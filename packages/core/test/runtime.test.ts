@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -41,8 +41,7 @@ async function makeRuntime(
   return { runtime, ws: workspace, provider };
 }
 
-const makeSession = (runtime: Runtime) =>
-  runtime.createSession({ model: "fake/fake-model" });
+const makeSession = (runtime: Runtime) => runtime.createSession({ model: "fake/fake-model" });
 
 function collect(session: RuntimeSession): RuntimeEvent[] {
   const events: RuntimeEvent[] = [];
@@ -53,9 +52,7 @@ function collect(session: RuntimeSession): RuntimeEvent[] {
 }
 
 const durableTypes = (events: RuntimeEvent[]) =>
-  events
-    .filter((e): e is Extract<RuntimeEvent, { seq: number }> => "seq" in e)
-    .map((e) => e.type);
+  events.filter((e): e is Extract<RuntimeEvent, { seq: number }> => "seq" in e).map((e) => e.type);
 
 describe("公开 Runtime API", () => {
   it("createRuntime → createSession → submit：完整 Turn 经公开 API 走通", async () => {
@@ -103,9 +100,9 @@ describe("公开 Runtime API", () => {
     await expect(runtime.createSession({ model: "nomodel" })).rejects.toMatchObject({
       code: "invalid_command",
     });
-    await expect(
-      runtime.createSession({ model: "unknown/m" }),
-    ).rejects.toThrow(/未配置的 Provider/);
+    await expect(runtime.createSession({ model: "unknown/m" })).rejects.toThrow(
+      /未配置的 Provider/,
+    );
   });
 
   it("submit 忙时拒绝 session_busy", async () => {
@@ -148,15 +145,18 @@ describe("公开 Runtime API", () => {
   it("respondPermission：Phase 1 无等待请求 → unknown_request", async () => {
     const { runtime } = await makeRuntime([]);
     const session = await makeSession(runtime);
-    await expect(
-      session.respondPermission("req-1", { decision: "allow" }),
-    ).rejects.toMatchObject({ code: "unknown_request" });
+    await expect(session.respondPermission("req-1", { decision: "allow" })).rejects.toMatchObject({
+      code: "unknown_request",
+    });
     expect(RuntimeCommandError).toBeDefined();
   });
 
   it("resumeSession：重开后状态一致，可继续 submit", async () => {
     const { runtime } = await makeRuntime([
-      [{ type: "text_delta", text: "hi" }, { type: "finish", reason: "stop" }],
+      [
+        { type: "text_delta", text: "hi" },
+        { type: "finish", reason: "stop" },
+      ],
     ]);
     const s1 = await makeSession(runtime);
     await s1.submit({ text: "first" });
@@ -194,9 +194,7 @@ describe("公开 Runtime API", () => {
     const reason = await session.submit({ text: "escape" });
     expect(reason).toBe("done");
     const completed = events.find((e) => e.type === "tool.completed");
-    expect(
-      completed?.type === "tool.completed" && completed.payload.status,
-    ).toBe("denied");
+    expect(completed?.type === "tool.completed" && completed.payload.status).toBe("denied");
   });
 
   it("junction 指向工作区外：经公开 API 的 read 被拒绝", async () => {
@@ -228,9 +226,7 @@ describe("公开 Runtime API", () => {
     const events = collect(session);
     await session.submit({ text: "junction escape" });
     const completed = events.find((e) => e.type === "tool.completed");
-    expect(
-      completed?.type === "tool.completed" && completed.payload.status,
-    ).toBe("denied");
+    expect(completed?.type === "tool.completed" && completed.payload.status).toBe("denied");
   });
 
   it("grep/glob 不泄漏工作区外资源（junction 目录不跟随）", async () => {
@@ -270,8 +266,7 @@ describe("公开 Runtime API", () => {
     const completed = events.filter((e) => e.type === "tool.completed");
     expect(completed).toHaveLength(2);
     for (const c of completed) {
-      const content =
-        c.type === "tool.completed" ? String(c.payload.modelContent) : "";
+      const content = c.type === "tool.completed" ? String(c.payload.modelContent) : "";
       expect(content).not.toContain("SECRET_TOKEN");
       expect(content).not.toContain("hidden.txt");
     }

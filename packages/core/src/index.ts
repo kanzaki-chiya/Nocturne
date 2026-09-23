@@ -2,12 +2,7 @@
  * @nocturne/core 公开入口（modules.md 第 3 节"core/index（公开 API）"）。
  * 客户端看到的全部能力都经由这里；进程内与将来的 RPC 客户端共用同一份语义（ADR-0002）。
  */
-import {
-  DEFAULT_TURN_CONFIG,
-  runTurn,
-  type TurnConfig,
-  type TurnDeps,
-} from "./agent/index.js";
+import { DEFAULT_TURN_CONFIG, runTurn, type TurnConfig, type TurnDeps } from "./agent/index.js";
 import type { EnvironmentInfo, InstructionFile, InstructionSet } from "./context/index.js";
 import { createWorkspaceReadPolicy, type PermissionPolicy } from "./permission/index.js";
 import { createPlatform, type Platform } from "./platform/index.js";
@@ -131,9 +126,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const { fs, paths } = platform;
 
   const cwd = paths.resolve(options.cwd, ".");
-  const workspaceRoot = await platform.resolveReal(
-    options.workspaceRoot ?? cwd,
-  );
+  const workspaceRoot = await platform.resolveReal(options.workspaceRoot ?? cwd);
   const sessionsDir =
     options.sessionsDir !== undefined
       ? paths.resolve(options.sessionsDir, ".")
@@ -145,10 +138,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   for (const config of options.providerConfigs ?? []) {
     providers.push(createOpenAICompatibleProvider(config, (n) => platform.env(n)));
   }
-  const registry: ProviderRegistry = createProviderRegistry(
-    providers,
-    options.modelOverrides,
-  );
+  const registry: ProviderRegistry = createProviderRegistry(providers, options.modelOverrides);
 
   const store: SessionStore = createSessionStore({ fs, paths, sessionsDir });
   const tools: ToolRegistry = createBuiltinRegistry();
@@ -199,17 +189,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       respondPermission(_requestId, _reply) {
         // Phase 1 固定策略不产生 permission.requested；Phase 3 经 gate 路由
-        return Promise.reject(
-          new RuntimeCommandError("unknown_request", "没有等待中的权限请求"),
-        );
+        return Promise.reject(new RuntimeCommandError("unknown_request", "没有等待中的权限请求"));
       },
       async submit(input) {
         assertUsable();
         if (controller !== undefined && !controller.signal.aborted) {
           throw new RuntimeCommandError("session_busy", "已有运行中的 Turn");
         }
-        const content: ContentBlock[] =
-          input.content ?? [{ type: "text", text: input.text ?? "" }];
+        const content: ContentBlock[] = input.content ?? [{ type: "text", text: input.text ?? "" }];
         const ac = new AbortController();
         controller = ac;
         const deps: TurnDeps = {
