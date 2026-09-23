@@ -101,6 +101,13 @@ Agent Loop                 → prune：直接写入事件
 - 请求已超出预算，或 Provider 返回 `context_overflow` 时，`mustCompact = true`（见 [agent-loop.md](agent-loop.md) 第 3.5 节）。
 - 用户可以用 `/compact` 手动触发摘要，走同一条路径。
 
+Phase 2 的落地细节（自动摘要仍在 Phase 3；手动 `/compact` 已是完整的 L2 摘要，含一次模型调用）：
+
+- 估算超过阈值 → 给出 `prune` 计划，`throughSeq` 取最近一个闭合步骤边界；Agent Loop 写入 `context.compacted(kind="prune")` 后重建一次。预防性压缩每个 Turn 至多执行一次（成功或失败均不重复；§6.6 的失败不再尝试规则是其子集）。
+- prune 后仍超出硬预算、必须压缩才能继续时（`mustCompact`）→ Phase 2 不自动摘要；Turn 以 `error` 结束，`error.code = "compaction_failed"`，提示用户使用 `/compact`（§6.6）。
+- Provider 返回 `context_overflow` → 若本 Turn 尚未执行过压缩且存在可行边界，执行一次 prune 后重建重试；否则按上一条结束。
+- prune 的呈现：最新摘要之后、`throughSeq` 及之前的工具结果替换为占位说明（保留工具名与参数摘要，标注"输出已省略"）；参数摘要来自 `tool.started.input` 折叠进历史条目的 `inputSummary` 字段（`HistoryEntry` 的兼容新增可选字段，见 [events.md](../protocols/events.md) 第 8 节）。
+
 ### 6.6 摘要请求本身的约束与失败处理
 
 - **摘要请求必须装得进窗口**：Builder 选择边界时保证"上一个摘要 + 待总结历史（先按修剪规则省略工具输出）+ 摘要指令"在预算内；装不下就把边界提前到更早的闭合边界；不存在任何可行边界时不给出计划。

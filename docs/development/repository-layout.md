@@ -32,10 +32,16 @@ nocturne/
 │       │   └── platform/        文件系统、子进程、路径（跨平台）
 │       └── test/                集成测试（脚本化的假 Provider 驱动完整 Turn）
 └── apps/
-    └── cli/                     nctrn
+    └── cli/                     nctrn（Phase 2 创建）
         ├── README.md
         ├── package.json         bin: nctrn
-        └── src/
+        ├── src/
+        │   ├── main.ts          入口：参数解析、模式分流、退出码
+        │   ├── args.ts          命令行解析与配置收集（环境变量 + 参数）
+        │   ├── repl.ts          交互循环与斜杠命令分发
+        │   ├── render.ts        事件 → 终端文本的纯函数渲染映射
+        │   └── permission.ts    权限确认提示 → respondPermission
+        └── test/                离线单测（*.test.ts）与冒烟（*.smoke.ts）
 ```
 
 单元测试与源文件放在一起（`*.test.ts`）；跨模块的 Turn 级测试放在 `packages/core/test/`，使用按脚本返回流式事件的假 Provider，使 Agent Loop 的行为可以确定性地测试，不依赖真实模型服务。
@@ -87,6 +93,7 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
 | 依赖方向检查 | **dependency-cruiser** | modules.md 第 1 节点名；可把"protocol 无依赖""platform 只允许 node:*""业务模块不碰 node:fs/child_process"等规则写成 JSON 配置进 CI | eslint `import/no-restricted-paths`（表达力不足）、自写 grep（脆弱） |
 | Lint / Format | **ESLint 9**（flat config）+ **typescript-eslint** + **eslint-config-prettier** + **Prettier 3** | 标准组合；格式与语义分离，Prettier 不管规则、ESLint 不管格式 | Biome / oxlint（规则覆盖与生态尚浅） |
 | OpenAI 兼容传输 | **`@ai-sdk/openai-compatible`**（peer：`ai`） | 专为"只实现 Chat Completions 的第三方服务"设计，覆盖 DeepSeek/GLM/OpenRouter/Ollama/vLLM/LM Studio；SDK 类型不泄漏到 Core（ADR-0005） | 适配器内自建 `fetch` + SSE 解析（拿不到必需字段时降级） |
-| OpenAI 官方（将来） | `openai` 官方 SDK（Responses API） | OpenAI 高级能力走单独适配器，不与兼容层混用 | — |
+| Anthropic 传输 | **`@ai-sdk/anthropic`**（peer：`ai`） | 与 openai-compatible 共用同一传输栈与归一化路径（[ADR-0006](../decisions/ADR-0006-anthropic-transport.md)） | 官方 `@anthropic-ai/sdk` 或适配器内自建 `fetch` + SSE |
+| CLI 运行时依赖 | **零**：`util.parseArgs` + `node:readline` + `util.styleText` | Phase 2 的 CLI 需求（单值参数、行输入、着色）Node 内置已够；不引 commander/chalk 类依赖（[apps/cli.md](../apps/cli.md) 第 8 节） | 需求超出内置能力时（如交互式选择列表）再评估 |
 
 版本策略：全部依赖写精确版本（不浮动、不用 `latest`），由 `pnpm-lock.yaml` 保证；`engines.node >= 24`；许可证均与 GPL-3.0 兼容（MIT / Apache-2.0）。OpenAI 兼容适配器的传输选型理由与限制记录在 [providers.md](../architecture/providers.md) 适配器表。

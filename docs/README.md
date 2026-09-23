@@ -26,6 +26,12 @@
 | [providers.md](architecture/providers.md) | Provider 抽象、模型能力、流式与错误归一化 |
 | [pitfalls.md](architecture/pitfalls.md) | 最容易犯的架构错误、早期症状与规避方式 |
 
+## Apps（客户端）
+
+| 文档 | 回答的问题 |
+|---|---|
+| [apps/cli.md](apps/cli.md) | `nctrn` 命令行客户端：参数、REPL、事件渲染、权限确认、退出码、Provider 过渡配置 |
+
 ## Protocols（精确契约）
 
 修改接口、事件字段或跨模块数据结构时阅读。

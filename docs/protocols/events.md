@@ -166,9 +166,9 @@ type PermissionSubject = {
 |---|---|---|---|
 | `submit(content)` | 会话空闲，否则返回 `session_busy` | `turn.started`、`message.user`、…… | Phase 1 |
 | `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` | Phase 1 |
-| `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 1（固定策略不产生等待请求，恒返回 `unknown_request`） |
-| `setModel(ref)` | 会话空闲 | `session.config_changed` | Phase 2（`/model`） |
-| `compact()` | 会话空闲 | `context.compacted(kind="summary")` | Phase 2（手动 `/compact`） |
+| `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 2（ask 流程生效；`reply.remember` 暂不生效，不生成持久授权） |
+| `setModel(ref)` | 会话空闲；未知 provider/model 返回 `invalid_model` | `session.config_changed` | Phase 2（`/model`） |
+| `compact()` | 会话空闲；上一次摘要进行中返回 `compaction_in_progress`，请求被中断返回 `compaction_interrupted` | `context.compacted(kind="summary")` | Phase 2（`/compact`，一次模型调用生成摘要，见 [context.md](../architecture/context.md) §6.2） |
 
 会话处于 `failed` 状态时，除 `close` 外的命令都返回 `session_failed`。
 

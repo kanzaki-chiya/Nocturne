@@ -1,0 +1,141 @@
+# CLI（`nctrn`）
+
+> 状态：提议 v0.1 ｜ 前置阅读：[modules.md](../architecture/modules.md) 第 4 节、[events.md](../protocols/events.md) ｜ 代码位置：`apps/cli/`
+
+本文是 `nctrn` 命令行客户端的唯一设计文档：命令行参数、REPL、事件渲染、权限确认、退出码、Phase 2 的 Provider 配置过渡方案。
+
+## 1. 定位与边界
+
+`nctrn` 是 Runtime 的进程内客户端：采集输入、渲染事件、把权限确认交给用户。**它不包含任何 Agent 行为、会话状态、权限判定或上下文构建逻辑**，只使用 `@nocturne/core` 的公开入口与 `@nocturne/core/protocol` 的类型；该约束由 dependency-cruiser 规则强制（见第 8 节），不是靠代码评审自觉。
+
+## 2. 命令行
+
+```text
+nctrn                        # 交互模式（REPL）
+nctrn -p "<prompt>"          # 非交互模式：执行一次 Turn 后退出
+nctrn -p                     # 非交互模式：prompt 从 stdin 读取（stdin 非 TTY 时）
+```
+
+| 参数 | 说明 |
+|---|---|
+| `-p, --print [prompt]` | 非交互模式。值可省略：省略时从 stdin 读全部输入作为 prompt |
+| `--model <id>` | 模型 id（当前 Provider 内），覆盖 `NOCTURNE_MODEL`；接受 `provider/model` 形式但必须与当前 Provider 一致 |
+| `--api-type <type>` | `openai-compatible`（默认）或 `anthropic`，覆盖 `NOCTURNE_API_TYPE` |
+| `--base-url <url>` | Provider 端点，覆盖 `NOCTURNE_BASE_URL`；`anthropic` 类型省略时用官方端点 |
+| `--api-key-env <NAME>` | 读取凭据的环境变量名。默认：`anthropic` → `ANTHROPIC_API_KEY`，其余 → `NOCTURNE_API_KEY` |
+| `-y, --yes` | 把需要确认的操作按"允许一次"自动批准（第 6 节）；对两类模式都生效 |
+| `-h, --help` | 打印用法后退出（退出码 0） |
+| `-v, --version` | 打印版本后退出（退出码 0） |
+
+规则：
+
+- 工作目录即进程 cwd；`workspaceRoot` 取 cwd 的真实路径。Phase 2 不提供恢复会话、切换目录等参数。
+- 凭据**只能**来自环境变量（`workflow.md` 第 7 节），不接受命令行上的密钥值；`--api-key-env` 指定的是变量名。
+- 启动时校验配置：缺 `baseURL`（openai-compatible）、缺凭据环境变量、缺模型 id，都打印缺失项并以退出码 2 退出，两种模式一致。
+- 未知参数、参数缺值：打印用法并以退出码 2 退出。
+
+## 3. 交互模式（REPL）
+
+启动后进入 `nctrn>` 提示符循环：
+
+- 普通输入：`session.submit({ text })`，期间渲染事件流（第 5 节）。
+- `/` 开头的输入：斜杠命令（第 4 节），不进入模型上下文。
+- 空行忽略；Ctrl+D（EOF）退出；空闲时 Ctrl+C 退出，Turn 进行中 Ctrl+C 调用 `session.interrupt()`。
+- Turn 进行中不接受新的输入行（只响应中断）；权限确认提示出现时优先处理（第 6 节）。
+- Phase 2 单行输入；多行与粘贴不作特殊处理。
+
+## 4. 斜杠命令
+
+| 命令 | 行为 | 对应 Runtime 能力 |
+|---|---|---|
+| `/help` | 列出命令与快捷键 | — |
+| `/model` | 显示当前模型与可用模型列表 | `runtime.listModels()`、`session.state().config.model` |
+| `/model <id>` | 会话内切换模型 | `session.setModel(ref)` → `session.config_changed` |
+| `/context` | 显示若现在构建请求，上下文由什么组成 | `session.describeContext()` → `{ report: ContextReport; overBudget: boolean }`（见下） |
+| `/compact` | 手动触发 L2 摘要压缩 | `session.compact()` → `context.compacted(kind="summary")` |
+| `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
+
+- 未知命令打印提示（不报错退出）。命令在 Turn 进行中给出"会话忙"提示（`setModel` / `compact` 的前置条件是空闲，见 events.md 第 7 节）。
+- `/model <id>` 在 Provider 内切换；完整写法 `<provider>/<model>` 仅当 provider 与当前一致时接受。
+- `/context` 渲染 `ContextReport`：各 section 的名称、来源、字符数、估算 token，加上合计 `estimatedTokens / budgetTokens` 与 `overBudget`。查询只读，不构建请求也不产生事件。
+- `/compact` 输出结果摘要（`throughSeq`、摘要字符数）；没有可压缩内容或摘要失败时打印原因，返回码不产生——REPL 命令的错误只显示，不影响进程。
+
+## 5. 事件渲染
+
+行式输出，无全屏 UI。渲染层是把 `RuntimeEvent` 映射为"写哪个流、写什么文本"的纯函数集合，便于离线测试；颜色经 `node:util` 的 `styleText`（终端不支持或 `NO_COLOR` 时自动降级为纯文本）。
+
+| 事件 | 渲染（交互模式） |
+|---|---|
+| `message.assistant.delta`（text） | 原样流式写到 stdout |
+| `message.assistant.delta`（reasoning） | 暗淡样式写 stdout |
+| `tool.started` | `● <name>(<参数摘要>)`，参数摘要取 input 的短 JSON，截断约 100 字符 |
+| `tool.input.delta` | 不渲染（Phase 4 的 TUI 才需要增量展示） |
+| `tool.progress` | shell 的流式输出：缩进写到终端（见"输出分流"） |
+| `tool.completed` | `└ <status>` + 耗时；`error`/`denied`/`cancelled` 附 `error.code` 与原因；`edit`/覆盖 `write` 的 `output.diff` 以 unified diff 着色渲染（`+` 绿、`-` 红、上下文默认色） |
+| `permission.requested` | 第 6 节的确认提示 |
+| `permission.resolved` | `└ 权限：<allow\|deny>（<source>）` 一行 |
+| `context.compacted` | `◇ 上下文已压缩（<kind>，至 seq <throughSeq>）` |
+| `session.config_changed` | `◇ 模型已切换为 <provider>/<model>` |
+| `provider.retry` | `! Provider 错误（<kind>），<delayMs>ms 后第 <n>/<max> 次重试` |
+| `runtime.warning` / `runtime.error` | `! <code>: <message>` |
+| `runtime.status` | 不逐条渲染；`compacting` 时显示一行"压缩中" |
+| `turn.completed` | 收尾：`reason` 非 `done` 时打印原因与 `error.message`；交互模式附一行用量摘要（input/output token） |
+
+输出分流：**非交互模式下**模型文本写 stdout，其余一切（工具状态、diff、诊断、用量）写 stderr，使 `nctrn -p "..." > out.txt` 得到纯模型输出。**交互模式**全部写 stdout；进程级致命错误（无法启动、配置缺失）写 stderr。
+
+## 6. 权限确认
+
+Phase 2 固定 `default` 预设（permissions.md 第 6 节）：工作区内读取 `allow`，其余 `ask`。ask 走协议流程：`permission.requested` → `session.respondPermission(requestId, reply)` → `permission.resolved`。
+
+- **交互模式**：提示块列出主体（kind、target、解析后路径）与原因，提供恰好两个选项：`[a] 允许一次` / `[d] 拒绝`。回复经 `respondPermission` 送回；回复到达前 Turn 挂起（Ctrl+C 可中断，该请求记 `cancelled`）。
+- **非交互模式**：不产生等待——`ask` 一律拒绝，`permission.resolved` 记 `source: "non_interactive"`。CLI 以 `RuntimeOptions.interactive` 告知 Runtime 是否有回复能力（交互 `true`，非交互 `false`，默认 `false`）。
+- **`-y, --yes`**：把 `ask` 提升为 `allow`（`source: "rule"`，理由注明来自命令行参数）。等价于 permissions.md 5.1 中最高优先级的"命令行参数"层规则的最小形态；是非交互验收与批处理场景的显式授权出口，默认不开启。
+- `deny` 后模型会收到带理由的工具结果并可自我修正；Phase 2 不暴露"拒绝并停止"（协议中的 `deny_stop` 保留），也不提供 Grant（"本会话/本项目允许"在 Phase 3）；`remember` 字段传入时忽略。
+
+## 7. Provider 配置（Phase 2 过渡方案）
+
+`config` 模块在 Phase 3 才存在（分层配置、配置文件）。Phase 2 的 CLI 以**环境变量 + 命令行参数**为唯一配置来源，组装成现有的 `RuntimeOptions.providerConfigs` / `modelOverrides` 注入 `createRuntime`：
+
+| 环境变量 | 参数覆盖 | 说明 |
+|---|---|---|
+| `NOCTURNE_API_TYPE` | `--api-type` | `openai-compatible`（默认）\| `anthropic` |
+| `NOCTURNE_BASE_URL` | `--base-url` | 端点；anthropic 缺省用官方端点 |
+| `NOCTURNE_API_KEY` | — | 凭据（默认变量名，可由 `--api-key-env` 改） |
+| `NOCTURNE_MODEL` | `--model` | 模型 id |
+| `NOCTURNE_HOME` | — | 数据目录（已有约定，repository-layout.md 第 5 节） |
+| `NOCTURNE_SHELL` | — | shell 工具使用的 shell（tools.md 第 6 节） |
+
+约定：
+
+- CLI 构造恰好一个 Provider，其 id 取 `--api-type` 的值；模型引用形如 `anthropic/claude-sonnet-4`。
+- **过渡性质**：Phase 3 落地 `config` 模块后，CLI 把"配置来源"从环境变量/参数换成 `config` 的分层加载结果，`createRuntime` 的注入形态不变（modules.md 已声明同一组 `RuntimeOptions` 承接两种来源）。因此本节只定义"CLI 如何收集配置"，不在 CLI 内造配置文件或规则语法，不引入与将来 `config` 冲突的概念。
+- 冒烟测试用独立的 `NOCTURNE_SMOKE_*` / `NOCTURNE_SMOKE_ANTHROPIC_*` 变量（workflow.md 第 5 节），与 CLI 运行变量分离。
+
+## 8. 工程约束
+
+- **目录**：`apps/cli/`，包名 `@nocturne/cli`，`bin: { nctrn: dist/main.js }`；`tsdown` 构建 ESM。
+- **第三方运行时依赖：零**。参数解析用 `util.parseArgs`，行输入用 `node:readline`，颜色用 `util.styleText`。非 Node 内置的新依赖需要理由，并在本文登记。
+- **依赖方向**（dependency-cruiser 固化）：
+  - 规则 `no-deep-import-from-outside-core` 的语义收紧为：`apps/` 解析到 `packages/core/src/` 的 import 只允许命中 `index.ts` 或 `protocol/index.ts`——即只有 `@nocturne/core` 包入口与 `@nocturne/core/protocol` 两个入口可用，任何内部路径（包括 `protocol/` 下的散文件）一律禁止。
+  - 根 `depcheck` 脚本扫描范围从 `packages` 扩为 `packages apps`，使上述规则实际生效。
+  - 解析方式：`tsconfig.base.json` 的 `paths` 把 `@nocturne/core` 映射到 `packages/core/src/index.ts`、`@nocturne/core/*` 到 `packages/core/src/*`，使 depcheck 与 typecheck 在源码层工作；运行期经 pnpm workspace 链接解析到 `dist`。
+- **测试分层**：
+  - `apps/cli/test/*.test.ts`：离线单测——参数解析、渲染映射、配置收集、命令分发（注入假会话，不需要 `dist`；vitest 用 `resolve.alias` 把 `@nocturne/core` 指到 core 源码）。
+  - `apps/cli/test/*.smoke.ts`：真实服务验收（fixture 仓库 + 非交互 `nctrn --yes -p`），只在设置 `NOCTURNE_SMOKE_*` 时运行；根 `test:smoke` 先 `pnpm build` 再跑各包冒烟。
+  - 涉及写文件与 shell 的测试一律在 `tmpdir` 下新建的临时目录中执行，不得触碰仓库与用户目录。
+- **dev 运行**：`pnpm build` 后 `node apps/cli/dist/main.js`；不改写 Node 的 `.ts` 直跑假设。
+
+## 9. 退出码（非交互模式与进程级）
+
+| 退出码 | 场景 |
+|---|---|
+| 0 | Turn 以 `done` 结束；`--help` / `--version` 正常输出 |
+| 1 | Turn 非 `done` 结束：`error`、`max_steps`、`truncated`、`refused`；会话进入 `failed` |
+| 2 | 用法或配置错误：未知参数、缺 `baseURL`/凭据/模型、模型未配置 |
+| 130 | 被中断（SIGINT → `aborted`） |
+
+交互模式的斜杠命令错误与 Turn 失败只显示，不退出进程。
+
+## 10. 暂不设计
+
+会话恢复与列表选择（Phase 3）、Grant 相关选项、多行输入与粘贴模式、`deny_stop` 选项、输出分页、`--output-format`、stdin 以外的非交互输入源。Phase 4 的 TUI 复用同一 Runtime 与事件流，不重用本 CLI 的渲染代码。

@@ -117,16 +117,22 @@
 客户端看到的全部能力都经由这里：
 
 ```ts
-const runtime = await createRuntime({ cwd, providerConfigs })  // 选项见 RuntimeOptions
+const runtime = await createRuntime({ cwd, providerConfigs, interactive })  // 选项见 RuntimeOptions
 const session = await runtime.createSession({ model: "provider/model" })  // 或 resumeSession(id) / listSessions()
 const unsubscribe = session.subscribe((event) => render(event))
 await session.submit({ text: "修复登录测试" })                 // 返回在 Turn 结束时 resolve
 session.interrupt()
-session.respondPermission(requestId, { decision: "allow", remember: "session" })
+await session.respondPermission(requestId, { decision: "allow" })
+await session.setModel({ provider: "…", model: "…" })          // → session.config_changed
+await session.compact()                                       // → context.compacted("summary")
+const { report, overBudget } = session.describeContext()       // ContextReport 查询，不产事件
+runtime.listModels()                                          // 全部可用模型（/model 用）
 await session.close()
 ```
 
-`createRuntime` 的选项（`RuntimeOptions`）直接接收各模块的配置：`cwd`、`workspaceRoot`、`sessionsDir`、`providers`（直接注入的 Provider 实例，如测试用 `FakeProvider`）、`providerConfigs`（声明式 Provider 配置）、`modelOverrides`、`policy`、`instructions`、`turn`（`maxSteps` / `retryLimit` / `retryBaseDelayMs`）。`config` 模块落地后，分层加载的结果经同一组选项注入，不改变这里的形态。`setModel` 与 `compact` 命令尚未实现，见 [events.md](../protocols/events.md) 第 7 节。
+`createRuntime` 的选项（`RuntimeOptions`）直接接收各模块的配置：`cwd`、`workspaceRoot`、`sessionsDir`、`providers`（直接注入的 Provider 实例，如测试用 `FakeProvider`）、`providerConfigs`（声明式 Provider 配置：`openai-compatible` 与 `anthropic` 的判别联合）、`modelOverrides`、`policy`、`permissions`（Phase 2 最小权限选项：命令行允许标志，对应 CLI `-y`，见 [permissions.md](permissions.md) 第 7 节）、`interactive`（是否有回复权限请求的客户端；默认 `false`，同上）、`instructions`、`turn`（`maxSteps` / `retryLimit` / `retryBaseDelayMs`）。`config` 模块落地后，分层加载的结果经同一组选项注入，不改变这里的形态；Phase 2 由 CLI 以环境变量与命令行参数组装（见 [apps/cli.md](../apps/cli.md) 第 7 节）。
+
+`describeContext` 与 `listModels` 是**只读查询**：不改变会话状态、不产生事件，只为客户端展示服务。
 
 这组命令与事件就是将来 RPC 需要序列化的全部内容；进程内客户端和远程客户端使用同一份语义（见 [ADR-0002](../decisions/ADR-0002-ui-independent-core.md)）。
 
@@ -137,6 +143,7 @@ await session.close()
 - **负责**：参数解析；REPL 输入；把事件渲染为终端输出（流式文本、工具状态、diff 摘要）；权限确认提示并调用 `respondPermission`；退出码。
 - **不负责**：任何 Agent 行为、会话状态、权限判定、上下文构建。
 - **依赖**：`@nocturne/core` 公开 API 与 `protocol`。
+- 详见 [apps/cli.md](../apps/cli.md)。
 
 ## 5. 未来模块（现在不创建目录）
 
