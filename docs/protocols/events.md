@@ -162,13 +162,13 @@ type PermissionSubject = {
 
 客户端通过会话句柄发出命令（进程内为方法调用，将来 RPC 为消息）。命令不写入日志，其效果以事件体现：
 
-| 命令 | 前置条件 | 效果事件 |
-|---|---|---|
-| `submit(content)` | 会话空闲，否则返回 `session_busy` | `turn.started`、`message.user`、…… |
-| `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` |
-| `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` |
-| `setModel(ref)` | 会话空闲 | `session.config_changed` |
-| `compact()` | 会话空闲 | `context.compacted(kind="summary")` |
+| 命令 | 前置条件 | 效果事件 | 实现阶段 |
+|---|---|---|---|
+| `submit(content)` | 会话空闲，否则返回 `session_busy` | `turn.started`、`message.user`、…… | Phase 1 |
+| `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` | Phase 1 |
+| `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 1（固定策略不产生等待请求，恒返回 `unknown_request`） |
+| `setModel(ref)` | 会话空闲 | `session.config_changed` | 未排期 |
+| `compact()` | 会话空闲 | `context.compacted(kind="summary")` | Phase 2（手动 `/compact`） |
 
 会话处于 `failed` 状态时，除 `close` 外的命令都返回 `session_failed`。
 

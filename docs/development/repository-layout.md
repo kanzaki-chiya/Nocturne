@@ -28,7 +28,7 @@ nocturne/
 │       │   ├── tools/           注册表、执行管线、结果预算
 │       │   │   └── builtin/     read、write、edit、grep、glob、shell
 │       │   ├── permission/      规则求值、权限闸门
-│       │   ├── config/          配置分层加载
+│       │   ├── config/          配置分层加载（Phase 3 创建）
 │       │   └── platform/        文件系统、子进程、路径（跨平台）
 │       └── test/                集成测试（脚本化的假 Provider 驱动完整 Turn）
 └── apps/

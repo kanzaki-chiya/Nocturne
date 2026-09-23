@@ -104,6 +104,7 @@
 - **负责**：按层级加载配置（内置默认 < 用户 < 项目 < 命令行参数）；校验；记录每个配置值的来源；读取 Provider 凭据所需的环境变量。
 - **不负责**：解释配置含义（各模块自己消费自己的配置段）。
 - **依赖**：protocol、platform。
+- **实现状态**：尚未创建目录，随 Phase 3「分层配置」实现（见 [roadmap.md](../roadmap/roadmap.md)）。在此之前，配置由客户端经 `createRuntime(options)` 直接注入（见下文 core/index）。
 
 ### platform
 
@@ -116,14 +117,16 @@
 客户端看到的全部能力都经由这里：
 
 ```ts
-const runtime = await createRuntime({ cwd, configOverrides })
-const session = await runtime.createSession({ model })        // 或 resumeSession(id) / listSessions()
+const runtime = await createRuntime({ cwd, providerConfigs })  // 选项见 RuntimeOptions
+const session = await runtime.createSession({ model: "provider/model" })  // 或 resumeSession(id) / listSessions()
 const unsubscribe = session.subscribe((event) => render(event))
 await session.submit({ text: "修复登录测试" })                 // 返回在 Turn 结束时 resolve
 session.interrupt()
 session.respondPermission(requestId, { decision: "allow", remember: "session" })
 await session.close()
 ```
+
+`createRuntime` 的选项（`RuntimeOptions`）直接接收各模块的配置：`cwd`、`workspaceRoot`、`sessionsDir`、`providers`（直接注入的 Provider 实例，如测试用 `FakeProvider`）、`providerConfigs`（声明式 Provider 配置）、`modelOverrides`、`policy`、`instructions`、`turn`（`maxSteps` / `retryLimit` / `retryBaseDelayMs`）。`config` 模块落地后，分层加载的结果经同一组选项注入，不改变这里的形态。`setModel` 与 `compact` 命令尚未实现，见 [events.md](../protocols/events.md) 第 7 节。
 
 这组命令与事件就是将来 RPC 需要序列化的全部内容；进程内客户端和远程客户端使用同一份语义（见 [ADR-0002](../decisions/ADR-0002-ui-independent-core.md)）。
 

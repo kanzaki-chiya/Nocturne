@@ -14,7 +14,7 @@
 - 核心契约（事件、Tool API、Provider API、权限规则、会话生命周期）足够明确，可以开始实现，不需要重新讨论基础模块职责。
 - 提议状态的 ADR 已由维护者确认或修改。
 
-## Phase 1 — 最小 Runtime（下一阶段）
+## Phase 1 — 最小 Runtime（实现完成，待真实服务冒烟验收）
 
 **内容**：pnpm workspace 与工具链；`protocol` 类型；`session`（JSONL 日志、先写后发、状态折叠）；`provider` 接口与 `openai-compatible` 适配器；`tools` 注册表与执行管线；内置 `read`、`grep`、`glob`；`agent` Loop（流式、多工具调用、中断、重试、步数上限）；权限层与资源解析接入执行管线（此阶段只有只读工具，固定策略为：工作区内读取允许、工作区外读取拒绝；含符号链接指向工作区外的情况）；依赖方向检查进入 CI。
 

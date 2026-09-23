@@ -76,7 +76,7 @@
 | `provider` | Provider 接口、模型能力、各模型服务的适配器 | [providers.md](providers.md) |
 | `tools` | 工具注册表、执行管线、内置工具 | [tools.md](tools.md) |
 | `permission` | 权限规则求值与审批请求 | [permissions.md](permissions.md) |
-| `config` | 配置分层加载与合并 | [modules.md](modules.md) |
+| `config` | 配置分层加载与合并（Phase 3 实现） | [modules.md](modules.md) |
 | `platform` | 文件系统、子进程、路径等跨平台 I/O | [modules.md](modules.md) |
 | `apps/cli` | `nctrn` 命令行客户端 | [modules.md](modules.md) |
 
