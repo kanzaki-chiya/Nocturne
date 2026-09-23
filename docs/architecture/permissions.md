@@ -151,7 +151,8 @@ PermissionGate.check(subjects, signal)
 
 **Phase 2 的最小形态**（完整规则与 Grant 在 Phase 3）：
 
-- 策略固定为 `default` 预设的专用实现：`read` 且 `where = "workspace"` → `allow`，其余主体 → `ask`；没有可配置规则与 Grant 存储。命令行注入的允许（CLI 的 `-y/--yes`）等价于 5.1 中"命令行参数"层的最高优先规则：`ask` 提升为 `allow`，`source` 记 `rule`，理由注明来自命令行。
+- 策略固定为 `default` 预设的专用实现：`read` 且 `where = "workspace"` → `allow`，其余主体 → `ask`；没有可配置规则与 Grant 存储。
+- 命令行注入的允许（CLI 的 `-y/--yes`）等价于 5.1 中"命令行参数"层规则的最小形态：**只把最终求值结果为 `ask` 的调用提升为 `allow`**（`source` 记 `rule`，理由注明来自命令行）。它不覆盖显式 `deny`，不绕过输入校验、主体解析或工具自身边界；转换在权限层（policy 求值的后处理）完成，CLI 与工具实现不得自行放行。测试也可以通过 `RuntimeOptions.policy` 注入限定范围的策略来完成自动批准，不依赖 `--yes`。
 - `permission.requested` 的 `options` 只包含 `allow_once` 与 `deny`；`deny_stop` 与 `remember` 保留在协议中，Phase 2 的客户端不暴露、Runtime 收到 `remember` 时忽略（不生成任何持久授权）。
 - "有无交互式客户端"由 Runtime 选项显式给出（`interactive`，默认 `false`）。为 `false` 时不发出 `permission.requested`，求值为 `ask` 的调用直接记 `permission.resolved(action="deny", source="non_interactive")`。
 - 等待回复期间 `signal` 中止：记 `permission.resolved(action="deny", source="cancelled")`，该调用按 `cancelled` 结算。

@@ -84,8 +84,8 @@ execute(call, ctx):
 
 `shell` 的约定（Phase 2 定案）：
 
-- **shell 选择**：Windows 用 `%COMSPEC%`（通常为 `cmd.exe`）加 `/d /s /c`；POSIX 用 `/bin/sh -c`。两者都可由 `NOCTURNE_SHELL` 环境变量覆盖为其他 shell 可执行文件。选择理由：cmd 在 Windows 上必有、无 profile 副作用；`sh` 在 POSIX 上必有，`bash` 不保证存在。
-- **输入**：`{ command, timeoutMs?, cwd? }`。`cwd` 省略时会话 cwd；指定时必须解析后位于工作区内，否则 `invalid_input`。
+- **shell 选择**：Windows 用 `%COMSPEC%`（通常为 `cmd.exe`）加 `/d /s /c`；POSIX 用 `/bin/sh -c`。两者都可由 `NOCTURNE_SHELL` 环境变量覆盖为其他 shell 可执行文件。选择理由：`cmd /c` 把其余参数原样当作命令行，语义与 POSIX `sh -c` 最接近、启动开销最小；PowerShell 亦可胜任（用 `-NoProfile` 避免 profile 副作用），但其引号解析与流语义不同，需要单独的参数形态，故不作默认。
+- **输入**：`{ command, timeoutMs?, cwd? }`。`cwd` 省略时会话 cwd；指定时经符号链接 / junction 解析后必须位于工作区内，否则 `invalid_input`。**注意：`cwd` 限制约束的只是执行起点，不是沙箱**——被批准的 `command` 本身仍可访问批准范围之外的资源；命令文本才是被确认的主体。
 - **输出合并与截断**：stdout 与 stderr 在工具内按到达顺序合并为单一输出流（不等价于 shell 重定向，由 ProcessRunner 的两条流归并）；逐块经 `tool.progress` 上报（带 `stream` 标记），累积内容按 `maxModelChars` 截断。进程持续输出超过缓冲上限时丢弃中间部分但继续排空管道，防止子进程阻塞。
 - **结果**：`output` 携带 `exitCode`、`signal`、`timedOut`、`killed`、`durationMs`；`timedOut` 时 `status="error"`、`code="timeout"`。
 - **进程树终止实测记录**（tools.md 第 5 节要求，实现时填写）：Windows（`taskkill /T /F`）：＿待实现时实测填写＿；POSIX（detached 进程组 + `kill(-pid)`）：＿未在当前平台验证＿。

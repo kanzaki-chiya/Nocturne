@@ -89,7 +89,7 @@ Phase 2 固定 `default` 预设（permissions.md 第 6 节）：工作区内读�
 
 - **交互模式**：提示块列出主体（kind、target、解析后路径）与原因，提供恰好两个选项：`[a] 允许一次` / `[d] 拒绝`。回复经 `respondPermission` 送回；回复到达前 Turn 挂起（Ctrl+C 可中断，该请求记 `cancelled`）。
 - **非交互模式**：不产生等待——`ask` 一律拒绝，`permission.resolved` 记 `source: "non_interactive"`。CLI 以 `RuntimeOptions.interactive` 告知 Runtime 是否有回复能力（交互 `true`，非交互 `false`，默认 `false`）。
-- **`-y, --yes`**：把 `ask` 提升为 `allow`（`source: "rule"`，理由注明来自命令行参数）。等价于 permissions.md 5.1 中最高优先级的"命令行参数"层规则的最小形态；是非交互验收与批处理场景的显式授权出口，默认不开启。
+- **`-y, --yes`**：只把**最终判定为 `ask`** 的调用提升为 `allow`（`source: "rule"`，理由注明来自命令行参数）；不覆盖显式 `deny`，不绕过输入校验、路径限制或工具边界，转换在权限层完成（permissions.md 第 7 节）。是用户主动选择的自动批准能力（非交互批处理等场景），默认不开启；程序化的测试也可以注入限定范围的 `policy`，不必依赖它。
 - `deny` 后模型会收到带理由的工具结果并可自我修正；Phase 2 不暴露"拒绝并停止"（协议中的 `deny_stop` 保留），也不提供 Grant（"本会话/本项目允许"在 Phase 3）；`remember` 字段传入时忽略。
 
 ## 7. Provider 配置（Phase 2 过渡方案）
@@ -108,6 +108,8 @@ Phase 2 固定 `default` 预设（permissions.md 第 6 节）：工作区内读�
 约定：
 
 - CLI 构造恰好一个 Provider，其 id 取 `--api-type` 的值；模型引用形如 `anthropic/claude-sonnet-4`。
+- 凭据只进入 Provider 配置：不出现在诊断信息、持久化事件、日志或配置回显中；`--api-key-env` 回显的是变量名而非值。
+- 缺失或无效的配置在启动时快速失败（退出码 2），不带着半截配置进入会话。
 - **过渡性质**：Phase 3 落地 `config` 模块后，CLI 把"配置来源"从环境变量/参数换成 `config` 的分层加载结果，`createRuntime` 的注入形态不变（modules.md 已声明同一组 `RuntimeOptions` 承接两种来源）。因此本节只定义"CLI 如何收集配置"，不在 CLI 内造配置文件或规则语法，不引入与将来 `config` 冲突的概念。
 - 冒烟测试用独立的 `NOCTURNE_SMOKE_*` / `NOCTURNE_SMOKE_ANTHROPIC_*` 变量（workflow.md 第 5 节），与 CLI 运行变量分离。
 
