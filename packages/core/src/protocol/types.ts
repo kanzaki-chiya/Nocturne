@@ -63,3 +63,16 @@ export type PermissionOption =
 
 /** Provider 流式响应的结束原因（provider-api.md 第 4 节） */
 export type FinishReason = "stop" | "tool_calls" | "length" | "content_filter" | "other";
+
+/**
+ * 工具输入的 JSON Schema（tool-api.md：inputSchema）。
+ * 该 Schema 同时发给模型并用于运行时校验（AJV）。
+ */
+export type JsonSchema = Record<string, unknown>;
+
+/** 模型可见的工具规格（tool-api.md 第 4 节）：由 tools 产出，经 ModelRequest 交给 Provider */
+export interface ToolSpec {
+  name: string;
+  description: string;
+  inputSchema: JsonSchema;
+}
