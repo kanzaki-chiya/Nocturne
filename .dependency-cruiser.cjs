@@ -1,0 +1,176 @@
+// 依赖方向检查：把 docs/architecture/modules.md 第 1 节的规则固化进 CI。
+// 箭头表示"可以 import"；任何未声明的依赖都视为禁止。
+
+/** @type {import('dependency-cruiser').IConfiguration} */
+module.exports = {
+  forbidden: [
+    // ── 全局 ────────────────────────────────────────────────
+    {
+      name: "no-circular",
+      severity: "error",
+      comment: "禁止循环依赖（modules.md 第 1 节）",
+      from: {},
+      to: { circular: true },
+    },
+    {
+      name: "no-orphans-core",
+      severity: "warn",
+      comment: "src 下不应有不被引用的模块（index/protocol 入口除外）",
+      from: {
+        orphan: true,
+        pathNot: ["(^|/)index\\.ts$", "(^|/)protocol/index\\.ts$", "\\.test\\.ts$", "\\.d\\.ts$"],
+      },
+      to: {},
+    },
+
+    // ── Node 内置模块的使用边界 ────────────────────────────
+    {
+      name: "only-platform-touches-fs",
+      severity: "error",
+      comment:
+        "node:fs / node:fs/promises 只允许 platform 与 provider 适配器使用（modules.md：真实 I/O 集中在 platform 与 Provider 适配器）",
+      from: {
+        path: "^packages/core/src",
+        pathNot: [
+          "^packages/core/src/platform/",
+          "^packages/core/src/provider/adapters/",
+          "\\.test\\.ts$",
+        ],
+      },
+      to: { dependencyTypes: ["core"], path: "^node:(fs|fs/promises)$" },
+    },
+    {
+      name: "only-platform-touches-process",
+      severity: "error",
+      comment: "node:child_process / node:process spawn 只允许 platform 使用",
+      from: {
+        path: "^packages/core/src",
+        pathNot: ["^packages/core/src/platform/", "\\.test\\.ts$"],
+      },
+      to: {
+        dependencyTypes: ["core"],
+        path: "^node:(child_process|process)$",
+      },
+    },
+    {
+      name: "protocol-no-node",
+      severity: "error",
+      comment: "protocol 只有类型与纯函数，不依赖 Node 内置模块",
+      from: { path: "^packages/core/src/protocol/" },
+      to: { dependencyTypes: ["core"] },
+    },
+
+    // ── 模块边界 ────────────────────────────────────────────
+    {
+      name: "protocol-depends-on-nothing",
+      severity: "error",
+      comment: "protocol 不依赖任何项目内模块",
+      from: { path: "^packages/core/src/protocol/" },
+      to: { path: "^packages/core/src/(?!protocol/)" },
+    },
+    {
+      name: "platform-depends-on-nothing",
+      severity: "error",
+      comment: "platform 只依赖 Node 标准库，不依赖项目内模块",
+      from: { path: "^packages/core/src/platform/" },
+      to: { path: "^packages/core/src/(?!platform/)" },
+    },
+    {
+      name: "session-deps",
+      severity: "error",
+      comment: "session 只能依赖 protocol 与 platform",
+      from: { path: "^packages/core/src/session/" },
+      to: {
+        path: "^packages/core/src/(?!session/|protocol/|platform/)",
+      },
+    },
+    {
+      name: "provider-deps",
+      severity: "error",
+      comment: "provider 只能依赖 protocol（不能依赖 session/agent/tools/context/platform）",
+      from: { path: "^packages/core/src/provider/" },
+      to: {
+        path: "^packages/core/src/(?!provider/|protocol/)",
+      },
+    },
+    {
+      name: "context-deps",
+      severity: "error",
+      comment:
+        "context 只能依赖 protocol 与 provider 的类型（import type）；不能依赖 agent/tools/session/platform",
+      from: { path: "^packages/core/src/context/" },
+      to: {
+        path: "^packages/core/src/(?!context/|protocol/|provider/)",
+      },
+    },
+    {
+      name: "tools-deps",
+      severity: "error",
+      comment: "tools 只能依赖 protocol、permission、platform",
+      from: { path: "^packages/core/src/tools/" },
+      to: {
+        path: "^packages/core/src/(?!tools/|protocol/|permission/|platform/)",
+      },
+    },
+    {
+      name: "permission-deps",
+      severity: "error",
+      comment: "permission 只能依赖 protocol（不能依赖 tools/agent/platform）",
+      from: { path: "^packages/core/src/permission/" },
+      to: {
+        path: "^packages/core/src/(?!permission/|protocol/)",
+      },
+    },
+    {
+      name: "config-deps",
+      severity: "error",
+      comment: "config 只能依赖 protocol 与 platform",
+      from: { path: "^packages/core/src/config/" },
+      to: {
+        path: "^packages/core/src/(?!config/|protocol/|platform/)",
+      },
+    },
+    {
+      name: "agent-deps",
+      severity: "error",
+      comment:
+        "agent 能依赖 session/context/provider/tools/permission/config/protocol，不能依赖 platform 或 apps",
+      from: { path: "^packages/core/src/agent/" },
+      to: {
+        path: "^packages/core/src/(?!agent/|session/|context/|provider/|tools/|permission/|config/|protocol/)",
+      },
+    },
+    {
+      name: "only-index-imports-agent",
+      severity: "error",
+      comment: "除 core/index（src/index.ts）外，任何模块不能 import agent",
+      from: {
+        path: "^packages/core/src",
+        pathNot: ["^packages/core/src/index\\.ts$", "^packages/core/src/agent/"],
+      },
+      to: { path: "^packages/core/src/agent/" },
+    },
+    {
+      name: "no-deep-import-from-outside-core",
+      severity: "error",
+      comment:
+        "包外（apps 等）只能 import @nocturne/core 或 @nocturne/core/protocol，不能深度导入内部路径",
+      from: { path: "^apps/" },
+      to: { path: "^packages/core/src/(?!protocol/)" },
+    },
+  ],
+  options: {
+    doNotFollow: { path: "node_modules" },
+    tsConfig: { fileName: "tsconfig.base.json" },
+    enhancedResolveOptions: {
+      exportsFields: ["exports"],
+      conditionNames: ["import", "require", "node", "default"],
+      extensions: [".ts", ".js", ".json"],
+      mainFields: ["module", "main", "types"],
+    },
+    reporterOptions: {
+      text: { highlightFocused: true },
+      dot: { collapsePattern: "node_modules/[^/]+" },
+    },
+  },
+};

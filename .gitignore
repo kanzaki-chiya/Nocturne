@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+
+# Package manager stores
+.pnpm-store/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log
