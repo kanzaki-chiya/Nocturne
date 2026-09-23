@@ -70,6 +70,8 @@ pnpm build          # tsdown 构建 packages/core/dist
 pnpm test:smoke     # vitest run --config vitest.smoke.config.ts；未设置时跳过
 ```
 
+这三个变量也可以写在仓库根目录的 `.env`（`KEY=value` 格式，已被 `.gitignore` 忽略，不得提交）；冒烟配置启动时加载它，已设置的环境变量优先。冒烟测试覆盖纯文本 Turn 与一次 `read` 工具往返，均在临时生成的工作区中运行。
+
 仅在不含敏感信息的测试工作区中运行冒烟测试——工作区内容会发送给模型服务。文档改动至少检查所有相对链接可达。
 
 ## 6. 许可证与第三方代码

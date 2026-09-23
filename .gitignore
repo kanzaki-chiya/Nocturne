@@ -8,6 +8,10 @@ dist/
 # Test / coverage
 coverage/
 
+# Local secrets (smoke test credentials etc.)
+.env
+.env.*
+
 # Package manager stores
 .pnpm-store/
 

@@ -6,7 +6,7 @@
  *   NOCTURNE_SMOKE_MODEL     模型 id，例如 deepseek-chat
  * 未设置时跳过。仅在不含敏感信息的测试工作区中运行——工作区内容会发给模型服务。
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,27 +31,32 @@ const makeTmp = (p: string) => {
   return d;
 };
 
+async function openSession(cwd: string) {
+  const runtime = await createRuntime({
+    cwd,
+    sessionsDir: makeTmp("nct-smoke-sessions-"),
+    providerConfigs: [
+      {
+        id: PROVIDER_ID,
+        baseURL: BASE_URL ?? "",
+        apiKeyEnv: "NOCTURNE_SMOKE_API_KEY",
+        models: { [MODEL ?? ""]: {} },
+      },
+    ],
+  });
+  const session = await runtime.createSession({
+    model: `${PROVIDER_ID}/${MODEL ?? ""}`,
+  });
+  const events: RuntimeEvent[] = [];
+  session.subscribe((e) => {
+    events.push(e);
+  });
+  return { session, events };
+}
+
 describe.skipIf(!configured)("openai-compatible 冒烟（真实服务）", () => {
   it("完整 Turn：submit 返回 done，收到流式文本与 turn.completed", async () => {
-    const runtime = await createRuntime({
-      cwd: makeTmp("nct-smoke-ws-"),
-      sessionsDir: makeTmp("nct-smoke-sessions-"),
-      providerConfigs: [
-        {
-          id: PROVIDER_ID,
-          baseURL: BASE_URL ?? "",
-          apiKeyEnv: "NOCTURNE_SMOKE_API_KEY",
-          models: { [MODEL ?? ""]: {} },
-        },
-      ],
-    });
-    const session = await runtime.createSession({
-      model: `${PROVIDER_ID}/${MODEL ?? ""}`,
-    });
-    const events: RuntimeEvent[] = [];
-    session.subscribe((e) => {
-      events.push(e);
-    });
+    const { session, events } = await openSession(makeTmp("nct-smoke-ws-"));
 
     const reason = await session.submit({
       text: "只回复单词 ok，不要调用任何工具。",
@@ -66,6 +71,34 @@ describe.skipIf(!configured)("openai-compatible 冒烟（真实服务）", () =>
     expect(
       assistant?.type === "message.assistant" && assistant.payload.content.length,
     ).toBeGreaterThan(0);
+    await session.close();
+  });
+
+  it("工具往返：模型调用 read，工具结果回到模型后 Turn 完成", async () => {
+    const cwd = makeTmp("nct-smoke-ws-");
+    const token = `NCT-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+    writeFileSync(
+      path.join(cwd, "secret.txt"),
+      `口令：${token}
+`,
+    );
+    const { session, events } = await openSession(cwd);
+
+    const reason = await session.submit({
+      text: "用 read 工具读取当前目录下的 secret.txt，然后原样回复文件里的口令（只回复口令本身）。",
+    });
+
+    expect(reason).toBe("done");
+    const completed = events.filter((e) => e.type === "tool.completed");
+    expect(completed.some((e) => e.payload.name === "read" && e.payload.status === "ok")).toBe(
+      true,
+    );
+    const finalText = events
+      .filter((e) => e.type === "message.assistant")
+      .flatMap((e) => e.payload.content)
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("");
+    expect(finalText).toContain(token);
     await session.close();
   });
 });
