@@ -6,12 +6,12 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     },
     "./protocol": {
-      "types": "./dist/protocol/index.d.ts",
-      "import": "./dist/protocol/index.js"
+      "types": "./dist/protocol/index.d.mts",
+      "import": "./dist/protocol/index.mjs"
     }
   },
   "files": [
