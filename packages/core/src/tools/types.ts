@@ -151,6 +151,26 @@ export interface ExecutionScope extends ToolScope {
   events: ToolEventSink;
 }
 
+/**
+ * 会话级执行环境：Agent Loop 只持有本类型（tools 的公开类型），
+ * 不直接接触 Platform——平台能力经 ExecutionScope 进入工具。
+ */
+export interface ExecutionEnvironment {
+  platform: Platform;
+  gate: PermissionGate;
+  readState: ReadStateStore;
+}
+
+/** 每次调用变化的 Turn 级参数 */
+export interface TurnCallScope {
+  cwd: string;
+  workspaceRoot: string;
+  sessionId: string;
+  turnId: string;
+  signal: AbortSignal;
+  events: ToolEventSink;
+}
+
 export type ToolExecutionStatus = "ok" | "error" | "denied" | "cancelled";
 
 export interface ToolExecution {

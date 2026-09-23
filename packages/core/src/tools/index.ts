@@ -1,6 +1,7 @@
 export * from "./types.js";
 export { createToolRegistry } from "./registry.js";
 export { createToolExecutor } from "./executor.js";
+export { createExecutionScope } from "./scope.js";
 export { createPolicyGate } from "./gate.js";
 export { createReadStateStore } from "./readstate.js";
 export {
