@@ -1,2 +1,8 @@
-// 占位：事件信封与类型在第 3 步实现。此文件只为让 typecheck 通过。
-export {};
+/**
+ * @nocturne/core/protocol — 客户端与 Runtime 共享的契约。
+ * 只包含类型与纯函数；不依赖任何其他模块与 Node 内置模块。
+ */
+export * from "./types.js";
+export * from "./events.js";
+export * from "./commands.js";
+export * from "./schema.js";
