@@ -54,6 +54,7 @@ type SubjectRequest = { kind: "read" | "edit" | "shell" | "network" | "mcp"; tar
 interface ToolScope {
   cwd: string              // 会话工作目录（绝对路径）
   workspaceRoot: string
+  paths: PathOps           // 来自 platform：词法路径规范化与包含判断；大小写敏感性由 platform 决定
 }
 
 /** 执行时可用的能力。刻意保持窄：工具需要新能力时，先在本文增加字段 */

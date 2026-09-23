@@ -48,7 +48,29 @@
 
 ## 5. 验证命令
 
-Phase 1 建立工具链后在此列出（类型检查、lint、测试、依赖方向检查、文档链接检查），并同步到 AGENTS.md 的"测试"一节。在此之前，文档改动至少检查所有相对链接可达。
+在仓库根目录运行（以 `package.json` scripts 为准）：
+
+```bash
+pnpm install        # 安装依赖
+pnpm typecheck      # tsc --noEmit（src 与 test 两套 tsconfig）
+pnpm lint           # eslint（strictTypeChecked + stylisticTypeChecked）
+pnpm format:check   # prettier --check；修复用 pnpm format
+pnpm test           # vitest run，默认测试集：完全离线，不依赖网络/API key/外部服务
+pnpm depcheck       # dependency-cruiser 依赖方向检查（modules.md 依赖图固化为规则）
+pnpm build          # tsdown 构建 packages/core/dist
+```
+
+真实 OpenAI 兼容服务冒烟测试与默认测试集分离，不进 `pnpm test`：
+
+```bash
+# 需要环境变量（凭据只从环境变量读取）：
+#   NOCTURNE_SMOKE_BASE_URL  例如 https://api.deepseek.com/v1
+#   NOCTURNE_SMOKE_API_KEY   服务凭据
+#   NOCTURNE_SMOKE_MODEL     模型 id，例如 deepseek-chat
+pnpm test:smoke     # vitest run --config vitest.smoke.config.ts；未设置时跳过
+```
+
+仅在不含敏感信息的测试工作区中运行冒烟测试——工作区内容会发送给模型服务。文档改动至少检查所有相对链接可达。
 
 ## 6. 许可证与第三方代码
 

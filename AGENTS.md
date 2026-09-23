@@ -42,7 +42,19 @@
 
 ## 5. 测试
 
-修改代码 → 运行相关测试 → 必要时补充或更新测试 → 检查对应文档。代码、测试、文档三者出现冲突时必须显式指出，不得静默忽略。具体命令见 [development/workflow.md](docs/development/workflow.md)。
+修改代码 → 运行相关测试 → 必要时补充或更新测试 → 检查对应文档。代码、测试、文档三者出现冲突时必须显式指出，不得静默忽略。
+
+验证命令（仓库根目录，详见 [development/workflow.md](docs/development/workflow.md) 第 5 节）：
+
+```bash
+pnpm typecheck      # tsc --noEmit（src + test）
+pnpm lint           # eslint
+pnpm format:check   # prettier --check
+pnpm test           # vitest run，默认测试集完全离线
+pnpm depcheck       # dependency-cruiser 依赖方向检查
+pnpm build          # tsdown 构建
+pnpm test:smoke     # 真实 OpenAI 兼容服务冒烟（需 NOCTURNE_SMOKE_* 环境变量，与默认测试集分离）
+```
 
 ## 6. 本文件的维护
 
