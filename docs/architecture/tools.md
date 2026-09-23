@@ -88,7 +88,7 @@ execute(call, ctx):
 - **输入**：`{ command, timeoutMs?, cwd? }`。`cwd` 省略时会话 cwd；指定时经符号链接 / junction 解析后必须位于工作区内，否则 `invalid_input`。**注意：`cwd` 限制约束的只是执行起点，不是沙箱**——被批准的 `command` 本身仍可访问批准范围之外的资源；命令文本才是被确认的主体。
 - **输出合并与截断**：stdout 与 stderr 在工具内按到达顺序合并为单一输出流（不等价于 shell 重定向，由 ProcessRunner 的两条流归并）；逐块经 `tool.progress` 上报（带 `stream` 标记），累积内容按 `maxModelChars` 截断。进程持续输出超过缓冲上限时丢弃中间部分但继续排空管道，防止子进程阻塞。
 - **结果**：`output` 携带 `exitCode`、`signal`、`timedOut`、`killed`、`durationMs`；`timedOut` 时 `status="error"`、`code="timeout"`。
-- **进程树终止实测记录**（tools.md 第 5 节要求，实现时填写）：Windows（`taskkill /T /F`）：＿待实现时实测填写＿；POSIX（detached 进程组 + `kill(-pid)`）：＿未在当前平台验证＿。
+- **进程树终止实测记录**（tools.md 第 5 节要求）：Windows（`taskkill /pid /T /F`）：已实测——测试在 `cmd /c` 下启动 Node 父进程并派生孙进程，中断后孙进程消失（`packages/core/src/tools/write-edit-shell.test.ts` "中断：终止整个进程树"用例）；POSIX（`detached` 进程组 + `kill(-pid, SIGKILL)`）：未在当前平台验证，CI/其他平台需复跑该用例。
 
 `apply_patch`（多文件补丁格式）不在 MVP 中。若后续发现某些模型使用它明显更可靠，再作为额外工具加入，与 `edit` 并存。
 

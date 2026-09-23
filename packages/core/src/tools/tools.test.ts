@@ -122,7 +122,7 @@ describe("ToolRegistry", () => {
         .specs()
         .map((s) => s.name)
         .sort(),
-    ).toEqual(["glob", "grep", "read"]);
+    ).toEqual(["edit", "glob", "grep", "read", "shell", "write"]);
     expect(() => r.register(builtinTools()[0] ?? readTool)).toThrow(/重复/);
     r.unregister("read");
     expect(r.get("read")).toBeUndefined();

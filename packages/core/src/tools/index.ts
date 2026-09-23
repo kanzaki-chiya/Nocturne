@@ -14,16 +14,23 @@ export {
 export { readTool } from "./builtin/read.js";
 export { grepTool } from "./builtin/grep.js";
 export { globTool } from "./builtin/glob.js";
+export { writeTool } from "./builtin/write.js";
+export { editTool } from "./builtin/edit.js";
+export { shellTool } from "./builtin/shell.js";
+export { diffLines } from "./builtin/diff.js";
 
 import type { ToolDefinition, ToolRegistry } from "./types.js";
 import { createToolRegistry } from "./registry.js";
 import { readTool } from "./builtin/read.js";
 import { grepTool } from "./builtin/grep.js";
 import { globTool } from "./builtin/glob.js";
+import { writeTool } from "./builtin/write.js";
+import { editTool } from "./builtin/edit.js";
+import { shellTool } from "./builtin/shell.js";
 
-/** Phase 1 内置只读工具集 */
+/** 内置工具集：Phase 2 起含写入与 shell（权限层决定是否放行） */
 export function builtinTools(): ToolDefinition[] {
-  return [readTool, grepTool, globTool];
+  return [readTool, grepTool, globTool, writeTool, editTool, shellTool];
 }
 
 export function createBuiltinRegistry(): ToolRegistry {
