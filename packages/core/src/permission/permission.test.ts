@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { PermissionSubject } from "../protocol/index.js";
-import { computeWhere, createWorkspaceReadPolicy } from "./index.js";
+import { computeWhere, createDefaultPolicy, createWorkspaceReadPolicy } from "./index.js";
 
 const WS = "C:\\ws\\proj";
 
@@ -92,5 +92,74 @@ describe("createWorkspaceReadPolicy（Phase 1 固定策略）", () => {
   it("deny 决定包含可解释原因", () => {
     const r = policy.evaluate([subject({ resolved: "C:\\ws\\out.ts" })]);
     expect(r.decision.reason).toContain("out.ts");
+  });
+});
+
+describe("createDefaultPolicy（Phase 2 default 预设）", () => {
+  const subject = (over: Partial<PermissionSubject>): PermissionSubject => ({
+    kind: "read",
+    target: "x",
+    ...over,
+  });
+
+  it("工作区内 read → allow", () => {
+    const policy = createDefaultPolicy({ workspaceRoot: WS, caseSensitive: false });
+    const r = policy.evaluate([subject({ resolved: "C:\\ws\\proj\\a.ts" })]);
+    expect(r.decision.action).toBe("allow");
+    expect(r.decision.source).toBe("rule");
+  });
+
+  it("空主体集 → allow（工具声明不触碰任何资源）", () => {
+    const policy = createDefaultPolicy({ workspaceRoot: WS, caseSensitive: false });
+    expect(policy.evaluate([]).decision.action).toBe("allow");
+  });
+
+  it("工作区外 read → ask", () => {
+    const policy = createDefaultPolicy({ workspaceRoot: WS, caseSensitive: false });
+    const r = policy.evaluate([subject({ resolved: "C:\\ws\\other\\a.ts" })]);
+    expect(r.decision.action).toBe("ask");
+    expect(r.decision.source).toBe("rule");
+  });
+
+  it("工作区内 edit / shell → ask", () => {
+    const policy = createDefaultPolicy({ workspaceRoot: WS, caseSensitive: false });
+    expect(
+      policy.evaluate([subject({ kind: "edit", resolved: "C:\\ws\\proj\\a.ts" })]).decision.action,
+    ).toBe("ask");
+    expect(policy.evaluate([subject({ kind: "shell", target: "npm test" })]).decision.action).toBe(
+      "ask",
+    );
+  });
+
+  it("混合主体：含非工作区读 → 整体 ask", () => {
+    const policy = createDefaultPolicy({ workspaceRoot: WS, caseSensitive: false });
+    const r = policy.evaluate([
+      subject({ resolved: "C:\\ws\\proj\\a.ts" }),
+      subject({ resolved: "C:\\ws\\out\\b.ts" }),
+    ]);
+    expect(r.decision.action).toBe("ask");
+  });
+
+  it("autoApproveAsk：ask 提升为 allow（source 仍为 rule）", () => {
+    const policy = createDefaultPolicy({
+      workspaceRoot: WS,
+      caseSensitive: false,
+      autoApproveAsk: true,
+    });
+    const r = policy.evaluate([subject({ kind: "edit", resolved: "C:\\ws\\proj\\a.ts" })]);
+    expect(r.decision.action).toBe("allow");
+    expect(r.decision.source).toBe("rule");
+    expect(r.decision.reason).toContain("自动批准");
+  });
+
+  it("autoApproveAsk：本就 allow 的工作区读不受影响", () => {
+    const policy = createDefaultPolicy({
+      workspaceRoot: WS,
+      caseSensitive: false,
+      autoApproveAsk: true,
+    });
+    const r = policy.evaluate([subject({ resolved: "C:\\ws\\proj\\a.ts" })]);
+    expect(r.decision.action).toBe("allow");
+    expect(r.decision.reason).not.toContain("自动批准");
   });
 });

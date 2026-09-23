@@ -4,7 +4,7 @@
  */
 import { DEFAULT_TURN_CONFIG, runTurn, type TurnConfig, type TurnDeps } from "./agent/index.js";
 import type { EnvironmentInfo, InstructionFile, InstructionSet } from "./context/index.js";
-import { createWorkspaceReadPolicy, type PermissionPolicy } from "./permission/index.js";
+import { createDefaultPolicy, type PermissionPolicy } from "./permission/index.js";
 import { createPlatform, type Platform } from "./platform/index.js";
 import {
   createOpenAICompatibleProvider,
@@ -52,7 +52,7 @@ export class RuntimeCommandError extends Error {
 /** 指令文件大小上限（context.md 6.2：每项注入内容都有上限） */
 const INSTRUCTION_FILE_LIMIT = 64 * 1024;
 const NOCTURNE_VERSION = "0.0.0";
-const DEFAULT_PERMISSION_PRESET = "phase1";
+const DEFAULT_PERMISSION_PRESET = "default";
 
 export interface RuntimeOptions {
   /** 工作区 cwd（会话内工具执行的默认目录） */
@@ -67,14 +67,33 @@ export interface RuntimeOptions {
   providerConfigs?: OpenAICompatibleConfig[] | undefined;
   /** 模型能力覆盖（providers.md 第 3 节配置形态） */
   modelOverrides?: Record<string, Record<string, ModelOverride>> | undefined;
-  /** 权限策略；默认 Phase 1 固定策略（工作区内读允许、其余拒绝） */
+  /**
+   * 权限策略；默认 Phase 2 的 default 预设（permissions.md 第 6 节：
+   * 工作区内读允许，其余 ask）
+   */
   policy?: PermissionPolicy | undefined;
+  /**
+   * 是否有能回复权限请求的客户端（permissions.md 第 7 节）。
+   * false/缺省：ask 一律结算为 deny（source: "non_interactive"）。
+   */
+  interactive?: boolean | undefined;
+  /** 权限层选项（Phase 2 最小形态，不含可配置规则） */
+  permissions?: RuntimePermissionsOptions | undefined;
   /** 指令集；默认自动收集 <NOCTURNE_HOME>/AGENTS.md 与项目各级 AGENTS.md */
   instructions?: InstructionSet | undefined;
   /** Turn 配置覆盖（maxSteps / retryLimit / retryBaseDelayMs） */
   turn?: Partial<TurnConfig> | undefined;
   /** 写入 session.created 的 Runtime 版本 */
   version?: string | undefined;
+}
+
+export interface RuntimePermissionsOptions {
+  /**
+   * 命令行允许（permissions.md 第 7 节）：最终判定为 ask 的调用自动批准。
+   * 只提升 ask；不覆盖 deny，不绕过输入校验与路径限制，由权限层完成。
+   * CLI 的 --yes 注入这里。
+   */
+  autoApproveAsk?: boolean | undefined;
 }
 
 export interface CreateSessionOptions {
@@ -98,7 +117,11 @@ export interface RuntimeSession {
   submit(input: SubmitInput): Promise<TurnEndReason>;
   /** 中断运行中的 Turn；无运行中 Turn 时无操作 */
   interrupt(): void;
-  /** Phase 1 固定策略不产生等待中的请求：恒 unknown_request */
+  /**
+   * 回复 permission.requested（events.md 第 7 节）。
+   * 没有匹配的等待中请求时以 unknown_request 拒绝；reply.remember 在
+   * Phase 2 被忽略（不产生持久授权）。
+   */
   respondPermission(requestId: string, reply: PermissionReply): Promise<void>;
   close(): Promise<void>;
 }
@@ -146,11 +169,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   const policy =
     options.policy ??
-    createWorkspaceReadPolicy({
+    createDefaultPolicy({
       workspaceRoot,
       caseSensitive: platform.caseSensitivePaths,
+      autoApproveAsk: options.permissions?.autoApproveAsk === true,
     });
-  const gate: PermissionGate = createPolicyGate(policy);
+  const interactive = options.interactive === true;
 
   const instructions =
     options.instructions ?? (await loadInstructions(platform, workspaceRoot, cwd));
@@ -166,6 +190,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   function wrapSession(session: Session): RuntimeSession {
     const modelRef = session.state().config.model;
     const model = registry.resolve(modelRef);
+    // gate 按会话持有：等待中的权限请求与会话绑定，respondPermission 按会话路由
+    const gate: PermissionGate = createPolicyGate(policy, { interactive });
     const execEnv: ExecutionEnvironment = {
       platform,
       gate,
@@ -187,8 +213,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       interrupt() {
         controller?.abort();
       },
-      respondPermission(_requestId, _reply) {
-        // Phase 1 固定策略不产生 permission.requested；Phase 3 经 gate 路由
+      respondPermission(requestId, reply) {
+        if (gate.respond?.(requestId, reply) === true) {
+          return Promise.resolve();
+        }
         return Promise.reject(new RuntimeCommandError("unknown_request", "没有等待中的权限请求"));
       },
       async submit(input) {
@@ -220,7 +248,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           if (controller === ac) controller = undefined;
         }
       },
-      close: () => session.close(),
+      async close() {
+        // 先结算等待中的权限请求为 cancelled，避免其挂住 Turn
+        gate.cancelAll?.();
+        await session.close();
+      },
     };
   }
 

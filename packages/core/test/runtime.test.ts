@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,6 +29,7 @@ function makeTmpDir(prefix: string): string {
 async function makeRuntime(
   scripts: FakeScript[][] | FakeScript[] | undefined,
   ws?: string,
+  extra?: { interactive?: boolean; autoApproveAsk?: boolean },
 ): Promise<{ runtime: Runtime; ws: string; provider: FakeProvider }> {
   const workspace = ws ?? makeTmpDir("nct-rt-ws-");
   const sessionsDir = makeTmpDir("nct-rt-sessions-");
@@ -37,6 +38,8 @@ async function makeRuntime(
     cwd: workspace,
     sessionsDir,
     providers: [provider],
+    interactive: extra?.interactive,
+    permissions: extra?.autoApproveAsk === true ? { autoApproveAsk: true } : undefined,
   });
   return { runtime, ws: workspace, provider };
 }
@@ -270,5 +273,189 @@ describe("公开 Runtime API", () => {
       expect(content).not.toContain("SECRET_TOKEN");
       expect(content).not.toContain("hidden.txt");
     }
+  });
+});
+
+describe("ask 权限流程（Phase 2 default 预设）", () => {
+  const writeThenDone = (rel: string): FakeScript[] => [
+    [
+      {
+        type: "tool_call",
+        toolCallId: "w1",
+        name: "write",
+        input: { path: rel, content: "written-by-agent" },
+      },
+      { type: "finish", reason: "tool_calls" },
+    ],
+    [
+      { type: "text_delta", text: "done" },
+      { type: "finish", reason: "stop" },
+    ],
+  ];
+
+  it("ask → 允许：permission.requested → respondPermission(allow) → 写入成功", async () => {
+    const { runtime, ws } = await makeRuntime(writeThenDone("out.txt"), undefined, {
+      interactive: true,
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    session.subscribe((e) => {
+      if (e.type === "permission.requested") {
+        void session.respondPermission(e.payload.requestId, { decision: "allow" });
+      }
+    });
+    const reason = await session.submit({ text: "write" });
+
+    expect(reason).toBe("done");
+    expect(readFileSync(path.join(ws, "out.txt"), "utf8")).toBe("written-by-agent");
+    const resolved = events.find((e) => e.type === "permission.resolved");
+    expect(resolved?.type === "permission.resolved" && resolved.payload.action).toBe("allow");
+    expect(resolved?.type === "permission.resolved" && resolved.payload.source).toBe("user");
+    const completed = events.find((e) => e.type === "tool.completed");
+    expect(completed?.type === "tool.completed" && completed.payload.status).toBe("ok");
+    await session.close();
+  });
+
+  it("ask → 拒绝：tool.completed denied + resolved(user)，反馈回模型", async () => {
+    const { runtime, ws, provider } = await makeRuntime(writeThenDone("out.txt"), undefined, {
+      interactive: true,
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    session.subscribe((e) => {
+      if (e.type === "permission.requested") {
+        void session.respondPermission(e.payload.requestId, {
+          decision: "deny",
+          feedback: "不要写这个文件",
+        });
+      }
+    });
+    const reason = await session.submit({ text: "write" });
+
+    expect(reason).toBe("done");
+    expect(existsSync(path.join(ws, "out.txt"))).toBe(false);
+    const resolved = events.find((e) => e.type === "permission.resolved");
+    expect(resolved?.type === "permission.resolved" && resolved.payload.action).toBe("deny");
+    expect(resolved?.type === "permission.resolved" && resolved.payload.source).toBe("user");
+    expect(resolved?.type === "permission.resolved" && resolved.payload.feedback).toBe(
+      "不要写这个文件",
+    );
+    // 反馈随 tool.completed 的 modelContent 回到模型
+    const toolMsg = provider.requests[1]?.messages.find((m) => m.role === "tool");
+    expect(toolMsg?.role === "tool" && toolMsg.content).toContain("不要写这个文件");
+    await session.close();
+  });
+
+  it("非交互模式：ask 一律拒绝（source=non_interactive），不发 permission.requested", async () => {
+    const { runtime, ws } = await makeRuntime(writeThenDone("out.txt"));
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "write" });
+
+    expect(existsSync(path.join(ws, "out.txt"))).toBe(false);
+    expect(events.some((e) => e.type === "permission.requested")).toBe(false);
+    const resolved = events.find((e) => e.type === "permission.resolved");
+    expect(resolved?.type === "permission.resolved" && resolved.payload.source).toBe(
+      "non_interactive",
+    );
+    const completed = events.find((e) => e.type === "tool.completed");
+    expect(completed?.type === "tool.completed" && completed.payload.status).toBe("denied");
+    await session.close();
+  });
+
+  it("--yes（autoApproveAsk）：非交互下 ask 被自动批准为 allow", async () => {
+    const { runtime, ws } = await makeRuntime(writeThenDone("out.txt"), undefined, {
+      autoApproveAsk: true,
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    const reason = await session.submit({ text: "write" });
+
+    expect(reason).toBe("done");
+    expect(readFileSync(path.join(ws, "out.txt"), "utf8")).toBe("written-by-agent");
+    // 直接 allow：无 requested/resolved 事件（走规则通道）
+    expect(events.some((e) => e.type === "permission.requested")).toBe(false);
+    const started = events.find((e) => e.type === "tool.started");
+    expect(started?.type === "tool.started" && started.payload.permission.source).toBe("rule");
+    await session.close();
+  });
+
+  it("reply.remember 被忽略：同一 Turn 的下一次写仍需确认", async () => {
+    const { runtime } = await makeRuntime(
+      [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "w1",
+            name: "write",
+            input: { path: "a.txt", content: "A" },
+          },
+          {
+            type: "tool_call",
+            toolCallId: "w2",
+            name: "write",
+            input: { path: "b.txt", content: "B" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [{ type: "finish", reason: "stop" }],
+      ],
+      undefined,
+      { interactive: true },
+    );
+    const session = await makeSession(runtime);
+    const requested: string[] = [];
+    session.subscribe((e) => {
+      if (e.type === "permission.requested") {
+        requested.push(e.payload.requestId);
+        void session.respondPermission(e.payload.requestId, {
+          decision: "allow",
+          remember: "session",
+        });
+      }
+    });
+    await session.submit({ text: "write two" });
+    // 两次写各自触发了 requested：remember 没有产生持久授权
+    expect(requested).toHaveLength(2);
+    await session.close();
+  });
+
+  it("ask 等待期间中断：resolved(cancelled) + 调用结算为 cancelled", async () => {
+    const { runtime } = await makeRuntime(writeThenDone("out.txt"), undefined, {
+      interactive: true,
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    session.subscribe((e) => {
+      if (e.type === "permission.requested") {
+        session.interrupt();
+      }
+    });
+    const reason = await session.submit({ text: "write" });
+
+    expect(reason).toBe("aborted");
+    const resolved = events.find((e) => e.type === "permission.resolved");
+    expect(resolved?.type === "permission.resolved" && resolved.payload.source).toBe("cancelled");
+    const completed = events.find((e) => e.type === "tool.completed");
+    expect(completed?.type === "tool.completed" && completed.payload.status).toBe("cancelled");
+    await session.close();
+  });
+
+  it("deny + stop：Turn 以 aborted 结束", async () => {
+    const { runtime } = await makeRuntime(writeThenDone("out.txt"), undefined, {
+      interactive: true,
+    });
+    const session = await makeSession(runtime);
+    session.subscribe((e) => {
+      if (e.type === "permission.requested") {
+        void session.respondPermission(e.payload.requestId, {
+          decision: "deny",
+          stop: true,
+        });
+      }
+    });
+    const reason = await session.submit({ text: "write" });
+    expect(reason).toBe("aborted");
+    await session.close();
   });
 });

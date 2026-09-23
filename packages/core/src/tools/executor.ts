@@ -159,7 +159,10 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       }
       let outcome;
       try {
-        outcome = await scope.gate.check(subjects, call.callId, scope.signal);
+        outcome = await scope.gate.check(subjects, call.callId, scope.signal, {
+          turnId,
+          events: scope.events,
+        });
       } catch (e) {
         if (aborted(scope.signal)) {
           return finish("cancelled", errorResult("cancelled", "调用已被中断"));
@@ -168,6 +171,10 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           "error",
           errorResult("tool_failed", `权限判定异常：${e instanceof Error ? e.message : String(e)}`),
         );
+      }
+      // 等待 ask 回复期间被中断（resolved 已由 gate 发出）
+      if (outcome.cancelled === true) {
+        return finish("cancelled", errorResult("cancelled", "等待权限回复期间被中断"));
       }
       const { decision } = outcome;
       if (decision.action !== "allow") {

@@ -8,6 +8,7 @@ import type {
   DurablePayload,
   JsonSchema,
   PermissionAction,
+  PermissionReply,
   PermissionSubject,
   SubjectRequest,
   ToolCallRef,
@@ -123,10 +124,20 @@ export interface ToolEventSink {
 export interface GateOutcome {
   subjects: PermissionSubject[];
   decision: PermissionDecision;
-  /** 用户在确认中选择"拒绝并停止"（Phase 3 ask 流程产生） */
+  /** 用户在确认中选择"拒绝并停止"（ask 流程的 deny_stop） */
   stopTurn?: boolean | undefined;
   /** gate 内部已发出 permission.resolved（ask 流程），Executor 不再补发 */
   resolvedEmitted?: boolean | undefined;
+  /** 等待 ask 回复期间被中断：Executor 按 cancelled 结算该调用 */
+  cancelled?: boolean | undefined;
+  /** 用户拒绝时附带给模型的反馈（PermissionReply.feedback） */
+  feedback?: string | undefined;
+}
+
+/** check 的 Turn 级上下文：ask 流程发出 permission.requested / resolved 需要它 */
+export interface GateTurnContext {
+  turnId: string;
+  events: ToolEventSink;
 }
 
 /**
@@ -134,9 +145,18 @@ export interface GateOutcome {
  * ask 的等待与取消封装在 gate 内部；checkLexical 供枚举工具过滤结果。
  */
 export interface PermissionGate {
-  check(subjects: PermissionSubject[], callId: string, signal: AbortSignal): Promise<GateOutcome>;
+  check(
+    subjects: PermissionSubject[],
+    callId: string,
+    signal: AbortSignal,
+    turn?: GateTurnContext,
+  ): Promise<GateOutcome>;
   /** 同步词法求值：结果路径位于已解析根目录之下（permissions.md 4.4） */
   checkLexical(request: SubjectRequest): PermissionAction;
+  /** 回复等待中的权限请求；未知或已结算的 requestId 返回 false */
+  respond?(requestId: string, reply: PermissionReply): boolean;
+  /** 会话关闭时把全部等待中的请求结算为 cancelled */
+  cancelAll?(): void;
 }
 
 /** Agent Loop 提供给 Executor 的运行环境；工具看不到它 */
