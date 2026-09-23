@@ -19,7 +19,7 @@ nctrn -p                     # 非交互模式：prompt 从 stdin 读取（stdin
 | 参数 | 说明 |
 |---|---|
 | `-p, --print [prompt]` | 非交互模式。值可省略：省略时从 stdin 读全部输入作为 prompt |
-| `--model <id>` | 模型 id（当前 Provider 内），覆盖 `NOCTURNE_MODEL`；接受 `provider/model` 形式但必须与当前 Provider 一致 |
+| `--model <id>` | 模型 id（当前 Provider 内），覆盖 `NOCTURNE_MODEL`；`provider/model` 写法在前缀等于当前 Provider 时剥掉前缀，前缀是另一种 api-type 时拒绝；其余含斜杠的值（如 `deepseek/deepseek-v4.1-flash` 这类命名空间 id）按模型 id 原样使用 |
 | `--api-type <type>` | `openai-compatible`（默认）或 `anthropic`，覆盖 `NOCTURNE_API_TYPE` |
 | `--base-url <url>` | Provider 端点，覆盖 `NOCTURNE_BASE_URL`；`anthropic` 类型省略时用官方端点 |
 | `--api-key-env <NAME>` | 读取凭据的环境变量名。默认：`anthropic` → `ANTHROPIC_API_KEY`，其余 → `NOCTURNE_API_KEY` |

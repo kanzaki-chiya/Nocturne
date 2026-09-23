@@ -50,18 +50,21 @@ export function collectConfig(args: CliArgs, env: Env = (n) => process.env[n]): 
   if (problems.length > 0) return { ok: false, problems };
 
   const providerId = validType;
-  // --model 允许 provider/model 写法，但 provider 必须与当前一致
+  // --model 允许 provider/model 写法：前缀等于当前 provider 时剥掉；
+  // 前缀是另一种 api-type（用户明显指了别的 Provider）时拒绝；
+  // 其余含斜杠的值（如 deepseek/deepseek-v4.1-flash）按模型 id 原样使用。
   let bareModel = modelId ?? "";
   const slash = bareModel.indexOf("/");
   if (slash > 0) {
     const p = bareModel.slice(0, slash);
-    if (p !== providerId) {
+    if (p === providerId) {
+      bareModel = bareModel.slice(slash + 1);
+    } else if (p === "openai-compatible" || p === "anthropic") {
       return {
         ok: false,
         problems: [`--model 的 provider "${p}" 与当前 Provider "${providerId}" 不一致`],
       };
     }
-    bareModel = bareModel.slice(slash + 1);
   }
   const model = `${providerId}/${bareModel}`;
 

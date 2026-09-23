@@ -73,14 +73,25 @@ describe("Provider 配置收集（cli.md 第 7 节）", () => {
     expect(r.config.model).toBe("anthropic/claude-x");
   });
 
-  it("--model provider/model 与当前 Provider 不一致 → 拒绝", () => {
-    const r = collectConfig(
-      { ...base, model: "other/m" },
+  it("--model 前缀是另一种 api-type → 拒绝；模型命名空间原样保留", () => {
+    const bad = collectConfig(
+      { ...base, model: "anthropic/m" },
       envOf({ NOCTURNE_BASE_URL: "https://x", NOCTURNE_API_KEY: "k" }),
     );
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.problems[0]).toContain("不一致");
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.problems[0]).toContain("不一致");
+
+    // 非 api-type 前缀是模型命名空间（openrouter/deepseek 形态），原样使用
+    const ns = collectConfig(
+      { ...base, model: "deepseek/deepseek-v4.1-flash" },
+      envOf({ NOCTURNE_BASE_URL: "https://x", NOCTURNE_API_KEY: "k" }),
+    );
+    expect(ns.ok).toBe(true);
+    if (!ns.ok) return;
+    expect(ns.config.model).toBe("openai-compatible/deepseek/deepseek-v4.1-flash");
+    expect(ns.config.providerConfig).toMatchObject({
+      models: { "deepseek/deepseek-v4.1-flash": {} },
+    });
   });
 
   it("--api-type 无效值 → 拒绝", () => {
