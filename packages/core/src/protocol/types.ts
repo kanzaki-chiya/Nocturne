@@ -83,3 +83,53 @@ export interface ToolSpec {
   description: string;
   inputSchema: JsonSchema;
 }
+
+/** tool.completed.status（events.md 第 3.1 节） */
+export type ToolCallStatus =
+  | "ok"
+  | "error"
+  | "denied"
+  | "cancelled"
+  /** 仅恢复修复产生 */
+  | "interrupted";
+
+/**
+ * 会话历史条目：持久化事件折叠出的投影（sessions.md），
+ * session 与 context 共用同一份定义，避免两份漂移。
+ */
+export type HistoryEntry =
+  | {
+      kind: "user";
+      seq: number;
+      turnId: string;
+      messageId: string;
+      content: ContentBlock[];
+    }
+  | {
+      kind: "assistant";
+      seq: number;
+      turnId: string;
+      messageId: string;
+      model: ModelRef;
+      content: ContentBlock[];
+      toolCalls: ToolCallRef[];
+      usage: Usage | undefined;
+      finishReason: FinishReason | "aborted";
+    }
+  | {
+      kind: "tool";
+      seq: number;
+      turnId: string;
+      callId: string;
+      name: string;
+      status: ToolCallStatus;
+      modelContent: string;
+    }
+  | {
+      kind: "compaction";
+      seq: number;
+      turnId: string | undefined;
+      compactKind: "prune" | "summary";
+      throughSeq: number;
+      summary: string | undefined;
+    };

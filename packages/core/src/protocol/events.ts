@@ -77,13 +77,9 @@ export interface PermissionResolvedPayload {
   feedback?: string | undefined;
 }
 
-export type ToolCallStatus =
-  | "ok"
-  | "error"
-  | "denied"
-  | "cancelled"
-  /** 仅恢复修复产生 */
-  | "interrupted";
+import type { ToolCallStatus } from "./types.js";
+
+export type { ToolCallStatus };
 
 export interface ToolCompletedPayload {
   callId: string;

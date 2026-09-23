@@ -3,19 +3,19 @@
  * SessionState 只由持久化事件折叠得到，不单独存储。
  */
 import type {
-  ContentBlock,
   DurableEvent,
   DurablePayload,
   DurableType,
   EphemeralEvent,
   EphemeralPayload,
   EphemeralType,
-  FinishReason,
+  HistoryEntry,
   ModelRef,
   RuntimeEvent,
-  ToolCallStatus,
   Usage,
 } from "../protocol/index.js";
+
+export type { HistoryEntry };
 
 export interface SessionMeta {
   id: string;
@@ -30,49 +30,6 @@ export interface SessionConfig {
   model: ModelRef;
   permissionPreset: string;
 }
-
-export type HistoryEntry =
-  | {
-      kind: "user";
-      seq: number;
-      turnId: string;
-      messageId: string;
-      content: ContentBlock[];
-    }
-  | {
-      kind: "assistant";
-      seq: number;
-      turnId: string;
-      messageId: string;
-      model: ModelRef;
-      content: ContentBlock[];
-      toolCalls: {
-        callId: string;
-        providerCallId?: string | undefined;
-        name: string;
-        input?: unknown;
-        rawInput?: string | undefined;
-      }[];
-      usage: Usage | undefined;
-      finishReason: FinishReason | "aborted";
-    }
-  | {
-      kind: "tool";
-      seq: number;
-      turnId: string;
-      callId: string;
-      name: string;
-      status: ToolCallStatus;
-      modelContent: string;
-    }
-  | {
-      kind: "compaction";
-      seq: number;
-      turnId: string | undefined;
-      compactKind: "prune" | "summary";
-      throughSeq: number;
-      summary: string | undefined;
-    };
 
 export interface OpenTurn {
   turnId: string;
