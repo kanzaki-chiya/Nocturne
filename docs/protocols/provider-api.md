@@ -73,7 +73,7 @@ type ModelMessage =
 ```ts
 type ModelStreamEvent =
   | { type: "text_delta"; text: string }
-  | { type: "reasoning_delta"; text: string }
+  | { type: "reasoning_delta"; text: string; providerData?: unknown }       // providerData：随增量携带的专有数据（如 Anthropic 签名 delta），落到当前推理块
   | { type: "reasoning_block"; text: string; providerData?: unknown }       // 完整推理块（含签名等专有数据时必须提供）
   | { type: "tool_call_delta"; toolCallId: string; name: string; argsDelta: string }   // 可选，仅用于显示
   | { type: "tool_call"; toolCallId: string; name: string; input?: unknown; rawInput?: string }

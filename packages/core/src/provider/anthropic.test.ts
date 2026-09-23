@@ -1,0 +1,371 @@
+/**
+ * anthropic 适配器契约测试（离线）：stub fetch 注入 Anthropic Messages SSE，
+ * 验证请求转换、流式归一化、签名回传、错误映射与中止。
+ */
+import { describe, expect, it } from "vitest";
+
+import { createAnthropicProvider, type AnthropicConfig } from "./adapters/anthropic.js";
+import { ProviderError } from "./errors.js";
+import type { ModelRequest, ModelStreamEvent } from "./types.js";
+
+const envWithKey = (name: string) => (name === "TEST_ANTHROPIC_KEY" ? "sk-test" : undefined);
+
+function config(overrides: Partial<AnthropicConfig> = {}): AnthropicConfig {
+  return {
+    id: "claude",
+    type: "anthropic",
+    baseURL: "https://api.test/v1",
+    apiKeyEnv: "TEST_ANTHROPIC_KEY",
+    models: { "claude-x": {} },
+    ...overrides,
+  };
+}
+
+function request(overrides: Partial<ModelRequest> = {}): ModelRequest {
+  return {
+    model: "claude-x",
+    system: [{ text: "sys" }],
+    messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    tools: [],
+    maxOutputTokens: 1024,
+    ...overrides,
+  };
+}
+
+function sseFetch(events: object[], capture?: { body?: unknown; url?: string }) {
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    capture && (capture.url = String(input));
+    capture && (capture.body = JSON.parse(String(init?.body)));
+    const payload = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(payload));
+        c.close();
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  };
+}
+
+function errorFetch(status: number, body: object) {
+  return async (): Promise<Response> =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+}
+
+async function collect(p: ReturnType<typeof createAnthropicProvider>, req: ModelRequest) {
+  const events: ModelStreamEvent[] = [];
+  for await (const ev of p.stream(req, new AbortController().signal)) events.push(ev);
+  return events;
+}
+
+const msgStart = (inputTokens = 10) => ({
+  type: "message_start",
+  message: { id: "msg_1", model: "claude-x", usage: { input_tokens: inputTokens } },
+});
+const msgEnd = (reason: string, outputTokens = 5) => [
+  {
+    type: "message_delta",
+    delta: { stop_reason: reason },
+    usage: { output_tokens: outputTokens },
+  },
+  { type: "message_stop" },
+];
+
+describe("anthropic 适配器", () => {
+  it("缺少凭据环境变量 → auth ProviderError（无网络）", async () => {
+    const p = createAnthropicProvider(config(), () => undefined);
+    await expect(collect(p, request())).rejects.toMatchObject({
+      name: "ProviderError",
+      kind: "auth",
+    });
+  });
+
+  it("文本流：text_delta + usage + finish(stop)", async () => {
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([
+        msgStart(),
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "hello" },
+        },
+        { type: "content_block_stop", index: 0 },
+        ...msgEnd("end_turn"),
+      ]),
+    );
+    const events = await collect(p, request());
+    expect(events).toContainEqual({ type: "text_delta", text: "hello" });
+    expect(events).toContainEqual({
+      type: "usage",
+      usage: expect.objectContaining({ inputTokens: 10, outputTokens: 5 }),
+    });
+    expect(events.at(-1)).toMatchObject({ type: "finish", reason: "stop" });
+  });
+
+  it("工具调用：input_json_delta 累积为 tool_call（含解析后的 input）", async () => {
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([
+        msgStart(),
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "tool_use", id: "toolu_1", name: "read" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: '{"path":' },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: '"a.txt"}' },
+        },
+        { type: "content_block_stop", index: 0 },
+        ...msgEnd("tool_use"),
+      ]),
+    );
+    const events = await collect(
+      p,
+      request({
+        tools: [
+          {
+            name: "read",
+            description: "读文件",
+            inputSchema: {
+              type: "object",
+              properties: { path: { type: "string" } },
+              required: ["path"],
+            },
+          },
+        ],
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "tool_call_delta", toolCallId: "toolu_1", name: "read" }),
+    );
+    expect(events).toContainEqual({
+      type: "tool_call",
+      toolCallId: "toolu_1",
+      name: "read",
+      input: { path: "a.txt" },
+      rawInput: undefined,
+    });
+    expect(events.at(-1)).toMatchObject({ type: "finish", reason: "tool_calls" });
+  });
+
+  it("推理流：thinking_delta → reasoning_delta；signature_delta → providerData", async () => {
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([
+        msgStart(),
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "thinking", thinking: "" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "想想" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "signature_delta", signature: "sig123" },
+        },
+        { type: "content_block_stop", index: 0 },
+        ...msgEnd("end_turn"),
+      ]),
+    );
+    const events = await collect(p, request());
+    expect(events).toContainEqual({ type: "reasoning_delta", text: "想想" });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "reasoning_delta",
+        providerData: { anthropic: { signature: "sig123" } },
+      }),
+    );
+  });
+
+  it("签名回传：assistant 推理块的 providerData 还原为 thinking 块", async () => {
+    const capture: { body?: { messages?: unknown[] } } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "reasoning",
+                text: "当时的推理",
+                providerData: { anthropic: { signature: "sig123" } },
+              },
+              { type: "text", text: "回答" },
+            ],
+            toolCalls: [],
+          },
+          { role: "user", content: [{ type: "text", text: "继续" }] },
+        ],
+      }),
+    );
+    const messages = capture.body?.messages as
+      | { role: string; content: { type: string; signature?: string; thinking?: string }[] }[]
+      | undefined;
+    const assistant = messages?.[0];
+    expect(assistant?.role).toBe("assistant");
+    expect(assistant?.content).toContainEqual({
+      type: "thinking",
+      thinking: "当时的推理",
+      signature: "sig123",
+    });
+    expect(assistant?.content).toContainEqual({ type: "text", text: "回答" });
+  });
+
+  it("无 providerData 的推理块回传为不带 signature 的结构（适配器告警但不崩）", async () => {
+    const capture: { body?: { messages?: unknown[] } } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "reasoning", text: "无签名推理" }],
+            toolCalls: [],
+          },
+        ],
+      }),
+    );
+    // sendReasoning 默认开启但缺 signature → 该块被丢弃（不进 messages）
+    const messages = capture.body?.messages as { content: unknown[] }[] | undefined;
+    expect(messages?.[0]?.content ?? []).not.toContainEqual(
+      expect.objectContaining({ type: "thinking" }),
+    );
+  });
+
+  it("工具往返：tool_use 回传 + tool_result 携带同一线上 id", async () => {
+    const capture: { body?: { messages?: unknown[] } } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "assistant",
+            content: [],
+            toolCalls: [{ callId: "c1", providerCallId: "toolu_1", name: "read", input: {} }],
+          },
+          { role: "tool", callId: "c1", name: "read", content: "文件内容", isError: false },
+        ],
+      }),
+    );
+    const messages = capture.body?.messages as
+      { role: string; content: Record<string, unknown>[] }[] | undefined;
+    expect(messages?.[0]?.content).toContainEqual(
+      expect.objectContaining({ type: "tool_use", id: "toolu_1", name: "read" }),
+    );
+    expect(messages?.[1]?.content).toContainEqual(
+      expect.objectContaining({ type: "tool_result", tool_use_id: "toolu_1" }),
+    );
+  });
+
+  it("HTTP 429 → rate_limit ProviderError", async () => {
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      errorFetch(429, { type: "error", error: { type: "rate_limit_error", message: "slow down" } }),
+    );
+    await expect(collect(p, request())).rejects.toMatchObject({
+      name: "ProviderError",
+      kind: "rate_limit",
+      status: 429,
+    });
+  });
+
+  it("HTTP 400 'prompt is too long' → context_overflow", async () => {
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      errorFetch(400, {
+        type: "error",
+        error: { type: "invalid_request_error", message: "prompt is too long: 213000 tokens" },
+      }),
+    );
+    await expect(collect(p, request())).rejects.toMatchObject({
+      name: "ProviderError",
+      kind: "context_overflow",
+    });
+  });
+
+  it("HTTP 401 → auth；529 → overloaded", async () => {
+    const p401 = createAnthropicProvider(
+      config(),
+      envWithKey,
+      errorFetch(401, {
+        type: "error",
+        error: { type: "authentication_error", message: "bad key" },
+      }),
+    );
+    await expect(collect(p401, request())).rejects.toMatchObject({ kind: "auth" });
+    const p529 = createAnthropicProvider(
+      config(),
+      envWithKey,
+      errorFetch(529, { type: "error", error: { type: "overloaded_error", message: "busy" } }),
+    );
+    await expect(collect(p529, request())).rejects.toMatchObject({ kind: "overloaded" });
+  });
+
+  it("预先中止的 signal → AbortError", async () => {
+    const p = createAnthropicProvider(config(), envWithKey, async () => {
+      return new Response("data: {}\n\n", { status: 200 });
+    });
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const consume = async () => {
+      for await (const _ of p.stream(request(), ctrl.signal)) void _;
+    };
+    await expect(consume()).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("流中 error 事件 → ProviderError（mapped）", async () => {
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([
+        msgStart(),
+        {
+          type: "error",
+          error: { type: "overloaded_error", message: "mid-stream overload", statusCode: 529 },
+        },
+      ]),
+    );
+    await expect(collect(p, request())).rejects.toBeInstanceOf(ProviderError);
+  });
+});

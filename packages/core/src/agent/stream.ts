@@ -86,6 +86,16 @@ export async function consumeStream(
             break;
           }
           case "reasoning_delta": {
+            // 专有数据 delta（如 Anthropic signature）落到末尾推理块；
+            // text 为空时只合并数据，不产生空块/空 delta 事件
+            if (ev.providerData !== undefined) {
+              const last = acc.content.at(-1);
+              if (last?.type === "reasoning") {
+                last.provider = provider.id;
+                last.providerData = ev.providerData;
+              }
+            }
+            if (ev.text === "") break;
             appendDelta(acc.content, "reasoning", ev.text);
             session.emitEphemeral(
               "message.assistant.delta",

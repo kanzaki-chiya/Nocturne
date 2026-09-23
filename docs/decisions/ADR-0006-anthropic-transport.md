@@ -1,7 +1,7 @@
 # ADR-0006：anthropic 适配器使用 @ai-sdk/anthropic 传输
 
-- 状态：提议
-- 日期：2026-09-24
+- 状态：已接受
+- 日期：2026-09-24（2026-09-25 实现确认）
 
 ## 背景
 
@@ -11,9 +11,10 @@
 
 `anthropic` 适配器使用 `@ai-sdk/anthropic`（AI SDK Provider），与 `openai-compatible` 适配器共用同一传输栈（`ai` 包的 `streamText` 与 `TextStreamPart` 归一化路径）。
 
-- 版本写精确版本，选择发布已满 7 天的版本（实现时以 `npm view time` 为准；记录时参考 `4.0.56`，2026-09-16 发布）。peer 要求 `zod ^3.25.76 || ^4.1.8`，与现有 `zod@4.6.5` 兼容。
-- Anthropic 特有字段在适配器内经 `providerMetadata` ↔ `providerData` 往返：thinking 块的签名进入 `reasoning_block` 的 `providerData`，历史回传时在消息转换中还原为 `providerMetadata`；`cachePrefix` 提示用于在 system 边界标注 `cache_control`。
-- 若暴露"拿不到必需字段"的限制（例如签名/用量细节不透传），退路是在适配器内自建 `fetch` + SSE 解析或改用官方 SDK——按 ADR-0005 的规则只换传输实现，不改 Core 接口。
+- 版本写精确版本，选择发布已满 7 天的版本：实际落地 `@ai-sdk/anthropic@4.0.58`（2026-09-16 发布）。peer 要求 `zod ^3.25.76 || ^4.1.8`，与现有 `zod@4.6.5` 兼容。
+- Anthropic 特有字段在适配器内经 `providerMetadata` ↔ `providerData` 往返：signature delta 随 `reasoning_delta.providerData` 进入推理块（`providerData` 就是 providerMetadata 原值，形如 `{ anthropic: { signature } }`），历史回传时在消息转换中原样放回 `providerOptions`，由适配器还原为 thinking 块；`cachePrefix` 提示用于在 system 边界标注 `cache_control`。
+- 依赖对齐：`ai@7` 与 `@ai-sdk/anthropic@4.0.58` 把 `@ai-sdk/provider` 精确锁定在不同补丁版（4.0.15 / 4.0.17），会产生 `LanguageModelV4` 双实例的类型冲突。在 `pnpm-workspace.yaml` 用 `overrides` 统一到 `4.0.17`（同 minor 族）；若未来升级出现行为差异，改回各自锁定并在适配器内做类型断言。
+- 若暴露"拿不到必需字段"的限制（例如签名/用量细节不透传），退路是在适配器内自建 `fetch` + SSE 解析或改用官方 SDK——按 ADR-0005 的规则只换传输实现，不改 Core 接口。不做运行时静默切换。
 
 ## 后果
 

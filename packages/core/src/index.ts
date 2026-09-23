@@ -15,13 +15,16 @@ import {
 import { createDefaultPolicy, type PermissionPolicy } from "./permission/index.js";
 import { createPlatform, type Platform } from "./platform/index.js";
 import {
+  createAnthropicProvider,
   createOpenAICompatibleProvider,
   createProviderRegistry,
   UnknownModelError,
+  type AnthropicConfig,
   type ModelInfo,
   type ModelOverride,
   type OpenAICompatibleConfig,
   type Provider,
+  type ProviderConfig,
   type ProviderRegistry,
   type ResolvedModel,
 } from "./provider/index.js";
@@ -75,8 +78,8 @@ export interface RuntimeOptions {
   sessionsDir?: string | undefined;
   /** 直接注入的 Provider 实例（如 FakeProvider） */
   providers?: Provider[] | undefined;
-  /** 声明式 Provider 配置；Phase 1 支持 openai-compatible */
-  providerConfigs?: OpenAICompatibleConfig[] | undefined;
+  /** 声明式 Provider 配置（openai-compatible 与 anthropic） */
+  providerConfigs?: ProviderConfig[] | undefined;
   /** 模型能力覆盖（providers.md 第 3 节配置形态） */
   modelOverrides?: Record<string, Record<string, ModelOverride>> | undefined;
   /**
@@ -184,10 +187,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       : paths.join(platform.nocturneHome(), "sessions");
   await fs.mkdir(sessionsDir);
 
-  // ProviderRegistry：显式注入 + 声明式 openai-compatible 配置
+  // ProviderRegistry：显式注入 + 声明式配置（openai-compatible / anthropic）
   const providers: Provider[] = [...(options.providers ?? [])];
   for (const config of options.providerConfigs ?? []) {
-    providers.push(createOpenAICompatibleProvider(config, (n) => platform.env(n)));
+    providers.push(
+      config.type === "anthropic"
+        ? createAnthropicProvider(config, (n) => platform.env(n))
+        : createOpenAICompatibleProvider(config, (n) => platform.env(n)),
+    );
   }
   const registry: ProviderRegistry = createProviderRegistry(providers, options.modelOverrides);
 
@@ -451,10 +458,12 @@ async function loadInstructions(
 // 公共契约类型与工具再导出：客户端只需要 @nocturne/core 与 @nocturne/core/protocol
 export * from "./protocol/index.js";
 export type {
+  AnthropicConfig,
   ModelInfo,
   ModelRequest,
   OpenAICompatibleConfig,
   Provider,
+  ProviderConfig,
   ResolvedModel,
 } from "./provider/index.js";
 export type { InstructionSet, EnvironmentInfo, BuiltContext } from "./context/index.js";

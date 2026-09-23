@@ -74,7 +74,15 @@ export interface ModelRequest {
 
 export type ModelStreamEvent =
   | { type: "text_delta"; text: string }
-  | { type: "reasoning_delta"; text: string }
+  | {
+      type: "reasoning_delta";
+      text: string;
+      /**
+       * 随推理 delta 附带的 Provider 专有数据（如 Anthropic 签名 delta）。
+       * 语义同 reasoning_block.providerData：由 consumeStream 落到当前推理块。
+       */
+      providerData?: unknown;
+    }
   | {
       type: "reasoning_block";
       text: string;
