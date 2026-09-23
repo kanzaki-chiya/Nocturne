@@ -1,0 +1,81 @@
+# Provider 抽象
+
+> 状态：已接受 v0.2 ｜ 前置阅读：[overview.md](overview.md) ｜ 接口契约：[provider-api.md](../protocols/provider-api.md) ｜ 决策：[ADR-0005](../decisions/ADR-0005-own-provider-interface.md)
+
+## 1. 职责
+
+Provider 层把"各家模型服务的协议差异"关在适配器里，对上只暴露一套中性的请求、流式事件和错误。它负责归一化：
+
+| 方面 | 归一化为 |
+|---|---|
+| 流式输出 | `ModelStreamEvent` 序列 |
+| 文本 | `text_delta` |
+| 推理 / 思考 | `reasoning_delta`，完整块可携带 Provider 专有数据（签名、加密内容） |
+| 工具调用 | 完整的 `tool_call`（id、名称、已解析参数）；参数增量可选地以 `tool_call_delta` 提供给界面 |
+| 用量 | `Usage`：输入、输出、缓存读、缓存写、推理 token，语义统一 |
+| 结束原因 | `stop` / `tool_calls` / `length` / `content_filter` / `other`，并保留原始值 |
+| 错误 | `ProviderError`：`kind`、`retryable`、`retryAfterMs`、HTTP 状态、原始信息 |
+| 能力 | `ModelInfo.capabilities` |
+
+Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某个模型的特殊行为，要么在适配器内处理，要么表达为能力字段。
+
+## 2. Provider、Model、能力、选项的关系
+
+| 概念 | 是什么 | 为什么单独存在 |
+|---|---|---|
+| `Provider` | 一个模型服务的连接：适配器类型 + 端点 + 凭据，实现 `stream()` | 同一种协议（如 OpenAI 兼容）可以连接许多不同的服务 |
+| `ModelInfo` | 某个 Provider 下一个模型的描述：id、上下文窗口、最大输出、能力 | 能力属于模型而不是 Provider：同一 Provider 的不同模型差异很大 |
+| `ModelCapabilities` | 数据：是否支持工具调用、并行工具调用、推理及其形式、图片输入、提示缓存、可选的推理强度档位 | Context Builder 与 Agent Loop 依据能力做决定，而不是依据名字 |
+| `ProviderOptions` | 传给某个 Provider 的专有参数，Core 不解释 | 给高级用户留出口，又不污染中性接口 |
+
+能力信息来自内置的小型模型目录（纯数据），用户可以在配置中覆盖或为未知模型补充。MVP 不从远端同步模型目录。
+
+## 3. 配置形态（示意）
+
+```jsonc
+{
+  "model": "deepseek/deepseek-chat",          // <providerId>/<modelId>
+  "providers": {
+    "deepseek": {
+      "type": "openai-compatible",
+      "baseURL": "https://api.deepseek.com/v1",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",          // 只引用环境变量名，不在配置里写密钥
+      "models": { "deepseek-chat": { "contextWindow": 128000 } },
+      "providerOptions": {}                      // 原样传给适配器
+    }
+  }
+}
+```
+
+凭据只从环境变量或用户级凭据文件读取，不写入会话日志、事件或普通日志。
+
+## 4. 适配器
+
+| 适配器 | 覆盖 | 阶段 |
+|---|---|---|
+| `openai-compatible`（Chat Completions） | OpenAI、DeepSeek、GLM、OpenRouter、Ollama / vLLM / LM Studio 等本地模型服务 | Phase 1 |
+| `anthropic`（Messages） | Anthropic 及兼容 Anthropic 协议的服务 | Phase 2 |
+| `openai-responses` | OpenAI Responses API（推理内容回传、服务端状态） | 按需 |
+| `gemini` | Google Gemini | 按需 |
+
+每个适配器的传输实现（使用哪个 SDK 或解析库，或自建）在实现时确定并记录在上表中，附理由；默认先复用成熟实现，遇到具体限制再替换（[ADR-0005](../decisions/ADR-0005-own-provider-interface.md)）。无论底层如何实现，适配器都必须通过同一组契约测试（[provider-api.md](../protocols/provider-api.md) 第 4 节的流式契约）。
+
+各协议的主要差异与处理位置：
+
+| 差异 | 例子 | 处理 |
+|---|---|---|
+| 工具调用的流式形态 | Chat Completions 按 index 分片传参数；Anthropic 按内容块传 JSON 片段 | 适配器组装为完整 `tool_call` 后再交出 |
+| 推理内容 | 部分服务以独立字段返回推理文本；Anthropic 的思考块带签名且必须原样回传 | 统一为 reasoning 内容块；签名等放入 `providerData`，并记录来源 Provider |
+| 工具结果的消息形态 | `tool` 角色消息 vs `tool_result` 内容块 | 适配器把中性消息转换为各自格式 |
+| 用量字段含义 | 输入 token 是否已包含缓存 token 各家不同 | 适配器换算为统一语义 |
+| 错误格式 | HTTP 状态码、错误体结构、限流头 | 适配器映射为 `ProviderError.kind` |
+
+## 5. 不属于 Provider 的事
+
+- **重试**：Provider 只报告错误是否可重试；是否重试、重试几次、何时停止，由 Agent Loop 决定（它知道是否已经输出过内容），见 [agent-loop.md](agent-loop.md)。
+- **上下文裁剪**：由 Context Builder 完成；Provider 收到的请求应当已经装得进窗口。
+- **工具执行**：Provider 只报告模型想调用什么。
+
+## 6. 暂不设计
+
+Provider 原生工具（服务端网页搜索等）、结构化输出（JSON schema 响应）、多模态输出、账号登录类凭据、按量计费展示。接入时以能力字段与可选请求字段扩展，不改变现有事件。

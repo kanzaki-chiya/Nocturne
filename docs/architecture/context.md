@@ -1,0 +1,129 @@
+# 上下文管理（Context）
+
+> 状态：已接受 v0.2 ｜ 前置阅读：[sessions.md](sessions.md) ｜ 相关契约：[provider-api.md](../protocols/provider-api.md)
+
+## 1. 两个不同的东西
+
+| | 会话历史（Session History） | 模型上下文（Model Context） |
+|---|---|---|
+| 是什么 | 会话日志折叠出的完整历史 | 某一个 Step 实际发给模型的请求 |
+| 生命周期 | 持久化，只追加 | 每个 Step 临时构建，用完即弃 |
+| 大小 | 可以无限增长 | 受模型上下文窗口限制 |
+| 所有者 | session | context |
+
+Context Builder 的职责就是：**从会话历史中选出、变换出一个装得进窗口、对模型有用、前缀尽量稳定的请求。** 两者永远不能混为一谈：压缩上下文不会删除历史，只会追加一个"从这里开始用摘要代替"的事件。
+
+## 2. 输入与输出
+
+```text
+build({
+  state: SessionState,            # 历史、配置
+  model: ModelInfo,               # 上下文窗口、能力
+  tools: ToolSpec[],              # 由 agent 从 ToolRegistry 取得后作为数据传入
+  instructions: InstructionSet,   # 已加载的 AGENTS.md 等
+  environment: EnvironmentInfo,   # 操作系统、shell、cwd、会话日期
+}) → BuiltContext {
+  request: ModelRequest,          # 中性请求，交给 Provider
+  report: ContextReport,          # 每个部分的来源与 token 估算，用于调试与 /context 命令
+  overBudget: boolean,            # 当前请求超出可用预算
+  compaction?: CompactionPlan,    # 建议或必须执行的压缩（第 6 节）
+  mustCompact: boolean,           # 不压缩就无法发出请求
+}
+```
+
+Context Builder 不做 I/O，也不调用 Provider：指令文件由 `config` / `platform` 在会话开始时读取并传入；需要模型参与的摘要由 Agent Loop 按计划执行。这让它可以用纯数据测试。
+
+## 3. 组装顺序（稳定的放前面）
+
+1. **基础系统提示**：Nocturne 身份、工作方式、工具使用约定。随版本变化，会话内不变。
+2. **工具规格**：名称、描述、输入 schema。会话内通常不变。
+3. **项目指令**：用户级 `<NOCTURNE_HOME>/AGENTS.md`，以及从 `workspaceRoot` 到 `cwd` 路径上各级目录的 `AGENTS.md`。每个文件有大小上限，超出截断并在报告中标注。
+4. **环境信息**：操作系统、shell、工作目录、会话创建日期。取会话级的值，不在每个 Step 刷新，避免破坏缓存前缀。
+5. **历史**：最近一个压缩边界之后的消息与工具结果；若存在摘要，摘要作为历史的第一条。
+
+Builder 在 `BuiltContext` 中标出"可缓存前缀"的边界，是否以及如何使用提示缓存（例如 Anthropic 的 cache breakpoint）由 Provider 适配器决定。
+
+## 4. 基本原则
+
+- **增量构建**：除压缩边界外，不改写已经发给模型的历史，让相邻 Step 的请求共享最长前缀。
+- **每一项都有上限**：工具结果在执行时就按预算截断（见 [tools.md](tools.md)），指令文件有上限，任何注入内容都不能无界增长。上下文层不负责修补无界输入。
+- **可解释**：`ContextReport` 列出每一部分的来源与估算 token，用户和开发者能看到"窗口被什么占满了"。
+
+## 5. Token 预算
+
+```text
+可用输入预算 = model.contextWindow − 输出预留（min(maxOutputTokens, 上限)）− 安全余量
+当前估算     = 上一次请求 Provider 报告的输入 token 数 + 此后新增内容的估算（字符数 / 4）
+```
+
+没有 Provider 用量数据时（第一个 Step、刚切换模型）完全使用估算。估算只用于决定是否压缩，不需要精确。
+
+## 6. 压缩
+
+### 6.1 两级压缩
+
+每一级都以持久化事件 `context.compacted` 记录，使后续构建结果确定、可恢复：
+
+| 级别 | 做法 | 成本 | 事件内容 |
+|---|---|---|---|
+| L1 修剪（prune） | 把 `throughSeq` 及之前的工具结果替换为占位说明（保留工具名、参数摘要与"输出已省略"），工具调用与结果本身仍然成对保留 | 无模型调用，确定性 | `kind: "prune"`、`throughSeq` |
+| L2 摘要（summary） | 用模型把 `throughSeq` 及之前的历史总结为一段结构化摘要（目标、已完成、关键文件、未决事项） | 一次模型调用 | `kind: "summary"`、`throughSeq`、`summary` |
+
+### 6.2 职责划分
+
+```text
+Context Builder（纯计算）  → CompactionPlan { kind, throughSeq, summaryRequest? }
+Agent Loop                 → prune：直接写入事件
+                             summary：用 summaryRequest 调用 Provider，成功后写入事件
+```
+
+### 6.3 边界规则
+
+`throughSeq` 必须指向一个**已闭合的步骤边界**，即以下两者之一：
+
+- 某个 `turn.completed` 事件；
+- 某条 `message.assistant` 的所有工具调用都已结算后，其最后一个 `tool.completed` 事件。
+
+因此压缩永远不会把一对工具调用与结果拆到边界两侧，也不会切进一条消息内部。
+
+进行中的 Turn 被摘要覆盖时（长 Turn 的中途压缩），该 Turn 的 `message.user` 原文在摘要之后保留，模型不会丢失当前任务的原始要求。
+
+### 6.4 多次压缩的叠加
+
+- 同一会话中，每种压缩的 `throughSeq` 必须严格递增；Agent Loop 保证这一点，折叠时遇到不递增的压缩事件视为不变量被破坏（记录诊断并忽略该事件）。
+- **摘要是累积的**：新摘要的输入是"上一个摘要 + 其后到新边界为止的历史"，因此只有最新的摘要生效，更早的摘要与其覆盖的历史都不再进入上下文。
+- **修剪只作用于最新摘要之后的历史**：生效的修剪截止点是最新摘要之后、`throughSeq` 最大的那次修剪；在其之前的工具结果显示为占位说明。
+- 有效历史 = 最新摘要（若有）+ 摘要之后的事件（修剪截止点之前的工具输出替换为占位）+ 被覆盖的进行中 Turn 的 `message.user` 原文。
+
+### 6.5 触发
+
+- 构建结果超过预算的某个阈值（默认 80%）时，Builder 先给出 prune 计划；修剪后仍超出，给出 summary 计划。这类压缩是预防性的（`mustCompact = false`）。
+- 请求已超出预算，或 Provider 返回 `context_overflow` 时，`mustCompact = true`（见 [agent-loop.md](agent-loop.md) 第 3.5 节）。
+- 用户可以用 `/compact` 手动触发摘要，走同一条路径。
+
+### 6.6 摘要请求本身的约束与失败处理
+
+- **摘要请求必须装得进窗口**：Builder 选择边界时保证"上一个摘要 + 待总结历史（先按修剪规则省略工具输出）+ 摘要指令"在预算内；装不下就把边界提前到更早的闭合边界；不存在任何可行边界时不给出计划。
+- **摘要输出有上限**（默认约 4,000 token），并作为有界内容写入事件。
+- **失败、超时、被中断**：不写任何压缩事件，会话历史不变。
+  - 预防性压缩失败：本 Step 照常使用未压缩的上下文，并发出 `runtime.warning`；本 Turn 内不再尝试预防性压缩，避免每个 Step 重复失败。
+  - 必须压缩却失败（或没有可行边界）：Turn 以 `error` 结束，`error.code = "compaction_failed"`，提示用户手动 `/compact` 或切换到更大窗口的模型。
+- 摘要请求遵守与普通请求相同的重试规则，但只尝试一轮，不嵌套压缩。
+
+### 6.7 阶段安排
+
+Phase 2 提供自动修剪与手动 `/compact`；Phase 3 加入自动摘要。之前的阶段遇到超长上下文时明确报错并提示用户，而不是静默截断。
+
+## 7. 切换模型或 Provider
+
+历史中的内容大多是中性的（文本、工具调用、工具结果），可以直接用于新模型。例外：
+
+- 推理内容若携带 Provider 专有数据（签名、加密内容），只能回传给产生它的 Provider；切换后 Builder 丢弃这类推理块，只保留普通文本。
+- 新模型不支持的输入类型（例如图片）替换为文字占位。
+- 新模型窗口更小时，按第 6 节的规则压缩。
+
+这些判断依据 `ModelInfo.capabilities` 与内容块上记录的来源 Provider，而不是按 Provider 名字写分支。
+
+## 8. 暂不设计
+
+仓库地图（repo map）、语义检索、长期记忆、跨会话知识。它们将来作为新的上下文来源（section）接入第 3 节的顺序中，并在 `ContextReport` 中可见。

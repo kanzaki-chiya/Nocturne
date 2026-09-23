@@ -1,0 +1,156 @@
+# Agent Loop
+
+> 状态：已接受 v0.2 ｜ 前置阅读：[overview.md](overview.md) ｜ 相关契约：[events.md](../protocols/events.md)、[tool-api.md](../protocols/tool-api.md)、[provider-api.md](../protocols/provider-api.md)
+
+本文定义一次 Turn 从开始到结束的完整流程。Agent Loop 只做编排：它不知道工具的具体行为、不知道 Provider 的协议、不知道权限规则、也不知道界面如何显示。
+
+## 1. Turn 的边界
+
+- **开始**：客户端调用 `session.submit(input)`，会话处于空闲状态。Runtime 写入 `turn.started` 与 `message.user`。
+- **进行中**：若干个 Step。每个 Step 是一次模型请求；模型返回工具调用时执行工具，然后进入下一个 Step。
+- **结束**：写入 `turn.completed`。`reason` 的取值与含义见 [events.md](../protocols/events.md) 第 3.1 节。**任何出口**在写入 `turn.completed` 之前，都必须先结算本 Turn 中所有尚未结算的工具调用（第 2 节的 `finish`）。
+
+MVP 中会话同一时间只有一个 Turn。Turn 进行中再次 `submit` 会被拒绝（`session_busy`）；CLI 在 Turn 期间只接受中断。运行中追加指令（steering）和输入排队属于后续设计。
+
+## 2. 伪代码
+
+以下为设计说明，不是实现代码。所有 `emit` 持久化事件都会等待日志写入完成；写入失败时抛出 `PersistenceError`，处理见第 3.6 节。
+
+```text
+runTurn(session, input, signal):
+  emit turn.started, message.user(input)
+  step = 0
+
+  loop:
+    if signal.aborted:           return finish("aborted")
+    if step >= config.maxSteps:  return finish("max_steps")
+    step += 1
+
+    # 1. 构建上下文（纯计算）；需要压缩时执行压缩计划后重建
+    built = contextBuilder.build(session.state, tools.specs(), model)
+    if built.compaction:
+      ok = runCompaction(built.compaction, signal)       # 见第 3.7 节
+      if not ok and built.mustCompact: return finish("error", compaction_failed)
+      built = contextBuilder.build(session.state, tools.specs(), model)
+    if built.overBudget:         return finish("error", context_overflow)
+
+    # 2. 调用模型并消费流
+    messageId = newId()
+    result = streamWithRetry(provider, built.request, signal):
+      text / reasoning 增量 → emit message.assistant.delta（临时）
+      tool_call             → 分配 callId，记录 providerCallId
+      usage / finish        → 记录
+    emit message.assistant(messageId, content, toolCalls, usage, finishReason)
+
+    # 3. 按结束原因决定去向（在执行任何工具之前）
+    switch result.finishReason:
+      "aborted"        → return finish("aborted")          # 流式中被中断；不完整的工具调用已丢弃
+      "length"         → return finish("truncated")
+      "content_filter" → return finish("refused")
+      "stop"           → if toolCalls is empty: return finish("done")
+      "tool_calls"     → if toolCalls is empty: return finish("error", unexpected_finish)
+      "other"          → return finish("error", unexpected_finish)
+    # 只有 stop / tool_calls 且存在工具调用时才会走到这里
+
+    # 4. 按模型给出的顺序执行工具
+    for call in toolCalls:
+      if signal.aborted: break
+      outcome = toolExecutor.execute(call, scope(session, signal))
+      # execute 内部：校验 → 解析资源 → 权限（可能等待用户）→ tool.started → 执行 → 归一化 → tool.completed
+      if outcome.stopTurn: return finish("aborted")         # 用户选择"拒绝并停止"；剩余调用由 finish 结算
+    if signal.aborted: return finish("aborted")
+    # 回到循环顶部：工具结果已写入会话，下一次 build 会把它们带给模型
+
+finish(reason, error?):
+  for call in session.state.unsettledCalls(turnId):         # 本 Turn 中还没有 tool.completed 的调用
+    emit tool.completed(call, status = "cancelled", error = { code: cancelCode(reason) })
+  emit turn.completed(reason, steps, usage, error)
+```
+
+`finish` 是 Turn 的唯一出口。第 3 步中因 `length` 等原因结束时，该 assistant 消息里的工具调用同样由 `finish` 记为 `cancelled`，因此"每个调用恰好一个 `tool.completed`"在所有出口上都成立。
+
+## 3. 关键行为
+
+### 3.1 工具结果如何回到模型
+
+工具结果不经由内存中的"消息数组"传回，而是：`tool.completed` 写入会话 → `SessionState` 折叠出历史 → 下一个 Step 由 Context Builder 重新构建请求。内存状态与持久化状态始终一致，恢复会话时不需要额外逻辑。
+
+### 3.2 一个 Step 返回多个工具调用
+
+- 按模型给出的顺序执行，结果按同样顺序记录；每个调用都有且只有一个 `tool.completed`（包括拒绝、取消、失败）。
+- 工具调用的标识是 Runtime 分配的 `callId`（会话内唯一）。Provider 返回的 ID 只保证在一次响应内唯一，不同 Step 可能重复（例如都叫 `call_1`），因此只作为 `providerCallId` 保存，用于回传 Provider。
+- MVP 串行执行。之后可以把连续的、声明了 `concurrencySafe` 且权限结果为 allow 的调用并行执行，只改变 Tool Executor 的调度，不改变事件语义。
+- 权限确认一次只弹一个，按调用顺序进行。
+
+### 3.3 中断如何传播
+
+每个 Turn 持有一个 `AbortController`，其 `signal` 传给：Provider 流、Tool Executor、每个工具的 `ToolContext`、等待中的权限请求、压缩用的摘要请求。
+
+| 中断发生时 | 处理 |
+|---|---|
+| 模型流式输出中 | 停止读取流；已收到的文本写入 `finishReason = "aborted"` 的 assistant 消息；不完整的工具调用丢弃 |
+| 等待权限确认 | 权限请求以取消结束，该调用记为 `cancelled` |
+| 工具执行中 | 工具收到 signal 自行停止（shell 终止进程树）；超出宽限期由执行器放弃等待；记为 `cancelled` |
+| 同一 Step 中尚未开始的调用 | 由 `finish` 记为 `cancelled` |
+| 压缩的摘要请求中 | 放弃摘要，不写压缩事件 |
+
+中断以 `turn.completed(reason="aborted")` 收尾，会话回到空闲状态，可以继续对话。
+
+### 3.4 错误的分类
+
+| 类别 | 来源 | 处理 | 是否结束 Turn |
+|---|---|---|---|
+| 工具失败 | 工具返回 `status: "error"`、输入校验失败、工具不存在、超时 | 作为工具结果（`isError`）交给模型，模型可以自我修正 | 否 |
+| 权限拒绝 | 规则 deny 或用户拒绝 | 作为工具结果交给模型，附带理由和用户反馈 | 否（"拒绝并停止"时是） |
+| 模型未正常结束 | `length`、`content_filter`、意外的结束原因 | 分别以 `truncated`、`refused`、`error` 结束 | 是 |
+| Provider 错误 | `ProviderError` | 可重试的按策略重试；否则结束 | 重试耗尽或不可重试时是 |
+| 中断 | 用户 | 见 3.3 | 是 |
+| 持久化失败 | 日志写入失败 | 见 3.6 | 是（会话进入 `failed`） |
+| Runtime 内部错误 | 代码缺陷、不变量被破坏 | 记录错误并结束 Turn；不把内部堆栈交给模型 | 是 |
+
+工具的异常必须在 Tool Executor 内转换为工具结果；Provider 的错误必须被适配器归一化为 `ProviderError`，Agent Loop 只看 `kind` 与 `retryable`，不解析错误文本。
+
+### 3.5 重试
+
+- 只有在**本次请求尚未产生任何输出事件**时才重试，避免重复的文本和工具调用。已经开始流式输出后失败，已收到的文本按中断同样的方式保存，Turn 以 `error` 结束。
+- 仅当 `ProviderError.retryable` 为真时重试；指数退避，优先遵守 `retryAfterMs`；次数上限可配置（默认 4 次）。每次重试发出临时事件 `provider.retry`。
+- `context_overflow` 不重试同一请求，而是要求 Context Builder 给出压缩计划（`mustCompact`）并重建一次；仍失败则以 `error` 结束。
+
+### 3.6 持久化失败
+
+任何持久化事件写入失败，会话进入 `failed` 状态（[sessions.md](sessions.md) 第 5 节）：Agent Loop 立即停止，不再发起模型请求、不再开始工具执行，也**不再尝试写入** `tool.completed` 或 `turn.completed`。未结算的调用与未结束的 Turn 留给下次恢复时的修复逻辑处理。这是 `finish` 唯一不执行的情况，因为此时已无法可靠写入。
+
+### 3.7 压缩的执行
+
+Context Builder 是纯计算，不调用 Provider。需要压缩时它返回压缩计划，由 Agent Loop 执行：
+
+- `prune` 计划：直接写入 `context.compacted(kind="prune")`。
+- `summary` 计划：用计划中给出的摘要请求调用 Provider（同样受中断信号与重试规则约束），成功后写入 `context.compacted(kind="summary")`；失败、超时或被中断时不写任何压缩事件。
+
+计划的边界规则、叠加方式与失败处理见 [context.md](context.md) 第 6 节。
+
+### 3.8 步数上限
+
+`maxSteps`（默认 100，可配置）是防止失控循环的安全阀。达到上限时 Turn 以 `max_steps` 结束，用户可以发送"继续"开启新 Turn。重复调用检测作为后续改进。
+
+## 4. 运行状态
+
+Agent Loop 通过临时事件 `runtime.status` 告知客户端当前状态：
+
+```text
+idle ──submit──▶ thinking ──工具调用──▶ running_tool ──ask──▶ waiting_permission
+  ▲                 │  ▲                     │                      │
+  │                 │  └──────下一个 Step─────┘◀────────回复──────────┘
+  └──turn.completed─┘   retrying（Provider 重试等待中）  compacting（执行摘要）
+                        failed（持久化失败，见 3.6）
+```
+
+状态是派生信息，丢失不影响正确性。
+
+## 5. 明确不在 Agent Loop 中的内容
+
+- 按工具名或 Provider 名的分支；
+- "是否需要确认"的判断；
+- 渲染、颜色、spinner；
+- 持久化格式；
+- 计划模式、目标管理、定时任务等产品功能（将来若需要，作为独立模块通过工具或事件接入）。
