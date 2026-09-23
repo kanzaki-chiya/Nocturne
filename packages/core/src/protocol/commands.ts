@@ -28,4 +28,11 @@ export type ClientCommand =
  * 进程内调用以带 code 的错误报告，将来 RPC 序列化为响应字段。
  */
 export type CommandRejectCode =
-  "session_busy" | "unknown_request" | "session_failed" | "invalid_command";
+  | "session_busy"
+  | "unknown_request"
+  | "session_failed"
+  | "invalid_command"
+  | "invalid_model"
+  | "compaction_in_progress"
+  | "compaction_interrupted"
+  | "compaction_failed";

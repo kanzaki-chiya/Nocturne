@@ -3,16 +3,27 @@
  * 客户端看到的全部能力都经由这里；进程内与将来的 RPC 客户端共用同一份语义（ADR-0002）。
  */
 import { DEFAULT_TURN_CONFIG, runTurn, type TurnConfig, type TurnDeps } from "./agent/index.js";
-import type { EnvironmentInfo, InstructionFile, InstructionSet } from "./context/index.js";
+import {
+  buildContext,
+  buildSummaryRequest,
+  chooseSummaryBoundary,
+  type BuiltContext,
+  type EnvironmentInfo,
+  type InstructionFile,
+  type InstructionSet,
+} from "./context/index.js";
 import { createDefaultPolicy, type PermissionPolicy } from "./permission/index.js";
 import { createPlatform, type Platform } from "./platform/index.js";
 import {
   createOpenAICompatibleProvider,
   createProviderRegistry,
+  UnknownModelError,
+  type ModelInfo,
   type ModelOverride,
   type OpenAICompatibleConfig,
   type Provider,
   type ProviderRegistry,
+  type ResolvedModel,
 } from "./provider/index.js";
 import type {
   CommandRejectCode,
@@ -24,6 +35,7 @@ import type {
 } from "./protocol/index.js";
 import {
   createSessionStore,
+  SessionError,
   type Session,
   type SessionState,
   type SessionStore,
@@ -123,6 +135,20 @@ export interface RuntimeSession {
    * Phase 2 被忽略（不产生持久授权）。
    */
   respondPermission(requestId: string, reply: PermissionReply): Promise<void>;
+  /**
+   * 切换模型（events.md 第 7 节）：会话空闲时生效，写入
+   * session.config_changed；未知 provider/model 拒绝 invalid_model。
+   */
+  setModel(model: string | ModelRef): Promise<void>;
+  /**
+   * 手动压缩（context.md 6.2/6.6）：一次模型调用生成 L2 摘要，
+   * 写入 context.compacted(kind="summary")。Turn 进行中拒绝 session_busy，
+   * 已有压缩进行中拒绝 compaction_in_progress，被中断拒绝
+   * compaction_interrupted；失败不写任何事件、历史不变。
+   */
+  compact(): Promise<void>;
+  /** 当前上下文构建结果与报告（cli.md /context 命令的数据来源） */
+  describeContext(): BuiltContext;
   close(): Promise<void>;
 }
 
@@ -130,6 +156,8 @@ export interface Runtime {
   createSession(options: CreateSessionOptions): Promise<RuntimeSession>;
   resumeSession(id: string): Promise<RuntimeSession>;
   listSessions(filter?: { cwd?: string | undefined }): Promise<SessionSummary[]>;
+  /** 全部已配置 Provider 声明的模型清单（cli.md /model 的数据来源） */
+  listModels(): ModelInfo[];
 }
 
 function parseModelRef(model: string | ModelRef): ModelRef {
@@ -189,7 +217,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   function wrapSession(session: Session): RuntimeSession {
     const modelRef = session.state().config.model;
-    const model = registry.resolve(modelRef);
+    // setModel 会替换该引用；submit 读取的是调用时刻的值
+    let model: ResolvedModel = registry.resolve(modelRef);
     // gate 按会话持有：等待中的权限请求与会话绑定，respondPermission 按会话路由
     const gate: PermissionGate = createPolicyGate(policy, { interactive });
     const execEnv: ExecutionEnvironment = {
@@ -198,12 +227,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       readState: createReadStateStore(paths),
     };
     let controller: AbortController | undefined;
+    let compactController: AbortController | undefined;
 
     const assertUsable = () => {
       if (session.health !== "ok") {
         throw new RuntimeCommandError("session_failed", "会话已处于 failed 状态");
       }
     };
+    const busy = () => controller !== undefined && !controller.signal.aborted;
 
     return {
       id: session.id,
@@ -212,6 +243,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       subscribe: (listener) => session.subscribe(listener),
       interrupt() {
         controller?.abort();
+        // 压缩是 Turn 之外的会话级活动，interrupt 同样中止它
+        compactController?.abort();
       },
       respondPermission(requestId, reply) {
         if (gate.respond?.(requestId, reply) === true) {
@@ -221,8 +254,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       async submit(input) {
         assertUsable();
-        if (controller !== undefined && !controller.signal.aborted) {
-          throw new RuntimeCommandError("session_busy", "已有运行中的 Turn");
+        if (busy() || compactController !== undefined) {
+          throw new RuntimeCommandError("session_busy", "会话正忙（Turn 或压缩进行中）");
         }
         const content: ContentBlock[] = input.content ?? [{ type: "text", text: input.text ?? "" }];
         const ac = new AbortController();
@@ -248,9 +281,105 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           if (controller === ac) controller = undefined;
         }
       },
+      async setModel(input) {
+        assertUsable();
+        if (busy() || compactController !== undefined) {
+          throw new RuntimeCommandError("session_busy", "会话正忙，不能切换模型");
+        }
+        const ref = parseModelRef(input);
+        let resolved: ResolvedModel;
+        try {
+          resolved = registry.resolve(ref);
+        } catch (e) {
+          if (e instanceof UnknownModelError) {
+            throw new RuntimeCommandError("invalid_model", e.message);
+          }
+          throw e;
+        }
+        // Provider 声明了模型清单时校验模型名在清单内（events.md：未知 model → invalid_model）
+        const declared = resolved.provider.models();
+        if (declared.length > 0 && !declared.some((m) => m.ref.model === ref.model)) {
+          throw new RuntimeCommandError(
+            "invalid_model",
+            `Provider ${ref.provider} 未声明模型 ${ref.model}`,
+          );
+        }
+        await session.emit("session.config_changed", { model: ref });
+        model = resolved;
+      },
+      async compact() {
+        assertUsable();
+        if (busy()) {
+          throw new RuntimeCommandError("session_busy", "Turn 运行中，不能压缩");
+        }
+        if (compactController !== undefined) {
+          throw new RuntimeCommandError("compaction_in_progress", "已有压缩在进行中");
+        }
+        const ac = new AbortController();
+        compactController = ac;
+        session.emitEphemeral("runtime.status", { status: "compacting" });
+        try {
+          const events = session.durableEvents();
+          const history = session.state().history;
+          const boundary = chooseSummaryBoundary(events, history, model.model);
+          if (boundary === undefined) {
+            throw new RuntimeCommandError(
+              "compaction_failed",
+              "没有可行的压缩边界（历史为空，或摘要请求在任何边界下都装不进窗口）",
+            );
+          }
+          const request = buildSummaryRequest({
+            history,
+            model: model.model,
+            throughSeq: boundary,
+          });
+          // context.md 6.6：摘要请求只尝试一轮，不嵌套压缩
+          let summary = "";
+          for await (const ev of model.provider.stream(request, ac.signal)) {
+            if (ev.type === "text_delta") summary += ev.text;
+            if (ev.type === "finish") break;
+          }
+          if (summary.trim().length === 0) {
+            throw new RuntimeCommandError("compaction_failed", "摘要结果为空");
+          }
+          await session.emit(
+            "context.compacted",
+            { kind: "summary", throughSeq: boundary, summary },
+            {},
+          );
+        } catch (e) {
+          if (ac.signal.aborted) {
+            // 中断：不写任何事件，历史不变（context.md 6.6）
+            throw new RuntimeCommandError("compaction_interrupted", "压缩被中断");
+          }
+          if (e instanceof RuntimeCommandError) throw e;
+          if (e instanceof SessionError) {
+            throw new RuntimeCommandError("session_failed", e.message);
+          }
+          throw new RuntimeCommandError(
+            "compaction_failed",
+            e instanceof Error ? e.message : String(e),
+          );
+        } finally {
+          compactController = undefined;
+          session.emitEphemeral("runtime.status", { status: "idle" });
+        }
+      },
+      describeContext() {
+        const state = session.state();
+        return buildContext({
+          history: state.history,
+          model: model.model,
+          tools: tools.specs(),
+          instructions,
+          environment,
+          events: session.durableEvents(),
+        });
+      },
       async close() {
         // 先结算等待中的权限请求为 cancelled，避免其挂住 Turn
         gate.cancelAll?.();
+        compactController?.abort();
         await session.close();
       },
     };
@@ -274,6 +403,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return wrapSession(session);
     },
     listSessions: (filter) => store.list(filter),
+    listModels: () => registry.providers().flatMap((p) => p.models()),
   };
 }
 

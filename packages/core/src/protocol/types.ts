@@ -124,6 +124,11 @@ export type HistoryEntry =
       name: string;
       status: ToolCallStatus;
       modelContent: string;
+      /**
+       * 参数摘要（来自 tool.started.input 的折叠，events.md 第 8 节兼容字段）；
+       * L1 修剪后用作占位说明的一部分（context.md 6.5）
+       */
+      inputSummary?: string | undefined;
     }
   | {
       kind: "compaction";

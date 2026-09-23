@@ -9,7 +9,12 @@ import {
   type Runtime,
   type RuntimeSession,
 } from "../src/index.js";
-import { FakeProvider, type FakeScript } from "../src/provider/index.js";
+import {
+  FakeProvider,
+  ProviderError,
+  type FakeScript,
+  type ModelInfo,
+} from "../src/provider/index.js";
 import type { RuntimeEvent } from "../src/protocol/index.js";
 
 const tmpRoots: string[] = [];
@@ -27,17 +32,22 @@ function makeTmpDir(prefix: string): string {
 }
 
 async function makeRuntime(
-  scripts: FakeScript[][] | FakeScript[] | undefined,
+  scripts: FakeScript[] | undefined,
   ws?: string,
-  extra?: { interactive?: boolean; autoApproveAsk?: boolean },
+  extra?: {
+    interactive?: boolean;
+    autoApproveAsk?: boolean;
+    provider?: FakeProvider;
+    providers?: FakeProvider[];
+  },
 ): Promise<{ runtime: Runtime; ws: string; provider: FakeProvider }> {
   const workspace = ws ?? makeTmpDir("nct-rt-ws-");
   const sessionsDir = makeTmpDir("nct-rt-sessions-");
-  const provider = new FakeProvider({ scripts: scripts as FakeScript[] | undefined });
+  const provider = extra?.provider ?? new FakeProvider({ scripts });
   const runtime = await createRuntime({
     cwd: workspace,
     sessionsDir,
-    providers: [provider],
+    providers: extra?.providers ?? [provider],
     interactive: extra?.interactive,
     permissions: extra?.autoApproveAsk === true ? { autoApproveAsk: true } : undefined,
   });
@@ -456,6 +466,327 @@ describe("ask 权限流程（Phase 2 default 预设）", () => {
     });
     const reason = await session.submit({ text: "write" });
     expect(reason).toBe("aborted");
+    await session.close();
+  });
+});
+
+describe("上下文与运行时命令（Phase 2）", () => {
+  const tinyModel: ModelInfo = {
+    ref: { provider: "fake", model: "tiny" },
+    contextWindow: 8_000,
+    maxOutputTokens: 256,
+    capabilities: {
+      toolCalls: true,
+      parallelToolCalls: true,
+      reasoning: "none",
+      imageInput: false,
+      promptCache: false,
+    },
+  };
+
+  it("L1 修剪：超阈值时写 context.compacted(prune)，工具结果以占位说明回模型", async () => {
+    const ws = makeTmpDir("nct-rt-prune-");
+    writeFileSync(path.join(ws, "big.txt"), "x".repeat(20_000));
+    const provider = new FakeProvider({
+      models: [tinyModel],
+      scripts: [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "r1",
+            name: "read",
+            input: { path: "big.txt" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, ws, { provider });
+    const session = await runtime.createSession({ model: "fake/tiny" });
+    const events = collect(session);
+    const reason = await session.submit({ text: "read big" });
+
+    expect(reason).toBe("done");
+    const compacted = events.find((e) => e.type === "context.compacted");
+    expect(compacted?.type === "context.compacted" && compacted.payload.kind).toBe("prune");
+    // 修剪后的请求里，工具结果是占位说明而非原文
+    const req2 = provider.requests[1];
+    const toolMsg = req2?.messages.find((m) => m.role === "tool");
+    expect(toolMsg?.role === "tool" && toolMsg.content).toContain("输出已省略");
+    expect(toolMsg?.role === "tool" && toolMsg.content).not.toContain("xxxx");
+    // 修剪事件持久化：折叠后的历史带 inputSummary
+    const toolEntry = session.state().history.find((h) => h.kind === "tool");
+    expect(toolEntry?.kind === "tool" && toolEntry.inputSummary).toContain("path=");
+    await session.close();
+  });
+
+  it("超预算且无可行边界：Turn 以 error(compaction_failed) 结束", async () => {
+    const impossible: ModelInfo = { ...tinyModel, contextWindow: 500 };
+    const provider = new FakeProvider({
+      models: [impossible],
+      scripts: [[{ type: "finish", reason: "stop" }]],
+    });
+    const { runtime } = await makeRuntime(undefined, undefined, { provider });
+    const session = await runtime.createSession({ model: "fake/tiny" });
+    const events = collect(session);
+    const reason = await session.submit({ text: "hi" });
+
+    expect(reason).toBe("error");
+    const done = events.find((e) => e.type === "turn.completed");
+    expect(done?.type === "turn.completed" && done.payload.error?.code).toBe("compaction_failed");
+    await session.close();
+  });
+
+  it("Provider context_overflow：存在边界时先 prune 再重试", async () => {
+    const ws = makeTmpDir("nct-rt-ovf-");
+    writeFileSync(path.join(ws, "big.txt"), "y".repeat(20_000));
+    const provider = new FakeProvider({
+      scripts: [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "r1",
+            name: "read",
+            input: { path: "big.txt" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "context_overflow", message: "too many tokens" }),
+          },
+        ],
+        [
+          { type: "text_delta", text: "ok" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, ws, { provider });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    const reason = await session.submit({ text: "go" });
+
+    expect(reason).toBe("done");
+    expect(provider.requests).toHaveLength(3);
+    const compacted = events.find((e) => e.type === "context.compacted");
+    expect(compacted?.type === "context.compacted" && compacted.payload.kind).toBe("prune");
+    const req3 = provider.requests[2];
+    const toolMsg = req3?.messages.find((m) => m.role === "tool");
+    expect(toolMsg?.role === "tool" && toolMsg.content).toContain("输出已省略");
+    await session.close();
+  });
+
+  it("compact()：一次模型调用写 context.compacted(summary)，历史被折叠", async () => {
+    const provider = new FakeProvider({
+      scripts: [
+        [
+          { type: "text_delta", text: "首轮回复" },
+          { type: "finish", reason: "stop" },
+        ],
+        // compact 的摘要调用
+        [
+          { type: "text_delta", text: "摘要：用户要求打招呼，已回复。" },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "text_delta", text: "第二轮" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, undefined, { provider });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "hi" });
+
+    await session.compact();
+    const compacted = events.find((e) => e.type === "context.compacted");
+    expect(compacted?.type === "context.compacted" && compacted.payload.kind).toBe("summary");
+    expect(compacted?.type === "context.compacted" && compacted.payload.summary).toContain("摘要");
+    // 摘要请求拿到了转录文本
+    const summaryReq = provider.requests[1];
+    expect(summaryReq?.tools).toHaveLength(0);
+    const userMsg = summaryReq?.messages.find((m) => m.role === "user");
+    expect(userMsg?.role === "user" && JSON.stringify(userMsg.content)).toContain("hi");
+
+    // 后续请求只携带摘要，不重复原文
+    await session.submit({ text: "again" });
+    const req3 = provider.requests[2];
+    const texts = JSON.stringify(req3?.messages);
+    expect(texts).toContain("会话历史摘要");
+    await session.close();
+  });
+
+  it("compact 并发约束：Turn 进行中 session_busy；压缩进行中 compaction_in_progress", async () => {
+    const provider = new FakeProvider({
+      handler: async () => {
+        await new Promise((r) => setTimeout(r, 120));
+        return [
+          { type: "text_delta", text: "s" },
+          { type: "finish", reason: "stop" },
+        ];
+      },
+    });
+    const { runtime } = await makeRuntime(undefined, undefined, { provider });
+    const session = await makeSession(runtime);
+    await session.submit({ text: "seed" });
+
+    // Turn 进行中
+    const turn = session.submit({ text: "busy" });
+    await expect(session.compact()).rejects.toMatchObject({ code: "session_busy" });
+    await turn;
+
+    // 压缩进行中（compacting 状态在 compact() 调用内同步发出，先订阅再启动）
+    const compacting = new Promise<void>((resolve) => {
+      const unsub = session.subscribe((e) => {
+        if (e.type === "runtime.status" && e.payload.status === "compacting") {
+          unsub();
+          resolve();
+        }
+      });
+    });
+    const first = session.compact();
+    await compacting;
+    await expect(session.compact()).rejects.toMatchObject({
+      code: "compaction_in_progress",
+    });
+    await first;
+    await session.close();
+  });
+
+  it("interrupt 中断 compact：compaction_interrupted，不写任何压缩事件", async () => {
+    const provider = new FakeProvider({
+      handler: async (_req, i) => {
+        if (i === 0) {
+          return [
+            { type: "text_delta", text: "seed" },
+            { type: "finish", reason: "stop" },
+          ];
+        }
+        await new Promise((r) => setTimeout(r, 300));
+        return [
+          { type: "text_delta", text: "late" },
+          { type: "finish", reason: "stop" },
+        ];
+      },
+    });
+    const { runtime } = await makeRuntime(undefined, undefined, { provider });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "seed" });
+
+    session.subscribe((e) => {
+      if (e.type === "runtime.status" && e.payload.status === "compacting") {
+        session.interrupt();
+      }
+    });
+    await expect(session.compact()).rejects.toMatchObject({
+      code: "compaction_interrupted",
+    });
+    expect(events.some((e) => e.type === "context.compacted")).toBe(false);
+    // 会话仍可继续使用
+    const reason = await session.submit({ text: "after" });
+    expect(reason).toBe("done");
+    await session.close();
+  });
+
+  it("setModel：config_changed + 后续请求走新模型；未知模型 invalid_model", async () => {
+    const p1 = new FakeProvider({
+      id: "fake",
+      models: [tinyModel],
+      scripts: [[{ type: "finish", reason: "stop" }]],
+    });
+    const p2 = new FakeProvider({
+      id: "fake2",
+      models: [
+        {
+          ref: { provider: "fake2", model: "m2" },
+          contextWindow: 128_000,
+          maxOutputTokens: 8_192,
+          capabilities: {
+            toolCalls: true,
+            parallelToolCalls: true,
+            reasoning: "none",
+            imageInput: false,
+            promptCache: false,
+          },
+        },
+      ],
+      scripts: [
+        [
+          { type: "text_delta", text: "from-m2" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, undefined, {
+      provider: p1,
+      providers: [p1, p2],
+    });
+    const session = await runtime.createSession({ model: "fake/tiny" });
+    const events = collect(session);
+
+    await session.setModel("fake2/m2");
+    const changed = events.find((e) => e.type === "session.config_changed");
+    expect(changed?.type === "session.config_changed" && changed.payload.model).toEqual({
+      provider: "fake2",
+      model: "m2",
+    });
+    expect(session.state().config.model).toEqual({ provider: "fake2", model: "m2" });
+
+    await session.submit({ text: "hi" });
+    expect(p2.requests).toHaveLength(1);
+    expect(p1.requests).toHaveLength(0);
+
+    await expect(session.setModel("nope/x")).rejects.toMatchObject({
+      code: "invalid_model",
+    });
+    await expect(session.setModel("fake/unknown-model")).rejects.toMatchObject({
+      code: "invalid_model",
+    });
+    await session.close();
+  });
+
+  it("setModel / compact 在 Turn 进行中拒绝 session_busy", async () => {
+    const provider = new FakeProvider({
+      handler: async () => {
+        await new Promise((r) => setTimeout(r, 120));
+        return [{ type: "finish", reason: "stop" }];
+      },
+    });
+    const { runtime } = await makeRuntime(undefined, undefined, { provider });
+    const session = await makeSession(runtime);
+    const turn = session.submit({ text: "slow" });
+    await expect(session.setModel("fake/fake-1")).rejects.toMatchObject({
+      code: "session_busy",
+    });
+    await turn;
+    await session.close();
+  });
+
+  it("describeContext 返回报告；runtime.listModels 汇总各 Provider", async () => {
+    const { runtime } = await makeRuntime([
+      [
+        { type: "text_delta", text: "hi" },
+        { type: "finish", reason: "stop" },
+      ],
+    ]);
+    const session = await makeSession(runtime);
+    await session.submit({ text: "x" });
+
+    const built = session.describeContext();
+    expect(built.report.budgetTokens).toBeGreaterThan(0);
+    expect(built.report.sections.map((s) => s.name)).toContain("history");
+    expect(built.overBudget).toBe(false);
+
+    const models = runtime.listModels();
+    expect(models.some((m) => m.ref.provider === "fake")).toBe(true);
     await session.close();
   });
 });

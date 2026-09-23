@@ -7,7 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { buildContext } from "../context/index.js";
+import { buildContext, lastClosedBoundary } from "../context/index.js";
 import { isProviderError } from "../provider/index.js";
 import type {
   ContentBlock,
@@ -138,6 +138,9 @@ export async function runTurn(
     });
   }
 
+  // context.md 6.5：预防性修剪每个 Turn 至多一次
+  let pruneAttempted = false;
+
   try {
     // ── 开始 ──
     const turnIndex = session.durableEvents().filter((e) => e.type === "turn.started").length + 1;
@@ -159,12 +162,24 @@ export async function runTurn(
         tools: deps.tools.specs(),
         instructions: deps.instructions,
         environment: deps.environment,
+        events: session.durableEvents(),
       });
+      // 6.5：估算超阈值 / 已超预算且存在可行边界 → 先执行一次 L1 修剪再重建
+      if (built.compaction !== undefined && !pruneAttempted) {
+        pruneAttempted = true;
+        status("compacting");
+        await session.emit(
+          "context.compacted",
+          { kind: "prune", throughSeq: built.compaction.throughSeq },
+          { turnId },
+        );
+        continue;
+      }
       if (built.overBudget || built.mustCompact) {
-        // Phase 1 无压缩：明确报错，不静默截断（context.md 6.7）
+        // 6.6：必须压缩却没有可行路径（Phase 2 不自动摘要）→ 明确报错
         return await finish("error", {
-          code: "context_overflow",
-          message: `上下文超出预算（估算 ${built.report.estimatedTokens} / 预算 ${built.report.budgetTokens} token）`,
+          code: "compaction_failed",
+          message: `上下文超出预算（估算 ${built.report.estimatedTokens} / 预算 ${built.report.budgetTokens} token）；请使用 /compact 压缩或切换到更大窗口的模型`,
         });
       }
 
@@ -179,6 +194,25 @@ export async function runTurn(
       if (outcome.kind === "failed") {
         await emitAssistant(outcome.acc, messageId, "aborted");
         const e = outcome.error;
+        // 6.5：Provider 报告 context_overflow → 本 Turn 尚未修剪且存在边界时，
+        // 执行一次 prune 后重建重试；否则按"必须压缩却失败"结束
+        if (isProviderError(e) && e.kind === "context_overflow") {
+          const boundary = lastClosedBoundary(session.durableEvents());
+          if (!pruneAttempted && boundary !== undefined) {
+            pruneAttempted = true;
+            status("compacting");
+            await session.emit(
+              "context.compacted",
+              { kind: "prune", throughSeq: boundary },
+              { turnId },
+            );
+            continue;
+          }
+          return await finish("error", {
+            code: "compaction_failed",
+            message: `Provider 报告上下文溢出且无可行压缩路径：${e.message}；请使用 /compact 或切换更大窗口的模型`,
+          });
+        }
         return await finish("error", {
           code: isProviderError(e) ? `provider_${e.kind}` : "provider_error",
           message: e instanceof Error ? e.message : String(e),

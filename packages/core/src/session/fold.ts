@@ -16,6 +16,26 @@ const ZERO_USAGE: Usage = {
   outputTokens: 0,
 };
 
+/**
+ * 参数摘要（context.md 6.5）：工具输入里取原始类型的字段，
+ * 每个值截断；供 L1 修剪的占位说明使用。与工具名无关的通用实现。
+ */
+const INPUT_SUMMARY_VALUE_MAX = 60;
+const INPUT_SUMMARY_MAX = 120;
+
+function summarizeInput(input: unknown): string | undefined {
+  if (input === undefined || input === null) return undefined;
+  const trunc = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+  if (typeof input === "object" && !Array.isArray(input)) {
+    const parts = Object.entries(input)
+      .filter(([, v]) => ["string", "number", "boolean"].includes(typeof v))
+      .map(([k, v]) => `${k}=${trunc(String(v), INPUT_SUMMARY_VALUE_MAX)}`);
+    if (parts.length === 0) return trunc(JSON.stringify(input), INPUT_SUMMARY_MAX);
+    return trunc(parts.join(" "), INPUT_SUMMARY_MAX);
+  }
+  return trunc(JSON.stringify(input), INPUT_SUMMARY_MAX);
+}
+
 export function foldEvents(events: readonly DurableEvent[]): SessionState {
   let meta: SessionMeta | undefined;
   let config: SessionConfig = {
@@ -26,6 +46,8 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
   const usage = { ...ZERO_USAGE };
   let openTurn: SessionState["openTurn"];
   const unsettled = new Map<string, UnsettledCall>();
+  // tool.started 的规范化输入 → 折叠成 tool 条目的 inputSummary
+  const startedInputs = new Map<string, string | undefined>();
 
   for (const event of events) {
     const turnId = event.turnId;
@@ -100,6 +122,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
       case "tool.started": {
         const existing = unsettled.get(event.payload.callId);
         if (existing !== undefined) existing.started = true;
+        startedInputs.set(event.payload.callId, summarizeInput(event.payload.input));
         break;
       }
       case "tool.completed": {
@@ -112,8 +135,10 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           name: p.name,
           status: p.status,
           modelContent: p.modelContent,
+          inputSummary: startedInputs.get(p.callId),
         });
         unsettled.delete(p.callId);
+        startedInputs.delete(p.callId);
         break;
       }
       case "context.compacted": {

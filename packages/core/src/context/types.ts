@@ -2,7 +2,7 @@
  * Context Builder 的输入与输出（context.md 第 2 节）。
  * 纯数据、不做 I/O：指令文件与环境信息由调用方（agent / 会话装配层）预先读取传入。
  */
-import type { HistoryEntry, ToolSpec } from "../protocol/index.js";
+import type { DurableEvent, HistoryEntry, ToolSpec } from "../protocol/index.js";
 import type { ModelInfo, ModelMessage, ModelRequest } from "../provider/index.js";
 
 /** 一份已加载的指令文件（AGENTS.md 等） */
@@ -42,6 +42,19 @@ export interface BuildContextInput {
   environment: EnvironmentInfo;
   /** 本次 Turn 尚未持久化的即时消息（进行中 Step 的增量历史） */
   pendingMessages?: readonly ModelMessage[] | undefined;
+  /**
+   * 会话持久化事件（session.durableEvents()）；提供后用于计算
+   * 闭合步骤边界，从而给出压缩计划（context.md 6.3/6.5）。
+   * 缺省时 Builder 无法给出压缩计划。
+   */
+  events?: readonly DurableEvent[] | undefined;
+}
+
+/** Builder 给出的压缩计划（context.md 6.2）；Phase 2 只会产生 prune */
+export interface CompactionPlan {
+  kind: "prune" | "summary";
+  /** 闭合步骤边界的 seq（context.md 6.3） */
+  throughSeq: number;
 }
 
 /** ContextReport 中的一个部分（context.md 第 4 节"可解释"） */
@@ -68,9 +81,14 @@ export interface BuiltContext {
   /** 当前请求超出可用预算 */
   overBudget: boolean;
   /**
+   * 建议或必须执行的压缩（context.md 6.5）：估算超过阈值时给出。
+   * 调用方执行后应重新构建。
+   */
+  compaction?: CompactionPlan | undefined;
+  /**
    * 不压缩就无法发出请求（context.md 6.5）。
-   * Phase 1 不实现压缩：调用方遇到 mustCompact 必须明确报错，
-   * 不得静默截断历史（context.md 6.7）。
+   * 调用方在无可行压缩计划时遇到它必须明确报错（6.6），
+   * 不得静默截断历史。
    */
   mustCompact: boolean;
 }

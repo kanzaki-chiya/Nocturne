@@ -1,11 +1,11 @@
 /**
  * Context Builder（context.md）：从会话历史组装一个装得进窗口的 ModelRequest。
  * 组装顺序（稳定前缀在前）：基础系统提示 → 工具规格 → 项目指令 → 环境信息 → 历史。
- * Phase 1 不做压缩：overBudget 时由调用方明确报错（context.md 6.7）。
+ * Phase 2：应用压缩边界（6.4），并在估算超过阈值时给出 L1 修剪计划（6.5）。
  */
-import type { ContentBlock, HistoryEntry } from "../protocol/index.js";
-import type { ModelMessage, ModelRequest, SystemBlock } from "../provider/index.js";
-import type { BuildContextInput, BuiltContext, ContextSection } from "./types.js";
+import type { ContentBlock, DurableEvent, HistoryEntry } from "../protocol/index.js";
+import type { ModelInfo, ModelMessage, ModelRequest, SystemBlock } from "../provider/index.js";
+import type { BuildContextInput, BuiltContext, CompactionPlan, ContextSection } from "./types.js";
 
 /** 单字符估算 token（context.md 第 5 节：字符数 / 4） */
 export function estimateTokens(chars: number): number {
@@ -16,6 +16,17 @@ export function estimateTokens(chars: number): number {
 const OUTPUT_RESERVE_CAP = 16_000;
 /** 安全余量（token） */
 const SAFETY_MARGIN = 1_024;
+/** 预防性修剪阈值：估算超过预算的该比例时给出 prune 计划（context.md 6.5 默认 80%） */
+const PRUNE_THRESHOLD = 0.8;
+
+/** 本次请求的可用输入预算（context.md 第 5 节） */
+export function inputBudgetTokens(
+  model: Pick<ModelInfo, "contextWindow" | "maxOutputTokens">,
+  maxOutputOverride?: number,
+): number {
+  const outputReserve = Math.min(maxOutputOverride ?? model.maxOutputTokens, OUTPUT_RESERVE_CAP);
+  return Math.max(0, model.contextWindow - outputReserve - SAFETY_MARGIN);
+}
 /** 单个指令文件的字符上限 */
 export const INSTRUCTION_FILE_MAX_CHARS = 32_000;
 
@@ -58,14 +69,88 @@ function blockChars(blocks: readonly ContentBlock[]): number {
   return n;
 }
 
+/**
+ * 全部已闭合步骤边界的 seq（context.md 6.3）：turn.completed，
+ * 或某条 message.assistant 的全部工具调用都结算后的最后一个 tool.completed。
+ * 只依赖持久化事件类型，纯函数。
+ */
+export function closedBoundaries(events: readonly DurableEvent[]): number[] {
+  const unsettled = new Set<string>();
+  const out: number[] = [];
+  for (const e of events) {
+    switch (e.type) {
+      case "message.assistant": {
+        for (const c of e.payload.toolCalls) unsettled.add(c.callId);
+        break;
+      }
+      case "tool.completed": {
+        unsettled.delete(e.payload.callId);
+        if (unsettled.size === 0) out.push(e.seq);
+        break;
+      }
+      case "turn.completed": {
+        out.push(e.seq);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
+/** 最近一个闭合步骤边界的 seq；没有任何闭合边界时返回 undefined */
+export function lastClosedBoundary(events: readonly DurableEvent[]): number | undefined {
+  return closedBoundaries(events).at(-1);
+}
+
+/**
+ * 6.4 压缩边界：最新摘要的 throughSeq（seq ≤ 它的条目被摘要覆盖）、
+ * 以及最新摘要之后最大的修剪截止（seq ≤ 它的工具结果显示为占位说明）。
+ * 不递增的压缩事件视为不变量被破坏——忽略（context.md 6.4）。
+ */
+export function compactionCutoffs(history: readonly HistoryEntry[]): {
+  summaryThrough: number;
+  pruneThrough: number;
+} {
+  let summaryThrough = 0;
+  let summarySeq = 0;
+  let pruneThrough = 0;
+  for (const e of history) {
+    if (e.kind !== "compaction") continue;
+    if (e.compactKind === "summary") {
+      if (e.throughSeq > summaryThrough) {
+        summaryThrough = e.throughSeq;
+        summarySeq = e.seq;
+        // 新摘要生效后，更早的修剪不再适用（修剪只作用于最新摘要之后）
+        pruneThrough = 0;
+      }
+    } else if (e.seq > summarySeq) {
+      pruneThrough = Math.max(pruneThrough, e.throughSeq);
+    }
+  }
+  return { summaryThrough, pruneThrough };
+}
+
+/** L1 修剪后工具结果的占位说明（context.md 6.5：保留工具名与参数摘要） */
+function prunedPlaceholder(entry: Extract<HistoryEntry, { kind: "tool" }>): string {
+  const args = entry.inputSummary !== undefined ? `（${entry.inputSummary}）` : "";
+  return `[输出已省略] 工具 ${entry.name}${args} 的结果已被 context.compacted 修剪`;
+}
+
 function historyToMessages(
   history: readonly HistoryEntry[],
   currentModelProvider: string,
 ): { messages: ModelMessage[]; chars: number; entries: number } {
   const messages: ModelMessage[] = [];
   let chars = 0;
+  let entries = 0;
+  const { summaryThrough, pruneThrough } = compactionCutoffs(history);
 
   for (const entry of history) {
+    // 被最新摘要覆盖的历史（含更早的压缩事件）不再进入上下文
+    if (entry.seq <= summaryThrough) continue;
+    entries += 1;
     switch (entry.kind) {
       case "user": {
         chars += blockChars(entry.content);
@@ -89,18 +174,18 @@ function historyToMessages(
         break;
       }
       case "tool": {
-        chars += entry.modelContent.length;
+        const content = entry.seq <= pruneThrough ? prunedPlaceholder(entry) : entry.modelContent;
+        chars += content.length;
         messages.push({
           role: "tool",
           callId: entry.callId,
           name: entry.name,
-          content: entry.modelContent,
+          content,
           isError: entry.status !== "ok",
         });
         break;
       }
       case "compaction": {
-        // Phase 1 不产生压缩事件；加载到历史日志时把摘要作为历史首条信息呈现
         if (entry.compactKind === "summary" && entry.summary !== undefined) {
           const text = `[会话历史摘要]\n${entry.summary}`;
           chars += text.length;
@@ -109,11 +194,36 @@ function historyToMessages(
             content: [{ type: "text", text }],
           });
         }
+        // prune 事件不产生消息，只改变其上界之前工具结果的呈现
         break;
       }
     }
   }
-  return { messages, chars, entries: history.length };
+  return { messages, chars, entries };
+}
+
+/**
+ * 把有效历史渲染为纯文本转录（供 L2 摘要请求使用）。
+ * 与 historyToMessages 走同一套 6.4 规则。
+ */
+export function renderTranscript(history: readonly HistoryEntry[], provider: string): string {
+  const { messages } = historyToMessages(history, provider);
+  const lines: string[] = [];
+  const blocksText = (blocks: readonly ContentBlock[]) => blocks.map((b) => b.text).join("\n");
+  for (const m of messages) {
+    if (m.role === "user") {
+      lines.push(`[user]\n${blocksText(m.content)}`);
+    } else if (m.role === "assistant") {
+      const parts = [blocksText(m.content)];
+      for (const c of m.toolCalls) {
+        parts.push(`调用工具 ${c.name}(${JSON.stringify(c.input ?? {})})`);
+      }
+      lines.push(`[assistant]\n${parts.filter((p) => p.length > 0).join("\n")}`);
+    } else {
+      lines.push(`[tool ${m.name}${m.isError ? " error" : ""}] ${m.content}`);
+    }
+  }
+  return lines.join("\n\n");
 }
 
 export function buildContext(input: BuildContextInput): BuiltContext {
@@ -189,11 +299,22 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   });
 
   // 预算（context.md 第 5 节）
-  const outputReserve = Math.min(model.maxOutputTokens, OUTPUT_RESERVE_CAP);
-  const budgetTokens = Math.max(0, model.contextWindow - outputReserve - SAFETY_MARGIN);
+  const budgetTokens = inputBudgetTokens(model);
   const totalChars = sections.reduce((a, s) => a + s.chars, 0);
   const estimated = sections.reduce((a, s) => a + s.estimatedTokens, 0);
   const overBudget = estimated > budgetTokens;
+
+  // 6.5：估算超过阈值（或已超预算）且存在新的闭合边界 → 给出 L1 修剪计划
+  const { summaryThrough, pruneThrough } = compactionCutoffs(input.history);
+  const boundary = input.events !== undefined ? lastClosedBoundary(input.events) : undefined;
+  let compaction: CompactionPlan | undefined;
+  if (
+    boundary !== undefined &&
+    boundary > Math.max(summaryThrough, pruneThrough) &&
+    estimated > PRUNE_THRESHOLD * budgetTokens
+  ) {
+    compaction = { kind: "prune", throughSeq: boundary };
+  }
 
   const request: ModelRequest = {
     model: model.ref.model,
@@ -214,7 +335,9 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       budgetTokens,
     },
     overBudget,
-    // Phase 1 无压缩：超预算即无法发出请求
+    // 调用方先执行 compaction（若有），执行后重建；无计划可用且仍超预算
+    // 才进入 6.6 的"必须压缩却失败"路径
+    compaction,
     mustCompact: overBudget,
   };
 }

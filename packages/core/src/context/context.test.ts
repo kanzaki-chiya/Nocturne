@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import type { HistoryEntry } from "../protocol/index.js";
+import type { DurableEvent, HistoryEntry } from "../protocol/index.js";
 import type { ModelInfo } from "../provider/index.js";
-import { buildContext, estimateTokens } from "./index.js";
+import {
+  buildContext,
+  buildSummaryRequest,
+  chooseSummaryBoundary,
+  closedBoundaries,
+  estimateTokens,
+  renderTranscript,
+} from "./index.js";
 import type { BuildContextInput } from "./index.js";
 
 const model: ModelInfo = {
@@ -195,5 +202,241 @@ describe("estimateTokens", () => {
     expect(estimateTokens(1)).toBe(1);
     expect(estimateTokens(4)).toBe(1);
     expect(estimateTokens(5)).toBe(2);
+  });
+});
+
+/** 构造持久化事件的简便助手（字段只填断言所需的） */
+function ev(
+  seq: number,
+  type: DurableEvent["type"],
+  payload: Record<string, unknown>,
+): DurableEvent {
+  return {
+    type,
+    sessionId: "s",
+    seq,
+    time: "t",
+    payload,
+  } as unknown as DurableEvent;
+}
+
+describe("压缩边界与有效历史（context.md 6.3/6.4）", () => {
+  const toolEntry = (seq: number, content: string): HistoryEntry => ({
+    kind: "tool",
+    seq,
+    turnId: "t",
+    callId: `c${seq}`,
+    name: "read",
+    status: "ok",
+    modelContent: content,
+    inputSummary: "path=a.txt",
+  });
+  const assistantEntry = (seq: number, callIds: string[] = []): HistoryEntry => ({
+    kind: "assistant",
+    seq,
+    turnId: "t",
+    messageId: `a${seq}`,
+    model: { provider: "test", model: "m1" },
+    content: [{ type: "text", text: "ok" }],
+    toolCalls: callIds.map((callId) => ({ callId, name: "read" })),
+    usage: undefined,
+    finishReason: callIds.length > 0 ? "tool_calls" : "stop",
+  });
+
+  it("closedBoundaries：turn.completed 与全部结算的 tool.completed", () => {
+    const events = [
+      ev(1, "session.created", {}),
+      ev(2, "turn.started", { turnIndex: 1 }),
+      ev(3, "message.assistant", { toolCalls: [{ callId: "c1" }, { callId: "c2" }] }),
+      ev(4, "tool.completed", { callId: "c1" }), // 仍有未结算调用，不是边界
+      ev(5, "tool.completed", { callId: "c2" }), // 全部结算 → 边界
+      ev(6, "turn.completed", {}),
+      ev(7, "turn.started", { turnIndex: 2 }),
+    ];
+    expect(closedBoundaries(events)).toEqual([5, 6]);
+  });
+
+  it("prune：throughSeq 及之前的工具结果替换为占位说明", () => {
+    const history: HistoryEntry[] = [
+      toolEntry(3, "x".repeat(5000)),
+      {
+        kind: "compaction",
+        seq: 4,
+        turnId: "t",
+        compactKind: "prune",
+        throughSeq: 3,
+        summary: undefined,
+      },
+      toolEntry(5, "新结果"),
+    ];
+    const built = buildContext(baseInput({ history }));
+    const msgs = built.request.messages.filter((m) => m.role === "tool");
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]?.role === "tool" && msgs[0].content).toContain("输出已省略");
+    expect(msgs[0]?.role === "tool" && msgs[0].content).toContain("path=a.txt");
+    expect(msgs[1]?.role === "tool" && msgs[1].content).toBe("新结果");
+  });
+
+  it("summary：throughSeq 及之前的条目被丢弃，摘要文本成为历史首条", () => {
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u",
+        content: [{ type: "text", text: "旧输入" }],
+      },
+      toolEntry(2, "旧结果"),
+      {
+        kind: "compaction",
+        seq: 3,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 2,
+        summary: "此前进展摘要",
+      },
+      toolEntry(4, "新结果"),
+    ];
+    const built = buildContext(baseInput({ history }));
+    const msgs = built.request.messages;
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]?.role === "user" && JSON.stringify(msgs[0].content)).toContain("此前进展摘要");
+    expect(JSON.stringify(msgs)).not.toContain("旧输入");
+    expect(JSON.stringify(msgs)).not.toContain("旧结果");
+  });
+
+  it("最新摘要之后的新修剪才生效；摘要前的修剪被忽略", () => {
+    const history: HistoryEntry[] = [
+      toolEntry(1, "A"),
+      {
+        kind: "compaction",
+        seq: 2,
+        turnId: "t",
+        compactKind: "prune",
+        throughSeq: 1,
+        summary: undefined,
+      },
+      {
+        kind: "compaction",
+        seq: 3,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 2,
+        summary: "S",
+      },
+      toolEntry(4, "B"),
+      {
+        kind: "compaction",
+        seq: 5,
+        turnId: "t",
+        compactKind: "prune",
+        throughSeq: 4,
+        summary: undefined,
+      },
+      toolEntry(6, "C"),
+    ];
+    const built = buildContext(baseInput({ history }));
+    const text = JSON.stringify(built.request.messages);
+    expect(text).not.toContain('"A"'); // 被摘要覆盖
+    expect(text).toContain("输出已省略"); // seq4 被新修剪占位
+    expect(text).toContain('"C"'); // 修剪截止之后的结果正常呈现
+  });
+
+  it("超过 80% 阈值且存在新边界 → 给出 prune 计划", () => {
+    // 预算 8000-256-1024=6720，阈值 5376；构造 ~6000 token 的历史
+    const big = "x".repeat(22_000);
+    const history: HistoryEntry[] = [assistantEntry(2, ["c3"]), toolEntry(3, big)];
+    const events = [
+      ev(1, "session.created", {}),
+      ev(2, "message.assistant", { toolCalls: [{ callId: "c3" }] }),
+      ev(3, "tool.completed", { callId: "c3" }),
+    ];
+    const built = buildContext(
+      baseInput({
+        history,
+        events,
+        model: { ...model, contextWindow: 8_000, maxOutputTokens: 256 },
+      }),
+    );
+    expect(built.compaction).toEqual({ kind: "prune", throughSeq: 3 });
+    expect(built.overBudget).toBe(false);
+    expect(built.mustCompact).toBe(false);
+  });
+
+  it("无 events 输入时不产生压缩计划", () => {
+    const big = "x".repeat(400_000);
+    const built = buildContext(baseInput({ history: [toolEntry(1, big)] }));
+    expect(built.compaction).toBeUndefined();
+    expect(built.mustCompact).toBe(true);
+  });
+});
+
+describe("L2 摘要请求（context.md 6.2/6.6）", () => {
+  const hist: HistoryEntry[] = [
+    {
+      kind: "user",
+      seq: 1,
+      turnId: "t",
+      messageId: "u",
+      content: [{ type: "text", text: "目标：修 bug" }],
+    },
+    {
+      kind: "tool",
+      seq: 2,
+      turnId: "t",
+      callId: "c",
+      name: "read",
+      status: "ok",
+      modelContent: "file body",
+    },
+  ];
+  const events = [
+    ev(1, "session.created", {}),
+    ev(2, "turn.started", {}),
+    ev(3, "turn.completed", {}),
+  ];
+
+  it("buildSummaryRequest：转录 + 指令，maxOutput 有上限，不带工具", () => {
+    const req = buildSummaryRequest({ history: hist, model, throughSeq: 3 });
+    expect(req.tools).toHaveLength(0);
+    expect(req.maxOutputTokens).toBeLessThanOrEqual(4_000);
+    const user = req.messages.find((m) => m.role === "user");
+    expect(user && JSON.stringify(user.content)).toContain("目标：修 bug");
+    expect(user && JSON.stringify(user.content)).toContain("file body");
+  });
+
+  it("chooseSummaryBoundary：装得进窗口时取最近边界，装不下向前回退", () => {
+    expect(chooseSummaryBoundary(events, hist, model)).toBe(3);
+    // 极小窗口：任何边界都装不下
+    const tiny = { ...model, contextWindow: 100, maxOutputTokens: 50 };
+    expect(chooseSummaryBoundary(events, hist, tiny)).toBeUndefined();
+    // 空历史无边界
+    expect(chooseSummaryBoundary([], [], model)).toBeUndefined();
+  });
+
+  it("renderTranscript：摘要事件渲染为 [会话历史摘要] 段", () => {
+    const withSummary: HistoryEntry[] = [
+      ...hist,
+      {
+        kind: "compaction",
+        seq: 3,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 2,
+        summary: "旧摘要",
+      },
+      {
+        kind: "user",
+        seq: 4,
+        turnId: "t",
+        messageId: "u2",
+        content: [{ type: "text", text: "新输入" }],
+      },
+    ];
+    const text = renderTranscript(withSummary, "test");
+    expect(text).toContain("会话历史摘要");
+    expect(text).toContain("旧摘要");
+    expect(text).not.toContain("目标：修 bug"); // 被摘要覆盖
+    expect(text).toContain("新输入");
   });
 });
