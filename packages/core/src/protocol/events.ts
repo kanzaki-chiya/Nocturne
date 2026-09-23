@@ -199,7 +199,7 @@ export type DurablePayload<T extends DurableType = DurableType> = DurablePayload
 export type EphemeralPayload<T extends EphemeralType = EphemeralType> = EphemeralPayloadMap[T];
 
 /** 持久化事件：写入日志，seq 从 1 连续递增（events.md 第 2 节） */
-export interface DurableEvent<T extends DurableType = DurableType> {
+export interface DurableEventFor<T extends DurableType> {
   type: T;
   sessionId: string;
   seq: number;
@@ -211,7 +211,7 @@ export interface DurableEvent<T extends DurableType = DurableType> {
 }
 
 /** 临时事件：只发布不写日志，不占用 seq */
-export interface EphemeralEvent<T extends EphemeralType = EphemeralType> {
+export interface EphemeralEventFor<T extends EphemeralType> {
   type: T;
   sessionId: string;
   /** 本次打开会话时生成，每次恢复都不同 */
@@ -224,6 +224,14 @@ export interface EphemeralEvent<T extends EphemeralType = EphemeralType> {
   turnId?: string | undefined;
   payload: EphemeralPayloadMap[T];
 }
+
+/** 分布为可判别联合：按 event.type 收窄 payload 类型 */
+export type DurableEvent<T extends DurableType = DurableType> = T extends unknown
+  ? DurableEventFor<T>
+  : never;
+export type EphemeralEvent<T extends EphemeralType = EphemeralType> = T extends unknown
+  ? EphemeralEventFor<T>
+  : never;
 
 export type RuntimeEvent = DurableEvent | EphemeralEvent;
 
