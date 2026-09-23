@@ -77,6 +77,16 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
 
 运行时数据不写入仓库：会话日志、用户配置、按工作区保存的权限授权都位于 `NOCTURNE_HOME`（默认 `~/.nocturne`）。仓库内只可能出现项目级配置 `.nocturne/`（其中的 allow 规则受信任限制，见 [permissions.md](../architecture/permissions.md)）与 `AGENTS.md`。
 
-## 6. Phase 1 需要确定并回填到本文的选择
+## 6. 工具链选型（Phase 1 确定）
 
-测试框架、运行时 schema 校验库、构建工具、依赖检查工具（如 dependency-cruiser）、lint / format 工具。选定后在此记录名称与理由；若某项选择影响多个模块且难以替换，另写 ADR。
+| 用途 | 选择 | 理由 | 备选 / 退路 |
+|---|---|---|---|
+| 测试框架 | **Vitest**（精确版本） | 原生 ESM + TS、Jest 兼容 API、可按 glob 把真实服务的冒烟测试排除在默认集之外 | `node:test`（零依赖但体验弱） |
+| 运行时 schema 校验 | **Zod 4**（内部数据：事件、配置、Provider 响应）+ **AJV 8**（工具 `inputSchema`） | `inputSchema` 本身是发给模型的 JSON Schema，必须由 JSON Schema 校验器执行；内部数据用 Zod 写起来可读且能推导 TS 类型。两者均 MIT | 纯 AJV（事件 schema 手写啰嗦）、valibot（JSON Schema 互操作弱） |
+| 构建 | **tsdown**（rolldown 系，`packages/core` 打 ESM + d.ts） | 单库包，配置最少，自动生成声明 | `tsc` 逐文件输出（零额外依赖，配置稍繁；tsdown 出现问题时降级到此） |
+| 依赖方向检查 | **dependency-cruiser** | modules.md 第 1 节点名；可把"protocol 无依赖""platform 只允许 node:*""业务模块不碰 node:fs/child_process"等规则写成 JSON 配置进 CI | eslint `import/no-restricted-paths`（表达力不足）、自写 grep（脆弱） |
+| Lint / Format | **ESLint 9**（flat config）+ **typescript-eslint** + **eslint-config-prettier** + **Prettier 3** | 标准组合；格式与语义分离，Prettier 不管规则、ESLint 不管格式 | Biome / oxlint（规则覆盖与生态尚浅） |
+| OpenAI 兼容传输 | **`@ai-sdk/openai-compatible`**（peer：`ai`） | 专为"只实现 Chat Completions 的第三方服务"设计，覆盖 DeepSeek/GLM/OpenRouter/Ollama/vLLM/LM Studio；SDK 类型不泄漏到 Core（ADR-0005） | 适配器内自建 `fetch` + SSE 解析（拿不到必需字段时降级） |
+| OpenAI 官方（将来） | `openai` 官方 SDK（Responses API） | OpenAI 高级能力走单独适配器，不与兼容层混用 | — |
+
+版本策略：全部依赖写精确版本（不浮动、不用 `latest`），由 `pnpm-lock.yaml` 保证；`engines.node >= 24`；许可证均与 GPL-3.0 兼容（MIT / Apache-2.0）。OpenAI 兼容适配器的传输选型理由与限制记录在 [providers.md](../architecture/providers.md) 适配器表。

@@ -51,14 +51,18 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 ## 4. 适配器
 
-| 适配器 | 覆盖 | 阶段 |
-|---|---|---|
-| `openai-compatible`（Chat Completions） | OpenAI、DeepSeek、GLM、OpenRouter、Ollama / vLLM / LM Studio 等本地模型服务 | Phase 1 |
-| `anthropic`（Messages） | Anthropic 及兼容 Anthropic 协议的服务 | Phase 2 |
-| `openai-responses` | OpenAI Responses API（推理内容回传、服务端状态） | 按需 |
-| `gemini` | Google Gemini | 按需 |
+| 适配器 | 覆盖 | 阶段 | 传输实现 |
+|---|---|---|---|
+| `openai-compatible`（Chat Completions） | DeepSeek、GLM、OpenRouter、Ollama / vLLM / LM Studio 等 OpenAI 兼容服务 | Phase 1 | `@ai-sdk/openai-compatible`（peer: `ai`） |
+| `openai`（Responses API） | OpenAI 官方服务（推理内容回传、服务端状态等） | 按需 | `openai` 官方 SDK |
+| `anthropic`（Messages） | Anthropic 及兼容 Anthropic 协议的服务 | Phase 2 | 待定（官方 SDK 或 AI SDK Provider） |
+| `gemini` | Google Gemini | 按需 | 待定 |
 
-每个适配器的传输实现（使用哪个 SDK 或解析库，或自建）在实现时确定并记录在上表中，附理由；默认先复用成熟实现，遇到具体限制再替换（[ADR-0005](../decisions/ADR-0005-own-provider-interface.md)）。无论底层如何实现，适配器都必须通过同一组契约测试（[provider-api.md](../protocols/provider-api.md) 第 4 节的流式契约）。
+传输实现的理由与约定：
+
+- **`openai-compatible` 用 `@ai-sdk/openai-compatible`**：该包专为"实现 `/v1/chat/completions` 的第三方服务"设计，已处理 SSE 边界、按 `index` 分片的 `tool_calls` 组装、用量与错误体归一化；自托管 / 中转兼容服务是它的明示使用场景。SDK 类型只存在于适配器内部，不泄漏到 Core（ADR-0005）。已知风险是各家在推理字段（`reasoning_content` 等）、用量口径、错误体结构上的差异不一定全部透传——契约测试与真实服务冒烟测试用于检验这一点；若暴露拿不到必需字段的限制，退路是适配器内自建 `fetch` + SSE 解析（不引第三方 SDK）。
+- **OpenAI 官方 API 将来走 `openai` SDK 的 Responses API**，与 `openai-compatible` 是不同的适配器：兼容只保证 Chat Completions，不保证 Responses / Files / Assistants 等能力。
+- 无论底层如何实现，适配器都必须通过同一组契约测试（[provider-api.md](../protocols/provider-api.md) 第 4 节的流式契约）；遇到具体限制时按 ADR-0005 替换传输实现，不改 Core 接口。
 
 各协议的主要差异与处理位置：
 
