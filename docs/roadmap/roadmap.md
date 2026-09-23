@@ -26,7 +26,7 @@
 
 ## Phase 2 — CLI
 
-**内容**：`nctrn` 命令、REPL、流式输出渲染、工具状态显示、`edit` / `write`（含先读后写检查）、`shell`（超时、进程树终止、输出截断）、`anthropic` 适配器、自动 L1 上下文修剪与手动 `/compact`、`/context` 查看上下文构成、非交互模式（单次 prompt）；**最小权限**：固定使用 `default` 预设（工作区内读取允许，写入与 shell 需确认），CLI 提供"允许一次 / 拒绝"的确认，非交互模式下需确认的操作一律拒绝。
+**内容**：`nctrn` 命令、REPL、流式输出渲染、工具状态显示、`edit` / `write`（含先读后写检查）、`shell`（超时、进程树终止、输出截断）、`anthropic` 适配器、自动 L1 上下文修剪与手动 `/compact`、`/context` 查看上下文构成、`/model` 会话内切换模型（`setModel` 命令，效果事件 `session.config_changed`）、非交互模式（单次 prompt）；**最小权限**：固定使用 `default` 预设（工作区内读取允许，写入与 shell 需确认），CLI 提供"允许一次 / 拒绝"的确认，非交互模式下需确认的操作一律拒绝。
 
 > 与最初设想的差异：原计划权限整体放在 Phase 3。但 Phase 2 就会引入写文件和执行命令，一个不经确认就执行 shell 的 CLI 不应交到用户手里，因此把最小的 ask 流程提前到 Phase 2；可配置规则、分层、信任、"记住选择"等仍在 Phase 3。
 
