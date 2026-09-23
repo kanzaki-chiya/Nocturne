@@ -41,6 +41,13 @@ export interface Usage {
 
 export type SubjectKind = "read" | "edit" | "shell" | "network" | "mcp";
 
+/** 工具声明的、未解析的权限主体（tool-api.md 第 1 节；permissionSubjects 纯函数产出） */
+export interface SubjectRequest {
+  kind: SubjectKind;
+  /** 词法规范化后的目标（绝对路径、命令字符串、URL） */
+  target: string;
+}
+
 export type SubjectWhere = "workspace" | "outside";
 
 /** 解析后的权限主体（permissions.md 第 2 节） */

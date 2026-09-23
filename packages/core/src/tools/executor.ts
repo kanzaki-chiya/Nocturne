@@ -1,0 +1,262 @@
+/**
+ * 执行管线（tools.md 第 3 节）。九步：
+ *   1 查找 → 2 校验 → 3 权限主体 → 4 解析资源 → 5 权限
+ *   → 6 tool.started → 7 执行 → 8 归一化 → 9 tool.completed
+ * 无论在哪一步结束，都恰好产生一个 tool.completed。
+ */
+import { Ajv, type ValidateFunction } from "ajv";
+
+import type { PermissionSubject, SubjectRequest, ToolCallRef } from "../protocol/index.js";
+import { applyBudget } from "./budget.js";
+import type {
+  ExecutionScope,
+  ToolDefinition,
+  ToolExecution,
+  ToolExecutor,
+  ToolRegistry,
+  ToolResult,
+} from "./types.js";
+
+const PATH_KINDS = new Set(["read", "edit"]);
+
+const ajv = new Ajv({ allErrors: true, useDefaults: true, strict: false });
+const validators = new WeakMap<ToolDefinition, ValidateFunction>();
+
+function validatorFor(tool: ToolDefinition): ValidateFunction {
+  let v = validators.get(tool);
+  if (v === undefined) {
+    v = ajv.compile(tool.inputSchema);
+    validators.set(tool, v);
+  }
+  return v;
+}
+
+function errorResult(code: string, message: string): ToolResult {
+  return { status: "error", modelContent: message, error: { code, message } };
+}
+
+/** 步骤 4：把未解析主体经 platform 解析为真实路径（路径类主体） */
+async function resolveSubjects(
+  requests: SubjectRequest[],
+  scope: ExecutionScope,
+): Promise<PermissionSubject[]> {
+  const subjects: PermissionSubject[] = [];
+  for (const req of requests) {
+    if (PATH_KINDS.has(req.kind)) {
+      const resolved = await scope.platform.resolveReal(req.target);
+      subjects.push({ kind: req.kind, target: req.target, resolved });
+    } else {
+      subjects.push({ kind: req.kind, target: req.target });
+    }
+  }
+  return subjects;
+}
+
+/** 读取中止状态：函数边界避免 TS 属性收窄把后续检查误判为恒假（信号是异步变化的） */
+function aborted(signal: AbortSignal): boolean {
+  return signal.aborted;
+}
+
+export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
+  return {
+    async execute(call: ToolCallRef, scope: ExecutionScope): Promise<ToolExecution> {
+      const startedAt = Date.now();
+      const { turnId } = scope;
+      let stopTurn = false;
+
+      /** 步骤 9：唯一出口——归一化 + 发出恰好一个 tool.completed */
+      async function finish(
+        status: ToolExecution["status"],
+        result: ToolResult,
+      ): Promise<ToolExecution> {
+        const budget = applyBudget(result);
+        await scope.events.emit(
+          "tool.completed",
+          {
+            callId: call.callId,
+            name: call.name,
+            status,
+            modelContent: budget.result.modelContent,
+            output: budget.result.output,
+            error: budget.result.status === "error" ? budget.result.error : undefined,
+            truncated: budget.truncated || undefined,
+            durationMs: Date.now() - startedAt,
+          },
+          { turnId },
+        );
+        return { status, result: budget.result, stopTurn };
+      }
+
+      if (scope.signal.aborted) {
+        return finish("cancelled", errorResult("cancelled", "调用已被中断"));
+      }
+
+      // 1. 查找
+      const tool = registry.get(call.name);
+      if (tool === undefined) {
+        const names = registry
+          .list()
+          .map((t) => t.name)
+          .join(", ");
+        return finish(
+          "error",
+          errorResult("unknown_tool", `未知工具 "${call.name}"。可用工具：${names || "（无）"}`),
+        );
+      }
+
+      // 2. 校验并规范化输入
+      if (call.input === undefined || call.input === null) {
+        return finish(
+          "error",
+          errorResult(
+            "invalid_input",
+            `工具 "${call.name}" 的输入缺失或无法解析${call.rawInput !== undefined ? `：${call.rawInput.slice(0, 200)}` : ""}`,
+          ),
+        );
+      }
+      const input: unknown = structuredClone(call.input);
+      if (!validatorFor(tool)(input)) {
+        const detail = ajv.errorsText(validatorFor(tool).errors, {
+          separator: "; ",
+        });
+        return finish(
+          "error",
+          errorResult("invalid_input", `工具 "${call.name}" 输入不符合 schema：${detail}`),
+        );
+      }
+
+      // 3. 权限主体（纯函数）
+      let requests: SubjectRequest[];
+      try {
+        requests = tool.permissionSubjects(input, scope);
+      } catch (e) {
+        return finish(
+          "error",
+          errorResult(
+            "tool_failed",
+            `工具 "${call.name}" permissionSubjects 抛出异常：${String(e)}`,
+          ),
+        );
+      }
+
+      // 4. 解析资源（唯一做 I/O 的准备步骤）
+      let subjects: PermissionSubject[];
+      try {
+        subjects = await resolveSubjects(requests, scope);
+      } catch (e) {
+        return finish(
+          "error",
+          errorResult(
+            "resource_unavailable",
+            `无法解析权限主体：${e instanceof Error ? e.message : String(e)}`,
+          ),
+        );
+      }
+
+      // 5. 权限（闸门封装 ask 的等待与取消）
+      if (aborted(scope.signal)) {
+        return finish("cancelled", errorResult("cancelled", "调用已被中断"));
+      }
+      let outcome;
+      try {
+        outcome = await scope.gate.check(subjects, call.callId, scope.signal);
+      } catch (e) {
+        if (aborted(scope.signal)) {
+          return finish("cancelled", errorResult("cancelled", "调用已被中断"));
+        }
+        return finish(
+          "error",
+          errorResult("tool_failed", `权限判定异常：${e instanceof Error ? e.message : String(e)}`),
+        );
+      }
+      const { decision } = outcome;
+      if (decision.action !== "allow") {
+        stopTurn = outcome.stopTurn === true;
+        // events.md：被规则直接拒绝的调用发出 permission.resolved（ask 流程已由 gate 发出）
+        if (outcome.resolvedEmitted !== true) {
+          await scope.events.emit(
+            "permission.resolved",
+            {
+              callId: call.callId,
+              action: "deny",
+              source: decision.source,
+              rule: decision.reason,
+            },
+            { turnId },
+          );
+        }
+        return finish("denied", errorResult("permission_denied", `权限拒绝：${decision.reason}`));
+      }
+
+      // 6. tool.started（写入成功后才继续执行）
+      await scope.events.emit(
+        "tool.started",
+        {
+          callId: call.callId,
+          name: call.name,
+          input,
+          subjects: outcome.subjects,
+          permission: { action: decision.action, source: decision.source },
+        },
+        { turnId },
+      );
+
+      // 7. 执行（AbortSignal 传播到工具；超时并入口径）
+      const timeoutMs = Math.min(
+        tool.traits.timeoutMs,
+        tool.traits.maxTimeoutMs ?? tool.traits.timeoutMs,
+      );
+      const timeoutSignal = AbortSignal.timeout(timeoutMs);
+      const combined = AbortSignal.any([scope.signal, timeoutSignal]);
+      const toolCtx = {
+        cwd: scope.cwd,
+        workspaceRoot: scope.workspaceRoot,
+        paths: scope.paths,
+        sessionId: scope.sessionId,
+        turnId,
+        callId: call.callId,
+        signal: combined,
+        subjects: outcome.subjects,
+        permissions: {
+          check: (req: SubjectRequest) => scope.gate.checkLexical(req),
+        },
+        fs: scope.platform.fs,
+        process: scope.platform.process,
+        readState: scope.readState,
+        progress: (chunk: string, stream?: "stdout" | "stderr" | "info") => {
+          scope.events.emitEphemeral(
+            "tool.progress",
+            { callId: call.callId, stream: stream ?? "info", chunk },
+            { turnId },
+          );
+        },
+      };
+
+      let result: ToolResult;
+      try {
+        result = await tool.execute(input, toolCtx);
+      } catch (e) {
+        if (aborted(scope.signal)) {
+          return finish("cancelled", errorResult("cancelled", "调用已被中断"));
+        }
+        if (aborted(timeoutSignal)) {
+          return finish(
+            "error",
+            errorResult("timeout", `工具 "${call.name}" 超过 ${timeoutMs}ms 超时`),
+          );
+        }
+        return finish(
+          "error",
+          errorResult(
+            "tool_failed",
+            `工具 "${call.name}" 抛出异常：${e instanceof Error ? e.message : String(e)}`,
+          ),
+        );
+      }
+      if (aborted(scope.signal)) {
+        return finish("cancelled", errorResult("cancelled", "调用已被中断"));
+      }
+      return finish(result.status, result);
+    },
+  };
+}
