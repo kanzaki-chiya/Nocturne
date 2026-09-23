@@ -12,7 +12,13 @@ import { streamText, type JSONValue } from "ai";
 import { abortError, ProviderError } from "../errors.js";
 import { resolveModelInfo, type ModelOverride } from "../registry.js";
 import type { ModelInfo, ModelRequest, ModelStreamEvent, Provider } from "../types.js";
-import { mapPart, toAiMessages, toAiTools, toProviderError } from "./ai-sdk-common.js";
+import {
+  mapPart,
+  suppressSdkErrorLog,
+  toAiMessages,
+  toAiTools,
+  toProviderError,
+} from "./ai-sdk-common.js";
 
 export interface AnthropicConfig {
   /** Provider id（也是 providerOptions 的键） */
@@ -76,6 +82,7 @@ export function createAnthropicProvider(
         maxRetries: 0,
         streamRetries: 0,
         abortSignal: signal,
+        onError: suppressSdkErrorLog,
         ...(request.providerOptions !== undefined
           ? {
               providerOptions: {

@@ -15,9 +15,10 @@ module.exports = {
     {
       name: "no-orphans-core",
       severity: "warn",
-      comment: "src 下不应有不被引用的模块（index/protocol 入口除外）",
+      comment: "core/src 下不应有不被引用的模块（index/protocol 入口除外）",
       from: {
         orphan: true,
+        path: "^packages/core/src",
         pathNot: ["(^|/)index\\.ts$", "(^|/)protocol/index\\.ts$", "\\.test\\.ts$", "\\.d\\.ts$"],
       },
       to: {},
@@ -154,9 +155,12 @@ module.exports = {
       name: "no-deep-import-from-outside-core",
       severity: "error",
       comment:
-        "包外（apps 等）只能 import @nocturne/core 或 @nocturne/core/protocol，不能深度导入内部路径",
+        "包外（apps 等）只能 import @nocturne/core（src/index.ts）或 @nocturne/core/protocol（src/protocol/index.ts），任何内部路径一律禁止",
       from: { path: "^apps/" },
-      to: { path: "^packages/core/src/(?!protocol/)" },
+      to: {
+        path: "^packages/core/src/",
+        pathNot: ["^packages/core/src/index\\.ts$", "^packages/core/src/protocol/index\\.ts$"],
+      },
     },
   ],
   options: {

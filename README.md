@@ -14,9 +14,25 @@ Nocturne 是一个开源的 Coding Agent Runtime，以及基于它的命令行�
 - **会话可恢复**：会话以追加式日志保存，退出或崩溃后可以恢复并继续。
 - **多模型**：通过统一的 Provider 接口接入 OpenAI 兼容接口、Anthropic 等模型服务。
 
+## 使用
+
+```bash
+pnpm install && pnpm build
+
+export NOCTURNE_API_KEY=...        # 或 ANTHROPIC_API_KEY（--api-type anthropic）
+export NOCTURNE_BASE_URL=...       # OpenAI 兼容端点，anthropic 可省略
+export NOCTURNE_MODEL=...          # 模型 id
+
+cd <你的代码仓库>
+node /path/to/nocturne/apps/cli/dist/main.js          # 交互模式
+node /path/to/nocturne/apps/cli/dist/main.js -p "..." # 非交互模式
+```
+
+参数与行为约定见 [docs/apps/cli.md](docs/apps/cli.md)。
+
 ## 当前状态
 
-Nocturne 处于设计阶段，尚无可安装的版本。架构与接口约定见 [docs/](docs/README.md)。
+Nocturne 处于早期开发阶段。架构与接口约定见 [docs/](docs/README.md)。
 
 ## 文档
 

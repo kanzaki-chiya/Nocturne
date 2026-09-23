@@ -8,7 +8,13 @@ import { streamText } from "ai";
 import { abortError, ProviderError } from "../errors.js";
 import { resolveModelInfo, type ModelOverride } from "../registry.js";
 import type { ModelInfo, ModelRequest, ModelStreamEvent, Provider } from "../types.js";
-import { mapPart, toAiMessages, toAiTools, toProviderError } from "./ai-sdk-common.js";
+import {
+  mapPart,
+  suppressSdkErrorLog,
+  toAiMessages,
+  toAiTools,
+  toProviderError,
+} from "./ai-sdk-common.js";
 import type { JSONValue } from "ai";
 
 export interface OpenAICompatibleConfig {
@@ -67,6 +73,7 @@ export function createOpenAICompatibleProvider(
         maxRetries: 0,
         streamRetries: 0,
         abortSignal: signal,
+        onError: suppressSdkErrorLog,
         ...(request.providerOptions !== undefined
           ? {
               providerOptions: {

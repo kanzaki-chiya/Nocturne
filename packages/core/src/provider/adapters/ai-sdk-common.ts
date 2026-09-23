@@ -117,6 +117,12 @@ export function toAiTools(request: ModelRequest): ToolSet {
   return tools;
 }
 
+/**
+ * streamText 的 onError 缺省会把错误打到 console；错误由适配器统一归一化为
+ * ProviderError 后抛出，必须传空函数抑制 SDK 自带的 stderr 噪音。
+ */
+export const suppressSdkErrorLog = (): void => undefined;
+
 // ── 流式事件归一化 ─────────────────────────────────────────
 
 export function mapPart(

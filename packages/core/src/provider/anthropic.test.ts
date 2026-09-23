@@ -33,9 +33,11 @@ function request(overrides: Partial<ModelRequest> = {}): ModelRequest {
 }
 
 function sseFetch(events: object[], capture?: { body?: unknown; url?: string }) {
-  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    capture && (capture.url = String(input));
-    capture && (capture.body = JSON.parse(String(init?.body)));
+  return async (input: unknown, init?: RequestInit): Promise<Response> => {
+    if (capture !== undefined) {
+      capture.url = String(input);
+      capture.body = JSON.parse(String(init?.body));
+    }
     const payload = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
     const stream = new ReadableStream<Uint8Array>({
       start(c) {

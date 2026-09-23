@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["test", "vitest.config.ts", "vitest.smoke.config.ts", "tsdown.config.ts"]
+}

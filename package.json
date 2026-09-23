@@ -15,8 +15,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "pnpm -r test",
-    "test:smoke": "pnpm --filter @nocturne/core test:smoke",
-    "depcheck": "dependency-cruiser packages --config .dependency-cruiser.cjs"
+    "test:smoke": "pnpm build && pnpm -r test:smoke",
+    "depcheck": "dependency-cruiser packages apps --config .dependency-cruiser.cjs"
   },
   "devDependencies": {
     "@types/node": "24.13.5",

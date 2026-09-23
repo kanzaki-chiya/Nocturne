@@ -1,0 +1,25 @@
+{
+  "name": "@nocturne/cli",
+  "version": "0.0.0",
+  "description": "nctrn — Nocturne CLI client",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "bin": {
+    "nctrn": "dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:smoke": "vitest run --config vitest.smoke.config.ts"
+  },
+  "dependencies": {
+    "@nocturne/core": "workspace:*"
+  }
+}

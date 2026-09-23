@@ -32,15 +32,16 @@ nocturne/
 │       │   └── platform/        文件系统、子进程、路径（跨平台）
 │       └── test/                集成测试（脚本化的假 Provider 驱动完整 Turn）
 └── apps/
-    └── cli/                     nctrn（Phase 2 创建）
+    └── cli/                     nctrn
         ├── README.md
         ├── package.json         bin: nctrn
         ├── src/
         │   ├── main.ts          入口：参数解析、模式分流、退出码
-        │   ├── args.ts          命令行解析与配置收集（环境变量 + 参数）
-        │   ├── repl.ts          交互循环与斜杠命令分发
-        │   ├── render.ts        事件 → 终端文本的纯函数渲染映射
-        │   └── permission.ts    权限确认提示 → respondPermission
+        │   ├── args.ts          命令行解析（util.parseArgs 封装）
+        │   ├── config.ts        Provider 配置收集（环境变量 + 参数，cli.md 第 7 节）
+        │   ├── repl.ts          交互循环与权限确认提示
+        │   ├── commands.ts      斜杠命令分发（/model、/context、/compact 等）
+        │   └── render.ts        事件 → 终端文本的纯函数渲染映射
         └── test/                离线单测（*.test.ts）与冒烟（*.smoke.ts）
 ```
 
