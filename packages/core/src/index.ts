@@ -554,6 +554,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (src?.maxSteps !== undefined) turnConfig.maxSteps = src.maxSteps;
       if (src?.retryLimit !== undefined) turnConfig.retryLimit = src.retryLimit;
       if (src?.retryBaseDelayMs !== undefined) turnConfig.retryBaseDelayMs = src.retryBaseDelayMs;
+      if (src?.firstEventTimeoutMs !== undefined)
+        turnConfig.firstEventTimeoutMs = src.firstEventTimeoutMs;
+      if (src?.idleTimeoutMs !== undefined) turnConfig.idleTimeoutMs = src.idleTimeoutMs;
     }
 
     const resolveSessionModel = (ref: ModelRef): ResolvedModel => sessionRegistry.resolve(ref);
@@ -773,7 +776,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             throughSeq: boundary,
           });
           // context.md 6.6：摘要请求只尝试一轮，不嵌套压缩
-          const summary = await runSummaryCall(model, request, ac.signal);
+          const summary = await runSummaryCall(
+            model,
+            request,
+            ac.signal,
+            turnConfig.firstEventTimeoutMs,
+            turnConfig.idleTimeoutMs,
+          );
           await session.emit(
             "context.compacted",
             { kind: "summary", throughSeq: boundary, summary },

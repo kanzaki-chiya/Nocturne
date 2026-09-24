@@ -7,7 +7,8 @@ import { abortError } from "./errors.js";
 import type { ModelInfo, ModelRequest, ModelStreamEvent, Provider } from "./types.js";
 
 /** 脚本条目：正常流式事件，或 throw（模拟 ProviderError / 任意异常） */
-export type FakeScriptEvent = ModelStreamEvent | { type: "throw"; error: unknown };
+export type FakeScriptEvent =
+  ModelStreamEvent | { type: "throw"; error: unknown } | { type: "wait"; ms?: number };
 
 export type FakeScript = FakeScriptEvent[];
 
@@ -74,6 +75,20 @@ export class FakeProvider implements Provider {
       if (signal.aborted) throw abortError();
       if (ev.type === "throw") {
         throw ev.error;
+      }
+      if (ev.type === "wait") {
+        await new Promise<void>((resolve, reject) => {
+          const timer = ev.ms === undefined ? undefined : setTimeout(resolve, ev.ms);
+          signal.addEventListener(
+            "abort",
+            () => {
+              if (timer !== undefined) clearTimeout(timer);
+              reject(abortError());
+            },
+            { once: true },
+          );
+        });
+        continue;
       }
       if (ev.type === "finish") sawFinish = true;
       yield ev;

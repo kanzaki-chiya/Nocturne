@@ -57,6 +57,8 @@ export interface TurnOverrides {
   maxSteps?: number | undefined;
   retryLimit?: number | undefined;
   retryBaseDelayMs?: number | undefined;
+  firstEventTimeoutMs?: number | undefined;
+  idleTimeoutMs?: number | undefined;
 }
 
 /** 各层配置文件共用的 schema（config.md 第 2 节）；程序从不改写这些文件 */

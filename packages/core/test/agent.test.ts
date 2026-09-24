@@ -117,6 +117,42 @@ const durableTypes = (events: RuntimeEvent[]) =>
 const prompt = (text = "hi"): Parameters<typeof runTurn>[1] => [{ type: "text", text }];
 
 describe("runTurn", () => {
+  it("首事件超时后重试成功；空闲超时在已有输出后保存部分内容且不重试", async () => {
+    const first = await makeHarness({
+      scripts: [
+        [{ type: "wait" }],
+        [
+          { type: "text_delta", text: "ok" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+      config: { firstEventTimeoutMs: 20, idleTimeoutMs: 20 },
+    });
+    expect(await runTurn(first.deps, prompt())).toBe("done");
+    expect(first.provider.requests).toHaveLength(2);
+    expect(first.events.filter((e) => e.type === "provider.retry")).toHaveLength(1);
+
+    const idle = await makeHarness({
+      scripts: [[{ type: "text_delta", text: "partial" }, { type: "wait" }]],
+      config: { firstEventTimeoutMs: 20, idleTimeoutMs: 20 },
+    });
+    expect(await runTurn(idle.deps, prompt())).toBe("error");
+    expect(idle.provider.requests).toHaveLength(1);
+    const end = idle.events.find((e) => e.type === "turn.completed");
+    expect(end?.type === "turn.completed" && end.payload.error?.code).toBe("provider_timeout");
+  });
+
+  it("首事件超时重试用尽，以 provider_timeout 结束", async () => {
+    const h = await makeHarness({
+      scripts: [[{ type: "wait" }], [{ type: "wait" }]],
+      config: { retryLimit: 1, firstEventTimeoutMs: 20 },
+    });
+    expect(await runTurn(h.deps, prompt())).toBe("error");
+    expect(h.events.filter((e) => e.type === "provider.retry")).toHaveLength(1);
+    const end = h.events.find((e) => e.type === "turn.completed");
+    expect(end?.type === "turn.completed" && end.payload.error?.code).toBe("provider_timeout");
+  });
+
   it("完整 Turn：prompt → 流式文本 → 工具调用 → 工具结果回模型 → done", async () => {
     const h = await makeHarness({
       scripts: [

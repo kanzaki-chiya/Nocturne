@@ -83,6 +83,8 @@ export function mergeLayers(layers: readonly MergeLayer[]): ResolvedConfig {
       if (t.maxSteps !== undefined) merged.maxSteps = t.maxSteps;
       if (t.retryLimit !== undefined) merged.retryLimit = t.retryLimit;
       if (t.retryBaseDelayMs !== undefined) merged.retryBaseDelayMs = t.retryBaseDelayMs;
+      if (t.firstEventTimeoutMs !== undefined) merged.firstEventTimeoutMs = t.firstEventTimeoutMs;
+      if (t.idleTimeoutMs !== undefined) merged.idleTimeoutMs = t.idleTimeoutMs;
       out.turn = merged;
     }
   }

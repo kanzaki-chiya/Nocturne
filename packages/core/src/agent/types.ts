@@ -14,12 +14,18 @@ export interface TurnConfig {
   retryLimit: number;
   /** 重试退避基数（ms），指数退避并优先遵守 retryAfterMs */
   retryBaseDelayMs: number;
+  /** 请求发出后等待首个流式事件的上限（ms） */
+  firstEventTimeoutMs: number;
+  /** 两个流式事件之间的上限（ms） */
+  idleTimeoutMs: number;
 }
 
 export const DEFAULT_TURN_CONFIG: TurnConfig = {
   maxSteps: 100,
   retryLimit: 4,
   retryBaseDelayMs: 250,
+  firstEventTimeoutMs: 30_000,
+  idleTimeoutMs: 120_000,
 };
 
 /** id 工厂：生产环境用随机 id；测试可注入确定性序列 */

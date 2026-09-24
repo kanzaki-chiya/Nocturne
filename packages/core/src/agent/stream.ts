@@ -4,7 +4,7 @@
  * 已开始输出后失败，把已收到的部分内容交给调用方保存。
  */
 import type { ContentBlock, FinishReason, ToolCallRef, Usage } from "../protocol/index.js";
-import { isProviderError, type ModelRequest } from "../provider/index.js";
+import { isProviderError, timedStream, type ModelRequest } from "../provider/index.js";
 import type { TurnDeps } from "./types.js";
 
 export interface StreamAccumulation {
@@ -82,7 +82,13 @@ export async function consumeStream(
     const requestStart = Date.now();
 
     try {
-      for await (const ev of provider.stream(request, signal)) {
+      for await (const ev of timedStream(
+        provider,
+        request,
+        signal,
+        config.firstEventTimeoutMs,
+        config.idleTimeoutMs,
+      )) {
         producedOutput = true;
         switch (ev.type) {
           case "text_delta": {

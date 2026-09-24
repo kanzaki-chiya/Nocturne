@@ -172,7 +172,13 @@ export async function runTurn(
       });
     let summary: string;
     try {
-      summary = await runSummaryCall(deps.model, request, signal);
+      summary = await runSummaryCall(
+        deps.model,
+        request,
+        signal,
+        config.firstEventTimeoutMs,
+        config.idleTimeoutMs,
+      );
     } catch {
       return false;
     }

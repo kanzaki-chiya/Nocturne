@@ -105,6 +105,8 @@ type FinishReason = "stop" | "tool_calls" | "length" | "content_filter" | "other
 5. 失败时迭代器抛出 `ProviderError`；`signal` 中止时抛出 `name === "AbortError"` 的错误。不使用"错误事件"。
 6. 适配器不重试、不裁剪上下文、不执行工具。
 
+流消费的公共包装为首个事件和事件间空闲设置独立超时；超时中止底层请求并抛出 `ProviderError(kind="timeout", retryable=true)`。这改变了静默流的失败语义，决策见 [ADR-0014](../decisions/ADR-0014-stream-timeout-empty-response.md)。适配器自身仍不重试。
+
 ## 5. 错误
 
 ```ts

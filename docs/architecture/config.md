@@ -43,7 +43,7 @@ interface ConfigFile {
     rules?: PermissionRule[];
   };
   /** Turn 参数覆盖（agent-loop.md 3.8） */
-  turn?: { maxSteps?: number; retryLimit?: number; retryBaseDelayMs?: number };
+  turn?: { maxSteps?: number; retryLimit?: number; retryBaseDelayMs?: number; firstEventTimeoutMs?: number; idleTimeoutMs?: number };
   /** MCP 服务器（stdio，Phase 5；见 architecture/mcp.md 第 3 节） */
   mcp?: { servers?: Record<string, McpServerEntry> };
   /** Hooks（外部命令，Phase 5；见 architecture/hooks.md 第 2 节） */

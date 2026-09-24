@@ -100,6 +100,8 @@ const configFileSchema = z.object({
       maxSteps: z.number().int().positive().optional(),
       retryLimit: z.number().int().nonnegative().optional(),
       retryBaseDelayMs: z.number().int().nonnegative().optional(),
+      firstEventTimeoutMs: z.number().int().positive().optional(),
+      idleTimeoutMs: z.number().int().positive().optional(),
     })
     .optional(),
   hooks: z.partialRecord(hookPointSchema, z.array(hookEntrySchema)).optional(),
