@@ -156,6 +156,14 @@ async function main(): Promise<number> {
   }
 
   // ── 会话选择：新建 / --resume / --continue ──
+  // --preset 只对新建会话生效（cli.md 第 2 节）：恢复会话时预设以日志为准
+  const continueCandidates = args.continueSession ? await runtime.listSessions({ cwd }) : [];
+  const resumeTarget = args.resume !== undefined || continueCandidates.length > 0;
+  if (resumeTarget && args.preset !== undefined) {
+    process.stderr.write("! --preset 仅对新建会话生效；恢复会话请用 /preset 切换\n");
+    return 2;
+  }
+
   let session: RuntimeSession;
   try {
     if (args.resume !== undefined) {
@@ -172,8 +180,7 @@ async function main(): Promise<number> {
         ...(override?.ok === true ? { model: override.ref } : {}),
       });
     } else if (args.continueSession) {
-      const candidates = await runtime.listSessions({ cwd });
-      const latest = candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
+      const latest = continueCandidates.sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
       if (latest !== undefined) {
         session = await runtime.resumeSession(latest.id, { force: args.forceUnlock });
       } else {
@@ -181,7 +188,10 @@ async function main(): Promise<number> {
           process.stderr.write("! 缺少模型：--model <id> / NOCTURNE_MODEL / 配置文件 model\n");
           return 2;
         }
-        session = await runtime.createSession({ model });
+        session = await runtime.createSession({
+          model,
+          ...(args.preset !== undefined ? { permissionPreset: args.preset } : {}),
+        });
       }
     } else {
       if (model === undefined) {
