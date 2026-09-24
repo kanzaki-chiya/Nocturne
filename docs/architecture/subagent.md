@@ -94,7 +94,7 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 - `depth` 与 `limits`（`maxDepth`/`maxConcurrent`/`maxStepsPerTurn`/`maxAttempts`）：见第 6、11 节；
 - `limiter`：Runtime 级并发信号量（`createRuntime` 创建一份，所有会话/层级共享）。
 
-**递归结构**：launcher 在创建子会话的注册表时，若 `depth + 1 ≤ maxDepth`，以同一 deps 构造 depth+1 的 launcher 并注册子级 `task`——嵌套派生是同一条路径的自然递归，不是第二套机制。
+**递归结构**：launcher 在创建子会话的注册表时，若子会话自身 `depth < maxDepth`，以同一 deps 构造 depth+1 的 launcher 并注册子级 `task`——嵌套派生是同一条路径的自然递归，不是第二套机制。
 
 **`RuntimeOptions.subagent`**（缺省即启用默认值）：
 
@@ -145,7 +145,7 @@ launch(request, ctx)
 
 ## 6. 受限工具集与递归
 
-**可选池** = 内置工具 ∪ 父会话 MCP 工具（`mcpSession.tools()` 快照）∪ `task`（仅 `depth + 1 ≤ maxDepth` 时）。子注册表 = 池 ∩ 选择 + `finish`（恒在，不可被 `tools` 列出也不可被排除）。
+**可选池** = 内置工具 ∪ 父会话 MCP 工具（`mcpSession.tools()` 快照）∪ `task`（仅子会话自身 `depth < maxDepth` 时）。子注册表 = 池 ∩ 选择 + `finish`（恒在，不可被 `tools` 列出也不可被排除）。
 
 | 选择方式 | 语义 |
 |---|---|

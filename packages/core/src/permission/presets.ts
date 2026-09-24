@@ -79,11 +79,8 @@ function broadRules(name: PermissionPresetName): BroadRule[] {
   ];
   // subagent（Phase 6，subagent.md 第 7 节）：explore 是只读工具集，
   // 它能拿到的 allow 都是父会话本就会自动放行的，default/auto-edit 下直接放行；
-  // general/custom 可能写文件跑命令，保留逐项把关
-  const subagent = (explore: PermissionRule["action"], rest: PermissionRule["action"]): BroadRule[] => [
-    { kind: "subagent", pattern: "explore", action: explore },
-    { kind: "subagent", pattern: "*", action: rest },
-  ];
+  // general/custom 不落规则 → 无匹配默认 ask（求值取最严命中，不能靠 * 兜底）
+  const subagentExplore: BroadRule[] = [{ kind: "subagent", pattern: "explore", action: "allow" }];
 
   switch (name) {
     case "read-only":
@@ -102,7 +99,7 @@ function broadRules(name: PermissionPresetName): BroadRule[] {
         edit("ask"),
         shell("ask"),
         ...other("ask"),
-        ...subagent("allow", "ask"),
+        ...subagentExplore,
       ];
     case "auto-edit":
       return [
@@ -112,7 +109,7 @@ function broadRules(name: PermissionPresetName): BroadRule[] {
         edit("ask", "outside"),
         shell("ask"),
         ...other("ask"),
-        ...subagent("allow", "ask"),
+        ...subagentExplore,
       ];
     case "full-access":
       return [

@@ -217,12 +217,13 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         );
       }
       let child: Session | undefined;
+      // Hook 标记里的 depth 是子会话自身深度（祖先进会话数）
+      const meta = {
+        parentSessionId: ctx.sessionId,
+        parentCallId: ctx.callId,
+        depth: deps.depth + 1,
+      };
       try {
-        const meta = {
-          parentSessionId: ctx.sessionId,
-          parentCallId: ctx.callId,
-          depth: deps.depth,
-        };
         child = await deps.store.create({
           cwd: ctx.cwd,
           workspaceRoot: ctx.workspaceRoot,
@@ -232,9 +233,9 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           parent: { sessionId: ctx.sessionId, callId: ctx.callId },
         });
 
-        // 可选池 = 内置 ∪ 父会话 MCP 快照 ∪ task（仅未达递归上限时）
+        // 可选池 = 内置 ∪ 父会话 MCP 快照 ∪ task（子会话自身深度未达上限才可再派生）
         const pool: ToolDefinition[] = [...builtinTools(), ...deps.mcpTools()];
-        if (deps.depth + 1 <= deps.limits.maxDepth) {
+        if (deps.depth + 1 < deps.limits.maxDepth) {
           pool.push(createTaskTool(createSubagentLauncher({ ...deps, depth: deps.depth + 1 })));
         }
         const names = new Set(pool.map((t) => t.name));
@@ -381,11 +382,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         if (child !== undefined) {
           // SessionEnd Hook（hooks.md）：与父会话 close 同点位；失败已降级
           await deps
-            .makeHookRunner(child, {
-              parentSessionId: ctx.sessionId,
-              parentCallId: ctx.callId,
-              depth: deps.depth,
-            })
+            .makeHookRunner(child, meta)
             ?.run("SessionEnd", { reason: "close" })
             .catch(() => undefined);
           await child.close().catch((e: unknown) => {
