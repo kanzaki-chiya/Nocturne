@@ -64,7 +64,7 @@
 
 - Windows 上强杀 Nocturne 进程时，MCP stdio 子进程可能成为孤儿——当前未用 Job Object 把子进程生命周期绑定到父进程，仅靠 stdin 断开依赖服务器自行退出（[mcp.md](../architecture/mcp.md) 第 4 节）。
 
-## Phase 6 — Subagent（进行中）
+## Phase 6 — Subagent（已完成，2026-09-25）
 
 **前提**：Runtime、会话、事件、工具、上下文在前面阶段中已稳定。
 
