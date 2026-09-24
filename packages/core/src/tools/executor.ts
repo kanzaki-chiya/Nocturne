@@ -327,6 +327,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         fs: scope.platform.fs,
         process: scope.platform.process,
         readState: scope.readState,
+        ...(scope.shellEnvStrip !== undefined ? { shellEnvStrip: scope.shellEnvStrip } : {}),
         progress: (chunk: string, stream?: "stdout" | "stderr" | "info") => {
           scope.events.emitEphemeral(
             "tool.progress",

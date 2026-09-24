@@ -367,3 +367,102 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
     expect(read.decision.reason).toContain("无法解析路径");
   });
 });
+
+describe("provider-setup 权限规则（provider-setup.md 第 8 节）", () => {
+  const subject = (over: Partial<PermissionSubject>): PermissionSubject => ({
+    kind: "read",
+    target: "x",
+    ...over,
+  });
+  const CRED_INDEX = `${HOME}\\credentials.json`;
+  const protectedPaths = {
+    lexical: [CRED_INDEX],
+    resolved: [`C:\\Users\\tester\\.nocturne\\credentials.json`],
+  };
+
+  it("providers.json 加入授权数据组：edit → ask 且带标签", () => {
+    const policy = createRulePolicy({
+      workspaceRoot: WS,
+      caseSensitive: false,
+      preset: "full-access",
+      presetContext: { nocturneHome: HOME },
+    });
+    const r = policy.evaluate([subject({ kind: "edit", resolved: `${HOME}\\providers.json` })]);
+    expect(r.decision.action).toBe("ask");
+    expect(r.decision.matchedRule?.rule?.label).toBe("修改 Nocturne 授权配置");
+  });
+
+  it("凭据索引内置硬拒绝：任何规则/Grant/--yes/full-access 都不能放开", () => {
+    const grants: Grant[] = [
+      { kind: "read", target: CRED_INDEX, createdAt: "2026-01-01T00:00:00Z" },
+    ];
+    for (const preset of ["read-only", "default", "auto-edit", "full-access"] as const) {
+      for (const extra of [
+        { protectedPaths },
+        // Grant 精确匹配也不能放开
+        { protectedPaths, grants: { session: grants } },
+        // --yes 也不能放开
+        { protectedPaths, autoApproveAsk: true },
+        // 用户层显式 allow 也不能放开
+        {
+          protectedPaths,
+          rules: [{ rule: { pattern: "**", action: "allow" as const }, origin: "user" as const }],
+        },
+      ]) {
+        const policy = createRulePolicy({
+          workspaceRoot: WS,
+          caseSensitive: false,
+          preset,
+          ...extra,
+        });
+        for (const kind of ["read", "edit"] as const) {
+          const r = policy.evaluate([subject({ kind, target: CRED_INDEX, resolved: CRED_INDEX })]);
+          expect(r.decision.action).toBe("deny");
+          expect(r.decision.reason).toContain("硬拒绝");
+        }
+      }
+    }
+  });
+
+  it("硬拒绝同时匹配词法路径与真实路径（junction 不能绕过）", () => {
+    const policy = createRulePolicy({
+      workspaceRoot: WS,
+      caseSensitive: false,
+      preset: "full-access",
+      protectedPaths,
+    });
+    // 词法不同、真实路径命中
+    const viaJunction = policy.evaluate([
+      subject({
+        kind: "read",
+        target: "D:\\junction\\credentials.json",
+        resolved: CRED_INDEX,
+      }),
+    ]);
+    expect(viaJunction.decision.action).toBe("deny");
+    // 原子写临时文件同样拒绝
+    const tmp = policy.evaluate([subject({ kind: "edit", target: `${CRED_INDEX}.tmp-1234` })]);
+    expect(tmp.decision.action).toBe("deny");
+  });
+
+  it("凭据后端命令至少 ask：shell allow 命中读取命令时降级", () => {
+    const policy = createRulePolicy({
+      workspaceRoot: WS,
+      caseSensitive: false,
+      preset: "full-access",
+    });
+    for (const cmd of [
+      "security find-generic-password -s nocturne -a corp -w",
+      "secret-tool lookup service nocturne provider corp",
+      'powershell -NoProfile -Command "[System.Security.Cryptography.ProtectedData]::Unprotect()"',
+    ]) {
+      const r = policy.evaluate([subject({ kind: "shell", target: cmd })]);
+      expect(r.decision.action).toBe("ask");
+      expect(r.decision.reason).toContain("凭据");
+    }
+    // 普通命令不受影响
+    expect(
+      policy.evaluate([subject({ kind: "shell", target: "git status" })]).decision.action,
+    ).toBe("allow");
+  });
+});

@@ -17,7 +17,7 @@ import type {
   RuleOrigin,
 } from "../protocol/index.js";
 import { matchGrant } from "./grants.js";
-import { isCompositeShell, isPathKind, matchPattern } from "./pattern.js";
+import { isCompositeShell, isPathKind, matchPattern, normalizePathText } from "./pattern.js";
 import { presetRules, type PresetContext } from "./presets.js";
 import { computeWhere } from "./where.js";
 import type { EvaluateOptions, PermissionPolicy, SubjectEvaluation } from "./types.js";
@@ -37,6 +37,14 @@ export interface RulePolicyOptions {
   rules?: readonly AnnotatedRule[] | undefined;
   /** 未信任项目配置中仅收紧方向的规则（与可信结果取更严格者，permissions.md 5.2） */
   untrustedRules?: readonly AnnotatedRule[] | undefined;
+  /**
+   * 内置硬拒绝路径集（provider-setup.md 第 8 节：凭据索引 credentials.json
+   * 及其原子写临时文件）。lexical 匹配词法 target、resolved 匹配真实路径；
+   * 任何规则、Grant、--yes、full-access 都不能放开。
+   */
+  protectedPaths?:
+    | { lexical?: readonly string[] | undefined; resolved?: readonly string[] | undefined }
+    | undefined;
   /** Grant 集合：session 数组由 gate 就地追加（policy 读取活引用），project 为只读快照 */
   grants?: { session?: Grant[]; project?: readonly Grant[] } | undefined;
   /**
@@ -54,6 +62,23 @@ interface SubjectVerdict {
 }
 
 const STRICTNESS: Record<PermissionAction, number> = { deny: 2, ask: 1, allow: 0 };
+
+/**
+ * 凭据后端命令模式（provider-setup.md 第 8 节）：shell 命令中出现系统
+ * 凭据后端的读取调用时至少 ask——即便宽规则/Grant 已 allow。
+ * - macOS：security …-generic-password（-i 交互模式同命令族）
+ * - Linux：secret-tool（store/lookup/clear 都经它）
+ * - Windows：ProtectedData（DPAPI 的 .NET 入口类名）
+ */
+const CREDENTIAL_COMMAND_PATTERNS = [
+  /\bsecurity\b[^\n]*-generic-password\b/i,
+  /\bsecret-tool\b/i,
+  /\bProtectedData\b/i,
+];
+
+function isCredentialBackendCommand(command: string): boolean {
+  return CREDENTIAL_COMMAND_PATTERNS.some((re) => re.test(command));
+}
 
 function describeHit(origin: RuleOrigin, index: number | undefined, presetName: string): string {
   switch (origin) {
@@ -113,6 +138,26 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
   const sessionGrants = options.grants?.session;
   const projectGrants = options.grants?.project ?? [];
 
+  // 内置硬拒绝路径集（词法 + 真实路径两组，规范化后比对）
+  const protectedLexical = new Set(
+    (options.protectedPaths?.lexical ?? []).map((p) => normalizePathText(p, caseSensitive)),
+  );
+  const protectedResolved = new Set(
+    (options.protectedPaths?.resolved ?? []).map((p) => normalizePathText(p, caseSensitive)),
+  );
+  const isProtected = (s: PermissionSubject): boolean => {
+    if (!isPathKind(s.kind)) return false;
+    const lex = normalizePathText(s.target, caseSensitive);
+    if ([...protectedLexical].some((p) => lex === p || lex.startsWith(`${p}.tmp-`))) return true;
+    if (s.resolved !== undefined) {
+      const real = normalizePathText(s.resolved, caseSensitive);
+      if ([...protectedResolved].some((p) => real === p || real.startsWith(`${p}.tmp-`))) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   function numberByOrigin(rules: readonly AnnotatedRule[]) {
     const counters = new Map<RuleOrigin, number>();
     return rules.map(({ rule, origin }) => {
@@ -144,6 +189,18 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
   }
 
   function decideSubject(s: PermissionSubject, skipApprovals: boolean | undefined): SubjectVerdict {
+    // 内置硬拒绝（provider-setup.md 第 8 节）：凭据索引等文件在任何
+    // 规则/Grant/--yes/full-access/Hook 下都不可读写——词法与真实路径都查
+    if (isProtected(s)) {
+      return {
+        action: "deny",
+        hit: {
+          origin: "default",
+          description: "内置硬拒绝：Nocturne 凭据索引（任何规则与授权都不能放开）",
+        },
+      };
+    }
+
     const trustedHit = lastMatch(trusted, s);
     let action: PermissionAction = trustedHit?.rule?.action ?? "ask";
     let hit: RuleHit =
@@ -170,6 +227,13 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     if (s.kind === "shell" && action === "allow" && isCompositeShell(s.target)) {
       action = "ask";
       note = "命令包含控制符/重定向，模式匹配的 allow 降级为需确认";
+    }
+
+    // 凭据后端命令至少 ask（provider-setup.md 第 8 节）：shell allow 命中
+    // 系统凭据后端的读取命令时降级；Grant/--yes 仍可在 ask 层批准
+    if (s.kind === "shell" && action === "allow" && isCredentialBackendCommand(s.target)) {
+      action = "ask";
+      note = [note, "命令涉及系统凭据后端"].filter(Boolean).join("；");
     }
 
     if (action === "ask" && skipApprovals !== true) {

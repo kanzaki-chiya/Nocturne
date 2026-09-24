@@ -145,7 +145,15 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
     }
     if (ctx.nocturneHome !== undefined) {
       const home = normalizePathText(ctx.nocturneHome, ctx.caseSensitive);
-      for (const pattern of [`${home}/config.json`, `${home}/trust.json`, `${home}/grants/**`]) {
+      // 授权数据组（permissions.md 第 6 节）：providers.json 是向导写入的
+      // 服务商清单，与 config.json/trust.json/grants 同级保护；
+      // credentials.json 不在这里——它是内置硬拒绝（policy.ts），非 ask
+      for (const pattern of [
+        `${home}/config.json`,
+        `${home}/trust.json`,
+        `${home}/grants/**`,
+        `${home}/providers.json`,
+      ]) {
         rules.push({ kind: "edit", pattern, action: "ask", label: AUTH_DATA_LABEL });
       }
     }
