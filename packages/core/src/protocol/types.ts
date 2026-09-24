@@ -64,6 +64,57 @@ export type PermissionAction = "allow" | "ask" | "deny";
 
 export type PermissionSource = "user" | "rule" | "grant" | "non_interactive" | "cancelled";
 
+/** 权限预设名（permissions.md 第 6 节） */
+export type PermissionPresetName = "read-only" | "default" | "auto-edit" | "full-access";
+
+/**
+ * 一条权限规则（permissions.md 第 2、5 节）。
+ * `kind` 缺省或 "*" 匹配全部类别；`label` 是给人看的短说明，
+ * 命中时进入规则解释文本与 permission.resolved.rule。
+ */
+export interface PermissionRule {
+  kind?: SubjectKind | "*" | undefined;
+  /**
+   * 匹配模式：路径类为 glob（相对模式拼接到 workspaceRoot 之下），
+   * shell / network / mcp 为字符串通配符（permissions.md 5.1）
+   */
+  pattern: string;
+  action: PermissionAction;
+  /** 只匹配该范围的主体；缺省匹配全部范围 */
+  where?: SubjectWhere | undefined;
+  /** 人读短说明（如"受保护路径""修改 Nocturne 授权配置"） */
+  label?: string | undefined;
+}
+
+/**
+ * 用户对具体请求授予的授权（permissions.md 5.4）：只精确匹配。
+ * 会话级 Grant 存会话内存；项目级 Grant 落盘到用户数据目录（config.md 第 4 节）。
+ */
+export interface Grant {
+  kind: SubjectKind;
+  /** 授权键：路径类为解析后的真实路径（canonical），shell 为完整命令字符串 */
+  target: string;
+  /** ISO 8601 */
+  createdAt: string;
+}
+
+/** 命中规则的来源层（permissions.md 5.3 的 matchedRule.origin） */
+export type RuleOrigin =
+  "preset" | "user" | "project" | "project-untrusted" | "cli" | "grant" | "default";
+
+/**
+ * 命中规则的可解释信息（permissions.md 5.3）：
+ * `rule` 为规则本体（Grant / 兜底 ask 没有本体时缺省），
+ * `description` 是人读说明（"预设 default 第 3 条""用户配置第 1 条"……）。
+ */
+export interface RuleHit {
+  origin: RuleOrigin;
+  /** 该来源内的序号（1 起）；preset / grant / default 缺省 */
+  index?: number | undefined;
+  rule?: PermissionRule | undefined;
+  description: string;
+}
+
 /** permission.requested 中提供给客户端的选项（permissions.md 第 7 节） */
 export type PermissionOption =
   "allow_once" | "allow_session" | "allow_project" | "deny" | "deny_stop";
