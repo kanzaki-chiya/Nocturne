@@ -32,7 +32,7 @@ export function effectiveProviderId(args: CliArgs, env: Env = (n) => process.env
   return effectiveApiType(args, env);
 }
 
-// 归一化语义属于 Provider 层，由 core 导出（tui.md §8）；此处再导出保持 CLI 内部调用不变
+// 归一化语义属于 Provider 层，由 core 导出（tui.md §9）；此处再导出保持 CLI 内部调用不变
 export { normalizeModelRef } from "@nocturne/core";
 
 /**

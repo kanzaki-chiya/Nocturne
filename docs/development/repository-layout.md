@@ -90,6 +90,7 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
 ├── trust.json                        可信工作区列表（nctrn trust/untrust，原子写）
 ├── providers.json                    向导配置（nctrn setup、/provider，原子写；v0.2 提议）
 ├── credentials.json                  凭据索引：DPAPI 密文或系统密钥库引用，不含明文（v0.2 提议，provider-setup.md）
+├── recent-models.json                最近使用的模型列表（最多 10 条，原子写；v0.2 提议）
 ├── AGENTS.md                         用户级项目指令（可选）
 ├── grants/<workspaceKey>.json        按工作区保存的项目级 Grant（ADR-0008）
 ├── logs/debug-<ts>-<pid>.jsonl       诊断日志（--debug / NOCTURNE_DEBUG，observability.md）
@@ -99,6 +100,8 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
     ├── <sessionId>.jsonl.tail-<ts>   崩溃截断下来的损坏尾部（诊断用）
     └── attachments/<sessionId>/<callId>.txt   超预算工具输出的落盘（tools.md 第 4 节）
 ```
+
+目录权限：POSIX 上 `NOCTURNE_HOME` 以 `0700` 创建——会话日志里有代码与对话内容，`credentials.json` 另以 `0600` 写（provider-setup.md 第 3 节）；Windows 维持用户目录的默认权限（凭据保护由 DPAPI 承担）。
 
 仓库内只可能出现项目级配置 `.nocturne/`（其中的 allow 规则受信任限制，见 [permissions.md](../architecture/permissions.md)）与 `AGENTS.md`。
 

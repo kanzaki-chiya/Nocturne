@@ -1,5 +1,6 @@
 /**
- * 通用列表选择器（tui.md §3）：/model 与 /resume 共用。
+ * 通用列表选择器（tui.md §3）：/resume 等会话内选择用；
+ * /model 已改为全屏模型选择页（tui.md §7）。
  * ↑↓ 移动、Enter 选择、Esc 取消。
  */
 import { Box, Text, useInput } from "ink";

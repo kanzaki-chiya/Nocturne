@@ -39,13 +39,15 @@ API Key（输入不回显；直接回车表示改用环境变量）：********
 
 | 命令 | 行为 |
 |---|---|
-| `/provider` | 列出全部服务商：名称、类型、服务地址（只显示主机名）、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），以及当前会话使用的是哪一个 |
+| `/provider` | 列出全部服务商：名称、类型、服务地址（只显示主机名）、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），以及当前会话使用的是哪一个。TUI 中不带参数的 `/provider` 改为打开全屏模型选择页（焦点在左栏服务商一侧），见 [tui.md](../apps/tui.md) 第 7 节 |
 | `/provider add` | 运行与 `nctrn setup` 相同的向导；完成后询问"切换当前会话到该模型？[Y/n]"，确认即调用 `session.setModel` |
 | `/provider key <name>` | 更新该服务商的密钥（不回显）并重新测试连接 |
 | `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置 |
 | `/provider remove <name>` | 删除向导写入的条目及其凭据；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改 |
 
-Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。TUI 用弹层完成同样的步骤：列表选择器（复用 `/model` 组件）、单行输入框、密钥输入框（显示为 `*`）、确认对话框；命令名与效果与 CLI 一致。
+Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。TUI 用弹层完成同样的步骤：单行输入框、密钥输入框（显示为 `*`）、确认对话框；命令名与效果与 CLI 一致。
+
+TUI 另有全屏的**模型选择页**（`/model` 与 `/provider` 打开）：左右双栏（范围/服务商 + 搜索与模型列表）、最近使用置顶、上游声明的上下文/价格/能力标记、窄终端降级。完整规格见 [tui.md](../apps/tui.md) 第 7 节。
 
 ## 2. 向导配置层：`providers.json`
 
@@ -70,6 +72,8 @@ interface ProviderSetupFile {
 - 只有向导与 `/provider` 写这个文件；用户也可以手工编辑，但推荐的手写位置仍是 `config.json`。
 
 为什么不直接改 `config.json`：程序改写用户手写的 JSON 会丢失用户的排版与字段顺序（JSON 没有注释，但顺序和分组对人有意义），并且会模糊"哪些是我写的、哪些是程序生成的"。ADR-0007/0008 已经确立"程序写自己的文件"的模式，本设计沿用它。
+
+同类的机器维护文件还有 `<NOCTURNE_HOME>/recent-models.json`：模型选择页"最近使用"范围的数据源。`{ version: 1, models: string[] }`（"provider/model" 形式，新→旧，最多 10 条），由 Runtime 在 `setModel` 与新建会话时经 `recordRecentModel` 更新，整文件原子写；损坏时忽略（最坏后果是最近列表为空）。
 
 ## 3. 凭据存储：交给操作系统
 
@@ -99,13 +103,30 @@ interface ProviderSetupFile {
   ```
 
   只有 DPAPI 需要 `ciphertext`（密文本身）；钥匙串与 libsecret 的密钥留在系统里，索引只记录"这个服务商的密钥存在哪个后端"。原子写，POSIX 上 `0600`。
+
+- **统一接口 `CredentialStore`**（参考 oh-my-pi 的 `AuthStorage → CredentialStore` 分层；区别是它把密钥以明文 JSON 存进 SQLite，我们不存明文）：
+
+  ```ts
+  interface CredentialStore {
+    /** 取出该服务商的密钥；索引无此 id 或后端取出失败时返回 undefined */
+    get(providerId: string): Promise<string | undefined>;
+    /** 写入/更新密钥并登记索引；后端不可用时拒绝（向导据此跳过保存密钥这一步） */
+    set(providerId: string, key: string): Promise<void>;
+    /** 删除密钥与索引条目；不存在时无操作 */
+    delete(providerId: string): Promise<void>;
+    /** 当前后端标识：界面提示（如"密钥已交给 Windows DPAPI 加密保存"）与测试断言用 */
+    backend(): "dpapi" | "keychain" | "libsecret" | "memory" | "none";
+  }
+  ```
+
+  每个平台一个实现：`dpapi`（Windows，索引存密文）、`keychain`（macOS，`security -i`/`find-generic-password`）、`libsecret`（Linux，`secret-tool`）——三者各自维护 `credentials.json` 索引的原子写与 POSIX `0600`；`memory` 只在内存中保存、不落任何文件，仅供测试；`none` 表示无可用后端（`get` 恒返回 `undefined`，`set`/`delete` 拒绝）。创建时按平台探测：找不到 `security`/`secret-tool` 可执行文件时落到 `none`。
 - **密钥解析顺序**（按服务商 id）：
   1. 条目声明了 `apiKeyEnv` 且该环境变量已设置 → 用环境变量；
   2. 凭据索引中有该 id → 经对应后端取出；
   3. 都没有，或后端取出失败 → 启动或切换模型时报"缺少凭据"并说明原因，提示运行 `nctrn setup` 或 `/provider key <name>`。
-- 解密结果在进程内按服务商 id 缓存，避免每次请求都启动子进程（PowerShell 启动约数百毫秒）；`/provider key` 更新时清除该 id 的缓存，下一次请求即用新密钥。
+- 解密结果在进程内按服务商 id 缓存（缓存在 `CredentialStore` 实现内部），避免每次请求都启动子进程（PowerShell 启动约数百毫秒）；`set`/`delete` 使对应条目失效——`/provider key` 更新后下一次请求即用新密钥。
 - `apiKeyEnv` 因此变为可选。手写配置照旧可以只用环境变量，行为与 v0.1 相同。
-- 密钥值只在 Provider 适配器发请求时经注入的 `CredentialSource.get(providerId)` 取得（第 6 节）：它不进入 `ResolvedConfig`、会话事件、诊断日志、`/provider` 输出或任何错误信息。后端子进程的 stderr 进入诊断日志前同样经过脱敏。
+- 密钥值只在 Provider 适配器发请求时经注入的 `CredentialStore.get(providerId)` 取得（第 6 节）：它不进入 `ResolvedConfig`、会话事件、诊断日志、`/provider` 输出或任何错误信息。后端子进程的 stderr 进入诊断日志前同样经过脱敏。
 
 **这能防什么、不能防什么**（如实说明）：
 
@@ -146,20 +167,30 @@ interface ProviderSetupFile {
 // @nocturne/core 公开导出
 listProviderPresets(): ProviderPreset[]
 fetchModels(entry: ProviderConfig, key: string | undefined, signal): Promise<UpstreamModel[]>
-  // GET /models；UpstreamModel = { id, contextWindow?, maxOutputTokens? }，只含上游明确声明的字段（第 7 节）；不支持时返回 []
+  // GET /models；UpstreamModel = { id, displayName?, contextWindow?, maxOutputTokens?,
+  //   pricing?, capabilities? }——只含上游明确声明的字段（第 7 节）；不支持时返回 []
 testProviderConnection(entry: ProviderConfig, key: string | undefined, model: string, signal):
   Promise<{ ok: true; latencyMs: number } | { ok: false; error: ProviderError }>
 
 // RuntimeConfig（config 模块）新增
+credentials: CredentialStore                             // 第 3 节的统一接口；get 结果在进程内缓存
 saveSetupProvider(entry: ProviderConfig, opts: { key?: string; makeDefault?: boolean }): Promise<void>
+  // key 存在时经 credentials.set 写入系统后端并登记 credentials.json 索引
 setCredential(providerId: string, key: string): Promise<void>
-removeSetupProvider(providerId: string): Promise<void>     // 同时删除该 id 的凭据
-describeProviders(): ProviderOverview[]                    // /provider 列表数据；不含密钥
-credentials: CredentialSource                              // { get(providerId): Promise<string | undefined> }，经系统后端取出并缓存（第 3 节）
+  // 经 credentials.set 完成（缓存随之失效，下一次请求即用新密钥）
+removeSetupProvider(providerId: string): Promise<void>     // 删除条目并经 credentials.delete 删凭据
+describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>
+  // /provider 列表数据：名称、类型、主机名、密钥来源、来源层、模型数；不含密钥。
+  // 给 workspaceRoot 时并入该工作区可信项目层的条目
 refreshUpstreamLimits(providerId: string): Promise<void>  // /provider refresh：重新获取并写入 providers.json
+setDefaultModel(model: string): Promise<void>            // 写入 providers.json 的 model 字段
+recentModels(): ModelRef[]                               // recent-models.json 当前内容（新→旧）
+recordRecentModel(ref: ModelRef): Promise<void>          // Runtime 在 setModel/新建会话时调用
 
 // Runtime 新增
 runtime.updateProviders(config: RuntimeConfig): void
+runtime.defaultModel(): ModelRef | undefined             // 分层合并后的默认模型（"默认模型"标记）
+runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最近使用"范围的数据源
 ```
 
 `runtime.updateProviders`：用新的基础层配置重建运行时级 Provider 注册表（`listModels` 的数据来源）；每个已打开会话在下一次空闲边界重建自己的会话级注册表（基础层 + 该会话的可信项目层）。当前会话正在使用的服务商不会被移除（客户端在删除前检查，Core 在重建时对仍被引用的服务商保留原实例并发出 `runtime.warning`）。它不产生持久事件；随后的 `setModel` 照常写 `session.config_changed`。
@@ -176,8 +207,13 @@ runtime.updateProviders(config: RuntimeConfig): void
 默认值 < 内置目录 < 上游声明 < 手写配置（config.json / 项目配置的 models）
 ```
 
-- **上游声明**来自服务的模型列表接口，在向导选择模型时、以及 `/provider refresh <name>` 时获取，写入 `providers.json` 对应条目的 `models`，并记录 `source: "upstream"` 与获取时间。不在每次启动时请求（避免启动依赖网络）。
-- 字段映射只读有明确含义的字段：OpenAI 兼容格式的 `context_length` → `contextWindow`；OpenRouter 的 `top_provider.max_completion_tokens` → `maxOutputTokens`（`top_provider.context_length` 优先于顶层 `context_length`）；Anthropic 模型列表接口按其官方文档返回的限额字段映射（实现时对照文档，没有的字段不猜）。
+- **上游声明**来自服务的模型列表接口，在向导选择模型时、以及 `/provider refresh <name>` 时获取，写入 `providers.json` 对应条目的 `models`，并在条目上记录 `source: "upstream"` 与 `fetchedAt` 获取时间。不在每次启动时请求（避免启动依赖网络）。
+- 字段映射只读有明确含义的字段：
+  - OpenAI 兼容格式：`id` → 模型 id；`name` → `displayName`；`context_length` → `contextWindow`；
+  - OpenRouter（同属 OpenAI 兼容形状）：`top_provider.max_completion_tokens` → `maxOutputTokens`（`top_provider.context_length` 优先于顶层 `context_length`）；`pricing`（按 token 计价的 USD 字符串）换算为每百万 token 写入 `pricing.input`/`pricing.output`；`supported_parameters` 含 `reasoning` → `capabilities.reasoning`；`architecture.input_modalities` 含 `image` → `capabilities.imageInput`；
+  - Anthropic 模型列表接口按其官方文档返回的限额字段映射（实现时对照文档，没有的字段不猜）。
+- `reasoning`/`imageInput` 复用 `ModelCapabilities` 的既有字段，但**只在有声明时设置**——上游没声明的字段保持目录/保守默认，不因"没在 supported_parameters 里看到"而断言不支持（清单字段的覆盖范围各服务不统一）。
+- 写入 `models` 的 `pricing` 进入 `ModelInfo.pricing`（[provider-api.md](../protocols/provider-api.md) 第 2 节）；模型选择页按这些字段渲染"推理 / 图片输入 / 上下文 / 价格"列（[tui.md](../apps/tui.md) 第 7 节），未声明的列留空，不编造数据。
 - **最大输出长度未知时不替上游做决定**：
   - `openai-compatible`：请求**不带** `max_tokens`，由上游按它自己的上限处理；
   - `anthropic`：协议要求必填，只有这种情况使用兜底值（8192），并在提示中说明。
@@ -192,4 +228,5 @@ runtime.updateProviders(config: RuntimeConfig): void
 - OAuth 登录、订阅账号登录：providers.md 第 6 节已排除；模拟官方客户端特征的登录方式不纳入。
 - 非交互的 `nctrn setup --provider ... --key ...`：命令行上的密钥会进入 shell 历史与进程列表，与"凭据不经命令行"的规则冲突；自动化场景继续使用环境变量或手写配置。
 - 项目级向导配置：向导只写用户级文件。项目级服务商配置仍然手写在 `.nocturne/config.json`，并受信任模型约束。
-- 自动探测推理、图片输入等能力：各服务的模型列表字段不统一，本阶段只读取上下文窗口与最大输出长度（第 7 节）。
+- 探测上游未声明的能力：各服务的模型列表字段不统一，本阶段只映射上游明确声明的字段（第 7 节），不发探测请求、不按模型名猜测。
+- 模型选择页的本机实测列（首字延迟、吞吐）：下一步单独实现；本阶段页面只展示上游/配置声明的数据（tui.md 第 7 节预留列位）。

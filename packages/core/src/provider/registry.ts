@@ -76,7 +76,7 @@ export function createProviderRegistry(
  * 值归属"当前 Provider"（providerId = 生效的 api-type）；前缀等于当前
  * Provider 时剥掉，前缀是另一种 api-type 时报错；其余含斜杠的值
  * （命名空间模型 id，如 deepseek/deepseek-v4.1-flash）原样保留。
- * 归一化语义属于 Provider 层，CLI 与 TUI 共用（tui.md §8）。
+ * 归一化语义属于 Provider 层，CLI 与 TUI 共用（tui.md §9）。
  */
 export function normalizeModelRef(
   model: string,

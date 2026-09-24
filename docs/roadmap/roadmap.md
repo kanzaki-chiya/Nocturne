@@ -98,7 +98,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 ## v0.2 — 开箱配置（设计中）
 
-**内容**：`nctrn setup` 首次配置向导与会话内 `/provider`（CLI 与 TUI）；机器维护的向导配置层 `providers.json`；凭据交给操作系统后端（Windows DPAPI、macOS 钥匙串、Linux Secret Service，无后端时不退回明文）与凭据解析顺序；模型上下文窗口与最大输出长度以上游声明为准（ADR-0016）；内置服务商预设（DeepSeek、OpenRouter、Anthropic 与自定义）；凭据文件的内置硬拒绝、`shell` 子进程剥离凭据变量；`runtime.updateProviders`；目录外模型套用默认能力时的提示。设计见 [provider-setup.md](../architecture/provider-setup.md)、[ADR-0015](../decisions/ADR-0015-provider-setup-credentials.md)。
+**内容**：`nctrn setup` 首次配置向导与会话内 `/provider`（CLI 与 TUI）；机器维护的向导配置层 `providers.json`；凭据交给操作系统后端（Windows DPAPI、macOS 钥匙串、Linux Secret Service，无后端时不退回明文）与凭据解析顺序；模型上下文窗口与最大输出长度以上游声明为准（ADR-0016）；内置服务商预设（DeepSeek、OpenRouter、Anthropic 与自定义）；凭据文件的内置硬拒绝、`shell` 子进程剥离凭据变量；`runtime.updateProviders`；目录外模型套用默认能力时的提示；**TUI 全屏模型选择页**（`/model` 与不带参数的 `/provider` 打开，备用屏幕仅此一页，ADR-0017）与 CLI `/model` 编号表格（同列信息 + 关键词过滤）；上游声明的价格/推理/图片输入映射入 `providers.json` 与 `ModelInfo`；机器维护的 `recent-models.json`。设计见 [provider-setup.md](../architecture/provider-setup.md)、[ADR-0015](../decisions/ADR-0015-provider-setup-credentials.md)、[ADR-0017](../decisions/ADR-0017-model-picker-alternate-screen.md)。
 
 **验收**：
 
@@ -110,10 +110,11 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - `credentials.json` 与 `providers.json` 中不出现任何密钥明文；三个平台的凭据写入与读取过程中密钥不出现在子进程命令行参数里（Windows 实测，macOS/Linux 在可用环境实测，否则如实标注未验证）。
 - 上游声明了限额的模型（commandcode 的 `context_length`、OpenRouter 的 `max_completion_tokens`）按声明值生效；最大输出长度未知时 openai-compatible 请求不含 `max_tokens`。
 - 只用环境变量的 v0.1 配置方式行为不变（回归测试）。
+- **模型选择页**（Windows Terminal 与 conhost 逐个场景截图核对）：打开后进入备用屏幕、关闭后对话内容完整；`←`/`→` 左右栏切换、打字进入搜索框过滤、`PageUp`/`PageDown` 翻页；从 `○` 预设进入 `/provider add` 流程并返回选中；右栏 `Enter` 的内联选项条完成「仅本会话」切换与「设为默认」（后者写入 `providers.json`）；详情行正确标注「当前会话」「默认模型」；窄终端（<80 列隐藏左栏、<40 列降级）行为正确；连续开关与 `Ctrl+C` 不残留备用屏幕。CLI 侧 `/model` 表格列信息与 `/model <关键词>` 过滤核对。
 
 ## 之后（未排期）
 
-RPC 服务端与远程客户端、OS 级沙箱、后台任务、会话分叉与回退、Web / Desktop / IDE 客户端、单文件分发。进入排期前各自先写设计文档。
+RPC 服务端与远程客户端、OS 级沙箱、后台任务、会话分叉与回退、Web / Desktop / IDE 客户端、单文件分发、模型选择页的本机实测首字延迟与吞吐列（tui.md 第 7 节预留列位）。进入排期前各自先写设计文档。
 
 - **v0.2 候选：MCP 强杀清理**：评估纯 Node 看护进程，detached 启动，轮询主进程是否存活，主进程消失后清理 MCP 进程树；沿用会话锁的“开机时间 + PID”判定以规避 PID 复用，Windows 与 POSIX 共用。进入排期前先写设计文档，再评估竞态、退出语义和成本。
 - **v0.2 候选：子会话 ask 冒泡**：按 [subagent.md](../architecture/subagent.md) 第 7.1 节方案 (a)，把子会话的确认请求路由到父客户端；先设计事件、权限回复与中断语义。

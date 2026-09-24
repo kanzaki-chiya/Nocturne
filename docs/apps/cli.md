@@ -52,6 +52,7 @@ nctrn setup                  # 服务商配置向导（v0.2 提议，provider-se
 - 启动时校验配置：缺 `baseURL`（openai-compatible）、缺凭据、缺模型 id，都打印缺失项并以退出码 2 退出，两种模式一致；交互终端下提示可运行 `nctrn setup`。
 - 未知参数、参数缺值：打印用法并以退出码 2 退出。
 - `trust` / `untrust` 子命令原子写 `<NOCTURNE_HOME>/trust.json`（[config.md](../architecture/config.md) 第 3 节），打印结果后以退出码 0 退出；程序不改写手写的 `config.json`。
+- `setup` 子命令（v0.2 提议）要求 stdin 与 stdout 都是 TTY，否则以退出码 2 退出并提示手写配置方式；密钥输入不回显，**不存在**把密钥放在命令行参数上的形式（provider-setup.md 第 1、8 节）。
 
 ## 3. 交互模式（REPL）
 
@@ -69,7 +70,8 @@ nctrn setup                  # 服务商配置向导（v0.2 提议，provider-se
 | 命令 | 行为 | 对应 Runtime 能力 |
 |---|---|---|
 | `/help` | 列出命令与快捷键 | — |
-| `/model` | 显示当前模型与可用模型列表 | `runtime.listModels()`、`session.state().config.model` |
+| `/model` | 编号表格列出可用模型：`服务商/模型 id`、推理/图片输入标记、上下文长度、价格（`$输入/输出` 每百万 token）；未声明的列留空，不编造数据。标注「当前会话」「默认模型」（v0.2 提议，列信息与 TUI 模型选择页一致，见 [apps/tui.md](tui.md) 第 7 节） | `runtime.listModels()`、`session.state().config.model`、`runtime.defaultModel()`、`runtime.listRecentModels()` |
+| `/model <关键词>` | 同上表格按关键词过滤后列出 | 同上 |
 | `/model <id>` | 会话内切换模型 | `session.setModel(ref)` → `session.config_changed` |
 | `/preset` | 显示当前权限预设 | `session.state().config.permissionPreset` |
 | `/preset <name>` | 会话内切换权限预设 | `session.setPermissionPreset(name)` → `session.config_changed` |
@@ -78,10 +80,11 @@ nctrn setup                  # 服务商配置向导（v0.2 提议，provider-se
 | `/resume` | 列出会话（编号、id、创建时间、绑定目录、模型、锁状态），输入编号切换，空行取消 | `runtime.listSessions()` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
-| `/provider` | 列出服务商、密钥来源与来源层；`/provider add`、`/provider key <name>`、`/provider remove <name>` 见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节（v0.2 提议） | `describeProviders()`、`saveSetupProvider` 等 + `runtime.updateProviders` |
+| `/provider` | 列出服务商：名称、类型、服务地址主机名、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），标记当前会话所用，不显示密钥；`/provider add` / `key <name>` / `refresh <name>` / `remove <name>` 见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节（v0.2 提议） | `describeProviders()`、`saveSetupProvider` 等 + `runtime.updateProviders` |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
 
 - 未知命令打印提示（不报错退出）。命令在 Turn 进行中给出"会话忙"提示（`setModel` / `compact` 的前置条件是空闲，见 events.md 第 7 节）。
+- `/model` 参数先按模型 id 精确匹配：匹配到已知 id（含 `provider/model` 归一化后）时直选切换，行为与 v0.1 一致；未匹配时按关键词过滤列表（子串、大小写不敏感），不切换。
 - `/model <id>` 在 Provider 内切换：裸 id 与 `provider/model` 写法都按 `--model` 同规则归一化（前缀等于当前 Provider 时剥掉、是另一种 api-type 时报错、其余含斜杠的值按模型 id 原样），再以 `<当前 Provider>/<id>` 调 `session.setModel`。CLI 的 Provider 配置以 `allowUndeclaredModels` 创建（`strictModels=false`），清单外的模型 id 也可切换，能力回退内置目录/保守默认（见 provider-api.md）。
 - `/context` 渲染 `ContextReport`：各 section 的名称、来源、字符数、估算 token，加上合计 `estimatedTokens / budgetTokens` 与 `overBudget`。查询只读，不构建请求也不产生事件。
 - `/compact` 输出结果摘要（`throughSeq`、摘要字符数）；没有可压缩内容或摘要失败时打印原因，返回码不产生——REPL 命令的错误只显示，不影响进程。

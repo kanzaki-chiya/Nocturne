@@ -162,7 +162,7 @@ Phase 6 增补：`subagent` 选项（`enabled`/`maxDepth`/`maxConcurrent`/`maxSt
 
 `describeContext` 与 `listModels` 是**只读查询**：不改变会话状态、不产生事件，只为客户端展示服务。
 
-Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.md) 第 8 节）：`normalizeModelRef`（`provider/model` 归一化，CLI 与 TUI 的 `/model` 共用）。配置收集与会话打开语义留在 CLI，`nctrn --tui` 在打开会话后把 `Session` 交给 `runTui`。
+Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.md) 第 9 节）：`normalizeModelRef`（`provider/model` 归一化，CLI 与 TUI 的 `/model` 共用）。配置收集与会话打开语义留在 CLI，`nctrn --tui` 在打开会话后把 `Session` 交给 `runTui`。
 
 这组命令与事件就是将来 RPC 需要序列化的全部内容；进程内客户端和远程客户端使用同一份语义（见 [ADR-0002](../decisions/ADR-0002-ui-independent-core.md)）。
 
