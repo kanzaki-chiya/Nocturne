@@ -19,11 +19,13 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    "jsx": "react-jsx",
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
       "@nocturne/core": ["./packages/core/src/index.ts"],
-      "@nocturne/core/*": ["./packages/core/src/*"]
+      "@nocturne/core/*": ["./packages/core/src/*"],
+      "@nocturne/tui": ["./apps/tui/src/index.ts"]
     }
   }
 }

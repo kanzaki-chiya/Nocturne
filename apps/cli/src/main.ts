@@ -88,6 +88,14 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  // --tui 需要交互式终端；非 TTY 直接退出 2，不降级为行式输出（tui.md 第 5 节）
+  if (args.tui && (!process.stdin.isTTY || !process.stdout.isTTY)) {
+    process.stderr.write(
+      '! --tui 需要交互式终端；非 TTY 环境请用 nctrn（行式 REPL）或 nctrn -p "<prompt>"\n',
+    );
+    return 2;
+  }
+
   const platform = createPlatform();
   let cwd: string;
   try {
@@ -252,6 +260,17 @@ async function main(): Promise<number> {
   }
 
   if (!args.print) {
+    if (args.tui) {
+      // 惰性加载 TUI：cli 的日常路径不支付 ink/react 的启动开销（ADR-0010）
+      const { runTui } = await import("@nocturne/tui");
+      const code = await runTui(session, runtime, {
+        stdin: process.stdin,
+        stdout: process.stdout,
+        stderr: process.stderr,
+      });
+      await session.close();
+      return code;
+    }
     process.on("SIGINT", () => {
       /* REPL 自己处理 SIGINT（rl "SIGINT" 事件）；这里兜底防意外退出 */
     });

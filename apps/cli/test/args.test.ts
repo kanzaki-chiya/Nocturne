@@ -66,6 +66,14 @@ describe("参数解析（cli.md 第 2 节）", () => {
     expect(parseArgs(["--preset", "read-only"]).preset).toBe("read-only");
   });
 
+  it("--tui：默认 false；可与 -c / --resume / --model 组合", () => {
+    expect(parseArgs([]).tui).toBe(false);
+    expect(parseArgs(["--tui"]).tui).toBe(true);
+    const r = parseArgs(["--tui", "--resume", "sess-9", "--model", "m2"]);
+    expect(r.tui).toBe(true);
+    expect(r.resume).toBe("sess-9");
+  });
+
   it("trust / untrust 子命令", () => {
     expect(parseArgs(["trust"]).command).toBe("trust");
     expect(parseArgs(["untrust"]).command).toBe("untrust");
@@ -77,5 +85,10 @@ describe("参数解析（cli.md 第 2 节）", () => {
     expect(() => parseArgs(["--preset", "default", "--resume", "x"])).toThrow(UsageError);
     expect(() => parseArgs(["--sessions", "-p", "hi"])).toThrow(UsageError);
     expect(() => parseArgs(["trust", "--resume", "x"])).toThrow(UsageError);
+    // --tui 互斥项（cli.md 第 2 节）
+    expect(() => parseArgs(["--tui", "-p", "hi"])).toThrow(UsageError);
+    expect(() => parseArgs(["--tui", "--print"])).toThrow(UsageError);
+    expect(() => parseArgs(["--tui", "--sessions"])).toThrow(UsageError);
+    expect(() => parseArgs(["--tui", "trust"])).toThrow(UsageError);
   });
 });

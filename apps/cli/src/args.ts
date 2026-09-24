@@ -17,6 +17,8 @@ export type TrustCommand = "trust" | "untrust";
 export interface CliArgs {
   /** -p/--print：非交互模式 */
   print: boolean;
+  /** --tui：交互式终端界面（与 -p 互斥；需要 TTY） */
+  tui: boolean;
   /** -p 后的内联 prompt；省略时 main 从 stdin 读 */
   prompt?: string | undefined;
   model?: string | undefined;
@@ -44,6 +46,7 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
 
 用法：
   nctrn                        交互模式（REPL）：新建会话
+  nctrn --tui                  终端界面（TUI）：新建会话
   nctrn -p "<prompt>"          非交互模式：执行一次 Turn 后退出
   nctrn -p                     非交互模式：prompt 从 stdin 读取
   nctrn -c, --continue         恢复当前目录最近的会话
@@ -53,6 +56,7 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
 
 参数：
   -p, --print [prompt]   非交互模式；值省略时读 stdin
+      --tui              终端界面模式；与 -p、--sessions 互斥；非 TTY 时退出码 2
   -c, --continue         恢复绑定到当前目录的最近会话（没有则新建）
       --resume <id>      恢复指定会话；可与 --model、-p 组合
       --sessions         列出全部会话（id、时间、目录、模型、锁状态）
@@ -77,6 +81,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       strict: true,
       options: {
         print: { type: "boolean", short: "p", default: false },
+        tui: { type: "boolean", default: false },
         model: { type: "string" },
         "api-type": { type: "string" },
         "base-url": { type: "string" },
@@ -111,14 +116,21 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 
   const continueSession = values.continue;
   const resume = values.resume;
+  const tui = values.tui;
   if (continueSession && resume !== undefined) {
     throw new UsageError("--continue 与 --resume 不能同时使用");
   }
-  if (command !== undefined && (continueSession || resume !== undefined || values.sessions)) {
+  if (tui && print) {
+    throw new UsageError("--tui 与 -p/--print 互斥：TUI 需要交互式终端");
+  }
+  if (
+    command !== undefined &&
+    (continueSession || resume !== undefined || values.sessions || tui)
+  ) {
     throw new UsageError(`${command} 子命令不接受会话选项`);
   }
-  if (values.sessions && (continueSession || resume !== undefined || print)) {
-    throw new UsageError("--sessions 是独立的只读命令，不能与恢复或执行组合");
+  if (values.sessions && (continueSession || resume !== undefined || print || tui)) {
+    throw new UsageError("--sessions 是独立的只读命令，不能与恢复、执行或 --tui 组合");
   }
   if (values["force-unlock"] && !continueSession && resume === undefined) {
     throw new UsageError("--force-unlock 只能与 --resume / --continue 搭配");
@@ -129,6 +141,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 
   return {
     print,
+    tui,
     prompt: print && positionals.length > 0 ? positionals.join(" ") : undefined,
     model: values.model,
     apiType: values["api-type"],

@@ -26,11 +26,12 @@ export default tseslint.config(
   },
   {
     files: [
-      "**/*.test.ts",
+      "**/*.test.{ts,tsx}",
       "**/*.smoke.ts",
-      "test/**/*.ts",
-      "**/test/**/*.ts",
+      "test/**/*.{ts,tsx}",
+      "**/test/**/*.{ts,tsx}",
       "**/*.config.ts",
+      "**/*.config.mts",
       "**/*.config.mjs",
     ],
     ...tseslint.configs.disableTypeChecked,

@@ -1,0 +1,33 @@
+{
+  "name": "@nocturne/tui",
+  "version": "0.0.0",
+  "description": "Nocturne terminal UI client (Ink + React)，由 nctrn --tui 惰性加载",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nocturne/core": "workspace:*",
+    "ink": "7.1.1",
+    "react": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "ink-testing-library": "4.0.0"
+  }
+}

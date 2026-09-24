@@ -20,6 +20,7 @@
     "test:smoke": "vitest run --config vitest.smoke.config.ts"
   },
   "dependencies": {
-    "@nocturne/core": "workspace:*"
+    "@nocturne/core": "workspace:*",
+    "@nocturne/tui": "workspace:*"
   }
 }
