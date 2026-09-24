@@ -40,14 +40,23 @@ const usageSchema = z.object({
 });
 
 const permissionSubjectSchema = z.object({
-  kind: z.enum(["read", "edit", "shell", "network", "mcp"]),
+  kind: z.enum(["read", "edit", "shell", "network", "mcp", "subagent"]),
   target: z.string(),
   resolved: z.string().optional(),
   where: z.enum(["workspace", "outside"]).optional(),
 });
 
 const permissionActionSchema = z.enum(["allow", "ask", "deny"]);
-const permissionSourceSchema = z.enum(["user", "rule", "grant", "non_interactive", "cancelled"]);
+// "hook" 在 Phase 5 已写入日志（PermissionRequest / PreToolUse 的结算来源）；
+// 漏列会让含该来源的会话在恢复时校验失败——补齐是缺陷修复而非演进
+const permissionSourceSchema = z.enum([
+  "user",
+  "rule",
+  "grant",
+  "hook",
+  "non_interactive",
+  "cancelled",
+]);
 
 const finishReasonSchema = z.enum(["stop", "tool_calls", "length", "content_filter", "other"]);
 
@@ -63,6 +72,7 @@ const payloadSchemas = {
     workspaceRoot: z.string(),
     model: modelRefSchema,
     permissionPreset: z.string(),
+    parent: z.object({ sessionId: z.string(), callId: z.string() }).optional(),
   }),
   "session.config_changed": z.object({
     model: modelRefSchema.optional(),

@@ -240,6 +240,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
           workspaceRoot: input.workspaceRoot,
           model: input.model,
           permissionPreset: input.permissionPreset,
+          ...(input.parent !== undefined ? { parent: input.parent } : {}),
         });
         return session;
       } catch (e) {
@@ -294,6 +295,9 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
           const firstLine = text.split("\n", 1)[0] ?? "";
           const event = decodeDurableEvent(firstLine);
           if (event.type !== "session.created") continue;
+          if (event.payload.parent !== undefined && filter.includeSubagents !== true) {
+            continue;
+          }
           if (filter.cwd !== undefined && !paths.equals(event.payload.cwd, filter.cwd)) {
             continue;
           }
@@ -307,6 +311,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             model: event.payload.model,
             mtimeMs: stat.mtimeMs,
             locked: await lockLooksHeld(fs, platform, lockPath(id)),
+            ...(event.payload.parent !== undefined ? { parent: event.payload.parent } : {}),
           });
         } catch {
           // 列表是只读操作：单个损坏文件不阻塞其他会话

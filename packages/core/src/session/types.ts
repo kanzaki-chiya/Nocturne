@@ -24,6 +24,8 @@ export interface SessionMeta {
   createdAt: string;
   formatVersion: number;
   nocturneVersion: string;
+  /** 子会话的父关联（Phase 6，subagent.md 第 5 节）；仅子会话存在 */
+  parent?: { sessionId: string; callId: string } | undefined;
 }
 
 export interface SessionConfig {
@@ -126,6 +128,8 @@ export interface SessionSummary {
   mtimeMs: number;
   /** 锁文件存在且持有者看起来存活（只读探测，不取得锁） */
   locked?: boolean | undefined;
+  /** 子会话的父关联；仅子会话存在（默认不进入列表，见 list 的 includeSubagents） */
+  parent?: { sessionId: string; callId: string } | undefined;
 }
 
 export interface CreateSessionInput {
@@ -134,6 +138,8 @@ export interface CreateSessionInput {
   model: ModelRef;
   permissionPreset: string;
   nocturneVersion: string;
+  /** 子会话的父关联（Phase 6）；写入 session.created.parent */
+  parent?: { sessionId: string; callId: string } | undefined;
 }
 
 export interface LoadSessionOptions {
@@ -148,5 +154,12 @@ export interface SessionStore {
    * 追加恢复修复事件（sessions.md 第 4 节顺序不可调换）
    */
   load(id: string, options?: LoadSessionOptions): Promise<Session>;
-  list(filter?: { cwd?: string | undefined }): Promise<SessionSummary[]>;
+  /**
+   * 列出会话摘要。`includeSubagents` 缺省 false：子会话（session.created.parent
+   * 存在者）不进入列表——它是子代理运行痕迹而非可交互会话（sessions.md 第 8 节）。
+   */
+  list(filter?: {
+    cwd?: string | undefined;
+    includeSubagents?: boolean | undefined;
+  }): Promise<SessionSummary[]>;
 }

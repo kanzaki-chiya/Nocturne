@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { ConfigFile } from "./types.js";
 import { ConfigError } from "./errors.js";
 
-const subjectKindSchema = z.enum(["read", "edit", "shell", "network", "mcp"]);
+const subjectKindSchema = z.enum(["read", "edit", "shell", "network", "mcp", "subagent"]);
 
 const permissionRuleSchema = z.object({
   kind: z.union([subjectKindSchema, z.literal("*")]).optional(),

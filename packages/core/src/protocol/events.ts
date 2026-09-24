@@ -24,6 +24,8 @@ export interface SessionCreatedPayload {
   workspaceRoot: string;
   model: ModelRef;
   permissionPreset: string;
+  /** 子会话的父关联（Phase 6，subagent.md 第 5 节）；仅子会话存在 */
+  parent?: { sessionId: string; callId: string } | undefined;
 }
 
 export interface SessionConfigChangedPayload {

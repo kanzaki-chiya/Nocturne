@@ -39,7 +39,7 @@ export interface Usage {
   reasoningTokens?: number | undefined;
 }
 
-export type SubjectKind = "read" | "edit" | "shell" | "network" | "mcp";
+export type SubjectKind = "read" | "edit" | "shell" | "network" | "mcp" | "subagent";
 
 /** 工具声明的、未解析的权限主体（tool-api.md 第 1 节；permissionSubjects 纯函数产出） */
 export interface SubjectRequest {

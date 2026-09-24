@@ -61,6 +61,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           createdAt: event.time,
           formatVersion: p.formatVersion,
           nocturneVersion: p.nocturneVersion,
+          ...(p.parent !== undefined ? { parent: p.parent } : {}),
         };
         config = { model: p.model, permissionPreset: p.permissionPreset };
         break;
