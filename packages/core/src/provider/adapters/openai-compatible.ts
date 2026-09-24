@@ -43,6 +43,8 @@ type EnvReader = (name: string) => string | undefined;
 export function createOpenAICompatibleProvider(
   config: OpenAICompatibleConfig,
   env: EnvReader = (name) => process.env[name],
+  /** 测试注入用；生产不传（SDK 默认全局 fetch） */
+  fetchImpl?: typeof fetch,
 ): Provider {
   const apiKey = env(config.apiKeyEnv);
   const sdk = createOpenAICompatible({
@@ -50,6 +52,7 @@ export function createOpenAICompatibleProvider(
     baseURL: config.baseURL,
     ...(apiKey !== undefined ? { apiKey } : {}),
     ...(config.headers !== undefined ? { headers: config.headers } : {}),
+    ...(fetchImpl !== undefined ? { fetch: fetchImpl } : {}),
   });
 
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>

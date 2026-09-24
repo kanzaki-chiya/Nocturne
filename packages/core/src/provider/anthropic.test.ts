@@ -436,6 +436,116 @@ describe("anthropic 适配器", () => {
     expect(body["service_tier"]).toBe("standard_only");
   });
 
+  it("toolChoice 映射为具体 tool_choice（type:tool）", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch(
+        [
+          msgStart(),
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "tool_use", id: "toolu_1", name: "finish" },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: '{"result":"done"}' },
+          },
+          { type: "content_block_stop", index: 0 },
+          ...msgEnd("tool_use"),
+        ],
+        capture,
+      ),
+    );
+    await collect(
+      p,
+      request({
+        toolChoice: { name: "finish" },
+        tools: [
+          {
+            name: "finish",
+            description: "提交结果",
+            inputSchema: { type: "object", properties: { result: { type: "string" } } },
+          },
+        ],
+      }),
+    );
+    expect(capture.body?.["tool_choice"]).toEqual({ type: "tool", name: "finish" });
+  });
+
+  it("扩展思考 + toolChoice：本轮移除 thinking 并保留 tool_choice（兜底轮临时关思考）", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const records: { kind: string; data: Record<string, unknown> }[] = [];
+    const p = createAnthropicProvider(
+      config({
+        providerOptions: { thinking: { type: "enabled", budgetTokens: 1024 } },
+        diagnostics: { record: (kind, data) => records.push({ kind, data: data ?? {} }) },
+      }),
+      envWithKey,
+      sseFetch(
+        [
+          msgStart(),
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "tool_use", id: "toolu_1", name: "finish" },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: '{"result":"done"}' },
+          },
+          { type: "content_block_stop", index: 0 },
+          ...msgEnd("tool_use"),
+        ],
+        capture,
+      ),
+    );
+    // thinking + 具体 tool_choice 会被服务端 400；适配器本轮关闭思考让强制生效
+    await collect(
+      p,
+      request({
+        toolChoice: { name: "finish" },
+        providerOptions: { thinking: { type: "enabled", budgetTokens: 1024 } },
+        tools: [
+          {
+            name: "finish",
+            description: "提交结果",
+            inputSchema: { type: "object", properties: { result: { type: "string" } } },
+          },
+        ],
+      }),
+    );
+    expect(capture.body?.["thinking"]).toBeUndefined();
+    expect(capture.body?.["tool_choice"]).toEqual({ type: "tool", name: "finish" });
+    expect(
+      records.find((r) => r.kind === "provider.unsupported_capability")?.data["resolution"],
+    ).toBe("disabled_reasoning");
+  });
+
+  it("归一化 reasoningEffort + toolChoice：无法安全关闭 → 丢弃 tool_choice", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const records: { kind: string; data: Record<string, unknown> }[] = [];
+    const p = createAnthropicProvider(
+      config({
+        providerOptions: { thinking: { type: "enabled", budgetTokens: 1024 } },
+        diagnostics: { record: (kind, data) => records.push({ kind, data: data ?? {} }) },
+      }),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    await collect(p, request({ toolChoice: { name: "finish" }, reasoningEffort: "high" }));
+    expect(capture.body?.["tool_choice"]).toBeUndefined();
+    // thinking 保留（丢弃的是 toolChoice 而非用户配置）
+    expect(capture.body?.["thinking"]).toEqual({ type: "enabled", budget_tokens: 1024 });
+    expect(
+      records.find((r) => r.kind === "provider.unsupported_capability")?.data["resolution"],
+    ).toBe("dropped_tool_choice");
+  });
+
   it("providerOptions：仅配置级时同样下发；无选项时不产生多余字段", async () => {
     const capture: { body?: unknown; url?: string } = {};
     const p = createAnthropicProvider(
