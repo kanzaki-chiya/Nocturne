@@ -5,6 +5,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import process from "node:process";
+import type { Readable } from "node:stream";
 
 export interface SpawnOptions {
   cwd?: string | undefined;
@@ -122,7 +123,7 @@ function readConsoleCodepage(): Promise<number | undefined> {
     }, CHCP_TIMEOUT_MS);
     timer.unref();
     const chunks: Buffer[] = [];
-    child.stdout.on("data", (c: Buffer) => chunks.push(c));
+    child.stdout?.on("data", (c: Buffer) => chunks.push(c));
     child.once("error", () => {
       clearTimeout(timer);
       resolve(undefined);
@@ -153,18 +154,53 @@ async function detectConsoleEncoding(): Promise<string> {
   return cp === undefined ? "utf-8" : codepageToEncodingLabel(cp);
 }
 
-/** 每条流独立的 TextDecoder：流式解码会在解码器内缓存跨界字符，两条流不能共享实例 */
-async function* decodeOutput(
-  stream: AsyncIterable<Buffer>,
-  encoding: Promise<string>,
-): AsyncIterable<string> {
-  const decoder = new TextDecoder(await encoding);
-  for await (const chunk of stream) {
-    const text = decoder.decode(chunk, { stream: true });
-    if (text !== "") yield text;
-  }
-  const tail = decoder.decode();
-  if (tail !== "") yield tail;
+/**
+ * 每条流独立的 TextDecoder：流式解码会在解码器内缓存跨界字符，两条流不能共享实例。
+ * 注意：编码探测（chcp.com）是异步的，若在迭代开始前才挂载 stdout 监听，
+ * 短命的子进程可能在解码器就绪前退出并丢数据——因此创建时立即以 flowing
+ * 模式捕获原始字节，消费侧再逐块解码（保留流式 progress 语义）。
+ */
+function decodeOutput(stream: Readable, encoding: Promise<string>): AsyncIterable<string> {
+  const pending: Buffer[] = [];
+  const state: { ended: boolean; failure: Error | undefined } = {
+    ended: false,
+    failure: undefined,
+  };
+  let wake: (() => void) | undefined;
+  const notify = (): void => {
+    wake?.();
+    wake = undefined;
+  };
+  stream.on("data", (chunk: Buffer) => {
+    pending.push(chunk);
+    notify();
+  });
+  stream.once("end", () => {
+    state.ended = true;
+    notify();
+  });
+  stream.once("error", (error: Error) => {
+    state.failure = error;
+    state.ended = true;
+    notify();
+  });
+  return (async function* (): AsyncGenerator<string> {
+    const decoder = new TextDecoder(await encoding);
+    for (;;) {
+      let chunk: Buffer | undefined;
+      while ((chunk = pending.shift()) !== undefined) {
+        const text = decoder.decode(chunk, { stream: true });
+        if (text !== "") yield text;
+      }
+      if (state.failure !== undefined) throw state.failure;
+      if (state.ended) break;
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+    }
+    const tail = decoder.decode();
+    if (tail !== "") yield tail;
+  })();
 }
 
 async function killTree(child: ChildProcess): Promise<void> {
@@ -219,8 +255,8 @@ export function createProcessRunner(): ProcessRunner {
     // 不设 setEncoding：原始字节流经控制台代码页对应的 TextDecoder 流式解码，
     // 避免 GBK 等本地编码被按 UTF-8 解成乱码
     const encoding = consoleEncoding();
-    const stdout = decodeOutput(child.stdout as AsyncIterable<Buffer>, encoding);
-    const stderr = decodeOutput(child.stderr as AsyncIterable<Buffer>, encoding);
+    const stdout = decodeOutput(child.stdout, encoding);
+    const stderr = decodeOutput(child.stderr, encoding);
 
     let timedOut = false;
     let killed = false;

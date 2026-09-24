@@ -173,7 +173,7 @@ describe("ProcessRunner 输出解码", () => {
   const saved = process.env[ENV_KEY];
 
   afterEach(() => {
-    if (saved === undefined) delete process.env[ENV_KEY];
+    if (saved === undefined) Reflect.deleteProperty(process.env, ENV_KEY);
     else process.env[ENV_KEY] = saved;
   });
 
