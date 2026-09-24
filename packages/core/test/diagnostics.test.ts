@@ -71,6 +71,27 @@ describe("diagnostics", () => {
     expect(obj.env?.PLAIN).toBe("***");
   });
 
+  it("脱敏不误伤用量字段：*Tokens/keys 等非凭据键名原样保留", async () => {
+    const ws = tmp();
+    const file = path.join(ws, "dbg.jsonl");
+    const d = createDiagnostics({ platform, enabled: true, file, logsDir: ws });
+    d.record("provider.result", {
+      usage: { inputTokens: 42, outputTokens: 17, cacheReadTokens: 3 },
+      estimatedTokens: 100,
+      maxOutputTokens: 1024,
+    });
+    await flush();
+    const obj = JSON.parse(readFileSync(file, "utf8").trim()) as {
+      usage: Record<string, number>;
+      estimatedTokens: number;
+      maxOutputTokens: number;
+    };
+    expect(obj.usage.inputTokens).toBe(42);
+    expect(obj.usage.cacheReadTokens).toBe(3);
+    expect(obj.estimatedTokens).toBe(100);
+    expect(obj.maxOutputTokens).toBe(1024);
+  });
+
   it("超长字符串截断", async () => {
     const ws = tmp();
     const file = path.join(ws, "dbg.jsonl");

@@ -6,13 +6,39 @@
 import type { Diagnostics } from "../protocol/index.js";
 import type { Platform } from "../platform/index.js";
 
-const CREDENTIAL_KEY = /key|token|secret|password|authorization|credential|cookie/i;
+/**
+ * 凭据形键名单词集合：按 _ / - / . / 驼峰拆词后精确匹配。
+ * `inputTokens`/`estimatedTokens`（复数）不命中，避免误杀用量字段；
+ * `apiKey`/`accessToken`/`NOCTURNE_API_KEY` 命中。
+ */
+const SENSITIVE_WORDS = new Set([
+  "key",
+  "token",
+  "secret",
+  "password",
+  "authorization",
+  "credential",
+  "credentials",
+  "cookie",
+  "auth",
+  "apikey",
+  "bearer",
+]);
+
+function isSensitiveKey(key: string): boolean {
+  const parts = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[\s_\-.]+/)
+    .map((p) => p.toLowerCase());
+  return parts.some((p) => SENSITIVE_WORDS.has(p));
+}
+
 const MAX_FIELD_CHARS = 16 * 1024;
 const MAX_DEPTH = 8;
 
 /** 递归清洗：凭据形键名的值替换为 "***"；超长字符串截断 */
 function sanitize(value: unknown, key: string | undefined, depth: number): unknown {
-  if (key !== undefined && CREDENTIAL_KEY.test(key)) return "***";
+  if (key !== undefined && isSensitiveKey(key)) return "***";
   if (typeof value === "string") {
     if (value.length <= MAX_FIELD_CHARS) return value;
     return `${value.slice(0, MAX_FIELD_CHARS)}…[truncated ${value.length - MAX_FIELD_CHARS} chars]`;
