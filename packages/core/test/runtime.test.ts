@@ -122,7 +122,10 @@ describe("公开 Runtime API", () => {
     const provider = new FakeProvider({
       handler: async () => {
         await new Promise((r) => setTimeout(r, 150));
-        return [{ type: "finish", reason: "stop" }];
+        return [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ];
       },
     });
     const rt = await createRuntime({
@@ -207,7 +210,10 @@ describe("公开 Runtime API", () => {
         },
         { type: "finish", reason: "tool_calls" },
       ],
-      [{ type: "finish", reason: "stop" }],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "finish", reason: "stop" },
+      ],
     ]);
     const session = await makeSession(runtime);
     const events = collect(session);

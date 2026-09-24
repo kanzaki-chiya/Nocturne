@@ -7,6 +7,13 @@ import type { ContentBlock, FinishReason, ToolCallRef, Usage } from "../protocol
 import { isProviderError, timedStream, type ModelRequest } from "../provider/index.js";
 import type { TurnDeps } from "./types.js";
 
+export class EmptyResponseError extends Error {
+  constructor() {
+    super("Provider 以 stop 结束，但未返回文本或工具调用");
+    this.name = "EmptyResponseError";
+  }
+}
+
 export interface StreamAccumulation {
   content: ContentBlock[];
   toolCalls: ToolCallRef[];
@@ -170,6 +177,13 @@ export async function consumeStream(
             break;
           }
           case "finish": {
+            if (
+              ev.reason === "stop" &&
+              !acc.content.some((block) => block.type === "text" && block.text.length > 0) &&
+              acc.toolCalls.length === 0
+            ) {
+              throw new EmptyResponseError();
+            }
             deps.execEnv.diagnostics?.record("provider.result", {
               turnId,
               attempt,
@@ -196,24 +210,38 @@ export async function consumeStream(
         turnId,
         attempt,
         provider: provider.id,
-        kind: isProviderError(e) ? e.kind : "unknown",
+        kind:
+          e instanceof EmptyResponseError
+            ? "empty_response"
+            : isProviderError(e)
+              ? e.kind
+              : "unknown",
         message: e instanceof Error ? e.message : String(e),
-        retryable: isProviderError(e) ? e.retryable : false,
+        retryable: e instanceof EmptyResponseError || (isProviderError(e) && e.retryable),
         durationMs: Date.now() - requestStart,
       });
       if (signal.aborted || isAbortError(e)) {
         return { kind: "aborted", acc };
       }
-      if (isProviderError(e) && e.retryable && !producedOutput && attempt < maxAttempts) {
-        // 尚未产生任何输出事件：允许重发整个请求（agent-loop.md 3.5）
-        const delayMs = e.retryAfterMs ?? config.retryBaseDelayMs * 2 ** (attempt - 1);
+      if (
+        (e instanceof EmptyResponseError ||
+          (isProviderError(e) && e.retryable && !producedOutput)) &&
+        attempt < maxAttempts
+      ) {
+        // 可重试 Provider 错误尚未输出，或已收到空 stop：重发整个请求。
+        const delayMs =
+          (isProviderError(e) ? e.retryAfterMs : undefined) ??
+          config.retryBaseDelayMs * 2 ** (attempt - 1);
         session.emitEphemeral(
           "provider.retry",
           {
             attempt,
             maxAttempts,
             delayMs,
-            error: { kind: e.kind, message: e.message },
+            error: {
+              kind: e instanceof EmptyResponseError ? "empty_response" : e.kind,
+              message: e.message,
+            },
           },
           { turnId },
         );

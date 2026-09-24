@@ -117,6 +117,34 @@ const durableTypes = (events: RuntimeEvent[]) =>
 const prompt = (text = "hi"): Parameters<typeof runTurn>[1] => [{ type: "text", text }];
 
 describe("runTurn", () => {
+  it("空 stop 重试后成功；重试用尽返回明确错误码", async () => {
+    const recovered = await makeHarness({
+      scripts: [
+        [{ type: "finish", reason: "stop" }],
+        [
+          { type: "text_delta", text: "ok" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    expect(await runTurn(recovered.deps, prompt())).toBe("done");
+    expect(recovered.provider.requests).toHaveLength(2);
+    expect(recovered.events.find((e) => e.type === "provider.retry")?.payload.error.kind).toBe(
+      "empty_response",
+    );
+
+    const exhausted = await makeHarness({
+      scripts: [[{ type: "finish", reason: "stop" }], [{ type: "finish", reason: "stop" }]],
+      config: { retryLimit: 1 },
+    });
+    expect(await runTurn(exhausted.deps, prompt())).toBe("error");
+    expect(exhausted.provider.requests).toHaveLength(2);
+    const end = exhausted.events.find((e) => e.type === "turn.completed");
+    expect(end?.type === "turn.completed" && end.payload.error?.code).toBe(
+      "provider_empty_response",
+    );
+  });
+
   it("首事件超时后重试成功；空闲超时在已有输出后保存部分内容且不重试", async () => {
     const first = await makeHarness({
       scripts: [
@@ -232,7 +260,10 @@ describe("runTurn", () => {
           },
           { type: "finish", reason: "tool_calls" },
         ],
-        [{ type: "finish", reason: "stop" }],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
       ],
     });
     const reason = await runTurn(h.deps, prompt());
@@ -283,7 +314,10 @@ describe("runTurn", () => {
             error: new ProviderError({ kind: "network", message: "net down" }),
           },
         ],
-        [{ type: "finish", reason: "stop" }],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
       ],
     });
     const reason = await runTurn(h.deps, prompt());
@@ -421,7 +455,10 @@ describe("runTurn", () => {
           },
           { type: "finish", reason: "tool_calls" },
         ],
-        [{ type: "finish", reason: "stop" }],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
       ],
     });
     const reason = await runTurn(h.deps, prompt());

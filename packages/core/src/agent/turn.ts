@@ -26,7 +26,7 @@ import type {
 } from "../protocol/index.js";
 import { SessionError } from "../session/index.js";
 import { createExecutionScope, type ExecutionScope } from "../tools/index.js";
-import { consumeStream, type StreamAccumulation } from "./stream.js";
+import { consumeStream, EmptyResponseError, type StreamAccumulation } from "./stream.js";
 import type { TurnDeps } from "./types.js";
 
 function isPersistenceFailure(e: unknown): boolean {
@@ -352,7 +352,12 @@ export async function runTurn(
           });
         }
         return await finish("error", {
-          code: isProviderError(e) ? `provider_${e.kind}` : "provider_error",
+          code:
+            e instanceof EmptyResponseError
+              ? "provider_empty_response"
+              : isProviderError(e)
+                ? `provider_${e.kind}`
+                : "provider_error",
           message: e instanceof Error ? e.message : String(e),
         });
       }
