@@ -55,11 +55,7 @@ async function makeHarness(options: {
 }): Promise<Harness> {
   const ws = makeTmpDir("nct-agent-ws-");
   const sessionsDir = makeTmpDir("nct-agent-sessions-");
-  const store = createSessionStore({
-    fs: platform.fs,
-    paths: platform.paths,
-    sessionsDir,
-  });
+  const store = createSessionStore({ platform, sessionsDir });
   const wsReal = await platform.resolveReal(ws);
   const provider = new FakeProvider({
     scripts: options.scripts,

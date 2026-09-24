@@ -20,6 +20,7 @@ import type {
   Session,
   SessionHealth,
   SessionListener,
+  SessionRecovery,
   SessionState,
 } from "./types.js";
 
@@ -31,12 +32,14 @@ export class SessionImpl implements Session {
   readonly id: string;
   readonly runId: string;
   readonly logPath: string;
+  readonly recovery?: SessionRecovery | undefined;
 
   private readonly fs: FileSystem;
   private readonly events: DurableEvent[];
   private readonly listeners = new Set<SessionListener>();
   private readonly diag: { event: RuntimeEvent; error: unknown }[] = [];
   private readonly failController = new AbortController();
+  private readonly onClose?: (() => Promise<void>) | undefined;
 
   private writeChain: Promise<void> = Promise.resolve();
   private nextSeq: number;
@@ -50,12 +53,17 @@ export class SessionImpl implements Session {
     fs: FileSystem;
     events: DurableEvent[];
     runId?: string;
+    recovery?: SessionRecovery | undefined;
+    /** 关闭时释放的资源（会话锁等） */
+    onClose?: (() => Promise<void>) | undefined;
   }) {
     this.id = args.id;
     this.logPath = args.logPath;
     this.fs = args.fs;
     this.events = [...args.events];
     this.runId = args.runId ?? newRunId();
+    this.recovery = args.recovery;
+    this.onClose = args.onClose;
     this.nextSeq = (this.events.at(-1)?.seq ?? 0) + 1;
     this.lastPublishedSeq = this.nextSeq - 1;
   }
@@ -169,6 +177,8 @@ export class SessionImpl implements Session {
     await this.writeChain;
     this.healthState = "closed";
     this.listeners.clear();
+    // 释放会话锁等资源；释放失败不影响关闭
+    if (this.onClose !== undefined) await this.onClose().catch(() => undefined);
   }
 
   private publish(event: RuntimeEvent): void {

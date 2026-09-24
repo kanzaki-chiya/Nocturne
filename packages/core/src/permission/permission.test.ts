@@ -177,9 +177,13 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
     target: "x",
     ...over,
   });
+  type ExtraOptions = Omit<
+    Parameters<typeof createRulePolicy>[0],
+    "workspaceRoot" | "caseSensitive" | "preset" | "presetContext"
+  >;
   const policyFor = (
     preset: "read-only" | "default" | "auto-edit" | "full-access",
-    extra?: Parameters<typeof createRulePolicy>[0],
+    extra?: ExtraOptions,
   ) =>
     createRulePolicy({
       workspaceRoot: WS,
@@ -191,7 +195,7 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
   const actionOf = (
     preset: "read-only" | "default" | "auto-edit" | "full-access",
     s: PermissionSubject,
-    extra?: Parameters<typeof createRulePolicy>[0],
+    extra?: ExtraOptions,
   ) => policyFor(preset, extra).evaluate([s]).decision.action;
 
   it("预设矩阵：read-only", () => {

@@ -57,6 +57,16 @@ export interface SessionState {
 
 export type SessionHealth = "ok" | "failed" | "closed";
 
+/** 本次打开发生的修复汇总（sessions.md 第 6 节末）；无修复时缺省 */
+export interface SessionRecovery {
+  /** 被截断的损坏尾部另存到的文件名 */
+  truncatedTail?: string | undefined;
+  /** 补齐为 interrupted 的工具调用数 */
+  interruptedCalls: number;
+  /** 以 process_exited 收束的未完成 Turn 数 */
+  recoveredTurns: number;
+}
+
 export type SessionListener = (event: RuntimeEvent) => void;
 
 export interface EmitOptions {
@@ -75,6 +85,8 @@ export interface Session {
   readonly health: SessionHealth;
   /** 日志写入失败时触发——Agent Loop 把它并入 Turn 的中断信号 */
   readonly failedSignal: AbortSignal;
+  /** 打开时执行的修复汇总（sessions.md 第 6 节）；无修复则 undefined */
+  readonly recovery?: SessionRecovery | undefined;
 
   /** 由持久化事件折叠出的当前状态 */
   state(): SessionState;
@@ -112,6 +124,8 @@ export interface SessionSummary {
   model: ModelRef;
   /** 日志文件修改时间 */
   mtimeMs: number;
+  /** 锁文件存在且持有者看起来存活（只读探测，不取得锁） */
+  locked?: boolean | undefined;
 }
 
 export interface CreateSessionInput {
@@ -122,9 +136,17 @@ export interface CreateSessionInput {
   nocturneVersion: string;
 }
 
+export interface LoadSessionOptions {
+  /** --force-unlock：先删锁再走正常流程（sessions.md 第 4 节） */
+  force?: boolean | undefined;
+}
+
 export interface SessionStore {
   create(input: CreateSessionInput): Promise<Session>;
-  /** 打开并校验日志；Phase 3 将在此加锁、截断损坏尾部、追加修复事件 */
-  load(id: string): Promise<Session>;
+  /**
+   * 打开会话：先取得排他锁，再读取日志——截断损坏尾部、校验、
+   * 追加恢复修复事件（sessions.md 第 4 节顺序不可调换）
+   */
+  load(id: string, options?: LoadSessionOptions): Promise<Session>;
   list(filter?: { cwd?: string | undefined }): Promise<SessionSummary[]>;
 }

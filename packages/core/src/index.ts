@@ -44,6 +44,7 @@ import {
   createSessionStore,
   SessionError,
   type Session,
+  type SessionRecovery,
   type SessionState,
   type SessionStore,
   type SessionSummary,
@@ -168,12 +169,16 @@ export interface RuntimeSession {
   describeContext(): BuiltContext;
   /** 打开会话时聚合的警告（配置降级、未信任项目配置等），供客户端展示 */
   readonly warnings: readonly string[];
+  /** 打开时执行的恢复修复汇总（sessions.md 第 6 节）；无修复则 undefined */
+  readonly recovery?: SessionRecovery | undefined;
   close(): Promise<void>;
 }
 
 export interface ResumeSessionOptions {
   /** 会话记录的模型无法解析时，以该模型替代（写入 session.config_changed） */
   model?: string | ModelRef | undefined;
+  /** --force-unlock：先删除锁文件再走正常打开流程（ADR-0009） */
+  force?: boolean | undefined;
 }
 
 export interface Runtime {
@@ -259,7 +264,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   // 运行时级清单（listModels 的数据来源）：注入 + providerConfigs + config 基础层
   const registry: ProviderRegistry = buildRegistry(config?.base.providers ?? []);
 
-  const store: SessionStore = createSessionStore({ fs, paths, sessionsDir });
+  const store: SessionStore = createSessionStore({ platform, sessionsDir });
   const tools: ToolRegistry = createBuiltinRegistry();
   const executor = createToolExecutor(tools);
 
@@ -542,6 +547,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
       },
       warnings,
+      recovery: session.recovery,
       describeContext() {
         const state = session.state();
         return buildContext({
@@ -589,7 +595,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     },
     async resumeSession(id, resumeOpts) {
-      const session = await store.load(id);
+      const session = await store.load(id, { force: resumeOpts?.force });
       try {
         return await wrapSession(session, { modelOverride: resumeOpts?.model });
       } catch (e) {

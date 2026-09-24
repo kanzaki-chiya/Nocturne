@@ -2,14 +2,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createNodeFileSystem, createPlatform } from "../platform/index.js";
+import { createPlatform } from "../platform/index.js";
 import type { RuntimeEvent } from "../protocol/index.js";
 import { createSessionStore, type SessionStore } from "./index.js";
 
 let dir: string;
 let store: SessionStore;
-const realFs = createNodeFileSystem();
-const paths = createPlatform().paths;
+const platform = createPlatform();
+const realFs = platform.fs;
 
 const INPUT = {
   cwd: "Z:\\repo",
@@ -21,7 +21,7 @@ const INPUT = {
 
 beforeAll(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-session-"));
-  store = createSessionStore({ fs: realFs, paths, sessionsDir: dir });
+  store = createSessionStore({ platform, sessionsDir: dir });
 });
 
 afterAll(async () => {
@@ -224,10 +224,36 @@ describe("load 校验（events.md 第 8 节）", () => {
   });
 
   it("中间行损坏 → session_log_corrupt", async () => {
-    const p = path.join(dir, "corrupt1.jsonl");
-    await fs.writeFile(p, `${JSON.stringify(created())}\n{bad json\n`);
+    // 损坏行不在末尾：无法按尾部截断恢复（sessions.md 第 4 节第 3/4 步）
+    await writeLog("corrupt1", [
+      created(),
+      "not-json-at-all",
+      { ...base, type: "turn.started", seq: 3, payload: { turnIndex: 1 } },
+    ]);
     await expect(store.load("corrupt1")).rejects.toMatchObject({
       code: "session_log_corrupt",
+    });
+  });
+
+  it("损坏尾部：截断、另存 tail 文件、恢复后可用（sessions.md 4.3）", async () => {
+    const p = path.join(dir, "tail1.jsonl");
+    await fs.writeFile(
+      p,
+      `${JSON.stringify(created())}\n${JSON.stringify({ ...base, type: "turn.started", seq: 2, payload: { turnIndex: 1 }, turnId: "t1" })}\n{"type":"tool.`,
+    );
+    const s = await store.load("tail1");
+    expect(s.recovery?.truncatedTail).toMatch(/^tail1\.jsonl\.tail-/);
+    // 尾部另存为诊断文件
+    const names = await fs.readdir(dir);
+    expect(names.some((n) => n.startsWith("tail1.jsonl.tail-"))).toBe(true);
+    // 未结束 Turn 被收束为 process_exited
+    expect(s.recovery?.recoveredTurns).toBe(1);
+    expect(s.state().openTurn).toBeUndefined();
+    const lines = await readLines(s.logPath);
+    expect(lines).toHaveLength(3);
+    expect(JSON.parse(lines[2] ?? "")).toMatchObject({
+      type: "turn.completed",
+      payload: { recovered: true },
     });
   });
 
@@ -254,6 +280,108 @@ describe("load 校验（events.md 第 8 节）", () => {
     await expect(store.load("nope-nothing")).rejects.toMatchObject({
       code: "session_not_found",
     });
+  });
+});
+
+describe("恢复修复（sessions.md 第 6 节）", () => {
+  it("未结算调用补 tool.completed(interrupted)，未结束 Turn 收束为 process_exited", async () => {
+    const s1 = await store.create(INPUT);
+    await s1.emit("turn.started", { turnIndex: 1 }, { turnId: "t1" });
+    await s1.emit(
+      "message.assistant",
+      {
+        messageId: "m1",
+        model: INPUT.model,
+        content: [],
+        toolCalls: [
+          { callId: "c1", name: "read" },
+          { callId: "c2", name: "write" },
+        ],
+        finishReason: "tool_calls",
+      },
+      { turnId: "t1" },
+    );
+    await s1.emit(
+      "tool.started",
+      {
+        callId: "c1",
+        name: "read",
+        input: {},
+        subjects: [],
+        permission: { action: "allow", source: "rule" },
+      },
+      { turnId: "t1" },
+    );
+    // 模拟崩溃：不 close、不走正常收束——直接释放锁模拟进程死亡
+    await s1.close();
+
+    const s2 = await store.load(s1.id);
+    expect(s2.recovery?.interruptedCalls).toBe(2);
+    expect(s2.recovery?.recoveredTurns).toBe(1);
+    const state = s2.state();
+    expect(state.openTurn).toBeUndefined();
+    expect(state.unsettledCalls.size).toBe(0);
+    const toolEntries = state.history.filter((h) => h.kind === "tool");
+    const c1 = toolEntries.find((h) => h.callId === "c1");
+    const c2 = toolEntries.find((h) => h.callId === "c2");
+    expect(c1?.status).toBe("interrupted");
+    expect(c2?.status).toBe("interrupted");
+    // started 的调用提示"可能已部分执行"；未 started 的提示"未执行"
+    expect(c1?.modelContent).toContain("部分执行");
+    expect(c2?.modelContent).toContain("未执行");
+    // 恢复后可继续提交
+    const ev = await s2.emit("turn.started", { turnIndex: 2 }, { turnId: "t2" });
+    expect(ev.seq).toBe(state.lastSeq + 1);
+  });
+});
+
+describe("会话锁（ADR-0009）", () => {
+  it("同进程已持锁的会话再 load → session_locked；close 后可打开", async () => {
+    const s1 = await store.create(INPUT);
+    await expect(store.load(s1.id)).rejects.toMatchObject({ code: "session_locked" });
+    // 锁文件存在
+    const names = await fs.readdir(dir);
+    expect(names).toContain(`${s1.id}.lock`);
+    await s1.close();
+    // 关闭释放锁
+    const namesAfter = await fs.readdir(dir);
+    expect(namesAfter).not.toContain(`${s1.id}.lock`);
+    const s2 = await store.load(s1.id);
+    expect(s2.id).toBe(s1.id);
+    await s2.close();
+  });
+
+  it("force：强制清锁后打开", async () => {
+    const s1 = await store.create(INPUT);
+    const s2 = await store.load(s1.id, { force: true });
+    expect(s2.id).toBe(s1.id);
+    // 旧持有者释放时不得误删新锁（release 校验锁内容归属）
+    await s1.close();
+    expect(await realFs.exists(path.join(dir, `${s1.id}.lock`))).toBe(true);
+    await s2.close();
+  });
+
+  it("失效锁（startedAt 早于开机）自动清理并打开", async () => {
+    const s1 = await store.create(INPUT);
+    const id = s1.id;
+    await s1.close();
+    // 手写一个远古锁
+    await fs.writeFile(
+      path.join(dir, `${id}.lock`),
+      JSON.stringify({ pid: 999999, hostname: "other-host", startedAt: 1 }),
+    );
+    const s2 = await store.load(id);
+    expect(s2.id).toBe(id);
+    await s2.close();
+  });
+
+  it("list 标注 locked 状态", async () => {
+    const s = await store.create(INPUT);
+    const all = await store.list();
+    expect(all.find((x) => x.id === s.id)?.locked).toBe(true);
+    await s.close();
+    const after = await store.list();
+    expect(after.find((x) => x.id === s.id)?.locked).toBe(false);
   });
 });
 

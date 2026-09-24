@@ -23,6 +23,14 @@ export interface Platform {
   env(name: string): string | undefined;
   /** 真实路径解析：含不存在尾巴与 junction/symlink（permissions.md 4.2） */
   resolveReal(path: string): Promise<string>;
+  /** 本进程 pid（会话锁持有者标识） */
+  pid(): number;
+  /** 主机名（会话锁失效判定：跨主机锁不算本机存活进程） */
+  hostname(): string;
+  /** 指定 pid 的进程看起来存活（同主机判定用；无法判定时按存活处理） */
+  processAlive(pid: number): boolean;
+  /** 本机最近一次开机的 Unix 毫秒时刻（锁 startedAt 早于它即失效，ADR-0009） */
+  bootTimeMs(): number;
 }
 
 export function createPlatform(): Platform {
@@ -45,5 +53,18 @@ export function createPlatform(): Platform {
     },
     env: (name) => process.env[name],
     resolveReal: (p) => resolveRealPath(fs, paths, p),
+    pid: () => process.pid,
+    hostname: () => os.hostname(),
+    processAlive(pid) {
+      try {
+        // signal 0：只探测不发送
+        process.kill(pid, 0);
+        return true;
+      } catch (e) {
+        // EPERM = 进程存在但无权限发信号——仍然算存活
+        return typeof e === "object" && e !== null && (e as { code?: string }).code === "EPERM";
+      }
+    },
+    bootTimeMs: () => Date.now() - os.uptime() * 1000,
   };
 }
