@@ -42,13 +42,17 @@ export async function runTurn(
   content: ContentBlock[],
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
-  const counters = { turn: 0, message: 0, call: 0 };
-  const id = (kind: "turn" | "message" | "call") =>
+  const counters = { message: 0, call: 0 };
+  // turnIndex 由日志推导（恢复后继续递增）；turnId 编号与之一致，
+  // 避免恢复后 turnId 重新从 1 开始造成的误导（唯一性由随机后缀保证）
+  const turnIndex = session.durableEvents().filter((e) => e.type === "turn.started").length + 1;
+  const id = (kind: "message" | "call") =>
     deps.newId !== undefined
       ? deps.newId(kind)
       : `${kind}-${++counters[kind]}-${randomUUID().slice(0, 8)}`;
 
-  const turnId = id("turn");
+  const turnId =
+    deps.newId !== undefined ? deps.newId("turn") : `turn-${turnIndex}-${randomUUID().slice(0, 8)}`;
   const turnUsage = {
     inputTokens: 0,
     outputTokens: 0,
@@ -179,7 +183,6 @@ export async function runTurn(
 
   try {
     // ── 开始 ──
-    const turnIndex = session.durableEvents().filter((e) => e.type === "turn.started").length + 1;
     await session.emit("turn.started", { turnIndex }, { turnId });
     await session.emit("message.user", { messageId: id("message"), content }, { turnId });
 

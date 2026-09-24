@@ -179,6 +179,13 @@ describe("公开 Runtime API", () => {
     const s2 = await runtime.resumeSession(id);
     expect(s2.id).toBe(id);
     expect(s2.state().history.length).toBeGreaterThan(0);
+
+    // turnId 编号在恢复后随 turnIndex 继续递增（不再从 1 重新计数）
+    const events2 = collect(s2);
+    await s2.submit({ text: "second" });
+    const started = events2.find((e) => e.type === "turn.started");
+    expect(started?.type === "turn.started" && started.payload.turnIndex).toBe(2);
+    expect(started?.turnId).toMatch(/^turn-2-/);
     await s2.close();
   });
 
