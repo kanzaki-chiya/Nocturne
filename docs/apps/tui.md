@@ -92,7 +92,7 @@
 | 40–79 | 紧凑：状态栏隐藏 cwd/sessionId，diff 上下文收窄，工具输入摘要硬截断 |
 | <40 | 极简：回放条目照常输出（`<Static>` 只追加，不暂存）但摘要更短；活动区 + 输入行 + 单行状态（`status | tokens`）；权限对话框隐藏原因行、选项收缩为单行 |
 | 运行时 resize | Ink 自动重排；回放区不受影响（已写 scrollback），活动区按新宽度重绘 |
-| Windows Terminal / conhost | 两者均支持；conhost 旧版无真彩，用 16 色回退（Ink 的 ColorLevel 探测）；IME 候选窗定位依赖终端的 Synchronized Update 支持，conhost 上会退化（ADR-0010 风险条目） |
+| Windows Terminal / conhost | 两者均可运行；conhost 旧版无真彩，用 16 色回退（Ink 的 ColorLevel 探测）。conhost 的活动区重绘可能留下残影，IME 候选窗定位也可能偏移；建议使用 Windows Terminal。Ink 当前默认已关闭增量渲染，但活动区帧通常不会触发整屏清除；按 `TERM` 无法可靠区分 conhost，强行整屏清除又会破坏 `<Static>` 回放与滚动区，因此本轮保留为已知限制（ADR-0010） |
 
 ## 6. 会话切换与恢复
 
