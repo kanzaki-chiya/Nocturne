@@ -4,29 +4,29 @@ Nocturne 是在代码仓库中工作的命令行编程助手。运行 `nctrn` �
 
 ## 安装
 
-需要 Node.js 24 或更新版本，以及 pnpm 11.24.0。从源码构建：
+需要 Node.js 24 或更新版本，以及 pnpm 11.24.0。从源码构建，并把 `nctrn` 注册为全局命令：
 
 ```sh
+git clone https://github.com/kanzaki-chiya/Nocturne.git
+cd Nocturne
 pnpm install --frozen-lockfile
 pnpm build
-node apps/cli/dist/main.js --version
+cd apps/cli
+npm link
+nctrn --version
 ```
 
-构建后的入口是 `apps/cli/dist/main.js`。以下示例用 `nctrn` 表示运行这个入口；可以按自己的 shell 设置快捷命令：
+`npm link` 把命令放进 npm 的全局目录（`npm prefix -g` 可查看），该目录需要在 `PATH` 中；Node.js 安装程序默认已经配置好。之后在任何目录、任何终端都可以直接运行 `nctrn`。
 
-```powershell
-# PowerShell，在 Nocturne 源码目录执行
-$nocturneCli = (Resolve-Path ./apps/cli/dist/main.js).Path
-function nctrn { node $nocturneCli @args }
-```
+这是链接而不是复制：更新源码后在 Nocturne 目录重新构建即可生效，不需要再次 `npm link`：
 
 ```sh
-# bash / zsh，在 Nocturne 源码目录执行
-NOCTURNE_CLI="$(pwd)/apps/cli/dist/main.js"
-nctrn() { node "$NOCTURNE_CLI" "$@"; }
+git pull
+pnpm install --frozen-lockfile
+pnpm build
 ```
 
-设置后进入要操作的代码仓库，再运行下文的 `nctrn` 命令。需要长期使用时，把入口的绝对路径写进 shell 配置。
+卸载：`npm unlink -g @nocturne/cli`。
 
 ## 配置
 
