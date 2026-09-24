@@ -1,6 +1,6 @@
 # 权限（Permission）
 
-> 状态：已接受 v0.2 ｜ 前置阅读：[tools.md](tools.md) ｜ 决策：[ADR-0004](../decisions/ADR-0004-permission-rules.md)
+> 状态：提议 v0.3（Phase 3 规则与 Grant 全文，评审中）｜ 前置阅读：[tools.md](tools.md)、[config.md](config.md) ｜ 决策：[ADR-0004](../decisions/ADR-0004-permission-rules.md)、[ADR-0008](../decisions/ADR-0008-project-trust-grants.md)
 
 ## 1. 定位
 
@@ -19,8 +19,8 @@
 |---|---|---|---|
 | `SubjectRequest` | 工具声明的、未解析的主体：`{ kind, target }` | 工具的 `permissionSubjects(input)`（纯函数） | — |
 | `PermissionSubject` | 解析后的主体：增加 `resolved`（真实路径）与 `where` | Tool Executor 解析 + 权限层计算 `where` | `tool.started`、`permission.requested` |
-| `PermissionRule` | 一条规则：`{ kind, pattern, action, where? }` | 预设、用户配置、项目配置、命令行参数 | 配置文件 |
-| `Grant` | 用户在确认时授予的授权："本会话内允许"或"在此项目中始终允许" | 客户端回复 | 会话内存 / 用户数据目录 |
+| `PermissionRule` | 一条规则：`{ kind?, pattern, action, where? }`；`kind` 缺省或 `*` 匹配全部类别 | 预设、用户配置、项目配置、命令行参数 | 配置文件 |
+| `Grant` | 用户在确认时授予的授权："本会话内允许"或"在此项目中始终允许"，形状 `{ kind, target, createdAt }`（5.4） | 客户端回复 | 会话内存 / 用户数据目录 |
 | `PermissionDecision` | 求值结果：`{ action, matchedRule?, source, reason }` | `PermissionPolicy.evaluate` | `tool.started.permission`、`permission.resolved` |
 | `PermissionRequest` | `ask` 时发给客户端的待确认请求，有 `requestId` | `PermissionGate` | `permission.requested` |
 | `PermissionReply` | 客户端的回答：允许 / 拒绝、是否授予 Grant、可选反馈 | 客户端 | `permission.resolved` |
@@ -84,7 +84,15 @@ PermissionPolicy.evaluate()             → 计算 where，匹配规则   纯函
 内置预设 < 用户配置 < 可信项目配置 < 命令行参数
 ```
 
-一条规则匹配一个主体，当且仅当 `kind` 相同（或规则为 `*`）、`pattern` 以 glob 方式匹配（路径类见 4.2）、`where` 未指定或相同。没有任何可信规则匹配时，结果为 `ask`。
+一条规则匹配一个主体，当且仅当 `kind` 相同（或规则为 `*`）、`pattern` 匹配（见下）、`where` 未指定或相同。没有任何可信规则匹配时，结果为 `ask`。
+
+`pattern` 的匹配语义按 `kind` 区分：
+
+- **路径类**（`read` / `edit`）：glob——`*` 不跨目录分隔符，`**` 跨任意层级，`?` 匹配单个字符。模式先规范化（`/`，大小写规则同平台）；相对模式拼接到 `workspaceRoot` 之下再匹配。同一个规范化模式同时与 `target`（词法路径）和 `resolved`（真实路径）比较，任一命中即算命中（4.2）。
+- **shell**：对完整命令字符串做通配符匹配——`*` 匹配任意字符序列（无路径段概念），`?` 匹配单字符；大小写敏感，不做词法变形。
+- **network / mcp**：与 shell 相同的字符串通配符匹配。
+
+"命令行参数"层为逐条规则预留（Phase 3 的命令行只提供预设名与 `--yes` 提升，不逐条写规则）。
 
 ### 5.2 信任边界
 
@@ -100,23 +108,42 @@ PermissionPolicy.evaluate()             → 计算 where，匹配规则   纯函
 对每个主体：
 
 ```text
-trusted   = lastMatch(预设 ++ 用户 ++ [可信项目] ++ 命令行, subject) ?? ask
+trusted   = lastMatch(内置预设 ++ 用户 ++ [可信项目] ++ 命令行, subject) ?? ask
 untrusted = 项目不可信 ? lastMatch(项目规则中的 ask/deny, subject) : 无
 decision  = stricter(trusted, untrusted)
-if decision == ask and 有 Grant 匹配 subject:
-  decision = allow        # source = "grant"
+if decision == ask:
+  if 有 Grant 匹配 subject:      decision = allow   # source = "grant"
+  elif autoApproveAsk（--yes）:  decision = allow   # source = "rule"，理由注明命令行提升
 ```
 
 一次调用有多个主体时：任一主体为 `deny` 则 `deny`；否则任一为 `ask` 则 `ask`；否则 `allow`。
 
 附加约束：
 
-- **shell 组合命令**：命令包含 `&&`、`||`、`;`、`|`、换行、反引号、`$(`、重定向等控制符时，基于模式的 `allow` 规则不适用，结果至少为 `ask`；对这类命令的 Grant 只能精确匹配完整命令字符串。这避免 `git status*` 放行 `git status && rm -rf .`。
-- **可解释**：决定中记录命中的规则及其来源（如"用户配置第 3 条""项目配置第 1 条（不可信，仅收紧）"）。
+- **shell 组合命令**：命令包含 `&&`、`||`、`;`、`|`、换行、反引号、`$(`、重定向等控制符时，基于模式的 `allow` 规则不适用（规则照常匹配，但 `allow` 结果按 `ask` 对待，`deny` 仍为 `deny`）；Grant 对命令本来就只能精确匹配完整字符串（5.4），不受此影响。这避免 `git status*` 放行 `git status && rm -rf .`。
+- **`--yes` 的边界**：`autoApproveAsk` 只把最终求值结果为 `ask` 的调用提升为 `allow`（`source` 记 `rule`，理由注明来自命令行）。它不覆盖显式 `deny`（包括不可信项目规则的 `deny`），不绕过输入校验、主体解析或工具自身边界；转换在权限层完成，CLI 与工具实现不得自行放行。
+- **可解释**：决定中记录命中的规则及其来源：`matchedRule = { origin, index?, rule? }`，`origin` 取 `preset` / `user` / `project` / `project-untrusted` / `cli` / `grant` / `default`（兜底 ask，无规则本体）；人读说明形如"预设 default 第 3 条""用户配置第 1 条""项目配置第 2 条（不可信，仅收紧）""Grant（项目）"。没有命中任何规则而落到 `ask` 时 `origin` 为 `default`，说明为"默认询问"。
+
+### 5.4 Grant 的形状与匹配
+
+```ts
+interface Grant {
+  kind: SubjectKind;
+  /** 授权目标：路径类为解析后的真实路径（canonical），shell 为完整命令字符串 */
+  target: string;
+  createdAt: string;
+}
+```
+
+Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。授权键：路径类取 `resolved`（缺失时取规范化 `target`），shell 取完整命令字符串，`network` / `mcp` 取 `target` 原值。"允许整个目录 / 某类命令"这类粗粒度授权不在确认选项中提供——需要时由用户显式写规则（配置文件的 `permissions.rules`），而不是在确认框里随手放权。
+
+- **会话 Grant**：保存在会话内存中，会话关闭即失效，恢复后不保留。
+- **项目 Grant**：写入 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`（见 [config.md](config.md) 第 4 节），按会话的 `workspaceRoot` 归属；写盘失败时降级为会话 Grant 并发出 `runtime.warning`。
+- 客户端回复 `PermissionReply.remember = "session" | "project"` 时生成对应 Grant；`remember` 与 `decision: "deny"` 组合无意义，忽略 `remember`。
 
 ## 6. 预设
 
-预设只是一组规则，没有隐藏逻辑，用户可以在其上追加规则覆盖。
+预设只是一组有序规则，没有隐藏逻辑，用户可以在其上追加规则覆盖。预设构造时拿到 `workspaceRoot` 与 `attachmentsDir`（工具输出落盘目录，见 [tools.md](tools.md) 第 4 节），据此生成具体规则；求值时预设与其他层规则没有任何差别。
 
 | 预设 | read（工作区） | read（外部） | edit（工作区） | edit（外部） | shell | network / mcp |
 |---|---|---|---|---|---|---|
@@ -125,10 +152,12 @@ if decision == ask and 有 Grant 匹配 subject:
 | `auto-edit` | allow | ask | allow | ask | ask | ask |
 | `full-access` | allow | allow | allow | ask | allow | allow |
 
-所有预设额外包含：
+表中没有覆盖到的组合落到"无规则匹配 → `ask`"。所有预设的规则序列都按以下次序排列（后写优先）：
 
-- **受保护路径**：对 `.git/` 内部与 `.nocturne/` 配置目录的 `edit` 一律 `ask`。
-- **高风险命令**：`full-access` 中对一组已知高风险命令模式（如 `rm -rf *`、`git push --force*`、`git reset --hard*`）保持 `ask`。这是基于模式的提示，不是可靠的危险检测。
+1. 宽规则（按上表，如 `default` 的 `read ** where=workspace → allow`）；
+2. **落盘目录可读**：`read <attachmentsDir>/** → allow`（工具输出落盘后模型可直接回读；该目录只含工具输出副本）；
+3. **受保护路径**：对 `.git/` 内部与 `.nocturne/` 配置目录的 `edit` 一律 `ask`——即使 `read-only` 把 `edit` 一律 `deny`，这两条仍在其后，因此受保护路径的最终结果是 `ask` 而不是 `deny`；
+4. **高风险命令**（仅 `full-access`）：一组已知高风险命令模式（如 `rm -rf *`、`git push --force*`、`git reset --hard*`、`sudo *`）保持 `ask`。这是基于模式的提示，不是可靠的危险检测。
 
 ## 7. 需要确认时（ask）
 
@@ -139,23 +168,19 @@ PermissionGate.check(subjects, signal)
   → emit permission.resolved { requestId, action, source: "user" | "cancelled", remember }
 ```
 
-| 选项 | 效果 |
-|---|---|
-| 允许一次 | 仅本次调用 |
-| 本会话内允许 | 生成会话 Grant（精确目标或用户选定的前缀），保存在内存中，会话关闭即失效 |
-| 在此项目中始终允许 | 生成项目 Grant，写入**用户数据目录**中按工作区区分的记录，而不是仓库内的项目配置 |
-| 拒绝 | 工具结果为拒绝，可附带反馈给模型，Turn 继续 |
-| 拒绝并停止 | 工具结果为拒绝，并中止当前 Turn |
+| 选项 | `PermissionOption` | 效果 |
+|---|---|---|
+| 允许一次 | `allow_once` | 仅本次调用 |
+| 本会话内允许 | `allow_session` | 生成会话 Grant（5.4 精确目标），保存在内存中，会话关闭即失效 |
+| 在此项目中始终允许 | `allow_project` | 生成项目 Grant，写入**用户数据目录**中按工作区区分的记录（[config.md](config.md) 第 4 节），而不是仓库内的项目配置 |
+| 拒绝 | `deny` | 工具结果为拒绝，可附带反馈给模型，Turn 继续 |
+| 拒绝并停止 | `deny_stop` | 工具结果为拒绝，并中止当前 Turn |
 
-两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时，`ask` 视为 `deny`（`source: "non_interactive"`），该行为可在配置中显式修改。
+`permission.requested.options` 对所有主体给出同一组完整选项；`PermissionReply.remember` 与所选 Grant 的持久化由权限层完成，客户端只表达意图。
 
-**Phase 2 的最小形态**（完整规则与 Grant 在 Phase 3）：
+两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时（Runtime 选项 `interactive = false`），`ask` 一律视为 `deny`（`source: "non_interactive"`，不发 `permission.requested`）；要在无人值守场景放行使用 `--yes`（5.3 的命令行提升）或预写规则，不提供"非交互默认允许"的配置项。
 
-- 策略固定为 `default` 预设的专用实现：`read` 且 `where = "workspace"` → `allow`，其余主体 → `ask`；没有可配置规则与 Grant 存储。
-- 命令行注入的允许（CLI 的 `-y/--yes`）等价于 5.1 中"命令行参数"层规则的最小形态：**只把最终求值结果为 `ask` 的调用提升为 `allow`**（`source` 记 `rule`，理由注明来自命令行）。它不覆盖显式 `deny`，不绕过输入校验、主体解析或工具自身边界；转换在权限层（policy 求值的后处理）完成，CLI 与工具实现不得自行放行。测试也可以通过 `RuntimeOptions.policy` 注入限定范围的策略来完成自动批准，不依赖 `--yes`。
-- `permission.requested` 的 `options` 只包含 `allow_once` 与 `deny`；`deny_stop` 与 `remember` 保留在协议中，Phase 2 的客户端不暴露、Runtime 收到 `remember` 时忽略（不生成任何持久授权）。
-- "有无交互式客户端"由 Runtime 选项显式给出（`interactive`，默认 `false`）。为 `false` 时不发出 `permission.requested`，求值为 `ask` 的调用直接记 `permission.resolved(action="deny", source="non_interactive")`。
-- 等待回复期间 `signal` 中止：记 `permission.resolved(action="deny", source="cancelled")`，该调用按 `cancelled` 结算。
+等待回复期间 `signal` 中止：记 `permission.resolved(action="deny", source="cancelled")`，该调用按 `cancelled` 结算。
 
 ## 8. 与其他模块的关系
 

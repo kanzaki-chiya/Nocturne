@@ -1,6 +1,6 @@
 # 上下文管理（Context）
 
-> 状态：已接受 v0.2 ｜ 前置阅读：[sessions.md](sessions.md) ｜ 相关契约：[provider-api.md](../protocols/provider-api.md)
+> 状态：提议 v0.3（自动 L2 摘要，评审中）｜ 前置阅读：[sessions.md](sessions.md) ｜ 相关契约：[provider-api.md](../protocols/provider-api.md)
 
 ## 1. 两个不同的东西
 
@@ -97,15 +97,16 @@ Agent Loop                 → prune：直接写入事件
 
 ### 6.5 触发
 
-- 构建结果超过预算的某个阈值（默认 80%）时，Builder 先给出 prune 计划；修剪后仍超出，给出 summary 计划。这类压缩是预防性的（`mustCompact = false`）。
+- 构建结果超过预算的某个阈值（默认 80%）时，Builder 先给出 prune 计划；修剪后仍超出阈值，给出 summary 计划。这类压缩是预防性的（`mustCompact = false`）。
 - 请求已超出预算，或 Provider 返回 `context_overflow` 时，`mustCompact = true`（见 [agent-loop.md](agent-loop.md) 第 3.5 节）。
 - 用户可以用 `/compact` 手动触发摘要，走同一条路径。
 
-Phase 2 的落地细节（自动摘要仍在 Phase 3；手动 `/compact` 已是完整的 L2 摘要，含一次模型调用）：
+落地细节（自动摘要自 Phase 3 起启用，与手动 `/compact` 共用同一条 L2 路径）：
 
-- 估算超过阈值 → 给出 `prune` 计划，`throughSeq` 取最近一个闭合步骤边界；Agent Loop 写入 `context.compacted(kind="prune")` 后重建一次。预防性压缩每个 Turn 至多执行一次（成功或失败均不重复；§6.6 的失败不再尝试规则是其子集）。
-- prune 后仍超出硬预算、必须压缩才能继续时（`mustCompact`）→ Phase 2 不自动摘要；Turn 以 `error` 结束，`error.code = "compaction_failed"`，提示用户使用 `/compact`（§6.6）。
-- Provider 返回 `context_overflow` → 若本 Turn 尚未执行过压缩且存在可行边界，执行一次 prune 后重建重试；否则按上一条结束。
+- Builder 的 `compaction` 计划按序给出：估算超过阈值且存在更新于当前修剪点的闭合边界 → `prune`；prune 之后仍超阈值（或 prune 无可行边界）且存在可行摘要边界 → `summary`（`CompactionPlan` 携带 `summaryRequest`）。两种计划的判定都在 Builder 内完成，Agent Loop 只按计划执行。
+- **每个 Turn 每种压缩至多执行一次**（成功或失败均不重复）：预防性压缩失败后本 Turn 不再尝试（§6.6）；`context_overflow` 到达时从未尝试过的下一级继续（prune 未试过先 prune，否则 summary），两级都已尝试后仍溢出发 `compaction_failed`。
+- `summary` 计划执行成功后重建一次；重建结果仍超硬预算时不再追加尝试，Turn 以 `error(code = "compaction_failed")` 结束。
+- 摘要可以在 Turn 进行中发生：此时摘要边界只落在已闭合的步骤边界上（6.3），被覆盖的进行中 Turn 的 `message.user` 原文由 Builder 依据 `state.openTurn` 在摘要后重新注入。
 - prune 的呈现：最新摘要之后、`throughSeq` 及之前的工具结果替换为占位说明（保留工具名与参数摘要，标注"输出已省略"）；参数摘要来自 `tool.started.input` 折叠进历史条目的 `inputSummary` 字段（`HistoryEntry` 的兼容新增可选字段，见 [events.md](../protocols/events.md) 第 8 节）。
 
 ### 6.6 摘要请求本身的约束与失败处理
@@ -120,7 +121,7 @@ Phase 2 的落地细节（自动摘要仍在 Phase 3；手动 `/compact` 已是�
 
 ### 6.7 阶段安排
 
-Phase 2 提供自动修剪与手动 `/compact`；Phase 3 加入自动摘要。之前的阶段遇到超长上下文时明确报错并提示用户，而不是静默截断。
+Phase 2 提供自动修剪与手动 `/compact`；Phase 3 加入自动摘要（6.5）。
 
 ## 7. 切换模型或 Provider
 

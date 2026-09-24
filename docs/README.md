@@ -23,6 +23,7 @@
 | [context.md](architecture/context.md) | 如何从会话历史构建模型上下文，token 预算与压缩 |
 | [tools.md](architecture/tools.md) | 工具注册、执行管线、结果归一化、内置工具 |
 | [permissions.md](architecture/permissions.md) | allow / ask / deny 规则模型、默认规则、审批流程 |
+| [config.md](architecture/config.md) | 分层配置、配置文件格式、项目信任模型、Grant 持久化 |
 | [providers.md](architecture/providers.md) | Provider 抽象、模型能力、流式与错误归一化 |
 | [pitfalls.md](architecture/pitfalls.md) | 最容易犯的架构错误、早期症状与规避方式 |
 
@@ -30,7 +31,7 @@
 
 | 文档 | 回答的问题 |
 |---|---|
-| [apps/cli.md](apps/cli.md) | `nctrn` 命令行客户端：参数、REPL、事件渲染、权限确认、退出码、Provider 过渡配置 |
+| [apps/cli.md](apps/cli.md) | `nctrn` 命令行客户端：参数、REPL、事件渲染、权限确认、会话恢复、退出码、配置来源 |
 
 ## Protocols（精确契约）
 

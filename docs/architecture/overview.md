@@ -76,7 +76,7 @@
 | `provider` | Provider 接口、模型能力、各模型服务的适配器 | [providers.md](providers.md) |
 | `tools` | 工具注册表、执行管线、内置工具 | [tools.md](tools.md) |
 | `permission` | 权限规则求值与审批请求 | [permissions.md](permissions.md) |
-| `config` | 配置分层加载与合并（Phase 3 实现） | [modules.md](modules.md) |
+| `config` | 配置分层加载与合并、项目信任、Grant 持久化（Phase 3 实现） | [config.md](config.md) |
 | `platform` | 文件系统、子进程、路径等跨平台 I/O | [modules.md](modules.md) |
 | `apps/cli` | `nctrn` 命令行客户端 | [apps/cli.md](../apps/cli.md) |
 
@@ -91,5 +91,9 @@
 - [ADR-0003](../decisions/ADR-0003-session-event-log.md)：追加式事件日志作为会话唯一事实来源
 - [ADR-0004](../decisions/ADR-0004-permission-rules.md)：规则化的权限策略层
 - [ADR-0005](../decisions/ADR-0005-own-provider-interface.md)：自有 Provider 接口，不暴露第三方 SDK 类型
+- [ADR-0006](../decisions/ADR-0006-anthropic-transport.md)：anthropic 适配器传输选型
+- [ADR-0007](../decisions/ADR-0007-config-format.md)：配置文件格式与分层（提议）
+- [ADR-0008](../decisions/ADR-0008-project-trust-grants.md)：项目配置信任模型与 Grant 持久化（提议）
+- [ADR-0009](../decisions/ADR-0009-session-lock.md)：会话锁机制（提议）
 
 这些决定的研究依据见 [research/zcode-review.md](../research/zcode-review.md)。

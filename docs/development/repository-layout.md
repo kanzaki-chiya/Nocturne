@@ -27,8 +27,8 @@ nocturne/
 │       │   │   └── adapters/    openai-compatible/、anthropic/ ……
 │       │   ├── tools/           注册表、执行管线、结果预算
 │       │   │   └── builtin/     read、write、edit、grep、glob、shell
-│       │   ├── permission/      规则求值、权限闸门
-│       │   ├── config/          配置分层加载（Phase 3 创建）
+│       │   ├── permission/      规则求值、权限闸门、Grant 匹配
+│       │   ├── config/          配置分层加载、项目信任、Grant 文件读写（Phase 3）
 │       │   └── platform/        文件系统、子进程、路径（跨平台）
 │       └── test/                集成测试（脚本化的假 Provider 驱动完整 Turn）
 └── apps/
@@ -38,8 +38,9 @@ nocturne/
         ├── src/
         │   ├── main.ts          入口：参数解析、模式分流、退出码
         │   ├── args.ts          命令行解析（util.parseArgs 封装）
-        │   ├── config.ts        Provider 配置收集（环境变量 + 参数，cli.md 第 7 节）
+        │   ├── config.ts        调用 core/config 分层加载并把命令行参数作为一层传入（cli.md 第 7 节）
         │   ├── repl.ts          交互循环与权限确认提示
+        │   ├── sessions.ts      --resume/--continue/--sessions/trust 的实现（Phase 3）
         │   ├── commands.ts      斜杠命令分发（/model、/context、/compact 等）
         │   └── render.ts        事件 → 终端文本的纯函数渲染映射
         └── test/                离线单测（*.test.ts）与冒烟（*.smoke.ts）
@@ -82,7 +83,21 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
 
 ## 5. 运行时数据位置
 
-运行时数据不写入仓库：会话日志、用户配置、按工作区保存的权限授权都位于 `NOCTURNE_HOME`（默认 `~/.nocturne`）。仓库内只可能出现项目级配置 `.nocturne/`（其中的 allow 规则受信任限制，见 [permissions.md](../architecture/permissions.md)）与 `AGENTS.md`。
+运行时数据不写入仓库，统一位于 `NOCTURNE_HOME`（默认 `~/.nocturne`）：
+
+```text
+<NOCTURNE_HOME>/
+├── config.json                       用户配置（含 trustedWorkspaces，config.md）
+├── AGENTS.md                         用户级项目指令（可选）
+├── grants/<workspaceKey>.json        按工作区保存的项目级 Grant（ADR-0008）
+└── sessions/
+    ├── <sessionId>.jsonl             会话事件日志
+    ├── <sessionId>.lock              会话锁（ADR-0009）
+    ├── <sessionId>.jsonl.tail-<ts>   崩溃截断下来的损坏尾部（诊断用）
+    └── attachments/<sessionId>/<callId>.txt   超预算工具输出的落盘（tools.md 第 4 节）
+```
+
+仓库内只可能出现项目级配置 `.nocturne/`（其中的 allow 规则受信任限制，见 [permissions.md](../architecture/permissions.md)）与 `AGENTS.md`。
 
 ## 6. 工具链选型（Phase 1 确定）
 

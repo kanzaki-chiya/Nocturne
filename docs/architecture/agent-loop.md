@@ -28,11 +28,11 @@ runTurn(session, input, signal):
 
     # 1. 构建上下文（纯计算）；需要压缩时执行压缩计划后重建
     built = contextBuilder.build(session.state, tools.specs(), model)
-    if built.compaction:
-      ok = runCompaction(built.compaction, signal)       # 见第 3.7 节
+    while built.compaction and 该计划类型本 Turn 未尝试过:
+      ok = runCompaction(built.compaction, signal)       # 见第 3.7 节；每类每 Turn 至多一次
       if not ok and built.mustCompact: return finish("error", compaction_failed)
       built = contextBuilder.build(session.state, tools.specs(), model)
-    if built.overBudget:         return finish("error", context_overflow)
+    if built.overBudget:         return finish("error", compaction_failed)
 
     # 2. 调用模型并消费流
     messageId = newId()
@@ -114,7 +114,7 @@ finish(reason, error?):
 
 - 只有在**本次请求尚未产生任何输出事件**时才重试，避免重复的文本和工具调用。已经开始流式输出后失败，已收到的文本按中断同样的方式保存，Turn 以 `error` 结束。
 - 仅当 `ProviderError.retryable` 为真时重试；指数退避，优先遵守 `retryAfterMs`；次数上限可配置（默认 4 次）。每次重试发出临时事件 `provider.retry`。
-- `context_overflow` 不重试同一请求，而是要求 Context Builder 给出压缩计划（`mustCompact`）并重建一次；仍失败则以 `error` 结束。
+- `context_overflow` 不重试同一请求，而是要求 Context Builder 给出压缩计划（`mustCompact`）并重建后重试一次；可尝试的计划按 prune → summary 顺序，每类每 Turn 至多一次，都已尝试后仍溢出则以 `error(code="compaction_failed")` 结束。
 
 ### 3.6 持久化失败
 

@@ -1,6 +1,6 @@
 # CLI（`nctrn`）
 
-> 状态：提议 v0.1 ｜ 前置阅读：[modules.md](../architecture/modules.md) 第 4 节、[events.md](../protocols/events.md) ｜ 代码位置：`apps/cli/`
+> 状态：提议 v0.2（Phase 3：会话恢复、分层配置、完整权限确认，评审中）｜ 前置阅读：[modules.md](../architecture/modules.md) 第 4 节、[events.md](../protocols/events.md)、[config.md](../architecture/config.md) ｜ 代码位置：`apps/cli/`
 
 本文是 `nctrn` 命令行客户端的唯一设计文档：命令行参数、REPL、事件渲染、权限确认、退出码、Phase 2 的 Provider 配置过渡方案。
 
@@ -11,15 +11,24 @@
 ## 2. 命令行
 
 ```text
-nctrn                        # 交互模式（REPL）
+nctrn                        # 交互模式（REPL）：新建会话
 nctrn -p "<prompt>"          # 非交互模式：执行一次 Turn 后退出
 nctrn -p                     # 非交互模式：prompt 从 stdin 读取（stdin 非 TTY 时）
+nctrn --continue             # 恢复当前目录最近的会话后进入所选模式
+nctrn --resume <id>          # 恢复指定会话后进入所选模式
+nctrn --sessions             # 列出会话后退出（只读）
+nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trustedWorkspaces 后退出
 ```
 
 | 参数 | 说明 |
 |---|---|
 | `-p, --print [prompt]` | 非交互模式。值可省略：省略时从 stdin 读全部输入作为 prompt |
-| `--model <id>` | 模型 id（当前 Provider 内），覆盖 `NOCTURNE_MODEL`；`provider/model` 写法在前缀等于当前 Provider 时剥掉前缀，前缀是另一种 api-type 时拒绝；其余含斜杠的值（如 `deepseek/deepseek-v4.1-flash` 这类命名空间 id）按模型 id 原样使用 |
+| `-c, --continue` | 恢复绑定到当前目录（`workspaceRoot` 相同）的最近会话；没有时按"新建会话"处理 |
+| `--resume <id>` | 恢复指定会话；支持 `-p` 组合（恢复后直接执行该 prompt） |
+| `--sessions` | 列出全部会话（id、创建时间、绑定目录、模型、锁状态），按修改时间倒序，随后退出（退出码 0） |
+| `--force-unlock` | 与 `--resume` / `--continue` 搭配：先删除残留锁再打开（[sessions.md](../architecture/sessions.md) 第 4 节） |
+| `--preset <name>` | 会话权限预设：`read-only` \| `default` \| `auto-edit` \| `full-access`，写入 `session.created`；恢复会话时该参数拒绝（预设以日志为准，改用 `/preset`） |
+| `--model <id>` | 模型 id（当前 Provider 内），覆盖 `NOCTURNE_MODEL` 与配置文件；`provider/model` 写法在前缀等于当前 Provider 时剥掉前缀，前缀是另一种 api-type 时拒绝；其余含斜杠的值（如 `deepseek/deepseek-v4.1-flash` 这类命名空间 id）按模型 id 原样使用 |
 | `--api-type <type>` | `openai-compatible`（默认）或 `anthropic`，覆盖 `NOCTURNE_API_TYPE` |
 | `--base-url <url>` | Provider 端点，覆盖 `NOCTURNE_BASE_URL`；`anthropic` 类型省略时用官方端点 |
 | `--api-key-env <NAME>` | 读取凭据的环境变量名。默认：`anthropic` → `ANTHROPIC_API_KEY`，其余 → `NOCTURNE_API_KEY` |
@@ -29,10 +38,15 @@ nctrn -p                     # 非交互模式：prompt 从 stdin 读取（stdin
 
 规则：
 
-- 工作目录即进程 cwd；`workspaceRoot` 取 cwd 的真实路径。Phase 2 不提供恢复会话、切换目录等参数。
+- 工作目录即进程 cwd；`workspaceRoot` 取 cwd 的真实路径。
+- **恢复与会话目录绑定**：`--resume` / `--continue` 打开的会话记录了它自己的 `cwd`/`workspaceRoot`（sessions.md 第 7 节）。会话目录与进程 cwd 不一致时：交互模式提示并默认拒绝（显式确认后继续，工具仍以会话记录的目录为准）；非交互模式直接报错（退出码 2）。
+- **锁冲突**：会话被其他进程占用时报 `session_locked` 并显示锁内容（pid、主机名、启动时间），退出码 2；确认持有者已退出时用 `--force-unlock`。
+- **恢复失败的其余情形**（不存在、`session_log_corrupt`、`session_log_newer`、模型已不可解析）同样以退出码 2 退出并打印原因。
+- 恢复成功后打印一行恢复摘要（`session.recovery`：截断尾部、补齐的中断调用与 Turn 计数；无修复则不打印）。
 - 凭据**只能**来自环境变量（`workflow.md` 第 7 节），不接受命令行上的密钥值；`--api-key-env` 指定的是变量名。
 - 启动时校验配置：缺 `baseURL`（openai-compatible）、缺凭据环境变量、缺模型 id，都打印缺失项并以退出码 2 退出，两种模式一致。
 - 未知参数、参数缺值：打印用法并以退出码 2 退出。
+- `trust` / `untrust` 子命令读写用户配置 `<NOCTURNE_HOME>/config.json` 的 `trustedWorkspaces`（[config.md](../architecture/config.md) 第 3 节），打印结果后以退出码 0 退出；用户配置损坏时按配置文件错误处理（退出码 2）。
 
 ## 3. 交互模式（REPL）
 
@@ -52,6 +66,8 @@ nctrn -p                     # 非交互模式：prompt 从 stdin 读取（stdin
 | `/help` | 列出命令与快捷键 | — |
 | `/model` | 显示当前模型与可用模型列表 | `runtime.listModels()`、`session.state().config.model` |
 | `/model <id>` | 会话内切换模型 | `session.setModel(ref)` → `session.config_changed` |
+| `/preset` | 显示当前权限预设 | `session.state().config.permissionPreset` |
+| `/preset <name>` | 会话内切换权限预设 | `session.setPermissionPreset(name)` → `session.config_changed` |
 | `/context` | 显示若现在构建请求，上下文由什么组成 | `session.describeContext()` → `{ report: ContextReport; overBudget: boolean }`（见下） |
 | `/compact` | 手动触发 L2 摘要压缩 | `session.compact()` → `context.compacted(kind="summary")` |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
@@ -72,9 +88,9 @@ nctrn -p                     # 非交互模式：prompt 从 stdin 读取（stdin
 | `tool.started` | `● <name>(<参数摘要>)`，参数摘要取 input 的短 JSON，截断约 100 字符 |
 | `tool.input.delta` | 不渲染（Phase 4 的 TUI 才需要增量展示） |
 | `tool.progress` | shell 的流式输出：缩进写到终端（见"输出分流"） |
-| `tool.completed` | `└ <status>` + 耗时；`error`/`denied`/`cancelled` 附 `error.code` 与原因；`edit`/覆盖 `write` 的 `output.diff` 以 unified diff 着色渲染（`+` 绿、`-` 红、上下文默认色） |
+| `tool.completed` | `└ <status>` + 耗时；`error`/`denied`/`cancelled`/`interrupted` 附 `error.code` 与原因；`edit`/覆盖 `write` 的 `output.diff` 以 unified diff 着色渲染（`+` 绿、`-` 红、上下文默认色）；`truncated` 为真时附一行"输出已截断，完整内容在 \<path\>"（落盘路径见 [tools.md](../architecture/tools.md) 第 4 节） |
 | `permission.requested` | 第 6 节的确认提示 |
-| `permission.resolved` | `└ 权限：<allow\|deny>（<source>）` 一行 |
+| `permission.resolved` | `└ 权限：<allow\|deny>（<source>：<rule\|reason>）` 一行——命中规则时展示 `rule`（如"用户配置第 3 条 {…}"），无规则时展示原因 |
 | `context.compacted` | `◇ 上下文已压缩（<kind>，至 seq <throughSeq>）` |
 | `session.config_changed` | `◇ 模型已切换为 <provider>/<model>` |
 | `provider.retry` | `! Provider 错误（<kind>），<delayMs>ms 后第 <n>/<max> 次重试` |
@@ -86,16 +102,26 @@ nctrn -p                     # 非交互模式：prompt 从 stdin 读取（stdin
 
 ## 6. 权限确认
 
-Phase 2 固定 `default` 预设（permissions.md 第 6 节）：工作区内读取 `allow`，其余 `ask`。ask 走协议流程：`permission.requested` → `session.respondPermission(requestId, reply)` → `permission.resolved`。
+预设与规则由配置决定（第 7 节、permissions.md 第 6 节），`--preset` 或 `/preset` 切换会话预设。ask 走协议流程：`permission.requested` → `session.respondPermission(requestId, reply)` → `permission.resolved`。
 
-- **交互模式**：提示块列出主体（kind、target、解析后路径）与原因，提供恰好两个选项：`[a] 允许一次` / `[d] 拒绝`。回复经 `respondPermission` 送回；回复到达前 Turn 挂起（Ctrl+C 可中断，该请求记 `cancelled`）。
+- **交互模式**：提示块列出主体（kind、target、解析后路径）、原因与命中的规则（`reason` 与规则来源），提供完整选项：
+
+  | 按键 | 选项 | reply |
+  |---|---|---|
+  | `a` | 允许一次 | `{ decision: "allow" }` |
+  | `s` | 本会话内允许 | `{ decision: "allow", remember: "session" }` |
+  | `p` | 在此项目中始终允许 | `{ decision: "allow", remember: "project" }` |
+  | `d` | 拒绝（可附一句反馈给模型） | `{ decision: "deny", feedback? }` |
+  | `x` | 拒绝并停止本 Turn | `{ decision: "deny", stop: true }` |
+
+  回复经 `respondPermission` 送回；回复到达前 Turn 挂起（Ctrl+C 可中断，该请求记 `cancelled`）。
 - **非交互模式**：不产生等待——`ask` 一律拒绝，`permission.resolved` 记 `source: "non_interactive"`。CLI 以 `RuntimeOptions.interactive` 告知 Runtime 是否有回复能力（交互 `true`，非交互 `false`，默认 `false`）。
-- **`-y, --yes`**：只把**最终判定为 `ask`** 的调用提升为 `allow`（`source: "rule"`，理由注明来自命令行参数）；不覆盖显式 `deny`，不绕过输入校验、路径限制或工具边界，转换在权限层完成（permissions.md 第 7 节）。是用户主动选择的自动批准能力（非交互批处理等场景），默认不开启；程序化的测试也可以注入限定范围的 `policy`，不必依赖它。
-- `deny` 后模型会收到带理由的工具结果并可自我修正；Phase 2 不暴露"拒绝并停止"（协议中的 `deny_stop` 保留），也不提供 Grant（"本会话/本项目允许"在 Phase 3）；`remember` 字段传入时忽略。
+- **`-y, --yes`**：只把**最终判定为 `ask`** 的调用提升为 `allow`（`source: "rule"`，理由注明来自命令行参数）；不覆盖显式 `deny`（包括不可信项目规则的 `deny`），不绕过输入校验、路径限制或工具边界，转换在权限层完成（permissions.md 第 5.3 节）。是用户主动选择的自动批准能力（非交互批处理等场景），默认不开启；程序化的测试也可以注入限定范围的 `policy`，不必依赖它。
+- `deny` 后模型会收到带理由的工具结果并可自我修正。
 
-## 7. Provider 配置（Phase 2 过渡方案）
+## 7. 配置来源（config 模块）
 
-`config` 模块在 Phase 3 才存在（分层配置、配置文件）。Phase 2 的 CLI 以**环境变量 + 命令行参数**为唯一配置来源，组装成现有的 `RuntimeOptions.providerConfigs` / `modelOverrides` 注入 `createRuntime`：
+CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的分层加载（[config.md](../architecture/config.md)），把 `ResolvedConfig` 注入 `createRuntime`；命令行参数构成最高优先级的一层。
 
 | 环境变量 | 参数覆盖 | 说明 |
 |---|---|---|
@@ -108,10 +134,10 @@ Phase 2 固定 `default` 预设（permissions.md 第 6 节）：工作区内读�
 
 约定：
 
-- CLI 构造恰好一个 Provider，其 id 取 `--api-type` 的值；模型引用形如 `anthropic/claude-sonnet-4`。
+- 用户配置 `<NOCTURNE_HOME>/config.json` 可声明多个 Provider 与默认模型；`--api-*`/`--model` 参数与 `NOCTURNE_*` 变量按 [config.md](../architecture/config.md) 第 5 节合成为一个环境变量/命令行层的 Provider 条目参与按 id 合并。只有环境变量、没有配置文件时行为与 Phase 2 一致。
 - 凭据只进入 Provider 配置：不出现在诊断信息、持久化事件、日志或配置回显中；`--api-key-env` 回显的是变量名而非值。
-- 缺失或无效的配置在启动时快速失败（退出码 2），不带着半截配置进入会话。
-- **过渡性质**：Phase 3 落地 `config` 模块后，CLI 把"配置来源"从环境变量/参数换成 `config` 的分层加载结果，`createRuntime` 的注入形态不变（modules.md 已声明同一组 `RuntimeOptions` 承接两种来源）。因此本节只定义"CLI 如何收集配置"，不在 CLI 内造配置文件或规则语法，不引入与将来 `config` 冲突的概念。
+- 配置文件错误（用户配置解析失败/不合 schema）、缺失或无效的配置在启动时快速失败（退出码 2），不带着半截配置进入会话。
+- 项目配置存在但未信任时打印一行提示（对应 `runtime.warning(code="project_config_untrusted")`）：其收紧方向的权限规则仍生效，其余字段被忽略，可用 `nctrn trust` 信任当前目录。
 - 冒烟测试用独立的 `NOCTURNE_SMOKE_*` / `NOCTURNE_SMOKE_ANTHROPIC_*` 变量（workflow.md 第 5 节），与 CLI 运行变量分离。
 
 ## 8. 工程约束
@@ -132,13 +158,13 @@ Phase 2 固定 `default` 预设（permissions.md 第 6 节）：工作区内读�
 
 | 退出码 | 场景 |
 |---|---|
-| 0 | Turn 以 `done` 结束；`--help` / `--version` 正常输出 |
+| 0 | Turn 以 `done` 结束；`--help` / `--version` / `--sessions` / `trust` / `untrust` 正常输出 |
 | 1 | Turn 非 `done` 结束：`error`、`max_steps`、`truncated`、`refused`；会话进入 `failed` |
-| 2 | 用法或配置错误：未知参数、缺 `baseURL`/凭据/模型、模型未配置 |
+| 2 | 用法或配置错误：未知参数、缺 `baseURL`/凭据/模型、模型未配置；恢复失败：会话不存在、被锁占用、日志损坏或版本过高、跨目录恢复被非交互模式拒绝 |
 | 130 | 被中断（SIGINT → `aborted`） |
 
 交互模式的斜杠命令错误与 Turn 失败只显示，不退出进程。
 
 ## 10. 暂不设计
 
-会话恢复与列表选择（Phase 3）、Grant 相关选项、多行输入与粘贴模式、`deny_stop` 选项、输出分页、`--output-format`、stdin 以外的非交互输入源。Phase 4 的 TUI 复用同一 Runtime 与事件流，不重用本 CLI 的渲染代码。
+REPL 内切换会话、多行输入与粘贴模式、输出分页、`--output-format`、stdin 以外的非交互输入源。Phase 4 的 TUI 复用同一 Runtime 与事件流，不重用本 CLI 的渲染代码。

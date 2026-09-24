@@ -101,10 +101,11 @@
 
 ### config
 
-- **负责**：按层级加载配置（内置默认 < 用户 < 项目 < 命令行参数）；校验；记录每个配置值的来源；读取 Provider 凭据所需的环境变量。
-- **不负责**：解释配置含义（各模块自己消费自己的配置段）。
+- **负责**：按层级加载配置（内置默认 < 用户 < 项目 < 环境变量 < 命令行参数）；校验；记录每个配置值的来源；项目配置的信任判定（`trustedWorkspaces`）；按工作区读写项目 Grant 文件；读取 Provider 凭据所需的环境变量。
+- **不负责**：解释配置含义（各模块自己消费自己的配置段）；权限求值（permission 只接收已合并、已标注来源与信任状态的规则与 Grant 集合）。
+- **公开接口**：`loadConfig(platform, { cliArgs })` → `RuntimeConfig`（`base` + `forWorkspace(workspaceRoot)`，见 [config.md](config.md) 第 6 节）。
 - **依赖**：protocol、platform。
-- **实现状态**：尚未创建目录，随 Phase 3「分层配置」实现（见 [roadmap.md](../roadmap/roadmap.md)）。在此之前，配置由客户端经 `createRuntime(options)` 直接注入（见下文 core/index）。
+- 详见 [config.md](config.md)。
 
 ### platform
 
@@ -117,20 +118,27 @@
 客户端看到的全部能力都经由这里：
 
 ```ts
-const runtime = await createRuntime({ cwd, providerConfigs, interactive })  // 选项见 RuntimeOptions
-const session = await runtime.createSession({ model: "provider/model" })  // 或 resumeSession(id) / listSessions()
+const runtime = await createRuntime({ cwd, providerConfigs, interactive, config })  // 选项见 RuntimeOptions
+const session = await runtime.createSession({ model: "provider/model" })  // 或 resumeSession(id, { force? }) / listSessions()
 const unsubscribe = session.subscribe((event) => render(event))
 await session.submit({ text: "修复登录测试" })                 // 返回在 Turn 结束时 resolve
 session.interrupt()
-await session.respondPermission(requestId, { decision: "allow" })
+await session.respondPermission(requestId, { decision: "allow", remember: "project" })  // Phase 3 起生成 Grant
 await session.setModel({ provider: "…", model: "…" })          // → session.config_changed
+await session.setPermissionPreset("auto-edit")                // → session.config_changed（Phase 3）
 await session.compact()                                       // → context.compacted("summary")
 const { report, overBudget } = session.describeContext()       // ContextReport 查询，不产事件
 runtime.listModels()                                          // 全部可用模型（/model 用）
 await session.close()
 ```
 
-`createRuntime` 的选项（`RuntimeOptions`）直接接收各模块的配置：`cwd`、`workspaceRoot`、`sessionsDir`、`providers`（直接注入的 Provider 实例，如测试用 `FakeProvider`）、`providerConfigs`（声明式 Provider 配置：`openai-compatible` 与 `anthropic` 的判别联合）、`modelOverrides`、`policy`、`permissions`（Phase 2 最小权限选项：命令行允许标志，对应 CLI `-y`，见 [permissions.md](permissions.md) 第 7 节）、`interactive`（是否有回复权限请求的客户端；默认 `false`，同上）、`instructions`、`turn`（`maxSteps` / `retryLimit` / `retryBaseDelayMs`）。`config` 模块落地后，分层加载的结果经同一组选项注入，不改变这里的形态；Phase 2 由 CLI 以环境变量与命令行参数组装（见 [apps/cli.md](../apps/cli.md) 第 7 节）。
+`createRuntime` 的选项（`RuntimeOptions`）直接接收各模块的配置：`cwd`、`workspaceRoot`、`sessionsDir`、`providers`（直接注入的 Provider 实例，如测试用 `FakeProvider`）、`providerConfigs`（声明式 Provider 配置：`openai-compatible` 与 `anthropic` 的判别联合）、`modelOverrides`、`policy`、`permissions`、`interactive`（是否有回复权限请求的客户端；默认 `false`）、`instructions`、`turn`（`maxSteps` / `retryLimit` / `retryBaseDelayMs`）、`config`。
+
+`permissions` 选项在 Phase 3 扩展为：`{ preset?: PermissionPresetName, rules?: { user?: PermissionRule[], cli?: PermissionRule[] }, autoApproveAsk?: boolean }`——预设与按层标注的规则；项目层规则与 Grant 集合在 `wrapSession` 时按会话的 `workspaceRoot` 从 `config` 取得（[config.md](config.md) 第 6 节），因为项目配置的信任与生效范围都以会话绑定的目录为准。`policy` 直注入保留，用于测试与特殊客户端；给定 `policy` 时规则系统不生效。
+
+`config` 是 `loadConfig` 返回的 `RuntimeConfig`（可选）：缺省时等价于 Phase 2 行为——无配置文件、固定 `default` 预设、无项目层与 Grant 持久化。CLI 在启动时调用 `loadConfig(platform, { cliArgs })` 并把结果连同 `providerConfigs`、`turn` 等派生字段一起注入（见 [apps/cli.md](../apps/cli.md) 第 7 节）。
+
+恢复相关的会话 API：`resumeSession(id, { force?: boolean })`（`force` 对应强制解锁，见 [sessions.md](sessions.md) 第 4 节）；`listSessions({ cwd? })` 的摘要含 `locked` 字段；`session.recovery` 暴露本次打开执行的修复（截断尾部、补齐调用与 Turn）。
 
 `describeContext` 与 `listModels` 是**只读查询**：不改变会话状态、不产生事件，只为客户端展示服务。
 

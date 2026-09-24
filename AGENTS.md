@@ -21,6 +21,7 @@
 | 上下文构建、压缩、提示词组装 | [architecture/context.md](docs/architecture/context.md) |
 | 工具运行时或内置工具 | [architecture/tools.md](docs/architecture/tools.md)、[protocols/tool-api.md](docs/protocols/tool-api.md) |
 | 权限规则、审批流程 | [architecture/permissions.md](docs/architecture/permissions.md) |
+| 配置文件、分层加载、项目信任、Grant | [architecture/config.md](docs/architecture/config.md) |
 | Provider、模型能力、流式归一化 | [architecture/providers.md](docs/architecture/providers.md)、[protocols/provider-api.md](docs/protocols/provider-api.md) |
 | CLI 参数、REPL、事件渲染、权限确认 | [apps/cli.md](docs/apps/cli.md) |
 | 模块划分、依赖方向、目录 | [architecture/modules.md](docs/architecture/modules.md)、[development/repository-layout.md](docs/development/repository-layout.md) |
