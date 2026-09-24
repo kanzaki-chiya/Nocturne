@@ -17,7 +17,7 @@ import type {
   RuleOrigin,
 } from "../protocol/index.js";
 import { matchGrant } from "./grants.js";
-import { isCompositeShell, matchPattern } from "./pattern.js";
+import { isCompositeShell, isPathKind, matchPattern } from "./pattern.js";
 import { presetRules, type PresetContext } from "./presets.js";
 import { computeWhere } from "./where.js";
 import type { PermissionPolicy, SubjectEvaluation } from "./types.js";
@@ -79,6 +79,8 @@ function withLabel(description: string, rule: PermissionRule | undefined): strin
 }
 
 function subjectDesc(s: PermissionSubject): string {
+  // 命令、URL、MCP 工具名没有路径可解析，原样展示 target
+  if (!isPathKind(s.kind)) return `${s.kind} ${s.target}`;
   return s.resolved === undefined
     ? `${s.kind} ${s.target}（无法解析路径）`
     : `${s.kind} ${s.resolved}（${s.where ?? "unknown"}）`;

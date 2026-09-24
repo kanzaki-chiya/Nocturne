@@ -8,7 +8,7 @@ import type { Runtime, RuntimeSession } from "@nocturne/core";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
 
 import { runSlashCommand } from "./commands.js";
-import { renderEvent, renderPermissionPrompt } from "./render.js";
+import { createEventWriter, renderEvent, renderPermissionPrompt } from "./render.js";
 
 export interface ReplIo {
   stdout: NodeJS.WritableStream;
@@ -32,28 +32,23 @@ export async function runRepl(
   let closed = false;
   /** 等待用户回答的权限请求（permission.requested 优先于普通输入） */
   let pendingPermission: { requestId: string } | undefined;
-  let lastAssistantHadText = false;
+  // 交互模式全部走 stdout：由写出器补齐流式文本与状态行之间的换行
+  const out = createEventWriter((channel, text) => {
+    write(io, channel, text);
+  });
 
   const unsubscribe = session.subscribe((ev: RuntimeEvent) => {
     if (ev.type === "permission.requested") {
       pendingPermission = { requestId: ev.payload.requestId };
-      write(
-        io,
+      out.line(
         "stdout",
-        `${renderPermissionPrompt(ev.payload.subjects, ev.payload.reason, ev.payload.options)}\n`,
+        renderPermissionPrompt(ev.payload.subjects, ev.payload.reason, ev.payload.options),
       );
       return;
     }
-    for (const r of renderEvent(ev, "interactive")) {
-      write(io, r.channel, r.channel === "stdout" ? r.text : `${r.text}\n`);
-    }
-    if (ev.type === "message.assistant.delta") {
-      lastAssistantHadText = true;
-    }
-    if (ev.type === "turn.completed") {
-      if (lastAssistantHadText) write(io, "stdout", "\n");
-      lastAssistantHadText = false;
-    }
+    out.write(renderEvent(ev, "interactive"));
+    // 提示符前回到行首（交互模式的 turn.completed 总带用量行，这里是兜底）
+    if (ev.type === "turn.completed") out.endLine("stdout");
   });
 
   const rl: Interface = createInterface({
@@ -107,14 +102,14 @@ export async function runRepl(
         return;
       }
       if (busy) {
-        write(io, "stdout", "会话忙（Turn 进行中）；Ctrl+C 可中断\n");
+        out.line("stdout", "会话忙（Turn 进行中）；Ctrl+C 可中断");
         prompt();
         return;
       }
       if (line.startsWith("/")) {
         void runSlashCommand(line, session, runtime, {
           print: (t) => {
-            write(io, "stdout", `${t}\n`);
+            out.line("stdout", t);
           },
         }).then((outcome) => {
           if (outcome === "exit") rl.close();
@@ -126,7 +121,7 @@ export async function runRepl(
       activeTurn = session
         .submit({ text: line })
         .catch((e: unknown) => {
-          write(io, "stderr", `! ${e instanceof Error ? e.message : String(e)}\n`);
+          out.line("stderr", `! ${e instanceof Error ? e.message : String(e)}`);
         })
         .finally(() => {
           busy = false;
@@ -138,7 +133,7 @@ export async function runRepl(
         session.interrupt();
         pendingPermission = undefined;
         busy = false;
-        write(io, "stdout", "\n! 已中断\n");
+        out.line("stdout", "! 已中断");
         prompt();
         return;
       }

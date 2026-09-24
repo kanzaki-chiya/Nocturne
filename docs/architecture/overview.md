@@ -92,8 +92,8 @@
 - [ADR-0004](../decisions/ADR-0004-permission-rules.md)：规则化的权限策略层
 - [ADR-0005](../decisions/ADR-0005-own-provider-interface.md)：自有 Provider 接口，不暴露第三方 SDK 类型
 - [ADR-0006](../decisions/ADR-0006-anthropic-transport.md)：anthropic 适配器传输选型
-- [ADR-0007](../decisions/ADR-0007-config-format.md)：配置文件格式与分层（提议）
-- [ADR-0008](../decisions/ADR-0008-project-trust-grants.md)：项目配置信任模型与 Grant 持久化（提议）
-- [ADR-0009](../decisions/ADR-0009-session-lock.md)：会话锁机制（提议）
+- [ADR-0007](../decisions/ADR-0007-config-format.md)：配置文件格式与分层
+- [ADR-0008](../decisions/ADR-0008-project-trust-grants.md)：项目配置信任模型与 Grant 持久化
+- [ADR-0009](../decisions/ADR-0009-session-lock.md)：会话锁机制
 
 这些决定的研究依据见 [research/zcode-review.md](../research/zcode-review.md)。

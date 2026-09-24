@@ -9,9 +9,16 @@ import type { RuntimeEvent, ToolCompletedPayload } from "@nocturne/core/protocol
 
 export type Channel = "stdout" | "stderr";
 
+/**
+ * 一段渲染输出。缺省是"整行"（写出器负责补齐前后换行）；
+ * `stream` 为真时是流式片段（模型文本、shell 输出），原样拼接。
+ */
 export interface Rendered {
   channel: Channel;
   text: string;
+  stream?: true;
+  /** 仅流式片段：每个新行的行首缩进 */
+  indent?: string;
 }
 
 export type RenderMode = "interactive" | "print";
@@ -83,7 +90,7 @@ function toolCompletedLines(p: ToolCompletedPayload): string[] {
  */
 export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
   const side: Channel = mode === "print" ? "stderr" : "stdout";
-  const out = (text: string): Rendered => ({ channel: "stdout", text });
+  const out = (text: string): Rendered => ({ channel: "stdout", text, stream: true });
   const aux = (text: string): Rendered => ({ channel: side, text });
 
   switch (ev.type) {
@@ -99,14 +106,9 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
     }
     case "tool.input.delta":
       return [];
-    case "tool.progress": {
-      // shell 的流式输出：原样缩进
-      const text = ev.payload.chunk
-        .split("\n")
-        .map((l) => (l === "" ? l : `  ${l}`))
-        .join("\n");
-      return [aux(text)];
-    }
+    case "tool.progress":
+      // shell 的流式输出：片段可能断在行中间，缩进由写出器按行首补
+      return [{ channel: side, text: ev.payload.chunk, stream: true, indent: "  " }];
     case "tool.completed":
       return toolCompletedLines(ev.payload).map(aux);
     case "permission.requested":
@@ -162,6 +164,62 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
     default:
       return [];
   }
+}
+
+export interface EventWriter {
+  /** 写出 renderEvent 的结果 */
+  write(items: readonly Rendered[]): void;
+  /** 写一个整行块（可含内部换行）：该通道不在行首时先补换行 */
+  line(channel: Channel, text: string): void;
+  /** 该通道不在行首时补一个换行 */
+  endLine(channel: Channel): void;
+}
+
+/**
+ * 按通道记录"是否停在行首"的写出器：整行输出前补齐被流式片段留下的半行，
+ * 使交互模式（全部走 stdout）与非交互模式（分流）共用同一套换行规则。
+ */
+export function createEventWriter(sink: (channel: Channel, text: string) => void): EventWriter {
+  const atLineStart: Record<Channel, boolean> = { stdout: true, stderr: true };
+
+  const endLine = (channel: Channel): void => {
+    if (!atLineStart[channel]) {
+      sink(channel, "\n");
+      atLineStart[channel] = true;
+    }
+  };
+
+  const stream = (channel: Channel, text: string, indent: string): void => {
+    if (text === "") return;
+    let buf = "";
+    text.split("\n").forEach((part, i) => {
+      if (i > 0) {
+        buf += "\n";
+        atLineStart[channel] = true;
+      }
+      if (part !== "") {
+        buf += atLineStart[channel] ? indent + part : part;
+        atLineStart[channel] = false;
+      }
+    });
+    sink(channel, buf);
+  };
+
+  const line = (channel: Channel, text: string): void => {
+    endLine(channel);
+    sink(channel, `${text}\n`);
+  };
+
+  return {
+    write(items) {
+      for (const r of items) {
+        if (r.stream === true) stream(r.channel, r.text, r.indent ?? "");
+        else line(r.channel, r.text);
+      }
+    },
+    line,
+    endLine,
+  };
 }
 
 const OPTION_LABELS: Record<string, string> = {

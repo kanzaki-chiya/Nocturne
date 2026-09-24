@@ -16,7 +16,7 @@ import {
 
 import { HELP_TEXT, parseArgs, UsageError, type CliArgs } from "./args.js";
 import { collectConfig, effectiveProviderId, normalizeModelRef } from "./config.js";
-import { renderEvent } from "./render.js";
+import { createEventWriter, renderEvent } from "./render.js";
 import { runRepl } from "./repl.js";
 
 const VERSION = "0.0.0";
@@ -269,11 +269,11 @@ async function main(): Promise<number> {
     session.interrupt();
   };
   process.on("SIGINT", onSigint);
+  const out = createEventWriter((channel, text) => {
+    (channel === "stdout" ? process.stdout : process.stderr).write(text);
+  });
   const unsubscribe = session.subscribe((ev) => {
-    for (const r of renderEvent(ev, "print")) {
-      const stream = r.channel === "stdout" ? process.stdout : process.stderr;
-      stream.write(r.channel === "stdout" ? r.text : `${r.text}\n`);
-    }
+    out.write(renderEvent(ev, "print"));
   });
 
   let code = 0;

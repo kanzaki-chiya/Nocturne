@@ -1,6 +1,6 @@
 # CLI（`nctrn`）
 
-> 状态：提议 v0.2（Phase 3：会话恢复、分层配置、完整权限确认，评审中）｜ 前置阅读：[modules.md](../architecture/modules.md) 第 4 节、[events.md](../protocols/events.md)、[config.md](../architecture/config.md) ｜ 代码位置：`apps/cli/`
+> 状态：已接受 v0.2 ｜ 前置阅读：[modules.md](../architecture/modules.md) 第 4 节、[events.md](../protocols/events.md)、[config.md](../architecture/config.md) ｜ 代码位置：`apps/cli/`
 
 本文是 `nctrn` 命令行客户端的唯一设计文档：命令行参数、REPL、事件渲染、权限确认、退出码、Phase 2 的 Provider 配置过渡方案。
 
@@ -88,7 +88,7 @@ nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trust
 | `message.assistant.delta`（reasoning） | 暗淡样式写 stdout |
 | `tool.started` | `● <name>(<参数摘要>)`，参数摘要取 input 的短 JSON，截断约 100 字符 |
 | `tool.input.delta` | 不渲染（Phase 4 的 TUI 才需要增量展示） |
-| `tool.progress` | shell 的流式输出：缩进写到终端（见"输出分流"） |
+| `tool.progress` | shell 的流式输出：按行首缩进两格写到终端（片段可能断在行中间，不额外插入换行；见"输出分流"） |
 | `tool.completed` | `└ <status>` + 耗时；`error`/`denied`/`cancelled`/`interrupted` 附 `error.code` 与原因；`edit`/覆盖 `write` 的 `output.diff` 以 unified diff 着色渲染（`+` 绿、`-` 红、上下文默认色）；`truncated` 为真时附一行"输出已截断，完整内容在 \<path\>"（落盘路径见 [tools.md](../architecture/tools.md) 第 4 节） |
 | `permission.requested` | 第 6 节的确认提示 |
 | `permission.resolved` | `└ 权限：<allow\|deny>（<source>：<rule\|reason>）` 一行——命中规则时展示 `rule`（如"用户配置第 3 条 {…}"），无规则时展示原因 |
@@ -100,6 +100,8 @@ nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trust
 | `turn.completed` | 收尾：`reason` 非 `done` 时打印原因与 `error.message`；交互模式附一行用量摘要（input/output token） |
 
 输出分流：**非交互模式下**模型文本写 stdout，其余一切（工具状态、diff、诊断、用量）写 stderr，使 `nctrn -p "..." > out.txt` 得到纯模型输出。**交互模式**全部写 stdout；进程级致命错误（无法启动、配置缺失）写 stderr。
+
+换行规则：渲染结果分为**流式片段**（模型文本、shell 输出，原样拼接）与**整行**（其余一切状态行与提示块）。写出层按流记录当前是否停在行首，整行输出前若上一段流式内容停在半行，先补一个换行，因此两种模式下状态行都各占一行、不会与模型文本粘连；非交互模式的 stdout 只含流式模型文本，不被插入额外换行。
 
 ## 6. 权限确认
 

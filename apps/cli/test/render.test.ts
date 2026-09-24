@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { RuntimeEvent } from "@nocturne/core/protocol";
 
-import { renderDiff, renderEvent, renderPermissionPrompt } from "../src/render.js";
+import {
+  createEventWriter,
+  renderDiff,
+  renderEvent,
+  renderPermissionPrompt,
+  type Channel,
+} from "../src/render.js";
 
 const durable = <T extends RuntimeEvent["type"]>(
   type: T,
@@ -21,7 +27,7 @@ describe("事件渲染（cli.md 第 5 节）", () => {
       ephemeral("message.assistant.delta", { messageId: "m", kind: "text", delta: "hi" }),
       "print",
     );
-    expect(text).toEqual([{ channel: "stdout", text: "hi" }]);
+    expect(text).toEqual([{ channel: "stdout", text: "hi", stream: true }]);
 
     const tool = renderEvent(
       durable("tool.started", {
@@ -176,5 +182,82 @@ describe("事件渲染（cli.md 第 5 节）", () => {
     expect(text).toContain("→ Z:\\w\\src\\a.ts");
     expect(text).toContain("允许一次");
     expect(text).toContain("拒绝");
+  });
+});
+
+describe("写出器：整行与流式片段的换行（cli.md 第 5 节）", () => {
+  const capture = () => {
+    const chunks: { channel: Channel; text: string }[] = [];
+    const writer = createEventWriter((channel, text) => {
+      chunks.push({ channel, text });
+    });
+    const joined = (channel: Channel) =>
+      chunks
+        .filter((c) => c.channel === channel)
+        .map((c) => c.text)
+        .join("");
+    return { writer, joined };
+  };
+
+  it("交互模式：模型文本后的状态行另起一行，状态行之间各占一行", () => {
+    const { writer, joined } = capture();
+    const events: RuntimeEvent[] = [
+      ephemeral("message.assistant.delta", { messageId: "m", kind: "text", delta: "先看看" }),
+      durable("tool.completed", {
+        callId: "c",
+        name: "shell",
+        status: "ok",
+        modelContent: "",
+        durationMs: 3,
+      }),
+      ephemeral("message.assistant.delta", { messageId: "m", kind: "text", delta: "好了" }),
+      durable("turn.completed", {
+        reason: "done",
+        steps: 2,
+        usage: { inputTokens: 1, outputTokens: 2 },
+      }),
+    ];
+    for (const ev of events) writer.write(renderEvent(ev, "interactive"));
+    const lines = joined("stdout").split("\n");
+    expect(lines[0]).toBe("先看看");
+    expect(lines[1]).toContain("ok");
+    expect(lines[2]).toBe("好了");
+    expect(lines[3]).toContain("tokens: in 1 / out 2");
+    expect(joined("stdout").endsWith("\n")).toBe(true);
+  });
+
+  it("非交互模式：stdout 保持纯模型文本，状态行在 stderr 各占一行", () => {
+    const { writer, joined } = capture();
+    writer.write(
+      renderEvent(
+        ephemeral("message.assistant.delta", { messageId: "m", kind: "text", delta: "答案" }),
+        "print",
+      ),
+    );
+    writer.write(renderEvent(ephemeral("runtime.error", { code: "a", message: "x" }), "print"));
+    writer.write(renderEvent(ephemeral("runtime.error", { code: "b", message: "y" }), "print"));
+    expect(joined("stdout")).toBe("答案");
+    expect(joined("stderr")).toBe("! a: x\n! b: y\n");
+  });
+
+  it("shell 进度：片段断在行中间时不重复缩进、不插入多余换行", () => {
+    const { writer, joined } = capture();
+    const progress = (chunk: string) =>
+      renderEvent(
+        ephemeral("tool.progress", { callId: "c", stream: "stdout", chunk }),
+        "interactive",
+      );
+    writer.write(progress("line one\nline t"));
+    writer.write(progress("wo\n\nlast"));
+    writer.line("stdout", "└ ok");
+    expect(joined("stdout")).toBe("  line one\n  line two\n\n  last\n└ ok\n");
+  });
+
+  it("line / endLine：已在行首时不补空行", () => {
+    const { writer, joined } = capture();
+    writer.line("stdout", "a");
+    writer.endLine("stdout");
+    writer.line("stdout", "b");
+    expect(joined("stdout")).toBe("a\nb\n");
   });
 });

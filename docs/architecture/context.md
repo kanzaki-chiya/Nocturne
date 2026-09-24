@@ -1,6 +1,6 @@
 # 上下文管理（Context）
 
-> 状态：提议 v0.3（自动 L2 摘要，评审中）｜ 前置阅读：[sessions.md](sessions.md) ｜ 相关契约：[provider-api.md](../protocols/provider-api.md)
+> 状态：已接受 v0.3 ｜ 前置阅读：[sessions.md](sessions.md) ｜ 相关契约：[provider-api.md](../protocols/provider-api.md)
 
 ## 1. 两个不同的东西
 

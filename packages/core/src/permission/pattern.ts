@@ -93,6 +93,11 @@ function wildcardToRegExp(pattern: string): RegExp {
 
 const PATH_KINDS = new Set(["read", "edit"]);
 
+/** 路径类主体（read / edit）：有 resolved / where；shell、network、mcp 没有 */
+export function isPathKind(kind: string): boolean {
+  return PATH_KINDS.has(kind);
+}
+
 /**
  * 规则 pattern 是否命中主体（只比较 pattern，不判 kind/where）。
  * 路径类：pattern 同时与规范化 target 和 resolved 比较，任一命中即中（4.2）。
@@ -103,7 +108,7 @@ export function matchPattern(
   workspaceRoot: string,
   caseSensitive: boolean,
 ): boolean {
-  if (PATH_KINDS.has(subject.kind)) {
+  if (isPathKind(subject.kind)) {
     // `**` 作为"所有路径"的显式写法：预设用它配合 where 区分工作区内/外，
     // 相对模式词法上拼到 workspaceRoot 之下无法表达"工作区外"，必须特判
     if (pattern === "**") return true;

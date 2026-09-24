@@ -1,6 +1,6 @@
 # 工具运行时（Tools）
 
-> 状态：提议 v0.3（输出落盘，评审中）｜ 前置阅读：[overview.md](overview.md) ｜ 接口契约：[tool-api.md](../protocols/tool-api.md) ｜ 权限：[permissions.md](permissions.md)
+> 状态：已接受 v0.3 ｜ 前置阅读：[overview.md](overview.md) ｜ 接口契约：[tool-api.md](../protocols/tool-api.md) ｜ 权限：[permissions.md](permissions.md)
 
 ## 1. 原则
 

@@ -4,13 +4,11 @@
  * shell 取完整命令字符串，network / mcp 取 target 原值。
  */
 import type { Grant, PermissionSubject } from "../protocol/index.js";
-import { normalizePathText } from "./pattern.js";
-
-const PATH_KINDS = new Set(["read", "edit"]);
+import { isPathKind, normalizePathText } from "./pattern.js";
 
 /** 主体的授权键（Grant.target 的规范化形式） */
 export function grantKey(subject: PermissionSubject, caseSensitive: boolean): string {
-  if (PATH_KINDS.has(subject.kind)) {
+  if (isPathKind(subject.kind)) {
     return normalizePathText(subject.resolved ?? subject.target, caseSensitive);
   }
   return subject.target;

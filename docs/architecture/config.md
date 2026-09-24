@@ -1,6 +1,6 @@
 # 配置（Config）
 
-> 状态：提议 v0.1 ｜ 前置阅读：[modules.md](modules.md)、[permissions.md](permissions.md) ｜ 决策：[ADR-0007](../decisions/ADR-0007-config-format.md)、[ADR-0008](../decisions/ADR-0008-project-trust-grants.md)
+> 状态：已接受 v0.1 ｜ 前置阅读：[modules.md](modules.md)、[permissions.md](permissions.md) ｜ 决策：[ADR-0007](../decisions/ADR-0007-config-format.md)、[ADR-0008](../decisions/ADR-0008-project-trust-grants.md)
 
 `config` 模块负责把分散的配置来源合并成一份带出处、带信任标记的运行时配置。它只负责**加载、校验、合并、标注来源**；配置的含义由各模块自己消费（权限规则的解释在 permission，Provider 配置的解释在 provider）。
 

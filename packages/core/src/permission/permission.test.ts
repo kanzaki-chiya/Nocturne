@@ -356,4 +356,14 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
     expect(r.decision.reason).toContain("受保护路径");
     expect(r.decision.matchedRule?.description).toContain("预设");
   });
+
+  it("命中解释：非路径类主体原样展示 target，不称无法解析路径", () => {
+    const shell = policyFor("default").evaluate([subject({ kind: "shell", target: "echo hi" })]);
+    expect(shell.decision.reason).toContain("shell echo hi（命中：预设 default");
+    expect(shell.decision.reason).not.toContain("无法解析路径");
+
+    // 路径类主体没解析出 resolved 时仍如实说明
+    const read = policyFor("default").evaluate([subject({ kind: "read", target: "C:\\gone\\x" })]);
+    expect(read.decision.reason).toContain("无法解析路径");
+  });
 });

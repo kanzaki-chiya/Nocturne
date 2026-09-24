@@ -1,6 +1,6 @@
 # 会话（Session）
 
-> 状态：提议 v0.3（锁与恢复修复的 Phase 3 实现细节，评审中）｜ 前置阅读：[overview.md](overview.md) ｜ 相关契约：[events.md](../protocols/events.md) ｜ 决策：[ADR-0003](../decisions/ADR-0003-session-event-log.md)、[ADR-0009](../decisions/ADR-0009-session-lock.md)
+> 状态：已接受 v0.3 ｜ 前置阅读：[overview.md](overview.md) ｜ 相关契约：[events.md](../protocols/events.md) ｜ 决策：[ADR-0003](../decisions/ADR-0003-session-event-log.md)、[ADR-0009](../decisions/ADR-0009-session-lock.md)
 
 ## 1. Session 与 Agent 分离
 
