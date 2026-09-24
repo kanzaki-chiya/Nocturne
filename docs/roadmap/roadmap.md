@@ -78,7 +78,8 @@
 
 - 子代理往返（默认测试集完全离线，脚本化假 Provider 驱动父子两层会话）：`task` 调用 → 子会话受控 Turn → `finish` 提交 → 结果作为 `tool.completed` 回到父模型；结构化结果按 `outputSchema` 校验通过与失败各一例；缺 `finish` 时催促重试与末轮 `toolChoice` 强制、轮尽 `subagent_no_result`。
 - 生命周期：父会话中断/超时取消子会话且父侧恰好一个 `tool.completed`；子会话 `error`/`max_steps` 正确映射；`maxDepth`（默认 1）与 `maxConcurrent`（默认 4）上限各有测试；强杀后 `-c` 恢复：父侧未结算 `task` 标记 `interrupted`，子日志完整且 `session.created.parent` 关联可读。
-- 权限：子会话越权尝试被拒绝；父会话 Grant 与 `--yes` 不会使子会话越过设计边界（ask 仍 non_interactive deny）；`subagent <preset>` 主体在父会话正常走确认流程；`subagent * → deny` 关闭特性。
+- 权限：子会话越权尝试被拒绝（拒绝消息指引子模型把受阻操作写进 `finish` 结果）；父会话 Grant 与 `--yes` 不会使子会话越过设计边界（ask 仍 non_interactive deny）；`subagent <preset>` 主体在父会话正常走确认流程，`explore` 在 `default`/`auto-edit` 下默认放行、`general`/`custom` 需确认；`subagent * → deny` 关闭特性。
+- Provider：`toolChoice` 经适配器映射；「思考开启 + 强制 tool_choice」的已知冲突组合被适配器丢弃并在诊断中标注（适配器单测断言请求体不含 `tool_choice`）；Subagent 兜底轮不携带 `reasoningEffort`。
 - 集成：子会话复用父会话 MCP 连接（断言不启动新服务器进程）；子会话 Hook 全点位触发且 `HookInput.subagent` 可区分；`--sessions`/`/resume` 默认不列出子会话；未使用 `task` 时事件序列与 Phase 5 逐项一致（回归断言）；`depcheck` 零违规无循环。
 - 端到端：`Z:/nocturne-accept/` 的 fake-openai 驱动真实 `nctrn` 进程，CLI 与 TUI 各跑一遍（TUI 在 Windows Terminal 与 conhost 实际查看）：子代理往返与一行式进度显示、子会话中 ask 按设计被拒、Ctrl+C 中断子代理、强杀恢复、`--sessions`/`/resume` 可见性。
 - 收尾：ADR-0013 转已接受；本文标注完成日期。

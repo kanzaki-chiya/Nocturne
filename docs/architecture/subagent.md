@@ -39,7 +39,9 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 
 `traits`：`{ mutates: true, concurrencySafe: false, timeoutMs: 600_000, maxTimeoutMs: 3_600_000, maxModelChars: 30_000 }`。`mutates: true` 如实声明（`general` 子代理可能写文件）；`concurrencySafe: false` 因为并行子代理在没有工作区隔离的前提下可能同时改同一批文件（隔离明确不做，见第 16 节）。
 
-`permissionSubjects` 返回 `[{ kind: "subagent", target }]`：`target` 为预设名（`general`/`explore`）或 `"custom"`（`tools` 白名单）。新增的 `subagent` 主体类别让用户能在规则层把"派生子代理"本身当作受控动作（如 `subagent * → deny` 即为本特性的用户级开关），各预设的默认值见 [permissions.md](permissions.md) 第 6 节。
+`permissionSubjects` 返回 `[{ kind: "subagent", target }]`：`target` 为预设名（`general`/`explore`）或 `"custom"`（`tools` 白名单）。新增的 `subagent` 主体类别让用户能在规则层把"派生子代理"本身当作受控动作（如 `subagent * → deny` 即为本特性的用户级开关），各预设的默认值见 [permissions.md](permissions.md) 第 6 节（`default`/`auto-edit` 下 `explore` 默认放行、`general`/`custom` 需确认）。
+
+工具描述向父模型如实说明权限收敛：子会话非交互，需要确认的操作在子会话内会被拒（第 7 节）——只读/探索任务优先用 `explore`，需要写入或执行的任务要么先由规则/Grant/`--yes` 放行，要么由父代理自己执行。避免父模型派出注定失败的写操作子代理浪费步数。
 
 **ToolResult**：
 
@@ -63,7 +65,8 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 - `finish` 是**只在子会话注册表中出现**的工具（不进父会话注册表）。输入 `{ result }`：`outputSchema` 缺省时 `result` 为字符串；给出 `outputSchema` 时 `finish` 的 `inputSchema` 为 `{ properties: { result: <outputSchema> }, required: ["result"] }`——**结构化校验复用管线第 2 步的既有 schema 校验**，不符时子模型收到 `invalid_input` 并可修正重试，不需要新机制。
 - `finish` 的 `permissionSubjects` 返回 `[]`（自动放行——它只是返回通道，不触碰任何资源）；`traits.mutates = false`。
 - 终止判定：`TurnDeps` 新增可选 `shouldFinish(state)` 谓词，Agent Loop 在每个工具调用结算后检查；launcher 提供的实现是"子会话历史中已存在 `name = finish` 且 `status = ok` 的 `tool.completed`"。命中即 `finish("done")`——子 Turn 以正常 `done` 收尾，不是中断。谓词由 launcher 注入，Agent Loop 本身仍不出现工具名。
-- **催促与兜底**：一个子 Turn 以 `done` 结束但没有 `finish` 调用时，launcher 在同一子会话上再开一个 Turn，message.user 为催促提示（如 `你还没有提交结果；请立即调用 finish 工具提交 {result}`）。上限 `maxAttempts`（默认 3：首轮 + 2 次催促）；**最后一轮**通过 `ModelRequest` 新增的可选字段 `toolChoice: { name: "finish" }` 强制模型调用结束工具（provider-api.md 第 3 节；适配器映射到服务方的 tool_choice，不支持则忽略）。全部轮次用尽仍无 `finish` → `subagent_no_result`。
+- **催促与兜底**：一个子 Turn 以 `done` 结束但没有 `finish` 调用时，launcher 在同一子会话上再开一个 Turn，message.user 为催促提示（如 `你还没有提交结果；请立即调用 finish 工具提交 {result}`）。上限 `maxAttempts`（默认 3：首轮 + 2 次催促）；**最后一轮**通过 `ModelRequest` 新增的可选字段 `toolChoice: { name: "finish" }` 强制模型调用结束工具（provider-api.md 第 3 节）。全部轮次用尽仍无 `finish` → `subagent_no_result`。
+- **`toolChoice` 与扩展思考**：部分服务在开启思考时不接受强制指定工具（如 Anthropic extended thinking 下 `tool_choice` 只接受 `auto`/`none`，强行发送返回 400）。采用**兜底轮临时关闭思考**：最后一轮的 TurnDeps 不携带 `reasoningEffort`（仅这一轮，子会话此前轮次不受影响），使 `toolChoice` 可正常表达。另加一层通用防御——适配器知道自己发出的组合不被服务端接受时（思考 + 强制 tool_choice 等），**主动丢弃 `toolChoice`** 并在 `provider.request` 诊断中标注，而不是把必然失败的请求发出去。
 - 非 `done` 的结束（`error`/`max_steps`/`truncated`/`refused`）不进入催促循环，直接 `subagent_turn_failed`——这些是失败信号，不是"忘了提交"。
 
 ## 3. Launcher 接线（无循环依赖）
@@ -147,7 +150,7 @@ launch(request, ctx)
 | 选择方式 | 语义 |
 |---|---|
 | `preset: "general"`（默认） | 可选池全部 |
-| `preset: "explore"` | 只读探索：`traits.mutates === false` 的工具（read/grep/glob 与 `readOnlyHint` 的 MCP 工具自动在内；write/edit/shell/task 自动排除）。按特性筛选而非按名字列表（pitfalls #3） |
+| `preset: "explore"` | 只读探索：`traits.mutates === false` 的工具（read/grep/glob 与声明 `readOnlyHint` 的 MCP 工具自动在内；write/edit/shell/task 自动排除）。按特性筛选而非按名字列表（pitfalls #3）。注意 `readOnlyHint` 是**服务器自己声明**的标注，不可信——它只决定工具能否进入 explore 工具集，调用时的放行仍由权限层逐项判断（第 7 节） |
 | `tools: [...]` | 显式白名单 ∩ 可选池；未知名 → `invalid_input` 并列出可用名（自愈路径与 `unknown_tool` 一致）；`finish` 不接受列出 |
 | `preset` + `tools` 同给 | `invalid_input` |
 
@@ -165,7 +168,7 @@ launch(request, ctx)
 |---|---|---|---|
 | (a) 冒泡到父会话客户端 | 转发为父会话的确认请求 | 完整（子代理可以获批写/执行） | 需要跨会话的请求路由（`respondPermission` 按会话路由，子请求要注册进父 gate 的 pending map）、父日志出现外来 `callId` 的 `permission.requested`（或新事件类型 + reducer 扩展）、双向中断传播——一组新的持久语义与失败模式 |
 | (b) 非交互子会话 | `ask` 一律 `deny`（`source: "non_interactive"` 既有路径） | 收窄：父会话里需要人确认的操作，子会话做不了 | **零新机制**：`createPolicyGate(..., { interactive: false })` 是现成路径；全部权限事实留在子日志 |
-| (c) 按工具集预设 | 不是 ask 的处理方式，是正交能力裁剪：`explore` 预设的调用在任何规则下都只求值为 allow，天然不产生 ask | 只读场景完整 | 与 (a)/(b) 都兼容 |
+| (c) 按工具集预设 | 不是 ask 的处理方式，是正交能力裁剪：`explore` 只含只读工具，**在默认规则下**工作区内的只读操作不会产生 ask | 只读场景在默认规则下完整 | 与 (a)/(b) 都兼容；不是"任何规则下都放行"——工作区外读取、`mcp` 主体等在 `default` 下仍是 ask，在子会话里照常被拒 |
 
 **结论：本阶段采用 (b) + (c)**。理由：(b) 是现有语义的直接复用且安全保证可证明；(c) 的预设让"天然不需要确认"的只读子代理不受影响；`--yes`、规则、`PermissionRequest` Hook 与项目 Grant 覆盖了无人值守场景下的大部分放行需求；交互式 `default` 预设下子代理做不了的写/执行操作，子代理在结果里说明需求、父代理自己执行即可——比"批准 task 调用即授权整个子任务"（oh-my-pi 的 yolo 做法，明确不采用）更符合逐项把关的权限哲学。(a) 留作以后扩展：在 `PermissionGate` 增加可选的 `forwardAsk` 委托即可接入，不推翻本设计。
 
@@ -188,14 +191,14 @@ launch(request, ctx)
 | 机制 | 子会话行为 |
 |---|---|
 | 规则 deny（含不可信项目收紧、受保护路径） | 照常 deny——没有任何子会话机制能越过 |
-| 规则 ask | `non_interactive` deny（不发 `permission.requested`） |
+| 规则 ask | `non_interactive` deny（不发 `permission.requested`）。拒绝消息由子会话 gate 的 `nonInteractiveDenyHint` 注入指引文案：**"子代理无法请求用户确认；需要写入或执行的操作请在 `finish` 结果中说明，由父代理执行"**——让子模型把受阻操作转化为结果内容，而不是反复重试浪费步数 |
 | 会话 Grant | 继承父会话的授权集（只读共享），精确匹配照常 `allow(source:"grant")` |
 | 项目 Grant | 同一 workspaceRoot，照常生效 |
 | `--yes` / `autoApproveAsk` | 继承：规则判定的 ask 提升为 allow；**仍不覆盖 deny，也不提升 Hook 强制的 ask** |
 | `PreToolUse` Hook | 照常触发（deny/ask/updatedInput 语义不变）；强制的 ask 在子会话走"PermissionRequest Hook → 无回答则 non_interactive deny" |
 | `PermissionRequest` Hook | 照常触发：可信 Hook 的 `allow`/`deny` 直接结算——这是团队自动化的既有委托点，也是子会话内 ask 唯一可能的放行来源 |
 | `PostToolUse` Hook | 照常触发（feedback 追加进子会话的工具结果） |
-| `task` 调用本身 | 在**父会话**走正常权限管线：`subagent <preset|custom>` 主体，默认预设下 `ask`（启动子代理由用户把关）；`deny_stop` 等选项语义不变 |
+| `task` 调用本身 | 在**父会话**走正常权限管线：`subagent <preset|custom>` 主体；`default`/`auto-edit` 预设下 `explore` 默认 `allow`（只读子代理能做的事父会话本就会自动放行，多出的只是 token 成本），`general`/`custom` 保持 `ask`；`deny_stop` 等选项语义不变 |
 
 ## 8. 上下文
 

@@ -54,7 +54,10 @@ interface ModelRequest {
   messages: ModelMessage[]
   tools: ToolSpec[]               // 见 tool-api.md
   /** 强制模型调用指定工具（Phase 6 新增；仅 Subagent 的结束工具兜底使用，subagent.md 第 2 节）。
-      适配器映射为服务方的 tool_choice；无法表达时忽略 */
+      适配器映射为服务方的 tool_choice。通用规则：适配器知道自己发出的组合不被服务端
+      接受时（如开启思考的服务端只接受 auto/none），丢弃 toolChoice 而不是发出必然
+      失败的请求；丢弃在 provider.request 诊断中标注。Subagent 的兜底轮本身不携带
+      reasoningEffort，正常路径不触发此规则 */
   toolChoice?: { name: string }
   maxOutputTokens: number
   reasoningEffort?: string        // 仅在模型声明支持该档位时设置

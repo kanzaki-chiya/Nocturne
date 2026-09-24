@@ -165,9 +165,11 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 | 预设 | read（工作区） | read（外部） | edit（工作区） | edit（外部） | shell | network / mcp | subagent |
 |---|---|---|---|---|---|---|---|
 | `read-only` | allow | ask | deny | deny | ask | ask | ask |
-| `default`（默认） | allow | ask | ask | ask | ask | ask | ask |
-| `auto-edit` | allow | ask | allow | ask | ask | ask | ask |
+| `default`（默认） | allow | ask | ask | ask | ask | ask | `explore` allow，其余 ask |
+| `auto-edit` | allow | ask | allow | ask | ask | ask | `explore` allow，其余 ask |
 | `full-access` | allow | allow | allow | ask | allow | allow | allow |
+
+`subagent` 一列的分化理由：`explore` 子代理只含只读工具，它能得到的 `allow` 都是父会话本来就会自动放行的操作，唯一代价是 token；`general`/`custom` 可能写文件、跑命令，保留逐项把关（[subagent.md](subagent.md) 第 7 节）。
 
 表中没有覆盖到的组合落到"无规则匹配 → `ask`"。所有预设的规则序列都按以下次序排列（后写优先）：
 
@@ -198,7 +200,7 @@ PermissionGate.check(subjects, signal)
 
 `permission.requested.options` 对所有主体给出同一组完整选项；`PermissionReply.remember` 与所选 Grant 的持久化由权限层完成，客户端只表达意图。
 
-两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时（Runtime 选项 `interactive = false`），`ask` 一律视为 `deny`（`source: "non_interactive"`，不发 `permission.requested`）；要在无人值守场景放行使用 `--yes`（5.3 的命令行提升）或预写规则，不提供"非交互默认允许"的配置项。
+两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时（Runtime 选项 `interactive = false`），`ask` 一律视为 `deny`（`source: "non_interactive"`，不发 `permission.requested`）；要在无人值守场景放行使用 `--yes`（5.3 的命令行提升）或预写规则，不提供"非交互默认允许"的配置项。非交互拒绝的提示文案可由调用方注入（`nonInteractiveDenyHint`）——子会话用它告诉子模型"无法请求用户确认，需要写入或执行的操作在 `finish` 结果中说明，由父代理执行"（[subagent.md](subagent.md) 7.3），CLI 非交互模式沿用通用文案。
 
 等待回复期间 `signal` 中止：记 `permission.resolved(action="deny", source="cancelled")`，该调用按 `cancelled` 结算。
 

@@ -16,12 +16,13 @@ Phase 6 引入子代理：父会话的模型调用一个工具，启动一条独
 1. **注入式 launcher**：`SubagentLauncher` 接口定义在 `tools`（与 `HookRunner`/`McpConnector` 同一手法），内置 `task` 工具以 `createTaskTool(launcher)` 工厂构造；实现 `createSubagentLauncher` 放在 `agent`（它是唯一能 import `runTurn` 的地方），由 `core/index` 的 `wrapSession` 装配并注册。依赖方向不变，无循环。
 2. **非交互权限收敛**：子会话的 `PermissionGate` 以 `interactive: false` 构造——`ask` 一律 `deny(source: "non_interactive")`，没有冒泡到父会话客户端的确认通道。子策略用与父会话相同的输入重建（同一预设、合并规则、项目 Grant、共享的会话 Grant 数组、`autoApproveAsk`），`presetContext.sessionId` 换为子会话 id。由此子会话的每个 `allow` 都等于父会话的自动判定，唯一差异是"需要人确认"在子会话里直接拒绝。
 3. **子会话就是普通会话**：一条独立 JSONL 日志 + 锁，同一个 `runTurn`，同一个执行管线，恢复修复语义沿用。父子关联以 `session.created` 新增的兼容可选字段 `parent: { sessionId, callId }` 持久记录。**不新增任何事件类型**；子会话进度经 `tool.progress(stream:"info")` 一行式转发到父会话。
-4. **结束协议**：子会话注册表内含仅其可见的 `finish` 工具；launcher 通过 `TurnDeps.shouldFinish` 注入的谓词结束子 Turn；缺 `finish` 时有上限的催促轮次，末轮以 `ModelRequest.toolChoice` 强制调用。
+4. **结束协议**：子会话注册表内含仅其可见的 `finish` 工具；launcher 通过 `TurnDeps.shouldFinish` 注入的谓词结束子 Turn；缺 `finish` 时有上限的催促轮次，末轮以 `ModelRequest.toolChoice` 强制调用——兜底轮不携带 `reasoningEffort`（规避"思考开启时服务端拒绝强制 tool_choice"的组合），适配器另加防御：已知发不出去的组合主动丢弃 `toolChoice`。
 5. **`traceId` 推迟到 RPC 阶段**：父子关联已由 `parent` 字段覆盖，进程内没有第二个消费方；events.md 原预留措辞相应改写。
+6. **`subagent` 权限主体的预设分化**：`default`/`auto-edit` 下 `explore` 默认 `allow`（只读子代理能做的事父会话本就会自动放行），`general`/`custom` 保持 `ask`。
 
 ## 后果
 
-- 子会话在 `default` 等交互式预设下**无法执行需要确认的操作**（写文件、shell、多数 MCP 调用），`explore` 预设（只读工具集）不受影响；`--yes`、预写规则、会话/项目 Grant 与 `PermissionRequest` Hook 是既有且足够的放行通道。这是"安全默认"的有意取舍，见 [subagent.md](../architecture/subagent.md) 第 7 节的方案比较。
+- 子会话在 `default` 等交互式预设下**无法执行需要确认的操作**（写文件、shell、多数 MCP 调用），被拒时的工具结果会指引子模型"在 `finish` 结果中说明需求、由父代理执行"；`explore` 预设（只读工具集）在默认规则下不受影响；`--yes`、预写规则、会话/项目 Grant 与 `PermissionRequest` Hook 是既有且足够的放行通道。这是"安全默认"的有意取舍，见 [subagent.md](../architecture/subagent.md) 第 7 节的方案比较。
 - 事件协议表面零增长（只有一个可选字段），重放等价与旧版本兼容不受影响；子会话日志自洽闭合，崩溃后按既有惰性修复处理。
 - `tools`/`agent`/`session`/`permission`/`provider-api` 各有一处小扩展点，全部为可选新增；`runTurn` 增加 `shouldFinish`/`toolChoice`/`basePrompt` 注入点，语义仍与工具无关。
 - 默认 `maxDepth = 1`：子代理默认不能嵌套派生，上限可由 `RuntimeOptions.subagent` 调整。
