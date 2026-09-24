@@ -221,7 +221,7 @@ export interface HookEntry {
   matcher?: string | undefined;
   command: string;
   args?: string[] | undefined;
-  /** 毫秒；缺省 30000，硬上限 120000 */
+  /** 毫秒；缺省 5000，硬上限 60000 */
   timeoutMs?: number | undefined;
 }
 

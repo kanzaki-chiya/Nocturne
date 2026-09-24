@@ -102,7 +102,7 @@ const configFileSchema = z.object({
       retryBaseDelayMs: z.number().int().nonnegative().optional(),
     })
     .optional(),
-  hooks: z.record(hookPointSchema, z.array(hookEntrySchema)).optional(),
+  hooks: z.partialRecord(hookPointSchema, z.array(hookEntrySchema)).optional(),
   mcp: z
     .object({
       servers: z.record(z.string(), mcpServerEntrySchema).optional(),

@@ -106,6 +106,10 @@ export async function runTurn(
       { reason, steps, usage: { ...turnUsage }, error },
       { turnId },
     );
+    // TurnEnd Hook（hooks.md）：仅通知，无效果；失败已在 runner 内降级
+    await deps.execEnv.hooks
+      ?.run("TurnEnd", { turnId, reason, steps, usage: { ...turnUsage } })
+      .catch(() => undefined);
     status("idle");
     await session.flush().catch(() => undefined);
     return reason;
@@ -185,6 +189,27 @@ export async function runTurn(
     // ── 开始 ──
     await session.emit("turn.started", { turnIndex }, { turnId });
     await session.emit("message.user", { messageId: id("message"), content }, { turnId });
+
+    // TurnStart Hook（hooks.md 第 1 节）：block → Turn 以 error(hook_blocked) 结算
+    const startHook = await deps.execEnv.hooks
+      ?.run(
+        "TurnStart",
+        {
+          turnId,
+          text: content
+            .filter((b): b is { type: "text"; text: string } => b.type === "text")
+            .map((b) => b.text)
+            .join("\n"),
+        },
+        signal,
+      )
+      .catch(() => undefined);
+    if (startHook?.block === true) {
+      return await finish("error", {
+        code: "hook_blocked",
+        message: startHook.reason ?? "TurnStart Hook 拦截",
+      });
+    }
 
     // ── Step 循环 ──
     for (;;) {

@@ -14,6 +14,7 @@ import {
   type InstructionSet,
 } from "./context/index.js";
 import type { ProviderEntryConfig, RuntimeConfig } from "./config/index.js";
+import { createHookRunner } from "./hooks/index.js";
 import {
   createRulePolicy,
   isPermissionPresetName,
@@ -36,6 +37,8 @@ import type {
   CommandRejectCode,
   ContentBlock,
   Grant,
+  HookEntry,
+  HookPoint,
   ModelRef,
   PermissionReply,
   RuntimeEvent,
@@ -121,6 +124,11 @@ export interface RuntimeOptions {
   mcp?: McpConnector | undefined;
   /** 不经配置文件直接注入的 MCP 服务器（测试与嵌入方用） */
   mcpServers?: McpServerConfig[] | undefined;
+  /**
+   * 不经配置文件直接注入的 Hook 条目（测试与嵌入方用；hooks.md）；
+   * 与配置层 hooks 合并时排在前。项目配置 hooks 段未信任时已整段剔除。
+   */
+  hooks?: Partial<Record<HookPoint, HookEntry[]>> | undefined;
   /** 写入 session.created 的 Runtime 版本 */
   version?: string | undefined;
 }
@@ -348,6 +356,28 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         `会话记录的权限预设 "${session.state().config.permissionPreset}" 未知，已回退 default`,
       );
     }
+    // HookRunner：注入条目（options.hooks）在前、配置层在后逐点追加；
+    // 项目层未信任时 resolved.hooks 已不含项目段（load.ts 整段忽略）
+    const hookEntries: Partial<Record<HookPoint, HookEntry[]>> = {};
+    for (const src of [options.hooks, resolved?.hooks]) {
+      for (const [point, entries] of Object.entries(src ?? {})) {
+        const key = point as HookPoint;
+        hookEntries[key] = [...(hookEntries[key] ?? []), ...entries];
+      }
+    }
+    const hookRunner =
+      Object.keys(hookEntries).length > 0
+        ? createHookRunner({
+            hooks: hookEntries,
+            platform,
+            sessionId: session.id,
+            cwd: meta.cwd,
+            workspaceRoot: meta.workspaceRoot,
+            warn: (code, message) =>
+              session.emitEphemeral("runtime.warning", { code, message }),
+          })
+        : undefined;
+
     // gate 按会话持有：等待中的权限请求与会话绑定，respondPermission 按会话路由；
     // 经委托读取当前 policy，使 setPermissionPreset 立即生效
     const gate: PermissionGate = createPolicyGate(
@@ -356,6 +386,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         interactive,
         caseSensitive: platform.caseSensitivePaths,
         grants: { session: sessionGrants, project: ws?.grants },
+        hooks: hookRunner,
       },
     );
     // 会话级工具注册表：内置工具 ∪ MCP 工具（mcp.md 第 4、5 节）。
@@ -421,6 +452,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       gate,
       readState: createReadStateStore(paths),
       attachmentsDir: paths.join(sessionsDir, "attachments"),
+      hooks: hookRunner,
     };
     const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
     for (const src of [resolved?.turn, options.turn]) {
@@ -469,6 +501,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     };
     const busy = () => controller !== undefined && !controller.signal.aborted;
+
+    // SessionStart Hook（hooks.md）：会话打开完成后触发（新建与恢复都算）
+    if (hookRunner !== undefined) {
+      await hookRunner
+        .run("SessionStart", { resumed: resume !== undefined })
+        .catch(() => undefined);
+    }
 
     return {
       id: session.id,
@@ -643,6 +682,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return mcpSession?.status() ?? [];
       },
       async close() {
+        // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
+        if (hookRunner !== undefined) {
+          await hookRunner
+            .run("SessionEnd", { reason: "close" })
+            .catch(() => undefined);
+        }
         // 先结算等待中的权限请求为 cancelled，避免其挂住 Turn
         gate.cancelAll?.();
         compactController?.abort();

@@ -132,6 +132,16 @@ module.exports = {
       },
     },
     {
+      name: "hooks-deps",
+      severity: "error",
+      comment:
+        "hooks 只能依赖 protocol、platform、tools（HookRunner 接口类型）与 diagnostics（注入）",
+      from: { path: "^packages/core/src/hooks/" },
+      to: {
+        path: "^packages/core/src/(?!hooks/|protocol/|platform/|tools/|diagnostics/)",
+      },
+    },
+    {
       name: "agent-deps",
       severity: "error",
       comment:

@@ -192,6 +192,39 @@ describe("项目配置信任", () => {
     await fs.unlink(path.join(home, "trust.json"));
   });
 
+  it("未信任：项目级 mcp 与 hooks 段整段忽略并警告（ADR-0012）", async () => {
+    await writeJson(projectConfigPath(), {
+      mcp: { servers: { evil: { command: "node", args: ["-e", ""] } } },
+      hooks: { PreToolUse: [{ command: "node", args: ["-e", "process.exit(0)"] }] },
+    });
+    const rc = await load();
+    const ws = await rc.forWorkspace(workspace);
+    expect(ws.projectConfig.trusted).toBe(false);
+    expect(ws.resolved.mcpServers).toHaveLength(0);
+    expect(Object.keys(ws.resolved.hooks)).toHaveLength(0);
+    expect(
+      ws.resolved.warnings.some((w) => w.includes("未信任") && w.includes("mcp") && w.includes("hooks")),
+    ).toBe(true);
+    await fs.rm(path.join(workspace, ".nocturne"), { recursive: true, force: true });
+  });
+
+  it("trust 后项目级 mcp 与 hooks 进入分层", async () => {
+    await writeJson(projectConfigPath(), {
+      mcp: { servers: { srv: { command: "node", args: ["server.js"] } } },
+      hooks: { PostToolUse: [{ command: "node", args: ["hook.js"] }] },
+    });
+    const rc = await load();
+    await rc.setWorkspaceTrusted(workspace, true);
+    const ws = await rc.forWorkspace(workspace);
+    expect(ws.resolved.mcpServers.map((s) => s.name)).toEqual(["srv"]);
+    expect(ws.resolved.mcpServers[0]?.entry.command).toBe("node");
+    expect(ws.resolved.mcpServers[0]?.origin).toBe("project");
+    expect(ws.resolved.hooks.PostToolUse).toHaveLength(1);
+    await rc.setWorkspaceTrusted(workspace, false);
+    await fs.rm(path.join(workspace, ".nocturne"), { recursive: true, force: true });
+    await fs.unlink(path.join(home, "trust.json"));
+  });
+
   it("损坏的项目配置整份忽略并警告", async () => {
     await writeJson(projectConfigPath(), { permissions: { rules: [{ pattern: "" }] } });
     const rc = await load();
