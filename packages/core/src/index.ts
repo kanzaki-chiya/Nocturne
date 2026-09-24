@@ -2,7 +2,14 @@
  * @nocturne/core 公开入口（modules.md 第 3 节"core/index（公开 API）"）。
  * 客户端看到的全部能力都经由这里；进程内与将来的 RPC 客户端共用同一份语义（ADR-0002）。
  */
-import { DEFAULT_TURN_CONFIG, runTurn, type TurnConfig, type TurnDeps } from "./agent/index.js";
+import {
+  createSubagentLauncher,
+  createSubagentLimiter,
+  DEFAULT_TURN_CONFIG,
+  runTurn,
+  type TurnConfig,
+  type TurnDeps,
+} from "./agent/index.js";
 import {
   buildContext,
   buildSummaryRequest,
@@ -59,9 +66,11 @@ import {
   builtinTools,
   createPolicyGate,
   createReadStateStore,
+  createTaskTool,
   createToolExecutor,
   createToolRegistry,
   type ExecutionEnvironment,
+  type HookRunner,
   type McpConnector,
   type McpServerConfig,
   type McpServerStatus,
@@ -138,6 +147,25 @@ export interface RuntimeOptions {
   debug?: { enabled?: boolean | undefined; file?: string | undefined } | undefined;
   /** 写入 session.created 的 Runtime 版本 */
   version?: string | undefined;
+  /**
+   * 子代理（subagent.md）：缺省即启用默认值；enabled=false 时 task 不注册。
+   * 用户级开关是权限规则 `subagent * → deny`。
+   */
+  subagent?: RuntimeSubagentOptions | undefined;
+}
+
+export interface RuntimeSubagentOptions {
+  enabled?: boolean | undefined;
+  /** 允许的最大会话深度（顶层 0），默认 1 */
+  maxDepth?: number | undefined;
+  /** Runtime 级并存子会话上限，默认 4 */
+  maxConcurrent?: number | undefined;
+  /** 子会话单 Turn 步数上限，默认 50 */
+  maxStepsPerTurn?: number | undefined;
+  /** 缺 finish 时的总轮次上限（首轮 + 催促），默认 3 */
+  maxAttempts?: number | undefined;
+  /** task 默认超时（毫秒），默认 600_000 */
+  timeoutMs?: number | undefined;
 }
 
 export interface RuntimePermissionsOptions {
@@ -214,7 +242,11 @@ export interface ResumeSessionOptions {
 export interface Runtime {
   createSession(options: CreateSessionOptions): Promise<RuntimeSession>;
   resumeSession(id: string, options?: ResumeSessionOptions): Promise<RuntimeSession>;
-  listSessions(filter?: { cwd?: string | undefined }): Promise<SessionSummary[]>;
+  listSessions(filter?: {
+    cwd?: string | undefined;
+    /** 默认 false：子会话（session.created.parent 存在）不进列表 */
+    includeSubagents?: boolean | undefined;
+  }): Promise<SessionSummary[]>;
   /** 全部已配置 Provider 声明的模型清单（cli.md /model 的数据来源） */
   listModels(): ModelInfo[];
 }
@@ -312,6 +344,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   // 运行时级清单（listModels 的数据来源）：注入 + providerConfigs + config 基础层
   const registry: ProviderRegistry = buildRegistry(config?.base.providers ?? []);
 
+  // 子代理（subagent.md 第 3、11 节）：并发信号量是 Runtime 级——
+  // 多会话宿主与嵌套派生共享同一批槽位
+  const subagentEnabled = options.subagent?.enabled !== false;
+  const subagentLimits = {
+    maxDepth: options.subagent?.maxDepth ?? 1,
+    maxConcurrent: options.subagent?.maxConcurrent ?? 4,
+    maxStepsPerTurn: options.subagent?.maxStepsPerTurn ?? 50,
+    maxAttempts: options.subagent?.maxAttempts ?? 3,
+    timeoutMs: options.subagent?.timeoutMs ?? 600_000,
+  };
+  const subagentLimiter = createSubagentLimiter(subagentLimits.maxConcurrent);
+
   const store: SessionStore = createSessionStore({ platform, sessionsDir });
 
   const interactive = options.interactive === true;
@@ -371,7 +415,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const sessionGrants: Grant[] = [];
     const projectGrants = ws?.grants.list() ?? [];
     const autoApproveAsk = options.permissions?.autoApproveAsk === true;
-    const buildPolicy = (presetName: string): PermissionPolicy =>
+    // presetContext.sessionId 参数化：子会话重建策略时换自己的 id
+    // （attachments 目录等规则绑定子会话自己的落盘位置，subagent.md 7.2）
+    const buildPolicy = (
+      presetName: string,
+      policySessionId: string = session.id,
+    ): PermissionPolicy =>
       options.policy ??
       createRulePolicy({
         workspaceRoot: meta.workspaceRoot,
@@ -379,7 +428,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         preset: isPermissionPresetName(presetName) ? presetName : "default",
         presetContext: {
           sessionsDir,
-          sessionId: session.id,
+          sessionId: policySessionId,
           nocturneHome,
         },
         rules: resolved?.rules ?? [],
@@ -394,7 +443,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       );
     }
     // HookRunner：注入条目（options.hooks）在前、配置层在后逐点追加；
-    // 项目层未信任时 resolved.hooks 已不含项目段（load.ts 整段忽略）
+    // 项目层未信任时 resolved.hooks 已不含项目段（load.ts 整段忽略）。
+    // 工厂形态：子会话以同一批条目换自己的 sessionId 重建，并注入
+    // subagent 标记让 Hook 区分父子会话（subagent.md 第 10 节）
     const hookEntries: Partial<Record<HookPoint, HookEntry[]>> = {};
     for (const src of [options.hooks, resolved?.hooks]) {
       for (const [point, entries] of Object.entries(src ?? {})) {
@@ -402,18 +453,26 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         hookEntries[key] = [...(hookEntries[key] ?? []), ...entries];
       }
     }
-    const hookRunner =
-      Object.keys(hookEntries).length > 0
-        ? createHookRunner({
-            hooks: hookEntries,
-            platform,
-            sessionId: session.id,
-            cwd: meta.cwd,
-            workspaceRoot: meta.workspaceRoot,
-            warn: (code, message) => session.emitEphemeral("runtime.warning", { code, message }),
-            diagnostics,
-          })
-        : undefined;
+    const makeHookRunner = (
+      owner: Session,
+      subagent?: { parentSessionId: string; parentCallId: string; depth: number },
+    ): HookRunner | undefined => {
+      if (Object.keys(hookEntries).length === 0) return undefined;
+      const inner = createHookRunner({
+        hooks: hookEntries,
+        platform,
+        sessionId: owner.id,
+        cwd: meta.cwd,
+        workspaceRoot: meta.workspaceRoot,
+        warn: (code, message) => owner.emitEphemeral("runtime.warning", { code, message }),
+        diagnostics,
+      });
+      if (subagent === undefined) return inner;
+      return {
+        run: (point, input, signal) => inner.run(point, { ...input, subagent }, signal),
+      };
+    };
+    const hookRunner = makeHookRunner(session);
 
     // gate 按会话持有：等待中的权限请求与会话绑定，respondPermission 按会话路由；
     // 经委托读取当前 policy，使 setPermissionPreset 立即生效
@@ -526,6 +585,36 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       } else {
         throw e;
       }
+    }
+
+    // 子代理（subagent.md 第 3 节）：launcher 捕获本会话装配上下文；
+    // task 与内置工具同一注册表——Agent Loop 无工具名分支
+    if (subagentEnabled) {
+      const launcher = createSubagentLauncher({
+        store,
+        sessionsDir,
+        platform,
+        diagnostics,
+        instructions,
+        environment,
+        model: () => model,
+        permissionPreset: () => session.state().config.permissionPreset,
+        nocturneVersion: options.version ?? NOCTURNE_VERSION,
+        turnConfig,
+        parentFailedSignal: session.failedSignal,
+        makePolicy: (childSessionId) =>
+          buildPolicy(session.state().config.permissionPreset, childSessionId),
+        makeHookRunner,
+        mcpTools: () => mcpSession?.tools() ?? [],
+        grants: {
+          session: sessionGrants,
+          ...(ws?.grants !== undefined ? { project: ws.grants } : {}),
+        },
+        depth: 0,
+        limits: subagentLimits,
+        limiter: subagentLimiter,
+      });
+      tools.register(createTaskTool(launcher));
     }
 
     let controller: AbortController | undefined;

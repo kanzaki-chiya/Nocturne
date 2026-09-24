@@ -129,7 +129,7 @@ const REASONING_OPTION_KEYS = ["thinking", "reasoning", "reasoningEffort"] as co
 function reasoningOptionEnabled(value: unknown): boolean {
   if (value === undefined || value === null || value === false) return false;
   if (typeof value === "object" && "type" in value) {
-    return (value as { type: unknown }).type === "enabled";
+    return value.type === "enabled";
   }
   return value !== "none" && value !== "off";
 }

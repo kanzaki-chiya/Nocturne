@@ -92,11 +92,11 @@ export function createAnthropicProvider(
           reason: choice.note.reason,
         });
       }
+      const stripped = new Set(choice.strippedKeys);
       const providerOptions =
-        mergedOptions !== undefined ? { ...mergedOptions } : undefined;
-      for (const k of choice.strippedKeys) {
-        if (providerOptions !== undefined) delete providerOptions[k];
-      }
+        mergedOptions !== undefined
+          ? Object.fromEntries(Object.entries(mergedOptions).filter(([k]) => !stripped.has(k)))
+          : undefined;
 
       const result = streamText({
         model: sdk(request.model),

@@ -18,6 +18,8 @@ export { writeTool } from "./builtin/write.js";
 export { editTool } from "./builtin/edit.js";
 export { shellTool } from "./builtin/shell.js";
 export { diffLines } from "./builtin/diff.js";
+export { createTaskTool } from "./builtin/task.js";
+export type { GateGrantSink } from "./gate.js";
 
 import type { ToolDefinition, ToolRegistry } from "./types.js";
 import { createToolRegistry } from "./registry.js";

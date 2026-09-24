@@ -226,6 +226,8 @@ export interface HookInput {
   usage?: Usage | undefined;
   /** SessionStart：本次为恢复会话 */
   resumed?: boolean | undefined;
+  /** 子会话标记（subagent.md 第 10 节）：仅子会话的 Hook 输入携带 */
+  subagent?: { parentSessionId: string; parentCallId: string; depth: number } | undefined;
 }
 
 /**
@@ -379,4 +381,55 @@ export interface ToolExecution {
 export interface ToolExecutor {
   /** 运行执行管线，保证发出恰好一个 tool.completed（tools.md 第 3 节） */
   execute(call: ToolCallRef, scope: ExecutionScope): Promise<ToolExecution>;
+}
+
+// ── Subagent 装配点（subagent.md 第 3 节）─────────────────
+
+/**
+ * 启动子会话的请求（subagent.md 第 1、3 节）。`preset`/`tools` 互斥，
+ * 具体工具集由 launcher 在可选池上解析（explore 按 traits 筛选需要池
+ * 的可见性）；task 工具只做输入预检与结果映射。
+ */
+export interface SubagentRequest {
+  /** 交给子代理的完整任务描述（子会话看不到父会话历史，必须自包含） */
+  task: string;
+  /** 工具集预设：general（可选池全部）/ explore（只读工具）；缺省 general */
+  preset?: "general" | "explore" | undefined;
+  /** 显式工具名白名单（与 preset 互斥）；未知名 → invalid_input */
+  tools?: readonly string[] | undefined;
+  /** 结构化结果 schema；缺省时 finish 提交字符串结果 */
+  outputSchema?: JsonSchema | undefined;
+  /** 本次调用的超时上限（毫秒）；缺省由 launcher 的默认值接管 */
+  timeoutMs?: number | undefined;
+}
+
+/** task 工具结果的 output 形状（subagent.md 第 1 节） */
+export interface SubagentStats {
+  childSessionId: string;
+  childLogPath: string;
+  turns: number;
+  steps: number;
+  usage?: Usage | undefined;
+  /** outputSchema 生效时子代理提交的结构化结果原文 */
+  structured?: unknown;
+}
+
+export type SubagentOutcome =
+  | { status: "ok"; resultText: string; stats: SubagentStats }
+  | {
+      status: "error";
+      error: { code: string; message: string };
+      /** 子会话最后的文本尾部（subagent_no_result 时供父模型利用） */
+      tailText?: string | undefined;
+      stats?: SubagentStats | undefined;
+    };
+
+/**
+ * 子会话启动器接口（subagent.md 第 3 节）。与 HookRunner 同一注入手法：
+ * tools 只持有接口，实现在 agent（createSubagentLauncher），由 core/index
+ * 装配注入——tools 不 import agent，无循环依赖。
+ * launch 只受 ctx.signal 约束返回；取消/超时由执行器统一结算。
+ */
+export interface SubagentLauncher {
+  launch(request: SubagentRequest, ctx: ToolContext): Promise<SubagentOutcome>;
 }
