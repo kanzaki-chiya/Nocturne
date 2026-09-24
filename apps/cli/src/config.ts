@@ -3,7 +3,13 @@
  * 调用 Core 的 loadConfig 做分层加载，命令行参数是最高优先级层；
  * 这里只做"本次启动是否凑得齐一次会话"的校验与模型引用归一化。
  */
-import { loadConfig, normalizeModelRef, type Platform, type RuntimeConfig } from "@nocturne/core";
+import {
+  fetchModels,
+  loadConfig,
+  normalizeModelRef,
+  type Platform,
+  type RuntimeConfig,
+} from "@nocturne/core";
 
 import type { CliArgs } from "./args.js";
 
@@ -55,6 +61,18 @@ export async function collectConfig(
       apiKeyEnv: args.apiKeyEnv,
     },
     env,
+    // /provider refresh 的上游获取（provider-setup.md 第 6 节）：
+    // config 不依赖 provider，这里桥接 provider 层的 fetchModels
+    upstreamFetch: (entry, key, signal) =>
+      fetchModels(
+        {
+          type: entry.type ?? "openai-compatible",
+          ...(entry.baseURL !== undefined ? { baseURL: entry.baseURL } : {}),
+          ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
+        },
+        key,
+        signal,
+      ),
   });
   const resolved = runtime.base;
   const problems: string[] = [];
@@ -108,8 +126,18 @@ export async function collectConfig(
       ) {
         problems.push(`Provider "${providerId}" 缺少 baseURL（openai-compatible 必需）`);
       }
-      if (env(provider.apiKeyEnv) === undefined || env(provider.apiKeyEnv) === "") {
-        problems.push(`缺少凭据：环境变量 ${provider.apiKeyEnv} 未设置`);
+      // 凭据解析顺序（provider-setup.md 第 3 节）：apiKeyEnv 已设置 →
+      // 环境变量；否则凭据索引。都没有 → 提示 nctrn setup
+      const envKey =
+        provider.apiKeyEnv !== undefined && env(provider.apiKeyEnv) !== ""
+          ? env(provider.apiKeyEnv)
+          : undefined;
+      if (envKey === undefined && !runtime.credentials.has(provider.id)) {
+        problems.push(
+          provider.apiKeyEnv !== undefined
+            ? `缺少凭据：环境变量 ${provider.apiKeyEnv} 未设置，凭据存储中也没有 "${provider.id}" 的密钥——运行 nctrn setup 或用 /provider key 配置`
+            : `缺少凭据：Provider "${provider.id}" 未配置密钥——运行 nctrn setup 或用 /provider key 配置`,
+        );
       }
     }
   }

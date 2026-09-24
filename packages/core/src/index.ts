@@ -34,6 +34,7 @@ import {
   createOpenAICompatibleProvider,
   createProviderRegistry,
   UnknownModelError,
+  type CredentialResolver,
   type ModelInfo,
   type ModelOverride,
   type Provider,
@@ -249,6 +250,16 @@ export interface Runtime {
   }): Promise<SessionSummary[]>;
   /** 全部已配置 Provider 声明的模型清单（cli.md /model 的数据来源） */
   listModels(): ModelInfo[];
+  /**
+   * 用新的基础层配置重建运行时级 Provider 注册表（provider-setup.md
+   * 第 6 节）；已打开会话在下一次空闲边界重建会话级注册表。不产生
+   * 持久事件，不触发 SessionEnd/SessionStart Hook，不重启 MCP。
+   */
+  updateProviders(config: RuntimeConfig): void;
+  /** 分层合并后的默认模型（模型选择页"默认模型"标记）；无法解析时 undefined */
+  defaultModel(): ModelRef | undefined;
+  /** recent-models.json 当前内容（新→旧，最多 10 条）；无 config 时为空 */
+  listRecentModels(): ModelRef[];
 }
 
 function parseModelRef(model: string | ModelRef): ModelRef {
@@ -267,11 +278,13 @@ function parseModelRef(model: string | ModelRef): ModelRef {
 function instantiateProvider(
   entry: ProviderEntryConfig,
   env: (n: string) => string | undefined,
-  diagnostics?: Diagnostics,
+  diagnostics: Diagnostics | undefined,
+  credentials: CredentialResolver | undefined,
 ) {
   const common = {
     id: entry.id,
     apiKeyEnv: entry.apiKeyEnv,
+    ...(credentials !== undefined ? { credentials } : {}),
     ...(entry.models !== undefined
       ? { models: entry.models as Record<string, ModelOverride> }
       : {}),
@@ -300,7 +313,8 @@ function instantiateProvider(
 export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const platform = createPlatform();
   const { fs, paths } = platform;
-  const config = options.config;
+  // currentConfig 在 updateProviders 时整体替换（provider-setup.md 第 6 节）
+  let config = options.config;
 
   const cwd = paths.resolve(options.cwd, ".");
   const workspaceRoot = await platform.resolveReal(options.workspaceRoot ?? cwd);
@@ -324,25 +338,49 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     warn: (code, message) => sinkWarnings.push({ code, message }),
   });
 
-  /** Provider 构造：显式注入 + options.providerConfigs +（有 config 时）合并后的条目 */
-  function buildRegistry(configProviders: readonly ProviderEntryConfig[]): ProviderRegistry {
+  /**
+   * 凭据解析器（provider-setup.md 第 3 节）：适配器在请求时经它取
+   * 凭据存储中的密钥；引用 currentConfig 的 store——updateProviders
+   * 换 config 后解析器自动指向新存储。
+   */
+  const credentialResolver: CredentialResolver = (providerId) =>
+    config?.credentials.get(providerId) ?? Promise.resolve(undefined);
+
+  /**
+   * Provider 构造：显式注入 + keepProviders + options.providerConfigs +
+   * （有 config 时）合并后的条目。
+   * keepProviders：updateProviders 重建时仍被会话引用的旧实例
+   * （provider-setup.md 第 6 节），同 id 被新条目覆盖。
+   */
+  function buildRegistry(
+    configProviders: readonly ProviderEntryConfig[],
+    keepProviders: readonly Provider[] = [],
+  ): ProviderRegistry {
     const env = (n: string) => platform.env(n);
     // 同 id 后者覆盖（options.providerConfigs < config 条目，与分层优先级一致）
     const byId = new Map<string, Provider>();
     for (const p of options.providers ?? []) byId.set(p.id, p);
+    for (const p of keepProviders) {
+      if (!byId.has(p.id)) byId.set(p.id, p);
+    }
     for (const c of options.providerConfigs ?? []) {
       const instance =
         c.type === "anthropic"
-          ? createAnthropicProvider({ ...c, diagnostics }, env)
-          : createOpenAICompatibleProvider({ ...c, diagnostics }, env);
+          ? createAnthropicProvider({ ...c, credentials: credentialResolver, diagnostics }, env)
+          : createOpenAICompatibleProvider(
+              { ...c, credentials: credentialResolver, diagnostics },
+              env,
+            );
       byId.set(instance.id, instance);
     }
-    for (const e of configProviders) byId.set(e.id, instantiateProvider(e, env, diagnostics));
+    for (const e of configProviders)
+      byId.set(e.id, instantiateProvider(e, env, diagnostics, credentialResolver));
     return createProviderRegistry([...byId.values()], options.modelOverrides);
   }
 
-  // 运行时级清单（listModels 的数据来源）：注入 + providerConfigs + config 基础层
-  const registry: ProviderRegistry = buildRegistry(config?.base.providers ?? []);
+  // 运行时级清单（listModels 的数据来源）：注入 + providerConfigs + config 基础层；
+  // updateProviders 时整体重建
+  let registry: ProviderRegistry = buildRegistry(config?.base.providers ?? []);
 
   // 子代理（subagent.md 第 3、11 节）：并发信号量是 Runtime 级——
   // 多会话宿主与嵌套派生共享同一批槽位
@@ -357,6 +395,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const subagentLimiter = createSubagentLimiter(subagentLimits.maxConcurrent);
 
   const store: SessionStore = createSessionStore({ platform, sessionsDir });
+
+  /**
+   * 已打开会话的"providers 待重建"标记回调（updateProviders →
+   * 各会话在下一次空闲边界 rebuildProviders；close 时移除）
+   */
+  const markProvidersDirty = new Set<() => void>();
 
   const interactive = options.interactive === true;
 
@@ -400,6 +444,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     for (const message of warnings) {
       session.emitEphemeral("runtime.warning", { code: "config_warning", message });
     }
+    // providers.json 损坏/版本不符：被忽略但明确提示（provider-setup.md 第 2 节）
+    if (config?.providerSetupWarning !== undefined) {
+      session.emitEphemeral("runtime.warning", {
+        code: "provider_setup_invalid",
+        message: config.providerSetupWarning,
+      });
+    }
     if (ws?.projectConfig.present === true && !ws.projectConfig.trusted) {
       session.emitEphemeral("runtime.warning", {
         code: "project_config_untrusted",
@@ -407,14 +458,22 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     }
 
-    // 会话级 ProviderRegistry：基础层 + 可信项目层的 Provider 条目
-    const sessionRegistry =
+    // 会话级 ProviderRegistry：基础层 + 可信项目层的 Provider 条目。
+    // updateProviders 后在下一次空闲边界经 rebuildProviders 重建。
+    let sessionRegistry =
       config === undefined ? registry : buildRegistry(resolved?.providers ?? []);
 
     // 权限策略：预设 + 分层规则 + Grant 集合；setPermissionPreset 重建
     const sessionGrants: Grant[] = [];
     const projectGrants = ws?.grants.list() ?? [];
     const autoApproveAsk = options.permissions?.autoApproveAsk === true;
+    // 凭据索引的内置硬拒绝（provider-setup.md 第 8 节）：词法路径与
+    // realpath 后的真实路径都进集合（junction/符号链接不能绕过）
+    const credentialsIndexLexical = paths.join(nocturneHome, "credentials.json");
+    const credentialsIndexResolved = paths.join(
+      await platform.resolveReal(nocturneHome),
+      "credentials.json",
+    );
     // presetContext.sessionId 参数化：子会话重建策略时换自己的 id
     // （attachments 目录等规则绑定子会话自己的落盘位置，subagent.md 7.2）
     const buildPolicy = (
@@ -433,6 +492,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         },
         rules: resolved?.rules ?? [],
         untrustedRules: resolved?.untrustedRules ?? [],
+        protectedPaths: {
+          lexical: [credentialsIndexLexical],
+          resolved: [credentialsIndexResolved],
+        },
         grants: { session: sessionGrants, project: projectGrants },
         autoApproveAsk,
       });
@@ -541,6 +604,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     }
 
+    // shell 子进程环境剥离的凭据变量（provider-setup.md 第 8 节）：
+    // 全部 Provider 条目声明的 apiKeyEnv——模型驱动的 shell 拿不到密钥
+    const shellEnvStrip = [
+      ...new Set(
+        [...(resolved?.providers ?? []), ...(options.providerConfigs ?? [])]
+          .map((p) => p.apiKeyEnv)
+          .filter((n): n is string => n !== undefined && n !== ""),
+      ),
+    ];
     const execEnv: ExecutionEnvironment = {
       platform,
       gate,
@@ -548,6 +620,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       attachmentsDir: paths.join(sessionsDir, "attachments"),
       hooks: hookRunner,
       diagnostics,
+      ...(shellEnvStrip.length > 0 ? { shellEnvStrip } : {}),
     };
     const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
     for (const src of [resolved?.turn, options.turn]) {
@@ -561,8 +634,45 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
     const resolveSessionModel = (ref: ModelRef): ResolvedModel => sessionRegistry.resolve(ref);
     let model: ResolvedModel;
+    let providersDirty = false;
+    /**
+     * updateProviders 触发的会话级注册表重建（provider-setup.md 第 6 节）：
+     * 在下一次空闲边界（submit / setModel 开头）执行；当前会话正在使用的
+     * 服务商若已从配置移除，保留其实例并发出 runtime.warning。
+     */
+    const rebuildProviders = async (): Promise<void> => {
+      if (!providersDirty || config === undefined) return;
+      providersDirty = false;
+      const wsNew = await config.forWorkspace(meta.workspaceRoot).catch(() => undefined);
+      const entries = wsNew?.resolved.providers ?? config.base.providers;
+      // 当前会话正在使用的 Provider 实例保留在最底层：新配置同 id 覆盖，
+      // 配置里消失时旧实例继续供本会话使用（不重启会话、不换锁）
+      const inUse = model.provider;
+      sessionRegistry = buildRegistry(entries, [inUse]);
+      if (!entries.some((e) => e.id === inUse.id)) {
+        session.emitEphemeral("runtime.warning", {
+          code: "provider_in_use",
+          message: `服务商 "${inUse.id}" 已从配置移除；本会话继续使用原实例直至结束`,
+        });
+      }
+    };
+    /** 限额未声明（ADR-0016）：会话打开与 setModel 时提示默认值来源与补救方式 */
+    const warnIfCapabilitiesDefaulted = (m: ModelInfo): void => {
+      const missing: string[] = [];
+      if (m.contextWindow === undefined) missing.push("上下文窗口");
+      if (m.maxOutputTokens === undefined) missing.push("最大输出长度");
+      if (missing.length === 0) return;
+      session.emitEphemeral("runtime.warning", {
+        code: "model_capabilities_defaulted",
+        message:
+          `模型 ${m.ref.provider}/${m.ref.model} 的${missing.join("与")}未由上游或配置声明，` +
+          `本地预算按默认值估算（上下文 128000 / 输出预留 8192）；` +
+          `可运行 /provider refresh ${m.ref.provider} 或在 config.json 的 models 中声明`,
+      });
+    };
     try {
       model = resolveSessionModel(session.state().config.model);
+      warnIfCapabilitiesDefaulted(model.model);
     } catch (e) {
       // 会话记录的模型无法解析：携带替代模型时先写 config_changed 再开放（sessions.md 4.2）
       if (e instanceof UnknownModelError && resume?.modelOverride !== undefined) {
@@ -578,6 +688,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         await session.emit("session.config_changed", { model: ref });
         model = replacement;
+        warnIfCapabilitiesDefaulted(replacement.model);
       } else if (e instanceof UnknownModelError) {
         throw new RuntimeCommandError(
           "invalid_model",
@@ -589,6 +700,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         throw e;
       }
     }
+
+    // 注册到 updateProviders 的广播集合；close 时移除
+    const markDirty = (): void => {
+      providersDirty = true;
+    };
+    markProvidersDirty.add(markDirty);
 
     // 子代理（subagent.md 第 3 节）：launcher 捕获本会话装配上下文；
     // task 与内置工具同一注册表——Agent Loop 无工具名分支
@@ -683,6 +800,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         const ac = new AbortController();
         controller = ac;
+        // 空闲边界：controller 先置位（busy 语义立即生效），再重建
+        // updateProviders 标记的会话级注册表（provider-setup.md 第 6 节）
+        await rebuildProviders();
         const deps: TurnDeps = {
           session,
           model,
@@ -709,6 +829,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (busy() || compactController !== undefined) {
           throw new RuntimeCommandError("session_busy", "会话正忙，不能切换模型");
         }
+        await rebuildProviders();
         const ref = parseModelRef(input);
         let resolved: ResolvedModel;
         try {
@@ -734,12 +855,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         await session.emit("session.config_changed", { model: ref });
         model = resolved;
+        warnIfCapabilitiesDefaulted(resolved.model);
+        // recent-models.json（provider-setup.md 第 6 节）：写入失败不阻塞切换
+        void config?.recordRecentModel(ref).catch((e: unknown) => {
+          diagnostics.record("config.recent_models_write_failed", {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        });
       },
       async setPermissionPreset(name) {
         assertUsable();
         if (busy() || compactController !== undefined) {
           throw new RuntimeCommandError("session_busy", "会话正忙，不能切换权限预设");
         }
+        await rebuildProviders();
         if (!isPermissionPresetName(name)) {
           throw new RuntimeCommandError(
             "invalid_command",
@@ -761,6 +890,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         compactController = ac;
         session.emitEphemeral("runtime.status", { status: "compacting" });
         try {
+          await rebuildProviders();
           const events = session.durableEvents();
           const history = session.state().history;
           const boundary = chooseSummaryBoundary(events, history, model.model);
@@ -823,6 +953,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return mcpSession?.status() ?? [];
       },
       async close() {
+        markProvidersDirty.delete(markDirty);
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
         if (hookRunner !== undefined) {
           await hookRunner.run("SessionEnd", { reason: "close" }).catch(() => undefined);
@@ -866,7 +997,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         nocturneVersion: options.version ?? NOCTURNE_VERSION,
       });
       try {
-        return await wrapSession(session);
+        const wrapped = await wrapSession(session);
+        // recent-models.json：新建会话记录初始模型（provider-setup.md 第 6 节）
+        void config?.recordRecentModel(session.state().config.model).catch((e: unknown) => {
+          diagnostics.record("config.recent_models_write_failed", {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        });
+        return wrapped;
       } catch (e) {
         await session.close().catch(() => undefined);
         throw e;
@@ -883,6 +1021,22 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     listSessions: (filter) => store.list(filter),
     listModels: () => registry.providers().flatMap((p) => p.models()),
+    updateProviders(newConfig) {
+      // 只换注册表：不动会话日志、Hook、MCP（provider-setup.md 第 6 节）
+      config = newConfig;
+      registry = buildRegistry(newConfig.base.providers);
+      for (const mark of markProvidersDirty) mark();
+    },
+    defaultModel() {
+      const model = config?.base.model;
+      if (model === undefined || model === "") return undefined;
+      try {
+        return parseModelRef(model);
+      } catch {
+        return undefined;
+      }
+    },
+    listRecentModels: () => config?.recentModels() ?? [],
   };
 }
 
@@ -946,6 +1100,16 @@ export {
   normalizeModelRef,
   type FakeScript,
   type FakeHandler,
+} from "./provider/index.js";
+// 服务商向导三件套（provider-setup.md 第 6 节）：CLI/TUI 共用
+export {
+  fetchModels,
+  listProviderPresets,
+  testProviderConnection,
+  ProviderUpstreamError,
+  type FetchModelsRequest,
+  type ProviderPreset,
+  type UpstreamModelInfo,
 } from "./provider/index.js";
 export { SessionError } from "./session/index.js";
 export {
