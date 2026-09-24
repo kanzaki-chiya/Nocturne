@@ -48,7 +48,7 @@ Hook 是**配置驱动的外部命令**：Runtime 在固定事件点上启动一
 运行契约（每个被触发的条目一次调用 = 一个进程）：
 
 - **stdin**：单个 JSON 对象，`Content-Type` 隐含 UTF-8，写完关闭。字段：
-  - 公共：`point`（事件点名）、`sessionId`、`cwd`、`workspaceRoot`、`turnId?`
+  - 公共：`point`（事件点名）、`sessionId`、`cwd`、`workspaceRoot`、`turnId?`；`subagent?: { parentSessionId, parentCallId, depth }` 仅子会话上下文出现（Phase 6，Hook 据此区分父子会话，见 [subagent.md](subagent.md) 第 10 节）
   - `PreToolUse`/`PermissionRequest`/`PostToolUse`：加 `callId`、`tool`、`input`；`PermissionRequest` 加 `subjects`（已解析权限主体数组）与 `permission`（当前求值结果 `{action, reason, rule?}`）；`PostToolUse` 加 `result`（工具返回的 `{status, modelContent 前 4000 字符, error?}`）
   - `TurnStart`：加 `text`（用户提交原文）；`TurnEnd`：加 `reason`、`steps`、`usage`；`SessionStart`：加 `resumed`（是否恢复会话）；`SessionEnd`：加 `reason`
 - **stdout**：单个 JSON 对象（可选；空输出视为"无效果"）。允许字段按点位限定，多写字段忽略；无法解析为 JSON 记失败。
@@ -130,6 +130,8 @@ Hook 调用的耗时计入诊断（`hook.run` 记录），不占 `tool.exec` 的
 `HookRunner` 接口（`run(point, input, signal?) → Promise<HookOutput | undefined>`）定义在 `tools`，实现在 `packages/core/src/hooks/`（依赖 protocol、platform、diagnostics；见 modules.md）。`hooks` 配置在 `forWorkspace` 解析时带入会话，`wrapSession` 构造 runner 并注入执行器、gate 与会话生命周期；`runner` 为 `undefined` 或点位无匹配条目时行为与 Phase 4 完全一致。
 
 **不变量**：未配置任何 Hook 时，事件序列、管线步序、权限结果与 Phase 4 逐项一致（测试断言）；配置了 Hook 但未匹配到条目时同样不产生任何可观测差异。
+
+**子会话（Phase 6）**：子代理会话沿用父会话同一批**已按信任过滤**的 Hook 条目，以子会话 `sessionId` 重建 runner——全部点位照常触发（`SessionStart`/`TurnStart`/工具三点/`TurnEnd`/`SessionEnd`），stdin 中 `sessionId` 为子会话 id 并带 `subagent` 标记字段；信任判定不做第二次（未信任项目的条目在父会话装配时已被整段剔除）。效果边界不变：`PermissionRequest` 仍是唯一能放宽 ask 的点，子会话里它是 ask 唯一可能的放行来源（[subagent.md](subagent.md) 第 7 节）。
 
 ## 7. 事件与诊断
 

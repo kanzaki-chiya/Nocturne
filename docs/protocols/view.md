@@ -194,6 +194,8 @@ interface SessionNotice {
 | `tool.input.delta` | 按 `callId` 查找/新建 `live.tools` 项；`inputText += payload.delta`；填 `name`/`turnId` |
 | `tool.progress` | `callId` 的 entries 条目存在则 `liveOutput += payload.chunk`（`payload.stream` 区分 stdout/stderr/info）；无条目则忽略——`progress` 不建占位，避免无支撑的幽灵工具行 |
 
+Phase 6 的 Subagent **不需要视图扩展**：`task` 在父会话是普通工具条目，子会话内部进度经 `tool.progress`（`stream:"info"`）一行式进入 `liveOutput`（[subagent.md](../architecture/subagent.md) 第 12 节）；子会话自身的事件写在子日志，不进父会话的事件流，V1 重放等价不受影响。
+
 ## 5. 权限请求生命周期
 
 ```

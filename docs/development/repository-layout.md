@@ -26,7 +26,7 @@ nocturne/
 │       │   ├── provider/        Provider 接口、模型目录
 │       │   │   └── adapters/    openai-compatible/、anthropic/ ……
 │       │   ├── tools/           注册表、执行管线、结果预算
-│       │   │   └── builtin/     read、write、edit、grep、glob、shell
+│       │   │   └── builtin/     read、write、edit、grep、glob、shell、task（Phase 6）
 │       │   ├── permission/      规则求值、权限闸门、Grant 匹配
 │       │   ├── config/          配置分层加载、项目信任、Grant 文件读写（Phase 3）
 │       │   ├── hooks/           HookRunner 实现：外部命令 + JSON 契约（Phase 5）

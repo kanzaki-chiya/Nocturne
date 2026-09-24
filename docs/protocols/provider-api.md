@@ -53,6 +53,9 @@ interface ModelRequest {
   system: SystemBlock[]
   messages: ModelMessage[]
   tools: ToolSpec[]               // 见 tool-api.md
+  /** 强制模型调用指定工具（Phase 6 新增；仅 Subagent 的结束工具兜底使用，subagent.md 第 2 节）。
+      适配器映射为服务方的 tool_choice；无法表达时忽略 */
+  toolChoice?: { name: string }
   maxOutputTokens: number
   reasoningEffort?: string        // 仅在模型声明支持该档位时设置
   cachePrefix?: { systemBlocks: number; messages: number }   // 可缓存前缀的边界提示，适配器自行决定是否使用

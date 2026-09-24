@@ -60,13 +60,30 @@
 - 端到端：`Z:/nocturne-accept/` 的 fake-openai 驱动真实 `nctrn` 进程，CLI 与 TUI 各跑一遍（TUI 在 Windows Terminal 与 conhost 实际查看）：MCP 调用往返与权限确认、服务器崩溃后会话继续、`PreToolUse` 拒绝与修改输入、项目 Hook 信任前后差异、杀进程恢复后 MCP 调用标记 `interrupted`、诊断文件无密钥。
 - 依赖与边界：`depcheck` 零违规；`packages/mcp` 只依赖 `@nocturne/core` 公开入口与 `@modelcontextprotocol/sdk`；ADR-0011/0012 转已接受。
 
-## Phase 6 — Subagent
+**已知问题（遗留）**：
+
+- Windows 上强杀 Nocturne 进程时，MCP stdio 子进程可能成为孤儿——当前未用 Job Object 把子进程生命周期绑定到父进程，仅靠 stdin 断开依赖服务器自行退出（[mcp.md](../architecture/mcp.md) 第 4 节）。
+
+## Phase 6 — Subagent（进行中）
 
 **前提**：Runtime、会话、事件、工具、上下文在前面阶段中已稳定。
 
-**内容**：一个内置工具通过注入的 launcher 启动子会话，运行受控的 Turn（受限工具集、独立上下文、继承或收紧的权限），把结果作为工具结果返回；子会话有独立日志并记录父会话关联；引入可选的 `traceId`。
+**内容**：一个内置工具通过注入的 launcher 启动子会话，运行受控的 Turn（受限工具集、独立上下文、继承或收紧的权限），把结果作为工具结果返回；子会话有独立日志并记录父会话关联。
 
-**不做**：Swarm、角色系统、Agent 间消息总线、分布式执行。
+**设计**：[architecture/subagent.md](../architecture/subagent.md)、[ADR-0013](../decisions/ADR-0013-subagent.md)。
+
+**约束**：`task` 是普通 `ToolDefinition`，走相同注册接口与执行管线（Agent Loop 不按工具名分支）；`tools` 不 import `agent`（launcher 接口在 `tools`、实现在 `agent`、`index` 装配）；权限判定只在权限层，子会话有效权限不宽于父会话（非交互收敛，ask 一律 non_interactive deny）；不新增事件类型，父子关联记 `session.created.parent`；`traceId` 维持推迟到 RPC 阶段（设计评审结论，见 ADR-0013）。
+
+**验收**：
+
+- 子代理往返（默认测试集完全离线，脚本化假 Provider 驱动父子两层会话）：`task` 调用 → 子会话受控 Turn → `finish` 提交 → 结果作为 `tool.completed` 回到父模型；结构化结果按 `outputSchema` 校验通过与失败各一例；缺 `finish` 时催促重试与末轮 `toolChoice` 强制、轮尽 `subagent_no_result`。
+- 生命周期：父会话中断/超时取消子会话且父侧恰好一个 `tool.completed`；子会话 `error`/`max_steps` 正确映射；`maxDepth`（默认 1）与 `maxConcurrent`（默认 4）上限各有测试；强杀后 `-c` 恢复：父侧未结算 `task` 标记 `interrupted`，子日志完整且 `session.created.parent` 关联可读。
+- 权限：子会话越权尝试被拒绝；父会话 Grant 与 `--yes` 不会使子会话越过设计边界（ask 仍 non_interactive deny）；`subagent <preset>` 主体在父会话正常走确认流程；`subagent * → deny` 关闭特性。
+- 集成：子会话复用父会话 MCP 连接（断言不启动新服务器进程）；子会话 Hook 全点位触发且 `HookInput.subagent` 可区分；`--sessions`/`/resume` 默认不列出子会话；未使用 `task` 时事件序列与 Phase 5 逐项一致（回归断言）；`depcheck` 零违规无循环。
+- 端到端：`Z:/nocturne-accept/` 的 fake-openai 驱动真实 `nctrn` 进程，CLI 与 TUI 各跑一遍（TUI 在 Windows Terminal 与 conhost 实际查看）：子代理往返与一行式进度显示、子会话中 ask 按设计被拒、Ctrl+C 中断子代理、强杀恢复、`--sessions`/`/resume` 可见性。
+- 收尾：ADR-0013 转已接受；本文标注完成日期。
+
+**不做**：Swarm、角色系统（含自定义 agent 定义文件）、Agent 间消息总线、分布式执行、后台/异步子任务、子代理常驻与唤醒、隔离工作区（worktree/overlay）、子会话权限冒泡、子代理独立模型。
 
 ## 之后（未排期）
 

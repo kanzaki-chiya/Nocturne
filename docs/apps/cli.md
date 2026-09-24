@@ -25,7 +25,7 @@ nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trust
 | `-p, --print [prompt]` | 非交互模式。值可省略：省略时从 stdin 读全部输入作为 prompt |
 | `-c, --continue` | 恢复绑定到当前目录（`workspaceRoot` 相同）的最近会话；没有时按"新建会话"处理 |
 | `--resume <id>` | 恢复指定会话；支持 `-p` 组合（恢复后直接执行该 prompt）与 `--model` 组合（见下） |
-| `--sessions` | 列出全部会话（id、创建时间、绑定目录、模型、锁状态），按修改时间倒序，随后退出（退出码 0） |
+| `--sessions` | 列出全部顶层会话（id、创建时间、绑定目录、模型、锁状态），按修改时间倒序，随后退出（退出码 0）；子代理会话（`session.created.parent` 存在者）默认不列出（[subagent.md](../architecture/subagent.md) 第 5 节） |
 | `--force-unlock` | 与 `--resume` / `--continue` 搭配：先删除残留锁再打开（[sessions.md](../architecture/sessions.md) 第 4 节） |
 | `--preset <name>` | 会话权限预设：`read-only` \| `default` \| `auto-edit` \| `full-access`，写入 `session.created`；恢复会话时该参数拒绝（预设以日志为准，改用 `/preset`） |
 | `--model <id>` | 模型 id（当前 Provider 内），覆盖 `NOCTURNE_MODEL` 与配置文件；`provider/model` 写法在前缀等于当前 Provider 时剥掉前缀，前缀是另一种 api-type 时拒绝；其余含斜杠的值（如 `deepseek/deepseek-v4.1-flash` 这类命名空间 id）按模型 id 原样使用 |
@@ -95,7 +95,7 @@ nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trust
 | `message.assistant.delta`（reasoning） | 暗淡样式写 stdout |
 | `tool.started` | `● <name>(<参数摘要>)`，参数摘要取 input 的短 JSON，截断约 100 字符 |
 | `tool.input.delta` | 不渲染（Phase 4 的 TUI 才需要增量展示） |
-| `tool.progress` | shell 的流式输出：按行首缩进两格写到终端（片段可能断在行中间，不额外插入换行；见"输出分流"） |
+| `tool.progress` | shell 的流式输出：按行首缩进两格写到终端（片段可能断在行中间，不额外插入换行；见"输出分流"）；`task` 工具的子会话进度（`stream:"info"`，一行式摘要）同路径渲染（Phase 6，[subagent.md](../architecture/subagent.md) 第 12 节） |
 | `tool.completed` | `└ <status>` + 耗时；`error`/`denied`/`cancelled`/`interrupted` 附 `error.code` 与原因；`edit`/覆盖 `write` 的 `output.diff` 以 unified diff 着色渲染（`+` 绿、`-` 红、上下文默认色）；`truncated` 为真时附一行"输出已截断，完整内容在 \<path\>"（落盘路径见 [tools.md](../architecture/tools.md) 第 4 节） |
 | `permission.requested` | 第 6 节的确认提示 |
 | `permission.resolved` | `└ 权限：<allow\|deny>（<source>：<rule\|reason>）` 一行——命中规则时展示 `rule`（如"用户配置第 3 条 {…}"），无规则时展示原因 |

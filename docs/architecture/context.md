@@ -35,7 +35,7 @@ Context Builder 不做 I/O，也不调用 Provider：指令文件由 `config` / 
 
 ## 3. 组装顺序（稳定的放前面）
 
-1. **基础系统提示**：Nocturne 身份、工作方式、工具使用约定。随版本变化，会话内不变。
+1. **基础系统提示**：Nocturne 身份、工作方式、工具使用约定。随版本变化，会话内不变。可由 `BuildContextInput.basePrompt` 覆盖——唯一的用户是子会话（Phase 6），它换成"子代理 + `finish` 提交协议"的提示（[subagent.md](subagent.md) 第 8 节）；缺省行为不变。
 2. **工具规格**：名称、描述、输入 schema。会话内通常不变。
 3. **项目指令**：用户级 `<NOCTURNE_HOME>/AGENTS.md`，以及从 `workspaceRoot` 到 `cwd` 路径上各级目录的 `AGENTS.md`。每个文件有大小上限，超出截断并在报告中标注。
 4. **环境信息**：操作系统、shell、工作目录、会话创建日期。取会话级的值，不在每个 Step 刷新，避免破坏缓存前缀。

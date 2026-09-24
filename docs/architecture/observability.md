@@ -48,6 +48,9 @@
 | `hook.run` / `hook.done` | hooks | 点位、command、退出码、耗时、效果摘要（deny/allow/feedback 长度等）、stderr 尾部 |
 | `mcp.event` | mcp | server、state、toolCount、error |
 | `mcp.call` | mcp | server、tool、耗时、isError、结果大小 |
+| `subagent.launch` / `subagent.attempt` / `subagent.done` | agent（subagent） | Phase 6：子 sessionId、`parentSessionId`/`parentCallId`、preset/tools、depth、turnIndex、status、usage、耗时（[subagent.md](subagent.md) 第 13 节） |
+
+子会话内的记录（provider.*、tool.*、hook.* 等）照常携带它自己的 `sessionId`——按 `sessionId` 过滤即得子会话视角，按 `parentSessionId`/`parentCallId` 关联到父调用。
 
 `hook.*` 与 `mcp.*` 由对应模块写入：`hooks` 用注入的 diagnostics；`packages/mcp` 通过 `McpOpenScope.diagnostics` 拿到同一个 sink。
 
@@ -70,6 +73,6 @@
 
 ## 5. 暂不设计
 
-- **traceId / 分布式追踪**：RPC 化之后再引入，届时 `kind` + `sessionId` + `callId` 已能串起本次链路。
+- **traceId / 分布式追踪**：RPC 化之后再引入，届时 `kind` + `sessionId` + `callId` 已能串起本次链路。Phase 6 评审过这个口径：父子会话关联已由 `session.created.parent` 的类型化字段覆盖，进程内没有第二个消费方，决定维持推迟（[subagent.md](subagent.md) 第 13 节）。
 - **日志轮转/保留策略**：每次启动一个文件、由用户清理；日志量随使用增长，待有实际负担再做。
 - **诊断事件进 TUI**：`/doctor` 式的状态面板属于客户端功能，诊断文件本身不驱动 UI。

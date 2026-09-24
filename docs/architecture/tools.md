@@ -16,10 +16,10 @@ tools/
 │   ├── registry     注册、查找、导出模型可见的工具规格
 │   ├── executor     执行管线（第 3 节）
 │   └── budget       结果大小预算与截断
-└── builtin/         read、write、edit、grep、glob、shell
+└── builtin/         read、write、edit、grep、glob、shell、task（Phase 6）
 ```
 
-内置工具与 MCP 工具（`packages/mcp`，见 [mcp.md](mcp.md)）、将来的插件工具走完全相同的注册接口和执行管线，没有特权通道。
+内置工具与 MCP 工具（`packages/mcp`，见 [mcp.md](mcp.md)）、将来的插件工具走完全相同的注册接口和执行管线，没有特权通道。`task`（子代理，Phase 6）同样如此：它是普通 `ToolDefinition`，启动子会话的能力经 `SubagentLauncher` 接口注入，见 [subagent.md](subagent.md)。
 
 ## 3. 执行管线
 
@@ -86,6 +86,9 @@ execute(call, ctx):
 | `grep` | 按正则搜索文件内容 | 无 | 优先使用 ripgrep；遵守 `.gitignore`；不跟随符号链接；结果逐条经权限过滤；数量有上限 |
 | `glob` | 按模式匹配文件路径 | 无 | 遵守 `.gitignore`；不跟随符号链接；结果逐条经权限过滤；按修改时间排序；数量有上限 |
 | `shell` | 执行非交互式命令 | 执行命令 | 指定工作目录与超时；合并输出流并截断；返回退出码；shell 与进程树终止见下 |
+| `task` | 启动一个子代理会话执行独立任务（Phase 6） | 运行一个受控子 Turn | 输入 `task`/`preset`/`tools`/`outputSchema`/`timeoutMs`；受限工具集、独立上下文、继承或收紧的权限；结果上限与落盘走第 4 节既有路径；完整契约见 [subagent.md](subagent.md) |
+
+另有只在**子会话**注册表中出现的 `finish` 工具：子代理用它提交结果结束 Turn（[subagent.md](subagent.md) 第 2 节）；它不是内置工具表的成员。
 
 "先读后写"与过期检测防止模型基于过时内容覆盖文件，是低成本、高收益的保护。已读状态保存在运行时内存中，会话恢复后需要重新读取。判定细则：
 

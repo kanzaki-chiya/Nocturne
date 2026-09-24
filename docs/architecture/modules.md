@@ -65,9 +65,9 @@
 
 ### agent
 
-- **负责**：Turn 与 Step 的循环；调用 Context Builder、Provider、Tool Executor；把结果作为事件写入会话；中断传播、重试、步数上限。
+- **负责**：Turn 与 Step 的循环；调用 Context Builder、Provider、Tool Executor；把结果作为事件写入会话；中断传播、重试、步数上限；`SubagentLauncher` 的实现（`agent/subagent.ts`，Phase 6）——唯一能 import `runTurn` 的地方，接口定义在 `tools`，由 `core/index` 装配进 `task` 工具。
 - **不负责**：Provider 协议细节；工具具体行为；权限规则；持久化格式；任何 UI 概念。
-- **公开接口**：`AgentRuntime.runTurn(session, input, signal)`，只被 `core/index` 使用。
+- **公开接口**：`AgentRuntime.runTurn(session, input, signal)`、`createSubagentLauncher`，只被 `core/index` 使用。
 - **依赖**：session、context、provider、tools、permission（仅用于组装 `PermissionGate` 并转交客户端回复）、config、protocol。**不能依赖**：apps、platform（通过 tools 与 session 间接使用）。
 - 详见 [agent-loop.md](agent-loop.md)。
 
@@ -91,7 +91,7 @@
 
 - **负责**：工具注册表；执行管线（输入校验 → 资源解析（经 platform）→ 权限 → 执行 → 结果归一化 → 生命周期事件）；中断与超时；结果大小预算；内置工具实现。
 - **不负责**：权限规则本身；决定何时调用工具；渲染工具结果。
-- **公开接口**：`ToolRegistry`、`ToolExecutor`、`ToolDefinition`（见 [tool-api.md](../protocols/tool-api.md)）；另定义 `HookRunner`（hooks 实现的注入点）与 `McpConnector` / `McpSession`（`packages/mcp` 的装配点）类型。
+- **公开接口**：`ToolRegistry`、`ToolExecutor`、`ToolDefinition`（见 [tool-api.md](../protocols/tool-api.md)）；另定义 `HookRunner`（hooks 实现的注入点）、`McpConnector` / `McpSession`（`packages/mcp` 的装配点）与 `SubagentLauncher`（`agent` 的注入点，Phase 6，见 [subagent.md](subagent.md)）类型。
 - **依赖**：protocol、permission、platform、diagnostics（仅接口注入，未启用时为空实现）。**不能依赖**：agent、session、provider、context、hooks（实现）。
 - 详见 [tools.md](tools.md)。
 
@@ -154,6 +154,8 @@ await session.close()
 
 `permissions` 选项在 Phase 3 扩展为：`{ preset?: PermissionPresetName, rules?: { user?: PermissionRule[], cli?: PermissionRule[] }, autoApproveAsk?: boolean }`——预设与按层标注的规则；项目层规则与 Grant 集合在 `wrapSession` 时按会话的 `workspaceRoot` 从 `config` 取得（[config.md](config.md) 第 6 节），因为项目配置的信任与生效范围都以会话绑定的目录为准。`policy` 直注入保留，用于测试与特殊客户端；给定 `policy` 时规则系统不生效。
 
+Phase 6 增补：`subagent` 选项（`enabled`/`maxDepth`/`maxConcurrent`/`maxStepsPerTurn`/`maxAttempts`/`timeoutMs`）控制子代理特性；启用时 `wrapSession` 创建 `SubagentLauncher` 并把 `task` 工具注册进会话注册表（[subagent.md](subagent.md) 第 3 节）。
+
 `config` 是 `loadConfig` 返回的 `RuntimeConfig`（可选）：缺省时等价于 Phase 2 行为——无配置文件、固定 `default` 预设、无项目层与 Grant 持久化。CLI 在启动时调用 `loadConfig(platform, { cliArgs })` 并把结果连同 `providerConfigs`、`turn` 等派生字段一起注入（见 [apps/cli.md](../apps/cli.md) 第 7 节）。
 
 恢复相关的会话 API：`resumeSession(id, { force?: boolean })`（`force` 对应强制解锁，见 [sessions.md](sessions.md) 第 4 节）；`listSessions({ cwd? })` 的摘要含 `locked` 字段；`session.recovery` 暴露本次打开执行的修复（截断尾部、补齐调用与 Turn）。
@@ -190,7 +192,8 @@ Phase 4 增补的客户端共享入口（提议，[apps/tui.md](../apps/tui.md) 
 
 | 模块 | 接入点 | 依赖约束 |
 |---|---|---|
-| `subagent` | 一个内置工具通过注入的 `SubagentLauncher` 创建子会话并运行受控 Turn | 工具不 import agent；launcher 由 agent 注入，避免循环 |
 | `rpc` | 服务端把公开 API 映射到传输层（stdio / WebSocket）；客户端只依赖 protocol | 服务端依赖公开 API；RPC 客户端不依赖 Core 实现 |
+
+`subagent` 已在 Phase 6 落地：它不是独立模块——接口在 `tools`、实现在 `agent`、装配在 `core/index`，见 [subagent.md](subagent.md) 第 3 节。
 
 新增这些模块时，先更新本文与对应架构文档，再写代码。

@@ -36,6 +36,7 @@
 | `shell` | 完整命令字符串 | shell |
 | `network` | URL 或主机 | 将来的网页类工具 |
 | `mcp` | `<server>/<tool>`（服务器与工具的**原始名**，不做规范化） | MCP 工具（Phase 5，见 [mcp.md](mcp.md)） |
+| `subagent` | 工具集预设名（`general`/`explore`）或 `"custom"`（显式白名单） | `task` 工具（Phase 6，见 [subagent.md](subagent.md)）；`subagent * → deny` 即关闭子代理派生 |
 
 ## 4. 路径主体的解析
 
@@ -90,7 +91,7 @@ PermissionPolicy.evaluate()             → 计算 where，匹配规则   纯函
 
 - **路径类**（`read` / `edit`）：glob——`*` 不跨目录分隔符，`**` 跨任意层级，`?` 匹配单个字符。模式先规范化（`/`，大小写规则同平台）；相对模式拼接到 `workspaceRoot` 之下再匹配。同一个规范化模式同时与 `target`（词法路径）和 `resolved`（真实路径）比较，任一命中即算命中（4.2）。
 - **shell**：对完整命令字符串做通配符匹配——`*` 匹配任意字符序列（无路径段概念），`?` 匹配单字符；大小写敏感，不做词法变形。
-- **network / mcp**：与 shell 相同的字符串通配符匹配。
+- **network / mcp / subagent**：与 shell 相同的字符串通配符匹配。
 
 "命令行参数"层为逐条规则预留（Phase 3 的命令行只提供预设名与 `--yes` 提升，不逐条写规则）。
 
@@ -153,7 +154,7 @@ interface Grant {
 
 Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。授权键：路径类取 `resolved`（缺失时取规范化 `target`），shell 取完整命令字符串，`network` / `mcp` 取 `target` 原值。"允许整个目录 / 某类命令"这类粗粒度授权不在确认选项中提供——需要时由用户显式写规则（配置文件的 `permissions.rules`），而不是在确认框里随手放权。
 
-- **会话 Grant**：保存在会话内存中，会话关闭即失效，恢复后不保留。
+- **会话 Grant**：保存在会话内存中，会话关闭即失效，恢复后不保留。其作用域是**会话树**：子会话（[subagent.md](subagent.md) 第 7 节）以只读方式继承父会话的会话 Grant（同一授权集），子会话自身不产生新的授权。
 - **项目 Grant**：写入 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`（见 [config.md](config.md) 第 4 节），按会话的 `workspaceRoot` 归属；写盘失败时降级为会话 Grant 并发出 `runtime.warning`。
 - 客户端回复 `PermissionReply.remember = "session" | "project"` 时生成对应 Grant；`remember` 与 `decision: "deny"` 组合无意义，忽略 `remember`。
 
@@ -161,12 +162,12 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 
 预设只是一组有序规则，没有隐藏逻辑，用户可以在其上追加规则覆盖。预设构造时拿到 `workspaceRoot`、`sessionsDir`、`sessionId` 与 `nocturneHome`（据此生成具体的路径模式）；求值时预设与其他层规则没有任何差别。
 
-| 预设 | read（工作区） | read（外部） | edit（工作区） | edit（外部） | shell | network / mcp |
-|---|---|---|---|---|---|---|
-| `read-only` | allow | ask | deny | deny | ask | ask |
-| `default`（默认） | allow | ask | ask | ask | ask | ask |
-| `auto-edit` | allow | ask | allow | ask | ask | ask |
-| `full-access` | allow | allow | allow | ask | allow | allow |
+| 预设 | read（工作区） | read（外部） | edit（工作区） | edit（外部） | shell | network / mcp | subagent |
+|---|---|---|---|---|---|---|---|
+| `read-only` | allow | ask | deny | deny | ask | ask | ask |
+| `default`（默认） | allow | ask | ask | ask | ask | ask | ask |
+| `auto-edit` | allow | ask | allow | ask | ask | ask | ask |
+| `full-access` | allow | allow | allow | ask | allow | allow | allow |
 
 表中没有覆盖到的组合落到"无规则匹配 → `ask`"。所有预设的规则序列都按以下次序排列（后写优先）：
 
@@ -206,3 +207,4 @@ PermissionGate.check(subjects, signal)
 - Tool Executor 负责解析资源并调用 `PermissionGate`，见 [tools.md](tools.md) 第 3 节。
 - Hooks 在权限求值前后给出建议：`PreToolUse` 的建议在第 5 步前合并，`PermissionRequest` 在 `ask` 分支内优先回答；`allow` 不能越过 `deny`，且仅可信来源能放宽 `ask`（5.5、[hooks.md](hooks.md)）。
 - 规则的配置格式与加载由 `config` 负责；本模块只接收已合并、已标注来源与信任状态的规则列表。
+- **子会话（Phase 6）**：子代理会话的有效策略用与父会话相同的输入重建（同一预设、合并规则、项目 Grant、共享的会话 Grant、`autoApproveAsk`），但 gate 恒为非交互——`ask` 一律 `deny(source: "non_interactive")`。因此子会话的每个 `allow` 都是父会话同一求值下也会得到的 `allow`，差异方向只有更严；完整论证与机制行为表见 [subagent.md](subagent.md) 第 7 节。

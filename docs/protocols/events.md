@@ -14,7 +14,7 @@
 | 序号？ | 持久化事件独占会话内连续递增的 `seq`（1, 2, 3, …，无空洞）。临时事件不占用 `seq`，使用本次运行的 `runId` 与运行内序号 `eseq` |
 | 需要 event id 吗？ | 不需要。持久化事件由 `(sessionId, seq)` 唯一标识；临时事件由 `(sessionId, runId, eseq)` 唯一标识 |
 | 需要 parent id 吗？ | 不需要。关联用有类型的字段（`turnId`、`messageId`、`callId`、`requestId`） |
-| 需要 correlation id 吗？ | `turnId` 关联一次 Turn 内的所有事件；跨会话的 `traceId` 在引入 Subagent 时以可选字段加入 |
+| 需要 correlation id 吗？ | `turnId` 关联一次 Turn 内的所有事件；父子会话关联由 `session.created.parent` 的类型化字段记录（Phase 6）；跨进程 `traceId` 推迟到 RPC 阶段评估（[subagent.md](../architecture/subagent.md) 第 13 节、[ADR-0013](../decisions/ADR-0013-subagent.md)） |
 | Tool Call 如何关联？ | Runtime 为每个工具调用分配会话内唯一的 `callId`，贯穿所有生命周期事件；Provider 给出的原始 ID 保存在 `providerCallId` 中，仅用于回传 Provider |
 | Message 与 Event 的关系？ | 消息就是事件：`message.user`、`message.assistant` 本身就是会话中的消息记录，工具结果就是 `tool.completed`。没有另一张消息表 |
 | Session state 如何得到？ | 由持久化事件折叠重建；MVP 不做快照 |
@@ -60,7 +60,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `messageId`、`callId`、`requestId` | 放在 payload | 只对相关事件有意义 |
 | 日志格式版本 | 在 `session.created.formatVersion` | 整个日志共用 |
 | `eventId`、`parentId` | 不需要 | 见第 1 节 |
-| `traceId`、`spanId` | 以后可选加入 | 兼容变更 |
+| `traceId`、`spanId` | RPC 阶段再评估 | 兼容变更；Phase 6 决定推迟，理由见 [subagent.md](../architecture/subagent.md) 第 13 节 |
 
 ## 3. 事件类型
 
@@ -68,7 +68,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 
 | 类型 | turnId | payload |
 |---|---|---|
-| `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset` |
+| `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节） |
 | `session.config_changed` | — | 变化的字段：`model?`、`permissionPreset?` |
 | `turn.started` | ✓ | `turnIndex` |
 | `message.user` | ✓ | `messageId`、`content: ContentBlock[]` |
@@ -136,7 +136,7 @@ type Usage = {
 
 /** 解析后的权限主体，见 permissions.md */
 type PermissionSubject = {
-  kind: "read" | "edit" | "shell" | "network" | "mcp"
+  kind: "read" | "edit" | "shell" | "network" | "mcp" | "subagent"   // subagent：Phase 6
   target: string            // 工具给出的目标（规范化后的路径、命令、URL）
   resolved?: string         // 路径类：解析符号链接 / junction 后的真实路径
   where?: "workspace" | "outside"

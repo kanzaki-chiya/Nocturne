@@ -26,6 +26,7 @@
 | [config.md](architecture/config.md) | 分层配置、配置文件格式、项目信任模型、Grant 持久化 |
 | [mcp.md](architecture/mcp.md) | MCP 客户端：stdio 传输、服务器生命周期、工具包装与结果映射、`mcp` 权限类别 |
 | [hooks.md](architecture/hooks.md) | Hooks：事件点、外部命令契约、与权限的关系、项目信任 |
+| [subagent.md](architecture/subagent.md) | Subagent（子代理）：`task` 工具契约、Launcher 注入、子会话生命周期、受限工具集与权限收敛 |
 | [observability.md](architecture/observability.md) | 诊断日志：开关与输出位置、记录种类、脱敏规则 |
 | [providers.md](architecture/providers.md) | Provider 抽象、模型能力、流式与错误归一化 |
 | [pitfalls.md](architecture/pitfalls.md) | 最容易犯的架构错误、早期症状与规避方式 |

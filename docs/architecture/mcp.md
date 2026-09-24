@@ -81,7 +81,8 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 - **作用域是会话**：服务器集合由会话的 `workspaceRoot` 与信任状态决定（不同会话的项目配置可以不同），进程随会话关闭终止。同一 Runtime 下两个会话各自持有自己的服务器进程，不共享。
 - **并行启动、限时等待**：会话打开不被单个慢服务器无限阻塞；超时服务器记 `failed`，其工具不注册（模型看不到），会话继续。`mcp.server` 事件与 `/mcp` 命令给出失败原因（第 7 节）。
 - **崩溃与重连**：进程在会话中途退出 → 状态 `crashed`，发 `mcp.server` + `runtime.warning(code="mcp_server_crashed")`；在途 `tools/call` 以 `mcp_unavailable` 失败。**惰性重连**：对崩溃服务器的下一次调用触发一次重连尝试（重新 spawn + initialize + tools/list），成功后恢复；每个会话每台服务器至多重连 3 次，超过后记 `failed` 不再尝试——避免反复拉起一个必崩的进程。
-- **Runtime 关闭清理**：`session.close()` 关闭本会话全部 MCP 连接（含 `failed`/`crashed` 状态的残留进程）。进程被强杀（杀 Nocturne 进程）时，stdio 子进程的 stdin 管道断开，行为良好的服务器会自行退出；与 [sessions.md](sessions.md) 第 6 节一致，**不作保证**。
+- **Runtime 关闭清理**：`session.close()` 关闭本会话全部 MCP 连接（含 `failed`/`crashed` 状态的残留进程）。进程被强杀（杀 Nocturne 进程）时，stdio 子进程的 stdin 管道断开，行为良好的服务器会自行退出；与 [sessions.md](sessions.md) 第 6 节一致，**不作保证**。**已知问题（Phase 5 遗留）**：Windows 上强杀 Nocturne 时 MCP 子进程可能成为孤儿——当前没有使用 Job Object 把子进程生命周期绑定到父进程；stdin 断开依赖服务器的自我退出行为。跟踪见 roadmap Phase 5。
+- **子会话复用（Phase 6）**：Subagent 子会话的工具集直接取父会话 `mcpSession.tools()` 的快照——同一连接、同一批服务器进程，**不为子会话启动新的 MCP 服务器**，也不做第二次 initialize（[subagent.md](subagent.md) 第 10 节）。
 - 服务器主动发来的请求（`sampling/createMessage`、`elicitation/create`、`roots/list` 等）：我们不声明对应 capability，一律回 JSON-RPC `method_not_found`；`ping` 由 SDK 自动应答。
 
 ## 5. 工具包装

@@ -60,6 +60,7 @@ runTurn(session, input, signal):
       # execute 内部：校验 → PreToolUse Hook → 解析资源 → 权限（ask 时先经 PermissionRequest Hook，
       #   可能等待用户）→ tool.started → 执行 → PostToolUse Hook → 归一化 → tool.completed
       if outcome.stopTurn: return finish("aborted")         # 用户选择"拒绝并停止"；剩余调用由 finish 结算
+      if deps.shouldFinish?(session.state): return finish("done")   # Phase 6 注入点（subagent.md 第 2 节）
     if signal.aborted: return finish("aborted")
     # 回到循环顶部：工具结果已写入会话，下一次 build 会把它们带给模型
 
@@ -135,6 +136,18 @@ Context Builder 是纯计算，不调用 Provider。需要压缩时它返回压�
 ### 3.8 步数上限
 
 `maxSteps`（默认 100，可配置）是防止失控循环的安全阀。达到上限时 Turn 以 `max_steps` 结束，用户可以发送"继续"开启新 Turn。重复调用检测作为后续改进。
+
+### 3.9 Turn 的可选注入点（Phase 6）
+
+`TurnDeps` 的三个可选字段为 Subagent 引入，缺省时行为与既有版本逐项一致：
+
+| 字段 | 作用 |
+|---|---|
+| `basePrompt?: string` | 覆盖基础系统提示段（context.md 第 3 节第 1 项）；子会话用它换成子代理提示 |
+| `shouldFinish?(state): boolean` | 每个工具调用结算后检查；返回 true 即 `finish("done")`。谓词由调用方注入，Agent Loop 不读工具名 |
+| `toolChoice?: { name: string }` | 设置时进入本 Turn 每个 `ModelRequest`（强制调用某工具，见 provider-api.md 第 3 节）；仅 Subagent 的催促兜底轮使用 |
+
+子会话由 `SubagentLauncher` 用同一 `runTurn` 驱动另一条会话日志（[subagent.md](subagent.md)）——没有"子会话模式"的 Agent Loop 分支。
 
 ## 4. 运行状态
 

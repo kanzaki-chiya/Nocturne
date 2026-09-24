@@ -77,7 +77,7 @@
 - 技术选型见 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)：Ink + React。回放区用 `<Static>`；活动区/对话框/状态栏是普通组件，随 `view.revision` 重绘。
 - **回放区只写 `entries` 的完结前缀**：从头到第一个未完结条目（`awaiting_permission`/`running` 的工具）为止；其后的条目（包括已完结的 notice）留在活动区渲染，待前缀推进后按序补进回放——`<Static>` 写出的内容不可改，未完结条目绝不能先进滚动区。测试覆盖：运行中工具之后已有权限提示条目时，该提示不得先进入回放区（ink-testing-library 断言帧内容）。
 - **diff 展示**：`tool.completed.output` 的结构化 diff（edit/write 工具已声明）直接渲染，红绿着色（NO_COLOR 时仅用 `+`/`-` 前缀）；大 diff 折叠为头尾若干行 + 省略计数，`spillPath` 存在时提示查看完整文件。
-- **工具行**：`● name <输入摘要>` + 状态徽标（awaiting → `?`，running → 转轮，ok/error → `✓`/`✗`，denied/cancelled/interrupted → 对应词）。`liveOutput` 只显示尾部 N 行。
+- **工具行**：`● name <输入摘要>` + 状态徽标（awaiting → `?`，running → 转轮，ok/error → `✓`/`✗`，denied/cancelled/interrupted → 对应词）。`liveOutput` 只显示尾部 N 行。`task`（子代理，Phase 6）的进行中行同样靠 `liveOutput` 展示一行式进度摘要（`tool.progress` `stream:"info"`），无新增视图通道（[subagent.md](../architecture/subagent.md) 第 12 节）。
 - **MCP 状态（Phase 5）**：`mcp.server` 是临时事件、不进 `SessionView`（reducer 忽略未知类型）；`failed`/`crashed` 经 `runtime.warning` 进入提示区，`/mcp` 面板按 `session.mcpServers()` 展示每台服务器的状态、工具数与失败原因。Hook 的可见效果走既有事件（`permission.resolved source:"hook"`、`tool.completed`、`runtime.warning(code:"hook_failed")`），不新增 UI 通道。
 - **宽字符**：所有截断/对齐经显示宽度计算（Ink 内建 string-width），中文文本不掰断。
 

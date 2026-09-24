@@ -7,7 +7,7 @@
 - **Session** 是持久的数据实体：一条事件日志加上从中派生的状态。它不会"思考"。
 - **Agent Loop** 是无状态的执行过程：每次 Turn 读取会话状态、写入事件。它不保存会话数据。
 
-分离的收益：恢复会话只需加载日志；同一个 Agent 实现可以驱动任何会话；将来的子会话（Subagent）只是另一条日志。
+分离的收益：恢复会话只需加载日志；同一个 Agent 实现可以驱动任何会话；子会话（Subagent，Phase 6）只是另一条日志——它复用同一套日志、锁与恢复语义，仅在 `session.created` 里多记一个 `parent` 关联字段（[subagent.md](subagent.md) 第 5 节）。
 
 ## 2. 事件日志
 
@@ -123,6 +123,8 @@ interface SessionRecovery {
 ## 8. 会话列表
 
 读取每个日志的第一行（`session.created`）和文件修改时间列出会话，可按工作目录过滤；每条摘要附带 `locked`（锁文件存在且持有者看起来存活），供客户端标注"正在使用/残留锁"。列表是只读操作，不取得锁、不解析日志主体。会话数量增长到影响启动时间时，再加入可随时从日志重建的索引文件。
+
+子会话（`session.created.parent` 存在者）默认**不出现在列表中**：`listSessions({ includeSubagents?: boolean })` 缺省为 false，`--sessions`、`/resume`、`-c/--continue` 都只面向顶层会话；子会话是子代理运行的痕迹而非可交互会话。摘要带 `parent` 字段供需要时区分；按 id 显式恢复一条子日志仍然可行（它只是打开一条普通日志，见 [subagent.md](subagent.md) 第 5 节）。
 
 ## 9. 暂不设计
 

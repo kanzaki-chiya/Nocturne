@@ -42,8 +42,8 @@ interface ToolTraits {
 - **`permissionSubjects` 必须是纯函数**：它只做词法层面的规范化（按 `cwd` 把相对路径变成绝对路径）。解析符号链接等需要 I/O 的工作由执行器通过 `platform` 完成，结果再交给权限层（[permissions.md](../architecture/permissions.md) 第 4 节）。
 
 ```ts
-/** 工具声明的未解析主体 */
-type SubjectRequest = { kind: "read" | "edit" | "shell" | "network" | "mcp"; target: string }
+/** 工具声明的未解析主体（subagent 为 Phase 6 新增，见 subagent.md） */
+type SubjectRequest = { kind: "read" | "edit" | "shell" | "network" | "mcp" | "subagent"; target: string }
 // 解析后的 PermissionSubject 定义见 events.md 第 4 节
 ```
 

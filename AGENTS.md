@@ -25,6 +25,7 @@
 | MCP 服务器接入、MCP 工具 | [architecture/mcp.md](docs/architecture/mcp.md)、[decisions/ADR-0011](docs/decisions/ADR-0011-mcp-client.md) |
 | Hooks（PreToolUse 等事件点） | [architecture/hooks.md](docs/architecture/hooks.md)、[decisions/ADR-0012](docs/decisions/ADR-0012-hooks.md) |
 | 诊断日志、调试输出 | [architecture/observability.md](docs/architecture/observability.md) |
+| 子代理（task 工具、子会话） | [architecture/subagent.md](docs/architecture/subagent.md)、[decisions/ADR-0013](docs/decisions/ADR-0013-subagent.md) |
 | Provider、模型能力、流式归一化 | [architecture/providers.md](docs/architecture/providers.md)、[protocols/provider-api.md](docs/protocols/provider-api.md) |
 | CLI 参数、REPL、事件渲染、权限确认 | [apps/cli.md](docs/apps/cli.md) |
 | 模块划分、依赖方向、目录 | [architecture/modules.md](docs/architecture/modules.md)、[development/repository-layout.md](docs/development/repository-layout.md) |
