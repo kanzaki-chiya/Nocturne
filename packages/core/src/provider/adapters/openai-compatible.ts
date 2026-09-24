@@ -7,7 +7,13 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { streamText } from "ai";
 import { abortError, ProviderError } from "../errors.js";
 import { resolveModelInfo, type ModelOverride } from "../registry.js";
-import type { ModelInfo, ModelRequest, ModelStreamEvent, Provider } from "../types.js";
+import type {
+  CredentialResolver,
+  ModelInfo,
+  ModelRequest,
+  ModelStreamEvent,
+  Provider,
+} from "../types.js";
 import type { Diagnostics } from "../../protocol/index.js";
 import {
   mapPart,
@@ -25,8 +31,16 @@ export interface OpenAICompatibleConfig {
   /** 适配器类型标识；缺省即 openai-compatible（providerConfigs 联合的分辨字段） */
   type?: "openai-compatible" | undefined;
   baseURL: string;
-  /** 环境变量名；凭据只经环境变量读取 */
-  apiKeyEnv: string;
+  /**
+   * 环境变量名（v0.1 方式保留）。可选：省略时凭据经 credentials 解析
+   * （provider-setup.md 第 3 节的凭据索引，密钥不落配置文件）。
+   */
+  apiKeyEnv?: string | undefined;
+  /**
+   * 凭据解析器（装配处注入 CredentialStore.get）：apiKeyEnv 未设置或
+   * 对应环境变量为空时，请求前经它取密钥；结果由存储层进程内缓存。
+   */
+  credentials?: CredentialResolver | undefined;
   /** 模型能力覆盖（合并在内置目录之上） */
   models?: Record<string, ModelOverride> | undefined;
   /** true 时接受清单外的模型 id（回退内置目录/保守默认；见 Provider.strictModels） */
@@ -46,13 +60,40 @@ export function createOpenAICompatibleProvider(
   /** 测试注入用；生产不传（SDK 默认全局 fetch） */
   fetchImpl?: typeof fetch,
 ): Provider {
-  const apiKey = env(config.apiKeyEnv);
+  // 构造时只取环境变量；凭据存储在请求时解析（异步），两条路径在 stream 里汇合
+  const apiKeyFromEnv =
+    config.apiKeyEnv !== undefined && env(config.apiKeyEnv) !== ""
+      ? env(config.apiKeyEnv)
+      : undefined;
+  const missingKeyError = (): ProviderError =>
+    new ProviderError({
+      kind: "auth",
+      message:
+        config.apiKeyEnv !== undefined
+          ? `环境变量 ${config.apiKeyEnv} 未设置，凭据存储中也没有 "${config.id}" 的密钥（openai-compatible Provider）——可运行 nctrn setup 或 /provider key 配置`
+          : `Provider "${config.id}" 未配置凭据——可运行 nctrn setup 或 /provider key 配置，或在条目上声明 apiKeyEnv`,
+      retryable: false,
+    });
+  /** 请求时解析密钥：环境变量优先，其次凭据存储（结果由存储层缓存） */
+  const resolveKey = async (): Promise<string | undefined> =>
+    apiKeyFromEnv ?? (await config.credentials?.(config.id));
+  // SDK 的 apiKey 只接受静态字符串；凭据存储的密钥经包装 fetch
+  // 覆盖 Authorization 头注入（每次请求取最新值，/provider key 后立即生效）。
+  // 惰性取 globalThis.fetch：测试在构造后替换全局 fetch 的场景保持有效
+  const baseFetch: typeof fetch = (...args) => (fetchImpl ?? globalThis.fetch)(...args);
+  const wrappedFetch: typeof fetch = async (url, init) => {
+    const key = await resolveKey();
+    if (key === undefined) throw missingKeyError();
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${key}`);
+    return baseFetch(url, { ...init, headers });
+  };
   const sdk = createOpenAICompatible({
     name: config.id,
     baseURL: config.baseURL,
-    ...(apiKey !== undefined ? { apiKey } : {}),
+    ...(apiKeyFromEnv !== undefined ? { apiKey: apiKeyFromEnv } : {}),
     ...(config.headers !== undefined ? { headers: config.headers } : {}),
-    ...(fetchImpl !== undefined ? { fetch: fetchImpl } : {}),
+    fetch: wrappedFetch,
   });
 
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
@@ -66,12 +107,8 @@ export function createOpenAICompatibleProvider(
     models: () => modelList,
 
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
-      if (apiKey === undefined || apiKey === "") {
-        throw new ProviderError({
-          kind: "auth",
-          message: `环境变量 ${config.apiKeyEnv} 未设置（openai-compatible Provider "${config.id}"）`,
-          retryable: false,
-        });
+      if ((await resolveKey()) === undefined) {
+        throw missingKeyError();
       }
       // 合并 providerOptions 后决定 toolChoice：部分兼容服务的推理配置与具体
       // tool_choice 冲突——能安全移除的推理键本轮移除（强制生效），无法安全移除的
@@ -100,7 +137,10 @@ export function createOpenAICompatibleProvider(
         system: request.system.map((b) => b.text).join("\n\n"),
         messages: toAiMessages(request),
         tools: toAiTools(request),
-        maxOutputTokens: request.maxOutputTokens,
+        // ADR-0016：最大输出长度未知时请求不带 max_tokens，由上游按自己的上限处理
+        ...(request.maxOutputTokens !== undefined
+          ? { maxOutputTokens: request.maxOutputTokens }
+          : {}),
         // 重试由 Agent Loop 决定（providers.md 第 5 节）；SDK 层一律不重试
         maxRetries: 0,
         streamRetries: 0,

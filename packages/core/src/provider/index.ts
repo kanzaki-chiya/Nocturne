@@ -7,6 +7,7 @@ export * from "./registry.js";
 export * from "./fake.js";
 export * from "./adapters/openai-compatible.js";
 export * from "./adapters/anthropic.js";
+export * from "./presets.js";
 
 import type { AnthropicConfig } from "./adapters/anthropic.js";
 import type { OpenAICompatibleConfig } from "./adapters/openai-compatible.js";

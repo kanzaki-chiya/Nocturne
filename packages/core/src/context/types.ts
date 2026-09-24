@@ -80,6 +80,16 @@ export interface ContextReport {
   estimatedTokens: number;
   /** 本次请求可用输入预算（token） */
   budgetTokens: number;
+  /**
+   * ADR-0016：模型限额未声明时本地预算使用的兜底值标注
+   * （/context 报告据此显示"哪些值是默认的"）
+   */
+  modelDefaults?:
+    | {
+        contextWindow?: boolean | undefined;
+        maxOutputTokens?: boolean | undefined;
+      }
+    | undefined;
 }
 
 export interface BuiltContext {

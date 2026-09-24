@@ -7,6 +7,12 @@ import type { ContentBlock, DurableEvent, HistoryEntry } from "../protocol/index
 import type { ModelInfo, ModelMessage, ModelRequest, SystemBlock } from "../provider/index.js";
 import type { BuildContextInput, BuiltContext, CompactionPlan, ContextSection } from "./types.js";
 
+// ADR-0016 兜底常量：context 只能 import type provider（modules.md），
+// 与 provider/catalog.ts 的同名常量保持一致（值相同、语义不同侧：
+// provider 侧是"请求兜底"，这里是"预算估算兜底"）
+const CONTEXT_WINDOW_FALLBACK = 128_000;
+const MAX_OUTPUT_FALLBACK = 8_192;
+
 /** 摘要输出上限（context.md 6.6：默认约 4,000 token） */
 export const SUMMARY_MAX_OUTPUT_TOKENS = 4_000;
 
@@ -26,13 +32,24 @@ const SAFETY_MARGIN = 1_024;
 /** 预防性修剪阈值：估算超过预算的该比例时给出 prune 计划（context.md 6.5 默认 80%） */
 const PRUNE_THRESHOLD = 0.8;
 
-/** 本次请求的可用输入预算（context.md 第 5 节） */
+/**
+ * 本次请求的可用输入预算（context.md 第 5 节）。
+ * ADR-0016：限额未声明时按兜底估算——contextWindow 按 128000、
+ * 输出预留按 8192；兜底只影响本地预算，不发送给上游（openai-compatible
+ * 不带 max_tokens；anthropic 必填由适配器兜底）。
+ */
 export function inputBudgetTokens(
   model: Pick<ModelInfo, "contextWindow" | "maxOutputTokens">,
   maxOutputOverride?: number,
 ): number {
-  const outputReserve = Math.min(maxOutputOverride ?? model.maxOutputTokens, OUTPUT_RESERVE_CAP);
-  return Math.max(0, model.contextWindow - outputReserve - SAFETY_MARGIN);
+  const outputReserve = Math.min(
+    maxOutputOverride ?? model.maxOutputTokens ?? MAX_OUTPUT_FALLBACK,
+    OUTPUT_RESERVE_CAP,
+  );
+  return Math.max(
+    0,
+    (model.contextWindow ?? CONTEXT_WINDOW_FALLBACK) - outputReserve - SAFETY_MARGIN,
+  );
 }
 /** 单个指令文件的字符上限 */
 export const INSTRUCTION_FILE_MAX_CHARS = 32_000;
@@ -255,7 +272,11 @@ export function buildSummaryRequest(input: BuildSummaryRequestInput): ModelReque
     system: [{ text: SUMMARY_SYSTEM }],
     messages: [{ role: "user", content: [{ type: "text", text: userText }] }],
     tools: [],
-    maxOutputTokens: Math.min(model.maxOutputTokens, SUMMARY_MAX_OUTPUT_TOKENS),
+    // 未声明输出上限时摘要仍按既有上限请求（不替上游做决定，只约束摘要本身）
+    maxOutputTokens: Math.min(
+      model.maxOutputTokens ?? SUMMARY_MAX_OUTPUT_TOKENS,
+      SUMMARY_MAX_OUTPUT_TOKENS,
+    ),
   };
 }
 
@@ -435,7 +456,8 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     system,
     messages,
     tools: input.tools,
-    maxOutputTokens: model.maxOutputTokens,
+    // 未声明 → undefined 透传：适配器按 ADR-0016 各自处理（省略或兜底）
+    ...(model.maxOutputTokens !== undefined ? { maxOutputTokens: model.maxOutputTokens } : {}),
     // 可缓存前缀：全部 system 块（base + 指令 + 环境），messages 不计
     cachePrefix: { systemBlocks: system.length, messages: 0 },
   };
@@ -447,6 +469,14 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       totalChars,
       estimatedTokens: estimated,
       budgetTokens,
+      ...(model.contextWindow === undefined || model.maxOutputTokens === undefined
+        ? {
+            modelDefaults: {
+              ...(model.contextWindow === undefined ? { contextWindow: true } : {}),
+              ...(model.maxOutputTokens === undefined ? { maxOutputTokens: true } : {}),
+            },
+          }
+        : {}),
     },
     overBudget,
     // 调用方先执行 compaction（若有），执行后重建；无计划可用且仍超预算

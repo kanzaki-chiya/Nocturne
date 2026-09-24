@@ -27,9 +27,18 @@ export interface ModelCapabilities {
 export interface ModelInfo {
   ref: ModelRef;
   displayName?: string | undefined;
-  /** 输入 + 输出共享的窗口大小 */
-  contextWindow: number;
-  maxOutputTokens: number;
+  /**
+   * 输入 + 输出共享的窗口大小。undefined = 上游与配置都未声明
+   * （ADR-0016）：本地预算按 128000 估算并发 model_capabilities_defaulted
+   */
+  contextWindow?: number | undefined;
+  /**
+   * undefined = 未声明：openai-compatible 请求不带 max_tokens；
+   * anthropic 必填故按兜底值发送（ADR-0016）
+   */
+  maxOutputTokens?: number | undefined;
+  /** 每百万 token 的 USD 价格（上游声明换算；provider-setup.md 第 7 节） */
+  pricing?: { input?: number | undefined; output?: number | undefined } | undefined;
   capabilities: ModelCapabilities;
 }
 
@@ -61,7 +70,8 @@ export interface ModelRequest {
   system: SystemBlock[];
   messages: ModelMessage[];
   tools: ToolSpec[];
-  maxOutputTokens: number;
+  /** undefined = 模型未声明输出上限：适配器自行处理（ADR-0016） */
+  maxOutputTokens?: number | undefined;
   /** 仅在模型声明支持该档位时设置 */
   reasoningEffort?: string | undefined;
   /** 可缓存前缀的边界提示，适配器自行决定是否使用 */
@@ -137,4 +147,27 @@ export interface ResolvedModel {
 export interface ProviderRegistry {
   resolve(ref: ModelRef): ResolvedModel;
   providers(): Provider[];
+}
+
+/**
+ * 凭据解析器（provider-setup.md 第 3 节）：config 层 CredentialStore.get
+ * 经装配处注入适配器——provider 不依赖 config，只认这个函数形状。
+ * 返回 undefined = 凭据存储中无该服务商密钥。
+ */
+export type CredentialResolver = (providerId: string) => Promise<string | undefined>;
+
+/**
+ * 上游模型列表条目（fetchModels 返回值；provider-setup.md 第 7 节）。
+ * 只含上游明确声明的字段；未声明的字段保持 undefined，不猜。
+ */
+export interface UpstreamModelInfo {
+  id: string;
+  displayName?: string | undefined;
+  contextWindow?: number | undefined;
+  maxOutputTokens?: number | undefined;
+  pricing?: { input?: number | undefined; output?: number | undefined } | undefined;
+  /** 仅含上游明确声明的能力位（reasoning / imageInput） */
+  capabilities?:
+    | { reasoning?: "none" | "hidden" | "visible" | undefined; imageInput?: boolean | undefined }
+    | undefined;
 }

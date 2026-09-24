@@ -10,8 +10,15 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { streamText, type JSONValue } from "ai";
 import { abortError, ProviderError } from "../errors.js";
+import { MAX_OUTPUT_FALLBACK } from "../catalog.js";
 import { resolveModelInfo, type ModelOverride } from "../registry.js";
-import type { ModelInfo, ModelRequest, ModelStreamEvent, Provider } from "../types.js";
+import type {
+  CredentialResolver,
+  ModelInfo,
+  ModelRequest,
+  ModelStreamEvent,
+  Provider,
+} from "../types.js";
 import type { Diagnostics } from "../../protocol/index.js";
 import {
   mapPart,
@@ -29,8 +36,16 @@ export interface AnthropicConfig {
   type: "anthropic";
   /** 缺省用 SDK 内置的 api.anthropic.com */
   baseURL?: string | undefined;
-  /** 环境变量名；凭据只经环境变量读取 */
-  apiKeyEnv: string;
+  /**
+   * 环境变量名（v0.1 方式保留）。可选：省略时凭据经 credentials 解析
+   * （provider-setup.md 第 3 节的凭据索引，密钥不落配置文件）。
+   */
+  apiKeyEnv?: string | undefined;
+  /**
+   * 凭据解析器（装配处注入 CredentialStore.get）：apiKeyEnv 未设置或
+   * 对应环境变量为空时，请求前经它取密钥；结果由存储层进程内缓存。
+   */
+  credentials?: CredentialResolver | undefined;
   /** 模型能力覆盖（合并在内置目录之上） */
   models?: Record<string, ModelOverride> | undefined;
   /** true 时接受清单外的模型 id（回退内置目录/保守默认；见 Provider.strictModels） */
@@ -50,12 +65,39 @@ export function createAnthropicProvider(
   /** 测试注入用；生产不传（SDK 默认全局 fetch） */
   fetchImpl?: typeof fetch,
 ): Provider {
-  const apiKey = env(config.apiKeyEnv);
+  // 构造时只取环境变量；凭据存储在请求时解析（异步），两条路径在 stream 里汇合
+  const apiKeyFromEnv =
+    config.apiKeyEnv !== undefined && env(config.apiKeyEnv) !== ""
+      ? env(config.apiKeyEnv)
+      : undefined;
+  const missingKeyError = (): ProviderError =>
+    new ProviderError({
+      kind: "auth",
+      message:
+        config.apiKeyEnv !== undefined
+          ? `环境变量 ${config.apiKeyEnv} 未设置，凭据存储中也没有 "${config.id}" 的密钥（anthropic Provider）——可运行 nctrn setup 或 /provider key 配置`
+          : `Provider "${config.id}" 未配置凭据——可运行 nctrn setup 或 /provider key 配置，或在条目上声明 apiKeyEnv`,
+      retryable: false,
+    });
+  /** 请求时解析密钥：环境变量优先，其次凭据存储（结果由存储层缓存） */
+  const resolveKey = async (): Promise<string | undefined> =>
+    apiKeyFromEnv ?? (await config.credentials?.(config.id));
+  // SDK 的 apiKey 只接受静态字符串；凭据存储的密钥经包装 fetch
+  // 覆盖 x-api-key 头注入（每次请求取最新值，/provider key 后立即生效）。
+  // 惰性取 globalThis.fetch：测试在构造后替换全局 fetch 的场景保持有效
+  const baseFetch: typeof fetch = (...args) => (fetchImpl ?? globalThis.fetch)(...args);
+  const wrappedFetch: typeof fetch = async (url, init) => {
+    const key = await resolveKey();
+    if (key === undefined) throw missingKeyError();
+    const headers = new Headers(init?.headers);
+    headers.set("x-api-key", key);
+    return baseFetch(url, { ...init, headers });
+  };
   const sdk = createAnthropic({
-    ...(apiKey !== undefined ? { apiKey } : {}),
+    ...(apiKeyFromEnv !== undefined ? { apiKey: apiKeyFromEnv } : {}),
     ...(config.baseURL !== undefined ? { baseURL: config.baseURL } : {}),
     ...(config.headers !== undefined ? { headers: config.headers } : {}),
-    ...(fetchImpl !== undefined ? { fetch: fetchImpl } : {}),
+    fetch: wrappedFetch,
   });
 
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
@@ -69,12 +111,8 @@ export function createAnthropicProvider(
     models: () => modelList,
 
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
-      if (apiKey === undefined || apiKey === "") {
-        throw new ProviderError({
-          kind: "auth",
-          message: `环境变量 ${config.apiKeyEnv} 未设置（anthropic Provider "${config.id}"）`,
-          retryable: false,
-        });
+      if ((await resolveKey()) === undefined) {
+        throw missingKeyError();
       }
       // 合并 providerOptions 后决定 toolChoice：扩展思考开启时 Anthropic 只接受
       // auto/none，具体 tool_choice 会 400——临时关闭本轮思考让强制生效
@@ -106,7 +144,9 @@ export function createAnthropicProvider(
           reasoningProviderOptions: (pd) => pd as Record<string, Record<string, JSONValue>>,
         }),
         tools: toAiTools(request),
-        maxOutputTokens: request.maxOutputTokens,
+        // ADR-0016：Messages API 的 max_tokens 必填，未知时只能给兜底值
+        // （8192）——这是协议要求，不代表对上游能力的断言
+        maxOutputTokens: request.maxOutputTokens ?? MAX_OUTPUT_FALLBACK,
         // 重试由 Agent Loop 决定（providers.md 第 5 节）；SDK 层一律不重试
         maxRetries: 0,
         streamRetries: 0,

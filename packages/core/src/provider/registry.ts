@@ -29,6 +29,7 @@ export function applyModelOverride(
     displayName: override.displayName ?? base.displayName,
     contextWindow: override.contextWindow ?? base.contextWindow,
     maxOutputTokens: override.maxOutputTokens ?? base.maxOutputTokens,
+    pricing: override.pricing ?? base.pricing,
     capabilities: {
       ...base.capabilities,
       ...override.capabilities,
