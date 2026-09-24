@@ -27,6 +27,7 @@
 | Hooks（PreToolUse 等事件点） | [architecture/hooks.md](docs/architecture/hooks.md)、[decisions/ADR-0012](docs/decisions/ADR-0012-hooks.md) |
 | 诊断日志、调试输出 | [architecture/observability.md](docs/architecture/observability.md) |
 | 子代理（task 工具、子会话） | [architecture/subagent.md](docs/architecture/subagent.md)、[decisions/ADR-0013](docs/decisions/ADR-0013-subagent.md) |
+| 服务商配置向导、凭据存储 | [architecture/provider-setup.md](docs/architecture/provider-setup.md)、[decisions/ADR-0015](docs/decisions/ADR-0015-provider-setup-credentials.md) |
 | Provider、模型能力、流式归一化 | [architecture/providers.md](docs/architecture/providers.md)、[protocols/provider-api.md](docs/protocols/provider-api.md) |
 | CLI 参数、REPL、事件渲染、权限确认 | [apps/cli.md](docs/apps/cli.md) |
 | TUI 布局、按键、渲染 | [apps/tui.md](docs/apps/tui.md)、[decisions/ADR-0010](docs/decisions/ADR-0010-tui-rendering.md) |

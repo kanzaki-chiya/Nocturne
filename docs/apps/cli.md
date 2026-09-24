@@ -18,6 +18,7 @@ nctrn --continue             # 恢复当前目录最近的会话后进入所选�
 nctrn --resume <id>          # 恢复指定会话后进入所选模式
 nctrn --sessions             # 列出会话后退出（只读）
 nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trustedWorkspaces 后退出
+nctrn setup                  # 服务商配置向导（v0.2 提议，provider-setup.md）
 ```
 
 | 参数 | 说明 |
@@ -47,8 +48,8 @@ nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trust
 - **恢复失败的其余情形**（不存在、`session_log_corrupt`、`session_log_newer`）同样以退出码 2 退出并打印原因。
 - **模型已不可解析**（Provider 清单或配置变了）也拒绝恢复，提示中给出用法：加 `--model <id>` 恢复并切换——Runtime 在取锁、修复之后先写入 `session.config_changed { model }` 再进入空闲（sessions.md 第 4 节），组合写法：`nctrn --resume <id> --model <id>`。
 - 恢复成功后打印一行恢复摘要（`session.recovery`：截断尾部、补齐的中断调用与 Turn 计数；无修复则不打印）。
-- 凭据**只能**来自环境变量（`workflow.md` 第 7 节），不接受命令行上的密钥值；`--api-key-env` 指定的是变量名。
-- 启动时校验配置：缺 `baseURL`（openai-compatible）、缺凭据环境变量、缺模型 id，都打印缺失项并以退出码 2 退出，两种模式一致。
+- 凭据来自环境变量或用户级凭据文件（v0.2 提议，[provider-setup.md](../architecture/provider-setup.md) 第 3 节），**不接受命令行上的密钥值**；`--api-key-env` 指定的是变量名。
+- 启动时校验配置：缺 `baseURL`（openai-compatible）、缺凭据、缺模型 id，都打印缺失项并以退出码 2 退出，两种模式一致；交互终端下提示可运行 `nctrn setup`。
 - 未知参数、参数缺值：打印用法并以退出码 2 退出。
 - `trust` / `untrust` 子命令原子写 `<NOCTURNE_HOME>/trust.json`（[config.md](../architecture/config.md) 第 3 节），打印结果后以退出码 0 退出；程序不改写手写的 `config.json`。
 
@@ -77,6 +78,7 @@ nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trust
 | `/resume` | 列出会话（编号、id、创建时间、绑定目录、模型、锁状态），输入编号切换，空行取消 | `runtime.listSessions()` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
+| `/provider` | 列出服务商、密钥来源与来源层；`/provider add`、`/provider key <name>`、`/provider remove <name>` 见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节（v0.2 提议） | `describeProviders()`、`saveSetupProvider` 等 + `runtime.updateProviders` |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
 
 - 未知命令打印提示（不报错退出）。命令在 Turn 进行中给出"会话忙"提示（`setModel` / `compact` 的前置条件是空闲，见 events.md 第 7 节）。

@@ -96,6 +96,19 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 **已知限制**：主进程被强杀时，不响应 stdin EOF 的 MCP 服务器可能残留，Windows 与 POSIX 的手动清理方式见 [mcp.md](../architecture/mcp.md) 第 4 节；传统 conhost 的 TUI 活动区可能有残影，建议 Windows Terminal（[tui.md](../apps/tui.md)）；服务端因能力字段不支持而返回 400 时尚无针对性配置提示，本版暂缓。扩展思考 Anthropic 模型的 `finish` 兜底轮与 DeepSeek 推理历史回传专项只有在配置对应模型变量时才运行；未配置不作为已通过验收。
 
+## v0.2 — 开箱配置（设计中）
+
+**内容**：`nctrn setup` 首次配置向导与会话内 `/provider`（CLI 与 TUI）；机器维护的向导配置层 `providers.json`；用户级凭据文件 `credentials.json` 与凭据解析顺序；内置服务商预设（DeepSeek、OpenRouter、Anthropic 与自定义）；凭据文件的内置硬拒绝、`shell` 子进程剥离凭据变量；`runtime.updateProviders`；目录外模型套用默认能力时的提示。设计见 [provider-setup.md](../architecture/provider-setup.md)、[ADR-0015](../decisions/ADR-0015-provider-setup-credentials.md)。
+
+**验收**：
+
+- 全新的 `NOCTURNE_HOME` 下运行 `nctrn setup` 完成配置后，不设任何环境变量即可 `nctrn` 进入会话并完成一次工具往返（CLI 与 TUI）。
+- 会话内 `/provider add` 添加第二个服务商并切换过去，不重启进程、不触发 `SessionEnd`/`SessionStart` Hook、不重启 MCP 服务器；`/provider key` 更新密钥后下一次请求即生效。
+- 连接测试对错误密钥、错误地址、错误模型 id 分别给出对应提示。
+- 在任何预设（含 `full-access`）、任何规则与 Grant、`--yes` 下，`read`/`edit`/`grep`/`glob` 都读不到 `credentials.json`；`shell` 子进程环境中不含已解析的凭据变量。
+- `config.json` 在整个流程中字节级不变；手写条目覆盖同名向导条目，`/provider` 正确标注来源层。
+- 只用环境变量的 v0.1 配置方式行为不变（回归测试）。
+
 ## 之后（未排期）
 
 RPC 服务端与远程客户端、OS 级沙箱、后台任务、会话分叉与回退、Web / Desktop / IDE 客户端、单文件分发。进入排期前各自先写设计文档。

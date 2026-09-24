@@ -48,7 +48,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 }
 ```
 
-凭据只从环境变量或用户级凭据文件读取，不写入会话日志、事件或普通日志。
+凭据只从环境变量或用户级凭据文件读取，不写入会话日志、事件或普通日志。交互式配置（`nctrn setup`、`/provider`）、服务商预设与凭据解析顺序见 [provider-setup.md](provider-setup.md)（v0.2 提议）。
 
 推理档位配置目前通过 Provider 的 `providerOptions` 传递服务方专有键；`ModelCapabilities.reasoningEffort` 仅描述可能的档位，`ModelRequest.reasoningEffort` 尚无 Runtime 赋值和适配器映射。子代理兜底轮会临时移除可识别的 `providerOptions` 推理键，再强制调用 `finish`。归一化档位的模型配置与两个适配器映射留待后续实现（见 [provider-api.md](../protocols/provider-api.md) 第 3 节）。
 

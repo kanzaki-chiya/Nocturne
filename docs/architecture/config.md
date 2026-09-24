@@ -7,18 +7,19 @@
 ## 1. 配置来源与分层
 
 ```text
-内置默认 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
+内置默认 < 向导配置 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
 ```
 
 | 层 | 位置 / 来源 | 信任 | 说明 |
 |---|---|---|---|
 | 内置默认 | 代码内常量 | 可信 | 预设名 `default`、Turn 默认值等；不是一个文件 |
+| 向导配置 | `<NOCTURNE_HOME>/providers.json` | 可信 | 机器维护：只由 `nctrn setup` 与 `/provider` 原子写，内容限 `model` 与 `providers`；手写配置按 `id` 覆盖它（v0.2 提议，[provider-setup.md](provider-setup.md)） |
 | 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；**程序从不改写它** |
 | 项目配置 | `<workspaceRoot>/.nocturne/config.json` | **默认不可信** | 来自被操作的仓库，见第 3 节信任模型 |
-| 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；凭据只经环境变量进入 |
+| 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；凭据经环境变量或用户级凭据文件 `credentials.json` 进入（v0.2 提议，[provider-setup.md](provider-setup.md)） |
 | 命令行参数 | `nctrn` 参数 | 可信 | 本次启动的显式意图，优先级最高 |
 
-机器维护的运行时数据（信任列表、项目 Grant）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`，见第 3、4 节）——程序写自己的文件，不碰用户手写的配置。
+机器维护的运行时数据（信任列表、项目 Grant、向导配置、凭据）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`，见第 3、4 节）——程序写自己的文件，不碰用户手写的配置。
 
 逐层合并后的结果叫 `ResolvedConfig`：每个字段都知道自己来自哪一层（用于诊断与权限规则的命中解释）。
 
@@ -119,7 +120,7 @@ CLI:   loadConfig(platform, { cliArgs })          → RuntimeConfig
 
 ## 7. 暂不设计
 
-- 配置文件中的凭据值（只允许 `apiKeyEnv` 指向环境变量名）；
+- 配置文件中的凭据值（`config.json` 与 `providers.json` 都不存密钥；密钥只在环境变量或 `credentials.json`，见 [provider-setup.md](provider-setup.md) 第 3 节）；
 - JSONC / TOML / 其他格式（ADR-0007 记录了取舍）；
-- 配置编辑命令、Grant 的查看与撤销界面；
+- 通用的配置编辑命令（服务商的交互配置见 [provider-setup.md](provider-setup.md)）、Grant 的查看与撤销界面；
 - 每会话不同的用户配置 profile。
