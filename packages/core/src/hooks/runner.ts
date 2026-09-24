@@ -6,11 +6,7 @@
  */
 import type { Diagnostics, HookEntry, HookPoint } from "../protocol/index.js";
 import type { Platform } from "../platform/index.js";
-import type {
-  HookCallInput,
-  HookOutput,
-  HookRunner,
-} from "../tools/types.js";
+import type { HookCallInput, HookOutput, HookRunner } from "../tools/types.js";
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const MAX_TIMEOUT_MS = 60_000;
@@ -238,9 +234,7 @@ export function createHookRunner(opts: HookRunnerOptions): HookRunner {
             const joined = prev === undefined ? out.feedback : `${prev}\n${out.feedback}`;
             merged = {
               feedback:
-                joined.length > MAX_FEEDBACK_CHARS
-                  ? joined.slice(0, MAX_FEEDBACK_CHARS)
-                  : joined,
+                joined.length > MAX_FEEDBACK_CHARS ? joined.slice(0, MAX_FEEDBACK_CHARS) : joined,
             };
           }
           break;
