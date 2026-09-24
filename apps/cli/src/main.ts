@@ -21,7 +21,7 @@ import { createEventWriter, renderEvent } from "./render.js";
 import { runRepl } from "./repl.js";
 import { createSessionSwitcher, sessionOpenNotes, type SessionHolder } from "./session-switch.js";
 
-const VERSION = "0.0.0";
+const VERSION = "0.1.0";
 
 async function readStdin(stream: NodeJS.ReadableStream): Promise<string> {
   const chunks: Buffer[] = [];

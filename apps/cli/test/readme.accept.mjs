@@ -80,6 +80,7 @@ try {
   };
   let result = await run(["--version"]);
   assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "0.1.0");
   result = await run(["--sessions"], envConfig);
   assert.equal(result.code, 0, result.stderr);
 
@@ -97,6 +98,10 @@ try {
     .find((name) => name.endsWith(".jsonl"))
     ?.replace(/\.jsonl$/, "");
   assert(sessionId);
+  const created = JSON.parse(
+    readFileSync(path.join(home, "sessions", `${sessionId}.jsonl`), "utf8").split("\n")[0],
+  );
+  assert.equal(created.payload.nocturneVersion, "0.1.0");
   result = await run(["--resume", sessionId, "-p", "恢复"]);
   assert.equal(result.code, 0, result.stderr);
   result = await run(["-c"], {}, "/exit\n");
