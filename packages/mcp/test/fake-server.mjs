@@ -5,6 +5,11 @@
  * env_report(汇报可见环境变量) / mutate(追加工具并发 list_changed)。
  */
 import readline from "node:readline";
+import { writeFileSync } from "node:fs";
+
+if (process.env.NOCTURNE_TEST_PID_FILE !== undefined) {
+  writeFileSync(process.env.NOCTURNE_TEST_PID_FILE, String(process.pid));
+}
 
 const tools = [
   {

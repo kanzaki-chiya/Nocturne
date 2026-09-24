@@ -62,7 +62,7 @@
 
 **已知问题（遗留）**：
 
-- Windows 上强杀 Nocturne 进程时，MCP stdio 子进程可能成为孤儿——当前未用 Job Object 把子进程生命周期绑定到父进程，仅靠 stdin 断开依赖服务器自行退出（[mcp.md](../architecture/mcp.md) 第 4 节）。
+- Windows 与 POSIX 上强杀 Nocturne 时，不理会 stdin 关闭的 MCP 服务器可能成为孤儿；能在 EOF 后退出的服务器不残留，手动清理方法见 [mcp.md](../architecture/mcp.md) 第 4 节。
 
 ## Phase 6 — Subagent（已完成，2026-09-25）
 
@@ -88,6 +88,10 @@
 
 **已知问题**：统一的 `reasoningEffort` 档位尚未由模型配置填入请求，也未映射到两个适配器；当前只能通过 Provider 专有的 `providerOptions` 开启推理。后续实现需同时定义 Anthropic 档位到 token budget 的换算，并验证子代理强制 `finish` 的兜底轮。
 
+服务端因不支持 `reasoning_effort` 等能力字段返回 400 时，错误提示尚不会指引用户关闭模型配置中的对应能力；v0.1.0 暂缓处理，不做自动删字段重试。
+
 ## 之后（未排期）
 
 RPC 服务端与远程客户端、OS 级沙箱、后台任务、会话分叉与回退、Web / Desktop / IDE 客户端、单文件分发。进入排期前各自先写设计文档。
+
+- **v0.2 候选：MCP 强杀清理**：评估纯 Node 看护进程，detached 启动，轮询主进程是否存活，主进程消失后清理 MCP 进程树；沿用会话锁的“开机时间 + PID”判定以规避 PID 复用，Windows 与 POSIX 共用。进入排期前先写设计文档，再评估竞态、退出语义和成本。
