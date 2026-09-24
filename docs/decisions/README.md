@@ -12,9 +12,9 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0004](ADR-0004-permission-rules.md) | 规则化的权限策略层 | 已接受（第 2 版） |
 | [ADR-0005](ADR-0005-own-provider-interface.md) | 自有 Provider 接口，不暴露第三方 SDK 类型 | 已接受（第 2 版） |
 | [ADR-0006](ADR-0006-anthropic-transport.md) | anthropic 适配器使用 @ai-sdk/anthropic 传输 | 已接受 |
-| [ADR-0007](ADR-0007-config-format.md) | 配置文件格式与分层 | 提议 |
-| [ADR-0008](ADR-0008-project-trust-grants.md) | 项目配置信任模型与 Grant 持久化 | 提议 |
-| [ADR-0009](ADR-0009-session-lock.md) | 会话锁机制 | 提议 |
+| [ADR-0007](ADR-0007-config-format.md) | 配置文件格式与分层 | 已接受 |
+| [ADR-0008](ADR-0008-project-trust-grants.md) | 项目配置信任模型与 Grant 持久化 | 已接受 |
+| [ADR-0009](ADR-0009-session-lock.md) | 会话锁机制 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
