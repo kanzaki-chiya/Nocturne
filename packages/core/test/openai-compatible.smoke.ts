@@ -129,12 +129,24 @@ describe.skipIf(!configured)("openai-compatible 冒烟（真实服务）", () =>
   it.skipIf(REASONING_MODEL === undefined)(
     "DeepSeek 推理模式：reasoning 块回传后的第二轮被真实服务接受，且不泄漏模板标记",
     async () => {
-      const { session, events } = await openSession(makeTmp("nct-smoke-ws-"), REASONING_MODEL);
-      expect(await session.submit({ text: "请心算 17 加 25，只回复结果。" })).toBe("done");
-      expect(
-        events.some((e) => e.type === "message.assistant.delta" && e.payload.kind === "reasoning"),
-      ).toBe(true);
-      expect(await session.submit({ text: "把刚才的结果加 3，只回复结果。" })).toBe("done");
+      // 模型按题目难度自行决定是否推理：简单题常直接作答、不产生 reasoning。
+      // 用需要推理的题并以新会话重试，都没有 reasoning 才判失败——
+      // 不能改为跳过，否则适配器漏解析 reasoning_content 时会被静默掩盖。
+      const PROMPT =
+        "甲、乙、丙三人中恰有一人说真话。甲说：乙在说谎。乙说：丙在说谎。丙说：甲和乙都在说谎。谁说真话？只回复名字。";
+      let opened: Awaited<ReturnType<typeof openSession>> | undefined;
+      for (let attempt = 0; attempt < 3 && opened === undefined; attempt++) {
+        const candidate = await openSession(makeTmp("nct-smoke-ws-"), REASONING_MODEL);
+        expect(await candidate.session.submit({ text: PROMPT })).toBe("done");
+        const reasoned = candidate.events.some(
+          (e) => e.type === "message.assistant.delta" && e.payload.kind === "reasoning",
+        );
+        if (reasoned) opened = candidate;
+        else await candidate.session.close();
+      }
+      if (opened === undefined) throw new Error("3 次尝试均未收到 reasoning 增量");
+      const { session, events } = opened;
+      expect(await session.submit({ text: "再确认一遍，谁说假话？只回复名字。" })).toBe("done");
       const text = events
         .filter((e) => e.type === "message.assistant")
         .flatMap((e) => e.payload.content)
