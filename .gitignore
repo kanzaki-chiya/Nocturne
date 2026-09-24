@@ -12,6 +12,14 @@ coverage/
 .env
 .env.*
 
+# Local session data and diagnostics (keep project .nocturne/config.json trackable)
+/sessions/
+/logs/
+**/.nocturne/sessions/
+**/.nocturne/logs/
+**/.nocturne/grants/
+**/.nocturne/trust.json
+
 # Package manager stores
 .pnpm-store/
 
