@@ -1,7 +1,7 @@
 # ADR-0010：TUI 渲染方案选型
 
 - 状态：提议
-- 日期：2026-10-21
+- 日期：2026-09-24
 
 ## 背景
 
@@ -18,8 +18,8 @@ Phase 4 需要一个终端 UI 渲染层（[apps/tui.md](../apps/tui.md)）。约
 **apps/tui 使用 Ink + React（`ink` + `react` 两个运行时依赖，外加 `ink-testing-library` 作为 devDependency）。**
 
 - "零第三方运行时依赖"约定改为**按包生效**：`packages/core` 与 `apps/cli` 保持零依赖；`apps/tui` 允许引入 ADR 批准的终端依赖。理由：该约定的初衷是 Core 可分发性与 CLI 启动轻量，TUI 是独立的可选客户端，为自研渲染付出的缺陷成本高于两个成熟依赖的体积成本。
-- `apps/cli` → `apps/tui` 仅存在 `nctrn --tui` 的**惰性** `import()` 边界：非 TUI 路径不加载 React/Ink，CLI 启动性能与依赖安装面不变。
-- 依赖仍锁精确版本（沿用仓库 renovate/lockfile 惯例），不引入 ink 生态的额外组件库（如 ink-text-input）：输入框用 `useInput` 自实现（约百行，键位路由更可控）。
+- `apps/cli` → `apps/tui` 仅存在 `nctrn --tui` 的**惰性** `import()` 边界：非 TUI 路径不加载 React/Ink，CLI 启动开销不变。注意安装面会变：`apps/cli` 依赖 `apps/tui` 后，`pnpm install` 会连带安装 React/Ink——惰性加载省的只是启动时的模块加载，不是安装体积。
+- 依赖仍写精确版本，由 `pnpm-lock.yaml` 锁定（仓库的既有版本策略），不引入 ink 生态的额外组件库（如 ink-text-input）：输入框用 `useInput` 自实现（约百行，键位路由更可控）。
 - 渲染模型：`<Static>` 承载已完结时间线条目（append-only，契合事件溯源），活动区用普通组件随 `view.revision` 重绘——这条不依赖 Ink 专有特性，替换渲染器时设计不变。
 
 ## 后果

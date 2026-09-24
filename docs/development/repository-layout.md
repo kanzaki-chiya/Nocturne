@@ -44,14 +44,13 @@ nocturne/
         │   ├── commands.ts      斜杠命令分发（/model、/context、/compact 等）
         │   └── render.ts        事件 → 终端文本的纯函数渲染映射
         └── test/                离线单测（*.test.ts）与冒烟（*.smoke.ts）
-    └── tui/                     （Phase 4）终端界面客户端
+    └── tui/                     （Phase 4）终端界面客户端，经 nctrn --tui 进入（无独立 bin）
         ├── README.md
-        ├── package.json         bin: nctrn-tui；依赖 ink、react（ADR-0010）
+        ├── package.json         依赖 ink、react（ADR-0010）；ink-testing-library 为 devDependency
         ├── src/
         │   ├── index.ts         runTui(runtime, session, opts) 导出（nctrn --tui 委托到这里）
-        │   ├── main.ts          nctrn-tui 独立入口（CLI 参数子集）
         │   ├── app.tsx          Ink 根组件
-        │   ├── components/      Transcript、ToolRow、PermissionDialog、StatusBar、Composer、SessionPicker
+        │   ├── components/      Transcript、ToolRow、PermissionDialog、StatusBar、Composer
         │   └── keys.ts          键位路由（五键权限、Ctrl+C、Esc）
         └── test/                ink-testing-library 渲染断言 + 注入假 Session 的集成测试
 ```
