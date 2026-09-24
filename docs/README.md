@@ -58,6 +58,10 @@
 
 [roadmap/roadmap.md](roadmap/roadmap.md)：阶段划分与验收标准。
 
+## Persona（角色设定）
+
+[persona.md](persona.md)：看板娘 Noctelia（夜璃）的命名与人设，供后续人设功能与文案参考。
+
 ## Research（研究记录，按需阅读）
 
 研究记录是写作当时的快照，不随代码维护，不作为约束来源。

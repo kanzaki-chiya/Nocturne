@@ -4,7 +4,7 @@ Nocturne 是一个开源的 Coding Agent Runtime，以及基于它的命令行�
 
 在代码仓库里启动 `nctrn`，用自然语言描述任务，Nocturne 会阅读代码、搜索文件、修改文件、运行命令，并在执行有风险的操作前征求你的同意。
 
-项目形象：**Nocteria**。
+看板娘：**Noctelia**（昵称 Elia，中文名 夜璃，日文名 夜璃（より））——Nocturne 的虚拟形象，设定见 [docs/persona.md](docs/persona.md)。
 
 ## 设计目标
 
