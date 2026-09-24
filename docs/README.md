@@ -32,6 +32,7 @@
 | 文档 | 回答的问题 |
 |---|---|
 | [apps/cli.md](apps/cli.md) | `nctrn` 命令行客户端：参数、REPL、事件渲染、权限确认、会话恢复、退出码、配置来源 |
+| [apps/tui.md](apps/tui.md) | 终端界面客户端（提议）：布局、键位、降级行为、`--tui` 入口 |
 
 ## Protocols（精确契约）
 
@@ -40,6 +41,7 @@
 | 文档 | 内容 |
 |---|---|
 | [events.md](protocols/events.md) | 事件信封、事件类型、持久化规则、顺序与关联 |
+| [view.md](protocols/view.md) | `SessionView` 派生视图：reducer 状态形状、归约规则、重放等价不变量 |
 | [tool-api.md](protocols/tool-api.md) | `ToolDefinition`、`ToolContext`、`ToolResult` |
 | [provider-api.md](protocols/provider-api.md) | `Provider`、`ModelInfo`、`ModelRequest`、`ModelStreamEvent`、`ProviderError` |
 

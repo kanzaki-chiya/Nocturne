@@ -10,6 +10,7 @@
 
 ```text
                         apps/cli ──────────────┐
+                        apps/tui ──────────────┤
                            │ 只用公开 API        │ 只用类型
                            ▼                    ▼
                     core/index（公开 API） ──▶ protocol
@@ -34,7 +35,7 @@
 - `provider` 不依赖 `tools`、`session`、`agent`；它只看到中性的消息与工具规格数据。
 - `context` 只依赖 `protocol` 与 `provider` 的**类型**，不调用 Provider，也不执行工具。
 - 真实 I/O（文件系统、子进程、环境变量、网络之外的系统访问）集中在 `platform` 与 Provider 适配器中，业务逻辑不直接调用 `node:fs`、`node:child_process`。
-- 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。
+- 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。客户端之间不互相依赖，唯一例外：`apps/cli` 为 `nctrn --tui` 对 `apps/tui` 做惰性 `import()`（[ADR-0010](../decisions/ADR-0010-tui-rendering.md)）。
 
 依赖规则在 Phase 1 用静态检查工具（如 dependency-cruiser）固化进 CI，见 [workflow.md](../development/workflow.md)。
 
@@ -46,9 +47,9 @@
 
 ### protocol
 
-- **负责**：事件信封与事件类型；客户端命令类型（submit、interrupt、respondPermission 等）；跨模块公共数据（消息内容块、用量、工具调用引用）。
-- **不负责**：任何行为、I/O、状态。
-- **公开接口**：`RuntimeEvent`、`EventType`、`ClientCommand`、`ContentBlock`、`Usage` 等类型。
+- **负责**：事件信封与事件类型；客户端命令类型（submit、interrupt、respondPermission 等）；跨模块公共数据（消息内容块、用量、工具调用引用）；面向客户端的派生视图 reducer（`SessionView`，Phase 4，见 [view.md](../protocols/view.md)）。
+- **不负责**：任何行为、I/O、可变状态（reducer 是纯函数，状态由调用方持有）。
+- **公开接口**：`RuntimeEvent`、`ClientCommand`、`ContentBlock`、`Usage` 等类型；`createSessionView` / `reduceSessionView` / `replaySessionView`。
 - **依赖**：无。**不能依赖**：一切。
 
 ### session
@@ -142,6 +143,8 @@ await session.close()
 
 `describeContext` 与 `listModels` 是**只读查询**：不改变会话状态、不产生事件，只为客户端展示服务。
 
+Phase 4 增补的客户端共享入口（提议，[apps/tui.md](../apps/tui.md) 第 8 节）：`collectSessionConfig`（配置分层收集上移，原 `apps/cli/config.ts`）、`openSession`（新建/恢复/继续/列表的组合与会话选择语义）、`normalizeModelRef`（`provider/model` 归一化）。
+
 这组命令与事件就是将来 RPC 需要序列化的全部内容；进程内客户端和远程客户端使用同一份语义（见 [ADR-0002](../decisions/ADR-0002-ui-independent-core.md)）。
 
 ## 4. 客户端
@@ -150,14 +153,20 @@ await session.close()
 
 - **负责**：参数解析；REPL 输入；把事件渲染为终端输出（流式文本、工具状态、diff 摘要）；权限确认提示并调用 `respondPermission`；退出码。
 - **不负责**：任何 Agent 行为、会话状态、权限判定、上下文构建。
-- **依赖**：`@nocturne/core` 公开 API 与 `protocol`。
+- **依赖**：`@nocturne/core` 公开 API 与 `protocol`；另有到 `apps/tui` 的惰性 `import()`（`--tui` 委托）。
 - 详见 [apps/cli.md](../apps/cli.md)。
+
+### apps/tui（Phase 4，提议）
+
+- **负责**：终端界面客户端——会话回放、工具状态与 diff、权限对话框、状态栏、会话选择器；渲染 `SessionView`，把按键翻译为公开命令。
+- **不负责**：任何 Agent 行为、事件投影（用 `protocol` 的 reducer）、权限判定；不复用 CLI 渲染代码。
+- **依赖**：`@nocturne/core` 公开 API 与 `protocol`；终端依赖（Ink + React）按 [ADR-0010](../decisions/ADR-0010-tui-rendering.md) 单独批准。
+- 详见 [apps/tui.md](../apps/tui.md)。
 
 ## 5. 未来模块（现在不创建目录）
 
 | 模块 | 接入点 | 依赖约束 |
 |---|---|---|
-| `tui` | 与 CLI 同为客户端，订阅事件；需要的派生视图由 `protocol` 提供纯函数 reducer | 只依赖公开 API 与 protocol |
 | `mcp` | 把 MCP 服务器的工具包装成 `ToolDefinition` 注册进 `ToolRegistry`；工具名带命名空间 `mcp__<server>__<tool>` | 依赖 tools 的注册接口与 platform；Core 不依赖 mcp |
 | `hooks` | Tool Executor 与 Agent Loop 在固定点位调用可选的 `HookRunner` 接口（PreToolUse、PostToolUse 等） | 接口定义在 tools / agent；未配置时 Runtime 行为不变 |
 | `subagent` | 一个内置工具通过注入的 `SubagentLauncher` 创建子会话并运行受控 Turn | 工具不 import agent；launcher 由 agent 注入，避免循环 |

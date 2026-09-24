@@ -18,7 +18,7 @@
 | Tool Call 如何关联？ | Runtime 为每个工具调用分配会话内唯一的 `callId`，贯穿所有生命周期事件；Provider 给出的原始 ID 保存在 `providerCallId` 中，仅用于回传 Provider |
 | Message 与 Event 的关系？ | 消息就是事件：`message.user`、`message.assistant` 本身就是会话中的消息记录，工具结果就是 `tool.completed`。没有另一张消息表 |
 | Session state 如何得到？ | 由持久化事件折叠重建；MVP 不做快照 |
-| CLI/TUI 消费什么？ | CLI（行式输出）直接消费事件；TUI 等需要整体视图的客户端使用 `protocol` 提供的纯函数 reducer 派生视图（Phase 4 加入）；远程客户端先按 `seq` 回放持久化事件，再接收实时事件 |
+| CLI/TUI 消费什么？ | CLI（行式输出）直接消费事件；TUI 等需要整体视图的客户端使用 `protocol` 提供的纯函数 reducer 派生视图（[view.md](view.md)，Phase 4）；远程客户端先按 `seq` 回放持久化事件，再接收实时事件 |
 
 ## 2. 事件信封
 
