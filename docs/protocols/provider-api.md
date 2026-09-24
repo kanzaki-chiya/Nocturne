@@ -29,7 +29,7 @@ interface ModelInfo {
   ref: ModelRef                  // { provider, model }
   displayName?: string
   contextWindow: number          // 输入 + 输出共享的窗口大小
-  maxOutputTokens: number
+  maxOutputTokens?: number       // v0.2 提议改为可选：未知表示上游未声明（ADR-0016）
   capabilities: ModelCapabilities
 }
 
@@ -59,7 +59,9 @@ interface ModelRequest {
       失败的请求；丢弃在 provider.request 诊断中标注。Subagent 的兜底轮本身不携带
       reasoningEffort，正常路径不触发此规则 */
   toolChoice?: { name: string }
-  maxOutputTokens: number
+  /** v0.2 提议改为可选（ADR-0016）：缺省时 openai-compatible 不发送 max_tokens、由上游决定；
+      anthropic 协议要求必填，适配器使用兜底值 */
+  maxOutputTokens?: number
   reasoningEffort?: string        // 保留字段：Runtime 当前不赋值，适配器当前不映射为服务端推理参数
   cachePrefix?: { systemBlocks: number; messages: number }   // 可缓存前缀的边界提示，适配器自行决定是否使用
   providerOptions?: Record<string, unknown>                  // 请求级 Provider 专有选项，原样交给适配器，Core 不解释

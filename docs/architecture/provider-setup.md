@@ -19,6 +19,7 @@ $ nctrn setup
 > 1
 名称 [deepseek]：
 API Key（输入不回显；直接回车表示改用环境变量）：********
+密钥已交给 Windows DPAPI 加密保存
 正在获取模型列表…
   1) deepseek-chat   2) deepseek-reasoner
 选择模型，或直接输入模型 id：> 1
@@ -28,8 +29,9 @@ API Key（输入不回显；直接回车表示改用环境变量）：********
 ```
 
 - 预设服务商（1–3）只问名称、密钥和模型；自定义（4、5）额外询问服务地址。
-- 模型列表来自服务的 `GET /models`（OpenAI 兼容与 Anthropic 都有该端点）；获取失败或服务不提供时退回手动输入，不阻塞流程。
+- 模型列表来自服务的 `GET /models`（OpenAI 兼容与 Anthropic 都有该端点），同时记录上游声明的上下文窗口与最大输出长度（第 7 节）；获取失败或服务不提供时退回手动输入，不阻塞流程。
 - **连接测试**发送一次最小请求（单条用户消息、`maxOutputTokens` 取 16、不带工具），把 `ProviderError.kind` 翻译成可操作的提示：`auth` → 密钥无效；`network`/`timeout` → 地址不通；`invalid_request` 或 404 → 模型 id 或地址路径有误。测试失败时询问"仍然保存？[y/N]"，默认不保存。
+- 系统凭据后端不可用时（第 3 节），跳过保存密钥这一步，直接进入环境变量方式。
 - 选择"改用环境变量"时询问变量名（默认 `NOCTURNE_API_KEY`，Anthropic 类默认 `ANTHROPIC_API_KEY`），条目写入 `apiKeyEnv`，密钥不落盘；此时连接测试只在该变量已设置时进行。
 - `nctrn setup` 要求 stdin/stdout 为 TTY，否则以退出码 2 退出并提示手写配置的方式（README）。
 
@@ -40,6 +42,7 @@ API Key（输入不回显；直接回车表示改用环境变量）：********
 | `/provider` | 列出全部服务商：名称、类型、服务地址（只显示主机名）、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），以及当前会话使用的是哪一个 |
 | `/provider add` | 运行与 `nctrn setup` 相同的向导；完成后询问"切换当前会话到该模型？[Y/n]"，确认即调用 `session.setModel` |
 | `/provider key <name>` | 更新该服务商的密钥（不回显）并重新测试连接 |
+| `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置 |
 | `/provider remove <name>` | 删除向导写入的条目及其凭据；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改 |
 
 Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。TUI 用弹层完成同样的步骤：列表选择器（复用 `/model` 组件）、单行输入框、密钥输入框（显示为 `*`）、确认对话框；命令名与效果与 CLI 一致。
@@ -68,35 +71,57 @@ interface ProviderSetupFile {
 
 为什么不直接改 `config.json`：程序改写用户手写的 JSON 会丢失用户的排版与字段顺序（JSON 没有注释，但顺序和分组对人有意义），并且会模糊"哪些是我写的、哪些是程序生成的"。ADR-0007/0008 已经确立"程序写自己的文件"的模式，本设计沿用它。
 
-## 3. 凭据存储：`credentials.json`
+## 3. 凭据存储：交给操作系统
 
-```ts
-interface CredentialFile {
-  version: 1;
-  /** 按服务商 id 存放的密钥 */
-  keys: Record<string, string>;
-}
-```
+密钥**不以明文落盘**。向导把密钥交给操作系统自带的凭据保护能力，全部通过系统自带的命令完成，不引入原生依赖：
 
-- 位置：`<NOCTURNE_HOME>/credentials.json`，原子写。POSIX 上以 `0600` 创建；Windows 依赖用户目录的默认访问控制（仅当前用户、SYSTEM 与管理员可访问），不额外设置 ACL。
-- **密钥解析顺序**（按服务商 id，每次请求时读取，因此 `/provider key` 更新后立即生效，不需要重启）：
+| 平台 | 后端 | 写入 | 读取 | 密钥存放在 |
+|---|---|---|---|---|
+| Windows | DPAPI（当前用户范围） | 系统自带的 Windows PowerShell 5.1（`powershell.exe`）调用 .NET `ProtectedData.Protect`，得到只有当前用户在本机能解开的密文 | 同一工具调用 `ProtectedData.Unprotect` | `credentials.json` 中的密文 |
+| macOS | 钥匙串 | `security -i`，命令经 stdin 写入（`add-generic-password -s nocturne -a <服务商 id> -U -w …`） | `security find-generic-password -w` | 钥匙串 |
+| Linux | Secret Service（libsecret） | `secret-tool store`，密钥经 stdin 写入 | `secret-tool lookup` | 桌面密钥环 |
+
+- **Windows 实现约束**（2026-09-25 在本机实测得出）：
+  - 直接调用 .NET 的 `System.Security.Cryptography.ProtectedData`，不用 `ConvertTo-SecureString` 等 cmdlet：从 PowerShell 7 环境启动 `powershell.exe` 时，继承的 `PSModulePath` 会让 5.1 加载不了 `Microsoft.PowerShell.Security` 模块；
+  - 启动子进程时从环境中去掉 `PSModulePath`；
+  - stdin 与 stdout 两个方向都只传 Base64：5.1 按控制台代码页读取 stdin，直接传 UTF-8 会把非 ASCII 字符读乱。
+  - 实测一次解密约 0.3 秒；篡改过的密文解密失败（按"缺少凭据"处理）。
+- **密钥只经管道传递**：写入与读取时密钥都走子进程的 stdin/stdout，**永不出现在命令行参数里**（命令行参数对同机其他进程可见）。每个平台的这一性质在实现时逐一验证并写进测试。
+- **没有可用后端时不退回明文**：例如无桌面环境的 Linux 服务器没有密钥环。此时向导说明原因，只提供环境变量方式（打印设置命令，不保存密钥）。
+- `<NOCTURNE_HOME>/credentials.json` 是索引文件：
+
+  ```ts
+  interface CredentialIndex {
+    version: 1;
+    /** 写入时使用的后端；跨机器拷贝后后端不可用或密文解不开，按"缺少凭据"处理 */
+    entries: Record<string, { backend: "dpapi" | "keychain" | "libsecret"; ciphertext?: string }>;
+  }
+  ```
+
+  只有 DPAPI 需要 `ciphertext`（密文本身）；钥匙串与 libsecret 的密钥留在系统里，索引只记录"这个服务商的密钥存在哪个后端"。原子写，POSIX 上 `0600`。
+- **密钥解析顺序**（按服务商 id）：
   1. 条目声明了 `apiKeyEnv` 且该环境变量已设置 → 用环境变量；
-  2. `credentials.json` 中有该 id 的密钥 → 用凭据文件；
-  3. 都没有 → 启动或切换模型时报"缺少凭据"，提示运行 `nctrn setup` 或 `/provider key <name>`。
+  2. 凭据索引中有该 id → 经对应后端取出；
+  3. 都没有，或后端取出失败 → 启动或切换模型时报"缺少凭据"并说明原因，提示运行 `nctrn setup` 或 `/provider key <name>`。
+- 解密结果在进程内按服务商 id 缓存，避免每次请求都启动子进程（PowerShell 启动约数百毫秒）；`/provider key` 更新时清除该 id 的缓存，下一次请求即用新密钥。
 - `apiKeyEnv` 因此变为可选。手写配置照旧可以只用环境变量，行为与 v0.1 相同。
-- 密钥值只在 Provider 适配器发请求时被读取：它不进入 `ResolvedConfig`、会话事件、诊断日志、`/provider` 输出或任何错误信息。适配器通过注入的 `CredentialSource.get(providerId)` 读取（第 6 节），`config` 模块拥有文件 I/O，保持权限层与 Provider 层零文件 I/O 的现状。
-- **明文存储，如实说明**：文件内容是明文，保护来自文件系统权限与第 4 节的访问限制。它与 `~/.npmrc`、多数 CLI 工具的做法相同。操作系统级密钥库（Windows 凭据管理器、macOS 钥匙串、libsecret）需要原生依赖，本阶段不做（第 8 节）。
+- 密钥值只在 Provider 适配器发请求时经注入的 `CredentialSource.get(providerId)` 取得（第 6 节）：它不进入 `ResolvedConfig`、会话事件、诊断日志、`/provider` 输出或任何错误信息。后端子进程的 stderr 进入诊断日志前同样经过脱敏。
+
+**这能防什么、不能防什么**（如实说明）：
+
+- 能防：凭据随文件泄漏——`~/.nocturne` 被备份、同步到网盘、误提交、磁盘被拿走，以及同机的其他用户。作为对照，v0.1 推荐的"用户级环境变量"在 Windows 上以明文存放于注册表 `HKCU\Environment`，并不具备这种保护。
+- 不能防：**以你的身份运行的进程**。DPAPI、钥匙串、密钥环都会为当前用户解密，所以 Agent 执行的一条已获准的 shell 命令，原则上也能调用同样的系统命令取出密钥。这一面由第 4 节的访问限制负责，并且同样不是沙箱。
 
 ## 4. 防止 Agent 读取凭据
 
-凭据文件让密钥第一次以文件形式出现在 Agent 能触及的文件系统里；同时 v0.1 已经存在一个同类问题：`shell` 工具的子进程继承完整进程环境，模型可以通过 `echo %NOCTURNE_API_KEY%` 这类命令读到环境变量里的密钥（`default` 预设下会先询问）。本阶段一并处理：
+凭据索引（含 Windows 上的 DPAPI 密文）位于 Agent 能触及的文件系统里，而当前用户的进程能解开它；同时 v0.1 已经存在一个同类问题：`shell` 工具的子进程继承完整进程环境，模型可以通过 `echo %NOCTURNE_API_KEY%` 这类命令读到环境变量里的密钥（`default` 预设下会先询问）。本阶段一并处理：
 
 1. **内置硬拒绝**（[permissions.md](permissions.md) 5.3）：对 `<NOCTURNE_HOME>/credentials.json` 的 `read` 与 `edit` 一律 `deny`，在规则求值之前生效。任何规则、Grant、`--yes`、`full-access` 预设、Hook 都不能放开它。`grep`/`glob` 的逐条过滤因此自然跳过它。路径同时按词法路径与真实路径匹配（与普通路径规则相同），符号链接绕不过去。
 2. **shell 子进程剥离凭据变量**：`shell` 工具启动子进程时，从环境中移除所有已解析服务商的 `apiKeyEnv` 变量名，以及 `NOCTURNE_API_KEY`、`ANTHROPIC_API_KEY` 两个默认名。MCP 服务器已经使用白名单环境（[mcp.md](mcp.md) 第 2 节），不受影响。Hook 维持继承完整环境（它是用户自己配置的脚本，[ADR-0012](../decisions/ADR-0012-hooks.md)）。
-3. **命令提示**：命令字符串中出现 `credentials.json` 的 `shell` 调用在全部预设（含 `full-access`）中至少 `ask`，`label` 为"可能读取 Nocturne 凭据"。这是基于模式的提示，不是可靠检测。
+3. **命令提示**：命令字符串中出现 `credentials.json`，或调用凭据后端读取命令（`security find-generic-password`、`secret-tool lookup`、`ConvertTo-SecureString`）的 `shell` 调用，在全部预设（含 `full-access`）中至少 `ask`，`label` 为"可能读取 Nocturne 凭据"。这是基于模式的提示，不是可靠检测。
 4. `providers.json` 加入"Nocturne 授权数据"一组（permissions.md 第 6 节第 4 条）：对它的 `edit` 至少 `ask`——它能把会话重定向到别的端点。
 
-**权限不是沙箱**（permissions.md 第 1 节）：一条已获准的 shell 命令仍然可以用任何方式读取凭据文件（比如拼接路径、调用脚本）。第 1、2 条挡住的是工具层面的直接读取与环境变量泄漏，第 3 条只是提示。文档与界面都不暗示凭据文件对 shell 完全不可见。
+**权限不是沙箱**（permissions.md 第 1 节）：一条已获准的 shell 命令仍然可以用任何方式取出密钥（比如拼接路径、调用脚本、间接调用系统凭据命令）。第 1、2 条挡住的是工具层面的直接读取与环境变量泄漏，第 3 条只是提示。文档与界面都不暗示凭据文件对 shell 完全不可见。
 
 ## 5. 服务商预设
 
@@ -120,7 +145,8 @@ interface CredentialFile {
 ```ts
 // @nocturne/core 公开导出
 listProviderPresets(): ProviderPreset[]
-fetchModelIds(entry: ProviderConfig, key: string | undefined, signal): Promise<string[]>      // GET /models；不支持时返回 []
+fetchModels(entry: ProviderConfig, key: string | undefined, signal): Promise<UpstreamModel[]>
+  // GET /models；UpstreamModel = { id, contextWindow?, maxOutputTokens? }，只含上游明确声明的字段（第 7 节）；不支持时返回 []
 testProviderConnection(entry: ProviderConfig, key: string | undefined, model: string, signal):
   Promise<{ ok: true; latencyMs: number } | { ok: false; error: ProviderError }>
 
@@ -129,7 +155,8 @@ saveSetupProvider(entry: ProviderConfig, opts: { key?: string; makeDefault?: boo
 setCredential(providerId: string, key: string): Promise<void>
 removeSetupProvider(providerId: string): Promise<void>     // 同时删除该 id 的凭据
 describeProviders(): ProviderOverview[]                    // /provider 列表数据；不含密钥
-credentials: CredentialSource                              // { get(providerId): string | undefined }，适配器使用
+credentials: CredentialSource                              // { get(providerId): Promise<string | undefined> }，经系统后端取出并缓存（第 3 节）
+refreshUpstreamLimits(providerId: string): Promise<void>  // /provider refresh：重新获取并写入 providers.json
 
 // Runtime 新增
 runtime.updateProviders(config: RuntimeConfig): void
@@ -139,14 +166,30 @@ runtime.updateProviders(config: RuntimeConfig): void
 
 为什么不"关闭会话再用新配置重新打开"：那会触发 `SessionEnd`/`SessionStart` Hook、重启全部 MCP 服务器、重新取锁——添加一个服务商不应该有这些副作用。
 
-## 7. 目录外模型的提示
+## 7. 模型限额以上游声明为准
 
-v0.1 里目录中查不到的模型会静默套用保守默认值（`contextWindow` 128000、`maxOutputTokens` 4096）。本阶段在会话打开与 `setModel` 时，如果当前模型的能力来自默认值，发出临时事件 `runtime.warning(code="model_capabilities_defaulted")`，说明哪些值是默认的、如何在 `config.json` 的 `models` 里声明；`/context` 报告也显示同样的标注。默认值本身是否调整见 ADR-0015 的开放问题。
+上下文窗口与最大输出长度是服务方的事实，应当由上游声明，而不是由 Nocturne 猜。v0.1 对目录外模型一律套用 `contextWindow` 128000、`maxOutputTokens` 4096，在实测中两头都错：commandcode 网关对 `deepseek/deepseek-v4.1-flash` 声明 `context_length` 为 1000000（按 128000 计算会过早触发压缩）；OpenRouter 对同一模型声明 `top_provider.max_completion_tokens` 为 393216（按 4096 截断会让一次大文件写入被切断）。
+
+**来源与优先级**（高者覆盖低者）：
+
+```text
+默认值 < 内置目录 < 上游声明 < 手写配置（config.json / 项目配置的 models）
+```
+
+- **上游声明**来自服务的模型列表接口，在向导选择模型时、以及 `/provider refresh <name>` 时获取，写入 `providers.json` 对应条目的 `models`，并记录 `source: "upstream"` 与获取时间。不在每次启动时请求（避免启动依赖网络）。
+- 字段映射只读有明确含义的字段：OpenAI 兼容格式的 `context_length` → `contextWindow`；OpenRouter 的 `top_provider.max_completion_tokens` → `maxOutputTokens`（`top_provider.context_length` 优先于顶层 `context_length`）；Anthropic 模型列表接口按其官方文档返回的限额字段映射（实现时对照文档，没有的字段不猜）。
+- **最大输出长度未知时不替上游做决定**：
+  - `openai-compatible`：请求**不带** `max_tokens`，由上游按它自己的上限处理；
+  - `anthropic`：协议要求必填，只有这种情况使用兜底值（8192），并在提示中说明。
+  - 上下文预算为输出预留的空间与发送的值分开：未知时按兜底值预留，只影响本地预算估算，不发送给上游。
+- **上下文窗口未知时**仍按 128000 估算（预算必须有一个数），同时在会话打开与 `setModel` 时发出 `runtime.warning(code="model_capabilities_defaulted")`，说明哪些值是默认的、如何运行 `/provider refresh` 或在 `config.json` 的 `models` 里声明；`/context` 报告显示同样的标注。
+- 这要求 `ModelInfo.maxOutputTokens` 与 `ModelRequest.maxOutputTokens` 变为可选（[provider-api.md](../protocols/provider-api.md) 第 2、3 节），属于协议契约变化，见 [ADR-0016](../decisions/ADR-0016-model-limits-from-upstream.md)。
 
 ## 8. 本阶段不做
 
-- 操作系统级密钥库：需要原生依赖（凭据管理器 / 钥匙串 / libsecret），与 v0.1 不引入原生依赖的取舍一致；接入时 `CredentialSource` 换实现即可，文件格式与解析顺序不变。
+- 明文凭据文件作为后备：没有系统后端时只提供环境变量方式（第 3 节）。
+- Windows 凭据管理器（Credential Manager）：读取需要经 PowerShell 动态编译 P/Invoke 代码，启动慢且易被安全软件拦截；DPAPI 提供同等的"仅当前用户可解密"保护，本阶段只用 DPAPI。
 - OAuth 登录、订阅账号登录：providers.md 第 6 节已排除；模拟官方客户端特征的登录方式不纳入。
 - 非交互的 `nctrn setup --provider ... --key ...`：命令行上的密钥会进入 shell 历史与进程列表，与"凭据不经命令行"的规则冲突；自动化场景继续使用环境变量或手写配置。
 - 项目级向导配置：向导只写用户级文件。项目级服务商配置仍然手写在 `.nocturne/config.json`，并受信任模型约束。
-- 按模型自动探测能力（上下文窗口、推理支持）：各服务的 `/models` 返回字段不统一，本阶段只取模型 id。
+- 自动探测推理、图片输入等能力：各服务的模型列表字段不统一，本阶段只读取上下文窗口与最大输出长度（第 7 节）。

@@ -16,7 +16,7 @@
 | 向导配置 | `<NOCTURNE_HOME>/providers.json` | 可信 | 机器维护：只由 `nctrn setup` 与 `/provider` 原子写，内容限 `model` 与 `providers`；手写配置按 `id` 覆盖它（v0.2 提议，[provider-setup.md](provider-setup.md)） |
 | 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；**程序从不改写它** |
 | 项目配置 | `<workspaceRoot>/.nocturne/config.json` | **默认不可信** | 来自被操作的仓库，见第 3 节信任模型 |
-| 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；凭据经环境变量或用户级凭据文件 `credentials.json` 进入（v0.2 提议，[provider-setup.md](provider-setup.md)） |
+| 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；凭据经环境变量或操作系统凭据后端进入（索引文件 `credentials.json` 不含明文）（v0.2 提议，[provider-setup.md](provider-setup.md)） |
 | 命令行参数 | `nctrn` 参数 | 可信 | 本次启动的显式意图，优先级最高 |
 
 机器维护的运行时数据（信任列表、项目 Grant、向导配置、凭据）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`，见第 3、4 节）——程序写自己的文件，不碰用户手写的配置。

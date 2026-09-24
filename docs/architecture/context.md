@@ -52,7 +52,7 @@ Builder 在 `BuiltContext` 中标出"可缓存前缀"的边界，是否以及如
 ## 5. Token 预算
 
 ```text
-可用输入预算 = model.contextWindow − 输出预留（min(maxOutputTokens, 上限)）− 安全余量
+可用输入预算 = model.contextWindow − 输出预留（min(maxOutputTokens, 上限)；maxOutputTokens 未知时按兜底值预留，只用于本地估算，见 [provider-setup.md](provider-setup.md) 第 7 节）− 安全余量
 当前估算     = 上一次请求 Provider 报告的输入 token 数 + 此后新增内容的估算（字符数 / 4）
 ```
 
