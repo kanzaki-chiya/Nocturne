@@ -12,7 +12,12 @@ import {
   type InstructionFile,
   type InstructionSet,
 } from "./context/index.js";
-import { createDefaultPolicy, type PermissionPolicy } from "./permission/index.js";
+import type { ProviderEntryConfig, RuntimeConfig } from "./config/index.js";
+import {
+  createRulePolicy,
+  isPermissionPresetName,
+  type PermissionPolicy,
+} from "./permission/index.js";
 import { createPlatform, type Platform } from "./platform/index.js";
 import {
   createAnthropicProvider,
@@ -29,6 +34,7 @@ import {
 import type {
   CommandRejectCode,
   ContentBlock,
+  Grant,
   ModelRef,
   PermissionReply,
   RuntimeEvent,
@@ -94,6 +100,11 @@ export interface RuntimeOptions {
   permissions?: RuntimePermissionsOptions | undefined;
   /** 指令集；默认自动收集 <NOCTURNE_HOME>/AGENTS.md 与项目各级 AGENTS.md */
   instructions?: InstructionSet | undefined;
+  /**
+   * 分层配置（config.md）：loadConfig 的产物；缺省时 Runtime 行为与 Phase 2 相同
+   * （无用户/项目配置、无 trust、无持久化 Grant）
+   */
+  config?: RuntimeConfig | undefined;
   /** Turn 配置覆盖（maxSteps / retryLimit / retryBaseDelayMs） */
   turn?: Partial<TurnConfig> | undefined;
   /** 写入 session.created 的 Runtime 版本 */
@@ -132,8 +143,8 @@ export interface RuntimeSession {
   interrupt(): void;
   /**
    * 回复 permission.requested（events.md 第 7 节）。
-   * 没有匹配的等待中请求时以 unknown_request 拒绝；reply.remember 在
-   * Phase 2 被忽略（不产生持久授权）。
+   * 没有匹配的等待中请求时以 unknown_request 拒绝；reply.remember 生成
+   * 对应范围的 Grant（permissions.md 5.4）。
    */
   respondPermission(requestId: string, reply: PermissionReply): Promise<void>;
   /**
@@ -141,6 +152,11 @@ export interface RuntimeSession {
    * session.config_changed；未知 provider/model 拒绝 invalid_model。
    */
   setModel(model: string | ModelRef): Promise<void>;
+  /**
+   * 切换权限预设（events.md 第 7 节）：会话空闲时生效，写入
+   * session.config_changed；未知预设名拒绝 invalid_command。
+   */
+  setPermissionPreset(name: string): Promise<void>;
   /**
    * 手动压缩（context.md 6.2/6.6）：一次模型调用生成 L2 摘要，
    * 写入 context.compacted(kind="summary")。Turn 进行中拒绝 session_busy，
@@ -150,12 +166,19 @@ export interface RuntimeSession {
   compact(): Promise<void>;
   /** 当前上下文构建结果与报告（cli.md /context 命令的数据来源） */
   describeContext(): BuiltContext;
+  /** 打开会话时聚合的警告（配置降级、未信任项目配置等），供客户端展示 */
+  readonly warnings: readonly string[];
   close(): Promise<void>;
+}
+
+export interface ResumeSessionOptions {
+  /** 会话记录的模型无法解析时，以该模型替代（写入 session.config_changed） */
+  model?: string | ModelRef | undefined;
 }
 
 export interface Runtime {
   createSession(options: CreateSessionOptions): Promise<RuntimeSession>;
-  resumeSession(id: string): Promise<RuntimeSession>;
+  resumeSession(id: string, options?: ResumeSessionOptions): Promise<RuntimeSession>;
   listSessions(filter?: { cwd?: string | undefined }): Promise<SessionSummary[]>;
   /** 全部已配置 Provider 声明的模型清单（cli.md /model 的数据来源） */
   listModels(): ModelInfo[];
@@ -173,40 +196,73 @@ function parseModelRef(model: string | ModelRef): ModelRef {
   return { provider: model.slice(0, i), model: model.slice(i + 1) };
 }
 
+/** ProviderEntryConfig → ProviderConfig（字段形状一致，按 type 分发适配器） */
+function instantiateProvider(entry: ProviderEntryConfig, env: (n: string) => string | undefined) {
+  const common = {
+    id: entry.id,
+    apiKeyEnv: entry.apiKeyEnv,
+    ...(entry.models !== undefined
+      ? { models: entry.models as Record<string, ModelOverride> }
+      : {}),
+    ...(entry.allowUndeclaredModels !== undefined
+      ? { allowUndeclaredModels: entry.allowUndeclaredModels }
+      : {}),
+    ...(entry.providerOptions !== undefined ? { providerOptions: entry.providerOptions } : {}),
+    ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
+  };
+  return entry.type === "anthropic"
+    ? createAnthropicProvider(
+        {
+          ...common,
+          type: "anthropic",
+          ...(entry.baseURL !== undefined ? { baseURL: entry.baseURL } : {}),
+        },
+        env,
+      )
+    : createOpenAICompatibleProvider(
+        { ...common, type: "openai-compatible", baseURL: entry.baseURL ?? "" },
+        env,
+      );
+}
+
 export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const platform = createPlatform();
   const { fs, paths } = platform;
+  const config = options.config;
 
   const cwd = paths.resolve(options.cwd, ".");
   const workspaceRoot = await platform.resolveReal(options.workspaceRoot ?? cwd);
   const sessionsDir =
     options.sessionsDir !== undefined
       ? paths.resolve(options.sessionsDir, ".")
-      : paths.join(platform.nocturneHome(), "sessions");
+      : (config?.sessionsDir ?? paths.join(platform.nocturneHome(), "sessions"));
   await fs.mkdir(sessionsDir);
+  const nocturneHome = config?.nocturneHome ?? platform.nocturneHome();
 
-  // ProviderRegistry：显式注入 + 声明式配置（openai-compatible / anthropic）
-  const providers: Provider[] = [...(options.providers ?? [])];
-  for (const config of options.providerConfigs ?? []) {
-    providers.push(
-      config.type === "anthropic"
-        ? createAnthropicProvider(config, (n) => platform.env(n))
-        : createOpenAICompatibleProvider(config, (n) => platform.env(n)),
-    );
+  /** Provider 构造：显式注入 + options.providerConfigs +（有 config 时）合并后的条目 */
+  function buildRegistry(configProviders: readonly ProviderEntryConfig[]): ProviderRegistry {
+    const env = (n: string) => platform.env(n);
+    // 同 id 后者覆盖（options.providerConfigs < config 条目，与分层优先级一致）
+    const byId = new Map<string, Provider>();
+    for (const p of options.providers ?? []) byId.set(p.id, p);
+    for (const c of options.providerConfigs ?? []) {
+      const instance =
+        c.type === "anthropic"
+          ? createAnthropicProvider(c, env)
+          : createOpenAICompatibleProvider(c, env);
+      byId.set(instance.id, instance);
+    }
+    for (const e of configProviders) byId.set(e.id, instantiateProvider(e, env));
+    return createProviderRegistry([...byId.values()], options.modelOverrides);
   }
-  const registry: ProviderRegistry = createProviderRegistry(providers, options.modelOverrides);
+
+  // 运行时级清单（listModels 的数据来源）：注入 + providerConfigs + config 基础层
+  const registry: ProviderRegistry = buildRegistry(config?.base.providers ?? []);
 
   const store: SessionStore = createSessionStore({ fs, paths, sessionsDir });
   const tools: ToolRegistry = createBuiltinRegistry();
   const executor = createToolExecutor(tools);
 
-  const policy =
-    options.policy ??
-    createDefaultPolicy({
-      workspaceRoot,
-      caseSensitive: platform.caseSensitivePaths,
-      autoApproveAsk: options.permissions?.autoApproveAsk === true,
-    });
   const interactive = options.interactive === true;
 
   const instructions =
@@ -218,19 +274,115 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     workspaceRoot,
     sessionDate: new Date().toISOString(),
   };
-  const turnConfig = { ...DEFAULT_TURN_CONFIG, ...options.turn };
 
-  function wrapSession(session: Session): RuntimeSession {
-    const modelRef = session.state().config.model;
-    // setModel 会替换该引用；submit 读取的是调用时刻的值
-    let model: ResolvedModel = registry.resolve(modelRef);
-    // gate 按会话持有：等待中的权限请求与会话绑定，respondPermission 按会话路由
-    const gate: PermissionGate = createPolicyGate(policy, { interactive });
+  async function wrapSession(
+    session: Session,
+    resume?: { modelOverride?: string | ModelRef | undefined },
+  ): Promise<RuntimeSession> {
+    const meta = session.state().meta;
+
+    // 项目层按会话记录的 workspaceRoot 加载（config.md 第 6 节）
+    const ws = config !== undefined ? await config.forWorkspace(meta.workspaceRoot) : undefined;
+    const resolved = ws?.resolved;
+    const warnings: string[] = [...(resolved?.warnings ?? [])];
+    if (ws?.projectConfig.present === true && !ws.projectConfig.trusted) {
+      warnings.push(
+        `检测到项目配置 ${ws.projectConfig.path ?? ""}，但该工作区未信任——其中仅收紧方向的规则生效；执行 nctrn trust 信任该工作区`,
+      );
+    }
+    for (const message of warnings) {
+      session.emitEphemeral("runtime.warning", { code: "config_warning", message });
+    }
+    if (ws?.projectConfig.present === true && !ws.projectConfig.trusted) {
+      session.emitEphemeral("runtime.warning", {
+        code: "project_config_untrusted",
+        message: `项目配置未信任：${ws.projectConfig.path ?? meta.workspaceRoot}`,
+      });
+    }
+
+    // 会话级 ProviderRegistry：基础层 + 可信项目层的 Provider 条目
+    const sessionRegistry =
+      config === undefined ? registry : buildRegistry(resolved?.providers ?? []);
+
+    // 权限策略：预设 + 分层规则 + Grant 集合；setPermissionPreset 重建
+    const sessionGrants: Grant[] = [];
+    const projectGrants = ws?.grants.list() ?? [];
+    const autoApproveAsk = options.permissions?.autoApproveAsk === true;
+    const buildPolicy = (presetName: string): PermissionPolicy =>
+      options.policy ??
+      createRulePolicy({
+        workspaceRoot: meta.workspaceRoot,
+        caseSensitive: platform.caseSensitivePaths,
+        preset: isPermissionPresetName(presetName) ? presetName : "default",
+        presetContext: {
+          sessionsDir,
+          sessionId: session.id,
+          nocturneHome,
+        },
+        rules: resolved?.rules ?? [],
+        untrustedRules: resolved?.untrustedRules ?? [],
+        grants: { session: sessionGrants, project: projectGrants },
+        autoApproveAsk,
+      });
+    let policy = buildPolicy(session.state().config.permissionPreset);
+    if (!isPermissionPresetName(session.state().config.permissionPreset)) {
+      warnings.push(
+        `会话记录的权限预设 "${session.state().config.permissionPreset}" 未知，已回退 default`,
+      );
+    }
+    // gate 按会话持有：等待中的权限请求与会话绑定，respondPermission 按会话路由；
+    // 经委托读取当前 policy，使 setPermissionPreset 立即生效
+    const gate: PermissionGate = createPolicyGate(
+      { evaluate: (subjects) => policy.evaluate(subjects) },
+      {
+        interactive,
+        caseSensitive: platform.caseSensitivePaths,
+        grants: { session: sessionGrants, project: ws?.grants },
+      },
+    );
     const execEnv: ExecutionEnvironment = {
       platform,
       gate,
       readState: createReadStateStore(paths),
     };
+    const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
+    for (const src of [resolved?.turn, options.turn]) {
+      if (src?.maxSteps !== undefined) turnConfig.maxSteps = src.maxSteps;
+      if (src?.retryLimit !== undefined) turnConfig.retryLimit = src.retryLimit;
+      if (src?.retryBaseDelayMs !== undefined) turnConfig.retryBaseDelayMs = src.retryBaseDelayMs;
+    }
+
+    const resolveSessionModel = (ref: ModelRef): ResolvedModel => sessionRegistry.resolve(ref);
+    let model: ResolvedModel;
+    try {
+      model = resolveSessionModel(session.state().config.model);
+    } catch (e) {
+      // 会话记录的模型无法解析：携带替代模型时先写 config_changed 再开放（sessions.md 4.2）
+      if (e instanceof UnknownModelError && resume?.modelOverride !== undefined) {
+        const ref = parseModelRef(resume.modelOverride);
+        let replacement: ResolvedModel;
+        try {
+          replacement = resolveSessionModel(ref);
+        } catch (inner) {
+          throw new RuntimeCommandError(
+            "invalid_model",
+            `替代模型同样无法解析：${inner instanceof Error ? inner.message : String(inner)}`,
+          );
+        }
+        await session.emit("session.config_changed", { model: ref });
+        model = replacement;
+      } else if (e instanceof UnknownModelError) {
+        throw new RuntimeCommandError(
+          "invalid_model",
+          resume !== undefined
+            ? `${e.message}；可携带替代模型恢复（resumeSession 的 model 选项 / CLI --model）`
+            : e.message,
+        );
+      } else {
+        throw e;
+      }
+    }
+
     let controller: AbortController | undefined;
     let compactController: AbortController | undefined;
 
@@ -251,11 +403,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         // 压缩是 Turn 之外的会话级活动，interrupt 同样中止它
         compactController?.abort();
       },
-      respondPermission(requestId, reply) {
-        if (gate.respond?.(requestId, reply) === true) {
-          return Promise.resolve();
+      async respondPermission(requestId, reply) {
+        if ((await gate.respond?.(requestId, reply)) === true) {
+          return;
         }
-        return Promise.reject(new RuntimeCommandError("unknown_request", "没有等待中的权限请求"));
+        throw new RuntimeCommandError("unknown_request", "没有等待中的权限请求");
       },
       async submit(input) {
         assertUsable();
@@ -294,7 +446,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const ref = parseModelRef(input);
         let resolved: ResolvedModel;
         try {
-          resolved = registry.resolve(ref);
+          resolved = resolveSessionModel(ref);
         } catch (e) {
           if (e instanceof UnknownModelError) {
             throw new RuntimeCommandError("invalid_model", e.message);
@@ -316,6 +468,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         await session.emit("session.config_changed", { model: ref });
         model = resolved;
+      },
+      async setPermissionPreset(name) {
+        assertUsable();
+        if (busy() || compactController !== undefined) {
+          throw new RuntimeCommandError("session_busy", "会话正忙，不能切换权限预设");
+        }
+        if (!isPermissionPresetName(name)) {
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `未知权限预设：${name}（可选：read-only | default | auto-edit | full-access）`,
+          );
+        }
+        await session.emit("session.config_changed", { permissionPreset: name });
+        policy = buildPolicy(name);
       },
       async compact() {
         assertUsable();
@@ -375,6 +541,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           session.emitEphemeral("runtime.status", { status: "idle" });
         }
       },
+      warnings,
       describeContext() {
         const state = session.state();
         return buildContext({
@@ -397,20 +564,38 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   return {
     async createSession(opts) {
-      const ref = parseModelRef(opts.model);
-      registry.resolve(ref); // 提前校验模型存在
+      const preset =
+        opts.permissionPreset ?? config?.base.permissionPreset ?? DEFAULT_PERMISSION_PRESET;
+      if (!isPermissionPresetName(preset)) {
+        throw new RuntimeCommandError(
+          "invalid_command",
+          `未知权限预设：${preset}（可选：read-only | default | auto-edit | full-access）`,
+        );
+      }
+      // 模型解析在 wrapSession 内进行（会话级注册表含项目层条目）；
+      // 失败时关闭已创建的会话，避免遗留打开的日志
       const session = await store.create({
         cwd,
         workspaceRoot,
-        model: ref,
-        permissionPreset: opts.permissionPreset ?? DEFAULT_PERMISSION_PRESET,
+        model: parseModelRef(opts.model),
+        permissionPreset: preset,
         nocturneVersion: options.version ?? NOCTURNE_VERSION,
       });
-      return wrapSession(session);
+      try {
+        return await wrapSession(session);
+      } catch (e) {
+        await session.close().catch(() => undefined);
+        throw e;
+      }
     },
-    async resumeSession(id) {
+    async resumeSession(id, resumeOpts) {
       const session = await store.load(id);
-      return wrapSession(session);
+      try {
+        return await wrapSession(session, { modelOverride: resumeOpts?.model });
+      } catch (e) {
+        await session.close().catch(() => undefined);
+        throw e;
+      }
     },
     listSessions: (filter) => store.list(filter),
     listModels: () => registry.providers().flatMap((p) => p.models()),

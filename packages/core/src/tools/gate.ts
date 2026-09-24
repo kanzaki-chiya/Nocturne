@@ -1,28 +1,58 @@
 /**
  * 权限闸门（tools.md 第 3 节步骤 5、permissions.md 第 7 节）。
- * Phase 2：求值为 ask 时——
+ * 求值为 ask 时——
  *   interactive 发出 permission.requested 并等待 respondPermission / 中断，
  *   然后发出 permission.resolved（gate 内部完成，Executor 不再补发）；
  *   非 interactive 直接把 ask 结算为 deny（source: "non_interactive"），不发 requested。
+ * Phase 3：完整选项集（允许一次 / 本会话内允许 / 本项目中始终允许 / 拒绝 /
+ * 拒绝并停止），remember 生成对应范围的 Grant；项目 Grant 写盘失败时降级为
+ * 会话 Grant 并发出 runtime.warning（permissions.md 5.4）。
  */
-import type { PermissionOption, PermissionSubject, SubjectRequest } from "../protocol/index.js";
-import type { PermissionDecision, PermissionPolicy } from "../permission/index.js";
+import type {
+  Grant,
+  PermissionOption,
+  PermissionSubject,
+  SubjectRequest,
+} from "../protocol/index.js";
+import {
+  grantFromSubject,
+  type PermissionDecision,
+  type PermissionPolicy,
+} from "../permission/index.js";
 import type { GateOutcome, GateTurnContext, PermissionGate, ToolEventSink } from "./types.js";
+
+/** gate 侧的授权落点：session 数组就地追加；project 为持久化存储句柄 */
+export interface GateGrantSink {
+  session: Grant[];
+  /** 项目 Grant 存储；缺省时 allow_project 降级为会话授权 */
+  project?: { add(grant: Grant): Promise<void> } | undefined;
+}
 
 export interface PolicyGateOptions {
   /** 是否有能回复权限请求的客户端（permissions.md 第 7 节）；默认 false */
   interactive?: boolean | undefined;
   /** 新会话内请求 id 的分配器（测试可注入确定性序列） */
   newRequestId?: (callId: string) => string;
+  /** Grant 落点与授权键大小写规则 */
+  grants?: GateGrantSink | undefined;
+  caseSensitive?: boolean | undefined;
 }
 
-/** Phase 2 提供给客户端的确认选项（permissions.md 第 7 节最小形态） */
-const ASK_OPTIONS: PermissionOption[] = ["allow_once", "deny"];
+/** 完整的确认选项集（permissions.md 第 7 节） */
+const ASK_OPTIONS: PermissionOption[] = [
+  "allow_once",
+  "allow_session",
+  "allow_project",
+  "deny",
+  "deny_stop",
+];
 
 interface PendingRequest {
   callId: string;
   subjects: PermissionSubject[];
   reason: string;
+  /** 命中规则的人读说明（写入 permission.resolved.rule） */
+  ruleDesc: string;
   turn: GateTurnContext;
   resolve(outcome: GateOutcome): void;
   /** 中断监听器的清理（respond 正常结算后移除，避免悬挂引用） */
@@ -36,13 +66,14 @@ export function createPolicyGate(
   const pending = new Map<string, PendingRequest>();
   let counter = 0;
   const newRequestId = options.newRequestId ?? ((callId: string) => `perm-${++counter}-${callId}`);
+  const caseSensitive = options.caseSensitive ?? true;
 
   async function emitResolved(
     req: { requestId?: string; callId: string },
     decision: PermissionDecision,
-    askReason: string,
+    ruleDesc: string,
     turn: GateTurnContext | undefined,
-    extra?: { feedback?: string | undefined },
+    extra?: { feedback?: string | undefined; remember?: "session" | "project" | undefined },
   ): Promise<void> {
     if (turn === undefined) return;
     await turn.events.emit(
@@ -52,7 +83,8 @@ export function createPolicyGate(
         callId: req.callId,
         action: decision.action === "allow" ? "allow" : "deny",
         source: decision.source,
-        rule: askReason,
+        rule: ruleDesc,
+        remember: extra?.remember,
         feedback: extra?.feedback,
       },
       { turnId: turn.turnId },
@@ -83,6 +115,7 @@ export function createPolicyGate(
             action: "deny",
             source: "non_interactive",
             reason: `非交互模式：需确认的操作被拒绝（${decision.reason}）`,
+            matchedRule: decision.matchedRule,
           },
         };
       }
@@ -90,6 +123,7 @@ export function createPolicyGate(
       // ask：先登记等待中的请求（客户端可能在 requested 事件回调里同步回复），
       // 再发 permission.requested，然后等待 respond / 中断
       const requestId = newRequestId(callId);
+      const ruleDesc = decision.matchedRule?.description ?? decision.reason;
       let resolveWait!: (outcome: GateOutcome) => void;
       const waitPromise = new Promise<GateOutcome>((resolve) => {
         resolveWait = resolve;
@@ -109,6 +143,7 @@ export function createPolicyGate(
         callId,
         subjects: evaluation.subjects,
         reason: decision.reason,
+        ruleDesc,
         turn,
         resolve: resolveWait,
         cleanup: () => {
@@ -148,8 +183,9 @@ export function createPolicyGate(
       const outcome = await waitPromise;
 
       // gate 内部发出 permission.resolved；Executor 不再补发
-      await emitResolved({ requestId, callId }, outcome.decision, decision.reason, turn, {
+      await emitResolved({ requestId, callId }, outcome.decision, ruleDesc, turn, {
         feedback: outcome.feedback,
+        remember: outcome.remember,
       });
       return { ...outcome, resolvedEmitted: true };
     },
@@ -162,13 +198,48 @@ export function createPolicyGate(
       return evaluation.decision.action;
     },
 
-    respond(requestId, reply) {
+    async respond(requestId, reply) {
       const p = pending.get(requestId);
       if (p === undefined) return false;
-      // Phase 2：不生成任何持久授权（remember 被忽略，见 permissions.md 第 7 节）
+      let remember: "session" | "project" | undefined;
+      if (reply.decision === "allow" && reply.remember !== undefined) {
+        const grants = p.subjects.map((s) => grantFromSubject(s, caseSensitive));
+        const sink = options.grants;
+        if (reply.remember === "project" && sink?.project !== undefined) {
+          try {
+            for (const g of grants) await sink.project.add(g);
+            remember = "project";
+          } catch (e) {
+            // 写盘失败降级为会话 Grant（permissions.md 5.4）
+            sink.session.push(...grants);
+            remember = "session";
+            p.turn.events.emitEphemeral(
+              "runtime.warning",
+              {
+                code: "grant_persist_failed",
+                message: `项目授权写入失败，已降级为本会话授权：${e instanceof Error ? e.message : String(e)}`,
+              },
+              { turnId: p.turn.turnId },
+            );
+          }
+        } else {
+          // remember === "session"，或无项目存储时的降级
+          sink?.session.push(...grants);
+          remember = "session";
+        }
+      }
       const decision: PermissionDecision =
         reply.decision === "allow"
-          ? { action: "allow", source: "user", reason: "用户允许一次" }
+          ? {
+              action: "allow",
+              source: "user",
+              reason:
+                remember === "project"
+                  ? "用户允许：本项目始终允许（已写入授权）"
+                  : remember === "session"
+                    ? "用户允许：本会话内允许"
+                    : "用户允许一次",
+            }
           : {
               action: "deny",
               source: "user",
@@ -182,6 +253,7 @@ export function createPolicyGate(
         decision,
         stopTurn: reply.decision === "deny" && reply.stop === true,
         feedback: reply.feedback,
+        remember,
       });
       return true;
     },

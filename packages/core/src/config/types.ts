@@ -4,7 +4,14 @@
  * Provider 配置的解释在 provider（config 不依赖它们，字段形状按
  * RuntimeOptions.providerConfigs 的元素对齐，由 core/index 装配时分发）。
  */
-import type { Grant, PermissionPresetName, PermissionRule, RuleOrigin } from "../protocol/index.js";
+import type {
+  AnnotatedRule,
+  Grant,
+  PermissionPresetName,
+  PermissionRule,
+} from "../protocol/index.js";
+
+export type { AnnotatedRule };
 
 /** Provider 条目中模型能力的覆盖形状（对齐 provider 的 ModelOverride） */
 export interface ModelOverrideShape {
@@ -59,12 +66,6 @@ export interface ConfigFile {
       }
     | undefined;
   turn?: TurnOverrides | undefined;
-}
-
-/** 带来源标注的权限规则：origin 取 user / project / project-untrusted / cli */
-export interface AnnotatedRule {
-  rule: PermissionRule;
-  origin: RuleOrigin;
 }
 
 /** 一层合并后的结果（config.md 第 1 节） */

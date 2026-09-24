@@ -56,7 +56,8 @@ export interface ToolStartedPayload {
   input: unknown;
   /** 解析后的权限主体 */
   subjects: PermissionSubject[];
-  permission: { action: PermissionAction; source: PermissionSource };
+  /** `rule` 为命中规则的人读说明（permissions.md 5.3） */
+  permission: { action: PermissionAction; source: PermissionSource; rule?: string | undefined };
 }
 
 export interface PermissionRequestedPayload {

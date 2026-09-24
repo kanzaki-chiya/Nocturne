@@ -5,7 +5,12 @@
  * `where` 由本层在求值时计算（permissions.md 4.1）。
  */
 
-import type { PermissionAction, PermissionSource, PermissionSubject } from "../protocol/index.js";
+import type {
+  PermissionAction,
+  PermissionSource,
+  PermissionSubject,
+  RuleHit,
+} from "../protocol/index.js";
 
 /** 一次求值的结论（events.md：tool.started.permission / permission.resolved） */
 export interface PermissionDecision {
@@ -13,6 +18,8 @@ export interface PermissionDecision {
   source: PermissionSource;
   /** 可解释的原因说明，写入事件与诊断 */
   reason: string;
+  /** 命中的规则及来源（permissions.md 5.3）；Grant / 兜底 ask 等无规则本体时 rule 缺省 */
+  matchedRule?: RuleHit | undefined;
 }
 
 /** 求值结果：填好 `where` 的主体列表 + 统一决定 */

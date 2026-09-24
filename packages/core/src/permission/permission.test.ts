@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import type { PermissionSubject } from "../protocol/index.js";
-import { computeWhere, createDefaultPolicy, createWorkspaceReadPolicy } from "./index.js";
+import type { Grant, PermissionSubject } from "../protocol/index.js";
+import {
+  computeWhere,
+  createDefaultPolicy,
+  createRulePolicy,
+  createWorkspaceReadPolicy,
+} from "./index.js";
 
 const WS = "C:\\ws\\proj";
+const HOME = "C:\\Users\\tester\\.nocturne";
+const SESSIONS = "C:\\Users\\tester\\.nocturne\\sessions";
 
 describe("computeWhere", () => {
   it("等于工作区根 → workspace", () => {
@@ -161,5 +168,188 @@ describe("createDefaultPolicy（Phase 2 default 预设）", () => {
     const r = policy.evaluate([subject({ resolved: "C:\\ws\\proj\\a.ts" })]);
     expect(r.decision.action).toBe("allow");
     expect(r.decision.reason).not.toContain("自动批准");
+  });
+});
+
+describe("createRulePolicy（Phase 3 规则引擎）", () => {
+  const subject = (over: Partial<PermissionSubject>): PermissionSubject => ({
+    kind: "read",
+    target: "x",
+    ...over,
+  });
+  const policyFor = (
+    preset: "read-only" | "default" | "auto-edit" | "full-access",
+    extra?: Parameters<typeof createRulePolicy>[0],
+  ) =>
+    createRulePolicy({
+      workspaceRoot: WS,
+      caseSensitive: false,
+      preset,
+      presetContext: { sessionsDir: SESSIONS, sessionId: "s1", nocturneHome: HOME },
+      ...extra,
+    });
+  const actionOf = (
+    preset: "read-only" | "default" | "auto-edit" | "full-access",
+    s: PermissionSubject,
+    extra?: Parameters<typeof createRulePolicy>[0],
+  ) => policyFor(preset, extra).evaluate([s]).decision.action;
+
+  it("预设矩阵：read-only", () => {
+    expect(actionOf("read-only", subject({ resolved: "C:\\ws\\proj\\a.ts" }))).toBe("allow");
+    expect(actionOf("read-only", subject({ resolved: "D:\\else\\a.ts" }))).toBe("ask");
+    expect(actionOf("read-only", subject({ kind: "edit", resolved: "C:\\ws\\proj\\a.ts" }))).toBe(
+      "deny",
+    );
+    expect(actionOf("read-only", subject({ kind: "shell", target: "ls" }))).toBe("ask");
+  });
+
+  it("预设矩阵：auto-edit / full-access", () => {
+    expect(actionOf("auto-edit", subject({ kind: "edit", resolved: "C:\\ws\\proj\\a.ts" }))).toBe(
+      "allow",
+    );
+    expect(actionOf("auto-edit", subject({ kind: "edit", resolved: "D:\\else\\a.ts" }))).toBe(
+      "ask",
+    );
+    expect(actionOf("full-access", subject({ kind: "shell", target: "pnpm test" }))).toBe("allow");
+    expect(actionOf("full-access", subject({ kind: "edit", resolved: "D:\\else\\a.ts" }))).toBe(
+      "ask",
+    );
+  });
+
+  it("受保护路径：default 中 .git/.nocturne edit → ask", () => {
+    const r = policyFor("default").evaluate([
+      subject({ kind: "edit", resolved: "C:\\ws\\proj\\.git\\config" }),
+    ]);
+    expect(r.decision.action).toBe("ask");
+    expect(r.decision.matchedRule?.rule?.label).toBe("受保护路径");
+    expect(
+      actionOf("default", subject({ kind: "edit", resolved: "C:\\ws\\proj\\.nocturne\\x.json" })),
+    ).toBe("ask");
+  });
+
+  it("read-only 中受保护路径保持 deny（不生成 ask 规则）", () => {
+    const r = policyFor("read-only").evaluate([
+      subject({ kind: "edit", resolved: "C:\\ws\\proj\\.git\\config" }),
+    ]);
+    expect(r.decision.action).toBe("deny");
+    expect(r.decision.matchedRule?.rule?.label).not.toBe("受保护路径");
+  });
+
+  it("授权数据保护：config.json / trust.json / grants/** 的 edit → ask 且带标签", () => {
+    for (const p of [`${HOME}\\config.json`, `${HOME}\\trust.json`, `${HOME}\\grants\\abc.json`]) {
+      const r = policyFor("full-access").evaluate([subject({ kind: "edit", resolved: p })]);
+      expect(r.decision.action).toBe("ask");
+      expect(r.decision.matchedRule?.rule?.label).toBe("修改 Nocturne 授权配置");
+    }
+    // read-only 中仍是 deny
+    expect(actionOf("read-only", subject({ kind: "edit", resolved: `${HOME}\\trust.json` }))).toBe(
+      "deny",
+    );
+  });
+
+  it("本会话落盘目录 read → allow；其他会话附件仍 ask", () => {
+    expect(
+      actionOf("default", subject({ resolved: `${SESSIONS}\\attachments\\s1\\call1.txt` })),
+    ).toBe("allow");
+    const r = policyFor("default").evaluate([
+      subject({ resolved: `${SESSIONS}\\attachments\\s2\\call1.txt` }),
+    ]);
+    expect(r.decision.action).toBe("ask");
+    expect(r.decision.matchedRule?.rule?.label).not.toBe("本会话落盘目录");
+  });
+
+  it("full-access 高风险 shell 保持 ask", () => {
+    const r = policyFor("full-access").evaluate([
+      subject({ kind: "shell", target: "sudo rm -rf /" }),
+    ]);
+    expect(r.decision.action).toBe("ask");
+    expect(r.decision.matchedRule?.rule?.label).toBe("高风险命令");
+  });
+
+  it("分层规则后写优先：用户规则覆盖预设", () => {
+    const policy = policyFor("default", {
+      rules: [
+        {
+          rule: { kind: "edit", pattern: "src/**", action: "allow" },
+          origin: "user",
+        },
+      ],
+    });
+    const r = policy.evaluate([subject({ kind: "edit", resolved: "C:\\ws\\proj\\src\\a.ts" })]);
+    expect(r.decision.action).toBe("allow");
+    expect(r.decision.matchedRule?.origin).toBe("user");
+  });
+
+  it("不可信项目规则只收紧：deny 生效，allow 不放宽", () => {
+    const policy = policyFor("default", {
+      untrustedRules: [
+        // 试图收紧：edit src/** deny
+        { rule: { kind: "edit", pattern: "src/**", action: "deny" }, origin: "project-untrusted" },
+        // 试图放宽（构造中不应出现 allow，但防御性验证）：shell * allow
+        { rule: { kind: "shell", pattern: "*", action: "allow" }, origin: "project-untrusted" },
+      ],
+    });
+    expect(
+      policy.evaluate([subject({ kind: "edit", resolved: "C:\\ws\\proj\\src\\a.ts" })]).decision
+        .action,
+    ).toBe("deny");
+    // 不可信 allow 不会把 ask 提升为 allow
+    expect(policy.evaluate([subject({ kind: "shell", target: "ls" })]).decision.action).toBe("ask");
+  });
+
+  it("组合命令：模式匹配的 allow 降级为 ask", () => {
+    const r = policyFor("full-access").evaluate([
+      subject({ kind: "shell", target: "ls && rm -rf x" }),
+    ]);
+    expect(r.decision.action).toBe("ask");
+    expect(r.decision.reason).toContain("降级");
+  });
+
+  it("Grant 精确匹配：shell 全串一致才生效，且只提升 ask", () => {
+    const session: Grant[] = [
+      { kind: "shell", target: "git status", createdAt: "2026-01-01T00:00:00Z" },
+    ];
+    const policy = policyFor("default", { grants: { session } });
+    // 精确命中 → allow
+    const hit = policy.evaluate([subject({ kind: "shell", target: "git status" })]);
+    expect(hit.decision.action).toBe("allow");
+    expect(hit.decision.source).toBe("grant");
+    // 前缀/超集不匹配 → 仍 ask
+    expect(
+      policy.evaluate([subject({ kind: "shell", target: "git status --all" })]).decision.action,
+    ).toBe("ask");
+    // deny 不被 Grant 提升：read-only 下 edit 仍 deny
+    const ro = policyFor("read-only", {
+      grants: {
+        session: [
+          {
+            kind: "edit",
+            target: "c:/ws/proj/a.ts",
+            createdAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+      },
+    });
+    expect(
+      ro.evaluate([subject({ kind: "edit", resolved: "C:\\ws\\proj\\a.ts" })]).decision.action,
+    ).toBe("deny");
+  });
+
+  it("autoApproveAsk 不覆盖 deny", () => {
+    const policy = policyFor("read-only", { autoApproveAsk: true });
+    expect(
+      policy.evaluate([subject({ kind: "edit", resolved: "C:\\ws\\proj\\a.ts" })]).decision.action,
+    ).toBe("deny");
+    expect(policy.evaluate([subject({ kind: "shell", target: "ls" })]).decision.action).toBe(
+      "allow",
+    );
+  });
+
+  it("命中解释：reason 含命中描述与 label", () => {
+    const r = policyFor("default").evaluate([
+      subject({ kind: "edit", resolved: "C:\\ws\\proj\\.git\\config" }),
+    ]);
+    expect(r.decision.reason).toContain("受保护路径");
+    expect(r.decision.matchedRule?.description).toContain("预设");
   });
 });

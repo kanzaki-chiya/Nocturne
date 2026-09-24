@@ -20,6 +20,7 @@ export type ClientCommand =
   | { type: "interrupt" }
   | { type: "respondPermission"; requestId: string; reply: PermissionReply }
   | { type: "setModel"; model: ModelRef }
+  | { type: "setPermissionPreset"; preset: string }
   | { type: "compact" }
   | { type: "close" };
 

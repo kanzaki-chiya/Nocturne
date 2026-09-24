@@ -34,16 +34,29 @@ const modelOverrideSchema = z.object({
   capabilities: capabilitiesSchema.optional(),
 });
 
-const providerEntrySchema = z.object({
-  id: z.string().min(1),
-  type: z.enum(["openai-compatible", "anthropic"]).optional(),
-  baseURL: z.string().min(1).optional(),
-  apiKeyEnv: z.string().min(1),
-  models: z.record(z.string(), modelOverrideSchema).optional(),
-  allowUndeclaredModels: z.boolean().optional(),
-  providerOptions: z.record(z.string(), z.unknown()).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-});
+const providerEntrySchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.enum(["openai-compatible", "anthropic"]).optional(),
+    baseURL: z.string().min(1).optional(),
+    apiKeyEnv: z.string().min(1),
+    models: z.record(z.string(), modelOverrideSchema).optional(),
+    allowUndeclaredModels: z.boolean().optional(),
+    providerOptions: z.record(z.string(), z.unknown()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+  })
+  .check((ctx) => {
+    // openai-compatible（含缺省 type）必须有 baseURL——适配器构造必需
+    const e = ctx.value;
+    if ((e.type === undefined || e.type === "openai-compatible") && e.baseURL === undefined) {
+      ctx.issues.push({
+        code: "custom",
+        input: e,
+        path: ["baseURL"],
+        message: "openai-compatible 必须提供 baseURL",
+      });
+    }
+  });
 
 const configFileSchema = z.object({
   model: z.string().min(1).optional(),

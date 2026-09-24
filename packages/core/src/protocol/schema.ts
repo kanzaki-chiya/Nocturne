@@ -89,6 +89,7 @@ const payloadSchemas = {
     permission: z.object({
       action: permissionActionSchema,
       source: permissionSourceSchema,
+      rule: z.string().optional(),
     }),
   }),
   "permission.requested": z.object({

@@ -10,6 +10,7 @@ import type {
   PermissionAction,
   PermissionReply,
   PermissionSubject,
+  RuntimeWarningPayload,
   SubjectRequest,
   ToolCallRef,
   ToolProgressPayload,
@@ -118,6 +119,11 @@ export interface ToolEventSink {
     payload: ToolProgressPayload,
     options?: { turnId?: string | undefined },
   ): void;
+  emitEphemeral(
+    type: "runtime.warning",
+    payload: RuntimeWarningPayload,
+    options?: { turnId?: string | undefined },
+  ): void;
 }
 
 /** gate.check 的返回：权限决定 + 填好 where 的主体 */
@@ -132,6 +138,8 @@ export interface GateOutcome {
   cancelled?: boolean | undefined;
   /** 用户拒绝时附带给模型的反馈（PermissionReply.feedback） */
   feedback?: string | undefined;
+  /** 本次应答生成的 Grant 范围（permission.resolved.remember） */
+  remember?: "session" | "project" | undefined;
 }
 
 /** check 的 Turn 级上下文：ask 流程发出 permission.requested / resolved 需要它 */
@@ -153,8 +161,11 @@ export interface PermissionGate {
   ): Promise<GateOutcome>;
   /** 同步词法求值：结果路径位于已解析根目录之下（permissions.md 4.4） */
   checkLexical(request: SubjectRequest): PermissionAction;
-  /** 回复等待中的权限请求；未知或已结算的 requestId 返回 false */
-  respond?(requestId: string, reply: PermissionReply): boolean;
+  /**
+   * 回复等待中的权限请求；未知或已结算的 requestId 返回 false。
+   * 异步：remember="project" 时要先完成 Grant 落盘（失败降级为会话授权）。
+   */
+  respond?(requestId: string, reply: PermissionReply): Promise<boolean>;
   /** 会话关闭时把全部等待中的请求结算为 cancelled */
   cancelAll?(): void;
 }

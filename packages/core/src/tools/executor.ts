@@ -187,7 +187,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
               callId: call.callId,
               action: "deny",
               source: decision.source,
-              rule: decision.reason,
+              rule: decision.matchedRule?.description ?? decision.reason,
             },
             { turnId },
           );
@@ -203,7 +203,11 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           name: call.name,
           input,
           subjects: outcome.subjects,
-          permission: { action: decision.action, source: decision.source },
+          permission: {
+            action: decision.action,
+            source: decision.source,
+            rule: decision.matchedRule?.description,
+          },
         },
         { turnId },
       );

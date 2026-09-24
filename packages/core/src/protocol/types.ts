@@ -115,6 +115,12 @@ export interface RuleHit {
   description: string;
 }
 
+/** 带来源标注的权限规则：config 合并产物，permission 求值输入 */
+export interface AnnotatedRule {
+  rule: PermissionRule;
+  origin: RuleOrigin;
+}
+
 /** permission.requested 中提供给客户端的选项（permissions.md 第 7 节） */
 export type PermissionOption =
   "allow_once" | "allow_session" | "allow_project" | "deny" | "deny_stop";

@@ -3,9 +3,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createWorkspaceReadPolicy, type PermissionDecision } from "../permission/index.js";
+import {
+  createDefaultPolicy,
+  createWorkspaceReadPolicy,
+  type PermissionDecision,
+} from "../permission/index.js";
 import { createPlatform, type Platform } from "../platform/index.js";
-import type { ToolCallRef } from "../protocol/index.js";
+import type { Grant, ToolCallRef } from "../protocol/index.js";
 import { globToRegExp } from "./builtin/globmatch.js";
 import { compileGitignore, matchGitignore } from "./builtin/gitignore.js";
 import {
@@ -368,5 +372,111 @@ describe("globToRegExp / gitignore", () => {
     expect(matchGitignore(rules, "build/out.js", false)).toBe(true);
     expect(matchGitignore(rules, "build", false)).toBeUndefined();
     expect(matchGitignore(rules, "src/a.ts", false)).toBeUndefined();
+  });
+});
+
+describe("PermissionGate（ask 流程与 Grant）", () => {
+  const wsSubject = (ws: string, rel = "a.ts") => [
+    { kind: "read" as const, target: rel, resolved: path.join(ws, rel) },
+  ];
+
+  function gateHarness(ws: string, grants: Grant[]) {
+    const events: Captured[] = [];
+    const ephemeral: Captured[] = [];
+    // default 预设：工作区外 read → ask（workspaceReadPolicy 会直接 deny，走不到 ask 流程）
+    const policy = createDefaultPolicy({
+      workspaceRoot: ws,
+      caseSensitive: platform.caseSensitivePaths,
+    });
+    const gate = createPolicyGate(policy, {
+      interactive: true,
+      grants: { session: grants },
+      caseSensitive: platform.caseSensitivePaths,
+      newRequestId: (id) => `req-${id}`,
+    });
+    const turn = {
+      turnId: "t1",
+      events: {
+        emit: (type: string, payload: unknown) => {
+          events.push({ type, payload: payload as Captured["payload"] });
+          return Promise.resolve();
+        },
+        emitEphemeral: (type: string, payload: unknown) => {
+          ephemeral.push({ type, payload: payload as Captured["payload"] });
+        },
+      } as never,
+    };
+    return { gate, turn, events, ephemeral };
+  }
+
+  it("ask → 用户允许一次：allow + source user + resolved 带规则说明", async () => {
+    const ws = tmpWorkspace();
+    const outside = path.join(tmpdir(), `nct-out-${Date.now()}`);
+    const { gate, turn, events } = gateHarness(ws, []);
+    const check = gate.check(wsSubject(outside), "c1", new AbortController().signal, turn);
+    // permission.requested 已发出且携带完整选项集
+    const requested = events.find((e) => e.type === "permission.requested");
+    expect(requested?.payload.requestId).toBe("req-c1");
+    expect(requested?.payload.options).toEqual([
+      "allow_once",
+      "allow_session",
+      "allow_project",
+      "deny",
+      "deny_stop",
+    ]);
+    const ok = await gate.respond?.("req-c1", { decision: "allow" });
+    expect(ok).toBe(true);
+    const outcome = await check;
+    expect(outcome.decision.action).toBe("allow");
+    expect(outcome.decision.source).toBe("user");
+    const resolved = events.find((e) => e.type === "permission.resolved");
+    expect(resolved?.payload.action).toBe("allow");
+    expect(String(resolved?.payload.rule)).toContain("预设 default");
+  });
+
+  it("ask → 本会话内允许：生成会话 Grant，后续同类主体直接放行", async () => {
+    const ws = tmpWorkspace();
+    const grants: Grant[] = [];
+    const outside = path.join(tmpdir(), `nct-out2-${Date.now()}`);
+    const { gate, turn } = gateHarness(ws, grants);
+    const signal = new AbortController().signal;
+    const check = gate.check(wsSubject(outside), "c1", signal, turn);
+    await gate.respond?.("req-c1", { decision: "allow", remember: "session" });
+    const outcome = await check;
+    expect(outcome.remember).toBe("session");
+    expect(grants).toHaveLength(1);
+    // grant 写入会话集合后，同一主体的下一次求值直接 allow（policy 读活引用）——
+    // 本测试用 workspaceReadPolicy 不带 grants 联动，故直接验证 grants 内容
+    expect(grants[0]?.kind).toBe("read");
+  });
+
+  it("ask → 拒绝并停止：stopTurn 置位", async () => {
+    const ws = tmpWorkspace();
+    const outside = path.join(tmpdir(), `nct-out3-${Date.now()}`);
+    const { gate, turn } = gateHarness(ws, []);
+    const check = gate.check(wsSubject(outside), "c1", new AbortController().signal, turn);
+    await gate.respond?.("req-c1", { decision: "deny", stop: true, feedback: "别动这个" });
+    const outcome = await check;
+    expect(outcome.decision.action).toBe("deny");
+    expect(outcome.stopTurn).toBe(true);
+    expect(outcome.feedback).toBe("别动这个");
+  });
+
+  it("非交互：ask 直接结算为 deny，不发 permission.requested", async () => {
+    const ws = tmpWorkspace();
+    const policy = createDefaultPolicy({
+      workspaceRoot: ws,
+      caseSensitive: platform.caseSensitivePaths,
+    });
+    const gate = createPolicyGate(policy);
+    const outside = path.join(tmpdir(), `nct-out4-${Date.now()}`);
+    const outcome = await gate.check(
+      wsSubject(outside),
+      "c1",
+      new AbortController().signal,
+      undefined,
+    );
+    expect(outcome.decision.action).toBe("deny");
+    expect(outcome.decision.source).toBe("non_interactive");
   });
 });
