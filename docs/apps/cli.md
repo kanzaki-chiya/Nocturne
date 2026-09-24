@@ -176,4 +176,4 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 
 ## 10. 暂不设计
 
-多行输入与粘贴模式、输出分页、`--output-format`、stdin 以外的非交互输入源。Phase 4 的 TUI 复用同一 Runtime 与事件流，不重用本 CLI 的渲染代码；`--tui` 入口与界面设计见 [apps/tui.md](tui.md)（提议）。
+多行输入与粘贴模式、输出分页、`--output-format`、stdin 以外的非交互输入源。Phase 4 的 TUI 复用同一 Runtime 与事件流，不重用本 CLI 的渲染代码；`--tui` 入口与界面设计见 [apps/tui.md](tui.md)。

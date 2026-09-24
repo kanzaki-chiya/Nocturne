@@ -1,12 +1,12 @@
 # TUI（`nctrn --tui`）
 
-> 状态：提议 v0.1 ｜ 前置阅读：[apps/cli.md](cli.md)、[protocols/view.md](../protocols/view.md) ｜ 代码位置（计划）：`apps/tui/`
+> 状态：已接受 v1.0（2026-09-24 验收）｜ 前置阅读：[apps/cli.md](cli.md)、[protocols/view.md](../protocols/view.md) ｜ 代码位置：`apps/tui/`
 
 `apps/tui` 是 Nocturne 的终端界面客户端：与 CLI 驱动同一套 Runtime，只消费公开 API（`@nocturne/core`）与 `protocol`（含 `SessionView` reducer）。TUI 不包含任何 Agent 逻辑，不复用 CLI 的渲染代码，不自行做事件投影。
 
 ## 1. 启动入口
 
-唯一入口是 **`nctrn --tui`**：CLI 完成参数解析、配置收集、会话选择（新建/`--resume`/`--continue`）后，把已打开的 `Session` 与 `Runtime` 交给 `runTui(runtime, session, opts)`。终端不是 TTY 时报错退出（§5）。
+唯一入口是 **`nctrn --tui`**：CLI 完成参数解析、配置收集、会话选择（新建/`--resume`/`--continue`）后，把已打开的 `Session` 与 `Runtime` 交给 `runTui(session, runtime, opts)`。终端不是 TTY 时报错退出（§5）。
 
 取舍理由：
 
@@ -37,7 +37,7 @@
 │   流式中的助手文本（view.live.assistants）；
 │   进行中工具（live.tools 参数流 / entries 的 awaiting/running 条目）+ liveOutput 尾部；
 │   重试倒计时；压缩中提示
-├ 权限对话框（pendingPermission 出现时替换活动区）
+├ 权限对话框（pendingPermission 出现时叠加在活动区下方，独占交互焦点）
 │   ? 需要确认
 │     shell: npm install
 │     原因：预设 default：shell 命令需要确认
@@ -66,7 +66,7 @@
 | 会话列表 | `--sessions` 打印后退出 | 同（`--tui` 不改变 `--sessions` 的只读退出行为） |
 | 会话内切换 | `/resume`（REPL：编号列表，`/resume <id>` 直达） | `/resume` 弹出列表选择器（复用 `/model` 的列表组件，Esc 取消）；`/resume <id>` 直达。切换语义见 §6 |
 | 跨目录恢复确认 | `y/N` 提问（默认拒绝） | 确认对话框，默认拒绝（启动恢复与 `/resume` 一致） |
-| 恢复摘要/警告 | stderr 行 | 回放区顶部 notice 块 + notices 计数进状态栏 |
+| 恢复摘要/警告 | stderr 行 | 提示区 `!` 行（挂载与 `/resume` 切换时写入 clientLines） |
 | 忙时输入 | "会话忙，稍后再试" | 输入框禁用，状态栏显示当前状态；Ctrl+C 中断 |
 | 退出码 | 交互模式 0；用法/配置/恢复错误 2；中断 130 | 正常退出 0；启动错误同 CLI 映射（2）；非 TTY 报 2 并提示 `nctrn`（行式 REPL）或 `nctrn -p` |
 
@@ -89,7 +89,7 @@
 | `NOCTURNE_ASCII=1`（显式开关） | 框线、徽标退回 ASCII（`-`/`+`/`*`/`->`）。不做自动探测：Windows 上 `TERM` 通常未设置，靠它识别 conhost 不可靠；默认一律输出 Unicode |
 | 宽度 ≥80 | 完整布局（含 diff 上下文行） |
 | 40–79 | 紧凑：状态栏隐藏 cwd/sessionId，diff 上下文收窄，工具输入摘要硬截断 |
-| <40 或 高度 <10 | 极简：回放条目照常输出（`<Static>` 只追加，不暂存）但摘要更短；活动区 + 输入行 + 单行状态（`status | tokens`）；权限对话框收缩为单行选项提示 |
+| <40 | 极简：回放条目照常输出（`<Static>` 只追加，不暂存）但摘要更短；活动区 + 输入行 + 单行状态（`status | tokens`）；权限对话框隐藏原因行、选项收缩为单行 |
 | 运行时 resize | Ink 自动重排；回放区不受影响（已写 scrollback），活动区按新宽度重绘 |
 | Windows Terminal / conhost | 两者均支持；conhost 旧版无真彩，用 16 色回退（Ink 的 ColorLevel 探测）；IME 候选窗定位依赖终端的 Synchronized Update 支持，conhost 上会退化（ADR-0010 风险条目） |
 
@@ -98,7 +98,7 @@
 会话内切换走 **`/resume` 斜杠命令**（REPL 与 TUI 同一套语义，cli.md 第 4 节为唯一主文档）：
 
 - `/resume`：列出 `runtime.listSessions()`（id、时间、cwd、模型、锁定标记），TUI 复用 `/model` 的列表选择组件（↑↓ + Enter，Esc 取消）；`/resume <id>` 直达。
-- **打开逻辑只在 CLI 有一份**：`runTui(runtime, session, { switchSession })`，`switchSession(id, { confirmedForeign? }) => Promise<{ ok: true; session } | { ok: false; reason; message; workspaceRoot? }>`。TUI 不直接打开会话，Core 不新增入口。跨目录确认在客户端完成：回调先返回 `reason: "foreign_workspace"`，TUI 弹确认对话框后带 `confirmedForeign` 重调。
+- **打开逻辑只在 CLI 有一份**：`runTui(session, runtime, { switchSession })`，`switchSession(id, { allowForeign? }) => Promise<SessionSwitchResult>`，结果为 `{ kind: "ok"; session } | { kind: "busy" } | { kind: "foreign"; workspaceRoot } | { kind: "error"; message }`。TUI 不直接打开会话，Core 不新增入口。跨目录确认在客户端完成：回调先返回 `kind: "foreign"`，TUI 弹确认对话框（默认拒绝）同意后带 `allowForeign` 重调。
 - **切换顺序**：Turn 进行中拒绝（提示先 Ctrl+C 中断）；先打开新会话——锁冲突/日志损坏/跨目录被拒时报错并**留在原会话**；打开成功后才 `close()` 旧会话、释放锁。
 - **切换后**：新建 `SessionView`，重放新会话的持久事件；已写入终端滚动区的旧内容无法收回，向回放区插一条"已切换到会话 \<id\>"分隔提示，再附恢复摘要（若有修复）。
 - 离线测试覆盖：切换成功、取消、锁冲突后留在原会话、Turn 进行中拒绝、切换后视图重放。
@@ -106,7 +106,7 @@
 ## 7. 工程约束
 
 - `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口 + ADR-0010 批准的终端依赖（ink、react；`ink-testing-library` 为 devDependency）。depcheck 新增规则：禁止 apps/tui → 其他 apps；cli→tui 仅 `--tui` 惰性边界一例。
-- 目录：`src/index.ts`（`runTui` 导出）、`src/app.tsx`（Ink 根组件）、`src/components/`（Transcript、ToolRow、PermissionDialog、StatusBar、Composer、PickList——`/model` 与 `/resume` 共用的列表选择器）、`src/keys.ts`。
+- 目录：`src/index.ts`（`runTui` 导出）、`src/app.tsx`（Ink 根组件）、`src/commands.ts`（斜杠命令分发）、`src/session-view.ts`（`useSessionView`：持久日志回放 + 订阅进同一 reducer）、`src/env.ts`（NOCTURNE_ASCII / NO_COLOR / TERM 降级探测）、`src/format.ts`（宽度安全格式化）、`src/types.ts`（`SwitchSessionFn` 等注入类型）、`src/components/`（Transcript、Activity、ToolRow、DiffView、PermissionDialog、StatusBar、Composer、PickList、Panel、ConfirmBox）。
 - 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧）；交互路径用注入假 Session 的集成测试（offline）。
 - `runTui` 只消费现有公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`，加上 `runtime.listModels`（`/model` 选择列表）与 `runtime.listSessions`（`/resume` 列表）；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
 

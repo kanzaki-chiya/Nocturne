@@ -1,6 +1,6 @@
 # 派生视图（SessionView）
 
-> 状态：提议 v0.1 ｜ 前置阅读：[events.md](events.md) ｜ 代码位置（计划）：`packages/core/src/protocol/view.ts`
+> 状态：已接受 v1.0（2026-09-24 验收）｜ 前置阅读：[events.md](events.md) ｜ 代码位置：`packages/core/src/protocol/view.ts`（测试在 `packages/core/test/view.test.ts`——reducer 测试依赖 Runtime 组装，按 depcheck 约定放测试目录）
 
 面向客户端的会话视图投影。`protocol` 中的纯函数 reducer 把事件流折叠成 `SessionView`，供 TUI 及后续所有客户端渲染使用（ADR-0002 第 5 条：派生视图由 `protocol` 提供，客户端不得各自重写投影逻辑）。
 
@@ -262,7 +262,7 @@ function replaySessionView(events: readonly DurableEvent[]): SessionView; // ≡
 
 `RuntimeEvent = DurableEvent | EphemeralEvent`（`subscribe` 的回调类型即此）。
 
-### 测试计划（protocol/view.test.ts）
+### 测试计划（packages/core/test/view.test.ts）
 
 场景矩阵（每个场景跑 live 序列与 durable-only 序列两条路径，断言 V1）：
 

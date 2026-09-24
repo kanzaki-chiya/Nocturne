@@ -32,7 +32,7 @@
 | 文档 | 回答的问题 |
 |---|---|
 | [apps/cli.md](apps/cli.md) | `nctrn` 命令行客户端：参数、REPL、事件渲染、权限确认、会话恢复、退出码、配置来源 |
-| [apps/tui.md](apps/tui.md) | 终端界面客户端（提议）：布局、键位、降级行为、`--tui` 入口 |
+| [apps/tui.md](apps/tui.md) | 终端界面客户端：布局、键位、降级行为、`--tui` 入口 |
 
 ## Protocols（精确契约）
 

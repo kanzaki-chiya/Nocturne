@@ -38,11 +38,11 @@
 
 **验收**：退出 CLI 后重新启动，可以恢复会话并继续之前的对话与任务；模拟崩溃（中途杀进程）后恢复，历史完整、未完成的工具调用被正确标记；危险操作按规则 allow / ask / deny，且能解释命中了哪条规则。
 
-## Phase 4 — TUI
+## Phase 4 — TUI（已完成，2026-09-24 验收）
 
-**内容**：会话视图、工具状态、diff 展示、权限对话框、会话状态栏；`protocol` 中的派生视图 reducer（供 TUI 与后续客户端共享）。
+**内容**：`protocol` 派生视图 reducer（`SessionView`，entries 只由持久事件产生、流式产物经 `live` 晋升，重放等价不变量 V1–V8）；`apps/tui` Ink 客户端——回放区（`<Static>` 完结前缀）+ 活动区 + 权限对话框 + 弹层 + 输入行 + 状态栏；`nctrn --tui` 惰性入口；REPL/TUI 会话内 `/resume` 切换（打开逻辑只在 CLI 一份，回调注入 TUI）；窄终端与 NO_COLOR/ASCII 降级。
 
-**验收**：CLI 与 TUI 驱动同一套 Runtime，行为一致；TUI 不包含 Agent 逻辑，只消费公开 API 与事件。
+**验收**：CLI 与 TUI 驱动同一套 Runtime，行为一致；TUI 不包含 Agent 逻辑，只消费公开 API 与事件。已用假 OpenAI 兼容 SSE 端点驱动真实进程逐项核对：流式中文对话、read+edit 工具与 diff、权限五键（a/s/p/d/x，d 带反馈、session/project Grant 生效）、Ctrl+C 中断、`-c`/`--resume` 恢复、杀进程后 process_exited 收束、会话内 `/resume` 切换与视图重放、非 TTY 退出 2、40 列窄终端；界面在 Windows Terminal 与 conhost 实际查看（含中文输入与 resize），conhost 活动区重绘残影为已知限制（ADR-0010）。
 
 ## Phase 5 — MCP 与 Hooks
 

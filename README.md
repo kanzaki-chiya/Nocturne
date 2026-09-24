@@ -24,7 +24,8 @@ export NOCTURNE_BASE_URL=...       # OpenAI 兼容端点，anthropic 可省略
 export NOCTURNE_MODEL=...          # 模型 id
 
 cd <你的代码仓库>
-node /path/to/nocturne/apps/cli/dist/main.js          # 交互模式
+node /path/to/nocturne/apps/cli/dist/main.js          # 交互模式（行式 REPL）
+node /path/to/nocturne/apps/cli/dist/main.js --tui    # 终端界面（TUI）
 node /path/to/nocturne/apps/cli/dist/main.js -p "..." # 非交互模式
 ```
 
