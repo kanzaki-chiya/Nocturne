@@ -116,6 +116,7 @@ const payloadSchemas = {
     output: z.unknown().optional(),
     error: errorInfoSchema.optional(),
     truncated: z.boolean().optional(),
+    spillPath: z.string().optional(),
     durationMs: z.number().optional(),
   }),
   "context.compacted": z.object({

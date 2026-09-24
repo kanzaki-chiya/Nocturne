@@ -50,11 +50,13 @@ export interface BuildContextInput {
   events?: readonly DurableEvent[] | undefined;
 }
 
-/** Builder 给出的压缩计划（context.md 6.2）；Phase 2 只会产生 prune */
+/** Builder 给出的压缩计划（context.md 6.2） */
 export interface CompactionPlan {
   kind: "prune" | "summary";
   /** 闭合步骤边界的 seq（context.md 6.3） */
   throughSeq: number;
+  /** kind="summary" 时已组装好的摘要请求；执行方直接交给 Provider */
+  summaryRequest?: ModelRequest | undefined;
 }
 
 /** ContextReport 中的一个部分（context.md 第 4 节"可解释"） */

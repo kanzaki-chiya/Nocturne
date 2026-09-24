@@ -92,6 +92,8 @@ export interface ToolCompletedPayload {
   output?: unknown;
   error?: { code: string; message: string } | undefined;
   truncated?: boolean | undefined;
+  /** 超预算输出的落盘文件绝对路径（tools.md 第 4 节） */
+  spillPath?: string | undefined;
   durationMs?: number | undefined;
 }
 

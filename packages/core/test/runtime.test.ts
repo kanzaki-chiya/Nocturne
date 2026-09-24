@@ -582,6 +582,121 @@ describe("上下文与运行时命令（Phase 2）", () => {
     await session.close();
   });
 
+  it("Provider context_overflow：prune 用尽后升级为 L2 摘要，重注入进行中输入", async () => {
+    const ws = makeTmpDir("nct-rt-ovf2-");
+    writeFileSync(path.join(ws, "big.txt"), "y".repeat(20_000));
+    const provider = new FakeProvider({
+      scripts: [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "r1",
+            name: "read",
+            input: { path: "big.txt" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // 第 2、3 次模型调用都溢出：第一次触发 prune，第二次升级为 summary
+        [
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "context_overflow", message: "too many tokens" }),
+          },
+        ],
+        [
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "context_overflow", message: "still too many" }),
+          },
+        ],
+        // 摘要调用（无工具）
+        [
+          { type: "text_delta", text: "自动摘要：读取了大文件 big.txt" },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, ws, { provider });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    const reason = await session.submit({ text: "task-go" });
+
+    expect(reason).toBe("done");
+    expect(provider.requests).toHaveLength(5);
+    const compacted = events.filter((e) => e.type === "context.compacted");
+    expect(compacted.map((e) => (e.type === "context.compacted" ? e.payload.kind : ""))).toEqual([
+      "prune",
+      "summary",
+    ]);
+    // 摘要请求是第 4 次模型调用：不带工具、输出受限
+    const summaryReq = provider.requests[3];
+    expect(summaryReq?.tools).toHaveLength(0);
+    expect(summaryReq?.maxOutputTokens).toBeLessThanOrEqual(4_000);
+    // 最终请求：摘要覆盖到 tool.completed，且进行中 Turn 的用户输入被重新注入
+    const finalText = JSON.stringify(provider.requests[4]?.messages);
+    expect(finalText).toContain("会话历史摘要");
+    expect(finalText).toContain("自动摘要");
+    expect(finalText).toContain("task-go");
+    // 原文工具结果不再出现（被摘要覆盖）
+    expect(finalText).not.toContain("yyyy");
+    await session.close();
+  });
+
+  it("自动 L2 摘要失败且不超预算：降级为未压缩继续并告警", async () => {
+    const ws = makeTmpDir("nct-rt-ovf3-");
+    writeFileSync(path.join(ws, "big.txt"), "y".repeat(20_000));
+    const provider = new FakeProvider({
+      scripts: [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "r1",
+            name: "read",
+            input: { path: "big.txt" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "context_overflow", message: "too many tokens" }),
+          },
+        ],
+        [
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "context_overflow", message: "still too many" }),
+          },
+        ],
+        // 摘要调用抛错 → 溢出路径下无可行压缩 → compaction_failed
+        [
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "network", message: "summary boom" }),
+          },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, ws, { provider });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    const reason = await session.submit({ text: "go" });
+
+    expect(reason).toBe("error");
+    const done = events.find((e) => e.type === "turn.completed");
+    expect(done?.type === "turn.completed" && done.payload.error?.code).toBe("compaction_failed");
+    // 摘要失败不写任何 context.compacted 事件（只有成功的 prune 一条）
+    const summaries = events.filter(
+      (e) => e.type === "context.compacted" && e.payload.kind === "summary",
+    );
+    expect(summaries).toHaveLength(0);
+    await session.close();
+  });
+
   it("compact()：一次模型调用写 context.compacted(summary)，历史被折叠", async () => {
     const provider = new FakeProvider({
       scripts: [

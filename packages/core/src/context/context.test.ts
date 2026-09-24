@@ -440,3 +440,116 @@ describe("L2 摘要请求（context.md 6.2/6.6）", () => {
     expect(text).toContain("新输入");
   });
 });
+
+describe("自动 L2 与进行中输入保留（context.md 6.5）", () => {
+  const evT = (
+    seq: number,
+    type: DurableEvent["type"],
+    payload: Record<string, unknown>,
+    turnId: string,
+  ): DurableEvent => ({ ...ev(seq, type, payload), turnId }) as DurableEvent;
+
+  it("无新闭合边界（本轮已修剪）且仍超阈值 → 给出携带请求的 summary 计划", () => {
+    // 预算 8000-256-1024=6720 token，阈值 5376；工具结果已被修剪为占位，
+    // 超阈值部分来自未持久化的 pending 输入（不进摘要转录）
+    const history: HistoryEntry[] = [
+      {
+        kind: "assistant",
+        seq: 2,
+        turnId: "t1",
+        messageId: "a2",
+        model: { provider: "test", model: "m1" },
+        content: [{ type: "text", text: "ok" }],
+        toolCalls: [{ callId: "c3", name: "read" }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 3,
+        turnId: "t1",
+        callId: "c3",
+        name: "read",
+        status: "ok",
+        modelContent: "x".repeat(2_000),
+        inputSummary: "path=a",
+      },
+      {
+        kind: "compaction",
+        seq: 4,
+        turnId: "t1",
+        compactKind: "prune",
+        throughSeq: 3,
+        summary: undefined,
+      },
+    ];
+    const events = [
+      evT(1, "turn.started", { turnIndex: 1 }, "t1"),
+      evT(3, "tool.completed", { callId: "c3" }, "t1"),
+      evT(4, "context.compacted", { kind: "prune", throughSeq: 3 }, "t1"),
+    ];
+    const built = buildContext(
+      baseInput({
+        history,
+        events,
+        model: { ...model, contextWindow: 8_000, maxOutputTokens: 256 },
+        pendingMessages: [{ role: "user", content: [{ type: "text", text: "y".repeat(23_000) }] }],
+      }),
+    );
+    expect(built.compaction?.kind).toBe("summary");
+    expect(built.compaction?.throughSeq).toBe(3);
+    expect(built.compaction?.summaryRequest).toBeDefined();
+    expect(built.compaction?.summaryRequest?.tools).toHaveLength(0);
+    expect(built.compaction?.summaryRequest?.maxOutputTokens).toBeLessThanOrEqual(4_000);
+  });
+
+  it("进行中 Turn 的 message.user 被摘要覆盖时重新注入，保证当前任务不丢", () => {
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 2,
+        turnId: "t1",
+        messageId: "u2",
+        content: [{ type: "text", text: "当前任务：修复登录" }],
+      },
+      {
+        kind: "assistant",
+        seq: 3,
+        turnId: "t1",
+        messageId: "a3",
+        model: { provider: "test", model: "m1" },
+        content: [{ type: "text", text: "读取中" }],
+        toolCalls: [{ callId: "c4", name: "read" }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 4,
+        turnId: "t1",
+        callId: "c4",
+        name: "read",
+        status: "ok",
+        modelContent: "body",
+      },
+      {
+        kind: "compaction",
+        seq: 5,
+        turnId: "t1",
+        compactKind: "summary",
+        throughSeq: 4,
+        summary: "前半段摘要",
+      },
+    ];
+    const events = [
+      evT(1, "turn.started", { turnIndex: 1 }, "t1"),
+      evT(4, "tool.completed", { callId: "c4" }, "t1"),
+      evT(5, "context.compacted", { kind: "summary", throughSeq: 4, summary: "前半段摘要" }, "t1"),
+    ];
+    const built = buildContext(baseInput({ history, events }));
+    // 摘要覆盖 seq≤4：只剩摘要消息 + 重新注入的当前任务
+    expect(built.request.messages).toHaveLength(2);
+    const last = built.request.messages[1];
+    expect(last?.role === "user" && JSON.stringify(last.content)).toContain("当前任务：修复登录");
+  });
+});

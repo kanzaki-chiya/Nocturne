@@ -7,6 +7,7 @@ import {
   buildContext,
   buildSummaryRequest,
   chooseSummaryBoundary,
+  runSummaryCall,
   type BuiltContext,
   type EnvironmentInfo,
   type InstructionFile,
@@ -349,6 +350,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       platform,
       gate,
       readState: createReadStateStore(paths),
+      attachmentsDir: paths.join(sessionsDir, "attachments"),
     };
     const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
     for (const src of [resolved?.turn, options.turn]) {
@@ -515,14 +517,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             throughSeq: boundary,
           });
           // context.md 6.6：摘要请求只尝试一轮，不嵌套压缩
-          let summary = "";
-          for await (const ev of model.provider.stream(request, ac.signal)) {
-            if (ev.type === "text_delta") summary += ev.text;
-            if (ev.type === "finish") break;
-          }
-          if (summary.trim().length === 0) {
-            throw new RuntimeCommandError("compaction_failed", "摘要结果为空");
-          }
+          const summary = await runSummaryCall(model, request, ac.signal);
           await session.emit(
             "context.compacted",
             { kind: "summary", throughSeq: boundary, summary },

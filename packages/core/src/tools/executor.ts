@@ -8,6 +8,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 
 import type { PermissionSubject, SubjectRequest, ToolCallRef } from "../protocol/index.js";
 import { applyBudget } from "./budget.js";
+import { writeSpill } from "./spill.js";
 import type {
   ExecutionScope,
   ToolDefinition,
@@ -70,21 +71,50 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         result: ToolResult,
       ): Promise<ToolExecution> {
         const budget = applyBudget(result);
+        // 超预算时把完整输出落盘到本会话附件目录（tools.md 第 4 节）；
+        // 写盘失败降级为普通截断，并在 modelContent 里如实说明
+        let spillPath: string | undefined;
+        let modelContent = budget.result.modelContent;
+        if (budget.truncated) {
+          if (scope.attachmentsDir !== undefined) {
+            try {
+              spillPath = await writeSpill({
+                fs: scope.platform.fs,
+                paths: scope.platform.paths,
+                attachmentsDir: scope.attachmentsDir,
+                sessionId: scope.sessionId,
+                callId: call.callId,
+                content: result.modelContent,
+              });
+            } catch {
+              spillPath = undefined;
+            }
+          }
+          modelContent +=
+            spillPath !== undefined
+              ? `\n\n[完整输出已写入 ${spillPath}（本会话内可用 read 查看）]`
+              : "\n\n[完整输出未保留：落盘不可用或写入失败]";
+        }
         await scope.events.emit(
           "tool.completed",
           {
             callId: call.callId,
             name: call.name,
             status,
-            modelContent: budget.result.modelContent,
+            modelContent,
             output: budget.result.output,
             error: budget.result.status === "error" ? budget.result.error : undefined,
             truncated: budget.truncated || undefined,
+            spillPath,
             durationMs: Date.now() - startedAt,
           },
           { turnId },
         );
-        return { status, result: budget.result, stopTurn };
+        return {
+          status,
+          result: { ...budget.result, modelContent },
+          stopTurn,
+        };
       }
 
       if (scope.signal.aborted) {

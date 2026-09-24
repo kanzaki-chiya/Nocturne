@@ -7,6 +7,13 @@ import type { ContentBlock, DurableEvent, HistoryEntry } from "../protocol/index
 import type { ModelInfo, ModelMessage, ModelRequest, SystemBlock } from "../provider/index.js";
 import type { BuildContextInput, BuiltContext, CompactionPlan, ContextSection } from "./types.js";
 
+/** 摘要输出上限（context.md 6.6：默认约 4,000 token） */
+export const SUMMARY_MAX_OUTPUT_TOKENS = 4_000;
+
+const SUMMARY_SYSTEM = `你是 Nocturne 会话的压缩器。把给定的会话转录压缩为一段结构化中文摘要，供后续模型继续任务时阅读。
+摘要必须包含：用户的总体目标、已完成的工作及结论、关键文件与工具调用结果、未决事项与下一步建议。
+只输出摘要正文，不要寒暄、不要复述指令。`;
+
 /** 单字符估算 token（context.md 第 5 节：字符数 / 4） */
 export function estimateTokens(chars: number): number {
   return Math.ceil(chars / 4);
@@ -226,6 +233,84 @@ export function renderTranscript(history: readonly HistoryEntry[], provider: str
   return lines.join("\n\n");
 }
 
+export interface BuildSummaryRequestInput {
+  /** 折叠后的历史（SessionState.history），函数内部按 throughSeq 截断 */
+  history: readonly HistoryEntry[];
+  model: ModelInfo;
+  /** 摘要覆盖到该 seq 为止（必须是闭合步骤边界） */
+  throughSeq: number;
+}
+
+/**
+ * 组装一次摘要请求：上一个摘要 + 其后到边界的历史（应用既有修剪/摘要规则）
+ * 渲染为转录文本，附上摘要指令。
+ */
+export function buildSummaryRequest(input: BuildSummaryRequestInput): ModelRequest {
+  const { model, throughSeq } = input;
+  const covered = input.history.filter((e) => e.seq <= throughSeq);
+  const transcript = renderTranscript(covered, model.ref.provider);
+  const userText = `以下是会话历史转录，请按系统提示压缩为摘要。\n\n${transcript}`;
+  return {
+    model: model.ref.model,
+    system: [{ text: SUMMARY_SYSTEM }],
+    messages: [{ role: "user", content: [{ type: "text", text: userText }] }],
+    tools: [],
+    maxOutputTokens: Math.min(model.maxOutputTokens, SUMMARY_MAX_OUTPUT_TOKENS),
+  };
+}
+
+/**
+ * 6.6 边界回退：从最新闭合边界向前找第一个"摘要请求装得进窗口"的边界；
+ * 候选边界必须晚于最新摘要的 throughSeq 且其后确有新的非压缩历史——
+ * 否则等于对同一范围重复压缩（旧摘要不会被替代，反而叠加）。
+ * 不存在任何可行边界时返回 undefined（调用方按 compaction_failed 处理）。
+ */
+export function chooseSummaryBoundary(
+  events: readonly DurableEvent[],
+  history: readonly HistoryEntry[],
+  model: ModelInfo,
+): number | undefined {
+  const budget = inputBudgetTokens(model, SUMMARY_MAX_OUTPUT_TOKENS);
+  const { summaryThrough } = compactionCutoffs(history);
+  const boundaries = closedBoundaries(events);
+  for (let i = boundaries.length - 1; i >= 0; i--) {
+    const b = boundaries[i];
+    if (b === undefined) continue;
+    if (b <= summaryThrough) break; // 边界按 seq 升序，更早的候选同样已被覆盖
+    const hasNewContent = history.some(
+      (e) => e.seq > summaryThrough && e.seq <= b && e.kind !== "compaction",
+    );
+    if (!hasNewContent) continue;
+    const req = buildSummaryRequest({ history, model, throughSeq: b });
+    const chars =
+      req.system.reduce((a, s) => a + s.text.length, 0) +
+      req.messages.reduce(
+        (a, m) =>
+          a +
+          (m.role === "tool" ? m.content.length : m.content.reduce((n, b) => n + b.text.length, 0)),
+        0,
+      );
+    if (estimateTokens(chars) <= budget) return b;
+  }
+  return undefined;
+}
+
+/**
+ * 最后一个未收束 Turn 的 id（context.md 6.5）：
+ * turn.started 已写而对应 turn.completed 未写（进行中，或崩溃后被
+ * process_exited 修复前的投影）。压缩发生在 Turn 内部时，
+ * 该 Turn 的 message.user 可能被摘要覆盖——Builder 据此重新注入。
+ */
+export function lastOpenTurnId(events: readonly DurableEvent[]): string | undefined {
+  const open = new Set<string>();
+  for (const e of events) {
+    if (e.turnId === undefined) continue;
+    if (e.type === "turn.started") open.add(e.turnId);
+    else if (e.type === "turn.completed") open.delete(e.turnId);
+  }
+  return [...open].at(-1);
+}
+
 export function buildContext(input: BuildContextInput): BuiltContext {
   const { model } = input;
 
@@ -282,6 +367,20 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     chars: historyChars,
     entries,
   } = historyToMessages(input.history, model.ref.provider);
+  // context.md 6.5：进行中 Turn 的 message.user 被摘要覆盖时重新注入，
+  // 保证"当前任务"不因压缩丢失（恢复投影中 open Turn 同理）
+  const { summaryThrough: summaryCut } = compactionCutoffs(input.history);
+  const openTurn = input.events !== undefined ? lastOpenTurnId(input.events) : undefined;
+  let reinjectedChars = 0;
+  if (openTurn !== undefined) {
+    const coveredUser = input.history.find(
+      (e) => e.kind === "user" && e.turnId === openTurn && e.seq <= summaryCut,
+    );
+    if (coveredUser?.kind === "user") {
+      messages.push({ role: "user", content: coveredUser.content });
+      reinjectedChars = blockChars(coveredUser.content);
+    }
+  }
   for (const m of input.pendingMessages ?? []) {
     messages.push(m);
   }
@@ -294,8 +393,8 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   sections.push({
     name: "history",
     source: `${entries} entries`,
-    chars: historyChars + pendingChars,
-    estimatedTokens: estimateTokens(historyChars + pendingChars),
+    chars: historyChars + pendingChars + reinjectedChars,
+    estimatedTokens: estimateTokens(historyChars + pendingChars + reinjectedChars),
   });
 
   // 预算（context.md 第 5 节）
@@ -304,16 +403,30 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   const estimated = sections.reduce((a, s) => a + s.estimatedTokens, 0);
   const overBudget = estimated > budgetTokens;
 
-  // 6.5：估算超过阈值（或已超预算）且存在新的闭合边界 → 给出 L1 修剪计划
+  // 6.5：估算超过阈值（或已超预算）→ 两级压缩计划：
+  //   存在"最新压缩边界之后"的新闭合边界 → 先 L1 修剪（便宜、立刻生效）；
+  //   无新边界（修剪已用过或没有可剪内容）→ L2 摘要计划（携带请求）。
+  // 调用方每类每 Turn 至多执行一次；都失败且仍超预算 → 6.6 报错路径。
   const { summaryThrough, pruneThrough } = compactionCutoffs(input.history);
-  const boundary = input.events !== undefined ? lastClosedBoundary(input.events) : undefined;
   let compaction: CompactionPlan | undefined;
-  if (
-    boundary !== undefined &&
-    boundary > Math.max(summaryThrough, pruneThrough) &&
-    estimated > PRUNE_THRESHOLD * budgetTokens
-  ) {
-    compaction = { kind: "prune", throughSeq: boundary };
+  if (input.events !== undefined && estimated > PRUNE_THRESHOLD * budgetTokens) {
+    const boundary = lastClosedBoundary(input.events);
+    if (boundary !== undefined && boundary > Math.max(summaryThrough, pruneThrough)) {
+      compaction = { kind: "prune", throughSeq: boundary };
+    } else {
+      const summaryBoundary = chooseSummaryBoundary(input.events, input.history, model);
+      if (summaryBoundary !== undefined) {
+        compaction = {
+          kind: "summary",
+          throughSeq: summaryBoundary,
+          summaryRequest: buildSummaryRequest({
+            history: input.history,
+            model,
+            throughSeq: summaryBoundary,
+          }),
+        };
+      }
+    }
   }
 
   const request: ModelRequest = {

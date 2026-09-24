@@ -16,5 +16,6 @@ export function createExecutionScope(
     gate: env.gate,
     readState: env.readState,
     events: call.events,
+    attachmentsDir: env.attachmentsDir,
   };
 }

@@ -180,6 +180,8 @@ export interface ExecutionScope extends ToolScope {
   gate: PermissionGate;
   readState: ReadStateStore;
   events: ToolEventSink;
+  /** 超预算输出落盘根目录：<sessionsDir>/attachments（tools.md 第 4 节） */
+  attachmentsDir?: string | undefined;
 }
 
 /**
@@ -190,6 +192,8 @@ export interface ExecutionEnvironment {
   platform: Platform;
   gate: PermissionGate;
   readState: ReadStateStore;
+  /** 超预算输出落盘根目录；缺省时不落盘（只截断） */
+  attachmentsDir?: string | undefined;
 }
 
 /** 每次调用变化的 Turn 级参数 */
