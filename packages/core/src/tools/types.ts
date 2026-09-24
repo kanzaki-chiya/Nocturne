@@ -5,8 +5,12 @@
 import type { FileSystem, PathOps, Platform, ProcessRunner } from "../platform/index.js";
 import type { PermissionDecision } from "../permission/index.js";
 import type {
+  Diagnostics,
   DurablePayload,
+  HookPoint,
   JsonSchema,
+  McpServerEntry,
+  McpServerPayload,
   PermissionAction,
   PermissionReply,
   PermissionSubject,
@@ -15,6 +19,7 @@ import type {
   ToolCallRef,
   ToolProgressPayload,
   ToolSpec,
+  Usage,
 } from "../protocol/index.js";
 
 // ── 工具定义 ──────────────────────────────────────────────
@@ -149,6 +154,18 @@ export interface GateTurnContext {
 }
 
 /**
+ * check 的 Hook 上下文（hooks.md 第 6 节）：
+ * PreToolUse decision:"ask" 经 forceAsk 传入——跳过 Grant/autoApproveAsk 强制确认；
+ * tool/input 供 PermissionRequest Hook 的 stdin。
+ */
+export interface GateHookContext {
+  forceAsk?: boolean | undefined;
+  askReason?: string | undefined;
+  tool?: string | undefined;
+  input?: unknown;
+}
+
+/**
  * 权限闸门（tools.md 第 3 步 5）：Executor 只调用 check，
  * ask 的等待与取消封装在 gate 内部；checkLexical 供枚举工具过滤结果。
  */
@@ -158,6 +175,7 @@ export interface PermissionGate {
     callId: string,
     signal: AbortSignal,
     turn?: GateTurnContext,
+    hookCtx?: GateHookContext,
   ): Promise<GateOutcome>;
   /** 同步词法求值：结果路径位于已解析根目录之下（permissions.md 4.4） */
   checkLexical(request: SubjectRequest): PermissionAction;
@@ -168,6 +186,141 @@ export interface PermissionGate {
   respond?(requestId: string, reply: PermissionReply): Promise<boolean>;
   /** 会话关闭时把全部等待中的请求结算为 cancelled */
   cancelAll?(): void;
+}
+
+// ── Hooks（hooks.md）──────────────────────────────────────
+
+/**
+ * Hook 的 stdin JSON（hooks.md 第 3 节）：公共字段随点位出现。
+ * input/subjects/permission/result 只在工具相关点位存在；
+ * text 在 TurnStart（本轮提示词）、SessionStart（无）等处按文档给出。
+ */
+export interface HookInput {
+  sessionId: string;
+  cwd: string;
+  workspaceRoot: string;
+  turnId?: string | undefined;
+  callId?: string | undefined;
+  /** PreToolUse / PostToolUse / PermissionRequest：工具名（含 mcp__ 前缀） */
+  tool?: string | undefined;
+  /** PreToolUse / PostToolUse：经 schema 校验的规范化输入 */
+  input?: unknown;
+  /** PermissionRequest：本次求值的主体（已解析） */
+  subjects?: PermissionSubject[] | undefined;
+  /** PermissionRequest：权限层当前的决定 */
+  permission?: { action: PermissionAction; reason: string; rule?: string | undefined } | undefined;
+  /** PostToolUse：执行结果摘要（modelContent 截断至约 4000 字符） */
+  result?:
+    | { status: string; modelContent: string; error?: { code: string; message: string } | undefined }
+    | undefined;
+  /** TurnStart：本轮用户提示词 */
+  text?: string | undefined;
+  /** TurnEnd / SessionEnd：结束原因 */
+  reason?: string | undefined;
+  /** TurnEnd */
+  steps?: number | undefined;
+  usage?: Usage | undefined;
+  /** SessionStart：本次为恢复会话 */
+  resumed?: boolean | undefined;
+}
+
+/**
+ * Hook 的 stdout JSON（hooks.md 第 3 节）。各点位允许的字段见文档：
+ * PreToolUse 只允许 decision/updatedInput（无 allow）；PermissionRequest 只允许 action；
+ * PostToolUse 只允许 feedback；生命周期点位允许 block。
+ */
+export interface HookOutput {
+  /** PreToolUse：ask（强制确认，绕过 Grant/--yes）或 deny */
+  decision?: "ask" | "deny" | undefined;
+  reason?: string | undefined;
+  /** PreToolUse：替换输入；执行器收到后重新做 schema 校验与主体解析 */
+  updatedInput?: unknown;
+  /** PermissionRequest：allow（放行该 ask）或 deny */
+  action?: "allow" | "deny" | undefined;
+  /** PostToolUse：追加给模型的反馈文本 */
+  feedback?: string | undefined;
+  /** 生命周期点位：非空时中止对应操作 */
+  block?: boolean | undefined;
+}
+
+/**
+ * 调用方提供的 Hook 输入：sessionId / cwd / workspaceRoot 由 Runner 注入
+ *（它由 Runtime 按会话创建，这三个字段对该会话恒定）。
+ */
+export type HookCallInput = Omit<HookInput, "sessionId" | "cwd" | "workspaceRoot">;
+
+/**
+ * Hook 执行器接口（hooks.md）：由 hooks 模块实现、经 RuntimeOptions 注入
+ * agent/tools/permission；无配置时字段缺省，行为与未启用完全一致。
+ * run 返回 undefined 表示"无意见"（无匹配条目、超时、失败等降级均吞掉）。
+ */
+export interface HookRunner {
+  run(
+    point: HookPoint,
+    input: HookCallInput,
+    signal?: AbortSignal,
+  ): Promise<HookOutput | undefined>;
+}
+
+// ── MCP 装配点（mcp.md 第 8 节）──────────────────────────
+
+/** 合并配置层后交给装配点的单服务器配置 */
+export interface McpServerConfig extends McpServerEntry {
+  name: string;
+  origin: "user" | "project";
+  /** 定义该条目的配置文件所在目录（相对 cwd/env 路径的解析基点） */
+  dir?: string | undefined;
+}
+
+/** 会话内服务器状态（mcp.md 第 5 节；status() 返回值） */
+export interface McpServerStatus {
+  name: string;
+  state: "starting" | "ready" | "failed" | "crashed" | "stopped";
+  toolCount: number;
+  /** failed / crashed 的人读原因 */
+  error?: string | undefined;
+  /** 已发生的惰性重连次数 */
+  restarts: number;
+}
+
+/** open() 的运行环境：由 index.ts（Runtime 装配处）构造 */
+export interface McpOpenScope {
+  servers: readonly McpServerConfig[];
+  cwd: string;
+  workspaceRoot: string;
+  sessionId: string;
+  platform: Platform;
+  /** 发出 mcp.server 临时事件 */
+  emitServer(payload: McpServerPayload): void;
+  /** 发出 runtime.warning 临时事件 */
+  warn(code: string, message: string): void;
+  diagnostics?: Diagnostics | undefined;
+}
+
+/** Turn 边界应用暂存的工具集变化（mcp.md 第 5 节 list_changed / 重连暂存） */
+export interface McpToolDiff {
+  add: ToolDefinition[];
+  remove: string[];
+}
+
+/**
+ * 会话级 MCP 连接集合。tools() 返回当前生效的包装工具；
+ * list_changed 与惰性重连刷新的工具集先暂存，applyPendingTools()
+ * 在 Turn 边界由 Runtime 调用并应用到会话注册表。
+ */
+export interface McpSession {
+  tools(): readonly ToolDefinition[];
+  status(): McpServerStatus[];
+  applyPendingTools(): McpToolDiff;
+  close(): Promise<void>;
+}
+
+/**
+ * RuntimeOptions.mcp 注入点（modules.md：Core 不依赖 mcp 模块）：
+ * packages/mcp 提供实现，CLI/TUI 装配时传入。
+ */
+export interface McpConnector {
+  open(scope: McpOpenScope): Promise<McpSession>;
 }
 
 /** Agent Loop 提供给 Executor 的运行环境；工具看不到它 */
@@ -182,6 +335,10 @@ export interface ExecutionScope extends ToolScope {
   events: ToolEventSink;
   /** 超预算输出落盘根目录：<sessionsDir>/attachments（tools.md 第 4 节） */
   attachmentsDir?: string | undefined;
+  /** 会话级 Hook 执行器；缺省时执行管线与未启用一致（hooks.md 第 8 节） */
+  hooks?: HookRunner | undefined;
+  /** 诊断通道；缺省为 no-op（observability.md） */
+  diagnostics?: Diagnostics | undefined;
 }
 
 /**
@@ -194,9 +351,9 @@ export interface ExecutionEnvironment {
   readState: ReadStateStore;
   /** 超预算输出落盘根目录；缺省时不落盘（只截断） */
   attachmentsDir?: string | undefined;
+  hooks?: HookRunner | undefined;
+  diagnostics?: Diagnostics | undefined;
 }
-
-/** 每次调用变化的 Turn 级参数 */
 export interface TurnCallScope {
   cwd: string;
   workspaceRoot: string;

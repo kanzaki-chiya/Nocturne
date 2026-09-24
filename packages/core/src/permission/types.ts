@@ -28,6 +28,16 @@ export interface SubjectEvaluation {
   decision: PermissionDecision;
 }
 
+/** evaluate 的可选行为开关 */
+export interface EvaluateOptions {
+  /**
+   * Hook 强制 ask 时置真（hooks.md / permissions.md 5.5）：跳过 Grant 与
+   * autoApproveAsk——Hook 要求的确认不能被既有授权或 --yes 自动放行；
+   * 规则层的 allow/ask/deny 判定不受影响。
+   */
+  skipApprovals?: boolean | undefined;
+}
+
 /**
  * 权限策略接口。Phase 3 将由规则排序 + Grant 实现；
  * Phase 1 为固定策略实现（workspace-read-only）。
@@ -39,5 +49,8 @@ export interface PermissionPolicy {
    * 本函数计算 `where` 并返回统一决定（permissions.md 5.3：
    * 任一主体 deny 则整体 deny）。
    */
-  evaluate(subjects: readonly PermissionSubject[]): SubjectEvaluation;
+  evaluate(
+    subjects: readonly PermissionSubject[],
+    options?: EvaluateOptions,
+  ): SubjectEvaluation;
 }

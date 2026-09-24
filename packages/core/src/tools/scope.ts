@@ -17,5 +17,7 @@ export function createExecutionScope(
     readState: env.readState,
     events: call.events,
     attachmentsDir: env.attachmentsDir,
+    hooks: env.hooks,
+    diagnostics: env.diagnostics,
   };
 }

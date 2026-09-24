@@ -62,7 +62,11 @@ export interface PermissionSubject {
 
 export type PermissionAction = "allow" | "ask" | "deny";
 
-export type PermissionSource = "user" | "rule" | "grant" | "non_interactive" | "cancelled";
+/**
+ * 判定来源（permissions.md 5.5、hooks.md）：`hook` 表示 PreToolUse /
+ * PermissionRequest Hook 的判定进入了最终决定（收紧，或经信任的 Hook 放行 ask）。
+ */
+export type PermissionSource = "user" | "rule" | "grant" | "hook" | "non_interactive" | "cancelled";
 
 /** 权限预设名（permissions.md 第 6 节） */
 export type PermissionPresetName = "read-only" | "default" | "auto-edit" | "full-access";
@@ -195,3 +199,59 @@ export type HistoryEntry =
       throughSeq: number;
       summary: string | undefined;
     };
+
+// ── Hooks（hooks.md）─────────────────────────────────────
+
+/** Hook 事件点（hooks.md 第 1 节） */
+export type HookPoint =
+  | "PreToolUse"
+  | "PostToolUse"
+  | "PermissionRequest"
+  | "TurnStart"
+  | "TurnEnd"
+  | "SessionStart"
+  | "SessionEnd";
+
+/**
+ * 一条 Hook 配置（hooks.md 第 2 节）：外部命令，stdin 传 JSON、stdout 返回 JSON。
+ * `matcher` 只用于 PreToolUse / PostToolUse / PermissionRequest，
+ * 为工具名的字符串通配符（与权限规则同一套匹配），缺省或 "*" 匹配全部。
+ */
+export interface HookEntry {
+  matcher?: string | undefined;
+  command: string;
+  args?: string[] | undefined;
+  /** 毫秒；缺省 30000，硬上限 120000 */
+  timeoutMs?: number | undefined;
+}
+
+// ── MCP（mcp.md 第 2 节）─────────────────────────────────
+
+/**
+ * 一个 MCP stdio 服务器配置（mcp.md 第 2 节）。
+ * env 值支持 `${NAME}` 展开；未配置 env 时子进程只拿到平台白名单基线
+ * 环境（不含 Provider API Key 等敏感变量）。
+ */
+export interface McpServerEntry {
+  command: string;
+  args?: string[] | undefined;
+  env?: Record<string, string> | undefined;
+  /** 相对路径按该层配置文件所在目录解析（config.md） */
+  cwd?: string | undefined;
+  /** 缺省 true */
+  enabled?: boolean | undefined;
+  /** 启动 + initialize + tools/list 超时；缺省 15000，上限 60000 */
+  startupTimeoutMs?: number | undefined;
+  /** 单次 tools/call 超时；缺省 120000，上限 600000 */
+  callTimeoutMs?: number | undefined;
+}
+
+// ── 诊断（observability.md）─────────────────────────────
+
+/**
+ * 诊断通道（observability.md 第 3 节）：各模块写入 JSONL 记录；
+ * 未启用时注入 no-op。写入方负责脱敏（密钥、Authorization、env 值不落盘）。
+ */
+export interface Diagnostics {
+  record(kind: string, data?: Record<string, unknown>): void;
+}

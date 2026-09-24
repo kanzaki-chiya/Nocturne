@@ -19,7 +19,13 @@ import {
   type PermissionDecision,
   type PermissionPolicy,
 } from "../permission/index.js";
-import type { GateOutcome, GateTurnContext, PermissionGate, ToolEventSink } from "./types.js";
+import type {
+  GateOutcome,
+  GateTurnContext,
+  HookRunner,
+  PermissionGate,
+  ToolEventSink,
+} from "./types.js";
 
 /** gate 侧的授权落点：session 数组就地追加；project 为持久化存储句柄 */
 export interface GateGrantSink {
@@ -36,6 +42,8 @@ export interface PolicyGateOptions {
   /** Grant 落点与授权键大小写规则 */
   grants?: GateGrantSink | undefined;
   caseSensitive?: boolean | undefined;
+  /** PermissionRequest Hook 执行器（hooks.md）；缺省时与未启用一致 */
+  hooks?: HookRunner | undefined;
 }
 
 /** 完整的确认选项集（permissions.md 第 7 节） */
@@ -101,12 +109,70 @@ export function createPolicyGate(
   }
 
   return {
-    async check(subjects, callId, signal, turn): Promise<GateOutcome> {
-      const evaluation = policy.evaluate(subjects);
-      const { decision } = evaluation;
+    async check(subjects, callId, signal, turn, hookCtx): Promise<GateOutcome> {
+      // Hook 强制 ask（PreToolUse decision:"ask"）：跳过 Grant 与 autoApproveAsk
+      // 求值——Hook 要求的确认不能被既有授权或 --yes 自动放行（permissions.md 5.5）
+      const forceAsk = hookCtx?.forceAsk === true;
+      const evaluation = policy.evaluate(
+        subjects,
+        forceAsk ? { skipApprovals: true } : undefined,
+      );
+      let decision = evaluation.decision;
+      // forceAsk 下规则层的 allow/ask 都走确认流程；deny 不受影响直接返回
+      if (forceAsk && decision.action !== "deny") {
+        decision = {
+          action: "ask",
+          source: decision.source,
+          reason: `Hook 要求确认${hookCtx.askReason !== undefined ? `（${hookCtx.askReason}）` : ""}：${decision.reason}`,
+          matchedRule: decision.matchedRule,
+        };
+      }
       if (decision.action !== "ask") {
         return { subjects: evaluation.subjects, decision };
       }
+
+      // PermissionRequest Hook（hooks.md 第 3 节）：在交互/非交互分支之前运行——
+      // 非交互模式下 Hook 的 allow 同样生效；只能放行 ask，碰不到 deny
+      if (options.hooks !== undefined) {
+        const out = await options.hooks.run(
+          "PermissionRequest",
+          {
+            turnId: turn?.turnId,
+            callId,
+            tool: hookCtx?.tool,
+            input: hookCtx?.input,
+            subjects: evaluation.subjects,
+            permission: {
+              action: "ask",
+              reason: decision.reason,
+              rule: decision.matchedRule?.description,
+            },
+          },
+          signal,
+        );
+        if (out?.action === "allow" || out?.action === "deny") {
+          const hookDecision: PermissionDecision = {
+            action: out.action,
+            source: "hook",
+            reason:
+              out.action === "allow"
+                ? (out.reason ?? "PermissionRequest Hook 放行")
+                : (out.reason ?? "PermissionRequest Hook 拒绝"),
+          };
+          await emitResolved(
+            { callId },
+            hookDecision,
+            "hook PermissionRequest",
+            turn,
+          );
+          return {
+            subjects: evaluation.subjects,
+            decision: hookDecision,
+            resolvedEmitted: turn !== undefined,
+          };
+        }
+      }
+
       // 非交互：ask 一律拒绝，不发 permission.requested
       if (options.interactive !== true || turn === undefined) {
         return {

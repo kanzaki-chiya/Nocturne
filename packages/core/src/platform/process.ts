@@ -16,6 +16,30 @@ export interface SpawnOptions {
   timeoutMs?: number | undefined;
 }
 
+export interface PipeSpawnOptions extends SpawnOptions {
+  /**
+   * 子进程环境基线（mcp.md 第 2 节）：
+   * - "inherit"（默认）：process.env 之上叠加 env——Hook 是用户自己的脚本，继承完整环境；
+   * - "minimal"：只给平台白名单基线（PATH、HOME/USERPROFILE、SystemRoot、TEMP 等），
+   *   env 在白名单之上叠加——第三方 MCP 服务器拿不到 Provider API Key 等敏感变量。
+   */
+  envMode?: "inherit" | "minimal" | undefined;
+}
+
+/**
+ * 双向管道子进程：stdin 可写、stdout 为原始字节流（结构化协议自行解码）、
+ * stderr 为解码文本（进诊断）。MCP stdio 传输与 Hook 命令共用。
+ */
+export interface PipeProcess {
+  readonly pid: number;
+  readonly stdin: { write(chunk: string): void; end(): void };
+  /** 原始字节流（不做控制台代码页解码） */
+  readonly stdoutRaw: AsyncIterable<Buffer>;
+  readonly stderr: AsyncIterable<string>;
+  wait(): Promise<ProcessExit>;
+  kill(): Promise<void>;
+}
+
 export interface ProcessExit {
   code: number | null;
   signal: NodeJS.Signals | null;
@@ -45,6 +69,84 @@ export interface ProcessRunner {
    * NOCTURNE_SHELL 仅替换可执行文件，参数形态按平台不变。
    */
   spawnShell(command: string, options?: SpawnOptions): SpawnedProcess;
+  /**
+   * 双向管道子进程（hooks.md / mcp.md）：stdin 可写、stdout 为原始字节、
+   * stderr 为解码文本。envMode:"minimal" 用于第三方 MCP 服务器的环境隔离。
+   */
+  spawnPipe(command: string, args: string[], options?: PipeSpawnOptions): PipeProcess;
+}
+
+/**
+ * "minimal" 模式的子进程环境白名单（mcp.md 第 2 节，参照 MCP SDK 的
+ * getDefaultEnvironment()）：只含运行进程所必需的定位/临时/语言变量，
+ * 不含任何凭据形变量。POSIX 追加 LC_* / XDG_* 前缀。
+ */
+const MINIMAL_ENV_POSIX = new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "TERM",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+]);
+
+const MINIMAL_ENV_WIN32 = new Set([
+  "PATH",
+  "PATHEXT",
+  "COMSPEC",
+  "SYSTEMROOT",
+  "SYSTEMDRIVE",
+  "WINDIR",
+  "TEMP",
+  "TMP",
+  "USERPROFILE",
+  "HOME",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "PROGRAMDATA",
+  "PROGRAMFILES",
+  "PROGRAMFILES(X86)",
+  "PROGRAMW6432",
+  "COMMONPROGRAMFILES",
+  "COMMONPROGRAMFILES(X86)",
+  "COMMONPROGRAMW6432",
+  "ALLUSERSPROFILE",
+  "USERNAME",
+  "USERDOMAIN",
+  "LOGONSERVER",
+  "PUBLIC",
+  "DRIVERDATA",
+  "OS",
+  "NUMBER_OF_PROCESSORS",
+  "PROCESSOR_ARCHITECTURE",
+  "PROCESSOR_IDENTIFIER",
+  "PROCESSOR_LEVEL",
+  "PROCESSOR_REVISION",
+  "PSMODULEPATH",
+  "SESSIONNAME",
+]);
+
+function minimalEnvironment(): Record<string, string> {
+  const win32 = process.platform === "win32";
+  const allow = win32 ? MINIMAL_ENV_WIN32 : MINIMAL_ENV_POSIX;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    const probe = win32 ? key.toUpperCase() : key;
+    if (
+      allow.has(probe) ||
+      (!win32 && (probe.startsWith("LC_") || probe.startsWith("XDG_")))
+    ) {
+      out[key] = value;
+    }
+  }
+  return out;
 }
 
 /** Windows 下取 shell 可执行文件：NOCTURNE_SHELL > %COMSPEC% > cmd.exe */
@@ -203,6 +305,90 @@ function decodeOutput(stream: Readable, encoding: Promise<string>): AsyncIterabl
   })();
 }
 
+/**
+ * 原始字节捕获（spawnPipe 的 stdout）：与 decodeOutput 同一套
+ * 立即捕获 + 唤醒模式，避免短命子进程在消费前丢数据。
+ */
+function rawOutput(stream: Readable): AsyncIterable<Buffer> {
+  const pending: Buffer[] = [];
+  const state: { ended: boolean; failure: Error | undefined } = {
+    ended: false,
+    failure: undefined,
+  };
+  let wake: (() => void) | undefined;
+  const notify = (): void => {
+    wake?.();
+    wake = undefined;
+  };
+  stream.on("data", (chunk: Buffer) => {
+    pending.push(chunk);
+    notify();
+  });
+  stream.once("end", () => {
+    state.ended = true;
+    notify();
+  });
+  stream.once("error", (error: Error) => {
+    state.failure = error;
+    state.ended = true;
+    notify();
+  });
+  return (async function* (): AsyncGenerator<Buffer> {
+    for (;;) {
+      let chunk: Buffer | undefined;
+      while ((chunk = pending.shift()) !== undefined) {
+        yield chunk;
+      }
+      if (state.failure !== undefined) throw state.failure;
+      if (state.ended) break;
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+    }
+  })();
+}
+
+/** spawn / spawnPipe 共用的生命周期：signal 中止、超时、wait()、进程树 kill */
+function attachLifecycle(
+  child: ChildProcess,
+  options: SpawnOptions,
+): { wait: () => Promise<ProcessExit>; kill: () => Promise<void> } {
+  let timedOut = false;
+  let killed = false;
+  const kill = () => {
+    killed = true;
+    return killTree(child);
+  };
+
+  if (options.signal !== undefined) {
+    const onAbort = () => {
+      void kill();
+    };
+    if (options.signal.aborted) onAbort();
+    else options.signal.addEventListener("abort", onAbort, { once: true });
+  }
+  let timer: NodeJS.Timeout | undefined;
+  if (options.timeoutMs !== undefined) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      void kill();
+    }, options.timeoutMs);
+    timer.unref();
+  }
+
+  const waitPromise = new Promise<ProcessExit>((resolve) => {
+    child.once("error", () => {
+      if (timer !== undefined) clearTimeout(timer);
+      resolve({ code: null, signal: null, timedOut, killed });
+    });
+    child.once("close", (code, signal) => {
+      if (timer !== undefined) clearTimeout(timer);
+      resolve({ code, signal, timedOut, killed });
+    });
+  });
+  return { wait: () => waitPromise, kill };
+}
+
 async function killTree(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.pid === undefined) return;
   const pid = child.pid;
@@ -257,45 +443,13 @@ export function createProcessRunner(): ProcessRunner {
     const encoding = consoleEncoding();
     const stdout = decodeOutput(child.stdout, encoding);
     const stderr = decodeOutput(child.stderr, encoding);
-
-    let timedOut = false;
-    let killed = false;
-    const kill = () => {
-      killed = true;
-      return killTree(child);
-    };
-
-    if (options.signal !== undefined) {
-      const onAbort = () => {
-        void kill();
-      };
-      if (options.signal.aborted) onAbort();
-      else options.signal.addEventListener("abort", onAbort, { once: true });
-    }
-    let timer: NodeJS.Timeout | undefined;
-    if (options.timeoutMs !== undefined) {
-      timer = setTimeout(() => {
-        timedOut = true;
-        void kill();
-      }, options.timeoutMs);
-      timer.unref();
-    }
-
-    const waitPromise = new Promise<ProcessExit>((resolve) => {
-      child.once("error", () => {
-        resolve({ code: null, signal: null, timedOut, killed });
-      });
-      child.once("close", (code, signal) => {
-        if (timer !== undefined) clearTimeout(timer);
-        resolve({ code, signal, timedOut, killed });
-      });
-    });
+    const { wait, kill } = attachLifecycle(child, options);
 
     return {
       pid: child.pid ?? -1,
       stdout,
       stderr,
-      wait: () => waitPromise,
+      wait,
       kill,
     };
   };
@@ -313,6 +467,34 @@ export function createProcessRunner(): ProcessRunner {
         );
       }
       return spawnImpl(shellExecutable(), ["-c", command], options, false);
+    },
+    spawnPipe(command, args, options = {}) {
+      const base = options.envMode === "minimal" ? minimalEnvironment() : process.env;
+      const child = spawn(command, args, {
+        cwd: options.cwd,
+        env: { ...base, ...options.env },
+        windowsHide: true,
+        detached: process.platform !== "win32",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const encoding = consoleEncoding();
+      const { wait, kill } = attachLifecycle(child, options);
+      const stdin = child.stdin;
+      return {
+        pid: child.pid ?? -1,
+        stdin: {
+          write(chunk: string) {
+            if (!stdin.destroyed) stdin.write(chunk, "utf8");
+          },
+          end() {
+            if (!stdin.destroyed) stdin.end();
+          },
+        },
+        stdoutRaw: rawOutput(child.stdout),
+        stderr: decodeOutput(child.stderr, encoding),
+        wait,
+        kill,
+      };
     },
   };
 }

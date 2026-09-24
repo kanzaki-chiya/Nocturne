@@ -20,7 +20,7 @@ import { matchGrant } from "./grants.js";
 import { isCompositeShell, isPathKind, matchPattern } from "./pattern.js";
 import { presetRules, type PresetContext } from "./presets.js";
 import { computeWhere } from "./where.js";
-import type { PermissionPolicy, SubjectEvaluation } from "./types.js";
+import type { EvaluateOptions, PermissionPolicy, SubjectEvaluation } from "./types.js";
 
 export interface RulePolicyOptions {
   /** 已解析为真实路径的工作区根目录 */
@@ -143,7 +143,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     return undefined;
   }
 
-  function decideSubject(s: PermissionSubject): SubjectVerdict {
+  function decideSubject(s: PermissionSubject, skipApprovals: boolean | undefined): SubjectVerdict {
     const trustedHit = lastMatch(trusted, s);
     let action: PermissionAction = trustedHit?.rule?.action ?? "ask";
     let hit: RuleHit =
@@ -172,7 +172,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       note = "命令包含控制符/重定向，模式匹配的 allow 降级为需确认";
     }
 
-    if (action === "ask") {
+    if (action === "ask" && skipApprovals !== true) {
       const sessionHit =
         sessionGrants !== undefined ? matchGrant(sessionGrants, s, caseSensitive) : undefined;
       const projectHit =
@@ -199,7 +199,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
   }
 
   return {
-    evaluate(subjects: readonly PermissionSubject[]): SubjectEvaluation {
+    evaluate(subjects, options?: EvaluateOptions): SubjectEvaluation {
       const evaluated = subjects.map((s) => ({
         ...s,
         where:
@@ -209,7 +209,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       }));
 
       // 多主体合并：任一 deny → deny；否则任一 ask → ask；否则 allow（5.3）
-      const verdicts = evaluated.map(decideSubject);
+      const verdicts = evaluated.map((s) => decideSubject(s, options?.skipApprovals));
       let action: PermissionAction = "allow";
       let decisive: SubjectVerdict | undefined;
       for (const v of verdicts) {

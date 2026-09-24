@@ -144,7 +144,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           ),
         );
       }
-      const input: unknown = structuredClone(call.input);
+      let input: unknown = structuredClone(call.input);
       if (!validatorFor(tool)(input)) {
         const detail = ajv.errorsText(validatorFor(tool).errors, {
           separator: "; ",
@@ -153,6 +153,51 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           "error",
           errorResult("invalid_input", `工具 "${call.name}" 输入不符合 schema：${detail}`),
         );
+      }
+
+      // 2.5 PreToolUse Hook（hooks.md 第 4 节）：在输入校验之后、主体解析之前运行。
+      // 只能收紧——无 allow；deny/ask 经权限层语义处理，updatedInput 重新校验。
+      let hookAskReason: string | undefined;
+      if (scope.hooks !== undefined) {
+        const hookOut = await scope.hooks.run(
+          "PreToolUse",
+          { turnId, callId: call.callId, tool: call.name, input },
+          scope.signal,
+        );
+        if (hookOut?.decision === "deny") {
+          const reason = hookOut.reason ?? "PreToolUse Hook 拒绝";
+          await scope.events.emit(
+            "permission.resolved",
+            {
+              callId: call.callId,
+              action: "deny",
+              source: "hook",
+              rule: "hook PreToolUse",
+            },
+            { turnId },
+          );
+          return finish(
+            "denied",
+            errorResult("permission_denied", `Hook 拒绝：${reason}`),
+          );
+        }
+        if (hookOut?.updatedInput !== undefined) {
+          const updated = structuredClone(hookOut.updatedInput);
+          if (!validatorFor(tool)(updated)) {
+            const detail = ajv.errorsText(validatorFor(tool).errors, { separator: "; " });
+            return finish(
+              "error",
+              errorResult(
+                "invalid_input",
+                `工具 "${call.name}" 经 Hook 修改后的输入不符合 schema：${detail}`,
+              ),
+            );
+          }
+          input = updated;
+        }
+        if (hookOut?.decision === "ask") {
+          hookAskReason = hookOut.reason ?? "PreToolUse Hook 要求确认";
+        }
       }
 
       // 3. 权限主体（纯函数）
@@ -192,6 +237,12 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         outcome = await scope.gate.check(subjects, call.callId, scope.signal, {
           turnId,
           events: scope.events,
+        },
+        {
+          forceAsk: hookAskReason !== undefined,
+          askReason: hookAskReason,
+          tool: call.name,
+          input,
         });
       } catch (e) {
         if (aborted(scope.signal)) {
@@ -296,6 +347,31 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       }
       if (aborted(scope.signal)) {
         return finish("cancelled", errorResult("cancelled", "调用已被中断"));
+      }
+
+      // 7.5 PostToolUse Hook（hooks.md）：观察结果、追加反馈；不修改结果本体
+      if (scope.hooks !== undefined) {
+        const hookOut = await scope.hooks.run(
+          "PostToolUse",
+          {
+            turnId,
+            callId: call.callId,
+            tool: call.name,
+            input,
+            result: {
+              status: result.status,
+              modelContent: result.modelContent.slice(0, 4_000),
+              error: result.status === "error" ? result.error : undefined,
+            },
+          },
+          scope.signal,
+        );
+        if (hookOut?.feedback !== undefined && hookOut.feedback !== "") {
+          result = {
+            ...result,
+            modelContent: `${result.modelContent}\n\n[hook] ${hookOut.feedback.slice(0, 4_000)}`,
+          };
+        }
       }
       return finish(result.status, result);
     },

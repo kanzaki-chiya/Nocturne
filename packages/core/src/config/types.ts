@@ -7,11 +7,15 @@
 import type {
   AnnotatedRule,
   Grant,
+  HookEntry,
+  HookPoint,
+  McpServerEntry,
   PermissionPresetName,
   PermissionRule,
 } from "../protocol/index.js";
 
 export type { AnnotatedRule };
+export type { HookEntry, HookPoint, McpServerEntry };
 
 /** Provider 条目中模型能力的覆盖形状（对齐 provider 的 ModelOverride） */
 export interface ModelOverrideShape {
@@ -66,6 +70,14 @@ export interface ConfigFile {
       }
     | undefined;
   turn?: TurnOverrides | undefined;
+  /** Hook 配置（hooks.md 第 2 节）：事件点 → 条目数组，层间追加 */
+  hooks?: Partial<Record<HookPoint, HookEntry[]>> | undefined;
+  /** MCP 配置（mcp.md 第 2 节）：servers 按名字逐条合并 */
+  mcp?:
+    | {
+        servers?: Record<string, McpServerEntry> | undefined;
+      }
+    | undefined;
 }
 
 /** 一层合并后的结果（config.md 第 1 节） */
@@ -81,6 +93,16 @@ export interface ResolvedConfig {
   untrustedRules: AnnotatedRule[];
   providers: ProviderEntryConfig[];
   turn: TurnOverrides;
+  /** 合并后的 Hook 条目：按层序追加（user → project） */
+  hooks: Partial<Record<HookPoint, HookEntry[]>>;
+  /** 合并后的 MCP 服务器（带来源标注）；项目层只在信任时并入 */
+  mcpServers: {
+    name: string;
+    origin: "user" | "project";
+    entry: McpServerEntry;
+    /** 定义该条目的配置文件所在目录（相对路径的解析基点） */
+    dir?: string | undefined;
+  }[];
   /** 加载与降级过程中产生的警告（人读说明） */
   warnings: string[];
 }

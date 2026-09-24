@@ -155,12 +155,20 @@ module.exports = {
       name: "no-deep-import-from-outside-core",
       severity: "error",
       comment:
-        "包外（apps 等）只能 import @nocturne/core（src/index.ts）或 @nocturne/core/protocol（src/protocol/index.ts），任何内部路径一律禁止",
-      from: { path: "^apps/" },
+        "包外（apps、packages/mcp）只能 import @nocturne/core（src/index.ts）或 @nocturne/core/protocol（src/protocol/index.ts），任何内部路径一律禁止",
+      from: { path: "^(apps|packages/mcp)/" },
       to: {
         path: "^packages/core/src/",
         pathNot: ["^packages/core/src/index\\.ts$", "^packages/core/src/protocol/index\\.ts$"],
       },
+    },
+    {
+      name: "mcp-deps",
+      severity: "error",
+      comment:
+        "packages/mcp 只能依赖 @nocturne/core 公开入口与 MCP SDK（modules.md：Core 不依赖 mcp，mcp 不依赖 apps）",
+      from: { path: "^packages/mcp/src" },
+      to: { path: "^(packages/(?!mcp)|apps)/" },
     },
   ],
   options: {

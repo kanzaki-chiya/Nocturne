@@ -25,6 +25,7 @@
     "paths": {
       "@nocturne/core": ["./packages/core/src/index.ts"],
       "@nocturne/core/*": ["./packages/core/src/*"],
+      "@nocturne/mcp": ["./packages/mcp/src/index.ts"],
       "@nocturne/tui": ["./apps/tui/src/index.ts"]
     }
   }

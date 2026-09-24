@@ -78,6 +78,11 @@ export async function loadConfig(
       { origin: "cli", file: cli.file },
     ];
     const resolved = mergeLayers(layers);
+    // mcpServers 标注来源目录：相对 cwd 按该层配置文件所在目录解析（config.md 第 2 节）
+    resolved.mcpServers = resolved.mcpServers.map((s) => ({
+      ...s,
+      dir: s.origin === "project" ? paths.dirname(projectPath) : home,
+    }));
     resolved.warnings.push(...base.warnings, ...warnings);
 
     if (!trusted && projectFile !== undefined) {
@@ -85,6 +90,16 @@ export async function loadConfig(
       for (const rule of projectFile.permissions?.rules ?? []) {
         if (rule.action === "allow") continue;
         resolved.untrustedRules.push({ rule, origin: "project-untrusted" });
+      }
+      // mcp / hooks 段整段忽略（ADR-0012：Hook 一旦运行就是任意代码，"运行但只收紧"
+      // 约束不了副作用）；明确警告让用户知道配置没生效
+      const hasMcp = Object.keys(projectFile.mcp?.servers ?? {}).length > 0;
+      const hasHooks = Object.keys(projectFile.hooks ?? {}).length > 0;
+      if (hasMcp || hasHooks) {
+        const parts = [hasMcp ? "mcp" : "", hasHooks ? "hooks" : ""].filter(Boolean).join("、");
+        resolved.warnings.push(
+          `项目配置未信任：其中的 ${parts} 配置已忽略（nctrn trust 后生效）`,
+        );
       }
     }
 

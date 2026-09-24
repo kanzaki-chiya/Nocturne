@@ -51,11 +51,16 @@ import {
   type SessionSummary,
 } from "./session/index.js";
 import {
-  createBuiltinRegistry,
+  builtinTools,
   createPolicyGate,
   createReadStateStore,
   createToolExecutor,
+  createToolRegistry,
   type ExecutionEnvironment,
+  type McpConnector,
+  type McpServerConfig,
+  type McpServerStatus,
+  type McpSession,
   type PermissionGate,
   type ToolRegistry,
 } from "./tools/index.js";
@@ -109,6 +114,13 @@ export interface RuntimeOptions {
   config?: RuntimeConfig | undefined;
   /** Turn 配置覆盖（maxSteps / retryLimit / retryBaseDelayMs） */
   turn?: Partial<TurnConfig> | undefined;
+  /**
+   * MCP 连接器（modules.md：Core 不依赖 mcp，装配方注入；packages/mcp
+   * 提供 createMcpConnector）。缺省时已配置的服务器降级为警告。
+   */
+  mcp?: McpConnector | undefined;
+  /** 不经配置文件直接注入的 MCP 服务器（测试与嵌入方用） */
+  mcpServers?: McpServerConfig[] | undefined;
   /** 写入 session.created 的 Runtime 版本 */
   version?: string | undefined;
 }
@@ -168,6 +180,8 @@ export interface RuntimeSession {
   compact(): Promise<void>;
   /** 当前上下文构建结果与报告（cli.md /context 命令的数据来源） */
   describeContext(): BuiltContext;
+  /** 本会话 MCP 服务器状态（mcp.md 第 5 节；未配置/未启用时为空数组） */
+  mcpServers(): readonly McpServerStatus[];
   /** 打开会话时聚合的警告（配置降级、未信任项目配置等），供客户端展示 */
   readonly warnings: readonly string[];
   /** 打开时执行的恢复修复汇总（sessions.md 第 6 节）；无修复则 undefined */
@@ -266,8 +280,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const registry: ProviderRegistry = buildRegistry(config?.base.providers ?? []);
 
   const store: SessionStore = createSessionStore({ platform, sessionsDir });
-  const tools: ToolRegistry = createBuiltinRegistry();
-  const executor = createToolExecutor(tools);
 
   const interactive = options.interactive === true;
 
@@ -346,6 +358,64 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         grants: { session: sessionGrants, project: ws?.grants },
       },
     );
+    // 会话级工具注册表：内置工具 ∪ MCP 工具（mcp.md 第 4、5 节）。
+    // MCP 服务器在会话打开时并行启动；list_changed / 重连带来的工具集变化
+    // 先暂存，在 submit() 的 Turn 边界经 applyPendingTools() 应用。
+    const tools: ToolRegistry = createToolRegistry();
+    for (const tool of builtinTools()) tools.register(tool);
+    const executor = createToolExecutor(tools);
+
+    // MCP：RuntimeOptions.mcpServers（注入）∪ 配置层 mcpServers（项目层仅信任时并入）
+    const mcpServerConfigs: McpServerConfig[] = [
+      ...(options.mcpServers ?? []),
+      ...(resolved?.mcpServers ?? []).map((s) => ({
+        ...s.entry,
+        name: s.name,
+        origin: s.origin,
+        dir: s.dir,
+      })),
+    ].filter((s) => s.enabled !== false);
+    let mcpSession: McpSession | undefined;
+    if (mcpServerConfigs.length > 0) {
+      if (options.mcp === undefined) {
+        warnings.push(
+          `已配置 ${mcpServerConfigs.length} 个 MCP 服务器，但 Runtime 未注入 MCP 连接器（RuntimeOptions.mcp），相关工具不可用`,
+        );
+      } else {
+        try {
+          mcpSession = await options.mcp.open({
+            servers: mcpServerConfigs,
+            cwd: meta.cwd,
+            workspaceRoot: meta.workspaceRoot,
+            sessionId: session.id,
+            platform,
+            emitServer: (p) => session.emitEphemeral("mcp.server", p),
+            warn: (code, message) =>
+              session.emitEphemeral("runtime.warning", { code, message }),
+          });
+          for (const tool of mcpSession.tools()) {
+            try {
+              tools.register(tool);
+            } catch (e) {
+              session.emitEphemeral("runtime.warning", {
+                code: "mcp_tool_conflict",
+                message: `MCP 工具 ${tool.name} 注册失败：${e instanceof Error ? e.message : String(e)}`,
+              });
+            }
+          }
+          for (const s of mcpSession.status()) {
+            if (s.state === "failed") {
+              warnings.push(`MCP 服务器 ${s.name} 启动失败：${s.error ?? "未知错误"}`);
+            }
+          }
+        } catch (e) {
+          warnings.push(
+            `MCP 装配失败：${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+    }
+
     const execEnv: ExecutionEnvironment = {
       platform,
       gate,
@@ -422,6 +492,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           throw new RuntimeCommandError("session_busy", "会话正忙（Turn 或压缩进行中）");
         }
         const content: ContentBlock[] = input.content ?? [{ type: "text", text: input.text ?? "" }];
+        // Turn 边界：应用暂存的 MCP 工具集变化（list_changed / 重连刷新）
+        if (mcpSession !== undefined) {
+          const diff = mcpSession.applyPendingTools();
+          for (const name of diff.remove) tools.unregister(name);
+          for (const tool of diff.add) {
+            try {
+              tools.register(tool);
+            } catch (e) {
+              session.emitEphemeral("runtime.warning", {
+                code: "mcp_tool_conflict",
+                message: `MCP 工具 ${tool.name} 注册失败：${e instanceof Error ? e.message : String(e)}`,
+              });
+            }
+          }
+        }
         const ac = new AbortController();
         controller = ac;
         const deps: TurnDeps = {
@@ -554,10 +639,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           events: session.durableEvents(),
         });
       },
+      mcpServers() {
+        return mcpSession?.status() ?? [];
+      },
       async close() {
         // 先结算等待中的权限请求为 cancelled，避免其挂住 Turn
         gate.cancelAll?.();
         compactController?.abort();
+        if (mcpSession !== undefined) {
+          // MCP 服务器进程树清理（mcp.md 第 5 节）；失败只警告不阻塞关闭
+          try {
+            await mcpSession.close();
+          } catch (e) {
+            session.emitEphemeral("runtime.warning", {
+              code: "mcp_close_failed",
+              message: `MCP 关闭异常：${e instanceof Error ? e.message : String(e)}`,
+            });
+          }
+        }
         await session.close();
       },
     };
@@ -665,4 +764,25 @@ export {
   type FakeHandler,
 } from "./provider/index.js";
 export { SessionError } from "./session/index.js";
-export { createPlatform, type Platform } from "./platform/index.js";
+export {
+  createPlatform,
+  type PipeProcess,
+  type PipeSpawnOptions,
+  type Platform,
+} from "./platform/index.js";
+// MCP / Hook 装配点类型（modules.md：注入方是 apps；实现位于 packages/mcp）
+export type {
+  HookCallInput,
+  HookInput,
+  HookOutput,
+  HookRunner,
+  McpConnector,
+  McpOpenScope,
+  McpServerConfig,
+  McpServerStatus,
+  McpSession,
+  McpToolDiff,
+  ToolContext,
+  ToolDefinition,
+  ToolResult,
+} from "./tools/index.js";

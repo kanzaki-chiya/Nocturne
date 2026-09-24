@@ -165,6 +165,17 @@ export interface RuntimeErrorPayload {
   message: string;
 }
 
+/**
+ * MCP 服务器状态变化（mcp.md 第 5 节）：临时事件，不持久化。
+ * `failed`/`crashed` 同时伴随 runtime.warning 供客户端显示原因。
+ */
+export interface McpServerPayload {
+  name: string;
+  state: "starting" | "ready" | "failed" | "crashed" | "stopped";
+  toolCount?: number | undefined;
+  error?: string | undefined;
+}
+
 // ── 类型映射与信封 ─────────────────────────────────────────
 
 export interface DurablePayloadMap {
@@ -189,6 +200,7 @@ export interface EphemeralPayloadMap {
   "provider.retry": ProviderRetryPayload;
   "runtime.warning": RuntimeWarningPayload;
   "runtime.error": RuntimeErrorPayload;
+  "mcp.server": McpServerPayload;
 }
 
 export type DurableType = keyof DurablePayloadMap;
@@ -262,6 +274,7 @@ export const EPHEMERAL_EVENT_TYPES: readonly EphemeralType[] = [
   "provider.retry",
   "runtime.warning",
   "runtime.error",
+  "mcp.server",
 ];
 
 const EPHEMERAL_TYPE_SET: ReadonlySet<string> = new Set(EPHEMERAL_EVENT_TYPES);
