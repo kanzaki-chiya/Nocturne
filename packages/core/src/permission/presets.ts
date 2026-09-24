@@ -77,12 +77,33 @@ function broadRules(name: PermissionPresetName): BroadRule[] {
     { kind: "network", pattern: "*", action: a },
     { kind: "mcp", pattern: "*", action: a },
   ];
+  // subagent（Phase 6，subagent.md 第 7 节）：explore 是只读工具集，
+  // 它能拿到的 allow 都是父会话本就会自动放行的，default/auto-edit 下直接放行；
+  // general/custom 可能写文件跑命令，保留逐项把关
+  const subagent = (explore: PermissionRule["action"], rest: PermissionRule["action"]): BroadRule[] => [
+    { kind: "subagent", pattern: "explore", action: explore },
+    { kind: "subagent", pattern: "*", action: rest },
+  ];
 
   switch (name) {
     case "read-only":
-      return [readWs, readOut("ask"), edit("deny"), shell("ask"), ...other("ask")];
+      return [
+        readWs,
+        readOut("ask"),
+        edit("deny"),
+        shell("ask"),
+        ...other("ask"),
+        { kind: "subagent", pattern: "*", action: "ask" },
+      ];
     case "default":
-      return [readWs, readOut("ask"), edit("ask"), shell("ask"), ...other("ask")];
+      return [
+        readWs,
+        readOut("ask"),
+        edit("ask"),
+        shell("ask"),
+        ...other("ask"),
+        ...subagent("allow", "ask"),
+      ];
     case "auto-edit":
       return [
         readWs,
@@ -91,6 +112,7 @@ function broadRules(name: PermissionPresetName): BroadRule[] {
         edit("ask", "outside"),
         shell("ask"),
         ...other("ask"),
+        ...subagent("allow", "ask"),
       ];
     case "full-access":
       return [
@@ -100,6 +122,7 @@ function broadRules(name: PermissionPresetName): BroadRule[] {
         edit("ask", "outside"),
         shell("allow"),
         ...other("allow"),
+        { kind: "subagent", pattern: "*", action: "allow" },
       ];
   }
 }

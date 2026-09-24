@@ -44,6 +44,11 @@ export interface PolicyGateOptions {
   caseSensitive?: boolean | undefined;
   /** PermissionRequest Hook 执行器（hooks.md）；缺省时与未启用一致 */
   hooks?: HookRunner | undefined;
+  /**
+   * 非交互拒绝的附加指引（permissions.md 第 7 节）：子会话用它告诉子模型
+   * "无法请求用户确认，受阻操作写进 finish 结果"（subagent.md 7.3）。
+   */
+  nonInteractiveDenyHint?: string | undefined;
 }
 
 /** 完整的确认选项集（permissions.md 第 7 节） */
@@ -167,12 +172,15 @@ export function createPolicyGate(
 
       // 非交互：ask 一律拒绝，不发 permission.requested
       if (options.interactive !== true || turn === undefined) {
+        const hint = options.nonInteractiveDenyHint;
         return {
           subjects: evaluation.subjects,
           decision: {
             action: "deny",
             source: "non_interactive",
-            reason: `非交互模式：需确认的操作被拒绝（${decision.reason}）`,
+            reason:
+              `非交互模式：需确认的操作被拒绝（${decision.reason}）` +
+              (hint !== undefined ? `；${hint}` : ""),
             matchedRule: decision.matchedRule,
           },
         };
