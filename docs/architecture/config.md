@@ -44,8 +44,14 @@ interface ConfigFile {
   };
   /** Turn 参数覆盖（agent-loop.md 3.8） */
   turn?: { maxSteps?: number; retryLimit?: number; retryBaseDelayMs?: number };
+  /** MCP 服务器（stdio，Phase 5；见 architecture/mcp.md 第 3 节） */
+  mcp?: { servers?: Record<string, McpServerEntry> };
+  /** Hooks（外部命令，Phase 5；见 architecture/hooks.md 第 2 节） */
+  hooks?: Partial<Record<HookPoint, HookEntry[]>>;
 }
 ```
+
+`mcp` 与 `hooks` 的条目形状分别在 [mcp.md](mcp.md) 第 3 节与 [hooks.md](hooks.md) 第 2 节定义。两段都是**可执行内容**：`command`/`args` 意味着启动任意进程，信任语义见第 3 节。`env` 中的 `${NAME}` 引用只记变量名、值在启动时从进程环境展开（mcp.md 第 3 节）；与 `providers` 同规则，出现疑似凭据字面量的字段按 `config_credential_rejected` 拒绝该层。
 
 合并规则：
 
@@ -54,12 +60,14 @@ interface ConfigFile {
 | `model`、`permissions.preset`、`turn.*` | 高层覆盖低层 |
 | `providers` | 按 `id` 合并：同 id 条目浅合并（高层字段覆盖），其中 `models` 按模型 id 再逐条合并；不同 id 并存 |
 | `permissions.rules` | 追加：高层规则排在低层之后（权限"后写优先"语义见 permissions.md 5.1） |
+| `mcp.servers` | 按服务器 id 浅合并（同 `providers`）；不同 id 并存 |
+| `hooks.*` | 按事件点追加：用户级条目在前、项目级在后，执行顺序即此顺序（hooks.md 第 2 节） |
 
 ## 3. 项目配置的信任模型
 
 项目配置来自被操作的仓库——它可能是恶意的。因此：
 
-- **未信任时**，项目配置里只有 `permissions.rules` 中**收紧方向**（`ask` / `deny`）的规则参与求值：与可信结果取更严格者，`allow` 被忽略。其余字段（`model`、`providers`、`preset`、`turn`）全部忽略。这保证一份仓库配置永远无法放宽用户的安全边界，也无法把会话引到别的 Provider 或模型（重定向端点是信息泄漏通道）。
+- **未信任时**，项目配置里只有 `permissions.rules` 中**收紧方向**（`ask` / `deny`）的规则参与求值：与可信结果取更严格者，`allow` 被忽略。其余字段（`model`、`providers`、`preset`、`turn`）全部忽略；`mcp` 与 `hooks` 两段同样**整段忽略**——它们定义的是要启动的进程，"运行但收紧"没有意义（进程一旦启动就是任意代码），收紧方向在可执行配置上不存在。这保证一份仓库配置永远无法放宽用户的安全边界、无法把会话引到别的 Provider 或模型，也无法让它在用户不知情时执行任何命令。
 - **信任后**，项目配置整体进入第 1 节的正常分层（规则排序位于用户配置之后、环境变量之前）。
 - 信任的标记存放在**机器维护的** `<NOCTURNE_HOME>/trust.json`：`{ version, workspaces: string[] }`，列出工作区真实路径（`realpath` 后比较，大小写规则同平台）。文件由 `nctrn trust` / `nctrn untrust` 原子写（临时文件 + rename）；用户也可以手工编辑。它是唯一能授予信任的来源——项目配置里没有这个字段，仓库不能自我授权。
 - 会话打开（create / resume）时若发现项目配置存在但未信任，发出临时事件 `runtime.warning(code="project_config_untrusted")` 告知客户端；CLI 显示如何信任（`nctrn trust`，见 [apps/cli.md](../apps/cli.md)）。
@@ -107,6 +115,7 @@ CLI:   loadConfig(platform, { cliArgs })          → RuntimeConfig
 - `createRuntime` 接受可选的 `config: RuntimeConfig`；缺省时行为与 Phase 2 相同（无配置文件、固定 `default` 预设），测试不受影响。
 - 项目层按**会话记录的 `workspaceRoot`** 加载，而不是进程 cwd：恢复会话时信任判定与规则都以会话绑定的目录为准。
 - `ResolvedConfig` 的各段经原有 `RuntimeOptions` 字段注入：`providers`→`providerConfigs`、`models`→`modelOverrides`、`turn`→`turn`、权限层（preset + 各层规则 + Grant 集合 + 命令行提升）→ 新的 `permissions` 选项。`policy` 直注入仍保留，供测试与特殊客户端使用。
+- Phase 5 增补：`mcp.servers` → `ResolvedConfig.mcpServers`（按会话 workspaceRoot 解析，带 `origin` 标注，供 `RuntimeOptions.mcp` 的 connector 消费，见 [mcp.md](mcp.md) 第 8 节）；`hooks` → `ResolvedConfig.hooks`（供 `wrapSession` 构造 `HookRunner`，见 [hooks.md](hooks.md) 第 6 节）。两段都只在 `forWorkspace` 展开——项目层是否参与取决于信任状态（第 3 节）。
 
 ## 7. 暂不设计
 

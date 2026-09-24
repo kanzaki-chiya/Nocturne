@@ -35,6 +35,9 @@
 - `provider` 不依赖 `tools`、`session`、`agent`；它只看到中性的消息与工具规格数据。
 - `context` 只依赖 `protocol` 与 `provider` 的**类型**，不调用 Provider，也不执行工具。
 - 真实 I/O（文件系统、子进程、环境变量、网络之外的系统访问）集中在 `platform` 与 Provider 适配器中，业务逻辑不直接调用 `node:fs`、`node:child_process`。
+- `hooks`（实现模块）依赖 protocol、platform、diagnostics；`HookRunner` 接口定义在 `tools`，实例由 `core/index` 按会话配置装配注入——`tools` 与 `agent` 只见接口，不 import 实现（见 [hooks.md](hooks.md)）。
+- `diagnostics`（调试通道）只依赖 protocol、platform；被 agent / context / tools / hooks / index 经注入使用，并经 `McpConnector` 传给 `packages/mcp`（见 [observability.md](observability.md)）。
+- `packages/mcp`（`@nocturne/mcp`）只允许依赖 `@nocturne/core` 的 `index` / `protocol/index` 两个入口与 `@modelcontextprotocol/sdk`——与 `apps/*` 同一检查规则；**Core 不依赖 `mcp`**（见 [mcp.md](mcp.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)）。
 - 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。客户端之间不互相依赖，唯一例外：`apps/cli` 为 `nctrn --tui` 对 `apps/tui` 做惰性 `import()`（[ADR-0010](../decisions/ADR-0010-tui-rendering.md)）。
 
 依赖规则在 Phase 1 用静态检查工具（如 dependency-cruiser）固化进 CI，见 [workflow.md](../development/workflow.md)。
@@ -88,8 +91,8 @@
 
 - **负责**：工具注册表；执行管线（输入校验 → 资源解析（经 platform）→ 权限 → 执行 → 结果归一化 → 生命周期事件）；中断与超时；结果大小预算；内置工具实现。
 - **不负责**：权限规则本身；决定何时调用工具；渲染工具结果。
-- **公开接口**：`ToolRegistry`、`ToolExecutor`、`ToolDefinition`（见 [tool-api.md](../protocols/tool-api.md)）。
-- **依赖**：protocol、permission、platform。**不能依赖**：agent、session、provider、context。
+- **公开接口**：`ToolRegistry`、`ToolExecutor`、`ToolDefinition`（见 [tool-api.md](../protocols/tool-api.md)）；另定义 `HookRunner`（hooks 实现的注入点）与 `McpConnector` / `McpSession`（`packages/mcp` 的装配点）类型。
+- **依赖**：protocol、permission、platform、diagnostics（仅接口注入，未启用时为空实现）。**不能依赖**：agent、session、provider、context、hooks（实现）。
 - 详见 [tools.md](tools.md)。
 
 ### permission
@@ -107,6 +110,20 @@
 - **公开接口**：`loadConfig(platform, { cliArgs })` → `RuntimeConfig`（`base` + `forWorkspace(workspaceRoot)`，见 [config.md](config.md) 第 6 节）。
 - **依赖**：protocol、platform。
 - 详见 [config.md](config.md)。
+
+### diagnostics
+
+- **负责**：接收各模块的诊断记录（模型请求、上下文构成、token、工具耗时、权限决定、Hook/MCP 调用），脱敏后写 JSONL 文件或 stderr；未启用时为零开销空实现。
+- **不负责**：会话事件（那是 session/protocol 的职责）；日志轮转与上传。
+- **依赖**：protocol、platform。**不能依赖**：agent、session、tools、hooks。
+- 详见 [observability.md](observability.md)。
+
+### hooks
+
+- **负责**：`HookRunner` 的实现——按配置在固定事件点 spawn 外部命令、stdin 传 JSON、解析 stdout JSON / 退出码、超时与输出上限控制。
+- **不负责**：决定 Hook 输出如何生效（`PreToolUse`/`PostToolUse` 的效果合并在 tools 管线，`PermissionRequest` 在 gate，生命周期点在 index/agent）；信任判定（config 层按 `trust.json` 决定项目 Hook 是否进入配置）。
+- **依赖**：protocol、platform、diagnostics。**不能依赖**：agent、tools、session。
+- 详见 [hooks.md](hooks.md)。
 
 ### platform
 
@@ -133,7 +150,7 @@ runtime.listModels()                                          // 全部可用模
 await session.close()
 ```
 
-`createRuntime` 的选项（`RuntimeOptions`）直接接收各模块的配置：`cwd`、`workspaceRoot`、`sessionsDir`、`providers`（直接注入的 Provider 实例，如测试用 `FakeProvider`）、`providerConfigs`（声明式 Provider 配置：`openai-compatible` 与 `anthropic` 的判别联合）、`modelOverrides`、`policy`、`permissions`、`interactive`（是否有回复权限请求的客户端；默认 `false`）、`instructions`、`turn`（`maxSteps` / `retryLimit` / `retryBaseDelayMs`）、`config`。
+`createRuntime` 的选项（`RuntimeOptions`）直接接收各模块的配置：`cwd`、`workspaceRoot`、`sessionsDir`、`providers`（直接注入的 Provider 实例，如测试用 `FakeProvider`）、`providerConfigs`（声明式 Provider 配置：`openai-compatible` 与 `anthropic` 的判别联合）、`modelOverrides`、`policy`、`permissions`、`interactive`（是否有回复权限请求的客户端；默认 `false`）、`instructions`、`turn`（`maxSteps` / `retryLimit` / `retryBaseDelayMs`）、`config`、`mcp`（`McpConnector`，`packages/mcp` 装配）、`debug`（诊断开关，`{ enabled?, file? }`）。
 
 `permissions` 选项在 Phase 3 扩展为：`{ preset?: PermissionPresetName, rules?: { user?: PermissionRule[], cli?: PermissionRule[] }, autoApproveAsk?: boolean }`——预设与按层标注的规则；项目层规则与 Grant 集合在 `wrapSession` 时按会话的 `workspaceRoot` 从 `config` 取得（[config.md](config.md) 第 6 节），因为项目配置的信任与生效范围都以会话绑定的目录为准。`policy` 直注入保留，用于测试与特殊客户端；给定 `policy` 时规则系统不生效。
 
@@ -146,6 +163,12 @@ await session.close()
 Phase 4 增补的客户端共享入口（提议，[apps/tui.md](../apps/tui.md) 第 8 节）：`normalizeModelRef`（`provider/model` 归一化，CLI 与 TUI 的 `/model` 共用）。配置收集与会话打开语义留在 CLI，`nctrn --tui` 在打开会话后把 `Session` 交给 `runTui`。
 
 这组命令与事件就是将来 RPC 需要序列化的全部内容；进程内客户端和远程客户端使用同一份语义（见 [ADR-0002](../decisions/ADR-0002-ui-independent-core.md)）。
+
+`session.mcpServers()` 是 Phase 5 增补的只读查询：返回本会话各 MCP 服务器的状态（`McpServerStatus[]`），不产事件，供 `/mcp` 命令展示（见 [mcp.md](mcp.md) 第 7 节）。
+
+### packages/mcp（独立于 Core 的包）
+
+`@nocturne/mcp` 是 MCP 客户端实现：按 `McpConnector` 接口把 MCP 服务器（stdio 子进程）的工具包装成 `ToolDefinition`，并管理服务器进程生命周期（启动、initialize、崩溃重连、关闭时进程树清理）。只依赖 `@nocturne/core` 的公开入口与 `@modelcontextprotocol/sdk`；由 `apps/cli` 装配后经 `RuntimeOptions.mcp` 注入。详见 [mcp.md](../architecture/mcp.md) 与 [ADR-0011](../decisions/ADR-0011-mcp-client.md)。
 
 ## 4. 客户端
 
@@ -167,8 +190,6 @@ Phase 4 增补的客户端共享入口（提议，[apps/tui.md](../apps/tui.md) 
 
 | 模块 | 接入点 | 依赖约束 |
 |---|---|---|
-| `mcp` | 把 MCP 服务器的工具包装成 `ToolDefinition` 注册进 `ToolRegistry`；工具名带命名空间 `mcp__<server>__<tool>` | 依赖 tools 的注册接口与 platform；Core 不依赖 mcp |
-| `hooks` | Tool Executor 与 Agent Loop 在固定点位调用可选的 `HookRunner` 接口（PreToolUse、PostToolUse 等） | 接口定义在 tools / agent；未配置时 Runtime 行为不变 |
 | `subagent` | 一个内置工具通过注入的 `SubagentLauncher` 创建子会话并运行受控 Turn | 工具不 import agent；launcher 由 agent 注入，避免循环 |
 | `rpc` | 服务端把公开 API 映射到传输层（stdio / WebSocket）；客户端只依赖 protocol | 服务端依赖公开 API；RPC 客户端不依赖 Core 实现 |
 

@@ -29,8 +29,14 @@ nocturne/
 │       │   │   └── builtin/     read、write、edit、grep、glob、shell
 │       │   ├── permission/      规则求值、权限闸门、Grant 匹配
 │       │   ├── config/          配置分层加载、项目信任、Grant 文件读写（Phase 3）
-│       │   └── platform/        文件系统、子进程、路径（跨平台）
+│       │   ├── hooks/           HookRunner 实现：外部命令 + JSON 契约（Phase 5）
+│       │   ├── diagnostics/     调试诊断 JSONL 记录与脱敏（Phase 5）
+│       │   └── platform/        文件系统、子进程、路径（跨平台；含 spawnPipe，Phase 5）
 │       └── test/                集成测试（脚本化的假 Provider 驱动完整 Turn）
+├── mcp/                         @nocturne/mcp：MCP 客户端（Phase 5，ADR-0011）
+│   ├── README.md
+│   ├── package.json             依赖 @nocturne/core（公开入口）+ @modelcontextprotocol/sdk
+│   └── src/                     connector、stdio 传输（基于 platform.spawnPipe）、工具包装
 └── apps/
     ├── cli/                     nctrn
         ├── README.md
@@ -71,7 +77,7 @@ nocturne/
 |---|---|
 | `packages/protocol` | 出现第一个进程外客户端（RPC）需要只依赖协议类型 |
 | `packages/provider-<name>` | 某个适配器引入较重的依赖，不应让所有用户安装 |
-| `packages/mcp` | 实现 MCP 时（引入 MCP SDK 依赖，且 Core 不应依赖它） |
+| `packages/mcp` | ~~实现 MCP 时~~（Phase 5 已触发：引入 `@modelcontextprotocol/sdk`，Core 不应依赖它，见 [ADR-0011](../decisions/ADR-0011-mcp-client.md)） |
 | `packages/server` | 实现 RPC 服务端时 |
 
 ## 4. 模块 README
@@ -99,6 +105,7 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
 ├── trust.json                        可信工作区列表（nctrn trust/untrust，原子写）
 ├── AGENTS.md                         用户级项目指令（可选）
 ├── grants/<workspaceKey>.json        按工作区保存的项目级 Grant（ADR-0008）
+├── logs/debug-<ts>-<pid>.jsonl       诊断日志（--debug / NOCTURNE_DEBUG，observability.md）
 └── sessions/
     ├── <sessionId>.jsonl             会话事件日志
     ├── <sessionId>.lock              会话锁（ADR-0009）

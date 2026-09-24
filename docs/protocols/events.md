@@ -75,7 +75,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`finishReason: FinishReason \| "aborted"` |
 | `tool.started` | ✓ | `callId`、`name`、`input`（规范化后）、`subjects: PermissionSubject[]`（解析后）、`permission: { action, source, rule? }`（`rule` 为命中规则的人读说明，见 [permissions.md](../architecture/permissions.md) 5.3） |
 | `permission.requested` | ✓ | `requestId`、`callId`、`subjects`、`reason`、`options`（完整选项集：`allow_once`、`allow_session`、`allow_project`、`deny`、`deny_stop`） |
-| `permission.resolved` | ✓ | `requestId?`、`callId`、`action: "allow" \| "deny"`、`source: "user" \| "rule" \| "grant" \| "non_interactive" \| "cancelled"`、`rule?`、`remember?`、`feedback?` |
+| `permission.resolved` | ✓ | `requestId?`、`callId`、`action: "allow" \| "deny"`、`source: "user" \| "rule" \| "grant" \| "non_interactive" \| "cancelled" \| "hook"`、`rule?`、`remember?`、`feedback?` |
 | `tool.completed` | ✓ | `callId`、`name`、`status`、`modelContent`、`output?`、`error?`、`truncated?`、`spillPath?`（超预算输出的落盘文件绝对路径，见 [tools.md](../architecture/tools.md) 第 4 节）、`durationMs?` |
 | `context.compacted` | ✓ 或 — | `kind: "prune" \| "summary"`、`throughSeq`、`summary?`（规则见 [context.md](../architecture/context.md) 第 6 节） |
 | `turn.completed` | ✓ | `reason`、`steps`、`usage`、`error?`、`recovered?` |
@@ -91,9 +91,9 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `refused` | 内容被 Provider 过滤（`content_filter`） |
 | `aborted` | 用户中断，或在权限确认中选择"拒绝并停止" |
 | `max_steps` | 达到单 Turn 步数上限 |
-| `error` | 不可恢复的错误：Provider 错误重试耗尽、意外的结束原因、压缩失败、Runtime 内部错误。恢复修复补写的 Turn 也使用 `error`，`error.code = "process_exited"`，`recovered: true` |
+| `error` | 不可恢复的错误：Provider 错误重试耗尽、意外的结束原因、压缩失败、Runtime 内部错误；`TurnStart` Hook 拦截时为 `error.code = "hook_blocked"`（hooks.md 第 1 节）。恢复修复补写的 Turn 也使用 `error`，`error.code = "process_exited"`，`recovered: true` |
 
-`permission.resolved` 在以下情况发出：经过用户确认的请求（有 `requestId`）；被规则直接拒绝的调用；由会话或项目授权放行原本需要确认的调用（`source: "grant"`）。规则直接允许的调用不单独发事件，其决定记录在 `tool.started.permission` 中。
+`permission.resolved` 在以下情况发出：经过用户确认的请求（有 `requestId`）；被规则直接拒绝的调用；由会话或项目授权放行原本需要确认的调用（`source: "grant"`）；Hook 直接结算的调用（`source: "hook"`——`PreToolUse` 的 deny/allow 与 `PermissionRequest` 的 allow/deny，`rule` 字段记 Hook 条目的人读描述，见 [hooks.md](../architecture/hooks.md)）。规则直接允许的调用不单独发事件，其决定记录在 `tool.started.permission` 中。
 
 ### 3.2 临时事件
 
@@ -104,10 +104,13 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `tool.progress` | ✓ | `callId`、`stream: "stdout" \| "stderr" \| "info"`、`chunk` |
 | `runtime.status` | ✓ 或 — | `status: "idle" \| "thinking" \| "running_tool" \| "waiting_permission" \| "retrying" \| "compacting" \| "failed"` |
 | `provider.retry` | ✓ | `attempt`、`maxAttempts`、`delayMs`、`error: { kind, message }` |
-| `runtime.warning` | ✓ 或 — | `code`、`message` |
+| `runtime.warning` | ✓ 或 — | `code`、`message`（Phase 5 增补的 `code`：`project_config_untrusted`（含被忽略的 `mcp`/`hooks` 段）、`mcp_server_failed`、`mcp_server_crashed`、`mcp_tool_conflict`、`mcp_env_missing`、`hook_failed`、`debug_sink_failed`、`grant_persist_failed` 等） |
 | `runtime.error` | ✓ 或 — | `code`、`message`（例如日志写入失败导致会话进入 `failed` 状态） |
+| `mcp.server` | — | `server`、`state: "starting" \| "ready" \| "failed" \| "crashed" \| "stopped"`、`toolCount?`、`error?`（Phase 5，MCP 服务器生命周期状态转移，见 [mcp.md](../architecture/mcp.md) 第 7 节） |
 
 临时事件的信息要么包含在随后的持久化事件中（增量 → 完整消息），要么是可丢弃的状态提示。客户端丢失临时事件不影响正确性。
+
+Phase 5 新增事件的取舍：`mcp.server` 与 Hook 执行记录都选**临时事件/诊断**而非持久化——MCP 服务器进程是本次打开的运行态，恢复时重新拉起；Hook 的效果已体现在 `permission.resolved`、`tool.completed`、`turn.completed` 里。若写进持久日志，包含这些事件的会话将无法被旧版本 Runtime 恢复（第 8 节），没有对应收益。
 
 ## 4. 公共数据类型
 

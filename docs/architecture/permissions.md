@@ -35,7 +35,7 @@
 | `edit` | 路径 | write、edit |
 | `shell` | 完整命令字符串 | shell |
 | `network` | URL 或主机 | 将来的网页类工具 |
-| `mcp` | `<server>/<tool>` | 将来的 MCP 工具 |
+| `mcp` | `<server>/<tool>`（服务器与工具的**原始名**，不做规范化） | MCP 工具（Phase 5，见 [mcp.md](mcp.md)） |
 
 ## 4. 路径主体的解析
 
@@ -118,6 +118,16 @@ if decision == ask:
 
 一次调用有多个主体时：任一主体为 `deny` 则 `deny`；否则任一为 `ask` 则 `ask`；否则 `allow`。
 
+### 5.5 Hook 建议的合并（Phase 5）
+
+`PreToolUse` Hook 与 `PermissionRequest` Hook 的输出作为**建议**进入求值，不改变规则排序本身（完整契约见 [hooks.md](hooks.md) 第 3、6 节）：
+
+- Hook `deny`：该调用直接结算为 `deny`（`source: "hook"`），不进入规则求值。
+- Hook `ask`：求值结果为 `allow` 或 `ask` 时强制按 `ask` 走确认流程；规则已是 `deny` 时仍为 `deny`——Hook 只能收紧。
+- Hook `allow`：求值结果为 `ask` 时结算为 `allow`（`source: "hook"`，不发 `permission.requested`）；规则 `deny` 时无效。**且仅当该 Hook 条目来源可信时生效**（用户配置或已信任的项目配置——未信任的项目 Hook 整段不执行，见 hooks.md 第 5 节）。
+- `PermissionRequest` Hook：在求值结果为 `ask` 时先回答，`allow`/`deny` 直接结算（`source: "hook"`）；无回答则继续询问用户。
+- Hook 不产生 Grant，不影响 5.3 的 Grant/`autoApproveAsk` 判定顺序——Hook 建议先于这两者参与求值。
+
 附加约束：
 
 - **shell 组合命令**：命令包含 `&&`、`||`、`;`、`|`、换行、反引号、`$(`、重定向等控制符时，基于模式的 `allow` 规则不适用（规则照常匹配，但 `allow` 结果按 `ask` 对待，`deny` 仍为 `deny`）；Grant 对命令本来就只能精确匹配完整字符串（5.4），不受此影响。这避免 `git status*` 放行 `git status && rm -rf .`。
@@ -169,6 +179,8 @@ PermissionGate.check(subjects, signal)
   → emit permission.resolved { requestId, action, source: "user" | "cancelled", remember }
 ```
 
+`ask` 分支在发出 `permission.requested` 之前先经 `PermissionRequest` Hook（Phase 5，见 [hooks.md](hooks.md) 第 6 节）：Hook 给出 `allow`/`deny` 时直接结算并发出 `permission.resolved{source:"hook"}`，不再询问客户端；无回答时维持上述流程。
+
 | 选项 | `PermissionOption` | 效果 |
 |---|---|---|
 | 允许一次 | `allow_once` | 仅本次调用 |
@@ -186,5 +198,5 @@ PermissionGate.check(subjects, signal)
 ## 8. 与其他模块的关系
 
 - Tool Executor 负责解析资源并调用 `PermissionGate`，见 [tools.md](tools.md) 第 3 节。
-- 将来的 Hooks 可以在权限求值前给出建议，但 Hook 的 `allow` 不能越过 `deny`，并按不可信来源处理（只能收紧），除非用户显式信任该 Hook。
+- Hooks 在权限求值前后给出建议：`PreToolUse` 的建议在第 5 步前合并，`PermissionRequest` 在 `ask` 分支内优先回答；`allow` 不能越过 `deny`，且仅可信来源能放宽 `ask`（5.5、[hooks.md](hooks.md)）。
 - 规则的配置格式与加载由 `config` 负责；本模块只接收已合并、已标注来源与信任状态的规则列表。

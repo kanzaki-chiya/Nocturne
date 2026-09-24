@@ -19,6 +19,7 @@ MVP 中会话同一时间只有一个 Turn。Turn 进行中再次 `submit` 会�
 ```text
 runTurn(session, input, signal):
   emit turn.started, message.user(input)
+  hooks?.run("TurnStart", { text: input })          # Phase 5，可选；block → return finish("error", hook_blocked)
   step = 0
 
   loop:
@@ -56,7 +57,8 @@ runTurn(session, input, signal):
     for call in toolCalls:
       if signal.aborted: break
       outcome = toolExecutor.execute(call, scope(session, signal))
-      # execute 内部：校验 → 解析资源 → 权限（可能等待用户）→ tool.started → 执行 → 归一化 → tool.completed
+      # execute 内部：校验 → PreToolUse Hook → 解析资源 → 权限（ask 时先经 PermissionRequest Hook，
+      #   可能等待用户）→ tool.started → 执行 → PostToolUse Hook → 归一化 → tool.completed
       if outcome.stopTurn: return finish("aborted")         # 用户选择"拒绝并停止"；剩余调用由 finish 结算
     if signal.aborted: return finish("aborted")
     # 回到循环顶部：工具结果已写入会话，下一次 build 会把它们带给模型
@@ -65,6 +67,7 @@ finish(reason, error?):
   for call in session.state.unsettledCalls(turnId):         # 本 Turn 中还没有 tool.completed 的调用
     emit tool.completed(call, status = "cancelled", error = { code: cancelCode(reason) })
   emit turn.completed(reason, steps, usage, error)
+  hooks?.run("TurnEnd", { reason, steps, usage })           # Phase 5，可选；仅通知，无效果
 ```
 
 `finish` 是 Turn 的唯一出口。第 3 步中因 `length` 等原因结束时，该 assistant 消息里的工具调用同样由 `finish` 记为 `cancelled`，因此"每个调用恰好一个 `tool.completed`"在所有出口上都成立。

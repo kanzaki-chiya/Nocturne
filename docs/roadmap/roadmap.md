@@ -44,11 +44,21 @@
 
 **验收**：CLI 与 TUI 驱动同一套 Runtime，行为一致；TUI 不包含 Agent 逻辑，只消费公开 API 与事件。已用假 OpenAI 兼容 SSE 端点驱动真实进程逐项核对：流式中文对话、read+edit 工具与 diff、权限五键（a/s/p/d/x，d 带反馈、session/project Grant 生效）、Ctrl+C 中断、`-c`/`--resume` 恢复、杀进程后 process_exited 收束、会话内 `/resume` 切换与视图重放、非 TTY 退出 2、40 列窄终端；界面在 Windows Terminal 与 conhost 实际查看（含中文输入与 resize），conhost 活动区重绘残影为已知限制（ADR-0010）。
 
-## Phase 5 — MCP 与 Hooks
+## Phase 5 — MCP 与 Hooks（进行中）
 
 **内容**：MCP 客户端（工具包装为 `ToolDefinition`，命名空间隔离，权限类别 `mcp`）；Hooks（PreToolUse、PostToolUse、权限相关 Hook、会话生命周期）；项目级 Hook 的信任机制；可观测性（请求、上下文构成、token、工具耗时、权限决定的调试输出）。
 
-**约束**：Hooks 是可选扩展，未配置时 Runtime 行为不变；Hook 的 allow 不能越过规则中的 deny。
+**设计**：[architecture/mcp.md](../architecture/mcp.md)、[architecture/hooks.md](../architecture/hooks.md)、[architecture/observability.md](../architecture/observability.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)、[ADR-0012](../decisions/ADR-0012-hooks.md)。
+
+**约束**：Hooks 是可选扩展，未配置时 Runtime 行为不变（事件序列与 Phase 4 逐项一致）；Hook 的 allow 不能越过规则中的 deny，且仅可信来源能放宽 ask；项目级 `mcp`/`hooks` 配置在未信任时整段不生效；Core 不依赖 `packages/mcp`。
+
+**验收**：
+
+- MCP：脚本化假 stdio 服务器（默认测试集完全离线）覆盖正常调用、`isError`、超时、崩溃与惰性重连；工具以 `mcp__<server>__<tool>` 出现在 `specs()` 与 `/context`，经与内置工具相同的管线执行；启动失败降级为"无该服务器工具"并经 `mcp.server` / `runtime.warning` 可见；权限主体 `mcp <server>/<tool>` 走完整确认流程。
+- Hooks：`PreToolUse` 拒绝与 `updatedInput` 修改后重新校验各一例；`PermissionRequest` 在 `ask` 时自动放行/拒绝；`PostToolUse` 反馈进入模型可见结果；超时、非零退出、输出过大均降级为"无效果 + `hook_failed` 警告"；**未配置 Hooks 时事件序列与 Phase 4 完全一致**（回归断言）；未信任项目的 Hook 不执行，信任后生效。
+- 可观测性：`--debug` / `NOCTURNE_DEBUG` 产出 JSONL，覆盖 provider 请求、context 构成、token、工具耗时、权限决定、hook/mcp 调用；日志中不出现凭据、`Authorization` 或 MCP `env` 值。
+- 端到端：`Z:/nocturne-accept/` 的 fake-openai 驱动真实 `nctrn` 进程，CLI 与 TUI 各跑一遍（TUI 在 Windows Terminal 与 conhost 实际查看）：MCP 调用往返与权限确认、服务器崩溃后会话继续、`PreToolUse` 拒绝与修改输入、项目 Hook 信任前后差异、杀进程恢复后 MCP 调用标记 `interrupted`、诊断文件无密钥。
+- 依赖与边界：`depcheck` 零违规；`packages/mcp` 只依赖 `@nocturne/core` 公开入口与 `@modelcontextprotocol/sdk`；ADR-0011/0012 转已接受。
 
 ## Phase 6 — Subagent
 

@@ -34,6 +34,8 @@ nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trust
 | `--api-key-env <NAME>` | 读取凭据的环境变量名。默认：`anthropic` → `ANTHROPIC_API_KEY`，其余 → `NOCTURNE_API_KEY` |
 | `--tui` | 以终端界面（TUI）启动交互模式（[apps/tui.md](tui.md)）；与 `-p`/`--print` 互斥（退出码 2）；stdin/stdout 非 TTY 时报错退出 2 |
 | `-y, --yes` | 把需要确认的操作按"允许一次"自动批准（第 6 节）；对两类模式都生效 |
+| `--debug` | 启用诊断日志（JSONL；[observability.md](../architecture/observability.md)），等价 `NOCTURNE_DEBUG=1` |
+| `--debug-file <path>` | 诊断输出文件；`-` 表示 stderr。缺省写 `<NOCTURNE_HOME>/logs/debug-<时间戳>-<pid>.jsonl` |
 | `-h, --help` | 打印用法后退出（退出码 0） |
 | `-v, --version` | 打印版本后退出（退出码 0） |
 
@@ -74,6 +76,7 @@ nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trust
 | `/compact` | 手动触发 L2 摘要压缩 | `session.compact()` → `context.compacted(kind="summary")` |
 | `/resume` | 列出会话（编号、id、创建时间、绑定目录、模型、锁状态），输入编号切换，空行取消 | `runtime.listSessions()` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
+| `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
 
 - 未知命令打印提示（不报错退出）。命令在 Turn 进行中给出"会话忙"提示（`setModel` / `compact` 的前置条件是空闲，见 events.md 第 7 节）。
@@ -100,6 +103,7 @@ nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trust
 | `session.config_changed` | `◇ 模型已切换为 <provider>/<model>` |
 | `provider.retry` | `! Provider 错误（<kind>），<delayMs>ms 后第 <n>/<max> 次重试` |
 | `runtime.warning` / `runtime.error` | `! <code>: <message>` |
+| `mcp.server` | `ready` 以外状态的转移打印一行 `! MCP <server>：<state>（<error?，含工具数>）`；`starting`/`ready` 不打扰（Phase 5） |
 | `runtime.status` | 不逐条渲染；`compacting` 时显示一行"压缩中" |
 | `turn.completed` | 收尾：`reason` 非 `done` 时打印原因与 `error.message`；交互模式附一行用量摘要（input/output token） |
 
@@ -140,19 +144,23 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 | `NOCTURNE_SHELL` | — | shell 工具使用的 shell（tools.md 第 6 节） |
 | `NOCTURNE_CONSOLE_ENCODING` | — | 子进程输出解码的 WHATWG 编码覆盖（tools.md 第 6 节） |
 | `NOCTURNE_ASCII` | — | `nctrn --tui` 时框线/徽标退回 ASCII（[apps/tui.md](tui.md) 第 5 节） |
+| `NOCTURNE_DEBUG` | `--debug` | 诊断日志开关（[observability.md](../architecture/observability.md)） |
+| `NOCTURNE_DEBUG_FILE` | `--debug-file` | 诊断输出文件；`-` 表示 stderr |
 
 约定：
 
 - 用户配置 `<NOCTURNE_HOME>/config.json` 可声明多个 Provider 与默认模型；`--api-*`/`--model` 参数与 `NOCTURNE_*` 变量按 [config.md](../architecture/config.md) 第 5 节合成为一个环境变量/命令行层的 Provider 条目参与按 id 合并。只有环境变量、没有配置文件时行为与 Phase 2 一致。
 - 凭据只进入 Provider 配置：不出现在诊断信息、持久化事件、日志或配置回显中；`--api-key-env` 回显的是变量名而非值。
 - 配置文件错误（用户配置解析失败/不合 schema）、缺失或无效的配置在启动时快速失败（退出码 2），不带着半截配置进入会话。
-- 项目配置存在但未信任时打印一行提示（对应 `runtime.warning(code="project_config_untrusted")`）：其收紧方向的权限规则仍生效，其余字段被忽略，可用 `nctrn trust` 信任当前目录。
+- 项目配置存在但未信任时打印一行提示（对应 `runtime.warning(code="project_config_untrusted")`）：其收紧方向的权限规则仍生效，其余字段（含 `mcp`、`hooks`——可执行配置一律不生效，见 [config.md](../architecture/config.md) 第 3 节）被忽略，可用 `nctrn trust` 信任当前目录。
+- `NOCTURNE_DEBUG` / `NOCTURNE_DEBUG_FILE`（上表）：诊断日志开关与输出位置；未指定文件时写 `<NOCTURNE_HOME>/logs/` 下按时间戳命名的 JSONL。
 - 冒烟测试用独立的 `NOCTURNE_SMOKE_*` / `NOCTURNE_SMOKE_ANTHROPIC_*` 变量（workflow.md 第 5 节），与 CLI 运行变量分离。
 
 ## 8. 工程约束
 
 - **目录**：`apps/cli/`，包名 `@nocturne/cli`，`bin: { nctrn: dist/main.js }`；`tsdown` 构建 ESM。
-- **第三方运行时依赖：零**。参数解析用 `util.parseArgs`，行输入用 `node:readline`，颜色用 `util.styleText`。非 Node 内置的新依赖需要理由，并在本文登记。该约定按包生效：`apps/tui` 经 [ADR-0010](../decisions/ADR-0010-tui-rendering.md) 单独批准终端依赖，不影响本包。
+- **第三方运行时依赖：零**（npm registry 依赖；workspace 包 `@nocturne/mcp` 除外——MCP 装配点在 CLI，见下）。参数解析用 `util.parseArgs`，行输入用 `node:readline`，颜色用 `util.styleText`。非 Node 内置的新依赖需要理由，并在本文登记。该约定按包生效：`apps/tui` 经 [ADR-0010](../decisions/ADR-0010-tui-rendering.md) 单独批准终端依赖，不影响本包。
+- **MCP 装配**：`createRuntime` 时构造 `createMcpConnector(platform)`（`@nocturne/mcp`）注入 `RuntimeOptions.mcp`；`--debug*` 参数映射到 `RuntimeOptions.debug`。TUI 路径（`nctrn --tui`）由 CLI 完成装配后把 `Session` 交给 `runTui`，MCP/Hook/诊断对 TUI 透明。
 - **依赖方向**（dependency-cruiser 固化）：
   - 规则 `no-deep-import-from-outside-core` 的语义收紧为：`apps/` 解析到 `packages/core/src/` 的 import 只允许命中 `index.ts` 或 `protocol/index.ts`——即只有 `@nocturne/core` 包入口与 `@nocturne/core/protocol` 两个入口可用，任何内部路径（包括 `protocol/` 下的散文件）一律禁止。
   - 根 `depcheck` 脚本扫描范围从 `packages` 扩为 `packages apps`，使上述规则实际生效。客户端之间不互相依赖，唯一例外：`apps/cli` 为 `--tui` 对 `apps/tui` 的惰性 `import()`（[apps/tui.md](tui.md)、ADR-0010），普通路径不加载 TUI 代码。

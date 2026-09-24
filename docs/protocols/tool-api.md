@@ -2,7 +2,7 @@
 
 > 状态：已接受 v0.2 ｜ 设计依据：[tools.md](../architecture/tools.md)、[permissions.md](../architecture/permissions.md) ｜ 代码位置（计划）：`packages/core/src/tools/`
 
-本文定义工具的最小接口。所有工具（内置、将来的 MCP 与插件）都实现同一接口，经同一执行管线运行。
+本文定义工具的最小接口。所有工具（内置、MCP（Phase 5，见 [mcp.md](../architecture/mcp.md)）与将来的插件）都实现同一接口，经同一执行管线运行。
 
 ## 1. ToolDefinition
 
@@ -96,8 +96,9 @@ type ToolResult<Output = unknown> =
 | code | 含义 |
 |---|---|
 | `unknown_tool` | 模型调用了不存在的工具 |
-| `invalid_input` | 输入不符合 schema |
+| `invalid_input` | 输入不符合 schema（含 `PreToolUse` Hook 修改后的输入未通过重新校验） |
 | `permission_denied` | 规则或用户拒绝 |
+| `hook_denied` | `PreToolUse` Hook 拒绝（Phase 5，见 [hooks.md](../architecture/hooks.md)） |
 | `cancelled` | 被中断 |
 | `timeout` | 超时 |
 | `tool_failed` | 工具抛出非预期异常 |

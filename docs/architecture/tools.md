@@ -19,7 +19,7 @@ tools/
 └── builtin/         read、write、edit、grep、glob、shell
 ```
 
-内置工具与将来的 MCP 工具、插件工具走完全相同的注册接口和执行管线，没有特权通道。
+内置工具与 MCP 工具（`packages/mcp`，见 [mcp.md](mcp.md)）、将来的插件工具走完全相同的注册接口和执行管线，没有特权通道。
 
 ## 3. 执行管线
 
@@ -29,15 +29,20 @@ execute(call, ctx):
                不存在 → 结果 error(code="unknown_tool")，列出可用工具名，交给模型自我修正
   2. 校验      按 inputSchema 校验并规范化输入
                失败 → error(code="invalid_input")，附带校验信息
+  2.5 PreToolUse Hook   见 hooks.md 第 3 节：deny → permission.resolved(source:"hook")
+                        + error(code="hook_denied")；ask/allow 记入第 5 步的合并；
+                        updatedInput 替换输入并重新走第 2 步校验
   3. 权限主体  requests = tool.permissionSubjects(input, scope)   # 纯函数：本次调用会碰到什么
   4. 解析资源  subjects = platform.resolve(requests)               # 唯一做 I/O 的准备步骤：真实路径
                解析失败（如权限不足无法访问父目录）→ error(code="resource_unavailable")
   5. 权限      decision = permissionGate.check(subjects, signal)
                deny → error(code="permission_denied")，附理由与用户反馈
-               ask  → 发出 permission.requested，等待客户端回复（可被中断）
+               ask  → 先过 PermissionRequest Hook（hooks.md 第 6 节）；无回答则
+                      发出 permission.requested，等待客户端回复（可被中断）
   6. 开始      emit tool.started（含解析后的 subjects 与权限决定），写入成功后才继续
   7. 执行      tool.execute(input, ctx)，ctx.subjects = 已批准的解析结果，携带 AbortSignal 与超时
                工具抛出的异常 → error(code="tool_failed")；超时 → error(code="timeout")
+  7.5 PostToolUse Hook  见 hooks.md：feedback 追加进 modelContent（参与第 8 步预算）
   8. 归一化    按结果预算截断模型可见内容；保留结构化输出供客户端渲染
   9. 完成      emit tool.completed（持久化），返回 ToolResult
 ```
@@ -48,7 +53,7 @@ execute(call, ctx):
 - 权限在第 5 步由执行器统一处理，工具实现拿到执行机会时权限已经确定。工具不能自己弹确认，也不能跳过这一步。资源解析与权限求值的分工见 [permissions.md](permissions.md) 第 4 节。
 - 会修改文件的工具在写入前重新解析目标路径，与 `ctx.subjects` 中批准时的结果不一致时返回 `resource_changed`，不写入。
 - 枚举类工具（grep、glob）不跟随符号链接，并用 `ctx.permissions.check` 过滤每个结果条目，只保留求值为 allow 的条目，省略数量写入结果。
-- 将来的 Hooks 插入点：PreToolUse 位于第 2、3 步之间（可以拒绝或修改输入，修改后重新校验），PostToolUse 位于第 7、8 步之间。未配置 Hooks 时管线行为不变。
+- Hooks 插入点：PreToolUse 位于第 2、3 步之间（可以拒绝或修改输入，修改后重新校验），PermissionRequest 在第 5 步 ask 分支内，PostToolUse 位于第 7、8 步之间。Hook 输出是建议——`allow` 只能放宽 `ask`、越不过 `deny`，完整语义与信任规则见 [hooks.md](hooks.md)。**未配置 Hooks 时管线行为与事件序列和 Phase 4 完全一致**。
 
 ## 4. 结果预算
 
@@ -100,4 +105,4 @@ execute(call, ctx):
 
 ## 7. 暂不设计
 
-MCP 工具适配、工具别名、Provider 原生工具（如服务端网页搜索）、后台运行的 shell、工具结果中的图片。接入时均通过 `ToolDefinition` 与注册表完成，不修改执行管线的步骤。
+工具别名、Provider 原生工具（如服务端网页搜索）、后台运行的 shell、工具结果中的图片（MCP 返回的图片目前按占位符处理，见 [mcp.md](mcp.md) 第 6 节）。接入时均通过 `ToolDefinition` 与注册表完成，不修改执行管线的步骤。
