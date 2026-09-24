@@ -70,3 +70,27 @@ export function createProviderRegistry(
     providers: () => [...byId.values()],
   };
 }
+
+/**
+ * 命令行/环境变量模型 id 归一化（cli.md §2/§4 同规则）：
+ * 值归属"当前 Provider"（providerId = 生效的 api-type）；前缀等于当前
+ * Provider 时剥掉，前缀是另一种 api-type 时报错；其余含斜杠的值
+ * （命名空间模型 id，如 deepseek/deepseek-v4.1-flash）原样保留。
+ * 归一化语义属于 Provider 层，CLI 与 TUI 共用（tui.md §8）。
+ */
+export function normalizeModelRef(
+  model: string,
+  providerId: string,
+): { ok: true; ref: string } | { ok: false; problem: string } {
+  const slash = model.indexOf("/");
+  if (slash <= 0) return { ok: true, ref: `${providerId}/${model}` };
+  const prefix = model.slice(0, slash);
+  if (prefix === providerId) return { ok: true, ref: model };
+  if (prefix === "openai-compatible" || prefix === "anthropic") {
+    return {
+      ok: false,
+      problem: `模型前缀 "${prefix}" 与当前 Provider "${providerId}" 不一致`,
+    };
+  }
+  return { ok: true, ref: `${providerId}/${model}` };
+}

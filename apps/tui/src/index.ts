@@ -9,6 +9,7 @@ import { createElement } from "react";
 import type { Runtime, RuntimeSession } from "@nocturne/core";
 
 import { App } from "./app.js";
+import { detectTuiEnv } from "./env.js";
 
 export interface TuiOptions {
   stdin?: NodeJS.ReadStream | undefined;
@@ -23,14 +24,22 @@ export interface TuiOptions {
  */
 export async function runTui(
   session: RuntimeSession,
-  _runtime: Runtime,
+  runtime: Runtime,
   options: TuiOptions = {},
 ): Promise<number> {
-  const app = render(createElement(App, { session }), {
-    stdout: options.stdout ?? process.stdout,
-    stdin: options.stdin ?? process.stdin,
-    stderr: options.stderr ?? process.stderr,
-    // Ctrl+C 由 App 的 useInput 处理（中断语义在后续提交接入）
+  const stdin = options.stdin ?? process.stdin;
+  const stdout = options.stdout ?? process.stdout;
+  const stderr = options.stderr ?? process.stderr;
+  // 非 TTY 兜底（tui.md §5）：CLI 启动时已检查，这里是直接调用时的防线
+  if (!stdin.isTTY || !stdout.isTTY) {
+    stderr.write('! --tui 需要交互式终端；请用 nctrn（行式 REPL）或 nctrn -p "<prompt>"\n');
+    return 2;
+  }
+  const app = render(createElement(App, { session, runtime, env: detectTuiEnv() }), {
+    stdout,
+    stdin,
+    stderr,
+    // Ctrl+C 由 App 的 useInput 路由（中断/退出语义）
     exitOnCtrlC: false,
   });
   await app.waitUntilExit();

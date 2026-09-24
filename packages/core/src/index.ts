@@ -658,6 +658,11 @@ export type {
 export type { InstructionSet, EnvironmentInfo, BuiltContext } from "./context/index.js";
 export * from "./config/index.js";
 export type { SessionState, SessionSummary } from "./session/index.js";
-export { FakeProvider, type FakeScript, type FakeHandler } from "./provider/index.js";
+export {
+  FakeProvider,
+  normalizeModelRef,
+  type FakeScript,
+  type FakeHandler,
+} from "./provider/index.js";
 export { SessionError } from "./session/index.js";
 export { createPlatform, type Platform } from "./platform/index.js";
