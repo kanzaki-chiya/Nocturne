@@ -15,6 +15,7 @@ import type { ToolEntry, ViewEntry } from "@nocturne/core/protocol";
 
 import { App, splitCompletedPrefix } from "../src/app.js";
 import { Transcript } from "../src/components/transcript.js";
+import type { SwitchSessionFn } from "../src/types.js";
 
 const tmpRoots: string[] = [];
 afterEach(() => {
@@ -109,5 +110,64 @@ describe("TUI", () => {
     expect(frame).toContain("shell");
     expect(frame).not.toContain("权限：allow");
     unmount();
+  });
+
+  it("/resume <id> 切换：分隔线进回放区，新会话日志重放", async () => {
+    const runtime = await createRuntime({
+      cwd: tmp("nct-tui-ws-"),
+      sessionsDir: tmp("nct-tui-sd-"),
+      providers: [
+        new FakeProvider({
+          scripts: [
+            [
+              { type: "text_delta", text: "来自 s2 的回答" },
+              { type: "finish", reason: "stop" },
+            ],
+          ],
+        }),
+      ],
+    });
+    // s2 先跑一个 Turn 留下持久日志，关闭释放锁
+    const s2 = await runtime.createSession({ model: "fake/fake-1" });
+    await s2.submit({ text: "hi" });
+    const s2id = s2.id;
+    await s2.close();
+    const s1 = await runtime.createSession({ model: "fake/fake-1" });
+
+    const switcher: SwitchSessionFn = async (id) =>
+      id === s2id
+        ? { kind: "ok", session: await runtime.resumeSession(id) }
+        : { kind: "error", message: "不存在" };
+
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session: s1, runtime, env: ENV, switchSession: switcher }),
+    );
+    await new Promise((r) => setTimeout(r, 50)); // 等 useInput 订阅挂载
+    stdin.write(`/resume ${s2id}`); // 单 data 事件视为一次粘贴；回车单独发
+    stdin.write("\r");
+    await new Promise((r) => setTimeout(r, 300));
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("已切换到会话");
+    expect(frame).toContain("来自 s2 的回答"); // 新会话持久日志已重放
+    unmount();
+    await s1.close();
+  });
+
+  it("/resume 失败：错误进提示行，不换会话", async () => {
+    const { session, runtime } = await makeSession();
+    const switcher: SwitchSessionFn = () =>
+      Promise.resolve({ kind: "error", message: "会话被另一个进程占用" });
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, switchSession: switcher }),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    stdin.write("/resume sX");
+    stdin.write("\r");
+    await new Promise((r) => setTimeout(r, 150));
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("占用");
+    expect(frame).not.toContain("已切换到会话");
+    unmount();
+    await session.close();
   });
 });

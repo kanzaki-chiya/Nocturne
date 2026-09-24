@@ -11,10 +11,17 @@ import type { Runtime, RuntimeSession } from "@nocturne/core";
 import { App } from "./app.js";
 import { detectTuiEnv } from "./env.js";
 
+import type { SwitchSessionFn } from "./types.js";
+
 export interface TuiOptions {
   stdin?: NodeJS.ReadStream | undefined;
   stdout?: NodeJS.WriteStream | undefined;
   stderr?: NodeJS.WriteStream | undefined;
+  /**
+   * /resume 会话切换回调（tui.md §3）：由 CLI 注入，打开逻辑只此一份。
+   * 缺省时 /resume 提示不可用。
+   */
+  switchSession?: SwitchSessionFn | undefined;
 }
 
 /**
@@ -35,15 +42,24 @@ export async function runTui(
     stderr.write('! --tui 需要交互式终端；请用 nctrn（行式 REPL）或 nctrn -p "<prompt>"\n');
     return 2;
   }
-  const app = render(createElement(App, { session, runtime, env: detectTuiEnv() }), {
-    stdout,
-    stdin,
-    stderr,
-    // Ctrl+C 由 App 的 useInput 路由（中断/退出语义）
-    exitOnCtrlC: false,
-  });
+  const app = render(
+    createElement(App, {
+      session,
+      runtime,
+      env: detectTuiEnv(),
+      switchSession: options.switchSession,
+    }),
+    {
+      stdout,
+      stdin,
+      stderr,
+      // Ctrl+C 由 App 的 useInput 路由（中断/退出语义）
+      exitOnCtrlC: false,
+    },
+  );
   await app.waitUntilExit();
   return 0;
 }
 
 export { App } from "./app.js";
+export type { SessionSwitchResult, SwitchSessionFn } from "./types.js";

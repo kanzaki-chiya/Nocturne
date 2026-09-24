@@ -11,6 +11,8 @@ export type SlashResult =
   | { kind: "overlay"; name: OverlayName }
   | { kind: "message"; text: string }
   | { kind: "exit" }
+  /** /resume <id>：由 App 调用注入的 switchSession 执行切换 */
+  | { kind: "switch"; id: string }
   /** 已静默处理（确认行由 session.config_changed 事件渲染） */
   | { kind: "none" };
 
@@ -72,8 +74,8 @@ export async function runSlash(line: string, session: RuntimeSession): Promise<S
       }
     }
     case "/resume":
-      // 会话切换（switchSession 回调注入）在后续提交接入
-      return { kind: "message", text: "! /resume 会话切换将在后续提交接入" };
+      // 无参：列表选择器；带 id：直接切换（App 侧执行注入的 switchSession）
+      return arg === "" ? { kind: "overlay", name: "resume" } : { kind: "switch", id: arg };
     default:
       return { kind: "message", text: `未知命令 ${cmd}；/help 列出可用命令` };
   }
@@ -85,6 +87,22 @@ export function errText(e: unknown): string {
 
 export function helpLines(): string[] {
   return HELP_TEXT.split("\n");
+}
+
+/** /resume 切换后打印的提示行：恢复修复摘要 + 聚合警告（与 CLI sessionOpenNotes 同文案） */
+export function sessionNotes(session: RuntimeSession): string[] {
+  const notes: string[] = [];
+  const r = session.recovery;
+  if (r !== undefined) {
+    const parts: string[] = [];
+    if (r.truncatedTail !== undefined) parts.push(`损坏尾部已截断（另存 ${r.truncatedTail}）`);
+    if (r.interruptedCalls > 0) parts.push(`${r.interruptedCalls} 个未完成调用标记为 interrupted`);
+    if (r.recoveredTurns > 0)
+      parts.push(`${r.recoveredTurns} 个未完成 Turn 已按 process_exited 收束`);
+    if (parts.length > 0) notes.push(`会话恢复时已修复：${parts.join("；")}`);
+  }
+  notes.push(...session.warnings);
+  return notes;
 }
 
 /** /context 面板内容（与 CLI /context 同口径的分区报告） */

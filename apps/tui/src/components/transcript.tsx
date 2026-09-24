@@ -10,6 +10,9 @@ import { ToolRow } from "./tool-row.js";
 
 import type { ViewEntry } from "@nocturne/core/protocol";
 
+/** 回放区条目：会话视图条目 + 客户端本地分隔线（/resume 切换标记） */
+export type TranscriptItem = ViewEntry | { kind: "separator"; key: string; text: string };
+
 const REASONING_TAIL = 4;
 
 function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): React.JSX.Element {
@@ -61,7 +64,21 @@ function NoticeRow({
   return <Text color={color}>{`${g.notice} ${entry.message}`}</Text>;
 }
 
-export function EntryRow({ entry, width }: { entry: ViewEntry; width: number }): React.JSX.Element {
+function SeparatorRow({ text }: { text: string }): React.JSX.Element {
+  return (
+    <Box marginTop={1}>
+      <Text dimColor>{`── ${text} ──`}</Text>
+    </Box>
+  );
+}
+
+export function EntryRow({
+  entry,
+  width,
+}: {
+  entry: TranscriptItem;
+  width: number;
+}): React.JSX.Element {
   switch (entry.kind) {
     case "user":
       return <UserRow entry={entry} />;
@@ -71,6 +88,8 @@ export function EntryRow({ entry, width }: { entry: ViewEntry; width: number }):
       return <ToolRow entry={entry} width={width} />;
     case "notice":
       return <NoticeRow entry={entry} />;
+    case "separator":
+      return <SeparatorRow text={entry.text} />;
   }
 }
 
@@ -82,7 +101,7 @@ export function Transcript({
   entries,
   width,
 }: {
-  entries: readonly ViewEntry[];
+  entries: readonly TranscriptItem[];
   width: number;
 }): React.JSX.Element {
   return (

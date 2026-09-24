@@ -18,6 +18,7 @@ import { HELP_TEXT, parseArgs, UsageError, type CliArgs } from "./args.js";
 import { collectConfig, effectiveProviderId, normalizeModelRef } from "./config.js";
 import { createEventWriter, renderEvent } from "./render.js";
 import { runRepl } from "./repl.js";
+import { createSessionSwitcher, sessionOpenNotes, type SessionHolder } from "./session-switch.js";
 
 const VERSION = "0.0.0";
 
@@ -40,17 +41,10 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** 恢复摘要（cli.md 第 2 节）：有修复才打印 */
-function printRecovery(session: RuntimeSession): void {
-  const r = session.recovery;
-  if (r === undefined) return;
-  const parts: string[] = [];
-  if (r.truncatedTail !== undefined) parts.push(`损坏尾部已截断（另存 ${r.truncatedTail}）`);
-  if (r.interruptedCalls > 0) parts.push(`${r.interruptedCalls} 个未完成调用标记为 interrupted`);
-  if (r.recoveredTurns > 0)
-    parts.push(`${r.recoveredTurns} 个未完成 Turn 已按 process_exited 收束`);
-  if (parts.length > 0) {
-    process.stderr.write(`! 会话恢复时已修复：${parts.join("；")}\n`);
+/** 打开会话后的提示（恢复修复摘要 + 聚合警告）：有内容才打印 */
+function printSessionNotes(session: RuntimeSession): void {
+  for (const n of sessionOpenNotes(session)) {
+    process.stderr.write(`! ${n}\n`);
   }
 }
 
@@ -234,10 +228,12 @@ async function main(): Promise<number> {
     }
   }
 
-  printRecovery(session);
-  for (const w of session.warnings) {
-    process.stderr.write(`! ${w}\n`);
-  }
+  printSessionNotes(session);
+
+  // /resume 会话切换：打开逻辑只有这一份，REPL 与 TUI 注入同一个 switcher；
+  // holder 跟踪当前会话，退出时关闭的是切换后的那个
+  const holder: SessionHolder = { current: session };
+  const switchSession = createSessionSwitcher({ runtime, platform, cwd, holder });
 
   let prompt: string | undefined = args.prompt;
   if (args.print && prompt === "") {
@@ -267,19 +263,25 @@ async function main(): Promise<number> {
         stdin: process.stdin,
         stdout: process.stdout,
         stderr: process.stderr,
+        switchSession,
       });
-      await session.close();
+      await holder.current.close();
       return code;
     }
     process.on("SIGINT", () => {
       /* REPL 自己处理 SIGINT（rl "SIGINT" 事件）；这里兜底防意外退出 */
     });
-    const code = await runRepl(session, runtime, {
-      stdout: process.stdout,
-      stderr: process.stderr,
-      stdin: process.stdin,
-    });
-    await session.close();
+    const code = await runRepl(
+      session,
+      runtime,
+      {
+        stdout: process.stdout,
+        stderr: process.stderr,
+        stdin: process.stdin,
+      },
+      { switchSession },
+    );
+    await holder.current.close();
     return code;
   }
 

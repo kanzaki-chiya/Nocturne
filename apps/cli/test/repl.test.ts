@@ -6,7 +6,7 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 
-import type { Runtime, RuntimeSession } from "@nocturne/core";
+import type { Runtime, RuntimeSession, SessionSummary } from "@nocturne/core";
 import type { RuntimeEvent, TurnEndReason } from "@nocturne/core/protocol";
 
 import { runRepl } from "../src/repl.js";
@@ -161,6 +161,137 @@ describe("REPL 生命周期", () => {
     const prompt = stdoutChunks.join("");
     expect(prompt).toContain("本会话内允许");
     expect(prompt).toContain("拒绝并停止");
+    stdin.end();
+    expect(await done).toBe(0);
+  });
+});
+
+describe("REPL /resume 会话切换", () => {
+  const fakeSession = (id: string) =>
+    ({
+      id,
+      subscribe: (_fn: (ev: RuntimeEvent) => void) => () => undefined,
+      submit: () => new Promise<TurnEndReason>(() => undefined),
+      interrupt: () => undefined,
+      respondPermission: () => Promise.resolve(),
+      state: () =>
+        ({ config: { model: { provider: "p", model: "m1" } }, openTurn: undefined }) as ReturnType<
+          RuntimeSession["state"]
+        >,
+      warnings: [],
+      session: { durableEvents: () => [] },
+    }) as unknown as RuntimeSession;
+
+  const summary = (id: string, mtimeMs: number, locked = false) =>
+    ({
+      id,
+      createdAt: "2026-09-24 10:00",
+      cwd: "C:\\ws",
+      workspaceRoot: "C:\\ws",
+      model: { provider: "p", model: "m1" },
+      mtimeMs,
+      ...(locked ? { locked: true } : {}),
+    }) as SessionSummary;
+
+  it("/resume 列编号列表，输入编号切换并打印分隔线", async () => {
+    const { io, stdin, stdoutChunks } = makeIo();
+    const s1 = fakeSession("s1");
+    const s2 = fakeSession("s2");
+    const rt = {
+      listModels: () => [],
+      listSessions: () => Promise.resolve([summary("s2", 100), summary("s1", 200)]),
+    } as unknown as Runtime;
+    const calls: string[] = [];
+    const done = runRepl(s1, rt, io, {
+      switchSession: async (id) => {
+        calls.push(id);
+        return { kind: "ok", session: s2 };
+      },
+    });
+    await tick();
+    stdin.write("/resume\n");
+    await tick();
+    stdin.write("2\n");
+    await tick();
+    const out = stdoutChunks.join("");
+    expect(out).toContain("1. s1");
+    expect(out).toContain("2. s2");
+    expect(out).toContain("已切换到会话 s2");
+    expect(calls).toEqual(["s2"]);
+    stdin.end();
+    expect(await done).toBe(0);
+  });
+
+  it("/resume 空行取消；/resume <id> 直接切换", async () => {
+    const { io, stdin, stdoutChunks } = makeIo();
+    const s1 = fakeSession("s1");
+    const s2 = fakeSession("s2");
+    const rt = {
+      listModels: () => [],
+      listSessions: () => Promise.resolve([summary("s2", 100), summary("s1", 200)]),
+    } as unknown as Runtime;
+    const calls: string[] = [];
+    const done = runRepl(s1, rt, io, {
+      switchSession: async (id) => {
+        calls.push(id);
+        return { kind: "ok", session: s2 };
+      },
+    });
+    await tick();
+    stdin.write("/resume\n");
+    await tick();
+    stdin.write("\n"); // 空行取消
+    await tick();
+    expect(stdoutChunks.join("")).toContain("已取消");
+    expect(calls).toEqual([]);
+    stdin.write("/resume s2\n");
+    await tick();
+    expect(calls).toEqual(["s2"]);
+    expect(stdoutChunks.join("")).toContain("已切换到会话 s2");
+    stdin.end();
+    expect(await done).toBe(0);
+  });
+
+  it("跨目录：先询问，y 后以 allowForeign 重试；n 取消", async () => {
+    const { io, stdin, stdoutChunks } = makeIo();
+    const s1 = fakeSession("s1");
+    const s2 = fakeSession("s2");
+    const calls: { id: string; foreign: boolean }[] = [];
+    const done = runRepl(s1, fakeRuntime, io, {
+      switchSession: async (id, opts) => {
+        const foreign = opts?.allowForeign === true;
+        calls.push({ id, foreign });
+        if (!foreign) return { kind: "foreign", workspaceRoot: "D:\\other" };
+        return { kind: "ok", session: s2 };
+      },
+    });
+    await tick();
+    stdin.write("/resume s2\n");
+    await tick();
+    expect(stdoutChunks.join("")).toContain("与当前目录不同");
+    stdin.write("y\n");
+    await tick();
+    expect(calls).toEqual([
+      { id: "s2", foreign: false },
+      { id: "s2", foreign: true },
+    ]);
+    expect(stdoutChunks.join("")).toContain("已切换到会话 s2");
+    stdin.end();
+    expect(await done).toBe(0);
+  });
+
+  it("切换失败（锁冲突）：打印原因并留在原会话", async () => {
+    const { io, stdin, stdoutChunks } = makeIo();
+    const s1 = fakeSession("s1");
+    const done = runRepl(s1, fakeRuntime, io, {
+      switchSession: () =>
+        Promise.resolve({ kind: "error", message: "会话被另一个进程占用（锁文件…）" }),
+    });
+    await tick();
+    stdin.write("/resume s2\n");
+    await tick();
+    expect(stdoutChunks.join("")).toContain("占用");
+    expect(stdoutChunks.join("")).not.toContain("已切换");
     stdin.end();
     expect(await done).toBe(0);
   });

@@ -21,6 +21,8 @@ const SLASH_HELP = `斜杠命令：
   /preset <name> 会话内切换权限预设（read-only | default | auto-edit | full-access）
   /context       显示上下文组成（分区与 token 估算）
   /compact       手动压缩上下文（L2 摘要）
+  /resume        列出会话并输入编号切换；空行取消
+  /resume <id>   直接切换到指定会话
   /exit, /quit   退出
 快捷键：Ctrl+C 中断当前 Turn（空闲时退出）；Ctrl+D 退出。`;
 
