@@ -135,7 +135,7 @@ interface LiveTool {
 }
 ```
 
-`live` 是**纯瞬态**区：内容由 `message.assistant.delta` / `tool.input.delta` 创建，在对应的 `message.assistant` / `permission.requested` / `tool.started` / `tool.completed` 到达时**转入 `entries`**（inputText 等流式字段随之丢弃——它们本来就不该出现在可重放视图里）。`live` 中的实体不保证有持久落点：流被中断、参数没发完的调用可能永远没有 `tool.started`，这类孤儿在 `turn.completed` 时按 `turnId` 丢弃。
+`live` 是**纯瞬态**区：内容由 `message.assistant.delta` / `tool.input.delta` 创建，在对应的 `message.assistant` / `permission.requested` / `tool.started` / `tool.completed` 到达时**转入 `entries`**（inputText 等流式字段随之丢弃——它们本来就不该出现在可重放视图里）。`live` 中的实体不保证有持久落点：流被中断、参数没发完的调用可能永远没有 `tool.started`，这类孤儿在 `turn.completed` 时随 `live` 整体清空（不按 `turnId` 筛选——`LiveTool.turnId` 可为空，且串行管线同一时刻至多一个 Turn）。
 
 `PendingPermission`：
 
@@ -176,7 +176,7 @@ interface SessionNotice {
 | `tool.started` | 同 `callId` 的 `live.tools` 项移除并晋升（`inputText` 丢弃）；`entries` 中已有条目（requested 建的 awaiting）则更新为 `running` 并填 `input`/`subjects`/`permission`/`turnId`/`name`；否则新建 `running` 条目 |
 | `tool.completed` | 同 `callId` 的 `live.tools` 项丢弃（未执行即终态）；`entries` 条目不存在则新建（`denied`/`cancelled` 路径无 `started`）；`status` 取 `payload.status`，填 `result`/`seq`（若尚无）/`turnId`/`name`；清 `liveOutput` |
 | `context.compacted` | 追加 `compacted` notice 条目 |
-| `turn.completed` | `currentTurn` 匹配则清除；`lastTurn`（含 `recovered`）/`turnCount`/`usage` 更新；`status=idle`；`retry`、`pendingPermission` 清空；丢弃本 `turnId` 的 live 孤儿（无持久落点的流式残片）；`reason!=="done"` 时追加 `turn_end` notice 条目（`recovered:true` 时文案区分"本次失败/中断"与"上次进程退出"） |
+| `turn.completed` | `currentTurn` 匹配则清除；`lastTurn`（含 `recovered`）/`turnCount`/`usage` 更新；`status=idle`；`retry`、`pendingPermission` 清空；**清空整个 `live`**（管线串行、同一时刻至多一个 Turn；`LiveTool.turnId` 可为空，按 turnId 筛选会留下无持久落点的孤儿，破坏 V8）；`reason!=="done"` 时追加 `turn_end` notice 条目（`recovered:true` 时文案区分"本次失败/中断"与"上次进程退出"） |
 
 顺序约束：视图**不要求**事件全序——`resolved` 可在 `requested` 前（规则拒绝直接产生 `resolved`）、`completed` 可在 `started` 前、`requested` 可在 `input.delta` 前（Provider 不流式参数时）。所有关联都通过 `callId`/`messageId`/`requestId` 键查找。
 

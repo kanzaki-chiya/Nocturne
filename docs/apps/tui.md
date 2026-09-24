@@ -6,7 +6,7 @@
 
 ## 1. 启动入口
 
-唯一入口是 **`nctrn --tui`**：CLI 完成参数解析、配置收集、会话选择（新建/恢复/继续/选择器）后，把已打开的 `Session` 与 `Runtime` 交给 `runTui(runtime, session, opts)`。终端不是 TTY 时报错退出（§5）。
+唯一入口是 **`nctrn --tui`**：CLI 完成参数解析、配置收集、会话选择（新建/`--resume`/`--continue`）后，把已打开的 `Session` 与 `Runtime` 交给 `runTui(runtime, session, opts)`。终端不是 TTY 时报错退出（§5）。
 
 取舍理由：
 
@@ -58,13 +58,14 @@
 | 场景 | CLI（REPL） | TUI |
 |---|---|---|
 | 提交输入 | Enter 提交一行 | Enter 提交输入框内容 |
-| 斜杠命令 | `/help /model /preset /context /compact /exit /quit` | 同一集合；`/model` 弹出选择列表（↑↓ + Enter），`/context` 弹出可滚动报告面板（Esc/Enter 关闭）。命令名与效果完全一致 |
+| 斜杠命令 | `/help /model /preset /context /compact /resume /exit /quit` | 同一集合；`/model` 与 `/resume` 弹出列表选择器（↑↓ + Enter，Esc 取消），`/context` 弹出可滚动报告面板（Esc/Enter 关闭）。命令名与效果完全一致 |
 | 权限确认 | `a`/`s`/`p`/`d`/`x`，`d <文本>` 带反馈 | 同五键；`d` 先进入反馈行：`Enter` 发送拒绝（内容为空 = 不带反馈，等价裸 `d`），`Esc` 退出反馈行回到五选项 |
 | 中断 | Ctrl+C：Turn 中中断；权限提示中取消；空闲退出 | 同：pendingPermission 时先中断（结算为 cancelled）；busy 时中断 Turn；空闲时退出 |
 | EOF/退出 | Ctrl+D、`/exit` | Ctrl+D（空闲）、`/exit`、`/quit` |
-| 恢复 | `--resume <id>` / `--continue` | 同参数；另有 `--tui --sessions` 在 TUI 启动前走**行式会话选择器**（编号列表：id、时间、cwd、模型、锁定标记；输入编号恢复，`n` 新建，锁定会话给提示） |
-| 会话列表 | `--sessions` 打印后退出 | `--sessions` 单独使用仍打印退出；`--tui --sessions` 进入选择器（见 §6） |
-| 跨目录恢复确认 | `y/N` 提问（默认拒绝） | 打开会话前的确认对话框，默认拒绝 |
+| 恢复 | `--resume <id>` / `--continue` | 同参数 |
+| 会话列表 | `--sessions` 打印后退出 | 同（`--tui` 不改变 `--sessions` 的只读退出行为） |
+| 会话内切换 | `/resume`（REPL：编号列表，`/resume <id>` 直达） | `/resume` 弹出列表选择器（复用 `/model` 的列表组件，Esc 取消）；`/resume <id>` 直达。切换语义见 §6 |
+| 跨目录恢复确认 | `y/N` 提问（默认拒绝） | 确认对话框，默认拒绝（启动恢复与 `/resume` 一致） |
 | 恢复摘要/警告 | stderr 行 | 回放区顶部 notice 块 + notices 计数进状态栏 |
 | 忙时输入 | "会话忙，稍后再试" | 输入框禁用，状态栏显示当前状态；Ctrl+C 中断 |
 | 退出码 | 交互模式 0；用法/配置/恢复错误 2；中断 130 | 正常退出 0；启动错误同 CLI 映射（2）；非 TTY 报 2 并提示 `nctrn`（行式 REPL）或 `nctrn -p` |
@@ -73,7 +74,8 @@
 
 ## 4. 渲染模型
 
-- 技术选型见 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)：Ink + React。回放区用 `<Static>`（已完结 `entries` append-only，契合事件溯源）；活动区/对话框/状态栏是普通组件，随 `view.revision` 重绘。
+- 技术选型见 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)：Ink + React。回放区用 `<Static>`；活动区/对话框/状态栏是普通组件，随 `view.revision` 重绘。
+- **回放区只写 `entries` 的完结前缀**：从头到第一个未完结条目（`awaiting_permission`/`running` 的工具）为止；其后的条目（包括已完结的 notice）留在活动区渲染，待前缀推进后按序补进回放——`<Static>` 写出的内容不可改，未完结条目绝不能先进滚动区。测试覆盖：运行中工具之后已有权限提示条目时，该提示不得先进入回放区（ink-testing-library 断言帧内容）。
 - **diff 展示**：`tool.completed.output` 的结构化 diff（edit/write 工具已声明）直接渲染，红绿着色（NO_COLOR 时仅用 `+`/`-` 前缀）；大 diff 折叠为头尾若干行 + 省略计数，`spillPath` 存在时提示查看完整文件。
 - **工具行**：`● name <输入摘要>` + 状态徽标（awaiting → `?`，running → 转轮，ok/error → `✓`/`✗`，denied/cancelled/interrupted → 对应词）。`liveOutput` 只显示尾部 N 行。
 - **宽字符**：所有截断/对齐经显示宽度计算（Ink 内建 string-width），中文文本不掰断。
@@ -91,16 +93,22 @@
 | 运行时 resize | Ink 自动重排；回放区不受影响（已写 scrollback），活动区按新宽度重绘 |
 | Windows Terminal / conhost | 两者均支持；conhost 旧版无真彩，用 16 色回退（Ink 的 ColorLevel 探测）；IME 候选窗定位依赖终端的 Synchronized Update 支持，conhost 上会退化（ADR-0010 风险条目） |
 
-## 6. 会话选择与恢复
+## 6. 会话切换与恢复
 
-`--tui --sessions` 在 TUI 启动前由 CLI 侧完成选择：**行式选择器**（编号列表 + 输入编号 + `n` 新建），不做 Ink 组件——会话打开发生在 `runTui` 之前，会话选择语义必须留在 CLI 一处（§8）。锁定会话在选择器中标注，选中时报 `session_locked` 并提示 `--force-unlock`（不内嵌强制解锁确认，与 CLI 行为一致）。恢复完成后回放全部历史条目，顶部显示恢复摘要 notice（interrupted 调用数、修复的 Turn 数——`turn_end` notice 的 `recovered` 文案已覆盖"上次进程退出"语义）。
+会话内切换走 **`/resume` 斜杠命令**（REPL 与 TUI 同一套语义，cli.md 第 4 节为唯一主文档）：
+
+- `/resume`：列出 `runtime.listSessions()`（id、时间、cwd、模型、锁定标记），TUI 复用 `/model` 的列表选择组件（↑↓ + Enter，Esc 取消）；`/resume <id>` 直达。
+- **打开逻辑只在 CLI 有一份**：`runTui(runtime, session, { switchSession })`，`switchSession(id, { confirmedForeign? }) => Promise<{ ok: true; session } | { ok: false; reason; message; workspaceRoot? }>`。TUI 不直接打开会话，Core 不新增入口。跨目录确认在客户端完成：回调先返回 `reason: "foreign_workspace"`，TUI 弹确认对话框后带 `confirmedForeign` 重调。
+- **切换顺序**：Turn 进行中拒绝（提示先 Ctrl+C 中断）；先打开新会话——锁冲突/日志损坏/跨目录被拒时报错并**留在原会话**；打开成功后才 `close()` 旧会话、释放锁。
+- **切换后**：新建 `SessionView`，重放新会话的持久事件；已写入终端滚动区的旧内容无法收回，向回放区插一条"已切换到会话 \<id\>"分隔提示，再附恢复摘要（若有修复）。
+- 离线测试覆盖：切换成功、取消、锁冲突后留在原会话、Turn 进行中拒绝、切换后视图重放。
 
 ## 7. 工程约束
 
 - `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口 + ADR-0010 批准的终端依赖（ink、react；`ink-testing-library` 为 devDependency）。depcheck 新增规则：禁止 apps/tui → 其他 apps；cli→tui 仅 `--tui` 惰性边界一例。
-- 目录：`src/index.ts`（`runTui` 导出）、`src/app.tsx`（Ink 根组件）、`src/components/`（Transcript、ToolRow、PermissionDialog、StatusBar、Composer）、`src/keys.ts`。
+- 目录：`src/index.ts`（`runTui` 导出）、`src/app.tsx`（Ink 根组件）、`src/components/`（Transcript、ToolRow、PermissionDialog、StatusBar、Composer、PickList——`/model` 与 `/resume` 共用的列表选择器）、`src/keys.ts`。
 - 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧）；交互路径用注入假 Session 的集成测试（offline）。
-- `runTui` 只消费现有公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`，加上 `runtime.listModels`（`/model` 选择列表用）。
+- `runTui` 只消费现有公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`，加上 `runtime.listModels`（`/model` 选择列表）与 `runtime.listSessions`（`/resume` 列表）；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
 
 ## 8. 需要的 Core API 变更
 
@@ -117,7 +125,7 @@
 - 多行输入编辑器、粘贴检测、@文件补全；
 - Markdown 语法高亮（文本按纯文本渲染，着色仅限角色/工具行）；
 - alternate screen 全屏模式（回放交给终端原生 scrollback）；
-- 会话内切换（`/sessions`）、多会话标签页；
+- 多会话标签页；
 - 工具输出详情查看器/分页器（长输出靠截断 + spillPath，与 CLI 一致）；
 - 主题、配色、键位自定义；
 - 中文输入法候选窗精确定位（Ink 已知限制，conhost 上无 Synchronized Update 会退化，见 ADR-0010）；
