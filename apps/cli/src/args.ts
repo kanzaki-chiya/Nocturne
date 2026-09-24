@@ -11,8 +11,8 @@ export class UsageError extends Error {
   }
 }
 
-/** trust / untrust 子命令（写 trust.json 后退出） */
-export type TrustCommand = "trust" | "untrust";
+/** trust / untrust / setup 子命令（trust 写 trust.json；setup 走配置向导） */
+export type CliCommand = "trust" | "untrust" | "setup";
 
 export interface CliArgs {
   /** -p/--print：非交互模式 */
@@ -42,8 +42,8 @@ export interface CliArgs {
   debugFile?: string | undefined;
   help: boolean;
   version: boolean;
-  /** trust / untrust 子命令 */
-  command?: TrustCommand | undefined;
+  /** trust / untrust / setup 子命令 */
+  command?: CliCommand | undefined;
 }
 
 export const HELP_TEXT = `nctrn — Nocturne CLI
@@ -57,6 +57,7 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
   nctrn --resume <id>          恢复指定会话
   nctrn --sessions             列出会话后退出
   nctrn trust | untrust        信任/取消信任当前目录后退出
+  nctrn setup                  服务商配置向导（密钥交系统凭据后端，不落明文）
 
 参数：
   -p, --print [prompt]   非交互模式；值省略时读 stdin
@@ -112,11 +113,15 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   const { values, positionals } = result;
   const print = values.print;
 
-  // trust / untrust 子命令：唯一合法的位置参数（且不与 -p 混用）
-  let command: TrustCommand | undefined;
+  // trust / untrust / setup 子命令：唯一合法的位置参数（且不与 -p 混用）
+  let command: CliCommand | undefined;
   if (positionals.length > 0) {
     const first = positionals[0];
-    if (!print && (first === "trust" || first === "untrust") && positionals.length === 1) {
+    if (
+      !print &&
+      (first === "trust" || first === "untrust" || first === "setup") &&
+      positionals.length === 1
+    ) {
       command = first;
     } else if (!print) {
       throw new UsageError(`未知的位置参数：${first}`);
@@ -137,6 +142,17 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     (continueSession || resume !== undefined || values.sessions || tui)
   ) {
     throw new UsageError(`${command} 子命令不接受会话选项`);
+  }
+  if (
+    command === "setup" &&
+    (values.model !== undefined ||
+      values["api-type"] !== undefined ||
+      values["base-url"] !== undefined ||
+      values["api-key-env"] !== undefined ||
+      values.preset !== undefined ||
+      values["force-unlock"])
+  ) {
+    throw new UsageError("setup 子命令不接受模型或服务商参数（向导内交互式配置）");
   }
   if (values.sessions && (continueSession || resume !== undefined || print || tui)) {
     throw new UsageError("--sessions 是独立的只读命令，不能与恢复、执行或 --tui 组合");

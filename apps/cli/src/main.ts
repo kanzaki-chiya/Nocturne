@@ -16,10 +16,16 @@ import {
 import { createMcpConnector } from "@nocturne/mcp";
 
 import { HELP_TEXT, parseArgs, UsageError, type CliArgs } from "./args.js";
-import { collectConfig, effectiveProviderId, normalizeModelRef } from "./config.js";
+import {
+  collectConfig,
+  effectiveProviderId,
+  makeConfigLoader,
+  normalizeModelRef,
+} from "./config.js";
 import { createEventWriter, renderEvent } from "./render.js";
 import { runRepl } from "./repl.js";
 import { createSessionSwitcher, sessionOpenNotes, type SessionHolder } from "./session-switch.js";
+import { createWizardIo, runProviderSetupWizard, WizardAbort } from "./setup.js";
 
 const VERSION = "0.1.0";
 
@@ -101,6 +107,36 @@ async function main(): Promise<number> {
     } catch {
       cwd = process.cwd();
     }
+  }
+
+  // setup：服务商配置向导（provider-setup.md 第 1 节）。
+  // stdin/stdout 均为 TTY 才运行，否则退出码 2 并提示手写配置
+  if (args.command === "setup") {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      process.stderr.write(
+        "! nctrn setup 需要交互式终端；非交互环境请手写 <NOCTURNE_HOME>/config.json（见 README）\n",
+      );
+      return 2;
+    }
+    const collected = await collectConfig(args, platform, undefined, { requireModel: false });
+    if (!collected.ok) {
+      process.stderr.write(`配置错误：\n${collected.problems.map((p) => `  - ${p}`).join("\n")}\n`);
+      return 2;
+    }
+    try {
+      await runProviderSetupWizard(
+        createWizardIo(process.stdin, process.stdout),
+        collected.config.runtime,
+      );
+    } catch (e) {
+      if (e instanceof WizardAbort) {
+        process.stdout.write("已取消\n");
+        return 0;
+      }
+      process.stderr.write(`! ${errorText(e)}\n`);
+      return 1;
+    }
+    return 0;
   }
 
   // trust / untrust：只写 trust.json，不校验 Provider（cli.md 第 2 节）
@@ -290,7 +326,14 @@ async function main(): Promise<number> {
         stderr: process.stderr,
         stdin: process.stdin,
       },
-      { switchSession },
+      {
+        switchSession,
+        provider: {
+          config: runtimeConfig,
+          reloadConfig: makeConfigLoader(args, platform),
+          workspaceRoot: cwd,
+        },
+      },
     );
     await holder.current.close();
     return code;

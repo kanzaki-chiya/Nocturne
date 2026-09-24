@@ -33,9 +33,43 @@ function fakeSession(overrides: Partial<RuntimeSession> = {}): RuntimeSession {
 
 const fakeRuntime = {
   listModels: () => [
-    { ref: { provider: "p", model: "m1" } },
-    { ref: { provider: "p", model: "m2" } },
+    {
+      ref: { provider: "p", model: "m1" },
+      contextWindow: 128_000,
+      pricing: { input: 0.27, output: 1.1 },
+      capabilities: {
+        reasoning: "visible",
+        imageInput: true,
+        promptCache: false,
+        toolCalls: true,
+        parallelToolCalls: false,
+      },
+    },
+    {
+      ref: { provider: "p", model: "m2" },
+      capabilities: {
+        reasoning: "none",
+        imageInput: false,
+        promptCache: false,
+        toolCalls: true,
+        parallelToolCalls: false,
+      },
+    },
+    {
+      ref: { provider: "other", model: "big" },
+      contextWindow: 1_000_000,
+      capabilities: {
+        reasoning: "none",
+        imageInput: false,
+        promptCache: false,
+        toolCalls: true,
+        parallelToolCalls: false,
+      },
+    },
   ],
+  defaultModel: () => ({ provider: "p", model: "m2" }),
+  listRecentModels: () => [],
+  updateProviders: () => undefined,
 } as unknown as Runtime;
 
 function capture() {
@@ -50,11 +84,35 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(lines.join("")).toContain("/compact");
   });
 
-  it("/model 无参数：显示当前与可用模型", async () => {
+  it("/model 无参数：编号表格含列信息与标注（cli.md 第 4 节）", async () => {
     const { lines, io } = capture();
     await runSlashCommand("/model", fakeSession(), fakeRuntime, io);
-    expect(lines.join("")).toContain("p/m1");
-    expect(lines.join("")).toContain("p/m2");
+    const text = lines.join("");
+    expect(text).toContain("p/m1");
+    expect(text).toContain("p/m2");
+    expect(text).toContain("128k");
+    expect(text).toContain("1m");
+    expect(text).toContain("$0.27/1.1");
+    expect(text).toContain("当前会话");
+    expect(text).toContain("默认模型");
+  });
+
+  it("/model <关键词> 未匹配 id 时过滤列表，不切换", async () => {
+    let called = 0;
+    const session = fakeSession({
+      setModel: async () => {
+        called += 1;
+      },
+    });
+    const { lines, io } = capture();
+    await runSlashCommand("/model big", session, fakeRuntime, io);
+    expect(called).toBe(0);
+    expect(lines.join("")).toContain("other/big");
+    expect(lines.join("")).not.toContain("p/m1");
+
+    const none = capture();
+    await runSlashCommand("/model zzzz", session, fakeRuntime, none.io);
+    expect(none.lines.join("")).toContain("没有匹配");
   });
 
   it("/model <id> 调 setModel；RuntimeCommandError 显示为提示", async () => {
@@ -150,6 +208,111 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     const outcome = await runSlashCommand("/compact", failing, fakeRuntime, c2.io);
     expect(outcome).toBe("handled");
     expect(c2.lines.join("")).toContain("compaction_in_progress");
+  });
+
+  it("/provider 列出服务商：密钥来源、来源层、当前会话标注，不含密钥", async () => {
+    const { lines, io } = capture();
+    const deps = {
+      provider: {
+        config: {
+          providerSetupWarning: undefined,
+          describeProviders: async () => [
+            {
+              id: "p",
+              type: "openai-compatible",
+              host: "api.corp.test",
+              keySource: "credential" as const,
+              origin: "setup" as const,
+              overridden: false,
+              modelCount: 2,
+              managed: true,
+            },
+            {
+              id: "q",
+              type: "anthropic",
+              host: undefined,
+              keySource: "env" as const,
+              keyEnvName: "ANTHROPIC_API_KEY",
+              origin: "user" as const,
+              overridden: false,
+              modelCount: 0,
+              managed: false,
+            },
+          ],
+        } as never,
+        reloadConfig: async () => ({}) as never,
+        updateProviders: () => undefined,
+      },
+    };
+    await runSlashCommand("/provider", fakeSession(), fakeRuntime, io, deps);
+    const text = lines.join("");
+    expect(text).toContain("api.corp.test");
+    expect(text).toContain("凭据文件");
+    expect(text).toContain("环境变量 ANTHROPIC_API_KEY");
+    expect(text).toContain("向导");
+    expect(text).toContain("config.json");
+    expect(text).toContain("当前会话");
+    expect(text).not.toContain("sk-");
+  });
+
+  it("/provider remove 当前会话使用的服务商拒绝；其他删除并刷新", async () => {
+    const removed: string[] = [];
+    const updated: unknown[] = [];
+    const deps = {
+      provider: {
+        config: {
+          removeSetupProvider: async (id: string) => {
+            removed.push(id);
+          },
+        } as never,
+        reloadConfig: async () => ({ tag: "rc" }) as never,
+        updateProviders: (rc: unknown) => {
+          updated.push(rc);
+        },
+      },
+    };
+    const { lines, io } = capture();
+    await runSlashCommand("/provider remove p", fakeSession(), fakeRuntime, io, deps);
+    expect(removed).toHaveLength(0);
+    expect(lines.join("")).toContain("不能删除");
+
+    await runSlashCommand("/provider remove q", fakeSession(), fakeRuntime, io, deps);
+    expect(removed).toEqual(["q"]);
+    expect(updated).toEqual([{ tag: "rc" }]);
+  });
+
+  it("/provider refresh 调 refreshUpstreamLimits 并 updateProviders", async () => {
+    const refreshed: string[] = [];
+    const updated: unknown[] = [];
+    const deps = {
+      provider: {
+        config: {
+          refreshUpstreamLimits: async (id: string) => {
+            refreshed.push(id);
+          },
+        } as never,
+        reloadConfig: async () => ({ tag: "rc" }) as never,
+        updateProviders: (rc: unknown) => {
+          updated.push(rc);
+        },
+      },
+    };
+    const { io } = capture();
+    await runSlashCommand("/provider refresh p", fakeSession(), fakeRuntime, io, deps);
+    expect(refreshed).toEqual(["p"]);
+    expect(updated).toEqual([{ tag: "rc" }]);
+  });
+
+  it("/provider add 无向导桥时提示需要交互终端", async () => {
+    const { lines, io } = capture();
+    await runSlashCommand("/provider add", fakeSession(), fakeRuntime, io, {
+      provider: {
+        config: {} as never,
+        reloadConfig: async () => ({}) as never,
+        updateProviders: () => undefined,
+      },
+    });
+    expect(lines.join("")).toContain("交互式终端");
   });
 
   it("/exit → exit；未知命令 → unknown 且不报错退出", async () => {

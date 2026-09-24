@@ -46,6 +46,37 @@ export { normalizeModelRef } from "@nocturne/core";
  * 校验项（cli.md 第 2 节）：缺模型、Provider 未配置、
  * openai-compatible 缺 baseURL、凭据环境变量未设置——均以退出码 2 报告。
  */
+/**
+ * /provider add/key/remove/refresh 之后的配置重载（provider-setup.md 第 6 节）：
+ * 与 collectConfig 相同的分层参数重跑 loadConfig，结果喂 runtime.updateProviders。
+ */
+export function makeConfigLoader(
+  args: CliArgs,
+  platform: Platform,
+  env: Env = (n) => process.env[n],
+): () => Promise<RuntimeConfig> {
+  return () =>
+    loadConfig(platform, {
+      cliArgs: {
+        model: args.model,
+        apiType: args.apiType,
+        baseUrl: args.baseUrl,
+        apiKeyEnv: args.apiKeyEnv,
+      },
+      env,
+      upstreamFetch: (entry, key, signal) =>
+        fetchModels(
+          {
+            type: entry.type ?? "openai-compatible",
+            ...(entry.baseURL !== undefined ? { baseURL: entry.baseURL } : {}),
+            ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
+          },
+          key,
+          signal,
+        ),
+    });
+}
+
 export async function collectConfig(
   args: CliArgs,
   platform: Platform,
