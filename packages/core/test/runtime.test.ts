@@ -623,6 +623,74 @@ describe("上下文与运行时命令（Phase 2）", () => {
     await session.close();
   });
 
+  it("compact() 重复调用：无新内容时 compaction_failed，不再写摘要事件", async () => {
+    const provider = new FakeProvider({
+      scripts: [
+        [
+          { type: "text_delta", text: "首轮回复" },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "text_delta", text: "SUMMARY1" },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "text_delta", text: "第二轮回复" },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "text_delta", text: "SUMMARY2" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, undefined, { provider });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "hi" });
+    await session.compact();
+
+    const callsAfterFirst = provider.requests.length;
+    // 没有新可压缩内容：同一批历史不得再压出第二份摘要
+    await expect(session.compact()).rejects.toMatchObject({ code: "compaction_failed" });
+    expect(provider.requests.length).toBe(callsAfterFirst);
+    const summaries = events.filter(
+      (e) => e.type === "context.compacted" && e.payload.kind === "summary",
+    );
+    expect(summaries).toHaveLength(1);
+
+    // 新 Turn 产生新边界后，第二次压缩才能成功并覆盖更广范围
+    await session.submit({ text: "again" });
+    await session.compact();
+    const all = events.filter(
+      (e) => e.type === "context.compacted" && e.payload.kind === "summary",
+    );
+    expect(all).toHaveLength(2);
+    const second = all[1];
+    expect(second?.type === "context.compacted" && second.payload.summary).toContain("SUMMARY2");
+    await session.close();
+  });
+
+  it("setModel：strictModels=false 的 Provider 接受清单外模型 id", async () => {
+    const provider = new FakeProvider({
+      strictModels: false,
+      models: [tinyModel],
+      scripts: [[{ type: "finish", reason: "stop" }]],
+    });
+    const { runtime } = await makeRuntime(undefined, undefined, { provider });
+    const session = await runtime.createSession({ model: "fake/tiny" });
+    const events = collect(session);
+
+    await session.setModel("fake/any-model-id");
+    const changed = events.find((e) => e.type === "session.config_changed");
+    expect(changed?.type === "session.config_changed" && changed.payload.model).toEqual({
+      provider: "fake",
+      model: "any-model-id",
+    });
+    expect(session.state().config.model.model).toBe("any-model-id");
+    await session.close();
+  });
+
   it("compact 并发约束：Turn 进行中 session_busy；压缩进行中 compaction_in_progress", async () => {
     const provider = new FakeProvider({
       handler: async () => {

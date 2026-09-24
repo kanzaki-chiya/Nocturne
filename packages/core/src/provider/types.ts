@@ -107,6 +107,12 @@ export interface Provider {
   readonly id: string;
   /** 适配器类型，如 "openai-compatible" */
   readonly type: string;
+  /**
+   * 严格模型清单（默认 true）：models() 非空时，清单外的模型视为
+   * invalid_model。false 时任何模型 id 经 resolve 回退内置目录/保守默认——
+   * 供"只有一个 Provider、模型由用户即时指定"的客户端（如 CLI）使用。
+   */
+  readonly strictModels?: boolean | undefined;
   /** 该 Provider 下可用的模型（内置目录 + 配置合并） */
   models(): ModelInfo[];
   /**

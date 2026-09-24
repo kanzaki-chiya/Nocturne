@@ -33,6 +33,7 @@ const DEFAULT_MODEL: ModelInfo = {
 export class FakeProvider implements Provider {
   readonly id: string;
   readonly type = "fake";
+  readonly strictModels: boolean;
   /** 已收到的全部请求（测试断言用） */
   readonly requests: ModelRequest[] = [];
   private readonly modelInfos: ModelInfo[];
@@ -42,12 +43,15 @@ export class FakeProvider implements Provider {
   constructor(options: {
     id?: string | undefined;
     models?: ModelInfo[] | undefined;
+    /** false 时接受清单外的模型 id（见 Provider.strictModels） */
+    strictModels?: boolean | undefined;
     /** 每次 stream() 消费一份脚本 */
     scripts?: FakeScript[] | undefined;
     /** 或按请求动态生成脚本 */
     handler?: FakeHandler | undefined;
   }) {
     this.id = options.id ?? "fake";
+    this.strictModels = options.strictModels ?? true;
     this.modelInfos = options.models ?? [
       { ...DEFAULT_MODEL, ref: { provider: this.id, model: "fake-1" } },
     ];

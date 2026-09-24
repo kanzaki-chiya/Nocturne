@@ -41,7 +41,8 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
       "baseURL": "https://api.deepseek.com/v1",
       "apiKeyEnv": "DEEPSEEK_API_KEY",          // 只引用环境变量名，不在配置里写密钥
       "models": { "deepseek-chat": { "contextWindow": 128000 } },
-      "providerOptions": {}                      // 原样传给适配器
+      "providerOptions": {},                     // 配置级选项，与请求级合并后传给适配器（provider-api.md §3）
+      "allowUndeclaredModels": false              // true → strictModels=false，接受清单外模型 id（CLI 用）
     }
   }
 }

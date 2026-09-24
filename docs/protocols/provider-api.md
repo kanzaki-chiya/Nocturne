@@ -10,6 +10,9 @@
 interface Provider {
   readonly id: string            // 配置中的名称，如 "deepseek"
   readonly type: string          // 适配器类型，如 "openai-compatible"、"anthropic"
+  /** 严格模型清单（默认 true）：models() 非空时清单外模型在 setModel 时拒绝；
+      false 时任何模型 id 经 resolve 回退内置目录/保守默认（CLI 用） */
+  readonly strictModels?: boolean
   /** 该 Provider 下可用的模型：内置目录 + 用户配置合并的结果 */
   models(): ModelInfo[]
   /** 发起一次流式请求。错误以抛出 ProviderError 的方式报告 */
@@ -53,9 +56,13 @@ interface ModelRequest {
   maxOutputTokens: number
   reasoningEffort?: string        // 仅在模型声明支持该档位时设置
   cachePrefix?: { systemBlocks: number; messages: number }   // 可缓存前缀的边界提示，适配器自行决定是否使用
-  providerOptions?: Record<string, unknown>                  // 来自配置，原样交给适配器，Core 不解释
+  providerOptions?: Record<string, unknown>                  // 请求级 Provider 专有选项，原样交给适配器，Core 不解释
 }
+```
 
+`providerOptions` 的命名空间由适配器定义：openai-compatible 以 Provider id 为键（`{ "<id>": {...} }`）；anthropic 固定为 `{ anthropic: {...} }`，与 Provider id 无关。适配器把**配置级** `providerOptions`（ProviderConfig）与**请求级** `providerOptions`（ModelRequest）做浅合并后填入该命名空间，请求级覆盖同名键；两者都缺省时不产生该字段。
+
+```ts
 type SystemBlock = { text: string }
 
 type ModelMessage =

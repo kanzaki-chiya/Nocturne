@@ -77,6 +77,27 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(lines.join("")).toContain("session_busy");
   });
 
+  it("/model <裸 id> 按当前 Provider 补齐；异 api-type 前缀报错不调 setModel", async () => {
+    const calls: unknown[] = [];
+    const session = fakeSession({
+      setModel: async (m) => {
+        calls.push(m);
+      },
+    });
+    const { lines, io } = capture();
+    await runSlashCommand("/model m2", session, fakeRuntime, io);
+    expect(calls).toEqual(["p/m2"]);
+
+    // 含斜杠但前缀不是 api-type：整体按模型 id 处理
+    await runSlashCommand("/model deepseek/deepseek-v4.1-flash", session, fakeRuntime, io);
+    expect(calls.at(-1)).toBe("p/deepseek/deepseek-v4.1-flash");
+
+    await runSlashCommand("/model anthropic/claude-b", session, fakeRuntime, io);
+    expect(calls).toHaveLength(2);
+    expect(lines.join("")).toContain("anthropic");
+    expect(lines.join("")).toContain("不一致");
+  });
+
   it("/context 渲染分区与合计", async () => {
     const { lines, io } = capture();
     await runSlashCommand("/context", fakeSession(), fakeRuntime, io);

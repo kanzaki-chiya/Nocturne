@@ -44,9 +44,24 @@ export async function runSlashCommand(
         io.print(`当前模型：${cur.provider}/${cur.model}\n可用模型：\n  ${models}`);
         return "handled";
       }
-      const ref = rest.join(" ");
+      // 归一化与 --model 同规则（cli.md §4）：
+      // 前缀 = 当前 Provider 剥掉；前缀是另一种 api-type 时报错；
+      // 其余含斜杠的值与裸 id 都按当前 Provider 下的模型 id 处理
+      const raw = rest.join(" ");
+      const current = session.state().config.model.provider;
+      let bare = raw;
+      const slash = raw.indexOf("/");
+      if (slash > 0) {
+        const prefix = raw.slice(0, slash);
+        if (prefix === current) {
+          bare = raw.slice(slash + 1);
+        } else if (prefix === "openai-compatible" || prefix === "anthropic") {
+          io.print(`! 模型前缀 ${prefix} 与当前 Provider ${current} 不一致`);
+          return "handled";
+        }
+      }
       try {
-        await session.setModel(ref);
+        await session.setModel(`${current}/${bare}`);
         // session.config_changed 事件会渲染确认行
       } catch (e) {
         io.print(`! ${errorText(e)}`);

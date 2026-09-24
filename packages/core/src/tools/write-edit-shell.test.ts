@@ -193,6 +193,24 @@ describe("edit 工具", () => {
     expect(output.diff).toContain("+qux");
   });
 
+  it("替换文本含 $& 等 JS 替换语法时按字面值写入", async () => {
+    const ws = tmpWorkspace();
+    writeFileSync(path.join(ws, "a.ts"), "before OLD after\n");
+    const h = await makeHarness(ws);
+    await readViaTool(h, "a.ts");
+    const r = await h.executor.execute(
+      call("edit", { path: "a.ts", old: "OLD", new: "$& and $$" }),
+      h.scope,
+    );
+    expect(r.status).toBe("ok");
+    const output = r.result.output as { replaced: number; diff: string };
+    expect(output.replaced).toBe(1);
+    expect(await h.scope.platform.fs.readTextFile(path.join(ws, "a.ts"))).toBe(
+      "before $& and $$ after\n",
+    );
+    expect(output.diff).toContain("+before $& and $$ after");
+  });
+
   it("多处出现且未指定 replaceAll → not_unique", async () => {
     const ws = tmpWorkspace();
     writeFileSync(path.join(ws, "a.ts"), "x\nx\nx\n");

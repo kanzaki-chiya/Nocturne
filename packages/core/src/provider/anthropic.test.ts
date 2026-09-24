@@ -370,4 +370,52 @@ describe("anthropic 适配器", () => {
     );
     await expect(collect(p, request())).rejects.toBeInstanceOf(ProviderError);
   });
+
+  it("providerOptions：配置级与请求级合并进 anthropic 命名空间，请求级覆盖", async () => {
+    const capture: { body?: unknown; url?: string } = {};
+    const p = createAnthropicProvider(
+      // Provider ID 是自定义的 "claude"，不是 "anthropic"——
+      // 选项仍必须落在 SDK 规定的 anthropic 命名空间
+      config({
+        providerOptions: {
+          thinking: { type: "enabled", budgetTokens: 4096 },
+          serviceTier: "standard_only",
+        },
+      }),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    await collect(
+      p,
+      request({ providerOptions: { thinking: { type: "enabled", budgetTokens: 1024 } } }),
+    );
+    const body = capture.body as Record<string, unknown>;
+    // 请求级 thinking 覆盖配置级（浅合并）；配置级 serviceTier 保留
+    expect(body["thinking"]).toEqual({ type: "enabled", budget_tokens: 1024 });
+    expect(body["service_tier"]).toBe("standard_only");
+  });
+
+  it("providerOptions：仅配置级时同样下发；无选项时不产生多余字段", async () => {
+    const capture: { body?: unknown; url?: string } = {};
+    const p = createAnthropicProvider(
+      config({ providerOptions: { speed: "fast" } }),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    await collect(p, request());
+    const body = capture.body as Record<string, unknown>;
+    expect(body["speed"]).toBe("fast");
+
+    const capture2: { body?: unknown; url?: string } = {};
+    const p2 = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture2),
+    );
+    await collect(p2, request());
+    const body2 = capture2.body as Record<string, unknown>;
+    expect(body2["thinking"]).toBeUndefined();
+    expect(body2["service_tier"]).toBeUndefined();
+    expect(body2["speed"]).toBeUndefined();
+  });
 });

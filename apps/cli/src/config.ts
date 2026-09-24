@@ -75,12 +75,16 @@ export function collectConfig(args: CliArgs, env: Env = (n) => process.env[n]): 
           type: "anthropic",
           ...(baseURL !== undefined && baseURL !== "" ? { baseURL } : {}),
           apiKeyEnv,
+          // CLI 只有一个 Provider、模型由用户即时指定（/model <id>）：
+          // 清单外的模型 id 也允许，回退内置目录/保守默认
+          allowUndeclaredModels: true,
           models: { [bareModel]: {} },
         }
       : {
           id: providerId,
           baseURL: baseURL ?? "",
           apiKeyEnv,
+          allowUndeclaredModels: true,
           models: { [bareModel]: {} },
         };
 

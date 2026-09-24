@@ -86,7 +86,8 @@ export const editTool: ToolDefinition<EditInput, EditOutput> = {
     const newText =
       input.replaceAll === true
         ? oldText.split(input.old).join(input.new)
-        : oldText.replace(input.old, input.new);
+        : // 函数形式保证 new 按字面值写入（$&、$$ 等不被解释）
+          oldText.replace(input.old, () => input.new);
 
     try {
       await ctx.fs.writeFile(resolved, newText);

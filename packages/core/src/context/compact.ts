@@ -4,7 +4,13 @@
  */
 import type { DurableEvent, HistoryEntry } from "../protocol/index.js";
 import type { ModelInfo, ModelRequest } from "../provider/index.js";
-import { closedBoundaries, estimateTokens, inputBudgetTokens, renderTranscript } from "./build.js";
+import {
+  closedBoundaries,
+  compactionCutoffs,
+  estimateTokens,
+  inputBudgetTokens,
+  renderTranscript,
+} from "./build.js";
 
 /** 摘要输出上限（context.md 6.6：默认约 4,000 token） */
 export const SUMMARY_MAX_OUTPUT_TOKENS = 4_000;
@@ -41,6 +47,8 @@ export function buildSummaryRequest(input: BuildSummaryRequestInput): ModelReque
 
 /**
  * 6.6 边界回退：从最新闭合边界向前找第一个"摘要请求装得进窗口"的边界；
+ * 候选边界必须晚于最新摘要的 throughSeq 且其后确有新的非压缩历史——
+ * 否则等于对同一范围重复压缩（旧摘要不会被替代，反而叠加）。
  * 不存在任何可行边界时返回 undefined（调用方按 compaction_failed 处理）。
  */
 export function chooseSummaryBoundary(
@@ -49,10 +57,16 @@ export function chooseSummaryBoundary(
   model: ModelInfo,
 ): number | undefined {
   const budget = inputBudgetTokens(model, SUMMARY_MAX_OUTPUT_TOKENS);
+  const { summaryThrough } = compactionCutoffs(history);
   const boundaries = closedBoundaries(events);
   for (let i = boundaries.length - 1; i >= 0; i--) {
     const b = boundaries[i];
     if (b === undefined) continue;
+    if (b <= summaryThrough) break; // 边界按 seq 升序，更早的候选同样已被覆盖
+    const hasNewContent = history.some(
+      (e) => e.seq > summaryThrough && e.seq <= b && e.kind !== "compaction",
+    );
+    if (!hasNewContent) continue;
     const req = buildSummaryRequest({ history, model, throughSeq: b });
     const chars =
       req.system.reduce((a, s) => a + s.text.length, 0) +

@@ -26,6 +26,10 @@ export async function runRepl(
   io: ReplIo,
 ): Promise<number> {
   let busy = false;
+  /** 进行中的 Turn 的 Promise；close 后由关闭路径等待其收敛 */
+  let activeTurn: Promise<unknown> | undefined;
+  /** readline 已关闭：此后任何异步回调不得再 rl.prompt() */
+  let closed = false;
   /** 等待用户回答的权限请求（permission.requested 优先于普通输入） */
   let pendingPermission: { requestId: string } | undefined;
   let lastAssistantHadText = false;
@@ -55,6 +59,10 @@ export async function runRepl(
     terminal: io.stdin.isTTY === true,
   });
 
+  const prompt = (): void => {
+    if (!closed) rl.prompt();
+  };
+
   const done = new Promise<number>((resolve) => {
     rl.on("line", (raw) => {
       const line = raw.trim();
@@ -71,17 +79,17 @@ export async function runRepl(
         } else {
           write(io, "stdout", "  请输入 a（允许一次）或 d（拒绝）\n");
         }
-        rl.prompt();
+        prompt();
         return;
       }
 
       if (line === "") {
-        rl.prompt();
+        prompt();
         return;
       }
       if (busy) {
         write(io, "stdout", "会话忙（Turn 进行中）；Ctrl+C 可中断\n");
-        rl.prompt();
+        prompt();
         return;
       }
       if (line.startsWith("/")) {
@@ -91,19 +99,19 @@ export async function runRepl(
           },
         }).then((outcome) => {
           if (outcome === "exit") rl.close();
-          else rl.prompt();
+          else prompt();
         });
         return;
       }
       busy = true;
-      void session
+      activeTurn = session
         .submit({ text: line })
         .catch((e: unknown) => {
           write(io, "stderr", `! ${e instanceof Error ? e.message : String(e)}\n`);
         })
         .finally(() => {
           busy = false;
-          rl.prompt();
+          prompt();
         });
     });
     rl.on("SIGINT", () => {
@@ -112,17 +120,27 @@ export async function runRepl(
         pendingPermission = undefined;
         busy = false;
         write(io, "stdout", "\n! 已中断\n");
-        rl.prompt();
+        prompt();
         return;
       }
       rl.close();
     });
     rl.on("close", () => {
+      closed = true;
+      // Turn 仍在进行：中断并等其收敛（finally 回调由 closed 守护），
+      // 保证不会有 prompt-after-close
+      if (busy && activeTurn !== undefined) {
+        session.interrupt();
+        void activeTurn.finally(() => {
+          resolve(0);
+        });
+        return;
+      }
       resolve(0);
     });
   });
 
-  rl.prompt();
+  prompt();
   const code = await done;
   unsubscribe();
   return code;

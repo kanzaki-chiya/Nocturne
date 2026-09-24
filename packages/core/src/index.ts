@@ -301,9 +301,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           }
           throw e;
         }
-        // Provider 声明了模型清单时校验模型名在清单内（events.md：未知 model → invalid_model）
+        // Provider 声明了模型清单且启用严格校验时，模型名必须在清单内
+        // （events.md：未知 model → invalid_model）
         const declared = resolved.provider.models();
-        if (declared.length > 0 && !declared.some((m) => m.ref.model === ref.model)) {
+        if (
+          resolved.provider.strictModels !== false &&
+          declared.length > 0 &&
+          !declared.some((m) => m.ref.model === ref.model)
+        ) {
           throw new RuntimeCommandError(
             "invalid_model",
             `Provider ${ref.provider} 未声明模型 ${ref.model}`,
@@ -330,7 +335,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           if (boundary === undefined) {
             throw new RuntimeCommandError(
               "compaction_failed",
-              "没有可行的压缩边界（历史为空，或摘要请求在任何边界下都装不进窗口）",
+              "没有可行的压缩边界（历史为空、最新摘要之后没有新内容，或摘要请求在任何边界下都装不进窗口）",
             );
           }
           const request = buildSummaryRequest({

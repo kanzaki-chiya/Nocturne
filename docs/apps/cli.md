@@ -41,6 +41,7 @@ nctrn -p                     # 非交互模式：prompt 从 stdin 读取（stdin
 - 普通输入：`session.submit({ text })`，期间渲染事件流（第 5 节）。
 - `/` 开头的输入：斜杠命令（第 4 节），不进入模型上下文。
 - 空行忽略；Ctrl+D（EOF）退出；空闲时 Ctrl+C 退出，Turn 进行中 Ctrl+C 调用 `session.interrupt()`。
+- EOF 发生在 Turn 进行中时：先 `session.interrupt()` 中断并等待该 Turn 收束后再退出；readline 关闭后任何异步回调不得再显示提示符。
 - Turn 进行中不接受新的输入行（只响应中断）；权限确认提示出现时优先处理（第 6 节）。
 - Phase 2 单行输入；多行与粘贴不作特殊处理。
 
@@ -56,7 +57,7 @@ nctrn -p                     # 非交互模式：prompt 从 stdin 读取（stdin
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
 
 - 未知命令打印提示（不报错退出）。命令在 Turn 进行中给出"会话忙"提示（`setModel` / `compact` 的前置条件是空闲，见 events.md 第 7 节）。
-- `/model <id>` 在 Provider 内切换；完整写法 `<provider>/<model>` 仅当 provider 与当前一致时接受。
+- `/model <id>` 在 Provider 内切换：裸 id 与 `provider/model` 写法都按 `--model` 同规则归一化（前缀等于当前 Provider 时剥掉、是另一种 api-type 时报错、其余含斜杠的值按模型 id 原样），再以 `<当前 Provider>/<id>` 调 `session.setModel`。CLI 的 Provider 配置以 `allowUndeclaredModels` 创建（`strictModels=false`），清单外的模型 id 也可切换，能力回退内置目录/保守默认（见 provider-api.md）。
 - `/context` 渲染 `ContextReport`：各 section 的名称、来源、字符数、估算 token，加上合计 `estimatedTokens / budgetTokens` 与 `overBudget`。查询只读，不构建请求也不产生事件。
 - `/compact` 输出结果摘要（`throughSeq`、摘要字符数）；没有可压缩内容或摘要失败时打印原因，返回码不产生——REPL 命令的错误只显示，不影响进程。
 

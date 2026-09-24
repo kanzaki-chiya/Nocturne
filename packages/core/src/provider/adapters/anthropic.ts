@@ -21,7 +21,7 @@ import {
 } from "./ai-sdk-common.js";
 
 export interface AnthropicConfig {
-  /** Provider id（也是 providerOptions 的键） */
+  /** Provider id（providerOptions 的 SDK 命名空间固定为 "anthropic"，与 id 无关） */
   id: string;
   /** 适配器类型标识（providerConfigs 联合的分辨字段） */
   type: "anthropic";
@@ -31,6 +31,8 @@ export interface AnthropicConfig {
   apiKeyEnv: string;
   /** 模型能力覆盖（合并在内置目录之上） */
   models?: Record<string, ModelOverride> | undefined;
+  /** true 时接受清单外的模型 id（回退内置目录/保守默认；见 Provider.strictModels） */
+  allowUndeclaredModels?: boolean | undefined;
   /** 原样传给适配器（providerOptions.anthropic） */
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
@@ -59,6 +61,7 @@ export function createAnthropicProvider(
   return {
     id: config.id,
     type: "anthropic",
+    strictModels: config.allowUndeclaredModels !== true,
     models: () => modelList,
 
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
@@ -83,10 +86,15 @@ export function createAnthropicProvider(
         streamRetries: 0,
         abortSignal: signal,
         onError: suppressSdkErrorLog,
-        ...(request.providerOptions !== undefined
+        // SDK 命名空间固定为 "anthropic"（与 config.id 无关）；
+        // 配置级 providerOptions 为底，请求级覆盖
+        ...(config.providerOptions !== undefined || request.providerOptions !== undefined
           ? {
               providerOptions: {
-                [config.id]: request.providerOptions as Record<string, JSONValue>,
+                anthropic: {
+                  ...(config.providerOptions ?? {}),
+                  ...(request.providerOptions ?? {}),
+                } as Record<string, JSONValue>,
               },
             }
           : {}),

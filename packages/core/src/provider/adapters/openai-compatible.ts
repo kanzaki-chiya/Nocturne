@@ -27,6 +27,8 @@ export interface OpenAICompatibleConfig {
   apiKeyEnv: string;
   /** 模型能力覆盖（合并在内置目录之上） */
   models?: Record<string, ModelOverride> | undefined;
+  /** true 时接受清单外的模型 id（回退内置目录/保守默认；见 Provider.strictModels） */
+  allowUndeclaredModels?: boolean | undefined;
   /** 原样传给适配器（providerOptions） */
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
@@ -53,6 +55,7 @@ export function createOpenAICompatibleProvider(
   return {
     id: config.id,
     type: "openai-compatible",
+    strictModels: config.allowUndeclaredModels !== true,
     models: () => modelList,
 
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
@@ -74,10 +77,14 @@ export function createOpenAICompatibleProvider(
         streamRetries: 0,
         abortSignal: signal,
         onError: suppressSdkErrorLog,
-        ...(request.providerOptions !== undefined
+        // 配置级 providerOptions 为底，请求级覆盖；命名空间是 config.id（SDK name）
+        ...(config.providerOptions !== undefined || request.providerOptions !== undefined
           ? {
               providerOptions: {
-                [config.id]: request.providerOptions as Record<string, JSONValue>,
+                [config.id]: {
+                  ...(config.providerOptions ?? {}),
+                  ...(request.providerOptions ?? {}),
+                } as Record<string, JSONValue>,
               },
             }
           : {}),
