@@ -1,13 +1,13 @@
 # MCP（Model Context Protocol）客户端
 
-> 状态：提议 v0.1（Phase 5 设计）｜ 前置阅读：[modules.md](modules.md)、[tools.md](tools.md)、[permissions.md](permissions.md)、[config.md](config.md) ｜ 决策：[ADR-0011](../decisions/ADR-0011-mcp-client.md)
+> 状态：已接受 v0.1（Phase 5 已验收）｜ 前置阅读：[modules.md](modules.md)、[tools.md](tools.md)、[permissions.md](permissions.md)、[config.md](config.md) ｜ 决策：[ADR-0011](../decisions/ADR-0011-mcp-client.md)
 
 Nocturne 作为 MCP **客户端**接入外部 MCP 服务器：把服务器提供的工具包装成 `ToolDefinition`，经与内置工具完全相同的注册接口与执行管线运行。本阶段只接入 MCP 的 **tools** 能力；resources、prompts、sampling 等其余能力见第 9 节"暂不设计"。
 
 ## 1. 定位与原则
 
 - MCP 工具不是特权通道：`ToolDefinition` 接口、执行管线九步、权限求值、结果预算对它一视同仁，Agent Loop 与执行器中不出现任何 MCP 分支（`mcp__` 前缀只是工具名）。
-- **Core 不依赖 MCP 实现**：客户端代码在独立包 `packages/mcp`（`@nocturne/mcp`，引入官方 SDK 的代价不落到 `@nocturne/core` 上，见 [repository-layout.md](../development/repository-layout.md) 第 3 节与 ADR-0011）。Core 只通过 `RuntimeOptions.mcp` 接收一个符合 `McpConnector` 接口的对象（接口类型定义在 `tools`，见第 8 节），由客户端（`apps/cli`）负责装配。
+- **Core 不依赖 MCP 实现**：客户端代码在独立包 `packages/mcp`（`@nocturne/mcp`，引入官方 SDK 的代价不落到 `@nocturne/core` 上，见 [repository-layout.md](../development/repository-layout.md) 第 2 节与 ADR-0011）。Core 只通过 `RuntimeOptions.mcp` 接收一个符合 `McpConnector` 接口的对象（接口类型定义在 `tools`，见第 8 节），由客户端（`apps/cli`）负责装配。
 - MCP 服务器是**会执行的配置**：`command` + `args` 意味着启动任意进程，因此项目级 MCP 配置的信任复用 ADR-0008 的 `trust.json` 语义（第 3 节），不另起一套机制。
 
 ## 2. 传输
@@ -165,8 +165,8 @@ core:      wrapSession 中 resolved.mcpServers 非空且 options.mcp 存在时
 
 - `McpConnector` / `McpSession` / `McpServerConfig` / `McpServerStatus` 接口类型定义在 `tools`（注册接口的消费方），经 `@nocturne/core` 公开导出；`@nocturne/mcp` 只依赖 `@nocturne/core` 的两个公开入口与 `@modelcontextprotocol/sdk`，depcheck 与 `apps/*` 同规则（只允许 `index` / `protocol/index` 两个入口）。
 - `RuntimeOptions.mcp` 缺省时整个 MCP 路径不存在（行为与 Phase 4 一致）；测试可注入假 connector 或直接用 `RuntimeOptions.mcpServers` + 假 connector。
-- `platform` 新增 `spawnPipe(command, args, opts)`：`stdin` 可写、`stdout` 原始字节流（MCP 是换行分隔 UTF-8 JSON-RPC，不走控制台代码页解码）、`stderr` 按控制台编码解码进诊断、`kill()` 走进程树终止。这是 platform 的通用能力，`hooks` 将来也用它。
-- Core 侧需要的公开导出增补：`ToolDefinition`、`ToolResult`、`ToolContext`、`ToolScope`、`ToolTraits`、`McpConnector` 等类型经 `@nocturne/core` 导出（纯类型，兼容变更；platform 的 `FileSystem`/`ProcessRunner`/`PathOps` 等类型同理）。
+- `platform` 的 `spawnPipe(command, args, opts)`：`stdin` 可写、`stdout` 原始字节流（MCP 是换行分隔 UTF-8 JSON-RPC，不走控制台代码页解码）、`stderr` 按控制台编码解码进诊断、`kill()` 走进程树终止。这是 platform 的通用能力，`hooks` 也使用它。
+- Core 侧的公开导出：`ToolDefinition`、`ToolResult`、`ToolContext`、`ToolScope`、`ToolTraits`、`McpConnector` 等类型经 `@nocturne/core` 导出（纯类型，兼容变更；platform 的 `FileSystem`/`ProcessRunner`/`PathOps` 等类型同理）。
 
 ## 9. 暂不设计
 

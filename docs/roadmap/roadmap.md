@@ -64,7 +64,7 @@
 
 - Windows 与 POSIX 上强杀 Nocturne 时，不理会 stdin 关闭的 MCP 服务器可能成为孤儿；能在 EOF 后退出的服务器不残留，手动清理方法见 [mcp.md](../architecture/mcp.md) 第 4 节。
 
-## Phase 6 — Subagent（已完成，2026-09-25）
+## Phase 6 — Subagent（已完成，2026-09-25 验收）
 
 **前提**：Runtime、会话、事件、工具、上下文在前面阶段中已稳定。
 
@@ -90,8 +90,17 @@
 
 服务端因不支持 `reasoning_effort` 等能力字段返回 400 时，错误提示尚不会指引用户关闭模型配置中的对应能力；v0.1.0 暂缓处理，不做自动删字段重试。
 
+## v0.1.0 收尾
+
+Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流消费路径加入首事件与事件间空闲超时，Agent Loop 对无文本无工具调用的 `stop` 作有上限重试（[ADR-0014](../decisions/ADR-0014-stream-timeout-empty-response.md)）；统一工具进度片段的行渲染；补足 TUI 交互测试与真实进程验收；用测试工作区完成两个适配器的基础真实服务冒烟；整理用户指南、更新日志、版本号与第三方许可说明。`ModelRequest.reasoningEffort` 本版保留未使用，见 [provider-api.md](../protocols/provider-api.md) 第 3 节。
+
+**已知限制**：主进程被强杀时，不响应 stdin EOF 的 MCP 服务器可能残留，Windows 与 POSIX 的手动清理方式见 [mcp.md](../architecture/mcp.md) 第 4 节；传统 conhost 的 TUI 活动区可能有残影，建议 Windows Terminal（[tui.md](../apps/tui.md)）；服务端因能力字段不支持而返回 400 时尚无针对性配置提示，本版暂缓。扩展思考 Anthropic 模型的 `finish` 兜底轮与 DeepSeek 推理历史回传专项只有在配置对应模型变量时才运行；未配置不作为已通过验收。
+
 ## 之后（未排期）
 
 RPC 服务端与远程客户端、OS 级沙箱、后台任务、会话分叉与回退、Web / Desktop / IDE 客户端、单文件分发。进入排期前各自先写设计文档。
 
 - **v0.2 候选：MCP 强杀清理**：评估纯 Node 看护进程，detached 启动，轮询主进程是否存活，主进程消失后清理 MCP 进程树；沿用会话锁的“开机时间 + PID”判定以规避 PID 复用，Windows 与 POSIX 共用。进入排期前先写设计文档，再评估竞态、退出语义和成本。
+- **v0.2 候选：子会话 ask 冒泡**：按 [subagent.md](../architecture/subagent.md) 第 7.1 节方案 (a)，把子会话的确认请求路由到父客户端；先设计事件、权限回复与中断语义。
+- **v0.2 候选：可展开的子代理进度**：以结构化进度替代当前 `tool.progress` 单行摘要，设计客户端共享的可展开视图与回放规则。
+- **v0.2 候选：项目级自定义 agent 定义**：复用 `trust.json` 的项目信任机制，先设计定义文件的加载、权限收敛与提示词边界。

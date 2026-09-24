@@ -1,8 +1,8 @@
 # Tool API
 
-> 状态：已接受 v0.2 ｜ 设计依据：[tools.md](../architecture/tools.md)、[permissions.md](../architecture/permissions.md) ｜ 代码位置（计划）：`packages/core/src/tools/`
+> 状态：已接受 v0.2 ｜ 设计依据：[tools.md](../architecture/tools.md)、[permissions.md](../architecture/permissions.md) ｜ 代码位置：`packages/core/src/tools/`
 
-本文定义工具的最小接口。所有工具（内置、MCP（Phase 5，见 [mcp.md](../architecture/mcp.md)）与将来的插件）都实现同一接口，经同一执行管线运行。
+本文定义工具的最小接口。所有工具（内置、MCP（见 [mcp.md](../architecture/mcp.md)）与将来的插件）都实现同一接口，经同一执行管线运行。
 
 ## 1. ToolDefinition
 

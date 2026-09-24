@@ -1,6 +1,6 @@
 # Provider API
 
-> 状态：已接受 v0.2 ｜ 设计依据：[providers.md](../architecture/providers.md)、[ADR-0005](../decisions/ADR-0005-own-provider-interface.md) ｜ 代码位置（计划）：`packages/core/src/provider/`
+> 状态：已接受 v0.2 ｜ 设计依据：[providers.md](../architecture/providers.md)、[ADR-0005](../decisions/ADR-0005-own-provider-interface.md) ｜ 代码位置：`packages/core/src/provider/`
 
 本文定义 Provider 适配器必须实现的接口与必须遵守的流式契约。公共类型 `ContentBlock`、`ToolCallRef`、`Usage`、`ModelRef` 定义在 [events.md](events.md) 第 4 节。
 

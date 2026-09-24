@@ -2,7 +2,7 @@
 
 本页是导航索引，不是介绍文档。每篇文档只负责一个概念；按"总览 → 模块设计 → 协议"逐层深入，只读与当前任务相关的部分。
 
-文档状态：**Architecture v0.2（已接受）**。这是 Phase 1 实现的基线；修改需走 [development/workflow.md](development/workflow.md) 中的流程，影响多个模块或难以逆转的修改需要新增 ADR。各文档开头标注自身版本。
+文档状态：**已接受；Phase 0–6 已验收**。各文档开头的 `v0.x` 是文档修订号，不是产品版本号。修改需走 [development/workflow.md](development/workflow.md) 中的流程，影响多个模块或难以逆转的修改需要新增 ADR。
 
 ## 从这里开始
 

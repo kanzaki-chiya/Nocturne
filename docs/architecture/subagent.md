@@ -1,6 +1,6 @@
 # Subagent（子代理会话）
 
-> 状态：提议 v0.1（Phase 6 设计）｜ 前置阅读：[tools.md](tools.md)、[sessions.md](sessions.md)、[permissions.md](permissions.md)、[agent-loop.md](agent-loop.md)、[mcp.md](mcp.md)、[hooks.md](hooks.md) ｜ 决策：[ADR-0013](../decisions/ADR-0013-subagent.md)
+> 状态：已接受 v0.1（Phase 6 已验收）｜ 前置阅读：[tools.md](tools.md)、[sessions.md](sessions.md)、[permissions.md](permissions.md)、[agent-loop.md](agent-loop.md)、[mcp.md](mcp.md)、[hooks.md](hooks.md) ｜ 决策：[ADR-0013](../decisions/ADR-0013-subagent.md)
 
 Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调用内置 `task` 工具，工具经注入的 `SubagentLauncher` 创建一条独立的会话日志并运行受控 Turn（受限工具集、独立上下文、继承或收紧的权限），子代理用 `finish` 工具交回结果，`task` 把结果作为普通工具结果返回父会话。
 

@@ -1,6 +1,6 @@
 # 可观测性（调试输出）
 
-> 状态：提议 v0.1（Phase 5 设计）｜ 前置阅读：[events.md](../protocols/events.md)、[modules.md](modules.md)、[sessions.md](sessions.md)
+> 状态：已接受 v0.1（Phase 5 已验收）｜ 前置阅读：[events.md](../protocols/events.md)、[modules.md](modules.md)、[sessions.md](sessions.md)
 
 诊断日志（diagnostics）是**开发/排障面的观察通道**：JSONL 格式的详细记录，覆盖模型请求、上下文构成、token、工具耗时、权限决定、Hook 与 MCP 调用。它与会话事件的分工：
 
@@ -67,7 +67,7 @@
 
 ## 4. 模块位置与接线
 
-- 实现：`packages/core/src/diagnostics/`（新内部模块）。依赖 `protocol`、`platform`；向上被 `agent`、`context`、`tools`、`hooks`、`index` 使用；`packages/mcp` 通过注入拿到 `Diagnostics` 接口（协议类型定义在 `tools`，与 `McpConnector` 同处）。
+- 实现：`packages/core/src/diagnostics/`（内部模块）。依赖 `protocol`、`platform`；向上被 `agent`、`context`、`tools`、`hooks`、`index` 使用；`packages/mcp` 通过注入拿到 `Diagnostics` 接口（协议类型定义在 `tools`，与 `McpConnector` 同处）。
 - 接线：`createRuntime` 读 `RuntimeOptions.debug?: { enabled?: boolean; file?: string }` 构造 sink（文件 sink 用 `platform.fs` 追加写），经 `TurnDeps`/`ExecuteEnv`/`HookRunner`/`McpOpenScope` 传入各模块。未启用时传 noop。
 - CLI：`--debug`、`--debug-file` 映射到 `RuntimeOptions.debug`；env 变量在 `apps/cli/src/config.ts` 解析。
 

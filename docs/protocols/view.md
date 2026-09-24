@@ -264,7 +264,7 @@ function replaySessionView(events: readonly DurableEvent[]): SessionView; // ≡
 
 `RuntimeEvent = DurableEvent | EphemeralEvent`（`subscribe` 的回调类型即此）。
 
-### 测试计划（packages/core/test/view.test.ts）
+### 测试覆盖（packages/core/test/view.test.ts）
 
 场景矩阵（每个场景跑 live 序列与 durable-only 序列两条路径，断言 V1）：
 

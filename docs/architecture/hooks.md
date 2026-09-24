@@ -1,6 +1,6 @@
 # Hooks
 
-> 状态：提议 v0.1（Phase 5 设计）｜ 前置阅读：[tools.md](tools.md) 第 3 节、[permissions.md](permissions.md)、[config.md](config.md)、[ADR-0008](../decisions/ADR-0008-project-trust-grants.md) ｜ 决策：[ADR-0012](../decisions/ADR-0012-hooks.md)
+> 状态：已接受 v0.1（Phase 5 已验收）｜ 前置阅读：[tools.md](tools.md) 第 3 节、[permissions.md](permissions.md)、[config.md](config.md)、[ADR-0008](../decisions/ADR-0008-project-trust-grants.md) ｜ 决策：[ADR-0012](../decisions/ADR-0012-hooks.md)
 
 Hook 是**配置驱动的外部命令**：Runtime 在固定事件点上启动一个子进程，stdin 传入 JSON 上下文，读取 stdout 的 JSON 结果（或退出码语义），把结果作为**输入/建议**合并进既有管线。Hook 不是事件系统插件——它不能调用 Runtime 内部 API，只能在自己的事件点上做契约允许的有限动作。
 
@@ -22,7 +22,7 @@ Hook 是**配置驱动的外部命令**：Runtime 在固定事件点上启动一
 - `PermissionRequest` 解决真实需求：团队想在 `ask` 时自动放行"安全"操作、自动拒绝"危险"操作，而不是每次问人。它与 `PreToolUse` 有重叠但语义不同——前者在**权限主体已解析**之后运行，能拿到精确的权限请求内容（`mcp github/push` 而不是模糊的工具名）。
 - `SessionStart` / `SessionEnd` 是生命周期里唯二不耦合 turn 节奏的点（恢复会话时也会触发 `SessionStart`，便于"恢复后继续"场景）。
 - `TurnStart` / `TurnEnd` 提供提交级拦截与审计；`TurnStart` 放在 `message.user` **之后**是有意的——被拦截的输入仍然落进持久日志，可审计。
-- **不做**：`ModelRequest`/`ModelResponse`（采样级 Hook 会把模型上下文暴露给外部进程，信任与脱敏问题另议）、`Compact`（Phase 6 上下文压缩的接入点，届时设计）。
+- **不做**：`ModelRequest`/`ModelResponse`（采样级 Hook 会把模型上下文暴露给外部进程，信任与脱敏问题另议）、`Compact`（若加入，需另行设计）。
 
 ## 2. Hook 的形态与契约
 

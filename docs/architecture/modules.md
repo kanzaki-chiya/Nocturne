@@ -40,7 +40,7 @@
 - `packages/mcp`（`@nocturne/mcp`）只允许依赖 `@nocturne/core` 的 `index` / `protocol/index` 两个入口与 `@modelcontextprotocol/sdk`——与 `apps/*` 同一检查规则；**Core 不依赖 `mcp`**（见 [mcp.md](mcp.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)）。
 - 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。客户端之间不互相依赖，唯一例外：`apps/cli` 为 `nctrn --tui` 对 `apps/tui` 做惰性 `import()`（[ADR-0010](../decisions/ADR-0010-tui-rendering.md)）。
 
-依赖规则在 Phase 1 用静态检查工具（如 dependency-cruiser）固化进 CI，见 [workflow.md](../development/workflow.md)。
+依赖规则已由 dependency-cruiser 固化，见 [workflow.md](../development/workflow.md)。
 
 ## 2. 为什么没有独立的 `events` 模块
 
@@ -162,7 +162,7 @@ Phase 6 增补：`subagent` 选项（`enabled`/`maxDepth`/`maxConcurrent`/`maxSt
 
 `describeContext` 与 `listModels` 是**只读查询**：不改变会话状态、不产生事件，只为客户端展示服务。
 
-Phase 4 增补的客户端共享入口（提议，[apps/tui.md](../apps/tui.md) 第 8 节）：`normalizeModelRef`（`provider/model` 归一化，CLI 与 TUI 的 `/model` 共用）。配置收集与会话打开语义留在 CLI，`nctrn --tui` 在打开会话后把 `Session` 交给 `runTui`。
+Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.md) 第 8 节）：`normalizeModelRef`（`provider/model` 归一化，CLI 与 TUI 的 `/model` 共用）。配置收集与会话打开语义留在 CLI，`nctrn --tui` 在打开会话后把 `Session` 交给 `runTui`。
 
 这组命令与事件就是将来 RPC 需要序列化的全部内容；进程内客户端和远程客户端使用同一份语义（见 [ADR-0002](../decisions/ADR-0002-ui-independent-core.md)）。
 
@@ -181,7 +181,7 @@ Phase 4 增补的客户端共享入口（提议，[apps/tui.md](../apps/tui.md) 
 - **依赖**：`@nocturne/core` 公开 API 与 `protocol`；另有到 `apps/tui` 的惰性 `import()`（`--tui` 委托）。
 - 详见 [apps/cli.md](../apps/cli.md)。
 
-### apps/tui（Phase 4，提议）
+### apps/tui（Phase 4，已验收）
 
 - **负责**：终端界面客户端——会话回放、工具状态与 diff、权限对话框、状态栏、会话选择器；渲染 `SessionView`，把按键翻译为公开命令。
 - **不负责**：任何 Agent 行为、事件投影（用 `protocol` 的 reducer）、权限判定；不复用 CLI 渲染代码。

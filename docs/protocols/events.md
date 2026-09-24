@@ -1,6 +1,6 @@
 # 事件协议（Event Protocol）
 
-> 状态：已接受 v0.2 ｜ 设计依据：[sessions.md](../architecture/sessions.md)、[ADR-0003](../decisions/ADR-0003-session-event-log.md) ｜ 代码位置（计划）：`packages/core/src/protocol/`
+> 状态：已接受 v0.2 ｜ 设计依据：[sessions.md](../architecture/sessions.md)、[ADR-0003](../decisions/ADR-0003-session-event-log.md) ｜ 代码位置：`packages/core/src/protocol/`
 
 本文是事件类型与字段的唯一主文档。修改任何事件，先改本文。
 

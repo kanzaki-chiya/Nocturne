@@ -18,6 +18,7 @@
 | Agent Loop、Turn 流程、中断、重试 | [architecture/agent-loop.md](docs/architecture/agent-loop.md) |
 | 会话、持久化、恢复 | [architecture/sessions.md](docs/architecture/sessions.md) |
 | 事件类型或字段 | [protocols/events.md](docs/protocols/events.md) |
+| 会话派生视图、重放、客户端共享状态 | [protocols/view.md](docs/protocols/view.md) |
 | 上下文构建、压缩、提示词组装 | [architecture/context.md](docs/architecture/context.md) |
 | 工具运行时或内置工具 | [architecture/tools.md](docs/architecture/tools.md)、[protocols/tool-api.md](docs/protocols/tool-api.md) |
 | 权限规则、审批流程 | [architecture/permissions.md](docs/architecture/permissions.md) |
@@ -28,7 +29,9 @@
 | 子代理（task 工具、子会话） | [architecture/subagent.md](docs/architecture/subagent.md)、[decisions/ADR-0013](docs/decisions/ADR-0013-subagent.md) |
 | Provider、模型能力、流式归一化 | [architecture/providers.md](docs/architecture/providers.md)、[protocols/provider-api.md](docs/protocols/provider-api.md) |
 | CLI 参数、REPL、事件渲染、权限确认 | [apps/cli.md](docs/apps/cli.md) |
+| TUI 布局、按键、渲染 | [apps/tui.md](docs/apps/tui.md)、[decisions/ADR-0010](docs/decisions/ADR-0010-tui-rendering.md) |
 | 模块划分、依赖方向、目录 | [architecture/modules.md](docs/architecture/modules.md)、[development/repository-layout.md](docs/development/repository-layout.md) |
+| 测试、许可证、发布流程 | [development/workflow.md](docs/development/workflow.md)、[roadmap/roadmap.md](docs/roadmap/roadmap.md) |
 
 ## 3. 硬性约束
 

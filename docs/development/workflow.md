@@ -92,7 +92,7 @@ Phase 2 的 CLI 冒烟（`apps/cli`）：在临时目录生成一个含失败测
 - Nocturne 以 GPL-3.0 发布（见仓库根目录 `LICENSE`）。各包的 `package.json` 使用 `"license": "GPL-3.0-only"`。
 - 引入第三方代码、提示词或素材前，确认其许可证与 GPL-3.0 兼容（例如 MIT、BSD、Apache-2.0 可以并入；许可证不明或不兼容的不能并入）。
 - 从参考项目复制或改写代码时，保留原版权与许可声明；Apache-2.0 来源（如 ZCode、Codex）还需保留其 NOTICE 中适用的内容，并在文件中注明修改。来源记录在根目录 `THIRD-PARTY-NOTICES.md`（首次引入第三方代码时创建）。
-- npm 依赖的许可证同样需要与 GPL-3.0 兼容，新增依赖时检查。
+- npm 依赖的许可证同样需要与 GPL-3.0 兼容，新增依赖时检查；v0.1.0 直接依赖的许可证核对见根目录 [THIRD-PARTY-NOTICES.md](../../THIRD-PARTY-NOTICES.md)。
 
 ## 7. 安全与隐私
 

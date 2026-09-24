@@ -7,13 +7,13 @@
 ## 1. Nocturne 是什么
 
 1. **定位**：一个开源的 Coding Agent Runtime，外加以它为核心的命令行助手 `nctrn`。用户在代码仓库中用自然语言下达任务，Agent 通过工具阅读、搜索、修改代码并运行命令。
-2. **第一阶段目标**：一个小而可靠的 CLI Coding Agent：流式输出、基础工具（read / write / edit / grep / glob / shell）、权限审批、可恢复的会话。
+2. **当前能力**：CLI 与 TUI 共用 Runtime，提供流式输出、内置与 MCP 工具、Hooks、子代理、权限审批和可恢复的会话。
 3. **长期目标**：同一套 Runtime 被 CLI、TUI、RPC 服务以及更远的 Web / Desktop / IDE 客户端复用。客户端增多时 Runtime 不需要改变。
 4. **Runtime 与 UI 分离**：Runtime 只产生结构化事件、接收结构化命令；它不知道自己被谁驱动、怎样渲染。
 5. **一个事实来源**：会话的持久化事实是一条追加式事件日志（见 [sessions.md](sessions.md)）。会话状态、模型上下文、界面视图都从它派生，不存在第二份需要同步的"真相"。
 6. **显式声明优于隐式判断**：工具声明自己的副作用，权限按规则判定，Provider 声明模型能力。核心流程里不按工具名或 Provider 名写分支。
 7. **可观测、可恢复**：每一步都有事件；中断、错误、权限决定都有明确的归属和记录；崩溃后能恢复到最后一个完整的事实。
-8. **正确且简单优先于为假想需求而复杂**：MCP、Hooks、Subagent、RPC 等能力按路线图逐步加入，现在只保证不堵死它们的接入点。
+8. **正确且简单优先于为假想需求而复杂**：MCP、Hooks、Subagent 已按路线图实现；RPC 等能力仍未排期。
 
 **Nocturne 不是**：多 Agent 编排框架、云端服务、带账号体系的商业产品、浏览器或桌面自动化工具，也不是任何现有产品的 fork。
 
@@ -76,9 +76,14 @@
 | `provider` | Provider 接口、模型能力、各模型服务的适配器 | [providers.md](providers.md) |
 | `tools` | 工具注册表、执行管线、内置工具 | [tools.md](tools.md) |
 | `permission` | 权限规则求值与审批请求 | [permissions.md](permissions.md) |
-| `config` | 配置分层加载与合并、项目信任、Grant 持久化（Phase 3 实现） | [config.md](config.md) |
+| `config` | 配置分层加载与合并、项目信任、Grant 持久化 | [config.md](config.md) |
+| `diagnostics` | 脱敏诊断日志 | [observability.md](observability.md) |
+| `hooks` | 生命周期与工具事件点的外部命令 | [hooks.md](hooks.md) |
+| `packages/mcp` | MCP stdio 客户端与工具包装 | [mcp.md](mcp.md) |
+| `subagent` | 受控子会话与结果返回 | [subagent.md](subagent.md) |
 | `platform` | 文件系统、子进程、路径等跨平台 I/O | [modules.md](modules.md) |
 | `apps/cli` | `nctrn` 命令行客户端 | [apps/cli.md](../apps/cli.md) |
+| `apps/tui` | Ink 终端客户端 | [apps/tui.md](../apps/tui.md) |
 
 模块边界、公开接口与依赖方向见 [modules.md](modules.md)；目录结构见 [repository-layout.md](../development/repository-layout.md)。
 
@@ -95,5 +100,6 @@
 - [ADR-0007](../decisions/ADR-0007-config-format.md)：配置文件格式与分层
 - [ADR-0008](../decisions/ADR-0008-project-trust-grants.md)：项目配置信任模型与 Grant 持久化
 - [ADR-0009](../decisions/ADR-0009-session-lock.md)：会话锁机制
+- [decisions/README.md](../decisions/README.md)：后续已接受的 ADR-0010–0014 与全部决策索引
 
 这些决定的研究依据见 [research/zcode-review.md](../research/zcode-review.md)。

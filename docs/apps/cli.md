@@ -2,7 +2,7 @@
 
 > 状态：已接受 v0.3 ｜ 前置阅读：[modules.md](../architecture/modules.md) 第 4 节、[events.md](../protocols/events.md)、[config.md](../architecture/config.md) ｜ 代码位置：`apps/cli/`
 
-本文是 `nctrn` 命令行客户端的唯一设计文档：命令行参数、REPL、事件渲染、权限确认、退出码、Phase 2 的 Provider 配置过渡方案。
+本文是 `nctrn` 命令行客户端的设计文档：命令行参数、REPL、事件渲染、权限确认、退出码与 Provider 配置。
 
 ## 1. 定位与边界
 
@@ -159,7 +159,7 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 ## 8. 工程约束
 
 - **目录**：`apps/cli/`，包名 `@nocturne/cli`，`bin: { nctrn: dist/main.js }`；`tsdown` 构建 ESM。
-- **第三方运行时依赖：零**（npm registry 依赖；workspace 包 `@nocturne/mcp` 除外——MCP 装配点在 CLI，见下）。参数解析用 `util.parseArgs`，行输入用 `node:readline`，颜色用 `util.styleText`。非 Node 内置的新依赖需要理由，并在本文登记。该约定按包生效：`apps/tui` 经 [ADR-0010](../decisions/ADR-0010-tui-rendering.md) 单独批准终端依赖，不影响本包。
+- **第三方运行时依赖：零**（npm registry 依赖；workspace 包 `@nocturne/mcp`、`@nocturne/tui` 除外——MCP 装配点在 CLI，`--tui` 惰性加载 TUI，见下）。参数解析用 `util.parseArgs`，行输入用 `node:readline`，颜色用 `util.styleText`。非 Node 内置的新依赖需要理由，并在本文登记。该约定按包生效：`apps/tui` 经 [ADR-0010](../decisions/ADR-0010-tui-rendering.md) 单独批准终端依赖，不影响本包。
 - **MCP 装配**：`createRuntime` 时构造 `createMcpConnector(platform)`（`@nocturne/mcp`）注入 `RuntimeOptions.mcp`；`--debug*` 参数映射到 `RuntimeOptions.debug`。TUI 路径（`nctrn --tui`）由 CLI 完成装配后把 `Session` 交给 `runTui`，MCP/Hook/诊断对 TUI 透明。
 - **依赖方向**（dependency-cruiser 固化）：
   - 规则 `no-deep-import-from-outside-core` 的语义收紧为：`apps/` 解析到 `packages/core/src/` 的 import 只允许命中 `index.ts` 或 `protocol/index.ts`——即只有 `@nocturne/core` 包入口与 `@nocturne/core/protocol` 两个入口可用，任何内部路径（包括 `protocol/` 下的散文件）一律禁止。
