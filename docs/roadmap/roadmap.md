@@ -44,7 +44,7 @@
 
 **验收**：CLI 与 TUI 驱动同一套 Runtime，行为一致；TUI 不包含 Agent 逻辑，只消费公开 API 与事件。已用假 OpenAI 兼容 SSE 端点驱动真实进程逐项核对：流式中文对话、read+edit 工具与 diff、权限五键（a/s/p/d/x，d 带反馈、session/project Grant 生效）、Ctrl+C 中断、`-c`/`--resume` 恢复、杀进程后 process_exited 收束、会话内 `/resume` 切换与视图重放、非 TTY 退出 2、40 列窄终端；界面在 Windows Terminal 与 conhost 实际查看（含中文输入与 resize），conhost 活动区重绘残影为已知限制（ADR-0010）。
 
-## Phase 5 — MCP 与 Hooks（进行中）
+## Phase 5 — MCP 与 Hooks（已完成，2026-09-24 验收）
 
 **内容**：MCP 客户端（工具包装为 `ToolDefinition`，命名空间隔离，权限类别 `mcp`）；Hooks（PreToolUse、PostToolUse、权限相关 Hook、会话生命周期）；项目级 Hook 的信任机制；可观测性（请求、上下文构成、token、工具耗时、权限决定的调试输出）。
 

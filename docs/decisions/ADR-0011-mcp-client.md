@@ -1,6 +1,6 @@
 # ADR-0011：MCP 客户端——独立包 + 官方 SDK + 自定义 stdio 传输
 
-- 状态：提议
+- 状态：已接受
 - 日期：2026-09-24
 - 相关：[architecture/mcp.md](../architecture/mcp.md)、[modules.md](../architecture/modules.md)、[repository-layout.md](../development/repository-layout.md)
 

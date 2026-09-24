@@ -1,6 +1,6 @@
 # ADR-0012：Hooks——外部命令 + JSON 契约 + 复用项目信任
 
-- 状态：提议
+- 状态：已接受
 - 日期：2026-09-24
 - 相关：[architecture/hooks.md](../architecture/hooks.md)、[ADR-0008](ADR-0008-project-trust-grants.md)、[permissions.md](../architecture/permissions.md)
 
