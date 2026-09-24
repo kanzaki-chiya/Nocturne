@@ -60,13 +60,15 @@ interface ModelRequest {
       reasoningEffort，正常路径不触发此规则 */
   toolChoice?: { name: string }
   maxOutputTokens: number
-  reasoningEffort?: string        // 仅在模型声明支持该档位时设置
+  reasoningEffort?: string        // 保留字段：Runtime 当前不赋值，适配器当前不映射为服务端推理参数
   cachePrefix?: { systemBlocks: number; messages: number }   // 可缓存前缀的边界提示，适配器自行决定是否使用
   providerOptions?: Record<string, unknown>                  // 请求级 Provider 专有选项，原样交给适配器，Core 不解释
 }
 ```
 
 `providerOptions` 的命名空间由适配器定义：openai-compatible 以 Provider id 为键（`{ "<id>": {...} }`）；anthropic 固定为 `{ anthropic: {...} }`，与 Provider id 无关。适配器把**配置级** `providerOptions`（ProviderConfig）与**请求级** `providerOptions`（ModelRequest）做浅合并后填入该命名空间，请求级覆盖同名键；两者都缺省时不产生该字段。
+
+`reasoningEffort` 暂为保留字段：Context/Agent 不设置它，两个现有适配器也不把它映射成推理请求参数。当前要开启推理，应按服务端要求使用 `providerOptions`；手工构造请求时，该字段仅参与与强制 `toolChoice` 的保守冲突判断。本次只纠正文字与注释，不改变流式契约或错误语义，因此不触发第 6 节的 ADR 要求。
 
 ```ts
 type SystemBlock = { text: string }

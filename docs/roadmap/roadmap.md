@@ -86,6 +86,8 @@
 
 **不做**：Swarm、角色系统（含自定义 agent 定义文件）、Agent 间消息总线、分布式执行、后台/异步子任务、子代理常驻与唤醒、隔离工作区（worktree/overlay）、子会话权限冒泡、子代理独立模型。
 
+**已知问题**：统一的 `reasoningEffort` 档位尚未由模型配置填入请求，也未映射到两个适配器；当前只能通过 Provider 专有的 `providerOptions` 开启推理。后续实现需同时定义 Anthropic 档位到 token budget 的换算，并验证子代理强制 `finish` 的兜底轮。
+
 ## 之后（未排期）
 
 RPC 服务端与远程客户端、OS 级沙箱、后台任务、会话分叉与回退、Web / Desktop / IDE 客户端、单文件分发。进入排期前各自先写设计文档。

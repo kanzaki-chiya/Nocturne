@@ -150,8 +150,8 @@ export interface ToolChoicePlan {
  * 决定本轮请求如何携带 toolChoice。规则（provider-api.md 第 3 节）：
  * 思考/推理已开启时，优先把可识别的推理配置从本轮 providerOptions 移除
  * （临时关闭），保留 toolChoice 使强制生效；对无法安全移除的推理声明
- * （归一化字段 request.reasoningEffort——它由适配器映射为一级推理参数，
- * 静默丢弃等于篡改用户显式配置）则丢弃 toolChoice。
+ * （保留字段 request.reasoningEffort：Runtime 不赋值，适配器不映射；
+ * 手工请求若设置它，则保守地丢弃 toolChoice）则丢弃 toolChoice。
  * 两种处置都不会把明知无效的组合发给服务端。
  */
 export function planToolChoice(
