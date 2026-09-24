@@ -57,11 +57,11 @@ execute(call, ctx):
 - 每个工具声明 `maxModelChars`（默认 30,000 字符，约 7,500 token）。超出时保留开头与结尾，中间替换为"已省略 N 字符"的说明。
 - 结构化 `output`（供客户端渲染，例如 diff、退出码）与模型可见的 `modelContent` 分开；前者也有独立上限，防止事件与日志膨胀。
 - **完整输出落盘**：`modelContent` 因超预算被截断时，执行器把截断前的完整文本写入附件文件，模型可见内容中注明文件路径，可用 `read` 按需查看：
-  - 位置：`<NOCTURNE_HOME>/sessions/attachments/<sessionId>/<callId>.txt`（会话数据目录内，不写入被操作的仓库）；文件随会话数据一起由用户管理，运行时不做自动清理。
+  - 位置：`<sessionsDir>/attachments/<sessionId>/<callId>.txt`（`sessionsDir` 来自 `RuntimeOptions`，默认 `<NOCTURNE_HOME>/sessions`；不写入被操作的仓库）；文件随会话数据一起由用户管理，运行时不做自动清理。
   - 落盘本身有上限（默认 1 MB）：再大的输出只写头部并在文件末尾注明截断，避免无限写盘。
   - 落盘写失败时降级为普通截断（模型可见内容注明未落盘），不影响 `tool.completed` 的结算。
   - `tool.completed` 增加可选字段 `spillPath`（落盘文件的绝对路径，兼容新增）；客户端据此显示"输出已截断，完整内容在 \<path\>"，模型可见的 `modelContent` 中同样注明路径与预览。
-  - 权限协同：所有预设都内置 `read <attachmentsDir>/** → allow`（[permissions.md](permissions.md) 第 6 节），模型回读自己的落盘输出不触发确认。
+  - 权限协同：所有预设都内置 `read <sessionsDir>/attachments/<sessionId>/** → allow`（[permissions.md](permissions.md) 第 6 节），**只放行当前会话**的落盘目录——读其他会话的附件仍走正常权限求值。
 
 ## 5. 超时、中断与并发
 

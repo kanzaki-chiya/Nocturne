@@ -87,7 +87,8 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
 
 ```text
 <NOCTURNE_HOME>/
-├── config.json                       用户配置（含 trustedWorkspaces，config.md）
+├── config.json                       用户手写配置（程序从不改写，config.md）
+├── trust.json                        可信工作区列表（nctrn trust/untrust，原子写）
 ├── AGENTS.md                         用户级项目指令（可选）
 ├── grants/<workspaceKey>.json        按工作区保存的项目级 Grant（ADR-0008）
 └── sessions/

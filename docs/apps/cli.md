@@ -24,7 +24,7 @@ nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trust
 |---|---|
 | `-p, --print [prompt]` | 非交互模式。值可省略：省略时从 stdin 读全部输入作为 prompt |
 | `-c, --continue` | 恢复绑定到当前目录（`workspaceRoot` 相同）的最近会话；没有时按"新建会话"处理 |
-| `--resume <id>` | 恢复指定会话；支持 `-p` 组合（恢复后直接执行该 prompt） |
+| `--resume <id>` | 恢复指定会话；支持 `-p` 组合（恢复后直接执行该 prompt）与 `--model` 组合（见下） |
 | `--sessions` | 列出全部会话（id、创建时间、绑定目录、模型、锁状态），按修改时间倒序，随后退出（退出码 0） |
 | `--force-unlock` | 与 `--resume` / `--continue` 搭配：先删除残留锁再打开（[sessions.md](../architecture/sessions.md) 第 4 节） |
 | `--preset <name>` | 会话权限预设：`read-only` \| `default` \| `auto-edit` \| `full-access`，写入 `session.created`；恢复会话时该参数拒绝（预设以日志为准，改用 `/preset`） |
@@ -41,12 +41,13 @@ nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trust
 - 工作目录即进程 cwd；`workspaceRoot` 取 cwd 的真实路径。
 - **恢复与会话目录绑定**：`--resume` / `--continue` 打开的会话记录了它自己的 `cwd`/`workspaceRoot`（sessions.md 第 7 节）。会话目录与进程 cwd 不一致时：交互模式提示并默认拒绝（显式确认后继续，工具仍以会话记录的目录为准）；非交互模式直接报错（退出码 2）。
 - **锁冲突**：会话被其他进程占用时报 `session_locked` 并显示锁内容（pid、主机名、启动时间），退出码 2；确认持有者已退出时用 `--force-unlock`。
-- **恢复失败的其余情形**（不存在、`session_log_corrupt`、`session_log_newer`、模型已不可解析）同样以退出码 2 退出并打印原因。
+- **恢复失败的其余情形**（不存在、`session_log_corrupt`、`session_log_newer`）同样以退出码 2 退出并打印原因。
+- **模型已不可解析**（Provider 清单或配置变了）也拒绝恢复，提示中给出用法：加 `--model <id>` 恢复并切换——Runtime 在取锁、修复之后先写入 `session.config_changed { model }` 再进入空闲（sessions.md 第 4 节），组合写法：`nctrn --resume <id> --model <id>`。
 - 恢复成功后打印一行恢复摘要（`session.recovery`：截断尾部、补齐的中断调用与 Turn 计数；无修复则不打印）。
 - 凭据**只能**来自环境变量（`workflow.md` 第 7 节），不接受命令行上的密钥值；`--api-key-env` 指定的是变量名。
 - 启动时校验配置：缺 `baseURL`（openai-compatible）、缺凭据环境变量、缺模型 id，都打印缺失项并以退出码 2 退出，两种模式一致。
 - 未知参数、参数缺值：打印用法并以退出码 2 退出。
-- `trust` / `untrust` 子命令读写用户配置 `<NOCTURNE_HOME>/config.json` 的 `trustedWorkspaces`（[config.md](../architecture/config.md) 第 3 节），打印结果后以退出码 0 退出；用户配置损坏时按配置文件错误处理（退出码 2）。
+- `trust` / `untrust` 子命令原子写 `<NOCTURNE_HOME>/trust.json`（[config.md](../architecture/config.md) 第 3 节），打印结果后以退出码 0 退出；程序不改写手写的 `config.json`。
 
 ## 3. 交互模式（REPL）
 

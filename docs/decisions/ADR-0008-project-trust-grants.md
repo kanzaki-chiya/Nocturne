@@ -14,7 +14,7 @@ ADR-0004 已定了两条关键性质：不可信的项目规则只能收紧（�
 ## 决定
 
 1. **信任的粒度是整个项目配置**：未信任时只有 `permissions.rules` 中的 `ask`/`deny` 生效（收紧语义不变）；`model`、`providers`、`preset`、`turn` 等其余字段全部忽略。不做"部分字段可信"的细分——Provider 重定向的风险不允许 `model`/`providers` 在未信任时生效。
-2. **信任标记只能写在用户层**：`<NOCTURNE_HOME>/config.json` 的 `trustedWorkspaces`（工作区真实路径）。仓库内文件无法自我授权。CLI 提供 `nctrn trust` / `nctrn untrust` 写这份列表。
+2. **信任标记存放在机器维护的 `<NOCTURNE_HOME>/trust.json`**（`{ version, workspaces: 真实路径[] }`，原子写）。它是唯一授予信任的来源，仓库内文件无法自我授权；`nctrn trust` / `nctrn untrust` 只写这个文件。**程序从不改写手写的 `config.json`**——配置文件的作者永远是用户，机器维护的数据一律落在自己的文件里（与 Grant 文件同一约定）。
 3. **Grant 是精确授权**：Phase 3 的 Grant 只精确匹配——路径类主体匹配解析后的真实路径，shell 主体匹配完整命令字符串。"匹配某个前缀/目录/命令族"这类粗粒度授权不在确认选项中提供；需要粗粒度允许时由用户显式写规则（配置文件的 `permissions.rules`），而不是在确认对话框里随手放权。
 4. **项目 Grant 存 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`**，按工作区分文件，原子写；会话 Grant 只在内存。
 5. Grant 只能把求值结果 `ask` 变为 `allow`（ADR-0004 第 3 条不变）；`deny` 不可被授权覆盖。
@@ -29,4 +29,5 @@ ADR-0004 已定了两条关键性质：不可信的项目规则只能收紧（�
 
 - **项目 Grant 写进仓库的 `.nocturne/`**（ADR-0004 已否决）：会把授权状态泄漏给所有拿到仓库的人，且与"仓库内容不可信"自相矛盾。
 - **确认选项中提供"目录前缀"授权**：确认框每个选项都是一次 UI 决策成本，前缀授权容易让用户放权过大；先只给精确授权，观察到真实需求后再扩协议（`PermissionReply` 可兼容地加 scope 字段）。
-- **信任标记放系统钥匙串或单独文件**：`trustedWorkspaces` 本质是用户配置的一部分，单独存放只会多一处同步。
+- **信任标记写进 `config.json`**：`trustedWorkspaces` 字段看起来是配置的一部分，但 `nctrn trust` 需要程序改写它——程序改写手写配置文件会丢注释顺序、引入写冲突，也让"配置文件只由用户拥有"这条边界变模糊。机器维护的数据（信任、Grant）一律放独立文件，原子写，程序与用户各写各的。
+- **信任标记放系统钥匙串**：`trust.json` 本质上是机器本地状态而非配置，但没有机密性需求，钥匙串只会增加平台差异与排障成本。

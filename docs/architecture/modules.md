@@ -119,7 +119,7 @@
 
 ```ts
 const runtime = await createRuntime({ cwd, providerConfigs, interactive, config })  // 选项见 RuntimeOptions
-const session = await runtime.createSession({ model: "provider/model" })  // 或 resumeSession(id, { force? }) / listSessions()
+const session = await runtime.createSession({ model: "provider/model" })  // 或 resumeSession(id, { force?, model? }) / listSessions()
 const unsubscribe = session.subscribe((event) => render(event))
 await session.submit({ text: "修复登录测试" })                 // 返回在 Turn 结束时 resolve
 session.interrupt()

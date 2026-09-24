@@ -19,7 +19,7 @@
 |---|---|---|---|
 | `SubjectRequest` | 工具声明的、未解析的主体：`{ kind, target }` | 工具的 `permissionSubjects(input)`（纯函数） | — |
 | `PermissionSubject` | 解析后的主体：增加 `resolved`（真实路径）与 `where` | Tool Executor 解析 + 权限层计算 `where` | `tool.started`、`permission.requested` |
-| `PermissionRule` | 一条规则：`{ kind?, pattern, action, where? }`；`kind` 缺省或 `*` 匹配全部类别 | 预设、用户配置、项目配置、命令行参数 | 配置文件 |
+| `PermissionRule` | 一条规则：`{ kind?, pattern, action, where?, label? }`；`kind` 缺省或 `*` 匹配全部类别；`label` 是给人看的短说明，命中时进入解释文本 | 预设、用户配置、项目配置、命令行参数 | 配置文件 |
 | `Grant` | 用户在确认时授予的授权："本会话内允许"或"在此项目中始终允许"，形状 `{ kind, target, createdAt }`（5.4） | 客户端回复 | 会话内存 / 用户数据目录 |
 | `PermissionDecision` | 求值结果：`{ action, matchedRule?, source, reason }` | `PermissionPolicy.evaluate` | `tool.started.permission`、`permission.resolved` |
 | `PermissionRequest` | `ask` 时发给客户端的待确认请求，有 `requestId` | `PermissionGate` | `permission.requested` |
@@ -143,7 +143,7 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 
 ## 6. 预设
 
-预设只是一组有序规则，没有隐藏逻辑，用户可以在其上追加规则覆盖。预设构造时拿到 `workspaceRoot` 与 `attachmentsDir`（工具输出落盘目录，见 [tools.md](tools.md) 第 4 节），据此生成具体规则；求值时预设与其他层规则没有任何差别。
+预设只是一组有序规则，没有隐藏逻辑，用户可以在其上追加规则覆盖。预设构造时拿到 `workspaceRoot`、`sessionsDir`、`sessionId` 与 `nocturneHome`（据此生成具体的路径模式）；求值时预设与其他层规则没有任何差别。
 
 | 预设 | read（工作区） | read（外部） | edit（工作区） | edit（外部） | shell | network / mcp |
 |---|---|---|---|---|---|---|
@@ -155,9 +155,10 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 表中没有覆盖到的组合落到"无规则匹配 → `ask`"。所有预设的规则序列都按以下次序排列（后写优先）：
 
 1. 宽规则（按上表，如 `default` 的 `read ** where=workspace → allow`）；
-2. **落盘目录可读**：`read <attachmentsDir>/** → allow`（工具输出落盘后模型可直接回读；该目录只含工具输出副本）；
-3. **受保护路径**：对 `.git/` 内部与 `.nocturne/` 配置目录的 `edit` 一律 `ask`——即使 `read-only` 把 `edit` 一律 `deny`，这两条仍在其后，因此受保护路径的最终结果是 `ask` 而不是 `deny`；
-4. **高风险命令**（仅 `full-access`）：一组已知高风险命令模式（如 `rm -rf *`、`git push --force*`、`git reset --hard*`、`sudo *`）保持 `ask`。这是基于模式的提示，不是可靠的危险检测。
+2. **本会话落盘目录可读**：`read <sessionsDir>/attachments/<sessionId>/** → allow`——只放行**当前会话**的落盘输出（模型回读自己的完整输出不触发确认），读其他会话的附件仍走正常求值（`default` 下即 `ask`）；
+3. **受保护路径**：对 `.git/` 内部与 `.nocturne/` 配置目录的 `edit` 保证"至少 ask"——在 `read-only`（`edit` 一律 `deny`）中不生成这两条 ask 规则，受保护路径保持 `deny`；其余预设中生成 `ask` 且排在宽 `allow` 之后；
+4. **Nocturne 授权数据**：对 `<NOCTURNE_HOME>/config.json`、`trust.json`、`grants/**` 的 `edit` 保证"至少 ask"（同上，`read-only` 保持 `deny`），`label` 为"修改 Nocturne 授权配置"，命中时出现在确认提示与 `permission.resolved.rule` 中。**如实说明**：这是提示而非安全边界——`--yes` 会把这类 `ask` 提升为 `allow`，`full-access` 预设下的 `shell` 也可以绕过（权限不是沙箱，见第 1 节）；
+5. **高风险命令**（仅 `full-access`）：一组已知高风险命令模式（如 `rm -rf *`、`git push --force*`、`git reset --hard*`、`sudo *`）保持 `ask`。这是基于模式的提示，不是可靠的危险检测。
 
 ## 7. 需要确认时（ask）
 

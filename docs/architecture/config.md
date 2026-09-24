@@ -13,10 +13,12 @@
 | 层 | 位置 / 来源 | 信任 | 说明 |
 |---|---|---|---|
 | 内置默认 | 代码内常量 | 可信 | 预设名 `default`、Turn 默认值等；不是一个文件 |
-| 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户自己的偏好与授权（含 `trustedWorkspaces`） |
+| 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；**程序从不改写它** |
 | 项目配置 | `<workspaceRoot>/.nocturne/config.json` | **默认不可信** | 来自被操作的仓库，见第 3 节信任模型 |
 | 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；凭据只经环境变量进入 |
 | 命令行参数 | `nctrn` 参数 | 可信 | 本次启动的显式意图，优先级最高 |
+
+机器维护的运行时数据（信任列表、项目 Grant）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`，见第 3、4 节）——程序写自己的文件，不碰用户手写的配置。
 
 逐层合并后的结果叫 `ResolvedConfig`：每个字段都知道自己来自哪一层（用于诊断与权限规则的命中解释）。
 
@@ -28,7 +30,7 @@
 - 文件不存在即跳过该层；`NOCTURNE_HOME` 改变时全部位置随之移动。
 
 ```ts
-// 各层文件共用一个 schema；trustedWorkspaces 只在用户层生效
+// 各层文件共用一个 schema；程序从不改写它们
 interface ConfigFile {
   /** 默认模型，"provider/model" 形式 */
   model?: string;
@@ -40,8 +42,6 @@ interface ConfigFile {
     /** 追加的权限规则，形状即 PermissionRule（permissions.md 第 2 节） */
     rules?: PermissionRule[];
   };
-  /** 仅用户层：标记为可信的工作区真实路径列表（第 3 节） */
-  trustedWorkspaces?: string[];
   /** Turn 参数覆盖（agent-loop.md 3.8） */
   turn?: { maxSteps?: number; retryLimit?: number; retryBaseDelayMs?: number };
 }
@@ -54,7 +54,6 @@ interface ConfigFile {
 | `model`、`permissions.preset`、`turn.*` | 高层覆盖低层 |
 | `providers` | 按 `id` 合并：同 id 条目浅合并（高层字段覆盖），其中 `models` 按模型 id 再逐条合并；不同 id 并存 |
 | `permissions.rules` | 追加：高层规则排在低层之后（权限"后写优先"语义见 permissions.md 5.1） |
-| `trustedWorkspaces` | 并集；只读用户层，其他层该字段被忽略 |
 
 ## 3. 项目配置的信任模型
 
@@ -62,7 +61,7 @@ interface ConfigFile {
 
 - **未信任时**，项目配置里只有 `permissions.rules` 中**收紧方向**（`ask` / `deny`）的规则参与求值：与可信结果取更严格者，`allow` 被忽略。其余字段（`model`、`providers`、`preset`、`turn`）全部忽略。这保证一份仓库配置永远无法放宽用户的安全边界，也无法把会话引到别的 Provider 或模型（重定向端点是信息泄漏通道）。
 - **信任后**，项目配置整体进入第 1 节的正常分层（规则排序位于用户配置之后、环境变量之前）。
-- 信任的标记**只能来自用户层**：`trustedWorkspaces` 列出工作区的真实路径（`realpath` 后比较，大小写规则同平台）。项目配置写 `trustedWorkspaces` 无效——不能让仓库自我授权。
+- 信任的标记存放在**机器维护的** `<NOCTURNE_HOME>/trust.json`：`{ version, workspaces: string[] }`，列出工作区真实路径（`realpath` 后比较，大小写规则同平台）。文件由 `nctrn trust` / `nctrn untrust` 原子写（临时文件 + rename）；用户也可以手工编辑。它是唯一能授予信任的来源——项目配置里没有这个字段，仓库不能自我授权。
 - 会话打开（create / resume）时若发现项目配置存在但未信任，发出临时事件 `runtime.warning(code="project_config_untrusted")` 告知客户端；CLI 显示如何信任（`nctrn trust`，见 [apps/cli.md](../apps/cli.md)）。
 
 ## 4. Grant 的持久化
@@ -102,6 +101,7 @@ CLI:   loadConfig(platform, { cliArgs })          → RuntimeConfig
                   , projectConfig: { present, trusted }
                   , grants: GrantStore             项目 Grant（含 add/持久化）
                   , warnings: string[] }
+         setWorkspaceTrusted(root, trusted)        nctrn trust/untrust：原子写 trust.json
 ```
 
 - `createRuntime` 接受可选的 `config: RuntimeConfig`；缺省时行为与 Phase 2 相同（无配置文件、固定 `default` 预设），测试不受影响。

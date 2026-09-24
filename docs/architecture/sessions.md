@@ -59,11 +59,11 @@ MVP 不做快照；若将来出现加载瓶颈，再追加 `session.snapshot` �
 
 顺序不能调换：**先取得锁，再读取和修改日志**。否则两个进程同时恢复时，可能各自追加修复事件后才发现对方存在。
 
-1. **取得排他锁**：以"文件不存在才创建"的原子方式创建锁文件 `<sessionId>.lock`（`writeFile` 的排他创建），内容为 `{ pid, hostname, startedAt }` JSON。锁已存在时按失效判定处理（ADR-0009）：主机名相同且该 pid 已不存在 → 失效锁，删除后重试一次；主机名不同、pid 存活或无法判定 → 拒绝打开，`SessionError(code = "session_locked")`；`resumeSession(id, { force: true })`（CLI `--force-unlock`）先删锁再走正常流程。网络文件系统上的会话目录不受支持；锁的已知限制（pid 复用、非强制性）见 ADR-0009。
+1. **取得排他锁**：以"文件不存在才创建"的原子方式创建锁文件 `<sessionId>.lock`（`writeFile` 的排他创建），内容为 `{ pid, hostname, startedAt }` JSON。锁已存在时按失效判定处理（ADR-0009）：锁的 `startedAt` 早于本机最近一次开机（`Date.now() - os.uptime() * 1000`）→ 失效；主机名相同且该 pid 已不存在 → 失效；两者皆判为失效时删除后重试一次，重试仍撞上锁则拒绝；主机名不同、pid 存活或无法判定 → 拒绝打开，`SessionError(code = "session_locked")`；`resumeSession(id, { force: true })`（CLI `--force-unlock`）先删锁再走正常流程。网络文件系统上的会话目录不受支持；锁的已知限制（pid 复用、非强制性）见 ADR-0009。
 2. **读取并校验**：逐行解析。
    - 检查 `session.created.formatVersion` 与全部事件类型；遇到高于自身支持的版本或不认识的持久化事件类型，拒绝恢复（`session_log_newer`），见 [events.md](../protocols/events.md) 第 8 节。
    - 检查 `seq` 从 1 连续递增。
-   - 恢复时校验会话记录的模型仍能在当前 Provider 清单中解析；不能解析时拒绝恢复（`invalid_model`）并提示用户调整配置或模型——恢复出来的会话不能带着一个无法工作的模型进入 `idle`。
+   - 恢复时校验会话记录的模型仍能在当前 Provider 清单中解析；不能解析时按调用方意图分流：`resumeSession(id, { model })` 携带替代模型（CLI `--resume`/`--continue` 与 `--model` 组合）时，在修复事件之后、开放之前写入 `session.config_changed { model }`，使新模型成为会话事实的一部分；未携带替代模型则拒绝恢复（`invalid_model`），错误信息中给出"加 `--model` 指定替代模型"的用法提示。恢复出来的会话不能带着一个无法工作的模型进入 `idle`。
 3. **处理损坏尾部**：只有**最后一行**可以被视为损坏尾部（文件不以换行符结束，或最后一行无法解析为合法事件——即使它看起来是合法 JSON，没有结尾换行符也说明写入中断过）。处理方式是把这部分字节另存为同目录的 `<sessionId>.jsonl.tail-<时间戳>` 以便诊断，然后**物理截断**日志到最后一个完整记录之后。只在读取时忽略是不够的：下一次追加会接在坏字节后面，把一条好记录也变成坏记录。
 4. **中间损坏**：任何非最后一行无法解析、`seq` 不连续或倒序，都视为日志损坏，拒绝打开（`session_log_corrupt`），不自动修复、不跳过。用户可以用只读方式查看可解析的部分（只读查看工具暂缓实现）。
 5. **追加修复事件**：见第 6 节。
