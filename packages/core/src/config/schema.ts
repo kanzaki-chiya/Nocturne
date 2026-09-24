@@ -27,23 +27,35 @@ const capabilitiesSchema = z.object({
   promptCache: z.boolean().optional(),
 });
 
-const modelOverrideSchema = z.object({
+/** 模型条目 schema（config.json 与 providers.json 共用） */
+export const modelOverrideSchema = z.object({
   displayName: z.string().optional(),
   contextWindow: z.number().int().positive().optional(),
   maxOutputTokens: z.number().int().positive().optional(),
   capabilities: capabilitiesSchema.optional(),
+  pricing: z
+    .object({
+      input: z.number().nonnegative().optional(),
+      output: z.number().nonnegative().optional(),
+    })
+    .optional(),
 });
 
-const providerEntrySchema = z
+/** Provider 条目 schema（config.json 与 providers.json 共用） */
+export const providerEntrySchema = z
   .object({
     id: z.string().min(1),
     type: z.enum(["openai-compatible", "anthropic"]).optional(),
     baseURL: z.string().min(1).optional(),
-    apiKeyEnv: z.string().min(1),
+    // v0.2：可选——缺省时凭据经凭据索引/系统后端解析（provider-setup.md 第 3 节）
+    apiKeyEnv: z.string().min(1).optional(),
     models: z.record(z.string(), modelOverrideSchema).optional(),
     allowUndeclaredModels: z.boolean().optional(),
     providerOptions: z.record(z.string(), z.unknown()).optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    // 向导/"refresh"写入的上游来源标注（provider-setup.md 第 7 节）
+    source: z.literal("upstream").optional(),
+    fetchedAt: z.string().optional(),
   })
   .check((ctx) => {
     // openai-compatible（含缺省 type）必须有 baseURL——适配器构造必需
@@ -135,7 +147,12 @@ const CREDENTIAL_KEYS = new Set([
 const ENV_REFERENCE = /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/;
 const CREDENTIAL_NAME = /key|token|secret|password|credential|auth/i;
 
-function rejectCredentialKeys(raw: unknown, filePath: string): void {
+/**
+ * 凭据字段硬拒绝（config.md 第 3 节）：providers 条目的内联凭据字段、
+ * mcp.servers.*.env 的疑似凭据字面量。parseConfigFile 与 providers.json
+ * 的加载共用——配置文件的任何位置都不允许出现密钥值。
+ */
+export function rejectCredentialKeys(raw: unknown, filePath: string): void {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return;
   const providers = (raw as { providers?: unknown }).providers;
   if (Array.isArray(providers)) {

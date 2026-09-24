@@ -10,6 +10,7 @@ import type {
   HookEntry,
   HookPoint,
   McpServerEntry,
+  ModelRef,
   PermissionPresetName,
   PermissionRule,
 } from "../protocol/index.js";
@@ -32,24 +33,38 @@ export interface ModelOverrideShape {
         promptCache?: boolean | undefined;
       }
     | undefined;
+  /**
+   * 上游声明的按量价格（USD / 每百万 token，provider-api.md 第 2 节）。
+   * 只在上游或配置明确声明时存在；界面未声明时留空。
+   */
+  pricing?: { input?: number | undefined; output?: number | undefined } | undefined;
 }
 
 /**
  * 声明式 Provider 配置条目（config.md 第 2 节：
  * 形状即 RuntimeOptions.providerConfigs 的元素）。
- * 凭据值不允许出现——只允许 apiKeyEnv 指向环境变量名。
+ * 凭据值不允许出现——只允许 apiKeyEnv 指向环境变量名（v0.2 起可选，
+ * 缺省时经凭据索引/系统后端解析，见 provider-setup.md 第 3 节）。
  */
 export interface ProviderEntryConfig {
   id: string;
   /** 适配器类型；缺省 openai-compatible */
   type?: "openai-compatible" | "anthropic" | undefined;
   baseURL?: string | undefined;
-  /** 环境变量名（不是凭据值） */
-  apiKeyEnv: string;
+  /** 环境变量名（不是凭据值）；可选——未声明时凭据经凭据索引/系统后端解析 */
+  apiKeyEnv?: string | undefined;
   models?: Record<string, ModelOverrideShape> | undefined;
   allowUndeclaredModels?: boolean | undefined;
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
+  /**
+   * models 字段的来源标注（provider-setup.md 第 7 节）：向导 /
+   * `/provider refresh` 写入上游列表时标记 "upstream" 并记录 fetchedAt。
+   * 手写条目不携带这两个字段。
+   */
+  source?: "upstream" | undefined;
+  /** ISO 8601 获取时间（仅 source="upstream"） */
+  fetchedAt?: string | undefined;
 }
 
 /** Turn 参数覆盖（结构与 agent 的 TurnConfig 对齐，config 不依赖 agent） */
@@ -133,6 +148,83 @@ export interface CliConfigArgs {
   apiKeyEnv?: string | undefined;
 }
 
+// ── 凭据与向导配置（provider-setup.md 第 2、3、6 节） ──────
+
+/** 凭据后端标识（界面提示与测试断言用） */
+export type CredentialBackend = "dpapi" | "keychain" | "libsecret" | "memory" | "none";
+
+/**
+ * 统一凭据存储接口（provider-setup.md 第 3 节）。
+ * 密钥不以明文落盘：交给操作系统后端（DPAPI / 钥匙串 / Secret Service），
+ * credentials.json 索引只记录后端与密文元数据。get 结果在实现内按
+ * providerId 缓存，set/delete 使对应条目失效。
+ */
+export interface CredentialStore {
+  /** 取出该服务商的密钥；索引无此 id 或后端取出失败时返回 undefined */
+  get(providerId: string): Promise<string | undefined>;
+  /** 写入/更新密钥并登记索引；后端不可用时拒绝 */
+  set(providerId: string, key: string): Promise<void>;
+  /** 删除密钥与索引条目；不存在时无操作 */
+  delete(providerId: string): Promise<void>;
+  /** 索引中是否登记了该服务商（不解密、不起子进程；describeProviders 用） */
+  has(providerId: string): boolean;
+  /** 当前后端标识 */
+  backend(): CredentialBackend;
+}
+
+/** 向导写入的 <NOCTURNE_HOME>/providers.json（provider-setup.md 第 2 节） */
+export interface ProviderSetupFile {
+  version: 1;
+  /** 默认模型，"provider/model" 形式；只在向导里选择"设为默认"时写入 */
+  model?: string | undefined;
+  providers?: ProviderEntryConfig[] | undefined;
+}
+
+/** /provider 列表条目（不含密钥；provider-setup.md 第 1 节） */
+export interface ProviderOverview {
+  id: string;
+  type: "openai-compatible" | "anthropic";
+  /** baseURL 的主机名；无 baseURL（Anthropic 官方端点）时为 undefined */
+  host?: string | undefined;
+  /** 密钥来源：凭据文件 / 环境变量（envName 给出变量名）/ 缺失 */
+  keySource: "credential" | "env" | "missing";
+  /** keySource="env" 或条目声明了 apiKeyEnv 时的变量名 */
+  keyEnvName?: string | undefined;
+  /** 定义该条目的最高层（后写优先的胜出者） */
+  origin: "setup" | "user" | "project" | "env" | "cli";
+  /** 向导条目被更高层同名条目覆盖（/provider 标注"被 config.json 覆盖"） */
+  overridden: boolean;
+  /** 声明的模型数 */
+  modelCount: number;
+  /** 条目可由向导管理（写入 providers.json）；其他层的条目只读 */
+  managed: boolean;
+}
+
+/** 上游模型信息（provider-setup.md 第 7 节字段映射的产物；纯数据） */
+export interface UpstreamModelEntry {
+  id: string;
+  displayName?: string | undefined;
+  contextWindow?: number | undefined;
+  maxOutputTokens?: number | undefined;
+  pricing?: { input?: number | undefined; output?: number | undefined } | undefined;
+  capabilities?:
+    | {
+        reasoning?: "none" | "hidden" | "visible" | undefined;
+        imageInput?: boolean | undefined;
+      }
+    | undefined;
+}
+
+/**
+ * 上游模型列表获取器（provider 模块的 fetchModels 注入点——
+ * config 不依赖 provider，上游字段映射的解释在 provider 层）。
+ */
+export type UpstreamFetch = (
+  entry: ProviderEntryConfig,
+  key: string | undefined,
+  signal?: AbortSignal,
+) => Promise<UpstreamModelEntry[]>;
+
 /**
  * loadConfig 的产物（config.md 第 6 节）。
  * base 不含项目层；forWorkspace 按会话 workspaceRoot 加载项目层与 Grant。
@@ -143,10 +235,46 @@ export interface RuntimeConfig {
   /** 工具输出落盘根目录（sessionsDir 推导，tools.md 第 4 节） */
   readonly attachmentsDir: string;
   readonly grantsDir: string;
+  /** providers.json 损坏/版本不符时的人读说明（runtime.warning 的 provider_setup_invalid） */
+  readonly providerSetupWarning?: string | undefined;
   base: ResolvedConfig;
   forWorkspace(workspaceRoot: string): Promise<WorkspaceConfig>;
   /** nctrn trust / untrust：原子写 <NOCTURNE_HOME>/trust.json */
   setWorkspaceTrusted(workspaceRoot: string, trusted: boolean): Promise<void>;
+
+  /** 统一凭据存储（provider-setup.md 第 3 节）；get 结果进程内缓存 */
+  readonly credentials: CredentialStore;
+  /**
+   * 向导写入/更新服务商条目（providers.json）。key 存在时经
+   * credentials.set 写入系统后端并登记索引；defaultModel（"provider/model"
+   * 全形）存在时同时写入默认模型字段。
+   * entry.models 携带上游声明的能力/价格字段（第 7 节）。
+   */
+  saveSetupProvider(
+    entry: ProviderEntryConfig,
+    opts?: { key?: string | undefined; defaultModel?: string | undefined },
+  ): Promise<void>;
+  /** 更新密钥（经 credentials.set；缓存失效后下一次请求即用新密钥） */
+  setCredential(providerId: string, key: string): Promise<void>;
+  /**
+   * 删除向导写入的条目及其凭据。条目不在 providers.json（由更高层
+   * 定义或不存在）时抛 ConfigError("config_invalid")，由调用方提示。
+   */
+  removeSetupProvider(providerId: string): Promise<void>;
+  /**
+   * /provider 列表数据：逐层合并后的服务商总览（密钥来源、来源层、
+   * 模型数、是否被高层覆盖）。给 workspaceRoot 时并入该工作区可信
+   * 项目层的条目。
+   */
+  describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>;
+  /** /provider refresh：重新从上游获取模型列表与限额并写回 providers.json */
+  refreshUpstreamLimits(providerId: string): Promise<void>;
+  /** 把默认模型（"provider/model"）写入 providers.json 的 model 字段 */
+  setDefaultModel(model: string): Promise<void>;
+  /** recent-models.json 当前内容（"provider/model" 形式，新→旧，最多 10 条；loadConfig 时预读的缓存） */
+  recentModels(): ModelRef[];
+  /** setModel/新建会话时记录最近使用（去重、置顶、原子写） */
+  recordRecentModel(ref: ModelRef): Promise<void>;
 }
 
 export interface LoadConfigOptions {
@@ -155,4 +283,11 @@ export interface LoadConfigOptions {
   nocturneHome?: string | undefined;
   /** 测试注入环境变量读取器；缺省 platform.env */
   env?: ((name: string) => string | undefined) | undefined;
+  /** 测试注入凭据存储；缺省按平台探测系统后端 */
+  credentials?: CredentialStore | undefined;
+  /**
+   * /provider refresh 的上游获取实现（core/index 注入 provider 层的
+   * fetchModels）；缺省时 refreshUpstreamLimits 拒绝并说明。
+   */
+  upstreamFetch?: UpstreamFetch | undefined;
 }

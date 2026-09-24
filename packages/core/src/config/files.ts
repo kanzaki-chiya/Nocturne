@@ -45,17 +45,26 @@ export async function loadConfigFile(
   return parseConfigFile(raw, path);
 }
 
-/** 原子写 JSON 文件：先写同目录临时文件再 rename（config.md 第 3、4 节） */
+/** 原子写 JSON 文件：先写同目录临时文件再 rename（config.md 第 3、4 节）。
+ *  mode 仅 POSIX 生效且只在新建文件时应用（凭据索引 0600、父目录 0700） */
 export async function writeJsonAtomic(
   fs: FileSystem,
   paths: PathOps,
   path: string,
   data: unknown,
+  options?: { fileMode?: number; dirMode?: number },
 ): Promise<void> {
-  await fs.mkdir(paths.dirname(path));
+  await fs.mkdir(
+    paths.dirname(path),
+    options?.dirMode !== undefined ? { mode: options.dirMode } : undefined,
+  );
   const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
   try {
-    await fs.writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
+    await fs.writeFile(
+      tmp,
+      `${JSON.stringify(data, null, 2)}\n`,
+      options?.fileMode !== undefined ? { mode: options.fileMode } : undefined,
+    );
     await fs.rename(tmp, path);
   } catch (e) {
     await fs.unlink(tmp).catch(() => undefined);

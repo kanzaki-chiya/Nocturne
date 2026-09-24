@@ -8,7 +8,9 @@ export type ConfigErrorCode =
   /** 读写配置/授权数据失败（权限、I/O） */
   | "config_unavailable"
   /** 配置试图内联凭据值（只允许 apiKeyEnv 指向环境变量名） */
-  | "config_credential_rejected";
+  | "config_credential_rejected"
+  /** 无可用系统凭据后端（provider-setup.md 第 3 节：不退回明文） */
+  | "credential_backend_unavailable";
 
 export class ConfigError extends Error {
   readonly code: ConfigErrorCode;

@@ -1,16 +1,36 @@
 /**
  * 配置加载入口（config.md 第 6 节）。
- * base = 用户配置 + 环境变量 + 命令行参数（不含项目层）；
- * forWorkspace(root) 按会话记录的工作区加载项目层与 Grant 存储。
+ * base = 向导配置（providers.json）+ 用户配置 + 环境变量 + 命令行参数
+ * （不含项目层）；forWorkspace(root) 按会话记录的工作区加载项目层与 Grant。
+ * v0.2 增补：凭据存储、providers.json 向导写入接口、recent-models.json。
  */
+import type { ModelRef } from "../protocol/index.js";
 import type { Platform } from "../platform/index.js";
 import { envLayerConfig, cliLayerConfig } from "./env.js";
 import { ConfigError } from "./errors.js";
 import { loadConfigFile, writeJsonAtomic } from "./files.js";
+import { createCredentialStore } from "./credentials.js";
 import { loadGrantStore } from "./grants.js";
 import { mergeLayers, type MergeLayer } from "./merge.js";
+import {
+  describeProviderLayers,
+  loadProviderSetup,
+  readRecentModels,
+  recordRecentModel,
+  refreshUpstreamLimits,
+  removeSetupProvider,
+  saveSetupProvider,
+  setSetupDefaultModel,
+} from "./setup.js";
 import { readTrustList } from "./trust.js";
-import type { LoadConfigOptions, RuntimeConfig, WorkspaceConfig } from "./types.js";
+import type {
+  ConfigFile,
+  LoadConfigOptions,
+  ProviderOverview,
+  ProviderSetupFile,
+  RuntimeConfig,
+  WorkspaceConfig,
+} from "./types.js";
 
 const PROJECT_CONFIG_DIR = ".nocturne";
 const PROJECT_CONFIG_NAME = "config.json";
@@ -21,31 +41,61 @@ export async function loadConfig(
 ): Promise<RuntimeConfig> {
   const { fs, paths } = platform;
   const home = paths.resolve(options.nocturneHome ?? platform.nocturneHome(), ".");
+  // POSIX 上以 0700 创建（会话日志含代码与对话内容，repository-layout.md 第 5 节）；
+  // Windows 维持用户目录默认权限（mode 被忽略）
+  await fs.mkdir(home, { mode: 0o700 });
   const sessionsDir = paths.join(home, "sessions");
   const trustPath = paths.join(home, "trust.json");
   const grantsDir = paths.join(home, "grants");
 
-  // 用户配置：损坏即快速失败（config.md 第 2 节）
-  const userFile = (await loadConfigFile(fs, paths.join(home, "config.json"))) ?? {};
+  const env = options.env ?? ((n: string) => platform.env(n));
 
-  const env = envLayerConfig(options.env ?? ((n) => platform.env(n)));
-  const cli = cliLayerConfig(options.cliArgs);
+  // 凭据存储（provider-setup.md 第 3 节）：按平台探测系统后端
+  const credentialsInit =
+    options.credentials !== undefined
+      ? { store: options.credentials, warning: undefined }
+      : await createCredentialStore(platform, home);
+  const credentials = credentialsInit.store;
+
+  // 向导配置层（providers.json）：损坏/版本不符 → 忽略 + provider_setup_invalid
+  const setup = await loadProviderSetup(platform, home);
+  const setupFile: ProviderSetupFile = setup.file ?? { version: 1 };
+
+  // 用户配置：损坏即快速失败（config.md 第 2 节）
+  const userFile: ConfigFile = (await loadConfigFile(fs, paths.join(home, "config.json"))) ?? {};
+
+  const envLayer = envLayerConfig(env);
+  const cliLayer = cliLayerConfig(options.cliArgs);
 
   const baseLayers: MergeLayer[] = [
+    { origin: "setup", file: setupFile },
     { origin: "user", file: userFile },
-    // 环境变量层不能携带权限规则；origin 仅用于标注（该层不产生 rules）
   ];
   const base = mergeLayers([
     ...baseLayers,
-    { origin: "cli", file: env.file },
-    { origin: "cli", file: cli.file },
+    { origin: "cli", file: envLayer.file },
+    { origin: "cli", file: cliLayer.file },
   ]);
-  base.warnings.push(...env.warnings, ...cli.warnings);
+  base.warnings.push(...envLayer.warnings, ...cliLayer.warnings);
+  if (credentialsInit.warning !== undefined) base.warnings.push(credentialsInit.warning);
 
   const trust = await readTrustList(platform, trustPath);
   if (trust.warning !== undefined) base.warnings.push(trust.warning);
   // trust.workspaces 对外是只读视图；内部持可变副本供 setWorkspaceTrusted 更新
   const trustedSet = new Set(trust.workspaces);
+
+  /** 可信工作区的项目层文件（describeProviders 复用；不含 Grant 加载） */
+  async function projectFileIfTrusted(workspaceRoot: string) {
+    const realRoot = await platform.resolveReal(workspaceRoot);
+    const canonical = paths.canonicalize(realRoot);
+    if (!trustedSet.has(canonical)) return undefined;
+    const projectPath = paths.join(realRoot, PROJECT_CONFIG_DIR, PROJECT_CONFIG_NAME);
+    try {
+      return await loadConfigFile(fs, projectPath);
+    } catch {
+      return undefined;
+    }
+  }
 
   async function forWorkspace(workspaceRoot: string): Promise<WorkspaceConfig> {
     const realRoot = await platform.resolveReal(workspaceRoot);
@@ -70,12 +120,13 @@ export async function loadConfig(
     }
 
     const layers: MergeLayer[] = [
+      { origin: "setup", file: setupFile },
       { origin: "user", file: userFile },
       ...(trusted && projectFile !== undefined
         ? [{ origin: "project" as const, file: projectFile }]
         : []),
-      { origin: "cli", file: env.file },
-      { origin: "cli", file: cli.file },
+      { origin: "cli", file: envLayer.file },
+      { origin: "cli", file: cliLayer.file },
     ];
     const resolved = mergeLayers(layers);
     // mcpServers 标注来源目录：相对 cwd 按该层配置文件所在目录解析（config.md 第 2 节）
@@ -115,6 +166,10 @@ export async function loadConfig(
     };
   }
 
+  // 最近模型列表：load 时预读，recentModels() 同步返回；recordRecentModel
+  // 更新缓存并原子写（setModel/新建会话时调用）
+  let recent = await readRecentModels(platform, home);
+
   async function setWorkspaceTrusted(workspaceRoot: string, trusted: boolean): Promise<void> {
     const realRoot = await platform.resolveReal(workspaceRoot);
     const canonical = paths.canonicalize(realRoot);
@@ -137,5 +192,35 @@ export async function loadConfig(
     base,
     forWorkspace,
     setWorkspaceTrusted,
+
+    providerSetupWarning: setup.warning,
+    credentials,
+    saveSetupProvider: (entry, opts) => saveSetupProvider(platform, home, credentials, entry, opts),
+    setCredential: (providerId, key) => credentials.set(providerId, key),
+    removeSetupProvider: (providerId) =>
+      removeSetupProvider(platform, home, credentials, providerId),
+    async describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]> {
+      const project =
+        workspaceRoot !== undefined ? await projectFileIfTrusted(workspaceRoot) : undefined;
+      return describeProviderLayers(
+        {
+          setup: setupFile.providers,
+          user: userFile.providers,
+          project: project?.providers,
+          env: envLayer.file.providers,
+          cli: cliLayer.file.providers,
+        },
+        credentials,
+        env,
+      );
+    },
+    refreshUpstreamLimits: (providerId: string) =>
+      refreshUpstreamLimits(platform, home, credentials, env, options.upstreamFetch, providerId),
+    setDefaultModel: (model: string) => setSetupDefaultModel(platform, home, model),
+    recentModels: () => [...recent],
+    recordRecentModel: async (ref: ModelRef) => {
+      await recordRecentModel(platform, home, ref);
+      recent = await readRecentModels(platform, home);
+    },
   };
 }

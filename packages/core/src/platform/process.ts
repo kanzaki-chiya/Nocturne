@@ -11,6 +11,12 @@ export interface SpawnOptions {
   cwd?: string | undefined;
   /** 叠加在进程环境之上的变量 */
   env?: Record<string, string> | undefined;
+  /**
+   * 从继承的环境中剔除这些变量名（provider-setup.md 第 3、4 节）：
+   * Windows 大小写不敏感匹配。用于 shell 工具剥离凭据变量、
+   * 以及凭据后端子进程去掉 PSModulePath 等会污染后端的变量。
+   */
+  envStrip?: readonly string[] | undefined;
   /** 中止时终止整个进程树 */
   signal?: AbortSignal | undefined;
   timeoutMs?: number | undefined;
@@ -142,6 +148,23 @@ function minimalEnvironment(): Record<string, string> {
     if (allow.has(probe) || (!win32 && (probe.startsWith("LC_") || probe.startsWith("XDG_")))) {
       out[key] = value;
     }
+  }
+  return out;
+}
+
+/** 从继承环境基线中剔除 envStrip 变量名（Windows 大小写不敏感） */
+function stripEnvVars(
+  base: Record<string, string | undefined>,
+  strip: readonly string[] | undefined,
+): Record<string, string | undefined> {
+  if (strip === undefined || strip.length === 0) return base;
+  const win32 = process.platform === "win32";
+  const deny = new Set(strip.map((n) => (win32 ? n.toUpperCase() : n)));
+  const out: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (value === undefined) continue;
+    if (deny.has(win32 ? key.toUpperCase() : key)) continue;
+    out[key] = value;
   }
   return out;
 }
@@ -429,7 +452,7 @@ export function createProcessRunner(): ProcessRunner {
   ): SpawnedProcess => {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env: { ...stripEnvVars(process.env, options.envStrip), ...options.env },
       windowsHide: true,
       windowsVerbatimArguments: verbatimArgs,
       detached: process.platform !== "win32",
@@ -466,7 +489,10 @@ export function createProcessRunner(): ProcessRunner {
       return spawnImpl(shellExecutable(), ["-c", command], options, false);
     },
     spawnPipe(command, args, options = {}) {
-      const base = options.envMode === "minimal" ? minimalEnvironment() : process.env;
+      const base =
+        options.envMode === "minimal"
+          ? minimalEnvironment()
+          : stripEnvVars(process.env, options.envStrip);
       const child = spawn(command, args, {
         cwd: options.cwd,
         env: { ...base, ...options.env },

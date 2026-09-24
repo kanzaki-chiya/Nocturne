@@ -15,8 +15,11 @@ import type {
 } from "./types.js";
 
 export interface MergeLayer {
-  /** 该层规则命中时的来源标注 */
-  origin: Extract<RuleOrigin, "user" | "project" | "cli">;
+  /**
+   * 该层规则命中时的来源标注。"setup"（向导层 providers.json）不携带
+   * 权限规则——其 schema 不含 permissions 段，类型上仍收窄到 RuleOrigin。
+   */
+  origin: Extract<RuleOrigin, "user" | "project" | "cli"> | "setup";
   file: ConfigFile;
 }
 
@@ -60,7 +63,8 @@ export function mergeLayers(layers: readonly MergeLayer[]): ResolvedConfig {
     if (file.model !== undefined) out.model = file.model;
     if (file.permissions?.preset !== undefined) out.permissionPreset = file.permissions.preset;
     for (const rule of file.permissions?.rules ?? []) {
-      out.rules.push({ rule, origin });
+      // setup 层 schema 不含 permissions 段，origin==="setup" 实际到不了这里
+      out.rules.push({ rule, origin: origin === "setup" ? "user" : origin });
     }
     if (file.providers !== undefined) mergeProviders(providers, file.providers);
     // hooks：按点位追加（高层条目排在其后，hooks.md 第 2 节）
