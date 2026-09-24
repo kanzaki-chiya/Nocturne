@@ -8,9 +8,18 @@
 import { Box, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { PermissionReply, Runtime, RuntimeSession, SessionSummary } from "@nocturne/core";
+import {
+  listProviderPresets,
+  type PermissionReply,
+  type ProviderOverview,
+  type Runtime,
+  type RuntimeSession,
+  type SessionSummary,
+  type WizardPreset,
+} from "@nocturne/core";
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 
+import { useAltScreen, waitCommit } from "./alt-screen.js";
 import {
   contextLines,
   errText,
@@ -18,18 +27,23 @@ import {
   runSlash,
   sessionNotes,
   type OverlayName,
+  type ProviderBridge,
+  type ProviderWizardStart,
 } from "./commands.js";
 import { Activity } from "./components/activity.js";
 import { Composer } from "./components/composer.js";
 import { ConfirmBox } from "./components/confirm-box.js";
+import { ModelPicker, type PickerScope } from "./components/model-picker.js";
 import { Panel } from "./components/panel.js";
 import { PermissionDialog } from "./components/permission-dialog.js";
 import { PickList, type PickItem } from "./components/pick-list.js";
 import { StatusBar } from "./components/status-bar.js";
 import { Transcript, type TranscriptItem } from "./components/transcript.js";
+import { WizardView } from "./components/wizard-view.js";
 import { TuiEnvContext, type TuiEnv } from "./env.js";
 import { useSessionView } from "./session-view.js";
 import type { SwitchSessionFn } from "./types.js";
+import { useProviderWizard } from "./wizard-io.js";
 
 /** 完结前缀切分：第一个未完结工具条目及其后条目留给活动区（tui.md §4） */
 export function splitCompletedPrefix(entries: readonly ViewEntry[]): {
@@ -48,15 +62,31 @@ export function App({
   runtime,
   env,
   switchSession,
+  provider,
 }: {
   session: RuntimeSession;
   runtime: Runtime;
   env: TuiEnv;
   switchSession?: SwitchSessionFn | undefined;
+  /** /provider 与模型选择页的配置桥（cli 注入）；缺省时相关命令提示不可用 */
+  provider?: ProviderBridge | undefined;
 }): React.JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const width = stdout.columns || 80;
+  const [width, setWidth] = useState(stdout.columns || 80);
+  const [height, setHeight] = useState(stdout.rows || 24);
+
+  // resize 跟随：Ink 不因终端 resize 自动重渲染（ADR-0017 实测约束）
+  useEffect(() => {
+    const on = (): void => {
+      setWidth(stdout.columns || 80);
+      setHeight(stdout.rows || 24);
+    };
+    stdout.on("resize", on);
+    return () => {
+      stdout.off("resize", on);
+    };
+  }, [stdout]);
 
   // /resume 切换：session 变为新会话（useSessionView 自动重放新日志）
   const [session, setSession] = useState(initialSession);
@@ -71,6 +101,30 @@ export function App({
   const [resumeList, setResumeList] = useState<readonly SessionSummary[] | undefined>(undefined);
   /** /resume 跨目录确认（foreign → 用户确认后带 allowForeign 重试） */
   const [foreign, setForeign] = useState<{ id: string; root: string } | undefined>(undefined);
+
+  // 全屏模型选择页（tui.md §7 / ADR-0017）：备用屏进出由 alt 驱动
+  const alt = useAltScreen();
+  const [picker, setPicker] = useState<
+    { focus: "left" | "right"; scope?: PickerScope | undefined } | undefined
+  >(undefined);
+  /** picker remount 计数：向导完成后重开并选中新服务商 */
+  const [pickerKey, setPickerKey] = useState(0);
+  /** 打开时快照的左栏数据（providers + 未配置预设） */
+  const [pickerData, setPickerData] = useState<
+    { providers: ProviderOverview[]; presets: WizardPreset[] } | undefined
+  >(undefined);
+  const pickerOpen = picker !== undefined;
+  /** React commit 观察点（挂起期间靠它确认页面状态已提交） */
+  const pickerCommitted = useRef(false);
+  useEffect(() => {
+    pickerCommitted.current = pickerOpen;
+  }, [pickerOpen]);
+
+  // /provider 向导（add/key）：主屏弹层 + picker 内嵌共用一份状态机
+  const wizard = useProviderWizard(provider?.config);
+  const [wizardOverlay, setWizardOverlay] = useState<ProviderWizardStart | undefined>(undefined);
+  /** /provider remove 确认 */
+  const [providerRemove, setProviderRemove] = useState<string | undefined>(undefined);
 
   const busy = view.status !== "idle";
   const pending = view.pendingPermission;
@@ -146,6 +200,110 @@ export function App({
     [switchSession, pushLine],
   );
 
+  /** 模型选择页左栏数据快照（打开时与向导完成后拉取） */
+  const loadPickerData = useCallback(async () => {
+    if (provider === undefined) return { providers: [], presets: [] };
+    const providers = await provider.config.describeProviders(provider.workspaceRoot);
+    const configured = new Set(providers.map((p) => p.id));
+    const presets = listProviderPresets().filter((p) => !configured.has(p.id));
+    return { providers, presets };
+  }, [provider]);
+
+  /** 打开模型选择页：ADR-0017 序列——挂起 → 提交页面 → ?1049h → 恢复全量重绘 */
+  const openPicker = useCallback(
+    async (focus: "left" | "right"): Promise<void> => {
+      if (busy || pending !== undefined) {
+        pushLine("! 会话忙，模型选择页仅在空闲时可打开");
+        return;
+      }
+      if (provider === undefined) {
+        pushLine("! 当前环境不支持模型选择页");
+        return;
+      }
+      const data = await loadPickerData().catch((e: unknown) => {
+        pushLine(`! ${errText(e)}`);
+        return undefined;
+      });
+      if (data === undefined) return;
+      setPickerData(data);
+      await alt.enter(async () => {
+        setPicker({ focus });
+        await waitCommit(pickerCommitted, true);
+      });
+    },
+    [busy, pending, provider, loadPickerData, alt, pushLine],
+  );
+
+  /** 关闭模型选择页：ADR-0017 序列——挂起 → 备用屏内恢复 → ?1049l → 提交关闭 */
+  const closePicker = useCallback(async (): Promise<void> => {
+    await alt.leave(() => {
+      setPicker(undefined);
+    });
+  }, [alt]);
+
+  /** picker 内 ○ 预设 Enter → 向导内嵌；完成后回到本页并选中新服务商 */
+  const startWizardInPicker = useCallback(
+    (presetId: string): void => {
+      if (provider === undefined) return;
+      wizard.start({ kind: "add", presetId }, (outcome) => {
+        if (outcome.kind === "added") {
+          void (async () => {
+            provider.updateProviders(await provider.reloadConfig());
+            const data = await loadPickerData().catch(() => undefined);
+            if (data !== undefined) setPickerData(data);
+            // 回到本页并选中刚添加的服务商（tui.md §7）
+            setPicker({ focus: "right", scope: { kind: "provider", id: outcome.providerId } });
+            setPickerKey((k) => k + 1);
+          })();
+        }
+      });
+    },
+    [provider, wizard, loadPickerData],
+  );
+
+  /** 主屏 /provider add|key 弹层 */
+  const openProviderWizard = useCallback(
+    (start: ProviderWizardStart): void => {
+      if (provider === undefined) {
+        pushLine("! 当前环境不支持 /provider 管理");
+        return;
+      }
+      setWizardOverlay(start);
+      wizard.start(start, (outcome) => {
+        void (async () => {
+          if (outcome.kind === "added") {
+            provider.updateProviders(await provider.reloadConfig());
+            pushLine(
+              `已保存 ${outcome.providerId}${outcome.model !== undefined ? `（默认 ${outcome.model}）` : ""}`,
+            );
+          } else if (outcome.kind === "key-updated") {
+            provider.updateProviders(await provider.reloadConfig());
+            pushLine(`已更新 ${outcome.providerId} 的密钥`);
+          } else if (outcome.kind === "error") {
+            pushLine(`! ${outcome.message}`);
+          }
+          setWizardOverlay(undefined);
+        })();
+      });
+    },
+    [provider, wizard, pushLine],
+  );
+
+  /** /provider remove 确认后执行 */
+  const doRemoveProvider = useCallback(
+    async (providerId: string): Promise<void> => {
+      if (provider === undefined) return;
+      try {
+        await provider.config.removeSetupProvider(providerId);
+        provider.updateProviders(await provider.reloadConfig());
+        pushLine(`已删除 ${providerId}`);
+      } catch (e) {
+        pushLine(`! ${errText(e)}`);
+      }
+    },
+    [provider, pushLine],
+  );
+
   useEffect(() => {
     if (overlay === "resume") {
       setResumeList(undefined);
@@ -161,13 +319,33 @@ export function App({
     }
   }, [overlay, runtime, pushLine]);
 
-  const dialogOpen = overlay !== undefined || foreign !== undefined;
+  const dialogOpen =
+    overlay !== undefined ||
+    foreign !== undefined ||
+    wizardOverlay !== undefined ||
+    providerRemove !== undefined;
 
   // 全局键：Ctrl+C / Ctrl+D（弹层内的 Esc/Enter 由各弹层组件处理）
   useInput((ch, key) => {
     if (key.ctrl && ch === "c") {
+      if (pickerOpen) {
+        // 先走正常关闭路径回主屏再退出——否则 unmount 把页面帧写进 scrollback（ADR-0017）
+        wizard.cancel();
+        void closePicker().then(() => {
+          exit();
+        });
+        return;
+      }
       if (foreign !== undefined) {
         setForeign(undefined);
+        return;
+      }
+      if (wizardOverlay !== undefined) {
+        wizard.cancel();
+        return;
+      }
+      if (providerRemove !== undefined) {
+        setProviderRemove(undefined);
         return;
       }
       if (overlay !== undefined) {
@@ -183,8 +361,24 @@ export function App({
       return;
     }
     if (key.ctrl && ch === "d") {
+      if (pickerOpen) {
+        wizard.cancel();
+        void closePicker().then(() => {
+          requestExit();
+        });
+        return;
+      }
       if (foreign !== undefined) {
         setForeign(undefined);
+        return;
+      }
+      if (wizardOverlay !== undefined) {
+        wizard.cancel();
+        setWizardOverlay(undefined);
+        return;
+      }
+      if (providerRemove !== undefined) {
+        setProviderRemove(undefined);
         return;
       }
       if (overlay !== undefined) {
@@ -201,11 +395,14 @@ export function App({
       const text = line.trim();
       if (text === "") return;
       if (text.startsWith("/")) {
-        void runSlash(text, session)
+        void runSlash(text, session, provider)
           .then((r) => {
             if (r.kind === "exit") requestExit();
             else if (r.kind === "overlay") setOverlay(r.name);
+            else if (r.kind === "picker") void openPicker(r.focus);
             else if (r.kind === "switch") void doSwitch(r.id);
+            else if (r.kind === "provider-wizard") openProviderWizard(r.start);
+            else if (r.kind === "provider-remove") setProviderRemove(r.providerId);
             else if (r.kind === "message") pushLine(r.text);
           })
           .catch((e: unknown) => {
@@ -217,21 +414,7 @@ export function App({
         pushLine(`! ${errText(e)}`);
       });
     },
-    [session, pushLine, requestExit, doSwitch],
-  );
-
-  const modelItems: PickItem<string>[] = useMemo(
-    () =>
-      runtime.listModels().map((m) => {
-        const ref = `${m.ref.provider}/${m.ref.model}`;
-        const cur = view.config.model;
-        return {
-          label: ref + (m.displayName !== undefined ? ` — ${m.displayName}` : ""),
-          hint: cur?.provider === m.ref.provider && cur.model === m.ref.model ? "当前" : "",
-          value: ref,
-        };
-      }),
-    [runtime, view.config.model],
+    [session, pushLine, requestExit, doSwitch, openPicker, openProviderWizard, provider],
   );
 
   const composerDisabled =
@@ -249,6 +432,46 @@ export function App({
     value: s.id,
   }));
 
+  // 模型选择页：整页替换主界面（帧渲染进备用屏；ADR-0017）
+  if (pickerOpen) {
+    return (
+      <TuiEnvContext.Provider value={env}>
+        <ModelPicker
+          key={pickerKey}
+          models={runtime.listModels()}
+          recents={runtime.listRecentModels()}
+          providers={pickerData?.providers ?? []}
+          presets={pickerData?.presets ?? []}
+          current={view.config.model}
+          defaultModel={runtime.defaultModel()}
+          initialScope={picker.scope}
+          initialFocus={picker.focus}
+          wizard={wizard.state.running ? wizard : undefined}
+          onStartWizard={startWizardInPicker}
+          onPick={(ref, setDefault) => {
+            void (async () => {
+              await closePicker();
+              try {
+                if (setDefault && provider !== undefined) {
+                  await provider.config.setDefaultModel(ref);
+                }
+                await session.setModel(ref);
+              } catch (e) {
+                pushLine(`! ${errText(e)}`);
+              }
+            })();
+          }}
+          onClose={() => {
+            void closePicker();
+          }}
+          width={width}
+          height={height}
+          active={wizardOverlay === undefined}
+        />
+      </TuiEnvContext.Provider>
+    );
+  }
+
   return (
     <TuiEnvContext.Provider value={env}>
       <Box flexDirection="column">
@@ -260,23 +483,6 @@ export function App({
             active={!dialogOpen}
             onReply={replyPermission}
             width={width}
-          />
-        ) : null}
-        {overlay === "model" ? (
-          <PickList
-            title="选择模型"
-            items={modelItems}
-            active
-            width={width}
-            onPick={(ref) => {
-              setOverlay(undefined);
-              session.setModel(ref).catch((e: unknown) => {
-                pushLine(`! ${errText(e)}`);
-              });
-            }}
-            onCancel={() => {
-              setOverlay(undefined);
-            }}
           />
         ) : null}
         {overlay === "context" ? (
@@ -313,6 +519,39 @@ export function App({
             }}
             onCancel={() => {
               setOverlay(undefined);
+            }}
+          />
+        ) : null}
+        {wizardOverlay !== undefined ? (
+          <WizardView
+            title={
+              wizardOverlay.kind === "add" ? "添加服务商" : `更新密钥 ${wizardOverlay.providerId}`
+            }
+            state={wizard.state}
+            active={overlay === undefined && providerRemove === undefined}
+            width={width}
+            onSubmit={(v) => {
+              wizard.submit(v);
+            }}
+            onCancel={() => {
+              wizard.cancel();
+            }}
+          />
+        ) : null}
+        {providerRemove !== undefined ? (
+          <ConfirmBox
+            title={`删除服务商 ${providerRemove}`}
+            detail="同时删除其凭据（providers.json 条目与凭据索引）"
+            active={overlay === undefined}
+            width={width}
+            onConfirm={() => {
+              const id = providerRemove;
+              setProviderRemove(undefined);
+              void doRemoveProvider(id);
+            }}
+            onCancel={() => {
+              setProviderRemove(undefined);
+              pushLine("! 已取消删除");
             }}
           />
         ) : null}

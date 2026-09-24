@@ -3,18 +3,36 @@
  * （/model、/resume 弹列表选择器；/context、/help 弹可滚动面板）。
  * 不共享 CLI 的渲染代码（cli.md §1）；语义参数（模型归一化等）走 core 公开 API。
  */
-import { normalizeModelRef, type RuntimeSession } from "@nocturne/core";
+import { normalizeModelRef, type RuntimeConfig, type RuntimeSession } from "@nocturne/core";
 
-export type OverlayName = "model" | "context" | "help" | "resume";
+export type OverlayName = "context" | "help" | "resume";
+
+/** /provider 向导启动形态（add / key） */
+export type ProviderWizardStart =
+  { kind: "add"; presetId?: string | undefined } | { kind: "key"; providerId: string };
 
 export type SlashResult =
   | { kind: "overlay"; name: OverlayName }
+  /** /model 与 /provider（无参）打开全屏模型选择页（tui.md §7） */
+  | { kind: "picker"; focus: "left" | "right" }
   | { kind: "message"; text: string }
   | { kind: "exit" }
   /** /resume <id>：由 App 调用注入的 switchSession 执行切换 */
   | { kind: "switch"; id: string }
+  /** /provider add/key：App 侧打开向导弹层 */
+  | { kind: "provider-wizard"; start: ProviderWizardStart }
+  /** /provider remove <name>：App 侧确认后删除 */
+  | { kind: "provider-remove"; providerId: string }
   /** 已静默处理（确认行由 session.config_changed 事件渲染） */
   | { kind: "none" };
+
+/** /provider 修改类子命令需要的配置桥（由 CLI 注入，与 REPL 同一份语义） */
+export interface ProviderBridge {
+  config: RuntimeConfig;
+  reloadConfig: () => Promise<RuntimeConfig>;
+  updateProviders: (rc: RuntimeConfig) => void;
+  workspaceRoot?: string | undefined;
+}
 
 const HELP_TEXT = `斜杠命令：
   /help          本帮助
@@ -26,11 +44,18 @@ const HELP_TEXT = `斜杠命令：
   /mcp           显示本会话 MCP 服务器状态（只读）
   /compact       手动压缩上下文（L2 摘要）
   /resume        弹出会话列表选择器；/resume <id> 直接切换
+  /provider      打开模型选择页（焦点在服务商栏）
+  /provider add  添加服务商向导；key <名称> 更新密钥
+  /provider refresh <名称> 刷新上游模型；remove <名称> 删除
   /exit, /quit   退出
 快捷键：a/s/p/d/x 权限确认（d 进反馈行，Enter 发送、Esc 返回）；
 Ctrl+C 中断（空闲时退出）；Ctrl+D 退出。`;
 
-export async function runSlash(line: string, session: RuntimeSession): Promise<SlashResult> {
+export async function runSlash(
+  line: string,
+  session: RuntimeSession,
+  provider?: ProviderBridge,
+): Promise<SlashResult> {
   const [cmd, ...rest] = line.trim().split(/\s+/);
   const arg = rest.join(" ").trim();
   switch (cmd) {
@@ -39,8 +64,45 @@ export async function runSlash(line: string, session: RuntimeSession): Promise<S
     case "/exit":
     case "/quit":
       return { kind: "exit" };
+    case "/provider": {
+      // 无参：打开模型选择页，焦点在左栏服务商列表（tui.md §7）
+      if (arg === "") return { kind: "picker", focus: "left" };
+      if (provider === undefined) {
+        return { kind: "message", text: "! 当前环境不支持 /provider 管理" };
+      }
+      const [sub, ...subRest] = arg.split(/\s+/);
+      const name = subRest.join(" ").trim();
+      switch (sub) {
+        case "add":
+          return {
+            kind: "provider-wizard",
+            start: { kind: "add", presetId: name !== "" ? name : undefined },
+          };
+        case "key":
+          if (name === "") return { kind: "message", text: "用法：/provider key <名称>" };
+          return { kind: "provider-wizard", start: { kind: "key", providerId: name } };
+        case "refresh": {
+          if (name === "") return { kind: "message", text: "用法：/provider refresh <名称>" };
+          try {
+            await provider.config.refreshUpstreamLimits(name);
+            provider.updateProviders(await provider.reloadConfig());
+            return { kind: "message", text: `已刷新 ${name} 的上游模型列表` };
+          } catch (e) {
+            return { kind: "message", text: `! ${errText(e)}` };
+          }
+        }
+        case "remove":
+          if (name === "") return { kind: "message", text: "用法：/provider remove <名称>" };
+          return { kind: "provider-remove", providerId: name };
+        default:
+          return {
+            kind: "message",
+            text: `未知子命令 ${sub}；可用：add | key <名称> | refresh <名称> | remove <名称>`,
+          };
+      }
+    }
     case "/model": {
-      if (arg === "") return { kind: "overlay", name: "model" };
+      if (arg === "") return { kind: "picker", focus: "right" };
       const norm = normalizeModelRef(arg, session.state().config.model.provider);
       if (!norm.ok) return { kind: "message", text: `! ${norm.problem}` };
       try {

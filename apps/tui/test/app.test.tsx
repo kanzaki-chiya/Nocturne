@@ -280,6 +280,91 @@ describe("TUI", () => {
     await s1.close();
   });
 
+  it("/model 打开全屏模型选择页：搜索过滤 + Enter 切换", async () => {
+    const { session, runtime } = await makeSession();
+    const provider = {
+      config: {
+        describeProviders: () =>
+          Promise.resolve([
+            {
+              id: "fake",
+              type: "openai-compatible" as const,
+              keySource: "env" as const,
+              keyEnvName: "FAKE_KEY",
+              origin: "user" as const,
+              overridden: false,
+              modelCount: 1,
+              managed: false,
+            },
+          ]),
+        setDefaultModel: () => Promise.resolve(),
+        removeSetupProvider: () => Promise.resolve(),
+        refreshUpstreamLimits: () => Promise.resolve(),
+        credentials: { backend: () => "none" as const },
+        base: { providers: [] },
+      } as never,
+      reloadConfig: () => Promise.resolve({} as never),
+      updateProviders: vi.fn(),
+      workspaceRoot: undefined,
+    };
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, provider }),
+    );
+    await pause(80);
+    stdin.write("/model");
+    stdin.write("\r");
+    await pause(400);
+    const frame = lastFrame() ?? "";
+    // 备用屏内渲染模型选择页：搜索框 + 模型行
+    expect(frame).toContain("搜索");
+    expect(frame).toContain("fake/fake-1");
+    // 输入字符 → 搜索过滤
+    stdin.write("zzz");
+    await pause(60);
+    expect(lastFrame()).toContain("无匹配");
+    // Esc 清搜索 → 再 Esc 关闭回主屏
+    stdin.write("\x1b");
+    await pause(60);
+    stdin.write("\x1b");
+    await pause(200);
+    expect(lastFrame()).toContain("idle");
+    unmount();
+    await session.close();
+  });
+
+  it("/provider 无参打开选择页（焦点左栏）；子命令分发", async () => {
+    const { session, runtime } = await makeSession();
+    const provider = {
+      config: {
+        describeProviders: () => Promise.resolve([]),
+        setDefaultModel: () => Promise.resolve(),
+        removeSetupProvider: () => Promise.resolve(),
+        refreshUpstreamLimits: () => Promise.resolve(),
+        credentials: { backend: () => "none" as const },
+        base: { providers: [] },
+      } as never,
+      reloadConfig: () => Promise.resolve({} as never),
+      updateProviders: vi.fn(),
+      workspaceRoot: undefined,
+    };
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, provider }),
+    );
+    await pause(80);
+    stdin.write("/provider");
+    stdin.write("\r");
+    await pause(400);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("搜索");
+    expect(frame).toContain("全部模型");
+    // 未配置的预设服务商以 ○ 列出
+    expect(frame).toContain("○");
+    stdin.write("\x1b");
+    await pause(200);
+    unmount();
+    await session.close();
+  });
+
   it("/resume 失败：错误进提示行，不换会话", async () => {
     const { session, runtime } = await makeSession();
     const switcher: SwitchSessionFn = () =>

@@ -311,6 +311,14 @@ async function main(): Promise<number> {
         stdout: process.stdout,
         stderr: process.stderr,
         switchSession,
+        provider: {
+          config: runtimeConfig,
+          reloadConfig: makeConfigLoader(args, platform),
+          updateProviders: (rc) => {
+            runtime.updateProviders(rc);
+          },
+          workspaceRoot: cwd,
+        },
       });
       await holder.current.close();
       return code;

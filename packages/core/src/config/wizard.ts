@@ -5,11 +5,7 @@
  * config 不依赖 provider——fetchModels/testProviderConnection/presets
  * 与环境变量读取全部由调用方注入。
  */
-import type {
-  ModelOverrideShape,
-  RuntimeConfig,
-  UpstreamModelEntry,
-} from "./types.js";
+import type { ModelOverrideShape, RuntimeConfig, UpstreamModelEntry } from "./types.js";
 
 /** 向导的输入输出抽象：nctrn setup 用真实 TTY；TUI 弹层与测试注入自己的实现 */
 export interface WizardIo {

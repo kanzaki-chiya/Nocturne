@@ -9,6 +9,7 @@ import { createElement } from "react";
 import type { Runtime, RuntimeSession } from "@nocturne/core";
 
 import { App } from "./app.js";
+import type { ProviderBridge } from "./commands.js";
 import { detectTuiEnv } from "./env.js";
 
 import type { SwitchSessionFn } from "./types.js";
@@ -22,6 +23,11 @@ export interface TuiOptions {
    * 缺省时 /resume 提示不可用。
    */
   switchSession?: SwitchSessionFn | undefined;
+  /**
+   * /provider 与模型选择页的配置桥（provider-setup.md 第 6 节）：
+   * config + reloadConfig + updateProviders。缺省时相关命令提示不可用。
+   */
+  provider?: ProviderBridge | undefined;
 }
 
 /**
@@ -48,6 +54,7 @@ export async function runTui(
       runtime,
       env: detectTuiEnv(),
       switchSession: options.switchSession,
+      provider: options.provider,
     }),
     {
       stdout,
