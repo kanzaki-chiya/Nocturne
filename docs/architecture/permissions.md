@@ -116,17 +116,23 @@ if decision == ask:
   elif autoApproveAsk（--yes）:  decision = allow   # source = "rule"，理由注明命令行提升
 ```
 
+Hook 的先后关系（Phase 5，完整语义见 5.5 与 hooks.md）：
+
+- `PreToolUse` 的 `deny` 在本算法之前直接结算为 `deny`，不求值。
+- `PreToolUse` 的 `ask`（强制确认）：`decision` 为 `deny` 时仍 `deny`；否则一律进入确认流程——**跳过上面的 Grant 匹配与 `autoApproveAsk` 提升**（Hook 的收紧不能被既有授权或命令行提升抵消），先经 `PermissionRequest` Hook，无回答才询问客户端。
+- `PermissionRequest` Hook 对任何到达 `ask` 的请求（规则判定的或 Hook 强制的）先回答：`allow`/`deny` 直接结算（`source: "hook"`）；无回答时按上表继续（Hook 强制来的 `ask` 除外——它始终停在"询问"）。
+
 一次调用有多个主体时：任一主体为 `deny` 则 `deny`；否则任一为 `ask` 则 `ask`；否则 `allow`。
 
 ### 5.5 Hook 建议的合并（Phase 5）
 
 `PreToolUse` Hook 与 `PermissionRequest` Hook 的输出作为**建议**进入求值，不改变规则排序本身（完整契约见 [hooks.md](hooks.md) 第 3、6 节）：
 
-- Hook `deny`：该调用直接结算为 `deny`（`source: "hook"`），不进入规则求值。
-- Hook `ask`：求值结果为 `allow` 或 `ask` 时强制按 `ask` 走确认流程；规则已是 `deny` 时仍为 `deny`——Hook 只能收紧。
-- Hook `allow`：求值结果为 `ask` 时结算为 `allow`（`source: "hook"`，不发 `permission.requested`）；规则 `deny` 时无效。**且仅当该 Hook 条目来源可信时生效**（用户配置或已信任的项目配置——未信任的项目 Hook 整段不执行，见 hooks.md 第 5 节）。
-- `PermissionRequest` Hook：在求值结果为 `ask` 时先回答，`allow`/`deny` 直接结算（`source: "hook"`）；无回答则继续询问用户。
-- Hook 不产生 Grant，不影响 5.3 的 Grant/`autoApproveAsk` 判定顺序——Hook 建议先于这两者参与求值。
+- `PreToolUse` `deny`：该调用直接结算为 `deny`（`source: "hook"`），不进入规则求值。
+- `PreToolUse` `ask`：求值结果为 `allow` 或 `ask` 时强制走确认流程；规则已是 `deny` 时仍为 `deny`——Hook 只能收紧。**强制的 `ask` 跳过 Grant 与 `autoApproveAsk`**（5.3），但仍先经 `PermissionRequest` Hook 回答，无回答才询问客户端。
+- `PreToolUse` 没有 `allow`：该点位在主体解析之前运行，看到的是未解析输入；放宽只能由 `PermissionRequest` 完成（它拿到解析后的主体）。
+- `PermissionRequest` Hook：对到达 `ask` 的请求先回答，`allow`/`deny` 直接结算（`source: "hook"`）；无回答则继续原流程。其 `allow` 永远不能越过 `deny`（它只在 `ask` 分支内运行），且条目本身要求可信来源（未信任项目的 Hook 整段不执行，hooks.md 第 5 节）。
+- Hook 不产生 Grant；`Grant`/`autoApproveAsk` 只对规则判定的 `ask` 生效，不对 Hook 强制的 `ask` 生效。
 
 附加约束：
 

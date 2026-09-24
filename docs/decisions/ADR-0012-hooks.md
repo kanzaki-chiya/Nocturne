@@ -11,7 +11,7 @@ Phase 5 要给 Runtime 加 Hook：在固定事件点（PreToolUse、PostToolUse�
 ## 决定
 
 1. **形态：外部命令**。每个 Hook 条目是 `command + args`，stdin 收 JSON 上下文、stdout 回 JSON 结果，退出码非零或输出不可解析记失败。进程经 `platform.spawnPipe` 启动（与 MCP 共用），超时强杀进程树。
-2. **输出是建议，权限留在权限层**：Hook 输出的 `deny`/`ask`/`updatedInput`/`feedback`/`block` 按点位限定语义；`allow` 只能放宽 `ask`、永远不能越过规则 `deny`；决策合并进既有管线（权限求值仍在 permission 层）。
+2. **输出是建议，权限留在权限层**：Hook 输出的 `deny`/`ask`/`updatedInput`/`feedback`/`block` 按点位限定语义；`PreToolUse` **没有 `allow`**——它在权限主体解析之前运行，看到的是未解析的原始输入（`foo/link` 可能解析到工作区外），不能基于它批准解析后才知道目标的操作；放宽 `ask` 的唯一点位是 `PermissionRequest`（拿到已解析主体），其 `allow` 也永远不能越过规则 `deny`。Hook 强制的 `ask` 跳过 Grant 与 `autoApproveAsk` 提升——收紧不能被自动批准抵消。决策合并进既有管线，权限求值仍在 permission 层。
 3. **失败 = 无效果 + 警告**：超时/非零退出/输出过大/无法解析都不阻塞管线，`runtime.warning{code:"hook_failed"}` + 诊断记录。例外是 `PermissionRequest`——失败即"没有回答"，继续询问用户。
 4. **信任复用 `trust.json`**：项目级 `hooks` 段在 `.nocturne/config.json` 未信任时**整段不执行**（不是运行后限制输出——进程一启动就没有输出语义可约束），与 ADR-0008 的"项目配置默认收紧、显式信任后才完整生效"同一条线。
 

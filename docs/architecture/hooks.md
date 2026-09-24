@@ -8,8 +8,8 @@ Hook 是**配置驱动的外部命令**：Runtime 在固定事件点上启动一
 
 | 事件点 | 触发时机 | 目的 | 可用的效果 |
 |---|---|---|---|
-| `PreToolUse` | 管线第 2 步（输入校验）通过之后、第 3 步（权限主体计算）之前 | 拦截或改写工具输入 | `deny` 直接拒绝；`ask` 强制走确认；`allow` 可放宽 `ask`（信任约束见第 5 节）；`updatedInput` 修改输入后**重新校验** |
-| `PermissionRequest` | 规则求值为 `ask` 之后、发出 `permission.requested` 之前 | 把确认自动化（如 CI 策略、审批网关） | `allow` / `deny` 直接结算（无输出字段 = 继续询问用户） |
+| `PreToolUse` | 管线第 2 步（输入校验）通过之后、第 3 步（权限主体计算）之前 | 拦截或改写工具输入 | `deny` 直接拒绝；`ask` 强制走确认；`updatedInput` 修改输入后**重新校验**。没有 `allow`：此点在主体解析之前运行，看到的是未解析的原始输入（如 `foo/link`），放行等于批准一个解析后才知道目标的操作——放宽只走 `PermissionRequest` |
+| `PermissionRequest` | 规则求值为 `ask` 之后、发出 `permission.requested` 之前 | 把确认自动化（如 CI 策略、审批网关） | `allow` / `deny` 直接结算（无输出字段 = 继续询问用户）；唯一能放宽 `ask` 的 Hook 点，因为它能看到已解析的权限主体 |
 | `PostToolUse` | 工具执行返回之后、结果归一化（第 8 步）之前 | 追加反馈给模型 | `feedback` 追加进 `modelContent`（有上限，见第 4 节）；不能改结果状态 |
 | `TurnStart` | `turn.started` 与 `message.user` 写入之后、Agent Loop 开始前 | 提交级拦截 | `block: true` + `reason` → Turn 以 `error`（`hook_blocked`）结算 |
 | `TurnEnd` | `turn.completed` 写入之后 | 审计/统计 | 无效果（仅通知） |
@@ -54,13 +54,13 @@ Hook 是**配置驱动的外部命令**：Runtime 在固定事件点上启动一
 - **stdout**：单个 JSON 对象（可选；空输出视为"无效果"）。允许字段按点位限定，多写字段忽略；无法解析为 JSON 记失败。
 - **stderr**：进诊断日志（observability.md），不进会话事件。
 - **退出码**：`0` = 成功（按 stdout 的 JSON 生效）；非零 = 失败，stdout 忽略。
-- **环境**：继承 Runtime 进程环境，另注入 `NOCTURNE_HOOK_EVENT`、`NOCTURNE_SESSION_ID`、`NOCTURNE_WORKSPACE_ROOT`、`NOCTURNE_CWD`。Hook 进程经 `platform.spawnPipe` 启动，超时/失败时进程树终止——与 MCP 同一套 platform 能力。
+- **环境**：继承 Runtime 进程环境（Hook 是用户自己写的脚本，定位与本地工具一致），另注入 `NOCTURNE_HOOK_EVENT`、`NOCTURNE_SESSION_ID`、`NOCTURNE_WORKSPACE_ROOT`、`NOCTURNE_CWD`。注意这与 MCP 服务器不同——MCP 子进程只拿白名单环境（mcp.md 第 3 节），因为第三方服务器不该默认看到 Provider 凭据；Hook 进程经 `platform.spawnPipe` 启动，超时/失败时进程树终止——与 MCP 同一套 platform 能力。
 
 按点位的输出契约：
 
 | 点位 | stdout JSON 允许的字段 |
 |---|---|
-| `PreToolUse` | `{ "decision": "allow" \| "ask" \| "deny", "reason"?: string, "updatedInput"?: unknown }` |
+| `PreToolUse` | `{ "decision": "ask" \| "deny", "reason"?: string, "updatedInput"?: unknown }`（无 `allow`，理由见第 1、3 节；`decision` 缺省 = 无意见） |
 | `PermissionRequest` | `{ "action": "allow" \| "deny", "reason"?: string }`（无字段/无输出 = 继续询问） |
 | `PostToolUse` | `{ "feedback"?: string }`（追加进 `modelContent`，上限 4000 字符，超出截断） |
 | `TurnStart` | `{ "block"?: boolean, "reason"?: string }` |
@@ -70,17 +70,18 @@ Hook 是**配置驱动的外部命令**：Runtime 在固定事件点上启动一
 
 ## 3. PreToolUse 的权限边界
 
-`PreToolUse` 的输出合并进管线第 5 步的权限求值，规则是**求严格者**：
+`PreToolUse` 的输出合并进管线第 5 步的权限求值，规则是**只能收紧**：
 
 - Hook `deny`：立即拒绝。发出 `permission.resolved{action:"deny", source:"hook"}`（`source` 枚举新增 `"hook"`），然后 `tool.completed{status:"denied", error.code:"hook_denied"}`——拒绝始终有持久记录。
-- Hook `ask`：无论规则求值结果如何（除非规则已是 `deny`——`deny` 永远不可被 Hook 放宽），强制走确认流程，请求原因标注来自 Hook。
-- Hook `allow`：**只在 Hook 来源可信时**可放宽 `ask` → `allow`（发 `permission.resolved{action:"allow", source:"hook"}`）；对 `deny` 无效。可信 = 用户级配置，或 `trust.json` 已信任的项目配置。
-- `updatedInput`：替换输入后**重新走第 2 步校验**；校验失败按 `invalid_args` 结算（模型看到"Hook 修改后的输入不合法"）；修改后的输入进入后续步骤与 `tool.completed.input`。Hook 只能改 input 的值，不能换工具、不能改 callId/turnId。
+- Hook `ask`：求值结果不是 `deny` 时强制走确认流程（规则已是 `deny` 则仍 `deny`），请求原因标注来自 Hook。**由 Hook 强制的 `ask` 不走 Grant 匹配与 `--yes`/`autoApproveAsk` 提升**（permissions.md 5.3、5.5）——否则 Hook 的收紧会被既有授权或命令行提升静默抵消；它仍先经 `PermissionRequest` Hook，无回答才询问用户。
+- `updatedInput`：替换输入后**重新走第 2 步校验**；校验失败按 `invalid_input` 结算（模型看到"Hook 修改后的输入不合法"）；修改后的输入进入后续步骤与 `tool.completed.input`。Hook 只能改 input 的值，不能换工具、不能改 callId/turnId。
+
+**为什么没有 `allow`**：PreToolUse 在权限主体解析（管线第 3、4 步）之前运行，它看到的 `input` 是未解析的原始值——`foo/link` 可能解析到工作区外。允许它在这里放行，等于根据未解析输入批准了一个解析后才知道目标的操作。唯一能放宽 `ask` 的点位是 `PermissionRequest`（第 1 节），它拿到的是解析后的主体。
 
 PreToolUse **不能**做的事（设计边界）：
 
 - 不能生成 Grant（`remember` 语义只属于用户确认路径）；
-- 不能跳过执行器——`allow` 之后工具照常执行、照常审计；
+- 不能放宽权限（无 `allow`，见上）；
 - 不能注入模型上下文（`updatedInput` 是工具参数，不是提示词）；SessionStart 同理（本阶段 Hook 无上下文注入通道，见第 8 节）。
 
 ## 4. 超时、失败、输出过大
@@ -99,7 +100,7 @@ Hook 调用的耗时计入诊断（`hook.run` 记录），不占 `tool.exec` 的
 ## 5. 信任与权限的关系
 
 - **配置来源与分层**：`hooks` 段出现在用户配置与项目配置；按事件点分组合并，同名点位**追加**（用户级在前，项目级在后，执行顺序即此顺序）。
-- **项目级 Hook 的信任**：复用 `trust.json` / ADR-0008——`.nocturne/config.json` 的 `hooks` 段在**未信任时整段不执行**（不只是输出受限），并随 `project_config_untrusted` 警告提示。理由：Hook 条目是任意命令，"运行但把输出 clamp 到收紧"并不安全——进程一旦运行就能做任何事（网络外传、改文件），输出语义约束不了它。"未信任的 Hook 只能收紧"在本设计中具体化为：**未信任的 Hook 没有机会产生任何影响**；可信 Hook 才可能放宽 `ask`，且永远越不过 `deny`。
+- **项目级 Hook 的信任**：复用 `trust.json` / ADR-0008——`.nocturne/config.json` 的 `hooks` 段在**未信任时整段不执行**（不只是输出受限），并随 `project_config_untrusted` 警告提示。理由：Hook 条目是任意命令，"运行但把输出 clamp 到收紧"并不安全——进程一旦运行就能做任何事（网络外传、改文件），输出语义约束不了它。"未信任的 Hook 只能收紧"在本设计中具体化为：**未信任的 Hook 没有机会产生任何影响**；而放宽 `ask` 的能力只属于 `PermissionRequest`（且其 `allow` 永远越不过 `deny`）。
 - 用户级 `hooks` 永远可信（用户配置本来就等同于用户意图）。
 - 命令的相对路径按 `workspaceRoot` 解析——项目 Hook 里 `./hooks/guard.js` 是可移植写法。
 
@@ -110,16 +111,16 @@ Hook 调用的耗时计入诊断（`hook.run` 记录），不占 `tool.exec` 的
   2. 校验 input
   2.5 PreToolUse: runner.run("PreToolUse", {callId, tool, input})
         deny  → permission.resolved(source:"hook") + tool.completed(denied, hook_denied)
-        ask   → 记 hookAdvice，进第 5 步强制确认
-        allow → 记 hookAdvice（仅可信来源生效）
+        ask   → 记 hookAdvice，进第 5 步强制确认（跳过 Grant/--yes 提升）
         updatedInput → 重新校验后继续
   3-4. 主体计算、资源解析（不变）
   5. 权限求值（permission.evaluate，不变）
         规则 deny → deny（hookAdvice 无效）
-        规则 ask 且 hookAdvice=allow（可信）→ allow(source:"hook")，不发 requested
+        hookAdvice=ask 且非 deny → 强制确认：先经 PermissionRequest Hook，
+                  无回答则走既有 interactive 询问 / 非交互拒绝；Grant 与
+                  autoApproveAsk 提升不适用（permissions.md 5.3）
         规则 ask → PermissionRequest Hook：allow/deny 直接结算(source:"hook")；
-                  无回答 → 走既有 interactive 询问 / 非交互拒绝
-        规则 allow 且 hookAdvice=ask → 转询问
+                  无回答 → Grant / --yes 提升 → interactive 询问 / 非交互拒绝
   6-7. tool.started、执行（不变）
   7.5 PostToolUse: runner.run("PostToolUse", {...，result 摘要})
         feedback 追加进 modelContent（含在归一化预算内）

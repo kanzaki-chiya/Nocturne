@@ -54,8 +54,8 @@
 
 **验收**：
 
-- MCP：脚本化假 stdio 服务器（默认测试集完全离线）覆盖正常调用、`isError`、超时、崩溃与惰性重连；工具以 `mcp__<server>__<tool>` 出现在 `specs()` 与 `/context`，经与内置工具相同的管线执行；启动失败降级为"无该服务器工具"并经 `mcp.server` / `runtime.warning` 可见；权限主体 `mcp <server>/<tool>` 走完整确认流程。
-- Hooks：`PreToolUse` 拒绝与 `updatedInput` 修改后重新校验各一例；`PermissionRequest` 在 `ask` 时自动放行/拒绝；`PostToolUse` 反馈进入模型可见结果；超时、非零退出、输出过大均降级为"无效果 + `hook_failed` 警告"；**未配置 Hooks 时事件序列与 Phase 4 完全一致**（回归断言）；未信任项目的 Hook 不执行，信任后生效。
+- MCP：脚本化假 stdio 服务器（默认测试集完全离线）覆盖正常调用、`isError`、超时、崩溃与惰性重连；工具以 `mcp__<server>__<tool>` 出现在 `specs()` 与 `/context`，经与内置工具相同的管线执行；启动失败降级为"无该服务器工具"并经 `mcp.server` / `runtime.warning` 可见；权限主体 `mcp <server>/<tool>` 走完整确认流程；**子进程环境为白名单 + 显式 `env` 覆盖**（测试断言 MCP 子进程看不到未声明的宿主环境变量，如 `NOCTURNE_API_KEY`）；`tools/list_changed` 与重连后的工具集变化只在 Turn 边界生效（测试断言 Turn 进行中 `specs()` 不变）；恢复含 `mcp__*` 历史的会话且服务器缺席时，两个适配器发出的请求仍合法（假 Provider 断言请求形状）。
+- Hooks：`PreToolUse` 拒绝与 `updatedInput` 修改后重新校验各一例；`PermissionRequest` 在 `ask` 时自动放行/拒绝；`PostToolUse` 反馈进入模型可见结果；超时、非零退出、输出过大均降级为"无效果 + `hook_failed` 警告"；**未配置 Hooks 时事件序列与 Phase 4 完全一致**（回归断言）；未信任项目的 Hook 不执行，信任后生效；**Hook 强制的 `ask` 不被 Grant 或 `--yes` 自动放行**（测试断言）。
 - 可观测性：`--debug` / `NOCTURNE_DEBUG` 产出 JSONL，覆盖 provider 请求、context 构成、token、工具耗时、权限决定、hook/mcp 调用；日志中不出现凭据、`Authorization` 或 MCP `env` 值。
 - 端到端：`Z:/nocturne-accept/` 的 fake-openai 驱动真实 `nctrn` 进程，CLI 与 TUI 各跑一遍（TUI 在 Windows Terminal 与 conhost 实际查看）：MCP 调用往返与权限确认、服务器崩溃后会话继续、`PreToolUse` 拒绝与修改输入、项目 Hook 信任前后差异、杀进程恢复后 MCP 调用标记 `interrupted`、诊断文件无密钥。
 - 依赖与边界：`depcheck` 零违规；`packages/mcp` 只依赖 `@nocturne/core` 公开入口与 `@modelcontextprotocol/sdk`；ADR-0011/0012 转已接受。

@@ -46,7 +46,9 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 |---|---|
 | `command` | 可执行文件（必填）。经 `platform.spawnPipe` 启动，不经 shell 解释——参数用 `args` 数组，不做引号解析 |
 | `args` | 参数数组，原样传递 |
-| `env` | 叠加在进程环境之上的变量。值中的 `${NAME}` 启动时从 Nocturne 进程环境展开；引用的变量不存在时展开为空字符串并记警告。**禁止内联凭据**：与 `providers` 条目同规则，env 值只应引用环境变量名（`${NAME}` 形式），出现疑似凭据字面量的字段按 `config_credential_rejected` 拒绝该层文件——见 config.md 第 2 节的既有约定扩展 |
+| `env` | 显式传给该服务器的变量，叠加在**白名单默认环境**之上（见下）。值中的 `${NAME}` 启动时从 Nocturne 进程环境展开；引用的变量不存在时展开为空字符串并记警告（`mcp_env_missing`）。**禁止内联凭据**：与 `providers` 条目同规则，env 值只应引用环境变量名（`${NAME}` 形式），出现疑似凭据字面量的字段按 `config_credential_rejected` 拒绝该层文件——见 config.md 第 2 节的既有约定扩展 |
+
+**子进程环境 = 白名单 + `env` 覆盖**：MCP 服务器默认**不继承** Nocturne 的完整进程环境——第三方服务器（`npx` 拉起的包等）不该默认拿到 `NOCTURNE_API_KEY`、`ANTHROPIC_API_KEY` 这类 Provider 凭据。白名单参照 SDK `getDefaultEnvironment()` 的平台基线：`PATH`、`HOME`/`USERPROFILE`、`APPDATA`、`SystemRoot`/`SYSTEMDRIVE`、`TEMP`/`TMP`、`ComSpec`、`TERM`、`LANG`/`LC_*`、`NODE_*` 之外不含任何 `*_KEY`/`*_TOKEN`/`*_SECRET` 形变量；用户要传更多变量必须经 `env` 显式声明（值可用 `${NAME}` 引用宿主环境）。这与 Hook 不同：Hook 是用户自己写的本地脚本，继承完整环境（hooks.md 第 2 节）。
 | `cwd` | 服务器工作目录；缺省会话 `cwd`。相对路径按 `workspaceRoot` 解析 |
 | `enabled` | 缺省 `true`；`false` 时跳过该服务器（保留配置便于切换） |
 | `startupTimeoutMs` | spawn + initialize + tools/list 的超时，默认 15000 |
@@ -68,7 +70,9 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
     └── 失败/超时 → 服务器记 failed，发临时事件 mcp.server + runtime.warning，会话照常打开
 会话运行中
   ├── tools/call 经执行管线（第 5、6 节）
-  ├── tools/list_changed 通知 → 重新 tools/list，增量注册/注销本会话工具
+  ├── tools/list_changed 通知 → 重新 tools/list 并**暂存**，下一个 Turn 边界才切换
+  │   注册表（Turn 内工具集与上下文前缀保持稳定，不打断进行中的请求，也保住
+  │   Provider 侧提示缓存命中）；崩溃重连后重新拉到的工具列表同样按此规则
   └── 进程退出/传输错误 → crashed；在途调用以 mcp_unavailable 结算
 会话关闭（session.close，含 failed 路径）
   → 并行关闭全部连接：先给至多 2 秒让对端响应 stdin EOF/自行退出，随后进程树强杀
@@ -106,7 +110,7 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 3. 规范化后撞名（不同原始名映射到同一名字）：先注册者保留，后到的工具跳过并记警告——不静默覆盖（注册表既有约定）。
 4. `server` id 在配置层校验：`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$`，不合规的条目拒绝该层（用户配置报错 / 项目配置忽略并警告）。
 
-工具集合随会话注册表存在：本会话的 `ToolRegistry` = 内置工具 ∪ 本会话 MCP 工具（`specs()` 进入 `buildContext` 与 `/context` 的口径不变）；`tools/list_changed` 到达时增量增删。会话关闭后 MCP 工具随注册表一起消失。
+工具集合随会话注册表存在：本会话的 `ToolRegistry` = 内置工具 ∪ 本会话 MCP 工具（`specs()` 进入 `buildContext` 与 `/context` 的口径不变）。`tools/list_changed` 与崩溃重连重新拉到的工具列表都**先暂存、在下一个 Turn 开始时一次性切换**——保证单个 Turn 内 `specs()` 稳定（模型看到的工具集不中途变化，请求前缀不变）。会话关闭后 MCP 工具随注册表一起消失。
 
 ## 6. 调用与结果映射
 
@@ -144,6 +148,7 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 - 失败同时发 `runtime.warning`（`mcp_server_failed` / `mcp_server_crashed` / `mcp_tool_conflict` / `mcp_env_missing`），客户端走既有警告渲染。
 - `session.mcpServers(): McpServerStatus[]`（只读查询，不产事件）：供 `/mcp` 命令列出每台服务器的状态、工具数与失败原因（[apps/cli.md](../apps/cli.md)）。
 - **部分失败降级**：启动失败的服务器不阻塞会话——其工具不存在，模型调用到不存在的工具名时得到 `unknown_tool`（列出可用工具名，与工具名漂移的既有自愈路径一致）。
+- **恢复兼容**：历史中含 `mcp__*` 调用、本次打开时该服务器未配置或启动失败——历史回放不受影响（`tool.completed` 是按 `callId` 配对的消息记录，发给 Provider 的请求不校验历史工具名是否仍在 `specs()` 中；openai-compatible 与 anthropic 两个适配器都要在验收中验证这一点，见 roadmap Phase 5）。
 
 ## 8. 与 Core 的接线
 

@@ -30,8 +30,9 @@ execute(call, ctx):
   2. 校验      按 inputSchema 校验并规范化输入
                失败 → error(code="invalid_input")，附带校验信息
   2.5 PreToolUse Hook   见 hooks.md 第 3 节：deny → permission.resolved(source:"hook")
-                        + error(code="hook_denied")；ask/allow 记入第 5 步的合并；
-                        updatedInput 替换输入并重新走第 2 步校验
+                        + error(code="hook_denied")；ask 记入第 5 步的合并（强制确认，
+                        不经 Grant/--yes 提升）；updatedInput 替换输入并重新走第 2 步校验；
+                        无 allow（此点在主体解析前运行）
   3. 权限主体  requests = tool.permissionSubjects(input, scope)   # 纯函数：本次调用会碰到什么
   4. 解析资源  subjects = platform.resolve(requests)               # 唯一做 I/O 的准备步骤：真实路径
                解析失败（如权限不足无法访问父目录）→ error(code="resource_unavailable")
@@ -53,7 +54,7 @@ execute(call, ctx):
 - 权限在第 5 步由执行器统一处理，工具实现拿到执行机会时权限已经确定。工具不能自己弹确认，也不能跳过这一步。资源解析与权限求值的分工见 [permissions.md](permissions.md) 第 4 节。
 - 会修改文件的工具在写入前重新解析目标路径，与 `ctx.subjects` 中批准时的结果不一致时返回 `resource_changed`，不写入。
 - 枚举类工具（grep、glob）不跟随符号链接，并用 `ctx.permissions.check` 过滤每个结果条目，只保留求值为 allow 的条目，省略数量写入结果。
-- Hooks 插入点：PreToolUse 位于第 2、3 步之间（可以拒绝或修改输入，修改后重新校验），PermissionRequest 在第 5 步 ask 分支内，PostToolUse 位于第 7、8 步之间。Hook 输出是建议——`allow` 只能放宽 `ask`、越不过 `deny`，完整语义与信任规则见 [hooks.md](hooks.md)。**未配置 Hooks 时管线行为与事件序列和 Phase 4 完全一致**。
+- Hooks 插入点：PreToolUse 位于第 2、3 步之间（可以拒绝或修改输入，修改后重新校验），PermissionRequest 在第 5 步 ask 分支内，PostToolUse 位于第 7、8 步之间。Hook 输出是建议——只能收紧（`deny`/`ask`/`updatedInput`/`feedback`/`block`），唯一放宽 `ask` 的点位是 `PermissionRequest`（看到解析后的主体），且越不过 `deny`；完整语义与信任规则见 [hooks.md](hooks.md)。**未配置 Hooks 时管线行为与事件序列和 Phase 4 完全一致**。
 
 ## 4. 结果预算
 
