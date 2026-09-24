@@ -23,6 +23,7 @@ const HELP_TEXT = `斜杠命令：
   /preset        显示当前权限预设
   /preset <name> 切换权限预设（read-only | default | auto-edit | full-access）
   /context       上下文组成面板（Esc/Enter 关闭，↑↓ 滚动）
+  /mcp           显示本会话 MCP 服务器状态（只读）
   /compact       手动压缩上下文（L2 摘要）
   /resume        弹出会话列表选择器；/resume <id> 直接切换
   /exit, /quit   退出
@@ -65,6 +66,19 @@ export async function runSlash(line: string, session: RuntimeSession): Promise<S
     }
     case "/context":
       return { kind: "overlay", name: "context" };
+    case "/mcp": {
+      const servers = session.mcpServers();
+      if (servers.length === 0) {
+        return { kind: "message", text: "本会话没有配置 MCP 服务器" };
+      }
+      const lines = servers.map((s) => {
+        const tools = s.state === "ready" ? `，${s.toolCount} 个工具` : "";
+        const err = s.error !== undefined ? `，${s.error}` : "";
+        const restarts = s.restarts > 0 ? `，重连 ${s.restarts} 次` : "";
+        return `  ${s.name}  ${s.state}${tools}${restarts}${err}`;
+      });
+      return { kind: "message", text: ["MCP 服务器：", ...lines].join("\n") };
+    }
     case "/compact": {
       try {
         await session.compact();

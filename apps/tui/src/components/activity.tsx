@@ -69,7 +69,11 @@ export function Activity({
       ) : null}
       {view.status === "compacting" ? <Text dimColor>正在压缩上下文…</Text> : null}
       {notices.map((n, i) => (
-        <Text key={i} color={n.level === "error" ? "red" : "yellow"} wrap="truncate">
+        <Text
+          key={i}
+          color={n.level === "error" ? "red" : n.level === "warning" ? "yellow" : "gray"}
+          wrap="truncate"
+        >
           {truncateLine(`! ${n.message}`, width, g.ellipsis)}
         </Text>
       ))}

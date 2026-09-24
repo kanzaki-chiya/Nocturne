@@ -152,4 +152,79 @@ describe("openai-compatible 适配器", () => {
       collect(p.stream({ ...REQ, model: "m-1" }, new AbortController().signal)),
     ).rejects.toMatchObject({ kind: "auth" });
   });
+
+  it("历史 mcp__ 调用（服务器缺失、未声明 tools）仍生成合法 tool_calls/tool 配对", async () => {
+    // 验收 D（mcp.md）：恢复会话时 MCP 服务器不在，发给 openai-compatible
+    // 的请求中历史调用必须保持 assistant.tool_calls ↔ tool 消息 id 配对
+    const capture: { body?: Record<string, unknown> } = {};
+    const sseFetch = async (_input: unknown, init?: RequestInit): Promise<Response> => {
+      capture.body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      const chunks = [
+        { id: "x", choices: [{ index: 0, delta: { role: "assistant", content: "ok" } }] },
+        {
+          id: "x",
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        },
+      ];
+      const payload =
+        chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n";
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(new TextEncoder().encode(payload));
+            c.close();
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    };
+    const p = createOpenAICompatibleProvider(
+      {
+        id: "test",
+        baseURL: "http://127.0.0.1:9/v1",
+        apiKeyEnv: "TEST_OAI_KEY",
+        models: { "m-1": {} },
+      },
+      (n) => (n === "TEST_OAI_KEY" ? "sk-test" : undefined),
+    );
+    // @ai-sdk/openai-compatible 用全局 fetch；测试内替换
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = sseFetch as typeof fetch;
+    try {
+      await collect(
+        p.stream(
+          {
+            ...REQ,
+            model: "m-1",
+            messages: [
+              {
+                role: "assistant",
+                content: [],
+                toolCalls: [{ callId: "c1", name: "mcp__gone__echo", input: { text: "hi" } }],
+              },
+              {
+                role: "tool",
+                callId: "c1",
+                name: "mcp__gone__echo",
+                content: "ok",
+                isError: false,
+              },
+              { role: "user", content: [{ type: "text", text: "continue" }] },
+            ],
+          },
+          new AbortController().signal,
+        ),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    const messages = capture.body?.["messages"] as Record<string, unknown>[] | undefined;
+    const assistant = messages?.find((m) => m["role"] === "assistant");
+    const calls = assistant?.["tool_calls"] as
+      { id: string; function: { name: string } }[] | undefined;
+    expect(calls?.[0]?.function.name).toBe("mcp__gone__echo");
+    const toolMsg = messages?.find((m) => m["role"] === "tool");
+    expect(toolMsg?.["tool_call_id"]).toBe(calls?.[0]?.id);
+  });
 });

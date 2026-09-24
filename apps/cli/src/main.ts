@@ -13,6 +13,7 @@ import {
   SessionError,
   type RuntimeSession,
 } from "@nocturne/core";
+import { createMcpConnector } from "@nocturne/mcp";
 
 import { HELP_TEXT, parseArgs, UsageError, type CliArgs } from "./args.js";
 import { collectConfig, effectiveProviderId, normalizeModelRef } from "./config.js";
@@ -133,11 +134,19 @@ async function main(): Promise<number> {
     process.stderr.write(`! ${w}\n`);
   }
 
+  // 诊断开关（observability.md 第 1 节）：--debug / NOCTURNE_DEBUG；
+  // 文件位置只由 --debug-file / NOCTURNE_DEBUG_FILE 决定，"-" 写 stderr
+  const debugEnabled = args.debug || /^(1|true|yes|on)$/i.test(process.env.NOCTURNE_DEBUG ?? "");
   const runtime = await createRuntime({
     cwd,
     config: runtimeConfig,
     interactive: !args.print,
     permissions: { autoApproveAsk: args.yes },
+    mcp: createMcpConnector(),
+    debug: {
+      enabled: debugEnabled,
+      file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,
+    },
   });
 
   // --sessions：只读列表（cli.md 第 2 节）

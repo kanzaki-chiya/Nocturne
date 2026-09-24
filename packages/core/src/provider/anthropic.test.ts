@@ -298,6 +298,47 @@ describe("anthropic 适配器", () => {
     );
   });
 
+  it("历史 mcp__ 调用（服务器缺失、未声明 tools）仍生成合法 tool_use/tool_result 配对", async () => {
+    const capture: { body?: { messages?: unknown[]; tools?: unknown[] } } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    await collect(
+      p,
+      request({
+        tools: [], // MCP 服务器本次未配置/启动失败 → 工具未声明
+        messages: [
+          {
+            role: "assistant",
+            content: [],
+            toolCalls: [
+              {
+                callId: "c1",
+                providerCallId: "toolu_m1",
+                name: "mcp__gone__echo",
+                input: { text: "hi" },
+              },
+            ],
+          },
+          { role: "tool", callId: "c1", name: "mcp__gone__echo", content: "ok", isError: false },
+          { role: "user", content: [{ type: "text", text: "continue" }] },
+        ],
+      }),
+    );
+    const messages = capture.body?.messages as
+      { role: string; content: Record<string, unknown>[] }[] | undefined;
+    expect(messages?.[0]?.content).toContainEqual(
+      expect.objectContaining({ type: "tool_use", id: "toolu_m1", name: "mcp__gone__echo" }),
+    );
+    expect(messages?.[1]?.content).toContainEqual(
+      expect.objectContaining({ type: "tool_result", tool_use_id: "toolu_m1" }),
+    );
+    // tools 未声明时序列化为空数组或不出现，但绝不能含悬空声明
+    expect(capture.body?.tools ?? []).toEqual([]);
+  });
+
   it("HTTP 429 → rate_limit ProviderError", async () => {
     const p = createAnthropicProvider(
       config(),

@@ -109,7 +109,10 @@ describe("Runtime MCP 装配", () => {
           { type: "tool_call", toolCallId: "t1", name: "mcp__fake__echo", input: { text: "hi" } },
           { type: "finish", reason: "tool_calls" },
         ],
-        [{ type: "text_delta", text: "done" }, { type: "finish", reason: "stop" }],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
       ],
       stub,
       { autoApproveAsk: true },
@@ -125,9 +128,7 @@ describe("Runtime MCP 装配", () => {
     );
     expect(started?.type).toBe("tool.started");
     if (started?.type === "tool.started") {
-      expect(started.payload.subjects).toEqual([
-        { kind: "mcp", target: "fake/echo" },
-      ]);
+      expect(started.payload.subjects).toEqual([{ kind: "mcp", target: "fake/echo" }]);
     }
     const completed = events.find((e) => e.type === "tool.completed");
     expect(completed?.type).toBe("tool.completed");
@@ -148,7 +149,10 @@ describe("Runtime MCP 装配", () => {
           { type: "tool_call", toolCallId: "t1", name: "mcp__fake__echo", input: { text: "hi" } },
           { type: "finish", reason: "tool_calls" },
         ],
-        [{ type: "text_delta", text: "done" }, { type: "finish", reason: "stop" }],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
       ],
       stub,
     );
@@ -159,9 +163,9 @@ describe("Runtime MCP 装配", () => {
     const completed = events.find((e) => e.type === "tool.completed");
     expect(completed?.type === "tool.completed" && completed.payload.status).toBe("denied");
     const resolved = events.find((e) => e.type === "permission.resolved");
-    expect(
-      resolved?.type === "permission.resolved" && resolved.payload.source,
-    ).toBe("non_interactive");
+    expect(resolved?.type === "permission.resolved" && resolved.payload.source).toBe(
+      "non_interactive",
+    );
     await session.close();
   });
 
@@ -170,12 +174,18 @@ describe("Runtime MCP 装配", () => {
     stub.diff.add.push(echoTool("added", "added"));
     const runtime = await makeRuntime(
       [
-        [{ type: "text_delta", text: "first" }, { type: "finish", reason: "stop" }],
+        [
+          { type: "text_delta", text: "first" },
+          { type: "finish", reason: "stop" },
+        ],
         [
           { type: "tool_call", toolCallId: "t2", name: "mcp__fake__added", input: {} },
           { type: "finish", reason: "tool_calls" },
         ],
-        [{ type: "text_delta", text: "done" }, { type: "finish", reason: "stop" }],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
       ],
       stub,
       { autoApproveAsk: true },
@@ -186,9 +196,72 @@ describe("Runtime MCP 装配", () => {
     session.subscribe((e) => events.push(e));
     await session.submit({ text: "two" });
     const completed = events.find((e) => e.type === "tool.completed");
-    expect(
-      completed?.type === "tool.completed" && completed.payload.modelContent,
-    ).toContain("added:");
+    expect(completed?.type === "tool.completed" && completed.payload.modelContent).toContain(
+      "added:",
+    );
     await session.close();
+  });
+
+  it("恢复：历史 mcp__ 调用在服务器缺失时重建为合法 tool 配对（验收 D）", async () => {
+    const stub = stubConnector([echoTool("echo")]);
+    const provider = new FakeProvider({
+      scripts: [
+        [
+          { type: "tool_call", toolCallId: "t1", name: "mcp__fake__echo", input: { text: "hi" } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "text_delta", text: "again" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const ws = tmp("nct-mcp-ws-");
+    const sessionsDir = tmp("nct-mcp-sessions-");
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir,
+      providers: [provider],
+      permissions: { autoApproveAsk: true },
+      mcp: stub.connector,
+      mcpServers: [{ name: "fake", origin: "user", command: "unused" }],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    await session.submit({ text: "call it" });
+    const id = session.id;
+    await session.close();
+
+    // 同一 sessionsDir 恢复，但这次完全不配置 MCP（服务器不存在）
+    const runtime2 = await createRuntime({
+      cwd: ws,
+      sessionsDir,
+      providers: [provider],
+      permissions: { autoApproveAsk: true },
+    });
+    const resumed = await runtime2.resumeSession(id);
+    expect(resumed.mcpServers()).toEqual([]);
+    const reason = await resumed.submit({ text: "again" });
+    expect(reason).toBe("done");
+
+    // 新请求的 messages 里历史 mcp 调用保持 tool_call/tool 配对（名字原样透传）
+    const req = provider.requests[2];
+    const assistant = req?.messages.find(
+      (m) => m.role === "assistant" && m.toolCalls.some((c) => c.name === "mcp__fake__echo"),
+    );
+    expect(assistant?.role).toBe("assistant");
+    const callId =
+      assistant?.role === "assistant"
+        ? assistant.toolCalls.find((c) => c.name === "mcp__fake__echo")?.callId
+        : undefined;
+    expect(typeof callId).toBe("string");
+    const toolMsg = req?.messages.find((m) => m.role === "tool" && m.callId === callId);
+    expect(toolMsg?.role).toBe("tool");
+    // 服务器缺失 → 本请求的工具清单不含该名字，但历史配对不受影响
+    expect(req?.tools.some((t) => t.name === "mcp__fake__echo") ?? false).toBe(false);
+    await resumed.close();
   });
 });

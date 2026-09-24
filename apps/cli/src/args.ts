@@ -36,6 +36,10 @@ export interface CliArgs {
   /** --preset <name>：新建会话的权限预设 */
   preset?: string | undefined;
   yes: boolean;
+  /** --debug：启用诊断 JSONL（等价 NOCTURNE_DEBUG=1） */
+  debug: boolean;
+  /** --debug-file <path>：诊断输出文件；"-" 写 stderr */
+  debugFile?: string | undefined;
   help: boolean;
   version: boolean;
   /** trust / untrust 子命令 */
@@ -68,6 +72,9 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
       --base-url <url>   Provider 端点（覆盖 NOCTURNE_BASE_URL）
       --api-key-env <名> 读取凭据的环境变量名
   -y, --yes              自动批准需要确认的操作
+      --debug            启用诊断输出（等价 NOCTURNE_DEBUG=1）
+      --debug-file <p>   诊断输出文件；"-" 写 stderr（等价 NOCTURNE_DEBUG_FILE）
+                         缺省写 <NOCTURNE_HOME>/logs/debug-*.jsonl
   -h, --help             打印本帮助
   -v, --version          打印版本
 `;
@@ -92,6 +99,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         "force-unlock": { type: "boolean", default: false },
         preset: { type: "string" },
         yes: { type: "boolean", short: "y", default: false },
+        debug: { type: "boolean", default: false },
+        "debug-file": { type: "string" },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", short: "v", default: false },
       },
@@ -153,6 +162,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     forceUnlock: values["force-unlock"],
     preset: values.preset,
     yes: values.yes,
+    debug: values.debug,
+    debugFile: values["debug-file"],
     help: values.help,
     version: values.version,
     command,

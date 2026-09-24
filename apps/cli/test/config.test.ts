@@ -14,6 +14,7 @@ const base: CliArgs = {
   print: true,
   tui: false,
   yes: false,
+  debug: false,
   help: false,
   version: false,
   continueSession: false,

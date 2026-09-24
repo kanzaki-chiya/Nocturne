@@ -149,6 +149,12 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
       return [aux(`! ${ev.payload.code}: ${ev.payload.message}`)];
     case "runtime.status":
       return ev.payload.status === "compacting" ? [aux("◇ 压缩中…")] : [];
+    case "mcp.server": {
+      const p = ev.payload;
+      const tools = p.toolCount !== undefined ? `（${p.toolCount} 个工具）` : "";
+      const err = p.error !== undefined ? `：${p.error}` : "";
+      return [aux(`◇ MCP 服务器 ${p.name} → ${p.state}${tools}${err}`)];
+    }
     case "turn.completed": {
       const p = ev.payload;
       const lines: Rendered[] = [];

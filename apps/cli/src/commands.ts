@@ -20,6 +20,7 @@ const SLASH_HELP = `斜杠命令：
   /preset        显示当前权限预设
   /preset <name> 会话内切换权限预设（read-only | default | auto-edit | full-access）
   /context       显示上下文组成（分区与 token 估算）
+  /mcp           显示本会话 MCP 服务器状态（只读）
   /compact       手动压缩上下文（L2 摘要）
   /resume        列出会话并输入编号切换；空行取消
   /resume <id>   直接切换到指定会话
@@ -96,6 +97,21 @@ export async function runSlashCommand(
           `  合计 ~${report.estimatedTokens} / ${report.budgetTokens} tok${overBudget ? "  [超预算]" : ""}`,
         ].join("\n"),
       );
+      return "handled";
+    }
+    case "/mcp": {
+      const servers = session.mcpServers();
+      if (servers.length === 0) {
+        io.print("本会话没有配置 MCP 服务器");
+        return "handled";
+      }
+      const lines = servers.map((s) => {
+        const tools = s.state === "ready" ? `，${s.toolCount} 个工具` : "";
+        const err = s.error !== undefined ? `，${s.error}` : "";
+        const restarts = s.restarts > 0 ? `，重连 ${s.restarts} 次` : "";
+        return `  ${s.name.padEnd(16)} ${s.state}${tools}${restarts}${err}`;
+      });
+      io.print(["MCP 服务器：", ...lines].join("\n"));
       return "handled";
     }
     case "/compact": {
