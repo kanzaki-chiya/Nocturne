@@ -228,7 +228,9 @@ async function main(): Promise<number> {
     }
   }
 
-  printSessionNotes(session);
+  // --tui 下打开提示由 TUI 在挂载时进提示区（app.tsx 挂载 effect），
+  // 此处不向 stderr 预打印，避免同一份提示出现两次
+  if (!args.tui) printSessionNotes(session);
 
   // /resume 会话切换：打开逻辑只有这一份，REPL 与 TUI 注入同一个 switcher；
   // holder 跟踪当前会话，退出时关闭的是切换后的那个

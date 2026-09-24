@@ -84,6 +84,12 @@ export function App({
     setClientLines((prev) => [...prev.slice(-19), ...text.split("\n")]);
   }, []);
 
+  // 初始会话的打开提示（恢复修复摘要等）进提示区——与切换路径同口径；
+  // --tui 下 main.ts 不再向 stderr 预打印，避免双份
+  useEffect(() => {
+    for (const n of sessionNotes(initialSession)) pushLine(`! ${n}`);
+  }, [initialSession, pushLine]);
+
   /** 退出：进行中先中断，等 Turn 收敛后再退（与 REPL close 路径同语义） */
   const requestExit = useCallback(() => {
     if (busy || pending !== undefined) {
