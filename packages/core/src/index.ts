@@ -37,6 +37,7 @@ import {
 import type {
   CommandRejectCode,
   ContentBlock,
+  Diagnostics,
   Grant,
   HookEntry,
   HookPoint,
@@ -231,7 +232,11 @@ function parseModelRef(model: string | ModelRef): ModelRef {
 }
 
 /** ProviderEntryConfig → ProviderConfig（字段形状一致，按 type 分发适配器） */
-function instantiateProvider(entry: ProviderEntryConfig, env: (n: string) => string | undefined) {
+function instantiateProvider(
+  entry: ProviderEntryConfig,
+  env: (n: string) => string | undefined,
+  diagnostics?: Diagnostics,
+) {
   const common = {
     id: entry.id,
     apiKeyEnv: entry.apiKeyEnv,
@@ -243,6 +248,7 @@ function instantiateProvider(entry: ProviderEntryConfig, env: (n: string) => str
       : {}),
     ...(entry.providerOptions !== undefined ? { providerOptions: entry.providerOptions } : {}),
     ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
+    ...(diagnostics !== undefined ? { diagnostics } : {}),
   };
   return entry.type === "anthropic"
     ? createAnthropicProvider(
@@ -273,31 +279,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   await fs.mkdir(sessionsDir);
   const nocturneHome = config?.nocturneHome ?? platform.nocturneHome();
 
-  /** Provider 构造：显式注入 + options.providerConfigs +（有 config 时）合并后的条目 */
-  function buildRegistry(configProviders: readonly ProviderEntryConfig[]): ProviderRegistry {
-    const env = (n: string) => platform.env(n);
-    // 同 id 后者覆盖（options.providerConfigs < config 条目，与分层优先级一致）
-    const byId = new Map<string, Provider>();
-    for (const p of options.providers ?? []) byId.set(p.id, p);
-    for (const c of options.providerConfigs ?? []) {
-      const instance =
-        c.type === "anthropic"
-          ? createAnthropicProvider(c, env)
-          : createOpenAICompatibleProvider(c, env);
-      byId.set(instance.id, instance);
-    }
-    for (const e of configProviders) byId.set(e.id, instantiateProvider(e, env));
-    return createProviderRegistry([...byId.values()], options.modelOverrides);
-  }
-
-  // 运行时级清单（listModels 的数据来源）：注入 + providerConfigs + config 基础层
-  const registry: ProviderRegistry = buildRegistry(config?.base.providers ?? []);
-
-  const store: SessionStore = createSessionStore({ platform, sessionsDir });
-
-  const interactive = options.interactive === true;
-
-  // 诊断通道（observability.md）：未启用时 no-op；sink 故障降级 + 警告进会话
+  // 诊断通道（observability.md）：未启用时 no-op；sink 故障降级 + 警告进会话。
+  // 先于 Provider 装配创建——适配器经 config.diagnostics 记录能力降级
   const sinkWarnings: { code: string; message: string }[] = [];
   const diagnostics = createDiagnostics({
     platform,
@@ -308,6 +291,30 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       options.debug?.file === "-" ? (line) => process.stderr.write(`${line}\n`) : undefined,
     warn: (code, message) => sinkWarnings.push({ code, message }),
   });
+
+  /** Provider 构造：显式注入 + options.providerConfigs +（有 config 时）合并后的条目 */
+  function buildRegistry(configProviders: readonly ProviderEntryConfig[]): ProviderRegistry {
+    const env = (n: string) => platform.env(n);
+    // 同 id 后者覆盖（options.providerConfigs < config 条目，与分层优先级一致）
+    const byId = new Map<string, Provider>();
+    for (const p of options.providers ?? []) byId.set(p.id, p);
+    for (const c of options.providerConfigs ?? []) {
+      const instance =
+        c.type === "anthropic"
+          ? createAnthropicProvider({ ...c, diagnostics }, env)
+          : createOpenAICompatibleProvider({ ...c, diagnostics }, env);
+      byId.set(instance.id, instance);
+    }
+    for (const e of configProviders) byId.set(e.id, instantiateProvider(e, env, diagnostics));
+    return createProviderRegistry([...byId.values()], options.modelOverrides);
+  }
+
+  // 运行时级清单（listModels 的数据来源）：注入 + providerConfigs + config 基础层
+  const registry: ProviderRegistry = buildRegistry(config?.base.providers ?? []);
+
+  const store: SessionStore = createSessionStore({ platform, sessionsDir });
+
+  const interactive = options.interactive === true;
 
   const instructions =
     options.instructions ?? (await loadInstructions(platform, workspaceRoot, cwd));

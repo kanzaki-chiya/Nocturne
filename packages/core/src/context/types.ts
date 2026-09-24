@@ -48,6 +48,11 @@ export interface BuildContextInput {
    * 缺省时 Builder 无法给出压缩计划。
    */
   events?: readonly DurableEvent[] | undefined;
+  /**
+   * 覆盖基础系统提示段（context.md 第 3 节第 1 项）；缺省为内置提示。
+   * 唯一用户是子会话（subagent.md 第 8 节）。
+   */
+  basePrompt?: string | undefined;
 }
 
 /** Builder 给出的压缩计划（context.md 6.2） */

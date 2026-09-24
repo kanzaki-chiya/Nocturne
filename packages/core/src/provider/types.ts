@@ -68,6 +68,13 @@ export interface ModelRequest {
   cachePrefix?: { systemBlocks: number; messages: number } | undefined;
   /** 来自配置，原样交给适配器，Core 不解释 */
   providerOptions?: Record<string, unknown> | undefined;
+  /**
+   * 强制工具选择（provider-api.md 第 3 节）：适配器尽力映射为具体的
+   * tool_choice；已知无法表达的组合（如 Anthropic 扩展思考开启时只接受
+   * auto/none）丢弃之并记 diagnostics.provider.unsupported_capability，
+   * 不得发出明知无效的请求。
+   */
+  toolChoice?: { name: string } | undefined;
 }
 
 // ── 流式事件（provider-api.md 第 4 节） ────────────────────

@@ -227,6 +227,7 @@ export async function runTurn(
         instructions: deps.instructions,
         environment: deps.environment,
         events: session.durableEvents(),
+        ...(deps.basePrompt !== undefined ? { basePrompt: deps.basePrompt } : {}),
       });
       deps.execEnv.diagnostics?.record("context.build", {
         turnId,
@@ -287,9 +288,13 @@ export async function runTurn(
         });
       }
 
-      // 2. 调用模型并消费流
+      // 2. 调用模型并消费流（toolChoice 注入点：subagent.md 第 2 节兜底轮）
       const messageId = id("message");
-      const outcome = await consumeStream(deps, built.request, turnId, messageId, nextCallId);
+      const request =
+        deps.toolChoice !== undefined
+          ? { ...built.request, toolChoice: deps.toolChoice }
+          : built.request;
+      const outcome = await consumeStream(deps, request, turnId, messageId, nextCallId);
 
       if (outcome.kind === "aborted") {
         await emitAssistant(outcome.acc, messageId, "aborted");
@@ -377,6 +382,11 @@ export async function runTurn(
         const execution = await deps.executor.execute(call, executionScope());
         if (execution.stopTurn) {
           return await finish("aborted");
+        }
+        // 注入的结束谓词（subagent.md 第 2 节）：调用方判定 Turn 已完成，
+        // 正常 done 收尾——Agent Loop 不读工具名
+        if (deps.shouldFinish?.(session.state()) === true) {
+          return await finish("done");
         }
         status("thinking");
       }

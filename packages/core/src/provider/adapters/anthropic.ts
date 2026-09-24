@@ -12,8 +12,10 @@ import { streamText, type JSONValue } from "ai";
 import { abortError, ProviderError } from "../errors.js";
 import { resolveModelInfo, type ModelOverride } from "../registry.js";
 import type { ModelInfo, ModelRequest, ModelStreamEvent, Provider } from "../types.js";
+import type { Diagnostics } from "../../protocol/index.js";
 import {
   mapPart,
+  planToolChoice,
   suppressSdkErrorLog,
   toAiMessages,
   toAiTools,
@@ -36,6 +38,8 @@ export interface AnthropicConfig {
   /** 原样传给适配器（providerOptions.anthropic） */
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
+  /** 诊断通道（observability.md）；缺省 no-op */
+  diagnostics?: Diagnostics | undefined;
 }
 
 type EnvReader = (name: string) => string | undefined;
@@ -72,6 +76,28 @@ export function createAnthropicProvider(
           retryable: false,
         });
       }
+      // 合并 providerOptions 后决定 toolChoice：扩展思考开启时 Anthropic 只接受
+      // auto/none，具体 tool_choice 会 400——临时关闭本轮思考让强制生效
+      // （provider-api.md 第 3 节），不发明知无效的组合
+      const mergedOptions: Record<string, unknown> | undefined =
+        config.providerOptions !== undefined || request.providerOptions !== undefined
+          ? { ...(config.providerOptions ?? {}), ...(request.providerOptions ?? {}) }
+          : undefined;
+      const choice = planToolChoice(request, mergedOptions);
+      if (choice.note !== undefined) {
+        config.diagnostics?.record("provider.unsupported_capability", {
+          provider: config.id,
+          capability: "tool_choice",
+          resolution: choice.note.resolution,
+          reason: choice.note.reason,
+        });
+      }
+      const providerOptions =
+        mergedOptions !== undefined ? { ...mergedOptions } : undefined;
+      for (const k of choice.strippedKeys) {
+        if (providerOptions !== undefined) delete providerOptions[k];
+      }
+
       const result = streamText({
         model: sdk(request.model),
         system: request.system.map((b) => b.text).join("\n\n"),
@@ -88,16 +114,10 @@ export function createAnthropicProvider(
         onError: suppressSdkErrorLog,
         // SDK 命名空间固定为 "anthropic"（与 config.id 无关）；
         // 配置级 providerOptions 为底，请求级覆盖
-        ...(config.providerOptions !== undefined || request.providerOptions !== undefined
-          ? {
-              providerOptions: {
-                anthropic: {
-                  ...(config.providerOptions ?? {}),
-                  ...(request.providerOptions ?? {}),
-                } as Record<string, JSONValue>,
-              },
-            }
+        ...(providerOptions !== undefined && Object.keys(providerOptions).length > 0
+          ? { providerOptions: { anthropic: providerOptions as Record<string, JSONValue> } }
           : {}),
+        ...(choice.toolChoice !== undefined ? { toolChoice: choice.toolChoice } : {}),
       });
 
       const toolNames = new Map<string, string>();

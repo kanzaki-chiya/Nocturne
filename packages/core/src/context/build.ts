@@ -314,14 +314,15 @@ export function lastOpenTurnId(events: readonly DurableEvent[]): string | undefi
 export function buildContext(input: BuildContextInput): BuiltContext {
   const { model } = input;
 
-  // 1. 基础系统提示
-  const system: SystemBlock[] = [{ text: BASE_SYSTEM_PROMPT }];
+  // 1. 基础系统提示（basePrompt 可覆盖——子会话换子代理提示，subagent.md 第 8 节）
+  const basePrompt = input.basePrompt ?? BASE_SYSTEM_PROMPT;
+  const system: SystemBlock[] = [{ text: basePrompt }];
   const sections: ContextSection[] = [
     {
       name: "system",
-      source: "nocturne base prompt",
-      chars: BASE_SYSTEM_PROMPT.length,
-      estimatedTokens: estimateTokens(BASE_SYSTEM_PROMPT.length),
+      source: input.basePrompt !== undefined ? "custom base prompt" : "nocturne base prompt",
+      chars: basePrompt.length,
+      estimatedTokens: estimateTokens(basePrompt.length),
     },
   ];
 

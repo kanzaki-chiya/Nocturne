@@ -117,6 +117,80 @@ export function toAiTools(request: ModelRequest): ToolSet {
   return tools;
 }
 
+// ── toolChoice 映射与思考冲突（provider-api.md 第 3 节） ───
+
+/**
+ * providerOptions 命名空间内表示"推理/思考已开启"的键。
+ * thinking 形如 { type: "enabled" | "disabled" }；reasoning / reasoningEffort
+ * 以存在且非禁用值为准。集合是开放的：只处理可识别的键，未知键原样透传。
+ */
+const REASONING_OPTION_KEYS = ["thinking", "reasoning", "reasoningEffort"] as const;
+
+function reasoningOptionEnabled(value: unknown): boolean {
+  if (value === undefined || value === null || value === false) return false;
+  if (typeof value === "object" && "type" in value) {
+    return (value as { type: unknown }).type === "enabled";
+  }
+  return value !== "none" && value !== "off";
+}
+
+export interface ToolChoicePlan {
+  /** 映射后的 ai-sdk toolChoice；被丢弃时为 undefined */
+  toolChoice: { type: "tool"; toolName: string } | undefined;
+  /**
+   * 需要从本轮 providerOptions 移除的键（兜底轮临时关闭思考，
+   * 使强制选择真正生效——subagent.md 第 2 节的二选一结论）。
+   */
+  strippedKeys: string[];
+  /** 冲突处置说明（适配器记 diagnostics.provider.unsupported_capability） */
+  note: { resolution: "disabled_reasoning" | "dropped_tool_choice"; reason: string } | undefined;
+}
+
+/**
+ * 决定本轮请求如何携带 toolChoice。规则（provider-api.md 第 3 节）：
+ * 思考/推理已开启时，优先把可识别的推理配置从本轮 providerOptions 移除
+ * （临时关闭），保留 toolChoice 使强制生效；对无法安全移除的推理声明
+ * （归一化字段 request.reasoningEffort——它由适配器映射为一级推理参数，
+ * 静默丢弃等于篡改用户显式配置）则丢弃 toolChoice。
+ * 两种处置都不会把明知无效的组合发给服务端。
+ */
+export function planToolChoice(
+  request: ModelRequest,
+  mergedProviderOptions: Record<string, unknown> | undefined,
+): ToolChoicePlan {
+  if (request.toolChoice === undefined) {
+    return { toolChoice: undefined, strippedKeys: [], note: undefined };
+  }
+  const toolChoice = { type: "tool" as const, toolName: request.toolChoice.name };
+  if (request.reasoningEffort !== undefined) {
+    return {
+      toolChoice: undefined,
+      strippedKeys: [],
+      note: {
+        resolution: "dropped_tool_choice",
+        reason: "reasoningEffort 已设置：推理开启时无法表达具体 tool_choice，丢弃 toolChoice",
+      },
+    };
+  }
+  const strippedKeys = REASONING_OPTION_KEYS.filter(
+    (k) =>
+      mergedProviderOptions !== undefined &&
+      k in mergedProviderOptions &&
+      reasoningOptionEnabled(mergedProviderOptions[k]),
+  );
+  if (strippedKeys.length > 0) {
+    return {
+      toolChoice,
+      strippedKeys,
+      note: {
+        resolution: "disabled_reasoning",
+        reason: `本轮移除推理配置（${strippedKeys.join(", ")}）以使 toolChoice 生效`,
+      },
+    };
+  }
+  return { toolChoice, strippedKeys: [], note: undefined };
+}
+
 /**
  * streamText 的 onError 缺省会把错误打到 console；错误由适配器统一归一化为
  * ProviderError 后抛出，必须传空函数抑制 SDK 自带的 stderr 噪音。

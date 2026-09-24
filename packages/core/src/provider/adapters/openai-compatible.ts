@@ -8,8 +8,10 @@ import { streamText } from "ai";
 import { abortError, ProviderError } from "../errors.js";
 import { resolveModelInfo, type ModelOverride } from "../registry.js";
 import type { ModelInfo, ModelRequest, ModelStreamEvent, Provider } from "../types.js";
+import type { Diagnostics } from "../../protocol/index.js";
 import {
   mapPart,
+  planToolChoice,
   suppressSdkErrorLog,
   toAiMessages,
   toAiTools,
@@ -32,6 +34,8 @@ export interface OpenAICompatibleConfig {
   /** 原样传给适配器（providerOptions） */
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
+  /** 诊断通道（observability.md）；缺省 no-op */
+  diagnostics?: Diagnostics | undefined;
 }
 
 type EnvReader = (name: string) => string | undefined;
@@ -66,6 +70,28 @@ export function createOpenAICompatibleProvider(
           retryable: false,
         });
       }
+      // 合并 providerOptions 后决定 toolChoice：部分兼容服务的推理配置与具体
+      // tool_choice 冲突——能安全移除的推理键本轮移除（强制生效），无法安全移除的
+      // （归一化 reasoningEffort）丢弃 toolChoice（provider-api.md 第 3 节）
+      const mergedOptions: Record<string, unknown> | undefined =
+        config.providerOptions !== undefined || request.providerOptions !== undefined
+          ? { ...(config.providerOptions ?? {}), ...(request.providerOptions ?? {}) }
+          : undefined;
+      const choice = planToolChoice(request, mergedOptions);
+      if (choice.note !== undefined) {
+        config.diagnostics?.record("provider.unsupported_capability", {
+          provider: config.id,
+          capability: "tool_choice",
+          resolution: choice.note.resolution,
+          reason: choice.note.reason,
+        });
+      }
+      const providerOptions =
+        mergedOptions !== undefined ? { ...mergedOptions } : undefined;
+      for (const k of choice.strippedKeys) {
+        if (providerOptions !== undefined) delete providerOptions[k];
+      }
+
       const result = streamText({
         model: sdk.chatModel(request.model),
         system: request.system.map((b) => b.text).join("\n\n"),
@@ -78,16 +104,10 @@ export function createOpenAICompatibleProvider(
         abortSignal: signal,
         onError: suppressSdkErrorLog,
         // 配置级 providerOptions 为底，请求级覆盖；命名空间是 config.id（SDK name）
-        ...(config.providerOptions !== undefined || request.providerOptions !== undefined
-          ? {
-              providerOptions: {
-                [config.id]: {
-                  ...(config.providerOptions ?? {}),
-                  ...(request.providerOptions ?? {}),
-                } as Record<string, JSONValue>,
-              },
-            }
+        ...(providerOptions !== undefined && Object.keys(providerOptions).length > 0
+          ? { providerOptions: { [config.id]: providerOptions as Record<string, JSONValue> } }
           : {}),
+        ...(choice.toolChoice !== undefined ? { toolChoice: choice.toolChoice } : {}),
       });
 
       const toolNames = new Map<string, string>();

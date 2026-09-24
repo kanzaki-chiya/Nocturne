@@ -4,7 +4,7 @@
  */
 import type { EnvironmentInfo, InstructionSet } from "../context/index.js";
 import type { ResolvedModel } from "../provider/index.js";
-import type { Session } from "../session/index.js";
+import type { Session, SessionState } from "../session/index.js";
 import type { ExecutionEnvironment, ToolExecutor, ToolRegistry } from "../tools/index.js";
 
 export interface TurnConfig {
@@ -38,4 +38,13 @@ export interface TurnDeps {
   /** Turn 级中断信号（客户端 interrupt → abort） */
   signal: AbortSignal;
   newId?: IdFactory | undefined;
+  /**
+   * Phase 6 注入点（agent-loop.md 3.9，subagent.md 第 9 节）；缺省时行为不变：
+   * - basePrompt：覆盖基础系统提示段
+   * - shouldFinish：每个工具调用结算后检查，返回 true 即 finish("done")
+   * - toolChoice：进入本 Turn 每个 ModelRequest（强制调用指定工具）
+   */
+  basePrompt?: string | undefined;
+  shouldFinish?: ((state: SessionState) => boolean) | undefined;
+  toolChoice?: { name: string } | undefined;
 }
