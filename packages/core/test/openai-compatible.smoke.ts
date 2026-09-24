@@ -17,6 +17,7 @@ import type { RuntimeEvent } from "../src/protocol/index.js";
 const BASE_URL = process.env.NOCTURNE_SMOKE_BASE_URL;
 const API_KEY = process.env.NOCTURNE_SMOKE_API_KEY;
 const MODEL = process.env.NOCTURNE_SMOKE_MODEL;
+const REASONING_MODEL = process.env.NOCTURNE_SMOKE_DEEPSEEK_REASONING_MODEL;
 const PROVIDER_ID = "smoke";
 
 const configured = BASE_URL !== undefined && API_KEY !== undefined && MODEL !== undefined;
@@ -31,7 +32,7 @@ const makeTmp = (p: string) => {
   return d;
 };
 
-async function openSession(cwd: string) {
+async function openSession(cwd: string, model = MODEL) {
   const runtime = await createRuntime({
     cwd,
     sessionsDir: makeTmp("nct-smoke-sessions-"),
@@ -40,12 +41,13 @@ async function openSession(cwd: string) {
         id: PROVIDER_ID,
         baseURL: BASE_URL ?? "",
         apiKeyEnv: "NOCTURNE_SMOKE_API_KEY",
-        models: { [MODEL ?? ""]: {} },
+        models: { [model ?? ""]: {} },
       },
     ],
+    permissions: { autoApproveAsk: true },
   });
   const session = await runtime.createSession({
-    model: `${PROVIDER_ID}/${MODEL ?? ""}`,
+    model: `${PROVIDER_ID}/${model ?? ""}`,
   });
   const events: RuntimeEvent[] = [];
   session.subscribe((e) => {
@@ -101,4 +103,46 @@ describe.skipIf(!configured)("openai-compatible 冒烟（真实服务）", () =>
     expect(finalText).toContain(token);
     await session.close();
   });
+
+  it("子代理往返：父 task、子 finish、父侧得到结果", async () => {
+    const { session, events } = await openSession(makeTmp("nct-smoke-ws-"));
+    const token = `NCT-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+    const reason = await session.submit({
+      text: `请调用 task 工具，任务写成“调用 finish 工具返回 ${token}”。收到子代理结果后，只回复该结果。`,
+    });
+    expect(reason).toBe("done");
+    expect(
+      events.some(
+        (e) =>
+          e.type === "tool.completed" && e.payload.name === "task" && e.payload.status === "ok",
+      ),
+    ).toBe(true);
+    expect(
+      events
+        .filter((e) => e.type === "message.assistant")
+        .flatMap((e) => e.payload.content)
+        .some((b) => b.type === "text" && b.text.includes(token)),
+    ).toBe(true);
+    await session.close();
+  });
+
+  it.skipIf(REASONING_MODEL === undefined)(
+    "DeepSeek 推理模式：reasoning 块回传后的第二轮被真实服务接受，且不泄漏模板标记",
+    async () => {
+      const { session, events } = await openSession(makeTmp("nct-smoke-ws-"), REASONING_MODEL);
+      expect(await session.submit({ text: "请心算 17 加 25，只回复结果。" })).toBe("done");
+      expect(
+        events.some((e) => e.type === "message.assistant.delta" && e.payload.kind === "reasoning"),
+      ).toBe(true);
+      expect(await session.submit({ text: "把刚才的结果加 3，只回复结果。" })).toBe("done");
+      const text = events
+        .filter((e) => e.type === "message.assistant")
+        .flatMap((e) => e.payload.content)
+        .filter((b) => b.type === "text")
+        .map((b) => b.text)
+        .join("\n");
+      expect(text).not.toMatch(/<｜[^｜]*｜>/u);
+      await session.close();
+    },
+  );
 });

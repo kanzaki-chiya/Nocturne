@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-// 冒烟测试：真实 OpenAI 兼容服务。需要环境变量：
+// 冒烟测试：真实 OpenAI 兼容与 Anthropic 服务。需要环境变量：
 //   NOCTURNE_SMOKE_BASE_URL  例如 https://api.deepseek.com/v1
 //   NOCTURNE_SMOKE_API_KEY   服务凭据（只从环境变量读取，不写入任何文件）
 //   NOCTURNE_SMOKE_MODEL     模型 id，例如 deepseek-chat

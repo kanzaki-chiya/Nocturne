@@ -12,10 +12,12 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createRuntime } from "../src/index.js";
+import { createAnthropicProvider, type Provider } from "../src/provider/index.js";
 import type { RuntimeEvent } from "../src/protocol/index.js";
 
 const API_KEY = process.env.NOCTURNE_SMOKE_ANTHROPIC_API_KEY;
 const MODEL = process.env.NOCTURNE_SMOKE_ANTHROPIC_MODEL;
+const THINKING_MODEL = process.env.NOCTURNE_SMOKE_ANTHROPIC_THINKING_MODEL;
 const BASE_URL = process.env.NOCTURNE_SMOKE_ANTHROPIC_BASE_URL;
 const PROVIDER_ID = "smoke-anthropic";
 
@@ -44,6 +46,7 @@ async function openSession(cwd: string) {
         models: { [MODEL ?? ""]: {} },
       },
     ],
+    permissions: { autoApproveAsk: true },
   });
   const session = await runtime.createSession({
     model: `${PROVIDER_ID}/${MODEL ?? ""}`,
@@ -94,4 +97,88 @@ describe.skipIf(!configured)("anthropic 冒烟（真实服务）", () => {
     expect(finalText).toContain(token);
     await session.close();
   });
+
+  it("子代理往返：父 task、子 finish、父侧得到结果", async () => {
+    const { session, events } = await openSession(makeTmp("nct-smoke-ws-"));
+    const token = `NCT-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+    const reason = await session.submit({
+      text: `请调用 task 工具，任务写成“调用 finish 工具返回 ${token}”。收到子代理结果后，只回复该结果。`,
+    });
+    expect(reason).toBe("done");
+    expect(
+      events.some(
+        (e) =>
+          e.type === "tool.completed" && e.payload.name === "task" && e.payload.status === "ok",
+      ),
+    ).toBe(true);
+    expect(
+      events
+        .filter((e) => e.type === "message.assistant")
+        .flatMap((e) => e.payload.content)
+        .some((b) => b.type === "text" && b.text.includes(token)),
+    ).toBe(true);
+    await session.close();
+  });
+
+  it.skipIf(THINKING_MODEL === undefined)(
+    "扩展思考：缺 finish 后催促，带历史 thinking 的兜底轮强制 finish 被真实服务接受",
+    async () => {
+      const base = createAnthropicProvider({
+        id: PROVIDER_ID,
+        type: "anthropic",
+        ...(BASE_URL !== undefined ? { baseURL: BASE_URL } : {}),
+        apiKeyEnv: "NOCTURNE_SMOKE_ANTHROPIC_API_KEY",
+        models: { [THINKING_MODEL ?? ""]: {} },
+        providerOptions: { thinking: { type: "enabled", budgetTokens: 1024 } },
+      });
+      let childAttempts = 0;
+      let childReasoning = 0;
+      let forcedWithThinkingHistory = false;
+      const provider: Provider = {
+        id: base.id,
+        type: base.type,
+        models: () => base.models(),
+        async *stream(request, signal) {
+          const child = request.tools.some((t) => t.name === "finish");
+          if (child) childAttempts++;
+          if (child && request.toolChoice?.name === "finish") {
+            forcedWithThinkingHistory = request.messages.some(
+              (m) => m.role === "assistant" && m.content.some((b) => b.type === "reasoning"),
+            );
+          }
+          // 前两轮故意不向真实服务提供 finish，稳定触发产品原有的催促与兜底路径。
+          const forwarded = child && childAttempts < 3 ? { ...request, tools: [] } : request;
+          for await (const event of base.stream(forwarded, signal)) {
+            if (child && event.type === "reasoning_delta") childReasoning++;
+            yield event;
+          }
+        },
+      };
+      const runtime = await createRuntime({
+        cwd: makeTmp("nct-smoke-ws-"),
+        sessionsDir: makeTmp("nct-smoke-sessions-"),
+        providers: [provider],
+        permissions: { autoApproveAsk: true },
+        subagent: { maxAttempts: 3 },
+      });
+      const session = await runtime.createSession({ model: `${PROVIDER_ID}/${THINKING_MODEL}` });
+      const events: RuntimeEvent[] = [];
+      session.subscribe((e) => events.push(e));
+      expect(
+        await session.submit({
+          text: "调用 task 完成任务：计算 17 + 25，子代理用 finish 返回结果。",
+        }),
+      ).toBe("done");
+      expect(childAttempts).toBe(3);
+      expect(childReasoning).toBeGreaterThan(0);
+      expect(forcedWithThinkingHistory).toBe(true);
+      expect(
+        events.some(
+          (e) =>
+            e.type === "tool.completed" && e.payload.name === "task" && e.payload.status === "ok",
+        ),
+      ).toBe(true);
+      await session.close();
+    },
+  );
 });

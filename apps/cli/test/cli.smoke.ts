@@ -1,12 +1,12 @@
 /**
- * CLI 验收冒烟（roadmap Phase 2）：临时 fixture 仓库内置一个失败测试，
- * 用真实模型跑 `nctrn --yes -p` 非交互模式，断言模型修好后测试通过。
+ * CLI 验收冒烟：在临时 fixture 中用真实模型跑 `nctrn --yes -p`，
+ * 覆盖文件修复及假 MCP 服务器工具往返。
  * 需要环境变量（openai-compatible）：
  *   NOCTURNE_SMOKE_BASE_URL / NOCTURNE_SMOKE_API_KEY / NOCTURNE_SMOKE_MODEL
  * 未设置时跳过。运行前需 pnpm build（根 test:smoke 已保证）。
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,5 +86,46 @@ describe.skipIf(!configured)("nctrn 非交互冒烟（真实服务）", () => {
     const after = spawnSync("node", ["test.mjs"], { cwd, encoding: "utf8" });
     expect(after.status).toBe(0);
     expect(after.stdout).toContain("PASS");
+  });
+
+  it("MCP 工具往返：真实模型调用假服务器的 echo", () => {
+    expect(existsSync(CLI)).toBe(true);
+    const cwd = makeFixture();
+    const home = mkdtempSync(path.join(tmpdir(), "nct-smoke-home-"));
+    tmpRoots.push(home);
+    const fakeServer = path.resolve(here, "../../../packages/mcp/test/fake-server.mjs");
+    writeFileSync(
+      path.join(home, "config.json"),
+      JSON.stringify({
+        mcp: { servers: { fake: { command: process.execPath, args: [fakeServer] } } },
+      }),
+    );
+    const token = `NCT-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+    const run = spawnSync(
+      process.execPath,
+      [CLI, "--yes", "-p", `调用 mcp__fake__echo 工具，参数 text 为 ${token}，然后原样回复结果。`],
+      {
+        cwd,
+        encoding: "utf8",
+        timeout: 120_000,
+        env: {
+          ...process.env,
+          NOCTURNE_API_TYPE: "openai-compatible",
+          NOCTURNE_BASE_URL: BASE_URL ?? "",
+          NOCTURNE_API_KEY: API_KEY ?? "",
+          NOCTURNE_MODEL: MODEL ?? "",
+          NOCTURNE_HOME: home,
+        },
+      },
+    );
+    if (run.status !== 0) console.error("nctrn stderr:\n", run.stderr);
+    expect(run.status).toBe(0);
+    const log = readdirSync(path.join(home, "sessions"))
+      .filter((name) => name.endsWith(".jsonl"))
+      .map((name) => readFileSync(path.join(home, "sessions", name), "utf8"))
+      .join("\n");
+    expect(log).toContain('"name":"mcp__fake__echo"');
+    expect(log).toContain('"status":"ok"');
+    expect(run.stdout).toContain(token);
   });
 });

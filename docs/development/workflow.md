@@ -70,7 +70,7 @@ pnpm build          # tsdown 构建 packages/core/dist
 pnpm test:smoke     # vitest run --config vitest.smoke.config.ts；未设置时跳过
 ```
 
-这三个变量也可以写在仓库根目录的 `.env`（`KEY=value` 格式，已被 `.gitignore` 忽略，不得提交）；冒烟配置启动时加载它，已设置的环境变量优先。冒烟测试覆盖纯文本 Turn 与一次 `read` 工具往返，均在临时生成的工作区中运行。
+这三个变量也可以写在仓库根目录的 `.env`（`KEY=value` 格式，已被 `.gitignore` 忽略，不得提交）；冒烟配置启动时加载它，已设置的环境变量优先。冒烟测试覆盖纯文本 Turn、`read` 工具、假 MCP 服务器 `echo` 工具、子代理往返，均在临时生成的工作区中运行。若另设 `NOCTURNE_SMOKE_DEEPSEEK_REASONING_MODEL`（同一 OpenAI 兼容端点上支持推理内容的模型 id），还会验证含 reasoning 历史的多轮回传与聊天模板标记不泄漏；未设时该专项跳过，不把普通 DeepSeek 模型误报为推理模型。
 
 Anthropic 适配器的冒烟用独立变量，与 `NOCTURNE_SMOKE_*` 分离、互不影响：
 
@@ -78,9 +78,10 @@ Anthropic 适配器的冒烟用独立变量，与 `NOCTURNE_SMOKE_*` 分离、�
 #   NOCTURNE_SMOKE_ANTHROPIC_API_KEY   Anthropic 凭据
 #   NOCTURNE_SMOKE_ANTHROPIC_MODEL     模型 id，例如 claude-sonnet-4-5
 #   NOCTURNE_SMOKE_ANTHROPIC_BASE_URL  可选；缺省用官方端点
+#   NOCTURNE_SMOKE_ANTHROPIC_THINKING_MODEL  可选；同端点支持扩展思考的模型 id
 ```
 
-未设置时跳过；只验证到跳过路径时在汇报中如实说明。
+未设置时跳过；扩展思考模型变量未设置时，只跳过“缺 finish → 催促 → 兜底轮强制 finish”专项。该用例前两轮临时从模型请求中隐藏 `finish` 工具，以稳定触发原有兜底路径；首轮与催促轮仍由真实服务生成带 thinking 的响应，第三轮仍由真实服务接受含历史 thinking 的强制工具请求。只验证到跳过路径时在汇报中如实说明。
 
 Phase 2 的 CLI 冒烟（`apps/cli`）：在临时目录生成一个含失败测试的 fixture 仓库，以非交互模式 `nctrn --yes -p "<任务>"` 驱动真实模型完成"阅读项目 → 定位 bug → 修改文件 → 运行测试 → 报告结果"，断言 fixture 的测试在运行后通过。纯文本回复或只读工具调用不算验收。
 
