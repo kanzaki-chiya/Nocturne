@@ -6,15 +6,25 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { Box } from "ink";
 import { render } from "ink-testing-library";
 import { createElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "@nocturne/core";
-import type { ToolEntry, ViewEntry } from "@nocturne/core/protocol";
+import {
+  createSessionView,
+  type PendingPermission,
+  type ToolEntry,
+  type ViewEntry,
+} from "@nocturne/core/protocol";
 
 import { App, splitCompletedPrefix } from "../src/app.js";
+import { PermissionDialog } from "../src/components/permission-dialog.js";
+import { StatusBar } from "../src/components/status-bar.js";
+import { ToolRow } from "../src/components/tool-row.js";
 import { Transcript } from "../src/components/transcript.js";
+import { TuiEnvContext } from "../src/env.js";
 import type { SwitchSessionFn } from "../src/types.js";
 
 const tmpRoots: string[] = [];
@@ -28,6 +38,9 @@ const tmp = (p: string) => {
 };
 
 const ENV = { ascii: false, animated: false };
+const pause = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+const inEnv = (child: React.ReactNode) =>
+  createElement(TuiEnvContext.Provider, { value: ENV }, child);
 
 async function makeSession(): Promise<{ runtime: Runtime; session: RuntimeSession }> {
   const runtime = await createRuntime({
@@ -65,6 +78,89 @@ const noticeEntry = (seq: number, message: string): ViewEntry => ({
 });
 
 describe("TUI", () => {
+  it("权限对话框：五选项可见，Tab 移焦，d 进入反馈行", async () => {
+    const pending: PendingPermission = {
+      requestId: "p1",
+      callId: "c1",
+      toolName: "shell",
+      subjects: [{ kind: "shell", target: "echo hi" }],
+      reason: "需要确认",
+      options: ["allow_once", "allow_session", "allow_project", "deny", "deny_stop"],
+    };
+    const reply = vi.fn();
+    const { lastFrame, stdin, unmount } = render(
+      inEnv(createElement(PermissionDialog, { pending, active: true, onReply: reply, width: 80 })),
+    );
+    for (const label of [
+      "允许一次",
+      "本会话内允许",
+      "在此项目中始终允许",
+      "拒绝（可附反馈）",
+      "拒绝并停止本 Turn",
+    ]) {
+      expect(lastFrame()).toContain(label);
+    }
+    stdin.write("\t");
+    await pause();
+    stdin.write("\r");
+    await pause();
+    expect(reply).toHaveBeenCalledWith({ decision: "allow", remember: "session" });
+    stdin.write("d");
+    await pause();
+    expect(lastFrame()).toContain("Enter 发送拒绝");
+    stdin.write("请先检查");
+    await pause();
+    stdin.write("\r");
+    await pause();
+    expect(reply).toHaveBeenCalledWith({ decision: "deny", feedback: "请先检查" });
+    unmount();
+  });
+
+  it("子代理运行中进度按行显示", () => {
+    const entry = toolEntry("c1", "running");
+    entry.name = "task";
+    entry.liveOutput = "子会话第 1 轮开始\nread → ok\n";
+    const { lastFrame, unmount } = render(inEnv(createElement(ToolRow, { entry, width: 80 })));
+    const lines = (lastFrame() ?? "").split("\n");
+    expect(lines.some((line) => line.includes("子会话第 1 轮开始"))).toBe(true);
+    expect(lines.some((line) => line.includes("read → ok"))).toBe(true);
+    expect(
+      lines.some((line) => line.includes("子会话第 1 轮开始") && line.includes("read → ok")),
+    ).toBe(false);
+    unmount();
+  });
+
+  it("窄于 40 列：状态栏仅留状态和 tokens，权限框隐藏原因", () => {
+    const view = createSessionView();
+    view.config.model = { provider: "fake", model: "long-model" };
+    view.config.permissionPreset = "default";
+    const pending: PendingPermission = {
+      requestId: "p1",
+      callId: "c1",
+      toolName: "shell",
+      subjects: [{ kind: "shell", target: "echo hi" }],
+      reason: "很长的审批原因",
+      options: ["allow_once", "deny"],
+    };
+    const { lastFrame, unmount } = render(
+      inEnv(
+        createElement(
+          Box,
+          { flexDirection: "column" },
+          createElement(PermissionDialog, { pending, active: true, onReply: vi.fn(), width: 32 }),
+          createElement(StatusBar, { view, sessionId: "s-very-long", width: 32 }),
+        ),
+      ),
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("idle");
+    expect(frame).toContain("↑0 ↓0");
+    expect(frame).not.toContain("很长的审批原因");
+    expect(frame).not.toContain("long-model");
+    expect(frame).not.toContain("s-very-long");
+    unmount();
+  });
+
   it("骨架：渲染会话 id 与状态栏；Ctrl+C 退出", async () => {
     const { session, runtime } = await makeSession();
     const { lastFrame, stdin, unmount } = render(
@@ -149,6 +245,37 @@ describe("TUI", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("已切换到会话");
     expect(frame).toContain("来自 s2 的回答"); // 新会话持久日志已重放
+    unmount();
+    await s1.close();
+  });
+
+  it("/resume 列表：显示会话、方向键移动并选择", async () => {
+    const { runtime, session: s1 } = await makeSession();
+    await pause();
+    const s2 = await runtime.createSession({ model: "fake/fake-model" });
+    const s2id = s2.id;
+    await s2.close();
+    const switcher = vi.fn<SwitchSessionFn>(async (id) => ({
+      kind: "ok",
+      session: id === s2id ? await runtime.resumeSession(id) : s1,
+    }));
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session: s1, runtime, env: ENV, switchSession: switcher }),
+    );
+    await pause(50);
+    stdin.write("/resume");
+    stdin.write("\r");
+    await pause(80);
+    expect(lastFrame()).toContain("切换到会话");
+    expect(lastFrame()).toContain(s2id);
+    stdin.write("\u001b[B");
+    await pause();
+    stdin.write("\u001b[A");
+    await pause();
+    stdin.write("\r");
+    await pause(80);
+    expect(switcher).toHaveBeenCalledWith(s2id, { allowForeign: false });
+    expect(lastFrame()).toContain(`已切换到会话 ${s2id}`);
     unmount();
     await s1.close();
   });
