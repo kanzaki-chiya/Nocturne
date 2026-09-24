@@ -122,6 +122,41 @@ const V5 = (view: SessionView) =>
   );
 
 describe("SessionView reducer", () => {
+  it("info 进度在 TUI 视图中逐条分行，stdout 半行继续拼接", () => {
+    const view = createSessionView();
+    reduceSessionView(view, {
+      type: "tool.started",
+      sessionId: "s",
+      seq: 1,
+      time: "",
+      turnId: "t",
+      payload: {
+        callId: "c",
+        name: "task",
+        input: {},
+        subjects: [],
+        permission: { action: "allow", source: "rule" },
+      },
+    });
+    const progress = (stream: "stdout" | "info", chunk: string) => {
+      reduceSessionView(view, {
+        type: "tool.progress",
+        sessionId: "s",
+        runId: "r",
+        eseq: 1,
+        afterSeq: 1,
+        time: "",
+        turnId: "t",
+        payload: { callId: "c", stream, chunk },
+      });
+    };
+    progress("stdout", "半");
+    progress("stdout", "行");
+    progress("info", "第 1 轮");
+    progress("info", "read → ok");
+    expect(toolEntries(view)[0]?.liveOutput).toBe("半行\n第 1 轮\nread → ok\n");
+  });
+
   it("场景1：纯文本 Turn（text + reasoning delta）", async () => {
     const { runtime } = await makeRuntime([
       [

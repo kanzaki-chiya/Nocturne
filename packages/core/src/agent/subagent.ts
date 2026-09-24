@@ -293,9 +293,9 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         // 进度转发：子会话的结算事件转写为父侧 tool.progress（subagent.md 第 12 节）
         child.subscribe((e) => {
           if (e.type === "turn.started") {
-            ctx.progress(`子会话第 ${e.payload.turnIndex} 轮开始\n`, "info");
+            ctx.progress(`子会话第 ${e.payload.turnIndex} 轮开始`, "info");
           } else if (e.type === "tool.completed") {
-            ctx.progress(`${e.payload.name} → ${e.payload.status}\n`, "info");
+            ctx.progress(`${e.payload.name} → ${e.payload.status}`, "info");
           }
         });
 

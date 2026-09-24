@@ -542,7 +542,15 @@ function reduceEphemeral(view: SessionView, event: EphemeralEvent): void {
     case "tool.progress": {
       const b = book(view);
       const entry = b.tools.get(event.payload.callId);
-      if (entry !== undefined) entry.liveOutput += event.payload.chunk;
+      if (entry !== undefined) {
+        const { chunk, stream } = event.payload;
+        if (stream === "info") {
+          if (entry.liveOutput !== "" && !entry.liveOutput.endsWith("\n")) entry.liveOutput += "\n";
+          entry.liveOutput += `${chunk}\n`;
+        } else {
+          entry.liveOutput += chunk;
+        }
+      }
       break;
     }
   }

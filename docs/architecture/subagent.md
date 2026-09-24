@@ -230,7 +230,7 @@ launch(request, ctx)
 
 ## 12. 客户端呈现
 
-**不新增事件类型。** `task` 在父会话就是一格普通工具条目（`tool.started`/`tool.completed`）；运行期间 launcher 订阅子会话事件并把**一行式摘要**经 `ctx.progress` 转发为父会话的 `tool.progress(stream:"info")`：子 Turn 开始/结束、每个子工具调用的 `<name> → <status>` 结算行、最终结果摘要。CLI 按既有 `tool.progress` 渲染（缩进整行）；TUI 走 `liveOutput` 尾部展示；reducer 不需要任何扩展（view.md）。
+**不新增事件类型。** `task` 在父会话就是一格普通工具条目（`tool.started`/`tool.completed`）；运行期间 launcher 订阅子会话事件并把**一行式摘要**经 `ctx.progress` 转发为父会话的 `tool.progress(stream:"info")`：子 Turn 开始、每个子工具调用的 `<name> → <status>` 结算行。发送方不补换行；CLI 为每条 `info` 单独成行，TUI 的视图归约在 `liveOutput` 中分行后展示尾部（[tool-api.md](../protocols/tool-api.md) 第 2 节）。
 
 **为什么不流式转发子会话内部内容**：子代理的文本与工具明细全量复制到父时间线会淹没父会话视图，且这些信息已经完整、可审计地写在子日志里（`output.childLogPath` 指路）。一行一结算的进度在"知道它在干活"与"不打扰"之间取平衡；要看全程，打开子日志。
 

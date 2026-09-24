@@ -77,7 +77,7 @@ export interface ToolContext extends ToolScope {
   fs: FileSystem;
   process: ProcessRunner;
   readState: ReadStateStore;
-  /** 产生 tool.progress 临时事件 */
+  /** 产生 tool.progress 临时事件；stdout/stderr 可为半行，info 是无末尾换行的独立行 */
   progress(chunk: string, stream?: "stdout" | "stderr" | "info"): void;
 }
 

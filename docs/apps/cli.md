@@ -95,7 +95,7 @@ nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trust
 | `message.assistant.delta`（reasoning） | 暗淡样式写 stdout |
 | `tool.started` | `● <name>(<参数摘要>)`，参数摘要取 input 的短 JSON，截断约 100 字符 |
 | `tool.input.delta` | 不渲染（Phase 4 的 TUI 才需要增量展示） |
-| `tool.progress` | shell 的流式输出：按行首缩进两格写到终端（片段可能断在行中间，不额外插入换行；见"输出分流"）；`task` 工具的子会话进度（`stream:"info"`，一行式摘要）同路径渲染（Phase 6，[subagent.md](../architecture/subagent.md) 第 12 节） |
+| `tool.progress` | `stdout`/`stderr` 的片段按顺序拼接，只在原始换行处结束行；`info` 每次调用是一行独立摘要，渲染层补换行。两类输出均缩进两格（约定见 [tool-api.md](../protocols/tool-api.md) 第 2 节） |
 | `tool.completed` | `└ <status>` + 耗时；`error`/`denied`/`cancelled`/`interrupted` 附 `error.code` 与原因；`edit`/覆盖 `write` 的 `output.diff` 以 unified diff 着色渲染（`+` 绿、`-` 红、上下文默认色）；`truncated` 为真时附一行"输出已截断，完整内容在 \<path\>"（落盘路径见 [tools.md](../architecture/tools.md) 第 4 节） |
 | `permission.requested` | 第 6 节的确认提示 |
 | `permission.resolved` | `└ 权限：<allow\|deny>（<source>：<rule\|reason>）` 一行——命中规则时展示 `rule`（如"用户配置第 3 条 {…}"），无规则时展示原因 |

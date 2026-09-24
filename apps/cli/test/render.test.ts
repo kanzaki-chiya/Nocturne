@@ -253,6 +253,17 @@ describe("写出器：整行与流式片段的换行（cli.md 第 5 节）", () 
     expect(joined("stdout")).toBe("  line one\n  line two\n\n  last\n└ ok\n");
   });
 
+  it("子代理进度：info 每次调用独立成行，不粘连", () => {
+    const { writer, joined } = capture();
+    for (const chunk of ["子会话第 1 轮开始", "read → ok"]) {
+      writer.write(
+        renderEvent(ephemeral("tool.progress", { callId: "c", stream: "info", chunk }), "print"),
+      );
+    }
+    expect(joined("stdout")).toBe("");
+    expect(joined("stderr")).toBe("  子会话第 1 轮开始\n  read → ok\n");
+  });
+
   it("line / endLine：已在行首时不补空行", () => {
     const { writer, joined } = capture();
     writer.line("stdout", "a");

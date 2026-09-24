@@ -107,7 +107,8 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
     case "tool.input.delta":
       return [];
     case "tool.progress":
-      // shell 的流式输出：片段可能断在行中间，缩进由写出器按行首补
+      if (ev.payload.stream === "info") return [aux(`  ${ev.payload.chunk}`)];
+      // stdout/stderr 的流式片段可能断在行中间，缩进由写出器按行首补
       return [{ channel: side, text: ev.payload.chunk, stream: true, indent: "  " }];
     case "tool.completed":
       return toolCompletedLines(ev.payload).map(aux);
