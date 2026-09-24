@@ -139,10 +139,7 @@ function minimalEnvironment(): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
     const probe = win32 ? key.toUpperCase() : key;
-    if (
-      allow.has(probe) ||
-      (!win32 && (probe.startsWith("LC_") || probe.startsWith("XDG_")))
-    ) {
+    if (allow.has(probe) || (!win32 && (probe.startsWith("LC_") || probe.startsWith("XDG_")))) {
       out[key] = value;
     }
   }

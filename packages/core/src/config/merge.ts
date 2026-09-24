@@ -54,10 +54,7 @@ export function mergeLayers(layers: readonly MergeLayer[]): ResolvedConfig {
     warnings: [],
   };
   const providers = new Map<string, ProviderEntryConfig>();
-  const mcpServers = new Map<
-    string,
-    { origin: "user" | "project"; entry: McpServerEntry }
-  >();
+  const mcpServers = new Map<string, { origin: "user" | "project"; entry: McpServerEntry }>();
 
   for (const { origin, file } of layers) {
     if (file.model !== undefined) out.model = file.model;

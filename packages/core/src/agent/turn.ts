@@ -228,6 +228,20 @@ export async function runTurn(
         environment: deps.environment,
         events: session.durableEvents(),
       });
+      deps.execEnv.diagnostics?.record("context.build", {
+        turnId,
+        sections: built.report.sections.map((s) => ({
+          name: s.name,
+          chars: s.chars,
+          estimatedTokens: s.estimatedTokens,
+          truncated: s.truncated,
+        })),
+        totalChars: built.report.totalChars,
+        estimatedTokens: built.report.estimatedTokens,
+        budgetTokens: built.report.budgetTokens,
+        overBudget: built.overBudget,
+        compaction: built.compaction?.kind,
+      });
       // 6.5：执行压缩计划——L1 修剪 / L2 摘要各至多一次；
       // 预防性压缩失败降级为未压缩继续，必须压缩失败走 6.6 报错
       const plan = built.compaction;

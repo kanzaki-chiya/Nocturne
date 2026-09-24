@@ -112,15 +112,19 @@ describe("HookRunner 契约", () => {
   it("matcher 不匹配时条目不执行", async () => {
     const ws = tmp();
     const warnings: { code: string; message: string }[] = [];
-    const r = runner(ws, {
-      PreToolUse: [
-        {
-          matcher: "shell|mcp_*",
-          command: "node",
-          args: echoScript(`() => ({decision:"deny"})`),
-        },
-      ],
-    }, warnings);
+    const r = runner(
+      ws,
+      {
+        PreToolUse: [
+          {
+            matcher: "shell|mcp_*",
+            command: "node",
+            args: echoScript(`() => ({decision:"deny"})`),
+          },
+        ],
+      },
+      warnings,
+    );
     expect(await r.run("PreToolUse", { tool: "read", input: {} })).toBeUndefined();
     expect(await r.run("PreToolUse", { tool: "shell", input: {} })).toEqual({
       decision: "deny",
@@ -158,9 +162,7 @@ describe("HookRunner 契约", () => {
   it("TurnStart block 短路", async () => {
     const ws = tmp();
     const r = runner(ws, {
-      TurnStart: [
-        { command: "node", args: echoScript(`() => ({block:true,reason:"维护中"})`) },
-      ],
+      TurnStart: [{ command: "node", args: echoScript(`() => ({block:true,reason:"维护中"})`) }],
     });
     const out = await r.run("TurnStart", { text: "hi" });
     expect(out).toEqual({ block: true, reason: "维护中" });
@@ -222,9 +224,7 @@ describe("HookRunner 契约", () => {
     const r = runner(
       ws,
       {
-        PreToolUse: [
-          { command: "node", args: ["-e", "setTimeout(()=>{},30000)"], timeoutMs: 300 },
-        ],
+        PreToolUse: [{ command: "node", args: ["-e", "setTimeout(()=>{},30000)"], timeoutMs: 300 }],
       },
       warnings,
     );
@@ -273,9 +273,13 @@ describe("执行管线集成", () => {
     const warnings: { code: string; message: string }[] = [];
     const h = await harness(
       ws,
-      runner(ws, {
-        PreToolUse: [{ command: "node", args: echoScript(`() => ({decision:"deny"})`) }],
-      }, warnings),
+      runner(
+        ws,
+        {
+          PreToolUse: [{ command: "node", args: echoScript(`() => ({decision:"deny"})`) }],
+        },
+        warnings,
+      ),
     );
     const r = await h.executor.execute(
       { callId: "c1", name: "shell", input: { command: "echo hi" } },
@@ -310,9 +314,7 @@ describe("执行管线集成", () => {
     const h = await harness(
       ws,
       runner(ws, {
-        PreToolUse: [
-          { command: "node", args: echoScript(`() => ({updatedInput:{path:42}})`) },
-        ],
+        PreToolUse: [{ command: "node", args: echoScript(`() => ({updatedInput:{path:42}})`) }],
       }),
     );
     const r = await h.executor.execute(
@@ -374,9 +376,7 @@ describe("执行管线集成", () => {
     const hookRunner = runner(
       ws,
       {
-        PermissionRequest: [
-          { command: "node", args: echoScript(`() => ({action:"allow"})`) },
-        ],
+        PermissionRequest: [{ command: "node", args: echoScript(`() => ({action:"allow"})`) }],
       },
       warnings,
     );
@@ -422,9 +422,7 @@ describe("执行管线集成", () => {
     const h = await harness(
       ws,
       runner(ws, {
-        PostToolUse: [
-          { command: "node", args: echoScript(`() => ({feedback:"追加"})`) },
-        ],
+        PostToolUse: [{ command: "node", args: echoScript(`() => ({feedback:"追加"})`) }],
       }),
     );
     const r = await h.executor.execute(

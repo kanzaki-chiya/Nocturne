@@ -132,6 +132,13 @@ module.exports = {
       },
     },
     {
+      name: "diagnostics-deps",
+      severity: "error",
+      comment: "diagnostics 只依赖 protocol 与 platform（observability.md 第 4 节）",
+      from: { path: "^packages/core/src/diagnostics/" },
+      to: { path: "^packages/core/src/(?!diagnostics/|protocol/|platform/)" },
+    },
+    {
       name: "hooks-deps",
       severity: "error",
       comment:

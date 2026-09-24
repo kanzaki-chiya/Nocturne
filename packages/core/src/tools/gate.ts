@@ -113,10 +113,7 @@ export function createPolicyGate(
       // Hook 强制 ask（PreToolUse decision:"ask"）：跳过 Grant 与 autoApproveAsk
       // 求值——Hook 要求的确认不能被既有授权或 --yes 自动放行（permissions.md 5.5）
       const forceAsk = hookCtx?.forceAsk === true;
-      const evaluation = policy.evaluate(
-        subjects,
-        forceAsk ? { skipApprovals: true } : undefined,
-      );
+      const evaluation = policy.evaluate(subjects, forceAsk ? { skipApprovals: true } : undefined);
       let decision = evaluation.decision;
       // forceAsk 下规则层的 allow/ask 都走确认流程；deny 不受影响直接返回
       if (forceAsk && decision.action !== "deny") {
@@ -159,12 +156,7 @@ export function createPolicyGate(
                 ? (out.reason ?? "PermissionRequest Hook 放行")
                 : (out.reason ?? "PermissionRequest Hook 拒绝"),
           };
-          await emitResolved(
-            { callId },
-            hookDecision,
-            "hook PermissionRequest",
-            turn,
-          );
+          await emitResolved({ callId }, hookDecision, "hook PermissionRequest", turn);
           return {
             subjects: evaluation.subjects,
             decision: hookDecision,

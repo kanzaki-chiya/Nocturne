@@ -14,6 +14,7 @@ import {
   type InstructionSet,
 } from "./context/index.js";
 import type { ProviderEntryConfig, RuntimeConfig } from "./config/index.js";
+import { createDiagnostics } from "./diagnostics/index.js";
 import { createHookRunner } from "./hooks/index.js";
 import {
   createRulePolicy,
@@ -129,6 +130,11 @@ export interface RuntimeOptions {
    * 与配置层 hooks 合并时排在前。项目配置 hooks 段未信任时已整段剔除。
    */
   hooks?: Partial<Record<HookPoint, HookEntry[]>> | undefined;
+  /**
+   * 诊断通道（observability.md）：enabled 后写 JSONL；file 缺省写
+   * <NOCTURNE_HOME>/logs/debug-*.jsonl，"-" 写 stderr。未启用零开销。
+   */
+  debug?: { enabled?: boolean | undefined; file?: string | undefined } | undefined;
   /** 写入 session.created 的 Runtime 版本 */
   version?: string | undefined;
 }
@@ -291,6 +297,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   const interactive = options.interactive === true;
 
+  // 诊断通道（observability.md）：未启用时 no-op；sink 故障降级 + 警告进会话
+  const sinkWarnings: { code: string; message: string }[] = [];
+  const diagnostics = createDiagnostics({
+    platform,
+    enabled: options.debug?.enabled,
+    file: options.debug?.file === "-" ? undefined : options.debug?.file,
+    logsDir: paths.join(config?.nocturneHome ?? platform.nocturneHome(), "logs"),
+    writeLine:
+      options.debug?.file === "-" ? (line) => process.stderr.write(`${line}\n`) : undefined,
+    warn: (code, message) => sinkWarnings.push({ code, message }),
+  });
+
   const instructions =
     options.instructions ?? (await loadInstructions(platform, workspaceRoot, cwd));
   const environment: EnvironmentInfo = {
@@ -306,15 +324,27 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     resume?: { modelOverride?: string | ModelRef | undefined },
   ): Promise<RuntimeSession> {
     const meta = session.state().meta;
+    const openedAt = Date.now();
 
     // 项目层按会话记录的 workspaceRoot 加载（config.md 第 6 节）
     const ws = config !== undefined ? await config.forWorkspace(meta.workspaceRoot) : undefined;
     const resolved = ws?.resolved;
+    diagnostics.record("config.load", {
+      sessionId: session.id,
+      trusted: ws?.projectConfig.trusted,
+      projectConfig: ws?.projectConfig.present === true,
+      mcpServers: resolved?.mcpServers.length ?? 0,
+      hookPoints: Object.keys(resolved?.hooks ?? {}).length,
+      warnings: resolved?.warnings.length ?? 0,
+    });
     const warnings: string[] = [...(resolved?.warnings ?? [])];
     if (ws?.projectConfig.present === true && !ws.projectConfig.trusted) {
       warnings.push(
         `检测到项目配置 ${ws.projectConfig.path ?? ""}，但该工作区未信任——其中仅收紧方向的规则生效；执行 nctrn trust 信任该工作区`,
       );
+    }
+    for (const w of sinkWarnings) {
+      session.emitEphemeral("runtime.warning", w);
     }
     for (const message of warnings) {
       session.emitEphemeral("runtime.warning", { code: "config_warning", message });
@@ -373,8 +403,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             sessionId: session.id,
             cwd: meta.cwd,
             workspaceRoot: meta.workspaceRoot,
-            warn: (code, message) =>
-              session.emitEphemeral("runtime.warning", { code, message }),
+            warn: (code, message) => session.emitEphemeral("runtime.warning", { code, message }),
+            diagnostics,
           })
         : undefined;
 
@@ -421,8 +451,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             sessionId: session.id,
             platform,
             emitServer: (p) => session.emitEphemeral("mcp.server", p),
-            warn: (code, message) =>
-              session.emitEphemeral("runtime.warning", { code, message }),
+            warn: (code, message) => session.emitEphemeral("runtime.warning", { code, message }),
+            diagnostics,
           });
           for (const tool of mcpSession.tools()) {
             try {
@@ -440,9 +470,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             }
           }
         } catch (e) {
-          warnings.push(
-            `MCP 装配失败：${e instanceof Error ? e.message : String(e)}`,
-          );
+          warnings.push(`MCP 装配失败：${e instanceof Error ? e.message : String(e)}`);
         }
       }
     }
@@ -453,6 +481,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       readState: createReadStateStore(paths),
       attachmentsDir: paths.join(sessionsDir, "attachments"),
       hooks: hookRunner,
+      diagnostics,
     };
     const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
     for (const src of [resolved?.turn, options.turn]) {
@@ -508,6 +537,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         .run("SessionStart", { resumed: resume !== undefined })
         .catch(() => undefined);
     }
+    diagnostics.record("session.open", {
+      sessionId: session.id,
+      cwd: meta.cwd,
+      workspaceRoot: meta.workspaceRoot,
+      resumed: resume !== undefined,
+      durationMs: Date.now() - openedAt,
+    });
 
     return {
       id: session.id,
@@ -684,9 +720,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       async close() {
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
         if (hookRunner !== undefined) {
-          await hookRunner
-            .run("SessionEnd", { reason: "close" })
-            .catch(() => undefined);
+          await hookRunner.run("SessionEnd", { reason: "close" }).catch(() => undefined);
         }
         // 先结算等待中的权限请求为 cancelled，避免其挂住 Turn
         gate.cancelAll?.();

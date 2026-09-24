@@ -76,9 +76,12 @@ function handleCall(id, params) {
       });
       return;
     case "sleep":
-      setTimeout(() => {
-        respond(id, { content: [{ type: "text", text: "slept" }] });
-      }, Number(args.ms ?? 0));
+      setTimeout(
+        () => {
+          respond(id, { content: [{ type: "text", text: "slept" }] });
+        },
+        Number(args.ms ?? 0),
+      );
       return;
     case "crash":
       // 先回一个 ack 再退出的场景不需要——直接退出模拟崩溃

@@ -203,7 +203,9 @@ describe("项目配置信任", () => {
     expect(ws.resolved.mcpServers).toHaveLength(0);
     expect(Object.keys(ws.resolved.hooks)).toHaveLength(0);
     expect(
-      ws.resolved.warnings.some((w) => w.includes("未信任") && w.includes("mcp") && w.includes("hooks")),
+      ws.resolved.warnings.some(
+        (w) => w.includes("未信任") && w.includes("mcp") && w.includes("hooks"),
+      ),
     ).toBe(true);
     await fs.rm(path.join(workspace, ".nocturne"), { recursive: true, force: true });
   });

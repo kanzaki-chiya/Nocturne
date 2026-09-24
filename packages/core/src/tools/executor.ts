@@ -176,10 +176,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
             },
             { turnId },
           );
-          return finish(
-            "denied",
-            errorResult("permission_denied", `Hook 拒绝：${reason}`),
-          );
+          return finish("denied", errorResult("permission_denied", `Hook 拒绝：${reason}`));
         }
         if (hookOut?.updatedInput !== undefined) {
           const updated = structuredClone(hookOut.updatedInput);
@@ -232,18 +229,24 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       if (aborted(scope.signal)) {
         return finish("cancelled", errorResult("cancelled", "调用已被中断"));
       }
+      const gateStart = Date.now();
       let outcome;
       try {
-        outcome = await scope.gate.check(subjects, call.callId, scope.signal, {
-          turnId,
-          events: scope.events,
-        },
-        {
-          forceAsk: hookAskReason !== undefined,
-          askReason: hookAskReason,
-          tool: call.name,
-          input,
-        });
+        outcome = await scope.gate.check(
+          subjects,
+          call.callId,
+          scope.signal,
+          {
+            turnId,
+            events: scope.events,
+          },
+          {
+            forceAsk: hookAskReason !== undefined,
+            askReason: hookAskReason,
+            tool: call.name,
+            input,
+          },
+        );
       } catch (e) {
         if (aborted(scope.signal)) {
           return finish("cancelled", errorResult("cancelled", "调用已被中断"));
@@ -258,6 +261,15 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         return finish("cancelled", errorResult("cancelled", "等待权限回复期间被中断"));
       }
       const { decision } = outcome;
+      scope.diagnostics?.record("tool.permission", {
+        callId: call.callId,
+        tool: call.name,
+        subjects: subjects.map((s) => ({ kind: s.kind, target: s.target })),
+        action: decision.action,
+        source: decision.source,
+        rule: decision.matchedRule?.description,
+        durationMs: Date.now() - gateStart,
+      });
       if (decision.action !== "allow") {
         stopTurn = outcome.stopTurn === true;
         // events.md：被规则直接拒绝的调用发出 permission.resolved（ask 流程已由 gate 发出）
@@ -325,6 +337,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       };
 
       let result: ToolResult;
+      const execStart = Date.now();
       try {
         result = await tool.execute(input, toolCtx);
       } catch (e) {
@@ -348,6 +361,14 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       if (aborted(scope.signal)) {
         return finish("cancelled", errorResult("cancelled", "调用已被中断"));
       }
+
+      scope.diagnostics?.record("tool.exec", {
+        callId: call.callId,
+        tool: call.name,
+        status: result.status,
+        durationMs: Date.now() - execStart,
+        modelChars: result.modelContent.length,
+      });
 
       // 7.5 PostToolUse Hook（hooks.md）：观察结果、追加反馈；不修改结果本体
       if (scope.hooks !== undefined) {

@@ -63,10 +63,7 @@ function getTool(session: McpSession, name: string): ToolDefinition {
 
 const ctx = { signal: new AbortController().signal, callId: "call-1" } as ToolContext;
 
-async function call(
-  tool: ToolDefinition,
-  input: Record<string, unknown>,
-): Promise<ToolResult> {
+async function call(tool: ToolDefinition, input: Record<string, unknown>): Promise<ToolResult> {
   return tool.execute(input, ctx);
 }
 
@@ -76,8 +73,9 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
     try {
       expect(session.status().map((s) => s.state)).toEqual(["ready"]);
       const echo = getTool(session, "mcp__fake__echo");
-      expect(echo.permissionSubjects({}, { cwd, workspaceRoot: cwd, paths: platform.paths }))
-        .toEqual([{ kind: "mcp", target: "fake/echo" }]);
+      expect(
+        echo.permissionSubjects({}, { cwd, workspaceRoot: cwd, paths: platform.paths }),
+      ).toEqual([{ kind: "mcp", target: "fake/echo" }]);
       const res = await call(echo, { text: "你好" });
       expect(res.status).toBe("ok");
       expect(res.modelContent).toBe("你好");

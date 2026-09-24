@@ -49,8 +49,5 @@ export interface PermissionPolicy {
    * 本函数计算 `where` 并返回统一决定（permissions.md 5.3：
    * 任一主体 deny 则整体 deny）。
    */
-  evaluate(
-    subjects: readonly PermissionSubject[],
-    options?: EvaluateOptions,
-  ): SubjectEvaluation;
+  evaluate(subjects: readonly PermissionSubject[], options?: EvaluateOptions): SubjectEvaluation;
 }

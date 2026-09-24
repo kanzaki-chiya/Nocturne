@@ -13,7 +13,6 @@ import {
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import type {
-
   McpConnector,
   McpOpenScope,
   McpServerConfig,
@@ -107,7 +106,10 @@ function toolError(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-async function fetchToolDefs(scope: McpOpenScope, st: Server): Promise<Map<string, ToolDefinition>> {
+async function fetchToolDefs(
+  scope: McpOpenScope,
+  st: Server,
+): Promise<Map<string, ToolDefinition>> {
   const client = st.runtime?.client;
   if (client === undefined) throw new Error("客户端未连接");
   const defs = new Map<string, ToolDefinition>();
@@ -138,10 +140,7 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
     env: expandEnv(st.cfg.env, scope, st.cfg.name),
   });
   const transport = new StdioPipeTransport(proc);
-  const client = new Client(
-    { name: CLIENT_NAME, version: CLIENT_VERSION },
-    { capabilities: {} },
-  );
+  const client = new Client({ name: CLIENT_NAME, version: CLIENT_VERSION }, { capabilities: {} });
   const runtime: ServerRuntime = { proc, transport, client };
   st.runtime = runtime;
   // 进程退出/管道关闭即视为崩溃；st.runtime 换防后旧 runtime 的 close 不生效
@@ -150,6 +149,11 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
     st.state = "crashed";
     st.error = "进程已退出或管道已关闭";
     scope.emitServer({ name: st.cfg.name, state: "crashed", error: st.error });
+    scope.diagnostics?.record("mcp.event", {
+      server: st.cfg.name,
+      state: "crashed",
+      error: st.error,
+    });
     scope.warn(
       "mcp_server_crashed",
       `MCP 服务器 ${st.cfg.name} 连接断开（${transport.stderrText().trim().slice(0, 300) || "进程退出"}）；下一次调用将尝试重连`,
@@ -181,12 +185,12 @@ async function refreshTools(scope: McpOpenScope, st: Server): Promise<void> {
   if (st.state !== "ready" || st.closed) return;
   try {
     st.staged = await fetchToolDefs(scope, st);
-    scope.warn(
-      "mcp_tools_changed",
-      `MCP 服务器 ${st.cfg.name} 的工具列表已更新，下一个 Turn 生效`,
-    );
+    scope.warn("mcp_tools_changed", `MCP 服务器 ${st.cfg.name} 的工具列表已更新，下一个 Turn 生效`);
   } catch (e) {
-    scope.warn("mcp_tools_refresh_failed", `MCP 服务器 ${st.cfg.name} 工具列表刷新失败：${toolError(e)}`);
+    scope.warn(
+      "mcp_tools_refresh_failed",
+      `MCP 服务器 ${st.cfg.name} 工具列表刷新失败：${toolError(e)}`,
+    );
   }
 }
 
@@ -205,6 +209,7 @@ async function ensureClient(scope: McpOpenScope, st: Server): Promise<Client> {
     st.restarts += 1;
     st.state = "starting";
     scope.emitServer({ name: st.cfg.name, state: "starting" });
+    scope.diagnostics?.record("mcp.event", { server: st.cfg.name, state: "starting" });
     try {
       await connectServer(scope, st);
       // 重连拉到的工具集同样按 Turn 边界生效（mcp.md 第 5 节）：
@@ -216,11 +221,21 @@ async function ensureClient(scope: McpOpenScope, st: Server): Promise<Client> {
         state: "ready",
         toolCount: st.staged?.size ?? st.tools.size,
       });
+      scope.diagnostics?.record("mcp.event", {
+        server: st.cfg.name,
+        state: "ready",
+        toolCount: st.staged?.size ?? st.tools.size,
+      });
       return true;
     } catch (e) {
       st.state = "failed";
       st.error = toolError(e);
       scope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
+      scope.diagnostics?.record("mcp.event", {
+        server: st.cfg.name,
+        state: "failed",
+        error: st.error,
+      });
       scope.warn("mcp_server_failed", `MCP 服务器 ${st.cfg.name} 重连失败：${st.error}`);
       return false;
     }
@@ -229,7 +244,12 @@ async function ensureClient(scope: McpOpenScope, st: Server): Promise<Client> {
     if (!(await st.restarting)) {
       throw new Error(`MCP 服务器 ${st.cfg.name} 不可用：${st.error ?? "重连失败"}`);
     }
-    return st.runtime?.client ?? (() => { throw new Error("重连后客户端缺失"); })();
+    return (
+      st.runtime?.client ??
+      (() => {
+        throw new Error("重连后客户端缺失");
+      })()
+    );
   } finally {
     st.restarting = undefined;
   }
@@ -253,8 +273,14 @@ function mapContent(res: CallToolResult | Record<string, unknown>): {
         meta.push({ type: "text" });
         break;
       case "image":
-        texts.push(`[image: ${block.mimeType}，约 ${Math.round((block.data.length * 3) / 4)} 字节，内容未传回模型]`);
-        meta.push({ type: "image", mimeType: block.mimeType, approxBytes: Math.round((block.data.length * 3) / 4) });
+        texts.push(
+          `[image: ${block.mimeType}，约 ${Math.round((block.data.length * 3) / 4)} 字节，内容未传回模型]`,
+        );
+        meta.push({
+          type: "image",
+          mimeType: block.mimeType,
+          approxBytes: Math.round((block.data.length * 3) / 4),
+        });
         break;
       case "audio":
         texts.push(`[audio: ${block.mimeType}，内容未传回模型]`);
@@ -315,10 +341,7 @@ function wrapTool(
   const callMs = Math.min(st.cfg.callTimeoutMs ?? DEFAULT_CALL_MS, MAX_CALL_MS);
   return {
     name,
-    description:
-      tool.description ??
-      tool.title ??
-      `MCP 工具 ${st.cfg.name}/${remote}`,
+    description: tool.description ?? tool.title ?? `MCP 工具 ${st.cfg.name}/${remote}`,
     inputSchema: tool.inputSchema,
     traits: {
       mutates: true,
@@ -369,10 +392,7 @@ function wrapTool(
           return err("timeout", `MCP 工具 ${remote} 超过 ${callMs}ms 超时`);
         }
         if (st.state !== "ready") {
-          return err(
-            "mcp_server_crashed",
-            `MCP 服务器 ${st.cfg.name} 连接中断：${toolError(e)}`,
-          );
+          return err("mcp_server_crashed", `MCP 服务器 ${st.cfg.name} 连接中断：${toolError(e)}`);
         }
         return err("tool_error", `MCP 工具 ${remote} 调用失败：${toolError(e)}`);
       }
@@ -404,6 +424,10 @@ export function createMcpConnector(): McpConnector {
       await Promise.all(
         servers.map(async (st) => {
           scope.emitServer({ name: st.cfg.name, state: "starting" });
+          scope.diagnostics?.record("mcp.event", {
+            server: st.cfg.name,
+            state: "starting",
+          });
           try {
             await connectServer(scope, st);
             st.tools = st.staged ?? new Map<string, ToolDefinition>();
@@ -414,14 +438,21 @@ export function createMcpConnector(): McpConnector {
               state: "ready",
               toolCount: st.tools.size,
             });
+            scope.diagnostics?.record("mcp.event", {
+              server: st.cfg.name,
+              state: "ready",
+              toolCount: st.tools.size,
+            });
           } catch (e) {
             st.state = "failed";
             st.error = toolError(e);
             scope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
-            scope.warn(
-              "mcp_server_failed",
-              `MCP 服务器 ${st.cfg.name} 启动失败：${st.error}`,
-            );
+            scope.diagnostics?.record("mcp.event", {
+              server: st.cfg.name,
+              state: "failed",
+              error: st.error,
+            });
+            scope.warn("mcp_server_failed", `MCP 服务器 ${st.cfg.name} 启动失败：${st.error}`);
           }
         }),
       );

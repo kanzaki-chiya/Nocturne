@@ -211,7 +211,11 @@ export interface HookInput {
   permission?: { action: PermissionAction; reason: string; rule?: string | undefined } | undefined;
   /** PostToolUse：执行结果摘要（modelContent 截断至约 4000 字符） */
   result?:
-    | { status: string; modelContent: string; error?: { code: string; message: string } | undefined }
+    | {
+        status: string;
+        modelContent: string;
+        error?: { code: string; message: string } | undefined;
+      }
     | undefined;
   /** TurnStart：本轮用户提示词 */
   text?: string | undefined;

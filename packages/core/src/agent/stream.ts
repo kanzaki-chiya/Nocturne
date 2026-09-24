@@ -71,6 +71,15 @@ export async function consumeStream(
     /** providerCallId → 已分配的 callId 与累积的原始参数 */
     const pending = new Map<string, { callId: string; name: string; rawArgs: string }>();
     let producedOutput = false;
+    // 诊断：完整 ModelRequest（不含请求头——头由适配器构造，天然不会进来）
+    deps.execEnv.diagnostics?.record("provider.request", {
+      turnId,
+      attempt,
+      provider: provider.id,
+      model: deps.model.model.ref.model,
+      request,
+    });
+    const requestStart = Date.now();
 
     try {
       for await (const ev of provider.stream(request, signal)) {
@@ -155,6 +164,16 @@ export async function consumeStream(
             break;
           }
           case "finish": {
+            deps.execEnv.diagnostics?.record("provider.result", {
+              turnId,
+              attempt,
+              provider: provider.id,
+              finishReason: ev.reason,
+              usage: acc.usage,
+              toolCalls: acc.toolCalls.length,
+              contentChars: acc.content.reduce((a, b) => a + b.text.length, 0),
+              durationMs: Date.now() - requestStart,
+            });
             return { kind: "finished", finishReason: ev.reason, acc };
           }
         }
@@ -167,6 +186,15 @@ export async function consumeStream(
         acc,
       };
     } catch (e) {
+      deps.execEnv.diagnostics?.record("provider.error", {
+        turnId,
+        attempt,
+        provider: provider.id,
+        kind: isProviderError(e) ? e.kind : "unknown",
+        message: e instanceof Error ? e.message : String(e),
+        retryable: isProviderError(e) ? e.retryable : false,
+        durationMs: Date.now() - requestStart,
+      });
       if (signal.aborted || isAbortError(e)) {
         return { kind: "aborted", acc };
       }

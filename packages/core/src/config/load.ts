@@ -97,9 +97,7 @@ export async function loadConfig(
       const hasHooks = Object.keys(projectFile.hooks ?? {}).length > 0;
       if (hasMcp || hasHooks) {
         const parts = [hasMcp ? "mcp" : "", hasHooks ? "hooks" : ""].filter(Boolean).join("、");
-        resolved.warnings.push(
-          `项目配置未信任：其中的 ${parts} 配置已忽略（nctrn trust 后生效）`,
-        );
+        resolved.warnings.push(`项目配置未信任：其中的 ${parts} 配置已忽略（nctrn trust 后生效）`);
       }
     }
 
