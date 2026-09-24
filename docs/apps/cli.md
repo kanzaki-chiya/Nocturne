@@ -134,6 +134,7 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 | `NOCTURNE_MODEL` | `--model` | 模型 id |
 | `NOCTURNE_HOME` | — | 数据目录（已有约定，repository-layout.md 第 5 节） |
 | `NOCTURNE_SHELL` | — | shell 工具使用的 shell（tools.md 第 6 节） |
+| `NOCTURNE_CONSOLE_ENCODING` | — | 子进程输出解码的 WHATWG 编码覆盖（tools.md 第 6 节） |
 
 约定：
 

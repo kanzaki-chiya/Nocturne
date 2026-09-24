@@ -1,8 +1,15 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createNodeFileSystem, createPathOps, createPlatform, resolveRealPath } from "./index.js";
+import {
+  codepageToEncodingLabel,
+  createNodeFileSystem,
+  createPathOps,
+  createPlatform,
+  createProcessRunner,
+  resolveRealPath,
+} from "./index.js";
 
 const isWin = process.platform === "win32";
 const pathsSensitive = createPathOps(true);
@@ -158,5 +165,62 @@ describe("resolveRealPath", () => {
   it("resolveRealPath 直接调用（platform 门面之外也可用）", async () => {
     const resolved = await resolveRealPath(nfs, platform.paths, path.join(root, "sub", "f.txt"));
     expect(platform.paths.isWithin(root, resolved)).toBe(true);
+  });
+});
+
+describe("ProcessRunner 输出解码", () => {
+  const ENV_KEY = "NOCTURNE_CONSOLE_ENCODING";
+  const saved = process.env[ENV_KEY];
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = saved;
+  });
+
+  async function collect(stream: AsyncIterable<string>): Promise<string> {
+    let text = "";
+    for await (const chunk of stream) text += chunk;
+    return text;
+  }
+
+  it("codepageToEncodingLabel：已知代码页映射，未知回退 utf-8", () => {
+    expect(codepageToEncodingLabel(936)).toBe("gbk");
+    expect(codepageToEncodingLabel(65001)).toBe("utf-8");
+    expect(codepageToEncodingLabel(437)).toBe("utf-8"); // 未映射的 OEM 页回退
+  });
+
+  it("NOCTURNE_CONSOLE_ENCODING=gbk 时按 GBK 解码", async () => {
+    process.env[ENV_KEY] = "gbk";
+    const runner = createProcessRunner();
+    // "中文" 的 GBK 字节序列
+    const proc = runner.spawn(process.execPath, [
+      "-e",
+      "process.stdout.write(Buffer.from([0xD6,0xD0,0xCE,0xC4]))",
+    ]);
+    expect(await collect(proc.stdout)).toBe("中文");
+    await proc.wait();
+  });
+
+  it("utf-8 时按 UTF-8 解码", async () => {
+    process.env[ENV_KEY] = "utf-8";
+    const runner = createProcessRunner();
+    const proc = runner.spawn(process.execPath, ["-e", 'process.stdout.write("中文")']);
+    expect(await collect(proc.stdout)).toBe("中文");
+    await proc.wait();
+  });
+
+  // 端到端：真实 chcp 探测 + cmd echo（仅在控制台能表示中文的代码页下断言内容）
+  it.runIf(isWin)("cmd 输出按探测到的控制台代码页解码", async () => {
+    const runner = createProcessRunner();
+    const chcp = runner.spawnShell("chcp");
+    const cpText = await collect(chcp.stdout);
+    await chcp.wait();
+    const cp = Number(/(\d+)/.exec(cpText)?.[1]);
+    expect(Number.isInteger(cp)).toBe(true);
+    // 437/850 等代码页无法表示中文，cmd 端已降级为 "?"，不在此断言
+    if (![936, 950, 932, 949, 65001].includes(cp)) return;
+    const proc = runner.spawnShell("echo 中文测试");
+    expect(await collect(proc.stdout)).toContain("中文测试");
+    await proc.wait();
   });
 });
