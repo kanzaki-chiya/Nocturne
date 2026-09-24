@@ -37,6 +37,25 @@ v0.2 新增的模型选择页（[tui.md](../apps/tui.md) 第 7 节）是双栏�
 - 备用屏幕内的渲染帧不进 scrollback——这正是本页想要的（临时页面不留痕迹），但意味着截图核对与 `ink-testing-library` 断言要覆盖进出序列与页面帧两种状态。
 - 需要测试覆盖：打开/关闭序列、resize 跟随、连续开关无残影、`Ctrl+C` 恢复主屏。
 
+## 可行性验证（2026-09-26，本机实测）
+
+实现前用独立实验脚本（Ink 7.1.1 + React 19，`?1049h`/`?1049l` 手写序列）在 Windows Terminal 与 conhost 两种宿主上逐项核对，全部通过：
+
+- 打开进入备用屏、关闭后主屏对话与输入框/状态栏完整恢复；
+- 面板打开时调整窗口大小，布局正确跟随；
+- 连续多次开关无残影、无重复行；
+- 面板打开时按 `Ctrl+C`，先恢复主屏再退出，备用屏帧不写入 scrollback。
+
+实测得到的关键实现约束（正式实现必须遵守）：
+
+- **复用 Ink 的 `useApp().suspendTerminal()`**：挂起时清除待渲染输出并暂停输入，恢复时强制全量重绘——这正是切屏所需的语义。备用屏序列仍由我们手写（Ink 的 `alternateScreen` 选项是进程级的，不能按页面开关）。
+- **打开顺序**：`suspendTerminal()` → 提交全屏页 React 状态（挂起期间不输出）→ 写 `?1049h` + `2J` + `H` → `resume()`（Ink 把页面帧全量重绘进备用屏）。
+- **关闭顺序**：`suspendTerminal()` → 仍在备用屏内 `resume()`（Ink 恢复输入并重绘）→ 写 `?1049l` 回主屏 → 再提交页面关闭状态。**`?1049l` 必须放在 `resume()` 之后**：实测在 conhost 上先退备用屏再 `resume()`，Ink 的 `resumeInput()` 触发 `stdin.setRawMode` 报 `EPIPE`。
+- **resize**：Ink 不会因终端 resize 自动重渲染组件——组件必须监听 `stdout` 的 `resize` 事件，把 `columns`/`rows` 存进 state 驱动重绘。
+- **`Ctrl+C`**：`render` 需 `exitOnCtrlC: false`，组件内处理——页面打开时先走正常关闭路径回主屏再 `exit()`，否则 unmount 会把页面帧写进主屏 scrollback。
+- **兜底**：组件卸载清理与 `process.on("exit")` 双重保证 `?1049l`。
+- 另验证了一条不经 `suspendTerminal` 的极简路径（直接写 `?1049h/l` + 提交状态）在两种宿主上也稳定，作为 fallback 记录；正式实现默认走 suspend 路径，因为输入暂停使切换过程原子化、无渲染竞态。
+
 ## 备选方案
 
 | 方案 | 结论 | 理由 |
