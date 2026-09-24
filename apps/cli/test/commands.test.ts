@@ -98,6 +98,28 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(lines.join("")).toContain("不一致");
   });
 
+  it("/preset 无参数显示当前；/preset <name> 调 setPermissionPreset", async () => {
+    let called: unknown;
+    const session = fakeSession({
+      setPermissionPreset: async (n) => {
+        called = n;
+      },
+    });
+    const { lines, io } = capture();
+    await runSlashCommand("/preset", session, fakeRuntime, io);
+    expect(lines.join("")).toContain("default");
+    await runSlashCommand("/preset auto-edit", session, fakeRuntime, io);
+    expect(called).toBe("auto-edit");
+
+    const failing = fakeSession({
+      setPermissionPreset: async () => {
+        throw new RuntimeCommandError("invalid_command", "未知预设");
+      },
+    });
+    await runSlashCommand("/preset bogus", failing, fakeRuntime, io);
+    expect(lines.join("")).toContain("invalid_command");
+  });
+
   it("/context 渲染分区与合计", async () => {
     const { lines, io } = capture();
     await runSlashCommand("/context", fakeSession(), fakeRuntime, io);

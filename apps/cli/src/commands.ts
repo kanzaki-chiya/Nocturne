@@ -5,6 +5,8 @@
 import type { Runtime, RuntimeSession } from "@nocturne/core";
 import { RuntimeCommandError } from "@nocturne/core";
 
+import { normalizeModelRef } from "./config.js";
+
 export interface CommandIo {
   print(text: string): void;
 }
@@ -15,6 +17,8 @@ const SLASH_HELP = `斜杠命令：
   /help          列出命令与快捷键
   /model         显示当前模型与可用模型
   /model <id>    会话内切换模型
+  /preset        显示当前权限预设
+  /preset <name> 会话内切换权限预设（read-only | default | auto-edit | full-access）
   /context       显示上下文组成（分区与 token 估算）
   /compact       手动压缩上下文（L2 摘要）
   /exit, /quit   退出
@@ -44,24 +48,32 @@ export async function runSlashCommand(
         io.print(`当前模型：${cur.provider}/${cur.model}\n可用模型：\n  ${models}`);
         return "handled";
       }
-      // 归一化与 --model 同规则（cli.md §4）：
-      // 前缀 = 当前 Provider 剥掉；前缀是另一种 api-type 时报错；
-      // 其余含斜杠的值与裸 id 都按当前 Provider 下的模型 id 处理
+      // 归一化与 --model 同规则（cli.md §4）
       const raw = rest.join(" ");
       const current = session.state().config.model.provider;
-      let bare = raw;
-      const slash = raw.indexOf("/");
-      if (slash > 0) {
-        const prefix = raw.slice(0, slash);
-        if (prefix === current) {
-          bare = raw.slice(slash + 1);
-        } else if (prefix === "openai-compatible" || prefix === "anthropic") {
-          io.print(`! 模型前缀 ${prefix} 与当前 Provider ${current} 不一致`);
-          return "handled";
-        }
+      const norm = normalizeModelRef(raw, current);
+      if (!norm.ok) {
+        io.print(`! ${norm.problem}`);
+        return "handled";
       }
       try {
-        await session.setModel(`${current}/${bare}`);
+        await session.setModel(norm.ref);
+        // session.config_changed 事件会渲染确认行
+      } catch (e) {
+        io.print(`! ${errorText(e)}`);
+      }
+      return "handled";
+    }
+    case "/preset": {
+      const current = session.state().config.permissionPreset;
+      if (rest.length === 0) {
+        io.print(
+          `当前权限预设：${current}\n可用预设：read-only | default | auto-edit | full-access`,
+        );
+        return "handled";
+      }
+      try {
+        await session.setPermissionPreset(rest.join(" "));
         // session.config_changed 事件会渲染确认行
       } catch (e) {
         io.print(`! ${errorText(e)}`);

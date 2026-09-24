@@ -58,6 +58,13 @@ function toolCompletedLines(p: ToolCompletedPayload): string[] {
     const reason = p.error !== undefined ? `${p.error.code}: ${p.error.message}` : "";
     lines.push(`└ ${style("red", p.status)}${dur}${reason !== "" ? ` ${reason}` : ""}`);
   }
+  if (p.truncated === true) {
+    lines.push(
+      p.spillPath !== undefined
+        ? `  输出已截断，完整内容在 ${p.spillPath}`
+        : "  输出已截断（落盘不可用，完整内容未保留）",
+    );
+  }
   const out = p.output;
   if (
     out !== null &&
@@ -87,7 +94,8 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
     }
     case "tool.started": {
       const p = ev.payload;
-      return [aux(`● ${p.name}(${summarizeInput(p.input)})`)];
+      const rule = p.permission.rule !== undefined ? `（命中：${p.permission.rule}）` : "";
+      return [aux(`● ${p.name}(${summarizeInput(p.input)})${rule}`)];
     }
     case "tool.input.delta":
       return [];
@@ -106,15 +114,25 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
       return [aux(`! 权限请求 ${ev.payload.requestId}：${ev.payload.reason}`)];
     case "permission.resolved": {
       const p = ev.payload;
-      return [aux(`└ 权限：${p.action}（${p.source}）`)];
+      const detail = p.rule !== undefined ? `${p.source}：${p.rule}` : p.source;
+      const remembered =
+        p.remember === "project"
+          ? "，已写入项目授权"
+          : p.remember === "session"
+            ? "，本会话内有效"
+            : "";
+      return [aux(`└ 权限：${p.action}（${detail}）${remembered}`)];
     }
     case "context.compacted": {
       const p = ev.payload;
       return [aux(`◇ 上下文已压缩（${p.kind}，至 seq ${p.throughSeq}）`)];
     }
     case "session.config_changed": {
-      const m = ev.payload.model;
-      return m !== undefined ? [aux(`◇ 模型已切换为 ${m.provider}/${m.model}`)] : [];
+      const p = ev.payload;
+      const lines: string[] = [];
+      if (p.model !== undefined) lines.push(`◇ 模型已切换为 ${p.model.provider}/${p.model.model}`);
+      if (p.permissionPreset !== undefined) lines.push(`◇ 权限预设已切换为 ${p.permissionPreset}`);
+      return lines.map(aux);
     }
     case "provider.retry": {
       const p = ev.payload;
@@ -146,19 +164,34 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
   }
 }
 
-/** 权限确认提示块（cli.md 第 6 节）：列出主体与原因、两个选项 */
+const OPTION_LABELS: Record<string, string> = {
+  allow_once: "允许一次",
+  allow_session: "本会话内允许",
+  allow_project: "在此项目中始终允许",
+  deny: "拒绝（可附反馈）",
+  deny_stop: "拒绝并停止本 Turn",
+};
+const OPTION_KEYS: Record<string, string> = {
+  allow_once: "a",
+  allow_session: "s",
+  allow_project: "p",
+  deny: "d",
+  deny_stop: "x",
+};
+
+/** 权限确认提示块（cli.md 第 6 节）：主体、命中原因与完整选项 */
 export function renderPermissionPrompt(
   subjects: { kind: string; target: string; resolved?: string | undefined }[],
   reason: string,
+  options?: readonly string[],
 ): string {
   const lines = subjects.map((s) => {
     const resolved = s.resolved !== undefined && s.resolved !== s.target ? ` → ${s.resolved}` : "";
     return `  ${s.kind}: ${s.target}${resolved}`;
   });
-  return [
-    style("yellow", "? 操作需要确认"),
-    ...lines,
-    `  ${reason}`,
-    `  ${style("bold", "[a]")} 允许一次  ${style("bold", "[d]")} 拒绝`,
-  ].join("\n");
+  const opts = options !== undefined && options.length > 0 ? options : ["allow_once", "deny"];
+  const rendered = opts
+    .map((o) => `${style("bold", `[${OPTION_KEYS[o] ?? o[0] ?? "?"}]`)} ${OPTION_LABELS[o] ?? o}`)
+    .join("  ");
+  return [style("yellow", "? 操作需要确认"), ...lines, `  ${reason}`, `  ${rendered}`].join("\n");
 }

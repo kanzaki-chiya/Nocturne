@@ -37,7 +37,11 @@ export async function runRepl(
   const unsubscribe = session.subscribe((ev: RuntimeEvent) => {
     if (ev.type === "permission.requested") {
       pendingPermission = { requestId: ev.payload.requestId };
-      write(io, "stdout", `${renderPermissionPrompt(ev.payload.subjects, ev.payload.reason)}\n`);
+      write(
+        io,
+        "stdout",
+        `${renderPermissionPrompt(ev.payload.subjects, ev.payload.reason, ev.payload.options)}\n`,
+      );
       return;
     }
     for (const r of renderEvent(ev, "interactive")) {
@@ -67,17 +71,32 @@ export async function runRepl(
     rl.on("line", (raw) => {
       const line = raw.trim();
 
-      // 权限确认优先（cli.md 第 6 节）：只允许 a/d
+      // 权限确认优先（cli.md 第 6 节）：a/s/p/d/x；
+      // "d <文本>" 把其余内容作为给模型的反馈
       if (pendingPermission !== undefined) {
         const { requestId } = pendingPermission;
-        if (line === "a" || line === "allow") {
+        const key = line === "" ? "d" : (line.split(/\s+/, 1)[0] ?? "d").toLowerCase();
+        const feedback = line.length > key.length ? line.slice(key.length).trim() : undefined;
+        const reply = (r: Parameters<typeof session.respondPermission>[1]) => {
           pendingPermission = undefined;
-          void session.respondPermission(requestId, { decision: "allow" });
-        } else if (line === "d" || line === "deny" || line === "") {
-          pendingPermission = undefined;
-          void session.respondPermission(requestId, { decision: "deny" });
+          void session.respondPermission(requestId, r);
+        };
+        if (key === "a" || key === "allow") {
+          reply({ decision: "allow" });
+        } else if (key === "s" || key === "session") {
+          reply({ decision: "allow", remember: "session" });
+        } else if (key === "p" || key === "project") {
+          reply({ decision: "allow", remember: "project" });
+        } else if (key === "x") {
+          reply({ decision: "deny", stop: true });
+        } else if (key === "d" || key === "deny") {
+          reply({ decision: "deny", ...(feedback !== undefined ? { feedback } : {}) });
         } else {
-          write(io, "stdout", "  请输入 a（允许一次）或 d（拒绝）\n");
+          write(
+            io,
+            "stdout",
+            "  请输入 a（允许一次）/ s（本会话允许）/ p（本项目始终允许）/ d（拒绝）/ x（拒绝并停止）\n",
+          );
         }
         prompt();
         return;

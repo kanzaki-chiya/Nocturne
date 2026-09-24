@@ -54,4 +54,28 @@ describe("参数解析（cli.md 第 2 节）", () => {
     expect(parseArgs(["-h"]).help).toBe(true);
     expect(parseArgs(["--version"]).version).toBe(true);
   });
+
+  it("恢复与列表参数", () => {
+    expect(parseArgs(["--continue"]).continueSession).toBe(true);
+    expect(parseArgs(["-c"]).continueSession).toBe(true);
+    const r = parseArgs(["--resume", "sess-9", "--model", "m2", "--force-unlock"]);
+    expect(r.resume).toBe("sess-9");
+    expect(r.model).toBe("m2");
+    expect(r.forceUnlock).toBe(true);
+    expect(parseArgs(["--sessions"]).sessions).toBe(true);
+    expect(parseArgs(["--preset", "read-only"]).preset).toBe("read-only");
+  });
+
+  it("trust / untrust 子命令", () => {
+    expect(parseArgs(["trust"]).command).toBe("trust");
+    expect(parseArgs(["untrust"]).command).toBe("untrust");
+  });
+
+  it("非法组合 → UsageError", () => {
+    expect(() => parseArgs(["-c", "--resume", "x"])).toThrow(UsageError);
+    expect(() => parseArgs(["--force-unlock"])).toThrow(UsageError);
+    expect(() => parseArgs(["--preset", "default", "--resume", "x"])).toThrow(UsageError);
+    expect(() => parseArgs(["--sessions", "-p", "hi"])).toThrow(UsageError);
+    expect(() => parseArgs(["trust", "--resume", "x"])).toThrow(UsageError);
+  });
 });

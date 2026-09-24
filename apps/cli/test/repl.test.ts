@@ -103,4 +103,65 @@ describe("REPL 生命周期", () => {
     expect(await done).toBe(0);
     expect(interrupted.value).toBe(false);
   });
+
+  it("权限确认五键：a/s/p/d/x 映射到 PermissionReply（cli.md 第 6 节）", async () => {
+    const { io, stdin, stdoutChunks } = makeIo();
+    let listener: ((ev: RuntimeEvent) => void) | undefined;
+    const replies: { requestId: string; reply: unknown }[] = [];
+    const session = {
+      id: "s1",
+      subscribe: (fn: (ev: RuntimeEvent) => void) => {
+        listener = fn;
+        return () => undefined;
+      },
+      submit: () => new Promise<TurnEndReason>(() => undefined),
+      interrupt: () => undefined,
+      respondPermission: (requestId: string, reply: unknown) => {
+        replies.push({ requestId, reply });
+        return Promise.resolve();
+      },
+      state: () =>
+        ({ config: { model: { provider: "p", model: "m1" } } }) as ReturnType<
+          RuntimeSession["state"]
+        >,
+    } as unknown as RuntimeSession;
+
+    const done = runRepl(session, fakeRuntime, io);
+    await tick();
+    const requested = (id: string) =>
+      listener?.({
+        type: "permission.requested",
+        sessionId: "s1",
+        seq: 9,
+        time: "t",
+        payload: {
+          requestId: id,
+          callId: "c1",
+          subjects: [{ kind: "edit", target: "/x/a.ts" }],
+          reason: "命中规则：工作区外编辑",
+          options: ["allow_once", "allow_session", "allow_project", "deny", "deny_stop"],
+        },
+      } as RuntimeEvent);
+
+    const cases: [string, unknown][] = [
+      ["a", { decision: "allow" }],
+      ["s", { decision: "allow", remember: "session" }],
+      ["p", { decision: "allow", remember: "project" }],
+      ["d 先别改", { decision: "deny", feedback: "先别改" }],
+      ["x", { decision: "deny", stop: true }],
+    ];
+    for (const [i, [key, expected]] of cases.entries()) {
+      requested(`req-${i}`);
+      await tick();
+      stdin.write(`${key}\n`);
+      await tick();
+      expect(replies.at(-1)).toEqual({ requestId: `req-${i}`, reply: expected });
+    }
+    // 提示块列出了全部五个选项
+    const prompt = stdoutChunks.join("");
+    expect(prompt).toContain("本会话内允许");
+    expect(prompt).toContain("拒绝并停止");
+    stdin.end();
+    expect(await done).toBe(0);
+  });
 });
