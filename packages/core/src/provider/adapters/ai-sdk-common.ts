@@ -327,7 +327,7 @@ export function toProviderError(e: unknown, signal: AbortSignal | undefined): Er
       kind = /context|length|token|too long/i.test(String(providerMessage))
         ? "context_overflow"
         : "invalid_request";
-    }
+    } else if (status === 404) kind = "invalid_request"; // 端点路径或模型 id 有误
     return new ProviderError({
       kind,
       message: s.message ?? `HTTP ${status}`,

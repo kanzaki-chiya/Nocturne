@@ -23,16 +23,15 @@ API Key（输入不回显；直接回车表示改用环境变量）：********
 正在获取模型列表…
   1) deepseek-chat   2) deepseek-reasoner
 选择模型，或直接输入模型 id：> 1
-正在测试连接… 成功（812ms）
 设为默认模型？[Y/n] y
 已保存：服务商 deepseek、默认模型 deepseek/deepseek-chat
 ```
 
 - 预设服务商（1–3）只问名称、密钥和模型；自定义（4、5）额外询问服务地址。
-- 模型列表来自服务的 `GET /models`（OpenAI 兼容与 Anthropic 都有该端点），同时记录上游声明的上下文窗口与最大输出长度（第 7 节）；获取失败或服务不提供时退回手动输入，不阻塞流程。
-- **连接测试**发送一次最小请求（单条用户消息、`maxOutputTokens` 取 16、不带工具），把 `ProviderError.kind` 翻译成可操作的提示：`auth` → 密钥无效；`network`/`timeout` → 地址不通；`invalid_request` 或 404 → 模型 id 或地址路径有误。测试失败时询问"仍然保存？[y/N]"，默认不保存。
+- 模型列表来自服务的 `GET /models`（OpenAI 兼容与 Anthropic 都有该端点），同时记录上游声明的上下文窗口与最大输出长度（第 7 节）；获取失败或服务不提供时退回手动输入，不阻塞流程——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，随后照常进入手动输入模型 id 并保存；404 与网络错误同样退回手动输入。
+- **向导不发送模型请求**：连接测试会消耗 token 且重复了首次真实请求才能发现的问题，因此不做。密钥、地址与模型 id 的有效性由会话中的首次真实请求检验；请求失败时按 `ProviderError.kind` 给出可操作提示（`auth` → 密钥可能无效，附 `/provider key <name>`；`network`/`timeout` → 地址不通，附 `nctrn setup`；`invalid_request`/404 → 模型 id 或地址路径有误），实现位置为 `agent/turn.ts` 的 `providerFailureHint`（turn.completed.error.message，CLI 与 TUI 共用）。
 - 系统凭据后端不可用时（第 3 节），跳过保存密钥这一步，直接进入环境变量方式。
-- 选择"改用环境变量"时询问变量名（默认 `NOCTURNE_API_KEY`，Anthropic 类默认 `ANTHROPIC_API_KEY`），条目写入 `apiKeyEnv`，密钥不落盘；此时连接测试只在该变量已设置时进行。
+- 选择"改用环境变量"时询问变量名（默认 `NOCTURNE_API_KEY`，Anthropic 类默认 `ANTHROPIC_API_KEY`），条目写入 `apiKeyEnv`，密钥不落盘。
 - `nctrn setup` 要求 stdin/stdout 为 TTY，否则以退出码 2 退出并提示手写配置的方式（README）。
 
 会话内的 `/provider`：
@@ -41,7 +40,7 @@ API Key（输入不回显；直接回车表示改用环境变量）：********
 |---|---|
 | `/provider` | 列出全部服务商：名称、类型、服务地址（只显示主机名）、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），以及当前会话使用的是哪一个。TUI 中不带参数的 `/provider` 改为打开全屏模型选择页（焦点在左栏服务商一侧），见 [tui.md](../apps/tui.md) 第 7 节 |
 | `/provider add` | 运行与 `nctrn setup` 相同的向导；完成后询问"切换当前会话到该模型？[Y/n]"，确认即调用 `session.setModel` |
-| `/provider key <name>` | 更新该服务商的密钥（不回显）并重新测试连接 |
+| `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成 |
 | `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置 |
 | `/provider remove <name>` | 删除向导写入的条目及其凭据；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改 |
 
@@ -161,16 +160,15 @@ interface ProviderSetupFile {
 
 ## 6. Core 接口
 
-向导的逻辑（预设、模型列表、连接测试、文件写入）放在 Core，客户端只负责交互；这样 CLI 与 TUI 共用一份行为，也为将来的 RPC 客户端留好入口。
+向导的逻辑（预设、模型列表、文件写入）放在 Core，客户端只负责交互；这样 CLI 与 TUI 共用一份行为，也为将来的 RPC 客户端留好入口。向导全程只发 `GET /models`，不发送任何模型请求。
 
 ```ts
 // @nocturne/core 公开导出
 listProviderPresets(): ProviderPreset[]
 fetchModels(entry: ProviderConfig, key: string | undefined, signal): Promise<UpstreamModel[]>
   // GET /models；UpstreamModel = { id, displayName?, contextWindow?, maxOutputTokens?,
-  //   pricing?, capabilities? }——只含上游明确声明的字段（第 7 节）；不支持时返回 []
-testProviderConnection(entry: ProviderConfig, key: string | undefined, model: string, signal):
-  Promise<{ ok: true; latencyMs: number } | { ok: false; error: ProviderError }>
+  //   pricing?, capabilities? }——只含上游明确声明的字段（第 7 节）；HTTP 错误抛
+  //   ProviderUpstreamError（携带 status），不支持时返回 []
 
 // RuntimeConfig（config 模块）新增
 credentials: CredentialStore                             // 第 3 节的统一接口；get 结果在进程内缓存

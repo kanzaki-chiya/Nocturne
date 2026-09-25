@@ -3,7 +3,6 @@
  * 写进 providers.json 的是完整条目；预设更新不会改变已写入的条目。
  * 新增预设门槛：服务地址与协议兼容性有官方文档可查，并实测过连接。
  */
-import { ProviderError } from "./errors.js";
 import type { UpstreamModelInfo } from "./types.js";
 
 export interface ProviderPreset {
@@ -256,39 +255,4 @@ export async function fetchModels(
       ? ((raw as { data: unknown[] }).data as RawModel[])
       : [];
   return data.map(mapUpstreamModel).filter((m): m is UpstreamModelInfo => m !== undefined);
-}
-
-/**
- * 连接测试：向模型列表接口发一次请求。返回 ok+latencyMs（含模型数）或
- * 结构化错误；不验证具体模型是否可用（模型可用性由第一次真实请求检验）。
- */
-export async function testProviderConnection(
-  entry: FetchModelsRequest,
-  key: string | undefined,
-  signal?: AbortSignal,
-): Promise<
-  { ok: true; latencyMs: number; modelCount: number } | { ok: false; error: ProviderError }
-> {
-  const started = Date.now();
-  try {
-    const models = await fetchModels(entry, key, signal);
-    return { ok: true, latencyMs: Date.now() - started, modelCount: models.length };
-  } catch (e) {
-    const status = e instanceof ProviderUpstreamError ? e.status : undefined;
-    const kind =
-      status === 401 || status === 403
-        ? ("auth" as const)
-        : status !== undefined && status >= 500
-          ? ("server" as const)
-          : ("network" as const);
-    return {
-      ok: false,
-      error: new ProviderError({
-        kind,
-        message: e instanceof Error ? e.message : String(e),
-        retryable: false,
-        ...(status !== undefined ? { status } : {}),
-      }),
-    };
-  }
 }

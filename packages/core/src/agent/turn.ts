@@ -16,7 +16,7 @@ import {
   runSummaryCall,
   type CompactionPlan,
 } from "../context/index.js";
-import { isProviderError } from "../provider/index.js";
+import { isProviderError, type ProviderError } from "../provider/index.js";
 import type {
   ContentBlock,
   FinishReason,
@@ -31,6 +31,26 @@ import type { TurnDeps } from "./types.js";
 
 function isPersistenceFailure(e: unknown): boolean {
   return e instanceof SessionError && (e.code === "session_failed" || e.code === "session_closed");
+}
+
+/**
+ * Provider 请求失败的用户可读提示（provider-setup.md 第 1 节）。
+ * 向导不做连接测试：密钥/地址/模型 id 的校验推迟到首次真实请求，
+ * 这里按 ProviderError.kind 翻译为补救命令。CLI 与 TUI 都渲染
+ * turn.completed.error.message，翻译只在这里做一份。
+ */
+export function providerFailureHint(e: ProviderError, providerId: string): string {
+  switch (e.kind) {
+    case "auth":
+      return `密钥可能无效：${e.message}（可用 /provider key ${providerId} 更新密钥）`;
+    case "network":
+    case "timeout":
+      return `服务地址不通：${e.message}（可运行 nctrn setup 检查或更新服务商配置）`;
+    case "invalid_request":
+      return `模型 id 或地址路径可能有误：${e.message}（可运行 nctrn setup 检查配置，或用 /model 切换模型）`;
+    default:
+      return e.message;
+  }
 }
 
 function aborted(signal: AbortSignal): boolean {
@@ -358,7 +378,11 @@ export async function runTurn(
               : isProviderError(e)
                 ? `provider_${e.kind}`
                 : "provider_error",
-          message: e instanceof Error ? e.message : String(e),
+          message: isProviderError(e)
+            ? providerFailureHint(e, deps.model.model.ref.provider)
+            : e instanceof Error
+              ? e.message
+              : String(e),
         });
       }
 

@@ -1119,11 +1119,10 @@ export {
   type FakeScript,
   type FakeHandler,
 } from "./provider/index.js";
-// 服务商向导三件套（provider-setup.md 第 6 节）：CLI/TUI 共用
+// 服务商向导两件套（provider-setup.md 第 6 节）：CLI/TUI 共用
 export {
   fetchModels,
   listProviderPresets,
-  testProviderConnection,
   ProviderUpstreamError,
   type FetchModelsRequest,
   type ProviderPreset,

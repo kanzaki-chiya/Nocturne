@@ -4,12 +4,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createOpenAICompatibleProvider,
-  fetchModels,
-  listProviderPresets,
-  testProviderConnection,
-} from "./index.js";
+import { createOpenAICompatibleProvider, fetchModels, listProviderPresets } from "./index.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -158,26 +153,6 @@ describe("fetchModels 字段映射", () => {
     expect(await fetchModels({ type: "openai-compatible", baseURL: "http://x/v1" }, "k")).toEqual(
       [],
     );
-  });
-});
-
-describe("testProviderConnection", () => {
-  it("ok 时返回延迟与模型数；401 归类 auth", async () => {
-    stubFetch(() => jsonRes({ data: [{ id: "a" }, { id: "b" }] }));
-    const ok = await testProviderConnection(
-      { type: "openai-compatible", baseURL: "http://x/v1" },
-      "k",
-    );
-    expect(ok.ok).toBe(true);
-    if (ok.ok) expect(ok.modelCount).toBe(2);
-
-    stubFetch(() => jsonRes({}, 403));
-    const bad = await testProviderConnection(
-      { type: "openai-compatible", baseURL: "http://x/v1" },
-      "k",
-    );
-    expect(bad.ok).toBe(false);
-    if (!bad.ok) expect(bad.error.kind).toBe("auth");
   });
 });
 

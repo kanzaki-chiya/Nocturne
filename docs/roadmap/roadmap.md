@@ -104,7 +104,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 - 全新的 `NOCTURNE_HOME` 下运行 `nctrn setup` 完成配置后，不设任何环境变量即可 `nctrn` 进入会话并完成一次工具往返（CLI 与 TUI）。
 - 会话内 `/provider add` 添加第二个服务商并切换过去，不重启进程、不触发 `SessionEnd`/`SessionStart` Hook、不重启 MCP 服务器；`/provider key` 更新密钥后下一次请求即生效。
-- 连接测试对错误密钥、错误地址、错误模型 id 分别给出对应提示。
+- 首次真实请求失败时，对错误密钥、错误地址、错误模型 id 分别给出对应提示；向导不发送模型请求。
 - 在任何预设（含 `full-access`）、任何规则与 Grant、`--yes` 下，`read`/`edit`/`grep`/`glob` 都读不到 `credentials.json`；`shell` 子进程环境中不含已解析的凭据变量。
 - `config.json` 在整个流程中字节级不变；手写条目覆盖同名向导条目，`/provider` 正确标注来源层。
 - `credentials.json` 与 `providers.json` 中不出现任何密钥明文；三个平台的凭据写入与读取过程中密钥不出现在子进程命令行参数里（Windows 实测，macOS/Linux 在可用环境实测，否则如实标注未验证）。

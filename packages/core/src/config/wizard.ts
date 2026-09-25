@@ -1,9 +1,12 @@
 /**
  * 服务商配置向导的流程编排（provider-setup.md 第 1、6 节）：
- * 预设/模型列表/连接测试/文件写入走注入的能力（provider 层与 RuntimeConfig），
+ * 预设/模型列表/文件写入走注入的能力（provider 层与 RuntimeConfig），
  * 交互外壳（行式问答、TUI 弹层）由客户端实现 WizardIo。
- * config 不依赖 provider——fetchModels/testProviderConnection/presets
- * 与环境变量读取全部由调用方注入。
+ * 向导不发送模型请求（不消耗 token）：密钥、地址与模型 id 的有效性
+ * 由会话中的首次真实请求检验，错误提示见 agent/turn.ts 的
+ * providerFailureHint。config 不依赖 provider——fetchModels/presets
+ * 与环境变量读取全部由调用方注入；fetchModels 抛出的错误可携带
+ * 数字 status（ProviderUpstreamError），401/403 时提示密钥可能无效。
  */
 import type { ModelOverrideShape, RuntimeConfig, UpstreamModelEntry } from "./types.js";
 
@@ -40,15 +43,14 @@ export interface WizardFetchRequest {
   baseURL?: string | undefined;
 }
 
-export type WizardTestResult =
-  | { ok: true; latencyMs: number; modelCount: number }
-  | { ok: false; error: { kind: string; message: string } };
-
 /** 向导编排依赖：客户端注入 provider 层能力与环境变量读取 */
 export interface SetupWizardDeps {
   presets(): readonly WizardPreset[];
+  /**
+   * GET /models 模型列表；失败时抛出错误（约定可携带数字 `status`，
+   * 401/403 被向导识别为"密钥可能无效"，其余错误一律退回手动输入）
+   */
   fetchModels(req: WizardFetchRequest, key: string | undefined): Promise<UpstreamModelEntry[]>;
-  testConnection(req: WizardFetchRequest, key: string | undefined): Promise<WizardTestResult>;
   env(name: string): string | undefined;
 }
 
@@ -74,18 +76,10 @@ function backendLabel(backend: string): string {
   }
 }
 
-function translateConnError(kind: string, message: string): string {
-  switch (kind) {
-    case "auth":
-      return `密钥无效（${message}）`;
-    case "network":
-    case "timeout":
-      return `地址不通（${message}）`;
-    case "invalid_request":
-      return `模型 id 或地址路径有误（${message}）`;
-    default:
-      return message;
-  }
+/** 注入的 fetchModels 抛错约定：可携带数字 status（ProviderUpstreamError） */
+function upstreamStatus(e: unknown): number | undefined {
+  const s = (e as { status?: unknown } | null | undefined)?.status;
+  return typeof s === "number" ? s : undefined;
 }
 
 /**
@@ -170,8 +164,15 @@ export async function runProviderSetupWizard(
         fetchReq,
         effectiveKey !== undefined && effectiveKey !== "" ? effectiveKey : undefined,
       );
-    } catch {
-      io.print("! 模型列表获取失败，改用手动输入");
+    } catch (e) {
+      const status = upstreamStatus(e);
+      if (status === 401 || status === 403) {
+        io.print(
+          "! 密钥可能无效（获取模型列表被拒绝），改用手动输入；保存后可随时用 /provider key 更新密钥",
+        );
+      } else {
+        io.print("! 模型列表获取失败，改用手动输入");
+      }
     }
   }
 
@@ -186,19 +187,6 @@ export async function runProviderSetupWizard(
   } else {
     modelId = await io.ask("模型 id：");
     if (modelId === "") throw new WizardAbort();
-  }
-
-  // 连接测试：只在有实际凭据时进行；失败问"仍然保存？[y/N]"（默认不保存）
-  if (effectiveKey !== undefined && effectiveKey !== "" && preset.fetchableModels) {
-    io.print("正在测试连接…");
-    const test = await deps.testConnection(fetchReq, effectiveKey);
-    if (test.ok) {
-      io.print(`成功（${test.latencyMs}ms，${test.modelCount} 个模型）`);
-    } else {
-      io.print(`! ${translateConnError(test.error.kind, test.error.message)}`);
-      const keep = await io.ask("仍然保存？[y/N] ");
-      if (!/^y(es)?$/i.test(keep.trim())) throw new WizardAbort();
-    }
   }
 
   const fullModel = `${providerId}/${modelId}`;
@@ -243,12 +231,12 @@ export async function runProviderSetupWizard(
 
 /**
  * /provider key <name>：更新单个服务商的密钥（provider-setup.md 第 1 节）。
- * 新密钥经 credentials.set 写入系统后端，然后按条目地址重新测试连接。
+ * 新密钥经 credentials.set 写入系统后端后即完成——不做连接测试，
+ * 密钥有效性由下一次真实请求检验。
  */
 export async function runProviderKeyWizard(
   io: WizardIo,
   config: RuntimeConfig,
-  deps: SetupWizardDeps,
   providerId: string,
 ): Promise<void> {
   const backend = config.credentials.backend();
@@ -263,22 +251,4 @@ export async function runProviderKeyWizard(
   }
   await config.setCredential(providerId, key);
   io.print(`密钥已交给 ${backendLabel(backend)} 加密保存`);
-
-  // 重新测试连接（条目带 baseURL/类型才测）
-  const entry = config.base.providers.find((p) => p.id === providerId);
-  if (entry !== undefined) {
-    io.print("正在测试连接…");
-    const test = await deps.testConnection(
-      {
-        type: entry.type ?? "openai-compatible",
-        ...(entry.baseURL !== undefined ? { baseURL: entry.baseURL } : {}),
-      },
-      key,
-    );
-    io.print(
-      test.ok
-        ? `成功（${test.latencyMs}ms）`
-        : `! ${translateConnError(test.error.kind, test.error.message)}（密钥已保存）`,
-    );
-  }
 }

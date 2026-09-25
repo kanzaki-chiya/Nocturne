@@ -20,7 +20,7 @@ export {
   type ProviderSetupState,
 } from "./setup.js";
 // 向导流程编排（provider-setup.md 第 1、6 节）：交互外壳在客户端，
-// fetch/test/presets/env 能力由客户端注入
+// fetch/presets/env 能力由客户端注入
 export {
   runProviderKeyWizard,
   runProviderSetupWizard,
@@ -30,5 +30,4 @@ export {
   type WizardIo,
   type WizardPreset,
   type WizardResult,
-  type WizardTestResult,
 } from "./wizard.js";

@@ -73,7 +73,6 @@ function makeDeps(overrides?: Partial<SetupWizardDeps>): SetupWizardDeps {
         },
         { id: "deepseek-reasoner", contextWindow: 128_000 },
       ]),
-    testConnection: () => Promise.resolve({ ok: true as const, latencyMs: 42, modelCount: 2 }),
     env: () => undefined,
     ...overrides,
   };
@@ -144,7 +143,7 @@ describe("/provider 向导弹层", () => {
     expect(f).toContain("deepseek-chat");
     await type(stdin, "1");
     await pause();
-    // 无实际凭据（env 未设置）→ 跳过连接测试 → 设默认
+    // 选完模型直接问"设为默认"（向导不做连接测试）
     expect(lastFrame()).toContain("设为默认模型");
     await type(stdin, "");
     await pause(120);
@@ -193,11 +192,9 @@ describe("/provider 向导弹层", () => {
     // 模型选择
     await type(stdin, "1");
     await pause(150);
-    // 有凭据 → 连接测试成功 → 设默认
-    const f2 = lastFrame() ?? "";
-    if (f2.includes("仍然保存")) await type(stdin, "y");
-    await pause();
-    if ((lastFrame() ?? "").includes("设为默认模型")) await type(stdin, "");
+    // 选完模型直接问"设为默认"（无连接测试步骤）
+    expect(lastFrame()).toContain("设为默认模型");
+    await type(stdin, "");
     await pause(120);
     expect(onDone).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "added", providerId: "deepseek" }),

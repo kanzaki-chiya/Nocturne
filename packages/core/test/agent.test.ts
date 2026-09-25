@@ -363,6 +363,57 @@ describe("runTurn", () => {
     expect(h.provider.requests).toHaveLength(1);
   });
 
+  // provider-setup.md 第 1 节：向导不做连接测试，错误提示推迟到首次真实请求
+  it("Provider auth 错误：提示密钥可能无效并给出 /provider key", async () => {
+    const h = await makeHarness({
+      scripts: [
+        [{ type: "throw", error: new ProviderError({ kind: "auth", message: "bad key" }) }],
+      ],
+    });
+    expect(await runTurn(h.deps, prompt())).toBe("error");
+    const done = h.events.find((e) => e.type === "turn.completed");
+    const msg = done?.type === "turn.completed" ? done.payload.error?.message : "";
+    expect(msg).toContain("密钥可能无效");
+    expect(msg).toContain("/provider key fake");
+  });
+
+  it("Provider network/timeout 错误：提示地址不通并给出 nctrn setup", async () => {
+    for (const kind of ["network", "timeout"] as const) {
+      const h = await makeHarness({
+        config: { retryLimit: 0 },
+        scripts: [[{ type: "throw", error: new ProviderError({ kind, message: "unreachable" }) }]],
+      });
+      expect(await runTurn(h.deps, prompt())).toBe("error");
+      const done = h.events.find((e) => e.type === "turn.completed");
+      const msg = done?.type === "turn.completed" ? done.payload.error?.message : "";
+      expect(msg).toContain("地址不通");
+      expect(msg).toContain("nctrn setup");
+    }
+  });
+
+  it("Provider invalid_request（含 404）错误：提示模型 id 或地址路径有误", async () => {
+    const h = await makeHarness({
+      scripts: [
+        [
+          {
+            type: "throw",
+            error: new ProviderError({
+              kind: "invalid_request",
+              message: "no such model",
+              status: 404,
+            }),
+          },
+        ],
+      ],
+    });
+    expect(await runTurn(h.deps, prompt())).toBe("error");
+    const done = h.events.find((e) => e.type === "turn.completed");
+    const msg = done?.type === "turn.completed" ? done.payload.error?.message : "";
+    expect(msg).toContain("模型 id 或地址路径");
+    const code = done?.type === "turn.completed" ? done.payload.error?.code : "";
+    expect(code).toBe("provider_invalid_request");
+  });
+
   it("重试耗尽 → error", async () => {
     const h = await makeHarness({
       config: { retryLimit: 2 },

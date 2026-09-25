@@ -9,7 +9,6 @@ import {
   listProviderPresets,
   runProviderKeyWizard as coreKeyWizard,
   runProviderSetupWizard as coreSetupWizard,
-  testProviderConnection,
   type RuntimeConfig,
   type SetupWizardDeps,
   type WizardIo,
@@ -108,7 +107,6 @@ export function cliWizardDeps(
   return {
     presets: () => listProviderPresets(),
     fetchModels: (req, key) => fetchModels(req, key),
-    testConnection: (req, key) => testProviderConnection(req, key),
     env,
   };
 }
@@ -128,7 +126,7 @@ export async function runProviderKeyWizard(
   config: RuntimeConfig,
   providerId: string,
 ): Promise<void> {
-  await coreKeyWizard(io, config, cliWizardDeps(), providerId);
+  await coreKeyWizard(io, config, providerId);
 }
 
 /**

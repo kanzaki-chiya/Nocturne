@@ -11,7 +11,6 @@ import {
   listProviderPresets,
   runProviderKeyWizard,
   runProviderSetupWizard,
-  testProviderConnection,
   WizardAbort,
   type RuntimeConfig,
   type SetupWizardDeps,
@@ -29,7 +28,7 @@ export interface WizardState {
   running: boolean;
   /** print() 累积的日志行 */
   logs: readonly string[];
-  /** 当前挂起的输入提示（undefined = 流程在异步步骤中，如拉模型/测连接） */
+  /** 当前挂起的输入提示（undefined = 流程在异步步骤中，如拉取模型列表） */
   prompt?: WizardPrompt | undefined;
   /** 流程已结束（done/cancel/error 之一，供视图显示收尾） */
   done?: "done" | "cancel" | "error" | undefined;
@@ -68,7 +67,6 @@ export function tuiWizardDeps(
   return {
     presets: () => listProviderPresets(),
     fetchModels: (req, key) => fetchModels(req, key),
-    testConnection: (req, key) => testProviderConnection(req, key),
     env,
   };
 }
@@ -143,9 +141,10 @@ export function useProviderWizard(
               providerId: r.providerId,
               model: r.model,
             }))
-          : runProviderKeyWizard(io, cfg, depsRef.current, s.providerId).then(
-              (): WizardOutcome => ({ kind: "key-updated", providerId: s.providerId }),
-            );
+          : runProviderKeyWizard(io, cfg, s.providerId).then((): WizardOutcome => ({
+              kind: "key-updated",
+              providerId: s.providerId,
+            }));
       run
         .then((outcome) => {
           setState((st) => ({
