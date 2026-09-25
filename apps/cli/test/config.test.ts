@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPlatform } from "@nocturne/core";
 
 import type { CliArgs } from "../src/args.js";
-import { collectConfig, normalizeModelRef } from "../src/config.js";
+import { collectConfig, configProblemsReport, normalizeModelRef } from "../src/config.js";
 
 const platform = createPlatform();
 
@@ -138,6 +138,34 @@ describe("Provider 配置收集（cli.md 第 7 节）", () => {
     if (!r.ok) return;
     expect(JSON.stringify(r.config)).not.toContain("super-secret-value");
     expect(JSON.stringify(r.config)).toContain("NOCTURNE_API_KEY");
+  });
+
+  it("配置不完整报告：交互终端提示 nctrn setup，非 TTY 不含（cli.md 第 2 节）", async () => {
+    // 空 NOCTURNE_HOME + 无任何环境变量：无 providers.json 条目、无
+    // config.json providers、无环境变量合成 → hasProviderSource=false
+    const r = await collectConfig(base, platform, () => undefined);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.hasProviderSource).toBe(false);
+
+    const ttyText = configProblemsReport(r.problems, {
+      tty: true,
+      hasProviderSource: r.hasProviderSource,
+    });
+    expect(ttyText).toContain("nctrn setup");
+    // 全无服务商来源：setup 提示置首（在缺失项列表之前）
+    expect(ttyText.indexOf("nctrn setup")).toBeLessThan(ttyText.indexOf("  - "));
+
+    const piped = configProblemsReport(r.problems, {
+      tty: false,
+      hasProviderSource: r.hasProviderSource,
+    });
+    expect(piped).not.toContain("nctrn setup");
+    expect(piped).toContain("配置不完整");
+
+    // 有服务商来源（如缺凭据）时提示在缺失项之后
+    const sourced = configProblemsReport(r.problems, { tty: true, hasProviderSource: true });
+    expect(sourced.indexOf("nctrn setup")).toBeGreaterThan(sourced.indexOf("  - "));
   });
 
   it("requireModel=false（恢复路径）：无模型配置也可通过", async () => {

@@ -49,7 +49,7 @@ nctrn setup                  # 服务商配置向导（v0.2 提议，provider-se
 - **模型已不可解析**（Provider 清单或配置变了）也拒绝恢复，提示中给出用法：加 `--model <id>` 恢复并切换——Runtime 在取锁、修复之后先写入 `session.config_changed { model }` 再进入空闲（sessions.md 第 4 节），组合写法：`nctrn --resume <id> --model <id>`。
 - 恢复成功后打印一行恢复摘要（`session.recovery`：截断尾部、补齐的中断调用与 Turn 计数；无修复则不打印）。
 - 凭据来自环境变量或用户级凭据文件（v0.2 提议，[provider-setup.md](../architecture/provider-setup.md) 第 3 节），**不接受命令行上的密钥值**；`--api-key-env` 指定的是变量名。
-- 启动时校验配置：缺 `baseURL`（openai-compatible）、缺凭据、缺模型 id，都打印缺失项并以退出码 2 退出，两种模式一致；交互终端下提示可运行 `nctrn setup`。
+- 启动时校验配置：缺 `baseURL`（openai-compatible）、缺凭据、缺模型 id，都打印缺失项并以退出码 2 退出，两种模式一致；stdin/stdout 均为交互终端时提示可运行 `nctrn setup`——完全没有任何服务商来源（无 `providers.json` 条目、无 `config.json` providers、无环境变量/命令行合成）时该提示置首，环境变量与手写说明退为次要；非 TTY 输出不变，不含向导提示。
 - 未知参数、参数缺值：打印用法并以退出码 2 退出。
 - `trust` / `untrust` 子命令原子写 `<NOCTURNE_HOME>/trust.json`（[config.md](../architecture/config.md) 第 3 节），打印结果后以退出码 0 退出；程序不改写手写的 `config.json`。
 - `setup` 子命令（v0.2 提议）要求 stdin 与 stdout 都是 TTY，否则以退出码 2 退出并提示手写配置方式；密钥输入不回显，**不存在**把密钥放在命令行参数上的形式（provider-setup.md 第 1、8 节）。

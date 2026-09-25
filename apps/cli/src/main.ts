@@ -18,6 +18,7 @@ import { createMcpConnector } from "@nocturne/mcp";
 import { HELP_TEXT, parseArgs, UsageError, type CliArgs } from "./args.js";
 import {
   collectConfig,
+  configProblemsReport,
   effectiveProviderId,
   makeConfigLoader,
   normalizeModelRef,
@@ -162,7 +163,13 @@ async function main(): Promise<number> {
     requireModel: !isResume,
   });
   if (!collected.ok) {
-    process.stderr.write(`配置不完整：\n${collected.problems.map((p) => `  - ${p}`).join("\n")}\n`);
+    // cli.md 第 2 节：交互终端提示 nctrn setup；非 TTY 输出保持脚本可解析
+    process.stderr.write(
+      configProblemsReport(collected.problems, {
+        tty: process.stdin.isTTY && process.stdout.isTTY,
+        hasProviderSource: collected.hasProviderSource,
+      }),
+    );
     return 2;
   }
   const { runtime: runtimeConfig, model } = collected.config;

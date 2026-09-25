@@ -24,7 +24,17 @@ export interface CliConfig {
   warnings: string[];
 }
 
-export type CollectResult = { ok: true; config: CliConfig } | { ok: false; problems: string[] };
+export type CollectResult =
+  | { ok: true; config: CliConfig }
+  | {
+      ok: false;
+      problems: string[];
+      /**
+       * 是否存在任何服务商来源（providers.json 条目、config.json providers、
+       * 环境变量/命令行合成条目）——全无时报告把 nctrn setup 提示置首
+       */
+      hasProviderSource: boolean;
+    };
 
 type Env = (name: string) => string | undefined;
 
@@ -119,7 +129,12 @@ export async function collectConfig(
   if (cliOrEnvModel !== undefined && cliOrEnvModel !== "") {
     providerId = effectiveApiType(args, env);
     const norm = normalizeModelRef(cliOrEnvModel, providerId);
-    if (!norm.ok) return { ok: false, problems: [norm.problem] };
+    if (!norm.ok)
+      return {
+        ok: false,
+        problems: [norm.problem],
+        hasProviderSource: resolved.providers.length > 0,
+      };
     model = norm.ref;
   } else {
     const configured = resolved.model;
@@ -133,7 +148,7 @@ export async function collectConfig(
       const slash = configured.indexOf("/");
       if (slash <= 0) {
         problems.push(`配置文件 model 必须是 "provider/model" 形式，收到 "${configured}"`);
-        return { ok: false, problems };
+        return { ok: false, problems, hasProviderSource: resolved.providers.length > 0 };
       }
       providerId = configured.slice(0, slash);
       model = configured;
@@ -173,10 +188,30 @@ export async function collectConfig(
     }
   }
 
-  if (problems.length > 0) return { ok: false, problems };
+  if (problems.length > 0) {
+    return { ok: false, problems, hasProviderSource: resolved.providers.length > 0 };
+  }
 
   return {
     ok: true,
     config: { runtime, model, providerId, warnings },
   };
+}
+
+/**
+ * 「配置不完整」报告文本（cli.md 第 2 节）：
+ * - 非 TTY：原样列出缺失项，不含向导提示（脚本场景输出稳定）；
+ * - 交互终端：追加 nctrn setup 提示；完全无服务商来源时提示置首，
+ *   环境变量/手写说明退为次要选项（首次体验场景）。
+ */
+export function configProblemsReport(
+  problems: string[],
+  options: { tty: boolean; hasProviderSource: boolean },
+): string {
+  const list = problems.map((p) => `  - ${p}`).join("\n");
+  if (!options.tty) return `配置不完整：\n${list}\n`;
+  const hint = "  首次使用？运行 nctrn setup 配置服务商与密钥";
+  return options.hasProviderSource
+    ? `配置不完整：\n${list}\n${hint}\n`
+    : `配置不完整：\n${hint}\n${list}\n`;
 }
