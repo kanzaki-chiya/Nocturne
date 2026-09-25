@@ -30,7 +30,7 @@ pnpm build
 
 ## 配置
 
-首次使用直接运行 `nctrn setup`：选择服务商、输入地址与密钥、挑选模型即可开始。密钥交给操作系统安全存储（Windows DPAPI、macOS 钥匙串、Linux Secret Service），不写进任何配置文件；会话内可用 `/provider` 管理服务商、`/model` 查看与切换模型。
+首次使用直接运行 `nctrn setup`：在交互终端打开服务商页完成配置，随后自动进入模型选择页挑选模型。密钥交给操作系统安全存储（Windows DPAPI、macOS 钥匙串、Linux Secret Service），不写进任何配置文件；会话内可用 `/provider` 打开服务商管理页、`/model` 查看与切换模型。
 
 也可以沿用环境变量方式连接 OpenAI 兼容服务：
 
@@ -100,9 +100,9 @@ Anthropic 协议可用另一份 Provider 条目，模型引用随之改为 `anth
 在要操作的仓库目录运行：
 
 ```sh
-nctrn                              # 交互式命令行
+nctrn                              # 交互式终端：默认全屏界面（TUI）
+nctrn --cli                        # 逐行命令行界面
 nctrn -p "概述这个仓库"             # 执行一次后退出
-nctrn --tui                        # 全屏终端界面，需要交互式终端
 nctrn -c                           # 继续当前目录最近的会话
 nctrn --resume <会话 ID>            # 恢复指定会话
 nctrn --sessions                   # 列出会话及 ID

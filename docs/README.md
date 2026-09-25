@@ -29,7 +29,7 @@
 | [subagent.md](architecture/subagent.md) | Subagent（子代理）：`task` 工具契约、Launcher 注入、子会话生命周期、受限工具集与权限收敛 |
 | [observability.md](architecture/observability.md) | 诊断日志：开关与输出位置、记录种类、脱敏规则 |
 | [providers.md](architecture/providers.md) | Provider 抽象、模型能力、流式与错误归一化 |
-| [provider-setup.md](architecture/provider-setup.md) | 服务商配置向导（`nctrn setup`、`/provider`）、向导配置层、操作系统凭据后端、模型限额以上游为准、模型选择页入口（v0.2） |
+| [provider-setup.md](architecture/provider-setup.md) | 服务商配置向导（`nctrn setup`、`/provider`）、向导配置层、操作系统凭据后端、模型限额以上游为准；v0.3 起向导不再选模型，模型选择收归 `/model`（v0.2/v0.3） |
 | [pitfalls.md](architecture/pitfalls.md) | 最容易犯的架构错误、早期症状与规避方式 |
 
 ## Apps（客户端）
@@ -37,7 +37,7 @@
 | 文档 | 回答的问题 |
 |---|---|
 | [apps/cli.md](apps/cli.md) | `nctrn` 命令行客户端：参数、REPL、事件渲染、权限确认、会话恢复、退出码、配置来源 |
-| [apps/tui.md](apps/tui.md) | 终端界面客户端：布局、键位、降级行为、`--tui` 入口 |
+| [apps/tui.md](apps/tui.md) | 终端界面客户端：布局、主题、欢迎框、状态栏、模型选择页、服务商页、键位、降级行为；TTY 时为 `nctrn` 默认界面 |
 
 ## Protocols（精确契约）
 

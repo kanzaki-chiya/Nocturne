@@ -1,56 +1,58 @@
 # 服务商配置向导与凭据存储
 
-> 状态：已接受 v0.2 ｜ 前置阅读：[config.md](config.md)、[providers.md](providers.md)、[permissions.md](permissions.md) ｜ 决策：[ADR-0015](../decisions/ADR-0015-provider-setup-credentials.md)
+> 状态：已接受 v0.2；v0.3 修订（[ADR-0019](../decisions/ADR-0019-tui-visual-provider-page.md)，提议，待验收）｜ 前置阅读：[config.md](config.md)、[providers.md](providers.md)、[permissions.md](permissions.md) ｜ 决策：[ADR-0015](../decisions/ADR-0015-provider-setup-credentials.md)
 
 v0.1 接入一个模型服务要做三件事：设置持久的用户级环境变量存放密钥、在 `config.json` 里手写一整段 Provider 条目（`id`/`type`/`baseURL`/`apiKeyEnv`/`models`）、自己查清服务地址和模型 id。本文设计的目标是让首次配置和日常切换都能在交互中完成：
 
 - `nctrn setup`：首次配置向导，独立于会话运行；
 - `/provider`：会话内查看、添加、更新密钥、删除服务商（CLI 与 TUI 都提供）。
 
-两个入口共用同一套 Core 能力（第 6 节），只是交互外壳不同。
+两个入口共用同一套 Core 能力（第 6 节），只是交互外壳不同。v0.3 起服务商配置与模型选择分离：向导只管"把服务商配上"，`/model` 是唯一的模型选择入口（[ADR-0019](../decisions/ADR-0019-tui-visual-provider-page.md) 第 3 条）。
 
 ## 1. 用户看到的流程
 
+### TTY：服务商页 → 模型页的两步流程
+
+`nctrn setup` 在交互终端直接打开全屏**服务商页**（第 1 步，备用屏幕，[tui.md](../apps/tui.md) 第 8 节）；按 `Esc` 完成后，如果没有默认模型自动进入**模型选择页**（第 2 步）设为默认；两页头部都显示"第 N 步，共 2 步"。没有任何已配置服务商时运行 `nctrn` 走同一流程，选完模型才创建会话进入主界面；有服务商但没有可解析的默认模型时直接进入第 2 步。
+
+服务商页里选中未配置预设后的就地步骤（逐行向导是同一套 Core 编排的同构外壳）：
+
 ```text
-$ nctrn setup
-选择服务商：
-  1) DeepSeek          2) OpenRouter        3) Anthropic
-  4) 其他 OpenAI 兼容服务  5) 其他 Anthropic 兼容服务
-> 1
-名称 [deepseek]：
-API Key（输入不回显；直接回车表示改用环境变量）：********
+▸ ○ DeepSeek / OpenRouter / Anthropic / 其他 OpenAI 兼容 / 其他 Anthropic 兼容
+（仅自定义预设）名称：commandcode
+（仅自定义预设）服务地址：https://api.example.com/v1      ← anthropic 兼容可留空用官方端点
+API Key（掩码输入；直接回车表示改用环境变量）：********
 密钥已交给 Windows DPAPI 加密保存
-正在获取模型列表…
-  1) deepseek-chat   2) deepseek-reasoner
-选择模型，或直接输入模型 id：> 1
-该服务支持思考强度吗？[y/N] y
+正在获取模型列表…                                        ← 只发 GET /models
+该服务支持思考强度吗？[y/N] y                            ← 仅上游未声明思考能力时
 勾选可用档位（空格切换，回车确认）：[ ] minimal  [x] low  [x] medium  [x] high  [ ] xhigh  [ ] max
-设为默认模型？[Y/n] y
-已保存：服务商 deepseek、默认模型 deepseek/deepseek-chat
+已保存 command，12 个模型                                ← 底部结果行，回到列表
 ```
 
-- 预设服务商（1–3）只问名称、密钥和模型；自定义（4、5）额外询问服务地址。
-- 模型列表来自服务的 `GET /models`（OpenAI 兼容与 Anthropic 都有该端点），同时记录上游声明的上下文窗口、最大输出长度与能力标记（第 7 节）；获取失败或服务不提供时退回手动输入，不阻塞流程——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，随后照常进入手动输入模型 id 并保存；404 与网络错误同样退回手动输入。
-- **思考强度声明**（ADR-0018 第 6 节）：上游 `/models` 没有声明思考能力时，向导问"该服务支持思考强度吗？[y/N]"；选 y 后多选勾选 `minimal/low/medium/high/xhigh/max`（TUI 用空格勾选、回车确认；CLI 输入逗号分隔的编号如 `2,3,4`，非法输入重问）。勾选结果写到 `providers.json` 服务商条目的 `thinking.levels`，并标注 `source: "user"`（"用户声明"，`/provider refresh` 不得覆盖它）。上游已声明思考能力时跳过这一步（可用档位走能力标记推导，见 ADR-0018 第 2 节）。
+- 三个内置预设不再问名称与地址（直接用预设默认值）；两个自定义预设问名称（必填）与服务地址（openai 兼容必填，anthropic 兼容可留空用官方端点）。
+- **向导不再选择模型**（v0.3）：模型列表仍经 `GET /models` 获取并把上游声明的上下文窗口、最大输出长度与能力标记写回条目 `models`（第 7 节），但不再出现"编号选择模型"与"设为默认模型"两步；默认模型在 `/model` 页设置。获取失败或服务不提供列表接口时只提示不阻塞——保存后可用服务商页「刷新模型列表」或 `/provider refresh <名>` 重试；`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"。
+- **思考强度声明**（ADR-0018 第 6 节）：上游 `/models` 没有声明思考能力时问"该服务支持思考强度吗？[y/N]"；选 y 后多选勾选 `minimal/low/medium/high/xhigh/max`（TUI 空格勾选回车确认；CLI 逗号分隔编号，非法输入重问）。勾选结果写到 `thinking.levels` 并标 `source: "user"`（`/provider refresh` 不得覆盖）。
 - **向导不发送模型请求**：连接测试会消耗 token 且重复了首次真实请求才能发现的问题，因此不做。密钥、地址与模型 id 的有效性由会话中的首次真实请求检验；请求失败时按 `ProviderError.kind` 给出可操作提示（`auth` → 密钥可能无效，附 `/provider key <name>`；`network`/`timeout` → 地址不通，附 `nctrn setup`；`invalid_request`/404 → 模型 id 或地址路径有误），实现位置为 `agent/turn.ts` 的 `providerFailureHint`（turn.completed.error.message，CLI 与 TUI 共用）。
-- 系统凭据后端不可用时（第 3 节），跳过保存密钥这一步，直接进入环境变量方式。
-- 选择"改用环境变量"时询问变量名（默认 `NOCTURNE_API_KEY`，Anthropic 类默认 `ANTHROPIC_API_KEY`），条目写入 `apiKeyEnv`，密钥不落盘。
-- `nctrn setup` 要求 stdin/stdout 为 TTY，否则以退出码 2 退出并提示手写配置的方式（README）。
+- 系统凭据后端不可用时（第 3 节），跳过保存密钥这一步，直接进入环境变量方式；选择"改用环境变量"时询问变量名（默认按预设 `defaultKeyEnv`），条目写入 `apiKeyEnv`，密钥不落盘。
 
-会话内的 `/provider`：
+### 逐行 CLI
+
+`nctrn setup --cli` 与行式 REPL 的 `/provider add` 走逐行向导（步骤同上，无服务商页）：预设按编号选择（自定义预设才问名称与地址）、密钥不回显、模型列表只获取不选择。配置完第一个服务商后提示"用 /model 选择模型"。`nctrn setup` 在非 TTY 环境以退出码 2 退出并提示手写配置的方式（README）。
+
+### 会话内的 `/provider`
 
 | 命令 | 行为 |
 |---|---|
-| `/provider` | 列出全部服务商：名称、类型、服务地址（只显示主机名）、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），以及当前会话使用的是哪一个。TUI 中不带参数的 `/provider` 改为打开全屏模型选择页（焦点在左栏服务商一侧），见 [tui.md](../apps/tui.md) 第 7 节 |
-| `/provider add` | 运行与 `nctrn setup` 相同的向导；完成后询问"切换当前会话到该模型？[Y/n]"，确认即调用 `session.setModel` |
-| `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成 |
-| `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置；不覆盖 `thinking.levels` 的用户声明 |
-| `/provider thinking <name>` | 对已配置的服务商重走向导的思考声明步骤（y/N + 档位勾选），写入 `thinking.levels` 并标注 `source: "user"`；CLI 与 TUI 效果一致（ADR-0018 第 6 节） |
-| `/provider remove <name>` | 删除向导写入的条目及其凭据；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改 |
+| `/provider` | CLI 列出全部服务商：名称、类型、服务地址（只显示主机名）、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），以及当前会话使用的是哪一个。TUI 中打开全屏**服务商页**（[tui.md](../apps/tui.md) 第 8 节） |
+| `/provider add` | 逐行向导（CLI）或服务商页内嵌向导（TUI 打开服务商页并选中预设）；保存后提示"用 /model 选择模型" |
+| `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成；等价于服务商页「换密钥」 |
+| `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置；不覆盖 `thinking.levels` 的用户声明；等价于「刷新模型列表」 |
+| `/provider thinking <name>` | 对已配置的服务商重走思考声明步骤（y/N + 档位勾选），写入 `thinking.levels` 并标注 `source: "user"`；等价于「调整思考档位」 |
+| `/provider remove <name>` | 删除向导写入的条目及其凭据；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改；等价于「删除」 |
 
-Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。TUI 用弹层完成同样的步骤：单行输入框、密钥输入框（显示为 `*`）、确认对话框；命令名与效果与 CLI 一致。
+Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。四个子命令与服务商页操作是同一套 Core 编排的快捷方式，命令名与效果在 CLI 与 TUI 一致。
 
-TUI 另有全屏的**模型选择页**（`/model` 与 `/provider` 打开）：左右双栏（范围/服务商 + 搜索与模型列表）、最近使用置顶、上游声明的上下文/价格/能力标记、窄终端降级。完整规格见 [tui.md](../apps/tui.md) 第 7 节。
+TUI 另有全屏的**模型选择页**（`/model` 打开）：左右双栏（范围/服务商 + 搜索与模型列表）、最近使用置顶、上游声明的上下文/价格/能力标记、窄终端降级、左栏 `○` 预设内嵌添加向导。完整规格见 [tui.md](../apps/tui.md) 第 7 节。
 
 ## 2. 向导配置层：`providers.json`
 
@@ -63,7 +65,7 @@ TUI 另有全屏的**模型选择页**（`/model` 与 `/provider` 打开）：�
 ```ts
 interface ProviderSetupFile {
   version: 1;
-  /** 默认模型，"provider/model" 形式；只在向导里选择"设为默认"时写入 */
+  /** 默认模型，"provider/model" 形式；由 /model 页"设为默认"写入（v0.3 起向导不写它） */
   model?: string;
   /** 形状同 config.json 的 providers 元素（ProviderConfig），apiKeyEnv 可省略（第 3 节） */
   providers: ProviderConfig[];
@@ -164,7 +166,7 @@ interface ProviderSetupFile {
 
 ## 6. Core 接口
 
-向导的逻辑（预设、模型列表、文件写入）放在 Core，客户端只负责交互；这样 CLI 与 TUI 共用一份行为，也为将来的 RPC 客户端留好入口。向导全程只发 `GET /models`，不发送任何模型请求。
+向导的逻辑（预设、模型列表、文件写入）放在 Core，客户端只负责交互；这样 CLI 与 TUI 共用一份行为，也为将来的 RPC 客户端留好入口。向导全程只发 `GET /models`，不发送任何模型请求。v0.3 起向导不再选择模型：`runProviderSetupWizard` 只把服务商配上（凭据 + 上游声明 + 可选思考档位），`WizardResult` 只含 `providerId` 与已登记模型数；选择模型与设默认一律走 `/model`。
 
 ```ts
 // @nocturne/core 公开导出
@@ -176,20 +178,25 @@ fetchModels(entry: ProviderConfig, key: string | undefined, signal): Promise<Ups
 
 // RuntimeConfig（config 模块）新增
 credentials: CredentialStore                             // 第 3 节的统一接口；get 结果在进程内缓存
-saveSetupProvider(entry: ProviderConfig, opts: { key?: string; makeDefault?: boolean }): Promise<void>
+saveSetupProvider(entry: ProviderConfig, opts: { key?: string }): Promise<void>
   // key 存在时经 credentials.set 写入系统后端并登记 credentials.json 索引
 setCredential(providerId: string, key: string): Promise<void>
   // 经 credentials.set 完成（缓存随之失效，下一次请求即用新密钥）
 removeSetupProvider(providerId: string): Promise<void>     // 删除条目并经 credentials.delete 删凭据
 describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>
-  // /provider 列表数据：名称、类型、主机名、密钥来源、来源层、模型数；不含密钥。
+  // /provider 与服务商页列表数据：名称、类型、主机名、密钥来源、来源层、模型数；不含密钥。
   // 给 workspaceRoot 时并入该工作区可信项目层的条目
 refreshUpstreamLimits(providerId: string): Promise<void>  // /provider refresh：重新获取并写入 providers.json（不覆盖 thinking.levels 用户声明）
 saveSetupThinking(providerId: string, levels: ReasoningEffortLevel[] | undefined): Promise<void>
   // /provider thinking：写入/清除条目 thinking.levels（levels 存在时标 source:"user"）
-runProviderThinkingWizard(io, config, providerId): Promise<WizardResult>
+runProviderSetupWizard(io, config, deps, opts?): Promise<WizardResult>
+  // 步骤：预设选择（opts.presetId 直达）→（自定义预设才问）名称/地址 → 密钥
+  //   → GET /models →（上游未声明思考能力时）思考档位 → 保存。
+  //   WizardResult = { providerId, modelCount }；modelCount 供客户端显示
+  //   "已保存 X，N 个模型"的结果行。不再询问模型与默认模型（v0.3）。
+runProviderThinkingWizard(io, config, providerId): Promise<void>
   // 重走思考声明步骤（y/N + 档位多选）后经 saveSetupThinking 保存；provider 须为向导条目
-setDefaultModel(model: string): Promise<void>            // 写入 providers.json 的 model 字段
+setDefaultModel(model: string): Promise<void>            // 写入 providers.json 的 model 字段（/model 页"设为默认"）
 recentModels(): ModelRef[]                               // recent-models.json 当前内容（新→旧）
 recordRecentModel(ref: ModelRef): Promise<void>          // Runtime 在 setModel/新建会话时调用
 
@@ -213,7 +220,7 @@ runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最�
 默认值 < 内置目录 < 上游声明 < 手写配置（config.json / 项目配置的 models）
 ```
 
-- **上游声明**来自服务的模型列表接口，在向导选择模型时、以及 `/provider refresh <name>` 时获取，写入 `providers.json` 对应条目的 `models`，并在条目上记录 `source: "upstream"` 与 `fetchedAt` 获取时间。不在每次启动时请求（避免启动依赖网络）。
+- **上游声明**来自服务的模型列表接口，在向导保存服务商时、以及 `/provider refresh <name>` / 服务商页「刷新模型列表」时获取，写入 `providers.json` 对应条目的 `models`，并在条目上记录 `source: "upstream"` 与 `fetchedAt` 获取时间。不在每次启动时请求（避免启动依赖网络）。
 - 字段映射只读有明确含义的字段：
   - OpenAI 兼容格式：`id` → 模型 id；`name` → `displayName`；`context_length` → `contextWindow`；
   - OpenRouter（同属 OpenAI 兼容形状）：`top_provider.max_completion_tokens` → `maxOutputTokens`（`top_provider.context_length` 优先于顶层 `context_length`）；`pricing`（按 token 计价的 USD 字符串）换算为每百万 token 写入 `pricing.input`/`pricing.output`；`supported_parameters` 含 `reasoning` → `capabilities.reasoning`；`architecture.input_modalities` 含 `image` → `capabilities.imageInput`；

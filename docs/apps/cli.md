@@ -1,6 +1,6 @@
 # CLI（`nctrn`）
 
-> 状态：已接受 v0.3 ｜ 前置阅读：[modules.md](../architecture/modules.md) 第 4 节、[events.md](../protocols/events.md)、[config.md](../architecture/config.md) ｜ 代码位置：`apps/cli/`
+> 状态：已接受 v0.3；v0.3 修订（[ADR-0019](../decisions/ADR-0019-tui-visual-provider-page.md)，提议，待验收）｜ 前置阅读：[modules.md](../architecture/modules.md) 第 4 节、[events.md](../protocols/events.md)、[config.md](../architecture/config.md) ｜ 代码位置：`apps/cli/`
 
 本文是 `nctrn` 命令行客户端的设计文档：命令行参数、REPL、事件渲染、权限确认、退出码与 Provider 配置。
 
@@ -11,14 +11,16 @@
 ## 2. 命令行
 
 ```text
-nctrn                        # 交互模式（REPL）：新建会话
+nctrn                        # 交互模式：TTY 时进入 TUI（v0.3 起），非 TTY 进逐行 REPL
+nctrn --cli                  # 交互模式：逐行 REPL（v0.3 新增）
+nctrn --tui                  # 交互模式：终端界面（兼容参数，等价默认形态）
 nctrn -p "<prompt>"          # 非交互模式：执行一次 Turn 后退出
 nctrn -p                     # 非交互模式：prompt 从 stdin 读取（stdin 非 TTY 时）
 nctrn --continue             # 恢复当前目录最近的会话后进入所选模式
 nctrn --resume <id>          # 恢复指定会话后进入所选模式
 nctrn --sessions             # 列出会话后退出（只读）
 nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trustedWorkspaces 后退出
-nctrn setup                  # 服务商配置向导（v0.2，provider-setup.md）
+nctrn setup                  # 服务商配置向导（TTY 打开服务商页，provider-setup.md）
 ```
 
 | 参数 | 说明 |
@@ -33,12 +35,24 @@ nctrn setup                  # 服务商配置向导（v0.2，provider-setup.md�
 | `--api-type <type>` | `openai-compatible`（默认）或 `anthropic`，覆盖 `NOCTURNE_API_TYPE` |
 | `--base-url <url>` | Provider 端点，覆盖 `NOCTURNE_BASE_URL`；`anthropic` 类型省略时用官方端点 |
 | `--api-key-env <NAME>` | 读取凭据的环境变量名。默认：`anthropic` → `ANTHROPIC_API_KEY`，其余 → `NOCTURNE_API_KEY` |
-| `--tui` | 以终端界面（TUI）启动交互模式（[apps/tui.md](tui.md)）；与 `-p`/`--print` 互斥（退出码 2）；stdin/stdout 非 TTY 时报错退出 2 |
+| `--cli` | 以逐行 REPL 启动交互模式（v0.3）；与 `--tui` 互斥（用法错误，退出码 2） |
+| `--tui` | 以终端界面（TUI）启动交互模式（[apps/tui.md](tui.md)）；与 `-p`/`--print`/`--cli`/`--sessions` 互斥（退出码 2）；显式给出且 stdin/stdout 非 TTY 时报错退出 2 |
 | `-y, --yes` | 把需要确认的操作按"允许一次"自动批准（第 6 节）；对两类模式都生效 |
 | `--debug` | 启用诊断日志（JSONL；[observability.md](../architecture/observability.md)），等价 `NOCTURNE_DEBUG=1` |
 | `--debug-file <path>` | 诊断输出文件；`-` 表示 stderr。缺省写 `<NOCTURNE_HOME>/logs/debug-<时间戳>-<pid>.jsonl` |
 | `-h, --help` | 打印用法后退出（退出码 0） |
 | `-v, --version` | 打印版本后退出（退出码 0） |
+
+**交互模式选择**（v0.3，ADR-0019）：
+
+| 条件 | 模式 |
+|---|---|
+| stdin 与 stdout 均为 TTY | 默认 TUI；`--cli` 选逐行 REPL；`--tui` 显式选 TUI（与默认等价） |
+| stdin 或 stdout 非 TTY | 自动逐行 REPL（不因默认选择 TUI 报错）；显式 `--tui` 报错退出 2 |
+| `-p/--print` | 非交互模式，与界面参数互斥，行为不变 |
+
+- `-c`/`--resume` 等恢复参数按同一规则选择模式；`--sessions`、`trust`/`untrust` 是只读命令，不参与模式选择。
+- 没有任何已配置服务商时，TTY 下的交互模式先走首次配置流程（服务商页 → 模型页，[provider-setup.md](../architecture/provider-setup.md) 第 1 节），选完模型才创建会话；有服务商但没有可解析默认模型时直接进入模型选择页。`-c`/`--resume` 的恢复失败语义不变。
 
 规则：
 
@@ -52,7 +66,7 @@ nctrn setup                  # 服务商配置向导（v0.2，provider-setup.md�
 - 启动时校验配置：缺 `baseURL`（openai-compatible）、缺凭据、缺模型 id，都打印缺失项并以退出码 2 退出，两种模式一致；stdin/stdout 均为交互终端时提示可运行 `nctrn setup`——完全没有任何服务商来源（无 `providers.json` 条目、无 `config.json` providers、无环境变量/命令行合成）时该提示置首，环境变量与手写说明退为次要；非 TTY 输出不变，不含向导提示。
 - 未知参数、参数缺值：打印用法并以退出码 2 退出。
 - `trust` / `untrust` 子命令原子写 `<NOCTURNE_HOME>/trust.json`（[config.md](../architecture/config.md) 第 3 节），打印结果后以退出码 0 退出；程序不改写手写的 `config.json`。
-- `setup` 子命令（v0.2）要求 stdin 与 stdout 都是 TTY，否则以退出码 2 退出并提示手写配置方式；密钥输入不回显，**不存在**把密钥放在命令行参数上的形式（provider-setup.md 第 1、8 节）。
+- `setup` 子命令：TTY 下打开服务商页（第 1 步），完成后无默认模型时自动进入模型选择页（第 2 步），流程结束即退出；`setup --cli` 走逐行向导（v0.3 起向导不再包含选模型步骤，配置完第一个服务商后提示"用 /model 选择模型"）；非 TTY 以退出码 2 退出并提示手写配置方式。密钥输入不回显，**不存在**把密钥放在命令行参数上的形式（provider-setup.md 第 1、8 节）。
 
 ## 3. 交互模式（REPL）
 
@@ -82,7 +96,7 @@ nctrn setup                  # 服务商配置向导（v0.2，provider-setup.md�
 | `/resume` | 列出会话（编号、id、创建时间、绑定目录、模型、锁状态），输入编号切换，空行取消 | `runtime.listSessions()` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
-| `/provider` | 列出服务商：名称、类型、服务地址主机名、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），标记当前会话所用，不显示密钥；`/provider add` / `key <name>` / `refresh <name>` / `thinking <name>` / `remove <name>` 见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节（v0.2） | `describeProviders()`、`saveSetupProvider` 等 + `runtime.updateProviders` |
+| `/provider` | 列出服务商：名称、类型、服务地址主机名、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），标记当前会话所用，不显示密钥；TUI 中打开全屏服务商页（[tui.md](tui.md) 第 8 节）。`/provider add` 走与 `nctrn setup --cli` 相同的逐行向导（v0.3 起不再询问模型，保存后提示用 `/model`）；`key <name>` / `refresh <name>` / `thinking <name>` / `remove <name>` 是服务商页四个操作的快捷方式，见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveSetupProvider` 等 + `runtime.updateProviders` |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
 
 - 未知命令打印提示（不报错退出）。命令在 Turn 进行中给出"会话忙"提示（`setModel` / `compact` 的前置条件是空闲，见 events.md 第 7 节）。
@@ -150,7 +164,7 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 | `NOCTURNE_HOME` | — | 数据目录（已有约定，repository-layout.md 第 5 节） |
 | `NOCTURNE_SHELL` | — | shell 工具使用的 shell（tools.md 第 6 节） |
 | `NOCTURNE_CONSOLE_ENCODING` | — | 子进程输出解码的 WHATWG 编码覆盖（tools.md 第 6 节） |
-| `NOCTURNE_ASCII` | — | `nctrn --tui` 时框线/徽标退回 ASCII（[apps/tui.md](tui.md) 第 5 节） |
+| `NOCTURNE_ASCII` | — | TUI 下框线/徽标退回 ASCII（[apps/tui.md](tui.md) 第 5 节） |
 | `NOCTURNE_DEBUG` | `--debug` | 诊断日志开关（[observability.md](../architecture/observability.md)） |
 | `NOCTURNE_DEBUG_FILE` | `--debug-file` | 诊断输出文件；`-` 表示 stderr |
 
@@ -170,7 +184,7 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 - **MCP 装配**：`createRuntime` 时构造 `createMcpConnector(platform)`（`@nocturne/mcp`）注入 `RuntimeOptions.mcp`；`--debug*` 参数映射到 `RuntimeOptions.debug`。TUI 路径（`nctrn --tui`）由 CLI 完成装配后把 `Session` 交给 `runTui`，MCP/Hook/诊断对 TUI 透明。
 - **依赖方向**（dependency-cruiser 固化）：
   - 规则 `no-deep-import-from-outside-core` 的语义收紧为：`apps/` 解析到 `packages/core/src/` 的 import 只允许命中 `index.ts` 或 `protocol/index.ts`——即只有 `@nocturne/core` 包入口与 `@nocturne/core/protocol` 两个入口可用，任何内部路径（包括 `protocol/` 下的散文件）一律禁止。
-  - 根 `depcheck` 脚本扫描范围从 `packages` 扩为 `packages apps`，使上述规则实际生效。客户端之间不互相依赖，唯一例外：`apps/cli` 为 `--tui` 对 `apps/tui` 的惰性 `import()`（[apps/tui.md](tui.md)、ADR-0010），普通路径不加载 TUI 代码。
+  - 根 `depcheck` 脚本扫描范围从 `packages` 扩为 `packages apps`，使上述规则实际生效。客户端之间不互相依赖，唯一例外：`apps/cli` 为 TUI 路径对 `apps/tui` 的惰性 `import()`（[apps/tui.md](tui.md)、ADR-0010），逐行路径不加载 TUI 代码。
   - 解析方式：`tsconfig.base.json` 的 `paths` 把 `@nocturne/core` 映射到 `packages/core/src/index.ts`、`@nocturne/core/*` 到 `packages/core/src/*`，使 depcheck 与 typecheck 在源码层工作；运行期经 pnpm workspace 链接解析到 `dist`。
 - **测试分层**：
   - `apps/cli/test/*.test.ts`：离线单测——参数解析、渲染映射、配置收集、命令分发（注入假会话，不需要 `dist`；vitest 用 `resolve.alias` 把 `@nocturne/core` 指到 core 源码）。
