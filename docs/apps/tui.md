@@ -58,7 +58,7 @@
 | 场景 | CLI（REPL） | TUI |
 |---|---|---|
 | 提交输入 | Enter 提交一行 | Enter 提交输入框内容 |
-| 斜杠命令 | `/help /model /preset /context /compact /resume /mcp /provider /exit /quit`（`/provider` 为 v0.2 提议，[provider-setup.md](../architecture/provider-setup.md) 第 1 节：弹层、单行输入框、`*` 回显的密钥输入框、确认对话框） | 同一集合；`/model` 打开全屏模型选择页（§7），`/resume` 弹出列表选择器（↑↓ + Enter，Esc 取消），`/context` 弹出可滚动报告面板，`/mcp` 弹出服务器状态面板（复用 Panel 组件，Esc/Enter 关闭）。命令名与效果完全一致 |
+| 斜杠命令 | `/help /model /preset /context /compact /resume /mcp /provider /exit /quit`（`/provider` 为 v0.2 新增，[provider-setup.md](../architecture/provider-setup.md) 第 1 节：弹层、单行输入框、`*` 回显的密钥输入框、确认对话框） | 同一集合；`/model` 打开全屏模型选择页（§7），`/resume` 弹出列表选择器（↑↓ + Enter，Esc 取消），`/context` 弹出可滚动报告面板，`/mcp` 弹出服务器状态面板（复用 Panel 组件，Esc/Enter 关闭）。命令名与效果完全一致 |
 | 权限确认 | `a`/`s`/`p`/`d`/`x`，`d <文本>` 带反馈 | 同五键；`d` 先进入反馈行：`Enter` 发送拒绝（内容为空 = 不带反馈，等价裸 `d`），`Esc` 退出反馈行回到五选项 |
 | 中断 | Ctrl+C：Turn 中中断；权限提示中取消；空闲退出 | 同：pendingPermission 时先中断（结算为 cancelled）；busy 时中断 Turn；空闲时退出 |
 | EOF/退出 | Ctrl+D、`/exit` | Ctrl+D（空闲）、`/exit`、`/quit` |

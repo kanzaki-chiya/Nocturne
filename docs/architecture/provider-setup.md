@@ -1,6 +1,6 @@
 # 服务商配置向导与凭据存储
 
-> 状态：提议 v0.1（v0.2 设计）｜ 前置阅读：[config.md](config.md)、[providers.md](providers.md)、[permissions.md](permissions.md) ｜ 决策：[ADR-0015](../decisions/ADR-0015-provider-setup-credentials.md)
+> 状态：已接受 v0.2 ｜ 前置阅读：[config.md](config.md)、[providers.md](providers.md)、[permissions.md](permissions.md) ｜ 决策：[ADR-0015](../decisions/ADR-0015-provider-setup-credentials.md)
 
 v0.1 接入一个模型服务要做三件事：设置持久的用户级环境变量存放密钥、在 `config.json` 里手写一整段 Provider 条目（`id`/`type`/`baseURL`/`apiKeyEnv`/`models`）、自己查清服务地址和模型 id。本文设计的目标是让首次配置和日常切换都能在交互中完成：
 

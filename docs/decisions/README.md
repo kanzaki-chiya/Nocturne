@@ -20,9 +20,9 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0012](ADR-0012-hooks.md) | Hooks：外部命令 + JSON 契约 + 复用项目信任 | 已接受 |
 | [ADR-0013](ADR-0013-subagent.md) | Subagent：注入式 launcher、非交互权限收敛、普通会话日志 | 已接受 |
 | [ADR-0014](ADR-0014-stream-timeout-empty-response.md) | 流式超时与空响应的失败语义 | 已接受 |
-| [ADR-0015](ADR-0015-provider-setup-credentials.md) | 服务商配置向导、机器维护的向导配置层与操作系统凭据后端 | 提议 |
-| [ADR-0016](ADR-0016-model-limits-from-upstream.md) | 模型上下文窗口与最大输出长度以上游声明为准 | 提议 |
-| [ADR-0017](ADR-0017-model-picker-alternate-screen.md) | 模型选择页使用终端备用屏幕 | 提议 |
+| [ADR-0015](ADR-0015-provider-setup-credentials.md) | 服务商配置向导、机器维护的向导配置层与操作系统凭据后端 | 已接受 |
+| [ADR-0016](ADR-0016-model-limits-from-upstream.md) | 模型上下文窗口与最大输出长度以上游声明为准 | 已接受 |
+| [ADR-0017](ADR-0017-model-picker-alternate-screen.md) | 模型选择页使用终端备用屏幕 | 已接受 |
 | [ADR-0018](ADR-0018-reasoning-effort.md) | 思考强度：统一中性档位、按声明决定可用档位、适配器归一化 | 提议 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。

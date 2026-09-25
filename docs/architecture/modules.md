@@ -107,7 +107,7 @@
 
 - **负责**：按层级加载配置（内置默认 < 用户 < 项目 < 环境变量 < 命令行参数）；校验；记录每个配置值的来源；项目配置的信任判定（`trustedWorkspaces`）；按工作区读写项目 Grant 文件；读取 Provider 凭据所需的环境变量。
 - **不负责**：解释配置含义（各模块自己消费自己的配置段）；权限求值（permission 只接收已合并、已标注来源与信任状态的规则与 Grant 集合）。
-- **公开接口**：`loadConfig(platform, { cliArgs })` → `RuntimeConfig`（`base` + `forWorkspace(workspaceRoot)`，见 [config.md](config.md) 第 6 节）。v0.2 提议增补向导写入与凭据读取（`saveSetupProvider`、`setCredential`、`removeSetupProvider`、`describeProviders`、`credentials`），以及 `runtime.updateProviders`，见 [provider-setup.md](provider-setup.md) 第 6 节。
+- **公开接口**：`loadConfig(platform, { cliArgs })` → `RuntimeConfig`（`base` + `forWorkspace(workspaceRoot)`，见 [config.md](config.md) 第 6 节）。v0.2 增补向导写入与凭据读取（`saveSetupProvider`、`setCredential`、`removeSetupProvider`、`describeProviders`、`credentials`），以及 `runtime.updateProviders`，见 [provider-setup.md](provider-setup.md) 第 6 节。
 - **依赖**：protocol、platform。
 - 详见 [config.md](config.md)。
 

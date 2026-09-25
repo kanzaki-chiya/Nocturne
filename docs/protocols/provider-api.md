@@ -29,9 +29,9 @@ interface ModelInfo {
   ref: ModelRef                  // { provider, model }
   displayName?: string
   contextWindow: number          // 输入 + 输出共享的窗口大小
-  maxOutputTokens?: number       // v0.2 提议改为可选：未知表示上游未声明（ADR-0016）
+  maxOutputTokens?: number       // v0.2 改为可选：未知表示上游未声明（ADR-0016）
   capabilities: ModelCapabilities
-  /** v0.2 提议新增：上游声明的按量价格（USD / 每百万 token）。
+  /** v0.2 新增：上游声明的按量价格（USD / 每百万 token）。
       只在上游或配置明确声明时存在；模型选择页依此渲染价格列，
       未声明时界面留空而不是显示估算值（provider-setup.md 第 7 节） */
   pricing?: { input?: number; output?: number }
@@ -65,7 +65,7 @@ interface ModelRequest {
       失败的请求；丢弃在 provider.request 诊断中标注。Subagent 的兜底轮本身不携带
       reasoningEffort，正常路径不触发此规则 */
   toolChoice?: { name: string }
-  /** v0.2 提议改为可选（ADR-0016）：缺省时 openai-compatible 不发送 max_tokens、由上游决定；
+  /** v0.2 改为可选（ADR-0016）：缺省时 openai-compatible 不发送 max_tokens、由上游决定；
       anthropic 协议要求必填，适配器使用兜底值；思考开启时该兜底值须与 thinking.budget_tokens
       协调（抬升 max_tokens 或压低预算，见 ADR-0018 第 3 节） */
   maxOutputTokens?: number

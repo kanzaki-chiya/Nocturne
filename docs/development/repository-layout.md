@@ -88,9 +88,9 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
 <NOCTURNE_HOME>/
 ├── config.json                       用户手写配置（程序从不改写，config.md）
 ├── trust.json                        可信工作区列表（nctrn trust/untrust，原子写）
-├── providers.json                    向导配置（nctrn setup、/provider，原子写；v0.2 提议）
-├── credentials.json                  凭据索引：DPAPI 密文或系统密钥库引用，不含明文（v0.2 提议，provider-setup.md）
-├── recent-models.json                最近使用的模型列表（最多 10 条，原子写；v0.2 提议）
+├── providers.json                    向导配置（nctrn setup、/provider，原子写；v0.2）
+├── credentials.json                  凭据索引：DPAPI 密文或系统密钥库引用，不含明文（v0.2，provider-setup.md）
+├── recent-models.json                最近使用的模型列表（最多 10 条，原子写；v0.2）
 ├── AGENTS.md                         用户级项目指令（可选）
 ├── grants/<workspaceKey>.json        按工作区保存的项目级 Grant（ADR-0008）
 ├── logs/debug-<ts>-<pid>.jsonl       诊断日志（--debug / NOCTURNE_DEBUG，observability.md）
