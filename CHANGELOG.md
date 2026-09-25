@@ -1,5 +1,27 @@
 # 更新日志
 
+## 0.2.0
+
+### 功能
+
+- 新增 `nctrn setup` 首次配置向导：选择服务商预设、输入地址与密钥、自动拉取或手动填写模型，完成后直接进入会话，不再需要手写 `config.json` 与环境变量。
+- 会话内 `/provider` 管理服务商：`add` 添加、`key` 更换密钥、不带参数列出当前配置；运行中即改即生效，不重启会话、Hook 或 MCP 服务器。
+- 新增 CLI `/model` 编号表格与关键词过滤，以及 TUI 全屏模型选择页：双栏浏览、搜索过滤、翻页、仅本会话切换与设为默认，窄终端自动降级。
+- 机器维护的向导配置层 `providers.json` 与 `recent-models.json`，与手写的 `config.json`、环境变量分层合并；手写条目可覆盖同名向导条目。
+- 内置 DeepSeek、OpenRouter、Anthropic 与自定义 OpenAI / Anthropic 兼容预设；上游声明的上下文窗口、最大输出长度与价格自动带入，未声明最大输出时请求不带 `max_tokens`。
+- v0.1 的环境变量配置方式保持不变。
+
+### 权限与安全
+
+- 凭据交给操作系统安全存储：Windows DPAPI、macOS 钥匙串、Linux Secret Service；无可用后端时拒绝保存，不退回明文。
+- `credentials.json` 只存密文或索引；任何权限预设、规则与授权下，读取类工具都无法访问它；`shell` 子进程环境中不携带已解析的凭据变量。
+- `nctrn setup` 与 `/provider` 向导全程不修改 `config.json`。
+
+### 已知限制
+
+- macOS 钥匙串与 Linux Secret Service 后端按相同接口实现，但本轮只在 Windows（DPAPI）上做过真实环境验收。
+- 模型选择页的延迟与吞吐列为后续版本预留，本版不显示。
+
 ## 0.1.0
 
 ### 功能

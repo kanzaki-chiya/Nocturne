@@ -30,7 +30,9 @@ pnpm build
 
 ## 配置
 
-凭据放在环境变量里，不要写进配置文件。用户配置位于 `<NOCTURNE_HOME>/config.json`；项目配置位于仓库的 `.nocturne/config.json`。两者都是严格 JSON。可以先用环境变量连接 OpenAI 兼容服务：
+首次使用直接运行 `nctrn setup`：选择服务商、输入地址与密钥、挑选模型即可开始。密钥交给操作系统安全存储（Windows DPAPI、macOS 钥匙串、Linux Secret Service），不写进任何配置文件；会话内可用 `/provider` 管理服务商、`/model` 查看与切换模型。
+
+也可以沿用环境变量方式连接 OpenAI 兼容服务：
 
 ```powershell
 $env:NOCTURNE_API_KEY = "<你的密钥>"
@@ -38,6 +40,8 @@ $env:NOCTURNE_BASE_URL = "https://<服务地址>/v1"
 $env:NOCTURNE_MODEL = "<模型 ID>"
 nctrn --sessions
 ```
+
+用户配置位于 `<NOCTURNE_HOME>/config.json`；项目配置位于仓库的 `.nocturne/config.json`。两者都是严格 JSON。向导写入独立的 `<NOCTURNE_HOME>/providers.json`，同名手头条目会覆盖向导条目。
 
 下面是一份用户配置示例，展示 Provider、模型、权限预设、MCP、Hooks 和子代理的最小写法。把地址、模型 ID 和 MCP 服务器脚本路径换成实际值；`NOCTURNE_API_KEY` 仍须由环境变量提供。MCP 服务器只在会话打开时启动，Hook 命令会在相应事件发生时执行。
 
