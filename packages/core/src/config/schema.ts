@@ -5,10 +5,15 @@
  */
 import { z } from "zod";
 
+import { REASONING_EFFORT_LEVELS, REASONING_EFFORT_ORDER } from "../protocol/index.js";
 import type { ConfigFile } from "./types.js";
 import { ConfigError } from "./errors.js";
 
 const subjectKindSchema = z.enum(["read", "edit", "shell", "network", "mcp", "subagent"]);
+
+/** 思考档位（ADR-0018）：全部七档（含 off）/ 可用档位（六档，不含 off） */
+const reasoningEffortSchema = z.enum(REASONING_EFFORT_ORDER);
+const reasoningEffortLevelSchema = z.enum(REASONING_EFFORT_LEVELS);
 
 const permissionRuleSchema = z.object({
   kind: z.union([subjectKindSchema, z.literal("*")]).optional(),
@@ -22,7 +27,8 @@ const capabilitiesSchema = z.object({
   toolCalls: z.boolean().optional(),
   parallelToolCalls: z.boolean().optional(),
   reasoning: z.enum(["none", "hidden", "visible"]).optional(),
-  reasoningEffort: z.array(z.string()).optional(),
+  /** 逐模型可用思考档位（ADR-0018）：只接受合法档位名 */
+  reasoningEffort: z.array(reasoningEffortLevelSchema).optional(),
   imageInput: z.boolean().optional(),
   promptCache: z.boolean().optional(),
 });
@@ -53,6 +59,18 @@ export const providerEntrySchema = z
     allowUndeclaredModels: z.boolean().optional(),
     providerOptions: z.record(z.string(), z.unknown()).optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    // 思考兼容开关（ADR-0018）：format 由预设写死；levels 用户声明；
+    // budgets 覆盖 anthropic 档位预算表（正整数 token 数）
+    thinking: z
+      .object({
+        format: z.enum(["openai", "openrouter"]).optional(),
+        levels: z.array(reasoningEffortLevelSchema).optional(),
+        source: z.literal("user").optional(),
+        budgets: z
+          .partialRecord(reasoningEffortLevelSchema, z.number().int().positive())
+          .optional(),
+      })
+      .optional(),
     // 向导/"refresh"写入的上游来源标注（provider-setup.md 第 7 节）
     source: z.literal("upstream").optional(),
     fetchedAt: z.string().optional(),
@@ -100,6 +118,8 @@ const mcpServerEntrySchema = z.object({
 
 const configFileSchema = z.object({
   model: z.string().min(1).optional(),
+  /** 会话默认思考档位（ADR-0018） */
+  reasoningEffort: reasoningEffortSchema.optional(),
   providers: z.array(providerEntrySchema).optional(),
   permissions: z
     .object({

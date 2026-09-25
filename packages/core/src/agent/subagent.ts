@@ -4,9 +4,9 @@
  * 父子关联写在 session.created.parent；取消/超时经共享 AbortSignal
  * 传播；父侧恰好一个 tool.completed 由执行器不变量保证。
  */
-import type { Diagnostics, JsonSchema, Usage } from "../protocol/index.js";
+import type { Diagnostics, JsonSchema, ReasoningEffort, Usage } from "../protocol/index.js";
 import type { InstructionSet, EnvironmentInfo } from "../context/index.js";
-import type { ResolvedModel } from "../provider/index.js";
+import { clampReasoningEffort, type ResolvedModel } from "../provider/index.js";
 import type { Session, SessionState, SessionStore } from "../session/index.js";
 import type { PermissionPolicy } from "../permission/index.js";
 import {
@@ -85,6 +85,8 @@ export interface SubagentDeps {
   /** 启动时刻读取父会话当前模型/预设（setModel/setPermissionPreset 后派生反映最新值） */
   model(): ResolvedModel;
   permissionPreset(): string;
+  /** 父会话当前思考档位（ADR-0018 §4）：子会话继承，受子模型可用档位约束 */
+  reasoningEffort?(): ReasoningEffort | undefined;
   nocturneVersion: string;
   /** 父会话 Turn 配置（maxSteps 被子会话独立上限覆盖） */
   turnConfig: TurnConfig;
@@ -229,13 +231,21 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         depth: deps.depth + 1,
       };
       try {
+        const childModel = deps.model();
+        // 子代理继承父会话档位（ADR-0018 §4）：按子模型可用集合就近降档；
+        // off / 无可用档 → 不写字段（等价 off）
+        const childEffort = clampReasoningEffort(
+          deps.reasoningEffort?.(),
+          childModel.model.capabilities.reasoningEffort,
+        );
         child = await deps.store.create({
           cwd: ctx.cwd,
           workspaceRoot: ctx.workspaceRoot,
-          model: deps.model().model.ref,
+          model: childModel.model.ref,
           permissionPreset: deps.permissionPreset(),
           nocturneVersion: deps.nocturneVersion,
           parent: { sessionId: ctx.sessionId, callId: ctx.callId },
+          ...(childEffort !== undefined ? { reasoningEffort: childEffort } : {}),
         });
 
         // 可选池 = 内置 ∪ 父会话 MCP 快照 ∪ task（子会话自身深度未达上限才可再派生）

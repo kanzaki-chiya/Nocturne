@@ -1,5 +1,6 @@
 /**
- * 状态栏（tui.md §2）：preset | model | status(+retry) | tokens | cwd | sessionId。
+ * 状态栏（tui.md §2）：preset | model | effort? | status(+retry) | tokens | cwd | sessionId。
+ * effort = 思考强度段（ADR-0018）：模型未声明可用档位时不显示。
  * 宽度收缩：<80 隐藏 cwd/sessionId；<40 只留 status | tokens。
  */
 import { Box, Text } from "ink";
@@ -23,10 +24,13 @@ export function StatusBar({
   view,
   sessionId,
   width,
+  effort,
 }: {
   view: SessionView;
   sessionId: string;
   width: number;
+  /** 当前思考强度（模型声明了可用档位时传入）；undefined = 不显示档位段 */
+  effort?: string | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const g = glyphs(env);
@@ -38,18 +42,21 @@ export function StatusBar({
   const model = view.config.model;
   const minimal = width < 40;
   const compact = width < 80;
+  const effortSeg = effort !== undefined ? `思考:${effort}` : "";
   const parts: string[] = minimal
     ? [status, tokens]
     : compact
       ? [
           view.config.permissionPreset ?? "?",
           model !== undefined ? `${model.provider}/${model.model}` : "?",
+          effortSeg,
           status,
           tokens,
         ]
       : [
           view.config.permissionPreset ?? "?",
           model !== undefined ? `${model.provider}/${model.model}` : "?",
+          effortSeg,
           status,
           tokens,
           view.meta?.cwd ?? "",

@@ -7,7 +7,11 @@
 import { z } from "zod";
 
 import type { Platform } from "../platform/index.js";
-import type { ModelRef } from "../protocol/index.js";
+import {
+  normalizeReasoningEffortLevels,
+  type ModelRef,
+  type ReasoningEffortLevel,
+} from "../protocol/index.js";
 import { ConfigError } from "./errors.js";
 import { writeJsonAtomic } from "./files.js";
 import { providerEntrySchema, rejectCredentialKeys } from "./schema.js";
@@ -188,6 +192,46 @@ export async function removeSetupProvider(
     version: SETUP_FILE_VERSION,
     ...(state.file?.model !== undefined ? { model: state.file.model } : {}),
     providers: entries.filter((p) => p.id !== providerId),
+  });
+}
+
+/**
+ * 写入向导条目的服务商级思考档位（/provider thinking；ADR-0018）：
+ * levels 非空 → thinking.levels + source:"user"；undefined → 清除用户
+ * 声明（format 保留，其余字段不动）。条目不在 providers.json 时拒绝。
+ */
+export async function saveSetupThinking(
+  platform: Platform,
+  nocturneHome: string,
+  providerId: string,
+  levels: readonly ReasoningEffortLevel[] | undefined,
+): Promise<void> {
+  const state = await loadProviderSetup(platform, nocturneHome);
+  const entries = state.file?.providers ?? [];
+  const entry = entries.find((p) => p.id === providerId);
+  if (entry === undefined) {
+    throw new ConfigError(
+      "config_invalid",
+      `服务商 "${providerId}" 不是向导写入的条目；手写在 config.json 的条目请编辑对应文件`,
+    );
+  }
+  const normalized = normalizeReasoningEffortLevels(levels);
+  const thinking: NonNullable<ProviderEntryConfig["thinking"]> = { ...(entry.thinking ?? {}) };
+  if (normalized !== undefined && normalized.length > 0) {
+    thinking.levels = normalized;
+    thinking.source = "user";
+  } else {
+    delete thinking.levels;
+    delete thinking.source;
+  }
+  const updated: ProviderEntryConfig = {
+    ...entry,
+    ...(Object.keys(thinking).length > 0 ? { thinking } : { thinking: undefined }),
+  };
+  await writeProviderSetup(platform, nocturneHome, {
+    version: SETUP_FILE_VERSION,
+    ...(state.file?.model !== undefined ? { model: state.file.model } : {}),
+    providers: entries.map((p) => (p.id === providerId ? updated : p)),
   });
 }
 

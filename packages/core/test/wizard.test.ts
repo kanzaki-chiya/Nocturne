@@ -28,19 +28,28 @@ const PRESET: WizardPreset = {
   fetchableModels: true,
 };
 
-/** 脚本化 WizardIo：answers 依次应答 ask/askSecret；print 记入 printed */
-function scriptedIo(answers: string[]): { io: WizardIo; printed: string[] } {
+/**
+ * 脚本化 WizardIo：answers 依次应答 ask/askSecret（string）与
+ * chooseMulti（number[]，选中下标）；print 记入 printed
+ */
+function scriptedIo(answers: (string | number[])[]): { io: WizardIo; printed: string[] } {
   const printed: string[] = [];
   const queue = [...answers];
   const take = (prompt: string): Promise<string> => {
     printed.push(prompt);
     const a = queue.shift();
-    if (a === undefined) return Promise.reject(new WizardAbort());
+    if (a === undefined || Array.isArray(a)) return Promise.reject(new WizardAbort());
+    return Promise.resolve(a);
+  };
+  const takeMulti = (prompt: string): Promise<number[]> => {
+    printed.push(prompt);
+    const a = queue.shift();
+    if (a === undefined || !Array.isArray(a)) return Promise.reject(new WizardAbort());
     return Promise.resolve(a);
   };
   return {
     printed,
-    io: { ask: take, askSecret: take, print: (t) => printed.push(t) },
+    io: { ask: take, askSecret: take, chooseMulti: takeMulti, print: (t) => printed.push(t) },
   };
 }
 
@@ -97,6 +106,7 @@ describe("provider 向导（无连接测试）", () => {
       "", // 名称 [deepseek]
       "sk-test", // API Key（askSecret）
       "1", // 模型选择
+      "n", // 上游未声明思考能力 → 该服务支持思考强度吗？[y/N]
       "", // 设为默认 [Y/n]
     ]);
     const res = await runProviderSetupWizard(io, config, deps, { presetId: "deepseek" });
@@ -114,6 +124,7 @@ describe("provider 向导（无连接测试）", () => {
       "", // 名称
       "sk-bad", // API Key
       "manual-model", // 手动输入模型 id
+      "n", // 思考强度提问（无上游声明）
       "", // 设为默认
     ]);
     await runProviderSetupWizard(io, config, deps, { presetId: "deepseek" });
@@ -136,6 +147,7 @@ describe("provider 向导（无连接测试）", () => {
         "", // 名称
         "", // 凭据环境变量名（backend=none）
         "typed-id", // 手动输入模型 id
+        "n", // 思考强度提问
         "", // 设为默认
       ]);
       await runProviderSetupWizard(io, config, deps, { presetId: "deepseek" });
@@ -144,6 +156,40 @@ describe("provider 向导（无连接测试）", () => {
       vi.unstubAllGlobals();
     }
     expect(saved).toHaveLength(2);
+  });
+
+  it("上游未声明思考能力：勾选档位写入 thinking.levels（source=user）", async () => {
+    stubFetch(() => jsonRes({ data: [{ id: "m1" }] }));
+    const { config, saved } = makeConfig("memory");
+    const { io } = scriptedIo([
+      "", // 名称
+      "sk-test", // API Key
+      "1", // 模型选择
+      "y", // 支持思考强度
+      [0, 2, 5], // 勾选 minimal / medium / max（REASONING_EFFORT_LEVELS 下标）
+      "", // 设为默认
+    ]);
+    await runProviderSetupWizard(io, config, deps, { presetId: "deepseek" });
+    expect(saved[0]?.entry.thinking?.levels).toEqual(["minimal", "medium", "max"]);
+    expect(saved[0]?.entry.thinking?.source).toBe("user");
+  });
+
+  it("上游已声明思考能力：不追问，直接到设为默认", async () => {
+    stubFetch(() =>
+      jsonRes({
+        data: [{ id: "m1", supported_parameters: ["tools", "reasoning"] }],
+      }),
+    );
+    const { config, saved } = makeConfig("memory");
+    const { io, printed } = scriptedIo([
+      "", // 名称
+      "sk-test", // API Key
+      "1", // 模型选择
+      "", // 设为默认（中间不应出现思考强度提问）
+    ]);
+    await runProviderSetupWizard(io, config, deps, { presetId: "deepseek" });
+    expect(printed.some((l) => l.includes("思考强度"))).toBe(false);
+    expect(saved[0]?.entry.thinking?.levels).toBeUndefined();
   });
 
   it("/provider key：保存新密钥后不发任何网络请求", async () => {

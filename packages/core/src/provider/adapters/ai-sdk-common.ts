@@ -121,10 +121,16 @@ export function toAiTools(request: ModelRequest): ToolSet {
 
 /**
  * providerOptions 命名空间内表示"推理/思考已开启"的键。
- * thinking 形如 { type: "enabled" | "disabled" }；reasoning / reasoningEffort
- * 以存在且非禁用值为准。集合是开放的：只处理可识别的键，未知键原样透传。
+ * thinking 形如 { type: "enabled" | "disabled" }；reasoning / reasoningEffort /
+ * reasoning_effort 以存在且非禁用值为准。集合是开放的：只处理可识别的键，
+ * 未知键原样透传。
  */
-const REASONING_OPTION_KEYS = ["thinking", "reasoning", "reasoningEffort"] as const;
+const REASONING_OPTION_KEYS = [
+  "thinking",
+  "reasoning",
+  "reasoningEffort",
+  "reasoning_effort",
+] as const;
 
 function reasoningOptionEnabled(value: unknown): boolean {
   if (value === undefined || value === null || value === false) return false;
@@ -147,11 +153,12 @@ export interface ToolChoicePlan {
 }
 
 /**
- * 决定本轮请求如何携带 toolChoice。规则（provider-api.md 第 3 节）：
- * 思考/推理已开启时，优先把可识别的推理配置从本轮 providerOptions 移除
- * （临时关闭），保留 toolChoice 使强制生效；对无法安全移除的推理声明
- * （保留字段 request.reasoningEffort：Runtime 不赋值，适配器不映射；
- * 手工请求若设置它，则保守地丢弃 toolChoice）则丢弃 toolChoice。
+ * 决定本轮请求如何携带 toolChoice。规则（provider-api.md 第 3 节，ADR-0018 §3）：
+ * - request.reasoningEffort 已设置（归一化档位）：推理确定开启且档位是请求级
+ *   承诺，无法安全关闭 → 丢弃 toolChoice（子代理 finish 兜底轮由 Runtime 侧
+ *   不携带档位来关闭思考，正常路径不触发本分支）。
+ * - providerOptions 中可识别的推理键已开启：把推理配置从本轮 providerOptions
+ *   移除（临时关闭），保留 toolChoice 使强制生效。
  * 两种处置都不会把明知无效的组合发给服务端。
  */
 export function planToolChoice(

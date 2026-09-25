@@ -9,6 +9,7 @@ import {
   listProviderPresets,
   runProviderKeyWizard as coreKeyWizard,
   runProviderSetupWizard as coreSetupWizard,
+  runProviderThinkingWizard as coreThinkingWizard,
   type RuntimeConfig,
   type SetupWizardDeps,
   type WizardIo,
@@ -94,6 +95,25 @@ export function createWizardIo(stdin: Stdin, stdout: NodeJS.WritableStream): Wiz
       if (line === undefined) throw new WizardAbort();
       return line.trim();
     },
+    chooseMulti: async (prompt, options) => {
+      // 逗号分隔编号（provider-setup.md 第 1 节，ADR-0018）；非法输入重问
+      stdout.write(`${prompt}\n`);
+      options.forEach((opt, i) => {
+        stdout.write(`  ${i + 1}) ${opt}\n`);
+      });
+      for (;;) {
+        stdout.write("编号（逗号分隔，如 2,3,4；空 = 不选）：");
+        const line = tty ? await readLineRaw(stdin, true) : await readLineStream(stdin);
+        if (line === undefined) throw new WizardAbort();
+        const trimmed = line.trim();
+        if (trimmed === "") return [];
+        const nums = trimmed.split(/[，,\s]+/).map((s) => Number.parseInt(s, 10));
+        if (nums.every((n) => Number.isInteger(n) && n >= 1 && n <= options.length)) {
+          return [...new Set(nums.map((n) => n - 1))].sort((a, b) => a - b);
+        }
+        stdout.write("! 无效输入：请输入 1-" + String(options.length) + " 之间的编号\n");
+      }
+    },
     print: (text) => {
       stdout.write(`${text}\n`);
     },
@@ -166,5 +186,21 @@ export async function runKeyWizardInSession(
   },
 ): Promise<void> {
   await runProviderKeyWizard(io, ctx.config, ctx.providerId);
+  ctx.updateProviders(await ctx.reloadConfig());
+}
+
+/**
+ * /provider thinking <name> 的会话内流程（ADR-0018）：思考档位向导 → 重载配置。
+ */
+export async function runThinkingWizardInSession(
+  io: WizardIo,
+  ctx: {
+    config: RuntimeConfig;
+    providerId: string;
+    reloadConfig: () => Promise<RuntimeConfig>;
+    updateProviders: (rc: RuntimeConfig) => void;
+  },
+): Promise<void> {
+  await coreThinkingWizard(io, ctx.config, ctx.providerId);
   ctx.updateProviders(await ctx.reloadConfig());
 }

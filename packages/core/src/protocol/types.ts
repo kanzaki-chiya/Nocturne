@@ -9,6 +9,51 @@ export interface ModelRef {
   model: string;
 }
 
+/**
+ * 思考强度的中性档位（ADR-0018；provider-api.md 第 2、3 节）。
+ * `off` 恒可用（不发送任何思考参数），不在模型的"可用档位"声明集合中；
+ * `max` 是通用最高档——openai/openrouter 格式原样发送 "max"，
+ * 只有 anthropic 格式换算为 thinking.budget_tokens（默认 32768）。
+ * 本轮不做 auto 档。
+ */
+export const REASONING_EFFORT_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
+export type ReasoningEffort = "off" | ReasoningEffortLevel;
+
+/** 档位全局顺序（含 off，循环切换与就近降档用） */
+export const REASONING_EFFORT_ORDER: readonly ReasoningEffort[] = [
+  "off",
+  ...REASONING_EFFORT_LEVELS,
+];
+
+const REASONING_EFFORT_LEVEL_SET: ReadonlySet<string> = new Set(REASONING_EFFORT_LEVELS);
+const REASONING_EFFORT_SET: ReadonlySet<string> = new Set(REASONING_EFFORT_ORDER);
+
+export function isReasoningEffortLevel(v: string): v is ReasoningEffortLevel {
+  return REASONING_EFFORT_LEVEL_SET.has(v);
+}
+
+export function isReasoningEffort(v: string): v is ReasoningEffort {
+  return REASONING_EFFORT_SET.has(v);
+}
+
+/** 声明集合归一化：丢弃非法值、去重、按全局档位顺序排序（ADR-0018 第 2 节） */
+export function normalizeReasoningEffortLevels(
+  levels: readonly string[] | undefined,
+): ReasoningEffortLevel[] | undefined {
+  if (levels === undefined) return undefined;
+  const set = new Set(levels.filter(isReasoningEffortLevel));
+  return REASONING_EFFORT_LEVELS.filter((l) => set.has(l));
+}
+
 export type ContentBlock =
   | { type: "text"; text: string }
   | {

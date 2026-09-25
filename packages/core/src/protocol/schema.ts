@@ -60,6 +60,9 @@ const permissionSourceSchema = z.enum([
 
 const finishReasonSchema = z.enum(["stop", "tool_calls", "length", "content_filter", "other"]);
 
+/** ReasoningEffort（types.ts）：七档中性思考档位，ADR-0018 */
+const reasoningEffortSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
 const errorInfoSchema = z.object({ code: z.string(), message: z.string() });
 
 // ── payload schema ─────────────────────────────────────────
@@ -72,11 +75,13 @@ const payloadSchemas = {
     workspaceRoot: z.string(),
     model: modelRefSchema,
     permissionPreset: z.string(),
+    reasoningEffort: reasoningEffortSchema.optional(),
     parent: z.object({ sessionId: z.string(), callId: z.string() }).optional(),
   }),
   "session.config_changed": z.object({
     model: modelRefSchema.optional(),
     permissionPreset: z.string().optional(),
+    reasoningEffort: reasoningEffortSchema.optional(),
   }),
   "turn.started": z.object({ turnIndex: z.number().int() }),
   "message.user": z.object({

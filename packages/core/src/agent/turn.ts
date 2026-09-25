@@ -16,7 +16,7 @@ import {
   runSummaryCall,
   type CompactionPlan,
 } from "../context/index.js";
-import { isProviderError, type ProviderError } from "../provider/index.js";
+import { clampReasoningEffort, isProviderError, type ProviderError } from "../provider/index.js";
 import type {
   ContentBlock,
   FinishReason,
@@ -39,7 +39,11 @@ function isPersistenceFailure(e: unknown): boolean {
  * 这里按 ProviderError.kind 翻译为补救命令。CLI 与 TUI 都渲染
  * turn.completed.error.message，翻译只在这里做一份。
  */
-export function providerFailureHint(e: ProviderError, providerId: string): string {
+export function providerFailureHint(
+  e: ProviderError,
+  providerId: string,
+  sent?: { reasoningEffort?: string | undefined },
+): string {
   switch (e.kind) {
     case "auth":
       return `密钥可能无效：${e.message}（可用 /provider key ${providerId} 更新密钥）`;
@@ -47,6 +51,15 @@ export function providerFailureHint(e: ProviderError, providerId: string): strin
     case "timeout":
       return `服务地址不通：${e.message}（可运行 nctrn setup 检查或更新服务商配置）`;
     case "invalid_request":
+      // ADR-0018 第 5 节：请求带思考参数时的 400 给档位定向提示
+      // （档位声明与实际服务可能不一致——用户声明是声明方的判断）
+      if (sent?.reasoningEffort !== undefined) {
+        return (
+          `该模型可能不支持档位 ${sent.reasoningEffort}：` +
+          `${e.message}（可用 /provider thinking ${providerId} 或配置文件调整；` +
+          `/effort off 关闭思考后再试）`
+        );
+      }
       return `模型 id 或地址路径可能有误：${e.message}（可运行 nctrn setup 检查配置，或用 /model 切换模型）`;
     default:
       return e.message;
@@ -177,6 +190,8 @@ export async function runTurn(
   // context.md 6.5：每类压缩每个 Turn 至多一次（成功或失败均不重复）
   let pruneAttempted = false;
   let summaryAttempted = false;
+  /** 最近一次请求实际携带的思考档位（invalid_request 定向提示用） */
+  let sentEffort: string | undefined;
 
   /**
    * 执行一次 L2 摘要计划：成功写 context.compacted(kind="summary") 并返回 true；
@@ -316,10 +331,23 @@ export async function runTurn(
 
       // 2. 调用模型并消费流（toolChoice 注入点：subagent.md 第 2 节兜底轮）
       const messageId = id("message");
-      const request =
-        deps.toolChoice !== undefined
-          ? { ...built.request, toolChoice: deps.toolChoice }
-          : built.request;
+      // 思考档位（ADR-0018）：会话配置按模型可用集合就近降档后写入请求；
+      // off / 无可用档 → 不携带（适配器 omit）。强制 toolChoice 轮
+      // （子代理 finish 兜底轮）Runtime 不携带档位，整轮关闭思考——
+      // 适配器层 toolChoice+档位共存时丢弃 toolChoice，故此处先行规避。
+      const effort =
+        deps.toolChoice === undefined
+          ? clampReasoningEffort(
+              state.config.reasoningEffort,
+              deps.model.model.capabilities.reasoningEffort,
+            )
+          : undefined;
+      sentEffort = effort;
+      const request = {
+        ...built.request,
+        ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+        ...(deps.toolChoice !== undefined ? { toolChoice: deps.toolChoice } : {}),
+      };
       const outcome = await consumeStream(deps, request, turnId, messageId, nextCallId);
 
       if (outcome.kind === "aborted") {
@@ -379,7 +407,9 @@ export async function runTurn(
                 ? `provider_${e.kind}`
                 : "provider_error",
           message: isProviderError(e)
-            ? providerFailureHint(e, deps.model.model.ref.provider)
+            ? providerFailureHint(e, deps.model.model.ref.provider, {
+                reasoningEffort: sentEffort,
+              })
             : e instanceof Error
               ? e.message
               : String(e),

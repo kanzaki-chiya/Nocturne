@@ -11,6 +11,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { streamText, type JSONValue } from "ai";
 import { abortError, ProviderError } from "../errors.js";
 import { MAX_OUTPUT_FALLBACK } from "../catalog.js";
+import { planAnthropicThinking, withReasoningEfforts } from "../reasoning.js";
 import { resolveModelInfo, type ModelOverride } from "../registry.js";
 import type {
   CredentialResolver,
@@ -18,8 +19,14 @@ import type {
   ModelRequest,
   ModelStreamEvent,
   Provider,
+  ProviderThinkingOptions,
 } from "../types.js";
-import type { Diagnostics } from "../../protocol/index.js";
+import {
+  isReasoningEffortLevel,
+  normalizeReasoningEffortLevels,
+  type Diagnostics,
+  type ReasoningEffortLevel,
+} from "../../protocol/index.js";
 import {
   mapPart,
   planToolChoice,
@@ -53,6 +60,12 @@ export interface AnthropicConfig {
   /** 原样传给适配器（providerOptions.anthropic） */
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
+  /**
+   * 思考兼容开关（ADR-0018）：levels 是服务商级可用档位（用户声明）；
+   * budgets 覆盖档位 → thinking.budget_tokens 的默认预算表。
+   * anthropic 不使用 format（恒走 thinking.budget_tokens）。
+   */
+  thinking?: ProviderThinkingOptions | undefined;
   /** 诊断通道（observability.md）；缺省 no-op */
   diagnostics?: Diagnostics | undefined;
 }
@@ -100,8 +113,19 @@ export function createAnthropicProvider(
     fetch: wrappedFetch,
   });
 
+  // 服务商级档位声明（thinking.levels，用户声明）与预算覆盖表
+  const defaultEfforts = normalizeReasoningEffortLevels(config.thinking?.levels);
+  const budgets: Partial<Record<ReasoningEffortLevel, number>> = {};
+  for (const [k, v] of Object.entries(config.thinking?.budgets ?? {})) {
+    if (isReasoningEffortLevel(k) && typeof v === "number" && Number.isFinite(v) && v > 0) {
+      budgets[k] = v;
+    }
+  }
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
-    resolveModelInfo({ provider: config.id, model: id }, config.models?.[id]),
+    withReasoningEfforts(
+      resolveModelInfo({ provider: config.id, model: id }, config.models?.[id]),
+      defaultEfforts,
+    ),
   );
 
   return {
@@ -109,18 +133,42 @@ export function createAnthropicProvider(
     type: "anthropic",
     strictModels: config.allowUndeclaredModels !== true,
     models: () => modelList,
+    defaultReasoningEfforts: defaultEfforts,
 
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
       if ((await resolveKey()) === undefined) {
         throw missingKeyError();
       }
-      // 合并 providerOptions 后决定 toolChoice：扩展思考开启时 Anthropic 只接受
-      // auto/none，具体 tool_choice 会 400——临时关闭本轮思考让强制生效
-      // （provider-api.md 第 3 节），不发明知无效的组合
-      const mergedOptions: Record<string, unknown> | undefined =
-        config.providerOptions !== undefined || request.providerOptions !== undefined
-          ? { ...(config.providerOptions ?? {}), ...(request.providerOptions ?? {}) }
+      // 归一化档位 → thinking.budget_tokens（ADR-0018 §3）：预算查
+      // thinking.budgets 覆盖表否则默认表；max_tokens 不满足"预算+余量"
+      // 时先抬升（不超过模型声明上限），仍不够则压预算；压到协议下限
+      // 以下本轮不发送 thinking 并记 diagnostics。
+      const thinkingPlan =
+        request.reasoningEffort !== undefined
+          ? planAnthropicThinking(request.reasoningEffort, request.maxOutputTokens, budgets)
           : undefined;
+      if (request.reasoningEffort !== undefined && thinkingPlan === undefined) {
+        config.diagnostics?.record("provider.unsupported_capability", {
+          provider: config.id,
+          capability: "reasoning_effort",
+          resolution: "thinking_omitted",
+          reason: `档位 ${request.reasoningEffort} 的预算在本请求 max_tokens 下压不到协议下限，本轮不发送 thinking`,
+        });
+      }
+      // 合并 providerOptions 后决定 toolChoice：扩展思考开启时 Anthropic 只接受
+      // auto/none，具体 tool_choice 会 400——临时关闭本轮思考（剥离 thinking 键）
+      // 让强制生效（provider-api.md 第 3 节），不发明知无效的组合
+      const merged: Record<string, unknown> = {
+        ...(config.providerOptions ?? {}),
+        ...(request.providerOptions ?? {}),
+      };
+      if (thinkingPlan !== undefined) {
+        merged.thinking = {
+          type: "enabled",
+          budgetTokens: thinkingPlan.budgetTokens,
+        };
+      }
+      const mergedOptions = Object.keys(merged).length > 0 ? merged : undefined;
       const choice = planToolChoice(request, mergedOptions);
       if (choice.note !== undefined) {
         config.diagnostics?.record("provider.unsupported_capability", {
@@ -145,8 +193,15 @@ export function createAnthropicProvider(
         }),
         tools: toAiTools(request),
         // ADR-0016：Messages API 的 max_tokens 必填，未知时只能给兜底值
-        // （8192）——这是协议要求，不代表对上游能力的断言
-        maxOutputTokens: request.maxOutputTokens ?? MAX_OUTPUT_FALLBACK,
+        // （8192）——这是协议要求，不代表对上游能力的断言。
+        // 思考档位生效时取 thinkingPlan 的线上目标值（满足 预算+余量，ADR-0018 §3）。
+        // 注意 SDK 语义：maxOutputTokens 是纯输出余量，思考开启时线上
+        // max_tokens = maxOutputTokens + budgetTokens——因此传 目标值-预算，
+        // 使线上 max_tokens 恰好等于 thinkingPlan.maxTokens。
+        maxOutputTokens:
+          thinkingPlan !== undefined
+            ? thinkingPlan.maxTokens - thinkingPlan.budgetTokens
+            : (request.maxOutputTokens ?? MAX_OUTPUT_FALLBACK),
         // 重试由 Agent Loop 决定（providers.md 第 5 节）；SDK 层一律不重试
         maxRetries: 0,
         streamRetries: 0,

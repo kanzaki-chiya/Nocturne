@@ -28,6 +28,8 @@ export interface CommandDeps {
   runAddWizard?: (() => Promise<void>) | undefined;
   /** /provider key <name>：同上密钥向导 */
   runKeyWizard?: ((providerId: string) => Promise<void>) | undefined;
+  /** /provider thinking <name>：同上思考档位向导（ADR-0018） */
+  runThinkingWizard?: ((providerId: string) => Promise<void>) | undefined;
 }
 
 export type CommandOutcome = "handled" | "exit" | "unknown";
@@ -37,9 +39,12 @@ const SLASH_HELP = `斜杠命令：
   /model             列出可用模型（编号表格）
   /model <关键词>    按关键词过滤模型列表
   /model <id>        会话内切换模型
+  /effort            显示当前思考强度与可用档位
+  /effort <档位>     切换会话思考强度（off | minimal | low | medium | high | xhigh | max）
   /provider          列出服务商（类型、地址、密钥来源、来源层）
   /provider add      运行服务商配置向导（同 nctrn setup）
   /provider key <名> 更新该服务商的密钥
+  /provider thinking <名> 调整该服务商的思考档位声明
   /provider refresh <名> 重新获取上游模型列表与限额
   /provider remove <名> 删除向导写入的服务商
   /preset            显示当前权限预设
@@ -254,6 +259,18 @@ export async function runSlashCommand(
           }
           return "handled";
         }
+        case "thinking": {
+          if (deps.runThinkingWizard === undefined) {
+            io.print("! /provider thinking 需要交互式终端");
+            return "handled";
+          }
+          try {
+            await deps.runThinkingWizard(name);
+          } catch (e) {
+            io.print(`! ${errorText(e)}`);
+          }
+          return "handled";
+        }
         case "refresh": {
           try {
             await config.refreshUpstreamLimits(name);
@@ -282,6 +299,24 @@ export async function runSlashCommand(
           io.print(`未知 /provider 子命令 ${sub}；/help 列出用法`);
           return "handled";
       }
+    }
+    case "/effort": {
+      const info = session.reasoningEffortInfo();
+      if (rest.length === 0) {
+        if (info.available.length === 0) {
+          io.print(`当前思考强度：${info.current}（该模型未声明可用档位）`);
+        } else {
+          io.print(`当前思考强度：${info.current}\n可用档位：off | ${info.available.join(" | ")}`);
+        }
+        return "handled";
+      }
+      try {
+        await session.setReasoningEffort(rest.join(" "));
+        // session.config_changed 事件渲染确认行
+      } catch (e) {
+        io.print(`! ${errorText(e)}`);
+      }
+      return "handled";
     }
     case "/preset": {
       const current = session.state().config.permissionPreset;

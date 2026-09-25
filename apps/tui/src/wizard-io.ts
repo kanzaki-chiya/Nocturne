@@ -11,6 +11,7 @@ import {
   listProviderPresets,
   runProviderKeyWizard,
   runProviderSetupWizard,
+  runProviderThinkingWizard,
   WizardAbort,
   type RuntimeConfig,
   type SetupWizardDeps,
@@ -21,6 +22,8 @@ import {
 export interface WizardPrompt {
   text: string;
   secret: boolean;
+  /** 多选模式（ADR-0018 思考档位勾选）：渲染 checkbox 列表 */
+  multi?: { options: string[] } | undefined;
 }
 
 export interface WizardState {
@@ -36,24 +39,28 @@ export interface WizardState {
   doneText?: string | undefined;
 }
 
-interface Pending {
-  resolve: (v: string) => void;
-  reject: (e: unknown) => void;
-}
+type Pending =
+  | { kind: "text"; resolve: (v: string) => void; reject: (e: unknown) => void }
+  | { kind: "multi"; resolve: (v: number[]) => void; reject: (e: unknown) => void };
 
 export type WizardOutcome =
   | { kind: "added"; providerId: string; model?: string | undefined }
   | { kind: "key-updated"; providerId: string }
+  | { kind: "thinking-updated"; providerId: string }
   | { kind: "cancel" }
   | { kind: "error"; message: string };
 
 export type WizardStart =
-  { kind: "add"; presetId?: string | undefined } | { kind: "key"; providerId: string };
+  | { kind: "add"; presetId?: string | undefined }
+  | { kind: "key"; providerId: string }
+  | { kind: "thinking"; providerId: string };
 
 export interface ProviderWizard {
   state: WizardState;
   /** 输入框提交（Enter） */
   submit(value: string): void;
+  /** 多选确认（checkbox 模式 Enter）：提交选中下标 */
+  submitMulti(indices: number[]): void;
   /** 取消（Esc / Ctrl+C 由调用方路由） */
   cancel(): void;
   /** 启动向导；onDone 在收尾时回调（重载配置/刷新列表由调用方做） */
@@ -89,13 +96,18 @@ export function useProviderWizard(
   const io: WizardIo = {
     ask: (prompt) =>
       new Promise<string>((resolve, reject) => {
-        pendingRef.current = { resolve, reject };
+        pendingRef.current = { kind: "text", resolve, reject };
         settle({ prompt: { text: prompt, secret: false } });
       }),
     askSecret: (prompt) =>
       new Promise<string>((resolve, reject) => {
-        pendingRef.current = { resolve, reject };
+        pendingRef.current = { kind: "text", resolve, reject };
         settle({ prompt: { text: prompt, secret: true } });
+      }),
+    chooseMulti: (prompt, options) =>
+      new Promise<number[]>((resolve, reject) => {
+        pendingRef.current = { kind: "multi", resolve, reject };
+        settle({ prompt: { text: prompt, secret: false, multi: { options: [...options] } } });
       }),
     print: (text) => {
       setState((s) => ({ ...s, logs: [...s.logs, ...text.split("\n")] }));
@@ -107,10 +119,21 @@ export function useProviderWizard(
   const submit = useCallback(
     (value: string) => {
       const p = pendingRef.current;
-      if (p === undefined) return;
+      if (p?.kind !== "text") return;
       pendingRef.current = undefined;
       settle({ prompt: undefined });
       p.resolve(value);
+    },
+    [settle],
+  );
+
+  const submitMulti = useCallback(
+    (indices: number[]) => {
+      const p = pendingRef.current;
+      if (p?.kind !== "multi") return;
+      pendingRef.current = undefined;
+      settle({ prompt: undefined });
+      p.resolve(indices);
     },
     [settle],
   );
@@ -141,10 +164,15 @@ export function useProviderWizard(
               providerId: r.providerId,
               model: r.model,
             }))
-          : runProviderKeyWizard(io, cfg, s.providerId).then((): WizardOutcome => ({
-              kind: "key-updated",
-              providerId: s.providerId,
-            }));
+          : s.kind === "key"
+            ? runProviderKeyWizard(io, cfg, s.providerId).then((): WizardOutcome => ({
+                kind: "key-updated",
+                providerId: s.providerId,
+              }))
+            : runProviderThinkingWizard(io, cfg, s.providerId).then((): WizardOutcome => ({
+                kind: "thinking-updated",
+                providerId: s.providerId,
+              }));
       run
         .then((outcome) => {
           setState((st) => ({
@@ -157,7 +185,9 @@ export function useProviderWizard(
                 ? `已保存 ${outcome.providerId}${outcome.model !== undefined ? `（默认 ${outcome.model}）` : ""}`
                 : outcome.kind === "key-updated"
                   ? `已更新 ${outcome.providerId} 的密钥`
-                  : "",
+                  : outcome.kind === "thinking-updated"
+                    ? `已更新 ${outcome.providerId} 的思考档位`
+                    : "",
           }));
           onDone(outcome);
         })
@@ -179,5 +209,5 @@ export function useProviderWizard(
     [io],
   );
 
-  return { state, submit, cancel, start };
+  return { state, submit, submitMulti, cancel, start };
 }

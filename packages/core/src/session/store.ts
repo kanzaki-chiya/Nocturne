@@ -240,6 +240,9 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
           workspaceRoot: input.workspaceRoot,
           model: input.model,
           permissionPreset: input.permissionPreset,
+          ...(input.reasoningEffort !== undefined
+            ? { reasoningEffort: input.reasoningEffort }
+            : {}),
           ...(input.parent !== undefined ? { parent: input.parent } : {}),
         });
         return session;

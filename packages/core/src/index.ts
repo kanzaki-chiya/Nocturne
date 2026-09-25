@@ -30,6 +30,7 @@ import {
 } from "./permission/index.js";
 import { createPlatform, type Platform } from "./platform/index.js";
 import {
+  clampReasoningEffort,
   createAnthropicProvider,
   createOpenAICompatibleProvider,
   createProviderRegistry,
@@ -51,9 +52,12 @@ import type {
   HookPoint,
   ModelRef,
   PermissionReply,
+  ReasoningEffort,
+  ReasoningEffortLevel,
   RuntimeEvent,
   TurnEndReason,
 } from "./protocol/index.js";
+import { isReasoningEffort, REASONING_EFFORT_ORDER } from "./protocol/index.js";
 import {
   createSessionStore,
   SessionError,
@@ -182,6 +186,11 @@ export interface CreateSessionOptions {
   /** "provider/model" 或 ModelRef */
   model: string | ModelRef;
   permissionPreset?: string | undefined;
+  /**
+   * 会话初始思考档位（ADR-0018）；缺省取配置的默认档位
+   * （reasoningEffort 顶层字段），再缺省视为 off
+   */
+  reasoningEffort?: ReasoningEffort | undefined;
 }
 
 export interface SubmitInput {
@@ -215,6 +224,19 @@ export interface RuntimeSession {
    * session.config_changed；未知预设名拒绝 invalid_command。
    */
   setPermissionPreset(name: string): Promise<void>;
+  /**
+   * 切换思考档位（events.md 第 7 节，ADR-0018）：立即写入
+   * session.config_changed，下一次模型请求生效（Turn 进行中允许）。
+   * 档位必须在当前模型声明的可用集合内（off 恒可用），否则
+   * 拒绝 invalid_command。
+   */
+  setReasoningEffort(level: string): Promise<void>;
+  /**
+   * 当前思考档位（TUI 状态栏、CLI /effort 的数据来源）：
+   * current = 生效档位（就近降档后的值）；available = 当前模型
+   * 声明的可用集合（空 = 不可切换；off 恒可用不计入）。
+   */
+  reasoningEffortInfo(): { current: ReasoningEffort; available: ReasoningEffortLevel[] };
   /**
    * 手动压缩（context.md 6.2/6.6）：一次模型调用生成 L2 摘要，
    * 写入 context.compacted(kind="summary")。Turn 进行中拒绝 session_busy，
@@ -293,6 +315,7 @@ function instantiateProvider(
       : {}),
     ...(entry.providerOptions !== undefined ? { providerOptions: entry.providerOptions } : {}),
     ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
+    ...(entry.thinking !== undefined ? { thinking: entry.thinking } : {}),
     ...(diagnostics !== undefined ? { diagnostics } : {}),
   };
   return entry.type === "anthropic"
@@ -673,6 +696,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         });
       }
     };
+    /**
+     * 档位就近降档提示（ADR-0018 第 4 节）：会话记录的档位在目标模型
+     * 的可用集合中不存在时，发送侧按 clamp 生效——这里发出可见警告；
+     * 写入侧不改动（回到旧模型自动恢复原档）。
+     */
+    const warnIfEffortClamped = (m: ModelInfo): void => {
+      const stored = session.state().config.reasoningEffort;
+      if (stored === undefined || stored === "off") return;
+      const clamped = clampReasoningEffort(stored, m.capabilities.reasoningEffort);
+      if (clamped === stored) return;
+      session.emitEphemeral("runtime.warning", {
+        code: "reasoning_effort_clamped",
+        message:
+          clamped === undefined
+            ? `模型 ${m.ref.provider}/${m.ref.model} 没有可用思考档位，本会话思考档位视为 off`
+            : `思考档位 ${stored} 在模型 ${m.ref.provider}/${m.ref.model} 不可用，就近降为 ${clamped}`,
+      });
+    };
     /** 限额未声明（ADR-0016）：会话打开与 setModel 时提示默认值来源与补救方式 */
     const warnIfCapabilitiesDefaulted = (m: ModelInfo): void => {
       const missing: string[] = [];
@@ -690,6 +731,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     try {
       model = resolveSessionModel(session.state().config.model);
       warnIfCapabilitiesDefaulted(model.model);
+      warnIfEffortClamped(model.model);
     } catch (e) {
       // 会话记录的模型无法解析：携带替代模型时先写 config_changed 再开放（sessions.md 4.2）
       if (e instanceof UnknownModelError && resume?.modelOverride !== undefined) {
@@ -736,6 +778,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         environment,
         model: () => model,
         permissionPreset: () => session.state().config.permissionPreset,
+        // 子会话继承父会话的思考档位（ADR-0018 §4；受子模型可用档位约束，
+        // 就近降档在 launcher 内完成）
+        reasoningEffort: () => session.state().config.reasoningEffort,
         nocturneVersion: options.version ?? NOCTURNE_VERSION,
         turnConfig,
         parentFailedSignal: session.failedSignal,
@@ -874,6 +919,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await session.emit("session.config_changed", { model: ref });
         model = resolved;
         warnIfCapabilitiesDefaulted(resolved.model);
+        warnIfEffortClamped(resolved.model);
         // recent-models.json（provider-setup.md 第 6 节）：写入失败不阻塞切换
         void config?.recordRecentModel(ref).catch((e: unknown) => {
           diagnostics.record("config.recent_models_write_failed", {
@@ -895,6 +941,43 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         await session.emit("session.config_changed", { permissionPreset: name });
         policy = buildPolicy(name);
+      },
+      async setReasoningEffort(level) {
+        assertUsable();
+        // ADR-0018：允许 Turn 进行中调用，下一次模型请求生效；
+        // 空闲边界顺手应用 updateProviders 的注册表重建（档位集合随之刷新）
+        await rebuildProviders();
+        const normalized = level.trim().toLowerCase();
+        if (!isReasoningEffort(normalized)) {
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `未知思考档位：${level}（可选：${REASONING_EFFORT_ORDER.join(" | ")}）`,
+          );
+        }
+        if (providersDirty) {
+          // rebuild 后模型条目可能变化：原模型原位重解析（失败则沿用旧解析，
+          // 错误仍由下一次 submit/setModel 的解析路径报告）
+          try {
+            model = resolveSessionModel(session.state().config.model);
+          } catch {
+            // 保留旧解析
+          }
+        }
+        const available = model.model.capabilities.reasoningEffort ?? [];
+        if (normalized !== "off" && !available.includes(normalized)) {
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `模型 ${model.model.ref.provider}/${model.model.ref.model} 未声明档位 ${normalized}` +
+              `（可用：${available.length > 0 ? available.join(" | ") : "无"}；off 恒可用）`,
+          );
+        }
+        await session.emit("session.config_changed", { reasoningEffort: normalized });
+      },
+      reasoningEffortInfo() {
+        const available = model.model.capabilities.reasoningEffort ?? [];
+        const current =
+          clampReasoningEffort(session.state().config.reasoningEffort, available) ?? "off";
+        return { current, available: [...available] };
       },
       async compact() {
         assertUsable();
@@ -1007,12 +1090,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
       // 模型解析在 wrapSession 内进行（会话级注册表含项目层条目）；
       // 失败时关闭已创建的会话，避免遗留打开的日志
+      const initialEffort = opts.reasoningEffort ?? config?.base.reasoningEffort;
+      if (initialEffort !== undefined && !isReasoningEffort(initialEffort)) {
+        throw new RuntimeCommandError(
+          "invalid_command",
+          `未知思考档位：${initialEffort}（可选：${REASONING_EFFORT_ORDER.join(" | ")}）`,
+        );
+      }
       const session = await store.create({
         cwd,
         workspaceRoot,
         model: parseModelRef(opts.model),
         permissionPreset: preset,
         nocturneVersion: options.version ?? NOCTURNE_VERSION,
+        ...(initialEffort !== undefined ? { reasoningEffort: initialEffort } : {}),
       });
       try {
         const wrapped = await wrapSession(session);

@@ -315,6 +315,72 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(lines.join("")).toContain("交互式终端");
   });
 
+  it("/effort 无参数：显示当前档位与可用档位；无可用档位时只显示当前", async () => {
+    const { lines, io } = capture();
+    const session = fakeSession({
+      reasoningEffortInfo: () => ({
+        current: "high",
+        available: ["low", "medium", "high", "xhigh"],
+      }),
+    });
+    await runSlashCommand("/effort", session, fakeRuntime, io);
+    const text = lines.join("");
+    expect(text).toContain("high");
+    expect(text).toContain("off | low | medium | high | xhigh");
+
+    const c2 = capture();
+    const plain = fakeSession({
+      reasoningEffortInfo: () => ({ current: "off", available: [] }),
+    });
+    await runSlashCommand("/effort", plain, fakeRuntime, c2.io);
+    expect(c2.lines.join("")).toContain("未声明可用档位");
+  });
+
+  it("/effort <档位> 调 setReasoningEffort；不可用档位报错为提示", async () => {
+    let called: unknown;
+    const session = fakeSession({
+      reasoningEffortInfo: () => ({ current: "off", available: ["low", "high"] }),
+      setReasoningEffort: async (level) => {
+        called = level;
+      },
+    });
+    const { lines, io } = capture();
+    await runSlashCommand("/effort high", session, fakeRuntime, io);
+    expect(called).toBe("high");
+
+    const failing = fakeSession({
+      reasoningEffortInfo: () => ({ current: "off", available: ["low", "high"] }),
+      setReasoningEffort: async () => {
+        throw new RuntimeCommandError("invalid_command", "该模型不可用档位 xhigh");
+      },
+    });
+    await runSlashCommand("/effort xhigh", failing, fakeRuntime, io);
+    expect(lines.join("")).toContain("invalid_command");
+  });
+
+  it("/provider thinking <name> 调 runThinkingWizard；无向导桥时提示需要交互终端", async () => {
+    const ran: string[] = [];
+    const deps = {
+      provider: {
+        config: {} as never,
+        reloadConfig: async () => ({}) as never,
+        updateProviders: () => undefined,
+      },
+      runThinkingWizard: async (name: string) => {
+        ran.push(name);
+      },
+    };
+    const { io } = capture();
+    await runSlashCommand("/provider thinking p", fakeSession(), fakeRuntime, io, deps);
+    expect(ran).toEqual(["p"]);
+
+    const c2 = capture();
+    await runSlashCommand("/provider thinking p", fakeSession(), fakeRuntime, c2.io, {
+      provider: deps.provider,
+    });
+    expect(c2.lines.join("")).toContain("交互式终端");
+  });
+
   it("/exit → exit；未知命令 → unknown 且不报错退出", async () => {
     const { lines, io } = capture();
     expect(await runSlashCommand("/exit", fakeSession(), fakeRuntime, io)).toBe("exit");

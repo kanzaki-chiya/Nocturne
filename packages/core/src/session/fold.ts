@@ -63,7 +63,11 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           nocturneVersion: p.nocturneVersion,
           ...(p.parent !== undefined ? { parent: p.parent } : {}),
         };
-        config = { model: p.model, permissionPreset: p.permissionPreset };
+        config = {
+          model: p.model,
+          permissionPreset: p.permissionPreset,
+          ...(p.reasoningEffort !== undefined ? { reasoningEffort: p.reasoningEffort } : {}),
+        };
         break;
       }
       case "session.config_changed": {
@@ -71,6 +75,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         config = {
           model: p.model ?? config.model,
           permissionPreset: p.permissionPreset ?? config.permissionPreset,
+          reasoningEffort: p.reasoningEffort ?? config.reasoningEffort,
         };
         break;
       }

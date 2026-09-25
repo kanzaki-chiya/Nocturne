@@ -2,8 +2,9 @@
  * ProviderRegistry：按 ModelRef 解析 Provider + ModelInfo。
  * 模型信息 = 内置目录 ← 用户配置覆盖 ← 保守默认。
  */
-import type { ModelRef } from "../protocol/index.js";
+import { normalizeReasoningEffortLevels, type ModelRef } from "../protocol/index.js";
 import { BUILTIN_MODEL_CATALOG, DEFAULT_MODEL_FALLBACK } from "./catalog.js";
+import { withReasoningEfforts } from "./reasoning.js";
 import type { ModelInfo, Provider, ProviderRegistry, ResolvedModel } from "./types.js";
 
 export class UnknownModelError extends Error {
@@ -33,6 +34,11 @@ export function applyModelOverride(
     capabilities: {
       ...base.capabilities,
       ...override.capabilities,
+      // 声明空间的 reasoningEffort 是任意字符串数组，归一化为合法档位
+      // （保留显式空数组语义 = 明确无档位）
+      ...(override.capabilities?.reasoningEffort !== undefined
+        ? { reasoningEffort: normalizeReasoningEffortLevels(override.capabilities.reasoningEffort) }
+        : {}),
     },
   };
 }
@@ -65,7 +71,10 @@ export function createProviderRegistry(
       }
       const configured = provider.models().find((m) => m.ref.model === ref.model);
       const base = configured ?? resolveModelInfo(ref, undefined);
-      const model = applyModelOverride(base, modelOverrides[ref.provider]?.[ref.model]);
+      const merged = applyModelOverride(base, modelOverrides[ref.provider]?.[ref.model]);
+      // 可用档位声明链（ADR-0018）：清单内模型适配器已解析（幂等）；
+      // 清单外模型在此套用服务商声明 / 能力标记推导
+      const model = withReasoningEfforts(merged, provider.defaultReasoningEfforts);
       return { provider, model };
     },
     providers: () => [...byId.values()],

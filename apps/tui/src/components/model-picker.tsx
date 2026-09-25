@@ -138,6 +138,7 @@ export function ModelPicker({
     | {
         state: WizardState;
         submit: (v: string) => void;
+        submitMulti: (indices: number[]) => void;
         cancel: () => void;
       }
     | undefined;
@@ -336,6 +337,7 @@ export function ModelPicker({
       active={active}
       width={width - (narrow ? 4 : LEFT_W + 4)}
       onSubmit={wizard.submit}
+      onSubmitMulti={wizard.submitMulti}
       onCancel={wizard.cancel}
     />
   ) : (

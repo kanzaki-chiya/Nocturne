@@ -9,7 +9,12 @@ import type { RuntimeEvent } from "@nocturne/core/protocol";
 
 import { runSlashCommand, type CommandDeps } from "./commands.js";
 import { createEventWriter, renderEvent, renderPermissionPrompt } from "./render.js";
-import { createWizardIo, runAddWizardInSession, runKeyWizardInSession } from "./setup.js";
+import {
+  createWizardIo,
+  runAddWizardInSession,
+  runKeyWizardInSession,
+  runThinkingWizardInSession,
+} from "./setup.js";
 import { sessionOpenNotes, type SessionSwitcher } from "./session-switch.js";
 
 export interface ReplIo {
@@ -261,6 +266,17 @@ export async function runRepl(
                   runKeyWizard: (providerId: string) =>
                     startWizard((wio) =>
                       runKeyWizardInSession(wio, {
+                        config: bridge.config,
+                        providerId,
+                        reloadConfig: bridge.reloadConfig,
+                        updateProviders: (rc) => {
+                          runtime.updateProviders(rc);
+                        },
+                      }),
+                    ),
+                  runThinkingWizard: (providerId: string) =>
+                    startWizard((wio) =>
+                      runThinkingWizardInSession(wio, {
                         config: bridge.config,
                         providerId,
                         reloadConfig: bridge.reloadConfig,

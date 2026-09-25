@@ -61,6 +61,7 @@ export function mergeLayers(layers: readonly MergeLayer[]): ResolvedConfig {
 
   for (const { origin, file } of layers) {
     if (file.model !== undefined) out.model = file.model;
+    if (file.reasoningEffort !== undefined) out.reasoningEffort = file.reasoningEffort;
     if (file.permissions?.preset !== undefined) out.permissionPreset = file.permissions.preset;
     for (const rule of file.permissions?.rules ?? []) {
       // setup 层 schema 不含 permissions 段，origin==="setup" 实际到不了这里

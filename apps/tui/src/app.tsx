@@ -128,6 +128,9 @@ export function App({
 
   const busy = view.status !== "idle";
   const pending = view.pendingPermission;
+  // 思考档位段（ADR-0018）：模型声明了可用档位才显示；config_changed 触发重渲染后取新值
+  const effortInfo = session.reasoningEffortInfo();
+  const effort = effortInfo.available.length > 0 ? effortInfo.current : undefined;
   const { prefix, tail } = splitCompletedPrefix(view.entries);
   const prefixRef = useRef(prefix);
   prefixRef.current = prefix;
@@ -167,6 +170,20 @@ export function App({
     },
     [pending, session, pushLine],
   );
+
+  /** 思考强度循环（Shift+Tab）：仅在输入框受理时由全局键路由调用 */
+  const cycleEffort = useCallback(() => {
+    const info = session.reasoningEffortInfo();
+    if (info.available.length === 0) {
+      pushLine("! 该模型未声明可用思考档位（可用 /provider thinking 或配置文件声明）");
+      return;
+    }
+    const cycle = ["off", ...info.available];
+    const next = cycle[(cycle.indexOf(info.current) + 1) % cycle.length] ?? "off";
+    session.setReasoningEffort(next).catch((e: unknown) => {
+      pushLine(`! ${errText(e)}`);
+    });
+  }, [session, pushLine]);
 
   /** 会话切换：冻结旧回放进 Static、换绑 session、新日志重放进 SessionView */
   const doSwitch = useCallback(
@@ -282,6 +299,9 @@ export function App({
           } else if (outcome.kind === "key-updated") {
             provider.updateProviders(await provider.reloadConfig());
             pushLine(`已更新 ${outcome.providerId} 的密钥`);
+          } else if (outcome.kind === "thinking-updated") {
+            provider.updateProviders(await provider.reloadConfig());
+            pushLine(`已更新 ${outcome.providerId} 的思考档位`);
           } else if (outcome.kind === "error") {
             pushLine(`! ${outcome.message}`);
           }
@@ -328,8 +348,15 @@ export function App({
     wizardOverlay !== undefined ||
     providerRemove !== undefined;
 
-  // 全局键：Ctrl+C / Ctrl+D（弹层内的 Esc/Enter 由各弹层组件处理）
+  // 全局键：Ctrl+C / Ctrl+D / Shift+Tab（弹层内的 Esc/Enter/Tab 由各弹层组件处理）
   useInput((ch, key) => {
+    // Shift+Tab（\x1B[Z → tab+shift）：输入框受理时循环思考档位；
+    // 弹层/权限框打开时放行给各自组件（权限框用 Shift+Tab 反向移动焦点）
+    if (key.tab && key.shift) {
+      if (pickerOpen || dialogOpen || pending !== undefined) return;
+      cycleEffort();
+      return;
+    }
     if (key.ctrl && ch === "c") {
       if (pickerOpen) {
         // 先走正常关闭路径回主屏再退出——否则 unmount 把页面帧写进 scrollback（ADR-0017）
@@ -534,13 +561,20 @@ export function App({
         {wizardOverlay !== undefined ? (
           <WizardView
             title={
-              wizardOverlay.kind === "add" ? "添加服务商" : `更新密钥 ${wizardOverlay.providerId}`
+              wizardOverlay.kind === "add"
+                ? "添加服务商"
+                : wizardOverlay.kind === "key"
+                  ? `更新密钥 ${wizardOverlay.providerId}`
+                  : `思考档位 ${wizardOverlay.providerId}`
             }
             state={wizard.state}
             active={overlay === undefined && providerRemove === undefined}
             width={width}
             onSubmit={(v) => {
               wizard.submit(v);
+            }}
+            onSubmitMulti={(indices) => {
+              wizard.submitMulti(indices);
             }}
             onCancel={() => {
               wizard.cancel();
@@ -588,7 +622,7 @@ export function App({
           active={!dialogOpen && pending === undefined}
           disabledReason={composerDisabled}
         />
-        <StatusBar view={view} sessionId={session.id} width={width} />
+        <StatusBar view={view} sessionId={session.id} width={width} effort={effort} />
       </Box>
     </TuiEnvContext.Provider>
   );

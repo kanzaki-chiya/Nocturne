@@ -7,9 +7,11 @@ import { normalizeModelRef, type RuntimeConfig, type RuntimeSession } from "@noc
 
 export type OverlayName = "context" | "help" | "resume";
 
-/** /provider 向导启动形态（add / key） */
+/** /provider 向导启动形态（add / key / thinking） */
 export type ProviderWizardStart =
-  { kind: "add"; presetId?: string | undefined } | { kind: "key"; providerId: string };
+  | { kind: "add"; presetId?: string | undefined }
+  | { kind: "key"; providerId: string }
+  | { kind: "thinking"; providerId: string };
 
 export type SlashResult =
   | { kind: "overlay"; name: OverlayName }
@@ -38,6 +40,7 @@ const HELP_TEXT = `斜杠命令：
   /help          本帮助
   /model         弹出模型列表选择器（↑↓ + Enter，Esc 取消）
   /model <id>    直接切换模型
+  /effort        显示当前思考强度；/effort <档位> 切换
   /preset        显示当前权限预设
   /preset <name> 切换权限预设（read-only | default | auto-edit | full-access）
   /context       上下文组成面板（Esc/Enter 关闭，↑↓ 滚动）
@@ -45,7 +48,7 @@ const HELP_TEXT = `斜杠命令：
   /compact       手动压缩上下文（L2 摘要）
   /resume        弹出会话列表选择器；/resume <id> 直接切换
   /provider      打开模型选择页（焦点在服务商栏）
-  /provider add  添加服务商向导；key <名称> 更新密钥
+  /provider add  添加服务商向导；key <名称> 更新密钥；thinking <名称> 调整思考档位
   /provider refresh <名称> 刷新上游模型；remove <名称> 删除
   /exit, /quit   退出
 快捷键：a/s/p/d/x 权限确认（d 进反馈行，Enter 发送、Esc 返回）；
@@ -81,6 +84,9 @@ export async function runSlash(
         case "key":
           if (name === "") return { kind: "message", text: "用法：/provider key <名称>" };
           return { kind: "provider-wizard", start: { kind: "key", providerId: name } };
+        case "thinking":
+          if (name === "") return { kind: "message", text: "用法：/provider thinking <名称>" };
+          return { kind: "provider-wizard", start: { kind: "thinking", providerId: name } };
         case "refresh": {
           if (name === "") return { kind: "message", text: "用法：/provider refresh <名称>" };
           try {
@@ -97,7 +103,7 @@ export async function runSlash(
         default:
           return {
             kind: "message",
-            text: `未知子命令 ${sub}；可用：add | key <名称> | refresh <名称> | remove <名称>`,
+            text: `未知子命令 ${sub}；可用：add | key <名称> | thinking <名称> | refresh <名称> | remove <名称>`,
           };
       }
     }
@@ -107,6 +113,24 @@ export async function runSlash(
       if (!norm.ok) return { kind: "message", text: `! ${norm.problem}` };
       try {
         await session.setModel(norm.ref);
+        return { kind: "none" };
+      } catch (e) {
+        return { kind: "message", text: `! ${errText(e)}` };
+      }
+    }
+    case "/effort": {
+      const info = session.reasoningEffortInfo();
+      if (arg === "") {
+        if (info.available.length === 0) {
+          return { kind: "message", text: `当前思考强度：${info.current}（该模型未声明可用档位）` };
+        }
+        return {
+          kind: "message",
+          text: `当前思考强度：${info.current}\n可用档位：off | ${info.available.join(" | ")}`,
+        };
+      }
+      try {
+        await session.setReasoningEffort(arg);
         return { kind: "none" };
       } catch (e) {
         return { kind: "message", text: `! ${errText(e)}` };

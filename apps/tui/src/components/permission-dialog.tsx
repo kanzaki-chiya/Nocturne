@@ -1,7 +1,7 @@
 /**
  * 权限对话框（tui.md §3）：pendingPermission 出现时独占交互焦点。
  * 五键 a/s/p/d/x；d 先进反馈行——Enter 发送拒绝（空 = 不带反馈），
- * Esc 退回五选项；Tab 在选项间移动焦点，Enter 激活焦点项。
+ * Esc 退回五选项；Tab/Shift+Tab 在选项间正向/反向移动焦点，Enter 激活焦点项。
  */
 import { Box, Text, useInput } from "ink";
 import { useEffect, useState } from "react";
@@ -110,7 +110,8 @@ export function PermissionDialog({
         return;
       }
       if (key.tab) {
-        setFocus((f) => (f + 1) % opts.length);
+        // Shift+Tab = 反向移动焦点（不切换思考档位；ADR-0018）
+        setFocus((f) => (f + (key.shift ? opts.length - 1 : 1)) % opts.length);
         return;
       }
       if (key.return) {

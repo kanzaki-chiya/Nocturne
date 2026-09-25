@@ -116,6 +116,89 @@ describe("TUI", () => {
     unmount();
   });
 
+  it("权限框里 Shift+Tab（\\x1B[Z）反向移动焦点，不切思考档位", async () => {
+    const pending: PendingPermission = {
+      requestId: "p1",
+      callId: "c1",
+      toolName: "shell",
+      subjects: [{ kind: "shell", target: "rm -rf x" }],
+      reason: "需要确认",
+      options: ["allow_once", "allow_session", "deny_stop"],
+    };
+    const reply = vi.fn();
+    const { stdin, unmount } = render(
+      inEnv(createElement(PermissionDialog, { pending, active: true, onReply: reply, width: 80 })),
+    );
+    await pause();
+    // Shift+Tab：焦点 0 → 末位 deny_stop；Enter 激活 → 拒绝并停止
+    stdin.write("\x1b[Z");
+    await pause();
+    stdin.write("\r");
+    await pause();
+    expect(reply).toHaveBeenCalledWith({ decision: "deny", stop: true });
+    unmount();
+  });
+
+  it("Shift+Tab（\\x1B[Z）循环思考档位：状态栏档位段随之更新", async () => {
+    const runtime = await createRuntime({
+      cwd: tmp("nct-tui-ws-"),
+      sessionsDir: tmp("nct-tui-sd-"),
+      providers: [
+        new FakeProvider({
+          scripts: [],
+          models: [
+            {
+              ref: { provider: "fake", model: "fake-1" },
+              contextWindow: 128_000,
+              maxOutputTokens: 8_192,
+              capabilities: {
+                toolCalls: true,
+                parallelToolCalls: true,
+                reasoning: "visible",
+                imageInput: false,
+                promptCache: false,
+                reasoningEffort: ["low", "high"],
+              },
+            },
+          ],
+        }),
+      ],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await pause(60);
+    // 可用档位 [low, high]：off → low → high → off 循环
+    expect(lastFrame()).toContain("思考:off");
+    stdin.write("\x1b[Z");
+    await pause(80);
+    expect(lastFrame()).toContain("思考:low");
+    stdin.write("\x1b[Z");
+    await pause(80);
+    expect(lastFrame()).toContain("思考:high");
+    stdin.write("\x1b[Z");
+    await pause(80);
+    expect(lastFrame()).toContain("思考:off");
+    unmount();
+    await session.close();
+  });
+
+  it("模型未声明可用档位：状态栏不显示档位段，Shift+Tab 给提示行", async () => {
+    const { session, runtime } = await makeSession(); // fake-model 未声明 reasoningEffort
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await pause(60);
+    expect(lastFrame()).not.toContain("思考:");
+    stdin.write("\x1b[Z");
+    await pause(80);
+    expect(lastFrame()).toContain("未声明可用思考档位");
+    expect(lastFrame()).not.toContain("思考:");
+    unmount();
+    await session.close();
+  });
+
   it("子代理运行中进度按行显示", () => {
     const entry = toolEntry("c1", "running");
     entry.name = "task";

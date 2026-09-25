@@ -20,6 +20,7 @@ import {
   refreshUpstreamLimits,
   removeSetupProvider,
   saveSetupProvider,
+  saveSetupThinking,
   setSetupDefaultModel,
 } from "./setup.js";
 import { readTrustList } from "./trust.js";
@@ -197,6 +198,8 @@ export async function loadConfig(
     credentials,
     saveSetupProvider: (entry, opts) => saveSetupProvider(platform, home, credentials, entry, opts),
     setCredential: (providerId, key) => credentials.set(providerId, key),
+    saveSetupThinking: (providerId, levels) =>
+      saveSetupThinking(platform, home, providerId, levels),
     removeSetupProvider: (providerId) =>
       removeSetupProvider(platform, home, credentials, providerId),
     async describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]> {

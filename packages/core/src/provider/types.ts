@@ -6,6 +6,7 @@ import type {
   ContentBlock,
   FinishReason,
   ModelRef,
+  ReasoningEffortLevel,
   ToolCallRef,
   ToolSpec,
   Usage,
@@ -18,8 +19,12 @@ export interface ModelCapabilities {
   parallelToolCalls: boolean;
   /** 不支持 / 有推理但不返回内容 / 返回推理内容 */
   reasoning: "none" | "hidden" | "visible";
-  /** 支持的推理强度档位，如 ["low","medium","high"] */
-  reasoningEffort?: string[] | undefined;
+  /**
+   * 该模型的可用思考档位（ADR-0018）：resolve 后的已解析集合
+   * （逐模型声明 > 服务商 thinking.levels > reasoning≠"none" 推导全档）。
+   * undefined 或空数组 = 无可用档位；off 恒可用，不在此集合中。
+   */
+  reasoningEffort?: ReasoningEffortLevel[] | undefined;
   imageInput: boolean;
   promptCache: boolean;
 }
@@ -72,8 +77,12 @@ export interface ModelRequest {
   tools: ToolSpec[];
   /** undefined = 模型未声明输出上限：适配器自行处理（ADR-0016） */
   maxOutputTokens?: number | undefined;
-  /** 仅在模型声明支持该档位时设置 */
-  reasoningEffort?: string | undefined;
+  /**
+   * 本会话生效的思考档位（ADR-0018）：仅装档位值；"off" 用缺省表达
+   * （字段不设置 = 请求不携带任何思考参数，disable-mode omit）。
+   * Runtime 只在模型声明支持时赋值。
+   */
+  reasoningEffort?: ReasoningEffortLevel | undefined;
   /** 可缓存前缀的边界提示，适配器自行决定是否使用 */
   cachePrefix?: { systemBlocks: number; messages: number } | undefined;
   /** 来自配置，原样交给适配器，Core 不解释 */
@@ -133,6 +142,11 @@ export interface Provider {
   /** 该 Provider 下可用的模型（内置目录 + 配置合并） */
   models(): ModelInfo[];
   /**
+   * 服务商级可用思考档位（用户声明的 thinking.levels，ADR-0018）：
+   * 逐模型未声明档位时作默认；清单外模型 resolve 走同一声明链。
+   */
+  readonly defaultReasoningEfforts?: readonly ReasoningEffortLevel[] | undefined;
+  /**
    * 发起一次流式请求。成功的流以且仅以一个 finish 结束；
    * 失败抛出 ProviderError；signal 中止时抛出 name === "AbortError" 的错误。
    */
@@ -170,4 +184,27 @@ export interface UpstreamModelInfo {
   capabilities?:
     | { reasoning?: "none" | "hidden" | "visible" | undefined; imageInput?: boolean | undefined }
     | undefined;
+}
+
+/**
+ * Provider 条目上的思考兼容开关（ADR-0018 第 2、3 节；providers.md）。
+ * 由预设自动填写 format，用户不需要选；levels 是"用户声明"来源的服务商级
+ * 档位（/provider thinking 与向导勾选写入）。
+ */
+export interface ProviderThinkingOptions {
+  /**
+   * openai-compatible 的思考参数格式（anthropic 条目忽略）：
+   * "openai" → Chat Completions 的 reasoning_effort（缺省）；
+   * "openrouter" → reasoning: { effort }。
+   */
+  format?: "openai" | "openrouter" | undefined;
+  /** 服务商级可用档位声明（写入时标 source:"user"）；校验后只含合法档位 */
+  levels?: readonly string[] | undefined;
+  /**
+   * levels 的来源标注："user" = 用户在向导里勾选——/provider refresh
+   * 不得覆盖它（refresh 只重写 models 字段，本字段天然不受影响）。
+   */
+  source?: "user" | undefined;
+  /** anthropic 档位 → thinking.budget_tokens 覆盖表；未列档位查默认表 */
+  budgets?: Record<string, number> | undefined;
 }

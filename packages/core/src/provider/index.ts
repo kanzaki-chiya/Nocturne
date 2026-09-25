@@ -3,6 +3,7 @@ export * from "./types.js";
 export * from "./timeout.js";
 export * from "./errors.js";
 export * from "./catalog.js";
+export * from "./reasoning.js";
 export * from "./registry.js";
 export * from "./fake.js";
 export * from "./adapters/openai-compatible.js";

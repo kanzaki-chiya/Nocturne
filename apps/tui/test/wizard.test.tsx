@@ -41,6 +41,7 @@ function makeConfig(backend: "none" | "dpapi") {
     opts: { key?: string; defaultModel?: string } | undefined;
   }[] = [];
   const creds: { providerId: string; key: string }[] = [];
+  const thinking: { providerId: string; levels: unknown }[] = [];
   const config = {
     credentials: { backend: () => backend },
     base: { providers: [] as ProviderEntryConfig[] },
@@ -51,12 +52,16 @@ function makeConfig(backend: "none" | "dpapi") {
       saved.push({ entry, opts });
       return Promise.resolve();
     },
+    saveSetupThinking: (providerId: string, levels: unknown) => {
+      thinking.push({ providerId, levels });
+      return Promise.resolve();
+    },
     setCredential: (providerId: string, key: string) => {
       creds.push({ providerId, key });
       return Promise.resolve();
     },
   } as unknown as RuntimeConfig;
-  return { config: config as RuntimeConfig, saved, creds };
+  return { config: config as RuntimeConfig, saved, creds, thinking };
 }
 
 function makeDeps(overrides?: Partial<SetupWizardDeps>): SetupWizardDeps {
@@ -103,6 +108,7 @@ function Probe({
       active
       width={80}
       onSubmit={w.submit}
+      onSubmitMulti={w.submitMulti}
       onCancel={w.cancel}
     />
   );
@@ -245,6 +251,49 @@ describe("/provider 向导弹层", () => {
     await pause(120);
     expect(onDone).toHaveBeenCalledWith({ kind: "key-updated", providerId: "deepseek" });
     expect(creds).toEqual([{ providerId: "deepseek", key: "new-key-456" }]);
+    unmount();
+  });
+
+  it("/provider thinking：y → 空格勾选多档 → Enter 保存 thinking.levels", async () => {
+    const { config, thinking } = makeConfig("none");
+    const onDone = vi.fn();
+    const { lastFrame, stdin, unmount } = render(
+      inEnv(
+        createElement(Probe, {
+          config,
+          deps: makeDeps(),
+          start: { kind: "thinking", providerId: "deepseek" },
+          onDone,
+        }),
+      ),
+    );
+    await pause();
+    // 先问"支持思考强度吗？[y/N]"
+    expect(lastFrame()).toContain("支持思考强度");
+    await type(stdin, "y");
+    await pause(80);
+    // 多选界面：六个档位 + 勾选提示
+    const f = lastFrame() ?? "";
+    expect(f).toContain("minimal");
+    expect(f).toContain("max");
+    expect(f).toContain("空格勾选");
+    // ↓ → 空格勾选 low；↓ ↓ → 空格勾选 high；Enter 确认
+    stdin.write("\x1b[B");
+    await pause();
+    stdin.write(" ");
+    await pause();
+    expect(lastFrame()).toContain("[x] low");
+    stdin.write("\x1b[B");
+    await pause();
+    stdin.write("\x1b[B");
+    await pause();
+    stdin.write(" ");
+    await pause();
+    expect(lastFrame()).toContain("[x] high");
+    stdin.write("\r");
+    await pause(150);
+    expect(onDone).toHaveBeenCalledWith({ kind: "thinking-updated", providerId: "deepseek" });
+    expect(thinking).toEqual([{ providerId: "deepseek", levels: ["low", "high"] }]);
     unmount();
   });
 

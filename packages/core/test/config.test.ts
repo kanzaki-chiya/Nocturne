@@ -285,3 +285,54 @@ describe("环境变量层", () => {
     expect(rc.base.providers).toHaveLength(0);
   });
 });
+
+describe("思考档位 schema（ADR-0018）", () => {
+  it("顶层 reasoningEffort 合法档位进入合并结果", async () => {
+    await writeJson(path.join(home, "config.json"), { reasoningEffort: "high" });
+    const rc = await load();
+    expect(rc.base.reasoningEffort).toBe("high");
+    await fs.unlink(path.join(home, "config.json"));
+  });
+
+  it("顶层 reasoningEffort 非法值（含 auto）报 config_invalid", async () => {
+    for (const bad of ["auto", "bogus", "MAX"]) {
+      await writeJson(path.join(home, "config.json"), { reasoningEffort: bad });
+      await expect(load()).rejects.toMatchObject({ code: "config_invalid" });
+    }
+    await fs.unlink(path.join(home, "config.json"));
+  });
+
+  it("provider.thinking 接受 levels/format/budgets，非法值被拒", async () => {
+    const entry = {
+      id: "p1",
+      baseURL: "https://e.test",
+      apiKeyEnv: "K",
+      thinking: {
+        format: "openrouter",
+        levels: ["low", "high"],
+        budgets: { low: 2048, max: 40000 },
+      },
+    };
+    await writeJson(path.join(home, "config.json"), { providers: [entry] });
+    const rc = await load();
+    const p = rc.base.providers[0];
+    expect(p?.thinking?.levels).toEqual(["low", "high"]);
+    expect(p?.thinking?.format).toBe("openrouter");
+    expect(p?.thinking?.budgets?.max).toBe(40000);
+    await fs.unlink(path.join(home, "config.json"));
+
+    for (const thinking of [
+      { format: "anthropic" },
+      { levels: ["auto"] },
+      { levels: ["MAX"] },
+      { budgets: { low: 0 } },
+      { budgets: { low: 1.5 } },
+    ]) {
+      await writeJson(path.join(home, "config.json"), {
+        providers: [{ ...entry, thinking }],
+      });
+      await expect(load()).rejects.toMatchObject({ code: "config_invalid" });
+    }
+    await fs.unlink(path.join(home, "config.json"));
+  });
+});

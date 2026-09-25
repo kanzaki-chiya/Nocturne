@@ -55,8 +55,8 @@ providers[].models.<id>.capabilities.reasoningEffort   逐模型声明（手写 
   | budget_tokens | 1024 | 4096 | 8192 | 16384 | 32768 | 32768 |
 
   `off` 时同样不发 `thinking`（omit，不发 `type:"disabled"`）。
-- **max_tokens 调整**（anthropic，协议要求 `max_tokens > budget_tokens`）：发请求前 `wireMax = request.maxOutputTokens ?? 8192`（ADR-0016 兜底值）；要求 `wireMax ≥ 预算 + 1024`（响应余量）。不足时先把 `wireMax` 抬到 `预算 + 1024`、封顶模型声明的最大输出长度（未声明则无封顶）；封顶后仍不足就把预算压到 `wireMax − 1024`，压到低于 1024（Anthropic 下限）时本轮不发送思考参数并记诊断 `provider.unsupported_capability`。
-- **强制 tool_choice 冲突**：思考开启 + 强制 `tool_choice` 的部分服务会 400——沿用既有适配器行为（丢弃 `tool_choice` 并在 `provider.request` 诊断标注）；另外 `TurnDeps.toolChoice` 存在的那一轮（子代理 `finish` 兜底轮）Runtime 不携带 `reasoningEffort`，整轮关闭思考（subagent.md 第 2 节语义不变）。
+- **max_tokens 调整**（anthropic，协议要求 `max_tokens > budget_tokens`）：发请求前 `wireMax = request.maxOutputTokens ?? 8192`（ADR-0016 兜底值）；要求 `wireMax ≥ 预算 + 1024`（响应余量）。不足时先把 `wireMax` 抬到 `预算 + 1024`、封顶模型声明的最大输出长度（未声明则无封顶）；封顶后仍不足就把预算压到 `wireMax − 1024`，压到低于 1024（Anthropic 下限）时本轮不发送思考参数并记诊断 `provider.unsupported_capability`。实现注：`@ai-sdk/anthropic` 的 `maxOutputTokens` 语义是纯输出余量（思考开启时线上 `max_tokens = maxOutputTokens + budget_tokens`），适配器传 `wireMax − 预算` 使线上值恰为 `wireMax`。
+- **强制 tool_choice 冲突**：思考开启 + 强制 `tool_choice` 的部分服务会 400——沿用既有适配器行为（丢弃 `tool_choice` 并记诊断 `provider.unsupported_capability`）；另外 `TurnDeps.toolChoice` 存在的那一轮（子代理 `finish` 兜底轮）Runtime 不携带 `reasoningEffort`，整轮关闭思考（subagent.md 第 2 节语义不变）。
 - `providerOptions` 中的原生推理键仍可直传；与归一化字段同义时（openai 的 `reasoningEffort`、openrouter 的 `reasoning`、anthropic 的 `thinking`）归一化字段胜出。
 
 ### 4. 会话持久化与切换语义
@@ -78,7 +78,7 @@ providers[].models.<id>.capabilities.reasoningEffort   逐模型声明（手写 
 
 ### 7. 400 定向提示
 
-`invalid_request` 且当前有效档位非 `off`、错误文本命中 `reasoning|thinking|effort|budget` 字样时，提示改为"该模型可能不支持档位 \<档\>：\<原始信息\>（可用 `/provider thinking <名>` 或配置文件调整，或用 `/effort` 切换档位）"。这覆盖了"能力字段 400 无针对性提示"已知限制中思考参数的部分（roadmap）。
+`invalid_request` 且本轮请求携带了档位（有效档非 `off`）时，提示改为"该模型可能不支持档位 \<档\>：\<原始信息\>（可用 `/provider thinking <名>` 或配置文件调整；`/effort off` 关闭思考后再试）"。不做错误文本关键词匹配——各服务对思考参数的报错措辞差异太大，"携带档位 + 400"本身就是足够强的信号。这覆盖了"能力字段 400 无针对性提示"已知限制中思考参数的部分（roadmap）。
 
 ### 8. 本阶段不做
 

@@ -13,6 +13,8 @@ import type {
   ModelRef,
   PermissionPresetName,
   PermissionRule,
+  ReasoningEffort,
+  ReasoningEffortLevel,
 } from "../protocol/index.js";
 
 export type { AnnotatedRule };
@@ -28,7 +30,8 @@ export interface ModelOverrideShape {
         toolCalls?: boolean | undefined;
         parallelToolCalls?: boolean | undefined;
         reasoning?: "none" | "hidden" | "visible" | undefined;
-        reasoningEffort?: string[] | undefined;
+        /** 逐模型可用思考档位声明（ADR-0018）；schema 校验只含合法档位 */
+        reasoningEffort?: ReasoningEffortLevel[] | undefined;
         imageInput?: boolean | undefined;
         promptCache?: boolean | undefined;
       }
@@ -58,6 +61,20 @@ export interface ProviderEntryConfig {
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
   /**
+   * 思考兼容开关（ADR-0018；对齐 provider 的 ProviderThinkingOptions）：
+   * format 由预设自动填写（openrouter → reasoning.effort），levels 是
+   * "用户声明"的服务商级可用档位（向导勾选，source:"user"），budgets
+   * 覆盖 anthropic 档位预算表。config 不解释这些字段，装配处透传给适配器。
+   */
+  thinking?:
+    | {
+        format?: "openai" | "openrouter" | undefined;
+        levels?: ReasoningEffortLevel[] | undefined;
+        source?: "user" | undefined;
+        budgets?: Partial<Record<ReasoningEffortLevel, number>> | undefined;
+      }
+    | undefined;
+  /**
    * models 字段的来源标注（provider-setup.md 第 7 节）：向导 /
    * `/provider refresh` 写入上游列表时标记 "upstream" 并记录 fetchedAt。
    * 手写条目不携带这两个字段。
@@ -79,6 +96,8 @@ export interface TurnOverrides {
 /** 各层配置文件共用的 schema（config.md 第 2 节）；程序从不改写这些文件 */
 export interface ConfigFile {
   model?: string | undefined;
+  /** 会话默认思考档位（ADR-0018 第 4 节）：七档中性值之一 */
+  reasoningEffort?: ReasoningEffort | undefined;
   providers?: ProviderEntryConfig[] | undefined;
   permissions?:
     | {
@@ -101,6 +120,8 @@ export interface ConfigFile {
 export interface ResolvedConfig {
   model?: string | undefined;
   permissionPreset?: PermissionPresetName | undefined;
+  /** 会话默认思考档位（ADR-0018）：未配置时 undefined（off 语义） */
+  reasoningEffort?: ReasoningEffort | undefined;
   /** 可信规则序列，按层序排列（后写优先）：user < project < env < cli */
   rules: AnnotatedRule[];
   /**
@@ -256,6 +277,15 @@ export interface RuntimeConfig {
   ): Promise<void>;
   /** 更新密钥（经 credentials.set；缓存失效后下一次请求即用新密钥） */
   setCredential(providerId: string, key: string): Promise<void>;
+  /**
+   * 写入向导条目的服务商级思考档位（/provider thinking；ADR-0018）：
+   * levels 非空时写 thinking.levels 并标 source:"user"；undefined 时
+   * 清除用户声明（保留 format）。条目不在 providers.json 时拒绝。
+   */
+  saveSetupThinking(
+    providerId: string,
+    levels: readonly ReasoningEffortLevel[] | undefined,
+  ): Promise<void>;
   /**
    * 删除向导写入的条目及其凭据。条目不在 providers.json（由更高层
    * 定义或不存在）时抛 ConfigError("config_invalid")，由调用方提示。

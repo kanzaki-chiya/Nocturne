@@ -7,14 +7,16 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { streamText } from "ai";
 import { abortError, ProviderError } from "../errors.js";
 import { resolveModelInfo, type ModelOverride } from "../registry.js";
+import { withReasoningEfforts } from "../reasoning.js";
 import type {
   CredentialResolver,
   ModelInfo,
   ModelRequest,
   ModelStreamEvent,
   Provider,
+  ProviderThinkingOptions,
 } from "../types.js";
-import type { Diagnostics } from "../../protocol/index.js";
+import { normalizeReasoningEffortLevels, type Diagnostics } from "../../protocol/index.js";
 import {
   mapPart,
   planToolChoice,
@@ -48,6 +50,12 @@ export interface OpenAICompatibleConfig {
   /** 原样传给适配器（providerOptions） */
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
+  /**
+   * 思考兼容开关（ADR-0018）：format 决定档位写进请求体的形状
+   * （"openai" → reasoning_effort，缺省；"openrouter" → reasoning.effort）；
+   * levels 是服务商级可用档位（用户声明）。
+   */
+  thinking?: ProviderThinkingOptions | undefined;
   /** 诊断通道（observability.md）；缺省 no-op */
   diagnostics?: Diagnostics | undefined;
 }
@@ -95,9 +103,21 @@ export function createOpenAICompatibleProvider(
     ...(config.headers !== undefined ? { headers: config.headers } : {}),
     fetch: wrappedFetch,
   });
+  // SDK 的 providerOptions 命名空间是 name.split(".")[0] 的驼峰形；
+  // 含连字符/下划线的 id 用原名会触发 SDK 弃用告警，统一写驼峰键
+  const optionsNs = (config.id.split(".")[0] ?? config.id).replace(
+    /[-_]([a-z])/g,
+    (_m, c: string) => c.toUpperCase(),
+  );
 
+  // 服务商级档位声明（thinking.levels，用户声明）；清单内模型逐条套用声明链
+  const defaultEfforts = normalizeReasoningEffortLevels(config.thinking?.levels);
+  const thinkingFormat = config.thinking?.format ?? "openai";
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
-    resolveModelInfo({ provider: config.id, model: id }, config.models?.[id]),
+    withReasoningEfforts(
+      resolveModelInfo({ provider: config.id, model: id }, config.models?.[id]),
+      defaultEfforts,
+    ),
   );
 
   return {
@@ -105,18 +125,34 @@ export function createOpenAICompatibleProvider(
     type: "openai-compatible",
     strictModels: config.allowUndeclaredModels !== true,
     models: () => modelList,
+    defaultReasoningEfforts: defaultEfforts,
 
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
       if ((await resolveKey()) === undefined) {
         throw missingKeyError();
       }
-      // 合并 providerOptions 后决定 toolChoice：部分兼容服务的推理配置与具体
-      // tool_choice 冲突——能安全移除的推理键本轮移除（强制生效），无法安全移除的
-      // （归一化 reasoningEffort）丢弃 toolChoice（provider-api.md 第 3 节）
-      const mergedOptions: Record<string, unknown> | undefined =
-        config.providerOptions !== undefined || request.providerOptions !== undefined
-          ? { ...(config.providerOptions ?? {}), ...(request.providerOptions ?? {}) }
-          : undefined;
+      // 归一化档位写进 providerOptions 命名空间（ADR-0018 §3）：
+      // format "openai" → reasoningEffort: "<level>"（schema 键，SDK 序列化为
+      // reasoning_effort；蛇形 reasoning_effort 会被 SDK 的显式字段覆盖，不能用）；
+      // format "openrouter" → reasoning: { effort: "<level>" }（非 schema 键，
+      // 原样透传进请求体）。"max" 两种格式都原样发送。
+      // 之后与手写推理键走同一条 toolChoice 剥离路径（本轮关闭思考）
+      const merged: Record<string, unknown> = {
+        ...(config.providerOptions ?? {}),
+        ...(request.providerOptions ?? {}),
+      };
+      if (request.reasoningEffort !== undefined) {
+        if (thinkingFormat === "openrouter") {
+          const existing = merged.reasoning;
+          merged.reasoning = {
+            ...(typeof existing === "object" && existing !== null ? existing : {}),
+            effort: request.reasoningEffort,
+          };
+        } else {
+          merged.reasoningEffort = request.reasoningEffort;
+        }
+      }
+      const mergedOptions = Object.keys(merged).length > 0 ? merged : undefined;
       const choice = planToolChoice(request, mergedOptions);
       if (choice.note !== undefined) {
         config.diagnostics?.record("provider.unsupported_capability", {
@@ -146,9 +182,9 @@ export function createOpenAICompatibleProvider(
         streamRetries: 0,
         abortSignal: signal,
         onError: suppressSdkErrorLog,
-        // 配置级 providerOptions 为底，请求级覆盖；命名空间是 config.id（SDK name）
+        // 配置级 providerOptions 为底，请求级覆盖；命名空间是 SDK 首选驼峰键
         ...(providerOptions !== undefined && Object.keys(providerOptions).length > 0
-          ? { providerOptions: { [config.id]: providerOptions as Record<string, JSONValue> } }
+          ? { providerOptions: { [optionsNs]: providerOptions as Record<string, JSONValue> } }
           : {}),
         ...(choice.toolChoice !== undefined ? { toolChoice: choice.toolChoice } : {}),
       });

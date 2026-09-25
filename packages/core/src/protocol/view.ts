@@ -22,6 +22,7 @@ import type {
   PermissionOption,
   PermissionSource,
   PermissionSubject,
+  ReasoningEffort,
   ToolCallRef,
   ToolCallStatus,
   Usage,
@@ -35,7 +36,12 @@ export interface SessionView {
   meta:
     | { cwd: string; workspaceRoot: string; formatVersion: number; nocturneVersion: string }
     | undefined;
-  config: { model: ModelRef | undefined; permissionPreset: string | undefined };
+  config: {
+    model: ModelRef | undefined;
+    permissionPreset: string | undefined;
+    /** 思考档位（ADR-0018）；缺省按 off 处理 */
+    reasoningEffort: ReasoningEffort | undefined;
+  };
   status: RuntimeStatus;
   retry: ProviderRetryPayload | undefined;
   currentTurn: { turnId: string; turnIndex: number } | undefined;
@@ -184,7 +190,7 @@ export function createSessionView(): SessionView {
   return {
     revision: 0,
     meta: undefined,
-    config: { model: undefined, permissionPreset: undefined },
+    config: { model: undefined, permissionPreset: undefined, reasoningEffort: undefined },
     status: "idle",
     retry: undefined,
     currentTurn: undefined,
@@ -230,16 +236,22 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
         formatVersion: p.formatVersion,
         nocturneVersion: p.nocturneVersion,
       };
-      view.config = { model: p.model, permissionPreset: p.permissionPreset };
+      view.config = {
+        model: p.model,
+        permissionPreset: p.permissionPreset,
+        reasoningEffort: p.reasoningEffort,
+      };
       break;
     }
     case "session.config_changed": {
       const p = event.payload;
       if (p.model !== undefined) view.config.model = p.model;
       if (p.permissionPreset !== undefined) view.config.permissionPreset = p.permissionPreset;
+      if (p.reasoningEffort !== undefined) view.config.reasoningEffort = p.reasoningEffort;
       const lines: string[] = [];
       if (p.model !== undefined) lines.push(`模型已切换为 ${p.model.provider}/${p.model.model}`);
       if (p.permissionPreset !== undefined) lines.push(`权限预设已切换为 ${p.permissionPreset}`);
+      if (p.reasoningEffort !== undefined) lines.push(`思考档位已切换为 ${p.reasoningEffort}`);
       pushNotice(view, event.seq, "config", lines.join("\n"), p);
       break;
     }

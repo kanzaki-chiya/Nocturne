@@ -19,6 +19,11 @@ export interface ProviderPreset {
   defaultKeyEnv?: string | undefined;
   /** 模型列表能否经 GET /models 自动获取 */
   fetchableModels: boolean;
+  /**
+   * 该服务商的思考参数格式（ADR-0018）：写入条目的 thinking.format。
+   * "openrouter" → reasoning: { effort }；缺省 → openai（reasoning_effort）。
+   */
+  thinkingFormat?: "openai" | "openrouter" | undefined;
 }
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
@@ -39,6 +44,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     baseURL: "https://openrouter.ai/api/v1",
     defaultKeyEnv: "OPENROUTER_API_KEY",
     fetchableModels: true,
+    thinkingFormat: "openrouter",
   },
   {
     id: "anthropic",

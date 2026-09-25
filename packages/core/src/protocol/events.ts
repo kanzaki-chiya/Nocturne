@@ -10,6 +10,7 @@ import type {
   PermissionOption,
   PermissionSource,
   PermissionSubject,
+  ReasoningEffort,
   ToolCallRef,
   Usage,
 } from "./types.js";
@@ -24,6 +25,8 @@ export interface SessionCreatedPayload {
   workspaceRoot: string;
   model: ModelRef;
   permissionPreset: string;
+  /** 初始思考档位（ADR-0018）；缺省按 off 处理 */
+  reasoningEffort?: ReasoningEffort | undefined;
   /** 子会话的父关联（Phase 6，subagent.md 第 5 节）；仅子会话存在 */
   parent?: { sessionId: string; callId: string } | undefined;
 }
@@ -31,6 +34,8 @@ export interface SessionCreatedPayload {
 export interface SessionConfigChangedPayload {
   model?: ModelRef | undefined;
   permissionPreset?: string | undefined;
+  /** 思考档位切换（ADR-0018）；payload 中存在的键覆盖当前值 */
+  reasoningEffort?: ReasoningEffort | undefined;
 }
 
 export interface TurnStartedPayload {

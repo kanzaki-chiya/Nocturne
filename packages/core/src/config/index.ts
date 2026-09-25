@@ -14,6 +14,7 @@ export {
   refreshUpstreamLimits,
   removeSetupProvider,
   saveSetupProvider,
+  saveSetupThinking,
   setSetupDefaultModel,
   writeProviderSetup,
   type DescribeLayers,
@@ -24,6 +25,7 @@ export {
 export {
   runProviderKeyWizard,
   runProviderSetupWizard,
+  runProviderThinkingWizard,
   WizardAbort,
   type SetupWizardDeps,
   type WizardFetchRequest,

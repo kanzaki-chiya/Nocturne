@@ -8,7 +8,13 @@
  * 与环境变量读取全部由调用方注入；fetchModels 抛出的错误可携带
  * 数字 status（ProviderUpstreamError），401/403 时提示密钥可能无效。
  */
-import type { ModelOverrideShape, RuntimeConfig, UpstreamModelEntry } from "./types.js";
+import { REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from "../protocol/index.js";
+import type {
+  ModelOverrideShape,
+  ProviderEntryConfig,
+  RuntimeConfig,
+  UpstreamModelEntry,
+} from "./types.js";
 
 /** 向导的输入输出抽象：nctrn setup 用真实 TTY；TUI 弹层与测试注入自己的实现 */
 export interface WizardIo {
@@ -16,6 +22,11 @@ export interface WizardIo {
   ask(prompt: string): Promise<string>;
   /** 密钥输入：回显为 *（TTY raw mode / TUI 掩码框）；非 TTY 退化为普通读取 */
   askSecret(prompt: string): Promise<string>;
+  /**
+   * 多选勾选（ADR-0018 思考档位）：返回选中项的下标（有序去重）；
+   * 空数组 = 全部不选。CLI 输入逗号分隔编号，TUI 空格勾选回车确认。
+   */
+  chooseMulti(prompt: string, options: readonly string[]): Promise<number[]>;
   print(text: string): void;
 }
 
@@ -36,6 +47,8 @@ export interface WizardPreset {
   baseURL?: string | undefined;
   defaultKeyEnv?: string | undefined;
   fetchableModels: boolean;
+  /** 思考参数格式（ADR-0018）：写入条目的 thinking.format（openrouter → reasoning.effort） */
+  thinkingFormat?: "openai" | "openrouter" | undefined;
 }
 
 export interface WizardFetchRequest {
@@ -190,6 +203,25 @@ export async function runProviderSetupWizard(
   }
 
   const fullModel = `${providerId}/${modelId}`;
+
+  // 思考档位（ADR-0018 第 2 节）：上游 /models 未声明思考能力时问用户；
+  // 勾选结果写在服务商条目 thinking.levels（source:"user"），作为该
+  // 服务商所有模型的默认档位——逐模型声明仍可覆盖（providers.md 第 3 节）
+  const upstreamDeclaresThinking = upstreamModels.some(
+    (m) => m.capabilities?.reasoning !== undefined && m.capabilities.reasoning !== "none",
+  );
+  let thinkingLevels: ReasoningEffortLevel[] | undefined;
+  if (!upstreamDeclaresThinking) {
+    const yn = await io.ask("该服务支持思考强度吗？[y/N] ");
+    if (/^y(es)?$/i.test(yn.trim())) {
+      const picked = await io.chooseMulti("勾选可用档位：", [...REASONING_EFFORT_LEVELS]);
+      const levels = picked
+        .map((i) => REASONING_EFFORT_LEVELS[i])
+        .filter((l): l is ReasoningEffortLevel => l !== undefined);
+      if (levels.length > 0) thinkingLevels = levels;
+    }
+  }
+
   const setDefault = yesDefault(await io.ask("设为默认模型？[Y/n] "));
 
   // models 字段写入上游声明的能力/价格/限额（provider-setup.md 第 7 节）
@@ -208,6 +240,13 @@ export async function runProviderSetupWizard(
     models[modelId] = {};
   }
 
+  // thinking 兼容开关：format 由预设自动填写（用户不需要选）；
+  // levels 只在用户勾选时写入并标 source:"user"
+  const thinking: ProviderEntryConfig["thinking"] = {
+    ...(preset.thinkingFormat !== undefined ? { format: preset.thinkingFormat } : {}),
+    ...(thinkingLevels !== undefined ? { levels: thinkingLevels, source: "user" as const } : {}),
+  };
+
   await config.saveSetupProvider(
     {
       id: providerId,
@@ -215,6 +254,7 @@ export async function runProviderSetupWizard(
       ...(baseURL !== undefined ? { baseURL } : {}),
       ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
       models,
+      ...(Object.keys(thinking).length > 0 ? { thinking } : {}),
       ...(upstreamModels.length > 0
         ? { source: "upstream" as const, fetchedAt: new Date().toISOString() }
         : {}),
@@ -251,4 +291,29 @@ export async function runProviderKeyWizard(
   }
   await config.setCredential(providerId, key);
   io.print(`密钥已交给 ${backendLabel(backend)} 加密保存`);
+}
+
+/**
+ * /provider thinking <name>（provider-setup.md 第 1 节，ADR-0018）：
+ * 对已配置的服务商重走"思考档位"步骤——问是否支持、多选勾选档位，
+ * 写入 providers.json 条目的 thinking.levels（source:"user"）。
+ * 回答 n 或空勾选 → 清除用户声明（模型级声明与能力标记推导不受影响）。
+ */
+export async function runProviderThinkingWizard(
+  io: WizardIo,
+  config: RuntimeConfig,
+  providerId: string,
+): Promise<void> {
+  const yn = await io.ask(`服务商 ${providerId} 支持思考强度吗？[y/N] `);
+  const yes = /^y(es)?$/i.test(yn.trim());
+  const picked = yes ? await io.chooseMulti("勾选可用档位：", [...REASONING_EFFORT_LEVELS]) : [];
+  const levels = picked
+    .map((i) => REASONING_EFFORT_LEVELS[i])
+    .filter((l): l is ReasoningEffortLevel => l !== undefined);
+  await config.saveSetupThinking(providerId, levels.length > 0 ? levels : undefined);
+  io.print(
+    levels.length > 0
+      ? `已保存 ${providerId} 的思考档位：${levels.join(" / ")}（该服务商所有模型的默认档位）`
+      : `已清除 ${providerId} 的思考档位声明`,
+  );
 }

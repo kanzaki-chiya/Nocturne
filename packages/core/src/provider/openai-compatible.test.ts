@@ -185,3 +185,76 @@ describe("openai-compatible 适配器：toolChoice", () => {
     expect(events.at(-1)).toMatchObject({ type: "finish" });
   });
 });
+
+describe("openai-compatible 适配器：reasoningEffort 映射（ADR-0018 §3）", () => {
+  const noReasoningKeys = (body: Record<string, unknown>) =>
+    Object.keys(body).filter((k) => k === "reasoning_effort" || k === "reasoning");
+
+  it.each(["minimal", "low", "medium", "high", "xhigh", "max"] as const)(
+    "openai 格式：档位 %s 原样写入 reasoning_effort（max 也原样发送）",
+    async (level) => {
+      const capture: { body?: Record<string, unknown> } = {};
+      const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+      await collect(p, request({ reasoningEffort: level }));
+      expect(capture.body?.["reasoning_effort"]).toBe(level);
+    },
+  );
+
+  it("openrouter 格式（thinking.format）：写入 reasoning.effort，不发 reasoning_effort", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(
+      config({ thinking: { format: "openrouter" } }),
+      envWithKey,
+      sseFetch(doneChunk, capture),
+    );
+    await collect(p, request({ reasoningEffort: "max" }));
+    expect(capture.body?.["reasoning"]).toEqual({ effort: "max" });
+    expect(capture.body?.["reasoning_effort"]).toBeUndefined();
+  });
+
+  it("不带档位：请求体不出现任何思考字段", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(p, request());
+    expect(noReasoningKeys(capture.body ?? {})).toEqual([]);
+  });
+
+  it("归一化字段覆盖同名 providerOptions 键（归一化胜出）", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(
+      config({ providerOptions: { reasoning_effort: "minimal", other: "keep" } }),
+      envWithKey,
+      sseFetch(doneChunk, capture),
+    );
+    await collect(p, request({ reasoningEffort: "high" }));
+    expect(capture.body?.["reasoning_effort"]).toBe("high");
+    // 其余 providerOptions 键正常透传
+    expect(capture.body?.["other"]).toBe("keep");
+  });
+
+  it("连字符 provider id：providerOptions 写入驼峰命名空间（SDK 首选键）", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(
+      config({ id: "my-p", providerOptions: { other: "keep" } }),
+      envWithKey,
+      sseFetch(doneChunk, capture),
+    );
+    await collect(p, request({ reasoningEffort: "high" }));
+    expect(capture.body?.["reasoning_effort"]).toBe("high");
+    expect(capture.body?.["other"]).toBe("keep");
+  });
+
+  it("openrouter 格式与既有 reasoning 对象键合并（effort 覆盖，其余保留）", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(
+      config({
+        thinking: { format: "openrouter" },
+        providerOptions: { reasoning: { exclude: true, effort: "low" } },
+      }),
+      envWithKey,
+      sseFetch(doneChunk, capture),
+    );
+    await collect(p, request({ reasoningEffort: "xhigh" }));
+    expect(capture.body?.["reasoning"]).toEqual({ exclude: true, effort: "xhigh" });
+  });
+});

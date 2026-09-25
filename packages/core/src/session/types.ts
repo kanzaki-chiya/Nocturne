@@ -11,6 +11,7 @@ import type {
   EphemeralType,
   HistoryEntry,
   ModelRef,
+  ReasoningEffort,
   RuntimeEvent,
   Usage,
 } from "../protocol/index.js";
@@ -31,6 +32,9 @@ export interface SessionMeta {
 export interface SessionConfig {
   model: ModelRef;
   permissionPreset: string;
+  /** 思考档位（ADR-0018）：记录用户意图，请求组装时按当前模型可用集合就近降档；
+   *  缺省按 off 处理 */
+  reasoningEffort?: ReasoningEffort | undefined;
 }
 
 export interface OpenTurn {
@@ -138,6 +142,8 @@ export interface CreateSessionInput {
   model: ModelRef;
   permissionPreset: string;
   nocturneVersion: string;
+  /** 初始思考档位（ADR-0018）；写入 session.created.reasoningEffort */
+  reasoningEffort?: ReasoningEffort | undefined;
   /** 子会话的父关联（Phase 6）；写入 session.created.parent */
   parent?: { sessionId: string; callId: string } | undefined;
 }

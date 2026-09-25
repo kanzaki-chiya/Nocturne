@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { createAnthropicProvider, type AnthropicConfig } from "./adapters/anthropic.js";
 import { ProviderError } from "./errors.js";
 import type { ModelRequest, ModelStreamEvent } from "./types.js";
+import type { ReasoningEffortLevel } from "../protocol/index.js";
 
 const envWithKey = (name: string) => (name === "TEST_ANTHROPIC_KEY" ? "sk-test" : undefined);
 
@@ -541,9 +542,15 @@ describe("anthropic 适配器", () => {
     expect(capture.body?.["tool_choice"]).toBeUndefined();
     // thinking 保留（丢弃的是 toolChoice 而非用户配置）
     expect(capture.body?.["thinking"]).toEqual({ type: "enabled", budget_tokens: 1024 });
+    // request.maxOutputTokens=1024 容不下 high 预算 → thinking_omitted；
+    // 归一化档位 + toolChoice 另有 dropped_tool_choice 诊断
     expect(
-      records.find((r) => r.kind === "provider.unsupported_capability")?.data["resolution"],
-    ).toBe("dropped_tool_choice");
+      records.some(
+        (r) =>
+          r.kind === "provider.unsupported_capability" &&
+          r.data["resolution"] === "dropped_tool_choice",
+      ),
+    ).toBe(true);
   });
 
   it("providerOptions：仅配置级时同样下发；无选项时不产生多余字段", async () => {
@@ -568,5 +575,103 @@ describe("anthropic 适配器", () => {
     expect(body2["thinking"]).toBeUndefined();
     expect(body2["service_tier"]).toBeUndefined();
     expect(body2["speed"]).toBeUndefined();
+  });
+});
+
+describe("anthropic 适配器：reasoningEffort → thinking.budget_tokens（ADR-0018 §3）", () => {
+  const budgets: [ReasoningEffortLevel, number][] = [
+    ["minimal", 1024],
+    ["low", 4096],
+    ["medium", 8192],
+    ["high", 16384],
+    ["xhigh", 32768],
+    ["max", 32768],
+  ];
+
+  it.each(budgets)(
+    "档位 %s → thinking.budget_tokens=%d（max 也走预算换算）",
+    async (level, budget) => {
+      const capture: { body?: unknown } = {};
+      const p = createAnthropicProvider(
+        config(),
+        envWithKey,
+        sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+      );
+      await collect(p, request({ reasoningEffort: level, maxOutputTokens: 64_000 }));
+      expect((capture.body as Record<string, unknown>)["thinking"]).toEqual({
+        type: "enabled",
+        budget_tokens: budget,
+      });
+      expect((capture.body as Record<string, unknown>)["max_tokens"]).toBe(64_000);
+    },
+  );
+
+  it("thinking.budgets 覆盖表生效", async () => {
+    const capture: { body?: unknown } = {};
+    const p = createAnthropicProvider(
+      config({ thinking: { budgets: { low: 2048 } } }),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    await collect(p, request({ reasoningEffort: "low", maxOutputTokens: 64_000 }));
+    expect((capture.body as Record<string, unknown>)["thinking"]).toEqual({
+      type: "enabled",
+      budget_tokens: 2048,
+    });
+  });
+
+  it("max_tokens 不满足预算+余量：声明上限内先抬升（未声明时用兜底再抬）", async () => {
+    const capture: { body?: unknown } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    // 未声明输出上限 → 兜底 8192 放不下 high(16384)+1024 → 抬到 17408
+    await collect(p, request({ reasoningEffort: "high", maxOutputTokens: undefined }));
+    const body = capture.body as Record<string, unknown>;
+    expect(body["thinking"]).toEqual({ type: "enabled", budget_tokens: 16384 });
+    expect(body["max_tokens"]).toBe(16384 + 1024);
+  });
+
+  it("声明上限太小：预算压到上限-余量；压不到协议下限则不发送 thinking", async () => {
+    const capture: { body?: unknown } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    // 声明 8192：high(16384) 压到 7168
+    await collect(p, request({ reasoningEffort: "high", maxOutputTokens: 8192 }));
+    expect((capture.body as Record<string, unknown>)["thinking"]).toEqual({
+      type: "enabled",
+      budget_tokens: 7168,
+    });
+    expect((capture.body as Record<string, unknown>)["max_tokens"]).toBe(8192);
+
+    // 声明 1024：压不到 1024 下限 → thinking 整段不发送 + 诊断
+    const records: { kind: string; data: Record<string, unknown> }[] = [];
+    const capture2: { body?: unknown } = {};
+    const p2 = createAnthropicProvider(
+      config({ diagnostics: { record: (kind, data) => records.push({ kind, data: data ?? {} }) } }),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture2),
+    );
+    await collect(p2, request({ reasoningEffort: "minimal", maxOutputTokens: 1024 }));
+    expect((capture2.body as Record<string, unknown>)["thinking"]).toBeUndefined();
+    expect(
+      records.find((r) => r.kind === "provider.unsupported_capability")?.data["resolution"],
+    ).toBe("thinking_omitted");
+  });
+
+  it("不带档位：请求体不出现 thinking 字段", async () => {
+    const capture: { body?: unknown } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    await collect(p, request({ maxOutputTokens: 64_000 }));
+    expect((capture.body as Record<string, unknown>)["thinking"]).toBeUndefined();
   });
 });
