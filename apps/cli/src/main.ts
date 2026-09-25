@@ -28,7 +28,7 @@ import { runRepl } from "./repl.js";
 import { createSessionSwitcher, sessionOpenNotes, type SessionHolder } from "./session-switch.js";
 import { createWizardIo, runProviderSetupWizard, WizardAbort } from "./setup.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 async function readStdin(stream: NodeJS.ReadableStream): Promise<string> {
   const chunks: Buffer[] = [];
