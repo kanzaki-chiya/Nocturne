@@ -7,7 +7,7 @@ import { Box, Text, useInput } from "ink";
 import { useEffect, useState } from "react";
 
 import { glyphs, useTuiEnv } from "../env.js";
-import { truncateLine } from "../format.js";
+import { boxSafe, truncateLine } from "../format.js";
 
 import type { PendingPermission, PermissionOption } from "@nocturne/core/protocol";
 import type { PermissionReply } from "@nocturne/core";
@@ -136,16 +136,18 @@ export function PermissionDialog({
       <Text bold color="yellow">
         {g.wait} 需要确认
       </Text>
-      <Text wrap="truncate">{truncateLine(subjectText(pending), width - 4, g.ellipsis)}</Text>
+      <Text wrap="truncate">
+        {truncateLine(boxSafe(subjectText(pending)), width - 8, g.ellipsis)}
+      </Text>
       {pending.reason !== "" && !narrow ? (
         <Text dimColor wrap="truncate">
-          {truncateLine(`原因：${pending.reason}`, width - 4, g.ellipsis)}
+          {truncateLine(boxSafe(`原因：${pending.reason}`), width - 8, g.ellipsis)}
         </Text>
       ) : null}
       {feedback !== undefined ? (
         <Text>
           <Text color="yellow">d{g.prompt} </Text>
-          {feedback}
+          {boxSafe(feedback)}
           <Text inverse> </Text>
         </Text>
       ) : narrow ? (

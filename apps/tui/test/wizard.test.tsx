@@ -122,7 +122,7 @@ const type = async (stdin: { write: (s: string) => void }, text: string): Promis
 };
 
 describe("/provider 向导弹层", () => {
-  it("backend=none：环境变量回退路径 → 模型选择 → 保存（含上游字段映射）", async () => {
+  it("backend=none：环境变量回退路径 → 拉模型列表 → 保存（v0.3 不选模型）", async () => {
     const { config, saved } = makeConfig("none");
     const onDone = vi.fn();
     const { lastFrame, stdin, unmount } = render(
@@ -136,40 +136,36 @@ describe("/provider 向导弹层", () => {
       ),
     );
     await pause();
-    // 名称 [deepseek]：直接回车
-    expect(lastFrame()).toContain("名称");
-    await type(stdin, "");
-    await pause();
-    // backend=none → 直接问环境变量名
+    // 内置预设不问名称/服务地址；backend=none → 直接问环境变量名
     expect(lastFrame()).toContain("凭据环境变量名");
+    // 内置预设不问名称/地址；摘要行只折叠已确定值，不出现提问行
+    expect(lastFrame()).not.toContain("名称：");
+    expect(lastFrame()).not.toContain("服务地址：");
     await type(stdin, "");
-    await pause(120);
-    // fetchModels 返回列表 → 编号选择
-    const f = lastFrame() ?? "";
-    expect(f).toContain("deepseek-chat");
-    await type(stdin, "1");
-    await pause();
-    // 选完模型直接问"设为默认"（向导不做连接测试）
-    expect(lastFrame()).toContain("设为默认模型");
-    await type(stdin, "");
-    await pause(120);
+    await pause(200);
+    // 拉完 /models 即保存——不问模型选择、不问"设为默认"（v0.3）
     expect(onDone).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "added", providerId: "deepseek" }),
+      expect.objectContaining({ kind: "added", providerId: "deepseek", modelCount: 2 }),
     );
+    expect(lastFrame()).not.toContain("设为默认模型");
     // saveSetupProvider 收到完整条目：上游字段映射进 models
     expect(saved).toHaveLength(1);
     const entry = saved[0]?.entry;
     expect(entry).toBeDefined();
     if (entry === undefined) return;
     expect(entry.id).toBe("deepseek");
+    expect(entry.baseURL).toBe("https://api.deepseek.com/v1");
     expect(entry.apiKeyEnv).toBe("DEEPSEEK_API_KEY");
+    expect(entry.source).toBe("upstream");
     const models = entry.models as Record<string, ModelOverrideShape>;
     expect(models["deepseek-chat"]?.contextWindow).toBe(128_000);
     expect(models["deepseek-chat"]?.pricing).toEqual({ input: 0.27, output: 1.1 });
+    // 上游已声明 reasoning → 不问思考档位（entry.thinking 无 levels）
+    expect(entry.thinking?.levels).toBeUndefined();
     unmount();
   });
 
-  it("backend=dpapi：密钥输入回显 *，setCredential/setDefault 正确传递", async () => {
+  it("backend=dpapi：密钥输入回显 *，setCredential 正确传递，不选模型", async () => {
     const { config, saved } = makeConfig("dpapi");
     const onDone = vi.fn();
     const { lastFrame, stdin, unmount } = render(
@@ -183,9 +179,7 @@ describe("/provider 向导弹层", () => {
       ),
     );
     await pause();
-    await type(stdin, ""); // 名称
-    await pause();
-    // backend=dpapi → askSecret 密钥提示
+    // backend=dpapi → askSecret 密钥提示（内置预设无名称步骤）
     expect(lastFrame()).toContain("API Key");
     // 密钥逐字符输入，回显应为 * 而非明文
     stdin.write("sk-secret-123");
@@ -194,16 +188,9 @@ describe("/provider 向导弹层", () => {
     expect(f).toContain("*************");
     expect(f).not.toContain("sk-secret-123");
     stdin.write("\r");
-    await pause(120);
-    // 模型选择
-    await type(stdin, "1");
-    await pause(150);
-    // 选完模型直接问"设为默认"（无连接测试步骤）
-    expect(lastFrame()).toContain("设为默认模型");
-    await type(stdin, "");
-    await pause(120);
+    await pause(200);
     expect(onDone).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "added", providerId: "deepseek" }),
+      expect.objectContaining({ kind: "added", providerId: "deepseek", modelCount: 2 }),
     );
     // 密钥经 opts.key 传给 saveSetupProvider（凭据存储路径），不落 entry 明文
     expect(saved[0]?.opts?.key).toBe("sk-secret-123");
@@ -254,7 +241,7 @@ describe("/provider 向导弹层", () => {
     unmount();
   });
 
-  it("/provider thinking：y → 空格勾选多档 → Enter 保存 thinking.levels", async () => {
+  it("/provider thinking：单步勾选（首项「不支持」互斥）→ Enter 保存 thinking.levels", async () => {
     const { config, thinking } = makeConfig("none");
     const onDone = vi.fn();
     const { lastFrame, stdin, unmount } = render(
@@ -268,16 +255,16 @@ describe("/provider 向导弹层", () => {
       ),
     );
     await pause();
-    // 先问"支持思考强度吗？[y/N]"
-    expect(lastFrame()).toContain("支持思考强度");
-    await type(stdin, "y");
-    await pause(80);
-    // 多选界面：六个档位 + 勾选提示
+    // v0.3 修订：无 y/N 是非题——直接出勾选列表，首项"不支持思考强度"
     const f = lastFrame() ?? "";
+    expect(f).toContain("不支持思考强度");
     expect(f).toContain("minimal");
     expect(f).toContain("max");
     expect(f).toContain("空格勾选");
-    // ↓ → 空格勾选 low；↓ ↓ → 空格勾选 high；Enter 确认
+    expect(f).not.toContain("[y/N]");
+    // ↓↓ → 空格勾选 low；↓ ↓ → 空格勾选 high；Enter 确认
+    stdin.write("\x1b[B");
+    await pause();
     stdin.write("\x1b[B");
     await pause();
     stdin.write(" ");
@@ -290,10 +277,59 @@ describe("/provider 向导弹层", () => {
     stdin.write(" ");
     await pause();
     expect(lastFrame()).toContain("[x] high");
+    // 勾"不支持"应互斥清空其余（先验证互斥，再改回勾选）
+    stdin.write("\x1b[A");
+    await pause();
+    stdin.write("\x1b[A");
+    await pause();
+    stdin.write("\x1b[A");
+    await pause();
+    stdin.write("\x1b[A");
+    await pause(); // 光标回"不支持"
+    stdin.write(" ");
+    await pause();
+    expect(lastFrame()).toContain("[x] 不支持思考强度");
+    expect(lastFrame()).not.toContain("[x] low");
+    // 取消"不支持"，重新勾 low + high
+    stdin.write(" ");
+    await pause();
+    stdin.write("\x1b[B");
+    await pause();
+    stdin.write("\x1b[B");
+    await pause();
+    stdin.write(" ");
+    await pause();
+    stdin.write("\x1b[B");
+    await pause();
+    stdin.write("\x1b[B");
+    await pause();
+    stdin.write(" ");
+    await pause();
     stdin.write("\r");
     await pause(150);
     expect(onDone).toHaveBeenCalledWith({ kind: "thinking-updated", providerId: "deepseek" });
     expect(thinking).toEqual([{ providerId: "deepseek", levels: ["low", "high"] }]);
+    unmount();
+  });
+
+  it("/provider thinking：什么都不勾直接 Enter = 清除声明", async () => {
+    const { config, thinking } = makeConfig("none");
+    const onDone = vi.fn();
+    const { stdin, unmount } = render(
+      inEnv(
+        createElement(Probe, {
+          config,
+          deps: makeDeps(),
+          start: { kind: "thinking", providerId: "deepseek" },
+          onDone,
+        }),
+      ),
+    );
+    await pause();
+    stdin.write("\r"); // 空勾选 = 不支持/清除
+    await pause(150);
+    expect(onDone).toHaveBeenCalledWith({ kind: "thinking-updated", providerId: "deepseek" });
+    expect(thinking).toEqual([{ providerId: "deepseek", levels: undefined }]);
     unmount();
   });
 

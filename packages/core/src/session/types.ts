@@ -134,6 +134,11 @@ export interface SessionSummary {
   locked?: boolean | undefined;
   /** 子会话的父关联；仅子会话存在（默认不进入列表，见 list 的 includeSubagents） */
   parent?: { sessionId: string; callId: string } | undefined;
+  /**
+   * 首条 message.user 的首行文本（TUI 欢迎框"最近会话"摘要，v0.3）；
+   * 无用户消息或日志损坏时缺省
+   */
+  firstText?: string | undefined;
 }
 
 export interface CreateSessionInput {

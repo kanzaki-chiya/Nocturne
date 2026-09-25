@@ -13,6 +13,7 @@ const platform = createPlatform();
 const base: CliArgs = {
   print: true,
   tui: false,
+  cli: false,
   yes: false,
   debug: false,
   help: false,

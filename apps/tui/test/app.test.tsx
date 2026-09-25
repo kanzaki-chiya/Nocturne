@@ -184,7 +184,7 @@ describe("TUI", () => {
     await session.close();
   });
 
-  it("Turn 中 Shift+Tab 切档：状态栏标出（下一轮生效），Turn 结束后消失", async () => {
+  it("Turn 中 Shift+Tab 切档：状态栏显示 旧档→新档，Turn 结束后只剩新档", async () => {
     // wait 事件让流保持 3s：覆盖"Turn 进行中"窗口
     const runtime = await createRuntime({
       cwd: tmp("nct-tui-ws-"),
@@ -225,15 +225,15 @@ describe("TUI", () => {
     // 提交后不 await：Turn 进行中
     const done = session.submit({ text: "长跑" });
     await pause(150);
-    // 进行中 Shift+Tab：off → low，状态栏显示 pending 标记
+    // 进行中 Shift+Tab：off → low，状态栏显示"旧档→新档"（ADR-0019）
     stdin.write("\x1b[Z");
     await pause(120);
-    expect(lastFrame()).toContain("下一轮生效");
+    expect(lastFrame()).toContain("思考:off→low");
     await done;
     await pause(150);
-    // Turn 结束：标记消失，显示新档位
+    // Turn 结束：只剩新档位
     expect(lastFrame()).toContain("思考:low");
-    expect(lastFrame()).not.toContain("下一轮生效");
+    expect(lastFrame()).not.toContain("→");
     unmount();
     await session.close();
   });
@@ -267,7 +267,7 @@ describe("TUI", () => {
     unmount();
   });
 
-  it("窄于 40 列：状态栏仅留状态和 tokens，权限框隐藏原因", () => {
+  it("窄于 40 列：状态栏仅留状态和上下文占用，权限框隐藏原因", () => {
     const view = createSessionView();
     view.config.model = { provider: "fake", model: "long-model" };
     view.config.permissionPreset = "default";
@@ -285,16 +285,15 @@ describe("TUI", () => {
           Box,
           { flexDirection: "column" },
           createElement(PermissionDialog, { pending, active: true, onReply: vi.fn(), width: 32 }),
-          createElement(StatusBar, { view, sessionId: "s-very-long", width: 32 }),
+          createElement(StatusBar, { view, width: 32, context: { used: 0 } }),
         ),
       ),
     );
     const frame = lastFrame() ?? "";
     expect(frame).toContain("idle");
-    expect(frame).toContain("↑0 ↓0");
     expect(frame).not.toContain("很长的审批原因");
     expect(frame).not.toContain("long-model");
-    expect(frame).not.toContain("s-very-long");
+    expect(frame).not.toContain("default");
     unmount();
   });
 
@@ -303,6 +302,7 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
+    await pause(80); // 欢迎框数据（最近会话）就绪后主界面才挂载
     const frame = lastFrame() ?? "";
     expect(frame).toContain("fake/fake-model");
     stdin.write("\x03"); // Ctrl+C：空闲退出
@@ -402,7 +402,7 @@ describe("TUI", () => {
     await pause(50);
     stdin.write("/resume");
     stdin.write("\r");
-    await pause(80);
+    await pause(200);
     expect(lastFrame()).toContain("切换到会话");
     expect(lastFrame()).toContain(s2id);
     // 列表按 mtimeMs 降序——s1/s2 同毫秒时顺序不稳定；先读渲染顺序再定向导航
@@ -422,7 +422,7 @@ describe("TUI", () => {
       await pause();
     }
     stdin.write("\r");
-    await pause(80);
+    await pause(300);
     // mtime 同毫秒时顺序仍可能翻转——验证“选择→切换”链路而非固定目标
     expect(switcher).toHaveBeenCalled();
     const calledId = switcher.mock.calls[0]?.[0];
@@ -484,7 +484,7 @@ describe("TUI", () => {
     await session.close();
   });
 
-  it("/provider 无参打开选择页（焦点左栏）；子命令分发", async () => {
+  it("/provider 无参打开全屏服务商页：预设列表 + 过滤 + Esc 返回", async () => {
     const { session, runtime } = await makeSession();
     const provider = {
       config: {
@@ -507,12 +507,20 @@ describe("TUI", () => {
     stdin.write("\r");
     await pause(400);
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("搜索");
-    expect(frame).toContain("全部模型");
+    expect(frame).toContain("服务商");
+    expect(frame).toContain("过滤");
     // 未配置的预设服务商以 ○ 列出
     expect(frame).toContain("○");
+    // 打字过滤 → 无匹配
+    stdin.write("zzz");
+    await pause(80);
+    expect(lastFrame()).toContain("无匹配");
+    // Esc 清过滤 → 再 Esc 关闭回主屏
+    stdin.write("\x1b");
+    await pause(80);
     stdin.write("\x1b");
     await pause(200);
+    expect(lastFrame()).toContain("idle");
     unmount();
     await session.close();
   });

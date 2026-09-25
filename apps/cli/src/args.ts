@@ -17,8 +17,10 @@ export type CliCommand = "trust" | "untrust" | "setup";
 export interface CliArgs {
   /** -p/--print：非交互模式 */
   print: boolean;
-  /** --tui：交互式终端界面（与 -p 互斥；需要 TTY） */
+  /** --tui：显式选终端界面（与 -p、--cli 互斥；需要 TTY；TTY 下本为默认） */
   tui: boolean;
+  /** --cli：强制行式 REPL（与 --tui、-p 互斥；非 TTY 时本就为行式） */
+  cli: boolean;
   /** -p 后的内联 prompt；省略时 main 从 stdin 读 */
   prompt?: string | undefined;
   model?: string | undefined;
@@ -49,19 +51,21 @@ export interface CliArgs {
 export const HELP_TEXT = `nctrn — Nocturne CLI
 
 用法：
-  nctrn                        交互模式（REPL）：新建会话
-  nctrn --tui                  终端界面（TUI）：新建会话
+  nctrn                        交互模式：TTY 默认打开 TUI，新建会话
+  nctrn --cli                  行式 REPL：新建会话
+  nctrn --tui                  显式选择 TUI（TTY 下本为默认；与 --cli 互斥）
   nctrn -p "<prompt>"          非交互模式：执行一次 Turn 后退出
   nctrn -p                     非交互模式：prompt 从 stdin 读取
   nctrn -c, --continue         恢复当前目录最近的会话
   nctrn --resume <id>          恢复指定会话
   nctrn --sessions             列出会话后退出
   nctrn trust | untrust        信任/取消信任当前目录后退出
-  nctrn setup                  服务商配置向导（密钥交系统凭据后端，不落明文）
+  nctrn setup                  服务商配置：TTY 打开服务商页；--cli 用行式向导
 
 参数：
   -p, --print [prompt]   非交互模式；值省略时读 stdin
-      --tui              终端界面模式；与 -p、--sessions 互斥；非 TTY 时退出码 2
+      --cli              行式 REPL（与 --tui、-p、--sessions 互斥）
+      --tui              终端界面模式；与 --cli、-p、--sessions 互斥；非 TTY 时退出码 2
   -c, --continue         恢复绑定到当前目录的最近会话（没有则新建）
       --resume <id>      恢复指定会话；可与 --model、-p 组合
       --sessions         列出全部会话（id、时间、目录、模型、锁状态）
@@ -80,6 +84,21 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
   -v, --version          打印版本
 `;
 
+/**
+ * 交互界面选择（cli.md §2）：stdin/stdout 均 TTY 时默认 TUI；
+ * --cli 强制行式；--tui 显式 TUI；非 TTY 自动行式（显式 --tui 报用法错 2）。
+ * 与 -p 无关：print 模式不走这里。
+ */
+export function resolveUiMode(
+  args: Pick<CliArgs, "cli" | "tui">,
+  interactive: boolean,
+): "tui" | "repl" | { error: string } {
+  if (args.tui && !interactive) {
+    return { error: "--tui 需要交互式终端；请用 nctrn 或 nctrn -p <prompt>" };
+  }
+  return interactive && !args.cli ? "tui" : "repl";
+}
+
 export function parseArgs(argv: readonly string[]): CliArgs {
   let result;
   try {
@@ -90,6 +109,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       options: {
         print: { type: "boolean", short: "p", default: false },
         tui: { type: "boolean", default: false },
+        cli: { type: "boolean", default: false },
         model: { type: "string" },
         "api-type": { type: "string" },
         "base-url": { type: "string" },
@@ -131,17 +151,27 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   const continueSession = values.continue;
   const resume = values.resume;
   const tui = values.tui;
+  const cli = values.cli;
   if (continueSession && resume !== undefined) {
     throw new UsageError("--continue 与 --resume 不能同时使用");
   }
+  if (tui && cli) {
+    throw new UsageError("--tui 与 --cli 互斥：交互界面只能二选一（TTY 下默认 TUI）");
+  }
   if (tui && print) {
     throw new UsageError("--tui 与 -p/--print 互斥：TUI 需要交互式终端");
+  }
+  if (cli && print) {
+    throw new UsageError("--cli 与 -p/--print 互斥：-p 本身就是非交互模式");
   }
   if (
     command !== undefined &&
     (continueSession || resume !== undefined || values.sessions || tui)
   ) {
     throw new UsageError(`${command} 子命令不接受会话选项`);
+  }
+  if (command !== undefined && command !== "setup" && cli) {
+    throw new UsageError(`${command} 子命令不接受 --cli`);
   }
   if (
     command === "setup" &&
@@ -154,8 +184,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   ) {
     throw new UsageError("setup 子命令不接受模型或服务商参数（向导内交互式配置）");
   }
-  if (values.sessions && (continueSession || resume !== undefined || print || tui)) {
-    throw new UsageError("--sessions 是独立的只读命令，不能与恢复、执行或 --tui 组合");
+  if (values.sessions && (continueSession || resume !== undefined || print || tui || cli)) {
+    throw new UsageError("--sessions 是独立的只读命令，不能与恢复、执行或 --tui/--cli 组合");
   }
   if (values["force-unlock"] && !continueSession && resume === undefined) {
     throw new UsageError("--force-unlock 只能与 --resume / --continue 搭配");
@@ -167,6 +197,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   return {
     print,
     tui,
+    cli,
     prompt: print && positionals.length > 0 ? positionals.join(" ") : undefined,
     model: values.model,
     apiType: values["api-type"],

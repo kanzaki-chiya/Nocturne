@@ -26,7 +26,8 @@ export function DiffView({ diff, width }: { diff: string; width: number }): Reac
         {...(color !== undefined ? { color } : {})}
         dimColor={color === undefined && !line.startsWith("@@")}
       >
-        {truncateLine(line, width, env.ascii ? "..." : "…")}
+        {/* 保真渲染源码，不做字符替换；留 4 列余量吸收歧义宽字符膨胀 */}
+        {truncateLine(line, width - 4, env.ascii ? "..." : "…")}
       </Text>
     );
   };

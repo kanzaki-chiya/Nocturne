@@ -23,15 +23,16 @@ v0.1 接入一个模型服务要做三件事：设置持久的用户级环境变
 （仅自定义预设）服务地址：https://api.example.com/v1      ← anthropic 兼容可留空用官方端点
 API Key（掩码输入；直接回车表示改用环境变量）：********
 密钥已交给 Windows DPAPI 加密保存
-正在获取模型列表…                                        ← 只发 GET /models
-该服务支持思考强度吗？[y/N] y                            ← 仅上游未声明思考能力时
-勾选可用档位（空格切换，回车确认）：[ ] minimal  [x] low  [x] medium  [x] high  [ ] xhigh  [ ] max
+✓ 已获取 12 个模型                                       ← 只发 GET /models；失败显示原因并继续
+思考强度档位（空格勾选，回车确认；不勾 = 不支持）：         ← 仅上游未声明思考能力时
+  [ ] 不支持思考强度  [ ] minimal  [x] low  [x] medium  [ ] high  [ ] xhigh  [ ] max
 已保存 command，12 个模型                                ← 底部结果行，回到列表
 ```
 
 - 三个内置预设不再问名称与地址（直接用预设默认值）；两个自定义预设问名称（必填）与服务地址（openai 兼容必填，anthropic 兼容可留空用官方端点）。
-- **向导不再选择模型**（v0.3）：模型列表仍经 `GET /models` 获取并把上游声明的上下文窗口、最大输出长度与能力标记写回条目 `models`（第 7 节），但不再出现"编号选择模型"与"设为默认模型"两步；默认模型在 `/model` 页设置。获取失败或服务不提供列表接口时只提示不阻塞——保存后可用服务商页「刷新模型列表」或 `/provider refresh <名>` 重试；`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"。
-- **思考强度声明**（ADR-0018 第 6 节）：上游 `/models` 没有声明思考能力时问"该服务支持思考强度吗？[y/N]"；选 y 后多选勾选 `minimal/low/medium/high/xhigh/max`（TUI 空格勾选回车确认；CLI 逗号分隔编号，非法输入重问）。勾选结果写到 `thinking.levels` 并标 `source: "user"`（`/provider refresh` 不得覆盖）。
+- **向导不再选择模型**（v0.3）：模型列表仍经 `GET /models` 获取并把上游声明的上下文窗口、最大输出长度与能力标记写回条目 `models`（第 7 节），但不再出现"编号选择模型"与"设为默认模型"两步；默认模型在 `/model` 页设置。获取结果替换进行中提示：成功显示"已获取 N 个模型"；失败显示原因并继续后续步骤——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，404/网络错误等其余失败提示"模型将手动填写"；保存后可用服务商页「刷新模型列表」或 `/provider refresh <名>` 重试。
+- **思考强度声明**（ADR-0018 第 6 节；v0.3 交互形式调整，规则不变）：上游 `/models` 没有声明思考能力时显示**单步勾选**列表，首项是"不支持思考强度"——它与 `minimal/low/medium/high/xhigh/max` 六档互斥（勾它清掉其余勾选，勾任一档位则清掉它）；什么都不勾直接确认同样等于不支持。TUI 用 `↑`/`↓` 移动、空格勾选、回车确认；CLI 逗号分隔编号（0 或空输入 = 不支持，非法输入重问）。勾选结果写到 `thinking.levels` 并标 `source: "user"`（`/provider refresh` 不得覆盖）。
+- **TUI 表单形态**（ADR-0019 第 2 条）：全屏页面内不出现需要打字回答的是非题；已完成步骤折叠为一行摘要（如"名称 command • 地址 api.xxx.com • 密钥已保存"），当前步骤用强调色提问、灰色小字给说明（密钥获取入口、回车改用环境变量等）。
 - **向导不发送模型请求**：连接测试会消耗 token 且重复了首次真实请求才能发现的问题，因此不做。密钥、地址与模型 id 的有效性由会话中的首次真实请求检验；请求失败时按 `ProviderError.kind` 给出可操作提示（`auth` → 密钥可能无效，附 `/provider key <name>`；`network`/`timeout` → 地址不通，附 `nctrn setup`；`invalid_request`/404 → 模型 id 或地址路径有误），实现位置为 `agent/turn.ts` 的 `providerFailureHint`（turn.completed.error.message，CLI 与 TUI 共用）。
 - 系统凭据后端不可用时（第 3 节），跳过保存密钥这一步，直接进入环境变量方式；选择"改用环境变量"时询问变量名（默认按预设 `defaultKeyEnv`），条目写入 `apiKeyEnv`，密钥不落盘。
 
@@ -47,7 +48,7 @@ API Key（掩码输入；直接回车表示改用环境变量）：********
 | `/provider add` | 逐行向导（CLI）或服务商页内嵌向导（TUI 打开服务商页并选中预设）；保存后提示"用 /model 选择模型" |
 | `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成；等价于服务商页「换密钥」 |
 | `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置；不覆盖 `thinking.levels` 的用户声明；等价于「刷新模型列表」 |
-| `/provider thinking <name>` | 对已配置的服务商重走思考声明步骤（y/N + 档位勾选），写入 `thinking.levels` 并标注 `source: "user"`；等价于「调整思考档位」 |
+| `/provider thinking <name>` | 对已配置的服务商重走思考声明步骤（单步勾选，首项"不支持"互斥），写入 `thinking.levels` 并标注 `source: "user"`；等价于「调整思考档位」 |
 | `/provider remove <name>` | 删除向导写入的条目及其凭据；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改；等价于「删除」 |
 
 Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。四个子命令与服务商页操作是同一套 Core 编排的快捷方式，命令名与效果在 CLI 与 TUI 一致。
@@ -195,7 +196,8 @@ runProviderSetupWizard(io, config, deps, opts?): Promise<WizardResult>
   //   WizardResult = { providerId, modelCount }；modelCount 供客户端显示
   //   "已保存 X，N 个模型"的结果行。不再询问模型与默认模型（v0.3）。
 runProviderThinkingWizard(io, config, providerId): Promise<void>
-  // 重走思考声明步骤（y/N + 档位多选）后经 saveSetupThinking 保存；provider 须为向导条目
+  // 重走思考声明步骤（单步多选，首项"不支持思考强度"互斥；空勾选或勾首项 = 清除声明）
+  // 后经 saveSetupThinking 保存；provider 须为向导条目
 setDefaultModel(model: string): Promise<void>            // 写入 providers.json 的 model 字段（/model 页"设为默认"）
 recentModels(): ModelRef[]                               // recent-models.json 当前内容（新→旧）
 recordRecentModel(ref: ModelRef): Promise<void>          // Runtime 在 setModel/新建会话时调用

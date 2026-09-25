@@ -7,6 +7,7 @@ import { Box, Text, useInput } from "ink";
 import { useEffect, useRef, useState } from "react";
 
 import { glyphs, useTuiEnv } from "../env.js";
+import { theme } from "../theme.js";
 
 export function Composer({
   value,
@@ -14,6 +15,7 @@ export function Composer({
   onSubmit,
   active,
   disabledReason,
+  width,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -22,6 +24,8 @@ export function Composer({
   active: boolean;
   /** 非空时输入禁用并显示原因（如"会话忙"）；已输入内容仍可见 */
   disabledReason?: string | undefined;
+  /** 终端宽度：输入行上下各画一条占满宽度的横线（tui.md §2，v0.3） */
+  width: number;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const g = glyphs(env);
@@ -86,21 +90,30 @@ export function Composer({
   );
 
   const at = value[cursor];
+  const rule = env.ascii ? "-".repeat(width) : "─".repeat(width);
   return (
-    <Box>
-      <Text color={disabled ? "gray" : "cyan"}>{`${g.prompt} `}</Text>
-      {disabled ? (
-        <Text dimColor>
-          {value}
-          {`（${disabledReason}）`}
-        </Text>
-      ) : (
-        <Text>
-          {value.slice(0, cursor)}
-          <Text inverse>{at ?? " "}</Text>
-          {at !== undefined ? value.slice(cursor + 1) : ""}
-        </Text>
-      )}
+    <Box flexDirection="column">
+      <Text dimColor wrap="truncate">
+        {rule}
+      </Text>
+      <Box>
+        <Text color={disabled ? theme.muted : theme.accent}>{`${g.prompt} `}</Text>
+        {disabled ? (
+          <Text dimColor>
+            {value}
+            {`（${disabledReason}）`}
+          </Text>
+        ) : (
+          <Text>
+            {value.slice(0, cursor)}
+            <Text inverse>{at ?? " "}</Text>
+            {at !== undefined ? value.slice(cursor + 1) : ""}
+          </Text>
+        )}
+      </Box>
+      <Text dimColor wrap="truncate">
+        {rule}
+      </Text>
     </Box>
   );
 }

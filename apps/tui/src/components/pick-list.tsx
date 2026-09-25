@@ -7,7 +7,7 @@ import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 
 import { glyphs, useTuiEnv } from "../env.js";
-import { truncateLine } from "../format.js";
+import { boxSafe, truncateLine } from "../format.js";
 
 export interface PickItem<T> {
   label: string;
@@ -64,8 +64,13 @@ export function PickList<T>({
   );
   const visible = items.slice(start, start + MAX_VISIBLE);
   return (
-    <Box flexDirection="column" borderStyle={env.ascii ? "single" : "round"} borderColor="cyan">
-      <Text bold>{title}</Text>
+    <Box
+      flexDirection="column"
+      width={width - 4}
+      borderStyle={env.ascii ? "single" : "round"}
+      borderColor="cyan"
+    >
+      <Text bold>{boxSafe(title)}</Text>
       {items.length === 0 ? <Text dimColor>（空）</Text> : null}
       {visible.map((item, i) => {
         const idx = start + i;
@@ -75,7 +80,7 @@ export function PickList<T>({
             <Text {...(focused ? { color: "cyan" } : {})}>{focused ? `${g.prompt} ` : "  "}</Text>
             <Text inverse={focused}>
               {truncateLine(
-                item.label + (item.hint !== undefined ? `  ${item.hint}` : ""),
+                boxSafe(item.label + (item.hint !== undefined ? `  ${item.hint}` : "")),
                 width - 6,
                 g.ellipsis,
               )}
@@ -88,7 +93,7 @@ export function PickList<T>({
           {cursor + 1}/{items.length}
         </Text>
       ) : null}
-      <Text dimColor>↑↓ 选择，Enter 确认，Esc 取消</Text>
+      <Text dimColor>上下选择，Enter 确认，Esc 取消</Text>
     </Box>
   );
 }

@@ -6,6 +6,35 @@ import stringWidth from "string-width";
 
 import type { Usage } from "@nocturne/core/protocol";
 
+/**
+ * conhost（GBK 代码页）把歧义宽度字符渲染为 2 列，与 string-width 的 1 列不一致：
+ * 带边框的行会被 Ink 按 string-width 补齐到整宽，框内每混入一个歧义字符实际
+ * 宽度就 +1，超过终端列数即折行——备用屏下表现为整屏滚动、页头被裁。
+ * 框内文本（含用户输入回显、外部传入的标题/详情）统一过 boxSafe，
+ * 把歧义字符换成实测 1 列的近形字符（conhost 80/120 列实测：
+ * 1 列=│ ─ ╭ █ ✓ ✗ ⚠ • › ⠋；2 列=· ● ○ ↑ ↓ ← → … — ｜ ◆ ◇）。
+ */
+const BOX_AMBIG_MAP: Record<string, string> = {
+  "·": "•",
+  "●": "•",
+  "○": "o",
+  "◆": "•",
+  "◇": "o",
+  "↑": "^",
+  "↓": "v",
+  "←": "<",
+  "→": ">",
+  "—": "-",
+  "–": "-",
+  "｜": "|",
+  "…": "...",
+};
+const BOX_AMBIG_RE = /[·●○◆◇↑↓←→—–｜…]/g;
+
+export function boxSafe(text: string): string {
+  return text.replace(BOX_AMBIG_RE, (c) => BOX_AMBIG_MAP[c] ?? c);
+}
+
 /** 按显示宽度截断为单行；超宽时截断并加省略号 */
 export function truncateLine(text: string, width: number, ellipsis = "…"): string {
   const oneLine = text.replace(/\r?\n/g, " ");

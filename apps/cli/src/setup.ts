@@ -82,20 +82,33 @@ async function readLineStream(stdin: Stdin): Promise<string | undefined> {
 /** nctrn setup / /provider add 的终端实现 */
 export function createWizardIo(stdin: Stdin, stdout: NodeJS.WritableStream): WizardIo {
   const tty = stdin.isTTY === true;
+  const writeHint = (hint: string | undefined): void => {
+    if (hint !== undefined && hint !== "") stdout.write(`  ${hint}\n`);
+  };
   return {
-    ask: async (prompt) => {
+    ask: async (prompt, opts) => {
+      writeHint(opts?.hint);
       stdout.write(prompt);
       const line = tty ? await readLineRaw(stdin, true) : await readLineStream(stdin);
       if (line === undefined) throw new WizardAbort();
       return line.trim();
     },
-    askSecret: async (prompt) => {
+    askSecret: async (prompt, opts) => {
+      writeHint(opts?.hint);
       stdout.write(prompt);
       const line = tty ? await readLineRaw(stdin, false) : await readLineStream(stdin);
       if (line === undefined) throw new WizardAbort();
       return line.trim();
     },
-    chooseMulti: async (prompt, options) => {
+    busy: (text) => {
+      // 逐行终端没有可覆盖行：瞬时提示直接打印（下一行输出自然滚动）
+      stdout.write(`${text}\n`);
+    },
+    step: (text) => {
+      stdout.write(`${text}\n`);
+    },
+    chooseMulti: async (prompt, options, opts) => {
+      writeHint(opts?.hint);
       // 逗号分隔编号（provider-setup.md 第 1 节，ADR-0018）；非法输入重问
       stdout.write(`${prompt}\n`);
       options.forEach((opt, i) => {
@@ -151,7 +164,8 @@ export async function runProviderKeyWizard(
 
 /**
  * /provider add 的会话内流程（provider-setup.md 第 1 节）：向导 → 重载配置
- * → updateProviders → 询问"切换当前会话到该模型？[Y/n]"（默认切换）。
+ * → updateProviders → 提示用 /model 选择模型（v0.3 起向导不选模型，
+ * 也不再询问"切换当前会话"）。
  */
 export async function runAddWizardInSession(
   io: WizardIo,
@@ -162,15 +176,9 @@ export async function runAddWizardInSession(
     updateProviders: (rc: RuntimeConfig) => void;
   },
 ): Promise<void> {
-  const res = await runProviderSetupWizard(io, ctx.config);
+  await runProviderSetupWizard(io, ctx.config);
   ctx.updateProviders(await ctx.reloadConfig());
-  if (res.model !== undefined) {
-    const sw = await io.ask(`切换当前会话到 ${res.model}？[Y/n] `);
-    if (!/^n(o)?$/i.test(sw.trim())) {
-      await ctx.session.setModel(res.model);
-      io.print(`已切换为 ${res.model}`);
-    }
-  }
+  io.print("服务商已就绪——用 /model 选择模型");
 }
 
 /**

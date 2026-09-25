@@ -49,7 +49,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 │   ─────────────────────────────────────────────
 │   › 输入提示_________________________________________
 │   ─────────────────────────────────────────────
-│   idle · gpt-4o · 思考:off · default · ~/repo · 12.3k/128k
+│   idle • gpt-4o • 思考:off • default • ~/repo • 12.3k/128k
 ```
 
 - **欢迎框**（v0.3）：主屏 `<Static>` 区渲染、只画一次。左栏为像素 Logo +「欢迎回来」+ 当前模型与服务商；右栏为三块信息（操作提示 / MCP 服务器状态 / 最近会话 ≤3 条）。宽度 <80 列降级为单栏（Logo + 模型/服务商 + 操作提示 + MCP + 会话纵向排布），<40 列不显示。会话 id 从状态栏移走后，欢迎框与 `/resume` 列表是会话 id 的可见位置。
@@ -58,7 +58,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 - **活动区**：渲染 `view.live`（流式助手、参数准备中的工具）、`entries` 中未完结的工具条目、`retry`、`status`。随 `view.revision` 重绘。同一时刻活动内容有限（串行管线）。
 - **权限对话框**：`pendingPermission` 非空时独占交互焦点；输入行禁用并提示。
 - **输入行**（v0.3）：`›` 提示符行的上下各画一条占满宽度的横线（`─`，ASCII 模式 `-`），在视觉上把输入区与回放/状态分开。
-- **状态栏**（v0.3）：彩色分段，`·` 分隔——`状态 · 模型 · 思考:档位 · 权限预设 · 目录 · 上下文占用`。上下文占用为 `已用/上下文长度`（`session.describeContext().report.estimatedTokens` / 当前模型声明的 `contextWindow`，ADR-0016；未声明时只显示已用量）。`思考:` 段只在当前模型有可用思考档位时显示；Turn 进行中切档时显示 `思考:<生效档>→<新档>` 并以警示色标出，不再附"（下一轮生效）"文字（ADR-0018）。会话 id 不再出现在状态栏。宽度不足时按 §5 收缩。
+- **状态栏**（v0.3）：彩色分段，`•` 分隔——`状态 • 模型 • 思考:档位 • 权限预设 • 目录 • 上下文占用`。上下文占用为 `已用/上下文长度`（`session.describeContext().report.estimatedTokens` / 当前模型声明的 `contextWindow`，ADR-0016；未声明时只显示已用量）。`思考:` 段只在当前模型有可用思考档位时显示；Turn 进行中切档时显示 `思考:<生效档>→<新档>` 并以警示色标出，不再附"（下一轮生效）"文字（ADR-0018）。会话 id 不再出现在状态栏。宽度不足时按 §5 收缩。
 
 ## 3. 键位与交互（对照 cli.md）
 
@@ -97,7 +97,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 | `NOCTURNE_ASCII=1`（显式开关） | 框线、徽标退回 ASCII（`-`/`+`/`*`/`->`）。不做自动探测：Windows 上 `TERM` 通常未设置，靠它识别 conhost 不可靠；默认一律输出 Unicode |
 | 宽度 ≥80 | 完整布局（欢迎框双栏、状态栏全段、diff 上下文行） |
 | 40–79 | 紧凑：欢迎框降级为单栏；状态栏隐藏目录段；diff 上下文收窄，工具输入摘要硬截断 |
-| <40 | 极简：不显示欢迎框；回放条目照常输出（`<Static>` 只追加，不暂存）但摘要更短；活动区 + 输入行 + 单行状态（`状态 · 上下文占用`）；权限对话框隐藏原因行、选项收缩为单行 |
+| <40 | 极简：不显示欢迎框；回放条目照常输出（`<Static>` 只追加，不暂存）但摘要更短；活动区 + 输入行 + 单行状态（`状态 • 上下文占用`）；权限对话框隐藏原因行、选项收缩为单行 |
 | 运行时 resize | Ink 自动重排；回放区不受影响（已写 scrollback），活动区按新宽度重绘 |
 | Windows Terminal / conhost | 两者均可运行；conhost 旧版无真彩，用 16 色回退（Ink 的 ColorLevel 探测）。conhost 的活动区重绘可能留下残影，IME 候选窗定位也可能偏移；建议使用 Windows Terminal。Ink 当前默认已关闭增量渲染，但活动区帧通常不会触发整屏清除；按 `TERM` 无法可靠区分 conhost，强行整屏清除又会破坏 `<Static>` 回放与滚动区，因此本轮保留为已知限制（ADR-0010）。图标只用两端实测可显示的字符（ADR-0019） |
 
@@ -130,8 +130,8 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 │ ──────────── │
 │ ○ anthropic  │
 ├──────────────┴─ deepseek/deepseek-chat ─────────────────┤
-│ 上下文 128k · 最大输出 8k · $0.27/1.00 每 M · 推理 · 图片 │
-│ 输入 · 当前会话 · 默认模型                                │
+│ 上下文 128k • 最大输出 8k • $0.27/1.00 每 M • 推理 • 图片 │
+│ 输入 • 当前会话 • 默认模型                                │
 │ ←→切换栏 ↑↓移动 /搜索 Enter选择 PgUp/PgDn翻页 Esc关闭     │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -164,21 +164,21 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 
 `/provider`（无参）打开全屏的服务商管理页（v0.3，ADR-0019）。它是第二个使用备用屏幕的页面：进出序列、`Ctrl+C` 恢复、Windows stdin 保护完全沿用 ADR-0017 的实测约束。只在会话空闲时可打开（与 `/provider` 子命令前置条件一致）；首次配置流程（provider-setup.md 第 1 节）中它由启动路径直接打开，不要求已有会话。
 
-**布局**：
+**布局**：页面高度锁定为终端行数——页头（Logo/标题/副标题/步骤标记）与底部按键提示始终完整可见，内容超出时只在列表或表单区域内滚动。像素 Logo 只在终端行数 ≥30 且宽度 ≥64 列时绘制；不满足时页头降级为单行文字标题，不画像素 Logo。
 
 ```text
 ┌ <像素 Logo>  Nocturne · 服务商
 │ 选择服务商进行配置；可配置多个，完成后按 Esc            ← 副标题
 │ 第 1 步，共 2 步                                      ← 仅首次配置流程显示
 ├ 过滤: [________]
-│ ▸ ● deepseek        已配置 · 凭据文件 · 12 个模型
-│   ● openrouter      已配置 · 环境变量 OPENROUTER_API_KEY · 412 个模型
+│ ▸ ● deepseek        已配置 • 凭据文件 • 12 个模型
+│   ● openrouter      已配置 • 环境变量 OPENROUTER_API_KEY • 412 个模型
 │   ○ anthropic       未配置
 │   ○ 其他 OpenAI 兼容服务
 │   ○ 其他 Anthropic 兼容服务
-│   ● commandcode     已配置 · 凭据文件 · 5 个模型        ← providers.json 自定义条目
+│   ● commandcode     已配置 • 凭据文件 • 5 个模型        ← providers.json 自定义条目
 ├ 已保存 command，12 个模型                              ← 结果行（操作完成后出现）
-└ ↑/↓ 选择 · Enter 确认 · Esc 返回/完成 · Ctrl+C 退出
+└ ↑/↓ 选择 • Enter 确认 • Esc 返回/完成 • Ctrl+C 退出
 ```
 
 **列表** = 5 个预设行 + 未被预设覆盖的已配置条目（`providers.json` 自定义条目、`config.json`/项目层手写条目按追加行展示）：
@@ -188,12 +188,12 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 - 当前会话正在使用的服务商加注「当前」标记，删除它被拒绝（提示先 `/model` 切换）。
 - 直接打字进入过滤（对 id/标签/主机名做子串匹配），`Backspace` 删字符；`Esc` 先清过滤，过滤已空时再按关闭页面（首次配置流程中为"完成"语义）；`↑`/`↓`/`PageUp`/`PageDown`/`Home`/`End` 移动；列表超出可视高度时右侧出滚动条。
 
-**未配置预设 `Enter` → 就地展开步骤**（正文区替换为向导视图，页头页脚保持；步骤编排在 Core `runProviderSetupWizard`，v0.3 起不再含选模型步骤）：
+**未配置预设 `Enter` → 就地展开步骤**（正文区替换为向导视图，页头页脚保持；步骤编排在 Core `runProviderSetupWizard`，v0.3 起不再含选模型步骤）。向导视图是 omp 风格的就地表单：已完成步骤折叠为一行摘要（`名称 x • 地址 y • 密钥已保存`），只展开当前步骤——当前提问用强调色、下方用灰色小字给说明（密钥来源、回车改用环境变量等），不堆叠逐行问答历史：
 
 1. 仅自定义预设问「名称」（必填）与「服务地址」（openai 兼容必填；anthropic 兼容可留空用官方端点）——三个内置预设直接跳过名称与地址；
 2. 「API Key」掩码输入（`*` 回显）：输入后回车 → 交系统凭据后端；直接回车 → 环境变量路径（问「凭据环境变量名」，默认取预设 `defaultKeyEnv`）；后端不可用时直接进环境变量路径；
-3. `GET /models` 拉模型列表与限额（不发模型请求，provider-setup.md 第 7 节）；失败只提示不阻塞，保存后可用「刷新模型列表」重试；
-4. 上游列表未声明思考能力 → 档位勾选（ADR-0018：y/N + 空格勾选回车确认）；
+3. `GET /models` 拉模型列表与限额（不发模型请求，provider-setup.md 第 7 节）：进行中显示「正在获取模型列表…」，完成后被结果行替换——成功为 `✓ 已获取 N 个模型`；失败显示原因并继续后续步骤（401/403 → 密钥可能无效；404/网络错误等 → 模型将手动填写），保存后可用「刷新模型列表」重试；
+4. 上游列表未声明思考能力 → **单步档位勾选**（ADR-0019 第 2 条；ADR-0018 规则不变，仅交互形式调整）：选项列表首项为「不支持思考强度」，与其余六档互斥；`↑`/`↓` 移动、`空格` 勾选、`Enter` 确认；什么都不勾直接回车同样等于不支持；
 5. 保存 → 回列表，底部结果显示如 `已保存 command，12 个模型`（未取到模型时为 `已保存 <id>`）。
 
 **已配置条目 `Enter` → 操作菜单**（内联选项条，`←`/`→` 移动、`Enter` 执行、`Esc` 返回）：
@@ -202,8 +202,10 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 |---|---|---|
 | 换密钥 | 掩码输入新密钥 → 系统凭据后端 | `/provider key <名>` |
 | 刷新模型列表 | 重新 `GET /models` 写回限额与能力标记；不覆盖 `thinking.levels` 用户声明 | `/provider refresh <名>` |
-| 调整思考档位 | 重走 y/N + 档位勾选 | `/provider thinking <名>` |
-| 删除 | 确认后删除条目与凭据；当前会话使用的拒绝；只读条目不可达 | `/provider remove <名>` |
+| 调整思考档位 | 重走单步档位勾选（首项「不支持思考强度」互斥） | `/provider thinking <名>` |
+| 删除 | 选项式确认框（默认焦点在「取消」；`←`/`→`/`↑`/`↓` 移动、`Enter` 执行、`Esc` 取消）确认后删除条目与凭据；当前会话使用的拒绝；只读条目不可达 | `/provider remove <名>` |
+
+**全页无打字是非题**（ADR-0019 第 2 条）：所有是非与多选交互都用 `↑`/`↓`/`←`/`→` + `空格`/`Enter` 完成——包括删除确认与思考档位勾选，页面上不出现需要键入 `y`/`N` 回答的提问。
 
 **向导对外只发 `GET /models`**（provider-setup.md 第 1、6 节）：不做连接测试、不发模型请求；测试用 fake fetch 断言只出现 `GET /models`。
 
@@ -214,6 +216,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 - `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口 + ADR-0010 批准的终端依赖（ink、react；`ink-testing-library` 为 devDependency）。depcheck 新增规则：禁止 apps/tui → 其他 apps；cli→tui 仅惰性边界一例。
 - 目录：`src/index.ts`（`runTui` 导出）、`src/app.tsx`（Ink 根组件）、`src/commands.ts`（斜杠命令分发）、`src/session-view.ts`（`useSessionView`：持久日志回放 + 订阅进同一 reducer）、`src/env.ts`（NOCTURNE_ASCII / NO_COLOR / TERM 降级探测）、`src/theme.ts`（主题常量：语义色、分段色、像素 Logo 数据；组件不写死色值）、`src/format.ts`（宽度安全格式化）、`src/types.ts`（`SwitchSessionFn` 等注入类型）、`src/alt-screen.ts`（备用屏进出原语，模型选择页与服务商页共用）、`src/components/`（Transcript、Activity、ToolRow、DiffView、PermissionDialog、StatusBar、Composer、PickList、Panel、ConfirmBox、WelcomeBox、ProviderPage、ModelPicker、WizardView）。
 - 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎框/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/就地步骤/四操作/Esc/Ctrl+C。
+- **歧义宽度字符**（conhost 实测，GBK 代码页）：`· ● ○ ◆ ◇ ↑ ↓ ← → … — ｜` 等在控制台实宽 2 列，与 `string-width` 的 1 列不一致；`│ ─ ╭ █ ✓ ✗ ⚠ • › ⠋` 及全角 CJK 两边一致。凡会被补齐到整宽的行（带边框 Box 内部、左右栏拼接行），每个歧义字符都让实际行宽 +1，超边即折行——备用屏下表现为整屏滚动、页头被裁。规则：框内动态文本一律过 `format.ts` 的 `boxSafe()`，静态文案只用宽度确定字符（分隔符用 `•` 不用 `·`，方向提示用"上下/左右"不用箭头），边框盒距右缘保留 ≥4 列余量；无补齐的行（裸 Text）只需截断预算留 ≥4 列余量。
 - `runTui` 只消费现有公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`（状态栏上下文占用与 `/context` 同源），加上 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`，以及 `session.mcpServers()`（`/mcp` 面板与欢迎框 MCP 块）；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
 
 ## 10. 需要的 Core API 变更

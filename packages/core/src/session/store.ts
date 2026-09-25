@@ -38,6 +38,27 @@ interface UnsettledFix {
   started: boolean;
 }
 
+/**
+ * 会话摘要的首句摘要（SessionSummary.firstText）：首条 message.user
+ * 的首行文本。日志可能很大，只对含 "message.user" 的行做完整解码。
+ */
+function firstUserText(logText: string): string | undefined {
+  for (const line of logText.split("\n")) {
+    if (!line.includes("message.user")) continue;
+    try {
+      const ev = decodeDurableEvent(line);
+      if (ev.type !== "message.user") continue;
+      const block = ev.payload.content.find((b) => b.type === "text");
+      if (block?.type !== "text") return undefined;
+      const firstLine = block.text.split("\n", 1)[0]?.trim();
+      return firstLine !== undefined && firstLine !== "" ? firstLine : undefined;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
 export interface SessionStoreDeps {
   platform: Platform;
   /** 会话目录：<NOCTURNE_HOME>/sessions */
@@ -315,6 +336,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             mtimeMs: stat.mtimeMs,
             locked: await lockLooksHeld(fs, platform, lockPath(id)),
             ...(event.payload.parent !== undefined ? { parent: event.payload.parent } : {}),
+            ...(firstUserText(text) !== undefined ? { firstText: firstUserText(text) } : {}),
           });
         } catch {
           // 列表是只读操作：单个损坏文件不阻塞其他会话

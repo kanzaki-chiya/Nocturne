@@ -24,6 +24,8 @@ export interface ProviderPreset {
    * "openrouter" → reasoning: { effort }；缺省 → openai（reasoning_effort）。
    */
   thinkingFormat?: "openai" | "openrouter" | undefined;
+  /** 密钥获取入口（控制台 URL）：向导密钥步骤的说明小字提示来源 */
+  keyHint?: string | undefined;
 }
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
@@ -35,6 +37,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     baseURL: "https://api.deepseek.com/v1",
     defaultKeyEnv: "DEEPSEEK_API_KEY",
     fetchableModels: true,
+    keyHint: "https://platform.deepseek.com/api_keys",
   },
   {
     id: "openrouter",
@@ -45,6 +48,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     defaultKeyEnv: "OPENROUTER_API_KEY",
     fetchableModels: true,
     thinkingFormat: "openrouter",
+    keyHint: "https://openrouter.ai/keys",
   },
   {
     id: "anthropic",
@@ -53,6 +57,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     defaultName: "anthropic",
     defaultKeyEnv: "ANTHROPIC_API_KEY",
     fetchableModels: true,
+    keyHint: "https://console.anthropic.com/settings/keys",
   },
   {
     id: "custom-openai",

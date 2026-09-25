@@ -12,7 +12,7 @@ import { useMemo, useState } from "react";
 import type { ModelInfo, ModelRef, ProviderOverview, WizardPreset } from "@nocturne/core";
 
 import { useTuiEnv } from "../env.js";
-import { truncateLine } from "../format.js";
+import { boxSafe, truncateLine } from "../format.js";
 import type { WizardState } from "../wizard-io.js";
 import { WizardView } from "./wizard-view.js";
 
@@ -335,7 +335,8 @@ export function ModelPicker({
       title="添加服务商"
       state={wizard.state}
       active={active}
-      width={width - (narrow ? 4 : LEFT_W + 4)}
+      width={width - (narrow ? 6 : LEFT_W + 6)}
+      maxRows={height}
       onSubmit={wizard.submit}
       onSubmitMulti={wizard.submitMulti}
       onCancel={wizard.cancel}
@@ -352,7 +353,7 @@ export function ModelPicker({
       action={action}
       current={current}
       defaultModel={defaultModel}
-      width={width - (narrow ? 2 : LEFT_W + 2)}
+      width={width - (narrow ? 4 : LEFT_W + 4)}
       height={height}
     />
   );
@@ -411,15 +412,16 @@ function LeftPane({
         ((item.scope === "recent" && scope.kind === "recent") ||
           (item.scope === "all" && scope.kind === "all"))) ||
       (item.kind === "provider" && scope.kind === "provider" && scope.id === item.id);
+    // ●/○ 状态点保留（2 列膨胀由栏宽余量吸收）；id/label 等动态文本过 boxSafe
     const label =
       item.kind === "scope"
-        ? item.label
+        ? boxSafe(item.label)
         : item.kind === "provider"
-          ? `${dotOn} ${item.id} ${item.count}`
-          : `${dotOff} ${item.id}`;
+          ? `${dotOn} ${boxSafe(item.id)} ${item.count}`
+          : `${dotOff} ${boxSafe(item.id)}`;
     rendered.push(
       <Text key={i} wrap="truncate">
-        <Text inverse={focused}>{truncateLine(`${cur ? "▸ " : "  "}${label}`, width - 2)}</Text>
+        <Text inverse={focused}>{truncateLine(`${cur ? "> " : "  "}${label}`, width - 2)}</Text>
       </Text>,
     );
   });
@@ -505,7 +507,9 @@ function RightPane({
       <Text key={idx} wrap="truncate">
         <Text inverse={focused}>
           {truncateLine(
-            `${focused ? "›" : " "}${mark} ${name}  ${r} ${im}  ${ctxText(m).padStart(5)} ${priceText(m).padStart(11)}`,
+            boxSafe(
+              `${focused ? ">" : " "}${mark} ${name}  ${r} ${im}  ${ctxText(m).padStart(5)} ${priceText(m).padStart(11)}`,
+            ),
             width - 2,
           )}
         </Text>
@@ -517,12 +521,12 @@ function RightPane({
   return (
     <Box flexDirection="column" width={width} height={height}>
       <Text wrap="truncate">
-        {truncateLine(`搜索: ${query}`, width - 2)}
+        {truncateLine(boxSafe(`搜索: ${query}`), width - 2)}
         <Text inverse> </Text>
       </Text>
       <Text dimColor>
         {scopeLabel}
-        {rows.length > 0 ? ` · ${cursor + 1}/${rows.length}` : " · 无匹配"}
+        {rows.length > 0 ? ` • ${cursor + 1}/${rows.length}` : " • 无匹配"}
       </Text>
       {lines}
       {rows.length === 0 ? <Text dimColor>（无匹配模型）</Text> : null}
@@ -532,7 +536,9 @@ function RightPane({
           <>
             <Text wrap="truncate">
               {truncateLine(
-                `${refText(sel.ref)}${sel.displayName !== undefined ? ` — ${sel.displayName}` : ""}`,
+                boxSafe(
+                  `${refText(sel.ref)}${sel.displayName !== undefined ? ` - ${sel.displayName}` : ""}`,
+                ),
                 width - 2,
               )}
             </Text>
@@ -548,7 +554,7 @@ function RightPane({
                   defaultModel !== undefined && refEq(sel.ref, defaultModel) ? "默认模型" : "",
                 ]
                   .filter((s) => s !== "")
-                  .join(" · "),
+                  .join(" • "),
                 width - 2,
               )}
             </Text>
@@ -561,14 +567,14 @@ function RightPane({
         <Text>
           <Text inverse={action === 0}>[仅本会话]</Text>{" "}
           <Text inverse={action === 1}>[设为默认]</Text>
-          <Text dimColor> ←→ 选择，Enter 确认，Esc 返回</Text>
+          <Text dimColor> 左右选择，Enter 确认，Esc 返回</Text>
         </Text>
       ) : (
         <Text dimColor wrap="truncate">
           {truncateLine(
             narrow
-              ? "←→切范围 ↑↓移动 输入=搜索 Enter选择 PgUp/PgDn翻页 Esc关闭"
-              : "←→切换栏 ↑↓移动 输入=搜索 Enter选择 PgUp/PgDn翻页 Esc关闭",
+              ? "左右切范围 上下移动 输入=搜索 Enter选择 PgUp/PgDn翻页 Esc关闭"
+              : "左右切换栏 上下移动 输入=搜索 Enter选择 PgUp/PgDn翻页 Esc关闭",
             width - 2,
           )}
         </Text>

@@ -15,8 +15,10 @@ export type ProviderWizardStart =
 
 export type SlashResult =
   | { kind: "overlay"; name: OverlayName }
-  /** /model 与 /provider（无参）打开全屏模型选择页（tui.md §7） */
+  /** /model 打开全屏模型选择页（tui.md §7） */
   | { kind: "picker"; focus: "left" | "right" }
+  /** /provider（无参/add）打开全屏服务商页（tui.md §8）；presetId 直达内嵌向导 */
+  | { kind: "provider-page"; presetId?: string | undefined }
   | { kind: "message"; text: string }
   | { kind: "exit" }
   /** /resume <id>：由 App 调用注入的 switchSession 执行切换 */
@@ -47,9 +49,10 @@ const HELP_TEXT = `斜杠命令：
   /mcp           显示本会话 MCP 服务器状态（只读）
   /compact       手动压缩上下文（L2 摘要）
   /resume        弹出会话列表选择器；/resume <id> 直接切换
-  /provider      打开模型选择页（焦点在服务商栏）
-  /provider add  添加服务商向导；key <名称> 更新密钥；thinking <名称> 调整思考档位
-  /provider refresh <名称> 刷新上游模型；remove <名称> 删除
+  /provider      打开服务商页（列表/过滤/就地配置/操作菜单）
+  /provider add  打开服务商页并进入添加向导；key <名称> 更新密钥
+  /provider thinking <名称> 调整思考档位；refresh <名称> 刷新上游模型
+  /provider remove <名称> 删除服务商（需确认）
   /exit, /quit   退出
 快捷键：a/s/p/d/x 权限确认（d 进反馈行，Enter 发送、Esc 返回）；
 Ctrl+C 中断（空闲时退出）；Ctrl+D 退出。`;
@@ -68,8 +71,8 @@ export async function runSlash(
     case "/quit":
       return { kind: "exit" };
     case "/provider": {
-      // 无参：打开模型选择页，焦点在左栏服务商列表（tui.md §7）
-      if (arg === "") return { kind: "picker", focus: "left" };
+      // 无参：打开全屏服务商页（tui.md §8）；add 同页内嵌向导
+      if (arg === "") return { kind: "provider-page" };
       if (provider === undefined) {
         return { kind: "message", text: "! 当前环境不支持 /provider 管理" };
       }
@@ -78,8 +81,8 @@ export async function runSlash(
       switch (sub) {
         case "add":
           return {
-            kind: "provider-wizard",
-            start: { kind: "add", presetId: name !== "" ? name : undefined },
+            kind: "provider-page",
+            presetId: name !== "" ? name : undefined,
           };
         case "key":
           if (name === "") return { kind: "message", text: "用法：/provider key <名称>" };

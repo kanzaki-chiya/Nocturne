@@ -15,7 +15,7 @@ import {
 } from "@nocturne/core";
 import { createMcpConnector } from "@nocturne/mcp";
 
-import { HELP_TEXT, parseArgs, UsageError, type CliArgs } from "./args.js";
+import { HELP_TEXT, parseArgs, resolveUiMode, UsageError, type CliArgs } from "./args.js";
 import {
   collectConfig,
   configProblemsReport,
@@ -90,13 +90,18 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  // --tui 需要交互式终端；非 TTY 直接退出 2，不降级为行式输出（tui.md 第 5 节）
-  if (args.tui && (!process.stdin.isTTY || !process.stdout.isTTY)) {
-    process.stderr.write(
-      '! --tui 需要交互式终端；非 TTY 环境请用 nctrn（行式 REPL）或 nctrn -p "<prompt>"\n',
-    );
+  const interactive = process.stdin.isTTY && process.stdout.isTTY;
+  // 界面选择（cli.md §2）：TTY 默认 TUI；--cli 或非 TTY 行式；
+  // 显式 --tui 在非 TTY 下报用法错（不降级）
+  const uiMode = resolveUiMode(args, interactive);
+  if (typeof uiMode === "object") {
+    process.stderr.write(`! ${uiMode.error}\n`);
     return 2;
   }
+
+  // 诊断开关（observability.md 第 1 节）：--debug / NOCTURNE_DEBUG；
+  // 文件位置只由 --debug-file / NOCTURNE_DEBUG_FILE 决定，"-" 写 stderr
+  const debugEnabled = args.debug || /^(1|true|yes|on)$/i.test(process.env.NOCTURNE_DEBUG ?? "");
 
   const platform = createPlatform();
   let cwd: string;
@@ -111,9 +116,10 @@ async function main(): Promise<number> {
   }
 
   // setup：服务商配置向导（provider-setup.md 第 1 节）。
-  // stdin/stdout 均为 TTY 才运行，否则退出码 2 并提示手写配置
+  // TTY 默认打开全屏服务商页（第 1 步）→ 无默认模型时模型页（第 2 步）；
+  // --cli 用行式向导；stdin/stdout 非 TTY 时退出码 2 并提示手写配置
   if (args.command === "setup") {
-    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    if (!interactive) {
       process.stderr.write(
         "! nctrn setup 需要交互式终端；非交互环境请手写 <NOCTURNE_HOME>/config.json（见 README）\n",
       );
@@ -123,6 +129,33 @@ async function main(): Promise<number> {
     if (!collected.ok) {
       process.stderr.write(`配置错误：\n${collected.problems.map((p) => `  - ${p}`).join("\n")}\n`);
       return 2;
+    }
+    if (!args.cli) {
+      const runtime = await createRuntime({
+        cwd,
+        config: collected.config.runtime,
+        interactive: true,
+        permissions: { autoApproveAsk: args.yes },
+        mcp: createMcpConnector(),
+        debug: {
+          enabled: debugEnabled,
+          file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,
+        },
+      });
+      const { runTui } = await import("@nocturne/tui");
+      return await runTui({ setup: {} }, runtime, {
+        stdin: process.stdin,
+        stdout: process.stdout,
+        stderr: process.stderr,
+        provider: {
+          config: collected.config.runtime,
+          reloadConfig: makeConfigLoader(args, platform),
+          updateProviders: (rc) => {
+            runtime.updateProviders(rc);
+          },
+          workspaceRoot: cwd,
+        },
+      });
     }
     try {
       await runProviderSetupWizard(
@@ -163,10 +196,96 @@ async function main(): Promise<number> {
     requireModel: !isResume,
   });
   if (!collected.ok) {
+    // 交互模式（非 --print）且配置可在向导内补齐 → 首次配置流程
+    // （ADR-0019 第 4 条）：无服务商来源 → 第 1 步服务商页；
+    // 已有服务商但缺模型 → 第 2 步模型页。其余问题维持错误报告。
+    // --cli 时首个服务商用行式向导；"缺模型"在行式下没有选模型页，维持错误报告。
+    const missingModelOnly =
+      collected.problems.length === 1 && collected.problems[0] !== undefined
+        ? collected.problems[0].startsWith("缺少模型")
+        : false;
+    const setupStep = !collected.hasProviderSource ? 1 : missingModelOnly ? 2 : 0;
+    if (setupStep > 0 && interactive && !args.print) {
+      const runtimeConfig = await makeConfigLoader(args, platform)();
+      if (args.cli) {
+        if (setupStep === 2) {
+          process.stderr.write(
+            configProblemsReport(collected.problems, {
+              tty: true,
+              hasProviderSource: true,
+            }),
+          );
+          return 2;
+        }
+        try {
+          await runProviderSetupWizard(
+            createWizardIo(process.stdin, process.stdout),
+            runtimeConfig,
+          );
+          process.stdout.write("配置完成：运行 nctrn 启动；用 /model 选择模型\n");
+          return 0;
+        } catch (e) {
+          if (e instanceof WizardAbort) {
+            process.stdout.write("已取消\n");
+            return 0;
+          }
+          process.stderr.write(`! ${errorText(e)}\n`);
+          return 1;
+        }
+      }
+      const runtime = await createRuntime({
+        cwd,
+        config: runtimeConfig,
+        interactive: true,
+        permissions: { autoApproveAsk: args.yes },
+        mcp: createMcpConnector(),
+        debug: {
+          enabled: debugEnabled,
+          file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,
+        },
+      });
+      // 会话由 setup.openSession 在流程完成后创建；holder 那一刻才被填充
+      // （/resume 只可能出现在会话已挂载的主界面里，不会读到空槽）
+      const holder: SessionHolder = { current: undefined as unknown as RuntimeSession };
+      let created: RuntimeSession | undefined;
+      const { runTui } = await import("@nocturne/tui");
+      const code = await runTui(
+        {
+          setup: {
+            step: setupStep as 1 | 2,
+            openSession: async (ref: string) => {
+              created = await runtime.createSession({
+                model: ref,
+                ...(args.preset !== undefined ? { permissionPreset: args.preset } : {}),
+              });
+              holder.current = created;
+              return created;
+            },
+          },
+        },
+        runtime,
+        {
+          stdin: process.stdin,
+          stdout: process.stdout,
+          stderr: process.stderr,
+          provider: {
+            config: runtimeConfig,
+            reloadConfig: makeConfigLoader(args, platform),
+            updateProviders: (rc) => {
+              runtime.updateProviders(rc);
+            },
+            workspaceRoot: cwd,
+          },
+          switchSession: createSessionSwitcher({ runtime, platform, cwd, holder }),
+        },
+      );
+      await created?.close();
+      return code;
+    }
     // cli.md 第 2 节：交互终端提示 nctrn setup；非 TTY 输出保持脚本可解析
     process.stderr.write(
       configProblemsReport(collected.problems, {
-        tty: process.stdin.isTTY && process.stdout.isTTY,
+        tty: interactive,
         hasProviderSource: collected.hasProviderSource,
       }),
     );
@@ -177,9 +296,6 @@ async function main(): Promise<number> {
     process.stderr.write(`! ${w}\n`);
   }
 
-  // 诊断开关（observability.md 第 1 节）：--debug / NOCTURNE_DEBUG；
-  // 文件位置只由 --debug-file / NOCTURNE_DEBUG_FILE 决定，"-" 写 stderr
-  const debugEnabled = args.debug || /^(1|true|yes|on)$/i.test(process.env.NOCTURNE_DEBUG ?? "");
   const runtime = await createRuntime({
     cwd,
     config: runtimeConfig,
@@ -280,9 +396,10 @@ async function main(): Promise<number> {
     }
   }
 
-  // --tui 下打开提示由 TUI 在挂载时进提示区（app.tsx 挂载 effect），
-  // 此处不向 stderr 预打印，避免同一份提示出现两次
-  if (!args.tui) printSessionNotes(session);
+  // TTY 默认 TUI（--cli 或非 TTY 走行式；--tui 为兼容参数）。
+  // TUI 下打开提示由欢迎框下的通知块呈现（ADR-0019），此处不预打印
+  const useTui = uiMode === "tui";
+  if (!useTui) printSessionNotes(session);
 
   // /resume 会话切换：打开逻辑只有这一份，REPL 与 TUI 注入同一个 switcher；
   // holder 跟踪当前会话，退出时关闭的是切换后的那个
@@ -310,10 +427,10 @@ async function main(): Promise<number> {
   }
 
   if (!args.print) {
-    if (args.tui) {
+    if (useTui) {
       // 惰性加载 TUI：cli 的日常路径不支付 ink/react 的启动开销（ADR-0010）
       const { runTui } = await import("@nocturne/tui");
-      const code = await runTui(session, runtime, {
+      const code = await runTui({ session }, runtime, {
         stdin: process.stdin,
         stdout: process.stdout,
         stderr: process.stderr,

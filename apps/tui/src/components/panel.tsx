@@ -40,11 +40,16 @@ export function Panel({
 
   const visible = lines.slice(offset, offset + MAX_VISIBLE);
   return (
-    <Box flexDirection="column" borderStyle={env.ascii ? "single" : "round"} borderColor="cyan">
+    <Box
+      flexDirection="column"
+      width={width - 4}
+      borderStyle={env.ascii ? "single" : "round"}
+      borderColor="cyan"
+    >
       <Text bold>{title}</Text>
       {visible.map((l, i) => (
         <Text key={offset + i} wrap="truncate">
-          {truncateLine(l, width - 4)}
+          {truncateLine(l, width - 8)}
         </Text>
       ))}
       {lines.length > MAX_VISIBLE ? (
@@ -52,7 +57,7 @@ export function Panel({
           {offset + 1}–{Math.min(lines.length, offset + MAX_VISIBLE)}/{lines.length}
         </Text>
       ) : null}
-      <Text dimColor>Esc / Enter 关闭{maxOffset > 0 ? "，↑↓ 滚动" : ""}</Text>
+      <Text dimColor>Esc / Enter 关闭{maxOffset > 0 ? "，上下滚动" : ""}</Text>
     </Box>
   );
 }

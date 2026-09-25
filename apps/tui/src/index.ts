@@ -8,7 +8,7 @@ import { createElement } from "react";
 
 import type { Runtime, RuntimeSession } from "@nocturne/core";
 
-import { App } from "./app.js";
+import { App, type SetupFlowSpec } from "./app.js";
 import type { ProviderBridge } from "./commands.js";
 import { detectTuiEnv } from "./env.js";
 
@@ -18,6 +18,14 @@ export interface TuiOptions {
   stdin?: NodeJS.ReadStream | undefined;
   stdout?: NodeJS.WriteStream | undefined;
   stderr?: NodeJS.WriteStream | undefined;
+  /**
+   * 会话入口，两选一：
+   * - session：直接进入主界面（常规形态）；
+   * - setup：首次配置流程——服务商页 → 模型页（ADR-0019 第 4 条），
+   *   完成后经 spec.openSession 开新会话，或（setup 命令形态）直接退出。
+   */
+  session?: RuntimeSession | undefined;
+  setup?: SetupFlowSpec | undefined;
   /**
    * /resume 会话切换回调（tui.md §3）：由 CLI 注入，打开逻辑只此一份。
    * 缺省时 /resume 提示不可用。
@@ -33,10 +41,10 @@ export interface TuiOptions {
 /**
  * 运行 TUI 主界面，直到用户退出；返回进程退出码（与 REPL 同口径）。
  * 调用方（CLI）负责：参数解析、配置加载、会话打开/恢复与跨目录确认，
- * TUI 只消费已打开的 Session。
+ * TUI 只消费已打开的 Session 或 setup 描述。
  */
 export async function runTui(
-  session: RuntimeSession,
+  entry: { session: RuntimeSession } | { setup: SetupFlowSpec } | { session?: undefined },
   runtime: Runtime,
   options: TuiOptions = {},
 ): Promise<number> {
@@ -55,13 +63,20 @@ export async function runTui(
   // 退出时补一次真正的 unref 让事件循环能排空。
   const realUnref = stdin.unref.bind(stdin);
   stdin.unref = () => stdin;
+  let exitCode = 0;
+  let exitMessage: string | undefined;
   const app = render(
     createElement(App, {
-      session,
+      session: "session" in entry ? entry.session : undefined,
+      setup: "setup" in entry ? entry.setup : options.setup,
       runtime,
       env: detectTuiEnv(),
       switchSession: options.switchSession,
       provider: options.provider,
+      onExitResult: (code: number, message?: string) => {
+        exitCode = code;
+        exitMessage = message;
+      },
     }),
     {
       stdout,
@@ -76,8 +91,12 @@ export async function runTui(
   } finally {
     realUnref();
   }
-  return 0;
+  if (exitMessage !== undefined && exitMessage !== "") {
+    stderr.write(`${exitMessage}\n`);
+  }
+  return exitCode;
 }
 
 export { App } from "./app.js";
+export type { SetupFlowSpec } from "./app.js";
 export type { SessionSwitchResult, SwitchSessionFn } from "./types.js";

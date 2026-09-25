@@ -55,7 +55,7 @@ export function glyphs(env: TuiEnv): Glyphs {
         ok: "✓",
         err: "✗",
         wait: "?",
-        notice: "◇",
+        notice: "•",
         prompt: "›",
         ellipsis: "…",
         spinner: ["●", "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],

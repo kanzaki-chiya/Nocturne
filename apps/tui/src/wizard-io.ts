@@ -4,6 +4,8 @@
  * 输入框状态，用户 Enter 后 resolve，Esc 后 reject(WizardAbort)。
  * print() 追加到日志区。密钥经 askSecret 回显为 *（WizardView 渲染）。
  */
+import { appendFileSync } from "node:fs";
+
 import { useCallback, useRef, useState } from "react";
 
 import {
@@ -22,15 +24,21 @@ import {
 export interface WizardPrompt {
   text: string;
   secret: boolean;
-  /** 多选模式（ADR-0018 思考档位勾选）：渲染 checkbox 列表 */
-  multi?: { options: string[] } | undefined;
+  /** 提示下方的说明小字（omp 风格表单：强调色问题 + 灰色说明） */
+  hint?: string | undefined;
+  /** 多选模式（ADR-0018/0019 思考档位勾选）：渲染 checkbox 列表 */
+  multi?: { options: string[]; exclusiveIndex?: number | undefined } | undefined;
 }
 
 export interface WizardState {
   /** 向导是否运行中 */
   running: boolean;
-  /** print() 累积的日志行 */
+  /** print() 累积的日志行（失败原因等独立行） */
   logs: readonly string[];
+  /** 已完成步骤的一行摘要（渲染为 "a · b · c" 折叠行） */
+  steps: readonly string[];
+  /** 瞬时进度行（"正在获取模型列表…"），被下一次 step/print 覆盖 */
+  busyText?: string | undefined;
   /** 当前挂起的输入提示（undefined = 流程在异步步骤中，如拉取模型列表） */
   prompt?: WizardPrompt | undefined;
   /** 流程已结束（done/cancel/error 之一，供视图显示收尾） */
@@ -44,7 +52,7 @@ type Pending =
   | { kind: "multi"; resolve: (v: number[]) => void; reject: (e: unknown) => void };
 
 export type WizardOutcome =
-  | { kind: "added"; providerId: string; model?: string | undefined }
+  | { kind: "added"; providerId: string; modelCount: number }
   | { kind: "key-updated"; providerId: string }
   | { kind: "thinking-updated"; providerId: string }
   | { kind: "cancel" }
@@ -82,35 +90,79 @@ export function useProviderWizard(
   config: RuntimeConfig | undefined,
   deps?: SetupWizardDeps,
 ): ProviderWizard {
-  const [state, setState] = useState<WizardState>({ running: false, logs: [] });
+  const [state, setState] = useState<WizardState>({ running: false, logs: [], steps: [] });
   const pendingRef = useRef<Pending | undefined>(undefined);
   const depsRef = useRef(deps ?? tuiWizardDeps());
   const configRef = useRef(config);
   configRef.current = config;
 
   const settle = useCallback((patch: Partial<WizardState>) => {
-    setState((s) => ({ ...s, ...patch }));
+    setState((s) => {
+      const next = { ...s, ...patch };
+      if (process.env.NOCTURNE_DEBUG_STATE !== undefined) {
+        try {
+          appendFileSync(process.env.NOCTURNE_DEBUG_STATE, JSON.stringify(next) + "\n");
+        } catch {
+          /* 调试用途，失败忽略 */
+        }
+      }
+      return next;
+    });
   }, []);
 
   // io 只在 settle/pendingRef 上闭包，渲染间重建无妨；start 捕获当次实例即可
   const io: WizardIo = {
-    ask: (prompt) =>
+    ask: (prompt, opts) =>
       new Promise<string>((resolve, reject) => {
         pendingRef.current = { kind: "text", resolve, reject };
-        settle({ prompt: { text: prompt, secret: false } });
+        settle({
+          prompt: {
+            text: prompt,
+            secret: false,
+            ...(opts?.hint !== undefined ? { hint: opts.hint } : {}),
+          },
+          busyText: undefined,
+        });
       }),
-    askSecret: (prompt) =>
+    askSecret: (prompt, opts) =>
       new Promise<string>((resolve, reject) => {
         pendingRef.current = { kind: "text", resolve, reject };
-        settle({ prompt: { text: prompt, secret: true } });
+        settle({
+          prompt: {
+            text: prompt,
+            secret: true,
+            ...(opts?.hint !== undefined ? { hint: opts.hint } : {}),
+          },
+          busyText: undefined,
+        });
       }),
-    chooseMulti: (prompt, options) =>
+    chooseMulti: (prompt, options, opts) =>
       new Promise<number[]>((resolve, reject) => {
         pendingRef.current = { kind: "multi", resolve, reject };
-        settle({ prompt: { text: prompt, secret: false, multi: { options: [...options] } } });
+        settle({
+          prompt: {
+            text: prompt,
+            secret: false,
+            ...(opts?.hint !== undefined ? { hint: opts.hint } : {}),
+            multi: {
+              options: [...options],
+              ...(opts?.exclusiveIndex !== undefined
+                ? { exclusiveIndex: opts.exclusiveIndex }
+                : {}),
+            },
+          },
+          busyText: undefined,
+        });
       }),
+    busy: (text) => {
+      setState((s) => ({ ...s, busyText: text }));
+    },
+    step: (text) => {
+      // 已完成步骤折叠进摘要行，同时覆盖瞬时进度
+      setState((s) => ({ ...s, steps: [...s.steps, text], busyText: undefined }));
+    },
     print: (text) => {
-      setState((s) => ({ ...s, logs: [...s.logs, ...text.split("\n")] }));
+      setState((s) => ({ ...s, logs: [...s.logs, ...text.split("\n")], busyText: undefined }));
     },
   };
   const ioRef = useRef(io);
@@ -154,7 +206,7 @@ export function useProviderWizard(
         onDone({ kind: "error", message: "当前环境不支持 /provider 配置" });
         return;
       }
-      setState({ running: true, logs: [] });
+      setState({ running: true, logs: [], steps: [] });
       const run =
         s.kind === "add"
           ? runProviderSetupWizard(io, cfg, depsRef.current, {
@@ -162,7 +214,7 @@ export function useProviderWizard(
             }).then((r: WizardResult): WizardOutcome => ({
               kind: "added",
               providerId: r.providerId,
-              model: r.model,
+              modelCount: r.modelCount,
             }))
           : s.kind === "key"
             ? runProviderKeyWizard(io, cfg, s.providerId).then((): WizardOutcome => ({
@@ -182,7 +234,7 @@ export function useProviderWizard(
             done: "done",
             doneText:
               outcome.kind === "added"
-                ? `已保存 ${outcome.providerId}${outcome.model !== undefined ? `（默认 ${outcome.model}）` : ""}`
+                ? `已保存 ${outcome.providerId}${outcome.modelCount > 0 ? `，${outcome.modelCount} 个模型` : ""}`
                 : outcome.kind === "key-updated"
                   ? `已更新 ${outcome.providerId} 的密钥`
                   : outcome.kind === "thinking-updated"
