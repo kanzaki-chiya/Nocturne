@@ -48,6 +48,13 @@ export async function runTui(
     stderr.write('! --tui 需要交互式终端；请用 nctrn（行式 REPL）或 nctrn -p "<prompt>"\n');
     return 2;
   }
+  // Windows 控制台 stdin：Ink suspendTerminal 的 pauseInput 会 unref() stdin，
+  // 撤销挂起的控制台读请求，而 resumeInput 的 ref() 不会重发——多次
+  // 备用屏切换后 stdin 永久饿死（实测第 2~3 个周期必现）。本应用里挂起
+  // 只用于备用屏切换，没有子进程接管终端，unref 没有意义；吞掉它并在
+  // 退出时补一次真正的 unref 让事件循环能排空。
+  const realUnref = stdin.unref.bind(stdin);
+  stdin.unref = () => stdin;
   const app = render(
     createElement(App, {
       session,
@@ -64,7 +71,11 @@ export async function runTui(
       exitOnCtrlC: false,
     },
   );
-  await app.waitUntilExit();
+  try {
+    await app.waitUntilExit();
+  } finally {
+    realUnref();
+  }
   return 0;
 }
 

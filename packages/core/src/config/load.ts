@@ -200,11 +200,14 @@ export async function loadConfig(
     removeSetupProvider: (providerId) =>
       removeSetupProvider(platform, home, credentials, providerId),
     async describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]> {
+      // 向导层每次现读：本会话内 /provider add|remove 写入 providers.json 后
+      // 立即可见（user/env/cli 层沿用加载时快照，与运行时配置一致）
+      const setupNow = await loadProviderSetup(platform, home);
       const project =
         workspaceRoot !== undefined ? await projectFileIfTrusted(workspaceRoot) : undefined;
       return describeProviderLayers(
         {
-          setup: setupFile.providers,
+          setup: setupNow.file?.providers,
           user: userFile.providers,
           project: project?.providers,
           env: envLayer.file.providers,

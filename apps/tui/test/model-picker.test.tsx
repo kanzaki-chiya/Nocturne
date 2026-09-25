@@ -17,9 +17,20 @@ const pause = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 const inEnv = (child: React.ReactNode) =>
   createElement(TuiEnvContext.Provider, { value: ENV }, child);
 
+const caps = (
+  reasoning: "none" | "visible" | "hidden",
+  imageInput = false,
+): ModelInfo["capabilities"] => ({
+  reasoning,
+  imageInput,
+  promptCache: false,
+  toolCalls: true,
+  parallelToolCalls: false,
+});
+
 const model = (provider: string, id: string, extra?: Partial<ModelInfo>): ModelInfo => ({
   ref: { provider, model: id },
-  capabilities: { reasoning: "none", imageInput: false, promptCache: false },
+  capabilities: caps("none"),
   ...extra,
 });
 
@@ -28,12 +39,12 @@ const MODELS: ModelInfo[] = [
     contextWindow: 128_000,
     maxOutputTokens: 8_000,
     pricing: { input: 0.27, output: 1.1 },
-    capabilities: { reasoning: "visible", imageInput: true, promptCache: false },
+    capabilities: caps("visible", true),
   }),
   model("openrouter", "gpt-5.2-codex", {
     contextWindow: 400_000,
     pricing: { input: 1.75, output: 14 },
-    capabilities: { reasoning: "hidden", imageInput: false, promptCache: false },
+    capabilities: caps("hidden"),
   }),
   model("anthropic", "claude-opus-4.6", { contextWindow: 200_000 }),
   model("openrouter", "llama-4", {}),
@@ -77,8 +88,10 @@ const PRESETS: WizardPreset[] = [
     id: "commandcode",
     label: "CommandCode",
     type: "openai-compatible",
+    defaultName: "CommandCode",
     baseURL: "https://x",
-    envName: "CC_KEY",
+    defaultKeyEnv: "CC_KEY",
+    fetchableModels: true,
   },
 ];
 

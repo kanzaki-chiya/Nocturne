@@ -50,9 +50,10 @@ v0.2 新增的模型选择页（[tui.md](../apps/tui.md) 第 7 节）是双栏�
 
 - **复用 Ink 的 `useApp().suspendTerminal()`**：挂起时清除待渲染输出并暂停输入，恢复时强制全量重绘——这正是切屏所需的语义。备用屏序列仍由我们手写（Ink 的 `alternateScreen` 选项是进程级的，不能按页面开关）。
 - **打开顺序**：`suspendTerminal()` → 提交全屏页 React 状态（挂起期间不输出）→ 写 `?1049h` + `2J` + `H` → `resume()`（Ink 把页面帧全量重绘进备用屏）。
-- **关闭顺序**：`suspendTerminal()` → 仍在备用屏内 `resume()`（Ink 恢复输入并重绘）→ 写 `?1049l` 回主屏 → 再提交页面关闭状态。**`?1049l` 必须放在 `resume()` 之后**：实测在 conhost 上先退备用屏再 `resume()`，Ink 的 `resumeInput()` 触发 `stdin.setRawMode` 报 `EPIPE`。
+- **关闭顺序**：`suspendTerminal()` → 仍在备用屏内 `resume()`（Ink 恢复输入并重绘页面帧）→ 写 `?1049l` 回主屏 → 提交页面关闭状态，**等 React commit 且 `waitUntilRenderFlush()` 把主界面帧 flush 进主屏后才算关完**。两条约束都来自实测：**`?1049l` 必须在 `resume()` 之后**（conhost 上先退备用屏再 `resume()`，`resumeInput()` 的 `stdin.setRawMode` 报 `EPIPE`）；**关闭后必须等主界面帧真正落进主屏**（调用方若随即 `exit()`——Ctrl+C 退出路径——unmount 的终帧会把尚未卸载的页面帧画进主屏 scrollback，真实终端实测复现）。
 - **resize**：Ink 不会因终端 resize 自动重渲染组件——组件必须监听 `stdout` 的 `resize` 事件，把 `columns`/`rows` 存进 state 驱动重绘。
 - **`Ctrl+C`**：`render` 需 `exitOnCtrlC: false`，组件内处理——页面打开时先走正常关闭路径回主屏再 `exit()`，否则 unmount 会把页面帧写进主屏 scrollback。
+- **Windows 控制台 stdin 保护（正式实现阶段实测补齐）**：`suspendTerminal` 的 `pauseInput()` 会 `stdin.unref()` + `setRawMode(false)`。Windows 控制台输入句柄上，`unref()` 会撤销挂起的读请求、raw↔cooked 切换也会取消挂起读，而 `resumeInput()` 的 `ref()`/`setRawMode(true)` 都不能可靠重发——真实终端实测第 2~4 个开关周期后 stdin 永久饿死（stream 仍有 `readable` 监听、进程与事件循环存活，resize 重绘正常，但 `readable` 事件不再产生）。本应用挂起只用于备用屏切换、没有子进程接管终端，因此正式实现：**TUI 生命周期内吞掉 `stdin.unref()`（退出时补一次真 `unref` 让事件循环排空）+ 挂起窗口内吞掉 `setRawMode(false)`（控制台全程保持 raw）+ `resume()` 后 `stdin.read(0)` 补发一次读请求兜底**。周期退化为纯 listener detach/attach。这是 Windows 专属约束，不改变 POSIX 上的语义。
 - **兜底**：组件卸载清理与 `process.on("exit")` 双重保证 `?1049l`。
 - 另验证了一条不经 `suspendTerminal` 的极简路径（直接写 `?1049h/l` + 提交状态）在两种宿主上也稳定，作为 fallback 记录；正式实现默认走 suspend 路径，因为输入暂停使切换过程原子化、无渲染竞态。
 

@@ -62,7 +62,7 @@ export interface ProviderWizard {
 }
 
 /** TUI 侧依赖注入：provider 层能力 + 进程环境变量 */
-function tuiWizardDeps(
+export function tuiWizardDeps(
   env: (n: string) => string | undefined = (n) => process.env[n],
 ): SetupWizardDeps {
   return {
@@ -73,10 +73,13 @@ function tuiWizardDeps(
   };
 }
 
-export function useProviderWizard(config: RuntimeConfig | undefined): ProviderWizard {
+export function useProviderWizard(
+  config: RuntimeConfig | undefined,
+  deps?: SetupWizardDeps,
+): ProviderWizard {
   const [state, setState] = useState<WizardState>({ running: false, logs: [] });
   const pendingRef = useRef<Pending | undefined>(undefined);
-  const depsRef = useRef(tuiWizardDeps());
+  const depsRef = useRef(deps ?? tuiWizardDeps());
   const configRef = useRef(config);
   configRef.current = config;
 

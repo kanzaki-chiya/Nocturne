@@ -236,8 +236,11 @@ export function App({
 
   /** 关闭模型选择页：ADR-0017 序列——挂起 → 备用屏内恢复 → ?1049l → 提交关闭 */
   const closePicker = useCallback(async (): Promise<void> => {
-    await alt.leave(() => {
+    await alt.leave(async () => {
       setPicker(undefined);
+      // 提交必须落地后才算关完：否则紧随的 exit() 在 unmount 终帧里
+      // 把仍未卸载的页面帧画进主屏 scrollback（Ctrl+C 路径实测）
+      await waitCommit(pickerCommitted, false);
     });
   }, [alt]);
 
@@ -331,9 +334,13 @@ export function App({
       if (pickerOpen) {
         // 先走正常关闭路径回主屏再退出——否则 unmount 把页面帧写进 scrollback（ADR-0017）
         wizard.cancel();
-        void closePicker().then(() => {
-          exit();
-        });
+        void closePicker()
+          .then(() => {
+            exit();
+          })
+          .catch(() => {
+            exit();
+          });
         return;
       }
       if (foreign !== undefined) {
@@ -453,7 +460,9 @@ export function App({
               await closePicker();
               try {
                 if (setDefault && provider !== undefined) {
+                  // providers.json 的 model 字段 + 重载让 runtime.defaultModel() 生效
                   await provider.config.setDefaultModel(ref);
+                  provider.updateProviders(await provider.reloadConfig());
                 }
                 await session.setModel(ref);
               } catch (e) {
