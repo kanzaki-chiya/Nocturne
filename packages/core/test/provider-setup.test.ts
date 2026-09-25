@@ -15,9 +15,9 @@ import {
   type ProviderEntryConfig,
   type UpstreamModelEntry,
 } from "../src/config/index.js";
-import { createRuntime } from "../src/index.js";
+import { createRuntime, type RuntimeOptions } from "../src/index.js";
 import { createPlatform, type PipeProcess, type Platform } from "../src/platform/index.js";
-import { FakeProvider } from "../src/provider/index.js";
+import { FakeProvider, type FakeScript } from "../src/provider/index.js";
 
 let root: string;
 let home: string;
@@ -439,13 +439,22 @@ describe("recent-models.json", () => {
 // ── Runtime 集成：updateProviders / 警告 / recent 记录 ────
 
 describe("runtime：updateProviders 与警告（provider-setup.md 第 6 节）", () => {
-  const makeRuntime = async () => {
+  const makeRuntime = async (
+    extra?: Pick<RuntimeOptions, "permissions" | "hooks" | "mcp" | "mcpServers"> & {
+      scripts?: FakeScript[];
+      provider?: FakeProvider;
+    },
+  ) => {
     const rc = await load();
     const runtime = await createRuntime({
       cwd: root,
       sessionsDir: path.join(root, "sessions"),
       config: rc,
-      providers: [new FakeProvider({ scripts: [] })],
+      providers: [extra?.provider ?? new FakeProvider({ scripts: extra?.scripts ?? [] })],
+      ...(extra?.permissions !== undefined ? { permissions: extra.permissions } : {}),
+      ...(extra?.hooks !== undefined ? { hooks: extra.hooks } : {}),
+      ...(extra?.mcp !== undefined ? { mcp: extra.mcp } : {}),
+      ...(extra?.mcpServers !== undefined ? { mcpServers: extra.mcpServers } : {}),
     });
     return { rc, runtime };
   };
@@ -466,12 +475,42 @@ describe("runtime：updateProviders 与警告（provider-setup.md 第 6 节）",
   });
 
   it("updateProviders：新服务商在下一次空闲边界生效，不触发 Session 重建", async () => {
-    const { rc, runtime } = await makeRuntime();
+    // 钩子落点记录 + MCP open 计数：断言 updateProviders 不触发
+    // SessionEnd/SessionStart、不重开 MCP（provider-setup.md 第 6 节）
+    const hookLog = path.join(root, "hooks.log");
+    await fs.rm(hookLog, { force: true });
+    const hookArgs = [
+      "-e",
+      `require("fs").appendFileSync(${JSON.stringify(hookLog)}, process.env.NOCTURNE_HOOK_EVENT + "\\n")`,
+    ];
+    let mcpOpens = 0;
+    const { rc, runtime } = await makeRuntime({
+      hooks: {
+        SessionStart: [{ command: "node", args: hookArgs }],
+        SessionEnd: [{ command: "node", args: hookArgs }],
+      },
+      mcp: {
+        open: async () => {
+          mcpOpens++;
+          return {
+            tools: () => [],
+            status: () => [],
+            applyPendingTools: () => ({ add: [], remove: [] }),
+            close: async () => {
+              /* no-op */
+            },
+          };
+        },
+      },
+      mcpServers: [{ name: "stub", origin: "user", command: "node", args: ["-e", "0"] }],
+    });
     const session = await runtime.createSession({ model: "fake/fake-model" });
     const warnings: { code: string; message: string }[] = [];
     session.subscribe((e) => {
       if (e.type === "runtime.warning") warnings.push(e.payload);
     });
+    expect(mcpOpens).toBe(1); // 会话打开时装配一次
+    expect((await fs.readFile(hookLog, "utf8")).trim().split("\n")).toEqual(["SessionStart"]);
 
     // 新配置增加服务商 corp（更新 providers.json 后 reload）
     await writeJson(path.join(home, "providers.json"), {
@@ -481,10 +520,18 @@ describe("runtime：updateProviders 与警告（provider-setup.md 第 6 节）",
     runtime.updateProviders(await load());
     expect(runtime.listModels().some((m) => m.ref.provider === "corp")).toBe(true);
 
-    // setModel 是空闲边界：切到新服务商成功；SessionEnd/Start Hook 不触发（无会话重启）
+    // setModel 是空闲边界：切到新服务商成功；会话不重建
     await session.setModel("corp/m1");
     expect(session.state().config.model).toEqual({ provider: "corp", model: "m1" });
+    expect(mcpOpens).toBe(1);
+    expect((await fs.readFile(hookLog, "utf8")).trim().split("\n")).toEqual(["SessionStart"]);
+
+    // 对照：close 才真正触发 SessionEnd（证明钩子接线本身有效）
     await session.close();
+    expect((await fs.readFile(hookLog, "utf8")).trim().split("\n")).toEqual([
+      "SessionStart",
+      "SessionEnd",
+    ]);
     void rc;
   });
 
@@ -533,5 +580,111 @@ describe("runtime：updateProviders 与警告（provider-setup.md 第 6 节）",
       "corp/bare",
     );
     await session.close();
+  });
+});
+
+// ── shell 子进程凭据变量剥离（provider-setup.md 第 4 节第 2 条）────
+
+describe("shell 子进程剥离凭据变量（provider-setup.md 第 4 节）", () => {
+  const node = JSON.stringify(process.execPath);
+  // 请求携带全量历史：本轮工具结果取最后一条 tool 消息
+  const toolText = (provider: FakeProvider, requestIndex: number): string => {
+    const msgs =
+      provider.requests[requestIndex]?.messages.filter((msg) => msg.role === "tool") ?? [];
+    const last = msgs[msgs.length - 1];
+    return typeof last?.content === "string" ? last.content : "";
+  };
+  const echoScript = (expr: string): FakeScript[] => [
+    [
+      {
+        type: "tool_call",
+        toolCallId: "t1",
+        name: "shell",
+        input: { command: `${node} -e "${expr}"` },
+      },
+      { type: "finish", reason: "tool_calls" },
+    ],
+    [
+      { type: "text_delta", text: "done" },
+      { type: "finish", reason: "stop" },
+    ],
+  ];
+  const makeRuntime = async (provider: FakeProvider) => {
+    const rc = await load();
+    const runtime = await createRuntime({
+      cwd: root,
+      sessionsDir: path.join(root, "sessions"),
+      config: rc,
+      providers: [provider],
+      permissions: { autoApproveAsk: true },
+    });
+    return { rc, runtime };
+  };
+
+  it("向导条目不声明 apiKeyEnv：NOCTURNE/ANTHROPIC_API_KEY 仍被剥离（full-access + --yes）", async () => {
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [ENTRY],
+    });
+    const provider = new FakeProvider({
+      scripts: echoScript(
+        "process.stdout.write('NOC:'+(process.env.NOCTURNE_API_KEY??'-')+'|ANT:'+(process.env.ANTHROPIC_API_KEY??'-'))",
+      ),
+    });
+    process.env.NOCTURNE_API_KEY = "noc-secret";
+    process.env.ANTHROPIC_API_KEY = "ant-secret";
+    try {
+      const { runtime } = await makeRuntime(provider);
+      const session = await runtime.createSession({
+        model: "fake/fake-model",
+        permissionPreset: "full-access",
+      });
+      await session.submit({ text: "echo env" });
+      await session.close();
+      // 凭据变量不进模型驱动的子进程——shell 看到的两个默认名都为空
+      expect(toolText(provider, 1)).toContain("NOC:-|ANT:-");
+      expect(toolText(provider, 1)).not.toContain("noc-secret");
+      expect(toolText(provider, 1)).not.toContain("ant-secret");
+    } finally {
+      delete process.env.NOCTURNE_API_KEY;
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
+  it("剥离名单随 updateProviders 重算：新增 apiKeyEnv 在下一空闲边界生效", async () => {
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [ENTRY],
+    });
+    const provider = new FakeProvider({
+      scripts: [
+        ...echoScript("process.stdout.write('STRIP:'+(process.env.NCTR_TEST_KEY??'-'))"),
+        ...echoScript("process.stdout.write('STRIP:'+(process.env.NCTR_TEST_KEY??'-'))"),
+      ],
+    });
+    process.env.NCTR_TEST_KEY = "leak-me";
+    try {
+      const { runtime } = await makeRuntime(provider);
+      const session = await runtime.createSession({
+        model: "fake/fake-model",
+        permissionPreset: "full-access",
+      });
+      // 条目未声明 apiKeyEnv：该变量不在名单 → 子进程可见（对照）
+      await session.submit({ text: "one" });
+      expect(toolText(provider, 1)).toContain("STRIP:leak-me");
+
+      // 条目更新为声明 apiKeyEnv → updateProviders → 下一次空闲边界后剥离
+      await writeJson(path.join(home, "providers.json"), {
+        version: 1,
+        providers: [{ ...ENTRY, apiKeyEnv: "NCTR_TEST_KEY" }],
+      });
+      runtime.updateProviders(await load());
+      await session.submit({ text: "two" });
+      expect(toolText(provider, 3)).toContain("STRIP:-");
+      expect(toolText(provider, 3)).not.toContain("leak-me");
+      await session.close();
+    } finally {
+      delete process.env.NCTR_TEST_KEY;
+    }
   });
 });

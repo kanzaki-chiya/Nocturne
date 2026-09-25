@@ -78,7 +78,7 @@ export interface ToolContext extends ToolScope {
   process: ProcessRunner;
   readState: ReadStateStore;
   /**
-   * shell 子进程环境中要剥离的变量名（provider-setup.md 第 8 节：
+   * shell 子进程环境中要剥离的变量名（provider-setup.md 第 4 节：
    * 凭据变量不进模型驱动的子进程环境）
    */
   shellEnvStrip?: readonly string[] | undefined;
@@ -350,7 +350,7 @@ export interface ExecutionScope extends ToolScope {
   hooks?: HookRunner | undefined;
   /** 诊断通道；缺省为 no-op（observability.md） */
   diagnostics?: Diagnostics | undefined;
-  /** shell 子进程环境中要剥离的变量名（凭据变量；provider-setup.md 第 8 节） */
+  /** shell 子进程环境中要剥离的变量名（凭据变量；provider-setup.md 第 4 节） */
   shellEnvStrip?: readonly string[] | undefined;
 }
 
@@ -366,7 +366,7 @@ export interface ExecutionEnvironment {
   attachmentsDir?: string | undefined;
   hooks?: HookRunner | undefined;
   diagnostics?: Diagnostics | undefined;
-  /** shell 子进程环境中要剥离的变量名（凭据变量；provider-setup.md 第 8 节） */
+  /** shell 子进程环境中要剥离的变量名（凭据变量；provider-setup.md 第 4 节） */
   shellEnvStrip?: readonly string[] | undefined;
 }
 export interface TurnCallScope {

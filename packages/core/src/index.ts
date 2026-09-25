@@ -467,7 +467,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const sessionGrants: Grant[] = [];
     const projectGrants = ws?.grants.list() ?? [];
     const autoApproveAsk = options.permissions?.autoApproveAsk === true;
-    // 凭据索引的内置硬拒绝（provider-setup.md 第 8 节）：词法路径与
+    // 凭据索引的内置硬拒绝（provider-setup.md 第 4 节）：词法路径与
     // realpath 后的真实路径都进集合（junction/符号链接不能绕过）
     const credentialsIndexLexical = paths.join(nocturneHome, "credentials.json");
     const credentialsIndexResolved = paths.join(
@@ -604,15 +604,26 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     }
 
-    // shell 子进程环境剥离的凭据变量（provider-setup.md 第 8 节）：
-    // 全部 Provider 条目声明的 apiKeyEnv——模型驱动的 shell 拿不到密钥
-    const shellEnvStrip = [
-      ...new Set(
-        [...(resolved?.providers ?? []), ...(options.providerConfigs ?? [])]
+    // shell 子进程环境剥离的凭据变量（provider-setup.md 第 4 节第 2 条）：
+    // 全部 Provider 条目声明的 apiKeyEnv + NOCTURNE_API_KEY /
+    // ANTHROPIC_API_KEY 两个默认名——模型驱动的 shell 拿不到密钥。
+    // 数组原地更新：updateProviders 后 rebuildProviders 重算同一引用，
+    // execEnv/scope 无需重挂
+    const computeShellEnvStrip = (
+      providers: readonly { apiKeyEnv?: string | undefined }[],
+    ): string[] => [
+      ...new Set([
+        "NOCTURNE_API_KEY",
+        "ANTHROPIC_API_KEY",
+        ...providers
           .map((p) => p.apiKeyEnv)
           .filter((n): n is string => n !== undefined && n !== ""),
-      ),
+      ]),
     ];
+    const shellEnvStrip = computeShellEnvStrip([
+      ...(resolved?.providers ?? []),
+      ...(options.providerConfigs ?? []),
+    ]);
     const execEnv: ExecutionEnvironment = {
       platform,
       gate,
@@ -620,7 +631,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       attachmentsDir: paths.join(sessionsDir, "attachments"),
       hooks: hookRunner,
       diagnostics,
-      ...(shellEnvStrip.length > 0 ? { shellEnvStrip } : {}),
+      shellEnvStrip,
     };
     const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
     for (const src of [resolved?.turn, options.turn]) {
@@ -645,6 +656,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       providersDirty = false;
       const wsNew = await config.forWorkspace(meta.workspaceRoot).catch(() => undefined);
       const entries = wsNew?.resolved.providers ?? config.base.providers;
+      // 凭据变量剥离名单随配置重算：向导/手写条目新增的 apiKeyEnv 即时生效
+      shellEnvStrip.splice(
+        0,
+        shellEnvStrip.length,
+        ...computeShellEnvStrip([...entries, ...(options.providerConfigs ?? [])]),
+      );
       // 当前会话正在使用的 Provider 实例保留在最底层：新配置同 id 覆盖，
       // 配置里消失时旧实例继续供本会话使用（不重启会话、不换锁）
       const inUse = model.provider;
@@ -726,6 +743,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           buildPolicy(session.state().config.permissionPreset, childSessionId),
         makeHookRunner,
         mcpTools: () => mcpSession?.tools() ?? [],
+        shellEnvStrip,
         grants: {
           session: sessionGrants,
           ...(ws?.grants !== undefined ? { project: ws.grants } : {}),

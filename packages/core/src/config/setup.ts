@@ -228,11 +228,9 @@ export async function refreshUpstreamLimits(
   if (upstreamFetch === undefined) {
     throw new ConfigError("config_unavailable", "上游获取不可用（缺少 fetchModels 注入）");
   }
-  // 凭据解析顺序与适配器一致：apiKeyEnv 已设置 → 环境变量；否则凭据索引
-  const key =
-    entry.apiKeyEnv !== undefined && env(entry.apiKeyEnv) !== undefined
-      ? env(entry.apiKeyEnv)
-      : await credentials.get(providerId);
+  // 凭据解析顺序与适配器一致：apiKeyEnv 非空 → 环境变量；否则凭据索引
+  const envKey = entry.apiKeyEnv !== undefined ? env(entry.apiKeyEnv) : undefined;
+  const key = envKey !== undefined && envKey !== "" ? envKey : await credentials.get(providerId);
   const upstream = await upstreamFetch(entry, key);
   const models: NonNullable<ProviderEntryConfig["models"]> = {};
   for (const m of upstream) {

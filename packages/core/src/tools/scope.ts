@@ -19,5 +19,6 @@ export function createExecutionScope(
     attachmentsDir: env.attachmentsDir,
     hooks: env.hooks,
     diagnostics: env.diagnostics,
+    shellEnvStrip: env.shellEnvStrip,
   };
 }

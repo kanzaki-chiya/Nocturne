@@ -179,7 +179,7 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 2. **本会话落盘目录可读**：`read <sessionsDir>/attachments/<sessionId>/** → allow`——只放行**当前会话**的落盘输出（模型回读自己的完整输出不触发确认），读其他会话的附件仍走正常求值（`default` 下即 `ask`）；
 3. **受保护路径**：对 `.git/` 内部与 `.nocturne/` 配置目录的 `edit` 保证"至少 ask"——在 `read-only`（`edit` 一律 `deny`）中不生成这两条 ask 规则，受保护路径保持 `deny`；其余预设中生成 `ask` 且排在宽 `allow` 之后；
 4. **Nocturne 授权数据**：对 `<NOCTURNE_HOME>/config.json`、`trust.json`、`grants/**`、`providers.json`（v0.2 提议）的 `edit` 保证"至少 ask"（同上，`read-only` 保持 `deny`），`label` 为"修改 Nocturne 授权配置"，命中时出现在确认提示与 `permission.resolved.rule` 中。**如实说明**：这是提示而非安全边界——`--yes` 会把这类 `ask` 提升为 `allow`，`full-access` 预设下的 `shell` 也可以绕过（权限不是沙箱，见第 1 节）；
-5. **可能读取凭据的命令**（v0.2 提议，全部预设含 `full-access`）：命令字符串含 `credentials.json` 或凭据后端读取命令（`security find-generic-password`、`secret-tool lookup`、`ConvertTo-SecureString`）的 `shell` 至少 `ask`，`label` 为"可能读取 Nocturne 凭据"，同样只是基于模式的提示（[provider-setup.md](provider-setup.md) 第 4 节）；
+5. **可能读取凭据的命令**（v0.2 提议，全部预设含 `full-access`）：命令字符串含 `credentials.json` 或凭据后端命令（`security …-generic-password` 族、`secret-tool`、`ProtectedData`）的 `shell` 至少 `ask`，`label` 为"可能读取 Nocturne 凭据"，同样只是基于模式的提示（[provider-setup.md](provider-setup.md) 第 4 节）；
 6. **高风险命令**（仅 `full-access`）：一组已知高风险命令模式（如 `rm -rf *`、`git push --force*`、`git reset --hard*`、`sudo *`）保持 `ask`。这是基于模式的提示，不是可靠的危险检测。
 
 ## 7. 需要确认时（ask）

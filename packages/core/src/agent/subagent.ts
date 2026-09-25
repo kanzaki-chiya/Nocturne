@@ -101,6 +101,11 @@ export interface SubagentDeps {
   mcpTools(): readonly ToolDefinition[];
   /** Grant 落点：session 数组只读共享（子 gate 无 respond 路径） */
   grants?: GateGrantSink | undefined;
+  /**
+   * shell 子进程剥离的凭据变量名（provider-setup.md 第 4 节）：
+   * 与父会话同一数组引用，装配层原地重算后子会话同步生效
+   */
+  shellEnvStrip?: readonly string[] | undefined;
   /** 祖先进会话数（顶层 0） */
   depth: number;
   limits: SubagentLimits;
@@ -287,6 +292,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           attachmentsDir: deps.platform.paths.join(deps.sessionsDir, "attachments"),
           ...(childRunner !== undefined ? { hooks: childRunner } : {}),
           ...(deps.diagnostics !== undefined ? { diagnostics: deps.diagnostics } : {}),
+          ...(deps.shellEnvStrip !== undefined ? { shellEnvStrip: deps.shellEnvStrip } : {}),
         };
         const executor = createToolExecutor(registry);
 

@@ -368,7 +368,7 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
   });
 });
 
-describe("provider-setup 权限规则（provider-setup.md 第 8 节）", () => {
+describe("provider-setup 权限规则（provider-setup.md 第 4 节）", () => {
   const subject = (over: Partial<PermissionSubject>): PermissionSubject => ({
     kind: "read",
     target: "x",
@@ -419,6 +419,8 @@ describe("provider-setup 权限规则（provider-setup.md 第 8 节）", () => {
           const r = policy.evaluate([subject({ kind, target: CRED_INDEX, resolved: CRED_INDEX })]);
           expect(r.decision.action).toBe("deny");
           expect(r.decision.reason).toContain("硬拒绝");
+          // 标签与 permissions.md 5.3 对齐
+          expect(r.decision.reason).toContain("Nocturne 凭据文件");
         }
       }
     }
@@ -445,20 +447,21 @@ describe("provider-setup 权限规则（provider-setup.md 第 8 节）", () => {
     expect(tmp.decision.action).toBe("deny");
   });
 
-  it("凭据后端命令至少 ask：shell allow 命中读取命令时降级", () => {
+  it("凭据相关命令至少 ask：shell allow 命中时降级并带标签", () => {
     const policy = createRulePolicy({
       workspaceRoot: WS,
       caseSensitive: false,
       preset: "full-access",
     });
     for (const cmd of [
+      `type ${CRED_INDEX}`,
       "security find-generic-password -s nocturne -a corp -w",
       "secret-tool lookup service nocturne provider corp",
       'powershell -NoProfile -Command "[System.Security.Cryptography.ProtectedData]::Unprotect()"',
     ]) {
       const r = policy.evaluate([subject({ kind: "shell", target: cmd })]);
       expect(r.decision.action).toBe("ask");
-      expect(r.decision.reason).toContain("凭据");
+      expect(r.decision.reason).toContain("可能读取 Nocturne 凭据");
     }
     // 普通命令不受影响
     expect(

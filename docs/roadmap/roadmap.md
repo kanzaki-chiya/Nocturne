@@ -96,7 +96,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 **已知限制**：主进程被强杀时，不响应 stdin EOF 的 MCP 服务器可能残留，Windows 与 POSIX 的手动清理方式见 [mcp.md](../architecture/mcp.md) 第 4 节；传统 conhost 的 TUI 活动区可能有残影，建议 Windows Terminal（[tui.md](../apps/tui.md)）；服务端因能力字段不支持而返回 400 时尚无针对性配置提示，本版暂缓。扩展思考 Anthropic 模型的 `finish` 兜底轮与 DeepSeek 推理历史回传专项只有在配置对应模型变量时才运行；未配置不作为已通过验收。
 
-## v0.2 — 开箱配置（已完成，2026-09-25 验收）
+## v0.2 — 开箱配置（进行中，待验收）
 
 **内容**：`nctrn setup` 首次配置向导与会话内 `/provider`（CLI 与 TUI）；机器维护的向导配置层 `providers.json`；凭据交给操作系统后端（Windows DPAPI、macOS 钥匙串、Linux Secret Service，无后端时不退回明文）与凭据解析顺序；模型上下文窗口与最大输出长度以上游声明为准（ADR-0016）；内置服务商预设（DeepSeek、OpenRouter、Anthropic 与自定义）；凭据文件的内置硬拒绝、`shell` 子进程剥离凭据变量；`runtime.updateProviders`；目录外模型套用默认能力时的提示；**TUI 全屏模型选择页**（`/model` 与不带参数的 `/provider` 打开，备用屏幕仅此一页，ADR-0017）与 CLI `/model` 编号表格（同列信息 + 关键词过滤）；上游声明的价格/推理/图片输入映射入 `providers.json` 与 `ModelInfo`；机器维护的 `recent-models.json`。设计见 [provider-setup.md](../architecture/provider-setup.md)、[ADR-0015](../decisions/ADR-0015-provider-setup-credentials.md)、[ADR-0017](../decisions/ADR-0017-model-picker-alternate-screen.md)。
 
@@ -112,7 +112,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - 只用环境变量的 v0.1 配置方式行为不变（回归测试）。
 - **模型选择页**（Windows Terminal 与 conhost 逐个场景截图核对）：打开后进入备用屏幕、关闭后对话内容完整；`←`/`→` 左右栏切换、打字进入搜索框过滤、`PageUp`/`PageDown` 翻页；从 `○` 预设进入 `/provider add` 流程并返回选中；右栏 `Enter` 的内联选项条完成「仅本会话」切换与「设为默认」（后者写入 `providers.json`）；详情行正确标注「当前会话」「默认模型」；窄终端（<80 列隐藏左栏、<40 列降级）行为正确；连续开关与 `Ctrl+C` 不残留备用屏幕。CLI 侧 `/model` 表格列信息与 `/model <关键词>` 过滤核对。
 
-真实终端验收在 Windows Terminal 与 conhost 上完成：全新 `NOCTURNE_HOME` 走 `nctrn setup` 后不设环境变量完成工具往返；模型选择页连续开关、`Ctrl+C`、窄终端降级逐个截图核对。实施中实测出 Windows 控制台 stdin 在多次 `suspendTerminal` 周期后饿死的平台问题，修复与约束已写入 [ADR-0017](../decisions/ADR-0017-model-picker-alternate-screen.md)。macOS 钥匙串与 Linux Secret Service 后端按同一接口实现，本轮无对应环境，未实测。
+当前进度：实现与自动化测试完成，真实终端核对在 Windows Terminal 与 conhost 上进行过一轮（全新 `NOCTURNE_HOME` 走 `nctrn setup` 后不设环境变量完成工具往返；模型选择页连续开关、`Ctrl+C`、窄终端降级）。实施中实测出 Windows 控制台 stdin 在多次 `suspendTerminal` 周期后饿死的平台问题，修复与约束已写入 [ADR-0017](../decisions/ADR-0017-model-picker-alternate-screen.md)。macOS 钥匙串与 Linux Secret Service 后端按同一接口实现，无对应环境，未实测。逐条验收待维护者确认。
 
 ## 之后（未排期）
 

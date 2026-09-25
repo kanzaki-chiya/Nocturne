@@ -38,7 +38,7 @@ export interface RulePolicyOptions {
   /** 未信任项目配置中仅收紧方向的规则（与可信结果取更严格者，permissions.md 5.2） */
   untrustedRules?: readonly AnnotatedRule[] | undefined;
   /**
-   * 内置硬拒绝路径集（provider-setup.md 第 8 节：凭据索引 credentials.json
+   * 内置硬拒绝路径集（provider-setup.md 第 4 节：凭据索引 credentials.json
    * 及其原子写临时文件）。lexical 匹配词法 target、resolved 匹配真实路径；
    * 任何规则、Grant、--yes、full-access 都不能放开。
    */
@@ -64,13 +64,16 @@ interface SubjectVerdict {
 const STRICTNESS: Record<PermissionAction, number> = { deny: 2, ask: 1, allow: 0 };
 
 /**
- * 凭据后端命令模式（provider-setup.md 第 8 节）：shell 命令中出现系统
- * 凭据后端的读取调用时至少 ask——即便宽规则/Grant 已 allow。
+ * 凭据相关命令模式（provider-setup.md 第 4 节第 3 条）：shell 命令中
+ * 出现凭据索引文件名或系统凭据后端的读取调用时至少 ask——即便宽
+ * 规则/Grant 已 allow。
+ * - 索引：credentials.json
  * - macOS：security …-generic-password（-i 交互模式同命令族）
  * - Linux：secret-tool（store/lookup/clear 都经它）
  * - Windows：ProtectedData（DPAPI 的 .NET 入口类名）
  */
 const CREDENTIAL_COMMAND_PATTERNS = [
+  /\bcredentials\.json\b/i,
   /\bsecurity\b[^\n]*-generic-password\b/i,
   /\bsecret-tool\b/i,
   /\bProtectedData\b/i,
@@ -189,14 +192,14 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
   }
 
   function decideSubject(s: PermissionSubject, skipApprovals: boolean | undefined): SubjectVerdict {
-    // 内置硬拒绝（provider-setup.md 第 8 节）：凭据索引等文件在任何
+    // 内置硬拒绝（provider-setup.md 第 4 节）：凭据索引等文件在任何
     // 规则/Grant/--yes/full-access/Hook 下都不可读写——词法与真实路径都查
     if (isProtected(s)) {
       return {
         action: "deny",
         hit: {
           origin: "default",
-          description: "内置硬拒绝：Nocturne 凭据索引（任何规则与授权都不能放开）",
+          description: "Nocturne 凭据文件（内置硬拒绝：任何规则与授权都不能放开）",
         },
       };
     }
@@ -229,11 +232,11 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       note = "命令包含控制符/重定向，模式匹配的 allow 降级为需确认";
     }
 
-    // 凭据后端命令至少 ask（provider-setup.md 第 8 节）：shell allow 命中
-    // 系统凭据后端的读取命令时降级；Grant/--yes 仍可在 ask 层批准
+    // 凭据相关命令至少 ask（provider-setup.md 第 4 节）：shell allow 命中
+    // 凭据文件名或后端读取命令时降级；Grant/--yes 仍可在 ask 层批准
     if (s.kind === "shell" && action === "allow" && isCredentialBackendCommand(s.target)) {
       action = "ask";
-      note = [note, "命令涉及系统凭据后端"].filter(Boolean).join("；");
+      note = [note, "可能读取 Nocturne 凭据"].filter(Boolean).join("；");
     }
 
     if (action === "ask" && skipApprovals !== true) {

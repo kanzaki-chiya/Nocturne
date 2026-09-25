@@ -118,8 +118,8 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
       cwd,
       signal: ctx.signal,
       timeoutMs,
-      // 凭据变量不进模型驱动的子进程环境（provider-setup.md 第 8 节）；
-      // envStrip 由装配层按 Provider 条目的 apiKeyEnv 汇总给出
+      // 凭据变量不进模型驱动的子进程环境（provider-setup.md 第 4 节）；
+      // envStrip 由装配层按 Provider 条目的 apiKeyEnv + 默认名汇总给出
       ...(ctx.shellEnvStrip !== undefined ? { envStrip: ctx.shellEnvStrip } : {}),
     });
 
