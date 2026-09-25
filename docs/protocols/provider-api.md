@@ -41,13 +41,15 @@ interface ModelCapabilities {
   toolCalls: boolean
   parallelToolCalls: boolean
   reasoning: "none" | "hidden" | "visible"   // 不支持 / 有推理但不返回内容 / 返回推理内容
-  reasoningEffort?: string[]                 // 支持的推理强度档位，如 ["low", "medium", "high"]
+  reasoningEffort?: ReasoningEffortLevel[]   // 已解析的可用思考档位集合；"off" 恒可用、不在集合中，缺省=不可切换
   imageInput: boolean
   promptCache: boolean
 }
 ```
 
 能力是数据，不是代码分支的依据名单。缺失的能力按保守值处理（不支持）。
+
+`ReasoningEffortLevel` 为 `"minimal" | "low" | "medium" | "high" | "xhigh" | "max"`，加上恒可用的 `"off"` 构成 `ReasoningEffort` 七档（常量定义在 protocol）。`reasoningEffort` 写的是**已解析的可用档位集合**——逐模型声明 > 服务商级 `thinking.levels`（用户声明）> 能力标记推导（`reasoning ≠ "none"` → 标准六档）的优先级折叠在 Provider 构造/解析时完成（[ADR-0018](../decisions/ADR-0018-reasoning-effort.md) 第 2 节）。
 
 ## 3. 请求
 
@@ -64,9 +66,10 @@ interface ModelRequest {
       reasoningEffort，正常路径不触发此规则 */
   toolChoice?: { name: string }
   /** v0.2 提议改为可选（ADR-0016）：缺省时 openai-compatible 不发送 max_tokens、由上游决定；
-      anthropic 协议要求必填，适配器使用兜底值 */
+      anthropic 协议要求必填，适配器使用兜底值；思考开启时该兜底值须与 thinking.budget_tokens
+      协调（抬升 max_tokens 或压低预算，见 ADR-0018 第 3 节） */
   maxOutputTokens?: number
-  reasoningEffort?: string        // 保留字段：Runtime 当前不赋值，适配器当前不映射为服务端推理参数
+  reasoningEffort?: ReasoningEffortLevel    // Runtime 按会话配置就近降档后赋值；"off"/无可用档位时缺省（不发送思考参数）
   cachePrefix?: { systemBlocks: number; messages: number }   // 可缓存前缀的边界提示，适配器自行决定是否使用
   providerOptions?: Record<string, unknown>                  // 请求级 Provider 专有选项，原样交给适配器，Core 不解释
 }
@@ -74,7 +77,21 @@ interface ModelRequest {
 
 `providerOptions` 的命名空间由适配器定义：openai-compatible 以 Provider id 为键（`{ "<id>": {...} }`）；anthropic 固定为 `{ anthropic: {...} }`，与 Provider id 无关。适配器把**配置级** `providerOptions`（ProviderConfig）与**请求级** `providerOptions`（ModelRequest）做浅合并后填入该命名空间，请求级覆盖同名键；两者都缺省时不产生该字段。
 
-`reasoningEffort` 暂为保留字段：Context/Agent 不设置它，两个现有适配器也不把它映射成推理请求参数。当前要开启推理，应按服务端要求使用 `providerOptions`；手工构造请求时，该字段仅参与与强制 `toolChoice` 的保守冲突判断。本次只纠正文字与注释，不改变流式契约或错误语义，因此不触发第 6 节的 ADR 要求。
+`reasoningEffort` 是归一化的中性档位，由 Runtime 按会话配置赋值（`"off"` 与无可用档位时该字段缺省）；适配器把它翻译为各自协议的思考参数，Agent Loop / Context 不出现服务商分支：
+
+| thinking-format | 请求体片段（档位为 `high` 示例；`"max"` 等档位原样发送） |
+|---|---|
+| `openai`（缺省） | `"reasoning_effort": "high"` |
+| `openrouter` | `"reasoning": { "effort": "high" }` |
+| anthropic（不看 thinking-format） | `"thinking": { "type": "enabled", "budget_tokens": 16384 }` |
+
+- 档位→`budget_tokens` 默认预算表：`minimal 1024 / low 4096 / medium 8192 / high 16384 / xhigh 32768 / max 32768`（条目 `thinking.budgets` 可覆盖）；`max` 是通用最高档而非 Anthropic 专有，openai/openrouter 格式原样发送 `"max"`。
+- anthropic 发送前调整 `max_tokens`：要求 `max_tokens ≥ budget_tokens + 1024`，不足先抬 `max_tokens`（封顶模型声明的最大输出长度，未声明无封顶），仍不足则压低预算，预算压到低于 1024 时本轮不发思考参数。
+- `off`（或字段缺省）时请求体不含任何思考字段（disable-mode `omit`）。
+- 归一化字段与 `providerOptions` 中同义的原生键（`reasoningEffort`、`reasoning`、`thinking`）冲突时，归一化字段胜出。
+- 思考开启 + 强制 `toolChoice` 的冲突沿用上文规则（适配器丢弃 `toolChoice` 并记诊断）；子代理兜底轮不携带 `reasoningEffort`，正常路径不触发该规则。
+
+全部细节与理由见 [ADR-0018](../decisions/ADR-0018-reasoning-effort.md)。
 
 ```ts
 type SystemBlock = { text: string }

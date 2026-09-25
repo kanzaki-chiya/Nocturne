@@ -68,8 +68,8 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 
 | 类型 | turnId | payload |
 |---|---|---|
-| `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节） |
-| `session.config_changed` | — | 变化的字段：`model?`、`permissionPreset?` |
+| `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`reasoningEffort?`（思考档位，ADR-0018；缺省按 `off` 处理）、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节） |
+| `session.config_changed` | — | 变化的字段：`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018） |
 | `turn.started` | ✓ | `turnIndex` |
 | `message.user` | ✓ | `messageId`、`content: ContentBlock[]` |
 | `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`finishReason: FinishReason \| "aborted"` |
@@ -172,6 +172,7 @@ type PermissionSubject = {
 | `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 2 起 ask 流程生效；Phase 3 起 `reply.remember` 生效，生成对应范围的 Grant（[permissions.md](../architecture/permissions.md) 5.4） |
 | `setModel(ref)` | 会话空闲（Turn 进行中返回 `session_busy`）；未知 provider 返回 `invalid_model`；Provider 启用严格清单（`strictModels`，默认）且模型不在清单内同样 `invalid_model` | `session.config_changed` | Phase 2（`/model`） |
 | `setPermissionPreset(name)` | 会话空闲；未知预设名返回 `invalid_command` | `session.config_changed`（`permissionPreset`）；生效的是**下一次**权限求值 | Phase 3（`/preset`） |
+| `setReasoningEffort(level)` | Turn 进行中同样允许（`config_changed` 无 turnId，对重放不变量无影响）；档位名未知或当前模型未声明该档位返回 `invalid_command`，并列出可用档位 | `session.config_changed`（`reasoningEffort`）；生效的是**下一次**模型请求 | ADR-0018（CLI `/effort`、TUI Shift+Tab） |
 | `compact()` | 会话空闲（Turn 进行中返回 `session_busy`）；上一次摘要进行中返回 `compaction_in_progress`，请求被中断返回 `compaction_interrupted`，Provider 失败或无可行边界返回 `compaction_failed` | `context.compacted(kind="summary")` | Phase 2（`/compact`，一次模型调用生成摘要；失败或中断不写入任何事件、历史不变，见 [context.md](../architecture/context.md) §6.2/§6.6） |
 
 会话处于 `failed` 状态时，除 `close` 外的命令都返回 `session_failed`。

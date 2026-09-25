@@ -25,7 +25,7 @@ interface SessionView {
     nocturneVersion: string;
   } | undefined;
   /** 当前生效配置：session.created → session.config_changed 覆盖 */
-  config: { model: ModelRef | undefined; permissionPreset: string | undefined };
+  config: { model: ModelRef | undefined; permissionPreset: string | undefined; reasoningEffort: ReasoningEffort | undefined };
   /** 展示状态：runtime.status 的最近一次取值，收敛点回退 idle */
   status: RuntimeStatus;
   /** 重试信息（provider.retry 的 payload；离开 retrying 时清空） */

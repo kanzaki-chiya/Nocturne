@@ -66,7 +66,7 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 - `finish` 的 `permissionSubjects` 返回 `[]`（自动放行——它只是返回通道，不触碰任何资源）；`traits.mutates = false`。
 - 终止判定：`TurnDeps` 新增可选 `shouldFinish(state)` 谓词，Agent Loop 在每个工具调用结算后检查；launcher 提供的实现是"子会话历史中已存在 `name = finish` 且 `status = ok` 的 `tool.completed`"。命中即 `finish("done")`——子 Turn 以正常 `done` 收尾，不是中断。谓词由 launcher 注入，Agent Loop 本身仍不出现工具名。
 - **催促与兜底**：一个子 Turn 以 `done` 结束但没有 `finish` 调用时，launcher 在同一子会话上再开一个 Turn，message.user 为催促提示（如 `你还没有提交结果；请立即调用 finish 工具提交 {result}`）。上限 `maxAttempts`（默认 3：首轮 + 2 次催促）；**最后一轮**通过 `ModelRequest` 新增的可选字段 `toolChoice: { name: "finish" }` 强制模型调用结束工具（provider-api.md 第 3 节）。全部轮次用尽仍无 `finish` → `subagent_no_result`。
-- **`toolChoice` 与扩展思考**：部分服务在开启思考时不接受强制指定工具（如 Anthropic extended thinking 下 `tool_choice` 只接受 `auto`/`none`，强行发送返回 400）。采用**兜底轮临时关闭思考**：最后一轮的 TurnDeps 不携带 `reasoningEffort`（仅这一轮，子会话此前轮次不受影响），使 `toolChoice` 可正常表达。另加一层通用防御——适配器知道自己发出的组合不被服务端接受时（思考 + 强制 tool_choice 等），**主动丢弃 `toolChoice`** 并在 `provider.request` 诊断中标注，而不是把必然失败的请求发出去。
+- **`toolChoice` 与扩展思考**：部分服务在开启思考时不接受强制指定工具（如 Anthropic extended thinking 下 `tool_choice` 只接受 `auto`/`none`，强行发送返回 400）。采用**兜底轮临时关闭思考**：最后一轮的 TurnDeps 不携带 `reasoningEffort`（仅这一轮，子会话此前轮次不受影响），使 `toolChoice` 可正常表达（ADR-0018 第 3 节）。另加一层通用防御——适配器知道自己发出的组合不被服务端接受时（思考 + 强制 tool_choice 等），**主动丢弃 `toolChoice`** 并在 `provider.request` 诊断中标注，而不是把必然失败的请求发出去。
 - 非 `done` 的结束（`error`/`max_steps`/`truncated`/`refused`）不进入催促循环，直接 `subagent_turn_failed`——这些是失败信号，不是"忘了提交"。
 
 ## 3. Launcher 接线（无循环依赖）
@@ -204,7 +204,7 @@ launch(request, ctx)
 
 - **不继承父会话历史**：子会话的 `message.user` 就是 `task` 文本；父会话的对话、工具结果、压缩记录一律不进入子上下文。
 - **系统提示**：`BuildContextInput` 新增可选 `basePrompt`（缺省即现有 `BASE_SYSTEM_PROMPT`），子会话传入子代理提示：身份（父代理派生的任务会话）、`finish` 提交协议（含 `outputSchema` 要求）、不能向用户提问的约束、其余工作约定。工具规格、项目指令、环境信息段的组装不变。
-- **继承**：项目指令（用户级与各级 `AGENTS.md`——它们是项目事实）、环境信息、同一 `ResolvedModel`（模型清单与 Provider 由会话级注册表解析，子会话不另建）。
+- **继承**：项目指令（用户级与各级 `AGENTS.md`——它们是项目事实）、环境信息、同一 `ResolvedModel`（模型清单与 Provider 由会话级注册表解析，子会话不另建）。思考档位同样继承：子会话 `session.created.reasoningEffort` 写父会话当前档位按子模型可用集合就近降档后的值（ADR-0018 第 5 节）。
 - **预算与压缩**：同一模型同一窗口，子会话独立计算；L1/L2 压缩机制照常（它就是一次普通 Turn）。子会话通常短命，压缩很少触发，但机制不需要例外。
 - **token 成本**：子会话的用量记在子日志的 `turn.completed.usage`，并随 `task` 结果的 `output.usage` 汇总给父侧。
 
@@ -265,6 +265,7 @@ launch(request, ctx)
 | 变更 | 位置 | 兼容性 |
 |---|---|---|
 | `session.created` payload 增加 `parent?: { sessionId, callId }` | events.md 3.1、`CreateSessionInput` | 可选新增字段，旧版本忽略 |
+| `session.created` / `session.config_changed` payload 增加 `reasoningEffort` | events.md 3.1、ADR-0018 | 可选新增字段，旧版本忽略；子会话记录继承父会话（就近降档后）的档位 |
 | `SessionSummary.parent`、`listSessions({ includeSubagents })` | sessions.md 8、store | 默认隐藏，行为只增不改 |
 | `PermissionSubject.kind` / `SubjectRequest.kind` 增加 `"subagent"` | events.md 4、tool-api.md 1、permissions.md 3/6 | 新类别；旧日志不受影响；预设新增一行规则 |
 | `BuildContextInput.basePrompt?`、`TurnDeps.basePrompt?/shouldFinish?/toolChoice?` | context.md、agent-loop.md | 可选注入点，缺省行为不变 |

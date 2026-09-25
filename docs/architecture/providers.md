@@ -50,7 +50,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 凭据只从环境变量或用户级凭据文件读取，不写入会话日志、事件或普通日志。交互式配置（`nctrn setup`、`/provider`）、服务商预设与凭据解析顺序见 [provider-setup.md](provider-setup.md)（v0.2 提议）。
 
-推理档位配置目前通过 Provider 的 `providerOptions` 传递服务方专有键；`ModelCapabilities.reasoningEffort` 仅描述可能的档位，`ModelRequest.reasoningEffort` 尚无 Runtime 赋值和适配器映射。子代理兜底轮会临时移除可识别的 `providerOptions` 推理键，再强制调用 `finish`。归一化档位的模型配置与两个适配器映射留待后续实现（见 [provider-api.md](../protocols/provider-api.md) 第 3 节）。
+思考强度档位（v0.2 提议，[ADR-0018](../decisions/ADR-0018-reasoning-effort.md)）：中性档位集合为 `off | minimal | low | medium | high | xhigh | max`，无 `auto`。每个模型的可用档位按声明解析——逐模型 `capabilities.reasoningEffort` > 服务商条目 `thinking.levels`（用户声明，`/provider refresh` 不覆盖）> 上游能力标记推导 > 无（不可切换）。`ModelRequest.reasoningEffort` 由 Runtime 按会话配置就近降档赋值；适配器把档位翻译为 `reasoning_effort`（openai 格式）、`reasoning.effort`（openrouter 格式）或 `thinking.budget_tokens`（anthropic）——`"max"` 是通用最高档，openai/openrouter 原样发送，anthropic 换算默认 32768。`providerOptions` 中的原生推理键仍可直传，与归一化字段同义时归一化字段胜出；子代理兜底轮不携带 `reasoningEffort`，使强制 `toolChoice` 可正常表达。
 
 ## 4. 适配器
 

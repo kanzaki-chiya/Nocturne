@@ -23,12 +23,15 @@ API Key（输入不回显；直接回车表示改用环境变量）：********
 正在获取模型列表…
   1) deepseek-chat   2) deepseek-reasoner
 选择模型，或直接输入模型 id：> 1
+该服务支持思考强度吗？[y/N] y
+勾选可用档位（空格切换，回车确认）：[ ] minimal  [x] low  [x] medium  [x] high  [ ] xhigh  [ ] max
 设为默认模型？[Y/n] y
 已保存：服务商 deepseek、默认模型 deepseek/deepseek-chat
 ```
 
 - 预设服务商（1–3）只问名称、密钥和模型；自定义（4、5）额外询问服务地址。
-- 模型列表来自服务的 `GET /models`（OpenAI 兼容与 Anthropic 都有该端点），同时记录上游声明的上下文窗口与最大输出长度（第 7 节）；获取失败或服务不提供时退回手动输入，不阻塞流程——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，随后照常进入手动输入模型 id 并保存；404 与网络错误同样退回手动输入。
+- 模型列表来自服务的 `GET /models`（OpenAI 兼容与 Anthropic 都有该端点），同时记录上游声明的上下文窗口、最大输出长度与能力标记（第 7 节）；获取失败或服务不提供时退回手动输入，不阻塞流程——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，随后照常进入手动输入模型 id 并保存；404 与网络错误同样退回手动输入。
+- **思考强度声明**（ADR-0018 第 6 节）：上游 `/models` 没有声明思考能力时，向导问"该服务支持思考强度吗？[y/N]"；选 y 后多选勾选 `minimal/low/medium/high/xhigh/max`（TUI 用空格勾选、回车确认；CLI 输入逗号分隔的编号如 `2,3,4`，非法输入重问）。勾选结果写到 `providers.json` 服务商条目的 `thinking.levels`，并标注 `source: "user"`（"用户声明"，`/provider refresh` 不得覆盖它）。上游已声明思考能力时跳过这一步（可用档位走能力标记推导，见 ADR-0018 第 2 节）。
 - **向导不发送模型请求**：连接测试会消耗 token 且重复了首次真实请求才能发现的问题，因此不做。密钥、地址与模型 id 的有效性由会话中的首次真实请求检验；请求失败时按 `ProviderError.kind` 给出可操作提示（`auth` → 密钥可能无效，附 `/provider key <name>`；`network`/`timeout` → 地址不通，附 `nctrn setup`；`invalid_request`/404 → 模型 id 或地址路径有误），实现位置为 `agent/turn.ts` 的 `providerFailureHint`（turn.completed.error.message，CLI 与 TUI 共用）。
 - 系统凭据后端不可用时（第 3 节），跳过保存密钥这一步，直接进入环境变量方式。
 - 选择"改用环境变量"时询问变量名（默认 `NOCTURNE_API_KEY`，Anthropic 类默认 `ANTHROPIC_API_KEY`），条目写入 `apiKeyEnv`，密钥不落盘。
@@ -41,7 +44,8 @@ API Key（输入不回显；直接回车表示改用环境变量）：********
 | `/provider` | 列出全部服务商：名称、类型、服务地址（只显示主机名）、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），以及当前会话使用的是哪一个。TUI 中不带参数的 `/provider` 改为打开全屏模型选择页（焦点在左栏服务商一侧），见 [tui.md](../apps/tui.md) 第 7 节 |
 | `/provider add` | 运行与 `nctrn setup` 相同的向导；完成后询问"切换当前会话到该模型？[Y/n]"，确认即调用 `session.setModel` |
 | `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成 |
-| `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置 |
+| `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置；不覆盖 `thinking.levels` 的用户声明 |
+| `/provider thinking <name>` | 对已配置的服务商重走向导的思考声明步骤（y/N + 档位勾选），写入 `thinking.levels` 并标注 `source: "user"`；CLI 与 TUI 效果一致（ADR-0018 第 6 节） |
 | `/provider remove <name>` | 删除向导写入的条目及其凭据；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改 |
 
 Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。TUI 用弹层完成同样的步骤：单行输入框、密钥输入框（显示为 `*`）、确认对话框；命令名与效果与 CLI 一致。
@@ -147,13 +151,13 @@ interface ProviderSetupFile {
 
 预设是 `provider` 模块里的纯数据：
 
-| 预设 | 类型 | 默认名称 | 服务地址 | 模型列表 |
-|---|---|---|---|---|
-| DeepSeek | `openai-compatible` | `deepseek` | `https://api.deepseek.com/v1` | `GET /models` |
-| OpenRouter | `openai-compatible` | `openrouter` | `https://openrouter.ai/api/v1` | `GET /models` |
-| Anthropic | `anthropic` | `anthropic` | 官方端点（省略 `baseURL`） | `GET /v1/models` |
-| 其他 OpenAI 兼容 | `openai-compatible` | 用户输入 | 用户输入 | `GET /models`（可能不提供） |
-| 其他 Anthropic 兼容 | `anthropic` | 用户输入 | 用户输入 | 手动输入 |
+| 预设 | 类型 | 默认名称 | 服务地址 | 模型列表 | thinking-format |
+|---|---|---|---|---|---|
+| DeepSeek | `openai-compatible` | `deepseek` | `https://api.deepseek.com/v1` | `GET /models` | `openai` |
+| OpenRouter | `openai-compatible` | `openrouter` | `https://openrouter.ai/api/v1` | `GET /models` | `openrouter` |
+| Anthropic | `anthropic` | `anthropic` | 官方端点（省略 `baseURL`） | `GET /v1/models` | — |
+| 其他 OpenAI 兼容 | `openai-compatible` | 用户输入 | 用户输入 | `GET /models`（可能不提供） | `openai` |
+| 其他 Anthropic 兼容 | `anthropic` | 用户输入 | 用户输入 | 手动输入 | — |
 
 - 预设只负责向导里的默认值；写进 `providers.json` 的是完整条目，之后与手写条目没有区别。预设数据更新不会改变已写入的条目。
 - 新增预设的门槛：服务地址与协议兼容性有官方文档可查，并在真实服务上跑过一次连接测试。未满足的服务走"其他 OpenAI 兼容"。
@@ -180,7 +184,11 @@ removeSetupProvider(providerId: string): Promise<void>     // 删除条目并经
 describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>
   // /provider 列表数据：名称、类型、主机名、密钥来源、来源层、模型数；不含密钥。
   // 给 workspaceRoot 时并入该工作区可信项目层的条目
-refreshUpstreamLimits(providerId: string): Promise<void>  // /provider refresh：重新获取并写入 providers.json
+refreshUpstreamLimits(providerId: string): Promise<void>  // /provider refresh：重新获取并写入 providers.json（不覆盖 thinking.levels 用户声明）
+saveSetupThinking(providerId: string, levels: ReasoningEffortLevel[] | undefined): Promise<void>
+  // /provider thinking：写入/清除条目 thinking.levels（levels 存在时标 source:"user"）
+runProviderThinkingWizard(io, config, providerId): Promise<WizardResult>
+  // 重走思考声明步骤（y/N + 档位多选）后经 saveSetupThinking 保存；provider 须为向导条目
 setDefaultModel(model: string): Promise<void>            // 写入 providers.json 的 model 字段
 recentModels(): ModelRef[]                               // recent-models.json 当前内容（新→旧）
 recordRecentModel(ref: ModelRef): Promise<void>          // Runtime 在 setModel/新建会话时调用
@@ -211,6 +219,7 @@ runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最�
   - OpenRouter（同属 OpenAI 兼容形状）：`top_provider.max_completion_tokens` → `maxOutputTokens`（`top_provider.context_length` 优先于顶层 `context_length`）；`pricing`（按 token 计价的 USD 字符串）换算为每百万 token 写入 `pricing.input`/`pricing.output`；`supported_parameters` 含 `reasoning` → `capabilities.reasoning`；`architecture.input_modalities` 含 `image` → `capabilities.imageInput`；
   - Anthropic 模型列表接口按其官方文档返回的限额字段映射（实现时对照文档，没有的字段不猜）。
 - `reasoning`/`imageInput` 复用 `ModelCapabilities` 的既有字段，但**只在有声明时设置**——上游没声明的字段保持目录/保守默认，不因"没在 supported_parameters 里看到"而断言不支持（清单字段的覆盖范围各服务不统一）。
+- 上游的 `reasoning` 能力标记会推导该模型的可用思考档位为完整六档（ADR-0018 第 2 节）；逐档位的收窄由用户在向导勾选（`thinking.levels`，`source: "user"`）或手写 `capabilities.reasoningEffort` 完成——`refresh` 不覆盖这些用户声明。
 - 写入 `models` 的 `pricing` 进入 `ModelInfo.pricing`（[provider-api.md](../protocols/provider-api.md) 第 2 节）；模型选择页按这些字段渲染"推理 / 图片输入 / 上下文 / 价格"列（[tui.md](../apps/tui.md) 第 7 节），未声明的列留空，不编造数据。
 - **最大输出长度未知时不替上游做决定**：
   - `openai-compatible`：请求**不带** `max_tokens`，由上游按它自己的上限处理；

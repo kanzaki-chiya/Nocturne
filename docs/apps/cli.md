@@ -73,6 +73,8 @@ nctrn setup                  # 服务商配置向导（v0.2 提议，provider-se
 | `/model` | 编号表格列出可用模型：`服务商/模型 id`、推理/图片输入标记、上下文长度、价格（`$输入/输出` 每百万 token）；未声明的列留空，不编造数据。标注「当前会话」「默认模型」（v0.2 提议，列信息与 TUI 模型选择页一致，见 [apps/tui.md](tui.md) 第 7 节） | `runtime.listModels()`、`session.state().config.model`、`runtime.defaultModel()`、`runtime.listRecentModels()` |
 | `/model <关键词>` | 同上表格按关键词过滤后列出 | 同上 |
 | `/model <id>` | 会话内切换模型 | `session.setModel(ref)` → `session.config_changed` |
+| `/effort` | 列出当前思考档位与该模型的可用档位（ADR-0018）；模型未声明档位时提示如何声明 | `session.reasoningEffortInfo()`（只读） |
+| `/effort <档位>` | 切换会话思考档位：`off` 或当前模型声明的档位；不支持时报错并列出可用档位 | `session.setReasoningEffort(level)` → `session.config_changed` |
 | `/preset` | 显示当前权限预设 | `session.state().config.permissionPreset` |
 | `/preset <name>` | 会话内切换权限预设 | `session.setPermissionPreset(name)` → `session.config_changed` |
 | `/context` | 显示若现在构建请求，上下文由什么组成 | `session.describeContext()` → `{ report: ContextReport; overBudget: boolean }`（见下） |
@@ -80,7 +82,7 @@ nctrn setup                  # 服务商配置向导（v0.2 提议，provider-se
 | `/resume` | 列出会话（编号、id、创建时间、绑定目录、模型、锁状态），输入编号切换，空行取消 | `runtime.listSessions()` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
-| `/provider` | 列出服务商：名称、类型、服务地址主机名、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），标记当前会话所用，不显示密钥；`/provider add` / `key <name>` / `refresh <name>` / `remove <name>` 见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节（v0.2 提议） | `describeProviders()`、`saveSetupProvider` 等 + `runtime.updateProviders` |
+| `/provider` | 列出服务商：名称、类型、服务地址主机名、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），标记当前会话所用，不显示密钥；`/provider add` / `key <name>` / `refresh <name>` / `thinking <name>` / `remove <name>` 见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节（v0.2 提议） | `describeProviders()`、`saveSetupProvider` 等 + `runtime.updateProviders` |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
 
 - 未知命令打印提示（不报错退出）。命令在 Turn 进行中给出"会话忙"提示（`setModel` / `compact` 的前置条件是空闲，见 events.md 第 7 节）。
@@ -105,7 +107,7 @@ nctrn setup                  # 服务商配置向导（v0.2 提议，provider-se
 | `permission.requested` | 第 6 节的确认提示 |
 | `permission.resolved` | `└ 权限：<allow\|deny>（<source>：<rule\|reason>）` 一行——命中规则时展示 `rule`（如"用户配置第 3 条 {…}"），无规则时展示原因 |
 | `context.compacted` | `◇ 上下文已压缩（<kind>，至 seq <throughSeq>）` |
-| `session.config_changed` | `◇ 模型已切换为 <provider>/<model>` |
+| `session.config_changed` | `◇ 模型已切换为 <provider>/<model>`；`reasoningEffort` 变化时 `◇ 思考档位已切换为 <档位>` |
 | `provider.retry` | `! Provider 错误（<kind>），<delayMs>ms 后第 <n>/<max> 次重试` |
 | `runtime.warning` / `runtime.error` | `! <code>: <message>` |
 | `mcp.server` | `ready` 以外状态的转移打印一行 `! MCP <server>：<state>（<error?，含工具数>）`；`starting`/`ready` 不打扰（Phase 5） |

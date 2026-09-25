@@ -144,6 +144,7 @@ session.interrupt()
 await session.respondPermission(requestId, { decision: "allow", remember: "project" })  // Phase 3 起生成 Grant
 await session.setModel({ provider: "…", model: "…" })          // → session.config_changed
 await session.setPermissionPreset("auto-edit")                // → session.config_changed（Phase 3）
+await session.setReasoningEffort("high")                      // → session.config_changed；Turn 中允许，下一次模型请求生效（ADR-0018）
 await session.compact()                                       // → context.compacted("summary")
 const { report, overBudget } = session.describeContext()       // ContextReport 查询，不产事件
 runtime.listModels()                                          // 全部可用模型（/model 用）

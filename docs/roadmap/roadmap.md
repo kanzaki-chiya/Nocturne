@@ -86,15 +86,13 @@
 
 **不做**：Swarm、角色系统（含自定义 agent 定义文件）、Agent 间消息总线、分布式执行、后台/异步子任务、子代理常驻与唤醒、隔离工作区（worktree/overlay）、子会话权限冒泡、子代理独立模型。
 
-**已知问题**：统一的 `reasoningEffort` 档位尚未由模型配置填入请求，也未映射到两个适配器；当前只能通过 Provider 专有的 `providerOptions` 开启推理。后续实现需同时定义 Anthropic 档位到 token budget 的换算，并验证子代理强制 `finish` 的兜底轮。
-
-服务端因不支持 `reasoning_effort` 等能力字段返回 400 时，错误提示尚不会指引用户关闭模型配置中的对应能力；v0.1.0 暂缓处理，不做自动删字段重试。
+服务端因不支持 `reasoning_effort` 等能力字段返回 400 时，错误提示尚不会指引用户关闭模型配置中的对应能力；v0.1.0 暂缓处理，不做自动删字段重试。（思考参数部分在"思考强度"一节处理。）
 
 ## v0.1.0 收尾
 
 Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流消费路径加入首事件与事件间空闲超时，Agent Loop 对无文本无工具调用的 `stop` 作有上限重试（[ADR-0014](../decisions/ADR-0014-stream-timeout-empty-response.md)）；统一工具进度片段的行渲染；补足 TUI 交互测试与真实进程验收；用测试工作区完成两个适配器的基础真实服务冒烟；整理用户指南、更新日志、版本号与第三方许可说明。`ModelRequest.reasoningEffort` 本版保留未使用，见 [provider-api.md](../protocols/provider-api.md) 第 3 节。
 
-**已知限制**：主进程被强杀时，不响应 stdin EOF 的 MCP 服务器可能残留，Windows 与 POSIX 的手动清理方式见 [mcp.md](../architecture/mcp.md) 第 4 节；传统 conhost 的 TUI 活动区可能有残影，建议 Windows Terminal（[tui.md](../apps/tui.md)）；服务端因能力字段不支持而返回 400 时尚无针对性配置提示，本版暂缓。扩展思考 Anthropic 模型的 `finish` 兜底轮与 DeepSeek 推理历史回传专项只有在配置对应模型变量时才运行；未配置不作为已通过验收。
+**已知限制**：主进程被强杀时，不响应 stdin EOF 的 MCP 服务器可能残留，Windows 与 POSIX 的手动清理方式见 [mcp.md](../architecture/mcp.md) 第 4 节；传统 conhost 的 TUI 活动区可能有残影，建议 Windows Terminal（[tui.md](../apps/tui.md)）；服务端因能力字段不支持而返回 400 时尚无针对性配置提示（思考参数部分由"思考强度"一节解决）。扩展思考 Anthropic 模型的 `finish` 兜底轮与 DeepSeek 推理历史回传专项只有在配置对应模型变量时才运行；未配置不作为已通过验收。
 
 ## v0.2 — 开箱配置（进行中，待验收）
 
@@ -113,6 +111,20 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - **模型选择页**（Windows Terminal 与 conhost 逐个场景截图核对）：打开后进入备用屏幕、关闭后对话内容完整；`←`/`→` 左右栏切换、打字进入搜索框过滤、`PageUp`/`PageDown` 翻页；从 `○` 预设进入 `/provider add` 流程并返回选中；右栏 `Enter` 的内联选项条完成「仅本会话」切换与「设为默认」（后者写入 `providers.json`）；详情行正确标注「当前会话」「默认模型」；窄终端（<80 列隐藏左栏、<40 列降级）行为正确；连续开关与 `Ctrl+C` 不残留备用屏幕。CLI 侧 `/model` 表格列信息与 `/model <关键词>` 过滤核对。
 
 当前进度：实现与自动化测试完成，真实终端核对在 Windows Terminal 与 conhost 上进行过一轮（全新 `NOCTURNE_HOME` 走 `nctrn setup` 后不设环境变量完成工具往返；模型选择页连续开关、`Ctrl+C`、窄终端降级）。实施中实测出 Windows 控制台 stdin 在多次 `suspendTerminal` 周期后饿死的平台问题，修复与约束已写入 [ADR-0017](../decisions/ADR-0017-model-picker-alternate-screen.md)。macOS 钥匙串与 Linux Secret Service 后端按同一接口实现，无对应环境，未实测。逐条验收待维护者确认。
+
+## 思考强度（进行中，待验收）
+
+**内容**：把 `ModelRequest.reasoningEffort` 从保留字段接通为统一能力——七档中性档位（`off | minimal | low | medium | high | xhigh | max`，无 `auto`）；可用档位按声明解析（逐模型 `capabilities.reasoningEffort` > 服务商 `thinking.levels` 用户声明 > 上游能力标记推导 > 无）；适配器归一化（openai 格式 `reasoning_effort`、openrouter 格式 `reasoning.effort`、anthropic `thinking.budget_tokens` 预算表 + `max_tokens` 调整）；会话配置经 `session.config_changed` 持久化与恢复；`setReasoningEffort` 允许 Turn 进行中、对下一次模型请求生效；就近降档；子代理继承与 `finish` 兜底轮关闭思考；向导思考声明勾选与 `/provider thinking`；TUI Shift+Tab 循环与状态栏档位段；CLI `/effort`；400 定向提示。设计见 [ADR-0018](../decisions/ADR-0018-reasoning-effort.md)。
+
+**验收**：
+
+- 三种格式每个档位的请求体断言（`off` 时请求体不含任何思考字段）；Anthropic 预算与 `max_tokens` 调整及边界（压预算、抬 `max_tokens` 封顶、低于下限不发送）。
+- 就近降档、声明来源优先级、`/provider refresh` 不覆盖 `thinking.levels` 用户声明各有测试。
+- `session.created`/`config_changed` 持久化与恢复；`setReasoningEffort` 在 Turn 进行中可切换；非法/不支持档位报 `invalid_command` 并列出可用档位。
+- 子会话 `session.created` 继承父档位（按子模型集合降档）；`finish` 兜底轮请求体不含思考字段。
+- TUI：Shift+Tab（`\x1B[Z`）循环 `[off,…]`、状态栏档位段显隐、权限框内 Shift+Tab 反向焦点不切换；CLI：`/effort` 列表与切换、`/provider thinking` 编号勾选（非法输入重问）。
+- 真实服务实测：commandcode `deepseek/deepseek-v4.1-flash`（openai 格式）与 OpenRouter `openrouter/free`（openrouter 格式）各以 `off`/`low`/`high` 跑一次；不支持档位触发 400 时给出定向提示。Anthropic 无端点，只做单测并如实标注。
+- 真实终端核对（Windows Terminal 与 conhost 截图）：Shift+Tab 循环时状态栏变化、权限框内 Shift+Tab 不切换、`/provider thinking` 勾选界面、CLI `/effort` 输出。
 
 ## 之后（未排期）
 
