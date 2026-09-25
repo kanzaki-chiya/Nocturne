@@ -128,9 +128,16 @@ export function App({
 
   const busy = view.status !== "idle";
   const pending = view.pendingPermission;
-  // 思考档位段（ADR-0018）：模型声明了可用档位才显示；config_changed 触发重渲染后取新值
+  // 思考档位段（ADR-0018）：模型声明了可用档位才显示；config_changed 触发重渲染后取新值。
+  // Turn 中切档时 effective 仍为 Turn 开始快照 → 标出"下一轮生效"；busy 门控
+  // 避免 turn.completed 渲染早于快照清除造成的 idle+标记残留帧
   const effortInfo = session.reasoningEffortInfo();
-  const effort = effortInfo.available.length > 0 ? effortInfo.current : undefined;
+  const effort =
+    effortInfo.available.length > 0
+      ? busy && effortInfo.effective !== effortInfo.current
+        ? `${effortInfo.effective}→${effortInfo.current}（下一轮生效）`
+        : effortInfo.current
+      : undefined;
   const { prefix, tail } = splitCompletedPrefix(view.entries);
   const prefixRef = useRef(prefix);
   prefixRef.current = prefix;

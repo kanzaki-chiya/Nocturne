@@ -251,7 +251,13 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
       const lines: string[] = [];
       if (p.model !== undefined) lines.push(`模型已切换为 ${p.model.provider}/${p.model.model}`);
       if (p.permissionPreset !== undefined) lines.push(`权限预设已切换为 ${p.permissionPreset}`);
-      if (p.reasoningEffort !== undefined) lines.push(`思考档位已切换为 ${p.reasoningEffort}`);
+      // ADR-0018 §3：Turn 进行中切档只改持久化意图，下一 Turn 才生效——
+      // 回放重建时 status=idle，该标注只出现在实时的 Turn 内切换场景
+      if (p.reasoningEffort !== undefined)
+        lines.push(
+          `思考档位已切换为 ${p.reasoningEffort}` +
+            (view.status !== "idle" ? "（下一 Turn 生效）" : ""),
+        );
       pushNotice(view, event.seq, "config", lines.join("\n"), p);
       break;
     }

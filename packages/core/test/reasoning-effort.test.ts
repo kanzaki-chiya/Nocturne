@@ -399,6 +399,45 @@ describe("Runtime：思考档位", () => {
     await s.close();
   });
 
+  it("Turn 中途切档：本 Turn 请求保持快照档位，下一 Turn 生效（ADR-0018 §3）", async () => {
+    // Anthropic 要求同一助手回合（含工具循环）单一思考模式——
+    // 中途切档只写持久化配置，本 Turn 后续请求仍用 Turn 开始时的快照
+    const ref: { s?: RuntimeSession } = {};
+    const midTurn: { current: string; effective: string }[] = [];
+    const provider = new FakeProvider({
+      handler: async (req, callIndex) => {
+        if (callIndex === 0 && ref.s !== undefined) {
+          // 第一个请求已发出（快照档在请求体上）；此刻切档模拟工具循环中改配置
+          await ref.s.setReasoningEffort("max");
+          const info = ref.s.reasoningEffortInfo();
+          midTurn.push({ current: info.current, effective: info.effective });
+          return [
+            { type: "tool_call", toolCallId: "c1", name: "read", input: { path: "a.txt" } },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return STOP;
+      },
+    });
+    const { runtime } = await makeRuntime(provider);
+    const s = await runtime.createSession({ model: "fake/fake-1", reasoningEffort: "low" });
+    ref.s = s;
+    await s.submit({ text: "两步" });
+
+    // 本 Turn 两次请求都用快照档 low；新意图 max 已持久化但未生效
+    expect(provider.requests.map((r) => r.reasoningEffort)).toEqual(["low", "low"]);
+    expect(s.state().config.reasoningEffort).toBe("max");
+    // Turn 内查询：current=新意图 max、effective=快照 low → 状态栏"下一轮生效"的依据
+    expect(midTurn).toEqual([{ current: "max", effective: "low" }]);
+    // Turn 结束后 effective 回到 current
+    expect(s.reasoningEffortInfo().effective).toBe("max");
+
+    // 下一 Turn 生效：请求携带 max
+    await s.submit({ text: "再来" });
+    expect(provider.requests.map((r) => r.reasoningEffort)).toEqual(["low", "low", "max"]);
+    await s.close();
+  });
+
   it("子代理继承父档位；finish 兜底轮不携带档位", async () => {
     // 父调 task → 子会话（finish 工具存在）→ 子代理第一轮不回 finish，
     // 兜底轮 toolChoice=finish 的请求不带 reasoningEffort

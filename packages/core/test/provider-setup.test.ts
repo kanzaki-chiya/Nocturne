@@ -296,6 +296,39 @@ describe("refreshUpstreamLimits", () => {
     expect(gotKey).toBe("sk-env");
     await fs.unlink(path.join(home, "providers.json"));
   });
+
+  it("refresh 保留用户声明的思考档位：thinking.levels 与 source:user 不被覆盖", async () => {
+    const creds = (await createCredentialStore(platform, home, { backend: "memory" })).store;
+    const rc = await loadConfig(platform, {
+      nocturneHome: home,
+      env: noEnv,
+      credentials: creds,
+      upstreamFetch: async () => [
+        { id: "m1", contextWindow: 999_999, capabilities: { reasoning: "visible" } },
+      ],
+    });
+    await rc.saveSetupProvider(ENTRY, { key: "sk-refresh" });
+    // 与 /provider thinking 同路径：写 thinking.levels + source:"user"
+    await rc.saveSetupThinking("corp", ["minimal", "low", "medium"]);
+    await rc.refreshUpstreamLimits("corp");
+
+    const raw = (await readJson(path.join(home, "providers.json"))) as {
+      providers: {
+        id: string;
+        source?: string;
+        models?: Record<string, Record<string, unknown>>;
+        thinking?: { levels?: string[]; source?: string };
+      }[];
+    };
+    const corp = raw.providers.find((p) => p.id === "corp");
+    // 上游刷新照常发生（条目 source/upstream + models 更新）
+    expect(corp?.source).toBe("upstream");
+    expect(corp?.models?.m1?.contextWindow).toBe(999_999);
+    // 但用户声明的思考档位不被覆盖
+    expect(corp?.thinking?.levels).toEqual(["minimal", "low", "medium"]);
+    expect(corp?.thinking?.source).toBe("user");
+    await fs.unlink(path.join(home, "providers.json"));
+  });
 });
 
 // ── 凭据存储 ────────────────────────────────────────────

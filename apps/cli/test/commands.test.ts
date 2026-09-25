@@ -320,6 +320,7 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     const session = fakeSession({
       reasoningEffortInfo: () => ({
         current: "high",
+        effective: "high",
         available: ["low", "medium", "high", "xhigh"],
       }),
     });
@@ -330,7 +331,7 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
 
     const c2 = capture();
     const plain = fakeSession({
-      reasoningEffortInfo: () => ({ current: "off", available: [] }),
+      reasoningEffortInfo: () => ({ current: "off", effective: "off", available: [] }),
     });
     await runSlashCommand("/effort", plain, fakeRuntime, c2.io);
     expect(c2.lines.join("")).toContain("未声明可用档位");
@@ -339,7 +340,7 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
   it("/effort <档位> 调 setReasoningEffort；不可用档位报错为提示", async () => {
     let called: unknown;
     const session = fakeSession({
-      reasoningEffortInfo: () => ({ current: "off", available: ["low", "high"] }),
+      reasoningEffortInfo: () => ({ current: "off", effective: "off", available: ["low", "high"] }),
       setReasoningEffort: async (level) => {
         called = level;
       },
@@ -349,7 +350,7 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(called).toBe("high");
 
     const failing = fakeSession({
-      reasoningEffortInfo: () => ({ current: "off", available: ["low", "high"] }),
+      reasoningEffortInfo: () => ({ current: "off", effective: "off", available: ["low", "high"] }),
       setReasoningEffort: async () => {
         throw new RuntimeCommandError("invalid_command", "该模型不可用档位 xhigh");
       },

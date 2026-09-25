@@ -306,7 +306,12 @@ export async function runSlashCommand(
         if (info.available.length === 0) {
           io.print(`当前思考强度：${info.current}（该模型未声明可用档位）`);
         } else {
-          io.print(`当前思考强度：${info.current}\n可用档位：off | ${info.available.join(" | ")}`);
+          io.print(
+            `当前思考强度：${info.current}\n可用档位：off | ${info.available.join(" | ")}` +
+              (info.effective !== info.current
+                ? `\n本 Turn 生效中：${info.effective}（新档位下一 Turn 生效）`
+                : ""),
+          );
         }
         return "handled";
       }

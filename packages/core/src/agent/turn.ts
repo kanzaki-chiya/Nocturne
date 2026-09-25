@@ -192,6 +192,15 @@ export async function runTurn(
   let summaryAttempted = false;
   /** 最近一次请求实际携带的思考档位（invalid_request 定向提示用） */
   let sentEffort: string | undefined;
+  // 思考档位快照（ADR-0018 §3）：Turn 开始时对会话意图按模型可用集合
+  // 就近降档一次并固定，本 Turn 内所有模型请求一致使用。Turn 中途的
+  // 档位变更只写持久化配置（session.config_changed），不影响本 Turn
+  // 请求，下一 Turn 生效——同一助手回合（含工具循环）内切换思考模式
+  // 违反 Anthropic 对 thinking 的单一模式约束（off→启用会被拒）。
+  const turnEffort = clampReasoningEffort(
+    session.state().config.reasoningEffort,
+    deps.model.model.capabilities.reasoningEffort,
+  );
 
   /**
    * 执行一次 L2 摘要计划：成功写 context.compacted(kind="summary") 并返回 true；
@@ -331,17 +340,12 @@ export async function runTurn(
 
       // 2. 调用模型并消费流（toolChoice 注入点：subagent.md 第 2 节兜底轮）
       const messageId = id("message");
-      // 思考档位（ADR-0018）：会话配置按模型可用集合就近降档后写入请求；
-      // off / 无可用档 → 不携带（适配器 omit）。强制 toolChoice 轮
-      // （子代理 finish 兜底轮）Runtime 不携带档位，整轮关闭思考——
-      // 适配器层 toolChoice+档位共存时丢弃 toolChoice，故此处先行规避。
-      const effort =
-        deps.toolChoice === undefined
-          ? clampReasoningEffort(
-              state.config.reasoningEffort,
-              deps.model.model.capabilities.reasoningEffort,
-            )
-          : undefined;
+      // 思考档位（ADR-0018）：使用 Turn 开始时快照的 turnEffort，本 Turn
+      // 内请求档位固定不变；off / 无可用档 → 不携带（适配器 omit）。
+      // 强制 toolChoice 轮（子代理 finish 兜底轮）Runtime 不携带档位，
+      // 整轮关闭思考——适配器层 toolChoice+档位共存时丢弃 toolChoice，
+      // 故此处先行规避。
+      const effort = deps.toolChoice === undefined ? turnEffort : undefined;
       sentEffort = effort;
       const request = {
         ...built.request,

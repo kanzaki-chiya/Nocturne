@@ -126,7 +126,11 @@ export async function runSlash(
         }
         return {
           kind: "message",
-          text: `当前思考强度：${info.current}\n可用档位：off | ${info.available.join(" | ")}`,
+          text:
+            `当前思考强度：${info.current}\n可用档位：off | ${info.available.join(" | ")}` +
+            (info.effective !== info.current
+              ? `\n本 Turn 生效中：${info.effective}（新档位下一 Turn 生效）`
+              : ""),
         };
       }
       try {

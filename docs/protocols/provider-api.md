@@ -69,7 +69,7 @@ interface ModelRequest {
       anthropic 协议要求必填，适配器使用兜底值；思考开启时该兜底值须与 thinking.budget_tokens
       协调（抬升 max_tokens 或压低预算，见 ADR-0018 第 3 节） */
   maxOutputTokens?: number
-  reasoningEffort?: ReasoningEffortLevel    // Runtime 按会话配置就近降档后赋值；"off"/无可用档位时缺省（不发送思考参数）
+  reasoningEffort?: ReasoningEffortLevel    // Runtime 在 Turn 开始时对会话配置就近降档并固定（本 Turn 不变）；"off"/无可用档位时缺省（不发送思考参数）
   cachePrefix?: { systemBlocks: number; messages: number }   // 可缓存前缀的边界提示，适配器自行决定是否使用
   providerOptions?: Record<string, unknown>                  // 请求级 Provider 专有选项，原样交给适配器，Core 不解释
 }

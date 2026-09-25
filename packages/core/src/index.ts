@@ -226,17 +226,24 @@ export interface RuntimeSession {
   setPermissionPreset(name: string): Promise<void>;
   /**
    * 切换思考档位（events.md 第 7 节，ADR-0018）：立即写入
-   * session.config_changed，下一次模型请求生效（Turn 进行中允许）。
+   * session.config_changed，下一个 Turn 生效（Turn 进行中允许——
+   * 本 Turn 请求沿用 Turn 开始快照）。
    * 档位必须在当前模型声明的可用集合内（off 恒可用），否则
    * 拒绝 invalid_command。
    */
   setReasoningEffort(level: string): Promise<void>;
   /**
-   * 当前思考档位（TUI 状态栏、CLI /effort 的数据来源）：
-   * current = 生效档位（就近降档后的值）；available = 当前模型
-   * 声明的可用集合（空 = 不可切换；off 恒可用不计入）。
+   * 当前思考档位信息（TUI 状态栏、CLI /effort 的数据来源）：
+   * current = 持久化意图按当前模型就近降档后的值；
+   * effective = 本 Turn 实际生效的快照档（Turn 外 = current）。
+   * Turn 中切档后两者不同 → 新档位下一 Turn 生效（ADR-0018 §3）。
+   * available = 当前模型声明的可用集合（空 = 不可切换；off 恒可用不计入）。
    */
-  reasoningEffortInfo(): { current: ReasoningEffort; available: ReasoningEffortLevel[] };
+  reasoningEffortInfo(): {
+    current: ReasoningEffort;
+    effective: ReasoningEffort;
+    available: ReasoningEffortLevel[];
+  };
   /**
    * 手动压缩（context.md 6.2/6.6）：一次模型调用生成 L2 摘要，
    * 写入 context.compacted(kind="summary")。Turn 进行中拒绝 session_busy，
@@ -802,6 +809,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
     let controller: AbortController | undefined;
     let compactController: AbortController | undefined;
+    // 进行中 Turn 的档位快照（ADR-0018 §3）：submit 时对持久化意图
+    // 就近降档一次，reasoningEffortInfo().effective 据此报告；
+    // Turn 中切档只改 current，effective 维持快照至 Turn 结束
+    let activeTurnEffort: ReasoningEffort | undefined;
 
     const assertUsable = () => {
       if (session.health !== "ok") {
@@ -877,6 +888,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           config: turnConfig,
           signal: ac.signal,
         };
+        // 与 runTurn 入口快照同源：同一瞬时、同一输入（持久化意图 ×
+        // 本模型可用集合）——report 给 reasoningEffortInfo().effective
+        activeTurnEffort =
+          clampReasoningEffort(
+            session.state().config.reasoningEffort,
+            model.model.capabilities.reasoningEffort,
+          ) ?? "off";
         try {
           const reason = await runTurn(deps, content);
           if (reason === "failed") {
@@ -885,6 +903,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           return reason;
         } finally {
           if (controller === ac) controller = undefined;
+          activeTurnEffort = undefined;
         }
       },
       async setModel(input) {
@@ -944,7 +963,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       async setReasoningEffort(level) {
         assertUsable();
-        // ADR-0018：允许 Turn 进行中调用，下一次模型请求生效；
+        // ADR-0018：允许 Turn 进行中调用，只改持久化意图、下一个 Turn
+        // 生效（本 Turn 请求沿用 submit 时的快照）；
         // 空闲边界顺手应用 updateProviders 的注册表重建（档位集合随之刷新）
         await rebuildProviders();
         const normalized = level.trim().toLowerCase();
@@ -977,7 +997,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const available = model.model.capabilities.reasoningEffort ?? [];
         const current =
           clampReasoningEffort(session.state().config.reasoningEffort, available) ?? "off";
-        return { current, available: [...available] };
+        return { current, effective: activeTurnEffort ?? current, available: [...available] };
       },
       async compact() {
         assertUsable();

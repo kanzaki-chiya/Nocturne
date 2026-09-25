@@ -184,6 +184,60 @@ describe("TUI", () => {
     await session.close();
   });
 
+  it("Turn 中 Shift+Tab 切档：状态栏标出（下一轮生效），Turn 结束后消失", async () => {
+    // wait 事件让流保持 3s：覆盖"Turn 进行中"窗口
+    const runtime = await createRuntime({
+      cwd: tmp("nct-tui-ws-"),
+      sessionsDir: tmp("nct-tui-sd-"),
+      providers: [
+        new FakeProvider({
+          scripts: [
+            [
+              { type: "wait", ms: 3000 },
+              { type: "text_delta", text: "done" },
+              { type: "finish", reason: "stop" },
+            ],
+          ],
+          models: [
+            {
+              ref: { provider: "fake", model: "fake-1" },
+              contextWindow: 128_000,
+              maxOutputTokens: 8_192,
+              capabilities: {
+                toolCalls: true,
+                parallelToolCalls: true,
+                reasoning: "visible",
+                imageInput: false,
+                promptCache: false,
+                reasoningEffort: ["low", "high"],
+              },
+            },
+          ],
+        }),
+      ],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await pause(60);
+    expect(lastFrame()).toContain("思考:off");
+    // 提交后不 await：Turn 进行中
+    const done = session.submit({ text: "长跑" });
+    await pause(150);
+    // 进行中 Shift+Tab：off → low，状态栏显示 pending 标记
+    stdin.write("\x1b[Z");
+    await pause(120);
+    expect(lastFrame()).toContain("下一轮生效");
+    await done;
+    await pause(150);
+    // Turn 结束：标记消失，显示新档位
+    expect(lastFrame()).toContain("思考:low");
+    expect(lastFrame()).not.toContain("下一轮生效");
+    unmount();
+    await session.close();
+  });
+
   it("模型未声明可用档位：状态栏不显示档位段，Shift+Tab 给提示行", async () => {
     const { session, runtime } = await makeSession(); // fake-model 未声明 reasoningEffort
     const { lastFrame, stdin, unmount } = render(

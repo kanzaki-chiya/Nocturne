@@ -114,7 +114,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 ## 思考强度（进行中，待验收）
 
-**内容**：把 `ModelRequest.reasoningEffort` 从保留字段接通为统一能力——七档中性档位（`off | minimal | low | medium | high | xhigh | max`，无 `auto`）；可用档位按声明解析（逐模型 `capabilities.reasoningEffort` > 服务商 `thinking.levels` 用户声明 > 上游能力标记推导 > 无）；适配器归一化（openai 格式 `reasoning_effort`、openrouter 格式 `reasoning.effort`、anthropic `thinking.budget_tokens` 预算表 + `max_tokens` 调整）；会话配置经 `session.config_changed` 持久化与恢复；`setReasoningEffort` 允许 Turn 进行中、对下一次模型请求生效；就近降档；子代理继承与 `finish` 兜底轮关闭思考；向导思考声明勾选与 `/provider thinking`；TUI Shift+Tab 循环与状态栏档位段；CLI `/effort`；400 定向提示。设计见 [ADR-0018](../decisions/ADR-0018-reasoning-effort.md)。
+**内容**：把 `ModelRequest.reasoningEffort` 从保留字段接通为统一能力——七档中性档位（`off | minimal | low | medium | high | xhigh | max`，无 `auto`）；可用档位按声明解析（逐模型 `capabilities.reasoningEffort` > 服务商 `thinking.levels` 用户声明 > 上游能力标记推导 > 无）；适配器归一化（openai 格式 `reasoning_effort`、openrouter 格式 `reasoning.effort`、anthropic `thinking.budget_tokens` 预算表 + `max_tokens` 调整）；会话配置经 `session.config_changed` 持久化与恢复；`setReasoningEffort` 允许 Turn 进行中、对下一个 Turn 生效（本 Turn 请求固定为 Turn 开始快照）；就近降档；子代理继承与 `finish` 兜底轮关闭思考；向导思考声明勾选与 `/provider thinking`；TUI Shift+Tab 循环与状态栏档位段；CLI `/effort`；400 定向提示。设计见 [ADR-0018](../decisions/ADR-0018-reasoning-effort.md)。
 
 **验收**：
 
