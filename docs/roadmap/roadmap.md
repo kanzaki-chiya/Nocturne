@@ -112,7 +112,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 当前进度：实现与自动化测试完成，真实终端核对在 Windows Terminal 与 conhost 上进行过一轮（全新 `NOCTURNE_HOME` 走 `nctrn setup` 后不设环境变量完成工具往返；模型选择页连续开关、`Ctrl+C`、窄终端降级）。实施中实测出 Windows 控制台 stdin 在多次 `suspendTerminal` 周期后饿死的平台问题，修复与约束已写入 [ADR-0017](../decisions/ADR-0017-model-picker-alternate-screen.md)。macOS 钥匙串与 Linux Secret Service 后端按同一接口实现，无对应环境，未实测。维护者已于 2026-09-25 确认验收。
 
-## 思考强度（进行中，待验收）
+## 思考强度（随 0.2.0 发布；已完成，2026-09-25 验收）
 
 **内容**：把 `ModelRequest.reasoningEffort` 从保留字段接通为统一能力——七档中性档位（`off | minimal | low | medium | high | xhigh | max`，无 `auto`）；可用档位按声明解析（逐模型 `capabilities.reasoningEffort` > 服务商 `thinking.levels` 用户声明 > 上游能力标记推导 > 无）；适配器归一化（openai 格式 `reasoning_effort`、openrouter 格式 `reasoning.effort`、anthropic `thinking.budget_tokens` 预算表 + `max_tokens` 调整）；会话配置经 `session.config_changed` 持久化与恢复；`setReasoningEffort` 允许 Turn 进行中、对下一个 Turn 生效（本 Turn 请求固定为 Turn 开始快照）；就近降档；子代理继承与 `finish` 兜底轮关闭思考；向导思考声明勾选与 `/provider thinking`；TUI Shift+Tab 循环与状态栏档位段；CLI `/effort`；400 定向提示。设计见 [ADR-0018](../decisions/ADR-0018-reasoning-effort.md)。
 
@@ -125,6 +125,8 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - TUI：Shift+Tab（`\x1B[Z`）循环 `[off,…]`、状态栏档位段显隐、权限框内 Shift+Tab 反向焦点不切换；CLI：`/effort` 列表与切换、`/provider thinking` 编号勾选（非法输入重问）。
 - 真实服务实测：commandcode `deepseek/deepseek-v4.1-flash`（openai 格式）与 OpenRouter `openrouter/free`（openrouter 格式）各以 `off`/`low`/`high` 跑一次；不支持档位触发 400 时给出定向提示。Anthropic 无端点，只做单测并如实标注。
 - 真实终端核对（Windows Terminal 与 conhost 截图）：Shift+Tab 循环时状态栏变化、权限框内 Shift+Tab 不切换、`/provider thinking` 勾选界面、CLI `/effort` 输出。
+
+当前进度：实现、自动化测试与真实服务实测完成（commandcode 的 openai 格式与 OpenRouter 的 openrouter 格式；commandcode 的 deepseek 对 `minimal` 返回 400 并给出定向提示）。Turn 进行中切换档位只更新会话设置，下一个 Turn 生效。Anthropic 格式无可用端点，仅单测覆盖，未实测。维护者已于 2026-09-25 确认验收。
 
 ## 之后（未排期）
 

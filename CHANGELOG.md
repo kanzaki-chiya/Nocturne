@@ -11,6 +11,9 @@
 - 新增 CLI `/model` 编号表格与关键词过滤，以及 TUI 全屏模型选择页：双栏浏览、搜索过滤、翻页、仅本会话切换与设为默认，窄终端自动降级。
 - 机器维护的向导配置层 `providers.json` 与 `recent-models.json`，与手写的 `config.json`、环境变量分层合并；手写条目可覆盖同名向导条目。
 - 内置 DeepSeek、OpenRouter、Anthropic 与自定义 OpenAI / Anthropic 兼容预设；上游声明的上下文窗口、最大输出长度与价格自动带入，未声明最大输出时请求不带 `max_tokens`。
+- 新增思考强度：`off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 七档。TUI 中按 Shift+Tab 循环切换，状态栏显示当前档位；CLI 中使用 `/effort [档位]`。档位随会话保存，恢复会话时还原；Turn 进行中切换时，从下一个 Turn 开始生效。
+- 每个模型可用的档位按声明决定：手写配置、向导中的勾选（`/provider thinking <名称>` 可随时调整）或上游声明的推理能力；切换模型时自动降到新模型支持的最近档位。OpenAI 兼容服务发送 `reasoning_effort`，OpenRouter 发送 `reasoning.effort`，Anthropic 换算为思考预算并自动留足 `max_tokens`。
+- 服务端拒绝某个思考档位时，给出针对性提示与调整方法。
 - v0.1 的环境变量配置方式保持不变。
 
 ### 权限与安全
@@ -23,6 +26,7 @@
 
 - macOS 钥匙串与 Linux Secret Service 后端按相同接口实现，但本轮只在 Windows（DPAPI）上做过真实环境验收。
 - 模型选择页的延迟与吞吐列为后续版本预留，本版不显示。
+- Anthropic 格式的思考强度只有自动化测试覆盖，尚未在真实 Anthropic 端点上验证。
 
 ## 0.1.0
 
