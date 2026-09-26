@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "@nocturne/core";
 
@@ -14,7 +14,14 @@ import { runTui } from "../src/index.js";
 import { sessionSavedLine } from "../src/exit-note.js";
 
 const tmpRoots: string[] = [];
+const tmp = (prefix: string) => {
+  const dir = mkdtempSync(path.join(tmpdir(), prefix));
+  tmpRoots.push(dir);
+  return dir;
+};
+beforeEach(() => vi.stubEnv("NOCTURNE_HOME", tmp("nct-tui-home-")));
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const r of tmpRoots.splice(0)) rmSync(r, { recursive: true, force: true });
 });
 

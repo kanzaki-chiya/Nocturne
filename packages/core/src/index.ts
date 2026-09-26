@@ -23,6 +23,7 @@ import {
 import type { ProviderEntryConfig, RuntimeConfig } from "./config/index.js";
 import { createDiagnostics } from "./diagnostics/index.js";
 import { createHookRunner } from "./hooks/index.js";
+import { appendInputHistory, readInputHistory } from "./input-history.js";
 import {
   createRulePolicy,
   isPermissionPresetName,
@@ -204,6 +205,10 @@ export interface RuntimeSession {
   state(): SessionState;
   /** 订阅会话事件（durable + ephemeral），返回退订函数 */
   subscribe(listener: (event: RuntimeEvent) => void): () => void;
+  /** 当前工作区的持久输入历史（旧→新）。读取失败时警告并返回空列表。 */
+  readInputHistory(): Promise<string[]>;
+  /** 记录一条原文；写盘失败发 runtime.warning，不阻断输入。 */
+  recordInputHistory(text: string): Promise<void>;
   /** 提交一个 Turn；Turn 结束时 resolve（events.md 第 7 节） */
   submit(input: SubmitInput): Promise<TurnEndReason>;
   /** 中断运行中的 Turn；无运行中 Turn 时无操作 */
@@ -354,6 +359,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       : (config?.sessionsDir ?? paths.join(platform.nocturneHome(), "sessions"));
   await fs.mkdir(sessionsDir);
   const nocturneHome = config?.nocturneHome ?? platform.nocturneHome();
+  let historyWrite = Promise.resolve();
 
   // 诊断通道（observability.md）：未启用时 no-op；sink 故障降级 + 警告进会话。
   // 先于 Provider 装配创建——适配器经 config.diagnostics 记录能力降级
@@ -840,6 +846,29 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       session,
       state: () => session.state(),
       subscribe: (listener) => session.subscribe(listener),
+      async readInputHistory() {
+        try {
+          await historyWrite;
+          return await readInputHistory(platform, nocturneHome, meta.workspaceRoot);
+        } catch (e) {
+          session.emitEphemeral("runtime.warning", {
+            code: "input_history_read_failed",
+            message: `读取输入历史失败：${e instanceof Error ? e.message : String(e)}`,
+          });
+          return [];
+        }
+      },
+      recordInputHistory(text) {
+        historyWrite = historyWrite
+          .then(() => appendInputHistory(platform, nocturneHome, meta.workspaceRoot, text))
+          .catch((e: unknown) => {
+            session.emitEphemeral("runtime.warning", {
+              code: "input_history_write_failed",
+              message: `保存输入历史失败：${e instanceof Error ? e.message : String(e)}`,
+            });
+          });
+        return historyWrite;
+      },
       interrupt() {
         controller?.abort();
         // 压缩是 Turn 之外的会话级活动，interrupt 同样中止它

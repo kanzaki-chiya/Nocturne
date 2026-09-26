@@ -65,6 +65,37 @@ const fakeRuntime = {
 const tick = () => new Promise((r) => setTimeout(r, 10));
 
 describe("REPL 生命周期", () => {
+  it("TTY readline 读取 Core 历史并记录新输入", async () => {
+    const { io, stdin } = makeIo();
+    io.stdin.isTTY = true;
+    (io.stdin as typeof io.stdin & { setRawMode: (enabled: boolean) => void }).setRawMode = () =>
+      undefined;
+    const submitted: string[] = [];
+    const recorded: string[] = [];
+    let reads = 0;
+    const { session } = fakeSessionWithPendingTurn({ value: false });
+    session.readInputHistory = async () => {
+      reads++;
+      return ["上次输入"];
+    };
+    session.recordInputHistory = async (text) => {
+      recorded.push(text);
+    };
+    session.submit = async ({ text }) => {
+      submitted.push(text ?? "");
+      return "done";
+    };
+    const done = runRepl(session, fakeRuntime, io);
+    await tick();
+    stdin.write("新输入\n");
+    await tick();
+    stdin.end();
+    expect(await done).toBe(0);
+    expect(reads).toBe(1);
+    expect(submitted).toEqual(["新输入"]);
+    expect(recorded).toEqual(["新输入"]);
+  });
+
   it("EOF（Ctrl+D / stdin 结束）时 Turn 进行中：中断并等待收束后退出，无 prompt-after-close", async () => {
     const { io, stdin, stderrChunks } = makeIo();
     const interrupted = { value: false };

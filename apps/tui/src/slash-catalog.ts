@@ -61,8 +61,8 @@ export function helpLines(): string[] {
     const extra = cmd.name === "/exit" ? ", /quit" : "";
     lines.push(`  ${cmd.name}${extra}`.padEnd(18) + cmd.summary);
   }
-  lines.push("快捷键：Shift+Tab 思考档位；Alt+M 权限预设；PgUp/PgDn 翻页；");
-  lines.push("Ctrl+Home 到顶；Ctrl+End 到底；Ctrl+C 中断（空闲时退出）；Ctrl+D 退出。");
+  lines.push("快捷键：Shift+Tab 思考档位；Alt+M 权限预设；Ctrl+J 换行；");
+  lines.push("Ctrl+C 中断（空闲时退出）；Ctrl+D 退出。输入历史按工作区保存为明文 history.jsonl。");
   return lines;
 }
 
@@ -74,6 +74,7 @@ export function cliHelpText(): string {
     lines.push(`  ${name.padEnd(22)}${cmd.cli ?? cmd.summary}`);
   }
   lines.push("快捷键：Ctrl+C 中断当前 Turn（空闲时退出）；Ctrl+D 退出。");
+  lines.push("输入历史按工作区保存为明文 <NOCTURNE_HOME>/history.jsonl。");
   return lines.join("\n");
 }
 

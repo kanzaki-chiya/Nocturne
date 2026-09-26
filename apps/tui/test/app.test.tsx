@@ -9,7 +9,7 @@ import path from "node:path";
 import { Box } from "ink";
 import { render } from "ink-testing-library";
 import { createElement } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "@nocturne/core";
 import {
@@ -28,7 +28,9 @@ import { TuiEnvContext } from "../src/env.js";
 import type { SwitchSessionFn } from "../src/types.js";
 
 const tmpRoots: string[] = [];
+beforeEach(() => vi.stubEnv("NOCTURNE_HOME", tmp("nct-tui-home-")));
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const r of tmpRoots.splice(0)) rmSync(r, { recursive: true, force: true });
 });
 const tmp = (p: string) => {

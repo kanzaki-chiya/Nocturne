@@ -4,6 +4,8 @@
  */
 import { createInterface, type Interface } from "node:readline";
 
+type HistoryInterface = Interface & { history: string[] };
+
 import type { Runtime, RuntimeConfig, RuntimeSession, SessionSummary } from "@nocturne/core";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
 import { readlineCompleter } from "@nocturne/tui/slash-catalog";
@@ -100,7 +102,7 @@ export async function runRepl(
     );
   };
   refreshProviders();
-  const makeRl = (): Interface =>
+  const makeRl = (): HistoryInterface =>
     createInterface({
       input: io.stdin,
       output: io.stdout,
@@ -113,8 +115,20 @@ export async function runRepl(
           providerIds,
         });
       },
-    });
+    }) as HistoryInterface;
   let rl = makeRl();
+  if (io.stdin.isTTY === true) rl.history = (await session.readInputHistory()).reverse();
+  let historyWrite = Promise.resolve();
+  const remember = (line: string): void => {
+    if (io.stdin.isTTY !== true) return;
+    const current = session;
+    historyWrite = historyWrite.then(() => current.recordInputHistory(line));
+  };
+  const reloadHistory = async (): Promise<void> => {
+    if (io.stdin.isTTY !== true) return;
+    await historyWrite;
+    rl.history = (await session.readInputHistory()).reverse();
+  };
 
   const prompt = (): void => {
     if (!closed) rl.prompt();
@@ -132,6 +146,7 @@ export async function runRepl(
       session = res.session;
       unsubscribe();
       unsubscribe = session.subscribe(onEvent);
+      await reloadHistory();
       out.line("stdout", `── 已切换到会话 ${session.id} ──`);
       for (const n of sessionOpenNotes(session)) out.line("stderr", `! ${n}`);
       return;
@@ -253,6 +268,7 @@ export async function runRepl(
           prompt();
           return;
         }
+        remember(line);
         if (line === "/resume" || line.startsWith("/resume ")) {
           const arg = line.slice("/resume".length).trim();
           void (arg === "" ? startResumePick() : doSwitch(arg)).finally(prompt);
@@ -269,6 +285,7 @@ export async function runRepl(
               session = res.session;
               unsubscribe();
               unsubscribe = session.subscribe(onEvent);
+              await reloadHistory();
               out.line("stdout", `── 新会话 ${session.id} ──`);
               for (const n of sessionOpenNotes(session)) out.line("stderr", `! ${n}`);
             } else {
@@ -385,9 +402,10 @@ export async function runRepl(
         if (wizardWork !== undefined) {
           const work = wizardWork;
           wizardWork = undefined;
-          void work().finally(() => {
+          void work().finally(async () => {
             closed = false;
             rl = makeRl();
+            await reloadHistory();
             attach(rl);
           });
           return;
@@ -410,6 +428,7 @@ export async function runRepl(
 
   prompt();
   const code = await done;
+  await historyWrite;
   unsubscribe();
   return code;
 }

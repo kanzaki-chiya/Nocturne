@@ -9,7 +9,7 @@ import path from "node:path";
 import { render as inkRender } from "ink";
 import { render } from "ink-testing-library";
 import { createElement } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "@nocturne/core";
 
@@ -17,7 +17,9 @@ import { App } from "../src/app.js";
 import { splitTextBlocks } from "../src/app.js";
 
 const tmpRoots: string[] = [];
+beforeEach(() => vi.stubEnv("NOCTURNE_HOME", tmp("nct-tui-home-")));
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const r of tmpRoots.splice(0)) rmSync(r, { recursive: true, force: true });
 });
 const tmp = (p: string) => {
@@ -386,6 +388,19 @@ describe("全屏界面", () => {
     await pause(60);
     expect(lastFrame()).toContain("› 你好abX");
     expect(lastFrame()).not.toContain("› 你好Xbc");
+    unmount();
+    await session.close();
+  });
+
+  it("跨次保存的多行原文回填为粘贴占位", async () => {
+    const { runtime, session } = await sessionWithEffort();
+    await session.recordInputHistory("甲\n乙");
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await pause(80);
+    stdin.write("\x1b[A");
+    await waitFor(() => (lastFrame() ?? "").includes("[Paste #1, +1 lines]"));
     unmount();
     await session.close();
   });

@@ -1126,11 +1126,24 @@ function SessionApp({
   }, []);
 
   const pastes = useMemo(() => createPasteStore(), []);
+  useEffect(() => {
+    let active = true;
+    setHistoryIndex(undefined);
+    void session.readInputHistory().then((rows) => {
+      if (active) setInputHistory(rows.map((row) => pastes.add(row) ?? row));
+    });
+    return () => {
+      active = false;
+    };
+  }, [session, pastes]);
   const onSubmit = useCallback(
     (line: string) => {
       const text = line.trim();
       if (text === "") return;
-      setInputHistory((history) => [...history.slice(-99), text]);
+      setInputHistory((history) =>
+        history.at(-1) === text ? history : [...history.slice(-999), text],
+      );
+      void session.recordInputHistory(pastes.expand(text));
       setHistoryIndex(undefined);
       if (text.startsWith("/")) {
         void runSlash(text, session, provider)
