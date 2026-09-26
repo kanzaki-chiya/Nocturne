@@ -19,9 +19,8 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 主对话运行在普通屏幕（[ADR-0021](../decisions/ADR-0021-tui-daily-usability.md)）；终端保存已完结内容的回滚记录，并提供原生滚轮、选中、复制和搜索。底部活动区按需重画，高度至多为终端行数减 1；模型选择页和服务商页打开时临时进入备用屏幕。
 
 ```
-┌ 终端回滚区（<Static> 只追加）
-│   欢迎区：左侧 4 行弯月标记，
-│   右侧「Nocturne 版本」「模型 • 思考档位」、当前目录、一行提示
+┌ 终端回滚区（<Static> 追加已完成的内容）
+│   欢迎区：弯月标记旁显示版本、模型、目录、快捷键提示
 │   › 用户消息
 │   已完结的助手文本 / 工具行 / 通知
 ├ 活动区（流式未完块、进行中的工具、权限确认或浮层）
@@ -31,7 +30,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 │ idle • deepseek/deepseek-v4.1-flash • 思考:off • default • ~/repo • 0.1% / 1M
 ```
 
-- **欢迎区**：紧凑布局。左侧弯月是 9×8 像素的半块字符画（`theme.ts` 的 `MOON_PIXELS`），高光、月黄、阴影三色，占 4 行 9 列；ASCII 模式退回 `#`。不画大号像素字，不显示会话 id、最近会话列表和 MCP 分栏。MCP 只在连接失败时在对话里给一条通知。宽度不够并排时改为纵向文字行。
+- **欢迎区**：四行内容依次为版本、模型与思考档位、当前目录、快捷键提示；空间够时左侧绘制弯月标记，窄屏时只显示这四行文字。ASCII 模式退回 `#`。不显示会话 id 或最近会话列表；MCP 连接失败通过对话通知提示。
 - **回滚区与活动区**：欢迎、启动通知、完结条目及流式输出的已结束块由 `<Static>` 只写一次；未结束的块和进行中的工具留在活动区，过长时只显示末尾。终端原生管理翻阅，不开启鼠标上报。`/new`、`/resume` 追加会话分隔线和新欢迎区，不清屏。
 - **助手 Markdown**：用 `marked` 词法分析后按显示宽度排成终端行。标题、强调、行内与围栏代码、嵌套列表、引用、分隔线、表格和链接可读显示；链接显示文字及地址，代码不高亮。窄表格退化为逐行“列名：值”。已结束块进入 `<Static>`，未结束块在活动区重排；用户消息、思考和工具输出仍按纯文本显示。
 - **权限对话框与浮层**：`/resume`、`/context`、`/help`、权限确认、向导确认画在对话区高度内，不另占帧高，也不清除输入框文字。模型选择页与服务商页替换整帧，关闭后输入框文字仍在。
@@ -59,7 +58,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 
 对话输入之外的全局键：`Esc` 优先关闭补全列表、弹层或权限反馈行；没有这些焦点时忙碌中中断 Turn，空闲时不退出、不清空输入。拆成 Esc + 字母的 Alt 组合在 80ms 内不会误中断。`Tab` 在权限对话框选项间移动焦点；补全列表打开时 `Tab` 补全当前候选。`Shift+Tab`（`\x1B[Z`）在输入框状态下循环思考档位 `[off, …当前模型可用档位]`，只高亮状态栏，不插入对话条目；Turn 进行中同样可切，新档位从下一个 Turn 生效（状态栏显示 `思考:<生效档>→<新档>`，ADR-0018）。权限确认框内 `Shift+Tab` 仍是反向移动焦点。当前模型没有可用档位时 `Shift+Tab` 不响应、不插入提示。
 
-`Alt+M` 在 `read-only → default → auto-edit → full-access` 间循环，走与 `/preset` 相同的 `setPermissionPreset`（`session.config_changed`），Turn 进行中同样拒绝；只高亮状态栏，不插入对话条目。Windows Terminal 发送 `\x1bm`，必须能识别。conhost 不要求识别；若把 Alt 拆成 Esc 加字母，吞掉该字母，不写入输入框，也不触发其他操作。
+`Alt+M` 在 `read-only → default → auto-edit → full-access` 间循环，走与 `/preset` 相同的 `setPermissionPreset`（`session.config_changed`），Turn 进行中同样拒绝；只高亮状态栏，不插入对话条目。Windows Terminal 发送 `\x1bm`，必须能识别；若把 Alt 拆成 Esc 加字母，吞掉该字母，不写入输入框，也不触发其他操作。
 
 不带参数的 `/preset` 与 `/effort` 打开活动区内的选择列表，高亮当前值，↑/↓ 选择、Enter 生效、Esc 取消；`/effort` 仅列出当前模型的可用档位与 `off`，不支持思考的模型只显示说明。带参数的调用和逐行 CLI 的可选值输出不变（[ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 第 8 条）。
 
@@ -79,12 +78,12 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 |---|---|
 | stdin/stdout 非 TTY | v0.3 起自动使用逐行 REPL（`--cli` 同形态），不再因默认选择 TUI 报错；显式 `--tui` 仍报错退出 2 并提示 `nctrn --cli` 或 `nctrn -p`。`runTui` 直接调用非 TTY 时同样退出 2 |
 | `NO_COLOR` 或 `TERM=dumb` | 禁用颜色与转轮动画；布局与符号不变 |
-| `NOCTURNE_ASCII=1`（显式开关） | 框线、徽标退回 ASCII（`-`/`+`/`*`/`->`）。不做自动探测：Windows 上 `TERM` 通常未设置，靠它识别 conhost 不可靠；默认一律输出 Unicode |
-| 宽度 ≥80 | 完整布局（欢迎框双栏、状态栏全段、diff 上下文行） |
-| 40–79 | 紧凑：欢迎框降级为单栏；状态栏隐藏目录段；diff 上下文收窄，工具输入摘要硬截断 |
-| <40 | 极简：不显示欢迎框；回放条目照常输出（`<Static>` 只追加，不暂存）但摘要更短；活动区 + 输入行 + 单行状态（`状态 • 上下文占用`）；权限对话框隐藏原因行、选项收缩为单行 |
-| 运行时 resize | 监听 `resize`，按新的行数减 1 重算帧预算，对话区按新宽度重排可见行 |
-| Windows Terminal / conhost | 两者均可运行；conhost 旧版无真彩，用 16 色回退。增量渲染 + 帧高 `rows - 1` 避免整屏清除（ADR-0020）。输入法光标由 `runTui` 统一补位（见 §2 输入行）。图标只用两端实测可显示的字符 |
+| `NOCTURNE_ASCII=1`（显式开关） | 框线、徽标退回 ASCII（`-`/`+`/`*`/`->`）；默认输出 Unicode |
+| 宽度 ≥80 | 欢迎区弯月与文字并排，状态栏显示完整分段与目录；diff 显示较多上下文 |
+| 40–79 | 欢迎区空间足够时仍并排，否则保留四行文字；状态栏隐藏目录段；diff 上下文收窄，工具输入摘要截断 |
+| <40 | 欢迎区保留四行文字；回滚内容照常写入 `<Static>`，摘要按宽度截断；状态栏优先保留状态与上下文，权限对话框收紧布局 |
+| 运行时 resize | 监听 `resize`，按新的行数减 1 重算活动区预算；已写入回滚区的内容不重排，活动区按新宽度重排 |
+| Windows Terminal | v0.4 的终端验收目标；增量渲染与活动区高度上限避免整屏清除，输入法光标由 `runTui` 补位（见 §2 输入行） |
 
 ## 6. 会话切换与恢复
 
@@ -199,11 +198,11 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 
 ## 9. 工程约束
 
-- `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口 + ADR-0010 批准的终端依赖（ink、react；`ink-testing-library` 为 devDependency）。CLI 仅可惰性加载 `@nocturne/tui`，或静态引用 `@nocturne/tui/slash-catalog`；后者不得 import 任何模块，以免逐行模式加载 Ink。依赖方向见 [modules.md](../architecture/modules.md) 第 1 节。
-- 目录：`src/index.ts`（`runTui`：增量渲染 + Ink 备用屏幕）、`src/app.tsx`（全屏壳）、`src/frame.ts`（帧高 `rows - 1` 与降级）、`src/viewport.ts`（可见行）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。不再有逐页切屏模块。
-- 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎框/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/就地步骤/四操作/Esc/Ctrl+C。
-- **歧义宽度字符**（conhost 实测，GBK 代码页）：`· ● ○ ◆ ◇ ↑ ↓ ← → … — ｜` 等在控制台实宽 2 列，与 `string-width` 的 1 列不一致；`│ ─ ╭ █ ▀ ▄ ▌ ▐ ✓ ✗ ⚠ • › ⠋` 及全角 CJK 两边一致（半块字符 2026-09-26 实测）。凡会被补齐到整宽的行（带边框 Box 内部、左右栏拼接行），每个歧义字符都让实际行宽 +1，超边即折行——备用屏下表现为整屏滚动、页头被裁。规则：框内动态文本一律过 `format.ts` 的 `boxSafe()`，静态文案只用宽度确定字符（分隔符用 `•` 不用 `·`，方向提示用"上下/左右"不用箭头），边框盒距右缘保留 ≥4 列余量；无补齐的行（裸 Text）只需截断预算留 ≥4 列余量。
-- `runTui` 只消费现有公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`（状态栏上下文占用与 `/context` 同源），加上 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`，以及 `session.mcpServers()`（`/mcp` 面板与欢迎框 MCP 块）；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
+- `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口及批准的终端依赖（ink、react、string-width、marked；`ink-testing-library` 为 devDependency）。CLI 仅可惰性加载 `@nocturne/tui`，或静态引用 `@nocturne/tui/slash-catalog`；后者不得 import 任何模块，以免逐行模式加载 Ink。依赖方向见 [modules.md](../architecture/modules.md) 第 1 节。
+- 目录：`src/index.ts`（`runTui`：普通屏幕增量渲染）、`src/app.tsx`（活动区与回滚区）、`src/frame.ts`（活动区高度预算）、`src/viewport.ts`（按显示宽度排版）、`src/markdown.ts`（助手文本排版）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。整页选择界面临时使用备用屏幕。
+- 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎区/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/就地步骤/四操作/Esc/Ctrl+C。
+- **显示宽度**：按 `string-width` 预算中文和动态文本，框内动态文本经 `format.ts` 的 `boxSafe()` 处理；窄屏时截断摘要和列表字段，边框保留安全余量。
+- `runTui` 只消费 Core 公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`、`readInputHistory`/`recordInputHistory`、`mcpServers()`（`/mcp` 面板），以及 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
 
 ## 10. 需要的 Core API 变更
 
@@ -214,7 +213,7 @@ v0.2 增补（provider-setup.md 第 6 节）：模型选择页与 `/provider` �
 v0.3 增补（ADR-0019）：
 
 - `runProviderSetupWizard` 不再包含选模型与"设为默认"两步；`WizardResult` 移除 `model`/`setDefault`、新增 `modelCount`（服务商页底部结果行的数据源）；
-- `SessionSummary.firstText?`：欢迎框"最近会话·首句摘要"的数据源（列表实现本就读日志文件，提取首条 `message.user` 文本）；
+- `SessionSummary.firstText?`：`/resume` 列表首句摘要的数据源（列表实现读日志，提取首条 `message.user` 文本）；
 - `runTui` 可无会话启动（首次配置流程）：注入 `openSession` 回调，服务商页 → 模型页走完后由 CLI 完成延迟装配；打开会话的逻辑仍在 CLI 一份。
 
 **不上移**：配置收集（`collectSessionConfig`）与会话打开组合（`openSession`）留在 CLI——它们携带 CLI 参数结构与"跨目录确认"这类客户端交互，进 Core 会违反"Core 不依赖客户端"的边界。CLI 单入口保证启动语义只有一份实现，TUI 从 CLI 手里接过已打开的 `Session`（或 setup 完成后的打开回调），不存在漂移面。
@@ -224,10 +223,9 @@ v0.3 增补（ADR-0019）：
 ## 11. 本阶段不做
 
 - 独立 `nctrn-tui` 命令（需要共享启动语义时再评估，可能以独立命令复制薄壳或重新讨论 Core 入口上移的方式引入）；
-- 鼠标交互、点击选中；
-- 多行输入编辑器、粘贴检测、@文件补全；
-- Markdown 语法高亮（文本按纯文本渲染，着色仅限角色/工具行）；
-- 逐页进出备用屏幕（主界面启动即在备用屏幕内，页面是同一帧里的层，见 ADR-0020）；
+- TUI 自绘的鼠标控件、点击操作（终端原生选中和复制可用）；
+- @文件补全；
+- 代码块语法高亮（助手 Markdown 已做结构化排版）；
 - 多会话标签页；
 - 工具输出详情查看器/分页器（长输出靠截断 + spillPath，与 CLI 一致）；
 - 主题、配色、键位的用户自定义（v0.3 只把颜色集中到主题常量，不开放配置）；
