@@ -87,6 +87,8 @@ function frameLines(frame: string | undefined): string[] {
   return lines;
 }
 
+const occurrences = (frame: string, part: string): number => frame.split(part).length - 1;
+
 describe("全屏界面", () => {
   it("/preset 与 /effort 无参选择高亮当前值，Enter 生效、Esc 取消", async () => {
     const { runtime, session } = await sessionWithEffort();
@@ -232,6 +234,101 @@ describe("全屏界面", () => {
     unmount();
     await session.close();
   });
+
+  it("流式松散列表完整进回滚区：每段恰好一次", async () => {
+    // 第一片在松散列表 item 的空行处停下——旧实现会把 item 头提前写进回滚区，
+    // 之后整个列表被识别为一个 token，按序号去重时续写部分永久丢失
+    const loose = "说明：\n\n1. **第一步**\n\n   细节一\n\n2. **第二步**\n\n   细节二\n\n结束。";
+    const cut = loose.indexOf("细节一");
+    const runtime = await createRuntime({
+      cwd: tmp("nct-tui-ws-"),
+      sessionsDir: tmp("nct-tui-sd-"),
+      providers: [
+        new FakeProvider({
+          scripts: [
+            [
+              { type: "text_delta", text: loose.slice(0, cut) },
+              { type: "wait", ms: 250 },
+              { type: "text_delta", text: loose.slice(cut) },
+              { type: "finish", reason: "stop" },
+            ],
+          ],
+        }),
+      ],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    const { lastFrame, unmount } = render(createElement(App, { session, runtime, env: ENV }));
+    await pause(80);
+    await session.submit({ text: "问" });
+    await waitFor(() => (lastFrame() ?? "").includes("结束。"));
+    const frame = lastFrame() ?? "";
+    for (const part of ["说明：", "第一步", "细节一", "第二步", "细节二", "结束。"]) {
+      expect(occurrences(frame, part)).toBe(1);
+    }
+    unmount();
+    await session.close();
+  }, 15000);
+
+  it("流式松散列表完整进回滚区；中断后 /new，新会话回复照常渲染", async () => {
+    const loose = "说明：\n\n1. **第一步**\n\n   细节一\n\n2. **第二步**\n\n   细节二\n\n结束。";
+    const first = loose.slice(0, loose.indexOf("细节一")); // 到列表第一块的空行处
+    const runtime = await createRuntime({
+      cwd: tmp("nct-tui-ws-"),
+      sessionsDir: tmp("nct-tui-sd-"),
+      providers: [
+        new FakeProvider({
+          scripts: [
+            // 第一片到达后挂起，模拟流式中途被中断
+            [
+              { type: "text_delta", text: first },
+              { type: "wait", ms: 30000 },
+              { type: "text_delta", text: loose.slice(first.length) },
+              { type: "finish", reason: "stop" },
+            ],
+            [
+              { type: "text_delta", text: "二轮回答\n\n- 甲\n- 乙\n\n完毕二" },
+              { type: "finish", reason: "stop" },
+            ],
+          ],
+        }),
+      ],
+    });
+    const s1 = await runtime.createSession({ model: "fake/fake-1" });
+    const created: RuntimeSession[] = [];
+    const newSession = vi.fn(async () => {
+      const next = await runtime.createSession({ model: "fake/fake-1" });
+      created.push(next);
+      return { kind: "ok" as const, session: next };
+    });
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session: s1, runtime, env: ENV, newSession }),
+    );
+    await pause(80);
+    const turn = s1.submit({ text: "问" });
+    await waitFor(() => (lastFrame() ?? "").includes("第一步"));
+    // 流式中途 Ctrl+C 中断：已写入部分只出现一次，未发出的部分不补写
+    stdin.write("\x03");
+    await turn;
+    await waitFor(() => (lastFrame() ?? "").includes("（中断）"));
+    const mid = lastFrame() ?? "";
+    expect(occurrences(mid, "说明：")).toBe(1);
+    expect(occurrences(mid, "第一步")).toBe(1);
+    expect(mid).not.toContain("细节一");
+    // 切换会话：新会话的消息按自身位置记账，不受旧会话影响
+    stdin.write("/new");
+    stdin.write("\r");
+    await waitFor(() => created.length === 1);
+    await created[0]?.submit({ text: "再问" });
+    await waitFor(() => (lastFrame() ?? "").includes("完毕二"));
+    const frame = lastFrame() ?? "";
+    for (const part of ["说明：", "第一步", "二轮回答", "完毕二"]) {
+      expect(occurrences(frame, part)).toBe(1);
+    }
+    expect(frame).toContain("新会话");
+    unmount();
+    await s1.close();
+    for (const s of created) await s.close();
+  }, 15000);
 
   it("打开模型页再关闭，输入框文字还在", async () => {
     const { runtime, session } = await sessionWithEffort();

@@ -34,7 +34,7 @@ import {
   type ProviderWizardStart,
 } from "./commands.js";
 import { composerWindow } from "./cursor.js";
-import { renderMarkdown, splitMarkdownBlocks } from "./markdown.js";
+import { renderMarkdown, splitMarkdownBlocks, takeMarkdownBlocks } from "./markdown.js";
 import { createPasteStore } from "./paste.js";
 import { resumeLabel } from "./resume-label.js";
 import { frameBudget } from "./frame.js";
@@ -76,16 +76,31 @@ export function splitCompletedPrefix(entries: readonly ViewEntry[]): {
 
 export const splitTextBlocks = splitMarkdownBlocks;
 
-function assistantBlocks(entry: Extract<ViewEntry, { kind: "assistant" }>): ViewEntry[] {
-  const { blocks } = splitMarkdownBlocks(entry.text, true);
-  if (blocks.length === 0) blocks.push("");
-  return blocks.map((text, i) => ({
-    ...entry,
-    key: `${entry.key}:block:${i}`,
-    text,
-    reasoning: i === 0 ? entry.reasoning : "",
-    finishReason: i === blocks.length - 1 ? entry.finishReason : "stop",
-  }));
+/**
+ * 持久化助手条目 → 写入回滚区的块条目。流式期间已写入的前缀按字符位置
+ * 记账（written），这里只切剩余部分；块键用绝对偏移，流式块晋升后不重发。
+ */
+function assistantBlocks(
+  entry: Extract<ViewEntry, { kind: "assistant" }>,
+  written: Map<string, number>,
+): ViewEntry[] {
+  const from = Math.min(written.get(entry.messageId) ?? 0, entry.text.length);
+  const { blocks } = splitMarkdownBlocks(entry.text.slice(from), true);
+  written.set(entry.messageId, entry.text.length);
+  // 空消息补一行占位；流式已写满时仅中断消息还要补"（中断）"标记行
+  if (blocks.length === 0 && (from === 0 || entry.finishReason === "aborted")) blocks.push("");
+  let at = from;
+  return blocks.map((text, i) => {
+    const key = `${entry.key}:@${at}`;
+    at += text.length;
+    return {
+      ...entry,
+      key,
+      text,
+      reasoning: i === 0 && from === 0 ? entry.reasoning : "",
+      finishReason: i === blocks.length - 1 ? entry.finishReason : "stop",
+    };
+  });
 }
 
 export interface SetupFlowSpec {
@@ -539,6 +554,8 @@ function SessionApp({
   /** Ink Static 只按数组下标追加；流式块晋升为持久条目时也不能重排或缩短。 */
   const staticQueue = useRef<TranscriptItem[]>([]);
   const staticKeys = useRef(new Set<string>());
+  /** 每条助手消息已写入回滚区的前缀长度（字符数），会话内跨流式/持久化保持；切换会话清零。 */
+  const staticWritten = useRef(new Map<string, number>());
   const sessionEpoch = useRef(0);
   /** /resume 弹层的会话清单（打开弹层时拉取） */
   const [resumeList, setResumeList] = useState<readonly SessionSummary[] | undefined>(undefined);
@@ -715,6 +732,7 @@ function SessionApp({
         };
         staticQueue.current.push(sep);
         sessionEpoch.current++;
+        staticWritten.current.clear();
         setSession(res.session);
         setOverlay(undefined);
         for (const n of sessionNotes(res.session)) pushLine(`! ${n}`);
@@ -745,6 +763,7 @@ function SessionApp({
       };
       staticQueue.current.push(sep);
       sessionEpoch.current++;
+      staticWritten.current.clear();
       setSession(res.session);
       setClientLines([]);
       setOverlay(undefined);
@@ -1329,18 +1348,24 @@ function SessionApp({
   ];
   const completedLive = new Map<string, string>();
   for (const assistant of view.live.assistants) {
-    const { blocks, tail } = splitMarkdownBlocks(assistant.text, false);
-    completedLive.set(assistant.messageId, tail);
-    blocks.forEach((text, i) => {
+    const step = takeMarkdownBlocks(
+      assistant.text,
+      staticWritten.current.get(assistant.messageId) ?? 0,
+      false,
+    );
+    completedLive.set(assistant.messageId, step.tail);
+    for (const part of step.parts) {
+      const key = `a:${assistant.messageId}:@${part.offset}`;
       staticEntries.push({
         kind: "header",
-        key: `a:${assistant.messageId}:block:${i}`,
-        lines: renderMarkdown(text, width, `a:${assistant.messageId}:block:${i}`),
+        key,
+        lines: renderMarkdown(part.text, width, key),
       });
-    });
+    }
+    staticWritten.current.set(assistant.messageId, step.written);
   }
   const staticBlocks = staticEntries.flatMap<TranscriptItem>((entry) =>
-    entry.kind === "assistant" ? assistantBlocks(entry) : [entry],
+    entry.kind === "assistant" ? assistantBlocks(entry, staticWritten.current) : [entry],
   );
   for (const entry of staticBlocks) {
     const id = `${sessionEpoch.current}:${entry.key}`;

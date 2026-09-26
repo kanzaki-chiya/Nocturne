@@ -13,6 +13,15 @@ export function splitMarkdownBlocks(
   complete: boolean,
 ): { blocks: string[]; tail: string } {
   const tokens = marked.lexer(text).filter((token) => token.type !== "def");
+  // 松散列表与多段引用在空行后仍可能续写：只有 lexer 已产出下一个非空白
+  // token，才能认定它们已结束（否则续写部分会被错误的块边界吞掉）。
+  let lastBlock = -1;
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    if (tokens[i]?.type !== "space") {
+      lastBlock = i;
+      break;
+    }
+  }
   const blocks: string[] = [];
   let offset = 0;
   for (let i = 0; i < tokens.length; i++) {
@@ -22,14 +31,39 @@ export function splitMarkdownBlocks(
     // A trailing space token contains the paragraph/list/code boundary, not body text.
     if (token.type === "space") continue;
     const end = text.indexOf(token.raw, offset) + token.raw.length;
-    const stable = complete || next !== undefined || /\n[ \t]*\n$/.test(text.slice(end));
-    if (!stable) break;
+    const closed =
+      token.type === "list" || token.type === "blockquote"
+        ? i < lastBlock
+        : next !== undefined || /\n[ \t]*\n$/.test(text.slice(end));
+    if (!(complete || closed)) break;
     const through = next?.type === "space" ? end + next.raw.length : end;
     blocks.push(text.slice(offset, through));
     offset = through;
     if (next?.type === "space") i++;
   }
   return { blocks, tail: complete ? "" : text.slice(offset) };
+}
+
+/**
+ * 按字符位置推进的稳定前缀切块（ADR-0021）：`written` 是已写入回滚区的
+ * 前缀长度。流式过程中块序号会随边界漂移，字符位置不会——之后只对
+ * text.slice(written) 重新切块，返回的新块带绝对偏移（作条目键），
+ * tail 是活动区要渲染的未完结剩余文本。
+ */
+export function takeMarkdownBlocks(
+  text: string,
+  written: number,
+  complete: boolean,
+): { parts: { offset: number; text: string }[]; written: number; tail: string } {
+  const from = Math.max(0, Math.min(written, text.length));
+  const { blocks, tail } = splitMarkdownBlocks(text.slice(from), complete);
+  let at = from;
+  const parts = blocks.map((block) => {
+    const part = { offset: at, text: block };
+    at += block.length;
+    return part;
+  });
+  return { parts, written: at, tail };
 }
 
 function inline(tokens: readonly Token[], style: Partial<Run> = {}): Run[] {
