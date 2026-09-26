@@ -5,6 +5,7 @@ export interface LineSegment {
   backgroundColor?: string | undefined;
   dim?: boolean | undefined;
   bold?: boolean | undefined;
+  italic?: boolean | undefined;
 }
 
 export interface LaidLine {
@@ -13,5 +14,6 @@ export interface LaidLine {
   color?: string | undefined;
   dim?: boolean | undefined;
   bold?: boolean | undefined;
+  italic?: boolean | undefined;
   segments?: readonly LineSegment[] | undefined;
 }

@@ -6,6 +6,7 @@ import { Box, Static, Text } from "ink";
 
 import { glyphs, useTuiEnv } from "../env.js";
 import { tailLines } from "../format.js";
+import { renderMarkdown } from "../markdown.js";
 import type { LaidLine } from "../viewport.js";
 import { ToolRow } from "./tool-row.js";
 
@@ -35,8 +36,10 @@ function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): Re
 
 function AssistantRow({
   entry,
+  width,
 }: {
   entry: Extract<ViewEntry, { kind: "assistant" }>;
+  width: number;
 }): React.JSX.Element {
   const reasoning = tailLines(entry.reasoning, REASONING_TAIL);
   return (
@@ -50,7 +53,23 @@ function AssistantRow({
           ))}
         </Box>
       ) : null}
-      {entry.text !== "" ? <Text>{entry.text}</Text> : null}
+      {entry.text !== ""
+        ? renderMarkdown(entry.text, width, entry.key).map((line) => (
+            <Text key={line.key}>
+              {line.segments?.map((seg, i) => (
+                <Text
+                  key={i}
+                  bold={seg.bold === true}
+                  italic={seg.italic === true}
+                  dimColor={seg.dim === true}
+                  {...(seg.color !== undefined ? { color: seg.color } : {})}
+                >
+                  {seg.text}
+                </Text>
+              )) ?? line.text}
+            </Text>
+          ))
+        : null}
       {entry.finishReason === "aborted" ? <Text dimColor>（中断）</Text> : null}
     </Box>
   );
@@ -87,7 +106,7 @@ export function EntryRow({
     case "user":
       return <UserRow entry={entry} />;
     case "assistant":
-      return <AssistantRow entry={entry} />;
+      return <AssistantRow entry={entry} width={width} />;
     case "tool":
       return <ToolRow entry={entry} width={width} />;
     case "notice":
@@ -103,6 +122,7 @@ export function EntryRow({
               {...(line.color !== undefined ? { color: line.color } : {})}
               dimColor={line.dim === true}
               bold={line.bold === true}
+              italic={line.italic === true}
             >
               {line.segments !== undefined
                 ? line.segments.map((seg, i) => (
@@ -114,6 +134,7 @@ export function EntryRow({
                         : {})}
                       dimColor={seg.dim === true}
                       bold={seg.bold === true}
+                      italic={seg.italic === true}
                     >
                       {seg.text}
                     </Text>

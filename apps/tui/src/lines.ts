@@ -6,6 +6,7 @@ import stringWidth from "string-width";
 import type { SessionView } from "@nocturne/core/protocol";
 
 import { boxSafe, summarizeToolInput, tailLines, truncateLine } from "./format.js";
+import { renderMarkdown } from "./markdown.js";
 import type { TranscriptItem } from "./components/transcript.js";
 import type { LaidLine } from "./viewport.js";
 
@@ -70,7 +71,7 @@ export function layoutEntry(entry: TranscriptItem, width: number, ascii: boolean
       if (entry.reasoning !== "") {
         lines.push(...rows(`${entry.key}:r`, entry.reasoning, width, { dim: true }).slice(-4));
       }
-      if (entry.text !== "") lines.push(...rows(`${entry.key}:t`, entry.text, width));
+      if (entry.text !== "") lines.push(...renderMarkdown(entry.text, width, `${entry.key}:t`));
       if (entry.finishReason === "aborted") {
         lines.push({ key: `${entry.key}:x`, text: "（中断）", dim: true });
       }
@@ -134,7 +135,10 @@ export function layoutLive(view: SessionView, width: number, ascii: boolean): La
     // 思考与正文都显示：有的模型先吐几个正文字再回去思考，
     // 只显示正文会让画面停在那几个字上（思考灰色在上，正文在下）
     const reasoning = a.reasoning !== "" ? wrap(a.reasoning, width) : [];
-    const text = a.text !== "" || reasoning.length === 0 ? wrap(a.text, width) : [];
+    const text =
+      a.text !== "" || reasoning.length === 0
+        ? renderMarkdown(a.text, width, `live-a:${a.messageId}`)
+        : [];
     reasoning.forEach((line, i) => {
       const last = text.length === 0 && i === reasoning.length - 1;
       lines.push({
@@ -146,8 +150,9 @@ export function layoutLive(view: SessionView, width: number, ascii: boolean): La
     text.forEach((line, i) => {
       const last = i === text.length - 1;
       lines.push({
-        key: `live-a:${a.messageId}:${i}`,
-        text: paint(last ? `${line}${cursor}` : line, width),
+        ...line,
+        text: paint(last ? `${line.text}${cursor}` : line.text, width),
+        segments: last ? [...(line.segments ?? []), { text: cursor, dim: true }] : line.segments,
       });
     });
   }

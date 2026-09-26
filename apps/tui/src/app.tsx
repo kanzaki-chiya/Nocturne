@@ -34,6 +34,7 @@ import {
   type ProviderWizardStart,
 } from "./commands.js";
 import { inputWindow } from "./cursor.js";
+import { renderMarkdown, splitMarkdownBlocks } from "./markdown.js";
 import { createPasteStore } from "./paste.js";
 import { resumeLabel } from "./resume-label.js";
 import { frameBudget } from "./frame.js";
@@ -73,26 +74,10 @@ export function splitCompletedPrefix(entries: readonly ViewEntry[]): {
   return { prefix: entries.slice(0, cut), tail: entries.slice(cut) };
 }
 
-/** 第 3 条 Markdown 词法器接入前，以空行作为完成块的边界。 */
-export function splitTextBlocks(
-  text: string,
-  complete: boolean,
-): { blocks: string[]; tail: string } {
-  const blocks: string[] = [];
-  const boundary = /\n[ \t]*\n/g;
-  let start = 0;
-  for (const match of text.matchAll(boundary)) {
-    const end = match.index + match[0].length;
-    blocks.push(text.slice(start, end));
-    start = end;
-  }
-  const tail = text.slice(start);
-  if (complete && tail !== "") blocks.push(tail);
-  return { blocks, tail: complete ? "" : tail };
-}
+export const splitTextBlocks = splitMarkdownBlocks;
 
 function assistantBlocks(entry: Extract<ViewEntry, { kind: "assistant" }>): ViewEntry[] {
-  const { blocks } = splitTextBlocks(entry.text, true);
+  const { blocks } = splitMarkdownBlocks(entry.text, true);
   if (blocks.length === 0) blocks.push("");
   return blocks.map((text, i) => ({
     ...entry,
@@ -1334,16 +1319,13 @@ function SessionApp({
   ];
   const completedLive = new Map<string, string>();
   for (const assistant of view.live.assistants) {
-    const { blocks, tail } = splitTextBlocks(assistant.text, false);
+    const { blocks, tail } = splitMarkdownBlocks(assistant.text, false);
     completedLive.set(assistant.messageId, tail);
     blocks.forEach((text, i) => {
       staticEntries.push({
         kind: "header",
         key: `a:${assistant.messageId}:block:${i}`,
-        lines: text.split("\n").map((part, j) => ({
-          key: `a:${assistant.messageId}:block:${i}:${j}`,
-          text: part,
-        })),
+        lines: renderMarkdown(text, width, `a:${assistant.messageId}:block:${i}`),
       });
     });
   }
@@ -1535,6 +1517,7 @@ function SessionApp({
                   {...(line.color !== undefined ? { color: line.color } : {})}
                   dimColor={line.dim === true}
                   bold={line.bold === true}
+                  italic={line.italic === true}
                 >
                   {line.segments !== undefined
                     ? line.segments.map((seg, i) => (
@@ -1546,6 +1529,7 @@ function SessionApp({
                             : {})}
                           dimColor={seg.dim === true}
                           bold={seg.bold === true}
+                          italic={seg.italic === true}
                         >
                           {seg.text}
                         </Text>
