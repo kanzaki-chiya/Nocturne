@@ -37,7 +37,7 @@ export function boxSafe(text: string): string {
 
 /** 按显示宽度截断为单行；超宽时截断并加省略号 */
 export function truncateLine(text: string, width: number, ellipsis = "…"): string {
-  const oneLine = text.replace(/\r?\n/g, " ");
+  const oneLine = text.replace(/\r\n?|\n/g, " ");
   if (width <= 0) return "";
   if (stringWidth(oneLine) <= width) return oneLine;
   const budget = Math.max(0, width - stringWidth(ellipsis));
@@ -54,7 +54,7 @@ export function truncateLine(text: string, width: number, ellipsis = "…"): str
 
 /** 多行文本尾部 n 行（liveOutput / 结果摘要展示用） */
 export function tailLines(text: string, n: number): string[] {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
   while (lines.length > 0 && lines.at(-1) === "") lines.pop();
   return lines.slice(Math.max(0, lines.length - n));
 }

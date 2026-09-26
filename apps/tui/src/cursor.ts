@@ -131,3 +131,50 @@ export function createCursorStream(stdout: NodeJS.WriteStream): {
   });
   return { stream, claims };
 }
+
+/** 粘贴/输入文本统一用 \n 换行（Windows Terminal 粘贴时换行是 \r） */
+export function normalizeNewlines(text: string): string {
+  return text.replace(/\r\n?/g, "\n");
+}
+
+/**
+ * 单行输入框的可见窗口：换行显示为 mark，按显示宽度水平滚动，保证光标可见。
+ * before 就是硬件光标前的可见文字，InputCursor 与 Composer 共用，二者不会错位。
+ */
+export function inputWindow(
+  prompt: string,
+  value: string,
+  cursor: number,
+  width: number,
+  mark: string,
+): { before: string; at: string | undefined; after: string } {
+  const show = (s: string): string => s.replace(/\n/g, mark);
+  const limit = Math.max(1, width - 2 - stringWidth(prompt));
+  const lead = "...";
+  let before = show(value.slice(0, cursor));
+  // 光标自身占 1 列
+  if (stringWidth(before) + 1 > limit) {
+    const chars = Array.from(new Intl.Segmenter().segment(before), (g) => g.segment);
+    let used = stringWidth(lead) + 1;
+    let start = chars.length;
+    while (start > 0) {
+      const w = stringWidth(chars[start - 1] ?? "");
+      if (used + w > limit) break;
+      used += w;
+      start--;
+    }
+    before = lead + chars.slice(start).join("");
+  }
+  const rawAt = value[cursor];
+  const at = rawAt === undefined ? undefined : show(rawAt);
+  const room = limit - stringWidth(before) - (at === undefined ? 1 : stringWidth(at));
+  let after = "";
+  let used = 0;
+  for (const ch of show(value.slice(cursor + 1))) {
+    const w = stringWidth(ch);
+    if (used + w > room) break;
+    after += ch;
+    used += w;
+  }
+  return { before, at, after };
+}

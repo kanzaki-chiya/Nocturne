@@ -33,6 +33,8 @@ import {
   type ProviderBridge,
   type ProviderWizardStart,
 } from "./commands.js";
+import { inputWindow } from "./cursor.js";
+import { createPasteStore } from "./paste.js";
 import { frameBudget } from "./frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "./keys.js";
 import { NEW_CONTENT_HINT, SCROLLED_HINT, transcriptBlocks } from "./lines.js";
@@ -1050,6 +1052,7 @@ function SessionApp({
     setCursor(0);
   }, []);
 
+  const pastes = useMemo(() => createPasteStore(), []);
   const onSubmit = useCallback(
     (line: string) => {
       const text = line.trim();
@@ -1077,7 +1080,8 @@ function SessionApp({
       }
       clearInput();
       setScroll(scrollToBottom());
-      session.submit({ text }).catch((e: unknown) => {
+      // 历史里保留占位，发给模型的是展开后的原文
+      session.submit({ text: pastes.expand(text) }).catch((e: unknown) => {
         pushLine(`! ${errText(e)}`);
       });
     },
@@ -1091,6 +1095,7 @@ function SessionApp({
       openProviderPage,
       openProviderWizard,
       provider,
+      pastes,
     ],
   );
 
@@ -1402,11 +1407,12 @@ function SessionApp({
         <InputCursor
           active={budget.input > 0 && !pageOpen}
           prefix={prompt}
-          text={input.slice(0, cursor)}
+          text={inputWindow(prompt, input, cursor, width, g.newline).before}
           width={width}
           y={inputY}
         />
         <Composer
+          pastes={pastes}
           value={input}
           cursor={cursor}
           onChange={(next, nextCursor) => {

@@ -3,10 +3,12 @@
  * 自实现（ADR-0010 不引 ink-text-input）：字符追加、退格、左右移动、
  * Enter 提交；Ctrl 组合键交给全局路由。
  */
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, usePaste } from "ink";
 import { useEffect, useRef, useState } from "react";
 
+import { inputWindow, normalizeNewlines } from "../cursor.js";
 import { glyphs, useTuiEnv } from "../env.js";
+import { pasteTokenBefore, type PasteStore } from "../paste.js";
 import { theme } from "../theme.js";
 
 export function Composer({
@@ -21,6 +23,7 @@ export function Composer({
   suspendNav = false,
   swallowRef,
   onCursor,
+  pastes,
 }: {
   value: string;
   /** 父组件持有光标，浮层开关后不丢 */
@@ -40,6 +43,8 @@ export function Composer({
   suspendNav?: boolean | undefined;
   /** conhost 拆开的 Esc+字母：为真时吞掉下一个字母 */
   swallowRef?: { current: boolean } | undefined;
+  /** 多行/超长粘贴收成占位（提交时由父组件展开） */
+  pastes?: PasteStore | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const g = glyphs(env);
@@ -64,6 +69,15 @@ export function Composer({
     cursorRef.current = nextCursor;
     onChange(next, nextCursor);
     setCursor(nextCursor);
+  };
+
+  const insert = (raw: string): void => {
+    const normalized = normalizeNewlines(raw);
+    if (normalized === "") return;
+    const text = pastes?.add(normalized) ?? normalized;
+    const v = valRef.current;
+    const c = cursorRef.current;
+    apply(v.slice(0, c) + text + v.slice(c), c + text.length);
   };
 
   useInput(
@@ -100,7 +114,9 @@ export function Composer({
         return;
       }
       if (key.backspace) {
-        if (c > 0) apply(v.slice(0, c - 1) + v.slice(c), c - 1);
+        // 占位整块删除，不留半截 [Paste #n
+        const n = Math.max(1, pasteTokenBefore(v.slice(0, c)));
+        if (c > 0) apply(v.slice(0, c - n) + v.slice(c), c - n);
         return;
       }
       if (key.delete) {
@@ -108,12 +124,23 @@ export function Composer({
         return;
       }
       if (key.escape) return; // Esc 由弹层处理
-      if (input !== "") apply(v.slice(0, c) + input + v.slice(c), c + input.length);
+      // 不支持括号粘贴的终端里，粘贴整块经这里到达，同样规范换行、收成占位
+      insert(input);
     },
     { isActive: active },
   );
 
-  const at = value[cursor];
+  // 括号粘贴：整段一次到达，内含的换行不会被当成 Enter 提交
+  usePaste(
+    (pasted) => {
+      if (disabled) return;
+      insert(pasted);
+    },
+    { isActive: active },
+  );
+
+  const prompt = `${g.prompt} `;
+  const view = inputWindow(prompt, value, cursor, width, g.newline);
   const rule = env.ascii ? "-".repeat(Math.max(1, width)) : "─".repeat(Math.max(1, width));
   return (
     <Box flexDirection="column">
@@ -123,17 +150,17 @@ export function Composer({
         </Text>
       ) : null}
       <Box height={1}>
-        <Text color={disabled ? theme.muted : theme.accent}>{`${g.prompt} `}</Text>
+        <Text color={disabled ? theme.muted : theme.accent}>{prompt}</Text>
         {disabled ? (
-          <Text dimColor>
-            {value}
+          <Text dimColor wrap="truncate">
+            {value.replaceAll("\n", g.newline)}
             {`（${disabledReason}）`}
           </Text>
         ) : (
-          <Text>
-            {value.slice(0, cursor)}
-            <Text inverse>{at ?? " "}</Text>
-            {at !== undefined ? value.slice(cursor + 1) : ""}
+          <Text wrap="truncate">
+            {view.before}
+            <Text inverse>{view.at ?? " "}</Text>
+            {view.after}
           </Text>
         )}
       </Box>

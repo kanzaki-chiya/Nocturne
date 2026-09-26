@@ -17,12 +17,12 @@ function budget(width: number): number {
 }
 
 function paint(text: string, width: number): string {
-  return truncateLine(boxSafe(text.replace(/\r\n/g, "\n")), budget(width), "...");
+  return truncateLine(boxSafe(text.replace(/\r\n?/g, "\n")), budget(width), "...");
 }
 
 function wrap(text: string, width: number): string[] {
   const limit = budget(width);
-  const flat = text.replace(/\r\n/g, "\n");
+  const flat = text.replace(/\r\n?/g, "\n");
   const out: string[] = [];
   for (const part of flat.split("\n")) {
     if (part === "") {
@@ -130,12 +130,20 @@ export function layoutLive(view: SessionView, width: number, ascii: boolean): La
     });
   }
   for (const a of view.live.assistants) {
-    const text = a.text !== "" ? a.text : a.reasoning;
-    const body = text !== "" ? text : "";
-    const wrapped = wrap(body, width);
-    const shown = wrapped.length > 0 ? wrapped : [""];
-    shown.forEach((line, i) => {
-      const last = i === shown.length - 1;
+    // 思考与正文都显示：有的模型先吐几个正文字再回去思考，
+    // 只显示正文会让画面停在那几个字上（思考灰色在上，正文在下）
+    const reasoning = a.reasoning !== "" ? wrap(a.reasoning, width) : [];
+    const text = a.text !== "" || reasoning.length === 0 ? wrap(a.text, width) : [];
+    reasoning.forEach((line, i) => {
+      const last = text.length === 0 && i === reasoning.length - 1;
+      lines.push({
+        key: `live-r:${a.messageId}:${i}`,
+        text: paint(last ? `${line}${cursor}` : line, width),
+        dim: true,
+      });
+    });
+    text.forEach((line, i) => {
+      const last = i === text.length - 1;
       lines.push({
         key: `live-a:${a.messageId}:${i}`,
         text: paint(last ? `${line}${cursor}` : line, width),
@@ -200,7 +208,13 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
           : entry.key;
     blocks.push(block(entry.key, revision, (width) => layoutEntry(entry, width, src.ascii)));
   }
-  const liveRev = src.live.live.assistants.map((a) => a.text.length).join(",") + src.live.status;
+  // 缓存标记要覆盖布局的全部输入：思考长度、进行中工具、重试
+  const liveRev = [
+    src.live.live.assistants.map((a) => `${a.text.length}/${a.reasoning.length}`).join(","),
+    src.live.live.tools.map((t) => t.callId).join(","),
+    src.live.retry?.attempt ?? "",
+    src.live.status,
+  ].join("|");
   blocks.push(block("live", liveRev, (width) => layoutLive(src.live, width, src.ascii)));
   if (src.clientLines.length > 0) {
     blocks.push(

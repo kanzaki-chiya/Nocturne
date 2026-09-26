@@ -34,6 +34,8 @@ export interface Glyphs {
   notice: string;
   prompt: string;
   ellipsis: string;
+  /** 输入框里换行的显示标记（只用宽度确定的字符） */
+  newline: string;
   /** 转轮帧；animated=false 时只用第一帧 */
   spinner: string[];
 }
@@ -48,6 +50,7 @@ export function glyphs(env: TuiEnv): Glyphs {
         notice: "-",
         prompt: ">",
         ellipsis: "...",
+        newline: "|",
         spinner: ["*", "|", "/", "-", "\\"],
       }
     : {
@@ -58,6 +61,7 @@ export function glyphs(env: TuiEnv): Glyphs {
         notice: "•",
         prompt: "›",
         ellipsis: "…",
+        newline: "│",
         spinner: ["●", "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
       };
 }

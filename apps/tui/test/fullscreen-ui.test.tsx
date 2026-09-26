@@ -9,7 +9,7 @@ import path from "node:path";
 import { render as inkRender } from "ink";
 import { render } from "ink-testing-library";
 import { createElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "@nocturne/core";
 
@@ -260,6 +260,33 @@ describe("全屏界面", () => {
     await pause(60);
     expect(lastFrame()).toContain("› /preseX");
     expect(lastFrame()).not.toContain("/prXset");
+    unmount();
+    await session.close();
+  });
+
+  it("多行粘贴收成占位、不提交；退格整块删除；提交时发原文", async () => {
+    const { runtime, session } = await sessionWithEffort();
+    const submit = vi.spyOn(session, "submit");
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await pause(60);
+    stdin.write("看：");
+    stdin.write("\x1b[200~第一行\r\r* 第二行\x1b[201~");
+    await pause(60);
+    expect(lastFrame()).toContain("› 看：[Paste #1, +2 lines]");
+    expect(lastFrame()).toContain("idle");
+    stdin.write("\x7f");
+    await pause(40);
+    expect(lastFrame()).toContain("› 看：");
+    expect(lastFrame()).not.toContain("[Paste");
+    stdin.write("\x1b[200~甲\r乙\x1b[201~");
+    await pause(40);
+    expect(lastFrame()).toContain("› 看：[Paste #2, +1 lines]");
+    stdin.write("\r");
+    await waitFor(() => (lastFrame() ?? "").includes("完毕"));
+    // 发给模型的是原文，不是占位
+    expect(submit.mock.calls[0]?.[0]).toEqual({ text: "看：甲\n乙" });
     unmount();
     await session.close();
   });

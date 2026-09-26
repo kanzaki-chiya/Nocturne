@@ -1,7 +1,7 @@
 import stringWidth from "string-width";
 import { describe, expect, it } from "vitest";
 
-import { cursorColumn } from "../src/cursor.js";
+import { cursorColumn, inputWindow, normalizeNewlines } from "../src/cursor.js";
 import { sessionSavedLine } from "../src/exit-note.js";
 import { frameBudget } from "../src/frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "../src/keys.js";
@@ -10,6 +10,9 @@ import { formatContextOccupancy, formatModelLabel } from "../src/status-format.j
 import { completeSlash, helpLines, readlineCompleter } from "../src/slash-catalog.js";
 import { selectVisible, type LineBlock } from "../src/viewport.js";
 import { moonRows } from "../src/welcome.js";
+import { createPasteStore, pasteTokenBefore } from "../src/paste.js";
+import { layoutLive, transcriptBlocks } from "../src/lines.js";
+import { createSessionView } from "@nocturne/core/protocol";
 
 const key = {
   ctrl: false,
@@ -222,5 +225,63 @@ describe("欢迎区弯月", () => {
     }
     for (const row of moonRows(true))
       expect(row.every((s) => s.text === "#" || s.text === " ")).toBe(true);
+  });
+});
+
+describe("长文本粘贴与流式思考", () => {
+  it("换行统一为 \n；输入框按光标水平滚动，换行显示为标记", () => {
+    expect(normalizeNewlines("a\r\rb\r\nc")).toBe("a\n\nb\nc");
+    const value = `${"甲".repeat(50)}\n末尾`;
+    const view = inputWindow("› ", value, value.length, 40, "│");
+    expect(view.before.startsWith("...")).toBe(true);
+    expect(view.before.endsWith("│末尾")).toBe(true);
+    expect(view.at).toBeUndefined();
+    expect(stringWidth(`› ${view.before}`) + 1).toBeLessThanOrEqual(38);
+    const mid = inputWindow("› ", "ab\ncd", 1, 40, "│");
+    expect(mid).toEqual({ before: "a", at: "b", after: "│cd" });
+  });
+
+  it("正文已开始后思考继续增长，思考仍显示且缓存失效", () => {
+    const view = createSessionView();
+    const a = {
+      kind: "assistant" as const,
+      messageId: "m1",
+      turnId: undefined,
+      text: "The",
+      reasoning: "想",
+    };
+    view.live.assistants.push(a);
+    view.status = "thinking";
+    const src = {
+      welcome: [],
+      notices: [],
+      frozen: [],
+      entries: [],
+      hide: () => false,
+      live: view,
+      clientLines: [],
+      ascii: false,
+    };
+    const before = transcriptBlocks(src).at(-1);
+    a.reasoning = "想了很久的第二段";
+    const after = transcriptBlocks(src).at(-1);
+    expect(after?.revision).not.toBe(before?.revision);
+    const texts = layoutLive(view, 80, false).map((l) => l.text);
+    expect(texts).toContain("想了很久的第二段");
+    expect(texts.at(-1)).toBe("The|");
+  });
+});
+
+describe("粘贴占位", () => {
+  it("多行与超长单行收起，短文本不收；展开只认已登记的占位", () => {
+    const store = createPasteStore();
+    expect(store.add("短文本")).toBeUndefined();
+    expect(store.add("a\nb\nc")).toBe("[Paste #1, +2 lines]");
+    expect(store.add("x".repeat(900))).toBe("[Paste #2, 900 chars]");
+    expect(store.expand("前[Paste #1, +2 lines]后[Paste #9, +1 lines]")).toBe(
+      "前a\nb\nc后[Paste #9, +1 lines]",
+    );
+    expect(pasteTokenBefore("看：[Paste #1, +2 lines]")).toBe("[Paste #1, +2 lines]".length);
+    expect(pasteTokenBefore("看：[Paste #1, +2 lines] ")).toBe(0);
   });
 });
