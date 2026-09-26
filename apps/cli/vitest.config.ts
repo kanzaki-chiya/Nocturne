@@ -16,6 +16,10 @@ export default defineConfig({
         find: /^@nocturne\/core$/,
         replacement: path.resolve(here, "../../packages/core/src/index.ts"),
       },
+      {
+        find: /^@nocturne\/tui\/slash-catalog$/,
+        replacement: path.resolve(here, "../tui/src/slash-catalog.ts"),
+      },
     ],
   },
   test: {

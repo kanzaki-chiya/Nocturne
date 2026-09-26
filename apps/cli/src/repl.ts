@@ -6,6 +6,7 @@ import { createInterface, type Interface } from "node:readline";
 
 import type { Runtime, RuntimeConfig, RuntimeSession, SessionSummary } from "@nocturne/core";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
+import { readlineCompleter } from "@nocturne/tui/slash-catalog";
 
 import { runSlashCommand, type CommandDeps } from "./commands.js";
 import { createEventWriter, renderEvent, renderPermissionPrompt } from "./render.js";
@@ -84,12 +85,33 @@ export async function runRepl(
    *  stdin 的 keypress/回显监听无法干净摘除，只能整实例重建） */
   let wizardWork: (() => Promise<void>) | undefined;
 
+  let providerIds: string[] = [...new Set(runtime.listModels().map((model) => model.ref.provider))];
+  const refreshProviders = (): void => {
+    const bridge = opts.provider;
+    if (bridge === undefined) return;
+    void bridge.config.describeProviders(bridge.workspaceRoot).then(
+      (rows) => {
+        providerIds = rows.map((row) => row.id);
+      },
+      () => {
+        /* 补全用上一份缓存 */
+      },
+    );
+  };
+  refreshProviders();
   const makeRl = (): Interface =>
     createInterface({
       input: io.stdin,
       output: io.stdout,
       prompt: "nctrn> ",
       terminal: io.stdin.isTTY === true,
+      completer: (line: string) => {
+        if (line.startsWith("/provider")) refreshProviders();
+        return readlineCompleter(line, {
+          effortLevels: session.reasoningEffortInfo().available,
+          providerIds,
+        });
+      },
     });
   let rl = makeRl();
 

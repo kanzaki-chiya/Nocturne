@@ -467,6 +467,7 @@ async function main(): Promise<number> {
         },
       },
     );
+    process.stdout.write(`会话 ${holder.current.id} 已保存，nctrn -c 继续\n`);
     await holder.current.close();
     return code;
   }

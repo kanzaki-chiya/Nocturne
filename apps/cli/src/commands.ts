@@ -4,6 +4,7 @@
  */
 import type { ModelInfo, Runtime, RuntimeConfig, RuntimeSession } from "@nocturne/core";
 import { RuntimeCommandError } from "@nocturne/core";
+import { cliHelpText } from "@nocturne/tui/slash-catalog";
 
 import { normalizeModelRef } from "./config.js";
 
@@ -34,28 +35,7 @@ export interface CommandDeps {
 
 export type CommandOutcome = "handled" | "exit" | "unknown";
 
-const SLASH_HELP = `斜杠命令：
-  /help              列出命令与快捷键
-  /model             列出可用模型（编号表格）
-  /model <关键词>    按关键词过滤模型列表
-  /model <id>        会话内切换模型
-  /effort            显示当前思考强度与可用档位
-  /effort <档位>     切换会话思考强度（off | minimal | low | medium | high | xhigh | max）
-  /provider          列出服务商（类型、地址、密钥来源、来源层）
-  /provider add      运行服务商配置向导（同 nctrn setup）
-  /provider key <名> 更新该服务商的密钥
-  /provider thinking <名> 调整该服务商的思考档位声明
-  /provider refresh <名> 重新获取上游模型列表与限额
-  /provider remove <名> 删除向导写入的服务商
-  /preset            显示当前权限预设
-  /preset <name>     会话内切换权限预设（read-only | default | auto-edit | full-access）
-  /context           显示上下文组成（分区与 token 估算）
-  /mcp               显示本会话 MCP 服务器状态（只读）
-  /compact           手动压缩上下文（L2 摘要）
-  /resume            列出会话并输入编号切换；空行取消
-  /resume <id>       直接切换到指定会话
-  /exit, /quit       退出
-快捷键：Ctrl+C 中断当前 Turn（空闲时退出）；Ctrl+D 退出。`;
+const SLASH_HELP = cliHelpText();
 
 // ── /model 表格（cli.md 第 4 节：与 TUI 模型选择页同列信息） ──
 
