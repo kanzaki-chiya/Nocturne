@@ -60,6 +60,8 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 
 `Alt+M` 在 `read-only → default → auto-edit → full-access` 间循环，走与 `/preset` 相同的 `setPermissionPreset`（`session.config_changed`），Turn 进行中同样拒绝；只高亮状态栏，不插入对话条目。Windows Terminal 发送 `\x1bm`，必须能识别。conhost 不要求识别；若把 Alt 拆成 Esc 加字母，吞掉该字母，不写入输入框，也不触发其他操作。
 
+不带参数的 `/preset` 与 `/effort` 打开活动区内的选择列表，高亮当前值，↑/↓ 选择、Enter 生效、Esc 取消；`/effort` 仅列出当前模型的可用档位与 `off`，不支持思考的模型只显示说明。带参数的调用和逐行 CLI 的可选值输出不变（[ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 第 8 条）。
+
 翻页：`PgUp`/`PgDn` 按对话区高度翻页；`Ctrl+Home` 到顶；`Ctrl+End` 到底并恢复跟随。
 
 ## 4. 渲染模型

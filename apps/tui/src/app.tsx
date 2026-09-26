@@ -1331,6 +1331,45 @@ function SessionApp({
           setOverlay(undefined);
         }}
       />
+    ) : overlay === "preset" ? (
+      <PickList
+        title="选择权限预设"
+        items={PRESET_NAMES.map((name) => ({ label: name, value: name }))}
+        initialValue={view.config.permissionPreset}
+        active
+        width={width}
+        onPick={(name) => {
+          setOverlay(undefined);
+          clearInput();
+          void session.setPermissionPreset(name).catch((e: unknown) => {
+            pushLine(`! ${errText(e)}`);
+          });
+        }}
+        onCancel={() => {
+          setOverlay(undefined);
+        }}
+      />
+    ) : overlay === "effort" ? (
+      <PickList
+        title="选择思考强度"
+        items={["off", ...session.reasoningEffortInfo().available].map((name) => ({
+          label: name,
+          value: name,
+        }))}
+        initialValue={session.reasoningEffortInfo().current}
+        active
+        width={width}
+        onPick={(name) => {
+          setOverlay(undefined);
+          clearInput();
+          void session.setReasoningEffort(name).catch((e: unknown) => {
+            pushLine(`! ${errText(e)}`);
+          });
+        }}
+        onCancel={() => {
+          setOverlay(undefined);
+        }}
+      />
     ) : wizardOverlay !== undefined ? (
       <WizardView
         title={

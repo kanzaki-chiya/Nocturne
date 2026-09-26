@@ -7,7 +7,7 @@ import { normalizeModelRef, type RuntimeConfig, type RuntimeSession } from "@noc
 
 import { helpLines as catalogHelpLines } from "./slash-catalog.js";
 
-export type OverlayName = "context" | "help" | "resume";
+export type OverlayName = "context" | "help" | "resume" | "preset" | "effort";
 
 /** /provider 向导启动形态（add / key / thinking） */
 export type ProviderWizardStart =
@@ -110,14 +110,7 @@ export async function runSlash(
         if (info.available.length === 0) {
           return { kind: "message", text: `当前思考强度：${info.current}（该模型未声明可用档位）` };
         }
-        return {
-          kind: "message",
-          text:
-            `当前思考强度：${info.current}\n可用档位：off | ${info.available.join(" | ")}` +
-            (info.effective !== info.current
-              ? `\n本 Turn 生效中：${info.effective}（新档位下一 Turn 生效）`
-              : ""),
-        };
+        return { kind: "overlay", name: "effort" };
       }
       try {
         await session.setReasoningEffort(arg);
@@ -128,10 +121,7 @@ export async function runSlash(
     }
     case "/preset": {
       if (arg === "") {
-        return {
-          kind: "message",
-          text: `当前权限预设：${session.state().config.permissionPreset}\n可用：read-only | default | auto-edit | full-access`,
-        };
+        return { kind: "overlay", name: "preset" };
       }
       try {
         await session.setPermissionPreset(arg);

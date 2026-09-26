@@ -86,6 +86,45 @@ function frameLines(frame: string | undefined): string[] {
 }
 
 describe("全屏界面", () => {
+  it("/preset 与 /effort 无参选择高亮当前值，Enter 生效、Esc 取消", async () => {
+    const { runtime, session } = await sessionWithEffort();
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await pause(80);
+    stdin.write("/preset");
+    await pause(40);
+    stdin.write("\r");
+    await waitFor(() => (lastFrame() ?? "").includes("选择权限预设"));
+    expect(lastFrame()).toContain("› default");
+    await pause(60);
+    stdin.write("\x1b[B");
+    await pause(80);
+    expect(lastFrame()).toContain("› auto-edit");
+    stdin.write("\r");
+    await waitFor(() => session.state().config.permissionPreset === "auto-edit");
+    stdin.write("/effort");
+    await pause(40);
+    stdin.write("\r");
+    await waitFor(() => (lastFrame() ?? "").includes("选择思考强度"));
+    expect(lastFrame()).toContain("› off");
+    await pause(60);
+    stdin.write("\x1b[B");
+    await waitFor(() => (lastFrame() ?? "").includes("› low"));
+    stdin.write("\r");
+    await waitFor(() => (lastFrame() ?? "").includes("思考:low"));
+    stdin.write("/effort");
+    await pause(40);
+    stdin.write("\r");
+    await waitFor(() => (lastFrame() ?? "").includes("选择思考强度"));
+    expect(lastFrame()).toContain("› low");
+    stdin.write("\x1b");
+    await waitFor(() => !(lastFrame() ?? "").includes("选择思考强度"));
+    expect(lastFrame()).toContain("思考:low");
+    unmount();
+    await session.close();
+  }, 10000);
+
   it("忙时 Esc 中断，空闲 Esc 保留输入；紧跟字母的 Esc 不误中断", async () => {
     const root = tmp("nct-esc-ws-");
     const runtime = await createRuntime({

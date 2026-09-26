@@ -24,6 +24,7 @@ export function PickList<T>({
   onPick,
   onCancel,
   width,
+  initialValue,
 }: {
   title: string;
   items: readonly PickItem<T>[];
@@ -31,10 +32,16 @@ export function PickList<T>({
   onPick: (value: T) => void;
   onCancel: () => void;
   width: number;
+  initialValue?: T | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const g = glyphs(env);
-  const [cursor, setCursor] = useState(0);
+  const [cursor, setCursor] = useState(() =>
+    Math.max(
+      0,
+      items.findIndex((item) => item.value === initialValue),
+    ),
+  );
 
   useInput(
     (_input, key) => {
