@@ -48,6 +48,11 @@ async function sessionWithEffort(): Promise<{ runtime: Runtime; session: Runtime
             { type: "text_delta", text: `${"甲\n".repeat(30)}完毕` },
             { type: "finish", reason: "stop" },
           ],
+          // 第二次提交也要有正文：空回复会触发退避重试，拖到接近测试超时
+          [
+            { type: "text_delta", text: "新的回答" },
+            { type: "finish", reason: "stop" },
+          ],
         ],
         models: [
           {
