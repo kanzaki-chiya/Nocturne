@@ -24,6 +24,34 @@ export type SessionSwitcher = (
   opts?: { allowForeign?: boolean },
 ) => Promise<SwitchResult>;
 
+export type NewSessionFn = () => Promise<SwitchResult>;
+
+export function createNewSession(deps: { runtime: Runtime; holder: SessionHolder }): NewSessionFn {
+  const { runtime, holder } = deps;
+  return async () => {
+    const current = holder.current;
+    if (current.state().openTurn !== undefined) return { kind: "busy" };
+    const config = current.state().config;
+    let next: RuntimeSession;
+    try {
+      next = await runtime.createSession({
+        model: `${config.model.provider}/${config.model.model}`,
+        permissionPreset: config.permissionPreset,
+        reasoningEffort: config.reasoningEffort,
+      });
+    } catch (e) {
+      return { kind: "error", message: e instanceof Error ? e.message : String(e) };
+    }
+    holder.current = next;
+    try {
+      await current.close();
+    } catch {
+      // 新会话已经建立；旧锁由进程退出兜底。
+    }
+    return { kind: "ok", session: next };
+  };
+}
+
 export function createSessionSwitcher(deps: {
   runtime: Runtime;
   platform: Platform;

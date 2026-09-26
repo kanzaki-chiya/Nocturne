@@ -91,6 +91,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 会话内切换走 **`/resume` 斜杠命令**（REPL 与 TUI 同一套语义，cli.md 第 4 节为唯一主文档）：
 
 - `/resume`：列出 `runtime.listSessions()`，TUI 弹出 PickList 列表选择器（↑↓ + Enter，Esc 取消）；每行以首条用户消息首行和相对修改时间开头，后列 id、模型、路径及锁定标记，首句在可用宽度内截断；`/resume <id>` 直达。首句为空时显示占位。
+- `/new`（`/clear`）：CLI 注入新建会话回调，沿用当前模型、思考档位和权限预设；成功后切到空会话，旧会话内容与分隔行保留在对话中，旧会话仍可 `/resume`。忙时拒绝，不清屏。
 - **打开逻辑只在 CLI 有一份**：`runTui(session, runtime, { switchSession })`，`switchSession(id, { allowForeign? }) => Promise<SessionSwitchResult>`，结果为 `{ kind: "ok"; session } | { kind: "busy" } | { kind: "foreign"; workspaceRoot } | { kind: "error"; message }`。TUI 不直接打开会话，Core 不新增入口。跨目录确认在客户端完成：回调先返回 `kind: "foreign"`，TUI 弹确认对话框（默认拒绝）同意后带 `allowForeign` 重调。
 - **切换顺序**：Turn 进行中拒绝（提示先 Ctrl+C 中断）；先打开新会话——锁冲突/日志损坏/跨目录被拒时报错并**留在原会话**；打开成功后才 `close()` 旧会话、释放锁。
 - **切换后**：新建 `SessionView`，重放新会话的持久事件；已写入终端滚动区的旧内容无法收回，向回放区插一条"已切换到会话 \<id\>"分隔提示，再附恢复摘要（若有修复）。

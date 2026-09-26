@@ -22,6 +22,8 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "/mcp", summary: "MCP 状态", cli: "显示本会话 MCP 服务器状态" },
   { name: "/compact", summary: "压缩上下文", cli: "手动压缩上下文" },
   { name: "/resume", summary: "切换会话", cli: "列出会话或按 id 切换" },
+  { name: "/new", summary: "新建会话", cli: "新建并切换到空会话" },
+  { name: "/clear", summary: "新建会话", cli: "/new 的别名" },
   { name: "/provider", summary: "管理服务商", cli: "列出或管理服务商", args: "provider" },
   { name: "/exit", summary: "退出", cli: "退出" },
   { name: "/quit", summary: "退出", cli: "退出" },

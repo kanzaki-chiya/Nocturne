@@ -15,7 +15,7 @@ import { createCursorStream } from "./cursor.js";
 import { detectTuiEnv } from "./env.js";
 import { sessionSavedLine } from "./exit-note.js";
 
-import type { SwitchSessionFn } from "./types.js";
+import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 
 export interface TuiOptions {
   stdin?: NodeJS.ReadStream | undefined;
@@ -34,6 +34,7 @@ export interface TuiOptions {
    * 缺省时 /resume 提示不可用。
    */
   switchSession?: SwitchSessionFn | undefined;
+  newSession?: NewSessionFn | undefined;
   /**
    * /provider 与模型选择页的配置桥（provider-setup.md 第 6 节）：
    * config + reloadConfig + updateProviders。缺省时相关命令提示不可用。
@@ -85,6 +86,7 @@ export async function runTui(
         runtime,
         env: detectTuiEnv(),
         switchSession: options.switchSession,
+        newSession: options.newSession,
         provider: options.provider,
         onSessionId: (id: string) => {
           sessionId = id;

@@ -16,3 +16,5 @@ export type SwitchSessionFn = (
   id: string,
   opts?: { allowForeign?: boolean },
 ) => Promise<SessionSwitchResult>;
+
+export type NewSessionFn = () => Promise<SessionSwitchResult>;

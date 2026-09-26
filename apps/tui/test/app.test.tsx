@@ -386,6 +386,31 @@ describe("TUI", () => {
     await s1.close();
   });
 
+  it("/new 与 /clear：换入空会话，保留旧对话和分隔行", async () => {
+    const { session, runtime } = await makeSession();
+    const created: RuntimeSession[] = [];
+    const newSession = vi.fn(async () => {
+      const next = await runtime.createSession({ model: "fake/fake-model" });
+      created.push(next);
+      return { kind: "ok" as const, session: next };
+    });
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, newSession }),
+    );
+    await pause(60);
+    for (const cmd of ["/new", "/clear"]) {
+      stdin.write(cmd);
+      stdin.write("\r");
+      await pause(180);
+    }
+    expect(newSession).toHaveBeenCalledTimes(2);
+    expect(lastFrame()).toContain(`新会话 ${created[0]?.id}`);
+    expect(lastFrame()).toContain(`新会话 ${created[1]?.id}`);
+    unmount();
+    await session.close();
+    for (const next of created) await next.close();
+  });
+
   it("/resume 列表：显示会话、方向键移动并选择", async () => {
     const { runtime, session: s1 } = await makeSession();
     await pause();

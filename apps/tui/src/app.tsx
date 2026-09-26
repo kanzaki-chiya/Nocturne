@@ -58,7 +58,7 @@ import { WizardView } from "./components/wizard-view.js";
 import { TuiEnvContext, glyphs, type TuiEnv } from "./env.js";
 import { useSessionView } from "./session-view.js";
 import { theme } from "./theme.js";
-import type { SwitchSessionFn } from "./types.js";
+import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 import { useProviderWizard } from "./wizard-io.js";
 
 /** 完结前缀切分：测试仍覆盖这条切分；全屏视口不再依赖 <Static> 不可改写。 */
@@ -94,6 +94,7 @@ export interface AppProps {
   runtime: Runtime;
   env: TuiEnv;
   switchSession?: SwitchSessionFn | undefined;
+  newSession?: NewSessionFn | undefined;
   /** /provider 与全屏页的配置桥（cli 注入）；缺省时相关命令提示不可用 */
   provider?: ProviderBridge | undefined;
   /** 首次配置流程（session 为 undefined 时生效） */
@@ -411,6 +412,7 @@ export function App({
   runtime,
   env,
   switchSession,
+  newSession,
   provider,
   setup,
   onExitResult,
@@ -448,6 +450,7 @@ export function App({
       runtime={runtime}
       env={env}
       switchSession={switchSession}
+      newSession={newSession}
       provider={provider}
       onSessionId={onSessionId}
     />
@@ -459,6 +462,7 @@ function SessionApp({
   runtime,
   env,
   switchSession,
+  newSession,
   provider,
   onSessionId,
 }: {
@@ -466,6 +470,7 @@ function SessionApp({
   runtime: Runtime;
   env: TuiEnv;
   switchSession?: SwitchSessionFn | undefined;
+  newSession?: NewSessionFn | undefined;
   provider?: ProviderBridge | undefined;
   onSessionId?: ((id: string) => void) | undefined;
 }): React.JSX.Element {
@@ -676,7 +681,7 @@ function SessionApp({
           text: `已切换到会话 ${res.session.id}`,
         };
         // 切换只会发生在空闲时（busy 被拦截）：prefix 即旧会话全部条目
-        setFrozen([...prefixRef.current, sep]);
+        setFrozen((previous) => [...previous, ...prefixRef.current, sep]);
         setSession(res.session);
         setOverlay(undefined);
         for (const n of sessionNotes(res.session)) pushLine(`! ${n}`);
@@ -692,6 +697,31 @@ function SessionApp({
     },
     [switchSession, pushLine],
   );
+
+  const doNew = useCallback(async (): Promise<void> => {
+    if (newSession === undefined) {
+      pushLine("! 当前环境不支持新建会话");
+      return;
+    }
+    const res = await newSession();
+    if (res.kind === "ok") {
+      const sep: TranscriptItem = {
+        kind: "separator",
+        key: `new-${res.session.id}`,
+        text: `新会话 ${res.session.id}`,
+      };
+      setFrozen((previous) => [...previous, ...prefixRef.current, sep]);
+      setSession(res.session);
+      setClientLines([]);
+      setOverlay(undefined);
+    } else {
+      pushLine(
+        res.kind === "busy"
+          ? "! 会话忙（Turn 进行中）；先中断再新建"
+          : `! ${res.kind === "error" ? res.message : "新建会话失败"}`,
+      );
+    }
+  }, [newSession, pushLine]);
 
   /** 模型选择页左栏数据快照（打开时与向导完成后拉取） */
   const loadPickerData = useCallback(async () => {
@@ -979,6 +1009,7 @@ function SessionApp({
             const opens = r.kind === "overlay" || r.kind === "picker" || r.kind === "provider-page";
             if (!opens) clearInput();
             if (r.kind === "exit") requestExit();
+            else if (r.kind === "new") void doNew();
             else if (r.kind === "overlay") setOverlay(r.name);
             else if (r.kind === "picker") openPicker(r.focus);
             else if (r.kind === "provider-page") openProviderPage(r.presetId);
@@ -1089,6 +1120,7 @@ function SessionApp({
             const opens = r.kind === "overlay" || r.kind === "picker" || r.kind === "provider-page";
             if (!opens) clearInput();
             if (r.kind === "exit") requestExit();
+            else if (r.kind === "new") void doNew();
             else if (r.kind === "overlay") setOverlay(r.name);
             else if (r.kind === "picker") openPicker(r.focus);
             else if (r.kind === "provider-page") openProviderPage(r.presetId);
@@ -1115,6 +1147,7 @@ function SessionApp({
       clearInput,
       requestExit,
       doSwitch,
+      doNew,
       openPicker,
       openProviderPage,
       openProviderWizard,

@@ -25,7 +25,12 @@ import {
 } from "./config.js";
 import { createEventWriter, renderEvent } from "./render.js";
 import { runRepl } from "./repl.js";
-import { createSessionSwitcher, sessionOpenNotes, type SessionHolder } from "./session-switch.js";
+import {
+  createNewSession,
+  createSessionSwitcher,
+  sessionOpenNotes,
+  type SessionHolder,
+} from "./session-switch.js";
 import { createWizardIo, runProviderSetupWizard, WizardAbort } from "./setup.js";
 
 const VERSION = "0.3.0";
@@ -405,6 +410,7 @@ async function main(): Promise<number> {
   // holder 跟踪当前会话，退出时关闭的是切换后的那个
   const holder: SessionHolder = { current: session };
   const switchSession = createSessionSwitcher({ runtime, platform, cwd, holder });
+  const newSession = createNewSession({ runtime, holder });
 
   let prompt: string | undefined = args.prompt;
   if (args.print && prompt === "") {
@@ -435,6 +441,7 @@ async function main(): Promise<number> {
         stdout: process.stdout,
         stderr: process.stderr,
         switchSession,
+        newSession,
         provider: {
           config: runtimeConfig,
           reloadConfig: makeConfigLoader(args, platform),
@@ -460,6 +467,7 @@ async function main(): Promise<number> {
       },
       {
         switchSession,
+        newSession,
         provider: {
           config: runtimeConfig,
           reloadConfig: makeConfigLoader(args, platform),

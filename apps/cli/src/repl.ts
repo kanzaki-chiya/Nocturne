@@ -16,7 +16,7 @@ import {
   runKeyWizardInSession,
   runThinkingWizardInSession,
 } from "./setup.js";
-import { sessionOpenNotes, type SessionSwitcher } from "./session-switch.js";
+import { sessionOpenNotes, type NewSessionFn, type SessionSwitcher } from "./session-switch.js";
 
 export interface ReplIo {
   stdout: NodeJS.WritableStream;
@@ -27,6 +27,7 @@ export interface ReplIo {
 export interface ReplOptions {
   /** /resume 会话切换（cli.md 第 4 节）；缺省时 /resume 提示不可用 */
   switchSession?: SessionSwitcher | undefined;
+  newSession?: NewSessionFn | undefined;
   /** /provider 命令桥（cli.md 第 4 节）；缺省时 /provider 提示不可用 */
   provider?:
     | {
@@ -255,6 +256,30 @@ export async function runRepl(
         if (line === "/resume" || line.startsWith("/resume ")) {
           const arg = line.slice("/resume".length).trim();
           void (arg === "" ? startResumePick() : doSwitch(arg)).finally(prompt);
+          return;
+        }
+        if (line === "/new" || line === "/clear") {
+          void (async () => {
+            if (opts.newSession === undefined) {
+              out.line("stdout", "! 当前环境不支持新建会话");
+              return;
+            }
+            const res = await opts.newSession();
+            if (res.kind === "ok") {
+              session = res.session;
+              unsubscribe();
+              unsubscribe = session.subscribe(onEvent);
+              out.line("stdout", `── 新会话 ${session.id} ──`);
+              for (const n of sessionOpenNotes(session)) out.line("stderr", `! ${n}`);
+            } else {
+              out.line(
+                "stdout",
+                res.kind === "busy"
+                  ? "! 会话忙（Turn 进行中）；先中断再新建"
+                  : `! ${res.kind === "error" ? res.message : "新建会话失败"}`,
+              );
+            }
+          })().finally(prompt);
           return;
         }
         if (line.startsWith("/")) {

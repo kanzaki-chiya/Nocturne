@@ -96,6 +96,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `/compact` | 手动触发 L2 摘要压缩 | `session.compact()` → `context.compacted(kind="summary")` |
 | `/resume` | 列出会话（编号、id、创建时间、绑定目录、模型、锁状态），输入编号切换，空行取消 | `runtime.listSessions()` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
+| `/new`、`/clear` | 新建空会话并切换，沿用当前模型、思考档位与权限预设；旧会话仍可恢复，`/clear` 不是清屏 | CLI 注入的 `newSession` 回调 |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
 | `/provider` | 列出服务商：名称、类型、服务地址主机名、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），标记当前会话所用，不显示密钥；TUI 中打开全屏服务商页（[tui.md](tui.md) 第 8 节）。`/provider add` 走与 `nctrn setup --cli` 相同的逐行向导（v0.3 起不再询问模型，保存后提示用 `/model`）；`key <name>` / `refresh <name>` / `thinking <name>` / `remove <name>` 是服务商页四个操作的快捷方式，见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveSetupProvider` 等 + `runtime.updateProviders` |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
@@ -106,6 +107,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 - `/context` 渲染 `ContextReport`：各 section 的名称、来源、字符数、估算 token，加上合计 `estimatedTokens / budgetTokens` 与 `overBudget`。查询只读，不构建请求也不产生事件。
 - `/compact` 输出结果摘要（`throughSeq`、摘要字符数）；没有可压缩内容或摘要失败时打印原因，返回码不产生——REPL 命令的错误只显示，不影响进程。
 - **`/resume` 会话内切换**：复用第 2 节的会话打开语义（锁冲突 `session_locked`、日志损坏、跨目录默认拒绝需 `y/N` 确认）。Turn 进行中拒绝并提示先中断；**先打开新会话**——失败时报错并留在原会话；打开成功后才 `session.close()` 旧会话（释放锁），打印一行"已切换到会话 \<id\>"与恢复摘要（`session.recovery`，若有修复）。该打开逻辑由 CLI 统一实现并以回调注入 TUI（[apps/tui.md](tui.md) 第 6 节）。
+- **`/new` 会话内新建**：Turn 进行中拒绝；按当前会话配置创建并换入新会话，创建失败保留旧会话，成功后才关闭旧会话。逐行模式打印新会话分隔行；`/clear` 是同义别名，不删除旧日志也不清屏。
 
 ## 5. 事件渲染
 

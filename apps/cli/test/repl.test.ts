@@ -193,6 +193,27 @@ describe("REPL /resume 会话切换", () => {
       ...(locked ? { locked: true } : {}),
     }) as SessionSummary;
 
+  it("/new 与 /clear 切换新会话且事件订阅换绑", async () => {
+    const { io, stdin, stdoutChunks } = makeIo();
+    const s1 = fakeSession("s1");
+    const s2 = fakeSession("s2");
+    const s3 = fakeSession("s3");
+    let count = 0;
+    const done = runRepl(s1, { listModels: () => [] } as unknown as Runtime, io, {
+      newSession: async () => ({ kind: "ok", session: ++count === 1 ? s2 : s3 }),
+    });
+    await tick();
+    stdin.write("/new\n");
+    await tick();
+    stdin.write("/clear\n");
+    await tick();
+    expect(count).toBe(2);
+    expect(stdoutChunks.join("")).toContain("新会话 s2");
+    expect(stdoutChunks.join("")).toContain("新会话 s3");
+    stdin.end();
+    expect(await done).toBe(0);
+  });
+
   it("/resume 列编号列表，输入编号切换并打印分隔线", async () => {
     const { io, stdin, stdoutChunks } = makeIo();
     const s1 = fakeSession("s1");

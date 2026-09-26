@@ -18,6 +18,7 @@ import {
 } from "@nocturne/core";
 
 import {
+  createNewSession,
   createSessionSwitcher,
   sessionOpenNotes,
   type SessionHolder,
@@ -179,6 +180,50 @@ describe("createSessionSwitcher", () => {
     const s1 = await runtime.createSession({ model: "fake/fake-1" });
     expect(sessionOpenNotes(s1)).toEqual([]);
     await s1.close();
+  });
+});
+
+describe("createNewSession", () => {
+  it("沿用当前配置，先创建并换入新会话，再关闭旧会话；旧会话可恢复", async () => {
+    const cwd = await tmp("nct-new-cwd-");
+    const runtime = await makeRuntime(cwd, await tmp("nct-new-sd-"));
+    const old = await runtime.createSession({ model: "fake/fake-1" });
+    await old.setPermissionPreset("read-only");
+    const holder: SessionHolder = { current: old };
+    const res = await createNewSession({ runtime, holder })();
+    expect(res.kind).toBe("ok");
+    if (res.kind !== "ok") return;
+    expect(res.session.id).not.toBe(old.id);
+    expect(holder.current).toBe(res.session);
+    expect(res.session.state().config).toEqual(old.state().config);
+    expect(res.session.state().history).toEqual([]);
+    const restored = await runtime.resumeSession(old.id);
+    expect(restored.state().config.permissionPreset).toBe("read-only");
+    await restored.close();
+    await res.session.close();
+  });
+
+  it("Turn 进行中拒绝创建且不换绑", async () => {
+    const cwd = await tmp("nct-new-cwd-");
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runtime = await createRuntime({
+      cwd,
+      sessionsDir: await tmp("nct-new-sd-"),
+      providers: [new FakeProvider({ handler: () => gate.then(() => TEXT("ok")) })],
+    });
+    const old = await runtime.createSession({ model: "fake/fake-1" });
+    const holder: SessionHolder = { current: old };
+    const turn = old.submit({ text: "hold" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await createNewSession({ runtime, holder })()).toEqual({ kind: "busy" });
+    expect(holder.current).toBe(old);
+    old.interrupt();
+    release?.();
+    await turn;
+    await old.close();
   });
 });
 
