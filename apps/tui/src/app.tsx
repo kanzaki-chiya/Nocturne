@@ -5,7 +5,7 @@
  *   权限对话框 + 弹层 + 输入行（上下横线）+ 分段状态栏；
  * - 无会话（首次配置，ADR-0019 第 4 条）：服务商页 → 模型页两步流程，
  *   完成后经注入的 openSession 回调创建会话再进入主界面。
- * 键位路由：Ctrl+C 中断/退出，Ctrl+D 退出，Esc 由弹层组件自闭。
+ * 键位路由：Ctrl+C 忙时中断、空闲退出，Esc 忙时中断、空闲无动作；弹层优先自闭。
  * /resume：注入的 switchSession 回调执行切换；旧回放冻结进 Static，
  * 新会话重建 SessionView 重放（tui.md §4）。
  */
@@ -527,6 +527,7 @@ function SessionApp({
   const hiddenNotices = useRef(new Set<string>());
   const suppressConfigNotice = useRef(false);
   const swallowUntil = useRef(0);
+  const escapeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const swallowRef = useRef(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -541,6 +542,14 @@ function SessionApp({
 
   const busy = view.status !== "idle";
   const pending = view.pendingPermission;
+  const interruptible = useRef(false);
+  interruptible.current = busy;
+  useEffect(
+    () => () => {
+      if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
+    },
+    [],
+  );
 
   const { prefix } = splitCompletedPrefix(view.entries);
   const prefixRef = useRef(prefix);
@@ -891,12 +900,26 @@ function SessionApp({
   useInput((ch, key) => {
     const now = Date.now();
     if (shouldSwallowAfterEscape(ch, key, swallowUntil.current, now)) {
+      if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
+      escapeTimer.current = undefined;
       swallowUntil.current = 0;
       swallowRef.current = true;
       return;
     }
     if (key.escape && ch === "" && !key.meta && !key.ctrl) {
+      if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
+      escapeTimer.current = undefined;
       swallowUntil.current = noteBareEscape(now);
+      if (!pageOpen && !dialogOpen && pending === undefined) {
+        if (completionOpen) setCompletionOn(false);
+        else {
+          escapeTimer.current = setTimeout(() => {
+            escapeTimer.current = undefined;
+            if (interruptible.current) session.interrupt();
+          }, 80);
+        }
+        return;
+      }
     }
     if (key.tab && key.shift) {
       if (pageOpen || dialogOpen || pending !== undefined) return;

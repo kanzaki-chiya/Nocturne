@@ -86,6 +86,47 @@ function frameLines(frame: string | undefined): string[] {
 }
 
 describe("全屏界面", () => {
+  it("忙时 Esc 中断，空闲 Esc 保留输入；紧跟字母的 Esc 不误中断", async () => {
+    const root = tmp("nct-esc-ws-");
+    const runtime = await createRuntime({
+      cwd: root,
+      sessionsDir: tmp("nct-esc-sd-"),
+      providers: [
+        new FakeProvider({
+          scripts: [
+            [
+              { type: "wait", ms: 5000 },
+              { type: "text_delta", text: "太晚" },
+            ],
+          ],
+        }),
+      ],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    const interrupt = vi.spyOn(session, "interrupt");
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await pause(80);
+    stdin.write("草稿");
+    stdin.write("\x1b");
+    await pause(120);
+    expect(lastFrame()).toContain("草稿");
+    expect(interrupt).not.toHaveBeenCalled();
+    const turn = session.submit({ text: "开始" });
+    await waitFor(() => (lastFrame() ?? "").includes("思考中"));
+    stdin.write("\x1b");
+    stdin.write("m");
+    await pause(120);
+    expect(interrupt).not.toHaveBeenCalled();
+    stdin.write("\x1b");
+    await waitFor(() => interrupt.mock.calls.length === 1);
+    await turn;
+    await waitFor(() => (lastFrame() ?? "").includes("idle"));
+    unmount();
+    await session.close();
+  }, 10000);
+
   it("默认帧高等于 rows-1", async () => {
     const { runtime, session } = await sessionWithEffort();
     const { lastFrame, unmount } = render(createElement(App, { session, runtime, env: ENV }));
