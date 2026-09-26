@@ -87,7 +87,9 @@ export function createCursorStream(stdout: NodeJS.WriteStream): {
 
   const place = (): string => {
     if (target === undefined) return "";
-    const head = moved ? HIDE : SAVE;
+    // moved 时光标停在旧目标处：先 DECRC 回到 Ink 写入终点（保存位仍有效，
+    // 不必再 DECSC），再从终点做相对移动——直接 moveRel 会从旧目标再动一次。
+    const head = moved ? HIDE + RESTORE : SAVE;
     moved = true;
     return head + moveRel(target) + SHOW;
   };

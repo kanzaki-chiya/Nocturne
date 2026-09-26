@@ -132,11 +132,34 @@ describe("createCursorStream", () => {
     stream.write("frame2");
     expect(out.at(-1)).toBe("\x1b[?25l\x1b8frame2\x1b7\x1b[2A\x1b[5G\x1b[?25h");
     claims.set(id, { x: 6, y: -2 });
-    expect(out.at(-1)).toBe("\x1b[?25l\x1b[2A\x1b[7G\x1b[?25h");
+    expect(out.at(-1)).toBe("\x1b[?25l\x1b8\x1b[2A\x1b[7G\x1b[?25h");
     claims.delete(id);
     expect(out.at(-1)).toBe("\x1b[?25l\x1b8");
     stream.write("frame3");
     expect(out.at(-1)).toBe("frame3");
+    stop();
+  });
+
+  it("坐标连续变化时先恢复 Ink 写入终点，再从终点相对移动", () => {
+    const { stream: raw, out } = fakeStdout();
+    const { stream, claims, stop } = createCursorStream(raw);
+    const id = Symbol();
+    stream.write("frame\n");
+    claims.set(id, { x: 4, y: -2 });
+    expect(out.at(-1)).toBe("\x1b7\x1b[2A\x1b[5G\x1b[?25h");
+    // 第二次变化：先 DECRC 回写入终点再上移 2 行、到第 7 列——不是从旧目标再移
+    claims.set(id, { x: 6, y: -2 });
+    expect(out.at(-1)).toBe("\x1b[?25l\x1b8\x1b[2A\x1b[7G\x1b[?25h");
+    // 仅 y 变化：同样从终点出发
+    claims.set(id, { x: 6, y: -5 });
+    expect(out.at(-1)).toBe("\x1b[?25l\x1b8\x1b[5A\x1b[7G\x1b[?25h");
+    // 目标即终点：恢复后只写列定位，带上移则错
+    claims.set(id, { x: 6, y: 0 });
+    expect(out.at(-1)).toBe("\x1b[?25l\x1b8\x1b[7G\x1b[?25h");
+    // 坐标不变：不再写任何序列
+    const before = out.length;
+    claims.set(id, { x: 6, y: 0 });
+    expect(out.length).toBe(before);
     stop();
   });
 
