@@ -238,7 +238,7 @@ describe("TUI", () => {
     await session.close();
   });
 
-  it("模型未声明可用档位：状态栏不显示档位段，Shift+Tab 给提示行", async () => {
+  it("模型未声明可用档位：状态栏不显示档位段，Shift+Tab 不插入提示", async () => {
     const { session, runtime } = await makeSession(); // fake-model 未声明 reasoningEffort
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
@@ -247,7 +247,7 @@ describe("TUI", () => {
     expect(lastFrame()).not.toContain("思考:");
     stdin.write("\x1b[Z");
     await pause(80);
-    expect(lastFrame()).toContain("未声明可用思考档位");
+    expect(lastFrame()).not.toContain("未声明可用思考档位");
     expect(lastFrame()).not.toContain("思考:");
     unmount();
     await session.close();

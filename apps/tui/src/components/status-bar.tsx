@@ -1,16 +1,17 @@
 /**
- * 状态栏（tui.md §2，ADR-0019 第 5 条）：彩色分段，· 分隔——
- * 状态 · 模型 · 思考:档位 · 权限预设 · 目录 · 上下文占用（已用/上下文长度）。
- * 上下文长度取 ADR-0016 的声明值，未声明只显示已用量；会话 id 不在此。
- * Turn 中切档：思考段显示 旧档→新档 并以警示色标出。
- * 宽度收缩：<80 隐藏目录段；<40 只留 状态 · 上下文占用。
+ * 状态栏（ADR-0020）：彩色分段，• 分隔。
+ * 上下文为「百分比 / 上下文长度」（单位大写）；长度未知只显示已用量。
+ * 模型段与 /model 一致（服务商/模型 ID 或简称），整行按显示宽度截断，不换行。
+ * Shift+Tab / Alt+M 只短暂高亮对应段，不往对话区插条目。
  */
 import { Box, Text } from "ink";
 import stringWidth from "string-width";
 
 import { useTuiEnv } from "../env.js";
+import { formatContextOccupancy, formatModelLabel } from "../status-format.js";
 import { statusSegmentColors, theme } from "../theme.js";
 
+import type { ModelInfo } from "@nocturne/core";
 import type { RuntimeStatus, SessionView } from "@nocturne/core/protocol";
 
 const STATUS_TEXT: Record<RuntimeStatus, string> = {
@@ -23,13 +24,6 @@ const STATUS_TEXT: Record<RuntimeStatus, string> = {
   failed: "failed",
 };
 
-/** token 数缩写：12.3k / 128k / 1m */
-function tok(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}m`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
-  return String(n);
-}
-
 export interface EffortSegment {
   /** 当前生效档位（Turn 快照） */
   effective: string;
@@ -39,9 +33,12 @@ export interface EffortSegment {
   transition: boolean;
 }
 
+export type StatusHighlight = "effort" | "preset";
+
 interface Segment {
   text: string;
   color: string;
+  highlight: boolean;
 }
 
 export function StatusBar({
@@ -49,6 +46,8 @@ export function StatusBar({
   width,
   effort,
   context,
+  models,
+  highlight,
 }: {
   view: SessionView;
   width: number;
@@ -56,61 +55,79 @@ export function StatusBar({
   effort?: EffortSegment | undefined;
   /** 上下文占用：已用 token / 声明的上下文长度（undefined = 未知） */
   context: { used: number; limit?: number | undefined };
+  /** 与 /model 同一份模型清单，用来取简称 */
+  models?: readonly ModelInfo[] | undefined;
+  /** 快捷键触发后短暂高亮的段 */
+  highlight?: StatusHighlight | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
-  // 分隔符用 •（U+2022，conhost 实宽 1 列）：· 是 2 列歧义宽度字符，会把贴边行顶折
   const sep = env.ascii ? " - " : " • ";
   const status =
     view.status === "retrying" && view.retry !== undefined
       ? `${STATUS_TEXT.retrying} ${view.retry.attempt}/${view.retry.maxAttempts}`
       : STATUS_TEXT[view.status];
   const statusColor = view.status === "idle" ? statusSegmentColors.status : theme.warning;
+  const ctx = formatContextOccupancy(context.used, context.limit);
 
-  const ctx =
-    context.limit !== undefined ? `${tok(context.used)}/${tok(context.limit)}` : tok(context.used);
-
-  const segments: Segment[] = [{ text: status, color: statusColor }];
-  const model = view.config.model;
-  segments.push({
-    text: model !== undefined ? `${model.provider}/${model.model}` : "?",
-    color: statusSegmentColors.model,
-  });
-  if (effort !== undefined) {
-    segments.push({
-      text: effort.transition
+  const effortText =
+    effort === undefined
+      ? undefined
+      : effort.transition
         ? `思考:${effort.effective}→${effort.current}`
-        : `思考:${effort.current}`,
+        : `思考:${effort.current}`;
+
+  const segments: Segment[] = [{ text: status, color: statusColor, highlight: false }];
+  const reserved =
+    stringWidth(status) +
+    stringWidth(sep) +
+    stringWidth(ctx) +
+    (effortText !== undefined ? stringWidth(sep) + stringWidth(effortText) : 0) +
+    stringWidth(sep) +
+    stringWidth(view.config.permissionPreset ?? "?") +
+    8;
+  const modelBudget = Math.max(8, width - reserved);
+  segments.push({
+    text: formatModelLabel(view.config.model, models ?? [], modelBudget),
+    color: statusSegmentColors.model,
+    highlight: false,
+  });
+  if (effort !== undefined && effortText !== undefined) {
+    segments.push({
+      text: effortText,
       color: effort.transition ? statusSegmentColors.effortTransition : statusSegmentColors.effort,
+      highlight: highlight === "effort",
     });
   }
   segments.push({
     text: view.config.permissionPreset ?? "?",
     color: statusSegmentColors.preset,
+    highlight: highlight === "preset",
   });
   const dir = view.meta?.cwd ?? "";
   const dirSeg: Segment | undefined =
-    width >= 80 && dir !== "" ? { text: dir, color: statusSegmentColors.dir } : undefined;
+    width >= 80 && dir !== ""
+      ? { text: dir, color: statusSegmentColors.dir, highlight: false }
+      : undefined;
   if (dirSeg !== undefined) segments.push(dirSeg);
-  segments.push({ text: ctx, color: statusSegmentColors.context });
+  segments.push({ text: ctx, color: statusSegmentColors.context, highlight: false });
 
-  // <40 列：只留 状态 · 上下文占用（tui.md §5）
   const head = segments[0];
   const last = segments.at(-1);
   let shown = width < 40 && head !== undefined && last !== undefined ? [head, last] : segments;
-  // 目录段是可选段：整行拼不下时先丢它，保证模型/思考/预设/上下文完整
   if (dirSeg !== undefined) {
     const total = shown.reduce((w, s) => w + stringWidth(s.text), 0) + (shown.length - 1) * 3;
-    // 思考段的 → 在 conhost 实宽 2 列，贴边截断前留 4 列膨胀余量
     if (total > width - 4) shown = shown.filter((s) => s !== dirSeg);
   }
 
   return (
-    <Box>
+    <Box height={1}>
       <Text wrap="truncate">
         {shown.map((s, i) => (
           <Text key={i}>
             {i > 0 ? <Text color={theme.muted}>{sep}</Text> : null}
-            <Text color={s.color}>{s.text}</Text>
+            <Text color={s.color} inverse={s.highlight} bold={s.highlight}>
+              {s.text}
+            </Text>
           </Text>
         ))}
       </Text>

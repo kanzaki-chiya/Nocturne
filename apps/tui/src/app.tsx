@@ -9,7 +9,7 @@
  * /resume：注入的 switchSession 回调执行切换；旧回放冻结进 Static，
  * 新会话重建 SessionView 重放（tui.md §4）。
  */
-import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Text, useApp, useCursor, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -23,7 +23,6 @@ import {
 } from "@nocturne/core";
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 
-import { useAltScreen, waitCommit } from "./alt-screen.js";
 import {
   contextLines,
   errText,
@@ -34,34 +33,32 @@ import {
   type ProviderBridge,
   type ProviderWizardStart,
 } from "./commands.js";
-import { Activity } from "./components/activity.js";
+import { cursorColumn } from "./cursor.js";
+import { frameBudget } from "./frame.js";
+import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "./keys.js";
+import { NEW_CONTENT_HINT, transcriptBlocks } from "./lines.js";
+import { applyClamp, scrollFollow, scrollPage, scrollToBottom, scrollToTop } from "./scroll.js";
+import { completeSlash, PRESET_NAMES, type Candidate } from "./slash-catalog.js";
+import { countLaidLines, selectVisible, type LaidLine } from "./viewport.js";
+import { welcomeLines } from "./welcome.js";
+import { APP_VERSION } from "./version.js";
 import { Composer } from "./components/composer.js";
 import { ConfirmBox } from "./components/confirm-box.js";
 import { ModelPicker, type PickerScope } from "./components/model-picker.js";
-import { NoticeBlock, type NoticeLevel } from "./components/notice-block.js";
 import { Panel } from "./components/panel.js";
 import { PermissionDialog } from "./components/permission-dialog.js";
 import { PickList, type PickItem } from "./components/pick-list.js";
 import { ProviderPage, type ProviderOp } from "./components/provider-page.js";
-import { StatusBar, type EffortSegment } from "./components/status-bar.js";
-import { EntryRow, type TranscriptItem } from "./components/transcript.js";
-import { WelcomeBox } from "./components/welcome-box.js";
+import { StatusBar, type EffortSegment, type StatusHighlight } from "./components/status-bar.js";
+import { type TranscriptItem } from "./components/transcript.js";
 import { WizardView } from "./components/wizard-view.js";
-import { TuiEnvContext, type TuiEnv } from "./env.js";
+import { TuiEnvContext, glyphs, type TuiEnv } from "./env.js";
 import { useSessionView } from "./session-view.js";
 import { theme } from "./theme.js";
 import type { SwitchSessionFn } from "./types.js";
 import { useProviderWizard } from "./wizard-io.js";
 
-/**
- * 主屏静态流条目（ADR-0019）：Ink 只跟踪一棵 <Static> 子树，
- * 欢迎框/启动通知与回放区必须并进同一条 items 流，否则后挂载的
- * Static 会顶掉先挂载的，前者输出整段丢失。
- */
-type StaticRow =
-  { kind: "boot-welcome"; key: string } | { kind: "boot-notices"; key: string } | TranscriptItem;
-
-/** 完结前缀切分：第一个未完结工具条目及其后条目留给活动区（tui.md §4） */
+/** 完结前缀切分：测试仍覆盖这条切分；全屏视口不再依赖 <Static> 不可改写。 */
 export function splitCompletedPrefix(entries: readonly ViewEntry[]): {
   prefix: ViewEntry[];
   tail: ViewEntry[];
@@ -100,6 +97,8 @@ export interface AppProps {
   setup?: SetupFlowSpec | undefined;
   /** 结束回调：让 runTui 带出退出码与 stderr 提示（默认退出码 0） */
   onExitResult?: ((code: number, message?: string) => void) | undefined;
+  /** 当前会话 id 变化时通知 runTui，退出提示要用切换后的 id */
+  onSessionId?: ((id: string) => void) | undefined;
 }
 
 /**
@@ -242,7 +241,7 @@ function useProviderOps(provider: ProviderBridge | undefined): {
   };
 }
 
-/** 首次配置流程（无会话形态）：服务商页 →（无默认模型时）模型页，都在备用屏内 */
+/** 首次配置流程（无会话形态）：服务商页 →（无默认模型时）模型页，同一全屏内切换 */
 function SetupFlow({
   runtime,
   provider,
@@ -256,53 +255,34 @@ function SetupFlow({
 }): React.JSX.Element | null {
   const { stdout } = useStdout();
   const [width, setWidth] = useState(stdout.columns || 80);
-  const [height, setHeight] = useState(stdout.rows || 24);
+  const [rows, setRows] = useState(stdout.rows || 24);
   useEffect(() => {
     const on = (): void => {
       setWidth(stdout.columns || 80);
-      setHeight(stdout.rows || 24);
+      setRows(stdout.rows || 24);
     };
     stdout.on("resize", on);
     return () => {
       stdout.off("resize", on);
     };
   }, [stdout]);
+  const frame = frameBudget(rows, 0);
 
-  const alt = useAltScreen();
   const ops = useProviderOps(provider);
   const [page, setPage] = useState<"provider" | "model">(setup.step === 2 ? "model" : "provider");
   const [ready, setReady] = useState(false);
-  const committed = useRef(false);
-  useEffect(() => {
-    committed.current = ready;
-  }, [ready]);
 
-  // 挂载即进备用屏（ADR-0017 序列）：先提交页面状态再 ?1049h
   useEffect(() => {
-    void (async () => {
-      await ops.reload().catch(() => undefined);
-      await alt.enter(async () => {
-        setReady(true);
-        await waitCommit(committed, true);
-      });
-    })();
-    // 只跑一次的挂载序列：reload/alt 都是稳定引用
-  }, []);
-
-  const closePage = useCallback(async (): Promise<void> => {
-    await alt.leave(async () => {
-      setReady(false);
-      await waitCommit(committed, false);
+    void ops.reload().finally(() => {
+      setReady(true);
     });
-  }, [alt]);
+  }, [ops]);
 
   const finish = useCallback(
     (d: SetupDone): void => {
-      void closePage().finally(() => {
-        onDone(d);
-      });
+      onDone(d);
     },
-    [closePage, onDone],
+    [onDone],
   );
 
   /** 第 1 步 Esc：无默认模型 → 第 2 步模型页；否则收尾（openSession 时用默认模型开新会话） */
@@ -360,7 +340,7 @@ function SetupFlow({
   });
 
   if (!ready) {
-    return <Box flexDirection="column" width={width} height={height} />;
+    return <Box flexDirection="column" width={width} height={frame.frameHeight} />;
   }
 
   if (page === "provider") {
@@ -384,7 +364,8 @@ function SetupFlow({
         busyText={ops.busyText}
         stepLabel="第 1 步，共 2 步"
         width={width}
-        height={height}
+        height={frame.frameHeight}
+        termRows={rows}
         active
       />
     );
@@ -393,7 +374,7 @@ function SetupFlow({
   const entries = ops.entries;
   const configured = new Set(entries.map((p) => p.id));
   return (
-    <Box flexDirection="column" width={width} height={height}>
+    <Box flexDirection="column" width={width} height={frame.frameHeight}>
       <Text color={theme.info}>第 2 步，共 2 步 — 选择模型并设为默认</Text>
       <ModelPicker
         models={runtime.listModels()}
@@ -415,7 +396,7 @@ function SetupFlow({
           );
         }}
         width={width}
-        height={height - 1}
+        height={Math.max(1, frame.frameHeight - 1)}
         active
       />
     </Box>
@@ -430,6 +411,7 @@ export function App({
   provider,
   setup,
   onExitResult,
+  onSessionId,
 }: AppProps): React.JSX.Element | null {
   const { exit } = useApp();
   const [session, setSession] = useState<RuntimeSession | undefined>(initialSession);
@@ -437,13 +419,14 @@ export function App({
   const onSetupDone = useCallback(
     (d: SetupDone): void => {
       if (d.kind === "session") {
+        onSessionId?.(d.session.id);
         setSession(d.session);
         return;
       }
       onExitResult?.(d.code, d.message);
       exit();
     },
-    [exit, onExitResult],
+    [exit, onExitResult, onSessionId],
   );
 
   if (session === undefined) {
@@ -463,6 +446,7 @@ export function App({
       env={env}
       switchSession={switchSession}
       provider={provider}
+      onSessionId={onSessionId}
     />
   );
 }
@@ -473,23 +457,26 @@ function SessionApp({
   env,
   switchSession,
   provider,
+  onSessionId,
 }: {
   session: RuntimeSession;
   runtime: Runtime;
   env: TuiEnv;
   switchSession?: SwitchSessionFn | undefined;
   provider?: ProviderBridge | undefined;
+  onSessionId?: ((id: string) => void) | undefined;
 }): React.JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
+  const { setCursorPosition } = useCursor();
   const [width, setWidth] = useState(stdout.columns || 80);
-  const [height, setHeight] = useState(stdout.rows || 24);
+  const [rows, setRows] = useState(stdout.rows || 24);
 
-  // resize 跟随：Ink 不因终端 resize 自动重渲染（ADR-0017 实测约束）
+  // resize 跟随：Ink 不因终端 resize 自动重渲染
   useEffect(() => {
     const on = (): void => {
       setWidth(stdout.columns || 80);
-      setHeight(stdout.rows || 24);
+      setRows(stdout.rows || 24);
     };
     stdout.on("resize", on);
     return () => {
@@ -500,7 +487,11 @@ function SessionApp({
   // /resume 切换：session 变为新会话（useSessionView 自动重放新日志）
   const [session, setSession] = useState(initialSession);
   const view = useSessionView(session);
+  useEffect(() => {
+    onSessionId?.(session.id);
+  }, [session, onSessionId]);
   const [input, setInput] = useState("");
+  const [cursor, setCursor] = useState(0);
   const [overlay, setOverlay] = useState<OverlayName | undefined>(undefined);
   const [clientLines, setClientLines] = useState<string[]>([]);
   const [exiting, setExiting] = useState(false);
@@ -510,11 +501,7 @@ function SessionApp({
   const [resumeList, setResumeList] = useState<readonly SessionSummary[] | undefined>(undefined);
   /** /resume 跨目录确认（foreign → 用户确认后带 allowForeign 重试） */
   const [foreign, setForeign] = useState<{ id: string; root: string } | undefined>(undefined);
-  /** 欢迎框"最近会话"数据（挂载时拉取一次，<Static> 只写一次） */
-  const [boot, setBoot] = useState<{ recents: SessionSummary[] } | undefined>(undefined);
-
-  // 全屏模型选择页（tui.md §7 / ADR-0017）：备用屏进出由 alt 驱动
-  const alt = useAltScreen();
+  // 模型选择页 / 服务商页：同一全屏里的页面，不再进出备用屏。输入文字留在父状态。
   const [picker, setPicker] = useState<
     { focus: "left" | "right"; scope?: PickerScope | undefined } | undefined
   >(undefined);
@@ -525,18 +512,19 @@ function SessionApp({
     { providers: ProviderOverview[]; presets: WizardPreset[] } | undefined
   >(undefined);
   const pickerOpen = picker !== undefined;
-  /** React commit 观察点（挂起期间靠它确认页面状态已提交） */
-  const pickerCommitted = useRef(false);
-  useEffect(() => {
-    pickerCommitted.current = pickerOpen;
-  }, [pickerOpen]);
-
-  // 全屏服务商页（tui.md §8 / ADR-0019）：与模型选择页共用 alt 序列
   const [providerPageOpen, setProviderPageOpen] = useState(false);
-  const providerPageCommitted = useRef(false);
-  useEffect(() => {
-    providerPageCommitted.current = providerPageOpen;
-  }, [providerPageOpen]);
+  const [scroll, setScroll] = useState(scrollFollow);
+  const [completionOn, setCompletionOn] = useState(true);
+  const [completionIndex, setCompletionIndex] = useState(0);
+  const [highlight, setHighlight] = useState<StatusHighlight | undefined>(undefined);
+  const [providerIds, setProviderIds] = useState<readonly string[]>([]);
+  const lineCache = useRef(new Map<string, LaidLine[]>());
+  const laidTotal = useRef<number | undefined>(undefined);
+  const hiddenNotices = useRef(new Set<string>());
+  const suppressConfigNotice = useRef(false);
+  const swallowUntil = useRef(0);
+  const swallowRef = useRef(false);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // 服务商页数据与操作（与 SetupFlow 共用一套编排）
   const ops = useProviderOps(provider);
@@ -550,19 +538,9 @@ function SessionApp({
   const busy = view.status !== "idle";
   const pending = view.pendingPermission;
 
-  const { prefix, tail } = splitCompletedPrefix(view.entries);
+  const { prefix } = splitCompletedPrefix(view.entries);
   const prefixRef = useRef(prefix);
   prefixRef.current = prefix;
-  const transcriptItems = useMemo(() => [...frozen, ...prefix], [frozen, prefix]);
-  /** 主屏唯一 <Static> 的 items 流：欢迎框与启动通知打头，其后是回放区（append-only） */
-  const staticRows = useMemo<StaticRow[]>(
-    () => [
-      { kind: "boot-welcome", key: "boot:welcome" },
-      { kind: "boot-notices", key: "boot:notices" },
-      ...transcriptItems,
-    ],
-    [transcriptItems],
-  );
 
   // 思考档位段（ADR-0018/0019）：Turn 中切档显示 旧档→新档 并变色
   const effortInfo = session.reasoningEffortInfo();
@@ -593,19 +571,23 @@ function SessionApp({
   const pushLine = useCallback((text: string) => {
     if (text === "") return;
     setClientLines((prev) => [...prev.slice(-19), ...text.split("\n")]);
+    setScroll((s) => (s.follow ? s : { ...s, follow: false }));
   }, []);
 
-  // 启动数据（欢迎框"最近会话"）：拿到后才渲染 <Static>——Static 只写一次
-  useEffect(() => {
-    runtime
-      .listSessions()
-      .then((rows) => {
-        setBoot({ recents: [...rows].sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 3) });
-      })
-      .catch(() => {
-        setBoot({ recents: [] });
-      });
-  }, [runtime]);
+  const flash = useCallback((which: StatusHighlight) => {
+    setHighlight(which);
+    if (highlightTimer.current !== undefined) clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => {
+      setHighlight(undefined);
+    }, 1200);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (highlightTimer.current !== undefined) clearTimeout(highlightTimer.current);
+    },
+    [],
+  );
 
   /** 退出：进行中先中断，等 Turn 收敛后再退（与 REPL close 路径同语义） */
   const requestExit = useCallback(() => {
@@ -631,19 +613,39 @@ function SessionApp({
     [pending, session, pushLine],
   );
 
-  /** 思考强度循环（Shift+Tab）：仅在输入框受理时由全局键路由调用 */
+  /** 思考强度循环（Shift+Tab）：只改档位并高亮状态栏，不插入对话条目 */
   const cycleEffort = useCallback(() => {
     const info = session.reasoningEffortInfo();
-    if (info.available.length === 0) {
-      pushLine("! 该模型未声明可用思考档位（可用 /provider thinking 或配置文件声明）");
-      return;
-    }
+    if (info.available.length === 0) return;
     const cycle = ["off", ...info.available];
     const next = cycle[(cycle.indexOf(info.current) + 1) % cycle.length] ?? "off";
-    session.setReasoningEffort(next).catch((e: unknown) => {
-      pushLine(`! ${errText(e)}`);
-    });
-  }, [session, pushLine]);
+    suppressConfigNotice.current = true;
+    session.setReasoningEffort(next).then(
+      () => {
+        flash("effort");
+      },
+      () => {
+        suppressConfigNotice.current = false;
+      },
+    );
+  }, [session, flash]);
+
+  /** Alt+M：与 /preset 同一条 setPermissionPreset 路径，Turn 中同样拒绝 */
+  const cyclePreset = useCallback(() => {
+    if (busy || pending !== undefined) return;
+    const current = session.state().config.permissionPreset;
+    const at = PRESET_NAMES.indexOf(current as (typeof PRESET_NAMES)[number]);
+    const next = PRESET_NAMES[(at + 1) % PRESET_NAMES.length] ?? "default";
+    suppressConfigNotice.current = true;
+    session.setPermissionPreset(next).then(
+      () => {
+        flash("preset");
+      },
+      () => {
+        suppressConfigNotice.current = false;
+      },
+    );
+  }, [busy, pending, session, flash]);
 
   /** 会话切换：冻结旧回放进 Static、换绑 session、新日志重放进 SessionView */
   const doSwitch = useCallback(
@@ -686,9 +688,9 @@ function SessionApp({
     return { providers, presets };
   }, [provider]);
 
-  /** 打开模型选择页：ADR-0017 序列——挂起 → 提交页面 → ?1049h → 恢复全量重绘 */
+  /** 打开模型选择页：同一全屏内换页，不切备用屏，不清除输入框文字 */
   const openPicker = useCallback(
-    async (focus: "left" | "right"): Promise<void> => {
+    (focus: "left" | "right"): void => {
       if (busy || pending !== undefined) {
         pushLine("! 会话忙，模型选择页仅在空闲时可打开");
         return;
@@ -697,29 +699,21 @@ function SessionApp({
         pushLine("! 当前环境不支持模型选择页");
         return;
       }
-      const data = await loadPickerData().catch((e: unknown) => {
-        pushLine(`! ${errText(e)}`);
-        return undefined;
-      });
-      if (data === undefined) return;
-      setPickerData(data);
-      await alt.enter(async () => {
-        setPicker({ focus });
-        await waitCommit(pickerCommitted, true);
-      });
+      void loadPickerData()
+        .then((data) => {
+          setPickerData(data);
+          setPicker({ focus });
+        })
+        .catch((e: unknown) => {
+          pushLine(`! ${errText(e)}`);
+        });
     },
-    [busy, pending, provider, loadPickerData, alt, pushLine],
+    [busy, pending, provider, loadPickerData, pushLine],
   );
 
-  /** 关闭模型选择页：ADR-0017 序列——挂起 → 备用屏内恢复 → ?1049l → 提交关闭 */
-  const closePicker = useCallback(async (): Promise<void> => {
-    await alt.leave(async () => {
-      setPicker(undefined);
-      // 提交必须落地后才算关完：否则紧随的 exit() 在 unmount 终帧里
-      // 把仍未卸载的页面帧画进主屏 scrollback（Ctrl+C 路径实测）
-      await waitCommit(pickerCommitted, false);
-    });
-  }, [alt]);
+  const closePicker = useCallback((): void => {
+    setPicker(undefined);
+  }, []);
 
   /** picker 内 ○ 预设 Enter → 向导内嵌；完成后回到本页并选中新服务商 */
   const startWizardInPicker = useCallback(
@@ -741,9 +735,9 @@ function SessionApp({
     [provider, wizard, loadPickerData],
   );
 
-  /** 打开服务商页：与模型选择页同一个 alt 序列（ADR-0019 扩展 ADR-0017 页面范围） */
+  /** 打开服务商页：同一全屏内换页，输入框文字保留在父状态 */
   const openProviderPage = useCallback(
-    async (presetId?: string): Promise<void> => {
+    (presetId?: string): void => {
       if (busy || pending !== undefined) {
         pushLine("! 会话忙，服务商页仅在空闲时可打开");
         return;
@@ -752,24 +746,18 @@ function SessionApp({
         pushLine("! 当前环境不支持服务商页");
         return;
       }
-      await ops.reload().catch((e: unknown) => {
+      void ops.reload().catch((e: unknown) => {
         pushLine(`! ${errText(e)}`);
       });
-      await alt.enter(async () => {
-        setProviderPageOpen(true);
-        await waitCommit(providerPageCommitted, true);
-      });
+      setProviderPageOpen(true);
       if (presetId !== undefined) ops.startWizard(presetId);
     },
-    [busy, pending, provider, ops, alt, pushLine],
+    [busy, pending, provider, ops, pushLine],
   );
 
-  const closeProviderPage = useCallback(async (): Promise<void> => {
-    await alt.leave(async () => {
-      setProviderPageOpen(false);
-      await waitCommit(providerPageCommitted, false);
-    });
-  }, [alt]);
+  const closeProviderPage = useCallback((): void => {
+    setProviderPageOpen(false);
+  }, []);
 
   /** 主屏 /provider key|thinking 弹层（add 已改为服务商页内嵌） */
   const openProviderWizard = useCallback(
@@ -835,38 +823,146 @@ function SessionApp({
     foreign !== undefined ||
     wizardOverlay !== undefined ||
     providerRemove !== undefined;
+  const pageOpen = pickerOpen || providerPageOpen;
+  const inputIdle = !pageOpen && !dialogOpen && pending === undefined && !busy;
 
-  // 全局键：Ctrl+C / Ctrl+D / Shift+Tab（弹层内的 Esc/Enter/Tab 由各弹层组件处理）
+  const completionCtx = useMemo(
+    () => ({
+      effortLevels: session.reasoningEffortInfo().available,
+      providerIds,
+    }),
+    [session, providerIds, view.revision],
+  );
+  const candidates = useMemo(
+    () => (input.startsWith("/") ? completeSlash(input, completionCtx) : []),
+    [input, completionCtx],
+  );
+  const completionOpen =
+    inputIdle && completionOn && input.startsWith("/") && candidates.length > 0;
+  const selected = candidates[Math.min(completionIndex, Math.max(0, candidates.length - 1))];
+
+  useEffect(() => {
+    setCompletionIndex(0);
+    setCompletionOn(true);
+  }, [input]);
+
+  useEffect(() => {
+    if (!input.startsWith("/provider") || provider === undefined) return;
+    let cancelled = false;
+    void provider.config.describeProviders(provider.workspaceRoot).then(
+      (rows) => {
+        if (!cancelled) setProviderIds(rows.map((row) => row.id));
+      },
+      () => {
+        if (!cancelled) setProviderIds([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [input.startsWith("/provider"), provider]);
+
+  const applyCandidate = useCallback((item: Candidate, execute: boolean) => {
+    setInput(item.insert);
+    setCursor(item.insert.length);
+    if (execute) {
+      setCompletionOn(false);
+    }
+  }, []);
+
+  // 全局键：退出、翻页、Shift+Tab、Alt+M、补全列表。弹层内的键由各自组件处理。
   useInput((ch, key) => {
-    // Shift+Tab（\x1B[Z → tab+shift）：输入框受理时循环思考档位；
-    // 弹层/权限框打开时放行给各自组件（权限框用 Shift+Tab 反向移动焦点）
+    const now = Date.now();
+    if (shouldSwallowAfterEscape(ch, key, swallowUntil.current, now)) {
+      swallowUntil.current = 0;
+      swallowRef.current = true;
+      return;
+    }
+    if (key.escape && ch === "" && !key.meta && !key.ctrl) {
+      swallowUntil.current = noteBareEscape(now);
+    }
     if (key.tab && key.shift) {
-      if (pickerOpen || providerPageOpen || dialogOpen || pending !== undefined) return;
+      if (pageOpen || dialogOpen || pending !== undefined) return;
       cycleEffort();
       return;
     }
+    if (isAltM(ch, key)) {
+      if (pageOpen || dialogOpen || pending !== undefined) return;
+      cyclePreset();
+      return;
+    }
+    if (!pageOpen && !dialogOpen && pending === undefined) {
+      const page = Math.max(1, frameBudget(rows, 0).conversation - 1);
+      if (key.pageUp) {
+        setScroll((s) => scrollPage(s, page));
+        return;
+      }
+      if (key.pageDown) {
+        setScroll((s) => scrollPage(s, -page));
+        return;
+      }
+      if (key.ctrl && key.home) {
+        setScroll(scrollToTop());
+        return;
+      }
+      if (key.ctrl && key.end) {
+        setScroll(scrollToBottom());
+        return;
+      }
+    }
+    if (completionOpen && selected !== undefined) {
+      if (key.upArrow) {
+        setCompletionIndex((i) => (i <= 0 ? candidates.length - 1 : i - 1));
+        return;
+      }
+      if (key.downArrow) {
+        setCompletionIndex((i) => (i + 1) % candidates.length);
+        return;
+      }
+      if (key.tab && !key.shift) {
+        applyCandidate(selected, false);
+        return;
+      }
+      if (key.escape) {
+        setCompletionOn(false);
+        return;
+      }
+      if (key.return) {
+        const text = selected.insert;
+        setInput("");
+        setCursor(0);
+        setCompletionOn(true);
+        setScroll(scrollToBottom());
+        void runSlash(text, session, provider)
+          .then((r) => {
+            const opens = r.kind === "overlay" || r.kind === "picker" || r.kind === "provider-page";
+            if (!opens) clearInput();
+            if (r.kind === "exit") requestExit();
+            else if (r.kind === "overlay") setOverlay(r.name);
+            else if (r.kind === "picker") openPicker(r.focus);
+            else if (r.kind === "provider-page") openProviderPage(r.presetId);
+            else if (r.kind === "switch") void doSwitch(r.id);
+            else if (r.kind === "provider-wizard") openProviderWizard(r.start);
+            else if (r.kind === "provider-remove") setProviderRemove(r.providerId);
+            else if (r.kind === "message") pushLine(r.text);
+          })
+          .catch((e: unknown) => {
+            pushLine(`! ${errText(e)}`);
+          });
+        return;
+      }
+    }
     if (key.ctrl && ch === "c") {
       if (pickerOpen) {
-        // 先走正常关闭路径回主屏再退出——否则 unmount 把页面帧写进 scrollback（ADR-0017）
         wizard.cancel();
-        void closePicker()
-          .then(() => {
-            exit();
-          })
-          .catch(() => {
-            exit();
-          });
+        closePicker();
+        exit();
         return;
       }
       if (providerPageOpen) {
         ops.wizard.cancel();
-        void closeProviderPage()
-          .then(() => {
-            exit();
-          })
-          .catch(() => {
-            exit();
-          });
+        closeProviderPage();
+        exit();
         return;
       }
       if (foreign !== undefined) {
@@ -886,7 +982,6 @@ function SessionApp({
         return;
       }
       if (pending !== undefined || busy) {
-        // 权限待决/运行中：中断（权限请求结算为 cancelled）
         session.interrupt();
         return;
       }
@@ -896,16 +991,14 @@ function SessionApp({
     if (key.ctrl && ch === "d") {
       if (pickerOpen) {
         wizard.cancel();
-        void closePicker().then(() => {
-          requestExit();
-        });
+        closePicker();
+        requestExit();
         return;
       }
       if (providerPageOpen) {
         ops.wizard.cancel();
-        void closeProviderPage().then(() => {
-          requestExit();
-        });
+        closeProviderPage();
+        requestExit();
         return;
       }
       if (foreign !== undefined) {
@@ -929,18 +1022,24 @@ function SessionApp({
     }
   });
 
+  const clearInput = useCallback(() => {
+    setInput("");
+    setCursor(0);
+  }, []);
+
   const onSubmit = useCallback(
     (line: string) => {
-      setInput("");
       const text = line.trim();
       if (text === "") return;
       if (text.startsWith("/")) {
         void runSlash(text, session, provider)
           .then((r) => {
+            const opens = r.kind === "overlay" || r.kind === "picker" || r.kind === "provider-page";
+            if (!opens) clearInput();
             if (r.kind === "exit") requestExit();
             else if (r.kind === "overlay") setOverlay(r.name);
-            else if (r.kind === "picker") void openPicker(r.focus);
-            else if (r.kind === "provider-page") void openProviderPage(r.presetId);
+            else if (r.kind === "picker") openPicker(r.focus);
+            else if (r.kind === "provider-page") openProviderPage(r.presetId);
             else if (r.kind === "switch") void doSwitch(r.id);
             else if (r.kind === "provider-wizard") openProviderWizard(r.start);
             else if (r.kind === "provider-remove") setProviderRemove(r.providerId);
@@ -951,6 +1050,8 @@ function SessionApp({
           });
         return;
       }
+      clearInput();
+      setScroll(scrollToBottom());
       session.submit({ text }).catch((e: unknown) => {
         pushLine(`! ${errText(e)}`);
       });
@@ -958,6 +1059,7 @@ function SessionApp({
     [
       session,
       pushLine,
+      clearInput,
       requestExit,
       doSwitch,
       openPicker,
@@ -982,7 +1084,10 @@ function SessionApp({
     value: s.id,
   }));
 
-  // 模型选择页：整页替换主界面（帧渲染进备用屏；ADR-0017）
+  const budget = frameBudget(rows, completionOpen ? Math.min(8, candidates.length) : 0);
+  const g = glyphs(env);
+
+  // 模型选择页：同一全屏里的一页，输入文字留在父状态
   if (pickerOpen) {
     return (
       <TuiEnvContext.Provider value={env}>
@@ -999,11 +1104,10 @@ function SessionApp({
           wizard={wizard.state.running ? wizard : undefined}
           onStartWizard={startWizardInPicker}
           onPick={(ref, setDefault) => {
+            closePicker();
             void (async () => {
-              await closePicker();
               try {
                 if (setDefault && provider !== undefined) {
-                  // providers.json 的 model 字段 + 重载让 runtime.defaultModel() 生效
                   await provider.config.setDefaultModel(ref);
                   provider.updateProviders(await provider.reloadConfig());
                 }
@@ -1013,18 +1117,15 @@ function SessionApp({
               }
             })();
           }}
-          onClose={() => {
-            void closePicker();
-          }}
+          onClose={closePicker}
           width={width}
-          height={height}
+          height={budget.frameHeight}
           active={wizardOverlay === undefined}
         />
       </TuiEnvContext.Provider>
     );
   }
 
-  // 服务商页：整页替换主界面（帧渲染进备用屏；ADR-0019）
   if (providerPageOpen) {
     return (
       <TuiEnvContext.Provider value={env}>
@@ -1043,13 +1144,12 @@ function SessionApp({
           onConfirmRemove={(id) => {
             ops.confirmRemove(id);
           }}
-          onClose={() => {
-            void closeProviderPage();
-          }}
+          onClose={closeProviderPage}
           notice={ops.notice}
           busyText={ops.busyText}
           width={width}
-          height={height}
+          height={budget.frameHeight}
+          termRows={rows}
           active
         />
       </TuiEnvContext.Provider>
@@ -1057,7 +1157,7 @@ function SessionApp({
   }
 
   const bootNotes = (() => {
-    const notes: { level: NoticeLevel; text: string }[] = [];
+    const notes: string[] = [];
     const r = session.recovery;
     if (r !== undefined) {
       const parts: string[] = [];
@@ -1066,165 +1166,240 @@ function SessionApp({
         parts.push(`${r.interruptedCalls} 个未完成调用标记为 interrupted`);
       if (r.recoveredTurns > 0)
         parts.push(`${r.recoveredTurns} 个未完成 Turn 已按 process_exited 收束`);
-      if (parts.length > 0)
-        notes.push({ level: "info", text: `会话恢复时已修复：${parts.join("；")}` });
+      if (parts.length > 0) notes.push(`会话恢复时已修复：${parts.join("；")}`);
     }
-    for (const w of session.warnings) notes.push({ level: "warning", text: w });
+    for (const w of session.warnings) notes.push(w);
+    for (const server of session.mcpServers()) {
+      if (server.state === "failed" || server.state === "crashed") {
+        notes.push(
+          `${server.name} 连接失败${server.error !== undefined ? `: ${server.error}` : ""}`,
+        );
+      }
+    }
     return notes;
   })();
 
-  // 等待"最近会话"数据，保证欢迎框只画一次（<Static> 不可改）
-  if (boot === undefined) {
-    return <TuiEnvContext.Provider value={env} />;
-  }
+  const hideNotice = (entry: ViewEntry): boolean => {
+    if (entry.kind !== "notice" || entry.subtype !== "config") return false;
+    if (hiddenNotices.current.has(entry.key)) return true;
+    if (suppressConfigNotice.current) {
+      hiddenNotices.current.add(entry.key);
+      suppressConfigNotice.current = false;
+      return true;
+    }
+    return false;
+  };
 
   const modelText =
     view.config.model !== undefined
       ? `${view.config.model.provider}/${view.config.model.model}`
       : "?";
+  const welcome = welcomeLines({
+    version: APP_VERSION,
+    model: modelText,
+    effort: effort !== undefined ? effort.current : undefined,
+    cwd: view.meta?.cwd ?? "",
+    ascii: env.ascii,
+    width,
+  });
+  const blocks = transcriptBlocks({
+    welcome,
+    notices: bootNotes,
+    frozen,
+    entries: view.entries,
+    hide: hideNotice,
+    live: view,
+    clientLines,
+    ascii: env.ascii,
+  });
+  const showBanner = !scroll.follow;
+  const transcriptRows = Math.max(0, budget.conversation - (showBanner ? 1 : 0));
+  const visible = selectVisible(
+    blocks,
+    width,
+    transcriptRows,
+    scroll.fromBottom,
+    lineCache.current,
+  );
+  if (!scroll.follow) {
+    const total = countLaidLines(blocks, width, lineCache.current);
+    const prev = laidTotal.current;
+    laidTotal.current = total;
+    if (prev !== undefined && total > prev) {
+      setScroll((s) => (s.follow ? s : { ...s, fromBottom: s.fromBottom + (total - prev) }));
+    } else if (visible.clampedFromBottom !== scroll.fromBottom) {
+      setScroll(applyClamp(scroll, visible.clampedFromBottom));
+    }
+  } else {
+    laidTotal.current = undefined;
+  }
+  const prompt = `${g.prompt} `;
+  const inputY = budget.conversation + budget.inputRule;
+  if (budget.input > 0 && !pageOpen) {
+    setCursorPosition({
+      x: cursorColumn(prompt, input.slice(0, cursor), width),
+      y: inputY,
+    });
+  } else {
+    setCursorPosition(undefined);
+  }
+
+  const shownCandidates = candidates.slice(0, budget.completion);
+  const overlayBody =
+    pending !== undefined ? (
+      <PermissionDialog
+        pending={pending}
+        active={!dialogOpen}
+        onReply={replyPermission}
+        width={width}
+      />
+    ) : overlay === "context" ? (
+      <Panel
+        title="/context"
+        lines={contextLines(session)}
+        active
+        onClose={() => {
+          setOverlay(undefined);
+        }}
+        width={width}
+      />
+    ) : overlay === "help" ? (
+      <Panel
+        title="/help"
+        lines={helpLines()}
+        active
+        onClose={() => {
+          setOverlay(undefined);
+        }}
+        width={width}
+      />
+    ) : overlay === "resume" ? (
+      <PickList
+        title="切换到会话"
+        items={resumeItems}
+        active
+        width={width}
+        onPick={(id) => {
+          setOverlay(undefined);
+          void doSwitch(id);
+        }}
+        onCancel={() => {
+          setOverlay(undefined);
+        }}
+      />
+    ) : wizardOverlay !== undefined ? (
+      <WizardView
+        title={
+          wizardOverlay.kind === "add"
+            ? "添加服务商"
+            : wizardOverlay.kind === "key"
+              ? `更新密钥 ${wizardOverlay.providerId}`
+              : `思考档位 ${wizardOverlay.providerId}`
+        }
+        state={wizard.state}
+        active
+        width={width}
+        maxRows={Math.max(4, budget.conversation - 2)}
+        onSubmit={(v) => {
+          wizard.submit(v);
+        }}
+        onSubmitMulti={(indices) => {
+          wizard.submitMulti(indices);
+        }}
+        onCancel={() => {
+          wizard.cancel();
+        }}
+      />
+    ) : providerRemove !== undefined ? (
+      <ConfirmBox
+        title={`删除服务商 ${providerRemove}`}
+        detail="同时删除其凭据（providers.json 条目与凭据索引）"
+        confirmLabel="删除"
+        active
+        width={width}
+        onConfirm={() => {
+          const id = providerRemove;
+          setProviderRemove(undefined);
+          void doRemoveProvider(id);
+        }}
+        onCancel={() => {
+          setProviderRemove(undefined);
+          pushLine("! 已取消删除");
+        }}
+      />
+    ) : foreign !== undefined ? (
+      <ConfirmBox
+        title={`会话绑定到 ${foreign.root}`}
+        detail="与当前目录不同"
+        active
+        width={width}
+        onConfirm={() => {
+          const f = foreign;
+          setForeign(undefined);
+          void doSwitch(f.id, true);
+        }}
+        onCancel={() => {
+          setForeign(undefined);
+          pushLine("! 已取消切换");
+        }}
+      />
+    ) : null;
 
   return (
     <TuiEnvContext.Provider value={env}>
-      <Box flexDirection="column">
-        <Static items={staticRows}>
-          {(item) => {
-            if (item.kind === "boot-welcome") {
-              return (
-                <WelcomeBox
-                  key={item.key}
-                  model={modelText}
-                  sessionId={session.id}
-                  mcp={session.mcpServers()}
-                  recents={boot.recents}
-                  width={width}
-                />
-              );
-            }
-            if (item.kind === "boot-notices") {
-              return <NoticeBlock key={item.key} notes={bootNotes} width={width} />;
-            }
-            return <EntryRow key={item.key} entry={item} width={width} />;
-          }}
-        </Static>
-        <Activity view={view} pendingEntries={tail} clientLines={clientLines} width={width} />
-        {pending !== undefined ? (
-          <PermissionDialog
-            pending={pending}
-            active={!dialogOpen}
-            onReply={replyPermission}
-            width={width}
-          />
-        ) : null}
-        {overlay === "context" ? (
-          <Panel
-            title="/context"
-            lines={contextLines(session)}
-            active
-            onClose={() => {
-              setOverlay(undefined);
-            }}
-            width={width}
-          />
-        ) : null}
-        {overlay === "help" ? (
-          <Panel
-            title="/help"
-            lines={helpLines()}
-            active
-            onClose={() => {
-              setOverlay(undefined);
-            }}
-            width={width}
-          />
-        ) : null}
-        {overlay === "resume" ? (
-          <PickList
-            title="切换到会话"
-            items={resumeItems}
-            active
-            width={width}
-            onPick={(id) => {
-              setOverlay(undefined);
-              void doSwitch(id);
-            }}
-            onCancel={() => {
-              setOverlay(undefined);
-            }}
-          />
-        ) : null}
-        {wizardOverlay !== undefined ? (
-          <WizardView
-            title={
-              wizardOverlay.kind === "add"
-                ? "添加服务商"
-                : wizardOverlay.kind === "key"
-                  ? `更新密钥 ${wizardOverlay.providerId}`
-                  : `思考档位 ${wizardOverlay.providerId}`
-            }
-            state={wizard.state}
-            active={overlay === undefined && providerRemove === undefined}
-            width={width}
-            maxRows={Math.max(6, height - 8)}
-            onSubmit={(v) => {
-              wizard.submit(v);
-            }}
-            onSubmitMulti={(indices) => {
-              wizard.submitMulti(indices);
-            }}
-            onCancel={() => {
-              wizard.cancel();
-            }}
-          />
-        ) : null}
-        {providerRemove !== undefined ? (
-          <ConfirmBox
-            title={`删除服务商 ${providerRemove}`}
-            detail="同时删除其凭据（providers.json 条目与凭据索引）"
-            confirmLabel="删除"
-            active={overlay === undefined}
-            width={width}
-            onConfirm={() => {
-              const id = providerRemove;
-              setProviderRemove(undefined);
-              void doRemoveProvider(id);
-            }}
-            onCancel={() => {
-              setProviderRemove(undefined);
-              pushLine("! 已取消删除");
-            }}
-          />
-        ) : null}
-        {foreign !== undefined ? (
-          <ConfirmBox
-            title={`会话绑定到 ${foreign.root}`}
-            detail="与当前目录不同"
-            active={overlay === undefined}
-            width={width}
-            onConfirm={() => {
-              const f = foreign;
-              setForeign(undefined);
-              void doSwitch(f.id, true);
-            }}
-            onCancel={() => {
-              setForeign(undefined);
-              pushLine("! 已取消切换");
-            }}
-          />
-        ) : null}
+      <Box flexDirection="column" width={width} height={budget.frameHeight}>
+        <Box flexDirection="column" height={budget.conversation} overflow="hidden">
+          {overlayBody ??
+            visible.lines.map((line) => (
+              <Text
+                key={line.key}
+                wrap="truncate"
+                {...(line.color !== undefined ? { color: line.color } : {})}
+                dimColor={line.dim === true}
+                bold={line.bold === true}
+              >
+                {line.text === "" ? " " : line.text}
+              </Text>
+            ))}
+          {showBanner && overlayBody === null ? (
+            <Text color={theme.warning} wrap="truncate">
+              {NEW_CONTENT_HINT}
+            </Text>
+          ) : null}
+        </Box>
         <Composer
           value={input}
-          onChange={setInput}
+          cursor={cursor}
+          onChange={(next, nextCursor) => {
+            setInput(next);
+            setCursor(nextCursor);
+          }}
+          onCursor={setCursor}
           onSubmit={onSubmit}
           active={!dialogOpen && pending === undefined}
           disabledReason={composerDisabled}
           width={width}
+          showRule={budget.inputRule > 0}
+          suspendNav={completionOpen}
+          swallowRef={swallowRef}
         />
-        <StatusBar
-          view={view}
-          width={width}
-          effort={effort}
-          context={{ used: contextReport.estimatedTokens, limit: contextWindow }}
-        />
+        {budget.completion > 0
+          ? shownCandidates.map((item, i) => (
+              <Text key={item.insert} wrap="truncate" inverse={i === completionIndex}>
+                {item.label}
+              </Text>
+            ))
+          : null}
+        {budget.status > 0 ? (
+          <StatusBar
+            view={view}
+            width={width}
+            effort={effort}
+            context={{ used: contextReport.estimatedTokens, limit: contextWindow }}
+            models={runtime.listModels()}
+            highlight={highlight}
+          />
+        ) : null}
       </Box>
     </TuiEnvContext.Provider>
   );

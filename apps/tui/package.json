@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
+    },
+    "./slash-catalog": {
+      "types": "./dist/slash-catalog.d.mts",
+      "import": "./dist/slash-catalog.mjs"
     }
   },
   "files": [

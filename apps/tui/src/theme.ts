@@ -67,3 +67,9 @@ export const LOGO_SPLIT = 24;
 
 /** Logo 宽度（8 字母 × 5 + 7 空格 = 47 列） */
 export const LOGO_WIDTH = 47;
+
+/**
+ * 欢迎区小像素标记（ADR-0020）：4 行，只用宽度确定的 █。
+ * 服务商页的大号字标仍用 LOGO_ROWS；主界面不再画整词像素字。
+ */
+export const MARK_ROWS: readonly string[] = ["█  █", "██ █", "█ ██", "█  █"];

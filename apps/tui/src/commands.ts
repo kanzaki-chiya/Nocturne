@@ -5,6 +5,8 @@
  */
 import { normalizeModelRef, type RuntimeConfig, type RuntimeSession } from "@nocturne/core";
 
+import { helpLines as catalogHelpLines } from "./slash-catalog.js";
+
 export type OverlayName = "context" | "help" | "resume";
 
 /** /provider 向导启动形态（add / key / thinking） */
@@ -37,25 +39,6 @@ export interface ProviderBridge {
   updateProviders: (rc: RuntimeConfig) => void;
   workspaceRoot?: string | undefined;
 }
-
-const HELP_TEXT = `斜杠命令：
-  /help          本帮助
-  /model         弹出模型列表选择器（↑↓ + Enter，Esc 取消）
-  /model <id>    直接切换模型
-  /effort        显示当前思考强度；/effort <档位> 切换
-  /preset        显示当前权限预设
-  /preset <name> 切换权限预设（read-only | default | auto-edit | full-access）
-  /context       上下文组成面板（Esc/Enter 关闭，↑↓ 滚动）
-  /mcp           显示本会话 MCP 服务器状态（只读）
-  /compact       手动压缩上下文（L2 摘要）
-  /resume        弹出会话列表选择器；/resume <id> 直接切换
-  /provider      打开服务商页（列表/过滤/就地配置/操作菜单）
-  /provider add  打开服务商页并进入添加向导；key <名称> 更新密钥
-  /provider thinking <名称> 调整思考档位；refresh <名称> 刷新上游模型
-  /provider remove <名称> 删除服务商（需确认）
-  /exit, /quit   退出
-快捷键：a/s/p/d/x 权限确认（d 进反馈行，Enter 发送、Esc 返回）；
-Ctrl+C 中断（空闲时退出）；Ctrl+D 退出。`;
 
 export async function runSlash(
   line: string,
@@ -193,7 +176,7 @@ export function errText(e: unknown): string {
 }
 
 export function helpLines(): string[] {
-  return HELP_TEXT.split("\n");
+  return catalogHelpLines();
 }
 
 /** /resume 切换后打印的提示行：恢复修复摘要 + 聚合警告（与 CLI sessionOpenNotes 同文案） */

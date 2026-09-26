@@ -11,6 +11,7 @@ import type { Runtime, RuntimeSession } from "@nocturne/core";
 import { App, type SetupFlowSpec } from "./app.js";
 import type { ProviderBridge } from "./commands.js";
 import { detectTuiEnv } from "./env.js";
+import { sessionSavedLine } from "./exit-note.js";
 
 import type { SwitchSessionFn } from "./types.js";
 
@@ -36,6 +37,10 @@ export interface TuiOptions {
    * config + reloadConfig + updateProviders。缺省时相关命令提示不可用。
    */
   provider?: ProviderBridge | undefined;
+  /** 测试注入：异常路径不要真的 process.exit */
+  exitProcess?: ((code: number) => void) | undefined;
+  /** 假 stdout 上 patch-console 会失败；生产路径保持默认 true */
+  patchConsole?: boolean | undefined;
 }
 
 /**
@@ -56,15 +61,16 @@ export async function runTui(
     stderr.write('! --tui 需要交互式终端；请用 nctrn（行式 REPL）或 nctrn -p "<prompt>"\n');
     return 2;
   }
-  // Windows 控制台 stdin：Ink suspendTerminal 的 pauseInput 会 unref() stdin，
-  // 撤销挂起的控制台读请求，而 resumeInput 的 ref() 不会重发——多次
-  // 备用屏切换后 stdin 永久饿死（实测第 2~3 个周期必现）。本应用里挂起
-  // 只用于备用屏切换，没有子进程接管终端，unref 没有意义；吞掉它并在
-  // 退出时补一次真正的 unref 让事件循环能排空。
-  const realUnref = stdin.unref.bind(stdin);
-  stdin.unref = () => stdin;
   let exitCode = 0;
   let exitMessage: string | undefined;
+  let sessionId = "session" in entry ? entry.session?.id : undefined;
+  let announced = false;
+  const announce = (): void => {
+    if (announced || sessionId === undefined) return;
+    announced = true;
+    // Ink unmount 已写完备用屏退出序列；这条写到主屏。
+    stdout.write(`${sessionSavedLine(sessionId)}\n`);
+  };
   const app = render(
     createElement(App, {
       session: "session" in entry ? entry.session : undefined,
@@ -73,6 +79,9 @@ export async function runTui(
       env: detectTuiEnv(),
       switchSession: options.switchSession,
       provider: options.provider,
+      onSessionId: (id: string) => {
+        sessionId = id;
+      },
       onExitResult: (code: number, message?: string) => {
         exitCode = code;
         exitMessage = message;
@@ -82,15 +91,34 @@ export async function runTui(
       stdout,
       stdin,
       stderr,
-      // Ctrl+C 由 App 的 useInput 路由（中断/退出语义）
       exitOnCtrlC: false,
+      incrementalRendering: true,
+      alternateScreen: true,
+      patchConsole: options.patchConsole ?? true,
     },
   );
+  const exitProcess = options.exitProcess ?? ((code: number) => process.exit(code));
+  const onCrash = (err: unknown): void => {
+    try {
+      app.unmount();
+    } catch {
+      /* 已经在卸载 */
+    }
+    announce();
+    const text = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    stderr.write(`${text}\n`);
+    exitCode = 1;
+    exitProcess(1);
+  };
+  process.on("uncaughtException", onCrash);
+  process.on("unhandledRejection", onCrash);
   try {
     await app.waitUntilExit();
   } finally {
-    realUnref();
+    process.off("uncaughtException", onCrash);
+    process.off("unhandledRejection", onCrash);
   }
+  announce();
   if (exitMessage !== undefined && exitMessage !== "") {
     stderr.write(`${exitMessage}\n`);
   }

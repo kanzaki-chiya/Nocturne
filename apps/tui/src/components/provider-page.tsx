@@ -100,6 +100,7 @@ export function ProviderPage({
   stepLabel,
   width,
   height,
+  termRows,
   active,
 }: {
   presets: readonly WizardPreset[];
@@ -131,7 +132,10 @@ export function ProviderPage({
   /** 首次配置流程的步骤标记（"第 1 步，共 2 步"） */
   stepLabel?: string | undefined;
   width: number;
+  /** 页面盒高度（全屏帧高，等于终端行数减 1） */
   height: number;
+  /** 终端行数。Logo 阈值按终端行数 ≥30，不按帧高。缺省时用 height。 */
+  termRows?: number | undefined;
   active: boolean;
 }): React.JSX.Element {
   const env = useTuiEnv();
@@ -164,7 +168,7 @@ export function ProviderPage({
 
   // 布局预算（ADR-0019 第 3 条）：页头固定、整页锁高、内容区内部滚动。
   // 像素 Logo 只在高度 ≥30 且宽度 ≥64 时绘制；否则单行文字标题。
-  const showLogo = width >= 64 && height >= 30;
+  const showLogo = width >= 64 && (termRows ?? height) >= 30;
   const headerH = showLogo ? 5 : stepLabel !== undefined ? 3 : 2;
   // 底部：结果/操作/确认区 + 按键提示行。确认框（边框+标题+说明+选项）5 行
   const footerH = 1 + (confirmRemove !== undefined ? 5 : 1);
