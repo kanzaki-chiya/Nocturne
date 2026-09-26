@@ -9,7 +9,7 @@
  * /resume：注入的 switchSession 回调执行切换；旧回放冻结进 Static，
  * 新会话重建 SessionView 重放（tui.md §4）。
  */
-import { Box, Text, useApp, useCursor, useInput, useStdout } from "ink";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -33,7 +33,6 @@ import {
   type ProviderBridge,
   type ProviderWizardStart,
 } from "./commands.js";
-import { cursorColumn } from "./cursor.js";
 import { frameBudget } from "./frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "./keys.js";
 import { NEW_CONTENT_HINT, SCROLLED_HINT, transcriptBlocks } from "./lines.js";
@@ -44,6 +43,7 @@ import { welcomeLines } from "./welcome.js";
 import { APP_VERSION } from "./version.js";
 import { Composer } from "./components/composer.js";
 import { ConfirmBox } from "./components/confirm-box.js";
+import { InputCursor } from "./components/input-cursor.js";
 import { ModelPicker, type PickerScope } from "./components/model-picker.js";
 import { Panel } from "./components/panel.js";
 import { PermissionDialog } from "./components/permission-dialog.js";
@@ -468,7 +468,6 @@ function SessionApp({
 }): React.JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const { setCursorPosition } = useCursor();
   const [width, setWidth] = useState(stdout.columns || 80);
   const [rows, setRows] = useState(stdout.rows || 24);
 
@@ -1263,14 +1262,6 @@ function SessionApp({
   }
   const prompt = `${g.prompt} `;
   const inputY = budget.conversation + budget.inputRule;
-  if (budget.input > 0 && !pageOpen) {
-    setCursorPosition({
-      x: cursorColumn(prompt, input.slice(0, cursor), width),
-      y: inputY,
-    });
-  } else {
-    setCursorPosition(undefined);
-  }
 
   const shownCandidates = candidates.slice(0, budget.completion);
   const overlayBody =
@@ -1395,6 +1386,13 @@ function SessionApp({
             </Text>
           ) : null}
         </Box>
+        <InputCursor
+          active={budget.input > 0 && !pageOpen}
+          prefix={prompt}
+          text={input.slice(0, cursor)}
+          width={width}
+          y={inputY}
+        />
         <Composer
           value={input}
           cursor={cursor}

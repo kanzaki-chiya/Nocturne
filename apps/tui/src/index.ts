@@ -10,6 +10,8 @@ import type { Runtime, RuntimeSession } from "@nocturne/core";
 
 import { App, type SetupFlowSpec } from "./app.js";
 import type { ProviderBridge } from "./commands.js";
+import { CursorClaimsContext } from "./components/input-cursor.js";
+import { createCursorStream } from "./cursor.js";
 import { detectTuiEnv } from "./env.js";
 import { sessionSavedLine } from "./exit-note.js";
 
@@ -71,24 +73,30 @@ export async function runTui(
     // Ink unmount 已写完备用屏退出序列；这条写到主屏。
     stdout.write(`${sessionSavedLine(sessionId)}\n`);
   };
+  // IME 光标由我们在 Ink 每次写完后补位（cursor.ts），不走 useCursor
+  const cursorOut = createCursorStream(stdout);
   const app = render(
-    createElement(App, {
-      session: "session" in entry ? entry.session : undefined,
-      setup: "setup" in entry ? entry.setup : options.setup,
-      runtime,
-      env: detectTuiEnv(),
-      switchSession: options.switchSession,
-      provider: options.provider,
-      onSessionId: (id: string) => {
-        sessionId = id;
-      },
-      onExitResult: (code: number, message?: string) => {
-        exitCode = code;
-        exitMessage = message;
-      },
-    }),
+    createElement(
+      CursorClaimsContext.Provider,
+      { value: cursorOut.claims },
+      createElement(App, {
+        session: "session" in entry ? entry.session : undefined,
+        setup: "setup" in entry ? entry.setup : options.setup,
+        runtime,
+        env: detectTuiEnv(),
+        switchSession: options.switchSession,
+        provider: options.provider,
+        onSessionId: (id: string) => {
+          sessionId = id;
+        },
+        onExitResult: (code: number, message?: string) => {
+          exitCode = code;
+          exitMessage = message;
+        },
+      }),
+    ),
     {
-      stdout,
+      stdout: cursorOut.stream,
       stdin,
       stderr,
       exitOnCtrlC: false,
