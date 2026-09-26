@@ -1,6 +1,6 @@
 # TUI（`nctrn`，交互终端默认界面）
 
-> 状态：已接受 v1.0（2026-09-24 验收）；v0.3 修订（[ADR-0019](../decisions/ADR-0019-tui-visual-provider-page.md)，提议，待验收）｜ 前置阅读：[apps/cli.md](cli.md)、[protocols/view.md](../protocols/view.md) ｜ 代码位置：`apps/tui/`
+> 状态：已接受 v1.0（2026-09-24 验收）；v0.3 修订（[ADR-0019](../decisions/ADR-0019-tui-visual-provider-page.md)、[ADR-0020](../decisions/ADR-0020-tui-fullscreen-rendering.md)，均提议，待验收）｜ 前置阅读：[apps/cli.md](cli.md)、[protocols/view.md](../protocols/view.md) ｜ 代码位置：`apps/tui/`
 
 `apps/tui` 是 Nocturne 的终端界面客户端：与 CLI 驱动同一套 Runtime，只消费公开 API（`@nocturne/core`）与 `protocol`（含 `SessionView` reducer）。TUI 不包含任何 Agent 逻辑，不复用 CLI 的渲染代码，不自行做事件投影。
 
@@ -16,49 +16,27 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 
 ## 2. 界面布局
 
-自顶向下：欢迎框（仅启动一次）→ 通知区 → 会话时间线两区 → 交互层：
+启动即进入备用屏幕（[ADR-0020](../decisions/ADR-0020-tui-fullscreen-rendering.md)）。帧高等于终端行数减 1。自顶向下：可滚动对话区，底部固定输入框、可选的斜杠候选、状态栏。
 
 ```
-┌ 欢迎框（<Static>，只在启动时画一次；v0.3）
-│   左栏：Nocturne 像素 Logo（原创双色像素字）+「欢迎回来」+ 当前模型与服务商
-│   右栏三块：操作提示（/ 命令、Shift+Tab 思考档位、Ctrl+C 中断）；
-│            MCP 服务器（名称 + 状态，失败标红附简短原因）；
-│            最近会话（最多 3 条：id 前缀、时间、首句摘要）
-├ 启动警告与通知（醒目色块：warning 黄底、error 红底，在欢迎框与输入框之间）
-├ 会话回放区（scrollback，Ink <Static>）
-│   已完结的时间线条目只追加不重绘，交给终端原生滚动与复制
-│   > 用户消息
-│   助手文本（可多段、含 reasoning 折叠显示）
-│   ● edit src/foo.ts ── ok 123ms
-│     ─ src/foo.ts
-│       + added line
-│       - removed line
-│   ◇ 权限：shell npm test → 用户允许一次
-│   ◇ 上下文已压缩（摘要至 seq 42）
-├ 活动区（动态重绘，至多屏高的一段）
-│   流式中的助手文本（view.live.assistants）；
-│   进行中工具（live.tools 参数流 / entries 的 awaiting/running 条目）+ liveOutput 尾部；
-│   重试倒计时；压缩中提示
-├ 权限对话框（pendingPermission 出现时叠加在活动区下方，独占交互焦点）
-│   ? 需要确认
-│     shell: npm install
-│     原因：预设 default：shell 命令需要确认
-│   [a] 允许一次  [s] 本会话  [p] 本项目  [d] 拒绝  [x] 拒绝并停止
-│   d 之后出现反馈输入行：d> ____
-├ 输入行（上下各一条横线）+ 状态栏（常驻底部；v0.3 起）
-│   ─────────────────────────────────────────────
-│   › 输入提示_________________________________________
-│   ─────────────────────────────────────────────
-│   idle • gpt-4o • 思考:off • default • ~/repo • 12.3k/128k
+┌ 对话区（只布局、只渲染可见行）
+│   欢迎区是第一项，随滚动离开：左侧 4 行小像素标记，
+│   右侧「Nocturne 版本」「模型 • 思考档位」、当前目录、一行提示
+│   › 用户消息
+│   助手文本 / 工具行 / 通知
+│   有新内容，Ctrl+End 回到最新          ← 离开底部时占对话区最后一行
+├ ─────────────────────────────────────────────
+│ › 输入
+│ /model  切换模型                       ← 以 / 开头时，最多 8 行，在输入框与状态栏之间
+│ idle • commandcode/deepseek-v4 • 思考:off • default • ~/repo • 0.1% / 1M
 ```
 
-- **欢迎框**（v0.3）：主屏 `<Static>` 区渲染、只画一次。左栏为像素 Logo +「欢迎回来」+ 当前模型与服务商；右栏为三块信息（操作提示 / MCP 服务器状态 / 最近会话 ≤3 条）。宽度 <80 列降级为单栏（Logo + 模型/服务商 + 操作提示 + MCP + 会话纵向排布），<40 列不显示。会话 id 从状态栏移走后，欢迎框与 `/resume` 列表是会话 id 的可见位置。
-- **通知区**（v0.3）：打开会话的警告（恢复修复、配置降级、未信任项目配置、`provider_setup_invalid` 等）以醒目色块渲染——`warning` 黄底、`error` 红底、`info` 蓝底；逐行带 `!` 前缀。回放区条目产生的运行中提示仍走原 `!` 行（活动区 clientLines）。
-- **回放区**：一个 `entries` 条目渲染一次。`tool` 条目完结时连同 diff/结果摘要一起写入回放（事件溯源保证不再变化）。长输出按 modelContent 截断标记 + `spillPath` 提示，与 CLI 同口径。
-- **活动区**：渲染 `view.live`（流式助手、参数准备中的工具）、`entries` 中未完结的工具条目、`retry`、`status`。随 `view.revision` 重绘。同一时刻活动内容有限（串行管线）。
-- **权限对话框**：`pendingPermission` 非空时独占交互焦点；输入行禁用并提示。
-- **输入行**（v0.3）：`›` 提示符行的上下各画一条占满宽度的横线（`─`，ASCII 模式 `-`），在视觉上把输入区与回放/状态分开。
-- **状态栏**（v0.3）：彩色分段，`•` 分隔——`状态 • 模型 • 思考:档位 • 权限预设 • 目录 • 上下文占用`。上下文占用为 `已用/上下文长度`（`session.describeContext().report.estimatedTokens` / 当前模型声明的 `contextWindow`，ADR-0016；未声明时只显示已用量）。`思考:` 段只在当前模型有可用思考档位时显示；Turn 进行中切档时显示 `思考:<生效档>→<新档>` 并以警示色标出，不再附"（下一轮生效）"文字（ADR-0018）。会话 id 不再出现在状态栏。宽度不足时按 §5 收缩。
+- **欢迎区**：紧凑布局。不画大号像素字，不显示会话 id、最近会话列表和 MCP 分栏。MCP 只在连接失败时在对话里给一条通知。宽度不够并排时改为纵向文字行。
+- **对话区**：欢迎、启动通知、时间线条目、流式输出都在同一可滚动窗口里。停在底部时跟随新输出；向上翻阅后停止跟随，并在对话区底部显示「有新内容，Ctrl+End 回到最新」。PgUp/PgDn 翻页，Ctrl+Home 到顶，Ctrl+End 到底。不开启鼠标上报，滚轮暂不处理。
+- **权限对话框与浮层**：`/resume`、`/context`、`/help`、权限确认、向导确认画在对话区高度内，不另占帧高，也不清除输入框文字。模型选择页与服务商页替换整帧，关闭后输入框文字仍在。
+- **输入行**：`›` 提示符。空间够时上方一条横线。硬件光标放在提示符后、已输入文字末尾（按显示宽度，中文 2 列），供输入法预编辑定位。
+- **斜杠补全**：输入以 `/` 开头时，在输入框下方、状态栏上方显示候选，最多 8 行，格式如 `/model  切换模型`。排序先前缀匹配，再包含匹配。列表打开时 ↑/↓ 移动候选，Tab 补全，Enter 执行，Esc 关闭列表但保留已输入文字。完整命令名加一个空格后进入参数补全：`/effort` 为当前模型档位和 `off`，`/provider` 为子命令与已配置服务商，`/preset` 为四个预设。候选与 `/help` 共用同一张命令表。终端太矮时先减少候选行数，再压缩对话区。
+- **状态栏**：彩色分段，`•` 分隔——`状态 • 模型 • 思考:档位 • 权限预设 • 目录 • 上下文`。上下文为「百分比 / 上下文长度」，单位大写，例如 `0.1% / 1M`；长度未知时只显示已用量。模型段为「服务商/模型 ID」或模型简称，与 `/model` 一致。`思考:` 段只在当前模型有可用档位时显示；Turn 进行中切档显示 `思考:<生效档>→<新档>`。Shift+Tab、Alt+M 只短暂高亮对应段，不往对话区插条目。宽度不足时按 §5 收缩。
 
 ## 3. 键位与交互（对照 cli.md）
 
@@ -77,12 +55,16 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 | 忙时输入 | "会话忙，稍后再试" | 输入框禁用，状态栏显示当前状态；Ctrl+C 中断 |
 | 退出码 | 交互模式 0；用法/配置/恢复错误 2；中断 130 | 正常退出 0；启动错误同 CLI 映射（2）；显式 `--tui` 在非 TTY 报 2 并提示 `nctrn --cli` 或 `nctrn -p` |
 
-对话输入之外的全局键：`Esc` 关闭弹层（模型列表/上下文报告/权限反馈行）；`Tab` 在权限对话框选项间移动焦点（与直接按字母键等价，服务纯键盘流）；`Shift+Tab`（`\x1B[Z`，Ink 解析为 `key.tab + key.shift`）在输入框状态下循环切换思考档位 `[off, …当前模型可用档位]`，Turn 进行中同样可切——新档位从下一个 Turn 生效（本 Turn 请求沿用 Turn 开始快照，此时状态栏档位段显示 `思考:<生效档>→<新档>` 并以警示色标出，ADR-0018）；权限确认框内 `Shift+Tab` 保持"反向移动焦点"，不切换档位；弹层/选择页/向导激活时由其自身处理。当前模型没有可用档位时 `Shift+Tab` 不响应。
+对话输入之外的全局键：`Esc` 关闭弹层（模型列表/上下文报告/权限反馈行）；补全列表打开时 `Esc` 只关列表、保留输入。`Tab` 在权限对话框选项间移动焦点；补全列表打开时 `Tab` 补全当前候选。`Shift+Tab`（`\x1B[Z`）在输入框状态下循环思考档位 `[off, …当前模型可用档位]`，只高亮状态栏，不插入对话条目；Turn 进行中同样可切，新档位从下一个 Turn 生效（状态栏显示 `思考:<生效档>→<新档>`，ADR-0018）。权限确认框内 `Shift+Tab` 仍是反向移动焦点。当前模型没有可用档位时 `Shift+Tab` 不响应、不插入提示。
+
+`Alt+M` 在 `read-only → default → auto-edit → full-access` 间循环，走与 `/preset` 相同的 `setPermissionPreset`（`session.config_changed`），Turn 进行中同样拒绝；只高亮状态栏，不插入对话条目。Windows Terminal 发送 `\x1bm`，必须能识别。conhost 不要求识别；若把 Alt 拆成 Esc 加字母，吞掉该字母，不写入输入框，也不触发其他操作。
+
+翻页：`PgUp`/`PgDn` 按对话区高度翻页；`Ctrl+Home` 到顶；`Ctrl+End` 到底并恢复跟随。
 
 ## 4. 渲染模型
 
-- 技术选型见 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)：Ink + React。回放区用 `<Static>`；活动区/对话框/状态栏是普通组件，随 `view.revision` 重绘。
-- **回放区只写 `entries` 的完结前缀**：从头到第一个未完结条目（`awaiting_permission`/`running` 的工具）为止；其后的条目（包括已完结的 notice）留在活动区渲染，待前缀推进后按序补进回放——`<Static>` 写出的内容不可改，未完结条目绝不能先进滚动区。测试覆盖：运行中工具之后已有权限提示条目时，该提示不得先进入回放区（ink-testing-library 断言帧内容）。
+- 技术选型见 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)：Ink + React。全屏滚动模型见 [ADR-0020](../decisions/ADR-0020-tui-fullscreen-rendering.md)：`incrementalRendering` 与 Ink 自带 `alternateScreen`，帧高 `rows - 1`，对话区只布局可见行。不再用 `<Static>` 写主屏 scrollback。
+- 可见窗口从末尾向前布局；跟随底部时不布局视口碰不到的历史。块按 key、内容版本和宽度缓存。
 - **diff 展示**：`tool.completed.output` 的结构化 diff（edit/write 工具已声明）直接渲染，红绿着色（NO_COLOR 时仅用 `+`/`-` 前缀）；大 diff 折叠为头尾若干行 + 省略计数，`spillPath` 存在时提示查看完整文件。
 - **工具行**：`● name <输入摘要>` + 状态徽标（awaiting → `?`，running → 转轮，ok/error → `✓`/`✗`，denied/cancelled/interrupted → 对应词）。`liveOutput` 只显示尾部 N 行。`task`（子代理，Phase 6）的进行中行同样靠 `liveOutput` 展示一行式进度摘要（`tool.progress` `stream:"info"`），无新增视图通道（[subagent.md](../architecture/subagent.md) 第 12 节）。
 - **MCP 状态（Phase 5）**：`mcp.server` 是临时事件、不进 `SessionView`（reducer 忽略未知类型）；`failed`/`crashed` 经 `runtime.warning` 进入提示区，`/mcp` 面板按 `session.mcpServers()` 展示每台服务器的状态、工具数与失败原因。Hook 的可见效果走既有事件（`permission.resolved source:"hook"`、`tool.completed`、`runtime.warning(code:"hook_failed")`），不新增 UI 通道。
@@ -98,8 +80,8 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 | 宽度 ≥80 | 完整布局（欢迎框双栏、状态栏全段、diff 上下文行） |
 | 40–79 | 紧凑：欢迎框降级为单栏；状态栏隐藏目录段；diff 上下文收窄，工具输入摘要硬截断 |
 | <40 | 极简：不显示欢迎框；回放条目照常输出（`<Static>` 只追加，不暂存）但摘要更短；活动区 + 输入行 + 单行状态（`状态 • 上下文占用`）；权限对话框隐藏原因行、选项收缩为单行 |
-| 运行时 resize | Ink 自动重排；回放区不受影响（已写 scrollback），活动区按新宽度重绘 |
-| Windows Terminal / conhost | 两者均可运行；conhost 旧版无真彩，用 16 色回退（Ink 的 ColorLevel 探测）。conhost 的活动区重绘可能留下残影，IME 候选窗定位也可能偏移；建议使用 Windows Terminal。Ink 当前默认已关闭增量渲染，但活动区帧通常不会触发整屏清除；按 `TERM` 无法可靠区分 conhost，强行整屏清除又会破坏 `<Static>` 回放与滚动区，因此本轮保留为已知限制（ADR-0010）。图标只用两端实测可显示的字符（ADR-0019） |
+| 运行时 resize | 监听 `resize`，按新的行数减 1 重算帧预算，对话区按新宽度重排可见行 |
+| Windows Terminal / conhost | 两者均可运行；conhost 旧版无真彩，用 16 色回退。增量渲染 + 帧高 `rows - 1` 避免整屏清除（ADR-0020）。主输入框用 `useCursor` 定位输入法。图标只用两端实测可显示的字符 |
 
 ## 6. 会话切换与恢复
 
@@ -115,7 +97,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 
 `/model` 打开全屏的模型选择页。v0.3 起 `/provider` 不再打开此页——服务商管理在 §8 的服务商页；本页左栏仍保留 `○` 未配置预设，Enter 后在页内嵌入添加向导（便于选模型时发现缺服务商），完成后回到本页并选中新服务商。只在会话空闲时可打开，前置条件与 `setModel` 一致；会话忙时提示"会话忙"。
 
-**全屏**：打开时进入终端备用屏幕（alternate screen），关闭后回到原界面，对话内容完整保留。v0.3 起备用屏幕页面有两个：本页与 §8 服务商页（ADR-0019 扩展了 ADR-0017 的页面范围），其余界面维持第 2 节的布局。
+**全屏内的一页**：与主界面共用同一备用屏幕（ADR-0020），打开和关闭不切屏，也不清除输入框里已有的文字。服务商页同此。
 
 **布局**：
 
@@ -162,7 +144,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 
 ## 8. 服务商页
 
-`/provider`（无参）打开全屏的服务商管理页（v0.3，ADR-0019）。它是第二个使用备用屏幕的页面：进出序列、`Ctrl+C` 恢复、Windows stdin 保护完全沿用 ADR-0017 的实测约束。只在会话空闲时可打开（与 `/provider` 子命令前置条件一致）；首次配置流程（provider-setup.md 第 1 节）中它由启动路径直接打开，不要求已有会话。
+`/provider`（无参）打开服务商管理页（v0.3，ADR-0019）。它与主界面在同一全屏里（ADR-0020），不再逐页进出备用屏幕。只在会话空闲时可打开；首次配置流程中由启动路径直接打开，不要求已有会话。
 
 **布局**：页面高度锁定为终端行数——页头（Logo/标题/副标题/步骤标记）与底部按键提示始终完整可见，内容超出时只在列表或表单区域内滚动。像素 Logo 只在终端行数 ≥30 且宽度 ≥64 列时绘制；不满足时页头降级为单行文字标题，不画像素 Logo。
 
@@ -214,7 +196,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 ## 9. 工程约束
 
 - `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口 + ADR-0010 批准的终端依赖（ink、react；`ink-testing-library` 为 devDependency）。depcheck 新增规则：禁止 apps/tui → 其他 apps；cli→tui 仅惰性边界一例。
-- 目录：`src/index.ts`（`runTui` 导出）、`src/app.tsx`（Ink 根组件）、`src/commands.ts`（斜杠命令分发）、`src/session-view.ts`（`useSessionView`：持久日志回放 + 订阅进同一 reducer）、`src/env.ts`（NOCTURNE_ASCII / NO_COLOR / TERM 降级探测）、`src/theme.ts`（主题常量：语义色、分段色、像素 Logo 数据；组件不写死色值）、`src/format.ts`（宽度安全格式化）、`src/types.ts`（`SwitchSessionFn` 等注入类型）、`src/alt-screen.ts`（备用屏进出原语，模型选择页与服务商页共用）、`src/components/`（Transcript、Activity、ToolRow、DiffView、PermissionDialog、StatusBar、Composer、PickList、Panel、ConfirmBox、WelcomeBox、ProviderPage、ModelPicker、WizardView）。
+- 目录：`src/index.ts`（`runTui`：增量渲染 + Ink 备用屏幕）、`src/app.tsx`（全屏壳）、`src/frame.ts`（帧高 `rows - 1` 与降级）、`src/viewport.ts`（可见行）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。不再有逐页切屏模块。
 - 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎框/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/就地步骤/四操作/Esc/Ctrl+C。
 - **歧义宽度字符**（conhost 实测，GBK 代码页）：`· ● ○ ◆ ◇ ↑ ↓ ← → … — ｜` 等在控制台实宽 2 列，与 `string-width` 的 1 列不一致；`│ ─ ╭ █ ✓ ✗ ⚠ • › ⠋` 及全角 CJK 两边一致。凡会被补齐到整宽的行（带边框 Box 内部、左右栏拼接行），每个歧义字符都让实际行宽 +1，超边即折行——备用屏下表现为整屏滚动、页头被裁。规则：框内动态文本一律过 `format.ts` 的 `boxSafe()`，静态文案只用宽度确定字符（分隔符用 `•` 不用 `·`，方向提示用"上下/左右"不用箭头），边框盒距右缘保留 ≥4 列余量；无补齐的行（裸 Text）只需截断预算留 ≥4 列余量。
 - `runTui` 只消费现有公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`（状态栏上下文占用与 `/context` 同源），加上 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`，以及 `session.mcpServers()`（`/mcp` 面板与欢迎框 MCP 块）；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
@@ -241,9 +223,9 @@ v0.3 增补（ADR-0019）：
 - 鼠标交互、点击选中；
 - 多行输入编辑器、粘贴检测、@文件补全；
 - Markdown 语法高亮（文本按纯文本渲染，着色仅限角色/工具行）；
-- 主界面的 alternate screen 全屏模式（回放交给终端原生 scrollback；全屏页只有模型选择页与服务商页两个例外，见 §7、§8 与 ADR-0017/0019）；
+- 逐页进出备用屏幕（主界面启动即在备用屏幕内，页面是同一帧里的层，见 ADR-0020）；
 - 多会话标签页；
 - 工具输出详情查看器/分页器（长输出靠截断 + spillPath，与 CLI 一致）；
 - 主题、配色、键位的用户自定义（v0.3 只把颜色集中到主题常量，不开放配置）；
-- 中文输入法候选窗精确定位（Ink 已知限制，conhost 上无 Synchronized Update 会退化，见 ADR-0010）；
+- 向导等嵌套表单的输入法光标若与行对不齐，先记录现象，不因此更换渲染方案（主输入框已用 `useCursor`，见 ADR-0020）；
 - RPC/Web 客户端（后续阶段，直接复用 SessionView reducer）。

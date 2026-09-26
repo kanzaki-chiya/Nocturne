@@ -74,7 +74,8 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 
 - 普通输入：`session.submit({ text })`，期间渲染事件流（第 5 节）。
 - `/` 开头的输入：斜杠命令（第 4 节），不进入模型上下文。
-- 空行忽略；Ctrl+D（EOF）退出；空闲时 Ctrl+C 退出，Turn 进行中 Ctrl+C 调用 `session.interrupt()`。
+- 空行忽略；Ctrl+D（EOF）退出；空闲时 Ctrl+C 退出，Turn 进行中 Ctrl+C 调用 `session.interrupt()`。退出后打印「会话 \<id\> 已保存，nctrn -c 继续」（与 TUI 同一句，TUI 在恢复主屏之后打印，见 [tui.md](tui.md)）。
+- 逐行模式用 readline 的 `completer`，候选与 TUI `/help` 共用同一张命令表（`@nocturne/tui/slash-catalog`，该模块不加载 Ink）。覆盖范围相同：命令名前缀/包含匹配；`/effort`、`/provider`、`/preset` 在命令名加空格后做参数补全。
 - EOF 发生在 Turn 进行中时：先 `session.interrupt()` 中断并等待该 Turn 收束后再退出；readline 关闭后任何异步回调不得再显示提示符。
 - Turn 进行中不接受新的输入行（只响应中断）；权限确认提示出现时优先处理（第 6 节）。
 - Phase 2 单行输入；多行与粘贴不作特殊处理。
