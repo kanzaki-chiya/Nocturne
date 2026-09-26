@@ -28,7 +28,7 @@ import {
   isPermissionPresetName,
   type PermissionPolicy,
 } from "./permission/index.js";
-import { createPlatform, type Platform } from "./platform/index.js";
+import { createPlatform, shellCommandDescription, type Platform } from "./platform/index.js";
 import {
   clampReasoningEffort,
   createAnthropicProvider,
@@ -438,7 +438,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     options.instructions ?? (await loadInstructions(platform, workspaceRoot, cwd));
   const environment: EnvironmentInfo = {
     os: process.platform,
-    shell: platform.env("COMSPEC") ?? platform.env("SHELL"),
+    shell: shellCommandDescription(),
     cwd,
     workspaceRoot,
     sessionDate: new Date().toISOString(),

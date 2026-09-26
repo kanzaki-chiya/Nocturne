@@ -35,10 +35,10 @@ Context Builder 不做 I/O，也不调用 Provider：指令文件由 `config` / 
 
 ## 3. 组装顺序（稳定的放前面）
 
-1. **基础系统提示**：Nocturne 身份、工作方式、工具使用约定。随版本变化，会话内不变。可由 `BuildContextInput.basePrompt` 覆盖——唯一的用户是子会话（Phase 6），它换成"子代理 + `finish` 提交协议"的提示（[subagent.md](subagent.md) 第 8 节）；缺省行为不变。
+1. **基础系统提示**：英文的 Nocturne 身份、先读后改与验证的工作方式、工具使用约定、安全边界、按用户语言回复。正文以 [ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 附录为准。随版本变化，会话内不变。可由 `BuildContextInput.basePrompt` 覆盖——唯一的用户是子会话（Phase 6），它换成中文的"子代理 + `finish` 提交协议"提示，并与主提示对齐验证与安全要求（[subagent.md](subagent.md) 第 8 节）。
 2. **工具规格**：名称、描述、输入 schema。会话内通常不变。
-3. **项目指令**：用户级 `<NOCTURNE_HOME>/AGENTS.md`，以及从 `workspaceRoot` 到 `cwd` 路径上各级目录的 `AGENTS.md`。每个文件有大小上限，超出截断并在报告中标注。
-4. **环境信息**：操作系统、shell、工作目录、会话创建日期。取会话级的值，不在每个 Step 刷新，避免破坏缓存前缀。
+3. **项目指令**：用户级 `<NOCTURNE_HOME>/AGENTS.md`，以及从 `workspaceRoot` 到 `cwd` 路径上各级目录的 `AGENTS.md`。前言说明这些是用户和项目指令，冲突时优先于默认做法。每个文件有大小上限，超出截断并在报告中标注。
+4. **环境信息**：操作系统、实际 shell 命令形态、工作目录、会话创建日期。shell 可执行文件与参数和 `spawnShell` 同源；`cmd`/`cmd.exe` 说明 cmd 语法，`sh` 说明 POSIX sh 语法，其他仅如实报告。取会话级的值，不在每个 Step 刷新，避免破坏缓存前缀。
 5. **历史**：最近一个压缩边界之后的消息与工具结果；若存在摘要，摘要作为历史的第一条。
 
 Builder 在 `BuiltContext` 中标出"可缓存前缀"的边界，是否以及如何使用提示缓存（例如 Anthropic 的 cache breakpoint）由 Provider 适配器决定。

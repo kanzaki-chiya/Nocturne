@@ -9,11 +9,47 @@ import {
   createPlatform,
   createProcessRunner,
   resolveRealPath,
+  shellArguments,
+  shellCommandDescription,
 } from "./index.js";
 
 const isWin = process.platform === "win32";
 const pathsSensitive = createPathOps(true);
 const pathsInsensitive = createPathOps(false);
+
+describe("shell 环境提示与工具同源", () => {
+  const originalShell = process.env.NOCTURNE_SHELL;
+  const originalComspec = process.env.COMSPEC;
+  afterEach(() => {
+    if (originalShell === undefined) delete process.env.NOCTURNE_SHELL;
+    else process.env.NOCTURNE_SHELL = originalShell;
+    if (originalComspec === undefined) delete process.env.COMSPEC;
+    else process.env.COMSPEC = originalComspec;
+  });
+
+  it("Windows cmd 使用 /d /s /c 并说明 cmd 语法", () => {
+    process.env.NOCTURNE_SHELL = "C:\\Windows\\System32\\cmd.exe";
+    expect(shellArguments("dir", "win32")).toEqual(["/d", "/s", "/c", '"dir"']);
+    expect(shellCommandDescription("win32")).toBe(
+      'Commands run with C:\\Windows\\System32\\cmd.exe /d /s /c "<command>": use cmd syntax, not bash or PowerShell',
+    );
+  });
+
+  it("POSIX sh 使用 -c 并说明 sh 语法，而非 SHELL 环境变量", () => {
+    process.env.NOCTURNE_SHELL = "/bin/sh";
+    expect(shellArguments("pwd", "linux")).toEqual(["-c", "pwd"]);
+    expect(shellCommandDescription("linux")).toBe(
+      'Commands run with /bin/sh -c "<command>": use POSIX sh syntax',
+    );
+  });
+
+  it("覆盖为其他 shell 时只报告可执行文件与实际参数", () => {
+    process.env.NOCTURNE_SHELL = "pwsh.exe";
+    expect(shellCommandDescription("win32")).toBe(
+      'Commands run with pwsh.exe /d /s /c "<command>"',
+    );
+  });
+});
 
 describe("PathOps（纯词法）", () => {
   it("resolve 绝对化并消除 ..", () => {

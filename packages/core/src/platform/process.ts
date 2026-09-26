@@ -177,6 +177,28 @@ export function shellExecutable(platform: NodeJS.Platform = process.platform): s
   return "/bin/sh";
 }
 
+/** Shell 工具与环境提示共用参数形态，避免提示中的语法与实际执行漂移。 */
+export function shellArguments(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  return platform === "win32" ? ["/d", "/s", "/c", `"${command}"`] : ["-c", command];
+}
+
+export function shellCommandDescription(platform: NodeJS.Platform = process.platform): string {
+  const executable = shellExecutable(platform);
+  const args = shellArguments("<command>", platform);
+  const name = executable.split(/[\\/]/).at(-1)?.toLowerCase();
+  const syntax =
+    name === "cmd" || name === "cmd.exe"
+      ? ": use cmd syntax, not bash or PowerShell"
+      : name === "sh"
+        ? ": use POSIX sh syntax"
+        : "";
+  const invocation = platform === "win32" ? args.join(" ") : `${args[0]} "${args[1]}"`;
+  return `Commands run with ${executable} ${invocation}${syntax}`;
+}
+
 /** Windows 控制台代码页 → WHATWG 编码 label；未映射的代码页回退 UTF-8 */
 const CONSOLE_CODEPAGE_LABELS: Record<number, string> = {
   65001: "utf-8",
@@ -479,14 +501,9 @@ export function createProcessRunner(): ProcessRunner {
     spawnShell(command, options = {}) {
       if (process.platform === "win32") {
         // cmd /d /s /c "<命令>"：verbatim 传参 + /s 剥掉外层引号，命令原文含引号不受影响
-        return spawnImpl(
-          shellExecutable("win32"),
-          ["/d", "/s", "/c", `"${command}"`],
-          options,
-          true,
-        );
+        return spawnImpl(shellExecutable("win32"), shellArguments(command, "win32"), options, true);
       }
-      return spawnImpl(shellExecutable(), ["-c", command], options, false);
+      return spawnImpl(shellExecutable(), shellArguments(command), options, false);
     },
     spawnPipe(command, args, options = {}) {
       const base =

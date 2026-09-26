@@ -68,7 +68,9 @@ describe("buildContext", () => {
     );
     expect(built.request.system).toHaveLength(3); // base + instructions + env
     expect(built.request.system[1]?.text).toContain("user rule");
+    expect(built.request.system[1]?.text).toContain("conflict with default practices");
     expect(built.request.system[1]?.text).toContain("project rule");
+    expect(built.request.system[0]?.text).toContain("# Safety");
     expect(built.request.system[2]?.text).toContain("C:\\ws");
     expect(built.request.messages).toHaveLength(1);
     expect(built.request.messages[0]?.role).toBe("user");
