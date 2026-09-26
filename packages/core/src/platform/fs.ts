@@ -29,7 +29,8 @@ export interface FileSystem {
   writeFile(path: string, data: string | Uint8Array, options?: { mode?: number }): Promise<void>;
   /** 排他创建（文件已存在时报 EEXIST）：会话锁等存在性锁的实现原语 */
   createExclusive(path: string, data: string | Uint8Array): Promise<void>;
-  appendFile(path: string, data: string): Promise<void>;
+  /** 追加写入；mode 与 writeFile 同语义——仅 POSIX 生效且只在新建文件时应用 */
+  appendFile(path: string, data: string, options?: { mode?: number }): Promise<void>;
   /** 截断到指定字节长度（恢复时切除损坏尾部，sessions.md 第 4 节） */
   truncate(path: string, length: number): Promise<void>;
   /** recursive 创建；mode 仅 POSIX 生效且只作用于本次新建的目录（如 NOCTURNE_HOME 0700） */
@@ -75,7 +76,8 @@ export function createNodeFileSystem(): FileSystem {
     readTextFile: (p) => fs.readFile(p, "utf8"),
     writeFile: (p, data, options) => fs.writeFile(p, data, { mode: options?.mode }),
     createExclusive: (p, data) => fs.writeFile(p, data, { flag: "wx" }),
-    appendFile: (p, data) => fs.appendFile(p, data, "utf8"),
+    appendFile: (p, data, options) =>
+      fs.appendFile(p, data, { encoding: "utf8", mode: options?.mode }),
     truncate: (p, len) => fs.truncate(p, len),
     mkdir: (p, options) =>
       fs.mkdir(p, { recursive: true, mode: options?.mode }).then(() => undefined),

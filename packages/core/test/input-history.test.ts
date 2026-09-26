@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -57,6 +57,16 @@ describe("公开输入历史 API", () => {
     expect(await second.readInputHistory()).toEqual(["另一个工作区"]);
     await first.close();
     await second.close();
+  });
+
+  // 权限位只在 POSIX 生效；Windows 下跳过
+  it.skipIf(process.platform === "win32")("新建 history.jsonl 的权限是 0600", async () => {
+    const home = temp();
+    vi.stubEnv("NOCTURNE_HOME", home);
+    const session = await open(temp());
+    await session.recordInputHistory("一条输入");
+    expect(statSync(path.join(home, "history.jsonl")).mode & 0o777).toBe(0o600);
+    await session.close();
   });
 
   it("写入失败只发警告，不阻断输入", async () => {

@@ -33,7 +33,8 @@ export async function appendInputHistory(
   const file = platform.paths.join(home, "history.jsonl");
   await platform.fs.mkdir(home, { mode: 0o700 });
   const row = { text, workspaceRoot, time: new Date().toISOString() };
-  await platform.fs.appendFile(file, JSON.stringify(row) + "\n");
+  // 明文输入历史：新建即 0600，与满额截断重写（下方 writeFile）一致
+  await platform.fs.appendFile(file, JSON.stringify(row) + "\n", { mode: 0o600 });
   if (rows.length < LIMIT) return;
 
   // ponytail: 满额后每次重写 1000 条；历史量上限固定，若放宽上限再改增量压缩。
