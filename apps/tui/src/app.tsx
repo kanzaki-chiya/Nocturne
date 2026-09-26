@@ -35,6 +35,7 @@ import {
 } from "./commands.js";
 import { inputWindow } from "./cursor.js";
 import { createPasteStore } from "./paste.js";
+import { resumeLabel } from "./resume-label.js";
 import { frameBudget } from "./frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "./keys.js";
 import { NEW_CONTENT_HINT, SCROLLED_HINT, transcriptBlocks } from "./lines.js";
@@ -1132,7 +1133,7 @@ function SessionApp({
           : undefined;
 
   const resumeItems: PickItem<string>[] = (resumeList ?? []).map((s) => ({
-    label: `${s.id}  ${s.createdAt}  ${s.model.provider}/${s.model.model}  ${s.workspaceRoot}`,
+    label: resumeLabel(s, width - 10),
     hint: `${s.locked === true ? "locked " : ""}${s.id === session.id ? "当前" : ""}`.trim(),
     value: s.id,
   }));
