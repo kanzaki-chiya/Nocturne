@@ -131,6 +131,12 @@
 - **不负责**：任何业务判断（例如"是否在工作区内"属于 permission）。
 - **依赖**：无（仅 Node.js 标准库）。
 
+### input-history（`src/input-history.ts`，单文件）
+
+- **负责**：交互输入历史的读写——`<NOCTURNE_HOME>/history.jsonl`（明文 JSONL），按工作区过滤、连续去重、满 1000 条截断重写；由 `core/index` 装配进 `RuntimeSession.readInputHistory` / `recordInputHistory`（见 [config.md](config.md) 第 1 节）。
+- **不负责**：历史的上屏与键位（各客户端实现）。
+- **依赖**：platform。**不能依赖**：session、agent、tools 等其余模块。
+
 ### core/index（公开 API）
 
 客户端看到的全部能力都经由这里：

@@ -159,6 +159,13 @@ module.exports = {
       },
     },
     {
+      name: "input-history-deps",
+      severity: "error",
+      comment: "input-history 只能依赖 platform（modules.md：单文件业务模块）",
+      from: { path: "^packages/core/src/input-history\\.ts$" },
+      to: { path: "^packages/core/src/(?!platform/)" },
+    },
+    {
       name: "only-index-imports-agent",
       severity: "error",
       comment: "除 core/index（src/index.ts）外，任何模块不能 import agent",
