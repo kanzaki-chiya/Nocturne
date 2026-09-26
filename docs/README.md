@@ -61,7 +61,7 @@
 
 [decisions/README.md](decisions/README.md) 列出全部 ADR 及其状态。
 
-全屏 TUI 的渲染模型见 [ADR-0020](decisions/ADR-0020-tui-fullscreen-rendering.md)（提议，待验收）：它取代 ADR-0010 的 `<Static>` scrollback 与 ADR-0017 的逐页备用屏幕；交互规格在 [apps/tui.md](apps/tui.md)。
+当前 TUI 交互规格见 [apps/tui.md](apps/tui.md)；v0.4 的普通屏幕与临时切屏方案见 [ADR-0021](decisions/ADR-0021-tui-daily-usability.md)，它部分取代已接受的 [ADR-0020](decisions/ADR-0020-tui-fullscreen-rendering.md)。
 
 ## Roadmap
 

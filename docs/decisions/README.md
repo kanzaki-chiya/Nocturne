@@ -22,10 +22,10 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0014](ADR-0014-stream-timeout-empty-response.md) | 流式超时与空响应的失败语义 | 已接受 |
 | [ADR-0015](ADR-0015-provider-setup-credentials.md) | 服务商配置向导、机器维护的向导配置层与操作系统凭据后端 | 已接受 |
 | [ADR-0016](ADR-0016-model-limits-from-upstream.md) | 模型上下文窗口与最大输出长度以上游声明为准 | 已接受 |
-| [ADR-0017](ADR-0017-model-picker-alternate-screen.md) | 模型选择页使用终端备用屏幕 | 已接受；部分被 ADR-0020 取代 |
+| [ADR-0017](ADR-0017-model-picker-alternate-screen.md) | 模型选择页使用终端备用屏幕 | 已接受；逐页切屏由 ADR-0021 恢复 |
 | [ADR-0018](ADR-0018-reasoning-effort.md) | 思考强度：统一中性档位、按声明决定可用档位、适配器归一化 | 已接受 |
 | [ADR-0019](ADR-0019-tui-visual-provider-page.md) | TUI 视觉风格与服务商页重构 | 已接受 |
-| [ADR-0020](ADR-0020-tui-fullscreen-rendering.md) | TUI 全屏渲染模型 | 已接受 |
+| [ADR-0020](ADR-0020-tui-fullscreen-rendering.md) | TUI 全屏渲染模型 | 已接受；主界面备用屏幕与自管滚动被 ADR-0021 取代 |
 | [ADR-0021](ADR-0021-tui-daily-usability.md) | TUI 日常可用性：主对话回到普通屏幕、/new、Markdown、输入编辑、Esc 中断、历史保留、系统提示重写 | 提议 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
