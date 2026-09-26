@@ -28,6 +28,14 @@ const tmp = (p: string) => {
 const ENV = { ascii: false, animated: false };
 const pause = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 
+async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error("waitFor 超时");
+    await pause(20);
+  }
+}
+
 async function sessionWithEffort(): Promise<{ runtime: Runtime; session: RuntimeSession }> {
   const runtime = await createRuntime({
     cwd: tmp("nct-fs-ws-"),
@@ -264,7 +272,11 @@ describe("全屏界面", () => {
     await pause(60);
     stdin.write("你好abc");
     stdin.write("\r");
-    await pause(120);
+    // Turn 结束（回到 idle）后输入框才接受 ↑；固定等待在慢机器上会与 Turn 赛跑
+    await waitFor(() => {
+      const frame = lastFrame() ?? "";
+      return frame.includes("完毕") && frame.includes("idle");
+    });
     stdin.write("\x1b[A");
     await pause(50);
     stdin.write("\x7f");
