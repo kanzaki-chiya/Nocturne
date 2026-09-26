@@ -114,7 +114,6 @@ nctrn --debug -p "概述这个仓库"     # 写入诊断日志
 ## 已知限制
 
 - Nocturne 主进程被强杀时，如果 MCP 服务器在 stdin 关闭后没有自行退出，它可能残留为孤儿进程。Windows 上服务器不会随父进程自动退出；POSIX 上即使服务器处于独立进程组，父进程消失也不会自动向该组发信号。先核对服务器命令行和 PID，再在 Windows 用 `taskkill /PID <PID> /T /F`，或在 POSIX 用 `kill -TERM <PID>`，必要时逐一清理其子进程。正常关闭会话时 Nocturne 会清理服务器。
-- Windows 传统 conhost 的 TUI 活动区重绘可能留下残影；建议使用 Windows Terminal。
 - 工具返回的图片、音频和二进制资源目前只以文本占位显示。
 
 ## 许可证

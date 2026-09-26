@@ -128,11 +128,11 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 当前进度：实现、自动化测试与真实服务实测完成（commandcode 的 openai 格式与 OpenRouter 的 openrouter 格式；commandcode 的 deepseek 对 `minimal` 返回 400 并给出定向提示）。Turn 进行中切换档位只更新会话设置，下一个 Turn 生效。Anthropic 格式无可用端点，仅单测覆盖，未实测。维护者已于 2026-09-25 确认验收。
 
-## v0.3 — TUI 视觉改造与服务商页重构（待验收）
+## v0.3 — TUI 视觉改造与服务商页重构（随 0.3.0 发布；已完成，2026-09-26 验收）
 
 **前提**：v0.2.0 已打标签（含思考强度）。
 
-**内容**：TUI 视觉统一（集中主题常量、紧凑欢迎区、分段彩色状态栏、宽度降级）；`/provider` 改为服务商管理页（模型选择收归 `/model`）；向导去除选模型步骤；首次配置两步流程；交互模式默认 TUI。全屏渲染（[ADR-0020](../decisions/ADR-0020-tui-fullscreen-rendering.md)，提议）：启动即进入 Ink 备用屏幕，增量渲染，帧高为行数减 1，对话区只渲染可见行；页面与浮层不再逐页切屏；斜杠补全与逐行 readline completer 共用命令表。设计见 [ADR-0019](../decisions/ADR-0019-tui-visual-provider-page.md)。
+**内容**：TUI 视觉统一（集中主题常量、紧凑欢迎区、分段彩色状态栏、宽度降级）；`/provider` 改为服务商管理页（模型选择收归 `/model`）；向导去除选模型步骤；首次配置两步流程；交互模式默认 TUI。全屏渲染（[ADR-0020](../decisions/ADR-0020-tui-fullscreen-rendering.md)）：启动即进入 Ink 备用屏幕，增量渲染，帧高为行数减 1，对话区只渲染可见行；页面与浮层不再逐页切屏；斜杠补全与逐行 readline completer 共用命令表。设计见 [ADR-0019](../decisions/ADR-0019-tui-visual-provider-page.md)。
 
 **约束**：服务商页只编排界面，业务逻辑复用 Core `wizard.ts` 编排与 RuntimeConfig 公开 API；颜色集中为一套主题常量，组件不直接写死色值；图标只用 Windows Terminal 与 conhost 都能显示的字符（emoji 与 Nerd Font 实测后再定）；本地提交不打标签不推送。
 
@@ -145,7 +145,9 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - 模式选择：stdin/stdout 均 TTY 时 `nctrn`（含 `-c`/`--resume`）默认 TUI；`--cli` 逐行 REPL；`--tui` 与 `--cli` 互斥（退出码 2）；非 TTY 自动逐行模式不因默认选择报错；`-p` 行为不变；显式 `--tui` 在非 TTY 报错退出 2。
 - 自动化测试：服务商页列表/过滤/就地步骤/四操作/删除保护/只读/Esc/Ctrl+C；首次"服务商页 → 模型页"衔接；欢迎框与状态栏多宽度降级；Turn 中切档状态段；TTY 与非 TTY 模式选择、互斥、`-p`；逐行向导不问模型；既有 `/model` 页与向导测试回归。
 - 全屏：帧高为行数减 1；翻页与「有新内容」提示；退出路径恢复主屏并打印继续提示；浮层开关不丢输入；Shift+Tab / Alt+M 不插入对话条目；状态栏 `0.1% / 1M` 与模型段；补全排序、键位与三类参数补全；`--cli` completer。Windows Terminal 与 conhost 截图待维护者核对。
-- 收尾：全量检查 `typecheck`/`lint`/`format:check`/`test`/`depcheck`/`build` 通过；文档同步完成；ADR-0019 与 ADR-0020 保持"提议"待维护者验收；本文 v0.3 保持"待验收"。
+- 收尾：全量检查 `typecheck`/`lint`/`format:check`/`test`/`depcheck`/`build` 通过；文档同步完成。
+
+当前进度：实现与自动化测试完成。真实终端核对：Windows Terminal 与 conhost 下用微软拼音实测主输入、`/model` 搜索、`/provider` 过滤三处候选窗跟随光标；欢迎区弯月两端截图；Windows Terminal 下粘贴真实多行需求原文。验收中发现并修复：浮层输入法光标被覆盖、长文本粘贴 `\r` 叠印（改为粘贴占位）、流式时正文开始后思考不再刷新、`full-access` 下带管道/重定向的命令整体降级为需确认（改为逐段求值）。ADR-0019、ADR-0020 转为已接受。上面列出的逐场景截图没有逐张拍摄，以维护者在真实配置下的上手验收代替。维护者已于 2026-09-26 确认验收。
 
 ## 之后（未排期）
 

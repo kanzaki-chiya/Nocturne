@@ -96,7 +96,7 @@ export class RuntimeCommandError extends Error {
 
 /** 指令文件大小上限（context.md 6.2：每项注入内容都有上限） */
 const INSTRUCTION_FILE_LIMIT = 64 * 1024;
-const NOCTURNE_VERSION = "0.2.0";
+const NOCTURNE_VERSION = "0.3.0";
 const DEFAULT_PERMISSION_PRESET = "default";
 
 export interface RuntimeOptions {

@@ -24,8 +24,8 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0016](ADR-0016-model-limits-from-upstream.md) | 模型上下文窗口与最大输出长度以上游声明为准 | 已接受 |
 | [ADR-0017](ADR-0017-model-picker-alternate-screen.md) | 模型选择页使用终端备用屏幕 | 已接受；部分被 ADR-0020 取代 |
 | [ADR-0018](ADR-0018-reasoning-effort.md) | 思考强度：统一中性档位、按声明决定可用档位、适配器归一化 | 已接受 |
-| [ADR-0019](ADR-0019-tui-visual-provider-page.md) | TUI 视觉风格与服务商页重构 | 提议 |
-| [ADR-0020](ADR-0020-tui-fullscreen-rendering.md) | TUI 全屏渲染模型 | 提议 |
+| [ADR-0019](ADR-0019-tui-visual-provider-page.md) | TUI 视觉风格与服务商页重构 | 已接受 |
+| [ADR-0020](ADR-0020-tui-fullscreen-rendering.md) | TUI 全屏渲染模型 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
