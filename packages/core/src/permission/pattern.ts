@@ -130,3 +130,16 @@ const COMPOSITE_SHELL = /&&|\|\||[;&|`<>]|\$\(|\r|\n/;
 export function isCompositeShell(command: string): boolean {
   return COMPOSITE_SHELL.test(command);
 }
+
+const SHELL_SEPARATORS = /&&|\|\||\$\(|[;&|`()\r\n]/;
+
+/**
+ * 组合命令拆段（全放行规则下逐段求值用）：按控制符切开、去空白。
+ * 重定向目标（`2>&1`、`> out.txt`）会成为独立短段，照常求值即可。
+ */
+export function shellSegments(command: string): string[] {
+  return command
+    .split(SHELL_SEPARATORS)
+    .map((part) => part.trim())
+    .filter((part) => part !== "");
+}

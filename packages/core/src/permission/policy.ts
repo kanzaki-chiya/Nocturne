@@ -17,7 +17,13 @@ import type {
   RuleOrigin,
 } from "../protocol/index.js";
 import { matchGrant } from "./grants.js";
-import { isCompositeShell, isPathKind, matchPattern, normalizePathText } from "./pattern.js";
+import {
+  isCompositeShell,
+  isPathKind,
+  matchPattern,
+  normalizePathText,
+  shellSegments,
+} from "./pattern.js";
 import { presetRules, type PresetContext } from "./presets.js";
 import { computeWhere } from "./where.js";
 import type { EvaluateOptions, PermissionPolicy, SubjectEvaluation } from "./types.js";
@@ -226,10 +232,35 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       hit = untrustedHit;
     }
 
-    // 组合命令：基于模式的 allow 降级为 ask（deny 不受影响，grant 精确匹配不受影响）
+    // 组合命令（permissions.md 5.3）：窄模式的 allow 降级为 ask（deny 不受影响，grant 精确匹配不受影响）。
+    // 全放行规则（pattern 为 "*"，如 full-access）降级没有意义，改为逐段求值：
+    // 任一段命中 ask/deny（高风险命令、用户 deny 等）就取最严格者。
     if (s.kind === "shell" && action === "allow" && isCompositeShell(s.target)) {
-      action = "ask";
-      note = "命令包含控制符/重定向，模式匹配的 allow 降级为需确认";
+      if (hit.rule?.pattern === "*") {
+        for (const segment of shellSegments(s.target)) {
+          const seg = { ...s, target: segment };
+          const segTrusted = lastMatch(trusted, seg);
+          let segAction: PermissionAction = segTrusted?.rule?.action ?? "ask";
+          let segHit = segTrusted;
+          const segUntrusted = lastMatch(untrusted, seg);
+          const segUntrustedAction = segUntrusted?.rule?.action;
+          if (
+            segUntrustedAction !== undefined &&
+            STRICTNESS[segUntrustedAction] > STRICTNESS[segAction]
+          ) {
+            segAction = segUntrustedAction;
+            segHit = segUntrusted;
+          }
+          if (STRICTNESS[segAction] > STRICTNESS[action]) {
+            action = segAction;
+            if (segHit !== undefined) hit = segHit;
+            note = `组合命令中的「${segment}」需逐段放行`;
+          }
+        }
+      } else {
+        action = "ask";
+        note = "命令包含控制符/重定向，模式匹配的 allow 降级为需确认";
+      }
     }
 
     // 凭据相关命令至少 ask（provider-setup.md 第 4 节）：shell allow 命中
