@@ -2,7 +2,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDiagnostics } from "../src/diagnostics/index.js";
 import { createPlatform, type Platform } from "../src/platform/index.js";
@@ -20,9 +20,16 @@ function tmp(): string {
   return dir;
 }
 
-/** 等待追加队列清空（record 同步返回，写盘异步排队） */
-async function flush(): Promise<void> {
-  await new Promise((r) => setTimeout(r, 100));
+/** record 同步返回；等到目标行完整落盘再断言内容。 */
+async function waitForLines(file: string, count: number): Promise<void> {
+  await vi.waitFor(
+    () => {
+      const content = readFileSync(file, "utf8");
+      expect(content.endsWith("\n")).toBe(true);
+      expect(content.trimEnd().split("\n")).toHaveLength(count);
+    },
+    { timeout: 5000 },
+  );
 }
 
 describe("diagnostics", () => {
@@ -30,7 +37,6 @@ describe("diagnostics", () => {
     const ws = tmp();
     const d = createDiagnostics({ platform, enabled: false, logsDir: ws });
     d.record("tool.exec", { callId: "c1" });
-    await flush();
     const files = await platform.fs.readdir(ws).catch(() => []);
     expect(files.filter((f) => f.name.endsWith(".jsonl"))).toHaveLength(0);
   });
@@ -41,7 +47,7 @@ describe("diagnostics", () => {
     const d = createDiagnostics({ platform, enabled: true, file, logsDir: ws });
     d.record("tool.exec", { callId: "c1", durationMs: 12 });
     d.record("provider.result", { finishReason: "stop" });
-    await flush();
+    await waitForLines(file, 2);
     const lines = readFileSync(file, "utf8").trim().split("\n");
     expect(lines).toHaveLength(2);
     const a = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
@@ -60,7 +66,7 @@ describe("diagnostics", () => {
       env: { OPENAI_API_KEY: "sk-live", PLAIN: "visible-name-only" },
       headers: { "x-token": "abc" },
     });
-    await flush();
+    await waitForLines(file, 1);
     const line = readFileSync(file, "utf8").trim();
     expect(line).not.toContain("sk-1234567890");
     expect(line).not.toContain("Bearer x");
@@ -80,7 +86,7 @@ describe("diagnostics", () => {
       estimatedTokens: 100,
       maxOutputTokens: 1024,
     });
-    await flush();
+    await waitForLines(file, 1);
     const obj = JSON.parse(readFileSync(file, "utf8").trim()) as {
       usage: Record<string, number>;
       estimatedTokens: number;
@@ -97,7 +103,7 @@ describe("diagnostics", () => {
     const file = path.join(ws, "dbg.jsonl");
     const d = createDiagnostics({ platform, enabled: true, file, logsDir: ws });
     d.record("provider.result", { text: "x".repeat(20 * 1024) });
-    await flush();
+    await waitForLines(file, 1);
     const line = readFileSync(file, "utf8").trim();
     expect(line.length).toBeLessThan(20 * 1024);
     expect(line).toContain("truncated");
@@ -133,10 +139,8 @@ describe("diagnostics", () => {
       warn: (code, message) => warnings.push({ code, message }),
     });
     d.record("tool.exec", {});
-    await flush();
-    expect(warnings.some((w) => w.code === "debug_sink_failed")).toBe(true);
+    await vi.waitFor(() => expect(warnings.some((w) => w.code === "debug_sink_failed")).toBe(true));
     // 降级后继续调用不抛错
     d.record("tool.exec", {});
-    await flush();
   });
 });
