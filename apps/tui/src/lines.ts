@@ -213,3 +213,4 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
 }
 
 export const NEW_CONTENT_HINT = "有新内容，Ctrl+End 回到最新";
+export const SCROLLED_HINT = "已向上翻阅，Ctrl+End 回到最新";

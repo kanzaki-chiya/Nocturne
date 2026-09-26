@@ -5,19 +5,25 @@
 export interface ScrollState {
   fromBottom: number;
   follow: boolean;
+  newContent: boolean;
 }
 
 export function scrollFollow(): ScrollState {
-  return { fromBottom: 0, follow: true };
+  return { fromBottom: 0, follow: true, newContent: false };
 }
 
 export function scrollPage(state: ScrollState, delta: number): ScrollState {
   const fromBottom = Math.max(0, state.fromBottom + delta);
-  return { fromBottom, follow: fromBottom === 0 };
+  return {
+    ...state,
+    fromBottom,
+    follow: fromBottom === 0,
+    newContent: fromBottom > 0 && state.newContent,
+  };
 }
 
 export function scrollToTop(): ScrollState {
-  return { fromBottom: Number.MAX_SAFE_INTEGER, follow: false };
+  return { fromBottom: Number.MAX_SAFE_INTEGER, follow: false, newContent: false };
 }
 
 export function scrollToBottom(): ScrollState {
@@ -27,5 +33,10 @@ export function scrollToBottom(): ScrollState {
 /** 视口算出的实际 fromBottom（到顶后夹紧）。跟随态不被夹紧结果打断。 */
 export function applyClamp(state: ScrollState, clampedFromBottom: number): ScrollState {
   if (state.follow) return state;
-  return { fromBottom: clampedFromBottom, follow: clampedFromBottom === 0 };
+  return {
+    ...state,
+    fromBottom: clampedFromBottom,
+    follow: clampedFromBottom === 0,
+    newContent: clampedFromBottom > 0 && state.newContent,
+  };
 }

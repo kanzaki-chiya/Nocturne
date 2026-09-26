@@ -17,6 +17,7 @@ import { useTuiEnv } from "../env.js";
 import { boxSafe, truncateLine } from "../format.js";
 import { theme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
+import { InputCursor } from "./input-cursor.js";
 
 /** print() 行最多保留的行数（失败原因等） */
 const MAX_LOGS = 4;
@@ -27,6 +28,8 @@ export function WizardView({
   active,
   width,
   maxRows,
+  offsetY = 0,
+  offsetX = 0,
   onSubmit,
   onSubmitMulti,
   onCancel,
@@ -37,6 +40,8 @@ export function WizardView({
   width: number;
   /** 组件可用行数（含边框）：超出时多选选项按光标窗口滚动 */
   maxRows?: number | undefined;
+  offsetY?: number | undefined;
+  offsetX?: number | undefined;
   onSubmit: (value: string) => void;
   /** 多选确认：选中下标数组 */
   onSubmitMulti: (indices: number[]) => void;
@@ -144,6 +149,16 @@ export function WizardView({
       borderStyle={env.ascii ? "single" : "round"}
       borderColor={theme.accent}
     >
+      <InputCursor
+        active={active && state.prompt !== undefined && multi === undefined}
+        prefix="> "
+        text={echo}
+        width={width - 4}
+        x={offsetX + 1}
+        y={
+          offsetY + 2 + (stepsLine !== "" ? 1 : 0) + logs.length + (state.prompt?.hint ? 1 : 0) + 1
+        }
+      />
       <Text bold color={theme.accent} wrap="truncate">
         {boxSafe(title)}
       </Text>

@@ -24,6 +24,7 @@ import type { WizardState } from "../wizard-io.js";
 import { ConfirmBox } from "./confirm-box.js";
 import { PixelLogo } from "./pixel-logo.js";
 import { WizardView } from "./wizard-view.js";
+import { InputCursor } from "./input-cursor.js";
 
 /** 列表行：预设（可附带同 id 已配置条目）或预设外的已配置条目 */
 export type ProviderRow =
@@ -310,6 +311,7 @@ export function ProviderPage({
       active={active}
       width={width - 2}
       maxRows={contentH}
+      offsetY={headerH}
       onSubmit={wizard.submit}
       onSubmitMulti={wizard.submitMulti}
       onCancel={wizard.cancel}
@@ -359,6 +361,13 @@ export function ProviderPage({
 
   return (
     <Box flexDirection="column" width={width} height={height} overflow="hidden">
+      <InputCursor
+        active={active && !wizardActive && confirmRemove === undefined && action === undefined}
+        prefix="过滤: "
+        text={query}
+        width={width - 2}
+        y={headerH}
+      />
       {titleRow}
       <Box flexDirection="column" height={contentH} overflow="hidden">
         {content}

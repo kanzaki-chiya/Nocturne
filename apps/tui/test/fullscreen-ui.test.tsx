@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "@nocturne/core";
 
 import { App } from "../src/app.js";
-import { NEW_CONTENT_HINT } from "../src/lines.js";
+import { NEW_CONTENT_HINT, SCROLLED_HINT } from "../src/lines.js";
 
 const tmpRoots: string[] = [];
 afterEach(() => {
@@ -124,7 +124,7 @@ describe("全屏界面", () => {
     await session.close();
   });
 
-  it("向上翻页出现有新内容，Ctrl+End 后消失并跟随", async () => {
+  it("翻页先提示已翻阅，新输出后提示新内容，回到底部消失", async () => {
     const { runtime, session } = await sessionWithEffort();
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
@@ -135,10 +135,15 @@ describe("全屏界面", () => {
     expect(lastFrame()).not.toContain(NEW_CONTENT_HINT);
     stdin.write("\x1b[5~");
     await pause(60);
+    expect(lastFrame()).toContain(SCROLLED_HINT);
+    expect(lastFrame()).not.toContain(NEW_CONTENT_HINT);
+    await session.submit({ text: "新回答" });
+    await pause(80);
     expect(lastFrame()).toContain(NEW_CONTENT_HINT);
     stdin.write("\x1b[1;5F");
     await pause(60);
     expect(lastFrame()).not.toContain(NEW_CONTENT_HINT);
+    expect(lastFrame()).not.toContain(SCROLLED_HINT);
     unmount();
     await session.close();
   });
@@ -226,6 +231,47 @@ describe("全屏界面", () => {
     stdin.write("\x1b");
     await pause(40);
     expect(lastFrame()).toContain("/preset");
+    unmount();
+    await session.close();
+  });
+
+  it("Tab 补全后退格再插入发生在末尾", async () => {
+    const { runtime, session } = await sessionWithEffort();
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await pause(60);
+    stdin.write("/pre");
+    await pause(40);
+    stdin.write("\t");
+    await pause(40);
+    stdin.write("\x1b");
+    await pause(40);
+    stdin.write("\x7f");
+    stdin.write("X");
+    await pause(60);
+    expect(lastFrame()).toContain("› /preseX");
+    expect(lastFrame()).not.toContain("/prXset");
+    unmount();
+    await session.close();
+  });
+
+  it("历史回填后退格再插入发生在末尾", async () => {
+    const { runtime, session } = await sessionWithEffort();
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await pause(60);
+    stdin.write("你好abc");
+    stdin.write("\r");
+    await pause(120);
+    stdin.write("\x1b[A");
+    await pause(50);
+    stdin.write("\x7f");
+    stdin.write("X");
+    await pause(60);
+    expect(lastFrame()).toContain("› 你好abX");
+    expect(lastFrame()).not.toContain("› 你好Xbc");
     unmount();
     await session.close();
   });

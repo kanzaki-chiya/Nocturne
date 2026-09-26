@@ -14,6 +14,7 @@ import type { ModelInfo, ModelRef, ProviderOverview, WizardPreset } from "@noctu
 import { useTuiEnv } from "../env.js";
 import { boxSafe, truncateLine } from "../format.js";
 import type { WizardState } from "../wizard-io.js";
+import { InputCursor } from "./input-cursor.js";
 import { WizardView } from "./wizard-view.js";
 
 /** 右栏范围（tui.md §7 左栏前两项 + 已配置服务商） */
@@ -337,6 +338,7 @@ export function ModelPicker({
       active={active}
       width={width - (narrow ? 6 : LEFT_W + 6)}
       maxRows={height}
+      offsetX={narrow ? 0 : LEFT_W}
       onSubmit={wizard.submit}
       onSubmitMulti={wizard.submitMulti}
       onCancel={wizard.cancel}
@@ -355,6 +357,7 @@ export function ModelPicker({
       defaultModel={defaultModel}
       width={width - (narrow ? 4 : LEFT_W + 4)}
       height={height}
+      offsetX={narrow ? 0 : LEFT_W}
     />
   );
 
@@ -455,6 +458,7 @@ function RightPane({
   defaultModel,
   width,
   height,
+  offsetX,
 }: {
   scope: PickerScope;
   query: string;
@@ -468,6 +472,7 @@ function RightPane({
   defaultModel: ModelRef | undefined;
   width: number;
   height: number;
+  offsetX: number;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const line = env.ascii ? "-" : "─";
@@ -520,6 +525,14 @@ function RightPane({
   const sel = rows[cursor]?.model;
   return (
     <Box flexDirection="column" width={width} height={height}>
+      <InputCursor
+        active
+        prefix="搜索: "
+        text={boxSafe(query)}
+        width={width - 2}
+        x={offsetX}
+        y={0}
+      />
       <Text wrap="truncate">
         {truncateLine(boxSafe(`搜索: ${query}`), width - 2)}
         <Text inverse> </Text>

@@ -50,13 +50,14 @@ export function Composer({
   valRef.current = value;
   const cursorRef = useRef(cursor);
   cursorRef.current = cursor;
-  // 外部清空（提交后）时把光标拉回末尾
+  // 父组件是光标的单一来源（补全、历史回填、提交清空都更新它）。
   useEffect(() => {
-    if (value.length < cursorRef.current) {
-      cursorRef.current = value.length;
-      setCursor(value.length);
+    const next = Math.min(cursorProp ?? value.length, value.length);
+    if (next !== cursorRef.current) {
+      cursorRef.current = next;
+      setCursor(next);
     }
-  }, [value]);
+  }, [value, cursorProp]);
 
   const apply = (next: string, nextCursor: number): void => {
     valRef.current = next;

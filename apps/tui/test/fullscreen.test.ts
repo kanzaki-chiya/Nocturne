@@ -198,6 +198,9 @@ describe("Alt+M 与光标", () => {
     expect(cursorColumn("› ", "ab", 80)).toBe(4);
     expect(cursorColumn("› ", "中", 80)).toBe(4);
     expect(cursorColumn("› ", "中文", 80)).toBe(6);
+    expect(cursorColumn("搜索: ", "中文", 80)).toBe(10);
+    expect(cursorColumn("过滤: ", "中文", 80)).toBe(10);
+    expect(cursorColumn("> ", "中文", 80)).toBe(6);
   });
 });
 

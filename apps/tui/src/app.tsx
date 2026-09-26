@@ -36,7 +36,7 @@ import {
 import { cursorColumn } from "./cursor.js";
 import { frameBudget } from "./frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "./keys.js";
-import { NEW_CONTENT_HINT, transcriptBlocks } from "./lines.js";
+import { NEW_CONTENT_HINT, SCROLLED_HINT, transcriptBlocks } from "./lines.js";
 import { applyClamp, scrollFollow, scrollPage, scrollToBottom, scrollToTop } from "./scroll.js";
 import { completeSlash, PRESET_NAMES, type Candidate } from "./slash-catalog.js";
 import { countLaidLines, selectVisible, type LaidLine } from "./viewport.js";
@@ -492,6 +492,9 @@ function SessionApp({
   }, [session, onSessionId]);
   const [input, setInput] = useState("");
   const [cursor, setCursor] = useState(0);
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | undefined>(undefined);
+  const [historyDraft, setHistoryDraft] = useState("");
   const [overlay, setOverlay] = useState<OverlayName | undefined>(undefined);
   const [clientLines, setClientLines] = useState<string[]>([]);
   const [exiting, setExiting] = useState(false);
@@ -571,7 +574,7 @@ function SessionApp({
   const pushLine = useCallback((text: string) => {
     if (text === "") return;
     setClientLines((prev) => [...prev.slice(-19), ...text.split("\n")]);
-    setScroll((s) => (s.follow ? s : { ...s, follow: false }));
+    setScroll((s) => (s.follow ? s : { ...s, follow: false, newContent: true }));
   }, []);
 
   const flash = useCallback((which: StatusHighlight) => {
@@ -870,6 +873,19 @@ function SessionApp({
     }
   }, []);
 
+  const recallHistory = (direction: -1 | 1): void => {
+    if (inputHistory.length === 0) return;
+    const next = Math.max(
+      0,
+      Math.min(inputHistory.length, (historyIndex ?? inputHistory.length) + direction),
+    );
+    if (historyIndex === undefined) setHistoryDraft(input);
+    setHistoryIndex(next === inputHistory.length ? undefined : next);
+    const value = next === inputHistory.length ? historyDraft : (inputHistory[next] ?? "");
+    setInput(value);
+    setCursor(value.length);
+  };
+
   // 全局键：退出、翻页、Shift+Tab、Alt+M、补全列表。弹层内的键由各自组件处理。
   useInput((ch, key) => {
     const now = Date.now();
@@ -952,6 +968,14 @@ function SessionApp({
         return;
       }
     }
+    if (inputIdle && !completionOpen && key.upArrow) {
+      recallHistory(-1);
+      return;
+    }
+    if (inputIdle && !completionOpen && key.downArrow && historyIndex !== undefined) {
+      recallHistory(1);
+      return;
+    }
     if (key.ctrl && ch === "c") {
       if (pickerOpen) {
         wizard.cancel();
@@ -1031,6 +1055,8 @@ function SessionApp({
     (line: string) => {
       const text = line.trim();
       if (text === "") return;
+      setInputHistory((history) => [...history.slice(-99), text]);
+      setHistoryIndex(undefined);
       if (text.startsWith("/")) {
         void runSlash(text, session, provider)
           .then((r) => {
@@ -1226,7 +1252,9 @@ function SessionApp({
     const prev = laidTotal.current;
     laidTotal.current = total;
     if (prev !== undefined && total > prev) {
-      setScroll((s) => (s.follow ? s : { ...s, fromBottom: s.fromBottom + (total - prev) }));
+      setScroll((s) =>
+        s.follow ? s : { ...s, fromBottom: s.fromBottom + (total - prev), newContent: true },
+      );
     } else if (visible.clampedFromBottom !== scroll.fromBottom) {
       setScroll(applyClamp(scroll, visible.clampedFromBottom));
     }
@@ -1363,7 +1391,7 @@ function SessionApp({
             ))}
           {showBanner && overlayBody === null ? (
             <Text color={theme.warning} wrap="truncate">
-              {NEW_CONTENT_HINT}
+              {scroll.newContent ? NEW_CONTENT_HINT : SCROLLED_HINT}
             </Text>
           ) : null}
         </Box>
@@ -1373,6 +1401,7 @@ function SessionApp({
           onChange={(next, nextCursor) => {
             setInput(next);
             setCursor(nextCursor);
+            setHistoryIndex(undefined);
           }}
           onCursor={setCursor}
           onSubmit={onSubmit}
