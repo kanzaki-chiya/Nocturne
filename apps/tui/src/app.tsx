@@ -33,7 +33,7 @@ import {
   type ProviderBridge,
   type ProviderWizardStart,
 } from "./commands.js";
-import { inputWindow } from "./cursor.js";
+import { composerWindow } from "./cursor.js";
 import { renderMarkdown, splitMarkdownBlocks } from "./markdown.js";
 import { createPasteStore } from "./paste.js";
 import { resumeLabel } from "./resume-label.js";
@@ -1054,14 +1054,6 @@ function SessionApp({
         return;
       }
     }
-    if (inputIdle && !completionOpen && key.upArrow) {
-      recallHistory(-1);
-      return;
-    }
-    if (inputIdle && !completionOpen && key.downArrow && historyIndex !== undefined) {
-      recallHistory(1);
-      return;
-    }
     if (key.ctrl && ch === "c") {
       if (pickerOpen) {
         wizard.cancel();
@@ -1196,8 +1188,13 @@ function SessionApp({
     value: s.id,
   }));
 
-  const budget = frameBudget(rows, completionOpen ? Math.min(8, candidates.length) : 0);
+  const budget = frameBudget(
+    rows,
+    completionOpen ? Math.min(8, candidates.length) : 0,
+    input.split("\n").length,
+  );
   const g = glyphs(env);
+  const editor = composerWindow(`${g.prompt} `, input, cursor, width, budget.input);
 
   // Static 始终保持挂载，进出备用屏幕时不会重新写入旧回滚区。
   const pageBody = pickerOpen ? (
@@ -1543,9 +1540,9 @@ function SessionApp({
           <InputCursor
             active={budget.input > 0 && !pageOpen}
             prefix={prompt}
-            text={inputWindow(prompt, input, cursor, width, g.newline).before}
+            text={editor.cursorBefore}
             width={width}
-            y={inputY}
+            y={inputY + editor.cursorRow}
           />
           <Composer
             pastes={pastes}
@@ -1557,10 +1554,12 @@ function SessionApp({
               setHistoryIndex(undefined);
             }}
             onCursor={setCursor}
+            onHistory={recallHistory}
             onSubmit={onSubmit}
             active={!dialogOpen && pending === undefined}
             disabledReason={composerDisabled}
             width={width}
+            height={budget.input}
             showRule={budget.inputRule > 0}
             suspendNav={completionOpen}
             swallowRef={swallowRef}

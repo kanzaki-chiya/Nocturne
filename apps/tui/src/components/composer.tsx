@@ -6,9 +6,9 @@
 import { Box, Text, useInput, usePaste } from "ink";
 import { useEffect, useRef, useState } from "react";
 
-import { inputWindow, normalizeNewlines } from "../cursor.js";
+import { composerWindow, normalizeNewlines, verticalCursor } from "../cursor.js";
 import { glyphs, useTuiEnv } from "../env.js";
-import { pasteTokenBefore, type PasteStore } from "../paste.js";
+import { pasteTokenAt, pasteTokenBefore, type PasteStore } from "../paste.js";
 import { theme } from "../theme.js";
 
 export function Composer({
@@ -23,13 +23,16 @@ export function Composer({
   suspendNav = false,
   swallowRef,
   onCursor,
+  onHistory,
   pastes,
+  height = 1,
 }: {
   value: string;
   /** 父组件持有光标，浮层开关后不丢 */
   cursor?: number | undefined;
   onChange: (v: string, cursor: number) => void;
   onCursor?: ((cursor: number) => void) | undefined;
+  onHistory?: ((direction: -1 | 1) => void) | undefined;
   onSubmit: (line: string) => void;
   /** false 时输入不接收按键（弹层/权限对话框占用焦点） */
   active: boolean;
@@ -37,6 +40,7 @@ export function Composer({
   disabledReason?: string | undefined;
   /** 终端宽度 */
   width: number;
+  height?: number | undefined;
   /** 帧预算允许时在输入行上方画分隔线 */
   showRule?: boolean | undefined;
   /** 补全列表打开时，上下/Tab/Enter/Esc 交给列表，不在这里处理 */
@@ -70,6 +74,11 @@ export function Composer({
     onChange(next, nextCursor);
     setCursor(nextCursor);
   };
+  const move = (next: number): void => {
+    cursorRef.current = next;
+    setCursor(next);
+    onCursor?.(next);
+  };
 
   const insert = (raw: string): void => {
     const normalized = normalizeNewlines(raw);
@@ -87,30 +96,72 @@ export function Composer({
         return;
       }
       if (disabled) return;
-      if (key.ctrl || key.meta) return; // Ctrl+C/Ctrl+D / Alt+M 由 App 路由
       if (suspendNav && (key.upArrow || key.downArrow || key.tab || key.return || key.escape)) {
         return;
       }
       const v = valRef.current;
       const c = cursorRef.current;
+      const lineStart = v.lastIndexOf("\n", c - 1) + 1;
+      const lineEnd = v.includes("\n", c) ? v.indexOf("\n", c) : v.length;
+      if ((key.ctrl && input === "j") || (!key.return && input === "\n")) {
+        apply(v.slice(0, c) + "\n" + v.slice(c), c + 1);
+        return;
+      }
+      if (key.home || (key.ctrl && input === "a")) {
+        move(lineStart);
+        return;
+      }
+      if (key.end || (key.ctrl && input === "e")) {
+        move(lineEnd);
+        return;
+      }
+      if (key.ctrl && input === "u") {
+        apply(v.slice(0, lineStart) + v.slice(c), lineStart);
+        return;
+      }
+      if (key.ctrl && input === "k") {
+        apply(v.slice(0, c) + v.slice(lineEnd), c);
+        return;
+      }
+      if (key.ctrl && (key.leftArrow || key.rightArrow || input === "w")) {
+        const left = key.leftArrow || input === "w";
+        const part = left ? v.slice(0, c) : v.slice(c);
+        const token = left ? pasteTokenBefore(part) : pasteTokenAt(part);
+        const match = left
+          ? /(?:\s*\S+|\s+)$/u.exec(part)?.[0].length
+          : /^(?:\s*\S+|\s+)/u.exec(part)?.[0].length;
+        const count = token > 0 ? token : (match ?? 0);
+        const next = left ? c - count : c + count;
+        if (input === "w") apply(v.slice(0, next) + v.slice(c), next);
+        else move(next);
+        return;
+      }
+      if (key.ctrl || key.meta) return; // Ctrl+C/Ctrl+D / Alt+M 由 App 路由
       if (key.return) {
+        if (c > 0 && v[c - 1] === "\\" && (c === v.length || v[c] === "\n")) {
+          apply(v.slice(0, c - 1) + "\n" + v.slice(c), c);
+          return;
+        }
         onSubmit(v);
         return;
       }
       if (key.leftArrow) {
         if (c > 0) {
-          cursorRef.current = c - 1;
-          setCursor(c - 1);
-          onCursor?.(c - 1);
+          move(c - (pasteTokenBefore(v.slice(0, c)) || 1));
         }
         return;
       }
       if (key.rightArrow) {
         if (c < v.length) {
-          cursorRef.current = c + 1;
-          setCursor(c + 1);
-          onCursor?.(c + 1);
+          move(c + (pasteTokenAt(v.slice(c)) || 1));
         }
+        return;
+      }
+      if (key.upArrow || key.downArrow) {
+        const direction = key.upArrow ? -1 : 1;
+        const next = verticalCursor(v, c, direction);
+        if (next === undefined) onHistory?.(direction);
+        else move(next);
         return;
       }
       if (key.backspace) {
@@ -120,7 +171,7 @@ export function Composer({
         return;
       }
       if (key.delete) {
-        if (c < v.length) apply(v.slice(0, c) + v.slice(c + 1), c);
+        if (c < v.length) apply(v.slice(0, c) + v.slice(c + (pasteTokenAt(v.slice(c)) || 1)), c);
         return;
       }
       if (key.escape) return; // Esc 由弹层处理
@@ -140,7 +191,7 @@ export function Composer({
   );
 
   const prompt = `${g.prompt} `;
-  const view = inputWindow(prompt, value, cursor, width, g.newline);
+  const view = composerWindow(prompt, value, cursor, width, height);
   const rule = env.ascii ? "-".repeat(Math.max(1, width)) : "─".repeat(Math.max(1, width));
   return (
     <Box flexDirection="column">
@@ -149,21 +200,17 @@ export function Composer({
           {rule}
         </Text>
       ) : null}
-      <Box height={1}>
-        <Text color={disabled ? theme.muted : theme.accent}>{prompt}</Text>
-        {disabled ? (
-          <Text dimColor wrap="truncate">
-            {value.replaceAll("\n", g.newline)}
-            {`（${disabledReason}）`}
+      {view.rows.map((row, i) => (
+        <Box key={i} height={1}>
+          <Text color={disabled ? theme.muted : theme.accent}>{row.prefix}</Text>
+          <Text dimColor={disabled} wrap="truncate">
+            {row.before}
+            {row.focused && !disabled ? <Text inverse>{row.at ?? " "}</Text> : row.at}
+            {row.after}
+            {disabled && i === view.rows.length - 1 ? `（${disabledReason}）` : null}
           </Text>
-        ) : (
-          <Text wrap="truncate">
-            {view.before}
-            <Text inverse>{view.at ?? " "}</Text>
-            {view.after}
-          </Text>
-        )}
-      </Box>
+        </Box>
+      ))}
     </Box>
   );
 }

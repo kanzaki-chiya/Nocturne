@@ -39,3 +39,7 @@ export function createPasteStore(): PasteStore {
 export function pasteTokenBefore(textBeforeCursor: string): number {
   return TOKEN_TAIL_RE.exec(textBeforeCursor)?.[0].length ?? 0;
 }
+
+export function pasteTokenAt(textAfterCursor: string): number {
+  return /^\[Paste #\d+, [^\]]*\]/.exec(textAfterCursor)?.[0].length ?? 0;
+}

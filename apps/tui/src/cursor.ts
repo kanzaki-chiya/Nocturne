@@ -206,3 +206,62 @@ export function inputWindow(
   }
   return { before, at, after };
 }
+
+/** 多行输入的可见窗口与硬件光标共用此结果。 */
+export function composerWindow(
+  prompt: string,
+  value: string,
+  cursor: number,
+  width: number,
+  height: number,
+): {
+  rows: {
+    prefix: string;
+    before: string;
+    at: string | undefined;
+    after: string;
+    focused: boolean;
+  }[];
+  cursorRow: number;
+  cursorBefore: string;
+} {
+  const lines = value.split("\n");
+  const lineIndex = value.slice(0, cursor).split("\n").length - 1;
+  const column = cursor - (value.lastIndexOf("\n", cursor - 1) + 1);
+  const count = Math.max(1, Math.min(height, lines.length));
+  const start = Math.min(Math.max(0, lineIndex - count + 1), lines.length - count);
+  const rows = lines.slice(start, start + count).map((line, index) => {
+    const focused = start + index === lineIndex;
+    const prefix = start + index === 0 ? prompt : " ".repeat(stringWidth(prompt));
+    const view = inputWindow(prefix, line, focused ? column : 0, width, "");
+    return { prefix, ...view, focused };
+  });
+  return {
+    rows,
+    cursorRow: lineIndex - start,
+    cursorBefore: rows[lineIndex - start]?.before ?? "",
+  };
+}
+
+/** 垂直移动保留显示列；越界由输入框改为翻历史。 */
+export function verticalCursor(
+  value: string,
+  cursor: number,
+  direction: -1 | 1,
+): number | undefined {
+  const lines = value.split("\n");
+  const lineIndex = value.slice(0, cursor).split("\n").length - 1;
+  const target = lineIndex + direction;
+  if (target < 0 || target >= lines.length) return undefined;
+  const currentStart = value.lastIndexOf("\n", cursor - 1) + 1;
+  const wanted = stringWidth(value.slice(currentStart, cursor));
+  const line = lines[target] ?? "";
+  let column = 0;
+  for (const ch of line) {
+    if (stringWidth(line.slice(0, column + ch.length)) > wanted) break;
+    column += ch.length;
+  }
+  let offset = 0;
+  for (let i = 0; i < target; i++) offset += (lines[i] ?? "").length + 1;
+  return offset + column;
+}

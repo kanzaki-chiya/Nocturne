@@ -1,14 +1,20 @@
 import stringWidth from "string-width";
 import { describe, expect, it } from "vitest";
 
-import { cursorColumn, inputWindow, normalizeNewlines } from "../src/cursor.js";
+import {
+  composerWindow,
+  cursorColumn,
+  inputWindow,
+  normalizeNewlines,
+  verticalCursor,
+} from "../src/cursor.js";
 import { sessionSavedLine } from "../src/exit-note.js";
 import { frameBudget } from "../src/frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "../src/keys.js";
 import { formatContextOccupancy, formatModelLabel } from "../src/status-format.js";
 import { completeSlash, helpLines, readlineCompleter } from "../src/slash-catalog.js";
 import { moonRows } from "../src/welcome.js";
-import { createPasteStore, pasteTokenBefore } from "../src/paste.js";
+import { createPasteStore, pasteTokenAt, pasteTokenBefore } from "../src/paste.js";
 import { layoutLive } from "../src/lines.js";
 import { createSessionView } from "@nocturne/core/protocol";
 
@@ -54,6 +60,8 @@ describe("帧高", () => {
     expect(tiny.frameHeight).toBe(1);
     expect(tiny.completion).toBe(0);
     expect(tiny.conversation).toBe(0);
+    expect(frameBudget(20, 0, 7).input).toBe(5);
+    expect(frameBudget(4, 8, 5).input).toBe(2);
   });
 });
 
@@ -184,6 +192,18 @@ describe("欢迎区弯月", () => {
 });
 
 describe("长文本粘贴与流式思考", () => {
+  it("多行输入滚动后光标仍对应可见行，中文按显示列移动", () => {
+    const value = "首\n中文\n三\n四\n五\n尾";
+    const view = composerWindow("› ", value, 4, 40, 3);
+    expect(view.rows.map((r) => r.before + (r.at ?? "") + r.after)).toEqual(["首", "中文", "三"]);
+    expect(view.cursorRow).toBe(1);
+    const tail = composerWindow("› ", value, value.length, 40, 3);
+    expect(tail.rows.map((r) => r.before + (r.at ?? "") + r.after)).toEqual(["四", "五", "尾"]);
+    expect(tail.cursorRow).toBe(2);
+    expect(verticalCursor("中文\na\n尾巴", 2, 1)).toBe(4);
+    expect(verticalCursor("中文\na\n尾巴", 4, -1)).toBe(0);
+    expect(verticalCursor("a\nb", 0, -1)).toBeUndefined();
+  });
   it("换行统一为 \n；输入框按光标水平滚动，换行显示为标记", () => {
     expect(normalizeNewlines("a\r\rb\r\nc")).toBe("a\n\nb\nc");
     const value = `${"甲".repeat(50)}\n末尾`;
@@ -225,5 +245,6 @@ describe("粘贴占位", () => {
     );
     expect(pasteTokenBefore("看：[Paste #1, +2 lines]")).toBe("[Paste #1, +2 lines]".length);
     expect(pasteTokenBefore("看：[Paste #1, +2 lines] ")).toBe(0);
+    expect(pasteTokenAt("[Paste #1, +2 lines]后")).toBe("[Paste #1, +2 lines]".length);
   });
 });

@@ -17,10 +17,10 @@ export interface FrameBudget {
  * @param rows 终端行数
  * @param completionWanted 希望显示的候选行数（已截到 0–8 之外也会被截断）
  */
-export function frameBudget(rows: number, completionWanted: number): FrameBudget {
+export function frameBudget(rows: number, completionWanted: number, inputWanted = 1): FrameBudget {
   const frameHeight = Math.max(0, rows - 1);
   const status = frameHeight >= 1 ? 1 : 0;
-  const input = frameHeight >= 2 ? 1 : 0;
+  const input = frameHeight >= 2 ? Math.min(5, Math.max(1, inputWanted), frameHeight - status) : 0;
   // 分隔线是输入框的一部分。帧高只够状态+输入时不画线，把行留给对话。
   const afterChrome = frameHeight - status - input;
   const inputRule = afterChrome >= 2 ? 1 : 0;
