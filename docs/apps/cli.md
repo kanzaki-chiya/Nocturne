@@ -185,7 +185,7 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 - **MCP 装配**：`createRuntime` 时构造 `createMcpConnector(platform)`（`@nocturne/mcp`）注入 `RuntimeOptions.mcp`；`--debug*` 参数映射到 `RuntimeOptions.debug`。TUI 路径（`nctrn --tui`）由 CLI 完成装配后把 `Session` 交给 `runTui`，MCP/Hook/诊断对 TUI 透明。
 - **依赖方向**（dependency-cruiser 固化）：
   - 规则 `no-deep-import-from-outside-core` 的语义收紧为：`apps/` 解析到 `packages/core/src/` 的 import 只允许命中 `index.ts` 或 `protocol/index.ts`——即只有 `@nocturne/core` 包入口与 `@nocturne/core/protocol` 两个入口可用，任何内部路径（包括 `protocol/` 下的散文件）一律禁止。
-  - 根 `depcheck` 脚本扫描范围从 `packages` 扩为 `packages apps`，使上述规则实际生效。客户端之间不互相依赖，唯一例外：`apps/cli` 为 TUI 路径对 `apps/tui` 的惰性 `import()`（[apps/tui.md](tui.md)、ADR-0010），逐行路径不加载 TUI 代码。
+  - 根 `depcheck` 脚本扫描 `packages apps`；CLI→TUI 的两种允许边及命令表零依赖约束见 [modules.md](../architecture/modules.md) 第 1 节。逐行路径只加载纯命令表，不加载 Ink。
   - 解析方式：`tsconfig.base.json` 的 `paths` 把 `@nocturne/core` 映射到 `packages/core/src/index.ts`、`@nocturne/core/*` 到 `packages/core/src/*`，使 depcheck 与 typecheck 在源码层工作；运行期经 pnpm workspace 链接解析到 `dist`。
 - **测试分层**：
   - `apps/cli/test/*.test.ts`：离线单测——参数解析、渲染映射、配置收集、命令分发（注入假会话，不需要 `dist`；vitest 用 `resolve.alias` 把 `@nocturne/core` 指到 core 源码）。

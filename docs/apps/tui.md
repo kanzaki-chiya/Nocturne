@@ -8,7 +8,7 @@
 
 v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-c`/`--resume`）：CLI 完成参数解析、配置收集、会话选择后，把已打开的 `Session` 与 `Runtime` 交给 `runTui(session, runtime, opts)`。`--cli` 进入逐行 REPL；`--tui` 保留为兼容参数（与 `--cli` 互斥、与 `-p`/`--print` 互斥，冲突为用法错误退出码 2）。任一端非 TTY 时自动走逐行模式，不因"默认选择 TUI"报错；显式 `--tui` 在非 TTY 下保持原语义退出码 2（§5）。
 
-取舍理由不变：会话选择的语义（`--resume`/`--continue`/`--sessions`/`--force-unlock`、跨目录确认、恢复摘要）只有一份实现，在 CLI 启动路径内；`apps/cli` → `apps/tui` 一条**惰性**依赖边（逐行路径不加载 React/Ink），depcheck 为这条边开唯一例外，其余 apps→apps 仍禁止。
+取舍理由不变：会话选择语义只有一份实现，在 CLI 启动路径内；CLI→TUI 的依赖边界见 [modules.md](../architecture/modules.md) 第 1 节，逐行路径不加载 React/Ink。
 
 首次配置流程（provider-setup.md 第 1 节）：`nctrn setup` 在 TTY 下直接打开服务商页（第 1 步），`Esc` 完成后无默认模型时自动进模型选择页（第 2 步）；没有已配置服务商时运行 `nctrn` 走同一流程，选完模型才创建会话。此时 `runTui` 以**无会话形态**启动，注入 `openSession` 回调完成延迟装配（§10）。
 
@@ -24,7 +24,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 │   右侧「Nocturne 版本」「模型 • 思考档位」、当前目录、一行提示
 │   › 用户消息
 │   助手文本 / 工具行 / 通知
-│   有新内容，Ctrl+End 回到最新          ← 离开底部时占对话区最后一行
+│   已向上翻阅，Ctrl+End 回到最新        ← 离开底部、尚无新输出时占最后一行
 ├ ─────────────────────────────────────────────
 │ › 输入
 │ /model  切换模型                       ← 以 / 开头时，最多 8 行，在输入框与状态栏之间
@@ -32,10 +32,11 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 ```
 
 - **欢迎区**：紧凑布局。不画大号像素字，不显示会话 id、最近会话列表和 MCP 分栏。MCP 只在连接失败时在对话里给一条通知。宽度不够并排时改为纵向文字行。
-- **对话区**：欢迎、启动通知、时间线条目、流式输出都在同一可滚动窗口里。停在底部时跟随新输出；向上翻阅后停止跟随，并在对话区底部显示「有新内容，Ctrl+End 回到最新」。PgUp/PgDn 翻页，Ctrl+Home 到顶，Ctrl+End 到底。不开启鼠标上报，滚轮暂不处理。
+- **对话区**：欢迎、启动通知、时间线条目、流式输出都在同一可滚动窗口里。停在底部时跟随新输出；向上翻阅后停止跟随，未有新输出时显示「已向上翻阅，Ctrl+End 回到最新」，新输出到达后改为「有新内容，Ctrl+End 回到最新」，回到底部则消失。PgUp/PgDn 翻页，Ctrl+Home 到顶，Ctrl+End 到底。不开启鼠标上报，滚轮暂不处理。
 - **权限对话框与浮层**：`/resume`、`/context`、`/help`、权限确认、向导确认画在对话区高度内，不另占帧高，也不清除输入框文字。模型选择页与服务商页替换整帧，关闭后输入框文字仍在。
-- **输入行**：`›` 提示符。空间够时上方一条横线。硬件光标放在提示符后、已输入文字末尾（按显示宽度，中文 2 列），供输入法预编辑定位。
+- **输入行**：`›` 提示符。空间够时上方一条横线。主输入、模型搜索、服务商过滤与向导文本框共用按显示宽度定位的硬件光标（中文 2 列），供输入法预编辑定位。补全及历史回填后编辑光标与硬件光标同步到文字末尾。
 - **斜杠补全**：输入以 `/` 开头时，在输入框下方、状态栏上方显示候选，最多 8 行，格式如 `/model  切换模型`。排序先前缀匹配，再包含匹配。列表打开时 ↑/↓ 移动候选，Tab 补全，Enter 执行，Esc 关闭列表但保留已输入文字。完整命令名加一个空格后进入参数补全：`/effort` 为当前模型档位和 `off`，`/provider` 为子命令与已配置服务商，`/preset` 为四个预设。候选与 `/help` 共用同一张命令表。终端太矮时先减少候选行数，再压缩对话区。
+- **输入历史**：候选未打开时 ↑/↓ 回填本次运行提交过的输入；下翻到末尾恢复翻阅前草稿。回填后光标在末尾。
 - **状态栏**：彩色分段，`•` 分隔——`状态 • 模型 • 思考:档位 • 权限预设 • 目录 • 上下文`。上下文为「百分比 / 上下文长度」，单位大写，例如 `0.1% / 1M`；长度未知时只显示已用量。模型段为「服务商/模型 ID」或模型简称，与 `/model` 一致。`思考:` 段只在当前模型有可用档位时显示；Turn 进行中切档显示 `思考:<生效档>→<新档>`。Shift+Tab、Alt+M 只短暂高亮对应段，不往对话区插条目。宽度不足时按 §5 收缩。
 
 ## 3. 键位与交互（对照 cli.md）
@@ -195,7 +196,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 
 ## 9. 工程约束
 
-- `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口 + ADR-0010 批准的终端依赖（ink、react；`ink-testing-library` 为 devDependency）。depcheck 新增规则：禁止 apps/tui → 其他 apps；cli→tui 仅惰性边界一例。
+- `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口 + ADR-0010 批准的终端依赖（ink、react；`ink-testing-library` 为 devDependency）。CLI 仅可惰性加载 `@nocturne/tui`，或静态引用 `@nocturne/tui/slash-catalog`；后者不得 import 任何模块，以免逐行模式加载 Ink。依赖方向见 [modules.md](../architecture/modules.md) 第 1 节。
 - 目录：`src/index.ts`（`runTui`：增量渲染 + Ink 备用屏幕）、`src/app.tsx`（全屏壳）、`src/frame.ts`（帧高 `rows - 1` 与降级）、`src/viewport.ts`（可见行）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。不再有逐页切屏模块。
 - 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎框/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/就地步骤/四操作/Esc/Ctrl+C。
 - **歧义宽度字符**（conhost 实测，GBK 代码页）：`· ● ○ ◆ ◇ ↑ ↓ ← → … — ｜` 等在控制台实宽 2 列，与 `string-width` 的 1 列不一致；`│ ─ ╭ █ ✓ ✗ ⚠ • › ⠋` 及全角 CJK 两边一致。凡会被补齐到整宽的行（带边框 Box 内部、左右栏拼接行），每个歧义字符都让实际行宽 +1，超边即折行——备用屏下表现为整屏滚动、页头被裁。规则：框内动态文本一律过 `format.ts` 的 `boxSafe()`，静态文案只用宽度确定字符（分隔符用 `•` 不用 `·`，方向提示用"上下/左右"不用箭头），边框盒距右缘保留 ≥4 列余量；无补齐的行（裸 Text）只需截断预算留 ≥4 列余量。
@@ -227,5 +228,4 @@ v0.3 增补（ADR-0019）：
 - 多会话标签页；
 - 工具输出详情查看器/分页器（长输出靠截断 + spillPath，与 CLI 一致）；
 - 主题、配色、键位的用户自定义（v0.3 只把颜色集中到主题常量，不开放配置）；
-- 向导等嵌套表单的输入法光标若与行对不齐，先记录现象，不因此更换渲染方案（主输入框已用 `useCursor`，见 ADR-0020）；
 - RPC/Web 客户端（后续阶段，直接复用 SessionView reducer）。

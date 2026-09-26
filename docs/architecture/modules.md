@@ -38,7 +38,7 @@
 - `hooks`（实现模块）依赖 protocol、platform、diagnostics；`HookRunner` 接口定义在 `tools`，实例由 `core/index` 按会话配置装配注入——`tools` 与 `agent` 只见接口，不 import 实现（见 [hooks.md](hooks.md)）。
 - `diagnostics`（调试通道）只依赖 protocol、platform；被 agent / context / tools / hooks / index 经注入使用，并经 `McpConnector` 传给 `packages/mcp`（见 [observability.md](observability.md)）。
 - `packages/mcp`（`@nocturne/mcp`）只允许依赖 `@nocturne/core` 的 `index` / `protocol/index` 两个入口与 `@modelcontextprotocol/sdk`——与 `apps/*` 同一检查规则；**Core 不依赖 `mcp`**（见 [mcp.md](mcp.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)）。
-- 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。客户端之间不互相依赖，唯一例外：`apps/cli` 为 `nctrn --tui` 对 `apps/tui` 做惰性 `import()`（[ADR-0010](../decisions/ADR-0010-tui-rendering.md)）。
+- 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。CLI 对 TUI 仅有两种依赖：`@nocturne/tui` 的惰性 `import()`，以及 `@nocturne/tui/slash-catalog` 的静态引用；`slash-catalog.ts` 不得 import 任何模块，保证逐行模式不加载 Ink。其余 apps→apps 依赖禁止（[tui.md](../apps/tui.md) 第 9 节）。
 
 依赖规则已由 dependency-cruiser 固化，见 [workflow.md](../development/workflow.md)。
 
@@ -179,7 +179,7 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 
 - **负责**：参数解析；REPL 输入；把事件渲染为终端输出（流式文本、工具状态、diff 摘要）；权限确认提示并调用 `respondPermission`；退出码。
 - **不负责**：任何 Agent 行为、会话状态、权限判定、上下文构建。
-- **依赖**：`@nocturne/core` 公开 API 与 `protocol`；另有到 `apps/tui` 的惰性 `import()`（`--tui` 委托）。
+- **依赖**：`@nocturne/core` 公开 API 与 `protocol`；对 `apps/tui` 仅有 `@nocturne/tui` 的惰性 `import()` 和 `@nocturne/tui/slash-catalog` 的静态引用。
 - 详见 [apps/cli.md](../apps/cli.md)。
 
 ### apps/tui（Phase 4，已验收）

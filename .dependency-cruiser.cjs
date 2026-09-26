@@ -187,6 +187,23 @@ module.exports = {
       from: { path: "^packages/mcp/src" },
       to: { path: "^(packages/(?!mcp)|apps)/" },
     },
+    {
+      name: "cli-tui-static-boundary",
+      severity: "error",
+      comment: "CLI 仅能静态引用无依赖的 slash-catalog；其余 TUI 入口必须惰性加载",
+      from: { path: "^apps/cli/src/" },
+      to: {
+        path: "^apps/tui/src/(?!slash-catalog\\.ts$)",
+        dependencyTypesNot: ["dynamic-import"],
+      },
+    },
+    {
+      name: "slash-catalog-depends-on-nothing",
+      severity: "error",
+      comment: "逐行 REPL 引用的命令表不得加载 Ink 或任何其他模块",
+      from: { path: "^apps/tui/src/slash-catalog\\.ts$" },
+      to: {},
+    },
   ],
   options: {
     doNotFollow: { path: "node_modules" },
