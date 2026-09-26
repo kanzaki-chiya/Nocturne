@@ -1,13 +1,11 @@
 /**
  * 紧凑欢迎区（ADR-0020）：对话区第一项，随滚动离开。
- * 左侧 4 行小像素标记，右侧版本、模型与档位、目录、一行提示。
+ * 左侧 4 行弯月标记，右侧版本、模型与档位、目录、一行提示。
  * 不做会话 id、最近会话和 MCP 分栏；MCP 失败由调用方另给通知。
  */
-import stringWidth from "string-width";
-
 import { boxSafe, truncateLine } from "./format.js";
-import { MARK_ROWS } from "./theme.js";
-import type { LaidLine } from "./viewport.js";
+import { MOON_PALETTE, MOON_PIXELS, theme } from "./theme.js";
+import type { LaidLine, LineSegment } from "./viewport.js";
 
 export interface WelcomeInfo {
   version: string;
@@ -18,8 +16,34 @@ export interface WelcomeInfo {
   width: number;
 }
 
+const GAP = 2;
+
 function clip(text: string, width: number): string {
-  return truncateLine(boxSafe(text), Math.max(1, width - 4), "...");
+  return truncateLine(boxSafe(text), Math.max(1, width), "...");
+}
+
+/**
+ * 像素网格 → 终端行：上下两像素合一格。上下同色用 █，
+ * 只有一半用 ▀/▄，两色用 ▀（前景=上、背景=下）。ASCII 模式有像素即 #。
+ */
+export function moonRows(ascii: boolean): LineSegment[][] {
+  const width = Math.max(...MOON_PIXELS.map((r) => r.length));
+  const out: LineSegment[][] = [];
+  for (let y = 0; y < MOON_PIXELS.length; y += 2) {
+    const row: LineSegment[] = [];
+    for (let x = 0; x < width; x++) {
+      const top = MOON_PALETTE[MOON_PIXELS[y]?.[x] ?? "."];
+      const bot = MOON_PALETTE[MOON_PIXELS[y + 1]?.[x] ?? "."];
+      if (top === undefined && bot === undefined) row.push({ text: " " });
+      else if (ascii) row.push({ text: "#", color: top ?? bot });
+      else if (top !== undefined && bot === undefined) row.push({ text: "▀", color: top });
+      else if (top === undefined) row.push({ text: "▄", color: bot });
+      else if (top === bot) row.push({ text: "█", color: top });
+      else row.push({ text: "▀", color: top, backgroundColor: bot });
+    }
+    out.push(row);
+  }
+  return out;
 }
 
 export function welcomeLines(info: WelcomeInfo): LaidLine[] {
@@ -28,29 +52,32 @@ export function welcomeLines(info: WelcomeInfo): LaidLine[] {
     info.effort !== undefined && info.effort !== ""
       ? `${info.model}${sep}${info.effort}`
       : info.model;
-  const hint = info.ascii
-    ? "/ 帮助  Shift+Tab 档位  Alt+M 权限"
-    : "/ 帮助  Shift+Tab 档位  Alt+M 权限";
-  const right = [`Nocturne ${info.version}`, modelLine, info.cwd, hint];
-  const markW = Math.max(...MARK_ROWS.map((row) => stringWidth(row)));
-  const gap = 2;
-  const twoCol = info.width >= 40 && info.width - markW - gap >= 16;
-  if (!twoCol) {
+  const right = [
+    `Nocturne ${info.version}`,
+    modelLine,
+    info.cwd,
+    "/ 帮助  Shift+Tab 档位  Alt+M 权限",
+  ];
+  const moon = moonRows(info.ascii);
+  const markW = moon[0]?.length ?? 0;
+  const sideW = info.width - 4 - markW - GAP;
+  if (info.width < 40 || sideW < 16) {
     return right.map((text, i) => ({
       key: `welcome:${i}`,
-      text: clip(text, info.width),
-      color: i === 0 ? "cyan" : undefined,
+      text: clip(text, info.width - 4),
+      color: i === 0 ? theme.accent : undefined,
+      bold: i === 0,
       dim: i > 0,
     }));
   }
-  return MARK_ROWS.map((mark, i) => {
-    const side = right[i] ?? "";
-    const text = `${info.ascii ? mark.replaceAll("█", "#") : mark}${" ".repeat(gap)}${side}`;
-    return {
-      key: `welcome:${i}`,
-      text: clip(text, info.width),
-      color: i === 0 ? "cyan" : undefined,
-      dim: i > 0,
-    };
+  return moon.map((mark, i) => {
+    const side = clip(right[i] ?? "", sideW);
+    const segments: LineSegment[] = [
+      ...mark,
+      { text: " ".repeat(GAP) },
+      i === 0 ? { text: side, color: theme.accent, bold: true } : { text: side, dim: true },
+    ];
+    const text = segments.map((s) => s.text).join("");
+    return { key: `welcome:${i}`, text, segments };
   });
 }

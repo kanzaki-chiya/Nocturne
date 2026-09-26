@@ -3,12 +3,22 @@
  * 跟随底部时从末尾向前布局，直到填满视口；翻到顶部才会碰到开头。
  * 已布局的块按 key+revision+宽度缓存，流式更新只重算变化的块。
  */
+/** 行内分段着色（欢迎区弯月等）；text 仍是整行纯文本 */
+export interface LineSegment {
+  text: string;
+  color?: string | undefined;
+  backgroundColor?: string | undefined;
+  dim?: boolean | undefined;
+  bold?: boolean | undefined;
+}
+
 export interface LaidLine {
   key: string;
   text: string;
   color?: string | undefined;
   dim?: boolean | undefined;
   bold?: boolean | undefined;
+  segments?: readonly LineSegment[] | undefined;
 }
 
 export interface LineBlock {

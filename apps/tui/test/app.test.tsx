@@ -304,7 +304,7 @@ describe("TUI", () => {
     );
     await pause(80); // 欢迎框数据（最近会话）就绪后主界面才挂载
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("fake/fake-model");
+    expect(frame).toContain("fake-model");
     stdin.write("\x03"); // Ctrl+C：空闲退出
     await new Promise((r) => setTimeout(r, 50));
     unmount();

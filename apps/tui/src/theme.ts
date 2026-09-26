@@ -69,7 +69,24 @@ export const LOGO_SPLIT = 24;
 export const LOGO_WIDTH = 47;
 
 /**
- * 欢迎区小像素标记（ADR-0020）：4 行，只用宽度确定的 █。
- * 服务商页的大号字标仍用 LOGO_ROWS；主界面不再画整词像素字。
+ * 欢迎区弯月标记（ADR-0020）：9×8 像素，半块字符两像素合一格，占 4 行 9 列。
+ * H 高光、Y 月黄、O 阴影，"." 留空。▀ ▄ █ 在 conhost GBK 下实测均为 1 列（tui.md §9）。
+ * 服务商页的大号字标仍用 LOGO_ROWS。
  */
-export const MARK_ROWS: readonly string[] = ["█  █", "██ █", "█ ██", "█  █"];
+export const MOON_PIXELS: readonly string[] = [
+  "...HYY...",
+  "..HY.....",
+  ".HY......",
+  "HYY......",
+  "HYY......",
+  "HYYY.....",
+  ".OYYYYYO.",
+  "..OOOO...",
+];
+
+/** 弯月三色；真彩不可用时由 Ink/chalk 降级到最近色 */
+export const MOON_PALETTE: Readonly<Record<string, string>> = {
+  H: "#ffee96",
+  Y: "#f2c62c",
+  O: "#c88c16",
+};

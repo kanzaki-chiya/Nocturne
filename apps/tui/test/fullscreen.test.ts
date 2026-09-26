@@ -1,3 +1,4 @@
+import stringWidth from "string-width";
 import { describe, expect, it } from "vitest";
 
 import { cursorColumn } from "../src/cursor.js";
@@ -8,6 +9,7 @@ import { scrollFollow, scrollPage, scrollToBottom, scrollToTop } from "../src/sc
 import { formatContextOccupancy, formatModelLabel } from "../src/status-format.js";
 import { completeSlash, helpLines, readlineCompleter } from "../src/slash-catalog.js";
 import { selectVisible, type LineBlock } from "../src/viewport.js";
+import { moonRows } from "../src/welcome.js";
 
 const key = {
   ctrl: false,
@@ -98,15 +100,15 @@ describe("可见窗口", () => {
 });
 
 describe("状态栏格式", () => {
-  it("0.1% / 1M，长度未知只显示已用量，模型段不拆成 command code", () => {
+  it("0.1% / 1M，长度未知只显示已用量，模型段只显示模型 ID", () => {
     expect(formatContextOccupancy(1000, 1_000_000)).toBe("0.1% / 1M");
     expect(formatContextOccupancy(128_000, 128_000)).toBe("100% / 128K");
     expect(formatContextOccupancy(1500, undefined)).toBe("1.5K");
     const label = formatModelLabel(
-      { provider: "commandcode", model: "deepseek/deepseek-v4.1-flash" },
+      { provider: "command code", model: "deepseek/deepseek-v4.1-flash" },
       [
         {
-          ref: { provider: "commandcode", model: "deepseek/deepseek-v4.1-flash" },
+          ref: { provider: "command code", model: "deepseek/deepseek-v4.1-flash" },
           displayName: "Flash",
           capabilities: {
             toolCalls: true,
@@ -119,14 +121,14 @@ describe("状态栏格式", () => {
       ],
       80,
     );
-    expect(label).toBe("commandcode/deepseek/deepseek-v4.1-flash");
+    expect(label).toBe("deepseek/deepseek-v4.1-flash");
     expect(label).not.toContain("command code");
     expect(
       formatModelLabel(
-        { provider: "commandcode", model: "deepseek/deepseek-v4.1-flash" },
+        { provider: "command code", model: "deepseek/deepseek-v4.1-flash" },
         [
           {
-            ref: { provider: "commandcode", model: "deepseek/deepseek-v4.1-flash" },
+            ref: { provider: "command code", model: "deepseek/deepseek-v4.1-flash" },
             displayName: "Flash",
             capabilities: {
               toolCalls: true,
@@ -207,5 +209,18 @@ describe("Alt+M 与光标", () => {
 describe("退出文案", () => {
   it("包含会话 id 与继续命令", () => {
     expect(sessionSavedLine("abc")).toBe("会话 abc 已保存，nctrn -c 继续");
+  });
+});
+
+describe("欢迎区弯月", () => {
+  it("4 行 9 列，只用宽度确定的字符；ASCII 模式退回 #", () => {
+    const rows = moonRows(false).map((r) => r.map((s) => s.text).join(""));
+    expect(rows).toHaveLength(4);
+    for (const row of rows) {
+      expect(stringWidth(row)).toBe(9);
+      expect(row).toMatch(/^[ ▀▄█]+$/);
+    }
+    for (const row of moonRows(true))
+      expect(row.every((s) => s.text === "#" || s.text === " ")).toBe(true);
   });
 });

@@ -20,7 +20,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 
 ```
 ┌ 对话区（只布局、只渲染可见行）
-│   欢迎区是第一项，随滚动离开：左侧 4 行小像素标记，
+│   欢迎区是第一项，随滚动离开：左侧 4 行弯月标记，
 │   右侧「Nocturne 版本」「模型 • 思考档位」、当前目录、一行提示
 │   › 用户消息
 │   助手文本 / 工具行 / 通知
@@ -28,16 +28,16 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 ├ ─────────────────────────────────────────────
 │ › 输入
 │ /model  切换模型                       ← 以 / 开头时，最多 8 行，在输入框与状态栏之间
-│ idle • commandcode/deepseek-v4 • 思考:off • default • ~/repo • 0.1% / 1M
+│ idle • deepseek/deepseek-v4.1-flash • 思考:off • default • ~/repo • 0.1% / 1M
 ```
 
-- **欢迎区**：紧凑布局。不画大号像素字，不显示会话 id、最近会话列表和 MCP 分栏。MCP 只在连接失败时在对话里给一条通知。宽度不够并排时改为纵向文字行。
+- **欢迎区**：紧凑布局。左侧弯月是 9×8 像素的半块字符画（`theme.ts` 的 `MOON_PIXELS`），高光、月黄、阴影三色，占 4 行 9 列；ASCII 模式退回 `#`。不画大号像素字，不显示会话 id、最近会话列表和 MCP 分栏。MCP 只在连接失败时在对话里给一条通知。宽度不够并排时改为纵向文字行。
 - **对话区**：欢迎、启动通知、时间线条目、流式输出都在同一可滚动窗口里。停在底部时跟随新输出；向上翻阅后停止跟随，未有新输出时显示「已向上翻阅，Ctrl+End 回到最新」，新输出到达后改为「有新内容，Ctrl+End 回到最新」，回到底部则消失。PgUp/PgDn 翻页，Ctrl+Home 到顶，Ctrl+End 到底。不开启鼠标上报，滚轮暂不处理。
 - **权限对话框与浮层**：`/resume`、`/context`、`/help`、权限确认、向导确认画在对话区高度内，不另占帧高，也不清除输入框文字。模型选择页与服务商页替换整帧，关闭后输入框文字仍在。
-- **输入行**：`›` 提示符。空间够时上方一条横线。主输入、模型搜索、服务商过滤与向导文本框共用按显示宽度定位的硬件光标（中文 2 列），供输入法预编辑定位。补全及历史回填后编辑光标与硬件光标同步到文字末尾。
+- **输入行**：`›` 提示符。空间够时上方一条横线。主输入、模型搜索、服务商过滤与向导文本框共用按显示宽度定位的硬件光标（中文 2 列），供输入法预编辑和候选窗定位。有焦点的输入框经 `InputCursor` 登记坐标，`runTui` 包装的 stdout 在 Ink 每次写完后把光标移过去（ADR-0020）；浮层打开时主输入让出光标，工具转圈等局部刷新也不会把光标带走。补全及历史回填后编辑光标与硬件光标同步到文字末尾。
 - **斜杠补全**：输入以 `/` 开头时，在输入框下方、状态栏上方显示候选，最多 8 行，格式如 `/model  切换模型`。排序先前缀匹配，再包含匹配。列表打开时 ↑/↓ 移动候选，Tab 补全，Enter 执行，Esc 关闭列表但保留已输入文字。完整命令名加一个空格后进入参数补全：`/effort` 为当前模型档位和 `off`，`/provider` 为子命令与已配置服务商，`/preset` 为四个预设。候选与 `/help` 共用同一张命令表。终端太矮时先减少候选行数，再压缩对话区。
 - **输入历史**：候选未打开时 ↑/↓ 回填本次运行提交过的输入；下翻到末尾恢复翻阅前草稿。回填后光标在末尾。
-- **状态栏**：彩色分段，`•` 分隔——`状态 • 模型 • 思考:档位 • 权限预设 • 目录 • 上下文`。上下文为「百分比 / 上下文长度」，单位大写，例如 `0.1% / 1M`；长度未知时只显示已用量。模型段为「服务商/模型 ID」或模型简称，与 `/model` 一致。`思考:` 段只在当前模型有可用档位时显示；Turn 进行中切档显示 `思考:<生效档>→<新档>`。Shift+Tab、Alt+M 只短暂高亮对应段，不往对话区插条目。宽度不足时按 §5 收缩。
+- **状态栏**：彩色分段，`•` 分隔——`状态 • 模型 • 思考:档位 • 权限预设 • 目录 • 上下文`。上下文为「百分比 / 上下文长度」，单位大写，例如 `0.1% / 1M`；长度未知时只显示已用量。模型段（欢迎区同）只显示模型 ID，放不下用模型简称，再不行截断；服务商名可能带空格，放进来既长又易误读，服务商在 `/model` 页查看。`思考:` 段只在当前模型有可用档位时显示；Turn 进行中切档显示 `思考:<生效档>→<新档>`。Shift+Tab、Alt+M 只短暂高亮对应段，不往对话区插条目。宽度不足时按 §5 收缩。
 
 ## 3. 键位与交互（对照 cli.md）
 
@@ -199,7 +199,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 - `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口 + ADR-0010 批准的终端依赖（ink、react；`ink-testing-library` 为 devDependency）。CLI 仅可惰性加载 `@nocturne/tui`，或静态引用 `@nocturne/tui/slash-catalog`；后者不得 import 任何模块，以免逐行模式加载 Ink。依赖方向见 [modules.md](../architecture/modules.md) 第 1 节。
 - 目录：`src/index.ts`（`runTui`：增量渲染 + Ink 备用屏幕）、`src/app.tsx`（全屏壳）、`src/frame.ts`（帧高 `rows - 1` 与降级）、`src/viewport.ts`（可见行）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。不再有逐页切屏模块。
 - 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎框/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/就地步骤/四操作/Esc/Ctrl+C。
-- **歧义宽度字符**（conhost 实测，GBK 代码页）：`· ● ○ ◆ ◇ ↑ ↓ ← → … — ｜` 等在控制台实宽 2 列，与 `string-width` 的 1 列不一致；`│ ─ ╭ █ ✓ ✗ ⚠ • › ⠋` 及全角 CJK 两边一致。凡会被补齐到整宽的行（带边框 Box 内部、左右栏拼接行），每个歧义字符都让实际行宽 +1，超边即折行——备用屏下表现为整屏滚动、页头被裁。规则：框内动态文本一律过 `format.ts` 的 `boxSafe()`，静态文案只用宽度确定字符（分隔符用 `•` 不用 `·`，方向提示用"上下/左右"不用箭头），边框盒距右缘保留 ≥4 列余量；无补齐的行（裸 Text）只需截断预算留 ≥4 列余量。
+- **歧义宽度字符**（conhost 实测，GBK 代码页）：`· ● ○ ◆ ◇ ↑ ↓ ← → … — ｜` 等在控制台实宽 2 列，与 `string-width` 的 1 列不一致；`│ ─ ╭ █ ▀ ▄ ▌ ▐ ✓ ✗ ⚠ • › ⠋` 及全角 CJK 两边一致（半块字符 2026-09-26 实测）。凡会被补齐到整宽的行（带边框 Box 内部、左右栏拼接行），每个歧义字符都让实际行宽 +1，超边即折行——备用屏下表现为整屏滚动、页头被裁。规则：框内动态文本一律过 `format.ts` 的 `boxSafe()`，静态文案只用宽度确定字符（分隔符用 `•` 不用 `·`，方向提示用"上下/左右"不用箭头），边框盒距右缘保留 ≥4 列余量；无补齐的行（裸 Text）只需截断预算留 ≥4 列余量。
 - `runTui` 只消费现有公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`（状态栏上下文占用与 `/context` 同源），加上 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`，以及 `session.mcpServers()`（`/mcp` 面板与欢迎框 MCP 块）；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
 
 ## 10. 需要的 Core API 变更

@@ -1,7 +1,7 @@
 /**
  * 状态栏片段（ADR-0020）：上下文是「百分比 / 上下文长度」，单位大写。
- * 模型段与 /model 一致：放得下就显示「服务商/模型 ID」，否则用模型简称，
- * 再不行按显示宽度截断。不要让整行换行把 id 拆成「command code/...」。
+ * 模型段只显示模型 ID（服务商名可能带空格，如「command code」，放进来既长又易误读；
+ * 服务商在 /model 页里看），放不下用模型简称，再不行按显示宽度截断。
  */
 import stringWidth from "string-width";
 
@@ -32,13 +32,9 @@ export function formatContextOccupancy(used: number, limit: number | undefined):
   return `${pctText} / ${formatContextUnit(limit)}`;
 }
 
-export function modelRefText(ref: ModelRef): string {
-  return `${ref.provider}/${ref.model}`;
-}
-
 /**
- * 与模型选择页列表列一致的标签。
- * 全形放得进预算就用全形；否则用 displayName；再否则截断全形（省略号用 `...`，避免 conhost 歧义宽度）。
+ * 状态栏与欢迎区的模型标签：模型 ID 放得进预算就用 ID；否则用 displayName；
+ * 再否则截断 ID（省略号用 `...`，避免 conhost 歧义宽度）。
  */
 export function formatModelLabel(
   ref: ModelRef | undefined,
@@ -46,7 +42,7 @@ export function formatModelLabel(
   maxWidth: number,
 ): string {
   if (ref === undefined) return "?";
-  const full = modelRefText(ref);
+  const full = ref.model;
   if (maxWidth <= 0) return "";
   if (stringWidth(full) <= maxWidth) return full;
   const info = models.find((m) => m.ref.provider === ref.provider && m.ref.model === ref.model);

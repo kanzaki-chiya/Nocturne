@@ -201,13 +201,13 @@ describe("全屏界面", () => {
     await session.close();
   });
 
-  it("状态栏是百分比 / 大写长度，模型段是服务商/模型 ID", async () => {
+  it("状态栏是百分比 / 大写长度，模型段只显示模型 ID", async () => {
     const { runtime, session } = await sessionWithEffort();
     const { lastFrame, unmount } = render(createElement(App, { session, runtime, env: ENV }));
     await pause(80);
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("commandcode/deepseek/deepseek-v4.1-flash");
-    expect(frame).not.toContain("command code");
+    expect(frame).toContain("deepseek/deepseek-v4.1-flash");
+    expect(frame).not.toContain("commandcode/");
     expect(frame).toMatch(/\d+\.\d% \/ 1M|\d+% \/ 1M/);
     unmount();
     await session.close();

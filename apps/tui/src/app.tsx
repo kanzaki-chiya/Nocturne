@@ -1215,10 +1215,7 @@ function SessionApp({
     return false;
   };
 
-  const modelText =
-    view.config.model !== undefined
-      ? `${view.config.model.provider}/${view.config.model.model}`
-      : "?";
+  const modelText = view.config.model !== undefined ? view.config.model.model : "?";
   const welcome = welcomeLines({
     version: APP_VERSION,
     model: modelText,
@@ -1377,7 +1374,23 @@ function SessionApp({
                 dimColor={line.dim === true}
                 bold={line.bold === true}
               >
-                {line.text === "" ? " " : line.text}
+                {line.segments !== undefined
+                  ? line.segments.map((seg, i) => (
+                      <Text
+                        key={i}
+                        {...(seg.color !== undefined ? { color: seg.color } : {})}
+                        {...(seg.backgroundColor !== undefined
+                          ? { backgroundColor: seg.backgroundColor }
+                          : {})}
+                        dimColor={seg.dim === true}
+                        bold={seg.bold === true}
+                      >
+                        {seg.text}
+                      </Text>
+                    ))
+                  : line.text === ""
+                    ? " "
+                    : line.text}
               </Text>
             ))}
           {showBanner && overlayBody === null ? (
