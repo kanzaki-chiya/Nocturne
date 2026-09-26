@@ -90,7 +90,7 @@ Esc 的处理次序：关闭补全列表 → 关闭浮层、确认框或页面 �
 
 - 用英文书写，要求按用户的语言回复。
 - 不写"只在工作区内操作"：工作区外的读写由权限层决定，提示词不重复限制。不写具体项目命令，那属于各项目的 AGENTS.md。不提本版还没有的工具。
-- 环境信息增加 shell 语法说明：Windows 为"Commands run with cmd /c: use cmd syntax, not bash or PowerShell"，POSIX 为"Commands run with /bin/sh -c"。
+- 环境信息的 shell 行与 `shell` 工具同源：可执行文件取自 `platform/process.ts` 的 `shellExecutable()`（`NOCTURNE_SHELL` > `%COMSPEC%` > `cmd.exe`；POSIX 为 `NOCTURNE_SHELL` > `/bin/sh`），参数形态取自工具实际使用的那一份（Windows `/d /s /c`，POSIX `-c`），不再读 `COMSPEC ?? SHELL`（旧写法在 POSIX 上会把 `SHELL=bash` 报给模型，而命令实际跑在 `/bin/sh`）。行文为 `Commands run with <可执行文件> <参数> "<command>"`；可执行文件的文件名是 `cmd`/`cmd.exe` 时追加 `use cmd syntax, not bash or PowerShell`，是 `sh` 时追加 `use POSIX sh syntax`，其他值（用户用 `NOCTURNE_SHELL` 换成别的 shell）不追加语法断言，只如实报告可执行文件与参数。不限制 `NOCTURNE_SHELL`。
 - AGENTS.md 拼入时加一句前言：以下是用户与项目提供的指令，与默认做法冲突时以它们为准。
 - 子代理的基础提示（`agent/subagent.ts`）保持中文不变，只在措辞上与主提示对齐其中的安全与验证要求。
 - 验收用真实模型对比新旧提示：修 bug、跨文件改动、只读问答、Windows 命令四类任务，看是否先读后改、是否验证、shell 语法是否一次正确、回复语言是否跟随用户。
