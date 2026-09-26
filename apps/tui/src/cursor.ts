@@ -1,16 +1,24 @@
 /**
- * 硬件光标（ADR-0020）：IME 预编辑与候选窗跟着硬件光标，不跟着绘制位置。
+ * 硬件光标（ADR-0020/0021）：IME 预编辑与候选窗跟着硬件光标，不跟着绘制位置。
  *
  * Ink 的 useCursor 只在调用它的组件重渲染时生效：父组件在子组件之后提交会覆盖
  * 浮层输入框的坐标，别的子组件单独刷新（转圈等）的那一帧光标会被藏到帧底。
- * 所以光标不交给 Ink：各输入框登记坐标（claims），包装后的 stdout 在 Ink 每次写完后
- * 保存 Ink 的光标位置（DECSC）、移到登记坐标并显示；下次 Ink 写之前先恢复（DECRC），
- * Ink 的相对移动不受影响。帧从备用屏幕第 0 行开始（帧高 rows - 1），可用绝对坐标。
+ * 所以光标不交给 Ink：各输入框登记坐标（claims），包装后的 stdout 在 Ink 每次
+ * 写完后保存 Ink 的光标位置（DECSC）、移到登记坐标并显示；下次 Ink 写之前先恢复
+ *（DECRC），Ink 的相对移动不受影响。
+ *
+ * 坐标是"相对 Ink 写入终点"（ADR-0021）：非全屏（普通屏幕 + <Static>）时 Ink
+ * 在输出末尾补一个换行，写完后光标停在活动区最后一行的下一行第 0 列。登记的
+ * y 是"活动区目标行相对该终点的行差"（≤0），x 是列。补位序列是
+ * `ESC[<|y|>A`（上移）+ `ESC[<x+1>G`（列定位，1 基）。目标即终点时只写列定位。
+ * 整页界面（模型页/服务商页）在备用屏幕内沿用同一约定——页面对该次输出同样
+ * 从活动区第 0 行算起。
  */
 import stringWidth from "string-width";
 
 export interface CursorPoint {
   x: number;
+  /** 相对活动区最后一行下一行（Ink 写入终点）的行差，≤0 */
   y: number;
 }
 
@@ -49,19 +57,24 @@ const SAVE = "\x1b7";
 const RESTORE = "\x1b8";
 const SHOW = "\x1b[?25h";
 const HIDE = "\x1b[?25l";
-const EXIT_ALT = "\x1b[?1049l";
 const SYNC_BEGIN = "\x1b[?2026h";
 const SYNC_END = "\x1b[?2026l";
 
-const moveTo = (p: CursorPoint): string => `\x1b[${p.y + 1};${p.x + 1}H`;
+/** 相对 Ink 写入终点移动：dy≤0 上移 |dy| 行，x 是 0 基列（CUP 列号 = x+1）。 */
+const moveRel = (p: CursorPoint): string => {
+  const up = p.y < 0 ? `\x1b[${-p.y}A` : "";
+  return `${up}\x1b[${p.x + 1}G`;
+};
 
 /**
  * 包装 Ink 的 stdout：其余属性与事件原样转发，只改写 write。
- * 退出备用屏幕（`?1049l`）后停止干预，主屏上的输出保持原样。
+ * `?1049h`/`?1049l` 进出备用屏时 Ink 的"写入终点"语义不变（补位仍按
+ * 同一约定）；进程退出（unmount 终帧）后不再干预。
  */
 export function createCursorStream(stdout: NodeJS.WriteStream): {
   stream: NodeJS.WriteStream;
   claims: CursorClaims;
+  stop(): void;
 } {
   const entries = new Map<symbol, { point: CursorPoint; seq: number }>();
   let seq = 0;
@@ -69,13 +82,14 @@ export function createCursorStream(stdout: NodeJS.WriteStream): {
   /** 光标已离开 Ink 的位置（已 SAVE）。 */
   let moved = false;
   let done = false;
+  let changingScreen = false;
   const raw = (data: string): boolean => stdout.write(data);
 
   const place = (): string => {
     if (target === undefined) return "";
     const head = moved ? HIDE : SAVE;
     moved = true;
-    return head + moveTo(target) + SHOW;
+    return head + moveRel(target) + SHOW;
   };
 
   const retarget = (): void => {
@@ -84,7 +98,7 @@ export function createCursorStream(stdout: NodeJS.WriteStream): {
     const next = best?.point;
     if (next?.x === target?.x && next?.y === target?.y) return;
     target = next;
-    if (done) return;
+    if (done || changingScreen) return;
     if (target === undefined) {
       if (moved) raw(HIDE + RESTORE);
       moved = false;
@@ -115,10 +129,16 @@ export function createCursorStream(stdout: NodeJS.WriteStream): {
     if (done || text === undefined || text === SYNC_BEGIN || text === SYNC_END) {
       return (stdout.write as (...a: unknown[]) => boolean)(chunk, ...rest);
     }
+    if (text.includes("\x1b[?1049h") || text.includes("\x1b[?1049l")) {
+      const out = (moved ? HIDE + RESTORE : "") + text;
+      moved = false;
+      changingScreen = true;
+      return (stdout.write as (...a: unknown[]) => boolean)(out, ...rest);
+    }
+    changingScreen = false;
     let out = moved ? HIDE + RESTORE + text : text;
     moved = false;
-    if (text.includes(EXIT_ALT)) done = true;
-    else out += place();
+    out += place();
     return (stdout.write as (...a: unknown[]) => boolean)(out, ...rest);
   };
 
@@ -129,7 +149,15 @@ export function createCursorStream(stdout: NodeJS.WriteStream): {
       return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(t) : value;
     },
   });
-  return { stream, claims };
+  return {
+    stream,
+    claims,
+    stop() {
+      done = true;
+      if (moved) raw(HIDE + RESTORE);
+      moved = false;
+    },
+  };
 }
 
 /** 粘贴/输入文本统一用 \n 换行（Windows Terminal 粘贴时换行是 \r） */

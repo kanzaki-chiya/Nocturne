@@ -5,13 +5,11 @@ import { cursorColumn, inputWindow, normalizeNewlines } from "../src/cursor.js";
 import { sessionSavedLine } from "../src/exit-note.js";
 import { frameBudget } from "../src/frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "../src/keys.js";
-import { scrollFollow, scrollPage, scrollToBottom, scrollToTop } from "../src/scroll.js";
 import { formatContextOccupancy, formatModelLabel } from "../src/status-format.js";
 import { completeSlash, helpLines, readlineCompleter } from "../src/slash-catalog.js";
-import { selectVisible, type LineBlock } from "../src/viewport.js";
 import { moonRows } from "../src/welcome.js";
 import { createPasteStore, pasteTokenBefore } from "../src/paste.js";
-import { layoutLive, transcriptBlocks } from "../src/lines.js";
+import { layoutLive } from "../src/lines.js";
 import { createSessionView } from "@nocturne/core/protocol";
 
 const key = {
@@ -56,49 +54,6 @@ describe("帧高", () => {
     expect(tiny.frameHeight).toBe(1);
     expect(tiny.completion).toBe(0);
     expect(tiny.conversation).toBe(0);
-  });
-});
-
-describe("滚动状态", () => {
-  it("翻页离开底部，Ctrl+End 回到跟随", () => {
-    const up = scrollPage(scrollFollow(), 10);
-    expect(up.follow).toBe(false);
-    expect(up.fromBottom).toBe(10);
-    expect(scrollToBottom().follow).toBe(true);
-    expect(scrollToTop().fromBottom).toBeGreaterThan(1000);
-    expect(scrollPage(up, -10).follow).toBe(true);
-  });
-});
-
-describe("可见窗口", () => {
-  it("只布局视口能碰到的块", () => {
-    const laid = new Set<string>();
-    const blocks: LineBlock[] = Array.from({ length: 50 }, (_, i) => ({
-      key: `b${i}`,
-      revision: "1",
-      layout: () => {
-        laid.add(`b${i}`);
-        return [{ key: `b${i}`, text: `line ${i}` }];
-      },
-    }));
-    const cache = new Map();
-    const window = selectVisible(blocks, 80, 5, 0, cache);
-    expect(window.lines.map((l) => l.text)).toEqual([
-      "line 45",
-      "line 46",
-      "line 47",
-      "line 48",
-      "line 49",
-    ]);
-    expect(window.atBottom).toBe(true);
-    expect(laid.has("b0")).toBe(false);
-    expect(laid.has("b49")).toBe(true);
-
-    laid.clear();
-    const top = selectVisible(blocks, 80, 5, 10_000, cache);
-    expect(top.atTop).toBe(true);
-    expect(top.lines[0]?.text).toBe("line 0");
-    expect(top.atBottom).toBe(false);
   });
 });
 
@@ -241,7 +196,7 @@ describe("长文本粘贴与流式思考", () => {
     expect(mid).toEqual({ before: "a", at: "b", after: "│cd" });
   });
 
-  it("正文已开始后思考继续增长，思考仍显示且缓存失效", () => {
+  it("正文已开始后思考继续增长，思考仍显示", () => {
     const view = createSessionView();
     const a = {
       kind: "assistant" as const,
@@ -252,20 +207,7 @@ describe("长文本粘贴与流式思考", () => {
     };
     view.live.assistants.push(a);
     view.status = "thinking";
-    const src = {
-      welcome: [],
-      notices: [],
-      frozen: [],
-      entries: [],
-      hide: () => false,
-      live: view,
-      clientLines: [],
-      ascii: false,
-    };
-    const before = transcriptBlocks(src).at(-1);
     a.reasoning = "想了很久的第二段";
-    const after = transcriptBlocks(src).at(-1);
-    expect(after?.revision).not.toBe(before?.revision);
     const texts = layoutLive(view, 80, false).map((l) => l.text);
     expect(texts).toContain("想了很久的第二段");
     expect(texts.at(-1)).toBe("The|");

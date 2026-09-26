@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "@nocturne/core";
 
 import { App } from "../src/app.js";
-import { NEW_CONTENT_HINT, SCROLLED_HINT } from "../src/lines.js";
+import { splitTextBlocks } from "../src/app.js";
 
 const tmpRoots: string[] = [];
 afterEach(() => {
@@ -166,12 +166,11 @@ describe("全屏界面", () => {
     await session.close();
   }, 10000);
 
-  it("默认帧高等于 rows-1", async () => {
+  it("活动区按内容收缩，不占满屏幕", async () => {
     const { runtime, session } = await sessionWithEffort();
     const { lastFrame, unmount } = render(createElement(App, { session, runtime, env: ENV }));
     await pause(80);
-    // ink-testing-library 不报 rows，App 按 24 行计算，帧高 23
-    expect(frameLines(lastFrame()).length).toBe(23);
+    expect(frameLines(lastFrame()).length).toBeLessThan(23);
     unmount();
     await session.close();
   });
@@ -217,26 +216,17 @@ describe("全屏界面", () => {
     await session.close();
   });
 
-  it("翻页先提示已翻阅，新输出后提示新内容，回到底部消失", async () => {
+  it("空行完成块进入回滚区，长未完结块只留活动区末尾", async () => {
     const { runtime, session } = await sessionWithEffort();
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(60);
+    expect(splitTextBlocks("甲\n\n乙", false)).toEqual({ blocks: ["甲\n\n"], tail: "乙" });
     await session.submit({ text: "长回答" });
-    await pause(80);
-    expect(lastFrame()).not.toContain(NEW_CONTENT_HINT);
+    await waitFor(() => (lastFrame() ?? "").includes("完毕"));
     stdin.write("\x1b[5~");
-    await pause(60);
-    expect(lastFrame()).toContain(SCROLLED_HINT);
-    expect(lastFrame()).not.toContain(NEW_CONTENT_HINT);
-    await session.submit({ text: "新回答" });
-    await pause(80);
-    expect(lastFrame()).toContain(NEW_CONTENT_HINT);
-    stdin.write("\x1b[1;5F");
-    await pause(60);
-    expect(lastFrame()).not.toContain(NEW_CONTENT_HINT);
-    expect(lastFrame()).not.toContain(SCROLLED_HINT);
+    await pause(40);
+    expect(lastFrame()).not.toContain("已向上翻阅");
     unmount();
     await session.close();
   });

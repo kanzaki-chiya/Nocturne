@@ -123,23 +123,24 @@ describe("浮层输入法光标", () => {
 describe("createCursorStream", () => {
   it("每次写完补位，下次写之前先恢复 Ink 的位置", () => {
     const { stream: raw, out } = fakeStdout();
-    const { stream, claims } = createCursorStream(raw);
+    const { stream, claims, stop } = createCursorStream(raw);
     const id = Symbol();
     stream.write("frame1");
     expect(out.at(-1)).toBe("frame1");
-    claims.set(id, { x: 4, y: 22 });
-    expect(out.at(-1)).toBe("\x1b7\x1b[23;5H\x1b[?25h");
+    claims.set(id, { x: 4, y: -2 });
+    expect(out.at(-1)).toBe("\x1b7\x1b[2A\x1b[5G\x1b[?25h");
     stream.write("frame2");
-    expect(out.at(-1)).toBe("\x1b[?25l\x1b8frame2\x1b7\x1b[23;5H\x1b[?25h");
-    claims.set(id, { x: 6, y: 22 });
-    expect(out.at(-1)).toBe("\x1b[?25l\x1b[23;7H\x1b[?25h");
+    expect(out.at(-1)).toBe("\x1b[?25l\x1b8frame2\x1b7\x1b[2A\x1b[5G\x1b[?25h");
+    claims.set(id, { x: 6, y: -2 });
+    expect(out.at(-1)).toBe("\x1b[?25l\x1b[2A\x1b[7G\x1b[?25h");
     claims.delete(id);
     expect(out.at(-1)).toBe("\x1b[?25l\x1b8");
     stream.write("frame3");
     expect(out.at(-1)).toBe("frame3");
+    stop();
   });
 
-  it("同步输出标记原样放行；退出备用屏幕后不再干预", () => {
+  it("同步输出标记原样放行；切屏后等待新帧再补位", () => {
     const { stream: raw, out } = fakeStdout();
     const { stream, claims } = createCursorStream(raw);
     claims.set(Symbol(), { x: 0, y: 0 });
@@ -147,8 +148,9 @@ describe("createCursorStream", () => {
     expect(out.at(-1)).toBe("\x1b[?2026h");
     stream.write("\x1b[?1049l");
     expect(out.at(-1)).toBe("\x1b[?25l\x1b8\x1b[?1049l");
+    expect(out.at(-1)).not.toContain("\x1b7");
     stream.write("主屏提示\n");
-    expect(out.at(-1)).toBe("主屏提示\n");
+    expect(out.at(-1)).toBe("主屏提示\n\x1b7\x1b[1G\x1b[?25h");
   });
 
   it("其余属性原样转发", () => {

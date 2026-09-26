@@ -6,7 +6,7 @@ import { cursorColumn, noopCursorClaims, type CursorClaims } from "../cursor.js"
 export const CursorClaimsContext = createContext<CursorClaims>(noopCursorClaims);
 
 /**
- * 仅在当前输入行有焦点时登记 IME 硬件光标；坐标从帧左上角开始。
+ * 仅在当前输入行有焦点时登记 IME 硬件光标；y 相对 Ink 写入终点。
  * 登记在提交后生效并一直保留到下次变化或卸载，不依赖本组件每帧重渲染。
  */
 export function InputCursor({

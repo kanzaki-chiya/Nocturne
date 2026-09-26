@@ -1,14 +1,13 @@
 /**
- * 把会话条目铺成固定行（ADR-0020）。每行已按显示宽度折好，
- * 视口只渲染其中可见的几行，不再把整段历史交给 Yoga。
+ * 把活动条目铺成固定行；<Static> 已写出的历史交给终端回滚区。
  */
 import stringWidth from "string-width";
 
-import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
+import type { SessionView } from "@nocturne/core/protocol";
 
 import { boxSafe, summarizeToolInput, tailLines, truncateLine } from "./format.js";
 import type { TranscriptItem } from "./components/transcript.js";
-import type { LaidLine, LineBlock } from "./viewport.js";
+import type { LaidLine } from "./viewport.js";
 
 const SAFE = 4;
 
@@ -116,6 +115,8 @@ export function layoutEntry(entry: TranscriptItem, width: number, ascii: boolean
       return rows(entry.key, `${dot} ${entry.message}`, width, { dim: true });
     case "separator":
       return rows(entry.key, `-- ${entry.text} --`, width, { dim: true });
+    case "header":
+      return entry.lines;
   }
 }
 
@@ -165,66 +166,3 @@ export function layoutLive(view: SessionView, width: number, ascii: boolean): La
   }
   return lines;
 }
-
-export interface TranscriptSource {
-  welcome: LaidLine[];
-  notices: readonly string[];
-  frozen: readonly TranscriptItem[];
-  entries: readonly ViewEntry[];
-  hide: (entry: ViewEntry) => boolean;
-  live: SessionView;
-  clientLines: readonly string[];
-  ascii: boolean;
-}
-
-function block(key: string, revision: string, lines: (width: number) => LaidLine[]): LineBlock {
-  return { key, revision, layout: lines };
-}
-
-/** 欢迎区在最前，会随对话滚走。快捷键插入的 config 通知由 hide 滤掉。 */
-export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
-  const blocks: LineBlock[] = [block("welcome", String(src.welcome.length), () => src.welcome)];
-  if (src.notices.length > 0) {
-    blocks.push(
-      block("notices", src.notices.join("\n"), (width) =>
-        src.notices.flatMap((text, i) => rows(`n${i}`, `! ${text}`, width, { color: "yellow" })),
-      ),
-    );
-  }
-  for (const item of src.frozen) {
-    blocks.push(
-      block(item.key, item.kind === "separator" ? item.text : item.key, (width) =>
-        layoutEntry(item, width, src.ascii),
-      ),
-    );
-  }
-  for (const entry of src.entries) {
-    if (src.hide(entry)) continue;
-    const revision =
-      entry.kind === "tool"
-        ? `${entry.status}:${entry.liveOutput.length}:${entry.result?.modelContent.length ?? 0}`
-        : entry.kind === "assistant"
-          ? `${entry.text.length}:${entry.reasoning.length}`
-          : entry.key;
-    blocks.push(block(entry.key, revision, (width) => layoutEntry(entry, width, src.ascii)));
-  }
-  // 缓存标记要覆盖布局的全部输入：思考长度、进行中工具、重试
-  const liveRev = [
-    src.live.live.assistants.map((a) => `${a.text.length}/${a.reasoning.length}`).join(","),
-    src.live.live.tools.map((t) => t.callId).join(","),
-    src.live.retry?.attempt ?? "",
-    src.live.status,
-  ].join("|");
-  blocks.push(block("live", liveRev, (width) => layoutLive(src.live, width, src.ascii)));
-  if (src.clientLines.length > 0) {
-    blocks.push(
-      block("client", src.clientLines.join("\n"), (width) =>
-        src.clientLines.flatMap((text, i) => rows(`c${i}`, text, width, { dim: true })),
-      ),
-    );
-  }
-  return blocks;
-}
-
-export const NEW_CONTENT_HINT = "有新内容，Ctrl+End 回到最新";
-export const SCROLLED_HINT = "已向上翻阅，Ctrl+End 回到最新";

@@ -311,7 +311,7 @@ export function ProviderPage({
       active={active}
       width={width - 2}
       maxRows={contentH}
-      offsetY={headerH}
+      offsetY={headerH - height}
       onSubmit={wizard.submit}
       onSubmitMulti={wizard.submitMulti}
       onCancel={wizard.cancel}
@@ -366,7 +366,7 @@ export function ProviderPage({
         prefix="过滤: "
         text={query}
         width={width - 2}
-        y={headerH}
+        y={headerH - height}
       />
       {titleRow}
       <Box flexDirection="column" height={contentH} overflow="hidden">

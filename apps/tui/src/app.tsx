@@ -1,6 +1,6 @@
 /**
  * TUI 根组件（tui.md §2）：
- * - 有会话：欢迎框 + 启动通知块 + 回放区共用同一条 <Static> 流（Ink 单
+ * - 有会话：欢迎区 + 启动通知块 + 回放区共用同一条 <Static> 流（Ink 单
  *   static 节点约束，见 StaticRow），只画一次 → 活动区 +
  *   权限对话框 + 弹层 + 输入行（上下横线）+ 分段状态栏；
  * - 无会话（首次配置，ADR-0019 第 4 条）：服务商页 → 模型页两步流程，
@@ -10,7 +10,7 @@
  * 新会话重建 SessionView 重放（tui.md §4）。
  */
 import { Box, Text, useApp, useInput, useStdout } from "ink";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   listProviderPresets,
@@ -38,10 +38,9 @@ import { createPasteStore } from "./paste.js";
 import { resumeLabel } from "./resume-label.js";
 import { frameBudget } from "./frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "./keys.js";
-import { NEW_CONTENT_HINT, SCROLLED_HINT, transcriptBlocks } from "./lines.js";
-import { applyClamp, scrollFollow, scrollPage, scrollToBottom, scrollToTop } from "./scroll.js";
+import { layoutEntry, layoutLive } from "./lines.js";
 import { completeSlash, PRESET_NAMES, type Candidate } from "./slash-catalog.js";
-import { countLaidLines, selectVisible, type LaidLine } from "./viewport.js";
+import type { LaidLine } from "./viewport.js";
 import { welcomeLines } from "./welcome.js";
 import { APP_VERSION } from "./version.js";
 import { Composer } from "./components/composer.js";
@@ -53,7 +52,8 @@ import { PermissionDialog } from "./components/permission-dialog.js";
 import { PickList, type PickItem } from "./components/pick-list.js";
 import { ProviderPage, type ProviderOp } from "./components/provider-page.js";
 import { StatusBar, type EffortSegment, type StatusHighlight } from "./components/status-bar.js";
-import { type TranscriptItem } from "./components/transcript.js";
+import { Transcript, type TranscriptItem } from "./components/transcript.js";
+import { useAltScreen, waitCommit } from "./alt-screen.js";
 import { WizardView } from "./components/wizard-view.js";
 import { TuiEnvContext, glyphs, type TuiEnv } from "./env.js";
 import { useSessionView } from "./session-view.js";
@@ -61,7 +61,7 @@ import { theme } from "./theme.js";
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 import { useProviderWizard } from "./wizard-io.js";
 
-/** 完结前缀切分：测试仍覆盖这条切分；全屏视口不再依赖 <Static> 不可改写。 */
+/** 未完成工具及其后的条目留在活动区；前缀可写入 <Static>。 */
 export function splitCompletedPrefix(entries: readonly ViewEntry[]): {
   prefix: ViewEntry[];
   tail: ViewEntry[];
@@ -71,6 +71,36 @@ export function splitCompletedPrefix(entries: readonly ViewEntry[]): {
   );
   if (cut < 0) return { prefix: [...entries], tail: [] };
   return { prefix: entries.slice(0, cut), tail: entries.slice(cut) };
+}
+
+/** 第 3 条 Markdown 词法器接入前，以空行作为完成块的边界。 */
+export function splitTextBlocks(
+  text: string,
+  complete: boolean,
+): { blocks: string[]; tail: string } {
+  const blocks: string[] = [];
+  const boundary = /\n[ \t]*\n/g;
+  let start = 0;
+  for (const match of text.matchAll(boundary)) {
+    const end = match.index + match[0].length;
+    blocks.push(text.slice(start, end));
+    start = end;
+  }
+  const tail = text.slice(start);
+  if (complete && tail !== "") blocks.push(tail);
+  return { blocks, tail: complete ? "" : tail };
+}
+
+function assistantBlocks(entry: Extract<ViewEntry, { kind: "assistant" }>): ViewEntry[] {
+  const { blocks } = splitTextBlocks(entry.text, true);
+  if (blocks.length === 0) blocks.push("");
+  return blocks.map((text, i) => ({
+    ...entry,
+    key: `${entry.key}:block:${i}`,
+    text,
+    reasoning: i === 0 ? entry.reasoning : "",
+    finishReason: i === blocks.length - 1 ? entry.finishReason : "stop",
+  }));
 }
 
 export interface SetupFlowSpec {
@@ -245,7 +275,7 @@ function useProviderOps(provider: ProviderBridge | undefined): {
   };
 }
 
-/** 首次配置流程（无会话形态）：服务商页 →（无默认模型时）模型页，同一全屏内切换 */
+/** 首次配置流程（无会话形态）：服务商页 →（无默认模型时）模型页，临时备用屏 */
 function SetupFlow({
   runtime,
   provider,
@@ -258,6 +288,7 @@ function SetupFlow({
   onDone: (d: SetupDone) => void;
 }): React.JSX.Element | null {
   const { stdout } = useStdout();
+  const alt = useAltScreen();
   const [width, setWidth] = useState(stdout.columns || 80);
   const [rows, setRows] = useState(stdout.rows || 24);
   useEffect(() => {
@@ -275,18 +306,32 @@ function SetupFlow({
   const ops = useProviderOps(provider);
   const [page, setPage] = useState<"provider" | "model">(setup.step === 2 ? "model" : "provider");
   const [ready, setReady] = useState(false);
+  const readyCommitted = useRef(false);
+  useLayoutEffect(() => {
+    readyCommitted.current = ready;
+  }, [ready]);
 
   useEffect(() => {
     void ops.reload().finally(() => {
-      setReady(true);
+      void alt.enter(async () => {
+        setReady(true);
+        await waitCommit(readyCommitted, true);
+      });
     });
-  }, [ops]);
+  }, [ops.reload]);
 
   const finish = useCallback(
     (d: SetupDone): void => {
-      onDone(d);
+      void alt
+        .leave(async () => {
+          setReady(false);
+          await waitCommit(readyCommitted, false);
+        })
+        .then(() => {
+          onDone(d);
+        });
     },
-    [onDone],
+    [alt, onDone],
   );
 
   /** 第 1 步 Esc：无默认模型 → 第 2 步模型页；否则收尾（openSession 时用默认模型开新会话） */
@@ -344,7 +389,7 @@ function SetupFlow({
   });
 
   if (!ready) {
-    return <Box flexDirection="column" width={width} height={frame.frameHeight} />;
+    return null;
   }
 
   if (page === "provider") {
@@ -476,6 +521,7 @@ function SessionApp({
 }): React.JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
+  const alt = useAltScreen();
   const [width, setWidth] = useState(stdout.columns || 80);
   const [rows, setRows] = useState(stdout.rows || 24);
 
@@ -505,13 +551,15 @@ function SessionApp({
   const [overlay, setOverlay] = useState<OverlayName | undefined>(undefined);
   const [clientLines, setClientLines] = useState<string[]>([]);
   const [exiting, setExiting] = useState(false);
-  /** 已冻结进滚动区的回放（旧会话的完结前缀 + 切换分隔线） */
-  const [frozen, setFrozen] = useState<TranscriptItem[]>([]);
+  /** Ink Static 只按数组下标追加；流式块晋升为持久条目时也不能重排或缩短。 */
+  const staticQueue = useRef<TranscriptItem[]>([]);
+  const staticKeys = useRef(new Set<string>());
+  const sessionEpoch = useRef(0);
   /** /resume 弹层的会话清单（打开弹层时拉取） */
   const [resumeList, setResumeList] = useState<readonly SessionSummary[] | undefined>(undefined);
   /** /resume 跨目录确认（foreign → 用户确认后带 allowForeign 重试） */
   const [foreign, setForeign] = useState<{ id: string; root: string } | undefined>(undefined);
-  // 模型选择页 / 服务商页：同一全屏里的页面，不再进出备用屏。输入文字留在父状态。
+  // 模型选择页 / 服务商页临时进出备用屏；输入文字留在父状态。
   const [picker, setPicker] = useState<
     { focus: "left" | "right"; scope?: PickerScope | undefined } | undefined
   >(undefined);
@@ -523,13 +571,16 @@ function SessionApp({
   >(undefined);
   const pickerOpen = picker !== undefined;
   const [providerPageOpen, setProviderPageOpen] = useState(false);
-  const [scroll, setScroll] = useState(scrollFollow);
+  const pickerCommitted = useRef(false);
+  const providerCommitted = useRef(false);
+  useLayoutEffect(() => {
+    pickerCommitted.current = pickerOpen;
+    providerCommitted.current = providerPageOpen;
+  }, [pickerOpen, providerPageOpen]);
   const [completionOn, setCompletionOn] = useState(true);
   const [completionIndex, setCompletionIndex] = useState(0);
   const [highlight, setHighlight] = useState<StatusHighlight | undefined>(undefined);
   const [providerIds, setProviderIds] = useState<readonly string[]>([]);
-  const lineCache = useRef(new Map<string, LaidLine[]>());
-  const laidTotal = useRef<number | undefined>(undefined);
   const hiddenNotices = useRef(new Set<string>());
   const suppressConfigNotice = useRef(false);
   const swallowUntil = useRef(0);
@@ -558,8 +609,6 @@ function SessionApp({
   );
 
   const { prefix } = splitCompletedPrefix(view.entries);
-  const prefixRef = useRef(prefix);
-  prefixRef.current = prefix;
 
   // 思考档位段（ADR-0018/0019）：Turn 中切档显示 旧档→新档 并变色
   const effortInfo = session.reasoningEffortInfo();
@@ -590,7 +639,6 @@ function SessionApp({
   const pushLine = useCallback((text: string) => {
     if (text === "") return;
     setClientLines((prev) => [...prev.slice(-19), ...text.split("\n")]);
-    setScroll((s) => (s.follow ? s : { ...s, follow: false, newContent: true }));
   }, []);
 
   const flash = useCallback((which: StatusHighlight) => {
@@ -680,8 +728,8 @@ function SessionApp({
           key: `sw-${res.session.id}`,
           text: `已切换到会话 ${res.session.id}`,
         };
-        // 切换只会发生在空闲时（busy 被拦截）：prefix 即旧会话全部条目
-        setFrozen((previous) => [...previous, ...prefixRef.current, sep]);
+        staticQueue.current.push(sep);
+        sessionEpoch.current++;
         setSession(res.session);
         setOverlay(undefined);
         for (const n of sessionNotes(res.session)) pushLine(`! ${n}`);
@@ -710,7 +758,8 @@ function SessionApp({
         key: `new-${res.session.id}`,
         text: `新会话 ${res.session.id}`,
       };
-      setFrozen((previous) => [...previous, ...prefixRef.current, sep]);
+      staticQueue.current.push(sep);
+      sessionEpoch.current++;
       setSession(res.session);
       setClientLines([]);
       setOverlay(undefined);
@@ -732,7 +781,7 @@ function SessionApp({
     return { providers, presets };
   }, [provider]);
 
-  /** 打开模型选择页：同一全屏内换页，不切备用屏，不清除输入框文字 */
+  /** 打开模型选择页：保留草稿，临时进入备用屏幕。 */
   const openPicker = useCallback(
     (focus: "left" | "right"): void => {
       if (busy || pending !== undefined) {
@@ -745,19 +794,27 @@ function SessionApp({
       }
       void loadPickerData()
         .then((data) => {
-          setPickerData(data);
-          setPicker({ focus });
+          void alt.enter(async () => {
+            setPickerData(data);
+            setPicker({ focus });
+            await waitCommit(pickerCommitted, true);
+          });
         })
         .catch((e: unknown) => {
           pushLine(`! ${errText(e)}`);
         });
     },
-    [busy, pending, provider, loadPickerData, pushLine],
+    [busy, pending, provider, loadPickerData, pushLine, alt],
   );
 
-  const closePicker = useCallback((): void => {
-    setPicker(undefined);
-  }, []);
+  const closePicker = useCallback(
+    () =>
+      alt.leave(async () => {
+        setPicker(undefined);
+        await waitCommit(pickerCommitted, false);
+      }),
+    [alt],
+  );
 
   /** picker 内 ○ 预设 Enter → 向导内嵌；完成后回到本页并选中新服务商 */
   const startWizardInPicker = useCallback(
@@ -779,7 +836,7 @@ function SessionApp({
     [provider, wizard, loadPickerData],
   );
 
-  /** 打开服务商页：同一全屏内换页，输入框文字保留在父状态 */
+  /** 打开服务商页：保留草稿，临时进入备用屏幕。 */
   const openProviderPage = useCallback(
     (presetId?: string): void => {
       if (busy || pending !== undefined) {
@@ -793,15 +850,23 @@ function SessionApp({
       void ops.reload().catch((e: unknown) => {
         pushLine(`! ${errText(e)}`);
       });
-      setProviderPageOpen(true);
-      if (presetId !== undefined) ops.startWizard(presetId);
+      void alt.enter(async () => {
+        setProviderPageOpen(true);
+        if (presetId !== undefined) ops.startWizard(presetId);
+        await waitCommit(providerCommitted, true);
+      });
     },
-    [busy, pending, provider, ops, pushLine],
+    [busy, pending, provider, ops, pushLine, alt],
   );
 
-  const closeProviderPage = useCallback((): void => {
-    setProviderPageOpen(false);
-  }, []);
+  const closeProviderPage = useCallback(
+    () =>
+      alt.leave(async () => {
+        setProviderPageOpen(false);
+        await waitCommit(providerCommitted, false);
+      }),
+    [alt],
+  );
 
   /** 主屏 /provider key|thinking 弹层（add 已改为服务商页内嵌） */
   const openProviderWizard = useCallback(
@@ -962,25 +1027,6 @@ function SessionApp({
       cyclePreset();
       return;
     }
-    if (!pageOpen && !dialogOpen && pending === undefined) {
-      const page = Math.max(1, frameBudget(rows, 0).conversation - 1);
-      if (key.pageUp) {
-        setScroll((s) => scrollPage(s, page));
-        return;
-      }
-      if (key.pageDown) {
-        setScroll((s) => scrollPage(s, -page));
-        return;
-      }
-      if (key.ctrl && key.home) {
-        setScroll(scrollToTop());
-        return;
-      }
-      if (key.ctrl && key.end) {
-        setScroll(scrollToBottom());
-        return;
-      }
-    }
     if (completionOpen && selected !== undefined) {
       if (key.upArrow) {
         setCompletionIndex((i) => (i <= 0 ? candidates.length - 1 : i - 1));
@@ -1003,7 +1049,6 @@ function SessionApp({
         setInput("");
         setCursor(0);
         setCompletionOn(true);
-        setScroll(scrollToBottom());
         void runSlash(text, session, provider)
           .then((r) => {
             const opens = r.kind === "overlay" || r.kind === "picker" || r.kind === "provider-page";
@@ -1035,14 +1080,12 @@ function SessionApp({
     if (key.ctrl && ch === "c") {
       if (pickerOpen) {
         wizard.cancel();
-        closePicker();
-        exit();
+        void closePicker().then(exit);
         return;
       }
       if (providerPageOpen) {
         ops.wizard.cancel();
-        closeProviderPage();
-        exit();
+        void closeProviderPage().then(exit);
         return;
       }
       if (foreign !== undefined) {
@@ -1071,14 +1114,12 @@ function SessionApp({
     if (key.ctrl && ch === "d") {
       if (pickerOpen) {
         wizard.cancel();
-        closePicker();
-        requestExit();
+        void closePicker().then(requestExit);
         return;
       }
       if (providerPageOpen) {
         ops.wizard.cancel();
-        closeProviderPage();
-        requestExit();
+        void closeProviderPage().then(requestExit);
         return;
       }
       if (foreign !== undefined) {
@@ -1135,7 +1176,6 @@ function SessionApp({
         return;
       }
       clearInput();
-      setScroll(scrollToBottom());
       // 历史里保留占位，发给模型的是展开后的原文
       session.submit({ text: pastes.expand(text) }).catch((e: unknown) => {
         pushLine(`! ${errText(e)}`);
@@ -1174,74 +1214,68 @@ function SessionApp({
   const budget = frameBudget(rows, completionOpen ? Math.min(8, candidates.length) : 0);
   const g = glyphs(env);
 
-  // 模型选择页：同一全屏里的一页，输入文字留在父状态
-  if (pickerOpen) {
-    return (
-      <TuiEnvContext.Provider value={env}>
-        <ModelPicker
-          key={pickerKey}
-          models={runtime.listModels()}
-          recents={runtime.listRecentModels()}
-          providers={pickerData?.providers ?? []}
-          presets={pickerData?.presets ?? []}
-          current={view.config.model}
-          defaultModel={runtime.defaultModel()}
-          initialScope={picker.scope}
-          initialFocus={picker.focus}
-          wizard={wizard.state.running ? wizard : undefined}
-          onStartWizard={startWizardInPicker}
-          onPick={(ref, setDefault) => {
-            closePicker();
-            void (async () => {
-              try {
-                if (setDefault && provider !== undefined) {
-                  await provider.config.setDefaultModel(ref);
-                  provider.updateProviders(await provider.reloadConfig());
-                }
-                await session.setModel(ref);
-              } catch (e) {
-                pushLine(`! ${errText(e)}`);
-              }
-            })();
-          }}
-          onClose={closePicker}
-          width={width}
-          height={budget.frameHeight}
-          active={wizardOverlay === undefined}
-        />
-      </TuiEnvContext.Provider>
-    );
-  }
-
-  if (providerPageOpen) {
-    return (
-      <TuiEnvContext.Provider value={env}>
-        <ProviderPage
-          presets={ops.presets}
-          entries={ops.entries}
-          currentProviderId={view.config.model?.provider}
-          wizard={ops.wizard.state.running ? ops.wizard : undefined}
-          onStartWizard={(presetId) => {
-            ops.startWizard(presetId);
-          }}
-          onOp={(id, op) => {
-            ops.runOp(id, op);
-          }}
-          onReadonlyHint={ops.readonlyHint}
-          onConfirmRemove={(id) => {
-            ops.confirmRemove(id);
-          }}
-          onClose={closeProviderPage}
-          notice={ops.notice}
-          busyText={ops.busyText}
-          width={width}
-          height={budget.frameHeight}
-          termRows={rows}
-          active
-        />
-      </TuiEnvContext.Provider>
-    );
-  }
+  // Static 始终保持挂载，进出备用屏幕时不会重新写入旧回滚区。
+  const pageBody = pickerOpen ? (
+    <ModelPicker
+      key={pickerKey}
+      models={runtime.listModels()}
+      recents={runtime.listRecentModels()}
+      providers={pickerData?.providers ?? []}
+      presets={pickerData?.presets ?? []}
+      current={view.config.model}
+      defaultModel={runtime.defaultModel()}
+      initialScope={picker.scope}
+      initialFocus={picker.focus}
+      wizard={wizard.state.running ? wizard : undefined}
+      onStartWizard={startWizardInPicker}
+      onPick={(ref, setDefault) => {
+        void (async () => {
+          try {
+            await closePicker();
+            if (setDefault && provider !== undefined) {
+              await provider.config.setDefaultModel(ref);
+              provider.updateProviders(await provider.reloadConfig());
+            }
+            await session.setModel(ref);
+          } catch (e) {
+            pushLine(`! ${errText(e)}`);
+          }
+        })();
+      }}
+      onClose={() => {
+        void closePicker();
+      }}
+      width={width}
+      height={budget.frameHeight}
+      active={wizardOverlay === undefined}
+    />
+  ) : providerPageOpen ? (
+    <ProviderPage
+      presets={ops.presets}
+      entries={ops.entries}
+      currentProviderId={view.config.model?.provider}
+      wizard={ops.wizard.state.running ? ops.wizard : undefined}
+      onStartWizard={(presetId) => {
+        ops.startWizard(presetId);
+      }}
+      onOp={(id, op) => {
+        ops.runOp(id, op);
+      }}
+      onReadonlyHint={ops.readonlyHint}
+      onConfirmRemove={(id) => {
+        ops.confirmRemove(id);
+      }}
+      onClose={() => {
+        void closeProviderPage();
+      }}
+      notice={ops.notice}
+      busyText={ops.busyText}
+      width={width}
+      height={budget.frameHeight}
+      termRows={rows}
+      active
+    />
+  ) : null;
 
   const bootNotes = (() => {
     const notes: string[] = [];
@@ -1286,41 +1320,61 @@ function SessionApp({
     ascii: env.ascii,
     width,
   });
-  const blocks = transcriptBlocks({
-    welcome,
-    notices: bootNotes,
-    frozen,
-    entries: view.entries,
-    hide: hideNotice,
-    live: view,
-    clientLines,
-    ascii: env.ascii,
-  });
-  const showBanner = !scroll.follow;
-  const transcriptRows = Math.max(0, budget.conversation - (showBanner ? 1 : 0));
-  const visible = selectVisible(
-    blocks,
-    width,
-    transcriptRows,
-    scroll.fromBottom,
-    lineCache.current,
-  );
-  if (!scroll.follow) {
-    const total = countLaidLines(blocks, width, lineCache.current);
-    const prev = laidTotal.current;
-    laidTotal.current = total;
-    if (prev !== undefined && total > prev) {
-      setScroll((s) =>
-        s.follow ? s : { ...s, fromBottom: s.fromBottom + (total - prev), newContent: true },
-      );
-    } else if (visible.clampedFromBottom !== scroll.fromBottom) {
-      setScroll(applyClamp(scroll, visible.clampedFromBottom));
-    }
-  } else {
-    laidTotal.current = undefined;
+  const header: TranscriptItem[] = [
+    { kind: "header", key: `header:${session.id}`, lines: welcome },
+    ...bootNotes.map((note, i): TranscriptItem => ({
+      kind: "header",
+      key: `boot:${session.id}:${i}`,
+      lines: [{ key: `boot:${i}`, text: `! ${note}`, color: "yellow" }],
+    })),
+  ];
+  const staticEntries: TranscriptItem[] = [
+    ...header,
+    ...prefix.filter((entry) => !hideNotice(entry)),
+  ];
+  const completedLive = new Map<string, string>();
+  for (const assistant of view.live.assistants) {
+    const { blocks, tail } = splitTextBlocks(assistant.text, false);
+    completedLive.set(assistant.messageId, tail);
+    blocks.forEach((text, i) => {
+      staticEntries.push({
+        kind: "header",
+        key: `a:${assistant.messageId}:block:${i}`,
+        lines: text.split("\n").map((part, j) => ({
+          key: `a:${assistant.messageId}:block:${i}:${j}`,
+          text: part,
+        })),
+      });
+    });
   }
+  const staticBlocks = staticEntries.flatMap<TranscriptItem>((entry) =>
+    entry.kind === "assistant" ? assistantBlocks(entry) : [entry],
+  );
+  for (const entry of staticBlocks) {
+    const id = `${sessionEpoch.current}:${entry.key}`;
+    if (staticKeys.current.has(id)) continue;
+    staticKeys.current.add(id);
+    staticQueue.current.push({ ...entry, key: id });
+  }
+  const { tail } = splitCompletedPrefix(view.entries);
+  const activityView: SessionView = {
+    ...view,
+    live: {
+      ...view.live,
+      assistants: view.live.assistants.map((a) => ({
+        ...a,
+        text: completedLive.get(a.messageId) ?? a.text,
+      })),
+    },
+  };
+  const activityLines: LaidLine[] = [
+    ...tail.flatMap((entry) => layoutEntry(entry, width, env.ascii)),
+    ...layoutLive(activityView, width, env.ascii),
+    ...clientLines.map((text, i) => ({ key: `client:${i}`, text, dim: true })),
+  ].slice(-budget.conversation);
+  const activityHeight = activityLines.length;
   const prompt = `${g.prompt} `;
-  const inputY = budget.conversation + budget.inputRule;
+  const inputY = -(budget.input + budget.completion + budget.status);
 
   const shownCandidates = candidates.slice(0, budget.completion);
   const overlayBody =
@@ -1417,6 +1471,7 @@ function SessionApp({
         active
         width={width}
         maxRows={Math.max(4, budget.conversation - 2)}
+        offsetY={-budget.frameHeight}
         onSubmit={(v) => {
           wizard.submit(v);
         }}
@@ -1464,85 +1519,87 @@ function SessionApp({
 
   return (
     <TuiEnvContext.Provider value={env}>
-      <Box flexDirection="column" width={width} height={budget.frameHeight}>
-        <Box flexDirection="column" height={budget.conversation} overflow="hidden">
-          {overlayBody ??
-            visible.lines.map((line) => (
-              <Text
-                key={line.key}
-                wrap="truncate"
-                {...(line.color !== undefined ? { color: line.color } : {})}
-                dimColor={line.dim === true}
-                bold={line.bold === true}
-              >
-                {line.segments !== undefined
-                  ? line.segments.map((seg, i) => (
-                      <Text
-                        key={i}
-                        {...(seg.color !== undefined ? { color: seg.color } : {})}
-                        {...(seg.backgroundColor !== undefined
-                          ? { backgroundColor: seg.backgroundColor }
-                          : {})}
-                        dimColor={seg.dim === true}
-                        bold={seg.bold === true}
-                      >
-                        {seg.text}
-                      </Text>
-                    ))
-                  : line.text === ""
-                    ? " "
-                    : line.text}
-              </Text>
-            ))}
-          {showBanner && overlayBody === null ? (
-            <Text color={theme.warning} wrap="truncate">
-              {scroll.newContent ? NEW_CONTENT_HINT : SCROLLED_HINT}
-            </Text>
+      <Transcript entries={staticQueue.current} width={width} />
+      {pageBody ?? (
+        <Box flexDirection="column" width={width}>
+          <Box
+            flexDirection="column"
+            height={overlayBody === null ? activityHeight : budget.conversation}
+            overflow="hidden"
+          >
+            {overlayBody ??
+              activityLines.map((line) => (
+                <Text
+                  key={line.key}
+                  wrap="truncate"
+                  {...(line.color !== undefined ? { color: line.color } : {})}
+                  dimColor={line.dim === true}
+                  bold={line.bold === true}
+                >
+                  {line.segments !== undefined
+                    ? line.segments.map((seg, i) => (
+                        <Text
+                          key={i}
+                          {...(seg.color !== undefined ? { color: seg.color } : {})}
+                          {...(seg.backgroundColor !== undefined
+                            ? { backgroundColor: seg.backgroundColor }
+                            : {})}
+                          dimColor={seg.dim === true}
+                          bold={seg.bold === true}
+                        >
+                          {seg.text}
+                        </Text>
+                      ))
+                    : line.text === ""
+                      ? " "
+                      : line.text}
+                </Text>
+              ))}
+          </Box>
+          <InputCursor
+            active={budget.input > 0 && !pageOpen}
+            prefix={prompt}
+            text={inputWindow(prompt, input, cursor, width, g.newline).before}
+            width={width}
+            y={inputY}
+          />
+          <Composer
+            pastes={pastes}
+            value={input}
+            cursor={cursor}
+            onChange={(next, nextCursor) => {
+              setInput(next);
+              setCursor(nextCursor);
+              setHistoryIndex(undefined);
+            }}
+            onCursor={setCursor}
+            onSubmit={onSubmit}
+            active={!dialogOpen && pending === undefined}
+            disabledReason={composerDisabled}
+            width={width}
+            showRule={budget.inputRule > 0}
+            suspendNav={completionOpen}
+            swallowRef={swallowRef}
+          />
+          {budget.completion > 0
+            ? shownCandidates.map((item, i) => (
+                <Text key={item.insert} wrap="truncate" inverse={i === completionIndex}>
+                  {item.label}
+                </Text>
+              ))
+            : null}
+          {budget.status > 0 ? (
+            <StatusBar
+              view={view}
+              width={width}
+              effort={effort}
+              context={{ used: contextReport.estimatedTokens, limit: contextWindow }}
+              models={runtime.listModels()}
+              highlight={highlight}
+            />
           ) : null}
         </Box>
-        <InputCursor
-          active={budget.input > 0 && !pageOpen}
-          prefix={prompt}
-          text={inputWindow(prompt, input, cursor, width, g.newline).before}
-          width={width}
-          y={inputY}
-        />
-        <Composer
-          pastes={pastes}
-          value={input}
-          cursor={cursor}
-          onChange={(next, nextCursor) => {
-            setInput(next);
-            setCursor(nextCursor);
-            setHistoryIndex(undefined);
-          }}
-          onCursor={setCursor}
-          onSubmit={onSubmit}
-          active={!dialogOpen && pending === undefined}
-          disabledReason={composerDisabled}
-          width={width}
-          showRule={budget.inputRule > 0}
-          suspendNav={completionOpen}
-          swallowRef={swallowRef}
-        />
-        {budget.completion > 0
-          ? shownCandidates.map((item, i) => (
-              <Text key={item.insert} wrap="truncate" inverse={i === completionIndex}>
-                {item.label}
-              </Text>
-            ))
-          : null}
-        {budget.status > 0 ? (
-          <StatusBar
-            view={view}
-            width={width}
-            effort={effort}
-            context={{ used: contextReport.estimatedTokens, limit: contextWindow }}
-            models={runtime.listModels()}
-            highlight={highlight}
-          />
-        ) : null}
-      </Box>
+      )}
     </TuiEnvContext.Provider>
   );
 }

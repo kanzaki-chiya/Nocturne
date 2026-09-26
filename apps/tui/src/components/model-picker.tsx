@@ -338,6 +338,7 @@ export function ModelPicker({
       active={active}
       width={width - (narrow ? 6 : LEFT_W + 6)}
       maxRows={height}
+      offsetY={-height}
       offsetX={narrow ? 0 : LEFT_W}
       onSubmit={wizard.submit}
       onSubmitMulti={wizard.submitMulti}
@@ -531,7 +532,7 @@ function RightPane({
         text={boxSafe(query)}
         width={width - 2}
         x={offsetX}
-        y={0}
+        y={-height}
       />
       <Text wrap="truncate">
         {truncateLine(boxSafe(`搜索: ${query}`), width - 2)}

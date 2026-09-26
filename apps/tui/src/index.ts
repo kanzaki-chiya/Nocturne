@@ -71,11 +71,14 @@ export async function runTui(
   const announce = (): void => {
     if (announced || sessionId === undefined) return;
     announced = true;
-    // Ink unmount 已写完备用屏退出序列；这条写到主屏。
+    // Ink unmount 已写完活动区终帧；这条追加到普通屏幕。
     stdout.write(`${sessionSavedLine(sessionId)}\n`);
   };
   // IME 光标由我们在 Ink 每次写完后补位（cursor.ts），不走 useCursor
   const cursorOut = createCursorStream(stdout);
+  // Windows Terminal: suspendTerminal 的 pauseInput 不应撤销控制台读请求。
+  const unref = stdin.unref.bind(stdin);
+  stdin.unref = () => stdin;
   const app = render(
     createElement(
       CursorClaimsContext.Provider,
@@ -103,7 +106,6 @@ export async function runTui(
       stderr,
       exitOnCtrlC: false,
       incrementalRendering: true,
-      alternateScreen: true,
       patchConsole: options.patchConsole ?? true,
     },
   );
@@ -125,6 +127,9 @@ export async function runTui(
   try {
     await app.waitUntilExit();
   } finally {
+    cursorOut.stop();
+    stdin.unref = unref;
+    unref();
     process.off("uncaughtException", onCrash);
     process.off("unhandledRejection", onCrash);
   }

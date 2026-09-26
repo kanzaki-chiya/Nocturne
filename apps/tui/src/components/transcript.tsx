@@ -6,12 +6,16 @@ import { Box, Static, Text } from "ink";
 
 import { glyphs, useTuiEnv } from "../env.js";
 import { tailLines } from "../format.js";
+import type { LaidLine } from "../viewport.js";
 import { ToolRow } from "./tool-row.js";
 
 import type { ViewEntry } from "@nocturne/core/protocol";
 
 /** 回放区条目：会话视图条目 + 客户端本地分隔线（/resume 切换标记） */
-export type TranscriptItem = ViewEntry | { kind: "separator"; key: string; text: string };
+export type TranscriptItem =
+  | ViewEntry
+  | { kind: "separator"; key: string; text: string }
+  | { kind: "header"; key: string; lines: LaidLine[] };
 
 const REASONING_TAIL = 4;
 
@@ -90,6 +94,35 @@ export function EntryRow({
       return <NoticeRow entry={entry} />;
     case "separator":
       return <SeparatorRow text={entry.text} />;
+    case "header":
+      return (
+        <Box flexDirection="column">
+          {entry.lines.map((line) => (
+            <Text
+              key={line.key}
+              {...(line.color !== undefined ? { color: line.color } : {})}
+              dimColor={line.dim === true}
+              bold={line.bold === true}
+            >
+              {line.segments !== undefined
+                ? line.segments.map((seg, i) => (
+                    <Text
+                      key={i}
+                      {...(seg.color !== undefined ? { color: seg.color } : {})}
+                      {...(seg.backgroundColor !== undefined
+                        ? { backgroundColor: seg.backgroundColor }
+                        : {})}
+                      dimColor={seg.dim === true}
+                      bold={seg.bold === true}
+                    >
+                      {seg.text}
+                    </Text>
+                  ))
+                : line.text || " "}
+            </Text>
+          ))}
+        </Box>
+      );
   }
 }
 
