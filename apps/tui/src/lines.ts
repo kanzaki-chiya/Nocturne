@@ -7,7 +7,7 @@ import stringWidth from "string-width";
 
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 
-import { boxSafe, summarizeToolInput, tailLines, truncateLine } from "./format.js";
+import { boxSafe, stripControls, summarizeToolInput, tailLines, truncateLine } from "./format.js";
 import { renderMarkdown } from "./markdown.js";
 import { reasoningLabel, type ReasoningMap, type ReasoningPart } from "./reasoning.js";
 import type { TranscriptItem } from "./components/transcript.js";
@@ -20,7 +20,7 @@ function budget(width: number): number {
 }
 
 function paint(text: string, width: number): string {
-  return truncateLine(boxSafe(text.replace(/\r\n?/g, "\n")), budget(width), "...");
+  return truncateLine(boxSafe(stripControls(text.replace(/\r\n?/g, "\n"))), budget(width), "...");
 }
 
 interface WrappedLine {
@@ -31,7 +31,7 @@ interface WrappedLine {
 
 function wrap(text: string, width: number): WrappedLine[] {
   const limit = budget(width);
-  const flat = text.replace(/\r\n?/g, "\n");
+  const flat = stripControls(text.replace(/\r\n?/g, "\n"));
   const out: WrappedLine[] = [];
   for (const part of flat.split("\n")) {
     if (part === "") {

@@ -65,6 +65,18 @@ describe("工具行 diff", () => {
     expect(lines.at(-1)?.color).toBe("green");
   });
 
+  it("工具输出里的终端控制序列被去掉（颜色码不漏到主屏）", () => {
+    const e = entry(
+      { command: "npm test" },
+      {},
+      "\x1b[31mFAIL\x1b[39m a\n\x1b]0;title\x07ok\x1b[0m",
+    );
+    const texts = layoutEntry({ ...e, name: "shell" }, 80, false).map((l) => l.text);
+    expect(texts.join("\n")).not.toContain("\x1b");
+    expect(texts.map((t) => t.trim())).toContain("FAIL a");
+    expect(texts.map((t) => t.trim())).toContain("ok");
+  });
+
   it("出错的调用不显示 diff", () => {
     const e = entry({ path: "a.js" }, { diff: "@@ a.js @@\n-x\n+y" }, "old 未出现");
     const lines = layoutEntry({ ...e, status: "error" }, 80, false);

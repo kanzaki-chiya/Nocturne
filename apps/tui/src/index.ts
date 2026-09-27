@@ -16,6 +16,7 @@ import { CursorClaimsContext } from "./components/input-cursor.js";
 import { createCursorStream } from "./cursor.js";
 import { detectTuiEnv } from "./env.js";
 import { sessionSavedLine } from "./exit-note.js";
+import { stripControls } from "./format.js";
 import { MOUSE_DISABLE, MOUSE_ENABLE, wrapMouseStdin, type MouseSource } from "./mouse.js";
 
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
@@ -183,7 +184,8 @@ export async function runTui(
   const dump = transcriptOut.current;
   if (dump !== undefined) {
     for (const line of dump()) {
-      stdout.write(`${line}\n`);
+      // 兜底：主屏上漏出的控制序列（颜色码）会染到后面所有输出
+      stdout.write(`${stripControls(line)}\n`);
     }
   }
   announce();

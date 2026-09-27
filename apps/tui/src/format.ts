@@ -35,6 +35,19 @@ export function boxSafe(text: string): string {
   return text.replace(BOX_AMBIG_RE, (c) => BOX_AMBIG_MAP[c] ?? c);
 }
 
+// CSI / OSC / 其他 ESC 序列，以及除换行、Tab 外的 C0 控制字符与 DEL
+const CONTROL_RE =
+  /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-_]?|[\x00-\x08\x0b-\x1f\x7f]/g;
+
+/**
+ * 去掉工具输出、文件内容里夹带的终端控制序列（命令自带的颜色码等）。
+ * 它们在全屏行里会打乱宽度计算，退出时原样打印到主屏还会让颜色一直漏到
+ * 后面的输出（例如整屏变红）。
+ */
+export function stripControls(text: string): string {
+  return text.replace(CONTROL_RE, "");
+}
+
 /** 按显示宽度截断为单行；超宽时截断并加省略号 */
 export function truncateLine(text: string, width: number, ellipsis = "…"): string {
   const oneLine = text.replace(/\r\n?|\n/g, " ");
