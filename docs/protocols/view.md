@@ -167,7 +167,7 @@ interface SessionNotice {
 | 事件 | 归约 |
 |---|---|
 | `session.created` | 填充 `meta`、`config` |
-| `session.config_changed` | payload 中存在的键覆盖 `config`；追加 `config` notice 条目 |
+| `session.config_changed` | payload 中存在的键覆盖 `config`（`shell` 不进 `config`，ADR-0022）；追加 `config` notice 条目（shell 切换文案：`shell 已切换为 <kind>（<path>）`） |
 | `turn.started` | `currentTurn = {turnId, turnIndex}`；`turnCount = max(turnCount, turnIndex)` |
 | `message.user` | 追加 `user` 条目（key `u:<messageId>`） |
 | `message.assistant` | `live.assistants` 中同 `messageId` 者移除并晋升：新建条目插入时间线（流式 text/reasoning 丢弃，以 `content` 为准）；无 live 对应物则直接新建条目 |

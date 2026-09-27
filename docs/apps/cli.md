@@ -94,6 +94,8 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `/effort <档位>` | 切换会话思考档位：`off` 或当前模型声明的档位；不支持时报错并列出可用档位 | `session.setReasoningEffort(level)` → `session.config_changed` |
 | `/preset` | 显示当前权限预设 | `session.state().config.permissionPreset` |
 | `/preset <name>` | 会话内切换权限预设 | `session.setPermissionPreset(name)` → `session.config_changed` |
+| `/shell` | 编号列表：当前生效 shell 与来源层、`auto` 加五种 shell 的探测结果（未安装标注「（未安装）」、`← 当前` 标注生效层声明值）；settings 层被 env/config 覆盖时给出提示 | `session.shellInfo()`、`session.listShells()` |
+| `/shell <种类\|编号>` | 会话内切换 shell（`auto` 清除选择回自动）；写入 `settings.json`，下一次 shell 调用生效；目标未安装时拒绝并列出可选项（`invalid_command`，不写 `settings.json`）；被 `NOCTURNE_SHELL`/`config.json` 覆盖时提示已写入但不生效 | `session.setShell(kind)` → `session.config_changed`（`shell`） |
 | `/context` | 显示若现在构建请求，上下文由什么组成 | `session.describeContext()` → `{ report: ContextReport; overBudget: boolean }`（见下） |
 | `/compact` | 手动触发 L2 摘要压缩 | `session.compact()` → `context.compacted(kind="summary")` |
 | `/resume` | 列出会话（编号、id、创建时间、绑定目录、模型、锁状态），输入编号切换，空行取消 | `runtime.listSessions()` + 会话打开逻辑（见下） |
@@ -126,7 +128,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `permission.requested` | 第 6 节的确认提示 |
 | `permission.resolved` | `└ 权限：<allow\|deny>（<source>：<rule\|reason>）` 一行——命中规则时展示 `rule`（如"用户配置第 3 条 {…}"），无规则时展示原因 |
 | `context.compacted` | `◇ 上下文已压缩（<kind>，至 seq <throughSeq>）` |
-| `session.config_changed` | `◇ 模型已切换为 <provider>/<model>`；`reasoningEffort` 变化时 `◇ 思考档位已切换为 <档位>` |
+| `session.config_changed` | `◇ 模型已切换为 <provider>/<model>`；`reasoningEffort` 变化时 `◇ 思考档位已切换为 <档位>`；`shell` 变化时 `◇ shell 已切换为 <kind>（<path>）` |
 | `provider.retry` | `! Provider 错误（<kind>），<delayMs>ms 后第 <n>/<max> 次重试` |
 | `runtime.warning` / `runtime.error` | `! <code>: <message>` |
 | `mcp.server` | `ready` 以外状态的转移打印一行 `! MCP <server>：<state>（<error?，含工具数>）`；`starting`/`ready` 不打扰（Phase 5） |
@@ -167,7 +169,7 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 | `NOCTURNE_API_KEY` | — | 凭据（默认变量名，可由 `--api-key-env` 改） |
 | `NOCTURNE_MODEL` | `--model` | 模型 id |
 | `NOCTURNE_HOME` | — | 数据目录（已有约定，repository-layout.md 第 5 节） |
-| `NOCTURNE_SHELL` | — | shell 工具使用的 shell（tools.md 第 6 节） |
+| `NOCTURNE_SHELL` | — | shell 选择的最高层：种类名（`auto \| pwsh \| powershell \| bash \| cmd \| sh`）或可执行文件路径/文件名；非法值警告并回退自动（tools.md 第 6 节、config.md 第 5 节） |
 | `NOCTURNE_CONSOLE_ENCODING` | — | 子进程输出解码的 WHATWG 编码覆盖（tools.md 第 6 节） |
 | `NOCTURNE_ASCII` | — | TUI 下框线/徽标退回 ASCII（[apps/tui.md](tui.md) 第 5 节） |
 | `NOCTURNE_DEBUG` | `--debug` | 诊断日志开关（[observability.md](../architecture/observability.md)） |

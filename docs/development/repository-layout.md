@@ -87,6 +87,7 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
 ```text
 <NOCTURNE_HOME>/
 ├── config.json                       用户手写配置（程序从不改写，config.md）
+├── settings.json                     程序维护的设置（/shell 写入 shell/shellPath，原子写；config.md 第 2 节，ADR-0022）
 ├── trust.json                        可信工作区列表（nctrn trust/untrust，原子写）
 ├── providers.json                    向导配置（nctrn setup、/provider，原子写；v0.2）
 ├── credentials.json                  凭据索引：DPAPI 密文或系统密钥库引用，不含明文（v0.2，provider-setup.md）

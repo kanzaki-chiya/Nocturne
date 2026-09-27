@@ -74,7 +74,7 @@ shell 工具支持以下种类，每种有自己固定的调用方式、输出�
 
 - **分段**：`shellSegments` 按种类切分。PowerShell 除 `;`、`|`、`&&`、`||`、`$(` 外，还要切开脚本块 `{ … }`（如 `ForEach-Object { Remove-Item … }`），`&`（调用运算符）后面的内容照常作为一段求值。cmd、sh、bash 保持现有规则。
 - **组合命令判定**（`isCompositeShell`，决定模式 allow 是否适用）同样按种类，PowerShell 的脚本块与 `;` 算组合。
-- **高风险命令**（full-access 下仍询问，permissions.md 第 6 节第 5 项）按种类补全：
+- **高风险命令**（full-access 下仍询问，permissions.md 第 6 节第 5 项）按种类补全（实现上表以纯数据集中在 `ShellDescriptor.risk`，随 shell 主体透传，匹配判定在权限层）：
   - PowerShell：`Remove-Item` 及其别名（`rm`、`ri`、`del`、`erase`、`rd`、`rmdir`）同时带递归与强制参数（`-Recurse`、`-Force`，允许 PowerShell 的参数前缀缩写与任意顺序）；`Format-Volume`、`Clear-Disk`；`Stop-Computer`、`Restart-Computer`；`Invoke-Expression` / `iex`（动态代码无法静态审查）；`git push --force` / `-f`、`git reset --hard`。
   - cmd（补上现有缺口）：`rd /s`、`rmdir /s`、`del /s`、`erase /s`、`format`。
   - bash：沿用 POSIX 表。

@@ -20,8 +20,8 @@
 ```text
 SessionState = fold(durableEvents)
   ├── meta：id、cwd、workspaceRoot、创建时间、标题
-  ├── config：当前模型、权限预设（取最近一次 session.config_changed）
-  ├── history：用户消息、assistant 消息、工具调用与结果、压缩记录（按顺序）
+  ├── config：当前模型、权限预设、思考档位、shell（取最近一次 session.config_changed）
+  ├── history：用户消息、assistant 消息、工具调用与结果、压缩记录、note 说明（按顺序；shell 切换在事件位置留 note，见 context.md 第 3 节）
   ├── usage：累计 token 用量
   ├── lastSeq
   └── openTurn / unsettledCalls：未结束的 Turn 与未结算的工具调用

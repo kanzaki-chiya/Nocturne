@@ -107,7 +107,7 @@
 
 - **负责**：按层级加载配置（内置默认 < 用户 < 项目 < 环境变量 < 命令行参数）；校验；记录每个配置值的来源；项目配置的信任判定（`trustedWorkspaces`）；按工作区读写项目 Grant 文件；读取 Provider 凭据所需的环境变量。
 - **不负责**：解释配置含义（各模块自己消费自己的配置段）；权限求值（permission 只接收已合并、已标注来源与信任状态的规则与 Grant 集合）。
-- **公开接口**：`loadConfig(platform, { cliArgs })` → `RuntimeConfig`（`base` + `forWorkspace(workspaceRoot)`，见 [config.md](config.md) 第 6 节）。v0.2 增补向导写入与凭据读取（`saveSetupProvider`、`setCredential`、`removeSetupProvider`、`describeProviders`、`credentials`），以及 `runtime.updateProviders`，见 [provider-setup.md](provider-setup.md) 第 6 节。
+- **公开接口**：`loadConfig(platform, { cliArgs })` → `RuntimeConfig`（`base` + `forWorkspace(workspaceRoot)`，见 [config.md](config.md) 第 6 节）。v0.2 增补向导写入与凭据读取（`saveSetupProvider`、`setCredential`、`removeSetupProvider`、`describeProviders`、`credentials`），以及 `runtime.updateProviders`，见 [provider-setup.md](provider-setup.md) 第 6 节。ADR-0022 增补 `shellSetting()` / `setShellSetting(kind, path?)`——`settings.json` 的读取与原子写。
 - **依赖**：protocol、platform。
 - 详见 [config.md](config.md)。
 
@@ -127,8 +127,8 @@
 
 ### platform
 
-- **负责**：文件系统访问、子进程启动与终止（含进程树）、路径规范化、用户目录解析，屏蔽 Windows / macOS / Linux 差异。
-- **不负责**：任何业务判断（例如"是否在工作区内"属于 permission）。
+- **负责**：文件系统访问、子进程启动与终止（含进程树）、路径规范化、用户目录解析，屏蔽 Windows / macOS / Linux 差异；shell 种类描述符与安装探测（`shells.ts`，ADR-0022：调用形态、语法说明、分页器名单、大小写敏感性等元数据随 `ShellDescriptor` 交给 tools / permission 消费，platform 不 import 权限语义）。
+- **不负责**：任何业务判断（例如"是否在工作区内"属于 permission；shell 命令的风险判定同）。
 - **依赖**：无（仅 Node.js 标准库）。
 
 ### input-history（`src/input-history.ts`，单文件）
@@ -151,6 +151,8 @@ await session.respondPermission(requestId, { decision: "allow", remember: "proje
 await session.setModel({ provider: "…", model: "…" })          // → session.config_changed
 await session.setPermissionPreset("auto-edit")                // → session.config_changed（Phase 3）
 await session.setReasoningEffort("high")                      // → session.config_changed；Turn 中允许，下一个 Turn 生效（ADR-0018）
+await session.setShell("pwsh")                                // → session.config_changed（shell）；下一次 shell 调用生效（ADR-0022）
+session.shellInfo() / session.listShells()                    // 生效 shell 与来源层 / 全部种类的探测结果（含不可用）
 await session.compact()                                       // → context.compacted("summary")
 const { report, overBudget } = session.describeContext()       // ContextReport 查询，不产事件
 runtime.listModels()                                          // 全部可用模型（/model 用）

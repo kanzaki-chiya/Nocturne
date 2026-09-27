@@ -49,6 +49,12 @@ interface ConfigFile {
     /** 追加的权限规则，形状即 PermissionRule（permissions.md 第 2 节） */
     rules?: PermissionRule[];
   };
+  /** shell 选择（ADR-0022）：auto | pwsh | powershell | bash | cmd | sh */
+  shell?: string;
+  /** 非标准安装位置的可执行文件路径；种类仍由 shell 决定。
+      未给 shell 时：文件名匹配已知 shell（pwsh/powershell/bash/cmd/sh）可推断种类，
+      否则声明无效——合并层警告后忽略（不静默回退 auto 吞掉路径） */
+  shellPath?: string;
   /** Turn 参数覆盖（agent-loop.md 3.8）。maxSteps 为可选正整数：设置后主对话
       单 Turn 步数受其限制并以 max_steps 收尾；未设即不限制 */
   turn?: { maxSteps?: number; retryLimit?: number; retryBaseDelayMs?: number; firstEventTimeoutMs?: number; idleTimeoutMs?: number };
@@ -65,17 +71,19 @@ interface ConfigFile {
 
 | 字段 | 合并方式 |
 |---|---|
-| `model`、`permissions.preset`、`reasoningEffort`、`turn.*` | 高层覆盖低层 |
+| `model`、`permissions.preset`、`reasoningEffort`、`turn.*`、`shell`、`shellPath` | 高层覆盖低层 |
 | `providers` | 按 `id` 合并：同 id 条目浅合并（高层字段覆盖），其中 `models` 按模型 id 再逐条合并；不同 id 并存 |
 | `permissions.rules` | 追加：高层规则排在低层之后（权限"后写优先"语义见 permissions.md 5.1） |
 | `mcp.servers` | 按服务器 id 浅合并（同 `providers`）；不同 id 并存 |
 | `hooks.*` | 按事件点追加：用户级条目在前、项目级在后，执行顺序即此顺序（hooks.md 第 2 节） |
 
+**机器维护的 `settings.json`**（ADR-0022 第 3 节）：`<NOCTURNE_HOME>/settings.json` 由程序原子写入（临时文件 + rename），只写自己的文件；当前只有 `shell`/`shellPath` 两个字段，由 `/shell`（或 `session.setShell`）写入，`"auto"` 表示清除回自动。它不进上面的合并链，只参与 shell 选择的合成：`NOCTURNE_SHELL` > `config.json` > `settings.json` > 自动（tools.md 第 6 节）；手写 `config.json` 的同名字段覆盖它，程序不改写 `config.json`。文件损坏或 `shell` 值无法识别时忽略并警告，不阻塞启动；单独给出 `shellPath` 时同样要先能推断种类（见上表注释）。读入时保留未知字段原样写回，后续偏好就地扩展。
+
 ## 3. 项目配置的信任模型
 
 项目配置来自被操作的仓库——它可能是恶意的。因此：
 
-- **未信任时**，项目配置里只有 `permissions.rules` 中**收紧方向**（`ask` / `deny`）的规则参与求值：与可信结果取更严格者，`allow` 被忽略。其余字段（`model`、`providers`、`preset`、`reasoningEffort`、`turn`）全部忽略；`mcp` 与 `hooks` 两段同样**整段忽略**——它们定义的是要启动的进程，"运行但收紧"没有意义（进程一旦启动就是任意代码），收紧方向在可执行配置上不存在。这保证一份仓库配置永远无法放宽用户的安全边界、无法把会话引到别的 Provider 或模型，也无法让它在用户不知情时执行任何命令。
+- **未信任时**，项目配置里只有 `permissions.rules` 中**收紧方向**（`ask` / `deny`）的规则参与求值：与可信结果取更严格者，`allow` 被忽略。其余字段（`model`、`providers`、`preset`、`reasoningEffort`、`turn`、`shell`、`shellPath`）全部忽略；`mcp` 与 `hooks` 两段同样**整段忽略**——它们定义的是要启动的进程，"运行但收紧"没有意义（进程一旦启动就是任意代码），收紧方向在可执行配置上不存在。这保证一份仓库配置永远无法放宽用户的安全边界、无法把会话引到别的 Provider 或模型，也无法让它在用户不知情时执行任何命令。
 - **信任后**，项目配置整体进入第 1 节的正常分层（规则排序位于用户配置之后、环境变量之前）。
 - 信任的标记存放在**机器维护的** `<NOCTURNE_HOME>/trust.json`：`{ version, workspaces: string[] }`，列出工作区真实路径（`realpath` 后比较，大小写规则同平台）。文件由 `nctrn trust` / `nctrn untrust` 原子写（临时文件 + rename）；用户也可以手工编辑。它是唯一能授予信任的来源——项目配置里没有这个字段，仓库不能自我授权。
 - 会话打开（create / resume）时若发现项目配置存在但未信任，发出临时事件 `runtime.warning(code="project_config_untrusted")` 告知客户端；CLI 显示如何信任（`nctrn trust`，见 [apps/cli.md](../apps/cli.md)）。
@@ -101,7 +109,7 @@ Grant 文件的读写由 `config` 完成（它是"按工作区存放的用户数
 | `NOCTURNE_MODEL` | `model` |
 | `NOCTURNE_API_TYPE` + `NOCTURNE_BASE_URL` + `NOCTURNE_API_KEY` / `--api-key-env` 指定的变量 | 合成一个 Provider 条目：`id` 取 api-type 值，`apiKeyEnv` 记录变量名（凭据值本身不进配置对象，由适配器经 `platform.env` 读取） |
 | `NOCTURNE_HOME` | 数据目录位置（由 platform 消费，见 [repository-layout.md](../development/repository-layout.md) 第 5 节） |
-| `NOCTURNE_SHELL` | shell 工具的执行 shell（tools.md 第 6 节，不经配置层） |
+| `NOCTURNE_SHELL` | shell 选择的最高层（ADR-0022）：种类名 `auto \| pwsh \| powershell \| bash \| cmd \| sh`，或可执行文件路径/文件名（按文件名识别种类，忽略大小写与 `.exe`）；无法识别时启动警告并回退自动选择（tools.md 第 6 节） |
 
 - `NOCTURNE_API_TYPE` 缺省 `openai-compatible`；仅当该层至少能提供 `type` 之外的必填字段（openai-compatible 需要 `baseURL`）或显式设置了 `NOCTURNE_API_TYPE` 时才合成 Provider 条目。
 - 命令行参数层同理合成一个条目（id 同 api-type），按 id 合并规则覆盖同 id 的环境变量条目。

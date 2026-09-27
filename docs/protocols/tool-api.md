@@ -23,8 +23,9 @@ interface ToolDefinition<Input = unknown, Output = unknown> {
    *（含 updatedInput 重新校验）之后、permissionSubjects 之前调用；返回非空
    * 错误说明即以 invalid_input 拒绝——不请求权限，execute 不会被调用。
    * 未声明时跳过。用途：schema 表达不了的语义约束（如 shell 拒绝末尾分页）。
+   * scope 参数（ADR-0022）携带当前生效 shell，供按种类的检查使用。
    */
-  validateInput?(input: Input): string | undefined
+  validateInput?(input: Input, scope?: ToolScope): string | undefined
   /** 执行。只在权限允许后被调用 */
   execute(input: Input, ctx: ToolContext): Promise<ToolResult<Output>>
 }
@@ -49,8 +50,16 @@ interface ToolTraits {
 - **`permissionSubjects` 必须是纯函数**：它只做词法层面的规范化（按 `cwd` 把相对路径变成绝对路径）。解析符号链接等需要 I/O 的工作由执行器通过 `platform` 完成，结果再交给权限层（[permissions.md](../architecture/permissions.md) 第 4 节）。
 
 ```ts
-/** 工具声明的未解析主体（subagent 为 Phase 6 新增，见 subagent.md） */
-type SubjectRequest = { kind: "read" | "edit" | "shell" | "network" | "mcp" | "subagent"; target: string }
+/** 工具声明的未解析主体（subagent 为 Phase 6 新增，见 subagent.md；
+    shell 主体的可选 shell/shellRisk 字段记录执行种类与高风险元数据，ADR-0022） */
+type SubjectRequest = {
+  kind: "read" | "edit" | "shell" | "network" | "mcp" | "subagent"
+  target: string
+  shell?: string
+  /** 生效 ShellDescriptor 的纯数据高风险元数据（表集中在 platform，
+      匹配判定在权限层）；缺省时权限层按 POSIX 基础表保守处理 */
+  shellRisk?: ShellRiskProfile
+}
 // 解析后的 PermissionSubject 定义见 events.md 第 4 节
 ```
 
@@ -62,6 +71,7 @@ interface ToolScope {
   cwd: string              // 会话工作目录（绝对路径）
   workspaceRoot: string
   paths: PathOps           // 来自 platform：词法路径规范化与包含判断；大小写敏感性由 platform 决定
+  shell?: ShellResolution  // 当前生效 shell 的解析结果（ADR-0022）：scope 组装时按次取值，不在 Turn 开始快照；供方言化分词与分页器名单使用
 }
 
 /** 执行时可用的能力。刻意保持窄：工具需要新能力时，先在本文增加字段 */
@@ -76,6 +86,8 @@ interface ToolContext extends ToolScope {
   }
   fs: FileSystem                    // 来自 platform
   process: ProcessRunner            // 来自 platform；支持超时与进程树终止；spawnShell 的 exit 结算与输出管道分离见 tools.md 第 6 节
+  shell?: ShellResolution           // 本次调用生效 shell 的解析结果（ADR-0022）；descriptor 缺失（显式选择不可用）时 error 给出可选项
+  shellEnvStrip?: readonly string[] // shell 子进程环境中要剥离的凭据变量名（provider-setup.md 第 4 节）
   readState: ReadStateStore         // "先读后写"所需的已读记录
   progress(chunk: string, stream?: "stdout" | "stderr" | "info"): void   // 产生 tool.progress 临时事件
 }

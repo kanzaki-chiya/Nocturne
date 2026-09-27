@@ -1,5 +1,18 @@
 # 更新日志
 
+## 未发布
+
+### Shell 可选（ADR-0022）
+
+- shell 工具可在 `pwsh`（PowerShell 7+）、`powershell`（Windows PowerShell 5.1）、`bash`（Windows 为 Git Bash）、`cmd`、`sh`（POSIX）间切换：TUI `/shell` 打开选择页（未安装的灰显不可选、当前值高亮，另有「自动」项），CLI `/shell` 打印编号列表，`/shell <种类|编号>` 直接切换；选择写入程序维护的新文件 `<NOCTURNE_HOME>/settings.json`，从下一次 shell 调用起生效。优先级为 `NOCTURNE_SHELL` > `config.json` 的 `shell`/`shellPath` > `settings.json` > 自动——Windows 自动按 pwsh → Git Bash → cmd 探测，POSIX 为 sh。`NOCTURNE_SHELL` 现在按种类名或可执行文件路径/文件名识别（不再只是替换可执行文件），非法值启动时警告并回退自动。
+- PowerShell 命令经 `-EncodedCommand`（UTF-16LE）执行：输出固定 UTF-8 无 BOM、静默进度流，原生命令透出其退出码；Git Bash 优先由 `git.exe` 推导 `bin\bash.exe`，避开 WSL 入口。
+- 权限按 shell 方言判定：PowerShell 的脚本块视为组合命令边界；高风险命令表补全 cmd（`rd /s`、`rmdir /s`、`del /s`、`erase /s`、`format`）与 PowerShell（`Remove-Item` 及别名带递归+强制、`Format-Volume`、`Clear-Disk`、`Stop-Computer`/`Restart-Computer`、`Invoke-Expression`/`iex`，大小写不敏感并允许参数前缀缩写）；出现 `pwsh`/`powershell` 搭配 `-EncodedCommand` 的命令一律需要确认。末尾分页拦截按种类识别，PowerShell 的 `Out-Host -Paging`/`oh -Paging` 也算分页。
+- 中途切换 shell 不改会话开头的环境信息（保护提示缓存）；会在历史该位置给模型留一条切换说明，恢复会话后仍可见。
+
+### 行为变化
+
+- 装有 pwsh 7 的 Windows 机器默认 shell 从 cmd 变为 pwsh；cmd 专属写法（`%VAR%`、`dir /b`）在 pwsh 下会报错，需要旧行为时用 `/shell cmd` 或 `NOCTURNE_SHELL=cmd`。
+
 ## 0.4.0
 
 ### 界面

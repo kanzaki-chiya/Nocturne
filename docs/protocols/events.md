@@ -69,7 +69,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | 类型 | turnId | payload |
 |---|---|---|
 | `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`reasoningEffort?`（思考档位，ADR-0018；缺省按 `off` 处理）、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节） |
-| `session.config_changed` | — | 变化的字段：`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018） |
+| `session.config_changed` | — | 变化的字段：`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018）、`shell?: { kind, path }`（shell 切换，ADR-0022：折叠时在该事件位置留 `note` 历史条目给模型，见 [context.md](../architecture/context.md) 第 3 节） |
 | `turn.started` | ✓ | `turnIndex` |
 | `message.user` | ✓ | `messageId`、`content: ContentBlock[]` |
 | `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`finishReason: FinishReason \| "aborted"` |
@@ -104,7 +104,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `tool.progress` | ✓ | `callId`、`stream: "stdout" \| "stderr" \| "info"`、`chunk` |
 | `runtime.status` | ✓ 或 — | `status: "idle" \| "thinking" \| "running_tool" \| "waiting_permission" \| "retrying" \| "compacting" \| "failed"` |
 | `provider.retry` | ✓ | `attempt`、`maxAttempts`、`delayMs`、`error: { kind, message }` |
-| `runtime.warning` | ✓ 或 — | `code`、`message`（Phase 5 增补的 `code`：`project_config_untrusted`（含被忽略的 `mcp`/`hooks` 段）、`mcp_server_failed`、`mcp_server_crashed`、`mcp_tool_conflict`、`mcp_env_missing`、`hook_failed`、`debug_sink_failed`、`grant_persist_failed` 等；v0.2 增补 `model_capabilities_defaulted`、`provider_setup_invalid`，见 [provider-setup.md](../architecture/provider-setup.md)） |
+| `runtime.warning` | ✓ 或 — | `code`、`message`（Phase 5 增补的 `code`：`project_config_untrusted`（含被忽略的 `mcp`/`hooks` 段）、`mcp_server_failed`、`mcp_server_crashed`、`mcp_tool_conflict`、`mcp_env_missing`、`hook_failed`、`debug_sink_failed`、`grant_persist_failed` 等；v0.2 增补 `model_capabilities_defaulted`、`provider_setup_invalid`，见 [provider-setup.md](../architecture/provider-setup.md)；ADR-0022 增补 `shell_env_invalid`（非法 `NOCTURNE_SHELL` 回退自动）、`shell_overridden`（settings 层的 shell 选择被 env/config 覆盖）） |
 | `runtime.error` | ✓ 或 — | `code`、`message`（例如日志写入失败导致会话进入 `failed` 状态） |
 | `mcp.server` | — | `server`、`state: "starting" \| "ready" \| "failed" \| "crashed" \| "stopped"`、`toolCount?`、`error?`（Phase 5，MCP 服务器生命周期状态转移，见 [mcp.md](../architecture/mcp.md) 第 7 节） |
 
@@ -140,6 +140,7 @@ type PermissionSubject = {
   target: string            // 工具给出的目标（规范化后的路径、命令、URL）
   resolved?: string         // 路径类：解析符号链接 / junction 后的真实路径
   where?: "workspace" | "outside"
+  shell?: string            // shell 主体：执行该命令的 shell 种类（ADR-0022；旧日志缺省按 POSIX 方言保守求值）
 }
 ```
 
@@ -174,6 +175,7 @@ type PermissionSubject = {
 | `setPermissionPreset(name)` | 会话空闲；未知预设名返回 `invalid_command` | `session.config_changed`（`permissionPreset`）；生效的是**下一次**权限求值 | Phase 3（`/preset`） |
 | `setReasoningEffort(level)` | Turn 进行中同样允许（`config_changed` 无 turnId，对重放不变量无影响）；档位名未知或当前模型未声明该档位返回 `invalid_command`，并列出可用档位 | `session.config_changed`（`reasoningEffort`）；生效的是**下一个 Turn**——本 Turn 请求沿用 Turn 开始快照（Anthropic 单一思考模式约束） | ADR-0018（CLI `/effort`、TUI Shift+Tab） |
 | `compact()` | 会话空闲（Turn 进行中返回 `session_busy`）；上一次摘要进行中返回 `compaction_in_progress`，请求被中断返回 `compaction_interrupted`，Provider 失败或无可行边界返回 `compaction_failed` | `context.compacted(kind="summary")` | Phase 2（`/compact`，一次模型调用生成摘要；失败或中断不写入任何事件、历史不变，见 [context.md](../architecture/context.md) §6.2/§6.6） |
+| `setShell(kind)` | 会话可用；未知种类或目标未安装（`auto` 无可解析结果同理）返回 `invalid_command` 并列出可选项——拒绝发生在写 settings.json 之前，不产生事件（Turn 进行中也可切换，已执行的命令不受影响） | 实际生效变化时发 `session.config_changed`（`shell: { kind, path }`）；生效的是**下一次** shell 工具调用——选择逐次解析、不在 Turn 开始快照。`"auto"` 清除 settings.json 的选择；被 `NOCTURNE_SHELL`/`config.json` 覆盖时照常写入但不生效、发 `runtime.warning(shell_overridden)`，不发 `config_changed` | ADR-0022（CLI/TUI `/shell`） |
 
 会话处于 `failed` 状态时，除 `close` 外的命令都返回 `session_failed`。
 
