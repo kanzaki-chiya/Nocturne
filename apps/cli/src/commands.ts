@@ -2,7 +2,13 @@
  * 斜杠命令分发（cli.md 第 4 节）。纯逻辑层：依赖注入 session/runtime/io，
  * 离线测试不需要真实终端。REPL 内命令错误只显示，不退出进程。
  */
-import type { ModelInfo, Runtime, RuntimeConfig, RuntimeSession } from "@nocturne/core";
+import type {
+  ModelInfo,
+  Runtime,
+  RuntimeConfig,
+  RuntimeSession,
+  SessionShellInfo,
+} from "@nocturne/core";
 import { RuntimeCommandError } from "@nocturne/core";
 import { cliHelpText } from "@nocturne/tui/slash-catalog";
 
@@ -300,6 +306,76 @@ export async function runSlashCommand(
         // session.config_changed 事件渲染确认行
       } catch (e) {
         io.print(`! ${errorText(e)}`);
+      }
+      return "handled";
+    }
+    case "/shell": {
+      // ADR-0022 第 4 节：/shell 打印编号列表；/shell <种类|编号> 切换
+      const info = session.shellInfo();
+      const detected = session.listShells();
+      const sourceLabel = (s: SessionShellInfo["source"]): string =>
+        s === "env"
+          ? "NOCTURNE_SHELL"
+          : s === "config"
+            ? "config.json"
+            : s === "settings"
+              ? "settings.json"
+              : "自动选择";
+      if (rest.length === 0) {
+        const cur = info.effective;
+        const lines = [
+          cur !== undefined
+            ? `当前 shell：${cur.kind}（${cur.name}，${cur.path}）——来源：${sourceLabel(info.source)}`
+            : `当前 shell 不可用：${info.error ?? "未探测到可用 shell"}`,
+        ];
+        if (info.overriddenBy !== undefined) {
+          lines.push(
+            `注意：settings.json 中的选择当前被 ${sourceLabel(info.overriddenBy)} 覆盖，不会生效`,
+          );
+        }
+        lines.push("   编号  种类          可执行文件");
+        const rows: { n: number; kind: string; desc: string }[] = [
+          {
+            n: 1,
+            kind: "auto",
+            desc:
+              info.selected === "auto" && cur !== undefined ? `自动（当前为 ${cur.kind}）` : "自动",
+          },
+          ...detected.map((d, i) => ({
+            n: i + 2,
+            kind: d.kind,
+            desc: d.executable ?? "（未安装）",
+          })),
+        ];
+        for (const r of rows) {
+          const mark = info.selected === r.kind ? "  ← 当前" : "";
+          lines.push(`   ${String(r.n).padStart(4)}  ${r.kind.padEnd(12)} ${r.desc}${mark}`);
+        }
+        io.print(lines.join("\n"));
+        return "handled";
+      }
+      const arg = rest.join(" ").trim().toLowerCase();
+      let target = arg;
+      if (/^\d+$/.test(arg)) {
+        const n = Number(arg);
+        target = n === 1 ? "auto" : (detected[n - 2]?.kind ?? arg);
+      }
+      try {
+        await session.setShell(target);
+      } catch (e) {
+        io.print(`! ${errorText(e)}`);
+        return "handled";
+      }
+      const after = session.shellInfo();
+      if (after.overriddenBy !== undefined) {
+        io.print(
+          `已写入 settings.json（当前由 ${sourceLabel(after.overriddenBy)} 指定，移除后才会生效）`,
+        );
+      } else if (after.effective !== undefined) {
+        // session.config_changed.shell 的确认行由事件渲染输出；这里只兜底
+        io.print(`shell 已切换为 ${after.effective.kind}（${after.effective.path}）`);
+      } else {
+        io.print(`! ${after.error ?? "所选 shell 不可用"}`);
       }
       return "handled";
     }

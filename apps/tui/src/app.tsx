@@ -1784,6 +1784,35 @@ function SessionApp({
     value: s.id,
   }));
 
+  // /shell 选择页（ADR-0022 第 4 节）：auto 在前，未安装灰显不可选，
+  // 当前选择高亮；被 env/config 覆盖时顶部说明。
+  // shellInfo/listShells 只在弹层打开时取值，不随每帧渲染重复探测
+  const shellPick =
+    overlay === "shell" ? { info: session.shellInfo(), detected: session.listShells() } : undefined;
+  const shellItems: PickItem<string>[] =
+    shellPick === undefined
+      ? []
+      : [
+          {
+            label: "auto",
+            hint:
+              shellPick.info.effective !== undefined
+                ? `自动（当前为 ${shellPick.info.effective.kind}）`
+                : "自动选择",
+            value: "auto",
+          },
+          ...shellPick.detected.map((d) => ({
+            label: d.available ? `${d.kind}  ${d.name}` : `${d.kind}（未安装）`,
+            hint: d.executable,
+            value: d.kind,
+            disabled: !d.available,
+          })),
+        ];
+  const shellNote =
+    shellPick?.info.overriddenBy !== undefined
+      ? `当前由 ${shellPick.info.overriddenBy === "env" ? "NOCTURNE_SHELL" : "config.json"} 指定，选择写入 settings.json 但不生效`
+      : undefined;
+
   const budget = frameBudget(
     rows,
     completionOpen ? Math.min(8, candidates.length) : 0,
@@ -2061,6 +2090,25 @@ function SessionApp({
           setOverlay(undefined);
           clearInput();
           void session.setPermissionPreset(name).catch((e: unknown) => {
+            pushLine(`! ${errText(e)}`);
+          });
+        }}
+        onCancel={() => {
+          setOverlay(undefined);
+        }}
+      />
+    ) : overlay === "shell" && shellPick !== undefined ? (
+      <PickList
+        title="选择 shell"
+        note={shellNote}
+        items={shellItems}
+        initialValue={shellPick.info.selected}
+        active
+        width={width}
+        onPick={(kind) => {
+          setOverlay(undefined);
+          clearInput();
+          void session.setShell(kind).catch((e: unknown) => {
             pushLine(`! ${errText(e)}`);
           });
         }}

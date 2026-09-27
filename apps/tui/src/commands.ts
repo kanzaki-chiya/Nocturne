@@ -7,7 +7,7 @@ import { normalizeModelRef, type RuntimeConfig, type RuntimeSession } from "@noc
 
 import { helpLines as catalogHelpLines } from "./slash-catalog.js";
 
-export type OverlayName = "context" | "help" | "resume" | "preset" | "effort";
+export type OverlayName = "context" | "help" | "resume" | "preset" | "effort" | "shell";
 
 /** /provider 向导启动形态（add / key / thinking） */
 export type ProviderWizardStart =
@@ -133,6 +133,37 @@ export async function runSlash(
       } catch (e) {
         return { kind: "message", text: `! ${errText(e)}` };
       }
+    }
+    case "/shell": {
+      // ADR-0022 第 4 节：无参打开选择页（未安装灰显、当前高亮）；
+      // 带种类名直接切换——生效从下一次 shell 调用起
+      if (arg === "") return { kind: "overlay", name: "shell" };
+      const before = session.shellInfo();
+      try {
+        await session.setShell(arg);
+      } catch (e) {
+        return { kind: "message", text: `! ${errText(e)}` };
+      }
+      const after = session.shellInfo();
+      if (after.overriddenBy !== undefined) {
+        return {
+          kind: "message",
+          text: `已写入 settings.json（当前由 ${
+            after.overriddenBy === "env" ? "NOCTURNE_SHELL" : "config.json"
+          } 指定，移除后才会生效）`,
+        };
+      }
+      if (after.effective === undefined) {
+        return { kind: "message", text: `! ${after.error ?? "所选 shell 不可用"}` };
+      }
+      // 确认行由 session.config_changed 事件渲染；未发生实际切换时兜底
+      if (
+        before.effective?.kind === after.effective.kind &&
+        before.effective.path === after.effective.path
+      ) {
+        return { kind: "message", text: `shell 已是 ${after.effective.kind}` };
+      }
+      return { kind: "none" };
     }
     case "/context":
       return { kind: "overlay", name: "context" };

@@ -17,4 +17,17 @@ describe("CLI completer", () => {
     );
     expect(readlineCompleter("/preset d", ctx)[0]).toContain("/preset default");
   });
+
+  it("/shell 参数补全：auto 在前，列出全部 shell 种类", () => {
+    expect(readlineCompleter("/shell ", ctx)[0]).toEqual([
+      "/shell auto",
+      "/shell pwsh",
+      "/shell powershell",
+      "/shell bash",
+      "/shell cmd",
+      "/shell sh",
+    ]);
+    expect(readlineCompleter("/shell b", ctx)[0]).toEqual(["/shell bash"]);
+    expect(readlineCompleter("/sh", ctx)[0]).toContain("/shell");
+  });
 });

@@ -2,6 +2,7 @@
  * 斜杠命令表：/help 与补全共用这一份，CLI readline completer 也用它。
  * 不许在补全路径再抄一份命令名。
  */
+
 export interface SlashCommand {
   /** 含斜杠，如 `/model` */
   name: string;
@@ -10,7 +11,7 @@ export interface SlashCommand {
   /** CLI /help 的说明；缺省用 summary */
   cli?: string | undefined;
   /** 命令名后空格进入的参数补全 */
-  args?: "effort" | "provider" | "preset" | undefined;
+  args?: "effort" | "provider" | "preset" | "shell" | undefined;
 }
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
@@ -18,6 +19,12 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "/model", summary: "切换模型", cli: "列出或切换模型" },
   { name: "/effort", summary: "切换思考档位", cli: "显示或切换思考强度", args: "effort" },
   { name: "/preset", summary: "切换权限预设", cli: "显示或切换权限预设", args: "preset" },
+  {
+    name: "/shell",
+    summary: "切换 shell",
+    cli: "列出或切换 shell（pwsh/bash/cmd…）",
+    args: "shell",
+  },
   { name: "/context", summary: "查看上下文", cli: "显示上下文组成" },
   { name: "/mcp", summary: "MCP 状态", cli: "显示本会话 MCP 服务器状态" },
   { name: "/compact", summary: "压缩上下文", cli: "手动压缩上下文" },
@@ -31,6 +38,9 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
 
 /** 与权限层预设名一致；补全与 Alt+M 共用，不另抄一份。 */
 export const PRESET_NAMES = ["read-only", "default", "auto-edit", "full-access"] as const;
+
+/** 与 platform SHELL_KINDS 一致（本文件不许 import，depcheck 固化）；补全只列名字，可用性以 /shell 为准 */
+const SHELL_KIND_NAMES = ["pwsh", "powershell", "bash", "cmd", "sh"] as const;
 
 export const PROVIDER_SUBCOMMANDS: readonly { name: string; summary: string }[] = [
   { name: "add", summary: "添加服务商" },
@@ -121,6 +131,10 @@ function argItems(
   }
   if (command.args === "preset") {
     return PRESET_NAMES.map((name) => labeled(name, name, `${prefix}${name}`));
+  }
+  if (command.args === "shell") {
+    // ADR-0022：auto 在前；可用性以选择页（/shell）为准，补全只列名字
+    return ["auto", ...SHELL_KIND_NAMES].map((name) => labeled(name, name, `${prefix}${name}`));
   }
   const subs = PROVIDER_SUBCOMMANDS.map((sub) =>
     labeled(sub.name, `${sub.name}  ${sub.summary}`, `${prefix}${sub.name}`),

@@ -136,6 +136,9 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
       if (p.model !== undefined) lines.push(`◇ 模型已切换为 ${p.model.provider}/${p.model.model}`);
       if (p.permissionPreset !== undefined) lines.push(`◇ 权限预设已切换为 ${p.permissionPreset}`);
       if (p.reasoningEffort !== undefined) lines.push(`◇ 思考强度已切换为 ${p.reasoningEffort}`);
+      if (p.shell !== undefined) {
+        lines.push(`◇ shell 已切换为 ${p.shell.kind}（${p.shell.path}）`);
+      }
       return lines.map(aux);
     }
     case "provider.retry": {

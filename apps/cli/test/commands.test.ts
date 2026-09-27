@@ -382,6 +382,109 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(c2.lines.join("")).toContain("交互式终端");
   });
 
+  it("/shell 无参数：编号列表含 auto 与全部种类、标注当前与来源；覆盖提示", async () => {
+    const { lines, io } = capture();
+    const session = fakeSession({
+      shellInfo: () => ({
+        selected: "cmd",
+        source: "settings",
+        effective: { kind: "cmd", name: "cmd.exe", path: "C:\\Windows\\System32\\cmd.exe" },
+        overriddenBy: "env",
+      }),
+      listShells: () => [
+        { kind: "pwsh", name: "PowerShell 7", executable: "C:\\ps\\pwsh.exe", available: true },
+        { kind: "powershell", name: "Windows PowerShell 5.1", available: false },
+        { kind: "bash", name: "Git Bash", executable: "C:\\Git\\bin\\bash.exe", available: true },
+        {
+          kind: "cmd",
+          name: "cmd.exe",
+          executable: "C:\\Windows\\System32\\cmd.exe",
+          available: true,
+        },
+        { kind: "sh", name: "POSIX sh", available: false },
+      ],
+      setShell: () => Promise.resolve(),
+    });
+    await runSlashCommand("/shell", session, fakeRuntime, io);
+    const text = lines.join("");
+    expect(text).toContain("当前 shell：cmd");
+    expect(text).toContain("settings.json");
+    expect(text).toContain("auto");
+    expect(text).toContain("pwsh");
+    expect(text).toContain("（未安装）");
+    expect(text).toContain("← 当前");
+    expect(text).toContain("NOCTURNE_SHELL"); // overriddenBy 提示
+  });
+
+  it("/shell <种类|编号> 调 setShell；切换成功打印确认；无效值显示错误", async () => {
+    const calls: string[] = [];
+    let cur: { kind: string; name: string; path: string } | undefined = {
+      kind: "cmd",
+      name: "cmd.exe",
+      path: "C:\\Windows\\System32\\cmd.exe",
+    };
+    const session = fakeSession({
+      shellInfo: () => ({
+        selected: calls.at(-1) ?? "auto",
+        source: calls.length > 0 ? "settings" : "auto",
+        ...(cur !== undefined ? { effective: cur } : {}),
+      }),
+      listShells: () => [
+        { kind: "pwsh", name: "PowerShell 7", executable: "C:\\ps\\pwsh.exe", available: true },
+        { kind: "powershell", name: "ps51", available: false },
+        { kind: "bash", name: "Git Bash", executable: "C:\\Git\\bin\\bash.exe", available: true },
+        {
+          kind: "cmd",
+          name: "cmd.exe",
+          executable: "C:\\Windows\\System32\\cmd.exe",
+          available: true,
+        },
+        { kind: "sh", name: "POSIX sh", available: false },
+      ],
+      setShell: async (k) => {
+        calls.push(k);
+        cur = { kind: k, name: k, path: `C:\\x\\${k}.exe` };
+      },
+    });
+    const { lines, io } = capture();
+    await runSlashCommand("/shell pwsh", session, fakeRuntime, io);
+    expect(calls).toEqual(["pwsh"]);
+    expect(lines.join("")).toContain("pwsh");
+
+    // 编号选择：1=auto，其后按 SHELL_KINDS 顺序（2=pwsh, 3=powershell, 4=bash）
+    await runSlashCommand("/shell 4", session, fakeRuntime, io);
+    expect(calls.at(-1)).toBe("bash");
+    await runSlashCommand("/shell 1", session, fakeRuntime, io);
+    expect(calls.at(-1)).toBe("auto");
+
+    const failing = fakeSession({
+      shellInfo: () => ({ selected: "auto", source: "auto" as const }),
+      listShells: () => [],
+      setShell: async () => {
+        throw new RuntimeCommandError("invalid_command", "未知 shell");
+      },
+    });
+    await runSlashCommand("/shell fish", failing, fakeRuntime, io);
+    expect(lines.join("")).toContain("未知 shell");
+  });
+
+  it("/shell 切换被覆盖时打印 settings 已写入但不生效的提示", async () => {
+    const session = fakeSession({
+      shellInfo: () => ({
+        selected: "bash",
+        source: "env",
+        effective: { kind: "cmd", name: "cmd.exe", path: "C:\\Windows\\System32\\cmd.exe" },
+        overriddenBy: "env" as const,
+      }),
+      listShells: () => [],
+      setShell: () => Promise.resolve(),
+    });
+    const { lines, io } = capture();
+    await runSlashCommand("/shell bash", session, fakeRuntime, io);
+    expect(lines.join("")).toContain("settings.json");
+    expect(lines.join("")).toContain("NOCTURNE_SHELL");
+  });
+
   it("/exit → exit；未知命令 → unknown 且不报错退出", async () => {
     const { lines, io } = capture();
     expect(await runSlashCommand("/exit", fakeSession(), fakeRuntime, io)).toBe("exit");

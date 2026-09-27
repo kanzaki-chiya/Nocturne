@@ -181,6 +181,24 @@ describe("createSessionSwitcher", () => {
     expect(sessionOpenNotes(s1)).toEqual([]);
     await s1.close();
   });
+
+  it("sessionOpenNotes：非法 NOCTURNE_SHELL 的启动警告透出（CLI/TUI 共用口径，ADR-0022）", async () => {
+    // runtime.warning 事件发出时尚无订阅者；警告经 session.warnings →
+    // sessionOpenNotes 透出，CLI/TUI 启动提示列表渲染它
+    process.env["NOCTURNE_SHELL"] = "fish";
+    try {
+      const cwd = await tmp("nct-sw-cwd-");
+      const runtime = await makeRuntime(cwd, await tmp("nct-sw-sd-"));
+      const s1 = await runtime.createSession({ model: "fake/fake-1" });
+      const notes = sessionOpenNotes(s1);
+      expect(notes.some((n) => n.includes("fish") && n.includes("回退自动选择"))).toBe(true);
+      // 生效 shell 自动兜底，不因非法 env 值而拒绝启动
+      expect(s1.shellInfo().effective).toBeDefined();
+      await s1.close();
+    } finally {
+      Reflect.deleteProperty(process.env, "NOCTURNE_SHELL");
+    }
+  });
 });
 
 describe("createNewSession", () => {
