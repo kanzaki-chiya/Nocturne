@@ -134,8 +134,8 @@ export function isCompositeShell(command: string): boolean {
 
 // ── shell 命令的轻量词法切分 ──────────────────────────────
 //
-// 共享给 shellSegments（全放行规则的逐段求值）与 shell 工具的末尾分页预检
-// （tools.md 第 6 节），两边用同一词法器避免切分规则漂移。
+// 供 shell 工具的末尾分页预检（tools.md 第 6 节）使用。权限层的
+// shellSegments 不用它：引号内的命令同样会被执行，拆段必须保守。
 // 这不是完整的 shell 解析器，词法层已知的简化：
 // - 引号（"…" 与 '…'）内的控制符一律视为文本；引号内的 $(…) / 反引号
 //   不再展开（`echo "$(x | more)"` 不切出内层管道）；
@@ -248,17 +248,19 @@ export function lexShellCommand(command: string): ShellToken[] {
   return tokens;
 }
 
+const SHELL_SEPARATORS = /&&|\|\||\$\(|[;&|`()\r\n]/;
+
 /**
  * 组合命令拆段（全放行规则下逐段求值用）：按控制符切开、去空白。
- * 与旧实现相比的语义差异只有引号感知：引号内的控制符不切分
- * （`echo "a;b"` 是一整段）。重定向目标（`2>&1` 的 `&1`、`> out.txt`）
- * 仍会成为独立短段，照常求值即可。
+ * 刻意不做引号感知：`sh -c "cd x; rm -rf build"` 要切出 `rm -rf build"`
+ * 才能命中高风险表，引号内的命令同样会被执行。
+ * 重定向目标（`2>&1`、`> out.txt`）会成为独立短段，照常求值即可。
  */
 export function shellSegments(command: string): string[] {
-  return lexShellCommand(command)
-    .filter((t) => !t.separator)
-    .map((t) => t.text.trim())
-    .filter((t) => t !== "");
+  return command
+    .split(SHELL_SEPARATORS)
+    .map((part) => part.trim())
+    .filter((part) => part !== "");
 }
 
 /** 首个词去引号：空白或重定向符结束；引号/转义规则与 lexShellCommand 相同 */

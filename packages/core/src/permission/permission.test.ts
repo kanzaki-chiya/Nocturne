@@ -328,6 +328,9 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
     expect(risky.action).toBe("ask");
     expect(risky.reason).toContain("rm -rf x");
     expect(run("echo $(sudo cat /etc/shadow)").action).toBe("ask");
+    // 引号里的命令同样会执行：拆段不做引号感知，嵌套 shell 里的高风险段仍 ask
+    expect(run('sh -c "cd x; rm -rf build"').action).toBe("ask");
+    expect(run('cmd /c "echo a & git reset --hard"').action).toBe("ask");
     // 用户 deny 规则对拆出的段同样生效
     const rules = [
       {
@@ -412,13 +415,16 @@ describe("shell 轻量词法切分（permissions.md 5.3 / tools.md 第 6 节）"
     expect(shellSegments("")).toEqual([]);
   });
 
-  it("shellSegments：引号内的控制符不切分", () => {
-    expect(shellSegments('echo "a;b" && c')).toEqual(['echo "a;b"', "c"]);
-    expect(shellSegments("echo 'a|b'")).toEqual(["echo 'a|b'"]);
-    // bash 风格转义：\\| 不切断
-    expect(shellSegments("echo a\\|b | c")).toEqual(["echo a\\|b", "c"]);
+  it("shellSegments：不做引号感知，引号内的控制符照样切分（保守）", () => {
+    expect(shellSegments('echo "a;b" && c')).toEqual(['echo "a', 'b"', "c"]);
+    expect(shellSegments('sh -c "cd x; rm -rf build"')).toEqual(['sh -c "cd x', 'rm -rf build"']);
     // Windows 路径反斜杠原样保留
     expect(shellSegments("type C:\\x\\y.txt | sort")).toEqual(["type C:\\x\\y.txt", "sort"]);
+  });
+
+  it("lexShellCommand：引号内的控制符不切分，\\| 转义不切断", () => {
+    expect(lexShellCommand('echo "a;b"').map((t) => t.separator)).toEqual([false]);
+    expect(lexShellCommand("echo a\\|b").map((t) => t.separator)).toEqual([false]);
   });
 
   it("lexShellCommand：保留分隔符并区分 | 与 ||", () => {
