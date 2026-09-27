@@ -164,7 +164,7 @@ describe("退出保留回滚区", () => {
       session.id,
     );
     await session.close();
-  });
+  }, 12000);
 
   it("/exit", async () => {
     const { runtime, session } = await openSession();

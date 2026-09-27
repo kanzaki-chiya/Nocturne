@@ -476,10 +476,20 @@ describe("TUI", () => {
       createElement(App, { session, runtime, env: ENV, newSession, inline: true }),
     );
     await pause(60);
-    for (const cmd of ["/new", "/clear"]) {
+    // 每次切换等到分隔行出现且输入框解除「正在切换」再发下一条：
+    // 固定间隔在系统计时器粒度粗（约 15.6ms）时不够，切换尚未完成就会被拒
+    for (const [i, cmd] of ["/new", "/clear"].entries()) {
       stdin.write(cmd);
       stdin.write("\r");
-      await pause(180);
+      await vi.waitFor(
+        () => {
+          expect(created).toHaveLength(i + 1);
+          const frame = lastFrame() ?? "";
+          expect(frame).toContain(`新会话 ${created[i]?.id}`);
+          expect(frame).not.toContain("正在切换会话");
+        },
+        { timeout: 3000, interval: 20 },
+      );
     }
     expect(newSession).toHaveBeenCalledTimes(2);
     expect(lastFrame()).toContain(`新会话 ${created[0]?.id}`);
