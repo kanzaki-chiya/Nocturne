@@ -16,7 +16,7 @@ v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-
 
 ## 2. 界面布局
 
-v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 第 1 条）：启动即进入备用屏幕，Ink 增量渲染，帧高始终为终端行数减 1。顶部是对话视口——只布局与渲染可见行；底部固定为浮层/权限框、斜杠候选、输入框和状态栏。模型选择页、服务商页（含向导）是同一全屏内的页面替换，不再进出备用屏幕。
+v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 第 1 条）：启动即进入备用屏幕，Ink 渲染固定高度的帧，帧高始终为终端行数减 1。顶部是对话视口——只布局与渲染可见行；底部固定为浮层/权限框、斜杠候选、输入框和状态栏。模型选择页、服务商页（含向导）是同一全屏内的页面替换，不再进出备用屏幕。
 
 ```
 ┌ 对话视口（只渲染可见行；欢迎区是第一项）
@@ -36,14 +36,20 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 - **拖动选中与复制**：视口内左键按下开始、拖动扩展、反色高亮；拖出视口上/下沿按住期间持续滚动并扩展。列按显示宽度换算，落在中文右半格选中整个字符。选区以「内容行 + 列」记录，滚动与流式追加不错位；宽度重排时清除。松开时非空即复制——折行续行拼回原行、真换行保留、行尾空白去掉；同时写系统剪贴板（Windows `powershell Set-Clipboard`、macOS `pbcopy`、Linux `wl-copy`/`xclip`，文本经 stdin 传入）与 OSC 52，任一成功即在状态栏显示"已复制 N 个字符"约 2 秒，都失败提示失败。单击只清除选区；视口外的按键忽略。
 - **助手 Markdown**：用 `marked` 词法分析后按显示宽度排成终端行。标题、强调、行内与围栏代码、嵌套列表、引用、分隔线、表格和链接可读显示；链接显示文字及地址，代码不高亮。窄表格退化为逐行“列名：值”。
 - **权限对话框与浮层**：`/resume`、`/context`、`/help`、权限确认、向导确认画在对话区高度内，不另占帧高，也不清除输入框文字。模型选择页与服务商页替换整帧（同一全屏内），关闭后输入框文字仍在。
-- **输入行与硬件光标**：`›` 提示符。空间够时上方一条横线。输入内容可展开至 5 行，超过后在输入区内滚动。各输入框按显示宽度登记光标列（中文占 2 列）；登记行是相对 Ink 写入终点的行差：Ink 在帧尾补换行，终点位于最后一行下一行的第 0 列，多行输入按当前可见行计算。包装 stdout 在 Ink 写前用 DECRC 恢复，写后用 DECSC 保存，再以上移 `ESC[nA` 和列定位 `ESC[mG` 移到登记点；页面内输入框采用同一坐标约定。粘贴走括号粘贴（Ink `usePaste`），换行统一为 `\n`；多行或超长粘贴显示为单个 `[Paste #n, …]` 占位，提交前展开。
+- **输入行与硬件光标**：`›` 提示符。空间够时上方一条横线。输入内容可展开至 5 行，超过后在输入区内滚动。各输入框按显示宽度登记光标列（中文占 2 列）；登记行是相对帧末的行差，多行输入按当前可见行计算。全屏输出层把登记点换算成绝对行列，并与帧同笔写出；`--inline` 仍在 Ink 写前用 DECRC 恢复、写后用 DECSC 保存，再以上移 `ESC[nA` 和列定位 `ESC[mG` 补位。页面内输入框采用同一坐标约定。粘贴走括号粘贴（Ink `usePaste`），换行统一为 `\n`；多行或超长粘贴显示为单个 `[Paste #n, …]` 占位，提交前展开。
 - **斜杠补全**：输入以 `/` 开头时，在输入框下方、状态栏上方显示候选，最多 8 行，格式如 `/model  切换模型`。排序先前缀匹配，再包含匹配。列表打开时 ↑/↓ 移动候选，Tab 补全，Enter 执行，Esc 关闭列表但保留已输入文字。完整命令名加一个空格后进入参数补全：`/effort` 为当前模型档位和 `off`，`/provider` 为子命令与已配置服务商，`/preset` 为四个预设。候选与 `/help` 共用同一张命令表。终端太矮时先减少候选行数，再压缩对话区。
 - **输入编辑与历史**：Home/End、Ctrl+A/E 到当前行首尾；Ctrl+←/→ 按词跳转，Ctrl+U/K 删至当前行首尾，Ctrl+W 删前词。Ctrl+J 换行；当前行末尾的 `\` 后按 Enter 会去掉 `\` 并换行，其余 Enter 提交。多行时 ↑/↓ 在行间移动；首行 ↑、末行 ↓ 回填当前工作区跨次保存的历史，下翻到末尾恢复草稿。粘贴占位在移动或删除时作为整体处理；存盘前展开原文，历史回填时重新收起。明文文件位置和保留规则见 [config.md](../architecture/config.md)。
 - **状态栏**：彩色分段，`•` 分隔——`状态 • 模型 • 思考:档位 • 权限预设 • 目录 • 上下文`。上下文为「百分比 / 上下文长度」，单位大写，例如 `0.1% / 1M`；长度未知时只显示已用量。模型段（欢迎区同）只显示模型 ID，放不下用模型简称，再不行截断；服务商名可能带空格，放进来既长又易误读，服务商在 `/model` 页查看。`思考:` 段只在当前模型有可用档位时显示；Turn 进行中切档显示 `思考:<生效档>→<新档>`。翻阅提示（"已向上翻阅"/"有新内容"）与复制结果提示（"已复制 N 个字符"/"! 复制失败"）短暂占用状态栏左侧提示位。Shift+Tab、Alt+M 只短暂高亮对应段，不往对话区插条目。宽度不足时按 §5 收缩。
 
+### 全屏输出层
+
+全屏视口写满后，跟随新内容会让每一行都换位置；Ink 按行号比较会反复重写整个视口，Windows Terminal 中表现为闪烁。全屏仍由 Ink 生成固定 `rows - 1` 行的完整帧并保持原有约 30 帧/秒节流；`cursor.ts` 截取 Ink 标准 `log-update` 写出的整帧，`output-layer.ts` 与上一帧比较后再写终端。
+
+视口有 1–4 行小幅整体上移或下移，且至少半个视口的行发生位置变化时，输出层以 DECSTBM 把滚动区域限制在对话视口，发 `CSI k S` 或 `CSI k T` 平移，再复位滚动区域，只覆盖新露出的行与其他变化行。较大的翻阅、尺寸变化、页面切换以及无法确认平移的帧逐行覆盖变化行；尺寸或页面变动时覆盖整帧，不发 `ESC[2J`。每帧先隐藏光标，把平移、逐行覆盖、绝对坐标光标补位和显示光标合为一次 `?2026h`…`?2026l` 同步写出。备用屏进入后开鼠标上报、退出前关闭；OSC 52 走帧外写出通道。`--inline` 仍用 Ink 的逐行增量输出和相对光标补位，不经过此输出层。
+
 ### 普通屏幕模式（`--inline`）
 
-`nctrn --inline` 走 v0.3 的普通屏幕实现：不进入备用屏幕，已完结内容经 Ink `<Static>` 追加进终端回滚区（终端原生滚轮、选中、复制、搜索可用），底部活动区按 `rows - 1` 预算重画；模型/服务商页打开时临时进出备用屏幕；不开启鼠标上报、不提供程序内翻阅键与拖动选中。输入法光标补位与全屏共用同一实现。退出时无需恢复主屏，`<Static>` 内容留在回滚区。
+`nctrn --inline` 走 v0.3 的普通屏幕实现：不进入备用屏幕，已完结内容经 Ink `<Static>` 追加进终端回滚区（终端原生滚轮、选中、复制、搜索可用），底部活动区按 `rows - 1` 预算重画；模型/服务商页打开时临时进出备用屏幕；不开启鼠标上报、不提供程序内翻阅键与拖动选中。输入法光标仍由 `cursor.ts` 登记补位，使用相对移动。退出时无需恢复主屏，`<Static>` 内容留在回滚区。
 
 ## 3. 键位与交互（对照 cli.md）
 
@@ -209,7 +215,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 ## 9. 工程约束
 
 - `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口及批准的终端依赖（ink、react、string-width、marked；`ink-testing-library` 为 devDependency）。CLI 仅可惰性加载 `@nocturne/tui`，或静态引用 `@nocturne/tui/slash-catalog`；后者不得 import 任何模块，以免逐行模式加载 Ink。依赖方向见 [modules.md](../architecture/modules.md) 第 1 节。
-- 目录：`src/index.ts`（`runTui`：全屏/普通屏幕装配、鼠标上报开闭、退出导出）、`src/app.tsx`（界面状态与布局）、`src/lines.ts`（`SessionView` → 内容行块，按条目 key + 宽度缓存布局）、`src/viewport.ts`（可见窗口选择）、`src/scroll.ts`（翻阅状态）、`src/mouse.ts`（SGR 鼠标序列解析与 stdin 包装）、`src/selection.ts`（选区坐标与高亮/复制文本）、`src/clipboard.ts`（系统剪贴板 + OSC 52，只用 Node 内置模块）、`src/cursor.ts`（硬件光标补位与帧外写出通道）、`src/frame.ts`（活动区高度预算，`--inline`）、`src/alt-screen.ts`（`--inline` 与首配流程的临时备用屏）、`src/markdown.ts`（助手文本排版）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。
+- 目录：`src/index.ts`（`runTui`：全屏/普通屏幕装配、鼠标上报开闭、退出导出）、`src/app.tsx`（界面状态与布局）、`src/lines.ts`（`SessionView` → 内容行块，按条目 key + 宽度缓存布局）、`src/viewport.ts`（可见窗口选择）、`src/scroll.ts`（翻阅状态）、`src/mouse.ts`（SGR 鼠标序列解析与 stdin 包装）、`src/selection.ts`（选区坐标与高亮/复制文本）、`src/clipboard.ts`（系统剪贴板 + OSC 52，只用 Node 内置模块）、`src/cursor.ts`（硬件光标补位与帧外写出通道）、`src/output-layer.ts`（全屏帧差异写出与滚动区域平移）、`src/frame.ts`（活动区高度预算）、`src/alt-screen.ts`（`--inline` 与首配流程的临时备用屏）、`src/markdown.ts`（助手文本排版）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。
 - 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎区/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/就地步骤/四操作/Esc/Ctrl+C。
 - **显示宽度**：按 `string-width` 预算中文和动态文本，框内动态文本经 `format.ts` 的 `boxSafe()` 处理；窄屏时截断摘要和列表字段，边框保留安全余量。
 - `runTui` 只消费 Core 公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`、`readInputHistory`/`recordInputHistory`、`mcpServers()`（`/mcp` 面板），以及 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。

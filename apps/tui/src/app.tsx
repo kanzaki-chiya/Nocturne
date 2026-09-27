@@ -181,6 +181,8 @@ export interface AppProps {
   mouse?: MouseSource | undefined;
   /** Ink 帧外写出通道（OSC 52 序列经 cursor.ts 代理直落 stdout） */
   writeOob?: ((data: string) => boolean) | undefined;
+  /** 全屏输出层取得当前视口边界与页面身份。 */
+  onOutputLayout?: ((conversation: number, page: string) => void) | undefined;
   /** 复制用的 spawn（测试注入 mock；缺省 node:child_process.spawn） */
   copySpawn?: typeof spawn | undefined;
   /** 全屏退出前把对话铺成行写回主屏（runTui 注入容器，App 填实现） */
@@ -337,12 +339,14 @@ function SetupFlow({
   provider,
   setup,
   inline,
+  onOutputLayout,
   onDone,
 }: {
   runtime: Runtime;
   provider: ProviderBridge;
   setup: SetupFlowSpec;
   inline: boolean;
+  onOutputLayout?: ((conversation: number, page: string) => void) | undefined;
   onDone: (d: SetupDone) => void;
 }): React.JSX.Element | null {
   const { stdout } = useStdout();
@@ -449,6 +453,7 @@ function SetupFlow({
   if (!ready) {
     return null;
   }
+  onOutputLayout?.(0, `setup-${page}`);
 
   if (page === "provider") {
     return (
@@ -521,6 +526,7 @@ export function App({
   inline,
   mouse,
   writeOob,
+  onOutputLayout,
   copySpawn,
   transcriptOut,
   onExitResult,
@@ -551,6 +557,7 @@ export function App({
             provider={provider}
             setup={setup}
             inline={inline === true}
+            onOutputLayout={onOutputLayout}
             onDone={onSetupDone}
           />
         ) : null}
@@ -569,6 +576,7 @@ export function App({
       inline={inline === true}
       mouse={mouse}
       writeOob={writeOob}
+      onOutputLayout={onOutputLayout}
       copySpawn={copySpawn}
       transcriptOut={transcriptOut}
       onSessionId={onSessionId}
@@ -586,6 +594,7 @@ function SessionApp({
   inline = false,
   mouse,
   writeOob,
+  onOutputLayout,
   copySpawn,
   transcriptOut,
   onSessionId,
@@ -600,6 +609,7 @@ function SessionApp({
   inline?: boolean | undefined;
   mouse?: MouseSource | undefined;
   writeOob?: ((data: string) => boolean) | undefined;
+  onOutputLayout?: ((conversation: number, page: string) => void) | undefined;
   copySpawn?: typeof spawn | undefined;
   transcriptOut?: { current?: (() => string[]) | undefined } | undefined;
   onSessionId?: ((id: string) => void) | undefined;
@@ -2080,6 +2090,17 @@ function SessionApp({
         />
       ) : null}
     </>
+  );
+
+  onOutputLayout?.(
+    pageBody !== null || overlayBody !== null ? 0 : budget.conversation,
+    pickerOpen
+      ? "model"
+      : providerPageOpen
+        ? "provider"
+        : overlayBody !== null
+          ? "overlay"
+          : "conversation",
   );
 
   return (

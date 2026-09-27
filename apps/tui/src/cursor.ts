@@ -3,18 +3,20 @@
  *
  * Ink 的 useCursor 只在调用它的组件重渲染时生效：父组件在子组件之后提交会覆盖
  * 浮层输入框的坐标，别的子组件单独刷新（转圈等）的那一帧光标会被藏到帧底。
- * 所以光标不交给 Ink：各输入框登记坐标（claims），包装后的 stdout 在 Ink 每次
- * 写完后保存 Ink 的光标位置（DECSC）、移到登记坐标并显示；下次 Ink 写之前先恢复
- *（DECRC），Ink 的相对移动不受影响。
+ * 所以光标不交给 Ink：各输入框登记坐标（claims）。全屏输出层在每帧末绝对定位；
+ * inline 包装 stdout，在 Ink 写后 DECSC 保存写入终点、移到登记坐标，下次写前
+ * 用 DECRC 恢复，Ink 的相对移动不受影响。
  *
  * 坐标是"相对 Ink 写入终点"（ADR-0021）：非全屏（普通屏幕 + <Static>）时 Ink
  * 在输出末尾补一个换行，写完后光标停在活动区最后一行的下一行第 0 列。登记的
  * y 是"活动区目标行相对该终点的行差"（≤0），x 是列。补位序列是
  * `ESC[<|y|>A`（上移）+ `ESC[<x+1>G`（列定位，1 基）。目标即终点时只写列定位。
- * 整页界面（模型页/服务商页）在备用屏幕内沿用同一约定——页面对该次输出同样
- * 从活动区第 0 行算起。
+ * 全屏将这个行差换算为从 1 开始的绝对行；整页界面（模型页/服务商页）
+ * 沿用同一坐标约定。
  */
 import stringWidth from "string-width";
+
+import { cursorSequence, inkFrame, OutputLayer } from "./output-layer.js";
 
 export interface CursorPoint {
   x: number;
@@ -67,6 +69,8 @@ const moveRel = (p: CursorPoint): string => {
 };
 
 export interface CursorStreamOptions {
+  /** 全屏帧交给自有输出层；inline 保持 Ink 原始增量写出。 */
+  fullscreen?: boolean | undefined;
   /**
    * 看到 `?1049h`（进入备用屏）的写出后追加——全屏模式用它开鼠标上报，
    * 保证「先备屏、后开鼠标」的顺序。
@@ -92,6 +96,7 @@ export function createCursorStream(
   claims: CursorClaims;
   /** Ink 帧之外的写出通道（OSC 52 等不移动光标、不占帧内容的序列） */
   writeOob: (data: string) => boolean;
+  setLayout: (conversation: number, page: string) => void;
   stop(): void;
 } {
   const entries = new Map<symbol, { point: CursorPoint; seq: number }>();
@@ -101,6 +106,12 @@ export function createCursorStream(
   let moved = false;
   let done = false;
   let changingScreen = false;
+  let entered = false;
+  let syncing = false;
+  let inkWrites = "";
+  let conversation = 0;
+  let page = "";
+  const layer = options.fullscreen ? new OutputLayer() : undefined;
   const raw = (data: string): boolean => stdout.write(data);
 
   const place = (): string => {
@@ -119,6 +130,11 @@ export function createCursorStream(
     if (next?.x === target?.x && next?.y === target?.y) return;
     target = next;
     if (done || changingScreen) return;
+    if (layer !== undefined) {
+      if (entered && !syncing)
+        raw(SYNC_BEGIN + HIDE + cursorSequence(target, stdout.rows) + SYNC_END);
+      return;
+    }
     if (target === undefined) {
       if (moved) raw(HIDE + RESTORE);
       moved = false;
@@ -145,6 +161,41 @@ export function createCursorStream(
 
   const write = (chunk: unknown, ...rest: unknown[]): boolean => {
     const text = typeof chunk === "string" ? chunk : undefined;
+    if (layer !== undefined && !done && text !== undefined) {
+      if (text.includes("\x1b[?1049h") || text.includes("\x1b[?1049l")) {
+        const leaving = text.includes("\x1b[?1049l");
+        entered = !leaving;
+        syncing = false;
+        inkWrites = "";
+        layer.reset();
+        changingScreen = true;
+        return raw(
+          (leaving ? (options.beforeExitAlt ?? "") : "") +
+            text +
+            (leaving ? "" : (options.afterEnterAlt ?? "")),
+        );
+      }
+      changingScreen = false;
+      if (text === SYNC_BEGIN) {
+        syncing = true;
+        inkWrites = "";
+        return true;
+      }
+      if (text === SYNC_END) {
+        syncing = false;
+        const frame = inkFrame(inkWrites);
+        inkWrites = "";
+        return frame === undefined || !entered
+          ? true
+          : raw(layer.render(frame, stdout.columns, stdout.rows, conversation, page, target));
+      }
+      if (syncing) {
+        inkWrites += text;
+        return true;
+      }
+      if (text === HIDE || text === SHOW) return true;
+      return (stdout.write as (...a: unknown[]) => boolean)(chunk, ...rest);
+    }
     // 同步输出的起止标记不移动光标，原样放行
     if (done || text === undefined || text === SYNC_BEGIN || text === SYNC_END) {
       return (stdout.write as (...a: unknown[]) => boolean)(chunk, ...rest);
@@ -176,6 +227,10 @@ export function createCursorStream(
   return {
     stream,
     claims,
+    setLayout(nextConversation, nextPage) {
+      conversation = nextConversation;
+      page = nextPage;
+    },
     // OSC 52 这类序列不移动硬件光标：直接落到真实 stdout，落在两帧之间
     // （单线程下不可能插进同一帧的 write 内部），也不碰补位记账。
     writeOob(data: string): boolean {
@@ -183,7 +238,7 @@ export function createCursorStream(
     },
     stop() {
       done = true;
-      if (moved) raw(HIDE + RESTORE);
+      if (moved && layer === undefined) raw(HIDE + RESTORE);
       moved = false;
     },
   };

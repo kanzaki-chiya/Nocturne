@@ -98,11 +98,11 @@ export async function runTui(
   }
   // 全屏退出时把对话按当前宽度铺成纯文本行打回主屏（App 填实现）
   const transcriptOut: { current?: (() => string[]) | undefined } = {};
-  // IME 光标由我们在 Ink 每次写完后补位（cursor.ts），不走 useCursor。
+  // 全屏从 Ink 标准 log-update 取得整帧，自有输出层做终端差异写出；inline 保持原路径。
   // 鼠标上报与备用屏切换绑在同一笔写出：进备用屏后开、回主屏前关。
   const cursorOut = createCursorStream(
     stdout,
-    inline ? {} : { afterEnterAlt: MOUSE_ENABLE, beforeExitAlt: MOUSE_DISABLE },
+    inline ? {} : { fullscreen: true, afterEnterAlt: MOUSE_ENABLE, beforeExitAlt: MOUSE_DISABLE },
   );
   // Windows Terminal: suspendTerminal 的 pauseInput 不应撤销控制台读请求。
   const unref = stdin.unref.bind(stdin);
@@ -122,6 +122,7 @@ export async function runTui(
         inline,
         mouse: mouseSource,
         writeOob: cursorOut.writeOob,
+        onOutputLayout: cursorOut.setLayout,
         copySpawn: options.copySpawn,
         transcriptOut,
         onSessionId: (id: string) => {
@@ -138,7 +139,7 @@ export async function runTui(
       stdin: stdinForInk,
       stderr,
       exitOnCtrlC: false,
-      incrementalRendering: true,
+      incrementalRendering: inline,
       alternateScreen: !inline,
       patchConsole: options.patchConsole ?? true,
     },
