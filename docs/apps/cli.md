@@ -37,6 +37,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `--api-key-env <NAME>` | 读取凭据的环境变量名。默认：`anthropic` → `ANTHROPIC_API_KEY`，其余 → `NOCTURNE_API_KEY` |
 | `--cli` | 以逐行 REPL 启动交互模式（v0.3）；与 `--tui` 互斥（用法错误，退出码 2） |
 | `--tui` | 以终端界面（TUI）启动交互模式（[apps/tui.md](tui.md)）；与 `-p`/`--print`/`--cli`/`--sessions` 互斥（退出码 2）；显式给出且 stdin/stdout 非 TTY 时报错退出 2 |
+| `--inline` | TUI 走普通屏幕模式（已完结内容进终端回滚区，见 [tui.md](tui.md) §2 末节）；与 `-p`/`--print`/`--cli`/`--sessions` 互斥（退出码 2） |
 | `-y, --yes` | 把需要确认的操作按"允许一次"自动批准（第 6 节）；对两类模式都生效 |
 | `--debug` | 启用诊断日志（JSONL；[observability.md](../architecture/observability.md)），等价 `NOCTURNE_DEBUG=1` |
 | `--debug-file <path>` | 诊断输出文件；`-` 表示 stderr。缺省写 `<NOCTURNE_HOME>/logs/debug-<时间戳>-<pid>.jsonl` |
@@ -47,7 +48,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 
 | 条件 | 模式 |
 |---|---|
-| stdin 与 stdout 均为 TTY | 默认 TUI；`--cli` 选逐行 REPL；`--tui` 显式选 TUI（与默认等价） |
+| stdin 与 stdout 均为 TTY | 默认 TUI（全屏）；`--cli` 选逐行 REPL；`--tui` 显式选 TUI（与默认等价）；`--inline` 选普通屏幕 TUI |
 | stdin 或 stdout 非 TTY | 自动逐行 REPL（不因默认选择 TUI 报错）；显式 `--tui` 报错退出 2 |
 | `-p/--print` | 非交互模式，与界面参数互斥，行为不变 |
 

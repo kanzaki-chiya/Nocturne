@@ -237,7 +237,7 @@ ask 判定
 - 实时：`session.subscribe(ev => reduceSessionView(view, ev))`
 - 恢复：`session.durableEvents().forEach(ev => reduceSessionView(view, ev))` 后继续 `subscribe`
 
-恢复模式下，修复补写的事件（`tool.completed(interrupted)`、`turn.completed(recovered)`）按 §3 正常归约，无需特殊分支。TUI 将持久 `entries` 和实时流式文本中已结束的 Markdown 块追加到普通屏幕的 `<Static>`；尚未结束的 `live` 块及 `pendingPermission`、`status` 留在活动区。流式块写入回滚区是客户端渲染行为，不改变 `SessionView` 的持久事件规则。
+恢复模式下，修复补写的事件（`tool.completed(interrupted)`、`turn.completed(recovered)`）按 §3 正常归约，无需特殊分支。TUI 全屏模式把持久 `entries`、实时流式文本与 `live` 排进对话视口的可见窗口；`--inline` 模式把已结束块追加到 `<Static>` 回滚区、未结束块留在活动区。写入窗口/回滚区是客户端渲染行为，不改变 `SessionView` 的持久事件规则。
 
 ## 7. 不变量清单
 

@@ -190,7 +190,7 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 
 ### apps/tui（Phase 4，已验收）
 
-- **负责**：终端界面客户端——会话回放、工具状态与 diff、权限对话框、状态栏、会话选择器；渲染 `SessionView`，把按键翻译为公开命令。
+- **负责**：终端界面客户端——会话回放、工具状态与 diff、权限对话框、状态栏、会话选择器、鼠标滚轮翻阅与拖动选中复制；渲染 `SessionView`，把按键翻译为公开命令。
 - **不负责**：任何 Agent 行为、事件投影（用 `protocol` 的 reducer）、权限判定；不复用 CLI 渲染代码。
 - **依赖**：`@nocturne/core` 公开 API 与 `protocol`；终端依赖 Ink、React、`string-width` 按 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)，Markdown 词法分析依赖 `marked` 按 [ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 批准。
 - 详见 [apps/tui.md](../apps/tui.md)。
