@@ -1,7 +1,8 @@
 /**
  * shell 工具（tools.md 第 6 节）：经系统 shell 执行非交互式命令。
  * 合并 stdout/stderr 为按到达顺序的单一输出并截断；返回退出码；
- * 超时或中断时终止整个进程树（platform/process 负责，Windows 实测记录见 tools.md）。
+ * 超时或中断时终止进程树中仍可达的后代（platform/process 负责，Windows 实测
+ * 记录见 tools.md）；detached 脱离进程树的后台进程可能无法终止。
  */
 import { resolveRealPath } from "../../platform/index.js";
 import type { SubjectRequest } from "../../protocol/index.js";
@@ -21,10 +22,19 @@ interface ShellOutput {
   timedOut: boolean;
   killed: boolean;
   durationMs: number;
+  /** 命令已退出但输出管道仍被后台进程占用，读取端已分离时为 true */
+  outputDetached?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
+/**
+ * 输出管道自然收尾的宽限：仅覆盖子进程 exit 到 stdio 关闭的正常间隙，
+ * 正常退出时流已结束、立即返回；到期仍被占用说明有后台进程继承了管道。
+ */
+const PIPE_DRAIN_GRACE_MS = 500;
+const ORPHAN_OUTPUT_NOTE =
+  "命令已退出，但仍有后台进程占用输出管道，之后的输出未读取；如果启动了服务器等后台进程，它可能仍在运行。";
 /** 缓冲上限：头 64k + 尾 64k，超出丢弃中间（modelContent 再经统一预算截断） */
 const BUFFER_HALF = 64_000;
 
@@ -61,7 +71,7 @@ class OutputBuffer {
 export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
   name: "shell",
   description:
-    "经系统 shell 执行非交互式命令（Windows: cmd /c；POSIX: /bin/sh -c）。合并 stdout/stderr 输出并截断，返回退出码。超时或中断会终止整个进程树。",
+    "经系统 shell 执行非交互式命令（Windows: cmd /c；POSIX: /bin/sh -c）。合并 stdout/stderr 输出并截断，返回退出码。超时或中断会尝试终止进程树中仍可达的后代；detached 方式脱离进程树的后台进程可能仍在运行。",
   inputSchema: {
     type: "object",
     required: ["command"],
@@ -133,11 +143,32 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
         ctx.progress(chunk, name);
       }
     };
-    const [exit] = await Promise.all([
-      proc.wait(),
-      pump(proc.stdout, "stdout"),
-      pump(proc.stderr, "stderr"),
-    ]);
+    const pumps = Promise.all([pump(proc.stdout, "stdout"), pump(proc.stderr, "stderr")]);
+    // pump 在 wait 结算前就失败时，错误仍在下方 race/await 处正常传播；
+    // 这里只为消除窗口期内的未处理 rejection
+    pumps.catch(() => undefined);
+    // spawnShell 的 wait() 在 shell 本体 exit 时结算（process.ts）：
+    // 继承了输出管道的后台孙进程不阻止退出判定
+    const exit = await proc.wait();
+    let outputDetached = false;
+    let drainTimer: NodeJS.Timeout | undefined;
+    try {
+      const drained = await Promise.race([
+        pumps.then(() => true),
+        new Promise<boolean>((resolve) => {
+          drainTimer = setTimeout(() => {
+            resolve(false);
+          }, PIPE_DRAIN_GRACE_MS);
+        }),
+      ]);
+      if (!drained) {
+        proc.detachOutput();
+        outputDetached = true;
+      }
+    } finally {
+      if (drainTimer !== undefined) clearTimeout(drainTimer);
+    }
+    await pumps;
 
     const durationMs = Date.now() - startedAt;
     const output: ShellOutput = {
@@ -147,7 +178,12 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
       killed: exit.killed,
       durationMs,
     };
-    const body = buf.text();
+    if (outputDetached) output.outputDetached = true;
+    const captured = buf.text();
+    // 分离时追加提示行：ok 路径落在 [exit code …] 之前，错误路径在末尾
+    const body = outputDetached
+      ? captured + (captured.endsWith("\n") || captured === "" ? "" : "\n") + ORPHAN_OUTPUT_NOTE
+      : captured;
 
     if (exit.timedOut) {
       return {

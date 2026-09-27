@@ -2,10 +2,11 @@
  * write / edit / shell 工具的离线测试（tools.md 第 6 节）。
  * 写文件与 shell 命令只在临时目录中执行。
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createPlatform, type Platform } from "../platform/index.js";
 import type { ToolCallRef } from "../protocol/index.js";
@@ -21,11 +22,106 @@ import {
 const platform: Platform = createPlatform();
 const tmpRoots: string[] = [];
 
-afterEach(() => {
+const ORPHAN_MARKER = "ORPHAN-HOLDS-PIPE-7f3a";
+
+/** 测试派生的后台进程 pid，afterEach 统一清理，不留孤儿 */
+const orphanPids: number[] = [];
+
+/** 终止指定 PID 的进程树；已退出的进程忽略（Windows taskkill /T，POSIX 直接 SIGKILL） */
+async function killPidTree(pid: number): Promise<void> {
+  if (process.platform === "win32") {
+    await new Promise<void>((resolve) => {
+      const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      killer.once("exit", () => resolve());
+      killer.once("error", () => resolve());
+    });
+    return;
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // 已退出
+  }
+}
+
+afterEach(async () => {
+  // 先杀孤儿再等其消失：Windows 上进程持有的 cwd 句柄会锁临时目录，
+  // 必须在删目录前完成。除已登记 PID 外还扫描本次临时目录中的 orphan.pid
+  // （去重）：工具执行/断言/vi.waitFor 在 trackOrphan 之前失败时，pid 文件
+  // 已写出的孤儿同样被清理；只读自己创建的目录，不触碰其他进程
+  const pids = new Set(orphanPids.splice(0));
+  for (const root of tmpRoots) {
+    const pidFile = path.join(root, "orphan.pid");
+    if (!existsSync(pidFile)) continue;
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+  }
+  for (const pid of pids) {
+    await killPidTree(pid);
+    for (let i = 0; i < 50; i++) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
   for (const r of tmpRoots.splice(0)) {
-    rmSync(r, { recursive: true, force: true });
+    rmSync(r, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
+
+/** 读取孤儿 pid 文件并登记清理（pid 文件由测试脚本写出，不会误杀其他进程） */
+async function trackOrphan(pidFile: string): Promise<void> {
+  if (await platform.fs.exists(pidFile)) {
+    const pid = Number(await platform.fs.readTextFile(pidFile));
+    if (Number.isInteger(pid) && pid > 0) orphanPids.push(pid);
+  }
+}
+
+const LEAF_SPAWN = `const {spawn}=require("node:child_process");
+const fs=require("node:fs");
+const c=spawn(process.execPath,["orphan-leaf.js"],{cwd:__dirname,detached:true,stdio:["ignore","inherit","inherit"],windowsHide:true});
+c.unref();`;
+
+/**
+ * 在 ws 中写脚本，制造"直接子进程已退出/将退出，但输出管道被后台进程持有"：
+ * 末端 leaf 长期存活、detached 并继承管道；其 pid 写到 orphan.pid，打印 marker。
+ * - "exit" 两层：parent 派生 leaf 后立即退出（leaf 成为脱离树的孤儿）。
+ * - "hang" 三层：parent 挂起；mid 派生 leaf 后退出——kill/超时触发时
+ *   leaf 的父链已断（mid 已死），taskkill /T 枚举不到它，detach 必然发生。
+ */
+function writeOrphanScripts(ws: string, mode: "exit" | "hang" = "exit"): { pidFile: string } {
+  const pidFile = path.join(ws, "orphan.pid");
+  writeFileSync(path.join(ws, "orphan-leaf.js"), "setInterval(()=>{},1000);\n");
+  if (mode === "exit") {
+    writeFileSync(
+      path.join(ws, "orphan-parent.js"),
+      `${LEAF_SPAWN}
+fs.writeFileSync(${JSON.stringify(pidFile)},String(c.pid));
+process.stdout.write(${JSON.stringify(`${ORPHAN_MARKER}\n`)});`,
+    );
+  } else {
+    writeFileSync(
+      path.join(ws, "orphan-mid.js"),
+      `${LEAF_SPAWN}
+fs.writeFileSync(${JSON.stringify(pidFile)},String(c.pid));
+process.stdout.write(${JSON.stringify(`${ORPHAN_MARKER}\n`)});`,
+    );
+    writeFileSync(
+      path.join(ws, "orphan-parent.js"),
+      `const {spawn}=require("node:child_process");
+const c=spawn(process.execPath,["orphan-mid.js"],{cwd:__dirname,stdio:["ignore","inherit","inherit"],windowsHide:true});
+c.unref();
+setInterval(()=>{},1000);`,
+    );
+  }
+  return { pidFile };
+}
 
 function tmpWorkspace(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "nct-wes-"));
@@ -347,6 +443,7 @@ setInterval(()=>{},1000);`,
       await new Promise((r) => setTimeout(r, 100));
     }
     expect(grandchildPid).toBeGreaterThan(0);
+    orphanPids.push(grandchildPid);
 
     ac.abort();
     const r = await exec;
@@ -397,6 +494,123 @@ setInterval(()=>{},1000);`,
     await h.executor.execute(call("shell", { command: `${node} -e "0"` }), h.scope);
     expect(seen).toEqual(["shell"]);
   });
+
+  it("后台孙进程占用输出管道：shell 退出后分离输出，有界返回", async () => {
+    const ws = tmpWorkspace();
+    const { pidFile } = writeOrphanScripts(ws);
+    const h = await makeHarness(ws);
+    const started = Date.now();
+    const r = await h.executor.execute(
+      call("shell", { command: `${node} orphan-parent.js`, timeoutMs: 30_000 }),
+      h.scope,
+    );
+    const elapsed = Date.now() - started;
+    await trackOrphan(pidFile);
+    expect(r.status).toBe("ok");
+    const output = r.result.output as ShellOut;
+    expect(output.exitCode).toBe(0);
+    expect(output.outputDetached).toBe(true);
+    expect(r.result.modelContent).toContain(ORPHAN_MARKER);
+    expect(r.result.modelContent).toContain("命令已退出，但仍有后台进程占用输出管道");
+    expect(r.result.modelContent).toContain("[exit code 0]");
+    // exit 结算 + 500ms 收尾窗口，远小于旧的无限等待
+    expect(elapsed).toBeLessThan(3_000);
+  });
+
+  it("孙进程占用管道时中断：cancelled 且有界返回", async () => {
+    const ws = tmpWorkspace();
+    const { pidFile } = writeOrphanScripts(ws);
+    const ac = new AbortController();
+    const h = await makeHarness(ws, { signal: ac.signal });
+    const exec = h.executor.execute(
+      call("shell", { command: `${node} orphan-parent.js`, timeoutMs: 60_000 }),
+      h.scope,
+    );
+    // 等孤儿接管管道：pid 文件写出后父进程随即退出
+    await vi.waitFor(
+      async () => {
+        expect(await platform.fs.exists(pidFile)).toBe(true);
+      },
+      { timeout: 10_000, interval: 50 },
+    );
+    await trackOrphan(pidFile);
+    const abortAt = Date.now();
+    ac.abort();
+    const r = await exec;
+    const elapsed = Date.now() - abortAt;
+    expect(r.status).toBe("cancelled");
+    // 中断结果由执行器统一归一化（cancelled 不由工具返回）；有界返回本身
+    // 证明 detach 收尾生效——否则输出泵会被孤儿占用的管道一直挂住
+    expect(elapsed).toBeLessThan(3_000);
+  });
+
+  it("孙进程占用管道时超时：有界 timeout 并附提示", async () => {
+    const ws = tmpWorkspace();
+    // 三层结构：parent 挂起（保证超时先触发），leaf 经已退出的 mid 脱离进程树，
+    // taskkill /T 杀不到 → 管道只能经 detach 收尾
+    const { pidFile } = writeOrphanScripts(ws, "hang");
+    const h = await makeHarness(ws);
+    const started = Date.now();
+    const r = await h.executor.execute(
+      call("shell", { command: `${node} orphan-parent.js`, timeoutMs: 400 }),
+      h.scope,
+    );
+    const elapsed = Date.now() - started;
+    await trackOrphan(pidFile);
+    expect(r.status).toBe("error");
+    expect(r.result.status === "error" && r.result.error.code).toBe("timeout");
+    const output = r.result.output as ShellOut;
+    expect(output.timedOut).toBe(true);
+    expect(output.outputDetached).toBe(true);
+    expect(r.result.modelContent).toContain("命令超过 400ms 超时");
+    expect(r.result.modelContent).toContain("命令已退出，但仍有后台进程占用输出管道");
+    expect(elapsed).toBeLessThan(3_000);
+  });
+
+  it("分页器占用管道的命令（| more）：有界返回", async () => {
+    const ws = tmpWorkspace();
+    // 真实孤儿场景接分页器：leaf detached 继承 parent→more 的管道，more 等不到
+    // stdin EOF 不退出，整条管道命令随之挂起，直到超时终止
+    const { pidFile } = writeOrphanScripts(ws);
+    const h = await makeHarness(ws);
+    const started = Date.now();
+    const r = await h.executor.execute(
+      call("shell", {
+        command: `${node} orphan-parent.js | more`,
+        timeoutMs: 1_000,
+      }),
+      h.scope,
+    );
+    const elapsed = Date.now() - started;
+    await trackOrphan(pidFile);
+    // 分页器未退出 → timeout 终止；若平台行为令其自然退出则 ok。
+    // 两者都要求有界返回；leaf 是否还持有 shell stdout 取决于 kill 落点，
+    // outputDetached 两种取值都合法，不断言
+    if (r.status === "error") {
+      expect(r.result.status === "error" && r.result.error.code).toBe("timeout");
+    } else {
+      expect(r.status).toBe("ok");
+    }
+    expect(elapsed).toBeLessThan(4_000);
+  });
+
+  it("无后台占用的正常命令：modelContent 与退出码不变，无 outputDetached", async () => {
+    const ws = tmpWorkspace();
+    const h = await makeHarness(ws);
+    const started = Date.now();
+    const r = await h.executor.execute(
+      call("shell", { command: `${node} -e "process.stdout.write('OK');process.exit(7)"` }),
+      h.scope,
+    );
+    const elapsed = Date.now() - started;
+    expect(r.status).toBe("ok");
+    expect(r.result.modelContent).toBe("OK\n[exit code 7]");
+    const output = r.result.output as ShellOut;
+    expect(output.exitCode).toBe(7);
+    expect("outputDetached" in output).toBe(false);
+    // 管道自然收尾立即返回，不付出 500ms 宽限
+    expect(elapsed).toBeLessThan(2_000);
+  });
 });
 
 interface ShellOut {
@@ -405,6 +619,7 @@ interface ShellOut {
   timedOut: boolean;
   killed: boolean;
   durationMs: number;
+  outputDetached?: boolean;
 }
 
 describe("diffLines", () => {

@@ -68,7 +68,7 @@ interface ToolContext extends ToolScope {
     check(subject: SubjectRequest): "allow" | "ask" | "deny"
   }
   fs: FileSystem                    // 来自 platform
-  process: ProcessRunner            // 来自 platform；支持超时与进程树终止
+  process: ProcessRunner            // 来自 platform；支持超时与进程树终止；spawnShell 的 exit 结算与输出管道分离见 tools.md 第 6 节
   readState: ReadStateStore         // "先读后写"所需的已读记录
   progress(chunk: string, stream?: "stdout" | "stderr" | "info"): void   // 产生 tool.progress 临时事件
 }

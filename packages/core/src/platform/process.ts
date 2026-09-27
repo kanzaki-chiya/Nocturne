@@ -64,6 +64,12 @@ export interface SpawnedProcess {
   wait(): Promise<ProcessExit>;
   /** 终止进程树（Windows: taskkill /T；POSIX: 进程组信号） */
   kill(): Promise<void>;
+  /**
+   * 放弃继续读取输出：销毁底层 stdout/stderr，已捕获字节按原解码规则
+   * 冲刷后两个 AsyncIterable 正常结束（不记为 error）。幂等。用于直接
+   * 子进程已退出、但输出管道仍被其后代占用的场景（tools.md 第 6 节）。
+   */
+  detachOutput(): void;
 }
 
 export interface ProcessRunner {
@@ -72,6 +78,8 @@ export interface ProcessRunner {
    * 经系统 shell 执行命令行（tools.md 第 6 节 shell 工具）：
    * Windows 用 %COMSPEC%（通常 cmd.exe）`/d /s /c`；POSIX 用 /bin/sh -c。
    * NOCTURNE_SHELL 仅替换可执行文件，参数形态按平台不变。
+   * wait() 在 shell 本体 exit 时结算，不等 stdio 的 close——孙进程可能
+   * 继承并继续占用输出管道；届时用 detachOutput() 结束读取。
    */
   spawnShell(command: string, options?: SpawnOptions): SpawnedProcess;
   /**
@@ -357,6 +365,11 @@ export function decodeOutput(
     state.ended = true;
     notify();
   });
+  // destroy()（detachOutput）只发 close 不发 end：按正常结束冲刷 pending
+  stream.once("close", () => {
+    state.ended = true;
+    notify();
+  });
   return (async function* (): AsyncGenerator<string> {
     const { label, forced } = await encoding;
     if (!forced && new TextDecoder(label).encoding !== "utf-8") {
@@ -473,10 +486,15 @@ function rawOutput(stream: Readable): AsyncIterable<Buffer> {
   })();
 }
 
-/** spawn / spawnPipe 共用的生命周期：signal 中止、超时、wait()、进程树 kill */
+/**
+ * spawn / spawnPipe 共用的生命周期：signal 中止、超时、wait()、进程树 kill。
+ * waitEvent 默认 "close"（stdio 全部关闭才结算）；spawnShell 传 "exit"——
+ * close 会被继承了输出管道的后台孙进程无限期拖住（tools.md 第 6 节）。
+ */
 function attachLifecycle(
   child: ChildProcess,
   options: SpawnOptions,
+  waitEvent: "exit" | "close" = "close",
 ): { wait: () => Promise<ProcessExit>; kill: () => Promise<void> } {
   let timedOut = false;
   let killed = false;
@@ -506,7 +524,7 @@ function attachLifecycle(
       if (timer !== undefined) clearTimeout(timer);
       resolve({ code: null, signal: null, timedOut, killed });
     });
-    child.once("close", (code, signal) => {
+    child.once(waitEvent, (code: number | null, signal: NodeJS.Signals | null) => {
       if (timer !== undefined) clearTimeout(timer);
       resolve({ code, signal, timedOut, killed });
     });
@@ -555,6 +573,7 @@ export function createProcessRunner(): ProcessRunner {
     args: string[],
     options: SpawnOptions,
     verbatimArgs: boolean,
+    waitEvent: "exit" | "close",
   ): SpawnedProcess => {
     const child = spawn(command, args, {
       cwd: options.cwd,
@@ -568,7 +587,8 @@ export function createProcessRunner(): ProcessRunner {
     const encoding = consoleEncoding();
     const stdout = decodeOutput(child.stdout, encoding);
     const stderr = decodeOutput(child.stderr, encoding);
-    const { wait, kill } = attachLifecycle(child, options);
+    const { wait, kill } = attachLifecycle(child, options, waitEvent);
+    let detached = false;
 
     return {
       pid: child.pid ?? -1,
@@ -576,17 +596,29 @@ export function createProcessRunner(): ProcessRunner {
       stderr,
       wait,
       kill,
+      detachOutput() {
+        if (detached) return;
+        detached = true;
+        child.stdout.destroy();
+        child.stderr.destroy();
+      },
     };
   };
 
   return {
-    spawn: (command, args, options = {}) => spawnImpl(command, args, options, false),
+    spawn: (command, args, options = {}) => spawnImpl(command, args, options, false, "close"),
     spawnShell(command, options = {}) {
       if (process.platform === "win32") {
         // cmd /d /s /c "<命令>"：verbatim 传参 + /s 剥掉外层引号，命令原文含引号不受影响
-        return spawnImpl(shellExecutable("win32"), shellArguments(command, "win32"), options, true);
+        return spawnImpl(
+          shellExecutable("win32"),
+          shellArguments(command, "win32"),
+          options,
+          true,
+          "exit",
+        );
       }
-      return spawnImpl(shellExecutable(), shellArguments(command), options, false);
+      return spawnImpl(shellExecutable(), shellArguments(command), options, false, "exit");
     },
     spawnPipe(command, args, options = {}) {
       const base =

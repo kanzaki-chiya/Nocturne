@@ -102,7 +102,9 @@ execute(call, ctx):
 - **shell 子进程环境**（v0.2）：继承进程环境，但剥离全部已解析服务商的 `apiKeyEnv` 变量名以及 `NOCTURNE_API_KEY`、`ANTHROPIC_API_KEY`，避免模型通过命令读到密钥（[provider-setup.md](provider-setup.md) 第 4 节）。
 - **输入**：`{ command, timeoutMs?, cwd? }`。`cwd` 省略时会话 cwd；指定时经符号链接 / junction 解析后必须位于工作区内，否则 `invalid_input`。**注意：`cwd` 限制约束的只是执行起点，不是沙箱**——被批准的 `command` 本身仍可访问批准范围之外的资源；命令文本才是被确认的主体。
 - **输出合并与截断**：stdout 与 stderr 在工具内按到达顺序合并为单一输出流（不等价于 shell 重定向，由 ProcessRunner 的两条流归并）；逐块经 `tool.progress` 上报（带 `stream` 标记），累积内容按 `maxModelChars` 截断。进程持续输出超过缓冲上限时丢弃中间部分但继续排空管道，防止子进程阻塞。
-- **结果**：`output` 携带 `exitCode`、`signal`、`timedOut`、`killed`、`durationMs`；`timedOut` 时 `status="error"`、`code="timeout"`。
+- **结果**：`output` 携带 `exitCode`、`signal`、`timedOut`、`killed`、`durationMs`；`timedOut` 时 `status="error"`、`code="timeout"`。命令已退出但输出管道仍被占用时另带 `outputDetached=true`（见下条），`modelContent` 末尾追加一行提示（ok 时落在 `[exit code …]` 之前）：`命令已退出，但仍有后台进程占用输出管道，之后的输出未读取；如果启动了服务器等后台进程，它可能仍在运行。`
+- **退出与输出管道分离**：`spawnShell` 的 `wait()` 在直接子进程（cmd/sh 本体）`exit` 时结算，而不是等 stdio 全部关闭的 `close`——`close` 会被继承了输出管道的后台孙进程无限期拖住（`start`、`nohup`、`detached` 派生等）。子进程退出后输出流最多再等 500ms 自然收尾；仍被占用则经 `SpawnedProcess.detachOutput()` 销毁读取端，已捕获输出按原解码规则冲刷后保留，读取方正常结束而非报错。通用 `spawn`/`spawnPipe`（MCP stdio、Hooks）仍按 `close` 结算，行为不变。
+- **孤儿进程遗留**：中断/超时只保证终止进程树——Windows `taskkill /T` 沿父子链终止，中间进程已退出的 detached 孙进程会脱离链条杀不到；POSIX 进程组终止对已 `setsid` 逃逸的进程同理。分离输出后仍存活的后台进程需用户按提示自行清理。
 - **输出解码**：Windows 取 `chcp` 代码页映射为 WHATWG 编码（如 CP936 → GBK），其余平台与未识别代码页按 UTF-8。探测到非 UTF-8 代码页时，stdout、stderr 各自按换行分段：整段字节能以 fatal UTF-8 解码就使用 UTF-8，否则按控制台编码解码，原样保留 `\r\n`。未换行尾巴超过 8KB 或空闲 50ms 后也按同一规则冲刷；末尾截断的 UTF-8 多字节字符（最多 3 字节）留待下一块。流结束时解码剩余字节。`NOCTURNE_CONSOLE_ENCODING` 可显式指定任意 WHATWG label（如 `utf-8`、`gbk`），设置后完全按该编码流式解码，不再逐行判定。残留风险：极短的 GBK 字节串偶然也是合法 UTF-8 时，会被识别为 UTF-8。
 - **进程树终止实测记录**（tools.md 第 5 节要求）：Windows（`taskkill /pid /T /F`）：已实测——测试在 `cmd /c` 下启动 Node 父进程并派生孙进程，中断后孙进程消失（`packages/core/src/tools/write-edit-shell.test.ts` "中断：终止整个进程树"用例）；POSIX（`detached` 进程组 + `kill(-pid, SIGKILL)`）：未在当前平台验证，CI/其他平台需复跑该用例。
 
