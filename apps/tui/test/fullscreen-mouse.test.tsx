@@ -158,6 +158,57 @@ describe("全屏鼠标", () => {
     await session.close();
   });
 
+  it("选区跨过空行时空行保持行高，下方内容不上移", async () => {
+    const runtime = await createRuntime({
+      cwd: tmp("nct-mouse-ws-"),
+      sessionsDir: tmp("nct-mouse-sd-"),
+      providers: [
+        new FakeProvider({
+          scripts: [
+            [
+              { type: "text_delta", text: "末尾标记" },
+              { type: "finish", reason: "stop" },
+            ],
+          ],
+        }),
+      ],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    const mouse = fakeMouse();
+    const { spawn } = okSpawn();
+    const { lastFrame, unmount } = render(
+      createElement(App, {
+        session,
+        runtime,
+        env: ENV,
+        mouse,
+        copySpawn: spawn,
+        writeOob: () => true,
+      }),
+    );
+    await pause(80);
+    // 用户消息原样显示，段间空行各占一行
+    await session.submit({ text: "第一段\n\n第二段\n\n第三段" });
+    await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
+    const rowOf = (text: string): number =>
+      (lastFrame() ?? "").split("\n").findIndex((l) => l.includes(text));
+    const top = rowOf("第一段");
+    const tail = rowOf("末尾标记");
+    const second = rowOf("第二段");
+    const third = rowOf("第三段");
+    expect(second - top).toBe(2);
+    mouse.emit({ type: "press", button: 0, x: 1, y: top + 1 });
+    mouse.emit({ type: "drag", button: 0, x: 4, y: tail + 1 });
+    await pause(150); // 测试帧不带颜色码，选区反色不可见；等选区提交进状态并重绘
+    // 选区覆盖三个空行时，内容行的位置与未选中时一致
+    expect(rowOf("第一段")).toBe(top);
+    expect(rowOf("第二段")).toBe(second);
+    expect(rowOf("第三段")).toBe(third);
+    expect(rowOf("末尾标记")).toBe(tail);
+    unmount();
+    await session.close();
+  });
+
   it("选区存在时 Ctrl+C 复制不退出；Esc 先清选区", async () => {
     const { runtime, session } = await longSession();
     const mouse = fakeMouse();

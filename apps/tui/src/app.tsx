@@ -2159,6 +2159,15 @@ function SessionApp({
     selected?: { start: number; end: number },
   ): React.JSX.Element => {
     const segments = selected === undefined ? line.segments : selSegments(line, selected);
+    // 空行没有可拆分的字符：空 Text 在 Ink 里高度为 0，会让下方各行整体上移。
+    // 占一格空格保住行高；落在选区里就反色这一格，示意空行也被选中。
+    if (segments?.every((seg) => seg.text === "") === true) {
+      return (
+        <Text key={line.key} inverse={(selected?.end ?? 0) > 0}>
+          {" "}
+        </Text>
+      );
+    }
     return (
       <Text
         key={line.key}
