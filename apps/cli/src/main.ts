@@ -33,7 +33,7 @@ import {
 } from "./session-switch.js";
 import { createWizardIo, runProviderSetupWizard, WizardAbort } from "./setup.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 async function readStdin(stream: NodeJS.ReadableStream): Promise<string> {
   const chunks: Buffer[] = [];
