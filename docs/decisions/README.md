@@ -27,6 +27,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0019](ADR-0019-tui-visual-provider-page.md) | TUI 视觉风格与服务商页重构 | 已接受 |
 | [ADR-0020](ADR-0020-tui-fullscreen-rendering.md) | TUI 全屏渲染模型 | 已接受；主界面备用屏幕与自管滚动被 ADR-0021 取代 |
 | [ADR-0021](ADR-0021-tui-daily-usability.md) | TUI 日常可用性：主对话回到普通屏幕、/new、Markdown、输入编辑、Esc 中断、历史保留、系统提示重写 | 提议 |
+| [ADR-0022](ADR-0022-shell-selection.md) | shell 工具可选 shell（pwsh / Git Bash / cmd） | 提议 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
