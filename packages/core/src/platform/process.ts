@@ -190,7 +190,7 @@ export function shellCommandDescription(platform: NodeJS.Platform = process.plat
   const name = executable.split(/[\\/]/).at(-1)?.toLowerCase();
   const syntax =
     name === "cmd" || name === "cmd.exe"
-      ? ": use cmd syntax, not bash or PowerShell"
+      ? ": use cmd syntax, not bash or PowerShell. findstr patterns use the console code page and cannot match non-ASCII text in UTF-8 output; use ASCII patterns only"
       : name === "sh"
         ? ": use POSIX sh syntax"
         : "";

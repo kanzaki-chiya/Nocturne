@@ -31,7 +31,7 @@ describe("shell 环境提示与工具同源", () => {
     process.env.NOCTURNE_SHELL = "C:\\Windows\\System32\\cmd.exe";
     expect(shellArguments("dir", "win32")).toEqual(["/d", "/s", "/c", '"dir"']);
     expect(shellCommandDescription("win32")).toBe(
-      'Commands run with C:\\Windows\\System32\\cmd.exe /d /s /c "<command>": use cmd syntax, not bash or PowerShell',
+      'Commands run with C:\\Windows\\System32\\cmd.exe /d /s /c "<command>": use cmd syntax, not bash or PowerShell. findstr patterns use the console code page and cannot match non-ASCII text in UTF-8 output; use ASCII patterns only',
     );
   });
 
