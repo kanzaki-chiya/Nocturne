@@ -8,12 +8,15 @@ import { createElement } from "react";
 
 import type { Runtime, RuntimeSession } from "@nocturne/core";
 
+import type { spawn } from "node:child_process";
+
 import { App, type SetupFlowSpec } from "./app.js";
 import type { ProviderBridge } from "./commands.js";
 import { CursorClaimsContext } from "./components/input-cursor.js";
 import { createCursorStream } from "./cursor.js";
 import { detectTuiEnv } from "./env.js";
 import { sessionSavedLine } from "./exit-note.js";
+import { MOUSE_DISABLE, MOUSE_ENABLE, wrapMouseStdin, type MouseSource } from "./mouse.js";
 
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 
@@ -21,6 +24,15 @@ export interface TuiOptions {
   stdin?: NodeJS.ReadStream | undefined;
   stdout?: NodeJS.WriteStream | undefined;
   stderr?: NodeJS.WriteStream | undefined;
+  /**
+   * 普通屏幕（行内）模式：<Static> 回滚区 + 页面临时备用屏，不开鼠标上报。
+   * 缺省为全屏（ADR-0021 第 1 条：Ink alternateScreen + 视口滚动 + 拖动选中复制）。
+   */
+  inline?: boolean | undefined;
+  /** 测试注入：自定义鼠标事件源（缺省时包装 stdin 解析 SGR 序列） */
+  mouse?: MouseSource | undefined;
+  /** 测试注入：系统剪贴板 spawn */
+  copySpawn?: typeof spawn | undefined;
   /**
    * 会话入口，两选一：
    * - session：直接进入主界面（常规形态）；
@@ -64,6 +76,7 @@ export async function runTui(
     stderr.write('! --tui 需要交互式终端；请用 nctrn（行式 REPL）或 nctrn -p "<prompt>"\n');
     return 2;
   }
+  const inline = options.inline === true;
   let exitCode = 0;
   let exitMessage: string | undefined;
   let sessionId = "session" in entry ? entry.session?.id : undefined;
@@ -71,11 +84,26 @@ export async function runTui(
   const announce = (): void => {
     if (announced || sessionId === undefined) return;
     announced = true;
-    // Ink unmount 已写完活动区终帧；这条追加到普通屏幕。
+    // 全屏：unmount 已写 ?1049l 回主屏，对话行与提示都在主屏上
     stdout.write(`${sessionSavedLine(sessionId)}\n`);
   };
-  // IME 光标由我们在 Ink 每次写完后补位（cursor.ts），不走 useCursor
-  const cursorOut = createCursorStream(stdout);
+  // 全屏：stdin 进 Ink 前先摘除 SGR 鼠标序列（跨块截断由包装层拼接）
+  let mouseSource = options.mouse;
+  let mouseStdin: ReturnType<typeof wrapMouseStdin> | undefined;
+  let stdinForInk = stdin;
+  if (!inline) {
+    mouseStdin = wrapMouseStdin(stdin);
+    stdinForInk = mouseStdin.stdin;
+    mouseSource ??= mouseStdin.mouse;
+  }
+  // 全屏退出时把对话按当前宽度铺成纯文本行打回主屏（App 填实现）
+  const transcriptOut: { current?: (() => string[]) | undefined } = {};
+  // IME 光标由我们在 Ink 每次写完后补位（cursor.ts），不走 useCursor。
+  // 鼠标上报与备用屏切换绑在同一笔写出：进备用屏后开、回主屏前关。
+  const cursorOut = createCursorStream(
+    stdout,
+    inline ? {} : { afterEnterAlt: MOUSE_ENABLE, beforeExitAlt: MOUSE_DISABLE },
+  );
   // Windows Terminal: suspendTerminal 的 pauseInput 不应撤销控制台读请求。
   const unref = stdin.unref.bind(stdin);
   stdin.unref = () => stdin;
@@ -91,6 +119,11 @@ export async function runTui(
         switchSession: options.switchSession,
         newSession: options.newSession,
         provider: options.provider,
+        inline,
+        mouse: mouseSource,
+        writeOob: cursorOut.writeOob,
+        copySpawn: options.copySpawn,
+        transcriptOut,
         onSessionId: (id: string) => {
           sessionId = id;
         },
@@ -102,10 +135,11 @@ export async function runTui(
     ),
     {
       stdout: cursorOut.stream,
-      stdin,
+      stdin: stdinForInk,
       stderr,
       exitOnCtrlC: false,
       incrementalRendering: true,
+      alternateScreen: !inline,
       patchConsole: options.patchConsole ?? true,
     },
   );
@@ -124,14 +158,32 @@ export async function runTui(
   };
   process.on("uncaughtException", onCrash);
   process.on("unhandledRejection", onCrash);
+  // 兜底：无论哪条路径离开进程，鼠标上报都关一遍（序列对主屏同样安全）
+  if (!inline) {
+    process.once("exit", () => {
+      try {
+        stdout.write(MOUSE_DISABLE);
+      } catch {
+        /* 进程退出路径忽略 */
+      }
+    });
+  }
   try {
     await app.waitUntilExit();
   } finally {
     cursorOut.stop();
+    mouseStdin?.dispose();
     stdin.unref = unref;
     unref();
     process.off("uncaughtException", onCrash);
     process.off("unhandledRejection", onCrash);
+  }
+  // 全屏：备用屏已回主屏（unmount 终帧含 ?1049l），对话按当前宽度铺行
+  const dump = transcriptOut.current;
+  if (dump !== undefined) {
+    for (const line of dump()) {
+      stdout.write(`${line}\n`);
+    }
   }
   announce();
   if (exitMessage !== undefined && exitMessage !== "") {

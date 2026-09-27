@@ -170,9 +170,11 @@ describe("全屏界面", () => {
     await session.close();
   }, 10000);
 
-  it("活动区按内容收缩，不占满屏幕", async () => {
+  it("inline：活动区按内容收缩，不占满屏幕", async () => {
     const { runtime, session } = await sessionWithEffort();
-    const { lastFrame, unmount } = render(createElement(App, { session, runtime, env: ENV }));
+    const { lastFrame, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, inline: true }),
+    );
     await pause(80);
     expect(frameLines(lastFrame()).length).toBeLessThan(23);
     unmount();
@@ -220,16 +222,35 @@ describe("全屏界面", () => {
     await session.close();
   });
 
-  it("空行完成块进入回滚区，长未完结块只留活动区末尾", async () => {
+  it("inline：空行完成块进入回滚区，长未完结块只留活动区末尾", async () => {
     const { runtime, session } = await sessionWithEffort();
     const { lastFrame, stdin, unmount } = render(
-      createElement(App, { session, runtime, env: ENV }),
+      createElement(App, { session, runtime, env: ENV, inline: true }),
     );
     expect(splitTextBlocks("甲\n\n乙", false)).toEqual({ blocks: ["甲\n\n"], tail: "乙" });
     await session.submit({ text: "长回答" });
     await waitFor(() => (lastFrame() ?? "").includes("完毕"));
     stdin.write("\x1b[5~");
     await pause(40);
+    expect(lastFrame()).not.toContain("已向上翻阅");
+    unmount();
+    await session.close();
+  });
+
+  it("全屏：PgUp 翻阅出提示，Ctrl+End 回到底部提示消失", async () => {
+    const { runtime, session } = await sessionWithEffort();
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await pause(80);
+    await session.submit({ text: "长回答" });
+    await waitFor(() => (lastFrame() ?? "").includes("完毕"));
+    stdin.write("\x1b[5~");
+    await waitFor(() => (lastFrame() ?? "").includes("已向上翻阅"));
+    // 翻上去了：底部不再是最后内容
+    expect(lastFrame()).not.toContain("完毕");
+    stdin.write("\x1b[1;5F"); // Ctrl+End
+    await waitFor(() => (lastFrame() ?? "").includes("完毕"));
     expect(lastFrame()).not.toContain("已向上翻阅");
     unmount();
     await session.close();
@@ -269,7 +290,7 @@ describe("全屏界面", () => {
     await session.close();
   }, 15000);
 
-  it("流式松散列表完整进回滚区；中断后 /new，新会话回复照常渲染", async () => {
+  it("inline：流式松散列表完整进回滚区；中断后 /new，新会话回复照常渲染", async () => {
     const loose = "说明：\n\n1. **第一步**\n\n   细节一\n\n2. **第二步**\n\n   细节二\n\n结束。";
     const first = loose.slice(0, loose.indexOf("细节一")); // 到列表第一块的空行处
     const runtime = await createRuntime({
@@ -301,7 +322,7 @@ describe("全屏界面", () => {
       return { kind: "ok" as const, session: next };
     });
     const { lastFrame, stdin, unmount } = render(
-      createElement(App, { session: s1, runtime, env: ENV, newSession }),
+      createElement(App, { session: s1, runtime, env: ENV, newSession, inline: true }),
     );
     await pause(80);
     const turn = s1.submit({ text: "问" });

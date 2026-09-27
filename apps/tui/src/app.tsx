@@ -21,6 +21,8 @@ import {
   type SessionSummary,
   type WizardPreset,
 } from "@nocturne/core";
+import type { spawn } from "node:child_process";
+
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 
 import {
@@ -33,15 +35,46 @@ import {
   type ProviderBridge,
   type ProviderWizardStart,
 } from "./commands.js";
+import { copyText } from "./clipboard.js";
 import { composerWindow } from "./cursor.js";
 import { renderMarkdown, splitMarkdownBlocks, takeMarkdownBlocks } from "./markdown.js";
+import type { MouseSource } from "./mouse.js";
 import { createPasteStore } from "./paste.js";
 import { resumeLabel } from "./resume-label.js";
 import { frameBudget } from "./frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "./keys.js";
-import { layoutEntry, layoutLive } from "./lines.js";
+import {
+  layoutEntry,
+  layoutLive,
+  NEW_CONTENT_HINT,
+  SCROLLED_HINT,
+  transcriptBlocks,
+} from "./lines.js";
+import {
+  applyClamp,
+  scrollFollow,
+  scrollPage,
+  scrollToBottom,
+  scrollToTop,
+  type ScrollState,
+} from "./scroll.js";
+import {
+  colFromDisplay,
+  selCopyText,
+  selIsEmpty,
+  selRangeOnLine,
+  selSegments,
+  type Selection,
+} from "./selection.js";
 import { completeSlash, PRESET_NAMES, type Candidate } from "./slash-catalog.js";
-import type { LaidLine } from "./viewport.js";
+import {
+  countLaidLines,
+  layoutCached,
+  selectVisible,
+  type LaidLine,
+  type LineBlock,
+  type VisibleWindow,
+} from "./viewport.js";
 import { welcomeLines } from "./welcome.js";
 import { APP_VERSION } from "./version.js";
 import { Composer } from "./components/composer.js";
@@ -61,6 +94,16 @@ import { useSessionView } from "./session-view.js";
 import { theme } from "./theme.js";
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 import { useProviderWizard } from "./wizard-io.js";
+
+const EMPTY_WINDOW: VisibleWindow = {
+  lines: [],
+  atTop: true,
+  atBottom: true,
+  clampedFromBottom: 0,
+  collectedLength: 0,
+  sliceStart: 0,
+  exhausted: true,
+};
 
 /** 未完成工具及其后的条目留在活动区；前缀可写入 <Static>。 */
 export function splitCompletedPrefix(entries: readonly ViewEntry[]): {
@@ -129,6 +172,19 @@ export interface AppProps {
   provider?: ProviderBridge | undefined;
   /** 首次配置流程（session 为 undefined 时生效） */
   setup?: SetupFlowSpec | undefined;
+  /**
+   * 普通屏幕（行内）模式：<Static> 回滚区 + 页面临时备用屏。
+   * 缺省为全屏：视口滚动、鼠标选中复制、页面同屏（ADR-0021 第 1 条）。
+   */
+  inline?: boolean | undefined;
+  /** 全屏模式的鼠标事件源（runTui 的 stdin 包装提供；测试可注入假源） */
+  mouse?: MouseSource | undefined;
+  /** Ink 帧外写出通道（OSC 52 序列经 cursor.ts 代理直落 stdout） */
+  writeOob?: ((data: string) => boolean) | undefined;
+  /** 复制用的 spawn（测试注入 mock；缺省 node:child_process.spawn） */
+  copySpawn?: typeof spawn | undefined;
+  /** 全屏退出前把对话铺成行写回主屏（runTui 注入容器，App 填实现） */
+  transcriptOut?: { current?: (() => string[]) | undefined } | undefined;
   /** 结束回调：让 runTui 带出退出码与 stderr 提示（默认退出码 0） */
   onExitResult?: ((code: number, message?: string) => void) | undefined;
   /** 当前会话 id 变化时通知 runTui，退出提示要用切换后的 id */
@@ -275,20 +331,22 @@ function useProviderOps(provider: ProviderBridge | undefined): {
   };
 }
 
-/** 首次配置流程（无会话形态）：服务商页 →（无默认模型时）模型页，临时备用屏 */
+/** 首次配置流程（无会话形态）：服务商页 →（无默认模型时）模型页；inline 走临时备用屏 */
 function SetupFlow({
   runtime,
   provider,
   setup,
+  inline,
   onDone,
 }: {
   runtime: Runtime;
   provider: ProviderBridge;
   setup: SetupFlowSpec;
+  inline: boolean;
   onDone: (d: SetupDone) => void;
 }): React.JSX.Element | null {
   const { stdout } = useStdout();
-  const alt = useAltScreen();
+  const alt = useAltScreen(inline);
   const [width, setWidth] = useState(stdout.columns || 80);
   const [rows, setRows] = useState(stdout.rows || 24);
   useEffect(() => {
@@ -460,6 +518,11 @@ export function App({
   newSession,
   provider,
   setup,
+  inline,
+  mouse,
+  writeOob,
+  copySpawn,
+  transcriptOut,
   onExitResult,
   onSessionId,
 }: AppProps): React.JSX.Element | null {
@@ -483,7 +546,13 @@ export function App({
     return (
       <TuiEnvContext.Provider value={env}>
         {provider !== undefined && setup !== undefined ? (
-          <SetupFlow runtime={runtime} provider={provider} setup={setup} onDone={onSetupDone} />
+          <SetupFlow
+            runtime={runtime}
+            provider={provider}
+            setup={setup}
+            inline={inline === true}
+            onDone={onSetupDone}
+          />
         ) : null}
       </TuiEnvContext.Provider>
     );
@@ -497,6 +566,11 @@ export function App({
       switchSession={switchSession}
       newSession={newSession}
       provider={provider}
+      inline={inline === true}
+      mouse={mouse}
+      writeOob={writeOob}
+      copySpawn={copySpawn}
+      transcriptOut={transcriptOut}
       onSessionId={onSessionId}
     />
   );
@@ -509,6 +583,11 @@ function SessionApp({
   switchSession,
   newSession,
   provider,
+  inline = false,
+  mouse,
+  writeOob,
+  copySpawn,
+  transcriptOut,
   onSessionId,
 }: {
   session: RuntimeSession;
@@ -517,11 +596,18 @@ function SessionApp({
   switchSession?: SwitchSessionFn | undefined;
   newSession?: NewSessionFn | undefined;
   provider?: ProviderBridge | undefined;
+  /** 普通屏幕（行内）模式；缺省 false = 全屏 */
+  inline?: boolean | undefined;
+  mouse?: MouseSource | undefined;
+  writeOob?: ((data: string) => boolean) | undefined;
+  copySpawn?: typeof spawn | undefined;
+  transcriptOut?: { current?: (() => string[]) | undefined } | undefined;
   onSessionId?: ((id: string) => void) | undefined;
 }): React.JSX.Element {
+  const fullscreen = !inline;
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const alt = useAltScreen();
+  const alt = useAltScreen(!fullscreen);
   const [width, setWidth] = useState(stdout.columns || 80);
   const [rows, setRows] = useState(stdout.rows || 24);
 
@@ -551,6 +637,14 @@ function SessionApp({
   const [overlay, setOverlay] = useState<OverlayName | undefined>(undefined);
   const [clientLines, setClientLines] = useState<string[]>([]);
   const [exiting, setExiting] = useState(false);
+  /** 全屏模式：对话视口滚动状态（fromBottom=0 跟随最新） */
+  const [scroll, setScroll] = useState<ScrollState>(scrollFollow);
+  /** 全屏模式：/resume 切换时冻结的旧会话条目（新会话内容在其后铺开） */
+  const [frozen, setFrozen] = useState<TranscriptItem[]>([]);
+  /** 全屏模式：拖动选区（内容行+列坐标；滚动不漂移，宽度变化清除） */
+  const [sel, setSel] = useState<Selection | undefined>(undefined);
+  /** 状态栏短暂提示（复制结果等），约 2 秒 */
+  const [note, setNote] = useState<string | undefined>(undefined);
   /** Ink Static 只按数组下标追加；流式块晋升为持久条目时也不能重排或缩短。 */
   const staticQueue = useRef<TranscriptItem[]>([]);
   const staticKeys = useRef(new Set<string>());
@@ -589,6 +683,29 @@ function SessionApp({
   const escapeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const swallowRef = useRef(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** 全屏视口的排版缓存与几何信息（鼠标处理器经 ref 读最新帧） */
+  const lineCache = useRef(new Map<string, LaidLine[]>());
+  const laidTotal = useRef<number | undefined>(undefined);
+  const geomRef = useRef<{
+    visible: VisibleWindow;
+    transcriptRows: number;
+    blocked: boolean;
+  }>({ visible: EMPTY_WINDOW, transcriptRows: 0, blocked: true });
+  const selRef = useRef<Selection | undefined>(undefined);
+  selRef.current = sel;
+  const blocksRef = useRef<{ blocks: LineBlock[]; width: number }>({ blocks: [], width: 0 });
+  /** 异步回调（doSwitch）读当前会话条目/本地行，冻结进视口前缀 */
+  const entriesRef = useRef(view.entries);
+  entriesRef.current = view.entries;
+  const clientLinesRef = useRef(clientLines);
+  clientLinesRef.current = clientLines;
+  /** 拖动状态：视口内按下为真；越过边缘时记方向（-1 上 / +1 下）并持续滚动 */
+  const dragRef = useRef<{
+    dragging: boolean;
+    edge: -1 | 0 | 1;
+    timer: ReturnType<typeof setInterval> | undefined;
+  }>({ dragging: false, edge: 0, timer: undefined });
 
   // 服务商页数据与操作（与 SetupFlow 共用一套编排）
   const ops = useProviderOps(provider);
@@ -638,10 +755,17 @@ function SessionApp({
       .find((x) => x.ref.provider === m.provider && x.ref.model === m.model)?.contextWindow;
   }, [runtime, view.config.model]);
 
-  const pushLine = useCallback((text: string) => {
-    if (text === "") return;
-    setClientLines((prev) => [...prev.slice(-19), ...text.split("\n")]);
-  }, []);
+  const pushLine = useCallback(
+    (text: string) => {
+      if (text === "") return;
+      setClientLines((prev) => [...prev.slice(-19), ...text.split("\n")]);
+      if (fullscreen) {
+        // 翻阅中不拉回底部，标"有新内容"
+        setScroll((s) => (s.follow ? s : { ...s, newContent: true }));
+      }
+    },
+    [fullscreen],
+  );
 
   const flash = useCallback((which: StatusHighlight) => {
     setHighlight(which);
@@ -681,6 +805,163 @@ function SessionApp({
     },
     [pending, session, pushLine],
   );
+
+  /** 拖动越过视口边缘时的自动滚动停止 */
+  const stopEdgeScroll = useCallback((): void => {
+    if (dragRef.current.timer !== undefined) clearInterval(dragRef.current.timer);
+    dragRef.current.timer = undefined;
+    dragRef.current.edge = 0;
+  }, []);
+
+  /** 可见窗口 lines[i] 在完整行表中的绝对序号 = absStart + i */
+  const absStartOf = useCallback((v: VisibleWindow): number => {
+    if (v.exhausted) return v.sliceStart;
+    const { blocks: bs, width: w } = blocksRef.current;
+    return countLaidLines(bs, w, lineCache.current) - v.collectedLength + v.sliceStart;
+  }, []);
+
+  const allLaidLines = useCallback((): LaidLine[] => {
+    const { blocks: bs, width: w } = blocksRef.current;
+    return bs.flatMap((b) => layoutCached(b, w, lineCache.current));
+  }, []);
+
+  const flashNote = useCallback((text: string | undefined): void => {
+    setNote(text);
+    if (noteTimer.current !== undefined) clearTimeout(noteTimer.current);
+    if (text !== undefined) {
+      noteTimer.current = setTimeout(() => {
+        noteTimer.current = undefined;
+        setNote(undefined);
+      }, 2000);
+    }
+  }, []);
+
+  /**
+   * 复制选区：渲染后的可见文字（折行续行拼回、行尾空白去掉），
+   * 系统剪贴板与 OSC 52 并行，任一成功即算成功。
+   */
+  const copySelection = useCallback(
+    (clear: boolean): void => {
+      const s = selRef.current;
+      if (s === undefined || selIsEmpty(s)) return;
+      const text = selCopyText(allLaidLines(), s);
+      if (clear) setSel(undefined);
+      if (text === "") return;
+      void copyText(text, { spawn: copySpawn, osc52: writeOob }).then((ok) => {
+        flashNote(ok.length > 0 ? `已复制 ${Array.from(text).length} 个字符` : "! 复制失败");
+      });
+    },
+    [allLaidLines, copySpawn, writeOob, flashNote],
+  );
+
+  // 鼠标（全屏）：滚轮翻阅视口；视口内左键按下/拖动扩展选区、越沿持续滚动、
+  // 松开复制。页面/弹层/权限待决时忽略。
+  useEffect(() => {
+    if (!fullscreen || mouse === undefined) return;
+    const off = mouse.subscribe((ev) => {
+      const g = geomRef.current;
+      if (g.blocked) return;
+      if (ev.type === "wheel") {
+        setScroll((s) => scrollPage(s, ev.dir === "up" ? 3 : -3));
+        return;
+      }
+      const base = absStartOf(g.visible);
+      const row = ev.y - 1;
+      const lineAt = (r: number): LaidLine | undefined =>
+        r >= 0 && r < g.visible.lines.length ? g.visible.lines[r] : undefined;
+      if (ev.type === "press") {
+        const line = lineAt(row);
+        if (ev.button !== 0 || line === undefined) return;
+        dragRef.current.dragging = true;
+        dragRef.current.edge = 0;
+        const col = colFromDisplay(line.text, ev.x - 1);
+        setSel({ anchor: { abs: base + row, col }, head: { abs: base + row, col } });
+        return;
+      }
+      if (ev.type === "drag" && dragRef.current.dragging && ev.button === 0) {
+        if (row < 0 || row >= g.transcriptRows) {
+          dragRef.current.edge = row < 0 ? -1 : 1;
+          dragRef.current.timer ??= setInterval(() => {
+            const gg = geomRef.current;
+            if (gg.blocked || dragRef.current.edge === 0) return;
+            setScroll((s) => scrollPage(s, dragRef.current.edge * 2));
+            const b2 = absStartOf(gg.visible);
+            const edgeRow = dragRef.current.edge < 0 ? 0 : gg.visible.lines.length - 1;
+            const edgeLine = gg.visible.lines[edgeRow];
+            if (edgeLine === undefined) return;
+            const col = dragRef.current.edge < 0 ? 0 : edgeLine.text.length;
+            setSel((prev) =>
+              prev === undefined ? prev : { ...prev, head: { abs: b2 + edgeRow, col } },
+            );
+          }, 60);
+          return;
+        }
+        dragRef.current.edge = 0;
+        const line = lineAt(row);
+        if (line === undefined) return;
+        const head = { abs: base + row, col: colFromDisplay(line.text, ev.x - 1) };
+        setSel((prev) => (prev === undefined ? prev : { ...prev, head }));
+        return;
+      }
+      if (ev.type === "release") {
+        if (!dragRef.current.dragging) return;
+        dragRef.current.dragging = false;
+        stopEdgeScroll();
+        const s = selRef.current;
+        if (s === undefined) return;
+        // 单击（按下松开同点）：只清除选区
+        if (selIsEmpty(s)) {
+          setSel(undefined);
+          return;
+        }
+        copySelection(false);
+      }
+    });
+    return () => {
+      off();
+      dragRef.current.dragging = false;
+      if (dragRef.current.timer !== undefined) {
+        clearInterval(dragRef.current.timer);
+        dragRef.current.timer = undefined;
+      }
+    };
+  }, [fullscreen, mouse, absStartOf, copySelection, stopEdgeScroll]);
+
+  // 全屏滚动状态维护：离开底部后新内容只标记不打断；到顶后夹紧 fromBottom
+  useEffect(() => {
+    if (!fullscreen) return;
+    if (scroll.follow) {
+      laidTotal.current = undefined;
+      return;
+    }
+    const total = countLaidLines(blocksRef.current.blocks, width, lineCache.current);
+    const prev = laidTotal.current;
+    laidTotal.current = total;
+    if (prev !== undefined && total > prev) {
+      setScroll((s) =>
+        s.follow ? s : { ...s, fromBottom: s.fromBottom + (total - prev), newContent: true },
+      );
+    } else if (geomRef.current.visible.clampedFromBottom !== scroll.fromBottom) {
+      setScroll(applyClamp(scroll, geomRef.current.visible.clampedFromBottom));
+    }
+  });
+
+  // 宽度变化 → 整段对话重排：作废排版缓存与选区（abs 行号随重排失效）
+  useEffect(() => {
+    if (!fullscreen) return;
+    lineCache.current.clear();
+    laidTotal.current = undefined;
+    setSel(undefined);
+  }, [fullscreen, width]);
+
+  // 全屏退出前把对话按当前宽度铺成纯文本行（runTui 在恢复主屏后打印）
+  useEffect(() => {
+    if (!fullscreen || transcriptOut === undefined) return;
+    transcriptOut.current = () =>
+      blocksRef.current.blocks
+        .flatMap((b) => layoutCached(b, blocksRef.current.width, lineCache.current))
+        .map((l) => l.text);
+  }, [fullscreen, transcriptOut]);
 
   /** 思考强度循环（Shift+Tab）：只改档位并高亮状态栏，不插入对话条目 */
   const cycleEffort = useCallback(() => {
@@ -725,14 +1006,37 @@ function SessionApp({
       }
       const res = await switchSession(id, { allowForeign });
       if (res.kind === "ok") {
+        const epoch = sessionEpoch.current++;
         const sep: TranscriptItem = {
           kind: "separator",
-          key: `sw-${res.session.id}`,
+          key: `sw-${epoch}`,
           text: `已切换到会话 ${res.session.id}`,
         };
-        staticQueue.current.push(sep);
-        sessionEpoch.current++;
-        staticWritten.current.clear();
+        if (fullscreen) {
+          // 旧会话的完结条目与本地提示行冻结进视口前缀；键加纪元前缀防碰撞
+          const frozenItems: TranscriptItem[] = entriesRef.current
+            .filter(
+              (e) =>
+                !(
+                  e.kind === "notice" &&
+                  e.subtype === "config" &&
+                  hiddenNotices.current.has(e.key)
+                ),
+            )
+            .map((e) => ({ ...e, key: `z${epoch}:${e.key}` }));
+          const frozenClient: TranscriptItem[] = clientLinesRef.current.map((text, i) => ({
+            kind: "header",
+            key: `z${epoch}:c${i}`,
+            lines: [{ key: `z${epoch}:c${i}`, text, dim: true }],
+          }));
+          setFrozen((prev) => [...prev, ...frozenItems, ...frozenClient, sep]);
+          setClientLines([]);
+          setSel(undefined);
+          setScroll(scrollToBottom());
+        } else {
+          staticQueue.current.push(sep);
+          staticWritten.current.clear();
+        }
         setSession(res.session);
         setOverlay(undefined);
         for (const n of sessionNotes(res.session)) pushLine(`! ${n}`);
@@ -746,7 +1050,7 @@ function SessionApp({
         res.kind === "busy" ? "! 会话忙（Turn 进行中）；先 Ctrl+C 中断再切换" : `! ${res.message}`,
       );
     },
-    [switchSession, pushLine],
+    [switchSession, pushLine, fullscreen],
   );
 
   const doNew = useCallback(async (): Promise<void> => {
@@ -756,14 +1060,22 @@ function SessionApp({
     }
     const res = await newSession();
     if (res.kind === "ok") {
-      const sep: TranscriptItem = {
-        kind: "separator",
-        key: `new-${res.session.id}`,
-        text: `新会话 ${res.session.id}`,
-      };
-      staticQueue.current.push(sep);
-      sessionEpoch.current++;
-      staticWritten.current.clear();
+      if (fullscreen) {
+        // 视口整体换成新会话：欢迎区重新出现，翻阅与选区清空（ADR-0021 第 2 条）
+        setFrozen([]);
+        setSel(undefined);
+        setScroll(scrollToBottom());
+        lineCache.current.clear();
+      } else {
+        const sep: TranscriptItem = {
+          kind: "separator",
+          key: `new-${res.session.id}`,
+          text: `新会话 ${res.session.id}`,
+        };
+        staticQueue.current.push(sep);
+        sessionEpoch.current++;
+        staticWritten.current.clear();
+      }
       setSession(res.session);
       setClientLines([]);
       setOverlay(undefined);
@@ -774,7 +1086,7 @@ function SessionApp({
           : `! ${res.kind === "error" ? res.message : "新建会话失败"}`,
       );
     }
-  }, [newSession, pushLine]);
+  }, [newSession, pushLine, fullscreen]);
 
   /** 模型选择页左栏数据快照（打开时与向导完成后拉取） */
   const loadPickerData = useCallback(async () => {
@@ -1006,6 +1318,18 @@ function SessionApp({
       swallowRef.current = true;
       return;
     }
+    // 选区存在时（全屏）：Ctrl+C 复制并清除（不中断不退出）；
+    // Esc 最先清选区；其他按键清高亮后继续各自路由
+    if (selRef.current !== undefined) {
+      if (key.ctrl && ch === "c") {
+        copySelection(true);
+        return;
+      }
+      setSel(undefined);
+      dragRef.current.dragging = false;
+      stopEdgeScroll();
+      if (key.escape && ch === "" && !key.meta && !key.ctrl) return;
+    }
     if (key.escape && ch === "" && !key.meta && !key.ctrl) {
       if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
       escapeTimer.current = undefined;
@@ -1031,6 +1355,26 @@ function SessionApp({
       cyclePreset();
       return;
     }
+    // 全屏视口翻阅（ADR-0021）：弹层/页面/权限待决时不响应
+    if (fullscreen && !pageOpen && !dialogOpen && pending === undefined) {
+      const page = Math.max(1, budget.conversation - 1);
+      if (key.pageUp) {
+        setScroll((s) => scrollPage(s, page));
+        return;
+      }
+      if (key.pageDown) {
+        setScroll((s) => scrollPage(s, -page));
+        return;
+      }
+      if (key.ctrl && key.home) {
+        setScroll(scrollToTop());
+        return;
+      }
+      if (key.ctrl && key.end) {
+        setScroll(scrollToBottom());
+        return;
+      }
+    }
     if (completionOpen && selected !== undefined) {
       if (key.upArrow) {
         setCompletionIndex((i) => (i <= 0 ? candidates.length - 1 : i - 1));
@@ -1053,6 +1397,7 @@ function SessionApp({
         setInput("");
         setCursor(0);
         setCompletionOn(true);
+        if (fullscreen) setScroll(scrollToBottom());
         void runSlash(text, session, provider)
           .then((r) => {
             const opens = r.kind === "overlay" || r.kind === "picker" || r.kind === "provider-page";
@@ -1185,6 +1530,7 @@ function SessionApp({
         return;
       }
       clearInput();
+      if (fullscreen) setScroll(scrollToBottom());
       // 历史里保留占位，发给模型的是展开后的原文
       session.submit({ text: pastes.expand(text) }).catch((e: unknown) => {
         pushLine(`! ${errText(e)}`);
@@ -1334,6 +1680,37 @@ function SessionApp({
     ascii: env.ascii,
     width,
   });
+  // —— 全屏视口（ADR-0021 第 1 条）：欢迎区在块表最前随对话滚走；
+  // 冻结前缀是 /resume 切换时旧会话的完结条目；live 块每次渲染重排。
+  const blocks: LineBlock[] = fullscreen
+    ? transcriptBlocks({
+        welcome,
+        notices: bootNotes,
+        frozen,
+        entries: view.entries,
+        hide: hideNotice,
+        live: view,
+        clientLines,
+        ascii: env.ascii,
+      })
+    : [];
+  blocksRef.current = { blocks, width };
+  const showBanner = fullscreen && !scroll.follow;
+  const transcriptRows = Math.max(0, budget.conversation - (showBanner ? 1 : 0));
+  const visible: VisibleWindow = fullscreen
+    ? selectVisible(blocks, width, transcriptRows, scroll.fromBottom, lineCache.current)
+    : EMPTY_WINDOW;
+  // 选区高亮需要绝对行号；未翻到顶时先用 countLaidLines 求总数换算
+  const selBase =
+    fullscreen && sel !== undefined
+      ? visible.exhausted
+        ? visible.sliceStart
+        : countLaidLines(blocks, width, lineCache.current) -
+          visible.collectedLength +
+          visible.sliceStart
+      : 0;
+
+  // —— inline（普通屏幕）：Static 回滚区记账 + 活动区行
   const header: TranscriptItem[] = [
     { kind: "header", key: `header:${session.id}`, lines: welcome },
     ...bootNotes.map((note, i): TranscriptItem => ({
@@ -1342,54 +1719,58 @@ function SessionApp({
       lines: [{ key: `boot:${i}`, text: `! ${note}`, color: "yellow" }],
     })),
   ];
-  const staticEntries: TranscriptItem[] = [
-    ...header,
-    ...prefix.filter((entry) => !hideNotice(entry)),
-  ];
-  const completedLive = new Map<string, string>();
-  for (const assistant of view.live.assistants) {
-    const step = takeMarkdownBlocks(
-      assistant.text,
-      staticWritten.current.get(assistant.messageId) ?? 0,
-      false,
-    );
-    completedLive.set(assistant.messageId, step.tail);
-    for (const part of step.parts) {
-      const key = `a:${assistant.messageId}:@${part.offset}`;
-      staticEntries.push({
-        kind: "header",
-        key,
-        lines: renderMarkdown(part.text, width, key),
-      });
+  const activityLines: LaidLine[] = [];
+  if (!fullscreen) {
+    const staticEntries: TranscriptItem[] = [
+      ...header,
+      ...prefix.filter((entry) => !hideNotice(entry)),
+    ];
+    const completedLive = new Map<string, string>();
+    for (const assistant of view.live.assistants) {
+      const step = takeMarkdownBlocks(
+        assistant.text,
+        staticWritten.current.get(assistant.messageId) ?? 0,
+        false,
+      );
+      completedLive.set(assistant.messageId, step.tail);
+      for (const part of step.parts) {
+        const key = `a:${assistant.messageId}:@${part.offset}`;
+        staticEntries.push({
+          kind: "header",
+          key,
+          lines: renderMarkdown(part.text, width, key),
+        });
+      }
+      staticWritten.current.set(assistant.messageId, step.written);
     }
-    staticWritten.current.set(assistant.messageId, step.written);
+    const staticBlocks = staticEntries.flatMap<TranscriptItem>((entry) =>
+      entry.kind === "assistant" ? assistantBlocks(entry, staticWritten.current) : [entry],
+    );
+    for (const entry of staticBlocks) {
+      const id = `${sessionEpoch.current}:${entry.key}`;
+      if (staticKeys.current.has(id)) continue;
+      staticKeys.current.add(id);
+      staticQueue.current.push({ ...entry, key: id });
+    }
+    const { tail } = splitCompletedPrefix(view.entries);
+    const activityView: SessionView = {
+      ...view,
+      live: {
+        ...view.live,
+        assistants: view.live.assistants.map((a) => ({
+          ...a,
+          text: completedLive.get(a.messageId) ?? a.text,
+        })),
+      },
+    };
+    activityLines.push(
+      ...tail.flatMap((entry) => layoutEntry(entry, width, env.ascii)),
+      ...layoutLive(activityView, width, env.ascii),
+      ...clientLines.map((text, i) => ({ key: `client:${i}`, text, dim: true })),
+    );
   }
-  const staticBlocks = staticEntries.flatMap<TranscriptItem>((entry) =>
-    entry.kind === "assistant" ? assistantBlocks(entry, staticWritten.current) : [entry],
-  );
-  for (const entry of staticBlocks) {
-    const id = `${sessionEpoch.current}:${entry.key}`;
-    if (staticKeys.current.has(id)) continue;
-    staticKeys.current.add(id);
-    staticQueue.current.push({ ...entry, key: id });
-  }
-  const { tail } = splitCompletedPrefix(view.entries);
-  const activityView: SessionView = {
-    ...view,
-    live: {
-      ...view.live,
-      assistants: view.live.assistants.map((a) => ({
-        ...a,
-        text: completedLive.get(a.messageId) ?? a.text,
-      })),
-    },
-  };
-  const activityLines: LaidLine[] = [
-    ...tail.flatMap((entry) => layoutEntry(entry, width, env.ascii)),
-    ...layoutLive(activityView, width, env.ascii),
-    ...clientLines.map((text, i) => ({ key: `client:${i}`, text, dim: true })),
-  ].slice(-budget.conversation);
-  const activityHeight = activityLines.length;
+  const shownActivity = activityLines.slice(-budget.conversation);
+  const activityHeight = shownActivity.length;
   const prompt = `${g.prompt} `;
   const inputY = -(budget.input + budget.completion + budget.status);
 
@@ -1534,93 +1915,141 @@ function SessionApp({
       />
     ) : null;
 
+  // 鼠标处理器读最新一帧的视口几何；页面/弹层占用对话区时整块屏蔽
+  geomRef.current = {
+    visible,
+    transcriptRows,
+    blocked: pageOpen || overlayBody !== null,
+  };
+
+  /** LaidLine → Text；selected 给本行的选区字符范围时拆分反色分段 */
+  const renderLine = (
+    line: LaidLine,
+    selected?: { start: number; end: number },
+  ): React.JSX.Element => {
+    const segments = selected === undefined ? line.segments : selSegments(line, selected);
+    return (
+      <Text
+        key={line.key}
+        wrap="truncate"
+        {...(line.color !== undefined ? { color: line.color } : {})}
+        dimColor={line.dim === true}
+        bold={line.bold === true}
+        italic={line.italic === true}
+      >
+        {segments !== undefined
+          ? segments.map((seg, i) => (
+              <Text
+                key={i}
+                {...(seg.color !== undefined ? { color: seg.color } : {})}
+                {...(seg.backgroundColor !== undefined
+                  ? { backgroundColor: seg.backgroundColor }
+                  : {})}
+                dimColor={seg.dim === true}
+                bold={seg.bold === true}
+                italic={seg.italic === true}
+                inverse={seg.inverse === true}
+              >
+                {seg.text}
+              </Text>
+            ))
+          : line.text === ""
+            ? " "
+            : line.text}
+      </Text>
+    );
+  };
+
+  // 底部固定区：输入框光标登记 + Composer + 候选 + 状态栏（两种模式共用）
+  const chrome = (
+    <>
+      <InputCursor
+        active={budget.input > 0 && !pageOpen}
+        prefix={prompt}
+        text={editor.cursorBefore}
+        width={width}
+        y={inputY + editor.cursorRow}
+      />
+      <Composer
+        pastes={pastes}
+        value={input}
+        cursor={cursor}
+        onChange={(next, nextCursor) => {
+          setInput(next);
+          setCursor(nextCursor);
+          setHistoryIndex(undefined);
+        }}
+        onCursor={setCursor}
+        onHistory={recallHistory}
+        onSubmit={onSubmit}
+        active={!dialogOpen && pending === undefined}
+        disabledReason={composerDisabled}
+        width={width}
+        height={budget.input}
+        showRule={budget.inputRule > 0}
+        suspendNav={completionOpen}
+        swallowRef={swallowRef}
+      />
+      {budget.completion > 0
+        ? shownCandidates.map((item, i) => (
+            <Text key={item.insert} wrap="truncate" inverse={i === completionIndex}>
+              {item.label}
+            </Text>
+          ))
+        : null}
+      {budget.status > 0 ? (
+        <StatusBar
+          view={view}
+          width={width}
+          effort={effort}
+          context={{ used: contextReport.estimatedTokens, limit: contextWindow }}
+          models={runtime.listModels()}
+          highlight={highlight}
+          note={note}
+        />
+      ) : null}
+    </>
+  );
+
   return (
     <TuiEnvContext.Provider value={env}>
-      <Transcript entries={staticQueue.current} width={width} />
-      {pageBody ?? (
-        <Box flexDirection="column" width={width}>
-          <Box
-            flexDirection="column"
-            height={overlayBody === null ? activityHeight : budget.conversation}
-            overflow="hidden"
-          >
-            {overlayBody ??
-              activityLines.map((line) => (
-                <Text
-                  key={line.key}
-                  wrap="truncate"
-                  {...(line.color !== undefined ? { color: line.color } : {})}
-                  dimColor={line.dim === true}
-                  bold={line.bold === true}
-                  italic={line.italic === true}
-                >
-                  {line.segments !== undefined
-                    ? line.segments.map((seg, i) => (
-                        <Text
-                          key={i}
-                          {...(seg.color !== undefined ? { color: seg.color } : {})}
-                          {...(seg.backgroundColor !== undefined
-                            ? { backgroundColor: seg.backgroundColor }
-                            : {})}
-                          dimColor={seg.dim === true}
-                          bold={seg.bold === true}
-                          italic={seg.italic === true}
-                        >
-                          {seg.text}
-                        </Text>
-                      ))
-                    : line.text === ""
-                      ? " "
-                      : line.text}
-                </Text>
-              ))}
+      {fullscreen ? null : <Transcript entries={staticQueue.current} width={width} />}
+      {pageBody ??
+        (fullscreen ? (
+          // 全屏：固定帧高 rows-1，上为可滚动视口，下为输入/候选/状态栏
+          <Box flexDirection="column" width={width} height={budget.frameHeight}>
+            <Box flexDirection="column" height={budget.conversation} overflow="hidden">
+              {overlayBody ?? (
+                <>
+                  {visible.lines.map((line, i) =>
+                    renderLine(
+                      line,
+                      sel === undefined ? undefined : selRangeOnLine(sel, selBase + i),
+                    ),
+                  )}
+                  <Box flexGrow={1} />
+                  {showBanner ? (
+                    <Text color={theme.warning} wrap="truncate">
+                      {scroll.newContent ? NEW_CONTENT_HINT : SCROLLED_HINT}
+                    </Text>
+                  ) : null}
+                </>
+              )}
+            </Box>
+            {chrome}
           </Box>
-          <InputCursor
-            active={budget.input > 0 && !pageOpen}
-            prefix={prompt}
-            text={editor.cursorBefore}
-            width={width}
-            y={inputY + editor.cursorRow}
-          />
-          <Composer
-            pastes={pastes}
-            value={input}
-            cursor={cursor}
-            onChange={(next, nextCursor) => {
-              setInput(next);
-              setCursor(nextCursor);
-              setHistoryIndex(undefined);
-            }}
-            onCursor={setCursor}
-            onHistory={recallHistory}
-            onSubmit={onSubmit}
-            active={!dialogOpen && pending === undefined}
-            disabledReason={composerDisabled}
-            width={width}
-            height={budget.input}
-            showRule={budget.inputRule > 0}
-            suspendNav={completionOpen}
-            swallowRef={swallowRef}
-          />
-          {budget.completion > 0
-            ? shownCandidates.map((item, i) => (
-                <Text key={item.insert} wrap="truncate" inverse={i === completionIndex}>
-                  {item.label}
-                </Text>
-              ))
-            : null}
-          {budget.status > 0 ? (
-            <StatusBar
-              view={view}
-              width={width}
-              effort={effort}
-              context={{ used: contextReport.estimatedTokens, limit: contextWindow }}
-              models={runtime.listModels()}
-              highlight={highlight}
-            />
-          ) : null}
-        </Box>
-      )}
+        ) : (
+          <Box flexDirection="column" width={width}>
+            <Box
+              flexDirection="column"
+              height={overlayBody === null ? activityHeight : budget.conversation}
+              overflow="hidden"
+            >
+              {overlayBody ?? shownActivity.map((line) => renderLine(line))}
+            </Box>
+            {chrome}
+          </Box>
+        ))}
     </TuiEnvContext.Provider>
   );
 }

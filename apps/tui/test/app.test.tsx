@@ -41,6 +41,14 @@ const tmp = (p: string) => {
 
 const ENV = { ascii: false, animated: false };
 const pause = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+
+async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error("waitFor 超时");
+    await pause(20);
+  }
+}
 const inEnv = (child: React.ReactNode) =>
   createElement(TuiEnvContext.Provider, { value: ENV }, child);
 
@@ -388,7 +396,7 @@ describe("TUI", () => {
     await s1.close();
   });
 
-  it("/new 与 /clear：换入空会话，保留旧对话和分隔行", async () => {
+  it("inline：/new 与 /clear 换入空会话，保留旧对话和分隔行", async () => {
     const { session, runtime } = await makeSession();
     const created: RuntimeSession[] = [];
     const newSession = vi.fn(async () => {
@@ -397,7 +405,7 @@ describe("TUI", () => {
       return { kind: "ok" as const, session: next };
     });
     const { lastFrame, stdin, unmount } = render(
-      createElement(App, { session, runtime, env: ENV, newSession }),
+      createElement(App, { session, runtime, env: ENV, newSession, inline: true }),
     );
     await pause(60);
     for (const cmd of ["/new", "/clear"]) {
@@ -408,6 +416,56 @@ describe("TUI", () => {
     expect(newSession).toHaveBeenCalledTimes(2);
     expect(lastFrame()).toContain(`新会话 ${created[0]?.id}`);
     expect(lastFrame()).toContain(`新会话 ${created[1]?.id}`);
+    unmount();
+    await session.close();
+    for (const next of created) await next.close();
+  });
+
+  it("全屏：/new 视口换成新会话，欢迎区重现且翻阅清空", async () => {
+    const runtime = await createRuntime({
+      cwd: tmp("nct-tui-ws-"),
+      sessionsDir: tmp("nct-tui-sd-"),
+      providers: [
+        new FakeProvider({
+          scripts: [
+            [
+              { type: "text_delta", text: `${"甲\n".repeat(30)}旧回答` },
+              { type: "finish", reason: "stop" },
+            ],
+            [
+              { type: "text_delta", text: "新回答" },
+              { type: "finish", reason: "stop" },
+            ],
+          ],
+        }),
+      ],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    const created: RuntimeSession[] = [];
+    const newSession = vi.fn(async () => {
+      const next = await runtime.createSession({ model: "fake/fake-model" });
+      created.push(next);
+      return { kind: "ok" as const, session: next };
+    });
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, newSession }),
+    );
+    await pause(60);
+    await session.submit({ text: "旧问题" });
+    await waitFor(() => (lastFrame() ?? "").includes("旧回答"));
+    stdin.write("\x1b[5~");
+    await waitFor(() => (lastFrame() ?? "").includes("已向上翻阅"));
+    stdin.write("/new");
+    stdin.write("\r");
+    await waitFor(() => created.length === 1);
+    await pause(80);
+    const frame = lastFrame() ?? "";
+    // 旧对话整体换出：欢迎区重新出现，翻阅提示与旧内容都不在
+    expect(frame).toContain("Nocturne");
+    expect(frame).not.toContain("旧回答");
+    expect(frame).not.toContain("已向上翻阅");
+    await created[0]?.submit({ text: "新问题" });
+    await waitFor(() => (lastFrame() ?? "").includes("新回答"));
     unmount();
     await session.close();
     for (const next of created) await next.close();

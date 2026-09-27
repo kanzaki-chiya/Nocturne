@@ -113,6 +113,7 @@ describe("退出保留回滚区", () => {
       stdin: io.stdin,
       stdout: io.stdout,
       stderr: io.stderr,
+      inline: true,
       patchConsole: false,
     });
     await new Promise((r) => setTimeout(r, 80));
@@ -141,6 +142,7 @@ describe("退出保留回滚区", () => {
       stdout: io.stdout,
       stderr: io.stderr,
       provider,
+      inline: true,
       patchConsole: false,
     });
     await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
@@ -169,6 +171,7 @@ describe("退出保留回滚区", () => {
       stdout: io.stdout,
       stderr: io.stderr,
       exitProcess: () => undefined,
+      inline: true,
       patchConsole: false,
     });
     await new Promise((r) => setTimeout(r, 120));
@@ -187,6 +190,7 @@ describe("退出保留回滚区", () => {
       stdout: io.stdout,
       stderr: io.stderr,
       exitProcess: () => undefined,
+      inline: true,
       patchConsole: false,
     });
     await new Promise((r) => setTimeout(r, 120));
@@ -204,6 +208,7 @@ describe("退出保留回滚区", () => {
       stdout: io.stdout,
       stderr: io.stderr,
       exitProcess: () => undefined,
+      inline: true,
       patchConsole: false,
     });
     await new Promise((r) => setTimeout(r, 120));
@@ -224,6 +229,7 @@ describe("退出保留回滚区", () => {
       exitProcess: () => {
         crashed = true;
       },
+      inline: true,
       patchConsole: false,
     });
     await new Promise((r) => setTimeout(r, 80));
@@ -231,6 +237,89 @@ describe("退出保留回滚区", () => {
     await done;
     expect(crashed).toBe(true);
     preservedBeforeMessage(io.stdoutChunks, session.id);
+    await session.close();
+  });
+});
+
+const MOUSE_ON = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
+const MOUSE_OFF = "\x1b[?1006l\x1b[?1002l\x1b[?1000l";
+
+describe("全屏退出（默认模式）", () => {
+  it("进备用屏后开鼠标；退出先关鼠标再回主屏；对话与继续提示落到主屏", async () => {
+    const { runtime, session } = await openSession();
+    const io = ttyPair();
+    const done = runTui({ session }, runtime, {
+      stdin: io.stdin,
+      stdout: io.stdout,
+      stderr: io.stderr,
+      patchConsole: false,
+    });
+    await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
+    await session.submit({ text: "测试分段" });
+    await waitFor(() => io.stdoutChunks.join("").includes("第二段"));
+    io.stdin.write("\x04");
+    await done;
+    const text = io.stdoutChunks.join("");
+    const enterAt = text.indexOf("\x1b[?1049h");
+    const mouseOn = text.indexOf(MOUSE_ON);
+    expect(enterAt).toBeGreaterThan(-1);
+    expect(mouseOn).toBeGreaterThan(enterAt); // 先备屏后开鼠标
+    const mouseOff = text.indexOf(MOUSE_OFF);
+    const leaveAt = text.indexOf("\x1b[?1049l");
+    expect(mouseOff).toBeGreaterThan(-1);
+    expect(leaveAt).toBeGreaterThan(mouseOff); // 先关鼠标再回主屏
+    const after = text.slice(leaveAt);
+    expect(after).toContain("第二段"); // 对话按纯文本行打回主屏
+    expect(after).toContain(sessionSavedLine(session.id));
+    expect(io.stderrChunks.join("")).toBe("");
+    await session.close();
+  });
+
+  it("未捕获异常：鼠标关闭仍在回主屏之前", async () => {
+    const { runtime, session } = await openSession();
+    const io = ttyPair();
+    let crashed = false;
+    const done = runTui({ session }, runtime, {
+      stdin: io.stdin,
+      stdout: io.stdout,
+      stderr: io.stderr,
+      exitProcess: () => {
+        crashed = true;
+      },
+      patchConsole: false,
+    });
+    await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
+    process.emit("unhandledRejection", new Error("boom"), Promise.resolve());
+    await done;
+    expect(crashed).toBe(true);
+    const text = io.stdoutChunks.join("");
+    const mouseOff = text.indexOf(MOUSE_OFF);
+    const leaveAt = text.indexOf("\x1b[?1049l");
+    expect(mouseOff).toBeGreaterThan(-1);
+    expect(leaveAt).toBeGreaterThan(mouseOff);
+    expect(text.slice(leaveAt)).toContain(sessionSavedLine(session.id));
+    expect(io.stderrChunks.join("")).toContain("boom");
+    await session.close();
+  });
+
+  it("stdin 进入 Ink 前摘除 SGR 鼠标序列：滚轮翻阅、字节不进输入框", async () => {
+    const { runtime, session } = await openSession();
+    const io = ttyPair();
+    const done = runTui({ session }, runtime, {
+      stdin: io.stdin,
+      stdout: io.stdout,
+      stderr: io.stderr,
+      patchConsole: false,
+    });
+    await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
+    // 滚轮序列与普通按键字节混在同一块里：按键进输入框，鼠标序列被摘除
+    io.stdin.write("\x1b[<65;10;5Mxyz");
+    await waitFor(() => io.stdoutChunks.join("").includes("xyz"));
+    const text = io.stdoutChunks.join("");
+    expect(text).not.toContain("<65;");
+    expect(text).not.toContain("10;5M");
+    io.stdin.write("\x03");
+    await done;
     await session.close();
   });
 });
