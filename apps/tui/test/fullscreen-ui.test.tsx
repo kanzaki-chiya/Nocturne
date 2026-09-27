@@ -494,10 +494,10 @@ describe("全屏界面", () => {
     await pause(60);
     stdin.write("你好abc");
     stdin.write("\r");
-    // Turn 结束（回到 idle）后输入框才接受 ↑；固定等待在慢机器上会与 Turn 赛跑
+    // 事件视图回到 idle 后，提交 Promise 仍可能尚未结算；等待输入框解除禁用。
     await waitFor(() => {
       const frame = lastFrame() ?? "";
-      return frame.includes("完毕") && frame.includes("idle");
+      return frame.includes("完毕") && frame.includes("idle") && !frame.includes("会话忙");
     });
     stdin.write("\x1b[A");
     await pause(50);

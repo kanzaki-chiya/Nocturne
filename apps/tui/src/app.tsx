@@ -637,6 +637,16 @@ function SessionApp({
   const [overlay, setOverlay] = useState<OverlayName | undefined>(undefined);
   const [clientLines, setClientLines] = useState<string[]>([]);
   const [exiting, setExiting] = useState(false);
+  const submitting = useRef(false);
+  const [submitPending, setSubmitPending] = useState(false);
+  const switching = useRef(false);
+  const [switchPending, setSwitchPending] = useState(false);
+  useLayoutEffect(() => {
+    if (switching.current) {
+      switching.current = false;
+      setSwitchPending(false);
+    }
+  }, [session]);
   /** 全屏模式：对话视口滚动状态（fromBottom=0 跟随最新） */
   const [scroll, setScroll] = useState<ScrollState>(scrollFollow);
   /** 全屏模式：/resume 切换时冻结的旧会话条目（新会话内容在其后铺开） */
@@ -716,7 +726,7 @@ function SessionApp({
   /** /provider remove 确认 */
   const [providerRemove, setProviderRemove] = useState<string | undefined>(undefined);
 
-  const busy = view.status !== "idle";
+  const busy = view.status !== "idle" || submitPending;
   const pending = view.pendingPermission;
   const interruptible = useRef(false);
   interruptible.current = busy;
@@ -784,7 +794,7 @@ function SessionApp({
 
   /** 退出：进行中先中断，等 Turn 收敛后再退（与 REPL close 路径同语义） */
   const requestExit = useCallback(() => {
-    if (busy || pending !== undefined) {
+    if (busy || submitting.current || pending !== undefined) {
       session.interrupt();
       setExiting(true);
       return;
@@ -958,9 +968,15 @@ function SessionApp({
   useEffect(() => {
     if (!fullscreen || transcriptOut === undefined) return;
     transcriptOut.current = () =>
-      blocksRef.current.blocks
-        .flatMap((b) => layoutCached(b, blocksRef.current.width, lineCache.current))
-        .map((l) => l.text);
+      blocksRef.current.blocks.flatMap((b) =>
+        layoutCached(b, blocksRef.current.width, lineCache.current).map((line) => {
+          if (b.key === "welcome") return line.segments?.at(-1)?.text ?? line.text;
+          if (line.key.includes(":r:") || line.key.startsWith("live-r:")) {
+            return `（思考）${line.text}`;
+          }
+          return line.text;
+        }),
+      );
   }, [fullscreen, transcriptOut]);
 
   /** 思考强度循环（Shift+Tab）：只改档位并高亮状态栏，不插入对话条目 */
@@ -1000,93 +1016,127 @@ function SessionApp({
   /** 会话切换：冻结旧回放进 Static、换绑 session、新日志重放进 SessionView */
   const doSwitch = useCallback(
     async (id: string, allowForeign = false): Promise<void> => {
+      if (submitting.current || busy) {
+        pushLine("! 会话忙（Turn 进行中）；先 Ctrl+C 中断再切换");
+        return;
+      }
+      if (switching.current) return;
       if (switchSession === undefined) {
         pushLine("! 当前环境不支持会话切换");
         return;
       }
-      const res = await switchSession(id, { allowForeign });
-      if (res.kind === "ok") {
-        const epoch = sessionEpoch.current++;
-        const sep: TranscriptItem = {
-          kind: "separator",
-          key: `sw-${epoch}`,
-          text: `已切换到会话 ${res.session.id}`,
-        };
-        if (fullscreen) {
-          // 旧会话的完结条目与本地提示行冻结进视口前缀；键加纪元前缀防碰撞
-          const frozenItems: TranscriptItem[] = entriesRef.current
-            .filter(
-              (e) =>
-                !(
-                  e.kind === "notice" &&
-                  e.subtype === "config" &&
-                  hiddenNotices.current.has(e.key)
-                ),
-            )
-            .map((e) => ({ ...e, key: `z${epoch}:${e.key}` }));
-          const frozenClient: TranscriptItem[] = clientLinesRef.current.map((text, i) => ({
-            kind: "header",
-            key: `z${epoch}:c${i}`,
-            lines: [{ key: `z${epoch}:c${i}`, text, dim: true }],
-          }));
-          setFrozen((prev) => [...prev, ...frozenItems, ...frozenClient, sep]);
-          setClientLines([]);
-          setSel(undefined);
-          setScroll(scrollToBottom());
-        } else {
-          staticQueue.current.push(sep);
-          staticWritten.current.clear();
+      switching.current = true;
+      setSwitchPending(true);
+      let switched = false;
+      try {
+        const res = await switchSession(id, { allowForeign });
+        if (res.kind === "ok") {
+          const epoch = sessionEpoch.current++;
+          const sep: TranscriptItem = {
+            kind: "separator",
+            key: `sw-${epoch}`,
+            text: `已切换到会话 ${res.session.id}`,
+          };
+          if (fullscreen) {
+            // 旧会话的完结条目与本地提示行冻结进视口前缀；键加纪元前缀防碰撞
+            const frozenItems: TranscriptItem[] = entriesRef.current
+              .filter(
+                (e) =>
+                  !(
+                    e.kind === "notice" &&
+                    e.subtype === "config" &&
+                    hiddenNotices.current.has(e.key)
+                  ),
+              )
+              .map((e) => ({ ...e, key: `z${epoch}:${e.key}` }));
+            const frozenClient: TranscriptItem[] = clientLinesRef.current.map((text, i) => ({
+              kind: "header",
+              key: `z${epoch}:c${i}`,
+              lines: [{ key: `z${epoch}:c${i}`, text, dim: true }],
+            }));
+            setFrozen((prev) => [...prev, ...frozenItems, ...frozenClient, sep]);
+            setClientLines([]);
+            setSel(undefined);
+            setScroll(scrollToBottom());
+          } else {
+            staticQueue.current.push(sep);
+            staticWritten.current.clear();
+          }
+          switched = true;
+          setSession(res.session);
+          setOverlay(undefined);
+          for (const n of sessionNotes(res.session)) pushLine(`! ${n}`);
+          return;
         }
-        setSession(res.session);
-        setOverlay(undefined);
-        for (const n of sessionNotes(res.session)) pushLine(`! ${n}`);
-        return;
+        if (res.kind === "foreign") {
+          setForeign({ id, root: res.workspaceRoot });
+          return;
+        }
+        pushLine(
+          res.kind === "busy"
+            ? "! 会话忙（Turn 进行中）；先 Ctrl+C 中断再切换"
+            : `! ${res.message}`,
+        );
+      } finally {
+        if (!switched) {
+          switching.current = false;
+          setSwitchPending(false);
+        }
       }
-      if (res.kind === "foreign") {
-        setForeign({ id, root: res.workspaceRoot });
-        return;
-      }
-      pushLine(
-        res.kind === "busy" ? "! 会话忙（Turn 进行中）；先 Ctrl+C 中断再切换" : `! ${res.message}`,
-      );
     },
-    [switchSession, pushLine, fullscreen],
+    [switchSession, pushLine, fullscreen, busy],
   );
 
   const doNew = useCallback(async (): Promise<void> => {
+    if (submitting.current || busy) {
+      pushLine("! 会话忙（Turn 进行中）；先中断再新建");
+      return;
+    }
+    if (switching.current) return;
     if (newSession === undefined) {
       pushLine("! 当前环境不支持新建会话");
       return;
     }
-    const res = await newSession();
-    if (res.kind === "ok") {
-      if (fullscreen) {
-        // 视口整体换成新会话：欢迎区重新出现，翻阅与选区清空（ADR-0021 第 2 条）
-        setFrozen([]);
-        setSel(undefined);
-        setScroll(scrollToBottom());
-        lineCache.current.clear();
+    switching.current = true;
+    setSwitchPending(true);
+    let switched = false;
+    try {
+      const res = await newSession();
+      if (res.kind === "ok") {
+        if (fullscreen) {
+          // 视口整体换成新会话：欢迎区重新出现，翻阅与选区清空（ADR-0021 第 2 条）
+          setFrozen([]);
+          setSel(undefined);
+          setScroll(scrollToBottom());
+          lineCache.current.clear();
+        } else {
+          const sep: TranscriptItem = {
+            kind: "separator",
+            key: `new-${res.session.id}`,
+            text: `新会话 ${res.session.id}`,
+          };
+          staticQueue.current.push(sep);
+          sessionEpoch.current++;
+          staticWritten.current.clear();
+        }
+        switched = true;
+        setSession(res.session);
+        setClientLines([]);
+        setOverlay(undefined);
       } else {
-        const sep: TranscriptItem = {
-          kind: "separator",
-          key: `new-${res.session.id}`,
-          text: `新会话 ${res.session.id}`,
-        };
-        staticQueue.current.push(sep);
-        sessionEpoch.current++;
-        staticWritten.current.clear();
+        pushLine(
+          res.kind === "busy"
+            ? "! 会话忙（Turn 进行中）；先中断再新建"
+            : `! ${res.kind === "error" ? res.message : "新建会话失败"}`,
+        );
       }
-      setSession(res.session);
-      setClientLines([]);
-      setOverlay(undefined);
-    } else {
-      pushLine(
-        res.kind === "busy"
-          ? "! 会话忙（Turn 进行中）；先中断再新建"
-          : `! ${res.kind === "error" ? res.message : "新建会话失败"}`,
-      );
+    } finally {
+      if (!switched) {
+        switching.current = false;
+        setSwitchPending(false);
+      }
     }
-  }, [newSession, pushLine, fullscreen]);
+  }, [newSession, pushLine, fullscreen, busy]);
 
   /** 模型选择页左栏数据快照（打开时与向导完成后拉取） */
   const loadPickerData = useCallback(async () => {
@@ -1100,7 +1150,7 @@ function SessionApp({
   /** 打开模型选择页：保留草稿，临时进入备用屏幕。 */
   const openPicker = useCallback(
     (focus: "left" | "right"): void => {
-      if (busy || pending !== undefined) {
+      if (submitting.current || busy || pending !== undefined) {
         pushLine("! 会话忙，模型选择页仅在空闲时可打开");
         return;
       }
@@ -1155,7 +1205,7 @@ function SessionApp({
   /** 打开服务商页：保留草稿，临时进入备用屏幕。 */
   const openProviderPage = useCallback(
     (presetId?: string): void => {
-      if (busy || pending !== undefined) {
+      if (submitting.current || busy || pending !== undefined) {
         pushLine("! 会话忙，服务商页仅在空闲时可打开");
         return;
       }
@@ -1404,8 +1454,11 @@ function SessionApp({
             if (!opens) clearInput();
             if (r.kind === "exit") requestExit();
             else if (r.kind === "new") void doNew();
-            else if (r.kind === "overlay") setOverlay(r.name);
-            else if (r.kind === "picker") openPicker(r.focus);
+            else if (r.kind === "overlay") {
+              if (r.name === "resume" && submitting.current)
+                pushLine("! 会话忙（Turn 进行中）；先中断再切换");
+              else setOverlay(r.name);
+            } else if (r.kind === "picker") openPicker(r.focus);
             else if (r.kind === "provider-page") openProviderPage(r.presetId);
             else if (r.kind === "switch") void doSwitch(r.id);
             else if (r.kind === "provider-wizard") openProviderWizard(r.start);
@@ -1504,6 +1557,10 @@ function SessionApp({
     (line: string) => {
       const text = line.trim();
       if (text === "") return;
+      if (switching.current) {
+        pushLine("! 正在切换会话，请稍候");
+        return;
+      }
       setInputHistory((history) =>
         history.at(-1) === text ? history : [...history.slice(-999), text],
       );
@@ -1516,8 +1573,11 @@ function SessionApp({
             if (!opens) clearInput();
             if (r.kind === "exit") requestExit();
             else if (r.kind === "new") void doNew();
-            else if (r.kind === "overlay") setOverlay(r.name);
-            else if (r.kind === "picker") openPicker(r.focus);
+            else if (r.kind === "overlay") {
+              if (r.name === "resume" && submitting.current)
+                pushLine("! 会话忙（Turn 进行中）；先中断再切换");
+              else setOverlay(r.name);
+            } else if (r.kind === "picker") openPicker(r.focus);
             else if (r.kind === "provider-page") openProviderPage(r.presetId);
             else if (r.kind === "switch") void doSwitch(r.id);
             else if (r.kind === "provider-wizard") openProviderWizard(r.start);
@@ -1532,9 +1592,18 @@ function SessionApp({
       clearInput();
       if (fullscreen) setScroll(scrollToBottom());
       // 历史里保留占位，发给模型的是展开后的原文
-      session.submit({ text: pastes.expand(text) }).catch((e: unknown) => {
-        pushLine(`! ${errText(e)}`);
-      });
+      if (submitting.current) return;
+      submitting.current = true;
+      setSubmitPending(true);
+      void session
+        .submit({ text: pastes.expand(text) })
+        .catch((e: unknown) => {
+          pushLine(`! ${errText(e)}`);
+        })
+        .finally(() => {
+          submitting.current = false;
+          setSubmitPending(false);
+        });
     },
     [
       session,
@@ -1556,9 +1625,11 @@ function SessionApp({
       ? "等待权限确认（a/s/p/d/x）"
       : busy
         ? "会话忙，Ctrl+C 可中断"
-        : dialogOpen
-          ? "弹层打开中，Esc 关闭"
-          : undefined;
+        : switchPending
+          ? "正在切换会话，请稍候"
+          : dialogOpen
+            ? "弹层打开中，Esc 关闭"
+            : undefined;
 
   const resumeItems: PickItem<string>[] = (resumeList ?? []).map((s) => ({
     label: resumeLabel(s, width - 10),

@@ -9,6 +9,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "@nocturne/core";
+import type { FakeScript } from "@nocturne/core";
 
 import { runTui } from "../src/index.js";
 import { sessionSavedLine } from "../src/exit-note.js";
@@ -64,7 +65,9 @@ function ttyPair() {
   return { stdin, stdout, stderr, stdoutChunks, stderrChunks };
 }
 
-async function openSession(): Promise<{ runtime: Runtime; session: RuntimeSession }> {
+async function openSession(
+  scripts?: FakeScript[],
+): Promise<{ runtime: Runtime; session: RuntimeSession }> {
   const root = mkdtempSync(path.join(tmpdir(), "nct-exit-"));
   const sessionsDir = mkdtempSync(path.join(tmpdir(), "nct-exit-sd-"));
   tmpRoots.push(root, sessionsDir);
@@ -73,7 +76,7 @@ async function openSession(): Promise<{ runtime: Runtime; session: RuntimeSessio
     sessionsDir,
     providers: [
       new FakeProvider({
-        scripts: [
+        scripts: scripts ?? [
           [
             { type: "text_delta", text: "第一段\n\n" },
             { type: "wait", ms: 80 },
@@ -245,6 +248,69 @@ const MOUSE_ON = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
 const MOUSE_OFF = "\x1b[?1006l\x1b[?1002l\x1b[?1000l";
 
 describe("全屏退出（默认模式）", () => {
+  it("提交准备中 Ctrl+D 等待中断收束后退出", async () => {
+    const { runtime, session } = await openSession();
+    const io = ttyPair();
+    let finish!: (reason: "aborted") => void;
+    const submit = vi.spyOn(session, "submit").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const interrupt = vi.spyOn(session, "interrupt");
+    let exited = false;
+    const done = runTui({ session }, runtime, {
+      stdin: io.stdin,
+      stdout: io.stdout,
+      stderr: io.stderr,
+      patchConsole: false,
+    }).then(() => {
+      exited = true;
+    });
+    await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
+    await new Promise((r) => setTimeout(r, 80));
+    io.stdin.write("hello");
+    await waitFor(() => io.stdoutChunks.join("").includes("hello"));
+    io.stdin.write("\r");
+    await waitFor(() => submit.mock.calls.length === 1);
+    io.stdin.write("\x04");
+    await waitFor(() => interrupt.mock.calls.length === 1);
+    expect(exited).toBe(false);
+    finish("aborted");
+    await done;
+    expect(io.stdoutChunks.join("")).not.toContain("会话持久化失败");
+    await session.close();
+  }, 12000);
+
+  it("退出文本区分思考并只导出欢迎文字", async () => {
+    const { runtime, session } = await openSession([
+      [
+        { type: "reasoning_delta", text: "先想想" },
+        { type: "text_delta", text: "正文" },
+        { type: "finish", reason: "stop" },
+      ],
+    ]);
+    const io = ttyPair();
+    const done = runTui({ session }, runtime, {
+      stdin: io.stdin,
+      stdout: io.stdout,
+      stderr: io.stderr,
+      patchConsole: false,
+    });
+    await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
+    await session.submit({ text: "问题" });
+    io.stdin.write("\x04");
+    await done;
+    const output = io.stdoutChunks.join("");
+    const after = output.slice(output.indexOf("\x1b[?1049l"));
+    expect(after).toContain("（思考）先想想");
+    expect(after).toContain("正文");
+    expect(after).toContain("Nocturne");
+    expect(after).not.toMatch(/[▀▄█]/);
+    await session.close();
+  });
+
   it("进备用屏后开鼠标；退出先关鼠标再回主屏；对话与继续提示落到主屏", async () => {
     const { runtime, session } = await openSession();
     const io = ttyPair();

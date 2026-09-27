@@ -75,7 +75,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 - Ink + React 沿用 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)。主界面使用 `incrementalRendering: true` + 备用屏幕，帧高 `rows - 1`；对话区只布局可见行窗口（`viewport.ts`），已完成条目的行布局按「条目 key + 宽度」缓存（`lines.ts`），宽度变化整段重排并清除选区。
 - **鼠标**：进入全屏后开启 `?1000h ?1002h ?1006h`；SGR 鼠标序列（`ESC [ < b ; x ; y M/m`）在 stdin 进入 Ink 之前摘除并解析成事件（`mouse.ts`），序列跨数据块截断时缓存拼接，绝不漏给 Ink 当成按键。退出、未捕获异常、任何恢复主屏幕的路径先按 `?1006l ?1002l ?1000l` 反向关闭。
 - **选区与复制**：`selection.ts` 以「绝对内容行 + 列」记录选区，`clipboard.ts` 负责复制——系统剪贴板按平台 spawn 剪贴板命令（文本经 stdin），OSC 52（`ESC ] 52 ; c ; base64 BEL`）经 `cursor.ts` 的 stdout 代理在 Ink 帧之外写出。剪贴板不经 Core，不新增运行时依赖。
-- **退出**：关闭鼠标上报 → 恢复主屏幕 → 把本次会话对话按当前宽度渲染成纯文本行打印到主屏（与视口所见一致，不含输入框和状态栏）→ 打印「会话 \<id\> 已保存，nctrn -c 继续」。异常路径至少保证鼠标关闭与主屏恢复。
+- **退出**：提交已接受但尚未写入 `turn.started` 时也视为忙：先中断并等待 Turn 收束，再关闭鼠标上报 → 恢复主屏幕 → 把本次会话对话按当前宽度渲染成纯文本行打印到主屏（不含输入框和状态栏；思考行加「（思考）」前缀，欢迎区只保留文字，不导出弯月像素）→ 打印「会话 \<id\> 已保存，nctrn -c 继续」。异常路径至少保证鼠标关闭与主屏恢复。
 - **diff 展示**：`tool.completed.output` 的结构化 diff（edit/write 工具已声明）直接渲染，红绿着色（NO_COLOR 时仅用 `+`/`-` 前缀）；大 diff 折叠为头尾若干行 + 省略计数，`spillPath` 存在时提示查看完整文件。
 - **工具行**：`● name <输入摘要>` + 状态徽标（awaiting → `?`，running → 转轮，ok/error → `✓`/`✗`，denied/cancelled/interrupted → 对应词）。`liveOutput` 只显示尾部 N 行。`task`（子代理，Phase 6）的进行中行同样靠 `liveOutput` 展示一行式进度摘要（`tool.progress` `stream:"info"`），无新增视图通道（[subagent.md](../architecture/subagent.md) 第 12 节）。
 - **MCP 状态（Phase 5）**：`mcp.server` 是临时事件、不进 `SessionView`（reducer 忽略未知类型）；`failed`/`crashed` 经 `runtime.warning` 进入提示区，`/mcp` 面板按 `session.mcpServers()` 展示每台服务器的状态、工具数与失败原因。Hook 的可见效果走既有事件（`permission.resolved source:"hook"`、`tool.completed`、`runtime.warning(code:"hook_failed")`），不新增 UI 通道。
@@ -102,7 +102,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 - `/resume`：列出 `runtime.listSessions()`，TUI 弹出 PickList 列表选择器（↑↓ + Enter，Esc 取消）；每行以首条用户消息首行和相对修改时间开头，后列 id、模型、路径及锁定标记，首句在可用宽度内截断；`/resume <id>` 直达。首句为空时显示占位。
 - `/new`（`/clear`）：CLI 注入新建会话回调，沿用当前模型、思考档位和权限预设；成功后切到空会话。全屏模式下视口整体换成新会话——欢迎区重新出现、翻阅状态与选区清空，旧会话仍可 `/resume`；`--inline` 模式下旧内容与分隔行保留在回滚区。忙时拒绝，不清屏。
 - **打开逻辑只在 CLI 有一份**：`runTui(session, runtime, { switchSession })`，`switchSession(id, { allowForeign? }) => Promise<SessionSwitchResult>`，结果为 `{ kind: "ok"; session } | { kind: "busy" } | { kind: "foreign"; workspaceRoot } | { kind: "error"; message }`。TUI 不直接打开会话，Core 不新增入口。跨目录确认在客户端完成：回调先返回 `kind: "foreign"`，TUI 弹确认对话框（默认拒绝）同意后带 `allowForeign` 重调。
-- **切换顺序**：Turn 进行中拒绝（提示先 Ctrl+C 中断）；先打开新会话——锁冲突/日志损坏/跨目录被拒时报错并**留在原会话**；打开成功后才 `close()` 旧会话、释放锁。
+- **切换顺序**：提交已接受但尚未写入 `turn.started` 时也拒绝 `/new`、`/resume`，提示会话忙；模型页、服务商页也只在提交收束后打开。切换回调等待期间拒绝新提交，输入框提示稍候；先打开新会话——锁冲突/日志损坏/跨目录被拒时报错并**留在原会话**；打开成功后才 `close()` 旧会话、释放锁。
 - **切换后**：新建 `SessionView`，重放新会话的持久事件。全屏模式视口直接换成新会话；`--inline` 模式下已写入终端滚动区的旧内容无法收回，向回放区插一条"已切换到会话 \<id\>"分隔提示，再附恢复摘要（若有修复）。
 - 离线测试覆盖：切换成功、取消、锁冲突后留在原会话、Turn 进行中拒绝、切换后视图重放。
 

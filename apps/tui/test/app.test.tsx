@@ -88,6 +88,74 @@ const noticeEntry = (seq: number, message: string): ViewEntry => ({
 });
 
 describe("TUI", () => {
+  it.each(["/new", "/resume other"])("提交准备中立刻 %s：拒绝切换", async (cmd) => {
+    const { runtime, session } = await makeSession();
+    let finish!: (reason: "aborted") => void;
+    const submit = vi.spyOn(session, "submit").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const newSession = vi.fn(async () => ({ kind: "busy" as const }));
+    const switchSession = vi.fn(async () => ({ kind: "busy" as const }));
+    const { stdin, lastFrame, unmount } = render(
+      createElement(App, {
+        session,
+        runtime,
+        env: ENV,
+        newSession,
+        switchSession,
+      }),
+    );
+    await pause(60);
+    stdin.write("hello");
+    stdin.write("\r");
+    await waitFor(() => submit.mock.calls.length === 1);
+    stdin.write(cmd);
+    stdin.write("\r");
+    await pause(100);
+    expect(newSession).not.toHaveBeenCalled();
+    expect(switchSession).not.toHaveBeenCalled();
+    expect(lastFrame()).toContain("会话忙");
+    finish("aborted");
+    unmount();
+    await session.close();
+  });
+
+  it("/new 切换等待中拒绝新提交", async () => {
+    const { runtime, session } = await makeSession();
+    let finish!: (value: { kind: "busy" }) => void;
+    const newSession = vi.fn(
+      () =>
+        new Promise<{ kind: "busy" }>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const submit = vi.spyOn(session, "submit");
+    const { stdin, lastFrame, unmount } = render(
+      createElement(App, {
+        session,
+        runtime,
+        env: ENV,
+        newSession,
+      }),
+    );
+    await pause(60);
+    stdin.write("/new");
+    stdin.write("\r");
+    await waitFor(() => newSession.mock.calls.length === 1);
+    stdin.write("must not submit");
+    stdin.write("\r");
+    await pause(80);
+    expect(submit).not.toHaveBeenCalled();
+    expect(lastFrame()).toContain("正在切换会话");
+    finish({ kind: "busy" });
+    await waitFor(() => !(lastFrame() ?? "").includes("正在切换会话"));
+    unmount();
+    await session.close();
+  });
+
   it("权限对话框：五选项可见，Tab 移焦，d 进入反馈行", async () => {
     const pending: PendingPermission = {
       requestId: "p1",
