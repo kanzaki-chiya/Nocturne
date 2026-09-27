@@ -48,6 +48,7 @@ export function StatusBar({
   context,
   models,
   highlight,
+  note,
 }: {
   view: SessionView;
   width: number;
@@ -59,6 +60,8 @@ export function StatusBar({
   models?: readonly ModelInfo[] | undefined;
   /** 快捷键触发后短暂高亮的段 */
   highlight?: StatusHighlight | undefined;
+  /** 短暂提示（复制结果等，由调用方控制时长）；显示为最左段 */
+  note?: string | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const sep = env.ascii ? " - " : " • ";
@@ -77,6 +80,9 @@ export function StatusBar({
         : `思考:${effort.current}`;
 
   const segments: Segment[] = [{ text: status, color: statusColor, highlight: false }];
+  if (note !== undefined) {
+    segments.unshift({ text: note, color: theme.accent, highlight: false });
+  }
   const reserved =
     stringWidth(status) +
     stringWidth(sep) +

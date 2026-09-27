@@ -66,14 +66,32 @@ const moveRel = (p: CursorPoint): string => {
   return `${up}\x1b[${p.x + 1}G`;
 };
 
+export interface CursorStreamOptions {
+  /**
+   * 看到 `?1049h`（进入备用屏）的写出后追加——全屏模式用它开鼠标上报，
+   * 保证「先备屏、后开鼠标」的顺序。
+   */
+  afterEnterAlt?: string | undefined;
+  /**
+   * 看到 `?1049l`（退出备用屏）的写出前插入——先关鼠标上报再回主屏；
+   * 挂在同一笔写出里，异常退出路径（unmount 终帧）同样覆盖。
+   */
+  beforeExitAlt?: string | undefined;
+}
+
 /**
  * 包装 Ink 的 stdout：其余属性与事件原样转发，只改写 write。
  * `?1049h`/`?1049l` 进出备用屏时 Ink 的"写入终点"语义不变（补位仍按
  * 同一约定）；进程退出（unmount 终帧）后不再干预。
  */
-export function createCursorStream(stdout: NodeJS.WriteStream): {
+export function createCursorStream(
+  stdout: NodeJS.WriteStream,
+  options: CursorStreamOptions = {},
+): {
   stream: NodeJS.WriteStream;
   claims: CursorClaims;
+  /** Ink 帧之外的写出通道（OSC 52 等不移动光标、不占帧内容的序列） */
+  writeOob: (data: string) => boolean;
   stop(): void;
 } {
   const entries = new Map<symbol, { point: CursorPoint; seq: number }>();
@@ -132,7 +150,11 @@ export function createCursorStream(stdout: NodeJS.WriteStream): {
       return (stdout.write as (...a: unknown[]) => boolean)(chunk, ...rest);
     }
     if (text.includes("\x1b[?1049h") || text.includes("\x1b[?1049l")) {
-      const out = (moved ? HIDE + RESTORE : "") + text;
+      // 退出备用屏前先关鼠标上报；进入后开上报。注入只发生在携带
+      // ?1049h/l 的那一笔写出里，顺序与备用屏切换原子绑定。
+      const injectPre = text.includes("\x1b[?1049l") ? (options.beforeExitAlt ?? "") : "";
+      const injectPost = text.includes("\x1b[?1049h") ? (options.afterEnterAlt ?? "") : "";
+      const out = (moved ? HIDE + RESTORE : "") + injectPre + text + injectPost;
       moved = false;
       changingScreen = true;
       return (stdout.write as (...a: unknown[]) => boolean)(out, ...rest);
@@ -154,6 +176,11 @@ export function createCursorStream(stdout: NodeJS.WriteStream): {
   return {
     stream,
     claims,
+    // OSC 52 这类序列不移动硬件光标：直接落到真实 stdout，落在两帧之间
+    // （单线程下不可能插进同一帧的 write 内部），也不碰补位记账。
+    writeOob(data: string): boolean {
+      return raw(data);
+    },
     stop() {
       done = true;
       if (moved) raw(HIDE + RESTORE);

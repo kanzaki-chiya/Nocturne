@@ -117,15 +117,23 @@ export function renderMarkdown(text: string, width: number, key: string): LaidLi
   const add = (runs: Run[], prefix = "", style: Partial<Run> = {}): void => {
     let segments: Run[] = prefix ? [{ text: prefix, ...style }] : [];
     let used = stringWidth(prefix);
+    // 宽度溢出折行 → 下一行是同一逻辑行的续行；\n 与收尾 flush 之后重新开始
+    let continuing = false;
     const flush = (): void => {
       const parts = segments.length > 0 ? segments : [{ text: " " }];
       lines.push({
         key: `${key}:${lines.length}`,
         text: parts.map((p) => p.text).join(""),
         segments: parts,
+        continued: continuing,
       });
       segments = [];
       used = 0;
+      continuing = false;
+    };
+    const overflowFlush = (): void => {
+      flush();
+      continuing = true;
     };
     for (const run of runs) {
       for (const ch of run.text) {
@@ -134,7 +142,7 @@ export function renderMarkdown(text: string, width: number, key: string): LaidLi
           continue;
         }
         const w = stringWidth(ch);
-        if (used + w > max && used > 0) flush();
+        if (used + w > max && used > 0) overflowFlush();
         if (w > max) continue;
         const last = segments.at(-1);
         if (

@@ -64,7 +64,12 @@ export interface AltScreen {
   leave(hide: () => Promise<void> | void): Promise<void>;
 }
 
-export function useAltScreen(): AltScreen {
+/**
+ * 临时备用屏（inline/普通屏幕模式的模型页、服务商页）。
+ * `enabled = false`（全屏模式）：页面与主对话同处一块备用屏，enter/leave
+ * 退化为只提交回调里的 React 状态，不写 ?1049h/l、不挂起终端。
+ */
+export function useAltScreen(enabled = true): AltScreen {
   const { stdout } = useStdout();
   const { stdin } = useStdin();
   const { suspendTerminal, waitUntilRenderFlush } = useApp();
@@ -76,6 +81,7 @@ export function useAltScreen(): AltScreen {
 
   // 兜底：组件卸载与进程退出都不把终端留在备用屏
   useEffect(() => {
+    if (!enabled) return;
     const onExit = (): void => {
       if (inAltRef.current) {
         try {
@@ -91,11 +97,17 @@ export function useAltScreen(): AltScreen {
       process.off("exit", onExit);
       onExit();
     };
-  }, [stdout]);
+  }, [stdout, enabled]);
 
   const enter = useCallback(
     async (show: () => Promise<void> | void): Promise<void> => {
       if (openRef.current || busyRef.current) return;
+      // 全屏模式：主对话已在备用屏内，页面直接同屏提交
+      if (!enabled) {
+        openRef.current = true;
+        await show();
+        return;
+      }
       // 非 TTY（测试/管道）：备用屏序列无意义，退化为直接提交页面状态
       if (!stdout.isTTY) {
         openRef.current = true;
@@ -119,12 +131,17 @@ export function useAltScreen(): AltScreen {
         busyRef.current = false;
       }
     },
-    [stdout, stdin, suspendTerminal],
+    [stdout, stdin, suspendTerminal, enabled],
   );
 
   const leave = useCallback(
     async (hide: () => Promise<void> | void): Promise<void> => {
       if (!openRef.current || busyRef.current) return;
+      if (!enabled) {
+        openRef.current = false;
+        await hide();
+        return;
+      }
       if (!stdout.isTTY) {
         openRef.current = false;
         await hide();
@@ -150,7 +167,7 @@ export function useAltScreen(): AltScreen {
         busyRef.current = false;
       }
     },
-    [stdout, stdin, suspendTerminal, waitUntilRenderFlush],
+    [stdout, stdin, suspendTerminal, waitUntilRenderFlush, enabled],
   );
 
   return {

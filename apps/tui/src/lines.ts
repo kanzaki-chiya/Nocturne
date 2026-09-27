@@ -1,14 +1,16 @@
 /**
- * 把活动条目铺成固定行；<Static> 已写出的历史交给终端回滚区。
+ * 把会话内容铺成固定行。普通屏幕模式下 <Static> 已写出的历史交给终端
+ * 回滚区，这里只铺活动区；全屏模式下 transcriptBlocks 把整段对话
+ * （欢迎区 + 冻结前缀 + 条目 + live）铺成 LineBlock 交给视口按需布局。
  */
 import stringWidth from "string-width";
 
-import type { SessionView } from "@nocturne/core/protocol";
+import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 
 import { boxSafe, summarizeToolInput, tailLines, truncateLine } from "./format.js";
 import { renderMarkdown } from "./markdown.js";
 import type { TranscriptItem } from "./components/transcript.js";
-import type { LaidLine } from "./viewport.js";
+import type { LaidLine, LineBlock } from "./viewport.js";
 
 const SAFE = 4;
 
@@ -20,21 +22,29 @@ function paint(text: string, width: number): string {
   return truncateLine(boxSafe(text.replace(/\r\n?/g, "\n")), budget(width), "...");
 }
 
-function wrap(text: string, width: number): string[] {
+interface WrappedLine {
+  text: string;
+  /** 自动折行断开的续行（真换行产生的行不标，复制时拼回） */
+  continued: boolean;
+}
+
+function wrap(text: string, width: number): WrappedLine[] {
   const limit = budget(width);
   const flat = text.replace(/\r\n?/g, "\n");
-  const out: string[] = [];
+  const out: WrappedLine[] = [];
   for (const part of flat.split("\n")) {
     if (part === "") {
-      out.push("");
+      out.push({ text: "", continued: false });
       continue;
     }
     let line = "";
     let used = 0;
+    let continued = false;
     for (const ch of part) {
       const w = Math.max(1, stringWidth(ch));
       if (used + w > limit && line !== "") {
-        out.push(line);
+        out.push({ text: line, continued });
+        continued = true;
         line = "";
         used = 0;
       }
@@ -42,15 +52,16 @@ function wrap(text: string, width: number): string[] {
       line += ch;
       used += w;
     }
-    out.push(line);
+    out.push({ text: line, continued });
   }
-  return out.length > 0 ? out : [""];
+  return out.length > 0 ? out : [{ text: "", continued: false }];
 }
 
 function rows(key: string, text: string, width: number, extra?: Partial<LaidLine>): LaidLine[] {
   return wrap(text, width).map((line, i) => ({
     key: `${key}:${i}`,
-    text: paint(line, width),
+    text: paint(line.text, width),
+    continued: line.continued,
     ...extra,
   }));
 }
@@ -143,7 +154,8 @@ export function layoutLive(view: SessionView, width: number, ascii: boolean): La
       const last = text.length === 0 && i === reasoning.length - 1;
       lines.push({
         key: `live-r:${a.messageId}:${i}`,
-        text: paint(last ? `${line}${cursor}` : line, width),
+        text: paint(last ? `${line.text}${cursor}` : line.text, width),
+        continued: line.continued,
         dim: true,
       });
     });
@@ -171,3 +183,71 @@ export function layoutLive(view: SessionView, width: number, ascii: boolean): La
   }
   return lines;
 }
+
+interface TranscriptSource {
+  welcome: LaidLine[];
+  notices: readonly string[];
+  frozen: readonly TranscriptItem[];
+  entries: readonly ViewEntry[];
+  hide: (entry: ViewEntry) => boolean;
+  live: SessionView;
+  clientLines: readonly string[];
+  ascii: boolean;
+}
+
+function block(key: string, revision: string, lines: (width: number) => LaidLine[]): LineBlock {
+  return { key, revision, layout: lines };
+}
+
+/**
+ * 全屏模式的对话块表（ADR-0021 第 1 条）：欢迎区在最前，随对话滚走；
+ * 冻结前缀是 /resume、/new 切换时旧会话已完结的条目；其后是当前会话的
+ * 全部条目（进行中的工具也在这里按 revision 重排）与 live 区（流式输出、
+ * 准备中的工具、重试/压缩提示）。快捷键插入的 config 通知由 hide 滤掉。
+ */
+export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
+  const blocks: LineBlock[] = [block("welcome", String(src.welcome.length), () => src.welcome)];
+  if (src.notices.length > 0) {
+    blocks.push(
+      block("notices", src.notices.join("\n"), (width) =>
+        src.notices.flatMap((text, i) => rows(`n${i}`, `! ${text}`, width, { color: "yellow" })),
+      ),
+    );
+  }
+  for (const item of src.frozen) {
+    blocks.push(
+      block(item.key, item.kind === "separator" ? item.text : item.key, (width) =>
+        layoutEntry(item, width, src.ascii),
+      ),
+    );
+  }
+  for (const entry of src.entries) {
+    if (src.hide(entry)) continue;
+    const revision =
+      entry.kind === "tool"
+        ? `${entry.status}:${entry.liveOutput.length}:${entry.result?.modelContent.length ?? 0}`
+        : entry.kind === "assistant"
+          ? `${entry.text.length}:${entry.reasoning.length}`
+          : entry.key;
+    blocks.push(block(entry.key, revision, (width) => layoutEntry(entry, width, src.ascii)));
+  }
+  // 缓存标记要覆盖布局的全部输入：思考长度、进行中工具、重试
+  const liveRev = [
+    src.live.live.assistants.map((a) => `${a.text.length}/${a.reasoning.length}`).join(","),
+    src.live.live.tools.map((t) => t.callId).join(","),
+    src.live.retry?.attempt ?? "",
+    src.live.status,
+  ].join("|");
+  blocks.push(block("live", liveRev, (width) => layoutLive(src.live, width, src.ascii)));
+  if (src.clientLines.length > 0) {
+    blocks.push(
+      block("client", src.clientLines.join("\n"), (width) =>
+        src.clientLines.flatMap((text, i) => rows(`c${i}`, text, width, { dim: true })),
+      ),
+    );
+  }
+  return blocks;
+}
+
+export const NEW_CONTENT_HINT = "有新内容，Ctrl+End 回到最新";
+export const SCROLLED_HINT = "已向上翻阅，Ctrl+End 回到最新";
