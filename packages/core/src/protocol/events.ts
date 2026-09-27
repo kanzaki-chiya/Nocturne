@@ -36,6 +36,11 @@ export interface SessionConfigChangedPayload {
   permissionPreset?: string | undefined;
   /** 思考档位切换（ADR-0018）；payload 中存在的键覆盖当前值 */
   reasoningEffort?: ReasoningEffort | undefined;
+  /**
+   * shell 切换（ADR-0022）：记录生效的种类与可执行文件。
+   * 只记录实际发生切换的事件（上层 env/config 覆盖时不发）。
+   */
+  shell?: { kind: string; path: string } | undefined;
 }
 
 export interface TurnStartedPayload {

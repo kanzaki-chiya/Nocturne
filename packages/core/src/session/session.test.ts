@@ -190,6 +190,45 @@ describe("load / 状态折叠", () => {
     expect(s.state().config.model.model).toBe("fake-2");
     expect(s.state().config.permissionPreset).toBe("phase1");
   });
+
+  it("config_changed.shell 折叠为 config.shell 并在该位置留 note 条目（ADR-0022 第 4 节）", async () => {
+    const s = await store.create(INPUT);
+    await s.emit("turn.started", { turnIndex: 1 }, { turnId: "t1" });
+    await s.emit(
+      "message.user",
+      { messageId: "m1", content: [{ type: "text", text: "hi" }] },
+      { turnId: "t1" },
+    );
+    await s.emit(
+      "turn.completed",
+      { reason: "done", steps: 1, usage: { inputTokens: 0, outputTokens: 0 } },
+      { turnId: "t1" },
+    );
+    await s.emit("session.config_changed", {
+      shell: { kind: "pwsh", path: "C:\\ps\\pwsh.exe" },
+    });
+    await s.emit("turn.started", { turnIndex: 2 }, { turnId: "t2" });
+    await s.emit(
+      "message.user",
+      { messageId: "m2", content: [{ type: "text", text: "next" }] },
+      { turnId: "t2" },
+    );
+
+    const state = s.state();
+    expect(state.config.shell).toEqual({ kind: "pwsh", path: "C:\\ps\\pwsh.exe" });
+    // note 位于两条 user 消息之间（事件位置保持）
+    const kinds = state.history.map((h) => h.kind);
+    expect(kinds).toEqual(["user", "note", "user"]);
+    const note = state.history[1];
+    expect(note?.kind === "note" && note.text).toContain("[Environment change]");
+    expect(note?.kind === "note" && note.text).toContain("pwsh");
+
+    // 重新加载：config.shell 与 note 原样重建
+    await s.close();
+    const s2 = await store.load(s.id);
+    expect(s2.state().config.shell).toEqual({ kind: "pwsh", path: "C:\\ps\\pwsh.exe" });
+    expect(s2.state().history.map((h) => h.kind)).toEqual(["user", "note", "user"]);
+  });
 });
 
 describe("load 校验（events.md 第 8 节）", () => {

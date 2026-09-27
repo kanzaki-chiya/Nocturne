@@ -86,11 +86,49 @@ export interface Usage {
 
 export type SubjectKind = "read" | "edit" | "shell" | "network" | "mcp" | "subagent";
 
+/**
+ * 每 shell 种类的高风险命令元数据（ADR-0022 第 1 节：表集中在 platform 的
+ * ShellDescriptor，经工具主体随命令透传到权限层）。
+ * 纯数据——不含任何权限判定；匹配语义由权限层（permissions.md 5.3）执行。
+ * 与 platform/shells.ts 的同名接口结构相同：platform 不能反向依赖 protocol，
+ * 两侧各自声明，结构漂移由 tools 层的赋值在编译期暴露。
+ */
+export interface ShellRiskProfile {
+  /** 命令词与模式匹配是否不区分大小写（pwsh / powershell / cmd 为 true） */
+  caseInsensitive: boolean;
+  /** 段级通配符高风险模式（各 shell 共用基础表，如 "rm -rf *"） */
+  basePatterns: readonly string[];
+  /** 命令词与开关共存才算高危（cmd：rd/del/erase/rmdir + /s 系开关） */
+  switchVerbs?:
+    | {
+        verbs: readonly string[];
+        /** 匹配开关 token 的正则源串（权限层以不区分大小写编译） */
+        switchPattern: string;
+      }
+    | undefined;
+  /** 命令词与两个参数共存才算高危（PowerShell：Remove-Item 系 + recurse/force，允许参数前缀缩写） */
+  dualParamVerbs?:
+    | {
+        verbs: readonly string[];
+        params: readonly [string, string];
+      }
+    | undefined;
+  /** 恒高危命令词（cmd 的 format；PowerShell 的系统破坏类 cmdlet 与动态执行别名） */
+  alwaysVerbs?: readonly string[] | undefined;
+}
+
 /** 工具声明的、未解析的权限主体（tool-api.md 第 1 节；permissionSubjects 纯函数产出） */
 export interface SubjectRequest {
   kind: SubjectKind;
   /** 词法规范化后的目标（绝对路径、命令字符串、URL） */
   target: string;
+  /**
+   * shell 主体：执行命令的 shell 种类（ADR-0022 的 ShellKind）。
+   * 权限层据此选择分词方言；缺省按 POSIX 保守处理。
+   */
+  shell?: string | undefined;
+  /** shell 主体：生效描述符携带的高风险元数据；缺省时权限层按 POSIX 基础表保守处理 */
+  shellRisk?: ShellRiskProfile | undefined;
 }
 
 export type SubjectWhere = "workspace" | "outside";
@@ -103,6 +141,10 @@ export interface PermissionSubject {
   /** 路径类主体：解析符号链接 / junction 后的真实路径 */
   resolved?: string | undefined;
   where?: SubjectWhere | undefined;
+  /** shell 主体：执行该命令的 shell 种类（ADR-0022） */
+  shell?: string | undefined;
+  /** shell 主体：生效描述符携带的高风险元数据（由 tools 层从 ShellDescriptor 透传） */
+  shellRisk?: ShellRiskProfile | undefined;
 }
 
 export type PermissionAction = "allow" | "ask" | "deny";
@@ -243,6 +285,17 @@ export type HistoryEntry =
       compactKind: "prune" | "summary";
       throughSeq: number;
       summary: string | undefined;
+    }
+  | {
+      /**
+       * 会话内环境变更说明（ADR-0022 第 4 节）：由 session.config_changed
+       * 的 shell 字段折叠产生，Context Builder 在该位置以 user 消息注入，
+       * 让模型知道切换发生在哪一步；恢复会话后旧说明原样保留。
+       */
+      kind: "note";
+      seq: number;
+      turnId: string | undefined;
+      text: string;
     };
 
 // ── Hooks（hooks.md）─────────────────────────────────────

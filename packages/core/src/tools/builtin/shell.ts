@@ -4,10 +4,10 @@
  * 超时或中断时终止进程树中仍可达的后代（platform/process 负责，Windows 实测
  * 记录见 tools.md）；detached 脱离进程树的后台进程可能无法终止。
  */
-import { shellTailExecutables } from "../../permission/index.js";
-import { resolveRealPath } from "../../platform/index.js";
+import { shellTailStages, stageExecutable } from "../../permission/index.js";
+import { resolveRealPath, type ShellDescriptor } from "../../platform/index.js";
 import type { SubjectRequest } from "../../protocol/index.js";
-import type { ToolDefinition } from "../types.js";
+import type { ToolDefinition, ToolScope } from "../types.js";
 
 interface ShellInput {
   command: string;
@@ -40,16 +40,31 @@ const ORPHAN_OUTPUT_NOTE =
 const BUFFER_HALF = 64_000;
 
 /**
- * 末尾分页拒绝（ADR-0021 第 9 条）：任一独立命令的管道末段以分页工具开头时
- * 判为输入错误。只认 basename 为 more / more.com / less（大小写不敏感，
- * 引号包裹的路径也算）；只看末段，管道中间的分页工具不误报。
+ * 末尾分页拒绝（ADR-0021 第 9 条 + ADR-0022 第 7 节）：任一独立命令的
+ * 管道末段以分页工具开头时判为输入错误。分页器名单按生效 shell 的
+ * 描述符给出（cmd/PowerShell：more、more.com；bash/sh：more、less；
+ * PowerShell 另含 Out-Host -Paging / oh -Paging）；未装配 shell 时回退
+ * 全量名单。引号包裹的路径、段首赋值/重定向照常识别。
  */
-const PAGER_EXECUTABLES = new Set(["more", "more.com", "less"]);
+const DEFAULT_PAGER_EXECUTABLES = new Set(["more", "more.com", "less"]);
 const TRAILING_PAGER_MESSAGE =
-  "命令以分页工具结尾（more/less）。分页工具会改坏输出编码、可能等待按键卡住；输出会被自动收集，去掉末尾的 `| more` 后直接执行即可。需要筛选时先重定向到文件再用 grep 工具。";
+  "命令以分页工具结尾（more/less/Out-Host -Paging）。分页工具会改坏输出编码、可能等待按键卡住；输出会被自动收集，去掉末尾的分页命令后直接执行即可。需要筛选时先重定向到文件再用 grep 工具。";
 
-function endsWithPager(command: string): boolean {
-  return shellTailExecutables(command).some((name) => PAGER_EXECUTABLES.has(name.toLowerCase()));
+function endsWithPager(command: string, shell: ShellDescriptor | undefined): boolean {
+  const pagers =
+    shell === undefined
+      ? DEFAULT_PAGER_EXECUTABLES
+      : new Set(shell.pagers.map((name) => name.toLowerCase()));
+  for (const stage of shellTailStages(command)) {
+    const exe = stageExecutable(stage);
+    if (exe === undefined) continue;
+    const base = exe.toLowerCase();
+    if (pagers.has(base)) return true;
+    for (const fp of shell?.flagPagers ?? []) {
+      if (base === fp.exe && fp.flag.test(stage)) return true;
+    }
+  }
+  return false;
 }
 
 /** 头尾保留的合并缓冲：超限丢弃中段但继续排空管道（防止子进程阻塞） */
@@ -84,8 +99,9 @@ class OutputBuffer {
 
 export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
   name: "shell",
+  // ADR-0022：描述保持中性、稳定——具体种类与语法见环境信息 Shell 行
   description:
-    "经系统 shell 执行非交互式命令（Windows: cmd /c；POSIX: /bin/sh -c）。合并 stdout/stderr 输出并截断，返回退出码。超时或中断会尝试终止进程树中仍可达的后代；detached 方式脱离进程树的后台进程可能仍在运行。",
+    "经当前会话选定的 shell 执行非交互式命令（种类与语法见环境信息）。合并 stdout/stderr 输出并截断，返回退出码。超时或中断会尝试终止进程树中仍可达的后代；detached 方式脱离进程树的后台进程可能仍在运行。",
   inputSchema: {
     type: "object",
     required: ["command"],
@@ -108,15 +124,37 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
     timeoutMs: MAX_TIMEOUT_MS + 30_000,
   },
 
-  permissionSubjects(input: ShellInput): SubjectRequest[] {
-    return [{ kind: "shell", target: input.command }];
+  permissionSubjects(input: ShellInput, scope: ToolScope): SubjectRequest[] {
+    // ADR-0022：主体携带执行它的 shell 种类与描述符的高风险元数据；
+    // 权限层据此选分词方言并按元数据做风险匹配（不在 tools 层判定）
+    const descriptor = scope.shell?.descriptor;
+    return [
+      {
+        kind: "shell",
+        target: input.command,
+        ...(descriptor !== undefined ? { shell: descriptor.kind, shellRisk: descriptor.risk } : {}),
+      },
+    ];
   },
 
-  validateInput(input: ShellInput): string | undefined {
-    return endsWithPager(input.command) ? TRAILING_PAGER_MESSAGE : undefined;
+  validateInput(input: ShellInput, scope?: ToolScope): string | undefined {
+    return endsWithPager(input.command, scope?.shell?.descriptor)
+      ? TRAILING_PAGER_MESSAGE
+      : undefined;
   },
 
   async execute(input, ctx) {
+    // ADR-0022：显式选择的 shell 不可用时报错并列出可选项
+    if (ctx.shell !== undefined && ctx.shell.descriptor === undefined) {
+      return {
+        status: "error",
+        modelContent: `无法执行 shell 命令：${ctx.shell.error ?? "当前 shell 不可用"}`,
+        error: {
+          code: "tool_failed",
+          message: ctx.shell.error ?? "当前 shell 不可用",
+        },
+      };
+    }
     // cwd：默认会话 cwd；指定时经 realpath 解析后必须在工作区内（junction/符号链接计入）
     let cwd = ctx.cwd;
     if (input.cwd !== undefined) {
@@ -146,6 +184,7 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
       cwd,
       signal: ctx.signal,
       timeoutMs,
+      ...(ctx.shell?.descriptor !== undefined ? { shell: ctx.shell.descriptor } : {}),
       // 凭据变量不进模型驱动的子进程环境（provider-setup.md 第 4 节）；
       // envStrip 由装配层按 Provider 条目的 apiKeyEnv + 默认名汇总给出
       ...(ctx.shellEnvStrip !== undefined ? { envStrip: ctx.shellEnvStrip } : {}),

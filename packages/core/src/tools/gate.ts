@@ -259,7 +259,13 @@ export function createPolicyGate(
     checkLexical(request: SubjectRequest) {
       // permissions.md 4.4：枚举结果位于已解析根目录之下，词法路径即可判定
       const evaluation = policy.evaluate([
-        { kind: request.kind, target: request.target, resolved: request.target },
+        {
+          kind: request.kind,
+          target: request.target,
+          resolved: request.target,
+          shell: request.shell,
+          shellRisk: request.shellRisk,
+        },
       ]);
       return evaluation.decision.action;
     },

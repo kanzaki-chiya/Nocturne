@@ -6,7 +6,7 @@
  * - shell / network / mcp：字符串通配符——`*` 任意字符序列，`?` 单字符；
  *   大小写敏感，不做词法变形。
  */
-import type { PermissionSubject } from "../protocol/index.js";
+import type { PermissionSubject, ShellRiskProfile } from "../protocol/index.js";
 
 function escapeRegExp(s: string): string {
   return s.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -121,15 +121,34 @@ export function matchPattern(
   return wildcardToRegExp(pattern).test(subject.target);
 }
 
-const COMPOSITE_SHELL = /&&|\|\||[;&|`<>]|\$\(|\r|\n/;
+/**
+ * shell 分词方言（ADR-0022）：命令主体携带执行它的 shell 种类，
+ * 权限层据此选择分段规则；缺省/未知一律按 POSIX 保守处理。
+ */
+export type ShellDialect = "posix" | "cmd" | "powershell";
+
+export function shellDialect(kind: string | undefined): ShellDialect {
+  if (kind === "pwsh" || kind === "powershell") return "powershell";
+  if (kind === "cmd") return "cmd";
+  return "posix";
+}
+
+const COMPOSITE_SHELL_POSIX = /&&|\|\||[;&|`<>]|\$\(|\r|\n/;
+// PowerShell 额外切开脚本块 { } —— & 与 ` 不作为命令边界的差异点不拆开列：
+// `&` 在两种方言里一律切开（PowerShell 7 中 `a & b` 是后台运算符，拆开更保守；
+// `&` 调用运算符后面的内容切出后照常作为一段求值）
+const COMPOSITE_SHELL_POWERSHELL = /&&|\|\||[;&|`<>{}]|\$\(|\r|\n/;
 
 /**
  * shell 组合命令判定（permissions.md 5.3）：含 `&&`、`||`、`;`、`|`、
  * 反引号、`$(`、重定向、换行等控制符时，基于模式的 allow 不适用（按 ask 对待）。
  * 保守起见沿用原始文本判定：引号内的控制符同样触发组合判定。
+ * dialect === "powershell" 时脚本块 `{` `}` 也算组合。
  */
-export function isCompositeShell(command: string): boolean {
-  return COMPOSITE_SHELL.test(command);
+export function isCompositeShell(command: string, dialect: ShellDialect = "posix"): boolean {
+  return (dialect === "powershell" ? COMPOSITE_SHELL_POWERSHELL : COMPOSITE_SHELL_POSIX).test(
+    command,
+  );
 }
 
 // ── shell 命令的轻量词法切分 ──────────────────────────────
@@ -248,7 +267,10 @@ export function lexShellCommand(command: string): ShellToken[] {
   return tokens;
 }
 
-const SHELL_SEPARATORS = /&&|\|\||\$\(|[;&|`()\r\n]/;
+const SHELL_SEPARATORS_POSIX = /&&|\|\||\$\(|[;&|`()\r\n]/;
+// PowerShell（ADR-0022 第 6 节）：; | && || $( 之外另切脚本块 { }；
+// `&` 仍切（调用运算符与后台运算符后的内容都照常成段求值）
+const SHELL_SEPARATORS_POWERSHELL = /&&|\|\||\$\(|[;&|`(){}\r\n]/;
 
 /**
  * 组合命令拆段（全放行规则下逐段求值用）：按控制符切开、去空白。
@@ -256,9 +278,9 @@ const SHELL_SEPARATORS = /&&|\|\||\$\(|[;&|`()\r\n]/;
  * 才能命中高风险表，引号内的命令同样会被执行。
  * 重定向目标（`2>&1`、`> out.txt`）会成为独立短段，照常求值即可。
  */
-export function shellSegments(command: string): string[] {
+export function shellSegments(command: string, dialect: ShellDialect = "posix"): string[] {
   return command
-    .split(SHELL_SEPARATORS)
+    .split(dialect === "powershell" ? SHELL_SEPARATORS_POWERSHELL : SHELL_SEPARATORS_POSIX)
     .map((part) => part.trim())
     .filter((part) => part !== "");
 }
@@ -312,7 +334,7 @@ function firstWord(text: string): string | undefined {
 const STAGE_PREFIX = /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*|\d*[<>]+\s*\S*)\s*/;
 
 /** 管道段的可执行名：剥离段首赋值与重定向后取首词，去引号取 basename */
-function stageExecutable(stage: string): string | undefined {
+export function stageExecutable(stage: string): string | undefined {
   let rest = stage.trimStart();
   for (;;) {
     const m = STAGE_PREFIX.exec(rest);
@@ -324,6 +346,29 @@ function stageExecutable(stage: string): string | undefined {
 }
 
 /**
+ * 每个独立命令的管道末段原文（分词规则同 shellTailExecutables）；
+ * ADR-0022：PowerShell 的 Out-Host -Paging 需要段内参数，故导出的
+ * 是原文而非可执行名。
+ */
+export function shellTailStages(command: string): string[] {
+  const out: string[] = [];
+  let stage = "";
+  for (const tok of lexShellCommand(command)) {
+    if (!tok.separator) {
+      stage += tok.text;
+      continue;
+    }
+    if (tok.text === "|") stage = "";
+    else {
+      if (stage.trim() !== "") out.push(stage);
+      stage = "";
+    }
+  }
+  if (stage.trim() !== "") out.push(stage);
+  return out;
+}
+
+/**
  * 每个独立命令的管道末段可执行名（`&&`、`||`、`&`、`;`、换行、反引号、
  * `$(`、`(`/`)` 都是命令边界；`|` 只区分管道段、不结束命令）。
  * 例如 `a | more && b | less` → ["more", "less"]；`a | more | sort` 只
@@ -331,20 +376,112 @@ function stageExecutable(stage: string): string | undefined {
  */
 export function shellTailExecutables(command: string): string[] {
   const out: string[] = [];
-  let stage = "";
-  const flush = () => {
+  for (const stage of shellTailStages(command)) {
     const exe = stageExecutable(stage);
     if (exe !== undefined) out.push(exe);
-    stage = "";
-  };
-  for (const tok of lexShellCommand(command)) {
-    if (!tok.separator) {
-      stage += tok.text;
+  }
+  return out;
+}
+
+// ── 高风险命令匹配（ADR-0022 第 6 节） ──────────────────
+//
+// 每 shell 种类的表集中在 platform 的 ShellDescriptor.risk，经 shell 主体
+// 以 shellRisk 透传到此处；这里只执行匹配语义（通配符表达不了"两个标志共存、
+// 允许参数前缀缩写、大小写不敏感"这类规则）。policy 把预设级 allow 降级为 ask；
+// 用户显式规则照旧按命令原文匹配并可覆盖。
+
+/** 主体未携带元数据时的保守回退：POSIX 基础表（大小写敏感、无种类专属词表） */
+const FALLBACK_RISK: ShellRiskProfile = {
+  caseInsensitive: false,
+  basePatterns: [
+    "rm -rf *",
+    "rm -fr *",
+    "sudo *",
+    "git push --force*",
+    "git push -f *",
+    "git reset --hard*",
+  ],
+};
+
+/** 命令首词归一化：跳过 PowerShell 调用运算符 & / .，去引号、路径与常见扩展名 */
+function riskCommandWord(segment: string): string | undefined {
+  let rest = segment.trimStart();
+  for (;;) {
+    const c = rest.charAt(0);
+    if ((c === "&" || c === ".") && /[\s'"]/.test(rest.charAt(1))) {
+      rest = rest.slice(1).trimStart();
       continue;
     }
-    if (tok.text === "|") stage = "";
-    else flush();
+    break;
   }
-  flush();
-  return out;
+  const word = firstWord(rest)?.split(/[\\/]/).at(-1);
+  return word?.replace(/\.(exe|com|bat|cmd)$/i, "").toLowerCase();
+}
+
+/** 段内存在某个 PowerShell 参数前缀缩写（-r … -Recurse、-f … -Force） */
+function hasPsParamPrefix(segment: string, name: string): boolean {
+  for (const tok of segment.split(/\s+/)) {
+    const m = /^-{1,2}([a-z]+)/i.exec(tok);
+    if (m !== null) {
+      const given = m[1]?.toLowerCase() ?? "";
+      if (given !== "" && name.startsWith(given)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 高风险判定：risk 为生效 shell 描述符透传的元数据（ShellDescriptor.risk）。
+ * - basePatterns：各 shell 共用的通配符基础表；
+ * - switchVerbs：命令词与开关共存才命中（cmd 的 rd /s 式规则）；
+ * - dualParamVerbs：命令词与两个参数共存才命中（PowerShell 的 -Recurse -Force，
+ *   允许参数前缀缩写）；
+ * - alwaysVerbs：恒高危命令词（cmd format、PS Format-Volume/Invoke-Expression 等）。
+ * 元数据缺省时按 FALLBACK_RISK（POSIX 基础表）保守处理。
+ */
+export function isRiskyShellCommand(segment: string, risk?: ShellRiskProfile): boolean {
+  const profile = risk ?? FALLBACK_RISK;
+  const text = profile.caseInsensitive ? segment.toLowerCase() : segment;
+  for (const pattern of profile.basePatterns) {
+    if (wildcardToRegExp(pattern).test(text)) return true;
+  }
+  const word = riskCommandWord(text);
+  if (word === undefined) return false;
+  if (profile.alwaysVerbs?.includes(word)) return true;
+  const sw = profile.switchVerbs;
+  if (sw?.verbs.includes(word)) {
+    const swRe = new RegExp(sw.switchPattern, "i");
+    if (segment.split(/\s+/).some((tok) => swRe.test(tok))) return true;
+  }
+  const dp = profile.dualParamVerbs;
+  if (
+    dp !== undefined &&
+    dp.verbs.includes(word) &&
+    hasPsParamPrefix(segment, dp.params[0]) &&
+    hasPsParamPrefix(segment, dp.params[1])
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 不透明的 PowerShell -EncodedCommand（含嵌套 pwsh/powershell 调用）：
+ * 文本里出现 pwsh/powershell 可执行名与 -EncodedCommand（或它的
+ * 前缀缩写 / -ec 别名）即判定——编码负载无法做内容审查，至少 ask。
+ */
+const POWERSHELL_EXE_TOKEN = /(?:^|[\s"'`/\\|&;(])(?:pwsh|powershell)(?:\.exe)?(?=[\s"'|&;():]|$)/i;
+
+export function isOpaquePowerShellCommand(command: string): boolean {
+  if (!POWERSHELL_EXE_TOKEN.test(command)) return false;
+  for (const raw of command.split(/\s+/)) {
+    const tok = raw.replace(/^["']+/, "").replace(/["';]+$/, "");
+    const m = /^-{1,2}([a-zA-Z]+)/.exec(tok);
+    if (m === null) continue;
+    const flag = (m[1] ?? "").toLowerCase();
+    if (flag === "ec" || "encodedcommand".startsWith(flag) || "encodedarguments".startsWith(flag)) {
+      return true;
+    }
+  }
+  return false;
 }

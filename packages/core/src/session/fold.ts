@@ -2,6 +2,7 @@
  * SessionState = fold(durableEvents)（sessions.md 第 2 节）。
  * 唯一事实来源是持久化事件序列；这里没有第二份状态。
  */
+import { shellSwitchNote } from "../platform/index.js";
 import type { DurableEvent, Usage } from "../protocol/index.js";
 import type {
   HistoryEntry,
@@ -76,7 +77,20 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           model: p.model ?? config.model,
           permissionPreset: p.permissionPreset ?? config.permissionPreset,
           reasoningEffort: p.reasoningEffort ?? config.reasoningEffort,
+          ...(p.shell !== undefined || config.shell !== undefined
+            ? { shell: p.shell ?? config.shell }
+            : {}),
         };
+        // ADR-0022 第 4 节：shell 切换在历史中该位置留一条给模型的说明；
+        // 措辞与环境信息同源（platform/shells.ts），恢复后旧说明原样重建
+        if (p.shell !== undefined) {
+          history.push({
+            kind: "note",
+            seq: event.seq,
+            turnId,
+            text: shellSwitchNote(p.shell.kind, p.shell.path),
+          });
+        }
         break;
       }
       case "turn.started": {

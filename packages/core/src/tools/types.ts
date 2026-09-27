@@ -2,7 +2,13 @@
  * 工具契约（docs/protocols/tool-api.md）。
  * 内置工具与将来的 MCP / 插件工具走同一接口与同一执行管线（tools.md 第 1 节）。
  */
-import type { FileSystem, PathOps, Platform, ProcessRunner } from "../platform/index.js";
+import type {
+  FileSystem,
+  PathOps,
+  Platform,
+  ProcessRunner,
+  ShellResolution,
+} from "../platform/index.js";
 import type { PermissionDecision } from "../permission/index.js";
 import type {
   Diagnostics,
@@ -54,6 +60,12 @@ export interface ToolScope {
   workspaceRoot: string;
   /** 词法路径操作（无 I/O），供 permissionSubjects 规范化目标 */
   paths: PathOps;
+  /**
+   * 当前生效 shell 的解析结果（ADR-0022）：scope 组装时按次取值，
+   * permissionSubjects / validateInput 用它选择分词方言与分页器名单；
+   * 缺省（未装配 provider）按 POSIX 保守处理。
+   */
+  shell?: ShellResolution | undefined;
 }
 
 /** "先读后写"所需的已读记录（tools.md 第 6 节；Phase 1 仅 read 记录） */
@@ -98,8 +110,9 @@ export interface ToolDefinition<Input = unknown, Output = unknown> {
    * 可选的额外输入预检（纯函数，无 I/O）：在 schema 校验与 PreToolUse Hook
    * （含 updatedInput 重新校验）之后、权限主体求值之前调用；返回非空的
    * 错误说明即以 invalid_input 拒绝该调用——不请求权限，不执行工具。
+   * scope 参数（ADR-0022）携带当前生效 shell，供分页器等按种类的检查使用。
    */
-  validateInput?(input: Input): string | undefined;
+  validateInput?(input: Input, scope?: ToolScope): string | undefined;
   /** 只在权限允许后被调用 */
   execute(input: Input, ctx: ToolContext): Promise<ToolResult<Output>>;
 }
@@ -361,6 +374,14 @@ export interface ExecutionScope extends ToolScope {
 }
 
 /**
+ * 当前生效 shell 的延迟解析（ADR-0022）：每次工具调用组装 scope 时
+ * 求值，运行中经 /shell 切换从下一次调用起生效，不在 Turn 开始快照。
+ */
+export interface ShellProvider {
+  current(): ShellResolution;
+}
+
+/**
  * 会话级执行环境：Agent Loop 只持有本类型（tools 的公开类型），
  * 不直接接触 Platform——平台能力经 ExecutionScope 进入工具。
  */
@@ -374,6 +395,8 @@ export interface ExecutionEnvironment {
   diagnostics?: Diagnostics | undefined;
   /** shell 子进程环境中要剥离的变量名（凭据变量；provider-setup.md 第 4 节） */
   shellEnvStrip?: readonly string[] | undefined;
+  /** 生效 shell 的延迟解析（ADR-0022）；缺省时工具按平台默认 shell 执行 */
+  shell?: ShellProvider | undefined;
 }
 export interface TurnCallScope {
   cwd: string;

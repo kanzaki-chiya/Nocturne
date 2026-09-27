@@ -98,6 +98,14 @@ export interface ConfigFile {
   model?: string | undefined;
   /** 会话默认思考档位（ADR-0018 第 4 节）：七档中性值之一 */
   reasoningEffort?: ReasoningEffort | undefined;
+  /**
+   * shell 选择（ADR-0022 第 2 节）：auto | pwsh | powershell | bash | cmd | sh。
+   * 层间按 model 同款规则后写优先；与 NOCTURNE_SHELL、settings.json 的
+   * 合成优先级由装配层完成（env > config > settings > auto）。
+   */
+  shell?: string | undefined;
+  /** 非标准安装位置的可执行文件；种类仍由 shell 决定（ADR-0022） */
+  shellPath?: string | undefined;
   providers?: ProviderEntryConfig[] | undefined;
   permissions?:
     | {
@@ -122,6 +130,10 @@ export interface ResolvedConfig {
   permissionPreset?: PermissionPresetName | undefined;
   /** 会话默认思考档位（ADR-0018）：未配置时 undefined（off 语义） */
   reasoningEffort?: ReasoningEffort | undefined;
+  /** 手写 config.json 层的 shell 选择原文（ADR-0022）；未配置时 undefined */
+  shell?: string | undefined;
+  /** 手写 config.json 层的 shellPath 原文（ADR-0022） */
+  shellPath?: string | undefined;
   /** 可信规则序列，按层序排列（后写优先）：user < project < env < cli */
   rules: AnnotatedRule[];
   /**
@@ -301,6 +313,18 @@ export interface RuntimeConfig {
   refreshUpstreamLimits(providerId: string): Promise<void>;
   /** 把默认模型（"provider/model"）写入 providers.json 的 model 字段 */
   setDefaultModel(model: string): Promise<void>;
+
+  /**
+   * settings.json 当前的 shell 层值原文（ADR-0022 第 3 节；live 快照——
+   * setShellSetting 写盘后立即可见）。未设置时返回 undefined。
+   */
+  shellSetting(): { shell?: string | undefined; shellPath?: string | undefined } | undefined;
+  /**
+   * /shell 的写入端（ADR-0022 第 4 节）：原子写 settings.json。
+   * kind 为种类名或 "auto"——auto 时清除 shell/shellPath 字段；
+   * 具体种类时写 shell（path 存在时同写 shellPath，否则清除）。
+   */
+  setShellSetting(kind: string, path?: string): Promise<void>;
   /** recent-models.json 当前内容（"provider/model" 形式，新→旧，最多 10 条；loadConfig 时预读的缓存） */
   recentModels(): ModelRef[];
   /** setModel/新建会话时记录最近使用（去重、置顶、原子写） */

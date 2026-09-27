@@ -110,6 +110,13 @@ export interface SubagentDeps {
    * 与父会话同一数组引用，装配层原地重算后子会话同步生效
    */
   shellEnvStrip?: readonly string[] | undefined;
+  /**
+   * 生效 shell 的延迟解析（ADR-0022）：与父会话同一 resolver——
+   * 父会话 /shell 切换后子会话的 shell 调用同样从下一次起生效
+   */
+  shell?: ExecutionEnvironment["shell"];
+  /** 子会话环境信息的 Shell 行：派生时按当前生效 shell 重新生成 */
+  shellLine?(): string;
   /** 祖先进会话数（顶层 0） */
   depth: number;
   limits: SubagentLimits;
@@ -305,6 +312,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           ...(childRunner !== undefined ? { hooks: childRunner } : {}),
           ...(deps.diagnostics !== undefined ? { diagnostics: deps.diagnostics } : {}),
           ...(deps.shellEnvStrip !== undefined ? { shellEnvStrip: deps.shellEnvStrip } : {}),
+          ...(deps.shell !== undefined ? { shell: deps.shell } : {}),
         };
         const executor = createToolExecutor(registry);
 
@@ -330,6 +338,15 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           await childRunner.run("SessionStart", { resumed: false }).catch(() => undefined);
         }
 
+        // 子会话环境信息在派生时刻生成（ADR-0022：Shell 行取当前生效值）
+        const childEnvironment: EnvironmentInfo =
+          deps.shellLine === undefined
+            ? deps.environment
+            : {
+                ...deps.environment,
+                shell: deps.shellLine(),
+                sessionDate: new Date().toISOString(),
+              };
         // 催促循环：done 且无 finish → 再开一轮催促；最后一轮 toolChoice 强制
         const maxAttempts = deps.limits.maxAttempts;
         const timeoutMs = request.timeoutMs ?? deps.limits.timeoutMs;
@@ -354,7 +371,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             executor,
             execEnv,
             instructions: deps.instructions,
-            environment: deps.environment,
+            environment: childEnvironment,
             config: { ...deps.turnConfig, maxSteps: deps.limits.maxStepsPerTurn },
             signal: childSignal,
             basePrompt: SUBAGENT_BASE_PROMPT,

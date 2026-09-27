@@ -8,48 +8,74 @@ import {
   createPathOps,
   createPlatform,
   createProcessRunner,
+  defaultShellInvocation,
   resolveRealPath,
-  shellArguments,
-  shellCommandDescription,
+  shellDescriptor,
 } from "./index.js";
 
 const isWin = process.platform === "win32";
 const pathsSensitive = createPathOps(true);
 const pathsInsensitive = createPathOps(false);
 
-describe("shell 环境提示与工具同源", () => {
-  const originalShell = process.env.NOCTURNE_SHELL;
-  const originalComspec = process.env.COMSPEC;
-  afterEach(() => {
-    if (originalShell === undefined) delete process.env.NOCTURNE_SHELL;
-    else process.env.NOCTURNE_SHELL = originalShell;
-    if (originalComspec === undefined) delete process.env.COMSPEC;
-    else process.env.COMSPEC = originalComspec;
-  });
-
+describe("shell 描述符与环境提示（ADR-0022）", () => {
   it("Windows cmd 使用 /d /s /c 并说明 cmd 语法", () => {
-    process.env.NOCTURNE_SHELL = "C:\\Windows\\System32\\cmd.exe";
-    expect(shellArguments("dir", "win32")).toEqual(["/d", "/s", "/c", '"dir"']);
-    expect(shellCommandDescription("win32")).toBe(
-      'Commands run with C:\\Windows\\System32\\cmd.exe /d /s /c "<command>": use cmd syntax, not bash or PowerShell. `&` runs commands in sequence, not in the background; run long-running commands directly and raise timeoutMs when needed. findstr patterns use the console code page and cannot match non-ASCII text in UTF-8 output; use ASCII patterns only',
+    const d = shellDescriptor("cmd", "C:\\Windows\\System32\\cmd.exe", "win32");
+    expect(d.invoke("dir")).toEqual({
+      executable: "C:\\Windows\\System32\\cmd.exe",
+      args: ["/d", "/s", "/c", '"dir"'],
+      verbatimArgs: true,
+    });
+    expect(d.description).toBe(
+      'Commands run with cmd.exe (C:\\Windows\\System32\\cmd.exe) /d /s /c "<command>": use cmd syntax, not bash or PowerShell. `&` runs commands in sequence, not in the background; run long-running commands directly and raise timeoutMs when needed. findstr patterns use the console code page and cannot match non-ASCII text in UTF-8 output; use ASCII patterns only',
     );
   });
 
-  it("POSIX sh 使用 -c 并说明 sh 语法，而非 SHELL 环境变量", () => {
-    process.env.NOCTURNE_SHELL = "/bin/sh";
-    expect(shellArguments("pwd", "linux")).toEqual(["-c", "pwd"]);
-    expect(shellCommandDescription("linux")).toBe(
-      'Commands run with /bin/sh -c "<command>": use POSIX sh syntax',
+  it("POSIX sh 使用 -c 并说明 sh 语法", () => {
+    const d = shellDescriptor("sh", "/bin/sh", "linux");
+    expect(d.invoke("pwd")).toEqual({ executable: "/bin/sh", args: ["-c", "pwd"] });
+    expect(d.description).toBe(
+      'Commands run with POSIX sh (/bin/sh) -c "<command>": use POSIX sh syntax',
     );
     // `&` 顺序执行说明只属于 cmd 分支（POSIX sh 里 & 本来就是后台语义）
-    expect(shellCommandDescription("linux")).not.toContain("not in the background");
+    expect(d.description).not.toContain("not in the background");
   });
 
-  it("覆盖为其他 shell 时只报告可执行文件与实际参数", () => {
-    process.env.NOCTURNE_SHELL = "pwsh.exe";
-    expect(shellCommandDescription("win32")).toBe(
-      'Commands run with pwsh.exe /d /s /c "<command>"',
-    );
+  it("pwsh / powershell 走 -EncodedCommand（UTF-16LE Base64）", () => {
+    for (const kind of ["pwsh", "powershell"] as const) {
+      const d = shellDescriptor(kind, "pwsh.exe", "win32");
+      const inv = d.invoke("echo 1");
+      expect(inv.executable).toBe("pwsh.exe");
+      expect(inv.args.slice(0, 4)).toEqual([
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+      ]);
+      // 负载是 UTF-16LE Base64 的包装脚本，内含 UTF-8 输出前奏与用户命令
+      const script = Buffer.from(inv.args[4] ?? "", "base64").toString("utf16le");
+      expect(script).toContain("[Console]::OutputEncoding");
+      expect(script).toContain("$ProgressPreference = 'SilentlyContinue'");
+      expect(script).toContain(Buffer.from("echo 1", "utf8").toString("base64"));
+    }
+  });
+
+  it("Git Bash（win32）使用 -c 且不 verbatim", () => {
+    const d = shellDescriptor("bash", "C:\\Program Files\\Git\\bin\\bash.exe", "win32");
+    expect(d.name).toBe("Git Bash");
+    const inv = d.invoke("echo hi");
+    expect(inv.args).toEqual(["-c", "echo hi"]);
+    expect(inv.verbatimArgs).toBeUndefined();
+    expect(inv.verbatimArgs !== true).toBe(true);
+  });
+
+  it("默认调用回退平台默认 shell（win32→cmd，其余→sh）", () => {
+    const inv = defaultShellInvocation("echo x");
+    if (isWin) {
+      expect(inv.args.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
+      expect(inv.verbatimArgs).toBe(true);
+    } else {
+      expect(inv.args).toEqual(["-c", "echo x"]);
+    }
   });
 });
 

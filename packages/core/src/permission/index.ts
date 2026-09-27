@@ -1,11 +1,17 @@
 export { computeWhere } from "./where.js";
 export {
   isCompositeShell,
+  isOpaquePowerShellCommand,
+  isRiskyShellCommand,
   lexShellCommand,
   matchPattern,
   normalizePathText,
+  shellDialect,
   shellSegments,
   shellTailExecutables,
+  shellTailStages,
+  stageExecutable,
+  type ShellDialect,
   type ShellToken,
 } from "./pattern.js";
 export { grantFromSubject, grantKey, matchGrant } from "./grants.js";

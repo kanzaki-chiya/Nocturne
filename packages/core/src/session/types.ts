@@ -35,6 +35,8 @@ export interface SessionConfig {
   /** 思考档位（ADR-0018）：记录用户意图，请求组装时按当前模型可用集合就近降档；
    *  缺省按 off 处理 */
   reasoningEffort?: ReasoningEffort | undefined;
+  /** 最近一次生效的 shell 切换（ADR-0022）；无切换事件时缺省 */
+  shell?: { kind: string; path: string } | undefined;
 }
 
 export interface OpenTurn {

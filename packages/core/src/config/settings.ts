@@ -1,0 +1,131 @@
+/**
+ * settings.json —— 程序维护的设置层（ADR-0022 第 3 节）。
+ *
+ * <NOCTURNE_HOME>/settings.json 由程序原子写入、只写自己的文件；与手写
+ * config.json 分层合并时同名 shell 字段手写优先。本 ADR 只放 shell 与
+ * 可选 shellPath；读入保留未知字段原样写回，后续版本的偏好就地扩展。
+ */
+import { inferShellKindFromPath, isShellKind, type ShellSpec } from "../platform/index.js";
+import type { Platform } from "../platform/index.js";
+import { writeJsonAtomic } from "./files.js";
+
+/** settings.json 的原始 JSON 对象（未知字段保留） */
+type SettingsData = Record<string, unknown>;
+
+export interface SettingsStore {
+  /** 当前 shell 层值原文；未设置或字段无效时为 undefined */
+  shellFields(): { shell?: string | undefined; shellPath?: string | undefined } | undefined;
+  /** shell 层值 → ShellSpec（kind+path）；无值时 undefined */
+  shellSpec(): ShellSpec | undefined;
+  /** /shell 写入端：原子重写文件并更新内存态（live getter 立即可见） */
+  setShell(kind: string, path?: string): Promise<void>;
+}
+
+function readShellFields(data: SettingsData):
+  | {
+      shell?: string | undefined;
+      shellPath?: string | undefined;
+    }
+  | undefined {
+  const shell = typeof data.shell === "string" ? data.shell : undefined;
+  const shellPath = typeof data.shellPath === "string" ? data.shellPath : undefined;
+  if (shell === undefined && shellPath === undefined) return undefined;
+  return { shell, shellPath };
+}
+
+function toSpec(fields: {
+  shell?: string | undefined;
+  shellPath?: string | undefined;
+}): ShellSpec | undefined {
+  if (fields.shell !== undefined) {
+    const lower = fields.shell.toLowerCase();
+    if (lower === "auto") return { kind: "auto" };
+    if (isShellKind(lower)) {
+      return {
+        kind: lower,
+        ...(fields.shellPath !== undefined ? { path: fields.shellPath } : {}),
+      };
+    }
+    // 无效种类名：忽略整个字段（加载时已警告），回退由上层/自动决定
+    return undefined;
+  }
+  // 只有 shellPath：按文件名推断种类（与 specFromConfigFields 同一规则）
+  if (fields.shellPath !== undefined) {
+    const stem = inferShellKindFromPath(fields.shellPath);
+    if (stem !== undefined) return { kind: stem, path: fields.shellPath };
+  }
+  return undefined;
+}
+
+/**
+ * 加载 settings.json：文件不存在 → 空设置；损坏 → 忽略并给警告
+ * （设置层降级不阻塞启动，与项目配置损坏同一处理）。
+ */
+export async function loadSettingsStore(
+  platform: Platform,
+  settingsPath: string,
+): Promise<{ store: SettingsStore; warning?: string | undefined }> {
+  const { fs } = platform;
+  let data: SettingsData = {};
+  let warning: string | undefined;
+  if (await fs.exists(settingsPath)) {
+    try {
+      const raw: unknown = JSON.parse(await fs.readTextFile(settingsPath));
+      if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+        data = { ...(raw as SettingsData) };
+      } else {
+        warning = `settings.json 不是 JSON 对象，shell 设置已忽略（${settingsPath}）`;
+      }
+    } catch (e) {
+      warning = `settings.json 无法解析（${e instanceof Error ? e.message : String(e)}），shell 设置已忽略`;
+    }
+  }
+  const fields = readShellFields(data);
+  if (
+    fields?.shell !== undefined &&
+    fields.shell.toLowerCase() !== "auto" &&
+    !isShellKind(fields.shell.toLowerCase())
+  ) {
+    warning =
+      (warning !== undefined ? `${warning}\n` : "") +
+      `settings.json 的 shell="${fields.shell}" 无法识别（可选：auto | pwsh | powershell | bash | cmd | sh），已忽略`;
+  }
+  // shellPath 单独存在而文件名识别不出种类：不是有效声明，忽略并警告
+  // （ADR-0022：shellPath 的语义是给指定种类换可执行文件；文件名推断
+  // 只是兼容写法，识别不了不能静默回退自动）
+  if (
+    fields?.shell === undefined &&
+    fields?.shellPath !== undefined &&
+    inferShellKindFromPath(fields.shellPath) === undefined
+  ) {
+    warning =
+      (warning !== undefined ? `${warning}\n` : "") +
+      `settings.json 的 shellPath="${fields.shellPath}" 无法识别为支持的 shell 可执行文件，已忽略`;
+  }
+
+  return {
+    warning,
+    store: {
+      shellFields: () => readShellFields(data),
+      shellSpec: () => {
+        const f = readShellFields(data);
+        return f === undefined ? undefined : toSpec(f);
+      },
+      async setShell(kind, path) {
+        // 先写盘后提交内存态：原子写失败时不留下与文件不一致的
+        // 内存视图（live getter 只在写成功后才看到新值）
+        const next: SettingsData = { ...data };
+        if (kind === "auto") {
+          delete next.shell;
+          delete next.shellPath;
+        } else {
+          next.shell = kind;
+          if (path !== undefined) next.shellPath = path;
+          else delete next.shellPath;
+        }
+        await writeJsonAtomic(fs, platform.paths, settingsPath, next);
+        data = next;
+      },
+    },
+  };
+}

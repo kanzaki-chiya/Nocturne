@@ -3,4 +3,5 @@ export * from "./fs.js";
 export * from "./paths.js";
 export * from "./process.js";
 export * from "./realpath.js";
+export * from "./shells.js";
 export * from "./platform.js";

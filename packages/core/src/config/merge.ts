@@ -5,6 +5,7 @@
  * - providers：按 id 合并，同 id 浅合并，其中 models 按模型 id 逐条合并
  * - permissions.rules：追加（高层规则排在低层之后，权限"后写优先"）
  */
+import { inferShellKindFromPath } from "../platform/index.js";
 import type { HookPoint, RuleOrigin } from "../protocol/index.js";
 import type {
   ConfigFile,
@@ -62,6 +63,10 @@ export function mergeLayers(layers: readonly MergeLayer[]): ResolvedConfig {
   for (const { origin, file } of layers) {
     if (file.model !== undefined) out.model = file.model;
     if (file.reasoningEffort !== undefined) out.reasoningEffort = file.reasoningEffort;
+    // ADR-0022：config.json 的 shell/shellPath 与 model 同款后写优先；
+    // 与 NOCTURNE_SHELL / settings.json 的合成优先级在装配层完成
+    if (file.shell !== undefined) out.shell = file.shell;
+    if (file.shellPath !== undefined) out.shellPath = file.shellPath;
     if (file.permissions?.preset !== undefined) out.permissionPreset = file.permissions.preset;
     for (const rule of file.permissions?.rules ?? []) {
       // setup 层 schema 不含 permissions 段，origin==="setup" 实际到不了这里
@@ -92,6 +97,18 @@ export function mergeLayers(layers: readonly MergeLayer[]): ResolvedConfig {
       if (t.idleTimeoutMs !== undefined) merged.idleTimeoutMs = t.idleTimeoutMs;
       out.turn = merged;
     }
+  }
+  // ADR-0022：shellPath 是给指定种类换可执行文件用的；单独存在且
+  // 文件名识别不出种类时不是有效声明——忽略并警告（不静默回退自动，
+  // 由下一层/自动选择接管）
+  if (
+    out.shellPath !== undefined &&
+    out.shell === undefined &&
+    inferShellKindFromPath(out.shellPath) === undefined
+  ) {
+    out.warnings.push(
+      `配置的 shellPath="${out.shellPath}" 无法识别为支持的 shell 可执行文件，已忽略（请同时设置 shell）`,
+    );
   }
   out.providers = [...providers.values()];
   out.mcpServers = [...mcpServers.entries()].map(([name, v]) => ({

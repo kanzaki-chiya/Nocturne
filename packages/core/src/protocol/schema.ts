@@ -44,6 +44,8 @@ const permissionSubjectSchema = z.object({
   target: z.string(),
   resolved: z.string().optional(),
   where: z.enum(["workspace", "outside"]).optional(),
+  // ADR-0022：执行该命令的 shell 种类（旧日志无此字段 → 按 POSIX 保守求值）
+  shell: z.string().optional(),
 });
 
 const permissionActionSchema = z.enum(["allow", "ask", "deny"]);
@@ -82,6 +84,7 @@ const payloadSchemas = {
     model: modelRefSchema.optional(),
     permissionPreset: z.string().optional(),
     reasoningEffort: reasoningEffortSchema.optional(),
+    shell: z.object({ kind: z.string(), path: z.string() }).optional(),
   }),
   "turn.started": z.object({ turnIndex: z.number().int() }),
   "message.user": z.object({

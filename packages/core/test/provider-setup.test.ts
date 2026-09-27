@@ -643,6 +643,11 @@ describe("shell 子进程剥离凭据变量（provider-setup.md 第 4 节）", (
     ],
   ];
   const makeRuntime = async (provider: FakeProvider) => {
+    // 命令是本 describe 为传统 cmd/sh 引用规则写的；ADR-0022 后 auto 可能选中
+    // pwsh（"path" 后跟参数是表达式而非调用），故把 shell 钉回两种旧方言之一。
+    await writeJson(path.join(home, "config.json"), {
+      shell: process.platform === "win32" ? "cmd" : "sh",
+    });
     const rc = await load();
     const runtime = await createRuntime({
       cwd: root,

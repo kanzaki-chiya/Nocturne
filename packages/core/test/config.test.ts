@@ -8,7 +8,12 @@ import os from "node:os";
 import path from "node:path";
 
 import { createPlatform, type Platform } from "../src/platform/index.js";
-import { loadConfig, workspaceKey, type CliConfigArgs } from "../src/config/index.js";
+import {
+  loadConfig,
+  loadSettingsStore,
+  workspaceKey,
+  type CliConfigArgs,
+} from "../src/config/index.js";
 import type { Grant } from "../src/protocol/index.js";
 
 let root: string;
@@ -283,6 +288,118 @@ describe("环境变量层", () => {
   it("无任何相关变量时不合成 Provider", async () => {
     const rc = await load();
     expect(rc.base.providers).toHaveLength(0);
+  });
+});
+
+describe("settings.json 与 shell 配置（ADR-0022 第 2、3 节）", () => {
+  const settingsPath = () => path.join(home, "settings.json");
+
+  it("config.json 的 shell/shellPath 进入合并结果；非法 shell 值报 config_invalid", async () => {
+    await writeJson(path.join(home, "config.json"), {
+      shell: "bash",
+      shellPath: "D:\\tools\\bash.exe",
+    });
+    const rc = await load();
+    expect(rc.base.shell).toBe("bash");
+    expect(rc.base.shellPath).toBe("D:\\tools\\bash.exe");
+    // 手写 config.json 未被改写
+    const raw = JSON.parse(await fs.readFile(path.join(home, "config.json"), "utf8")) as {
+      shell: string;
+      shellPath: string;
+    };
+    expect(raw.shell).toBe("bash");
+    await fs.unlink(path.join(home, "config.json"));
+
+    await writeJson(path.join(home, "config.json"), { shell: "fish" });
+    await expect(load()).rejects.toMatchObject({ code: "config_invalid" });
+    await fs.unlink(path.join(home, "config.json"));
+  });
+
+  it("setShellSetting 原子写 settings.json；shellSetting live 可见；auto 清除且保留未知字段", async () => {
+    const rc = await load();
+    expect(rc.shellSetting()).toBeUndefined();
+    await rc.setShellSetting("pwsh");
+    expect(rc.shellSetting()).toEqual({ shell: "pwsh" });
+    const written = JSON.parse(await fs.readFile(settingsPath(), "utf8")) as {
+      shell: string;
+      theme?: string;
+    };
+    expect(written.shell).toBe("pwsh");
+    // 再次加载可读回；不写临时文件残留
+    const rc2 = await load();
+    expect(rc2.shellSetting()).toEqual({ shell: "pwsh" });
+    const dirEntries = await fs.readdir(home);
+    expect(dirEntries.filter((n) => n.startsWith("settings.json"))).toEqual(["settings.json"]);
+
+    // 未知字段保留；auto 清除 shell/shellPath
+    await writeJson(settingsPath(), { shell: "cmd", theme: "dark" });
+    const rc3 = await load();
+    expect(rc3.shellSetting()).toEqual({ shell: "cmd" });
+    await rc3.setShellSetting("auto");
+    expect(rc3.shellSetting()).toBeUndefined();
+    const after = JSON.parse(await fs.readFile(settingsPath(), "utf8")) as Record<string, unknown>;
+    expect(after["shell"]).toBeUndefined();
+    expect(after["theme"]).toBe("dark");
+    await fs.unlink(settingsPath());
+  });
+
+  it("损坏或非法的 settings.json 降级为忽略 + 警告（不阻塞启动）", async () => {
+    await fs.writeFile(settingsPath(), "{ not json");
+    const rc = await load();
+    expect(rc.shellSetting()).toBeUndefined();
+    expect(rc.base.warnings.some((w) => w.includes("settings.json"))).toBe(true);
+
+    await writeJson(settingsPath(), { shell: "fish" });
+    const rc2 = await load();
+    expect(rc2.shellSetting()?.shell).toBe("fish"); // 原文可见
+    expect(rc2.base.warnings.some((w) => w.includes("无法识别"))).toBe(true);
+    await fs.unlink(settingsPath());
+  });
+
+  it("shellPath 单独出现：文件名可识别则推断种类；不可识别则警告并忽略", async () => {
+    // 可识别的文件名 → 有效声明（shell 推断为 bash）
+    await writeJson(path.join(home, "config.json"), {
+      shellPath: "D:\\portable\\bash.exe",
+    });
+    const rc = await load();
+    expect(rc.base.shellPath).toBe("D:\\portable\\bash.exe");
+    expect(rc.base.warnings.some((w) => w.includes("shellPath"))).toBe(false);
+    await fs.unlink(path.join(home, "config.json"));
+
+    // 识别不了文件名 → 警告，resolver 侧视为无声明（specFromConfigFields → undefined）
+    await writeJson(path.join(home, "config.json"), {
+      shellPath: "D:\\x\\weird.exe",
+    });
+    const rc2 = await load();
+    expect(rc2.base.warnings.some((w) => w.includes("weird.exe") && w.includes("无法识别"))).toBe(
+      true,
+    );
+    await fs.unlink(path.join(home, "config.json"));
+
+    // settings.json 同一规则
+    await writeJson(settingsPath(), { shellPath: "D:\\x\\weird.exe" });
+    const rc3 = await load();
+    expect(rc3.base.warnings.some((w) => w.includes("weird.exe") && w.includes("无法识别"))).toBe(
+      true,
+    );
+    await fs.unlink(settingsPath());
+  });
+
+  it("setShellSetting 原子写失败时内存态不漂移（先写盘后提交）", async () => {
+    await writeJson(settingsPath(), { shell: "cmd" });
+    const failingPlatform: Platform = {
+      ...platform,
+      fs: {
+        ...platform.fs,
+        writeFile: () => Promise.reject(new Error("disk full")),
+      },
+    };
+    const { store } = await loadSettingsStore(failingPlatform, settingsPath());
+    expect(store.shellSpec()).toEqual({ kind: "cmd" });
+    await expect(store.setShell("pwsh")).rejects.toThrow();
+    // 写失败 → live getter 仍返回旧值
+    expect(store.shellSpec()).toEqual({ kind: "cmd" });
+    await fs.unlink(settingsPath());
   });
 });
 

@@ -5,7 +5,10 @@
  *   2. 本会话落盘目录可读（sessionsDir/attachments/<sessionId>/**）
  *   3. 受保护路径 edit 至少 ask（read-only 中不生成，保持 deny）
  *   4. Nocturne 授权数据 edit 至少 ask（label "修改 Nocturne 授权配置"）
- *   5. 高风险 shell 命令保持 ask（仅 full-access）
+ *
+ * 高风险 shell 命令不再由预设规则表达（ADR-0022 第 1 节）：表集中在
+ * platform 的 ShellDescriptor.risk，full-access 的宽 allow 命中时由
+ * policy 按主体透传的元数据降级为 ask。
  */
 import type { PermissionPresetName, PermissionRule } from "../protocol/index.js";
 import { normalizePathText } from "./pattern.js";
@@ -35,17 +38,6 @@ export interface PresetContext {
 const PROTECTED_LABEL = "受保护路径";
 const AUTH_DATA_LABEL = "修改 Nocturne 授权配置";
 const ATTACHMENTS_LABEL = "本会话落盘目录";
-const RISKY_LABEL = "高风险命令";
-
-/** full-access 下仍保持 ask 的高风险命令模式（permissions.md 第 6 节第 5 项） */
-const RISKY_SHELL_PATTERNS = [
-  "rm -rf *",
-  "rm -fr *",
-  "sudo *",
-  "git push --force*",
-  "git push -f *",
-  "git reset --hard*",
-];
 
 interface BroadRule {
   kind?: PermissionRule["kind"];
@@ -155,11 +147,6 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
         `${home}/providers.json`,
       ]) {
         rules.push({ kind: "edit", pattern, action: "ask", label: AUTH_DATA_LABEL });
-      }
-    }
-    if (name === "full-access") {
-      for (const pattern of RISKY_SHELL_PATTERNS) {
-        rules.push({ kind: "shell", pattern, action: "ask", label: RISKY_LABEL });
       }
     }
   }

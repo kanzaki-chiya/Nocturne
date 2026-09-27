@@ -120,6 +120,10 @@ const configFileSchema = z.object({
   model: z.string().min(1).optional(),
   /** 会话默认思考档位（ADR-0018） */
   reasoningEffort: reasoningEffortSchema.optional(),
+  /** shell 选择（ADR-0022 第 2 节）：auto | pwsh | powershell | bash | cmd | sh */
+  shell: z.enum(["auto", "pwsh", "powershell", "bash", "cmd", "sh"]).optional(),
+  /** 非标准安装位置的可执行文件路径；种类仍由 shell 决定 */
+  shellPath: z.string().min(1).optional(),
   providers: z.array(providerEntrySchema).optional(),
   permissions: z
     .object({

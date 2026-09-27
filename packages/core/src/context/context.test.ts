@@ -119,6 +119,41 @@ describe("buildContext", () => {
     expect(toolMsg?.role === "tool" && toolMsg.isError).toBe(false);
   });
 
+  it("note 条目（ADR-0022 shell 切换说明）在该位置渲染为 user 消息", () => {
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t1",
+        messageId: "u1",
+        content: [{ type: "text", text: "第一条" }],
+      },
+      {
+        kind: "note",
+        seq: 2,
+        turnId: "t1",
+        text: "[Environment change] shell is now PowerShell 7 (pwsh) (C:\\ps\\pwsh.exe); use PowerShell syntax",
+      },
+      {
+        kind: "user",
+        seq: 3,
+        turnId: "t2",
+        messageId: "u2",
+        content: [{ type: "text", text: "第二条" }],
+      },
+    ];
+    const built = buildContext(baseInput({ history }));
+    const texts = built.request.messages.map((m) =>
+      typeof m.content === "string" ? m.content : m.content.map((b) => b.text).join("\n"),
+    );
+    expect(built.request.messages.map((m) => m.role)).toEqual(["user", "user", "user"]);
+    expect(texts[1]).toContain("[Environment change]");
+    expect(texts[1]).toContain("pwsh");
+    // 位置保持：切换说明在两条用户消息之间
+    expect(texts[0]).toBe("第一条");
+    expect(texts[2]).toBe("第二条");
+  });
+
   it("工具失败结果标记 isError", () => {
     const history: HistoryEntry[] = [
       {
@@ -197,6 +232,94 @@ describe("buildContext", () => {
       }),
     );
     expect(built.request.messages.at(-1)?.role).toBe("user");
+  });
+});
+
+describe("note 投影遵守 toolCalls/结果邻接（协议约束）", () => {
+  const assistantCall = (seq: number, callIds: string[]): HistoryEntry => ({
+    kind: "assistant",
+    seq,
+    turnId: "t",
+    messageId: `a${seq}`,
+    model: { provider: "test", model: "m1" },
+    content: [{ type: "text", text: "ok" }],
+    toolCalls: callIds.map((callId) => ({ callId, name: "read" })),
+    usage: undefined,
+    finishReason: "tool_calls",
+  });
+  const toolResult = (seq: number, callId: string): HistoryEntry => ({
+    kind: "tool",
+    seq,
+    turnId: "t",
+    callId,
+    name: "read",
+    status: "ok",
+    modelContent: `r-${callId}`,
+  });
+  const note = (seq: number, text = "[Environment change] shell is now bash"): HistoryEntry => ({
+    kind: "note",
+    seq,
+    turnId: "t",
+    text,
+  });
+  /** 把 ModelRequest.messages 压成形状序列，note 记为 note:<文本>，tool 记为 tool:<callId> */
+  const shape = (built: ReturnType<typeof buildContext>): string[] =>
+    built.request.messages.map((m) => {
+      if (m.role === "tool") return `tool:${m.callId}`;
+      if (m.role === "assistant") return "assistant";
+      const text = m.content.map((b) => b.text).join("");
+      return text.startsWith("[Environment change]") ? `note:${text.slice(-8)}` : "user";
+    });
+
+  it("assistant 未决调用之间的 shell note 延迟到工具结果之后", () => {
+    // /shell 在工具调用进行中执行：持久序 assistant → note → tool 结果，
+    // 投影必须不把 user 角色的 note 插到 assistant 与其结果之间
+    const history = [assistantCall(2, ["c1"]), note(3), toolResult(4, "c1")];
+    const built = buildContext(baseInput({ history }));
+    expect(shape(built)).toEqual(["assistant", "tool:c1", "note:now bash"]);
+    // 断言 assistant 与其 tool 结果之间没有任何 user 消息
+    const assistantIdx = built.request.messages.findIndex((m) => m.role === "assistant");
+    expect(built.request.messages[assistantIdx + 1]?.role).toBe("tool");
+  });
+
+  it("并行调用：note 插在两段结果之间时等全部结算再放行，多条 note 保序", () => {
+    const history = [
+      assistantCall(2, ["c1", "c2", "c3"]),
+      note(3, "[Environment change] shell is now bash"),
+      toolResult(4, "c1"),
+      note(5, "[Environment change] shell is now cmd"),
+      toolResult(6, "c2"),
+      toolResult(7, "c3"),
+    ];
+    const built = buildContext(baseInput({ history }));
+    expect(shape(built)).toEqual([
+      "assistant",
+      "tool:c1",
+      "tool:c2",
+      "tool:c3",
+      "note:now bash",
+      "note: now cmd",
+    ]);
+  });
+
+  it("结算在 pendingMessages 中到达时，note 排在结果之后、后续 pending 之前", () => {
+    const history = [assistantCall(2, ["c1"]), note(3)];
+    const built = buildContext(
+      baseInput({
+        history,
+        pendingMessages: [
+          { role: "tool", callId: "c1", name: "read", content: "r-c1", isError: false },
+          { role: "user", content: [{ type: "text", text: "继续" }] },
+        ],
+      }),
+    );
+    expect(shape(built)).toEqual(["assistant", "tool:c1", "note:now bash", "user"]);
+  });
+
+  it("调用悬空到历史末尾（中断/截断）时 note 追加到末尾而非插队", () => {
+    const history = [assistantCall(2, ["c1"]), note(3)];
+    const built = buildContext(baseInput({ history }));
+    expect(shape(built)).toEqual(["assistant", "note:now bash"]);
   });
 });
 

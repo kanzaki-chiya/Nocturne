@@ -8,8 +8,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createDefaultPolicy } from "../permission/index.js";
-import { createPlatform, type Platform } from "../platform/index.js";
+import { createDefaultPolicy, createRulePolicy } from "../permission/index.js";
+import {
+  createPlatform,
+  shellDescriptor,
+  type Platform,
+  type ProcessRunner,
+  type ShellResolution,
+  type SpawnedProcess,
+} from "../platform/index.js";
 import type { ToolCallRef } from "../protocol/index.js";
 import { diffLines } from "./builtin/diff.js";
 import {
@@ -158,9 +165,16 @@ const allowAllGate: PermissionGate = {
 
 async function makeHarness(
   ws: string,
-  options?: { gate?: PermissionGate; signal?: AbortSignal },
+  options?: {
+    gate?: PermissionGate;
+    signal?: AbortSignal;
+    shell?: ShellResolution;
+    process?: ProcessRunner;
+  },
 ): Promise<Harness> {
   const workspaceRoot = await platform.resolveReal(ws);
+  const plat: Platform =
+    options?.process !== undefined ? { ...platform, process: options.process } : platform;
   const events: Captured[] = [];
   const ephemeral: Captured[] = [];
   const scope: ExecutionScope = {
@@ -170,7 +184,7 @@ async function makeHarness(
     sessionId: "s1",
     turnId: "turn-1",
     signal: options?.signal ?? new AbortController().signal,
-    platform,
+    platform: plat,
     gate: options?.gate ?? allowAllGate,
     readState: createReadStateStore(platform.paths),
     events: {
@@ -182,6 +196,7 @@ async function makeHarness(
         ephemeral.push({ type, payload: payload as unknown as Captured["payload"] });
       },
     },
+    ...(options?.shell !== undefined ? { shell: options.shell } : {}),
   };
   return {
     scope,
@@ -630,7 +645,7 @@ interface ShellOut {
 describe("shell 末尾分页预检（ADR-0021 第 9 条）", () => {
   const node = JSON.stringify(process.execPath);
   const PAGER_MESSAGE =
-    "命令以分页工具结尾（more/less）。分页工具会改坏输出编码、可能等待按键卡住；输出会被自动收集，去掉末尾的 `| more` 后直接执行即可。需要筛选时先重定向到文件再用 grep 工具。";
+    "命令以分页工具结尾（more/less/Out-Host -Paging）。分页工具会改坏输出编码、可能等待按键卡住；输出会被自动收集，去掉末尾的分页命令后直接执行即可。需要筛选时先重定向到文件再用 grep 工具。";
 
   it("末尾接分页工具的命令在权限之前拒绝：invalid_input、不 spawn、不请求权限、恰好一个 tool.completed", async () => {
     const ws = tmpWorkspace();
@@ -732,6 +747,159 @@ describe("shell 末尾分页预检（ADR-0021 第 9 条）", () => {
     const r = await h.executor.execute(call("read", { path: "a.txt" }), h.scope);
     expect(r.status).toBe("ok");
     expect(r.result.modelContent).toContain("hi");
+  });
+});
+
+describe("shell 工具 × ADR-0022（描述符 / 分页器名单 / 主体 shell 字段）", () => {
+  const pwshScope = { descriptor: shellDescriptor("pwsh", "C:\\ps\\pwsh.exe", "win32") };
+  const resolution = (descriptor: ReturnType<typeof shellDescriptor>): ShellResolution => ({
+    descriptor,
+    source: "auto",
+    selected: "auto",
+  });
+
+  it("permissionSubjects 主体携带当前 shell 种类与描述符风险元数据", () => {
+    const subs = shellTool.permissionSubjects({ command: "ls" }, {
+      shell: resolution(pwshScope.descriptor),
+    } as never);
+    expect(subs).toEqual([
+      {
+        kind: "shell",
+        target: "ls",
+        shell: "pwsh",
+        shellRisk: pwshScope.descriptor.risk,
+      },
+    ]);
+    // 未装配 shell 时主体不带 shell/shellRisk 字段（权限层按 POSIX 保守处理）
+    const bare = shellTool.permissionSubjects({ command: "ls" }, {} as never);
+    expect(bare).toEqual([{ kind: "shell", target: "ls" }]);
+    expect("shell" in (bare[0] ?? {})).toBe(false);
+    expect("shellRisk" in (bare[0] ?? {})).toBe(false);
+  });
+
+  it("描述符风险元数据经主体进入权限判定：pwsh 高危组合在全放行下仍 ask", () => {
+    const policy = createRulePolicy({
+      workspaceRoot: "C:\\ws",
+      caseSensitive: false,
+      preset: "full-access",
+    });
+    const subs = shellTool.permissionSubjects({ command: "Remove-Item x -Recurse -Force" }, {
+      shell: resolution(pwshScope.descriptor),
+    } as never);
+    expect(policy.evaluate(subs).decision.action).toBe("ask");
+  });
+
+  it("分页器名单按生效 shell：pwsh 拒绝 more/Out-Host -Paging/oh -p，放行 less", () => {
+    const scope = { shell: resolution(pwshScope.descriptor) } as never;
+    for (const command of [
+      "dir | more",
+      "Get-ChildItem | Out-Host -Paging",
+      "Get-ChildItem | oh -Paging",
+      "Get-ChildItem | oh -p", // PowerShell 参数前缀缩写
+      "Get-ChildItem | Out-Host -p",
+    ]) {
+      expect(shellTool.validateInput?.({ command }, scope), command).toContain("分页工具");
+    }
+    // 无 -Paging 的 Out-Host、非本方言分页器照常放行
+    for (const command of ["Get-ChildItem | Out-Host", "x | less", "x | Out-String -Paging"]) {
+      expect(shellTool.validateInput?.({ command }, scope), command).toBeUndefined();
+    }
+  });
+
+  it("bash/sh 名单含 more+less；cmd 只含 more（less 放行）", () => {
+    const bash = { shell: resolution(shellDescriptor("bash", "bash", "win32")) } as never;
+    const cmd = { shell: resolution(shellDescriptor("cmd", "cmd.exe", "win32")) } as never;
+    for (const command of ["x | less", "x | more"]) {
+      expect(shellTool.validateInput?.({ command }, bash), command).toContain("分页工具");
+    }
+    expect(shellTool.validateInput?.({ command: "x | more" }, cmd)).toContain("分页工具");
+    expect(shellTool.validateInput?.({ command: "x | less" }, cmd)).toBeUndefined();
+    expect(shellTool.validateInput?.({ command: "x | oh -Paging" }, cmd)).toBeUndefined();
+  });
+
+  it("描述符缺省（无 shell 装配）回退全量名单 more/less", () => {
+    expect(shellTool.validateInput?.({ command: "x | more" })).toContain("分页工具");
+    expect(shellTool.validateInput?.({ command: "x | less" })).toContain("分页工具");
+    // flagPagers 无描述符时不启用：Out-Host -Paging 不拒绝
+    expect(
+      shellTool.validateInput?.({ command: "Get-ChildItem | Out-Host -Paging" }),
+    ).toBeUndefined();
+  });
+
+  it("显式选择的 shell 不可用：执行前返回错误并列出检测信息，不 spawn", async () => {
+    const ws = tmpWorkspace();
+    const spawnShell = vi.fn();
+    const runner: ProcessRunner = {
+      spawn: () => {
+        throw new Error("unused");
+      },
+      spawnPipe: () => {
+        throw new Error("unused");
+      },
+      spawnShell,
+    };
+    const h = await makeHarness(ws, {
+      process: runner,
+      shell: {
+        source: "env",
+        selected: "sh",
+        error: "指定的 shell sh 未安装；可用 shell：pwsh | cmd",
+      },
+    });
+    const r = await h.executor.execute(call("shell", { command: "ls" }), h.scope);
+    expect(r.status).toBe("error");
+    expect(r.result.status === "error" && r.result.error.code).toBe("tool_failed");
+    expect(r.result.modelContent).toContain("sh 未安装");
+    expect(spawnShell).not.toHaveBeenCalled();
+  });
+
+  it("生效描述符原样传给 spawnShell（argv 由描述符 invoke 决定）", async () => {
+    const ws = tmpWorkspace();
+    const seen: {
+      command?: string | undefined;
+      shell?: string | undefined;
+      verbatim?: boolean | undefined;
+    } = {};
+    const runner: ProcessRunner = {
+      spawn: () => {
+        throw new Error("unused");
+      },
+      spawnPipe: () => {
+        throw new Error("unused");
+      },
+      spawnShell(command, options) {
+        seen.command = command;
+        seen.shell = options?.shell?.kind;
+        seen.verbatim = options?.shell?.invoke(command).verbatimArgs;
+        const done = Promise.resolve({
+          code: 0,
+          signal: null,
+          timedOut: false,
+          killed: false,
+        });
+        return {
+          pid: 1,
+          stdout: (async function* () {
+            yield "OK\n";
+          })(),
+          stderr: (async function* () {
+            await Promise.resolve();
+          })(),
+          wait: () => done,
+          kill: () => Promise.resolve(),
+          detachOutput: () => undefined,
+        } satisfies SpawnedProcess;
+      },
+    };
+    const h = await makeHarness(ws, {
+      process: runner,
+      shell: resolution(shellDescriptor("pwsh", "C:\\ps\\pwsh.exe", "win32")),
+    });
+    const r = await h.executor.execute(call("shell", { command: "ls" }), h.scope);
+    expect(r.status).toBe("ok");
+    expect(seen.shell).toBe("pwsh");
+    expect(seen.verbatim).not.toBe(true);
+    expect(r.result.modelContent).toContain("OK");
   });
 });
 

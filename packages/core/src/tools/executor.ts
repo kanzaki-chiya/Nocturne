@@ -48,7 +48,12 @@ async function resolveSubjects(
       const resolved = await scope.platform.resolveReal(req.target);
       subjects.push({ kind: req.kind, target: req.target, resolved });
     } else {
-      subjects.push({ kind: req.kind, target: req.target });
+      subjects.push({
+        kind: req.kind,
+        target: req.target,
+        shell: req.shell,
+        shellRisk: req.shellRisk,
+      });
     }
   }
   return subjects;
@@ -204,7 +209,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       if (tool.validateInput !== undefined) {
         let message: string | undefined;
         try {
-          message = tool.validateInput(input);
+          message = tool.validateInput(input, scope);
         } catch (e) {
           return finish(
             "error",
@@ -347,6 +352,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         process: scope.platform.process,
         readState: scope.readState,
         ...(scope.shellEnvStrip !== undefined ? { shellEnvStrip: scope.shellEnvStrip } : {}),
+        shell: scope.shell,
         progress: (chunk: string, stream?: "stdout" | "stderr" | "info") => {
           scope.events.emitEphemeral(
             "tool.progress",

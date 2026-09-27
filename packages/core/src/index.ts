@@ -29,7 +29,17 @@ import {
   isPermissionPresetName,
   type PermissionPolicy,
 } from "./permission/index.js";
-import { createPlatform, shellCommandDescription, type Platform } from "./platform/index.js";
+import {
+  createPlatform,
+  createShellResolver,
+  detectShells,
+  isShellKind,
+  parseShellSpec,
+  specFromConfigFields,
+  type DetectedShell,
+  type Platform,
+  type ShellSpec,
+} from "./platform/index.js";
 import {
   clampReasoningEffort,
   createAnthropicProvider,
@@ -238,6 +248,24 @@ export interface RuntimeSession {
    */
   setReasoningEffort(level: string): Promise<void>;
   /**
+   * 当前 shell 解析结果（ADR-0022）：selected 是生效层声明的选择
+   * （"auto" 或种类名），effective 是实际执行的 shell；显式选择不可用
+   * 时 error 给出可选项。生效层为 env/config 时 overriddenBy 给出该
+   * 来源——此时写入 settings.json 的选择不生效（无论它当前是否有值）。
+   */
+  shellInfo(): SessionShellInfo;
+  /** 本机探测到的全部 shell 种类（含未安装的；/shell 列表的数据来源） */
+  listShells(): readonly DetectedShell[];
+  /**
+   * 切换 shell（ADR-0022 第 4 节）：kind 为 "auto" 或种类名
+   * （pwsh | powershell | bash | cmd | sh）。目标种类未安装（或 auto
+   * 解不出可用 shell）时以 invalid_command 拒绝并列出可选项，不写
+   * settings.json、不产生事件。写入 settings.json（无配置层时仅本
+   * 会话内生效），下一次 shell 调用起生效，Turn 进行中也可切换；
+   * 实际生效变化且未被上层覆盖时写 session.config_changed 的 shell 字段。
+   */
+  setShell(kind: string): Promise<void>;
+  /**
    * 当前思考档位信息（TUI 状态栏、CLI /effort 的数据来源）：
    * current = 持久化意图按当前模型就近降档后的值；
    * effective = 本 Turn 实际生效的快照档（Turn 外 = current）。
@@ -265,6 +293,19 @@ export interface RuntimeSession {
   /** 打开时执行的恢复修复汇总（sessions.md 第 6 节）；无修复则 undefined */
   readonly recovery?: SessionRecovery | undefined;
   close(): Promise<void>;
+}
+
+/** RuntimeSession.shellInfo 的返回（ADR-0022 第 2、4 节） */
+export interface SessionShellInfo {
+  /** 生效层声明的选择："auto" 或种类名 */
+  selected: string;
+  /** 生效选择的来源层：NOCTURNE_SHELL / config.json / settings.json / 自动 */
+  source: "env" | "config" | "settings" | "auto";
+  /** 实际执行的 shell；显式选择不可用时缺省（error 给出原因与可选项） */
+  effective?: { kind: string; name: string; path: string } | undefined;
+  error?: string | undefined;
+  /** 生效层为 env/config 时的覆盖来源（settings 写入不生效的提示） */
+  overriddenBy?: "env" | "config" | undefined;
 }
 
 export interface ResumeSessionOptions {
@@ -442,13 +483,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   const instructions =
     options.instructions ?? (await loadInstructions(platform, workspaceRoot, cwd));
-  const environment: EnvironmentInfo = {
-    os: process.platform,
-    shell: shellCommandDescription(),
-    cwd,
-    workspaceRoot,
-    sessionDate: new Date().toISOString(),
-  };
+  const detectedShells = await detectShells(platform);
 
   async function wrapSession(
     session: Session,
@@ -493,6 +528,58 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         message: `项目配置未信任：${ws.projectConfig.path ?? meta.workspaceRoot}`,
       });
     }
+
+    // shell 解析（ADR-0022 第 2 节）：NOCTURNE_SHELL > config.json >
+    // settings.json > 自动。env 值与 config 层值在会话打开时快照；
+    // settings 层经 config.shellSetting() live 读取，/shell 写盘后下一次
+    // shell 调用即生效（不在 Turn 开始快照——scope 组装时按次取值）。
+    let memoryShellSpec: ShellSpec | undefined;
+    const explicitPaths = new Set<string>();
+    const envShellValue = platform.env("NOCTURNE_SHELL");
+    if (envShellValue !== undefined) {
+      const parsed = parseShellSpec(envShellValue);
+      if (parsed.kind !== "auto" && parsed.kind !== "invalid" && parsed.path !== undefined) {
+        explicitPaths.add(parsed.path);
+      }
+    }
+    if (resolved?.shellPath !== undefined) explicitPaths.add(resolved.shellPath);
+    const initialSetting = config?.shellSetting();
+    if (initialSetting?.shellPath !== undefined) explicitPaths.add(initialSetting.shellPath);
+    const explicitPathExists = new Map<string, boolean>();
+    await Promise.all(
+      [...explicitPaths].map(async (p) => {
+        explicitPathExists.set(p, await platform.fs.exists(p));
+      }),
+    );
+    const shellResolver = createShellResolver({
+      platform: process.platform,
+      envValue: envShellValue,
+      config: specFromConfigFields(resolved?.shell, resolved?.shellPath),
+      settings: () =>
+        memoryShellSpec ??
+        (config !== undefined
+          ? specFromConfigFields(config.shellSetting()?.shell, config.shellSetting()?.shellPath)
+          : undefined),
+      detected: detectedShells,
+      // 显式路径在会话打开时已预探测；settings.json 由程序写入，
+      // setShell 只允许种类名，不产生会话内新路径
+      pathExists: (p) => explicitPathExists.get(p) === true,
+      // 非法 NOCTURNE_SHELL：此处发事件早于任何订阅者，客户端看不到——
+      // 同时进 session.warnings（CLI/TUI 的打开提示列表渲染它）
+      onWarning: (message) => {
+        warnings.push(message);
+        session.emitEphemeral("runtime.warning", { code: "shell_env_invalid", message });
+      },
+    });
+    // 环境信息在会话打开（新建或恢复）时按当时生效的 shell 生成，之后不变
+    // （ADR-0022 第 4 节：中途切换只写 config_changed + 历史说明，不改前缀）
+    const environment: EnvironmentInfo = {
+      os: process.platform,
+      shell: shellResolver.environmentLine(),
+      cwd,
+      workspaceRoot,
+      sessionDate: new Date().toISOString(),
+    };
 
     // 会话级 ProviderRegistry：基础层 + 可信项目层的 Provider 条目。
     // updateProviders 后在下一次空闲边界经 rebuildProviders 重建。
@@ -668,6 +755,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       hooks: hookRunner,
       diagnostics,
       shellEnvStrip,
+      // ADR-0022：延迟解析——每次工具调用组装 scope 时取当前生效 shell
+      shell: shellResolver,
     };
     const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
     for (const src of [resolved?.turn, options.turn]) {
@@ -802,6 +891,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         makeHookRunner,
         mcpTools: () => mcpSession?.tools() ?? [],
         shellEnvStrip,
+        // 子会话与父会话共用同一 shell 解析（ADR-0022）：切换即时生效；
+        // 子会话环境信息的 Shell 行在派生时重新生成
+        shell: shellResolver,
+        shellLine: () => shellResolver.environmentLine(),
         grants: {
           session: sessionGrants,
           ...(ws?.grants !== undefined ? { project: ws.grants } : {}),
@@ -999,6 +1092,75 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         await session.emit("session.config_changed", { permissionPreset: name });
         policy = buildPolicy(name);
+      },
+      shellInfo() {
+        const res = shellResolver.current();
+        return {
+          selected: res.selected,
+          source: res.source,
+          ...(res.descriptor !== undefined
+            ? {
+                effective: {
+                  kind: res.descriptor.kind,
+                  name: res.descriptor.name,
+                  path: res.descriptor.executable,
+                },
+              }
+            : {}),
+          ...(res.error !== undefined ? { error: res.error } : {}),
+          ...(res.overriddenBy !== undefined ? { overriddenBy: res.overriddenBy } : {}),
+        };
+      },
+      listShells() {
+        return shellResolver.list();
+      },
+      async setShell(kind) {
+        assertUsable();
+        // ADR-0022 第 4 节：Turn 进行中也可切换，下一次 shell 调用起生效
+        const normalized = kind.trim().toLowerCase();
+        if (normalized !== "auto" && !isShellKind(normalized)) {
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `未知 shell：${kind}（可选：auto | pwsh | powershell | bash | cmd | sh）`,
+          );
+        }
+        // 先验证目标可执行（含 auto 能解出可用 shell），再动 settings/内存：
+        // 不可用的选择不落盘、不发事件、不改变生效 shell
+        const probe = shellResolver.probe(normalized);
+        if (probe.descriptor === undefined) {
+          throw new RuntimeCommandError(
+            "invalid_command",
+            probe.error ?? `所选 shell ${normalized} 不可用`,
+          );
+        }
+        const before = shellResolver.current();
+        if (config !== undefined) {
+          // settings.json 原子写（ADR-0022 第 3 节）；写后 live getter 立即生效
+          await config.setShellSetting(normalized);
+          memoryShellSpec = undefined;
+        } else {
+          // 无配置层的嵌入用法：仅本会话内存生效
+          memoryShellSpec = normalized === "auto" ? { kind: "auto" } : { kind: normalized };
+        }
+        const after = shellResolver.current();
+        // 只在实际生效变化且未被 env/config 覆盖时记历史（ADR-0022 第 4 节）
+        const d = after.descriptor;
+        const switched =
+          d !== undefined &&
+          (d.kind !== before.descriptor?.kind || d.executable !== before.descriptor.executable);
+        if (switched && after.overriddenBy === undefined) {
+          await session.emit("session.config_changed", {
+            shell: { kind: d.kind, path: d.executable },
+          });
+        }
+        if (after.overriddenBy !== undefined) {
+          session.emitEphemeral("runtime.warning", {
+            code: "shell_overridden",
+            message: `shell 已写入 settings.json，但当前由 ${
+              after.overriddenBy === "env" ? "NOCTURNE_SHELL" : "config.json"
+            } 指定，移除上层设置后才会生效`,
+          });
+        }
       },
       async setReasoningEffort(level) {
         assertUsable();
@@ -1289,9 +1451,12 @@ export {
 export { SessionError } from "./session/index.js";
 export {
   createPlatform,
+  SHELL_KINDS,
+  type DetectedShell,
   type PipeProcess,
   type PipeSpawnOptions,
   type Platform,
+  type ShellKind,
 } from "./platform/index.js";
 // MCP / Hook 装配点类型（modules.md：注入方是 apps；实现位于 packages/mcp）
 export type {

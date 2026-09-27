@@ -271,7 +271,8 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
       subject({ kind: "shell", target: "sudo rm -rf /" }),
     ]);
     expect(r.decision.action).toBe("ask");
-    expect(r.decision.matchedRule?.rule?.label).toBe("高风险命令");
+    // ADR-0022 第 1 节后：不再是预设规则命中，而是宽 allow 被高风险元数据降级
+    expect(r.decision.matchedRule?.description).toBe("预设 full-access 高风险命令");
   });
 
   it("分层规则后写优先：用户规则覆盖预设", () => {
@@ -450,6 +451,26 @@ describe("shell 轻量词法切分（permissions.md 5.3 / tools.md 第 6 节）"
   it("isCompositeShell 保持保守：引号内控制符仍判组合", () => {
     expect(isCompositeShell('echo "a;b"')).toBe(true);
     expect(isCompositeShell("echo hi")).toBe(false);
+  });
+});
+
+describe("shell 方言分段（ADR-0022 第 6 节）", () => {
+  it("PowerShell 方言另切脚本块 { }；POSIX 方言不切", () => {
+    const cmd = "1..3 | ForEach-Object { rm $_ -r -f }";
+    expect(shellSegments(cmd, "powershell")).toEqual(["1..3", "ForEach-Object", "rm $_ -r -f"]);
+    const posix = shellSegments(cmd, "posix");
+    expect(posix.some((s) => s === "rm $_ -r -f")).toBe(false);
+    // isCompositeShell 同样按方言判定
+    expect(isCompositeShell("{ echo hi }", "powershell")).toBe(true);
+    expect(isCompositeShell("{ echo hi }", "posix")).toBe(false);
+    // 未携带 shell 种类时按 POSIX 保守处理
+    expect(shellSegments(cmd)).toEqual(posix);
+  });
+
+  it("PowerShell 方言仍切 ; | && || $( 与调用运算符 &", () => {
+    expect(shellSegments("a; b | c && d", "powershell")).toEqual(["a", "b", "c", "d"]);
+    expect(shellSegments("& 'x.ps1' ; y", "powershell")).toEqual(["'x.ps1'", "y"]);
+    expect(shellSegments("echo $(pwd)", "powershell")).toEqual(["echo", "pwd"]);
   });
 });
 

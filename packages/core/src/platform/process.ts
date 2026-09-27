@@ -7,6 +7,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import process from "node:process";
 import type { Readable } from "node:stream";
 
+import { defaultShellInvocation, type ShellDescriptor } from "./shells.js";
+
 export interface SpawnOptions {
   cwd?: string | undefined;
   /** 叠加在进程环境之上的变量 */
@@ -72,16 +74,25 @@ export interface SpawnedProcess {
   detachOutput(): void;
 }
 
+export interface ShellSpawnOptions extends SpawnOptions {
+  /**
+   * 本次调用使用的 shell 描述符（ADR-0022）：给出时按描述符的 invoke
+   * 生成 argv；缺省时回退平台默认（win32→cmd /d /s /c，其余→/bin/sh -c）。
+   */
+  shell?: ShellDescriptor | undefined;
+}
+
 export interface ProcessRunner {
   spawn(command: string, args: string[], options?: SpawnOptions): SpawnedProcess;
   /**
-   * 经系统 shell 执行命令行（tools.md 第 6 节 shell 工具）：
-   * Windows 用 %COMSPEC%（通常 cmd.exe）`/d /s /c`；POSIX 用 /bin/sh -c。
-   * NOCTURNE_SHELL 仅替换可执行文件，参数形态按平台不变。
+   * 经系统 shell 执行命令行（tools.md 第 6 节 shell 工具；ADR-0022）：
+   * options.shell 指定本次的 shell 种类与可执行文件（pwsh/powershell 经
+   * -EncodedCommand，bash/sh 经 -c，cmd 经 /d /s /c verbatim）；缺省回退
+   * 平台默认 shell。shell 选择的分层与探测在 shells.ts，本接口只做调用。
    * wait() 在 shell 本体 exit 时结算，不等 stdio 的 close——孙进程可能
    * 继承并继续占用输出管道；届时用 detachOutput() 结束读取。
    */
-  spawnShell(command: string, options?: SpawnOptions): SpawnedProcess;
+  spawnShell(command: string, options?: ShellSpawnOptions): SpawnedProcess;
   /**
    * 双向管道子进程（hooks.md / mcp.md）：stdin 可写、stdout 为原始字节、
    * stderr 为解码文本。envMode:"minimal" 用于第三方 MCP 服务器的环境隔离。
@@ -174,36 +185,6 @@ function stripEnvVars(
     out[key] = value;
   }
   return out;
-}
-
-/** Windows 下取 shell 可执行文件：NOCTURNE_SHELL > %COMSPEC% > cmd.exe */
-export function shellExecutable(platform: NodeJS.Platform = process.platform): string {
-  const override = process.env.NOCTURNE_SHELL;
-  if (override !== undefined && override.length > 0) return override;
-  if (platform === "win32") return process.env.COMSPEC ?? "cmd.exe";
-  return "/bin/sh";
-}
-
-/** Shell 工具与环境提示共用参数形态，避免提示中的语法与实际执行漂移。 */
-export function shellArguments(
-  command: string,
-  platform: NodeJS.Platform = process.platform,
-): string[] {
-  return platform === "win32" ? ["/d", "/s", "/c", `"${command}"`] : ["-c", command];
-}
-
-export function shellCommandDescription(platform: NodeJS.Platform = process.platform): string {
-  const executable = shellExecutable(platform);
-  const args = shellArguments("<command>", platform);
-  const name = executable.split(/[\\/]/).at(-1)?.toLowerCase();
-  const syntax =
-    name === "cmd" || name === "cmd.exe"
-      ? ": use cmd syntax, not bash or PowerShell. `&` runs commands in sequence, not in the background; run long-running commands directly and raise timeoutMs when needed. findstr patterns use the console code page and cannot match non-ASCII text in UTF-8 output; use ASCII patterns only"
-      : name === "sh"
-        ? ": use POSIX sh syntax"
-        : "";
-  const invocation = platform === "win32" ? args.join(" ") : `${args[0]} "${args[1]}"`;
-  return `Commands run with ${executable} ${invocation}${syntax}`;
 }
 
 /** Windows 控制台代码页 → WHATWG 编码 label；未映射的代码页回退 UTF-8 */
@@ -608,17 +589,10 @@ export function createProcessRunner(): ProcessRunner {
   return {
     spawn: (command, args, options = {}) => spawnImpl(command, args, options, false, "close"),
     spawnShell(command, options = {}) {
-      if (process.platform === "win32") {
-        // cmd /d /s /c "<命令>"：verbatim 传参 + /s 剥掉外层引号，命令原文含引号不受影响
-        return spawnImpl(
-          shellExecutable("win32"),
-          shellArguments(command, "win32"),
-          options,
-          true,
-          "exit",
-        );
-      }
-      return spawnImpl(shellExecutable(), shellArguments(command), options, false, "exit");
+      // ADR-0022：描述符缺省时回退平台默认 shell（win32→cmd，其余→/bin/sh）
+      const inv = options.shell?.invoke(command) ?? defaultShellInvocation(command);
+      const { shell: _shell, ...rest } = options;
+      return spawnImpl(inv.executable, inv.args, rest, inv.verbatimArgs === true, "exit");
     },
     spawnPipe(command, args, options = {}) {
       const base =

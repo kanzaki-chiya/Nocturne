@@ -19,9 +19,12 @@ import type {
 import { matchGrant } from "./grants.js";
 import {
   isCompositeShell,
+  isOpaquePowerShellCommand,
   isPathKind,
+  isRiskyShellCommand,
   matchPattern,
   normalizePathText,
+  shellDialect,
   shellSegments,
 } from "./pattern.js";
 import { presetRules, type PresetContext } from "./presets.js";
@@ -235,9 +238,11 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     // 组合命令（permissions.md 5.3）：窄模式的 allow 降级为 ask（deny 不受影响，grant 精确匹配不受影响）。
     // 全放行规则（pattern 为 "*"，如 full-access）降级没有意义，改为逐段求值：
     // 任一段命中 ask/deny（高风险命令、用户 deny 等）就取最严格者。
-    if (s.kind === "shell" && action === "allow" && isCompositeShell(s.target)) {
+    // ADR-0022：分段方言由主体携带的 shell 种类决定（PowerShell 另切脚本块）
+    const dialect = shellDialect(s.kind === "shell" ? s.shell : undefined);
+    if (s.kind === "shell" && action === "allow" && isCompositeShell(s.target, dialect)) {
       if (hit.rule?.pattern === "*") {
-        for (const segment of shellSegments(s.target)) {
+        for (const segment of shellSegments(s.target, dialect)) {
           const seg = { ...s, target: segment };
           const segTrusted = lastMatch(trusted, seg);
           let segAction: PermissionAction = segTrusted?.rule?.action ?? "ask";
@@ -263,11 +268,35 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       }
     }
 
+    // 高风险元数据（ADR-0022 第 6 节）：表由生效 ShellDescriptor 经主体
+    // 透传，通配符表达不了的 PowerShell/cmd 语义（参数前缀缩写、标志共存、
+    // 大小写不敏感）在此按元数据匹配；只把预设级宽规则的 allow 降级为 ask，
+    // 用户/项目/CLI 显式规则照旧覆盖
+    if (s.kind === "shell" && action === "allow" && hit.origin === "preset") {
+      const risky = shellSegments(s.target, dialect).find((segment) =>
+        isRiskyShellCommand(segment, s.shellRisk),
+      );
+      if (risky !== undefined) {
+        action = "ask";
+        hit = { origin: "preset", description: `预设 ${presetName} 高风险命令` };
+        note = [note, `高风险命令「${risky}」按 ${s.shell ?? "sh"} 语法判定`]
+          .filter(Boolean)
+          .join("；");
+      }
+    }
+
     // 凭据相关命令至少 ask（provider-setup.md 第 4 节）：shell allow 命中
     // 凭据文件名或后端读取命令时降级；Grant/--yes 仍可在 ask 层批准
     if (s.kind === "shell" && action === "allow" && isCredentialBackendCommand(s.target)) {
       action = "ask";
       note = [note, "可能读取 Nocturne 凭据"].filter(Boolean).join("；");
+    }
+
+    // 不透明 PowerShell -EncodedCommand 至少 ask（ADR-0022 第 6 节）：
+    // 编码负载无法做内容审查，含嵌套调用同样降级
+    if (s.kind === "shell" && action === "allow" && isOpaquePowerShellCommand(s.target)) {
+      action = "ask";
+      note = [note, "包含 PowerShell -EncodedCommand（内容不透明）"].filter(Boolean).join("；");
     }
 
     if (action === "ask" && skipApprovals !== true) {

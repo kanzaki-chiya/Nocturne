@@ -23,6 +23,7 @@ import {
   saveSetupThinking,
   setSetupDefaultModel,
 } from "./setup.js";
+import { loadSettingsStore } from "./settings.js";
 import { readTrustList } from "./trust.js";
 import type {
   ConfigFile,
@@ -79,6 +80,12 @@ export async function loadConfig(
   ]);
   base.warnings.push(...envLayer.warnings, ...cliLayer.warnings);
   if (credentialsInit.warning !== undefined) base.warnings.push(credentialsInit.warning);
+
+  // settings.json（ADR-0022 第 3 节）：程序维护的设置层，只放 shell/shellPath；
+  // 损坏降级为忽略 + 警告。store 持内存态，setShell 写盘后 live getter 立即可见
+  const settingsPath = paths.join(home, "settings.json");
+  const settings = await loadSettingsStore(platform, settingsPath);
+  if (settings.warning !== undefined) base.warnings.push(settings.warning);
 
   const trust = await readTrustList(platform, trustPath);
   if (trust.warning !== undefined) base.warnings.push(trust.warning);
@@ -223,6 +230,8 @@ export async function loadConfig(
     refreshUpstreamLimits: (providerId: string) =>
       refreshUpstreamLimits(platform, home, credentials, env, options.upstreamFetch, providerId),
     setDefaultModel: (model: string) => setSetupDefaultModel(platform, home, model),
+    shellSetting: () => settings.store.shellFields(),
+    setShellSetting: (kind, path) => settings.store.setShell(kind, path),
     recentModels: () => [...recent],
     recordRecentModel: async (ref: ModelRef) => {
       await recordRecentModel(platform, home, ref);

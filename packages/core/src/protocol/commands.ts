@@ -21,6 +21,8 @@ export type ClientCommand =
   | { type: "respondPermission"; requestId: string; reply: PermissionReply }
   | { type: "setModel"; model: ModelRef }
   | { type: "setPermissionPreset"; preset: string }
+  /** shell 选择（ADR-0022）："auto" 或支持的种类名 */
+  | { type: "setShell"; shell: string }
   | { type: "compact" }
   | { type: "close" };
 

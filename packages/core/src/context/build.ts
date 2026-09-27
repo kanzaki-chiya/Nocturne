@@ -210,14 +210,34 @@ function prunedPlaceholder(entry: Extract<HistoryEntry, { kind: "tool" }>): stri
   return `[输出已省略] 工具 ${entry.name}${args} 的结果已被 context.compacted 修剪`;
 }
 
+interface HistoryProjection {
+  messages: ModelMessage[];
+  chars: number;
+  entries: number;
+  /** 历史末尾仍未结算的 toolCalls（其结果可能在 pendingMessages 中） */
+  unsettled: Set<string>;
+  /** 等待未决工具调用结算后才放行的延迟消息（note / 摘要注入） */
+  deferred: ModelMessage[];
+}
+
 function historyToMessages(
   history: readonly HistoryEntry[],
   currentModelProvider: string,
-): { messages: ModelMessage[]; chars: number; entries: number } {
+): HistoryProjection {
   const messages: ModelMessage[] = [];
   let chars = 0;
   let entries = 0;
   const { summaryThrough, pruneThrough } = compactionCutoffs(history);
+  // 协议邻接约束（OpenAI/Anthropic）：assistant 携带的 toolCalls 必须由对应
+  // tool 结果紧随。note 类注入（/shell 切换说明可在 Turn 进行中写入）若落在
+  // 未决调用之间会违反邻接——先排队，等全部未决调用的结果齐了再放行；
+  // 结算在 pendingMessages 中完成的场景由调用方用返回的 unsettled/deferred 续排
+  const unsettled = new Set<string>();
+  const deferred: ModelMessage[] = [];
+  const inject = (m: ModelMessage): void => {
+    if (unsettled.size === 0) messages.push(m);
+    else deferred.push(m);
+  };
 
   for (const entry of history) {
     // 被最新摘要覆盖的历史（含更早的压缩事件）不再进入上下文
@@ -243,6 +263,7 @@ function historyToMessages(
           content,
           toolCalls: entry.toolCalls,
         });
+        for (const c of entry.toolCalls) unsettled.add(c.callId);
         break;
       }
       case "tool": {
@@ -255,13 +276,16 @@ function historyToMessages(
           content,
           isError: entry.status !== "ok",
         });
+        if (unsettled.delete(entry.callId) && unsettled.size === 0) {
+          messages.push(...deferred.splice(0));
+        }
         break;
       }
       case "compaction": {
         if (entry.compactKind === "summary" && entry.summary !== undefined) {
           const text = `[会话历史摘要]\n${entry.summary}`;
           chars += text.length;
-          messages.push({
+          inject({
             role: "user",
             content: [{ type: "text", text }],
           });
@@ -269,9 +293,18 @@ function historyToMessages(
         // prune 事件不产生消息，只改变其上界之前工具结果的呈现
         break;
       }
+      case "note": {
+        // ADR-0022：shell 切换说明在该事件位置注入（user 角色，与摘要注入同式）
+        chars += entry.text.length;
+        inject({
+          role: "user",
+          content: [{ type: "text", text: entry.text }],
+        });
+        break;
+      }
     }
   }
-  return { messages, chars, entries };
+  return { messages, chars, entries, unsettled, deferred };
 }
 
 /**
@@ -279,7 +312,8 @@ function historyToMessages(
  * 与 historyToMessages 走同一套 6.4 规则。
  */
 export function renderTranscript(history: readonly HistoryEntry[], provider: string): string {
-  const { messages } = historyToMessages(history, provider);
+  const { messages, deferred } = historyToMessages(history, provider);
+  messages.push(...deferred);
   const lines: string[] = [];
   const blocksText = (blocks: readonly ContentBlock[]) => blocks.map((b) => b.text).join("\n");
   for (const m of messages) {
@@ -436,6 +470,8 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     messages,
     chars: historyChars,
     entries,
+    unsettled,
+    deferred,
   } = historyToMessages(input.history, model.ref.provider);
   // context.md 6.5：进行中 Turn 的 message.user 被摘要覆盖时重新注入，
   // 保证"当前任务"不因压缩丢失（恢复投影中 open Turn 同理）
@@ -453,7 +489,12 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   }
   for (const m of input.pendingMessages ?? []) {
     messages.push(m);
+    // 历史末尾未决调用的 tool 结果到达后，延迟的 note 才放行（协议邻接约束）
+    if (m.role === "tool" && unsettled.delete(m.callId) && unsettled.size === 0) {
+      messages.push(...deferred.splice(0));
+    }
   }
+  messages.push(...deferred);
   const pendingChars = (input.pendingMessages ?? [])
     .map((m) => {
       if (m.role === "tool") return m.content.length;
