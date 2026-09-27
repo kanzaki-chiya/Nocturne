@@ -53,7 +53,7 @@ MVP 不做快照；若将来出现加载瓶颈，再追加 `session.snapshot` �
 | `resume` | 按第 4 节打开 |
 | `submit` | 仅在 `idle` 时接受，启动一个 Turn |
 | `interrupt` | 中止当前 Turn；Turn 以 `aborted` 结束，会话回到 `idle` |
-| `close` | 若有运行中的 Turn 先中断并等待其结束（`failed` 状态下不再写入）；释放锁。日志保留，可随时恢复 |
+| `close` | 先拒绝新操作；若 Turn 已被接受（包括尚在提交准备阶段）或正在压缩，先发出中断并等待收束，再清理资源、释放锁。Turn 按中断语义写入 `turn.completed(reason="aborted")`（`failed` 状态下不再写入）。日志保留，可随时恢复 |
 
 ## 4. 打开会话（恢复）的顺序
 

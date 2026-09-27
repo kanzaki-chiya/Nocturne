@@ -2,6 +2,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { loadConfig } from "../src/config/index.js";
+import { createPlatform } from "../src/platform/index.js";
 
 import {
   createRuntime,
@@ -68,6 +70,74 @@ const durableTypes = (events: RuntimeEvent[]) =>
   events.filter((e): e is Extract<RuntimeEvent, { seq: number }> => "seq" in e).map((e) => e.type);
 
 describe("公开 Runtime API", () => {
+  it("close 等待运行中的 Turn 以 aborted 落盘后才释放会话", async () => {
+    const provider = new FakeProvider({
+      scripts: [
+        [
+          { type: "wait", ms: 100 },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, undefined, { provider });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    const turn = session.submit({ text: "close race" });
+    await new Promise((r) => setTimeout(r, 20));
+    await session.close();
+    expect(await turn).toBe("aborted");
+    expect(durableTypes(events)).toContain("turn.started");
+    expect(events.filter((e) => e.type === "turn.completed")).toMatchObject([
+      { payload: { reason: "aborted" } },
+    ]);
+    expect(durableTypes(events).indexOf("turn.completed")).toBeGreaterThan(
+      durableTypes(events).indexOf("turn.started"),
+    );
+  });
+
+  it("close 在 Provider 重建准备阶段中断并等待 Turn 日志收尾", async () => {
+    const workspace = makeTmpDir("nct-rt-ws-");
+    const sessionsDir = makeTmpDir("nct-rt-sessions-");
+    const config = await loadConfig(createPlatform(), {
+      nocturneHome: makeTmpDir("nct-rt-home-"),
+      env: () => undefined,
+    });
+    const runtime = await createRuntime({
+      cwd: workspace,
+      sessionsDir,
+      providers: [new FakeProvider({})],
+      config,
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    let begin!: () => void;
+    let resume!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      begin = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    runtime.updateProviders({
+      ...config,
+      forWorkspace: async (root) => {
+        begin();
+        await blocked;
+        return config.forWorkspace(root);
+      },
+    });
+    const turn = session.submit({ text: "close during rebuild" });
+    await entered;
+    expect(session.state().openTurn).toBeUndefined();
+    const close = session.close();
+    resume();
+    await close;
+    expect(await turn).toBe("aborted");
+    const log = readFileSync(path.join(sessionsDir, `${session.id}.jsonl`), "utf8");
+    expect(log).toContain('"type":"turn.started"');
+    expect(log).toContain('"type":"turn.completed"');
+    expect(log).toContain('"reason":"aborted"');
+  });
+
   it("createRuntime → createSession → submit：完整 Turn 经公开 API 走通", async () => {
     const { runtime, ws, provider } = await makeRuntime([
       [

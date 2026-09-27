@@ -815,12 +815,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
     let controller: AbortController | undefined;
     let compactController: AbortController | undefined;
+    let turnSettled: Promise<void> | undefined;
+    let compactSettled: Promise<void> | undefined;
+    let closing = false;
     // 进行中 Turn 的档位快照（ADR-0018 §3）：submit 时对持久化意图
     // 就近降档一次，reasoningEffortInfo().effective 据此报告；
     // Turn 中切档只改 current，effective 维持快照至 Turn 结束
     let activeTurnEffort: ReasoningEffort | undefined;
 
     const assertUsable = () => {
+      if (closing) throw new RuntimeCommandError("session_busy", "会话正在关闭");
       if (session.health !== "ok") {
         throw new RuntimeCommandError("session_failed", "会话已处于 failed 状态");
       }
@@ -903,28 +907,32 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         const ac = new AbortController();
         controller = ac;
+        let settleTurn!: () => void;
+        turnSettled = new Promise<void>((resolve) => {
+          settleTurn = resolve;
+        });
         // 空闲边界：controller 先置位（busy 语义立即生效），再重建
         // updateProviders 标记的会话级注册表（provider-setup.md 第 6 节）
-        await rebuildProviders();
-        const deps: TurnDeps = {
-          session,
-          model,
-          tools,
-          executor,
-          execEnv,
-          instructions,
-          environment,
-          config: turnConfig,
-          signal: ac.signal,
-        };
-        // 与 runTurn 入口快照同源：同一瞬时、同一输入（持久化意图 ×
-        // 本模型可用集合）——report 给 reasoningEffortInfo().effective
-        activeTurnEffort =
-          clampReasoningEffort(
-            session.state().config.reasoningEffort,
-            model.model.capabilities.reasoningEffort,
-          ) ?? "off";
         try {
+          await rebuildProviders();
+          const deps: TurnDeps = {
+            session,
+            model,
+            tools,
+            executor,
+            execEnv,
+            instructions,
+            environment,
+            config: turnConfig,
+            signal: ac.signal,
+          };
+          // 与 runTurn 入口快照同源：同一瞬时、同一输入（持久化意图 ×
+          // 本模型可用集合）——report 给 reasoningEffortInfo().effective
+          activeTurnEffort =
+            clampReasoningEffort(
+              session.state().config.reasoningEffort,
+              model.model.capabilities.reasoningEffort,
+            ) ?? "off";
           const reason = await runTurn(deps, content);
           if (reason === "failed") {
             throw new RuntimeCommandError("session_failed", "会话持久化失败");
@@ -933,6 +941,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         } finally {
           if (controller === ac) controller = undefined;
           activeTurnEffort = undefined;
+          turnSettled = undefined;
+          settleTurn();
         }
       },
       async setModel(input) {
@@ -1038,6 +1048,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         const ac = new AbortController();
         compactController = ac;
+        let settleCompact!: () => void;
+        compactSettled = new Promise<void>((resolve) => {
+          settleCompact = resolve;
+        });
         session.emitEphemeral("runtime.status", { status: "compacting" });
         try {
           await rebuildProviders();
@@ -1084,6 +1098,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         } finally {
           compactController = undefined;
           session.emitEphemeral("runtime.status", { status: "idle" });
+          compactSettled = undefined;
+          settleCompact();
         }
       },
       warnings,
@@ -1103,14 +1119,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return mcpSession?.status() ?? [];
       },
       async close() {
+        closing = true;
+        controller?.abort();
+        compactController?.abort();
+        gate.cancelAll?.();
+        await Promise.all([turnSettled, compactSettled]);
         markProvidersDirty.delete(markDirty);
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
         if (hookRunner !== undefined) {
           await hookRunner.run("SessionEnd", { reason: "close" }).catch(() => undefined);
         }
         // 先结算等待中的权限请求为 cancelled，避免其挂住 Turn
-        gate.cancelAll?.();
-        compactController?.abort();
         if (mcpSession !== undefined) {
           // MCP 服务器进程树清理（mcp.md 第 5 节）；失败只警告不阻塞关闭
           try {
