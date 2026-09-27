@@ -264,7 +264,11 @@ export async function runTurn(
     // ── Step 循环 ──
     for (;;) {
       if (aborted(signal)) return await finish("aborted");
-      if (steps >= config.maxSteps) return await finish("max_steps");
+      // 3.8：maxSteps 未配置时不限步数——不会因步数上限结束；正常由模型
+      // stop 或用户中断收尾，其他失败/拒绝出口遵循原有规则
+      if (config.maxSteps !== undefined && steps >= config.maxSteps) {
+        return await finish("max_steps");
+      }
       steps += 1;
 
       // 1. 构建上下文（纯计算）

@@ -8,8 +8,11 @@ import type { Session, SessionState } from "../session/index.js";
 import type { ExecutionEnvironment, ToolExecutor, ToolRegistry } from "../tools/index.js";
 
 export interface TurnConfig {
-  /** 单 Turn 步数上限（agent-loop.md 3.8，默认 100） */
-  maxSteps: number;
+  /**
+   * 单 Turn 步数上限（agent-loop.md 3.8）：仅显式设置时生效；
+   * undefined 即不限制，主对话默认如此（子会话有独立上限，subagent.md）
+   */
+  maxSteps?: number | undefined;
   /** Provider 重试次数上限（3.5，默认 4） */
   retryLimit: number;
   /** 重试退避基数（ms），指数退避并优先遵守 retryAfterMs */
@@ -21,7 +24,6 @@ export interface TurnConfig {
 }
 
 export const DEFAULT_TURN_CONFIG: TurnConfig = {
-  maxSteps: 100,
   retryLimit: 4,
   retryBaseDelayMs: 250,
   firstEventTimeoutMs: 30_000,

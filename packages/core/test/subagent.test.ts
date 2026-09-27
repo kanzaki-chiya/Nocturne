@@ -38,6 +38,8 @@ interface RuntimeExtra {
   interactive?: boolean;
   autoApproveAsk?: boolean;
   provider?: FakeProvider;
+  /** 主会话 Turn 上限覆盖（验证不影响子会话独立上限） */
+  turn?: { maxSteps?: number };
   subagent?: {
     enabled?: boolean;
     maxDepth?: number;
@@ -64,6 +66,7 @@ async function makeRuntime(
     providers: [provider],
     interactive: extra.interactive,
     permissions: extra.autoApproveAsk === true ? { autoApproveAsk: true } : undefined,
+    ...(extra.turn !== undefined ? { turn: extra.turn } : {}),
     ...(extra.subagent !== undefined ? { subagent: extra.subagent } : {}),
     ...(extra.mcp !== undefined ? { mcp: extra.mcp } : {}),
     ...(extra.mcpServers !== undefined ? { mcpServers: extra.mcpServers } : {}),
@@ -509,6 +512,77 @@ describe("subagent：中断、超时与失败", () => {
     );
     await session.close();
   });
+
+  it(
+    "父 Turn 上限不影响子会话独立默认 50 步：子 50 步后 max_steps → subagent_turn_failed",
+    { timeout: 60_000 },
+    async () => {
+      const provider = new FakeProvider({
+        handler: (req) => {
+          if (isChildRequest(req)) {
+            // 子模型永远只调用 glob 不提交：耗尽默认 50 步上限
+            return [
+              {
+                type: "tool_call",
+                toolCallId: `cr-${req.messages.length}`,
+                name: "glob",
+                input: { pattern: "*.ts" },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          return req.messages.some((m) => m.role === "tool")
+            ? [
+                { type: "text_delta", text: "结束" },
+                { type: "finish", reason: "stop" },
+              ]
+            : [
+                {
+                  type: "tool_call",
+                  toolCallId: "task-1",
+                  name: "task",
+                  input: { task: "无限读", preset: "explore" },
+                },
+                { type: "finish", reason: "tool_calls" },
+              ];
+        },
+      });
+      // 父 Turn maxSteps=3：父会话两步内结束证明上限未触发；若子会话
+      // 继承父上限只会发出 3 个请求
+      const { runtime } = await makeRuntime(undefined, {
+        provider,
+        turn: { maxSteps: 3 },
+      });
+      const session = await makeSession(runtime);
+      const events = collect(session);
+      const reason = await session.submit({ text: "go" });
+      expect(reason).toBe("done");
+
+      expect(provider.requests.filter(isChildRequest)).toHaveLength(50);
+      const completed = taskCompleted(events);
+      expect(completed?.type === "tool.completed" && completed.payload.error?.code).toBe(
+        "subagent_turn_failed",
+      );
+      expect(completed?.type === "tool.completed" && completed.payload.error?.message).toContain(
+        "max_steps",
+      );
+      // 子会话日志佐证：turn.completed 以 max_steps、steps=50 结算
+      const output =
+        completed?.type === "tool.completed"
+          ? (completed.payload.output as { childLogPath?: string } | undefined)
+          : undefined;
+      expect(output?.childLogPath !== undefined && existsSync(output.childLogPath)).toBe(true);
+      if (output?.childLogPath === undefined) throw new Error("task 未返回子会话日志路径");
+      const childCompleted = readFileSync(output.childLogPath, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as { type: string; payload: { reason?: string; steps?: number } })
+        .find((e) => e.type === "turn.completed");
+      expect(childCompleted?.payload.reason).toBe("max_steps");
+      expect(childCompleted?.payload.steps).toBe(50);
+      await session.close();
+    },
+  );
 
   it("子会话超步数上限 → subagent_turn_failed", async () => {
     const provider = new FakeProvider({

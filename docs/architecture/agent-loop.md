@@ -24,7 +24,8 @@ runTurn(session, input, signal):
 
   loop:
     if signal.aborted:           return finish("aborted")
-    if step >= config.maxSteps:  return finish("max_steps")
+    if config.maxSteps 已设置 and step >= config.maxSteps:
+                                 return finish("max_steps")
     step += 1
 
     # 1. 构建上下文（纯计算）；需要压缩时执行压缩计划后重建
@@ -138,7 +139,7 @@ Context Builder 是纯计算，不调用 Provider。需要压缩时它返回压�
 
 ### 3.8 步数上限
 
-`maxSteps`（默认 100，可配置）是防止失控循环的安全阀。达到上限时 Turn 以 `max_steps` 结束，用户可以发送"继续"开启新 Turn。重复调用检测作为后续改进。
+主对话默认不限制单 Turn 步数：`maxSteps` 未配置（undefined）时 Turn 不会因步数上限结束；正常由模型 `stop` 或用户中断收尾，其余结束原因（Provider 错误、截断、拒绝、持久化失败等）遵循原有规则。显式配置 `maxSteps`（正整数）后达到上限时 Turn 以 `max_steps` 结束，用户可以发送"继续"开启新 Turn。子会话不受此默认影响：Subagent 始终有自己的独立上限（`maxStepsPerTurn`，默认 50，见 [subagent.md](subagent.md)）。重复调用检测作为后续改进。
 
 ### 3.9 Turn 的可选注入点（Phase 6）
 

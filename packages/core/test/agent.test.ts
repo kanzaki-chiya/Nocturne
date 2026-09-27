@@ -481,6 +481,8 @@ describe("runTurn", () => {
     const reason = await runTurn(h.deps, prompt());
     expect(reason).toBe("max_steps");
     expect(h.provider.requests).toHaveLength(3);
+    const end = h.events.find((e) => e.type === "turn.completed");
+    expect(end?.type === "turn.completed" && end.payload.steps).toBe(3);
     // 每个工具调用都有恰好一个 tool.completed
     const calls = h.events
       .filter((e) => e.type === "message.assistant")
@@ -492,6 +494,64 @@ describe("runTurn", () => {
         completed.filter((e) => e.type === "tool.completed" && e.payload.callId === c),
       ).toHaveLength(1);
     }
+  });
+
+  it(
+    "默认不设 maxSteps：151 次工具调用后模型自行 stop → done，无 max_steps",
+    { timeout: 60_000 },
+    async () => {
+      // 前 151 个请求一律要求 glob，第 152 个请求输出文本并 stop：
+      // 超出旧默认 100 之上仍能继续，证明默认不限制步数
+      const h = await makeHarness({
+        handler: (_req, callIndex) =>
+          callIndex < 151
+            ? [
+                {
+                  type: "tool_call",
+                  toolCallId: `x${callIndex}`,
+                  name: "glob",
+                  input: { pattern: "*.ts" },
+                },
+                { type: "finish", reason: "tool_calls" },
+              ]
+            : [
+                { type: "text_delta", text: "done" },
+                { type: "finish", reason: "stop" },
+              ],
+      });
+      const reason = await runTurn(h.deps, prompt());
+      expect(reason).toBe("done");
+      expect(h.provider.requests).toHaveLength(152);
+      const end = h.events.find((e) => e.type === "turn.completed");
+      expect(end?.type === "turn.completed" && end.payload.reason).toBe("done");
+      expect(end?.type === "turn.completed" && end.payload.steps).toBe(152);
+    },
+  );
+
+  it("不设 maxSteps 时在工具循环中中断：aborted，不出现 max_steps", async () => {
+    const ac = new AbortController();
+    const h = await makeHarness({
+      signal: ac.signal,
+      // 模型永远要求工具：不中断则 Turn 不会自行结束
+      handler: () => [
+        {
+          type: "tool_call",
+          toolCallId: "x",
+          name: "glob",
+          input: { pattern: "*.ts" },
+        },
+        { type: "finish", reason: "tool_calls" },
+      ],
+    });
+    let completed = 0;
+    h.session.subscribe((e) => {
+      if (e.type === "tool.completed" && ++completed === 5) ac.abort();
+    });
+    const reason = await runTurn(h.deps, prompt());
+    expect(reason).toBe("aborted");
+    const end = h.events.find((e) => e.type === "turn.completed");
+    expect(end?.type === "turn.completed" && end.payload.reason).toBe("aborted");
+    expect(reason).not.toBe("max_steps");
   });
 
   it("权限拒绝：denied 结果回模型，Turn 正常继续", async () => {

@@ -90,7 +90,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `truncated` | 模型输出达到长度上限（`length`） |
 | `refused` | 内容被 Provider 过滤（`content_filter`） |
 | `aborted` | 用户中断，或在权限确认中选择"拒绝并停止" |
-| `max_steps` | 达到单 Turn 步数上限 |
+| `max_steps` | 达到单 Turn 步数上限：只在显式配置主会话 `turn.maxSteps` 或子代理独立上限（默认 50）时出现；主对话默认不限步数 |
 | `error` | 不可恢复的错误：Provider 错误重试耗尽、意外的结束原因、压缩失败、Runtime 内部错误；`TurnStart` Hook 拦截时为 `error.code = "hook_blocked"`（hooks.md 第 1 节）。恢复修复补写的 Turn 也使用 `error`，`error.code = "process_exited"`，`recovered: true` |
 
 `permission.resolved` 在以下情况发出：经过用户确认的请求（有 `requestId`）；被规则直接拒绝的调用；由会话或项目授权放行原本需要确认的调用（`source: "grant"`）；Hook 直接结算的调用（`source: "hook"`——`PreToolUse` 的 deny/allow 与 `PermissionRequest` 的 allow/deny，`rule` 字段记 Hook 条目的人读描述，见 [hooks.md](../architecture/hooks.md)）。规则直接允许的调用不单独发事件，其决定记录在 `tool.started.permission` 中。
