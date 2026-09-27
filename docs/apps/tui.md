@@ -90,7 +90,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 - **鼠标**：进入全屏后开启 `?1000h ?1002h ?1006h`；SGR 鼠标序列（`ESC [ < b ; x ; y M/m`）在 stdin 进入 Ink 之前摘除并解析成事件（`mouse.ts`），序列跨数据块截断时缓存拼接，绝不漏给 Ink 当成按键。退出、未捕获异常、任何恢复主屏幕的路径先按 `?1006l ?1002l ?1000l` 反向关闭。
 - **选区与复制**：`selection.ts` 以「绝对内容行 + 列」记录选区，`clipboard.ts` 负责复制——系统剪贴板按平台 spawn 剪贴板命令（文本经 stdin），OSC 52（`ESC ] 52 ; c ; base64 BEL`）经 `cursor.ts` 的 stdout 代理在 Ink 帧之外写出。剪贴板不经 Core，不新增运行时依赖。
 - **退出**：提交已接受但尚未写入 `turn.started` 时也视为忙：先中断并等待 Turn 收束，再关闭鼠标上报 → 恢复主屏幕 → 把本次会话对话按当前宽度渲染成纯文本行打印到主屏（不含输入框和状态栏；思考按退出时显示形态导出：折叠时只留折叠行，展开时保留灰字全文的纯文本；欢迎区只保留文字，不导出弯月像素）→ 打印「会话 \<id\> 已保存，nctrn -c 继续」。异常路径至少保证鼠标关闭与主屏恢复。
-- **diff 展示**：`tool.completed.output` 的结构化 diff（edit/write 工具已声明）直接渲染，红绿着色（NO_COLOR 时仅用 `+`/`-` 前缀）；大 diff 折叠为头尾若干行 + 省略计数，`spillPath` 存在时提示查看完整文件。
+- **diff 展示**：`tool.completed.output` 的结构化 diff（edit/write 工具已声明）直接渲染，红绿着色（NO_COLOR 时仅用 `+`/`-` 前缀）；大 diff 折叠为头尾若干行 + 省略计数，`spillPath` 存在时提示查看完整文件。新建文件（`output.created`）没有 diff，全屏模式按输入的 `content` 铺成 `+` 行，同样折叠。全屏模式在摘要行（已修改/已创建 …）下方接 diff，不显示 `@@` 头；出错的调用只显示错误。
 - **工具行**：`● name <输入摘要>` + 状态徽标（awaiting → `?`，running → 转轮，ok/error → `✓`/`✗`，denied/cancelled/interrupted → 对应词）。`liveOutput` 只显示尾部 N 行。`task`（子代理，Phase 6）的进行中行同样靠 `liveOutput` 展示一行式进度摘要（`tool.progress` `stream:"info"`），无新增视图通道（[subagent.md](../architecture/subagent.md) 第 12 节）。
 - **MCP 状态（Phase 5）**：`mcp.server` 是临时事件、不进 `SessionView`（reducer 忽略未知类型）；`failed`/`crashed` 经 `runtime.warning` 进入提示区，`/mcp` 面板按 `session.mcpServers()` 展示每台服务器的状态、工具数与失败原因。Hook 的可见效果走既有事件（`permission.resolved source:"hook"`、`tool.completed`、`runtime.warning(code:"hook_failed")`），不新增 UI 通道。
 - **宽字符**：所有截断/对齐经显示宽度计算（Ink 内建 string-width），中文文本不掰断。

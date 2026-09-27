@@ -67,6 +67,57 @@ function rows(key: string, text: string, width: number, extra?: Partial<LaidLine
   }));
 }
 
+const DIFF_HEAD = 6;
+const DIFF_TAIL = 4;
+
+/**
+ * 工具结果里可展示的 diff（tui.md §4）：edit/覆盖 write 声明的 output.diff；
+ * 新建文件（output.created）没有 diff，按输入的 content 铺成全 + 行。
+ */
+function toolDiff(entry: Extract<ViewEntry, { kind: "tool" }>): string | undefined {
+  if (entry.status !== "ok") return undefined;
+  const out = entry.result?.output;
+  if (out === null || typeof out !== "object") return undefined;
+  const { diff, created } = out as { diff?: unknown; created?: unknown };
+  if (typeof diff === "string" && diff !== "") return diff;
+  const content = (entry.input as { content?: unknown } | undefined)?.content;
+  if (created === true && typeof content === "string" && content !== "") {
+    return content
+      .replace(/\r\n?/g, "\n")
+      .replace(/\n$/, "")
+      .split("\n")
+      .map((l) => `+${l}`)
+      .join("\n");
+  }
+  return undefined;
+}
+
+/** diff 行：+ 绿 / - 红 / 上下文暗色；过长折叠为头尾 + 省略计数（NO_COLOR 靠前缀区分） */
+function diffLines(key: string, diff: string, width: number, ascii: boolean): LaidLine[] {
+  const all = diff.split("\n").filter((l) => !l.startsWith("@@"));
+  const folded = all.length > DIFF_HEAD + DIFF_TAIL + 1;
+  const head = folded ? all.slice(0, DIFF_HEAD) : all;
+  const tail = folded ? all.slice(all.length - DIFF_TAIL) : [];
+  const line = (text: string, i: number): LaidLine => {
+    const color = text.startsWith("+") ? "green" : text.startsWith("-") ? "red" : undefined;
+    return {
+      key: `${key}:diff:${i}`,
+      text: paint(`  ${text}`, width),
+      ...(color !== undefined ? { color } : { dim: true }),
+    };
+  };
+  const out = head.map(line);
+  if (folded) {
+    out.push({
+      key: `${key}:diff:more`,
+      text: `  ${ascii ? "..." : "…"} 省略 ${all.length - head.length - tail.length} 行`,
+      dim: true,
+    });
+  }
+  out.push(...tail.map((t, i) => line(t, all.length - tail.length + i)));
+  return out;
+}
+
 export function layoutEntry(
   entry: TranscriptItem,
   width: number,
@@ -126,6 +177,16 @@ export function layoutEntry(
             dim: true,
           });
         }
+      }
+      const diff = toolDiff(entry);
+      if (diff !== undefined) {
+        // 摘要行（已修改/已创建 …）保留，其后接 diff
+        const first = entry.result?.modelContent.split("\n")[0] ?? "";
+        if (first !== "") {
+          lines.push({ key: `${entry.key}:sum`, text: paint(`  ${first}`, width), dim: true });
+        }
+        lines.push(...diffLines(entry.key, diff, width, ascii));
+        return lines;
       }
       const content = entry.result?.modelContent;
       if (content !== undefined && content !== "") {
