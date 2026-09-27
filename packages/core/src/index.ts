@@ -1129,7 +1129,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (hookRunner !== undefined) {
           await hookRunner.run("SessionEnd", { reason: "close" }).catch(() => undefined);
         }
-        // 先结算等待中的权限请求为 cancelled，避免其挂住 Turn
         if (mcpSession !== undefined) {
           // MCP 服务器进程树清理（mcp.md 第 5 节）；失败只警告不阻塞关闭
           try {
