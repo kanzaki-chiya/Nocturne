@@ -56,9 +56,8 @@ export interface ProcessExit {
 export interface SpawnedProcess {
   readonly pid: number;
   /**
-   * 子进程输出文本流。Windows 控制台程序按 OEM 代码页输出（如 zh-CN 的
-   * GBK），POSIX 按 UTF-8：统一按"控制台代码页 → WHATWG 编码"流式解码，
-   * 保证终端显示与模型读到的内容都不乱码（tools.md 第 6 节 shell）。
+   * 子进程输出文本流。非 UTF-8 控制台逐行优先识别 UTF-8，失败后按
+   * 控制台代码页解码；显式覆盖编码时完全遵循覆盖值（tools.md 第 6 节）。
    */
   readonly stdout: AsyncIterable<string>;
   readonly stderr: AsyncIterable<string>;
@@ -284,27 +283,57 @@ function readConsoleCodepage(): Promise<number | undefined> {
  * 决定子进程输出的解码方式：
  * NOCTURNE_CONSOLE_ENCODING（任意 WHATWG label）> Windows chcp 代码页 > UTF-8。
  */
-async function detectConsoleEncoding(): Promise<string> {
+interface OutputEncoding {
+  label: string;
+  forced: boolean;
+}
+
+async function detectConsoleEncoding(): Promise<OutputEncoding> {
   const override = process.env.NOCTURNE_CONSOLE_ENCODING;
   if (override !== undefined && override.length > 0) {
     try {
       new TextDecoder(override);
-      return override;
+      return { label: override, forced: true };
     } catch {
-      return "utf-8";
+      return { label: "utf-8", forced: true };
     }
   }
   const cp = await readConsoleCodepage();
-  return cp === undefined ? "utf-8" : codepageToEncodingLabel(cp);
+  return { label: cp === undefined ? "utf-8" : codepageToEncodingLabel(cp), forced: false };
 }
 
 /**
- * 每条流独立的 TextDecoder：流式解码会在解码器内缓存跨界字符，两条流不能共享实例。
- * 注意：编码探测（chcp.com）是异步的，若在迭代开始前才挂载 stdout 监听，
- * 短命的子进程可能在解码器就绪前退出并丢数据——因此创建时立即以 flowing
- * 模式捕获原始字节，消费侧再逐块解码（保留流式 progress 语义）。
+ * 仅保留被截断的 UTF-8 末尾，最长 3 字节；长行冲刷时避免拆坏多字节字符。
  */
-function decodeOutput(stream: Readable, encoding: Promise<string>): AsyncIterable<string> {
+function incompleteUtf8Tail(bytes: Buffer): number {
+  for (let start = Math.max(0, bytes.length - 3); start < bytes.length; start++) {
+    const lead = bytes[start];
+    if (lead === undefined) continue;
+    const size =
+      lead >= 0xc2 && lead <= 0xdf
+        ? 2
+        : lead >= 0xe0 && lead <= 0xef
+          ? 3
+          : lead >= 0xf0 && lead <= 0xf4
+            ? 4
+            : 0;
+    if (size === 0 || bytes.length - start >= size) continue;
+    if (bytes.subarray(start + 1).every((byte) => (byte & 0xc0) === 0x80))
+      return bytes.length - start;
+  }
+  return 0;
+}
+
+/**
+ * 创建时立即以 flowing 模式捕获原始字节，避免异步 chcp 探测期间短命进程丢数据。
+ * stdout/stderr 各有独立队列和解码状态；MCP stdout 另走 rawOutput。
+ * 完整行用 fatal UTF-8 探测；无换行尾巴 50ms 空闲或超过 8KB 时冲刷，
+ * 保留至多 3 字节的 UTF-8 截断后缀，继续逐块上报 tool.progress。
+ */
+export function decodeOutput(
+  stream: Readable,
+  encoding: Promise<OutputEncoding>,
+): AsyncIterable<string> {
   const pending: Buffer[] = [];
   const state: { ended: boolean; failure: Error | undefined } = {
     ended: false,
@@ -329,7 +358,61 @@ function decodeOutput(stream: Readable, encoding: Promise<string>): AsyncIterabl
     notify();
   });
   return (async function* (): AsyncGenerator<string> {
-    const decoder = new TextDecoder(await encoding);
+    const { label, forced } = await encoding;
+    if (!forced && new TextDecoder(label).encoding !== "utf-8") {
+      const utf8 = new TextDecoder("utf-8", { fatal: true });
+      const fallback = new TextDecoder(label);
+      const decode = (bytes: Buffer): string => {
+        try {
+          return utf8.decode(bytes);
+        } catch {
+          return fallback.decode(bytes);
+        }
+      };
+      let tail: Buffer = Buffer.alloc(0);
+      for (;;) {
+        let chunk: Buffer | undefined;
+        while ((chunk = pending.shift()) !== undefined) {
+          tail = tail.length === 0 ? chunk : Buffer.concat([tail, chunk]);
+          let end: number;
+          while ((end = tail.indexOf(0x0a)) !== -1) {
+            const text = decode(tail.subarray(0, end + 1));
+            tail = tail.subarray(end + 1);
+            if (text !== "") yield text;
+          }
+          if (tail.length > 8192) {
+            const keep = incompleteUtf8Tail(tail);
+            const text = decode(tail.subarray(0, tail.length - keep));
+            tail = tail.subarray(tail.length - keep);
+            if (text !== "") yield text;
+          }
+        }
+        if (state.failure !== undefined) throw state.failure;
+        if (state.ended) break;
+        let timer: NodeJS.Timeout | undefined;
+        const idle = await new Promise<boolean>((resolve) => {
+          wake = () => {
+            resolve(false);
+          };
+          if (tail.length > incompleteUtf8Tail(tail)) {
+            timer = setTimeout(() => {
+              wake = undefined;
+              resolve(true);
+            }, 50);
+          }
+        });
+        if (timer !== undefined) clearTimeout(timer);
+        if (idle && pending.length === 0) {
+          const keep = incompleteUtf8Tail(tail);
+          const text = decode(tail.subarray(0, tail.length - keep));
+          tail = tail.subarray(tail.length - keep);
+          if (text !== "") yield text;
+        }
+      }
+      if (tail.length > 0) yield decode(tail);
+      return;
+    }
+    const decoder = new TextDecoder(label);
     for (;;) {
       let chunk: Buffer | undefined;
       while ((chunk = pending.shift()) !== undefined) {
@@ -463,8 +546,9 @@ async function killTree(child: ChildProcess): Promise<void> {
 
 export function createProcessRunner(): ProcessRunner {
   // 控制台代码页探测只做一次，全部子进程共享同一个编码结论
-  let encodingPromise: Promise<string> | undefined;
-  const consoleEncoding = (): Promise<string> => (encodingPromise ??= detectConsoleEncoding());
+  let encodingPromise: Promise<OutputEncoding> | undefined;
+  const consoleEncoding = (): Promise<OutputEncoding> =>
+    (encodingPromise ??= detectConsoleEncoding());
 
   const spawnImpl = (
     command: string,
@@ -480,8 +564,7 @@ export function createProcessRunner(): ProcessRunner {
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    // 不设 setEncoding：原始字节流经控制台代码页对应的 TextDecoder 流式解码，
-    // 避免 GBK 等本地编码被按 UTF-8 解成乱码
+    // 不设 setEncoding：保留原始字节供逐行 UTF-8/控制台编码判定。
     const encoding = consoleEncoding();
     const stdout = decodeOutput(child.stdout, encoding);
     const stderr = decodeOutput(child.stderr, encoding);
