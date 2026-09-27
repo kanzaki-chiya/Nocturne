@@ -6,6 +6,10 @@ import {
   createDefaultPolicy,
   createRulePolicy,
   createWorkspaceReadPolicy,
+  isCompositeShell,
+  lexShellCommand,
+  shellSegments,
+  shellTailExecutables,
 } from "./index.js";
 
 const WS = "C:\\ws\\proj";
@@ -394,6 +398,52 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
     // 路径类主体没解析出 resolved 时仍如实说明
     const read = policyFor("default").evaluate([subject({ kind: "read", target: "C:\\gone\\x" })]);
     expect(read.decision.reason).toContain("无法解析路径");
+  });
+});
+
+describe("shell 轻量词法切分（permissions.md 5.3 / tools.md 第 6 节）", () => {
+  it("shellSegments：控制符切分，空段忽略", () => {
+    expect(shellSegments("a && b")).toEqual(["a", "b"]);
+    expect(shellSegments("a || b ; c")).toEqual(["a", "b", "c"]);
+    // 2>&1 的 &1 仍是独立短段（沿用旧实现语义；重定向符不拆开前面的词）
+    expect(shellSegments("node t.js 2>&1 | more")).toEqual(["node t.js 2>", "1", "more"]);
+    // 连续分隔符不产生空段
+    expect(shellSegments("a ; ; b")).toEqual(["a", "b"]);
+    expect(shellSegments("")).toEqual([]);
+  });
+
+  it("shellSegments：引号内的控制符不切分", () => {
+    expect(shellSegments('echo "a;b" && c')).toEqual(['echo "a;b"', "c"]);
+    expect(shellSegments("echo 'a|b'")).toEqual(["echo 'a|b'"]);
+    // bash 风格转义：\\| 不切断
+    expect(shellSegments("echo a\\|b | c")).toEqual(["echo a\\|b", "c"]);
+    // Windows 路径反斜杠原样保留
+    expect(shellSegments("type C:\\x\\y.txt | sort")).toEqual(["type C:\\x\\y.txt", "sort"]);
+  });
+
+  it("lexShellCommand：保留分隔符并区分 | 与 ||", () => {
+    const texts = lexShellCommand("a | b || c").map((t) => t.text);
+    expect(texts).toEqual(["a ", "|", " b ", "||", " c"]);
+    const sepKinds = lexShellCommand('echo "a|b"').map((t) => t.separator);
+    expect(sepKinds).toEqual([false]);
+  });
+
+  it("shellTailExecutables：只报告各独立命令的管道末段", () => {
+    expect(shellTailExecutables("a | more && b | less")).toEqual(["more", "less"]);
+    expect(shellTailExecutables("a | more | sort")).toEqual(["sort"]);
+    expect(shellTailExecutables('echo "a | more"')).toEqual(["echo"]);
+    expect(shellTailExecutables("a | more")).toEqual(["more"]);
+    // 带路径与引号的可执行名取 basename
+    expect(shellTailExecutables('dir | "C:\\Windows\\System32\\more.com" /p')).toEqual([
+      "more.com",
+    ]);
+    // 空段不产生条目
+    expect(shellTailExecutables("a && && b | less")).toEqual(["a", "less"]);
+  });
+
+  it("isCompositeShell 保持保守：引号内控制符仍判组合", () => {
+    expect(isCompositeShell('echo "a;b"')).toBe(true);
+    expect(isCompositeShell("echo hi")).toBe(false);
   });
 });
 

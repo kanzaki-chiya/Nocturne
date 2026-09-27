@@ -1,7 +1,8 @@
 /**
  * 执行管线（tools.md 第 3 节）。九步：
- *   1 查找 → 2 校验 → 3 权限主体 → 4 解析资源 → 5 权限
- *   → 6 tool.started → 7 执行 → 8 归一化 → 9 tool.completed
+ *   1 查找 → 2 校验 → 2.5 PreToolUse Hook → 2.6 输入预检 → 3 权限主体
+ *   → 4 解析资源 → 5 权限 → 6 tool.started → 7 执行 → 7.5 PostToolUse
+ *   → 8 归一化 → 9 tool.completed
  * 无论在哪一步结束，都恰好产生一个 tool.completed。
  */
 import { Ajv, type ValidateFunction } from "ajv";
@@ -194,6 +195,24 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         }
         if (hookOut?.decision === "ask") {
           hookAskReason = hookOut.reason ?? "PreToolUse Hook 要求确认";
+        }
+      }
+
+      // 2.6 输入预检（tool-api.md 第 1 节 validateInput）：可选纯函数，作用在
+      // Hook 修改后的输入上；返回错误说明即以 invalid_input 拒绝——不请求权限、
+      // 不发 tool.started，由 finish 统一发出恰好一个 tool.completed。
+      if (tool.validateInput !== undefined) {
+        let message: string | undefined;
+        try {
+          message = tool.validateInput(input);
+        } catch (e) {
+          return finish(
+            "error",
+            errorResult("tool_failed", `工具 "${call.name}" validateInput 抛出异常：${String(e)}`),
+          );
+        }
+        if (message !== undefined) {
+          return finish("error", errorResult("invalid_input", message));
         }
       }
 

@@ -94,6 +94,12 @@ export interface ToolDefinition<Input = unknown, Output = unknown> {
   traits: ToolTraits;
   /** 纯函数：本次调用会碰到什么；不得做 I/O */
   permissionSubjects(input: Input, scope: ToolScope): SubjectRequest[];
+  /**
+   * 可选的额外输入预检（纯函数，无 I/O）：在 schema 校验与 PreToolUse Hook
+   * （含 updatedInput 重新校验）之后、权限主体求值之前调用；返回非空的
+   * 错误说明即以 invalid_input 拒绝该调用——不请求权限，不执行工具。
+   */
+  validateInput?(input: Input): string | undefined;
   /** 只在权限允许后被调用 */
   execute(input: Input, ctx: ToolContext): Promise<ToolResult<Output>>;
 }

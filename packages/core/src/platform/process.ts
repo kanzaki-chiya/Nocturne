@@ -198,7 +198,7 @@ export function shellCommandDescription(platform: NodeJS.Platform = process.plat
   const name = executable.split(/[\\/]/).at(-1)?.toLowerCase();
   const syntax =
     name === "cmd" || name === "cmd.exe"
-      ? ": use cmd syntax, not bash or PowerShell. findstr patterns use the console code page and cannot match non-ASCII text in UTF-8 output; use ASCII patterns only"
+      ? ": use cmd syntax, not bash or PowerShell. `&` runs commands in sequence, not in the background; run long-running commands directly and raise timeoutMs when needed. findstr patterns use the console code page and cannot match non-ASCII text in UTF-8 output; use ASCII patterns only"
       : name === "sh"
         ? ": use POSIX sh syntax"
         : "";

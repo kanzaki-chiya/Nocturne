@@ -58,8 +58,10 @@ runTurn(session, input, signal):
     for call in toolCalls:
       if signal.aborted: break
       outcome = toolExecutor.execute(call, scope(session, signal))
-      # execute 内部：校验 → PreToolUse Hook → 解析资源 → 权限（ask 时先经 PermissionRequest Hook，
-      #   可能等待用户）→ tool.started → 执行 → PostToolUse Hook → 归一化 → tool.completed
+      # execute 内部：校验 → PreToolUse Hook → 输入预检（可选 validateInput，
+      #   tools.md 第 3 节 2.6 步）→ 权限主体 → 解析资源 → 权限（ask 时先经
+      #   PermissionRequest Hook，可能等待用户）→ tool.started → 执行
+      #   → PostToolUse Hook → 归一化 → tool.completed
       if outcome.stopTurn: return finish("aborted")         # 用户选择"拒绝并停止"；剩余调用由 finish 结算
       if deps.shouldFinish?(session.state): return finish("done")   # Phase 6 注入点（subagent.md 第 2 节）
     if signal.aborted: return finish("aborted")

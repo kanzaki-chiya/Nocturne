@@ -18,6 +18,13 @@ interface ToolDefinition<Input = unknown, Output = unknown> {
   traits: ToolTraits
   /** 纯函数：本次调用会碰到哪些对象（未解析），供执行器解析后交给权限层判定。不得做 I/O */
   permissionSubjects(input: Input, scope: ToolScope): SubjectRequest[]
+  /**
+   * 可选的输入语义预检（纯函数，无 I/O）：在 schema 校验与 PreToolUse Hook
+   *（含 updatedInput 重新校验）之后、permissionSubjects 之前调用；返回非空
+   * 错误说明即以 invalid_input 拒绝——不请求权限，execute 不会被调用。
+   * 未声明时跳过。用途：schema 表达不了的语义约束（如 shell 拒绝末尾分页）。
+   */
+  validateInput?(input: Input): string | undefined
   /** 执行。只在权限允许后被调用 */
   execute(input: Input, ctx: ToolContext): Promise<ToolResult<Output>>
 }
@@ -98,7 +105,7 @@ type ToolResult<Output = unknown> =
 | code | 含义 |
 |---|---|
 | `unknown_tool` | 模型调用了不存在的工具 |
-| `invalid_input` | 输入不符合 schema（含 `PreToolUse` Hook 修改后的输入未通过重新校验） |
+| `invalid_input` | 输入不符合 schema（含 `PreToolUse` Hook 修改后的输入未通过重新校验），或未通过工具可选的 `validateInput` 语义预检 |
 | `permission_denied` | 规则或用户拒绝 |
 | `hook_denied` | `PreToolUse` Hook 拒绝（Phase 5，见 [hooks.md](../architecture/hooks.md)） |
 | `cancelled` | 被中断 |
@@ -134,6 +141,8 @@ type ToolExecution = {
 
 `ExecutionScope` 由 Agent Loop 提供，包含会话、Turn 标识、中断信号、权限闸门与资源解析器；工具看不到它。`call.callId` 由 Agent Loop 在收到 Provider 的工具调用时分配（[agent-loop.md](../architecture/agent-loop.md) 第 3.2 节）。
 
+执行器对可选 `validateInput` 的调用顺序是固定的（[tools.md](../architecture/tools.md) 第 3 节第 2.6 步）：在 `PreToolUse` Hook 处理完成、且 Hook 给出的 `updatedInput` 通过最终 schema 重新校验之后，`permissionSubjects` 计算与权限闸门求值之前调用。返回非空错误说明时，该调用以 `error`/`invalid_input` 结算并发出唯一的 `tool.completed`——不发出 `permission.requested`、不发出 `tool.started`，`execute` 不会被调用；返回 `undefined` 或未声明该字段时管线照常继续。
+
 ## 5. 示例（示意）
 
 ```ts
@@ -149,5 +158,5 @@ const read: ToolDefinition<{ path: string; offset?: number; limit?: number }> = 
 
 ## 6. 演进规则
 
-- 新增可选的 `traits` 字段或 `ToolContext` 能力：兼容变更，更新本文。
+- 新增可选的 `traits` 字段、`ToolDefinition` 可选方法（如 `validateInput`）或 `ToolContext` 能力：兼容变更，更新本文。
 - 修改 `ToolResult` 形状或执行管线的保证：不兼容变更，需要 ADR。

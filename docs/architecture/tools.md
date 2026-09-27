@@ -33,6 +33,9 @@ execute(call, ctx):
                         + error(code="hook_denied")；ask 记入第 5 步的合并（强制确认，
                         不经 Grant/--yes 提升）；updatedInput 替换输入并重新走第 2 步校验；
                         无 allow（此点在主体解析前运行）
+  2.6 输入预检  可选 tool.validateInput(input)：纯函数（无 I/O），作用在 Hook
+               修改后的最终输入上；返回错误说明 → error(code="invalid_input")，
+               不请求权限、不发 tool.started（tool-api.md 第 1 节）
   3. 权限主体  requests = tool.permissionSubjects(input, scope)   # 纯函数：本次调用会碰到什么
   4. 解析资源  subjects = platform.resolve(requests)               # 唯一做 I/O 的准备步骤：真实路径
                解析失败（如权限不足无法访问父目录）→ error(code="resource_unavailable")
@@ -101,6 +104,11 @@ execute(call, ctx):
 - **shell 选择**：Windows 用 `%COMSPEC%`（通常为 `cmd.exe`）加 `/d /s /c`；POSIX 用 `/bin/sh -c`。两者都可由 `NOCTURNE_SHELL` 环境变量覆盖为其他 shell 可执行文件。选择理由：`cmd /c` 把其余参数原样当作命令行，语义与 POSIX `sh -c` 最接近、启动开销最小；PowerShell 亦可胜任（用 `-NoProfile` 避免 profile 副作用），但其引号解析与流语义不同，需要单独的参数形态，故不作默认。
 - **shell 子进程环境**（v0.2）：继承进程环境，但剥离全部已解析服务商的 `apiKeyEnv` 变量名以及 `NOCTURNE_API_KEY`、`ANTHROPIC_API_KEY`，避免模型通过命令读到密钥（[provider-setup.md](provider-setup.md) 第 4 节）。
 - **输入**：`{ command, timeoutMs?, cwd? }`。`cwd` 省略时会话 cwd；指定时经符号链接 / junction 解析后必须位于工作区内，否则 `invalid_input`。**注意：`cwd` 限制约束的只是执行起点，不是沙箱**——被批准的 `command` 本身仍可访问批准范围之外的资源；命令文本才是被确认的主体。
+- **末尾分页拒绝**（v0.4，[ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 第 9 条）：模型有时给命令接上 `| more`/`| less` 分页——Windows 上 `more.com` 会改坏 UTF-8 输出（中文尤甚）且可能等待按键挂住。shell 工具声明了 `validateInput` 预检（tool-api.md 第 1 节）：`command` 经与权限层共享的轻量词法器（`lexShellCommand`，见 [permissions.md](permissions.md) 5.3）切分后，任一独立命令（`&&`、`||`、`&`、`;`、换行、`$(`、反引号、`(`/`)` 均为边界）的管道末段若以可执行名 `more`/`more.com`/`less` 开头（basename 比较、大小写不敏感、允许引号包裹的路径如 `"C:\Windows\System32\more.com"`、忽略段首赋值与重定向），调用即以 `status:"error"`、`code:"invalid_input"` 结算——发生在权限求值与进程派生之前：不请求权限、不发 `tool.started`、不启动进程、不改写命令文本，模型收到的补救说明原文为：
+
+  > 命令以分页工具结尾（more/less）。分页工具会改坏输出编码、可能等待按键卡住；输出会被自动收集，去掉末尾的 `| more` 后直接执行即可。需要筛选时先重定向到文件再用 grep 工具。
+
+  管道中间段的分页工具（`more | sort`）、`more.txt`/`findstr more`、引号内的字样不误伤。词法器是提示性分词而非完整 shell 解析器：引号一律按 POSIX 习惯识别——`'` 在 cmd 中本不是引号符，单引号写法按 POSIX 语义近似处理（如 `'a | more'` 不判为管道）；引号内的 `$(…)`/反引号不展开，`^` 转义、here-doc 等复合语法不处理。
 - **输出合并与截断**：stdout 与 stderr 在工具内按到达顺序合并为单一输出流（不等价于 shell 重定向，由 ProcessRunner 的两条流归并）；逐块经 `tool.progress` 上报（带 `stream` 标记），累积内容按 `maxModelChars` 截断。进程持续输出超过缓冲上限时丢弃中间部分但继续排空管道，防止子进程阻塞。
 - **结果**：`output` 携带 `exitCode`、`signal`、`timedOut`、`killed`、`durationMs`；`timedOut` 时 `status="error"`、`code="timeout"`。命令已退出但输出管道仍被占用时另带 `outputDetached=true`（见下条），`modelContent` 末尾追加一行提示（ok 时落在 `[exit code …]` 之前）：`命令已退出，但仍有后台进程占用输出管道，之后的输出未读取；如果启动了服务器等后台进程，它可能仍在运行。`
 - **退出与输出管道分离**：`spawnShell` 的 `wait()` 在直接子进程（cmd/sh 本体）`exit` 时结算，而不是等 stdio 全部关闭的 `close`——`close` 会被继承了输出管道的后台孙进程无限期拖住（`start`、`nohup`、`detached` 派生等）。子进程退出后输出流最多再等 500ms 自然收尾；仍被占用则经 `SpawnedProcess.detachOutput()` 销毁读取端，已捕获输出按原解码规则冲刷后保留，读取方正常结束而非报错。通用 `spawn`/`spawnPipe`（MCP stdio、Hooks）仍按 `close` 结算，行为不变。

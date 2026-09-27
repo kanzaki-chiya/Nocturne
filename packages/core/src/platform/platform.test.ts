@@ -31,7 +31,7 @@ describe("shell 环境提示与工具同源", () => {
     process.env.NOCTURNE_SHELL = "C:\\Windows\\System32\\cmd.exe";
     expect(shellArguments("dir", "win32")).toEqual(["/d", "/s", "/c", '"dir"']);
     expect(shellCommandDescription("win32")).toBe(
-      'Commands run with C:\\Windows\\System32\\cmd.exe /d /s /c "<command>": use cmd syntax, not bash or PowerShell. findstr patterns use the console code page and cannot match non-ASCII text in UTF-8 output; use ASCII patterns only',
+      'Commands run with C:\\Windows\\System32\\cmd.exe /d /s /c "<command>": use cmd syntax, not bash or PowerShell. `&` runs commands in sequence, not in the background; run long-running commands directly and raise timeoutMs when needed. findstr patterns use the console code page and cannot match non-ASCII text in UTF-8 output; use ASCII patterns only',
     );
   });
 
@@ -41,6 +41,8 @@ describe("shell 环境提示与工具同源", () => {
     expect(shellCommandDescription("linux")).toBe(
       'Commands run with /bin/sh -c "<command>": use POSIX sh syntax',
     );
+    // `&` 顺序执行说明只属于 cmd 分支（POSIX sh 里 & 本来就是后台语义）
+    expect(shellCommandDescription("linux")).not.toContain("not in the background");
   });
 
   it("覆盖为其他 shell 时只报告可执行文件与实际参数", () => {

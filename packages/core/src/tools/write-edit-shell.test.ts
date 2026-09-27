@@ -8,13 +8,16 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createDefaultPolicy } from "../permission/index.js";
 import { createPlatform, type Platform } from "../platform/index.js";
 import type { ToolCallRef } from "../protocol/index.js";
 import { diffLines } from "./builtin/diff.js";
 import {
   createBuiltinRegistry,
+  createPolicyGate,
   createReadStateStore,
   createToolExecutor,
+  shellTool,
   type ExecutionScope,
   type PermissionGate,
 } from "./index.js";
@@ -567,23 +570,25 @@ setInterval(()=>{},1000);`,
     expect(elapsed).toBeLessThan(3_000);
   });
 
-  it("分页器占用管道的命令（| more）：有界返回", async () => {
+  it("下游命令与孙进程占用输出管道：有界返回", async () => {
     const ws = tmpWorkspace();
-    // 真实孤儿场景接分页器：leaf detached 继承 parent→more 的管道，more 等不到
-    // stdin EOF 不退出，整条管道命令随之挂起，直到超时终止
+    // 真实孤儿场景接一个永不读到 EOF 的下游命令：leaf detached 继承
+    // parent→tail 管道的写端，tail 的 stdin 始终不关闭，整条管道随之挂起，
+    // 直到超时终止（旧用例接 | more，现在末尾分页在输入预检就被拒绝，
+    // 改用 node 下游保持同一占用形态）
     const { pidFile } = writeOrphanScripts(ws);
     const h = await makeHarness(ws);
     const started = Date.now();
     const r = await h.executor.execute(
       call("shell", {
-        command: `${node} orphan-parent.js | more`,
+        command: `${node} orphan-parent.js | ${node} -e "process.stdin.resume()"`,
         timeoutMs: 1_000,
       }),
       h.scope,
     );
     const elapsed = Date.now() - started;
     await trackOrphan(pidFile);
-    // 分页器未退出 → timeout 终止；若平台行为令其自然退出则 ok。
+    // 下游未退出 → timeout 终止；若平台行为令其自然退出则 ok。
     // 两者都要求有界返回；leaf 是否还持有 shell stdout 取决于 kill 落点，
     // outputDetached 两种取值都合法，不断言
     if (r.status === "error") {
@@ -621,6 +626,114 @@ interface ShellOut {
   durationMs: number;
   outputDetached?: boolean;
 }
+
+describe("shell 末尾分页预检（ADR-0021 第 9 条）", () => {
+  const node = JSON.stringify(process.execPath);
+  const PAGER_MESSAGE =
+    "命令以分页工具结尾（more/less）。分页工具会改坏输出编码、可能等待按键卡住；输出会被自动收集，去掉末尾的 `| more` 后直接执行即可。需要筛选时先重定向到文件再用 grep 工具。";
+
+  it("末尾接分页工具的命令在权限之前拒绝：invalid_input、不 spawn、不请求权限、恰好一个 tool.completed", async () => {
+    const ws = tmpWorkspace();
+    const spawnSpy = vi.spyOn(platform.process, "spawnShell");
+    // default 预设的真实策略：shell 一律 ask——若拒绝发生在权限之后，
+    // 这里会产生 permission.resolved（非交互 deny）；断言 gate 根本没被调用
+    const policy = createDefaultPolicy({
+      workspaceRoot: await platform.resolveReal(ws),
+      caseSensitive: platform.caseSensitivePaths,
+    });
+    const gate = createPolicyGate(policy);
+    const gateCheck = vi.spyOn(gate, "check");
+    try {
+      const h = await makeHarness(ws, { gate });
+      const blocked = [
+        "dir | more",
+        "dir|more.com",
+        "dir | MORE",
+        "dir | more +0",
+        "dir | less -S",
+        "x | less -R",
+        "a | more & b",
+        "x | more || b",
+        "b ; x | more",
+        "echo ok && dir | more",
+        "dir | more && echo ok",
+        "x | C:\\Windows\\System32\\more.com",
+        'dir | "C:\\Windows\\System32\\more.com" /p',
+        `${node} -v 2>&1 | more`,
+        "echo $(dir | more)",
+      ];
+      for (const [i, command] of blocked.entries()) {
+        const r = await h.executor.execute(call("shell", { command }, `c${i}`), h.scope);
+        expect(r.status, command).toBe("error");
+        expect(r.result.status === "error" && r.result.error.code, command).toBe("invalid_input");
+        expect(r.result.modelContent, command).toBe(PAGER_MESSAGE);
+      }
+      expect(spawnSpy).not.toHaveBeenCalled();
+      expect(gateCheck).not.toHaveBeenCalled();
+      expect(h.events.some((e) => e.type === "tool.started")).toBe(false);
+      expect(h.events.some((e) => e.type === "permission.requested")).toBe(false);
+      expect(h.events.some((e) => e.type === "permission.resolved")).toBe(false);
+      expect(h.events.filter((e) => e.type === "tool.completed")).toHaveLength(blocked.length);
+    } finally {
+      spawnSpy.mockRestore();
+    }
+  });
+
+  it("不误伤：引号内的分页字样、文件名、非末段分页工具与其他命令照常放行", () => {
+    const allowed = [
+      'echo "a | more"', // 双引号内的 | 不是管道
+      "echo 'a | less'", // 单引号同理
+      "dir | more.txt", // 文件名不是分页工具
+      "x | findstr more", // more 只是参数
+      "findstr more file.txt",
+      "a | more | findstr x", // 分页工具不在管道末段
+      "a | more | sort",
+      'dir | "more.com.txt"', // 引号文件名
+      "type file.txt && echo more",
+      "x > more.txt", // 重定向目标
+      "echo hi > more.txt",
+      "dir", // 普通命令
+    ];
+    for (const command of allowed) {
+      expect(shellTool.validateInput?.({ command }), command).toBeUndefined();
+    }
+  });
+
+  it("引号内的分页字样放行后命令正常执行", async () => {
+    const ws = tmpWorkspace();
+    const h = await makeHarness(ws);
+    const r = await h.executor.execute(
+      call("shell", { command: `${node} -e "process.stdout.write('a|more')"` }),
+      h.scope,
+    );
+    expect(r.status).toBe("ok");
+    expect(r.result.modelContent).toBe("a|more\n[exit code 0]");
+  });
+
+  it("PreToolUse updatedInput 重写后的输入同样经过预检", async () => {
+    const ws = tmpWorkspace();
+    const h = await makeHarness(ws);
+    h.scope.hooks = {
+      run: (point) =>
+        Promise.resolve(
+          point === "PreToolUse" ? { updatedInput: { command: "dir | less" } } : undefined,
+        ),
+    };
+    const r = await h.executor.execute(call("shell", { command: "dir" }), h.scope);
+    expect(r.status).toBe("error");
+    expect(r.result.status === "error" && r.result.error.code).toBe("invalid_input");
+    expect(r.result.modelContent).toBe(PAGER_MESSAGE);
+  });
+
+  it("其他工具无 validateInput：行为不变（read 照常执行）", async () => {
+    const ws = tmpWorkspace();
+    writeFileSync(path.join(ws, "a.txt"), "hi\n");
+    const h = await makeHarness(ws);
+    const r = await h.executor.execute(call("read", { path: "a.txt" }), h.scope);
+    expect(r.status).toBe("ok");
+    expect(r.result.modelContent).toContain("hi");
+  });
+});
 
 describe("diffLines", () => {
   it("公共前后缀作上下文，中段 -/+", () => {

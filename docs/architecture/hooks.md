@@ -113,6 +113,9 @@ Hook 调用的耗时计入诊断（`hook.run` 记录），不占 `tool.exec` 的
         deny  → permission.resolved(source:"hook") + tool.completed(denied, hook_denied)
         ask   → 记 hookAdvice，进第 5 步强制确认（跳过 Grant/--yes 提升）
         updatedInput → 重新校验后继续
+  2.6 输入预检（可选）：tool.validateInput?.(input) 作用在 Hook 修改后的
+        最终输入上；返回错误说明 → tool.completed(error, invalid_input)，
+        不请求权限、不发 tool.started（tool-api.md 第 1 节）
   3-4. 主体计算、资源解析（不变）
   5. 权限求值（permission.evaluate，不变）
         规则 deny → deny（hookAdvice 无效）

@@ -4,6 +4,7 @@
  * 超时或中断时终止进程树中仍可达的后代（platform/process 负责，Windows 实测
  * 记录见 tools.md）；detached 脱离进程树的后台进程可能无法终止。
  */
+import { shellTailExecutables } from "../../permission/index.js";
 import { resolveRealPath } from "../../platform/index.js";
 import type { SubjectRequest } from "../../protocol/index.js";
 import type { ToolDefinition } from "../types.js";
@@ -37,6 +38,19 @@ const ORPHAN_OUTPUT_NOTE =
   "命令已退出，但仍有后台进程占用输出管道，之后的输出未读取；如果启动了服务器等后台进程，它可能仍在运行。";
 /** 缓冲上限：头 64k + 尾 64k，超出丢弃中间（modelContent 再经统一预算截断） */
 const BUFFER_HALF = 64_000;
+
+/**
+ * 末尾分页拒绝（ADR-0021 第 9 条）：任一独立命令的管道末段以分页工具开头时
+ * 判为输入错误。只认 basename 为 more / more.com / less（大小写不敏感，
+ * 引号包裹的路径也算）；只看末段，管道中间的分页工具不误报。
+ */
+const PAGER_EXECUTABLES = new Set(["more", "more.com", "less"]);
+const TRAILING_PAGER_MESSAGE =
+  "命令以分页工具结尾（more/less）。分页工具会改坏输出编码、可能等待按键卡住；输出会被自动收集，去掉末尾的 `| more` 后直接执行即可。需要筛选时先重定向到文件再用 grep 工具。";
+
+function endsWithPager(command: string): boolean {
+  return shellTailExecutables(command).some((name) => PAGER_EXECUTABLES.has(name.toLowerCase()));
+}
 
 /** 头尾保留的合并缓冲：超限丢弃中段但继续排空管道（防止子进程阻塞） */
 class OutputBuffer {
@@ -96,6 +110,10 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
 
   permissionSubjects(input: ShellInput): SubjectRequest[] {
     return [{ kind: "shell", target: input.command }];
+  },
+
+  validateInput(input: ShellInput): string | undefined {
+    return endsWithPager(input.command) ? TRAILING_PAGER_MESSAGE : undefined;
   },
 
   async execute(input, ctx) {
