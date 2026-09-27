@@ -273,6 +273,7 @@ async function main(): Promise<number> {
           stdin: process.stdin,
           stdout: process.stdout,
           stderr: process.stderr,
+          inline: args.inline,
           provider: {
             config: runtimeConfig,
             reloadConfig: makeConfigLoader(args, platform),
@@ -440,6 +441,7 @@ async function main(): Promise<number> {
         stdin: process.stdin,
         stdout: process.stdout,
         stderr: process.stderr,
+        inline: args.inline,
         switchSession,
         newSession,
         provider: {

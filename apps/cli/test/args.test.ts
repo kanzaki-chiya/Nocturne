@@ -91,6 +91,18 @@ describe("参数解析（cli.md 第 2 节）", () => {
     expect(() => parseArgs(["trust", "--cli"])).toThrow(UsageError);
   });
 
+  it("--inline：默认 false；可与 -c / --resume 组合；互斥项与 --tui 相同", () => {
+    expect(parseArgs([]).inline).toBe(false);
+    expect(parseArgs(["--inline"]).inline).toBe(true);
+    const r = parseArgs(["--inline", "--resume", "sess-9"]);
+    expect(r.inline).toBe(true);
+    expect(r.resume).toBe("sess-9");
+    expect(() => parseArgs(["--inline", "--cli"])).toThrow(UsageError);
+    expect(() => parseArgs(["--inline", "-p", "hi"])).toThrow(UsageError);
+    expect(() => parseArgs(["--inline", "--sessions"])).toThrow(UsageError);
+    expect(() => parseArgs(["trust", "--inline"])).toThrow(UsageError);
+  });
+
   it("trust / untrust 子命令", () => {
     expect(parseArgs(["trust"]).command).toBe("trust");
     expect(parseArgs(["untrust"]).command).toBe("untrust");
@@ -111,16 +123,19 @@ describe("参数解析（cli.md 第 2 节）", () => {
 });
 
 describe("界面模式选择（cli.md 第 2 节：TTY 默认 TUI，非 TTY 自动行式）", () => {
-  const noFlags = { cli: false, tui: false };
-  it("TTY 默认 TUI；--cli 选行式；--tui 显式 TUI", () => {
+  const noFlags = { cli: false, tui: false, inline: false };
+  it("TTY 默认 TUI；--cli 选行式；--tui / --inline 显式 TUI", () => {
     expect(resolveUiMode(noFlags, true)).toBe("tui");
-    expect(resolveUiMode({ cli: true, tui: false }, true)).toBe("repl");
-    expect(resolveUiMode({ cli: false, tui: true }, true)).toBe("tui");
+    expect(resolveUiMode({ cli: true, tui: false, inline: false }, true)).toBe("repl");
+    expect(resolveUiMode({ cli: false, tui: true, inline: false }, true)).toBe("tui");
+    expect(resolveUiMode({ cli: false, tui: false, inline: true }, true)).toBe("tui");
   });
-  it("非 TTY 自动行式（无参与 --cli 相同）；显式 --tui 报用法错", () => {
+  it("非 TTY 自动行式（无参与 --cli 相同）；显式 --tui/--inline 报用法错", () => {
     expect(resolveUiMode(noFlags, false)).toBe("repl");
-    expect(resolveUiMode({ cli: true, tui: false }, false)).toBe("repl");
-    const r = resolveUiMode({ cli: false, tui: true }, false);
+    expect(resolveUiMode({ cli: true, tui: false, inline: false }, false)).toBe("repl");
+    const r = resolveUiMode({ cli: false, tui: true, inline: false }, false);
     expect(typeof r).toBe("object");
+    const r2 = resolveUiMode({ cli: false, tui: false, inline: true }, false);
+    expect(typeof r2).toBe("object");
   });
 });
