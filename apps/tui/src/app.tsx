@@ -46,7 +46,6 @@ import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "./keys.js";
 import {
   layoutEntry,
   layoutLive,
-  reasoningPageLines,
   NEW_CONTENT_HINT,
   SCROLLED_HINT,
   transcriptBlocks,
@@ -71,6 +70,7 @@ import { completeSlash, PRESET_NAMES, type Candidate } from "./slash-catalog.js"
 import {
   countLaidLines,
   layoutCached,
+  reanchorFromBottom,
   selectVisible,
   type LaidLine,
   type LineBlock,
@@ -92,7 +92,7 @@ import { useAltScreen, waitCommit } from "./alt-screen.js";
 import { WizardView } from "./components/wizard-view.js";
 import { TuiEnvContext, glyphs, type TuiEnv } from "./env.js";
 import { useSessionView } from "./session-view.js";
-import { reasoningTurns, useReasoning } from "./reasoning.js";
+import { useReasoning } from "./reasoning.js";
 import { theme } from "./theme.js";
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 import { useProviderWizard } from "./wizard-io.js";
@@ -639,7 +639,6 @@ function SessionApp({
   const [session, setSession] = useState(initialSession);
   const view = useSessionView(session);
   const { parts: reasoning, now: reasoningNow } = useReasoning(session);
-  const turns = reasoningTurns(view, reasoning);
   useEffect(() => {
     onSessionId?.(session.id);
   }, [session, onSessionId]);
@@ -663,13 +662,14 @@ function SessionApp({
   }, [session]);
   /** 全屏模式：对话视口滚动状态（fromBottom=0 跟随最新） */
   const [scroll, setScroll] = useState<ScrollState>(scrollFollow);
-  const [reasoningPage, setReasoningPage] = useState<number | undefined>(undefined);
-  const [reasoningScroll, setReasoningScroll] = useState<ScrollState>(scrollFollow);
-  const reasoningTotal = useRef<number | undefined>(undefined);
-  const reasoningCommitted = useRef(false);
+  const [expanded, setExpanded] = useState(false);
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [recordScroll, setRecordScroll] = useState<ScrollState>(scrollFollow);
+  const recordTotal = useRef<number | undefined>(undefined);
+  const recordCommitted = useRef(false);
   useLayoutEffect(() => {
-    reasoningCommitted.current = reasoningPage !== undefined;
-  }, [reasoningPage]);
+    recordCommitted.current = recordOpen;
+  }, [recordOpen]);
   /** 全屏模式：/resume 切换时冻结的旧会话条目（新会话内容在其后铺开） */
   const [frozen, setFrozen] = useState<TranscriptItem[]>([]);
   /** 全屏模式：拖动选区（内容行+列坐标；滚动不漂移，宽度变化清除） */
@@ -726,6 +726,7 @@ function SessionApp({
   const selRef = useRef<Selection | undefined>(undefined);
   selRef.current = sel;
   const blocksRef = useRef<{ blocks: LineBlock[]; width: number }>({ blocks: [], width: 0 });
+  const sourceRef = useRef<Parameters<typeof transcriptBlocks>[0] | undefined>(undefined);
   const exportBlocksRef = useRef<{ blocks: LineBlock[]; width: number }>({ blocks: [], width: 0 });
   /** 异步回调（doSwitch）读当前会话条目/本地行，冻结进视口前缀 */
   const entriesRef = useRef(view.entries);
@@ -888,10 +889,10 @@ function SessionApp({
 
   const moveScroll = useCallback(
     (change: (s: ScrollState) => ScrollState) => {
-      if (reasoningPage === undefined) setScroll(change);
-      else setReasoningScroll(change);
+      if (recordOpen) setRecordScroll(change);
+      else setScroll(change);
     },
-    [reasoningPage],
+    [recordOpen],
   );
 
   // 鼠标（全屏）：滚轮翻阅视口；视口内左键按下/拖动扩展选区、越沿持续滚动、
@@ -906,7 +907,7 @@ function SessionApp({
         return;
       }
       const base = absStartOf(g.visible);
-      const row = ev.y - 1 - (reasoningPage === undefined ? 0 : 1);
+      const row = ev.y - 1;
       const lineAt = (r: number): LaidLine | undefined =>
         r >= 0 && r < g.visible.lines.length ? g.visible.lines[r] : undefined;
       if (ev.type === "press") {
@@ -965,11 +966,11 @@ function SessionApp({
         dragRef.current.timer = undefined;
       }
     };
-  }, [fullscreen, mouse, absStartOf, copySelection, stopEdgeScroll, moveScroll, reasoningPage]);
+  }, [fullscreen, mouse, absStartOf, copySelection, stopEdgeScroll, moveScroll]);
 
   // 全屏滚动状态维护：离开底部后新内容只标记不打断；到顶后夹紧 fromBottom
   useEffect(() => {
-    if (!fullscreen || reasoningPage !== undefined) return;
+    if (!fullscreen) return;
     if (scroll.follow) {
       laidTotal.current = undefined;
       return;
@@ -987,30 +988,30 @@ function SessionApp({
   });
 
   useEffect(() => {
-    if (reasoningPage === undefined) return;
-    if (reasoningScroll.follow) {
-      reasoningTotal.current = undefined;
+    if (!recordOpen) return;
+    if (recordScroll.follow) {
+      recordTotal.current = undefined;
       return;
     }
     const total = countLaidLines(blocksRef.current.blocks, width, lineCache.current);
-    const prev = reasoningTotal.current;
-    reasoningTotal.current = total;
+    const prev = recordTotal.current;
+    recordTotal.current = total;
     if (prev !== undefined && total > prev) {
-      setReasoningScroll((s) =>
+      setRecordScroll((s) =>
         s.follow ? s : { ...s, fromBottom: s.fromBottom + total - prev, newContent: true },
       );
-    } else if (geomRef.current.visible.clampedFromBottom !== reasoningScroll.fromBottom) {
-      setReasoningScroll(applyClamp(reasoningScroll, geomRef.current.visible.clampedFromBottom));
+    } else if (geomRef.current.visible.clampedFromBottom !== recordScroll.fromBottom) {
+      setRecordScroll(applyClamp(recordScroll, geomRef.current.visible.clampedFromBottom));
     }
   });
 
   // 宽度变化 → 整段对话重排：作废排版缓存与选区（abs 行号随重排失效）
   useEffect(() => {
-    if (!fullscreen && reasoningPage === undefined) return;
+    if (!fullscreen && !recordOpen) return;
     lineCache.current.clear();
     laidTotal.current = undefined;
     setSel(undefined);
-  }, [fullscreen, width, reasoningPage]);
+  }, [fullscreen, width, recordOpen]);
 
   // 全屏退出前把对话按当前宽度铺成纯文本行（runTui 在恢复主屏后打印）
   useEffect(() => {
@@ -1343,42 +1344,69 @@ function SessionApp({
     foreign !== undefined ||
     wizardOverlay !== undefined ||
     providerRemove !== undefined;
-  const pageOpen = pickerOpen || providerPageOpen || reasoningPage !== undefined;
-  const closeReasoningPage = useCallback(
+  const pageOpen = pickerOpen || providerPageOpen || recordOpen;
+  const closeRecord = useCallback(
     () =>
       alt.leave(async () => {
         setSel(undefined);
-        setReasoningPage(undefined);
-        await waitCommit(reasoningCommitted, false);
+        setRecordOpen(false);
+        await waitCommit(recordCommitted, false);
       }),
     [alt],
   );
-  const toggleReasoningPage = useCallback(() => {
+  const toggleReasoning = useCallback(() => {
     if (pending !== undefined) return;
-    if (reasoningPage !== undefined) {
-      void closeReasoningPage();
+    if (recordOpen) {
+      void closeRecord();
       return;
     }
     if (pickerOpen || providerPageOpen || dialogOpen) return;
-    if (turns.length === 0) {
+    const source = sourceRef.current;
+    if (
+      source === undefined ||
+      (![...source.frozen, ...source.entries].some(
+        (entry) => entry.kind === "assistant" && entry.reasoning !== "",
+      ) &&
+        !source.live.live.assistants.some((entry) => entry.reasoning !== ""))
+    ) {
       flashNote("本会话还没有思考内容");
       return;
     }
+    setSel(undefined);
+    if (fullscreen) {
+      if (!scroll.follow) {
+        const next = transcriptBlocks({ ...source, expanded: !expanded });
+        const fromBottom = reanchorFromBottom(
+          blocksRef.current.blocks,
+          next,
+          width,
+          geomRef.current.transcriptRows,
+          geomRef.current.visible.lines[0],
+          lineCache.current,
+        );
+        setScroll((s) => ({ ...s, fromBottom, follow: fromBottom === 0 }));
+      }
+      laidTotal.current = undefined;
+      setExpanded(!expanded);
+      return;
+    }
     void alt.enter(async () => {
-      setSel(undefined);
-      setReasoningScroll(scrollToBottom());
-      setReasoningPage(turns.length - 1);
-      await waitCommit(reasoningCommitted, true);
+      setRecordScroll(scrollToBottom());
+      setRecordOpen(true);
+      await waitCommit(recordCommitted, true);
     });
   }, [
     pending,
-    reasoningPage,
-    closeReasoningPage,
+    recordOpen,
+    closeRecord,
     pickerOpen,
     providerPageOpen,
     dialogOpen,
-    turns.length,
     flashNote,
+    fullscreen,
+    scroll.follow,
+    expanded,
+    width,
     alt,
   ]);
   const inputIdle = !pageOpen && !dialogOpen && pending === undefined && !busy;
@@ -1463,15 +1491,15 @@ function SessionApp({
       if (key.escape && ch === "" && !key.meta && !key.ctrl) return;
     }
     if (key.ctrl && ch === "o") {
-      toggleReasoningPage();
+      toggleReasoning();
       return;
     }
     if (key.escape && ch === "" && !key.meta && !key.ctrl) {
       if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
       escapeTimer.current = undefined;
       swallowUntil.current = noteBareEscape(now);
-      if (reasoningPage !== undefined) {
-        void closeReasoningPage();
+      if (recordOpen) {
+        void closeRecord();
         return;
       }
       if (!pageOpen && !dialogOpen && pending === undefined) {
@@ -1485,16 +1513,8 @@ function SessionApp({
         return;
       }
     }
-    if (reasoningPage !== undefined) {
+    if (recordOpen) {
       const page = Math.max(1, rows - 4);
-      if (key.leftArrow || key.rightArrow) {
-        setReasoningPage((i) =>
-          Math.max(0, Math.min(turns.length - 1, (i ?? 0) + (key.leftArrow ? -1 : 1))),
-        );
-        setReasoningScroll(scrollToBottom());
-        setSel(undefined);
-        return;
-      }
       if (key.pageUp || key.pageDown || key.upArrow || key.downArrow) {
         moveScroll((s) =>
           scrollPage(s, key.pageUp ? page : key.pageDown ? -page : key.upArrow ? 1 : -1),
@@ -1502,11 +1522,11 @@ function SessionApp({
         return;
       }
       if (key.ctrl && key.home) {
-        setReasoningScroll(scrollToTop());
+        setRecordScroll(scrollToTop());
         return;
       }
       if (key.ctrl && key.end) {
-        setReasoningScroll(scrollToBottom());
+        setRecordScroll(scrollToBottom());
         return;
       }
       if (!(key.ctrl && (ch === "c" || ch === "d"))) return;
@@ -1588,9 +1608,9 @@ function SessionApp({
       }
     }
     if (key.ctrl && ch === "c") {
-      if (reasoningPage !== undefined) {
+      if (recordOpen) {
         if (busy) session.interrupt();
-        else void closeReasoningPage().then(exit);
+        else void closeRecord().then(exit);
         return;
       }
       if (pickerOpen) {
@@ -1627,8 +1647,8 @@ function SessionApp({
       return;
     }
     if (key.ctrl && ch === "d") {
-      if (reasoningPage !== undefined) {
-        void closeReasoningPage().then(requestExit);
+      if (recordOpen) {
+        void closeRecord().then(requestExit);
         return;
       }
       if (pickerOpen) {
@@ -1878,47 +1898,31 @@ function SessionApp({
   });
   // —— 全屏视口（ADR-0021 第 1 条）：欢迎区在块表最前随对话滚走；
   // 冻结前缀是 /resume 切换时旧会话的完结条目；live 块每次渲染重排。
-  const blocks: LineBlock[] = fullscreen
-    ? transcriptBlocks({
-        welcome,
-        notices: bootNotes,
-        frozen,
-        entries: view.entries,
-        hide: hideNotice,
-        live: view,
-        clientLines,
-        ascii: env.ascii,
-        reasoning,
-        now: reasoningNow,
-      })
-    : [];
+  const transcriptSource: Parameters<typeof transcriptBlocks>[0] = {
+    welcome,
+    notices: bootNotes,
+    frozen,
+    entries: view.entries,
+    hide: hideNotice,
+    live: view,
+    clientLines,
+    ascii: env.ascii,
+    reasoning,
+    now: reasoningNow,
+    expanded: fullscreen ? expanded : true,
+  };
+  sourceRef.current = transcriptSource;
+  const blocks: LineBlock[] = fullscreen || recordOpen ? transcriptBlocks(transcriptSource) : [];
   exportBlocksRef.current = { blocks, width };
-  const chosenTurn = reasoningPage === undefined ? undefined : turns[reasoningPage];
-  const pageBlocks: LineBlock[] =
-    chosenTurn === undefined
-      ? []
-      : [
-          {
-            key: `reasoning:${chosenTurn.id}`,
-            revision: chosenTurn.parts
-              .map(
-                (p) =>
-                  `${p.text.length}:${p.active ? Math.floor(reasoningNow / 1000) : (p.ended ?? "")}`,
-              )
-              .join("|"),
-            layout: (w) => reasoningPageLines(chosenTurn, w, reasoningNow, env.ascii),
-          },
-        ];
-  blocksRef.current = { blocks: reasoningPage === undefined ? blocks : pageBlocks, width };
+  blocksRef.current = { blocks, width };
   const showBanner = fullscreen && !scroll.follow;
-  const transcriptRows =
-    reasoningPage === undefined
-      ? Math.max(0, budget.conversation - (showBanner ? 1 : 0))
-      : Math.max(0, budget.frameHeight - 2);
-  const activeScroll = reasoningPage === undefined ? scroll : reasoningScroll;
+  const transcriptRows = recordOpen
+    ? Math.max(0, budget.frameHeight - 2)
+    : Math.max(0, budget.conversation - (showBanner ? 1 : 0));
+  const activeScroll = recordOpen ? recordScroll : scroll;
   const activeBlocks = blocksRef.current.blocks;
   const visible: VisibleWindow =
-    fullscreen || reasoningPage !== undefined
+    fullscreen || recordOpen
       ? selectVisible(
           activeBlocks,
           width,
@@ -2146,7 +2150,7 @@ function SessionApp({
   geomRef.current = {
     visible,
     transcriptRows,
-    blocked: (pageOpen && reasoningPage === undefined) || overlayBody !== null,
+    blocked: pageOpen || overlayBody !== null,
   };
 
   /** LaidLine → Text；selected 给本行的选区字符范围时拆分反色分段 */
@@ -2187,24 +2191,20 @@ function SessionApp({
     );
   };
 
-  const reasoningPageBody =
-    chosenTurn === undefined ? null : (
-      <Box flexDirection="column" width={width} height={budget.frameHeight}>
-        <Text
-          wrap="truncate"
-          bold
-        >{`思考 · 第 ${(reasoningPage ?? 0) + 1}/${turns.length} 轮`}</Text>
-        <Box flexDirection="column" height={transcriptRows} overflow="hidden">
-          {visible.lines.map((line, i) =>
-            renderLine(line, sel === undefined ? undefined : selRangeOnLine(sel, selBase + i)),
-          )}
-          <Box flexGrow={1} />
-        </Box>
-        <Text dimColor wrap="truncate">
-          ←/→ 切换轮次 · PgUp/PgDn 翻阅 · Esc 返回
-        </Text>
+  const recordBody = !recordOpen ? null : (
+    <Box flexDirection="column" width={width} height={budget.frameHeight}>
+      <Text wrap="truncate" bold>
+        完整记录
+      </Text>
+      <Box flexDirection="column" height={transcriptRows} overflow="hidden">
+        {visible.lines.map((line) => renderLine(line))}
+        <Box flexGrow={1} />
       </Box>
-    );
+      <Text dimColor wrap="truncate">
+        PgUp/PgDn 翻阅 · Esc 返回
+      </Text>
+    </Box>
+  );
 
   // 底部固定区：输入框光标登记 + Composer + 候选 + 状态栏（两种模式共用）
   const chrome = (
@@ -2251,22 +2251,20 @@ function SessionApp({
           context={{ used: contextReport.estimatedTokens, limit: contextWindow }}
           models={runtime.listModels()}
           highlight={highlight}
-          note={note}
+          note={note ?? (expanded && fullscreen ? "思考已展开（Ctrl+O 收起）" : undefined)}
         />
       ) : null}
     </>
   );
 
   onOutputLayout?.(
-    pageBody !== null || reasoningPageBody !== null || overlayBody !== null
-      ? 0
-      : budget.conversation,
+    pageBody !== null || recordBody !== null || overlayBody !== null ? 0 : budget.conversation,
     pickerOpen
       ? "model"
       : providerPageOpen
         ? "provider"
-        : reasoningPage !== undefined
-          ? `reasoning-${reasoningPage}`
+        : recordOpen
+          ? "record"
           : overlayBody !== null
             ? "overlay"
             : "conversation",
@@ -2283,7 +2281,7 @@ function SessionApp({
         />
       )}
       {pageBody ??
-        reasoningPageBody ??
+        recordBody ??
         (fullscreen ? (
           // 全屏：固定帧高 rows-1，上为可滚动视口，下为输入/候选/状态栏
           <Box flexDirection="column" width={width} height={budget.frameHeight}>

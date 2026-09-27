@@ -116,7 +116,10 @@ export function selCopyText(lines: readonly LaidLine[], sel: Selection): string 
     const range = selRangeOnLine(sel, abs);
     if (range === undefined) continue;
     picked.push({
-      text: line.text.slice(range.start, Math.min(range.end, line.text.length)),
+      text: line.text.slice(
+        Math.max(range.start, line.copyIndent ?? 0),
+        Math.min(range.end, line.text.length),
+      ),
       continued: line.continued === true,
     });
   }

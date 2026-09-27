@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef } from "react";
 
 import type { RuntimeSession } from "@nocturne/core";
-import type { RuntimeEvent, SessionView } from "@nocturne/core/protocol";
+import type { RuntimeEvent } from "@nocturne/core/protocol";
 
 export interface ReasoningPart {
   text: string;
@@ -101,37 +101,16 @@ export function useReasoning(session: RuntimeSession): { parts: ReasoningMap; no
   return { parts: ref.current.parts, now };
 }
 
-export function reasoningLabel(part: ReasoningPart, now: number, ascii: boolean): string {
+export function reasoningLabel(
+  part: ReasoningPart,
+  now: number,
+  ascii: boolean,
+  expanded = false,
+): string {
   const mark = ascii ? "*" : "∴";
   const seconds =
     part.started === undefined
       ? ""
       : ` ${Math.floor(Math.max(0, (part.ended ?? now) - part.started) / 1000)}s`;
-  return `${mark} ${part.active ? "思考中" : part.started === undefined ? "思考" : "思考了"}${seconds}（Ctrl+O 查看）`;
-}
-
-export interface ReasoningTurn {
-  id: string;
-  parts: ReasoningPart[];
-}
-
-export function reasoningTurns(view: SessionView, parts: ReasoningMap): ReasoningTurn[] {
-  const turns: ReasoningTurn[] = [];
-  const add = (id: string | undefined, messageId: string, fallback: string): void => {
-    const found =
-      parts.get(messageId) ?? (fallback !== "" ? [{ text: fallback, active: false }] : []);
-    if (found.length === 0) return;
-    const turnId = id ?? messageId;
-    let turn = turns.find((t) => t.id === turnId);
-    if (turn === undefined) {
-      turn = { id: turnId, parts: [] };
-      turns.push(turn);
-    }
-    turn.parts.push(...found);
-  };
-  for (const entry of view.entries) {
-    if (entry.kind === "assistant") add(entry.turnId, entry.messageId, entry.reasoning);
-  }
-  for (const live of view.live.assistants) add(live.turnId, live.messageId, live.reasoning);
-  return turns;
+  return `${mark} ${part.active ? "思考中" : part.started === undefined ? "思考" : "思考了"}${seconds}${expanded ? "" : "（Ctrl+O 展开）"}`;
 }

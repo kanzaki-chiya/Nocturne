@@ -303,13 +303,44 @@ describe("全屏退出（默认模式）", () => {
     io.stdin.write("\x04");
     await done;
     const output = io.stdoutChunks.join("");
+    expect(output).not.toContain("\x1b[2J");
     const after = output.slice(output.indexOf("\x1b[?1049l"));
-    expect(after).toContain("∴ 思考了 0s（Ctrl+O 查看）");
+    expect(after).toContain("∴ 思考了 0s（Ctrl+O 展开）");
     expect(after).not.toContain("先想想");
     expect(after).not.toContain("（思考）");
     expect(after).toContain("正文");
     expect(after).toContain("Nocturne");
     expect(after).not.toMatch(/[▀▄█]/);
+    await session.close();
+  });
+
+  it("展开后退出导出思考全文", async () => {
+    const { runtime, session } = await openSession([
+      [
+        { type: "reasoning_delta", text: "第一段完整思考\n第二行" },
+        { type: "text_delta", text: "正文" },
+        { type: "finish", reason: "stop" },
+      ],
+    ]);
+    const io = ttyPair();
+    const done = runTui({ session }, runtime, {
+      stdin: io.stdin,
+      stdout: io.stdout,
+      stderr: io.stderr,
+      patchConsole: false,
+    });
+    await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
+    await session.submit({ text: "问题" });
+    io.stdin.write("\x0f");
+    await waitFor(() => io.stdoutChunks.join("").includes("思考已展开（Ctrl+O 收起）"));
+    io.stdin.write("\x04");
+    await done;
+    const output = io.stdoutChunks.join("");
+    const after = output.slice(output.indexOf("\x1b[?1049l"));
+    expect(after).toContain("∴ 思考了 0s");
+    expect(after).toContain("  第一段完整思考");
+    expect(after).toContain("  第二行");
+    expect(after).not.toContain("Ctrl+O 展开");
     await session.close();
   });
 

@@ -9,12 +9,7 @@ import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 
 import { boxSafe, summarizeToolInput, tailLines, truncateLine } from "./format.js";
 import { renderMarkdown } from "./markdown.js";
-import {
-  reasoningLabel,
-  type ReasoningMap,
-  type ReasoningPart,
-  type ReasoningTurn,
-} from "./reasoning.js";
+import { reasoningLabel, type ReasoningMap, type ReasoningPart } from "./reasoning.js";
 import type { TranscriptItem } from "./components/transcript.js";
 import type { LaidLine, LineBlock } from "./viewport.js";
 
@@ -78,6 +73,7 @@ export function layoutEntry(
   ascii: boolean,
   parts: ReasoningMap = new Map(),
   now = Date.now(),
+  expanded = false,
 ): LaidLine[] {
   const dot = ascii ? "*" : "•";
   const prompt = ascii ? ">" : "›";
@@ -93,13 +89,14 @@ export function layoutEntry(
       const lines: LaidLine[] = [];
       if (entry.reasoning !== "") {
         const sections = parts.get(entry.messageId) ?? [{ text: entry.reasoning, active: false }];
-        sections.forEach((part, i) =>
+        sections.forEach((part, i) => {
           lines.push({
             key: `${entry.key}:r:${i}`,
-            text: paint(reasoningLabel(part, now, ascii), width),
+            text: paint(reasoningLabel(part, now, ascii, expanded), width),
             dim: true,
-          }),
-        );
+          });
+          if (expanded) lines.push(...reasoningBody(`${entry.key}:r:${i}`, part.text, width));
+        });
       }
       if (entry.text !== "") lines.push(...renderMarkdown(entry.text, width, `${entry.key}:t`));
       if (entry.finishReason === "aborted") {
@@ -157,6 +154,7 @@ export function layoutLive(
   ascii: boolean,
   parts: ReasoningMap = new Map(),
   now = Date.now(),
+  expanded = false,
 ): LaidLine[] {
   const lines: LaidLine[] = [];
   const cursor = ascii ? "_" : "|";
@@ -181,20 +179,22 @@ export function layoutLive(
     sections.forEach((part, section) => {
       lines.push({
         key: `live-r:${a.messageId}:${section}:head`,
-        text: paint(reasoningLabel(part, now, ascii), width),
+        text: paint(reasoningLabel(part, now, ascii, expanded), width),
         dim: true,
       });
-      if (!part.active) return;
-      const visible = wrap(part.text, width).slice(-4);
+      if (!part.active && !expanded) return;
+      const visible = expanded ? wrap(part.text, width - 2) : wrap(part.text, width).slice(-4);
       visible.forEach((line, i) => {
-        const last = section === sections.length - 1 && i === visible.length - 1;
+        const last = part.active && section === sections.length - 1 && i === visible.length - 1;
+        const body = `${expanded ? "  " : ""}${line.text}`;
         lines.push({
           key: `live-r:${a.messageId}:${section}:${i}`,
           text: last
-            ? `${truncateLine(boxSafe(line.text), Math.max(0, budget(width) - 1), "")}${cursor}`
-            : paint(line.text, width),
+            ? `${truncateLine(boxSafe(body), Math.max(0, budget(width) - 1), "")}${cursor}`
+            : paint(body, width),
           continued: line.continued,
           dim: true,
+          ...(expanded ? { copyIndent: 2 } : {}),
         });
       });
     });
@@ -223,23 +223,14 @@ export function layoutLive(
   return lines;
 }
 
-export function reasoningPageLines(
-  turn: ReasoningTurn,
-  width: number,
-  now: number,
-  ascii: boolean,
-): LaidLine[] {
-  return turn.parts.flatMap((part, i) => [
-    ...(i > 0
-      ? [{ key: `sep:${i}`, text: paint("─".repeat(Math.max(1, width - SAFE)), width), dim: true }]
-      : []),
-    {
-      key: `head:${i}`,
-      text: paint(reasoningLabel(part, now, ascii).replace("（Ctrl+O 查看）", ""), width),
-      dim: true,
-    },
-    ...rows(`part:${i}`, part.text, width),
-  ]);
+function reasoningBody(key: string, text: string, width: number): LaidLine[] {
+  return wrap(text, width - 2).map((line, i) => ({
+    key: `${key}:body:${i}`,
+    text: paint(`  ${line.text}`, width),
+    continued: line.continued,
+    dim: true,
+    copyIndent: 2,
+  }));
 }
 
 interface TranscriptSource {
@@ -253,6 +244,7 @@ interface TranscriptSource {
   ascii: boolean;
   reasoning?: ReasoningMap;
   now?: number;
+  expanded?: boolean;
 }
 
 function block(key: string, revision: string, lines: (width: number) => LaidLine[]): LineBlock {
@@ -276,8 +268,10 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
   }
   for (const item of src.frozen) {
     blocks.push(
-      block(item.key, item.kind === "separator" ? item.text : item.key, (width) =>
-        layoutEntry(item, width, src.ascii, src.reasoning, src.now),
+      block(
+        item.key,
+        `${item.kind === "separator" ? item.text : item.key}:${src.expanded}`,
+        (width) => layoutEntry(item, width, src.ascii, src.reasoning, src.now, src.expanded),
       ),
     );
   }
@@ -295,13 +289,14 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
             }`
           : entry.key;
     blocks.push(
-      block(entry.key, revision, (width) =>
-        layoutEntry(entry, width, src.ascii, src.reasoning, src.now),
+      block(entry.key, `${revision}:${src.expanded}`, (width) =>
+        layoutEntry(entry, width, src.ascii, src.reasoning, src.now, src.expanded),
       ),
     );
   }
   // 缓存标记要覆盖布局的全部输入：思考长度、进行中工具、重试
   const liveRev = [
+    src.expanded,
     src.live.live.assistants.map((a) => `${a.text.length}/${a.reasoning.length}`).join(","),
     src.live.live.tools.map((t) => t.callId).join(","),
     src.live.retry?.attempt ?? "",
@@ -323,7 +318,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
   ].join("|");
   blocks.push(
     block("live", liveRev, (width) =>
-      layoutLive(src.live, width, src.ascii, src.reasoning, src.now),
+      layoutLive(src.live, width, src.ascii, src.reasoning, src.now, src.expanded),
     ),
   );
   if (src.clientLines.length > 0) {

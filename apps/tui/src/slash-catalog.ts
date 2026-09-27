@@ -61,7 +61,7 @@ export function helpLines(): string[] {
     const extra = cmd.name === "/exit" ? ", /quit" : "";
     lines.push(`  ${cmd.name}${extra}`.padEnd(18) + cmd.summary);
   }
-  lines.push("快捷键：Ctrl+O 查看思考；Shift+Tab 思考档位；Alt+M 权限预设；Ctrl+J 换行；");
+  lines.push("快捷键：Ctrl+O 展开/收起思考；Shift+Tab 思考档位；Alt+M 权限预设；Ctrl+J 换行；");
   lines.push("Ctrl+C 中断（空闲时退出）；Ctrl+D 退出。输入历史按工作区保存为明文 history.jsonl。");
   return lines;
 }

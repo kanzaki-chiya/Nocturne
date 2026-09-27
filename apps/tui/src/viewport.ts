@@ -29,6 +29,8 @@ export interface LaidLine {
    * 本行是上一行被自动折行断开的续行（复制时拼回一行；真换行不标）。
    */
   continued?: boolean | undefined;
+  /** 仅显示用的左缩进；复制时去掉。 */
+  copyIndent?: number | undefined;
 }
 
 export interface LineBlock {
@@ -81,6 +83,31 @@ export function countLaidLines(
   let n = 0;
   for (const block of blocks) n += layoutCached(block, width, cache).length;
   return n;
+}
+
+/** 切换排版形态时以顶部条目及条目内行偏移恢复翻阅位置。 */
+export function reanchorFromBottom(
+  before: readonly LineBlock[],
+  after: readonly LineBlock[],
+  width: number,
+  viewport: number,
+  top: LaidLine | undefined,
+  cache: Map<string, LaidLine[]>,
+): number {
+  if (top === undefined) return 0;
+  const owner = before.find((block) =>
+    layoutCached(block, width, cache).some((line) => line.key === top.key),
+  );
+  if (owner === undefined) return 0;
+  const offset = layoutCached(owner, width, cache).findIndex((line) => line.key === top.key);
+  let start = 0;
+  let total = 0;
+  for (const block of after) {
+    const length = layoutCached(block, width, cache).length;
+    if (block.key === owner.key) start = total + Math.min(offset, Math.max(0, length - 1));
+    total += length;
+  }
+  return Math.max(0, total - start - viewport);
 }
 
 /**

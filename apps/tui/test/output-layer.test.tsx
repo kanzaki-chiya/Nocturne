@@ -83,7 +83,7 @@ it("尺寸和页面切换逐行重写整帧，不清屏", () => {
   for (const write of [
     layer.render(frame(lines), 100, 10, 9, "conversation", undefined),
     layer.render(frame(lines), 100, 10, 0, "model", undefined),
-    layer.render(frame(lines), 100, 10, 0, "reasoning-0", undefined),
+    layer.render(frame(lines), 100, 10, 0, "record", undefined),
     layer.render(frame(lines), 100, 10, 9, "conversation", undefined),
   ]) {
     expect(rewritten(write)).toHaveLength(9);
