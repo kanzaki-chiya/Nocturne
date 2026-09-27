@@ -103,6 +103,7 @@ Esc 的处理次序：清除选区（全屏模式）→ 关闭补全列表 → �
 - 用英文书写，要求按用户的语言回复。
 - 不写"只在工作区内操作"：工作区外的读写由权限层决定，提示词不重复限制。不写具体项目命令，那属于各项目的 AGENTS.md。不提本版还没有的工具。
 - 环境信息的 shell 行与 `shell` 工具同源：可执行文件取自 `platform/process.ts` 的 `shellExecutable()`（`NOCTURNE_SHELL` > `%COMSPEC%` > `cmd.exe`；POSIX 为 `NOCTURNE_SHELL` > `/bin/sh`），参数形态取自工具实际使用的那一份（Windows `/d /s /c`，POSIX `-c`），不再读 `COMSPEC ?? SHELL`（旧写法在 POSIX 上会把 `SHELL=bash` 报给模型，而命令实际跑在 `/bin/sh`）。行文为 `Commands run with <可执行文件> <参数> "<command>"`；可执行文件的文件名是 `cmd`/`cmd.exe` 时追加 `use cmd syntax, not bash or PowerShell`，是 `sh` 时追加 `use POSIX sh syntax`，其他值（用户用 `NOCTURNE_SHELL` 换成别的 shell）不追加语法断言，只如实报告可执行文件与参数。不限制 `NOCTURNE_SHELL`。
+- 不把命令输出接到分页工具（v0.4 验收补充）：基础提示的工具习惯加一条——输出会被自动收集（过长截断并另存文件可读），不要接 `more`、`less` 等分页工具；要从大量输出里找内容时先重定向到文件再用 `grep` 工具。环境信息的 shell 行在可执行文件是 `cmd` 时再补一句：`findstr` 的关键词按控制台代码页编码，匹配不到 UTF-8 输出里的非 ASCII 文字，只用 ASCII 关键词。起因：实测 Windows 上 `more` 会按 GBK 转写并改坏 UTF-8 中文、有时吞掉输出、超过一屏等待按键；`findstr "通过"` 与 PowerShell `Select-String 通过` 对 UTF-8 输出都匹配不到。
 - AGENTS.md 拼入时加一句前言：以下是用户与项目提供的指令，与默认做法冲突时以它们为准。
 - 子代理的基础提示（`agent/subagent.ts`）保持中文不变，只在措辞上与主提示对齐其中的安全与验证要求。
 - 验收用真实模型对比新旧提示：修 bug、跨文件改动、只读问答、Windows 命令四类任务，看是否先读后改、是否验证、shell 语法是否一次正确、回复语言是否跟随用户。
