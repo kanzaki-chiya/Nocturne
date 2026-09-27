@@ -181,6 +181,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 **内容**：
 
+- **shell 可选（第一项）**：shell 工具支持 pwsh / Windows PowerShell / Git Bash / cmd（POSIX 为 sh / bash / pwsh），Windows 默认自动选 pwsh 7 → Git Bash → cmd；`/shell` 选择页，选择写入程序维护的 `settings.json`（设置层第一个字段）；权限层按种类分段并补全 PowerShell 与 cmd 的高风险命令。设计见 [ADR-0022](../decisions/ADR-0022-shell-selection.md)（已接受）。
 - **任务清单工具**：长任务里模型列出步骤、逐项更新状态，界面显示进度；清单随会话持久化，恢复会话时还原。
 - **向用户提问工具**：模型遇到需要用户拍板的问题时暂停并提问（可给选项），用户回答后继续；非交互模式下返回"无法提问"，由模型自行取默认。
 - **网页抓取**：按 URL 抓取并转成文本交给模型，走权限层的 `network` 类；搜索不内置，交给 MCP。
