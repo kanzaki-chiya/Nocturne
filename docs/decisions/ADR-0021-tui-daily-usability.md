@@ -178,8 +178,9 @@ running commands, investigating bugs, and answering questions about the codebase
 - shell runs non-interactive commands and cannot answer prompts; pass flags that avoid
   them. Don't start servers or watchers unless asked; they block until the timeout.
 - When tool calls don't depend on each other, make them in the same response.
-- Long outputs are truncated; the result says where the full output was saved, and
-  you can read that file.
+- Command output is collected automatically; long output is truncated and saved to a
+  file you can read. Don't pipe it to pagers like more or less. For large output,
+  redirect to a file first, then search it with the grep tool.
 - Use task to hand a self-contained piece of work to a subagent: explore for read-only
   investigation, general for independent changes. It sees only the task text, so
   include everything it needs.
