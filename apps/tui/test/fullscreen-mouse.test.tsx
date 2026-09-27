@@ -209,6 +209,30 @@ describe("全屏鼠标", () => {
     await session.close();
   });
 
+  it("拖到视口第一行时持续向上滚动并扩展选区", async () => {
+    const { runtime, session } = await longSession();
+    const mouse = fakeMouse();
+    const { spawn, calls } = okSpawn();
+    const { lastFrame, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, mouse, copySpawn: spawn }),
+    );
+    await pause(80);
+    await session.submit({ text: "起点问题" });
+    await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
+    expect(lastFrame()).not.toContain("起点问题");
+    const y = (lastFrame() ?? "").split("\n").findIndex((l) => l.includes("末尾标记")) + 1;
+    mouse.emit({ type: "press", button: 0, x: 1, y });
+    // 终端报告的坐标最小为 1：拖出上沿时也只会报第一行
+    mouse.emit({ type: "drag", button: 0, x: 1, y: 1 });
+    await waitFor(() => (lastFrame() ?? "").includes("起点问题"));
+    await pause(300); // 按住期间继续滚到顶，选区头跟到第一行
+    mouse.emit({ type: "release", button: 0, x: 1, y: 1 });
+    await waitFor(() => calls.length === 1);
+    expect(calls[0]?.input).toContain("起点问题");
+    unmount();
+    await session.close();
+  });
+
   it("选区存在时 Ctrl+C 复制不退出；Esc 先清选区", async () => {
     const { runtime, session } = await longSession();
     const mouse = fakeMouse();

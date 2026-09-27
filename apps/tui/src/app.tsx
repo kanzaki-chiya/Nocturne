@@ -920,12 +920,14 @@ function SessionApp({
         return;
       }
       if (ev.type === "drag" && dragRef.current.dragging && ev.button === 0) {
-        if (row < 0 || row >= g.transcriptRows) {
-          dragRef.current.edge = row < 0 ? -1 : 1;
+        // 对话区从屏幕第一行开始，终端报告的坐标不会小于它：拖到第一行即向上滚
+        if (row <= 0 || row >= g.transcriptRows) {
+          dragRef.current.edge = row <= 0 ? -1 : 1;
           dragRef.current.timer ??= setInterval(() => {
             const gg = geomRef.current;
             if (gg.blocked || dragRef.current.edge === 0) return;
-            moveScroll((s) => scrollPage(s, dragRef.current.edge * 2));
+            // scrollPage 的正数是向上翻（离底部更远），与 edge 的方向相反
+            moveScroll((s) => scrollPage(s, -dragRef.current.edge * 2));
             const b2 = absStartOf(gg.visible);
             const edgeRow = dragRef.current.edge < 0 ? 0 : gg.visible.lines.length - 1;
             const edgeLine = gg.visible.lines[edgeRow];
