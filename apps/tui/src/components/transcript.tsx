@@ -5,7 +5,8 @@
 import { Box, Static, Text } from "ink";
 
 import { glyphs, useTuiEnv } from "../env.js";
-import { tailLines } from "../format.js";
+import { layoutEntry } from "../lines.js";
+import type { ReasoningMap } from "../reasoning.js";
 import { renderMarkdown } from "../markdown.js";
 import type { LaidLine } from "../viewport.js";
 import { ToolRow } from "./tool-row.js";
@@ -17,8 +18,6 @@ export type TranscriptItem =
   | ViewEntry
   | { kind: "separator"; key: string; text: string }
   | { kind: "header"; key: string; lines: LaidLine[] };
-
-const REASONING_TAIL = 4;
 
 function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): React.JSX.Element {
   const text = entry.content
@@ -37,18 +36,28 @@ function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): Re
 function AssistantRow({
   entry,
   width,
+  reasoning,
+  now,
 }: {
   entry: Extract<ViewEntry, { kind: "assistant" }>;
   width: number;
+  reasoning?: ReasoningMap | undefined;
+  now?: number | undefined;
 }): React.JSX.Element {
-  const reasoning = tailLines(entry.reasoning, REASONING_TAIL);
+  const env = useTuiEnv();
   return (
     <Box flexDirection="column" marginTop={1}>
       {entry.reasoning !== "" ? (
         <Box flexDirection="column">
-          {reasoning.map((l, i) => (
-            <Text key={i} dimColor italic>
-              {l}
+          {layoutEntry(
+            { ...entry, text: "", finishReason: "stop" },
+            width,
+            env.ascii,
+            reasoning,
+            now,
+          ).map((line) => (
+            <Text key={line.key} dimColor wrap="truncate">
+              {line.text}
             </Text>
           ))}
         </Box>
@@ -98,15 +107,19 @@ function SeparatorRow({ text }: { text: string }): React.JSX.Element {
 export function EntryRow({
   entry,
   width,
+  reasoning,
+  now,
 }: {
   entry: TranscriptItem;
   width: number;
+  reasoning?: ReasoningMap | undefined;
+  now?: number | undefined;
 }): React.JSX.Element {
   switch (entry.kind) {
     case "user":
       return <UserRow entry={entry} />;
     case "assistant":
-      return <AssistantRow entry={entry} width={width} />;
+      return <AssistantRow entry={entry} width={width} reasoning={reasoning} now={now} />;
     case "tool":
       return <ToolRow entry={entry} width={width} />;
     case "notice":
@@ -154,13 +167,19 @@ export function EntryRow({
 export function Transcript({
   entries,
   width,
+  reasoning,
+  now,
 }: {
   entries: readonly TranscriptItem[];
   width: number;
+  reasoning?: ReasoningMap | undefined;
+  now?: number | undefined;
 }): React.JSX.Element {
   return (
     <Static items={[...entries]}>
-      {(entry) => <EntryRow key={entry.key} entry={entry} width={width} />}
+      {(entry) => (
+        <EntryRow key={entry.key} entry={entry} width={width} reasoning={reasoning} now={now} />
+      )}
     </Static>
   );
 }

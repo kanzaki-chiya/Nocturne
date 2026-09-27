@@ -216,7 +216,7 @@ describe("长文本粘贴与流式思考", () => {
     expect(mid).toEqual({ before: "a", at: "b", after: "│cd" });
   });
 
-  it("正文已开始后思考继续增长，思考仍显示", () => {
+  it("正文已开始后思考继续增长，思考窗口仍显示", () => {
     const view = createSessionView();
     const a = {
       kind: "assistant" as const,
@@ -228,9 +228,15 @@ describe("长文本粘贴与流式思考", () => {
     view.live.assistants.push(a);
     view.status = "thinking";
     a.reasoning = "想了很久的第二段";
-    const texts = layoutLive(view, 80, false).map((l) => l.text);
-    expect(texts).toContain("想了很久的第二段");
-    expect(texts.at(-1)).toBe("The|");
+    const texts = layoutLive(
+      view,
+      80,
+      false,
+      new Map([["m1", [{ text: a.reasoning, started: 0, active: true }]]]),
+      1000,
+    ).map((l) => l.text);
+    expect(texts).toContain("想了很久的第二段|");
+    expect(texts).toContain("The");
   });
 });
 

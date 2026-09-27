@@ -9,6 +9,12 @@ import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 
 import { boxSafe, summarizeToolInput, tailLines, truncateLine } from "./format.js";
 import { renderMarkdown } from "./markdown.js";
+import {
+  reasoningLabel,
+  type ReasoningMap,
+  type ReasoningPart,
+  type ReasoningTurn,
+} from "./reasoning.js";
 import type { TranscriptItem } from "./components/transcript.js";
 import type { LaidLine, LineBlock } from "./viewport.js";
 
@@ -66,7 +72,13 @@ function rows(key: string, text: string, width: number, extra?: Partial<LaidLine
   }));
 }
 
-export function layoutEntry(entry: TranscriptItem, width: number, ascii: boolean): LaidLine[] {
+export function layoutEntry(
+  entry: TranscriptItem,
+  width: number,
+  ascii: boolean,
+  parts: ReasoningMap = new Map(),
+  now = Date.now(),
+): LaidLine[] {
   const dot = ascii ? "*" : "•";
   const prompt = ascii ? ">" : "›";
   switch (entry.kind) {
@@ -80,7 +92,14 @@ export function layoutEntry(entry: TranscriptItem, width: number, ascii: boolean
     case "assistant": {
       const lines: LaidLine[] = [];
       if (entry.reasoning !== "") {
-        lines.push(...rows(`${entry.key}:r`, entry.reasoning, width, { dim: true }).slice(-4));
+        const sections = parts.get(entry.messageId) ?? [{ text: entry.reasoning, active: false }];
+        sections.forEach((part, i) =>
+          lines.push({
+            key: `${entry.key}:r:${i}`,
+            text: paint(reasoningLabel(part, now, ascii), width),
+            dim: true,
+          }),
+        );
       }
       if (entry.text !== "") lines.push(...renderMarkdown(entry.text, width, `${entry.key}:t`));
       if (entry.finishReason === "aborted") {
@@ -132,7 +151,13 @@ export function layoutEntry(entry: TranscriptItem, width: number, ascii: boolean
   }
 }
 
-export function layoutLive(view: SessionView, width: number, ascii: boolean): LaidLine[] {
+export function layoutLive(
+  view: SessionView,
+  width: number,
+  ascii: boolean,
+  parts: ReasoningMap = new Map(),
+  now = Date.now(),
+): LaidLine[] {
   const lines: LaidLine[] = [];
   const cursor = ascii ? "_" : "|";
   for (const tool of view.live.tools) {
@@ -145,22 +170,36 @@ export function layoutLive(view: SessionView, width: number, ascii: boolean): La
   for (const a of view.live.assistants) {
     // 思考与正文都显示：有的模型先吐几个正文字再回去思考，
     // 只显示正文会让画面停在那几个字上（思考灰色在上，正文在下）
-    const reasoning = a.reasoning !== "" ? wrap(a.reasoning, width) : [];
+    const sections: ReasoningPart[] =
+      parts.get(a.messageId) ??
+      (a.reasoning !== "" ? [{ text: a.reasoning, active: a.text === "" }] : []);
     const text =
-      a.text !== "" || reasoning.length === 0
+      a.text !== "" || sections.length === 0
         ? renderMarkdown(a.text, width, `live-a:${a.messageId}`)
         : [];
-    reasoning.forEach((line, i) => {
-      const last = text.length === 0 && i === reasoning.length - 1;
+    const thoughtActive = sections.at(-1)?.active === true;
+    sections.forEach((part, section) => {
       lines.push({
-        key: `live-r:${a.messageId}:${i}`,
-        text: paint(last ? `${line.text}${cursor}` : line.text, width),
-        continued: line.continued,
+        key: `live-r:${a.messageId}:${section}:head`,
+        text: paint(reasoningLabel(part, now, ascii), width),
         dim: true,
+      });
+      if (!part.active) return;
+      const visible = wrap(part.text, width).slice(-4);
+      visible.forEach((line, i) => {
+        const last = section === sections.length - 1 && i === visible.length - 1;
+        lines.push({
+          key: `live-r:${a.messageId}:${section}:${i}`,
+          text: last
+            ? `${truncateLine(boxSafe(line.text), Math.max(0, budget(width) - 1), "")}${cursor}`
+            : paint(line.text, width),
+          continued: line.continued,
+          dim: true,
+        });
       });
     });
     text.forEach((line, i) => {
-      const last = i === text.length - 1;
+      const last = !thoughtActive && i === text.length - 1;
       lines.push({
         ...line,
         text: paint(last ? `${line.text}${cursor}` : line.text, width),
@@ -184,6 +223,25 @@ export function layoutLive(view: SessionView, width: number, ascii: boolean): La
   return lines;
 }
 
+export function reasoningPageLines(
+  turn: ReasoningTurn,
+  width: number,
+  now: number,
+  ascii: boolean,
+): LaidLine[] {
+  return turn.parts.flatMap((part, i) => [
+    ...(i > 0
+      ? [{ key: `sep:${i}`, text: paint("─".repeat(Math.max(1, width - SAFE)), width), dim: true }]
+      : []),
+    {
+      key: `head:${i}`,
+      text: paint(reasoningLabel(part, now, ascii).replace("（Ctrl+O 查看）", ""), width),
+      dim: true,
+    },
+    ...rows(`part:${i}`, part.text, width),
+  ]);
+}
+
 interface TranscriptSource {
   welcome: LaidLine[];
   notices: readonly string[];
@@ -193,6 +251,8 @@ interface TranscriptSource {
   live: SessionView;
   clientLines: readonly string[];
   ascii: boolean;
+  reasoning?: ReasoningMap;
+  now?: number;
 }
 
 function block(key: string, revision: string, lines: (width: number) => LaidLine[]): LineBlock {
@@ -217,7 +277,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
   for (const item of src.frozen) {
     blocks.push(
       block(item.key, item.kind === "separator" ? item.text : item.key, (width) =>
-        layoutEntry(item, width, src.ascii),
+        layoutEntry(item, width, src.ascii, src.reasoning, src.now),
       ),
     );
   }
@@ -227,9 +287,18 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
       entry.kind === "tool"
         ? `${entry.status}:${entry.liveOutput.length}:${entry.result?.modelContent.length ?? 0}`
         : entry.kind === "assistant"
-          ? `${entry.text.length}:${entry.reasoning.length}`
+          ? `${entry.text.length}:${entry.reasoning.length}:${
+              src.reasoning
+                ?.get(entry.messageId)
+                ?.map((p) => p.ended ?? "")
+                .join(",") ?? ""
+            }`
           : entry.key;
-    blocks.push(block(entry.key, revision, (width) => layoutEntry(entry, width, src.ascii)));
+    blocks.push(
+      block(entry.key, revision, (width) =>
+        layoutEntry(entry, width, src.ascii, src.reasoning, src.now),
+      ),
+    );
   }
   // 缓存标记要覆盖布局的全部输入：思考长度、进行中工具、重试
   const liveRev = [
@@ -237,8 +306,26 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
     src.live.live.tools.map((t) => t.callId).join(","),
     src.live.retry?.attempt ?? "",
     src.live.status,
+    src.reasoning === undefined
+      ? ""
+      : src.live.live.assistants
+          .map(
+            (a) =>
+              src.reasoning
+                ?.get(a.messageId)
+                ?.map(
+                  (p) =>
+                    `${p.active ? Math.floor((src.now ?? 0) / 1000) : (p.ended ?? "")}:${p.text.length}`,
+                )
+                .join(",") ?? "",
+          )
+          .join("|"),
   ].join("|");
-  blocks.push(block("live", liveRev, (width) => layoutLive(src.live, width, src.ascii)));
+  blocks.push(
+    block("live", liveRev, (width) =>
+      layoutLive(src.live, width, src.ascii, src.reasoning, src.now),
+    ),
+  );
   if (src.clientLines.length > 0) {
     blocks.push(
       block("client", src.clientLines.join("\n"), (width) =>

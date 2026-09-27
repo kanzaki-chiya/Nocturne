@@ -83,6 +83,7 @@ it("尺寸和页面切换逐行重写整帧，不清屏", () => {
   for (const write of [
     layer.render(frame(lines), 100, 10, 9, "conversation", undefined),
     layer.render(frame(lines), 100, 10, 0, "model", undefined),
+    layer.render(frame(lines), 100, 10, 0, "reasoning-0", undefined),
     layer.render(frame(lines), 100, 10, 9, "conversation", undefined),
   ]) {
     expect(rewritten(write)).toHaveLength(9);
@@ -163,7 +164,7 @@ function tty() {
   return { stdin, stdout, stderr, writes };
 }
 
-it("满视口后 120 行流式推理每帧只写露出行且不清屏", async () => {
+it("120 行流式思考保持固定窗口，每帧至多改 6 行且不清屏", async () => {
   const scripts = [
     [
       ...Array.from({ length: 120 }, (_, i) => [
@@ -206,7 +207,7 @@ it("满视口后 120 行流式推理每帧只写露出行且不清屏", async ()
       frames.push(write);
     }
   }
-  // 回复正文/Turn 完结会重排整页，不属于推理流式滚动。
+  // 回复正文/Turn 完结会重排页面，只统计长思考稳定流式阶段。
   const steady = frames.filter(
     (f) => /推理第(?:0[4-9]\d|1[01]\d)行/.test(f) && !f.includes("完成"),
   );
@@ -222,7 +223,8 @@ it("满视口后 120 行流式推理每帧只写露出行且不清屏", async ()
   }
   try {
     expect(steady.length).toBeGreaterThan(10);
-    expect(Math.max(...rows)).toBeLessThanOrEqual(5);
+    expect(Math.max(...rows)).toBeLessThanOrEqual(6);
+    expect(steady.join("")).not.toMatch(/\x1b\[\d+[ST]/);
     expect(io.writes.join("")).not.toContain("\x1b[2J");
   } finally {
     io.stdin.send("\x04");

@@ -283,7 +283,7 @@ describe("全屏退出（默认模式）", () => {
     await session.close();
   }, 12000);
 
-  it("退出文本区分思考并只导出欢迎文字", async () => {
+  it("退出只导出折叠思考行与欢迎文字", async () => {
     const { runtime, session } = await openSession([
       [
         { type: "reasoning_delta", text: "先想想" },
@@ -304,7 +304,9 @@ describe("全屏退出（默认模式）", () => {
     await done;
     const output = io.stdoutChunks.join("");
     const after = output.slice(output.indexOf("\x1b[?1049l"));
-    expect(after).toContain("（思考）先想想");
+    expect(after).toContain("∴ 思考了 0s（Ctrl+O 查看）");
+    expect(after).not.toContain("先想想");
+    expect(after).not.toContain("（思考）");
     expect(after).toContain("正文");
     expect(after).toContain("Nocturne");
     expect(after).not.toMatch(/[▀▄█]/);
