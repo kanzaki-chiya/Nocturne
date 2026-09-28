@@ -21,6 +21,7 @@ import { clampReasoningEffort, isProviderError, type ProviderError } from "../pr
 import type {
   ContentBlock,
   FinishReason,
+  ImageAttachment,
   RuntimeStatus,
   TurnEndReason,
   Usage,
@@ -74,6 +75,7 @@ function aborted(signal: AbortSignal): boolean {
 export async function runTurn(
   deps: TurnDeps,
   content: ContentBlock[],
+  attachments?: ImageAttachment[],
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -88,7 +90,7 @@ export async function runTurn(
   const turnId =
     deps.newId !== undefined ? deps.newId("turn") : `turn-${turnIndex}-${randomUUID().slice(0, 8)}`;
   // ADR-0023：sha256 → base64 的 Turn 内缓存，避免每个 Step 重复读盘/编码；
-  // 加载失败记 null，本 Turn 内不再重试
+  // 加载失败记 null，本 Turn 内不再重试；每请求最多 20 张，无需另设上限
   const imageCache = new Map<string, string | null>();
   const turnUsage = {
     inputTokens: 0,
@@ -242,7 +244,11 @@ export async function runTurn(
   try {
     // ── 开始 ──
     await session.emit("turn.started", { turnIndex }, { turnId });
-    await session.emit("message.user", { messageId: id("message"), content }, { turnId });
+    await session.emit(
+      "message.user",
+      { messageId: id("message"), content, ...(attachments?.length ? { attachments } : {}) },
+      { turnId },
+    );
 
     // TurnStart Hook（hooks.md 第 1 节）：block → Turn 以 error(hook_blocked) 结算
     const startHook = await deps.execEnv.hooks

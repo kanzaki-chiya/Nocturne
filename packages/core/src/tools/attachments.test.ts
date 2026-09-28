@@ -51,6 +51,37 @@ function makeStore(attachmentsDir: string, sessionId = "sess-1"): AttachmentStor
 }
 
 describe("AttachmentStore", () => {
+  it("64 MB LRU 淘汰最久未用字节；重读磁盘并重新校验 sha256", async () => {
+    const dir = tmpDir("nct-att-lru-");
+    let reads = 0;
+    const store = createAttachmentStore({
+      fs: {
+        ...platform.fs,
+        readFile: async (file) => {
+          reads += 1;
+          return platform.fs.readFile(file);
+        },
+      },
+      paths: platform.paths,
+      attachmentsDir: dir,
+      sessionId: "s",
+    });
+    const payload = (tail: number) => {
+      const data = new Uint8Array(24 * 1024 * 1024);
+      data.set(PNG_2x3);
+      data[data.length - 1] = tail;
+      return data;
+    };
+    const a = await store.save({ data: payload(1), mimeType: "image/png", source: "read" });
+    const b = await store.save({ data: payload(2), mimeType: "image/png", source: "read" });
+    expect(await store.load(a)).toBeDefined(); // a 最近使用
+    await store.save({ data: payload(3), mimeType: "image/png", source: "read" });
+    expect(await store.load(a)).toBeDefined();
+    expect(reads).toBe(0);
+    await platform.fs.writeFile(path.join(dir, "s", b.file), new Uint8Array([9]));
+    expect(await store.load(b)).toBeUndefined(); // b 被淘汰，读回时校验失败
+    expect(reads).toBe(1);
+  });
   it("save 写入 <attachmentsDir>/<sessionId>/img-1.png，引用含 sha256 与宽高", async () => {
     const dir = tmpDir("nct-att-");
     const store = makeStore(dir);

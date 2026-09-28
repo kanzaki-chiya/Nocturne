@@ -61,6 +61,7 @@ import type {
   Grant,
   HookEntry,
   HookPoint,
+  ImageMimeType,
   ModelRef,
   PermissionReply,
   ReasoningEffort,
@@ -68,6 +69,7 @@ import type {
   RuntimeEvent,
   TurnEndReason,
 } from "./protocol/index.js";
+import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
 import { isReasoningEffort, REASONING_EFFORT_ORDER } from "./protocol/index.js";
 import {
   createSessionStore,
@@ -208,6 +210,9 @@ export interface CreateSessionOptions {
 export interface SubmitInput {
   text?: string | undefined;
   content?: ContentBlock[] | undefined;
+  /** 图片字节由 Core 落盘，事件只保存引用 */
+  attachments?:
+    { data: Uint8Array; mimeType: ImageMimeType; label?: string | undefined }[] | undefined;
 }
 
 export interface RuntimeSession {
@@ -1043,7 +1048,25 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               session.state().config.reasoningEffort,
               model.model.capabilities.reasoningEffort,
             ) ?? "off";
-          const reason = await runTurn(deps, content);
+          const attachments = [];
+          for (const att of input.attachments ?? []) {
+            const mimeType = sniffImageMime(att.data);
+            const size = mimeType === undefined ? undefined : parseImageSize(att.data, mimeType);
+            if (
+              mimeType !== att.mimeType ||
+              size === undefined ||
+              att.data.byteLength > IMAGE_MAX_BYTES ||
+              size.width > IMAGE_MAX_EDGE ||
+              size.height > IMAGE_MAX_EDGE
+            ) {
+              throw new RuntimeCommandError("invalid_command", "图片格式或尺寸不符合要求");
+            }
+            if (execEnv.attachments === undefined) {
+              throw new RuntimeCommandError("invalid_command", "附件存储不可用");
+            }
+            attachments.push(await execEnv.attachments.save({ ...att, source: "paste" }));
+          }
+          const reason = await runTurn(deps, content, attachments);
           if (reason === "failed") {
             throw new RuntimeCommandError("session_failed", "会话持久化失败");
           }
@@ -1469,6 +1492,7 @@ export {
 export { SessionError } from "./session/index.js";
 export {
   createPlatform,
+  type Clipboard,
   SHELL_KINDS,
   type DetectedShell,
   type PipeProcess,
@@ -1476,6 +1500,7 @@ export {
   type Platform,
   type ShellKind,
 } from "./platform/index.js";
+export { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
 // MCP / Hook 装配点类型（modules.md：注入方是 apps；实现位于 packages/mcp）
 export type {
   HookCallInput,

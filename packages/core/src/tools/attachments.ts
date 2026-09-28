@@ -19,6 +19,7 @@ const EXT: Record<ImageMimeType, string> = {
 };
 
 const IMG_NAME = /^img-(\d+)\./;
+const CACHE_LIMIT = 64 * 1024 * 1024;
 
 export interface AttachmentStore {
   /** 保存字节为 img-<n>.<ext>，返回引用（含 sha256、宽高） */
@@ -40,8 +41,23 @@ export function createAttachmentStore(opts: {
 }): AttachmentStore {
   const { fs, paths, sessionId } = opts;
   const dir = paths.join(opts.attachmentsDir, sessionId);
-  /** sha256 → 字节（会话级缓存，无淘汰） */
+  /** sha256 → 字节，Map 插入顺序即 LRU 顺序 */
   const cache = new Map<string, Uint8Array>();
+  let cachedBytes = 0;
+  function remember(sha: string, data: Uint8Array): void {
+    const old = cache.get(sha);
+    if (old !== undefined) cachedBytes -= old.byteLength;
+    cache.delete(sha);
+    if (data.byteLength > CACHE_LIMIT) return;
+    cache.set(sha, data);
+    cachedBytes += data.byteLength;
+    while (cachedBytes > CACHE_LIMIT) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cachedBytes -= cache.get(oldest)?.byteLength ?? 0;
+      cache.delete(oldest);
+    }
+  }
   /** 下一个可用序号；首次 save 时扫目录惰性定起点 */
   let next: number | undefined;
   /** 保存串行化：n 递增与 createExclusive 配对，杜绝并发抢号 */
@@ -77,7 +93,7 @@ export function createAttachmentStore(opts: {
         next = n + 1;
         const sha256 = createHash("sha256").update(data).digest("hex");
         const size = parseImageSize(data, mimeType);
-        cache.set(sha256, data);
+        remember(sha256, data);
         return {
           type: "image",
           file,
@@ -109,12 +125,15 @@ export function createAttachmentStore(opts: {
     },
     async load(att) {
       const hit = cache.get(att.sha256);
-      if (hit !== undefined) return hit;
+      if (hit !== undefined) {
+        remember(att.sha256, hit);
+        return hit;
+      }
       const data = await fs.readFile(paths.join(dir, att.file)).catch(() => undefined);
       if (data === undefined) return undefined;
       const sha256 = createHash("sha256").update(data).digest("hex");
       if (sha256 !== att.sha256) return undefined;
-      cache.set(sha256, data);
+      remember(sha256, data);
       return data;
     },
   };

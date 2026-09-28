@@ -86,6 +86,58 @@ describe("附件编号跨恢复续接（ADR-0023）", () => {
 });
 
 describe("端到端：read 图片 → 下一次请求（ADR-0023）", () => {
+  it("submit 图片落盘并投影到同一条用户消息", async () => {
+    const ws = tmpDir("nct-att-ws-");
+    const sessionsDir = tmpDir("nct-att-sess-");
+    const provider = new FakeProvider({
+      scripts: [
+        [
+          { type: "text_delta", text: "已看" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+      models: [
+        {
+          ref: { provider: "fake", model: "fake-model" },
+          capabilities: {
+            toolCalls: true,
+            parallelToolCalls: true,
+            reasoning: "none",
+            imageInput: true,
+            promptCache: false,
+          },
+        },
+      ],
+    });
+    const runtime = await createRuntime({ cwd: ws, sessionsDir, providers: [provider] });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    await session.submit({
+      text: "看 [Image #1]",
+      attachments: [{ data: PNG_2x3, mimeType: "image/png", label: "剪贴板" }],
+    });
+    const user = session.state().history.find((h) => h.kind === "user");
+    expect(user?.kind).toBe("user");
+    if (user?.kind !== "user") throw new Error("missing user");
+    expect(user.attachments?.[0]).toMatchObject({
+      file: "img-1.png",
+      source: "paste",
+      label: "剪贴板",
+    });
+    const ref = user.attachments?.[0];
+    if (ref === undefined) throw new Error("missing attachment");
+    expect(
+      await platform.fs.readFile(path.join(sessionsDir, "attachments", session.id, ref.file)),
+    ).toEqual(Buffer.from(PNG_2x3));
+    expect(ref.sha256).toBe(
+      (await import("node:crypto")).createHash("sha256").update(PNG_2x3).digest("hex"),
+    );
+    const requestUser = provider.requests[0]?.messages.find((m) => m.role === "user");
+    expect(requestUser?.role === "user" && requestUser.images?.[0]).toMatchObject({
+      data: Buffer.from(PNG_2x3).toString("base64"),
+      mimeType: "image/png",
+    });
+    await session.close();
+  });
   const readImageScripts = (): FakeScript[] => [
     [
       { type: "tool_call", toolCallId: "tc1", name: "read", input: { path: "pic.png" } },
