@@ -19,6 +19,9 @@ import { sessionSavedLine } from "./exit-note.js";
 import { stripControls } from "./format.js";
 import { MOUSE_DISABLE, MOUSE_ENABLE, wrapMouseStdin, type MouseSource } from "./mouse.js";
 
+/** 复位全部文字属性：退出路径统一收尾，保证不把颜色留给后续的 shell */
+const SGR_RESET = "\x1b[0m";
+
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 
 export interface TuiOptions {
@@ -85,8 +88,9 @@ export async function runTui(
   const announce = (): void => {
     if (announced || sessionId === undefined) return;
     announced = true;
-    // 全屏：unmount 已写 ?1049l 回主屏，对话行与提示都在主屏上
-    stdout.write(`${sessionSavedLine(sessionId)}\n`);
+    // 全屏：unmount 已写 ?1049l 回主屏，对话行与提示都在主屏上。
+    // 先复位 SGR：ConPTY 下漏出的颜色会被 shell 当成默认色，整个标签页一直带色
+    stdout.write(`${SGR_RESET}${sessionSavedLine(sessionId)}\n`);
   };
   // 全屏：stdin 进 Ink 前先摘除 SGR 鼠标序列（跨块截断由包装层拼接）
   let mouseSource = options.mouse;
@@ -103,7 +107,9 @@ export async function runTui(
   // 鼠标上报与备用屏切换绑在同一笔写出：进备用屏后开、回主屏前关。
   const cursorOut = createCursorStream(
     stdout,
-    inline ? {} : { fullscreen: true, afterEnterAlt: MOUSE_ENABLE, beforeExitAlt: MOUSE_DISABLE },
+    inline
+      ? {}
+      : { fullscreen: true, afterEnterAlt: MOUSE_ENABLE, beforeExitAlt: SGR_RESET + MOUSE_DISABLE },
   );
   // Windows Terminal: suspendTerminal 的 pauseInput 不应撤销控制台读请求。
   const unref = stdin.unref.bind(stdin);
@@ -164,7 +170,7 @@ export async function runTui(
   if (!inline) {
     process.once("exit", () => {
       try {
-        stdout.write(MOUSE_DISABLE);
+        stdout.write(MOUSE_DISABLE + SGR_RESET);
       } catch {
         /* 进程退出路径忽略 */
       }
@@ -183,6 +189,8 @@ export async function runTui(
   // 全屏：备用屏已回主屏（unmount 终帧含 ?1049l），对话按当前宽度铺行
   const dump = transcriptOut.current;
   if (dump !== undefined) {
+    // 回主屏后 DECRC 可能恢复进备用屏前的颜色；打印前统一复位
+    stdout.write(SGR_RESET);
     for (const line of dump()) {
       // 兜底：主屏上漏出的控制序列（颜色码）会染到后面所有输出
       stdout.write(`${stripControls(line)}\n`);

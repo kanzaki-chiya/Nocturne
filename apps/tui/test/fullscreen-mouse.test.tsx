@@ -97,7 +97,9 @@ function okSpawn() {
   return { spawn, calls };
 }
 
-describe("全屏鼠标", () => {
+// 用例内部都按渲染条件等待；单独运行 0.5–3 秒，全量并发下会被拖慢到 5 秒以上，
+// 这里放宽的只是单个用例的总时长上限，不是等待时序
+describe("全屏鼠标", { timeout: 15_000 }, () => {
   it("滚轮翻阅出提示并停在原处，滚回底部提示消失", async () => {
     const { runtime, session } = await longSession();
     const mouse = fakeMouse();

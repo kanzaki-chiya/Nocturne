@@ -373,6 +373,33 @@ describe("全屏退出（默认模式）", () => {
     await session.close();
   });
 
+  it("退出路径复位 SGR：回主屏前、导出对话前、继续提示前各一次", async () => {
+    const { runtime, session } = await openSession();
+    const io = ttyPair();
+    const done = runTui({ session }, runtime, {
+      stdin: io.stdin,
+      stdout: io.stdout,
+      stderr: io.stderr,
+      patchConsole: false,
+    });
+    await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
+    io.stdin.write("\x04");
+    await done;
+    const text = io.stdoutChunks.join("");
+    const leaveAt = text.lastIndexOf("\x1b[?1049l");
+    expect(leaveAt).toBeGreaterThan(-1);
+    // 回主屏那一笔：复位在 ?1049l 之前（ConPTY 下漏出的颜色会被 shell 当成默认色）
+    const leaveChunk = io.stdoutChunks.find((c) => c.includes("\x1b[?1049l")) ?? "";
+    expect(leaveChunk.indexOf("\x1b[0m")).toBeGreaterThan(-1);
+    expect(leaveChunk.indexOf("\x1b[0m")).toBeLessThan(leaveChunk.indexOf("\x1b[?1049l"));
+    // 主屏上：导出的第一行文字之前先复位；继续提示自带复位前缀
+    const after = text.slice(leaveAt + "\x1b[?1049l".length);
+    expect(after.indexOf("\x1b[0m")).toBeGreaterThan(-1);
+    expect(after.indexOf("\x1b[0m")).toBeLessThan(after.indexOf("Nocturne"));
+    expect(after).toContain(`\x1b[0m${sessionSavedLine(session.id)}`);
+    await session.close();
+  });
+
   it("未捕获异常：鼠标关闭仍在回主屏之前", async () => {
     const { runtime, session } = await openSession();
     const io = ttyPair();
