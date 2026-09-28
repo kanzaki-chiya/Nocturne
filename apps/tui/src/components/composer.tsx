@@ -8,7 +8,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 
 import { composerWindow, normalizeNewlines, verticalCursor } from "../cursor.js";
 import { glyphs, useTuiEnv } from "../env.js";
-import { imageTokenAt, imageTokenBefore } from "../images.js";
+import { imageTokenAt, imageTokenBefore, splitImageTokens } from "../images.js";
 import { pasteTokenAt, pasteTokenBefore, type PasteStore } from "../paste.js";
 import { theme } from "../theme.js";
 
@@ -208,6 +208,19 @@ export function Composer({
 
   const prompt = `${g.prompt} `;
   const view = composerWindow(prompt, value, cursor, width, height);
+  // [Image #n] 占位换色，与正文区分（光标只停在占位两端，不会把占位拆开）
+  const tinted = (text: string | undefined): React.ReactNode =>
+    text === undefined || text === ""
+      ? text
+      : splitImageTokens(text).map((part, i) =>
+          part.image ? (
+            <Text key={i} color={theme.accentAlt}>
+              {part.text}
+            </Text>
+          ) : (
+            part.text
+          ),
+        );
   const rule = env.ascii ? "-".repeat(Math.max(1, width)) : "─".repeat(Math.max(1, width));
   return (
     <Box flexDirection="column">
@@ -220,9 +233,9 @@ export function Composer({
         <Box key={i} height={1}>
           <Text color={disabled ? theme.muted : theme.accent}>{row.prefix}</Text>
           <Text dimColor={disabled} wrap="truncate">
-            {row.before}
+            {tinted(row.before)}
             {row.focused && !disabled ? <Text inverse>{row.at ?? " "}</Text> : row.at}
-            {row.after}
+            {tinted(row.after)}
             {disabled && i === view.rows.length - 1 ? `（${disabledReason}）` : null}
           </Text>
         </Box>

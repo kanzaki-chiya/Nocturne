@@ -697,7 +697,6 @@ function SessionApp({
   const cursorRef = useRef(0);
   const images = useMemo(() => createImageStore(), []);
   const imagePlatform = useMemo(() => createPlatform(), []);
-  const [imageHint, setImageHint] = useState<string | undefined>();
   const updateInput = (value: string, at: number): void => {
     inputRef.current = value;
     cursorRef.current = at;
@@ -1501,18 +1500,17 @@ function SessionApp({
     const v = inputRef.current;
     const c = cursorRef.current;
     updateInput(v.slice(0, c) + token + v.slice(c), c + token.length);
-    setImageHint(undefined);
   };
   const onPasteImage = async (text: string): Promise<boolean> => {
     const found = await droppedImage(text, imagePlatform);
     if (found.kind === "none") return false;
     if (found.kind === "too_large") {
-      setImageHint("图片超过 5 MB / 8000 px 限制");
+      pushLine("! 图片超过 5 MB / 8000 px 限制");
       return false;
     }
     const model = imageModel();
     if (!model.supported) {
-      setImageHint(model.hint);
+      pushLine(`! ${model.hint}`);
       return false;
     }
     insertImage(found.image);
@@ -1522,35 +1520,40 @@ function SessionApp({
     if (
       clipboardPlatform !== undefined ? clipboardPlatform !== "win32" : process.platform !== "win32"
     ) {
-      setImageHint("当前平台暂不支持从剪贴板粘贴图片");
+      pushLine("! 当前平台暂不支持从剪贴板粘贴图片");
       return;
     }
     const model = imageModel();
     if (!model.supported) {
-      setImageHint(model.hint);
+      pushLine(`! ${model.hint}`);
       return;
     }
     void (clipboard ?? imagePlatform.clipboard)
       .readImage()
       .then((result) => {
         if (result === undefined) {
-          setImageHint("剪贴板中没有图片");
+          pushLine("! 剪贴板中没有图片");
           return;
         }
         const checked = checkImage(result.data);
         if (checked.kind !== "ok") {
-          setImageHint("图片超过 5 MB / 8000 px 限制");
+          pushLine("! 图片超过 5 MB / 8000 px 限制");
           return;
         }
         const current = imageModel();
         if (!current.supported) {
-          setImageHint(current.hint);
+          pushLine(`! ${current.hint}`);
           return;
         }
         insertImage({ data: result.data, mimeType: checked.mimeType, label: "剪贴板" });
       })
       .catch((e: unknown) => {
-        setImageHint(`读取剪贴板失败：${errText(e)}`);
+        // base64 输出超过读取缓冲（约 6 MB 原图）时 execFile 报 maxBuffer
+        pushLine(
+          /maxBuffer/i.test(errText(e))
+            ? "! 图片超过 5 MB / 8000 px 限制"
+            : `! 读取剪贴板失败：${errText(e)}`,
+        );
       });
   };
 
@@ -1853,7 +1856,7 @@ function SessionApp({
       if (!text.startsWith("/") && images.in(text).length > 0) {
         const model = imageModel();
         if (!model.supported) {
-          setImageHint(model.hint);
+          pushLine(`! ${model.hint}`);
           return;
         }
       }
@@ -2464,9 +2467,7 @@ function SessionApp({
           context={{ used: contextReport.estimatedTokens, limit: contextWindow }}
           models={runtime.listModels()}
           highlight={highlight}
-          note={
-            imageHint ?? note ?? (expanded && fullscreen ? "思考已展开（Ctrl+O 收起）" : undefined)
-          }
+          note={note ?? (expanded && fullscreen ? "思考已展开（Ctrl+O 收起）" : undefined)}
         />
       ) : null}
     </>

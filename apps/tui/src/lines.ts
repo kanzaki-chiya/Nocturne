@@ -8,6 +8,7 @@ import stringWidth from "string-width";
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 
 import { attachmentLine } from "./attachment-line.js";
+import { splitImageTokens } from "./images.js";
 import { boxSafe, stripControls, summarizeToolInput, tailLines, truncateLine } from "./format.js";
 import { renderMarkdown } from "./markdown.js";
 import { reasoningLabel, type ReasoningMap, type ReasoningPart } from "./reasoning.js";
@@ -137,7 +138,20 @@ export function layoutEntry(
         .map((c) => c.text)
         .join("");
       return [
-        ...rows(entry.key, `${prompt} ${text}`, width, { color: "cyan", bold: true }),
+        ...rows(entry.key, `${prompt} ${text}`, width, { color: "cyan", bold: true }).map(
+          (line) => {
+            // [Image #n] 占位换色，与正文区分（其余分段继承本行的 cyan/bold）
+            const parts = splitImageTokens(line.text);
+            return parts.some((p) => p.image)
+              ? {
+                  ...line,
+                  segments: parts.map((p) =>
+                    p.image ? { text: p.text, color: theme.accentAlt } : { text: p.text },
+                  ),
+                }
+              : line;
+          },
+        ),
         ...(entry.attachments ?? []).flatMap((att, i) =>
           rows(`${entry.key}:image:${i}`, `  ${attachmentLine(att, i, ascii)}`, width, {
             color: theme.accent,

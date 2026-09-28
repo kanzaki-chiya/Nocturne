@@ -10,7 +10,8 @@ import type { ImageAttachment } from "@nocturne/core/protocol";
 import { App } from "../src/app.js";
 import { attachmentLine } from "../src/attachment-line.js";
 import { layoutEntry } from "../src/lines.js";
-import { createImageStore, droppedImage } from "../src/images.js";
+import { createImageStore, droppedImage, splitImageTokens } from "../src/images.js";
+import { theme } from "../src/theme.js";
 import { createPlatform } from "@nocturne/core";
 
 const roots: string[] = [];
@@ -139,6 +140,10 @@ describe("TUI 图片输入", () => {
       stdin.write("\x1bv");
       await waitFor(() => (lastFrame() ?? "").includes(hint));
       expect(lastFrame()).not.toContain("[Image #1]");
+      // 提示进对话（! 开头），不挂在状态栏：切回模型后状态栏不会残留旧提示
+      const lines = (lastFrame() ?? "").split("\n");
+      expect(lines.some((l) => l.includes("! ") && l.includes(hint))).toBe(true);
+      expect(lines.find((l) => l.includes("idle"))).not.toContain(hint);
       unmount();
       await active.close();
     }
@@ -329,5 +334,36 @@ describe("附件行", () => {
         .map((l) => l.text)
         .join("\n"),
     ).toContain("[Image #3");
+  });
+
+  it("用户消息里的 [Image #n] 占位单独着色，其余文字继承本行颜色", () => {
+    expect(splitImageTokens("看[Image #1]和[Image #12]")).toEqual([
+      { text: "看", image: false },
+      { text: "[Image #1]", image: true },
+      { text: "和", image: false },
+      { text: "[Image #12]", image: true },
+    ]);
+    expect(splitImageTokens("无占位")).toEqual([{ text: "无占位", image: false }]);
+    const user = {
+      kind: "user" as const,
+      key: "u",
+      seq: 1,
+      turnId: "t",
+      content: [{ type: "text" as const, text: "[Image #1]识别图片内容" }],
+    };
+    const [first] = layoutEntry(user, 80, false);
+    expect(first?.color).toBe("cyan");
+    expect(first?.segments).toEqual([
+      { text: "› " },
+      { text: "[Image #1]", color: theme.accentAlt },
+      { text: "识别图片内容" },
+    ]);
+    // 不含占位的行保持原样，不额外拆分
+    const plain = layoutEntry(
+      { ...user, content: [{ type: "text" as const, text: "你好" }] },
+      80,
+      false,
+    );
+    expect(plain[0]?.segments).toBeUndefined();
   });
 });

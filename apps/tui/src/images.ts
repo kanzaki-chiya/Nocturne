@@ -16,6 +16,19 @@ export interface PendingImage {
 }
 const TOKEN = /\[Image #(\d+)\]/g;
 
+/** 按 [Image #n] 占位切分文本（输入框与用户消息里把占位着色，与正文区分） */
+export function splitImageTokens(text: string): { text: string; image: boolean }[] {
+  const out: { text: string; image: boolean }[] = [];
+  let last = 0;
+  for (const m of text.matchAll(/\[Image #\d+\]/g)) {
+    if (m.index > last) out.push({ text: text.slice(last, m.index), image: false });
+    out.push({ text: m[0], image: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last), image: false });
+  return out;
+}
+
 export function imageTokenBefore(text: string): number {
   return /\[Image #\d+\]$/.exec(text)?.[0].length ?? 0;
 }

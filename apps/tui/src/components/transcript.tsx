@@ -6,6 +6,7 @@ import { Box, Static, Text } from "ink";
 
 import { attachmentLine } from "../attachment-line.js";
 import { glyphs, useTuiEnv } from "../env.js";
+import { splitImageTokens } from "../images.js";
 import { layoutEntry } from "../lines.js";
 import type { ReasoningMap } from "../reasoning.js";
 import { renderMarkdown } from "../markdown.js";
@@ -30,7 +31,16 @@ function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): Re
   return (
     <Box marginTop={1} flexDirection="column">
       <Text color="cyan" bold>
-        {glyphs(env).prompt} {text}
+        {glyphs(env).prompt}{" "}
+        {splitImageTokens(text).map((part, i) =>
+          part.image ? (
+            <Text key={i} color={theme.accentAlt}>
+              {part.text}
+            </Text>
+          ) : (
+            part.text
+          ),
+        )}
       </Text>
       {(entry.attachments ?? []).map((att, i) => (
         <Text key={`${att.file}:${i}`} color={theme.accent} wrap="truncate">
