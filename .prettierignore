@@ -3,3 +3,4 @@ node_modules
 coverage
 pnpm-lock.yaml
 *.md
+packages/core/src/config/models-dev-snapshot.ts
