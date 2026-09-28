@@ -1,6 +1,6 @@
 # ADR-0018：思考强度——统一中性档位、按声明决定可用档位、适配器归一化
 
-- 状态：已接受；逐模型档位的用户编辑来源与"显式推理 none 不可切换"约束见 [ADR-0024](ADR-0024-model-settings-editor.md)
+- 状态：已接受；逐模型档位的用户编辑来源见 [ADR-0024](ADR-0024-model-settings-editor.md)；服务商级 `thinking.levels` 与向导「是否支持思考」被 [ADR-0025](ADR-0025-per-model-reasoning.md) 取消，档位只在模型支持推理时存在
 - 日期：2026-09-25
 
 ## 背景
