@@ -1,8 +1,9 @@
 /**
- * 分层合并（config.md 第 2 节）。
- * 输入按层序排列（低层在前）；输出 ResolvedConfig。
+ * 分层合并（config.md 第 2 节；模型字段合并与来源标注见 ADR-0024 第 2 节）。
+ * 输入按层序排列（低层在前）；输出 ResolvedConfig 与逐字段来源表。
  * - model / preset / turn.*：高层覆盖低层
- * - providers：按 id 合并，同 id 浅合并，其中 models 按模型 id 逐条合并
+ * - providers：按 id 合并，同 id 浅合并；其中 models 按模型 id **逐字段合并**——
+ *   顶层字段逐个覆盖、capabilities 逐键覆盖、数组（reasoningEffort）整体替换
  * - permissions.rules：追加（高层规则排在低层之后，权限"后写优先"）
  */
 import { inferShellKindFromPath } from "../platform/index.js";
@@ -10,62 +11,161 @@ import type { HookPoint, RuleOrigin } from "../protocol/index.js";
 import type {
   ConfigFile,
   McpServerEntry,
+  ModelOverrideShape,
   ProviderEntryConfig,
   ResolvedConfig,
   TurnOverrides,
 } from "./types.js";
 
+/** 层的身份（模型字段来源标注与显式 none 规则用；ADR-0024 第 2 节） */
+export type LayerKind = "setup" | "userModels" | "user" | "project" | "env" | "cli";
+
 export interface MergeLayer {
   /**
-   * 该层规则命中时的来源标注。"setup"（向导层 providers.json）不携带
-   * 权限规则——其 schema 不含 permissions 段，类型上仍收窄到 RuleOrigin。
+   * 层身份：setup=向导层 providers.json；userModels=providers.json 条目的
+   * 用户编辑派生出的合成层（load.ts 插在 setup 与 user 之间）；其余为
+   * 手写/环境/命令行层。权限规则 origin 由 kind 推导（user→"user"、
+   * project→"project"、env/cli→"cli"；setup/userModels 不产生规则）。
    */
-  origin: Extract<RuleOrigin, "user" | "project" | "cli"> | "setup";
+  kind: LayerKind;
+  /** 定义该层的文件（来源标注与警告文案用）；env/cli 层无文件 */
+  path?: string | undefined;
   file: ConfigFile;
 }
 
-/** 向导层"用户声明"的逐模型图片输入（ADR-0023 第 1 节）：providerId → modelId → imageInput */
-type SetupImageDecls = Map<string, Map<string, boolean>>;
+/** 字段生效值由哪一层给出 */
+export interface FieldOrigin {
+  kind: LayerKind;
+  path?: string | undefined;
+}
 
 /**
- * 预处理 setup 层条目：把 userCapabilities 中声明了 imageInput 的 (modelId, caps)
- * 投影进 models[modelId].capabilities.imageInput（覆盖上游值；不改原对象）。
- * 清单外模型不建 models 条目（会把非严格清单变严格）。同时把声明收集进
- * decls，供全部层合并完后回填（高层手写条目整体替换某模型且未声明
- * imageInput 时回落到用户声明）。高层条目自带的 userCapabilities 只作数据、
- * 不作用户声明。
+ * 某字段在一层的声明（值原文 + 来源）：按层序入栈，栈顶是生效声明；
+ * "跳过 userModels 层"的下层取值直接从栈里找（模型编辑页「跟随」显示用）。
  */
-function projectSetupUserCapabilities(
-  entry: ProviderEntryConfig,
-  decls: SetupImageDecls,
-): ProviderEntryConfig {
-  const userCaps = entry.userCapabilities;
-  if (userCaps === undefined) return entry;
-  const table = new Map<string, boolean>();
-  for (const [modelId, caps] of Object.entries(userCaps)) {
-    if (caps.imageInput !== undefined) table.set(modelId, caps.imageInput);
+export interface FieldDecl {
+  origin: FieldOrigin;
+  value: unknown;
+}
+
+/** 逐模型逐字段的来源表（编辑页来源标注 / 显式 none 判定共用） */
+export interface ModelFieldOrigins {
+  /** providerId → modelId → 字段名（顶层字段与 capabilities.<k> 扁平记录）→ 声明栈 */
+  fields: Map<string, Map<string, Map<string, FieldDecl[]>>>;
+  /** providerId → 定义该服务商条目的最高层 */
+  providers: Map<string, FieldOrigin>;
+  /** providerId → modelId → 声明过该模型的层集合（剔除纯合成层模型的依据） */
+  declaredLayers: Map<string, Map<string, Set<LayerKind>>>;
+  /** 显式 none 规则锁定的 "providerId/modelId"（reasoningEffort 被规则置空） */
+  noneLocked: Set<string>;
+}
+
+export interface MergeResult {
+  resolved: ResolvedConfig;
+  modelInfo: ModelFieldOrigins;
+}
+
+const CONFIG_KINDS: ReadonlySet<LayerKind> = new Set(["user", "project", "env", "cli"]);
+const isConfigKind = (k: LayerKind): boolean => CONFIG_KINDS.has(k);
+
+/** 顶层模型字段（逐个覆盖；pricing 作为整体值替换，不下钻） */
+const MODEL_TOP_FIELDS = ["displayName", "contextWindow", "maxOutputTokens", "pricing"] as const;
+/** capabilities 内的键（逐键覆盖；数组整体替换） */
+const CAP_FIELDS = [
+  "toolCalls",
+  "parallelToolCalls",
+  "reasoning",
+  "reasoningEffort",
+  "imageInput",
+  "promptCache",
+] as const;
+
+type ModelCaps = NonNullable<ModelOverrideShape["capabilities"]>;
+
+/**
+ * 模型条目的逐字段合并（ADR-0024 第 2 节）：upper 只覆盖它实际声明的字段，
+ * 未声明的继承 lower；capabilities 同样逐键，reasoningEffort 数组整体替换。
+ */
+function mergeModelEntry(
+  lower: ModelOverrideShape | undefined,
+  upper: ModelOverrideShape,
+): ModelOverrideShape {
+  const out: ModelOverrideShape = {};
+  for (const f of MODEL_TOP_FIELDS) {
+    const v = upper[f] ?? lower?.[f];
+    if (v !== undefined) (out as Record<string, unknown>)[f] = v;
   }
-  if (table.size === 0) return entry;
-  const existing = decls.get(entry.id) ?? new Map<string, boolean>();
-  for (const [modelId, imageInput] of table) existing.set(modelId, imageInput);
-  decls.set(entry.id, existing);
-  if (entry.models === undefined) return entry;
-  const models = { ...entry.models };
-  let touched = false;
-  for (const [modelId, imageInput] of table) {
-    const model = models[modelId];
-    if (model === undefined) continue; // 不为清单外模型建条目
-    models[modelId] = { ...model, capabilities: { ...model.capabilities, imageInput } };
-    touched = true;
+  const caps: ModelCaps = {};
+  let hasCaps = false;
+  for (const f of CAP_FIELDS) {
+    const v = upper.capabilities?.[f] ?? lower?.capabilities?.[f];
+    if (v !== undefined) {
+      (caps as Record<string, unknown>)[f] = v;
+      hasCaps = true;
+    }
   }
-  return touched ? { ...entry, models } : entry;
+  if (hasCaps) out.capabilities = caps;
+  return out;
+}
+
+/** 记录上层模型条目声明的字段（值 !== undefined 才入栈） */
+function recordFieldOrigins(
+  info: ModelFieldOrigins,
+  providerId: string,
+  modelId: string,
+  model: ModelOverrideShape,
+  layer: MergeLayer,
+): void {
+  info.declaredLayers.get(providerId)?.get(modelId)?.add(layer.kind);
+  const fields = info.fields.get(providerId)?.get(modelId);
+  if (fields === undefined) return;
+  const origin: FieldOrigin = {
+    kind: layer.kind,
+    ...(layer.path !== undefined ? { path: layer.path } : {}),
+  };
+  const push = (key: string, value: unknown): void => {
+    const decls = fields.get(key) ?? [];
+    decls.push({ origin, value: Array.isArray(value) ? [...(value as unknown[])] : value });
+    fields.set(key, decls);
+  };
+  for (const f of MODEL_TOP_FIELDS) {
+    if (model[f] !== undefined) push(f, model[f]);
+  }
+  for (const f of CAP_FIELDS) {
+    if (model.capabilities?.[f] !== undefined) push(`capabilities.${f}`, model.capabilities[f]);
+  }
+}
+
+function trackModel(info: ModelFieldOrigins, providerId: string, modelId: string): void {
+  let decl = info.declaredLayers.get(providerId);
+  if (decl === undefined) {
+    decl = new Map();
+    info.declaredLayers.set(providerId, decl);
+  }
+  if (!decl.has(modelId)) decl.set(modelId, new Set());
+  let fields = info.fields.get(providerId);
+  if (fields === undefined) {
+    fields = new Map();
+    info.fields.set(providerId, fields);
+  }
+  if (!fields.has(modelId)) fields.set(modelId, new Map());
 }
 
 function mergeProviders(
   into: Map<string, ProviderEntryConfig>,
   entries: readonly ProviderEntryConfig[],
+  layer: MergeLayer,
+  info: ModelFieldOrigins,
 ): void {
   for (const entry of entries) {
+    info.providers.set(entry.id, {
+      kind: layer.kind,
+      ...(layer.path !== undefined ? { path: layer.path } : {}),
+    });
+    for (const modelId of Object.keys(entry.models ?? {})) {
+      trackModel(info, entry.id, modelId);
+      recordFieldOrigins(info, entry.id, modelId, entry.models?.[modelId] ?? {}, layer);
+    }
     const existing = into.get(entry.id);
     if (existing === undefined) {
       into.set(entry.id, {
@@ -74,17 +174,46 @@ function mergeProviders(
       });
       continue;
     }
+    const models = { ...existing.models };
+    for (const [modelId, model] of Object.entries(entry.models ?? {})) {
+      models[modelId] = mergeModelEntry(models[modelId], model);
+    }
     into.set(entry.id, {
       ...existing,
       ...entry,
-      models: { ...existing.models, ...entry.models },
+      models,
       providerOptions: { ...existing.providerOptions, ...entry.providerOptions },
       headers: { ...existing.headers, ...entry.headers },
     });
   }
 }
 
-export function mergeLayers(layers: readonly MergeLayer[]): ResolvedConfig {
+/** 警告文案中的层指代（显式 none 冲突用） */
+function layerLabel(origin: FieldOrigin): string {
+  switch (origin.kind) {
+    case "userModels":
+      return "providers.json 的用户编辑";
+    case "setup":
+      return origin.path ?? "providers.json";
+    case "user":
+      return origin.path ?? "config.json";
+    case "project":
+      return origin.path ?? "项目配置";
+    case "env":
+      return "环境变量";
+    case "cli":
+      return "命令行参数";
+  }
+}
+
+/** 权限规则/事件里的 RuleOrigin：由层 kind 推导（setup/userModels 不产生规则） */
+function ruleOrigin(kind: LayerKind): Extract<RuleOrigin, "user" | "project" | "cli"> {
+  if (kind === "project") return "project";
+  if (kind === "user" || kind === "userModels" || kind === "setup") return "user";
+  return "cli";
+}
+
+export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
   const out: ResolvedConfig = {
     rules: [],
     untrustedRules: [],
@@ -96,9 +225,15 @@ export function mergeLayers(layers: readonly MergeLayer[]): ResolvedConfig {
   };
   const providers = new Map<string, ProviderEntryConfig>();
   const mcpServers = new Map<string, { origin: "user" | "project"; entry: McpServerEntry }>();
-  const setupImageDecls: SetupImageDecls = new Map();
+  const info: ModelFieldOrigins = {
+    fields: new Map(),
+    providers: new Map(),
+    declaredLayers: new Map(),
+    noneLocked: new Set(),
+  };
 
-  for (const { origin, file } of layers) {
+  for (const layer of layers) {
+    const { kind, file } = layer;
     if (file.model !== undefined) out.model = file.model;
     if (file.reasoningEffort !== undefined) out.reasoningEffort = file.reasoningEffort;
     // ADR-0022：config.json 的 shell/shellPath 与 model 同款后写优先；
@@ -107,17 +242,10 @@ export function mergeLayers(layers: readonly MergeLayer[]): ResolvedConfig {
     if (file.shellPath !== undefined) out.shellPath = file.shellPath;
     if (file.permissions?.preset !== undefined) out.permissionPreset = file.permissions.preset;
     for (const rule of file.permissions?.rules ?? []) {
-      // setup 层 schema 不含 permissions 段，origin==="setup" 实际到不了这里
-      out.rules.push({ rule, origin: origin === "setup" ? "user" : origin });
+      out.rules.push({ rule, origin: ruleOrigin(kind) });
     }
     if (file.providers !== undefined) {
-      mergeProviders(
-        providers,
-        // 向导层先投影"用户声明"再按普通条目合并（ADR-0023 第 1 节）
-        origin === "setup"
-          ? file.providers.map((e) => projectSetupUserCapabilities(e, setupImageDecls))
-          : file.providers,
-      );
+      mergeProviders(providers, file.providers, layer, info);
     }
     // hooks：按点位追加（高层条目排在其后，hooks.md 第 2 节）
     for (const [point, entries] of Object.entries(file.hooks ?? {})) {
@@ -125,11 +253,11 @@ export function mergeLayers(layers: readonly MergeLayer[]): ResolvedConfig {
       out.hooks[key] = [...(out.hooks[key] ?? []), ...entries.map((e) => ({ ...e }))];
     }
     // mcp.servers：按名字合并，同名字段浅覆盖；origin 记录定义它的层
-    // （cli/env 层不产生 mcp 配置，落到 "user" 仅为类型收敛）
+    // （setup/userModels/env/cli 层不产生 mcp 配置，落到 "user" 仅为类型收敛）
     for (const [name, entry] of Object.entries(file.mcp?.servers ?? {})) {
       const existing = mcpServers.get(name);
       mcpServers.set(name, {
-        origin: origin === "project" ? "project" : "user",
+        origin: kind === "project" ? "project" : "user",
         entry: existing === undefined ? { ...entry } : { ...existing.entry, ...entry },
       });
     }
@@ -144,6 +272,83 @@ export function mergeLayers(layers: readonly MergeLayer[]): ResolvedConfig {
       out.turn = merged;
     }
   }
+
+  // 合成层（userModels）不为清单外模型建条目：只由 userModels 引入的模型剔除
+  for (const [providerId, entry] of providers) {
+    if (entry.models === undefined) continue;
+    const decl = info.declaredLayers.get(providerId);
+    const kept: Record<string, ModelOverrideShape> = {};
+    let touched = false;
+    for (const [modelId, model] of Object.entries(entry.models)) {
+      const kinds = decl?.get(modelId);
+      if (kinds !== undefined && [...kinds].every((k) => k === "userModels")) {
+        info.fields.get(providerId)?.delete(modelId);
+        touched = true;
+        continue;
+      }
+      kept[modelId] = model;
+    }
+    if (touched) providers.set(providerId, { ...entry, models: kept });
+  }
+
+  // 显式 none（ADR-0024 第 2 节）：生效 reasoning==="none" 且来源是
+  // userModels 或手写层时，档位锁定为空数组（交给 ADR-0018 链的
+  // "逐模型显式空数组"处理）——两类冲突例外：
+  //   用户编辑 none + 手写非空档位 → 手写优先，保留档位并警告；
+  //   手写 reasoning=none + 手写非空档位 → 档位置空并警告。
+  for (const [providerId, entry] of providers) {
+    if (entry.models === undefined) continue;
+    const fields = info.fields.get(providerId);
+    const models = { ...entry.models };
+    let touched = false;
+    const lock = (modelId: string, model: ModelOverrideShape): void => {
+      // 不就地改——layer file 对象在 base 与工作区两次合并间共享
+      models[modelId] = {
+        ...model,
+        capabilities: { ...model.capabilities, reasoningEffort: [] },
+      };
+      info.noneLocked.add(`${providerId}/${modelId}`);
+    };
+    for (const [modelId, model] of Object.entries(entry.models)) {
+      if (model.capabilities?.reasoning !== "none") continue;
+      const rSrc = fields?.get(modelId)?.get("capabilities.reasoning")?.at(-1)?.origin;
+      if (rSrc === undefined || (rSrc.kind !== "userModels" && !isConfigKind(rSrc.kind))) {
+        continue;
+      }
+      const effort = model.capabilities.reasoningEffort;
+      const eSrc = fields?.get(modelId)?.get("capabilities.reasoningEffort")?.at(-1)?.origin;
+      if (
+        effort !== undefined &&
+        effort.length > 0 &&
+        eSrc !== undefined &&
+        isConfigKind(eSrc.kind)
+      ) {
+        if (rSrc.kind === "userModels") {
+          // 手写配置永远优先：档位保留；警告说明 userModels 的 none 未锁定档位
+          out.warnings.push(
+            `providers.json 的用户编辑将服务商 ${providerId} 的模型 ${modelId} 推理设为 none，` +
+              `但 ${layerLabel(eSrc)} 声明了思考档位——按手写配置保留档位`,
+          );
+          continue;
+        }
+        // 手写配置自身矛盾：显式 none 优先，档位置空 + 警告
+        lock(modelId, model);
+        touched = true;
+        const where =
+          rSrc.kind === eSrc.kind && rSrc.path === eSrc.path
+            ? layerLabel(rSrc)
+            : `${layerLabel(rSrc)}（档位来自 ${layerLabel(eSrc)}）`;
+        out.warnings.push(
+          `${where} 中服务商 ${providerId} 的模型 ${modelId} 推理为 none 却声明了思考档位，已按不可切换处理`,
+        );
+        continue;
+      }
+      lock(modelId, model);
+      touched = true;
+    }
+    if (touched) providers.set(providerId, { ...entry, models });
+  }
+
   // ADR-0022：shellPath 是给指定种类换可执行文件用的；单独存在且
   // 文件名识别不出种类时不是有效声明——忽略并警告（不静默回退自动，
   // 由下一层/自动选择接管）
@@ -156,28 +361,12 @@ export function mergeLayers(layers: readonly MergeLayer[]): ResolvedConfig {
       `配置的 shellPath="${out.shellPath}" 无法识别为支持的 shell 可执行文件，已忽略（请同时设置 shell）`,
     );
   }
-  // 用户声明回填：models 按模型 id 整体替换（mergeProviders），高层手写
-  // 条目换掉某模型而未声明 imageInput 时，合并结果该位为 undefined——
-  // 此时回落到向导层的用户声明（ADR-0023：手写配置 > 用户声明 > 上游）
-  for (const [providerId, table] of setupImageDecls) {
-    const merged = providers.get(providerId);
-    if (merged?.models === undefined) continue;
-    const models = { ...merged.models };
-    let touched = false;
-    for (const [modelId, imageInput] of table) {
-      const model = models[modelId];
-      if (model !== undefined && model.capabilities?.imageInput === undefined) {
-        models[modelId] = { ...model, capabilities: { ...model.capabilities, imageInput } };
-        touched = true;
-      }
-    }
-    if (touched) providers.set(providerId, { ...merged, models });
-  }
+
   out.providers = [...providers.values()];
   out.mcpServers = [...mcpServers.entries()].map(([name, v]) => ({
     name,
     origin: v.origin,
     entry: v.entry,
   }));
-  return out;
+  return { resolved: out, modelInfo: info };
 }

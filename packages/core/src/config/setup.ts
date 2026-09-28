@@ -159,12 +159,12 @@ export async function saveSetupProvider(
   const state = await loadProviderSetup(platform, nocturneHome);
   const previous = (state.file?.providers ?? []).find((p) => p.id === entry.id);
   const providers = (state.file?.providers ?? []).filter((p) => p.id !== entry.id);
-  // 同 id 整换时保留"用户声明"字段：向导没有 /provider image 的重答步骤，
-  // 不带 userCapabilities 的新条目沿用旧声明（thinking.levels 由向导步骤
-  // 重新勾选，无需保留）
+  // 同 id 整换时保留逐模型用户编辑（ADR-0024 第 1 节）：向导没有重答
+  // userModels 的步骤，不带 userModels 的新条目沿用旧编辑（thinking.levels
+  // 由向导步骤重新勾选，无需保留）
   providers.push(
-    entry.userCapabilities === undefined && previous?.userCapabilities !== undefined
-      ? { ...entry, userCapabilities: previous.userCapabilities }
+    entry.userModels === undefined && previous?.userModels !== undefined
+      ? { ...entry, userModels: previous.userModels }
       : entry,
   );
   const file: ProviderSetupFile = {
@@ -244,17 +244,16 @@ export async function saveSetupThinking(
 }
 
 /**
- * 写入向导条目的逐模型图片输入声明（/provider image；ADR-0023 第 1 节）：
- * on → true，off → false（off 是显式声明"不支持"，合并时覆盖上游值）。
- * 条目不在 providers.json，或模型不在该条目 models 清单中时拒绝——
+ * 写入向导条目的逐模型用户编辑（ADR-0024 第 3 节）：整体替换该条目的
+ * userModels——校验与 patch 合成在 load.ts 完成，这里只做现读 + 原子写；
+ * undefined 时删除 userModels 字段。条目不在 providers.json 时拒绝，
  * 绝不写 config.json。
  */
-export async function saveSetupImageInput(
+export async function saveSetupUserModels(
   platform: Platform,
   nocturneHome: string,
   providerId: string,
-  modelId: string,
-  enabled: boolean,
+  userModels: ProviderEntryConfig["userModels"],
 ): Promise<void> {
   const state = await loadProviderSetup(platform, nocturneHome);
   const entries = state.file?.providers ?? [];
@@ -262,22 +261,12 @@ export async function saveSetupImageInput(
   if (entry === undefined) {
     throw new ConfigError(
       "config_invalid",
-      `服务商 "${providerId}" 不是向导写入的条目；手写在 config.json 的条目请编辑对应文件（models.<模型>.capabilities.imageInput）`,
+      `服务商 "${providerId}" 不是向导写入的条目；手写在 config.json 的条目请编辑对应文件`,
     );
   }
-  if (entry.models?.[modelId] === undefined) {
-    throw new ConfigError(
-      "config_invalid",
-      `模型 "${modelId}" 不在服务商 "${providerId}" 的清单中，可先 /provider refresh 获取上游模型列表`,
-    );
-  }
-  const updated: ProviderEntryConfig = {
-    ...entry,
-    userCapabilities: {
-      ...(entry.userCapabilities ?? {}),
-      [modelId]: { ...(entry.userCapabilities?.[modelId] ?? {}), imageInput: enabled },
-    },
-  };
+  const updated: ProviderEntryConfig =
+    userModels !== undefined ? { ...entry, userModels } : { ...entry };
+  if (userModels === undefined) delete updated.userModels;
   await writeProviderSetup(platform, nocturneHome, {
     version: SETUP_FILE_VERSION,
     ...(state.file?.model !== undefined ? { model: state.file.model } : {}),

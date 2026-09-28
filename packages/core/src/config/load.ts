@@ -11,7 +11,15 @@ import { ConfigError } from "./errors.js";
 import { loadConfigFile, writeJsonAtomic } from "./files.js";
 import { createCredentialStore } from "./credentials.js";
 import { loadGrantStore } from "./grants.js";
-import { mergeLayers, type MergeLayer } from "./merge.js";
+import { mergeLayers, type MergeLayer, type MergeResult } from "./merge.js";
+import {
+  applyModelPatch,
+  buildModelSettingsViews,
+  configFieldError,
+  effectiveValueError,
+  patchValueError,
+  providerOriginHint,
+} from "./model-settings.js";
 import {
   describeProviderLayers,
   loadProviderSetup,
@@ -19,9 +27,9 @@ import {
   recordRecentModel,
   refreshUpstreamLimits,
   removeSetupProvider,
-  saveSetupImageInput,
   saveSetupProvider,
   saveSetupThinking,
+  saveSetupUserModels,
   setSetupDefaultModel,
 } from "./setup.js";
 import { loadSettingsStore } from "./settings.js";
@@ -29,6 +37,8 @@ import { readTrustList } from "./trust.js";
 import type {
   ConfigFile,
   LoadConfigOptions,
+  ModelSettingsPatch,
+  ProviderEntryConfig,
   ProviderOverview,
   ProviderSetupFile,
   RuntimeConfig,
@@ -37,6 +47,24 @@ import type {
 
 const PROJECT_CONFIG_DIR = ".nocturne";
 const PROJECT_CONFIG_NAME = "config.json";
+
+/**
+ * 向导层 + 用户编辑合成层（ADR-0024 第 2 节）：providers.json 条目里的
+ * userModels 包成同形状的 providers 列表，插在 setup 与 user 之间参与
+ * 逐字段合并；mergeLayers 在合并后丢弃仅由该层引入的清单外模型。
+ */
+function setupLayers(setupFile: ProviderSetupFile, providersPath: string): MergeLayer[] {
+  const layers: MergeLayer[] = [{ kind: "setup", path: providersPath, file: setupFile }];
+  const userModels: ProviderEntryConfig[] = [];
+  for (const entry of setupFile.providers ?? []) {
+    if (entry.userModels === undefined) continue;
+    userModels.push({ id: entry.id, models: entry.userModels });
+  }
+  if (userModels.length > 0) {
+    layers.push({ kind: "userModels", path: providersPath, file: { providers: userModels } });
+  }
+  return layers;
+}
 
 export async function loadConfig(
   platform: Platform,
@@ -50,6 +78,8 @@ export async function loadConfig(
   const sessionsDir = paths.join(home, "sessions");
   const trustPath = paths.join(home, "trust.json");
   const grantsDir = paths.join(home, "grants");
+  const providersPath = paths.join(home, "providers.json");
+  const userConfigPath = paths.join(home, "config.json");
 
   const env = options.env ?? ((n: string) => platform.env(n));
 
@@ -65,33 +95,62 @@ export async function loadConfig(
   const setupFile: ProviderSetupFile = setup.file ?? { version: 1 };
 
   // 用户配置：损坏即快速失败（config.md 第 2 节）
-  const userFile: ConfigFile = (await loadConfigFile(fs, paths.join(home, "config.json"))) ?? {};
+  const userFile: ConfigFile = (await loadConfigFile(fs, userConfigPath)) ?? {};
 
   const envLayer = envLayerConfig(env);
   const cliLayer = cliLayerConfig(options.cliArgs);
-
-  const baseLayers: MergeLayer[] = [
-    { origin: "setup", file: setupFile },
-    { origin: "user", file: userFile },
-  ];
-  const base = mergeLayers([
-    ...baseLayers,
-    { origin: "cli", file: envLayer.file },
-    { origin: "cli", file: cliLayer.file },
-  ]);
-  base.warnings.push(...envLayer.warnings, ...cliLayer.warnings);
-  if (credentialsInit.warning !== undefined) base.warnings.push(credentialsInit.warning);
 
   // settings.json（ADR-0022 第 3 节）：程序维护的设置层，只放 shell/shellPath；
   // 损坏降级为忽略 + 警告。store 持内存态，setShell 写盘后 live getter 立即可见
   const settingsPath = paths.join(home, "settings.json");
   const settings = await loadSettingsStore(platform, settingsPath);
-  if (settings.warning !== undefined) base.warnings.push(settings.warning);
 
   const trust = await readTrustList(platform, trustPath);
-  if (trust.warning !== undefined) base.warnings.push(trust.warning);
   // trust.workspaces 对外是只读视图；内部持可变副本供 setWorkspaceTrusted 更新
   const trustedSet = new Set(trust.workspaces);
+
+  /**
+   * 某份向导文件参与的合并（ADR-0024）：base 与 forWorkspace 之外的第三处
+   * 层构造点——listModelSettings/saveModelSettings 需要与 mergeLayers 同一份
+   * 层列表（可信项目层才并入），并取回逐字段来源表。
+   */
+  async function mergeFor(sFile: ProviderSetupFile, workspaceRoot?: string): Promise<MergeResult> {
+    const layers: MergeLayer[] = [
+      ...setupLayers(sFile, providersPath),
+      { kind: "user", path: userConfigPath, file: userFile },
+    ];
+    if (workspaceRoot !== undefined) {
+      const project = await projectFileIfTrusted(workspaceRoot);
+      if (project !== undefined) {
+        layers.push({
+          kind: "project",
+          path: paths.join(
+            await platform.resolveReal(workspaceRoot),
+            PROJECT_CONFIG_DIR,
+            PROJECT_CONFIG_NAME,
+          ),
+          file: project,
+        });
+      }
+    }
+    layers.push({ kind: "env", file: envLayer.file }, { kind: "cli", file: cliLayer.file });
+    return mergeLayers(layers);
+  }
+
+  // 合并产物之外的加载期警告：base 与工作区 resolved 各加一次（合并自身
+  // 的警告已在 mergeLayers 内计算，不再重复）
+  const loadWarnings: string[] = [...envLayer.warnings, ...cliLayer.warnings];
+  if (credentialsInit.warning !== undefined) loadWarnings.push(credentialsInit.warning);
+  if (settings.warning !== undefined) loadWarnings.push(settings.warning);
+  if (trust.warning !== undefined) loadWarnings.push(trust.warning);
+
+  const base = mergeLayers([
+    ...setupLayers(setupFile, providersPath),
+    { kind: "user", path: userConfigPath, file: userFile },
+    { kind: "env", file: envLayer.file },
+    { kind: "cli", file: cliLayer.file },
+  ]).resolved;
+  base.warnings.push(...loadWarnings);
 
   /** 可信工作区的项目层文件（describeProviders 复用；不含 Grant 加载） */
   async function projectFileIfTrusted(workspaceRoot: string) {
@@ -129,21 +188,21 @@ export async function loadConfig(
     }
 
     const layers: MergeLayer[] = [
-      { origin: "setup", file: setupFile },
-      { origin: "user", file: userFile },
+      ...setupLayers(setupFile, providersPath),
+      { kind: "user", path: userConfigPath, file: userFile },
       ...(trusted && projectFile !== undefined
-        ? [{ origin: "project" as const, file: projectFile }]
+        ? [{ kind: "project" as const, path: projectPath, file: projectFile }]
         : []),
-      { origin: "cli", file: envLayer.file },
-      { origin: "cli", file: cliLayer.file },
+      { kind: "env", file: envLayer.file },
+      { kind: "cli", file: cliLayer.file },
     ];
-    const resolved = mergeLayers(layers);
+    const resolved = mergeLayers(layers).resolved;
     // mcpServers 标注来源目录：相对 cwd 按该层配置文件所在目录解析（config.md 第 2 节）
     resolved.mcpServers = resolved.mcpServers.map((s) => ({
       ...s,
       dir: s.origin === "project" ? paths.dirname(projectPath) : home,
     }));
-    resolved.warnings.push(...base.warnings, ...warnings);
+    resolved.warnings.push(...loadWarnings, ...warnings);
 
     if (!trusted && projectFile !== undefined) {
       // 未信任项目配置：其余字段全部忽略；rules 中只保留收紧方向（permissions.md 5.2）
@@ -208,8 +267,33 @@ export async function loadConfig(
     setCredential: (providerId, key) => credentials.set(providerId, key),
     saveSetupThinking: (providerId, levels) =>
       saveSetupThinking(platform, home, providerId, levels),
-    saveSetupImageInput: (providerId, modelId, enabled) =>
-      saveSetupImageInput(platform, home, providerId, modelId, enabled),
+    // ADR-0024 第 3 节：来源按"实际参与合并的层"计算；trustedSet 与
+    // projectFileIfTrusted 复用 forWorkspace 同一口径
+    listModelSettings: async (providerId, workspaceRoot) => {
+      const setupNow = await loadProviderSetup(platform, home);
+      const sFile = setupNow.file ?? { version: 1 };
+      const merged = await mergeFor(sFile, workspaceRoot);
+      const managed = (sFile.providers ?? []).some((e) => e.id === providerId);
+      return buildModelSettingsViews({
+        providerId,
+        entry: merged.resolved.providers.find((p) => p.id === providerId),
+        managed,
+        userModels: sFile.providers?.find((e) => e.id === providerId)?.userModels,
+        modelInfo: merged.modelInfo,
+        ...(options.builtinModel !== undefined ? { builtinModel: options.builtinModel } : {}),
+      });
+    },
+    saveModelSettings: (providerId, modelId, patch, workspaceRoot) =>
+      saveModelSettingsImpl(
+        platform,
+        home,
+        providerId,
+        modelId,
+        patch,
+        workspaceRoot,
+        mergeFor,
+        options,
+      ),
     removeSetupProvider: (providerId) =>
       removeSetupProvider(platform, home, credentials, providerId),
     async describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]> {
@@ -241,4 +325,92 @@ export async function loadConfig(
       recent = await readRecentModels(platform, home);
     },
   };
+}
+
+/**
+ * 模型设置写入端（ADR-0024 第 3 节）：校验 → 应用到 userModels → 原子写
+ * providers.json。校验一律以"保存后的最终生效值"计算；config.json 绝不写。
+ * mergeFor 复用 loadConfig 的层构造（可信项目层才参与）。
+ */
+async function saveModelSettingsImpl(
+  platform: Platform,
+  nocturneHome: string,
+  providerId: string,
+  modelId: string,
+  patch: ModelSettingsPatch,
+  workspaceRoot: string | undefined,
+  mergeFor: (sFile: ProviderSetupFile, workspaceRoot?: string) => Promise<MergeResult>,
+  options: LoadConfigOptions,
+): Promise<void> {
+  const invalid = (msg: string): never => {
+    throw new ConfigError("config_invalid", msg);
+  };
+  const valueError = patchValueError(patch);
+  if (valueError !== undefined) invalid(valueError);
+
+  const setupNow = await loadProviderSetup(platform, nocturneHome);
+  const sFile = setupNow.file ?? { version: 1 };
+  const entry = sFile.providers?.find((e) => e.id === providerId);
+  if (entry === undefined) {
+    const merged = await mergeFor(sFile, workspaceRoot);
+    invalid(providerOriginHint(providerId, merged.modelInfo.providers.get(providerId)));
+  }
+
+  // 当前视图：模型须在清单内；来源为 config 的字段不接受编辑
+  const current = await mergeFor(sFile, workspaceRoot);
+  const currentEntry = current.resolved.providers.find((p) => p.id === providerId);
+  if (currentEntry?.models?.[modelId] === undefined) {
+    invalid(`模型 "${modelId}" 不在服务商 "${providerId}" 的清单中`);
+  }
+  const currentView = buildModelSettingsViews({
+    providerId,
+    entry: currentEntry,
+    managed: true,
+    userModels: entry?.userModels,
+    modelInfo: current.modelInfo,
+    ...(options.builtinModel !== undefined ? { builtinModel: options.builtinModel } : {}),
+  }).find((v) => v.modelId === modelId);
+  if (currentView === undefined) {
+    throw new ConfigError(
+      "config_invalid",
+      `模型 "${modelId}" 不在服务商 "${providerId}" 的清单中`,
+    );
+  }
+  const cfgError = configFieldError(currentView, patch);
+  if (cfgError !== undefined) invalid(cfgError);
+
+  // 候选 userModels → 重新合并 → 以最终生效值校验
+  const nextUserModels = applyModelPatch(entry?.userModels, modelId, patch);
+  const candidateFile: ProviderSetupFile = {
+    ...sFile,
+    providers: (sFile.providers ?? []).map((e) =>
+      e.id === providerId
+        ? nextUserModels !== undefined
+          ? { ...e, userModels: nextUserModels }
+          : (() => {
+              const { userModels: _dropped, ...rest } = e;
+              return rest;
+            })()
+        : e,
+    ),
+  };
+  const candidate = await mergeFor(candidateFile, workspaceRoot);
+  const candidateView = buildModelSettingsViews({
+    providerId,
+    entry: candidate.resolved.providers.find((p) => p.id === providerId),
+    managed: true,
+    userModels: nextUserModels,
+    modelInfo: candidate.modelInfo,
+    ...(options.builtinModel !== undefined ? { builtinModel: options.builtinModel } : {}),
+  }).find((v) => v.modelId === modelId);
+  if (candidateView === undefined) {
+    throw new ConfigError(
+      "config_invalid",
+      `模型 "${modelId}" 不在服务商 "${providerId}" 的清单中`,
+    );
+  }
+  const effError = effectiveValueError(candidateView);
+  if (effError !== undefined) invalid(effError);
+
+  await saveSetupUserModels(platform, nocturneHome, providerId, nextUserModels);
 }

@@ -43,6 +43,21 @@ export interface ModelOverrideShape {
   pricing?: { input?: number | undefined; output?: number | undefined } | undefined;
 }
 
+/** userModels 中单个模型的用户编辑（ADR-0024 第 1 节；六个可编辑字段） */
+export interface UserModelEntry {
+  displayName?: string | undefined;
+  contextWindow?: number | undefined;
+  maxOutputTokens?: number | undefined;
+  capabilities?:
+    | {
+        reasoning?: "none" | "hidden" | "visible" | undefined;
+        imageInput?: boolean | undefined;
+        /** 逐模型可用思考档位；空数组 = 明确无可用档位 */
+        reasoningEffort?: ReasoningEffortLevel[] | undefined;
+      }
+    | undefined;
+}
+
 /**
  * 声明式 Provider 配置条目（config.md 第 2 节：
  * 形状即 RuntimeOptions.providerConfigs 的元素）。
@@ -75,11 +90,11 @@ export interface ProviderEntryConfig {
       }
     | undefined;
   /**
-   * 用户声明的逐模型能力（ADR-0023 第 1 节）：`/provider image` 写入，
-   * 只在向导层 providers.json 有意义——合并时作为"用户声明"投影到对应
-   * 模型的 capabilities.imageInput（高于上游声明、低于逐模型手写配置）。
+   * 逐模型用户编辑（ADR-0024 第 1 节）：「编辑模型」/`/provider model` 写入，
+   * 只在向导层 providers.json 有意义——合并时作为独立"用户编辑"层参与
+   * 逐字段合并（高于上游、低于手写配置）。高层条目里的同名字段只作数据。
    */
-  userCapabilities?: Record<string, { imageInput?: boolean | undefined }> | undefined;
+  userModels?: Record<string, UserModelEntry> | undefined;
   /**
    * models 字段的来源标注（provider-setup.md 第 7 节）：向导 /
    * `/provider refresh` 写入上游列表时标记 "upstream" 并记录 fetchedAt。
@@ -254,6 +269,24 @@ export interface UpstreamModelEntry {
     | undefined;
 }
 
+/** 内置模型目录查询（provider 层 BUILTIN_MODEL_CATALOG 的注入点——config 不依赖 provider） */
+export type BuiltinModelLookup = (
+  providerId: string,
+  modelId: string,
+) =>
+  | {
+      displayName?: string | undefined;
+      contextWindow?: number | undefined;
+      maxOutputTokens?: number | undefined;
+      capabilities?:
+        | {
+            reasoning?: "none" | "hidden" | "visible" | undefined;
+            imageInput?: boolean | undefined;
+          }
+        | undefined;
+    }
+  | undefined;
+
 /**
  * 上游模型列表获取器（provider 模块的 fetchModels 注入点——
  * config 不依赖 provider，上游字段映射的解释在 provider 层）。
@@ -263,6 +296,62 @@ export type UpstreamFetch = (
   key: string | undefined,
   signal?: AbortSignal,
 ) => Promise<UpstreamModelEntry[]>;
+
+// ── 模型设置编辑（ADR-0024 第 2、3 节） ─────────────────────
+
+/** 单个字段生效值的来源标注（编辑页/CLI 问答显示用） */
+export type ModelFieldSource =
+  | { kind: "upstream" }
+  | { kind: "user" }
+  | { kind: "config"; layer: "user" | "project" | "env" | "cli"; path?: string | undefined }
+  | { kind: "builtin" }
+  | { kind: "default" }
+  /** 仅 reasoningEffort：服务商级 thinking.levels */
+  | { kind: "provider_levels" }
+  /** 仅 reasoningEffort：由 reasoning ≠ "none" 推导的全档 */
+  | { kind: "derived" }
+  /** 仅 reasoningEffort：显式推理 none 锁定为不可切换 */
+  | { kind: "reasoning_none" };
+
+/** 一个可编辑字段：生效值、来源、可否在编辑页修改、当前用户编辑值 */
+export interface ModelField<T> {
+  value: T | undefined;
+  source: ModelFieldSource;
+  editable: boolean;
+  /** userModels 中该字段的用户编辑值（未编辑为 undefined） */
+  userValue?: T | undefined;
+  /**
+   * 清空用户编辑后回落到的值（= userModels 层不参与合并时的生效值；
+   * 编辑页「跟随」行的灰色提示）
+   */
+  lowerValue?: T | undefined;
+}
+
+/** listModelSettings 返回的逐模型视图 */
+export interface ModelSettingsView {
+  providerId: string;
+  modelId: string;
+  /** 服务商条目不在 providers.json：整页只读 */
+  readonly: boolean;
+  /** 只读时的说明（如 "该服务商定义在 <path>，请编辑该文件"） */
+  readonlyHint?: string | undefined;
+  fields: {
+    displayName: ModelField<string>;
+    contextWindow: ModelField<number>;
+    maxOutputTokens: ModelField<number>;
+    reasoning: ModelField<"none" | "hidden" | "visible">;
+    imageInput: ModelField<boolean>;
+    reasoningEffort: ModelField<ReasoningEffortLevel[]>;
+  };
+}
+
+/**
+ * saveModelSettings 的补丁：键存在才处理——
+ * undefined 值保留现状（不写），null 清除该字段的用户编辑，其余写为用户编辑。
+ */
+export type ModelSettingsPatch = {
+  [K in keyof ModelSettingsView["fields"]]?: ModelSettingsView["fields"][K]["value"] | null;
+};
 
 /**
  * loadConfig 的产物（config.md 第 6 节）。
@@ -305,11 +394,20 @@ export interface RuntimeConfig {
     levels: readonly ReasoningEffortLevel[] | undefined,
   ): Promise<void>;
   /**
-   * 写入向导条目的逐模型图片输入声明（/provider image；ADR-0023 第 1 节）：
-   * enabled=false 也是显式声明（覆盖上游 true）。条目不在 providers.json，
-   * 或模型不在该条目 models 清单中时抛 ConfigError("config_invalid")。
+   * 模型设置编辑（ADR-0024）：按字段返回生效值/来源/可编辑标记的清单
+   * （只含合并结果清单内的模型）。workspaceRoot 决定项目层是否参与。
    */
-  saveSetupImageInput(providerId: string, modelId: string, enabled: boolean): Promise<void>;
+  listModelSettings(providerId: string, workspaceRoot?: string): Promise<ModelSettingsView[]>;
+  /**
+   * 模型设置编辑的写入端：patch 应用到 providers.json 条目的 userModels。
+   * 校验失败抛 ConfigError("config_invalid") 且不写文件；绝不写 config.json。
+   */
+  saveModelSettings(
+    providerId: string,
+    modelId: string,
+    patch: ModelSettingsPatch,
+    workspaceRoot?: string,
+  ): Promise<void>;
   /**
    * 删除向导写入的条目及其凭据。条目不在 providers.json（由更高层
    * 定义或不存在）时抛 ConfigError("config_invalid")，由调用方提示。
@@ -356,4 +454,9 @@ export interface LoadConfigOptions {
    * fetchModels）；缺省时 refreshUpstreamLimits 拒绝并说明。
    */
   upstreamFetch?: UpstreamFetch | undefined;
+  /**
+   * 内置模型目录查询（core 侧注入 provider/catalog 的 BUILTIN_MODEL_CATALOG）：
+   * listModelSettings 标 "builtin" 来源用；缺省时内置层视为不存在（字段落"默认"）。
+   */
+  builtinModel?: BuiltinModelLookup | undefined;
 }
