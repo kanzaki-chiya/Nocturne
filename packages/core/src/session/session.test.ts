@@ -231,6 +231,57 @@ describe("load / 状态折叠", () => {
   });
 });
 
+describe("图片附件字段（ADR-0023 第 2 节）", () => {
+  const att = {
+    type: "image" as const,
+    file: "img-1.png",
+    mimeType: "image/png" as const,
+    bytes: 29,
+    sha256: "ab".repeat(32),
+    width: 2,
+    height: 3,
+    source: "read" as const,
+  };
+
+  it("message.user / tool.completed 的 attachments 折叠进历史；无字段时键不出现", async () => {
+    const s = await store.create(INPUT);
+    await s.emit("turn.started", { turnIndex: 1 }, { turnId: "t1" });
+    await s.emit(
+      "message.user",
+      {
+        messageId: "m1",
+        content: [{ type: "text", text: "看图" }],
+        attachments: [att],
+      },
+      { turnId: "t1" },
+    );
+    await s.emit(
+      "tool.completed",
+      {
+        callId: "c1",
+        name: "read",
+        status: "ok",
+        modelContent: "x",
+        attachments: [att],
+      },
+      { turnId: "t1" },
+    );
+    await s.emit(
+      "message.user",
+      { messageId: "m2", content: [{ type: "text", text: "无图" }] },
+      { turnId: "t1" },
+    );
+
+    const [u1, t1, u2] = s.state().history;
+    expect(u1?.kind === "user" && u1.attachments?.[0]?.file).toBe("img-1.png");
+    expect(u1?.kind === "user" && u1.attachments?.[0]?.source).toBe("read");
+    expect(t1?.kind === "tool" && t1.attachments?.[0]?.sha256).toBe(att.sha256);
+    // 旧日志形态：无附件的条目不含 attachments 键
+    expect(u2?.kind === "user" && "attachments" in u2).toBe(false);
+    await s.close();
+  });
+});
+
 describe("load 校验（events.md 第 8 节）", () => {
   async function writeLog(name: string, lines: unknown[]): Promise<string> {
     const p = path.join(dir, `${name}.jsonl`);

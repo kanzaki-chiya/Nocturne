@@ -14,6 +14,7 @@ import { globToRegExp } from "./builtin/globmatch.js";
 import { compileGitignore, matchGitignore } from "./builtin/gitignore.js";
 import {
   builtinTools,
+  createAttachmentStore,
   createBuiltinRegistry,
   createPolicyGate,
   createReadStateStore,
@@ -295,6 +296,183 @@ describe("read 工具", () => {
     rmSync(path.join(parent, `escape-${path.basename(ws)}.txt`), {
       force: true,
     });
+  });
+});
+
+describe("read 图片（ADR-0023 第 2 节）", () => {
+  const u8 = (arr: number[]): Uint8Array => new Uint8Array(arr);
+  const u16be = (n: number) => [(n >> 8) & 0xff, n & 0xff];
+  const u16le = (n: number) => [n & 0xff, (n >> 8) & 0xff];
+  const u32be = (n: number) => [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
+  const ascii = (s: string) => [...s].map((c) => c.charCodeAt(0));
+
+  const PNG = (w: number, h: number): Uint8Array =>
+    u8([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...u32be(13),
+      ...ascii("IHDR"),
+      ...u32be(w),
+      ...u32be(h),
+      8,
+      6,
+      0,
+      0,
+      0,
+    ]);
+  const JPEG = (w: number, h: number): Uint8Array =>
+    u8([
+      0xff,
+      0xd8,
+      0xff,
+      0xe0,
+      ...u16be(16),
+      ...ascii("JFIF"),
+      0,
+      ...new Array(9).fill(0),
+      0xff,
+      0xc0,
+      ...u16be(17),
+      8,
+      ...u16be(h),
+      ...u16be(w),
+      3,
+      1,
+      0x22,
+      0,
+      2,
+      0x11,
+      1,
+      3,
+      0x11,
+      1,
+    ]);
+  const GIF = (w: number, h: number): Uint8Array =>
+    u8([...ascii("GIF89a"), ...u16le(w), ...u16le(h), 0xf0, 0, 0]);
+  const WEBP = (w: number, h: number): Uint8Array =>
+    u8([
+      ...ascii("RIFF"),
+      ...u32be(18),
+      ...ascii("WEBP"),
+      ...ascii("VP8X"),
+      ...u32be(10),
+      0,
+      0,
+      0,
+      0,
+      (w - 1) & 0xff,
+      ((w - 1) >> 8) & 0xff,
+      ((w - 1) >> 16) & 0xff,
+      (h - 1) & 0xff,
+      ((h - 1) >> 8) & 0xff,
+      ((h - 1) >> 16) & 0xff,
+    ]);
+
+  async function writeBin(ws: string, rel: string, data: Uint8Array): Promise<void> {
+    await platform.fs.writeFile(path.join(ws, rel), data);
+  }
+
+  function withAttachmentStore(h: Harness, attachmentsDir: string): void {
+    h.scope.attachments = createAttachmentStore({
+      fs: platform.fs,
+      paths: platform.paths,
+      attachmentsDir,
+      sessionId: h.scope.sessionId,
+    });
+  }
+
+  it.each([
+    ["png", PNG(2, 3), "image/png"],
+    ["jpeg", JPEG(4, 5), "image/jpeg"],
+    ["gif", GIF(6, 7), "image/gif"],
+    ["webp", WEBP(8, 9), "image/webp"],
+  ] as const)("四种格式成功：%s → 附件引用落盘、不写 readState", async (ext, data, mime) => {
+    const ws = tmpWorkspace();
+    const attachmentsDir = tmpWorkspace();
+    await writeBin(ws, `pic.${ext}`, data);
+    const h = await makeHarness(ws);
+    withAttachmentStore(h, attachmentsDir);
+    const wsReal = h.workspaceRoot;
+
+    const r = await h.executor.execute(
+      call("read", { path: `pic.${ext}`, offset: 5, limit: 1 }),
+      h.scope,
+    );
+    expect(r.status).toBe("ok");
+    expect(r.result.modelContent).toBe(
+      `Image file: pic.${ext} (${mime}, ${{ png: "2×3", jpeg: "4×5", gif: "6×7", webp: "8×9" }[ext]}, ${data.length} B)`,
+    );
+    const output = r.result.output as { path: string; mimeType: string; bytes: number };
+    expect(output.mimeType).toBe(mime);
+    expect(output.path).toBe(path.join(wsReal, `pic.${ext}`));
+    // 事件里只有引用；文件已落盘
+    const done = completedOf(h)[0]?.payload;
+    const refs = done?.attachments as { file: string; source: string; label: string }[];
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.file).toBe("img-1." + (ext === "jpeg" ? "jpg" : ext));
+    expect(refs[0]?.source).toBe("read");
+    expect(refs[0]?.label).toBe(`pic.${ext}`);
+    const onDisk = await platform.fs.readFile(path.join(attachmentsDir, "s1", refs[0]?.file ?? ""));
+    expect(onDisk).toEqual(Buffer.from(data));
+    // 图片不写 readState
+    expect(h.scope.readState.get(path.join(wsReal, `pic.${ext}`))).toBeUndefined();
+  });
+
+  it("截断的 PNG 头 → image_corrupt", async () => {
+    const ws = tmpWorkspace();
+    await writeBin(ws, "bad.png", PNG(1, 1).subarray(0, 12));
+    const h = await makeHarness(ws);
+    const r = await h.executor.execute(call("read", { path: "bad.png" }), h.scope);
+    expect(r.result.status === "error" && r.result.error.code).toBe("image_corrupt");
+    expect(r.result.modelContent).toContain("损坏或被截断");
+  });
+
+  it(".png 扩展名但内容是文本 → 走文本路径", async () => {
+    const ws = tmpWorkspace();
+    await writeWs(ws, "fake.png", "not a real image\n");
+    const h = await makeHarness(ws);
+    const r = await h.executor.execute(call("read", { path: "fake.png" }), h.scope);
+    expect(r.status).toBe("ok");
+    expect(r.result.modelContent).toContain("1|not a real image");
+  });
+
+  it("超过 5 MB 的图片 → image_too_large", async () => {
+    const ws = tmpWorkspace();
+    const big = new Uint8Array(5 * 1024 * 1024 + 1);
+    big.set(PNG(1, 1));
+    await writeBin(ws, "big.png", big);
+    const h = await makeHarness(ws);
+    const r = await h.executor.execute(call("read", { path: "big.png" }), h.scope);
+    expect(r.result.status === "error" && r.result.error.code).toBe("image_too_large");
+    expect(r.result.modelContent).toContain("5 MB");
+  });
+
+  it("边长超过 8000 → image_too_large", async () => {
+    const ws = tmpWorkspace();
+    await writeBin(ws, "tall.png", PNG(8001, 1));
+    const h = await makeHarness(ws);
+    const r = await h.executor.execute(call("read", { path: "tall.png" }), h.scope);
+    expect(r.result.status === "error" && r.result.error.code).toBe("image_too_large");
+    expect(r.result.modelContent).toContain("8001×1");
+  });
+
+  it("SVG 走文本路径；BMP → binary_file 且说明列出支持格式", async () => {
+    const ws = tmpWorkspace();
+    await writeWs(ws, "icon.svg", '<svg xmlns="x"><rect/></svg>\n');
+    await writeBin(ws, "img.bmp", u8([0x42, 0x4d, 0, 0, 0, 0, 0, 0]));
+    const h = await makeHarness(ws);
+    const svg = await h.executor.execute(call("read", { path: "icon.svg" }), h.scope);
+    expect(svg.status).toBe("ok");
+    expect(svg.result.modelContent).toContain("<svg");
+    const bmp = await h.executor.execute(call("read", { path: "img.bmp" }, "c2"), h.scope);
+    expect(bmp.result.status === "error" && bmp.result.error.code).toBe("binary_file");
+    expect(bmp.result.modelContent).toContain("PNG、JPEG、GIF、WebP");
   });
 });
 

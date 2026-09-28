@@ -5,6 +5,7 @@
 import type {
   ContentBlock,
   FinishReason,
+  ImageAttachment,
   ModelRef,
   PermissionAction,
   PermissionOption,
@@ -50,6 +51,8 @@ export interface TurnStartedPayload {
 export interface MessageUserPayload {
   messageId: string;
   content: ContentBlock[];
+  /** 随消息附带的图片引用（ADR-0023，粘贴/拖入）；无附件时缺省 */
+  attachments?: ImageAttachment[] | undefined;
 }
 
 export interface MessageAssistantPayload {
@@ -106,6 +109,8 @@ export interface ToolCompletedPayload {
   truncated?: boolean | undefined;
   /** 超预算输出的落盘文件绝对路径（tools.md 第 4 节） */
   spillPath?: string | undefined;
+  /** 工具结果附带的图片引用（ADR-0023）；字节已落盘，事件只含引用 */
+  attachments?: ImageAttachment[] | undefined;
   durationMs?: number | undefined;
 }
 

@@ -14,6 +14,7 @@ import type {
   Diagnostics,
   DurablePayload,
   HookPoint,
+  ImageMimeType,
   JsonSchema,
   McpServerEntry,
   McpServerPayload,
@@ -27,6 +28,7 @@ import type {
   ToolSpec,
   Usage,
 } from "../protocol/index.js";
+import type { AttachmentStore } from "./attachments.js";
 
 // ── 工具定义 ──────────────────────────────────────────────
 
@@ -43,12 +45,29 @@ export interface ToolTraits {
   maxModelChars?: number | undefined;
 }
 
+/**
+ * 工具结果携带的图片附件（ADR-0023 第 2 节）：原始字节由执行器
+ * 经 AttachmentStore 落盘，事件与历史里只保留引用；字节不得进入
+ * 事件、HistoryEntry 或 Hook 输入。
+ */
+export interface ToolResultAttachment {
+  mimeType: ImageMimeType;
+  data: Uint8Array;
+  label?: string | undefined;
+}
+
 export type ToolResult<Output = unknown> =
-  | { status: "ok"; modelContent: string; output?: Output }
+  | {
+      status: "ok";
+      modelContent: string;
+      output?: Output;
+      attachments?: ToolResultAttachment[] | undefined;
+    }
   | {
       status: "error";
       modelContent: string;
       output?: Output;
+      attachments?: ToolResultAttachment[] | undefined;
       error: { code: string; message: string };
     };
 
@@ -104,6 +123,11 @@ export interface ToolDefinition<Input = unknown, Output = unknown> {
   description: string;
   inputSchema: JsonSchema;
   traits: ToolTraits;
+  /**
+   * 工具来源标记（ADR-0023）：MCP 连接器包装的工具为 "mcp"，
+   * 用于给结果附件标注 ImageAttachment.source；缺省为内置/本地来源。
+   */
+  origin?: "mcp" | undefined;
   /** 纯函数：本次调用会碰到什么；不得做 I/O */
   permissionSubjects(input: Input, scope: ToolScope): SubjectRequest[];
   /**
@@ -365,6 +389,8 @@ export interface ExecutionScope extends ToolScope {
   events: ToolEventSink;
   /** 超预算输出落盘根目录：<sessionsDir>/attachments（tools.md 第 4 节） */
   attachmentsDir?: string | undefined;
+  /** 会话级图片附件存储（ADR-0023）；缺省时附件保存按失败降级并注明 */
+  attachments?: AttachmentStore | undefined;
   /** 会话级 Hook 执行器；缺省时执行管线与未启用一致（hooks.md 第 8 节） */
   hooks?: HookRunner | undefined;
   /** 诊断通道；缺省为 no-op（observability.md） */
@@ -391,6 +417,8 @@ export interface ExecutionEnvironment {
   readState: ReadStateStore;
   /** 超预算输出落盘根目录；缺省时不落盘（只截断） */
   attachmentsDir?: string | undefined;
+  /** 会话级图片附件存储（ADR-0023）；缺省时结果附件按保存失败降级 */
+  attachments?: AttachmentStore | undefined;
   hooks?: HookRunner | undefined;
   diagnostics?: Diagnostics | undefined;
   /** shell 子进程环境中要剥离的变量名（凭据变量；provider-setup.md 第 4 节） */

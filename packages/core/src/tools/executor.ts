@@ -7,7 +7,12 @@
  */
 import { Ajv, type ValidateFunction } from "ajv";
 
-import type { PermissionSubject, SubjectRequest, ToolCallRef } from "../protocol/index.js";
+import type {
+  ImageAttachment,
+  PermissionSubject,
+  SubjectRequest,
+  ToolCallRef,
+} from "../protocol/index.js";
 import { applyBudget } from "./budget.js";
 import { writeSpill } from "./spill.js";
 import type {
@@ -71,6 +76,9 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       const startedAt = Date.now();
       const { turnId } = scope;
       let stopTurn = false;
+      // 结果附件的来源（ADR-0023）：找到工具后按其 origin 标记更新；
+      // finish 闭包先于 tool 定义，不能反向收窄，故单独持有
+      let attachmentSource: ImageAttachment["source"] = "read";
 
       /** 步骤 9：唯一出口——归一化 + 发出恰好一个 tool.completed */
       async function finish(
@@ -102,6 +110,45 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
               ? `\n\n[完整输出已写入 ${spillPath}（本会话内可用 read 查看）]`
               : "\n\n[完整输出未保留：落盘不可用或写入失败]";
         }
+        // 图片附件落盘（ADR-0023 第 2 节）：字节经 AttachmentStore 存入会话
+        // 附件目录，tool.completed 只带 ImageAttachment 引用。单张失败不拖垮
+        // 结果——成功的照常引用，失败的在 modelContent 末尾注明并记诊断
+        let attachments: ImageAttachment[] | undefined;
+        const attSpecs = result.attachments;
+        if (attSpecs !== undefined && attSpecs.length > 0) {
+          const source = attachmentSource;
+          attachments = [];
+          for (const att of attSpecs) {
+            if (scope.attachments === undefined) {
+              modelContent += "\n\n[图片附件保存失败：附件目录不可用]";
+              scope.diagnostics?.record("tool.attachment_failed", {
+                callId: call.callId,
+                name: call.name,
+                error: "附件目录不可用",
+              });
+              continue;
+            }
+            try {
+              attachments.push(
+                await scope.attachments.save({
+                  data: att.data,
+                  mimeType: att.mimeType,
+                  source,
+                  ...(att.label !== undefined ? { label: att.label } : {}),
+                }),
+              );
+            } catch (e) {
+              const why = e instanceof Error ? e.message : String(e);
+              modelContent += `\n\n[图片附件保存失败：${why}]`;
+              scope.diagnostics?.record("tool.attachment_failed", {
+                callId: call.callId,
+                name: call.name,
+                error: why,
+              });
+            }
+          }
+          if (attachments.length === 0) attachments = undefined;
+        }
         await scope.events.emit(
           "tool.completed",
           {
@@ -113,6 +160,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
             error: budget.result.status === "error" ? budget.result.error : undefined,
             truncated: budget.truncated || undefined,
             spillPath,
+            ...(attachments !== undefined ? { attachments } : {}),
             durationMs: Date.now() - startedAt,
           },
           { turnId },
@@ -140,6 +188,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           errorResult("unknown_tool", `未知工具 "${call.name}"。可用工具：${names || "（无）"}`),
         );
       }
+      attachmentSource = tool.origin === "mcp" ? "mcp" : "read";
 
       // 2. 校验并规范化输入
       if (call.input === undefined || call.input === null) {

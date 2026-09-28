@@ -343,6 +343,8 @@ function wrapTool(
     name,
     description: tool.description ?? tool.title ?? `MCP 工具 ${st.cfg.name}/${remote}`,
     inputSchema: tool.inputSchema,
+    // 来源标记：结果图片附件记为 source "mcp"（ADR-0023）
+    origin: "mcp",
     traits: {
       // readOnlyHint 是服务器自己声明的标注（不可信）：只决定能否进入
       // explore 工具集（subagent.md 第 6 节），放行仍由权限层逐项判断

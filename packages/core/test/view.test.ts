@@ -649,4 +649,46 @@ describe("SessionView reducer", () => {
     // 收敛断言不成立（Turn 未闭合）——pendingPermission 非空即非收敛点
     expect(view.pendingPermission).toBeDefined();
   });
+
+  it("图片附件引用进入 user / tool 视图条目；无附件时键不出现（ADR-0023）", () => {
+    const att = {
+      type: "image" as const,
+      file: "img-1.png",
+      mimeType: "image/png" as const,
+      bytes: 29,
+      sha256: "ab".repeat(32),
+      source: "read" as const,
+    };
+    const view = createSessionView();
+    const dur = (seq: number, type: DurableEvent["type"], payload: unknown, turnId = "t1") =>
+      ({ type, sessionId: "s", seq, time: "t", turnId, payload }) as DurableEvent;
+    reduceSessionView(
+      view,
+      dur(1, "message.user", {
+        messageId: "m1",
+        content: [{ type: "text", text: "看图" }],
+        attachments: [att],
+      }),
+    );
+    reduceSessionView(
+      view,
+      dur(2, "tool.completed", {
+        callId: "c1",
+        name: "read",
+        status: "ok",
+        modelContent: "x",
+        attachments: [att],
+      }),
+    );
+    reduceSessionView(
+      view,
+      dur(3, "message.user", { messageId: "m2", content: [{ type: "text", text: "无图" }] }),
+    );
+    const [u1, tool, u2] = view.entries;
+    expect(u1?.kind === "user" && u1.attachments?.[0]?.file).toBe("img-1.png");
+    expect(tool?.kind === "tool" && tool.result?.attachments?.[0]?.sha256).toBe(att.sha256);
+    expect(u2?.kind === "user" && "attachments" in u2).toBe(false);
+    // 只含引用的视图可 JSON 序列化（字节从未进入事件）
+    expect(() => JSON.stringify(view)).not.toThrow();
+  });
 });

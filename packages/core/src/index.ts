@@ -80,6 +80,7 @@ import {
 } from "./session/index.js";
 import {
   builtinTools,
+  createAttachmentStore,
   createPolicyGate,
   createReadStateStore,
   createTaskTool,
@@ -752,6 +753,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       gate,
       readState: createReadStateStore(paths),
       attachmentsDir: paths.join(sessionsDir, "attachments"),
+      // ADR-0023：会话级图片附件存储；B/C 阶段共用同一实例（C 阶段
+      // Agent Loop 经 execEnv 取回字节投影进模型请求）
+      attachments: createAttachmentStore({
+        fs,
+        paths,
+        attachmentsDir: paths.join(sessionsDir, "attachments"),
+        sessionId: session.id,
+      }),
       hooks: hookRunner,
       diagnostics,
       shellEnvStrip,

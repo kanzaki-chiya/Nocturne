@@ -67,6 +67,19 @@ const reasoningEffortSchema = z.enum(["off", "minimal", "low", "medium", "high",
 
 const errorInfoSchema = z.object({ code: z.string(), message: z.string() });
 
+/** ImageAttachment（ADR-0023 第 2 节）：事件里只有引用，字节在附件目录 */
+const imageAttachmentSchema = z.object({
+  type: z.literal("image"),
+  file: z.string(),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp"]),
+  bytes: z.number().int().nonnegative(),
+  sha256: z.string(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  label: z.string().optional(),
+  source: z.enum(["paste", "read", "mcp"]),
+});
+
 // ── payload schema ─────────────────────────────────────────
 
 const payloadSchemas = {
@@ -90,6 +103,7 @@ const payloadSchemas = {
   "message.user": z.object({
     messageId: z.string(),
     content: z.array(contentBlockSchema),
+    attachments: z.array(imageAttachmentSchema).optional(),
   }),
   "message.assistant": z.object({
     messageId: z.string(),
@@ -135,6 +149,7 @@ const payloadSchemas = {
     error: errorInfoSchema.optional(),
     truncated: z.boolean().optional(),
     spillPath: z.string().optional(),
+    attachments: z.array(imageAttachmentSchema).optional(),
     durationMs: z.number().optional(),
   }),
   "context.compacted": z.object({

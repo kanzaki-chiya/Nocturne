@@ -17,6 +17,7 @@ import { isDurableEvent, isDurableEventType, isEphemeralEventType } from "./even
 import type {
   ContentBlock,
   FinishReason,
+  ImageAttachment,
   ModelRef,
   PermissionAction,
   PermissionOption,
@@ -74,6 +75,8 @@ export interface UserEntry {
   seq: number;
   turnId: string;
   content: ContentBlock[];
+  /** 随消息附带的图片引用（ADR-0023）；无附件时字段不出现 */
+  attachments?: ImageAttachment[] | undefined;
 }
 
 export interface AssistantEntry {
@@ -115,6 +118,8 @@ export interface ToolEntry {
         error: { code: string; message: string } | undefined;
         truncated: boolean;
         spillPath: string | undefined;
+        /** 工具结果附带的图片引用（ADR-0023）；无附件时字段不出现 */
+        attachments?: ImageAttachment[] | undefined;
         durationMs: number | undefined;
       }
     | undefined;
@@ -275,6 +280,9 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
         seq: event.seq,
         turnId: turnId ?? "",
         content: event.payload.content,
+        ...(event.payload.attachments !== undefined
+          ? { attachments: event.payload.attachments }
+          : {}),
       });
       break;
     }
@@ -376,6 +384,7 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
         error: p.error,
         truncated: p.truncated === true,
         spillPath: p.spillPath,
+        ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
         durationMs: p.durationMs,
       };
       break;

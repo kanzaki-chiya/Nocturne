@@ -123,6 +123,69 @@ describe("decodeDurableEvent", () => {
     expect("futureField" in decoded).toBe(false);
   });
 
+  it("attachments 字段（ADR-0023）：带/不带均可解析，非法 mimeType 拒绝", () => {
+    const att = {
+      type: "image" as const,
+      file: "img-1.png",
+      mimeType: "image/png" as const,
+      bytes: 29,
+      sha256: "ab".repeat(32),
+      width: 2,
+      height: 3,
+      label: "x.png",
+      source: "read" as const,
+    };
+    const withAtt = makeEvent({
+      type: "message.user",
+      seq: 2,
+      turnId: "t1",
+      payload: {
+        messageId: "m1",
+        content: [{ type: "text", text: "hi" }],
+        attachments: [att],
+      },
+    });
+    expect(decodeDurableEvent(encodeDurableEvent(withAtt))).toEqual(withAtt);
+
+    const toolDone = makeEvent({
+      type: "tool.completed",
+      seq: 3,
+      turnId: "t1",
+      payload: {
+        callId: "c1",
+        name: "read",
+        status: "ok",
+        modelContent: "x",
+        attachments: [att],
+      },
+    });
+    expect(decodeDurableEvent(encodeDurableEvent(toolDone))).toEqual(toolDone);
+
+    // 无附件字段照常解析
+    const plain = makeEvent({
+      type: "tool.completed",
+      seq: 4,
+      turnId: "t1",
+      payload: { callId: "c1", name: "read", status: "ok", modelContent: "x" },
+    });
+    const decoded = decodeDurableEvent(encodeDurableEvent(plain));
+    expect("attachments" in (decoded.payload as Record<string, unknown>)).toBe(false);
+
+    // 非法 mimeType → invalid_event
+    const bad = JSON.parse(encodeDurableEvent(withAtt)) as {
+      payload: { attachments: { mimeType: string }[] };
+    };
+    const first = bad.payload.attachments[0];
+    if (first === undefined) expect.unreachable();
+    first.mimeType = "image/bmp";
+    try {
+      decodeDurableEvent(JSON.stringify(bad));
+      expect.unreachable();
+    } catch (e) {
+      expect((e as EventParseError).code).toBe("invalid_event");
+    }
+  });
+
   it("seq 必须为正整数", () => {
     for (const seq of [0, -1, 1.5, "2"]) {
       const raw = JSON.parse(encodeDurableEvent(makeEvent())) as Record<string, unknown>;

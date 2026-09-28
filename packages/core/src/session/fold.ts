@@ -100,12 +100,15 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         break;
       }
       case "message.user": {
+        const p = event.payload;
         history.push({
           kind: "user",
           seq: event.seq,
           turnId: turnId ?? "",
-          messageId: event.payload.messageId,
-          content: event.payload.content,
+          messageId: p.messageId,
+          content: p.content,
+          // ADR-0023：旧日志无 attachments 字段——有值才带上，缺省不落进历史
+          ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
         });
         break;
       }
@@ -156,6 +159,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           status: p.status,
           modelContent: p.modelContent,
           inputSummary: startedInputs.get(p.callId),
+          ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
         });
         unsettled.delete(p.callId);
         startedInputs.delete(p.callId);

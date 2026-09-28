@@ -2,6 +2,14 @@ export * from "./types.js";
 export { createToolRegistry } from "./registry.js";
 export { createToolExecutor } from "./executor.js";
 export { createExecutionScope } from "./scope.js";
+export { createAttachmentStore, type AttachmentStore } from "./attachments.js";
+export {
+  IMAGE_MAX_BYTES,
+  IMAGE_MAX_EDGE,
+  SUPPORTED_IMAGE_FORMATS,
+  parseImageSize,
+  sniffImageMime,
+} from "./image.js";
 export { createPolicyGate } from "./gate.js";
 export { createReadStateStore } from "./readstate.js";
 export {

@@ -11,6 +11,7 @@ import type { Session, SessionState, SessionStore } from "../session/index.js";
 import type { PermissionPolicy } from "../permission/index.js";
 import {
   builtinTools,
+  createAttachmentStore,
   createPolicyGate,
   createReadStateStore,
   createTaskTool,
@@ -309,6 +310,14 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           gate,
           readState: createReadStateStore(deps.platform.paths),
           attachmentsDir: deps.platform.paths.join(deps.sessionsDir, "attachments"),
+          // ADR-0023：子会话用独立附件目录（<attachmentsDir>/<child.id>/），
+          // 编号与父会话互不干扰
+          attachments: createAttachmentStore({
+            fs: deps.platform.fs,
+            paths: deps.platform.paths,
+            attachmentsDir: deps.platform.paths.join(deps.sessionsDir, "attachments"),
+            sessionId: child.id,
+          }),
           ...(childRunner !== undefined ? { hooks: childRunner } : {}),
           ...(deps.diagnostics !== undefined ? { diagnostics: deps.diagnostics } : {}),
           ...(deps.shellEnvStrip !== undefined ? { shellEnvStrip: deps.shellEnvStrip } : {}),

@@ -64,6 +64,30 @@ export type ContentBlock =
       providerData?: unknown;
     };
 
+// ── 图片附件（ADR-0023 第 2 节）─────────────────────────────
+
+export type ImageMimeType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+
+/**
+ * 图片附件的引用：字节不落进事件与历史，统一存到
+ * <attachmentsDir>/<sessionId>/ 下，事件里只有这份元数据。
+ * `source` 标记来源：paste（用户粘贴/拖入）、read（内置工具读图）、
+ * mcp（MCP 工具结果）。
+ */
+export interface ImageAttachment {
+  type: "image";
+  /** 相对 <attachmentsDir>/<sessionId>/ 的文件名，如 "img-3.png" */
+  file: string;
+  mimeType: ImageMimeType;
+  bytes: number;
+  /** 小写 hex */
+  sha256: string;
+  width?: number | undefined;
+  height?: number | undefined;
+  label?: string | undefined;
+  source: "paste" | "read" | "mcp";
+}
+
 /** 一次工具调用的引用。callId 由 Runtime 分配、会话内唯一 */
 export interface ToolCallRef {
   callId: string;
@@ -259,6 +283,8 @@ export type HistoryEntry =
       turnId: string;
       messageId: string;
       content: ContentBlock[];
+      /** 随用户消息附带的图片引用（ADR-0023）；旧日志无此字段 */
+      attachments?: ImageAttachment[] | undefined;
     }
   | {
       kind: "assistant";
@@ -284,6 +310,8 @@ export type HistoryEntry =
        * L1 修剪后用作占位说明的一部分（context.md 6.5）
        */
       inputSummary?: string | undefined;
+      /** 工具结果附带的图片引用（ADR-0023）；旧日志无此字段 */
+      attachments?: ImageAttachment[] | undefined;
     }
   | {
       kind: "compaction";
