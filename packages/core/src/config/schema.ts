@@ -71,6 +71,12 @@ export const providerEntrySchema = z
           .optional(),
       })
       .optional(),
+    // 用户声明的逐模型能力（ADR-0023 第 1 节）：仅向导层 providers.json
+    // 有意义（/provider image 写入）；合并时按"用户声明"投影到
+    // models.*.capabilities.imageInput，高层条目里的同名字段不作声明用
+    userCapabilities: z
+      .record(z.string(), z.object({ imageInput: z.boolean().optional() }))
+      .optional(),
     // 向导/"refresh"写入的上游来源标注（provider-setup.md 第 7 节）
     source: z.literal("upstream").optional(),
     fetchedAt: z.string().optional(),

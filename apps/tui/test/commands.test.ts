@@ -4,9 +4,9 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { RuntimeSession, SessionShellInfo } from "@nocturne/core";
+import type { RuntimeConfig, RuntimeSession, SessionShellInfo } from "@nocturne/core";
 
-import { runSlash } from "../src/commands.js";
+import { runSlash, type ProviderBridge } from "../src/commands.js";
 
 function fakeSession(overrides: Partial<RuntimeSession> = {}): RuntimeSession {
   return {
@@ -104,5 +104,65 @@ describe("TUI /shell", () => {
     const r = await runSlash("/shell fish", session);
     expect(r.kind).toBe("message");
     if (r.kind === "message") expect(r.text).toContain("未知 shell");
+  });
+});
+
+describe("TUI /provider image（ADR-0023 第 1 节）", () => {
+  const bridge = (impl: (p: string, m: string, on: boolean) => Promise<void>) => {
+    const calls: [string, string, boolean][] = [];
+    const updates: unknown[] = [];
+    const provider: ProviderBridge = {
+      config: {
+        saveSetupImageInput: async (p: string, m: string, on: boolean) => {
+          calls.push([p, m, on]);
+          await impl(p, m, on);
+        },
+      } as unknown as RuntimeConfig,
+      reloadConfig: async () => ({ tag: "rc" }) as unknown as RuntimeConfig,
+      updateProviders: (rc) => {
+        updates.push(rc);
+      },
+    };
+    return { provider, calls, updates };
+  };
+
+  it("on/off 调 saveSetupImageInput 并 reload，返回声明文案", async () => {
+    const { provider, calls, updates } = bridge(() => Promise.resolve());
+    const r = await runSlash("/provider image corp m1 on", fakeSession(), provider);
+    expect(calls).toEqual([["corp", "m1", true]]);
+    expect(updates).toEqual([{ tag: "rc" }]);
+    expect(r).toEqual({ kind: "message", text: "已声明 corp/m1 支持图片输入" });
+
+    const r2 = await runSlash("/provider image corp m1 off", fakeSession(), provider);
+    expect(calls.at(-1)).toEqual(["corp", "m1", false]);
+    expect(r2).toEqual({ kind: "message", text: "已声明 corp/m1 不支持图片输入" });
+  });
+
+  it("参数不全或非法开关 → 用法提示，不写配置", async () => {
+    const { provider, calls } = bridge(() => Promise.resolve());
+    for (const line of [
+      "/provider image",
+      "/provider image corp",
+      "/provider image corp m1 maybe",
+    ]) {
+      const r = await runSlash(line, fakeSession(), provider);
+      expect(r).toEqual({
+        kind: "message",
+        text: "用法：/provider image <服务商> <模型> on|off",
+      });
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("写入失败 → ! 错误消息", async () => {
+    const { provider } = bridge(() =>
+      Promise.reject(new Error('服务商 "corp" 不是向导写入的条目')),
+    );
+    const r = await runSlash("/provider image corp m1 on", fakeSession(), provider);
+    expect(r.kind).toBe("message");
+    if (r.kind === "message") {
+      expect(r.text).toContain("! ");
+      expect(r.text).toContain("不是向导写入的条目");
+    }
   });
 });

@@ -15,6 +15,7 @@ export {
   recordRecentModel,
   refreshUpstreamLimits,
   removeSetupProvider,
+  saveSetupImageInput,
   saveSetupProvider,
   saveSetupThinking,
   setSetupDefaultModel,

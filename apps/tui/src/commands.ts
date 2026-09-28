@@ -77,6 +77,23 @@ export async function runSlash(
         case "thinking":
           if (name === "") return { kind: "message", text: "用法：/provider thinking <名称>" };
           return { kind: "provider-wizard", start: { kind: "thinking", providerId: name } };
+        case "image": {
+          // /provider image <服务商> <模型> on|off（ADR-0023 第 1 节）
+          const [pid, mid, flag] = [subRest[0], subRest[1], subRest[2]];
+          if (pid === undefined || mid === undefined || (flag !== "on" && flag !== "off")) {
+            return { kind: "message", text: "用法：/provider image <服务商> <模型> on|off" };
+          }
+          try {
+            await provider.config.saveSetupImageInput(pid, mid, flag === "on");
+            provider.updateProviders(await provider.reloadConfig());
+            return {
+              kind: "message",
+              text: `已声明 ${pid}/${mid} ${flag === "on" ? "支持" : "不支持"}图片输入`,
+            };
+          } catch (e) {
+            return { kind: "message", text: `! ${errText(e)}` };
+          }
+        }
         case "refresh": {
           if (name === "") return { kind: "message", text: "用法：/provider refresh <名称>" };
           try {
@@ -93,7 +110,7 @@ export async function runSlash(
         default:
           return {
             kind: "message",
-            text: `未知子命令 ${sub}；可用：add | key <名称> | thinking <名称> | refresh <名称> | remove <名称>`,
+            text: `未知子命令 ${sub}；可用：add | key <名称> | thinking <名称> | image <名称> <模型> on|off | refresh <名称> | remove <名称>`,
           };
       }
     }

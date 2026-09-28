@@ -227,6 +227,22 @@ export async function runSlashCommand(
         }
         return "handled";
       }
+      // /provider image <服务商> <模型> on|off（ADR-0023 第 1 节）
+      if (sub === "image") {
+        const [pid, mid, flag] = [rest[1], rest[2], rest[3]];
+        if (pid === undefined || mid === undefined || (flag !== "on" && flag !== "off")) {
+          io.print("用法：/provider image <服务商> <模型> on|off");
+          return "handled";
+        }
+        try {
+          await config.saveSetupImageInput(pid, mid, flag === "on");
+          updateProviders(await reloadConfig());
+          io.print(`已声明 ${pid}/${mid} ${flag === "on" ? "支持" : "不支持"}图片输入`);
+        } catch (e) {
+          io.print(`! ${errorText(e)}`);
+        }
+        return "handled";
+      }
       const name = rest[1];
       if (name === undefined || name === "") {
         io.print(`! /provider ${sub} 需要服务商名`);

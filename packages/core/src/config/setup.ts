@@ -157,8 +157,16 @@ export async function saveSetupProvider(
   },
 ): Promise<void> {
   const state = await loadProviderSetup(platform, nocturneHome);
+  const previous = (state.file?.providers ?? []).find((p) => p.id === entry.id);
   const providers = (state.file?.providers ?? []).filter((p) => p.id !== entry.id);
-  providers.push(entry);
+  // 同 id 整换时保留"用户声明"字段：向导没有 /provider image 的重答步骤，
+  // 不带 userCapabilities 的新条目沿用旧声明（thinking.levels 由向导步骤
+  // 重新勾选，无需保留）
+  providers.push(
+    entry.userCapabilities === undefined && previous?.userCapabilities !== undefined
+      ? { ...entry, userCapabilities: previous.userCapabilities }
+      : entry,
+  );
   const file: ProviderSetupFile = {
     version: SETUP_FILE_VERSION,
     ...(state.file?.model !== undefined ? { model: state.file.model } : {}),
@@ -227,6 +235,48 @@ export async function saveSetupThinking(
   const updated: ProviderEntryConfig = {
     ...entry,
     ...(Object.keys(thinking).length > 0 ? { thinking } : { thinking: undefined }),
+  };
+  await writeProviderSetup(platform, nocturneHome, {
+    version: SETUP_FILE_VERSION,
+    ...(state.file?.model !== undefined ? { model: state.file.model } : {}),
+    providers: entries.map((p) => (p.id === providerId ? updated : p)),
+  });
+}
+
+/**
+ * 写入向导条目的逐模型图片输入声明（/provider image；ADR-0023 第 1 节）：
+ * on → true，off → false（off 是显式声明"不支持"，合并时覆盖上游值）。
+ * 条目不在 providers.json，或模型不在该条目 models 清单中时拒绝——
+ * 绝不写 config.json。
+ */
+export async function saveSetupImageInput(
+  platform: Platform,
+  nocturneHome: string,
+  providerId: string,
+  modelId: string,
+  enabled: boolean,
+): Promise<void> {
+  const state = await loadProviderSetup(platform, nocturneHome);
+  const entries = state.file?.providers ?? [];
+  const entry = entries.find((p) => p.id === providerId);
+  if (entry === undefined) {
+    throw new ConfigError(
+      "config_invalid",
+      `服务商 "${providerId}" 不是向导写入的条目；手写在 config.json 的条目请编辑对应文件（models.<模型>.capabilities.imageInput）`,
+    );
+  }
+  if (entry.models?.[modelId] === undefined) {
+    throw new ConfigError(
+      "config_invalid",
+      `模型 "${modelId}" 不在服务商 "${providerId}" 的清单中，可先 /provider refresh 获取上游模型列表`,
+    );
+  }
+  const updated: ProviderEntryConfig = {
+    ...entry,
+    userCapabilities: {
+      ...(entry.userCapabilities ?? {}),
+      [modelId]: { ...(entry.userCapabilities?.[modelId] ?? {}), imageInput: enabled },
+    },
   };
   await writeProviderSetup(platform, nocturneHome, {
     version: SETUP_FILE_VERSION,

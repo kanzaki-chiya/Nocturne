@@ -136,6 +136,7 @@ describe("补全", () => {
     ]);
     const provider = completeSlash("/provider ", ctx).map((h) => h.insert);
     expect(provider).toContain("/provider add");
+    expect(provider).toContain("/provider image");
     expect(provider).toContain("/provider deepseek");
     expect(completeSlash("/preset ", ctx).map((h) => h.insert)).toEqual([
       "/preset read-only",

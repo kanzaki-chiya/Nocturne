@@ -303,6 +303,61 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(updated).toEqual([{ tag: "rc" }]);
   });
 
+  it("/provider image 声明写入并 updateProviders；on/off 文案（ADR-0023）", async () => {
+    const calls: [string, string, boolean][] = [];
+    const updated: unknown[] = [];
+    const deps = {
+      provider: {
+        config: {
+          saveSetupImageInput: async (p: string, m: string, on: boolean) => {
+            calls.push([p, m, on]);
+          },
+        } as never,
+        reloadConfig: async () => ({ tag: "rc" }) as never,
+        updateProviders: (rc: unknown) => {
+          updated.push(rc);
+        },
+      },
+    };
+    const { lines, io } = capture();
+    await runSlashCommand("/provider image corp m1 on", fakeSession(), fakeRuntime, io, deps);
+    expect(calls).toEqual([["corp", "m1", true]]);
+    expect(updated).toEqual([{ tag: "rc" }]);
+    expect(lines.join("")).toContain("已声明 corp/m1 支持图片输入");
+
+    const c2 = capture();
+    await runSlashCommand("/provider image corp m1 off", fakeSession(), fakeRuntime, c2.io, deps);
+    expect(calls.at(-1)).toEqual(["corp", "m1", false]);
+    expect(c2.lines.join("")).toContain("已声明 corp/m1 不支持图片输入");
+  });
+
+  it("/provider image 参数不全或非法开关 → 用法；写入失败透传", async () => {
+    const deps = {
+      provider: {
+        config: {
+          saveSetupImageInput: async () => {
+            throw new Error('服务商 "corp" 不是向导写入的条目');
+          },
+        } as never,
+        reloadConfig: async () => ({}) as never,
+        updateProviders: () => undefined,
+      },
+    };
+    const { lines, io } = capture();
+    for (const line of [
+      "/provider image",
+      "/provider image corp",
+      "/provider image corp m1",
+      "/provider image corp m1 maybe",
+    ]) {
+      await runSlashCommand(line, fakeSession(), fakeRuntime, io, deps);
+    }
+    expect(lines.filter((l) => l.includes("用法：/provider image"))).toHaveLength(4);
+    await runSlashCommand("/provider image corp m1 on", fakeSession(), fakeRuntime, io, deps);
+    expect(lines.at(-1)).toContain("! ");
+    expect(lines.at(-1)).toContain("不是向导写入的条目");
+  });
+
   it("/provider add 无向导桥时提示需要交互终端", async () => {
     const { lines, io } = capture();
     await runSlashCommand("/provider add", fakeSession(), fakeRuntime, io, {

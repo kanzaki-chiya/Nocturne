@@ -19,6 +19,7 @@ import {
   recordRecentModel,
   refreshUpstreamLimits,
   removeSetupProvider,
+  saveSetupImageInput,
   saveSetupProvider,
   saveSetupThinking,
   setSetupDefaultModel,
@@ -207,6 +208,8 @@ export async function loadConfig(
     setCredential: (providerId, key) => credentials.set(providerId, key),
     saveSetupThinking: (providerId, levels) =>
       saveSetupThinking(platform, home, providerId, levels),
+    saveSetupImageInput: (providerId, modelId, enabled) =>
+      saveSetupImageInput(platform, home, providerId, modelId, enabled),
     removeSetupProvider: (providerId) =>
       removeSetupProvider(platform, home, credentials, providerId),
     async describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]> {

@@ -13,7 +13,7 @@ describe("CLI completer", () => {
       "/effort low",
     ]);
     expect(readlineCompleter("/provider ", ctx)[0]).toEqual(
-      expect.arrayContaining(["/provider add", "/provider commandcode"]),
+      expect.arrayContaining(["/provider add", "/provider image", "/provider commandcode"]),
     );
     expect(readlineCompleter("/preset d", ctx)[0]).toContain("/preset default");
   });

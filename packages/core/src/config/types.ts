@@ -75,6 +75,12 @@ export interface ProviderEntryConfig {
       }
     | undefined;
   /**
+   * 用户声明的逐模型能力（ADR-0023 第 1 节）：`/provider image` 写入，
+   * 只在向导层 providers.json 有意义——合并时作为"用户声明"投影到对应
+   * 模型的 capabilities.imageInput（高于上游声明、低于逐模型手写配置）。
+   */
+  userCapabilities?: Record<string, { imageInput?: boolean | undefined }> | undefined;
+  /**
    * models 字段的来源标注（provider-setup.md 第 7 节）：向导 /
    * `/provider refresh` 写入上游列表时标记 "upstream" 并记录 fetchedAt。
    * 手写条目不携带这两个字段。
@@ -298,6 +304,12 @@ export interface RuntimeConfig {
     providerId: string,
     levels: readonly ReasoningEffortLevel[] | undefined,
   ): Promise<void>;
+  /**
+   * 写入向导条目的逐模型图片输入声明（/provider image；ADR-0023 第 1 节）：
+   * enabled=false 也是显式声明（覆盖上游 true）。条目不在 providers.json，
+   * 或模型不在该条目 models 清单中时抛 ConfigError("config_invalid")。
+   */
+  saveSetupImageInput(providerId: string, modelId: string, enabled: boolean): Promise<void>;
   /**
    * 删除向导写入的条目及其凭据。条目不在 providers.json（由更高层
    * 定义或不存在）时抛 ConfigError("config_invalid")，由调用方提示。

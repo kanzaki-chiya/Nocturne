@@ -331,6 +331,209 @@ describe("refreshUpstreamLimits", () => {
   });
 });
 
+// ── /provider image：用户声明 imageInput（ADR-0023 第 1 节）──
+
+describe("saveSetupImageInput 与用户声明合并（ADR-0023 第 1 节）", () => {
+  it("写入 providers.json 的 userCapabilities；refresh 重写 models 后声明仍在", async () => {
+    const creds = (await createCredentialStore(platform, home, { backend: "memory" })).store;
+    const rc = await loadConfig(platform, {
+      nocturneHome: home,
+      env: noEnv,
+      credentials: creds,
+      upstreamFetch: async () => [
+        { id: "m1", capabilities: { reasoning: "visible", imageInput: true } },
+        { id: "m2" },
+      ],
+    });
+    await rc.saveSetupProvider(ENTRY);
+    await rc.saveSetupImageInput("corp", "m1", false); // off = 显式声明"不支持"
+
+    const written = (await readJson(path.join(home, "providers.json"))) as {
+      providers: {
+        id: string;
+        baseURL?: string;
+        userCapabilities?: Record<string, { imageInput?: boolean }>;
+      }[];
+    };
+    expect(written.providers[0]?.userCapabilities).toEqual({ m1: { imageInput: false } });
+    // 其余字段不动
+    expect(written.providers[0]?.baseURL).toBe(ENTRY.baseURL);
+
+    // refresh 重写 models（上游值照常写回），用户声明不被覆盖
+    await rc.refreshUpstreamLimits("corp");
+    const refreshed = (await readJson(path.join(home, "providers.json"))) as {
+      providers: {
+        id: string;
+        source?: string;
+        models?: Record<string, { capabilities?: Record<string, unknown> }>;
+        userCapabilities?: Record<string, { imageInput?: boolean }>;
+      }[];
+    };
+    const corp = refreshed.providers.find((p) => p.id === "corp");
+    expect(corp?.source).toBe("upstream");
+    expect(corp?.models?.m1?.capabilities?.imageInput).toBe(true);
+    expect(corp?.userCapabilities).toEqual({ m1: { imageInput: false } });
+    // 合并结果：用户声明覆盖上游值
+    const rc2 = await load();
+    expect(
+      rc2.base.providers.find((p) => p.id === "corp")?.models?.m1?.capabilities?.imageInput,
+    ).toBe(false);
+  });
+
+  it("saveSetupProvider 同 id 整换条目时保留 userCapabilities（向导无重答步骤）", async () => {
+    const creds = (await createCredentialStore(platform, home, { backend: "memory" })).store;
+    const rc = await loadConfig(platform, { nocturneHome: home, env: noEnv, credentials: creds });
+    await rc.saveSetupProvider(ENTRY);
+    await rc.saveSetupImageInput("corp", "m1", true);
+    // 重走向导换地址：同 id 条目整体替换，声明沿用
+    await rc.saveSetupProvider({ ...ENTRY, baseURL: "https://new.corp.test/v1" });
+    const raw = (await readJson(path.join(home, "providers.json"))) as {
+      providers: { baseURL?: string; userCapabilities?: unknown }[];
+    };
+    expect(raw.providers[0]?.baseURL).toBe("https://new.corp.test/v1");
+    expect(raw.providers[0]?.userCapabilities).toEqual({ m1: { imageInput: true } });
+  });
+
+  it("对 config.json 手写条目拒绝（config_invalid），文件字节不变", async () => {
+    await writeJson(path.join(home, "config.json"), { providers: [ENTRY] });
+    const before = await fs.readFile(path.join(home, "config.json"), "utf8");
+    const rc = await load();
+    await expect(rc.saveSetupImageInput("corp", "m1", true)).rejects.toMatchObject({
+      code: "config_invalid",
+    });
+    expect(await fs.readFile(path.join(home, "config.json"), "utf8")).toBe(before);
+    await fs.unlink(path.join(home, "config.json"));
+  });
+
+  it("模型不在服务商清单中（含空清单）报错并提示 refresh", async () => {
+    const creds = (await createCredentialStore(platform, home, { backend: "memory" })).store;
+    const rc = await loadConfig(platform, { nocturneHome: home, env: noEnv, credentials: creds });
+    await rc.saveSetupProvider(ENTRY);
+    await expect(rc.saveSetupImageInput("corp", "m9", true)).rejects.toMatchObject({
+      code: "config_invalid",
+    });
+    await expect(rc.saveSetupImageInput("corp", "m9", true)).rejects.toThrow(/refresh/);
+    // 清单为空的条目同样拒绝
+    await rc.saveSetupProvider({
+      id: "bare",
+      type: "openai-compatible",
+      baseURL: "https://b.test",
+    });
+    await expect(rc.saveSetupImageInput("bare", "m1", true)).rejects.toMatchObject({
+      code: "config_invalid",
+    });
+  });
+});
+
+describe("imageInput 合并优先级：逐模型手写 > 用户声明 > 上游（ADR-0023 第 1 节）", () => {
+  const setupEntry = (extra: Record<string, unknown>) => ({
+    id: "corp",
+    type: "openai-compatible",
+    baseURL: "https://api.corp.test/v1",
+    ...extra,
+  });
+  const mergedModels = async () => {
+    const rc = await load();
+    return rc.base.providers.find((p) => p.id === "corp")?.models ?? {};
+  };
+
+  it("上游 true + 声明 false → false；上游 false/未声明 + 声明 true → true", async () => {
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [
+        setupEntry({
+          models: {
+            m1: { capabilities: { imageInput: true } },
+            m2: { capabilities: { imageInput: false } },
+            m3: { capabilities: { reasoning: "visible" } },
+          },
+          userCapabilities: {
+            m1: { imageInput: false },
+            m2: { imageInput: true },
+            m3: { imageInput: true },
+          },
+        }),
+      ],
+    });
+    const models = await mergedModels();
+    expect(models.m1?.capabilities?.imageInput).toBe(false);
+    expect(models.m2?.capabilities?.imageInput).toBe(true);
+    expect(models.m3?.capabilities?.imageInput).toBe(true);
+    // 其余能力位不受投影影响
+    expect(models.m3?.capabilities?.reasoning).toBe("visible");
+    await fs.unlink(path.join(home, "providers.json"));
+  });
+
+  it("config.json 手写同模型 imageInput=false + 声明 true → 手写胜", async () => {
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [
+        setupEntry({
+          models: { m1: { capabilities: { imageInput: true } } },
+          userCapabilities: { m1: { imageInput: true } },
+        }),
+      ],
+    });
+    await writeJson(path.join(home, "config.json"), {
+      providers: [
+        {
+          id: "corp",
+          baseURL: "https://api.corp.test/v1",
+          models: { m1: { capabilities: { imageInput: false } } },
+        },
+      ],
+    });
+    const models = await mergedModels();
+    expect(models.m1?.capabilities?.imageInput).toBe(false);
+    await fs.unlink(path.join(home, "providers.json"));
+    await fs.unlink(path.join(home, "config.json"));
+  });
+
+  it("config.json 手写同模型但未写 imageInput + 声明 true → 声明回填", async () => {
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [
+        setupEntry({
+          models: { m1: { contextWindow: 100, capabilities: { imageInput: false } } },
+          userCapabilities: { m1: { imageInput: true } },
+        }),
+      ],
+    });
+    // 手写条目整体替换 m1（未声明 imageInput）
+    await writeJson(path.join(home, "config.json"), {
+      providers: [
+        {
+          id: "corp",
+          baseURL: "https://api.corp.test/v1",
+          models: { m1: { contextWindow: 999 } },
+        },
+      ],
+    });
+    const models = await mergedModels();
+    expect(models.m1?.contextWindow).toBe(999); // 手写条目生效
+    expect(models.m1?.capabilities?.imageInput).toBe(true); // 声明回填
+    await fs.unlink(path.join(home, "providers.json"));
+    await fs.unlink(path.join(home, "config.json"));
+  });
+
+  it("无声明 → 保持上游值；清单外模型的声明不创建条目", async () => {
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [
+        setupEntry({
+          models: { m1: { capabilities: { imageInput: true } }, m2: {} },
+          userCapabilities: { ghost: { imageInput: true } },
+        }),
+      ],
+    });
+    const models = await mergedModels();
+    expect(models.m1?.capabilities?.imageInput).toBe(true);
+    expect(models.m2?.capabilities?.imageInput).toBeUndefined();
+    expect(models.ghost).toBeUndefined();
+    await fs.unlink(path.join(home, "providers.json"));
+  });
+});
+
 // ── 凭据存储 ────────────────────────────────────────────
 
 describe("凭据存储", () => {
