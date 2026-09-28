@@ -1,16 +1,22 @@
 export * from "./types.js";
 export * from "./compact.js";
 export {
+  attachmentsToLoad,
   buildContext,
   buildSummaryRequest,
   chooseSummaryBoundary,
   closedBoundaries,
   compactionCutoffs,
   estimateTokens,
+  IMAGE_PLACEHOLDER_LIMIT,
+  IMAGE_PLACEHOLDER_MISSING,
+  IMAGE_PLACEHOLDER_UNSUPPORTED,
+  IMAGE_TOKEN_ESTIMATE,
   INSTRUCTION_FILE_MAX_CHARS,
   inputBudgetTokens,
   lastClosedBoundary,
   lastOpenTurnId,
+  MAX_IMAGES_PER_REQUEST,
   renderTranscript,
   SUMMARY_MAX_OUTPUT_TOKENS,
   type BuildSummaryRequestInput,

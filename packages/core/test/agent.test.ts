@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runTurn, DEFAULT_TURN_CONFIG, type TurnDeps } from "../src/agent/index.js";
+import { redactRequestImages } from "../src/agent/redact.js";
 import { createWorkspaceReadPolicy } from "../src/permission/index.js";
 import { createPlatform, type Platform } from "../src/platform/index.js";
 import {
@@ -11,11 +13,13 @@ import {
   ProviderError,
   type FakeHandler,
   type FakeScript,
+  type ModelRequest,
   type ResolvedModel,
 } from "../src/provider/index.js";
 import type { RuntimeEvent, ToolCallRef } from "../src/protocol/index.js";
 import { createSessionStore, type Session } from "../src/session/index.js";
 import {
+  createAttachmentStore,
   createBuiltinRegistry,
   createPolicyGate,
   createReadStateStore,
@@ -52,15 +56,20 @@ async function makeHarness(options: {
   gate?: PermissionGate;
   config?: Partial<TurnDeps["config"]>;
   signal?: AbortSignal;
+  provider?: FakeProvider;
+  attachments?: TurnDeps["execEnv"]["attachments"];
+  diagnostics?: TurnDeps["execEnv"]["diagnostics"];
 }): Promise<Harness> {
   const ws = makeTmpDir("nct-agent-ws-");
   const sessionsDir = makeTmpDir("nct-agent-sessions-");
   const store = createSessionStore({ platform, sessionsDir });
   const wsReal = await platform.resolveReal(ws);
-  const provider = new FakeProvider({
-    scripts: options.scripts,
-    handler: options.handler,
-  });
+  const provider =
+    options.provider ??
+    new FakeProvider({
+      scripts: options.scripts,
+      handler: options.handler,
+    });
   const model: ResolvedModel = {
     provider,
     model:
@@ -97,6 +106,8 @@ async function makeHarness(options: {
           }),
         ),
       readState: createReadStateStore(platform.paths),
+      ...(options.attachments !== undefined ? { attachments: options.attachments } : {}),
+      ...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
     },
     instructions: { project: [] },
     environment: {
@@ -622,5 +633,284 @@ describe("runTurn", () => {
     expect(completed).toHaveLength(2);
     const statuses = completed.map((e) => (e.type === "tool.completed" ? e.payload.status : ""));
     expect(statuses.sort()).toEqual(["cancelled", "denied"]);
+  });
+});
+
+describe("图片附件接线（ADR-0023）", () => {
+  const PNG = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2,
+    0, 0, 0, 3, 8, 6, 0, 0, 0,
+  ]);
+  const visionProvider = (scripts: FakeScript[]): FakeProvider =>
+    new FakeProvider({
+      scripts,
+      models: [
+        {
+          ref: { provider: "fake", model: "fake-vision" },
+          capabilities: {
+            toolCalls: true,
+            parallelToolCalls: true,
+            reasoning: "none",
+            imageInput: true,
+            promptCache: false,
+          },
+        },
+      ],
+    });
+  const readImageScript = (): FakeScript[] => [
+    [
+      { type: "tool_call", toolCallId: "tc1", name: "read", input: { path: "pic.png" } },
+      { type: "finish", reason: "tool_calls" },
+    ],
+    [
+      { type: "text_delta", text: "看到了" },
+      { type: "finish", reason: "stop" },
+    ],
+  ];
+
+  it("read 读图 → 附件落盘 → 下一请求的 tool 消息携带 base64 images", async () => {
+    const records: { kind: string; data: Record<string, unknown> }[] = [];
+    const ws = makeTmpDir("nct-agent-img-");
+    const sessionsDir = makeTmpDir("nct-agent-img-sessions-");
+    // 手工搭 harness 以接管 workspace/attachmentsDir
+    const store = createSessionStore({ platform, sessionsDir });
+    const wsReal = await platform.resolveReal(ws);
+    await platform.fs.writeFile(path.join(ws, "pic.png"), PNG);
+    const provider = visionProvider(readImageScript());
+    const session = await store.create({
+      cwd: ws,
+      workspaceRoot: wsReal,
+      model: { provider: "fake", model: "fake-vision" },
+      permissionPreset: "phase1",
+      nocturneVersion: "0.0.0-test",
+    });
+    const registry = createBuiltinRegistry();
+    const attachments = createAttachmentStore({
+      fs: platform.fs,
+      paths: platform.paths,
+      attachmentsDir: path.join(sessionsDir, "attachments"),
+      sessionId: session.id,
+    });
+    const model = provider.models()[0];
+    if (model === undefined) throw new Error("no model");
+    const deps: TurnDeps = {
+      session,
+      model: { provider, model },
+      tools: registry,
+      executor: createToolExecutor(registry),
+      execEnv: {
+        platform,
+        gate: createPolicyGate(
+          createWorkspaceReadPolicy({
+            workspaceRoot: wsReal,
+            caseSensitive: platform.caseSensitivePaths,
+          }),
+        ),
+        readState: createReadStateStore(platform.paths),
+        attachments,
+        diagnostics: { record: (kind, data) => records.push({ kind, data: data ?? {} }) },
+      },
+      instructions: { project: [] },
+      environment: {
+        os: "test-os",
+        cwd: ws,
+        workspaceRoot: wsReal,
+        sessionDate: "2025-01-01",
+      },
+      config: { ...DEFAULT_TURN_CONFIG, retryBaseDelayMs: 1 },
+      signal: new AbortController().signal,
+    };
+    expect(await runTurn(deps, prompt())).toBe("done");
+    expect(provider.requests).toHaveLength(2);
+    const toolMsg = provider.requests[1]?.messages.find((m) => m.role === "tool");
+    const pngB64 = Buffer.from(PNG).toString("base64");
+    expect(toolMsg?.role === "tool" && toolMsg.images?.[0]?.data).toBe(pngB64);
+    expect(toolMsg?.role === "tool" && toolMsg.images?.[0]?.mimeType).toBe("image/png");
+    // provider.request 诊断：base64 脱敏为 { mimeType, bytes, sha256 }（C5）
+    const withImages = records
+      .filter((r) => r.kind === "provider.request")
+      .map((r) => r.data)
+      .find((d) => JSON.stringify(d).includes('"mimeType":"image/png"'));
+    expect(withImages).toBeDefined();
+    const redactedImgs = (
+      (withImages?.["request"] as { messages?: { images?: unknown[] }[] })?.messages ?? []
+    ).flatMap((m) => m.images ?? [])[0] as
+      { mimeType: string; bytes: number; sha256: string } | undefined;
+    expect(redactedImgs?.mimeType).toBe("image/png");
+    expect(redactedImgs?.bytes).toBe(PNG.length);
+    expect(redactedImgs?.sha256).toBe(createHash("sha256").update(PNG).digest("hex"));
+    expect(JSON.stringify(withImages)).not.toContain(pngB64);
+  });
+
+  it("模型不支持看图：同一附件在请求里只有占位文字", async () => {
+    const ws = makeTmpDir("nct-agent-img-");
+    const sessionsDir = makeTmpDir("nct-agent-img-sessions-");
+    const store = createSessionStore({ platform, sessionsDir });
+    const wsReal = await platform.resolveReal(ws);
+    await platform.fs.writeFile(path.join(ws, "pic.png"), PNG);
+    const provider = new FakeProvider({ scripts: readImageScript() });
+    const session = await store.create({
+      cwd: ws,
+      workspaceRoot: wsReal,
+      model: { provider: "fake", model: "fake-1" },
+      permissionPreset: "phase1",
+      nocturneVersion: "0.0.0-test",
+    });
+    const registry = createBuiltinRegistry();
+    const model = provider.models()[0];
+    if (model === undefined) throw new Error("no model");
+    const deps: TurnDeps = {
+      session,
+      model: { provider, model },
+      tools: registry,
+      executor: createToolExecutor(registry),
+      execEnv: {
+        platform,
+        gate: createPolicyGate(
+          createWorkspaceReadPolicy({
+            workspaceRoot: wsReal,
+            caseSensitive: platform.caseSensitivePaths,
+          }),
+        ),
+        readState: createReadStateStore(platform.paths),
+        attachments: createAttachmentStore({
+          fs: platform.fs,
+          paths: platform.paths,
+          attachmentsDir: path.join(sessionsDir, "attachments"),
+          sessionId: session.id,
+        }),
+      },
+      instructions: { project: [] },
+      environment: {
+        os: "test-os",
+        cwd: ws,
+        workspaceRoot: wsReal,
+        sessionDate: "2025-01-01",
+      },
+      config: { ...DEFAULT_TURN_CONFIG, retryBaseDelayMs: 1 },
+      signal: new AbortController().signal,
+    };
+    expect(await runTurn(deps, prompt())).toBe("done");
+    const toolMsg = provider.requests[1]?.messages.find((m) => m.role === "tool");
+    expect(toolMsg?.role === "tool" && toolMsg.images).toBeUndefined();
+    expect(toolMsg?.role === "tool" && toolMsg.content).toContain(
+      "[image omitted: current model does not support image input]",
+    );
+  });
+
+  it("附件文件缺失：缺失占位 + context.attachment_missing 诊断", async () => {
+    const records: { kind: string; data: Record<string, unknown> }[] = [];
+    const h = await makeHarness({
+      provider: visionProvider([
+        [
+          { type: "text_delta", text: "ok" },
+          { type: "finish", reason: "stop" },
+        ],
+      ]),
+      diagnostics: { record: (kind, data) => records.push({ kind, data: data ?? {} }) },
+      attachments: createAttachmentStore({
+        fs: platform.fs,
+        paths: platform.paths,
+        attachmentsDir: makeTmpDir("nct-agent-att-"),
+        sessionId: "will-be-replaced",
+      }),
+    });
+    // 直接写入一条带附件引用的 tool.completed（文件并不存在）
+    await h.session.emit("turn.started", { turnIndex: 1 }, { turnId: "t0" });
+    await h.session.emit(
+      "message.assistant",
+      {
+        messageId: "m0",
+        model: { provider: "fake", model: "fake-model" },
+        content: [{ type: "text", text: "" }],
+        toolCalls: [{ callId: "cx", name: "read" }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      { turnId: "t0" },
+    );
+    await h.session.emit(
+      "tool.completed",
+      {
+        callId: "cx",
+        name: "read",
+        status: "ok",
+        modelContent: "Image file: x.png",
+        attachments: [
+          {
+            type: "image",
+            file: "img-9.png",
+            mimeType: "image/png",
+            bytes: 29,
+            sha256: "f".repeat(64),
+            source: "read",
+          },
+        ],
+      },
+      { turnId: "t0" },
+    );
+    await h.session.emit(
+      "turn.completed",
+      { reason: "done", steps: 1, usage: { inputTokens: 0, outputTokens: 0 } },
+      { turnId: "t0" },
+    );
+    expect(await runTurn(h.deps, prompt())).toBe("done");
+    const toolMsg = h.provider.requests[0]?.messages.find((m) => m.role === "tool");
+    expect(toolMsg?.role === "tool" && toolMsg.content).toContain(
+      "[image unavailable: attachment file missing]",
+    );
+    expect(toolMsg?.role === "tool" && toolMsg.images).toBeUndefined();
+    const miss = records.filter((r) => r.kind === "context.attachment_missing");
+    expect(miss).toHaveLength(1);
+    expect(miss[0]?.data["file"]).toBe("img-9.png");
+    expect(miss[0]?.data["sha256"]).toBe("f".repeat(64));
+    // provider.request 诊断中的请求不含 base64（已脱敏为摘要）
+    const reqRecord = records.find((r) => r.kind === "provider.request");
+    expect(JSON.stringify(reqRecord?.data)).not.toContain("base64,");
+  });
+});
+
+describe("redactRequestImages（ADR-0023 C5）", () => {
+  const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  const baseRequest = (images?: { mimeType: "image/png"; data: string }[]): ModelRequest => ({
+    model: "m",
+    system: [{ text: "sys" }],
+    messages: [
+      {
+        role: "tool",
+        callId: "c1",
+        name: "read",
+        content: "out",
+        isError: false,
+        ...(images !== undefined ? { images } : {}),
+      },
+    ],
+    tools: [],
+  });
+
+  it("无图片：原样返回同一对象引用", () => {
+    const req = baseRequest();
+    expect(redactRequestImages(req)).toBe(req);
+    const emptyImages = baseRequest([]);
+    expect(redactRequestImages(emptyImages)).toBe(emptyImages);
+  });
+
+  it("有图片：替换为 { mimeType, bytes, sha256 }，不含 base64", () => {
+    const data = Buffer.from(PNG_BYTES).toString("base64");
+    const req = baseRequest([{ mimeType: "image/png", data }]);
+    const redacted = redactRequestImages(req);
+    expect(redacted).not.toBe(req);
+    const msg = redacted.messages[0] as {
+      images?: { mimeType: string; bytes: number; sha256: string }[];
+    };
+    expect(msg.images?.[0]).toEqual({
+      mimeType: "image/png",
+      bytes: PNG_BYTES.length,
+      sha256: createHash("sha256").update(PNG_BYTES).digest("hex"),
+    });
+    expect(JSON.stringify(redacted)).not.toContain(data);
+    // 原请求不被修改
+    const orig = req.messages[0];
+    expect(orig !== undefined && orig.role === "tool" && orig.images?.[0]?.data).toBe(data);
   });
 });

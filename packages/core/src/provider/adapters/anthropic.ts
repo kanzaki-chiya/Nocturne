@@ -190,6 +190,8 @@ export function createAnthropicProvider(
         messages: toAiMessages(request, {
           // providerData 就是 providerMetadata 原值（{ anthropic: {...} }），直接回传
           reasoningProviderOptions: (pd) => pd as Record<string, Record<string, JSONValue>>,
+          // ADR-0023：tool_result content 支持原生 image 块
+          toolResultImages: "native",
         }),
         tools: toAiTools(request),
         // ADR-0016：Messages API 的 max_tokens 必填，未知时只能给兜底值

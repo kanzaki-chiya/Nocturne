@@ -5,6 +5,7 @@
 import type {
   ContentBlock,
   FinishReason,
+  ImageMimeType,
   ModelRef,
   ReasoningEffortLevel,
   ToolCallRef,
@@ -53,8 +54,19 @@ export interface SystemBlock {
   text: string;
 }
 
+/**
+ * 一张待发送的图片（ADR-0023）：data 为 base64 编码字节。
+ * 由 Context Builder 按模型 imageInput 能力从附件引用投影产生；
+ * 适配器负责映射为各自 API 的图片部件。
+ */
+export interface ModelImage {
+  mimeType: ImageMimeType;
+  /** base64 编码的图片字节 */
+  data: string;
+}
+
 export type ModelMessage =
-  | { role: "user"; content: ContentBlock[] }
+  | { role: "user"; content: ContentBlock[]; images?: ModelImage[] | undefined }
   | {
       role: "assistant";
       content: ContentBlock[];
@@ -66,6 +78,7 @@ export type ModelMessage =
       name: string;
       content: string;
       isError: boolean;
+      images?: ModelImage[] | undefined;
     };
 
 /** 纯数据请求：不含重试预算、回调等运行时对象 */

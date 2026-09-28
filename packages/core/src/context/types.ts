@@ -2,7 +2,7 @@
  * Context Builder 的输入与输出（context.md 第 2 节）。
  * 纯数据、不做 I/O：指令文件与环境信息由调用方（agent / 会话装配层）预先读取传入。
  */
-import type { DurableEvent, HistoryEntry, ToolSpec } from "../protocol/index.js";
+import type { DurableEvent, HistoryEntry, ImageAttachment, ToolSpec } from "../protocol/index.js";
 import type { ModelInfo, ModelMessage, ModelRequest } from "../provider/index.js";
 
 /** 一份已加载的指令文件（AGENTS.md 等） */
@@ -53,6 +53,13 @@ export interface BuildContextInput {
    * 唯一用户是子会话（subagent.md 第 8 节）。
    */
   basePrompt?: string | undefined;
+  /**
+   * 图片附件数据（ADR-0023）：sha256 → base64，由 Agent Loop 在构建前
+   * 从 AttachmentStore 读入（Builder 不做 I/O）。
+   * undefined = 估算模式（describeContext 等报告场景）：模型支持看图时
+   * 按引用计数估算，不产生 images，也不计入 missingAttachments。
+   */
+  attachmentData?: ReadonlyMap<string, string> | undefined;
 }
 
 /** Builder 给出的压缩计划（context.md 6.2） */
@@ -90,6 +97,12 @@ export interface ContextReport {
         maxOutputTokens?: boolean | undefined;
       }
     | undefined;
+  /**
+   * 本次请求以图片形式发出的附件（ADR-0023）：仅在 count > 0 时出现；
+   * estimatedTokens = count × 1600，已计入上方 estimatedTokens 总数。
+   * 估算模式下同样给出（按将发送的引用数）。
+   */
+  images?: { count: number; estimatedTokens: number } | undefined;
 }
 
 export interface BuiltContext {
@@ -108,4 +121,9 @@ export interface BuiltContext {
    * 不得静默截断历史。
    */
   mustCompact: boolean;
+  /**
+   * 引用了但未能取回字节的附件（ADR-0023）：Builder 不做诊断，
+   * 由调用方（Agent Loop）记 context.attachment_missing。
+   */
+  missingAttachments?: ImageAttachment[] | undefined;
 }

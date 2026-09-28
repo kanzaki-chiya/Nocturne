@@ -3,8 +3,19 @@
  * 组装顺序（稳定前缀在前）：基础系统提示 → 工具规格 → 项目指令 → 环境信息 → 历史。
  * Phase 2：应用压缩边界（6.4），并在估算超过阈值时给出 L1 修剪计划（6.5）。
  */
-import type { ContentBlock, DurableEvent, HistoryEntry } from "../protocol/index.js";
-import type { ModelInfo, ModelMessage, ModelRequest, SystemBlock } from "../provider/index.js";
+import type {
+  ContentBlock,
+  DurableEvent,
+  HistoryEntry,
+  ImageAttachment,
+} from "../protocol/index.js";
+import type {
+  ModelImage,
+  ModelInfo,
+  ModelMessage,
+  ModelRequest,
+  SystemBlock,
+} from "../provider/index.js";
 import type { BuildContextInput, BuiltContext, CompactionPlan, ContextSection } from "./types.js";
 
 // ADR-0016 兜底常量：context 只能 import type provider（modules.md），
@@ -29,6 +40,18 @@ export function estimateTokens(chars: number): number {
 const OUTPUT_RESERVE_CAP = 16_000;
 /** 安全余量（token） */
 const SAFETY_MARGIN = 1_024;
+
+// ── 图片附件（ADR-0023）───────────────────────────────────
+
+/** 每张以图片形式发出的附件的固定 token 估算（base64 长度绝不计入） */
+export const IMAGE_TOKEN_ESTIMATE = 1_600;
+/** 单次请求最多携带的图片数；更早的换上限占位 */
+export const MAX_IMAGES_PER_REQUEST = 20;
+export const IMAGE_PLACEHOLDER_UNSUPPORTED =
+  "[image omitted: current model does not support image input]";
+export const IMAGE_PLACEHOLDER_MISSING = "[image unavailable: attachment file missing]";
+export const IMAGE_PLACEHOLDER_LIMIT =
+  "[image omitted: exceeds the per-request limit of 20 images]";
 /** 预防性修剪阈值：估算超过预算的该比例时给出 prune 计划（context.md 6.5 默认 80%） */
 const PRUNE_THRESHOLD = 0.8;
 
@@ -210,6 +233,160 @@ function prunedPlaceholder(entry: Extract<HistoryEntry, { kind: "tool" }>): stri
   return `[输出已省略] 工具 ${entry.name}${args} 的结果已被 context.compacted 修剪`;
 }
 
+/**
+ * 附件投影模式（ADR-0023）：
+ * - project：实际投影——模型支持且 attachmentData 命中 → 消息带 images；
+ *   缺数据 → 缺失占位并记入 missing；不支持 → 不支持占位。
+ * - estimate：attachmentData 未提供的报告场景（describeContext）——
+ *   支持时按引用计数估算（virtual），不产生 images 也不算缺失；
+ *   不支持时与 project 一样写不支持占位（报告要如实反映将发出的文本）。
+ * - transcript：摘要转录——附件一律渲染为 `[image: <label ?? file>]`
+ *   文本标记，不管模型能力，不产生 images。
+ */
+interface ImageProjectionOpts {
+  mode: "project" | "estimate" | "transcript";
+  supported: boolean;
+  data?: ReadonlyMap<string, string> | undefined;
+  missing?: ImageAttachment[] | undefined;
+  /** estimate 模式下每条消息"将发送"的引用数（参与 20 张上限与 token 估算） */
+  virtual?: Map<ModelMessage, number> | undefined;
+}
+
+/** 单条附件的解析结果：图片数据、占位/标记文本，或估算计数 */
+function resolveAttachment(
+  att: ImageAttachment,
+  opts: ImageProjectionOpts,
+): { image?: string; text?: string; virtual?: boolean } {
+  if (opts.mode === "transcript") return { text: `[image: ${att.label ?? att.file}]` };
+  if (!opts.supported) return { text: IMAGE_PLACEHOLDER_UNSUPPORTED };
+  if (opts.mode === "estimate") return { virtual: true };
+  const data = opts.data?.get(att.sha256);
+  if (data === undefined) {
+    opts.missing?.push(att);
+    return { text: IMAGE_PLACEHOLDER_MISSING };
+  }
+  return { image: data };
+}
+
+interface ResolvedAttachments {
+  images: ModelImage[];
+  /** 占位/标记文本（调用方按消息类型落位：user 追加 text 块，tool 追加到 content） */
+  texts: string[];
+  virtual: number;
+}
+
+function resolveAttachments(
+  atts: readonly ImageAttachment[] | undefined,
+  opts: ImageProjectionOpts,
+): ResolvedAttachments {
+  const out: ResolvedAttachments = { images: [], texts: [], virtual: 0 };
+  for (const att of atts ?? []) {
+    const r = resolveAttachment(att, opts);
+    if (r.image !== undefined) out.images.push({ mimeType: att.mimeType, data: r.image });
+    else if (r.text !== undefined) out.texts.push(r.text);
+    else out.virtual += 1;
+  }
+  return out;
+}
+
+/**
+ * 按投影规则会作为图片进入请求的附件引用（与 historyToMessages /
+ * buildContext 共用同一套 6.4 cutoff：跳过摘要覆盖的条目、跳过 L1 修剪
+ * 覆盖的 tool 条目；open Turn 被摘要覆盖而重新注入的 user 条目也算）。
+ * Agent Loop 用它决定要从 AttachmentStore 读哪些字节。
+ */
+export function attachmentsToLoad(
+  history: readonly HistoryEntry[],
+  model: Pick<ModelInfo, "capabilities">,
+  events?: readonly DurableEvent[],
+): ImageAttachment[] {
+  if (!model.capabilities.imageInput) return [];
+  const { summaryThrough, pruneThrough } = compactionCutoffs(history);
+  const refs: ImageAttachment[] = [];
+  for (const entry of history) {
+    if (entry.seq <= summaryThrough) continue;
+    if (entry.kind === "tool" && entry.seq <= pruneThrough) continue;
+    if (entry.kind === "user" || entry.kind === "tool") {
+      if (entry.attachments !== undefined) refs.push(...entry.attachments);
+    }
+  }
+  // 与 buildContext 的"当前任务重新注入"同口径（context.md 6.5）
+  const openTurn = events !== undefined ? lastOpenTurnId(events) : undefined;
+  if (openTurn !== undefined) {
+    const covered = history.find(
+      (e) => e.kind === "user" && e.turnId === openTurn && e.seq <= summaryThrough,
+    );
+    if (covered?.kind === "user" && covered.attachments !== undefined) {
+      refs.push(...covered.attachments);
+    }
+  }
+  // 只取最新 20 个引用（与请求的逐张上限一致），按 sha256 去重后给 Loop 加载
+  const seen = new Set<string>();
+  const out: ImageAttachment[] = [];
+  for (const r of refs.slice(-MAX_IMAGES_PER_REQUEST)) {
+    if (seen.has(r.sha256)) continue;
+    seen.add(r.sha256);
+    out.push(r);
+  }
+  return out;
+}
+
+/**
+ * 20 张上限后处理（ADR-0023）：从消息尾部往前保留最新 MAX_IMAGES_PER_REQUEST
+ * 张图片，更早的从 images 中移除并按落位规则换上限占位。返回最终发出的图片数
+ * 与新增占位文本的字符数。估算模式的 virtual 计数同样受限（不产生占位）。
+ */
+function enforceImageCap(
+  messages: ModelMessage[],
+  virtual: Map<ModelMessage, number>,
+): { count: number; addedChars: number } {
+  let remaining = MAX_IMAGES_PER_REQUEST;
+  let count = 0;
+  let addedChars = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m === undefined || m.role === "assistant") continue;
+    const real = m.images?.length ?? 0;
+    const virt = virtual.get(m) ?? 0;
+    const total = real + virt;
+    if (total === 0) continue;
+    if (total <= remaining) {
+      count += total;
+      remaining -= total;
+      continue;
+    }
+    count += remaining;
+    let drop = total - remaining;
+    remaining = 0;
+    if (real > 0 && m.images !== undefined) {
+      const dropped = Math.min(drop, real);
+      drop -= dropped;
+      const kept = m.images.slice(dropped);
+      addedChars += dropped * IMAGE_PLACEHOLDER_LIMIT.length;
+      messages[i] =
+        m.role === "user"
+          ? {
+              ...m,
+              content: [
+                ...m.content,
+                ...Array.from({ length: dropped }, () => ({
+                  type: "text" as const,
+                  text: IMAGE_PLACEHOLDER_LIMIT,
+                })),
+              ],
+              images: kept.length > 0 ? kept : undefined,
+            }
+          : {
+              ...m,
+              content: m.content + "\n".concat(IMAGE_PLACEHOLDER_LIMIT).repeat(dropped),
+              images: kept.length > 0 ? kept : undefined,
+            };
+    }
+    if (drop > 0 && virt > 0) virtual.set(m, virt - drop);
+  }
+  return { count, addedChars };
+}
+
 interface HistoryProjection {
   messages: ModelMessage[];
   chars: number;
@@ -223,10 +400,13 @@ interface HistoryProjection {
 function historyToMessages(
   history: readonly HistoryEntry[],
   currentModelProvider: string,
+  images?: ImageProjectionOpts,
 ): HistoryProjection {
   const messages: ModelMessage[] = [];
   let chars = 0;
   let entries = 0;
+  // 未提供投影参数（历史调用方）按"不支持看图"处理：附件 → 不支持占位
+  const imgOpts: ImageProjectionOpts = images ?? { mode: "estimate", supported: false };
   const { summaryThrough, pruneThrough } = compactionCutoffs(history);
   // 协议邻接约束（OpenAI/Anthropic）：assistant 携带的 toolCalls 必须由对应
   // tool 结果紧随。note 类注入（/shell 切换说明可在 Turn 进行中写入）若落在
@@ -245,8 +425,20 @@ function historyToMessages(
     entries += 1;
     switch (entry.kind) {
       case "user": {
-        chars += blockChars(entry.content);
-        messages.push({ role: "user", content: entry.content });
+        // ADR-0023：附件按能力投影——images / 占位 text 块 / 估算计数
+        const atts = resolveAttachments(entry.attachments, imgOpts);
+        const blocks: ContentBlock[] = [
+          ...entry.content,
+          ...atts.texts.map((text) => ({ type: "text" as const, text })),
+        ];
+        chars += blockChars(blocks);
+        const msg: ModelMessage = {
+          role: "user",
+          content: blocks,
+          ...(atts.images.length > 0 ? { images: atts.images } : {}),
+        };
+        if (atts.virtual > 0) imgOpts.virtual?.set(msg, atts.virtual);
+        messages.push(msg);
         break;
       }
       case "assistant": {
@@ -267,15 +459,24 @@ function historyToMessages(
         break;
       }
       case "tool": {
-        const content = entry.seq <= pruneThrough ? prunedPlaceholder(entry) : entry.modelContent;
+        const pruned = entry.seq <= pruneThrough;
+        // L1 修剪覆盖的工具结果：占位说明原样，附件随正文省略（不加图片占位）
+        let content = pruned ? prunedPlaceholder(entry) : entry.modelContent;
+        const atts = pruned
+          ? { images: [], texts: [], virtual: 0 }
+          : resolveAttachments(entry.attachments, imgOpts);
+        for (const text of atts.texts) content += `\n${text}`;
         chars += content.length;
-        messages.push({
+        const msg: ModelMessage = {
           role: "tool",
           callId: entry.callId,
           name: entry.name,
           content,
           isError: entry.status !== "ok",
-        });
+          ...(atts.images.length > 0 ? { images: atts.images } : {}),
+        };
+        if (atts.virtual > 0) imgOpts.virtual?.set(msg, atts.virtual);
+        messages.push(msg);
         if (unsettled.delete(entry.callId) && unsettled.size === 0) {
           messages.push(...deferred.splice(0));
         }
@@ -312,7 +513,11 @@ function historyToMessages(
  * 与 historyToMessages 走同一套 6.4 规则。
  */
 export function renderTranscript(history: readonly HistoryEntry[], provider: string): string {
-  const { messages, deferred } = historyToMessages(history, provider);
+  // 摘要转录不带图片：附件渲染为 `[image: <label ?? file>]` 文本标记（ADR-0023）
+  const { messages, deferred } = historyToMessages(history, provider, {
+    mode: "transcript",
+    supported: false,
+  });
   messages.push(...deferred);
   const lines: string[] = [];
   const blocksText = (blocks: readonly ContentBlock[]) => blocks.map((b) => b.text).join("\n");
@@ -465,14 +670,22 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     estimatedTokens: estimateTokens(envText.length),
   });
 
-  // 5. 历史
+  // 5. 历史（含图片附件投影，ADR-0023：Builder 不做 I/O，
+  //    字节由调用方按 sha256 读入 attachmentData；未提供 = 估算模式）
+  const imageOpts: ImageProjectionOpts = {
+    mode: input.attachmentData === undefined ? "estimate" : "project",
+    supported: model.capabilities.imageInput,
+    data: input.attachmentData,
+    missing: [],
+    virtual: new Map(),
+  };
   const {
     messages,
     chars: historyChars,
     entries,
     unsettled,
     deferred,
-  } = historyToMessages(input.history, model.ref.provider);
+  } = historyToMessages(input.history, model.ref.provider, imageOpts);
   // context.md 6.5：进行中 Turn 的 message.user 被摘要覆盖时重新注入，
   // 保证"当前任务"不因压缩丢失（恢复投影中 open Turn 同理）
   const { summaryThrough: summaryCut } = compactionCutoffs(input.history);
@@ -483,8 +696,19 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       (e) => e.kind === "user" && e.turnId === openTurn && e.seq <= summaryCut,
     );
     if (coveredUser?.kind === "user") {
-      messages.push({ role: "user", content: coveredUser.content });
-      reinjectedChars = blockChars(coveredUser.content);
+      const atts = resolveAttachments(coveredUser.attachments, imageOpts);
+      const blocks: ContentBlock[] = [
+        ...coveredUser.content,
+        ...atts.texts.map((text) => ({ type: "text" as const, text })),
+      ];
+      const msg: ModelMessage = {
+        role: "user",
+        content: blocks,
+        ...(atts.images.length > 0 ? { images: atts.images } : {}),
+      };
+      if (atts.virtual > 0) imageOpts.virtual?.set(msg, atts.virtual);
+      messages.push(msg);
+      reinjectedChars = blockChars(blocks);
     }
   }
   for (const m of input.pendingMessages ?? []) {
@@ -501,17 +725,23 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       return blockChars(m.content);
     })
     .reduce((a, b) => a + b, 0);
+  // ADR-0023：单次请求最多 20 张图片；从最新往前保留，更早的换上限占位。
+  // 估算模式（virtual）同样受限。图片字节/base64 长度不计入字符估算。
+  const imageCap = enforceImageCap(messages, imageOpts.virtual ?? new Map<ModelMessage, number>());
   sections.push({
     name: "history",
     source: `${entries} entries`,
-    chars: historyChars + pendingChars + reinjectedChars,
-    estimatedTokens: estimateTokens(historyChars + pendingChars + reinjectedChars),
+    chars: historyChars + pendingChars + reinjectedChars + imageCap.addedChars,
+    estimatedTokens: estimateTokens(
+      historyChars + pendingChars + reinjectedChars + imageCap.addedChars,
+    ),
   });
 
-  // 预算（context.md 第 5 节）
+  // 预算（context.md 第 5 节）；图片按每张 1600 token 固定估算加入总数
   const budgetTokens = inputBudgetTokens(model);
   const totalChars = sections.reduce((a, s) => a + s.chars, 0);
-  const estimated = sections.reduce((a, s) => a + s.estimatedTokens, 0);
+  const imageTokens = imageCap.count * IMAGE_TOKEN_ESTIMATE;
+  const estimated = sections.reduce((a, s) => a + s.estimatedTokens, 0) + imageTokens;
   const overBudget = estimated > budgetTokens;
 
   // 6.5：估算超过阈值（或已超预算）→ 两级压缩计划：
@@ -566,8 +796,12 @@ export function buildContext(input: BuildContextInput): BuiltContext {
             },
           }
         : {}),
+      ...(imageCap.count > 0
+        ? { images: { count: imageCap.count, estimatedTokens: imageTokens } }
+        : {}),
     },
     overBudget,
+    ...((imageOpts.missing?.length ?? 0) > 0 ? { missingAttachments: imageOpts.missing } : {}),
     // 调用方先执行 compaction（若有），执行后重建；无计划可用且仍超预算
     // 才进入 6.6 的"必须压缩却失败"路径
     compaction,

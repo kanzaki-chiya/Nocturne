@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { DurableEvent, HistoryEntry } from "../protocol/index.js";
+import type { DurableEvent, HistoryEntry, ImageAttachment } from "../protocol/index.js";
 import type { ModelInfo } from "../provider/index.js";
 import {
+  attachmentsToLoad,
   buildContext,
   buildSummaryRequest,
   chooseSummaryBoundary,
@@ -678,5 +679,239 @@ describe("自动 L2 与进行中输入保留（context.md 6.5）", () => {
     expect(built.request.messages).toHaveLength(2);
     const last = built.request.messages[1];
     expect(last?.role === "user" && JSON.stringify(last.content)).toContain("当前任务：修复登录");
+  });
+});
+
+describe("图片附件投影（ADR-0023）", () => {
+  const visionModel: ModelInfo = {
+    ...model,
+    capabilities: { ...model.capabilities, imageInput: true },
+  };
+  const att = (sha: string, label?: string): ImageAttachment => ({
+    type: "image",
+    file: `img-${sha}.png`,
+    mimeType: "image/png",
+    bytes: 29,
+    sha256: sha,
+    width: 2,
+    height: 3,
+    source: "read",
+    ...(label !== undefined ? { label } : {}),
+  });
+  const toolWithAtt = (seq: number, sha: string): HistoryEntry => ({
+    kind: "tool",
+    seq,
+    turnId: "t",
+    callId: `c${seq}`,
+    name: "read",
+    status: "ok",
+    modelContent: `out${seq}`,
+    attachments: [att(sha)],
+  });
+  const userWithAtt = (seq: number, sha: string, label?: string): HistoryEntry => ({
+    kind: "user",
+    seq,
+    turnId: "t",
+    messageId: `u${seq}`,
+    content: [{ type: "text", text: "看看这个" }],
+    attachments: [att(sha, label)],
+  });
+  const dataOf = (...shas: string[]): ReadonlyMap<string, string> =>
+    new Map(shas.map((s) => [s, Buffer.from(`bytes-of-${s}`).toString("base64")]));
+
+  it("支持看图：tool/user 附件投影为 images（base64）", () => {
+    const built = buildContext(
+      baseInput({
+        history: [toolWithAtt(1, "a"), userWithAtt(2, "b")],
+        model: visionModel,
+        attachmentData: dataOf("a", "b"),
+      }),
+    );
+    const toolMsg = built.request.messages[0];
+    expect(toolMsg?.role === "tool" && toolMsg.images?.[0]?.data).toBe(
+      Buffer.from("bytes-of-a").toString("base64"),
+    );
+    expect(toolMsg?.role === "tool" && toolMsg.images?.[0]?.mimeType).toBe("image/png");
+    const userMsg = built.request.messages[1];
+    expect(userMsg?.role === "user" && userMsg.images).toHaveLength(1);
+    // 占位不外溢：文本保持原样
+    expect(toolMsg?.role === "tool" && toolMsg.content).toBe("out1");
+  });
+
+  it("不支持看图：附件换成占位文字（tool 追加 content；user 追加 text 块）", () => {
+    const built = buildContext(
+      baseInput({
+        history: [toolWithAtt(1, "a"), userWithAtt(2, "b")],
+        attachmentData: dataOf("a", "b"),
+      }),
+    );
+    const toolMsg = built.request.messages[0];
+    expect(toolMsg?.role === "tool" && toolMsg.images).toBeUndefined();
+    expect(toolMsg?.role === "tool" && toolMsg.content).toBe(
+      "out1\n[image omitted: current model does not support image input]",
+    );
+    const userMsg = built.request.messages[1];
+    expect(userMsg?.role === "user" && userMsg.images).toBeUndefined();
+    const blocks = userMsg?.role === "user" ? userMsg.content : [];
+    expect(blocks.at(-1)?.text).toBe("[image omitted: current model does not support image input]");
+    expect(built.missingAttachments).toBeUndefined();
+  });
+
+  it("同一段历史切换模型（imageInput true→false）两次构建结果不同", () => {
+    const history = [toolWithAtt(1, "a")];
+    const withVision = buildContext(
+      baseInput({ history, model: visionModel, attachmentData: dataOf("a") }),
+    );
+    const without = buildContext(baseInput({ history, attachmentData: dataOf("a") }));
+    const tm0 = withVision.request.messages[0];
+    const tm1 = without.request.messages[0];
+    expect(tm0?.role === "tool" && tm0.images).toHaveLength(1);
+    expect(tm1?.role === "tool" && tm1.images).toBeUndefined();
+    expect(JSON.stringify(tm1)).toContain("image omitted");
+  });
+
+  it("attachmentData 缺该 sha256 → 缺失占位 + missingAttachments", () => {
+    const built = buildContext(
+      baseInput({
+        history: [toolWithAtt(1, "a")],
+        model: visionModel,
+        attachmentData: new Map(),
+      }),
+    );
+    const toolMsg = built.request.messages[0];
+    expect(toolMsg?.role === "tool" && toolMsg.images).toBeUndefined();
+    expect(toolMsg?.role === "tool" && toolMsg.content).toContain(
+      "[image unavailable: attachment file missing]",
+    );
+    expect(built.missingAttachments?.map((a) => a.sha256)).toEqual(["a"]);
+  });
+
+  it("25 张图：最旧 5 张换上限占位，最新 20 张保留", () => {
+    const history = Array.from({ length: 25 }, (_, i) => toolWithAtt(i + 1, `s${i}`));
+    const built = buildContext(
+      baseInput({
+        history,
+        model: visionModel,
+        attachmentData: dataOf(...Array.from({ length: 25 }, (_, i) => `s${i}`)),
+      }),
+    );
+    const toolMsgs = built.request.messages.filter((m) => m.role === "tool");
+    expect(toolMsgs).toHaveLength(25);
+    const kept = toolMsgs.filter((m) => m.role === "tool" && (m.images?.length ?? 0) > 0);
+    expect(kept).toHaveLength(20);
+    // 最旧 5 条：无 images，content 末追加上限占位
+    for (const m of toolMsgs.slice(0, 5)) {
+      expect(m.role === "tool" && m.images).toBeUndefined();
+      expect(m.role === "tool" && m.content).toContain(
+        "[image omitted: exceeds the per-request limit of 20 images]",
+      );
+    }
+    // 最新 20 条保留图片且无占位
+    for (const m of toolMsgs.slice(5)) {
+      expect(m.role === "tool" && m.images).toHaveLength(1);
+      expect(m.role === "tool" && m.content).toBe(`out${toolMsgs.indexOf(m) + 1}`);
+    }
+  });
+
+  it("L1 修剪覆盖的 tool 条目：无图片也无图片占位", () => {
+    const history: HistoryEntry[] = [
+      toolWithAtt(1, "a"),
+      {
+        kind: "compaction",
+        seq: 2,
+        turnId: "t",
+        compactKind: "prune",
+        throughSeq: 1,
+        summary: undefined,
+      },
+    ];
+    const built = buildContext(
+      baseInput({ history, model: visionModel, attachmentData: dataOf("a") }),
+    );
+    const toolMsg = built.request.messages[0];
+    expect(toolMsg?.role === "tool" && toolMsg.images).toBeUndefined();
+    expect(toolMsg?.role === "tool" && toolMsg.content).toContain("输出已省略");
+    expect(toolMsg?.role === "tool" && toolMsg.content).not.toContain("image");
+    expect(built.missingAttachments).toBeUndefined();
+  });
+
+  it("摘要请求不含 images；转录对每个附件写 [image: …] 标记", () => {
+    const history: HistoryEntry[] = [userWithAtt(1, "a", "截图.png"), toolWithAtt(2, "b")];
+    const req = buildSummaryRequest({ history, model: visionModel, throughSeq: 2 });
+    expect(JSON.stringify(req.messages)).not.toContain("images");
+    expect(JSON.stringify(req.messages)).toContain("[image: 截图.png]");
+    expect(JSON.stringify(req.messages)).toContain("[image: img-b.png]");
+    const transcript = renderTranscript(history, "test");
+    expect(transcript).toContain("[image: 截图.png]");
+    expect(transcript).toContain("[image: img-b.png]");
+  });
+
+  it("token 估算：图片按 1600/张计入，base64 长度不进估算", () => {
+    const history = [toolWithAtt(1, "a")];
+    const small = buildContext(
+      baseInput({
+        history,
+        model: visionModel,
+        attachmentData: new Map([["a", "aVZCT1I="]]),
+      }),
+    );
+    const big = buildContext(
+      baseInput({
+        history,
+        model: visionModel,
+        attachmentData: new Map([["a", "x".repeat(1024 * 1024)]]),
+      }),
+    );
+    expect(small.report.estimatedTokens).toBe(big.report.estimatedTokens);
+    expect(small.report.images).toEqual({ count: 1, estimatedTokens: 1600 });
+    const noImages = buildContext(baseInput({ history: [] }));
+    expect(noImages.report.images).toBeUndefined();
+  });
+
+  it("估算模式（无 attachmentData）：不产生 images/missing，report.images 按引用计数", () => {
+    const built = buildContext(
+      baseInput({ history: [toolWithAtt(1, "a"), userWithAtt(2, "b")], model: visionModel }),
+    );
+    const toolMsg = built.request.messages[0];
+    expect(toolMsg?.role === "tool" && toolMsg.images).toBeUndefined();
+    const userMsg = built.request.messages[1];
+    expect(userMsg?.role === "user" && userMsg.images).toBeUndefined();
+    expect(built.missingAttachments).toBeUndefined();
+    expect(built.report.images).toEqual({ count: 2, estimatedTokens: 3200 });
+    // 估算模式 + 不支持看图：写不支持占位、不计数
+    const blind = buildContext(baseInput({ history: [toolWithAtt(1, "a")] }));
+    expect(blind.report.images).toBeUndefined();
+  });
+
+  it("attachmentsToLoad：不支持→[]；跳过摘要/修剪覆盖；最多20并按 sha256 去重", () => {
+    const history: HistoryEntry[] = [
+      toolWithAtt(1, "covered"),
+      {
+        kind: "compaction",
+        seq: 2,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 1,
+        summary: "S",
+      },
+      toolWithAtt(3, "pruned"),
+      {
+        kind: "compaction",
+        seq: 4,
+        turnId: "t",
+        compactKind: "prune",
+        throughSeq: 3,
+        summary: undefined,
+      },
+      toolWithAtt(5, "x"),
+      toolWithAtt(6, "x"), // 同 sha256 去重
+      userWithAtt(7, "y"),
+    ];
+    expect(attachmentsToLoad(history, model)).toEqual([]);
+    expect(attachmentsToLoad(history, visionModel).map((a) => a.sha256)).toEqual(["x", "y"]);
+    // 超过 20 个引用只取最新 20
+    const many = Array.from({ length: 22 }, (_, i) => toolWithAtt(10 + i, `m${i}`));
+    expect(attachmentsToLoad(many, visionModel)).toHaveLength(20);
+    expect(attachmentsToLoad(many, visionModel)[0]?.sha256).toBe("m2");
   });
 });

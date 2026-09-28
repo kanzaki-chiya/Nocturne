@@ -244,6 +244,12 @@ export function contextLines(session: RuntimeSession): string[] {
     (s) =>
       `  ${s.name.padEnd(12)} ${String(s.chars).padStart(7)} chars  ~${s.estimatedTokens} tok  ${s.source}${s.truncated === true ? "  [已截断]" : ""}`,
   );
+  // ADR-0023：图片附件按固定 1600 tok/张计入总量，单列一行
+  if (report.images !== undefined) {
+    lines.push(
+      `  ${"images".padEnd(12)} ${String(report.images.count).padStart(7)} 张  ~${report.images.estimatedTokens} tok`,
+    );
+  }
   return [
     "上下文组成：",
     ...lines,

@@ -5,6 +5,7 @@
  */
 import type { ContentBlock, FinishReason, ToolCallRef, Usage } from "../protocol/index.js";
 import { isProviderError, timedStream, type ModelRequest } from "../provider/index.js";
+import { redactRequestImages } from "./redact.js";
 import type { TurnDeps } from "./types.js";
 
 export class EmptyResponseError extends Error {
@@ -78,13 +79,14 @@ export async function consumeStream(
     /** providerCallId → 已分配的 callId 与累积的原始参数 */
     const pending = new Map<string, { callId: string; name: string; rawArgs: string }>();
     let producedOutput = false;
-    // 诊断：完整 ModelRequest（不含请求头——头由适配器构造，天然不会进来）
+    // 诊断：完整 ModelRequest（不含请求头——头由适配器构造，天然不会进来）；
+    // 图片 base64 脱敏为 { mimeType, bytes, sha256 }（ADR-0023，observability.md）
     deps.execEnv.diagnostics?.record("provider.request", {
       turnId,
       attempt,
       provider: provider.id,
       model: deps.model.model.ref.model,
-      request,
+      request: redactRequestImages(request),
     });
     const requestStart = Date.now();
 

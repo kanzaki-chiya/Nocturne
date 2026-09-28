@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  attachmentsToLoad,
   buildContext,
   buildSummaryRequest,
   chooseSummaryBoundary,
@@ -86,6 +87,9 @@ export async function runTurn(
 
   const turnId =
     deps.newId !== undefined ? deps.newId("turn") : `turn-${turnIndex}-${randomUUID().slice(0, 8)}`;
+  // ADR-0023：sha256 → base64 的 Turn 内缓存，避免每个 Step 重复读盘/编码；
+  // 加载失败记 null，本 Turn 内不再重试
+  const imageCache = new Map<string, string | null>();
   const turnUsage = {
     inputTokens: 0,
     outputTokens: 0,
@@ -274,6 +278,25 @@ export async function runTurn(
       // 1. 构建上下文（纯计算）
       status("thinking");
       const state = session.state();
+      // ADR-0023：把将进入请求的图片附件引用经 AttachmentStore 读为
+      // base64 交给 Builder（Loop 做 I/O，Builder 纯计算）。store 缺失
+      // 视同全部缺失（attachmentData 为空 Map → 缺失占位 + 诊断）。
+      const imageRefs = attachmentsToLoad(state.history, deps.model.model, session.durableEvents());
+      let attachmentData: ReadonlyMap<string, string> | undefined;
+      if (imageRefs.length > 0) {
+        const store = deps.execEnv.attachments;
+        const data = new Map<string, string>();
+        for (const ref of imageRefs) {
+          let b64 = imageCache.get(ref.sha256);
+          if (b64 === undefined) {
+            const bytes = store !== undefined ? await store.load(ref) : undefined;
+            b64 = bytes === undefined ? null : Buffer.from(bytes).toString("base64");
+            imageCache.set(ref.sha256, b64);
+          }
+          if (b64 !== null) data.set(ref.sha256, b64);
+        }
+        attachmentData = data;
+      }
       const built = buildContext({
         history: state.history,
         model: deps.model.model,
@@ -282,7 +305,17 @@ export async function runTurn(
         environment: deps.environment,
         events: session.durableEvents(),
         ...(deps.basePrompt !== undefined ? { basePrompt: deps.basePrompt } : {}),
+        ...(attachmentData !== undefined ? { attachmentData } : {}),
       });
+      if (built.missingAttachments !== undefined) {
+        for (const att of built.missingAttachments) {
+          deps.execEnv.diagnostics?.record("context.attachment_missing", {
+            turnId,
+            file: att.file,
+            sha256: att.sha256,
+          });
+        }
+      }
       deps.execEnv.diagnostics?.record("context.build", {
         turnId,
         sections: built.report.sections.map((s) => ({

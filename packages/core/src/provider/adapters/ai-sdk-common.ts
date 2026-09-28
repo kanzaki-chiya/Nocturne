@@ -6,10 +6,13 @@
 import {
   jsonSchema,
   type AssistantContent,
+  type FilePart,
   type JSONValue,
   type LanguageModelUsage,
   type ModelMessage as AiModelMessage,
+  type TextPart,
   type TextStreamPart,
+  type ToolResultPart,
   type ToolSet,
 } from "ai";
 
@@ -17,7 +20,7 @@ import {
 type SdkProviderOptions = Record<string, Record<string, JSONValue>>;
 import type { ContentBlock, FinishReason, Usage } from "../../protocol/index.js";
 import { abortError, ProviderError } from "../errors.js";
-import type { ModelRequest, ModelStreamEvent } from "../types.js";
+import type { ModelImage, ModelRequest, ModelStreamEvent } from "../types.js";
 
 // ── 消息转换：中性 ModelMessage → AI SDK ModelMessage ──────
 
@@ -27,27 +30,60 @@ export interface ToAiMessagesOptions {
    * 返回 undefined 表示不带 providerOptions。
    */
   reasoningProviderOptions?: (providerData: unknown) => SdkProviderOptions | undefined;
+  /**
+   * 工具结果图片的传输方式（ADR-0023）：
+   * - "user-message"（缺省，openai-compatible）：tool 消息只放文本——
+   *   @ai-sdk/openai-compatible 对 content 型 output 会 JSON.stringify，
+   *   绝不能用它传图——一批连续 tool 消息的 images 收集后在该批结束处
+   *   插入一条 user 消息（每张图一行 `Image from tool call <id> (<name>):`）。
+   * - "native"（anthropic）：output 用 SDK 的内容型结果
+   *   （{ type:"content", value:[…] }），适配器转成 tool_result 内的
+   *   原生 image 块；isError 带图时丢弃图片并在文本末追加说明。
+   */
+  toolResultImages?: "native" | "user-message" | undefined;
+}
+
+/** 中性图片 → AI SDK file 部件（v7 的 image 部件已弃用，file 是标准形态） */
+function toFilePart(img: ModelImage): FilePart {
+  return { type: "file", mediaType: img.mimeType, data: { type: "data", data: img.data } };
 }
 
 export function toAiMessages(
   request: ModelRequest,
   options: ToAiMessagesOptions = {},
 ): AiModelMessage[] {
+  const toolResultImages = options.toolResultImages ?? "user-message";
   // callId → 线上 id：同一请求内同一对调用/结果必须用同一个 id（provider-api.md 第 3 节）
   const wireIds = new Map<string, string>();
   const out: AiModelMessage[] = [];
+  // user-message 模式：连续 tool 消息的图像暂存，批末插入一条 user 消息
+  const pendingToolImages: { wireId: string; toolName: string; img: ModelImage }[] = [];
+  const flushToolImages = (): void => {
+    if (pendingToolImages.length === 0) return;
+    const parts: (TextPart | FilePart)[] = [];
+    for (const p of pendingToolImages) {
+      parts.push({
+        type: "text",
+        text: `Image from tool call ${p.wireId} (${p.toolName}):`,
+      });
+      parts.push(toFilePart(p.img));
+    }
+    out.push({ role: "user", content: parts });
+    pendingToolImages.length = 0;
+  };
   for (const m of request.messages) {
     switch (m.role) {
       case "user": {
-        out.push({
-          role: "user",
-          content: m.content
-            .filter((c): c is Extract<ContentBlock, { type: "text" }> => c.type === "text")
-            .map((c) => ({ type: "text" as const, text: c.text })),
-        });
+        flushToolImages();
+        const content: (TextPart | FilePart)[] = m.content
+          .filter((c): c is Extract<ContentBlock, { type: "text" }> => c.type === "text")
+          .map((c) => ({ type: "text" as const, text: c.text }));
+        for (const img of m.images ?? []) content.push(toFilePart(img));
+        out.push({ role: "user", content });
         break;
       }
       case "assistant": {
+        flushToolImages();
         const parts: AssistantContent = [];
         for (const c of m.content) {
           if (c.type === "text") {
@@ -86,23 +122,55 @@ export function toAiMessages(
         break;
       }
       case "tool": {
+        const wireId = wireIds.get(m.callId) ?? m.callId;
+        const imgs = m.images ?? [];
+        let output: ToolResultPart["output"];
+        if (toolResultImages === "native" && imgs.length > 0 && !m.isError) {
+          output = {
+            type: "content" as const,
+            value: [
+              { type: "text" as const, text: m.content },
+              ...imgs.map((img) => ({
+                type: "file" as const,
+                mediaType: img.mimeType,
+                data: { type: "data" as const, data: img.data },
+              })),
+            ],
+          };
+        } else if (m.isError) {
+          // native 模式下 Anthropic 的 is_error tool_result 不携带图片：
+          // 丢弃并在文本末注明（user-message 模式的图仍在下方收集转发）
+          output = {
+            type: "error-text" as const,
+            value:
+              imgs.length > 0 && toolResultImages === "native"
+                ? `${m.content}\n[image omitted: error result]`
+                : m.content,
+          };
+        } else {
+          output = { type: "text" as const, value: m.content };
+        }
         out.push({
           role: "tool",
           content: [
             {
               type: "tool-result",
-              toolCallId: wireIds.get(m.callId) ?? m.callId,
+              toolCallId: wireId,
               toolName: m.name,
-              output: m.isError
-                ? { type: "error-text", value: m.content }
-                : { type: "text", value: m.content },
+              output,
             },
           ],
         });
+        if (toolResultImages === "user-message") {
+          for (const img of imgs) {
+            pendingToolImages.push({ wireId, toolName: m.name, img });
+          }
+        }
         break;
       }
     }
   }
+  flushToolImages();
   return out;
 }
 

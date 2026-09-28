@@ -675,3 +675,108 @@ describe("anthropic 适配器：reasoningEffort → thinking.budget_tokens（ADR
     expect((capture.body as Record<string, unknown>)["thinking"]).toBeUndefined();
   });
 });
+
+describe("anthropic 适配器：图片（ADR-0023）", () => {
+  const png = { mimeType: "image/png" as const, data: "aVZCT1I=" };
+  const end = [...msgEnd("end_turn")];
+
+  it("tool 结果带图 → tool_result.content 含原生 image 块", async () => {
+    const capture: { body?: { messages?: unknown[] } } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...end], capture),
+    );
+    await collect(
+      p,
+      request({
+        messages: [
+          { role: "user", content: [{ type: "text", text: "go" }] },
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            toolCalls: [{ callId: "c1", name: "read" }],
+          },
+          {
+            role: "tool",
+            callId: "c1",
+            name: "read",
+            content: "r1",
+            isError: false,
+            images: [png],
+          },
+        ],
+      }),
+    );
+    const msgs = (capture.body?.messages ?? []) as {
+      role: string;
+      content: { type: string; [k: string]: unknown }[];
+    }[];
+    const toolResultMsg = msgs.at(-1);
+    expect(toolResultMsg?.role).toBe("user");
+    const tr = toolResultMsg?.content.find((b) => b.type === "tool_result");
+    expect(tr?.["tool_use_id"]).toBe("c1");
+    expect(tr?.["content"]).toEqual([
+      { type: "text", text: "r1" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "aVZCT1I=" } },
+    ]);
+  });
+
+  it("isError 带图：图片丢弃，文本末追加 [image omitted: error result]", async () => {
+    const capture: { body?: { messages?: unknown[] } } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...end], capture),
+    );
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            toolCalls: [{ callId: "c1", name: "read" }],
+          },
+          {
+            role: "tool",
+            callId: "c1",
+            name: "read",
+            content: "boom",
+            isError: true,
+            images: [png],
+          },
+        ],
+      }),
+    );
+    const msgs = (capture.body?.messages ?? []) as {
+      content: { type: string; [k: string]: unknown }[];
+    }[];
+    const tr = msgs.at(-1)?.content.find((b) => b.type === "tool_result");
+    expect(tr?.["is_error"]).toBe(true);
+    expect(tr?.["content"]).toBe("boom\n[image omitted: error result]");
+    expect(JSON.stringify(tr)).not.toContain('"type":"image"');
+  });
+
+  it("用户消息图片 → image 块", async () => {
+    const capture: { body?: { messages?: unknown[] } } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...end], capture),
+    );
+    await collect(
+      p,
+      request({
+        messages: [{ role: "user", content: [{ type: "text", text: "look" }], images: [png] }],
+      }),
+    );
+    const msgs = (capture.body?.messages ?? []) as {
+      content: { type: string; [k: string]: unknown }[];
+    }[];
+    expect(msgs[0]?.content).toEqual([
+      { type: "text", text: "look" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "aVZCT1I=" } },
+    ]);
+  });
+});

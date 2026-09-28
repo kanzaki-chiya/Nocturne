@@ -188,6 +188,28 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(text).toContain("100000");
   });
 
+  it("/context 有图片时渲染 images 行", async () => {
+    const { lines, io } = capture();
+    const session = fakeSession({
+      describeContext: () =>
+        ({
+          report: {
+            sections: [{ name: "history", source: "3 条", chars: 400, estimatedTokens: 100 }],
+            totalChars: 400,
+            estimatedTokens: 4900,
+            budgetTokens: 100_000,
+            images: { count: 3, estimatedTokens: 4800 },
+          },
+          overBudget: false,
+        }) as ReturnType<RuntimeSession["describeContext"]>,
+    });
+    await runSlashCommand("/context", session, fakeRuntime, io);
+    const text = lines.join("");
+    expect(text).toContain("images");
+    expect(text).toContain("3 张");
+    expect(text).toContain("~4800");
+  });
+
   it("/compact 调 compact；失败只显示不抛", async () => {
     let compacted = false;
     const session = fakeSession({

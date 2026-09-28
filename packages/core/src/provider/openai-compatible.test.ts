@@ -258,3 +258,115 @@ describe("openai-compatible 适配器：reasoningEffort 映射（ADR-0018 §3）
     expect(capture.body?.["reasoning"]).toEqual({ exclude: true, effort: "xhigh" });
   });
 });
+
+describe("openai-compatible 适配器：图片（ADR-0023）", () => {
+  const png = { mimeType: "image/png" as const, data: "aVZCT1I=" };
+
+  it("tool 消息带图：tool 仍是纯文本，批末插入一条 user 消息（image_url + 标注行）", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(
+      p,
+      request({
+        messages: [
+          { role: "user", content: [{ type: "text", text: "go" }] },
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            toolCalls: [
+              { callId: "c1", name: "read" },
+              { callId: "c2", name: "read" },
+            ],
+          },
+          {
+            role: "tool",
+            callId: "c1",
+            name: "read",
+            content: "r1",
+            isError: false,
+            images: [png],
+          },
+          {
+            role: "tool",
+            callId: "c2",
+            name: "read",
+            content: "r2",
+            isError: false,
+            images: [png],
+          },
+          { role: "assistant", content: [{ type: "text", text: "done" }], toolCalls: [] },
+        ],
+      }),
+    );
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    // 两条 tool 之后、下一条 assistant 之前，恰好一条图片 user 消息
+    expect(msgs.map((m) => m["role"])).toEqual([
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "tool",
+      "user",
+      "assistant",
+    ]);
+    expect(msgs[3]?.["content"]).toBe("r1");
+    expect(msgs[4]?.["content"]).toBe("r2");
+    expect(msgs[5]?.["content"]).toEqual([
+      { type: "text", text: "Image from tool call c1 (read):" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,aVZCT1I=" } },
+      { type: "text", text: "Image from tool call c2 (read):" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,aVZCT1I=" } },
+    ]);
+    // base64 不得以 JSON.stringify 形式出现在 tool content 里
+    expect(JSON.stringify(capture.body)).not.toContain('"type":"image-data"');
+  });
+
+  it("工具结果后紧跟用户消息：图片 user 消息在 tool 之后、原用户消息之前", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            toolCalls: [{ callId: "c1", name: "read" }],
+          },
+          { role: "tool", callId: "c1", name: "read", content: "r", isError: false, images: [png] },
+          { role: "user", content: [{ type: "text", text: "然后呢" }] },
+        ],
+      }),
+    );
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    expect(msgs.map((m) => m["role"])).toEqual(["system", "assistant", "tool", "user", "user"]);
+    expect((msgs[3]?.["content"] as unknown[])[0]).toEqual({
+      type: "text",
+      text: "Image from tool call c1 (read):",
+    });
+    expect(msgs[4]?.["content"]).toBe("然后呢");
+  });
+
+  it("用户消息自带图片 → image_url 部件；无图片回归不变", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(
+      p,
+      request({
+        messages: [{ role: "user", content: [{ type: "text", text: "look" }], images: [png] }],
+      }),
+    );
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    expect(msgs[1]?.["content"]).toEqual([
+      { type: "text", text: "look" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,aVZCT1I=" } },
+    ]);
+
+    const noImg: { body?: Record<string, unknown> } = {};
+    const p2 = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, noImg));
+    await collect(p2, request());
+    const noImgMsgs = noImg.body?.["messages"] as Record<string, unknown>[];
+    expect(noImgMsgs.map((m) => m["role"])).toEqual(["system", "user"]);
+    expect(noImgMsgs[1]?.["content"]).toBe("hi");
+  });
+});

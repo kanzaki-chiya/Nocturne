@@ -171,7 +171,9 @@ export function createOpenAICompatibleProvider(
       const result = streamText({
         model: sdk.chatModel(request.model),
         system: request.system.map((b) => b.text).join("\n\n"),
-        messages: toAiMessages(request),
+        // ADR-0023：Chat Completions 的 tool 消息不能携带图片——
+        // 工具结果图以批末 user 消息转发（ai-sdk-common.ts 说明）
+        messages: toAiMessages(request, { toolResultImages: "user-message" }),
         tools: toAiTools(request),
         // ADR-0016：最大输出长度未知时请求不带 max_tokens，由上游按自己的上限处理
         ...(request.maxOutputTokens !== undefined
