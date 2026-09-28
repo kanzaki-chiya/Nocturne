@@ -73,7 +73,7 @@ execute(call, ctx):
   - 落盘写失败时降级为普通截断（模型可见内容注明未落盘），不影响 `tool.completed` 的结算。
   - `tool.completed` 增加可选字段 `spillPath`（落盘文件的绝对路径，兼容新增）；客户端据此显示"输出已截断，完整内容在 \<path\>"，模型可见的 `modelContent` 中同样注明路径与预览。
   - 权限协同：所有预设都内置 `read <sessionsDir>/attachments/<sessionId>/** → allow`（[permissions.md](permissions.md) 第 6 节），**只放行当前会话**的落盘目录——读其他会话的附件仍走正常权限求值。
-- **图片附件**（ADR-0023）：`ToolResult.attachments` 携带的图片字节由执行器经 `AttachmentStore` 落盘到**同一目录** `<sessionsDir>/attachments/<sessionId>/`，文件名 `img-<n>.<ext>`（`n` 从该目录已有文件的最大编号续起，并发保存串行化、撞名让号）；事件与历史只写 `ImageAttachment` 引用（events.md 第 4 节），字节绝不进事件。读回时校验 sha256，文件缺失或不符按缺失处理。附件存储按会话独立：子会话使用自己的 `sessionId` 目录与实例（index.ts / subagent.ts 各建一份，挂在 `ExecutionEnvironment.attachments` 上）。保存失败的语义见 [tool-api.md](../protocols/tool-api.md) 第 3 节；字节如何进入模型请求见 [context.md](context.md) 第 3 节。
+- **图片附件**（ADR-0023）：`ToolResult.attachments` 携带的图片字节由执行器经 `AttachmentStore` 落盘到**同一目录** `<sessionsDir>/attachments/<sessionId>/`，用户提交的 `attachments` 也由 Core 落盘（`source: "paste"`）。文件名 `img-<n>.<ext>`（`n` 从该目录已有文件的最大编号续起，并发保存串行化、撞名让号）；事件与历史只写 `ImageAttachment` 引用（events.md 第 4 节），字节绝不进事件。读回时校验 sha256，文件缺失或不符按缺失处理。会话级字节缓存以 sha256 为键，按总字节数做 64 MB LRU；淘汰后再次读取文件并重新校验。附件存储按会话独立：子会话使用自己的 `sessionId` 目录与实例（index.ts / subagent.ts 各建一份，挂在 `ExecutionEnvironment.attachments` 上）。保存失败的语义见 [tool-api.md](../protocols/tool-api.md) 第 3 节；字节如何进入模型请求见 [context.md](context.md) 第 3 节。
 
 ## 5. 超时、中断与并发
 

@@ -30,3 +30,7 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `vitest` | 5.0.1 | MIT |
 
 这些是通过各包 `package.json` 核对的直接依赖；间接依赖与完整许可文本可从 `pnpm-lock.yaml` 和安装后的 `node_modules` 查阅。仓库未从参考项目复制第三方源文件，故没有需要附加的来源 NOTICE。
+
+## 内置数据
+
+`packages/core/src/config/models-dev-snapshot.ts` 的模型字段快照来源于 [models.dev](https://github.com/sst/models.dev) 的 `models.json`，上游仓库的 `LICENSE` 声明 MIT License。用 `scripts/update-models-dev-snapshot.mjs` 获取并筛选上游模型数据后生成此文件；运行期默认使用内置快照，只有显式刷新才访问上游。

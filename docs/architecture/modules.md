@@ -127,7 +127,7 @@
 
 ### platform
 
-- **负责**：文件系统访问、子进程启动与终止（含进程树）、路径规范化、用户目录解析，屏蔽 Windows / macOS / Linux 差异；shell 种类描述符与安装探测（`shells.ts`，ADR-0022：调用形态、语法说明、分页器名单、大小写敏感性等元数据随 `ShellDescriptor` 交给 tools / permission 消费，platform 不 import 权限语义）。
+- **负责**：文件系统访问、子进程启动与终止（含进程树）、路径规范化、用户目录解析、剪贴板图片读取（Windows PowerShell 5.1 STA，其他平台暂不支持），屏蔽 Windows / macOS / Linux 差异；shell 种类描述符与安装探测（`shells.ts`，ADR-0022：调用形态、语法说明、分页器名单、大小写敏感性等元数据随 `ShellDescriptor` 交给 tools / permission 消费，platform 不 import 权限语义）。
 - **不负责**：任何业务判断（例如"是否在工作区内"属于 permission；shell 命令的风险判定同）。
 - **依赖**：无（仅 Node.js 标准库）。
 

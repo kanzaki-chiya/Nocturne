@@ -184,7 +184,7 @@ type ImageAttachment = {
 
 | 命令 | 前置条件 | 效果事件 | 实现阶段 |
 |---|---|---|---|
-| `submit(content)` | 会话空闲，否则返回 `session_busy` | `turn.started`、`message.user`、…… | Phase 1 |
+| `submit({ text?, content?, attachments? })` | 会话空闲，否则返回 `session_busy`；`attachments` 是可选的 `{ data, mimeType, label? }[]`，由 Core 校验并落盘 | `turn.started`、`message.user`（含附件引用）、…… | Phase 1；图片见 ADR-0023 |
 | `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` | Phase 1 |
 | `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 2 起 ask 流程生效；Phase 3 起 `reply.remember` 生效，生成对应范围的 Grant（[permissions.md](../architecture/permissions.md) 5.4） |
 | `setModel(ref)` | 会话空闲（Turn 进行中返回 `session_busy`）；未知 provider 返回 `invalid_model`；Provider 启用严格清单（`strictModels`，默认）且模型不在清单内同样 `invalid_model` | `session.config_changed` | Phase 2（`/model`） |
