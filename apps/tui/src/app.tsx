@@ -39,6 +39,7 @@ import {
   type ProviderBridge,
   type ProviderWizardStart,
 } from "./commands.js";
+import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { copyText } from "./clipboard.js";
 import { composerWindow } from "./cursor.js";
 import { checkImage, createImageStore, droppedImage } from "./images.js";
@@ -708,7 +709,8 @@ function SessionApp({
   const [historyIndex, setHistoryIndex] = useState<number | undefined>(undefined);
   const [historyDraft, setHistoryDraft] = useState("");
   const [overlay, setOverlay] = useState<OverlayName | undefined>(undefined);
-  const [clientLines, setClientLines] = useState<string[]>([]);
+  const [clientLines, setClientLines] = useState<ClientLine[]>([]);
+  const clientLineId = useRef(0);
   const [exiting, setExiting] = useState(false);
   const submitting = useRef(false);
   const [submitPending, setSubmitPending] = useState(false);
@@ -856,7 +858,12 @@ function SessionApp({
   const pushLine = useCallback(
     (text: string) => {
       if (text === "") return;
-      setClientLines((prev) => [...prev.slice(-19), ...text.split("\n")]);
+      // 记下推入时的条目数，提示行随对话滚走而不是钉在末尾
+      const after = entriesRef.current.length;
+      const added = text
+        .split("\n")
+        .map((line) => ({ id: clientLineId.current++, text: line, after }));
+      setClientLines((prev) => [...prev.slice(-199), ...added]);
       if (fullscreen) {
         // 翻阅中不拉回底部，标"有新内容"
         setScroll((s) => (s.follow ? s : { ...s, newContent: true }));
@@ -1152,22 +1159,21 @@ function SessionApp({
           };
           if (fullscreen) {
             // 旧会话的完结条目与本地提示行冻结进视口前缀；键加纪元前缀防碰撞
-            const frozenItems: TranscriptItem[] = entriesRef.current
-              .filter(
-                (e) =>
-                  !(
-                    e.kind === "notice" &&
-                    e.subtype === "config" &&
-                    hiddenNotices.current.has(e.key)
-                  ),
-              )
-              .map((e) => ({ ...e, key: `z${epoch}:${e.key}` }));
-            const frozenClient: TranscriptItem[] = clientLinesRef.current.map((text, i) => ({
-              kind: "header",
-              key: `z${epoch}:c${i}`,
-              lines: [{ key: `z${epoch}:c${i}`, text, dim: true }],
-            }));
-            setFrozen((prev) => [...prev, ...frozenItems, ...frozenClient, sep]);
+            const frozenItems = interleaveClient<ViewEntry, TranscriptItem>(
+              entriesRef.current,
+              0,
+              clientLinesRef.current,
+              (e) =>
+                e.kind === "notice" && e.subtype === "config" && hiddenNotices.current.has(e.key)
+                  ? []
+                  : [{ ...e, key: `z${epoch}:${e.key}` }],
+              (line) => ({
+                kind: "header",
+                key: `z${epoch}:c${line.id}`,
+                lines: [{ key: `z${epoch}:c${line.id}`, text: line.text, dim: true }],
+              }),
+            );
+            setFrozen((prev) => [...prev, ...frozenItems, sep]);
             setClientLines([]);
             setSel(undefined);
             setScroll(scrollToBottom());
@@ -2143,9 +2149,20 @@ function SessionApp({
   ];
   const activityLines: LaidLine[] = [];
   if (!fullscreen) {
+    // 本地提示行按推入位置进回滚区；落在未完结条目之后的先留在活动区
     const staticEntries: TranscriptItem[] = [
       ...header,
-      ...prefix.filter((entry) => !hideNotice(entry)),
+      ...interleaveClient<ViewEntry, TranscriptItem>(
+        prefix,
+        0,
+        clientLines.filter((line) => line.after <= prefix.length),
+        (entry) => (hideNotice(entry) ? [] : [entry]),
+        (line) => ({
+          kind: "header",
+          key: `client:${line.id}`,
+          lines: [{ key: `client:${line.id}`, text: line.text, dim: true }],
+        }),
+      ),
     ];
     const completedLive = new Map<string, string>();
     for (const assistant of view.live.assistants) {
@@ -2185,10 +2202,20 @@ function SessionApp({
         })),
       },
     };
+    const clientRows = (line: ClientLine): LaidLine[] => [
+      { key: `client:${line.id}`, text: line.text, dim: true },
+    ];
+    const pendingLines = clientLines.filter((line) => line.after > prefix.length);
     activityLines.push(
-      ...tail.flatMap((entry) => layoutEntry(entry, width, env.ascii, reasoning, reasoningNow)),
+      ...interleaveClient<ViewEntry, LaidLine[]>(
+        tail,
+        prefix.length,
+        pendingLines.filter((line) => line.after < view.entries.length),
+        (entry) => [layoutEntry(entry, width, env.ascii, reasoning, reasoningNow)],
+        clientRows,
+      ).flat(),
       ...layoutLive(activityView, width, env.ascii, reasoning, reasoningNow),
-      ...clientLines.map((text, i) => ({ key: `client:${i}`, text, dim: true })),
+      ...pendingLines.filter((line) => line.after >= view.entries.length).flatMap(clientRows),
     );
   }
   const shownActivity = activityLines.slice(-budget.conversation);

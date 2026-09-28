@@ -8,6 +8,7 @@ import stringWidth from "string-width";
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 
 import { attachmentLine } from "./attachment-line.js";
+import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { splitImageTokens } from "./images.js";
 import { boxSafe, stripControls, summarizeToolInput, tailLines, truncateLine } from "./format.js";
 import { renderMarkdown } from "./markdown.js";
@@ -329,7 +330,7 @@ interface TranscriptSource {
   entries: readonly ViewEntry[];
   hide: (entry: ViewEntry) => boolean;
   live: SessionView;
-  clientLines: readonly string[];
+  clientLines: readonly ClientLine[];
   ascii: boolean;
   reasoning?: ReasoningMap;
   now?: number;
@@ -364,8 +365,20 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
       ),
     );
   }
-  for (const entry of src.entries) {
-    if (src.hide(entry)) continue;
+  // 本地提示行按推入位置插在条目之间；推入时尚无后续条目的排在 live 之后
+  const clientBlock = (line: ClientLine): LineBlock =>
+    block(`client:${line.id}`, line.text, (width) =>
+      rows(`c${line.id}`, line.text, width, { dim: true }),
+    );
+  const entryBlocks = interleaveClient<ViewEntry, LineBlock>(
+    src.entries,
+    0,
+    src.clientLines.filter((line) => line.after < src.entries.length),
+    (entry) => (src.hide(entry) ? [] : [entryBlock(entry)]),
+    clientBlock,
+  );
+  blocks.push(...entryBlocks);
+  function entryBlock(entry: ViewEntry): LineBlock {
     const revision =
       entry.kind === "tool"
         ? `${entry.status}:${entry.liveOutput.length}:${entry.result?.modelContent.length ?? 0}`
@@ -377,10 +390,8 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
                 .join(",") ?? ""
             }`
           : entry.key;
-    blocks.push(
-      block(entry.key, `${revision}:${src.expanded}`, (width) =>
-        layoutEntry(entry, width, src.ascii, src.reasoning, src.now, src.expanded),
-      ),
+    return block(entry.key, `${revision}:${src.expanded}`, (width) =>
+      layoutEntry(entry, width, src.ascii, src.reasoning, src.now, src.expanded),
     );
   }
   // 缓存标记要覆盖布局的全部输入：思考长度、进行中工具、重试
@@ -410,13 +421,9 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
       layoutLive(src.live, width, src.ascii, src.reasoning, src.now, src.expanded),
     ),
   );
-  if (src.clientLines.length > 0) {
-    blocks.push(
-      block("client", src.clientLines.join("\n"), (width) =>
-        src.clientLines.flatMap((text, i) => rows(`c${i}`, text, width, { dim: true })),
-      ),
-    );
-  }
+  blocks.push(
+    ...src.clientLines.filter((line) => line.after >= src.entries.length).map(clientBlock),
+  );
   return blocks;
 }
 

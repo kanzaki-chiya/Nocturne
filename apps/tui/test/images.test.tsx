@@ -149,6 +149,31 @@ describe("TUI 图片输入", () => {
     }
   });
 
+  it("提示行留在推入位置，之后的对话排在它下面", async () => {
+    const { runtime, active } = await session(false);
+    const { stdin, lastFrame, unmount } = render(
+      createElement(App, {
+        session: active,
+        runtime,
+        env,
+        clipboard: clip(png),
+        clipboardPlatform: "win32",
+      }),
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("idle"));
+    stdin.write("\x1bv");
+    await waitFor(() => (lastFrame() ?? "").includes("未声明支持图片输入"));
+    stdin.write("你好");
+    await waitFor(() => (lastFrame() ?? "").includes("你好"));
+    stdin.write("\r");
+    await waitFor(() => (lastFrame() ?? "").includes("完成"));
+    const frame = lastFrame() ?? "";
+    expect(frame.indexOf("未声明支持图片输入")).toBeLessThan(frame.indexOf("› 你好"));
+    expect(frame.indexOf("› 你好")).toBeLessThan(frame.indexOf("完成"));
+    unmount();
+    await active.close();
+  });
+
   it("拖入路径：引号、普通路径、非图片、不存在、超限", async () => {
     const dir = tmp();
     const good = path.join(dir, "a.png");
