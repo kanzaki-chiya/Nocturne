@@ -55,7 +55,7 @@ pnpm install        # 安装依赖
 pnpm typecheck      # tsc --noEmit（src 与 test 两套 tsconfig）
 pnpm lint           # eslint（strictTypeChecked + stylisticTypeChecked）
 pnpm format:check   # prettier --check；修复用 pnpm format
-pnpm test           # vitest run，默认测试集：完全离线，不依赖网络/API key/外部服务
+pnpm test           # vitest run，默认测试集：完全离线，不依赖网络/API key/外部服务；各包依次运行，避免 TUI 渲染测试在并行负载下超时
 pnpm depcheck       # dependency-cruiser 依赖方向检查（modules.md 依赖图固化为规则）
 pnpm build          # tsdown 构建 packages/core/dist
 ```
