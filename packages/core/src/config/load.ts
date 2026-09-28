@@ -9,6 +9,13 @@ import type { Platform } from "../platform/index.js";
 import { envLayerConfig, cliLayerConfig } from "./env.js";
 import { ConfigError } from "./errors.js";
 import { loadConfigFile, writeJsonAtomic } from "./files.js";
+import {
+  matchModelsDev,
+  modelOverrideFromDev,
+  readModelsDev,
+  refreshModelsDev,
+} from "./models-dev.js";
+import { modelsDevSnapshot } from "./models-dev-snapshot.js";
 import { createCredentialStore } from "./credentials.js";
 import { loadGrantStore } from "./grants.js";
 import { mergeLayers, type MergeLayer, type MergeResult } from "./merge.js";
@@ -28,9 +35,9 @@ import {
   refreshUpstreamLimits,
   removeSetupProvider,
   saveSetupProvider,
-  saveSetupThinking,
   saveSetupUserModels,
   setSetupDefaultModel,
+  writeProviderSetup,
 } from "./setup.js";
 import { loadSettingsStore } from "./settings.js";
 import { readTrustList } from "./trust.js";
@@ -96,6 +103,30 @@ export async function loadConfig(
 
   // 用户配置：损坏即快速失败（config.md 第 2 节）
   const userFile: ConfigFile = (await loadConfigFile(fs, userConfigPath)) ?? {};
+  let modelsDev =
+    userFile.modelsDev === false ? modelsDevSnapshot : await readModelsDev(platform, home);
+
+  function mergeWithModelsDev(layers: MergeLayer[]): MergeResult {
+    const entries = new Map<string, Set<string>>();
+    for (const layer of layers) {
+      if (layer.kind === "userModels") continue;
+      for (const provider of layer.file.providers ?? []) {
+        const ids = entries.get(provider.id) ?? new Set<string>();
+        for (const id of Object.keys(provider.models ?? {})) ids.add(id);
+        entries.set(provider.id, ids);
+      }
+    }
+    const providers: ProviderEntryConfig[] = [];
+    for (const [id, ids] of entries) {
+      const models: NonNullable<ProviderEntryConfig["models"]> = {};
+      for (const modelId of ids) {
+        const record = matchModelsDev(modelsDev.models, modelId);
+        if (record !== undefined) models[modelId] = modelOverrideFromDev(record);
+      }
+      if (Object.keys(models).length > 0) providers.push({ id, models });
+    }
+    return mergeLayers([{ kind: "modelsDev", file: { providers } }, ...layers]);
+  }
 
   const envLayer = envLayerConfig(env);
   const cliLayer = cliLayerConfig(options.cliArgs);
@@ -134,7 +165,7 @@ export async function loadConfig(
       }
     }
     layers.push({ kind: "env", file: envLayer.file }, { kind: "cli", file: cliLayer.file });
-    return mergeLayers(layers);
+    return mergeWithModelsDev(layers);
   }
 
   // 合并产物之外的加载期警告：base 与工作区 resolved 各加一次（合并自身
@@ -144,7 +175,7 @@ export async function loadConfig(
   if (settings.warning !== undefined) loadWarnings.push(settings.warning);
   if (trust.warning !== undefined) loadWarnings.push(trust.warning);
 
-  const base = mergeLayers([
+  const base = mergeWithModelsDev([
     ...setupLayers(setupFile, providersPath),
     { kind: "user", path: userConfigPath, file: userFile },
     { kind: "env", file: envLayer.file },
@@ -196,7 +227,7 @@ export async function loadConfig(
       { kind: "env", file: envLayer.file },
       { kind: "cli", file: cliLayer.file },
     ];
-    const resolved = mergeLayers(layers).resolved;
+    const resolved = mergeWithModelsDev(layers).resolved;
     // mcpServers 标注来源目录：相对 cwd 按该层配置文件所在目录解析（config.md 第 2 节）
     resolved.mcpServers = resolved.mcpServers.map((s) => ({
       ...s,
@@ -264,9 +295,19 @@ export async function loadConfig(
     providerSetupWarning: setup.warning,
     credentials,
     saveSetupProvider: (entry, opts) => saveSetupProvider(platform, home, credentials, entry, opts),
-    setCredential: (providerId, key) => credentials.set(providerId, key),
-    saveSetupThinking: (providerId, levels) =>
-      saveSetupThinking(platform, home, providerId, levels),
+    setCredential: async (providerId, key) => {
+      await credentials.set(providerId, key);
+      const now = await loadProviderSetup(platform, home);
+      if (now.file?.providers?.some((p) => p.id === providerId)) {
+        await writeProviderSetup(platform, home, now.file);
+      }
+    },
+    refreshModelsDev: async () => {
+      if (userFile.modelsDev === false) return undefined;
+      const result = await refreshModelsDev(platform, home, options.modelsDevFetch);
+      modelsDev = result.data;
+      return result.warning;
+    },
     // ADR-0024 第 3 节：来源按"实际参与合并的层"计算；trustedSet 与
     // projectFileIfTrusted 复用 forWorkspace 同一口径
     listModelSettings: async (providerId, workspaceRoot) => {
@@ -314,8 +355,20 @@ export async function loadConfig(
         env,
       );
     },
-    refreshUpstreamLimits: (providerId: string) =>
-      refreshUpstreamLimits(platform, home, credentials, env, options.upstreamFetch, providerId),
+    refreshUpstreamLimits: async (providerId: string) => {
+      await refreshUpstreamLimits(
+        platform,
+        home,
+        credentials,
+        env,
+        options.upstreamFetch,
+        providerId,
+      );
+      if (userFile.modelsDev === false) return undefined;
+      const result = await refreshModelsDev(platform, home, options.modelsDevFetch);
+      modelsDev = result.data;
+      return result.warning;
+    },
     setDefaultModel: (model: string) => setSetupDefaultModel(platform, home, model),
     shellSetting: () => settings.store.shellFields(),
     setShellSetting: (kind, path) => settings.store.setShell(kind, path),

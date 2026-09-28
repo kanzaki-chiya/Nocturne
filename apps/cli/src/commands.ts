@@ -35,8 +35,6 @@ export interface CommandDeps {
   runAddWizard?: (() => Promise<void>) | undefined;
   /** /provider key <name>：同上密钥向导 */
   runKeyWizard?: ((providerId: string) => Promise<void>) | undefined;
-  /** /provider thinking <name>：同上思考档位向导（ADR-0018） */
-  runThinkingWizard?: ((providerId: string) => Promise<void>) | undefined;
   /** /provider model <name> <model>：同上模型设置问答（ADR-0024） */
   runModelWizard?: ((providerId: string, modelId: string) => Promise<void>) | undefined;
 }
@@ -265,23 +263,12 @@ export async function runSlashCommand(
           }
           return "handled";
         }
-        case "thinking": {
-          if (deps.runThinkingWizard === undefined) {
-            io.print("! /provider thinking 需要交互式终端");
-            return "handled";
-          }
-          try {
-            await deps.runThinkingWizard(name);
-          } catch (e) {
-            io.print(`! ${errorText(e)}`);
-          }
-          return "handled";
-        }
         case "refresh": {
           try {
-            await config.refreshUpstreamLimits(name);
+            const warning = await config.refreshUpstreamLimits(name);
             updateProviders(await reloadConfig());
             io.print(`已刷新 ${name} 的模型列表与限额`);
+            if (warning !== undefined) io.print(`! ${warning}`);
           } catch (e) {
             io.print(`! ${errorText(e)}`);
           }

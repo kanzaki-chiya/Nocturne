@@ -41,7 +41,6 @@ function makeConfig(backend: "none" | "dpapi") {
     opts: { key?: string; defaultModel?: string } | undefined;
   }[] = [];
   const creds: { providerId: string; key: string }[] = [];
-  const thinking: { providerId: string; levels: unknown }[] = [];
   const config = {
     credentials: { backend: () => backend },
     base: { providers: [] as ProviderEntryConfig[] },
@@ -52,16 +51,13 @@ function makeConfig(backend: "none" | "dpapi") {
       saved.push({ entry, opts });
       return Promise.resolve();
     },
-    saveSetupThinking: (providerId: string, levels: unknown) => {
-      thinking.push({ providerId, levels });
-      return Promise.resolve();
-    },
+    refreshModelsDev: async () => undefined,
     setCredential: (providerId: string, key: string) => {
       creds.push({ providerId, key });
       return Promise.resolve();
     },
   } as unknown as RuntimeConfig;
-  return { config: config as RuntimeConfig, saved, creds, thinking };
+  return { config: config as RuntimeConfig, saved, creds };
 }
 
 function makeDeps(overrides?: Partial<SetupWizardDeps>): SetupWizardDeps {
@@ -238,98 +234,6 @@ describe("/provider 向导弹层", () => {
     await pause(120);
     expect(onDone).toHaveBeenCalledWith({ kind: "key-updated", providerId: "deepseek" });
     expect(creds).toEqual([{ providerId: "deepseek", key: "new-key-456" }]);
-    unmount();
-  });
-
-  it("/provider thinking：单步勾选（首项「不支持」互斥）→ Enter 保存 thinking.levels", async () => {
-    const { config, thinking } = makeConfig("none");
-    const onDone = vi.fn();
-    const { lastFrame, stdin, unmount } = render(
-      inEnv(
-        createElement(Probe, {
-          config,
-          deps: makeDeps(),
-          start: { kind: "thinking", providerId: "deepseek" },
-          onDone,
-        }),
-      ),
-    );
-    await pause();
-    // v0.3 修订：无 y/N 是非题——直接出勾选列表，首项"不支持思考强度"
-    const f = lastFrame() ?? "";
-    expect(f).toContain("不支持思考强度");
-    expect(f).toContain("minimal");
-    expect(f).toContain("max");
-    expect(f).toContain("空格勾选");
-    expect(f).not.toContain("[y/N]");
-    // ↓↓ → 空格勾选 low；↓ ↓ → 空格勾选 high；Enter 确认
-    stdin.write("\x1b[B");
-    await pause();
-    stdin.write("\x1b[B");
-    await pause();
-    stdin.write(" ");
-    await pause();
-    expect(lastFrame()).toContain("[x] low");
-    stdin.write("\x1b[B");
-    await pause();
-    stdin.write("\x1b[B");
-    await pause();
-    stdin.write(" ");
-    await pause();
-    expect(lastFrame()).toContain("[x] high");
-    // 勾"不支持"应互斥清空其余（先验证互斥，再改回勾选）
-    stdin.write("\x1b[A");
-    await pause();
-    stdin.write("\x1b[A");
-    await pause();
-    stdin.write("\x1b[A");
-    await pause();
-    stdin.write("\x1b[A");
-    await pause(); // 光标回"不支持"
-    stdin.write(" ");
-    await pause();
-    expect(lastFrame()).toContain("[x] 不支持思考强度");
-    expect(lastFrame()).not.toContain("[x] low");
-    // 取消"不支持"，重新勾 low + high
-    stdin.write(" ");
-    await pause();
-    stdin.write("\x1b[B");
-    await pause();
-    stdin.write("\x1b[B");
-    await pause();
-    stdin.write(" ");
-    await pause();
-    stdin.write("\x1b[B");
-    await pause();
-    stdin.write("\x1b[B");
-    await pause();
-    stdin.write(" ");
-    await pause();
-    stdin.write("\r");
-    await pause(150);
-    expect(onDone).toHaveBeenCalledWith({ kind: "thinking-updated", providerId: "deepseek" });
-    expect(thinking).toEqual([{ providerId: "deepseek", levels: ["low", "high"] }]);
-    unmount();
-  });
-
-  it("/provider thinking：什么都不勾直接 Enter = 清除声明", async () => {
-    const { config, thinking } = makeConfig("none");
-    const onDone = vi.fn();
-    const { stdin, unmount } = render(
-      inEnv(
-        createElement(Probe, {
-          config,
-          deps: makeDeps(),
-          start: { kind: "thinking", providerId: "deepseek" },
-          onDone,
-        }),
-      ),
-    );
-    await pause();
-    stdin.write("\r"); // 空勾选 = 不支持/清除
-    await pause(150);
-    expect(onDone).toHaveBeenCalledWith({ kind: "thinking-updated", providerId: "deepseek" });
-    expect(thinking).toEqual([{ providerId: "deepseek", levels: undefined }]);
     unmount();
   });
 

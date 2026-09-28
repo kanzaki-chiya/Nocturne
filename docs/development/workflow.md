@@ -60,6 +60,8 @@ pnpm depcheck       # dependency-cruiser 依赖方向检查（modules.md 依赖�
 pnpm build          # tsdown 构建 packages/core/dist
 ```
 
+发布前手动运行 `node scripts/update-models-dev-snapshot.mjs` 更新随版本内置的 models.dev 裁剪快照；检查生成文件的模型数、大小与变更，再执行完整验证。运行时启动不联网，添加服务商或刷新模型列表才更新本地缓存（[config.md](../architecture/config.md)）。
+
 真实 OpenAI 兼容服务冒烟测试与默认测试集分离，不进 `pnpm test`：
 
 ```bash

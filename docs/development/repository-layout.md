@@ -13,6 +13,8 @@ nocturne/
 ├── CHANGELOG.md                 面向用户的版本变化
 ├── package.json                 pnpm workspace 根
 ├── pnpm-workspace.yaml
+├── scripts/
+│   └── update-models-dev-snapshot.mjs  手动更新内置 models.dev 裁剪快照
 ├── tsconfig.base.json
 ├── docs/                        所有正式文档
 ├── packages/
@@ -30,7 +32,8 @@ nocturne/
 │   │   │   ├── tools/           注册表、执行管线、结果预算、图片附件存储
 │   │   │   │   └── builtin/     read、write、edit、grep、glob、shell、task
 │   │   │   ├── permission/      规则求值、权限闸门、Grant 匹配
-│   │   │   ├── config/          配置分层加载、项目信任、Grant 文件读写
+│   │   │   ├── config/          配置分层加载、项目信任、Grant 文件读写、models.dev 缓存与快照
+│   │   │   │   └── models-dev-snapshot.ts  随版本内置的裁剪模型表（由脚本生成）
 │   │   │   ├── hooks/           HookRunner：外部命令 + JSON 契约
 │   │   │   ├── diagnostics/     调试诊断 JSONL 记录与脱敏
 │   │   │   └── platform/        文件系统、子进程、路径（含 spawnPipe）
@@ -92,6 +95,7 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
 ├── providers.json                    向导配置（nctrn setup、/provider，原子写；v0.2）
 ├── credentials.json                  凭据索引：DPAPI 密文或系统密钥库引用，不含明文（v0.2，provider-setup.md）
 ├── recent-models.json                最近使用的模型列表（最多 10 条，原子写；v0.2）
+├── cache/models-dev.json              models.dev 裁剪数据及拉取时间（刷新时原子写；ADR-0025）
 ├── AGENTS.md                         用户级项目指令（可选）
 ├── grants/<workspaceKey>.json        按工作区保存的项目级 Grant（ADR-0008）
 ├── logs/debug-<ts>-<pid>.jsonl       诊断日志（--debug / NOCTURNE_DEBUG，observability.md）

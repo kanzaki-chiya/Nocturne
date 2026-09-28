@@ -102,7 +102,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
 | `/new`、`/clear` | 新建空会话并切换，沿用当前模型、思考档位与权限预设；旧会话仍可恢复，`/clear` 不是清屏 | CLI 注入的 `newSession` 回调 |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
-| `/provider` | 列出服务商：名称、类型、服务地址主机名、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），标记当前会话所用，不显示密钥；TUI 中打开全屏服务商页（[tui.md](tui.md) 第 8 节）。`/provider add` 走与 `nctrn setup --cli` 相同的逐行向导（v0.3 起不再询问模型，保存后提示用 `/model`）；`key <name>` / `refresh <name>` / `thinking <name>` / `remove <name>` 是服务商页操作的快捷方式；`model <名> <模型>` 是「编辑模型」的行式等价（ADR-0024）：逐字段显示 `当前值（来源）`，回车保留、`-` 清除用户编辑——数值为正整数、图片输入 `y`/`n`、推理 `none`/`hidden`/`visible`、思考档位逗号分隔或 `none`（= 空数组）；来源为手写配置层的字段与推理 none 锁定的档位只显示不提问；收集完一次写入，失败打印原因不保存，成功打印「已保存」，见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveSetupProvider` 等 + `runtime.updateProviders` |
+| `/provider` | 列出服务商与来源，不显示密钥；TUI 中打开服务商页。`add` 与 `nctrn setup --cli` 共用向导；`key <name>` / `refresh <name>` / `remove <name>` 为快捷操作。`model <名> <模型>` 逐字段显示 `当前值（来源）`，来源可为 models.dev；回车保留、`-` 清除用户编辑。图片输入和推理接受 `y`/`n`/`-`，推理为否时不询问档位；来源为手写配置的字段只读。成功后写入 `userModels`，详见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveModelSettings()` 等 + `runtime.updateProviders` |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
 
 - 未知命令打印提示（不报错退出）。命令在 Turn 进行中给出"会话忙"提示（`setModel` / `compact` 的前置条件是空闲，见 events.md 第 7 节）。

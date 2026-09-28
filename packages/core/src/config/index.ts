@@ -16,7 +16,6 @@ export {
   refreshUpstreamLimits,
   removeSetupProvider,
   saveSetupProvider,
-  saveSetupThinking,
   saveSetupUserModels,
   setSetupDefaultModel,
   writeProviderSetup,
@@ -31,7 +30,6 @@ export { runProviderModelWizard } from "./wizard.js";
 export {
   runProviderKeyWizard,
   runProviderSetupWizard,
-  runProviderThinkingWizard,
   WizardAbort,
   type SetupWizardDeps,
   type WizardFetchRequest,

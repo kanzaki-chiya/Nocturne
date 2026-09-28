@@ -13,7 +13,6 @@ import {
   listProviderPresets,
   runProviderKeyWizard,
   runProviderSetupWizard,
-  runProviderThinkingWizard,
   WizardAbort,
   type RuntimeConfig,
   type SetupWizardDeps,
@@ -54,14 +53,11 @@ type Pending =
 export type WizardOutcome =
   | { kind: "added"; providerId: string; modelCount: number }
   | { kind: "key-updated"; providerId: string }
-  | { kind: "thinking-updated"; providerId: string }
   | { kind: "cancel" }
   | { kind: "error"; message: string };
 
 export type WizardStart =
-  | { kind: "add"; presetId?: string | undefined }
-  | { kind: "key"; providerId: string }
-  | { kind: "thinking"; providerId: string };
+  { kind: "add"; presetId?: string | undefined } | { kind: "key"; providerId: string };
 
 export interface ProviderWizard {
   state: WizardState;
@@ -216,15 +212,10 @@ export function useProviderWizard(
               providerId: r.providerId,
               modelCount: r.modelCount,
             }))
-          : s.kind === "key"
-            ? runProviderKeyWizard(io, cfg, s.providerId).then((): WizardOutcome => ({
-                kind: "key-updated",
-                providerId: s.providerId,
-              }))
-            : runProviderThinkingWizard(io, cfg, s.providerId).then((): WizardOutcome => ({
-                kind: "thinking-updated",
-                providerId: s.providerId,
-              }));
+          : runProviderKeyWizard(io, cfg, s.providerId).then((): WizardOutcome => ({
+              kind: "key-updated",
+              providerId: s.providerId,
+            }));
       run
         .then((outcome) => {
           setState((st) => ({
@@ -237,9 +228,7 @@ export function useProviderWizard(
                 ? `已保存 ${outcome.providerId}${outcome.modelCount > 0 ? `，${outcome.modelCount} 个模型` : ""}`
                 : outcome.kind === "key-updated"
                   ? `已更新 ${outcome.providerId} 的密钥`
-                  : outcome.kind === "thinking-updated"
-                    ? `已更新 ${outcome.providerId} 的思考档位`
-                    : "",
+                  : "",
           }));
           onDone(outcome);
         })

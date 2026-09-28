@@ -297,7 +297,7 @@ describe("refreshUpstreamLimits", () => {
     await fs.unlink(path.join(home, "providers.json"));
   });
 
-  it("refresh 保留用户声明的思考档位：thinking.levels 与 source:user 不被覆盖", async () => {
+  it("refresh 清理旧服务商思考档位，保留协议格式", async () => {
     const creds = (await createCredentialStore(platform, home, { backend: "memory" })).store;
     const rc = await loadConfig(platform, {
       nocturneHome: home,
@@ -308,8 +308,14 @@ describe("refreshUpstreamLimits", () => {
       ],
     });
     await rc.saveSetupProvider(ENTRY, { key: "sk-refresh" });
-    // 与 /provider thinking 同路径：写 thinking.levels + source:"user"
-    await rc.saveSetupThinking("corp", ["minimal", "low", "medium"]);
+    const setupPath = path.join(home, "providers.json");
+    const before = (await readJson(setupPath)) as {
+      providers: { id: string; thinking?: object }[];
+    };
+    const first = before.providers[0];
+    if (first === undefined) throw new Error("缺少测试服务商");
+    first.thinking = { format: "openrouter", levels: ["low"], source: "user" };
+    await fs.writeFile(setupPath, JSON.stringify(before));
     await rc.refreshUpstreamLimits("corp");
 
     const raw = (await readJson(path.join(home, "providers.json"))) as {
@@ -324,9 +330,9 @@ describe("refreshUpstreamLimits", () => {
     // 上游刷新照常发生（条目 source/upstream + models 更新）
     expect(corp?.source).toBe("upstream");
     expect(corp?.models?.m1?.contextWindow).toBe(999_999);
-    // 但用户声明的思考档位不被覆盖
-    expect(corp?.thinking?.levels).toEqual(["minimal", "low", "medium"]);
-    expect(corp?.thinking?.source).toBe("user");
+    expect(corp?.thinking?.levels).toBeUndefined();
+    expect(corp?.thinking?.source).toBeUndefined();
+    expect(corp?.thinking).toMatchObject({ format: "openrouter" });
     await fs.unlink(path.join(home, "providers.json"));
   });
 });

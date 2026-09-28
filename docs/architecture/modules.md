@@ -105,7 +105,7 @@
 
 ### config
 
-- **负责**：按层级加载配置（内置默认 < 用户 < 项目 < 环境变量 < 命令行参数）；校验；记录每个配置值的来源；项目配置的信任判定（`trustedWorkspaces`）；按工作区读写项目 Grant 文件；读取 Provider 凭据所需的环境变量。
+- **负责**：按层级加载配置（模型字段加入内置目录 < models.dev < 上游 < 用户编辑 < 手写配置）；校验并标注来源；项目配置的信任判定；按工作区读写项目 Grant 文件；读取 Provider 凭据所需的环境变量；在 config 层读取内置 models.dev 快照、原子缓存和显式刷新。config 只产生模型字段声明，Provider 层负责解释能力与档位；依赖方向仍为 config → platform/protocol，Provider 装配消费 config 结果。
 - **不负责**：解释配置含义（各模块自己消费自己的配置段）；权限求值（permission 只接收已合并、已标注来源与信任状态的规则与 Grant 集合）。
 - **公开接口**：`loadConfig(platform, { cliArgs })` → `RuntimeConfig`（`base` + `forWorkspace(workspaceRoot)`，见 [config.md](config.md) 第 6 节）。v0.2 增补向导写入与凭据读取（`saveSetupProvider`、`setCredential`、`removeSetupProvider`、`describeProviders`、`credentials`），以及 `runtime.updateProviders`，见 [provider-setup.md](provider-setup.md) 第 6 节。ADR-0022 增补 `shellSetting()` / `setShellSetting(kind, path?)`——`settings.json` 的读取与原子写。
 - **依赖**：protocol、platform。

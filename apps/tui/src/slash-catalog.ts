@@ -46,7 +46,6 @@ export const PROVIDER_SUBCOMMANDS: readonly { name: string; summary: string }[] 
   { name: "add", summary: "添加服务商" },
   { name: "key", summary: "更新密钥" },
   { name: "refresh", summary: "刷新模型列表" },
-  { name: "thinking", summary: "调整思考档位" },
   { name: "model", summary: "编辑模型设置" },
   { name: "remove", summary: "删除服务商" },
 ];

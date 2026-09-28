@@ -15,34 +15,27 @@ import type { ModelCapabilities, ModelInfo } from "./types.js";
 
 /**
  * 可用档位声明链（ADR-0018 第 2 节），返回 undefined = 无可用档位：
- * 逐模型声明（含显式空数组 = 明确无档位）> 服务商级用户声明
- * （thinking.levels）> 能力标记推导（reasoning≠"none" → 全档阶梯）。
+ * 推理为 none 时无档位；否则逐模型声明（含空数组）> 推导全档。
  */
 export function resolveReasoningEfforts(
   capabilities: Pick<ModelCapabilities, "reasoning" | "reasoningEffort">,
-  providerLevels: readonly string[] | undefined,
 ): ReasoningEffortLevel[] | undefined {
+  if (capabilities.reasoning === "none") return undefined;
   const perModel = normalizeReasoningEffortLevels(capabilities.reasoningEffort);
   if (perModel !== undefined) return perModel;
-  const provider = normalizeReasoningEffortLevels(providerLevels);
-  if (provider !== undefined && provider.length > 0) return provider;
-  if (capabilities.reasoning !== "none") return [...REASONING_EFFORT_LEVELS];
-  return undefined;
+  return [...REASONING_EFFORT_LEVELS];
 }
 
 /**
- * 把档位解析结果烙进 ModelInfo：逐模型声明缺失时回填服务商声明或
- * 能力标记推导的阶梯；已声明（含空数组）时只归一化，不覆盖。
+ * 把档位解析结果烙进 ModelInfo：逐模型声明缺失时按能力推导全档；
+ * 已声明（含空数组）时只归一化，不覆盖。
  * 注意：capabilities.reasoningEffort 在声明空间允许任意字符串，
  * 这里归一化为合法的 ReasoningEffortLevel[]。
  */
-export function withReasoningEfforts(
-  model: ModelInfo,
-  providerLevels: readonly string[] | undefined,
-): ModelInfo {
-  const efforts = resolveReasoningEfforts(model.capabilities, providerLevels);
-  if (efforts === undefined) return model;
-  return { ...model, capabilities: { ...model.capabilities, reasoningEffort: efforts } };
+export function withReasoningEfforts(model: ModelInfo): ModelInfo {
+  const caps = model.capabilities;
+  const efforts = resolveReasoningEfforts(caps);
+  return { ...model, capabilities: { ...caps, reasoningEffort: efforts } };
 }
 
 /**

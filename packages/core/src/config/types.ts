@@ -76,10 +76,8 @@ export interface ProviderEntryConfig {
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
   /**
-   * 思考兼容开关（ADR-0018；对齐 provider 的 ProviderThinkingOptions）：
-   * format 由预设自动填写（openrouter → reasoning.effort），levels 是
-   * "用户声明"的服务商级可用档位（向导勾选，source:"user"），budgets
-   * 覆盖 anthropic 档位预算表。config 不解释这些字段，装配处透传给适配器。
+   * 思考参数格式由预设填写；budgets 覆盖 Anthropic 默认预算。
+   * levels/source 仅为旧配置兼容读取，运行时忽略并在写回时清除。
    */
   thinking?:
     | {
@@ -116,6 +114,8 @@ export interface TurnOverrides {
 
 /** 各层配置文件共用的 schema（config.md 第 2 节）；程序从不改写这些文件 */
 export interface ConfigFile {
+  /** false 时只使用本地 models.dev 数据，不联网刷新 */
+  modelsDev?: false | undefined;
   model?: string | undefined;
   /** 会话默认思考档位（ADR-0018 第 4 节）：七档中性值之一 */
   reasoningEffort?: ReasoningEffort | undefined;
@@ -147,6 +147,7 @@ export interface ConfigFile {
 
 /** 一层合并后的结果（config.md 第 1 节） */
 export interface ResolvedConfig {
+  providerThinkingWarnings?: string[] | undefined;
   model?: string | undefined;
   permissionPreset?: PermissionPresetName | undefined;
   /** 会话默认思考档位（ADR-0018）：未配置时 undefined（off 语义） */
@@ -301,17 +302,14 @@ export type UpstreamFetch = (
 
 /** 单个字段生效值的来源标注（编辑页/CLI 问答显示用） */
 export type ModelFieldSource =
+  | { kind: "modelsDev" }
   | { kind: "upstream" }
   | { kind: "user" }
   | { kind: "config"; layer: "user" | "project" | "env" | "cli"; path?: string | undefined }
   | { kind: "builtin" }
   | { kind: "default" }
-  /** 仅 reasoningEffort：服务商级 thinking.levels */
-  | { kind: "provider_levels" }
   /** 仅 reasoningEffort：由 reasoning ≠ "none" 推导的全档 */
-  | { kind: "derived" }
-  /** 仅 reasoningEffort：显式推理 none 锁定为不可切换 */
-  | { kind: "reasoning_none" };
+  | { kind: "derived" };
 
 /** 一个可编辑字段：生效值、来源、可否在编辑页修改、当前用户编辑值 */
 export interface ModelField<T> {
@@ -384,15 +382,8 @@ export interface RuntimeConfig {
   ): Promise<void>;
   /** 更新密钥（经 credentials.set；缓存失效后下一次请求即用新密钥） */
   setCredential(providerId: string, key: string): Promise<void>;
-  /**
-   * 写入向导条目的服务商级思考档位（/provider thinking；ADR-0018）：
-   * levels 非空时写 thinking.levels 并标 source:"user"；undefined 时
-   * 清除用户声明（保留 format）。条目不在 providers.json 时拒绝。
-   */
-  saveSetupThinking(
-    providerId: string,
-    levels: readonly ReasoningEffortLevel[] | undefined,
-  ): Promise<void>;
+  /** 添加/刷新模型列表时更新 models.dev 缓存；失败返回一行提示。 */
+  refreshModelsDev(): Promise<string | undefined>;
   /**
    * 模型设置编辑（ADR-0024）：按字段返回生效值/来源/可编辑标记的清单
    * （只含合并结果清单内的模型）。workspaceRoot 决定项目层是否参与。
@@ -420,7 +411,7 @@ export interface RuntimeConfig {
    */
   describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>;
   /** /provider refresh：重新从上游获取模型列表与限额并写回 providers.json */
-  refreshUpstreamLimits(providerId: string): Promise<void>;
+  refreshUpstreamLimits(providerId: string): Promise<string | undefined>;
   /** 把默认模型（"provider/model"）写入 providers.json 的 model 字段 */
   setDefaultModel(model: string): Promise<void>;
 
@@ -442,6 +433,8 @@ export interface RuntimeConfig {
 }
 
 export interface LoadConfigOptions {
+  /** 测试注入 models.dev fetch；默认使用全局 fetch。 */
+  modelsDevFetch?: typeof fetch | undefined;
   cliArgs?: CliConfigArgs | undefined;
   /** 测试注入；缺省取 platform.nocturneHome() */
   nocturneHome?: string | undefined;

@@ -16,7 +16,7 @@ import type {
   Provider,
   ProviderThinkingOptions,
 } from "../types.js";
-import { normalizeReasoningEffortLevels, type Diagnostics } from "../../protocol/index.js";
+import { type Diagnostics } from "../../protocol/index.js";
 import {
   mapPart,
   planToolChoice,
@@ -110,14 +110,9 @@ export function createOpenAICompatibleProvider(
     (_m, c: string) => c.toUpperCase(),
   );
 
-  // 服务商级档位声明（thinking.levels，用户声明）；清单内模型逐条套用声明链
-  const defaultEfforts = normalizeReasoningEffortLevels(config.thinking?.levels);
   const thinkingFormat = config.thinking?.format ?? "openai";
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
-    withReasoningEfforts(
-      resolveModelInfo({ provider: config.id, model: id }, config.models?.[id]),
-      defaultEfforts,
-    ),
+    withReasoningEfforts(resolveModelInfo({ provider: config.id, model: id }, config.models?.[id])),
   );
 
   return {
@@ -125,7 +120,6 @@ export function createOpenAICompatibleProvider(
     type: "openai-compatible",
     strictModels: config.allowUndeclaredModels !== true,
     models: () => modelList,
-    defaultReasoningEfforts: defaultEfforts,
 
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
       if ((await resolveKey()) === undefined) {

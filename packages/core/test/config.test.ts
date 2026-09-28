@@ -433,7 +433,7 @@ describe("思考档位 schema（ADR-0018）", () => {
     await writeJson(path.join(home, "config.json"), { providers: [entry] });
     const rc = await load();
     const p = rc.base.providers[0];
-    expect(p?.thinking?.levels).toEqual(["low", "high"]);
+    expect(p?.thinking?.levels).toBeUndefined();
     expect(p?.thinking?.format).toBe("openrouter");
     expect(p?.thinking?.budgets?.max).toBe(40000);
     await fs.unlink(path.join(home, "config.json"));

@@ -249,8 +249,6 @@ function useProviderOps(provider: ProviderBridge | undefined): {
           );
         } else if (outcome.kind === "key-updated") {
           setNotice(`已更新 ${outcome.providerId} 的密钥`);
-        } else if (outcome.kind === "thinking-updated") {
-          setNotice(`已更新 ${outcome.providerId} 的思考档位`);
         } else if (outcome.kind === "error") {
           setNotice(`! ${outcome.message ?? ""}`);
         }
@@ -273,18 +271,16 @@ function useProviderOps(provider: ProviderBridge | undefined): {
         wizard.start({ kind: "key", providerId }, afterWizard);
         return;
       }
-      if (op === "thinking") {
-        wizard.start({ kind: "thinking", providerId }, afterWizard);
-        return;
-      }
       // refresh：同步执行（页面 busyText 显示进行中）
       void (async () => {
         setBusyText(`正在获取 ${providerId} 的模型列表…`);
         try {
-          await provider.config.refreshUpstreamLimits(providerId);
+          const warning = await provider.config.refreshUpstreamLimits(providerId);
           provider.updateProviders(await provider.reloadConfig());
           await reload();
-          setNotice(`已刷新 ${providerId} 的上游模型列表`);
+          setNotice(
+            `已刷新 ${providerId} 的上游模型列表${warning !== undefined ? `；${warning}` : ""}`,
+          );
         } catch (e) {
           setNotice(`! ${errText(e)}`);
         } finally {
@@ -1332,7 +1328,7 @@ function SessionApp({
     [alt],
   );
 
-  /** 主屏 /provider key|thinking 弹层（add 已改为服务商页内嵌） */
+  /** 主屏 /provider key 弹层（add 已改为服务商页内嵌） */
   const openProviderWizard = useCallback(
     (start: ProviderWizardStart): void => {
       if (provider === undefined) {
@@ -1348,9 +1344,6 @@ function SessionApp({
           } else if (outcome.kind === "key-updated") {
             provider.updateProviders(await provider.reloadConfig());
             pushLine(`已更新 ${outcome.providerId} 的密钥`);
-          } else if (outcome.kind === "thinking-updated") {
-            provider.updateProviders(await provider.reloadConfig());
-            pushLine(`已更新 ${outcome.providerId} 的思考档位`);
           } else if (outcome.kind === "error") {
             pushLine(`! ${outcome.message}`);
           }
@@ -2193,13 +2186,7 @@ function SessionApp({
       />
     ) : wizardOverlay !== undefined ? (
       <WizardView
-        title={
-          wizardOverlay.kind === "add"
-            ? "添加服务商"
-            : wizardOverlay.kind === "key"
-              ? `更新密钥 ${wizardOverlay.providerId}`
-              : `思考档位 ${wizardOverlay.providerId}`
-        }
+        title={wizardOverlay.kind === "add" ? "添加服务商" : `更新密钥 ${wizardOverlay.providerId}`}
         state={wizard.state}
         active
         width={width}

@@ -59,7 +59,7 @@ export const providerEntrySchema = z
     allowUndeclaredModels: z.boolean().optional(),
     providerOptions: z.record(z.string(), z.unknown()).optional(),
     headers: z.record(z.string(), z.string()).optional(),
-    // 思考兼容开关（ADR-0018）：format 由预设写死；levels 用户声明；
+    // 思考兼容开关（ADR-0018）：format 由预设写死；levels/source 仅为旧文件读取；
     // budgets 覆盖 anthropic 档位预算表（正整数 token 数）
     thinking: z
       .object({
@@ -137,6 +137,7 @@ const mcpServerEntrySchema = z.object({
 });
 
 const configFileSchema = z.object({
+  modelsDev: z.literal(false).optional(),
   model: z.string().min(1).optional(),
   /** 会话默认思考档位（ADR-0018） */
   reasoningEffort: reasoningEffortSchema.optional(),

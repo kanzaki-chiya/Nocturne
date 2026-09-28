@@ -68,41 +68,28 @@ describe("档位常量", () => {
 // ── 声明链（ADR-0018 §2）─────────────────────────────────
 
 describe("resolveReasoningEfforts 声明链", () => {
-  it("逐模型声明（含显式空数组）优先于服务商声明与能力推导", () => {
-    // 逐模型声明优先
+  it("推理为否无档位；支持推理时逐模型声明优先，否则推导全档", () => {
     expect(
-      resolveReasoningEfforts({ reasoning: "none", reasoningEffort: ["low", "high"] }, ["minimal"]),
+      resolveReasoningEfforts({ reasoning: "none", reasoningEffort: ["low"] }),
+    ).toBeUndefined();
+    expect(
+      resolveReasoningEfforts({ reasoning: "visible", reasoningEffort: ["low", "high"] }),
     ).toEqual(["low", "high"]);
-    // 显式空数组 = 明确无档位（不被服务商声明/推导覆盖）
-    expect(resolveReasoningEfforts({ reasoning: "visible", reasoningEffort: [] }, ["low"])).toEqual(
-      [],
-    );
-    // 服务商声明 > 能力推导
-    expect(resolveReasoningEfforts({ reasoning: "visible" }, ["minimal", "low"])).toEqual([
-      "minimal",
-      "low",
-    ]);
-    // 能力标记推导：reasoning ≠ none → 全档
-    expect(resolveReasoningEfforts({ reasoning: "visible" }, undefined)).toEqual([
-      ...REASONING_EFFORT_LEVELS,
-    ]);
-    expect(resolveReasoningEfforts({ reasoning: "hidden" }, undefined)).toEqual([
-      ...REASONING_EFFORT_LEVELS,
-    ]);
-    // 无声明 → undefined（不可切换）
-    expect(resolveReasoningEfforts({ reasoning: "none" }, undefined)).toBeUndefined();
-    expect(resolveReasoningEfforts({ reasoning: "none" }, [])).toBeUndefined();
+    expect(resolveReasoningEfforts({ reasoning: "visible", reasoningEffort: [] })).toEqual([]);
+    expect(resolveReasoningEfforts({ reasoning: "visible" })).toEqual([...REASONING_EFFORT_LEVELS]);
+    expect(resolveReasoningEfforts({ reasoning: "hidden" })).toEqual([...REASONING_EFFORT_LEVELS]);
+    expect(resolveReasoningEfforts({ reasoning: "none" })).toBeUndefined();
   });
 
   it("同系列不同型号的最高档按各自声明（gpt-5.5 到 xhigh 的论据形态）", () => {
-    const gpt55 = resolveReasoningEfforts(
-      { reasoning: "none", reasoningEffort: ["low", "medium", "high", "xhigh"] },
-      ["max"],
-    );
-    const gpt56 = resolveReasoningEfforts(
-      { reasoning: "none", reasoningEffort: ["low", "medium", "high", "xhigh", "max"] },
-      ["max"],
-    );
+    const gpt55 = resolveReasoningEfforts({
+      reasoning: "visible",
+      reasoningEffort: ["low", "medium", "high", "xhigh"],
+    });
+    const gpt56 = resolveReasoningEfforts({
+      reasoning: "visible",
+      reasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+    });
     expect(gpt55).not.toContain("max");
     expect(gpt56).toContain("max");
   });
@@ -337,7 +324,7 @@ describe("Runtime：思考档位", () => {
     const caps = (efforts: ReasoningEffortLevel[]): ModelInfo["capabilities"] => ({
       toolCalls: true,
       parallelToolCalls: true,
-      reasoning: "none",
+      reasoning: "visible",
       imageInput: false,
       promptCache: false,
       reasoningEffort: efforts,

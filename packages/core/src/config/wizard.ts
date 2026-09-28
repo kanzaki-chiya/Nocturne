@@ -8,11 +8,7 @@
  * 与环境变量读取全部由调用方注入；fetchModels 抛出的错误可携带
  * 数字 status（ProviderUpstreamError），401/403 时提示密钥可能无效。
  */
-import {
-  isReasoningEffortLevel,
-  REASONING_EFFORT_LEVELS,
-  type ReasoningEffortLevel,
-} from "../protocol/index.js";
+import { isReasoningEffortLevel, REASONING_EFFORT_LEVELS } from "../protocol/index.js";
 import { modelFieldSourceText } from "./model-settings.js";
 import type {
   ModelOverrideShape,
@@ -240,33 +236,6 @@ export async function runProviderSetupWizard(
     }
   }
 
-  // 思考档位（ADR-0019 第 2 条，交互形式调整；ADR-0018 规则不变）：
-  // 上游 /models 未声明思考能力时，单步多选勾选档位——首项"不支持
-  // 思考强度"与其余档位互斥，什么都不勾同样等于不支持。勾选结果写
-  // 在服务商条目 thinking.levels（source:"user"），作为该服务商所有
-  // 模型的默认档位——逐模型声明仍可覆盖（providers.md 第 3 节）
-  const upstreamDeclaresThinking = upstreamModels.some(
-    (m) => m.capabilities?.reasoning !== undefined && m.capabilities.reasoning !== "none",
-  );
-  let thinkingLevels: ReasoningEffortLevel[] | undefined;
-  if (!upstreamDeclaresThinking) {
-    const picked = await io.chooseMulti(
-      "思考强度档位：",
-      ["不支持思考强度", ...REASONING_EFFORT_LEVELS],
-      {
-        hint: "上游未声明思考能力；空格勾选，Enter 确认（不勾或勾第一项 = 不支持）",
-        exclusiveIndex: 0,
-      },
-    );
-    const levels = picked.includes(0)
-      ? []
-      : picked
-          .map((i) => REASONING_EFFORT_LEVELS[i - 1])
-          .filter((l): l is ReasoningEffortLevel => l !== undefined);
-    if (levels.length > 0) thinkingLevels = levels;
-    io.step(levels.length > 0 ? `思考档位 ${levels.join(" / ")}` : "不支持思考强度");
-  }
-
   // models 字段写入上游声明的能力/价格/限额（provider-setup.md 第 7 节）
   const models: Record<string, ModelOverrideShape> = {};
   for (const m of upstreamModels) {
@@ -279,11 +248,9 @@ export async function runProviderSetupWizard(
     };
   }
 
-  // thinking 兼容开关：format 由预设自动填写（用户不需要选）；
-  // levels 只在用户勾选时写入并标 source:"user"
+  // thinking.format 是协议格式开关；能力和档位只按模型声明。
   const thinking: ProviderEntryConfig["thinking"] = {
     ...(preset.thinkingFormat !== undefined ? { format: preset.thinkingFormat } : {}),
-    ...(thinkingLevels !== undefined ? { levels: thinkingLevels, source: "user" as const } : {}),
   };
 
   const modelCount = upstreamModels.length;
@@ -303,6 +270,9 @@ export async function runProviderSetupWizard(
       ...(key !== undefined ? { key } : {}),
     },
   );
+
+  const modelsDevWarning = await config.refreshModelsDev();
+  if (modelsDevWarning !== undefined) io.print(`! ${modelsDevWarning}`);
 
   io.print(`已保存 ${providerId}${modelCount > 0 ? `，${modelCount} 个模型` : ""}`);
   return { providerId, modelCount };
@@ -334,37 +304,6 @@ export async function runProviderKeyWizard(
   io.print(`密钥已交给 ${backendLabel(backend)} 加密保存`);
 }
 
-/**
- * /provider thinking <name>（provider-setup.md 第 1 节；ADR-0019 第 2 条）：
- * 对已配置的服务商重走"思考档位"步骤——单步多选，首项"不支持思考强度"
- * 互斥；空勾选或勾第一项 → 清除用户声明（模型级声明与能力标记推导不受影响）。
- */
-export async function runProviderThinkingWizard(
-  io: WizardIo,
-  config: RuntimeConfig,
-  providerId: string,
-): Promise<void> {
-  const picked = await io.chooseMulti(
-    `服务商 ${providerId} 的思考档位：`,
-    ["不支持思考强度", ...REASONING_EFFORT_LEVELS],
-    {
-      hint: "空格勾选，Enter 确认；不勾或勾第一项 = 清除声明",
-      exclusiveIndex: 0,
-    },
-  );
-  const levels = picked.includes(0)
-    ? []
-    : picked
-        .map((i) => REASONING_EFFORT_LEVELS[i - 1])
-        .filter((l): l is ReasoningEffortLevel => l !== undefined);
-  await config.saveSetupThinking(providerId, levels.length > 0 ? levels : undefined);
-  io.print(
-    levels.length > 0
-      ? `已保存 ${providerId} 的思考档位：${levels.join(" / ")}（该服务商所有模型的默认档位）`
-      : `已清除 ${providerId} 的思考档位声明`,
-  );
-}
-
 // ── 模型设置编辑（ADR-0024 第 4 节） ─────────────────────
 
 const MODEL_FIELD_LABELS = {
@@ -388,6 +327,7 @@ const MODEL_FIELD_ORDER: readonly ModelFieldKey[] = [
 /** 当前值的一行显示（用户未声明时显示生效值；未声明显示 "—"） */
 function modelFieldText(key: ModelFieldKey, value: unknown): string {
   if (value === undefined) return "—";
+  if (key === "reasoning") return value === "none" ? "否" : "是";
   if (key === "imageInput") return value === true ? "是" : "否";
   if (key === "reasoningEffort")
     return Array.isArray(value) ? (value.length > 0 ? value.join(",") : "不支持") : "—";
@@ -412,7 +352,7 @@ function parseModelField(key: ModelFieldKey, input: string): unknown {
       return undefined;
     }
     case "reasoning":
-      return s === "none" || s === "hidden" || s === "visible" ? s : undefined;
+      return s.toLowerCase() === "y" ? "visible" : s.toLowerCase() === "n" ? "none" : undefined;
     case "reasoningEffort": {
       if (s.toLowerCase() === "none") return [];
       const levels = s
@@ -447,6 +387,7 @@ export async function runProviderModelWizard(
   if (view.readonly) {
     if (view.readonlyHint !== undefined) io.print(`! ${view.readonlyHint}`);
     for (const key of MODEL_FIELD_ORDER) {
+      if (key === "reasoningEffort" && view.fields.reasoning.value === "none") continue;
       const f = view.fields[key];
       io.print(
         `  ${MODEL_FIELD_LABELS[key]}：${modelFieldText(key, f.value)}（${modelFieldSourceText(f.source)}）`,
@@ -456,6 +397,11 @@ export async function runProviderModelWizard(
   }
   const patch: ModelSettingsPatch = {};
   for (const key of MODEL_FIELD_ORDER) {
+    const effectiveReasoning =
+      patch.reasoning === null
+        ? view.fields.reasoning.lowerValue
+        : (patch.reasoning ?? view.fields.reasoning.value);
+    if (key === "reasoningEffort" && effectiveReasoning === "none") continue;
     const f = view.fields[key];
     const shown = `${modelFieldText(key, f.userValue ?? f.value)}（${modelFieldSourceText(f.source)}）`;
     if (!f.editable) {
@@ -469,7 +415,7 @@ export async function runProviderModelWizard(
           : key === "imageInput"
             ? "y / n；- 清除用户编辑"
             : key === "reasoning"
-              ? "none / hidden / visible；- 清除用户编辑"
+              ? "y = 是 / n = 否；- 清除用户编辑"
               : key === "reasoningEffort"
                 ? `逗号分隔（${REASONING_EFFORT_LEVELS.join(",")}）或 none = 不支持；- 清除用户编辑`
                 : "正整数；- 清除用户编辑",

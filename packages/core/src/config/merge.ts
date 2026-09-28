@@ -17,8 +17,8 @@ import type {
   TurnOverrides,
 } from "./types.js";
 
-/** 层的身份（模型字段来源标注与显式 none 规则用；ADR-0024 第 2 节） */
-export type LayerKind = "setup" | "userModels" | "user" | "project" | "env" | "cli";
+/** 层的身份（模型字段来源标注用；ADR-0024/0025） */
+export type LayerKind = "modelsDev" | "setup" | "userModels" | "user" | "project" | "env" | "cli";
 
 export interface MergeLayer {
   /**
@@ -48,7 +48,7 @@ export interface FieldDecl {
   value: unknown;
 }
 
-/** 逐模型逐字段的来源表（编辑页来源标注 / 显式 none 判定共用） */
+/** 逐模型逐字段的来源表（编辑页来源标注用） */
 export interface ModelFieldOrigins {
   /** providerId → modelId → 字段名（顶层字段与 capabilities.<k> 扁平记录）→ 声明栈 */
   fields: Map<string, Map<string, Map<string, FieldDecl[]>>>;
@@ -56,8 +56,6 @@ export interface ModelFieldOrigins {
   providers: Map<string, FieldOrigin>;
   /** providerId → modelId → 声明过该模型的层集合（剔除纯合成层模型的依据） */
   declaredLayers: Map<string, Map<string, Set<LayerKind>>>;
-  /** 显式 none 规则锁定的 "providerId/modelId"（reasoningEffort 被规则置空） */
-  noneLocked: Set<string>;
 }
 
 export interface MergeResult {
@@ -188,13 +186,15 @@ function mergeProviders(
   }
 }
 
-/** 警告文案中的层指代（显式 none 冲突用） */
+/** 警告文案中的层指代（手写配置矛盾用） */
 function layerLabel(origin: FieldOrigin): string {
   switch (origin.kind) {
     case "userModels":
       return "providers.json 的用户编辑";
     case "setup":
       return origin.path ?? "providers.json";
+    case "modelsDev":
+      return "models.dev";
     case "user":
       return origin.path ?? "config.json";
     case "project":
@@ -229,7 +229,6 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     fields: new Map(),
     providers: new Map(),
     declaredLayers: new Map(),
-    noneLocked: new Set(),
   };
 
   for (const layer of layers) {
@@ -245,6 +244,13 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
       out.rules.push({ rule, origin: ruleOrigin(kind) });
     }
     if (file.providers !== undefined) {
+      for (const entry of file.providers) {
+        if (entry.thinking?.levels !== undefined) {
+          out.providerThinkingWarnings ??= [];
+          if (!out.providerThinkingWarnings.includes(entry.id))
+            out.providerThinkingWarnings.push(entry.id);
+        }
+      }
       mergeProviders(providers, file.providers, layer, info);
     }
     // hooks：按点位追加（高层条目排在其后，hooks.md 第 2 节）
@@ -291,30 +297,13 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     if (touched) providers.set(providerId, { ...entry, models: kept });
   }
 
-  // 显式 none（ADR-0024 第 2 节）：生效 reasoning==="none" 且来源是
-  // userModels 或手写层时，档位锁定为空数组（交给 ADR-0018 链的
-  // "逐模型显式空数组"处理）——两类冲突例外：
-  //   用户编辑 none + 手写非空档位 → 手写优先，保留档位并警告；
-  //   手写 reasoning=none + 手写非空档位 → 档位置空并警告。
+  // 手写配置自身同时声明推理 none 与非空档位时，推理为准并报告矛盾。
   for (const [providerId, entry] of providers) {
-    if (entry.models === undefined) continue;
     const fields = info.fields.get(providerId);
-    const models = { ...entry.models };
-    let touched = false;
-    const lock = (modelId: string, model: ModelOverrideShape): void => {
-      // 不就地改——layer file 对象在 base 与工作区两次合并间共享
-      models[modelId] = {
-        ...model,
-        capabilities: { ...model.capabilities, reasoningEffort: [] },
-      };
-      info.noneLocked.add(`${providerId}/${modelId}`);
-    };
-    for (const [modelId, model] of Object.entries(entry.models)) {
+    for (const [modelId, model] of Object.entries(entry.models ?? {})) {
       if (model.capabilities?.reasoning !== "none") continue;
       const rSrc = fields?.get(modelId)?.get("capabilities.reasoning")?.at(-1)?.origin;
-      if (rSrc === undefined || (rSrc.kind !== "userModels" && !isConfigKind(rSrc.kind))) {
-        continue;
-      }
+      if (rSrc === undefined || !isConfigKind(rSrc.kind)) continue;
       const effort = model.capabilities.reasoningEffort;
       const eSrc = fields?.get(modelId)?.get("capabilities.reasoningEffort")?.at(-1)?.origin;
       if (
@@ -323,17 +312,6 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
         eSrc !== undefined &&
         isConfigKind(eSrc.kind)
       ) {
-        if (rSrc.kind === "userModels") {
-          // 手写配置永远优先：档位保留；警告说明 userModels 的 none 未锁定档位
-          out.warnings.push(
-            `providers.json 的用户编辑将服务商 ${providerId} 的模型 ${modelId} 推理设为 none，` +
-              `但 ${layerLabel(eSrc)} 声明了思考档位——按手写配置保留档位`,
-          );
-          continue;
-        }
-        // 手写配置自身矛盾：显式 none 优先，档位置空 + 警告
-        lock(modelId, model);
-        touched = true;
         const where =
           rSrc.kind === eSrc.kind && rSrc.path === eSrc.path
             ? layerLabel(rSrc)
@@ -341,12 +319,8 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
         out.warnings.push(
           `${where} 中服务商 ${providerId} 的模型 ${modelId} 推理为 none 却声明了思考档位，已按不可切换处理`,
         );
-        continue;
       }
-      lock(modelId, model);
-      touched = true;
     }
-    if (touched) providers.set(providerId, { ...entry, models });
   }
 
   // ADR-0022：shellPath 是给指定种类换可执行文件用的；单独存在且
@@ -362,7 +336,11 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     );
   }
 
-  out.providers = [...providers.values()];
+  out.providers = [...providers.values()].map((entry) => {
+    if (entry.thinking === undefined) return entry;
+    const { levels: _levels, source: _source, ...thinking } = entry.thinking;
+    return { ...entry, thinking };
+  });
   out.mcpServers = [...mcpServers.entries()].map(([name, v]) => ({
     name,
     origin: v.origin,

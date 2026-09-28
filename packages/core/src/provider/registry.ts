@@ -45,11 +45,24 @@ export function applyModelOverride(
 
 /** 合并目录项与覆盖项，生成 ModelInfo */
 export function resolveModelInfo(ref: ModelRef, override: ModelOverride | undefined): ModelInfo {
+  const builtin = BUILTIN_MODEL_CATALOG[ref.provider]?.[ref.model];
   const base: ModelInfo = {
     ref,
-    ...(BUILTIN_MODEL_CATALOG[ref.provider]?.[ref.model] ?? DEFAULT_MODEL_FALLBACK),
+    ...(builtin ?? DEFAULT_MODEL_FALLBACK),
   };
-  return applyModelOverride(base, override);
+  const inferred =
+    builtin === undefined &&
+    override?.capabilities?.reasoning === undefined &&
+    (override?.capabilities?.reasoningEffort?.length ?? 0) > 0;
+  return applyModelOverride(
+    inferred
+      ? {
+          ...base,
+          capabilities: { ...base.capabilities, reasoning: "visible" },
+        }
+      : base,
+    override,
+  );
 }
 
 export function createProviderRegistry(
@@ -72,9 +85,8 @@ export function createProviderRegistry(
       const configured = provider.models().find((m) => m.ref.model === ref.model);
       const base = configured ?? resolveModelInfo(ref, undefined);
       const merged = applyModelOverride(base, modelOverrides[ref.provider]?.[ref.model]);
-      // 可用档位声明链（ADR-0018）：清单内模型适配器已解析（幂等）；
-      // 清单外模型在此套用服务商声明 / 能力标记推导
-      const model = withReasoningEfforts(merged, provider.defaultReasoningEfforts);
+      // 清单内模型适配器已解析（幂等）；清单外模型按逐模型能力推导档位。
+      const model = withReasoningEfforts(merged);
       return { provider, model };
     },
     providers: () => [...byId.values()],

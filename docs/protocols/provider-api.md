@@ -49,7 +49,7 @@ interface ModelCapabilities {
 
 能力是数据，不是代码分支的依据名单。缺失的能力按保守值处理（不支持）。
 
-`ReasoningEffortLevel` 为 `"minimal" | "low" | "medium" | "high" | "xhigh" | "max"`，加上恒可用的 `"off"` 构成 `ReasoningEffort` 七档（常量定义在 protocol）。`reasoningEffort` 写的是**已解析的可用档位集合**——逐模型声明 > 服务商级 `thinking.levels`（用户声明）> 能力标记推导（`reasoning ≠ "none"` → 标准六档）的优先级折叠在 Provider 构造/解析时完成（[ADR-0018](../decisions/ADR-0018-reasoning-effort.md) 第 2 节）。
+`ReasoningEffortLevel` 为 `"minimal" | "low" | "medium" | "high" | "xhigh" | "max"`，加上恒可用的 `"off"` 构成 `ReasoningEffort` 七档（常量定义在 protocol）。`reasoningEffort` 写的是**已解析的可用档位集合**：支持推理时取逐模型声明，没有声明则推导标准六档；不支持推理时没有档位。没有任何层声明 `reasoning` 但有非空逐模型档位声明时，视为支持推理。服务商级 `thinking.levels` 不再生效（[ADR-0025](../decisions/ADR-0025-per-model-reasoning.md)）。
 
 ## 3. 请求
 

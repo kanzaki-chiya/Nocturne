@@ -33,7 +33,10 @@ function contextText(n: number | undefined): string {
 
 /** 能力标记：R = 推理（≠none），I = 图片输入 */
 function flagsText(view: ModelSettingsView): string {
-  const r = view.fields.reasoning.value !== "none" ? "R" : "·";
+  const r =
+    view.fields.reasoning.value === "visible" || view.fields.reasoning.value === "hidden"
+      ? "R"
+      : "·";
   const i = view.fields.imageInput.value === true ? "I" : "·";
   return `${r}${i}`;
 }
@@ -195,7 +198,7 @@ const TEXT_FIELDS: ReadonlySet<FieldKey> = new Set([
 const CYCLE_FIELDS: ReadonlySet<FieldKey> = new Set(["imageInput", "reasoning"]);
 
 type TriState = "follow" | "true" | "false";
-type ReasoningDraft = "follow" | "none" | "hidden" | "visible";
+type ReasoningDraft = "follow" | "yes" | "no";
 
 interface Draft {
   displayName: string;
@@ -215,7 +218,12 @@ function initDraft(view: ModelSettingsView): Draft {
       f.maxOutputTokens.userValue !== undefined ? String(f.maxOutputTokens.userValue) : "",
     imageInput:
       f.imageInput.userValue === undefined ? "follow" : f.imageInput.userValue ? "true" : "false",
-    reasoning: f.reasoning.userValue ?? "follow",
+    reasoning:
+      f.reasoning.userValue === undefined
+        ? "follow"
+        : f.reasoning.userValue === "none"
+          ? "no"
+          : "yes",
     reasoningEffort: f.reasoningEffort.userValue ?? "follow",
   };
 }
@@ -232,15 +240,19 @@ function scalarText(v: unknown): string {
 /**
  * 字段行当前值（tui.md §8）：
  * - 只读字段（config 来源）：直接显示生效值，不出现「跟随」；
- * - reasoning_none 锁定的档位行：显示「—」（来源列已说明原因）；
  * - 可编辑字段「跟随」：无用户编辑时显示生效值 field.value，
  *   用户改回跟随/清空时显示回落值 field.lowerValue。
  */
 function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>): string {
-  if (field.source.kind === "reasoning_none") return "—";
-  if (!field.editable) return scalarText(field.value);
+  const show = (value: unknown): string =>
+    key === "reasoning" && value !== undefined
+      ? value === "none"
+        ? "否"
+        : "是"
+      : scalarText(value);
+  if (!field.editable) return show(field.value);
   const followBase = field.userValue !== undefined ? field.lowerValue : field.value;
-  const follow = `跟随（${scalarText(followBase)}）`;
+  const follow = `跟随（${show(followBase)}）`;
   if (TEXT_FIELDS.has(key)) {
     const raw = draft[key as "displayName" | "contextWindow" | "maxOutputTokens"];
     return raw !== "" ? raw : follow;
@@ -252,7 +264,7 @@ function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>)
   }
   if (key === "reasoning") {
     const d = draft.reasoning;
-    return d === "follow" ? follow : d;
+    return d === "follow" ? follow : d === "yes" ? "是" : "否";
   }
   // reasoningEffort
   const d = draft.reasoningEffort;
@@ -280,9 +292,12 @@ export function draftToPatch(view: ModelSettingsView, draft: Draft): ModelSettin
   } else if (f.maxOutputTokens.userValue !== undefined) patch.maxOutputTokens = null;
   if (draft.imageInput !== "follow") patch.imageInput = draft.imageInput === "true";
   else if (f.imageInput.userValue !== undefined) patch.imageInput = null;
-  if (draft.reasoning !== "follow") patch.reasoning = draft.reasoning;
+  if (draft.reasoning !== "follow")
+    patch.reasoning = draft.reasoning === "yes" ? "visible" : "none";
   else if (f.reasoning.userValue !== undefined) patch.reasoning = null;
-  if (draft.reasoningEffort !== "follow") patch.reasoningEffort = draft.reasoningEffort;
+  if (draft.reasoning === "no" && f.reasoningEffort.userValue !== undefined)
+    patch.reasoningEffort = null;
+  else if (draft.reasoningEffort !== "follow") patch.reasoningEffort = draft.reasoningEffort;
   else if (f.reasoningEffort.userValue !== undefined) patch.reasoningEffort = null;
   return patch;
 }
@@ -321,8 +336,19 @@ export function ModelEditPane({
   const [multi, setMulti] = useState<{ cursor: number; selected: number[] } | undefined>(undefined);
 
   // 可聚焦项：可编辑字段 + 保存 + 取消（readonly 时只剩取消）
+  const reasoningValue =
+    draft.reasoning === "follow"
+      ? view.fields.reasoning.userValue !== undefined
+        ? view.fields.reasoning.lowerValue
+        : view.fields.reasoning.value
+      : draft.reasoning === "yes"
+        ? "visible"
+        : "none";
+  const visibleFields = FIELD_ORDER.filter(
+    (k) => k !== "reasoningEffort" || reasoningValue === "visible" || reasoningValue === "hidden",
+  );
   const focusables: (FieldKey | "save" | "cancel")[] = [
-    ...FIELD_ORDER.filter((k) => readonly !== true && view.fields[k].editable),
+    ...visibleFields.filter((k) => readonly !== true && view.fields[k].editable),
     ...(readonly === true ? (["cancel"] as const) : (["save", "cancel"] as const)),
   ];
   const focusIndex = Math.min(cursor, Math.max(0, focusables.length - 1));
@@ -339,7 +365,7 @@ export function ModelEditPane({
         const i = (seq.indexOf(d.imageInput) + delta + seq.length) % seq.length;
         return { ...d, imageInput: seq[i] ?? "follow" };
       }
-      const seq: ReasoningDraft[] = ["follow", "none", "hidden", "visible"];
+      const seq: ReasoningDraft[] = ["follow", "yes", "no"];
       const i = (seq.indexOf(d.reasoning) + delta + seq.length) % seq.length;
       return { ...d, reasoning: seq[i] ?? "follow" };
     });
@@ -455,14 +481,14 @@ export function ModelEditPane({
 
   // 列宽按显示宽度：值列 = min(本页值文本最大宽度, 32)，来源列紧跟其后占剩余宽度
   const LABEL_W = 10;
-  const valueTexts = FIELD_ORDER.map((k) => fieldValueText(k, draft, view.fields[k]));
+  const valueTexts = visibleFields.map((k) => fieldValueText(k, draft, view.fields[k]));
   const VALUE_W = Math.min(Math.max(8, ...valueTexts.map((t) => stringWidth(t))), 32);
   const SOURCE_W = Math.max(8, width - 2 - LABEL_W - 1 - VALUE_W - 2);
   const row = (key: FieldKey): React.JSX.Element => {
     const f = view.fields[key];
     const enabled = readonly !== true && f.editable;
     const isFocus = focused === key;
-    const text = valueTexts[FIELD_ORDER.indexOf(key)] ?? "";
+    const text = valueTexts[visibleFields.indexOf(key)] ?? "";
     const editMark = isFocus && TEXT_FIELDS.has(key);
     const inner =
       `${isFocus ? "›" : " "} ${padToWidth(FIELD_LABELS[key], LABEL_W)} ` +
@@ -497,7 +523,7 @@ export function ModelEditPane({
           {readonlyHint}
         </Text>
       ) : null}
-      {FIELD_ORDER.map((key) => row(key))}
+      {visibleFields.map((key) => row(key))}
       {readonly !== true ? (
         <Text wrap="truncate">
           {buttonsFocus ? "›" : " "} <Text inverse={focused === "save"}>[保存]</Text>

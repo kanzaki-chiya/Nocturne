@@ -10,7 +10,6 @@ import {
   runProviderKeyWizard as coreKeyWizard,
   runProviderModelWizard as coreModelWizard,
   runProviderSetupWizard as coreSetupWizard,
-  runProviderThinkingWizard as coreThinkingWizard,
   type RuntimeConfig,
   type SetupWizardDeps,
   type WizardIo,
@@ -195,22 +194,6 @@ export async function runKeyWizardInSession(
   },
 ): Promise<void> {
   await runProviderKeyWizard(io, ctx.config, ctx.providerId);
-  ctx.updateProviders(await ctx.reloadConfig());
-}
-
-/**
- * /provider thinking <name> 的会话内流程（ADR-0018）：思考档位向导 → 重载配置。
- */
-export async function runThinkingWizardInSession(
-  io: WizardIo,
-  ctx: {
-    config: RuntimeConfig;
-    providerId: string;
-    reloadConfig: () => Promise<RuntimeConfig>;
-    updateProviders: (rc: RuntimeConfig) => void;
-  },
-): Promise<void> {
-  await coreThinkingWizard(io, ctx.config, ctx.providerId);
   ctx.updateProviders(await ctx.reloadConfig());
 }
 

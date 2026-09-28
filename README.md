@@ -112,7 +112,7 @@ nctrn --debug -p "概述这个仓库"     # 写入诊断日志
 
 交互模式常用 `/help` 查看命令，`/model` 和 `/preset` 查看或切换模型与权限预设，`/shell` 查看或切换执行命令的 shell（pwsh / Git Bash / cmd 等，也可用 `NOCTURNE_SHELL` 或 `config.json` 的 `shell` 字段指定），`/context` 查看上下文用量，`/compact` 压缩上下文，`/mcp` 查看服务器状态，`/resume` 切换会话，`/exit` 退出。执行时需要确认的操作会显示允许一次、会话内允许、项目内允许或拒绝等选项；非交互模式下需要确认的操作默认拒绝。
 
-模型支持图片输入时，`read` 可以读取 PNG、JPEG、GIF、WebP 图片并交给模型查看；用 `/provider` 的「编辑模型」（行式 CLI 用 `/provider model <服务商> <模型>`）修正上游未声明或声明错误的上下文长度、最大输出、推理、图片输入与思考档位。
+模型能力自动从上游与 models.dev 获取；个别模型可在 `/provider` 的「编辑模型」（行式 CLI 用 `/provider model <服务商> <模型>`）中修正推理、图片输入和限额。模型支持图片输入时，`read` 可读取 PNG、JPEG、GIF、WebP 图片并交给模型查看。需要完全离线时，在 `config.json` 设置 `"modelsDev": false` 关闭联网更新，仍使用随版本内置的模型快照。
 
 默认全屏界面支持鼠标滚轮翻阅对话，拖动选中后松开即可复制；有选区时 Ctrl+C 复制，Esc 清除选区。Ctrl+O 原位展开或收起思考内容，Ctrl+V 粘贴。需要终端原生的回滚记录、选中与搜索时使用 `--inline`；退出全屏后，本次对话会打印回主屏。
 

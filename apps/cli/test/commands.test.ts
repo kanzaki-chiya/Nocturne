@@ -433,27 +433,16 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(lines.join("")).toContain("invalid_command");
   });
 
-  it("/provider thinking <name> 调 runThinkingWizard；无向导桥时提示需要交互终端", async () => {
-    const ran: string[] = [];
-    const deps = {
+  it("/provider thinking 已移除", async () => {
+    const { io, lines } = capture();
+    await runSlashCommand("/provider thinking p", fakeSession(), fakeRuntime, io, {
       provider: {
         config: {} as never,
         reloadConfig: async () => ({}) as never,
         updateProviders: () => undefined,
       },
-      runThinkingWizard: async (name: string) => {
-        ran.push(name);
-      },
-    };
-    const { io } = capture();
-    await runSlashCommand("/provider thinking p", fakeSession(), fakeRuntime, io, deps);
-    expect(ran).toEqual(["p"]);
-
-    const c2 = capture();
-    await runSlashCommand("/provider thinking p", fakeSession(), fakeRuntime, c2.io, {
-      provider: deps.provider,
     });
-    expect(c2.lines.join("")).toContain("交互式终端");
+    expect(lines.join("")).toContain("未知 /provider 子命令 thinking");
   });
 
   it("/shell 无参数：编号列表含 auto 与全部种类、标注当前与来源；覆盖提示", async () => {

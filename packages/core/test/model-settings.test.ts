@@ -1,6 +1,6 @@
 /**
  * 模型设置编辑测试（ADR-0024）：providers.json userModels 合成层、
- * models 逐字段合并与显式 none 规则、listModelSettings 来源标注、
+ * models 逐字段合并与推理 none 规则、listModelSettings 来源标注、
  * saveModelSettings 校验与原子写、配置警告到达会话。
  * 全部在临时目录中运行，不写真实用户目录。
  */
@@ -197,9 +197,9 @@ describe("models 逐字段合并", () => {
   });
 });
 
-// ── 显式 none 规则 ─────────────────────────────────────
+// ── 推理 none 规则 ─────────────────────────────────────
 
-describe("显式推理 none", () => {
+describe("推理 none", () => {
   it("userModels reasoning=none：档位锁为空数组", async () => {
     await writeProviders([
       {
@@ -211,10 +211,10 @@ describe("显式推理 none", () => {
     ]);
     const m = await mergedModel();
     expect(m?.capabilities?.reasoning).toBe("none");
-    expect(m?.capabilities?.reasoningEffort).toEqual([]);
+    expect(m?.capabilities?.reasoningEffort).toEqual(["low", "high"]);
   });
 
-  it("config.json reasoning=none：档位锁为空数组", async () => {
+  it("config.json reasoning=none：保留声明供诊断，运行时无档位", async () => {
     await writeProviders([ENTRY]);
     await writeJson(configPath(), {
       providers: [
@@ -228,7 +228,7 @@ describe("显式推理 none", () => {
       ],
     });
     const m = await mergedModel();
-    expect(m?.capabilities?.reasoningEffort).toEqual([]);
+    expect(m?.capabilities?.reasoningEffort).toEqual(["low", "high"]);
   });
 
   it("user none + 手写非空档位：保留手写档位并警告（含服务商/模型/文件）", async () => {
@@ -247,13 +247,10 @@ describe("显式推理 none", () => {
     const rc = await load();
     const m = rc.base.providers.find((p) => p.id === "corp")?.models?.m1;
     expect(m?.capabilities?.reasoningEffort).toEqual(["low", "high"]);
-    const w = rc.base.warnings.find((x) => x.includes("corp") && x.includes("m1"));
-    expect(w).toBeDefined();
-    expect(w).toContain("用户编辑");
-    expect(w).toContain(configPath());
+    expect(rc.base.warnings.some((x) => x.includes("用户编辑") && x.includes("corp"))).toBe(false);
   });
 
-  it("config none + config 非空档位：档位置空并警告（含文件/服务商/模型）", async () => {
+  it("config none + config 非空档位：保留声明并警告（含文件/服务商/模型）", async () => {
     await writeProviders([ENTRY]);
     await writeJson(configPath(), {
       providers: [
@@ -268,7 +265,7 @@ describe("显式推理 none", () => {
     });
     const rc = await load();
     const m = rc.base.providers.find((p) => p.id === "corp")?.models?.m1;
-    expect(m?.capabilities?.reasoningEffort).toEqual([]);
+    expect(m?.capabilities?.reasoningEffort).toEqual(["low", "high"]);
     const w = rc.base.warnings.find((x) => x.includes("推理为 none 却声明了思考档位"));
     expect(w).toBeDefined();
     expect(w).toContain(configPath());
@@ -276,8 +273,7 @@ describe("显式推理 none", () => {
     expect(w).toContain("m1");
   });
 
-  it("ADR-0018 回归：默认/内置的 none 不锁定——仍继承服务商 thinking.levels", async () => {
-    // m1 任何层都不声明 reasoning（默认 none）：服务商级 thinking.levels 生效
+  it("旧服务商级 thinking.levels 不生效", async () => {
     await writeProviders([
       {
         ...ENTRY,
@@ -290,16 +286,16 @@ describe("显式推理 none", () => {
     const v = views.find((x) => x.modelId === "m1");
     expect(v?.fields.reasoning.value).toBe("none");
     expect(v?.fields.reasoning.source.kind).toBe("default");
-    expect(v?.fields.reasoningEffort.value).toEqual(["low", "high"]);
-    expect(v?.fields.reasoningEffort.source.kind).toBe("provider_levels");
-    expect(v?.fields.reasoningEffort.editable).toBe(true);
+    expect(v?.fields.reasoningEffort.value).toBeUndefined();
+    expect(v?.fields.reasoningEffort.source.kind).toBe("default");
+    expect(v?.fields.reasoningEffort.editable).toBe(false);
   });
 });
 
 // ── listModelSettings：来源与可编辑性 ────────────────────
 
 describe("listModelSettings 来源标注", () => {
-  it("upstream / user / default / provider_levels / derived", async () => {
+  it("upstream / user / default / derived", async () => {
     await writeProviders([
       {
         ...ENTRY,
@@ -314,7 +310,7 @@ describe("listModelSettings 来源标注", () => {
           m2: { contextWindow: 50_000, capabilities: { reasoning: "hidden" } },
         },
       },
-      // derived 需要无服务商级 thinking.levels 的另一家服务商
+      // derived 由逐模型推理能力推导
       {
         id: "drv",
         type: "openai-compatible",
@@ -343,11 +339,9 @@ describe("listModelSettings 来源标注", () => {
     const dv = (await rc.listModelSettings("drv")).find((x) => x.modelId === "d1");
     expect(dv?.fields.reasoningEffort.source.kind).toBe("derived");
     expect(dv?.fields.reasoningEffort.value).toHaveLength(6);
-    // v1 有服务商级 levels：档位来源是 provider_levels
-    expect(v1?.fields.reasoningEffort.source.kind).toBe("provider_levels");
-    // provider_levels：服务商级 thinking.levels
-    expect(v2?.fields.reasoningEffort.source.kind).toBe("provider_levels");
-    expect(v2?.fields.reasoningEffort.value).toEqual(["minimal", "low"]);
+    expect(v1?.fields.reasoningEffort.source.kind).toBe("derived");
+    expect(v2?.fields.reasoningEffort.source.kind).toBe("derived");
+    expect(v2?.fields.reasoningEffort.value).toHaveLength(6);
     // 列表按模型 id 排序且只含清单内模型
     expect(views.map((x) => x.modelId)).toEqual(["m1", "m2"]);
     expect(views.every((x) => x.readonly === false)).toBe(true);
@@ -404,19 +398,19 @@ describe("listModelSettings 来源标注", () => {
         id: "deepseek",
         type: "openai-compatible",
         baseURL: "https://api.deepseek.test/v1",
-        models: { "deepseek/deepseek-chat": { capabilities: { reasoning: "visible" } } },
+        models: { "internal-test-model": { capabilities: { reasoning: "visible" } } },
       },
     ]);
     const rc = await loadConfig(platform, {
       nocturneHome: home,
       env: noEnv,
       builtinModel: (pid, mid) =>
-        pid === "deepseek" && mid === "deepseek/deepseek-chat"
+        pid === "deepseek" && mid === "internal-test-model"
           ? { contextWindow: 64_000, capabilities: { imageInput: false } }
           : undefined,
     });
     const v = (await rc.listModelSettings("deepseek")).find(
-      (x) => x.modelId === "deepseek/deepseek-chat",
+      (x) => x.modelId === "internal-test-model",
     );
     expect(v?.fields.contextWindow.value).toBe(64_000);
     expect(v?.fields.contextWindow.source.kind).toBe("builtin");
@@ -425,7 +419,7 @@ describe("listModelSettings 来源标注", () => {
     expect(v?.fields.reasoning.source.kind).toBe("upstream");
   });
 
-  it("reasoning_none：锁定的档位行不可编辑", async () => {
+  it("推理为 none 时没有档位", async () => {
     await writeProviders([
       { ...ENTRY, userModels: { m1: { capabilities: { reasoning: "none" } } } },
     ]);
@@ -433,8 +427,7 @@ describe("listModelSettings 来源标注", () => {
     const v = (await rc.listModelSettings("corp")).find((x) => x.modelId === "m1");
     expect(v?.fields.reasoning.value).toBe("none");
     expect(v?.fields.reasoning.source.kind).toBe("user");
-    expect(v?.fields.reasoningEffort.value).toEqual([]);
-    expect(v?.fields.reasoningEffort.source.kind).toBe("reasoning_none");
+    expect(v?.fields.reasoningEffort.value).toBeUndefined();
     expect(v?.fields.reasoningEffort.editable).toBe(false);
   });
 
@@ -630,6 +623,31 @@ describe("saveModelSettings", () => {
 // ── 配置警告到达会话（runtime.warning / session.warnings）───
 
 describe("配置警告到达会话", () => {
+  it("旧服务商档位在启动时提示；编辑模型后清理旧字段", async () => {
+    await writeProviders([
+      { ...ENTRY, thinking: { format: "openrouter", levels: ["low"], source: "user" } },
+    ]);
+    const rc = await load();
+    expect(rc.base.providerThinkingWarnings).toEqual(["corp"]);
+    const runtime = await createRuntime({
+      cwd: root,
+      sessionsDir: path.join(root, "sessions"),
+      config: rc,
+      providers: [new FakeProvider({ scripts: [] })],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    expect(session.warnings).toContain(
+      "服务商 corp：服务商级思考档位已停用，模型能力改由上游与 models.dev 提供，个别模型可在编辑模型里修改",
+    );
+    await session.close();
+    await rc.saveModelSettings("corp", "m1", { contextWindow: 60_000 });
+    const raw = (await readJson(providersPath())) as {
+      providers: { thinking?: { format?: string; levels?: string[]; source?: string } }[];
+    };
+    expect(raw.providers[0]?.thinking).toEqual({ format: "openrouter" });
+    expect((await load()).base.providerThinkingWarnings).toBeUndefined();
+  });
+
   it("显式 none 冲突警告进 session.warnings", async () => {
     await writeProviders([ENTRY]);
     await writeJson(configPath(), {

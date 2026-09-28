@@ -89,9 +89,9 @@ function rowLabel(row: ProviderRow, currentId: string | undefined, env: { ascii:
   return { mark: dotOn, name: p.id, detail, configured: true };
 }
 
-const OPS = ["换密钥", "刷新模型列表", "调整思考档位", "编辑模型", "删除"] as const;
+const OPS = ["换密钥", "刷新模型列表", "编辑模型", "删除"] as const;
 /** 交给父级执行的操作（删除在页内确认后走 onConfirmRemove；「编辑模型」为页内子视图） */
-export type ProviderOp = "key" | "refresh" | "thinking";
+export type ProviderOp = "key" | "refresh";
 
 export function ProviderPage({
   presets,
@@ -316,8 +316,7 @@ export function ProviderPage({
             openModels(id);
             return;
           }
-          const realOp: ProviderOp =
-            op === "换密钥" ? "key" : op === "刷新模型列表" ? "refresh" : "thinking";
+          const realOp: ProviderOp = op === "换密钥" ? "key" : "refresh";
           onOp(id, realOp);
           return;
         }

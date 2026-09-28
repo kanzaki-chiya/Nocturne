@@ -23,6 +23,8 @@ type ReasoningValue = "none" | "hidden" | "visible";
 
 function toSource(origin: FieldOrigin): ModelFieldSource {
   switch (origin.kind) {
+    case "modelsDev":
+      return { kind: "modelsDev" };
     case "setup":
       return { kind: "upstream" };
     case "userModels":
@@ -64,6 +66,8 @@ export function modelFieldSourceText(source: ModelFieldSource): string {
   switch (source.kind) {
     case "upstream":
       return "上游";
+    case "modelsDev":
+      return "models.dev";
     case "user":
       return "用户编辑";
     case "config":
@@ -82,12 +86,8 @@ export function modelFieldSourceText(source: ModelFieldSource): string {
       return "内置";
     case "default":
       return "默认";
-    case "provider_levels":
-      return "服务商思考档位";
     case "derived":
       return "按推理能力推导";
-    case "reasoning_none":
-      return "推理为 none，不可切换";
   }
 }
 
@@ -154,26 +154,23 @@ function scalarField<T>(
 
 /**
  * 思考档位的声明链（ADR-0024 第 2 节档位链、providers.md ADR-0018 链）：
- * 声明栈顶（config/user/upstream 逐模型）> 服务商级 thinking.levels >
- * reasoning ≠ "none" 推导全档 > default(undefined)。
- * 显式 none 锁定在最外层（buildModelSettingsViews）处理。
+ * 推理为 none 时无档位；否则逐模型声明 > 推导全档。
  */
 function resolveEffort(
   list: readonly FieldDecl[],
-  providerLevels: ReasoningEffortLevel[] | undefined,
   reasoningValue: "none" | "hidden" | "visible" | undefined,
 ): { value: ReasoningEffortLevel[] | undefined; source: ModelFieldSource } {
   const top = list.at(-1);
+  if (reasoningValue === "none") {
+    return {
+      value: undefined,
+      source: top !== undefined ? toSource(top.origin) : { kind: "default" },
+    };
+  }
   if (top !== undefined) {
     return { value: top.value as ReasoningEffortLevel[] | undefined, source: toSource(top.origin) };
   }
-  if (providerLevels !== undefined && providerLevels.length > 0) {
-    return { value: providerLevels, source: { kind: "provider_levels" } };
-  }
-  if (reasoningValue !== "none") {
-    return { value: [...REASONING_EFFORT_LEVELS], source: { kind: "derived" } };
-  }
-  return { value: undefined, source: { kind: "default" } };
+  return { value: [...REASONING_EFFORT_LEVELS], source: { kind: "derived" } };
 }
 
 export interface ModelSettingsViewInput {
@@ -196,8 +193,6 @@ export function buildModelSettingsViews(input: ModelSettingsViewInput): ModelSet
   const readonlyHint = managed
     ? undefined
     : providerOriginHint(providerId, modelInfo.providers.get(providerId));
-  const levels = entry?.thinking?.levels;
-  const providerLevels = levels !== undefined ? normalizeLevels(levels) : undefined;
   const views: ModelSettingsView[] = [];
   for (const modelId of Object.keys(entry?.models ?? {}).sort()) {
     const model = entry?.models?.[modelId];
@@ -206,41 +201,35 @@ export function buildModelSettingsViews(input: ModelSettingsViewInput): ModelSet
     const ctx: FieldCtx = { fields: modelInfo.fields, providerId, modelId, managed };
     const uCaps = userEntry?.capabilities;
 
+    const effortDecls = decls(ctx, "capabilities.reasoningEffort");
+    const explicitReasoning = decls(ctx, "capabilities.reasoning").length > 0;
+    const inferredReasoning: ReasoningValue | undefined =
+      !explicitReasoning &&
+      effortDecls.at(-1)?.value instanceof Array &&
+      (effortDecls.at(-1)?.value as unknown[]).length > 0
+        ? "visible"
+        : undefined;
     const reasoning = scalarField<ReasoningValue>(
       ctx,
       "capabilities.reasoning",
-      model?.capabilities?.reasoning,
+      model?.capabilities?.reasoning ?? inferredReasoning,
       builtin?.capabilities?.reasoning,
-      "none",
+      inferredReasoning ?? "none",
       uCaps?.reasoning,
     );
-    const locked = modelInfo.noneLocked.has(`${providerId}/${modelId}`);
-    const effortDecls = decls(ctx, "capabilities.reasoningEffort");
-    // 档位链按"跳过 userModels 层"再算一遍：「跟随」回落值（locked 时
-    // 档位不可编辑，回落值无意义，skip）
+    // 跳过用户编辑层，计算「跟随」时的档位。
     const lowerEffort = resolveEffort(
       effortDecls.filter((d) => d.origin.kind !== "userModels"),
-      providerLevels,
       reasoning.lowerValue,
     ).value;
-    let reasoningEffort: ModelField<ReasoningEffortLevel[]>;
-    if (locked) {
-      reasoningEffort = {
-        value: [],
-        source: { kind: "reasoning_none" },
-        editable: false,
-        ...(uCaps?.reasoningEffort !== undefined ? { userValue: uCaps.reasoningEffort } : {}),
-      };
-    } else {
-      const resolved = resolveEffort(effortDecls, providerLevels, reasoning.value);
-      reasoningEffort = {
-        value: resolved.value,
-        source: resolved.source,
-        editable: managed && resolved.source.kind !== "config",
-        lowerValue: lowerEffort,
-        ...(uCaps?.reasoningEffort !== undefined ? { userValue: uCaps.reasoningEffort } : {}),
-      };
-    }
+    const resolved = resolveEffort(effortDecls, reasoning.value);
+    const reasoningEffort: ModelField<ReasoningEffortLevel[]> = {
+      value: resolved.value,
+      source: resolved.source,
+      editable: managed && reasoning.value !== "none" && resolved.source.kind !== "config",
+      lowerValue: lowerEffort,
+      ...(uCaps?.reasoningEffort !== undefined ? { userValue: uCaps.reasoningEffort } : {}),
+    };
 
     views.push({
       providerId,
@@ -289,13 +278,6 @@ export function buildModelSettingsViews(input: ModelSettingsViewInput): ModelSet
 }
 
 /** 「不支持思考强度」档位列表的归一化（与 providers.md ADR-0018 链同口径） */
-function normalizeLevels(levels: readonly string[]): ReasoningEffortLevel[] {
-  const uniq = [...new Set(levels)].filter(isReasoningEffortLevel);
-  return [...uniq].sort(
-    (a, b) => REASONING_EFFORT_LEVELS.indexOf(a) - REASONING_EFFORT_LEVELS.indexOf(b),
-  );
-}
-
 const FIELD_KEYS = [
   "displayName",
   "contextWindow",
@@ -406,8 +388,8 @@ export function effectiveValueError(candidate: ModelSettingsView): string | unde
   if (reasoning.value === "none" && reasoning.source.kind === "user") {
     // 用户编辑 none：档位链只被手写配置豁免
     if (
-      reasoningEffort.value !== undefined &&
-      reasoningEffort.value.length > 0 &&
+      reasoningEffort.lowerValue !== undefined &&
+      reasoningEffort.lowerValue.length > 0 &&
       reasoningEffort.source.kind === "config"
     ) {
       return `${modelFieldSourceText(reasoningEffort.source)}，不能把推理设为 none`;

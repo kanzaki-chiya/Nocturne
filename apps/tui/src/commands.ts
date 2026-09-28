@@ -9,11 +9,9 @@ import { helpLines as catalogHelpLines } from "./slash-catalog.js";
 
 export type OverlayName = "context" | "help" | "resume" | "preset" | "effort" | "shell";
 
-/** /provider 向导启动形态（add / key / thinking） */
+/** /provider 向导启动形态（add / key） */
 export type ProviderWizardStart =
-  | { kind: "add"; presetId?: string | undefined }
-  | { kind: "key"; providerId: string }
-  | { kind: "thinking"; providerId: string };
+  { kind: "add"; presetId?: string | undefined } | { kind: "key"; providerId: string };
 
 export type SlashResult =
   | { kind: "overlay"; name: OverlayName }
@@ -81,9 +79,6 @@ export async function runSlash(
         case "key":
           if (name === "") return { kind: "message", text: "用法：/provider key <名称>" };
           return { kind: "provider-wizard", start: { kind: "key", providerId: name } };
-        case "thinking":
-          if (name === "") return { kind: "message", text: "用法：/provider thinking <名称>" };
-          return { kind: "provider-wizard", start: { kind: "thinking", providerId: name } };
         case "model": {
           // /provider model <服务商> [<模型>]：直达模型列表/编辑页（ADR-0024 第 5 节）
           const [pid, mid] = [subRest[0], subRest[1]];
@@ -101,9 +96,12 @@ export async function runSlash(
         case "refresh": {
           if (name === "") return { kind: "message", text: "用法：/provider refresh <名称>" };
           try {
-            await provider.config.refreshUpstreamLimits(name);
+            const warning = await provider.config.refreshUpstreamLimits(name);
             provider.updateProviders(await provider.reloadConfig());
-            return { kind: "message", text: `已刷新 ${name} 的上游模型列表` };
+            return {
+              kind: "message",
+              text: `已刷新 ${name} 的上游模型列表${warning !== undefined ? `；${warning}` : ""}`,
+            };
           } catch (e) {
             return { kind: "message", text: `! ${errText(e)}` };
           }
@@ -114,7 +112,7 @@ export async function runSlash(
         default:
           return {
             kind: "message",
-            text: `未知子命令 ${sub}；可用：add | key <名称> | thinking <名称> | model <名称> [<模型>] | refresh <名称> | remove <名称>`,
+            text: `未知子命令 ${sub}；可用：add | key <名称> | model <名称> [<模型>] | refresh <名称> | remove <名称>`,
           };
       }
     }

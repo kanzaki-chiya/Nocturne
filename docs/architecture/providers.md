@@ -28,11 +28,11 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 | `ModelCapabilities` | 数据：是否支持工具调用、并行工具调用、推理及其形式、图片输入、提示缓存、可选的推理强度档位 | Context Builder 与 Agent Loop 依据能力做决定，而不是依据名字 |
 | `ProviderOptions` | 传给某个 Provider 的专有参数，Core 不解释 | 给高级用户留出口，又不污染中性接口 |
 
-能力信息来自内置的小型模型目录（纯数据），用户可以在配置中覆盖或为未知模型补充。MVP 不从远端同步模型目录。
+模型能力来自上游、models.dev 裁剪目录与内置的小型目录，用户可以按模型覆盖。models.dev 只在添加服务商或刷新模型列表时更新，本地缓存与内置快照保证离线可用（[ADR-0025](../decisions/ADR-0025-per-model-reasoning.md)）。
 
-模型字段（`displayName`/`contextWindow`/`maxOutputTokens`/`capabilities.*`）的生效值按**逐字段**优先级取（高者覆盖低者，ADR-0024 第 2 节）：逐模型手写 `models.<id>.<字段>`（config.json / 项目配置 / 环境变量 / 命令行，层间再按全局层级）> 用户编辑（providers.json 条目的 `userModels.<模型>`，「编辑模型」或 `/provider model` 写入，见 [provider-setup.md](provider-setup.md)）> 上游声明（`GET /models` 的字段映射，provider-setup.md 第 7 节）> 内置目录 > 字段默认（`imageInput` 为 `false`、`reasoning` 为 `none`、数值字段为未声明）。逐字段的含义：`config.json` 同名模型条目**只覆盖它实际写出的字段**——只写 `contextWindow` 时其余字段照常回落到用户编辑/上游/内置；数组字段（`reasoningEffort`）由最高层整体替换，不并集，显式空数组同样生效。
+模型字段（`displayName`/`contextWindow`/`maxOutputTokens`/`capabilities.*`）的生效值按**逐字段**优先级取（高者覆盖低者，ADR-0025）：逐模型手写配置 > 用户编辑（`userModels`）> 上游声明（`GET /models`）> models.dev > 内置目录 > 默认。只覆盖实际声明的字段；数组字段（`reasoningEffort`）由最高层整体替换，不并集，显式空数组同样生效。models.dev 只取 `reasoning`（true→visible，false→none）、`modalities.input` 是否包含 `image`、`limit.context`、`limit.output`，不取 `attachment`、显示名和价格。模型 ID 依次尝试完全相同、忽略大小写相同、去冒号后缀后末段模型名相同；每步只有唯一候选才匹配，歧义时不猜。
 
-`reasoningEffort` 在字段级声明之外还有一条档位链（ADR-0018/0024）：逐模型字段声明（同上优先级）> 服务商条目 `thinking.levels`（服务商级用户声明，`/provider refresh` 不覆盖）> `reasoning ≠ "none"` 时推导全档 > 无（不可切换）。**显式 none**：生效 `reasoning` 为 `none` 且来源是用户编辑或手写层时档位锁定为空数组——两个例外：`userModels` 的 none 遇到手写非空档位时手写优先（保留档位并警告）；手写层自身的 none + 非空档位是配置矛盾，档位置空并产生 `config_warning`（写明文件、服务商、模型）。内置目录/默认给出的 none 不算配置层声明，不触发锁定（服务商 `thinking.levels` 照常生效）。
+推理能力只按逐模型声明解析：没有任何层声明 `reasoning`，但有非空 `reasoningEffort` 声明时，视为支持推理；都没有时默认不支持。支持推理时档位取逐模型声明，否则推导六档；推理为 `none` 时没有档位。旧服务商级 `thinking.levels/source` 忽略；读到旧 `levels` 每次启动发 `runtime.warning(provider_thinking_levels_ignored)`。用户编辑设为「否」与手写非空档位冲突时拒绝保存；手写配置自身同时声明 `none` 和非空档位时推理为准，并警告文件、服务商、模型。
 
 ## 3. 配置形态（示意）
 
@@ -54,7 +54,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 凭据只从环境变量或用户级凭据文件读取，不写入会话日志、事件或普通日志。交互式配置（`nctrn setup`、`/provider`）、服务商预设与凭据解析顺序见 [provider-setup.md](provider-setup.md)（v0.2）。
 
-思考强度档位（[ADR-0018](../decisions/ADR-0018-reasoning-effort.md)）：中性档位集合为 `off | minimal | low | medium | high | xhigh | max`，无 `auto`。每个模型的可用档位按声明解析——逐模型 `capabilities.reasoningEffort` > 服务商条目 `thinking.levels`（用户声明，`/provider refresh` 不覆盖）> 上游能力标记推导 > 无（不可切换）。`ModelRequest.reasoningEffort` 由 Runtime 按会话配置就近降档赋值；适配器把档位翻译为 `reasoning_effort`（openai 格式）、`reasoning.effort`（openrouter 格式）或 `thinking.budget_tokens`（anthropic）——`"max"` 是通用最高档，openai/openrouter 原样发送，anthropic 换算默认 32768。`providerOptions` 中的原生推理键仍可直传，与归一化字段同义时归一化字段胜出；子代理兜底轮不携带 `reasoningEffort`，使强制 `toolChoice` 可正常表达。
+思考强度档位（[ADR-0025](../decisions/ADR-0025-per-model-reasoning.md)）：中性档位集合为 `off | minimal | low | medium | high | xhigh | max`。每个模型的可用档位按上段规则解析；`ModelRequest.reasoningEffort` 由 Runtime 按会话配置就近降档赋值。适配器把档位翻译为 `reasoning_effort`（openai 格式）、`reasoning.effort`（openrouter 格式）或 `thinking.budget_tokens`（anthropic）；`thinking.format` 与 `thinking.budgets` 保留。`providerOptions` 中的原生推理键仍可直传，与归一化字段同义时归一化字段胜出；子代理兜底轮不携带 `reasoningEffort`。
 
 ## 4. 适配器
 

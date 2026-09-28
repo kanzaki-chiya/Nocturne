@@ -85,6 +85,7 @@ function makeConfig(backend: "memory" | "none") {
       saved.push({ entry, opts });
       return Promise.resolve();
     },
+    refreshModelsDev: async () => undefined,
     setCredential: (providerId: string, key: string) => {
       creds.push({ providerId, key });
       return Promise.resolve();
@@ -198,7 +199,6 @@ describe("provider 向导（无连接测试，v0.3 不选模型）", () => {
       stubFetch(handler);
       const { io, printed } = scriptedIo([
         "", // 凭据环境变量名（backend=none）
-        [0], // 思考档位单步：不支持
       ]);
       await runProviderSetupWizard(io, config, deps, { presetId: "deepseek" });
       expect(printed.some((l) => l.includes("获取模型列表失败"))).toBe(true);
@@ -209,29 +209,15 @@ describe("provider 向导（无连接测试，v0.3 不选模型）", () => {
     expect(saved).toHaveLength(2);
   });
 
-  it("上游未声明思考能力：单步勾选档位写入 thinking.levels（source=user）", async () => {
+  it("上游未声明思考能力：不再询问服务商级档位", async () => {
     stubFetch(() => jsonRes({ data: [{ id: "m1" }] }));
     const { config, saved } = makeConfig("memory");
     const { io, printed } = scriptedIo([
       "sk-test", // API Key
-      [1, 3, 6], // 勾选 minimal / medium / max（选项 0 为"不支持"占位）
-    ]);
-    await runProviderSetupWizard(io, config, deps, { presetId: "deepseek" });
-    expect(saved[0]?.entry.thinking?.levels).toEqual(["minimal", "medium", "max"]);
-    expect(saved[0]?.entry.thinking?.source).toBe("user");
-    // 步骤摘要记录所选档位
-    expect(printed.some((l) => l === "思考档位 minimal / medium / max")).toBe(true);
-  });
-
-  it("勾选「不支持」与档位混选时按不支持处理（互斥兜底）", async () => {
-    stubFetch(() => jsonRes({ data: [{ id: "m1" }] }));
-    const { config, saved } = makeConfig("memory");
-    const { io } = scriptedIo([
-      "sk-test", // API Key
-      [0, 2], // 实现层兜底：互斥项一旦勾上即判不支持（UI 层本就互斥）
     ]);
     await runProviderSetupWizard(io, config, deps, { presetId: "deepseek" });
     expect(saved[0]?.entry.thinking?.levels).toBeUndefined();
+    expect(printed.some((l) => l.includes("思考档位"))).toBe(false);
   });
 
   it("上游已声明思考能力：不追问思考强度", async () => {
@@ -316,15 +302,15 @@ describe("runProviderModelWizard", () => {
     expect(printed.at(-1)).toContain("已保存 corp/m1");
   });
 
-  it("正常值解析：正整数 / y / hidden / 逗号档位 / none=空数组", async () => {
+  it("正常值解析：正整数 / y / 逗号档位 / none=空数组", async () => {
     const { config, saved } = makeConfig([baseView()]);
-    const { io } = scriptedIo(["命名", "128000", "4096", "hidden", "y", "low,high"]);
+    const { io } = scriptedIo(["命名", "128000", "4096", "y", "y", "low,high"]);
     await runProviderModelWizard(io, config, "corp", "m1");
     expect(saved[0]?.patch).toEqual({
       displayName: "命名",
       contextWindow: 128000,
       maxOutputTokens: 4096,
-      reasoning: "hidden",
+      reasoning: "visible",
       imageInput: true,
       reasoningEffort: ["low", "high"],
     });
@@ -361,10 +347,10 @@ describe("runProviderModelWizard", () => {
     ).toBe(true);
   });
 
-  it("reasoning_none 锁定：档位行不提问", async () => {
+  it("推理为否时隐藏档位行", async () => {
     const view = baseView({
       reasoning: field<"none" | "hidden" | "visible">("none", { kind: "user" }, true, "none"),
-      reasoningEffort: field<ReasoningEffortLevel[]>([], { kind: "reasoning_none" }, false),
+      reasoningEffort: field<ReasoningEffortLevel[]>([], { kind: "default" }, false),
     });
     const { config } = makeConfig([view]);
     let asks = 0;
@@ -372,7 +358,7 @@ describe("runProviderModelWizard", () => {
     const spyIo: WizardIo = { ...io, ask: async (p, o) => ((asks += 1), io.ask(p, o)) };
     await runProviderModelWizard(spyIo, config, "corp", "m1");
     expect(asks).toBe(5);
-    expect(printed.some((l) => l.includes("思考档位") && l.includes("推理为 none"))).toBe(true);
+    expect(printed.some((l) => l.includes("思考档位"))).toBe(false);
   });
 
   it("保存失败打印原因不保存；无效输入不写文件", async () => {

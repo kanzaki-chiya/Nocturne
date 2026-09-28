@@ -7,12 +7,13 @@
 ## 1. 配置来源与分层
 
 ```text
-内置默认 < 向导配置 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
+内置默认 < models.dev < 向导配置 < 用户编辑 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
 ```
 
 | 层 | 位置 / 来源 | 信任 | 说明 |
 |---|---|---|---|
 | 内置默认 | 代码内常量 | 可信 | 预设名 `default`、Turn 默认值等；不是一个文件 |
+| models.dev | 随版本快照或 `<NOCTURNE_HOME>/cache/models-dev.json` | 可信 | 只为已有模型补全推理、图片输入、上下文与最大输出；低于上游逐字段声明，不写入 `providers.json`（ADR-0025） |
 | 向导配置 | `<NOCTURNE_HOME>/providers.json` | 可信 | 机器维护：只由 `nctrn setup` 与 `/provider` 原子写，内容限 `model` 与 `providers`；手写配置按 `id` 覆盖它（v0.2，[provider-setup.md](provider-setup.md)） |
 | 用户编辑（`userModels`） | 同上 providers.json 条目的 `userModels` 字段 | 可信 | **合成层**：加载时由条目内 `userModels` 包成 `{providers:[{id,models:userModels}]}`，插在向导层与用户配置之间；只作用于 `models` 逐字段合并，不产生权限规则等其他字段（ADR-0024，见第 2 节） |
 | 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；**程序从不改写它** |
@@ -20,7 +21,7 @@
 | 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；凭据经环境变量或操作系统凭据后端进入（索引文件 `credentials.json` 不含明文）（v0.2，[provider-setup.md](provider-setup.md)） |
 | 命令行参数 | `nctrn` 参数 | 可信 | 本次启动的显式意图，优先级最高 |
 
-机器维护的运行时数据（信任列表、项目 Grant、向导配置、凭据索引、最近模型列表）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`credentials.json`、`recent-models.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。
+机器维护的运行时数据（信任列表、项目 Grant、向导配置、凭据索引、最近模型列表、models.dev 缓存）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。
 
 交互输入历史由 Core 的 `RuntimeSession.readInputHistory()` / `recordInputHistory(text)` 管理，保存在 `<NOCTURNE_HOME>/history.jsonl`，**明文保存输入原文**，文件创建权限 `0600`（POSIX）；每行是 `{text, workspaceRoot, time}`。历史按会话绑定的工作区过滤，连续重复输入只记录一次，超过 1000 条保留最近 1000 条。TUI 提交前展开粘贴占位，读取后在输入框重新收起多行原文。读写故障发 `runtime.warning`，不阻断输入；CLI 与 TUI 都不直接读写此文件。
 
@@ -36,13 +37,15 @@
 ```ts
 // 各层文件共用一个 schema；程序从不改写它们
 interface ConfigFile {
+  /** false 时不联网更新 models.dev，仍使用随版本内置的快照 */
+  modelsDev?: false;
   /** 默认模型，"provider/model" 形式 */
   model?: string;
   /** 新会话的默认思考档位（ADR-0018；缺省 off）。档位是否可用由所选模型的声明决定，
       不支持时按就近降档生效 */
   reasoningEffort?: ReasoningEffort;
   /** Provider 声明式配置，形状即 RuntimeOptions.providerConfigs 的元素；
-      条目上的 thinking.format / thinking.levels / thinking.budgets 见 ADR-0018 第 2、3 节 */
+      条目上的 thinking.format / thinking.budgets 见 provider-api.md；旧 levels/source 忽略 */
   providers?: ProviderConfig[];
   permissions?: {
     /** 预设名；缺省 "default" */
@@ -78,7 +81,9 @@ interface ConfigFile {
 | `mcp.servers` | 按服务器 id 浅合并（同 `providers`）；不同 id 并存 |
 | `hooks.*` | 按事件点追加：用户级条目在前、项目级在后，执行顺序即此顺序（hooks.md 第 2 节） |
 
-**`userModels` 合成层**（ADR-0024 第 2 节）：providers.json 条目里的 `userModels`（模型编辑页 / `/provider model` 写入的逐模型用户编辑）不是合并结果的一部分，而是加载时被包成一个独立层——`providers: [{ id, models: userModels }]`——插在向导层（setup）与 `config.json`（user）之间参与 `models` 逐字段合并。因此用户编辑优先于上游声明、低于任何手写层；只由该层引入、其他层都不声明的模型条目在合并后被丢弃（不为清单外模型造条目）。生效 `reasoning` 为 `none` 且来源是 `userModels` 或手写层时，`reasoningEffort` 按显式 none 规则锁定为空数组（两类冲突的例外与警告见 [providers.md](providers.md) 第 2 节）。
+**`userModels` 合成层**（ADR-0024 第 2 节）：providers.json 条目里的 `userModels`（模型编辑页 / `/provider model` 写入的逐模型用户编辑）不是合并结果的一部分，而是加载时被包成一个独立层——`providers: [{ id, models: userModels }]`——插在向导层（setup）与 `config.json`（user）之间参与 `models` 逐字段合并。因此用户编辑优先于上游声明、低于任何手写层；只由该层引入、其他层都不声明的模型条目在合并后被丢弃。推理为 `none` 时没有可用思考档位；冲突处理见 [providers.md](providers.md) 第 2 节。
+
+models.dev 数据在启动时从缓存或内置快照读取，启动不联网；添加服务商或刷新模型列表时才 GET 更新，10 秒超时，失败沿用本地数据并提示。`config.json` 的 `modelsDev: false` 关闭联网并只使用内置快照。缓存比快照新时优先使用缓存。匹配规则与字段映射见 [providers.md](providers.md) 第 2 节。
 
 **机器维护的 `settings.json`**（ADR-0022 第 3 节）：`<NOCTURNE_HOME>/settings.json` 由程序原子写入（临时文件 + rename），只写自己的文件；当前只有 `shell`/`shellPath` 两个字段，由 `/shell`（或 `session.setShell`）写入，`"auto"` 表示清除回自动。它不进上面的合并链，只参与 shell 选择的合成：`NOCTURNE_SHELL` > `config.json` > `settings.json` > 自动（tools.md 第 6 节）；手写 `config.json` 的同名字段覆盖它，程序不改写 `config.json`。文件损坏或 `shell` 值无法识别时忽略并警告，不阻塞启动；单独给出 `shellPath` 时同样要先能推断种类（见上表注释）。读入时保留未知字段原样写回，后续偏好就地扩展。
 

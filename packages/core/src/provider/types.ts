@@ -22,7 +22,7 @@ export interface ModelCapabilities {
   reasoning: "none" | "hidden" | "visible";
   /**
    * 该模型的可用思考档位（ADR-0018）：resolve 后的已解析集合
-   * （逐模型声明 > 服务商 thinking.levels > reasoning≠"none" 推导全档）。
+   * （逐模型声明 > reasoning≠"none" 推导全档）。
    * undefined 或空数组 = 无可用档位；off 恒可用，不在此集合中。
    */
   reasoningEffort?: ReasoningEffortLevel[] | undefined;
@@ -154,11 +154,6 @@ export interface Provider {
   readonly strictModels?: boolean | undefined;
   /** 该 Provider 下可用的模型（内置目录 + 配置合并） */
   models(): ModelInfo[];
-  /**
-   * 服务商级可用思考档位（用户声明的 thinking.levels，ADR-0018）：
-   * 逐模型未声明档位时作默认；清单外模型 resolve 走同一声明链。
-   */
-  readonly defaultReasoningEfforts?: readonly ReasoningEffortLevel[] | undefined;
   /**
    * 发起一次流式请求。成功的流以且仅以一个 finish 结束；
    * 失败抛出 ProviderError；signal 中止时抛出 name === "AbortError" 的错误。

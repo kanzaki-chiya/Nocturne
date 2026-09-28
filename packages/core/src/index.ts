@@ -516,6 +516,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     for (const message of warnings) {
       session.emitEphemeral("runtime.warning", { code: "config_warning", message });
     }
+    for (const providerId of resolved?.providerThinkingWarnings ?? []) {
+      const message = `服务商 ${providerId}：服务商级思考档位已停用，模型能力改由上游与 models.dev 提供，个别模型可在编辑模型里修改`;
+      warnings.push(message);
+      session.emitEphemeral("runtime.warning", {
+        code: "provider_thinking_levels_ignored",
+        message,
+      });
+    }
     // providers.json 损坏/版本不符：被忽略但明确提示（provider-setup.md 第 2 节）
     if (config?.providerSetupWarning !== undefined) {
       session.emitEphemeral("runtime.warning", {

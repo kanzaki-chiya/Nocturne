@@ -23,7 +23,6 @@ import type {
 } from "../types.js";
 import {
   isReasoningEffortLevel,
-  normalizeReasoningEffortLevels,
   type Diagnostics,
   type ReasoningEffortLevel,
 } from "../../protocol/index.js";
@@ -113,8 +112,7 @@ export function createAnthropicProvider(
     fetch: wrappedFetch,
   });
 
-  // 服务商级档位声明（thinking.levels，用户声明）与预算覆盖表
-  const defaultEfforts = normalizeReasoningEffortLevels(config.thinking?.levels);
+  // 预算覆盖表仍按服务商的协议格式配置；档位能力只看模型声明。
   const budgets: Partial<Record<ReasoningEffortLevel, number>> = {};
   for (const [k, v] of Object.entries(config.thinking?.budgets ?? {})) {
     if (isReasoningEffortLevel(k) && typeof v === "number" && Number.isFinite(v) && v > 0) {
@@ -122,10 +120,7 @@ export function createAnthropicProvider(
     }
   }
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
-    withReasoningEfforts(
-      resolveModelInfo({ provider: config.id, model: id }, config.models?.[id]),
-      defaultEfforts,
-    ),
+    withReasoningEfforts(resolveModelInfo({ provider: config.id, model: id }, config.models?.[id])),
   );
 
   return {
@@ -133,7 +128,6 @@ export function createAnthropicProvider(
     type: "anthropic",
     strictModels: config.allowUndeclaredModels !== true,
     models: () => modelList,
-    defaultReasoningEfforts: defaultEfforts,
 
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
       if ((await resolveKey()) === undefined) {

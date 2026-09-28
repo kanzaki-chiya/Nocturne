@@ -3,15 +3,21 @@
  * 编辑页聚焦/跟随/保存、只读查看、/provider model 直达。
  * 直接渲染 ProviderPage（ink-testing-library），数据经 stub 桥注入。
  */
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { render } from "ink-testing-library";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type {
-  ModelField,
-  ModelSettingsView,
-  ProviderOverview,
-  ReasoningEffortLevel,
+import {
+  createPlatform,
+  loadConfig,
+  type ModelField,
+  type ModelSettingsView,
+  type ProviderOverview,
+  type ReasoningEffortLevel,
 } from "@nocturne/core";
 
 import { ProviderPage } from "../src/components/provider-page.js";
@@ -95,12 +101,67 @@ function pageProps(over?: Record<string, unknown>) {
 }
 
 describe("模型设置编辑页（ADR-0024）", () => {
+  it("上游只有基本字段时，编辑页显示 models.dev 的推理和看图来源", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nct-model-frame-"));
+    try {
+      const home = path.join(root, "home");
+      await fs.mkdir(home);
+      const upstream = {
+        id: "deepseek-v4.1-flash",
+        name: "DeepSeek V4.1 Flash",
+        context_length: 128_000,
+        supported_endpoints: ["/v1/chat/completions"],
+      };
+      await fs.writeFile(
+        path.join(home, "providers.json"),
+        JSON.stringify({
+          version: 1,
+          providers: [
+            {
+              id: "up",
+              type: "openai-compatible",
+              baseURL: "https://example.test/v1",
+              models: {
+                [upstream.id]: {
+                  displayName: upstream.name,
+                  contextWindow: upstream.context_length,
+                },
+              },
+            },
+          ],
+        }),
+      );
+      const config = await loadConfig(createPlatform(), {
+        nocturneHome: home,
+        env: () => undefined,
+      });
+      const { lastFrame, unmount } = render(
+        createElement(
+          ProviderPage,
+          pageProps({
+            entries: [entry({ modelCount: 1 })],
+            onListModels: () => config.listModelSettings("up"),
+            initialModelTarget: { providerId: "up", modelId: upstream.id },
+          }),
+        ),
+      );
+      await waitFor(() => (lastFrame() ?? "").includes("服务商 up › deepseek-v4.1-flash"));
+      const frame = lastFrame() ?? "";
+      expect(frame).toMatch(/推理.*是.*models\.dev/);
+      expect(frame).toMatch(/图片输入.*是.*models\.dev/);
+      expect(frame).toMatch(/上下文.*128000.*上游/);
+      unmount();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("操作条含「编辑模型」：Enter 条目 → 操作条 → 编辑模型进列表", async () => {
     const { lastFrame, stdin, unmount } = render(createElement(ProviderPage, pageProps()));
     await waitFor(() => (lastFrame() ?? "").includes("up"));
     stdin.write(ENTER); // 打开操作条
     await waitFor(() => (lastFrame() ?? "").includes("编辑模型"));
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 2; i += 1) {
       stdin.write(RIGHT);
       await pause(30);
     }
@@ -284,24 +345,22 @@ describe("模型设置编辑页（ADR-0024）", () => {
     unmount();
   });
 
-  it("reasoning_none 锁定的档位行显示 — 且来源列说明原因", async () => {
-    const lockedViews = [
+  it("推理为否时隐藏档位行", async () => {
+    const noReasoningViews = [
       fullView({
         reasoning: field<"none" | "hidden" | "visible">("none", { kind: "user" }, true, "none"),
-        reasoningEffort: field<ReasoningEffortLevel[]>([], { kind: "reasoning_none" }, false),
+        reasoningEffort: field<ReasoningEffortLevel[]>([], { kind: "default" }, false),
       }),
     ];
     const { lastFrame, unmount } = render(
       createElement(ProviderPage, {
-        ...pageProps({ onListModels: async () => lockedViews }),
+        ...pageProps({ onListModels: async () => noReasoningViews }),
         initialModelTarget: { providerId: "up", modelId: "m1" },
       }),
     );
     await waitFor(() => (lastFrame() ?? "").includes("[保存]"));
-    const effortRow = (lastFrame() ?? "").split("\n").find((l) => l.includes("思考档位")) ?? "";
-    expect(effortRow).toContain("—");
-    expect(effortRow).toContain("不可切换");
-    expect(effortRow).not.toContain("跟随");
+    expect(lastFrame()).toContain("推理");
+    expect(lastFrame()).not.toContain("思考档位");
     unmount();
   });
 
