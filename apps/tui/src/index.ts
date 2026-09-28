@@ -6,7 +6,7 @@
 import { render } from "ink";
 import { createElement } from "react";
 
-import type { Runtime, RuntimeSession } from "@nocturne/core";
+import type { Clipboard, Runtime, RuntimeSession } from "@nocturne/core";
 
 import type { spawn } from "node:child_process";
 
@@ -37,6 +37,9 @@ export interface TuiOptions {
   mouse?: MouseSource | undefined;
   /** 测试注入：系统剪贴板 spawn */
   copySpawn?: typeof spawn | undefined;
+  /** 测试注入：图片剪贴板读取器及平台标识 */
+  clipboard?: Clipboard | undefined;
+  clipboardPlatform?: NodeJS.Platform | undefined;
   /**
    * 会话入口，两选一：
    * - session：直接进入主界面（常规形态）；
@@ -131,6 +134,8 @@ export async function runTui(
         writeOob: cursorOut.writeOob,
         onOutputLayout: cursorOut.setLayout,
         copySpawn: options.copySpawn,
+        clipboard: options.clipboard,
+        clipboardPlatform: options.clipboardPlatform,
         transcriptOut,
         onSessionId: (id: string) => {
           sessionId = id;

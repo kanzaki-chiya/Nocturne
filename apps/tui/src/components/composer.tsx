@@ -4,10 +4,11 @@
  * Enter 提交；Ctrl 组合键交给全局路由。
  */
 import { Box, Text, useInput, usePaste } from "ink";
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { composerWindow, normalizeNewlines, verticalCursor } from "../cursor.js";
 import { glyphs, useTuiEnv } from "../env.js";
+import { imageTokenAt, imageTokenBefore } from "../images.js";
 import { pasteTokenAt, pasteTokenBefore, type PasteStore } from "../paste.js";
 import { theme } from "../theme.js";
 
@@ -25,6 +26,7 @@ export function Composer({
   onCursor,
   onHistory,
   pastes,
+  onPasteImage,
   height = 1,
 }: {
   value: string;
@@ -49,6 +51,7 @@ export function Composer({
   swallowRef?: { current: boolean } | undefined;
   /** 多行/超长粘贴收成占位（提交时由父组件展开） */
   pastes?: PasteStore | undefined;
+  onPasteImage?: ((text: string) => Promise<boolean>) | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const g = glyphs(env);
@@ -60,7 +63,7 @@ export function Composer({
   const cursorRef = useRef(cursor);
   cursorRef.current = cursor;
   // 父组件是光标的单一来源（补全、历史回填、提交清空都更新它）。
-  useEffect(() => {
+  useLayoutEffect(() => {
     const next = Math.min(cursorProp ?? value.length, value.length);
     if (next !== cursorRef.current) {
       cursorRef.current = next;
@@ -126,7 +129,9 @@ export function Composer({
       if (key.ctrl && (key.leftArrow || key.rightArrow || input === "w")) {
         const left = key.leftArrow || input === "w";
         const part = left ? v.slice(0, c) : v.slice(c);
-        const token = left ? pasteTokenBefore(part) : pasteTokenAt(part);
+        const token = left
+          ? Math.max(pasteTokenBefore(part), imageTokenBefore(part))
+          : Math.max(pasteTokenAt(part), imageTokenAt(part));
         const match = left
           ? /(?:\s*\S+|\s+)$/u.exec(part)?.[0].length
           : /^(?:\s*\S+|\s+)/u.exec(part)?.[0].length;
@@ -147,13 +152,15 @@ export function Composer({
       }
       if (key.leftArrow) {
         if (c > 0) {
-          move(c - (pasteTokenBefore(v.slice(0, c)) || 1));
+          move(
+            c - (Math.max(pasteTokenBefore(v.slice(0, c)), imageTokenBefore(v.slice(0, c))) || 1),
+          );
         }
         return;
       }
       if (key.rightArrow) {
         if (c < v.length) {
-          move(c + (pasteTokenAt(v.slice(c)) || 1));
+          move(c + (Math.max(pasteTokenAt(v.slice(c)), imageTokenAt(v.slice(c))) || 1));
         }
         return;
       }
@@ -166,12 +173,17 @@ export function Composer({
       }
       if (key.backspace) {
         // 占位整块删除，不留半截 [Paste #n
-        const n = Math.max(1, pasteTokenBefore(v.slice(0, c)));
+        const n = Math.max(1, pasteTokenBefore(v.slice(0, c)), imageTokenBefore(v.slice(0, c)));
         if (c > 0) apply(v.slice(0, c - n) + v.slice(c), c - n);
         return;
       }
       if (key.delete) {
-        if (c < v.length) apply(v.slice(0, c) + v.slice(c + (pasteTokenAt(v.slice(c)) || 1)), c);
+        if (c < v.length)
+          apply(
+            v.slice(0, c) +
+              v.slice(c + (Math.max(pasteTokenAt(v.slice(c)), imageTokenAt(v.slice(c))) || 1)),
+            c,
+          );
         return;
       }
       if (key.escape) return; // Esc 由弹层处理
@@ -185,7 +197,11 @@ export function Composer({
   usePaste(
     (pasted) => {
       if (disabled) return;
-      insert(pasted);
+      if (onPasteImage === undefined) insert(pasted);
+      else
+        void onPasteImage(pasted).then((attached) => {
+          if (!attached) insert(pasted);
+        });
     },
     { isActive: active },
   );

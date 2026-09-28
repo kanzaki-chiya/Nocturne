@@ -14,6 +14,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import {
   listProviderPresets,
+  createPlatform,
+  type Clipboard,
   type ModelSettingsPatch,
   type ModelSettingsView,
   type PermissionReply,
@@ -39,6 +41,7 @@ import {
 } from "./commands.js";
 import { copyText } from "./clipboard.js";
 import { composerWindow } from "./cursor.js";
+import { checkImage, createImageStore, droppedImage } from "./images.js";
 import { renderMarkdown, splitMarkdownBlocks, takeMarkdownBlocks } from "./markdown.js";
 import type { MouseSource } from "./mouse.js";
 import { createPasteStore } from "./paste.js";
@@ -189,6 +192,8 @@ export interface AppProps {
   onOutputLayout?: ((conversation: number, page: string) => void) | undefined;
   /** 复制用的 spawn（测试注入 mock；缺省 node:child_process.spawn） */
   copySpawn?: typeof spawn | undefined;
+  clipboard?: Clipboard | undefined;
+  clipboardPlatform?: NodeJS.Platform | undefined;
   /** 全屏退出前把对话铺成行写回主屏（runTui 注入容器，App 填实现） */
   transcriptOut?: { current?: (() => string[]) | undefined } | undefined;
   /** 结束回调：让 runTui 带出退出码与 stderr 提示（默认退出码 0） */
@@ -566,6 +571,8 @@ export function App({
   writeOob,
   onOutputLayout,
   copySpawn,
+  clipboard,
+  clipboardPlatform,
   transcriptOut,
   onExitResult,
   onSessionId,
@@ -616,6 +623,8 @@ export function App({
       writeOob={writeOob}
       onOutputLayout={onOutputLayout}
       copySpawn={copySpawn}
+      clipboard={clipboard}
+      clipboardPlatform={clipboardPlatform}
       transcriptOut={transcriptOut}
       onSessionId={onSessionId}
     />
@@ -634,6 +643,8 @@ function SessionApp({
   writeOob,
   onOutputLayout,
   copySpawn,
+  clipboard,
+  clipboardPlatform,
   transcriptOut,
   onSessionId,
 }: {
@@ -649,6 +660,8 @@ function SessionApp({
   writeOob?: ((data: string) => boolean) | undefined;
   onOutputLayout?: ((conversation: number, page: string) => void) | undefined;
   copySpawn?: typeof spawn | undefined;
+  clipboard?: Clipboard | undefined;
+  clipboardPlatform?: NodeJS.Platform | undefined;
   transcriptOut?: { current?: (() => string[]) | undefined } | undefined;
   onSessionId?: ((id: string) => void) | undefined;
 }): React.JSX.Element {
@@ -680,6 +693,18 @@ function SessionApp({
   }, [session, onSessionId]);
   const [input, setInput] = useState("");
   const [cursor, setCursor] = useState(0);
+  const inputRef = useRef("");
+  const cursorRef = useRef(0);
+  const images = useMemo(() => createImageStore(), []);
+  const imagePlatform = useMemo(() => createPlatform(), []);
+  const [imageHint, setImageHint] = useState<string | undefined>();
+  const updateInput = (value: string, at: number): void => {
+    inputRef.current = value;
+    cursorRef.current = at;
+    images.prune(value);
+    setInput(value);
+    setCursor(at);
+  };
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | undefined>(undefined);
   const [historyDraft, setHistoryDraft] = useState("");
@@ -1192,6 +1217,8 @@ function SessionApp({
     try {
       const res = await newSession();
       if (res.kind === "ok") {
+        images.clear();
+        updateInput(images.strip(inputRef.current), images.strip(inputRef.current).length);
         if (fullscreen) {
           // 视口整体换成新会话：欢迎区重新出现，翻阅与选区清空（ADR-0021 第 2 条）
           setFrozen([]);
@@ -1455,6 +1482,77 @@ function SessionApp({
     alt,
   ]);
   const inputIdle = !pageOpen && !dialogOpen && pending === undefined && !busy;
+  const imageModel = (): { supported: boolean; hint: string } => {
+    const ref = session.state().config.model;
+    const found = runtime
+      .listModels()
+      .find((m) => m.ref.provider === ref.provider && m.ref.model === ref.model);
+    return {
+      supported: found?.capabilities.imageInput === true,
+      hint: `当前模型 ${ref.provider}/${ref.model} 未声明支持图片输入；可在 /provider → 编辑模型里开启`,
+    };
+  };
+  const insertImage = (image: {
+    data: Uint8Array;
+    mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+    label: string;
+  }): void => {
+    const token = images.add(image);
+    const v = inputRef.current;
+    const c = cursorRef.current;
+    updateInput(v.slice(0, c) + token + v.slice(c), c + token.length);
+    setImageHint(undefined);
+  };
+  const onPasteImage = async (text: string): Promise<boolean> => {
+    const found = await droppedImage(text, imagePlatform);
+    if (found.kind === "none") return false;
+    if (found.kind === "too_large") {
+      setImageHint("图片超过 5 MB / 8000 px 限制");
+      return false;
+    }
+    const model = imageModel();
+    if (!model.supported) {
+      setImageHint(model.hint);
+      return false;
+    }
+    insertImage(found.image);
+    return true;
+  };
+  const pasteClipboardImage = (): void => {
+    if (
+      clipboardPlatform !== undefined ? clipboardPlatform !== "win32" : process.platform !== "win32"
+    ) {
+      setImageHint("当前平台暂不支持从剪贴板粘贴图片");
+      return;
+    }
+    const model = imageModel();
+    if (!model.supported) {
+      setImageHint(model.hint);
+      return;
+    }
+    void (clipboard ?? imagePlatform.clipboard)
+      .readImage()
+      .then((result) => {
+        if (result === undefined) {
+          setImageHint("剪贴板中没有图片");
+          return;
+        }
+        const checked = checkImage(result.data);
+        if (checked.kind !== "ok") {
+          setImageHint("图片超过 5 MB / 8000 px 限制");
+          return;
+        }
+        const current = imageModel();
+        if (!current.supported) {
+          setImageHint(current.hint);
+          return;
+        }
+        insertImage({ data: result.data, mimeType: checked.mimeType, label: "剪贴板" });
+      })
+      .catch((e: unknown) => {
+        setImageHint(`读取剪贴板失败：${errText(e)}`);
+      });
+  };
 
   const completionCtx = useMemo(
     () => ({
@@ -1492,13 +1590,12 @@ function SessionApp({
     };
   }, [input.startsWith("/provider"), provider]);
 
-  const applyCandidate = useCallback((item: Candidate, execute: boolean) => {
-    setInput(item.insert);
-    setCursor(item.insert.length);
+  const applyCandidate = (item: Candidate, execute: boolean): void => {
+    updateInput(item.insert, item.insert.length);
     if (execute) {
       setCompletionOn(false);
     }
-  }, []);
+  };
 
   const recallHistory = (direction: -1 | 1): void => {
     if (inputHistory.length === 0) return;
@@ -1506,11 +1603,10 @@ function SessionApp({
       0,
       Math.min(inputHistory.length, (historyIndex ?? inputHistory.length) + direction),
     );
-    if (historyIndex === undefined) setHistoryDraft(input);
+    if (historyIndex === undefined) setHistoryDraft(images.strip(input));
     setHistoryIndex(next === inputHistory.length ? undefined : next);
     const value = next === inputHistory.length ? historyDraft : (inputHistory[next] ?? "");
-    setInput(value);
-    setCursor(value.length);
+    updateInput(value, value.length);
   };
 
   // 全局键：退出、翻页、Shift+Tab、Alt+M、补全列表。弹层内的键由各自组件处理。
@@ -1586,6 +1682,10 @@ function SessionApp({
       cyclePreset();
       return;
     }
+    if (key.meta && !key.ctrl && (ch === "v" || ch === "V")) {
+      if (inputIdle) pasteClipboardImage();
+      return;
+    }
     // 全屏视口翻阅（ADR-0021）：弹层/页面/权限待决时不响应
     if (fullscreen && !pageOpen && !dialogOpen && pending === undefined) {
       const page = Math.max(1, budget.conversation - 1);
@@ -1625,8 +1725,7 @@ function SessionApp({
       }
       if (key.return) {
         const text = selected.insert;
-        setInput("");
-        setCursor(0);
+        updateInput("", 0);
         setCompletionOn(true);
         if (fullscreen) setScroll(scrollToBottom());
         void runSlash(text, session, provider)
@@ -1728,8 +1827,7 @@ function SessionApp({
   });
 
   const clearInput = useCallback(() => {
-    setInput("");
-    setCursor(0);
+    updateInput("", 0);
   }, []);
 
   const pastes = useMemo(() => createPasteStore(), []);
@@ -1751,10 +1849,20 @@ function SessionApp({
         pushLine("! 正在切换会话，请稍候");
         return;
       }
-      setInputHistory((history) =>
-        history.at(-1) === text ? history : [...history.slice(-999), text],
-      );
-      void session.recordInputHistory(pastes.expand(text));
+      const historyText = images.strip(pastes.expand(text));
+      if (!text.startsWith("/") && images.in(text).length > 0) {
+        const model = imageModel();
+        if (!model.supported) {
+          setImageHint(model.hint);
+          return;
+        }
+      }
+      if (historyText !== "") {
+        setInputHistory((history) =>
+          history.at(-1) === historyText ? history : [...history.slice(-999), historyText],
+        );
+        void session.recordInputHistory(historyText);
+      }
       setHistoryIndex(undefined);
       if (text.startsWith("/")) {
         void runSlash(text, session, provider)
@@ -1779,14 +1887,16 @@ function SessionApp({
           });
         return;
       }
+      if (submitting.current) return;
+      const attachments = images.in(text);
       clearInput();
+      images.clear();
       if (fullscreen) setScroll(scrollToBottom());
       // 历史里保留占位，发给模型的是展开后的原文
-      if (submitting.current) return;
       submitting.current = true;
       setSubmitPending(true);
       void session
-        .submit({ text: pastes.expand(text) })
+        .submit({ text: pastes.expand(text), ...(attachments.length > 0 ? { attachments } : {}) })
         .catch((e: unknown) => {
           pushLine(`! ${errText(e)}`);
         })
@@ -2321,13 +2431,16 @@ function SessionApp({
         value={input}
         cursor={cursor}
         onChange={(next, nextCursor) => {
-          setInput(next);
-          setCursor(nextCursor);
+          updateInput(next, nextCursor);
           setHistoryIndex(undefined);
         }}
-        onCursor={setCursor}
+        onCursor={(next) => {
+          cursorRef.current = next;
+          setCursor(next);
+        }}
         onHistory={recallHistory}
         onSubmit={onSubmit}
+        onPasteImage={onPasteImage}
         active={!dialogOpen && pending === undefined && !pageOpen}
         disabledReason={composerDisabled}
         width={width}
@@ -2351,7 +2464,9 @@ function SessionApp({
           context={{ used: contextReport.estimatedTokens, limit: contextWindow }}
           models={runtime.listModels()}
           highlight={highlight}
-          note={note ?? (expanded && fullscreen ? "思考已展开（Ctrl+O 收起）" : undefined)}
+          note={
+            imageHint ?? note ?? (expanded && fullscreen ? "思考已展开（Ctrl+O 收起）" : undefined)
+          }
         />
       ) : null}
     </>
