@@ -7,9 +7,11 @@ import stringWidth from "string-width";
 
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 
+import { attachmentLine } from "./attachment-line.js";
 import { boxSafe, stripControls, summarizeToolInput, tailLines, truncateLine } from "./format.js";
 import { renderMarkdown } from "./markdown.js";
 import { reasoningLabel, type ReasoningMap, type ReasoningPart } from "./reasoning.js";
+import { theme } from "./theme.js";
 import type { TranscriptItem } from "./components/transcript.js";
 import type { LaidLine, LineBlock } from "./viewport.js";
 
@@ -19,8 +21,9 @@ function budget(width: number): number {
   return Math.max(1, width - SAFE);
 }
 
-function paint(text: string, width: number): string {
-  return truncateLine(boxSafe(stripControls(text.replace(/\r\n?/g, "\n"))), budget(width), "...");
+function paint(text: string, width: number, preserveMiddleDots = false): string {
+  const clean = stripControls(text.replace(/\r\n?/g, "\n"));
+  return truncateLine(preserveMiddleDots ? clean : boxSafe(clean), budget(width), "...");
 }
 
 interface WrappedLine {
@@ -58,10 +61,16 @@ function wrap(text: string, width: number): WrappedLine[] {
   return out.length > 0 ? out : [{ text: "", continued: false }];
 }
 
-function rows(key: string, text: string, width: number, extra?: Partial<LaidLine>): LaidLine[] {
+function rows(
+  key: string,
+  text: string,
+  width: number,
+  extra?: Partial<LaidLine>,
+  preserveMiddleDots = false,
+): LaidLine[] {
   return wrap(text, width).map((line, i) => ({
     key: `${key}:${i}`,
-    text: paint(line.text, width),
+    text: paint(line.text, width, preserveMiddleDots),
     continued: line.continued,
     ...extra,
   }));
@@ -134,7 +143,18 @@ export function layoutEntry(
         .filter((c) => c.type === "text")
         .map((c) => c.text)
         .join("");
-      return rows(entry.key, `${prompt} ${text}`, width, { color: "cyan", bold: true });
+      return [
+        ...rows(entry.key, `${prompt} ${text}`, width, { color: "cyan", bold: true }),
+        ...(entry.attachments ?? []).flatMap((att, i) =>
+          rows(
+            `${entry.key}:image:${i}`,
+            `  ${attachmentLine(att, i, ascii)}`,
+            width,
+            { color: theme.accent },
+            true,
+          ),
+        ),
+      ];
     }
     case "assistant": {
       const lines: LaidLine[] = [];
@@ -169,6 +189,15 @@ export function layoutEntry(
       const summary = summarizeToolInput(entry.name, entry.input);
       const head = `${mark} ${entry.name ?? "?"} ${summary} ${entry.status}`;
       const lines = rows(entry.key, head, width);
+      const attachmentRows = (entry.result?.attachments ?? []).flatMap((att, i) =>
+        rows(
+          `${entry.key}:image:${i}`,
+          `  ${attachmentLine(att, i, ascii)}`,
+          width,
+          { color: theme.accent },
+          true,
+        ),
+      );
       if (entry.liveOutput !== "") {
         for (const [i, line] of tailLines(entry.liveOutput, 3).entries()) {
           lines.push({
@@ -186,7 +215,7 @@ export function layoutEntry(
           lines.push({ key: `${entry.key}:sum`, text: paint(`  ${first}`, width), dim: true });
         }
         lines.push(...diffLines(entry.key, diff, width, ascii));
-        return lines;
+        return [...lines, ...attachmentRows];
       }
       const content = entry.result?.modelContent;
       if (content !== undefined && content !== "") {
@@ -198,7 +227,7 @@ export function layoutEntry(
           });
         }
       }
-      return lines;
+      return [...lines, ...attachmentRows];
     }
     case "notice":
       return rows(entry.key, `${dot} ${entry.message}`, width, { dim: true });

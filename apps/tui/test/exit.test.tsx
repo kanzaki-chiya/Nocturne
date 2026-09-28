@@ -150,7 +150,9 @@ describe("退出保留回滚区", () => {
     });
     await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
     for (let i = 1; i <= 5; i++) {
+      const before = io.stdoutChunks.length;
       io.stdin.write("/model");
+      await waitFor(() => io.stdoutChunks.slice(before).join("").includes("/model"));
       io.stdin.write("\r");
       await waitFor(() => io.stdoutChunks.join("").split("\x1b[?1049h").length - 1 === i);
       io.stdin.write("\x1b");

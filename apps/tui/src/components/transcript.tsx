@@ -4,10 +4,12 @@
  */
 import { Box, Static, Text } from "ink";
 
+import { attachmentLine } from "../attachment-line.js";
 import { glyphs, useTuiEnv } from "../env.js";
 import { layoutEntry } from "../lines.js";
 import type { ReasoningMap } from "../reasoning.js";
 import { renderMarkdown } from "../markdown.js";
+import { theme } from "../theme.js";
 import type { LaidLine } from "../viewport.js";
 import { ToolRow } from "./tool-row.js";
 
@@ -20,15 +22,21 @@ export type TranscriptItem =
   | { kind: "header"; key: string; lines: LaidLine[] };
 
 function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): React.JSX.Element {
+  const env = useTuiEnv();
   const text = entry.content
     .filter((c) => c.type === "text")
     .map((c) => c.text)
     .join("");
   return (
-    <Box marginTop={1}>
+    <Box marginTop={1} flexDirection="column">
       <Text color="cyan" bold>
-        › {text}
+        {glyphs(env).prompt} {text}
       </Text>
+      {(entry.attachments ?? []).map((att, i) => (
+        <Text key={`${att.file}:${i}`} color={theme.accent} wrap="truncate">
+          {`  ${attachmentLine(att, i, env.ascii)}`}
+        </Text>
+      ))}
     </Box>
   );
 }

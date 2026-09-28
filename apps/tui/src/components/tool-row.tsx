@@ -5,8 +5,10 @@
 import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
 
+import { attachmentLine } from "../attachment-line.js";
 import { glyphs, useTuiEnv } from "../env.js";
 import { formatDuration, summarizeToolInput, tailLines, truncateLine } from "../format.js";
+import { theme } from "../theme.js";
 import { DiffView } from "./diff.js";
 
 import type { LiveTool, ToolEntry } from "@nocturne/core/protocol";
@@ -95,6 +97,11 @@ export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): 
           ))
         : null}
       {entry.result !== undefined ? <ToolResult entry={entry} width={width} /> : null}
+      {(entry.result?.attachments ?? []).map((att, i) => (
+        <Text key={`${att.file}:${i}`} color={theme.accent} wrap="truncate">
+          {`  ${attachmentLine(att, i, env.ascii)}`}
+        </Text>
+      ))}
     </Box>
   );
 }
