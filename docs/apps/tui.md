@@ -212,9 +212,19 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 | 换密钥 | 掩码输入新密钥 → 系统凭据后端 | `/provider key <名>` |
 | 刷新模型列表 | 重新 `GET /models` 写回限额与能力标记；不覆盖 `thinking.levels` 用户声明 | `/provider refresh <名>` |
 | 调整思考档位 | 重走单步档位勾选（首项「不支持思考强度」互斥） | `/provider thinking <名>` |
+| 编辑模型 | 进入模型列表子视图（见下）；`/provider model <名> [<模型>]` 直达 | `/provider model <名> [<模型>]` |
 | 删除 | 选项式确认框（默认焦点在「取消」；`←`/`→`/`↑`/`↓` 移动、`Enter` 执行、`Esc` 取消）确认后删除条目与凭据；当前会话使用的拒绝；只读条目不可达 | `/provider remove <名>` |
 
-`/provider image <名> <模型> on|off` 声明模型是否支持图片输入（ADR-0023），没有对应的页面操作，只在斜杠命令中提供。
+**模型编辑子视图**（ADR-0024 第 5 节）：「编辑模型」把内容区换成**模型列表**——页头面包屑 `服务商 <名> › 模型（N）`，下一行与服务商页一致的 `过滤: <query>`；行显示模型 id、`上下文/最大输出` 缩写与 `R`（推理）/`I`（图片输入）能力标记，按模型 id 排序、按显示宽度对齐。`Enter` 进**模型编辑页**，`Esc` 返回列表再返回服务商列表。底部按键提示 `↑/↓ 选择 • Enter 编辑 • Esc 返回 • Ctrl+C 退出`（子视图打开时服务商页自身不再追加提示行，全页只有这一行）。只读服务商（手写层条目）`Enter` 不进操作菜单，直接进模型列表的**只读查看**——面包屑下方显示 `readonlyHint`（该条目定义在哪个文件/环境），底部提示改为 `只读 • Esc 返回 • Ctrl+C 退出`，编辑页所有字段灰显不可聚焦。
+
+**模型编辑页**：面包屑 `服务商 <名> › <模型>`；每行 `字段名  当前值  来源`，列按显示宽度对齐：字段名列固定 10 列，**值列宽为 `min(本页值文本最大显示宽度, 32)`**，来源列紧跟其后占剩余宽度、放不下时从左侧截断（保留文件名）。来源文案为 上游 / 用户编辑 / 由 <文件> 决定（config.json 层为文件路径、项目配置为项目配置路径、env 为环境变量、cli 为命令行）/ 内置 / 默认 / 服务商思考档位 / 按推理能力推导 / 「推理为 none，不可切换」。当前值规则：可编辑且无用户编辑的字段显示 `跟随（<生效值>）`（生效值未声明显示 `未声明`）；草稿改回跟随/清空后显示回落到的下层值；来源为手写层的只读字段直接显示生效值、不出现「跟随」；`reasoningEffort` 被显式 none 锁定时该行显示 `—` 且不可聚焦。焦点行以 `›` 前缀标示。六个字段：
+
+- 显示名、上下文长度、最大输出：直接键入编辑（输入框预填用户编辑值；留空 = 跟随；数字按原始整数显示）；
+- 图片输入：`←`/`→` 在「跟随 / 是 / 否」间切换；推理：「跟随 / none / hidden / visible」；
+- 思考档位：`Enter` 打开多选弹层（与思考档位向导同一勾选交互）：首项「跟随」与「不支持思考强度」（= 空数组）各自独占互斥，其余六档；弹层打开时编辑页提示行隐去，弹层底部 `空格勾选 • Enter 确认 • Esc 取消 • Ctrl+C 退出`；
+- `↑`/`↓` 移动时跳过不可编辑行（只读灰显）；来源为 `config.json` 等手写层的字段不可聚焦。
+
+底部 `[保存]` `[取消]` 与按键提示 `↑/↓ 移动 • ←/→ 切换 • Enter 编辑/确认 • Esc 取消 • Ctrl+C 退出` 各占一行。保存经 `saveModelSettings` 写入 providers.json 的 `userModels`，成功后 reload 配置 + `updateProviders` 并回列表、结果显示行；校验失败在编辑页内显示原因不退出。`Esc` 取消不保存。`/provider model <名> [<模型>]` 打开服务商页直达模型列表（带模型 id 时直达该模型的编辑页）。
 
 **全页无打字是非题**（ADR-0019 第 2 条）：所有是非与多选交互都用 `↑`/`↓`/`←`/`→` + `空格`/`Enter` 完成——包括删除确认与思考档位勾选，页面上不出现需要键入 `y`/`N` 回答的提问。
 
@@ -226,7 +236,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 - `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口及批准的终端依赖（ink、react、string-width、marked；`ink-testing-library` 为 devDependency）。CLI 仅可惰性加载 `@nocturne/tui`，或静态引用 `@nocturne/tui/slash-catalog`；后者不得 import 任何模块，以免逐行模式加载 Ink。依赖方向见 [modules.md](../architecture/modules.md) 第 1 节。
 - 目录：`src/index.ts`（`runTui`：全屏/普通屏幕装配、鼠标上报开闭、退出导出）、`src/app.tsx`（界面状态与布局）、`src/lines.ts`（`SessionView` → 内容行块，按条目 key + 宽度缓存布局）、`src/viewport.ts`（可见窗口选择）、`src/scroll.ts`（翻阅状态）、`src/mouse.ts`（SGR 鼠标序列解析与 stdin 包装）、`src/selection.ts`（选区坐标与高亮/复制文本）、`src/clipboard.ts`（系统剪贴板 + OSC 52，只用 Node 内置模块）、`src/cursor.ts`（硬件光标补位与帧外写出通道）、`src/output-layer.ts`（全屏帧差异写出与滚动区域平移）、`src/frame.ts`（活动区高度预算）、`src/alt-screen.ts`（`--inline` 与首配流程的临时备用屏）、`src/markdown.ts`（助手文本排版）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。
-- 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎区/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/就地步骤/四操作/Esc/Ctrl+C。
+- 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎区/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/就地步骤/操作菜单/模型编辑子视图/Esc/Ctrl+C。
 - **显示宽度**：按 `string-width` 预算中文和动态文本，框内动态文本经 `format.ts` 的 `boxSafe()` 处理；窄屏时截断摘要和列表字段，边框保留安全余量。
 - `runTui` 只消费 Core 公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`、`readInputHistory`/`recordInputHistory`、`mcpServers()`（`/mcp` 面板），以及 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
 

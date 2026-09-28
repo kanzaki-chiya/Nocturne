@@ -30,7 +30,9 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 能力信息来自内置的小型模型目录（纯数据），用户可以在配置中覆盖或为未知模型补充。MVP 不从远端同步模型目录。
 
-`capabilities.imageInput` 的来源优先级（高者覆盖低者，ADR-0023）：逐模型手写 `models.<id>.capabilities.imageInput` > 用户声明（providers.json 条目的 `userCapabilities`，`/provider image` 写入，见 [provider-setup.md](provider-setup.md)）> 上游声明（`GET /models` 的 `architecture.input_modalities` 等映射，provider-setup.md 第 7 节）> 内置目录 > `false`。一层细节：同 id 服务商的 `models` 按模型 id 逐条合并，`config.json` 里手写的同名模型条目会**整体替换**向导层的该模型条目——若手写条目没写 `imageInput`，该字段回落到用户声明而不是上游值；只有手写确实给出 `imageInput` 时才覆盖声明。
+模型字段（`displayName`/`contextWindow`/`maxOutputTokens`/`capabilities.*`）的生效值按**逐字段**优先级取（高者覆盖低者，ADR-0024 第 2 节）：逐模型手写 `models.<id>.<字段>`（config.json / 项目配置 / 环境变量 / 命令行，层间再按全局层级）> 用户编辑（providers.json 条目的 `userModels.<模型>`，「编辑模型」或 `/provider model` 写入，见 [provider-setup.md](provider-setup.md)）> 上游声明（`GET /models` 的字段映射，provider-setup.md 第 7 节）> 内置目录 > 字段默认（`imageInput` 为 `false`、`reasoning` 为 `none`、数值字段为未声明）。逐字段的含义：`config.json` 同名模型条目**只覆盖它实际写出的字段**——只写 `contextWindow` 时其余字段照常回落到用户编辑/上游/内置；数组字段（`reasoningEffort`）由最高层整体替换，不并集，显式空数组同样生效。
+
+`reasoningEffort` 在字段级声明之外还有一条档位链（ADR-0018/0024）：逐模型字段声明（同上优先级）> 服务商条目 `thinking.levels`（服务商级用户声明，`/provider refresh` 不覆盖）> `reasoning ≠ "none"` 时推导全档 > 无（不可切换）。**显式 none**：生效 `reasoning` 为 `none` 且来源是用户编辑或手写层时档位锁定为空数组——两个例外：`userModels` 的 none 遇到手写非空档位时手写优先（保留档位并警告）；手写层自身的 none + 非空档位是配置矛盾，档位置空并产生 `config_warning`（写明文件、服务商、模型）。内置目录/默认给出的 none 不算配置层声明，不触发锁定（服务商 `thinking.levels` 照常生效）。
 
 ## 3. 配置形态（示意）
 

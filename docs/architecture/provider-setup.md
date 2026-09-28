@@ -49,10 +49,10 @@ API Key（掩码输入；直接回车表示改用环境变量）：********
 | `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成；等价于服务商页「换密钥」 |
 | `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置；不覆盖 `thinking.levels` 的用户声明；等价于「刷新模型列表」 |
 | `/provider thinking <name>` | 对已配置的服务商重走思考声明步骤（单步勾选，首项"不支持"互斥），写入 `thinking.levels` 并标注 `source: "user"`；等价于「调整思考档位」 |
-| `/provider image <name> <模型> on\|off` | 声明该模型是否支持图片输入（ADR-0023），写入条目 `userCapabilities.<模型>.imageInput`；只能声明清单内的模型，不存在时提示先 `/provider refresh`；`off` 是显式"不支持"，覆盖上游声明的 true；`refresh` 不覆盖用户声明；手写在 `config.json` 的条目报错且不改写该文件 |
+| `/provider model <name> <模型>` | 编辑该模型的六个设置（显示名 / 上下文长度 / 最大输出 / 推理 / 图片输入 / 思考档位），写入条目 `userModels.<模型>`（ADR-0024）。CLI 逐行问答：每行显示 `当前值（来源）`，回车保留、`-` 清除用户编辑；来源为 `config.json` 等手写层的字段只显示不提问；TUI 等价于服务商页「编辑模型」。只能编辑清单内的模型；`refresh` 不覆盖用户编辑；手写在 `config.json` 的条目报错且不改写该文件 |
 | `/provider remove <name>` | 删除向导写入的条目及其凭据；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改；等价于「删除」 |
 
-Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。四个子命令与服务商页操作是同一套 Core 编排的快捷方式，命令名与效果在 CLI 与 TUI 一致。
+Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。这些子命令与服务商页操作是同一套 Core 编排的快捷方式，命令名与效果在 CLI 与 TUI 一致。
 
 TUI 另有全屏的**模型选择页**（`/model` 打开）：左右双栏（范围/服务商 + 搜索与模型列表）、最近使用置顶、上游声明的上下文/价格/能力标记、窄终端降级、左栏 `○` 预设内嵌添加向导。完整规格见 [tui.md](../apps/tui.md) 第 7 节。
 
@@ -70,14 +70,16 @@ interface ProviderSetupFile {
   /** 默认模型，"provider/model" 形式；由 /model 页"设为默认"写入（v0.3 起向导不写它） */
   model?: string;
   /** 形状同 config.json 的 providers 元素（ProviderConfig），apiKeyEnv 可省略（第 3 节）；
-      另含 userCapabilities?: Record<modelId, { imageInput?: boolean }>——/provider image
-      写入的用户声明（ADR-0023），只在向导层有意义；refresh 重写 models 字段时保留，
-      同名条目整换（重新添加）时同样沿用 */
+      另含 userModels?: Record<modelId, { displayName?; contextWindow?; maxOutputTokens?;
+      capabilities?: { reasoning?; imageInput?; reasoningEffort? } }>——/provider model 与
+      服务商页「编辑模型」写入的逐模型用户编辑（ADR-0024），只在向导层有意义；
+      refresh 重写 models 字段时保留，同名条目整换（重新添加）时同样沿用 */
   providers: ProviderConfig[];
 }
 ```
 
-- 合并规则与 `config.json` 相同（按 `id` 合并，`models` 逐条合并）。手写配置里同名的条目覆盖向导条目：用户手写的永远赢。`/provider` 列表会标注"被 config.json 覆盖"，免得用户困惑"为什么向导改了不生效"。
+- 合并规则与 `config.json` 相同（按 `id` 合并，`models` **逐字段合并**——顶层字段逐个覆盖、`capabilities` 逐键覆盖、`reasoningEffort` 数组整体替换；ADR-0024 第 2 节）。手写配置里同名的字段覆盖向导条目：用户手写的永远赢。`/provider` 列表会标注"被 config.json 覆盖"，免得用户困惑"为什么向导改了不生效"。
+- 条目里的 `userModels` 不直接出现在合并结果中：加载时它被包成一个独立合成层（`providers: [{ id, models: userModels }]`）插在向导层与用户配置之间参与逐字段合并——用户编辑优先于上游声明、低于手写配置；只由该层引入的清单外模型在合并后被丢弃（详见 [config.md](config.md) 第 2 节与 [ADR-0024](../decisions/ADR-0024-model-settings-editor.md)）。
 - 写入方式与 `trust.json` 一致：整文件原子替换（临时文件 + rename）；解析失败或版本不符时忽略该文件并发出 `runtime.warning(code="provider_setup_invalid")`（不阻塞启动，与 Grant 文件的处理一致），`/provider` 在列表顶部显示该警告。
 - 只有向导与 `/provider` 写这个文件；用户也可以手工编辑，但推荐的手写位置仍是 `config.json`。
 
@@ -194,9 +196,19 @@ describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>
 refreshUpstreamLimits(providerId: string): Promise<void>  // /provider refresh：重新获取并写入 providers.json（不覆盖 thinking.levels 用户声明）
 saveSetupThinking(providerId: string, levels: ReasoningEffortLevel[] | undefined): Promise<void>
   // /provider thinking：写入/清除条目 thinking.levels（levels 存在时标 source:"user"）
-saveSetupImageInput(providerId: string, modelId: string, enabled: boolean): Promise<void>
-  // /provider image：写入条目 userCapabilities.<modelId>.imageInput；非向导条目或
-  //   清单外模型抛 config_invalid，绝不写 config.json
+listModelSettings(providerId: string, workspaceRoot?: string): Promise<ModelSettingsView[]>
+  // 模型设置编辑（ADR-0024）：逐模型返回六个字段的生效值/来源/可编辑标记；
+  //   只含合并结果清单内的模型（按模型 id 排序）；服务商不在 providers.json 时
+  //   整个视图 readonly 并带 readonlyHint
+saveModelSettings(providerId: string, modelId: string, patch: ModelSettingsPatch): Promise<void>
+  // 写入端：patch（undefined=保留、null=清除用户编辑）应用到条目 userModels；
+  //   校验以"保存后的最终生效值"计算（非向导条目、清单外模型、patch 触及
+  //   config 来源字段、非正整数、生效最大输出>上下文、显式 none 冲突等抛
+  //   config_invalid 且不写文件）；原子写 providers.json，绝不写 config.json
+runProviderModelWizard(io, config, providerId, modelId, opts?): Promise<void>
+  // /provider model 的行式问答（ADR-0024 第 4 节）：逐字段显示"当前值（来源）"，
+  //   回车保留、- 清除；只读字段与推理 none 锁定的档位只显示不提问；
+  //   收集完一次性 saveModelSettings
 runProviderSetupWizard(io, config, deps, opts?): Promise<WizardResult>
   // 步骤：预设选择（opts.presetId 直达）→（自定义预设才问）名称/地址 → 密钥
   //   → GET /models →（上游未声明思考能力时）思考档位 → 保存。
@@ -234,7 +246,7 @@ runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最�
   - OpenAI 兼容格式：`id` → 模型 id；`name` → `displayName`；`context_length` → `contextWindow`；
   - OpenRouter（同属 OpenAI 兼容形状）：`top_provider.max_completion_tokens` → `maxOutputTokens`（`top_provider.context_length` 优先于顶层 `context_length`）；`pricing`（按 token 计价的 USD 字符串）换算为每百万 token 写入 `pricing.input`/`pricing.output`；`supported_parameters` 含 `reasoning` → `capabilities.reasoning`；`architecture.input_modalities` 含 `image` → `capabilities.imageInput`；
   - Anthropic 模型列表接口按其官方文档返回的限额字段映射（实现时对照文档，没有的字段不猜）。
-- `reasoning`/`imageInput` 复用 `ModelCapabilities` 的既有字段，但**只在有声明时设置**——上游没声明的字段保持目录/保守默认，不因"没在 supported_parameters 里看到"而断言不支持（清单字段的覆盖范围各服务不统一）。`imageInput` 另有用户声明一级：providers.json 条目的 `userCapabilities`（`/provider image` 写入）位于上游声明之上、手写配置之下，完整优先级见 [providers.md](providers.md) 第 2 节。
+- `reasoning`/`imageInput` 复用 `ModelCapabilities` 的既有字段，但**只在有声明时设置**——上游没声明的字段保持目录/保守默认，不因"没在 supported_parameters 里看到"而断言不支持（清单字段的覆盖范围各服务不统一）。六个字段（`displayName`/`contextWindow`/`maxOutputTokens`/`reasoning`/`imageInput`/`reasoningEffort`）另有用户编辑一级：providers.json 条目的 `userModels`（`/provider model` 或服务商页「编辑模型」写入）位于上游声明之上、手写配置之下，完整优先级见 [providers.md](providers.md) 第 2 节。
 - 上游的 `reasoning` 能力标记会推导该模型的可用思考档位为完整六档（ADR-0018 第 2 节）；逐档位的收窄由用户在向导勾选（`thinking.levels`，`source: "user"`）或手写 `capabilities.reasoningEffort` 完成——`refresh` 不覆盖这些用户声明。
 - 写入 `models` 的 `pricing` 进入 `ModelInfo.pricing`（[provider-api.md](../protocols/provider-api.md) 第 2 节）；模型选择页按这些字段渲染"推理 / 图片输入 / 上下文 / 价格"列（[tui.md](../apps/tui.md) 第 7 节），未声明的列留空，不编造数据。
 - **最大输出长度未知时不替上游做决定**：

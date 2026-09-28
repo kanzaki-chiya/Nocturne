@@ -14,6 +14,7 @@
 |---|---|---|---|
 | 内置默认 | 代码内常量 | 可信 | 预设名 `default`、Turn 默认值等；不是一个文件 |
 | 向导配置 | `<NOCTURNE_HOME>/providers.json` | 可信 | 机器维护：只由 `nctrn setup` 与 `/provider` 原子写，内容限 `model` 与 `providers`；手写配置按 `id` 覆盖它（v0.2，[provider-setup.md](provider-setup.md)） |
+| 用户编辑（`userModels`） | 同上 providers.json 条目的 `userModels` 字段 | 可信 | **合成层**：加载时由条目内 `userModels` 包成 `{providers:[{id,models:userModels}]}`，插在向导层与用户配置之间；只作用于 `models` 逐字段合并，不产生权限规则等其他字段（ADR-0024，见第 2 节） |
 | 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；**程序从不改写它** |
 | 项目配置 | `<workspaceRoot>/.nocturne/config.json` | **默认不可信** | 来自被操作的仓库，见第 3 节信任模型 |
 | 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；凭据经环境变量或操作系统凭据后端进入（索引文件 `credentials.json` 不含明文）（v0.2，[provider-setup.md](provider-setup.md)） |
@@ -72,10 +73,12 @@ interface ConfigFile {
 | 字段 | 合并方式 |
 |---|---|
 | `model`、`permissions.preset`、`reasoningEffort`、`turn.*`、`shell`、`shellPath` | 高层覆盖低层 |
-| `providers` | 按 `id` 合并：同 id 条目浅合并（高层字段覆盖），其中 `models` 按模型 id 再逐条合并；不同 id 并存 |
+| `providers` | 按 `id` 合并：同 id 条目浅合并（高层字段覆盖），其中 `models` 按模型 id **逐字段合并**（ADR-0024 第 2 节）：顶层字段（`displayName`/`contextWindow`/`maxOutputTokens`/`pricing`）逐个覆盖、`capabilities` 逐键覆盖、数组字段（`reasoningEffort`）由最高层整体替换（显式空数组同样生效、不并集）；不同 id 并存 |
 | `permissions.rules` | 追加：高层规则排在低层之后（权限"后写优先"语义见 permissions.md 5.1） |
 | `mcp.servers` | 按服务器 id 浅合并（同 `providers`）；不同 id 并存 |
 | `hooks.*` | 按事件点追加：用户级条目在前、项目级在后，执行顺序即此顺序（hooks.md 第 2 节） |
+
+**`userModels` 合成层**（ADR-0024 第 2 节）：providers.json 条目里的 `userModels`（模型编辑页 / `/provider model` 写入的逐模型用户编辑）不是合并结果的一部分，而是加载时被包成一个独立层——`providers: [{ id, models: userModels }]`——插在向导层（setup）与 `config.json`（user）之间参与 `models` 逐字段合并。因此用户编辑优先于上游声明、低于任何手写层；只由该层引入、其他层都不声明的模型条目在合并后被丢弃（不为清单外模型造条目）。生效 `reasoning` 为 `none` 且来源是 `userModels` 或手写层时，`reasoningEffort` 按显式 none 规则锁定为空数组（两类冲突的例外与警告见 [providers.md](providers.md) 第 2 节）。
 
 **机器维护的 `settings.json`**（ADR-0022 第 3 节）：`<NOCTURNE_HOME>/settings.json` 由程序原子写入（临时文件 + rename），只写自己的文件；当前只有 `shell`/`shellPath` 两个字段，由 `/shell`（或 `session.setShell`）写入，`"auto"` 表示清除回自动。它不进上面的合并链，只参与 shell 选择的合成：`NOCTURNE_SHELL` > `config.json` > `settings.json` > 自动（tools.md 第 6 节）；手写 `config.json` 的同名字段覆盖它，程序不改写 `config.json`。文件损坏或 `shell` 值无法识别时忽略并警告，不阻塞启动；单独给出 `shellPath` 时同样要先能推断种类（见上表注释）。读入时保留未知字段原样写回，后续偏好就地扩展。
 
