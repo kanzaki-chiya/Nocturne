@@ -280,7 +280,7 @@ describe("附件行", () => {
     label: "a.png",
   };
   it("用户与 read 工具行及退出用布局均展示；ASCII 为纯文本", () => {
-    expect(attachmentLine(att, 0, false)).toBe("[图片 #3 · a.png · 2×3 · 2 KB]");
+    expect(attachmentLine(att, 0, false)).toBe("[图片 #3 • a.png • 2x3 • 2 KB]");
     expect(attachmentLine(att, 0, true)).toBe("[Image #3 | a.png | 2x3 | 2 KB]");
     const user = {
       kind: "user" as const,
@@ -318,12 +318,12 @@ describe("附件行", () => {
       layoutEntry(user, 80, false)
         .map((l) => l.text)
         .join("\n"),
-    ).toContain("[图片 #3 · a.png · 2×3 · 2 KB]");
+    ).toContain("[图片 #3 • a.png • 2x3 • 2 KB]");
     expect(
       layoutEntry(tool, 80, false)
         .map((l) => l.text)
         .join("\n"),
-    ).toContain("[图片 #3 · a.png · 2×3 · 2 KB]");
+    ).toContain("[图片 #3 • a.png • 2x3 • 2 KB]");
     expect(
       layoutEntry(user, 80, true)
         .map((l) => l.text)

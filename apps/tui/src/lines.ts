@@ -21,9 +21,8 @@ function budget(width: number): number {
   return Math.max(1, width - SAFE);
 }
 
-function paint(text: string, width: number, preserveMiddleDots = false): string {
-  const clean = stripControls(text.replace(/\r\n?/g, "\n"));
-  return truncateLine(preserveMiddleDots ? clean : boxSafe(clean), budget(width), "...");
+function paint(text: string, width: number): string {
+  return truncateLine(boxSafe(stripControls(text.replace(/\r\n?/g, "\n"))), budget(width), "...");
 }
 
 interface WrappedLine {
@@ -61,16 +60,10 @@ function wrap(text: string, width: number): WrappedLine[] {
   return out.length > 0 ? out : [{ text: "", continued: false }];
 }
 
-function rows(
-  key: string,
-  text: string,
-  width: number,
-  extra?: Partial<LaidLine>,
-  preserveMiddleDots = false,
-): LaidLine[] {
+function rows(key: string, text: string, width: number, extra?: Partial<LaidLine>): LaidLine[] {
   return wrap(text, width).map((line, i) => ({
     key: `${key}:${i}`,
-    text: paint(line.text, width, preserveMiddleDots),
+    text: paint(line.text, width),
     continued: line.continued,
     ...extra,
   }));
@@ -146,13 +139,9 @@ export function layoutEntry(
       return [
         ...rows(entry.key, `${prompt} ${text}`, width, { color: "cyan", bold: true }),
         ...(entry.attachments ?? []).flatMap((att, i) =>
-          rows(
-            `${entry.key}:image:${i}`,
-            `  ${attachmentLine(att, i, ascii)}`,
-            width,
-            { color: theme.accent },
-            true,
-          ),
+          rows(`${entry.key}:image:${i}`, `  ${attachmentLine(att, i, ascii)}`, width, {
+            color: theme.accent,
+          }),
         ),
       ];
     }
@@ -190,13 +179,9 @@ export function layoutEntry(
       const head = `${mark} ${entry.name ?? "?"} ${summary} ${entry.status}`;
       const lines = rows(entry.key, head, width);
       const attachmentRows = (entry.result?.attachments ?? []).flatMap((att, i) =>
-        rows(
-          `${entry.key}:image:${i}`,
-          `  ${attachmentLine(att, i, ascii)}`,
-          width,
-          { color: theme.accent },
-          true,
-        ),
+        rows(`${entry.key}:image:${i}`, `  ${attachmentLine(att, i, ascii)}`, width, {
+          color: theme.accent,
+        }),
       );
       if (entry.liveOutput !== "") {
         for (const [i, line] of tailLines(entry.liveOutput, 3).entries()) {
