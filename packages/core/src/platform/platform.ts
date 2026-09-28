@@ -4,12 +4,14 @@
  */
 import os from "node:os";
 import process from "node:process";
+import { createClipboard, type Clipboard } from "./clipboard.js";
 import { createNodeFileSystem, type FileSystem } from "./fs.js";
 import { createPathOps, type PathOps } from "./paths.js";
 import { createProcessRunner, type ProcessRunner } from "./process.js";
 import { resolveRealPath } from "./realpath.js";
 
 export interface Platform {
+  readonly clipboard: Clipboard;
   readonly fs: FileSystem;
   readonly paths: PathOps;
   readonly process: ProcessRunner;
@@ -39,6 +41,7 @@ export function createPlatform(): Platform {
   const caseSensitive = process.platform !== "win32" && process.platform !== "darwin";
   const paths = createPathOps(caseSensitive);
   return {
+    clipboard: createClipboard(),
     fs,
     paths,
     process: createProcessRunner(),
