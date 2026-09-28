@@ -813,6 +813,24 @@ describe("图片附件投影（ADR-0023）", () => {
     }
   });
 
+  it("25 张图、只加载 attachmentsToLoad 给出的 20 张：更早 5 张是上限占位而非缺失", () => {
+    const history = Array.from({ length: 25 }, (_, i) => toolWithAtt(i + 1, `s${i}`));
+    const loaded = attachmentsToLoad(history, visionModel).map((a) => a.sha256);
+    expect(loaded).toHaveLength(20);
+    const built = buildContext(
+      baseInput({ history, model: visionModel, attachmentData: dataOf(...loaded) }),
+    );
+    const toolMsgs = built.request.messages.filter((m) => m.role === "tool");
+    for (const m of toolMsgs.slice(0, 5)) {
+      expect(m.role === "tool" && m.content).toContain(
+        "[image omitted: exceeds the per-request limit of 20 images]",
+      );
+      expect(m.role === "tool" && m.content).not.toContain("attachment file missing");
+    }
+    expect(toolMsgs.filter((m) => m.role === "tool" && m.images?.length === 1)).toHaveLength(20);
+    expect(built.missingAttachments ?? []).toEqual([]);
+  });
+
   it("L1 修剪覆盖的 tool 条目：无图片也无图片占位", () => {
     const history: HistoryEntry[] = [
       toolWithAtt(1, "a"),

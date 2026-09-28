@@ -250,6 +250,12 @@ interface ImageProjectionOpts {
   missing?: ImageAttachment[] | undefined;
   /** estimate 模式下每条消息"将发送"的引用数（参与 20 张上限与 token 估算） */
   virtual?: Map<ModelMessage, number> | undefined;
+  /**
+   * project 模式：落在最新 20 张之内的引用（对象身份，与 attachmentsToLoad
+   * 同源）。不在其中的直接换上限占位——Loop 只加载这 20 张，更早的本来
+   * 就没有字节，不能误报为缺失
+   */
+  inCap?: ReadonlySet<ImageAttachment> | undefined;
 }
 
 /** 单条附件的解析结果：图片数据、占位/标记文本，或估算计数 */
@@ -260,6 +266,7 @@ function resolveAttachment(
   if (opts.mode === "transcript") return { text: `[image: ${att.label ?? att.file}]` };
   if (!opts.supported) return { text: IMAGE_PLACEHOLDER_UNSUPPORTED };
   if (opts.mode === "estimate") return { virtual: true };
+  if (opts.inCap !== undefined && !opts.inCap.has(att)) return { text: IMAGE_PLACEHOLDER_LIMIT };
   const data = opts.data?.get(att.sha256);
   if (data === undefined) {
     opts.missing?.push(att);
@@ -290,17 +297,16 @@ function resolveAttachments(
 }
 
 /**
- * 按投影规则会作为图片进入请求的附件引用（与 historyToMessages /
- * buildContext 共用同一套 6.4 cutoff：跳过摘要覆盖的条目、跳过 L1 修剪
- * 覆盖的 tool 条目；open Turn 被摘要覆盖而重新注入的 user 条目也算）。
- * Agent Loop 用它决定要从 AttachmentStore 读哪些字节。
+ * 按消息顺序排列、落在最新 20 张之内的附件引用（对象身份）。与
+ * historyToMessages / buildContext 共用同一套 6.4 cutoff：跳过摘要覆盖的
+ * 条目、跳过 L1 修剪覆盖的 tool 条目；open Turn 被摘要覆盖而重新注入的
+ * user 条目排在最后。attachmentsToLoad 与 buildContext 的上限判定都用它，
+ * 保证"加载了哪些"与"哪些以图片发出"一致。
  */
-export function attachmentsToLoad(
+function imageRefsInCap(
   history: readonly HistoryEntry[],
-  model: Pick<ModelInfo, "capabilities">,
   events?: readonly DurableEvent[],
 ): ImageAttachment[] {
-  if (!model.capabilities.imageInput) return [];
   const { summaryThrough, pruneThrough } = compactionCutoffs(history);
   const refs: ImageAttachment[] = [];
   for (const entry of history) {
@@ -320,10 +326,22 @@ export function attachmentsToLoad(
       refs.push(...covered.attachments);
     }
   }
-  // 只取最新 20 个引用（与请求的逐张上限一致），按 sha256 去重后给 Loop 加载
+  return refs.slice(-MAX_IMAGES_PER_REQUEST);
+}
+
+/**
+ * 按投影规则会作为图片进入请求的附件引用（最新 20 张，按 sha256 去重）。
+ * Agent Loop 用它决定要从 AttachmentStore 读哪些字节。
+ */
+export function attachmentsToLoad(
+  history: readonly HistoryEntry[],
+  model: Pick<ModelInfo, "capabilities">,
+  events?: readonly DurableEvent[],
+): ImageAttachment[] {
+  if (!model.capabilities.imageInput) return [];
   const seen = new Set<string>();
   const out: ImageAttachment[] = [];
-  for (const r of refs.slice(-MAX_IMAGES_PER_REQUEST)) {
+  for (const r of imageRefsInCap(history, events)) {
     if (seen.has(r.sha256)) continue;
     seen.add(r.sha256);
     out.push(r);
@@ -676,6 +694,9 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     mode: input.attachmentData === undefined ? "estimate" : "project",
     supported: model.capabilities.imageInput,
     data: input.attachmentData,
+    ...(input.attachmentData !== undefined
+      ? { inCap: new Set(imageRefsInCap(input.history, input.events)) }
+      : {}),
     missing: [],
     virtual: new Map(),
   };
