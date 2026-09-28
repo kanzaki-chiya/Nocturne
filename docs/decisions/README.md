@@ -29,8 +29,9 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0021](ADR-0021-tui-daily-usability.md) | TUI 日常可用性：全屏鼠标选中复制、--inline、/new、Markdown、输入编辑、Esc 中断、历史保留、思考折叠、系统提示重写 | 已接受 |
 | [ADR-0022](ADR-0022-shell-selection.md) | shell 工具可选 shell（pwsh / Git Bash / cmd） | 已接受 |
 | [ADR-0023](ADR-0023-image-input.md) | 图片输入：沿用 imageInput 能力位、附件落盘引用、按当前模型投影 | 已接受；第 1 节声明入口被 ADR-0024 取代 |
-| [ADR-0024](ADR-0024-model-settings-editor.md) | 模型设置编辑页：逐模型用户覆盖取代 `/provider image` | 已接受；显式 none 规则被 ADR-0025 取代 |
+| [ADR-0024](ADR-0024-model-settings-editor.md) | 模型设置编辑页：逐模型用户覆盖取代 `/provider image` | 已接受；显式 none 规则被 ADR-0025 取代；协议字段见 ADR-0026 |
 | [ADR-0025](ADR-0025-per-model-reasoning.md) | 模型能力来源：接入 models.dev，推理与档位只按模型声明 | 已接受 |
+| [ADR-0026](ADR-0026-per-model-protocol.md) | 按模型选择协议：同一服务商下的模型按上游声明各走各的接口 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
