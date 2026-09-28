@@ -119,7 +119,7 @@ describe("退出保留回滚区", () => {
       inline: true,
       patchConsole: false,
     });
-    await new Promise((r) => setTimeout(r, 80));
+    await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
     await session.submit({ text: "测试分段" });
     const output = io.stdoutChunks.join("");
     expect(output).toContain("第一段");
@@ -177,7 +177,7 @@ describe("退出保留回滚区", () => {
       inline: true,
       patchConsole: false,
     });
-    await new Promise((r) => setTimeout(r, 120));
+    await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
     io.stdin.write("/exit");
     io.stdin.write("\r");
     await done;
@@ -196,7 +196,7 @@ describe("退出保留回滚区", () => {
       inline: true,
       patchConsole: false,
     });
-    await new Promise((r) => setTimeout(r, 120));
+    await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
     io.stdin.write("\x04");
     await done;
     preservedBeforeMessage(io.stdoutChunks, session.id);
@@ -214,7 +214,7 @@ describe("退出保留回滚区", () => {
       inline: true,
       patchConsole: false,
     });
-    await new Promise((r) => setTimeout(r, 120));
+    await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
     io.stdin.write("\x03");
     await done;
     preservedBeforeMessage(io.stdoutChunks, session.id);
@@ -235,7 +235,7 @@ describe("退出保留回滚区", () => {
       inline: true,
       patchConsole: false,
     });
-    await new Promise((r) => setTimeout(r, 80));
+    await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
     process.emit("unhandledRejection", new Error("boom"), Promise.resolve());
     await done;
     expect(crashed).toBe(true);
@@ -269,7 +269,6 @@ describe("全屏退出（默认模式）", () => {
       exited = true;
     });
     await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
-    await new Promise((r) => setTimeout(r, 80));
     io.stdin.write("hello");
     await waitFor(() => io.stdoutChunks.join("").includes("hello"));
     io.stdin.write("\r");

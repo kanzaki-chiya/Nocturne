@@ -246,24 +246,24 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(60);
+    await waitFor(() => (lastFrame() ?? "").includes("思考:off"));
     // 可用档位 [low, high]：off → low → high → off 循环
     expect(lastFrame()).toContain("思考:off");
     stdin.write("\x1b[Z");
-    await pause(80);
+    await waitFor(() => (lastFrame() ?? "").includes("思考:low"));
     expect(lastFrame()).toContain("思考:low");
     stdin.write("\x1b[Z");
-    await pause(80);
+    await waitFor(() => (lastFrame() ?? "").includes("思考:high"));
     expect(lastFrame()).toContain("思考:high");
     stdin.write("\x1b[Z");
-    await pause(80);
+    await waitFor(() => (lastFrame() ?? "").includes("思考:off"));
     expect(lastFrame()).toContain("思考:off");
     unmount();
     await session.close();
   });
 
   it("Turn 中 Shift+Tab 切档：状态栏显示 旧档→新档，Turn 结束后只剩新档", async () => {
-    // wait 事件让流保持 3s：覆盖"Turn 进行中"窗口
+    // wait 事件保留 Turn 进行中窗口，避免整例被固定等待耗尽。
     const runtime = await createRuntime({
       cwd: tmp("nct-tui-ws-"),
       sessionsDir: tmp("nct-tui-sd-"),
@@ -271,7 +271,7 @@ describe("TUI", () => {
         new FakeProvider({
           scripts: [
             [
-              { type: "wait", ms: 3000 },
+              { type: "wait", ms: 500 },
               { type: "text_delta", text: "done" },
               { type: "finish", reason: "stop" },
             ],
@@ -298,17 +298,19 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(60);
+    await waitFor(() => (lastFrame() ?? "").includes("思考:off"));
     expect(lastFrame()).toContain("思考:off");
     // 提交后不 await：Turn 进行中
     const done = session.submit({ text: "长跑" });
-    await pause(150);
+    await waitFor(() => (lastFrame() ?? "").includes("长跑"));
     // 进行中 Shift+Tab：off → low，状态栏显示"旧档→新档"（ADR-0019）
     stdin.write("\x1b[Z");
-    await pause(120);
+    await waitFor(() => (lastFrame() ?? "").includes("思考:off→low"));
     expect(lastFrame()).toContain("思考:off→low");
     await done;
-    await pause(150);
+    await waitFor(
+      () => (lastFrame() ?? "").includes("思考:low") && !(lastFrame() ?? "").includes("off→"),
+    );
     // Turn 结束：只剩新档位
     expect(lastFrame()).toContain("思考:low");
     expect(lastFrame()).not.toContain("→");
@@ -380,7 +382,7 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(80); // 欢迎框数据（最近会话）就绪后主界面才挂载
+    await waitFor(() => (lastFrame() ?? "").includes("fake-model"));
     const frame = lastFrame() ?? "";
     expect(frame).toContain("fake-model");
     stdin.write("\x03"); // Ctrl+C：空闲退出
@@ -453,10 +455,14 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session: s1, runtime, env: ENV, switchSession: switcher }),
     );
-    await new Promise((r) => setTimeout(r, 50)); // 等 useInput 订阅挂载
+    await waitFor(() => (lastFrame() ?? "").includes("fake-1"));
     stdin.write(`/resume ${s2id}`); // 单 data 事件视为一次粘贴；回车单独发
     stdin.write("\r");
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(
+      () =>
+        (lastFrame() ?? "").includes("已切换到会话") &&
+        (lastFrame() ?? "").includes("来自 s2 的回答"),
+    );
     const frame = lastFrame() ?? "";
     expect(frame).toContain("已切换到会话");
     expect(frame).toContain("来自 s2 的回答"); // 新会话持久日志已重放
@@ -536,7 +542,9 @@ describe("TUI", () => {
     stdin.write("/new");
     stdin.write("\r");
     await waitFor(() => created.length === 1);
-    await pause(80);
+    await waitFor(
+      () => (lastFrame() ?? "").includes("Nocturne") && !(lastFrame() ?? "").includes("旧回答"),
+    );
     const frame = lastFrame() ?? "";
     // 旧对话整体换出：欢迎区重新出现，翻阅提示与旧内容都不在
     expect(frame).toContain("Nocturne");
@@ -565,7 +573,9 @@ describe("TUI", () => {
     await pause(50);
     stdin.write("/resume");
     stdin.write("\r");
-    await pause(200);
+    await waitFor(
+      () => (lastFrame() ?? "").includes("切换到会话") && (lastFrame() ?? "").includes(s2id),
+    );
     expect(lastFrame()).toContain("切换到会话");
     expect(lastFrame()).toContain(s2id);
     // 列表按 mtimeMs 降序——s1/s2 同毫秒时顺序不稳定；先读渲染顺序再定向导航
@@ -585,7 +595,9 @@ describe("TUI", () => {
       await pause();
     }
     stdin.write("\r");
-    await pause(300);
+    await waitFor(
+      () => switcher.mock.calls.length > 0 && (lastFrame() ?? "").includes("已切换到会话"),
+    );
     // mtime 同毫秒时顺序仍可能翻转——验证“选择→切换”链路而非固定目标
     expect(switcher).toHaveBeenCalled();
     const calledId = switcher.mock.calls[0]?.[0];

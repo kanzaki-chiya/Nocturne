@@ -104,7 +104,7 @@ describe("全屏鼠标", () => {
     const { lastFrame, unmount } = render(
       createElement(App, { session, runtime, env: ENV, mouse }),
     );
-    await pause(80);
+    await waitFor(() => (lastFrame() ?? "").includes("Nocturne"));
     await session.submit({ text: "长" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
     mouse.emit({ type: "wheel", dir: "up", x: 1, y: 1 });
@@ -137,7 +137,7 @@ describe("全屏鼠标", () => {
         writeOob: oob,
       }),
     );
-    await pause(80);
+    await waitFor(() => (lastFrame() ?? "").includes("Nocturne"));
     await session.submit({ text: "复制目标" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
     // 视口底部往上找"末尾标记"所在行；拖动选中它
@@ -186,7 +186,7 @@ describe("全屏鼠标", () => {
         writeOob: () => true,
       }),
     );
-    await pause(80);
+    await waitFor(() => (lastFrame() ?? "").includes("Nocturne"));
     // 用户消息原样显示，段间空行各占一行
     await session.submit({ text: "第一段\n\n第二段\n\n第三段" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
@@ -216,7 +216,7 @@ describe("全屏鼠标", () => {
     const { lastFrame, unmount } = render(
       createElement(App, { session, runtime, env: ENV, mouse, copySpawn: spawn }),
     );
-    await pause(80);
+    await waitFor(() => (lastFrame() ?? "").includes("Nocturne"));
     await session.submit({ text: "起点问题" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
     expect(lastFrame()).not.toContain("起点问题");
@@ -240,7 +240,7 @@ describe("全屏鼠标", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV, mouse, copySpawn: spawn }),
     );
-    await pause(80);
+    await waitFor(() => (lastFrame() ?? "").includes("Nocturne"));
     await session.submit({ text: "问题" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
     const frame = lastFrame() ?? "";
@@ -252,7 +252,7 @@ describe("全屏鼠标", () => {
     stdin.write("\x03");
     await waitFor(() => (lastFrame() ?? "").includes("已复制"));
     stdin.write("还活着");
-    await pause(60);
+    await waitFor(() => (lastFrame() ?? "").includes("› 还活着"));
     expect(lastFrame()).toContain("› 还活着");
     // 等第一次复制的状态栏提示过期（2s），避免与下一次断言串扰
     await waitFor(() => !(lastFrame() ?? "").includes("已复制"));
@@ -264,7 +264,6 @@ describe("全屏鼠标", () => {
     await pause(120);
     expect(lastFrame()).not.toContain("已复制"); // Esc 未触发复制
     stdin.write("\x03");
-    await pause(80);
     // 无选区时 Ctrl+C = 退出：之后的输入不再进入输入框
     stdin.write("探针");
     await pause(60);
@@ -280,7 +279,7 @@ describe("全屏鼠标", () => {
     const { lastFrame, unmount } = render(
       createElement(App, { session, runtime, env: ENV, mouse, copySpawn: spawn }),
     );
-    await pause(80);
+    await waitFor(() => (lastFrame() ?? "").includes("Nocturne"));
     await session.submit({ text: "问题" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
     mouse.emit({ type: "press", button: 0, x: 3, y: 2 });
