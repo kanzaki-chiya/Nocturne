@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDefaultPolicy, createRulePolicy } from "../permission/index.js";
 import {
   createPlatform,
+  SHELL_RISK_BY_DIALECT,
   shellDescriptor,
   type Platform,
   type ProcessRunner,
@@ -768,11 +769,14 @@ describe("shell 工具 × ADR-0022（描述符 / 分页器名单 / 主体 shell 
         target: "ls",
         shell: "pwsh",
         shellRisk: pwshScope.descriptor.risk,
+        shellRiskByDialect: SHELL_RISK_BY_DIALECT,
       },
     ]);
     // 未装配 shell 时主体不带 shell/shellRisk 字段（权限层按 POSIX 保守处理）
     const bare = shellTool.permissionSubjects({ command: "ls" }, {} as never);
-    expect(bare).toEqual([{ kind: "shell", target: "ls" }]);
+    expect(bare).toEqual([
+      { kind: "shell", target: "ls", shellRiskByDialect: SHELL_RISK_BY_DIALECT },
+    ]);
     expect("shell" in (bare[0] ?? {})).toBe(false);
     expect("shellRisk" in (bare[0] ?? {})).toBe(false);
   });
@@ -787,6 +791,12 @@ describe("shell 工具 × ADR-0022（描述符 / 分页器名单 / 主体 shell 
       shell: resolution(pwshScope.descriptor),
     } as never);
     expect(policy.evaluate(subs).decision.action).toBe("ask");
+    // 嵌套调用：cmd 下 pwsh -c 交出的命令体按 PowerShell 表判定
+    const nested = shellTool.permissionSubjects(
+      { command: 'pwsh -c "Remove-Item x -Recurse -Force"' },
+      { shell: resolution(shellDescriptor("cmd", "cmd.exe", "win32")) } as never,
+    );
+    expect(policy.evaluate(nested).decision.action).toBe("ask");
   });
 
   it("分页器名单按生效 shell：pwsh 拒绝 more/Out-Host -Paging/oh -p，放行 less", () => {

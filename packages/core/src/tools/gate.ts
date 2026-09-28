@@ -265,6 +265,7 @@ export function createPolicyGate(
           resolved: request.target,
           shell: request.shell,
           shellRisk: request.shellRisk,
+          shellRiskByDialect: request.shellRiskByDialect,
         },
       ]);
       return evaluation.decision.action;

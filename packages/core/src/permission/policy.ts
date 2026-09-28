@@ -21,7 +21,7 @@ import {
   isCompositeShell,
   isOpaquePowerShellCommand,
   isPathKind,
-  isRiskyShellCommand,
+  findRiskySegment,
   matchPattern,
   normalizePathText,
   shellDialect,
@@ -273,9 +273,8 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     // 大小写不敏感）在此按元数据匹配；只把预设级宽规则的 allow 降级为 ask，
     // 用户/项目/CLI 显式规则照旧覆盖
     if (s.kind === "shell" && action === "allow" && hit.origin === "preset") {
-      const risky = shellSegments(s.target, dialect).find((segment) =>
-        isRiskyShellCommand(segment, s.shellRisk),
-      );
+      // 含嵌套 shell 调用（pwsh -c "…"、cmd /c "…"）的命令体，按内层方言再查
+      const risky = findRiskySegment(s.target, dialect, s.shellRisk, s.shellRiskByDialect);
       if (risky !== undefined) {
         action = "ask";
         hit = { origin: "preset", description: `预设 ${presetName} 高风险命令` };

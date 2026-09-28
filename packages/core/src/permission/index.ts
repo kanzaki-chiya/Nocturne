@@ -1,10 +1,12 @@
 export { computeWhere } from "./where.js";
 export {
+  findRiskySegment,
   isCompositeShell,
   isOpaquePowerShellCommand,
   isRiskyShellCommand,
   lexShellCommand,
   matchPattern,
+  nestedShellPayloads,
   normalizePathText,
   shellDialect,
   shellSegments,

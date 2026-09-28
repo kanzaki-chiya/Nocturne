@@ -10,7 +10,7 @@ import {
   isOpaquePowerShellCommand,
   isRiskyShellCommand,
 } from "../src/permission/index.js";
-import { shellDescriptor } from "../src/platform/index.js";
+import { SHELL_RISK_BY_DIALECT, shellDescriptor } from "../src/platform/index.js";
 import type { ShellKind } from "../src/platform/index.js";
 import type { PermissionRule } from "../src/protocol/index.js";
 
@@ -34,6 +34,7 @@ const act = (target: string, shell?: ShellKind) =>
       ...(shell !== undefined
         ? { shell, shellRisk: shellDescriptor(shell, `${shell}-exe`, "win32").risk }
         : {}),
+      shellRiskByDialect: SHELL_RISK_BY_DIALECT,
     },
   ]).decision.action;
 
@@ -133,6 +134,34 @@ describe("full-access 高风险表按 shell 种类判定（ADR-0022 第 6 节）
     expect(act(block, "bash")).toBe("allow");
     // 普通组合中的 PowerShell 高危段
     expect(act("echo ok ; Remove-Item x -r -f", "pwsh")).toBe("ask");
+  });
+
+  it("嵌套 shell 调用的命令体按内层方言检查（pwsh -c / cmd /c / bash -c）", () => {
+    for (const [c, outer] of [
+      ['pwsh -c "Remove-Item -Recurse -Force x"', "pwsh"],
+      ['pwsh -NoProfile -Command "Remove-Item x -r -f"', "cmd"],
+      ["powershell.exe -ExecutionPolicy Bypass -Command \"iex 'x'\"", "bash"],
+      ['cmd /c "rd /s /q x"', "pwsh"],
+      ['cmd.exe /d /s /c "del /s C:\\x\\*.tmp"', "bash"],
+      ['bash -c "rm -rf x"', "pwsh"],
+      ["bash -lc 'git reset --hard'", "cmd"],
+      ['sh -c "rm -rf x"', "sh"],
+      ['C:\\Git\\bin\\bash.exe -c "sudo ls"', "pwsh"],
+      // 多层嵌套
+      ["cmd /c \"pwsh -c 'Remove-Item x -Recurse -Force'\"", "bash"],
+      // 外层分隔符切断的命令体：内层方言的表仍能认出
+      ['pwsh -c "echo a; Remove-Item x -r -f"', "cmd"],
+    ] as const) {
+      expect(act(c, outer), `${c} @${outer}`).toBe("ask");
+    }
+    // 负例：命令体本身无害时照常放行
+    expect(act('pwsh -c "Get-ChildItem"', "cmd")).toBe("allow");
+    expect(act('cmd /c "dir /b"', "pwsh")).toBe("allow");
+    expect(act('bash -c "ls -la"', "pwsh")).toBe("allow");
+    // 内层 cmd 的 rd /s 不因外层是 bash 就漏掉，但外层 bash 的 rd /s 仍不按 cmd 表判
+    expect(act("rd /s x", "bash")).toBe("allow");
+    // 没有命令参数的 shell 调用不当作嵌套
+    expect(act("bash script.sh", "pwsh")).toBe("allow");
   });
 
   it("不透明 PowerShell -EncodedCommand（含嵌套）至少 ask；-Command 不受影响", () => {

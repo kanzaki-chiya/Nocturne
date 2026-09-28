@@ -210,6 +210,13 @@ const CMD_RISK: ShellRiskProfile = {
   alwaysVerbs: ["format"],
 };
 
+/** 各方言的高风险表：权限层检查嵌套 shell 调用（`pwsh -c "…"` 等）的命令体时按内层方言取用 */
+export const SHELL_RISK_BY_DIALECT: Readonly<Record<ShellDialect, ShellRiskProfile>> = {
+  posix: POSIX_RISK,
+  cmd: CMD_RISK,
+  powershell: POWERSHELL_RISK,
+};
+
 interface ShellMeta {
   name(platform: NodeJS.Platform): string;
   shape: string;

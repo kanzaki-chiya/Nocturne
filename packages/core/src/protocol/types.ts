@@ -129,6 +129,11 @@ export interface SubjectRequest {
   shell?: string | undefined;
   /** shell 主体：生效描述符携带的高风险元数据；缺省时权限层按 POSIX 基础表保守处理 */
   shellRisk?: ShellRiskProfile | undefined;
+  /**
+   * shell 主体：各方言的高风险元数据（posix / cmd / powershell），供权限层检查
+   * `pwsh -c "…"`、`cmd /c "…"`、`bash -c "…"` 这类嵌套调用的命令体
+   */
+  shellRiskByDialect?: Readonly<Record<string, ShellRiskProfile>> | undefined;
 }
 
 export type SubjectWhere = "workspace" | "outside";
@@ -145,6 +150,8 @@ export interface PermissionSubject {
   shell?: string | undefined;
   /** shell 主体：生效描述符携带的高风险元数据（由 tools 层从 ShellDescriptor 透传） */
   shellRisk?: ShellRiskProfile | undefined;
+  /** shell 主体：各方言的高风险元数据，用于嵌套 shell 调用的命令体（见 SubjectRequest） */
+  shellRiskByDialect?: Readonly<Record<string, ShellRiskProfile>> | undefined;
 }
 
 export type PermissionAction = "allow" | "ask" | "deny";

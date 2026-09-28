@@ -5,7 +5,11 @@
  * 记录见 tools.md）；detached 脱离进程树的后台进程可能无法终止。
  */
 import { shellTailStages, stageExecutable } from "../../permission/index.js";
-import { resolveRealPath, type ShellDescriptor } from "../../platform/index.js";
+import {
+  resolveRealPath,
+  SHELL_RISK_BY_DIALECT,
+  type ShellDescriptor,
+} from "../../platform/index.js";
 import type { SubjectRequest } from "../../protocol/index.js";
 import type { ToolDefinition, ToolScope } from "../types.js";
 
@@ -133,6 +137,7 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
         kind: "shell",
         target: input.command,
         ...(descriptor !== undefined ? { shell: descriptor.kind, shellRisk: descriptor.risk } : {}),
+        shellRiskByDialect: SHELL_RISK_BY_DIALECT,
       },
     ];
   },

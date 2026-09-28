@@ -465,6 +465,91 @@ export function isRiskyShellCommand(segment: string, risk?: ShellRiskProfile): b
   return false;
 }
 
+// ── 嵌套 shell 调用（pwsh -c "…"、cmd /c "…"、bash -c "…"） ──────────
+//
+// 段首词是 shell 时，高风险表只看到 "pwsh"/"cmd"/"bash"，认不出引号里交给
+// 内层 shell 的命令。这里把命令体取出来，按内层 shell 的方言与表再查一遍。
+// 取命令体是保守近似：从命令参数之后取到整条文本末尾，去掉一层外引号；
+// 多取的部分只会多查，不会少查。
+
+const NESTED_SHELL =
+  /(?:^|[\s"'`;&|(])(?:[^\s"'`;&|()]*[\\/])?(pwsh|powershell|cmd|sh|bash|zsh|dash|ksh)(?:\.exe)?(?=\s)/gi;
+
+function nestedDialect(name: string): ShellDialect {
+  const n = name.toLowerCase();
+  if (n === "pwsh" || n === "powershell") return "powershell";
+  if (n === "cmd") return "cmd";
+  return "posix";
+}
+
+/** 该 token 是否为内层 shell 的「执行命令文本」参数 */
+function isCommandFlag(token: string, dialect: ShellDialect): boolean {
+  if (dialect === "cmd") return /^\/[ck]$/i.test(token);
+  if (dialect === "powershell") {
+    const m = /^-{1,2}([a-z]+)$/i.exec(token);
+    return m !== null && "command".startsWith((m[1] ?? "").toLowerCase());
+  }
+  // POSIX：-c 或合并短选项（-lc、-ec）
+  return /^-[a-z]*c[a-z]*$/i.test(token);
+}
+
+/** 去掉命令体外面的一层引号（只有开头引号时只去开头） */
+function unquotePayload(text: string): string {
+  const t = text.trim();
+  const q = t.charAt(0);
+  if (q !== '"' && q !== "'") return t;
+  return t.length > 1 && t.endsWith(q) ? t.slice(1, -1) : t.slice(1);
+}
+
+/** 文本中各处嵌套 shell 调用的命令体及其方言 */
+export function nestedShellPayloads(command: string): { dialect: ShellDialect; payload: string }[] {
+  const out: { dialect: ShellDialect; payload: string }[] = [];
+  for (const m of command.matchAll(NESTED_SHELL)) {
+    const dialect = nestedDialect(m[1] ?? "");
+    let rest = command.slice(m.index + m[0].length);
+    // 命令参数前允许若干其他参数（-NoProfile、/d /s、-ExecutionPolicy Bypass 等）
+    for (let i = 0; i < 8; i++) {
+      const tok = /^\s*(\S+)/.exec(rest);
+      if (tok === null) break;
+      rest = rest.slice(tok[0].length);
+      if (isCommandFlag(tok[1] ?? "", dialect)) {
+        const payload = unquotePayload(rest);
+        if (payload !== "") out.push({ dialect, payload });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * 找出命令中命中高风险表的段（含嵌套 shell 调用的命令体，最多三层）。
+ * byDialect 缺省时，嵌套命令体按 POSIX 基础表保守检查。
+ */
+export function findRiskySegment(
+  command: string,
+  dialect: ShellDialect,
+  risk: ShellRiskProfile | undefined,
+  byDialect: Readonly<Record<string, ShellRiskProfile>> | undefined,
+  depth = 0,
+): string | undefined {
+  const direct = shellSegments(command, dialect).find((segment) =>
+    isRiskyShellCommand(segment, risk),
+  );
+  if (direct !== undefined || depth >= 3) return direct;
+  for (const nested of nestedShellPayloads(command)) {
+    const hit = findRiskySegment(
+      nested.payload,
+      nested.dialect,
+      byDialect?.[nested.dialect],
+      byDialect,
+      depth + 1,
+    );
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
+}
+
 /**
  * 不透明的 PowerShell -EncodedCommand（含嵌套 pwsh/powershell 调用）：
  * 文本里出现 pwsh/powershell 可执行名与 -EncodedCommand（或它的

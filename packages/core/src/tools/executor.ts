@@ -53,6 +53,7 @@ async function resolveSubjects(
         target: req.target,
         shell: req.shell,
         shellRisk: req.shellRisk,
+        shellRiskByDialect: req.shellRiskByDialect,
       });
     }
   }
