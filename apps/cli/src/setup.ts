@@ -8,6 +8,7 @@ import {
   fetchModels,
   listProviderPresets,
   runProviderKeyWizard as coreKeyWizard,
+  runProviderModelWizard as coreModelWizard,
   runProviderSetupWizard as coreSetupWizard,
   runProviderThinkingWizard as coreThinkingWizard,
   type RuntimeConfig,
@@ -210,5 +211,26 @@ export async function runThinkingWizardInSession(
   },
 ): Promise<void> {
   await coreThinkingWizard(io, ctx.config, ctx.providerId);
+  ctx.updateProviders(await ctx.reloadConfig());
+}
+
+/**
+ * /provider model <服务商> <模型> 的会话内流程（ADR-0024 第 4 节）：
+ * 行式问答 → saveModelSettings → 重载配置 → updateProviders。
+ */
+export async function runModelWizardInSession(
+  io: WizardIo,
+  ctx: {
+    config: RuntimeConfig;
+    providerId: string;
+    modelId: string;
+    workspaceRoot?: string | undefined;
+    reloadConfig: () => Promise<RuntimeConfig>;
+    updateProviders: (rc: RuntimeConfig) => void;
+  },
+): Promise<void> {
+  await coreModelWizard(io, ctx.config, ctx.providerId, ctx.modelId, {
+    workspaceRoot: ctx.workspaceRoot,
+  });
   ctx.updateProviders(await ctx.reloadConfig());
 }

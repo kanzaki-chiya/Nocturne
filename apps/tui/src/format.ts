@@ -48,6 +48,12 @@ export function stripControls(text: string): string {
   return text.replace(CONTROL_RE, "");
 }
 
+/** 按显示宽度向右补齐空格（宽字符按 string-width 计；超长不截断） */
+export function padToWidth(text: string, width: number): string {
+  const w = stringWidth(text);
+  return w >= width ? text : text + " ".repeat(width - w);
+}
+
 /** 按显示宽度截断为单行；超宽时截断并加省略号 */
 export function truncateLine(text: string, width: number, ellipsis = "…"): string {
   const oneLine = text.replace(/\r\n?|\n/g, " ");
@@ -63,6 +69,23 @@ export function truncateLine(text: string, width: number, ellipsis = "…"): str
     w += cw;
   }
   return out + ellipsis;
+}
+
+/** 按显示宽度截断为单行，截掉头部保留尾部（如长路径保留文件名）；超宽时前缀省略号 */
+export function truncateLineHead(text: string, width: number, ellipsis = "…"): string {
+  const oneLine = text.replace(/\r\n?|\n/g, " ");
+  if (width <= 0) return "";
+  if (stringWidth(oneLine) <= width) return oneLine;
+  const budget = Math.max(0, width - stringWidth(ellipsis));
+  let out = "";
+  let w = 0;
+  for (const ch of Array.from(oneLine).reverse()) {
+    const cw = stringWidth(ch);
+    if (w + cw > budget) break;
+    out = ch + out;
+    w += cw;
+  }
+  return ellipsis + out;
 }
 
 /** 多行文本尾部 n 行（liveOutput / 结果摘要展示用） */

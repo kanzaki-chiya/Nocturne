@@ -14,6 +14,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import {
   listProviderPresets,
+  type ModelSettingsPatch,
+  type ModelSettingsView,
   type PermissionReply,
   type ProviderOverview,
   type Runtime,
@@ -211,6 +213,12 @@ function useProviderOps(provider: ProviderBridge | undefined): {
   runOp: (providerId: string, op: ProviderOp) => void;
   confirmRemove: (providerId: string) => void;
   readonlyHint: (entry: ProviderOverview) => string;
+  listModels: (providerId: string) => Promise<ModelSettingsView[]>;
+  saveModel: (
+    providerId: string,
+    modelId: string,
+    patch: ModelSettingsPatch,
+  ) => Promise<string | undefined>;
 } {
   const [entries, setEntries] = useState<readonly ProviderOverview[]>([]);
   const [notice, setNotice] = useState<string | undefined>(undefined);
@@ -321,6 +329,34 @@ function useProviderOps(provider: ProviderBridge | undefined): {
     [provider],
   );
 
+  const listModels = useCallback(
+    async (providerId: string): Promise<ModelSettingsView[]> => {
+      if (provider === undefined) return [];
+      return await provider.config.listModelSettings(providerId, provider.workspaceRoot);
+    },
+    [provider],
+  );
+
+  const saveModel = useCallback(
+    async (
+      providerId: string,
+      modelId: string,
+      patch: ModelSettingsPatch,
+    ): Promise<string | undefined> => {
+      if (provider === undefined) return "当前环境不支持模型设置编辑";
+      try {
+        await provider.config.saveModelSettings(providerId, modelId, patch, provider.workspaceRoot);
+        provider.updateProviders(await provider.reloadConfig());
+        await reload();
+        setNotice(`已保存 ${providerId}/${modelId}`);
+        return undefined;
+      } catch (e) {
+        return errText(e);
+      }
+    },
+    [provider, reload],
+  );
+
   return {
     entries,
     presets,
@@ -332,6 +368,8 @@ function useProviderOps(provider: ProviderBridge | undefined): {
     runOp,
     confirmRemove,
     readonlyHint,
+    listModels,
+    saveModel,
   };
 }
 
@@ -473,6 +511,8 @@ function SetupFlow({
         onConfirmRemove={(id) => {
           ops.confirmRemove(id);
         }}
+        onListModels={ops.listModels}
+        onSaveModel={ops.saveModel}
         onClose={finishStep1}
         notice={ops.notice}
         busyText={ops.busyText}
@@ -698,6 +738,11 @@ function SessionApp({
   >(undefined);
   const pickerOpen = picker !== undefined;
   const [providerPageOpen, setProviderPageOpen] = useState(false);
+  /** /provider model 直达目标（ADR-0024）；每次打开页自增 key 让页内状态重挂 */
+  const [providerPageTarget, setProviderPageTarget] = useState<
+    { providerId: string; modelId?: string | undefined } | undefined
+  >(undefined);
+  const [providerPageKey, setProviderPageKey] = useState(0);
   const pickerCommitted = useRef(false);
   const providerCommitted = useRef(false);
   useLayoutEffect(() => {
@@ -1252,7 +1297,10 @@ function SessionApp({
 
   /** 打开服务商页：保留草稿，临时进入备用屏幕。 */
   const openProviderPage = useCallback(
-    (presetId?: string): void => {
+    (
+      presetId?: string,
+      modelTarget?: { providerId: string; modelId?: string | undefined },
+    ): void => {
       if (submitting.current || busy || pending !== undefined) {
         pushLine("! 会话忙，服务商页仅在空闲时可打开");
         return;
@@ -1265,6 +1313,8 @@ function SessionApp({
         pushLine(`! ${errText(e)}`);
       });
       void alt.enter(async () => {
+        setProviderPageTarget(modelTarget);
+        setProviderPageKey((k) => k + 1);
         setProviderPageOpen(true);
         if (presetId !== undefined) ops.startWizard(presetId);
         await waitCommit(providerCommitted, true);
@@ -1597,7 +1647,7 @@ function SessionApp({
                 pushLine("! 会话忙（Turn 进行中）；先中断再切换");
               else setOverlay(r.name);
             } else if (r.kind === "picker") openPicker(r.focus);
-            else if (r.kind === "provider-page") openProviderPage(r.presetId);
+            else if (r.kind === "provider-page") openProviderPage(r.presetId, r.modelTarget);
             else if (r.kind === "switch") void doSwitch(r.id);
             else if (r.kind === "provider-wizard") openProviderWizard(r.start);
             else if (r.kind === "provider-remove") setProviderRemove(r.providerId);
@@ -1725,7 +1775,7 @@ function SessionApp({
                 pushLine("! 会话忙（Turn 进行中）；先中断再切换");
               else setOverlay(r.name);
             } else if (r.kind === "picker") openPicker(r.focus);
-            else if (r.kind === "provider-page") openProviderPage(r.presetId);
+            else if (r.kind === "provider-page") openProviderPage(r.presetId, r.modelTarget);
             else if (r.kind === "switch") void doSwitch(r.id);
             else if (r.kind === "provider-wizard") openProviderWizard(r.start);
             else if (r.kind === "provider-remove") setProviderRemove(r.providerId);
@@ -1858,6 +1908,7 @@ function SessionApp({
     />
   ) : providerPageOpen ? (
     <ProviderPage
+      key={providerPageKey}
       presets={ops.presets}
       entries={ops.entries}
       currentProviderId={view.config.model?.provider}
@@ -1872,6 +1923,9 @@ function SessionApp({
       onConfirmRemove={(id) => {
         ops.confirmRemove(id);
       }}
+      onListModels={ops.listModels}
+      onSaveModel={ops.saveModel}
+      initialModelTarget={providerPageTarget}
       onClose={() => {
         void closeProviderPage();
       }}

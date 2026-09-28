@@ -6,22 +6,29 @@
  * Logo 自适应：行数 <30 或宽度 <64 时降级为单行文字标题，不画像素 Logo。
  *
  * 未配置预设 Enter → 同页内嵌向导（WizardView，Core 编排，omp 风格表单）；
- * 已配置条目 Enter → 内联操作条（换密钥/刷新模型列表/调整思考档位/删除）；
- * 手写层条目只读并提示文件；当前会话所用服务商不可删除。
+ * 已配置条目 Enter → 内联操作条（换密钥/刷新模型列表/调整思考档位/编辑模型/删除）；
+ * 「编辑模型」打开模型列表/编辑子视图（ADR-0024 第 5 节，model-settings-view.tsx）；
+ * 手写层条目 Enter → 模型列表只读查看；当前会话所用服务商不可删除。
  * 全页无打字是非题：删除确认等为 ↑↓/←→ 选项式（ConfirmBox）。
  * 由 App 在备用屏内渲染；进出序列在 App（ADR-0017 约束沿用）。
  * 本组件只管页面内状态与按键，业务逻辑都在父级（Core 公开 API）。
  */
 import { Box, Text, useInput } from "ink";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ProviderOverview, WizardPreset } from "@nocturne/core";
+import type {
+  ModelSettingsPatch,
+  ModelSettingsView,
+  ProviderOverview,
+  WizardPreset,
+} from "@nocturne/core";
 
 import { useTuiEnv } from "../env.js";
 import { truncateLine } from "../format.js";
 import { theme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
 import { ConfirmBox } from "./confirm-box.js";
+import { ModelEditPane, ModelListPane } from "./model-settings-view.js";
 import { PixelLogo } from "./pixel-logo.js";
 import { WizardView } from "./wizard-view.js";
 import { InputCursor } from "./input-cursor.js";
@@ -82,8 +89,8 @@ function rowLabel(row: ProviderRow, currentId: string | undefined, env: { ascii:
   return { mark: dotOn, name: p.id, detail, configured: true };
 }
 
-const OPS = ["换密钥", "刷新模型列表", "调整思考档位", "删除"] as const;
-/** 交给父级执行的操作（删除在页内确认后走 onConfirmRemove） */
+const OPS = ["换密钥", "刷新模型列表", "调整思考档位", "编辑模型", "删除"] as const;
+/** 交给父级执行的操作（删除在页内确认后走 onConfirmRemove；「编辑模型」为页内子视图） */
 export type ProviderOp = "key" | "refresh" | "thinking";
 
 export function ProviderPage({
@@ -95,6 +102,9 @@ export function ProviderPage({
   onOp,
   onReadonlyHint,
   onConfirmRemove,
+  onListModels,
+  onSaveModel,
+  initialModelTarget,
   onClose,
   notice,
   busyText,
@@ -125,6 +135,24 @@ export function ProviderPage({
   onReadonlyHint: (entry: ProviderOverview) => string;
   /** 删除确认由父级执行后的提示/执行回调（页面负责 y/n 确认交互） */
   onConfirmRemove: (providerId: string) => void;
+  /**
+   * 模型设置读取（ADR-0024）：Core listModelSettings 的桥；
+   * 缺省时「编辑模型」给出不可用提示
+   */
+  onListModels?: ((providerId: string) => Promise<ModelSettingsView[]>) | undefined;
+  /**
+   * 模型设置保存：返回值 undefined = 成功，string = 失败原因（页内显示不退出）；
+   * 成功后由调用方负责 reloadConfig + updateProviders
+   */
+  onSaveModel?:
+    | ((
+        providerId: string,
+        modelId: string,
+        patch: ModelSettingsPatch,
+      ) => Promise<string | undefined>)
+    | undefined;
+  /** /provider model 直达目标：打开页后直接进入模型列表（含模型 id 时进编辑页） */
+  initialModelTarget?: { providerId: string; modelId?: string | undefined } | undefined;
   onClose: () => void;
   /** 父级结果行（保存/刷新/删除/换密钥后的提示） */
   notice?: string | undefined;
@@ -148,6 +176,72 @@ export function ProviderPage({
   );
   const [confirmRemove, setConfirmRemove] = useState<string | undefined>(undefined);
   const [localNotice, setLocalNotice] = useState<string | undefined>(undefined);
+  // 模型设置子视图（ADR-0024）：列表 → 编辑；数据经 onListModels/onSaveModel
+  const [subView, setSubView] = useState<
+    | { kind: "models"; providerId: string }
+    | { kind: "edit"; providerId: string; modelId: string }
+    | undefined
+  >(undefined);
+  const [modelsData, setModelsData] = useState<
+    | { providerId: string; views?: readonly ModelSettingsView[] | undefined; error?: string }
+    | undefined
+  >(undefined);
+  const [saveError, setSaveError] = useState<string | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
+
+  const openModels = (providerId: string, modelId?: string): void => {
+    if (onListModels === undefined) {
+      setLocalNotice("当前环境不支持模型设置编辑");
+      return;
+    }
+    setModelsData({ providerId });
+    setSubView({ kind: "models", providerId });
+    void onListModels(providerId).then(
+      (views) => {
+        setModelsData({ providerId, views });
+        if (modelId !== undefined) {
+          if (views.some((v) => v.modelId === modelId)) {
+            setSubView({ kind: "edit", providerId, modelId });
+          } else {
+            setLocalNotice(`! 模型 "${modelId}" 不在 ${providerId} 的清单中`);
+          }
+        }
+      },
+      (e: unknown) => {
+        setModelsData({
+          providerId,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      },
+    );
+  };
+
+  const saveModel = (providerId: string, modelId: string, patch: ModelSettingsPatch): void => {
+    if (onSaveModel === undefined) {
+      setSaveError("当前环境不支持模型设置编辑");
+      return;
+    }
+    setSaving(true);
+    setSaveError(undefined);
+    void onSaveModel(providerId, modelId, patch).then((err) => {
+      setSaving(false);
+      if (err !== undefined) {
+        setSaveError(err);
+        return;
+      }
+      // 成功 → 回列表并刷新（结果行走页面 notice 区）
+      setLocalNotice(`已保存 ${providerId}/${modelId}`);
+      openModels(providerId);
+    });
+  };
+
+  // /provider model 直达（挂载后进入列表；含模型 id 时继续进编辑页）
+  const targetRef = useRef(initialModelTarget);
+  useEffect(() => {
+    const t = targetRef.current;
+    if (t !== undefined) openModels(t.providerId, t.modelId);
+    // 仅挂载时执行一次
+  }, []);
 
   const rows = useMemo(() => {
     if (query === "") return allRows;
@@ -171,8 +265,9 @@ export function ProviderPage({
   // 像素 Logo 只在高度 ≥30 且宽度 ≥64 时绘制；否则单行文字标题。
   const showLogo = width >= 64 && (termRows ?? height) >= 30;
   const headerH = showLogo ? 5 : stepLabel !== undefined ? 3 : 2;
-  // 底部：结果/操作/确认区 + 按键提示行。确认框（边框+标题+说明+选项）5 行
-  const footerH = 1 + (confirmRemove !== undefined ? 5 : 1);
+  // 底部：结果/操作/确认区 + 按键提示行。确认框（边框+标题+说明+选项）5 行；
+  // 子视图打开时页面不再追加自己的提示行（提示由子视图提供，footer 只留结果/操作行）
+  const footerH = subView !== undefined ? 1 : 1 + (confirmRemove !== undefined ? 5 : 1);
   const contentH = Math.max(4, height - headerH - footerH);
   const listH = Math.max(1, contentH - 1); // 过滤行占 1 行
   const start = Math.min(
@@ -214,6 +309,11 @@ export function ProviderPage({
             } else {
               setConfirmRemove(id);
             }
+            return;
+          }
+          if (op === "编辑模型") {
+            setAction(undefined);
+            openModels(id);
             return;
           }
           const realOp: ProviderOp =
@@ -268,7 +368,8 @@ export function ProviderPage({
         const entry = row.kind === "preset" ? row.configured : row.overview;
         if (entry === undefined) return;
         if (!entry.managed) {
-          setLocalNotice(onReadonlyHint(entry));
+          // 只读条目：进入模型列表只读查看（ADR-0024 第 5 节）
+          openModels(entry.id);
           return;
         }
         setAction({ providerId: entry.id, index: 0 });
@@ -286,7 +387,7 @@ export function ProviderPage({
         setCursor(0);
       }
     },
-    { isActive: active && !wizardActive && confirmRemove === undefined },
+    { isActive: active && !wizardActive && confirmRemove === undefined && subView === undefined },
   );
 
   const titleRow = (
@@ -304,6 +405,20 @@ export function ProviderPage({
     </Box>
   );
 
+  const modelsEntry =
+    subView !== undefined ? entries.find((e) => e.id === subView.providerId) : undefined;
+  // 只读以 Core 视图为准（服务商在 providers.json 才可编辑，ADR-0024）；
+  // 视图未加载时退回条目 managed（被 config.json 整换覆盖的条目此时仍只读）
+  const modelsReadonly =
+    modelsData?.views?.[0]?.readonly ?? (modelsEntry !== undefined ? !modelsEntry.managed : false);
+  const modelsHint =
+    modelsData?.views?.[0]?.readonlyHint ??
+    (modelsReadonly && modelsEntry !== undefined ? onReadonlyHint(modelsEntry) : undefined);
+  const editView =
+    subView?.kind === "edit"
+      ? modelsData?.views?.find((v) => v.modelId === subView.modelId)
+      : undefined;
+
   const content = wizardActive ? (
     <WizardView
       title="添加服务商"
@@ -315,6 +430,42 @@ export function ProviderPage({
       onSubmit={wizard.submit}
       onSubmitMulti={wizard.submitMulti}
       onCancel={wizard.cancel}
+    />
+  ) : subView?.kind === "models" ? (
+    <ModelListPane
+      providerId={subView.providerId}
+      views={modelsData?.providerId === subView.providerId ? modelsData.views : undefined}
+      readonlyHint={modelsHint}
+      error={modelsData?.providerId === subView.providerId ? modelsData.error : undefined}
+      active={active}
+      width={width}
+      height={contentH}
+      onOpen={(modelId) => {
+        setSubView({ kind: "edit", providerId: subView.providerId, modelId });
+        setSaveError(undefined);
+      }}
+      onBack={() => {
+        setSubView(undefined);
+        setModelsData(undefined);
+      }}
+    />
+  ) : subView?.kind === "edit" && editView !== undefined ? (
+    <ModelEditPane
+      view={editView}
+      readonly={modelsReadonly || editView.readonly}
+      readonlyHint={editView.readonlyHint}
+      error={saveError}
+      saving={saving}
+      active={active}
+      width={width}
+      height={contentH}
+      onSave={(patch) => {
+        saveModel(subView.providerId, editView.modelId, patch);
+      }}
+      onBack={() => {
+        setSubView({ kind: "models", providerId: subView.providerId });
+        setSaveError(undefined);
+      }}
     />
   ) : (
     <Box flexDirection="column">
@@ -362,7 +513,13 @@ export function ProviderPage({
   return (
     <Box flexDirection="column" width={width} height={height} overflow="hidden">
       <InputCursor
-        active={active && !wizardActive && confirmRemove === undefined && action === undefined}
+        active={
+          active &&
+          !wizardActive &&
+          confirmRemove === undefined &&
+          action === undefined &&
+          subView === undefined
+        }
         prefix="过滤: "
         text={query}
         width={width - 2}
@@ -404,9 +561,11 @@ export function ProviderPage({
           {truncateLine(busyText ?? noticeLine ?? "", width - 4)}
         </Text>
       )}
-      <Text color={theme.muted} wrap="truncate">
-        {truncateLine("↑/↓ 选择 • Enter 确认 • Esc 返回/完成 • Ctrl+C 退出", width - 4)}
-      </Text>
+      {subView === undefined ? (
+        <Text color={theme.muted} wrap="truncate">
+          {truncateLine("↑/↓ 选择 • Enter 确认 • Esc 返回/完成 • Ctrl+C 退出", width - 4)}
+        </Text>
+      ) : null}
     </Box>
   );
 }

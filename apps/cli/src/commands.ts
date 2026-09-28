@@ -37,6 +37,8 @@ export interface CommandDeps {
   runKeyWizard?: ((providerId: string) => Promise<void>) | undefined;
   /** /provider thinking <name>：同上思考档位向导（ADR-0018） */
   runThinkingWizard?: ((providerId: string) => Promise<void>) | undefined;
+  /** /provider model <name> <model>：同上模型设置问答（ADR-0024） */
+  runModelWizard?: ((providerId: string, modelId: string) => Promise<void>) | undefined;
 }
 
 export type CommandOutcome = "handled" | "exit" | "unknown";
@@ -227,17 +229,19 @@ export async function runSlashCommand(
         }
         return "handled";
       }
-      // /provider image <服务商> <模型> on|off（ADR-0023 第 1 节）
-      if (sub === "image") {
-        const [pid, mid, flag] = [rest[1], rest[2], rest[3]];
-        if (pid === undefined || mid === undefined || (flag !== "on" && flag !== "off")) {
-          io.print("用法：/provider image <服务商> <模型> on|off");
+      // /provider model <服务商> <模型>：行式模型设置问答（ADR-0024 第 4 节）
+      if (sub === "model") {
+        const [pid, mid] = [rest[1], rest[2]];
+        if (pid === undefined || mid === undefined) {
+          io.print("用法：/provider model <服务商> <模型>");
+          return "handled";
+        }
+        if (deps.runModelWizard === undefined) {
+          io.print("! /provider model 需要交互式终端");
           return "handled";
         }
         try {
-          await config.saveSetupImageInput(pid, mid, flag === "on");
-          updateProviders(await reloadConfig());
-          io.print(`已声明 ${pid}/${mid} ${flag === "on" ? "支持" : "不支持"}图片输入`);
+          await deps.runModelWizard(pid, mid);
         } catch (e) {
           io.print(`! ${errorText(e)}`);
         }

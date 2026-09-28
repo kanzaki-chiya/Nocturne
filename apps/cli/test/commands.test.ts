@@ -325,59 +325,56 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(updated).toEqual([{ tag: "rc" }]);
   });
 
-  it("/provider image 声明写入并 updateProviders；on/off 文案（ADR-0023）", async () => {
-    const calls: [string, string, boolean][] = [];
-    const updated: unknown[] = [];
+  it("/provider model 调 runModelWizard（参数顺序：服务商、模型）", async () => {
+    const calls: [string, string][] = [];
     const deps = {
       provider: {
-        config: {
-          saveSetupImageInput: async (p: string, m: string, on: boolean) => {
-            calls.push([p, m, on]);
-          },
-        } as never,
-        reloadConfig: async () => ({ tag: "rc" }) as never,
-        updateProviders: (rc: unknown) => {
-          updated.push(rc);
-        },
+        config: {} as never,
+        reloadConfig: async () => ({}) as never,
+        updateProviders: () => undefined,
+      },
+      runModelWizard: async (p: string, m: string) => {
+        calls.push([p, m]);
       },
     };
-    const { lines, io } = capture();
-    await runSlashCommand("/provider image corp m1 on", fakeSession(), fakeRuntime, io, deps);
-    expect(calls).toEqual([["corp", "m1", true]]);
-    expect(updated).toEqual([{ tag: "rc" }]);
-    expect(lines.join("")).toContain("已声明 corp/m1 支持图片输入");
-
-    const c2 = capture();
-    await runSlashCommand("/provider image corp m1 off", fakeSession(), fakeRuntime, c2.io, deps);
-    expect(calls.at(-1)).toEqual(["corp", "m1", false]);
-    expect(c2.lines.join("")).toContain("已声明 corp/m1 不支持图片输入");
+    await runSlashCommand(
+      "/provider model corp m1",
+      fakeSession(),
+      fakeRuntime,
+      capture().io,
+      deps,
+    );
+    expect(calls).toEqual([["corp", "m1"]]);
   });
 
-  it("/provider image 参数不全或非法开关 → 用法；写入失败透传", async () => {
+  it("/provider model 参数不全 → 用法；无向导桥 → 需要交互式终端；失败透传", async () => {
     const deps = {
       provider: {
-        config: {
-          saveSetupImageInput: async () => {
-            throw new Error('服务商 "corp" 不是向导写入的条目');
-          },
-        } as never,
+        config: {} as never,
         reloadConfig: async () => ({}) as never,
         updateProviders: () => undefined,
       },
     };
     const { lines, io } = capture();
-    for (const line of [
-      "/provider image",
-      "/provider image corp",
-      "/provider image corp m1",
-      "/provider image corp m1 maybe",
-    ]) {
+    for (const line of ["/provider model", "/provider model corp"]) {
       await runSlashCommand(line, fakeSession(), fakeRuntime, io, deps);
     }
-    expect(lines.filter((l) => l.includes("用法：/provider image"))).toHaveLength(4);
-    await runSlashCommand("/provider image corp m1 on", fakeSession(), fakeRuntime, io, deps);
-    expect(lines.at(-1)).toContain("! ");
-    expect(lines.at(-1)).toContain("不是向导写入的条目");
+    expect(lines.filter((l) => l.includes("用法：/provider model <服务商> <模型>"))).toHaveLength(
+      2,
+    );
+    // 无 runModelWizard 桥 → 非交互提示
+    await runSlashCommand("/provider model corp m1", fakeSession(), fakeRuntime, io, deps);
+    expect(lines.at(-1)).toContain("需要交互式终端");
+    // 向导错误透传
+    const { lines: lines2, io: io2 } = capture();
+    await runSlashCommand("/provider model corp m1", fakeSession(), fakeRuntime, io2, {
+      ...deps,
+      runModelWizard: async () => {
+        throw new Error('模型 "m1" 不在清单中');
+      },
+    });
+    expect(lines2.at(-1)).toContain("! ");
+    expect(lines2.at(-1)).toContain("不在清单中");
   });
 
   it("/provider add 无向导桥时提示需要交互终端", async () => {

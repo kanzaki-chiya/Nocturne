@@ -16,6 +16,7 @@ import {
   createWizardIo,
   runAddWizardInSession,
   runKeyWizardInSession,
+  runModelWizardInSession,
   runThinkingWizardInSession,
 } from "./setup.js";
 import { sessionOpenNotes, type NewSessionFn, type SessionSwitcher } from "./session-switch.js";
@@ -343,6 +344,19 @@ export async function runRepl(
                       runThinkingWizardInSession(wio, {
                         config: bridge.config,
                         providerId,
+                        reloadConfig: bridge.reloadConfig,
+                        updateProviders: (rc) => {
+                          runtime.updateProviders(rc);
+                        },
+                      }),
+                    ),
+                  runModelWizard: (providerId: string, modelId: string) =>
+                    startWizard((wio) =>
+                      runModelWizardInSession(wio, {
+                        config: bridge.config,
+                        providerId,
+                        modelId,
+                        workspaceRoot: bridge.workspaceRoot,
                         reloadConfig: bridge.reloadConfig,
                         updateProviders: (rc) => {
                           runtime.updateProviders(rc);

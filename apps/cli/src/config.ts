@@ -4,9 +4,11 @@
  * 这里只做"本次启动是否凑得齐一次会话"的校验与模型引用归一化。
  */
 import {
+  BUILTIN_MODEL_CATALOG,
   fetchModels,
   loadConfig,
   normalizeModelRef,
+  type BuiltinModelLookup,
   type Platform,
   type RuntimeConfig,
 } from "@nocturne/core";
@@ -37,6 +39,10 @@ export type CollectResult =
     };
 
 type Env = (name: string) => string | undefined;
+
+/** 模型设置编辑的内置目录查询（ADR-0024 第 2 节 builtin 来源标注） */
+const builtinModel: BuiltinModelLookup = (providerId, modelId) =>
+  BUILTIN_MODEL_CATALOG[providerId]?.[modelId];
 
 /** 生效的 api-type：命令行 > 环境变量 > 默认 openai-compatible */
 function effectiveApiType(args: CliArgs, env: Env): string {
@@ -84,6 +90,7 @@ export function makeConfigLoader(
           key,
           signal,
         ),
+      builtinModel,
     });
 }
 
@@ -114,6 +121,7 @@ export async function collectConfig(
         key,
         signal,
       ),
+    builtinModel,
   });
   const resolved = runtime.base;
   const problems: string[] = [];
