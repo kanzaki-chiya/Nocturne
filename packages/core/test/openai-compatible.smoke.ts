@@ -4,6 +4,7 @@
  *   NOCTURNE_SMOKE_BASE_URL  例如 https://api.deepseek.com/v1
  *   NOCTURNE_SMOKE_API_KEY   服务凭据（只从环境变量读取）
  *   NOCTURNE_SMOKE_MODEL     模型 id，例如 deepseek-chat
+ *   NOCTURNE_SMOKE_IMAGE=1   可选：开启读图用例（要求 NOCTURNE_SMOKE_MODEL 真能看图）
  * 未设置时跳过。仅在不含敏感信息的测试工作区中运行——工作区内容会发给模型服务。
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -18,6 +19,7 @@ const BASE_URL = process.env.NOCTURNE_SMOKE_BASE_URL;
 const API_KEY = process.env.NOCTURNE_SMOKE_API_KEY;
 const MODEL = process.env.NOCTURNE_SMOKE_MODEL;
 const REASONING_MODEL = process.env.NOCTURNE_SMOKE_DEEPSEEK_REASONING_MODEL;
+const IMAGE_SMOKE = process.env.NOCTURNE_SMOKE_IMAGE === "1";
 const PROVIDER_ID = "smoke";
 
 const configured = BASE_URL !== undefined && API_KEY !== undefined && MODEL !== undefined;
@@ -32,7 +34,7 @@ const makeTmp = (p: string) => {
   return d;
 };
 
-async function openSession(cwd: string, model = MODEL) {
+async function openSession(cwd: string, model = MODEL, imageInput = false) {
   const runtime = await createRuntime({
     cwd,
     sessionsDir: makeTmp("nct-smoke-sessions-"),
@@ -41,7 +43,19 @@ async function openSession(cwd: string, model = MODEL) {
         id: PROVIDER_ID,
         baseURL: BASE_URL ?? "",
         apiKeyEnv: "NOCTURNE_SMOKE_API_KEY",
-        models: { [model ?? ""]: {} },
+        models: {
+          [model ?? ""]: imageInput
+            ? {
+                capabilities: {
+                  toolCalls: true,
+                  parallelToolCalls: true,
+                  reasoning: "none",
+                  imageInput: true,
+                  promptCache: false,
+                },
+              }
+            : {},
+        },
       },
     ],
     permissions: { autoApproveAsk: true },
@@ -125,6 +139,42 @@ describe.skipIf(!configured)("openai-compatible 冒烟（真实服务）", () =>
     ).toBe(true);
     await session.close();
   });
+
+  // 显式 opt-in：配置的模型未必能看图；断言不放宽——模型看不到图时应失败而非跳过。
+  it.skipIf(!IMAGE_SMOKE)(
+    "读图：模型 read 一张 PNG 并答出主色（需 NOCTURNE_SMOKE_IMAGE=1）",
+    async () => {
+      const cwd = makeTmp("nct-smoke-ws-");
+      // 2×2 纯红 PNG（74 字节，构造自合法 IHDR/IDAT/IEND）
+      writeFileSync(
+        path.join(cwd, "red.png"),
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP4z8DwnwGMgRQAH+4D/dJQfRoAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      );
+      const { session, events } = await openSession(cwd, MODEL, true);
+
+      const reason = await session.submit({
+        text: "用 read 工具读取当前目录下的 red.png，然后只回答这张图片的主色（一个词）。",
+      });
+
+      // reason 非 "done" 即意味着请求侧失败（如 HTTP 400），不允许放松断言掩盖。
+      expect(reason).toBe("done");
+      const readOk = events.some(
+        (e) =>
+          e.type === "tool.completed" && e.payload.name === "read" && e.payload.status === "ok",
+      );
+      expect(readOk).toBe(true);
+      const finalText = events
+        .filter((e) => e.type === "message.assistant")
+        .flatMap((e) => e.payload.content)
+        .map((b) => (b.type === "text" ? b.text : ""))
+        .join("\n");
+      expect(finalText).toMatch(/红|red/i);
+      await session.close();
+    },
+  );
 
   it.skipIf(REASONING_MODEL === undefined)(
     "DeepSeek 推理模式：reasoning 块回传后的第二轮被真实服务接受，且不泄漏模板标记",

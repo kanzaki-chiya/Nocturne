@@ -63,7 +63,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 | 场景 | CLI（REPL） | TUI |
 |---|---|---|
 | 提交输入 | Enter 提交一行 | Enter 提交输入框内容 |
-| 斜杠命令 | `/help /model /preset /effort /context /compact /resume /new /clear /mcp /provider /shell /exit /quit`（`/provider` 子命令见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节） | 同一集合；`/model` 打开全屏模型选择页（§7），`/provider` 打开全屏服务商页（§8），`/resume` 弹出列表选择器（↑↓ + Enter，Esc 取消），`/context` 弹出可滚动报告面板，`/mcp` 弹出服务器状态面板（复用 Panel 组件，Esc/Enter 关闭），`/shell` 弹出 shell 选择器（`auto` 加五种探测结果，未安装灰显不可选、光标自动跳过，当前值高亮；被 `NOCTURNE_SHELL`/`config.json` 覆盖时页面顶部说明「写入 settings.json 但不生效」，ADR-0022 第 4 节）；`/shell <种类>` 直接切换，未安装的种类在写盘前被拒绝并列出可选项（`invalid_command`）。命令名与效果完全一致 |
+| 斜杠命令 | `/help /model /preset /effort /context /compact /resume /new /clear /mcp /provider /shell /exit /quit`（`/provider` 子命令见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节） | 同一集合；`/model` 打开全屏模型选择页（§7），`/provider` 打开全屏服务商页（§8），`/resume` 弹出列表选择器（↑↓ + Enter，Esc 取消），`/context` 弹出可滚动报告面板（请求携带图片附件时含 `images <count> 张 ~<tok> tok` 行，context.md 第 5 节），`/mcp` 弹出服务器状态面板（复用 Panel 组件，Esc/Enter 关闭），`/shell` 弹出 shell 选择器（`auto` 加五种探测结果，未安装灰显不可选、光标自动跳过，当前值高亮；被 `NOCTURNE_SHELL`/`config.json` 覆盖时页面顶部说明「写入 settings.json 但不生效」，ADR-0022 第 4 节）；`/shell <种类>` 直接切换，未安装的种类在写盘前被拒绝并列出可选项（`invalid_command`）。命令名与效果完全一致 |
 | 权限确认 | `a`/`s`/`p`/`d`/`x`，`d <文本>` 带反馈 | 同五键；`d` 先进入反馈行：`Enter` 发送拒绝（内容为空 = 不带反馈，等价裸 `d`），`Esc` 退出反馈行回到五选项 |
 | 中断 | Ctrl+C：Turn 中中断；权限提示中取消；空闲退出 | 同：pendingPermission 时先中断（结算为 cancelled）；busy 时中断 Turn；空闲时退出。**例外**：存在选区时 Ctrl+C 复制并清除选区，不中断、不退出 |
 | EOF/退出 | Ctrl+D、`/exit` | Ctrl+D（空闲）、`/exit`、`/quit` |
@@ -213,6 +213,8 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 | 刷新模型列表 | 重新 `GET /models` 写回限额与能力标记；不覆盖 `thinking.levels` 用户声明 | `/provider refresh <名>` |
 | 调整思考档位 | 重走单步档位勾选（首项「不支持思考强度」互斥） | `/provider thinking <名>` |
 | 删除 | 选项式确认框（默认焦点在「取消」；`←`/`→`/`↑`/`↓` 移动、`Enter` 执行、`Esc` 取消）确认后删除条目与凭据；当前会话使用的拒绝；只读条目不可达 | `/provider remove <名>` |
+
+`/provider image <名> <模型> on|off` 声明模型是否支持图片输入（ADR-0023），没有对应的页面操作，只在斜杠命令中提供。
 
 **全页无打字是非题**（ADR-0019 第 2 条）：所有是非与多选交互都用 `↑`/`↓`/`←`/`→` + `空格`/`Enter` 完成——包括删除确认与思考档位勾选，页面上不出现需要键入 `y`/`N` 回答的提问。
 

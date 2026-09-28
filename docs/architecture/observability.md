@@ -39,12 +39,14 @@
 |---|---|---|
 | `config.load` | config | 各来源路径、信任状态、警告数（不记文件全文） |
 | `session.open` | index | sessionId、cwd、workspaceRoot、resumed、加载耗时 |
-| `provider.request` | agent | 完整 `ModelRequest`（messages、tools、参数）。请求头由 Provider 适配器构造、不含在 `ModelRequest` 里，天然不会进来 |
+| `provider.request` | agent | 完整 `ModelRequest`（messages、tools、参数）。请求头由 Provider 适配器构造、不含在 `ModelRequest` 里，天然不会进来；消息的 `images` 元素被替换为 `{ mimeType, bytes, sha256 }` 摘要，base64 不落盘（ADR-0023，`agent/redact.ts`） |
 | `provider.result` | agent | finishReason、usage（token 明细）、耗时、text/toolCalls 概要 |
 | `provider.error` | agent | ProviderError kind、message、retryable、attempt |
 | `context.build` | context | 各段落名与字符/token 数、estimatedTokens、预算、是否裁剪/压缩（进 `context.section` 明细） |
+| `context.attachment_missing` | agent | 历史引用了但 `AttachmentStore` 读不回字节的图片附件：turnId、file、sha256（ADR-0023） |
 | `tool.permission` | tools/gate | callId、工具名、subjects、action、source、命中规则描述、耗时 |
 | `tool.exec` | tools/executor | callId、工具名、status、耗时、是否截断/落盘 |
+| `tool.attachment_failed` | tools/executor | 工具结果图片附件落盘失败：callId、name、error；成功的图片照常引用，该次调用仍恰好一个 `tool.completed`（ADR-0023） |
 | `hook.run` / `hook.done` | hooks | 点位、command、退出码、耗时、效果摘要（deny/allow/feedback 长度等）、stderr 尾部 |
 | `mcp.event` | mcp | server、state、toolCount、error |
 | `mcp.call` | mcp | server、tool、耗时、isError、结果大小 |

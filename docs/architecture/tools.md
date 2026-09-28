@@ -15,7 +15,9 @@ tools/
 ├── Tool Runtime
 │   ├── registry     注册、查找、导出模型可见的工具规格
 │   ├── executor     执行管线（第 3 节）
-│   └── budget       结果大小预算与截断
+│   ├── budget       结果大小预算与截断
+│   ├── image        图片文件头识别与尺寸解析（sniffImageMime / parseImageSize，纯函数）
+│   └── attachments  AttachmentStore：图片附件的会话内落盘与按 sha256 校验的读回（第 4 节）
 └── builtin/         read、write、edit、grep、glob、shell、task（Phase 6）
 ```
 
@@ -71,6 +73,7 @@ execute(call, ctx):
   - 落盘写失败时降级为普通截断（模型可见内容注明未落盘），不影响 `tool.completed` 的结算。
   - `tool.completed` 增加可选字段 `spillPath`（落盘文件的绝对路径，兼容新增）；客户端据此显示"输出已截断，完整内容在 \<path\>"，模型可见的 `modelContent` 中同样注明路径与预览。
   - 权限协同：所有预设都内置 `read <sessionsDir>/attachments/<sessionId>/** → allow`（[permissions.md](permissions.md) 第 6 节），**只放行当前会话**的落盘目录——读其他会话的附件仍走正常权限求值。
+- **图片附件**（ADR-0023）：`ToolResult.attachments` 携带的图片字节由执行器经 `AttachmentStore` 落盘到**同一目录** `<sessionsDir>/attachments/<sessionId>/`，文件名 `img-<n>.<ext>`（`n` 从该目录已有文件的最大编号续起，并发保存串行化、撞名让号）；事件与历史只写 `ImageAttachment` 引用（events.md 第 4 节），字节绝不进事件。读回时校验 sha256，文件缺失或不符按缺失处理。附件存储按会话独立：子会话使用自己的 `sessionId` 目录与实例（index.ts / subagent.ts 各建一份，挂在 `ExecutionEnvironment.attachments` 上）。保存失败的语义见 [tool-api.md](../protocols/tool-api.md) 第 3 节；字节如何进入模型请求见 [context.md](context.md) 第 3 节。
 
 ## 5. 超时、中断与并发
 
@@ -83,7 +86,7 @@ execute(call, ctx):
 
 | 工具 | 作用 | 副作用 | 关键约定 |
 |---|---|---|---|
-| `read` | 读取文本文件，支持起始行与行数 | 无 | 带行号输出；检测二进制文件；记录"已读状态"（路径、修改时间） |
+| `read` | 读取文本文件与 PNG、JPEG、GIF、WebP 图片，支持起始行与行数 | 无 | 带行号输出；记录"已读状态"（路径、修改时间）；图片约定见下 |
 | `write` | 创建或整体覆盖文件 | 写文件 | 覆盖已存在的文件前必须在本会话读过它，且文件自读取后未被外部修改；`output` 携带 `path`、`created`、`lines`，覆盖时附 `diff` |
 | `edit` | 精确字符串替换 | 写文件 | `old` 必须在文件中唯一出现（或显式 `replaceAll`）；同样要求先读且未过期；`output` 返回 unified 风格 `diff` 供客户端显示 |
 | `grep` | 按正则搜索文件内容 | 无 | 优先使用 ripgrep；遵守 `.gitignore`；不跟随符号链接；结果逐条经权限过滤；数量有上限 |
@@ -98,6 +101,12 @@ execute(call, ctx):
 - 写入工具以 `ctx.subjects` 中已批准的**解析后路径**为准；写入前重新 `stat`/`realpath`：解析结果与批准时不一致 → `resource_changed`；已存在文件在 `readState` 中无记录 → `error(code="not_read")`；记录的 `mtimeMs`/`size` 与当前不一致 → `error(code="stale_file")`（要求重新 `read`）。
 - `write` 创建尚不存在的文件不要求先读；写入瞬间文件恰好出现（竞态）按已存在文件处理，即要求先读。
 - `edit`/`write` 覆盖时在 `output` 中携带行级 unified 风格 diff（公共前后缀作上下文，中段为 `-`/`+` 行）；`modelContent` 是简短摘要，不含完整 diff。
+
+`read` 的图片约定（ADR-0023）：
+
+- **识别方式**：读出字节后先做魔数嗅探（PNG `89 50 4E 47…`、JPEG `FF D8 FF`、GIF `GIF87a/89a`、WebP `RIFF…WEBP`），命中则从文件头解析宽高（`tools/image.ts` 纯函数）；识别在二进制判定之前，因此扩展名与内容不一致时按内容为准——`.png` 扩展名的文本文件仍按文本读取，SVG（纯文本格式）走文本路径，BMP 等未识别二进制仍报 `binary_file`（其说明中列出支持的图片格式）。
+- **限制**：单张原始文件不超过 5 MB、每边不超过 8000 px（`IMAGE_MAX_BYTES`/`IMAGE_MAX_EDGE`），超限报 `image_too_large`；文件头损坏或截断到无法解析尺寸报 `image_corrupt`。
+- **结果**：成功时忽略 `offset`/`limit`、**不写 readState**（图片不解除"先读后写"）；`modelContent` 为一行 `Image file: <path> (<mime>, <宽>×<高>, <大小>)`；字节作为 `attachments` 交给执行器落盘（第 4 节），经 Context Builder 按当前模型 `imageInput` 投影进请求（[context.md](context.md) 第 3 节）——工具本身不判断模型能力。
 
 `shell` 的约定（Phase 2 定案）：
 
@@ -120,4 +129,4 @@ execute(call, ctx):
 
 ## 7. 暂不设计
 
-工具别名、Provider 原生工具（如服务端网页搜索）、后台运行的 shell、工具结果中的图片（MCP 返回的图片目前按占位符处理，见 [mcp.md](mcp.md) 第 6 节）。接入时均通过 `ToolDefinition` 与注册表完成，不修改执行管线的步骤。
+工具别名、Provider 原生工具（如服务端网页搜索）、后台运行的 shell。工具结果图片已有落地通道（`ToolResult.attachments` → `AttachmentStore` → 按 `imageInput` 投影，ADR-0023）；MCP 返回的图片目前仍按占位符处理（见 [mcp.md](mcp.md) 第 6 节），接入时转换为 `ToolResult.attachments`，不修改执行管线的步骤。

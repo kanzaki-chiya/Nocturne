@@ -89,7 +89,7 @@
 
 ### tools
 
-- **负责**：工具注册表；执行管线（输入校验 → 资源解析（经 platform）→ 权限 → 执行 → 结果归一化 → 生命周期事件）；中断与超时；结果大小预算；内置工具实现。
+- **负责**：工具注册表；执行管线（输入校验 → 资源解析（经 platform）→ 权限 → 执行 → 结果归一化 → 生命周期事件）；中断与超时；结果大小预算；内置工具实现；图片附件存储（`AttachmentStore`，ADR-0023——字节落盘在 tools，Agent Loop 经注入接口读回，依赖方向不变）。
 - **不负责**：权限规则本身；决定何时调用工具；渲染工具结果。
 - **公开接口**：`ToolRegistry`、`ToolExecutor`、`ToolDefinition`（见 [tool-api.md](../protocols/tool-api.md)）；另定义 `HookRunner`（hooks 实现的注入点）、`McpConnector` / `McpSession`（`packages/mcp` 的装配点）与 `SubagentLauncher`（`agent` 的注入点，Phase 6，见 [subagent.md](subagent.md)）类型。
 - **依赖**：protocol、permission、platform、diagnostics（仅接口注入，未启用时为空实现）。**不能依赖**：agent、session、provider、context、hooks（实现）。

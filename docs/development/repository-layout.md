@@ -27,7 +27,7 @@ nocturne/
 │   │   │   ├── context/         Context Builder、token 预算、压缩
 │   │   │   ├── provider/        Provider 接口、模型目录
 │   │   │   │   └── adapters/    openai-compatible、anthropic
-│   │   │   ├── tools/           注册表、执行管线、结果预算
+│   │   │   ├── tools/           注册表、执行管线、结果预算、图片附件存储
 │   │   │   │   └── builtin/     read、write、edit、grep、glob、shell、task
 │   │   │   ├── permission/      规则求值、权限闸门、Grant 匹配
 │   │   │   ├── config/          配置分层加载、项目信任、Grant 文件读写
@@ -99,7 +99,9 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
     ├── <sessionId>.jsonl             会话事件日志
     ├── <sessionId>.lock              会话锁（ADR-0009）
     ├── <sessionId>.jsonl.tail-<ts>   崩溃截断下来的损坏尾部（诊断用）
-    └── attachments/<sessionId>/<callId>.txt   超预算工具输出的落盘（tools.md 第 4 节）
+    └── attachments/<sessionId>/            按会话隔离的工具输出落盘目录：
+        ├── <callId>.txt                       超预算工具输出（tools.md 第 4 节）
+        └── img-<n>.<ext>                      read/粘贴/MCP 的图片附件字节（tools.md，n 会话内递增）
 ```
 
 目录权限：POSIX 上 `NOCTURNE_HOME` 以 `0700` 创建——会话日志里有代码与对话内容，`credentials.json` 另以 `0600` 写（provider-setup.md 第 3 节）；Windows 维持用户目录的默认权限（凭据保护由 DPAPI 承担）。

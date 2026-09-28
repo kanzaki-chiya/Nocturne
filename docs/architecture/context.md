@@ -22,16 +22,27 @@ build({
   tools: ToolSpec[],              # 由 agent 从 ToolRegistry 取得后作为数据传入
   instructions: InstructionSet,   # 已加载的 AGENTS.md 等
   environment: EnvironmentInfo,   # 操作系统、shell、cwd、会话日期
+  attachmentData?: Map<sha256, base64>,  # 图片附件字节，由 Agent Loop 预先读入（见下）
 }) → BuiltContext {
   request: ModelRequest,          # 中性请求，交给 Provider
   report: ContextReport,          # 每个部分的来源与 token 估算，用于调试与 /context 命令
   overBudget: boolean,            # 当前请求超出可用预算
   compaction?: CompactionPlan,    # 建议或必须执行的压缩（第 6 节）
   mustCompact: boolean,           # 不压缩就无法发出请求
+  missingAttachments?: ImageAttachment[],  # 引用了但取不到字节的附件，由 Loop 记诊断
 }
 ```
 
 Context Builder 不做 I/O，也不调用 Provider：指令文件由 `config` / `platform` 在会话开始时读取并传入；需要模型参与的摘要由 Agent Loop 按计划执行。这让它可以用纯数据测试。
+
+图片附件（ADR-0023）：历史条目上的 `attachments` 只是引用（events.md 第 4 节）。每个 Step 构建前，Agent Loop 先调 `attachmentsToLoad(history, model)`——与构建共用同一套 6.4 压缩边界——得到本次会作为图片发出的引用集（模型 `imageInput` 为 false 时为空；跳过摘要/修剪覆盖的条目；含进行中 Turn 被摘要覆盖而重注入的 `message.user`；按 `sha256` 去重、只取最新 20 个引用），再经会话的 `AttachmentStore` 读字节、转 base64 放进 `attachmentData` 传给 Builder。投影规则：
+
+- `imageInput` 为 true 且 `attachmentData` 命中该 sha256 → 消息带 `images`（`ModelImage`，provider-api.md 第 3 节）；user 消息的图片走消息级 `images` 字段，tool 消息同理。
+- `imageInput` 为 false → 每个附件换成占位文字 `[image omitted: current model does not support image input]`。
+- 数据缺失 → `[image unavailable: attachment file missing]`，引用记入 `missingAttachments`；Builder 不记诊断，由 Agent Loop 逐条记 `context.attachment_missing`。
+- 占位文字的落位：user 消息追加一个 text 块；tool 消息在 `content` 末尾每个占位前加 `\n` 追加。L1 修剪覆盖的 tool 条目保持原占位说明，不附加任何图片占位或图片。
+- `attachmentData` 缺省（`undefined`）是**估算模式**——`describeContext`（`/context` 报告）走这条路：支持看图的模型按将发送的引用数估算，不产生 `images` 也不算缺失。
+- 全部消息组装完（含 `pendingMessages`）做一次上限后处理：从最新往前保留 20 张图片，更早的从 `images` 移除并按同一落位规则换成 `[image omitted: exceeds the per-request limit of 20 images]`。
 
 ## 3. 组装顺序（稳定的放前面）
 
@@ -57,6 +68,8 @@ Builder 在 `BuiltContext` 中标出"可缓存前缀"的边界，是否以及如
 ```
 
 没有 Provider 用量数据时（第一个 Step、刚切换模型）完全使用估算。估算只用于决定是否压缩，不需要精确。
+
+图片附件按**每张固定 1600 token** 计入估算（`IMAGE_TOKEN_ESTIMATE`），与实际分辨率、base64 长度无关——base64 长度绝不进入字符/token 估算；`report.images` 仅在 count>0 时给出 `{ count, estimatedTokens }`（`/context` 显示为 `images` 行），占位文字按普通字符计入。
 
 ## 6. 压缩
 
@@ -114,6 +127,7 @@ Agent Loop                 → prune：直接写入事件
 - **摘要请求必须装得进窗口**：Builder 选择边界时保证"上一个摘要 + 待总结历史（先按修剪规则省略工具输出）+ 摘要指令"在预算内；装不下就把边界提前到更早的闭合边界；不存在任何可行边界时不给出计划。
 - **边界只取新内容**：候选边界必须落在最新摘要的 `throughSeq` 之后（即摘要覆盖之后存在新的闭合边界）；最新摘要之后没有新内容时不给出计划，手动 `/compact` 因此返回 `compaction_failed` 而不是对同一历史再压出第二份摘要。
 - **摘要输出有上限**（默认约 4,000 token），并作为有界内容写入事件。
+- **转录不携带图片字节**：`renderTranscript`/`buildSummaryRequest` 对每个附件输出文本标记 `[image: <label ?? file>]`（不管模型能力），摘要请求的消息里没有 `images`。
 - **失败、超时、被中断**：不写任何压缩事件，会话历史不变。
   - 预防性压缩失败：本 Step 照常使用未压缩的上下文，并发出 `runtime.warning`；本 Turn 内不再尝试预防性压缩，避免每个 Step 重复失败。
   - 必须压缩却失败（或没有可行边界）：Turn 以 `error` 结束，`error.code = "compaction_failed"`，提示用户手动 `/compact` 或切换到更大窗口的模型。
@@ -128,7 +142,7 @@ Phase 2 提供自动修剪与手动 `/compact`；Phase 3 加入自动摘要（6.
 历史中的内容大多是中性的（文本、工具调用、工具结果），可以直接用于新模型。例外：
 
 - 推理内容若携带 Provider 专有数据（签名、加密内容），只能回传给产生它的 Provider；切换后 Builder 丢弃这类推理块，只保留普通文本。
-- 新模型不支持的输入类型（例如图片）替换为文字占位。
+- 新模型不支持图片输入（`capabilities.imageInput` 为 false）时，历史中的图片附件投影为占位文字 `[image omitted: current model does not support image input]`——附件引用仍在历史里，切回支持图片的模型后同一附件会重新以图片发出（第 3 节投影规则）。同一逻辑还产出另外两种占位：`[image unavailable: attachment file missing]`（附件文件读不回）与 `[image omitted: exceeds the per-request limit of 20 images]`（超出单请求 20 张上限的较旧图片）。
 - 新模型窗口更小时，按第 6 节的规则压缩。
 
 这些判断依据 `ModelInfo.capabilities` 与内容块上记录的来源 Provider，而不是按 Provider 名字写分支。

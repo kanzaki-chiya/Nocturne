@@ -30,6 +30,8 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 能力信息来自内置的小型模型目录（纯数据），用户可以在配置中覆盖或为未知模型补充。MVP 不从远端同步模型目录。
 
+`capabilities.imageInput` 的来源优先级（高者覆盖低者，ADR-0023）：逐模型手写 `models.<id>.capabilities.imageInput` > 用户声明（providers.json 条目的 `userCapabilities`，`/provider image` 写入，见 [provider-setup.md](provider-setup.md)）> 上游声明（`GET /models` 的 `architecture.input_modalities` 等映射，provider-setup.md 第 7 节）> 内置目录 > `false`。一层细节：同 id 服务商的 `models` 按模型 id 逐条合并，`config.json` 里手写的同名模型条目会**整体替换**向导层的该模型条目——若手写条目没写 `imageInput`，该字段回落到用户声明而不是上游值；只有手写确实给出 `imageInput` 时才覆盖声明。
+
 ## 3. 配置形态（示意）
 
 ```jsonc

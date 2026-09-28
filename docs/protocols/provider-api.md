@@ -96,11 +96,21 @@ interface ModelRequest {
 ```ts
 type SystemBlock = { text: string }
 
+/** 一张待发送的图片（ADR-0023）：由 Context Builder 按当前模型的
+    imageInput 能力从附件引用投影产生（context.md），适配器映射为
+    各自 API 的图片部件 */
+type ModelImage = { mimeType: ImageMimeType /* events.md 第 4 节 */; data: string /* base64 */ }
+
 type ModelMessage =
-  | { role: "user"; content: ContentBlock[] }
+  | { role: "user"; content: ContentBlock[]; images?: ModelImage[] }
   | { role: "assistant"; content: ContentBlock[]; toolCalls: ToolCallRef[] }
-  | { role: "tool"; callId: string; name: string; content: string; isError: boolean }
+  | { role: "tool"; callId: string; name: string; content: string; isError: boolean; images?: ModelImage[] }
 ```
+
+`images` 的协议转换（ADR-0023；差异只存在于适配器内）：
+
+- **openai-compatible**：user 消息的图片追加为 `image_url` 内容部件（`data:<mime>;base64,<data>` 数据 URL）。tool 消息的 `content` 只放文本——OpenAI 兼容协议的 tool 消息没有图片部件，而 SDK 的 content 型 tool output 会被 JSON.stringify 成文本——因此一批**连续** tool 消息携带的图片被收集起来，在该批结束处插入**一条**合成 user 消息：每张图先放一行标注 `Image from tool call <wireId> (<toolName>):`，再放 `image_url` 部件。
+- **anthropic**：user 图片转为原生 `image` 内容块；tool 结果携带图片且非错误时，output 用 SDK 的内容型结果，线上形态为 `tool_result.content` 中的原生 `image` 块（`{ type: "image", source: { type: "base64", media_type, data } }`）。`isError` 的 tool 结果不带图：图片被丢弃，文本末尾追加一行 `[image omitted: error result]`。
 
 工具调用的标识：历史中的工具调用与结果以 Runtime 分配的 `callId` 关联（`ToolCallRef` 见 [events.md](events.md) 第 4 节）。适配器转换为服务协议时，需要为每对调用 / 结果选择一个线上 ID：若该调用来自同一 Provider 且保存了 `providerCallId`，可以使用它；否则使用 `callId`（字符集 `[A-Za-z0-9_-]`，满足主流服务的格式要求）。同一请求内同一对调用与结果必须使用同一个线上 ID。
 

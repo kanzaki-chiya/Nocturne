@@ -102,13 +102,13 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
 | `/new`、`/clear` | 新建空会话并切换，沿用当前模型、思考档位与权限预设；旧会话仍可恢复，`/clear` 不是清屏 | CLI 注入的 `newSession` 回调 |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
-| `/provider` | 列出服务商：名称、类型、服务地址主机名、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），标记当前会话所用，不显示密钥；TUI 中打开全屏服务商页（[tui.md](tui.md) 第 8 节）。`/provider add` 走与 `nctrn setup --cli` 相同的逐行向导（v0.3 起不再询问模型，保存后提示用 `/model`）；`key <name>` / `refresh <name>` / `thinking <name>` / `remove <name>` 是服务商页四个操作的快捷方式，见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveSetupProvider` 等 + `runtime.updateProviders` |
+| `/provider` | 列出服务商：名称、类型、服务地址主机名、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），标记当前会话所用，不显示密钥；TUI 中打开全屏服务商页（[tui.md](tui.md) 第 8 节）。`/provider add` 走与 `nctrn setup --cli` 相同的逐行向导（v0.3 起不再询问模型，保存后提示用 `/model`）；`key <name>` / `refresh <name>` / `thinking <name>` / `remove <name>` 是服务商页四个操作的快捷方式；`image <name> <模型> on|off` 声明模型是否支持图片输入（ADR-0023，无对应页面操作），见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveSetupProvider` 等 + `runtime.updateProviders` |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
 
 - 未知命令打印提示（不报错退出）。命令在 Turn 进行中给出"会话忙"提示（`setModel` / `compact` 的前置条件是空闲，见 events.md 第 7 节）。
 - `/model` 参数先按模型 id 精确匹配：匹配到已知 id（含 `provider/model` 归一化后）时直选切换，行为与 v0.1 一致；未匹配时按关键词过滤列表（子串、大小写不敏感），不切换。
 - `/model <id>` 在 Provider 内切换：裸 id 与 `provider/model` 写法都按 `--model` 同规则归一化（前缀等于当前 Provider 时剥掉、是另一种 api-type 时报错、其余含斜杠的值按模型 id 原样），再以 `<当前 Provider>/<id>` 调 `session.setModel`。CLI 的 Provider 配置以 `allowUndeclaredModels` 创建（`strictModels=false`），清单外的模型 id 也可切换，能力回退内置目录/保守默认（见 provider-api.md）。
-- `/context` 渲染 `ContextReport`：各 section 的名称、来源、字符数、估算 token，加上合计 `estimatedTokens / budgetTokens` 与 `overBudget`。查询只读，不构建请求也不产生事件。
+- `/context` 渲染 `ContextReport`：各 section 的名称、来源、字符数、估算 token，加上合计 `estimatedTokens / budgetTokens` 与 `overBudget`；请求会携带图片附件时另有 `images <count> 张 ~<tok> tok` 行（`report.images`，按估算模式计数，见 [context.md](../architecture/context.md) 第 3、5 节）。查询只读，不构建请求也不产生事件。
 - `/compact` 输出结果摘要（`throughSeq`、摘要字符数）；没有可压缩内容或摘要失败时打印原因，返回码不产生——REPL 命令的错误只显示，不影响进程。
 - **`/resume` 会话内切换**：复用第 2 节的会话打开语义（锁冲突 `session_locked`、日志损坏、跨目录默认拒绝需 `y/N` 确认）。Turn 进行中拒绝并提示先中断；**先打开新会话**——失败时报错并留在原会话；打开成功后才 `session.close()` 旧会话（释放锁），打印一行"已切换到会话 \<id\>"与恢复摘要（`session.recovery`，若有修复）。该打开逻辑由 CLI 统一实现并以回调注入 TUI（[apps/tui.md](tui.md) 第 6 节）。
 - **`/new` 会话内新建**：Turn 进行中拒绝；按当前会话配置创建并换入新会话，创建失败保留旧会话，成功后才关闭旧会话。逐行模式打印新会话分隔行；`/clear` 是同义别名，不删除旧日志也不清屏。

@@ -26,6 +26,9 @@ interface ToolDefinition<Input = unknown, Output = unknown> {
    * scope 参数（ADR-0022）携带当前生效 shell，供按种类的检查使用。
    */
   validateInput?(input: Input, scope?: ToolScope): string | undefined
+  /** 工具来源标记（ADR-0023）：MCP 连接器包装的声明为 "mcp"；
+      缺省视为内置/本地。目前用于标注结果图片附件的来源（ImageAttachment.source） */
+  origin?: "mcp"
   /** 执行。只在权限允许后被调用 */
   execute(input: Input, ctx: ToolContext): Promise<ToolResult<Output>>
 }
@@ -103,12 +106,21 @@ interface ToolContext extends ToolScope {
 
 ```ts
 type ToolResult<Output = unknown> =
-  | { status: "ok";    modelContent: string; output?: Output }
-  | { status: "error"; modelContent: string; output?: Output; error: { code: string; message: string } }
+  | { status: "ok";    modelContent: string; output?: Output; attachments?: RawImageAttachment[] }
+  | { status: "error"; modelContent: string; output?: Output; attachments?: RawImageAttachment[]; error: { code: string; message: string } }
+
+/** 工具结果携带的图片字节（ADR-0023）；执行器负责落盘，
+    事件里只出现 ImageAttachment 引用（events.md 第 4 节） */
+type RawImageAttachment = {
+  mimeType: ImageMimeType    // events.md 第 4 节
+  data: Uint8Array
+  label?: string
+}
 ```
 
 - `modelContent`：交给模型的文本。执行器会按 `maxModelChars` 截断并标注。
 - `output`：结构化结果，供客户端渲染（例如 `edit` 返回 diff，`shell` 返回退出码）。有独立大小上限；不发送给模型。
+- `attachments`：图片字节；执行器经会话的 `AttachmentStore` 逐张落盘（tools.md 第 4 节），成功的写入 `tool.completed.attachments` 引用，`source` 取 `origin === "mcp" ? "mcp" : "read"`。某张保存失败不影响其余：成功的照常引用，失败的在 `modelContent` 末尾追加 `[图片附件保存失败：<原因>]` 并记 `tool.attachment_failed` 诊断；无论成败都恰好一个 `tool.completed`。`read` 的图片相关错误码为 `image_too_large`（超 5 MB 或任一边超 8000 px）与 `image_corrupt`（文件头损坏/截断）。
 - 可预期的失败（文件不存在、`old` 字符串不唯一、先读检查失败）返回 `status: "error"` 与工具自定义的 `code`；非预期异常直接抛出，由执行器转换为 `tool_failed`。
 - `denied`、`cancelled`、`interrupted` 等状态只由执行器或恢复逻辑产生，工具不会返回它们。
 

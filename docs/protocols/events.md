@@ -71,12 +71,12 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`reasoningEffort?`（思考档位，ADR-0018；缺省按 `off` 处理）、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节） |
 | `session.config_changed` | — | 变化的字段：`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018）、`shell?: { kind, path }`（shell 切换，ADR-0022：折叠时在该事件位置留 `note` 历史条目给模型，见 [context.md](../architecture/context.md) 第 3 节） |
 | `turn.started` | ✓ | `turnIndex` |
-| `message.user` | ✓ | `messageId`、`content: ContentBlock[]` |
+| `message.user` | ✓ | `messageId`、`content: ContentBlock[]`、`attachments?: ImageAttachment[]`（v0.5 新增可选字段，见第 4 节；用户消息粘贴的图片在后续版本接入，本版只定义形状与折叠保留） |
 | `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`finishReason: FinishReason \| "aborted"` |
 | `tool.started` | ✓ | `callId`、`name`、`input`（规范化后）、`subjects: PermissionSubject[]`（解析后）、`permission: { action, source, rule? }`（`rule` 为命中规则的人读说明，见 [permissions.md](../architecture/permissions.md) 5.3） |
 | `permission.requested` | ✓ | `requestId`、`callId`、`subjects`、`reason`、`options`（完整选项集：`allow_once`、`allow_session`、`allow_project`、`deny`、`deny_stop`） |
 | `permission.resolved` | ✓ | `requestId?`、`callId`、`action: "allow" \| "deny"`、`source: "user" \| "rule" \| "grant" \| "non_interactive" \| "cancelled" \| "hook"`、`rule?`、`remember?`、`feedback?` |
-| `tool.completed` | ✓ | `callId`、`name`、`status`、`modelContent`、`output?`、`error?`、`truncated?`、`spillPath?`（超预算输出的落盘文件绝对路径，见 [tools.md](../architecture/tools.md) 第 4 节）、`durationMs?` |
+| `tool.completed` | ✓ | `callId`、`name`、`status`、`modelContent`、`output?`、`error?`、`truncated?`、`spillPath?`（超预算输出的落盘文件绝对路径，见 [tools.md](../architecture/tools.md) 第 4 节）、`attachments?: ImageAttachment[]`（v0.5 新增：工具结果图片的附件引用，字节已落盘，见 [tools.md](../architecture/tools.md) 第 4 节）、`durationMs?` |
 | `context.compacted` | ✓ 或 — | `kind: "prune" \| "summary"`、`throughSeq`、`summary?`（规则见 [context.md](../architecture/context.md) 第 6 节） |
 | `turn.completed` | ✓ | `reason`、`steps`、`usage`、`error?`、`recovered?` |
 
@@ -142,6 +142,22 @@ type PermissionSubject = {
   where?: "workspace" | "outside"
   shell?: string            // shell 主体：执行该命令的 shell 种类（ADR-0022；旧日志缺省按 POSIX 方言保守求值）
 }
+
+/** v0.5 新增（ADR-0023）：图片附件引用。字节不进事件——附件文件
+    落盘在 <sessionsDir>/attachments/<sessionId>/ 下，事件里只存引用 */
+type ImageMimeType = "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+
+type ImageAttachment = {
+  type: "image"
+  file: string              // 相对 <attachmentsDir>/<sessionId>/ 的文件名，如 "img-3.png"
+  mimeType: ImageMimeType
+  bytes: number             // 原始字节数
+  sha256: string            // 小写 hex，load 时校验
+  width?: number
+  height?: number
+  label?: string            // 人读名（如原始文件名）
+  source: "paste" | "read" | "mcp"   // 附件来源
+}
 ```
 
 `providerData` 只能回传给 `provider` 字段所示的 Provider，见 [context.md](../architecture/context.md) 第 7 节。
@@ -190,6 +206,6 @@ type PermissionSubject = {
 
 演进规则：
 
-- 新增临时事件类型、在已知事件中新增可选字段：兼容变更。新增字段不得改变已有字段的含义。
+- 新增临时事件类型、在已知事件中新增可选字段：兼容变更。新增字段不得改变已有字段的含义。v0.5 的 `message.user.attachments` 与 `tool.completed.attachments` 属于此类：不提升 `formatVersion`，旧版本按上表忽略未知字段。
 - 新增持久化事件类型：旧版本 Runtime 将无法恢复包含它的会话（见上表）。这是有意的保守选择；变更说明中需写明。
 - 删除字段、改变字段含义：不兼容变更，提升 `formatVersion`，提供旧格式日志的读取迁移，并新增 ADR。
