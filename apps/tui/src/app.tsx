@@ -697,6 +697,7 @@ function SessionApp({
   const inputRef = useRef("");
   const cursorRef = useRef(0);
   const images = useMemo(() => createImageStore(), []);
+  const pastes = useMemo(() => createPasteStore(), []);
   const imagePlatform = useMemo(() => createPlatform(), []);
   const updateInput = (value: string, at: number): void => {
     inputRef.current = value;
@@ -1210,6 +1211,7 @@ function SessionApp({
             staticWritten.current.clear();
           }
           switched = true;
+          pastes.reset(inputRef.current);
           setSession(res.session);
           setOverlay(undefined);
           for (const n of sessionNotes(res.session)) pushLine(`! ${n}`);
@@ -1231,7 +1233,7 @@ function SessionApp({
         }
       }
     },
-    [switchSession, pushLine, fullscreen, busy],
+    [switchSession, pushLine, fullscreen, busy, pastes],
   );
 
   const doNew = useCallback(async (): Promise<void> => {
@@ -1252,6 +1254,7 @@ function SessionApp({
       if (res.kind === "ok") {
         images.clear();
         updateInput(images.strip(inputRef.current), images.strip(inputRef.current).length);
+        pastes.reset(inputRef.current);
         if (fullscreen) {
           // 视口整体换成新会话：欢迎区重新出现，翻阅与选区清空（ADR-0021 第 2 条）
           setFrozen([]);
@@ -1285,7 +1288,7 @@ function SessionApp({
         setSwitchPending(false);
       }
     }
-  }, [newSession, pushLine, fullscreen, busy]);
+  }, [newSession, pushLine, fullscreen, busy, pastes]);
 
   /** 模型选择页左栏数据快照（打开时与向导完成后拉取） */
   const loadPickerData = useCallback(async () => {
@@ -1642,7 +1645,10 @@ function SessionApp({
     );
     if (historyIndex === undefined) setHistoryDraft(images.strip(input));
     setHistoryIndex(next === inputHistory.length ? undefined : next);
-    const value = next === inputHistory.length ? historyDraft : (inputHistory[next] ?? "");
+    const value =
+      next === inputHistory.length
+        ? historyDraft
+        : (pastes.add(inputHistory[next] ?? "") ?? inputHistory[next] ?? "");
     updateInput(value, value.length);
   };
 
@@ -1867,17 +1873,16 @@ function SessionApp({
     updateInput("", 0);
   }, []);
 
-  const pastes = useMemo(() => createPasteStore(), []);
   useEffect(() => {
     let active = true;
     setHistoryIndex(undefined);
     void session.readInputHistory().then((rows) => {
-      if (active) setInputHistory(rows.map((row) => pastes.add(row) ?? row));
+      if (active) setInputHistory(rows);
     });
     return () => {
       active = false;
     };
-  }, [session, pastes]);
+  }, [session]);
   const onSubmit = useCallback(
     (line: string) => {
       const text = line.trim();
@@ -1929,7 +1934,7 @@ function SessionApp({
       clearInput();
       images.clear();
       if (fullscreen) setScroll(scrollToBottom());
-      // 历史里保留占位，发给模型的是展开后的原文
+      // 历史存原文，发给模型的也是展开后的原文
       submitting.current = true;
       setSubmitPending(true);
       void session

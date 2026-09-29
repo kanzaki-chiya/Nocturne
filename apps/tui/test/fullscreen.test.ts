@@ -250,6 +250,10 @@ describe("粘贴占位", () => {
     expect(store.expand("前[Paste #1, +2 lines]后[Paste #9, +1 lines]")).toBe(
       "前a\nb\nc后[Paste #9, +1 lines]",
     );
+    store.reset("草稿：[Paste #2, 900 chars]");
+    expect(store.add("新\n粘贴")).toBe("[Paste #1, +1 lines]");
+    expect(store.expand("[Paste #2, 900 chars]")).toBe("x".repeat(900));
+    expect(store.expand("[Paste #3, +2 lines]")).toBe("[Paste #3, +2 lines]");
     expect(pasteTokenBefore("看：[Paste #1, +2 lines]")).toBe("[Paste #1, +2 lines]".length);
     expect(pasteTokenBefore("看：[Paste #1, +2 lines] ")).toBe(0);
     expect(pasteTokenAt("[Paste #1, +2 lines]后")).toBe("[Paste #1, +2 lines]".length);

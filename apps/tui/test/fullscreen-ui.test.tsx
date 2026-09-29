@@ -523,6 +523,42 @@ describe("全屏界面", () => {
     await session.close();
   });
 
+  it("历史不预占粘贴编号，新会话重新从 1 编号", async () => {
+    const { runtime, session } = await sessionWithEffort();
+    await session.recordInputHistory("旧一\n旧二");
+    await session.recordInputHistory("旧三\n旧四");
+    const historyLoad = vi.spyOn(session, "readInputHistory");
+    const created: RuntimeSession[] = [];
+    const newSession = async () => {
+      const next = await runtime.createSession({
+        model: "commandcode/deepseek/deepseek-v4.1-flash",
+      });
+      created.push(next);
+      return { kind: "ok" as const, session: next };
+    };
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, newSession }),
+    );
+    await waitFor(() => historyLoad.mock.results.length > 0);
+    await historyLoad.mock.results[0]?.value;
+    stdin.write("\x1b[200~当前\r粘贴\x1b[201~");
+    await waitFor(() => (lastFrame() ?? "").includes("› [Paste #1, +1 lines]"));
+    stdin.write("\x15");
+    await waitFor(() => !(lastFrame() ?? "").includes("› [Paste"));
+    stdin.write("\x1b[200~另一\r段\x1b[201~");
+    await waitFor(() => (lastFrame() ?? "").includes("› [Paste #2, +1 lines]"));
+    stdin.write("\x15");
+    await waitFor(() => !(lastFrame() ?? "").includes("› [Paste"));
+    stdin.write("/new");
+    stdin.write("\r");
+    await waitFor(() => created.length === 1 && (lastFrame() ?? "").includes("›\nidle"));
+    stdin.write("\x1b[200~新会话\r粘贴\x1b[201~");
+    await waitFor(() => (lastFrame() ?? "").includes("› [Paste #1, +1 lines]"));
+    unmount();
+    await session.close();
+    for (const next of created) await next.close();
+  }, 15000);
+
   it("/effort 空格后列出档位和 off", async () => {
     const { runtime, session } = await sessionWithEffort();
     const { lastFrame, stdin, unmount } = render(

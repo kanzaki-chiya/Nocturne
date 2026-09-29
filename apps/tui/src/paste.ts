@@ -1,6 +1,6 @@
 /**
  * 粘贴占位（tui.md §2）：多行或超长粘贴在输入框里收成 `[Paste #n, +k lines]`，
- * 提交时展开成原文。原文只存在本次运行的内存里，占位号递增不复用。
+ * 提交时展开成原文。原文只存在本次运行的内存里，占位号在会话内递增。
  */
 
 /** 单行粘贴超过这个长度也收成占位 */
@@ -14,6 +14,8 @@ export interface PasteStore {
   add(text: string): string | undefined;
   /** 把行内已登记的占位换回原文；未登记的占位原样保留 */
   expand(line: string): string;
+  /** 切换会话时重置编号，保留当前草稿里的占位 */
+  reset(draft: string): void;
 }
 
 export function createPasteStore(): PasteStore {
@@ -23,6 +25,7 @@ export function createPasteStore(): PasteStore {
     add(text) {
       const breaks = text.split("\n").length - 1;
       if (breaks === 0 && text.length <= LONG_PASTE_CHARS) return undefined;
+      while (texts.has(next)) next++;
       const id = next++;
       texts.set(id, text);
       return breaks > 0
@@ -31,6 +34,11 @@ export function createPasteStore(): PasteStore {
     },
     expand(line) {
       return line.replace(TOKEN_RE, (token, id: string) => texts.get(Number(id)) ?? token);
+    },
+    reset(draft) {
+      const keep = new Set([...draft.matchAll(TOKEN_RE)].map((match) => Number(match[1])));
+      for (const id of texts.keys()) if (!keep.has(id)) texts.delete(id);
+      next = 1;
     },
   };
 }
