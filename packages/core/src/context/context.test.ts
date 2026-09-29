@@ -48,6 +48,19 @@ const baseInput = (over: Partial<BuildContextInput> = {}): BuildContextInput => 
 });
 
 describe("buildContext", () => {
+  it("压缩后的清单独立进入模型请求并计入预算，清空后撤去", () => {
+    const todos = [{ text: "当前任务", status: "in_progress" as const }];
+    const plain = buildContext(baseInput({ history: [] }));
+    const built = buildContext(baseInput({ history: [], todos }));
+    expect(built.request.system.at(-1)?.text).toContain('"当前任务"');
+    expect(built.report.sections.find((s) => s.name === "todos")?.estimatedTokens).toBeGreaterThan(
+      0,
+    );
+    expect(built.report.estimatedTokens).toBeGreaterThan(plain.report.estimatedTokens);
+    expect(
+      buildContext(baseInput({ todos: [] })).report.sections.some((s) => s.name === "todos"),
+    ).toBe(false);
+  });
   it("组装顺序：system → tools → instructions → environment → history", () => {
     const history: HistoryEntry[] = [
       {

@@ -171,6 +171,8 @@ type ToolExecution = {
 
 ## 5. 示例（示意）
 
+`todo_write`（[ADR-0028](../decisions/ADR-0028-session-task-list.md)）接受 `{ items: [{ text, status }] }`，每次提交完整清单，`items: []` 清空。最多 20 项；`text` 去首尾空白后非空且至多 200 个字符，拒绝换行、控制字符和未知字段；`status` 只允许 `pending`、`in_progress`、`completed`。校验失败以 `invalid_input` 结算；成功时 `output.items` 是规范化后的完整清单，`modelContent` 是简短确认。工具的 `permissionSubjects` 返回 `[]`，`traits` 为 `mutates: false, concurrencySafe: false`，仍经过普通执行管线和 Hook；它不读写工作区文件、配置或网络。
+
 ```ts
 const read: ToolDefinition<{ path: string; offset?: number; limit?: number }> = {
   name: "read",

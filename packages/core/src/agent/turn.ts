@@ -308,6 +308,7 @@ export async function runTurn(
       }
       const built = buildContext({
         history: state.history,
+        todos: state.todos,
         model: deps.model.model,
         tools: deps.tools.specs(),
         instructions: deps.instructions,

@@ -14,6 +14,7 @@ import type {
   TurnEndReason,
 } from "./events.js";
 import { isDurableEvent, isDurableEventType, isEphemeralEventType } from "./events.js";
+import { todoItemsFromCompletion, type TodoItem } from "./todo.js";
 import type {
   ContentBlock,
   FinishReason,
@@ -32,6 +33,8 @@ import type {
 // ── 视图类型 ────────────────────────────────────────────────
 
 export interface SessionView {
+  /** 最后一次有效且持久化的 todo_write 快照 */
+  todos: TodoItem[];
   /** 每次归约 +1；不参与重放等价 */
   revision: number;
   meta:
@@ -193,6 +196,7 @@ function book(view: SessionView): Bookkeeping {
 
 export function createSessionView(): SessionView {
   return {
+    todos: [],
     revision: 0,
     meta: undefined,
     config: { model: undefined, permissionPreset: undefined, reasoningEffort: undefined },
@@ -371,6 +375,7 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
     }
     case "tool.completed": {
       const p = event.payload;
+      view.todos = todoItemsFromCompletion(p) ?? view.todos;
       // 未执行即终态：丢弃 preparing 残片（inputText 不属于可重放视图）
       view.live.tools = view.live.tools.filter((t) => t.callId !== p.callId);
       const entry = promoteTool(view, b, p.callId, turnId ?? "", event.seq);

@@ -52,6 +52,8 @@ Context Builder 不做 I/O，也不调用 Provider：指令文件由 `config` / 
 4. **环境信息**：操作系统、shell、工作目录、会话创建日期。Shell 行由会话级 resolver 在会话打开（新建或恢复）时按当时的生效 shell 生成一次（ADR-0022，与 `spawnShell` 同源），内容为 `Commands run with <名称>（<可执行文件>）<调用形态>: <语法说明>`——`cmd` 说明 `&` 是顺序执行而非后台（长命令直接执行并调大 `timeoutMs`），并提醒 `findstr` 控制台代码页关键词无法匹配 UTF-8 输出中的非 ASCII 文字；`pwsh`/`powershell` 说明 PowerShell 语法（7+ 支持 `&&`/`||`，5.1 不支持）；Git Bash 说明 Windows 路径写法（`C:/…` 或 `/c/…`）与 MSYS 参数转换；`sh` 说明 POSIX sh 语法。取会话级的值，不在每个 Step 刷新，避免破坏缓存前缀。会话中途切换 shell 时该行**不改写**（改它会让整段历史的提示缓存失效）：`session.config_changed { shell }` 折叠时在事件位置生成 `note` 历史条目（`[Environment change] shell is now …`，措辞与 Shell 行同源），Context Builder 把它作为 user 消息在该位置注入；恢复会话后历史中的旧切换说明原样保留。协议约束例外：`/shell` 可在工具调用进行中执行，此时持久序上 note 会落在 `assistant`（含 toolCalls）与对应 `tool` 结果之间——OpenAI/Anthropic 要求 tool 结果紧随其调用，所以投影时这类注入说明先排队，等到该批 toolCalls 的**全部**结果就位（含结果在 `pendingMessages` 中到达的情形）才放行；调用悬空到历史末尾时排在消息尾部。持久化序不变，仅投影序调整。
 5. **历史**：最近一个压缩边界之后的消息与工具结果；若存在摘要，摘要作为历史的第一条。
 
+当前任务清单（[ADR-0028](../decisions/ADR-0028-session-task-list.md)）由 Agent Loop 和 `describeContext` 从 `SessionState.todos` 传入 Builder，作为有界的任务数据块进入每次模型请求；空清单不注入。该块计入 `ContextReport` 的 `todos` section 与预算，不依赖历史中的工具结果，所以 L1 修剪、L2 摘要与恢复后仍是最新状态。清单文字不能覆盖系统、用户或项目指令。
+
 Builder 在 `BuiltContext` 中标出"可缓存前缀"的边界，是否以及如何使用提示缓存（例如 Anthropic 的 cache breakpoint）由 Provider 适配器决定。
 
 ## 4. 基本原则

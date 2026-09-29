@@ -1326,6 +1326,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const state = session.state();
         return buildContext({
           history: state.history,
+          todos: state.todos,
           model: model.model,
           tools: tools.specs(),
           instructions,

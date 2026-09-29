@@ -3,7 +3,12 @@
  * 唯一事实来源是持久化事件序列；这里没有第二份状态。
  */
 import { shellSwitchNote } from "../platform/index.js";
-import type { DurableEvent, Usage } from "../protocol/index.js";
+import {
+  todoItemsFromCompletion,
+  type DurableEvent,
+  type TodoItem,
+  type Usage,
+} from "../protocol/index.js";
 import type {
   HistoryEntry,
   SessionConfig,
@@ -44,6 +49,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
     permissionPreset: "",
   };
   const history: HistoryEntry[] = [];
+  let todos: TodoItem[] = [];
   const usage = { ...ZERO_USAGE };
   let openTurn: SessionState["openTurn"];
   const unsettled = new Map<string, UnsettledCall>();
@@ -152,6 +158,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
       }
       case "tool.completed": {
         const p = event.payload;
+        todos = todoItemsFromCompletion(p) ?? todos;
         history.push({
           kind: "tool",
           seq: event.seq,
@@ -206,6 +213,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
     meta,
     config,
     history,
+    todos,
     usage,
     lastSeq,
     openTurn,

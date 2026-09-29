@@ -127,7 +127,7 @@ describe("ToolRegistry", () => {
         .specs()
         .map((s) => s.name)
         .sort(),
-    ).toEqual(["edit", "glob", "grep", "read", "shell", "write"]);
+    ).toEqual(["edit", "glob", "grep", "read", "shell", "todo_write", "write"]);
     expect(() => r.register(builtinTools()[0] ?? readTool)).toThrow(/重复/);
     r.unregister("read");
     expect(r.get("read")).toBeUndefined();
@@ -141,6 +141,44 @@ describe("ToolRegistry", () => {
 });
 
 describe("Executor 管线", () => {
+  it("todo_write 校验边界并输出规范化的完整快照", async () => {
+    const h = await makeHarness(tmpWorkspace());
+    const valid = { items: [{ text: "  做事  ", status: "in_progress" }] };
+    expect((await h.executor.execute(call("todo_write", valid), h.scope)).status).toBe("ok");
+    expect(completedOf(h)[0]?.payload.output).toEqual({
+      items: [{ text: "做事", status: "in_progress" }],
+    });
+    expect(h.events.map((e) => e.type)).toEqual(["tool.started", "tool.completed"]);
+    expect(
+      (await h.executor.execute(call("todo_write", { items: [] }, "clear"), h.scope)).status,
+    ).toBe("ok");
+    expect(completedOf(h)[1]?.payload.output).toEqual({ items: [] });
+    const maxItems = Array.from({ length: 20 }, () => ({
+      text: "x".repeat(200),
+      status: "pending",
+    }));
+    expect(
+      (await h.executor.execute(call("todo_write", { items: maxItems }, "max"), h.scope)).status,
+    ).toBe("ok");
+    expect(completedOf(h)[2]?.payload.output).toEqual({ items: maxItems });
+    const invalid = [
+      { items: Array(21).fill({ text: "x", status: "pending" }) },
+      { items: [{ text: " ", status: "pending" }] },
+      { items: [{ text: "x".repeat(201), status: "pending" }] },
+      { items: [{ text: "x\ny", status: "pending" }] },
+      { items: [{ text: "x\u0001", status: "pending" }] },
+      { items: [{ text: "x\u2028y", status: "pending" }] },
+      { items: [{ text: "x", status: "done" }] },
+      { items: [{ text: "x", status: "pending", extra: 1 }] },
+      { items: [], extra: 1 },
+    ];
+    for (const [i, input] of invalid.entries()) {
+      const result = await h.executor.execute(call("todo_write", input, `bad-${i}`), h.scope);
+      expect(result.status).toBe("error");
+      expect(completedOf(h).at(-1)?.payload.error).toMatchObject({ code: "invalid_input" });
+    }
+    expect(h.events.filter((e) => e.type === "tool.started")).toHaveLength(3);
+  });
   it("unknown_tool：恰好一个 tool.completed，错误含可用工具名", async () => {
     const ws = tmpWorkspace();
     const h = await makeHarness(ws);

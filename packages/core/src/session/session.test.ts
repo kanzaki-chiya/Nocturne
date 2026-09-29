@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createPlatform } from "../platform/index.js";
-import type { RuntimeEvent } from "../protocol/index.js";
+import { replaySessionView, type RuntimeEvent } from "../protocol/index.js";
 import { createSessionStore, type SessionStore } from "./index.js";
 
 let dir: string;
@@ -103,6 +103,50 @@ describe("create + emit", () => {
 });
 
 describe("load / 状态折叠", () => {
+  it("清单只跟随有效已落盘的完成事件，恢复与子会话隔离", async () => {
+    const parent = await store.create(INPUT);
+    const item = { text: "第一步", status: "completed" as const };
+    const completed = (status: "ok" | "error" | "denied" | "interrupted", output: unknown) => ({
+      callId: "todo",
+      name: "todo_write",
+      status,
+      modelContent: "updated",
+      output,
+    });
+    await parent.emit("tool.completed", completed("ok", { items: [item] }));
+    await parent.emit("tool.started", {
+      callId: "later",
+      name: "todo_write",
+      input: { items: [] },
+      subjects: [],
+      permission: { action: "allow", source: "rule" },
+    });
+    await parent.emit("tool.completed", completed("error", { items: [] }));
+    await parent.emit("tool.completed", completed("denied", { items: [] }));
+    await parent.emit("tool.completed", completed("interrupted", { items: [] }));
+    await parent.emit(
+      "tool.completed",
+      completed("ok", { items: [{ text: "", status: "pending" }] }),
+    );
+    expect(parent.state().todos).toEqual([item]);
+    expect(replaySessionView(parent.durableEvents()).todos).toEqual(parent.state().todos);
+    const child = await store.create(INPUT);
+    expect(child.state().todos).toEqual([]);
+    await child.emit(
+      "tool.completed",
+      completed("ok", { items: [{ text: "子任务", status: "pending" }] }),
+    );
+    expect(parent.state().todos).toEqual([item]);
+    await parent.close();
+    const reopened = await store.load(parent.id);
+    expect(reopened.state().todos).toEqual([item]);
+    expect(replaySessionView(reopened.durableEvents()).todos).toEqual([item]);
+    await reopened.emit("tool.completed", completed("ok", { items: [] }));
+    expect(reopened.state().todos).toEqual([]);
+    expect(replaySessionView(reopened.durableEvents()).todos).toEqual([]);
+    await reopened.close();
+    await child.close();
+  });
   it("load 重建状态：新 runId、seq 继续、历史完整", async () => {
     const s1 = await store.create(INPUT);
     await s1.emit("turn.started", { turnIndex: 1 }, { turnId: "t1" });
@@ -478,6 +522,14 @@ describe("会话锁（ADR-0009）", () => {
 describe("写入失败 → failed", () => {
   it("append 失败：health=failed、failedSignal 中止、后续 emit 拒绝、发出 runtime.error", async () => {
     const s = await store.create(INPUT);
+    const oldItems = [{ text: "保留旧清单", status: "pending" as const }];
+    await s.emit("tool.completed", {
+      callId: "old",
+      name: "todo_write",
+      status: "ok",
+      modelContent: "updated",
+      output: { items: oldItems },
+    });
     const ephemeral: RuntimeEvent[] = [];
     s.subscribe((e) => {
       if (!("seq" in e)) ephemeral.push(e);
@@ -486,11 +538,18 @@ describe("写入失败 → failed", () => {
     await fs.rm(s.logPath);
     await fs.mkdir(s.logPath);
 
-    await expect(s.emit("turn.started", { turnIndex: 1 }, { turnId: "t1" })).rejects.toMatchObject({
-      code: "session_failed",
-    });
+    await expect(
+      s.emit("tool.completed", {
+        callId: "new",
+        name: "todo_write",
+        status: "ok",
+        modelContent: "updated",
+        output: { items: [] },
+      }),
+    ).rejects.toMatchObject({ code: "session_failed" });
     expect(s.health).toBe("failed");
     expect(s.failedSignal.aborted).toBe(true);
+    expect(s.state().todos).toEqual(oldItems);
     await expect(s.emit("turn.started", { turnIndex: 1 }, { turnId: "t1" })).rejects.toMatchObject({
       code: "session_failed",
     });

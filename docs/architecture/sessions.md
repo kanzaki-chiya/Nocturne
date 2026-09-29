@@ -126,6 +126,8 @@ interface SessionRecovery {
 
 子会话（`session.created.parent` 存在者）默认**不出现在列表中**：`listSessions({ includeSubagents?: boolean })` 缺省为 false，`--sessions`、`/resume`、`-c/--continue` 都只面向顶层会话；子会话是子代理运行的痕迹而非可交互会话。摘要带 `parent` 字段供需要时区分；按 id 显式恢复一条子日志仍然可行（它只是打开一条普通日志，见 [subagent.md](subagent.md) 第 5 节）。
 
+当前任务清单由 [ADR-0028](../decisions/ADR-0028-session-task-list.md) 的 `todo_write` 结果派生：只有持久化成功的 `tool.completed` 同时满足 `name: "todo_write"`、`status: "ok"`、`output.items` 有效，才原子替换 `SessionState.todos`。`[]` 清空；拒绝、失败、中断、只有 `tool.started` 或日志写入失败均保留旧清单。恢复时从日志逐事件重放，不读取独立清单文件；旧日志初始清单为空。子会话有独立状态，不向父会话合并。客户端遵循同一规则，见 [view.md](../protocols/view.md)。
+
 ## 9. 暂不设计
 
 分叉、回退、跨设备同步、会话分享、断电级持久性选项。它们都可以在事件日志模型上实现，届时单独写设计。

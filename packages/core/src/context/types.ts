@@ -2,7 +2,13 @@
  * Context Builder 的输入与输出（context.md 第 2 节）。
  * 纯数据、不做 I/O：指令文件与环境信息由调用方（agent / 会话装配层）预先读取传入。
  */
-import type { DurableEvent, HistoryEntry, ImageAttachment, ToolSpec } from "../protocol/index.js";
+import type {
+  DurableEvent,
+  HistoryEntry,
+  ImageAttachment,
+  TodoItem,
+  ToolSpec,
+} from "../protocol/index.js";
 import type { ModelInfo, ModelMessage, ModelRequest } from "../provider/index.js";
 
 /** 一份已加载的指令文件（AGENTS.md 等） */
@@ -35,6 +41,8 @@ export interface EnvironmentInfo {
 export interface BuildContextInput {
   /** 折叠后的历史（SessionState.history 结构） */
   history: readonly HistoryEntry[];
+  /** 当前会话清单，独立于可能被压缩的历史 */
+  todos?: readonly TodoItem[] | undefined;
   model: ModelInfo;
   /** 由 agent 从 ToolRegistry 取得后作为数据传入 */
   tools: ToolSpec[];
@@ -73,7 +81,7 @@ export interface CompactionPlan {
 
 /** ContextReport 中的一个部分（context.md 第 4 节"可解释"） */
 export interface ContextSection {
-  name: "system" | "tools" | "instructions" | "environment" | "history";
+  name: "system" | "tools" | "instructions" | "environment" | "todos" | "history";
   /** 来源说明（版本、文件路径、条目数） */
   source: string;
   chars: number;

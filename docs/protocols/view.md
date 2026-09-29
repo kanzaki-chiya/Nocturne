@@ -44,6 +44,8 @@ interface SessionView {
   pendingPermission: PendingPermission | undefined;
   /** 时间线：只由持久事件创建，可重放（§3） */
   entries: ViewEntry[];
+  /** 当前会话任务清单；只从有效的持久 todo_write 完成事件派生 */
+  todos: TodoItem[];
   /** 在途实体：只由临时事件创建，对应持久事件到达时转入 entries（§4） */
   live: {
     assistants: LiveAssistant[];

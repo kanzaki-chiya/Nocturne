@@ -14,6 +14,7 @@ import type {
   ReasoningEffort,
   RuntimeEvent,
   Usage,
+  TodoItem,
 } from "../protocol/index.js";
 
 export type { HistoryEntry };
@@ -56,6 +57,8 @@ export interface SessionState {
   meta: SessionMeta;
   config: SessionConfig;
   history: HistoryEntry[];
+  /** 最后一次有效且持久化的 todo_write 快照 */
+  todos: TodoItem[];
   /** 累计 token 用量（由各 message.assistant.usage 累加） */
   usage: Usage;
   lastSeq: number;
