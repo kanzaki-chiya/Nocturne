@@ -6,15 +6,18 @@
  * Logo 自适应：行数 <30 或宽度 <64 时降级为单行文字标题，不画像素 Logo。
  *
  * 未配置预设 Enter → 同页内嵌向导（WizardView，Core 编排，omp 风格表单）；
- * 已配置条目 Enter → 内联操作条（换密钥/刷新模型列表/调整思考档位/编辑模型/删除）；
+ * 已配置条目 Enter → 内联操作条（换密钥/刷新模型列表/编辑模型/删除）；
  * 「编辑模型」打开模型列表/编辑子视图（ADR-0024 第 5 节，model-settings-view.tsx）；
  * 手写层条目 Enter → 模型列表只读查看；当前会话所用服务商不可删除。
+ * Delete → 可删除条目直达删除确认（ADR-0030 §6）；当前会话在用/只读/未配置条目
+ * 拒绝并给原因（沿用结果行），不开确认框；Backspace 仍只删过滤字符。
  * 全页无打字是非题：删除确认等为 ↑↓/←→ 选项式（ConfirmBox）。
  * 由 App 在备用屏内渲染；进出序列在 App（ADR-0017 约束沿用）。
  * 本组件只管页面内状态与按键，业务逻辑都在父级（Core 公开 API）。
  */
 import { Box, Text, useInput } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
+import stringWidth from "string-width";
 
 import type {
   ModelSettingsPatch,
@@ -92,6 +95,15 @@ function rowLabel(row: ProviderRow, currentId: string | undefined, env: { ascii:
 const OPS = ["换密钥", "刷新模型列表", "编辑模型", "删除"] as const;
 /** 交给父级执行的操作（删除在页内确认后走 onConfirmRemove；「编辑模型」为页内子视图） */
 export type ProviderOp = "key" | "refresh";
+
+/**
+ * 底部按键提示（ADR-0030 §6）：宽能放下时一行写全，Enter 段列出四项操作；
+ * 放不下时 Enter 段缩写为「Enter 操作」，四项操作在相邻一行完整列出。
+ */
+const KEY_HINT_FULL =
+  "↑/↓ 选择 • Enter 打开操作（换密钥 / 刷新 / 编辑模型 / 删除） • Delete 删除 • Esc 返回/完成 • Ctrl+C 退出";
+const KEY_HINT_SHORT = "↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回/完成 • Ctrl+C 退出";
+const KEY_HINT_OPS = "操作：换密钥 / 刷新 / 编辑模型 / 删除";
 
 export function ProviderPage({
   presets,
@@ -262,13 +274,33 @@ export function ProviderPage({
   const wizardActive = wizard?.state.running === true;
   const noticeLine = localNotice ?? notice;
 
+  /**
+   * 删除入口（ADR-0030 §6），Delete 键与操作条「删除」共用：
+   * 当前会话正在使用或只读条目拒绝并给出原因（走页面结果行，不开确认框）；
+   * 可删除条目打开现有确认框，真正删除仍由确认框里的 Enter 触发。
+   */
+  const requestRemove = (entry: ProviderOverview): void => {
+    if (entry.id === currentProviderId) {
+      setLocalNotice(`"${entry.id}" 是当前会话正在使用的服务商；先 /model 切换再删除`);
+      return;
+    }
+    if (!entry.managed) {
+      setLocalNotice(onReadonlyHint(entry));
+      return;
+    }
+    setConfirmRemove(entry.id);
+  };
+
   // 布局预算（ADR-0019 第 3 条）：页头固定、整页锁高、内容区内部滚动。
   // 像素 Logo 只在高度 ≥30 且宽度 ≥64 时绘制；否则单行文字标题。
   const showLogo = width >= 64 && (termRows ?? height) >= 30;
   const headerH = showLogo ? 5 : stepLabel !== undefined ? 3 : 2;
   // 底部：结果/操作/确认区 + 按键提示行。确认框（边框+标题+说明+选项）5 行；
-  // 子视图打开时页面不再追加自己的提示行（提示由子视图提供，footer 只留结果/操作行）
-  const footerH = subView !== undefined ? 1 : 1 + (confirmRemove !== undefined ? 5 : 1);
+  // 子视图打开时页面不再追加自己的提示行（提示由子视图提供，footer 只留结果/操作行）；
+  // Enter 提示放不下完整四项时占两行（缩写 + 四项操作行）
+  const enterHintFits = stringWidth(KEY_HINT_FULL) <= width - 4;
+  const footerH =
+    subView !== undefined ? 1 : 1 + (confirmRemove !== undefined ? 5 : 1) + (enterHintFits ? 0 : 1);
   const contentH = Math.max(4, height - headerH - footerH);
   const listH = Math.max(1, contentH - 1); // 过滤行占 1 行
   const start = Math.min(
@@ -305,11 +337,8 @@ export function ProviderPage({
           const id = action.providerId;
           setAction(undefined);
           if (op === "删除") {
-            if (id === currentProviderId) {
-              setLocalNotice(`"${id}" 是当前会话正在使用的服务商；先 /model 切换再删除`);
-            } else {
-              setConfirmRemove(id);
-            }
+            const entry = entries.find((e) => e.id === id);
+            if (entry !== undefined) requestRemove(entry);
             return;
           }
           if (op === "编辑模型") {
@@ -375,7 +404,21 @@ export function ProviderPage({
         setAction({ providerId: entry.id, index: 0 });
         return;
       }
-      if (key.backspace || key.delete) {
+      if (key.delete) {
+        // Delete = 删除入口（ADR-0030 §6），不再删除过滤字符。
+        // 未配置预设 / 当前会话在用 / 只读条目都给原因并停在这里，不开确认框。
+        const row = rows[cur];
+        if (row === undefined) return;
+        if (row.kind === "preset" && row.configured === undefined) {
+          setLocalNotice(`"${row.preset.label}" 尚未配置，没有可删除的内容`);
+          return;
+        }
+        const entry = row.kind === "preset" ? row.configured : row.overview;
+        if (entry !== undefined) requestRemove(entry);
+        return;
+      }
+      if (key.backspace) {
+        // Backspace 仍只删过滤字符（行为不变）
         if (query !== "") {
           setQuery((q) => q.slice(0, -1));
           setCursor(0);
@@ -570,9 +613,16 @@ export function ProviderPage({
         </Text>
       )}
       {subView === undefined ? (
-        <Text color={theme.muted} wrap="truncate">
-          {truncateLine("↑/↓ 选择 • Enter 确认 • Esc 返回/完成 • Ctrl+C 退出", width - 4)}
-        </Text>
+        <>
+          <Text color={theme.muted} wrap="truncate">
+            {truncateLine(enterHintFits ? KEY_HINT_FULL : KEY_HINT_SHORT, width - 4)}
+          </Text>
+          {enterHintFits ? null : (
+            <Text color={theme.muted} wrap="truncate">
+              {truncateLine(KEY_HINT_OPS, width - 4)}
+            </Text>
+          )}
+        </>
       ) : null}
     </Box>
   );

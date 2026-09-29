@@ -18,6 +18,7 @@ import {
   type ModelSettingsView,
   type ProviderOverview,
   type ReasoningEffortLevel,
+  type WizardPreset,
 } from "@nocturne/core";
 
 import { ProviderPage } from "../src/components/provider-page.js";
@@ -31,10 +32,22 @@ async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
   }
 }
 
+/**
+ * 等 Ink 写出下一帧：本次按键的 React 更新已经完成。
+ * 同一测试里连续发键（如先移焦点再 Enter）时用它同步，不用固定延时。
+ */
+async function nextFrame(frames: readonly string[]): Promise<void> {
+  const n = frames.length;
+  await waitFor(() => frames.length > n);
+}
+
 const DOWN = "[B";
 const LEFT = "[D";
 const RIGHT = "[C";
 const ENTER = "\r";
+/** ink 7 对真实终端序列的解析：\x7f = backspace，\x1b[3~ = delete */
+const BACKSPACE = "\x7f";
+const DELETE = "\x1b[3~";
 
 const field = <T,>(
   value: T | undefined,
@@ -466,6 +479,148 @@ describe("模型设置编辑页（ADR-0024）", () => {
     await waitFor(() => (lastFrame() ?? "").includes("服务商 up › m1"));
     expect(lastFrame()).not.toContain("Esc 返回上一级");
     expect(lastFrame()).toContain("↑/↓ 移动 • ←/→ 切换 • Enter 编辑/确认 • Esc 取消 • Ctrl+C 退出");
+    unmount();
+  });
+});
+
+describe("服务商页 Delete 入口与底部提示（ADR-0030 §6）", () => {
+  it("Delete 打开删除确认（默认焦点在取消），确认后才删除", async () => {
+    const onConfirmRemove = vi.fn();
+    const { lastFrame, stdin, frames, unmount } = render(
+      createElement(ProviderPage, pageProps({ onConfirmRemove })),
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("已配置"));
+    stdin.write(DELETE);
+    await waitFor(() => (lastFrame() ?? "").includes("删除服务商 up"));
+    stdin.write(ENTER); // 默认焦点在「取消」：Enter 不删除
+    await waitFor(() => (lastFrame() ?? "").includes("已取消删除"));
+    expect(onConfirmRemove).not.toHaveBeenCalled();
+    stdin.write(DELETE);
+    await waitFor(() => (lastFrame() ?? "").includes("删除服务商 up"));
+    stdin.write(RIGHT); // 移到「删除」
+    await nextFrame(frames);
+    stdin.write(ENTER);
+    await waitFor(() => onConfirmRemove.mock.calls.length === 1);
+    expect(onConfirmRemove).toHaveBeenCalledWith("up");
+    unmount();
+  });
+
+  it("当前会话所用服务商：Delete 与操作条「删除」都拒绝，提示先 /model 切换", async () => {
+    const onConfirmRemove = vi.fn();
+    const { lastFrame, stdin, frames, unmount } = render(
+      createElement(ProviderPage, pageProps({ currentProviderId: "up", onConfirmRemove })),
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("当前"));
+    stdin.write(DELETE);
+    await waitFor(() => (lastFrame() ?? "").includes("先 /model 切换"));
+    expect(lastFrame() ?? "").not.toContain("删除服务商");
+    expect(onConfirmRemove).not.toHaveBeenCalled();
+    // 操作条里的「删除」走同样的拒绝：不开确认框
+    stdin.write(ENTER);
+    await waitFor(() => (lastFrame() ?? "").includes("[删除]"));
+    stdin.write(LEFT); // 焦点 0 环绕到 3「删除」
+    await nextFrame(frames);
+    stdin.write(ENTER);
+    await waitFor(() => !(lastFrame() ?? "").includes("[删除]"));
+    expect(lastFrame() ?? "").toContain("先 /model 切换");
+    expect(lastFrame() ?? "").not.toContain("删除服务商");
+    expect(onConfirmRemove).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("只读条目：Delete 提示只读原因，不开确认框", async () => {
+    const onConfirmRemove = vi.fn();
+    const { lastFrame, stdin, unmount } = render(
+      createElement(
+        ProviderPage,
+        pageProps({ entries: [entry({ managed: false })], onConfirmRemove }),
+      ),
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("只读"));
+    stdin.write(DELETE);
+    await waitFor(() => (lastFrame() ?? "").includes("请编辑该处配置"));
+    expect(lastFrame() ?? "").not.toContain("删除服务商");
+    expect(onConfirmRemove).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("未配置预设：Delete 提示不能删除的原因，不开确认框", async () => {
+    const presets: WizardPreset[] = [
+      {
+        id: "other-oai",
+        label: "其他 OpenAI 兼容服务",
+        type: "openai-compatible",
+        defaultName: "",
+        fetchableModels: true,
+        thinkingFormat: "openai",
+      },
+    ];
+    const onConfirmRemove = vi.fn();
+    const { lastFrame, stdin, unmount } = render(
+      createElement(ProviderPage, pageProps({ presets, entries: [], onConfirmRemove })),
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("其他 OpenAI 兼容服务"));
+    stdin.write(DELETE);
+    await waitFor(() => (lastFrame() ?? "").includes("尚未配置"));
+    expect(lastFrame() ?? "").not.toContain("删除服务商");
+    expect(onConfirmRemove).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("过滤非空时 Delete 仍打开确认框，过滤文字不变", async () => {
+    const { lastFrame, stdin, unmount } = render(createElement(ProviderPage, pageProps()));
+    await waitFor(() => (lastFrame() ?? "").includes("已配置"));
+    stdin.write("u");
+    await waitFor(() => {
+      const row = (lastFrame() ?? "").split("\n").find((l) => l.includes("过滤:")) ?? "";
+      return row.includes("过滤: u");
+    });
+    stdin.write(DELETE);
+    await waitFor(() => (lastFrame() ?? "").includes("删除服务商 up"));
+    const filter = (lastFrame() ?? "").split("\n").find((l) => l.includes("过滤:")) ?? "";
+    expect(filter).toContain("过滤: u");
+    unmount();
+  });
+
+  it("Backspace 仍只删过滤字符", async () => {
+    const { lastFrame, stdin, unmount } = render(createElement(ProviderPage, pageProps()));
+    await waitFor(() => (lastFrame() ?? "").includes("已配置"));
+    stdin.write("up");
+    await waitFor(() => {
+      const row = (lastFrame() ?? "").split("\n").find((l) => l.includes("过滤:")) ?? "";
+      return row.includes("过滤: up");
+    });
+    stdin.write(BACKSPACE);
+    await waitFor(() => {
+      const row = (lastFrame() ?? "").split("\n").find((l) => l.includes("过滤:")) ?? "";
+      return row.includes("过滤: u") && !row.includes("过滤: up");
+    });
+    unmount();
+  });
+
+  it("底部提示宽时一行列出四项操作，并保留其余按键", async () => {
+    const { lastFrame, unmount } = render(
+      createElement(ProviderPage, pageProps({ width: 120, height: 30, termRows: 30 })),
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("已配置"));
+    const hint = (lastFrame() ?? "").split("\n").find((l) => l.includes("Enter 打开操作")) ?? "";
+    expect(hint).toContain("Enter 打开操作（换密钥 / 刷新 / 编辑模型 / 删除）");
+    for (const k of ["↑/↓ 选择", "Delete 删除", "Esc 返回", "Ctrl+C 退出"])
+      expect(hint).toContain(k);
+    unmount();
+  });
+
+  it("底部提示窄时缩写，四项操作在相邻行完整列出", async () => {
+    const { lastFrame, unmount } = render(
+      createElement(ProviderPage, pageProps({ width: 70, height: 30, termRows: 30 })),
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("已配置"));
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Enter 操作");
+    expect(frame).toContain("Esc 返回");
+    expect(frame).not.toContain("Enter 打开操作");
+    const ops = frame.split("\n").find((l) => l.includes("换密钥")) ?? "";
+    expect(ops).toContain("换密钥 / 刷新 / 编辑模型 / 删除");
     unmount();
   });
 });
