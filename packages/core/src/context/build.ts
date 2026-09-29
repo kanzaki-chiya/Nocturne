@@ -471,6 +471,8 @@ function historyToMessages(
         const content = sameSource
           ? entry.content
           : entry.content.filter((b) => !(b.type === "reasoning" && b.providerData !== undefined));
+        // 旧日志里失败轮次可能留下空 assistant；Messages 不接受空 content。
+        if (content.length === 0 && entry.toolCalls.length === 0) break;
         chars += blockChars(content) + JSON.stringify(entry.toolCalls).length;
         messages.push({
           role: "assistant",

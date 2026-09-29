@@ -120,6 +120,40 @@ describe("buildContext", () => {
     expect(toolMsg?.role === "tool" && toolMsg.isError).toBe(false);
   });
 
+  it("旧会话中无输出的失败 assistant 不进入下一轮请求", () => {
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t1",
+        messageId: "u1",
+        content: [{ type: "text", text: "first" }],
+      },
+      {
+        kind: "assistant",
+        seq: 2,
+        turnId: "t1",
+        messageId: "a1",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [],
+        usage: undefined,
+        finishReason: "aborted",
+      },
+      {
+        kind: "user",
+        seq: 3,
+        turnId: "t2",
+        messageId: "u2",
+        content: [{ type: "text", text: "second" }],
+      },
+    ];
+    expect(buildContext(baseInput({ history })).request.messages.map((m) => m.role)).toEqual([
+      "user",
+      "user",
+    ]);
+  });
+
   it("note 条目（ADR-0022 shell 切换说明）在该位置渲染为 user 消息", () => {
     const history: HistoryEntry[] = [
       {

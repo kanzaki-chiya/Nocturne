@@ -161,6 +161,7 @@ export async function runTurn(
     finishReason: FinishReason | "aborted",
   ): Promise<void> {
     addUsage(acc.usage);
+    if (acc.content.length === 0 && acc.toolCalls.length === 0) return;
     await session.emit(
       "message.assistant",
       {

@@ -367,11 +367,18 @@ describe("runTurn", () => {
             error: new ProviderError({ kind: "auth", message: "bad key" }),
           },
         ],
+        [
+          { type: "text_delta", text: "recovered" },
+          { type: "finish", reason: "stop" },
+        ],
       ],
     });
     const reason = await runTurn(h.deps, prompt());
     expect(reason).toBe("error");
     expect(h.provider.requests).toHaveLength(1);
+    expect(h.events.some((e) => e.type === "message.assistant")).toBe(false);
+    expect(await runTurn(h.deps, prompt())).toBe("done");
+    expect(h.provider.requests[1]?.messages.every((m) => m.role !== "assistant")).toBe(true);
   });
 
   // provider-setup.md 第 1 节：向导不做连接测试，错误提示推迟到首次真实请求

@@ -121,6 +121,7 @@ finish(reason, error?):
 ### 3.5 重试
 
 - 只有在**本次请求尚未产生任何输出事件**时才重试，避免重复的文本和工具调用。已经开始流式输出后失败，已收到的文本按中断同样的方式保存，Turn 以 `error` 结束。
+- Provider 失败或用户中断时，若没有任何 assistant 内容和工具调用，不写入空的 `message.assistant`；Turn 仍以对应原因结束。已有部分输出时照常保存。
 - 仅当 `ProviderError.retryable` 为真时重试；指数退避，优先遵守 `retryAfterMs`；次数上限可配置（默认 4 次）。每次重试发出临时事件 `provider.retry`。
 - 公共流包装分别限制首个事件等待和事件间空闲（默认 30 秒、120 秒；`turn.firstEventTimeoutMs` / `turn.idleTimeoutMs` 可调）。超时视为 `ProviderError(kind="timeout", retryable=true)`；已有输出时遵守上条规则，不重发。普通 Step、自动与手动摘要共用这一限制，见 [ADR-0014](../decisions/ADR-0014-stream-timeout-empty-response.md)。
 - `stop` 但没有文本与工具调用时，Agent Loop 在持久化 assistant 消息前按可重试的空响应处理；受同一重试上限约束，用尽后以 `error.code="provider_empty_response"` 结束。该判断不改变 Provider 的公共事件与错误类型，因此没有新的 Provider kind；错误语义变化见同一 ADR。
