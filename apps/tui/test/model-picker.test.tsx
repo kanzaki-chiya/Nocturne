@@ -336,4 +336,32 @@ describe("模型选择页", () => {
     expect(okRow).not.toContain("协议不支持");
     unmount();
   });
+
+  it("长模型名截断后仍显示不可用标注", async () => {
+    const { lastFrame, unmount } = renderPicker({
+      width: 80,
+      models: [
+        model("gw", "responses-only-with-an-especially-long-model-identifier", {
+          unavailable: { reason: "仅支持 /responses" },
+        }),
+      ],
+      providers: [
+        {
+          id: "gw",
+          type: "openai-compatible",
+          host: "gw.test",
+          keySource: "credential",
+          origin: "setup",
+          overridden: false,
+          modelCount: 1,
+          managed: true,
+        },
+      ],
+      recents: [],
+    });
+    await vi.waitFor(() => expect(lastFrame()).toContain("responses-only"));
+    const row = (lastFrame() ?? "").split("\n").find((line) => line.includes("responses-only"));
+    expect(row).toContain("协议不支持");
+    unmount();
+  });
 });

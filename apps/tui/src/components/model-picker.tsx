@@ -8,6 +8,7 @@
  */
 import { Box, Text, useInput } from "ink";
 import { useMemo, useState } from "react";
+import stringWidth from "string-width";
 
 import type { ModelInfo, ModelRef, ProviderOverview, WizardPreset } from "@nocturne/core";
 
@@ -511,6 +512,7 @@ function RightPane({
     const r = m.capabilities.reasoning !== "none" ? "R" : " ";
     const im = m.capabilities.imageInput ? "I" : " ";
     const mark = `${isCur ? "*" : " "}${isDef ? "d" : " "}`;
+    const unavailableTag = m.unavailable !== undefined ? " 协议不支持" : "";
     lines.push(
       <Text key={idx} wrap="truncate">
         <Text inverse={focused}>
@@ -518,11 +520,11 @@ function RightPane({
             boxSafe(
               `${focused ? ">" : " "}${mark} ${name}  ${r} ${im}  ${ctxText(m).padStart(5)} ${priceText(m).padStart(11)}`,
             ),
-            width - 2,
+            width - 2 - stringWidth(unavailableTag),
           )}
         </Text>
         {/* ADR-0026 §5：不可用模型行尾灰色标注（照常列出，不可请求） */}
-        {m.unavailable !== undefined ? <Text dimColor> 协议不支持</Text> : null}
+        {unavailableTag !== "" ? <Text dimColor>{unavailableTag}</Text> : null}
       </Text>,
     );
   });
