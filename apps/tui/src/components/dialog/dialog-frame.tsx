@@ -29,9 +29,11 @@ export function DialogFrame({
       backgroundColor={theme.overlayBg}
       overflow="hidden"
     >
-      <Text bold color={theme.accent} wrap="truncate">
-        {title}
-      </Text>
+      <Box flexShrink={0}>
+        <Text bold color={theme.accent} wrap="truncate">
+          {title}
+        </Text>
+      </Box>
       {children}
     </Box>
   );

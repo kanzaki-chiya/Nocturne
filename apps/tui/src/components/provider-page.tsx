@@ -59,6 +59,20 @@ export function buildProviderRows(
   return rows;
 }
 
+/** 按过滤词筛选行（渲染 useMemo 与按键 handler 共用，后者从 queryRef 取最新值） */
+function filterRows(allRows: ProviderRow[], query: string): ProviderRow[] {
+  if (query === "") return allRows;
+  const q = query.toLowerCase();
+  return allRows.filter((r) => {
+    const label = (r.kind === "preset" ? r.preset.label : r.overview.id).toLowerCase();
+    const id = (
+      r.kind === "preset" ? (r.configured?.id ?? r.preset.id) : r.overview.id
+    ).toLowerCase();
+    const host = (r.kind === "preset" ? r.configured?.host : r.overview.host)?.toLowerCase() ?? "";
+    return label.includes(q) || id.includes(q) || host.includes(q);
+  });
+}
+
 function keySourceText(p: ProviderOverview): string {
   switch (p.keySource) {
     case "credential":
@@ -201,6 +215,33 @@ export function ProviderPage({
   >(undefined);
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
+  // 镜像 ref：一次 'data' 突发里的多个按键可能在 React 提交前到达，
+  // handler 读写同步更新的 ref，不用渲染闭包里的旧状态（子视图门控同理）。
+  const cursorRef = useRef(0);
+  const queryRef = useRef("");
+  const actionRef = useRef(action);
+  const confirmRemoveRef = useRef(confirmRemove);
+  const subViewRef = useRef(subView);
+  const setSubViewNow = (v: typeof subView): void => {
+    subViewRef.current = v;
+    setSubView(v);
+  };
+  const setActionNow = (v: typeof action): void => {
+    actionRef.current = v;
+    setAction(v);
+  };
+  const setConfirmRemoveNow = (v: string | undefined): void => {
+    confirmRemoveRef.current = v;
+    setConfirmRemove(v);
+  };
+  const setQueryNow = (v: string): void => {
+    queryRef.current = v;
+    setQuery(v);
+  };
+  const setCursorNow = (v: number): void => {
+    cursorRef.current = v;
+    setCursor(v);
+  };
 
   const openModels = (providerId: string, modelId?: string): void => {
     if (onListModels === undefined) {
@@ -208,13 +249,13 @@ export function ProviderPage({
       return;
     }
     setModelsData({ providerId });
-    setSubView({ kind: "models", providerId });
+    setSubViewNow({ kind: "models", providerId });
     void onListModels(providerId).then(
       (views) => {
         setModelsData({ providerId, views });
         if (modelId !== undefined) {
           if (views.some((v) => v.modelId === modelId)) {
-            setSubView({ kind: "edit", providerId, modelId });
+            setSubViewNow({ kind: "edit", providerId, modelId });
           } else {
             setLocalNotice(`! 模型 "${modelId}" 不在 ${providerId} 的清单中`);
           }
@@ -256,19 +297,7 @@ export function ProviderPage({
     // 仅挂载时执行一次
   }, []);
 
-  const rows = useMemo(() => {
-    if (query === "") return allRows;
-    const q = query.toLowerCase();
-    return allRows.filter((r) => {
-      const label = (r.kind === "preset" ? r.preset.label : r.overview.id).toLowerCase();
-      const id = (
-        r.kind === "preset" ? (r.configured?.id ?? r.preset.id) : r.overview.id
-      ).toLowerCase();
-      const host =
-        (r.kind === "preset" ? r.configured?.host : r.overview.host)?.toLowerCase() ?? "";
-      return label.includes(q) || id.includes(q) || host.includes(q);
-    });
-  }, [allRows, query]);
+  const rows = useMemo(() => filterRows(allRows, query), [allRows, query]);
   const cur = Math.min(cursor, Math.max(0, rows.length - 1));
 
   const wizardActive = wizard?.state.running === true;
@@ -288,7 +317,7 @@ export function ProviderPage({
       setLocalNotice(onReadonlyHint(entry));
       return;
     }
-    setConfirmRemove(entry.id);
+    setConfirmRemoveNow(entry.id);
   };
 
   // 布局预算（ADR-0019 第 3 条）：页头固定、整页锁高、内容区内部滚动。
@@ -314,35 +343,36 @@ export function ProviderPage({
 
   useInput(
     (ch, key) => {
+      // 子视图/对话框打开时本页不吃键（ADR-0030 §4）。isActive 的退订在
+      // useEffect 里落后于已提交的帧，旧订阅仍可能被分发到，必须在处理器内再判一次。
+      if (subViewRef.current !== undefined) return;
       // 删除确认（ConfirmBox 自己吃键时这里不再处理）
-      if (confirmRemove !== undefined) return;
+      if (confirmRemoveRef.current !== undefined) return;
       // 操作条：←/→ 选择、Enter 执行、Esc 返回
-      if (action !== undefined) {
+      const act = actionRef.current;
+      if (act !== undefined) {
         if (key.escape) {
-          setAction(undefined);
+          setActionNow(undefined);
           return;
         }
         if (key.leftArrow) {
-          setAction((a) =>
-            a === undefined ? a : { ...a, index: (a.index + OPS.length - 1) % OPS.length },
-          );
+          setActionNow({ ...act, index: (act.index + OPS.length - 1) % OPS.length });
           return;
         }
         if (key.rightArrow) {
-          setAction((a) => (a === undefined ? a : { ...a, index: (a.index + 1) % OPS.length }));
+          setActionNow({ ...act, index: (act.index + 1) % OPS.length });
           return;
         }
         if (key.return) {
-          const op = OPS[action.index] ?? OPS[0];
-          const id = action.providerId;
-          setAction(undefined);
+          const op = OPS[act.index] ?? OPS[0];
+          const id = act.providerId;
+          setActionNow(undefined);
           if (op === "删除") {
             const entry = entries.find((e) => e.id === id);
             if (entry !== undefined) requestRemove(entry);
             return;
           }
           if (op === "编辑模型") {
-            setAction(undefined);
             openModels(id);
             return;
           }
@@ -354,40 +384,42 @@ export function ProviderPage({
       }
 
       if (key.escape) {
-        if (query !== "") {
-          setQuery("");
-          setCursor(0);
+        if (queryRef.current !== "") {
+          setQueryNow("");
+          setCursorNow(0);
           return;
         }
         onClose();
         return;
       }
+      const rowsNow = filterRows(allRows, queryRef.current);
+      const curNow = Math.min(cursorRef.current, Math.max(0, rowsNow.length - 1));
       if (key.upArrow) {
-        setCursor((c) => (c + rows.length - 1) % Math.max(1, rows.length));
+        setCursorNow((curNow + rowsNow.length - 1) % Math.max(1, rowsNow.length));
         return;
       }
       if (key.downArrow) {
-        setCursor((c) => (c + 1) % Math.max(1, rows.length));
+        setCursorNow((curNow + 1) % Math.max(1, rowsNow.length));
         return;
       }
       if (key.pageUp) {
-        setCursor((c) => Math.max(0, c - listH));
+        setCursorNow(Math.max(0, curNow - listH));
         return;
       }
       if (key.pageDown) {
-        setCursor((c) => Math.min(Math.max(0, rows.length - 1), c + listH));
+        setCursorNow(Math.min(Math.max(0, rowsNow.length - 1), curNow + listH));
         return;
       }
       if (key.home) {
-        setCursor(0);
+        setCursorNow(0);
         return;
       }
       if (key.end) {
-        setCursor(Math.max(0, rows.length - 1));
+        setCursorNow(Math.max(0, rowsNow.length - 1));
         return;
       }
       if (key.return) {
-        const row = rows[cur];
+        const row = rowsNow[curNow];
         if (row === undefined) return;
         setLocalNotice(undefined);
         if (row.kind === "preset" && row.configured === undefined) {
@@ -401,13 +433,13 @@ export function ProviderPage({
           openModels(entry.id);
           return;
         }
-        setAction({ providerId: entry.id, index: 0 });
+        setActionNow({ providerId: entry.id, index: 0 });
         return;
       }
       if (key.delete) {
         // Delete = 删除入口（ADR-0030 §6），不再删除过滤字符。
         // 未配置预设 / 当前会话在用 / 只读条目都给原因并停在这里，不开确认框。
-        const row = rows[cur];
+        const row = rowsNow[curNow];
         if (row === undefined) return;
         if (row.kind === "preset" && row.configured === undefined) {
           setLocalNotice(`"${row.preset.label}" 尚未配置，没有可删除的内容`);
@@ -419,15 +451,15 @@ export function ProviderPage({
       }
       if (key.backspace) {
         // Backspace 仍只删过滤字符（行为不变）
-        if (query !== "") {
-          setQuery((q) => q.slice(0, -1));
-          setCursor(0);
+        if (queryRef.current !== "") {
+          setQueryNow(queryRef.current.slice(0, -1));
+          setCursorNow(0);
         }
         return;
       }
       if (ch !== "" && !key.ctrl && !key.meta) {
-        setQuery((q) => q + ch);
-        setCursor(0);
+        setQueryNow(queryRef.current + ch);
+        setCursorNow(0);
       }
     },
     { isActive: active && !wizardActive && confirmRemove === undefined && subView === undefined },
@@ -484,31 +516,24 @@ export function ProviderPage({
       width={width}
       height={contentH}
       onOpen={(modelId) => {
-        setSubView({ kind: "edit", providerId: subView.providerId, modelId });
+        setSubViewNow({ kind: "edit", providerId: subView.providerId, modelId });
         setSaveError(undefined);
       }}
       onBack={() => {
-        setSubView(undefined);
+        setSubViewNow(undefined);
         setModelsData(undefined);
       }}
     />
   ) : subView?.kind === "edit" && editView !== undefined ? (
-    <ModelEditPane
-      view={editView}
-      readonly={modelsReadonly || editView.readonly}
-      readonlyHint={editView.readonlyHint}
-      error={saveError}
-      saving={saving}
-      active={active}
+    <ModelListPane
+      providerId={subView.providerId}
+      views={modelsData?.views}
+      readonlyHint={modelsHint}
+      active={false}
       width={width}
       height={contentH}
-      onSave={(patch) => {
-        saveModel(subView.providerId, editView.modelId, patch);
-      }}
-      onBack={() => {
-        setSubView({ kind: "models", providerId: subView.providerId });
-        setSaveError(undefined);
-      }}
+      onOpen={() => undefined}
+      onBack={() => undefined}
     />
   ) : (
     <Box flexDirection="column">
@@ -583,11 +608,11 @@ export function ProviderPage({
           width={width}
           onConfirm={() => {
             const id = confirmRemove;
-            setConfirmRemove(undefined);
+            setConfirmRemoveNow(undefined);
             onConfirmRemove(id);
           }}
           onCancel={() => {
-            setConfirmRemove(undefined);
+            setConfirmRemoveNow(undefined);
             setLocalNotice("已取消删除");
           }}
         />
@@ -623,6 +648,27 @@ export function ProviderPage({
             </Text>
           )}
         </>
+      ) : null}
+      {subView?.kind === "edit" && editView !== undefined ? (
+        <Box position="absolute" width={width} height={height}>
+          <ModelEditPane
+            view={editView}
+            readonly={modelsReadonly || editView.readonly}
+            readonlyHint={editView.readonlyHint}
+            error={saveError}
+            saving={saving}
+            active={active}
+            width={width}
+            height={height}
+            onSave={(patch) => {
+              saveModel(subView.providerId, editView.modelId, patch);
+            }}
+            onBack={() => {
+              setSubViewNow({ kind: "models", providerId: subView.providerId });
+              setSaveError(undefined);
+            }}
+          />
+        </Box>
       ) : null}
     </Box>
   );
