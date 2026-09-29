@@ -65,6 +65,8 @@
 
 会话任务清单工具与进度显示方案见 [ADR-0028](decisions/ADR-0028-session-task-list.md)。
 
+TUI 深浅主题与配色切换方案见 [ADR-0029](decisions/ADR-0029-tui-themes.md)。
+
 当前 TUI 交互规格见 [apps/tui.md](apps/tui.md)；v0.4 的普通屏幕与临时切屏方案见 [ADR-0021](decisions/ADR-0021-tui-daily-usability.md)，它部分取代已接受的 [ADR-0020](decisions/ADR-0020-tui-fullscreen-rendering.md)。
 
 ## Roadmap
