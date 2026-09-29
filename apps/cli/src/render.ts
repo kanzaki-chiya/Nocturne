@@ -5,6 +5,7 @@
  */
 import { styleText } from "node:util";
 
+import { todoItemsFromCompletion, todoSnapshotLines } from "@nocturne/core/protocol";
 import type { RuntimeEvent, ToolCompletedPayload } from "@nocturne/core/protocol";
 
 export type Channel = "stdout" | "stderr";
@@ -82,6 +83,8 @@ function toolCompletedLines(p: ToolCompletedPayload): string[] {
     const reason = p.error !== undefined ? `${p.error.code}: ${p.error.message}` : "";
     lines.push(`└ ${style("red", p.status)}${dur}${reason !== "" ? ` ${reason}` : ""}`);
   }
+  const todos = todoItemsFromCompletion(p);
+  if (todos !== undefined) lines.push(...todoSnapshotLines(todos).map((line) => `  ${line}`));
   if (p.truncated === true) {
     lines.push(
       p.spillPath !== undefined

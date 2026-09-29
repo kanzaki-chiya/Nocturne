@@ -10,9 +10,12 @@ import { diffSummary, parseDiff } from "../diff-format.js";
 import { glyphs, useTuiEnv } from "../env.js";
 import { formatDuration, summarizeToolInput, tailLines, truncateLine } from "../format.js";
 import { theme } from "../theme.js";
+import { todoHeadline } from "../todo-format.js";
 import { DiffView } from "./diff.js";
+import { SegmentText, TodoRows } from "./todo-panel.js";
 
 import type { LiveTool, ToolEntry } from "@nocturne/core/protocol";
+import { todoItemsFromCompletion } from "@nocturne/core/protocol";
 
 const LIVE_TAIL = 3;
 const RESULT_TAIL = 5;
@@ -96,6 +99,23 @@ export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): 
       : entry.status === "running"
         ? ""
         : ` ${b.word !== "" ? `${b.word} ` : ""}${formatDuration(duration)}`.trimEnd();
+  const todos =
+    entry.result === undefined
+      ? undefined
+      : todoItemsFromCompletion({ name, status: entry.status, output: entry.result.output });
+  if (todos !== undefined) {
+    return (
+      <Box flexDirection="column">
+        <SegmentText
+          segments={[
+            ...(env.ascii ? [{ text: `${b.glyph} `, color: b.color }] : []),
+            ...todoHeadline(todos, env.ascii),
+          ]}
+        />
+        <TodoRows items={todos} width={width} />
+      </Box>
+    );
+  }
   return (
     <Box flexDirection="column">
       <Text wrap="truncate">

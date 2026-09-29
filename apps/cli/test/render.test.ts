@@ -22,6 +22,36 @@ const ephemeral = <T extends RuntimeEvent["type"]>(
   ({ type, sessionId: "s", runId: "r", eseq: 1, afterSeq: 0, time: "", payload }) as RuntimeEvent;
 
 describe("事件渲染（cli.md 第 5 节）", () => {
+  it("todo_write 在交互与打印模式逐次输出完整清单，失败不打印快照", () => {
+    const payload = {
+      callId: "todo",
+      name: "todo_write",
+      status: "ok" as const,
+      modelContent: "updated",
+      output: {
+        items: [
+          { text: "甲", status: "completed" },
+          { text: "乙", status: "in_progress" },
+        ],
+      },
+    };
+    const interactive = renderEvent(durable("tool.completed", payload), "interactive");
+    expect(interactive.map((part) => part.text).join("\n")).toContain("已完成 1/2");
+    expect(interactive.map((part) => part.text).join("\n")).toContain("[>] 乙");
+    const printed = renderEvent(durable("tool.completed", payload), "print");
+    expect(printed.every((part) => part.channel === "stderr")).toBe(true);
+    expect(
+      renderEvent(durable("tool.completed", { ...payload, output: { items: [] } }), "interactive")
+        .map((part) => part.text)
+        .join("\n"),
+    ).toContain("已完成 0/0");
+    expect(
+      renderEvent(durable("tool.completed", { ...payload, status: "error" }), "interactive")
+        .map((part) => part.text)
+        .join("\n"),
+    ).not.toContain("已完成");
+  });
+
   it("非交互模式：text delta → stdout，其余 → stderr", () => {
     const text = renderEvent(
       ephemeral("message.assistant.delta", { messageId: "m", kind: "text", delta: "hi" }),

@@ -113,6 +113,11 @@ const inputString = (input: unknown, key: string): string | undefined => {
 
 /** 工具输入单行摘要：shell→command；read/write/edit→path；grep/glob→pattern */
 export function summarizeToolInput(name: string | undefined, input: unknown): string {
+  if (name === "todo_write") {
+    const items =
+      typeof input === "object" && input !== null && "items" in input ? input.items : undefined;
+    return Array.isArray(items) ? `${items.length} 项` : "";
+  }
   const byKey =
     name === "shell"
       ? inputString(input, "command")

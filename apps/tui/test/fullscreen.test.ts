@@ -62,6 +62,17 @@ describe("帧高", () => {
     expect(tiny.conversation).toBe(0);
     expect(frameBudget(20, 0, 7).input).toBe(5);
     expect(frameBudget(4, 8, 5).input).toBe(2);
+    const withTodo = frameBudget(24, 0, 1, 7);
+    expect(withTodo.todo).toBe(7);
+    expect(
+      withTodo.conversation +
+        withTodo.inputRule +
+        withTodo.input +
+        withTodo.completion +
+        withTodo.todo +
+        withTodo.status,
+    ).toBe(withTodo.frameHeight);
+    expect(frameBudget(8, 0, 1, 7).conversation).toBeGreaterThanOrEqual(3);
   });
 });
 

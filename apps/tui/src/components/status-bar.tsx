@@ -80,6 +80,12 @@ export function StatusBar({
         : `思考:${effort.current}`;
 
   const segments: Segment[] = [{ text: status, color: statusColor, highlight: false }];
+  let progress: Segment | undefined;
+  if (view.todos.length > 0) {
+    const done = view.todos.filter((item) => item.status === "completed").length;
+    progress = { text: `任务 ${done}/${view.todos.length}`, color: theme.accent, highlight: false };
+    segments.push(progress);
+  }
   if (note !== undefined) {
     segments.unshift({ text: note, color: theme.accent, highlight: false });
   }
@@ -119,7 +125,10 @@ export function StatusBar({
 
   const head = segments[0];
   const last = segments.at(-1);
-  let shown = width < 40 && head !== undefined && last !== undefined ? [head, last] : segments;
+  let shown =
+    width < 40 && head !== undefined && last !== undefined
+      ? [head, ...(progress === undefined ? [] : [progress]), last]
+      : segments;
   if (dirSeg !== undefined) {
     const total = shown.reduce((w, s) => w + stringWidth(s.text), 0) + (shown.length - 1) * 3;
     if (total > width - 4) shown = shown.filter((s) => s !== dirSeg);

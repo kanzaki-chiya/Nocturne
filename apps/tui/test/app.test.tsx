@@ -347,10 +347,11 @@ describe("TUI", () => {
     unmount();
   });
 
-  it("窄于 40 列：状态栏仅留状态和上下文占用，权限框隐藏原因", () => {
+  it("窄于 40 列：状态栏保留任务进度，权限框隐藏原因", () => {
     const view = createSessionView();
     view.config.model = { provider: "fake", model: "long-model" };
     view.config.permissionPreset = "default";
+    view.todos = [{ text: "第一步", status: "in_progress" }];
     const pending: PendingPermission = {
       requestId: "p1",
       callId: "c1",
@@ -371,6 +372,7 @@ describe("TUI", () => {
     );
     const frame = lastFrame() ?? "";
     expect(frame).toContain("idle");
+    expect(frame).toContain("任务 0/1");
     expect(frame).not.toContain("很长的审批原因");
     expect(frame).not.toContain("long-model");
     expect(frame).not.toContain("default");

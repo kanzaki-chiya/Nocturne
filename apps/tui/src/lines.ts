@@ -6,6 +6,7 @@
 import stringWidth from "string-width";
 
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
+import { todoItemsFromCompletion } from "@nocturne/core/protocol";
 
 import { attachmentLine } from "./attachment-line.js";
 import { diffSummary, layoutDiffRow, parseDiff } from "./diff-format.js";
@@ -15,6 +16,7 @@ import { boxSafe, stripControls, summarizeToolInput, tailLines, truncateLine } f
 import { renderMarkdown } from "./markdown.js";
 import { reasoningLabel, type ReasoningMap, type ReasoningPart } from "./reasoning.js";
 import { theme } from "./theme.js";
+import { todoHeadline, todoItemRows, todoSnapshotWindow } from "./todo-format.js";
 import type { TranscriptItem } from "./components/transcript.js";
 import type { LaidLine, LineBlock } from "./viewport.js";
 
@@ -194,6 +196,47 @@ export function layoutEntry(
               ? "x"
               : "✗"
             : dot;
+      const todoItems =
+        entry.result === undefined
+          ? undefined
+          : todoItemsFromCompletion({
+              name: entry.name ?? "",
+              status: entry.status,
+              output: entry.result.output,
+            });
+      if (todoItems !== undefined) {
+        // 非 ASCII 时 📋 图标已标明这一行，不再重复成功符号
+        const segments = [
+          ...(ascii ? [{ text: `${mark} `, color: theme.success }] : []),
+          ...todoHeadline(todoItems, ascii),
+        ];
+        const lines: LaidLine[] = [
+          {
+            key: `${entry.key}:0`,
+            text: segments.map((seg) => seg.text).join(""),
+            segments,
+          },
+        ];
+        const snapshot = todoSnapshotWindow(todoItems);
+        snapshot.shown.forEach((item, i) => {
+          todoItemRows(item, ascii, budget(width)).forEach((segments, j) => {
+            lines.push({
+              key: `${entry.key}:todo:${i}:${j}`,
+              text: segments.map((seg) => seg.text).join(""),
+              segments,
+              ...(j > 0 ? { continued: true, copyIndent: segments[0]?.text.length ?? 0 } : {}),
+            });
+          });
+        });
+        if (snapshot.after > 0) {
+          lines.push({
+            key: `${entry.key}:todo:more`,
+            text: `  ${ascii ? "..." : "…"} 另有 ${snapshot.after} 项`,
+            dim: true,
+          });
+        }
+        return lines;
+      }
       const summary = summarizeToolInput(entry.name, entry.input);
       const head = `${mark} ${entry.name ?? "?"} ${summary} ${entry.status}`;
       const lines = rows(entry.key, head, width);

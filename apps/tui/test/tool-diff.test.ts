@@ -12,7 +12,9 @@ import { layoutEntry } from "../src/lines.js";
 import { diffSummary, layoutDiffRow, parseDiff } from "../src/diff-format.js";
 import { selCopyText } from "../src/selection.js";
 import { ToolRow } from "../src/components/tool-row.js";
+import { TodoPanel } from "../src/components/todo-panel.js";
 import { TuiEnvContext } from "../src/env.js";
+import { todoSnapshotWindow } from "../src/todo-format.js";
 
 const entry = (input: unknown, output: unknown, modelContent: string): ToolEntry => ({
   kind: "tool",
@@ -38,7 +40,155 @@ const entry = (input: unknown, output: unknown, modelContent: string): ToolEntry
   },
 });
 
+describe("清单快照窗口", () => {
+  const list = (done: number, total = 10) =>
+    Array.from({ length: total }, (_, i) => ({
+      text: `第${i + 1}步`,
+      status:
+        i < done
+          ? ("completed" as const)
+          : i === done
+            ? ("in_progress" as const)
+            : ("pending" as const),
+    }));
+  const texts = (done: number, total = 10) => {
+    const w = todoSnapshotWindow(list(done, total));
+    return [w.shown.map((item) => item.text).join(","), w.after];
+  };
+
+  it("从最近完成项起连同其后两项，只数窗口之后的项", () => {
+    expect(texts(0)).toEqual(["第1步,第2步,第3步", 7]);
+    expect(texts(3)).toEqual(["第3步,第4步,第5步", 5]);
+    expect(texts(9)).toEqual(["第8步,第9步,第10步", 0]);
+    expect(texts(10)).toEqual(["第8步,第9步,第10步", 0]);
+    expect(texts(1, 2)).toEqual(["第1步,第2步", 0]);
+  });
+
+  it("固定区全部完成时显示最后几项，不再提示另有；进行中时只数其后未显示的项", () => {
+    const panel = (done: number) => {
+      const frame = render(
+        createElement(
+          TuiEnvContext.Provider,
+          { value: { ascii: true, animated: false } },
+          createElement(TodoPanel, { items: list(done), width: 40, height: 10 }),
+        ),
+      );
+      const out = frame.lastFrame() ?? "";
+      frame.unmount();
+      return out;
+    };
+    const finished = panel(10);
+    expect(finished).toContain("[x] 第10步");
+    expect(finished).toContain("[x] 第4步");
+    expect(finished).not.toContain("第3步");
+    expect(finished).not.toContain("另有");
+    const mid = panel(2);
+    expect(mid).toContain("[x] 第2步");
+    expect(mid).toContain("[>] 第3步");
+    expect(mid).toContain("[ ] 第7步");
+    expect(mid).not.toContain("第1步");
+    expect(mid).not.toContain("第8步");
+    expect(mid).toContain("另有 3 项");
+    // 窗口已能延伸到末尾时显示到最后一项，不留「另有」
+    const late = panel(4);
+    expect(late).toContain("[x] 第4步");
+    expect(late).toContain("[ ] 第10步");
+    expect(late).not.toContain("另有");
+  });
+
+  it("对话流里的快照只列三项并提示另有项数", () => {
+    const tool: ToolEntry = {
+      ...entry({}, { items: list(3) }, "updated"),
+      name: "todo_write",
+    };
+    const plain = layoutEntry(tool, 60, false)
+      .map((line) => line.text)
+      .join("\n");
+    expect(plain).toContain("✅ 第3步");
+    expect(plain).toContain("🟦 第4步");
+    expect(plain).toContain("⬜ 第5步");
+    expect(plain).not.toContain("第2步");
+    expect(plain).not.toContain("第6步");
+    expect(plain).toContain("… 另有 5 项");
+  });
+});
+
 describe("工具行 diff", () => {
+  it("普通屏幕逐次打印完整清单，窄屏 ASCII 无色可辨状态", () => {
+    const tool = {
+      ...entry(
+        {
+          items: [
+            { text: "第一步", status: "completed" },
+            { text: "第二步", status: "in_progress" },
+            { text: `第三步${"长".repeat(40)}末尾`, status: "pending" },
+          ],
+        },
+        {
+          items: [
+            { text: "第一步", status: "completed" },
+            { text: "第二步", status: "in_progress" },
+            { text: `第三步${"长".repeat(40)}末尾`, status: "pending" },
+          ],
+        },
+        "updated",
+      ),
+      name: "todo_write",
+    };
+    const plain = layoutEntry(tool, 25, true)
+      .map((line) => line.text)
+      .join("\n");
+    expect(plain).toContain("+ 任务清单  1/3");
+    expect(plain).toContain("[x] 第一");
+    expect(plain).toContain("[>] 第二");
+    expect(plain).toContain("[ ] 第三");
+    expect(plain).not.toContain("todo_write");
+    expect(plain).not.toContain('"items"');
+    const frame = render(
+      createElement(
+        TuiEnvContext.Provider,
+        { value: { ascii: true, animated: false } },
+        createElement(ToolRow, { entry: tool, width: 25 }),
+      ),
+    );
+    expect(frame.lastFrame()).toContain("+ 任务清单  1/3");
+    expect(frame.lastFrame()).toContain("[>] 第二步");
+    expect(frame.lastFrame()).toContain("末尾");
+    frame.unmount();
+    expect(
+      layoutEntry({ ...entry({}, { items: [] }, "cleared"), name: "todo_write" }, 25, true)
+        .map((line) => line.text)
+        .join("\n"),
+    ).toContain("清空任务清单");
+  });
+
+  it("固定清单在窄屏截断长文本，ASCII 状态仍可见", () => {
+    const frame = render(
+      createElement(
+        TuiEnvContext.Provider,
+        { value: { ascii: true, animated: false } },
+        createElement(TodoPanel, {
+          items: [
+            { text: "计算总和", status: "completed" },
+            { text: `计算结果${"很长".repeat(20)}`, status: "in_progress" },
+            { text: "说明结果", status: "pending" },
+            { text: "检查结果", status: "pending" },
+            { text: "总结", status: "pending" },
+          ],
+          width: 25,
+          height: 4,
+        }),
+      ),
+    );
+    const lines = (frame.lastFrame() ?? "").split("\n");
+    expect(lines[0]).toBe("任务  1/5");
+    expect(lines.join("\n")).toContain("[x] 计算总和");
+    expect(lines.join("\n")).toContain("[>] 计算结果");
+    expect(lines.join("\n")).not.toContain("说明结果");
+    expect(lines.join("\n")).toContain("另有 3 项");
+    frame.unmount();
+  });
+
   it("edit：摘要行 + 新旧行号、标记与背景；旧头部不臆造行号", () => {
     const lines = layoutEntry(
       entry(

@@ -10,6 +10,7 @@ export interface FrameBudget {
   inputRule: number;
   input: number;
   completion: number;
+  todo: number;
   status: number;
 }
 
@@ -17,7 +18,12 @@ export interface FrameBudget {
  * @param rows 终端行数
  * @param completionWanted 希望显示的候选行数（已截到 0–8 之外也会被截断）
  */
-export function frameBudget(rows: number, completionWanted: number, inputWanted = 1): FrameBudget {
+export function frameBudget(
+  rows: number,
+  completionWanted: number,
+  inputWanted = 1,
+  todoWanted = 0,
+): FrameBudget {
   const frameHeight = Math.max(0, rows - 1);
   const status = frameHeight >= 1 ? 1 : 0;
   const input = frameHeight >= 2 ? Math.min(5, Math.max(1, inputWanted), frameHeight - status) : 0;
@@ -35,5 +41,7 @@ export function frameBudget(rows: number, completionWanted: number, inputWanted 
     completion = Math.min(wanted, surplus);
     conversation += surplus - completion;
   }
-  return { frameHeight, conversation, inputRule, input, completion, status };
+  const todo = Math.min(Math.max(0, todoWanted), Math.max(0, conversation - 3));
+  conversation -= todo;
+  return { frameHeight, conversation, inputRule, input, completion, todo, status };
 }

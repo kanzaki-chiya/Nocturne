@@ -12,6 +12,7 @@ export interface LineSegment {
   dim?: boolean | undefined;
   bold?: boolean | undefined;
   italic?: boolean | undefined;
+  strikethrough?: boolean | undefined;
   /** 选区高亮（反色）；由 selSegments 拆分标注 */
   inverse?: boolean | undefined;
 }

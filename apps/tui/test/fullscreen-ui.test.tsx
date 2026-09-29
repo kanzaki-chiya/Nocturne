@@ -90,6 +90,87 @@ function frameLines(frame: string | undefined): string[] {
 const occurrences = (frame: string, part: string): number => frame.split(part).length - 1;
 
 describe("全屏界面", () => {
+  it("清单固定在输入框上方，翻阅历史后仍可见，清空后消失", async () => {
+    const PANEL_HEAD = /📋 任务 {2}10\/20/;
+    const { runtime, session } = await sessionWithEffort();
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("idle"));
+    // 对话里的快照只列三项；多次更新把对话撑过一屏，才有历史可翻
+    for (let round = 1; round <= 3; round++) {
+      await session.session.emit("tool.completed", {
+        callId: `todo-warm-${round}`,
+        name: "todo_write",
+        status: "ok",
+        modelContent: "updated",
+        output: { items: [{ text: `预热${round}`, status: "in_progress" }] },
+      });
+    }
+    await session.session.emit("tool.completed", {
+      callId: "todo-1",
+      name: "todo_write",
+      status: "ok",
+      modelContent: "updated",
+      output: {
+        items: Array.from({ length: 20 }, (_, i) => ({
+          text: `第${i + 1}步`,
+          status: i === 10 ? "in_progress" : i < 10 ? "completed" : "pending",
+        })),
+      },
+    });
+    await waitFor(() => PANEL_HEAD.test(lastFrame() ?? ""));
+    expect(lastFrame()).toContain("🟦 第11步");
+    expect(lastFrame()).toContain("另有 5 项");
+    const panel = (lastFrame() ?? "").split(PANEL_HEAD).at(-1) ?? "";
+    expect(panel).toContain("✅ 第10步");
+    expect(panel).toContain("🟦 第11步");
+    expect(panel).not.toContain("第20步");
+    stdin.write("\x1b[5~"); // PageUp
+    await waitFor(() => (lastFrame() ?? "").includes("已向上翻阅"));
+    expect(lastFrame()).toMatch(PANEL_HEAD);
+    await session.session.emit("tool.completed", {
+      callId: "todo-2",
+      name: "todo_write",
+      status: "ok",
+      modelContent: "cleared",
+      output: { items: [] },
+    });
+    await waitFor(() => !PANEL_HEAD.test(lastFrame() ?? ""));
+    expect(lastFrame()).not.toContain("另有 5 项");
+    unmount();
+    await session.close();
+  }, 15_000);
+
+  it("三项清单固定显示完整文本；窄屏 ASCII 仍可辨状态", async () => {
+    const { runtime, session } = await sessionWithEffort();
+    const { lastFrame, unmount } = render(
+      createElement(App, { session, runtime, env: { ascii: true, animated: false } }),
+    );
+    await session.session.emit("tool.completed", {
+      callId: "todo-small",
+      name: "todo_write",
+      status: "ok",
+      modelContent: "updated",
+      output: {
+        items: [
+          { text: "计算总和", status: "completed" },
+          { text: "结果乘二", status: "in_progress" },
+          { text: "说明结果", status: "pending" },
+        ],
+      },
+    });
+    await waitFor(() => (lastFrame() ?? "").includes("| 任务  1/3"));
+    const frame = lastFrame() ?? "";
+    expect(frame).toMatch(/\+-+\+/);
+    expect(frame).toContain("[x] 计算总和");
+    expect(frame).toContain("[>] 结果乘二");
+    expect(frame).toContain("[ ] 说明结果");
+    expect(frame).not.toContain('"items"');
+    unmount();
+    await session.close();
+  });
+
   it("/preset 与 /effort 无参选择高亮当前值，Enter 生效、Esc 取消", async () => {
     const { runtime, session } = await sessionWithEffort();
     const { lastFrame, stdin, unmount } = render(

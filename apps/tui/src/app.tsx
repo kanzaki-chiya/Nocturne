@@ -93,6 +93,7 @@ import { PermissionDialog } from "./components/permission-dialog.js";
 import { PickList, type PickItem } from "./components/pick-list.js";
 import { ProviderPage, type ProviderOp } from "./components/provider-page.js";
 import { StatusBar, type EffortSegment, type StatusHighlight } from "./components/status-bar.js";
+import { TodoPanel, todoPanelRows } from "./components/todo-panel.js";
 import { Transcript, type TranscriptItem } from "./components/transcript.js";
 import { useAltScreen, waitCommit } from "./alt-screen.js";
 import { WizardView } from "./components/wizard-view.js";
@@ -2012,6 +2013,7 @@ function SessionApp({
     rows,
     completionOpen ? Math.min(8, candidates.length) : 0,
     input.split("\n").length,
+    fullscreen && !pageOpen ? todoPanelRows(view.todos.length) : 0,
   );
   const g = glyphs(env);
   const editor = composerWindow(`${g.prompt} `, input, cursor, width, budget.input);
@@ -2455,6 +2457,7 @@ function SessionApp({
                 dimColor={seg.dim === true}
                 bold={seg.bold === true}
                 italic={seg.italic === true}
+                strikethrough={seg.strikethrough === true}
                 inverse={seg.inverse === true}
               >
                 {seg.text}
@@ -2482,7 +2485,7 @@ function SessionApp({
     </Box>
   );
 
-  // 底部固定区：输入框光标登记 + Composer + 候选 + 状态栏（两种模式共用）
+  // 底部固定区：清单（全屏）、输入框光标登记 + Composer + 候选 + 状态栏
   const chrome = (
     <>
       <InputCursor
@@ -2492,6 +2495,9 @@ function SessionApp({
         width={width}
         y={inputY + editor.cursorRow}
       />
+      {fullscreen && budget.todo > 0 ? (
+        <TodoPanel items={view.todos} width={width} height={budget.todo} />
+      ) : null}
       <Composer
         pastes={pastes}
         value={input}

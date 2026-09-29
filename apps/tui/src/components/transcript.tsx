@@ -166,6 +166,7 @@ export function EntryRow({
                       dimColor={seg.dim === true}
                       bold={seg.bold === true}
                       italic={seg.italic === true}
+                      strikethrough={seg.strikethrough === true}
                     >
                       {seg.text}
                     </Text>
