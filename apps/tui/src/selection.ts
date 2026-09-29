@@ -8,6 +8,7 @@
  */
 import stringWidth from "string-width";
 
+import { palettes, type ThemePalette } from "./theme.js";
 import type { LaidLine, LineSegment } from "./viewport.js";
 
 export interface SelPoint {
@@ -73,10 +74,14 @@ export function selRangeOnLine(
 }
 
 /**
- * 把一行按选区字符范围拆成分段，选中部分标 `inverse`（渲染为反色）。
+ * 把一行按选区字符范围拆成分段，选中部分使用主题的选区底色。
  * 供视口行渲染使用；无选区部分保留原分段样式。
  */
-export function selSegments(line: LaidLine, range: { start: number; end: number }): LineSegment[] {
+export function selSegments(
+  line: LaidLine,
+  range: { start: number; end: number },
+  theme: ThemePalette = palettes.dark,
+): LineSegment[] {
   const src = line.segments ?? [{ text: line.text }];
   const out: LineSegment[] = [];
   let at = 0;
@@ -94,7 +99,7 @@ export function selSegments(line: LaidLine, range: { start: number; end: number 
       out.push({
         ...seg,
         text: seg.text.slice(pos, pos + len),
-        ...(selHere ? { inverse: true } : {}),
+        ...(selHere ? { color: theme.selected, backgroundColor: theme.selectionBg } : {}),
       });
       pos += len;
     }

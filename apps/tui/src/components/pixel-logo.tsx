@@ -5,10 +5,11 @@
 import { Box, Text } from "ink";
 
 import { useTuiEnv } from "../env.js";
-import { LOGO_ROWS, LOGO_SPLIT, theme } from "../theme.js";
+import { LOGO_ROWS, LOGO_SPLIT, useTheme } from "../theme.js";
 
 export function PixelLogo(): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const block = env.ascii ? "#" : "█";
   return (
     <Box flexDirection="column">

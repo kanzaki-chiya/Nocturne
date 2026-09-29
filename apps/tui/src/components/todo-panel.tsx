@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import type { TodoItem } from "@nocturne/core/protocol";
 
 import { useTuiEnv } from "../env.js";
-import { theme } from "../theme.js";
+import { useTheme } from "../theme.js";
 import {
   segmentsWidth,
   todoDone,
@@ -53,11 +53,12 @@ export function TodoRows({
   width: number;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const { shown, after } = todoSnapshotWindow(items);
   return (
     <Box flexDirection="column">
       {shown.flatMap((item, i) =>
-        todoItemRows(item, env.ascii, Math.max(8, width - 1)).map((segments, j) => (
+        todoItemRows(item, env.ascii, Math.max(8, width - 1), "  ", theme).map((segments, j) => (
           <SegmentText key={`${i}:${j}`} segments={segments} />
         )),
       )}
@@ -76,6 +77,7 @@ export function TodoPanel({
   height: number;
 }): React.JSX.Element | null {
   const env = useTuiEnv();
+  const theme = useTheme();
   if (height === 0 || items.length === 0) return null;
   // 终端太矮（框内放不下标题加两行）时去掉边框，把行留给标题和条目。
   const framed = height >= Math.min(items.length + 3, 6) && width >= 12;
@@ -89,11 +91,13 @@ export function TodoPanel({
   const header: LineSegment[] = [
     { text: `${todoIcon(env.ascii)}任务`, color: theme.accent, bold: true },
     { text: `  ${done}/${items.length}`, bold: true },
-    ...(finished ? [{ text: "  " }, todoDoneBadge()] : []),
+    ...(finished ? [{ text: "  " }, todoDoneBadge(theme)] : []),
   ];
   const lines: LineSegment[][] = [
     header,
-    ...shown.map((item) => todoItemRows(item, env.ascii, Number.MAX_SAFE_INTEGER, "")[0] ?? []),
+    ...shown.map(
+      (item) => todoItemRows(item, env.ascii, Number.MAX_SAFE_INTEGER, "", theme)[0] ?? [],
+    ),
     ...(after > 0
       ? [[{ text: `${ellipsis} 另有 ${after} 项`, dim: true } satisfies LineSegment]]
       : []),
@@ -109,7 +113,7 @@ export function TodoPanel({
       height={height}
       overflow="hidden"
       {...(framed
-        ? { borderStyle: env.ascii ? "classic" : "round", borderColor: theme.muted, paddingX: 1 }
+        ? { borderStyle: env.ascii ? "classic" : "round", borderColor: theme.border, paddingX: 1 }
         : {})}
     >
       {lines.map((segments, i) => (

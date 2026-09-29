@@ -1,8 +1,10 @@
 /**
  * 选区（selection.ts）：坐标换算（中文宽字符）、选区规范化、
- * 复制文本（折行续行拼回/行尾空白/真换行保留）、反色分段。
+ * 复制文本（折行续行拼回/行尾空白/真换行保留）、主题选区分段。
  */
 import { describe, expect, it } from "vitest";
+
+import { palettes } from "../src/theme.js";
 
 import {
   colFromDisplay,
@@ -87,21 +89,28 @@ describe("复制文本", () => {
 });
 
 describe("高亮分段", () => {
-  it("选区部分标 inverse，保留原分段样式", () => {
+  it("选区部分使用主题前景与底色，保留原分段样式", () => {
     const line = L("aXbYc", {
       segments: [{ text: "aX", color: "red" }, { text: "bY", dim: true }, { text: "c" }],
     });
     const segs = selSegments(line, { start: 1, end: 4 });
     expect(segs).toEqual([
       { text: "a", color: "red" },
-      { text: "X", color: "red", inverse: true },
-      { text: "bY", dim: true, inverse: true },
+      { text: "X", color: palettes.dark.selected, backgroundColor: palettes.dark.selectionBg },
+      {
+        text: "bY",
+        dim: true,
+        color: palettes.dark.selected,
+        backgroundColor: palettes.dark.selectionBg,
+      },
       { text: "c" },
     ]);
   });
 
   it("无分段的行整行拆；越界范围整行高亮", () => {
     const segs = selSegments(L("abc"), { start: 0, end: Number.MAX_SAFE_INTEGER });
-    expect(segs).toEqual([{ text: "abc", inverse: true }]);
+    expect(segs).toEqual([
+      { text: "abc", color: palettes.dark.selected, backgroundColor: palettes.dark.selectionBg },
+    ]);
   });
 });

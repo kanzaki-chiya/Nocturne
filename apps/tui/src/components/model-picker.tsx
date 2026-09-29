@@ -14,6 +14,7 @@ import type { ModelInfo, ModelRef, ProviderOverview, WizardPreset } from "@noctu
 
 import { useTuiEnv } from "../env.js";
 import { boxSafe, truncateLine } from "../format.js";
+import { useTheme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
 import { InputCursor } from "./input-cursor.js";
 import { WizardView } from "./wizard-view.js";
@@ -396,6 +397,7 @@ function LeftPane({
   height: number;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const dotOn = env.ascii ? "*" : "●";
   const dotOff = env.ascii ? "o" : "○";
   const line = env.ascii ? "-" : "─";
@@ -426,7 +428,9 @@ function LeftPane({
           : `${dotOff} ${boxSafe(item.id)}`;
     rendered.push(
       <Text key={i} wrap="truncate">
-        <Text inverse={focused}>{truncateLine(`${cur ? "> " : "  "}${label}`, width - 2)}</Text>
+        <Text {...(focused ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}>
+          {truncateLine(`${cur ? "> " : "  "}${label}`, width - 2)}
+        </Text>
       </Text>,
     );
   });
@@ -440,7 +444,7 @@ function LeftPane({
       borderLeft={false}
       borderTop={false}
       borderBottom={false}
-      borderColor="gray"
+      borderColor={theme.border}
     >
       {rendered}
     </Box>
@@ -477,6 +481,7 @@ function RightPane({
   offsetX: number;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const line = env.ascii ? "-" : "─";
   const sel = rows[cursor]?.model;
   const listTop = 2; // 搜索框 + 空行
@@ -515,7 +520,7 @@ function RightPane({
     const unavailableTag = m.unavailable !== undefined ? " 协议不支持" : "";
     lines.push(
       <Text key={idx} wrap="truncate">
-        <Text inverse={focused}>
+        <Text {...(focused ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}>
           {truncateLine(
             boxSafe(
               `${focused ? ">" : " "}${mark} ${name}  ${r} ${im}  ${ctxText(m).padStart(5)} ${priceText(m).padStart(11)}`,
@@ -541,7 +546,9 @@ function RightPane({
       />
       <Text wrap="truncate">
         {truncateLine(boxSafe(`搜索: ${query}`), width - 2)}
-        <Text inverse> </Text>
+        <Text color={theme.selected} backgroundColor={theme.selectionBg}>
+          {" "}
+        </Text>
       </Text>
       <Text dimColor>
         {scopeLabel}
@@ -590,8 +597,16 @@ function RightPane({
       </Box>
       {action !== undefined ? (
         <Text>
-          <Text inverse={action === 0}>[仅本会话]</Text>{" "}
-          <Text inverse={action === 1}>[设为默认]</Text>
+          <Text
+            {...(action === 0 ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}
+          >
+            [仅本会话]
+          </Text>{" "}
+          <Text
+            {...(action === 1 ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}
+          >
+            [设为默认]
+          </Text>
           <Text dimColor> 左右选择，Enter 确认，Esc 返回</Text>
         </Text>
       ) : (

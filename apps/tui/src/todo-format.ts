@@ -8,7 +8,7 @@ import stringWidth from "string-width";
 
 import type { TodoItem, TodoStatus } from "@nocturne/core/protocol";
 
-import { theme } from "./theme.js";
+import { palettes, type ThemePalette } from "./theme.js";
 import type { LineSegment } from "./viewport.js";
 
 export function todoMark(status: TodoStatus, ascii: boolean): string {
@@ -22,7 +22,10 @@ export function todoIcon(ascii: boolean): string {
 }
 
 /** 正文样式：完成为弱化加删除线，进行中强调色加粗，待办保持常规。 */
-export function todoTextStyle(status: TodoStatus): Omit<LineSegment, "text"> {
+export function todoTextStyle(
+  status: TodoStatus,
+  theme: ThemePalette = palettes.dark,
+): Omit<LineSegment, "text"> {
   if (status === "completed") return { dim: true, strikethrough: true };
   if (status === "in_progress") return { color: theme.accent, bold: true };
   return {};
@@ -33,7 +36,7 @@ export function todoDone(items: readonly TodoItem[]): number {
 }
 
 /** 「全部完成」标记：成功色加粗文字，不加背景。 */
-export function todoDoneBadge(): LineSegment {
+export function todoDoneBadge(theme: ThemePalette = palettes.dark): LineSegment {
   return { text: "全部完成", color: theme.success, bold: true };
 }
 
@@ -45,9 +48,10 @@ export function todoItemRows(
   ascii: boolean,
   width: number,
   indent = "  ",
+  theme: ThemePalette = palettes.dark,
 ): LineSegment[][] {
   const mark = todoMark(item.status, ascii);
-  const style = todoTextStyle(item.status);
+  const style = todoTextStyle(item.status, theme);
   const lead = `${indent}${mark} `;
   const room = Math.max(4, width - stringWidth(lead));
   const chunks: string[] = [];
@@ -103,13 +107,19 @@ export function todoSnapshotWindow(items: readonly TodoItem[]): {
 }
 
 /** 对话流里 todo_write 成功结果的标题行，替代通用的「工具名 摘要 状态」。 */
-export function todoHeadline(items: readonly TodoItem[], ascii: boolean): LineSegment[] {
+export function todoHeadline(
+  items: readonly TodoItem[],
+  ascii: boolean,
+  theme: ThemePalette = palettes.dark,
+): LineSegment[] {
   const icon = todoIcon(ascii);
   if (items.length === 0) return [{ text: `${icon}清空任务清单`, color: theme.accent, bold: true }];
   const done = todoDone(items);
   const title: LineSegment = { text: `${icon}任务清单`, color: theme.accent, bold: true };
   const tally: LineSegment = { text: `  ${done}/${items.length}`, bold: true };
-  return done === items.length ? [title, tally, { text: "  " }, todoDoneBadge()] : [title, tally];
+  return done === items.length
+    ? [title, tally, { text: "  " }, todoDoneBadge(theme)]
+    : [title, tally];
 }
 
 export function segmentsWidth(segments: readonly LineSegment[]): number {

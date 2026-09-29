@@ -15,6 +15,7 @@ import { ToolRow } from "../src/components/tool-row.js";
 import { TodoPanel } from "../src/components/todo-panel.js";
 import { TuiEnvContext } from "../src/env.js";
 import { todoSnapshotWindow } from "../src/todo-format.js";
+import { palettes } from "../src/theme.js";
 
 const entry = (input: unknown, output: unknown, modelContent: string): ToolEntry => ({
   kind: "tool",
@@ -205,11 +206,11 @@ describe("工具行 diff", () => {
     expect(
       layoutDiffRow("red", { mark: "-", body: "old", oldNo: 2 }, 80, true)[0]?.segments?.[0]
         ?.backgroundColor,
-    ).toBe("#3b2024");
+    ).toBe(palettes.dark.diffRemoveBg);
     expect(
       layoutDiffRow("green", { mark: "+", body: "new", newNo: 2 }, 80, true)[0]?.segments?.[0]
         ?.backgroundColor,
-    ).toBe("#173524");
+    ).toBe(palettes.dark.diffAddBg);
     expect(
       layoutDiffRow("plain", { mark: "+", body: "new", newNo: 2 }, 80, false)[0]?.segments?.[0]
         ?.backgroundColor,

@@ -11,7 +11,7 @@ import { App } from "../src/app.js";
 import { attachmentLine } from "../src/attachment-line.js";
 import { layoutEntry } from "../src/lines.js";
 import { createImageStore, droppedImage, splitImageTokens } from "../src/images.js";
-import { theme } from "../src/theme.js";
+import { palettes } from "../src/theme.js";
 import { createPlatform } from "@nocturne/core";
 
 const roots: string[] = [];
@@ -377,10 +377,10 @@ describe("附件行", () => {
       content: [{ type: "text" as const, text: "[Image #1]识别图片内容" }],
     };
     const [first] = layoutEntry(user, 80, false);
-    expect(first?.color).toBe("cyan");
+    expect(first?.color).toBe(palettes.dark.accent);
     expect(first?.segments).toEqual([
       { text: "› " },
-      { text: "[Image #1]", color: theme.accentAlt },
+      { text: "[Image #1]", color: palettes.dark.accentAlt },
       { text: "识别图片内容" },
     ]);
     // 不含占位的行保持原样，不额外拆分

@@ -100,7 +100,7 @@ import { WizardView } from "./components/wizard-view.js";
 import { TuiEnvContext, glyphs, type TuiEnv } from "./env.js";
 import { useSessionView } from "./session-view.js";
 import { useReasoning } from "./reasoning.js";
-import { theme } from "./theme.js";
+import { useTheme } from "./theme.js";
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 import { useProviderWizard } from "./wizard-io.js";
 
@@ -392,6 +392,7 @@ function SetupFlow({
   onOutputLayout?: ((conversation: number, page: string) => void) | undefined;
   onDone: (d: SetupDone) => void;
 }): React.JSX.Element | null {
+  const theme = useTheme();
   const { stdout } = useStdout();
   const alt = useAltScreen(inline);
   const [width, setWidth] = useState(stdout.columns || 80);
@@ -667,6 +668,7 @@ function SessionApp({
   transcriptOut?: { current?: (() => string[]) | undefined } | undefined;
   onSessionId?: ((id: string) => void) | undefined;
 }): React.JSX.Element {
+  const theme = useTheme();
   const fullscreen = !inline;
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -2129,6 +2131,7 @@ function SessionApp({
     cwd: view.meta?.cwd ?? "",
     ascii: env.ascii,
     width,
+    theme,
   });
   // —— 全屏视口（ADR-0021 第 1 条）：欢迎区在块表最前随对话滚走；
   // 冻结前缀是 /resume 切换时旧会话的完结条目；live 块每次渲染重排。
@@ -2145,6 +2148,7 @@ function SessionApp({
     now: reasoningNow,
     expanded: fullscreen ? expanded : true,
     diffExpanded,
+    theme,
   };
   sourceRef.current = transcriptSource;
   const blocks: LineBlock[] = fullscreen || recordOpen ? transcriptBlocks(transcriptSource) : [];
@@ -2182,7 +2186,7 @@ function SessionApp({
     ...bootNotes.map((note, i): TranscriptItem => ({
       kind: "header",
       key: `boot:${session.id}:${i}`,
-      lines: [{ key: `boot:${i}`, text: `! ${note}`, color: "yellow" }],
+      lines: [{ key: `boot:${i}`, text: `! ${note}`, color: theme.warning }],
     })),
   ];
   const activityLines: LaidLine[] = [];
@@ -2215,7 +2219,7 @@ function SessionApp({
         staticEntries.push({
           kind: "header",
           key,
-          lines: renderMarkdown(part.text, width, key),
+          lines: renderMarkdown(part.text, width, key, theme),
         });
       }
       staticWritten.current.set(assistant.messageId, step.written);
@@ -2249,10 +2253,12 @@ function SessionApp({
         tail,
         prefix.length,
         pendingLines.filter((line) => line.after < view.entries.length),
-        (entry) => [layoutEntry(entry, width, env.ascii, reasoning, reasoningNow)],
+        (entry) => [
+          layoutEntry(entry, width, env.ascii, reasoning, reasoningNow, false, false, theme),
+        ],
         clientRows,
       ).flat(),
-      ...layoutLive(activityView, width, env.ascii, reasoning, reasoningNow),
+      ...layoutLive(activityView, width, env.ascii, reasoning, reasoningNow, false, theme),
       ...pendingLines.filter((line) => line.after >= view.entries.length).flatMap(clientRows),
     );
   }
@@ -2422,17 +2428,22 @@ function SessionApp({
     blocked: pageOpen || overlayBody !== null,
   };
 
-  /** LaidLine → Text；selected 给本行的选区字符范围时拆分反色分段 */
+  /** LaidLine → Text；selected 给本行的选区字符范围时用主题底色拆分 */
   const renderLine = (
     line: LaidLine,
     selected?: { start: number; end: number },
   ): React.JSX.Element => {
-    const segments = selected === undefined ? line.segments : selSegments(line, selected);
+    const segments = selected === undefined ? line.segments : selSegments(line, selected, theme);
     // 空行没有可拆分的字符：空 Text 在 Ink 里高度为 0，会让下方各行整体上移。
-    // 占一格空格保住行高；落在选区里就反色这一格，示意空行也被选中。
+    // 占一格空格保住行高；落在选区里用选区底色示意空行也被选中。
     if (segments?.every((seg) => seg.text === "") === true) {
       return (
-        <Text key={line.key} inverse={(selected?.end ?? 0) > 0}>
+        <Text
+          key={line.key}
+          {...((selected?.end ?? 0) > 0
+            ? { color: theme.selected, backgroundColor: theme.selectionBg }
+            : {})}
+        >
           {" "}
         </Text>
       );
@@ -2458,7 +2469,6 @@ function SessionApp({
                 bold={seg.bold === true}
                 italic={seg.italic === true}
                 strikethrough={seg.strikethrough === true}
-                inverse={seg.inverse === true}
               >
                 {seg.text}
               </Text>
@@ -2523,7 +2533,13 @@ function SessionApp({
       />
       {budget.completion > 0
         ? shownCandidates.map((item, i) => (
-            <Text key={item.insert} wrap="truncate" inverse={i === completionIndex}>
+            <Text
+              key={item.insert}
+              wrap="truncate"
+              {...(i === completionIndex
+                ? { color: theme.selected, backgroundColor: theme.selectionBg }
+                : {})}
+            >
               {item.label}
             </Text>
           ))

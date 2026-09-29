@@ -9,7 +9,7 @@ import { useState } from "react";
 
 import { useTuiEnv } from "../env.js";
 import { boxSafe } from "../format.js";
-import { theme } from "../theme.js";
+import { useTheme } from "../theme.js";
 
 export function ConfirmBox({
   title,
@@ -31,6 +31,7 @@ export function ConfirmBox({
   cancelLabel?: string | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   // index 0 = 取消（默认拒绝）；index 1 = 确认
   const [index, setIndex] = useState(0);
   useInput(
@@ -55,6 +56,7 @@ export function ConfirmBox({
       flexDirection="column"
       borderStyle={env.ascii ? "single" : "round"}
       borderColor={theme.warning}
+      backgroundColor={theme.overlayBg}
       width={Math.min(width - 2, 72)}
     >
       <Text bold color={theme.warning} wrap="truncate">
@@ -66,11 +68,17 @@ export function ConfirmBox({
         </Text>
       ) : null}
       <Text wrap="truncate">
-        <Text inverse={index === 0} {...(index === 0 ? { color: theme.accent } : {})}>
+        <Text
+          color={index === 0 ? theme.selected : theme.text}
+          {...(index === 0 ? { backgroundColor: theme.selectionBg } : {})}
+        >
           [{cancelLabel}]
         </Text>
         {"  "}
-        <Text inverse={index === 1} {...(index === 1 ? { color: theme.warning } : {})}>
+        <Text
+          color={index === 1 ? theme.selected : theme.text}
+          {...(index === 1 ? { backgroundColor: theme.selectionBg } : {})}
+        >
           [{confirmLabel}]
         </Text>
         <Text dimColor> 左右选择，Enter 执行，Esc 取消</Text>

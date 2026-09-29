@@ -25,7 +25,7 @@ import type {
 
 import { useTuiEnv } from "../env.js";
 import { truncateLine } from "../format.js";
-import { theme } from "../theme.js";
+import { useTheme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
 import { ConfirmBox } from "./confirm-box.js";
 import { ModelEditPane, ModelListPane } from "./model-settings-view.js";
@@ -168,6 +168,7 @@ export function ProviderPage({
   active: boolean;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const allRows = useMemo(() => buildProviderRows(presets, entries), [presets, entries]);
   const [cursor, setCursor] = useState(0);
   const [query, setQuery] = useState("");
@@ -471,7 +472,9 @@ export function ProviderPage({
       <Text wrap="truncate">
         <Text color={theme.muted}>{"过滤: "}</Text>
         {query}
-        <Text inverse> </Text>
+        <Text color={theme.selected} backgroundColor={theme.selectionBg}>
+          {" "}
+        </Text>
       </Text>
       <Box flexDirection="row" height={listH}>
         <Box flexDirection="column" flexGrow={1}>
@@ -483,8 +486,8 @@ export function ProviderPage({
             return (
               <Text key={idx} wrap="truncate">
                 <Text
-                  inverse={focused}
-                  color={focused ? theme.accent : l.configured ? theme.success : theme.muted}
+                  color={focused ? theme.selected : l.configured ? theme.success : theme.muted}
+                  {...(focused ? { backgroundColor: theme.selectionBg } : {})}
                 >
                   {truncateLine(text, width - (showScroll ? 6 : 4))}
                 </Text>
@@ -550,7 +553,13 @@ export function ProviderPage({
           {OPS.map((op, i) => (
             <Text key={op}>
               {i > 0 ? " " : ""}
-              <Text inverse={action.index === i}>[{op}]</Text>
+              <Text
+                {...(action.index === i
+                  ? { color: theme.selected, backgroundColor: theme.selectionBg }
+                  : {})}
+              >
+                [{op}]
+              </Text>
             </Text>
           ))}
           <Text color={theme.muted}> 左右选择，Enter 执行，Esc 返回</Text>

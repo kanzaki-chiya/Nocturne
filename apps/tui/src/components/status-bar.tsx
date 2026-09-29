@@ -1,5 +1,5 @@
 /**
- * 状态栏（ADR-0020）：彩色分段，• 分隔。
+ * 状态栏：中性色为主，• 分隔。
  * 上下文为「百分比 / 上下文长度」（单位大写）；长度未知只显示已用量。
  * 模型段与 /model 一致（服务商/模型 ID 或简称），整行按显示宽度截断，不换行。
  * Shift+Tab / Alt+M 只短暂高亮对应段，不往对话区插条目。
@@ -9,7 +9,7 @@ import stringWidth from "string-width";
 
 import { useTuiEnv } from "../env.js";
 import { formatContextOccupancy, formatModelLabel } from "../status-format.js";
-import { statusSegmentColors, theme } from "../theme.js";
+import { useTheme } from "../theme.js";
 
 import type { ModelInfo } from "@nocturne/core";
 import type { RuntimeStatus, SessionView } from "@nocturne/core/protocol";
@@ -64,12 +64,13 @@ export function StatusBar({
   note?: string | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const sep = env.ascii ? " - " : " • ";
   const status =
     view.status === "retrying" && view.retry !== undefined
       ? `${STATUS_TEXT.retrying} ${view.retry.attempt}/${view.retry.maxAttempts}`
       : STATUS_TEXT[view.status];
-  const statusColor = view.status === "idle" ? statusSegmentColors.status : theme.warning;
+  const statusColor = view.status === "idle" ? theme.secondary : theme.warning;
   const ctx = formatContextOccupancy(context.used, context.limit);
 
   const effortText =
@@ -87,7 +88,7 @@ export function StatusBar({
     segments.push(progress);
   }
   if (note !== undefined) {
-    segments.unshift({ text: note, color: theme.accent, highlight: false });
+    segments.unshift({ text: note, color: theme.secondary, highlight: false });
   }
   const reserved =
     stringWidth(status) +
@@ -100,28 +101,26 @@ export function StatusBar({
   const modelBudget = Math.max(8, width - reserved);
   segments.push({
     text: formatModelLabel(view.config.model, models ?? [], modelBudget),
-    color: statusSegmentColors.model,
+    color: theme.text,
     highlight: false,
   });
   if (effort !== undefined && effortText !== undefined) {
     segments.push({
       text: effortText,
-      color: effort.transition ? statusSegmentColors.effortTransition : statusSegmentColors.effort,
+      color: effort.transition ? theme.warning : theme.secondary,
       highlight: highlight === "effort",
     });
   }
   segments.push({
     text: view.config.permissionPreset ?? "?",
-    color: statusSegmentColors.preset,
+    color: theme.secondary,
     highlight: highlight === "preset",
   });
   const dir = view.meta?.cwd ?? "";
   const dirSeg: Segment | undefined =
-    width >= 80 && dir !== ""
-      ? { text: dir, color: statusSegmentColors.dir, highlight: false }
-      : undefined;
+    width >= 80 && dir !== "" ? { text: dir, color: theme.secondary, highlight: false } : undefined;
   if (dirSeg !== undefined) segments.push(dirSeg);
-  segments.push({ text: ctx, color: statusSegmentColors.context, highlight: false });
+  segments.push({ text: ctx, color: theme.muted, highlight: false });
 
   const head = segments[0];
   const last = segments.at(-1);
@@ -140,7 +139,11 @@ export function StatusBar({
         {shown.map((s, i) => (
           <Text key={i}>
             {i > 0 ? <Text color={theme.muted}>{sep}</Text> : null}
-            <Text color={s.color} inverse={s.highlight} bold={s.highlight}>
+            <Text
+              color={s.highlight ? theme.selected : s.color}
+              {...(s.highlight ? { backgroundColor: theme.selectionBg } : {})}
+              bold={s.highlight}
+            >
               {s.text}
             </Text>
           </Text>

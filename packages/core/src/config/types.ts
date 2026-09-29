@@ -450,6 +450,10 @@ export interface RuntimeConfig {
    * 具体种类时写 shell（path 存在时同写 shellPath，否则清除）。
    */
   setShellSetting(kind: string, path?: string): Promise<void>;
+  /** settings.json 顶层字符串偏好；无值或非字符串时返回 undefined。 */
+  getPreference(key: string): string | undefined;
+  /** 原子写入或删除普通偏好；拒绝 shell、shellPath 等保留字段。 */
+  setPreference(key: string, value: string | undefined): Promise<void>;
   /** recent-models.json 当前内容（"provider/model" 形式，新→旧，最多 10 条；loadConfig 时预读的缓存） */
   recentModels(): ModelRef[];
   /** setModel/新建会话时记录最近使用（去重、置顶、原子写） */

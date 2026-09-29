@@ -1,39 +1,86 @@
-/**
- * 主题常量（ADR-0019 第 5 条）：TUI 全部颜色集中在这里，
- * 组件不直接写死色值。语义角色 + 状态栏分段色 + 像素 Logo 数据。
- * NO_COLOR / TERM=dumb 时 Ink 自行降级（env.ts 探测）；NOCTURNE_ASCII
- * 退回 ASCII 符号（env.ts 的 glyphs）。
- */
+/** TUI 语义色（ADR-0029）：深浅色适配终端背景，不涂满整屏。 */
+import { createContext, useContext } from "react";
 
-/** 语义色 */
-export const theme = {
-  /** 主强调色：选中标记、标题、边框 */
-  accent: "cyan",
-  /** 第二强调色：像素 Logo 右半、"欢迎回来" */
-  accentAlt: "magenta",
-  /** 成功 / 已配置标记 */
-  success: "green",
-  /** 警告块、确认框、思考档位"旧→新"过渡段 */
-  warning: "yellow",
-  /** 错误块、失败状态 */
-  error: "red",
-  /** 信息块（恢复修复摘要等启动通知） */
-  info: "blue",
-  /** 弱化：分隔线、按键提示、留空列 */
-  muted: "gray",
-} as const;
+export type ThemeId = "dark" | "light";
+export interface ThemePalette {
+  id: ThemeId;
+  text: string; // 正文、状态栏主要信息
+  secondary: string; // Markdown 标题、引用、次要说明
+  muted: string; // 按键提示、分隔线、留空列
+  accent: string; // 输入、当前项、进度
+  accentAlt: string; // 图片占位、Logo 副色
+  selected: string; // 被选中控件的文字
+  onStatus: string; // 有色通知标记的文字
+  selectionBg: string; // 选区和聚焦项底色
+  border: string; // 面板、Todo 固定区边框
+  success: string;
+  warning: string;
+  error: string;
+  info: string; // 中性信息提示
+  diffAddBg: string;
+  diffRemoveBg: string;
+  codeBg: string;
+  overlayBg: string;
+  moonHighlight: string;
+  moonMain: string;
+  moonShadow: string;
+}
 
-/** 状态栏分段色（tui.md §2：模型 · 思考档位 · 权限预设 · 目录 · 上下文占用） */
-export const statusSegmentColors = {
-  status: theme.accent,
-  model: theme.success,
-  effort: theme.accentAlt,
-  /** Turn 中切档（旧档→新档）的提示色 */
-  effortTransition: theme.warning,
-  preset: theme.warning,
-  dir: theme.info,
-  context: theme.muted,
-} as const;
+export const palettes: Record<ThemeId, ThemePalette> = {
+  dark: {
+    id: "dark",
+    text: "#D8DCE3",
+    secondary: "#B7C0CC",
+    muted: "#88919D",
+    accent: "#6CB7C2",
+    accentAlt: "#B3A6D6",
+    selected: "#F4F7F9",
+    onStatus: "#17212A",
+    selectionBg: "#294553",
+    border: "#697986",
+    success: "#84C49A",
+    warning: "#E5BD77",
+    error: "#E58F90",
+    info: "#96B6D2",
+    diffAddBg: "#173526",
+    diffRemoveBg: "#3B2329",
+    codeBg: "#1B2730",
+    overlayBg: "#18232C",
+    moonHighlight: "#FFF0A6",
+    moonMain: "#E9BD5A",
+    moonShadow: "#9C692A",
+  },
+  light: {
+    id: "light",
+    text: "#252B35",
+    secondary: "#454F5C",
+    muted: "#656F7B",
+    accent: "#226D78",
+    accentAlt: "#6653A0",
+    selected: "#15232A",
+    onStatus: "#FFFFFF",
+    selectionBg: "#C9E5EA",
+    border: "#8799A5",
+    success: "#287044",
+    warning: "#865B14",
+    error: "#AD3340",
+    info: "#305D82",
+    diffAddBg: "#DBEEDB",
+    diffRemoveBg: "#F6DEDF",
+    codeBg: "#E8EEF1",
+    overlayBg: "#EDF1F3",
+    moonHighlight: "#8C5A12",
+    moonMain: "#AB741C",
+    moonShadow: "#6D4B26",
+  },
+};
+
+export function resolveTheme(value: string | undefined): ThemeId {
+  return value === "light" ? "light" : "dark";
+}
+
+export const ThemeContext = createContext<ThemePalette>(palettes.dark);
+export const useTheme = (): ThemePalette => useContext(ThemeContext);
 
 /**
  * Nocturne 像素 Logo（原创双色像素字，5 行高）。
@@ -83,10 +130,3 @@ export const MOON_PIXELS: readonly string[] = [
   ".OYYYYYO.",
   "..OOOO...",
 ];
-
-/** 弯月三色；真彩不可用时由 Ink/chalk 降级到最近色 */
-export const MOON_PALETTE: Readonly<Record<string, string>> = {
-  H: "#ffee96",
-  Y: "#f2c62c",
-  O: "#c88c16",
-};

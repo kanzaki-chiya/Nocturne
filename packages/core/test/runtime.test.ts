@@ -70,6 +70,37 @@ const durableTypes = (events: RuntimeEvent[]) =>
   events.filter((e): e is Extract<RuntimeEvent, { seq: number }> => "seq" in e).map((e) => e.type);
 
 describe("公开 Runtime API", () => {
+  it("偏好方法转交 RuntimeConfig；未注入时读取为空且写入明确拒绝", async () => {
+    const root = makeTmpDir("nct-prefs-");
+    const home = path.join(root, "home");
+    const workspace = path.join(root, "ws");
+    const sessionsDir = path.join(root, "sessions");
+    const previous = process.env.NOCTURNE_HOME;
+    process.env.NOCTURNE_HOME = home;
+    try {
+      const config = await loadConfig(createPlatform(), {
+        nocturneHome: home,
+        env: (key) => (key === "NOCTURNE_HOME" ? home : undefined),
+      });
+      const runtime = await createRuntime({ cwd: workspace, sessionsDir, config });
+      expect(runtime.getPreference("theme")).toBeUndefined();
+      await runtime.setPreference("theme", "custom-string");
+      expect(runtime.getPreference("theme")).toBe("custom-string");
+      expect(JSON.parse(readFileSync(path.join(home, "settings.json"), "utf8"))).toMatchObject({
+        theme: "custom-string",
+      });
+      await runtime.setPreference("theme", undefined);
+      expect(runtime.getPreference("theme")).toBeUndefined();
+      const withoutConfig = await createRuntime({ cwd: workspace, sessionsDir });
+      expect(withoutConfig.getPreference("theme")).toBeUndefined();
+      await expect(withoutConfig.setPreference("theme", "dark")).rejects.toThrow(
+        "未注入 RuntimeConfig，无法保存偏好",
+      );
+    } finally {
+      if (previous === undefined) delete process.env.NOCTURNE_HOME;
+      else process.env.NOCTURNE_HOME = previous;
+    }
+  });
   it("close 等待运行中的 Turn 以 aborted 落盘后才释放会话", async () => {
     const provider = new FakeProvider({
       scripts: [

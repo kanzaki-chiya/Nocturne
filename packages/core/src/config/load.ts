@@ -131,7 +131,7 @@ export async function loadConfig(
   const envLayer = envLayerConfig(env);
   const cliLayer = cliLayerConfig(options.cliArgs);
 
-  // settings.json（ADR-0022 第 3 节）：程序维护的设置层，只放 shell/shellPath；
+  // settings.json（ADR-0022/0029）：程序维护的 shell 与字符串偏好设置层；
   // 损坏降级为忽略 + 警告。store 持内存态，setShell 写盘后 live getter 立即可见
   const settingsPath = paths.join(home, "settings.json");
   const settings = await loadSettingsStore(platform, settingsPath);
@@ -372,6 +372,8 @@ export async function loadConfig(
     setDefaultModel: (model: string) => setSetupDefaultModel(platform, home, model),
     shellSetting: () => settings.store.shellFields(),
     setShellSetting: (kind, path) => settings.store.setShell(kind, path),
+    getPreference: (key) => settings.store.getPreference(key),
+    setPreference: (key, value) => settings.store.setPreference(key, value),
     recentModels: () => [...recent],
     recordRecentModel: async (ref: ModelRef) => {
       await recordRecentModel(platform, home, ref);

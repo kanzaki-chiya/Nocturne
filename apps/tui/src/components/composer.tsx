@@ -10,7 +10,7 @@ import { composerWindow, normalizeNewlines, verticalCursor } from "../cursor.js"
 import { glyphs, useTuiEnv } from "../env.js";
 import { imageTokenAt, imageTokenBefore, splitImageTokens } from "../images.js";
 import { pasteTokenAt, pasteTokenBefore, type PasteStore } from "../paste.js";
-import { theme } from "../theme.js";
+import { useTheme } from "../theme.js";
 
 export function Composer({
   value,
@@ -54,6 +54,7 @@ export function Composer({
   onPasteImage?: ((text: string) => Promise<boolean>) | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const g = glyphs(env);
   const disabled = disabledReason !== undefined;
   const [cursor, setCursor] = useState(cursorProp ?? value.length);
@@ -234,7 +235,13 @@ export function Composer({
           <Text color={disabled ? theme.muted : theme.accent}>{row.prefix}</Text>
           <Text dimColor={disabled} wrap="truncate">
             {tinted(row.before)}
-            {row.focused && !disabled ? <Text inverse>{row.at ?? " "}</Text> : row.at}
+            {row.focused && !disabled ? (
+              <Text color={theme.selected} backgroundColor={theme.selectionBg}>
+                {row.at ?? " "}
+              </Text>
+            ) : (
+              row.at
+            )}
             {tinted(row.after)}
             {disabled && i === view.rows.length - 1 ? `（${disabledReason}）` : null}
           </Text>

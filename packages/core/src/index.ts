@@ -340,6 +340,10 @@ export interface Runtime {
   defaultModel(): ModelRef | undefined;
   /** recent-models.json 当前内容（新→旧，最多 10 条）；无 config 时为空 */
   listRecentModels(): ModelRef[];
+  /** 读取机器维护的字符串偏好；未注入 RuntimeConfig 时返回 undefined。 */
+  getPreference(key: string): string | undefined;
+  /** 原子保存或删除偏好；未注入 RuntimeConfig 时拒绝。 */
+  setPreference(key: string, value: string | undefined): Promise<void>;
 }
 
 function parseModelRef(model: string | ModelRef): ModelRef {
@@ -1432,6 +1436,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     },
     listRecentModels: () => config?.recentModels() ?? [],
+    getPreference: (key) => config?.getPreference(key),
+    setPreference: (key, value) =>
+      config !== undefined
+        ? config.setPreference(key, value)
+        : Promise.reject(new Error("未注入 RuntimeConfig，无法保存偏好")),
   };
 }
 

@@ -21,7 +21,7 @@ import {
 
 import { useTuiEnv } from "../env.js";
 import { padToWidth, truncateLine, truncateLineHead } from "../format.js";
-import { theme } from "../theme.js";
+import { useTheme } from "../theme.js";
 
 /** 上下文的紧凑写法（128000 → 128k） */
 function contextText(n: number | undefined): string {
@@ -66,6 +66,7 @@ export function ModelListPane({
   onOpen: (modelId: string) => void;
   onBack: () => void;
 }): React.JSX.Element {
+  const theme = useTheme();
   const [cursor, setCursor] = useState(0);
   const [query, setQuery] = useState("");
   const list = views ?? [];
@@ -139,7 +140,9 @@ export function ModelListPane({
       <Text wrap="truncate">
         <Text color={theme.muted}>{"过滤: "}</Text>
         {query}
-        <Text inverse> </Text>
+        <Text color={theme.selected} backgroundColor={theme.selectionBg}>
+          {" "}
+        </Text>
       </Text>
       {views === undefined ? (
         <Text color={theme.muted}>正在读取模型设置…</Text>
@@ -155,7 +158,10 @@ export function ModelListPane({
             flagsText(v);
           return (
             <Text key={v.modelId} wrap="truncate">
-              <Text inverse={focused} color={focused ? theme.accent : theme.success}>
+              <Text
+                color={focused ? theme.selected : theme.success}
+                {...(focused ? { backgroundColor: theme.selectionBg } : {})}
+              >
                 {truncateLine(row, width - 2)}
               </Text>
               {/* ADR-0026 §5：不可用模型照常列出并标注 */}
@@ -357,6 +363,7 @@ export function ModelEditPane({
   onBack: () => void;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const [draft, setDraft] = useState<Draft>(() => initDraft(view));
   const [cursor, setCursor] = useState(0);
   const [multi, setMulti] = useState<{ cursor: number; selected: number[] } | undefined>(undefined);
@@ -527,9 +534,13 @@ export function ModelEditPane({
     return (
       <Text key={key} wrap="truncate">
         {isFocus ? (
-          <Text inverse color={theme.accent}>
+          <Text color={theme.selected} backgroundColor={theme.selectionBg}>
             {inner}
-            {editMark ? <Text inverse> </Text> : null}
+            {editMark ? (
+              <Text color={theme.selected} backgroundColor={theme.selectionBg}>
+                {" "}
+              </Text>
+            ) : null}
           </Text>
         ) : enabled ? (
           <Text>{inner}</Text>
@@ -563,9 +574,22 @@ export function ModelEditPane({
       {visibleFields.map((key) => row(key))}
       {readonly !== true ? (
         <Text wrap="truncate">
-          {buttonsFocus ? "›" : " "} <Text inverse={focused === "save"}>[保存]</Text>
+          {buttonsFocus ? "›" : " "}{" "}
+          <Text
+            {...(focused === "save"
+              ? { color: theme.selected, backgroundColor: theme.selectionBg }
+              : {})}
+          >
+            [保存]
+          </Text>
           {"  "}
-          <Text inverse={focused === "cancel"}>[取消]</Text>
+          <Text
+            {...(focused === "cancel"
+              ? { color: theme.selected, backgroundColor: theme.selectionBg }
+              : {})}
+          >
+            [取消]
+          </Text>
         </Text>
       ) : null}
       {multi === undefined ? (
@@ -589,7 +613,11 @@ export function ModelEditPane({
             const mark = env.ascii ? (on ? "[x]" : "[ ]") : on ? "[✓]" : "[ ]";
             return (
               <Text key={label} wrap="truncate">
-                <Text inverse={multi.cursor === i}>
+                <Text
+                  {...(multi.cursor === i
+                    ? { color: theme.selected, backgroundColor: theme.selectionBg }
+                    : {})}
+                >
                   {`${multi.cursor === i ? "›" : " "} ${mark} ${label}`}
                 </Text>
               </Text>

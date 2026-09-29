@@ -2,6 +2,7 @@
 import { marked, type Token, type Tokens } from "marked";
 import stringWidth from "string-width";
 
+import { palettes, type ThemePalette } from "./theme.js";
 import type { LaidLine, LineSegment } from "./viewport.js";
 
 type Run = LineSegment;
@@ -66,21 +67,26 @@ export function takeMarkdownBlocks(
   return { parts, written: at, tail };
 }
 
-function inline(tokens: readonly Token[], style: Partial<Run> = {}): Run[] {
+function inline(tokens: readonly Token[], style: Partial<Run> = {}, theme = palettes.dark): Run[] {
   const out: Run[] = [];
   for (const token of tokens) {
     switch (token.type) {
       case "strong":
-        out.push(...inline((token as Tokens.Strong).tokens, { ...style, bold: true }));
+        out.push(...inline((token as Tokens.Strong).tokens, { ...style, bold: true }, theme));
         break;
       case "em":
-        out.push(...inline((token as Tokens.Em).tokens, { ...style, italic: true }));
+        out.push(...inline((token as Tokens.Em).tokens, { ...style, italic: true }, theme));
         break;
       case "codespan":
-        out.push({ text: (token as Tokens.Codespan).text, ...style, color: "cyan" });
+        out.push({
+          text: (token as Tokens.Codespan).text,
+          ...style,
+          color: theme.secondary,
+          backgroundColor: theme.codeBg,
+        });
         break;
       case "link":
-        out.push(...inline((token as Tokens.Link).tokens, style));
+        out.push(...inline((token as Tokens.Link).tokens, style, theme));
         out.push({ text: ` (${(token as Tokens.Link).href})`, ...style, dim: true });
         break;
       case "image":
@@ -94,7 +100,7 @@ function inline(tokens: readonly Token[], style: Partial<Run> = {}): Run[] {
         break;
       default:
         if ("tokens" in token && Array.isArray(token.tokens)) {
-          out.push(...inline(token.tokens, style));
+          out.push(...inline(token.tokens, style, theme));
         } else if ("text" in token && typeof token.text === "string") {
           out.push({ text: token.text, ...style });
         } else {
@@ -111,7 +117,12 @@ function textOf(tokens: readonly Token[]): string {
     .join("");
 }
 
-export function renderMarkdown(text: string, width: number, key: string): LaidLine[] {
+export function renderMarkdown(
+  text: string,
+  width: number,
+  key: string,
+  theme: ThemePalette = palettes.dark,
+): LaidLine[] {
   const lines: LaidLine[] = [];
   const max = limitFor(width);
   const add = (runs: Run[], prefix = "", style: Partial<Run> = {}): void => {
@@ -150,7 +161,8 @@ export function renderMarkdown(text: string, width: number, key: string): LaidLi
           last.bold === run.bold &&
           last.italic === run.italic &&
           last.dim === run.dim &&
-          last.color === run.color
+          last.color === run.color &&
+          last.backgroundColor === run.backgroundColor
         )
           last.text += ch;
         else segments.push({ ...run, text: ch });
@@ -166,15 +178,22 @@ export function renderMarkdown(text: string, width: number, key: string): LaidLi
         case "def":
           break;
         case "heading":
-          add(inline((token as Tokens.Heading).tokens, { bold: true, color: "cyan" }), prefix);
+          add(
+            inline((token as Tokens.Heading).tokens, { bold: true, color: theme.secondary }, theme),
+            prefix,
+          );
           break;
         case "paragraph":
         case "text":
-          add(inline((token as Tokens.Paragraph).tokens), prefix);
+          add(inline((token as Tokens.Paragraph).tokens, {}, theme), prefix);
           break;
         case "code":
           for (const line of (token as Tokens.Code).text.split("\n"))
-            add([{ text: line, color: "cyan" }], `${prefix}│ `);
+            add(
+              [{ text: line, color: theme.secondary, backgroundColor: theme.codeBg }],
+              `${prefix}│ `,
+              { backgroundColor: theme.codeBg, color: theme.muted },
+            );
           break;
         case "hr":
           add([{ text: "─".repeat(max), dim: true }]);

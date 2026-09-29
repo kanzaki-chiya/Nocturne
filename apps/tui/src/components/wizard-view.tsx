@@ -15,7 +15,7 @@ import { useState } from "react";
 
 import { useTuiEnv } from "../env.js";
 import { boxSafe, truncateLine } from "../format.js";
-import { theme } from "../theme.js";
+import { useTheme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
 import { InputCursor } from "./input-cursor.js";
 
@@ -48,6 +48,7 @@ export function WizardView({
   onCancel: () => void;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const [value, setValue] = useState("");
   const [cursor, setCursor] = useState(0);
   const [checked, setChecked] = useState<ReadonlySet<number>>(new Set());
@@ -202,7 +203,9 @@ export function WizardView({
           ) : (
             <Text wrap="truncate">
               {truncateLine(`> ${echo}`, width - 4)}
-              <Text inverse> </Text>
+              <Text color={theme.selected} backgroundColor={theme.selectionBg}>
+                {" "}
+              </Text>
             </Text>
           )}
         </Box>

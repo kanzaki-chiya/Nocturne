@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import { useTuiEnv } from "../env.js";
 import { truncateLine } from "../format.js";
+import { useTheme } from "../theme.js";
 
 const MAX_VISIBLE = 12;
 
@@ -23,6 +24,7 @@ export function Panel({
   width: number;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const [offset, setOffset] = useState(0);
   const maxOffset = Math.max(0, lines.length - MAX_VISIBLE);
 
@@ -44,7 +46,8 @@ export function Panel({
       flexDirection="column"
       width={width - 4}
       borderStyle={env.ascii ? "single" : "round"}
-      borderColor="cyan"
+      borderColor={theme.border}
+      backgroundColor={theme.overlayBg}
     >
       <Text bold>{title}</Text>
       {visible.map((l, i) => (

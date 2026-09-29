@@ -10,7 +10,7 @@ import { splitImageTokens } from "../images.js";
 import { layoutEntry } from "../lines.js";
 import type { ReasoningMap } from "../reasoning.js";
 import { renderMarkdown } from "../markdown.js";
-import { theme } from "../theme.js";
+import { useTheme } from "../theme.js";
 import type { LaidLine } from "../viewport.js";
 import { ToolRow } from "./tool-row.js";
 
@@ -24,13 +24,14 @@ export type TranscriptItem =
 
 function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const text = entry.content
     .filter((c) => c.type === "text")
     .map((c) => c.text)
     .join("");
   return (
     <Box marginTop={1} flexDirection="column">
-      <Text color="cyan" bold>
+      <Text color={theme.accent} bold>
         {glyphs(env).prompt}{" "}
         {splitImageTokens(text).map((part, i) =>
           part.image ? (
@@ -63,6 +64,7 @@ function AssistantRow({
   now?: number | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   return (
     <Box flexDirection="column" marginTop={1}>
       {entry.reasoning !== "" ? (
@@ -73,6 +75,9 @@ function AssistantRow({
             env.ascii,
             reasoning,
             now,
+            false,
+            false,
+            theme,
           ).map((line) => (
             <Text key={line.key} dimColor wrap="truncate">
               {line.text}
@@ -81,7 +86,7 @@ function AssistantRow({
         </Box>
       ) : null}
       {entry.text !== ""
-        ? renderMarkdown(entry.text, width, entry.key).map((line) => (
+        ? renderMarkdown(entry.text, width, entry.key, theme).map((line) => (
             <Text key={line.key}>
               {line.segments?.map((seg, i) => (
                 <Text
@@ -90,6 +95,9 @@ function AssistantRow({
                   italic={seg.italic === true}
                   dimColor={seg.dim === true}
                   {...(seg.color !== undefined ? { color: seg.color } : {})}
+                  {...(seg.backgroundColor !== undefined
+                    ? { backgroundColor: seg.backgroundColor }
+                    : {})}
                 >
                   {seg.text}
                 </Text>
@@ -108,9 +116,14 @@ function NoticeRow({
   entry: Extract<ViewEntry, { kind: "notice" }>;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const g = glyphs(env);
   const color =
-    entry.subtype === "permission" ? "yellow" : entry.subtype === "turn_end" ? "red" : "gray";
+    entry.subtype === "permission"
+      ? theme.warning
+      : entry.subtype === "turn_end"
+        ? theme.error
+        : theme.muted;
   return <Text color={color}>{`${g.notice} ${entry.message}`}</Text>;
 }
 

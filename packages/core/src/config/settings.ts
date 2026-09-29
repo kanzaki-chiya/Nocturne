@@ -2,8 +2,8 @@
  * settings.json —— 程序维护的设置层（ADR-0022 第 3 节）。
  *
  * <NOCTURNE_HOME>/settings.json 由程序原子写入、只写自己的文件；与手写
- * config.json 分层合并时同名 shell 字段手写优先。本 ADR 只放 shell 与
- * 可选 shellPath；读入保留未知字段原样写回，后续版本的偏好就地扩展。
+ * config.json 分层合并时同名 shell 字段手写优先。通用字符串偏好与
+ * shell/shellPath 共用此文件；读入保留未知字段原样写回。
  */
 import { inferShellKindFromPath, isShellKind, type ShellSpec } from "../platform/index.js";
 import type { Platform } from "../platform/index.js";
@@ -19,7 +19,11 @@ export interface SettingsStore {
   shellSpec(): ShellSpec | undefined;
   /** /shell 写入端：原子重写文件并更新内存态（live getter 立即可见） */
   setShell(kind: string, path?: string): Promise<void>;
+  getPreference(key: string): string | undefined;
+  setPreference(key: string, value: string | undefined): Promise<void>;
 }
+
+const reservedFields = new Set(["shell", "shellPath"]);
 
 function readShellFields(data: SettingsData):
   | {
@@ -103,6 +107,18 @@ export async function loadSettingsStore(
       `settings.json 的 shellPath="${fields.shellPath}" 无法识别为支持的 shell 可执行文件，已忽略`;
   }
 
+  let pending = Promise.resolve();
+  function write(update: (next: SettingsData) => void): Promise<void> {
+    const operation = pending.then(async () => {
+      const next = { ...data };
+      update(next);
+      await writeJsonAtomic(fs, platform.paths, settingsPath, next);
+      data = next;
+    });
+    pending = operation.catch(() => undefined);
+    return operation;
+  }
+
   return {
     warning,
     store: {
@@ -112,19 +128,36 @@ export async function loadSettingsStore(
         return f === undefined ? undefined : toSpec(f);
       },
       async setShell(kind, path) {
-        // 先写盘后提交内存态：原子写失败时不留下与文件不一致的
-        // 内存视图（live getter 只在写成功后才看到新值）
-        const next: SettingsData = { ...data };
-        if (kind === "auto") {
-          delete next.shell;
-          delete next.shellPath;
-        } else {
-          next.shell = kind;
-          if (path !== undefined) next.shellPath = path;
-          else delete next.shellPath;
+        await write((next) => {
+          if (kind === "auto") {
+            delete next.shell;
+            delete next.shellPath;
+          } else {
+            next.shell = kind;
+            if (path !== undefined) next.shellPath = path;
+            else delete next.shellPath;
+          }
+        });
+      },
+      getPreference: (key) => {
+        const value = Object.hasOwn(data, key) ? data[key] : undefined;
+        return typeof value === "string" ? value : undefined;
+      },
+      async setPreference(key, value) {
+        if (
+          typeof key !== "string" ||
+          !/^[a-z][a-z\d_-]*$/iu.test(key) ||
+          reservedFields.has(key)
+        ) {
+          throw new TypeError(`不能写入保留或无效的偏好字段：${key}`);
         }
-        await writeJsonAtomic(fs, platform.paths, settingsPath, next);
-        data = next;
+        if (value !== undefined && typeof value !== "string") {
+          throw new TypeError(`偏好 ${key} 的值必须是字符串或 undefined`);
+        }
+        await write((next) => {
+          if (value === undefined) Reflect.deleteProperty(next, key);
+          else next[key] = value;
+        });
       },
     },
   };

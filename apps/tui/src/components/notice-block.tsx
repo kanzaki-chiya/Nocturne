@@ -5,15 +5,9 @@
 import { Box, Text } from "ink";
 
 import { truncateLine } from "../format.js";
-import { theme } from "../theme.js";
+import { useTheme } from "../theme.js";
 
 export type NoticeLevel = "info" | "warning" | "error";
-
-const LEVEL_STYLE: Record<NoticeLevel, { tag: string; fg: string; bg: string }> = {
-  info: { tag: " i ", fg: theme.info, bg: theme.info },
-  warning: { tag: " ! ", fg: theme.warning, bg: theme.warning },
-  error: { tag: " ! ", fg: theme.error, bg: theme.error },
-};
 
 export function NoticeBlock({
   notes,
@@ -22,17 +16,23 @@ export function NoticeBlock({
   notes: readonly { level: NoticeLevel; text: string }[];
   width: number;
 }): React.JSX.Element | null {
+  const theme = useTheme();
+  const levelStyle: Record<NoticeLevel, { tag: string; fg: string; bg: string }> = {
+    info: { tag: " i ", fg: theme.onStatus, bg: theme.info },
+    warning: { tag: " ! ", fg: theme.onStatus, bg: theme.warning },
+    error: { tag: " ! ", fg: theme.onStatus, bg: theme.error },
+  };
   if (notes.length === 0) return null;
   return (
     <Box flexDirection="column" marginBottom={1}>
       {notes.map((n, i) => {
-        const style = LEVEL_STYLE[n.level];
+        const style = levelStyle[n.level];
         return (
           <Text key={i} wrap="truncate">
-            <Text backgroundColor={style.bg} color="black">
+            <Text backgroundColor={style.bg} color={style.fg}>
               {style.tag}
             </Text>
-            <Text color={style.fg}> {truncateLine(n.text, Math.max(1, width - 4))}</Text>
+            <Text color={theme.text}> {truncateLine(n.text, Math.max(1, width - 4))}</Text>
           </Text>
         );
       })}

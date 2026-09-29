@@ -8,6 +8,7 @@ import { useState } from "react";
 
 import { glyphs, useTuiEnv } from "../env.js";
 import { boxSafe, truncateLine } from "../format.js";
+import { useTheme } from "../theme.js";
 
 export interface PickItem<T> {
   label: string;
@@ -40,6 +41,7 @@ export function PickList<T>({
   initialValue?: T | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const g = glyphs(env);
   const enabled = (i: number): boolean => items[i]?.disabled !== true;
   const move = (c: number, dir: 1 | -1): number => {
@@ -91,7 +93,7 @@ export function PickList<T>({
       flexDirection="column"
       width={width - 4}
       borderStyle={env.ascii ? "single" : "round"}
-      borderColor="cyan"
+      borderColor={theme.border}
     >
       <Text bold>{boxSafe(title)}</Text>
       {note !== undefined ? <Text dimColor>{boxSafe(note)}</Text> : null}
@@ -102,8 +104,13 @@ export function PickList<T>({
         const dim = item.disabled === true;
         return (
           <Text key={idx} wrap="truncate">
-            <Text {...(focused ? { color: "cyan" } : {})}>{focused ? `${g.prompt} ` : "  "}</Text>
-            <Text inverse={focused} dimColor={dim}>
+            <Text {...(focused ? { color: theme.accent } : {})}>
+              {focused ? `${g.prompt} ` : "  "}
+            </Text>
+            <Text
+              {...(focused ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}
+              dimColor={dim}
+            >
               {truncateLine(
                 boxSafe(item.label + (item.hint !== undefined ? `  ${item.hint}` : "")),
                 width - 6,

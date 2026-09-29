@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 
 import { glyphs, useTuiEnv } from "../env.js";
 import { boxSafe, truncateLine } from "../format.js";
+import { useTheme } from "../theme.js";
 
 import type { PendingPermission, PermissionOption } from "@nocturne/core/protocol";
 import type { PermissionReply } from "@nocturne/core";
@@ -75,6 +76,7 @@ export function PermissionDialog({
   width: number;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const g = glyphs(env);
   const opts = optionsOf(pending);
   const [focus, setFocus] = useState(0);
@@ -132,8 +134,13 @@ export function PermissionDialog({
 
   const narrow = width < 40;
   return (
-    <Box flexDirection="column" borderStyle={env.ascii ? "single" : "round"} borderColor="yellow">
-      <Text bold color="yellow">
+    <Box
+      flexDirection="column"
+      borderStyle={env.ascii ? "single" : "round"}
+      borderColor={theme.border}
+      backgroundColor={theme.overlayBg}
+    >
+      <Text bold color={theme.warning}>
         {g.wait} 需要确认
       </Text>
       <Text wrap="truncate">
@@ -146,16 +153,23 @@ export function PermissionDialog({
       ) : null}
       {feedback !== undefined ? (
         <Text>
-          <Text color="yellow">d{g.prompt} </Text>
+          <Text color={theme.warning}>d{g.prompt} </Text>
           {boxSafe(feedback)}
-          <Text inverse> </Text>
+          <Text color={theme.selected} backgroundColor={theme.selectionBg}>
+            {" "}
+          </Text>
         </Text>
       ) : narrow ? (
         <Text wrap="truncate">{opts.map((o) => `[${o.key}]${o.label}`).join(" ")}</Text>
       ) : (
         <Box>
           {opts.map((o, i) => (
-            <Text key={o.key} inverse={i === focus} {...(i === focus ? { color: "cyan" } : {})}>
+            <Text
+              key={o.key}
+              {...(i === focus
+                ? { color: theme.selected, backgroundColor: theme.selectionBg }
+                : {})}
+            >
               {` [${o.key}] ${o.label} `}
             </Text>
           ))}

@@ -17,6 +17,7 @@ import { createCursorStream } from "./cursor.js";
 import { detectTuiEnv } from "./env.js";
 import { sessionSavedLine } from "./exit-note.js";
 import { stripControls } from "./format.js";
+import { palettes, resolveTheme, ThemeContext } from "./theme.js";
 import { MOUSE_DISABLE, MOUSE_ENABLE, wrapMouseStdin, type MouseSource } from "./mouse.js";
 
 /** 复位全部文字属性：退出路径统一收尾，保证不把颜色留给后续的 shell */
@@ -117,34 +118,39 @@ export async function runTui(
   // Windows Terminal: suspendTerminal 的 pauseInput 不应撤销控制台读请求。
   const unref = stdin.unref.bind(stdin);
   stdin.unref = () => stdin;
+  const palette = palettes[resolveTheme(runtime.getPreference("theme"))];
   const app = render(
     createElement(
-      CursorClaimsContext.Provider,
-      { value: cursorOut.claims },
-      createElement(App, {
-        session: "session" in entry ? entry.session : undefined,
-        setup: "setup" in entry ? entry.setup : options.setup,
-        runtime,
-        env: detectTuiEnv(),
-        switchSession: options.switchSession,
-        newSession: options.newSession,
-        provider: options.provider,
-        inline,
-        mouse: mouseSource,
-        writeOob: cursorOut.writeOob,
-        onOutputLayout: cursorOut.setLayout,
-        copySpawn: options.copySpawn,
-        clipboard: options.clipboard,
-        clipboardPlatform: options.clipboardPlatform,
-        transcriptOut,
-        onSessionId: (id: string) => {
-          sessionId = id;
-        },
-        onExitResult: (code: number, message?: string) => {
-          exitCode = code;
-          exitMessage = message;
-        },
-      }),
+      ThemeContext.Provider,
+      { value: palette },
+      createElement(
+        CursorClaimsContext.Provider,
+        { value: cursorOut.claims },
+        createElement(App, {
+          session: "session" in entry ? entry.session : undefined,
+          setup: "setup" in entry ? entry.setup : options.setup,
+          runtime,
+          env: detectTuiEnv(),
+          switchSession: options.switchSession,
+          newSession: options.newSession,
+          provider: options.provider,
+          inline,
+          mouse: mouseSource,
+          writeOob: cursorOut.writeOob,
+          onOutputLayout: cursorOut.setLayout,
+          copySpawn: options.copySpawn,
+          clipboard: options.clipboard,
+          clipboardPlatform: options.clipboardPlatform,
+          transcriptOut,
+          onSessionId: (id: string) => {
+            sessionId = id;
+          },
+          onExitResult: (code: number, message?: string) => {
+            exitCode = code;
+            exitMessage = message;
+          },
+        }),
+      ),
     ),
     {
       stdout: cursorOut.stream,

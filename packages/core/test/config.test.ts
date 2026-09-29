@@ -294,6 +294,64 @@ describe("环境变量层", () => {
 describe("settings.json 与 shell 配置（ADR-0022 第 2、3 节）", () => {
   const settingsPath = () => path.join(home, "settings.json");
 
+  it("字符串偏好读写、删除与重载保留未知字段及 shell；手写配置不变", async () => {
+    const configPath = path.join(home, "config.json");
+    await writeJson(configPath, { shell: "bash" });
+    const configBefore = await fs.readFile(configPath, "utf8");
+    await writeJson(settingsPath(), {
+      shell: "pwsh",
+      shellPath: "C:\\pwsh.exe",
+      future: { enabled: true },
+    });
+    const rc = await load();
+    expect(rc.getPreference("theme")).toBeUndefined();
+    await rc.setPreference("theme", "light");
+    expect(rc.getPreference("theme")).toBe("light");
+    expect((await load()).getPreference("theme")).toBe("light");
+    expect(JSON.parse(await fs.readFile(settingsPath(), "utf8"))).toMatchObject({
+      shell: "pwsh",
+      shellPath: "C:\\pwsh.exe",
+      future: { enabled: true },
+      theme: "light",
+    });
+    await rc.setPreference("theme", undefined);
+    expect(rc.getPreference("theme")).toBeUndefined();
+    expect(JSON.parse(await fs.readFile(settingsPath(), "utf8"))).not.toHaveProperty("theme");
+    expect(await fs.readFile(configPath, "utf8")).toBe(configBefore);
+    await fs.unlink(settingsPath());
+    await fs.unlink(configPath);
+  });
+
+  it("通用偏好拒绝保留字段和非字符串值", async () => {
+    const rc = await load();
+    for (const key of ["shell", "shellPath", "bad.key", "__proto__"]) {
+      await expect(rc.setPreference(key, "x")).rejects.toThrow();
+    }
+    await expect(rc.setPreference("theme", 42 as unknown as string)).rejects.toThrow();
+    expect(await platform.fs.exists(settingsPath())).toBe(false);
+  });
+
+  it("偏好写盘失败时旧值仍可读，下一次成功写入也可继续", async () => {
+    await writeJson(settingsPath(), { theme: "dark" });
+    let fail = true;
+    const flakyPlatform: Platform = {
+      ...platform,
+      fs: {
+        ...platform.fs,
+        writeFile: (...args) =>
+          fail ? Promise.reject(new Error("disk full")) : platform.fs.writeFile(...args),
+      },
+    };
+    const { store } = await loadSettingsStore(flakyPlatform, settingsPath());
+    await expect(store.setPreference("theme", "light")).rejects.toThrow("disk full");
+    expect(store.getPreference("theme")).toBe("dark");
+    expect(JSON.parse(await fs.readFile(settingsPath(), "utf8"))).toMatchObject({ theme: "dark" });
+    fail = false;
+    await store.setPreference("theme", "light");
+    expect(store.getPreference("theme")).toBe("light");
+    await fs.unlink(settingsPath());
+  });
+
   it("config.json 的 shell/shellPath 进入合并结果；非法 shell 值报 config_invalid", async () => {
     await writeJson(path.join(home, "config.json"), {
       shell: "bash",

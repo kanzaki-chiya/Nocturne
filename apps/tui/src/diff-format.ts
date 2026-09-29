@@ -1,6 +1,7 @@
 import stringWidth from "string-width";
 
 import { boxSafe, stripControls } from "./format.js";
+import { palettes, type ThemePalette } from "./theme.js";
 import type { LaidLine, LineSegment } from "./viewport.js";
 
 export interface DiffRow {
@@ -63,12 +64,17 @@ export function layoutDiffRow(
   row: DiffRow,
   width: number,
   color: boolean,
+  theme: ThemePalette = palettes.dark,
 ): LaidLine[] {
   const gutter =
     `${row.oldNo ?? ""}`.padStart(4) + ` ${row.newNo ?? ""}`.padStart(4) + ` ${row.mark} `;
   const indent = " ".repeat(gutter.length);
   const backgroundColor =
-    color && row.mark === "+" ? "#173524" : color && row.mark === "-" ? "#3b2024" : undefined;
+    color && row.mark === "+"
+      ? theme.diffAddBg
+      : color && row.mark === "-"
+        ? theme.diffRemoveBg
+        : undefined;
   return pieces(boxSafe(stripControls(row.body)), Math.max(1, width - gutter.length - 4)).map(
     (piece, i) => {
       const lead = i === 0 ? gutter : indent;

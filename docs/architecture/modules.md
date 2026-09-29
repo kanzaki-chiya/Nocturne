@@ -167,6 +167,8 @@ Phase 6 增补：`subagent` 选项（`enabled`/`maxDepth`/`maxConcurrent`/`maxSt
 
 `config` 是 `loadConfig` 返回的 `RuntimeConfig`（可选）：缺省时等价于 Phase 2 行为——无配置文件、固定 `default` 预设、无项目层与 Grant 持久化。CLI 在启动时调用 `loadConfig(platform, { cliArgs })` 并把结果连同 `providerConfigs`、`turn` 等派生字段一起注入（见 [apps/cli.md](../apps/cli.md) 第 7 节）。
 
+`RuntimeConfig` 与 `Runtime` 的通用字符串偏好读写接口及未注入配置时的行为见 [config.md](config.md) 第 2 节；Core 不解释 TUI 主题取值。
+
 恢复相关的会话 API：`resumeSession(id, { force?: boolean })`（`force` 对应强制解锁，见 [sessions.md](sessions.md) 第 4 节）；`listSessions({ cwd? })` 的摘要含 `locked` 字段；`session.recovery` 暴露本次打开执行的修复（截断尾部、补齐调用与 Turn）。
 
 `describeContext` 与 `listModels` 是**只读查询**：不改变会话状态、不产生事件，只为客户端展示服务。

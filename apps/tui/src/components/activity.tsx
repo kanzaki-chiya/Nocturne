@@ -7,6 +7,7 @@ import { Box, Text } from "ink";
 
 import { glyphs, useTuiEnv } from "../env.js";
 import { truncateLine } from "../format.js";
+import { useTheme } from "../theme.js";
 import { EntryRow } from "./transcript.js";
 import { LiveToolRow } from "./tool-row.js";
 
@@ -28,6 +29,7 @@ export function Activity({
   width: number;
 }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const g = glyphs(env);
   const notices = view.notices.slice(-NOTICE_TAIL);
   const empty =
@@ -59,7 +61,7 @@ export function Activity({
         </Box>
       ))}
       {view.retry !== undefined ? (
-        <Text color="yellow" wrap="truncate">
+        <Text color={theme.warning} wrap="truncate">
           {truncateLine(
             `重试 ${view.retry.attempt}/${view.retry.maxAttempts}：${view.retry.error.message}（${view.retry.delayMs}ms 后重试）`,
             width,
@@ -71,7 +73,9 @@ export function Activity({
       {notices.map((n, i) => (
         <Text
           key={i}
-          color={n.level === "error" ? "red" : n.level === "warning" ? "yellow" : "gray"}
+          color={
+            n.level === "error" ? theme.error : n.level === "warning" ? theme.warning : theme.muted
+          }
           wrap="truncate"
         >
           {truncateLine(`! ${n.message}`, width, g.ellipsis)}

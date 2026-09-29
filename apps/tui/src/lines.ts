@@ -15,7 +15,7 @@ import { splitImageTokens } from "./images.js";
 import { boxSafe, stripControls, summarizeToolInput, tailLines, truncateLine } from "./format.js";
 import { renderMarkdown } from "./markdown.js";
 import { reasoningLabel, type ReasoningMap, type ReasoningPart } from "./reasoning.js";
-import { theme } from "./theme.js";
+import { palettes, type ThemePalette } from "./theme.js";
 import { todoHeadline, todoItemRows, todoSnapshotWindow } from "./todo-format.js";
 import type { TranscriptItem } from "./components/transcript.js";
 import type { LaidLine, LineBlock } from "./viewport.js";
@@ -105,6 +105,7 @@ function diffLines(
   width: number,
   ascii: boolean,
   expanded: boolean,
+  theme: ThemePalette,
 ): LaidLine[] {
   const all = parseDiff(diff);
   const folded = !expanded && all.length > DIFF_HEAD + DIFF_TAIL;
@@ -112,7 +113,13 @@ function diffLines(
     folded || (expanded && all.length > DIFF_HEAD + DIFF_TAIL) ? all.slice(0, DIFF_HEAD) : all;
   const tail = folded ? all.slice(all.length - DIFF_TAIL) : expanded ? all.slice(DIFF_HEAD) : [];
   const line = (row: (typeof all)[number], i: number): LaidLine[] =>
-    layoutDiffRow(`${key}:diff:${i}`, row, width, !ascii && process.env.NO_COLOR === undefined);
+    layoutDiffRow(
+      `${key}:diff:${i}`,
+      row,
+      width,
+      !ascii && process.env.NO_COLOR === undefined,
+      theme,
+    );
   const out = head.flatMap(line);
   if (folded || (expanded && all.length > DIFF_HEAD + DIFF_TAIL)) {
     out.push({
@@ -135,6 +142,7 @@ export function layoutEntry(
   now = Date.now(),
   expanded = false,
   diffExpanded = false,
+  theme: ThemePalette = palettes.dark,
 ): LaidLine[] {
   const dot = ascii ? "*" : "•";
   const prompt = ascii ? ">" : "›";
@@ -145,7 +153,7 @@ export function layoutEntry(
         .map((c) => c.text)
         .join("");
       return [
-        ...rows(entry.key, `${prompt} ${text}`, width, { color: "cyan", bold: true }).map(
+        ...rows(entry.key, `${prompt} ${text}`, width, { color: theme.accent, bold: true }).map(
           (line) => {
             // [Image #n] 占位换色，与正文区分（其余分段继承本行的 cyan/bold）
             const parts = splitImageTokens(line.text);
@@ -179,7 +187,8 @@ export function layoutEntry(
           if (expanded) lines.push(...reasoningBody(`${entry.key}:r:${i}`, part.text, width));
         });
       }
-      if (entry.text !== "") lines.push(...renderMarkdown(entry.text, width, `${entry.key}:t`));
+      if (entry.text !== "")
+        lines.push(...renderMarkdown(entry.text, width, `${entry.key}:t`, theme));
       if (entry.finishReason === "aborted") {
         lines.push({ key: `${entry.key}:x`, text: "（中断）", dim: true });
       }
@@ -208,7 +217,7 @@ export function layoutEntry(
         // 非 ASCII 时 📋 图标已标明这一行，不再重复成功符号
         const segments = [
           ...(ascii ? [{ text: `${mark} `, color: theme.success }] : []),
-          ...todoHeadline(todoItems, ascii),
+          ...todoHeadline(todoItems, ascii, theme),
         ];
         const lines: LaidLine[] = [
           {
@@ -219,7 +228,7 @@ export function layoutEntry(
         ];
         const snapshot = todoSnapshotWindow(todoItems);
         snapshot.shown.forEach((item, i) => {
-          todoItemRows(item, ascii, budget(width)).forEach((segments, j) => {
+          todoItemRows(item, ascii, budget(width), "  ", theme).forEach((segments, j) => {
             lines.push({
               key: `${entry.key}:todo:${i}:${j}`,
               text: segments.map((seg) => seg.text).join(""),
@@ -265,7 +274,7 @@ export function layoutEntry(
             dim: true,
           });
         }
-        lines.push(...diffLines(entry.key, diff, width, ascii, diffExpanded));
+        lines.push(...diffLines(entry.key, diff, width, ascii, diffExpanded, theme));
         return [...lines, ...attachmentRows];
       }
       const content = entry.result?.modelContent;
@@ -296,6 +305,7 @@ export function layoutLive(
   parts: ReasoningMap = new Map(),
   now = Date.now(),
   expanded = false,
+  theme: ThemePalette = palettes.dark,
 ): LaidLine[] {
   const lines: LaidLine[] = [];
   const cursor = ascii ? "_" : "|";
@@ -303,7 +313,7 @@ export function layoutLive(
     lines.push({
       key: `live:${tool.callId}`,
       text: paint(`${ascii ? "*" : "•"} ${tool.name}`, width),
-      color: "cyan",
+      color: theme.accent,
     });
   }
   for (const a of view.live.assistants) {
@@ -314,7 +324,7 @@ export function layoutLive(
       (a.reasoning !== "" ? [{ text: a.reasoning, active: a.text === "" }] : []);
     const text =
       a.text !== "" || sections.length === 0
-        ? renderMarkdown(a.text, width, `live-a:${a.messageId}`)
+        ? renderMarkdown(a.text, width, `live-a:${a.messageId}`, theme)
         : [];
     const thoughtActive = sections.at(-1)?.active === true;
     sections.forEach((part, section) => {
@@ -355,7 +365,7 @@ export function layoutLive(
         `重试 ${view.retry.attempt}/${view.retry.maxAttempts}：${view.retry.error.message}`,
         width,
       ),
-      color: "yellow",
+      color: theme.warning,
     });
   }
   if (view.status === "compacting") {
@@ -387,6 +397,7 @@ interface TranscriptSource {
   now?: number;
   expanded?: boolean;
   diffExpanded?: ReadonlySet<string>;
+  theme?: ThemePalette;
 }
 
 function block(key: string, revision: string, lines: (width: number) => LaidLine[]): LineBlock {
@@ -400,11 +411,14 @@ function block(key: string, revision: string, lines: (width: number) => LaidLine
  * 准备中的工具、重试/压缩提示）。快捷键插入的 config 通知由 hide 滤掉。
  */
 export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
+  const theme = src.theme ?? palettes.dark;
   const blocks: LineBlock[] = [block("welcome", String(src.welcome.length), () => src.welcome)];
   if (src.notices.length > 0) {
     blocks.push(
       block("notices", src.notices.join("\n"), (width) =>
-        src.notices.flatMap((text, i) => rows(`n${i}`, `! ${text}`, width, { color: "yellow" })),
+        src.notices.flatMap((text, i) =>
+          rows(`n${i}`, `! ${text}`, width, { color: theme.warning }),
+        ),
       ),
     );
   }
@@ -422,6 +436,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
             src.now,
             src.expanded,
             src.diffExpanded?.has(item.key),
+            theme,
           ),
       ),
     );
@@ -463,6 +478,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
           src.now,
           src.expanded,
           src.diffExpanded?.has(entry.key),
+          theme,
         ),
     );
   }
@@ -490,13 +506,13 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
   ].join("|");
   blocks.push(
     block("live", liveRev, (width) =>
-      layoutLive(src.live, width, src.ascii, src.reasoning, src.now, src.expanded),
+      layoutLive(src.live, width, src.ascii, src.reasoning, src.now, src.expanded, theme),
     ),
   );
   blocks.push(
     ...src.clientLines.filter((line) => line.after >= src.entries.length).map(clientBlock),
   );
-  return blocks;
+  return blocks.map((entry) => ({ ...entry, revision: `${theme.id}:${entry.revision}` }));
 }
 
 export const NEW_CONTENT_HINT = "有新内容，Ctrl+End 回到最新";

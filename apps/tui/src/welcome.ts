@@ -4,7 +4,7 @@
  * 不做会话 id、最近会话和 MCP 分栏；MCP 失败由调用方另给通知。
  */
 import { boxSafe, truncateLine } from "./format.js";
-import { MOON_PALETTE, MOON_PIXELS, theme } from "./theme.js";
+import { MOON_PIXELS, palettes, type ThemePalette } from "./theme.js";
 import type { LaidLine, LineSegment } from "./viewport.js";
 
 export interface WelcomeInfo {
@@ -14,6 +14,7 @@ export interface WelcomeInfo {
   cwd: string;
   ascii: boolean;
   width: number;
+  theme?: ThemePalette;
 }
 
 const GAP = 2;
@@ -26,14 +27,19 @@ function clip(text: string, width: number): string {
  * 像素网格 → 终端行：上下两像素合一格。上下同色用 █，
  * 只有一半用 ▀/▄，两色用 ▀（前景=上、背景=下）。ASCII 模式有像素即 #。
  */
-export function moonRows(ascii: boolean): LineSegment[][] {
+export function moonRows(ascii: boolean, theme: ThemePalette = palettes.dark): LineSegment[][] {
+  const moonColors: Record<string, string> = {
+    H: theme.moonHighlight,
+    Y: theme.moonMain,
+    O: theme.moonShadow,
+  };
   const width = Math.max(...MOON_PIXELS.map((r) => r.length));
   const out: LineSegment[][] = [];
   for (let y = 0; y < MOON_PIXELS.length; y += 2) {
     const row: LineSegment[] = [];
     for (let x = 0; x < width; x++) {
-      const top = MOON_PALETTE[MOON_PIXELS[y]?.[x] ?? "."];
-      const bot = MOON_PALETTE[MOON_PIXELS[y + 1]?.[x] ?? "."];
+      const top = moonColors[MOON_PIXELS[y]?.[x] ?? "."];
+      const bot = moonColors[MOON_PIXELS[y + 1]?.[x] ?? "."];
       if (top === undefined && bot === undefined) row.push({ text: " " });
       else if (ascii) row.push({ text: "#", color: top ?? bot });
       else if (top !== undefined && bot === undefined) row.push({ text: "▀", color: top });
@@ -47,6 +53,7 @@ export function moonRows(ascii: boolean): LineSegment[][] {
 }
 
 export function welcomeLines(info: WelcomeInfo): LaidLine[] {
+  const theme = info.theme ?? palettes.dark;
   const sep = info.ascii ? " - " : " • ";
   const modelLine =
     info.effort !== undefined && info.effort !== ""
@@ -58,7 +65,7 @@ export function welcomeLines(info: WelcomeInfo): LaidLine[] {
     info.cwd,
     "/ 帮助  Shift+Tab 档位  Alt+M 权限",
   ];
-  const moon = moonRows(info.ascii);
+  const moon = moonRows(info.ascii, theme);
   const markW = moon[0]?.length ?? 0;
   const sideW = info.width - 4 - markW - GAP;
   if (info.width < 40 || sideW < 16) {

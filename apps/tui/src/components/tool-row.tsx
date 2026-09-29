@@ -9,7 +9,7 @@ import { attachmentLine } from "../attachment-line.js";
 import { diffSummary, parseDiff } from "../diff-format.js";
 import { glyphs, useTuiEnv } from "../env.js";
 import { formatDuration, summarizeToolInput, tailLines, truncateLine } from "../format.js";
-import { theme } from "../theme.js";
+import { useTheme, type ThemePalette } from "../theme.js";
 import { todoHeadline } from "../todo-format.js";
 import { DiffView } from "./diff.js";
 import { SegmentText, TodoRows } from "./todo-panel.js";
@@ -36,23 +36,28 @@ function useSpinner(active: boolean): string {
   return frames[env.animated ? i % frames.length : 0] ?? "●";
 }
 
-function badge(status: ToolEntry["status"], spinner: string, env: ReturnType<typeof useTuiEnv>) {
+function badge(
+  status: ToolEntry["status"],
+  spinner: string,
+  env: ReturnType<typeof useTuiEnv>,
+  theme: ThemePalette,
+) {
   const g = glyphs(env);
   switch (status) {
     case "awaiting_permission":
-      return { glyph: g.wait, color: "yellow", word: "等待确认" };
+      return { glyph: g.wait, color: theme.warning, word: "等待确认" };
     case "running":
-      return { glyph: spinner, color: "cyan", word: "" };
+      return { glyph: spinner, color: theme.accent, word: "" };
     case "ok":
-      return { glyph: g.ok, color: "green", word: "" };
+      return { glyph: g.ok, color: theme.success, word: "" };
     case "error":
-      return { glyph: g.err, color: "red", word: "" };
+      return { glyph: g.err, color: theme.error, word: "" };
     case "denied":
-      return { glyph: g.err, color: "yellow", word: "已拒绝" };
+      return { glyph: g.err, color: theme.warning, word: "已拒绝" };
     case "cancelled":
-      return { glyph: g.err, color: "yellow", word: "已取消" };
+      return { glyph: g.err, color: theme.warning, word: "已取消" };
     case "interrupted":
-      return { glyph: g.err, color: "red", word: "interrupted" };
+      return { glyph: g.err, color: theme.error, word: "interrupted" };
   }
 }
 
@@ -81,10 +86,11 @@ function diffOf(entry: ToolEntry): string | undefined {
 
 export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const g = glyphs(env);
   const running = entry.status === "running";
   const spinner = useSpinner(running);
-  const b = badge(entry.status, spinner, env);
+  const b = badge(entry.status, spinner, env, theme);
   const name = entry.name ?? "?";
   const summary = truncateLine(
     summarizeToolInput(entry.name, entry.input),
@@ -109,7 +115,7 @@ export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): 
         <SegmentText
           segments={[
             ...(env.ascii ? [{ text: `${b.glyph} `, color: b.color }] : []),
-            ...todoHeadline(todos, env.ascii),
+            ...todoHeadline(todos, env.ascii, theme),
           ]}
         />
         <TodoRows items={todos} width={width} />
@@ -143,6 +149,7 @@ export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): 
 
 function ToolResult({ entry, width }: { entry: ToolEntry; width: number }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const g = glyphs(env);
   const result = entry.result;
   if (result === undefined) return <></>;
@@ -166,7 +173,7 @@ function ToolResult({ entry, width }: { entry: ToolEntry; width: number }): Reac
         ))
       ) : null}
       {result.error !== undefined ? (
-        <Text color="red" wrap="truncate">
+        <Text color={theme.error} wrap="truncate">
           {"  "}
           {truncateLine(
             `${result.error.code}: ${result.error.message}`,
@@ -192,11 +199,12 @@ function ToolResult({ entry, width }: { entry: ToolEntry; width: number }): Reac
 /** live.tools 中参数还在流式拼接的调用（尚无持久落点） */
 export function LiveToolRow({ tool, width }: { tool: LiveTool; width: number }): React.JSX.Element {
   const env = useTuiEnv();
+  const theme = useTheme();
   const g = glyphs(env);
   const spinner = useSpinner(true);
   return (
     <Text wrap="truncate">
-      <Text color="cyan">{spinner}</Text>
+      <Text color={theme.accent}>{spinner}</Text>
       <Text> {tool.name}</Text>
       <Text dimColor>
         {" "}
