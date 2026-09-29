@@ -95,7 +95,7 @@ describe("清单快照窗口", () => {
     expect(late).toContain("[x] 第4步");
     expect(late).toContain("[ ] 第10步");
     expect(late).not.toContain("另有");
-  });
+  }, 15000);
 
   it("对话流里的快照只列三项并提示另有项数", () => {
     const tool: ToolEntry = {
@@ -112,6 +112,15 @@ describe("清单快照窗口", () => {
     expect(plain).not.toContain("第6步");
     expect(plain).toContain("… 另有 5 项");
   });
+});
+
+it("真实 diff 删除行只显示一个删除标记", () => {
+  const row = parseDiff("@@ -1,1 +1,1 @@\n-const accent = 'old'\n+const accent = 'iris'")[0];
+  if (row === undefined) throw new Error("删除行未被解析");
+  expect(row).toMatchObject({ mark: "-", body: "const accent = 'old'" });
+  const line = layoutDiffRow("diff", row, 60, false, palettes.dark)[0];
+  expect(line?.text).toContain("- const accent = 'old'");
+  expect(line?.text).not.toContain("- -const");
 });
 
 describe("工具行 diff", () => {

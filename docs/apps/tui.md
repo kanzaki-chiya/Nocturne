@@ -94,7 +94,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 ## 4. 渲染模型
 
-深浅配色遵循 [ADR-0029](../decisions/ADR-0029-tui-themes.md)：`dark` 适配深色终端背景，`light` 适配浅色终端背景。TUI 在第一次渲染前从 Runtime 偏好读取 `theme`，缺失或无效值回退 `dark`；语义角色经 React context 供组件和行排版使用。状态栏以中性色为主，Markdown 标题、代码和引用用灰度与粗细区分；选区使用主题底色，边框使用边框角色。全屏和 `--inline` 均保留终端原有背景，只给 diff、代码块、浮层与对话框设置局部底色；已写入普通屏幕滚动历史的内容不会重着色。第一步暂用候选配色，`/theme` 选择与保存界面待第二步实现。精确色值以支持真彩色的 Windows Terminal 为准，其他终端由 chalk 降级；`NO_COLOR`、`TERM=dumb`、ASCII 仍靠文字和符号表达状态。
+深浅配色遵循 [ADR-0029](../decisions/ADR-0029-tui-themes.md)：仅发布 iris 主色的 `dark`（适配深色终端背景）和 `light`（适配浅色终端背景）。TUI 在第一次渲染前从 Runtime 偏好读取 `theme`，缺失或无效值回退 `dark`；语义角色经 React context 供组件和行排版使用。`/theme` 打开仅含两套主题的选择页，初始高亮当前主题；↑/↓ 移动时下方示例立即用候选主题重绘，并在 Campbell 深底与 One Half Light 浅底上对照，窄屏改为上下排列。Enter 写入偏好并立即应用；失败时保留原主题、停留选择页并提示原因；Esc 取消预览，不写设置。全屏已布局的对话行按新主题重新布局，`--inline` 已写入滚动历史的内容不重新着色。状态栏以中性色为主，Markdown 标题、代码和引用用灰度与粗细区分；选区使用主题底色，边框使用边框角色。全屏和 `--inline` 均保留终端原有背景，只给 diff、代码块、浮层与对话框设置局部底色。精确色值以支持真彩色的 Windows Terminal 为准，其他终端由 chalk 降级；`NO_COLOR`、`TERM=dumb`、ASCII 仍靠文字和符号表达状态。
 
 - Ink + React 沿用 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)。主界面使用 `incrementalRendering: true` + 备用屏幕，帧高 `rows - 1`；对话区只布局可见行窗口（`viewport.ts`），已完成条目的行布局按「条目 key + 宽度 + 主题 ID」缓存（`lines.ts`），宽度变化整段重排并清除选区。
 - **鼠标**：进入全屏后开启 `?1000h ?1002h ?1006h`；SGR 鼠标序列（`ESC [ < b ; x ; y M/m`）在 stdin 进入 Ink 之前摘除并解析成事件（`mouse.ts`），序列跨数据块截断时缓存拼接，绝不漏给 Ink 当成按键。退出、未捕获异常、任何恢复主屏幕的路径先按 `?1006l ?1002l ?1000l` 反向关闭。
@@ -275,5 +275,5 @@ v0.3 增补（ADR-0019）：
 - 代码块语法高亮（助手 Markdown 已做结构化排版）；
 - 多会话标签页；
 - 工具输出详情查看器/分页器（长输出靠截断 + spillPath，与 CLI 一致）；
-- 任意自定义主题色与键位（内置深浅主题的 `/theme` 切换待 [ADR-0029](../decisions/ADR-0029-tui-themes.md) 第二步实现）；
+- 任意自定义主题色与键位（`/theme` 只提供内置 `dark`、`light`）；
 - RPC/Web 客户端（后续阶段，直接复用 SessionView reducer）。

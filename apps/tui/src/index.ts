@@ -4,13 +4,13 @@
  * @nocturne/core/protocol 的公开 API，不包含 Agent 逻辑。
  */
 import { render } from "ink";
-import { createElement } from "react";
+import { createElement, useState } from "react";
 
 import type { Clipboard, Runtime, RuntimeSession } from "@nocturne/core";
 
 import type { spawn } from "node:child_process";
 
-import { App, type SetupFlowSpec } from "./app.js";
+import { App, type AppProps, type SetupFlowSpec } from "./app.js";
 import type { ProviderBridge } from "./commands.js";
 import { CursorClaimsContext } from "./components/input-cursor.js";
 import { createCursorStream } from "./cursor.js";
@@ -18,6 +18,16 @@ import { detectTuiEnv } from "./env.js";
 import { sessionSavedLine } from "./exit-note.js";
 import { stripControls } from "./format.js";
 import { palettes, resolveTheme, ThemeContext } from "./theme.js";
+
+/** 首帧前同步读取偏好；保存成功后只换 context，App 会以主题 ID 重排全屏行。 */
+export function ThemeApp(props: AppProps): React.JSX.Element {
+  const [id, setId] = useState(() => resolveTheme(props.runtime.getPreference("theme")));
+  return createElement(
+    ThemeContext.Provider,
+    { value: palettes[id] },
+    createElement(App, { ...props, onThemeChange: setId }),
+  );
+}
 import { MOUSE_DISABLE, MOUSE_ENABLE, wrapMouseStdin, type MouseSource } from "./mouse.js";
 
 /** 复位全部文字属性：退出路径统一收尾，保证不把颜色留给后续的 shell */
@@ -118,39 +128,34 @@ export async function runTui(
   // Windows Terminal: suspendTerminal 的 pauseInput 不应撤销控制台读请求。
   const unref = stdin.unref.bind(stdin);
   stdin.unref = () => stdin;
-  const palette = palettes[resolveTheme(runtime.getPreference("theme"))];
   const app = render(
     createElement(
-      ThemeContext.Provider,
-      { value: palette },
-      createElement(
-        CursorClaimsContext.Provider,
-        { value: cursorOut.claims },
-        createElement(App, {
-          session: "session" in entry ? entry.session : undefined,
-          setup: "setup" in entry ? entry.setup : options.setup,
-          runtime,
-          env: detectTuiEnv(),
-          switchSession: options.switchSession,
-          newSession: options.newSession,
-          provider: options.provider,
-          inline,
-          mouse: mouseSource,
-          writeOob: cursorOut.writeOob,
-          onOutputLayout: cursorOut.setLayout,
-          copySpawn: options.copySpawn,
-          clipboard: options.clipboard,
-          clipboardPlatform: options.clipboardPlatform,
-          transcriptOut,
-          onSessionId: (id: string) => {
-            sessionId = id;
-          },
-          onExitResult: (code: number, message?: string) => {
-            exitCode = code;
-            exitMessage = message;
-          },
-        }),
-      ),
+      CursorClaimsContext.Provider,
+      { value: cursorOut.claims },
+      createElement(ThemeApp, {
+        session: "session" in entry ? entry.session : undefined,
+        setup: "setup" in entry ? entry.setup : options.setup,
+        runtime,
+        env: detectTuiEnv(),
+        switchSession: options.switchSession,
+        newSession: options.newSession,
+        provider: options.provider,
+        inline,
+        mouse: mouseSource,
+        writeOob: cursorOut.writeOob,
+        onOutputLayout: cursorOut.setLayout,
+        copySpawn: options.copySpawn,
+        clipboard: options.clipboard,
+        clipboardPlatform: options.clipboardPlatform,
+        transcriptOut,
+        onSessionId: (id: string) => {
+          sessionId = id;
+        },
+        onExitResult: (code: number, message?: string) => {
+          exitCode = code;
+          exitMessage = message;
+        },
+      }),
     ),
     {
       stdout: cursorOut.stream,

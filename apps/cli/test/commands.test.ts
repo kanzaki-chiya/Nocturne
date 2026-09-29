@@ -82,6 +82,7 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     const { lines, io } = capture();
     expect(await runSlashCommand("/help", fakeSession(), fakeRuntime, io)).toBe("handled");
     expect(lines.join("")).toContain("/compact");
+    expect(lines.join("")).not.toContain("/theme");
   });
 
   it("/model 无参数：编号表格含列信息与标注（cli.md 第 4 节）", async () => {

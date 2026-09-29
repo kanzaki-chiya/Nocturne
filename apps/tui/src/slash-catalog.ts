@@ -12,10 +12,13 @@ export interface SlashCommand {
   cli?: string | undefined;
   /** 命令名后空格进入的参数补全 */
   args?: "effort" | "provider" | "preset" | "shell" | undefined;
+  /** 页面命令只在 TUI 展示；逐行 CLI 不支持。 */
+  tuiOnly?: boolean | undefined;
 }
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "/help", summary: "显示帮助", cli: "列出命令与快捷键" },
+  { name: "/theme", summary: "切换深浅主题", tuiOnly: true },
   { name: "/model", summary: "切换模型", cli: "列出或切换模型" },
   { name: "/effort", summary: "切换思考档位", cli: "显示或切换思考强度", args: "effort" },
   { name: "/preset", summary: "切换权限预设", cli: "显示或切换权限预设", args: "preset" },
@@ -79,7 +82,7 @@ export function helpLines(): string[] {
 export function cliHelpText(): string {
   const lines = ["斜杠命令："];
   for (const cmd of SLASH_COMMANDS) {
-    if (cmd.name === "/quit") continue;
+    if (cmd.name === "/quit" || cmd.tuiOnly === true) continue;
     const name = cmd.name === "/exit" ? "/exit, /quit" : cmd.name;
     lines.push(`  ${name.padEnd(22)}${cmd.cli ?? cmd.summary}`);
   }
@@ -104,8 +107,8 @@ function rank(
   return [...prefix, ...contains];
 }
 
-function commandItems(): { key: string; label: string; insert: string }[] {
-  return SLASH_COMMANDS.map((cmd) => ({
+function commandItems(tui: boolean): { key: string; label: string; insert: string }[] {
+  return SLASH_COMMANDS.filter((cmd) => tui || cmd.tuiOnly !== true).map((cmd) => ({
     key: cmd.name,
     label: `${cmd.name}  ${cmd.summary}`,
     insert: cmd.name,
@@ -148,12 +151,12 @@ function argItems(
  * 完整命令名加一个空格后进入参数补全。
  * 调用方按帧预算截断行数（最多 8）。
  */
-export function completeSlash(line: string, ctx: CompletionContext): Candidate[] {
+export function completeSlash(line: string, ctx: CompletionContext, tui = true): Candidate[] {
   if (!line.startsWith("/")) return [];
   const space = line.indexOf(" ");
-  if (space === -1) return rank(line, commandItems());
+  if (space === -1) return rank(line, commandItems(tui));
   const name = line.slice(0, space);
-  const command = SLASH_COMMANDS.find((cmd) => cmd.name === name);
+  const command = SLASH_COMMANDS.find((cmd) => cmd.name === name && (tui || cmd.tuiOnly !== true));
   if (command?.args === undefined) return [];
   const rest = line.slice(space + 1);
   const query = rest.includes(" ") ? (rest.split(/\s+/).at(-1) ?? "") : rest.trimStart();
@@ -177,7 +180,7 @@ export function completeSlash(line: string, ctx: CompletionContext): Candidate[]
  * 多个匹配时 readline 取公共前缀。
  */
 export function readlineCompleter(line: string, ctx: CompletionContext): [string[], string] {
-  const hits = completeSlash(line, ctx);
+  const hits = completeSlash(line, ctx, false);
   if (hits.length === 0) return [[], line];
   return [hits.map((h) => h.insert), line];
 }

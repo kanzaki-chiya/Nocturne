@@ -30,4 +30,8 @@ describe("CLI completer", () => {
     expect(readlineCompleter("/shell b", ctx)[0]).toEqual(["/shell bash"]);
     expect(readlineCompleter("/sh", ctx)[0]).toContain("/shell");
   });
+
+  it("不向逐行 CLI 补全 TUI 专用的 /theme", () => {
+    expect(readlineCompleter("/th", ctx)[0]).not.toContain("/theme");
+  });
 });

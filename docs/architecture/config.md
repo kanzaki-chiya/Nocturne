@@ -87,7 +87,7 @@ models.dev 数据在启动时从缓存或内置快照读取，启动不联网；
 
 **机器维护的 `settings.json`**（ADR-0022 第 3 节）：`<NOCTURNE_HOME>/settings.json` 由程序原子写入（临时文件 + rename），只写自己的文件；其中 `shell`/`shellPath` 两个专用字段由 `/shell`（或 `session.setShell`）写入，`"auto"` 表示清除回自动。它不进上面的合并链，只参与 shell 选择的合成：`NOCTURNE_SHELL` > `config.json` > `settings.json` > 自动（tools.md 第 6 节）；手写 `config.json` 的同名字段覆盖它，程序不改写 `config.json`。文件损坏或 `shell` 值无法识别时忽略并警告，不阻塞启动；单独给出 `shellPath` 时同样要先能推断种类（见上表注释）。读入时保留未知字段原样写回，普通字符串偏好由下述通用接口维护。
 
-**通用界面偏好**（[ADR-0029](../decisions/ADR-0029-tui-themes.md) 第 3 节）：`RuntimeConfig` 与公开的 `Runtime` 都提供 `getPreference(key: string): string | undefined`、`setPreference(key: string, value: string | undefined): Promise<void>`。它们读写 `settings.json` 顶层的普通字符串字段；`undefined` 删除字段。写入拒绝无效字段名、`shell`/`shellPath` 等有专用接口的保留字段和非字符串值；原子写盘成功后才更新内存，失败时旧值不变，未知字段原样保留。`Runtime` 委托注入的 `RuntimeConfig`；`createRuntime` 未传 `config` 时，读取返回 `undefined`，写入返回被拒绝的 Promise，错误为「未注入 RuntimeConfig，无法保存偏好」。Core 不解释偏好值的 UI 含义；当前 TUI 启动前读取 `theme`，由 TUI 判断 `dark`/`light`，非法值回退 `dark`。主题选择与保存界面待第二步实现。
+**通用界面偏好**（[ADR-0029](../decisions/ADR-0029-tui-themes.md) 第 3 节）：`RuntimeConfig` 与公开的 `Runtime` 都提供 `getPreference(key: string): string | undefined`、`setPreference(key: string, value: string | undefined): Promise<void>`。它们读写 `settings.json` 顶层的普通字符串字段；`undefined` 删除字段。写入拒绝无效字段名、`shell`/`shellPath` 等有专用接口的保留字段和非字符串值；原子写盘成功后才更新内存，失败时旧值不变，未知字段原样保留。`Runtime` 委托注入的 `RuntimeConfig`；`createRuntime` 未传 `config` 时，读取返回 `undefined`，写入返回被拒绝的 Promise，错误为「未注入 RuntimeConfig，无法保存偏好」。Core 不解释偏好值的 UI 含义；TUI 在首次渲染前读取 `theme`，由 TUI 判断 `dark`/`light`，非法值回退 `dark`；`/theme` 保存失败时保持原主题并留在选择页提示错误。
 
 ## 3. 项目配置的信任模型
 

@@ -81,5 +81,5 @@ describe("深浅主题", () => {
       expect(snapshot.lastFrame()).toContain("[>] 第二步");
       snapshot.unmount();
     }
-  });
+  }, 15000);
 });

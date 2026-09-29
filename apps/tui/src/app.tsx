@@ -93,6 +93,7 @@ import { PermissionDialog } from "./components/permission-dialog.js";
 import { PickList, type PickItem } from "./components/pick-list.js";
 import { ProviderPage, type ProviderOp } from "./components/provider-page.js";
 import { StatusBar, type EffortSegment, type StatusHighlight } from "./components/status-bar.js";
+import { ThemePage } from "./components/theme-page.js";
 import { TodoPanel, todoPanelRows } from "./components/todo-panel.js";
 import { Transcript, type TranscriptItem } from "./components/transcript.js";
 import { useAltScreen, waitCommit } from "./alt-screen.js";
@@ -100,7 +101,7 @@ import { WizardView } from "./components/wizard-view.js";
 import { TuiEnvContext, glyphs, type TuiEnv } from "./env.js";
 import { useSessionView } from "./session-view.js";
 import { useReasoning } from "./reasoning.js";
-import { useTheme } from "./theme.js";
+import { useTheme, type ThemeId } from "./theme.js";
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 import { useProviderWizard } from "./wizard-io.js";
 
@@ -174,6 +175,7 @@ export interface AppProps {
   /** 已打开的会话；undefined = 首次配置流程形态（setup 必给） */
   session?: RuntimeSession | undefined;
   runtime: Runtime;
+  onThemeChange?: ((id: ThemeId) => void) | undefined;
   env: TuiEnv;
   switchSession?: SwitchSessionFn | undefined;
   newSession?: NewSessionFn | undefined;
@@ -564,6 +566,7 @@ function SetupFlow({
 export function App({
   session: initialSession,
   runtime,
+  onThemeChange,
   env,
   switchSession,
   newSession,
@@ -617,6 +620,7 @@ export function App({
     <SessionApp
       session={session}
       runtime={runtime}
+      onThemeChange={onThemeChange}
       env={env}
       switchSession={switchSession}
       newSession={newSession}
@@ -637,6 +641,7 @@ export function App({
 function SessionApp({
   session: initialSession,
   runtime,
+  onThemeChange,
   env,
   switchSession,
   newSession,
@@ -653,6 +658,7 @@ function SessionApp({
 }: {
   session: RuntimeSession;
   runtime: Runtime;
+  onThemeChange?: ((id: ThemeId) => void) | undefined;
   env: TuiEnv;
   switchSession?: SwitchSessionFn | undefined;
   newSession?: NewSessionFn | undefined;
@@ -1752,7 +1758,7 @@ function SessionApp({
         return;
       }
     }
-    if (completionOpen && selected !== undefined) {
+    if (!dialogOpen && !pageOpen && completionOpen && selected !== undefined) {
       if (key.upArrow) {
         setCompletionIndex((i) => (i <= 0 ? candidates.length - 1 : i - 1));
         return;
@@ -1781,6 +1787,7 @@ function SessionApp({
             if (r.kind === "exit") requestExit();
             else if (r.kind === "new") void doNew();
             else if (r.kind === "overlay") {
+              if (r.name === "theme") clearInput();
               if (r.name === "resume" && submitting.current)
                 pushLine("! 会话忙（Turn 进行中）；先中断再切换");
               else setOverlay(r.name);
@@ -1917,6 +1924,7 @@ function SessionApp({
             if (r.kind === "exit") requestExit();
             else if (r.kind === "new") void doNew();
             else if (r.kind === "overlay") {
+              if (r.name === "theme") clearInput();
               if (r.name === "resume" && submitting.current)
                 pushLine("! 会话忙（Turn 进行中）；先中断再切换");
               else setOverlay(r.name);
@@ -2295,6 +2303,21 @@ function SessionApp({
           setOverlay(undefined);
         }}
         width={width}
+      />
+    ) : overlay === "theme" ? (
+      <ThemePage
+        width={width}
+        height={budget.conversation}
+        active
+        onSave={async (id) => {
+          await runtime.setPreference("theme", id);
+          onThemeChange?.(id);
+          setOverlay(undefined);
+          clearInput();
+        }}
+        onCancel={() => {
+          setOverlay(undefined);
+        }}
       />
     ) : overlay === "resume" ? (
       <PickList
