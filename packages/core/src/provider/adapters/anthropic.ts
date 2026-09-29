@@ -65,6 +65,13 @@ export interface AnthropicConfig {
    * anthropic 不使用 format（恒走 thinking.budget_tokens）。
    */
   thinking?: ProviderThinkingOptions | undefined;
+  /**
+   * ADR-0026 §3：openai-compatible 条目下的 Messages 协议请求同时发送
+   * `x-api-key` 与 `Authorization: Bearer`（各家 Messages 兼容网关接受的
+   * 鉴权头不统一，两个都带由网关选用）。anthropic 条目本家请求置 false
+   * ——不给官方端点多发 Authorization，以免被当成 OAuth 令牌。
+   */
+  dualAuth?: boolean | undefined;
   /** 诊断通道（observability.md）；缺省 no-op */
   diagnostics?: Diagnostics | undefined;
 }
@@ -103,6 +110,8 @@ export function createAnthropicProvider(
     if (key === undefined) throw missingKeyError();
     const headers = new Headers(init?.headers);
     headers.set("x-api-key", key);
+    // ADR-0026 §3：openai-compatible 条目下的 Messages 请求双发鉴权头
+    if (config.dualAuth === true) headers.set("Authorization", `Bearer ${key}`);
     return baseFetch(url, { ...init, headers });
   };
   const sdk = createAnthropic({

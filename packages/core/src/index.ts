@@ -42,8 +42,7 @@ import {
 } from "./platform/index.js";
 import {
   clampReasoningEffort,
-  createAnthropicProvider,
-  createOpenAICompatibleProvider,
+  createEntryProvider,
   createProviderRegistry,
   UnknownModelError,
   type CredentialResolver,
@@ -355,41 +354,36 @@ function parseModelRef(model: string | ModelRef): ModelRef {
   return { provider: model.slice(0, i), model: model.slice(i + 1) };
 }
 
-/** ProviderEntryConfig → ProviderConfig（字段形状一致，按 type 分发适配器） */
+/**
+ * ProviderEntryConfig → 路由 Provider（ADR-0026 §4）：条目一个实例，
+ * 内部按模型的生效协议分发到两种适配器。
+ */
 function instantiateProvider(
   entry: ProviderEntryConfig,
   env: (n: string) => string | undefined,
   diagnostics: Diagnostics | undefined,
   credentials: CredentialResolver | undefined,
 ) {
-  const common = {
-    id: entry.id,
-    apiKeyEnv: entry.apiKeyEnv,
-    ...(credentials !== undefined ? { credentials } : {}),
-    ...(entry.models !== undefined
-      ? { models: entry.models as Record<string, ModelOverride> }
-      : {}),
-    ...(entry.allowUndeclaredModels !== undefined
-      ? { allowUndeclaredModels: entry.allowUndeclaredModels }
-      : {}),
-    ...(entry.providerOptions !== undefined ? { providerOptions: entry.providerOptions } : {}),
-    ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
-    ...(entry.thinking !== undefined ? { thinking: entry.thinking } : {}),
-    ...(diagnostics !== undefined ? { diagnostics } : {}),
-  };
-  return entry.type === "anthropic"
-    ? createAnthropicProvider(
-        {
-          ...common,
-          type: "anthropic",
-          ...(entry.baseURL !== undefined ? { baseURL: entry.baseURL } : {}),
-        },
-        env,
-      )
-    : createOpenAICompatibleProvider(
-        { ...common, type: "openai-compatible", baseURL: entry.baseURL ?? "" },
-        env,
-      );
+  return createEntryProvider(
+    {
+      id: entry.id,
+      ...(entry.type !== undefined ? { type: entry.type } : {}),
+      ...(entry.baseURL !== undefined ? { baseURL: entry.baseURL } : {}),
+      apiKeyEnv: entry.apiKeyEnv,
+      ...(credentials !== undefined ? { credentials } : {}),
+      ...(entry.models !== undefined
+        ? { models: entry.models as Record<string, ModelOverride> }
+        : {}),
+      ...(entry.allowUndeclaredModels !== undefined
+        ? { allowUndeclaredModels: entry.allowUndeclaredModels }
+        : {}),
+      ...(entry.providerOptions !== undefined ? { providerOptions: entry.providerOptions } : {}),
+      ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
+      ...(entry.thinking !== undefined ? { thinking: entry.thinking } : {}),
+      ...(diagnostics !== undefined ? { diagnostics } : {}),
+    },
+    env,
+  );
 }
 
 export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
@@ -447,13 +441,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (!byId.has(p.id)) byId.set(p.id, p);
     }
     for (const c of options.providerConfigs ?? []) {
-      const instance =
-        c.type === "anthropic"
-          ? createAnthropicProvider({ ...c, credentials: credentialResolver, diagnostics }, env)
-          : createOpenAICompatibleProvider(
-              { ...c, credentials: credentialResolver, diagnostics },
-              env,
-            );
+      // ADR-0026 §4：与 config 条目同一路由 Provider（按模型生效协议分发）
+      const instance = createEntryProvider(
+        { ...c, credentials: credentialResolver, diagnostics },
+        env,
+      );
       byId.set(instance.id, instance);
     }
     for (const e of configProviders)
@@ -854,6 +846,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     };
     try {
       model = resolveSessionModel(session.state().config.model);
+      // ADR-0026 §5：新建会话选到不可用模型即拒绝；恢复会话允许打开
+      // （不可用由下一轮 submit 在发请求前以同一说明结束）
+      if (resume === undefined && model.model.unavailable !== undefined) {
+        throw new RuntimeCommandError("invalid_model", model.model.unavailable.reason);
+      }
       warnIfCapabilitiesDefaulted(model.model);
       warnIfEffortClamped(model.model);
     } catch (e) {
@@ -868,6 +865,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             "invalid_model",
             `替代模型同样无法解析：${inner instanceof Error ? inner.message : String(inner)}`,
           );
+        }
+        // 替代模型是显式选择：不可用同样拒绝（ADR-0026 §5）
+        if (replacement.model.unavailable !== undefined) {
+          throw new RuntimeCommandError("invalid_model", replacement.model.unavailable.reason);
         }
         await session.emit("session.config_changed", { model: ref });
         model = replacement;
@@ -1030,6 +1031,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         // updateProviders 标记的会话级注册表（provider-setup.md 第 6 节）
         try {
           await rebuildProviders();
+          // ADR-0026 §5：刷新后条目/模型可能变化——原位重解析拿到最新的
+          // 协议与不可用标记（失败沿用旧解析，同一错误仍由 stream 路径报告）
+          try {
+            model = resolveSessionModel(session.state().config.model);
+          } catch {
+            // 保留旧解析
+          }
+          // 会话中的模型变为不可用时，本轮在发请求前以说明结束，不发 HTTP
+          if (model.model.unavailable !== undefined) {
+            throw new RuntimeCommandError("invalid_model", model.model.unavailable.reason);
+          }
           const deps: TurnDeps = {
             session,
             model,
@@ -1106,6 +1118,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             "invalid_model",
             `Provider ${ref.provider} 未声明模型 ${ref.model}`,
           );
+        }
+        // ADR-0026 §5：不可用模型选中即拒绝（模型页照常列出但不可请求）
+        if (resolved.model.unavailable !== undefined) {
+          throw new RuntimeCommandError("invalid_model", resolved.model.unavailable.reason);
         }
         await session.emit("session.config_changed", { model: ref });
         model = resolved;

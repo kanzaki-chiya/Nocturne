@@ -3,7 +3,13 @@
  * 只有在本次请求尚未产生任何输出事件时才允许重试；
  * 已开始输出后失败，把已收到的部分内容交给调用方保存。
  */
-import type { ContentBlock, FinishReason, ToolCallRef, Usage } from "../protocol/index.js";
+import {
+  PROTOCOL_ENDPOINTS,
+  type ContentBlock,
+  type FinishReason,
+  type ToolCallRef,
+  type Usage,
+} from "../protocol/index.js";
 import { isProviderError, timedStream, type ModelRequest } from "../provider/index.js";
 import { redactRequestImages } from "./redact.js";
 import type { TurnDeps } from "./types.js";
@@ -86,6 +92,13 @@ export async function consumeStream(
       attempt,
       provider: provider.id,
       model: deps.model.model.ref.model,
+      // ADR-0026 §7：请求记录带生效协议与接口路径（不含密钥）
+      ...(deps.model.model.protocol !== undefined
+        ? {
+            protocol: deps.model.model.protocol,
+            endpoint: PROTOCOL_ENDPOINTS[deps.model.model.protocol],
+          }
+        : {}),
       request: redactRequestImages(request),
     });
     const requestStart = Date.now();

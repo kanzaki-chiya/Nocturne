@@ -4,6 +4,8 @@ export * from "./timeout.js";
 export * from "./errors.js";
 export * from "./catalog.js";
 export * from "./reasoning.js";
+export * from "./effective-protocol.js";
+export * from "./entry.js";
 export * from "./registry.js";
 export * from "./fake.js";
 export * from "./adapters/openai-compatible.js";
