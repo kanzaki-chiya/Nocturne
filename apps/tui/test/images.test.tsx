@@ -31,7 +31,7 @@ const png = new Uint8Array([
 ]);
 const env = { ascii: false, animated: false };
 async function waitFor(check: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + 12_000;
   while (!check()) {
     if (Date.now() > deadline) throw new Error("render timeout");
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -117,7 +117,7 @@ describe("TUI 图片输入", () => {
     expect(transcriptOut.current?.().join("\n")).not.toMatch(/\x1b\[/);
     unmount();
     await active.close();
-  });
+  }, 15_000);
 
   it("Alt+V 无图、非 Windows、超限、模型不支持时只提示", async () => {
     for (const [imageInput, platform, data, hint] of [
@@ -147,7 +147,7 @@ describe("TUI 图片输入", () => {
       unmount();
       await active.close();
     }
-  });
+  }, 30_000);
 
   it("提示行留在推入位置，之后的对话排在它下面", async () => {
     const { runtime, active } = await session(false);

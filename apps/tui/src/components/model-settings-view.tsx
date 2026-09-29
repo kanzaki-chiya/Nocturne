@@ -158,6 +158,8 @@ export function ModelListPane({
               <Text inverse={focused} color={focused ? theme.accent : theme.success}>
                 {truncateLine(row, width - 2)}
               </Text>
+              {/* ADR-0026 §5：不可用模型照常列出并标注 */}
+              {v.unavailable !== undefined ? <Text color={theme.muted}> 协议不支持</Text> : null}
             </Text>
           );
         })
@@ -180,6 +182,7 @@ const FIELD_ORDER = [
   "imageInput",
   "reasoning",
   "reasoningEffort",
+  "protocol",
 ] as const;
 type FieldKey = (typeof FIELD_ORDER)[number];
 const FIELD_LABELS: Record<FieldKey, string> = {
@@ -189,16 +192,20 @@ const FIELD_LABELS: Record<FieldKey, string> = {
   imageInput: "图片输入",
   reasoning: "推理",
   reasoningEffort: "思考档位",
+  // ADR-0026 §7：第七个字段「协议」
+  protocol: "协议",
 };
 const TEXT_FIELDS: ReadonlySet<FieldKey> = new Set([
   "displayName",
   "contextWindow",
   "maxOutputTokens",
 ]);
-const CYCLE_FIELDS: ReadonlySet<FieldKey> = new Set(["imageInput", "reasoning"]);
+const CYCLE_FIELDS: ReadonlySet<FieldKey> = new Set(["imageInput", "reasoning", "protocol"]);
 
 type TriState = "follow" | "true" | "false";
 type ReasoningDraft = "follow" | "yes" | "no";
+/** 协议选项（ADR-0026 §7）：跟随 / Chat Completions / Messages */
+type ProtocolDraft = "follow" | "chat" | "messages";
 
 interface Draft {
   displayName: string;
@@ -207,6 +214,7 @@ interface Draft {
   imageInput: TriState;
   reasoning: ReasoningDraft;
   reasoningEffort: "follow" | ReasoningEffortLevel[];
+  protocol: ProtocolDraft;
 }
 
 function initDraft(view: ModelSettingsView): Draft {
@@ -225,6 +233,12 @@ function initDraft(view: ModelSettingsView): Draft {
           ? "no"
           : "yes",
     reasoningEffort: f.reasoningEffort.userValue ?? "follow",
+    protocol:
+      f.protocol.userValue === undefined
+        ? "follow"
+        : f.protocol.userValue === "anthropic"
+          ? "messages"
+          : "chat",
   };
 }
 
@@ -244,12 +258,16 @@ function scalarText(v: unknown): string {
  *   用户改回跟随/清空时显示回落值 field.lowerValue。
  */
 function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>): string {
-  const show = (value: unknown): string =>
-    key === "reasoning" && value !== undefined
-      ? value === "none"
-        ? "否"
-        : "是"
-      : scalarText(value);
+  const show = (value: unknown): string => {
+    if (key === "reasoning" && value !== undefined) return value === "none" ? "否" : "是";
+    // 协议：undefined = 推导为 unavailable（ADR-0026 §5）
+    if (key === "protocol") {
+      if (value === "openai-compatible") return "Chat Completions";
+      if (value === "anthropic") return "Messages";
+      return "协议不支持";
+    }
+    return scalarText(value);
+  };
   if (!field.editable) return show(field.value);
   const followBase = field.userValue !== undefined ? field.lowerValue : field.value;
   const follow = `跟随（${show(followBase)}）`;
@@ -265,6 +283,10 @@ function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>)
   if (key === "reasoning") {
     const d = draft.reasoning;
     return d === "follow" ? follow : d === "yes" ? "是" : "否";
+  }
+  if (key === "protocol") {
+    const d = draft.protocol;
+    return d === "follow" ? follow : d === "chat" ? "Chat Completions" : "Messages";
   }
   // reasoningEffort
   const d = draft.reasoningEffort;
@@ -299,6 +321,10 @@ export function draftToPatch(view: ModelSettingsView, draft: Draft): ModelSettin
     patch.reasoningEffort = null;
   else if (draft.reasoningEffort !== "follow") patch.reasoningEffort = draft.reasoningEffort;
   else if (f.reasoningEffort.userValue !== undefined) patch.reasoningEffort = null;
+  // ADR-0026 §7：跟随 = 清除用户编辑（写 null），仅在有用户编辑时
+  if (draft.protocol !== "follow")
+    patch.protocol = draft.protocol === "messages" ? "anthropic" : "openai-compatible";
+  else if (f.protocol.userValue !== undefined) patch.protocol = null;
   return patch;
 }
 
@@ -364,6 +390,11 @@ export function ModelEditPane({
         const seq: TriState[] = ["follow", "true", "false"];
         const i = (seq.indexOf(d.imageInput) + delta + seq.length) % seq.length;
         return { ...d, imageInput: seq[i] ?? "follow" };
+      }
+      if (key === "protocol") {
+        const seq: ProtocolDraft[] = ["follow", "chat", "messages"];
+        const i = (seq.indexOf(d.protocol) + delta + seq.length) % seq.length;
+        return { ...d, protocol: seq[i] ?? "follow" };
       }
       const seq: ReasoningDraft[] = ["follow", "yes", "no"];
       const i = (seq.indexOf(d.reasoning) + delta + seq.length) % seq.length;
@@ -506,7 +537,7 @@ export function ModelEditPane({
           <Text color={theme.muted}>{inner}</Text>
         )}
         <Text color={theme.muted}>
-          {`  ${truncateLineHead(modelFieldSourceText(f.source), SOURCE_W)}`}
+          {`  ${truncateLineHead(modelFieldSourceText(f.source, key), SOURCE_W)}`}
         </Text>
       </Text>
     );
@@ -521,6 +552,12 @@ export function ModelEditPane({
       {readonlyHint !== undefined ? (
         <Text color={theme.warning} wrap="truncate">
           {readonlyHint}
+        </Text>
+      ) : null}
+      {/* ADR-0026 §5：当前推导为不可用时提示原因（可经协议字段指定后恢复） */}
+      {view.unavailable !== undefined ? (
+        <Text color={theme.warning} wrap="truncate">
+          {view.unavailable.reason}
         </Text>
       ) : null}
       {visibleFields.map((key) => row(key))}

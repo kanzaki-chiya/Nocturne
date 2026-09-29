@@ -72,6 +72,8 @@ function modelTable(
 ): string {
   const tags = (m: ModelInfo): string => {
     const t: string[] = [];
+    // ADR-0026 §5：不可用模型照常列出并标注
+    if (m.unavailable !== undefined) t.push("协议不支持");
     if (m.ref.provider === current.provider && m.ref.model === current.model) t.push("当前会话");
     if (m.ref.provider === defaultRef?.provider && m.ref.model === defaultRef.model)
       t.push("默认模型");

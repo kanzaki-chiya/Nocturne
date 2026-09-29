@@ -62,6 +62,9 @@ const fullView = (
     reasoning: field<"none" | "hidden" | "visible">("visible", { kind: "upstream" }),
     imageInput: field<boolean | undefined>(false, { kind: "default" }),
     reasoningEffort: field<("low" | "high")[] | undefined>(["low", "high"], { kind: "derived" }),
+    protocol: field<"openai-compatible" | "anthropic" | undefined>("openai-compatible", {
+      kind: "entryType",
+    }),
     ...over,
   } as ModelSettingsView["fields"],
   ...top,
@@ -188,8 +191,8 @@ describe("模型设置编辑页（ADR-0024）", () => {
     await pause(50);
     stdin.write(RIGHT);
     await pause(50);
-    // 继续 ↓ 到 [保存]（focusables = 6 字段 + save + cancel）
-    for (let i = 0; i < 3; i += 1) stdin.write(DOWN);
+    // 继续 ↓ 到 [保存]（focusables = 7 字段 + save + cancel）
+    for (let i = 0; i < 4; i += 1) stdin.write(DOWN);
     await pause(50);
     stdin.write(ENTER);
     await waitFor(() => save.mock.calls.length === 1);
@@ -249,7 +252,8 @@ describe("模型设置编辑页（ADR-0024）", () => {
     await pause(50);
     stdin.write(LEFT);
     await pause(50);
-    for (let i = 0; i < 3; i += 1) stdin.write(DOWN);
+    // 7 字段 + save + cancel：↓×4 到 [保存]
+    for (let i = 0; i < 4; i += 1) stdin.write(DOWN);
     await pause(50);
     stdin.write(ENTER);
     await waitFor(() => save.mock.calls.length === 1);
@@ -266,8 +270,8 @@ describe("模型设置编辑页（ADR-0024）", () => {
     );
     await waitFor(() => (lastFrame() ?? "").includes("[保存]"));
     await pause(100);
-    // 6 字段全可编辑：↓×6 到 [保存]
-    for (let i = 0; i < 6; i += 1) stdin.write(DOWN);
+    // 7 字段全可编辑：↓×7 到 [保存]
+    for (let i = 0; i < 7; i += 1) stdin.write(DOWN);
     await pause(50);
     stdin.write(ENTER);
     await waitFor(() => (lastFrame() ?? "").includes("最大输出不能超过上下文长度"));

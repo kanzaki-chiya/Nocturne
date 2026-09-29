@@ -2001,11 +2001,13 @@ function SessionApp({
         void (async () => {
           try {
             await closePicker();
+            // 先切换本会话模型（不可用模型在此拒绝，ADR-0026 §5），
+            // 成功后才落默认模型——避免把默认模型写到不可用的 ref 上
+            await session.setModel(ref);
             if (setDefault && provider !== undefined) {
               await provider.config.setDefaultModel(ref);
               provider.updateProviders(await provider.reloadConfig());
             }
-            await session.setModel(ref);
           } catch (e) {
             pushLine(`! ${errText(e)}`);
           }

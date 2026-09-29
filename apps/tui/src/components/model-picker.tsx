@@ -477,8 +477,10 @@ function RightPane({
 }): React.JSX.Element {
   const env = useTuiEnv();
   const line = env.ascii ? "-" : "─";
+  const sel = rows[cursor]?.model;
   const listTop = 2; // 搜索框 + 空行
-  const detailH = 3; // 分隔 + 详情 2 行
+  // 分隔 + 详情 2 行（不可用模型多一行原因说明，ADR-0026 §5）
+  const detailH = sel?.unavailable !== undefined ? 4 : 3;
   const hintH = 1;
   const listH = Math.max(3, height - listTop - detailH - hintH);
 
@@ -519,11 +521,12 @@ function RightPane({
             width - 2,
           )}
         </Text>
+        {/* ADR-0026 §5：不可用模型行尾灰色标注（照常列出，不可请求） */}
+        {m.unavailable !== undefined ? <Text dimColor> 协议不支持</Text> : null}
       </Text>,
     );
   });
 
-  const sel = rows[cursor]?.model;
   return (
     <Box flexDirection="column" width={width} height={height}>
       <InputCursor
@@ -572,6 +575,12 @@ function RightPane({
                 width - 2,
               )}
             </Text>
+            {/* ADR-0026 §5：选中不可用模型时底部显示原因 */}
+            {sel.unavailable !== undefined ? (
+              <Text wrap="truncate" dimColor>
+                {truncateLine(boxSafe(sel.unavailable.reason), width - 2)}
+              </Text>
+            ) : null}
           </>
         ) : (
           <Text dimColor>（未选中）</Text>

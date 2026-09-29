@@ -236,7 +236,7 @@ export async function runProviderSetupWizard(
     }
   }
 
-  // models 字段写入上游声明的能力/价格/限额（provider-setup.md 第 7 节）
+  // models 字段写入上游声明的能力/价格/限额/接口（provider-setup.md 第 7 节）
   const models: Record<string, ModelOverrideShape> = {};
   for (const m of upstreamModels) {
     models[m.id] = {
@@ -245,6 +245,8 @@ export async function runProviderSetupWizard(
       ...(m.maxOutputTokens !== undefined ? { maxOutputTokens: m.maxOutputTokens } : {}),
       ...(m.pricing !== undefined ? { pricing: m.pricing } : {}),
       ...(m.capabilities !== undefined ? { capabilities: m.capabilities } : {}),
+      // ADR-0026 第 2 节：上游 supported_endpoints 原文随条目保存
+      ...(m.endpoints !== undefined ? { endpoints: m.endpoints } : {}),
     };
   }
 
@@ -313,6 +315,8 @@ const MODEL_FIELD_LABELS = {
   reasoning: "推理",
   imageInput: "图片输入",
   reasoningEffort: "思考档位",
+  // ADR-0026 第 7 节：第七个字段「协议」
+  protocol: "协议",
 } as const;
 type ModelFieldKey = keyof typeof MODEL_FIELD_LABELS;
 const MODEL_FIELD_ORDER: readonly ModelFieldKey[] = [
@@ -322,15 +326,21 @@ const MODEL_FIELD_ORDER: readonly ModelFieldKey[] = [
   "reasoning",
   "imageInput",
   "reasoningEffort",
+  "protocol",
 ];
 
 /** 当前值的一行显示（用户未声明时显示生效值；未声明显示 "—"） */
 function modelFieldText(key: ModelFieldKey, value: unknown): string {
-  if (value === undefined) return "—";
+  if (value === undefined) return key === "protocol" ? "协议不支持" : "—";
   if (key === "reasoning") return value === "none" ? "否" : "是";
   if (key === "imageInput") return value === true ? "是" : "否";
   if (key === "reasoningEffort")
     return Array.isArray(value) ? (value.length > 0 ? value.join(",") : "不支持") : "—";
+  if (key === "protocol") {
+    if (value === "openai-compatible") return "Chat Completions";
+    if (value === "anthropic") return "Messages";
+    return "—";
+  }
   return typeof value === "string" || typeof value === "number" ? String(value) : "—";
 }
 
@@ -361,6 +371,13 @@ function parseModelField(key: ModelFieldKey, input: string): unknown {
         .filter((x) => x !== "");
       return levels.length > 0 && levels.every(isReasoningEffortLevel) ? levels : undefined;
     }
+    case "protocol": {
+      // ADR-0026 第 7 节：CLI 输入 chat / messages；- 在调用方处理
+      const t = s.toLowerCase();
+      if (t === "chat") return "openai-compatible";
+      if (t === "messages") return "anthropic";
+      return undefined;
+    }
   }
 }
 
@@ -390,7 +407,7 @@ export async function runProviderModelWizard(
       if (key === "reasoningEffort" && view.fields.reasoning.value === "none") continue;
       const f = view.fields[key];
       io.print(
-        `  ${MODEL_FIELD_LABELS[key]}：${modelFieldText(key, f.value)}（${modelFieldSourceText(f.source)}）`,
+        `  ${MODEL_FIELD_LABELS[key]}：${modelFieldText(key, f.value)}（${modelFieldSourceText(f.source, key)}）`,
       );
     }
     return;
@@ -403,7 +420,7 @@ export async function runProviderModelWizard(
         : (patch.reasoning ?? view.fields.reasoning.value);
     if (key === "reasoningEffort" && effectiveReasoning === "none") continue;
     const f = view.fields[key];
-    const shown = `${modelFieldText(key, f.userValue ?? f.value)}（${modelFieldSourceText(f.source)}）`;
+    const shown = `${modelFieldText(key, f.userValue ?? f.value)}（${modelFieldSourceText(f.source, key)}）`;
     if (!f.editable) {
       io.print(`  ${MODEL_FIELD_LABELS[key]}：${shown}`);
       continue;
@@ -418,7 +435,9 @@ export async function runProviderModelWizard(
               ? "y = 是 / n = 否；- 清除用户编辑"
               : key === "reasoningEffort"
                 ? `逗号分隔（${REASONING_EFFORT_LEVELS.join(",")}）或 none = 不支持；- 清除用户编辑`
-                : "正整数；- 清除用户编辑",
+                : key === "protocol"
+                  ? "chat / messages；- 清除用户编辑（跟随）"
+                  : "正整数；- 清除用户编辑",
     });
     const t = answer.trim();
     if (t === "") continue;

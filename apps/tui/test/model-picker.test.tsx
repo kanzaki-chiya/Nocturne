@@ -101,6 +101,8 @@ const RECENTS: ModelRef[] = [{ provider: "anthropic", model: "claude-opus-4.6" }
 
 function renderPicker(overrides?: {
   width?: number;
+  models?: ModelInfo[];
+  providers?: ProviderOverview[];
   recents?: ModelRef[];
   initialFocus?: "left" | "right";
   initialScope?: { kind: "provider"; id: string };
@@ -114,9 +116,9 @@ function renderPicker(overrides?: {
   const r = render(
     inEnv(
       createElement(ModelPicker, {
-        models: MODELS,
+        models: overrides?.models ?? MODELS,
         recents: overrides?.recents ?? RECENTS,
-        providers: PROVIDERS,
+        providers: overrides?.providers ?? PROVIDERS,
         presets: PRESETS,
         current: CURRENT,
         defaultModel: DEFAULT,
@@ -297,6 +299,41 @@ describe("模型选择页", () => {
     stdin.write("\x1b[H"); // Home
     await pause();
     expect(lastFrame()).toContain("1/40");
+    unmount();
+  });
+
+  // ADR-0026 §5：不可用模型照常列出，行尾标注并在选中详情显示原因
+  it("不可用模型照常列出：行尾「协议不支持」，选中详情显示原因", async () => {
+    const { lastFrame, unmount } = renderPicker({
+      models: [
+        model("gw", "responses-only", {
+          contextWindow: 128_000,
+          unavailable: { reason: "该模型没有可用的服务协议：上游只声明了 /responses 接口" },
+        }),
+        model("gw", "chat-ok", { contextWindow: 128_000 }),
+      ],
+      providers: [
+        {
+          id: "gw",
+          type: "openai-compatible",
+          host: "gw.test",
+          keySource: "credential",
+          origin: "setup",
+          overridden: false,
+          modelCount: 2,
+          managed: true,
+        },
+      ],
+      recents: [],
+    });
+    await pause();
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("gw/responses-only");
+    expect(frame).toContain("协议不支持");
+    expect(frame).toContain("没有可用的服务协议");
+    // 正常模型不带标注
+    const okRow = frame.split("\n").find((l) => l.includes("chat-ok")) ?? "";
+    expect(okRow).not.toContain("协议不支持");
     unmount();
   });
 });
