@@ -66,8 +66,18 @@ export interface MergeResult {
 const CONFIG_KINDS: ReadonlySet<LayerKind> = new Set(["user", "project", "env", "cli"]);
 const isConfigKind = (k: LayerKind): boolean => CONFIG_KINDS.has(k);
 
-/** 顶层模型字段（逐个覆盖；pricing 作为整体值替换，不下钻） */
-const MODEL_TOP_FIELDS = ["displayName", "contextWindow", "maxOutputTokens", "pricing"] as const;
+/**
+ * 顶层模型字段（逐个覆盖；pricing/endpoints 作为整体值替换，不下钻）。
+ * ADR-0026：protocol/endpoints 同样逐字段——高层只覆盖它实际声明的字段。
+ */
+const MODEL_TOP_FIELDS = [
+  "displayName",
+  "contextWindow",
+  "maxOutputTokens",
+  "pricing",
+  "protocol",
+  "endpoints",
+] as const;
 /** capabilities 内的键（逐键覆盖；数组整体替换） */
 const CAP_FIELDS = [
   "toolCalls",

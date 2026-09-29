@@ -300,6 +300,8 @@ export async function refreshUpstreamLimits(
             },
           }
         : {}),
+      // ADR-0026 第 2 节：上游 supported_endpoints 原文随模型列表保存
+      ...(m.endpoints !== undefined ? { endpoints: m.endpoints } : {}),
     };
   }
   const updated: ProviderEntryConfig = {

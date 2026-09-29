@@ -10,6 +10,7 @@ import type {
   HookEntry,
   HookPoint,
   McpServerEntry,
+  ModelProtocol,
   ModelRef,
   PermissionPresetName,
   PermissionRule,
@@ -41,9 +42,19 @@ export interface ModelOverrideShape {
    * 只在上游或配置明确声明时存在；界面未声明时留空。
    */
   pricing?: { input?: number | undefined; output?: number | undefined } | undefined;
+  /**
+   * 手写协议指定（ADR-0026 第 2 节，最高优先级）：声明后不再按
+   * endpoints 推导或条目 type 回落。
+   */
+  protocol?: ModelProtocol | undefined;
+  /**
+   * 上游 supported_endpoints 的保存位（ADR-0026 第 2 节）；
+   * 手写配置也可声明，数据层面与上游同位。
+   */
+  endpoints?: string[] | undefined;
 }
 
-/** userModels 中单个模型的用户编辑（ADR-0024 第 1 节；六个可编辑字段） */
+/** userModels 中单个模型的用户编辑（ADR-0024 第 1 节；七个可编辑字段） */
 export interface UserModelEntry {
   displayName?: string | undefined;
   contextWindow?: number | undefined;
@@ -56,6 +67,8 @@ export interface UserModelEntry {
         reasoningEffort?: ReasoningEffortLevel[] | undefined;
       }
     | undefined;
+  /** 用户编辑的协议指定（ADR-0026 第 7 节）；高于 endpoints 推导、低于手写 */
+  protocol?: ModelProtocol | undefined;
 }
 
 /**
@@ -268,6 +281,8 @@ export interface UpstreamModelEntry {
         imageInput?: boolean | undefined;
       }
     | undefined;
+  /** 上游 supported_endpoints 原文（ADR-0026 第 2 节；协议推导的输入事实） */
+  endpoints?: string[] | undefined;
 }
 
 /** 内置模型目录查询（provider 层 BUILTIN_MODEL_CATALOG 的注入点——config 不依赖 provider） */
@@ -308,8 +323,10 @@ export type ModelFieldSource =
   | { kind: "config"; layer: "user" | "project" | "env" | "cli"; path?: string | undefined }
   | { kind: "builtin" }
   | { kind: "default" }
-  /** 仅 reasoningEffort：由 reasoning ≠ "none" 推导的全档 */
-  | { kind: "derived" };
+  /** reasoningEffort：由 reasoning ≠ "none" 推导的全档；protocol：由 endpoints 推导 */
+  | { kind: "derived" }
+  /** 仅 protocol（ADR-0026 第 2 节）：回落到服务商条目 type */
+  | { kind: "entryType" };
 
 /** 一个可编辑字段：生效值、来源、可否在编辑页修改、当前用户编辑值 */
 export interface ModelField<T> {
@@ -340,7 +357,14 @@ export interface ModelSettingsView {
     reasoning: ModelField<"none" | "hidden" | "visible">;
     imageInput: ModelField<boolean>;
     reasoningEffort: ModelField<ReasoningEffortLevel[]>;
+    /**
+     * 生效协议（ADR-0026 第 7 节）：value 为生效的协议；
+     * 推导结果为 unavailable 时 value 为 undefined、unavailable 给出原因。
+     */
+    protocol: ModelField<ModelProtocol>;
   };
+  /** 模型当前不可用时的原因（协议推导为 unavailable，ADR-0026 第 5 节） */
+  unavailable?: { reason: string } | undefined;
 }
 
 /**

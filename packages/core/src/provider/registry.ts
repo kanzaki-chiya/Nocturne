@@ -4,6 +4,7 @@
  */
 import { normalizeReasoningEffortLevels, type ModelRef } from "../protocol/index.js";
 import { BUILTIN_MODEL_CATALOG, DEFAULT_MODEL_FALLBACK } from "./catalog.js";
+import { isModelProtocol, withEffectiveProtocol } from "./effective-protocol.js";
 import { withReasoningEfforts } from "./reasoning.js";
 import type { ModelInfo, Provider, ProviderRegistry, ResolvedModel } from "./types.js";
 
@@ -16,8 +17,12 @@ export class UnknownModelError extends Error {
   }
 }
 
-/** 用户在 Provider 配置里对某个模型的覆盖 */
-export type ModelOverride = Partial<Omit<ModelInfo, "ref">>;
+/**
+ * 用户在 Provider 配置里对某个模型的覆盖。
+ * unavailable 是派生结果（ADR-0026 §5），不是可声明字段——覆盖
+ * protocol/endpoints 后由装配层重新推导。
+ */
+export type ModelOverride = Partial<Omit<ModelInfo, "ref" | "unavailable">>;
 
 /** 在既有 ModelInfo 上应用用户覆盖 */
 export function applyModelOverride(
@@ -31,6 +36,9 @@ export function applyModelOverride(
     contextWindow: override.contextWindow ?? base.contextWindow,
     maxOutputTokens: override.maxOutputTokens ?? base.maxOutputTokens,
     pricing: override.pricing ?? base.pricing,
+    protocol: override.protocol ?? base.protocol,
+    endpoints: override.endpoints ?? base.endpoints,
+    ...(base.unavailable !== undefined ? { unavailable: base.unavailable } : {}),
     capabilities: {
       ...base.capabilities,
       ...override.capabilities,
@@ -86,7 +94,13 @@ export function createProviderRegistry(
       const base = configured ?? resolveModelInfo(ref, undefined);
       const merged = applyModelOverride(base, modelOverrides[ref.provider]?.[ref.model]);
       // 清单内模型适配器已解析（幂等）；清单外模型按逐模型能力推导档位。
-      const model = withReasoningEfforts(merged);
+      const merged2 = withReasoningEfforts(merged);
+      // ADR-0026：按条目标识协议重算生效协议——清单内模型已盖章（幂等），
+      // 清单外/覆盖后的模型取条目 type；非协议感知的 Provider（type 不是
+      // 两种协议）不盖章。
+      const model = isModelProtocol(provider.type)
+        ? withEffectiveProtocol(merged2, provider.type)
+        : merged2;
       return { provider, model };
     },
     providers: () => [...byId.values()],

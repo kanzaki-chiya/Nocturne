@@ -444,6 +444,86 @@ describe("listModelSettings 来源标注", () => {
     expect(v?.readonlyHint).toContain(configPath());
     expect(v?.fields.contextWindow.editable).toBe(false);
   });
+
+  // ADR-0026 §2/§7：第七个字段「协议」——无声明回落条目 type（entryType 来源）
+  it("协议：无任何声明时来源 entryType、取条目 type", async () => {
+    await writeProviders([ENTRY]);
+    const rc = await load();
+    const v = (await rc.listModelSettings("corp")).find((x) => x.modelId === "m1");
+    expect(v?.fields.protocol.value).toBe("openai-compatible");
+    expect(v?.fields.protocol.source.kind).toBe("entryType");
+    expect(v?.fields.protocol.editable).toBe(true);
+    expect(v?.unavailable).toBeUndefined();
+  });
+
+  it("协议：endpoints 推导 → 上游/接口声明来源；/responses-only → unavailable", async () => {
+    await writeProviders([
+      {
+        ...ENTRY,
+        models: {
+          m1: { endpoints: ["/messages"] },
+          m2: { endpoints: ["/responses"] },
+        },
+      },
+    ]);
+    // 手写层声明 endpoints → 协议值按接口声明推导（derived 来源）
+    await writeJson(configPath(), {
+      providers: [
+        {
+          id: "corp",
+          baseURL: "https://api.corp.test/v1",
+          models: { m3: { endpoints: ["/v1/chat/completions/"] } },
+        },
+      ],
+    });
+    const rc = await load();
+    const views = await rc.listModelSettings("corp");
+    const v1 = views.find((x) => x.modelId === "m1");
+    const v2 = views.find((x) => x.modelId === "m2");
+    const v3 = views.find((x) => x.modelId === "m3");
+    // 条目 type=openai-compatible 但模型只有 /messages → 推导为 anthropic；
+    // endpoints 由上游（providers.json refresh 位）声明 → upstream 来源
+    expect(v1?.fields.protocol.value).toBe("anthropic");
+    expect(v1?.fields.protocol.source.kind).toBe("upstream");
+    // 无可识别接口：模型照常列出，视图带 unavailable 原因
+    expect(v2?.fields.protocol.value).toBeUndefined();
+    expect(v2?.unavailable?.reason).toContain("没有可用的服务协议");
+    // 路径末尾归一化：/v1/chat/completions/ ≡ /chat/completions；
+    // 手写层声明的 endpoints → 按接口声明推导
+    expect(v3?.fields.protocol.value).toBe("openai-compatible");
+    expect(v3?.fields.protocol.source.kind).toBe("derived");
+  });
+
+  it("协议：userModels 编辑 → user 来源；手写 config 声明 → config 来源只读", async () => {
+    await writeProviders([
+      {
+        ...ENTRY,
+        userModels: { m1: { protocol: "anthropic" } },
+        models: { m1: { endpoints: ["/chat/completions"] }, m2: {} },
+      },
+    ]);
+    await writeJson(configPath(), {
+      providers: [
+        {
+          id: "corp",
+          baseURL: "https://api.corp.test/v1",
+          models: { m2: { protocol: "anthropic" } },
+        },
+      ],
+    });
+    const rc = await load();
+    const views = await rc.listModelSettings("corp");
+    const v1 = views.find((x) => x.modelId === "m1");
+    const v2 = views.find((x) => x.modelId === "m2");
+    // userModels.protocol 压过 endpoints 推导（ADR-0026 §2 优先级）
+    expect(v1?.fields.protocol.value).toBe("anthropic");
+    expect(v1?.fields.protocol.source.kind).toBe("user");
+    expect(v1?.fields.protocol.userValue).toBe("anthropic");
+    // 手写 models.<id>.protocol → config 来源、只读
+    expect(v2?.fields.protocol.value).toBe("anthropic");
+    expect(v2?.fields.protocol.source.kind).toBe("config");
+    expect(v2?.fields.protocol.editable).toBe(false);
+  });
 });
 
 // ── saveModelSettings ──────────────────────────────────
@@ -575,6 +655,47 @@ describe("saveModelSettings", () => {
     expect(raw.providers[0]?.userModels).toBeUndefined();
     // config.json 从未被写
     expect(await fs.readFile(configPath(), "utf8").catch(() => undefined)).toBe(cfgBefore);
+  });
+
+  it("协议字段：写入 userModels.protocol；清除回落；非法值拒绝", async () => {
+    await writeProviders([ENTRY]);
+    const rc = await load();
+    await rc.saveModelSettings("corp", "m1", { protocol: "anthropic" });
+    let raw = (await readJson(providersPath())) as {
+      providers: { id: string; userModels?: Record<string, Record<string, unknown>> }[];
+    };
+    expect(raw.providers[0]?.userModels?.m1).toEqual({ protocol: "anthropic" });
+    expect((await mergedModel())?.protocol).toBe("anthropic");
+    // 清除 → 回落条目 type
+    await rc.saveModelSettings("corp", "m1", { protocol: null });
+    raw = (await readJson(providersPath())) as typeof raw;
+    expect(raw.providers[0]?.userModels).toBeUndefined();
+    expect((await mergedModel())?.protocol).toBeUndefined();
+    // 非法协议值拒绝且文件不变
+    const before = await fs.readFile(providersPath(), "utf8");
+    await expect(
+      rc.saveModelSettings("corp", "m1", { protocol: "grpc" } as never),
+    ).rejects.toMatchObject({ code: "config_invalid" });
+    expect(await fs.readFile(providersPath(), "utf8")).toBe(before);
+  });
+
+  it("config 来源的协议字段：patch 拒绝", async () => {
+    await writeProviders([ENTRY]);
+    await writeJson(configPath(), {
+      providers: [
+        {
+          id: "corp",
+          baseURL: "https://api.corp.test/v1",
+          models: { m1: { protocol: "anthropic" } },
+        },
+      ],
+    });
+    const rc = await load();
+    const before = await fs.readFile(providersPath(), "utf8");
+    await expect(
+      rc.saveModelSettings("corp", "m1", { protocol: "openai-compatible" }),
+    ).rejects.toMatchObject({ code: "config_invalid" });
+    expect(await fs.readFile(providersPath(), "utf8")).toBe(before);
   });
 
   it("refresh 不覆盖 userModels", async () => {

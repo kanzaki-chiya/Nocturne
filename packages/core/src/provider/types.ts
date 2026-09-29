@@ -6,6 +6,7 @@ import type {
   ContentBlock,
   FinishReason,
   ImageMimeType,
+  ModelProtocol,
   ModelRef,
   ReasoningEffortLevel,
   ToolCallRef,
@@ -46,6 +47,21 @@ export interface ModelInfo {
   /** 每百万 token 的 USD 价格（上游声明换算；provider-setup.md 第 7 节） */
   pricing?: { input?: number | undefined; output?: number | undefined } | undefined;
   capabilities: ModelCapabilities;
+  /**
+   * 生效协议（ADR-0026 §1）：该模型请求实际使用的服务协议；
+   * 只由带协议的适配器/装配层填写（FakeProvider 等不填）。
+   */
+  protocol?: ModelProtocol | undefined;
+  /**
+   * 上游声明的服务接口（supported_endpoints 原文；ADR-0026 §2）：
+   * 推导生效协议的原始事实，本身不代表可用协议。
+   */
+  endpoints?: string[] | undefined;
+  /**
+   * 不可用模型（ADR-0026 §5）：上游声明的接口无一可识别
+   * （如只有 /responses）；该模型继续在清单中展示，但不可发请求。
+   */
+  unavailable?: { reason: string } | undefined;
 }
 
 // ── 请求（provider-api.md 第 3 节） ────────────────────────
@@ -85,6 +101,12 @@ export type ModelMessage =
 export interface ModelRequest {
   /** Provider 内的模型 id */
   model: string;
+  /**
+   * 生效协议（ADR-0026 §4）：由 resolve 产出的 ModelInfo.protocol 随请求
+   * 带给路由 Provider；缺省 = 未决议，路由按清单盖章/条目 type 回落。
+   * 不透明数据——调用方不解释其取值。
+   */
+  protocol?: ModelProtocol | undefined;
   system: SystemBlock[];
   messages: ModelMessage[];
   tools: ToolSpec[];
@@ -192,6 +214,11 @@ export interface UpstreamModelInfo {
   capabilities?:
     | { reasoning?: "none" | "hidden" | "visible" | undefined; imageInput?: boolean | undefined }
     | undefined;
+  /**
+   * 上游声明的服务接口（supported_endpoints 原文，ADR-0026 §2）：
+   * 非空才携带；推导协议在运行时装配处完成，这里只保存事实。
+   */
+  endpoints?: string[] | undefined;
 }
 
 /**

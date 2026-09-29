@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeDurableEvent,
+  deriveProtocolFromEndpoints,
   encodeDurableEvent,
   EventParseError,
   isDurableEvent,
   isDurableEventType,
   isEphemeralEventType,
   LOG_FORMAT_VERSION,
+  resolveEffectiveProtocol,
   type DurableEvent,
   type MessageAssistantPayload,
 } from "./index.js";
@@ -216,5 +218,63 @@ describe("事件类型守卫", () => {
         payload: { status: "idle" },
       }),
     ).toBe(false);
+  });
+});
+
+// ── ADR-0026 §2：按接口声明推导生效协议 ──────────────────
+
+describe("deriveProtocolFromEndpoints", () => {
+  it("未声明 / 空列表 → undefined（交调用方继续回落）", () => {
+    expect(deriveProtocolFromEndpoints(undefined, "openai-compatible")).toBeUndefined();
+    expect(deriveProtocolFromEndpoints([], "anthropic")).toBeUndefined();
+  });
+
+  it("条目 type 对应接口在列表中 → 条目 type（两接口并存时）", () => {
+    const both = ["/chat/completions", "/messages"];
+    expect(deriveProtocolFromEndpoints(both, "openai-compatible")).toBe("openai-compatible");
+    expect(deriveProtocolFromEndpoints(both, "anthropic")).toBe("anthropic");
+  });
+
+  it("条目本家接口不在列表 → 依次 /chat/completions、/messages", () => {
+    expect(deriveProtocolFromEndpoints(["/messages"], "openai-compatible")).toBe("anthropic");
+    expect(deriveProtocolFromEndpoints(["/chat/completions"], "anthropic")).toBe(
+      "openai-compatible",
+    );
+  });
+
+  it("只有 /responses 或全部无法识别 → unavailable", () => {
+    expect(deriveProtocolFromEndpoints(["/responses"], "openai-compatible")).toBe("unavailable");
+    expect(deriveProtocolFromEndpoints(["/responses", "/embeddings"], "anthropic")).toBe(
+      "unavailable",
+    );
+  });
+
+  it("按路径末尾比较：/v1/messages ≡ /messages；大小写与尾斜杠不敏感", () => {
+    expect(deriveProtocolFromEndpoints(["/v1/messages"], "openai-compatible")).toBe("anthropic");
+    expect(deriveProtocolFromEndpoints(["/api/v2/Chat/Completions/"], "anthropic")).toBe(
+      "openai-compatible",
+    );
+  });
+});
+
+describe("resolveEffectiveProtocol", () => {
+  it("优先级：显式声明 > endpoints 推导 > 条目 type", () => {
+    // 显式声明压过 endpoints 推导（含"只有 /responses"的 unavailable 情形）
+    expect(resolveEffectiveProtocol("anthropic", ["/responses"], "openai-compatible")).toBe(
+      "anthropic",
+    );
+    expect(resolveEffectiveProtocol("openai-compatible", ["/messages"], "openai-compatible")).toBe(
+      "openai-compatible",
+    );
+    // 无声明走 endpoints 推导
+    expect(resolveEffectiveProtocol(undefined, ["/messages"], "openai-compatible")).toBe(
+      "anthropic",
+    );
+    expect(resolveEffectiveProtocol(undefined, ["/responses"], "openai-compatible")).toBe(
+      "unavailable",
+    );
+    // 无声明无 endpoints → 条目 type
+    expect(resolveEffectiveProtocol(undefined, undefined, "anthropic")).toBe("anthropic");
+    expect(resolveEffectiveProtocol(undefined, [], "openai-compatible")).toBe("openai-compatible");
   });
 });

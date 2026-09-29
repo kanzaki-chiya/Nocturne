@@ -9,6 +9,79 @@ export interface ModelRef {
   model: string;
 }
 
+// ── 服务协议（ADR-0026）───────────────────────────────────
+
+/**
+ * Nocturne 已接入的服务协议：openai-compatible（Chat Completions）
+ * 与 anthropic（Messages）。Provider 条目的 type 同时是默认协议。
+ */
+export type ModelProtocol = "openai-compatible" | "anthropic";
+
+/**
+ * 模型的生效协议（ADR-0026 §1）：两种可用协议之一；
+ * "unavailable" = 上游声明的接口无一可识别（如只有 /responses），
+ * 该模型继续出现在清单中但不可发请求。
+ */
+export type EffectiveProtocol = ModelProtocol | "unavailable";
+
+/** 协议对应的接口路径（按末尾比较；ADR-0026 §3） */
+export const PROTOCOL_ENDPOINTS: Record<ModelProtocol, string> = {
+  "openai-compatible": "/chat/completions",
+  anthropic: "/messages",
+};
+
+/** 接口路径归一化：小写、去尾斜杠、保证前导斜杠——按末尾比较 */
+function normalizeEndpoint(endpoint: string): string {
+  const norm = endpoint.trim().toLowerCase().replace(/\/+$/, "");
+  return norm.startsWith("/") ? norm : `/${norm}`;
+}
+
+/**
+ * 由上游 supported_endpoints 推导生效协议（ADR-0026 §2 四步）：
+ * 1. 条目 type 对应的接口在列表中 → 条目 type；
+ * 2. 含 /chat/completions → openai-compatible；
+ * 3. 含 /messages → anthropic；
+ * 4. 否则（只有 /responses 或全部无法识别）→ "unavailable"。
+ * 未声明/空列表 → undefined（按未声明处理，交给调用方继续回落）。
+ * 比较按路径末尾（/v1/messages ≡ /messages）。
+ */
+export function deriveProtocolFromEndpoints(
+  endpoints: readonly string[] | undefined,
+  entryType: ModelProtocol,
+): EffectiveProtocol | undefined {
+  if (endpoints === undefined || endpoints.length === 0) return undefined;
+  const norms = endpoints.map(normalizeEndpoint);
+  const has = (path: string) => norms.some((n) => n.endsWith(path));
+  if (has(PROTOCOL_ENDPOINTS[entryType])) return entryType;
+  if (has(PROTOCOL_ENDPOINTS["openai-compatible"])) return "openai-compatible";
+  if (has(PROTOCOL_ENDPOINTS.anthropic)) return "anthropic";
+  return "unavailable";
+}
+
+/**
+ * 生效协议的最终解析（ADR-0026 §2 优先级）：
+ * 显式声明（手写 models.<id>.protocol 或用户编辑）> endpoints 推导 > 条目 type。
+ */
+export function resolveEffectiveProtocol(
+  declared: ModelProtocol | undefined,
+  endpoints: readonly string[] | undefined,
+  entryType: ModelProtocol,
+): EffectiveProtocol {
+  return declared ?? deriveProtocolFromEndpoints(endpoints, entryType) ?? entryType;
+}
+
+/**
+ * 不可用说明（ADR-0026 §5）：模型列表标注、setModel 拒绝、Turn 报错与
+ * 模型编辑页共用同一文本，并指向补救方式（编辑页/CLI 手动指定协议）。
+ */
+export function unavailableProtocolReason(endpoints: readonly string[]): string {
+  const list = endpoints.length > 0 ? endpoints.join("、") : "未声明的可识别接口";
+  return (
+    `该模型没有可用的服务协议：上游只声明了 ${list} 接口，Nocturne 暂不支持；` +
+    `如确认该模型可用 Chat Completions 或 Messages，可在「编辑模型」或 /provider model 指定协议`
+  );
+}
+
 /**
  * 思考强度的中性档位（ADR-0018；provider-api.md 第 2、3 节）。
  * `off` 恒可用（不发送任何思考参数），不在模型的"可用档位"声明集合中；
@@ -292,6 +365,11 @@ export type HistoryEntry =
       turnId: string;
       messageId: string;
       model: ModelRef;
+      /**
+       * 产生本条消息的生效协议（ADR-0026 §6）；旧日志无此字段——
+       * 缺省时 providerData 回传只比较服务商。
+       */
+      protocol?: ModelProtocol | undefined;
       content: ContentBlock[];
       toolCalls: ToolCallRef[];
       usage: Usage | undefined;

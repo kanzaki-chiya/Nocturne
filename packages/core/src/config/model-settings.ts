@@ -6,6 +6,9 @@
 import {
   isReasoningEffortLevel,
   REASONING_EFFORT_LEVELS,
+  resolveEffectiveProtocol,
+  unavailableProtocolReason,
+  type ModelProtocol,
   type ReasoningEffortLevel,
 } from "../protocol/index.js";
 import type { FieldDecl, FieldOrigin, ModelFieldOrigins } from "./merge.js";
@@ -13,6 +16,7 @@ import type {
   BuiltinModelLookup,
   ModelField,
   ModelFieldSource,
+  ModelOverrideShape,
   ModelSettingsPatch,
   ModelSettingsView,
   UserModelEntry,
@@ -62,7 +66,7 @@ export function providerOriginHint(providerId: string, origin: FieldOrigin | und
 }
 
 /** 字段来源的界面文案（TUI 编辑页与 CLI 问答共用） */
-export function modelFieldSourceText(source: ModelFieldSource): string {
+export function modelFieldSourceText(source: ModelFieldSource, forKey?: string): string {
   switch (source.kind) {
     case "upstream":
       return "上游";
@@ -87,7 +91,9 @@ export function modelFieldSourceText(source: ModelFieldSource): string {
     case "default":
       return "默认";
     case "derived":
-      return "按推理能力推导";
+      return forKey === "protocol" ? "按接口声明推导" : "按推理能力推导";
+    case "entryType":
+      return "服务商类型";
   }
 }
 
@@ -173,6 +179,66 @@ function resolveEffort(
   return { value: [...REASONING_EFFORT_LEVELS], source: { kind: "derived" } };
 }
 
+/**
+ * 协议字段（ADR-0026 第 2、7 节）：
+ * - 显式声明（手写 models.<id>.protocol 或用户编辑）→ 生效值 = 声明值；
+ * - 否则按 endpoints 推导：可识别协议 → 生效值；unavailable → value 空、
+ *   unavailable 给原因；
+ * - 无 endpoints → 条目 type（来源 entryType）。
+ * 手写声明只读（与其他字段同规则）；用户编辑参与「跟随」lowerValue。
+ */
+function protocolField(
+  ctx: FieldCtx,
+  entryType: ModelProtocol,
+  mergedModel: ModelOverrideShape | undefined,
+  userValue: ModelProtocol | undefined,
+): { field: ModelField<ModelProtocol>; unavailable?: { reason: string } } {
+  const pDecls = decls(ctx, "protocol");
+  const top = pDecls.at(-1);
+  const lowerTop = lastNonUserDecl(pDecls);
+  const endpoints = mergedModel?.endpoints;
+  const derive = (declared: ModelProtocol | undefined): ModelProtocol | undefined => {
+    const eff = resolveEffectiveProtocol(declared, endpoints, entryType);
+    return eff === "unavailable" ? undefined : eff;
+  };
+  // endpoints 声明的来源：上游写入 → "upstream"；手写层声明 → "derived"（按接口声明推导）
+  const endpointsTop = decls(ctx, "endpoints").at(-1)?.origin;
+  const deriveSource: ModelFieldSource =
+    endpointsTop === undefined
+      ? { kind: "entryType" }
+      : endpointsTop.kind === "setup"
+        ? { kind: "upstream" }
+        : endpointsTop.kind === "modelsDev"
+          ? { kind: "modelsDev" }
+          : { kind: "derived" };
+  const lowerValue = derive(lowerTop?.value as ModelProtocol | undefined);
+  const base = {
+    editable: ctx.managed,
+    lowerValue,
+    ...(userValue !== undefined ? { userValue } : {}),
+  };
+  if (top !== undefined) {
+    // 显式声明优先：unavailable 不可能出现（声明值即生效值）
+    const source = toSource(top.origin);
+    return {
+      field: {
+        ...base,
+        value: top.value as ModelProtocol,
+        source,
+        editable: ctx.managed && source.kind !== "config",
+      },
+    };
+  }
+  const eff = resolveEffectiveProtocol(undefined, endpoints, entryType);
+  if (eff === "unavailable") {
+    return {
+      field: { ...base, value: undefined, source: deriveSource },
+      unavailable: { reason: unavailableProtocolReason(endpoints ?? []) },
+    };
+  }
+  return { field: { ...base, value: eff, source: deriveSource } };
+}
+
 export interface ModelSettingsViewInput {
   providerId: string;
   /** 合并结果中的服务商条目（不存在则无清单模型） */
@@ -193,6 +259,8 @@ export function buildModelSettingsViews(input: ModelSettingsViewInput): ModelSet
   const readonlyHint = managed
     ? undefined
     : providerOriginHint(providerId, modelInfo.providers.get(providerId));
+  // 条目 type = 默认协议（ADR-0026 第 3 节）；缺省按 openai-compatible（schema 已强制其 baseURL）
+  const entryType: ModelProtocol = entry?.type ?? "openai-compatible";
   const views: ModelSettingsView[] = [];
   for (const modelId of Object.keys(entry?.models ?? {}).sort()) {
     const model = entry?.models?.[modelId];
@@ -230,12 +298,14 @@ export function buildModelSettingsViews(input: ModelSettingsViewInput): ModelSet
       lowerValue: lowerEffort,
       ...(uCaps?.reasoningEffort !== undefined ? { userValue: uCaps.reasoningEffort } : {}),
     };
+    const protocol = protocolField(ctx, entryType, model, userEntry?.protocol);
 
     views.push({
       providerId,
       modelId,
       readonly: !managed,
       ...(readonlyHint !== undefined ? { readonlyHint } : {}),
+      ...(protocol.unavailable !== undefined ? { unavailable: protocol.unavailable } : {}),
       fields: {
         displayName: scalarField<string>(
           ctx,
@@ -271,13 +341,14 @@ export function buildModelSettingsViews(input: ModelSettingsViewInput): ModelSet
           uCaps?.imageInput,
         ),
         reasoningEffort,
+        protocol: protocol.field,
       },
     });
   }
   return views;
 }
 
-/** 「不支持思考强度」档位列表的归一化（与 providers.md ADR-0018 链同口径） */
+/** 七个可编辑字段（ADR-0024 第 3 节 + ADR-0026 第 7 节的「协议」） */
 const FIELD_KEYS = [
   "displayName",
   "contextWindow",
@@ -285,6 +356,7 @@ const FIELD_KEYS = [
   "reasoning",
   "imageInput",
   "reasoningEffort",
+  "protocol",
 ] as const;
 type FieldKey = (typeof FIELD_KEYS)[number];
 
@@ -345,7 +417,9 @@ export function configFieldError(
               ? "推理"
               : key === "imageInput"
                 ? "图片输入"
-                : "思考档位";
+                : key === "protocol"
+                  ? "协议"
+                  : "思考档位";
     return `${name}${label}，不能在编辑页修改`;
   }
   return undefined;
@@ -366,6 +440,10 @@ export function patchValueError(patch: ModelSettingsPatch): string | undefined {
   const e = patch.reasoningEffort as readonly string[] | null | undefined;
   if (e?.some((l) => !isReasoningEffortLevel(l)) === true) {
     return `思考档位只能是 ${REASONING_EFFORT_LEVELS.join("/")}`;
+  }
+  const p: unknown = patch.protocol;
+  if (p !== undefined && p !== null && p !== "openai-compatible" && p !== "anthropic") {
+    return `协议只能为 openai-compatible/anthropic`;
   }
   return undefined;
 }

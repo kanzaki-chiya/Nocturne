@@ -71,7 +71,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     label: "其他 Anthropic 兼容服务",
     type: "anthropic",
     defaultName: "",
-    fetchableModels: false,
+    fetchableModels: true,
   },
 ];
 
@@ -92,8 +92,12 @@ function joinUrl(base: string, path: string): string {
   return `${base.replace(/\/+$/, "")}${path}`;
 }
 
+/**
+ * anthropic 条目的请求基地址（ADR-0026 §3）：与消息请求共用同一 baseURL
+ * 语义——省略 baseURL 时用官方 https://api.anthropic.com/v1。
+ */
 function anthropicBase(entry: FetchModelsRequest): string {
-  return entry.baseURL ?? "https://api.anthropic.com";
+  return entry.baseURL ?? "https://api.anthropic.com/v1";
 }
 
 function authHeaders(entry: FetchModelsRequest, key: string | undefined): Record<string, string> {
@@ -166,6 +170,8 @@ interface RawModel {
   top_provider?: unknown;
   pricing?: unknown;
   supported_parameters?: unknown;
+  /** 上游声明的服务接口列表（ADR-0026 §2；OpenRouter 等聚合服务逐模型给出） */
+  supported_endpoints?: unknown;
   architecture?: unknown;
   // Anthropic /v1/models 官方声明的限额字段
   max_input_tokens?: unknown;
@@ -233,6 +239,15 @@ function mapUpstreamModel(raw: RawModel): UpstreamModelInfo | undefined {
   if (caps.reasoning !== undefined || caps.imageInput !== undefined) {
     out.capabilities = caps;
   }
+
+  // ADR-0026 §2：supported_endpoints 原文保存（字符串数组、非空才记）；
+  // 空数组按未声明处理——由调用方继续走条目 type 回落
+  if (Array.isArray(raw.supported_endpoints)) {
+    const eps = raw.supported_endpoints.filter(
+      (e): e is string => typeof e === "string" && e !== "",
+    );
+    if (eps.length > 0) out.endpoints = eps;
+  }
   return out;
 }
 
@@ -246,9 +261,11 @@ export async function fetchModels(
   key: string | undefined,
   signal?: AbortSignal,
 ): Promise<UpstreamModelInfo[]> {
+  // ADR-0026 §3：两种协议共用条目的 baseURL 语义（含 /v1）——
+  // anthropic 条目为 <baseURL 或官方默认>/models（不再是额外的 /v1 段）
   const url =
     entry.type === "anthropic"
-      ? joinUrl(anthropicBase(entry), "/v1/models")
+      ? joinUrl(anthropicBase(entry), "/models")
       : entry.baseURL !== undefined && entry.baseURL !== ""
         ? joinUrl(entry.baseURL, "/models")
         : (() => {

@@ -245,6 +245,7 @@ describe("refreshUpstreamLimits", () => {
         maxOutputTokens: 393_216,
         pricing: { input: 0.5, output: 1.5 },
         capabilities: { reasoning: "visible", imageInput: true },
+        endpoints: ["/chat/completions", "/responses"],
       },
       { id: "m2" }, // 无声明字段 → 全 undefined
     ];
@@ -271,6 +272,8 @@ describe("refreshUpstreamLimits", () => {
     expect(corp?.models?.m1?.contextWindow).toBe(1_000_000);
     expect(corp?.models?.m1?.maxOutputTokens).toBe(393_216);
     expect(corp?.models?.m1?.pricing).toEqual({ input: 0.5, output: 1.5 });
+    // ADR-0026 §1：上游 supported_endpoints 原文写回 models.<id>.endpoints
+    expect(corp?.models?.m1?.endpoints).toEqual(["/chat/completions", "/responses"]);
     expect(corp?.models?.m2).toEqual({});
     await expect(rc.refreshUpstreamLimits("absent")).rejects.toMatchObject({
       code: "config_invalid",

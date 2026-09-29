@@ -11,6 +11,9 @@ import { ConfigError } from "./errors.js";
 
 const subjectKindSchema = z.enum(["read", "edit", "shell", "network", "mcp", "subagent"]);
 
+/** 逐模型协议（ADR-0026）：models/userModels 的 protocol 字段取值 */
+const modelProtocolSchema = z.enum(["openai-compatible", "anthropic"]);
+
 /** 思考档位（ADR-0018）：全部七档（含 off）/ 可用档位（六档，不含 off） */
 const reasoningEffortSchema = z.enum(REASONING_EFFORT_ORDER);
 const reasoningEffortLevelSchema = z.enum(REASONING_EFFORT_LEVELS);
@@ -45,6 +48,9 @@ export const modelOverrideSchema = z.object({
       output: z.number().nonnegative().optional(),
     })
     .optional(),
+  // ADR-0026 第 2 节：手写协议指定（最高优先级）与上游/手写接口声明
+  protocol: modelProtocolSchema.optional(),
+  endpoints: z.array(z.string().min(1)).optional(),
 });
 
 /** Provider 条目 schema（config.json 与 providers.json 共用） */
@@ -88,6 +94,8 @@ export const providerEntrySchema = z
               reasoningEffort: z.array(reasoningEffortLevelSchema).optional(),
             })
             .optional(),
+          // ADR-0026 第 7 节：编辑页「协议」字段的用户编辑
+          protocol: modelProtocolSchema.optional(),
         }),
       )
       .optional(),

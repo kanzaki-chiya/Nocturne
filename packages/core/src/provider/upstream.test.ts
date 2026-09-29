@@ -41,7 +41,8 @@ describe("服务商预设", () => {
       "custom-anthropic",
     ]);
     expect(presets.find((p) => p.id === "anthropic")?.baseURL).toBeUndefined();
-    expect(presets.find((p) => p.id === "custom-anthropic")?.fetchableModels).toBe(false);
+    // ADR-0026 §3：「其他 Anthropic 兼容」可拉取 /models（失败照旧转手动）
+    expect(presets.find((p) => p.id === "custom-anthropic")?.fetchableModels).toBe(true);
   });
 });
 
@@ -112,6 +113,39 @@ describe("fetchModels 字段映射", () => {
     expect(models[1]?.displayName).toBe("No Caps");
     // 无 key 时不发 Authorization
     expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBeNull();
+  });
+
+  it("supported_endpoints 原文映射：字符串数组、非空才记（ADR-0026 §1）", async () => {
+    stubFetch(() =>
+      jsonRes({
+        data: [
+          { id: "m-chat", supported_endpoints: ["/chat/completions", "/responses"] },
+          { id: "m-msg", supported_endpoints: ["/messages"] },
+          { id: "m-empty", supported_endpoints: [] },
+          { id: "m-bad", supported_endpoints: ["/messages", 1, null, ""] },
+          { id: "m-none" },
+        ],
+      }),
+    );
+    const models = await fetchModels(
+      { type: "openai-compatible", baseURL: "http://gw.test/v1" },
+      undefined,
+    );
+    const byId = new Map(models.map((m) => [m.id, m]));
+    expect(byId.get("m-chat")?.endpoints).toEqual(["/chat/completions", "/responses"]);
+    expect(byId.get("m-msg")?.endpoints).toEqual(["/messages"]);
+    // 空数组按未声明处理；数组内非字符串/空串剔除后仍非空才记
+    expect(byId.get("m-empty")?.endpoints).toBeUndefined();
+    expect(byId.get("m-bad")?.endpoints).toEqual(["/messages"]);
+    expect(byId.get("m-none")?.endpoints).toBeUndefined();
+  });
+
+  it("anthropic 条目自定义 baseURL：列表走 <baseURL>/models（不再叠 /v1）", async () => {
+    const calls = stubFetch(() => jsonRes({ data: [{ id: "claude-x" }] }));
+    await fetchModels({ type: "anthropic", baseURL: "https://gw.test/anthropic/v1" }, "sk-ant");
+    expect(calls[0]?.url).toBe("https://gw.test/anthropic/v1/models");
+    const headers = new Headers(calls[0]?.init?.headers);
+    expect(headers.get("x-api-key")).toBe("sk-ant");
   });
 
   it("Anthropic /v1/models：只映射官方声明字段，x-api-key 头", async () => {
