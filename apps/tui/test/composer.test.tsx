@@ -1,20 +1,22 @@
 import { render } from "ink-testing-library";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { Composer } from "../src/components/composer.js";
 import { TuiEnvContext } from "../src/env.js";
 import { createPasteStore } from "../src/paste.js";
 
 const env = { ascii: false, animated: false };
-const pause = () => new Promise((resolve) => setTimeout(resolve, 30));
-
 describe("Composer 多行编辑", () => {
   it("Ctrl+J 换行，方向键跨行移动，反斜杠回车换行，Enter 提交", async () => {
     const submitted: string[] = [];
+    let current = "";
+    let caret = 0;
     function Harness() {
       const [value, setValue] = useState("");
       const [cursor, setCursor] = useState(0);
+      current = value;
+      caret = cursor;
       return (
         <TuiEnvContext.Provider value={env}>
           <Composer
@@ -34,26 +36,25 @@ describe("Composer 多行编辑", () => {
       );
     }
     const { stdin, lastFrame, unmount } = render(<Harness />);
-    await pause();
+    await vi.waitFor(() => expect(lastFrame()).toBeTruthy());
     stdin.write("甲");
-    await pause();
+    await vi.waitFor(() => expect(current).toBe("甲"));
     stdin.write("\n"); // Windows Terminal 的 Ctrl+J
-    await pause();
+    await vi.waitFor(() => expect(current).toBe("甲\n"));
     stdin.write("乙\\");
-    await pause();
+    await vi.waitFor(() => expect(current).toBe("甲\n乙\\"));
     stdin.write("\r");
-    await pause();
+    await vi.waitFor(() => expect(current).toBe("甲\n乙\n"));
     expect(lastFrame()).toContain("甲");
     expect(lastFrame()).toContain("乙");
     stdin.write("\x1b[A");
-    await pause();
+    await vi.waitFor(() => expect(caret).toBe(2));
     stdin.write("\x1b[B");
-    await pause();
+    await vi.waitFor(() => expect(caret).toBe(4));
     stdin.write("丙");
-    await pause();
+    await vi.waitFor(() => expect(current).toBe("甲\n乙\n丙"));
     stdin.write("\r");
-    await pause();
-    expect(submitted).toEqual(["甲\n乙\n丙"]);
+    await vi.waitFor(() => expect(submitted).toEqual(["甲\n乙\n丙"]));
     unmount();
   });
 
@@ -61,10 +62,12 @@ describe("Composer 多行编辑", () => {
     const store = createPasteStore();
     const token = store.add("第一行\n第二行") ?? "";
     let current = "";
+    let caret = 0;
     function Harness() {
       const [value, setValue] = useState(token + " alpha beta");
       const [cursor, setCursor] = useState(value.length);
       current = value;
+      caret = cursor;
       return (
         <TuiEnvContext.Provider value={env}>
           <Composer
@@ -86,17 +89,15 @@ describe("Composer 多行编辑", () => {
       );
     }
     const { stdin, unmount } = render(<Harness />);
-    await pause();
+    await vi.waitFor(() => expect(current).toBe(token + " alpha beta"));
     stdin.write("\x17"); // Ctrl+W
-    await pause();
-    expect(current).toBe(token + " alpha");
+    await vi.waitFor(() => expect(current).toBe(token + " alpha"));
     stdin.write("\x01"); // Ctrl+A
-    await pause();
+    await vi.waitFor(() => expect(caret).toBe(0));
     stdin.write("\x1b[C"); // 占位整块右移
-    await pause();
+    await vi.waitFor(() => expect(caret).toBe(token.length));
     stdin.write("\x7f");
-    await pause();
-    expect(current).toBe(" alpha");
+    await vi.waitFor(() => expect(current).toBe(" alpha"));
     unmount();
   });
 });
