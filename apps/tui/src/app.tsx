@@ -725,6 +725,7 @@ function SessionApp({
   /** 全屏模式：对话视口滚动状态（fromBottom=0 跟随最新） */
   const [scroll, setScroll] = useState<ScrollState>(scrollFollow);
   const [expanded, setExpanded] = useState(false);
+  const [diffExpanded, setDiffExpanded] = useState<ReadonlySet<string>>(new Set());
   const [recordOpen, setRecordOpen] = useState(false);
   const [recordScroll, setRecordScroll] = useState<ScrollState>(scrollFollow);
   const recordTotal = useRef<number | undefined>(undefined);
@@ -792,6 +793,8 @@ function SessionApp({
   }>({ visible: EMPTY_WINDOW, transcriptRows: 0, blocked: true });
   const selRef = useRef<Selection | undefined>(undefined);
   selRef.current = sel;
+  const diffExpandedRef = useRef(diffExpanded);
+  diffExpandedRef.current = diffExpanded;
   const blocksRef = useRef<{ blocks: LineBlock[]; width: number }>({ blocks: [], width: 0 });
   const sourceRef = useRef<Parameters<typeof transcriptBlocks>[0] | undefined>(undefined);
   const exportBlocksRef = useRef<{ blocks: LineBlock[]; width: number }>({ blocks: [], width: 0 });
@@ -988,7 +991,9 @@ function SessionApp({
         dragRef.current.dragging = true;
         dragRef.current.edge = 0;
         const col = colFromDisplay(line.text, ev.x - 1);
-        setSel({ anchor: { abs: base + row, col }, head: { abs: base + row, col } });
+        const pressed = { anchor: { abs: base + row, col }, head: { abs: base + row, col } };
+        selRef.current = pressed;
+        setSel(pressed);
         return;
       }
       if (ev.type === "drag" && dragRef.current.dragging && ev.button === 0) {
@@ -1024,9 +1029,32 @@ function SessionApp({
         stopEdgeScroll();
         const s = selRef.current;
         if (s === undefined) return;
-        // 单击（按下松开同点）：只清除选区
+        // 单击省略行切换当前工具 diff；拖动仍按原选区复制。
         if (selIsEmpty(s)) {
           setSel(undefined);
+          const key = lineAt(row)?.key;
+          if (key?.endsWith(":diff:more") === true) {
+            const owner = key.slice(0, -":diff:more".length);
+            const next = new Set(diffExpandedRef.current);
+            if (next.has(owner)) next.delete(owner);
+            else next.add(owner);
+            diffExpandedRef.current = next;
+            const source = sourceRef.current;
+            if (source !== undefined && !g.visible.atBottom) {
+              const after = transcriptBlocks({ ...source, diffExpanded: next });
+              const fromBottom = reanchorFromBottom(
+                blocksRef.current.blocks,
+                after,
+                width,
+                g.transcriptRows,
+                g.visible.lines[0],
+                lineCache.current,
+              );
+              setScroll((current) => ({ ...current, fromBottom, follow: fromBottom === 0 }));
+            }
+            laidTotal.current = undefined;
+            setDiffExpanded(next);
+          }
           return;
         }
         copySelection(false);
@@ -1040,7 +1068,7 @@ function SessionApp({
         dragRef.current.timer = undefined;
       }
     };
-  }, [fullscreen, mouse, absStartOf, copySelection, stopEdgeScroll, moveScroll]);
+  }, [fullscreen, mouse, absStartOf, copySelection, stopEdgeScroll, moveScroll, width]);
 
   // 全屏滚动状态维护：离开底部后新内容只标记不打断；到顶后夹紧 fromBottom
   useEffect(() => {
@@ -2109,6 +2137,7 @@ function SessionApp({
     reasoning,
     now: reasoningNow,
     expanded: fullscreen ? expanded : true,
+    diffExpanded,
   };
   sourceRef.current = transcriptSource;
   const blocks: LineBlock[] = fullscreen || recordOpen ? transcriptBlocks(transcriptSource) : [];

@@ -173,6 +173,44 @@ describe("事件渲染（cli.md 第 5 节）", () => {
     expect(out).toContain("+y");
   });
 
+  it("带行号 diff 完整输出、准确计数，旧头部不臆造行号", () => {
+    const diff = "@@ -2,2 +2,3 @@\n same\n-old\n+new\n+extra";
+    const rendered = renderDiff(diff);
+    expect(rendered).toContain("   2    2  same");
+    expect(rendered).toContain("   3      -old");
+    expect(rendered).toContain("        3 +new");
+    expect(rendered).toContain("        4 +extra");
+    const ev = renderEvent(
+      durable("tool.completed", {
+        callId: "c",
+        name: "edit",
+        status: "ok",
+        modelContent: "已修改 a.ts",
+        output: { path: "a.ts", diff },
+      }),
+      "print",
+    );
+    expect(ev.every((r) => r.channel === "stderr")).toBe(true);
+    expect(ev.map((r) => r.text).join("\n")).toContain("新增 2 行，删除 1 行");
+    expect(renderDiff("@@ a.ts @@\n-old\n+new")).toContain("         -old");
+    expect(renderDiff("+created")).toContain("         +created");
+    expect(renderDiff("@@ -1,1 +1,1 @@\n--- source\n+++ source")).toContain("   1      --- source");
+    expect(renderDiff("@@ -1,1 +1,1 @@\n--- source\n+++ source")).toContain("        1 +++ source");
+  });
+
+  it("结构化输出省略时显示真实省略提示", () => {
+    const ev = renderEvent(
+      durable("tool.completed", {
+        callId: "c",
+        name: "write",
+        status: "ok",
+        modelContent: "已创建 a.ts\n[结构化 output 超过大小上限，已省略]",
+      }),
+      "interactive",
+    );
+    expect(ev.map((r) => r.text).join("\n")).toContain("结构化 output 超过大小上限，已省略");
+  });
+
   it("权限提示块：列出主体与 a/d 选项", () => {
     const text = renderPermissionPrompt(
       [{ kind: "write", target: "src/a.ts", resolved: "Z:\\w\\src\\a.ts" }],

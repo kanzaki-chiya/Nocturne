@@ -100,6 +100,54 @@ function okSpawn() {
 // 用例内部都按渲染条件等待；单独运行 0.5–3 秒，全量并发下会被拖慢到 5 秒以上，
 // 这里放宽的只是单个用例的总时长上限，不是等待时序
 describe("全屏鼠标", { timeout: 15_000 }, () => {
+  it("大 diff 的省略行单击展开、再次单击收起，翻阅位置仍落在 diff", async () => {
+    const { runtime, session } = await longSession();
+    const mouse = fakeMouse();
+    const { lastFrame, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, mouse }),
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("Nocturne"));
+    const diff = `@@ -0,0 +1,50 @@\n${Array.from({ length: 50 }, (_, i) => `+line${i + 1}`).join("\n")}`;
+    await session.session.emit("tool.started", {
+      callId: "diff-1",
+      name: "write",
+      input: { path: "a.ts", content: "" },
+      subjects: [],
+      permission: { action: "allow", source: "rule" },
+    });
+    await session.session.emit("tool.completed", {
+      callId: "diff-1",
+      name: "write",
+      status: "ok",
+      modelContent: "已创建 a.ts",
+      output: { path: "a.ts", created: true, diff },
+    });
+    await waitFor(() => (lastFrame() ?? "").includes("line50"));
+    for (let i = 0; i < 15 && !(lastFrame() ?? "").includes("还有 10 行"); i++) {
+      const before = lastFrame();
+      mouse.emit({ type: "wheel", dir: "up", x: 1, y: 1 });
+      await waitFor(() => lastFrame() !== before);
+    }
+    await waitFor(() => (lastFrame() ?? "").includes("还有 10 行"));
+    const clickMore = () => {
+      const y =
+        (lastFrame() ?? "")
+          .split("\n")
+          .findIndex((line) => line.includes("单击收起") || line.includes("还有 10 行")) + 1;
+      expect(y).toBeGreaterThan(0);
+      mouse.emit({ type: "press", button: 0, x: 4, y });
+      mouse.emit({ type: "release", button: 0, x: 4, y });
+    };
+    clickMore();
+    await waitFor(() => (lastFrame() ?? "").includes("单击收起"));
+    clickMore();
+    await waitFor(() => (lastFrame() ?? "").includes("还有 10 行")).catch(() => {
+      throw new Error(`收起后未见省略行：\n${lastFrame() ?? "<empty>"}`);
+    });
+    unmount();
+    await session.close();
+  });
+
   it("滚轮翻阅出提示并停在原处，滚回底部提示消失", async () => {
     const { runtime, session } = await longSession();
     const mouse = fakeMouse();

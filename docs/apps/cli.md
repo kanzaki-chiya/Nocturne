@@ -124,7 +124,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `tool.started` | `● <name>(<参数摘要>)`，参数摘要取 input 的短 JSON，截断约 100 字符 |
 | `tool.input.delta` | 不渲染（Phase 4 的 TUI 才需要增量展示） |
 | `tool.progress` | `stdout`/`stderr` 的片段按顺序拼接，只在原始换行处结束行；`info` 每次调用是一行独立摘要，渲染层补换行。两类输出均缩进两格（约定见 [tool-api.md](../protocols/tool-api.md) 第 2 节） |
-| `tool.completed` | `└ <status>` + 耗时；`error`/`denied`/`cancelled`/`interrupted` 附 `error.code` 与原因；`edit`/覆盖 `write` 的 `output.diff` 以 unified diff 着色渲染（`+` 绿、`-` 红、上下文默认色）；`truncated` 为真时附一行"输出已截断，完整内容在 \<path\>"（落盘路径见 [tools.md](../architecture/tools.md) 第 4 节） |
+| `tool.completed` | `└ <status>` + 耗时；`error`/`denied`/`cancelled`/`interrupted` 附 `error.code` 与原因；`edit`/`write` 的 `output.diff` 完整显示旧/新行号、`+`/`-` 标记及「新增 N 行，删除 M 行」，无色终端仍保留标记，旧头部不臆造行号；结构化输出超限时显示省略提示；`truncated` 为真时附一行"输出已截断，完整内容在 \<path\>"（落盘路径见 [tools.md](../architecture/tools.md) 第 4 节） |
 | `permission.requested` | 第 6 节的确认提示 |
 | `permission.resolved` | `└ 权限：<allow\|deny>（<source>：<rule\|reason>）` 一行——命中规则时展示 `rule`（如"用户配置第 3 条 {…}"），无规则时展示原因 |
 | `context.compacted` | `◇ 上下文已压缩（<kind>，至 seq <throughSeq>）` |

@@ -6,6 +6,7 @@ import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
 
 import { attachmentLine } from "../attachment-line.js";
+import { diffSummary, parseDiff } from "../diff-format.js";
 import { glyphs, useTuiEnv } from "../env.js";
 import { formatDuration, summarizeToolInput, tailLines, truncateLine } from "../format.js";
 import { theme } from "../theme.js";
@@ -15,7 +16,6 @@ import type { LiveTool, ToolEntry } from "@nocturne/core/protocol";
 
 const LIVE_TAIL = 3;
 const RESULT_TAIL = 5;
-const DIFF_MAX_WIDTH = 120;
 
 function useSpinner(active: boolean): string {
   const env = useTuiEnv();
@@ -53,12 +53,27 @@ function badge(status: ToolEntry["status"], spinner: string, env: ReturnType<typ
   }
 }
 
-/** 结果输出里的 diff（edit/write 工具声明的 output.diff 字段） */
-function diffOf(result: ToolEntry["result"]): string | undefined {
-  const out = result?.output;
+/** 结果输出里的 diff；旧新建记录按输入内容合成 + 行。 */
+function diffOf(entry: ToolEntry): string | undefined {
+  if (entry.status !== "ok") return undefined;
+  const out = entry.result?.output;
   if (typeof out !== "object" || out === null) return undefined;
   const d = (out as Record<string, unknown>).diff;
-  return typeof d === "string" && d !== "" ? d : undefined;
+  if (typeof d === "string" && d !== "") return d;
+  const content = (entry.input as { content?: unknown } | undefined)?.content;
+  if (
+    (out as { created?: unknown }).created === true &&
+    typeof content === "string" &&
+    content !== ""
+  ) {
+    return content
+      .replace(/\r\n?/g, "\n")
+      .replace(/\n$/, "")
+      .split("\n")
+      .map((line) => `+${line}`)
+      .join("\n");
+  }
+  return undefined;
 }
 
 export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): React.JSX.Element {
@@ -111,12 +126,17 @@ function ToolResult({ entry, width }: { entry: ToolEntry; width: number }): Reac
   const g = glyphs(env);
   const result = entry.result;
   if (result === undefined) return <></>;
-  const diff = diffOf(result);
+  const diff = diffOf(entry);
   const spill = result.spillPath;
   return (
     <Box flexDirection="column">
       {diff !== undefined ? (
-        <DiffView diff={diff} width={Math.min(width - 2, DIFF_MAX_WIDTH)} />
+        <>
+          <Text
+            dimColor
+          >{`  ${result.modelContent.split("\n")[0] ?? ""}；${diffSummary(parseDiff(diff))}`}</Text>
+          <DiffView diff={diff} width={width} />
+        </>
       ) : result.modelContent !== "" ? (
         tailLines(result.modelContent, RESULT_TAIL).map((l, i) => (
           <Text key={i} dimColor wrap="truncate">

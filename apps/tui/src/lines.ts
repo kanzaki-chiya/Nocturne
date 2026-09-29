@@ -8,6 +8,7 @@ import stringWidth from "string-width";
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 
 import { attachmentLine } from "./attachment-line.js";
+import { diffSummary, layoutDiffRow, parseDiff } from "./diff-format.js";
 import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { splitImageTokens } from "./images.js";
 import { boxSafe, stripControls, summarizeToolInput, tailLines, truncateLine } from "./format.js";
@@ -71,12 +72,11 @@ function rows(key: string, text: string, width: number, extra?: Partial<LaidLine
   }));
 }
 
-const DIFF_HEAD = 6;
-const DIFF_TAIL = 4;
+const DIFF_HEAD = 20;
+const DIFF_TAIL = 20;
 
 /**
- * 工具结果里可展示的 diff（tui.md §4）：edit/覆盖 write 声明的 output.diff；
- * 新建文件（output.created）没有 diff，按输入的 content 铺成全 + 行。
+ * 工具结果里可展示的 diff；旧新建记录无 diff 时按输入内容铺成 + 行。
  */
 function toolDiff(entry: Extract<ViewEntry, { kind: "tool" }>): string | undefined {
   if (entry.status !== "ok") return undefined;
@@ -96,29 +96,32 @@ function toolDiff(entry: Extract<ViewEntry, { kind: "tool" }>): string | undefin
   return undefined;
 }
 
-/** diff 行：+ 绿 / - 红 / 上下文暗色；过长折叠为头尾 + 省略计数（NO_COLOR 靠前缀区分） */
-function diffLines(key: string, diff: string, width: number, ascii: boolean): LaidLine[] {
-  const all = diff.split("\n").filter((l) => !l.startsWith("@@"));
-  const folded = all.length > DIFF_HEAD + DIFF_TAIL + 1;
-  const head = folded ? all.slice(0, DIFF_HEAD) : all;
-  const tail = folded ? all.slice(all.length - DIFF_TAIL) : [];
-  const line = (text: string, i: number): LaidLine => {
-    const color = text.startsWith("+") ? "green" : text.startsWith("-") ? "red" : undefined;
-    return {
-      key: `${key}:diff:${i}`,
-      text: paint(`  ${text}`, width),
-      ...(color !== undefined ? { color } : { dim: true }),
-    };
-  };
-  const out = head.map(line);
-  if (folded) {
+/** 全屏 diff 超过 40 个内容行时折叠为前后各 20 行。 */
+function diffLines(
+  key: string,
+  diff: string,
+  width: number,
+  ascii: boolean,
+  expanded: boolean,
+): LaidLine[] {
+  const all = parseDiff(diff);
+  const folded = !expanded && all.length > DIFF_HEAD + DIFF_TAIL;
+  const head =
+    folded || (expanded && all.length > DIFF_HEAD + DIFF_TAIL) ? all.slice(0, DIFF_HEAD) : all;
+  const tail = folded ? all.slice(all.length - DIFF_TAIL) : expanded ? all.slice(DIFF_HEAD) : [];
+  const line = (row: (typeof all)[number], i: number): LaidLine[] =>
+    layoutDiffRow(`${key}:diff:${i}`, row, width, !ascii && process.env.NO_COLOR === undefined);
+  const out = head.flatMap(line);
+  if (folded || (expanded && all.length > DIFF_HEAD + DIFF_TAIL)) {
     out.push({
       key: `${key}:diff:more`,
-      text: `  ${ascii ? "..." : "…"} 省略 ${all.length - head.length - tail.length} 行`,
+      text: folded
+        ? `  ${ascii ? "..." : "…"} 还有 ${all.length - head.length - tail.length} 行`
+        : `  ${ascii ? "..." : "…"} 单击收起`,
       dim: true,
     });
   }
-  out.push(...tail.map((t, i) => line(t, all.length - tail.length + i)));
+  out.push(...tail.flatMap((t, i) => line(t, all.length - tail.length + i)));
   return out;
 }
 
@@ -129,6 +132,7 @@ export function layoutEntry(
   parts: ReasoningMap = new Map(),
   now = Date.now(),
   expanded = false,
+  diffExpanded = false,
 ): LaidLine[] {
   const dot = ascii ? "*" : "•";
   const prompt = ascii ? ">" : "›";
@@ -212,9 +216,13 @@ export function layoutEntry(
         // 摘要行（已修改/已创建 …）保留，其后接 diff
         const first = entry.result?.modelContent.split("\n")[0] ?? "";
         if (first !== "") {
-          lines.push({ key: `${entry.key}:sum`, text: paint(`  ${first}`, width), dim: true });
+          lines.push({
+            key: `${entry.key}:sum`,
+            text: paint(`  ${first}；${diffSummary(parseDiff(diff))}`, width),
+            dim: true,
+          });
         }
-        lines.push(...diffLines(entry.key, diff, width, ascii));
+        lines.push(...diffLines(entry.key, diff, width, ascii, diffExpanded));
         return [...lines, ...attachmentRows];
       }
       const content = entry.result?.modelContent;
@@ -335,6 +343,7 @@ interface TranscriptSource {
   reasoning?: ReasoningMap;
   now?: number;
   expanded?: boolean;
+  diffExpanded?: ReadonlySet<string>;
 }
 
 function block(key: string, revision: string, lines: (width: number) => LaidLine[]): LineBlock {
@@ -360,8 +369,17 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
     blocks.push(
       block(
         item.key,
-        `${item.kind === "separator" ? item.text : item.key}:${src.expanded}`,
-        (width) => layoutEntry(item, width, src.ascii, src.reasoning, src.now, src.expanded),
+        `${item.kind === "separator" ? item.text : item.key}:${src.expanded}:${src.diffExpanded?.has(item.key)}`,
+        (width) =>
+          layoutEntry(
+            item,
+            width,
+            src.ascii,
+            src.reasoning,
+            src.now,
+            src.expanded,
+            src.diffExpanded?.has(item.key),
+          ),
       ),
     );
   }
@@ -390,8 +408,19 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
                 .join(",") ?? ""
             }`
           : entry.key;
-    return block(entry.key, `${revision}:${src.expanded}`, (width) =>
-      layoutEntry(entry, width, src.ascii, src.reasoning, src.now, src.expanded),
+    return block(
+      entry.key,
+      `${revision}:${src.expanded}:${src.diffExpanded?.has(entry.key)}`,
+      (width) =>
+        layoutEntry(
+          entry,
+          width,
+          src.ascii,
+          src.reasoning,
+          src.now,
+          src.expanded,
+          src.diffExpanded?.has(entry.key),
+        ),
     );
   }
   // 缓存标记要覆盖布局的全部输入：思考长度、进行中工具、重试

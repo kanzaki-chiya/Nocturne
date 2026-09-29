@@ -42,16 +42,33 @@ function summarizeInput(input: unknown): string {
   return s;
 }
 
-/** unified diff 着色：+ 绿、- 红、@@ 青、其余默认色 */
+/** 输出已保留的完整 diff；旧路径头部和无头部结果不臆造行号。 */
 export function renderDiff(diff: string): string {
+  let oldNo: number | undefined;
+  let newNo: number | undefined;
   return diff
     .split("\n")
     .map((line) => {
-      if (line.startsWith("+++") || line.startsWith("---")) return style("bold", line);
-      if (line.startsWith("+")) return style("green", line);
-      if (line.startsWith("-")) return style("red", line);
-      if (line.startsWith("@@")) return style("cyan", line);
-      return line;
+      if (line.startsWith("@@")) {
+        const header = /^@@ -(\d+),(\d+) \+(\d+),(\d+) @@/.exec(line);
+        oldNo = header === null ? undefined : Number(header[1]);
+        newNo = header === null ? undefined : Number(header[3]);
+        return style("cyan", line);
+      }
+      const mark = line[0] ?? " ";
+      if (mark === "\\") return line;
+      const oldColumn =
+        (mark === " " || mark === "-") && oldNo !== undefined
+          ? String(oldNo++).padStart(4)
+          : "    ";
+      const newColumn =
+        (mark === " " || mark === "+") && newNo !== undefined
+          ? String(newNo++).padStart(4)
+          : "    ";
+      const rendered = `${oldColumn} ${newColumn} ${line}`;
+      if (mark === "+") return style("green", rendered);
+      if (mark === "-") return style("red", rendered);
+      return rendered;
     })
     .join("\n");
 }
@@ -79,7 +96,14 @@ function toolCompletedLines(p: ToolCompletedPayload): string[] {
     "diff" in out &&
     typeof (out as { diff?: unknown }).diff === "string"
   ) {
-    lines.push(renderDiff((out as { diff: string }).diff));
+    const diff = (out as { diff: string }).diff;
+    const changes = diff.split("\n");
+    const added = changes.filter((line) => line.startsWith("+")).length;
+    const removed = changes.filter((line) => line.startsWith("-")).length;
+    lines.push(`  ${p.modelContent.split("\n")[0] ?? ""}；新增 ${added} 行，删除 ${removed} 行`);
+    lines.push(renderDiff(diff));
+  } else if (p.modelContent.includes("[结构化 output 超过大小上限，已省略]")) {
+    lines.push("  结构化 output 超过大小上限，已省略");
   }
   return lines;
 }
