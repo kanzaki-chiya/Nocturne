@@ -35,6 +35,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0027](ADR-0027-edit-diagnostics-diff-display.md) | edit 未命中诊断与带行号的 diff 显示 | 已接受 |
 | [ADR-0028](ADR-0028-session-task-list.md) | 会话任务清单工具与进度显示 | 已接受 |
 | [ADR-0029](ADR-0029-tui-themes.md) | TUI 深浅主题与配色切换 | 已接受 |
+| [ADR-0030](ADR-0030-dialog-settings-pages.md) | TUI 对话框式设置页 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
