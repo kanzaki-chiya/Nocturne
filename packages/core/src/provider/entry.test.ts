@@ -131,6 +131,19 @@ describe("路由 Provider：openai-compatible 条目（ADR-0026 §3/§4）", () 
     expect(capture.headers?.["anthropic-version"]).toBeDefined();
   });
 
+  it("跨协议 Messages 使用凭据存储密钥，不依赖 ANTHROPIC_API_KEY", async () => {
+    const capture: Capture = {};
+    const p = createEntryProvider(
+      entry({ apiKeyEnv: undefined, credentials: async () => "sk-stored" }),
+      () => undefined,
+      routingFetch(capture),
+    );
+    await collect(p, request("msg"));
+    expect(capture.url).toBe("https://gw.test/v1/messages");
+    expect(capture.headers?.["x-api-key"]).toBe("sk-stored");
+    expect(capture.headers?.["authorization"]).toBe("Bearer sk-stored");
+  });
+
   it("手写 protocol 压过 endpoints：/responses 声明 + protocol=anthropic 仍走 /messages", async () => {
     const capture: Capture = {};
     const p = createEntryProvider(
@@ -166,6 +179,25 @@ describe("路由 Provider：openai-compatible 条目（ADR-0026 §3/§4）", () 
 });
 
 describe("路由 Provider：anthropic 条目", () => {
+  it("本家 Messages 使用凭据存储密钥，不额外发送 Authorization", async () => {
+    const capture: Capture = {};
+    const p = createEntryProvider(
+      {
+        id: "claude",
+        type: "anthropic",
+        baseURL: "https://api.test/v1",
+        credentials: async () => "sk-stored",
+        models: { m: { endpoints: ["/messages"] } },
+      },
+      () => undefined,
+      routingFetch(capture),
+    );
+    await collect(p, request("m"));
+    expect(capture.url).toBe("https://api.test/v1/messages");
+    expect(capture.headers?.["x-api-key"]).toBe("sk-stored");
+    expect(capture.headers?.["authorization"]).toBeUndefined();
+  });
+
   it("messages 模型 → <baseURL>/messages，x-api-key + anthropic-version，不带 Authorization", async () => {
     const capture: Capture = {};
     const p = createEntryProvider(

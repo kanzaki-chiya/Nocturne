@@ -115,7 +115,8 @@ export function createAnthropicProvider(
     return baseFetch(url, { ...init, headers });
   };
   const sdk = createAnthropic({
-    ...(apiKeyFromEnv !== undefined ? { apiKey: apiKeyFromEnv } : {}),
+    // SDK 在调用 fetch 前校验 apiKey；真实凭据仍由 wrappedFetch 按请求覆盖。
+    apiKey: apiKeyFromEnv ?? "resolved-by-fetch",
     ...(config.baseURL !== undefined ? { baseURL: config.baseURL } : {}),
     ...(config.headers !== undefined ? { headers: config.headers } : {}),
     fetch: wrappedFetch,
