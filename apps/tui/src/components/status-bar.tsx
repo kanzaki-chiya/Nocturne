@@ -39,6 +39,7 @@ interface Segment {
   text: string;
   color: string;
   highlight: boolean;
+  emphasis?: boolean;
 }
 
 export function StatusBar({
@@ -84,7 +85,11 @@ export function StatusBar({
   let progress: Segment | undefined;
   if (view.todos.length > 0) {
     const done = view.todos.filter((item) => item.status === "completed").length;
-    progress = { text: `任务 ${done}/${view.todos.length}`, color: theme.accent, highlight: false };
+    progress = {
+      text: `任务 ${done}/${view.todos.length}`,
+      color: theme.secondary,
+      highlight: false,
+    };
     segments.push(progress);
   }
   if (note !== undefined) {
@@ -107,14 +112,16 @@ export function StatusBar({
   if (effort !== undefined && effortText !== undefined) {
     segments.push({
       text: effortText,
-      color: effort.transition ? theme.warning : theme.secondary,
+      color: effort.transition ? theme.warning : theme.accent,
       highlight: highlight === "effort",
+      emphasis: true,
     });
   }
   segments.push({
     text: view.config.permissionPreset ?? "?",
-    color: theme.secondary,
+    color: theme.warning,
     highlight: highlight === "preset",
+    emphasis: true,
   });
   const dir = view.meta?.cwd ?? "";
   const dirSeg: Segment | undefined =
@@ -142,7 +149,7 @@ export function StatusBar({
             <Text
               color={s.highlight ? theme.selected : s.color}
               {...(s.highlight ? { backgroundColor: theme.selectionBg } : {})}
-              bold={s.highlight}
+              bold={s.highlight || s.emphasis === true}
             >
               {s.text}
             </Text>
