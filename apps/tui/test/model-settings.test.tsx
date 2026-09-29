@@ -881,6 +881,29 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     unmount();
   });
 
+  it("↓ 从最后一个字段进入「保存」；放得下时不滚动", async () => {
+    const { stdin, lastFrame, onSave, unmount } = editor();
+    await waitFor(() => (lastFrame() ?? "").includes("> 显示名"));
+    await flushInput();
+    for (let i = 0; i < 10; i += 1) stdin.write(DOWN);
+    await waitFor(() => (lastFrame() ?? "").includes("> [ 保存 ]"));
+    // 高度足够：焦点到底部后首个字段仍可见
+    expect(lastFrame()).toContain("显示名");
+    expect(onSave).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("需要滚动时只滚到焦点字段可见，不在下方留空", async () => {
+    const { stdin, lastFrame, unmount } = editor({ height: 16 });
+    await waitFor(() => (lastFrame() ?? "").includes("> 显示名"));
+    await flushInput();
+    for (let i = 0; i < 6; i += 1) stdin.write(DOWN);
+    await waitFor(() => (lastFrame() ?? "").includes("> 协议"));
+    // 协议之上的字段仍填满字段区，而不是把协议顶到第一行
+    expect(lastFrame()).toContain("思考档位");
+    unmount();
+  });
+
   it("按钮区：↓ 停住、↑ 回最后一个字段、←/→ 在按钮间移动", async () => {
     const { stdin, lastFrame, onBack, unmount } = editor();
     await waitFor(() => (lastFrame() ?? "").includes("> 显示名"));

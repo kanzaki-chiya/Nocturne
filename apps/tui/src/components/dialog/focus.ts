@@ -21,8 +21,15 @@ export function moveFocus(
   if (direction === "shiftTab") return order[(index + order.length - 1) % order.length] ?? current;
   if (direction === "up")
     return order[Math.max(0, index > lastField ? lastField : index - 1)] ?? current;
-  if (direction === "down")
-    return order[index > lastField ? index : Math.min(lastField, index + 1)] ?? current;
+  if (direction === "down") {
+    if (index > lastField) return current;
+    // 最后一个字段按 ↓ 进入按钮区，落在主按钮「保存」上（只读页为「返回」）
+    if (index === lastField) {
+      const save = order.indexOf("save");
+      return order[save >= 0 ? save : firstButton] ?? current;
+    }
+    return order[index + 1] ?? current;
+  }
   if (index <= lastField) return current;
   return (
     order[

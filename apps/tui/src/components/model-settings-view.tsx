@@ -621,11 +621,6 @@ export function ModelEditPane({
   const compact = innerWidth < 12 + fieldMin;
   const single = compact && innerWidth < fieldMin + 6;
   const tiny = height < (single ? 4 : 6) || width < (single ? 8 : 12);
-  const outerHeight = framed ? Math.min(height - 2, 2 + fields.length * 2 + 4) : height;
-  const left = framed ? Math.floor((width - outerWidth) / 2) : 0;
-  const top = framed ? Math.floor((height - outerHeight) / 2) : 0;
-  const hintRows = (readonlyHint ? 1 : 0) + (view.unavailable ? 1 : 0);
-  const fieldHeight = Math.max(1, outerHeight - (framed ? 2 : 0) - 4 - hintRows);
   const rowHeight = (key: FieldKey): number => {
     const label = compact ? 4 : 12;
     const available = innerWidth - label - 3;
@@ -636,14 +631,27 @@ export function ModelEditPane({
         : 1;
     return Math.max(1, controlRows) + (single ? 0 : 1) + (errors[key] ? 1 : 0);
   };
+  const hintRows = (readonlyHint ? 1 : 0) + (view.unavailable ? 1 : 0);
+  // 高度按字段实际行数（档位折行、错误行）计算，放得下就不滚动
+  const totalRows = fields.reduce((n, key) => n + rowHeight(key), 0);
+  const outerHeight = framed ? Math.min(height - 2, 2 + 4 + hintRows + totalRows) : height;
+  const left = framed ? Math.floor((width - outerWidth) / 2) : 0;
+  const top = framed ? Math.floor((height - outerHeight) / 2) : 0;
+  const fieldHeight = Math.max(1, outerHeight - (framed ? 2 : 0) - 4 - hintRows);
   const fieldStart = fields
     .slice(0, Math.max(0, fields.indexOf(current as FieldKey)))
     .reduce((n, key) => n + rowHeight(key), 0);
   const fieldEnd = fieldStart + (currentField ? rowHeight(currentField) : 0);
-  const nextScroll =
-    currentField !== undefined && (fieldStart < scroll || fieldEnd > scroll + fieldHeight)
-      ? fieldStart
-      : scroll;
+  // 只滚到焦点字段刚好可见为止，并且不滚过内容末尾（避免下方留空）
+  const wanted =
+    currentField === undefined
+      ? scroll
+      : fieldStart < scroll
+        ? fieldStart
+        : fieldEnd > scroll + fieldHeight
+          ? fieldEnd - fieldHeight
+          : scroll;
+  const nextScroll = Math.max(0, Math.min(wanted, totalRows - fieldHeight));
   if (nextScroll !== scroll) setScroll(nextScroll);
   let rowOffset = 0;
   const visible = single

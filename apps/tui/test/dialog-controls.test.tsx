@@ -23,12 +23,13 @@ describe("对话框通用控件", () => {
     expect(focusOrder([{ key: "a", editable: true }], true)).toEqual(["return"]);
   });
 
-  it("Tab 循环，方向键在字段和按钮边界停住", () => {
+  it("Tab 循环；↓ 从最后一个字段进入「保存」，其余方向键在边界停住", () => {
     const order = ["a", "b", "cancel", "save"];
     expect(moveFocus(order, "save", "tab")).toBe("a");
     expect(moveFocus(order, "a", "shiftTab")).toBe("save");
     expect(moveFocus(order, "a", "up")).toBe("a");
-    expect(moveFocus(order, "b", "down")).toBe("b");
+    expect(moveFocus(order, "b", "down")).toBe("save");
+    expect(moveFocus(["return"], "return", "down")).toBe("return");
     expect(moveFocus(order, "save", "up")).toBe("b");
     expect(moveFocus(order, "cancel", "down")).toBe("cancel");
     expect(moveFocus(order, "save", "left")).toBe("cancel");
