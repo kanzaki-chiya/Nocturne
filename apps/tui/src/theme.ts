@@ -21,6 +21,7 @@ export interface ThemePalette {
   diffRemoveBg: string;
   codeBg: string;
   overlayBg: string;
+  inputBg: string;
   moonHighlight: string;
   moonMain: string;
   moonShadow: string;
@@ -46,6 +47,7 @@ export const palettes: Record<ThemeId, ThemePalette> = {
     diffRemoveBg: "#3B2329",
     codeBg: "#1B2730",
     overlayBg: "#18232C",
+    inputBg: "#111A21",
     moonHighlight: "#FFF0A6",
     moonMain: "#E9BD5A",
     moonShadow: "#9C692A",
@@ -69,6 +71,7 @@ export const palettes: Record<ThemeId, ThemePalette> = {
     diffRemoveBg: "#F6DEDF",
     codeBg: "#E8EEF1",
     overlayBg: "#EDF1F3",
+    inputBg: "#DDE5EA",
     moonHighlight: "#8C5A12",
     moonMain: "#AB741C",
     moonShadow: "#6D4B26",

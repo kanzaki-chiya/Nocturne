@@ -1,0 +1,50 @@
+import { Text } from "ink";
+import stringWidth from "string-width";
+import { useTheme } from "../../theme.js";
+
+export function inputWindow(
+  value: string,
+  cursor: number,
+  width: number,
+): { text: string; column: number } {
+  const chars = Array.from(value);
+  const inner = Math.max(1, width - 4);
+  let start = 0;
+  while (stringWidth(chars.slice(start, cursor).join("")) >= inner && start < cursor) start++;
+  let text = "";
+  for (const ch of chars.slice(start)) {
+    if (stringWidth(text + ch) > inner) break;
+    text += ch;
+  }
+  return { text, column: stringWidth(chars.slice(start, cursor).join("")) };
+}
+
+export function TextInput({
+  value,
+  cursor,
+  focused,
+  width,
+  invalid = false,
+}: {
+  value: string;
+  cursor: number;
+  focused: boolean;
+  width: number;
+  invalid?: boolean;
+}): React.JSX.Element {
+  const theme = useTheme();
+  const window = inputWindow(value, cursor, width);
+  return (
+    <Text
+      wrap="truncate"
+      color={invalid ? theme.error : focused ? theme.selected : theme.text}
+      backgroundColor={theme.inputBg}
+    >
+      [{" "}
+      <Text {...(value === "" ? { color: theme.muted } : {})}>
+        {value === "" ? "跟随" : window.text}
+      </Text>
+      {" ".repeat(Math.max(0, width - 4 - stringWidth(value === "" ? "跟随" : window.text)))} ]
+    </Text>
+  );
+}
