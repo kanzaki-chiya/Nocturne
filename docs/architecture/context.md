@@ -141,7 +141,7 @@ Phase 2 提供自动修剪与手动 `/compact`；Phase 3 加入自动摘要（6.
 
 历史中的内容大多是中性的（文本、工具调用、工具结果），可以直接用于新模型。例外：
 
-- 推理内容若携带 Provider 专有数据（签名、加密内容），只能回传给产生它的 Provider；切换后 Builder 丢弃这类推理块，只保留普通文本。
+- 推理内容若携带 Provider 专有数据（签名、加密内容），只能回传给产生它的 Provider **且同一协议**（ADR-0026 §6）：历史 `message.assistant` 记录的协议与当前模型的生效协议相同才保留 `providerData`，否则（跨 Provider、跨协议，或新模型协议无从比对时）丢弃这类推理块的专有数据。历史条目缺 `protocol` 字段（旧日志）时按旧规则只比较服务商。
 - 新模型不支持图片输入（`capabilities.imageInput` 为 false）时，历史中的图片附件投影为占位文字 `[image omitted: current model does not support image input]`——附件引用仍在历史里，切回支持图片的模型后同一附件会重新以图片发出（第 3 节投影规则）。同一逻辑还产出另外两种占位：`[image unavailable: attachment file missing]`（附件文件读不回）与 `[image omitted: exceeds the per-request limit of 20 images]`（超出单请求 20 张上限的较旧图片）。
 - 新模型窗口更小时，按第 6 节的规则压缩。
 

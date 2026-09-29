@@ -23,7 +23,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 | 概念 | 是什么 | 为什么单独存在 |
 |---|---|---|
-| `Provider` | 一个模型服务的连接：适配器类型 + 端点 + 凭据，实现 `stream()` | 同一种协议（如 OpenAI 兼容）可以连接许多不同的服务 |
+| `Provider` | 一个模型服务的连接：适配器类型 + 端点 + 凭据，实现 `stream()`；同一服务商条目内的模型可以按模型各自走不同协议（ADR-0026） | 同一种协议（如 OpenAI 兼容）可以连接许多不同的服务 |
 | `ModelInfo` | 某个 Provider 下一个模型的描述：id、上下文窗口、最大输出、能力 | 能力属于模型而不是 Provider：同一 Provider 的不同模型差异很大 |
 | `ModelCapabilities` | 数据：是否支持工具调用、并行工具调用、推理及其形式、图片输入、提示缓存、可选的推理强度档位 | Context Builder 与 Agent Loop 依据能力做决定，而不是依据名字 |
 | `ProviderOptions` | 传给某个 Provider 的专有参数，Core 不解释 | 给高级用户留出口，又不污染中性接口 |
@@ -34,17 +34,25 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 推理能力只按逐模型声明解析：没有任何层声明 `reasoning`，但有非空 `reasoningEffort` 声明时，视为支持推理；都没有时默认不支持。支持推理时档位取逐模型声明，否则推导六档；推理为 `none` 时没有档位。旧服务商级 `thinking.levels/source` 忽略；读到旧 `levels` 每次启动发 `runtime.warning(provider_thinking_levels_ignored)`。用户编辑设为「否」与手写非空档位冲突时拒绝保存；手写配置自身同时声明 `none` 和非空档位时推理为准，并警告文件、服务商、模型。
 
+**协议来源（[ADR-0026](../decisions/ADR-0026-per-model-protocol.md)）**：每个模型解析一个**生效协议**——`openai-compatible`（请求 `<baseURL>/chat/completions`）或 `anthropic`（请求 `<baseURL>/messages`）。解析优先级（高者覆盖低者）：手写 `models.<id>.protocol` > 用户编辑 `userModels.<id>.protocol` > 上游 `supported_endpoints` 推导 > 条目 `type`（同时是鉴权与模型列表接口的「本家」协议）。推导按接口路径末尾比较（`/v1/messages` ≡ `/messages`，大小写与尾斜杠不敏感）：条目 `type` 对应接口在列 → `type`；否则含 `/chat/completions` → `openai-compatible`；否则含 `/messages` → `anthropic`；否则（只有 `/responses` 或全部无法识别）→ **unavailable**。上游未声明 `supported_endpoints`（或空数组）不触发推导，回落到条目 `type`。**不得**按模型名、models.dev 或内置目录猜协议。`protocol` 与 `endpoints` 同其他模型字段一样参与逐字段合并。
+
 ## 3. 配置形态（示意）
 
 ```jsonc
 {
-  "model": "deepseek/deepseek-chat",          // <providerId>/<modelId>
+  "model": "gateway/deepseek-chat",           // <providerId>/<modelId>
   "providers": {
-    "deepseek": {
-      "type": "openai-compatible",
-      "baseURL": "https://api.deepseek.com/v1",
-      "apiKeyEnv": "DEEPSEEK_API_KEY",          // 只引用环境变量名，不在配置里写密钥
-      "models": { "deepseek-chat": { "contextWindow": 128000 } },
+    "gateway": {
+      "type": "openai-compatible",              // 默认协议与鉴权本家（ADR-0026）
+      "baseURL": "https://api.example.com/v1",
+      "apiKeyEnv": "GW_API_KEY",               // 只引用环境变量名，不在配置里写密钥
+      "models": {
+        "deepseek-chat": { "contextWindow": 128000 },
+        // 手写协议：同一条目内该模型改走 <baseURL>/messages（x-api-key + Bearer 双发）
+        "claude-opus-4.6": { "protocol": "anthropic" },
+        // 上游接口原文（supported_endpoints），据此推导生效协议
+        "some-model": { "endpoints": ["/v1/chat/completions", "/v1/messages"] }
+      },
       "providerOptions": {},                     // 配置级选项，与请求级合并后传给适配器（provider-api.md §3）
       "allowUndeclaredModels": false              // true → strictModels=false，接受清单外模型 id（CLI 用）
     }
@@ -81,6 +89,10 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 | 工具结果的消息形态 | `tool` 角色消息 vs `tool_result` 内容块 | 适配器把中性消息转换为各自格式 |
 | 用量字段含义 | 输入 token 是否已包含缓存 token 各家不同 | 适配器换算为统一语义 |
 | 错误格式 | HTTP 状态码、错误体结构、限流头 | 适配器映射为 `ProviderError.kind` |
+
+**条目级路由（[ADR-0026](../decisions/ADR-0026-per-model-protocol.md)）**：每个服务商条目仍是一个 `Provider` 实例（`id`/`type` 语义不变），实例内部按需构造 `openai-compatible` 与 `anthropic` 两种适配器并复用，共用凭据解析器、`headers` 与诊断通道；`stream()` 按请求模型的生效协议分发（第 2 节）。两种协议共用同一条目的 `baseURL`：`anthropic` 请求 `<baseURL>/messages`（条目省略 `baseURL` 时用官方 `https://api.anthropic.com/v1`），`openai-compatible` 请求 `<baseURL>/chat/completions`（条目未声明 `baseURL` 时以 `ProviderError(kind="invalid_request")` 拒绝，不发请求）。
+
+跨协议的鉴权写法：鉴权以条目 `type` 为「本家」——`anthropic` 条目本家发 `x-api-key`（不发 `Authorization`，避免官方端点将其当 OAuth 令牌），`openai-compatible` 条目本家发 `Authorization: Bearer`；`openai-compatible` 条目下的 `anthropic` 协议请求**同时携带** `x-api-key` 与 `Authorization: Bearer`（`anthropic-version` 由 SDK 注入）。条目级 `providerOptions` 只交给与条目 `type` 同协议的请求。推导为 `unavailable` 的模型照常出现在清单中（`ModelInfo.unavailable`），选择或请求时以同一说明拒绝、不发 HTTP（ADR-0026 §5）。`message.assistant` 事件记录产生该消息时的协议；上下文回传 Provider 专有数据（`providerData`）要求「同一服务商且同一协议」（context.md 第 7 节）。
 
 ## 5. 不属于 Provider 的事
 

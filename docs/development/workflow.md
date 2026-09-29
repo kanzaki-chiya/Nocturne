@@ -87,6 +87,17 @@ Anthropic 适配器的冒烟用独立变量，与 `NOCTURNE_SMOKE_*` 分离、�
 
 未设置时跳过；扩展思考模型变量未设置时，只跳过“缺 finish → 催促 → 兜底轮强制 finish”专项。该用例前两轮临时从模型请求中隐藏 `finish` 工具，以稳定触发原有兜底路径；首轮与催促轮仍由真实服务生成带 thinking 的响应，第三轮仍由真实服务接受含历史 thinking 的强制工具请求。只验证到跳过路径时在汇报中如实说明。
 
+按模型选择协议的冒烟（ADR-0026 §8，`test/per-model-protocol.smoke.ts`）：复用 Anthropic 冒烟的凭据变量，另需一个 Chat Completions 模型 id——
+
+```bash
+#   NOCTURNE_SMOKE_ANTHROPIC_API_KEY   双协议网关凭据（两协议共用同一密钥）
+#   NOCTURNE_SMOKE_ANTHROPIC_BASE_URL  同时提供 /chat/completions 与 /messages 的网关
+#   NOCTURNE_SMOKE_ANTHROPIC_MODEL     Messages 协议模型 id
+#   NOCTURNE_SMOKE_MODEL               Chat Completions 协议模型 id（复用 openai 冒烟变量）
+```
+
+四个变量齐备才运行（缺一即跳过）：在同一个 `openai-compatible` 条目、同一密钥下，默认协议模型请求 `<baseURL>/chat/completions`，手写 `protocol: "anthropic"` 的模型请求 `<baseURL>/messages`，各跑一轮纯文本对话并断言 `message.assistant.protocol` 分别为 `openai-compatible`/`anthropic`。
+
 Phase 2 的 CLI 冒烟（`apps/cli`）：在临时目录生成一个含失败测试的 fixture 仓库，以非交互模式 `nctrn --yes -p "<任务>"` 驱动真实模型完成"阅读项目 → 定位 bug → 修改文件 → 运行测试 → 报告结果"，断言 fixture 的测试在运行后通过。纯文本回复或只读工具调用不算验收。
 
 仅在不含敏感信息的测试工作区中运行冒烟测试——工作区内容会发送给模型服务。文档改动至少检查所有相对链接可达。

@@ -31,7 +31,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `--sessions` | 列出全部顶层会话（id、创建时间、绑定目录、模型、锁状态），按修改时间倒序，随后退出（退出码 0）；子代理会话（`session.created.parent` 存在者）默认不列出（[subagent.md](../architecture/subagent.md) 第 5 节） |
 | `--force-unlock` | 与 `--resume` / `--continue` 搭配：先删除残留锁再打开（[sessions.md](../architecture/sessions.md) 第 4 节） |
 | `--preset <name>` | 会话权限预设：`read-only` \| `default` \| `auto-edit` \| `full-access`，写入 `session.created`；恢复会话时该参数拒绝（预设以日志为准，改用 `/preset`） |
-| `--model <id>` | 模型 id（当前 Provider 内），覆盖 `NOCTURNE_MODEL` 与配置文件；`provider/model` 写法在前缀等于当前 Provider 时剥掉前缀，前缀是另一种 api-type 时拒绝；其余含斜杠的值（如 `deepseek/deepseek-v4.1-flash` 这类命名空间 id）按模型 id 原样使用 |
+| `--model <id>` | 模型 id（当前 Provider 内），覆盖 `NOCTURNE_MODEL` 与配置文件；`provider/model` 写法在前缀等于当前 Provider 时剥掉前缀，前缀是另一种 api-type 时拒绝；其余含斜杠的值（如 `deepseek/deepseek-v4.1-flash` 这类命名空间 id）按模型 id 原样使用。生效协议为 unavailable 的模型以同一说明拒绝（ADR-0026 §5） |
 | `--api-type <type>` | `openai-compatible`（默认）或 `anthropic`，覆盖 `NOCTURNE_API_TYPE` |
 | `--base-url <url>` | Provider 端点，覆盖 `NOCTURNE_BASE_URL`；`anthropic` 类型省略时用官方端点 |
 | `--api-key-env <NAME>` | 读取凭据的环境变量名。默认：`anthropic` → `ANTHROPIC_API_KEY`，其余 → `NOCTURNE_API_KEY` |
@@ -87,9 +87,9 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | 命令 | 行为 | 对应 Runtime 能力 |
 |---|---|---|
 | `/help` | 列出命令与快捷键 | — |
-| `/model` | 编号表格列出可用模型：`服务商/模型 id`、推理/图片输入标记、上下文长度、价格（`$输入/输出` 每百万 token）；未声明的列留空，不编造数据。标注「当前会话」「默认模型」（v0.2，列信息与 TUI 模型选择页一致，见 [apps/tui.md](tui.md) 第 7 节） | `runtime.listModels()`、`session.state().config.model`、`runtime.defaultModel()`、`runtime.listRecentModels()` |
+| `/model` | 编号表格列出可用模型：`服务商/模型 id`、推理/图片输入标记、上下文长度、价格（`$输入/输出` 每百万 token）；未声明的列留空，不编造数据。标注「当前会话」「默认模型」，生效协议为 unavailable 的模型照常列出并标注「协议不支持」（ADR-0026 §5）（v0.2，列信息与 TUI 模型选择页一致，见 [apps/tui.md](tui.md) 第 7 节） | `runtime.listModels()`、`session.state().config.model`、`runtime.defaultModel()`、`runtime.listRecentModels()` |
 | `/model <关键词>` | 同上表格按关键词过滤后列出 | 同上 |
-| `/model <id>` | 会话内切换模型 | `session.setModel(ref)` → `session.config_changed` |
+| `/model <id>` | 会话内切换模型；生效协议为 unavailable 的模型以「协议不支持」说明拒绝 | `session.setModel(ref)` → `session.config_changed` |
 | `/effort` | 列出当前思考档位与该模型的可用档位（ADR-0018）；模型未声明档位时提示如何声明 | `session.reasoningEffortInfo()`（只读） |
 | `/effort <档位>` | 切换会话思考档位：`off` 或当前模型声明的档位；不支持时报错并列出可用档位 | `session.setReasoningEffort(level)` → `session.config_changed` |
 | `/preset` | 显示当前权限预设 | `session.state().config.permissionPreset` |
