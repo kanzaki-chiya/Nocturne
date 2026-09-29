@@ -6,6 +6,7 @@
 import type { SubjectRequest } from "../../protocol/index.js";
 import type { ToolDefinition, ToolScope } from "../types.js";
 import { diffLines } from "./diff.js";
+import { diagnoseNoMatch } from "./edit-diagnostic.js";
 import { countLines, guardWritable, isGuardError, toolError } from "./guard.js";
 
 interface EditInput {
@@ -73,7 +74,10 @@ export const editTool: ToolDefinition<EditInput, EditOutput> = {
 
     const count = occurrences(oldText, input.old);
     if (count === 0) {
-      return toolError("no_match", `old 在 ${resolved} 中未出现`);
+      return toolError(
+        "no_match",
+        `old 在 ${resolved} 中未出现。${diagnoseNoMatch(oldText, input.old)}`,
+      );
     }
     if (count > 1 && input.replaceAll !== true) {
       return toolError(

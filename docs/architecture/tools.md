@@ -87,8 +87,8 @@ execute(call, ctx):
 | 工具 | 作用 | 副作用 | 关键约定 |
 |---|---|---|---|
 | `read` | 读取文本文件与 PNG、JPEG、GIF、WebP 图片，支持起始行与行数 | 无 | 带行号输出；记录"已读状态"（路径、修改时间）；图片约定见下 |
-| `write` | 创建或整体覆盖文件 | 写文件 | 覆盖已存在的文件前必须在本会话读过它，且文件自读取后未被外部修改；`output` 携带 `path`、`created`、`lines`，覆盖时附 `diff` |
-| `edit` | 精确字符串替换 | 写文件 | `old` 必须在文件中唯一出现（或显式 `replaceAll`）；同样要求先读且未过期；`output` 返回 unified 风格 `diff` 供客户端显示 |
+| `write` | 创建或整体覆盖文件 | 写文件 | 覆盖已存在的文件前必须在本会话读过它，且文件自读取后未被外部修改；`output` 携带 `path`、`created`、`lines`，有变化时附 `diff`（含新建） |
+| `edit` | 精确字符串替换 | 写文件 | `old` 必须在文件中唯一出现（或显式 `replaceAll`）；同样要求先读且未过期；未命中只诊断、不写入；`output` 返回 unified 风格 `diff` 供客户端显示 |
 | `grep` | 按正则搜索文件内容 | 无 | 优先使用 ripgrep；遵守 `.gitignore`；不跟随符号链接；结果逐条经权限过滤；数量有上限 |
 | `glob` | 按模式匹配文件路径 | 无 | 遵守 `.gitignore`；不跟随符号链接；结果逐条经权限过滤；按修改时间排序；数量有上限 |
 | `shell` | 执行非交互式命令 | 执行命令 | 指定工作目录与超时；合并输出流并截断；返回退出码；shell 与进程树终止见下 |
@@ -100,7 +100,8 @@ execute(call, ctx):
 
 - 写入工具以 `ctx.subjects` 中已批准的**解析后路径**为准；写入前重新 `stat`/`realpath`：解析结果与批准时不一致 → `resource_changed`；已存在文件在 `readState` 中无记录 → `error(code="not_read")`；记录的 `mtimeMs`/`size` 与当前不一致 → `error(code="stale_file")`（要求重新 `read`）。
 - `write` 创建尚不存在的文件不要求先读；写入瞬间文件恰好出现（竞态）按已存在文件处理，即要求先读。
-- `edit`/`write` 覆盖时在 `output` 中携带行级 unified 风格 diff（公共前后缀作上下文，中段为 `-`/`+` 行）；`modelContent` 是简短摘要，不含完整 diff。
+- `edit` 未命中仍返回 `no_match`，仅在路径和先读状态检查通过后，用已读的目标文本有界地诊断换行符、缩进、空白差异，或给出一处至多 5 行、带实际行号的相近片段；没有可信候选或文本过大时给简短提示。诊断只供模型修正精确的 `old`，绝不用于自动替换。
+- `edit` 与 `write` 创建/覆盖在有变化时于 `output.diff` 携带行级 unified 风格差异，头部为 `@@ -旧起始行,旧行数 +新起始行,新行数 @@`，路径由 `output.path` 提供；行尾 CRLF/LF 与末尾换行变化按变更行表达。`modelContent` 是简短摘要，不含完整 diff；结构化 `output` 超过 100,000 字符时仍按第 4 节的预算省略。
 
 `read` 的图片约定（ADR-0023）：
 

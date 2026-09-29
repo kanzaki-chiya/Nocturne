@@ -17,7 +17,7 @@ interface WriteOutput {
   path: string;
   created: boolean;
   lines: number;
-  /** 覆盖时的 unified 风格 diff（客户端渲染用） */
+  /** 创建或覆盖时的 unified 风格 diff（客户端渲染用） */
   diff?: string | undefined;
 }
 
@@ -70,7 +70,7 @@ export const writeTool: ToolDefinition<WriteInput, WriteOutput> = {
 
     const lines = countLines(input.content);
     const created = oldText === undefined;
-    const diff = created ? "" : diffLines(oldText, input.content, resolved);
+    const diff = diffLines(oldText ?? "", input.content, resolved);
     return {
       status: "ok",
       modelContent: created

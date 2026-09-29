@@ -263,6 +263,20 @@ describe("write 工具", () => {
     expect(output.diff).toContain(" line1");
   });
 
+  it("新建 write 返回从空文件到内容的 diff", async () => {
+    const ws = tmpWorkspace();
+    const h = await makeHarness(ws);
+    const r = await h.executor.execute(
+      call("write", { path: "new.ts", content: "one\ntwo\n" }),
+      h.scope,
+    );
+    expect(r.status).toBe("ok");
+    expect(r.result.output).toMatchObject({
+      created: true,
+      diff: "@@ -0,0 +1,2 @@\n+one\n+two",
+    });
+  });
+
   it("读取后文件被外部修改 → stale_file", async () => {
     const ws = tmpWorkspace();
     const file = path.join(ws, "a.ts");
@@ -366,6 +380,47 @@ describe("edit 工具", () => {
       h.scope,
     );
     expect(noChange.result.status === "error" && noChange.result.error.code).toBe("no_change");
+    expect(await h.scope.platform.fs.readTextFile(path.join(ws, "a.ts"))).toBe("content\n");
+  });
+
+  it.each([
+    ["alpha\r\nbeta\r\n", "alpha\nbeta", "换行符", "1 行"],
+    ["alpha\n    beta\n", "alpha\nbeta", "缩进", "1 行"],
+    ["alpha beta\n", "alpha  beta", "空白", "1 行"],
+    ["alpha\nbeta value\ngamma\n", "beta valse", "相近片段", "2: beta value"],
+    [
+      "one\ntwo\nthree\nfour\nfive\nsix\n",
+      "one\ntwo\nthrae\nfour\nfive\nsix",
+      "相近片段",
+      "2: two",
+    ],
+  ])("未命中诊断只提示并保留文件：%s", async (content, old, kind, location) => {
+    const ws = tmpWorkspace();
+    writeFileSync(path.join(ws, "a.ts"), content);
+    const h = await makeHarness(ws);
+    await readViaTool(h, "a.ts");
+    const r = await h.executor.execute(
+      call("edit", { path: "a.ts", old, new: "REPLACED" }),
+      h.scope,
+    );
+    expect(r.result.status === "error" && r.result.error.code).toBe("no_match");
+    expect(r.result.modelContent).toContain(kind);
+    expect(r.result.modelContent).toContain(location);
+    expect(await h.scope.platform.fs.readTextFile(path.join(ws, "a.ts"))).toBe(content);
+  });
+
+  it("大文件未命中退化为短错误", async () => {
+    const ws = tmpWorkspace();
+    writeFileSync(path.join(ws, "a.ts"), "x\n".repeat(50_100));
+    const h = await makeHarness(ws);
+    await readViaTool(h, "a.ts");
+    const r = await h.executor.execute(
+      call("edit", { path: "a.ts", old: "missing", new: "y" }),
+      h.scope,
+    );
+    expect(r.result.status === "error" && r.result.error.code).toBe("no_match");
+    expect(r.result.modelContent).not.toContain("相近片段");
+    expect(r.result.modelContent.length).toBeLessThan(300);
   });
 
   it("未先读 → not_read；文件不存在 → file_not_found", async () => {
@@ -916,7 +971,7 @@ describe("shell 工具 × ADR-0022（描述符 / 分页器名单 / 主体 shell 
 describe("diffLines", () => {
   it("公共前后缀作上下文，中段 -/+", () => {
     const d = diffLines("a\nb\nc\nd\ne\n", "a\nb\nX\nd\ne\n", "f.ts");
-    expect(d).toContain("@@ f.ts @@");
+    expect(d).toContain("@@ -1,5 +1,5 @@");
     expect(d).toContain("-c");
     expect(d).toContain("+X");
     expect(d).toContain(" a");
@@ -928,5 +983,16 @@ describe("diffLines", () => {
     const d = diffLines("a\n", "a\nb\n", "f");
     expect(d).toContain("+b");
     expect(d).not.toContain("-a");
+  });
+
+  it("首尾插入、删除及末尾换行使用真实行数和零行位置", () => {
+    expect(diffLines("", "first\n")).toBe("@@ -0,0 +1,1 @@\n+first");
+    expect(diffLines("last\n", "")).toBe("@@ -1,1 +0,0 @@\n-last");
+    expect(diffLines("a\n", "a\nb\n")).toBe("@@ -1,1 +1,2 @@\n a\n+b");
+    expect(diffLines("a", "a\n")).toBe("@@ -1,1 +1,1 @@\n-a\n\\ No newline at end of file\n+a");
+  });
+
+  it("仅 CRLF/LF 不同也产生变更行", () => {
+    expect(diffLines("a\r\n", "a\n")).toBe("@@ -1,1 +1,1 @@\n-a\n\\ CRLF\n+a");
   });
 });
