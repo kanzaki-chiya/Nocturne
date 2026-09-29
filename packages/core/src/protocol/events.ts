@@ -6,6 +6,7 @@ import type {
   ContentBlock,
   FinishReason,
   ImageAttachment,
+  ModelProtocol,
   ModelRef,
   PermissionAction,
   PermissionOption,
@@ -58,6 +59,12 @@ export interface MessageUserPayload {
 export interface MessageAssistantPayload {
   messageId: string;
   model: ModelRef;
+  /**
+   * 产生本条消息的生效协议（ADR-0026 §6）：可选，旧版本读取忽略；
+   * 无协议的 Provider（FakeProvider 等）不写。缺省时跨上下文回传
+   * providerData 只比较服务商，与 ADR-0026 之前的行为一致。
+   */
+  protocol?: ModelProtocol | undefined;
   content: ContentBlock[];
   toolCalls: ToolCallRef[];
   usage?: Usage | undefined;

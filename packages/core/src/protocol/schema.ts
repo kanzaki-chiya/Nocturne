@@ -108,6 +108,8 @@ const payloadSchemas = {
   "message.assistant": z.object({
     messageId: z.string(),
     model: modelRefSchema,
+    // ADR-0026 §6：产生该消息的生效协议（可选，旧版本忽略）
+    protocol: z.enum(["openai-compatible", "anthropic"]).optional(),
     content: z.array(contentBlockSchema),
     toolCalls: z.array(toolCallRefSchema),
     usage: usageSchema.optional(),

@@ -1056,3 +1056,106 @@ describe("上下文与运行时命令（Phase 2）", () => {
     await session.close();
   });
 });
+
+// ── 按模型协议（ADR-0026）───────────────────────────────
+
+describe("按模型协议（ADR-0026）", () => {
+  const entryOf = (endpoints: Record<string, string[]>) => ({
+    id: "gw",
+    type: "openai-compatible",
+    baseURL: "https://gw.test/v1",
+    models: Object.fromEntries(
+      Object.entries(endpoints).map(([id, eps]) => [id, { endpoints: eps }]),
+    ),
+  });
+
+  const writeProviders = (home: string, providers: unknown[]) =>
+    writeFileSync(path.join(home, "providers.json"), JSON.stringify({ version: 1, providers }));
+
+  it("清单照常列出不可用模型并带 reason；createSession/setModel 拒绝", async () => {
+    const workspace = makeTmpDir("nct-rt-ws-");
+    const sessionsDir = makeTmpDir("nct-rt-sessions-");
+    const home = makeTmpDir("nct-rt-home-");
+    writeProviders(home, [
+      entryOf({ chat: ["/chat/completions"], msg: ["/messages"], bad: ["/responses"] }),
+    ]);
+    const config = await loadConfig(createPlatform(), { nocturneHome: home, env: () => undefined });
+    const runtime = await createRuntime({ cwd: workspace, sessionsDir, config });
+
+    // 模型页：不可用模型照常列出并带说明；两协议各按 endpoints 盖章
+    const models = runtime.listModels();
+    const bad = models.find((m) => m.ref.model === "bad");
+    expect(bad?.unavailable?.reason).toContain("没有可用的服务协议");
+    expect(bad?.protocol).toBeUndefined();
+    expect(models.find((m) => m.ref.model === "chat")?.protocol).toBe("openai-compatible");
+    expect(models.find((m) => m.ref.model === "msg")?.protocol).toBe("anthropic");
+
+    // --model / createSession 选到不可用模型即拒绝
+    await expect(runtime.createSession({ model: "gw/bad" })).rejects.toMatchObject({
+      code: "invalid_model",
+    });
+
+    const session = await runtime.createSession({ model: "gw/chat" });
+    // /model 等价路径：setModel 拒绝并给同一说明
+    await expect(session.setModel("gw/bad")).rejects.toMatchObject({
+      code: "invalid_model",
+    });
+    expect(session.state().config.model.model).toBe("chat");
+    await session.close();
+  });
+
+  it("刷新后模型变为不可用：下一轮发请求前以说明结束，不发 HTTP", async () => {
+    const workspace = makeTmpDir("nct-rt-ws-");
+    const sessionsDir = makeTmpDir("nct-rt-sessions-");
+    const home = makeTmpDir("nct-rt-home-");
+    writeProviders(home, [entryOf({ m1: ["/chat/completions"] })]);
+    const platform = createPlatform();
+    const config = await loadConfig(platform, { nocturneHome: home, env: () => undefined });
+    const runtime = await createRuntime({ cwd: workspace, sessionsDir, config });
+    const session = await runtime.createSession({ model: "gw/m1" });
+
+    // 模拟 refresh 后上游只剩 /responses：同一条目下该模型变为不可用
+    writeProviders(home, [entryOf({ m1: ["/responses"] })]);
+    runtime.updateProviders(
+      await loadConfig(platform, { nocturneHome: home, env: () => undefined }),
+    );
+
+    await expect(session.submit({ text: "hi" })).rejects.toMatchObject({
+      code: "invalid_model",
+    });
+    await session.close();
+  });
+
+  it("message.assistant 记录生效协议；无协议的 Provider 不写该字段", async () => {
+    const protoModel: ModelInfo = {
+      ref: { provider: "fake", model: "fake-1" },
+      protocol: "anthropic",
+      contextWindow: 128_000,
+      maxOutputTokens: 8_192,
+      capabilities: {
+        toolCalls: true,
+        parallelToolCalls: true,
+        reasoning: "none",
+        imageInput: false,
+        promptCache: false,
+      },
+    };
+    const provider = new FakeProvider({
+      models: [protoModel],
+      scripts: [
+        [
+          { type: "text_delta", text: "x" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, undefined, { provider });
+    // 清单内模型（ref.model=fake-1）才能拿到声明的 protocol
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    const events = collect(session);
+    await session.submit({ text: "hi" });
+    const assistant = events.find((e) => e.type === "message.assistant");
+    expect(assistant?.type === "message.assistant" && assistant.payload.protocol).toBe("anthropic");
+    await session.close();
+  });
+});

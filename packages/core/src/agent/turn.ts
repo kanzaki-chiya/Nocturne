@@ -166,6 +166,8 @@ export async function runTurn(
       {
         messageId,
         model: deps.model.model.ref,
+        // ADR-0026 §6：记录产生本条消息的生效协议；无协议的 Provider 不写
+        ...(deps.model.model.protocol !== undefined ? { protocol: deps.model.model.protocol } : {}),
         content: acc.content,
         toolCalls: acc.toolCalls,
         usage: acc.usage,

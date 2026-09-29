@@ -8,6 +8,7 @@ import type {
   DurableEvent,
   HistoryEntry,
   ImageAttachment,
+  ModelProtocol,
 } from "../protocol/index.js";
 import type {
   ModelImage,
@@ -418,6 +419,7 @@ interface HistoryProjection {
 function historyToMessages(
   history: readonly HistoryEntry[],
   currentModelProvider: string,
+  currentModelProtocol: ModelProtocol | undefined,
   images?: ImageProjectionOpts,
 ): HistoryProjection {
   const messages: ModelMessage[] = [];
@@ -460,13 +462,15 @@ function historyToMessages(
         break;
       }
       case "assistant": {
-        // context.md 第 7 节：含 Provider 专有数据的推理块只回传同一 Provider
-        const content =
-          entry.model.provider === currentModelProvider
-            ? entry.content
-            : entry.content.filter(
-                (b) => !(b.type === "reasoning" && b.providerData !== undefined),
-              );
+        // context.md 第 7 节 + ADR-0026 §6：含 Provider 专有数据的推理块只在
+        // 「同一服务商且同一协议」时回传；历史条目缺 protocol（ADR-0026 之前
+        // 同一服务商只有一种协议）时只比较服务商
+        const sameSource =
+          entry.model.provider === currentModelProvider &&
+          (entry.protocol === undefined || entry.protocol === currentModelProtocol);
+        const content = sameSource
+          ? entry.content
+          : entry.content.filter((b) => !(b.type === "reasoning" && b.providerData !== undefined));
         chars += blockChars(content) + JSON.stringify(entry.toolCalls).length;
         messages.push({
           role: "assistant",
@@ -530,9 +534,13 @@ function historyToMessages(
  * 把有效历史渲染为纯文本转录（供 L2 摘要请求使用）。
  * 与 historyToMessages 走同一套 6.4 规则。
  */
-export function renderTranscript(history: readonly HistoryEntry[], provider: string): string {
+export function renderTranscript(
+  history: readonly HistoryEntry[],
+  provider: string,
+  protocol?: ModelProtocol,
+): string {
   // 摘要转录不带图片：附件渲染为 `[image: <label ?? file>]` 文本标记（ADR-0023）
-  const { messages, deferred } = historyToMessages(history, provider, {
+  const { messages, deferred } = historyToMessages(history, provider, protocol, {
     mode: "transcript",
     supported: false,
   });
@@ -570,10 +578,11 @@ export interface BuildSummaryRequestInput {
 export function buildSummaryRequest(input: BuildSummaryRequestInput): ModelRequest {
   const { model, throughSeq } = input;
   const covered = input.history.filter((e) => e.seq <= throughSeq);
-  const transcript = renderTranscript(covered, model.ref.provider);
+  const transcript = renderTranscript(covered, model.ref.provider, model.protocol);
   const userText = `以下是会话历史转录，请按系统提示压缩为摘要。\n\n${transcript}`;
   return {
     model: model.ref.model,
+    ...(model.protocol !== undefined ? { protocol: model.protocol } : {}),
     system: [{ text: SUMMARY_SYSTEM }],
     messages: [{ role: "user", content: [{ type: "text", text: userText }] }],
     tools: [],
@@ -706,7 +715,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     entries,
     unsettled,
     deferred,
-  } = historyToMessages(input.history, model.ref.provider, imageOpts);
+  } = historyToMessages(input.history, model.ref.provider, model.protocol, imageOpts);
   // context.md 6.5：进行中 Turn 的 message.user 被摘要覆盖时重新注入，
   // 保证"当前任务"不因压缩丢失（恢复投影中 open Turn 同理）
   const { summaryThrough: summaryCut } = compactionCutoffs(input.history);
@@ -793,6 +802,8 @@ export function buildContext(input: BuildContextInput): BuiltContext {
 
   const request: ModelRequest = {
     model: model.ref.model,
+    // ADR-0026 §4：生效协议随请求带给路由 Provider（不透明数据，不解释）
+    ...(model.protocol !== undefined ? { protocol: model.protocol } : {}),
     system,
     messages,
     tools: input.tools,

@@ -197,6 +197,57 @@ describe("buildContext", () => {
     }
   });
 
+  // ADR-0026 §6：providerData 回传条件是「同一服务商且同一协议」；
+  // 旧日志条目无 protocol 字段时按旧规则只比较服务商
+  const assistantWith = (protocol?: "openai-compatible" | "anthropic"): HistoryEntry => ({
+    kind: "assistant",
+    seq: 1,
+    turnId: "t",
+    messageId: "a1",
+    model: { provider: "test", model: "prev" },
+    ...(protocol !== undefined ? { protocol } : {}),
+    content: [
+      { type: "reasoning", text: "r", providerData: { sig: 1 } },
+      { type: "text", text: "answer" },
+    ],
+    toolCalls: [],
+    usage: undefined,
+    finishReason: "stop",
+  });
+  const chatModel: ModelInfo = { ...model, protocol: "openai-compatible" };
+
+  it("同一服务商但跨协议切换：剥离 providerData 推理块，保留文本", () => {
+    const built = buildContext(
+      baseInput({ history: [assistantWith("anthropic")], model: chatModel }),
+    );
+    const msg = built.request.messages[0];
+    if (msg?.role === "assistant") {
+      expect(msg.content).toEqual([{ type: "text", text: "answer" }]);
+    }
+  });
+
+  it("同一服务商且同一协议：providerData 推理块原样回传", () => {
+    const built = buildContext(
+      baseInput({ history: [assistantWith("openai-compatible")], model: chatModel }),
+    );
+    const msg = built.request.messages[0];
+    if (msg?.role === "assistant") {
+      expect(msg.content).toContainEqual(
+        expect.objectContaining({ type: "reasoning", providerData: { sig: 1 } }),
+      );
+    }
+  });
+
+  it("旧日志条目无 protocol：只比较服务商，providerData 保留", () => {
+    const built = buildContext(baseInput({ history: [assistantWith()], model: chatModel }));
+    const msg = built.request.messages[0];
+    if (msg?.role === "assistant") {
+      expect(msg.content).toContainEqual(
+        expect.objectContaining({ type: "reasoning", providerData: { sig: 1 } }),
+      );
+    }
+  });
+
   it("预算：contextWindow − min(maxOutput,16k) − 余量；超预算 → overBudget+mustCompact", () => {
     const huge = "x".repeat(400_000);
     const history: HistoryEntry[] = [

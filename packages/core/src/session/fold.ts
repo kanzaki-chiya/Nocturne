@@ -120,6 +120,8 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           turnId: turnId ?? "",
           messageId: p.messageId,
           model: p.model,
+          // ADR-0026 §6：协议随历史条目保存；旧日志无此字段
+          ...(p.protocol !== undefined ? { protocol: p.protocol } : {}),
           content: p.content,
           toolCalls: p.toolCalls,
           usage: p.usage,
