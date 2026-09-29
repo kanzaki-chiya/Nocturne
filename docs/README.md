@@ -61,7 +61,7 @@
 
 [decisions/README.md](decisions/README.md) 列出全部 ADR 及其状态。
 
-待确认的工具结果与客户端显示方案见 [ADR-0027](decisions/ADR-0027-edit-diagnostics-diff-display.md)。
+`edit` 未命中诊断与 diff 显示方案见 [ADR-0027](decisions/ADR-0027-edit-diagnostics-diff-display.md)。
 
 当前 TUI 交互规格见 [apps/tui.md](apps/tui.md)；v0.4 的普通屏幕与临时切屏方案见 [ADR-0021](decisions/ADR-0021-tui-daily-usability.md)，它部分取代已接受的 [ADR-0020](decisions/ADR-0020-tui-fullscreen-rendering.md)。
 

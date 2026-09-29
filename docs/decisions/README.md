@@ -32,7 +32,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0024](ADR-0024-model-settings-editor.md) | 模型设置编辑页：逐模型用户覆盖取代 `/provider image` | 已接受；显式 none 规则被 ADR-0025 取代；协议字段见 ADR-0026 |
 | [ADR-0025](ADR-0025-per-model-reasoning.md) | 模型能力来源：接入 models.dev，推理与档位只按模型声明 | 已接受 |
 | [ADR-0026](ADR-0026-per-model-protocol.md) | 按模型选择协议：同一服务商下的模型按上游声明各走各的接口 | 已接受 |
-| [ADR-0027](ADR-0027-edit-diagnostics-diff-display.md) | edit 未命中诊断与带行号的 diff 显示 | 提议 |
+| [ADR-0027](ADR-0027-edit-diagnostics-diff-display.md) | edit 未命中诊断与带行号的 diff 显示 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
