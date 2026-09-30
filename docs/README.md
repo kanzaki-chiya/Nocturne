@@ -23,7 +23,7 @@
 | [context.md](architecture/context.md) | 如何从会话历史构建模型上下文，token 预算与压缩 |
 | [tools.md](architecture/tools.md) | 工具注册、执行管线、结果归一化、内置工具 |
 | [permissions.md](architecture/permissions.md) | allow / ask / deny 规则模型、默认规则、审批流程 |
-| [config.md](architecture/config.md) | 分层配置、配置文件格式、项目信任模型、Grant 持久化 |
+| [config.md](architecture/config.md) | 分层配置、程序设置与 Runtime 设置接口、配置文件格式、项目信任模型、Grant 持久化 |
 | [mcp.md](architecture/mcp.md) | MCP 客户端：stdio 传输、服务器生命周期、工具包装与结果映射、`mcp` 权限类别 |
 | [hooks.md](architecture/hooks.md) | Hooks：事件点、外部命令契约、与权限的关系、项目信任 |
 | [subagent.md](architecture/subagent.md) | Subagent（子代理）：`task` 工具契约、Launcher 注入、子会话生命周期、受限工具集与权限收敛 |

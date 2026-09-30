@@ -7,7 +7,8 @@ import { normalizeModelRef, type RuntimeConfig, type RuntimeSession } from "@noc
 
 import { helpLines as catalogHelpLines } from "./slash-catalog.js";
 
-export type OverlayName = "context" | "help" | "resume" | "preset" | "effort" | "shell" | "theme";
+export type OverlayName =
+  "context" | "help" | "resume" | "preset" | "effort" | "shell" | "theme" | "settings";
 
 /** /provider 向导启动形态（add / key） */
 export type ProviderWizardStart =
@@ -56,6 +57,10 @@ export async function runSlash(
   switch (cmd) {
     case "/help":
       return { kind: "overlay", name: "help" };
+    case "/settings":
+      return arg === ""
+        ? { kind: "overlay", name: "settings" }
+        : { kind: "message", text: "用法：/settings" };
     case "/theme":
       return arg === ""
         ? { kind: "overlay", name: "theme" }

@@ -11,6 +11,8 @@ import { useMemo, useState } from "react";
 import stringWidth from "string-width";
 
 import type { ModelInfo, ModelRef, ProviderOverview, WizardPreset } from "@nocturne/core";
+import { clampReasoningEffort, type ReasoningEffort } from "@nocturne/core";
+import { Segmented } from "./dialog/segmented.js";
 
 import { useTuiEnv } from "../env.js";
 import { boxSafe, truncateLine } from "../format.js";
@@ -116,6 +118,8 @@ export function ModelPicker({
   presets,
   current,
   defaultModel,
+  currentEffort,
+  savedEffort,
   initialScope,
   initialFocus,
   wizard,
@@ -146,7 +150,9 @@ export function ModelPicker({
       }
     | undefined;
   onStartWizard: (presetId: string) => void;
-  onPick: (ref: string, setDefault: boolean) => void;
+  currentEffort?: ReasoningEffort | undefined;
+  savedEffort?: ReasoningEffort | undefined;
+  onPick: (ref: string, setDefault: boolean, effort: ReasoningEffort | null) => void;
   onClose: () => void;
   width: number;
   height: number;
@@ -161,6 +167,7 @@ export function ModelPicker({
   const [leftCursor, setLeftCursor] = useState(0);
   const [rightCursor, setRightCursor] = useState(0);
   const [action, setAction] = useState<0 | 1 | undefined>(undefined);
+  const [effort, setEffort] = useState<ReasoningEffort | undefined>();
 
   const leftItems = useMemo<LeftItem[]>(() => {
     const items: LeftItem[] = [
@@ -232,6 +239,21 @@ export function ModelPicker({
   useInput(
     (ch, key) => {
       // 内联选项条：←/→ 选择、Enter 确认、Esc 返回
+      if (effort !== undefined && selected !== undefined) {
+        const choices: ReasoningEffort[] = [
+          "off",
+          ...(selected.capabilities.reasoningEffort ?? []),
+        ];
+        if (key.escape) setEffort(undefined);
+        else if (key.leftArrow || key.rightArrow) {
+          setEffort(
+            choices[
+              (choices.indexOf(effort) + (key.leftArrow ? -1 : 1) + choices.length) % choices.length
+            ],
+          );
+        } else if (key.return) onPick(refText(selected.ref), true, effort);
+        return;
+      }
       if (action !== undefined) {
         if (key.escape) {
           setAction(undefined);
@@ -243,7 +265,17 @@ export function ModelPicker({
         }
         if (key.return) {
           const m = selected;
-          if (m !== undefined) onPick(refText(m.ref), action === 1);
+          if (m !== undefined) {
+            const levels = m.capabilities.reasoningEffort ?? [];
+            if (action === 1 && levels.length > 0) {
+              const preferred =
+                currentEffort !== undefined &&
+                (currentEffort === "off" || levels.includes(currentEffort))
+                  ? currentEffort
+                  : (clampReasoningEffort(savedEffort ?? "off", levels) ?? "off");
+              setEffort(preferred);
+            } else onPick(refText(m.ref), action === 1, null);
+          }
           return;
         }
         return;
@@ -356,6 +388,7 @@ export function ModelPicker({
       focus={focus}
       narrow={narrow}
       action={action}
+      effort={effort}
       current={current}
       defaultModel={defaultModel}
       width={width - (narrow ? 4 : LEFT_W + 4)}
@@ -460,6 +493,7 @@ function RightPane({
   focus,
   narrow,
   action,
+  effort,
   current,
   defaultModel,
   width,
@@ -474,6 +508,7 @@ function RightPane({
   focus: "left" | "right";
   narrow: boolean;
   action: 0 | 1 | undefined;
+  effort: ReasoningEffort | undefined;
   current: ModelRef | undefined;
   defaultModel: ModelRef | undefined;
   width: number;
@@ -487,7 +522,7 @@ function RightPane({
   const listTop = 2; // 搜索框 + 空行
   // 分隔 + 详情 2 行（不可用模型多一行原因说明，ADR-0026 §5）
   const detailH = sel?.unavailable !== undefined ? 4 : 3;
-  const hintH = 1;
+  const hintH = effort === undefined ? 1 : 2;
   const listH = Math.max(3, height - listTop - detailH - hintH);
 
   const start = Math.min(
@@ -595,7 +630,18 @@ function RightPane({
           <Text dimColor>（未选中）</Text>
         )}
       </Box>
-      {action !== undefined ? (
+      {effort !== undefined ? (
+        <Box flexDirection="column">
+          <Text>默认思考档位 · Enter 确认，Esc 返回</Text>
+          <Segmented
+            options={["off", ...(sel?.capabilities.reasoningEffort ?? [])]}
+            selected={["off", ...(sel?.capabilities.reasoningEffort ?? [])].indexOf(effort)}
+            focused
+            width={width - 2}
+            maxLines={1}
+          />
+        </Box>
+      ) : action !== undefined ? (
         <Text>
           <Text
             {...(action === 0 ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}

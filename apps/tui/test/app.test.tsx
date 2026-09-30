@@ -88,6 +88,27 @@ const noticeEntry = (seq: number, message: string): ViewEntry => ({
 });
 
 describe("TUI", () => {
+  it.each([false, true])("/settings 整帧打开并取消返回对话（inline=%s）", async (inline) => {
+    const { runtime, session } = await makeSession();
+    const screen = render(createElement(App, { session, runtime, env: ENV, inline }));
+    await waitFor(() => (screen.lastFrame() ?? "").includes("fake-model"));
+    await pause(100);
+    screen.stdin.write("/settings");
+    screen.stdin.write("\r");
+    await waitFor(() => (screen.lastFrame() ?? "").includes("/settings 设置"));
+    expect(screen.lastFrame()).toContain("在 /model 页设置");
+    expect(screen.lastFrame()).not.toContain("上下文");
+    await pause(100);
+    screen.stdin.write("\x1b");
+    await waitFor(
+      () =>
+        !(screen.lastFrame() ?? "").includes("/settings 设置") &&
+        (screen.lastFrame() ?? "").includes("fake-model"),
+    );
+    screen.unmount();
+    await session.close();
+  });
+
   it.each(["/new", "/resume other"])("提交准备中立刻 %s：拒绝切换", async (cmd) => {
     const { runtime, session } = await makeSession();
     let finish!: (reason: "aborted") => void;

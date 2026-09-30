@@ -20,6 +20,7 @@ import {
   type Clipboard,
   type ModelSettingsPatch,
   type ModelSettingsView,
+  type ReasoningEffort,
   type PermissionReply,
   type ProviderOverview,
   type QuestionReply,
@@ -100,6 +101,7 @@ import { QuestionDialog, questionDialogRows } from "./components/question-dialog
 import { ProviderPage, type ProviderOp } from "./components/provider-page.js";
 import { StatusBar, type EffortSegment, type StatusHighlight } from "./components/status-bar.js";
 import { ThemePage } from "./components/theme-page.js";
+import { SettingsPage } from "./components/settings-page.js";
 import { TodoPanel, todoPanelRows } from "./components/todo-panel.js";
 import { Transcript, type TranscriptItem } from "./components/transcript.js";
 import { useAltScreen, waitCommit } from "./alt-screen.js";
@@ -471,14 +473,13 @@ function SetupFlow({
     setPage("model");
   }, [runtime, setup, finish]);
 
-  /** 选中模型：setDefault 写 providers.json，再交给 openSession 或退出 */
+  /** 选中模型：成对保存默认模型与档位，再交给 openSession 或退出 */
   const pick = useCallback(
-    (ref: string, setDefault: boolean): void => {
+    (ref: string, setDefault: boolean, effort: ReasoningEffort | null): void => {
       void (async () => {
         try {
           if (setDefault) {
-            await provider.config.setDefaultModel(ref);
-            provider.updateProviders(await provider.reloadConfig());
+            await runtime.setDefaultModel(ref, effort);
           }
           if (setup.openSession !== undefined) {
             const session = await setup.openSession(ref);
@@ -491,7 +492,7 @@ function SetupFlow({
         }
       })();
     },
-    [provider, setup, finish],
+    [runtime, setup, finish],
   );
 
   // Ctrl+C：先回主屏再退出，不把终端留在备用屏（ADR-0017/0019）
@@ -549,6 +550,10 @@ function SetupFlow({
         presets={ops.presets.filter((p) => !configured.has(p.id))}
         current={undefined}
         defaultModel={runtime.defaultModel()}
+        savedEffort={
+          runtime.describeSettings().find((item) => item.key === "reasoningEffort")?.saved as
+            ReasoningEffort | undefined
+        }
         wizard={ops.wizard.state.running ? ops.wizard : undefined}
         onStartWizard={(presetId) => {
           ops.startWizard(presetId);
@@ -792,10 +797,12 @@ function SessionApp({
   const [providerPageKey, setProviderPageKey] = useState(0);
   const pickerCommitted = useRef(false);
   const providerCommitted = useRef(false);
+  const settingsCommitted = useRef(false);
   useLayoutEffect(() => {
     pickerCommitted.current = pickerOpen;
     providerCommitted.current = providerPageOpen;
-  }, [pickerOpen, providerPageOpen]);
+    settingsCommitted.current = overlay === "settings";
+  }, [pickerOpen, providerPageOpen, overlay]);
   const [completionOn, setCompletionOn] = useState(true);
   const [completionIndex, setCompletionIndex] = useState(0);
   const [indexed, setIndexed] = useState<
@@ -1511,7 +1518,7 @@ function SessionApp({
     foreign !== undefined ||
     wizardOverlay !== undefined ||
     providerRemove !== undefined;
-  const pageOpen = pickerOpen || providerPageOpen || recordOpen;
+  const pageOpen = pickerOpen || providerPageOpen || recordOpen || overlay === "settings";
   const closeRecord = useCallback(
     () =>
       alt.leave(async () => {
@@ -1876,6 +1883,12 @@ function SessionApp({
               if (r.name === "theme") clearInput();
               if (r.name === "resume" && submitting.current)
                 pushLine("! 会话忙（Turn 进行中）；先中断再切换");
+              else if (r.name === "settings")
+                void alt.enter(async () => {
+                  clearInput();
+                  setOverlay("settings");
+                  await waitCommit(settingsCommitted, true);
+                });
               else setOverlay(r.name);
             } else if (r.kind === "picker") openPicker(r.focus);
             else if (r.kind === "provider-page") openProviderPage(r.presetId, r.modelTarget);
@@ -1919,6 +1932,7 @@ function SessionApp({
         return;
       }
       if (overlay !== undefined) {
+        if (overlay === "settings") return;
         setOverlay(undefined);
         return;
       }
@@ -1958,6 +1972,7 @@ function SessionApp({
         return;
       }
       if (overlay !== undefined) {
+        if (overlay === "settings") return;
         setOverlay(undefined);
         return;
       }
@@ -2013,6 +2028,12 @@ function SessionApp({
               if (r.name === "theme") clearInput();
               if (r.name === "resume" && submitting.current)
                 pushLine("! 会话忙（Turn 进行中）；先中断再切换");
+              else if (r.name === "settings")
+                void alt.enter(async () => {
+                  clearInput();
+                  setOverlay("settings");
+                  await waitCommit(settingsCommitted, true);
+                });
               else setOverlay(r.name);
             } else if (r.kind === "picker") openPicker(r.focus);
             else if (r.kind === "provider-page") openProviderPage(r.presetId, r.modelTarget);
@@ -2134,74 +2155,95 @@ function SessionApp({
   const editor = composerWindow(`${g.prompt} `, input, cursor, width, budget.input);
 
   // Static 始终保持挂载，进出备用屏幕时不会重新写入旧回滚区。
-  const pageBody = pickerOpen ? (
-    <ModelPicker
-      key={pickerKey}
-      models={runtime.listModels()}
-      recents={runtime.listRecentModels()}
-      providers={pickerData?.providers ?? []}
-      presets={pickerData?.presets ?? []}
-      current={view.config.model}
-      defaultModel={runtime.defaultModel()}
-      initialScope={picker.scope}
-      initialFocus={picker.focus}
-      wizard={wizard.state.running ? wizard : undefined}
-      onStartWizard={startWizardInPicker}
-      onPick={(ref, setDefault) => {
-        void (async () => {
-          try {
-            await closePicker();
-            // 先切换本会话模型（不可用模型在此拒绝，ADR-0026 §5），
-            // 成功后才落默认模型——避免把默认模型写到不可用的 ref 上
-            await session.setModel(ref);
-            if (setDefault && provider !== undefined) {
-              await provider.config.setDefaultModel(ref);
-              provider.updateProviders(await provider.reloadConfig());
+  const pageBody =
+    overlay === "settings" ? (
+      <SettingsPage
+        runtime={runtime}
+        session={session}
+        width={width}
+        height={budget.frameHeight}
+        onThemeChange={onThemeChange}
+        onMouseFrame={fullscreen ? reportDialogMouse : undefined}
+        onClose={() => {
+          void alt.leave(() => {
+            setOverlay(undefined);
+            clearInput();
+          });
+        }}
+      />
+    ) : pickerOpen ? (
+      <ModelPicker
+        key={pickerKey}
+        models={runtime.listModels()}
+        recents={runtime.listRecentModels()}
+        providers={pickerData?.providers ?? []}
+        presets={pickerData?.presets ?? []}
+        current={view.config.model}
+        defaultModel={runtime.defaultModel()}
+        currentEffort={session.reasoningEffortInfo().current}
+        savedEffort={
+          runtime.describeSettings().find((item) => item.key === "reasoningEffort")?.saved as
+            ReasoningEffort | undefined
+        }
+        initialScope={picker.scope}
+        initialFocus={picker.focus}
+        wizard={wizard.state.running ? wizard : undefined}
+        onStartWizard={startWizardInPicker}
+        onPick={(ref, setDefault, effort) => {
+          void (async () => {
+            try {
+              await closePicker();
+              // 先切换本会话模型（不可用模型在此拒绝，ADR-0026 §5），
+              // 成功后才落默认模型——避免把默认模型写到不可用的 ref 上
+              await session.setModel(ref);
+              if (setDefault) {
+                await runtime.setDefaultModel(ref, effort);
+                await session.setReasoningEffort(effort ?? "off");
+              }
+            } catch (e) {
+              pushLine(`! ${errText(e)}`);
             }
-          } catch (e) {
-            pushLine(`! ${errText(e)}`);
-          }
-        })();
-      }}
-      onClose={() => {
-        void closePicker();
-      }}
-      width={width}
-      height={budget.frameHeight}
-      active={wizardOverlay === undefined}
-    />
-  ) : providerPageOpen ? (
-    <ProviderPage
-      key={providerPageKey}
-      presets={ops.presets}
-      entries={ops.entries}
-      currentProviderId={view.config.model?.provider}
-      wizard={ops.wizard.state.running ? ops.wizard : undefined}
-      onStartWizard={(presetId) => {
-        ops.startWizard(presetId);
-      }}
-      onOp={(id, op) => {
-        ops.runOp(id, op);
-      }}
-      onReadonlyHint={ops.readonlyHint}
-      onConfirmRemove={(id) => {
-        ops.confirmRemove(id);
-      }}
-      onListModels={ops.listModels}
-      onSaveModel={ops.saveModel}
-      initialModelTarget={providerPageTarget}
-      onMouseFrame={fullscreen ? reportDialogMouse : undefined}
-      onClose={() => {
-        void closeProviderPage();
-      }}
-      notice={ops.notice}
-      busyText={ops.busyText}
-      width={width}
-      height={budget.frameHeight}
-      termRows={rows}
-      active
-    />
-  ) : null;
+          })();
+        }}
+        onClose={() => {
+          void closePicker();
+        }}
+        width={width}
+        height={budget.frameHeight}
+        active={wizardOverlay === undefined}
+      />
+    ) : providerPageOpen ? (
+      <ProviderPage
+        key={providerPageKey}
+        presets={ops.presets}
+        entries={ops.entries}
+        currentProviderId={view.config.model?.provider}
+        wizard={ops.wizard.state.running ? ops.wizard : undefined}
+        onStartWizard={(presetId) => {
+          ops.startWizard(presetId);
+        }}
+        onOp={(id, op) => {
+          ops.runOp(id, op);
+        }}
+        onReadonlyHint={ops.readonlyHint}
+        onConfirmRemove={(id) => {
+          ops.confirmRemove(id);
+        }}
+        onListModels={ops.listModels}
+        onSaveModel={ops.saveModel}
+        initialModelTarget={providerPageTarget}
+        onMouseFrame={fullscreen ? reportDialogMouse : undefined}
+        onClose={() => {
+          void closeProviderPage();
+        }}
+        notice={ops.notice}
+        busyText={ops.busyText}
+        width={width}
+        height={budget.frameHeight}
+        termRows={rows}
+        active
+      />
+    ) : null;
 
   const bootNotes = (() => {
     const notes: string[] = [];

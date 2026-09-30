@@ -7,7 +7,13 @@ import { render } from "ink-testing-library";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ModelInfo, ModelRef, ProviderOverview, WizardPreset } from "@nocturne/core";
+import type {
+  ModelInfo,
+  ModelRef,
+  ProviderOverview,
+  WizardPreset,
+  ReasoningEffort,
+} from "@nocturne/core";
 
 import { ModelPicker } from "../src/components/model-picker.js";
 import { TuiEnvContext } from "../src/env.js";
@@ -109,6 +115,8 @@ function renderPicker(overrides?: {
   onPick?: (ref: string, d: boolean) => void;
   onStartWizard?: (id: string) => void;
   onClose?: () => void;
+  currentEffort?: ReasoningEffort;
+  savedEffort?: ReasoningEffort;
 }) {
   const onPick = overrides?.onPick ?? vi.fn();
   const onStartWizard = overrides?.onStartWizard ?? vi.fn();
@@ -122,6 +130,8 @@ function renderPicker(overrides?: {
         presets: PRESETS,
         current: CURRENT,
         defaultModel: DEFAULT,
+        currentEffort: overrides?.currentEffort,
+        savedEffort: overrides?.savedEffort,
         initialScope: overrides?.initialScope,
         initialFocus: overrides?.initialFocus,
         wizard: undefined,
@@ -138,6 +148,52 @@ function renderPicker(overrides?: {
 }
 
 describe("模型选择页", () => {
+  it.each([
+    ["high", "low", "high"],
+    ["medium", "medium", "low"],
+    [undefined, undefined, "off"],
+  ] as const)(
+    "设为默认预选 current=%s saved=%s → %s，Esc 返回选项条",
+    async (currentEffort, savedEffort, expected) => {
+      const chosen = model("fake", "reasoner", {
+        capabilities: { ...caps("visible"), reasoningEffort: ["low", "high"] },
+      });
+      const screen = renderPicker({
+        models: [chosen],
+        recents: [],
+        ...(currentEffort ? { currentEffort } : {}),
+        ...(savedEffort ? { savedEffort } : {}),
+      });
+      await vi.waitFor(() => expect(screen.lastFrame()).toContain("fake/reasoner"));
+      await pause(100);
+      screen.stdin.write("\r");
+      await vi.waitFor(() => expect(screen.lastFrame()).toContain("仅本会话"));
+      await pause(100);
+      screen.stdin.write("\x1b[C");
+      await pause(100);
+      screen.stdin.write("\r");
+      await vi.waitFor(() => expect(screen.lastFrame()).toContain(`* ${expected}`));
+      await pause(100);
+      screen.stdin.write("\x1b");
+      await vi.waitFor(() => expect(screen.lastFrame()).toContain("仅本会话"));
+      await pause(100);
+      expect(screen.onPick).not.toHaveBeenCalled();
+      screen.stdin.write("\r");
+      await vi.waitFor(() => expect(screen.lastFrame()).toContain(`* ${expected}`));
+      await pause(100);
+      screen.stdin.write("\x1b[C");
+      await pause(100);
+      screen.stdin.write("\r");
+      await vi.waitFor(() =>
+        expect(screen.onPick).toHaveBeenCalledWith(
+          "fake/reasoner",
+          true,
+          expected === "off" ? "low" : expected === "low" ? "high" : "off",
+        ),
+      );
+      screen.unmount();
+    },
+  );
   it("双栏布局：左栏范围/服务商/预设，右栏搜索框与模型行", async () => {
     const { lastFrame, unmount } = renderPicker();
     await pause();
@@ -205,7 +261,7 @@ describe("模型选择页", () => {
     await pause();
     stdin.write("\r"); // 确认
     await pause();
-    expect(onPick).toHaveBeenCalledWith("deepseek/deepseek-chat", true);
+    expect(onPick).toHaveBeenCalledWith("deepseek/deepseek-chat", true, null);
     unmount();
   });
 
@@ -216,7 +272,7 @@ describe("模型选择页", () => {
     await pause();
     stdin.write("\r"); // 确认仅本会话
     await pause();
-    expect(onPick).toHaveBeenCalledWith("anthropic/claude-opus-4.6", false);
+    expect(onPick).toHaveBeenCalledWith("anthropic/claude-opus-4.6", false, null);
     unmount();
   });
 
