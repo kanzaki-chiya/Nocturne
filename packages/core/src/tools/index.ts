@@ -28,6 +28,7 @@ export { editTool } from "./builtin/edit.js";
 export { shellTool } from "./builtin/shell.js";
 export { todoWriteTool } from "./builtin/todo-write.js";
 export { askUserTool } from "./builtin/ask-user.js";
+export { webFetchTool } from "./builtin/web-fetch.js";
 export { diffLines } from "./builtin/diff.js";
 export { createTaskTool } from "./builtin/task.js";
 export type { GateGrantSink } from "./gate.js";
@@ -42,10 +43,21 @@ import { editTool } from "./builtin/edit.js";
 import { shellTool } from "./builtin/shell.js";
 import { todoWriteTool } from "./builtin/todo-write.js";
 import { askUserTool } from "./builtin/ask-user.js";
+import { webFetchTool } from "./builtin/web-fetch.js";
 
 /** 内置工具集：Phase 2 起含写入与 shell（权限层决定是否放行） */
 export function builtinTools(): ToolDefinition[] {
-  return [readTool, grepTool, globTool, writeTool, editTool, shellTool, todoWriteTool, askUserTool];
+  return [
+    readTool,
+    grepTool,
+    globTool,
+    writeTool,
+    editTool,
+    shellTool,
+    todoWriteTool,
+    askUserTool,
+    webFetchTool,
+  ];
 }
 
 export function createBuiltinRegistry(): ToolRegistry {

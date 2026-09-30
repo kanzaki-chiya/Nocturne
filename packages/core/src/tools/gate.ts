@@ -143,7 +143,11 @@ export function createPolicyGate(
             callId,
             tool: hookCtx?.tool,
             input: hookCtx?.input,
-            subjects: evaluation.subjects,
+            subjects: evaluation.subjects.map((subject) => {
+              const copy = { ...subject };
+              delete copy.detail;
+              return copy;
+            }),
             permission: {
               action: "ask",
               reason: decision.reason,

@@ -42,6 +42,7 @@ const usageSchema = z.object({
 const permissionSubjectSchema = z.object({
   kind: z.enum(["read", "edit", "shell", "network", "mcp", "subagent"]),
   target: z.string(),
+  detail: z.string().optional(),
   resolved: z.string().optional(),
   where: z.enum(["workspace", "outside"]).optional(),
   // ADR-0022：执行该命令的 shell 种类（旧日志无此字段 → 按 POSIX 保守求值）

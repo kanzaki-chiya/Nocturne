@@ -150,11 +150,13 @@ launch(request, ctx)
 | 选择方式 | 语义 |
 |---|---|
 | `preset: "general"`（默认） | 可选池全部 |
-| `preset: "explore"` | 只读探索：`traits.mutates === false` 的工具（read/grep/glob 与声明 `readOnlyHint` 的 MCP 工具自动在内；write/edit/shell/task 自动排除）。按特性筛选而非按名字列表（pitfalls #3）。注意 `readOnlyHint` 是**服务器自己声明**的标注，不可信——它只决定工具能否进入 explore 工具集，调用时的放行仍由权限层逐项判断（第 7 节） |
+| `preset: "explore"` | 只读探索：`traits.mutates === false` 的工具（read/grep/glob/web_fetch 与声明 `readOnlyHint` 的 MCP 工具自动在内；write/edit/shell/task 自动排除）。按特性筛选而非按名字列表（pitfalls #3）。注意 `readOnlyHint` 是**服务器自己声明**的标注，不可信——它只决定工具能否进入 explore 工具集，调用时的放行仍由权限层逐项判断（第 7 节） |
 | `tools: [...]` | 显式白名单 ∩ 可选池；未知名 → `invalid_input` 并列出可用名（自愈路径与 `unknown_tool` 一致）；`finish` 不接受列出；点名 `needsUser` 工具（如 `ask_user`）因不在池内同样以 `invalid_input` 拒绝 |
 | `preset` + `tools` 同给 | `invalid_input` |
 
 工具名空间不变（子会话里仍是 `read`、`mcp__x__y`）；模型在子会话中调用池外/不存在工具 → `unknown_tool` 正常结算。
+
+`web_fetch` 自动进入 explore 工具集，但子会话非交互，未获规则或 Grant 放行的主机仍被拒绝。父会话「本会话允许」过的主机按第 7.2 节只读继承，可以直接读取其他页面；被拒访问应写入 finish 结果，由父代理处理。网页抓取契约见 [tools.md](tools.md) 第 6 节。
 
 **递归上限**：`maxDepth`（默认 1）是会话深度上限——`depth` 为祖先进会话数（顶层 0）。`depth == maxDepth` 的会话注册表里没有 `task`，模型硬调会得到 `unknown_tool`；这靠**不注册**实现，不靠运行时分支。
 

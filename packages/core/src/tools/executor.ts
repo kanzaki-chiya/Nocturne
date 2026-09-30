@@ -52,11 +52,12 @@ async function resolveSubjects(
   for (const req of requests) {
     if (PATH_KINDS.has(req.kind)) {
       const resolved = await scope.platform.resolveReal(req.target);
-      subjects.push({ kind: req.kind, target: req.target, resolved });
+      subjects.push({ kind: req.kind, target: req.target, resolved, detail: req.detail });
     } else {
       subjects.push({
         kind: req.kind,
         target: req.target,
+        detail: req.detail,
         shell: req.shell,
         shellRisk: req.shellRisk,
         shellRiskByDialect: req.shellRiskByDialect,

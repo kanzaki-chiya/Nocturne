@@ -234,6 +234,8 @@ export interface SubjectRequest {
   kind: SubjectKind;
   /** 词法规范化后的目标（绝对路径、命令字符串、URL） */
   target: string;
+  /** 仅供用户查看，不参与规则、Grant 或 Hook 判定（ADR-0033）。 */
+  detail?: string | undefined;
   /**
    * shell 主体：执行命令的 shell 种类（ADR-0022 的 ShellKind）。
    * 权限层据此选择分词方言；缺省按 POSIX 保守处理。
@@ -255,6 +257,8 @@ export interface PermissionSubject {
   kind: SubjectKind;
   /** 工具给出的目标（规范化后的路径、命令、URL） */
   target: string;
+  /** 仅供用户查看，不参与规则、Grant 或 Hook 判定（ADR-0033）。 */
+  detail?: string | undefined;
   /** 路径类主体：解析符号链接 / junction 后的真实路径 */
   resolved?: string | undefined;
   where?: SubjectWhere | undefined;

@@ -97,7 +97,7 @@ interface ToolEntry {
   status: "awaiting_permission" | "running"
         | "ok" | "error" | "denied" | "cancelled" | "interrupted";
   input: unknown;               // tool.started 的规范化 input
-  subjects: PermissionSubject[]; // permission.requested / tool.started 带来
+  subjects: PermissionSubject[]; // permission.requested / tool.started 带来；detail 只供确认框显示
   permission: { action: PermissionAction; source: PermissionSource; rule: string | undefined }
     | undefined;                // tool.started 带来
   resolution: PermissionResolvedPayload | undefined; // 最近一条 resolved

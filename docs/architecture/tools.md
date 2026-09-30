@@ -18,7 +18,7 @@ tools/
 │   ├── budget       结果大小预算与截断
 │   ├── image        图片文件头识别与尺寸解析（sniffImageMime / parseImageSize，纯函数）
 │   └── attachments  AttachmentStore：图片附件的会话内落盘与按 sha256 校验的读回（第 4 节）
-└── builtin/         read、write、edit、grep、glob、shell、task（Phase 6）
+└── builtin/         read、write、edit、grep、glob、shell、task、web_fetch 等
 ```
 
 内置工具与 MCP 工具（`packages/mcp`，见 [mcp.md](mcp.md)）、将来的插件工具走完全相同的注册接口和执行管线，没有特权通道。`task`（子代理，Phase 6）同样如此：它是普通 `ToolDefinition`，启动子会话的能力经 `SubagentLauncher` 接口注入，见 [subagent.md](subagent.md)。
@@ -87,6 +87,7 @@ execute(call, ctx):
 | 工具 | 作用 | 副作用 | 关键约定 |
 |---|---|---|---|
 | `read` | 读取文本文件与 PNG、JPEG、GIF、WebP 图片，支持起始行与行数 | 无 | 带行号输出；记录"已读状态"（路径、修改时间）；图片约定见下 |
+| `web_fetch` | 抓取公开网页、文档与图片 | 无 | 按主机申请 network 权限；HTML 转 Markdown；请求与结果约定见下 |
 | `write` | 创建或整体覆盖文件 | 写文件 | 覆盖已存在的文件前必须在本会话读过它，且文件自读取后未被外部修改；`output` 携带 `path`、`created`、`lines`，有变化时附 `diff`（含新建） |
 | `edit` | 精确字符串替换 | 写文件 | `old` 必须在文件中唯一出现（或显式 `replaceAll`）；同样要求先读且未过期；未命中只诊断、不写入；`output` 返回 unified 风格 `diff` 供客户端显示 |
 | `grep` | 按正则搜索文件内容 | 无 | 优先使用 ripgrep；遵守 `.gitignore`；不跟随符号链接；结果逐条经权限过滤；数量有上限 |
@@ -110,6 +111,18 @@ execute(call, ctx):
 - **识别方式**：读出字节后先做魔数嗅探（PNG `89 50 4E 47…`、JPEG `FF D8 FF`、GIF `GIF87a/89a`、WebP `RIFF…WEBP`），命中则从文件头解析宽高（`tools/image.ts` 纯函数）；识别在二进制判定之前，因此扩展名与内容不一致时按内容为准——`.png` 扩展名的文本文件仍按文本读取，SVG（纯文本格式）走文本路径，BMP 等未识别二进制仍报 `binary_file`（其说明中列出支持的图片格式）。
 - **限制**：单张原始文件不超过 5 MB、每边不超过 8000 px（`IMAGE_MAX_BYTES`/`IMAGE_MAX_EDGE`），超限报 `image_too_large`；文件头损坏或截断到无法解析尺寸报 `image_corrupt`。
 - **结果**：成功时忽略 `offset`/`limit`、**不写 readState**（图片不解除"先读后写"）；`modelContent` 为一行 `Image file: <path> (<mime>, <宽>×<高>, <大小>)`；字节作为 `attachments` 交给执行器落盘（第 4 节），经 Context Builder 按当前模型 `imageInput` 投影进请求（[context.md](context.md) 第 3 节）——工具本身不判断模型能力。
+
+### `web_fetch`
+
+契约见 [ADR-0033 §1](../decisions/ADR-0033-web-fetch-file-refs.md)。输入仅 `{ url: string }`，拒绝未知字段、非 HTTP(S) 协议、超过 2000 字符的 URL 和用户名密码段。只发 GET，User-Agent 使用共享版本基值 `nocturne/<version>`，Accept 为 `text/html, text/markdown, text/plain, application/json, */*;q=0.5`，沿用进程级 `configureEnvProxy`，不登录、不带 Cookie、不执行脚本，也没有搜索能力。
+
+声明 `mutates: false`、`concurrencySafe: true`、`timeoutMs: 30_000`、`maxModelChars: 30_000`。超时和中断由执行器结算，响应体读取同时监听取消信号。响应体超过 5 MB 时取消流，只处理前 5 MB 并注明截断；长结果走第 4 节的预算与完整输出落盘。重定向手动处理，至多跟随 5 次，每个目标重新校验协议、长度与凭据。授权主机相同才跟随：默认端口不写入主机，允许默认端口 HTTP → HTTPS 升级；非默认端口变化视作跨主机。跨主机以 `ok` 返回新地址，要求模型再次调用，由权限层批准新的主机。
+
+HTML/XHTML 删除 `script/style/noscript/svg/iframe/nav/header/footer/aside/form`，优先取 `main`，其次 `article`，否则取页面内容；提取 `<title>`，用 `node-html-markdown` 转 Markdown。`text/*`、JSON、XML 与 `+json`/`+xml` 原文返回。字符集优先取响应头 charset，HTML 未声明时查看前 1024 字节的 meta charset，未知编码回退 UTF-8；仅使用 WHATWG TextDecoder。PNG/JPEG/GIF/WebP 复用 `read` 的魔数、尺寸与大小校验，经附件通道落盘（`source: "read"`），由上下文按模型能力投影，不写 readState。其他内容返回 `unsupported_content` 并说明类型与已读取大小。
+
+2xx 的 `modelContent` 首行为 `URL: <最终地址>`，有标题时第二行为 `标题: <title>`，空行后是正文；HTTP 错误返回 `http_error`、状态码及正文前 2000 字符；连接、DNS、TLS 与无效重定向返回 `network_error`，超时仍为执行器的 `timeout`。`output` 只含 `{ url, finalUrl, status, contentType, title?, chars, truncatedBytes? }`，其中 chars 是预算截断前的模型结果字符数，不含正文。跨主机结果的 finalUrl 保留实际访问地址。
+
+权限目标为小写 hostname（非默认端口带 `:端口`），完整 URL 放在只供显示的 `detail`。同主机的会话授权与 explore 子会话继承见 [permissions.md](permissions.md) 第 3、5.4 节和 [subagent.md](subagent.md) 第 6、7 节；工具不自行判断访问权限。
 
 `shell` 的约定（Phase 2 定案）：
 

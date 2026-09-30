@@ -127,7 +127,17 @@ describe("ToolRegistry", () => {
         .specs()
         .map((s) => s.name)
         .sort(),
-    ).toEqual(["ask_user", "edit", "glob", "grep", "read", "shell", "todo_write", "write"]);
+    ).toEqual([
+      "ask_user",
+      "edit",
+      "glob",
+      "grep",
+      "read",
+      "shell",
+      "todo_write",
+      "web_fetch",
+      "write",
+    ]);
     expect(() => r.register(builtinTools()[0] ?? readTool)).toThrow(/重复/);
     r.unregister("read");
     expect(r.get("read")).toBeUndefined();

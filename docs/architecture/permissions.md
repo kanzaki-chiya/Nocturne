@@ -17,7 +17,7 @@
 
 | 概念 | 是什么 | 谁产生 | 记录位置 |
 |---|---|---|---|
-| `SubjectRequest` | 工具声明的、未解析的主体：`{ kind, target }` | 工具的 `permissionSubjects(input)`（纯函数） | — |
+| `SubjectRequest` | 工具声明的、未解析的主体：`{ kind, target, detail? }` | 工具的 `permissionSubjects(input)`（纯函数） | — |
 | `PermissionSubject` | 解析后的主体：增加 `resolved`（真实路径）与 `where` | Tool Executor 解析 + 权限层计算 `where` | `tool.started`、`permission.requested` |
 | `PermissionRule` | 一条规则：`{ kind?, pattern, action, where?, label? }`；`kind` 缺省或 `*` 匹配全部类别；`label` 是给人看的短说明，命中时进入解释文本 | 预设、用户配置、项目配置、命令行参数 | 配置文件 |
 | `Grant` | 用户在确认时授予的授权："本会话内允许"或"在此项目中始终允许"，形状 `{ kind, target, createdAt }`（5.4） | 客户端回复 | 会话内存 / 用户数据目录 |
@@ -34,11 +34,15 @@
 | `read` | 路径 | read、grep、glob（以搜索根目录为主体，枚举结果另行过滤，见 4.4） |
 | `edit` | 路径 | write、edit |
 | `shell` | 完整命令字符串 | shell |
-| `network` | URL 或主机 | 将来的网页类工具 |
+| `network` | 小写 hostname；非协议默认端口带 `:端口`，不含协议与路径 | `web_fetch` |
 | `mcp` | `<server>/<tool>`（服务器与工具的**原始名**，不做规范化） | MCP 工具（Phase 5，见 [mcp.md](mcp.md)） |
 | `subagent` | 工具集预设名（`general`/`explore`）或 `"custom"`（显式白名单） | `task` 工具（Phase 6，见 [subagent.md](subagent.md)）；`subagent * → deny` 即关闭子代理派生 |
 
 shell 主体另携带可选的 `shell` 字段（执行该命令的 shell 种类，ADR-0022）：`pwsh` / `powershell` / `bash` / `cmd` / `sh`，以及 `shellRisk` 字段——生效 `ShellDescriptor` 上的高风险命令元数据、`shellRiskByDialect` 字段——各方言的高风险表（检查嵌套 shell 调用的命令体用，见第 6 节第 6 项）（第 6 节的按种类表以纯数据形式集中在 platform 层，随主体透传进来；权限层执行匹配判定，platform 不含权限逻辑）。`shell` 只影响方言化判定（5.3 的组合命令拆段），`shellRisk` 只影响第 6 节的高风险匹配，两者都不参与规则 `pattern` 匹配——用户规则始终按命令原文匹配；缺省或未知一律按 POSIX 保守处理。
+
+`SubjectRequest` 与 `PermissionSubject` 可带 `detail?: string`，是只供人阅读的补充说明：执行器保留它，写入 `tool.started` 与 `permission.requested`，但规则匹配、Grant 键与 Hook 判定都不读取它。`PermissionRequest` Hook 的 subjects 会移除 detail；其他工具 Hook 不接收主体。`web_fetch` 的 detail 为完整 URL，授权目标仍是主机，因此「本会话允许」覆盖同主机后续页面；非默认端口有独立授权目标。network 可用 `docs.python.org`、`*.github.com` 等规则匹配。
+
+localhost 与内网地址同样经过权限求值，不做特殊限制；**full-access 下模型可以访问本机与内网服务**。重定向仅自动访问相同授权主机，跨主机需要重新调用与求值（[tools.md](tools.md) 第 6 节）。
 
 ## 4. 路径主体的解析
 

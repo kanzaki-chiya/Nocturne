@@ -61,6 +61,8 @@ interface ToolTraits {
 type SubjectRequest = {
   kind: "read" | "edit" | "shell" | "network" | "mcp" | "subagent"
   target: string
+  /** 仅用于显示，不参与规则匹配、Grant 键与 Hook 判定 */
+  detail?: string
   shell?: string
   /** 生效 ShellDescriptor 的纯数据高风险元数据（表集中在 platform，
       匹配判定在权限层）；缺省时权限层按 POSIX 基础表保守处理 */
@@ -154,6 +156,16 @@ type RawImageAttachment = {
 | `tool_failed` | 工具抛出非预期异常 |
 | `resource_unavailable` | 执行器无法解析权限主体（例如无权访问父目录） |
 | `resource_changed` | 修改类工具发现目标路径的解析结果与批准时不同（工具返回，名称统一） |
+
+`web_fetch` 的工具错误码（请求、响应与结果结构见 [tools.md](../architecture/tools.md) 第 6 节）：
+
+| code | 含义 |
+|---|---|
+| `unsupported_content` | 内容类型不受支持，说明 MIME 与已读取字节数 |
+| `http_error` | HTTP 非成功状态，给出状态码与正文前 2000 字符；重定向缺少 Location 同样报此错误 |
+| `network_error` | DNS、连接、TLS、读取失败，或无效目标、超过 5 次重定向；超时仍由执行器结算为 `timeout` |
+
+图片复用 `image_too_large` 与 `image_corrupt`，经既有附件通道返回，source 为 `read`。
 
 ## 4. 注册表与执行器
 

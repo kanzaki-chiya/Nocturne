@@ -141,7 +141,8 @@ type Usage = {
 /** 解析后的权限主体，见 permissions.md */
 type PermissionSubject = {
   kind: "read" | "edit" | "shell" | "network" | "mcp" | "subagent"   // subagent：Phase 6
-  target: string            // 工具给出的目标（规范化后的路径、命令、URL）
+  target: string            // 工具给出的目标（规范化路径、命令、网络主机）
+  detail?: string           // 仅供显示的补充说明，不参与规则、Grant 或 Hook 判定
   resolved?: string         // 路径类：解析符号链接 / junction 后的真实路径
   where?: "workspace" | "outside"
   shell?: string            // shell 主体：执行该命令的 shell 种类（ADR-0022；旧日志缺省按 POSIX 方言保守求值）

@@ -12,6 +12,7 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `@modelcontextprotocol/sdk` | 1.30.0 | MIT |
 | `ink` | 7.1.1 | MIT |
 | `marked` | 18.0.7 | MIT |
+| `node-html-markdown` | 2.0.0 | MIT |
 | `react` | 19.3.0 | MIT |
 | `string-width` | 8.2.2 | MIT |
 
