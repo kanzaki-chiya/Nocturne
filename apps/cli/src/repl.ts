@@ -7,11 +7,17 @@ import { createInterface, type Interface } from "node:readline";
 type HistoryInterface = Interface & { history: string[] };
 
 import type { Runtime, RuntimeConfig, RuntimeSession, SessionSummary } from "@nocturne/core";
-import type { RuntimeEvent } from "@nocturne/core/protocol";
+import type { QuestionAnswer, QuestionItem, RuntimeEvent } from "@nocturne/core/protocol";
 import { readlineCompleter } from "@nocturne/tui/slash-catalog";
 
 import { runSlashCommand, type CommandDeps } from "./commands.js";
-import { createEventWriter, renderEvent, renderPermissionPrompt } from "./render.js";
+import {
+  createEventWriter,
+  renderEvent,
+  renderPermissionPrompt,
+  renderQuestionPrompt,
+  renderQuestionSummary,
+} from "./render.js";
 import {
   createWizardIo,
   runAddWizardInSession,
@@ -62,6 +68,17 @@ export async function runRepl(
   let closed = false;
   /** 等待用户回答的权限请求（permission.requested 优先于普通输入） */
   let pendingPermission: { requestId: string } | undefined;
+  /** 等待用户回答的提问（ADR-0032 §6 逐行交互；与权限确认同级优先） */
+  let pendingQuestion:
+    | {
+        requestId: string;
+        callId: string;
+        questions: QuestionItem[];
+        /** 正在回答的题号 */
+        index: number;
+        answers: QuestionAnswer[];
+      }
+    | undefined;
   /** /resume 的行内交互状态（编号选择 / 跨目录确认） */
   let pendingResume: PendingResume | undefined;
   // 交互模式全部走 stdout：由写出器补齐流式文本与状态行之间的换行
@@ -69,7 +86,33 @@ export async function runRepl(
     write(io, channel, text);
   });
 
+  /** 打印当前待答题目的逐行提示（ADR-0032 §6） */
+  const printQuestion = (): void => {
+    const pq = pendingQuestion;
+    const q = pq?.questions[pq.index];
+    if (pq === undefined || q === undefined) return;
+    out.line("stdout", renderQuestionPrompt(q, pq.index, pq.questions.length));
+  };
+
   const onEvent = (ev: RuntimeEvent): void => {
+    if (ev.type === "question.requested") {
+      pendingQuestion = {
+        requestId: ev.payload.requestId,
+        callId: ev.payload.callId,
+        questions: ev.payload.questions,
+        index: 0,
+        answers: [],
+      };
+      printQuestion();
+      return;
+    }
+    // 提问随对应调用结算（或 Turn 结束兜底）清除——中断/超时走这里
+    if (
+      (ev.type === "tool.completed" && pendingQuestion?.callId === ev.payload.callId) ||
+      ev.type === "turn.completed"
+    ) {
+      pendingQuestion = undefined;
+    }
     if (ev.type === "permission.requested") {
       pendingPermission = { requestId: ev.payload.requestId };
       out.line(
@@ -232,6 +275,68 @@ export async function runRepl(
           return;
         }
 
+        // 提问的逐行回答（ADR-0032 §6）：编号或直接文字；空行跳过整次提问
+        if (pendingQuestion !== undefined) {
+          const pq = pendingQuestion;
+          const q = pq.questions[pq.index];
+          if (q === undefined) {
+            pendingQuestion = undefined;
+            prompt();
+            return;
+          }
+          if (line === "") {
+            pendingQuestion = undefined;
+            out.line("stdout", renderQuestionSummary(pq.questions, undefined));
+            void session.respondQuestion(pq.requestId, { skipped: true }).catch(() => undefined);
+            prompt();
+            return;
+          }
+          const options = q.options ?? [];
+          let answer: QuestionAnswer;
+          if (options.length === 0) {
+            // 自由文本题：整行即回答
+            answer = { selected: [], text: line };
+          } else {
+            const parts = line.split(",").map((s) => s.trim());
+            // 全部是数字 → 编号选择；否则整行作为「其他」文本
+            if (parts.every((s) => /^\d+$/.test(s))) {
+              const picked: string[] = [];
+              const bad: string[] = [];
+              for (const s of parts) {
+                const opt = options[Number.parseInt(s, 10) - 1];
+                if (opt === undefined) bad.push(s);
+                else if (!picked.includes(opt.label)) picked.push(opt.label);
+              }
+              if (bad.length > 0) {
+                out.line("stdout", `! 无效编号：${bad.join("，")}（可选 1–${options.length}）`);
+                prompt();
+                return;
+              }
+              if (q.multiSelect !== true && picked.length > 1) {
+                out.line("stdout", "! 本题是单选，只能输入一个编号");
+                prompt();
+                return;
+              }
+              answer = { selected: picked };
+            } else {
+              answer = { selected: [], text: line };
+            }
+          }
+          pq.answers.push(answer);
+          pq.index += 1;
+          if (pq.index < pq.questions.length) {
+            printQuestion();
+          } else {
+            pendingQuestion = undefined;
+            out.line("stdout", renderQuestionSummary(pq.questions, pq.answers));
+            void session
+              .respondQuestion(pq.requestId, { answers: pq.answers })
+              .catch(() => undefined);
+          }
+          prompt();
+          return;
+        }
+
         // /resume 的行内交互：编号选择 / 跨目录确认（沿用启动的默认拒绝语义）
         if (pendingResume !== undefined) {
           const state = pendingResume;
@@ -388,9 +493,10 @@ export async function runRepl(
           prompt();
           return;
         }
-        if (busy || pendingPermission !== undefined) {
+        if (busy || pendingPermission !== undefined || pendingQuestion !== undefined) {
           session.interrupt();
           pendingPermission = undefined;
+          pendingQuestion = undefined;
           busy = false;
           out.line("stdout", "! 已中断");
           prompt();

@@ -6,7 +6,12 @@
 import { styleText } from "node:util";
 
 import { todoItemsFromCompletion, todoSnapshotLines } from "@nocturne/core/protocol";
-import type { RuntimeEvent, ToolCompletedPayload } from "@nocturne/core/protocol";
+import type {
+  QuestionAnswer,
+  QuestionItem,
+  RuntimeEvent,
+  ToolCompletedPayload,
+} from "@nocturne/core/protocol";
 
 export type Channel = "stdout" | "stderr";
 
@@ -290,4 +295,41 @@ export function renderPermissionPrompt(
     .map((o) => `${style("bold", `[${OPTION_KEYS[o] ?? o[0] ?? "?"}]`)} ${OPTION_LABELS[o] ?? o}`)
     .join("  ");
   return [style("yellow", "? 操作需要确认"), ...lines, `  ${reason}`, `  ${rendered}`].join("\n");
+}
+
+/** 逐行 CLI 的单题提示（ADR-0032 §6）：编号选项 + 输入规则说明 */
+export function renderQuestionPrompt(q: QuestionItem, index: number, total: number): string {
+  const tag = q.header !== undefined ? `[${q.header}] ` : "";
+  const counter = total > 1 ? `（第 ${index + 1}/${total} 题）` : "";
+  const lines = [`${style("yellow", "?")} ${tag}${q.question}${counter}`];
+  const options = q.options ?? [];
+  for (const [i, o] of options.entries()) {
+    const desc = o.description !== undefined ? ` — ${o.description}` : "";
+    lines.push(`  ${i + 1}. ${o.label}${desc}`);
+  }
+  const hints: string[] = [];
+  if (options.length > 0) {
+    hints.push("输入编号选择");
+    if (q.multiSelect === true) hints.push("可输入多个编号，用逗号分隔");
+    hints.push("或直接输入文字作为「其他」");
+  }
+  hints.push("空行跳过整次提问");
+  lines.push(`  ${hints.join("；")}`);
+  return lines.join("\n");
+}
+
+/** 提问提交后的对话摘要（§6：每题一行「问题 → 回答」；跳过时显示「已跳过」） */
+export function renderQuestionSummary(
+  questions: readonly QuestionItem[],
+  answers: readonly QuestionAnswer[] | undefined,
+): string {
+  if (answers === undefined) return "◇ 提问已跳过";
+  const lines = questions.map((q, i) => {
+    const a = answers[i];
+    const parts: string[] = [];
+    if (a !== undefined && a.selected.length > 0) parts.push(a.selected.join("、"));
+    if (a?.text !== undefined) parts.push(a.text);
+    return `  ${q.question} → ${parts.length > 0 ? parts.join("；") : "（未回答）"}`;
+  });
+  return ["◇ 已提交回答：", ...lines].join("\n");
 }
