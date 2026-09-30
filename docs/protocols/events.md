@@ -134,8 +134,11 @@ type ToolCallRef = {
 }
 
 type Usage = {
-  inputTokens: number; outputTokens: number
-  cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number
+  inputTokens: number       // 本次请求模型看到的全部输入 token，包含缓存读取与缓存写入
+  outputTokens: number
+  cacheReadTokens?: number  // inputTokens 的子集：命中缓存读取的部分
+  cacheWriteTokens?: number // inputTokens 的子集：本次写入缓存的部分
+  reasoningTokens?: number
 }
 
 /** 解析后的权限主体，见 permissions.md */
@@ -191,6 +194,8 @@ type QuestionAnswer = { declined: true } | {
   text?: string
 }
 ```
+
+`inputTokens` 统一为包含口径：服务商分开报告未缓存输入与缓存读写时（如 Anthropic 原生 usage），由 Provider 适配器相加后写入；已是包含口径的来源（AI SDK 的 `LanguageModelUsage`，其 Anthropic provider 已完成相加）直接透传。Core 与客户端据此计算缓存命中率（`cacheReadTokens / inputTokens`）和上下文估算（[context.md](../architecture/context.md) 第 5 节），不再按服务商区分口径。
 
 `providerData` 只能回传给 `provider` 字段所示的 Provider，且要求同一协议（ADR-0026 §6），见 [context.md](../architecture/context.md) 第 7 节。
 
