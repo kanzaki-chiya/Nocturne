@@ -129,6 +129,7 @@
 
 - **负责**：文件系统访问、子进程启动与终止（含进程树）、路径规范化、用户目录解析、剪贴板图片读取（Windows PowerShell 5.1 STA，其他平台暂不支持），屏蔽 Windows / macOS / Linux 差异；shell 种类描述符与安装探测（`shells.ts`，ADR-0022：调用形态、语法说明、分页器名单、大小写敏感性等元数据随 `ShellDescriptor` 交给 tools / permission 消费，platform 不 import 权限语义）。
 - **不负责**：任何业务判断（例如"是否在工作区内"属于 permission；shell 命令的风险判定同）。
+- `configureEnvProxy()` 提供显式进程入口代理初始化，公开经 `core/index` 导出；导入与 Runtime 创建不自动调用，行为见 [config.md](config.md#网络代理)。
 - **依赖**：无（仅 Node.js 标准库）。
 
 ### input-history（`src/input-history.ts`，单文件）

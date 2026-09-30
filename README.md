@@ -41,6 +41,8 @@ $env:NOCTURNE_MODEL = "<模型 ID>"
 nctrn --sessions
 ```
 
+代理环境下设置 `HTTPS_PROXY`（例如 `http://127.0.0.1:7897`）即可，Node 24.14.0 起会自动生效；也支持 `HTTP_PROXY` 和 `NO_PROXY`，详见[网络代理说明](docs/architecture/config.md#网络代理)。较早的 Node 24 版本请升级，或在启动前设置 `NODE_USE_ENV_PROXY=1`。
+
 用户配置位于 `<NOCTURNE_HOME>/config.json`；项目配置位于仓库的 `.nocturne/config.json`。两者都是严格 JSON。向导写入独立的 `<NOCTURNE_HOME>/providers.json`，同名手头条目会覆盖向导条目。
 
 下面是一份用户配置示例，展示 Provider、模型、权限预设、MCP、Hooks 和子代理的最小写法。把地址、模型 ID 和 MCP 服务器脚本路径换成实际值；`NOCTURNE_API_KEY` 仍须由环境变量提供。MCP 服务器只在会话打开时启动，Hook 命令会在相应事件发生时执行。

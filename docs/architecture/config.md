@@ -125,6 +125,18 @@ Grant 文件的读写由 `config` 完成（它是"按工作区存放的用户数
 - 命令行参数层同理合成一个条目（id 同 api-type），按 id 合并规则覆盖同 id 的环境变量条目。
 - 合成条目的模型清单：环境变量/参数只给出"当前要用的模型"，其余行为与 Phase 2 一致（`allowUndeclaredModels`）。
 
+### 网络代理
+
+`nctrn` 在入口启动时、创建 Runtime 和任何网络请求之前调用公开的 `configureEnvProxy()`；逐行 CLI、TUI 与 `nctrn setup` 共用这个入口。函数位于 Core 的 platform 层，只在入口显式调用时设置进程全局代理，导入 Core 或调用 `createRuntime` 不会修改全局代理。
+
+读取 `HTTP_PROXY`、`HTTPS_PROXY` 及小写 `http_proxy`、`https_proxy`，并将 `NO_PROXY` / `no_proxy` 交给 Node 处理；同名大小写变量都设置时小写优先。`NO_PROXY` 是逗号分隔的绕过列表，可匹配主机、域名、端口等，`*` 绕过所有地址；具体语法遵循 [Node 内置代理文档](https://nodejs.org/docs/latest-v24.x/api/http.html#built-in-proxy-support)。这些变量是进程级网络设置，不参与 `NOCTURNE_*` 配置分层，也不控制 MCP 子进程自身的网络实现。
+
+自动初始化使用 Node 的 `http.setGlobalProxyFromEnv`，该 API [自 Node 24.14.0 提供](https://nodejs.org/docs/latest-v24.x/api/http.html#httpsetglobalproxyfromenvproxyenv)。仓库仍支持 Node >=24；有代理地址而当前 Node 缺少该 API 时，启动警告提示升级到 24.14.0 或设置 `NODE_USE_ENV_PROXY=1`，不阻断启动。无代理地址时不做任何设置；已设 `NODE_USE_ENV_PROXY=1` 时沿用 Node 在进程启动时完成的初始化，不重复调用。代理配置触发 `ERR_PROXY_INVALID_CONFIG` 时，启动警告仅报告变量名，不输出地址或用户名、密码；本次自动初始化未完成。启动后修改变量不会自动重配全局代理。
+
+Node 的 fetch dispatcher 对不支持的代理协议也可能抛 `UND_ERR_INVALID_ARG`，按同样的无地址警告处理。
+
+Core 冒烟配置在加载根目录 `.env` 后调用同一函数，冒烟专用 setup 也在 Vitest 测试 worker 入口调用它（worker 继承环境变量，但不继承配置进程的全局 dispatcher）。因此代理地址可以来自启动环境或冒烟环境文件；默认离线测试不会启用全局代理。
+
 ## 6. 与 Runtime 的接线
 
 ```text

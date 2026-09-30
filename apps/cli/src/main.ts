@@ -7,6 +7,7 @@ import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 
 import {
+  configureEnvProxy,
   createPlatform,
   createRuntime,
   RuntimeCommandError,
@@ -75,6 +76,9 @@ async function confirmForeignWorkspace(workspaceRoot: string): Promise<boolean> 
 }
 
 async function main(): Promise<number> {
+  const proxyWarning = configureEnvProxy();
+  if (proxyWarning !== undefined) process.stderr.write(`! ${proxyWarning}\n`);
+
   let args: CliArgs;
   try {
     args = parseArgs(process.argv.slice(2));

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { configureEnvProxy } from "./src/platform/proxy.js";
 
 // 冒烟测试：真实 OpenAI 兼容与 Anthropic 服务。需要环境变量：
 //   NOCTURNE_SMOKE_BASE_URL  例如 https://api.deepseek.com/v1
@@ -10,11 +11,14 @@ import { defineConfig } from "vitest/config";
 // 仅在不含敏感信息的测试仓库中运行——读取到的内容会发给模型服务。
 const rootEnv = fileURLToPath(new URL("../../.env", import.meta.url));
 if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
+const proxyWarning = configureEnvProxy();
+if (proxyWarning !== undefined) process.stderr.write(`! ${proxyWarning}\n`);
 
 export default defineConfig({
   test: {
     include: ["test/**/*.smoke.ts"],
     environment: "node",
+    setupFiles: ["test/setup-smoke.ts"],
     testTimeout: 60_000,
     hookTimeout: 30_000,
   },

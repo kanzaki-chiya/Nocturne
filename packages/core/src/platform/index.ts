@@ -6,3 +6,4 @@ export * from "./process.js";
 export * from "./realpath.js";
 export * from "./shells.js";
 export * from "./platform.js";
+export * from "./proxy.js";

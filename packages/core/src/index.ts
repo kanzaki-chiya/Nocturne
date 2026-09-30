@@ -1527,6 +1527,7 @@ export {
 export { SessionError } from "./session/index.js";
 export {
   createPlatform,
+  configureEnvProxy,
   type Clipboard,
   SHELL_KINDS,
   type DetectedShell,

@@ -76,6 +76,8 @@ pnpm test:smoke     # vitest run --config vitest.smoke.config.ts；未设置时�
 
 这三个变量也可以写在仓库根目录的 `.env`（`KEY=value` 格式，已被 `.gitignore` 忽略，不得提交）；冒烟配置启动时加载它，已设置的环境变量优先。冒烟测试覆盖纯文本 Turn、`read` 工具、假 MCP 服务器 `echo` 工具、子代理往返，均在临时生成的工作区中运行。若另设 `NOCTURNE_SMOKE_DEEPSEEK_REASONING_MODEL`（同一 OpenAI 兼容端点上支持推理内容的模型 id），还会验证含 reasoning 历史的多轮回传与聊天模板标记不泄漏；未设时该专项跳过，不把普通 DeepSeek 模型误报为推理模型。另设 `NOCTURNE_SMOKE_IMAGE=1`（要求 `NOCTURNE_SMOKE_MODEL` 真能看图）时，会跑读图冒烟：临时工作区写一张小 PNG，让模型用 `read` 读取并回答主色，断言回复命中颜色词；模型不能看图时该用例会失败而非跳过，故默认不开启。
 
+Core 冒烟配置在加载 `.env` 后自动初始化环境代理：设置 `HTTPS_PROXY` / `HTTP_PROXY` 即可，无需额外设置 `NODE_USE_ENV_PROXY=1`（Node 24.14.0 起；版本与绕过规则见[网络代理说明](../architecture/config.md#网络代理)）。
+
 Anthropic 适配器的冒烟用独立变量，与 `NOCTURNE_SMOKE_*` 分离、互不影响：
 
 ```bash
