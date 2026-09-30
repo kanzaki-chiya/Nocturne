@@ -203,6 +203,76 @@ describe("anthropic 适配器", () => {
     );
   });
 
+  it("提示缓存：按 cachePrefix 给 system 末尾与前缀内最后一条消息打 cache_control，其后内容不打", async () => {
+    const capture: { body?: unknown } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    await collect(
+      p,
+      request({
+        system: [{ text: "sys" }, { text: "env" }],
+        messages: [
+          { role: "user", content: [{ type: "text", text: "旧问题" }] },
+          { role: "assistant", content: [{ type: "text", text: "旧回答" }], toolCalls: [] },
+          { role: "user", content: [{ type: "text", text: "新问题" }] },
+          { role: "user", content: [{ type: "text", text: "任务清单" }] },
+        ],
+        cachePrefix: { systemBlocks: 2, messages: 3 },
+      }),
+    );
+    const body = capture.body as {
+      system: { text: string; cache_control?: unknown }[];
+      messages: { role: string; content: { text?: string; cache_control?: unknown }[] }[];
+    };
+    expect(body.system.at(-1)?.cache_control).toEqual({ type: "ephemeral" });
+    const parts = body.messages.flatMap((m) => m.content);
+    const marked = parts.filter((c) => c.cache_control !== undefined).map((c) => c.text);
+    expect(marked).toEqual(["新问题"]);
+  });
+
+  it("提示缓存：没有 cachePrefix 时不打任何 cache_control", async () => {
+    const capture: { body?: unknown } = {};
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+    );
+    await collect(p, request());
+    expect(JSON.stringify(capture.body)).not.toContain("cache_control");
+  });
+
+  it("usage 口径：inputTokens 包含缓存读写（events.md Usage）", async () => {
+    const p = createAnthropicProvider(
+      config(),
+      envWithKey,
+      sseFetch([
+        {
+          type: "message_start",
+          message: {
+            id: "msg_1",
+            model: "claude-x",
+            usage: {
+              input_tokens: 10,
+              cache_read_input_tokens: 80,
+              cache_creation_input_tokens: 5,
+            },
+          },
+        },
+        ...msgEnd("end_turn"),
+      ]),
+    );
+    const events = await collect(p, request());
+    const usage = events.find((e) => e.type === "usage");
+    expect(usage?.type === "usage" ? usage.usage : undefined).toMatchObject({
+      inputTokens: 95,
+      cacheReadTokens: 80,
+      cacheWriteTokens: 5,
+    });
+  });
+
   it("签名回传：assistant 推理块的 providerData 还原为 thinking 块", async () => {
     const capture: { body?: { messages?: unknown[] } } = {};
     const p = createAnthropicProvider(

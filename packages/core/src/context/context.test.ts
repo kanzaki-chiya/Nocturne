@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DurableEvent, HistoryEntry, ImageAttachment } from "../protocol/index.js";
-import type { ModelInfo } from "../provider/index.js";
+import type { ModelInfo, ModelMessage } from "../provider/index.js";
 import {
   attachmentsToLoad,
   buildContext,
@@ -52,7 +52,15 @@ describe("buildContext", () => {
     const todos = [{ text: "当前任务", status: "in_progress" as const }];
     const plain = buildContext(baseInput({ history: [] }));
     const built = buildContext(baseInput({ history: [], todos }));
-    expect(built.request.system.at(-1)?.text).toContain('"当前任务"');
+    // ADR-0028 修订：清单不进 system（保持缓存前缀稳定），作为末尾 user 消息附上
+    expect(built.request.system).toEqual(plain.request.system);
+    const last = built.request.messages.at(-1);
+    expect(last?.role).toBe("user");
+    expect(last?.role === "user" ? last.content.at(-1) : undefined).toMatchObject({
+      text: expect.stringContaining('"当前任务"'),
+    });
+    expect(built.request.cachePrefix?.messages).toBe(built.request.messages.length - 1);
+    expect(plain.request.cachePrefix?.messages).toBe(plain.request.messages.length);
     expect(built.report.sections.find((s) => s.name === "todos")?.estimatedTokens).toBeGreaterThan(
       0,
     );
@@ -60,6 +68,56 @@ describe("buildContext", () => {
     expect(
       buildContext(baseInput({ todos: [] })).report.sections.some((s) => s.name === "todos"),
     ).toBe(false);
+  });
+  it("任务清单：末尾是 user 消息时并入该条（不产生连续 user），末尾是工具结果时另起一条", () => {
+    const todos = [{ text: "当前任务", status: "in_progress" as const }];
+    const userTail = buildContext(
+      baseInput({
+        history: [
+          {
+            kind: "user",
+            seq: 1,
+            turnId: "t1",
+            messageId: "m1",
+            content: [{ type: "text", text: "问题" }],
+          },
+        ],
+        todos,
+      }),
+    ).request;
+    expect(userTail.messages).toHaveLength(1);
+    const merged = userTail.messages[0];
+    expect(merged?.role === "user" ? merged.content.map((c) => c.type) : []).toEqual([
+      "text",
+      "text",
+    ]);
+    expect(userTail.cachePrefix?.messages).toBe(0);
+
+    const pending: ModelMessage = {
+      role: "tool",
+      callId: "c1",
+      name: "read",
+      content: "结果",
+      isError: false,
+    };
+    const toolTail = buildContext(
+      baseInput({
+        history: [
+          {
+            kind: "user",
+            seq: 1,
+            turnId: "t1",
+            messageId: "m1",
+            content: [{ type: "text", text: "问题" }],
+          },
+        ],
+        pendingMessages: [pending],
+        todos,
+      }),
+    ).request;
+    expect(toolTail.messages.map((m) => m.role)).toEqual(["user", "tool", "user"]);
+    expect(toolTail.cachePrefix?.messages).toBe(2);
+    expect(pending.content).toBe("结果");
   });
   it("组装顺序：system → tools → instructions → environment → history", () => {
     const history: HistoryEntry[] = [

@@ -36,6 +36,9 @@ import {
   toProviderError,
 } from "./ai-sdk-common.js";
 
+/** Messages API 的 cache_control 断点（默认 5 分钟有效） */
+const EPHEMERAL_CACHE = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
+
 export interface AnthropicConfig {
   /** Provider id（providerOptions 的 SDK 命名空间固定为 "anthropic"，与 id 无关） */
   id: string;
@@ -204,14 +207,32 @@ export function createAnthropicProvider(
       // sessionHeader 才写；静态 headers 同名头优先
       const sessionHeaders = sessionRequestHeaders(config, request.sessionId);
 
+      // 提示缓存（providers.md 第 4 节）：Messages API 只缓存显式 cache_control
+      // 断点之前的前缀。按 cachePrefix 打两个断点：system 末尾（连同其前的
+      // 工具规格）与前缀内最后一条消息；其后的任务清单等每次变化的内容不缓存。
+      const systemText = request.system.map((b) => b.text).join("\n\n");
+      const prefix = request.cachePrefix;
+      const cacheSystem =
+        prefix !== undefined && systemText !== "" && prefix.systemBlocks >= request.system.length;
+
       const result = streamText({
         model: sdk(request.model),
-        system: request.system.map((b) => b.text).join("\n\n"),
+        system: cacheSystem
+          ? { role: "system", content: systemText, providerOptions: EPHEMERAL_CACHE }
+          : systemText,
         messages: toAiMessages(request, {
           // providerData 就是 providerMetadata 原值（{ anthropic: {...} }），直接回传
           reasoningProviderOptions: (pd) => pd as Record<string, Record<string, JSONValue>>,
           // ADR-0023：tool_result content 支持原生 image 块
           toolResultImages: "native",
+          ...(prefix !== undefined && prefix.messages > 0
+            ? {
+                cacheBreakpoint: {
+                  afterMessages: prefix.messages,
+                  providerOptions: EPHEMERAL_CACHE,
+                },
+              }
+            : {}),
         }),
         tools: toAiTools(request),
         // ADR-0016：Messages API 的 max_tokens 必填，未知时只能给兜底值

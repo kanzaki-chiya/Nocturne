@@ -41,6 +41,12 @@ export interface ToAiMessagesOptions {
    *   原生 image 块；isError 带图时丢弃图片并在文本末追加说明。
    */
   toolResultImages?: "native" | "user-message" | undefined;
+  /**
+   * 提示缓存断点（anthropic 的 cache_control）：前 `afterMessages` 条中性消息
+   * 转换出的最后一条 SDK 消息挂上 `providerOptions`。取
+   * `request.cachePrefix.messages`；为 0 时不挂。
+   */
+  cacheBreakpoint?: { afterMessages: number; providerOptions: SdkProviderOptions } | undefined;
 }
 
 /** 中性图片 → AI SDK file 部件（v7 的 image 部件已弃用，file 是标准形态） */
@@ -71,7 +77,11 @@ export function toAiMessages(
     out.push({ role: "user", content: parts });
     pendingToolImages.length = 0;
   };
-  for (const m of request.messages) {
+  const breakpoint = options.cacheBreakpoint;
+  // 前缀内消息转换出的 SDK 消息条数（断点挂在其中最后一条上）
+  let prefixOut = breakpoint !== undefined && breakpoint.afterMessages <= 0 ? 0 : undefined;
+  for (const [index, m] of request.messages.entries()) {
+    if (index === breakpoint?.afterMessages) prefixOut = out.length;
     switch (m.role) {
       case "user": {
         flushToolImages();
@@ -171,6 +181,10 @@ export function toAiMessages(
     }
   }
   flushToolImages();
+  if (breakpoint !== undefined) {
+    const target = out[(prefixOut ?? out.length) - 1];
+    if (target !== undefined) target.providerOptions = breakpoint.providerOptions;
+  }
   return out;
 }
 

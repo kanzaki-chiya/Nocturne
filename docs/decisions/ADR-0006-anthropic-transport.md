@@ -26,3 +26,7 @@
 
 - **`@anthropic-ai/sdk`（官方 SDK）**：对 Messages API 的覆盖最直接、字段最全；但引入第二套 SDK 的流式与错误形态，归一化代码不能与现有适配器同构。当 AI SDK 的字段透传出现实际缺口时改用它。
 - **适配器内自建 `fetch` + SSE**：控制最强、零新依赖，但要自行处理 SSE 边界、`content_block_*` 事件组装与错误体映射，重复 `@ai-sdk/openai-compatible` 已经解决的问题；作为最终退路保留。
+
+## 修订
+
+- 2026-10-01：`cache_control` 此前并未实现（适配器没有读取 `cachePrefix`），走 Messages API 的请求一直没有提示缓存。现按 `cachePrefix` 打两个断点：system 末尾，以及前缀内最后一条消息（Builder 的前缀已延伸到末尾任务清单之前，见 ADR-0028 修订）。细节见 [providers.md](../architecture/providers.md) 第 4 节。
