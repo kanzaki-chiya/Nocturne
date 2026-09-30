@@ -38,6 +38,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0030](ADR-0030-dialog-settings-pages.md) | TUI 对话框式设置页 | 已接受 |
 | [ADR-0031](ADR-0031-opencode-presets-responses.md) | OpenCode Zen / Go 预设、Responses 协议与会话标识请求头 | 已接受 |
 | [ADR-0032](ADR-0032-ask-user-tool.md) | 向用户提问工具 | 已接受 |
+| [ADR-0033](ADR-0033-web-fetch-file-refs.md) | 网页抓取工具与 `@文件` 引用 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 

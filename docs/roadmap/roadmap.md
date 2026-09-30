@@ -184,8 +184,9 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - ~~**shell 可选（第一项）**~~（已实现）：shell 工具支持 pwsh / Windows PowerShell / Git Bash / cmd（POSIX 为 sh），Windows 自动选 pwsh 7 → Git Bash → cmd；`/shell` 选择写入程序维护的 `settings.json`（设置层第一个字段）；权限层按种类分段并补全 PowerShell 与 cmd 的高风险命令。设计见 [ADR-0022](../decisions/ADR-0022-shell-selection.md)（已接受）。
 - ~~**任务清单工具**~~（已实现；[ADR-0028](../decisions/ADR-0028-session-task-list.md)）：长任务里模型列出步骤、逐项更新状态，界面显示进度；清单随会话持久化，恢复会话时还原。
 - ~~**向用户提问工具**~~（已实现；[ADR-0032](../decisions/ADR-0032-ask-user-tool.md)）：模型遇到需要用户拍板的问题时暂停并提问（可给选项），用户回答后继续；非交互模式下返回"无法提问"，由模型自行取默认。
-- **网页抓取**：按 URL 抓取并转成文本交给模型，走权限层的 `network` 类；搜索不内置，交给 MCP。
-- **`@文件` 引用**：输入框里 `@` 补全工作区路径，提交时把文件内容作为附件带入。
+- **网页抓取**：按 URL 抓取并转成文本交给模型，走权限层的 `network` 类（按主机授权，确认框显示完整 URL）；搜索不内置，交给 MCP。设计见 [ADR-0033](../decisions/ADR-0033-web-fetch-file-refs.md)（已接受）。
+- **`@文件` 引用**：输入框里 `@` 补全工作区路径，提交时把文件内容随用户消息带入（在 Core 解析，不经过权限层）。设计见 [ADR-0033](../decisions/ADR-0033-web-fetch-file-refs.md)（已接受）。
+- **MCP 服务器管理**：在 `/settings` 或独立的 `/mcp` 页里添加、删除、启停 MCP 服务器，取代只能手写 `config.json` 的现状；同一轮实现 MCP 工具返回图片走附件通道（[ADR-0023](../decisions/ADR-0023-image-input.md) 第 8 节，已决定未实现），届时用真实服务器手测。依赖设置层。
 - **视觉输入**：沿用已有的模型能力位 `imageInput`（上游声明或用户声明，未声明按不支持处理），用户声明经「编辑模型」入口维护（见 [ADR-0024](../decisions/ADR-0024-model-settings-editor.md)）。先做 `read` 读图片（附件复制到会话附件目录、日志只存引用；发送时用 base64，OpenAI 兼容协议下图片随工具结果之后的一条 user 消息发送，转换在 Provider 适配器内完成），再做 TUI 粘贴（Alt+V 读剪贴板、拖入图片路径）：当前模型不支持图片时粘贴当场提示、不附加；发送时历史里的图片按当前模型能力替换为文字占位兜底（中途换模型、旧图片）；最后让 MCP 图片结果走同一通道。设计见 [ADR-0023](../decisions/ADR-0023-image-input.md)（已接受）。
 - **模型设置编辑页**（已实现，[ADR-0024](../decisions/ADR-0024-model-settings-editor.md)）：服务商页「编辑模型」与 `/provider model`，逐模型修改显示名、上下文长度、最大输出、推理、看图与思考档位，每项标明来源；取代 `/provider image`。
 - **模型能力来源与逐模型推理**（[ADR-0025](../decisions/ADR-0025-per-model-reasoning.md)，已接受）：接入 models.dev 作为上游之下的能力来源层（刷新时拉取并缓存，随版本内置裁剪快照）；取消服务商级思考档位（`/provider thinking`、向导「是否支持思考」），推理与档位只按模型声明，推理为否就没有档位；编辑页推理改为「跟随 / 是 / 否」。排在图片粘贴之前。
