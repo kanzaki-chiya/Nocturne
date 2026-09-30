@@ -105,7 +105,8 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `message.assistant.delta` | ✓ | `messageId`、`kind: "text" \| "reasoning"`、`delta` |
 | `tool.input.delta` | ✓ | `callId`、`name`、`delta`（参数 JSON 片段，仅供显示） |
 | `tool.progress` | ✓ | `callId`、`stream: "stdout" \| "stderr" \| "info"`、`chunk` |
-| `runtime.status` | ✓ 或 — | `status: "idle" \| "thinking" \| "running_tool" \| "waiting_permission" \| "retrying" \| "compacting" \| "failed"` |
+| `runtime.status` | ✓ 或 — | `status: "idle" \| "thinking" \| "running_tool" \| "waiting_permission" \| "waiting_user" \| "retrying" \| "compacting" \| "failed"` |
+| `question.requested` | ✓ | `requestId`、`callId`、`questions: QuestionItem[]`（ADR-0032；等待 `respondQuestion`，回复校验失败返回 `invalid_reply` 且请求保持等待） |
 | `provider.retry` | ✓ | `attempt`、`maxAttempts`、`delayMs`、`error: { kind, message }` |
 | `runtime.warning` | ✓ 或 — | `code`、`message`（Phase 5 增补的 `code`：`project_config_untrusted`（含被忽略的 `mcp`/`hooks` 段）、`mcp_server_failed`、`mcp_server_crashed`、`mcp_tool_conflict`、`mcp_env_missing`、`hook_failed`、`debug_sink_failed`、`grant_persist_failed` 等；v0.2 增补 `model_capabilities_defaulted`、`provider_setup_invalid`，见 [provider-setup.md](../architecture/provider-setup.md)；ADR-0022 增补 `shell_env_invalid`（非法 `NOCTURNE_SHELL` 回退自动）、`shell_overridden`（settings 层的 shell 选择被 env/config 覆盖）；ADR-0025 增补 `provider_thinking_levels_ignored`（旧向导配置的服务商级 `thinking.levels` 已忽略，需逐模型设置）） |
 | `runtime.error` | ✓ 或 — | `code`、`message`（例如日志写入失败导致会话进入 `failed` 状态） |
@@ -161,6 +162,23 @@ type ImageAttachment = {
   label?: string            // 人读名（如原始文件名）
   source: "paste" | "read" | "mcp"   // 附件来源
 }
+
+/** ask_user 提问条目（ADR-0032 §1）；字段边界与校验规则
+    见 tool-api.md「ask_user」段，此处只列形状 */
+type QuestionItem = {
+  question: string
+  header?: string
+  options?: { label: string; description?: string }[]  // 省略/为空 = 自由文本题
+  multiSelect?: boolean
+}
+
+/** 用户对单题的答复（ADR-0032 §2）：按位置与 questions[i] 对应；
+    selected 是已提供选项中被选中的 label 集（单选至多一项），
+    text 为「其他」/自由文本题的回答（去首尾空白、至多 2000 字符） */
+type QuestionAnswer = {
+  selected: string[]
+  text?: string
+}
 ```
 
 `providerData` 只能回传给 `provider` 字段所示的 Provider，且要求同一协议（ADR-0026 §6），见 [context.md](../architecture/context.md) 第 7 节。
@@ -190,6 +208,7 @@ type ImageAttachment = {
 | `submit({ text?, content?, attachments? })` | 会话空闲，否则返回 `session_busy`；`attachments` 是可选的 `{ data, mimeType, label? }[]`，由 Core 校验并落盘 | `turn.started`、`message.user`（含附件引用）、…… | Phase 1；图片见 ADR-0023 |
 | `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` | Phase 1 |
 | `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 2 起 ask 流程生效；Phase 3 起 `reply.remember` 生效，生成对应范围的 Grant（[permissions.md](../architecture/permissions.md) 5.4） |
+| `respondQuestion(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request`；`reply` 为 `{ answers: QuestionAnswer[] }` 或 `{ skipped: true }`，答案数/选项归属与问题不匹配返回 `invalid_reply` 且请求保持等待 | 无独立结算事件：等待中的 `ask_user` 调用以 `tool.completed` 结算（跳过为 `ok` 且 `output.skipped === true`；中断为 `cancelled`）；`runtime.status` 离开 `waiting_user` | ADR-0032 |
 | `setModel(ref)` | 会话空闲（Turn 进行中返回 `session_busy`）；未知 provider 返回 `invalid_model`；Provider 启用严格清单（`strictModels`，默认）且模型不在清单内同样 `invalid_model` | `session.config_changed` | Phase 2（`/model`） |
 | `setPermissionPreset(name)` | 会话空闲；未知预设名返回 `invalid_command` | `session.config_changed`（`permissionPreset`）；生效的是**下一次**权限求值 | Phase 3（`/preset`） |
 | `setReasoningEffort(level)` | Turn 进行中同样允许（`config_changed` 无 turnId，对重放不变量无影响）；档位名未知或当前模型未声明该档位返回 `invalid_command`，并列出可用档位 | `session.config_changed`（`reasoningEffort`）；生效的是**下一个 Turn**——本 Turn 请求沿用 Turn 开始快照（Anthropic 单一思考模式约束） | ADR-0018（CLI `/effort`、TUI Shift+Tab） |

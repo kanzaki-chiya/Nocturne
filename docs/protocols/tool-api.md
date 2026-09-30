@@ -43,6 +43,9 @@ interface ToolTraits {
   maxTimeoutMs?: number
   /** 模型可见输出的字符上限，默认 30000 */
   maxModelChars?: number
+  /** 执行时需要与用户交互输入（ADR-0032）：声明后 ToolContext.askUser 可用；
+      子代理（非交互）的可选工具池按此特性排除（subagent.md 第 6 节） */
+  needsUser?: boolean
 }
 ```
 
@@ -93,7 +96,20 @@ interface ToolContext extends ToolScope {
   shellEnvStrip?: readonly string[] // shell 子进程环境中要剥离的凭据变量名（provider-setup.md 第 4 节）
   readState: ReadStateStore         // "先读后写"所需的已读记录
   progress(chunk: string, stream?: "stdout" | "stderr" | "info"): void   // 产生 tool.progress 临时事件
+  /** 向用户提问（ADR-0032 §3）：发出 question.requested 并等待 respondQuestion
+      命令。非交互环境返回 unavailable（不发事件）；中断/超时经 signal 使
+      返回的 Promise 拒绝，由执行器统一结算为 cancelled / timeout。
+      缺省 = 运行环境未提供提问通道，工具按 not_interactive 结算 */
+  askUser?(request: AskUserRequest): Promise<AskUserReply>
 }
+
+/** askUser 的入参与返回（ADR-0032 §3）；QuestionItem / QuestionAnswer
+    的字段边界见 ADR-0032 §1/§2 与 events.md 第 3 节 */
+type AskUserRequest = { questions: QuestionItem[] }
+type AskUserReply =
+  | { kind: "answered"; answers: QuestionAnswer[] }
+  | { kind: "skipped" }
+  | { kind: "unavailable" }  // 非交互：不发 question.requested
 ```
 
 `permissions.check` 对传入路径做词法判定（不解析链接），因此只适用于不跟随符号链接、结果位于已解析根目录之下的枚举场景。
@@ -172,6 +188,8 @@ type ToolExecution = {
 ## 5. 示例（示意）
 
 `todo_write`（[ADR-0028](../decisions/ADR-0028-session-task-list.md)）接受 `{ items: [{ text, status }] }`，每次提交完整清单，`items: []` 清空。最多 20 项；`text` 去首尾空白后非空且至多 200 个字符，拒绝换行、控制字符和未知字段；`status` 只允许 `pending`、`in_progress`、`completed`。校验失败以 `invalid_input` 结算；成功时 `output.items` 是规范化后的完整清单，`modelContent` 是简短确认。工具的 `permissionSubjects` 返回 `[]`，`traits` 为 `mutates: false, concurrencySafe: false`，仍经过普通执行管线和 Hook；它不读写工作区文件、配置或网络。
+
+`ask_user`（[ADR-0032](../decisions/ADR-0032-ask-user-tool.md)）接受 `{ questions: [{ question, header?, options?, multiSelect? }] }`，一次调用 1–4 题。`question` 去首尾空白后非空、至多 300 字符；`header` 至多 12 字符；`options` 省略或为空表示自由文本题、提供时 2–6 项，界面始终额外提供「其他」（模型不得自行添加）；`label` 去首尾空白后非空、至多 60 字符、同题不重复；`description` 至多 200 字符；所有文本字段禁止控制字符（`question`、`description` 允许换行，`label`、`header` 不允许），未知字段一律拒绝。任一不满足即以 `invalid_input` 结算。成功时 `output.answers` 逐题给出 `{ question, selected, text? }`（`selected` 是已提供选项中被选中的 label 集，`text` 是「其他」/自由文本回答），`modelContent` 是人读的「问/答」摘要；用户跳过整次提问时 `output.skipped === true`。非交互环境（`interactive` 为假或 `ctx.askUser` 未装配）返回 `error(code="not_interactive")`、不发 `question.requested`。提问经 `ToolContext.askUser` 实现：发出临时事件 `question.requested`、`runtime.status` 置 `waiting_user`，等待 `respondQuestion`（[events.md](events.md) 第 3、7 节）；回复与问题不匹配时命令以 `invalid_reply` 拒绝且请求保持等待。中断以 `cancelled` 结算、等待超时以 `timeout` 结算（`traits.timeoutMs` 默认 24 小时），进程退出由恢复补 `interrupted`。`traits` 为 `mutates: false, concurrencySafe: false, needsUser: true`，`permissionSubjects` 返回 `[]`——提问不是权限请求，不经权限层；子代理的可选池按 `needsUser` 排除本工具（[subagent.md](../architecture/subagent.md) 第 6 节）。
 
 ```ts
 const read: ToolDefinition<{ path: string; offset?: number; limit?: number }> = {

@@ -91,12 +91,13 @@ finish(reason, error?):
 
 ### 3.3 中断如何传播
 
-每个 Turn 持有一个 `AbortController`，其 `signal` 传给：Provider 流、Tool Executor、每个工具的 `ToolContext`、等待中的权限请求、压缩用的摘要请求。
+每个 Turn 持有一个 `AbortController`，其 `signal` 传给：Provider 流、Tool Executor、每个工具的 `ToolContext`、等待中的权限请求、等待中的提问（ADR-0032）、压缩用的摘要请求。
 
 | 中断发生时 | 处理 |
 |---|---|
 | 模型流式输出中 | 停止读取流；已收到的文本写入 `finishReason = "aborted"` 的 assistant 消息；不完整的工具调用丢弃 |
 | 等待权限确认 | 权限请求以取消结束，该调用记为 `cancelled` |
+| 等待提问回答（`waiting_user`） | 提问请求以取消结束，该调用记为 `cancelled`（ADR-0032） |
 | 工具执行中 | 工具收到 signal 自行停止（shell 终止进程树）；超出宽限期由执行器放弃等待；记为 `cancelled` |
 | 同一 Step 中尚未开始的调用 | 由 `finish` 记为 `cancelled` |
 | 压缩的摘要请求中 | 放弃摘要，不写压缩事件 |
@@ -162,11 +163,13 @@ Agent Loop 通过临时事件 `runtime.status` 告知客户端当前状态：
 
 ```text
 idle ──submit──▶ thinking ──工具调用──▶ running_tool ──ask──▶ waiting_permission
-  ▲                 │  ▲                     │                      │
-  │                 │  └──────下一个 Step─────┘◀────────回复──────────┘
+  ▲                 │  ▲                     │└─提问─▶ waiting_user │
+  │                 │  └──────下一个 Step─────┘◀──回复/回答/跳过──────┘
   └──turn.completed─┘   retrying（Provider 重试等待中）  compacting（执行摘要）
                         failed（持久化失败，见 3.6）
 ```
+
+`waiting_user` 是 ADR-0032 的提问等待态：`needsUser` 工具经 `ToolContext.askUser` 发出 `question.requested` 后进入；`respondQuestion` 到达或提问被取消后回到 `running_tool` 继续本 Step。
 
 状态是派生信息，丢失不影响正确性。
 

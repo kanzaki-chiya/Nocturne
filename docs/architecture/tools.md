@@ -94,6 +94,7 @@ execute(call, ctx):
 | `shell` | 执行非交互式命令 | 执行命令 | 指定工作目录与超时；合并输出流并截断；返回退出码；shell 与进程树终止见下 |
 | `task` | 启动一个子代理会话执行独立任务（Phase 6） | 运行一个受控子 Turn | 输入 `task`/`preset`/`tools`/`outputSchema`/`timeoutMs`；受限工具集、独立上下文、继承或收紧的权限；结果上限与落盘走第 4 节既有路径；完整契约见 [subagent.md](subagent.md) |
 | `todo_write` | 完整替换当前会话任务清单 | 只改变会话派生状态 | 输入最多 20 项的完整 `items`；空数组清空；无文件、配置或网络 I/O。输入与结果契约见 [tool-api.md](../protocols/tool-api.md)，状态来源见 [sessions.md](sessions.md) |
+| `ask_user` | 需要用户拍板时暂停并提问（ADR-0032） | 无 | 输入与结果契约见 [tool-api.md](../protocols/tool-api.md)；等待经临时事件 `question.requested` 与会话命令 `respondQuestion`（[events.md](../protocols/events.md) 第 3、7 节）；声明 `needsUser`，子代理可选池按特性排除 |
 
 另有只在**子会话**注册表中出现的 `finish` 工具：子代理用它提交结果结束 Turn（[subagent.md](subagent.md) 第 2 节）；它不是内置工具表的成员。
 

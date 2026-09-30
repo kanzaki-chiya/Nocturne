@@ -42,6 +42,9 @@ interface SessionView {
   usage: Usage;
   /** 等待用户回复的权限请求（至多一个：执行管线串行） */
   pendingPermission: PendingPermission | undefined;
+  /** 待回答的提问（ADR-0032；只由临时事件 question.requested 产生，
+      至多一个；对应 callId 的 tool.completed 或 turn.completed 到达时清除） */
+  pendingQuestion: PendingQuestion | undefined;
   /** 时间线：只由持久事件创建，可重放（§3） */
   entries: ViewEntry[];
   /** 当前会话任务清单；只从有效的持久 todo_write 完成事件派生 */
@@ -176,9 +179,9 @@ interface SessionNotice {
 | `permission.requested` | `pendingPermission` 设置；同 `callId` 的 `live.tools` 项移除并晋升为 `awaiting_permission` 条目（回填 `subjects`），无 live/entries 对应物则新建 `awaiting_permission` 条目（`name` 暂缺）；记录进 `pendingByCallId` |
 | `permission.resolved` | `requestId` 匹配则清 `pendingPermission`、`pendingByCallId`；`callId` 的 entries 条目更新 `resolution`（`deny` 时 `status` 仍等 `tool.completed` 落定）；追加 `permission` notice 条目。归约器内部维护 `Map<callId, resolved>`，供晚到的 `started`/`completed` 回填 |
 | `tool.started` | 同 `callId` 的 `live.tools` 项移除并晋升（`inputText` 丢弃）；`entries` 中已有条目（requested 建的 awaiting）则更新为 `running` 并填 `input`/`subjects`/`permission`/`turnId`/`name`；否则新建 `running` 条目 |
-| `tool.completed` | 同 `callId` 的 `live.tools` 项丢弃（未执行即终态）；`entries` 条目不存在则新建（`denied`/`cancelled` 路径无 `started`）；`status` 取 `payload.status`，填 `result`/`seq`（若尚无）/`turnId`/`name`；清 `liveOutput` |
+| `tool.completed` | 同 `callId` 的 `live.tools` 项丢弃（未执行即终态）；`entries` 条目不存在则新建（`denied`/`cancelled` 路径无 `started`）；`status` 取 `payload.status`，填 `result`/`seq`（若尚无）/`turnId`/`name`；清 `liveOutput`；同 `callId` 的 `pendingQuestion` 清除（ADR-0032） |
 | `context.compacted` | 追加 `compacted` notice 条目 |
-| `turn.completed` | `currentTurn` 匹配则清除；`lastTurn`（含 `recovered`）/`turnCount`/`usage` 更新；`status=idle`；`retry`、`pendingPermission` 清空；**清空整个 `live`**（管线串行、同一时刻至多一个 Turn；`LiveTool.turnId` 可为空，按 turnId 筛选会留下无持久落点的孤儿，破坏 V8）；`reason!=="done"` 时追加 `turn_end` notice 条目（`recovered:true` 时文案区分"本次失败/中断"与"上次进程退出"） |
+| `turn.completed` | `currentTurn` 匹配则清除；`lastTurn`（含 `recovered`）/`turnCount`/`usage` 更新；`status=idle`；`retry`、`pendingPermission`、`pendingQuestion` 清空；**清空整个 `live`**（管线串行、同一时刻至多一个 Turn；`LiveTool.turnId` 可为空，按 turnId 筛选会留下无持久落点的孤儿，破坏 V8）；`reason!=="done"` 时追加 `turn_end` notice 条目（`recovered:true` 时文案区分"本次失败/中断"与"上次进程退出"） |
 
 顺序约束：视图**不要求**事件全序——`resolved` 可在 `requested` 前（规则拒绝直接产生 `resolved`）、`completed` 可在 `started` 前、`requested` 可在 `input.delta` 前（Provider 不流式参数时）。所有关联都通过 `callId`/`messageId`/`requestId` 键查找。
 
@@ -195,6 +198,7 @@ interface SessionNotice {
 | `message.assistant.delta` | 按 `messageId` 查找/新建 `live.assistants` 项；`kind` 分流追加 `text`/`reasoning` |
 | `tool.input.delta` | 按 `callId` 查找/新建 `live.tools` 项；`inputText += payload.delta`；填 `name`/`turnId` |
 | `tool.progress` | `callId` 的 entries 条目存在时，`stdout`/`stderr` 原样拼接到 `liveOutput`，允许半行；`info` 作为独立一行拼接并在视图中补换行；无条目则忽略——`progress` 不建占位，避免无支撑的幽灵工具行 |
+| `question.requested` | `pendingQuestion = { requestId, callId, questions }`（ADR-0032）；不建 entries/live 条目 |
 
 Phase 6 的 Subagent **不需要视图扩展**：`task` 在父会话是普通工具条目，子会话内部进度经 `tool.progress`（`stream:"info"`）一行式进入 `liveOutput`（[subagent.md](../architecture/subagent.md) 第 12 节）；子会话自身的事件写在子日志，不进父会话的事件流，V1 重放等价不受影响。
 
@@ -222,9 +226,11 @@ ask 判定
 
 视图不变量：`pendingPermission` 仅在"有未决 requested 且 Turn 未闭合"时非空；同一时刻至多一个待决请求（执行管线串行）。
 
+提问（ADR-0032）的生命周期对应更简单：`question.requested` 是临时事件，设置 `pendingQuestion`；它没有独立的 resolved 事件——回答、跳过、中断、超时都经等待中的 `ask_user` 调用以 `tool.completed` 落定，`pendingQuestion` 随之清除；`turn.completed` 的防御规则兜底。进程在等待期间被杀时日志止于 `tool.started`（`question.requested` 不落盘），恢复补写 `tool.completed(interrupted)` + `turn.completed(recovered)`，重放路径上 `pendingQuestion` 从未出现，天然一致。
+
 ## 6. 重放与实时一致性
 
-**收敛点**：`currentTurn === undefined && pendingPermission === undefined && live` 为空。
+**收敛点**：`currentTurn === undefined && pendingPermission === undefined && pendingQuestion === undefined && live` 为空。
 
 > **不变量 V1（重放等价）**：对任意合法事件序列 E（持久事件 + 任意交织的临时事件），在收敛点上，`reduce(E)` 与 `reduce(E.durable)` 在除 `revision`、`notices` 外的全部字段相等。
 
@@ -247,12 +253,12 @@ ask 判定
 |---|---|---|
 | V1 | 收敛点重放等价（§6；排除 `revision`、`notices`） | 场景矩阵 × {live 序列, 仅持久序列} 深比较 |
 | V2 | 每个 `toolCalls[].callId` 恰有一条 `tool` 条目；`tool.completed` 落定且只落定一次 | 场景断言 |
-| V3 | `pendingPermission` 至多一个，且其 `requestId` 未被 `resolved` | 场景断言 |
+| V3 | `pendingPermission` 至多一个，且其 `requestId` 未被 `resolved`；`pendingQuestion` 至多一个，且其 `callId` 无对应 `tool.completed` | 场景断言 |
 | V4 | `entries` 顺序 = 首个支撑持久事件的 `seq` 升序；条目 `seq` 单调不降 | 场景断言 |
 | V5 | 视图 JSON 可序列化：`JSON.parse(JSON.stringify(view))` 与原件深比较相等（`live` 用数组不用 Map） | 全场景 |
 | V6 | 确定性：同一事件序列归约两次结果相等 | 全场景 |
 | V7 | 未知事件类型被忽略，`revision` 仍递增 | 单测 |
-| V8 | 收敛点上 `status==="idle"`、`retry===undefined`、`live` 为空、`liveOutput` 全空 | 场景断言 |
+| V8 | 收敛点上 `status==="idle"`、`retry===undefined`、`pendingQuestion===undefined`、`live` 为空、`liveOutput` 全空 | 场景断言 |
 
 ## 8. API
 

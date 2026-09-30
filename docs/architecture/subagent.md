@@ -145,13 +145,13 @@ launch(request, ctx)
 
 ## 6. 受限工具集与递归
 
-**可选池** = 内置工具 ∪ 父会话 MCP 工具（`mcpSession.tools()` 快照）∪ `task`（仅子会话自身 `depth < maxDepth` 时）。子注册表 = 池 ∩ 选择 + `finish`（恒在，不可被 `tools` 列出也不可被排除）。
+**可选池** = 内置工具 ∪ 父会话 MCP 工具（`mcpSession.tools()` 快照）∪ `task`（仅子会话自身 `depth < maxDepth` 时），再按特性排除 `traits.needsUser === true` 的工具——子会话非交互，`ask_user`（ADR-0032）永远不在池内。子注册表 = 池 ∩ 选择 + `finish`（恒在，不可被 `tools` 列出也不可被排除）。
 
 | 选择方式 | 语义 |
 |---|---|
 | `preset: "general"`（默认） | 可选池全部 |
 | `preset: "explore"` | 只读探索：`traits.mutates === false` 的工具（read/grep/glob 与声明 `readOnlyHint` 的 MCP 工具自动在内；write/edit/shell/task 自动排除）。按特性筛选而非按名字列表（pitfalls #3）。注意 `readOnlyHint` 是**服务器自己声明**的标注，不可信——它只决定工具能否进入 explore 工具集，调用时的放行仍由权限层逐项判断（第 7 节） |
-| `tools: [...]` | 显式白名单 ∩ 可选池；未知名 → `invalid_input` 并列出可用名（自愈路径与 `unknown_tool` 一致）；`finish` 不接受列出 |
+| `tools: [...]` | 显式白名单 ∩ 可选池；未知名 → `invalid_input` 并列出可用名（自愈路径与 `unknown_tool` 一致）；`finish` 不接受列出；点名 `needsUser` 工具（如 `ask_user`）因不在池内同样以 `invalid_input` 拒绝 |
 | `preset` + `tools` 同给 | `invalid_input` |
 
 工具名空间不变（子会话里仍是 `read`、`mcp__x__y`）；模型在子会话中调用池外/不存在工具 → `unknown_tool` 正常结算。
