@@ -113,7 +113,7 @@ describe("弹窗位置", () => {
           await pause();
           (stdin as unknown as PassThrough).write(name === "ask_user" ? "\x1b[A" : "\t");
           await waitFor(() =>
-            frame.includes(name === "ask_user" ? "> [ ] 拒绝回答" : ">[s] 本会话内允许"),
+            frame.includes(name === "ask_user" ? "> ( ) 拒绝回答" : ">[s] 本会话内允许"),
           );
         }
         (stdin as unknown as PassThrough).write("\x1b[5~");

@@ -843,10 +843,17 @@ function SessionApp({
   const pending = view.pendingPermission;
   // 待回答的提问与权限确认同级独占焦点。
   const pendingQ = view.pendingQuestion;
-  const [questionPage, setQuestionPage] = useState({ index: 0, confirm: false });
-  useEffect(() => {
-    setQuestionPage({ index: 0, confirm: false });
-  }, [pendingQ?.requestId]);
+  // 面板页码按 requestId 记录并在渲染时派生：新提问自动回到第 1 题。
+  // 不用挂载 effect 重置——它会在挂载后多触发一轮渲染，赶上 Ink 按键订阅的时机丢键
+  const [questionPageState, setQuestionPage] = useState<{
+    requestId: string | undefined;
+    index: number;
+    confirm: boolean;
+  }>({ requestId: undefined, index: 0, confirm: false });
+  const questionPage =
+    pendingQ !== undefined && questionPageState.requestId === pendingQ.requestId
+      ? questionPageState
+      : { index: 0, confirm: false };
   const interruptible = useRef(false);
   interruptible.current = busy;
   useEffect(
@@ -2357,7 +2364,7 @@ function SessionApp({
         onReply={replyQuestion}
         height={popupHeight}
         onPageChange={(index, confirm) => {
-          setQuestionPage({ index, confirm });
+          setQuestionPage({ requestId: pendingQ.requestId, index, confirm });
         }}
         onEscape={escapePrompt}
         width={width}
@@ -2691,14 +2698,14 @@ function SessionApp({
             <Box flexDirection="column" height={conversationHeight} overflow="hidden">
               {(promptOverlay ? null : overlayBody) ?? (
                 <>
-                  {promptOverlay ? <Box flexGrow={1} /> : null}
                   {visible.lines.map((line, i) =>
                     renderLine(
                       line,
                       sel === undefined ? undefined : selRangeOnLine(sel, selBase + i),
                     ),
                   )}
-                  {promptOverlay ? null : <Box flexGrow={1} />}
+                  {/* 弹窗打开时对话仍顶端对齐，不整体下移（弹窗贴在输入框上方） */}
+                  <Box flexGrow={1} />
                   {showBanner ? (
                     <Text color={theme.warning} wrap="truncate">
                       {scroll.newContent ? NEW_CONTENT_HINT : SCROLLED_HINT}

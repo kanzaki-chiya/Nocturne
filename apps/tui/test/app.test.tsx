@@ -642,20 +642,21 @@ describe("TUI", () => {
     await pause(80);
     stdin.write("/model");
     stdin.write("\r");
-    await pause(400);
+    await waitFor(() => (lastFrame() ?? "").includes("fake/fake-1"));
+    // 首帧出现后页面的按键订阅在 effect 里才挂上，留一点时间再打字
+    await pause(100);
     const frame = lastFrame() ?? "";
     // 备用屏内渲染模型选择页：搜索框 + 模型行
     expect(frame).toContain("搜索");
     expect(frame).toContain("fake/fake-1");
     // 输入字符 → 搜索过滤
     stdin.write("zzz");
-    await pause(60);
-    expect(lastFrame()).toContain("无匹配");
+    await waitFor(() => (lastFrame() ?? "").includes("无匹配"));
     // Esc 清搜索 → 再 Esc 关闭回主屏
     stdin.write("\x1b");
-    await pause(60);
+    await waitFor(() => !(lastFrame() ?? "").includes("无匹配"));
     stdin.write("\x1b");
-    await pause(200);
+    await waitFor(() => (lastFrame() ?? "").includes("idle"));
     expect(lastFrame()).toContain("idle");
     unmount();
     await session.close();
@@ -682,7 +683,9 @@ describe("TUI", () => {
     await pause(80);
     stdin.write("/provider");
     stdin.write("\r");
-    await pause(400);
+    await waitFor(() => (lastFrame() ?? "").includes("○"));
+    // 首帧出现后页面的按键订阅在 effect 里才挂上，留一点时间再打字
+    await pause(100);
     const frame = lastFrame() ?? "";
     expect(frame).toContain("服务商");
     expect(frame).toContain("过滤");
@@ -690,13 +693,12 @@ describe("TUI", () => {
     expect(frame).toContain("○");
     // 打字过滤 → 无匹配
     stdin.write("zzz");
-    await pause(80);
-    expect(lastFrame()).toContain("无匹配");
+    await waitFor(() => (lastFrame() ?? "").includes("无匹配"));
     // Esc 清过滤 → 再 Esc 关闭回主屏
     stdin.write("\x1b");
-    await pause(80);
+    await waitFor(() => !(lastFrame() ?? "").includes("无匹配"));
     stdin.write("\x1b");
-    await pause(200);
+    await waitFor(() => (lastFrame() ?? "").includes("idle"));
     expect(lastFrame()).toContain("idle");
     unmount();
     await session.close();

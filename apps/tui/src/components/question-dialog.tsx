@@ -1,11 +1,15 @@
 /** 提问面板：逐题回答或拒绝，焦点行始终保留在高度窗口内。 */
 import { Box, Text, useInput } from "ink";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { glyphs, useTuiEnv } from "../env.js";
-import { boxSafe, truncateLine } from "../format.js";
+import { boxSafe, truncateLine, truncateLineHead } from "../format.js";
 import { useTheme } from "../theme.js";
 import type { PendingQuestion } from "@nocturne/core/protocol";
 import type { QuestionAnswer, QuestionReply } from "@nocturne/core";
+
+/** 行内占位标记：渲染时替换为反色光标块 / 灰色占位文字 */
+const OTHER_CURSOR = "cursor";
+const OTHER_PLACEHOLDER = "placeholder";
 
 interface Draft {
   selected: string[];
@@ -64,19 +68,7 @@ export function QuestionDialog({
       editing: !q.options?.length,
     })),
   );
-  useEffect(() => {
-    setIndex(0);
-    setFocus(0);
-    setConfirm(false);
-    setDrafts(
-      pending.questions.map((q) => ({
-        selected: [],
-        text: "",
-        declined: false,
-        editing: !q.options?.length,
-      })),
-    );
-  }, [pending.requestId, pending.questions]);
+  // 新提问由调用方按 requestId 作 key 重新挂载，这里不再用 effect 重置状态
   const q = pending.questions[index];
   const opts = q?.options ?? [];
   const draft = drafts[index];
@@ -162,6 +154,28 @@ export function QuestionDialog({
     { isActive: active },
   );
   const answers = toAnswers(drafts);
+  // 「其他」行与选项同格式：标记 + 标签，输入后标签变为「其他：」并紧跟文本；
+  // 光标另画反色块（不用下划线），见渲染处 OTHER_CURSOR 标记
+  const otherFilled = draft !== undefined && !draft.declined && draft.text.trim() !== "";
+  const otherMark = !opts.length
+    ? ""
+    : (q?.multiSelect
+        ? otherFilled
+          ? "[x]"
+          : "[ ]"
+        : otherFilled && draft.selected.length === 0
+          ? "(o)"
+          : "( )") + " ";
+  const otherLabel = opts.length ? "其他" : "回答";
+  const otherRow =
+    (focus === opts.length ? ">" : " ") +
+    " " +
+    otherMark +
+    (draft?.editing || draft?.text
+      ? otherLabel + "：" + draft.text + (draft.editing ? OTHER_CURSOR : "")
+      : opts.length
+        ? "其他（自己输入）"
+        : "回答：" + OTHER_PLACEHOLDER);
   const rows: string[] = confirm
     ? [
         "确认回答：",
@@ -191,15 +205,10 @@ export function QuestionDialog({
             o.label +
             (width >= 40 && o.description ? " - " + o.description : ""),
         ),
-        (focus === opts.length ? ">" : " ") +
-          " [" +
-          (opts.length ? "其他（自己输入）" : "回答") +
-          "] " +
-          (draft?.text ?? "") +
-          (draft?.editing ? "_" : ""),
+        otherRow,
         (focus === opts.length + 1 ? ">" : " ") +
           " " +
-          (draft?.declined ? "[x]" : "[ ]") +
+          (q?.multiSelect ? (draft?.declined ? "[x]" : "[ ]") : draft?.declined ? "(o)" : "( )") +
           " 拒绝回答",
       ];
   const h = height ?? questionDialogRows(pending, index, confirm);
@@ -214,7 +223,31 @@ export function QuestionDialog({
     ? "Enter 提交  ←/Shift+Tab 返回  Esc 中断"
     : draft?.editing
       ? "输入回答  Enter 下一题  Esc 退出输入"
-      : "↑/↓ 移动  Space 多选  Enter 下一题  ←/→/Tab 切题  Esc 中断";
+      : q?.multiSelect
+        ? "↑/↓ 移动  Space 勾选  Enter 下一题  ←/→/Tab 切题  Esc 中断"
+        : "↑/↓ 移动  Enter 选中并下一题  ←/→/Tab 切题  Esc 中断";
+  const renderRow = (row: string, room: number): React.ReactNode => {
+    if (row.endsWith(OTHER_PLACEHOLDER)) {
+      const head = row.slice(0, -OTHER_PLACEHOLDER.length);
+      return (
+        <>
+          {truncateLine(boxSafe(head), room, g.ellipsis)}
+          <Text dimColor>在此输入</Text>
+        </>
+      );
+    }
+    if (row.endsWith(OTHER_CURSOR)) {
+      // 输入中：超宽时截掉头部，保留正在输入的尾部，并给光标留一格
+      const head = row.slice(0, -OTHER_CURSOR.length);
+      return (
+        <>
+          {truncateLineHead(boxSafe(head), Math.max(1, room - 1), g.ellipsis)}
+          <Text inverse> </Text>
+        </>
+      );
+    }
+    return truncateLine(boxSafe(row), room, g.ellipsis);
+  };
   return (
     <Box
       flexDirection="column"
@@ -242,7 +275,7 @@ export function QuestionDialog({
             ? { color: theme.selected, backgroundColor: theme.selectionBg }
             : {})}
         >
-          {truncateLine(boxSafe(row), Math.max(1, width - 4), g.ellipsis)}
+          {renderRow(row, Math.max(1, width - 4))}
         </Text>
       ))}
       {hintRows ? (

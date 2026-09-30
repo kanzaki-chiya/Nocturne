@@ -172,7 +172,7 @@ describe("提问面板", () => {
     screen.stdin.write("\x1b[A");
     await pause();
     expect(screen.lastFrame()?.split("\n")).toHaveLength(5);
-    expect(screen.lastFrame()).toContain("> [ ] 拒绝回答");
+    expect(screen.lastFrame()).toContain("> ( ) 拒绝回答");
     screen.stdin.write("\r");
     await pause();
     expect(screen.lastFrame()).toContain("拒绝回答");
@@ -200,7 +200,7 @@ describe("提问面板", () => {
     expect(frame).toContain("选哪个方案？");
     expect(frame).toContain("( ) 方案A");
     expect(frame).toContain("( ) 方案B");
-    expect(frame).toContain("[其他（自己输入）]");
+    expect(frame).toContain("( ) 其他（自己输入）");
     expect(frame).toContain("保守做法");
     // ↓ 到方案B，Enter 选中并进确认行（单题直接到确认）
     stdin.write("\x1b[B");
@@ -286,10 +286,12 @@ describe("提问面板", () => {
         }),
       ),
     );
-    expect(lastFrame()).toContain("[回答]");
+    expect(lastFrame()).toContain("> 回答：");
     stdin.write("小夜曲");
     await pause();
-    expect(lastFrame()).toContain("小夜曲");
+    // 文本紧跟标签，不再有方括号和下划线光标
+    expect(lastFrame()).toContain("> 回答：小夜曲");
+    expect(lastFrame()).not.toContain("小夜曲_");
     stdin.write("\r");
     await pause();
     expect(lastFrame()).toContain("想要什么名字？ > 小夜曲");
