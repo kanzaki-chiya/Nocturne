@@ -21,6 +21,11 @@ import type {
   PermissionAction,
   PermissionReply,
   PermissionSubject,
+  QuestionAnswer,
+  QuestionItem,
+  QuestionReply,
+  QuestionRequestedPayload,
+  RuntimeStatusPayload,
   RuntimeWarningPayload,
   SubjectRequest,
   ToolCallRef,
@@ -43,6 +48,12 @@ export interface ToolTraits {
   maxTimeoutMs?: number | undefined;
   /** 模型可见输出字符上限，默认 30000 */
   maxModelChars?: number | undefined;
+  /**
+   * 执行时需要与用户交互输入（ADR-0032 §5）：声明后
+   * ToolContext.askUser 可用；子代理（非交互）的可选工具池
+   * 按此特性排除，不按名字判断。
+   */
+  needsUser?: boolean | undefined;
 }
 
 /**
@@ -115,6 +126,13 @@ export interface ToolContext extends ToolScope {
   shellEnvStrip?: readonly string[] | undefined;
   /** 产生 tool.progress 临时事件；stdout/stderr 可为半行，info 是无末尾换行的独立行 */
   progress(chunk: string, stream?: "stdout" | "stderr" | "info"): void;
+  /**
+   * 向用户提问的能力（ADR-0032 §3）：发出 question.requested 并等待
+   * respondQuestion 命令。非交互环境返回 unavailable（不发事件）；
+   * 中断/超时经 signal 使返回的 Promise 拒绝，由执行器统一结算。
+   * 缺省 = 运行环境未提供提问通道，工具按 not_interactive 结算。
+   */
+  askUser?(request: AskUserRequest): Promise<AskUserReply>;
 }
 
 export interface ToolDefinition<Input = unknown, Output = unknown> {
@@ -177,6 +195,16 @@ export interface ToolEventSink {
     payload: RuntimeWarningPayload,
     options?: { turnId?: string | undefined },
   ): void;
+  emitEphemeral(
+    type: "runtime.status",
+    payload: RuntimeStatusPayload,
+    options?: { turnId?: string | undefined },
+  ): void;
+  emitEphemeral(
+    type: "question.requested",
+    payload: QuestionRequestedPayload,
+    options?: { turnId?: string | undefined },
+  ): void;
 }
 
 /** gate.check 的返回：权限决定 + 填好 where 的主体 */
@@ -234,6 +262,45 @@ export interface PermissionGate {
   respond?(requestId: string, reply: PermissionReply): Promise<boolean>;
   /** 会话关闭时把全部等待中的请求结算为 cancelled */
   cancelAll?(): void;
+}
+
+// ── 向用户提问（ADR-0032）─────────────────────────────────
+
+/** ToolContext.askUser 的入参：按 ADR-0032 §1 规范化的问题集（1–4 题） */
+export interface AskUserRequest {
+  questions: QuestionItem[];
+}
+
+/**
+ * ToolContext.askUser 的返回（ADR-0032 §3）：skipped 对应用户跳过整次
+ * 提问；unavailable 表示当前环境不可提问（非交互——不发 question.requested）。
+ * 中断与超时不经返回值表达：实现按 signal 拒绝返回的 Promise，
+ * 由执行器统一结算为 cancelled / timeout。
+ */
+export type AskUserReply =
+  { kind: "answered"; answers: QuestionAnswer[] } | { kind: "skipped" } | { kind: "unavailable" };
+
+/**
+ * 提问请求的路由（ADR-0032 §3）：等待中的请求与会话命令
+ * respondQuestion 按 requestId 配对。经 ExecutionEnvironment
+ * 注入执行器（与 PermissionGate 同一手法），工具侧只见 askUser 能力，
+ * 不接触会话或事件发布器。
+ */
+export interface QuestionBroker {
+  /** 登记并等待回复；signal 中断时拒绝返回的 Promise */
+  ask(
+    callId: string,
+    request: AskUserRequest,
+    turn: GateTurnContext,
+    signal: AbortSignal,
+  ): Promise<AskUserReply>;
+  /**
+   * 客户端命令侧：回复等待中的请求。回复校验不通过返回
+   * "invalid_reply" 且请求保持等待；未知或已结算返回 "unknown_request"。
+   */
+  respond(requestId: string, reply: QuestionReply): "ok" | "invalid_reply" | "unknown_request";
+  /** 会话关闭：取消全部等待中的请求（ask 返回的 Promise 拒绝） */
+  cancelAll(): void;
 }
 
 // ── Hooks（hooks.md）──────────────────────────────────────
@@ -397,6 +464,8 @@ export interface ExecutionScope extends ToolScope {
   diagnostics?: Diagnostics | undefined;
   /** shell 子进程环境中要剥离的变量名（凭据变量；provider-setup.md 第 4 节） */
   shellEnvStrip?: readonly string[] | undefined;
+  /** 提问通道（ADR-0032）：缺省时声明 needsUser 的工具按 not_interactive 结算 */
+  askUser?: QuestionBroker | undefined;
 }
 
 /**
@@ -425,6 +494,8 @@ export interface ExecutionEnvironment {
   shellEnvStrip?: readonly string[] | undefined;
   /** 生效 shell 的延迟解析（ADR-0022）；缺省时工具按平台默认 shell 执行 */
   shell?: ShellProvider | undefined;
+  /** 提问通道（ADR-0032）：缺省时声明 needsUser 的工具按 not_interactive 结算 */
+  askUser?: QuestionBroker | undefined;
 }
 export interface TurnCallScope {
   cwd: string;

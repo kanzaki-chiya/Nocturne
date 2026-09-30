@@ -16,6 +16,7 @@ import type {
 import { applyBudget } from "./budget.js";
 import { writeSpill } from "./spill.js";
 import type {
+  AskUserRequest,
   ExecutionScope,
   ToolDefinition,
   ToolExecution,
@@ -386,6 +387,9 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       );
       const timeoutSignal = AbortSignal.timeout(timeoutMs);
       const combined = AbortSignal.any([scope.signal, timeoutSignal]);
+      // ADR-0032：提问通道注入（与 gate 同手法）——工具只见 askUser 能力；
+      // 缺省该字段时声明 needsUser 的工具按 not_interactive 结算
+      const questionBroker = scope.askUser;
       const toolCtx = {
         cwd: scope.cwd,
         workspaceRoot: scope.workspaceRoot,
@@ -401,6 +405,17 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         fs: scope.platform.fs,
         process: scope.platform.process,
         readState: scope.readState,
+        ...(questionBroker !== undefined
+          ? {
+              askUser: (request: AskUserRequest) =>
+                questionBroker.ask(
+                  call.callId,
+                  request,
+                  { turnId, events: scope.events },
+                  combined,
+                ),
+            }
+          : {}),
         ...(scope.shellEnvStrip !== undefined ? { shellEnvStrip: scope.shellEnvStrip } : {}),
         shell: scope.shell,
         progress: (chunk: string, stream?: "stdout" | "stderr" | "info") => {

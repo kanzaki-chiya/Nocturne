@@ -481,3 +481,43 @@ export interface McpServerEntry {
 export interface Diagnostics {
   record(kind: string, data?: Record<string, unknown>): void;
 }
+
+// ── 向用户提问（ADR-0032 §1/§2）──────────────────────────
+
+/**
+ * ask_user 的一个候选选项（ADR-0032 §1）：label 去首尾空白后非空、
+ * 至多 60 字符、同一问题内不可重复；description 至多 200 字符。
+ * 客户端始终额外提供「其他」，选项里不得自行加入。
+ */
+export interface QuestionOption {
+  label: string;
+  description?: string | undefined;
+}
+
+/**
+ * ask_user 的一个问题（ADR-0032 §1）：question.requested 临时事件、
+ * 工具输入与待回答派生状态共用此形状。
+ * options 省略或为空表示自由文本题；multiSelect 为真可多选。
+ */
+export interface QuestionItem {
+  /** 去掉首尾空白后非空，至多 300 字符 */
+  question: string;
+  /** 短标签（至多 12 字符），界面显示为问题前的小标记 */
+  header?: string | undefined;
+  /** 2–6 个选项；省略或为空 = 自由文本题 */
+  options?: QuestionOption[] | undefined;
+  /** true 时同一题可选多个 label */
+  multiSelect?: boolean | undefined;
+}
+
+/**
+ * 一道题的回答（ADR-0032 §2/§3）：selected 是已提供选项的 label，
+ * text 是「其他」/自由文本（去首尾空白、至多 2000 字符）；
+ * selected 与 text 可同时存在，二者都为空表示该题没答。
+ */
+export interface QuestionAnswer {
+  /** 已提供选项中被选中的 label 集 */
+  selected: string[];
+  /** 「其他」自由文本；省略 = 没有文字补充 */
+  text?: string | undefined;
+}

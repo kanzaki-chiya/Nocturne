@@ -64,6 +64,7 @@ import type {
   ImageMimeType,
   ModelRef,
   PermissionReply,
+  QuestionReply,
   ReasoningEffort,
   ReasoningEffortLevel,
   RuntimeEvent,
@@ -84,6 +85,7 @@ import {
   builtinTools,
   createAttachmentStore,
   createPolicyGate,
+  createQuestionBroker,
   createReadStateStore,
   createTaskTool,
   createToolExecutor,
@@ -235,6 +237,12 @@ export interface RuntimeSession {
    * 对应范围的 Grant（permissions.md 5.4）。
    */
   respondPermission(requestId: string, reply: PermissionReply): Promise<void>;
+  /**
+   * 回复 question.requested（events.md 第 7 节，ADR-0032）。
+   * 没有匹配的等待中请求时以 unknown_request 拒绝；回复与问题不匹配
+   * （条数不符、未知 label、单选多项）以 invalid_reply 拒绝且请求保持等待。
+   */
+  respondQuestion(requestId: string, reply: QuestionReply): Promise<void>;
   /**
    * 切换模型（events.md 第 7 节）：会话空闲时生效，写入
    * session.config_changed；未知 provider/model 拒绝 invalid_model。
@@ -687,6 +695,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         hooks: hookRunner,
       },
     );
+    // 提问通道（ADR-0032）按会话持有：等待中的请求与会话绑定，
+    // respondQuestion 按 requestId 路由；非交互时 ask 立即不可用
+    const questions = createQuestionBroker({ interactive });
     // 会话级工具注册表：内置工具 ∪ MCP 工具（mcp.md 第 4、5 节）。
     // MCP 服务器在会话打开时并行启动；list_changed / 重连带来的工具集变化
     // 先暂存，在 submit() 的 Turn 边界经 applyPendingTools() 应用。
@@ -781,6 +792,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       shellEnvStrip,
       // ADR-0022：延迟解析——每次工具调用组装 scope 时取当前生效 shell
       shell: shellResolver,
+      // ADR-0032：声明 needsUser 的工具经此提问；与权限层相互独立
+      askUser: questions,
     };
     const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
     for (const src of [resolved?.turn, options.turn]) {
@@ -1012,6 +1025,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           return;
         }
         throw new RuntimeCommandError("unknown_request", "没有等待中的权限请求");
+      },
+      respondQuestion(requestId, reply) {
+        const outcome = questions.respond(requestId, reply);
+        if (outcome === "ok") return Promise.resolve();
+        if (outcome === "invalid_reply") {
+          return Promise.reject(new RuntimeCommandError("invalid_reply", "回复与待回答问题不匹配"));
+        }
+        return Promise.reject(new RuntimeCommandError("unknown_request", "没有等待中的提问请求"));
       },
       async submit(input) {
         assertUsable();
@@ -1355,6 +1376,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         controller?.abort();
         compactController?.abort();
         gate.cancelAll?.();
+        questions.cancelAll();
         await Promise.all([turnSettled, compactSettled]);
         markProvidersDirty.delete(markDirty);
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级

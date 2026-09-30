@@ -23,5 +23,6 @@ export function createExecutionScope(
     shellEnvStrip: env.shellEnvStrip,
     // ADR-0022：每次调用组装 scope 时取当前生效 shell，不在 Turn 开始快照
     shell: env.shell?.current(),
+    askUser: env.askUser,
   };
 }

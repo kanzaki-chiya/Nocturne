@@ -12,6 +12,7 @@ import type {
   PermissionOption,
   PermissionSource,
   PermissionSubject,
+  QuestionItem,
   ReasoningEffort,
   ToolCallRef,
   Usage,
@@ -164,6 +165,8 @@ export type RuntimeStatus =
   | "thinking"
   | "running_tool"
   | "waiting_permission"
+  /** 等待用户回答 ask_user（ADR-0032 §3） */
+  | "waiting_user"
   | "retrying"
   | "compacting"
   | "failed";
@@ -200,6 +203,16 @@ export interface McpServerPayload {
   error?: string | undefined;
 }
 
+/**
+ * ask_user 待回答的问题（ADR-0032 §3）：临时事件——问题已记录在
+ * tool.started.input、回答记录在 tool.completed.output，不持久化。
+ */
+export interface QuestionRequestedPayload {
+  requestId: string;
+  callId: string;
+  questions: QuestionItem[];
+}
+
 // ── 类型映射与信封 ─────────────────────────────────────────
 
 export interface DurablePayloadMap {
@@ -225,6 +238,7 @@ export interface EphemeralPayloadMap {
   "runtime.warning": RuntimeWarningPayload;
   "runtime.error": RuntimeErrorPayload;
   "mcp.server": McpServerPayload;
+  "question.requested": QuestionRequestedPayload;
 }
 
 export type DurableType = keyof DurablePayloadMap;
@@ -299,6 +313,7 @@ export const EPHEMERAL_EVENT_TYPES: readonly EphemeralType[] = [
   "runtime.warning",
   "runtime.error",
   "mcp.server",
+  "question.requested",
 ];
 
 const EPHEMERAL_TYPE_SET: ReadonlySet<string> = new Set(EPHEMERAL_EVENT_TYPES);

@@ -19,6 +19,7 @@ const STATUS_TEXT: Record<RuntimeStatus, string> = {
   thinking: "思考中",
   running_tool: "工具执行中",
   waiting_permission: "等待确认",
+  waiting_user: "等待回答",
   compacting: "压缩中",
   retrying: "重试中",
   failed: "failed",

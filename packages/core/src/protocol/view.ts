@@ -24,6 +24,7 @@ import type {
   PermissionOption,
   PermissionSource,
   PermissionSubject,
+  QuestionItem,
   ReasoningEffort,
   ToolCallRef,
   ToolCallStatus,
@@ -61,6 +62,11 @@ export interface SessionView {
   turnCount: number;
   usage: Usage;
   pendingPermission: PendingPermission | undefined;
+  /**
+   * 待回答的提问（ADR-0032 §3）：只由临时事件 question.requested 产生；
+   * 对应 callId 的 tool.completed 或 turn.completed 到达时清除。
+   */
+  pendingQuestion: PendingQuestion | undefined;
   /** 只由持久事件创建（可重放） */
   entries: ViewEntry[];
   /** 只由临时事件创建；对应持久事件到达时晋升入 entries */
@@ -163,6 +169,13 @@ export interface PendingPermission {
   options: PermissionOption[];
 }
 
+/** 待回答的提问（ADR-0032）：客户端据此渲染提问面板并 respondQuestion */
+export interface PendingQuestion {
+  requestId: string;
+  callId: string;
+  questions: QuestionItem[];
+}
+
 export interface SessionNotice {
   level: "info" | "warning" | "error";
   code: string;
@@ -207,6 +220,7 @@ export function createSessionView(): SessionView {
     turnCount: 0,
     usage: { inputTokens: 0, outputTokens: 0 },
     pendingPermission: undefined,
+    pendingQuestion: undefined,
     entries: [],
     live: { assistants: [], tools: [] },
     notices: [],
@@ -392,6 +406,8 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
         ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
         durationMs: p.durationMs,
       };
+      // ADR-0032 §3：待回答的提问随对应调用的结算清除
+      if (view.pendingQuestion?.callId === p.callId) view.pendingQuestion = undefined;
       break;
     }
     case "context.compacted": {
@@ -424,6 +440,7 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
       view.status = "idle";
       view.retry = undefined;
       view.pendingPermission = undefined;
+      view.pendingQuestion = undefined;
       // 串行管线同一时刻至多一个 Turn；LiveTool.turnId 可空，
       // 按 turnId 筛会留下无持久落点的孤儿（view.md §3）
       view.live = { assistants: [], tools: [] };
@@ -585,6 +602,16 @@ function reduceEphemeral(view: SessionView, event: EphemeralEvent): void {
           entry.liveOutput += chunk;
         }
       }
+      break;
+    }
+    case "question.requested": {
+      // ADR-0032 §3：待回答的提问只来自此临时事件，不进持久化 entries
+      const p = event.payload;
+      view.pendingQuestion = {
+        requestId: p.requestId,
+        callId: p.callId,
+        questions: p.questions,
+      };
       break;
     }
   }

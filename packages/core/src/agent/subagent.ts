@@ -264,8 +264,12 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           ...(childEffort !== undefined ? { reasoningEffort: childEffort } : {}),
         });
 
-        // 可选池 = 内置 ∪ 父会话 MCP 快照 ∪ task（子会话自身深度未达上限才可再派生）
-        const pool: ToolDefinition[] = [...builtinTools(), ...deps.mcpTools()];
+        // 可选池 = 内置 ∪ 父会话 MCP 快照 ∪ task（子会话自身深度未达上限才可再派生）。
+        // ADR-0032 §4：子会话非交互，声明 needsUser 的工具按特性排除——
+        // 显式 tools 白名单点名时也按不可用名处理
+        const pool: ToolDefinition[] = [...builtinTools(), ...deps.mcpTools()].filter(
+          (t) => t.traits.needsUser !== true,
+        );
         if (deps.depth + 1 < deps.limits.maxDepth) {
           pool.push(createTaskTool(createSubagentLauncher({ ...deps, depth: deps.depth + 1 })));
         }

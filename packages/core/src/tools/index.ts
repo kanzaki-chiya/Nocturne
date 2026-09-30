@@ -11,6 +11,7 @@ export {
   sniffImageMime,
 } from "./image.js";
 export { createPolicyGate } from "./gate.js";
+export { createQuestionBroker, type QuestionBrokerOptions } from "./question.js";
 export { createReadStateStore } from "./readstate.js";
 export {
   applyBudget,
@@ -26,6 +27,7 @@ export { writeTool } from "./builtin/write.js";
 export { editTool } from "./builtin/edit.js";
 export { shellTool } from "./builtin/shell.js";
 export { todoWriteTool } from "./builtin/todo-write.js";
+export { askUserTool } from "./builtin/ask-user.js";
 export { diffLines } from "./builtin/diff.js";
 export { createTaskTool } from "./builtin/task.js";
 export type { GateGrantSink } from "./gate.js";
@@ -39,10 +41,11 @@ import { writeTool } from "./builtin/write.js";
 import { editTool } from "./builtin/edit.js";
 import { shellTool } from "./builtin/shell.js";
 import { todoWriteTool } from "./builtin/todo-write.js";
+import { askUserTool } from "./builtin/ask-user.js";
 
 /** 内置工具集：Phase 2 起含写入与 shell（权限层决定是否放行） */
 export function builtinTools(): ToolDefinition[] {
-  return [readTool, grepTool, globTool, writeTool, editTool, shellTool, todoWriteTool];
+  return [readTool, grepTool, globTool, writeTool, editTool, shellTool, todoWriteTool, askUserTool];
 }
 
 export function createBuiltinRegistry(): ToolRegistry {
