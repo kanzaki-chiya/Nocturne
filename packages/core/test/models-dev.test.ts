@@ -5,10 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loadConfig, modelFieldSourceText } from "../src/config/index.js";
 import {
+  devProviderEndpoints,
   matchModelsDev,
   modelOverrideFromDev,
+  npmToEndpoints,
   readModelsDev,
   trimModelsDev,
+  trimModelsDevProviders,
+  type ModelsDevData,
 } from "../src/config/models-dev.js";
 import { modelsDevSnapshot } from "../src/config/models-dev-snapshot.js";
 import { createPlatform } from "../src/platform/index.js";
@@ -92,7 +96,8 @@ describe("models.dev", () => {
     const fetcher = fetchOk();
     const config = await load(fetcher);
     expect(await config.refreshModelsDev()).toBeUndefined();
-    expect(fetcher).toHaveBeenCalledOnce();
+    // ADR-0031 §4：models.json（模型表）+ api.json（服务商接口块）两次请求
+    expect(fetcher).toHaveBeenCalledTimes(2);
     const cache = JSON.parse(
       await fs.readFile(path.join(home, "cache", "models-dev.json"), "utf8"),
     ) as { fetchedAt: string; models: Record<string, unknown> };
@@ -165,5 +170,119 @@ describe("models.dev", () => {
     expect(config.base.providers[0]?.models?.[id]?.capabilities?.reasoning).toBeUndefined();
     expect((await config.listModelSettings("corp"))[0]?.fields.reasoning.value).toBe("none");
     expect(Object.keys(modelsDevSnapshot.models).length).toBeGreaterThan(0);
+  });
+});
+
+describe("models.dev 服务商层（ADR-0031 §4）", () => {
+  /** api.json 形状：服务商级 npm + 逐模型 provider.npm */
+  const apiRaw = {
+    opencode: {
+      npm: "@ai-sdk/openai-compatible",
+      models: {
+        "gpt-5.4": { provider: { npm: "@ai-sdk/openai" } },
+        "claude-opus-5-5": { provider: { npm: "@ai-sdk/anthropic" } },
+        "gemini-3-pro": { provider: { npm: "@ai-sdk/google" } },
+        "kimi-k2.5-free": {}, // 缺省 → 继承服务商级
+      },
+    },
+    "opencode-go": {
+      npm: "@ai-sdk/openai-compatible",
+      models: { "grok-4.7": { provider: { npm: "@ai-sdk/openai" } } },
+    },
+    // 白名单外的服务商不收录
+    other: { npm: "@ai-sdk/google", models: { x: {} } },
+  };
+  const devData: ModelsDevData = {
+    fetchedAt: "2026-09-30T00:00:00.000Z",
+    models: {},
+    providers: trimModelsDevProviders(apiRaw),
+  };
+
+  it("裁剪只收录白名单键；保存服务商级与逐模型 npm 原文", () => {
+    const p = devData.providers;
+    expect(Object.keys(p ?? {})).toEqual(["opencode", "opencode-go"]);
+    expect(p?.opencode?.npm).toBe("@ai-sdk/openai-compatible");
+    expect(p?.opencode?.models?.["gpt-5.4"]).toEqual({ npm: "@ai-sdk/openai" });
+    // 未声明 npm 的模型仍记录存在性（继承判定用）
+    expect(p?.opencode?.models?.["kimi-k2.5-free"]).toEqual({});
+    expect(trimModelsDevProviders([])).toBeUndefined();
+    expect(trimModelsDevProviders({})).toBeUndefined();
+  });
+
+  it("npm → endpoints 映射表逐行", () => {
+    expect(npmToEndpoints("@ai-sdk/openai-compatible")).toEqual(["/chat/completions"]);
+    expect(npmToEndpoints("@ai-sdk/anthropic")).toEqual(["/messages"]);
+    expect(npmToEndpoints("@ai-sdk/openai")).toEqual(["/responses"]);
+    expect(npmToEndpoints("@ai-sdk/google")).toEqual(["npm:@ai-sdk/google"]);
+  });
+
+  it("devProviderEndpoints：逐模型 npm 优先，缺省继承服务商级；查不到不贡献", () => {
+    expect(devProviderEndpoints(devData, "opencode", "gpt-5.4")).toEqual(["/responses"]);
+    expect(devProviderEndpoints(devData, "opencode", "claude-opus-5-5")).toEqual(["/messages"]);
+    expect(devProviderEndpoints(devData, "opencode", "kimi-k2.5-free")).toEqual([
+      "/chat/completions",
+    ]);
+    expect(devProviderEndpoints(devData, "opencode", "gemini-3-pro")).toEqual([
+      "npm:@ai-sdk/google",
+    ]);
+    // 不在服务商表内的模型 / 未知服务商键 / 无 providers 块 → 不贡献
+    expect(devProviderEndpoints(devData, "opencode", "not-listed")).toBeUndefined();
+    expect(devProviderEndpoints(devData, "unknown", "gpt-5.4")).toBeUndefined();
+    expect(
+      devProviderEndpoints({ fetchedAt: devData.fetchedAt, models: {} }, "opencode", "gpt-5.4"),
+    ).toBeUndefined();
+  });
+
+  it("合并：modelsDevProvider 条目的模型拿到 models.dev 层 endpoints；上游层优先", async () => {
+    // 写入含 providers 块的缓存（fetchedAt 比内置快照新 → 生效）
+    await writeJson(path.join(home, "cache", "models-dev.json"), {
+      fetchedAt: new Date(Date.now() + 60_000).toISOString(),
+      models: {},
+      providers: devData.providers,
+    });
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [
+        {
+          id: "oc",
+          type: "openai-compatible",
+          baseURL: "https://opencode.ai/zen/v1",
+          modelsDevProvider: "opencode",
+          models: {
+            "gpt-5.4": {}, // models.dev → /responses
+            "kimi-k2.5-free": {}, // 服务商级继承 → /chat/completions
+            // 上游声明的 endpoints（向导层）优先于 models.dev 层
+            "claude-opus-5-5": { endpoints: ["/chat/completions"] },
+            "not-listed": {},
+          },
+        },
+        {
+          // 未声明 modelsDevProvider 的条目不受影响
+          id: "plain",
+          baseURL: "https://example.test/v1",
+          models: { "gpt-5.4": {} },
+        },
+      ],
+    });
+    const config = await load();
+    const oc = config.base.providers.find((p) => p.id === "oc");
+    expect(oc?.models?.["gpt-5.4"]?.endpoints).toEqual(["/responses"]);
+    expect(oc?.models?.["kimi-k2.5-free"]?.endpoints).toEqual(["/chat/completions"]);
+    expect(oc?.models?.["claude-opus-5-5"]?.endpoints).toEqual(["/chat/completions"]);
+    expect(oc?.models?.["not-listed"]?.endpoints).toBeUndefined();
+    expect(
+      config.base.providers.find((p) => p.id === "plain")?.models?.["gpt-5.4"]?.endpoints,
+    ).toBeUndefined();
+  });
+
+  it("旧缓存（无 providers 块）仍然有效", async () => {
+    // 缓存里是裁剪后的形状（context 为顶层字段）
+    await writeJson(path.join(home, "cache", "models-dev.json"), {
+      fetchedAt: new Date(Date.now() + 60_000).toISOString(),
+      models: trimModelsDev(raw, "2026-09-30T00:00:00.000Z").models,
+    });
+    const data = await readModelsDev(platform, home);
+    expect(data.models[id]?.context).toBe(99_000);
+    expect(data.providers).toBeUndefined();
   });
 });

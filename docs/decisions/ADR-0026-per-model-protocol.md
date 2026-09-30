@@ -124,3 +124,7 @@
 - **维持现状，让用户为同一服务加两个条目**：密钥重复保存，模型列表重复，自定义 Anthropic 预设还不能获取列表。这正是本 ADR 要解决的问题。
 - **按模型名猜协议**：违背 ADR-0016「不猜」的原则，名字规则也跟不上聚合服务的命名。
 - **现在就接 Responses API**：需要引入新的适配器（providers.md 第 4 节的 `openai` 适配器）。维护者数据里所有声明了 `/responses` 的模型也都声明了 `/chat/completions`，目前没有必须走 Responses 的模型，所以暂缓。那时只需按上一段的约束扩展。
+
+## 修订
+
+- **2026-09-30**：Responses 接口已由 [ADR-0031](ADR-0031-opencode-presets-responses.md) 接入——`openai-responses` 成为第三个生效协议（`/responses`），推导规则在「含 `/messages`」之后追加「含 `/responses` → `openai-responses`」，本 ADR 备选方案中「暂缓接 Responses」的前提不再成立。models.dev 不再只是能力来源层：条目声明 `modelsDevProvider` 时，models.dev 缓存/快照中该服务商的逐模型 `npm` 原文映射为 `endpoints` 作为最低优先层参与推导（服务商限定的接口声明），详见 ADR-0031 §4。

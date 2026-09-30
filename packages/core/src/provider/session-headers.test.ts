@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
-import { NOCTURNE_VERSION } from "../version.js";
+import { NOCTURNE_VERSION } from "../protocol/version.js";
 import { createAnthropicProvider, type AnthropicConfig } from "./adapters/anthropic.js";
 import {
   createOpenAICompatibleProvider,
@@ -128,14 +128,15 @@ function responsesConfig(over: Partial<OpenAIResponsesConfig> = {}): OpenAIRespo
 }
 
 function createFor(config: AnyConfig, fetchImpl: typeof fetch) {
-  switch (config.type) {
-    case "anthropic":
-      return createAnthropicProvider(config, envWithKey, fetchImpl);
-    case "openai-responses":
-      return createOpenAIResponsesProvider(config, envWithKey, fetchImpl);
-    default:
-      return createOpenAICompatibleProvider(config, envWithKey, fetchImpl);
+  // config.type 可选（适配器缺省值）：本文件的工厂始终显式设置 type，
+  // default 分支只可能是 openai-compatible
+  if (config.type === "anthropic") {
+    return createAnthropicProvider(config, envWithKey, fetchImpl);
   }
+  if (config.type === "openai-responses") {
+    return createOpenAIResponsesProvider(config, envWithKey, fetchImpl);
+  }
+  return createOpenAICompatibleProvider(config as OpenAICompatibleConfig, envWithKey, fetchImpl);
 }
 
 async function drain(
@@ -156,7 +157,7 @@ async function drain(
   return { events, captured };
 }
 
-const CONFIGS: Record<string, () => AnyConfig> = {
+const CONFIGS = {
   "openai-compatible": compatConfig,
   anthropic: anthropicConfig,
   "openai-responses": responsesConfig,

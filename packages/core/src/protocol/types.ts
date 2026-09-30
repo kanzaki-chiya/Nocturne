@@ -79,6 +79,16 @@ export function resolveEffectiveProtocol(
  * 模型编辑页共用同一文本，并指向补救方式（编辑页/CLI 手动指定协议）。
  */
 export function unavailableProtocolReason(endpoints: readonly string[]): string {
+  // ADR-0031 §4：models.dev npm 映射的 "npm:<包名>" 标记——
+  // 无法识别为已知接口时给出更具体的说明（包名原文列出）。
+  const npmPkgs = endpoints.filter((e) => e.startsWith("npm:")).map((e) => e.slice(4));
+  if (npmPkgs.length === endpoints.length && npmPkgs.length > 0) {
+    return (
+      `models.dev 标注该模型使用 ${npmPkgs.join("、")} 对应的接口，` +
+      `Nocturne 暂不支持；如确认该模型可用 Chat Completions、Messages ` +
+      `或 Responses，可在「编辑模型」或 /provider model 指定协议`
+    );
+  }
   const list = endpoints.length > 0 ? endpoints.join("、") : "未声明的可识别接口";
   return (
     `该模型没有可用的服务协议：上游只声明了 ${list} 接口，Nocturne 暂不支持；` +

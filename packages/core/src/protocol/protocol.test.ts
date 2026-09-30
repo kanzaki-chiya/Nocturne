@@ -9,6 +9,7 @@ import {
   isEphemeralEventType,
   LOG_FORMAT_VERSION,
   resolveEffectiveProtocol,
+  unavailableProtocolReason,
   type DurableEvent,
   type MessageAssistantPayload,
 } from "./index.js";
@@ -257,6 +258,18 @@ describe("deriveProtocolFromEndpoints", () => {
   it("全部无法识别 → unavailable", () => {
     expect(deriveProtocolFromEndpoints(["/embeddings"], "openai-compatible")).toBe("unavailable");
     expect(deriveProtocolFromEndpoints(["/embeddings", "/files"], "anthropic")).toBe("unavailable");
+    // ADR-0031 §4：models.dev npm 映射的 "npm:<包名>" 同样不可识别
+    expect(deriveProtocolFromEndpoints(["npm:@ai-sdk/google"], "openai-compatible")).toBe(
+      "unavailable",
+    );
+  });
+
+  it("npm:<包名> 标记的不可用说明写 models.dev 文案（ADR-0031 §4）", () => {
+    expect(unavailableProtocolReason(["npm:@ai-sdk/google"])).toContain(
+      "models.dev 标注该模型使用 @ai-sdk/google 对应的接口",
+    );
+    // 混合条目保持通用文案
+    expect(unavailableProtocolReason(["/embeddings"])).toContain("上游只声明了");
   });
 
   it("按路径末尾比较：/v1/messages ≡ /messages；大小写与尾斜杠不敏感", () => {

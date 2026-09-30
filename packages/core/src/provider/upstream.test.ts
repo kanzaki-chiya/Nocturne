@@ -31,12 +31,14 @@ const jsonRes = (data: unknown, status = 200) =>
 // ── 预设 ────────────────────────────────────────────────
 
 describe("服务商预设", () => {
-  it("五个预设：deepseek/openrouter/anthropic + 两个自定义", () => {
+  it("七个预设：deepseek/openrouter/anthropic + 两个 opencode + 两个自定义", () => {
     const presets = listProviderPresets();
     expect(presets.map((p) => p.id)).toEqual([
       "deepseek",
       "openrouter",
       "anthropic",
+      "opencode-zen",
+      "opencode-go",
       "custom-openai",
       "custom-anthropic",
     ]);

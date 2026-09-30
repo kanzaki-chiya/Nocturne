@@ -163,10 +163,13 @@ interface ProviderSetupFile {
 | DeepSeek | `openai-compatible` | `deepseek` | `https://api.deepseek.com/v1` | `GET /models` | `openai` |
 | OpenRouter | `openai-compatible` | `openrouter` | `https://openrouter.ai/api/v1` | `GET /models` | `openrouter` |
 | Anthropic | `anthropic` | `anthropic` | 官方端点（省略 `baseURL`） | `GET /models`（`https://api.anthropic.com/v1/models`） | — |
+| OpenCode Zen | `openai-compatible` | `opencode-zen` | `https://opencode.ai/zen/v1` | `GET /models` | — |
+| OpenCode Go | `openai-compatible` | `opencode-go` | `https://opencode.ai/zen/go/v1` | `GET /models` | — |
 | 其他 OpenAI 兼容 | `openai-compatible` | 用户输入 | 用户输入 | `GET /models`（可能不提供） | `openai` |
 | 其他 Anthropic 兼容 | `anthropic` | 用户输入 | 用户输入（可留空用官方端点） | `GET /models`（失败转手动输入；ADR-0026 §3） | — |
 
 - 预设只负责向导里的默认值；写进 `providers.json` 的是完整条目，之后与手写条目没有区别。预设数据更新不会改变已写入的条目。
+- OpenCode 两个预设（[ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md) §5）额外写死 `sessionHeader: "x-opencode-session"`（同系网关要求，Zen 文档未写明但带上无害）与 `modelsDevProvider`（`opencode` / `opencode-go`，启用 models.dev 服务商层的逐模型接口声明，见 [providers.md](providers.md) 第 2 节）；默认凭据变量名 `OPENCODE_API_KEY`，密钥入口为官方文档的 `https://opencode.ai/auth`。
 - 新增预设的门槛：服务地址与协议兼容性有官方文档可查，并在真实服务上跑过一次连接测试。未满足的服务走"其他 OpenAI 兼容"。
 
 ## 6. Core 接口

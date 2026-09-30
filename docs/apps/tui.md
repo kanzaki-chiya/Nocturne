@@ -206,9 +206,9 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 └ ↑/↓ 选择 • Enter 打开操作（换密钥 / 刷新 / 编辑模型 / 删除） • Delete 删除 • Esc 返回/完成 • Ctrl+C 退出
 ```
 
-**列表** = 5 个预设行 + 未被预设覆盖的已配置条目（`providers.json` 自定义条目、`config.json`/项目层手写条目按追加行展示）：
+**列表** = 7 个预设行 + 未被预设覆盖的已配置条目（`providers.json` 自定义条目、`config.json`/项目层手写条目按追加行展示）：
 
-- 预设行按固定顺序：DeepSeek、OpenRouter、Anthropic、其他 OpenAI 兼容、其他 Anthropic 兼容。与已配置条目 id 匹配的预设显示 `● 已配置`（绿色）+ 密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）+ 模型数；未匹配显示 `○ 未配置`。
+- 预设行按固定顺序：DeepSeek、OpenRouter、Anthropic、OpenCode Zen、OpenCode Go、其他 OpenAI 兼容、其他 Anthropic 兼容。与已配置条目 id 匹配的预设显示 `● 已配置`（绿色）+ 密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）+ 模型数；未匹配显示 `○ 未配置`。
 - 手写配置层的条目（`origin` ≠ `setup`）标注来源层并**只读**：Enter 后提示去哪个文件修改（`config.json` 层 → `<NOCTURNE_HOME>/config.json`；项目层 → `<工作区>/.nocturne/config.json`；env/cli 层 → 对应环境变量或命令行参数）。
 - 当前会话正在使用的服务商加注「当前」标记，删除它被拒绝（提示先 `/model` 切换）。
 - 直接打字进入过滤（对 id/标签/主机名做子串匹配），`Backspace` 删字符；`Esc` 先清过滤，过滤已空时再按关闭页面（首次配置流程中为"完成"语义）；`↑`/`↓`/`PageUp`/`PageDown`/`Home`/`End` 移动；列表超出可视高度时右侧出滚动条。
@@ -216,7 +216,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 **未配置预设 `Enter` → 就地展开步骤**（正文区替换为向导视图，页头页脚保持；步骤编排在 Core `runProviderSetupWizard`，v0.3 起不再含选模型步骤）。向导视图是 omp 风格的就地表单：已完成步骤折叠为一行摘要（`名称 x • 地址 y • 密钥已保存`），只展开当前步骤——当前提问用强调色、下方用灰色小字给说明（密钥来源、回车改用环境变量等），不堆叠逐行问答历史：
 
-1. 仅自定义预设问「名称」（必填）、「服务地址」（openai 兼容必填；anthropic 兼容可留空用官方端点）与「会话标识请求头」（可选，回车跳过，写入条目 `sessionHeader`，[provider-setup.md](../architecture/provider-setup.md) 第 1 节）——三个内置预设直接跳过这三步；
+1. 仅自定义预设问「名称」（必填）、「服务地址」（openai 兼容必填；anthropic 兼容可留空用官方端点）与「会话标识请求头」（可选，回车跳过，写入条目 `sessionHeader`，[provider-setup.md](../architecture/provider-setup.md) 第 1 节）——五个内置预设直接跳过这三步（OpenCode 预设自带 `x-opencode-session`）；
 2. 「API Key」掩码输入（`*` 回显）：输入后回车 → 交系统凭据后端；直接回车 → 环境变量路径（问「凭据环境变量名」，默认取预设 `defaultKeyEnv`）；后端不可用时直接进环境变量路径；
 3. `GET /models` 拉模型列表与限额（不发模型请求，provider-setup.md 第 7 节）：进行中显示「正在获取模型列表…」，完成后被结果行替换——成功为 `✓ 已获取 N 个模型`；失败显示原因并继续后续步骤（401/403 → 密钥可能无效；404/网络错误等 → 模型将手动填写），保存后可用「刷新模型列表」重试；
 4. 顺带更新 models.dev 缓存；失败时用本地数据并在结果行提示，不中断保存；

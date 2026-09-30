@@ -10,6 +10,7 @@ import { envLayerConfig, cliLayerConfig } from "./env.js";
 import { ConfigError } from "./errors.js";
 import { loadConfigFile, writeJsonAtomic } from "./files.js";
 import {
+  devProviderEndpoints,
   matchModelsDev,
   modelOverrideFromDev,
   readModelsDev,
@@ -108,20 +109,36 @@ export async function loadConfig(
 
   function mergeWithModelsDev(layers: MergeLayer[]): MergeResult {
     const entries = new Map<string, Set<string>>();
+    // 条目的 modelsDevProvider 声明（ADR-0031 §4）：高层覆盖低层
+    const devProviderKey = new Map<string, string>();
     for (const layer of layers) {
       if (layer.kind === "userModels") continue;
       for (const provider of layer.file.providers ?? []) {
         const ids = entries.get(provider.id) ?? new Set<string>();
         for (const id of Object.keys(provider.models ?? {})) ids.add(id);
         entries.set(provider.id, ids);
+        if (provider.modelsDevProvider !== undefined) {
+          devProviderKey.set(provider.id, provider.modelsDevProvider);
+        }
       }
     }
     const providers: ProviderEntryConfig[] = [];
     for (const [id, ids] of entries) {
       const models: NonNullable<ProviderEntryConfig["models"]> = {};
+      const providerKey = devProviderKey.get(id);
       for (const modelId of ids) {
         const record = matchModelsDev(modelsDev.models, modelId);
-        if (record !== undefined) models[modelId] = modelOverrideFromDev(record);
+        // models.dev 服务商层的 endpoints 声明（ADR-0031 §4）：与
+        // 其他字段同一层参与逐字段合并，优先级低于上游/手写
+        const endpoints =
+          providerKey !== undefined
+            ? devProviderEndpoints(modelsDev, providerKey, modelId)
+            : undefined;
+        const override = {
+          ...(record !== undefined ? modelOverrideFromDev(record) : {}),
+          ...(endpoints !== undefined ? { endpoints } : {}),
+        };
+        if (record !== undefined || endpoints !== undefined) models[modelId] = override;
       }
       if (Object.keys(models).length > 0) providers.push({ id, models });
     }

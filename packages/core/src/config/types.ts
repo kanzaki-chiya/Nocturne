@@ -95,6 +95,13 @@ export interface ProviderEntryConfig {
    */
   sessionHeader?: string | undefined;
   /**
+   * models.dev 服务商键（ADR-0031 §4）：如 "opencode-go"；声明后
+   * models.dev 缓存/快照中该服务商的逐模型 npm 原文映射为 endpoints，
+   * 以 models.dev 层身份参与逐字段合并（优先级低于上游）。未声明
+   * 的条目不受影响。
+   */
+  modelsDevProvider?: string | undefined;
+  /**
    * 思考参数格式由预设填写；budgets 覆盖 Anthropic 默认预算。
    * levels/source 仅为旧配置兼容读取，运行时忽略并在写回时清除。
    */

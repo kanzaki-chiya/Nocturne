@@ -34,7 +34,9 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 推理能力只按逐模型声明解析：没有任何层声明 `reasoning`，但有非空 `reasoningEffort` 声明时，视为支持推理；都没有时默认不支持。支持推理时档位取逐模型声明，否则推导六档；推理为 `none` 时没有档位。旧服务商级 `thinking.levels/source` 忽略；读到旧 `levels` 每次启动发 `runtime.warning(provider_thinking_levels_ignored)`。用户编辑设为「否」与手写非空档位冲突时拒绝保存；手写配置自身同时声明 `none` 和非空档位时推理为准，并警告文件、服务商、模型。
 
-**协议来源（[ADR-0026](../decisions/ADR-0026-per-model-protocol.md)）**：每个模型解析一个**生效协议**——`openai-compatible`（请求 `<baseURL>/chat/completions`）、`anthropic`（请求 `<baseURL>/messages`）或 `openai-responses`（请求 `<baseURL>/responses`，[ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md) §1）。解析优先级（高者覆盖低者）：手写 `models.<id>.protocol` > 用户编辑 `userModels.<id>.protocol` > 上游 `supported_endpoints` 推导 > 条目 `type`（同时是鉴权与模型列表接口的「本家」协议）。推导按接口路径末尾比较（`/v1/messages` ≡ `/messages`，大小写与尾斜杠不敏感）：条目 `type` 对应接口在列 → `type`；否则含 `/chat/completions` → `openai-compatible`；否则含 `/messages` → `anthropic`；否则含 `/responses` → `openai-responses`；否则（全部无法识别）→ **unavailable**，说明列出无法识别的接口。上游未声明 `supported_endpoints`（或空数组）不触发推导，回落到条目 `type`。**不得**按模型名、models.dev 或内置目录猜协议。`protocol` 与 `endpoints` 同其他模型字段一样参与逐字段合并。
+**协议来源（[ADR-0026](../decisions/ADR-0026-per-model-protocol.md)）**：每个模型解析一个**生效协议**——`openai-compatible`（请求 `<baseURL>/chat/completions`）、`anthropic`（请求 `<baseURL>/messages`）或 `openai-responses`（请求 `<baseURL>/responses`，[ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md) §1）。解析优先级（高者覆盖低者）：手写 `models.<id>.protocol` > 用户编辑 `userModels.<id>.protocol` > 上游 `supported_endpoints` 推导 > models.dev 服务商层 `endpoints` > 条目 `type`（同时是鉴权与模型列表接口的「本家」协议）。推导按接口路径末尾比较（`/v1/messages` ≡ `/messages`，大小写与尾斜杠不敏感）：条目 `type` 对应接口在列 → `type`；否则含 `/chat/completions` → `openai-compatible`；否则含 `/messages` → `anthropic`；否则含 `/responses` → `openai-responses`；否则（全部无法识别）→ **unavailable**，说明列出无法识别的接口（`npm:<包名>` 标记写 models.dev 专属说明）。上游未声明 `supported_endpoints`（或空数组）不触发推导，回落到条目 `type`。**不得**按模型名或内置目录猜协议。`protocol` 与 `endpoints` 同其他模型字段一样参与逐字段合并。
+
+**models.dev 服务商层接口声明（[ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md) §4）**：条目可选字段 `modelsDevProvider`（models.dev 服务商键，如 `"opencode-go"`）使 models.dev 缓存/快照中该服务商的逐模型 `npm` 原文参与合并——映射为 `endpoints`（`@ai-sdk/openai-compatible` → `/chat/completions`、`@ai-sdk/anthropic` → `/messages`、`@ai-sdk/openai` → `/responses`、其他 → `npm:<包名>` 标记为不可用）并作为 models.dev 层（最低层）声明。逐模型缺省时取服务商级 `npm`；服务商表内查不到的模型不贡献 `endpoints`、回落条目 `type`。快照与缓存只收录内置预设引用的服务商键（`MODELS_DEV_PROVIDER_KEYS`），数据为 api.json 的服务商级与逐模型 `provider.npm` 原文；没有该块的旧缓存仍然有效。
 
 ## 3. 配置形态（示意）
 
@@ -55,6 +57,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
       },
       "providerOptions": {},                     // 配置级选项，与请求级合并后传给适配器（provider-api.md §3）
       "sessionHeader": "x-opencode-session",      // 可选：会话标识请求头名（ADR-0031 §3，见第 4 节）
+      "modelsDevProvider": "opencode-go",          // 可选：models.dev 服务商键（ADR-0031 §4，见第 2 节）
       "allowUndeclaredModels": false              // true → strictModels=false，接受清单外模型 id（CLI 用）
     }
   }

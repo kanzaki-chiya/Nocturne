@@ -13,7 +13,7 @@
 | 层 | 位置 / 来源 | 信任 | 说明 |
 |---|---|---|---|
 | 内置默认 | 代码内常量 | 可信 | 预设名 `default`、Turn 默认值等；不是一个文件 |
-| models.dev | 随版本快照或 `<NOCTURNE_HOME>/cache/models-dev.json` | 可信 | 只为已有模型补全推理、图片输入、上下文与最大输出；低于上游逐字段声明，不写入 `providers.json`（ADR-0025） |
+| models.dev | 随版本快照或 `<NOCTURNE_HOME>/cache/models-dev.json` | 可信 | 只为已有模型补全推理、图片输入、上下文与最大输出；低于上游逐字段声明，不写入 `providers.json`（ADR-0025）；条目声明 `modelsDevProvider` 时另按服务商提供逐模型 `endpoints`（ADR-0031 §4，[providers.md](providers.md) 第 2 节） |
 | 向导配置 | `<NOCTURNE_HOME>/providers.json` | 可信 | 机器维护：只由 `nctrn setup` 与 `/provider` 原子写，内容限 `model` 与 `providers`；手写配置按 `id` 覆盖它（v0.2，[provider-setup.md](provider-setup.md)） |
 | 用户编辑（`userModels`） | 同上 providers.json 条目的 `userModels` 字段 | 可信 | **合成层**：加载时由条目内 `userModels` 包成 `{providers:[{id,models:userModels}]}`，插在向导层与用户配置之间；只作用于 `models` 逐字段合并，不产生权限规则等其他字段（ADR-0024，见第 2 节） |
 | 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；**程序从不改写它** |

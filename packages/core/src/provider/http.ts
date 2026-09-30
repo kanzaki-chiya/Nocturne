@@ -6,7 +6,7 @@
  *   <sessionId>`；两者缺一不写；fetchModels 不属于会话，不发送。
  * - 条目 headers 里的同名头（大小写不敏感）优先于这两条规则。
  */
-import { NOCTURNE_VERSION } from "../version.js";
+import { NOCTURNE_VERSION } from "../protocol/version.js";
 
 /** 默认 User-Agent 基值：`nocturne/<version>`（版本同 Runtime 上报） */
 export function nocturneUserAgent(version: string = NOCTURNE_VERSION): string {

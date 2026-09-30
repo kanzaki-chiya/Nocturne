@@ -98,6 +98,17 @@ Anthropic 适配器的冒烟用独立变量，与 `NOCTURNE_SMOKE_*` 分离、�
 
 四个变量齐备才运行（缺一即跳过）：在同一个 `openai-compatible` 条目、同一密钥下，默认协议模型请求 `<baseURL>/chat/completions`，手写 `protocol: "anthropic"` 的模型请求 `<baseURL>/messages`，各跑一轮纯文本对话并断言 `message.assistant.protocol` 分别为 `openai-compatible`/`anthropic`。
 
+OpenCode Go 的三协议冒烟（ADR-0031 §5，`test/opencode.smoke.ts`）用独立变量——
+
+```bash
+#   NOCTURNE_SMOKE_OPENCODE_API_KEY            OpenCode Zen/Go 凭据
+#   NOCTURNE_SMOKE_OPENCODE_CHAT_MODEL         Chat Completions 模型 id（如 claude-sonnet-4-5）
+#   NOCTURNE_SMOKE_OPENCODE_MESSAGES_MODEL     Messages 协议模型 id
+#   NOCTURNE_SMOKE_OPENCODE_RESPONSES_MODEL    Responses 协议模型 id
+```
+
+四个变量齐备才运行（缺一即跳过）：在 `opencode-go` 预设形态（baseURL + `x-opencode-session` + `modelsDevProvider`）下，三个模型各跑一轮带 `read` 工具调用的对话，断言 `message.assistant.protocol` 分别为 `openai-compatible`/`anthropic`/`openai-responses`、每次请求都写 `x-opencode-session`、不出现网关「缺少 x-opencode-session」报错；Responses 模型额外断言推理加密内容的多轮回传。若某 id 实际不走对应协议（models.dev 接口声明与假设不符）会失败而非跳过，此时应核对 models.dev 对该模型的 `npm` 声明。
+
 Phase 2 的 CLI 冒烟（`apps/cli`）：在临时目录生成一个含失败测试的 fixture 仓库，以非交互模式 `nctrn --yes -p "<任务>"` 驱动真实模型完成"阅读项目 → 定位 bug → 修改文件 → 运行测试 → 报告结果"，断言 fixture 的测试在运行后通过。纯文本回复或只读工具调用不算验收。
 
 仅在不含敏感信息的测试工作区中运行冒烟测试——工作区内容会发送给模型服务。文档改动至少检查所有相对链接可达。

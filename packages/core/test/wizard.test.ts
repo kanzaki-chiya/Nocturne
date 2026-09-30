@@ -23,7 +23,7 @@ import {
   type WizardIo,
   type WizardPreset,
 } from "../src/index.js";
-import { fetchModels } from "../src/provider/index.js";
+import { fetchModels, listProviderPresets } from "../src/provider/index.js";
 
 const PRESET: WizardPreset = {
   id: "deepseek",
@@ -193,6 +193,43 @@ describe("provider 向导（无连接测试，v0.3 不选模型）", () => {
     const { io: io2, printed: p2 } = scriptedIo(["sk-test", [0]]);
     await runProviderSetupWizard(io2, c2, deps, { presetId: "deepseek" });
     expect(p2.some((l) => l.includes("会话标识请求头"))).toBe(false);
+  });
+
+  it("OpenCode 预设写出的条目字段完整（ADR-0031 §5）", async () => {
+    stubFetch(() => jsonRes({ data: [{ id: "gpt-5.4" }] }));
+    const { config, saved } = makeConfig("memory");
+    const { io, printed } = scriptedIo([
+      "", // API Key 留空 → 环境变量路径
+      "", // 凭据环境变量名回车 → 预设默认 OPENCODE_API_KEY
+    ]);
+    const realDeps: SetupWizardDeps = {
+      ...deps,
+      presets: () => listProviderPresets(),
+    };
+    const res = await runProviderSetupWizard(io, config, realDeps, { presetId: "opencode-go" });
+    expect(res.providerId).toBe("opencode-go");
+    const entry = saved[0]?.entry;
+    expect(entry).toMatchObject({
+      id: "opencode-go",
+      type: "openai-compatible",
+      baseURL: "https://opencode.ai/zen/go/v1",
+      apiKeyEnv: "OPENCODE_API_KEY",
+      sessionHeader: "x-opencode-session",
+      modelsDevProvider: "opencode-go",
+    });
+    // 内置预设不问会话标识请求头（由预设写死）
+    expect(printed.some((l) => l.includes("会话标识请求头"))).toBe(false);
+    // opencode-zen 预设同样齐备
+    const zen = listProviderPresets().find((p) => p.id === "opencode-zen");
+    expect(zen).toMatchObject({
+      label: "OpenCode Zen",
+      type: "openai-compatible",
+      baseURL: "https://opencode.ai/zen/v1",
+      defaultKeyEnv: "OPENCODE_API_KEY",
+      fetchableModels: true,
+      sessionHeader: "x-opencode-session",
+      modelsDevProvider: "opencode",
+    });
   });
 
   it("/models 返回 401：提示密钥可能无效，条目仍保存（空 models）", async () => {

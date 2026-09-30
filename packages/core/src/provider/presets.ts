@@ -32,6 +32,11 @@ export interface ProviderPreset {
    * （如 OpenCode 的 x-opencode-session），原样写入条目。
    */
   sessionHeader?: string | undefined;
+  /**
+   * models.dev 服务商键（ADR-0031 §5）：预设写死，原样写入条目；
+   * 启用 models.dev 服务商层的逐模型接口声明参与合并。
+   */
+  modelsDevProvider?: string | undefined;
 }
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
@@ -64,6 +69,33 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     defaultKeyEnv: "ANTHROPIC_API_KEY",
     fetchableModels: true,
     keyHint: "https://console.anthropic.com/settings/keys",
+  },
+  {
+    // ADR-0031 §5：OpenCode Zen；会话头与 models.dev 服务商键写死。
+    // 官方文档的密钥入口是 opencode.ai/auth（登录后复制 API key）。
+    id: "opencode-zen",
+    label: "OpenCode Zen",
+    type: "openai-compatible",
+    defaultName: "opencode-zen",
+    baseURL: "https://opencode.ai/zen/v1",
+    defaultKeyEnv: "OPENCODE_API_KEY",
+    fetchableModels: true,
+    sessionHeader: "x-opencode-session",
+    modelsDevProvider: "opencode",
+    keyHint: "https://opencode.ai/auth",
+  },
+  {
+    // ADR-0031 §5：OpenCode Go（Zen 的同系网关，要求 x-opencode-session）
+    id: "opencode-go",
+    label: "OpenCode Go",
+    type: "openai-compatible",
+    defaultName: "opencode-go",
+    baseURL: "https://opencode.ai/zen/go/v1",
+    defaultKeyEnv: "OPENCODE_API_KEY",
+    fetchableModels: true,
+    sessionHeader: "x-opencode-session",
+    modelsDevProvider: "opencode-go",
+    keyHint: "https://opencode.ai/auth",
   },
   {
     id: "custom-openai",

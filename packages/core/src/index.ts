@@ -97,7 +97,7 @@ import {
   type PermissionGate,
   type ToolRegistry,
 } from "./tools/index.js";
-import { NOCTURNE_VERSION } from "./version.js";
+import { NOCTURNE_VERSION } from "./protocol/version.js";
 
 /** 命令被拒绝时抛出的错误；code 即 events.md 第 7 节的拒绝原因码 */
 export class RuntimeCommandError extends Error {

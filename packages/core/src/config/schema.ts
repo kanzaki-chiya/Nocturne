@@ -68,6 +68,8 @@ export const providerEntrySchema = z
     // 会话标识请求头名（ADR-0031 §3）：如 "x-opencode-session"；
     // 请求带 sessionId 时写该头，未声明不发送任何会话头
     sessionHeader: z.string().min(1).optional(),
+    // models.dev 服务商键（ADR-0031 §4）：启用按服务商的接口声明参与合并
+    modelsDevProvider: z.string().min(1).optional(),
     // 思考兼容开关（ADR-0018）：format 由预设写死；levels/source 仅为旧文件读取；
     // budgets 覆盖 anthropic 档位预算表（正整数 token 数）
     thinking: z

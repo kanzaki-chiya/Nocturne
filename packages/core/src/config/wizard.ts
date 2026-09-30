@@ -86,6 +86,8 @@ export interface WizardPreset {
    * x-opencode-session）；自定义预设由向导可选步骤询问，留空不写。
    */
   sessionHeader?: string | undefined;
+  /** models.dev 服务商键（ADR-0031 §5）：内置预设写死，原样写入条目 */
+  modelsDevProvider?: string | undefined;
 }
 
 export interface WizardFetchRequest {
@@ -280,6 +282,9 @@ export async function runProviderSetupWizard(
       ...(baseURL !== undefined ? { baseURL } : {}),
       ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
       ...(sessionHeader !== undefined ? { sessionHeader } : {}),
+      ...(preset.modelsDevProvider !== undefined
+        ? { modelsDevProvider: preset.modelsDevProvider }
+        : {}),
       models,
       ...(Object.keys(thinking).length > 0 ? { thinking } : {}),
       ...(modelCount > 0
