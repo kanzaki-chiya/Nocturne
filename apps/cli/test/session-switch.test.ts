@@ -13,6 +13,7 @@ import {
   createPlatform,
   createRuntime,
   FakeProvider,
+  loadConfig,
   type Runtime,
   type RuntimeSession,
 } from "@nocturne/core";
@@ -202,6 +203,57 @@ describe("createSessionSwitcher", () => {
 });
 
 describe("createNewSession", () => {
+  it("配置注入后 /new 使用刚保存的默认模型、档位和权限，旧会话快照不变", async () => {
+    const cwd = await tmp("nct-new-cwd-");
+    const config = await loadConfig(platform, {
+      nocturneHome: await tmp("nct-new-home-"),
+      env: () => undefined,
+    });
+    const provider = new FakeProvider({
+      models: ["old", "new"].map((model) => ({
+        ref: { provider: "fake", model },
+        capabilities: {
+          toolCalls: true,
+          parallelToolCalls: true,
+          reasoning: "visible" as const,
+          imageInput: false,
+          promptCache: false,
+          reasoningEffort: ["low" as const, "high" as const],
+        },
+      })),
+    });
+    const runtime = await createRuntime({
+      cwd,
+      config,
+      sessionsDir: await tmp("nct-new-sd-"),
+      providers: [provider],
+    });
+    const old = await runtime.createSession({
+      model: "fake/old",
+      permissionPreset: "default",
+      reasoningEffort: "off",
+    });
+    await runtime.setDefaultModel("fake/new", "high");
+    await runtime.updateSettings({ "permissions.preset": "read-only" });
+    expect(old.state().config.model.model).toBe("old");
+    expect(old.state().config.permissionPreset).toBe("default");
+    const result = await createNewSession({ runtime, holder: { current: old } })();
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+    expect(result.session.state().config).toMatchObject({
+      model: { provider: "fake", model: "new" },
+      permissionPreset: "read-only",
+      reasoningEffort: "high",
+    });
+    const restored = await runtime.resumeSession(old.id);
+    expect(restored.state().config).toMatchObject({
+      model: { model: "old" },
+      permissionPreset: "default",
+      reasoningEffort: "off",
+    });
+    await Promise.all([restored.close(), result.session.close()]);
+  });
+
   it("沿用当前配置，先创建并换入新会话，再关闭旧会话；旧会话可恢复", async () => {
     const cwd = await tmp("nct-new-cwd-");
     const runtime = await makeRuntime(cwd, await tmp("nct-new-sd-"));

@@ -9,7 +9,12 @@ import type {
   RuntimeSession,
   SessionShellInfo,
 } from "@nocturne/core";
-import { RuntimeCommandError } from "@nocturne/core";
+import {
+  RuntimeCommandError,
+  isReasoningEffort,
+  REASONING_EFFORT_ORDER,
+  type PermissionPresetName,
+} from "@nocturne/core";
 import { cliHelpText } from "@nocturne/tui/slash-catalog";
 
 import { normalizeModelRef } from "./config.js";
@@ -294,6 +299,67 @@ export async function runSlashCommand(
           io.print(`未知 /provider 子命令 ${sub}；/help 列出用法`);
           return "handled";
       }
+    }
+    case "/settings": {
+      const sources = {
+        default: "默认",
+        setup: "向导",
+        settings: "设置",
+        user: "config.json",
+        project: "项目配置",
+        env: "环境变量",
+        cli: "命令行",
+      };
+      if (rest.length === 0) {
+        io.print("会话默认（默认值对新会话生效）");
+        for (const item of runtime.describeSettings()) {
+          if (item.key === "shell") io.print("界面：/theme 仅 TUI\n执行");
+          const label = {
+            "permissions.preset": "默认权限预设",
+            reasoningEffort: "默认思考档位",
+            defaultModel: "默认模型（/model）",
+            shell: "Shell（/shell）",
+          }[item.key];
+          io.print(
+            `${label}：${item.effective ?? "未设置"} · ${sources[item.source]}${item.overridden ? ` · 已保存，但被 ${sources[item.source]} 覆盖` : ""}`,
+          );
+        }
+        return "handled";
+      }
+      const [sub, value = ""] = rest;
+      const presets = ["read-only", "default", "auto-edit", "full-access"];
+      try {
+        if (rest.length !== 2 || (sub !== "preset" && sub !== "effort"))
+          throw new RuntimeCommandError(
+            "invalid_command",
+            "用法：/settings preset|effort <值|reset>；模型去 /model，Shell 去 /shell，主题 /theme 仅 TUI",
+          );
+        if (sub === "preset") {
+          if (value !== "reset" && !presets.includes(value))
+            throw new RuntimeCommandError(
+              "invalid_command",
+              `可选：${presets.join(" | ")} | reset`,
+            );
+          await runtime.updateSettings({
+            "permissions.preset": value === "reset" ? null : (value as PermissionPresetName),
+          });
+        } else {
+          if (value !== "reset" && !isReasoningEffort(value))
+            throw new RuntimeCommandError(
+              "invalid_command",
+              `可选：${REASONING_EFFORT_ORDER.join(" | ")} | reset`,
+            );
+          await runtime.updateSettings({
+            reasoningEffort: value === "reset" ? null : value,
+          });
+        }
+        io.print("已保存默认设置（对新会话生效）");
+      } catch (cause) {
+        io.print(
+          `! ${cause instanceof RuntimeCommandError ? `${cause.code}: ` : ""}${errorText(cause)}`,
+        );
+      }
+      return "handled";
     }
     case "/effort": {
       const info = session.reasoningEffortInfo();

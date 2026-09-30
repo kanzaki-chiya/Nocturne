@@ -35,9 +35,13 @@ export function createNewSession(deps: { runtime: Runtime; holder: SessionHolder
     let next: RuntimeSession;
     try {
       next = await runtime.createSession({
-        model: `${config.model.provider}/${config.model.model}`,
-        permissionPreset: config.permissionPreset,
-        reasoningEffort: config.reasoningEffort,
+        model: runtime.defaultModel() ?? config.model,
+        ...(runtime.describeSettings().length === 0
+          ? {
+              permissionPreset: config.permissionPreset,
+              reasoningEffort: config.reasoningEffort,
+            }
+          : {}),
       });
     } catch (e) {
       return { kind: "error", message: e instanceof Error ? e.message : String(e) };

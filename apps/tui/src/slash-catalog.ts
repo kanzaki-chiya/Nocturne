@@ -19,6 +19,11 @@ export interface SlashCommand {
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "/help", summary: "显示帮助", cli: "列出命令与快捷键" },
   { name: "/theme", summary: "切换深浅主题", tuiOnly: true },
+  {
+    name: "/settings",
+    summary: "设置会话默认值与界面偏好",
+    cli: "查看设置；preset|effort <值|reset>",
+  },
   { name: "/model", summary: "切换模型", cli: "列出或切换模型" },
   { name: "/effort", summary: "切换思考档位", cli: "显示或切换思考强度", args: "effort" },
   { name: "/preset", summary: "切换权限预设", cli: "显示或切换权限预设", args: "preset" },

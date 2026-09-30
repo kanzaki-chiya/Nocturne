@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Runtime, RuntimeSession } from "@nocturne/core";
 import { RuntimeCommandError } from "@nocturne/core";
@@ -78,6 +78,70 @@ function capture() {
 }
 
 describe("斜杠命令（cli.md 第 4 节）", () => {
+  it("/settings 列出分组、生效值、来源和覆盖提示", async () => {
+    const runtime = {
+      ...fakeRuntime,
+      describeSettings: () => [
+        {
+          key: "permissions.preset",
+          effective: "read-only",
+          saved: "full-access",
+          source: "user",
+          overridden: true,
+        },
+        { key: "defaultModel", effective: "p/m1", source: "settings", overridden: false },
+        { key: "reasoningEffort", effective: "off", source: "default", overridden: false },
+        { key: "shell", effective: "cmd", source: "env", overridden: false },
+      ],
+    } as Runtime;
+    const { lines, io } = capture();
+    await runSlashCommand("/settings", fakeSession(), runtime, io);
+    expect(lines.join("\n")).toContain("已保存，但被 config.json 覆盖");
+    expect(lines.join("\n")).toContain("p/m1 · 设置");
+    expect(lines.join("\n")).toContain("界面：/theme 仅 TUI\n执行");
+  });
+  it.each([
+    ["preset read-only", { "permissions.preset": "read-only" }],
+    ["preset default", { "permissions.preset": "default" }],
+    ["preset auto-edit", { "permissions.preset": "auto-edit" }],
+    ["preset full-access", { "permissions.preset": "full-access" }],
+    ["preset reset", { "permissions.preset": null }],
+    ["effort off", { reasoningEffort: "off" }],
+    ["effort high", { reasoningEffort: "high" }],
+    ["effort reset", { reasoningEffort: null }],
+  ])("/settings %s 写入默认值", async (args, patch) => {
+    const updateSettings = vi.fn(async () => []);
+    const { lines, io } = capture();
+    await runSlashCommand(
+      `/settings ${args}`,
+      fakeSession(),
+      { ...fakeRuntime, updateSettings },
+      io,
+    );
+    expect(updateSettings).toHaveBeenCalledWith(patch);
+    expect(lines.join("")).toContain("对新会话生效");
+  });
+  it.each([
+    "preset bad",
+    "effort bad",
+    "preset",
+    "model p/m1",
+    "shell cmd",
+    "theme light",
+    "preset default extra",
+  ])("/settings %s 非法命令列出选择或入口", async (args) => {
+    const updateSettings = vi.fn(async () => []);
+    const { lines, io } = capture();
+    await runSlashCommand(
+      `/settings ${args}`,
+      fakeSession(),
+      { ...fakeRuntime, updateSettings },
+      io,
+    );
+    expect(lines.join("")).toContain("invalid_command");
+    expect(lines.join("")).toMatch(/可选|用法/);
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
   it("/help 列出命令", async () => {
     const { lines, io } = capture();
     expect(await runSlashCommand("/help", fakeSession(), fakeRuntime, io)).toBe("handled");

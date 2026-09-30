@@ -102,7 +102,10 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `/compact` | 手动触发 L2 摘要压缩 | `session.compact()` → `context.compacted(kind="summary")` |
 | `/resume` | 列出会话（编号、id、创建时间、绑定目录、模型、锁状态），输入编号切换，空行取消 | `runtime.listSessions()` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
-| `/new`、`/clear` | 新建空会话并切换，沿用当前模型、思考档位与权限预设；旧会话仍可恢复，`/clear` 不是清屏 | CLI 注入的 `newSession` 回调 |
+| `/settings` | 按会话默认、界面、执行分组列出生效值、来源和覆盖提示；默认模型去 `/model`，Shell 去 `/shell`，`/theme` 仅 TUI | `runtime.describeSettings()` |
+| `/settings preset <名称\|reset>` | 保存默认预设，`reset` 清除；可选 `read-only`、`default`、`auto-edit`、`full-access` | `runtime.updateSettings()` |
+| `/settings effort <档位\|reset>` | 保存默认档位，按生效默认模型校验；`reset` 清除；非法值以 `invalid_command` 拒绝并列出可选值 | `runtime.updateSettings()` |
+| `/new`、`/clear` | 新建空会话并切换，使用最新生效的默认模型、思考档位与权限预设；未注入配置时沿用当前会话值；旧会话仍可恢复，`/clear` 不是清屏 | CLI 注入的 `newSession` 回调 |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
 | `/provider` | 列出服务商与来源，不显示密钥；TUI 中打开服务商页。`add` 与 `nctrn setup --cli` 共用向导；`key <name>` / `refresh <name>` / `remove <name>` 为快捷操作。`model <名> <模型>` 逐字段显示 `当前值（来源）`，来源可为 models.dev；回车保留、`-` 清除用户编辑。图片输入和推理接受 `y`/`n`/`-`，推理为否时不询问档位；来源为手写配置的字段只读。成功后写入 `userModels`，详见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveModelSettings()` 等 + `runtime.updateProviders` |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
@@ -113,7 +116,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 - `/context` 渲染 `ContextReport`：各 section 的名称、来源、字符数、估算 token，加上合计 `estimatedTokens / budgetTokens` 与 `overBudget`；请求会携带图片附件时另有 `images <count> 张 ~<tok> tok` 行（`report.images`，按估算模式计数，见 [context.md](../architecture/context.md) 第 3、5 节）。查询只读，不构建请求也不产生事件。
 - `/compact` 输出结果摘要（`throughSeq`、摘要字符数）；没有可压缩内容或摘要失败时打印原因，返回码不产生——REPL 命令的错误只显示，不影响进程。
 - **`/resume` 会话内切换**：复用第 2 节的会话打开语义（锁冲突 `session_locked`、日志损坏、跨目录默认拒绝需 `y/N` 确认）。Turn 进行中拒绝并提示先中断；**先打开新会话**——失败时报错并留在原会话；打开成功后才 `session.close()` 旧会话（释放锁），打印一行"已切换到会话 \<id\>"与恢复摘要（`session.recovery`，若有修复）。该打开逻辑由 CLI 统一实现并以回调注入 TUI（[apps/tui.md](tui.md) 第 6 节）。
-- **`/new` 会话内新建**：Turn 进行中拒绝；按当前会话配置创建并换入新会话，创建失败保留旧会话，成功后才关闭旧会话。逐行模式打印新会话分隔行；`/clear` 是同义别名，不删除旧日志也不清屏。
+- **`/new` 会话内新建**：Turn 进行中拒绝；按最新默认设置创建并换入新会话（未配置默认模型时沿用当前模型），创建失败保留旧会话，成功后才关闭旧会话。逐行模式打印新会话分隔行；`/clear` 是同义别名，不删除旧日志也不清屏。`/settings` 保存只影响之后的新会话，当前会话仍用 `/preset`、`/effort` 切换。
 
 ## 5. 事件渲染
 
