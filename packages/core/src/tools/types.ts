@@ -98,7 +98,7 @@ export interface ToolScope {
   shell?: ShellResolution | undefined;
 }
 
-/** "先读后写"所需的已读记录（tools.md 第 6 节；Phase 1 仅 read 记录） */
+/** "先读后写"所需的已读记录（tools.md 第 6 节；read 与用户 @文件 文本引用记录） */
 export interface ReadStateStore {
   record(path: string, stat: { mtimeMs: number; size: number }): void;
   get(path: string): { mtimeMs: number; size: number } | undefined;

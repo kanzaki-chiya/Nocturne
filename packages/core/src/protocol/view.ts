@@ -17,6 +17,7 @@ import { isDurableEvent, isDurableEventType, isEphemeralEventType } from "./even
 import { todoItemsFromCompletion, type TodoItem } from "./todo.js";
 import type {
   ContentBlock,
+  FileRef,
   FinishReason,
   ImageAttachment,
   ModelRef,
@@ -86,6 +87,7 @@ export interface UserEntry {
   content: ContentBlock[];
   /** 随消息附带的图片引用（ADR-0023）；无附件时字段不出现 */
   attachments?: ImageAttachment[] | undefined;
+  fileRefs?: FileRef[] | undefined;
 }
 
 export interface AssistantEntry {
@@ -298,6 +300,7 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
         seq: event.seq,
         turnId: turnId ?? "",
         content: event.payload.content,
+        ...(event.payload.fileRefs !== undefined ? { fileRefs: event.payload.fileRefs } : {}),
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
           : {}),

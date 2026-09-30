@@ -67,7 +67,8 @@ interface SessionView {
 
 ```ts
 type ViewEntry =
-  | { kind: "user";      key: string; seq: number; turnId: string; content: ContentBlock[] }
+  | { kind: "user"; key: string; seq: number; turnId: string; content: ContentBlock[];
+      attachments?: ImageAttachment[]; fileRefs?: FileRef[] }
   | AssistantEntry
   | ToolEntry
   | NoticeEntry;
@@ -174,7 +175,7 @@ interface SessionNotice {
 | `session.created` | 填充 `meta`、`config` |
 | `session.config_changed` | payload 中存在的键覆盖 `config`（`shell` 不进 `config`，ADR-0022）；追加 `config` notice 条目（shell 切换文案：`shell 已切换为 <kind>（<path>）`） |
 | `turn.started` | `currentTurn = {turnId, turnIndex}`；`turnCount = max(turnCount, turnIndex)` |
-| `message.user` | 追加 `user` 条目（key `u:<messageId>`） |
+| `message.user` | 追加 `user` 条目（key `u:<messageId>`），保留 `attachments` 与 `fileRefs`；引用内容仍在 `content` 中，客户端可用元数据显示摘要 |
 | `message.assistant` | `live.assistants` 中同 `messageId` 者移除并晋升：新建条目插入时间线（流式 text/reasoning 丢弃，以 `content` 为准）；无 live 对应物则直接新建条目 |
 | `permission.requested` | `pendingPermission` 设置；同 `callId` 的 `live.tools` 项移除并晋升为 `awaiting_permission` 条目（回填 `subjects`），无 live/entries 对应物则新建 `awaiting_permission` 条目（`name` 暂缺）；记录进 `pendingByCallId` |
 | `permission.resolved` | `requestId` 匹配则清 `pendingPermission`、`pendingByCallId`；`callId` 的 entries 条目更新 `resolution`（`deny` 时 `status` 仍等 `tool.completed` 落定）；追加 `permission` notice 条目。归约器内部维护 `Map<callId, resolved>`，供晚到的 `started`/`completed` 回填 |

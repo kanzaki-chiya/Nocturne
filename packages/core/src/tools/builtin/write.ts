@@ -24,7 +24,7 @@ interface WriteOutput {
 export const writeTool: ToolDefinition<WriteInput, WriteOutput> = {
   name: "write",
   description:
-    "创建或整体覆盖文件。覆盖已存在的文件前必须先在本会话中 read 过它；文件被外部修改后需重新读取。",
+    "创建或整体覆盖文件。覆盖已存在的文件前必须先在本会话中 read 过它或由用户 @文件 附带文本；文件被外部修改后需重新读取。",
   inputSchema: {
     type: "object",
     required: ["path", "content"],

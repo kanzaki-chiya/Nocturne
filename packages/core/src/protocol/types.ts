@@ -156,6 +156,16 @@ export type ContentBlock =
 
 export type ImageMimeType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
+/** 已附带的 @ 引用快照元数据（ADR-0033）。 */
+export interface FileRef {
+  path: string;
+  kind: "file" | "directory" | "image";
+  lines?: number | undefined;
+  totalLines?: number | undefined;
+  chars: number;
+  truncated: boolean;
+}
+
 /**
  * 图片附件的引用：字节不落进事件与历史，统一存到
  * <attachmentsDir>/<sessionId>/ 下，事件里只有这份元数据。
@@ -377,6 +387,7 @@ export type HistoryEntry =
       content: ContentBlock[];
       /** 随用户消息附带的图片引用（ADR-0023）；旧日志无此字段 */
       attachments?: ImageAttachment[] | undefined;
+      fileRefs?: FileRef[] | undefined;
     }
   | {
       kind: "assistant";

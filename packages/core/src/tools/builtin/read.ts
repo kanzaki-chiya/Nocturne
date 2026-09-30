@@ -4,6 +4,7 @@
  * PNG/JPEG/GIF/WebP 图片按 ADR-0023 第 2 节作为图片附件返回。
  */
 import type { ImageMimeType, SubjectRequest } from "../../protocol/index.js";
+import { isBinary } from "../text.js";
 import {
   IMAGE_MAX_BYTES,
   IMAGE_MAX_EDGE,
@@ -36,7 +37,6 @@ type ReadOutput =
       bytes: number;
     };
 
-const BINARY_SNIFF_BYTES = 8192;
 const DEFAULT_LIMIT = 2000;
 
 /** 图片大小的人读格式：<1KB → "N B"；<1MB → 整数 "N KB"；否则一位小数 "N.N MB" */
@@ -47,14 +47,6 @@ function formatBytes(n: number): string {
 }
 
 const IMAGE_LIMIT_TEXT = `单张图片原始文件不超过 5 MB（5×1024×1024 字节）、每边不超过 ${IMAGE_MAX_EDGE} px`;
-
-function isBinary(bytes: Uint8Array): boolean {
-  const n = Math.min(bytes.length, BINARY_SNIFF_BYTES);
-  for (let i = 0; i < n; i++) {
-    if (bytes[i] === 0) return true;
-  }
-  return false;
-}
 
 export const readTool: ToolDefinition<ReadInput, ReadOutput> = {
   name: "read",

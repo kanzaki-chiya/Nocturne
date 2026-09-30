@@ -99,7 +99,7 @@ execute(call, ctx):
 
 另有只在**子会话**注册表中出现的 `finish` 工具：子代理用它提交结果结束 Turn（[subagent.md](subagent.md) 第 2 节）；它不是内置工具表的成员。
 
-"先读后写"与过期检测防止模型基于过时内容覆盖文件，是低成本、高收益的保护。已读状态保存在运行时内存中，会话恢复后需要重新读取。判定细则：
+"先读后写"与过期检测防止模型基于过时内容覆盖文件，是低成本、高收益的保护。`read` 与用户 `@文件` 附带的完整或部分文本都记录已读状态；状态保存在运行时内存中，会话恢复后需要重新读取或重新引用。判定细则：
 
 - 写入工具以 `ctx.subjects` 中已批准的**解析后路径**为准；写入前重新 `stat`/`realpath`：解析结果与批准时不一致 → `resource_changed`；已存在文件在 `readState` 中无记录 → `error(code="not_read")`；记录的 `mtimeMs`/`size` 与当前不一致 → `error(code="stale_file")`（要求重新 `read`）。
 - `write` 创建尚不存在的文件不要求先读；写入瞬间文件恰好出现（竞态）按已存在文件处理，即要求先读。
@@ -123,6 +123,16 @@ HTML/XHTML 删除 `script/style/noscript/svg/iframe/nav/header/footer/aside/form
 2xx 的 `modelContent` 首行为 `URL: <最终地址>`，有标题时第二行为 `标题: <title>`，空行后是正文；HTTP 错误返回 `http_error`、状态码及正文前 2000 字符；连接、DNS、TLS 与无效重定向返回 `network_error`，超时仍为执行器的 `timeout`。`output` 只含 `{ url, finalUrl, status, contentType, title?, chars, truncatedBytes? }`，其中 chars 是预算截断前的模型结果字符数，不含正文。跨主机结果的 finalUrl 保留实际访问地址。
 
 权限目标为小写 hostname（非默认端口带 `:端口`），完整 URL 放在只供显示的 `detail`。同主机的会话授权与 explore 子会话继承见 [permissions.md](permissions.md) 第 3、5.4 节和 [subagent.md](subagent.md) 第 6、7 节；工具不自行判断访问权限。
+
+### 用户文件引用
+
+`submit` 使用公开纯函数 `parseFileRefs` 识别开头或空白后的 `@路径`、`@"带空格的路径"`；相对路径以会话 cwd 为基准，支持工作区外绝对路径。先尝试原路径，不存在才去掉末尾中英文标点；仍不存在则保留普通文字。同一真实路径去重。引用是用户操作，不经过权限层与工具 Hooks。
+
+文本复用 `read` 的 UTF-8 解码、前 8192 字节 NUL 二进制嗅探和行号规则。2000 行与 50,000 字符取较宽上限，只有同时超过才截断，并选择前 2000 行或 50,000 字符以内整行中内容更多的结果。一条消息的附加文本硬上限为 150,000 字符，包括标签、行号和提示；保持整行，预算不够容纳一行时仅保留路径并告警，达到总上限后的引用不再附加。成功附带的文本写入 `readState`。
+
+目录列出一层，复用 walk 的隐藏项、符号链接与 `.gitignore` 过滤规则，包含祖先和当前目录的规则，至多 200 项，子目录以 `/` 结尾。图片复用 `read` 的格式、5 MB 与 8000 px 限制，保存为 `source: "paste"` 附件；当前模型不支持图片时保留普通文字并告警。其他二进制文件同样只保留路径并告警。
+
+文件与目录内容提交时写入消息，不因后续文件修改而变化；元数据契约见 [events.md](../protocols/events.md)，上下文处理见 [context.md](context.md)。`RuntimeSession.fileIndex()` 延迟建立工作区索引，复用 walk，最多 20,000 项，每个 Turn 结束后失效；公开纯函数 `completeFileRefs` 供客户端排序候选和生成补全文本。
 
 `shell` 的约定（Phase 2 定案）：
 

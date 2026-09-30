@@ -13,6 +13,7 @@ export interface WalkedFile {
   rel: string;
   size: number;
   mtimeMs: number;
+  type?: "file" | "directory";
 }
 
 const ALWAYS_IGNORED = new Set([".git", ".nocturne"]);
@@ -24,14 +25,21 @@ export async function* walkFiles(
   fs: FileSystem,
   paths: PathOps,
   root: string,
-  options: { signal?: AbortSignal | undefined; maxDirs?: number } = {},
+  options: {
+    signal?: AbortSignal | undefined;
+    maxDirs?: number;
+    includeDirectories?: boolean;
+    maxEntries?: number;
+    statFiles?: boolean;
+  } = {},
 ): AsyncGenerator<WalkedFile> {
   const chain = new GitignoreChain();
   let dirs = 0;
   const maxDirs = options.maxDirs ?? 20_000;
+  let count = 0;
 
   async function* visit(dirAbs: string, dirRel: string): AsyncGenerator<WalkedFile> {
-    if (options.signal?.aborted) return;
+    if (options.signal?.aborted || count >= (options.maxEntries ?? Infinity)) return;
     if (++dirs > maxDirs) return;
     const giContent = await fs
       .readTextFile(paths.join(dirAbs, ".gitignore"))
@@ -46,15 +54,22 @@ export async function* walkFiles(
     }
     try {
       for (const e of entries) {
+        if (count >= (options.maxEntries ?? Infinity)) return;
         if (options.signal?.aborted) return;
         if (e.type === "symlink") continue; // 不跟随链接 / junction
         const rel = dirRel === "" ? e.name : `${dirRel}/${e.name}`;
         if (ALWAYS_IGNORED.has(e.name) || isHidden(e.name)) continue;
         if (chain.ignores(rel, e.type === "directory")) continue;
         if (e.type === "directory") {
+          if (options.includeDirectories) {
+            count++;
+            yield { path: e.path, rel, size: 0, mtimeMs: 0, type: "directory" };
+          }
           yield* visit(e.path, rel);
         } else if (e.type === "file") {
-          const stat = await fs.lstat(e.path).catch(() => undefined);
+          const stat =
+            options.statFiles === false ? undefined : await fs.lstat(e.path).catch(() => undefined);
+          count++;
           yield {
             path: e.path,
             rel,

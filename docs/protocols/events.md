@@ -71,7 +71,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`reasoningEffort?`（思考档位，ADR-0018；缺省按 `off` 处理）、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节） |
 | `session.config_changed` | — | 变化的字段：`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018）、`shell?: { kind, path }`（shell 切换，ADR-0022：折叠时在该事件位置留 `note` 历史条目给模型，见 [context.md](../architecture/context.md) 第 3 节） |
 | `turn.started` | ✓ | `turnIndex` |
-| `message.user` | ✓ | `messageId`、`content: ContentBlock[]`、`attachments?: ImageAttachment[]`（v0.5 新增可选字段，见第 4 节；用户消息粘贴的图片在后续版本接入，本版只定义形状与折叠保留） |
+| `message.user` | ✓ | `messageId`、`content: ContentBlock[]`、`attachments?: ImageAttachment[]`、`fileRefs?: FileRef[]`（用户引用的快照元数据，见第 4 节） |
 | `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`finishReason: FinishReason \| "aborted"`、`protocol?: "openai-compatible" \| "anthropic" \| "openai-responses"`（产生该消息时的生效协议，ADR-0026 §6、ADR-0031 §1；旧日志无此字段，缺省时 `providerData` 回传只比较服务商） |
 | `tool.started` | ✓ | `callId`、`name`、`input`（规范化后）、`subjects: PermissionSubject[]`（解析后）、`permission: { action, source, rule? }`（`rule` 为命中规则的人读说明，见 [permissions.md](../architecture/permissions.md) 5.3） |
 | `permission.requested` | ✓ | `requestId`、`callId`、`subjects`、`reason`、`options`（完整选项集：`allow_once`、`allow_session`、`allow_project`、`deny`、`deny_stop`） |
@@ -152,6 +152,16 @@ type PermissionSubject = {
     落盘在 <sessionsDir>/attachments/<sessionId>/ 下，事件里只存引用 */
 type ImageMimeType = "image/png" | "image/jpeg" | "image/gif" | "image/webp"
 
+/** ADR-0033：用户消息附带的 @ 引用，缺省时沿用旧消息显示。 */
+type FileRef = {
+  path: string
+  kind: "file" | "directory" | "image"
+  lines?: number            // 文本实际附带的行数
+  totalLines?: number       // 文件总行数，换行规则同 read
+  chars: number             // 附带原文的字符数（不含行号/标签）；图片为 0
+  truncated: boolean
+}
+
 type ImageAttachment = {
   type: "image"
   file: string              // 相对 <attachmentsDir>/<sessionId>/ 的文件名，如 "img-3.png"
@@ -206,8 +216,9 @@ type QuestionAnswer = { declined: true } | {
 
 | 命令 | 前置条件 | 效果事件 | 实现阶段 |
 |---|---|---|---|
-| `submit({ text?, content?, attachments? })` | 会话空闲，否则返回 `session_busy`；`attachments` 是可选的 `{ data, mimeType, label? }[]`，由 Core 校验并落盘 | `turn.started`、`message.user`（含附件引用）、…… | Phase 1；图片见 ADR-0023 |
+| `submit({ text?, content?, attachments? })` | 会话空闲，否则返回 `session_busy`；`attachments` 是可选的 `{ data, mimeType, label? }[]`，由 Core 校验并落盘；文本中的 `@文件` 由 Core 读取并固定为快照 | `turn.started`、`message.user`（含 `attachments`、`fileRefs`）、…… | 图片见 ADR-0023；文件引用见 ADR-0033 |
 | `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` | Phase 1 |
+| `fileIndex()` | 会话可用；首次请求建立工作区索引，每个 Turn 后失效 | 无事件，返回至多 20,000 个文件与目录候选；规则见 [tools.md](../architecture/tools.md) | ADR-0033 |
 | `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 2 起 ask 流程生效；Phase 3 起 `reply.remember` 生效，生成对应范围的 Grant（[permissions.md](../architecture/permissions.md) 5.4） |
 | `respondQuestion(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request`；`reply` 为 `{ answers: QuestionAnswer[] }`，逐题为 `{ selected: string[], text?: string }` 或 `{ declined: true }`；拒绝项同时带 selected/text、答案数/选项归属与问题不匹配、单选多项或 text 超过 2000 字符返回 `invalid_reply` 且请求保持等待 | 无独立结算事件：等待中的 `ask_user` 调用以 `tool.completed` 结算（回答与逐题拒绝均为 `ok`；中断为 `cancelled`）；`runtime.status` 离开 `waiting_user` | ADR-0032 |
 | `setModel(ref)` | 会话空闲（Turn 进行中返回 `session_busy`）；未知 provider 返回 `invalid_model`；Provider 启用严格清单（`strictModels`，默认）且模型不在清单内同样 `invalid_model` | `session.config_changed` | Phase 2（`/model`） |

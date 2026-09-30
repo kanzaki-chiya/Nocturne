@@ -35,6 +35,8 @@ build({
 
 Context Builder 不做 I/O，也不调用 Provider：指令文件由 `config` / `platform` 在会话开始时读取并传入；需要模型参与的摘要由 Agent Loop 按计划执行。这让它可以用纯数据测试。
 
+用户的 `@文件` 引用在 Core `submit` 时读取并固定为消息快照：原文之后追加 `<file>` 或 `<directory>` 文本块，图片使用既有 `attachments` 通道；读取与截断规则见 [tools.md](tools.md#用户文件引用)。`fileRefs` 只供客户端显示摘要，Builder 不据此读取文件或区别处理内容，文件块照常参与上下文预算与压缩，恢复时使用日志中的内容。
+
 图片附件（ADR-0023）：历史条目上的 `attachments` 只是引用（events.md 第 4 节）。每个 Step 构建前，Agent Loop 先调 `attachmentsToLoad(history, model)`——与构建共用同一套 6.4 压缩边界——得到本次会作为图片发出的引用集（模型 `imageInput` 为 false 时为空；跳过摘要/修剪覆盖的条目；含进行中 Turn 被摘要覆盖而重注入的 `message.user`；按 `sha256` 去重、只取最新 20 个引用），再经会话的 `AttachmentStore` 读字节、转 base64 放进 `attachmentData` 传给 Builder。投影规则：
 
 - `imageInput` 为 true 且 `attachmentData` 命中该 sha256 → 消息带 `images`（`ModelImage`，provider-api.md 第 3 节）；user 消息的图片走消息级 `images` 字段，tool 消息同理。

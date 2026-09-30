@@ -103,9 +103,7 @@ export class GitignoreChain {
 
   /** 进入一个目录时压入该目录的 .gitignore（baseRel = 该目录相对 root 的路径，root 为 ""） */
   push(baseRel: string, content: string | undefined): void {
-    if (content !== undefined && content.length > 0) {
-      this.layers.push({ rules: compileGitignore(content), baseRel });
-    }
+    this.layers.push({ rules: compileGitignore(content ?? ""), baseRel });
   }
 
   pop(): void {

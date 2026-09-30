@@ -4,6 +4,7 @@
  */
 import type {
   ContentBlock,
+  FileRef,
   FinishReason,
   ImageAttachment,
   ModelProtocol,
@@ -55,6 +56,7 @@ export interface MessageUserPayload {
   content: ContentBlock[];
   /** 随消息附带的图片引用（ADR-0023，粘贴/拖入）；无附件时缺省 */
   attachments?: ImageAttachment[] | undefined;
+  fileRefs?: FileRef[] | undefined;
 }
 
 export interface MessageAssistantPayload {

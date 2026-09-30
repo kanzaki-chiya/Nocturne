@@ -81,6 +81,15 @@ const imageAttachmentSchema = z.object({
   source: z.enum(["paste", "read", "mcp"]),
 });
 
+const fileRefSchema = z.object({
+  path: z.string(),
+  kind: z.enum(["file", "directory", "image"]),
+  lines: z.number().int().nonnegative().optional(),
+  totalLines: z.number().int().nonnegative().optional(),
+  chars: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+});
+
 // ── payload schema ─────────────────────────────────────────
 
 const payloadSchemas = {
@@ -105,6 +114,7 @@ const payloadSchemas = {
     messageId: z.string(),
     content: z.array(contentBlockSchema),
     attachments: z.array(imageAttachmentSchema).optional(),
+    fileRefs: z.array(fileRefSchema).optional(),
   }),
   "message.assistant": z.object({
     messageId: z.string(),

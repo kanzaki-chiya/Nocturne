@@ -25,6 +25,7 @@ import {
 } from "../provider/index.js";
 import type {
   ContentBlock,
+  FileRef,
   FinishReason,
   ImageAttachment,
   RuntimeStatus,
@@ -81,6 +82,7 @@ export async function runTurn(
   deps: TurnDeps,
   content: ContentBlock[],
   attachments?: ImageAttachment[],
+  fileRefs?: FileRef[],
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -257,7 +259,12 @@ export async function runTurn(
     await session.emit("turn.started", { turnIndex }, { turnId });
     await session.emit(
       "message.user",
-      { messageId: id("message"), content, ...(attachments?.length ? { attachments } : {}) },
+      {
+        messageId: id("message"),
+        content,
+        ...(attachments?.length ? { attachments } : {}),
+        ...(fileRefs?.length ? { fileRefs } : {}),
+      },
       { turnId },
     );
 

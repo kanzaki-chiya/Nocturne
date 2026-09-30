@@ -71,6 +71,8 @@ import type {
   TurnEndReason,
 } from "./protocol/index.js";
 import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
+import { resolveFileRefs } from "./tools/file-refs.js";
+import { buildFileIndex, type FileIndexEntry } from "./tools/file-index.js";
 import { isReasoningEffort, REASONING_EFFORT_ORDER } from "./protocol/index.js";
 import {
   createSessionStore,
@@ -227,6 +229,8 @@ export interface RuntimeSession {
   readInputHistory(): Promise<string[]>;
   /** 记录一条原文；写盘失败发 runtime.warning，不阻断输入。 */
   recordInputHistory(text: string): Promise<void>;
+  /** 工作区 @ 补全索引，首次请求建立，每个 Turn 后失效。 */
+  fileIndex(): Promise<FileIndexEntry[]>;
   /** 提交一个 Turn；Turn 结束时 resolve（events.md 第 7 节） */
   submit(input: SubmitInput): Promise<TurnEndReason>;
   /** 中断运行中的 Turn；无运行中 Turn 时无操作 */
@@ -956,6 +960,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
 
     let controller: AbortController | undefined;
+    let fileIndexPromise: Promise<FileIndexEntry[]> | undefined;
     let compactController: AbortController | undefined;
     let turnSettled: Promise<void> | undefined;
     let compactSettled: Promise<void> | undefined;
@@ -1014,6 +1019,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             });
           });
         return historyWrite;
+      },
+      fileIndex() {
+        assertUsable();
+        fileIndexPromise ??= buildFileIndex(fs, paths, meta.workspaceRoot).catch(
+          (error: unknown) => {
+            fileIndexPromise = undefined;
+            throw error;
+          },
+        );
+        return fileIndexPromise;
       },
       interrupt() {
         controller?.abort();
@@ -1112,13 +1127,32 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             }
             attachments.push(await execEnv.attachments.save({ ...att, source: "paste" }));
           }
-          const reason = await runTurn(deps, content, attachments);
+          const refs = await resolveFileRefs(content, {
+            fs: platform.fs,
+            paths: platform.paths,
+            cwd: session.state().meta.cwd,
+            workspaceRoot: session.state().meta.workspaceRoot,
+            readState: execEnv.readState,
+            attachments: execEnv.attachments,
+            imageInput: model.model.capabilities.imageInput,
+            signal: ac.signal,
+          });
+          for (const message of refs.warnings) {
+            session.emitEphemeral("runtime.warning", { code: "file_reference", message });
+          }
+          const reason = await runTurn(
+            deps,
+            refs.content,
+            [...attachments, ...refs.attachments],
+            refs.fileRefs,
+          );
           if (reason === "failed") {
             throw new RuntimeCommandError("session_failed", "会话持久化失败");
           }
           return reason;
         } finally {
           if (controller === ac) controller = undefined;
+          fileIndexPromise = undefined;
           activeTurnEffort = undefined;
           turnSettled = undefined;
           settleTurn();
@@ -1559,6 +1593,7 @@ export {
   type ShellKind,
 } from "./platform/index.js";
 export { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
+export { completeFileRefs, type FileCompletion, type FileIndexEntry } from "./tools/file-index.js";
 // MCP / Hook 装配点类型（modules.md：注入方是 apps；实现位于 packages/mcp）
 export type {
   HookCallInput,
