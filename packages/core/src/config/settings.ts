@@ -1,18 +1,24 @@
 /**
- * settings.json —— 程序维护的设置层（ADR-0022 第 3 节）。
+ * settings.json —— 程序维护的设置层（ADR-0034）。
  *
  * <NOCTURNE_HOME>/settings.json 由程序原子写入、只写自己的文件；与手写
- * config.json 分层合并时同名 shell 字段手写优先。通用字符串偏好与
- * shell/shellPath 共用此文件；读入保留未知字段原样写回。
+ * config.json 分层合并时手写优先。白名单设置与通用字符串偏好
+ * 共用此文件；读入保留未知字段原样写回。
  */
 import { inferShellKindFromPath, isShellKind, type ShellSpec } from "../platform/index.js";
 import type { Platform } from "../platform/index.js";
 import { writeJsonAtomic } from "./files.js";
+import { parseConfigFile } from "./schema.js";
+import type { ConfigFile, SettingsPatch } from "./types.js";
+import type { ReasoningEffort } from "../protocol/index.js";
 
 /** settings.json 的原始 JSON 对象（未知字段保留） */
 type SettingsData = Record<string, unknown>;
 
 export interface SettingsStore {
+  fields(): ConfigFile;
+  update(patch: SettingsPatch): Promise<void>;
+  setDefaultModel(model: string, effort: ReasoningEffort | null): Promise<void>;
   /** 当前 shell 层值原文；未设置或字段无效时为 undefined */
   shellFields(): { shell?: string | undefined; shellPath?: string | undefined } | undefined;
   /** shell 层值 → ShellSpec（kind+path）；无值时 undefined */
@@ -23,7 +29,56 @@ export interface SettingsStore {
   setPreference(key: string, value: string | undefined): Promise<void>;
 }
 
-const reservedFields = new Set(["shell", "shellPath"]);
+const reservedFields = new Set(["model", "reasoningEffort", "permissions", "shell", "shellPath"]);
+
+export function validateSettingsPatch(input: unknown): asserts input is SettingsPatch {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input) ||
+    Object.keys(input).some((key) => key !== "permissions.preset" && key !== "reasoningEffort")
+  ) {
+    throw new TypeError("仅支持 permissions.preset、reasoningEffort");
+  }
+  const patch = input as SettingsPatch;
+  const preset = patch["permissions.preset"];
+  parseConfigFile(
+    {
+      ...(preset !== null && preset !== undefined ? { permissions: { preset } } : {}),
+      ...(patch.reasoningEffort !== null && patch.reasoningEffort !== undefined
+        ? { reasoningEffort: patch.reasoningEffort }
+        : {}),
+    },
+    "settings.json",
+  );
+}
+
+function configFields(data: SettingsData, warn?: (message: string) => void): ConfigFile {
+  let result: ConfigFile = {};
+  for (const key of ["model", "reasoningEffort", "shell", "shellPath", "permissions"] as const) {
+    if (!Object.hasOwn(data, key)) continue;
+    const value =
+      key === "permissions" &&
+      typeof data.permissions === "object" &&
+      data.permissions !== null &&
+      !Array.isArray(data.permissions)
+        ? { preset: (data.permissions as { preset?: unknown }).preset }
+        : data[key];
+    try {
+      result = { ...result, ...parseConfigFile({ [key]: value }, "settings.json") };
+    } catch {
+      warn?.(`settings.json 的 ${key} 无效，已忽略`);
+    }
+  }
+  if (
+    result.shell === undefined &&
+    result.shellPath !== undefined &&
+    inferShellKindFromPath(result.shellPath) === undefined
+  ) {
+    delete result.shellPath;
+  }
+  return result;
+}
 
 function readShellFields(data: SettingsData):
   | {
@@ -78,12 +133,15 @@ export async function loadSettingsStore(
       if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
         data = { ...(raw as SettingsData) };
       } else {
-        warning = `settings.json 不是 JSON 对象，shell 设置已忽略（${settingsPath}）`;
+        warning = `settings.json 不是 JSON 对象，设置已忽略（${settingsPath}）`;
       }
     } catch (e) {
-      warning = `settings.json 无法解析（${e instanceof Error ? e.message : String(e)}），shell 设置已忽略`;
+      warning = `settings.json 无法解析（${e instanceof Error ? e.message : String(e)}），设置已忽略`;
     }
   }
+  configFields(data, (message) => {
+    warning = warning ? `${warning}\n${message}` : message;
+  });
   const fields = readShellFields(data);
   if (
     fields?.shell !== undefined &&
@@ -122,6 +180,38 @@ export async function loadSettingsStore(
   return {
     warning,
     store: {
+      fields: () => configFields(data),
+      async update(patch) {
+        validateSettingsPatch(patch);
+        const preset = patch["permissions.preset"];
+        await write((next) => {
+          if (preset !== undefined) {
+            const permissions =
+              typeof next.permissions === "object" &&
+              next.permissions !== null &&
+              !Array.isArray(next.permissions)
+                ? { ...(next.permissions as Record<string, unknown>) }
+                : {};
+            if (preset === null) delete permissions.preset;
+            else permissions.preset = preset;
+            next.permissions = permissions;
+          }
+          if (patch.reasoningEffort === null) delete next.reasoningEffort;
+          else if (patch.reasoningEffort !== undefined)
+            next.reasoningEffort = patch.reasoningEffort;
+        });
+      },
+      async setDefaultModel(model, effort) {
+        parseConfigFile(
+          { model, ...(effort !== null ? { reasoningEffort: effort } : {}) },
+          settingsPath,
+        );
+        await write((next) => {
+          next.model = model;
+          if (effort === null) delete next.reasoningEffort;
+          else next.reasoningEffort = effort;
+        });
+      },
       shellFields: () => readShellFields(data),
       shellSpec: () => {
         const f = readShellFields(data);

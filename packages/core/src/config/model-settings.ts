@@ -34,6 +34,7 @@ function toSource(origin: FieldOrigin): ModelFieldSource {
     case "userModels":
       return { kind: "user" };
     case "user":
+    case "settings":
       return {
         kind: "config",
         layer: "user",

@@ -7,21 +7,22 @@
 ## 1. 配置来源与分层
 
 ```text
-内置默认 < models.dev < 向导配置 < 用户编辑 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
+内置默认 < models.dev < 向导配置 < 用户编辑 < 程序设置 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
 ```
 
 | 层 | 位置 / 来源 | 信任 | 说明 |
 |---|---|---|---|
 | 内置默认 | 代码内常量 | 可信 | 预设名 `default`、Turn 默认值等；不是一个文件 |
 | models.dev | 随版本快照或 `<NOCTURNE_HOME>/cache/models-dev.json` | 可信 | 只为已有模型补全推理、图片输入、上下文与最大输出；低于上游逐字段声明，不写入 `providers.json`（ADR-0025）；条目声明 `modelsDevProvider` 时另按服务商提供逐模型 `endpoints`（ADR-0031 §4，[providers.md](providers.md) 第 2 节） |
-| 向导配置 | `<NOCTURNE_HOME>/providers.json` | 可信 | 机器维护：只由 `nctrn setup` 与 `/provider` 原子写，内容限 `model` 与 `providers`；手写配置按 `id` 覆盖它（v0.2，[provider-setup.md](provider-setup.md)） |
+| 向导配置 | `<NOCTURNE_HOME>/providers.json` | 可信 | `nctrn setup` 与 `/provider` 原子写服务商；旧 `model` 继续读取但不再写入，默认模型改存程序设置层（[provider-setup.md](provider-setup.md)） |
 | 用户编辑（`userModels`） | 同上 providers.json 条目的 `userModels` 字段 | 可信 | **合成层**：加载时由条目内 `userModels` 包成 `{providers:[{id,models:userModels}]}`，插在向导层与用户配置之间；只作用于 `models` 逐字段合并，不产生权限规则等其他字段（ADR-0024，见第 2 节） |
+| 程序设置 | `<NOCTURNE_HOME>/settings.json` | 可信 | 白名单设置参与合并，界面偏好只保留；低于所有手写配置（[ADR-0034](../decisions/ADR-0034-settings-layer.md)，见第 2 节） |
 | 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；**程序从不改写它** |
 | 项目配置 | `<workspaceRoot>/.nocturne/config.json` | **默认不可信** | 来自被操作的仓库，见第 3 节信任模型 |
 | 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；凭据经环境变量或操作系统凭据后端进入（索引文件 `credentials.json` 不含明文）（v0.2，[provider-setup.md](provider-setup.md)） |
 | 命令行参数 | `nctrn` 参数 | 可信 | 本次启动的显式意图，优先级最高 |
 
-机器维护的运行时数据（信任列表、项目 Grant、向导配置、凭据索引、最近模型列表、models.dev 缓存）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。
+机器维护的运行时数据（信任列表、项目 Grant、向导配置、程序设置、凭据索引、最近模型列表、models.dev 缓存）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。
 
 交互输入历史由 Core 的 `RuntimeSession.readInputHistory()` / `recordInputHistory(text)` 管理，保存在 `<NOCTURNE_HOME>/history.jsonl`，**明文保存输入原文**，文件创建权限 `0600`（POSIX）；每行是 `{text, workspaceRoot, time}`。历史按会话绑定的工作区过滤，连续重复输入只记录一次，超过 1000 条保留最近 1000 条。TUI 提交前展开粘贴占位，读取后在输入框重新收起多行原文。读写故障发 `runtime.warning`，不阻断输入；CLI 与 TUI 都不直接读写此文件。
 
@@ -35,7 +36,7 @@
 - 文件不存在即跳过该层；`NOCTURNE_HOME` 改变时全部位置随之移动。
 
 ```ts
-// 各层文件共用一个 schema；程序从不改写它们
+// 配置字段共用一个 schema；程序从不改写用户或项目 config.json
 interface ConfigFile {
   /** false 时不联网更新 models.dev，仍使用随版本内置的快照 */
   modelsDev?: false;
@@ -85,7 +86,21 @@ interface ConfigFile {
 
 models.dev 数据在启动时从缓存或内置快照读取，启动不联网；添加服务商或刷新模型列表时才 GET 更新，10 秒超时，失败沿用本地数据并提示。`config.json` 的 `modelsDev: false` 关闭联网并只使用内置快照。缓存比快照新时优先使用缓存。匹配规则与字段映射见 [providers.md](providers.md) 第 2 节。
 
-**机器维护的 `settings.json`**（ADR-0022 第 3 节）：`<NOCTURNE_HOME>/settings.json` 由程序原子写入（临时文件 + rename），只写自己的文件；其中 `shell`/`shellPath` 两个专用字段由 `/shell`（或 `session.setShell`）写入，`"auto"` 表示清除回自动。它不进上面的合并链，只参与 shell 选择的合成：`NOCTURNE_SHELL` > `config.json` > `settings.json` > 自动（tools.md 第 6 节）；手写 `config.json` 的同名字段覆盖它，程序不改写 `config.json`。文件损坏或 `shell` 值无法识别时忽略并警告，不阻塞启动；单独给出 `shellPath` 时同样要先能推断种类（见上表注释）。读入时保留未知字段原样写回，普通字符串偏好由下述通用接口维护。
+**程序设置层 `settings.json`**（[ADR-0034](../decisions/ADR-0034-settings-layer.md)）：白名单为 `model`、`reasoningEffort`、`permissions.preset`、`shell`、`shellPath`，与 `config.json` 共用 schema，按第 1 节的顺序参与通用合并。损坏文件忽略并警告；无效字段逐个忽略并警告，其余合法字段继续生效，不阻塞启动。白名单外字段（包括 `permissions` 中的未知成员）原样保留，但不参与合并；`theme` 等界面偏好仍由客户端解释。写入采用临时文件 + rename，成功后才更新内存，失败保留旧值，同进程并发写入串行执行，避免设置与偏好互相覆盖。
+
+Shell 也走通用合并，`session.setShell` 仍先探测可执行文件，再写 `shell`/`shellPath`；`auto` 清除保存值。保留 ADR-0022 的声明边界：手写层之间逐字段覆盖；手写配置覆盖程序 shell 设置、环境变量覆盖配置时，替换整份 shell 声明，不继承低层路径。自动选择与非法环境变量降级见 [tools.md](tools.md) 第 6 节。
+
+公开 Runtime 设置接口：
+
+```ts
+describeSettings(): SettingItem[]
+updateSettings(patch: SettingsPatch): Promise<SettingItem[]>
+setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<SettingItem[]>
+```
+
+`SettingItem` 给出默认预设、默认模型、默认档位和 shell 的生效值、来源、保存值与覆盖标记；默认模型只读。`SettingsPatch` 只接受 `permissions.preset` 与 `reasoningEffort`，`null` 清除，档位按生效的默认模型校验，不支持时以 `invalid_command` 拒绝并列出可选值。`setDefaultModel` 在一次原子写入中保存模型和档位，`null` 清除档位；不再写 `providers.json`，其中旧 `model` 仍按向导层读取。完整类型见 ADR-0034 第 3 节。未注入 `RuntimeConfig` 时读取返回空数组，写入 Promise 拒绝。
+
+这些默认值只影响之后新建的会话，已有会话和恢复的会话继续使用自己的配置快照；`/new` 使用最新生效默认值。`/model` 页「设为默认」是显式切换，会同时修改当前会话；`/settings` 不修改当前会话的模型、档位或权限。
 
 **通用界面偏好**（[ADR-0029](../decisions/ADR-0029-tui-themes.md) 第 3 节）：`RuntimeConfig` 与公开的 `Runtime` 都提供 `getPreference(key: string): string | undefined`、`setPreference(key: string, value: string | undefined): Promise<void>`。它们读写 `settings.json` 顶层的普通字符串字段；`undefined` 删除字段。写入拒绝无效字段名、`shell`/`shellPath` 等有专用接口的保留字段和非字符串值；原子写盘成功后才更新内存，失败时旧值不变，未知字段原样保留。`Runtime` 委托注入的 `RuntimeConfig`；`createRuntime` 未传 `config` 时，读取返回 `undefined`，写入返回被拒绝的 Promise，错误为「未注入 RuntimeConfig，无法保存偏好」。Core 不解释偏好值的 UI 含义；TUI 在首次渲染前读取 `theme`，由 TUI 判断 `dark`/`light`，非法值回退 `dark`；`/theme` 保存失败时保持原主题并留在选择页提示错误。
 

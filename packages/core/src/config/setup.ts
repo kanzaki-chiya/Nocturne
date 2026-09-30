@@ -159,8 +159,6 @@ export async function saveSetupProvider(
   entry: ProviderEntryConfig,
   opts?: {
     key?: string | undefined;
-    /** 设为默认：写入 providers.json 的 model 字段（"provider/model" 全形） */
-    defaultModel?: string | undefined;
   },
 ): Promise<void> {
   const state = await loadProviderSetup(platform, nocturneHome);
@@ -177,7 +175,6 @@ export async function saveSetupProvider(
     version: SETUP_FILE_VERSION,
     ...(state.file?.model !== undefined ? { model: state.file.model } : {}),
     providers,
-    ...(opts?.defaultModel !== undefined ? { model: opts.defaultModel } : {}),
   };
   // 先写凭据（后端不可用时直接拒绝，不留半截条目）
   if (opts?.key !== undefined) {
@@ -237,20 +234,6 @@ export async function saveSetupUserModels(
     version: SETUP_FILE_VERSION,
     ...(state.file?.model !== undefined ? { model: state.file.model } : {}),
     providers: entries.map((p) => (p.id === providerId ? updated : p)),
-  });
-}
-
-/** 写入默认模型字段（保留其余内容） */
-export async function setSetupDefaultModel(
-  platform: Platform,
-  nocturneHome: string,
-  model: string,
-): Promise<void> {
-  const state = await loadProviderSetup(platform, nocturneHome);
-  await writeProviderSetup(platform, nocturneHome, {
-    version: SETUP_FILE_VERSION,
-    model,
-    ...(state.file?.providers !== undefined ? { providers: state.file.providers } : {}),
   });
 }
 

@@ -145,6 +145,7 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
         `${home}/trust.json`,
         `${home}/grants/**`,
         `${home}/providers.json`,
+        `${home}/settings.json`,
       ]) {
         rules.push({ kind: "edit", pattern, action: "ask", label: AUTH_DATA_LABEL });
       }

@@ -20,7 +20,12 @@ import {
   type InstructionFile,
   type InstructionSet,
 } from "./context/index.js";
-import type { ProviderEntryConfig, RuntimeConfig } from "./config/index.js";
+import type {
+  ProviderEntryConfig,
+  RuntimeConfig,
+  SettingItem,
+  SettingsPatch,
+} from "./config/index.js";
 import { createDiagnostics } from "./diagnostics/index.js";
 import { createHookRunner } from "./hooks/index.js";
 import { appendInputHistory, readInputHistory } from "./input-history.js";
@@ -74,6 +79,7 @@ import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from 
 import { resolveFileRefs } from "./tools/file-refs.js";
 import { buildFileIndex, type FileIndexEntry } from "./tools/file-index.js";
 import { isReasoningEffort, REASONING_EFFORT_ORDER } from "./protocol/index.js";
+import { validateSettingsPatch } from "./config/settings.js";
 import {
   createSessionStore,
   SessionError,
@@ -334,6 +340,9 @@ export interface ResumeSessionOptions {
 }
 
 export interface Runtime {
+  describeSettings(): SettingItem[];
+  updateSettings(patch: SettingsPatch): Promise<SettingItem[]>;
+  setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<SettingItem[]>;
   createSession(options: CreateSessionOptions): Promise<RuntimeSession>;
   resumeSession(id: string, options?: ResumeSessionOptions): Promise<RuntimeSession>;
   listSessions(filter?: {
@@ -341,7 +350,7 @@ export interface Runtime {
     /** 默认 false：子会话（session.created.parent 存在）不进列表 */
     includeSubagents?: boolean | undefined;
   }): Promise<SessionSummary[]>;
-  /** 全部已配置 Provider 声明的模型清单（cli.md /model 的数据来源） */
+  /** 当前工作区已配置 Provider 声明的模型清单（含已加载的可信项目层） */
   listModels(): ModelInfo[];
   /**
    * 用新的基础层配置重建运行时级 Provider 注册表（provider-setup.md
@@ -414,6 +423,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   const cwd = paths.resolve(options.cwd, ".");
   const workspaceRoot = await platform.resolveReal(options.workspaceRoot ?? cwd);
+  await config?.forWorkspace(workspaceRoot);
   const sessionsDir =
     options.sessionsDir !== undefined
       ? paths.resolve(options.sessionsDir, ".")
@@ -475,7 +485,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     return createProviderRegistry([...byId.values()], options.modelOverrides);
   }
 
-  // 运行时级清单（listModels 的数据来源）：注入 + providerConfigs + config 基础层；
+  // 运行时级注册表：注入 + providerConfigs + config 基础层；
   // updateProviders 时整体重建
   let registry: ProviderRegistry = buildRegistry(config?.base.providers ?? []);
 
@@ -579,7 +589,29 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         explicitPathExists.set(p, await platform.fs.exists(p));
       }),
     );
+    const settingsConfig = config;
     const shellResolver = createShellResolver({
+      resolved:
+        settingsConfig !== undefined
+          ? () => {
+              const current = settingsConfig.resolvedSettings(meta.workspaceRoot, envShellValue);
+              const source =
+                settingsConfig
+                  .describeSettings(meta.workspaceRoot, envShellValue)
+                  .find((item) => item.key === "shell")?.source ?? "default";
+              return {
+                spec: specFromConfigFields(current.shell, current.shellPath),
+                source:
+                  source === "env"
+                    ? "env"
+                    : source === "settings"
+                      ? "settings"
+                      : source === "default"
+                        ? "auto"
+                        : "config",
+              };
+            }
+          : undefined,
       platform: process.platform,
       envValue: envShellValue,
       config: specFromConfigFields(resolved?.shell, resolved?.shellPath),
@@ -1434,9 +1466,51 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   }
 
   return {
+    describeSettings: () =>
+      config?.describeSettings(workspaceRoot, platform.env("NOCTURNE_SHELL")) ?? [],
+    async updateSettings(patch) {
+      if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存设置");
+      validateSettingsPatch(patch);
+      await config.forWorkspace(workspaceRoot);
+      if (patch.reasoningEffort !== undefined && patch.reasoningEffort !== null) {
+        const model = config.resolvedSettings(workspaceRoot).model;
+        const resolved =
+          model !== undefined
+            ? buildRegistry(config.resolvedSettings(workspaceRoot).providers).resolve(
+                parseModelRef(model),
+              )
+            : undefined;
+        const levels = resolved?.model.capabilities.reasoningEffort ?? [];
+        if (patch.reasoningEffort !== "off" && !levels.includes(patch.reasoningEffort)) {
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `默认模型不支持档位 ${patch.reasoningEffort}（可选：${["off", ...levels].join(" | ")}）`,
+          );
+        }
+      }
+      await config.updateSettings(patch);
+      return config.describeSettings(workspaceRoot);
+    },
+    async setDefaultModel(model, effort) {
+      if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存默认模型");
+      const resolved = buildRegistry(
+        (await config.forWorkspace(workspaceRoot)).resolved.providers,
+      ).resolve(parseModelRef(model));
+      const levels = resolved.model.capabilities.reasoningEffort ?? [];
+      if (effort !== null && effort !== "off" && !levels.includes(effort)) {
+        throw new RuntimeCommandError(
+          "invalid_command",
+          `模型不支持档位 ${effort}（可选：${["off", ...levels].join(" | ")}）`,
+        );
+      }
+      await config.setDefaultModel(model, effort);
+      return config.describeSettings(workspaceRoot);
+    },
     async createSession(opts) {
+      const defaults =
+        config !== undefined ? (await config.forWorkspace(workspaceRoot)).resolved : undefined;
       const preset =
-        opts.permissionPreset ?? config?.base.permissionPreset ?? DEFAULT_PERMISSION_PRESET;
+        opts.permissionPreset ?? defaults?.permissionPreset ?? DEFAULT_PERMISSION_PRESET;
       if (!isPermissionPresetName(preset)) {
         throw new RuntimeCommandError(
           "invalid_command",
@@ -1445,7 +1519,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
       // 模型解析在 wrapSession 内进行（会话级注册表含项目层条目）；
       // 失败时关闭已创建的会话，避免遗留打开的日志
-      const initialEffort = opts.reasoningEffort ?? config?.base.reasoningEffort;
+      const initialEffort = opts.reasoningEffort ?? defaults?.reasoningEffort;
       if (initialEffort !== undefined && !isReasoningEffort(initialEffort)) {
         throw new RuntimeCommandError(
           "invalid_command",
@@ -1484,7 +1558,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     },
     listSessions: (filter) => store.list(filter),
-    listModels: () => registry.providers().flatMap((p) => p.models()),
+    listModels: () =>
+      (config !== undefined
+        ? buildRegistry(config.resolvedSettings(workspaceRoot).providers)
+        : registry
+      )
+        .providers()
+        .flatMap((p) => p.models()),
     updateProviders(newConfig) {
       // 只换注册表：不动会话日志、Hook、MCP（provider-setup.md 第 6 节）
       config = newConfig;
@@ -1492,7 +1572,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       for (const mark of markProvidersDirty) mark();
     },
     defaultModel() {
-      const model = config?.base.model;
+      const model = config?.resolvedSettings(workspaceRoot).model;
       if (model === undefined || model === "") return undefined;
       try {
         return parseModelRef(model);
@@ -1566,6 +1646,7 @@ export * from "./config/index.js";
 export type { SessionState, SessionSummary } from "./session/index.js";
 export {
   FakeProvider,
+  clampReasoningEffort,
   normalizeModelRef,
   type FakeScript,
   type FakeHandler,

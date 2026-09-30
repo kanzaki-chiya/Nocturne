@@ -120,19 +120,19 @@ describe("providers.json 向导层", () => {
 // ── saveSetupProvider / removeSetupProvider ─────────────
 
 describe("向导写入与删除", () => {
-  it("saveSetupProvider 写条目+默认模型；removeSetupProvider 删条目+凭据", async () => {
+  it("saveSetupProvider 写条目；removeSetupProvider 删条目+凭据", async () => {
     const rc = await loadConfig(platform, {
       nocturneHome: home,
       env: noEnv,
       credentials: (await createCredentialStore(platform, home, { backend: "memory" })).store,
     });
-    await rc.saveSetupProvider(ENTRY, { key: "sk-test", defaultModel: "corp/m1" });
+    await rc.saveSetupProvider(ENTRY, { key: "sk-test" });
 
     const raw = (await readJson(path.join(home, "providers.json"))) as {
       model?: string;
       providers: { id: string; apiKey?: unknown }[];
     };
-    expect(raw.model).toBe("corp/m1");
+    expect(raw.model).toBeUndefined();
     expect(raw.providers[0]?.id).toBe("corp");
     // 密钥不出现在 providers.json 的任何字段
     expect(JSON.stringify(raw)).not.toContain("sk-test");
@@ -155,17 +155,19 @@ describe("向导写入与删除", () => {
     });
   });
 
-  it("setDefaultModel 只写 model 字段", async () => {
+  it("setDefaultModel 写设置层，不改向导文件", async () => {
     await rc_helper_save();
     const rc = await load();
-    await rc.setDefaultModel("corp/m9");
+    await rc.setDefaultModel("corp/m9", null);
     const raw = (await readJson(path.join(home, "providers.json"))) as {
       model?: string;
       providers?: unknown[];
     };
-    expect(raw.model).toBe("corp/m9");
+    expect(raw.model).toBeUndefined();
+    expect(await readJson(path.join(home, "settings.json"))).toMatchObject({ model: "corp/m9" });
     expect(raw.providers).toHaveLength(1);
     await fs.unlink(path.join(home, "providers.json"));
+    await fs.unlink(path.join(home, "settings.json"));
   });
 });
 

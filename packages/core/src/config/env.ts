@@ -4,6 +4,7 @@
  * 凭据值本身不进配置对象，只记录环境变量名（apiKeyEnv）。
  */
 import type { CliConfigArgs, ConfigFile, ProviderEntryConfig } from "./types.js";
+import { parseShellSpec } from "../platform/index.js";
 
 type EnvReader = (name: string) => string | undefined;
 
@@ -50,6 +51,13 @@ export interface LayerFragment {
 export function envLayerConfig(env: EnvReader): LayerFragment {
   const warnings: string[] = [];
   const file: ConfigFile = {};
+  const shell = env("NOCTURNE_SHELL")?.trim();
+  if (shell) {
+    const parsed = parseShellSpec(shell);
+    file.shell = parsed.kind === "invalid" ? "auto" : parsed.kind;
+    if (parsed.kind === "invalid") warnings.push(parsed.reason);
+    else if (parsed.kind !== "auto" && parsed.path !== undefined) file.shellPath = parsed.path;
+  }
 
   const model = env("NOCTURNE_MODEL");
   if (model !== undefined && model !== "") file.model = model;

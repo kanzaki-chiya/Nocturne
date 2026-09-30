@@ -594,6 +594,8 @@ function autoOrder(platform: NodeJS.Platform): readonly ShellKind[] {
 }
 
 export function createShellResolver(opts: {
+  /** 通用配置合并后的 live 声明；旧独立层参数仅兼容嵌入调用。 */
+  resolved?: (() => { spec: ShellSpec | undefined; source: ShellSource }) | undefined;
   platform: NodeJS.Platform;
   envValue?: string | undefined;
   /** config.json 层值（wrapSession 时快照） */
@@ -647,7 +649,11 @@ export function createShellResolver(opts: {
     let spec: ShellSpec | undefined;
     let source: ShellSource;
     const envValue = opts.envValue?.trim();
-    if (envValue !== undefined && envValue !== "") {
+    if (opts.resolved !== undefined) {
+      const merged = opts.resolved();
+      spec = merged.spec ?? { kind: "auto" };
+      source = merged.source;
+    } else if (envValue !== undefined && envValue !== "") {
       source = "env";
       const parsed = parseShellSpec(envValue);
       if (parsed.kind === "invalid" || parsed.kind === "auto") {

@@ -3,8 +3,8 @@ export * from "./types.js";
 export * from "./errors.js";
 export { loadConfig } from "./load.js";
 export { workspaceKey } from "./grants.js";
-// settings.json 设置层（ADR-0022 第 3 节）：loadConfig 内部使用，测试可注入
-export { loadSettingsStore, type SettingsStore } from "./settings.js";
+// settings.json 设置层（ADR-0034）：loadConfig 内部使用，测试可注入
+export { loadSettingsStore, validateSettingsPatch, type SettingsStore } from "./settings.js";
 // 向导配置层与凭据存储（provider-setup.md）：CLI/TUI 的向导与 /provider 命令共用
 export { createCredentialStore, type CredentialStoreInit } from "./credentials.js";
 export {
@@ -17,7 +17,6 @@ export {
   removeSetupProvider,
   saveSetupProvider,
   saveSetupUserModels,
-  setSetupDefaultModel,
   writeProviderSetup,
   type DescribeLayers,
   type ProviderSetupState,

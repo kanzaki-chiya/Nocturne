@@ -37,7 +37,6 @@ import {
   removeSetupProvider,
   saveSetupProvider,
   saveSetupUserModels,
-  setSetupDefaultModel,
   writeProviderSetup,
 } from "./setup.js";
 import { loadSettingsStore } from "./settings.js";
@@ -50,6 +49,7 @@ import type {
   ProviderOverview,
   ProviderSetupFile,
   RuntimeConfig,
+  SettingItem,
   WorkspaceConfig,
 } from "./types.js";
 
@@ -148,10 +148,16 @@ export async function loadConfig(
   const envLayer = envLayerConfig(env);
   const cliLayer = cliLayerConfig(options.cliArgs);
 
-  // settings.json（ADR-0022/0029）：程序维护的 shell 与字符串偏好设置层；
+  // settings.json（ADR-0034）：白名单设置参与合并，界面偏好仅保留；
   // 损坏降级为忽略 + 警告。store 持内存态，setShell 写盘后 live getter 立即可见
   const settingsPath = paths.join(home, "settings.json");
   const settings = await loadSettingsStore(platform, settingsPath);
+  const workspaceLayers = new Map<string, MergeLayer[]>();
+  const settingsLayer = (): MergeLayer => ({
+    kind: "settings",
+    path: settingsPath,
+    file: settings.store.fields(),
+  });
 
   const trust = await readTrustList(platform, trustPath);
   // trust.workspaces 对外是只读视图；内部持可变副本供 setWorkspaceTrusted 更新
@@ -165,6 +171,7 @@ export async function loadConfig(
   async function mergeFor(sFile: ProviderSetupFile, workspaceRoot?: string): Promise<MergeResult> {
     const layers: MergeLayer[] = [
       ...setupLayers(sFile, providersPath),
+      settingsLayer(),
       { kind: "user", path: userConfigPath, file: userFile },
     ];
     if (workspaceRoot !== undefined) {
@@ -192,13 +199,79 @@ export async function loadConfig(
   if (settings.warning !== undefined) loadWarnings.push(settings.warning);
   if (trust.warning !== undefined) loadWarnings.push(trust.warning);
 
-  const base = mergeWithModelsDev([
+  const baseLayers = (): MergeLayer[] => [
     ...setupLayers(setupFile, providersPath),
+    settingsLayer(),
     { kind: "user", path: userConfigPath, file: userFile },
     { kind: "env", file: envLayer.file },
     { kind: "cli", file: cliLayer.file },
-  ]).resolved;
-  base.warnings.push(...loadWarnings);
+  ];
+  const base = (): MergeResult => {
+    const merged = mergeWithModelsDev(baseLayers());
+    merged.resolved.warnings.push(...loadWarnings);
+    return merged;
+  };
+
+  function mergedSettings(workspaceRoot?: string, shellEnv?: string): MergeResult {
+    const layers = workspaceRoot !== undefined ? workspaceLayers.get(workspaceRoot) : undefined;
+    const current = (layers ?? baseLayers()).map((layer) =>
+      layer.kind === "settings" ? settingsLayer() : layer,
+    );
+    if (shellEnv !== undefined)
+      current.splice(
+        current.findIndex((layer) => layer.kind === "cli"),
+        0,
+        {
+          kind: "env",
+          file: envLayerConfig((name) => (name === "NOCTURNE_SHELL" ? shellEnv : undefined)).file,
+        },
+      );
+    return mergeWithModelsDev(current);
+  }
+  function describeSettings(workspaceRoot?: string, shellEnv?: string): SettingItem[] {
+    const merged = mergedSettings(workspaceRoot, shellEnv);
+    const saved = settings.store.fields();
+    return (
+      [
+        [
+          "permissions.preset",
+          "permissions.preset",
+          merged.resolved.permissionPreset ?? "default",
+          saved.permissions?.preset,
+        ],
+        ["defaultModel", "model", merged.resolved.model, saved.model],
+        [
+          "reasoningEffort",
+          "reasoningEffort",
+          merged.resolved.reasoningEffort ?? "off",
+          saved.reasoningEffort,
+        ],
+        [
+          "shell",
+          "shell",
+          merged.resolved.shellPath ?? merged.resolved.shell ?? "auto",
+          saved.shellPath ?? saved.shell,
+        ],
+      ] as const
+    ).map(([key, field, effective, value]) => {
+      const origin =
+        key === "shell" && merged.resolved.shellPath !== undefined
+          ? merged.origins.shellPath
+          : merged.origins[field];
+      const source =
+        origin === "modelsDev" || origin === "userModels" || origin === undefined
+          ? "default"
+          : origin;
+      return {
+        key,
+        effective,
+        saved: value,
+        source,
+        overridden: value !== undefined && ["user", "project", "env", "cli"].includes(source),
+        ...(key === "defaultModel" ? { readonly: true as const } : {}),
+      };
+    });
+  }
 
   /** 可信工作区的项目层文件（describeProviders 复用；不含 Grant 加载） */
   async function projectFileIfTrusted(workspaceRoot: string) {
@@ -237,6 +310,7 @@ export async function loadConfig(
 
     const layers: MergeLayer[] = [
       ...setupLayers(setupFile, providersPath),
+      settingsLayer(),
       { kind: "user", path: userConfigPath, file: userFile },
       ...(trusted && projectFile !== undefined
         ? [{ kind: "project" as const, path: projectPath, file: projectFile }]
@@ -244,6 +318,7 @@ export async function loadConfig(
       { kind: "env", file: envLayer.file },
       { kind: "cli", file: cliLayer.file },
     ];
+    workspaceLayers.set(workspaceRoot, layers);
     const resolved = mergeWithModelsDev(layers).resolved;
     // mcpServers 标注来源目录：相对 cwd 按该层配置文件所在目录解析（config.md 第 2 节）
     resolved.mcpServers = resolved.mcpServers.map((s) => ({
@@ -305,7 +380,9 @@ export async function loadConfig(
     sessionsDir,
     attachmentsDir: paths.join(sessionsDir, "attachments"),
     grantsDir,
-    base,
+    get base() {
+      return base().resolved;
+    },
     forWorkspace,
     setWorkspaceTrusted,
 
@@ -386,7 +463,10 @@ export async function loadConfig(
       modelsDev = result.data;
       return result.warning;
     },
-    setDefaultModel: (model: string) => setSetupDefaultModel(platform, home, model),
+    describeSettings,
+    resolvedSettings: (root, shellEnv) => mergedSettings(root, shellEnv).resolved,
+    updateSettings: (patch) => settings.store.update(patch),
+    setDefaultModel: (model, effort) => settings.store.setDefaultModel(model, effort),
     shellSetting: () => settings.store.shellFields(),
     setShellSetting: (kind, path) => settings.store.setShell(kind, path),
     getPreference: (key) => settings.store.getPreference(key),

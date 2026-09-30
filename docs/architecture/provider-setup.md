@@ -59,13 +59,13 @@ TUI 另有全屏的**模型选择页**（`/model` 打开）：左右双栏（范
 用户手写的 `config.json` 仍然**程序从不改写**（[config.md](config.md) 第 1 节）。向导写入的是一个新的**机器维护文件** `<NOCTURNE_HOME>/providers.json`，它在分层中位于内置默认之上、用户配置之下：
 
 ```text
-内置默认 < 向导配置 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
+内置默认 < models.dev < 向导配置 < 用户编辑 < 程序设置 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
 ```
 
 ```ts
 interface ProviderSetupFile {
   version: 1;
-  /** 默认模型，"provider/model" 形式；由 /model 页"设为默认"写入（v0.3 起向导不写它） */
+  /** 旧默认模型，"provider/model" 形式；仅兼容读取，不再写入（ADR-0034） */
   model?: string;
   /** 形状同 config.json 的 providers 元素（ProviderConfig），apiKeyEnv 可省略（第 3 节）；
       另含 userModels?: Record<modelId, { displayName?; contextWindow?; maxOutputTokens?;
@@ -217,7 +217,7 @@ runProviderSetupWizard(io, config, deps, opts?): Promise<WizardResult>
   //   → GET /models 并尝试刷新 models.dev → 保存。
   //   WizardResult = { providerId, modelCount }；modelCount 供客户端显示
   //   "已保存 X，N 个模型"的结果行。不再询问模型与默认模型（v0.3）。
-setDefaultModel(model: string): Promise<void>            // 写入 providers.json 的 model 字段（/model 页"设为默认"）
+setDefaultModel(model: string, effort: ReasoningEffort | null): Promise<SettingItem[]> // 成对写入 settings.json；Runtime 同名公开接口
 recentModels(): ModelRef[]                               // recent-models.json 当前内容（新→旧）
 recordRecentModel(ref: ModelRef): Promise<void>          // Runtime 在 setModel/新建会话时调用
 
@@ -227,7 +227,7 @@ runtime.defaultModel(): ModelRef | undefined             // 分层合并后的�
 runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最近使用"范围的数据源
 ```
 
-`runtime.updateProviders`：用新的基础层配置重建运行时级 Provider 注册表（`listModels` 的数据来源）；每个已打开会话在下一次空闲边界重建自己的会话级注册表（基础层 + 该会话的可信项目层）。当前会话正在使用的服务商不会被移除（客户端在删除前检查，Core 在重建时对仍被引用的服务商保留原实例并发出 `runtime.warning`）。它不产生持久事件；随后的 `setModel` 照常写 `session.config_changed`。
+`runtime.updateProviders`：用新的基础层配置重建运行时级 Provider 注册表；每个已打开会话在下一次空闲边界重建自己的会话级注册表（基础层 + 该会话的可信项目层）。`listModels` 展示当前工作区已加载的合并结果，包含可信项目层，供 `/model` 和 `/settings` 按生效模型能力列出档位。当前会话正在使用的服务商不会被移除（客户端在删除前检查，Core 在重建时对仍被引用的服务商保留原实例并发出 `runtime.warning`）。它不产生持久事件；随后的 `setModel` 照常写 `session.config_changed`。
 
 为什么不"关闭会话再用新配置重新打开"：那会触发 `SessionEnd`/`SessionStart` Hook、重启全部 MCP 服务器、重新取锁——添加一个服务商不应该有这些副作用。
 

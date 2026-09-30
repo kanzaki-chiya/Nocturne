@@ -138,7 +138,7 @@ export interface TurnOverrides {
   idleTimeoutMs?: number | undefined;
 }
 
-/** 各层配置文件共用的 schema（config.md 第 2 节）；程序从不改写这些文件 */
+/** 各层配置字段共用的 schema（config.md 第 2 节）；程序从不改写 config.json */
 export interface ConfigFile {
   /** false 时只使用本地 models.dev 数据，不联网刷新 */
   modelsDev?: false | undefined;
@@ -147,8 +147,8 @@ export interface ConfigFile {
   reasoningEffort?: ReasoningEffort | undefined;
   /**
    * shell 选择（ADR-0022 第 2 节）：auto | pwsh | powershell | bash | cmd | sh。
-   * 层间按 model 同款规则后写优先；与 NOCTURNE_SHELL、settings.json 的
-   * 合成优先级由装配层完成（env > config > settings > auto）。
+   * 经通用配置链后写优先，保留 shell 声明边界（ADR-0034）；
+   * 未声明时由平台自动选择。
    */
   shell?: string | undefined;
   /** 非标准安装位置的可执行文件；种类仍由 shell 决定（ADR-0022） */
@@ -388,6 +388,20 @@ export type ModelSettingsPatch = {
   [K in keyof ModelSettingsView["fields"]]?: ModelSettingsView["fields"][K]["value"] | null;
 };
 
+export interface SettingItem {
+  key: "permissions.preset" | "reasoningEffort" | "shell" | "defaultModel";
+  effective: string | undefined;
+  source: "default" | "setup" | "settings" | "user" | "project" | "env" | "cli";
+  saved: string | undefined;
+  overridden: boolean;
+  readonly?: true;
+}
+
+export type SettingsPatch = Partial<{
+  "permissions.preset": PermissionPresetName | null;
+  reasoningEffort: ReasoningEffort | null;
+}>;
+
 /**
  * loadConfig 的产物（config.md 第 6 节）。
  * base 不含项目层；forWorkspace 按会话 workspaceRoot 加载项目层与 Grant。
@@ -409,14 +423,10 @@ export interface RuntimeConfig {
   readonly credentials: CredentialStore;
   /**
    * 向导写入/更新服务商条目（providers.json）。key 存在时经
-   * credentials.set 写入系统后端并登记索引；defaultModel（"provider/model"
-   * 全形）存在时同时写入默认模型字段。
+   * credentials.set 写入系统后端并登记索引。旧 model 只保留，不再写入。
    * entry.models 携带上游声明的能力/价格字段（第 7 节）。
    */
-  saveSetupProvider(
-    entry: ProviderEntryConfig,
-    opts?: { key?: string | undefined; defaultModel?: string | undefined },
-  ): Promise<void>;
+  saveSetupProvider(entry: ProviderEntryConfig, opts?: { key?: string | undefined }): Promise<void>;
   /** 更新密钥（经 credentials.set；缓存失效后下一次请求即用新密钥） */
   setCredential(providerId: string, key: string): Promise<void>;
   /** 添加/刷新模型列表时更新 models.dev 缓存；失败返回一行提示。 */
@@ -449,8 +459,10 @@ export interface RuntimeConfig {
   describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>;
   /** /provider refresh：重新从上游获取模型列表与限额并写回 providers.json */
   refreshUpstreamLimits(providerId: string): Promise<string | undefined>;
-  /** 把默认模型（"provider/model"）写入 providers.json 的 model 字段 */
-  setDefaultModel(model: string): Promise<void>;
+  describeSettings(workspaceRoot?: string, shellEnv?: string): SettingItem[];
+  resolvedSettings(workspaceRoot?: string, shellEnv?: string): ResolvedConfig;
+  updateSettings(patch: SettingsPatch): Promise<void>;
+  setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<void>;
 
   /**
    * settings.json 当前的 shell 层值原文（ADR-0022 第 3 节；live 快照——

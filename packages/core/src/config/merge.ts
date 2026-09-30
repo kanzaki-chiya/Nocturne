@@ -18,7 +18,8 @@ import type {
 } from "./types.js";
 
 /** 层的身份（模型字段来源标注用；ADR-0024/0025） */
-export type LayerKind = "modelsDev" | "setup" | "userModels" | "user" | "project" | "env" | "cli";
+export type LayerKind =
+  "modelsDev" | "setup" | "userModels" | "settings" | "user" | "project" | "env" | "cli";
 
 export interface MergeLayer {
   /**
@@ -61,6 +62,9 @@ export interface ModelFieldOrigins {
 export interface MergeResult {
   resolved: ResolvedConfig;
   modelInfo: ModelFieldOrigins;
+  origins: Partial<
+    Record<"model" | "reasoningEffort" | "shell" | "shellPath" | "permissions.preset", LayerKind>
+  >;
 }
 
 const CONFIG_KINDS: ReadonlySet<LayerKind> = new Set(["user", "project", "env", "cli"]);
@@ -203,6 +207,8 @@ function layerLabel(origin: FieldOrigin): string {
       return "providers.json 的用户编辑";
     case "setup":
       return origin.path ?? "providers.json";
+    case "settings":
+      return origin.path ?? "settings.json";
     case "modelsDev":
       return "models.dev";
     case "user":
@@ -224,6 +230,7 @@ function ruleOrigin(kind: LayerKind): Extract<RuleOrigin, "user" | "project" | "
 }
 
 export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
+  const origins: MergeResult["origins"] = {};
   const out: ResolvedConfig = {
     rules: [],
     untrustedRules: [],
@@ -243,10 +250,24 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
 
   for (const layer of layers) {
     const { kind, file } = layer;
+    // 旧 shell 选择把程序设置、手写配置、环境各作为一份声明；
+    // 手写层之间仍逐字段覆盖，跨这些边界时不沿用低层的可执行路径。
+    if (
+      (file.shell !== undefined || file.shellPath !== undefined) &&
+      (kind === "env" || origins.shell === "settings" || origins.shellPath === "settings")
+    ) {
+      delete out.shell;
+      delete out.shellPath;
+      delete origins.shell;
+      delete origins.shellPath;
+    }
+    for (const key of ["model", "reasoningEffort", "shell", "shellPath"] as const) {
+      if (file[key] !== undefined) origins[key] = kind;
+    }
+    if (file.permissions?.preset !== undefined) origins["permissions.preset"] = kind;
     if (file.model !== undefined) out.model = file.model;
     if (file.reasoningEffort !== undefined) out.reasoningEffort = file.reasoningEffort;
-    // ADR-0022：config.json 的 shell/shellPath 与 model 同款后写优先；
-    // 与 NOCTURNE_SHELL / settings.json 的合成优先级在装配层完成
+    // ADR-0034：所有 shell 声明均在配置合并链里处理。
     if (file.shell !== undefined) out.shell = file.shell;
     if (file.shellPath !== undefined) out.shellPath = file.shellPath;
     if (file.permissions?.preset !== undefined) out.permissionPreset = file.permissions.preset;
@@ -356,5 +377,5 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     origin: v.origin,
     entry: v.entry,
   }));
-  return { resolved: out, modelInfo: info };
+  return { resolved: out, modelInfo: info, origins };
 }
