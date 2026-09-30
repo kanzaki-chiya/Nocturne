@@ -1472,22 +1472,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存设置");
       validateSettingsPatch(patch);
       await config.forWorkspace(workspaceRoot);
-      if (patch.reasoningEffort !== undefined && patch.reasoningEffort !== null) {
-        const model = config.resolvedSettings(workspaceRoot).model;
-        const resolved =
-          model !== undefined
-            ? buildRegistry(config.resolvedSettings(workspaceRoot).providers).resolve(
-                parseModelRef(model),
-              )
-            : undefined;
-        const levels = resolved?.model.capabilities.reasoningEffort ?? [];
-        if (patch.reasoningEffort !== "off" && !levels.includes(patch.reasoningEffort)) {
-          throw new RuntimeCommandError(
-            "invalid_command",
-            `默认模型不支持档位 ${patch.reasoningEffort}（可选：${["off", ...levels].join(" | ")}）`,
-          );
-        }
-      }
       await config.updateSettings(patch);
       return config.describeSettings(workspaceRoot);
     },

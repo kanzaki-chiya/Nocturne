@@ -39,6 +39,7 @@ function page(
       saved: "low",
       source: "settings",
       overridden: false,
+      readonly: true,
     },
     { key: "shell", effective: "cmd", saved: "cmd", source: "settings", overridden: false },
   ];
@@ -110,7 +111,9 @@ describe("ADR-0034 设置页", () => {
     const screen = page();
     await screen.ready();
     expect(screen.lastFrame()).toContain("已保存，但被 config.json 覆盖");
+    expect(screen.lastFrame()).toContain("默认模型与档位 · fake/m · 档位 low");
     expect(screen.lastFrame()).toContain("在 /model 页设置");
+    expect(screen.lastFrame()).not.toContain("默认思考档位");
     expect(screen.lastFrame()).toContain("默认值对新会话生效");
     await screen.input("\x1b[C");
     expect(screen.update).not.toHaveBeenCalled();
@@ -124,7 +127,6 @@ describe("ADR-0034 设置页", () => {
   it("主题即时预览，Esc 确认放弃后恢复，取消不写入", async () => {
     const screen = page();
     await screen.ready();
-    await screen.input("\t");
     await screen.input("\t");
     await screen.input("\x1b[C");
     expect(screen.preview).toHaveBeenLastCalledWith("light");
@@ -155,7 +157,6 @@ describe("ADR-0034 设置页", () => {
   it("Enter 进入 /theme 和 shell 选择器，返回后仅保存草稿", async () => {
     const screen = page();
     await screen.ready();
-    await screen.input("\t");
     await screen.input("\t");
     await screen.input("\r");
     await waitFor(() => (screen.lastFrame() ?? "").includes("选择主题"));

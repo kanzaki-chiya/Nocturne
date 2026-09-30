@@ -397,9 +397,9 @@ export interface SettingItem {
   readonly?: true;
 }
 
+/** 默认档位随默认模型经 setDefaultModel 成对保存，不在此单独修改（ADR-0034 修订） */
 export type SettingsPatch = Partial<{
   "permissions.preset": PermissionPresetName | null;
-  reasoningEffort: ReasoningEffort | null;
 }>;
 
 /**

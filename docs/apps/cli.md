@@ -102,9 +102,8 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `/compact` | 手动触发 L2 摘要压缩 | `session.compact()` → `context.compacted(kind="summary")` |
 | `/resume` | 列出会话（编号、id、创建时间、绑定目录、模型、锁状态），输入编号切换，空行取消 | `runtime.listSessions()` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
-| `/settings` | 按会话默认、界面、执行分组列出生效值、来源和覆盖提示；默认模型去 `/model`，Shell 去 `/shell`，`/theme` 仅 TUI | `runtime.describeSettings()` |
+| `/settings` | 按会话默认、界面、执行分组列出生效值、来源和覆盖提示；默认模型与档位只读，修改去 `/model`，Shell 去 `/shell`，`/theme` 仅 TUI | `runtime.describeSettings()` |
 | `/settings preset <名称\|reset>` | 保存默认预设，`reset` 清除；可选 `read-only`、`default`、`auto-edit`、`full-access` | `runtime.updateSettings()` |
-| `/settings effort <档位\|reset>` | 保存默认档位，按生效默认模型校验；`reset` 清除；非法值以 `invalid_command` 拒绝并列出可选值 | `runtime.updateSettings()` |
 | `/new`、`/clear` | 新建空会话并切换，使用最新生效的默认模型、思考档位与权限预设；未注入配置时沿用当前会话值；旧会话仍可恢复，`/clear` 不是清屏 | CLI 注入的 `newSession` 回调 |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
 | `/provider` | 列出服务商与来源，不显示密钥；TUI 中打开服务商页。`add` 与 `nctrn setup --cli` 共用向导；`key <name>` / `refresh <name>` / `remove <name>` 为快捷操作。`model <名> <模型>` 逐字段显示 `当前值（来源）`，来源可为 models.dev；回车保留、`-` 清除用户编辑。图片输入和推理接受 `y`/`n`/`-`，推理为否时不询问档位；来源为手写配置的字段只读。成功后写入 `userModels`，详见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveModelSettings()` 等 + `runtime.updateProviders` |

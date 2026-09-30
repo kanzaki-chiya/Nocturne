@@ -34,7 +34,7 @@ afterEach(async () => {
 const load = () => loadConfig(platform, { nocturneHome: home, env: noEnv });
 
 describe("ADR-0034 设置层", () => {
-  it("可信项目默认模型的档位同时用于设置校验与界面模型清单", async () => {
+  it("可信项目默认模型的档位同时用于 setDefaultModel 校验与界面模型清单", async () => {
     await mkdir(path.join(workspace, ".nocturne"));
     await writeFile(
       path.join(workspace, ".nocturne", "config.json"),
@@ -58,7 +58,10 @@ describe("ADR-0034 设置层", () => {
       runtime.listModels().find((model) => model.ref.model === "project")?.capabilities
         .reasoningEffort,
     ).toEqual(["low", "high"]);
-    await runtime.updateSettings({ reasoningEffort: "high" });
+    await runtime.setDefaultModel("corp/project", "high");
+    await expect(runtime.setDefaultModel("corp/project", "medium")).rejects.toMatchObject({
+      code: "invalid_command",
+    });
     expect(runtime.describeSettings().find((item) => item.key === "defaultModel")).toMatchObject({
       effective: "corp/project",
       source: "project",
@@ -107,7 +110,7 @@ describe("ADR-0034 设置层", () => {
       shell: "cmd",
     });
   });
-  it("档位按高层生效默认模型校验，不按保存模型校验", async () => {
+  it("默认档位只读：updateSettings 拒绝单独修改档位（ADR-0034 修订）", async () => {
     await json("settings.json", { model: "fake/saved" });
     await json("config.json", { model: "fake/user" });
     const config = await load();
@@ -135,13 +138,13 @@ describe("ADR-0034 设置层", () => {
         }),
       ],
     });
-    await expect(runtime.updateSettings({ reasoningEffort: "high" })).rejects.toMatchObject({
-      code: "invalid_command",
-      message: expect.stringContaining("off | low"),
-    });
-    await runtime.updateSettings({ reasoningEffort: "low" });
-    expect(runtime.describeSettings().find((item) => item.key === "reasoningEffort")?.saved).toBe(
-      "low",
+    const before = await readSettings();
+    await expect(
+      runtime.updateSettings({ reasoningEffort: "low" } as unknown as SettingsPatch),
+    ).rejects.toThrow("setDefaultModel");
+    expect(await readSettings()).toEqual(before);
+    expect(runtime.describeSettings().find((item) => item.key === "reasoningEffort")).toMatchObject(
+      { readonly: true },
     );
   });
 
@@ -177,7 +180,8 @@ describe("ADR-0034 设置层", () => {
     });
     const before = await readFile(path.join(home, "config.json"), "utf8");
     const user = await load();
-    await user.updateSettings({ "permissions.preset": "full-access", reasoningEffort: "medium" });
+    await user.updateSettings({ "permissions.preset": "full-access" });
+    await user.setDefaultModel("fake/new", "medium");
     expect(user.describeSettings().find((item) => item.key === "reasoningEffort")).toMatchObject({
       effective: "high",
       saved: "medium",
@@ -251,18 +255,17 @@ describe("ADR-0034 设置层", () => {
   });
   it("schema 与只读字段拒绝，null 清除后来源回到默认", async () => {
     const config = await load();
-    await config.updateSettings({ "permissions.preset": "auto-edit", reasoningEffort: "off" });
+    await config.updateSettings({ "permissions.preset": "auto-edit" });
     const before = await readSettings();
     await expect(
       config.updateSettings({ reasoningEffort: "bogus" } as unknown as SettingsPatch),
     ).rejects.toThrow();
     await expect(config.updateSettings({ model: "fake/new" } as SettingsPatch)).rejects.toThrow();
     expect(await readSettings()).toEqual(before);
-    await config.updateSettings({ "permissions.preset": null, reasoningEffort: null });
+    await config.updateSettings({ "permissions.preset": null });
     expect(
       config.describeSettings().find((item) => item.key === "permissions.preset"),
     ).toMatchObject({ effective: "default", source: "default", saved: undefined });
-    expect((await readSettings()).reasoningEffort).toBeUndefined();
   });
   it("原子 rename 失败时磁盘和内存都保留旧值，后续写入可重试", async () => {
     const { store } = await loadSettingsStore(platform, path.join(home, "settings.json"));
@@ -311,9 +314,9 @@ describe("ADR-0034 设置层", () => {
       providers: [provider],
     });
     const old = await runtime.createSession({ model: "fake/m" });
-    await runtime.setDefaultModel("fake/m", "high");
-    await runtime.updateSettings({ "permissions.preset": "read-only", reasoningEffort: "low" });
-    await expect(runtime.updateSettings({ reasoningEffort: "medium" })).rejects.toMatchObject({
+    await runtime.setDefaultModel("fake/m", "low");
+    await runtime.updateSettings({ "permissions.preset": "read-only" });
+    await expect(runtime.setDefaultModel("fake/m", "medium")).rejects.toMatchObject({
       code: "invalid_command",
       message: expect.stringContaining("off | low | high"),
     });
@@ -336,7 +339,7 @@ describe("ADR-0034 设置层", () => {
       sessionsDir: path.join(root, "sessions"),
     });
     expect(runtime.describeSettings()).toEqual([]);
-    await expect(runtime.updateSettings({ reasoningEffort: null })).rejects.toThrow("未注入");
+    await expect(runtime.updateSettings({ "permissions.preset": null })).rejects.toThrow("未注入");
     await expect(runtime.setDefaultModel("fake/m", null)).rejects.toThrow("未注入");
   });
   it.each(PERMISSION_PRESET_NAMES)("%s 对 settings edit 至少 ask（read-only deny）", (preset) => {

@@ -98,7 +98,7 @@ updateSettings(patch: SettingsPatch): Promise<SettingItem[]>
 setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<SettingItem[]>
 ```
 
-`SettingItem` 给出默认预设、默认模型、默认档位和 shell 的生效值、来源、保存值与覆盖标记；默认模型只读。`SettingsPatch` 只接受 `permissions.preset` 与 `reasoningEffort`，`null` 清除，档位按生效的默认模型校验，不支持时以 `invalid_command` 拒绝并列出可选值。`setDefaultModel` 在一次原子写入中保存模型和档位，`null` 清除档位；不再写 `providers.json`，其中旧 `model` 仍按向导层读取。完整类型见 ADR-0034 第 3 节。未注入 `RuntimeConfig` 时读取返回空数组，写入 Promise 拒绝。
+`SettingItem` 给出默认预设、默认模型、默认档位和 shell 的生效值、来源、保存值与覆盖标记；默认模型与默认档位只读。`SettingsPatch` 只接受 `permissions.preset`，`null` 清除；默认档位不能单独修改，只随默认模型经 `setDefaultModel` 成对保存（ADR-0034 修订），`setDefaultModel` 按该模型的可用档位校验，不支持时以 `invalid_command` 拒绝并列出可选值。`setDefaultModel` 在一次原子写入中保存模型和档位，`null` 清除档位；不再写 `providers.json`，其中旧 `model` 仍按向导层读取。完整类型见 ADR-0034 第 3 节。未注入 `RuntimeConfig` 时读取返回空数组，写入 Promise 拒绝。
 
 这些默认值只影响之后新建的会话，已有会话和恢复的会话继续使用自己的配置快照；`/new` 使用最新生效默认值。`/model` 页「设为默认」是显式切换，会同时修改当前会话；`/settings` 不修改当前会话的模型、档位或权限。
 

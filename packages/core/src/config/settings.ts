@@ -36,18 +36,15 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
     typeof input !== "object" ||
     input === null ||
     Array.isArray(input) ||
-    Object.keys(input).some((key) => key !== "permissions.preset" && key !== "reasoningEffort")
+    Object.keys(input).some((key) => key !== "permissions.preset")
   ) {
-    throw new TypeError("仅支持 permissions.preset、reasoningEffort");
+    throw new TypeError("仅支持 permissions.preset；默认档位随默认模型经 setDefaultModel 保存");
   }
   const patch = input as SettingsPatch;
   const preset = patch["permissions.preset"];
   parseConfigFile(
     {
       ...(preset !== null && preset !== undefined ? { permissions: { preset } } : {}),
-      ...(patch.reasoningEffort !== null && patch.reasoningEffort !== undefined
-        ? { reasoningEffort: patch.reasoningEffort }
-        : {}),
     },
     "settings.json",
   );
@@ -196,9 +193,6 @@ export async function loadSettingsStore(
             else permissions.preset = preset;
             next.permissions = permissions;
           }
-          if (patch.reasoningEffort === null) delete next.reasoningEffort;
-          else if (patch.reasoningEffort !== undefined)
-            next.reasoningEffort = patch.reasoningEffort;
         });
       },
       async setDefaultModel(model, effort) {

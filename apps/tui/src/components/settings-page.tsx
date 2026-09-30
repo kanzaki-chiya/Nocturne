@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import stringWidth from "string-width";
 import type {
   PermissionPresetName,
-  ReasoningEffort,
   Runtime,
   RuntimeSession,
   SettingItem,
@@ -29,7 +28,7 @@ const SOURCES: Record<SettingItem["source"], string> = {
   cli: "命令行",
 };
 const PRESETS = ["read-only", "default", "auto-edit", "full-access"] as const;
-const ORDER = ["preset", "effort", "theme", "shell", "cancel", "save"];
+const ORDER = ["preset", "theme", "shell", "cancel", "save"];
 
 export function SettingsPage({
   runtime,
@@ -56,9 +55,6 @@ export function SettingsPage({
   }));
   const item = (key: SettingItem["key"]) => initial.items.find((entry) => entry.key === key);
   const [preset, setPreset] = useState(item("permissions.preset")?.saved ?? "");
-  const initialEffort =
-    item("reasoningEffort")?.saved ?? item("reasoningEffort")?.effective ?? "off";
-  const [effort, setEffort] = useState(initialEffort);
   const [theme, setTheme] = useState(initial.theme);
   const [shell, setShell] = useState(initial.shell);
   const [focus, setFocus] = useState("preset");
@@ -69,23 +65,20 @@ export function SettingsPage({
   const [saving, setSaving] = useState(false);
   const busy = useRef(false);
   const boxes = useRef(new Map<string, DOMElement>());
+  // 默认模型与档位成对只读显示，修改去 /model 页「设为默认」（ADR-0034 修订）
   const model = item("defaultModel")?.effective;
-  const levels =
-    runtime.listModels().find((entry) => `${entry.ref.provider}/${entry.ref.model}` === model)
-      ?.capabilities.reasoningEffort ?? [];
+  const effort = item("reasoningEffort")?.effective ?? "off";
   const choices: Record<string, readonly string[]> = {
     preset: ["", ...PRESETS],
-    effort: ["off", ...levels],
     theme: ["dark", "light"],
   };
-  const values: Record<string, string> = { preset, effort, theme };
+  const values: Record<string, string> = { preset, theme };
   const labels = (id: string) =>
     (choices[id] ?? []).map((value) =>
       id === "theme" ? (value === "dark" ? "深色" : "浅色") : value || "跟随默认",
     );
   const dirty =
     preset !== (item("permissions.preset")?.saved ?? "") ||
-    effort !== initialEffort ||
     theme !== initial.theme ||
     shell !== initial.shell;
   const cancel = () => {
@@ -102,7 +95,6 @@ export function SettingsPage({
   };
   const change = (key: string, value: string) => {
     if (key === "preset") setPreset(value);
-    if (key === "effort") setEffort(value);
     if (key === "theme") preview(value as ThemeId);
   };
   const save = async () => {
@@ -114,7 +106,6 @@ export function SettingsPage({
       const patch: SettingsPatch = {};
       if (preset !== (item("permissions.preset")?.saved ?? ""))
         patch["permissions.preset"] = (preset || null) as PermissionPresetName | null;
-      if (effort !== initialEffort) patch.reasoningEffort = effort as ReasoningEffort;
       if (Object.keys(patch).length > 0) await runtime.updateSettings(patch);
       if (shell !== initial.shell) await session.setShell(shell);
       if (theme !== initial.theme) await runtime.setPreference("theme", theme);
@@ -323,17 +314,17 @@ export function SettingsPage({
           marginTop={
             -Math.max(
               0,
-              (({ preset: 2, effort: 5, theme: 8, shell: 10 } as Record<string, number>)[focus] ??
-                10) - Math.max(1, height - 8),
+              (({ preset: 2, theme: 6, shell: 8 } as Record<string, number>)[focus] ?? 8) -
+                Math.max(1, height - 8),
             )
           }
         >
           <Text bold>会话默认</Text>
           {field("preset", "默认权限预设", "permissions.preset")}
           <Text wrap="truncate">
-            默认模型 · {model ?? "未设置"} · {source("defaultModel")} · 在 /model 页设置
+            默认模型与档位 · {model ?? "未设置"} · 档位 {effort} · {source("defaultModel")} · 在
+            /model 页设置
           </Text>
-          {field("effort", "默认思考档位", "reasoningEffort")}
           <Text bold>界面</Text>
           {field("theme", "主题（Enter 预览）")}
           <Text bold>执行</Text>

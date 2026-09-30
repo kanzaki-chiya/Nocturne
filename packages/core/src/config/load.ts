@@ -268,7 +268,7 @@ export async function loadConfig(
         saved: value,
         source,
         overridden: value !== undefined && ["user", "project", "env", "cli"].includes(source),
-        ...(key === "defaultModel" ? { readonly: true as const } : {}),
+        ...(key === "defaultModel" || key === "reasoningEffort" ? { readonly: true as const } : {}),
       };
     });
   }

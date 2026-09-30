@@ -97,7 +97,8 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     const { lines, io } = capture();
     await runSlashCommand("/settings", fakeSession(), runtime, io);
     expect(lines.join("\n")).toContain("已保存，但被 config.json 覆盖");
-    expect(lines.join("\n")).toContain("p/m1 · 设置");
+    expect(lines.join("\n")).toContain("默认模型（/model）：p/m1 · 设置");
+    expect(lines.join("\n")).toContain("  档位：off · 默认");
     expect(lines.join("\n")).toContain("界面：/theme 仅 TUI\n执行");
   });
   it.each([
@@ -106,9 +107,6 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     ["preset auto-edit", { "permissions.preset": "auto-edit" }],
     ["preset full-access", { "permissions.preset": "full-access" }],
     ["preset reset", { "permissions.preset": null }],
-    ["effort off", { reasoningEffort: "off" }],
-    ["effort high", { reasoningEffort: "high" }],
-    ["effort reset", { reasoningEffort: null }],
   ])("/settings %s 写入默认值", async (args, patch) => {
     const updateSettings = vi.fn(async () => []);
     const { lines, io } = capture();
@@ -124,6 +122,8 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
   it.each([
     "preset bad",
     "effort bad",
+    "effort high",
+    "effort reset",
     "preset",
     "model p/m1",
     "shell cmd",
