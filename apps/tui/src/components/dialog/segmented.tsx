@@ -27,12 +27,14 @@ export function Segmented({
   focused,
   width,
   maxLines,
+  inline = false,
 }: {
   options: readonly string[];
   selected: number;
   focused: boolean;
   width: number;
   maxLines?: number;
+  inline?: boolean;
 }): React.JSX.Element {
   const theme = useTheme();
   return (
@@ -44,7 +46,7 @@ export function Segmented({
           color={focused ? theme.selected : theme.text}
           {...(focused ? { backgroundColor: theme.selectionBg } : {})}
         >
-          {focused && i === 0 ? "> " : "  "}
+          {inline ? "" : focused && i === 0 ? "> " : "  "}
           {line}
         </Text>
       ))}

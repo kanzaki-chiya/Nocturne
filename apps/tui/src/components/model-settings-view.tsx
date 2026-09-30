@@ -6,7 +6,7 @@
  * 思考档位 Enter 打开多选（「跟随」「不支持思考强度」与其余互斥）。
  * 组件只管交互与草稿，数据与校验走 Core（listModelSettings/saveModelSettings）。
  */
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, type DOMElement, type Key } from "ink";
 import { useEffect, useRef, useState } from "react";
 import stringWidth from "string-width";
 
@@ -26,7 +26,10 @@ import { Buttons } from "./dialog/buttons.js";
 import { ConfirmDiscard } from "./dialog/confirm-discard.js";
 import { DialogFrame } from "./dialog/dialog-frame.js";
 import { focusOrder, moveFocus } from "./dialog/focus.js";
-import { Segmented } from "./dialog/segmented.js";
+import { Segmented, segmentedLines } from "./dialog/segmented.js";
+import { screenRect, type DialogMouseFrame } from "./dialog/mouse.js";
+import type { HitBox } from "../click.js";
+import type { MouseEvent } from "../mouse.js";
 import { SourceLine } from "./dialog/source-line.js";
 import { inputWindow, TextInput } from "./dialog/text-input.js";
 
@@ -375,6 +378,7 @@ export function ModelEditPane({
   height,
   onSave,
   onBack,
+  onMouseFrame,
 }: {
   view: ModelSettingsView;
   readonly?: boolean | undefined;
@@ -386,6 +390,7 @@ export function ModelEditPane({
   height: number;
   onSave: (patch: ModelSettingsPatch) => void;
   onBack: () => void;
+  onMouseFrame?: ((frame: DialogMouseFrame | undefined) => void) | undefined;
 }): React.JSX.Element {
   const theme = useTheme();
   const [draft, setDraft] = useState<Draft>(() => initDraft(view));
@@ -397,6 +402,16 @@ export function ModelEditPane({
   const [discard, setDiscard] = useState<boolean | undefined>();
   const [multi, setMulti] = useState<{ cursor: number; selected: number[] }>();
   const savingGuard = useRef(false);
+  const nodes = useRef(new Map<string, DOMElement>());
+  const manualScroll = useRef(false);
+  const scrollRef = useRef(0);
+  const register =
+    (id: string) =>
+    (node: DOMElement | null): void => {
+      if (node) nodes.current.set(id, node);
+      else nodes.current.delete(id);
+    };
+  useEffect(() => () => onMouseFrame?.(undefined), [onMouseFrame]);
   useEffect(() => {
     if (!saving) savingGuard.current = false;
   }, [saving]);
@@ -463,156 +478,155 @@ export function ModelEditPane({
     };
     setDraft(draftRef.current);
   };
-  useInput(
-    (ch, key) => {
-      if (!active) return;
-      if (tiny) {
-        if (key.escape) onBack();
-        return;
-      }
-      if (saving || savingGuard.current) return;
-      if (discardRef.current !== undefined) {
-        if (key.escape) {
-          discardRef.current = undefined;
-          setDiscard(undefined);
-        } else if (key.tab || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) {
-          discardRef.current = !discardRef.current;
-          setDiscard(discardRef.current);
-        } else if (key.return || ch === " ") {
-          const drop = discardRef.current;
-          discardRef.current = undefined;
-          setDiscard(undefined);
-          if (drop) onBack();
-        }
-        return;
-      }
-      if (multiRef.current) {
-        const m = multiRef.current;
-        if (key.escape) {
-          multiRef.current = undefined;
-          setMulti(undefined);
-          return;
-        }
-        if (key.tab || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) {
-          const delta = key.shift || key.upArrow || key.leftArrow ? -1 : 1;
-          multiRef.current = { ...m, cursor: (m.cursor + 8 + delta) % 8 };
-          setMulti(multiRef.current);
-          return;
-        }
-        if (ch === " ") {
-          const selected =
-            m.cursor <= 1
-              ? [m.cursor]
-              : m.selected.includes(m.cursor)
-                ? m.selected.filter((i) => i !== m.cursor)
-                : [...m.selected.filter((i) => i > 1), m.cursor].sort((a, b) => a - b);
-          multiRef.current = { ...m, selected };
-          setMulti(multiRef.current);
-          return;
-        }
-        if (key.return) {
-          const sel = m.selected;
-          draftRef.current = {
-            ...draftRef.current,
-            reasoningEffort: sel.includes(0)
-              ? "follow"
-              : sel.includes(1) || sel.length === 0
-                ? []
-                : sel
-                    .map((i) => REASONING_EFFORT_LEVELS[i - 2])
-                    .filter((x): x is ReasoningEffortLevel => x !== undefined),
-          };
-          setDraft(draftRef.current);
-          multiRef.current = undefined;
-          setMulti(undefined);
-        }
-        return;
-      }
+  const handleInput = (ch: string, key: Partial<Key>): void => {
+    if (!active) return;
+    manualScroll.current = false;
+    if (tiny) {
+      if (key.escape) onBack();
+      return;
+    }
+    if (saving || savingGuard.current) return;
+    if (discardRef.current !== undefined) {
       if (key.escape) {
-        cancel();
+        discardRef.current = undefined;
+        setDiscard(undefined);
+      } else if (key.tab || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) {
+        discardRef.current = !discardRef.current;
+        setDiscard(discardRef.current);
+      } else if (key.return || ch === " ") {
+        const drop = discardRef.current;
+        discardRef.current = undefined;
+        setDiscard(undefined);
+        if (drop) onBack();
+      }
+      return;
+    }
+    if (multiRef.current) {
+      const m = multiRef.current;
+      if (key.escape) {
+        multiRef.current = undefined;
+        setMulti(undefined);
         return;
       }
-      if (key.tab) {
-        move(key.shift ? "shiftTab" : "tab");
+      if (key.tab || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) {
+        const delta = key.shift || key.upArrow || key.leftArrow ? -1 : 1;
+        multiRef.current = { ...m, cursor: (m.cursor + 8 + delta) % 8 };
+        setMulti(multiRef.current);
         return;
       }
-      if (key.upArrow || key.downArrow) {
-        move(key.upArrow ? "up" : "down");
+      if (ch === " ") {
+        const selected =
+          m.cursor <= 1
+            ? [m.cursor]
+            : m.selected.includes(m.cursor)
+              ? m.selected.filter((i) => i !== m.cursor)
+              : [...m.selected.filter((i) => i > 1), m.cursor].sort((a, b) => a - b);
+        multiRef.current = { ...m, selected };
+        setMulti(multiRef.current);
         return;
       }
-      const cur = order.includes(focusRef.current) ? focusRef.current : (order[0] ?? "return");
-      if (cur === "save" || cur === "cancel" || cur === "return") {
-        if (key.leftArrow || key.rightArrow) move(key.leftArrow ? "left" : "right");
-        else if (key.return || ch === " ") {
-          if (cur === "save") {
-            savingGuard.current = true;
-            onSave(draftToPatch(view, draftRef.current));
-          } else cancel();
-        }
+      if (key.return) {
+        const sel = m.selected;
+        draftRef.current = {
+          ...draftRef.current,
+          reasoningEffort: sel.includes(0)
+            ? "follow"
+            : sel.includes(1) || sel.length === 0
+              ? []
+              : sel
+                  .map((i) => REASONING_EFFORT_LEVELS[i - 2])
+                  .filter((x): x is ReasoningEffortLevel => x !== undefined),
+        };
+        setDraft(draftRef.current);
+        multiRef.current = undefined;
+        setMulti(undefined);
+      }
+      return;
+    }
+    if (key.escape) {
+      cancel();
+      return;
+    }
+    if (key.tab) {
+      move(key.shift ? "shiftTab" : "tab");
+      return;
+    }
+    if (key.upArrow || key.downArrow) {
+      move(key.upArrow ? "up" : "down");
+      return;
+    }
+    const cur = order.includes(focusRef.current) ? focusRef.current : (order[0] ?? "return");
+    if (cur === "save" || cur === "cancel" || cur === "return") {
+      if (key.leftArrow || key.rightArrow) move(key.leftArrow ? "left" : "right");
+      else if (key.return || ch === " ") {
+        if (cur === "save") {
+          savingGuard.current = true;
+          onSave(draftToPatch(view, draftRef.current));
+        } else cancel();
+      }
+      return;
+    }
+    if (cur === "reasoningEffort") {
+      if (key.return || ch === " ") {
+        const value = draftRef.current.reasoningEffort;
+        multiRef.current = {
+          cursor: 0,
+          selected:
+            value === "follow"
+              ? [0]
+              : value.length === 0
+                ? [1]
+                : value.map((x) => REASONING_EFFORT_LEVELS.indexOf(x) + 2),
+        };
+        setMulti(multiRef.current);
+      }
+      return;
+    }
+    if (CYCLE_FIELDS.has(cur as FieldKey)) {
+      if (key.leftArrow || key.rightArrow)
+        cycle(cur as "imageInput" | "reasoning" | "protocol", key.leftArrow ? -1 : 1);
+      return;
+    }
+    if (TEXT_FIELDS.has(cur as FieldKey)) {
+      const field = cur as "displayName" | "contextWindow" | "maxOutputTokens";
+      const chars = Array.from(draftRef.current[field]);
+      if (key.return) {
+        move("tab");
         return;
       }
-      if (cur === "reasoningEffort") {
-        if (key.return || ch === " ") {
-          const value = draftRef.current.reasoningEffort;
-          multiRef.current = {
-            cursor: 0,
-            selected:
-              value === "follow"
-                ? [0]
-                : value.length === 0
-                  ? [1]
-                  : value.map((x) => REASONING_EFFORT_LEVELS.indexOf(x) + 2),
-          };
-          setMulti(multiRef.current);
-        }
+      if (key.leftArrow || key.rightArrow) {
+        posRef.current = Math.max(
+          0,
+          Math.min(chars.length, posRef.current + (key.leftArrow ? -1 : 1)),
+        );
+        setPosition(posRef.current);
         return;
       }
-      if (CYCLE_FIELDS.has(cur as FieldKey)) {
-        if (key.leftArrow || key.rightArrow)
-          cycle(cur as "imageInput" | "reasoning" | "protocol", key.leftArrow ? -1 : 1);
+      if (key.home || key.end) {
+        posRef.current = key.home ? 0 : chars.length;
+        setPosition(posRef.current);
         return;
       }
-      if (TEXT_FIELDS.has(cur as FieldKey)) {
-        const field = cur as "displayName" | "contextWindow" | "maxOutputTokens";
-        const chars = Array.from(draftRef.current[field]);
-        if (key.return) {
-          move("tab");
-          return;
-        }
-        if (key.leftArrow || key.rightArrow) {
-          posRef.current = Math.max(
-            0,
-            Math.min(chars.length, posRef.current + (key.leftArrow ? -1 : 1)),
-          );
-          setPosition(posRef.current);
-          return;
-        }
-        if (key.home || key.end) {
-          posRef.current = key.home ? 0 : chars.length;
-          setPosition(posRef.current);
-          return;
-        }
-        if (key.backspace || key.delete) {
-          if (key.backspace && posRef.current > 0) {
-            chars.splice(posRef.current - 1, 1);
-            posRef.current -= 1;
-          } else if (key.delete && posRef.current < chars.length) chars.splice(posRef.current, 1);
-          setPosition(posRef.current);
-          draftRef.current = { ...draftRef.current, [field]: chars.join("") };
-          setDraft(draftRef.current);
-          return;
-        }
-        if (ch !== "" && !key.ctrl && !key.meta) {
-          chars.splice(posRef.current, 0, ...Array.from(ch));
-          posRef.current += Array.from(ch).length;
-          setPosition(posRef.current);
-          draftRef.current = { ...draftRef.current, [field]: chars.join("") };
-          setDraft(draftRef.current);
-        }
+      if (key.backspace || key.delete) {
+        if (key.backspace && posRef.current > 0) {
+          chars.splice(posRef.current - 1, 1);
+          posRef.current -= 1;
+        } else if (key.delete && posRef.current < chars.length) chars.splice(posRef.current, 1);
+        setPosition(posRef.current);
+        draftRef.current = { ...draftRef.current, [field]: chars.join("") };
+        setDraft(draftRef.current);
+        return;
       }
-    },
-    { isActive: active },
-  );
+      if (ch !== "" && !key.ctrl && !key.meta) {
+        chars.splice(posRef.current, 0, ...Array.from(ch));
+        posRef.current += Array.from(ch).length;
+        setPosition(posRef.current);
+        draftRef.current = { ...draftRef.current, [field]: chars.join("") };
+        setDraft(draftRef.current);
+      }
+    }
+  };
+  useInput(handleInput, { isActive: active });
   const preferredWidth = Math.max(1, Math.min(72, width - 4));
   const fieldMin = currentField === "protocol" ? 19 : currentField === "reasoningEffort" ? 18 : 10;
   const framed = preferredWidth - 4 >= 12 + fieldMin && height - 2 >= 8;
@@ -626,9 +640,16 @@ export function ModelEditPane({
     const available = innerWidth - label - 3;
     const value = fieldValueText(key, draft, view.fields[key]);
     const controlRows =
-      key === "reasoningEffort"
-        ? Math.ceil(stringWidth(`[ 编辑档位… ] 当前：${value}`) / Math.max(1, available))
-        : 1;
+      CYCLE_FIELDS.has(key) && !readonly && view.fields[key].editable
+        ? segmentedLines(
+            key === "protocol" ? ["跟随", "Chat Completions", "Messages"] : ["跟随", "是", "否"],
+            0,
+            Math.max(1, available),
+            single ? 1 : 2,
+          ).length
+        : key === "reasoningEffort"
+          ? Math.ceil(stringWidth(`[ 编辑档位… ] 当前：${value}`) / Math.max(1, available))
+          : 1;
     return Math.max(1, controlRows) + (single ? 0 : 1) + (errors[key] ? 1 : 0);
   };
   const hintRows = (readonlyHint ? 1 : 0) + (view.unavailable ? 1 : 0);
@@ -644,7 +665,7 @@ export function ModelEditPane({
   const fieldEnd = fieldStart + (currentField ? rowHeight(currentField) : 0);
   // 只滚到焦点字段刚好可见为止，并且不滚过内容末尾（避免下方留空）
   const wanted =
-    currentField === undefined
+    currentField === undefined || manualScroll.current
       ? scroll
       : fieldStart < scroll
         ? fieldStart
@@ -652,15 +673,194 @@ export function ModelEditPane({
           ? fieldEnd - fieldHeight
           : scroll;
   const nextScroll = Math.max(0, Math.min(wanted, totalRows - fieldHeight));
+  scrollRef.current = nextScroll;
   if (nextScroll !== scroll) setScroll(nextScroll);
-  let rowOffset = 0;
-  const visible = single
-    ? fields.filter((field) => field === currentField)
-    : fields.filter((field) => {
-        const start = rowOffset;
-        rowOffset += rowHeight(field);
-        return start >= nextScroll && start < nextScroll + fieldHeight;
+  const visible = single ? fields.filter((field) => field === currentField) : fields;
+  const choices = (field: FieldKey): string[] =>
+    field === "protocol"
+      ? ["follow", "chat", "messages"]
+      : field === "reasoning"
+        ? ["follow", "yes", "no"]
+        : ["follow", "true", "false"];
+  useEffect(() => {
+    if (!onMouseFrame) return;
+    if (!active || tiny) {
+      onMouseFrame(undefined);
+      return;
+    }
+    const boxes: HitBox[] = [];
+    const actions = new Map<string, (event: MouseEvent) => void>();
+    const area = screenRect(nodes.current.get("fields"));
+    const add = (
+      id: string,
+      row: number,
+      col: number,
+      size: number,
+      action: (event: MouseEvent) => void,
+      field = false,
+    ): void => {
+      const end = Math.min(
+        col + size - 1,
+        width,
+        field ? area.col + area.width - 1 : left + outerWidth - (framed ? 2 : 0),
+      );
+      if (
+        row < 1 ||
+        row > height ||
+        end < col ||
+        (field && (row < area.row || row >= area.row + area.height))
+      )
+        return;
+      boxes.push({ id, row, colStart: col, colEnd: end });
+      actions.set(id, action);
+    };
+    const focus = (field: string): void => {
+      manualScroll.current = false;
+      focusRef.current = field;
+      setFocused(field);
+    };
+    const button = (id: string, action: () => void): void => {
+      const rect = screenRect(nodes.current.get(id));
+      if (rect.width > 0) add(id, rect.row, rect.col, rect.width, action);
+    };
+    if (discard !== undefined) {
+      for (const id of ["continue", "discard"])
+        button(id, () => {
+          discardRef.current = id === "discard";
+          handleInput("", { return: true });
+        });
+    } else if (multi) {
+      for (let i = 0; i < 8; i++) {
+        const rect = screenRect(nodes.current.get(`option:${i}`));
+        const label = ["跟随", "不支持思考强度", ...REASONING_EFFORT_LEVELS][i] ?? "";
+        add(
+          `option:${i}`,
+          rect.row,
+          rect.col + 2,
+          Math.min(rect.width - 2, 4 + stringWidth(label)),
+          () => {
+            const m = multiRef.current;
+            if (!m) return;
+            multiRef.current = { ...m, cursor: i };
+            handleInput(" ", {});
+          },
+          true,
+        );
+      }
+      button("cancel", () => {
+        handleInput("", { escape: true });
       });
+      button("confirm", () => {
+        handleInput("", { return: true });
+      });
+    } else {
+      for (const field of visible) {
+        if (readonly || !view.fields[field].editable) continue;
+        const rect = screenRect(nodes.current.get(field));
+        if (TEXT_FIELDS.has(field)) {
+          const key = field as "displayName" | "contextWindow" | "maxOutputTokens";
+          const raw = draft[key];
+          const window = inputWindow(
+            raw,
+            current === field ? position : Array.from(raw).length,
+            rect.width,
+          );
+          add(
+            field,
+            rect.row,
+            rect.col,
+            rect.width,
+            (event) => {
+              focus(field);
+              let column = 0;
+              let index = window.start;
+              for (const ch of Array.from(window.text)) {
+                if (column + stringWidth(ch) > event.x - rect.col - 2) break;
+                column += stringWidth(ch);
+                index++;
+              }
+              posRef.current = index;
+              setPosition(index);
+            },
+            true,
+          );
+        } else if (CYCLE_FIELDS.has(field)) {
+          const selected = choices(field).indexOf(
+            draft[field as "imageInput" | "reasoning" | "protocol"],
+          );
+          const options =
+            field === "protocol" ? ["跟随", "Chat Completions", "Messages"] : ["跟随", "是", "否"];
+          const lines = segmentedLines(options, selected, rect.width, single ? 1 : 2);
+          let option = 0;
+          for (const [lineIndex, line] of lines.entries()) {
+            let offset = 0;
+            const tokens = line.startsWith("<")
+              ? [line.split(" / ")[0] ?? ""]
+              : (line.match(/\[[^\]]*\]/g) ?? []);
+            for (const token of tokens) {
+              const index = line.startsWith("<") ? selected : option++;
+              add(
+                `${field}:${index}`,
+                rect.row + lineIndex,
+                rect.col + offset,
+                stringWidth(token),
+                () => {
+                  focus(field);
+                  const key = field as "imageInput" | "reasoning" | "protocol";
+                  cycle(key, index - choices(field).indexOf(draftRef.current[key]));
+                },
+                true,
+              );
+              offset += stringWidth(token) + 1;
+            }
+          }
+        } else {
+          add(
+            field,
+            rect.row,
+            rect.col,
+            stringWidth("[ 编辑档位… ]"),
+            () => {
+              focus(field);
+              handleInput("", { return: true });
+            },
+            true,
+          );
+        }
+      }
+      for (const id of pageReadonly ? ["return"] : ["cancel", "save"])
+        button(id, () => {
+          focus(id);
+          handleInput("", { return: true });
+        });
+    }
+    onMouseFrame({
+      layer: `${view.providerId}/${view.modelId}/${discard !== undefined ? "discard" : multi ? "multi" : "edit"}`,
+      boxes,
+      click: (id, event) => {
+        if (!saving && !savingGuard.current) actions.get(id)?.(event);
+      },
+      wheel: (event) => {
+        if (
+          multi ||
+          discard !== undefined ||
+          saving ||
+          savingGuard.current ||
+          event.x < area.col ||
+          event.x >= area.col + area.width ||
+          event.y < area.row ||
+          event.y >= area.row + area.height
+        )
+          return;
+        manualScroll.current = true;
+        scrollRef.current = Math.max(
+          0,
+          Math.min(totalRows - fieldHeight, scrollRef.current + (event.dir === "down" ? 1 : -1)),
+        );
+        setScroll(scrollRef.current);
+      },
+    });
+  });
   const row = (field: FieldKey): React.JSX.Element => {
     const f = view.fields[field],
       editable = !readonly && f.editable,
@@ -699,6 +899,7 @@ export function ModelEditPane({
             field === "protocol" ? ["跟随", "Chat Completions", "Messages"] : ["跟随", "是", "否"]
           }
           selected={selected}
+          inline
           focused={false}
           width={Math.max(1, innerWidth - stringWidth(prefix))}
           maxLines={single ? 1 : 2}
@@ -711,7 +912,13 @@ export function ModelEditPane({
       <Box key={field} flexDirection="column" flexShrink={0}>
         <Box flexDirection="row">
           <Text color={focus ? theme.accent : editable ? theme.text : theme.muted}>{prefix}</Text>
-          {control}
+          <Box
+            ref={register(field)}
+            width={Math.max(5, innerWidth - stringWidth(prefix) - (TEXT_FIELDS.has(field) ? 1 : 0))}
+            flexShrink={0}
+          >
+            {control}
+          </Box>
           {errors[field] ? <Text color={theme.error}> !</Text> : null}
         </Box>
         {/* ADR-0030 §3：来源与错误行缩进 2 列，跟在控件下方 */}
@@ -781,23 +988,37 @@ export function ModelEditPane({
             </Box>
           ) : null}
           {multi ? (
-            <Box flexDirection="column" height={fieldHeight} overflow="hidden">
+            <Box
+              ref={register("fields")}
+              flexDirection="column"
+              height={fieldHeight}
+              overflow="hidden"
+            >
               <Text color={theme.accent}>思考档位</Text>
               {["跟随", "不支持思考强度", ...REASONING_EFFORT_LEVELS].map((label, i) => (
-                <Text
-                  key={label}
-                  color={multi.cursor === i ? theme.selected : theme.text}
-                  {...(multi.cursor === i ? { backgroundColor: theme.selectionBg } : {})}
-                >
-                  {multi.cursor === i ? "> " : "  "}[{multi.selected.includes(i) ? "x" : " "}]{" "}
-                  {label}
-                </Text>
+                <Box key={label} ref={register(`option:${i}`)} flexShrink={0}>
+                  <Text
+                    wrap="truncate"
+                    color={multi.cursor === i ? theme.selected : theme.text}
+                    {...(multi.cursor === i ? { backgroundColor: theme.selectionBg } : {})}
+                  >
+                    {multi.cursor === i ? "> " : "  "}[{multi.selected.includes(i) ? "x" : " "}]{" "}
+                    {label}
+                  </Text>
+                </Box>
               ))}
               <Text color={theme.muted}>空格勾选 Enter 确认 Esc 取消</Text>
             </Box>
           ) : (
-            <Box flexDirection="column" height={fieldHeight} overflow="hidden">
-              {visible.map(row)}
+            <Box
+              ref={register("fields")}
+              flexDirection="column"
+              height={fieldHeight}
+              overflow="hidden"
+            >
+              <Box flexDirection="column" flexShrink={0} marginTop={single ? 0 : -nextScroll}>
+                {visible.map(row)}
+              </Box>
             </Box>
           )}
           <Box flexShrink={0}>
@@ -806,9 +1027,29 @@ export function ModelEditPane({
             </Text>
           </Box>
           {discard === undefined ? (
-            <Buttons focused={current} readonly={pageReadonly} width={innerWidth} />
+            <Buttons
+              focused={multi ? "" : current}
+              readonly={pageReadonly}
+              width={innerWidth}
+              {...(multi
+                ? {
+                    items: [
+                      ["cancel", "取消"],
+                      ["confirm", "确认"],
+                    ] as const,
+                  }
+                : {})}
+              onBox={(id, node) => {
+                register(id)(node);
+              }}
+            />
           ) : (
-            <ConfirmDiscard discard={discard} />
+            <ConfirmDiscard
+              discard={discard}
+              onBox={(id, node) => {
+                register(id)(node);
+              }}
+            />
           )}
           <Box flexShrink={0}>
             <Text color={theme.muted} wrap="truncate">

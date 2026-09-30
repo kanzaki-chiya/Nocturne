@@ -6,7 +6,7 @@ export function inputWindow(
   value: string,
   cursor: number,
   width: number,
-): { text: string; column: number } {
+): { text: string; column: number; start: number } {
   const chars = Array.from(value);
   const inner = Math.max(1, width - 4);
   let start = 0;
@@ -16,7 +16,7 @@ export function inputWindow(
     if (stringWidth(text + ch) > inner) break;
     text += ch;
   }
-  return { text, column: stringWidth(chars.slice(start, cursor).join("")) };
+  return { text, column: stringWidth(chars.slice(start, cursor).join("")), start };
 }
 
 export function TextInput({

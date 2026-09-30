@@ -32,6 +32,7 @@ import { useTheme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
 import { ConfirmBox } from "./confirm-box.js";
 import { ModelEditPane, ModelListPane } from "./model-settings-view.js";
+import type { DialogMouseFrame } from "./dialog/mouse.js";
 import { PixelLogo } from "./pixel-logo.js";
 import { WizardView } from "./wizard-view.js";
 import { InputCursor } from "./input-cursor.js";
@@ -130,6 +131,7 @@ export function ProviderPage({
   onConfirmRemove,
   onListModels,
   onSaveModel,
+  onMouseFrame,
   initialModelTarget,
   onClose,
   notice,
@@ -179,6 +181,7 @@ export function ProviderPage({
     | undefined;
   /** /provider model 直达目标：打开页后直接进入模型列表（含模型 id 时进编辑页） */
   initialModelTarget?: { providerId: string; modelId?: string | undefined } | undefined;
+  onMouseFrame?: ((frame: DialogMouseFrame | undefined) => void) | undefined;
   onClose: () => void;
   /** 父级结果行（保存/刷新/删除/换密钥后的提示） */
   notice?: string | undefined;
@@ -652,6 +655,7 @@ export function ProviderPage({
       {subView?.kind === "edit" && editView !== undefined ? (
         <Box position="absolute" width={width} height={height}>
           <ModelEditPane
+            onMouseFrame={onMouseFrame}
             view={editView}
             readonly={modelsReadonly || editView.readonly}
             readonlyHint={editView.readonlyHint}

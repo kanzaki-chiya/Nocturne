@@ -45,6 +45,8 @@ import { composerWindow } from "./cursor.js";
 import { checkImage, createImageStore, droppedImage } from "./images.js";
 import { renderMarkdown, splitMarkdownBlocks, takeMarkdownBlocks } from "./markdown.js";
 import type { MouseSource } from "./mouse.js";
+import { createClickTracker } from "./click.js";
+import type { DialogMouseFrame } from "./components/dialog/mouse.js";
 import { createPasteStore } from "./paste.js";
 import { resumeLabel } from "./resume-label.js";
 import { frameBudget } from "./frame.js";
@@ -771,6 +773,12 @@ function SessionApp({
   >(undefined);
   const pickerOpen = picker !== undefined;
   const [providerPageOpen, setProviderPageOpen] = useState(false);
+  const dialogMouse = useRef<DialogMouseFrame | undefined>(undefined);
+  const dialogClicks = useRef(createClickTracker());
+  const reportDialogMouse = useCallback((frame: DialogMouseFrame | undefined): void => {
+    if (frame?.layer !== dialogMouse.current?.layer) dialogClicks.current.reset();
+    dialogMouse.current = frame;
+  }, []);
   /** /provider model 直达目标（ADR-0024）；每次打开页自增 key 让页内状态重挂 */
   const [providerPageTarget, setProviderPageTarget] = useState<
     { providerId: string; modelId?: string | undefined } | undefined
@@ -985,6 +993,15 @@ function SessionApp({
   useEffect(() => {
     if (!fullscreen || mouse === undefined) return;
     const off = mouse.subscribe((ev) => {
+      const dialog = dialogMouse.current;
+      if (dialog) {
+        if (ev.type === "wheel") dialog.wheel(ev);
+        else {
+          const id = dialogClicks.current.feed(ev, dialog.boxes);
+          if (id !== undefined) dialog.click(id, ev);
+        }
+        return;
+      }
       const g = geomRef.current;
       if (g.blocked) return;
       if (ev.type === "wheel") {
@@ -2085,6 +2102,7 @@ function SessionApp({
       onListModels={ops.listModels}
       onSaveModel={ops.saveModel}
       initialModelTarget={providerPageTarget}
+      onMouseFrame={fullscreen ? reportDialogMouse : undefined}
       onClose={() => {
         void closeProviderPage();
       }}
