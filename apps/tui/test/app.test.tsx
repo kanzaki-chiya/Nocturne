@@ -20,6 +20,7 @@ import {
 } from "@nocturne/core/protocol";
 
 import { App, splitCompletedPrefix } from "../src/app.js";
+import { captureConsole } from "../src/console-capture.js";
 import { PermissionDialog } from "../src/components/permission-dialog.js";
 import { StatusBar } from "../src/components/status-bar.js";
 import { ToolRow } from "../src/components/tool-row.js";
@@ -366,6 +367,26 @@ describe("TUI", () => {
       lines.some((line) => line.includes("子会话第 1 轮开始") && line.includes("read → ok")),
     ).toBe(false);
     unmount();
+  });
+
+  it("全屏接管的 console 输出显示为对话区提示行，不压进输入行", async () => {
+    const { runtime, session } = await makeSession();
+    const target = { ...console } as Console;
+    const cap = captureConsole(target);
+    target.error("(node:9) TestWarning: early\n(Use `node --trace-warnings ...`)");
+    const screen = render(
+      createElement(App, { session, runtime, env: ENV, consoleLines: cap.lines }),
+    );
+    await waitFor(() => (screen.lastFrame() ?? "").includes("fake-model"));
+    target.warn("late warning");
+    await waitFor(() => (screen.lastFrame() ?? "").includes("! late warning"));
+    const lines = (screen.lastFrame() ?? "").split("\n");
+    expect(lines.some((l) => l.startsWith("! (node:9) TestWarning: early"))).toBe(true);
+    expect(lines.some((l) => l.includes("trace-warnings"))).toBe(false);
+    expect(lines.at(-1)).toContain("idle");
+    screen.unmount();
+    cap.restore();
+    await session.close();
   });
 
   it("状态栏显示本会话累计缓存命中率，宽度不够时先去目录再去缓存", () => {

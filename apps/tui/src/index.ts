@@ -29,6 +29,7 @@ export function ThemeApp(props: AppProps): React.JSX.Element {
   );
 }
 import { MOUSE_DISABLE, MOUSE_ENABLE, wrapMouseStdin, type MouseSource } from "./mouse.js";
+import { captureConsole } from "./console-capture.js";
 
 /** 复位全部文字属性：退出路径统一收尾，保证不把颜色留给后续的 shell */
 const SGR_RESET = "\x1b[0m";
@@ -128,6 +129,10 @@ export async function runTui(
   // Windows Terminal: suspendTerminal 的 pauseInput 不应撤销控制台读请求。
   const unref = stdin.unref.bind(stdin);
   stdin.unref = () => stdin;
+  // 全屏：console 输出（含 Node 进程警告）改为对话区提示行，不用 Ink 的 patchConsole
+  //（它把文字写在帧上方，备用屏里会压进输入行）；inline 仍由 Ink 写进回滚区
+  const patchConsole = options.patchConsole ?? true;
+  const captured = !inline && patchConsole ? captureConsole() : undefined;
   const app = render(
     createElement(
       CursorClaimsContext.Provider,
@@ -155,6 +160,7 @@ export async function runTui(
           exitCode = code;
           exitMessage = message;
         },
+        consoleLines: captured?.lines,
       }),
     ),
     {
@@ -164,7 +170,7 @@ export async function runTui(
       exitOnCtrlC: false,
       incrementalRendering: inline,
       alternateScreen: !inline,
-      patchConsole: options.patchConsole ?? true,
+      patchConsole: inline && patchConsole,
     },
   );
   const exitProcess = options.exitProcess ?? ((code: number) => process.exit(code));
@@ -196,6 +202,7 @@ export async function runTui(
     await app.waitUntilExit();
   } finally {
     cursorOut.stop();
+    captured?.restore();
     mouseStdin?.dispose();
     stdin.unref = unref;
     unref();

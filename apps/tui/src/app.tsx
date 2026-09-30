@@ -111,6 +111,7 @@ import { useSessionView } from "./session-view.js";
 import { useReasoning } from "./reasoning.js";
 import { useTheme, type ThemeId } from "./theme.js";
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
+import type { ConsoleLines } from "./console-capture.js";
 import { useProviderWizard } from "./wizard-io.js";
 
 const EMPTY_WINDOW: VisibleWindow = {
@@ -212,6 +213,8 @@ export interface AppProps {
   onExitResult?: ((code: number, message?: string) => void) | undefined;
   /** 当前会话 id 变化时通知 runTui，退出提示要用切换后的 id */
   onSessionId?: ((id: string) => void) | undefined;
+  /** 全屏接管的 console 输出（含 Node 进程警告），转成对话区本地提示行 */
+  consoleLines?: ConsoleLines | undefined;
 }
 
 /**
@@ -593,6 +596,7 @@ export function App({
   transcriptOut,
   onExitResult,
   onSessionId,
+  consoleLines,
 }: AppProps): React.JSX.Element | null {
   const { exit } = useApp();
   const [session, setSession] = useState<RuntimeSession | undefined>(initialSession);
@@ -645,6 +649,7 @@ export function App({
       clipboardPlatform={clipboardPlatform}
       transcriptOut={transcriptOut}
       onSessionId={onSessionId}
+      consoleLines={consoleLines}
     />
   );
 }
@@ -666,6 +671,7 @@ function SessionApp({
   clipboardPlatform,
   transcriptOut,
   onSessionId,
+  consoleLines,
 }: {
   session: RuntimeSession;
   runtime: Runtime;
@@ -684,6 +690,7 @@ function SessionApp({
   clipboardPlatform?: NodeJS.Platform | undefined;
   transcriptOut?: { current?: (() => string[]) | undefined } | undefined;
   onSessionId?: ((id: string) => void) | undefined;
+  consoleLines?: ConsoleLines | undefined;
 }): React.JSX.Element {
   const theme = useTheme();
   const fullscreen = !inline;
@@ -920,6 +927,14 @@ function SessionApp({
       }
     },
     [fullscreen],
+  );
+
+  useEffect(
+    () =>
+      consoleLines?.subscribe((text) => {
+        pushLine(`! ${text}`);
+      }),
+    [consoleLines, pushLine],
   );
 
   const flash = useCallback((which: StatusHighlight) => {

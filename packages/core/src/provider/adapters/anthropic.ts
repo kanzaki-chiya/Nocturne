@@ -34,6 +34,7 @@ import {
   toAiMessages,
   toAiTools,
   toProviderError,
+  routeSdkWarnings,
 } from "./ai-sdk-common.js";
 
 /** Messages API 的 cache_control 断点（默认 5 分钟有效） */
@@ -98,6 +99,7 @@ export function createAnthropicProvider(
   /** 测试注入用；生产不传（SDK 默认全局 fetch） */
   fetchImpl?: typeof fetch,
 ): Provider {
+  routeSdkWarnings(config.diagnostics);
   // 构造时只取环境变量；凭据存储在请求时解析（异步），两条路径在 stream 里汇合
   const apiKeyFromEnv =
     config.apiKeyEnv !== undefined && env(config.apiKeyEnv) !== ""

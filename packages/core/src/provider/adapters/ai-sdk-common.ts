@@ -18,7 +18,7 @@ import {
 
 /** ai 包未再导出 ProviderOptions/JSONObject；此处与 SharedV4ProviderOptions 结构等价 */
 type SdkProviderOptions = Record<string, Record<string, JSONValue>>;
-import type { ContentBlock, FinishReason, Usage } from "../../protocol/index.js";
+import type { ContentBlock, Diagnostics, FinishReason, Usage } from "../../protocol/index.js";
 import { abortError, ProviderError } from "../errors.js";
 import type { ModelImage, ModelRequest, ModelStreamEvent } from "../types.js";
 
@@ -463,4 +463,24 @@ function parseRetryAfter(value: string | undefined): number | undefined {
   const date = Date.parse(value);
   if (Number.isFinite(date)) return Math.max(0, date - Date.now());
   return undefined;
+}
+
+let sdkWarningSink: Diagnostics | undefined;
+
+/**
+ * AI SDK 的警告默认经 process.emitWarning 打到 stderr，会打乱全屏 TUI；
+ * 改记诊断 provider.sdk_warning（observability.md）。进程级开关，
+ * 由最近装配的适配器的诊断通道接收；用户已自行设置 AI_SDK_LOG_WARNINGS 时不覆盖。
+ */
+export function routeSdkWarnings(diagnostics: Diagnostics | undefined): void {
+  if (diagnostics !== undefined) sdkWarningSink = diagnostics;
+  const g = globalThis as { AI_SDK_LOG_WARNINGS?: unknown };
+  if (g.AI_SDK_LOG_WARNINGS !== undefined) return;
+  g.AI_SDK_LOG_WARNINGS = (options: { warnings: unknown[]; provider?: string; model?: string }) => {
+    sdkWarningSink?.record("provider.sdk_warning", {
+      provider: options.provider,
+      model: options.model,
+      warnings: options.warnings,
+    });
+  };
 }
