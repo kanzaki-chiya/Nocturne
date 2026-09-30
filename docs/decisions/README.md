@@ -40,6 +40,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0032](ADR-0032-ask-user-tool.md) | 向用户提问工具 | 已接受 |
 | [ADR-0033](ADR-0033-web-fetch-file-refs.md) | 网页抓取工具与 `@文件` 引用 | 已接受 |
 | [ADR-0034](ADR-0034-settings-layer.md) | 设置层与 `/settings` 页、默认模型与档位成对保存 | 已接受 |
+| [ADR-0035](ADR-0035-apply-patch.md) | `apply_patch` 编辑工具与系统提示更新 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
