@@ -1,6 +1,6 @@
 /**
  * 逐行 CLI 提问交互（ADR-0032 §6）：question.requested 后逐题打印，
- * 编号/直接文字/空行跳过/非法编号重试/Ctrl+C 中断。
+ * 编号/直接文字/空行重提示/非法编号重试/Ctrl+C 中断。
  */
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
@@ -41,6 +41,7 @@ interface QuestionReplySeen {
 /** 假会话：submit 挂起直至 interrupt，subscribe 捕获 listener，respondQuestion 记录回复 */
 function fakeSession(interrupted?: { value: boolean }) {
   let listener: ((ev: RuntimeEvent) => void) | undefined;
+  let questions: QuestionItem[] = [];
   let control: { resolve(r: TurnEndReason): void } | undefined;
   const replies: QuestionReplySeen[] = [];
   const session = {
@@ -61,6 +62,26 @@ function fakeSession(interrupted?: { value: boolean }) {
     respondPermission: () => Promise.resolve(),
     respondQuestion: (requestId: string, reply: unknown) => {
       replies.push({ requestId, reply });
+      const answers = (reply as { answers: unknown[] }).answers;
+      listener?.({
+        type: "tool.completed",
+        sessionId: "s1",
+        seq: 3,
+        time: "t",
+        turnId: "t1",
+        payload: {
+          callId: "c1",
+          name: "ask_user",
+          status: "ok",
+          modelContent: "问：重复摘要不可显示",
+          output: {
+            answers: answers.map((a, i) => ({
+              question: questions[i]?.question,
+              ...(a as object),
+            })),
+          },
+        },
+      } as RuntimeEvent);
       return Promise.resolve();
     },
     readInputHistory: () => Promise.resolve([]),
@@ -70,7 +91,14 @@ function fakeSession(interrupted?: { value: boolean }) {
         RuntimeSession["state"]
       >,
   } as unknown as RuntimeSession;
-  return { session, replies, emit: (ev: RuntimeEvent) => listener?.(ev) };
+  return {
+    session,
+    replies,
+    emit: (ev: RuntimeEvent) => {
+      if (ev.type === "question.requested") questions = ev.payload.questions;
+      listener?.(ev);
+    },
+  };
 }
 
 function questionEvent(requestId: string, questions: QuestionItem[], callId = "c1"): RuntimeEvent {
@@ -106,6 +134,7 @@ describe("REPL 提问交互（ADR-0032 §6）", () => {
     expect(shown).toContain("1. PostgreSQL（推荐） — 兼容 13 版");
     expect(shown).toContain("2. SQLite");
     expect(shown).toContain("其他");
+    expect(shown).toContain("3. 拒绝回答");
     stdin.write("1\n");
     await tick();
     expect(replies).toEqual([
@@ -115,7 +144,8 @@ describe("REPL 提问交互（ADR-0032 §6）", () => {
       },
     ]);
     // 提交后打印摘要
-    expect(stdoutChunks.join("")).toContain("用哪个数据库？ → PostgreSQL（推荐）");
+    expect(stdoutChunks.join("").match(/用哪个数据库？ → PostgreSQL（推荐）/g)).toHaveLength(1);
+    expect(stdoutChunks.join("")).not.toContain("重复摘要");
     stdin.end();
     expect(await done).toBe(0);
   });
@@ -143,6 +173,10 @@ describe("REPL 提问交互（ADR-0032 §6）", () => {
     await tick();
     expect(replies).toHaveLength(0);
     expect(stdoutChunks.join("")).toContain("无效编号");
+    stdin.write("1,4\n");
+    await tick();
+    expect(replies).toHaveLength(0);
+    expect(stdoutChunks.join("")).toContain("拒绝回答须单独选择");
     stdin.write("1,3\n");
     await tick();
     expect(replies).toEqual([
@@ -182,7 +216,7 @@ describe("REPL 提问交互（ADR-0032 §6）", () => {
     expect(await done).toBe(0);
   });
 
-  it("空行跳过整次提问：respondQuestion 收到 skipped", async () => {
+  it("空行重提示，最后的拒绝编号只拒绝本题", async () => {
     const { io, stdin, stdoutChunks } = makeIo();
     const { session, replies, emit } = fakeSession();
     const done = runRepl(session, fakeRuntime, io);
@@ -191,13 +225,19 @@ describe("REPL 提问交互（ADR-0032 §6）", () => {
     await tick();
     emit(questionEvent("q-4", [twoOption, { question: "第二题" }]));
     await tick();
-    // 第一题答完，第二题处空行 → 整次跳过
-    stdin.write("2\n");
+    // 第一题拒绝，第二题处空行重提示，保留逐题拒绝。
+    stdin.write("3\n");
     await tick();
     stdin.write("\n");
     await tick();
-    expect(replies).toEqual([{ requestId: "q-4", reply: { skipped: true } }]);
-    expect(stdoutChunks.join("")).toContain("已跳过");
+    expect(replies).toHaveLength(0);
+    expect(stdoutChunks.join("").match(/第二题/g)?.length).toBe(2);
+    stdin.write("1\n");
+    await tick();
+    expect(replies).toEqual([
+      { requestId: "q-4", reply: { answers: [{ declined: true }, { declined: true }] } },
+    ]);
+    expect(stdoutChunks.join("")).toContain("第二题 → 拒绝回答");
     stdin.end();
     expect(await done).toBe(0);
   });

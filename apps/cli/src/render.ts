@@ -80,6 +80,15 @@ export function renderDiff(diff: string): string {
 }
 
 function toolCompletedLines(p: ToolCompletedPayload): string[] {
+  if (p.name === "ask_user") {
+    if (p.status === "cancelled" || p.status === "interrupted") return ["  已取消"];
+    if (p.error?.code === "timeout") return ["  已超时"];
+    if (p.error?.code === "not_interactive") return ["  无法提问（非交互）"];
+    if (p.status !== "ok") return [p.error?.message ?? "无法提问"];
+    const output = p.output as { answers?: (QuestionAnswer & { question: string })[] } | undefined;
+    if (!Array.isArray(output?.answers)) return ["无法读取回答"];
+    return [renderQuestionSummary(output.answers, output.answers)];
+  }
   const dur = p.durationMs !== undefined ? `（${p.durationMs}ms）` : "";
   const lines: string[] = [];
   if (p.status === "ok") {
@@ -133,6 +142,11 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
     }
     case "tool.started": {
       const p = ev.payload;
+      if (p.name === "ask_user") {
+        const input = p.input as { questions?: unknown[] } | undefined;
+        const n = input?.questions?.length ?? 0;
+        return [aux("? 提问" + (n > 1 ? `（${n} 题）` : ""))];
+      }
       const rule = p.permission.rule !== undefined ? `（命中：${p.permission.rule}）` : "";
       return [aux(`● ${p.name}(${summarizeInput(p.input)})${rule}`)];
     }
@@ -311,25 +325,26 @@ export function renderQuestionPrompt(q: QuestionItem, index: number, total: numb
   if (options.length > 0) {
     hints.push("输入编号选择");
     if (q.multiSelect === true) hints.push("可输入多个编号，用逗号分隔");
-    hints.push("或直接输入文字作为「其他」");
   }
-  hints.push("空行跳过整次提问");
+  lines.push(`  ${options.length + 1}. 拒绝回答`);
+  hints.push("直接输入文字作为「其他」；空行重新提示");
   lines.push(`  ${hints.join("；")}`);
   return lines.join("\n");
 }
 
-/** 提问提交后的对话摘要（§6：每题一行「问题 → 回答」；跳过时显示「已跳过」） */
+/** ask_user 完成条目的摘要：每题一行「问题 → 回答」。 */
 export function renderQuestionSummary(
   questions: readonly QuestionItem[],
-  answers: readonly QuestionAnswer[] | undefined,
+  answers: readonly QuestionAnswer[],
 ): string {
-  if (answers === undefined) return "◇ 提问已跳过";
   const lines = questions.map((q, i) => {
     const a = answers[i];
     const parts: string[] = [];
+    if (a !== undefined && "declined" in a)
+      return `  ${q.question.replace(/\r\n?|\n/g, " ")} → 拒绝回答`;
     if (a !== undefined && a.selected.length > 0) parts.push(a.selected.join("、"));
-    if (a?.text !== undefined) parts.push(a.text);
-    return `  ${q.question} → ${parts.length > 0 ? parts.join("；") : "（未回答）"}`;
+    if (a?.text !== undefined) parts.push(a.text.replace(/\r\n?|\n/g, " "));
+    return `  ${q.question.replace(/\r\n?|\n/g, " ")} → ${parts.length > 0 ? parts.join("、") : "（未回答）"}`;
   });
-  return ["◇ 已提交回答：", ...lines].join("\n");
+  return lines.join("\n");
 }

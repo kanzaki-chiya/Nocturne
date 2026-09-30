@@ -16,7 +16,6 @@ import {
   renderEvent,
   renderPermissionPrompt,
   renderQuestionPrompt,
-  renderQuestionSummary,
 } from "./render.js";
 import {
   createWizardIo,
@@ -275,7 +274,7 @@ export async function runRepl(
           return;
         }
 
-        // 提问的逐行回答（ADR-0032 §6）：编号或直接文字；空行跳过整次提问
+        // 提问的逐行回答：编号、拒绝或直接文字；空行重新提示。
         if (pendingQuestion !== undefined) {
           const pq = pendingQuestion;
           const q = pq.questions[pq.index];
@@ -285,15 +284,20 @@ export async function runRepl(
             return;
           }
           if (line === "") {
-            pendingQuestion = undefined;
-            out.line("stdout", renderQuestionSummary(pq.questions, undefined));
-            void session.respondQuestion(pq.requestId, { skipped: true }).catch(() => undefined);
+            printQuestion();
             prompt();
             return;
           }
           const options = q.options ?? [];
           let answer: QuestionAnswer;
-          if (options.length === 0) {
+          if (/^\d+$/.test(line) && Number(line) === options.length + 1) {
+            answer = { declined: true };
+          } else if (Array.from(line).length > 2000) {
+            out.line("stdout", "! 回答不能超过 2000 字符");
+            printQuestion();
+            prompt();
+            return;
+          } else if (options.length === 0 && !/^\d+$/.test(line)) {
             // 自由文本题：整行即回答
             answer = { selected: [], text: line };
           } else {
@@ -308,12 +312,17 @@ export async function runRepl(
                 else if (!picked.includes(opt.label)) picked.push(opt.label);
               }
               if (bad.length > 0) {
-                out.line("stdout", `! 无效编号：${bad.join("，")}（可选 1–${options.length}）`);
+                out.line(
+                  "stdout",
+                  `! 无效编号：${bad.join("，")}（可选 1–${options.length + 1}，拒绝回答须单独选择）`,
+                );
+                printQuestion();
                 prompt();
                 return;
               }
               if (q.multiSelect !== true && picked.length > 1) {
                 out.line("stdout", "! 本题是单选，只能输入一个编号");
+                printQuestion();
                 prompt();
                 return;
               }
@@ -328,7 +337,6 @@ export async function runRepl(
             printQuestion();
           } else {
             pendingQuestion = undefined;
-            out.line("stdout", renderQuestionSummary(pq.questions, pq.answers));
             void session
               .respondQuestion(pq.requestId, { answers: pq.answers })
               .catch(() => undefined);
