@@ -159,6 +159,12 @@ describe("draftToPatch 固定期望值", () => {
     expect(
       draftToPatch(fullView(), {
         ...blankDraft,
+        protocol: "responses",
+      }),
+    ).toEqual({ protocol: "openai-responses" });
+    expect(
+      draftToPatch(fullView(), {
+        ...blankDraft,
         displayName: "新名",
         contextWindow: "abc",
         maxOutputTokens: "1200",

@@ -46,7 +46,7 @@ API Key（掩码输入；直接回车表示改用环境变量）：********
 | `/provider add` | 逐行向导（CLI）或服务商页内嵌向导（TUI 打开服务商页并选中预设）；保存后提示"用 /model 选择模型" |
 | `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成；等价于服务商页「换密钥」 |
 | `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置并更新 models.dev 缓存；models.dev 失败只提示，不中断刷新 |
-| `/provider model <name> <模型>` | 编辑该模型的七个设置（显示名 / 上下文长度 / 最大输出 / 推理 / 图片输入 / 思考档位 / 协议），写入条目 `userModels.<模型>`。推理为「跟随 / 是 / 否」，CLI 输入 `-`/`y`/`n`，选否时不询问档位；协议为「跟随 / Chat Completions / Messages」，CLI 输入 `-`/`chat`/`messages`，选「跟随」清除用户编辑（ADR-0026 第 7 节）；来源含「models.dev」「按接口声明推导」「服务商类型」。手写配置来源的字段只显示不提问；只能编辑清单内模型，程序不改写 `config.json` |
+| `/provider model <name> <模型>` | 编辑该模型的七个设置（显示名 / 上下文长度 / 最大输出 / 推理 / 图片输入 / 思考档位 / 协议），写入条目 `userModels.<模型>`。推理为「跟随 / 是 / 否」，CLI 输入 `-`/`y`/`n`，选否时不询问档位；协议为「跟随 / Chat Completions / Messages / Responses」，CLI 输入 `-`/`chat`/`messages`/`responses`，选「跟随」清除用户编辑（ADR-0026 第 7 节、ADR-0031 §1）；来源含「models.dev」「按接口声明推导」「服务商类型」。手写配置来源的字段只显示不提问；只能编辑清单内模型，程序不改写 `config.json` |
 | `/provider remove <name>` | 删除向导写入的条目及其凭据；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改；等价于「删除」 |
 
 Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。这些子命令与服务商页操作是同一套 Core 编排的快捷方式，命令名与效果在 CLI 与 TUI 一致。
@@ -206,7 +206,7 @@ saveModelSettings(providerId: string, modelId: string, patch: ModelSettingsPatch
   //   config_invalid 且不写文件）；原子写 providers.json，绝不写 config.json
 runProviderModelWizard(io, config, providerId, modelId, opts?): Promise<void>
   // /provider model 的行式问答（ADR-0024 第 4 节、ADR-0026 第 7 节）：逐字段显示"当前值（来源）"，
-  //   回车保留、- 清除；推理用 y/n/-，为否时不问档位；协议输入 chat/messages/-；
+  //   回车保留、- 清除；推理用 y/n/-，为否时不问档位；协议输入 chat/messages/responses/-；
   //   收集完一次性 saveModelSettings
 runProviderSetupWizard(io, config, deps, opts?): Promise<WizardResult>
   // 步骤：预设选择（opts.presetId 直达）→（自定义预设才问）名称/地址 → 密钥

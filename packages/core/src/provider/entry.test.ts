@@ -1,8 +1,8 @@
 /**
- * 路由 Provider 契约测试（ADR-0026 §3-§5，离线）：stub fetch 捕获
- * 请求 URL 与鉴权头——同一 openai-compatible 条目下的模型按各自
- * 生效协议走 /chat/completions 或 /messages，并携带协议对应的鉴权头；
- * 不可用模型照常列出但发请求前以说明拒绝（不发 HTTP）。
+ * 路由 Provider 契约测试（ADR-0026 §3-§5 + ADR-0031 §1，离线）：stub fetch
+ * 捕获请求 URL 与鉴权头——同一 openai-compatible 条目下的模型按各自
+ * 生效协议走 /chat/completions、/messages 或 /responses，并携带协议对应
+ * 的鉴权头；不可用模型照常列出但发请求前以说明拒绝（不发 HTTP）。
  */
 import { describe, expect, it } from "vitest";
 
@@ -49,22 +49,57 @@ function routingFetch(capture: Capture) {
           },
           { type: "message_stop" },
         ]
-      : [
-          {
-            id: "c1",
-            object: "chat.completion.chunk",
-            choices: [{ index: 0, delta: { role: "assistant", content: "ok" } }],
-          },
-          {
-            id: "c1",
-            object: "chat.completion.chunk",
-            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-            usage: { prompt_tokens: 1, completion_tokens: 1 },
-          },
-        ];
+      : capture.url.endsWith("/responses")
+        ? [
+            {
+              type: "response.output_item.added",
+              output_index: 0,
+              item: { type: "message", id: "m_1", role: "assistant", content: [] },
+            },
+            {
+              type: "response.output_text.delta",
+              item_id: "m_1",
+              output_index: 0,
+              content_index: 0,
+              delta: "ok",
+            },
+            {
+              type: "response.output_item.done",
+              output_index: 0,
+              item: {
+                type: "message",
+                id: "m_1",
+                role: "assistant",
+                status: "completed",
+                content: [{ type: "output_text", text: "ok", annotations: [] }],
+              },
+            },
+            {
+              type: "response.completed",
+              response: {
+                id: "resp_1",
+                status: "completed",
+                output: [],
+                usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+              },
+            },
+          ]
+        : [
+            {
+              id: "c1",
+              object: "chat.completion.chunk",
+              choices: [{ index: 0, delta: { role: "assistant", content: "ok" } }],
+            },
+            {
+              id: "c1",
+              object: "chat.completion.chunk",
+              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+              usage: { prompt_tokens: 1, completion_tokens: 1 },
+            },
+          ];
     const payload = `${events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("")}${
       capture.url.endsWith("/messages") ? "" : "data: [DONE]\n\n"
-    }`;
+    }`; // Responses 流同样以 [DONE] 收尾
     const stream = new ReadableStream<Uint8Array>({
       start(c) {
         c.enqueue(new TextEncoder().encode(payload));
@@ -254,8 +289,71 @@ describe("路由 Provider：anthropic 条目", () => {
   });
 });
 
+describe("路由 Provider：Responses 协议（ADR-0031 §1）", () => {
+  it("/responses-only 模型：清单可用（protocol=openai-responses），请求走 /responses 且只发 Bearer", async () => {
+    const capture: Capture = {};
+    const p = createEntryProvider(
+      {
+        id: "gw",
+        type: "openai-compatible",
+        baseURL: "https://gw.test/v1",
+        apiKeyEnv: "TEST_KEY",
+        models: { resp: { endpoints: ["/responses"] } },
+      },
+      envWithKey,
+      routingFetch(capture),
+    );
+    const info = p.models().find((m) => m.ref.model === "resp");
+    expect(info?.unavailable).toBeUndefined();
+    expect(info?.protocol).toBe("openai-responses");
+    const events = await collect(p, request("resp"));
+    expect(capture.url).toBe("https://gw.test/v1/responses");
+    expect(capture.headers?.["authorization"]).toBe("Bearer sk-test");
+    expect(capture.headers?.["x-api-key"]).toBeUndefined();
+    expect(events.at(-1)).toMatchObject({ type: "finish" });
+  });
+
+  it("显式 protocol=openai-responses（无 endpoints）也路由到 /responses", async () => {
+    const capture: Capture = {};
+    const p = createEntryProvider(
+      {
+        id: "gw",
+        type: "anthropic",
+        baseURL: "https://gw.test/v1",
+        apiKeyEnv: "TEST_KEY",
+        models: { resp: { protocol: "openai-responses" } },
+      },
+      envWithKey,
+      routingFetch(capture),
+    );
+    await collect(p, request("resp"));
+    expect(capture.url).toBe("https://gw.test/v1/responses");
+  });
+
+  it("anthropic 条目缺 baseURL 时 Responses 请求按 openai-compatible 同款报错", async () => {
+    const p = createEntryProvider(
+      {
+        id: "claude",
+        type: "anthropic",
+        apiKeyEnv: "TEST_KEY",
+        models: { resp: { protocol: "openai-responses" } },
+      },
+      envWithKey,
+      async () => new Response("x", { status: 500 }),
+    );
+    await expect(collect(p, request("resp"))).rejects.toMatchObject({
+      name: "ProviderError",
+      kind: "invalid_request",
+      retryable: false,
+    });
+    await expect(collect(p, request("resp"))).rejects.toThrow(
+      /baseURL.*openai-responses.*\/responses/,
+    );
+  });
+});
+
 describe("路由 Provider：不可用模型（ADR-0026 §5）", () => {
-  it("只有 /responses 的模型照常列出但标记 unavailable；发请求即拒绝（不发 HTTP）", async () => {
+  it("接口全部无法识别的模型照常列出但标记 unavailable；发请求即拒绝（不发 HTTP）", async () => {
     let called = 0;
     const p = createEntryProvider(
       {
@@ -264,7 +362,7 @@ describe("路由 Provider：不可用模型（ADR-0026 §5）", () => {
         baseURL: "https://gw.test/v1",
         apiKeyEnv: "TEST_KEY",
         models: {
-          bad: { endpoints: ["/responses"] },
+          bad: { endpoints: ["/embeddings"] },
           good: {},
         },
       },

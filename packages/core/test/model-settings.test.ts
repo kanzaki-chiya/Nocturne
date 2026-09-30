@@ -456,13 +456,14 @@ describe("listModelSettings 来源标注", () => {
     expect(v?.unavailable).toBeUndefined();
   });
 
-  it("协议：endpoints 推导 → 上游/接口声明来源；/responses-only → unavailable", async () => {
+  it("协议：endpoints 推导 → 上游/接口声明来源；/responses → openai-responses；无法识别 → unavailable", async () => {
     await writeProviders([
       {
         ...ENTRY,
         models: {
           m1: { endpoints: ["/messages"] },
           m2: { endpoints: ["/responses"] },
+          m4: { endpoints: ["/embeddings"] },
         },
       },
     ]);
@@ -481,13 +482,18 @@ describe("listModelSettings 来源标注", () => {
     const v1 = views.find((x) => x.modelId === "m1");
     const v2 = views.find((x) => x.modelId === "m2");
     const v3 = views.find((x) => x.modelId === "m3");
+    const v4 = views.find((x) => x.modelId === "m4");
     // 条目 type=openai-compatible 但模型只有 /messages → 推导为 anthropic；
     // endpoints 由上游（providers.json refresh 位）声明 → upstream 来源
     expect(v1?.fields.protocol.value).toBe("anthropic");
     expect(v1?.fields.protocol.source.kind).toBe("upstream");
+    // 只有 /responses → openai-responses（ADR-0031 §1），照常可用
+    expect(v2?.fields.protocol.value).toBe("openai-responses");
+    expect(v2?.fields.protocol.source.kind).toBe("upstream");
+    expect(v2?.unavailable).toBeUndefined();
     // 无可识别接口：模型照常列出，视图带 unavailable 原因
-    expect(v2?.fields.protocol.value).toBeUndefined();
-    expect(v2?.unavailable?.reason).toContain("没有可用的服务协议");
+    expect(v4?.fields.protocol.value).toBeUndefined();
+    expect(v4?.unavailable?.reason).toContain("没有可用的服务协议");
     // 路径末尾归一化：/v1/chat/completions/ ≡ /chat/completions；
     // 手写层声明的 endpoints → 按接口声明推导
     expect(v3?.fields.protocol.value).toBe("openai-compatible");

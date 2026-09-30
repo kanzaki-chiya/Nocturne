@@ -12,22 +12,24 @@ export interface ModelRef {
 // ── 服务协议（ADR-0026）───────────────────────────────────
 
 /**
- * Nocturne 已接入的服务协议：openai-compatible（Chat Completions）
- * 与 anthropic（Messages）。Provider 条目的 type 同时是默认协议。
+ * Nocturne 已接入的服务协议：openai-compatible（Chat Completions）、
+ * anthropic（Messages）与 openai-responses（Responses；ADR-0031 §1）。
+ * Provider 条目的 type 同时是默认协议。
  */
-export type ModelProtocol = "openai-compatible" | "anthropic";
+export type ModelProtocol = "openai-compatible" | "anthropic" | "openai-responses";
 
 /**
- * 模型的生效协议（ADR-0026 §1）：两种可用协议之一；
- * "unavailable" = 上游声明的接口无一可识别（如只有 /responses），
+ * 模型的生效协议（ADR-0026 §1）：三种可用协议之一；
+ * "unavailable" = 上游声明的接口无一可识别，
  * 该模型继续出现在清单中但不可发请求。
  */
 export type EffectiveProtocol = ModelProtocol | "unavailable";
 
-/** 协议对应的接口路径（按末尾比较；ADR-0026 §3） */
+/** 协议对应的接口路径（按末尾比较；ADR-0026 §3、ADR-0031 §1） */
 export const PROTOCOL_ENDPOINTS: Record<ModelProtocol, string> = {
   "openai-compatible": "/chat/completions",
   anthropic: "/messages",
+  "openai-responses": "/responses",
 };
 
 /** 接口路径归一化：小写、去尾斜杠、保证前导斜杠——按末尾比较 */
@@ -37,11 +39,12 @@ function normalizeEndpoint(endpoint: string): string {
 }
 
 /**
- * 由上游 supported_endpoints 推导生效协议（ADR-0026 §2 四步）：
+ * 由上游 supported_endpoints 推导生效协议（ADR-0026 §2 + ADR-0031 §1）：
  * 1. 条目 type 对应的接口在列表中 → 条目 type；
  * 2. 含 /chat/completions → openai-compatible；
  * 3. 含 /messages → anthropic；
- * 4. 否则（只有 /responses 或全部无法识别）→ "unavailable"。
+ * 4. 含 /responses → openai-responses；
+ * 5. 否则（全部无法识别）→ "unavailable"。
  * 未声明/空列表 → undefined（按未声明处理，交给调用方继续回落）。
  * 比较按路径末尾（/v1/messages ≡ /messages）。
  */
@@ -55,6 +58,7 @@ export function deriveProtocolFromEndpoints(
   if (has(PROTOCOL_ENDPOINTS[entryType])) return entryType;
   if (has(PROTOCOL_ENDPOINTS["openai-compatible"])) return "openai-compatible";
   if (has(PROTOCOL_ENDPOINTS.anthropic)) return "anthropic";
+  if (has(PROTOCOL_ENDPOINTS["openai-responses"])) return "openai-responses";
   return "unavailable";
 }
 
@@ -78,7 +82,8 @@ export function unavailableProtocolReason(endpoints: readonly string[]): string 
   const list = endpoints.length > 0 ? endpoints.join("、") : "未声明的可识别接口";
   return (
     `该模型没有可用的服务协议：上游只声明了 ${list} 接口，Nocturne 暂不支持；` +
-    `如确认该模型可用 Chat Completions 或 Messages，可在「编辑模型」或 /provider model 指定协议`
+    `如确认该模型可用 Chat Completions、Messages 或 Responses，` +
+    `可在「编辑模型」或 /provider model 指定协议`
   );
 }
 

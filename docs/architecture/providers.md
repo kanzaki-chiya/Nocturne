@@ -34,7 +34,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 推理能力只按逐模型声明解析：没有任何层声明 `reasoning`，但有非空 `reasoningEffort` 声明时，视为支持推理；都没有时默认不支持。支持推理时档位取逐模型声明，否则推导六档；推理为 `none` 时没有档位。旧服务商级 `thinking.levels/source` 忽略；读到旧 `levels` 每次启动发 `runtime.warning(provider_thinking_levels_ignored)`。用户编辑设为「否」与手写非空档位冲突时拒绝保存；手写配置自身同时声明 `none` 和非空档位时推理为准，并警告文件、服务商、模型。
 
-**协议来源（[ADR-0026](../decisions/ADR-0026-per-model-protocol.md)）**：每个模型解析一个**生效协议**——`openai-compatible`（请求 `<baseURL>/chat/completions`）或 `anthropic`（请求 `<baseURL>/messages`）。解析优先级（高者覆盖低者）：手写 `models.<id>.protocol` > 用户编辑 `userModels.<id>.protocol` > 上游 `supported_endpoints` 推导 > 条目 `type`（同时是鉴权与模型列表接口的「本家」协议）。推导按接口路径末尾比较（`/v1/messages` ≡ `/messages`，大小写与尾斜杠不敏感）：条目 `type` 对应接口在列 → `type`；否则含 `/chat/completions` → `openai-compatible`；否则含 `/messages` → `anthropic`；否则（只有 `/responses` 或全部无法识别）→ **unavailable**。上游未声明 `supported_endpoints`（或空数组）不触发推导，回落到条目 `type`。**不得**按模型名、models.dev 或内置目录猜协议。`protocol` 与 `endpoints` 同其他模型字段一样参与逐字段合并。
+**协议来源（[ADR-0026](../decisions/ADR-0026-per-model-protocol.md)）**：每个模型解析一个**生效协议**——`openai-compatible`（请求 `<baseURL>/chat/completions`）、`anthropic`（请求 `<baseURL>/messages`）或 `openai-responses`（请求 `<baseURL>/responses`，[ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md) §1）。解析优先级（高者覆盖低者）：手写 `models.<id>.protocol` > 用户编辑 `userModels.<id>.protocol` > 上游 `supported_endpoints` 推导 > 条目 `type`（同时是鉴权与模型列表接口的「本家」协议）。推导按接口路径末尾比较（`/v1/messages` ≡ `/messages`，大小写与尾斜杠不敏感）：条目 `type` 对应接口在列 → `type`；否则含 `/chat/completions` → `openai-compatible`；否则含 `/messages` → `anthropic`；否则含 `/responses` → `openai-responses`；否则（全部无法识别）→ **unavailable**，说明列出无法识别的接口。上游未声明 `supported_endpoints`（或空数组）不触发推导，回落到条目 `type`。**不得**按模型名、models.dev 或内置目录猜协议。`protocol` 与 `endpoints` 同其他模型字段一样参与逐字段合并。
 
 ## 3. 配置形态（示意）
 
@@ -69,7 +69,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 | 适配器 | 覆盖 | 阶段 | 传输实现 |
 |---|---|---|---|
 | `openai-compatible`（Chat Completions） | DeepSeek、GLM、OpenRouter、Ollama / vLLM / LM Studio 等 OpenAI 兼容服务 | Phase 1 | `@ai-sdk/openai-compatible`（peer: `ai`） |
-| `openai`（Responses API） | OpenAI 官方服务（推理内容回传、服务端状态等） | 按需 | `openai` 官方 SDK |
+| `openai-responses`（Responses API） | OpenAI Responses 兼容服务（OpenCode Go 的 GPT/Grok 系等只声明 `/responses` 的模型） | Phase 2 | `@ai-sdk/openai`（peer: `ai`），见 [ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md) |
 | `anthropic`（Messages） | Anthropic 及兼容 Anthropic 协议的服务 | Phase 2 | `@ai-sdk/anthropic`（peer: `ai`），见 [ADR-0006](../decisions/ADR-0006-anthropic-transport.md) |
 | `gemini` | Google Gemini | 按需 | 待定 |
 
@@ -77,7 +77,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 - **`openai-compatible` 用 `@ai-sdk/openai-compatible`**：该包专为"实现 `/v1/chat/completions` 的第三方服务"设计，已处理 SSE 边界、按 `index` 分片的 `tool_calls` 组装、用量与错误体归一化；自托管 / 中转兼容服务是它的明示使用场景。SDK 类型只存在于适配器内部，不泄漏到 Core（ADR-0005）。已知风险是各家在推理字段（`reasoning_content` 等）、用量口径、错误体结构上的差异不一定全部透传——契约测试与真实服务冒烟测试用于检验这一点；若暴露拿不到必需字段的限制，退路是适配器内自建 `fetch` + SSE 解析（不引第三方 SDK）。
 - **`anthropic` 用 `@ai-sdk/anthropic`**（[ADR-0006](../decisions/ADR-0006-anthropic-transport.md)）：与 openai-compatible 共用 `streamText` / `TextStreamPart` 归一化路径。Anthropic 特有字段在适配器内经 `providerMetadata` ↔ `providerData` 往返（thinking 签名回传、`cache_control` 断点）；`baseURL` 可省略（默认官方端点），凭据经 `apiKeyEnv` 环境变量名引用。冒烟变量为 `NOCTURNE_SMOKE_ANTHROPIC_*`（workflow.md 第 5 节）。
-- **OpenAI 官方 API 将来走 `openai` SDK 的 Responses API**，与 `openai-compatible` 是不同的适配器：兼容只保证 Chat Completions，不保证 Responses / Files / Assistants 等能力。
+- **`openai-responses` 用 `@ai-sdk/openai` 的 Responses 模型**（`provider.responses(id)`，[ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md) §1）：与另外两种协议共用 `streamText` 归一化路径；请求发送 `store: false`（无状态，每次带完整历史，不使用 `previous_response_id`），推理项以 `include: ["reasoning.encrypted_content"]` 取回加密内容并经 `providerMetadata` ↔ `providerData` 往返；`reasoningEffort` 档位翻译为 `reasoning.effort` 并请求 `reasoning.summary: "auto"`（推理摘要当作可见推理文本）；鉴权只发 `Authorization: Bearer`（`anthropic` 条目下也一样），条目级 `providerOptions` 不交给它。
 - 无论底层如何实现，适配器都必须通过同一组契约测试（[provider-api.md](../protocols/provider-api.md) 第 4 节的流式契约）；遇到具体限制时按 ADR-0005 替换传输实现，不改 Core 接口。
 
 各协议的主要差异与处理位置：
@@ -90,9 +90,9 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 | 用量字段含义 | 输入 token 是否已包含缓存 token 各家不同 | 适配器换算为统一语义 |
 | 错误格式 | HTTP 状态码、错误体结构、限流头 | 适配器映射为 `ProviderError.kind` |
 
-**条目级路由（[ADR-0026](../decisions/ADR-0026-per-model-protocol.md)）**：每个服务商条目仍是一个 `Provider` 实例（`id`/`type` 语义不变），实例内部按需构造 `openai-compatible` 与 `anthropic` 两种适配器并复用，共用凭据解析器、`headers` 与诊断通道；`stream()` 按请求模型的生效协议分发（第 2 节）。两种协议共用同一条目的 `baseURL`：`anthropic` 请求 `<baseURL>/messages`（条目省略 `baseURL` 时用官方 `https://api.anthropic.com/v1`），`openai-compatible` 请求 `<baseURL>/chat/completions`（条目未声明 `baseURL` 时以 `ProviderError(kind="invalid_request")` 拒绝，不发请求）。
+**条目级路由（[ADR-0026](../decisions/ADR-0026-per-model-protocol.md)）**：每个服务商条目仍是一个 `Provider` 实例（`id`/`type` 语义不变），实例内部按需构造 `openai-compatible`、`anthropic` 与 `openai-responses` 三种适配器并复用，共用凭据解析器、`headers` 与诊断通道；`stream()` 按请求模型的生效协议分发（第 2 节）。三种协议共用同一条目的 `baseURL`：`anthropic` 请求 `<baseURL>/messages`（条目省略 `baseURL` 时用官方 `https://api.anthropic.com/v1`），`openai-compatible` 请求 `<baseURL>/chat/completions`、`openai-responses` 请求 `<baseURL>/responses`（条目未声明 `baseURL` 时两者都以 `ProviderError(kind="invalid_request")` 拒绝，不发请求）。
 
-跨协议的鉴权写法：鉴权以条目 `type` 为「本家」——`anthropic` 条目本家发 `x-api-key`（不发 `Authorization`，避免官方端点将其当 OAuth 令牌），`openai-compatible` 条目本家发 `Authorization: Bearer`；`openai-compatible` 条目下的 `anthropic` 协议请求**同时携带** `x-api-key` 与 `Authorization: Bearer`（`anthropic-version` 由 SDK 注入）。条目级 `providerOptions` 只交给与条目 `type` 同协议的请求。推导为 `unavailable` 的模型照常出现在清单中（`ModelInfo.unavailable`），选择或请求时以同一说明拒绝、不发 HTTP（ADR-0026 §5）。`message.assistant` 事件记录产生该消息时的协议；上下文回传 Provider 专有数据（`providerData`）要求「同一服务商且同一协议」（context.md 第 7 节）。
+跨协议的鉴权写法：鉴权以条目 `type` 为「本家」——`anthropic` 条目本家发 `x-api-key`（不发 `Authorization`，避免官方端点将其当 OAuth 令牌），`openai-compatible` 条目本家发 `Authorization: Bearer`；`openai-compatible` 条目下的 `anthropic` 协议请求**同时携带** `x-api-key` 与 `Authorization: Bearer`（`anthropic-version` 由 SDK 注入）；`openai-responses` 协议请求无论条目 `type` 都只发 `Authorization: Bearer`（ADR-0031 §1）。条目级 `providerOptions` 只交给与条目 `type` 同协议的请求。推导为 `unavailable` 的模型照常出现在清单中（`ModelInfo.unavailable`），选择或请求时以同一说明拒绝、不发 HTTP（ADR-0026 §5）。`message.assistant` 事件记录产生该消息时的协议；上下文回传 Provider 专有数据（`providerData`）要求「同一服务商且同一协议」（context.md 第 7 节）。
 
 ## 5. 不属于 Provider 的事
 

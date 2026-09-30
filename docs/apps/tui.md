@@ -238,7 +238,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 - 显示名、上下文长度、最大输出：直接键入编辑（输入框预填用户编辑值；留空 = 跟随；数字按原始整数显示）；
 - 图片输入与推理：`←`/`→` 在「跟随 / 是 / 否」间切换；旧 `hidden` 在推理行显示为「是」；
 - 思考档位：仅推理为「是」时显示；「编辑档位…」打开多选弹层，首项「跟随」与「不支持思考强度」（= 空数组）各自独占互斥，其余六档可多选；弹层有「取消」「确认」按钮；
-- 协议（ADR-0026 §7）：`←`/`→` 在「跟随 / Chat Completions / Messages」间切换，选「跟随」清除用户编辑；写 `userModels.<id>.protocol`；
+- 协议（ADR-0026 §7）：`←`/`→` 在「跟随 / Chat Completions / Messages / Responses」间切换，选「跟随」清除用户编辑；写 `userModels.<id>.protocol`（`responses` → `openai-responses`，ADR-0031 §1）；
 - `↑`/`↓` 移动时跳过不可编辑行（只读灰显）；来源为 `config.json` 等手写层的字段不可聚焦。
 
 底部按钮顺序为 `[ 取消 ]`、`[ 保存 ]`，下一行提示 `Tab/方向键移动  空格/Enter 选择  Esc 取消`；保存状态与失败原因显示在按钮上方的固定行。键鼠规则见 §3。保存仍经 `saveModelSettings` 写入 providers.json 的 `userModels`，成功后 reload 配置 + `updateProviders` 并回列表、显示结果；校验或写盘失败保留草稿，不关闭。取消有修改时先确认放弃。`/provider model <名> [<模型>]` 直达模型列表，带模型 id 时直达编辑对话框。

@@ -442,8 +442,14 @@ export function patchValueError(patch: ModelSettingsPatch): string | undefined {
     return `思考档位只能是 ${REASONING_EFFORT_LEVELS.join("/")}`;
   }
   const p: unknown = patch.protocol;
-  if (p !== undefined && p !== null && p !== "openai-compatible" && p !== "anthropic") {
-    return `协议只能为 openai-compatible/anthropic`;
+  if (
+    p !== undefined &&
+    p !== null &&
+    p !== "openai-compatible" &&
+    p !== "anthropic" &&
+    p !== "openai-responses"
+  ) {
+    return `协议只能为 openai-compatible/anthropic/openai-responses`;
   }
   return undefined;
 }

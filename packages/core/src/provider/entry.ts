@@ -8,6 +8,7 @@
 import { PROTOCOL_ENDPOINTS, type Diagnostics, type ModelProtocol } from "../protocol/index.js";
 import { createAnthropicProvider } from "./adapters/anthropic.js";
 import { createOpenAICompatibleProvider } from "./adapters/openai-compatible.js";
+import { createOpenAIResponsesProvider } from "./adapters/openai-responses.js";
 import { ProviderError } from "./errors.js";
 import { withEffectiveProtocol } from "./effective-protocol.js";
 import { withReasoningEfforts } from "./reasoning.js";
@@ -72,6 +73,7 @@ export function createEntryProvider(
 
   let openaiAdapter: Provider | undefined;
   let anthropicAdapter: Provider | undefined;
+  let responsesAdapter: Provider | undefined;
 
   const openai = (): Provider => {
     openaiAdapter ??= createOpenAICompatibleProvider(
@@ -107,6 +109,20 @@ export function createEntryProvider(
     );
     return anthropicAdapter;
   };
+  const responses = (): Provider => {
+    responsesAdapter ??= createOpenAIResponsesProvider(
+      {
+        ...common,
+        type: "openai-responses",
+        baseURL: config.baseURL ?? "",
+        // ADR-0031 §6：条目级 providerOptions 不给 Responses 适配器
+        // （协议选项固定由适配器写死：store:false + reasoning.encrypted_content）
+      },
+      env,
+      fetchImpl,
+    );
+    return responsesAdapter;
+  };
 
   /** 请求的生效协议：决议值随请求携带 > 清单盖章 > 条目 type */
   const protocolOf = (request: ModelRequest): ModelProtocol =>
@@ -134,15 +150,19 @@ export function createEntryProvider(
         return;
       }
       // anthropic 条目省略 baseURL 时没有可构造 openai 请求的地址
-      // （api.anthropic.com 不提供 Chat Completions）
+      // （api.anthropic.com 不提供 Chat Completions / Responses）
       if (config.baseURL === undefined || config.baseURL === "") {
         throw new ProviderError({
           kind: "invalid_request",
           message:
             `服务商 "${config.id}" 未声明 baseURL，模型 ${request.model} 无法按 ` +
-            `openai-compatible 协议请求${PROTOCOL_ENDPOINTS["openai-compatible"]}`,
+            `${protocol} 协议请求${PROTOCOL_ENDPOINTS[protocol]}`,
           retryable: false,
         });
+      }
+      if (protocol === "openai-responses") {
+        yield* responses().stream(request, signal);
+        return;
       }
       yield* openai().stream(request, signal);
     },

@@ -339,6 +339,7 @@ function modelFieldText(key: ModelFieldKey, value: unknown): string {
   if (key === "protocol") {
     if (value === "openai-compatible") return "Chat Completions";
     if (value === "anthropic") return "Messages";
+    if (value === "openai-responses") return "Responses";
     return "—";
   }
   return typeof value === "string" || typeof value === "number" ? String(value) : "—";
@@ -372,10 +373,11 @@ function parseModelField(key: ModelFieldKey, input: string): unknown {
       return levels.length > 0 && levels.every(isReasoningEffortLevel) ? levels : undefined;
     }
     case "protocol": {
-      // ADR-0026 第 7 节：CLI 输入 chat / messages；- 在调用方处理
+      // ADR-0026 第 7 节：CLI 输入 chat / messages / responses；- 在调用方处理
       const t = s.toLowerCase();
       if (t === "chat") return "openai-compatible";
       if (t === "messages") return "anthropic";
+      if (t === "responses") return "openai-responses";
       return undefined;
     }
   }
@@ -436,7 +438,7 @@ export async function runProviderModelWizard(
               : key === "reasoningEffort"
                 ? `逗号分隔（${REASONING_EFFORT_LEVELS.join(",")}）或 none = 不支持；- 清除用户编辑`
                 : key === "protocol"
-                  ? "chat / messages；- 清除用户编辑（跟随）"
+                  ? "chat / messages / responses；- 清除用户编辑（跟随）"
                   : "正整数；- 清除用户编辑",
     });
     const t = answer.trim();

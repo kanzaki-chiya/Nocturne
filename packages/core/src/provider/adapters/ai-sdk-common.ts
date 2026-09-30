@@ -292,6 +292,17 @@ export function mapPart(
         },
       ];
     }
+    case "reasoning-start":
+    case "reasoning-end": {
+      // 推理块的专有数据也可能只出现在边界事件上（ADR-0031 §1：
+      // Responses 在 reasoning-end 携带 encrypted_content）。以空 text 的
+      // reasoning_delta 上送——stream.ts 对 text==="" 只合并数据不产生新块
+      const providerData =
+        part.providerMetadata !== undefined ? { ...part.providerMetadata } : undefined;
+      return providerData !== undefined
+        ? [{ type: "reasoning_delta", text: "", providerData }]
+        : [];
+    }
     case "tool-input-start":
       toolNames.set(part.id, part.toolName);
       return [];

@@ -235,18 +235,28 @@ describe("deriveProtocolFromEndpoints", () => {
     expect(deriveProtocolFromEndpoints(both, "anthropic")).toBe("anthropic");
   });
 
-  it("条目本家接口不在列表 → 依次 /chat/completions、/messages", () => {
+  it("条目本家接口不在列表 → 依次 /chat/completions、/messages、/responses", () => {
     expect(deriveProtocolFromEndpoints(["/messages"], "openai-compatible")).toBe("anthropic");
     expect(deriveProtocolFromEndpoints(["/chat/completions"], "anthropic")).toBe(
       "openai-compatible",
     );
+    // ADR-0031 §1：/responses 是第三个可识别接口
+    expect(deriveProtocolFromEndpoints(["/responses"], "openai-compatible")).toBe(
+      "openai-responses",
+    );
+    expect(deriveProtocolFromEndpoints(["/responses"], "anthropic")).toBe("openai-responses");
   });
 
-  it("只有 /responses 或全部无法识别 → unavailable", () => {
-    expect(deriveProtocolFromEndpoints(["/responses"], "openai-compatible")).toBe("unavailable");
-    expect(deriveProtocolFromEndpoints(["/responses", "/embeddings"], "anthropic")).toBe(
-      "unavailable",
-    );
+  it("条目 type 优先于 /responses：三接口并存时按本家", () => {
+    const all = ["/chat/completions", "/messages", "/responses"];
+    expect(deriveProtocolFromEndpoints(all, "openai-compatible")).toBe("openai-compatible");
+    expect(deriveProtocolFromEndpoints(all, "anthropic")).toBe("anthropic");
+    expect(deriveProtocolFromEndpoints(["/messages", "/responses"], "anthropic")).toBe("anthropic");
+  });
+
+  it("全部无法识别 → unavailable", () => {
+    expect(deriveProtocolFromEndpoints(["/embeddings"], "openai-compatible")).toBe("unavailable");
+    expect(deriveProtocolFromEndpoints(["/embeddings", "/files"], "anthropic")).toBe("unavailable");
   });
 
   it("按路径末尾比较：/v1/messages ≡ /messages；大小写与尾斜杠不敏感", () => {
@@ -271,6 +281,9 @@ describe("resolveEffectiveProtocol", () => {
       "anthropic",
     );
     expect(resolveEffectiveProtocol(undefined, ["/responses"], "openai-compatible")).toBe(
+      "openai-responses",
+    );
+    expect(resolveEffectiveProtocol(undefined, ["/embeddings"], "openai-compatible")).toBe(
       "unavailable",
     );
     // 无声明无 endpoints → 条目 type

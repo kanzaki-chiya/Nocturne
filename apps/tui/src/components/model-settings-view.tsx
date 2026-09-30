@@ -240,8 +240,8 @@ const CYCLE_FIELDS: ReadonlySet<FieldKey> = new Set(["imageInput", "reasoning", 
 
 type TriState = "follow" | "true" | "false";
 type ReasoningDraft = "follow" | "yes" | "no";
-/** 协议选项（ADR-0026 §7）：跟随 / Chat Completions / Messages */
-type ProtocolDraft = "follow" | "chat" | "messages";
+/** 协议选项（ADR-0026 §7；Responses 由 ADR-0031 §1 接入）：跟随 / Chat / Messages / Responses */
+type ProtocolDraft = "follow" | "chat" | "messages" | "responses";
 
 interface Draft {
   displayName: string;
@@ -274,7 +274,9 @@ function initDraft(view: ModelSettingsView): Draft {
         ? "follow"
         : f.protocol.userValue === "anthropic"
           ? "messages"
-          : "chat",
+          : f.protocol.userValue === "openai-responses"
+            ? "responses"
+            : "chat",
   };
 }
 
@@ -300,6 +302,7 @@ function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>)
     if (key === "protocol") {
       if (value === "openai-compatible") return "Chat Completions";
       if (value === "anthropic") return "Messages";
+      if (value === "openai-responses") return "Responses";
       return "协议不支持";
     }
     return scalarText(value);
@@ -322,7 +325,13 @@ function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>)
   }
   if (key === "protocol") {
     const d = draft.protocol;
-    return d === "follow" ? follow : d === "chat" ? "Chat Completions" : "Messages";
+    return d === "follow"
+      ? follow
+      : d === "chat"
+        ? "Chat Completions"
+        : d === "messages"
+          ? "Messages"
+          : "Responses";
   }
   // reasoningEffort
   const d = draft.reasoningEffort;
@@ -361,7 +370,12 @@ export function draftToPatch(view: ModelSettingsView, draft: Draft): ModelSettin
   else if (f.reasoningEffort.userValue !== undefined) patch.reasoningEffort = null;
   // ADR-0026 §7：跟随 = 清除用户编辑（写 null），仅在有用户编辑时
   if (draft.protocol !== "follow")
-    patch.protocol = draft.protocol === "messages" ? "anthropic" : "openai-compatible";
+    patch.protocol =
+      draft.protocol === "messages"
+        ? "anthropic"
+        : draft.protocol === "responses"
+          ? "openai-responses"
+          : "openai-compatible";
   else if (f.protocol.userValue !== undefined) patch.protocol = null;
   return patch;
 }
@@ -503,10 +517,11 @@ export function ModelEditPane({
         ? ["follow", "true", "false"]
         : field === "reasoning"
           ? ["follow", "yes", "no"]
-          : ["follow", "chat", "messages"];
+          : ["follow", "chat", "messages", "responses"];
     draftRef.current = {
       ...d,
-      [field]: choices[Math.max(0, Math.min(2, choices.indexOf(d[field]) + delta))],
+      [field]:
+        choices[Math.max(0, Math.min(choices.length - 1, choices.indexOf(d[field]) + delta))],
     };
     setDraft(draftRef.current);
   };
@@ -674,7 +689,9 @@ export function ModelEditPane({
     const controlRows =
       CYCLE_FIELDS.has(key) && !readonly && view.fields[key].editable
         ? segmentedLines(
-            key === "protocol" ? ["跟随", "Chat Completions", "Messages"] : ["跟随", "是", "否"],
+            key === "protocol"
+              ? ["跟随", "Chat Completions", "Messages", "Responses"]
+              : ["跟随", "是", "否"],
             0,
             Math.max(1, available),
             single ? 1 : 2,
@@ -710,7 +727,7 @@ export function ModelEditPane({
   const visible = single ? fields.filter((field) => field === currentField) : fields;
   const choices = (field: FieldKey): string[] =>
     field === "protocol"
-      ? ["follow", "chat", "messages"]
+      ? ["follow", "chat", "messages", "responses"]
       : field === "reasoning"
         ? ["follow", "yes", "no"]
         : ["follow", "true", "false"];
@@ -821,7 +838,9 @@ export function ModelEditPane({
             draft[field as "imageInput" | "reasoning" | "protocol"],
           );
           const options =
-            field === "protocol" ? ["跟随", "Chat Completions", "Messages"] : ["跟随", "是", "否"];
+            field === "protocol"
+              ? ["跟随", "Chat Completions", "Messages", "Responses"]
+              : ["跟随", "是", "否"];
           const lines = segmentedLines(options, selected, rect.width, single ? 1 : 2);
           let option = 0;
           for (const [lineIndex, line] of lines.entries()) {
@@ -924,11 +943,13 @@ export function ModelEditPane({
           ? ["follow", "true", "false"].indexOf(draft.imageInput)
           : field === "reasoning"
             ? ["follow", "yes", "no"].indexOf(draft.reasoning)
-            : ["follow", "chat", "messages"].indexOf(draft.protocol);
+            : ["follow", "chat", "messages", "responses"].indexOf(draft.protocol);
       control = (
         <Segmented
           options={
-            field === "protocol" ? ["跟随", "Chat Completions", "Messages"] : ["跟随", "是", "否"]
+            field === "protocol"
+              ? ["跟随", "Chat Completions", "Messages", "Responses"]
+              : ["跟随", "是", "否"]
           }
           selected={selected}
           inline

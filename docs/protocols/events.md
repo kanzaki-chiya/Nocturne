@@ -72,7 +72,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `session.config_changed` | — | 变化的字段：`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018）、`shell?: { kind, path }`（shell 切换，ADR-0022：折叠时在该事件位置留 `note` 历史条目给模型，见 [context.md](../architecture/context.md) 第 3 节） |
 | `turn.started` | ✓ | `turnIndex` |
 | `message.user` | ✓ | `messageId`、`content: ContentBlock[]`、`attachments?: ImageAttachment[]`（v0.5 新增可选字段，见第 4 节；用户消息粘贴的图片在后续版本接入，本版只定义形状与折叠保留） |
-| `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`finishReason: FinishReason \| "aborted"`、`protocol?: "openai-compatible" \| "anthropic"`（产生该消息时的生效协议，ADR-0026 §6；旧日志无此字段，缺省时 `providerData` 回传只比较服务商） |
+| `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`finishReason: FinishReason \| "aborted"`、`protocol?: "openai-compatible" \| "anthropic" \| "openai-responses"`（产生该消息时的生效协议，ADR-0026 §6、ADR-0031 §1；旧日志无此字段，缺省时 `providerData` 回传只比较服务商） |
 | `tool.started` | ✓ | `callId`、`name`、`input`（规范化后）、`subjects: PermissionSubject[]`（解析后）、`permission: { action, source, rule? }`（`rule` 为命中规则的人读说明，见 [permissions.md](../architecture/permissions.md) 5.3） |
 | `permission.requested` | ✓ | `requestId`、`callId`、`subjects`、`reason`、`options`（完整选项集：`allow_once`、`allow_session`、`allow_project`、`deny`、`deny_stop`） |
 | `permission.resolved` | ✓ | `requestId?`、`callId`、`action: "allow" \| "deny"`、`source: "user" \| "rule" \| "grant" \| "non_interactive" \| "cancelled" \| "hook"`、`rule?`、`remember?`、`feedback?` |

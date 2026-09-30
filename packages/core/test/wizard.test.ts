@@ -323,6 +323,19 @@ describe("runProviderModelWizard", () => {
     expect(s2[0]?.patch).toEqual({ reasoningEffort: [] });
   });
 
+  it("协议输入 chat / messages / responses 分别映射为三种协议", async () => {
+    for (const [input, protocol] of [
+      ["chat", "openai-compatible"],
+      ["messages", "anthropic"],
+      ["responses", "openai-responses"],
+    ] as const) {
+      const { config, saved } = makeConfig([baseView()]);
+      const { io } = scriptedIo(["", "", "", "", "", "", input]);
+      await runProviderModelWizard(io, config, "corp", "m1");
+      expect(saved[0]?.patch).toEqual({ protocol });
+    }
+  });
+
   it("「-」清除用户编辑 → patch 写 null", async () => {
     const { config, saved } = makeConfig([baseView()]);
     const { io } = scriptedIo(["-", "-", "", "", "", "", ""]);

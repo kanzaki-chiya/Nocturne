@@ -36,8 +36,8 @@ interface ModelInfo {
       未声明时界面留空而不是显示估算值（provider-setup.md 第 7 节） */
   pricing?: { input?: number; output?: number }
   /** 生效协议（ADR-0026 §2）：写入请求时作为本模型要走的协议
-      （手写/编辑声明 > endpoints 推导 > 条目 type） */
-  protocol?: "openai-compatible" | "anthropic"
+      （手写/编辑声明 > endpoints 推导 > 条目 type）；openai-responses 见 ADR-0031 §1 */
+  protocol?: "openai-compatible" | "anthropic" | "openai-responses"
   /** 上游声明的服务接口原文（supported_endpoints；ADR-0026 §2） */
   endpoints?: string[]
   /** 生效协议为 "unavailable" 时的说明（ADR-0026 §5）：模型照常列出，
@@ -81,12 +81,12 @@ interface ModelRequest {
   cachePrefix?: { systemBlocks: number; messages: number }   // 可缓存前缀的边界提示，适配器自行决定是否使用
   /** 本请求的生效协议（ADR-0026 §4）：由 Runtime 从 resolved ModelInfo 透传，
       条目路由据此分发到对应协议的适配器；缺省时按清单盖章或条目 type */
-  protocol?: "openai-compatible" | "anthropic"
+  protocol?: "openai-compatible" | "anthropic" | "openai-responses"
   providerOptions?: Record<string, unknown>                  // 请求级 Provider 专有选项，原样交给适配器，Core 不解释
 }
 ```
 
-`providerOptions` 的命名空间由适配器定义：openai-compatible 以 Provider id 为键（`{ "<id>": {...} }`）；anthropic 固定为 `{ anthropic: {...} }`，与 Provider id 无关。适配器把**配置级** `providerOptions`（ProviderConfig）与**请求级** `providerOptions`（ModelRequest）做浅合并后填入该命名空间，请求级覆盖同名键；两者都缺省时不产生该字段。同一服务商条目内可能存在两种协议的请求（ADR-0026）：配置级 `providerOptions` 只交给与条目 `type` 同协议的请求，跨协议请求不带它。
+`providerOptions` 的命名空间由适配器定义：openai-compatible 以 Provider id 为键（`{ "<id>": {...} }`）；anthropic 固定为 `{ anthropic: {...} }`；openai-responses 固定为 `{ openai: {...} }`，与 Provider id 无关。适配器把**配置级** `providerOptions`（ProviderConfig）与**请求级** `providerOptions`（ModelRequest）做浅合并后填入该命名空间，请求级覆盖同名键；两者都缺省时不产生该字段。同一服务商条目内可能存在多种协议的请求（ADR-0026）：配置级 `providerOptions` 只交给与条目 `type` 同协议的请求，跨协议请求（含 openai-responses，它永远不是条目 `type`）不带它。
 
 `reasoningEffort` 是归一化的中性档位，由 Runtime 按会话配置赋值（`"off"` 与无可用档位时该字段缺省）；适配器把它翻译为各自协议的思考参数，Agent Loop / Context 不出现服务商分支：
 

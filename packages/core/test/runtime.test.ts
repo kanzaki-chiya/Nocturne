@@ -1108,18 +1108,27 @@ describe("按模型协议（ADR-0026）", () => {
     const sessionsDir = makeTmpDir("nct-rt-sessions-");
     const home = makeTmpDir("nct-rt-home-");
     writeProviders(home, [
-      entryOf({ chat: ["/chat/completions"], msg: ["/messages"], bad: ["/responses"] }),
+      entryOf({
+        chat: ["/chat/completions"],
+        msg: ["/messages"],
+        resp: ["/responses"],
+        bad: ["/embeddings"],
+      }),
     ]);
     const config = await loadConfig(createPlatform(), { nocturneHome: home, env: () => undefined });
     const runtime = await createRuntime({ cwd: workspace, sessionsDir, config });
 
-    // 模型页：不可用模型照常列出并带说明；两协议各按 endpoints 盖章
+    // 模型页：不可用模型照常列出并带说明；三协议各按 endpoints 盖章
     const models = runtime.listModels();
     const bad = models.find((m) => m.ref.model === "bad");
     expect(bad?.unavailable?.reason).toContain("没有可用的服务协议");
     expect(bad?.protocol).toBeUndefined();
     expect(models.find((m) => m.ref.model === "chat")?.protocol).toBe("openai-compatible");
     expect(models.find((m) => m.ref.model === "msg")?.protocol).toBe("anthropic");
+    // /responses-only → openai-responses（ADR-0031 §1），不再是不可用
+    const resp = models.find((m) => m.ref.model === "resp");
+    expect(resp?.protocol).toBe("openai-responses");
+    expect(resp?.unavailable).toBeUndefined();
 
     // --model / createSession 选到不可用模型即拒绝
     await expect(runtime.createSession({ model: "gw/bad" })).rejects.toMatchObject({
@@ -1145,8 +1154,8 @@ describe("按模型协议（ADR-0026）", () => {
     const runtime = await createRuntime({ cwd: workspace, sessionsDir, config });
     const session = await runtime.createSession({ model: "gw/m1" });
 
-    // 模拟 refresh 后上游只剩 /responses：同一条目下该模型变为不可用
-    writeProviders(home, [entryOf({ m1: ["/responses"] })]);
+    // 模拟 refresh 后上游只剩无法识别的接口：同一条目下该模型变为不可用
+    writeProviders(home, [entryOf({ m1: ["/embeddings"] })]);
     runtime.updateProviders(
       await loadConfig(platform, { nocturneHome: home, env: () => undefined }),
     );
