@@ -274,14 +274,15 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     mouse.emit({ type: "press", button: 0, x: 1, y });
     // 终端报告的坐标最小为 1：拖出上沿时也只会报第一行
     mouse.emit({ type: "drag", button: 0, x: 1, y: 1 });
-    await waitFor(() => (lastFrame() ?? "").includes("起点问题"));
+    // 自动滚动每步都重绘整段长对话；全量并发时 CPU 紧张，滚到顶可能超过 5s
+    await waitFor(() => (lastFrame() ?? "").includes("起点问题"), 15_000);
     await pause(300); // 按住期间继续滚到顶，选区头跟到第一行
     mouse.emit({ type: "release", button: 0, x: 1, y: 1 });
     await waitFor(() => calls.length === 1);
     expect(calls[0]?.input).toContain("起点问题");
     unmount();
     await session.close();
-  });
+  }, 30_000);
 
   it("选区存在时 Ctrl+C 复制不退出；Esc 先清选区", async () => {
     const { runtime, session } = await longSession();

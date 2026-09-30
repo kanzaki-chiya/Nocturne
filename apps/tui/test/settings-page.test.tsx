@@ -191,11 +191,16 @@ describe("ADR-0034 设置页", () => {
       screen.mouse()?.click(id, { type: "click", row: 1, col: 1, button: 0 } as never);
     expect(screen.mouse()?.boxes.some((box) => box.id === "preset:4")).toBe(true);
     click("preset:4");
+    // 等草稿渲染出来再点取消：取消按「是否有未保存修改」决定是否弹放弃确认
+    await waitFor(() => (screen.lastFrame() ?? "").includes("* full-access"));
     await pause();
     click("cancel");
+    // 每次换层后稍等：鼠标帧先于新层的回调就绪上报，立刻点击会落在旧闭包上
     await waitFor(() => screen.mouse()?.layer === "settings-discard");
+    await pause();
     click("continue");
     await waitFor(() => screen.mouse()?.layer === "settings");
+    await pause();
     click("save");
     await waitFor(() => screen.close.mock.calls.length === 1);
     expect(screen.update).toHaveBeenCalledWith({ "permissions.preset": "full-access" });

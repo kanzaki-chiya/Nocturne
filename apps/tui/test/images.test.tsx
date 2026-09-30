@@ -231,7 +231,8 @@ describe("TUI 图片输入", () => {
       unmount();
       await active.close();
     }
-  });
+    // 四轮各挂载一次 App，全量并发下接近默认 15s 上限
+  }, 30_000);
 
   it("插入后切换到不支持图片的模型：拒绝提交且保留占位", async () => {
     const { runtime, active } = await session();
