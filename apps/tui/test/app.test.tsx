@@ -386,7 +386,7 @@ describe("TUI", () => {
       unmount();
       return frame;
     };
-    expect(frameAt(120)).not.toContain("缓存");
+    expect(frameAt(120)).toContain("缓存 0% • 0.1% / 1M");
     view.usage = { inputTokens: 40_000, outputTokens: 100, cacheReadTokens: 30_000 };
     const wide = frameAt(120);
     expect(wide).toContain("fairly");

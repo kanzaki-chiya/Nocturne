@@ -54,12 +54,11 @@ export function formatModelLabel(
 
 /**
  * 本会话累计缓存命中率：累计 cacheReadTokens / 累计 inputTokens（包含口径，events.md Usage）。
- * 从未报告过缓存读写（服务商不返回或未启用缓存）时返回 undefined，不显示该段。
+ * 尚无用量或服务商未返回缓存数据时显示 0%（一眼可知是上游没缓存，不隐藏该段）。
  */
-export function formatCacheHitRate(usage: Usage): string | undefined {
+export function formatCacheHitRate(usage: Usage): string {
   const read = usage.cacheReadTokens ?? 0;
-  const write = usage.cacheWriteTokens ?? 0;
-  if (read + write <= 0 || !(usage.inputTokens > 0)) return undefined;
+  if (!(usage.inputTokens > 0) || !(read > 0)) return "缓存 0%";
   const pct = Math.min(100, (read / usage.inputTokens) * 100);
   return `缓存 ${pct < 10 && pct > 0 ? pct.toFixed(1) : Math.round(pct)}%`;
 }

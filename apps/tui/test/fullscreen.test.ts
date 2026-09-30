@@ -85,8 +85,8 @@ describe("状态栏格式", () => {
     expect(formatContextOccupancy(1000, 1_000_000)).toBe("0.1% / 1M");
     expect(formatContextOccupancy(128_000, 128_000)).toBe("100% / 128K");
     expect(formatContextOccupancy(1500, undefined)).toBe("1.5K");
-    // 缓存命中率：累计读 / 累计输入（包含口径）；从未报告缓存读写时不显示
-    expect(formatCacheHitRate({ inputTokens: 1000, outputTokens: 5 })).toBeUndefined();
+    // 缓存命中率：累计读 / 累计输入（包含口径）；无用量或服务商未返回缓存数据时为 0%
+    expect(formatCacheHitRate({ inputTokens: 1000, outputTokens: 5 })).toBe("缓存 0%");
     expect(formatCacheHitRate({ inputTokens: 1000, outputTokens: 5, cacheWriteTokens: 900 })).toBe(
       "缓存 0%",
     );
@@ -96,9 +96,9 @@ describe("状态栏格式", () => {
     expect(formatCacheHitRate({ inputTokens: 1000, outputTokens: 5, cacheReadTokens: 42 })).toBe(
       "缓存 4.2%",
     );
-    expect(
-      formatCacheHitRate({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 1 }),
-    ).toBeUndefined();
+    expect(formatCacheHitRate({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 1 })).toBe(
+      "缓存 0%",
+    );
     const label = formatModelLabel(
       { provider: "command code", model: "deepseek/deepseek-v4.1-flash" },
       [

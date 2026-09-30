@@ -129,10 +129,12 @@ export function StatusBar({
   const dirSeg: Segment | undefined =
     width >= 80 && dir !== "" ? { text: dir, color: theme.secondary, highlight: false } : undefined;
   if (dirSeg !== undefined) segments.push(dirSeg);
-  const cacheText = formatCacheHitRate(view.usage);
-  const cacheSeg: Segment | undefined =
-    cacheText !== undefined ? { text: cacheText, color: theme.muted, highlight: false } : undefined;
-  if (cacheSeg !== undefined) segments.push(cacheSeg);
+  const cacheSeg: Segment = {
+    text: formatCacheHitRate(view.usage),
+    color: theme.muted,
+    highlight: false,
+  };
+  segments.push(cacheSeg);
   segments.push({ text: ctx, color: theme.muted, highlight: false });
 
   const head = segments[0];
