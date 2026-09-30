@@ -20,6 +20,7 @@ import {
   type ModelSettingsView,
   type PermissionReply,
   type ProviderOverview,
+  type QuestionReply,
   type Runtime,
   type RuntimeSession,
   type SessionSummary,
@@ -93,6 +94,7 @@ import { ModelPicker, type PickerScope } from "./components/model-picker.js";
 import { Panel } from "./components/panel.js";
 import { PermissionDialog } from "./components/permission-dialog.js";
 import { PickList, type PickItem } from "./components/pick-list.js";
+import { QuestionDialog, questionSummary } from "./components/question-dialog.js";
 import { ProviderPage, type ProviderOp } from "./components/provider-page.js";
 import { StatusBar, type EffortSegment, type StatusHighlight } from "./components/status-bar.js";
 import { ThemePage } from "./components/theme-page.js";
@@ -839,6 +841,8 @@ function SessionApp({
 
   const busy = view.status !== "idle" || submitPending;
   const pending = view.pendingPermission;
+  // 待回答的提问（ADR-0032）：与权限确认同级独占焦点，Esc 在面板内表示跳过
+  const pendingQ = view.pendingQuestion;
   const interruptible = useRef(false);
   interruptible.current = busy;
   useEffect(
@@ -930,6 +934,18 @@ function SessionApp({
       });
     },
     [pending, session, pushLine],
+  );
+
+  // 提问回复（ADR-0032 §6）：提交/跳过后在对话中留一条摘要
+  const replyQuestion = useCallback(
+    (reply: QuestionReply) => {
+      if (pendingQ === undefined) return;
+      pushLine(questionSummary(pendingQ.questions, reply));
+      session.respondQuestion(pendingQ.requestId, reply).catch((e: unknown) => {
+        pushLine(`! ${errText(e)}`);
+      });
+    },
+    [pendingQ, session, pushLine],
   );
 
   /** 拖动越过视口边缘时的自动滚动停止 */
@@ -1489,7 +1505,7 @@ function SessionApp({
     [alt],
   );
   const toggleReasoning = useCallback(() => {
-    if (pending !== undefined) return;
+    if (pending !== undefined || pendingQ !== undefined) return;
     if (recordOpen) {
       void closeRecord();
       return;
@@ -1543,7 +1559,8 @@ function SessionApp({
     width,
     alt,
   ]);
-  const inputIdle = !pageOpen && !dialogOpen && pending === undefined && !busy;
+  const inputIdle =
+    !pageOpen && !dialogOpen && pending === undefined && pendingQ === undefined && !busy;
   const imageModel = (): { supported: boolean; hint: string } => {
     const ref = session.state().config.model;
     const found = runtime
@@ -1712,7 +1729,7 @@ function SessionApp({
         void closeRecord();
         return;
       }
-      if (!pageOpen && !dialogOpen && pending === undefined) {
+      if (!pageOpen && !dialogOpen && pending === undefined && pendingQ === undefined) {
         if (completionOpen) setCompletionOn(false);
         else {
           escapeTimer.current = setTimeout(() => {
@@ -1742,12 +1759,12 @@ function SessionApp({
       if (!(key.ctrl && (ch === "c" || ch === "d"))) return;
     }
     if (key.tab && key.shift) {
-      if (pageOpen || dialogOpen || pending !== undefined) return;
+      if (pageOpen || dialogOpen || pending !== undefined || pendingQ !== undefined) return;
       cycleEffort();
       return;
     }
     if (isAltM(ch, key)) {
-      if (pageOpen || dialogOpen || pending !== undefined) return;
+      if (pageOpen || dialogOpen || pending !== undefined || pendingQ !== undefined) return;
       cyclePreset();
       return;
     }
@@ -1756,7 +1773,7 @@ function SessionApp({
       return;
     }
     // 全屏视口翻阅（ADR-0021）：弹层/页面/权限待决时不响应
-    if (fullscreen && !pageOpen && !dialogOpen && pending === undefined) {
+    if (fullscreen && !pageOpen && !dialogOpen && pending === undefined && pendingQ === undefined) {
       const page = Math.max(1, budget.conversation - 1);
       if (key.pageUp) {
         setScroll((s) => scrollPage(s, page));
@@ -1775,7 +1792,13 @@ function SessionApp({
         return;
       }
     }
-    if (!dialogOpen && !pageOpen && completionOpen && selected !== undefined) {
+    if (
+      !dialogOpen &&
+      !pageOpen &&
+      pendingQ === undefined &&
+      completionOpen &&
+      selected !== undefined
+    ) {
       if (key.upArrow) {
         setCompletionIndex((i) => (i <= 0 ? candidates.length - 1 : i - 1));
         return;
@@ -1993,13 +2016,15 @@ function SessionApp({
   const composerDisabled =
     pending !== undefined
       ? "等待权限确认（a/s/p/d/x）"
-      : busy
-        ? "会话忙，Ctrl+C 可中断"
-        : switchPending
-          ? "正在切换会话，请稍候"
-          : dialogOpen
-            ? "弹层打开中，Esc 关闭"
-            : undefined;
+      : pendingQ !== undefined
+        ? "等待回答提问"
+        : busy
+          ? "会话忙，Ctrl+C 可中断"
+          : switchPending
+            ? "正在切换会话，请稍候"
+            : dialogOpen
+              ? "弹层打开中，Esc 关闭"
+              : undefined;
 
   const resumeItems: PickItem<string>[] = (resumeList ?? []).map((s) => ({
     label: resumeLabel(s, width - 10),
@@ -2302,6 +2327,13 @@ function SessionApp({
         onReply={replyPermission}
         width={width}
       />
+    ) : pendingQ !== undefined ? (
+      <QuestionDialog
+        pending={pendingQ}
+        active={!dialogOpen}
+        onReply={replyQuestion}
+        width={width}
+      />
     ) : overlay === "context" ? (
       <Panel
         title="/context"
@@ -2564,7 +2596,7 @@ function SessionApp({
         onHistory={recallHistory}
         onSubmit={onSubmit}
         onPasteImage={onPasteImage}
-        active={!dialogOpen && pending === undefined && !pageOpen}
+        active={!dialogOpen && pending === undefined && pendingQ === undefined && !pageOpen}
         disabledReason={composerDisabled}
         width={width}
         height={budget.input}
