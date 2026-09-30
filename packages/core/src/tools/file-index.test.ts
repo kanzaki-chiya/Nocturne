@@ -98,15 +98,13 @@ describe("工作区索引", () => {
     const { fs, paths } = createPlatform();
     const root = paths.resolve(".", "large-index");
     vi.spyOn(fs, "readTextFile").mockRejectedValue(new Error("ENOENT"));
-    const read = vi
-      .spyOn(fs, "readdir")
-      .mockResolvedValue(
-        Array.from({ length: 20_010 }, (_, i) => ({
-          name: `${i}`,
-          path: paths.join(root, `${i}`),
-          type: i === 19_999 ? ("directory" as const) : ("file" as const),
-        })),
-      );
+    const read = vi.spyOn(fs, "readdir").mockResolvedValue(
+      Array.from({ length: 20_010 }, (_, i) => ({
+        name: `${i}`,
+        path: paths.join(root, `${i}`),
+        type: i === 19_999 ? ("directory" as const) : ("file" as const),
+      })),
+    );
     const result = await buildFileIndex(fs, paths, root);
     expect(result).toHaveLength(20_000);
     expect(result.at(-1)).toEqual({ path: "19999/", kind: "directory" });

@@ -15,6 +15,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   listProviderPresets,
   createPlatform,
+  completeFileRefs,
+  type FileIndexEntry,
   type Clipboard,
   type ModelSettingsPatch,
   type ModelSettingsView,
@@ -718,6 +720,8 @@ function SessionApp({
     images.prune(value);
     setInput(value);
     setCursor(at);
+    setCompletionIndex(0);
+    setCompletionOn(true);
   };
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | undefined>(undefined);
@@ -794,6 +798,9 @@ function SessionApp({
   }, [pickerOpen, providerPageOpen]);
   const [completionOn, setCompletionOn] = useState(true);
   const [completionIndex, setCompletionIndex] = useState(0);
+  const [indexed, setIndexed] = useState<
+    { session: RuntimeSession; turn: number; entries: readonly FileIndexEntry[] } | undefined
+  >();
   const [highlight, setHighlight] = useState<StatusHighlight | undefined>(undefined);
   const [providerIds, setProviderIds] = useState<readonly string[]>([]);
   const hiddenNotices = useRef(new Set<string>());
@@ -1654,18 +1661,36 @@ function SessionApp({
     }),
     [session, providerIds, view.revision],
   );
-  const candidates = useMemo(
-    () => (input.startsWith("/") ? completeSlash(input, completionCtx) : []),
-    [input, completionCtx],
+  const completedTurn = view.lastTurn?.turnIndex ?? 0;
+  const fileCompletion = completeFileRefs(
+    input,
+    cursor,
+    indexed?.session === session && indexed.turn === completedTurn ? indexed.entries : [],
   );
-  const completionOpen =
-    inputIdle && completionOn && input.startsWith("/") && candidates.length > 0;
+  const indexing =
+    fileCompletion !== undefined &&
+    (indexed?.session !== session || indexed.turn !== completedTurn);
+  const candidates =
+    fileCompletion?.candidates ??
+    (input.startsWith("/") ? completeSlash(input, completionCtx) : []);
+  const completionOpen = inputIdle && completionOn && (candidates.length > 0 || indexing);
   const selected = candidates[Math.min(completionIndex, Math.max(0, candidates.length - 1))];
 
   useEffect(() => {
-    setCompletionIndex(0);
-    setCompletionOn(true);
-  }, [input]);
+    if (!indexing || !inputIdle) return;
+    let cancelled = false;
+    void session.fileIndex().then(
+      (entries) => {
+        if (!cancelled) setIndexed({ session, turn: completedTurn, entries });
+      },
+      () => {
+        if (!cancelled) setIndexed({ session, turn: completedTurn, entries: [] });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [indexing, inputIdle, session, completedTurn]);
 
   useEffect(() => {
     if (!input.startsWith("/provider") || provider === undefined) return;
@@ -1684,6 +1709,13 @@ function SessionApp({
   }, [input.startsWith("/provider"), provider]);
 
   const applyCandidate = (item: Candidate, execute: boolean): void => {
+    if (fileCompletion !== undefined) {
+      const next =
+        input.slice(0, fileCompletion.start) + item.insert + input.slice(fileCompletion.end);
+      updateInput(next, fileCompletion.start + item.insert.length);
+      setCompletionOn(!item.insert.endsWith(" "));
+      return;
+    }
     updateInput(item.insert, item.insert.length);
     if (execute) {
       setCompletionOn(false);
@@ -1826,6 +1858,10 @@ function SessionApp({
         return;
       }
       if (key.return) {
+        if (fileCompletion !== undefined) {
+          applyCandidate(selected, false);
+          return;
+        }
         const text = selected.insert;
         updateInput("", 0);
         setCompletionOn(true);
@@ -2073,7 +2109,7 @@ function SessionApp({
 
   const budget = frameBudget(
     rows,
-    completionOpen ? Math.min(8, candidates.length) : 0,
+    completionOpen ? Math.min(8, Math.max(indexing ? 1 : 0, candidates.length)) : 0,
     input.split("\n").length,
     fullscreen && !pageOpen ? todoPanelRows(view.todos.length) : 0,
   );
@@ -2345,10 +2381,12 @@ function SessionApp({
   const prompt = `${g.prompt} `;
   const inputY = -(budget.input + budget.completion + budget.status);
 
-  const shownCandidates = candidates.slice(0, budget.completion);
+  const candidateStart = Math.max(0, completionIndex - budget.completion + 1);
+  const shownCandidates = candidates.slice(candidateStart, candidateStart + budget.completion);
   const overlayBody =
     pending !== undefined ? (
       <PermissionDialog
+        key={pending.requestId}
         pending={pending}
         active={!dialogOpen}
         onReply={replyPermission}
@@ -2640,12 +2678,13 @@ function SessionApp({
         suspendNav={completionOpen}
         swallowRef={swallowRef}
       />
-      {budget.completion > 0
+      {budget.completion > 0 && indexing ? <Text dimColor>正在索引…</Text> : null}
+      {budget.completion > 0 && !indexing
         ? shownCandidates.map((item, i) => (
             <Text
               key={item.insert}
               wrap="truncate"
-              {...(i === completionIndex
+              {...(i + candidateStart === completionIndex
                 ? { color: theme.selected, backgroundColor: theme.selectionBg }
                 : {})}
             >

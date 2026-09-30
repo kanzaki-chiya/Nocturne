@@ -77,6 +77,8 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 - `/` 开头的输入：斜杠命令（第 4 节），不进入模型上下文。
 - 空行忽略；Ctrl+D（EOF）退出；空闲时 Ctrl+C 退出，Turn 进行中 Ctrl+C 调用 `session.interrupt()`。退出后打印「会话 \<id\> 已保存，nctrn -c 继续」（与 TUI 同一句，TUI 在恢复主屏之后打印，见 [tui.md](tui.md)）。
 - 逐行模式用 readline 的 `completer`，候选与 TUI `/help` 共用同一张命令表（`@nocturne/tui/slash-catalog`，该模块不加载 Ink）。覆盖范围相同：命令名前缀/包含匹配；`/effort`、`/provider`、`/preset` 在命令名加空格后做参数补全。
+- 权限详情经 `@nocturne/tui/text-format` 纯文本入口复用 `truncateMiddle`，按显示列宽保留 URL 两端；该静态入口不加载 Ink。
+- `@` 开头或紧跟空白的路径词用同一 completer 补全：异步读取 `session.fileIndex()`，复用 Core 的排序与逐级目录补全，空格路径自动加双引号。索引最多包含 20000 个工作区文件与目录，遵守 `.gitignore`，排除隐藏项与链接；当前 Turn 内复用，Turn 结束后重建。提交读取规则由 Core 统一处理，见 [ADR-0033](../decisions/ADR-0033-web-fetch-file-refs.md)。
 - `--cli` 的 TTY readline ↑/↓ 从当前工作区的持久输入历史回填，切换会话后改用新会话的工作区；历史经 Core 公开 API 保存，明文文件与保留规则见 [config.md](../architecture/config.md)。`/help` 同样提示明文存储。
 - EOF 发生在 Turn 进行中时：先 `session.interrupt()` 中断并等待该 Turn 收束后再退出；readline 关闭后任何异步回调不得再显示提示符。
 - Turn 进行中不接受新的输入行（只响应中断）；权限确认提示出现时优先处理（第 6 节）。
@@ -140,11 +142,15 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 
 输出分流：**非交互模式下**模型文本写 stdout，其余一切（工具状态、diff、诊断、用量）写 stderr，使 `nctrn -p "..." > out.txt` 得到纯模型输出。**交互模式**全部写 stdout；进程级致命错误（无法启动、配置缺失）写 stderr。
 
+`message.user.fileRefs` 存在时逐条显示 `附带 @路径（M/N 行）`，目录与图片显示对应类型；引用快照不铺开。用户输入由 readline 回显，不重复打印原文。打印模式的引用摘要同样写 stderr。
+
 换行规则：渲染结果分为**流式片段**（模型文本、shell 输出，原样拼接）与**整行**（其余一切状态行与提示块）。写出层按流记录当前是否停在行首，整行输出前若上一段流式内容停在半行，先补一个换行，因此两种模式下状态行都各占一行、不会与模型文本粘连；非交互模式的 stdout 只含流式模型文本，不被插入额外换行。
 
 ## 6. 权限确认
 
 预设与规则由配置决定（第 8 节、permissions.md 第 6 节），`--preset` 或 `/preset` 切换会话预设。ask 走协议流程：`permission.requested` → `session.respondPermission(requestId, reply)` → `permission.resolved`。
+
+主体有 `detail` 时在目标下方显示一行，过宽时省略中间并保留两端；`web_fetch` 的该行是完整 URL。网络主体的 `s` 选项显示「本会话允许访问 <主机>」，明确授权范围；`detail` 只用于展示，判定仍由权限层完成。
 
 - **交互模式**：提示块列出主体（kind、target、解析后路径）、原因与命中的规则（`reason` 与规则来源），提供完整选项：
 

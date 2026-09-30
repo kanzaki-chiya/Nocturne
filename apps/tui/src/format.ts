@@ -88,6 +88,17 @@ export function truncateLineHead(text: string, width: number, ellipsis = "…"):
   return ellipsis + out;
 }
 
+export function truncateMiddle(text: string, width: number, ellipsis = "…"): string {
+  const safe = boxSafe(stripControls(text).replace(/[\r\n\t]/g, " "));
+  if (stringWidth(safe) <= width) return safe;
+  const half = Math.max(0, Math.floor((width - stringWidth(ellipsis)) / 2));
+  return (
+    truncateLine(safe, half, "") +
+    ellipsis +
+    truncateLineHead(safe, Math.max(0, width - half - stringWidth(ellipsis)), "")
+  );
+}
+
 /** 多行文本尾部 n 行（liveOutput / 结果摘要展示用） */
 export function tailLines(text: string, n: number): string[] {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
@@ -119,10 +130,12 @@ export function summarizeToolInput(name: string | undefined, input: unknown): st
     return Array.isArray(items) ? `${items.length} 项` : "";
   }
   const byKey =
-    name === "shell"
-      ? inputString(input, "command")
-      : name === "grep" || name === "glob"
-        ? inputString(input, "pattern")
-        : (inputString(input, "path") ?? inputString(input, "command"));
+    name === "web_fetch"
+      ? inputString(input, "url")
+      : name === "shell"
+        ? inputString(input, "command")
+        : name === "grep" || name === "glob"
+          ? inputString(input, "pattern")
+          : (inputString(input, "path") ?? inputString(input, "command"));
   return byKey ?? (input === undefined ? "" : JSON.stringify(input));
 }

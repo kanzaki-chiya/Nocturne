@@ -4,6 +4,7 @@
  * 颜色经 util.styleText（终端不支持或 NO_COLOR 时自动降级）。
  */
 import { styleText } from "node:util";
+import { truncateMiddle } from "@nocturne/tui/text-format";
 
 import { todoItemsFromCompletion, todoSnapshotLines } from "@nocturne/core/protocol";
 import type {
@@ -135,6 +136,12 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
   const aux = (text: string): Rendered => ({ channel: side, text });
 
   switch (ev.type) {
+    case "message.user":
+      return (ev.payload.fileRefs ?? []).map((ref) =>
+        aux(
+          `  附带 @${ref.path}${ref.kind === "file" ? `（${ref.lines ?? 0}/${ref.totalLines ?? 0} 行）` : ref.kind === "directory" ? "（目录）" : "（图片）"}`,
+        ),
+      );
     case "message.assistant.delta": {
       const p = ev.payload;
       if (p.kind === "text") return [out(p.delta)];
@@ -296,17 +303,36 @@ const OPTION_KEYS: Record<string, string> = {
 
 /** 权限确认提示块（cli.md 第 6 节）：主体、命中原因与完整选项 */
 export function renderPermissionPrompt(
-  subjects: { kind: string; target: string; resolved?: string | undefined }[],
+  subjects: {
+    kind: string;
+    target: string;
+    resolved?: string | undefined;
+    detail?: string | undefined;
+  }[],
   reason: string,
   options?: readonly string[],
+  width = 80,
 ): string {
-  const lines = subjects.map((s) => {
+  const lines = subjects.flatMap((s) => {
     const resolved = s.resolved !== undefined && s.resolved !== s.target ? ` → ${s.resolved}` : "";
-    return `  ${s.kind}: ${s.target}${resolved}`;
+    const detail = s.detail;
+    const limit = Math.max(1, width - 2);
+    const shown = truncateMiddle(detail ?? "", limit);
+    return [`  ${s.kind}: ${s.target}${resolved}`, ...(detail === undefined ? [] : [`  ${shown}`])];
   });
   const opts = options !== undefined && options.length > 0 ? options : ["allow_once", "deny"];
   const rendered = opts
-    .map((o) => `${style("bold", `[${OPTION_KEYS[o] ?? o[0] ?? "?"}]`)} ${OPTION_LABELS[o] ?? o}`)
+    .map(
+      (o) =>
+        `${style("bold", `[${OPTION_KEYS[o] ?? o[0] ?? "?"}]`)} ${
+          o === "allow_session" && subjects.some((s) => s.kind === "network")
+            ? `本会话允许访问 ${subjects
+                .filter((s) => s.kind === "network")
+                .map((s) => s.target)
+                .join("、")}`
+            : (OPTION_LABELS[o] ?? o)
+        }`,
+    )
     .join("  ");
   return [style("yellow", "? 操作需要确认"), ...lines, `  ${reason}`, `  ${rendered}`].join("\n");
 }

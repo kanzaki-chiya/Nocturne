@@ -8,7 +8,8 @@ import { useLayoutEffect, useRef, useState } from "react";
 
 import { composerWindow, normalizeNewlines, verticalCursor } from "../cursor.js";
 import { glyphs, useTuiEnv } from "../env.js";
-import { imageTokenAt, imageTokenBefore, splitImageTokens } from "../images.js";
+import { imageTokenAt, imageTokenBefore } from "../images.js";
+import { splitInputTokens } from "../file-refs.js";
 import { pasteTokenAt, pasteTokenBefore, type PasteStore } from "../paste.js";
 import { useTheme } from "../theme.js";
 
@@ -209,11 +210,19 @@ export function Composer({
 
   const prompt = `${g.prompt} `;
   const view = composerWindow(prompt, value, cursor, width, height);
+  const lineIndex = value.slice(0, cursor).split("\n").length - 1;
+  const allLines = value.split("\n");
+  const firstLine = Math.min(
+    Math.max(0, lineIndex - view.rows.length + 1),
+    allLines.length - view.rows.length,
+  );
+  const lineOffset = (index: number): number =>
+    allLines.slice(0, firstLine + index).reduce((sum, line) => sum + line.length + 1, 0);
   // [Image #n] 占位换色，与正文区分（光标只停在占位两端，不会把占位拆开）
-  const tinted = (text: string | undefined): React.ReactNode =>
+  const tinted = (text: string | undefined, offset = 0): React.ReactNode =>
     text === undefined || text === ""
       ? text
-      : splitImageTokens(text).map((part, i) =>
+      : splitInputTokens(text, value, Math.max(0, offset)).map((part, i) =>
           part.image ? (
             <Text key={i} color={theme.accentAlt}>
               {part.text}
@@ -234,15 +243,22 @@ export function Composer({
         <Box key={i} height={1}>
           <Text color={disabled ? theme.muted : theme.accent}>{row.prefix}</Text>
           <Text dimColor={disabled} wrap="truncate">
-            {tinted(row.before)}
+            {row.focused && row.before !== value.slice(lineOffset(i), cursor) ? (
+              <>
+                {"..."}
+                {tinted(row.before.slice(3), cursor - row.before.length + 3)}
+              </>
+            ) : (
+              tinted(row.before, lineOffset(i))
+            )}
             {row.focused && !disabled ? (
               <Text color={theme.selected} backgroundColor={theme.selectionBg}>
                 {row.at ?? " "}
               </Text>
             ) : (
-              row.at
+              tinted(row.at, row.focused ? cursor : lineOffset(i))
             )}
-            {tinted(row.after)}
+            {tinted(row.after, (row.focused ? cursor : lineOffset(i)) + 1)}
             {disabled && i === view.rows.length - 1 ? `（${disabledReason}）` : null}
           </Text>
         </Box>

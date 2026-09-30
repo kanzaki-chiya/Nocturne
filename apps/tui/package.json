@@ -9,6 +9,10 @@
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
     },
+    "./text-format": {
+      "types": "./dist/text-format.d.mts",
+      "import": "./dist/text-format.mjs"
+    },
     "./slash-catalog": {
       "types": "./dist/slash-catalog.d.mts",
       "import": "./dist/slash-catalog.mjs"

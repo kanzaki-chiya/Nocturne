@@ -4,11 +4,11 @@
  * Esc 退回五选项；Tab/Shift+Tab 在选项间正向/反向移动焦点，Enter 激活焦点项。
  */
 import { Box, Text, useInput } from "ink";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import stringWidth from "string-width";
 
 import { glyphs, useTuiEnv } from "../env.js";
-import { boxSafe, truncateLine } from "../format.js";
+import { boxSafe, truncateLine, truncateMiddle } from "../format.js";
 import { useTheme } from "../theme.js";
 
 import type { PendingPermission, PermissionOption } from "@nocturne/core/protocol";
@@ -50,7 +50,13 @@ function optionsOf(pending: PendingPermission): Option[] {
   return list.map((option) => ({
     option,
     key: OPTION_KEYS[option],
-    label: OPTION_LABELS[option],
+    label:
+      option === "allow_session" && pending.subjects.some((s) => s.kind === "network")
+        ? `本会话允许访问 ${pending.subjects
+            .filter((s) => s.kind === "network")
+            .map((s) => s.target)
+            .join("、")}`
+        : OPTION_LABELS[option],
     reply: OPTION_REPLIES[option],
   }));
 }
@@ -67,7 +73,11 @@ function subjectText(pending: PendingPermission): string {
 
 /** 固定单行标题、主体、可选原因、选项、提示与边框，无渲染后测量。 */
 export function permissionDialogRows(pending: PendingPermission, width: number): number {
-  return 6 + (pending.reason !== "" && width >= 40 ? 1 : 0);
+  return (
+    6 +
+    pending.subjects.filter((s) => s.detail !== undefined).length +
+    (pending.reason !== "" && width >= 40 ? 1 : 0)
+  );
 }
 
 export function PermissionDialog({
@@ -91,12 +101,6 @@ export function PermissionDialog({
   const opts = optionsOf(pending);
   const [focus, setFocus] = useState(0);
   const [feedback, setFeedback] = useState<string | undefined>(undefined);
-
-  // 新请求到来时重置内部状态
-  useEffect(() => {
-    setFocus(0);
-    setFeedback(undefined);
-  }, [pending.requestId]);
 
   useInput(
     (input, key) => {
@@ -150,6 +154,9 @@ export function PermissionDialog({
   const rows = [
     `${g.wait} 需要确认`,
     subjectText(pending),
+    ...pending.subjects.flatMap((s) =>
+      s.detail === undefined ? [] : [truncateMiddle(s.detail, Math.max(1, width - 4), g.ellipsis)],
+    ),
     ...(pending.reason !== "" && !narrow ? [`原因：${pending.reason}`] : []),
     feedback !== undefined
       ? `d${g.prompt} ${feedback}_`
@@ -218,6 +225,15 @@ export function PermissionDialog({
       <Text wrap="truncate">
         {truncateLine(boxSafe(subjectText(pending)), width - 8, g.ellipsis)}
       </Text>
+      {pending.subjects.flatMap((s, i) =>
+        s.detail === undefined
+          ? []
+          : [
+              <Text key={`detail:${i}`} wrap="truncate">
+                {truncateMiddle(s.detail, Math.max(1, width - 8), g.ellipsis)}
+              </Text>,
+            ],
+      )}
       {pending.reason !== "" && !narrow ? (
         <Text dimColor wrap="truncate">
           {truncateLine(boxSafe(`原因：${pending.reason}`), width - 8, g.ellipsis)}

@@ -9,10 +9,11 @@ import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 import { todoItemsFromCompletion } from "@nocturne/core/protocol";
 
 import { questionToolLines } from "./question-format.js";
+import { webFetchSummary } from "./web-fetch.js";
 import { attachmentLine } from "./attachment-line.js";
 import { diffSummary, layoutDiffRow, parseDiff } from "./diff-format.js";
 import { interleaveClient, type ClientLine } from "./client-lines.js";
-import { splitImageTokens } from "./images.js";
+import { splitInputTokens, userText, fileRefLine } from "./file-refs.js";
 import { boxSafe, stripControls, summarizeToolInput, tailLines, truncateLine } from "./format.js";
 import { renderMarkdown } from "./markdown.js";
 import { reasoningLabel, type ReasoningMap, type ReasoningPart } from "./reasoning.js";
@@ -149,15 +150,16 @@ export function layoutEntry(
   const prompt = ascii ? ">" : "›";
   switch (entry.kind) {
     case "user": {
-      const text = entry.content
-        .filter((c) => c.type === "text")
-        .map((c) => c.text)
-        .join("");
+      const text = userText(entry);
+      const fullText = stripControls(`${prompt} ${text}`.replace(/\r\n?/g, "\n"));
+      let offset = 0;
       return [
         ...rows(entry.key, `${prompt} ${text}`, width, { color: theme.accent, bold: true }).map(
           (line) => {
             // [Image #n] 占位换色，与正文区分（其余分段继承本行的 cyan/bold）
-            const parts = splitImageTokens(line.text);
+            if (offset > 0 && !line.continued) offset++;
+            const parts = splitInputTokens(line.text, fullText, offset);
+            offset += line.text.length;
             return parts.some((p) => p.image)
               ? {
                   ...line,
@@ -167,6 +169,9 @@ export function layoutEntry(
                 }
               : line;
           },
+        ),
+        ...(entry.fileRefs ?? []).flatMap((ref, i) =>
+          rows(`${entry.key}:ref:${i}`, `  ${fileRefLine(ref)}`, width, { color: theme.accentAlt }),
         ),
         ...(entry.attachments ?? []).flatMap((att, i) =>
           rows(`${entry.key}:image:${i}`, `  ${attachmentLine(att, i, ascii)}`, width, {
@@ -283,7 +288,7 @@ export function layoutEntry(
         lines.push(...diffLines(entry.key, diff, width, ascii, diffExpanded, theme));
         return [...lines, ...attachmentRows];
       }
-      const content = entry.result?.modelContent;
+      const content = webFetchSummary(entry) ?? entry.result?.modelContent;
       if (content !== undefined && content !== "") {
         for (const [i, line] of tailLines(content, 4).entries()) {
           lines.push({

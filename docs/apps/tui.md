@@ -68,6 +68,10 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 ## 3. 键位与交互（对照 cli.md）
 
+`@` 文件引用补全沿用斜杠候选列表，最多 8 行，`↑`/`↓` 移动、`Tab` 或 `Enter` 选中，`Esc` 关闭。`Enter` 选中引用时不提交消息；选中文件后下次 `Enter` 才提交。目录带 `/`，选中后保持列表打开并列直接下一级；空格路径自动加双引号。候选按文件名前缀、文件名包含、路径包含排序，同档短路径优先，匹配不区分大小写。异步索引期间显示「正在索引…」。索引由 `session.fileIndex()` 共享，遵守 `.gitignore`，排除隐藏项与链接，文件和目录共最多 20000 项；每 Turn 结束后失效。已识别引用与 `[Image #n]` 使用同一强调色。语法和读取规则见 [ADR-0033](../decisions/ADR-0033-web-fetch-file-refs.md)。
+
+权限主体有 `detail` 时在目标下方显示一行，超宽省略中间；`web_fetch` 在此显示 URL。网络主体的会话授权选项显示「本会话允许访问 <主机>」，展示与权限判定分离。
+
 | 场景 | CLI（REPL） | TUI |
 |---|---|---|
 | 提交输入 | Enter 提交一行 | Enter 提交输入框内容 |
@@ -109,6 +113,8 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 - **退出**：提交已接受但尚未写入 `turn.started` 时也视为忙：先中断并等待 Turn 收束，再关闭鼠标上报 → 恢复主屏幕 → 把本次会话对话按当前宽度渲染成纯文本行打印到主屏（不含输入框和状态栏；思考按退出时显示形态导出：折叠时只留折叠行，展开时保留灰字全文的纯文本；欢迎区只保留文字，不导出弯月像素）→ 打印「会话 \<id\> 已保存，nctrn -c 继续」。异常路径至少保证鼠标关闭与主屏恢复。
 - **diff 展示**：`edit`、`write`（含新建）的 `output.diff` 显示旧/新行号、`+`/`-` 标记与「新增 N 行，删除 M 行」；源码文字保持正文色，新增/删除行在支持颜色的终端铺满主题指定的局部底色。长行按宽度折行，续行对齐正文列，拖选复制可拼回同一源码行。NO_COLOR、ASCII 或无背景能力时保留行号与标记。旧日志的 `@@ 路径 @@` 或无头部结果继续显示，不补造行号；旧新建结果无 diff 时按输入内容合成新增行。全屏超过 40 个 diff 内容行时显示前 20、后 20 行及「… 还有 N 行」，单击省略行展开，再次单击收起，拖选仍用于复制；普通屏幕直接打印完整 diff。结构化 `output` 被预算省略时只显示省略提示，无展开入口。`spillPath` 存在时提示查看完整文件；出错的调用只显示错误。
 - **工具行**：`● name <输入摘要>` + 状态徽标（awaiting → `?`，running → 转轮，ok/error → `✓`/`✗`，denied/cancelled/interrupted → 对应词）。`liveOutput` 只显示尾部 N 行。`task`（子代理，Phase 6）的进行中行同样靠 `liveOutput` 展示一行式进度摘要（`tool.progress` `stream:"info"`），无新增视图通道（[subagent.md](../architecture/subagent.md) 第 12 节）。
+- **文件引用**：有 `fileRefs` 的用户消息保留全部原文块，按非图片引用数量排除尾部快照；仅图片引用不剔除文本块；下方逐条显示 `附带 @路径（M/N 行）`，目录与图片改为类型说明。普通屏幕、全屏、恢复与退出导出一致；旧消息仍按全部文本块展示。
+- **网页抓取**：`web_fetch` 输入摘要是 URL，结果显示标题、HTTP 状态、内容类型、字符数，以及发生重定向时的最终地址和 5 MB 截断提示；不铺开网页正文。
 - **MCP 状态（Phase 5）**：`mcp.server` 是临时事件、不进 `SessionView`（reducer 忽略未知类型）；`failed`/`crashed` 经 `runtime.warning` 进入提示区，`/mcp` 面板按 `session.mcpServers()` 展示每台服务器的状态、工具数与失败原因。Hook 的可见效果走既有事件（`permission.resolved source:"hook"`、`tool.completed`、`runtime.warning(code:"hook_failed")`），不新增 UI 通道。
 - **宽字符**：所有截断/对齐经显示宽度计算（Ink 内建 string-width），中文文本不掰断。
 
@@ -252,11 +258,11 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 ## 9. 工程约束
 
-- `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口及批准的终端依赖（ink、react、string-width、marked；`ink-testing-library` 为 devDependency）。CLI 仅可惰性加载 `@nocturne/tui`，或静态引用 `@nocturne/tui/slash-catalog`；后者不得 import 任何模块，以免逐行模式加载 Ink。依赖方向见 [modules.md](../architecture/modules.md) 第 1 节。
+- `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口及批准的终端依赖（ink、react、string-width、marked；`ink-testing-library` 为 devDependency）。CLI 可惰性加载 `@nocturne/tui`，或静态引用 `@nocturne/tui/slash-catalog` 与 `@nocturne/tui/text-format`。命令表不得 import 任何模块；纯文本入口复用 `truncateMiddle` 与控制字符过滤，仅依赖纯格式化函数、协议类型与 string-width，不加载 Ink。依赖方向见 [modules.md](../architecture/modules.md) 第 1 节。
 - 目录：`src/index.ts`（`runTui`：全屏/普通屏幕装配、鼠标上报开闭、退出导出）、`src/app.tsx`（界面状态与布局）、`src/lines.ts`（`SessionView` → 内容行块，按条目 key + 宽度 + 主题 ID 缓存布局）、`src/viewport.ts`（可见窗口选择）、`src/scroll.ts`（翻阅状态）、`src/mouse.ts`（SGR 鼠标序列解析与 stdin 包装）、`src/selection.ts`（选区坐标与高亮/复制文本）、`src/clipboard.ts`（系统剪贴板 + OSC 52，只用 Node 内置模块）、`src/cursor.ts`（硬件光标补位与帧外写出通道）、`src/output-layer.ts`（全屏帧差异写出与滚动区域平移）、`src/frame.ts`（活动区高度预算）、`src/alt-screen.ts`（`--inline` 与首配流程的临时备用屏）、`src/markdown.ts`（助手文本排版）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。
 - 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎区/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/就地步骤/操作菜单/模型编辑子视图/Esc/Ctrl+C。
 - **显示宽度**：按 `string-width` 预算中文和动态文本，框内动态文本经 `format.ts` 的 `boxSafe()` 处理；窄屏时截断摘要和列表字段，边框保留安全余量。
-- `runTui` 只消费 Core 公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`、`readInputHistory`/`recordInputHistory`、`mcpServers()`（`/mcp` 面板），以及 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`/`runtime.getPreference`；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
+- `runTui` 只消费 Core 公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`、`readInputHistory`/`recordInputHistory`、`fileIndex()`（文件补全索引）、`mcpServers()`（`/mcp` 面板），以及 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`/`runtime.getPreference`；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
 
 ## 10. 需要的 Core API 变更
 
@@ -278,7 +284,6 @@ v0.3 增补（ADR-0019）：
 
 - 独立 `nctrn-tui` 命令（需要共享启动语义时再评估，可能以独立命令复制薄壳或重新讨论 Core 入口上移的方式引入）；
 - 模型编辑对话框开放单击，其余页内控件暂不开放；页面内拖选留待以后，双击/三击选词选段仍不做（[ADR-0030 及修订](../decisions/ADR-0030-dialog-settings-pages.md)）；
-- @文件补全；
 - 代码块语法高亮（助手 Markdown 已做结构化排版）；
 - 多会话标签页；
 - 工具输出详情查看器/分页器（长输出靠截断 + spillPath，与 CLI 一致）；

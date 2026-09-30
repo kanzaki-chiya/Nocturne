@@ -197,11 +197,25 @@ module.exports = {
     {
       name: "cli-tui-static-boundary",
       severity: "error",
-      comment: "CLI 仅能静态引用无依赖的 slash-catalog；其余 TUI 入口必须惰性加载",
+      comment: "CLI 仅能静态引用 slash-catalog 和纯文本 text-format；其余 TUI 入口必须惰性加载",
       from: { path: "^apps/cli/src/" },
       to: {
-        path: "^apps/tui/src/(?!slash-catalog\\.ts$)",
+        path: "^apps/tui/src/(?!(?:slash-catalog|text-format)\\.ts$)",
         dependencyTypesNot: ["dynamic-import"],
+      },
+    },
+    {
+      name: "text-format-pure-boundary",
+      severity: "error",
+      comment:
+        "CLI 复用的文本格式入口只允许纯格式函数、protocol 类型与 string-width，不加载 Ink/React",
+      from: { path: "^apps/tui/src/(?:text-format|format)\\.ts$" },
+      to: {
+        pathNot: [
+          "^apps/tui/src/format\\.ts$",
+          "^packages/core/src/protocol/index\\.ts$",
+          "node_modules/string-width/",
+        ],
       },
     },
     {

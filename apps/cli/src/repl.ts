@@ -6,9 +6,15 @@ import { createInterface, type Interface } from "node:readline";
 
 type HistoryInterface = Interface & { history: string[] };
 
-import type { Runtime, RuntimeConfig, RuntimeSession, SessionSummary } from "@nocturne/core";
+import {
+  completeFileRefs,
+  type Runtime,
+  type RuntimeConfig,
+  type RuntimeSession,
+  type SessionSummary,
+} from "@nocturne/core";
 import type { QuestionAnswer, QuestionItem, RuntimeEvent } from "@nocturne/core/protocol";
-import { readlineCompleter } from "@nocturne/tui/slash-catalog";
+import { completeLine } from "./completer.js";
 
 import { runSlashCommand, type CommandDeps } from "./commands.js";
 import {
@@ -26,7 +32,7 @@ import {
 import { sessionOpenNotes, type NewSessionFn, type SessionSwitcher } from "./session-switch.js";
 
 export interface ReplIo {
-  stdout: NodeJS.WritableStream;
+  stdout: NodeJS.WritableStream & { columns?: number };
   stderr: NodeJS.WritableStream;
   stdin: NodeJS.ReadableStream & { isTTY?: boolean };
 }
@@ -116,7 +122,12 @@ export async function runRepl(
       pendingPermission = { requestId: ev.payload.requestId };
       out.line(
         "stdout",
-        renderPermissionPrompt(ev.payload.subjects, ev.payload.reason, ev.payload.options),
+        renderPermissionPrompt(
+          ev.payload.subjects,
+          ev.payload.reason,
+          ev.payload.options,
+          io.stdout.columns ?? 80,
+        ),
       );
       return;
     }
@@ -150,12 +161,27 @@ export async function runRepl(
       output: io.stdout,
       prompt: "nctrn> ",
       terminal: io.stdin.isTTY === true,
-      completer: (line: string) => {
+      completer: (
+        line: string,
+        callback: (error: Error | null, result: [string[], string]) => void,
+      ) => {
         if (line.startsWith("/provider")) refreshProviders();
-        return readlineCompleter(line, {
+        const context = {
           effortLevels: session.reasoningEffortInfo().available,
           providerIds,
-        });
+        };
+        if (completeFileRefs(line, line.length, []) === undefined) {
+          callback(null, completeLine(line, context, []));
+          return;
+        }
+        void session.fileIndex().then(
+          (entries) => {
+            callback(null, completeLine(line, context, entries));
+          },
+          () => {
+            callback(null, [[], line]);
+          },
+        );
       },
     }) as HistoryInterface;
   let rl = makeRl();

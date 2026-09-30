@@ -6,7 +6,7 @@ import { Box, Static, Text } from "ink";
 
 import { attachmentLine } from "../attachment-line.js";
 import { glyphs, useTuiEnv } from "../env.js";
-import { splitImageTokens } from "../images.js";
+import { splitInputTokens, userText, fileRefLine } from "../file-refs.js";
 import { layoutEntry } from "../lines.js";
 import type { ReasoningMap } from "../reasoning.js";
 import { renderMarkdown } from "../markdown.js";
@@ -25,15 +25,12 @@ export type TranscriptItem =
 function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
-  const text = entry.content
-    .filter((c) => c.type === "text")
-    .map((c) => c.text)
-    .join("");
+  const text = userText(entry);
   return (
     <Box marginTop={1} flexDirection="column">
       <Text color={theme.accent} bold>
         {glyphs(env).prompt}{" "}
-        {splitImageTokens(text).map((part, i) =>
+        {splitInputTokens(text).map((part, i) =>
           part.image ? (
             <Text key={i} color={theme.accentAlt}>
               {part.text}
@@ -43,6 +40,9 @@ function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): Re
           ),
         )}
       </Text>
+      {(entry.fileRefs ?? []).map((ref, i) => (
+        <Text key={`ref:${i}`} color={theme.accentAlt}>{`  ${fileRefLine(ref)}`}</Text>
+      ))}
       {(entry.attachments ?? []).map((att, i) => (
         <Text key={`${att.file}:${i}`} color={theme.accent} wrap="truncate">
           {`  ${attachmentLine(att, i, env.ascii)}`}

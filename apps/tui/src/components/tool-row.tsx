@@ -6,6 +6,7 @@ import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
 
 import { questionToolLines } from "../question-format.js";
+import { webFetchSummary } from "../web-fetch.js";
 import { attachmentLine } from "../attachment-line.js";
 import { diffSummary, parseDiff } from "../diff-format.js";
 import { glyphs, useTuiEnv } from "../env.js";
@@ -166,9 +167,15 @@ function ToolResult({ entry, width }: { entry: ToolEntry; width: number }): Reac
   if (result === undefined) return <></>;
   const diff = diffOf(entry);
   const spill = result.spillPath;
+  const webSummary = webFetchSummary(entry);
   return (
     <Box flexDirection="column">
-      {diff !== undefined ? (
+      {webSummary !== undefined ? (
+        <Text
+          dimColor
+          wrap="truncate"
+        >{`  ${truncateLine(webSummary, Math.max(1, width - 2), g.ellipsis)}`}</Text>
+      ) : diff !== undefined ? (
         <>
           <Text
             dimColor
