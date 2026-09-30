@@ -54,6 +54,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
         "some-model": { "endpoints": ["/v1/chat/completions", "/v1/messages"] }
       },
       "providerOptions": {},                     // 配置级选项，与请求级合并后传给适配器（provider-api.md §3）
+      "sessionHeader": "x-opencode-session",      // 可选：会话标识请求头名（ADR-0031 §3，见第 4 节）
       "allowUndeclaredModels": false              // true → strictModels=false，接受清单外模型 id（CLI 用）
     }
   }
@@ -93,6 +94,8 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 **条目级路由（[ADR-0026](../decisions/ADR-0026-per-model-protocol.md)）**：每个服务商条目仍是一个 `Provider` 实例（`id`/`type` 语义不变），实例内部按需构造 `openai-compatible`、`anthropic` 与 `openai-responses` 三种适配器并复用，共用凭据解析器、`headers` 与诊断通道；`stream()` 按请求模型的生效协议分发（第 2 节）。三种协议共用同一条目的 `baseURL`：`anthropic` 请求 `<baseURL>/messages`（条目省略 `baseURL` 时用官方 `https://api.anthropic.com/v1`），`openai-compatible` 请求 `<baseURL>/chat/completions`、`openai-responses` 请求 `<baseURL>/responses`（条目未声明 `baseURL` 时两者都以 `ProviderError(kind="invalid_request")` 拒绝，不发请求）。
 
 跨协议的鉴权写法：鉴权以条目 `type` 为「本家」——`anthropic` 条目本家发 `x-api-key`（不发 `Authorization`，避免官方端点将其当 OAuth 令牌），`openai-compatible` 条目本家发 `Authorization: Bearer`；`openai-compatible` 条目下的 `anthropic` 协议请求**同时携带** `x-api-key` 与 `Authorization: Bearer`（`anthropic-version` 由 SDK 注入）；`openai-responses` 协议请求无论条目 `type` 都只发 `Authorization: Bearer`（ADR-0031 §1）。条目级 `providerOptions` 只交给与条目 `type` 同协议的请求。推导为 `unavailable` 的模型照常出现在清单中（`ModelInfo.unavailable`），选择或请求时以同一说明拒绝、不发 HTTP（ADR-0026 §5）。`message.assistant` 事件记录产生该消息时的协议；上下文回传 Provider 专有数据（`providerData`）要求「同一服务商且同一协议」（context.md 第 7 节）。
+
+**请求头（[ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md) §2/§3）**：三种协议的模型请求与 `fetchModels` 都携带 `User-Agent: nocturne/<version>`（版本为 Core 的 `NOCTURNE_VERSION`，SDK 追加的后缀保留）；条目 `headers` 中同名的 `User-Agent`（大小写不敏感）优先。条目可选字段 `sessionHeader` 声明一个会话标识请求头名（如 `x-opencode-session`）：适配器仅在「`ModelRequest.sessionId` 非空且条目声明了 `sessionHeader`」时写该头，值为 `sessionId`；条目 `headers` 已有同名头时以静态值为准。`sessionId` 由 Runtime 填入根会话 ID（provider-api.md 第 3 节），适配器不生成、不缓存、不修改它；`fetchModels` 属于服务商级请求，永远不写会话头。
 
 ## 5. 不属于 Provider 的事
 

@@ -123,6 +123,12 @@ export interface ModelRequest {
   /** 来自配置，原样交给适配器，Core 不解释 */
   providerOptions?: Record<string, unknown> | undefined;
   /**
+   * 会话标识（ADR-0031 §3）：Runtime 填入会话 ID（子代理填根会话 ID），
+   * 不透明数据；仅当条目声明 sessionHeader 时适配器把它写成请求头，
+   * fetchModels 不携带。
+   */
+  sessionId?: string | undefined;
+  /**
    * 强制工具选择（provider-api.md 第 3 节）：适配器尽力映射为具体的
    * tool_choice；已知无法表达的组合（如 Anthropic 扩展思考开启时只接受
    * auto/none）丢弃之并记 diagnostics.provider.unsupported_capability，

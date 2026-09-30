@@ -44,6 +44,7 @@ import {
   clampReasoningEffort,
   createEntryProvider,
   createProviderRegistry,
+  nocturneUserAgent,
   UnknownModelError,
   type CredentialResolver,
   type ModelInfo,
@@ -96,6 +97,7 @@ import {
   type PermissionGate,
   type ToolRegistry,
 } from "./tools/index.js";
+import { NOCTURNE_VERSION } from "./version.js";
 
 /** 命令被拒绝时抛出的错误；code 即 events.md 第 7 节的拒绝原因码 */
 export class RuntimeCommandError extends Error {
@@ -109,7 +111,6 @@ export class RuntimeCommandError extends Error {
 
 /** 指令文件大小上限（context.md 6.2：每项注入内容都有上限） */
 const INSTRUCTION_FILE_LIMIT = 64 * 1024;
-const NOCTURNE_VERSION = "0.4.0";
 const DEFAULT_PERMISSION_PRESET = "default";
 
 export interface RuntimeOptions {
@@ -360,13 +361,14 @@ function parseModelRef(model: string | ModelRef): ModelRef {
 
 /**
  * ProviderEntryConfig → 路由 Provider（ADR-0026 §4）：条目一个实例，
- * 内部按模型的生效协议分发到两种适配器。
+ * 内部按模型的生效协议分发到三种适配器。
  */
 function instantiateProvider(
   entry: ProviderEntryConfig,
   env: (n: string) => string | undefined,
   diagnostics: Diagnostics | undefined,
   credentials: CredentialResolver | undefined,
+  userAgent: string,
 ) {
   return createEntryProvider(
     {
@@ -383,6 +385,8 @@ function instantiateProvider(
         : {}),
       ...(entry.providerOptions !== undefined ? { providerOptions: entry.providerOptions } : {}),
       ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
+      ...(entry.sessionHeader !== undefined ? { sessionHeader: entry.sessionHeader } : {}),
+      userAgent,
       ...(entry.thinking !== undefined ? { thinking: entry.thinking } : {}),
       ...(diagnostics !== undefined ? { diagnostics } : {}),
     },
@@ -438,6 +442,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     keepProviders: readonly Provider[] = [],
   ): ProviderRegistry {
     const env = (n: string) => platform.env(n);
+    // ADR-0031 §2：所有 Provider 请求的 UA 以 nocturne/<version> 开头
+    const userAgent = nocturneUserAgent(options.version ?? NOCTURNE_VERSION);
     // 同 id 后者覆盖（options.providerConfigs < config 条目，与分层优先级一致）
     const byId = new Map<string, Provider>();
     for (const p of options.providers ?? []) byId.set(p.id, p);
@@ -447,13 +453,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     for (const c of options.providerConfigs ?? []) {
       // ADR-0026 §4：与 config 条目同一路由 Provider（按模型生效协议分发）
       const instance = createEntryProvider(
-        { ...c, credentials: credentialResolver, diagnostics },
+        { ...c, credentials: credentialResolver, diagnostics, userAgent },
         env,
       );
       byId.set(instance.id, instance);
     }
     for (const e of configProviders)
-      byId.set(e.id, instantiateProvider(e, env, diagnostics, credentialResolver));
+      byId.set(e.id, instantiateProvider(e, env, diagnostics, credentialResolver, userAgent));
     return createProviderRegistry([...byId.values()], options.modelOverrides);
   }
 
@@ -913,6 +919,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         nocturneVersion: options.version ?? NOCTURNE_VERSION,
         turnConfig,
         parentFailedSignal: session.failedSignal,
+        // ADR-0031 §3：本会话即根会话（depth 0 launcher 只挂在顶层会话上），
+        // 嵌套子代理沿 deps 透传同一个根 ID
+        rootSessionId: session.id,
         makePolicy: (childSessionId) =>
           buildPolicy(session.state().config.permissionPreset, childSessionId),
         makeHookRunner,

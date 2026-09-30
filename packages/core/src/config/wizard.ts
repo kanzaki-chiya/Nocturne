@@ -81,6 +81,11 @@ export interface WizardPreset {
   thinkingFormat?: "openai" | "openrouter" | undefined;
   /** 密钥获取入口（控制台 URL）：密钥步骤的说明小字用它提示来源 */
   keyHint?: string | undefined;
+  /**
+   * 会话标识请求头名（ADR-0031 §3/§5）：内置预设写死（如 OpenCode 的
+   * x-opencode-session）；自定义预设由向导可选步骤询问，留空不写。
+   */
+  sessionHeader?: string | undefined;
 }
 
 export interface WizardFetchRequest {
@@ -175,6 +180,18 @@ export async function runProviderSetupWizard(
   }
   io.step(`地址 ${baseURL ?? "官方端点"}`);
 
+  // 会话标识请求头（ADR-0031 §3）：仅自定义预设询问，可选——
+  // 直接回车跳过、不写字段；内置预设由预设值写死
+  let sessionHeader = preset.sessionHeader;
+  if (preset.id.startsWith("custom-")) {
+    const input = await io.ask("会话标识请求头（可选，回车跳过）：", {
+      hint: "部分网关要求每个对话带固定的会话 ID，填请求头名称，例如 x-opencode-session；留空不发送",
+    });
+    const name = input.trim();
+    sessionHeader = name !== "" ? name : undefined;
+    io.step(`会话头 ${sessionHeader ?? "不发送"}`);
+  }
+
   // 密钥：后端可用时经凭据存储；不可用时退回环境变量方式
   const backend = config.credentials.backend();
   let key: string | undefined;
@@ -262,6 +279,7 @@ export async function runProviderSetupWizard(
       type: preset.type,
       ...(baseURL !== undefined ? { baseURL } : {}),
       ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+      ...(sessionHeader !== undefined ? { sessionHeader } : {}),
       models,
       ...(Object.keys(thinking).length > 0 ? { thinking } : {}),
       ...(modelCount > 0

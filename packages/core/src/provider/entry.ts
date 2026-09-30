@@ -38,6 +38,16 @@ export interface EntryProviderConfig {
   /** 只交给与条目 type 同协议的请求（ADR-0026 §3） */
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
+  /**
+   * 会话标识请求头名（ADR-0031 §3）：配置字段，值为请求头名称
+   * （如 "x-opencode-session"）；未声明时不发送任何会话头。
+   */
+  sessionHeader?: string | undefined;
+  /**
+   * User-Agent 基值（ADR-0031 §2）：装配处注入 `nocturne/<version>`；
+   * 缺省时适配器用内置版本。
+   */
+  userAgent?: string | undefined;
   thinking?: ProviderThinkingOptions | undefined;
   diagnostics?: Diagnostics | undefined;
 }
@@ -61,12 +71,14 @@ export function createEntryProvider(
   );
   const byModel = new Map(modelList.map((m) => [m.ref.model, m]));
 
-  // 两种适配器共用的条目级输入（凭据解析器/headers/诊断/thinking 一致）
+  // 三种适配器共用的条目级输入（凭据解析器/headers/会话头/UA/诊断/thinking 一致）
   const common = {
     id: config.id,
     apiKeyEnv: config.apiKeyEnv,
     credentials: config.credentials,
     headers: config.headers,
+    sessionHeader: config.sessionHeader,
+    userAgent: config.userAgent,
     thinking: config.thinking,
     diagnostics: config.diagnostics,
   };

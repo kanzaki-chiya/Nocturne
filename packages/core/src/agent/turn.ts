@@ -17,7 +17,12 @@ import {
   runSummaryCall,
   type CompactionPlan,
 } from "../context/index.js";
-import { clampReasoningEffort, isProviderError, type ProviderError } from "../provider/index.js";
+import {
+  clampReasoningEffort,
+  isProviderError,
+  type ModelRequest,
+  type ProviderError,
+} from "../provider/index.js";
 import type {
   ContentBlock,
   FinishReason,
@@ -216,13 +221,16 @@ export async function runTurn(
    * 失败或中断不写任何压缩事件（context.md 6.6），返回 false。
    */
   async function runSummaryPlan(plan: CompactionPlan): Promise<boolean> {
-    const request =
-      plan.summaryRequest ??
-      buildSummaryRequest({
-        history: session.state().history,
-        model: deps.model.model,
-        throughSeq: plan.throughSeq,
-      });
+    const request: ModelRequest = {
+      ...(plan.summaryRequest ??
+        buildSummaryRequest({
+          history: session.state().history,
+          model: deps.model.model,
+          throughSeq: plan.throughSeq,
+        })),
+      // ADR-0031 §3：摘要请求同属本会话，同样携带会话 ID
+      sessionId: deps.rootSessionId ?? session.id,
+    };
     let summary: string;
     try {
       summary = await runSummaryCall(
@@ -396,6 +404,8 @@ export async function runTurn(
       sentEffort = effort;
       const request = {
         ...built.request,
+        // ADR-0031 §3：Runtime 为每个模型请求填会话 ID（子代理填根会话 ID）
+        sessionId: deps.rootSessionId ?? session.id,
         ...(effort !== undefined ? { reasoningEffort: effort } : {}),
         ...(deps.toolChoice !== undefined ? { toolChoice: deps.toolChoice } : {}),
       };

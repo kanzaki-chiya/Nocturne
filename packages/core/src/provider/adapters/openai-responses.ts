@@ -25,6 +25,7 @@ import type {
   Provider,
 } from "../types.js";
 import { type Diagnostics } from "../../protocol/index.js";
+import { sessionRequestHeaders, withUserAgent } from "../http.js";
 import {
   mapPart,
   planToolChoice,
@@ -56,6 +57,16 @@ export interface OpenAIResponsesConfig {
   /** true 时接受清单外的模型 id（回退内置目录/保守默认；见 Provider.strictModels） */
   allowUndeclaredModels?: boolean | undefined;
   headers?: Record<string, string> | undefined;
+  /**
+   * User-Agent 基值（ADR-0031 §2）：装配处注入 `nocturne/<version>`；
+   * 缺省用内置版本。条目 headers 里的 UA（不区分大小写）优先。
+   */
+  userAgent?: string | undefined;
+  /**
+   * 会话标识请求头名（ADR-0031 §3）：请求携带 sessionId 时写
+   * `<sessionHeader>: <sessionId>`；静态 headers 已有同名头时不写。
+   */
+  sessionHeader?: string | undefined;
   /** 诊断通道（observability.md）；缺省 no-op */
   diagnostics?: Diagnostics | undefined;
 }
@@ -101,7 +112,9 @@ export function createOpenAIResponsesProvider(
     baseURL: config.baseURL,
     // SDK 在组装请求头时强制读取 apiKey；真实凭据仍由 wrappedFetch 按请求覆盖
     apiKey: apiKeyFromEnv ?? "resolved-by-fetch",
-    ...(config.headers !== undefined ? { headers: config.headers } : {}),
+    // ADR-0031 §2：User-Agent 以 nocturne/<version> 开头（条目 headers
+    // 里用户写的 UA 优先）；SDK 追加的 ai-sdk/... 后缀保留
+    headers: withUserAgent(config.headers, config.userAgent),
     fetch: wrappedFetch,
   });
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
@@ -152,6 +165,9 @@ export function createOpenAIResponsesProvider(
         mergedOptions !== undefined
           ? Object.fromEntries(Object.entries(mergedOptions).filter(([k]) => !stripped.has(k)))
           : undefined;
+      // ADR-0031 §3：会话标识头——请求带 sessionId 且条目声明
+      // sessionHeader 才写；静态 headers 同名头优先
+      const sessionHeaders = sessionRequestHeaders(config, request.sessionId);
 
       const result = streamText({
         model: sdk.responses(request.model),
@@ -172,6 +188,7 @@ export function createOpenAIResponsesProvider(
         streamRetries: 0,
         abortSignal: signal,
         onError: suppressSdkErrorLog,
+        ...(sessionHeaders !== undefined ? { headers: sessionHeaders } : {}),
         ...(providerOptions !== undefined && Object.keys(providerOptions).length > 0
           ? { providerOptions: { openai: providerOptions as Record<string, JSONValue> } }
           : {}),

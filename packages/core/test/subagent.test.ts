@@ -178,6 +178,13 @@ describe("subagent：基本往返", () => {
     const toolMsg = lastParentReq?.messages.find((m) => m.role === "tool");
     expect(toolMsg?.role === "tool" && toolMsg.content).toContain("调查结论");
 
+    // ADR-0031 §3：主会话与子会话的每个模型请求都携带根会话 ID
+    // （子代理沿 parent 链到顶取同一个值）
+    expect(provider.requests.length).toBeGreaterThan(1);
+    for (const req of provider.requests) {
+      expect(req.sessionId).toBe(session.id);
+    }
+
     // 子会话日志：独立文件 + session.created.parent 关联父会话与 callId
     if (output === undefined) throw new Error("task 未返回子会话统计");
     expect(existsSync(output.childLogPath)).toBe(true);

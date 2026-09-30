@@ -155,6 +155,7 @@ describe("provider 向导（无连接测试，v0.3 不选模型）", () => {
     const { io, printed } = scriptedIo([
       "commandcode", // 名称（必填）
       "https://gw.example.com/v1", // 服务地址
+      "", // 会话标识请求头：回车跳过（ADR-0031 §3），不写 sessionHeader
       "", // API Key 留空 → 走环境变量
       "MY_GATEWAY_KEY", // 凭据环境变量名
       [0], // 思考档位单步：勾第一项 = 不支持
@@ -165,11 +166,33 @@ describe("provider 向导（无连接测试，v0.3 不选模型）", () => {
     expect(saved[0]?.entry.id).toBe("commandcode");
     expect(saved[0]?.entry.baseURL).toBe("https://gw.example.com/v1");
     expect(saved[0]?.entry.apiKeyEnv).toBe("MY_GATEWAY_KEY");
+    expect(saved[0]?.entry.sessionHeader).toBeUndefined();
     expect(printed.some((l) => l.includes("名称"))).toBe(true);
     // 步骤摘要记录名称/地址/密钥来源
     expect(printed.some((l) => l === "名称 commandcode")).toBe(true);
     expect(printed.some((l) => l === "地址 https://gw.example.com/v1")).toBe(true);
+    expect(printed.some((l) => l === "会话头 不发送")).toBe(true);
     expect(printed.some((l) => l === "密钥来源：环境变量 MY_GATEWAY_KEY")).toBe(true);
+  });
+
+  it("自定义预设可填会话标识请求头：写入 sessionHeader；内置预设不问", async () => {
+    stubFetch(() => jsonRes({ data: [{ id: "m1" }] }));
+    const { config, saved } = makeConfig("memory");
+    const { io } = scriptedIo([
+      "opencode", // 名称
+      "https://opencode.ai/zen/go/v1", // 服务地址
+      "x-opencode-session", // 会话标识请求头（ADR-0031 §3）
+      "sk-test", // API Key
+      [0], // 思考档位单步：不支持
+    ]);
+    await runProviderSetupWizard(io, config, deps, { presetId: "custom-openai" });
+    expect(saved[0]?.entry.sessionHeader).toBe("x-opencode-session");
+
+    // 内置预设不出现这一步（由预设值写死；本预设未声明则不发）
+    const { config: c2 } = makeConfig("memory");
+    const { io: io2, printed: p2 } = scriptedIo(["sk-test", [0]]);
+    await runProviderSetupWizard(io2, c2, deps, { presetId: "deepseek" });
+    expect(p2.some((l) => l.includes("会话标识请求头"))).toBe(false);
   });
 
   it("/models 返回 401：提示密钥可能无效，条目仍保存（空 models）", async () => {

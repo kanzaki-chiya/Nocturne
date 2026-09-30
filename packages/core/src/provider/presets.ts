@@ -4,6 +4,7 @@
  * 新增预设门槛：服务地址与协议兼容性有官方文档可查，并实测过连接。
  */
 import type { UpstreamModelInfo } from "./types.js";
+import { hasStaticHeader, nocturneUserAgent } from "./http.js";
 
 export interface ProviderPreset {
   /** 预设标识（向导内部使用；"custom-*" 表示手动填写地址的预设） */
@@ -26,6 +27,11 @@ export interface ProviderPreset {
   thinkingFormat?: "openai" | "openrouter" | undefined;
   /** 密钥获取入口（控制台 URL）：向导密钥步骤的说明小字提示来源 */
   keyHint?: string | undefined;
+  /**
+   * 会话标识请求头名（ADR-0031 §5）：预设写死的服务商要求
+   * （如 OpenCode 的 x-opencode-session），原样写入条目。
+   */
+  sessionHeader?: string | undefined;
 }
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
@@ -84,6 +90,8 @@ export interface FetchModelsRequest {
   type: "openai-compatible" | "anthropic";
   baseURL?: string | undefined;
   headers?: Record<string, string> | undefined;
+  /** 条目可能声明的会话头名；fetchModels 不属于会话，永不发送（ADR-0031 §3） */
+  sessionHeader?: string | undefined;
 }
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -261,6 +269,11 @@ export async function fetchModels(
   key: string | undefined,
   signal?: AbortSignal,
 ): Promise<UpstreamModelInfo[]> {
+  // ADR-0031 §2：模型列表请求同样以 nocturne/<version> 开头；
+  // 条目 headers 里用户写的 UA 优先。fetchModels 不属于会话，不写会话头。
+  const uaHeader = hasStaticHeader(entry.headers, "user-agent")
+    ? {}
+    : { "User-Agent": nocturneUserAgent() };
   // ADR-0026 §3：两种协议共用条目的 baseURL 语义（含 /v1）——
   // anthropic 条目为 <baseURL 或官方默认>/models（不再是额外的 /v1 段）
   const url =
@@ -275,7 +288,7 @@ export async function fetchModels(
           })();
   const raw = await fetchJson(
     url,
-    { Accept: "application/json", ...authHeaders(entry, key) },
+    { ...uaHeader, Accept: "application/json", ...authHeaders(entry, key) },
     signal,
   );
   const data =

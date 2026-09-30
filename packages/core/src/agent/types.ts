@@ -55,4 +55,10 @@ export interface TurnDeps {
   basePrompt?: string | undefined;
   shouldFinish?: ((state: SessionState) => boolean) | undefined;
   toolChoice?: { name: string } | undefined;
+  /**
+   * 写入本 Turn 所有 ModelRequest.sessionId 的会话标识（ADR-0031 §3）：
+   * 缺省取 session.id；子代理填根会话 ID（沿 parent 链到顶），保证
+   * 「一个对话一个 ID」。Agent Loop 不解释其内容，原样放进请求。
+   */
+  rootSessionId?: string | undefined;
 }

@@ -83,6 +83,10 @@ interface ModelRequest {
       条目路由据此分发到对应协议的适配器；缺省时按清单盖章或条目 type */
   protocol?: "openai-compatible" | "anthropic" | "openai-responses"
   providerOptions?: Record<string, unknown>                  // 请求级 Provider 专有选项，原样交给适配器，Core 不解释
+  /** 会话标识（ADR-0031 §3）：Runtime 对每个模型请求填入根会话 ID（主 Turn、
+      压缩、子代理兜底轮同一值；子代理沿 parent 链到顶取根会话）。
+      对适配器不透明：仅当条目声明 sessionHeader 时映射为同名请求头 */
+  sessionId?: string
 }
 ```
 

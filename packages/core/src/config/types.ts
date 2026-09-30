@@ -89,6 +89,12 @@ export interface ProviderEntryConfig {
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
   /**
+   * 会话标识请求头名（ADR-0031 §3）：值为请求头名称（如
+   * "x-opencode-session"）；请求带 sessionId 时写 `<sessionHeader>:
+   * <sessionId>`，headers 里同名静态头优先；未声明不发送。
+   */
+  sessionHeader?: string | undefined;
+  /**
    * 思考参数格式由预设填写；budgets 覆盖 Anthropic 默认预算。
    * levels/source 仅为旧配置兼容读取，运行时忽略并在写回时清除。
    */

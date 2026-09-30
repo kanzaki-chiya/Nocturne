@@ -95,6 +95,12 @@ export interface SubagentDeps {
   turnConfig: TurnConfig;
   /** 父会话 failedSignal：父日志失败传播到子会话（sessions.md 第 7 节） */
   parentFailedSignal: AbortSignal;
+  /**
+   * 根会话 ID（ADR-0031 §3）：写入子会话模型请求的 sessionId，
+   * 保证「一个对话一个 ID」；由装配处在 depth 0 填入会话自身 id，
+   * 嵌套派生沿 deps 透传。
+   */
+  rootSessionId: string;
   /** 按子会话参数重建策略：同一批规则/Grant/预设，presetContext.sessionId 换为子会话 */
   makePolicy(childSessionId: string): PermissionPolicy;
   /** 同一批已过滤条目换子会话绑定重建；subagent 标记由实现方注入输入 */
@@ -385,6 +391,8 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             signal: childSignal,
             basePrompt: SUBAGENT_BASE_PROMPT,
             shouldFinish: finishSubmitted,
+            // ADR-0031 §3：子代理请求填根会话 ID
+            rootSessionId: deps.rootSessionId,
             ...(last ? { toolChoice: { name: "finish" } } : {}),
           };
           const reason = await runTurn(turnDeps, [{ type: "text", text: prompt }]);
