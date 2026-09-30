@@ -397,6 +397,24 @@ describe("TUI", () => {
     const narrow = frameAt(42);
     expect(narrow).not.toContain("缓存");
     expect(narrow).toContain("0.1% / 1M");
+    // 进行中 Turn：已写入的 assistant 消息用量即时计入，不等 turn.completed
+    view.currentTurn = { turnId: "t2", turnIndex: 2 };
+    view.entries = [
+      {
+        kind: "assistant",
+        key: "a1",
+        turnId: "t2",
+        messageId: "m1",
+        seq: 1,
+        text: "",
+        reasoning: "",
+        toolCalls: [],
+        model: { provider: "fake", model: "m" },
+        usage: { inputTokens: 60_000, outputTokens: 10, cacheReadTokens: 58_000 },
+        finishReason: "tool_calls",
+      },
+    ];
+    expect(frameAt(120)).toContain("缓存 88%");
   });
 
   it("窄于 40 列：状态栏保留任务进度，权限框隐藏原因", () => {

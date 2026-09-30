@@ -6,7 +6,7 @@
 import stringWidth from "string-width";
 
 import type { ModelInfo, ModelRef } from "@nocturne/core";
-import type { Usage } from "@nocturne/core/protocol";
+import type { SessionView, Usage } from "@nocturne/core/protocol";
 
 import { truncateLine } from "./format.js";
 
@@ -56,6 +56,26 @@ export function formatModelLabel(
  * 本会话累计缓存命中率：累计 cacheReadTokens / 累计 inputTokens（包含口径，events.md Usage）。
  * 尚无用量或服务商未返回缓存数据时显示 0%（一眼可知是上游没缓存，不隐藏该段）。
  */
+/**
+ * 状态栏用的会话累计用量：已结束 Turn 的累计（SessionView.usage，turn.completed 时累加）
+ * 加上进行中 Turn 已写入的 assistant 消息用量，不必等 Turn 结束才更新。
+ */
+export function sessionUsageSoFar(view: SessionView): Usage {
+  const turnId = view.currentTurn?.turnId;
+  if (turnId === undefined) return view.usage;
+  let read = view.usage.cacheReadTokens ?? 0;
+  let input = view.usage.inputTokens;
+  let output = view.usage.outputTokens;
+  for (const entry of view.entries) {
+    if (entry.kind !== "assistant" || entry.turnId !== turnId || entry.usage === undefined)
+      continue;
+    input += entry.usage.inputTokens;
+    output += entry.usage.outputTokens;
+    read += entry.usage.cacheReadTokens ?? 0;
+  }
+  return { inputTokens: input, outputTokens: output, cacheReadTokens: read };
+}
+
 export function formatCacheHitRate(usage: Usage): string {
   const read = usage.cacheReadTokens ?? 0;
   if (!(usage.inputTokens > 0) || !(read > 0)) return "缓存 0%";

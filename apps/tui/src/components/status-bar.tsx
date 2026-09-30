@@ -3,13 +3,18 @@
  * 上下文为「百分比 / 上下文长度」（单位大写）；长度未知只显示已用量。
  * 模型段与 /model 一致（服务商/模型 ID 或简称），整行按显示宽度截断，不换行。
  * Shift+Tab / Alt+M 只短暂高亮对应段，不往对话区插条目。
- * 缓存命中率为本会话累计值，紧贴上下文段；宽度不够时先去目录段，再去缓存段。
+ * 缓存命中率为本会话累计值（含进行中 Turn 已完成的步骤），紧贴上下文段；宽度不够时先去目录段，再去缓存段。
  */
 import { Box, Text } from "ink";
 import stringWidth from "string-width";
 
 import { useTuiEnv } from "../env.js";
-import { formatCacheHitRate, formatContextOccupancy, formatModelLabel } from "../status-format.js";
+import {
+  formatCacheHitRate,
+  formatContextOccupancy,
+  formatModelLabel,
+  sessionUsageSoFar,
+} from "../status-format.js";
 import { useTheme } from "../theme.js";
 
 import type { ModelInfo } from "@nocturne/core";
@@ -130,7 +135,7 @@ export function StatusBar({
     width >= 80 && dir !== "" ? { text: dir, color: theme.secondary, highlight: false } : undefined;
   if (dirSeg !== undefined) segments.push(dirSeg);
   const cacheSeg: Segment = {
-    text: formatCacheHitRate(view.usage),
+    text: formatCacheHitRate(sessionUsageSoFar(view)),
     color: theme.muted,
     highlight: false,
   };
