@@ -1,4 +1,4 @@
-# ADR-0036：权限预设重排——guarded / smart / auto 与安全审查
+# ADR-0036：权限预设重排——guarded / smart / bypass 与安全审查
 
 - 状态：已接受（维护者 2026-10-01 确认）
 - 日期：2026-10-01
@@ -26,9 +26,9 @@
 | `auto-edit` | 不变 | 用户 |
 | `guarded`（原 `full-access` 改名） | 同原 `full-access`：读写工作区、外部读、shell、network、mcp、subagent 放行 | 用户：高风险命令、工作区外 `edit`、`.git/` 内 `edit`、`-EncodedCommand` 等由分类规则（第 2 条）拦下的操作 |
 | `smart`（新） | 同 `guarded` | 分类规则拦下的操作先交审查器（Jev 或小模型）：放行即执行；拦截直接拒绝，理由作为工具结果回给主模型；拿不准才询问用户 |
-| `auto`（新） | 全部放行，类似 bypass | 几乎不问，只剩第 3 条列出的少数情况 |
+| `bypass`（新） | 全部放行，相当于 Claude Code 的 bypass permissions | 几乎不问，只剩第 3 条列出的少数情况 |
 
-Alt+M 与 `/preset` 按上表顺序循环，六项都可达；`/settings` 的默认权限预设同步扩充。`guarded` 适合日常放手但危险操作自己把关；`smart` 适合长任务、减少打扰；`auto` 适合维护者在受控环境里测试或完全信任的任务。
+Alt+M 与 `/preset` 按上表顺序循环，六项都可达；`/settings` 的默认权限预设同步扩充。`guarded` 适合日常放手但危险操作自己把关；`smart` 适合长任务、减少打扰；`bypass` 适合维护者在受控环境里测试或完全信任的任务。
 
 **旧名兼容**：`full-access` 不再出现在循环、补全与设置页里，但 `config.json`、`settings.json`、`--preset` 与 `/preset` 中写 `full-access` 仍然接受，按 `guarded` 处理（与改名前行为一致），不报错。
 
@@ -44,9 +44,9 @@ Alt+M 与 `/preset` 按上表顺序循环，六项都可达；`/settings` 的默
 
 `guarded` 下这些 `ask` 询问用户；`smart` 下先交审查器。
 
-### 3. auto 不询问
+### 3. bypass 不询问
 
-`auto` 去掉第 2 条中前四项降级，改为直接 `allow`：工作区外 `edit`、`.git/` 内 `edit`、高风险命令、`-EncodedCommand` 都放行。保留的只有下面几项，它们触发得很少，保护的是 Nocturne 自身而不是工作区：
+`bypass` 去掉第 2 条中前四项降级，改为直接 `allow`：工作区外 `edit`、`.git/` 内 `edit`、高风险命令、`-EncodedCommand` 都放行。保留的只有下面几项，它们触发得很少，保护的是 Nocturne 自身而不是工作区：
 
 - 凭据文件的内置硬拒绝（任何预设、规则、Grant 都不能放开）；
 - 修改 Nocturne 授权数据（`config.json`、`settings.json`、`trust.json`、`grants/**`、`providers.json`）与 `.nocturne/` 项目配置目录：至少 `ask`；
@@ -132,18 +132,19 @@ decision == ask 时：
 
 ## 后果
 
-- `packages/core/src/permission/`：预设表与规则序列（`presets.ts`，`full-access` 改名 `guarded` 并保留别名解析、新增 `smart`/`auto`）、5.3 算法中的审查分支与缓存、选项集计算；`SecurityReviewer` 接口与两个后端的实现放在权限模块下，模型后端经 Provider 公开接口调用，不按服务商分支。
-- `protocol`：`PermissionPresetName` 改为 `read-only | default | auto-edit | guarded | smart | auto`，读取配置与旧会话日志时 `full-access` 映射为 `guarded`；新事件 `permission.reviewed`；`permission.resolved.source` 增加 `reviewer`；会话日志 schema 同步（吸取 ADR-0031 漏改 schema 导致会话无法恢复的教训：新增与改名的枚举值都要有往返测试，含旧日志里的 `full-access`）。
+- `packages/core/src/permission/`：预设表与规则序列（`presets.ts`，`full-access` 改名 `guarded` 并保留别名解析、新增 `smart`/`bypass`）、5.3 算法中的审查分支与缓存、选项集计算；`SecurityReviewer` 接口与两个后端的实现放在权限模块下，模型后端经 Provider 公开接口调用，不按服务商分支。
+- `protocol`：`PermissionPresetName` 改为 `read-only | default | auto-edit | guarded | smart | bypass`，读取配置与旧会话日志时 `full-access` 映射为 `guarded`；新事件 `permission.reviewed`；`permission.resolved.source` 增加 `reviewer`；会话日志 schema 同步（吸取 ADR-0031 漏改 schema 导致会话无法恢复的教训：新增与改名的枚举值都要有往返测试，含旧日志里的 `full-access`）。
 - 设置层：`permission.reviewer` 字段、`/settings` 新行与模型选择。
 - TUI/CLI：预设循环、补全、审查行、弹窗理由、未配置提示。
 - 文档：[permissions.md](../architecture/permissions.md) 第 6、7 节与 5.3、[events.md](../protocols/events.md)、[config.md](../architecture/config.md)、[tui.md](../apps/tui.md)、[cli.md](../apps/cli.md)、用户指南中出现 `full-access` 的地方；路线图中「智能权限与安全审计模型」「高风险操作只给一次性选项」两项改为指向本 ADR。
-- 实现排在 `apply_patch`（[ADR-0035](ADR-0035-apply-patch.md)）之后。分两轮：第一轮做第 1、2、3、9 条（改名、别名、`auto`、一次性选项）与审查框架和模型后端；第二轮接 Jev。
+- 实现排在 `apply_patch`（[ADR-0035](ADR-0035-apply-patch.md)）之后。分两轮：第一轮做第 1、2、3、9 条（改名、别名、`bypass`、一次性选项）与审查框架和模型后端；第二轮接 Jev。
 
 ## 备选方案
 
-- **保留 `full-access` 名字、只修匹配缺陷**：缺陷修完后询问已大幅减少，但工作区外 `edit` 与高风险命令仍会打断测试，且「full access」这个名字暗示不问，与实际行为不符。改名为 `guarded` 把名字和行为对上，真正不问的档位叫 `auto`。
+- **保留 `full-access` 名字、只修匹配缺陷**：缺陷修完后询问已大幅减少，但工作区外 `edit` 与高风险命令仍会打断测试，且「full access」这个名字暗示不问，与实际行为不符。改名为 `guarded` 把名字和行为对上，真正不问的档位叫 `bypass`。
 - **`smart` 以 `auto-edit` 为放行范围、审查所有需确认的操作**（本 ADR 初稿）：普通 shell 命令每条都要经审查器，延迟与费用高；改为只审查分类规则拦下的少数操作，审查器调用次数少得多。
-- **`auto` 连授权数据与凭据命令也放开**：这两类几乎不会在正常任务里出现，一旦出现往往意味着模型在试图改自己的权限或读密钥；保留询问的打扰很小。
+- **不询问的档位叫 `auto`**：与 `auto-edit` 同前缀、放行程度却相差最远，Alt+M 循环里容易按错；Claude Code 的 auto mode 指分类器审查（相当于本 ADR 的 `smart`），同名反义会让用户误以为有审查兜底。
+- **`bypass` 连授权数据与凭据命令也放开**：这两类几乎不会在正常任务里出现，一旦出现往往意味着模型在试图改自己的权限或读密钥；保留询问的打扰很小。
 - **审查器放在工具实现或 UI 里**：违反「权限判定只能发生在权限层」的约束。
 - **让审查器自报置信度再按阈值分档**：LLM 的自报置信度不可靠；三选一加「拿不准就选拿不准」更直接。Jev 返回的是模型本身的概率，可以按阈值分档。
 - **审查器看文件内容或工具输出以提高准确度**：扩大了提示注入面（工具输出正是注入的主要来源），不采用。
