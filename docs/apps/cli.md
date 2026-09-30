@@ -100,7 +100,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `/shell <种类\|编号>` | 会话内切换 shell（`auto` 清除选择回自动）；写入 `settings.json`，下一次 shell 调用生效；目标未安装时拒绝并列出可选项（`invalid_command`，不写 `settings.json`）；被 `NOCTURNE_SHELL`/`config.json` 覆盖时提示已写入但不生效 | `session.setShell(kind)` → `session.config_changed`（`shell`） |
 | `/context` | 显示若现在构建请求，上下文由什么组成 | `session.describeContext()` → `{ report: ContextReport; overBudget: boolean }`（见下） |
 | `/compact` | 手动触发 L2 摘要压缩 | `session.compact()` → `context.compacted(kind="summary")` |
-| `/resume` | 列出会话（编号、id、创建时间、绑定目录、模型、锁状态），输入编号切换，空行取消 | `runtime.listSessions()` + 会话打开逻辑（见下） |
+| `/resume` | 列出**当前目录**的会话（编号、id、创建时间、绑定目录、模型、锁状态），与 `-c/--continue` 同口径；输入编号切换，空行取消；其他目录的会话用 `/resume <id>`，全部会话用 `--sessions` 查看 | `runtime.listSessions({ cwd })` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
 | `/settings` | 按会话默认、界面、执行分组列出生效值、来源和覆盖提示；默认模型与档位只读，修改去 `/model`，Shell 去 `/shell`，`/theme` 仅 TUI | `runtime.describeSettings()` |
 | `/settings preset <名称\|reset>` | 保存默认预设，`reset` 清除；可选 `read-only`、`default`、`auto-edit`、`full-access` | `runtime.updateSettings()` |

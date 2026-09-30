@@ -1516,8 +1516,9 @@ function SessionApp({
   useEffect(() => {
     if (overlay === "resume") {
       setResumeList(undefined);
+      // 只列当前目录的会话（与 --continue 同口径）；其他目录用 /resume <id>
       runtime
-        .listSessions()
+        .listSessions({ cwd: session.state().meta.cwd })
         .then((rows) => {
           setResumeList([...rows].sort((a, b) => b.mtimeMs - a.mtimeMs));
         })
@@ -1526,7 +1527,7 @@ function SessionApp({
           setOverlay(undefined);
         });
     }
-  }, [overlay, runtime, pushLine]);
+  }, [overlay, runtime, session, pushLine]);
 
   const dialogOpen =
     overlay !== undefined ||
@@ -2501,7 +2502,7 @@ function SessionApp({
       />
     ) : overlay === "resume" ? (
       <PickList
-        title="切换到会话"
+        title="切换到会话（当前目录）"
         items={resumeItems}
         active
         width={width}

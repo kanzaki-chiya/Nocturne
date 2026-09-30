@@ -650,6 +650,28 @@ describe("TUI", () => {
     for (const next of created) await next.close();
   });
 
+  it("/resume 列表只显示当前目录的会话", async () => {
+    const sessionsDir = tmp("nct-tui-sd-");
+    const mk = (cwd: string) =>
+      createRuntime({ cwd, sessionsDir, providers: [new FakeProvider({ scripts: [] })] });
+    const runtime = await mk(tmp("nct-tui-ws-"));
+    const other = await mk(tmp("nct-tui-other-"));
+    const s1 = await runtime.createSession({ model: "fake/fake-model" });
+    const elsewhere = await other.createSession({ model: "fake/fake-model" });
+    await elsewhere.close();
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session: s1, runtime, env: ENV, switchSession: vi.fn() }),
+    );
+    await pause(50);
+    stdin.write("/resume");
+    stdin.write("\r");
+    await waitFor(() => (lastFrame() ?? "").includes("切换到会话（当前目录）"));
+    await waitFor(() => (lastFrame() ?? "").includes(s1.id));
+    expect(lastFrame()).not.toContain(elsewhere.id);
+    unmount();
+    await s1.close();
+  });
+
   it("/resume 列表：显示会话、方向键移动并选择", async () => {
     const { runtime, session: s1 } = await makeSession();
     await pause();

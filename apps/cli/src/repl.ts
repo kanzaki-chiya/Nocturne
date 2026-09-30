@@ -232,9 +232,12 @@ export async function runRepl(
   };
 
   const startResumePick = async (): Promise<void> => {
-    const rows = [...(await runtime.listSessions())].sort((a, b) => b.mtimeMs - a.mtimeMs);
+    // 只列当前目录的会话（与 --continue 同口径）；其他目录用 /resume <id>
+    const rows = [...(await runtime.listSessions({ cwd: session.state().meta.cwd }))].sort(
+      (a, b) => b.mtimeMs - a.mtimeMs,
+    );
     if (rows.length === 0) {
-      out.line("stdout", "（没有会话）");
+      out.line("stdout", "（当前目录没有会话）");
       return;
     }
     pendingResume = { rows };

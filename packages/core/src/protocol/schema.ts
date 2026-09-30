@@ -5,6 +5,7 @@
  */
 import { z } from "zod";
 import { DURABLE_EVENT_TYPES, type DurableEvent, type DurableType } from "./events.js";
+import { PROTOCOL_ENDPOINTS, type ModelProtocol } from "./types.js";
 
 // ── 公共类型 schema ────────────────────────────────────────
 
@@ -119,8 +120,10 @@ const payloadSchemas = {
   "message.assistant": z.object({
     messageId: z.string(),
     model: modelRefSchema,
-    // ADR-0026 §6：产生该消息的生效协议（可选，旧版本忽略）
-    protocol: z.enum(["openai-compatible", "anthropic"]).optional(),
+    // ADR-0026 §6：产生该消息的生效协议（可选，旧版本忽略）；取值随 ModelProtocol
+    protocol: z
+      .enum(Object.keys(PROTOCOL_ENDPOINTS) as [ModelProtocol, ...ModelProtocol[]])
+      .optional(),
     content: z.array(contentBlockSchema),
     toolCalls: z.array(toolCallRefSchema),
     usage: usageSchema.optional(),

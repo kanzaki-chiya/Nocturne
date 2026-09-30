@@ -206,9 +206,11 @@ describe("REPL /resume 会话切换", () => {
       interrupt: () => undefined,
       respondPermission: () => Promise.resolve(),
       state: () =>
-        ({ config: { model: { provider: "p", model: "m1" } }, openTurn: undefined }) as ReturnType<
-          RuntimeSession["state"]
-        >,
+        ({
+          config: { model: { provider: "p", model: "m1" } },
+          openTurn: undefined,
+          meta: { cwd: "/ws" },
+        }) as unknown as ReturnType<RuntimeSession["state"]>,
       warnings: [],
       session: { durableEvents: () => [] },
     }) as unknown as RuntimeSession;
@@ -251,7 +253,10 @@ describe("REPL /resume 会话切换", () => {
     const s2 = fakeSession("s2");
     const rt = {
       listModels: () => [],
-      listSessions: () => Promise.resolve([summary("s2", 100), summary("s1", 200)]),
+      listSessions: (filter?: { cwd?: string }) => {
+        expect(filter?.cwd).toBe("/ws");
+        return Promise.resolve([summary("s2", 100), summary("s1", 200)]);
+      },
     } as unknown as Runtime;
     const calls: string[] = [];
     const done = runRepl(s1, rt, io, {
@@ -280,7 +285,10 @@ describe("REPL /resume 会话切换", () => {
     const s2 = fakeSession("s2");
     const rt = {
       listModels: () => [],
-      listSessions: () => Promise.resolve([summary("s2", 100), summary("s1", 200)]),
+      listSessions: (filter?: { cwd?: string }) => {
+        expect(filter?.cwd).toBe("/ws");
+        return Promise.resolve([summary("s2", 100), summary("s1", 200)]);
+      },
     } as unknown as Runtime;
     const calls: string[] = [];
     const done = runRepl(s1, rt, io, {

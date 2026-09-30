@@ -8,6 +8,8 @@ import {
   isDurableEventType,
   isEphemeralEventType,
   LOG_FORMAT_VERSION,
+  PROTOCOL_ENDPOINTS,
+  type ModelProtocol,
   resolveEffectiveProtocol,
   unavailableProtocolReason,
   type DurableEvent,
@@ -57,6 +59,24 @@ describe("decodeDurableEvent", () => {
     const line = encodeDurableEvent(event);
     expect(decodeDurableEvent(line)).toEqual(event);
     expect(decodeDurableEvent(encodeDurableEvent(decodeDurableEvent(line)))).toEqual(event);
+  });
+
+  it("message.assistant.protocol 接受全部 ModelProtocol（含 openai-responses，可恢复）", () => {
+    for (const protocol of Object.keys(PROTOCOL_ENDPOINTS) as ModelProtocol[]) {
+      const event = makeEvent({
+        type: "message.assistant",
+        turnId: "t1",
+        payload: {
+          messageId: "m1",
+          model: { provider: "fake", model: "fake-1" },
+          protocol,
+          content: [{ type: "text", text: "hello" }],
+          toolCalls: [],
+          finishReason: "stop",
+        } satisfies MessageAssistantPayload,
+      });
+      expect(decodeDurableEvent(encodeDurableEvent(event))).toEqual(event);
+    }
   });
 
   it("非法 JSON → invalid_json", () => {
