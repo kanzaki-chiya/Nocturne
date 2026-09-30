@@ -8,6 +8,7 @@ import stringWidth from "string-width";
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 import { todoItemsFromCompletion } from "@nocturne/core/protocol";
 
+import { questionToolLines } from "./question-format.js";
 import { attachmentLine } from "./attachment-line.js";
 import { diffSummary, layoutDiffRow, parseDiff } from "./diff-format.js";
 import { interleaveClient, type ClientLine } from "./client-lines.js";
@@ -195,6 +196,11 @@ export function layoutEntry(
       return lines.length > 0 ? lines : [{ key: entry.key, text: "" }];
     }
     case "tool": {
+      if (entry.name === "ask_user")
+        return questionToolLines(entry).map((text, i) => ({
+          key: `${entry.key}:${i}`,
+          text: paint(text, width),
+        }));
       const mark =
         entry.status === "ok"
           ? ascii
@@ -312,7 +318,7 @@ export function layoutLive(
   for (const tool of view.live.tools) {
     lines.push({
       key: `live:${tool.callId}`,
-      text: paint(`${ascii ? "*" : "•"} ${tool.name}`, width),
+      text: paint(tool.name === "ask_user" ? "? 提问" : `${ascii ? "*" : "•"} ${tool.name}`, width),
       color: theme.accent,
     });
   }

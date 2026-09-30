@@ -5,6 +5,7 @@
  */
 import { Box, Text, useInput } from "ink";
 import { useEffect, useState } from "react";
+import stringWidth from "string-width";
 
 import { glyphs, useTuiEnv } from "../env.js";
 import { boxSafe, truncateLine } from "../format.js";
@@ -64,16 +65,25 @@ function subjectText(pending: PendingPermission): string {
     .join("；");
 }
 
+/** 固定单行标题、主体、可选原因、选项、提示与边框，无渲染后测量。 */
+export function permissionDialogRows(pending: PendingPermission, width: number): number {
+  return 6 + (pending.reason !== "" && width >= 40 ? 1 : 0);
+}
+
 export function PermissionDialog({
   pending,
   active,
   onReply,
   width,
+  height,
+  onEscape,
 }: {
   pending: PendingPermission;
   active: boolean;
   onReply: (reply: PermissionReply) => void;
   width: number;
+  height?: number;
+  onEscape?: () => void;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
@@ -111,6 +121,10 @@ export function PermissionDialog({
         if (!key.ctrl && !key.meta && input !== "") setFeedback(feedback + input);
         return;
       }
+      if (key.escape) {
+        onEscape?.();
+        return;
+      }
       if (key.tab) {
         // Shift+Tab = 反向移动焦点（不切换思考档位；ADR-0018）
         setFocus((f) => (f + (key.shift ? opts.length - 1 : 1)) % opts.length);
@@ -133,6 +147,64 @@ export function PermissionDialog({
   );
 
   const narrow = width < 40;
+  const rows = [
+    `${g.wait} 需要确认`,
+    subjectText(pending),
+    ...(pending.reason !== "" && !narrow ? [`原因：${pending.reason}`] : []),
+    feedback !== undefined
+      ? `d${g.prompt} ${feedback}_`
+      : opts.map((o, i) => `${i === focus ? ">" : ""}[${o.key}] ${o.label}`).join("  "),
+    feedback !== undefined
+      ? "Enter 发送拒绝（空 = 不带反馈）；Esc 返回"
+      : "Tab/Shift+Tab 选择  Enter 确认  Esc 中断",
+  ];
+  if (height !== undefined) {
+    const bordered = height >= 3;
+    const capacity = Math.max(0, height - (bordered ? 2 : 0));
+    const start = capacity === 1 ? rows.length - 2 : Math.max(0, rows.length - capacity);
+    const focused = opts[focus];
+    return (
+      <Box
+        flexDirection="column"
+        height={height}
+        flexShrink={0}
+        overflow="hidden"
+        {...(bordered
+          ? {
+              borderStyle: env.ascii ? ("single" as const) : ("round" as const),
+              borderColor: theme.border,
+            }
+          : {})}
+        backgroundColor={theme.overlayBg}
+      >
+        {rows.slice(start, start + capacity).map((row, i) => (
+          <Text key={i} wrap="truncate">
+            {truncateLine(
+              boxSafe(
+                start + i === rows.length - 2 &&
+                  feedback === undefined &&
+                  focused !== undefined &&
+                  stringWidth(
+                    boxSafe(
+                      row.slice(
+                        0,
+                        row.indexOf(`>[${focused.key}]`) +
+                          `>[${focused.key}] ${focused.label}`.length,
+                      ),
+                    ),
+                  ) >
+                    width - 4
+                  ? `>[${focused.key}] ${focused.label}`
+                  : row,
+              ),
+              Math.max(1, width - 4),
+              g.ellipsis,
+            )}
+          </Text>
+        ))}
+      </Box>
+    );
+  }
   return (
     <Box
       flexDirection="column"

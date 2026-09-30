@@ -1,7 +1,7 @@
 /**
  * 提问面板测试（ADR-0032 §6 TUI）：ink-testing-library 帧断言。
  * 组件级覆盖单选、多选、「其他」文本、自由文本、多题切换、确认行、
- * Esc 退出输入/跳过；App 级覆盖面板独占焦点（Esc 不中断 Turn）、
+ * Esc 退出输入/中断；App 级覆盖面板独占焦点（Esc 中断 Turn）、
  * Ctrl+C 中断与对话摘要。
  * 注：框内行的「→」经 boxSafe 渲染为「>」（conhost 宽度安全约定）；
  * App 级用例在面板出现后要等一拍再写键，等 useInput 订阅生效。
@@ -78,6 +78,110 @@ const twoQ = (): PendingQuestion => ({
 });
 
 describe("提问面板", () => {
+  it("单选拒绝与混合回答在确认行逐题显示", async () => {
+    const reply = vi.fn();
+    const screen = render(
+      inEnv(
+        createElement(QuestionDialog, { pending: twoQ(), active: true, onReply: reply, width: 80 }),
+      ),
+    );
+    await pause();
+    screen.stdin.write("\x1b[A");
+    await pause(); // 循环到拒绝
+    screen.stdin.write("\r");
+    await pause();
+    screen.stdin.write("\r");
+    await pause(); // 第二题选丙
+    expect(screen.lastFrame()).toContain("第一题？ > 拒绝回答");
+    expect(screen.lastFrame()).toContain("第二题？ > 丙");
+    screen.stdin.write("\r");
+    await pause();
+    expect(reply).toHaveBeenCalledWith({ answers: [{ declined: true }, { selected: ["丙"] }] });
+    screen.unmount();
+  });
+
+  it("多选拒绝清除勾选及其他文本；选其他项取消拒绝", async () => {
+    const reply = vi.fn();
+    const screen = render(
+      inEnv(
+        createElement(QuestionDialog, {
+          pending: choiceQ(true),
+          active: true,
+          onReply: reply,
+          width: 80,
+        }),
+      ),
+    );
+    await pause();
+    screen.stdin.write(" ");
+    await pause();
+    screen.stdin.write("\x1b[B");
+    await pause();
+    screen.stdin.write("\x1b[B");
+    await pause();
+    screen.stdin.write("自定义");
+    await pause();
+    screen.stdin.write("\x1b[B");
+    await pause();
+    screen.stdin.write(" ");
+    await pause();
+    expect(screen.lastFrame()).toContain("[x] 拒绝回答");
+    expect(screen.lastFrame()).not.toContain("[x] 方案A");
+    expect(screen.lastFrame()).not.toContain("自定义");
+    screen.stdin.write("\x1b[B");
+    await pause();
+    screen.stdin.write(" ");
+    await pause();
+    expect(screen.lastFrame()).toContain("[ ] 拒绝回答");
+    expect(screen.lastFrame()).toContain("[x] 方案A");
+    screen.stdin.write("\x1b[A");
+    await pause();
+    screen.stdin.write(" ");
+    await pause();
+    screen.stdin.write("\r");
+    await pause();
+    screen.stdin.write("\r");
+    await pause();
+    expect(reply).toHaveBeenCalledWith({ answers: [{ declined: true }] });
+    screen.unmount();
+  });
+
+  it("矮终端封顶，焦点在拒绝行时仍可见（ASCII/NO_COLOR）", async () => {
+    vi.stubEnv("NO_COLOR", "1");
+    const reply = vi.fn();
+    const pending = choiceQ();
+    pending.questions = [
+      {
+        question: "选哪个方案？",
+        options: ["A", "B", "C", "D", "E", "F"].map((label) => ({ label })),
+      },
+    ];
+    const screen = render(
+      inEnv(
+        createElement(QuestionDialog, {
+          pending,
+          active: true,
+          onReply: reply,
+          width: 32,
+          height: 5,
+        }),
+        { ascii: true, animated: false },
+      ),
+    );
+    await pause();
+    screen.stdin.write("\x1b[A");
+    await pause();
+    expect(screen.lastFrame()?.split("\n")).toHaveLength(5);
+    expect(screen.lastFrame()).toContain("> [ ] 拒绝回答");
+    screen.stdin.write("\r");
+    await pause();
+    expect(screen.lastFrame()).toContain("拒绝回答");
+    screen.stdin.write("\r");
+    await pause();
+    expect(reply).toHaveBeenCalledWith({ answers: [{ declined: true }] });
+    screen.unmount();
+  });
+
   it("单选：Enter 选中焦点项并进确认行，再 Enter 提交", async () => {
     const reply = vi.fn();
     const { lastFrame, stdin, unmount } = render(
@@ -96,7 +200,7 @@ describe("提问面板", () => {
     expect(frame).toContain("选哪个方案？");
     expect(frame).toContain("( ) 方案A");
     expect(frame).toContain("( ) 方案B");
-    expect(frame).toContain("[其他]");
+    expect(frame).toContain("[其他（自己输入）]");
     expect(frame).toContain("保守做法");
     // ↓ 到方案B，Enter 选中并进确认行（单题直接到确认）
     stdin.write("\x1b[B");
@@ -251,32 +355,37 @@ describe("提问面板", () => {
     unmount();
   });
 
-  it("Esc：非输入态跳过整次提问", async () => {
+  it("Esc：非输入态委托全局中断", async () => {
     const reply = vi.fn();
+    const escape = vi.fn();
     const { stdin, unmount } = render(
       inEnv(
         createElement(QuestionDialog, {
           pending: choiceQ(),
           active: true,
           onReply: reply,
+          onEscape: escape,
           width: 80,
         }),
       ),
     );
     stdin.write("\x1b");
     await pause();
-    expect(reply).toHaveBeenCalledWith({ skipped: true });
+    expect(escape).toHaveBeenCalledOnce();
+    expect(reply).not.toHaveBeenCalled();
     unmount();
   });
 
-  it("Esc：文本输入中先退出输入，再按一次才跳过", async () => {
+  it("Esc：文本输入中先退出输入，再按一次才中断", async () => {
     const reply = vi.fn();
+    const escape = vi.fn();
     const { lastFrame, stdin, unmount } = render(
       inEnv(
         createElement(QuestionDialog, {
           pending: freeQ(),
           active: true,
           onReply: reply,
+          onEscape: escape,
           width: 80,
         }),
       ),
@@ -287,9 +396,10 @@ describe("提问面板", () => {
     await pause();
     expect(reply).not.toHaveBeenCalled();
     expect(lastFrame()).toContain("abc");
-    stdin.write("\x1b"); // 跳过
+    stdin.write("\x1b"); // 中断
     await pause();
-    expect(reply).toHaveBeenCalledWith({ skipped: true });
+    expect(escape).toHaveBeenCalledOnce();
+    expect(reply).not.toHaveBeenCalled();
     unmount();
   });
 
@@ -357,6 +467,10 @@ describe("提问面板 · App 集成", () => {
               { type: "tool_call", toolCallId: "q1", name: "ask_user", input: { questions } },
               { type: "finish", reason: "tool_calls" },
             ],
+            [
+              { type: "text_delta", text: "完成" },
+              { type: "finish", reason: "stop" },
+            ],
           ],
         }),
       ],
@@ -365,7 +479,7 @@ describe("提问面板 · App 集成", () => {
     return { runtime, session };
   }
 
-  it("面板打开：Esc 跳过不中断 Turn，对话留「已跳过」摘要", async () => {
+  it("面板打开：Esc 中断 Turn，工具条目显示「已取消」", async () => {
     const { session, runtime } = await makeQuestionSession([
       { question: "选哪个？", options: [{ label: "A" }, { label: "B" }] },
     ]);
@@ -374,11 +488,11 @@ describe("提问面板 · App 集成", () => {
       createElement(App, { session, runtime, env: ENV }),
     );
     void session.submit({ text: "干活" });
-    await waitFor(() => (lastFrame() ?? "").includes("Esc 跳过"));
+    await waitFor(() => (lastFrame() ?? "").includes("Esc 中断"));
     await pause(60); // 等面板 useInput 订阅生效
-    stdin.write("\x1b"); // Esc：面板内跳过，不是中断 Turn
-    await waitFor(() => (lastFrame() ?? "").includes("提问已跳过"));
-    expect(interrupt).not.toHaveBeenCalled();
+    stdin.write("\x1b"); // Esc：非输入态中断 Turn
+    await waitFor(() => (lastFrame() ?? "").includes("已取消"));
+    expect(interrupt).toHaveBeenCalledOnce();
     unmount();
     await session.close();
   });
@@ -392,31 +506,42 @@ describe("提问面板 · App 集成", () => {
       createElement(App, { session, runtime, env: ENV }),
     );
     void session.submit({ text: "干活" });
-    await waitFor(() => (lastFrame() ?? "").includes("Esc 跳过"));
+    await waitFor(() => (lastFrame() ?? "").includes("Esc 中断"));
     stdin.write("\x03");
     await waitFor(() => interrupt.mock.calls.length > 0);
-    await waitFor(() => (lastFrame() ?? "").includes("调用已被中断"));
+    await waitFor(() => (lastFrame() ?? "").includes("已取消"));
     unmount();
     await session.close();
   });
 
-  it("提交后对话中留「问题 → 回答」摘要，状态栏显示等待回答", async () => {
+  it("提交后仅工具条目显示摘要，真实恢复会话后保持一致", async () => {
     const { session, runtime } = await makeQuestionSession([
       { question: "选哪个？", options: [{ label: "A" }, { label: "B" }] },
     ]);
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV, inline: true }),
     );
-    void session.submit({ text: "干活" });
-    await waitFor(() => (lastFrame() ?? "").includes("Esc 跳过"));
+    const turn = session.submit({ text: "干活" });
+    await waitFor(() => (lastFrame() ?? "").includes("Esc 中断"));
     expect(lastFrame()).toContain("等待回答");
     await pause(60); // 等面板 useInput 订阅生效
     stdin.write("\r"); // 选中 A → 确认行
     await waitFor(() => (lastFrame() ?? "").includes("确认回答"));
     stdin.write("\r"); // 提交
-    await waitFor(() => (lastFrame() ?? "").includes("已提交回答"));
-    expect(lastFrame()).toContain("选哪个？ → A");
+    await waitFor(() => (lastFrame() ?? "").includes("选哪个？ → A"));
+    await turn;
+    expect((lastFrame() ?? "").split("选哪个？ → A")).toHaveLength(2);
+    expect(lastFrame()).not.toContain('"questions"');
     unmount();
     await session.close();
+    const resumed = await runtime.resumeSession(session.id);
+    const restored = render(
+      createElement(App, { session: resumed, runtime, env: ENV, inline: true }),
+    );
+    await waitFor(() => (restored.lastFrame() ?? "").includes("选哪个？ → A"));
+    expect((restored.lastFrame() ?? "").split("选哪个？ → A")).toHaveLength(2);
+    expect(restored.lastFrame()).not.toContain('"questions"');
+    restored.unmount();
+    await resumed.close();
   });
 });

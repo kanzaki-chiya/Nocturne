@@ -92,9 +92,9 @@ import { ConfirmBox } from "./components/confirm-box.js";
 import { InputCursor } from "./components/input-cursor.js";
 import { ModelPicker, type PickerScope } from "./components/model-picker.js";
 import { Panel } from "./components/panel.js";
-import { PermissionDialog } from "./components/permission-dialog.js";
+import { PermissionDialog, permissionDialogRows } from "./components/permission-dialog.js";
 import { PickList, type PickItem } from "./components/pick-list.js";
-import { QuestionDialog, questionSummary } from "./components/question-dialog.js";
+import { QuestionDialog, questionDialogRows } from "./components/question-dialog.js";
 import { ProviderPage, type ProviderOp } from "./components/provider-page.js";
 import { StatusBar, type EffortSegment, type StatusHighlight } from "./components/status-bar.js";
 import { ThemePage } from "./components/theme-page.js";
@@ -841,8 +841,12 @@ function SessionApp({
 
   const busy = view.status !== "idle" || submitPending;
   const pending = view.pendingPermission;
-  // 待回答的提问（ADR-0032）：与权限确认同级独占焦点，Esc 在面板内表示跳过
+  // 待回答的提问与权限确认同级独占焦点。
   const pendingQ = view.pendingQuestion;
+  const [questionPage, setQuestionPage] = useState({ index: 0, confirm: false });
+  useEffect(() => {
+    setQuestionPage({ index: 0, confirm: false });
+  }, [pendingQ?.requestId]);
   const interruptible = useRef(false);
   interruptible.current = busy;
   useEffect(
@@ -936,11 +940,10 @@ function SessionApp({
     [pending, session, pushLine],
   );
 
-  // 提问回复（ADR-0032 §6）：提交/跳过后在对话中留一条摘要
+  // 回复只结算工具；对话摘要由持久工具事件显示。
   const replyQuestion = useCallback(
     (reply: QuestionReply) => {
       if (pendingQ === undefined) return;
-      pushLine(questionSummary(pendingQ.questions, reply));
       session.respondQuestion(pendingQ.requestId, reply).catch((e: unknown) => {
         pushLine(`! ${errText(e)}`);
       });
@@ -2067,6 +2070,23 @@ function SessionApp({
     input.split("\n").length,
     fullscreen && !pageOpen ? todoPanelRows(view.todos.length) : 0,
   );
+  const promptOverlay = pending !== undefined || pendingQ !== undefined;
+  const popupHeight = Math.min(
+    budget.conversation,
+    pending !== undefined
+      ? permissionDialogRows(pending, width)
+      : pendingQ !== undefined
+        ? questionDialogRows(pendingQ, questionPage.index, questionPage.confirm)
+        : 0,
+  );
+  const conversationHeight = budget.conversation - popupHeight;
+  const escapePrompt = (): void => {
+    if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
+    escapeTimer.current = setTimeout(() => {
+      escapeTimer.current = undefined;
+      if (interruptible.current) session.interrupt();
+    }, 80);
+  };
   const g = glyphs(env);
   const editor = composerWindow(`${g.prompt} `, input, cursor, width, budget.input);
 
@@ -2205,10 +2225,10 @@ function SessionApp({
   const blocks: LineBlock[] = fullscreen || recordOpen ? transcriptBlocks(transcriptSource) : [];
   exportBlocksRef.current = { blocks, width };
   blocksRef.current = { blocks, width };
-  const showBanner = fullscreen && !scroll.follow;
+  const showBanner = fullscreen && !scroll.follow && !promptOverlay;
   const transcriptRows = recordOpen
     ? Math.max(0, budget.frameHeight - 2)
-    : Math.max(0, budget.conversation - (showBanner ? 1 : 0));
+    : Math.max(0, conversationHeight - (showBanner ? 1 : 0));
   const activeScroll = recordOpen ? recordScroll : scroll;
   const activeBlocks = blocksRef.current.blocks;
   const visible: VisibleWindow =
@@ -2217,7 +2237,7 @@ function SessionApp({
           activeBlocks,
           width,
           transcriptRows,
-          activeScroll.fromBottom,
+          promptOverlay ? 0 : activeScroll.fromBottom,
           lineCache.current,
         )
       : EMPTY_WINDOW;
@@ -2313,7 +2333,7 @@ function SessionApp({
       ...pendingLines.filter((line) => line.after >= view.entries.length).flatMap(clientRows),
     );
   }
-  const shownActivity = activityLines.slice(-budget.conversation);
+  const shownActivity = conversationHeight > 0 ? activityLines.slice(-conversationHeight) : [];
   const activityHeight = shownActivity.length;
   const prompt = `${g.prompt} `;
   const inputY = -(budget.input + budget.completion + budget.status);
@@ -2325,13 +2345,21 @@ function SessionApp({
         pending={pending}
         active={!dialogOpen}
         onReply={replyPermission}
+        height={popupHeight}
+        onEscape={escapePrompt}
         width={width}
       />
     ) : pendingQ !== undefined ? (
       <QuestionDialog
+        key={pendingQ.requestId}
         pending={pendingQ}
         active={!dialogOpen}
         onReply={replyQuestion}
+        height={popupHeight}
+        onPageChange={(index, confirm) => {
+          setQuestionPage({ index, confirm });
+        }}
+        onEscape={escapePrompt}
         width={width}
       />
     ) : overlay === "context" ? (
@@ -2581,6 +2609,7 @@ function SessionApp({
       {fullscreen && budget.todo > 0 ? (
         <TodoPanel items={view.todos} width={width} height={budget.todo} />
       ) : null}
+      {promptOverlay ? overlayBody : null}
       <Composer
         pastes={pastes}
         value={input}
@@ -2659,16 +2688,17 @@ function SessionApp({
         (fullscreen ? (
           // 全屏：固定帧高 rows-1，上为可滚动视口，下为输入/候选/状态栏
           <Box flexDirection="column" width={width} height={budget.frameHeight}>
-            <Box flexDirection="column" height={budget.conversation} overflow="hidden">
-              {overlayBody ?? (
+            <Box flexDirection="column" height={conversationHeight} overflow="hidden">
+              {(promptOverlay ? null : overlayBody) ?? (
                 <>
+                  {promptOverlay ? <Box flexGrow={1} /> : null}
                   {visible.lines.map((line, i) =>
                     renderLine(
                       line,
                       sel === undefined ? undefined : selRangeOnLine(sel, selBase + i),
                     ),
                   )}
-                  <Box flexGrow={1} />
+                  {promptOverlay ? null : <Box flexGrow={1} />}
                   {showBanner ? (
                     <Text color={theme.warning} wrap="truncate">
                       {scroll.newContent ? NEW_CONTENT_HINT : SCROLLED_HINT}
@@ -2683,10 +2713,11 @@ function SessionApp({
           <Box flexDirection="column" width={width}>
             <Box
               flexDirection="column"
-              height={overlayBody === null ? activityHeight : budget.conversation}
+              height={promptOverlay || overlayBody === null ? activityHeight : budget.conversation}
               overflow="hidden"
             >
-              {overlayBody ?? shownActivity.map((line) => renderLine(line))}
+              {(promptOverlay ? null : overlayBody) ??
+                shownActivity.map((line) => renderLine(line))}
             </Box>
             {chrome}
           </Box>

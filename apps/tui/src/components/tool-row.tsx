@@ -5,6 +5,7 @@
 import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
 
+import { questionToolLines } from "../question-format.js";
 import { attachmentLine } from "../attachment-line.js";
 import { diffSummary, parseDiff } from "../diff-format.js";
 import { glyphs, useTuiEnv } from "../env.js";
@@ -90,6 +91,16 @@ export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): 
   const g = glyphs(env);
   const running = entry.status === "running";
   const spinner = useSpinner(running);
+  if (entry.name === "ask_user")
+    return (
+      <Box flexDirection="column">
+        {questionToolLines(entry).map((line, i) => (
+          <Text key={i} wrap="truncate">
+            {truncateLine(line, width, g.ellipsis)}
+          </Text>
+        ))}
+      </Box>
+    );
   const b = badge(entry.status, spinner, env, theme);
   const name = entry.name ?? "?";
   const summary = truncateLine(
@@ -202,6 +213,7 @@ export function LiveToolRow({ tool, width }: { tool: LiveTool; width: number }):
   const theme = useTheme();
   const g = glyphs(env);
   const spinner = useSpinner(true);
+  if (tool.name === "ask_user") return <Text>? 提问</Text>;
   return (
     <Text wrap="truncate">
       <Text color={theme.accent}>{spinner}</Text>
