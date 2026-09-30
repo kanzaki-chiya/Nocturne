@@ -513,11 +513,13 @@ export interface QuestionItem {
 /**
  * 一道题的回答（ADR-0032 §2/§3）：selected 是已提供选项的 label，
  * text 是「其他」/自由文本（去首尾空白、至多 2000 字符）；
- * selected 与 text 可同时存在，二者都为空表示该题没答。
+ * selected 与 text 可同时存在，二者都为空表示该题没答；declined 只表示拒绝本题。
  */
-export interface QuestionAnswer {
-  /** 已提供选项中被选中的 label 集 */
-  selected: string[];
-  /** 「其他」自由文本；省略 = 没有文字补充 */
-  text?: string | undefined;
-}
+export type QuestionAnswer =
+  | { declined: true }
+  | {
+      /** 已提供选项中被选中的 label 集 */
+      selected: string[];
+      /** 「其他」自由文本；省略 = 没有文字补充 */
+      text?: string | undefined;
+    };

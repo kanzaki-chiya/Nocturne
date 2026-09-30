@@ -175,7 +175,7 @@ type QuestionItem = {
 /** 用户对单题的答复（ADR-0032 §2）：按位置与 questions[i] 对应；
     selected 是已提供选项中被选中的 label 集（单选至多一项），
     text 为「其他」/自由文本题的回答（去首尾空白、至多 2000 字符） */
-type QuestionAnswer = {
+type QuestionAnswer = { declined: true } | {
   selected: string[]
   text?: string
 }
@@ -208,7 +208,7 @@ type QuestionAnswer = {
 | `submit({ text?, content?, attachments? })` | 会话空闲，否则返回 `session_busy`；`attachments` 是可选的 `{ data, mimeType, label? }[]`，由 Core 校验并落盘 | `turn.started`、`message.user`（含附件引用）、…… | Phase 1；图片见 ADR-0023 |
 | `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` | Phase 1 |
 | `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 2 起 ask 流程生效；Phase 3 起 `reply.remember` 生效，生成对应范围的 Grant（[permissions.md](../architecture/permissions.md) 5.4） |
-| `respondQuestion(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request`；`reply` 为 `{ answers: QuestionAnswer[] }` 或 `{ skipped: true }`，答案数/选项归属与问题不匹配返回 `invalid_reply` 且请求保持等待 | 无独立结算事件：等待中的 `ask_user` 调用以 `tool.completed` 结算（跳过为 `ok` 且 `output.skipped === true`；中断为 `cancelled`）；`runtime.status` 离开 `waiting_user` | ADR-0032 |
+| `respondQuestion(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request`；`reply` 为 `{ answers: QuestionAnswer[] }`，逐题为 `{ selected: string[], text?: string }` 或 `{ declined: true }`；拒绝项同时带 selected/text、答案数/选项归属与问题不匹配、单选多项或 text 超过 2000 字符返回 `invalid_reply` 且请求保持等待 | 无独立结算事件：等待中的 `ask_user` 调用以 `tool.completed` 结算（回答与逐题拒绝均为 `ok`；中断为 `cancelled`）；`runtime.status` 离开 `waiting_user` | ADR-0032 |
 | `setModel(ref)` | 会话空闲（Turn 进行中返回 `session_busy`）；未知 provider 返回 `invalid_model`；Provider 启用严格清单（`strictModels`，默认）且模型不在清单内同样 `invalid_model` | `session.config_changed` | Phase 2（`/model`） |
 | `setPermissionPreset(name)` | 会话空闲；未知预设名返回 `invalid_command` | `session.config_changed`（`permissionPreset`）；生效的是**下一次**权限求值 | Phase 3（`/preset`） |
 | `setReasoningEffort(level)` | Turn 进行中同样允许（`config_changed` 无 turnId，对重放不变量无影响）；档位名未知或当前模型未声明该档位返回 `invalid_command`，并列出可用档位 | `session.config_changed`（`reasoningEffort`）；生效的是**下一个 Turn**——本 Turn 请求沿用 Turn 开始快照（Anthropic 单一思考模式约束） | ADR-0018（CLI `/effort`、TUI Shift+Tab） |

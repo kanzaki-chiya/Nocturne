@@ -226,7 +226,7 @@ ask 判定
 
 视图不变量：`pendingPermission` 仅在"有未决 requested 且 Turn 未闭合"时非空；同一时刻至多一个待决请求（执行管线串行）。
 
-提问（ADR-0032）的生命周期对应更简单：`question.requested` 是临时事件，设置 `pendingQuestion`；它没有独立的 resolved 事件——回答、跳过、中断、超时都经等待中的 `ask_user` 调用以 `tool.completed` 落定，`pendingQuestion` 随之清除；`turn.completed` 的防御规则兜底。进程在等待期间被杀时日志止于 `tool.started`（`question.requested` 不落盘），恢复补写 `tool.completed(interrupted)` + `turn.completed(recovered)`，重放路径上 `pendingQuestion` 从未出现，天然一致。
+提问（ADR-0032）的生命周期对应更简单：`question.requested` 是临时事件，设置 `pendingQuestion`；它没有独立的 resolved 事件——回答、逐题拒绝、中断、超时都经等待中的 `ask_user` 调用以 `tool.completed` 落定，`pendingQuestion` 随之清除；`turn.completed` 的防御规则兜底。进程在等待期间被杀时日志止于 `tool.started`（`question.requested` 不落盘），恢复补写 `tool.completed(interrupted)` + `turn.completed(recovered)`，重放路径上 `pendingQuestion` 从未出现，天然一致。客户端对 `ask_user` 条目的标题与回答只读取持久事件 `tool.started.input`、`tool.completed.output`（取消/超时/非交互读取其状态与错误码），不插入提交前的临时摘要，恢复后显示相同。
 
 ## 6. 重放与实时一致性
 

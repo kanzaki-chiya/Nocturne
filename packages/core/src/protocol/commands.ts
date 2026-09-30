@@ -18,9 +18,11 @@ export interface PermissionReply {
 /**
  * 客户端对 question.requested 的回答（ADR-0032 §3）：
  * answers 的条数与顺序必须与请求中的 questions 一一对应；
- * `{ skipped: true }` 表示用户跳过整次提问。
+ * `{ declined: true }` 表示用户拒绝回答该题。
  */
-export type QuestionReply = { answers: QuestionAnswer[] } | { skipped: true };
+export interface QuestionReply {
+  answers: QuestionAnswer[];
+}
 
 export type ClientCommand =
   | { type: "submit"; content: ContentBlock[] }

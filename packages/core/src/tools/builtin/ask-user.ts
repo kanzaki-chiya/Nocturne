@@ -1,10 +1,10 @@
 /**
  * ask_user 内置工具（ADR-0032）：需要用户拍板时暂停并提问。
  * 输入校验按 §1 的全部边界；提问经 ToolContext.askUser 走
- * 会话级提问通道（tools/question.ts），回答/跳过/不可用按 §2 结算，
+ * 会话级提问通道（tools/question.ts），回答/逐题拒绝/不可用按 §2 结算，
  * 中断/超时由执行器按 signal 统一结算。本工具不产生任何权限主体。
  */
-import type { QuestionItem, QuestionOption } from "../../protocol/index.js";
+import type { QuestionAnswer, QuestionItem, QuestionOption } from "../../protocol/index.js";
 import type { ToolDefinition } from "../types.js";
 
 const MAX_QUESTIONS = 4;
@@ -19,12 +19,12 @@ const ASK_TIMEOUT_MS = 86_400_000;
 
 const NOT_INTERACTIVE_MESSAGE =
   "当前为非交互模式，无法向用户提问；请按最合理的默认继续，并在最终回复中说明所做的假设";
-const SKIPPED_MESSAGE = "用户未回答，请按你的判断继续，并在回复中说明所做的假设";
+const DECLINED_MESSAGE =
+  "对用户拒绝回答的问题，请按你的判断继续，不要就同一问题再次提问，并在回复中说明所做的假设。";
 
 /** tool.completed.output 的形状（ADR-0032 §2） */
 interface AskUserOutput {
-  answers: { question: string; selected: string[]; text?: string | undefined }[];
-  skipped?: true;
+  answers: (QuestionAnswer & { question: string })[];
 }
 const charLen = (s: string): number => Array.from(s).length;
 // ADR-0032 §1：所有文本字段禁止控制字符；label/header 额外不允许换行。
@@ -137,19 +137,24 @@ function formatAnswers(questions: QuestionItem[], answers: AskUserOutput["answer
   const lines: string[] = [];
   for (const [i, q] of questions.entries()) {
     const a = answers[i];
+    if (a !== undefined && "declined" in a) {
+      lines.push(`问：${q.question}`, "答：用户拒绝回答");
+      continue;
+    }
     const parts: string[] = [];
     if (a !== undefined && a.selected.length > 0) parts.push(a.selected.join("、"));
     if (a?.text !== undefined) parts.push(`补充：${a.text}`);
     lines.push(`问：${q.question}`);
     lines.push(`答：${parts.length > 0 ? parts.join("；") : "（未回答）"}`);
   }
+  if (answers.some((a) => "declined" in a)) lines.push(DECLINED_MESSAGE);
   return lines.join("\n");
 }
 
 export const askUserTool: ToolDefinition<{ questions: unknown }, AskUserOutput> = {
   name: "ask_user",
   description:
-    "需要用户拍板时暂停并提问，用户回答后继续。仅在确实需要用户决定、且无法通过读代码、查文档或合理默认解决时使用；不要用来请求执行许可（权限由权限层处理），也不要用来确认可以直接做的事。一次调用 1–4 题；每题可提供 2–6 个选项（界面会自动附加「其他」供自由输入，不要自行添加），推荐选项放在第一位并在 label 末尾标「（推荐）」；options 省略即为自由文本回答。非交互环境调用会返回 not_interactive，此时自行采用最合理的默认继续。",
+    "需要用户拍板时暂停并提问，用户回答后继续。用户拒绝回答后，不要就同一问题再次调用本工具。仅在确实需要用户决定、且无法通过读代码、查文档或合理默认解决时使用；不要用来请求执行许可（权限由权限层处理），也不要用来确认可以直接做的事。一次调用 1–4 题；每题可提供 2–6 个选项（界面会自动附加「其他」供自由输入及「拒绝回答」，不要自行添加），推荐选项放在第一位并在 label 末尾标「（推荐）」；options 省略即为自由文本回答。非交互环境调用会返回 not_interactive，此时自行采用最合理的默认继续。",
   inputSchema: {
     type: "object",
     required: ["questions"],
@@ -206,15 +211,9 @@ export const askUserTool: ToolDefinition<{ questions: unknown }, AskUserOutput> 
     if (ctx.askUser === undefined) return notInteractive;
     const reply = await ctx.askUser({ questions });
     if (reply.kind === "unavailable") return notInteractive;
-    if (reply.kind === "skipped") {
-      return {
-        status: "ok",
-        modelContent: SKIPPED_MESSAGE,
-        output: { answers: [], skipped: true },
-      };
-    }
     const answers: AskUserOutput["answers"] = questions.map((q, i) => {
       const a = reply.answers[i];
+      if (a !== undefined && "declined" in a) return { question: q.question, declined: true };
       return {
         question: q.question,
         selected: a?.selected ?? [],

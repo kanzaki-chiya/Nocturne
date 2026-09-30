@@ -30,13 +30,18 @@ interface PendingQuestion {
  */
 function checkReply(questions: QuestionItem[], reply: unknown): AskUserReply | undefined {
   if (typeof reply !== "object" || reply === null) return undefined;
-  if ((reply as { skipped?: unknown }).skipped === true) return { kind: "skipped" };
   const answers = (reply as { answers?: unknown }).answers;
   if (!Array.isArray(answers) || answers.length !== questions.length) return undefined;
   const normalized: QuestionAnswer[] = [];
   for (const [i, raw] of answers.entries()) {
     const question = questions[i];
     if (question === undefined || typeof raw !== "object" || raw === null) return undefined;
+    if ("declined" in raw) {
+      if ((raw as { declined: unknown }).declined !== true || "selected" in raw || "text" in raw)
+        return undefined;
+      normalized.push({ declined: true });
+      continue;
+    }
     const selected = (raw as { selected?: unknown }).selected;
     const text = (raw as { text?: unknown }).text;
     if (!Array.isArray(selected) || selected.some((s) => typeof s !== "string")) return undefined;

@@ -1,5 +1,5 @@
 /**
- * ADR-0032 ask_user（Core）：输入校验边界、回复校验、回答/跳过/中断/
+ * ADR-0032 ask_user（Core）：输入校验边界、回复校验、回答/逐题拒绝/中断/
  * 超时/非交互四种结算、恰好一个 tool.completed、进程退出恢复为
  * interrupted、子代理池排除 needsUser、不新增持久化事件类型。
  */
@@ -213,7 +213,9 @@ describe("ask_user 输入校验（ADR-0032 §1）", () => {
     const events = collect(session);
     session.subscribe((e) => {
       if (e.type === "question.requested") {
-        void session.respondQuestion(e.payload.requestId, { skipped: true });
+        void session.respondQuestion(e.payload.requestId, {
+          answers: e.payload.questions.map(() => ({ declined: true })),
+        });
       }
     });
     await session.submit({ text: "ask" });
@@ -229,12 +231,12 @@ describe("ask_user 输入校验（ADR-0032 §1）", () => {
     expect(qs[1]?.multiSelect).toBe(true);
     const p = completedFor(events)[0]?.payload;
     expect(p?.status).toBe("ok");
-    expect(p?.output).toMatchObject({ answers: [], skipped: true });
+    expect(p?.output).toMatchObject({ answers: [{ declined: true }, { declined: true }] });
     await session.close();
   });
 });
 
-describe("ask_user 回答与跳过（ADR-0032 §2/§3）", () => {
+describe("ask_user 回答与逐题拒绝（ADR-0032 §2/§3）", () => {
   const twoQuestions = [
     {
       question: "用哪个数据库？",
@@ -284,20 +286,40 @@ describe("ask_user 回答与跳过（ADR-0032 §2/§3）", () => {
     await session.close();
   });
 
-  it("跳过：skipped → ok + skipped:true + 固定 modelContent", async () => {
+  it.each([
+    [true, false],
+    [false, true],
+    [true, true],
+  ])("逐题拒绝与混合回答：%s / %s", async (first, second) => {
     const { runtime } = await makeRuntime(askThenDone(twoQuestions), { interactive: true });
     const session = await makeSession(runtime);
     const events = collect(session);
     session.subscribe((e) => {
       if (e.type === "question.requested") {
-        void session.respondQuestion(e.payload.requestId, { skipped: true });
+        void session.respondQuestion(e.payload.requestId, {
+          answers: [
+            first ? { declined: true } : { selected: ["SQLite"] },
+            second ? { declined: true } : { selected: [], text: "尽快" },
+          ],
+        });
       }
     });
     await session.submit({ text: "ask" });
     const p = completedFor(events)[0]?.payload;
     expect(p?.status).toBe("ok");
-    expect(p?.output).toEqual({ answers: [], skipped: true });
-    expect(p?.modelContent).toBe("用户未回答，请按你的判断继续，并在回复中说明所做的假设");
+    expect(p?.output).toEqual({
+      answers: [
+        { question: "用哪个数据库？", ...(first ? { declined: true } : { selected: ["SQLite"] }) },
+        {
+          question: "补充约束？",
+          ...(second ? { declined: true } : { selected: [], text: "尽快" }),
+        },
+      ],
+    });
+    expect(p?.modelContent).toContain("答：用户拒绝回答");
+    expect(p?.modelContent).toContain(
+      "对用户拒绝回答的问题，请按你的判断继续，不要就同一问题再次提问，并在回复中说明所做的假设。",
+    );
     await session.close();
   });
 
@@ -323,6 +345,20 @@ describe("ask_user 回答与跳过（ADR-0032 §2/§3）", () => {
     await expect(
       session.respondQuestion(requestId, {
         answers: [{ selected: ["SQLite", "PostgreSQL（推荐）"] }, { selected: [] }],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_reply" });
+    for (const invalid of [
+      { declined: true, selected: [] },
+      { declined: true, text: "不答" },
+      { declined: false },
+    ]) {
+      await expect(
+        session.respondQuestion(requestId, { answers: [invalid, { selected: [] }] } as never),
+      ).rejects.toMatchObject({ code: "invalid_reply" });
+    }
+    await expect(
+      session.respondQuestion(requestId, {
+        answers: [{ selected: [] }, { selected: [], text: "字".repeat(2001) }],
       }),
     ).rejects.toMatchObject({ code: "invalid_reply" });
     // 未知请求

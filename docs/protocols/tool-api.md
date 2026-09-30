@@ -108,7 +108,6 @@ interface ToolContext extends ToolScope {
 type AskUserRequest = { questions: QuestionItem[] }
 type AskUserReply =
   | { kind: "answered"; answers: QuestionAnswer[] }
-  | { kind: "skipped" }
   | { kind: "unavailable" }  // 非交互：不发 question.requested
 ```
 
@@ -189,7 +188,7 @@ type ToolExecution = {
 
 `todo_write`（[ADR-0028](../decisions/ADR-0028-session-task-list.md)）接受 `{ items: [{ text, status }] }`，每次提交完整清单，`items: []` 清空。最多 20 项；`text` 去首尾空白后非空且至多 200 个字符，拒绝换行、控制字符和未知字段；`status` 只允许 `pending`、`in_progress`、`completed`。校验失败以 `invalid_input` 结算；成功时 `output.items` 是规范化后的完整清单，`modelContent` 是简短确认。工具的 `permissionSubjects` 返回 `[]`，`traits` 为 `mutates: false, concurrencySafe: false`，仍经过普通执行管线和 Hook；它不读写工作区文件、配置或网络。
 
-`ask_user`（[ADR-0032](../decisions/ADR-0032-ask-user-tool.md)）接受 `{ questions: [{ question, header?, options?, multiSelect? }] }`，一次调用 1–4 题。`question` 去首尾空白后非空、至多 300 字符；`header` 至多 12 字符；`options` 省略或为空表示自由文本题、提供时 2–6 项，界面始终额外提供「其他」（模型不得自行添加）；`label` 去首尾空白后非空、至多 60 字符、同题不重复；`description` 至多 200 字符；所有文本字段禁止控制字符（`question`、`description` 允许换行，`label`、`header` 不允许），未知字段一律拒绝。任一不满足即以 `invalid_input` 结算。成功时 `output.answers` 逐题给出 `{ question, selected, text? }`（`selected` 是已提供选项中被选中的 label 集，`text` 是「其他」/自由文本回答），`modelContent` 是人读的「问/答」摘要；用户跳过整次提问时 `output.skipped === true`。非交互环境（`interactive` 为假或 `ctx.askUser` 未装配）返回 `error(code="not_interactive")`、不发 `question.requested`。提问经 `ToolContext.askUser` 实现：发出临时事件 `question.requested`、`runtime.status` 置 `waiting_user`，等待 `respondQuestion`（[events.md](events.md) 第 3、7 节）；回复与问题不匹配时命令以 `invalid_reply` 拒绝且请求保持等待。中断以 `cancelled` 结算、等待超时以 `timeout` 结算（`traits.timeoutMs` 默认 24 小时），进程退出由恢复补 `interrupted`。`traits` 为 `mutates: false, concurrencySafe: false, needsUser: true`，`permissionSubjects` 返回 `[]`——提问不是权限请求，不经权限层；子代理的可选池按 `needsUser` 排除本工具（[subagent.md](../architecture/subagent.md) 第 6 节）。
+`ask_user`（[ADR-0032](../decisions/ADR-0032-ask-user-tool.md)）接受 `{ questions: [{ question, header?, options?, multiSelect? }] }`，一次调用 1–4 题。`question` 去首尾空白后非空、至多 300 字符；`header` 至多 12 字符；`options` 省略或为空表示自由文本题、提供时 2–6 项，界面始终额外提供「其他」与「拒绝回答」（模型不得自行添加）；`label` 去首尾空白后非空、至多 60 字符、同题不重复；`description` 至多 200 字符；所有文本字段禁止控制字符（`question`、`description` 允许换行，`label`、`header` 不允许），未知字段一律拒绝。任一不满足即以 `invalid_input` 结算。成功时 `output.answers` 逐题给出 `{ question, selected, text? }` 或 `{ question, declined: true }`（`selected` 是已提供选项中被选中的 label 集，`text` 是「其他」/自由文本回答）。`respondQuestion(requestId, { answers })` 的每项为 `{ selected: string[], text?: string }` 或 `{ declined: true }`，条数必须与题数一致；拒绝项不得同时携带 `selected` 或 `text`。`modelContent` 逐题列出「问/答」，拒绝题写「答：用户拒绝回答」；只要有拒绝项，末尾追加「对用户拒绝回答的问题，请按你的判断继续，不要就同一问题再次提问，并在回复中说明所做的假设。」工具描述同时要求拒绝后不得就同一问题再次调用本工具。非交互环境（`interactive` 为假或 `ctx.askUser` 未装配）返回 `error(code="not_interactive")`、不发 `question.requested`。提问经 `ToolContext.askUser` 实现：发出临时事件 `question.requested`、`runtime.status` 置 `waiting_user`，等待 `respondQuestion`（[events.md](events.md) 第 3、7 节）；回复与问题不匹配时命令以 `invalid_reply` 拒绝且请求保持等待。中断以 `cancelled` 结算、等待超时以 `timeout` 结算（`traits.timeoutMs` 默认 24 小时），进程退出由恢复补 `interrupted`。`traits` 为 `mutates: false, concurrencySafe: false, needsUser: true`，`permissionSubjects` 返回 `[]`——提问不是权限请求，不经权限层；子代理的可选池按 `needsUser` 排除本工具（[subagent.md](../architecture/subagent.md) 第 6 节）。
 
 ```ts
 const read: ToolDefinition<{ path: string; offset?: number; limit?: number }> = {

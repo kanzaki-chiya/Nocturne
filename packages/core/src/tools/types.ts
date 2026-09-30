@@ -272,13 +272,13 @@ export interface AskUserRequest {
 }
 
 /**
- * ToolContext.askUser 的返回（ADR-0032 §3）：skipped 对应用户跳过整次
+ * ToolContext.askUser 的返回（ADR-0032 §3）：answered 包含逐题回答或拒绝
  * 提问；unavailable 表示当前环境不可提问（非交互——不发 question.requested）。
  * 中断与超时不经返回值表达：实现按 signal 拒绝返回的 Promise，
  * 由执行器统一结算为 cancelled / timeout。
  */
 export type AskUserReply =
-  { kind: "answered"; answers: QuestionAnswer[] } | { kind: "skipped" } | { kind: "unavailable" };
+  { kind: "answered"; answers: QuestionAnswer[] } | { kind: "unavailable" };
 
 /**
  * 提问请求的路由（ADR-0032 §3）：等待中的请求与会话命令
