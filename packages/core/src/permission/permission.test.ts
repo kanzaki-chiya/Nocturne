@@ -275,6 +275,18 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
     expect(r.decision.matchedRule?.description).toBe("预设 full-access 高风险命令");
   });
 
+  it("full-access 多行命令命中 * 后逐段求值，不落到默认询问", () => {
+    const multi = policyFor("full-access").evaluate([
+      subject({ kind: "shell", target: 'git status --short\nWrite-Output "---"\ngit log -5' }),
+    ]);
+    expect(multi.decision.action).toBe("allow");
+    const risky = policyFor("full-access").evaluate([
+      subject({ kind: "shell", target: "git status\nsudo rm -rf /" }),
+    ]);
+    expect(risky.decision.action).toBe("ask");
+    expect(risky.decision.matchedRule?.origin).not.toBe("default");
+  });
+
   it("分层规则后写优先：用户规则覆盖预设", () => {
     const policy = policyFor("default", {
       rules: [

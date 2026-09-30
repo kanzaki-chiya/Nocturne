@@ -3,7 +3,7 @@
  * - 路径类（read / edit）：glob——`*` 不跨目录分隔符，`**` 跨任意层级，`?` 单字符；
  *   模式与目标都先规范化（"/" 分隔、词法消除 . / ..、按平台折叠大小写）；
  *   相对模式拼接到 workspaceRoot 之下。
- * - shell / network / mcp：字符串通配符——`*` 任意字符序列，`?` 单字符；
+ * - shell / network / mcp：字符串通配符——`*` 任意字符序列（含换行），`?` 单字符；
  *   大小写敏感，不做词法变形。
  */
 import type { PermissionSubject, ShellRiskProfile } from "../protocol/index.js";
@@ -88,7 +88,8 @@ function wildcardToRegExp(pattern: string): RegExp {
     else if (c === "?") re += ".";
     else re += escapeRegExp(c);
   }
-  return new RegExp(`^${re}$`);
+  // s 标志：`*` 跨换行——多行命令整条也能命中 "*"，随后再按组合命令逐段求值
+  return new RegExp(`^${re}$`, "s");
 }
 
 const PATH_KINDS = new Set(["read", "edit"]);
