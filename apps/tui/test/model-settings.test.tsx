@@ -881,6 +881,33 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     unmount();
   });
 
+  it("推理原本为否：草稿切到「是」后档位可编辑并显示推导全档，不改档位只保存推理", async () => {
+    const view = fullView({
+      reasoning: field<"none" | "hidden" | "visible">("none", { kind: "default" }),
+      reasoningEffort: field<ReasoningEffortLevel[]>(undefined, { kind: "default" }, false),
+    });
+    const { stdin, lastFrame, onSave, unmount } = editor({ view });
+    await waitFor(() => (lastFrame() ?? "").includes("> 显示名"));
+    await flushInput();
+    for (let i = 0; i < 4; i += 1) stdin.write(DOWN);
+    await waitFor(() => (lastFrame() ?? "").includes("> 推理"));
+    stdin.write(RIGHT);
+    await waitFor(() => (lastFrame() ?? "").includes("思考档位"));
+    expect(lastFrame()).toContain("minimal/low/medium/high/xhigh/max");
+    const effortRow = (lastFrame() ?? "").split("\n").find((l) => l.includes("思考档位")) ?? "";
+    expect(effortRow).not.toContain("未声明");
+    expect(effortRow).not.toContain("只读");
+    stdin.write(DOWN);
+    await waitFor(() => (lastFrame() ?? "").includes("> 思考档位"));
+    stdin.write(DOWN);
+    stdin.write(DOWN);
+    await waitFor(() => (lastFrame() ?? "").includes("> [ 保存 ]"));
+    stdin.write(ENTER);
+    await waitFor(() => onSave.mock.calls.length === 1);
+    expect(onSave).toHaveBeenCalledWith({ reasoning: "visible" });
+    unmount();
+  });
+
   it("↓ 从最后一个字段进入「保存」；放得下时不滚动", async () => {
     const { stdin, lastFrame, onSave, unmount } = editor();
     await waitFor(() => (lastFrame() ?? "").includes("> 显示名"));

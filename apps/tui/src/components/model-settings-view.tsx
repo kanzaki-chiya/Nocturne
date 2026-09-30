@@ -367,8 +367,39 @@ export function draftToPatch(view: ModelSettingsView, draft: Draft): ModelSettin
 }
 
 /** 模型编辑对话框。 */
+/**
+ * 推理原本为「否」时，Core 把思考档位标为不可编辑、值为空。草稿里把推理切到
+ * 「是」后，只要服务商可编辑、档位不是 config.json 写死的，就按可编辑处理，
+ * 空值按 Core 的推导规则视为全部档位（resolveEffort）。只影响显示与聚焦，
+ * 不改变 draftToPatch 的输出。
+ */
+function withDraftEffort(
+  view: ModelSettingsView,
+  reasoning: unknown,
+  readonly: boolean,
+): ModelSettingsView {
+  const f = view.fields;
+  const eff = f.reasoningEffort;
+  if (readonly || eff.editable || !f.reasoning.editable || eff.source.kind === "config")
+    return view;
+  if (reasoning !== "visible" && reasoning !== "hidden") return view;
+  const all = [...REASONING_EFFORT_LEVELS];
+  return {
+    ...view,
+    fields: {
+      ...f,
+      reasoningEffort: {
+        ...eff,
+        editable: true,
+        value: eff.value ?? all,
+        lowerValue: eff.lowerValue ?? all,
+      },
+    },
+  };
+}
+
 export function ModelEditPane({
-  view,
+  view: sourceView,
   readonly = false,
   readonlyHint,
   error,
@@ -393,9 +424,9 @@ export function ModelEditPane({
   onMouseFrame?: ((frame: DialogMouseFrame | undefined) => void) | undefined;
 }): React.JSX.Element {
   const theme = useTheme();
-  const [draft, setDraft] = useState<Draft>(() => initDraft(view));
+  const [draft, setDraft] = useState<Draft>(() => initDraft(sourceView));
   const [focused, setFocused] = useState<string>(() =>
-    readonly ? "return" : (FIELD_ORDER.find((k) => view.fields[k].editable) ?? "cancel"),
+    readonly ? "return" : (FIELD_ORDER.find((k) => sourceView.fields[k].editable) ?? "cancel"),
   );
   const [position, setPosition] = useState(0);
   const [scroll, setScroll] = useState(0);
@@ -424,12 +455,13 @@ export function ModelEditPane({
   const multiRef = useRef(multi);
   const reasoning =
     draft.reasoning === "follow"
-      ? view.fields.reasoning.userValue !== undefined
-        ? view.fields.reasoning.lowerValue
-        : view.fields.reasoning.value
+      ? sourceView.fields.reasoning.userValue !== undefined
+        ? sourceView.fields.reasoning.lowerValue
+        : sourceView.fields.reasoning.value
       : draft.reasoning === "no"
         ? "none"
         : "visible";
+  const view = withDraftEffort(sourceView, reasoning, readonly);
   const fields = FIELD_ORDER.filter(
     (k) => k !== "reasoningEffort" || reasoning === "visible" || reasoning === "hidden",
   );
