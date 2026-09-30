@@ -75,6 +75,8 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 网页抓取工具与 `@文件` 引用方案见 [ADR-0033](decisions/ADR-0033-web-fetch-file-refs.md)。
 
+设置层与 `/settings` 页方案见 [ADR-0034](decisions/ADR-0034-settings-layer.md)。
+
 当前 TUI 交互规格见 [apps/tui.md](apps/tui.md)；v0.4 的普通屏幕与临时切屏方案见 [ADR-0021](decisions/ADR-0021-tui-daily-usability.md)，它部分取代已接受的 [ADR-0020](decisions/ADR-0020-tui-fullscreen-rendering.md)。
 
 ## Roadmap

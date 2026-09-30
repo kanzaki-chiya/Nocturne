@@ -207,7 +207,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
   - 每次审查写入会话日志（后端、模型、结果、理由、用户是否推翻），界面显示一行。文档写明这是基于模型的判断，不是安全边界。
 - **模型角色（model roles）**：按用途给模型分工，参考 omp 的 `modelRoles`：`default`（主对话）、`smol`（标题生成等轻量工作）、`vision`（当前模型不能看图时代为看图，把描述交给主模型）、`task`（子代理）等，具体角色集在 ADR 中定；未配置的角色回落到 `default`。这里的「角色」只指模型分工，与子代理阶段不做的 agent 角色系统（persona、自定义 agent 文件）无关。子代理改为可按 `task` 角色选模型，取代子代理阶段「子代理独立模型」不做的决定（届时同步修改 `subagent.md`）。安全审计模型不属于模型角色。依赖设置层；排在视觉输入之后。
 - **高风险操作只给一次性选项**：full-access 下仍需确认的高风险命令、修改工作区外文件等操作，确认弹窗只提供「允许一次」「拒绝」「拒绝并停止」，不提供会话内与项目级长期允许。
-- **设置层与 `/settings` 页**：程序维护的 `settings.json`（文件与 `shell`/`shellPath` 字段已随 ADR-0022 落地），与手写 `config.json` 分层合并、手写优先（程序仍不改写 `config.json`）。`/settings` 集中管理默认权限预设、默认思考档位、安全审计模型与审查器后端、模型角色等偏好。
+- **设置层与 `/settings` 页**（[ADR-0034](../decisions/ADR-0034-settings-layer.md)，已接受；默认模型与默认档位在 `/model` 页成对设置）：程序维护的 `settings.json`（文件与 `shell`/`shellPath` 字段已随 ADR-0022 落地），与手写 `config.json` 分层合并、手写优先（程序仍不改写 `config.json`）。`/settings` 集中管理默认权限预设、默认思考档位、安全审计模型与审查器后端、模型角色等偏好。
 - **界面打磨**：
   - **配色（已完成）**（见[ADR-0029](../decisions/ADR-0029-tui-themes.md)）：iris 主色的深浅两套主题已落地；`/theme` 在 Campbell 深底和 One Half Light 浅底上预览，↑/↓ 选择、Enter 保存、Esc 取消；选择写入 `settings.json`，未设置或值无效时默认深色。状态行以中性色为主，Markdown 标题、代码、引用靠灰度与粗细区分。
   - **对话框式设置页**：样板轮已实现（模型编辑对话框，键盘 + 鼠标），待推广到服务商页与 `/settings`。范围与后续推广验收见 [ADR-0030](../decisions/ADR-0030-dialog-settings-pages.md)，当前行为见 [tui.md](../apps/tui.md) §2、§3、§8、§11。
