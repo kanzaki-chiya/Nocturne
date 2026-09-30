@@ -96,13 +96,17 @@ async function editor(width = 100, height = 29, extra = {}) {
     ...extra,
   };
   const ui = render(createElement(ModelEditPane, props));
-  await vi.waitFor(() => expect(mouse.frame?.boxes.length).toBeGreaterThan(0));
+  await waitLong(() => expect(mouse.frame?.boxes.length).toBeGreaterThan(0));
   return { mouse, ui, onSave, onBack, props };
+}
+/** 全量并发下渲染较慢，vi.waitFor 默认 1 秒不够用 */
+function waitLong<T>(fn: () => T): Promise<T> {
+  return vi.waitFor(fn, { timeout: 5000 });
 }
 async function changed(ui: ReturnType<typeof render>, action: () => void) {
   const count = ui.frames.length;
   action();
-  await vi.waitFor(() => expect(ui.frames.length).toBeGreaterThan(count));
+  await waitLong(() => expect(ui.frames.length).toBeGreaterThan(count));
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 function visibleText(ui: ReturnType<typeof render>, box: HitBox): string {
@@ -212,11 +216,11 @@ describe("dialog mouse app routing", () => {
     });
     const output = () => io.chunks.join("");
     try {
-      await vi.waitFor(() => expect(output()).toContain("Nocturne"));
+      await waitLong(() => expect(output()).toContain("Nocturne"));
       io.stdin.write("/provider model up m1");
-      await vi.waitFor(() => expect(output()).toContain("/provider model up m1"));
+      await waitLong(() => expect(output()).toContain("/provider model up m1"));
       io.stdin.write("\r");
-      await vi.waitFor(() => expect(output()).toContain("编辑档位"));
+      await waitLong(() => expect(output()).toContain("编辑档位"));
       expect(output()).toContain("服务商");
       io.stdin.write("\x04");
       await done;
@@ -256,17 +260,17 @@ describe("dialog mouse app routing", () => {
       parser.feed(`\x1b[<0;${col};${row + 1}M\x1b[<0;${col};${row + 1}m`);
     };
     try {
-      await vi.waitFor(() => expect(ui.lastFrame()).toContain("Nocturne"));
+      await waitLong(() => expect(ui.lastFrame()).toContain("Nocturne"));
       await changed(ui, () => ui.stdin.write("/provider model up m1"));
       ui.stdin.write("\r");
-      await vi.waitFor(() => expect(ui.lastFrame()).toContain("编辑档位"));
+      await waitLong(() => expect(ui.lastFrame()).toContain("编辑档位"));
       await new Promise<void>((resolve) => setImmediate(resolve));
       const original = ui.lastFrame();
       parser.feed("\x1b[<0;1;1M\x1b[<32;5;5M\x1b[<0;1;1m\x1b[<65;1;1M");
       expect(ui.lastFrame()).toBe(original);
       await changed(ui, () => clickText("[  是]"));
       clickText("[ 保存 ]");
-      await vi.waitFor(() =>
+      await waitLong(() =>
         expect(fixture.save).toHaveBeenCalledWith(
           "up",
           "m1",
@@ -274,7 +278,7 @@ describe("dialog mouse app routing", () => {
           undefined,
         ),
       );
-      await vi.waitFor(() => expect(ui.lastFrame()).toContain("已保存"));
+      await waitLong(() => expect(ui.lastFrame()).toContain("已保存"));
       expect(ui.lastFrame()).not.toContain("编辑档位");
       await changed(ui, () => ui.stdin.write("\x1b"));
       expect(ui.lastFrame()).toContain("过滤");
@@ -380,7 +384,7 @@ describe("model dialog SGR clicks", () => {
     await changed(ui, () => mouse.click("contextWindow", 2));
     await changed(ui, () => ui.stdin.write("42"));
     ui.rerender(createElement(ModelEditPane, { ...props, width: 60, height: 23 }));
-    await vi.waitFor(() => expect(mouse.at("contextWindow").row).not.toBe(before));
+    await waitLong(() => expect(mouse.at("contextWindow").row).not.toBe(before));
     expect(visibleText(ui, mouse.at("contextWindow"))).toMatch(/^\[ 42/);
     mouse.click("save");
     expect(onSave).toHaveBeenCalledWith({ displayName: "中文AB", contextWindow: 42 });
@@ -412,12 +416,12 @@ describe("model dialog SGR clicks", () => {
       });
     }
     const ui = render(createElement(Harness));
-    await vi.waitFor(() => expect(mouse.frame).toBeDefined());
+    await waitLong(() => expect(mouse.frame).toBeDefined());
     await changed(ui, () => mouse.click("imageInput:1"));
     mouse.click("save");
     mouse.click("save");
     expect(onSave).toHaveBeenCalledOnce();
-    await vi.waitFor(() => expect(ui.lastFrame()).toContain("正在保存"));
+    await waitLong(() => expect(ui.lastFrame()).toContain("正在保存"));
     mouse.click("save");
     expect(onSave).toHaveBeenCalledOnce();
     await changed(ui, fail);
@@ -458,14 +462,14 @@ describe("model dialog SGR clicks", () => {
         active: true,
       }),
     );
-    await vi.waitFor(() => expect(mouse.frame).toBeDefined());
+    await waitLong(() => expect(mouse.frame).toBeDefined());
     const frame = ui.lastFrame();
     mouse.send(0, 1, 1);
     mouse.send(0, 1, 1, true);
     mouse.send(65, 1, 1);
     expect(ui.lastFrame()).toBe(frame);
     await changed(ui, () => mouse.click("cancel"));
-    await vi.waitFor(() => expect(mouse.frame).toBeUndefined());
+    await waitLong(() => expect(mouse.frame).toBeUndefined());
     expect(ui.lastFrame()).toContain("m1");
     await changed(ui, () => ui.stdin.write("\x1b"));
     expect(ui.lastFrame()).toContain("服务商");

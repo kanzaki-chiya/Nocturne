@@ -208,7 +208,7 @@ describe("全屏界面", () => {
     expect(lastFrame()).toContain("思考:low");
     unmount();
     await session.close();
-  }, 10000);
+  }, 20_000);
 
   it("忙时 Esc 中断，空闲 Esc 保留输入；紧跟字母的 Esc 不误中断", async () => {
     const root = tmp("nct-esc-ws-");
