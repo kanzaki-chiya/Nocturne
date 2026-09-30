@@ -6,7 +6,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   resolve: {
-    // 离线测试直接对 core 源码运行（cli.md 第 8 节），不需要先构建 dist
+    // 离线测试直接对 core 源码运行（cli.md 第 9 节），不需要先构建 dist
     alias: [
       {
         find: /^@nocturne\/core\/protocol$/,
