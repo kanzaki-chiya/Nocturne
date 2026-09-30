@@ -368,6 +368,37 @@ describe("TUI", () => {
     unmount();
   });
 
+  it("状态栏显示本会话累计缓存命中率，宽度不够时先去目录再去缓存", () => {
+    const view = createSessionView();
+    view.config.model = { provider: "fake", model: "m" };
+    view.config.permissionPreset = "default";
+    view.meta = {
+      cwd: "Z:/some/fairly/long/workspace/path",
+      workspaceRoot: "Z:/some",
+      formatVersion: 1,
+      nocturneVersion: "0.0.0",
+    };
+    const frameAt = (width: number) => {
+      const { lastFrame, unmount } = render(
+        inEnv(createElement(StatusBar, { view, width, context: { used: 1000, limit: 1_000_000 } })),
+      );
+      const frame = lastFrame() ?? "";
+      unmount();
+      return frame;
+    };
+    expect(frameAt(120)).not.toContain("缓存");
+    view.usage = { inputTokens: 40_000, outputTokens: 100, cacheReadTokens: 30_000 };
+    const wide = frameAt(120);
+    expect(wide).toContain("fairly");
+    expect(wide).toContain("缓存 75% • 0.1% / 1M");
+    const mid = frameAt(80);
+    expect(mid).not.toContain("fairly");
+    expect(mid).toContain("缓存 75% • 0.1% / 1M");
+    const narrow = frameAt(42);
+    expect(narrow).not.toContain("缓存");
+    expect(narrow).toContain("0.1% / 1M");
+  });
+
   it("窄于 40 列：状态栏保留任务进度，权限框隐藏原因", () => {
     const view = createSessionView();
     view.config.model = { provider: "fake", model: "long-model" };

@@ -6,6 +6,7 @@
 import stringWidth from "string-width";
 
 import type { ModelInfo, ModelRef } from "@nocturne/core";
+import type { Usage } from "@nocturne/core/protocol";
 
 import { truncateLine } from "./format.js";
 
@@ -49,4 +50,16 @@ export function formatModelLabel(
   const short = info?.displayName;
   if (short !== undefined && short !== "" && stringWidth(short) <= maxWidth) return short;
   return truncateLine(full, maxWidth, "...");
+}
+
+/**
+ * 本会话累计缓存命中率：累计 cacheReadTokens / 累计 inputTokens（包含口径，events.md Usage）。
+ * 从未报告过缓存读写（服务商不返回或未启用缓存）时返回 undefined，不显示该段。
+ */
+export function formatCacheHitRate(usage: Usage): string | undefined {
+  const read = usage.cacheReadTokens ?? 0;
+  const write = usage.cacheWriteTokens ?? 0;
+  if (read + write <= 0 || !(usage.inputTokens > 0)) return undefined;
+  const pct = Math.min(100, (read / usage.inputTokens) * 100);
+  return `缓存 ${pct < 10 && pct > 0 ? pct.toFixed(1) : Math.round(pct)}%`;
 }

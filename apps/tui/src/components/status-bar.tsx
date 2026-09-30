@@ -3,12 +3,13 @@
  * 上下文为「百分比 / 上下文长度」（单位大写）；长度未知只显示已用量。
  * 模型段与 /model 一致（服务商/模型 ID 或简称），整行按显示宽度截断，不换行。
  * Shift+Tab / Alt+M 只短暂高亮对应段，不往对话区插条目。
+ * 缓存命中率为本会话累计值，紧贴上下文段；宽度不够时先去目录段，再去缓存段。
  */
 import { Box, Text } from "ink";
 import stringWidth from "string-width";
 
 import { useTuiEnv } from "../env.js";
-import { formatContextOccupancy, formatModelLabel } from "../status-format.js";
+import { formatCacheHitRate, formatContextOccupancy, formatModelLabel } from "../status-format.js";
 import { useTheme } from "../theme.js";
 
 import type { ModelInfo } from "@nocturne/core";
@@ -128,6 +129,10 @@ export function StatusBar({
   const dirSeg: Segment | undefined =
     width >= 80 && dir !== "" ? { text: dir, color: theme.secondary, highlight: false } : undefined;
   if (dirSeg !== undefined) segments.push(dirSeg);
+  const cacheText = formatCacheHitRate(view.usage);
+  const cacheSeg: Segment | undefined =
+    cacheText !== undefined ? { text: cacheText, color: theme.muted, highlight: false } : undefined;
+  if (cacheSeg !== undefined) segments.push(cacheSeg);
   segments.push({ text: ctx, color: theme.muted, highlight: false });
 
   const head = segments[0];
@@ -136,9 +141,10 @@ export function StatusBar({
     width < 40 && head !== undefined && last !== undefined
       ? [head, ...(progress === undefined ? [] : [progress]), last]
       : segments;
-  if (dirSeg !== undefined) {
+  for (const optional of [dirSeg, cacheSeg]) {
+    if (optional === undefined) continue;
     const total = shown.reduce((w, s) => w + stringWidth(s.text), 0) + (shown.length - 1) * 3;
-    if (total > width - 4) shown = shown.filter((s) => s !== dirSeg);
+    if (total > width - 4) shown = shown.filter((s) => s !== optional);
   }
 
   return (

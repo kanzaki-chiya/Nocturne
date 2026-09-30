@@ -11,7 +11,11 @@ import {
 import { sessionSavedLine } from "../src/exit-note.js";
 import { frameBudget } from "../src/frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "../src/keys.js";
-import { formatContextOccupancy, formatModelLabel } from "../src/status-format.js";
+import {
+  formatCacheHitRate,
+  formatContextOccupancy,
+  formatModelLabel,
+} from "../src/status-format.js";
 import { completeSlash, helpLines, readlineCompleter } from "../src/slash-catalog.js";
 import { moonRows } from "../src/welcome.js";
 import { createPasteStore, pasteTokenAt, pasteTokenBefore } from "../src/paste.js";
@@ -81,6 +85,20 @@ describe("状态栏格式", () => {
     expect(formatContextOccupancy(1000, 1_000_000)).toBe("0.1% / 1M");
     expect(formatContextOccupancy(128_000, 128_000)).toBe("100% / 128K");
     expect(formatContextOccupancy(1500, undefined)).toBe("1.5K");
+    // 缓存命中率：累计读 / 累计输入（包含口径）；从未报告缓存读写时不显示
+    expect(formatCacheHitRate({ inputTokens: 1000, outputTokens: 5 })).toBeUndefined();
+    expect(formatCacheHitRate({ inputTokens: 1000, outputTokens: 5, cacheWriteTokens: 900 })).toBe(
+      "缓存 0%",
+    );
+    expect(
+      formatCacheHitRate({ inputTokens: 40_000, outputTokens: 5, cacheReadTokens: 33_000 }),
+    ).toBe("缓存 83%");
+    expect(formatCacheHitRate({ inputTokens: 1000, outputTokens: 5, cacheReadTokens: 42 })).toBe(
+      "缓存 4.2%",
+    );
+    expect(
+      formatCacheHitRate({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 1 }),
+    ).toBeUndefined();
     const label = formatModelLabel(
       { provider: "command code", model: "deepseek/deepseek-v4.1-flash" },
       [
