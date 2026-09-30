@@ -42,12 +42,13 @@ const makeTmp = (p: string) => {
 };
 
 /** 捕获发往服务商的请求头（断言 x-opencode-session 用；密钥不记录） */
-function captureHeaders(): { headers: Map<string, Headers>; restore: () => void } {
-  const headers = new Map<string, Headers>();
+function captureHeaders(): { headers: [string, Headers][]; restore: () => void } {
+  // 逐次记录（同一端点的多次请求都要检查，不能按 URL 覆盖）
+  const headers: [string, Headers][] = [];
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = String(input);
-    if (url.startsWith(BASE_URL)) headers.set(url, new Headers(init?.headers));
+    if (url.startsWith(BASE_URL)) headers.push([url, new Headers(init?.headers)]);
     return original(input, init);
   }) as typeof fetch;
   return { headers, restore: () => (globalThis.fetch = original) };
@@ -99,7 +100,7 @@ describe.skipIf(!configured)("OpenCode 冒烟（ADR-0031 §5，真实服务）",
         expect(events.some((e) => e.type === "tool.completed")).toBe(true);
         await session.close();
         // 该模型的每个请求（含工具循环的后续请求）都带会话头，且全对话同值
-        const sent = [...capture.headers.entries()].filter(([url]) => url.endsWith(endpoint));
+        const sent = capture.headers.filter(([url]) => url.endsWith(endpoint));
         expect(sent.length).toBeGreaterThan(0);
         const values = new Set(sent.map(([, h]) => h.get("x-opencode-session")));
         expect(values.size).toBe(1);
