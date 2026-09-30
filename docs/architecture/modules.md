@@ -166,7 +166,7 @@ await session.close()
 
 Phase 6 增补：`subagent` 选项（`enabled`/`maxDepth`/`maxConcurrent`/`maxStepsPerTurn`/`maxAttempts`/`timeoutMs`）控制子代理特性；启用时 `wrapSession` 创建 `SubagentLauncher` 并把 `task` 工具注册进会话注册表（[subagent.md](subagent.md) 第 3 节）。
 
-`config` 是 `loadConfig` 返回的 `RuntimeConfig`（可选）：缺省时等价于 Phase 2 行为——无配置文件、固定 `default` 预设、无项目层与 Grant 持久化。CLI 在启动时调用 `loadConfig(platform, { cliArgs })` 并把结果连同 `providerConfigs`、`turn` 等派生字段一起注入（见 [apps/cli.md](../apps/cli.md) 第 7 节）。
+`config` 是 `loadConfig` 返回的 `RuntimeConfig`（可选）：缺省时等价于 Phase 2 行为——无配置文件、固定 `default` 预设、无项目层与 Grant 持久化。CLI 在启动时调用 `loadConfig(platform, { cliArgs })` 并把结果连同 `providerConfigs`、`turn` 等派生字段一起注入（见 [apps/cli.md](../apps/cli.md) 第 8 节）。
 
 `RuntimeConfig` 与 `Runtime` 的通用字符串偏好读写接口及未注入配置时的行为见 [config.md](config.md) 第 2 节；Core 不解释 TUI 主题取值。
 

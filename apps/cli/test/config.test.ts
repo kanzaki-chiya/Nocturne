@@ -37,7 +37,7 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-describe("Provider 配置收集（cli.md 第 7 节）", () => {
+describe("Provider 配置收集（cli.md 第 8 节）", () => {
   it("openai-compatible：env 齐全 → 组装配置", async () => {
     const r = await collectConfig(
       base,

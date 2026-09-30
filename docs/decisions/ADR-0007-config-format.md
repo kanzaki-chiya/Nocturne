@@ -7,7 +7,7 @@
 
 Phase 3 引入 `config` 模块（分层配置）。需要决定：配置文件放在哪里、用什么格式、各来源如何排序、凭据如何进入。约束：
 
-- CLI 的运行时第三方依赖为零（[apps/cli.md](../apps/cli.md) 第 8 节）；Core 已有 Zod 做运行时校验。
+- CLI 的运行时第三方依赖为零（[apps/cli.md](../apps/cli.md) 第 9 节）；Core 已有 Zod 做运行时校验。
 - 配置是面向用户手写的文件，注释可读性有价值。
 - 凭据不得写入任何配置文件或会话日志（[workflow.md](../development/workflow.md) 第 7 节）。
 

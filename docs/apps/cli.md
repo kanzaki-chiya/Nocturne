@@ -6,7 +6,7 @@
 
 ## 1. 定位与边界
 
-`nctrn` 是 Runtime 的进程内客户端：采集输入、渲染事件、把权限确认交给用户。**它不包含任何 Agent 行为、会话状态、权限判定或上下文构建逻辑**，只使用 `@nocturne/core` 的公开入口与 `@nocturne/core/protocol` 的类型；该约束由 dependency-cruiser 规则强制（见第 8 节），不是靠代码评审自觉。
+`nctrn` 是 Runtime 的进程内客户端：采集输入、渲染事件、把权限确认交给用户。**它不包含任何 Agent 行为、会话状态、权限判定或上下文构建逻辑**，只使用 `@nocturne/core` 的公开入口与 `@nocturne/core/protocol` 的类型；该约束由 dependency-cruiser 规则强制（见第 9 节），不是靠代码评审自觉。
 
 ## 2. 命令行
 
@@ -144,7 +144,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 
 ## 6. 权限确认
 
-预设与规则由配置决定（第 7 节、permissions.md 第 6 节），`--preset` 或 `/preset` 切换会话预设。ask 走协议流程：`permission.requested` → `session.respondPermission(requestId, reply)` → `permission.resolved`。
+预设与规则由配置决定（第 8 节、permissions.md 第 6 节），`--preset` 或 `/preset` 切换会话预设。ask 走协议流程：`permission.requested` → `session.respondPermission(requestId, reply)` → `permission.resolved`。
 
 - **交互模式**：提示块列出主体（kind、target、解析后路径）、原因与命中的规则（`reason` 与规则来源），提供完整选项：
 
@@ -161,7 +161,17 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 - **`-y, --yes`**：只把**最终判定为 `ask`** 的调用提升为 `allow`（`source: "rule"`，理由注明来自命令行参数）；不覆盖显式 `deny`（包括不可信项目规则的 `deny`），不绕过输入校验、路径限制或工具边界，转换在权限层完成（permissions.md 第 5.3 节）。是用户主动选择的自动批准能力（非交互批处理等场景），默认不开启；程序化的测试也可以注入限定范围的 `policy`，不必依赖它。
 - `deny` 后模型会收到带理由的工具结果并可自我修正。
 
-## 7. 配置来源（config 模块）
+## 7. 提问（ask_user，ADR-0032）
+
+模型调用 `ask_user` 时 Runtime 发出临时事件 `question.requested`（`requestId`、`callId`、`questions`），CLI 逐题交互后 `session.respondQuestion(requestId, reply)` 送回。与权限确认同级优先处理输入；等待期间 Ctrl+C 中断 Turn（该调用记 `cancelled`）。
+
+- **逐题打印**：`?` 开头的问题行（多题时带「第 n/N 题」，有 `header` 时前缀 `[header]`），选项逐行编号显示 `1. label — description`。
+- **回答**：有选项时输入编号选择（多选提示「可输入多个编号，用逗号分隔」）；直接输入文字即「其他」自由文本；无选项的问题整行就是回答。编号越界、单选题输入多个编号等非法输入提示后重新输入，不提交。
+- **空行**：跳过整次提问（`{ skipped: true }`），打印「已跳过」。
+- **提交后**：打印摘要——每题一行「问题 → 回答」（`；`分隔多个选中项，「其他」文本直接列出），跳过时显示「已跳过」。
+- **非交互模式**（`-p`）：`interactive` 为 false，`question.requested` 不产生，`ask_user` 以 `error`/`not_interactive` 结算，由模型自行采用默认方案——打印模式不会卡住等待输入。
+
+## 8. 配置来源（config 模块）
 
 CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的分层加载（[config.md](../architecture/config.md)），把 `ResolvedConfig` 注入 `createRuntime`；命令行参数构成最高优先级的一层。
 
@@ -187,7 +197,7 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 - `NOCTURNE_DEBUG` / `NOCTURNE_DEBUG_FILE`（上表）：诊断日志开关与输出位置；未指定文件时写 `<NOCTURNE_HOME>/logs/` 下按时间戳命名的 JSONL。
 - 冒烟测试用独立的 `NOCTURNE_SMOKE_*` / `NOCTURNE_SMOKE_ANTHROPIC_*` 变量（workflow.md 第 5 节），与 CLI 运行变量分离。
 
-## 8. 工程约束
+## 9. 工程约束
 
 - **目录**：`apps/cli/`，包名 `@nocturne/cli`，`bin: { nctrn: dist/main.js }`；`tsdown` 构建 ESM。
 - **第三方运行时依赖：零**（npm registry 依赖；workspace 包 `@nocturne/mcp`、`@nocturne/tui` 除外——MCP 装配点在 CLI，`--tui` 惰性加载 TUI，见下）。参数解析用 `util.parseArgs`，行输入用 `node:readline`，颜色用 `util.styleText`。非 Node 内置的新依赖需要理由，并在本文登记。该约定按包生效：`apps/tui` 经 [ADR-0010](../decisions/ADR-0010-tui-rendering.md) 单独批准终端依赖，不影响本包。
@@ -202,7 +212,7 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
   - 涉及写文件与 shell 的测试一律在 `tmpdir` 下新建的临时目录中执行，不得触碰仓库与用户目录。
 - **dev 运行**：`pnpm build` 后 `node apps/cli/dist/main.js`；不改写 Node 的 `.ts` 直跑假设。
 
-## 9. 退出码（非交互模式与进程级）
+## 10. 退出码（非交互模式与进程级）
 
 | 退出码 | 场景 |
 |---|---|
@@ -213,6 +223,6 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 
 交互模式的斜杠命令错误与 Turn 失败只显示，不退出进程。
 
-## 10. 暂不设计
+## 11. 暂不设计
 
 多行输入与粘贴模式、输出分页、`--output-format`、stdin 以外的非交互输入源。Phase 4 的 TUI 复用同一 Runtime 与事件流，不重用本 CLI 的渲染代码；`--tui` 入口与界面设计见 [apps/tui.md](tui.md)。
