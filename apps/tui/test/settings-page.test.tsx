@@ -1,7 +1,13 @@
 import { render } from "ink-testing-library";
 import { createElement, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Runtime, RuntimeSession, SettingItem } from "@nocturne/core";
+import {
+  defaultJevReviewer,
+  type Runtime,
+  type RuntimeSession,
+  type SettingItem,
+  type ProviderOverview,
+} from "@nocturne/core";
 import { SettingsPage } from "../src/components/settings-page.js";
 import type { DialogMouseFrame } from "../src/components/dialog/mouse.js";
 import { detectTuiEnv, TuiEnvContext } from "../src/env.js";
@@ -56,6 +62,14 @@ function page(
     updateSettings: update,
     setPreference: preference,
     getPreference: () => undefined,
+    defaultReviewer: async (endpoint: Parameters<Runtime["defaultReviewer"]>[0], url?: string) =>
+      defaultJevReviewer(
+        endpoint,
+        [{ id: "opencode-go", host: "opencode.ai", keySource: "credential" } as ProviderOverview],
+        url,
+      ),
+    listReviewerProviders: async () => [],
+    listReviewerModels: async () => ({ models: ["jev-1.13-free"] }),
     listRecentModels: () => [],
     listModels: () => [
       { ref: { provider: "fake", model: "m" }, capabilities: { reasoningEffort: ["low", "high"] } },
@@ -114,16 +128,16 @@ describe("ADR-0034 设置页", () => {
     expect(screen.lastFrame()).toContain("安全审查：关闭");
     await screen.input("\t");
     await screen.input("\r");
-    expect(screen.lastFrame()).toContain("选择审查后端");
-    expect(screen.lastFrame()).not.toContain("Jev");
-    await screen.input("\x1b[B");
+    expect(screen.lastFrame()).toContain("后端");
+    expect(screen.lastFrame()).toContain("Jev");
+    await screen.input("\x1b[D");
     await screen.input("\r");
     expect(screen.lastFrame()).toContain("安全审查模型");
     expect(screen.lastFrame()).toContain("fake");
     await screen.input("\r");
-    expect(screen.lastFrame()).toContain("小模型 • fake/m");
+    expect(screen.lastFrame()).toContain("fake/m");
     expect(screen.update).not.toHaveBeenCalled();
-    await screen.input("\x1b");
+    await screen.input("\r");
     expect(screen.lastFrame()).toContain("安全审查：小模型 · fake/m");
     expect(screen.lastFrame()).toContain("默认模型与档位 · fake/m · 档位 low");
     await screen.input("\x1b[Z");
@@ -133,6 +147,53 @@ describe("ADR-0034 设置页", () => {
     expect(screen.update).toHaveBeenCalledWith({
       "permission.reviewer": { backend: "model", model: { provider: "fake", model: "m" } },
     });
+    screen.unmount();
+  });
+  it("Jev 草稿只在设置页保存时写入，密钥独立传递并记一次披露", async () => {
+    const screen = page();
+    await screen.ready();
+    const click = async (id: string) => {
+      const box = screen.mouse()?.boxes.find((box) => box.id === id);
+      if (!box) throw new Error(`无可点击区域：${id}`);
+      screen.mouse()?.click(id, { type: "release", y: box.row, x: box.colEnd, button: 0 });
+      await pause();
+    };
+    await click("reviewer");
+    await click("backend:1");
+    expect(screen.lastFrame()).toContain("opencode-go");
+    await click("credential");
+    await screen.input("\x1b[B");
+    await screen.input("\x1b[B");
+    await screen.input("\r");
+    await screen.input("test-secret");
+    expect(screen.lastFrame()).not.toContain("test-secret");
+    await click("save");
+    expect(screen.lastFrame()).toContain("首次开启 Jev");
+    await click("save");
+    expect(screen.lastFrame()).toContain("安全审查：Jev · opencode-zen · jev-1.13-free");
+    expect(screen.update).not.toHaveBeenCalled();
+    expect(screen.preference).not.toHaveBeenCalled();
+    await click("reviewer");
+    expect(screen.lastFrame()).toContain("***********");
+    expect(screen.lastFrame()).not.toContain("test-secret");
+    await click("save");
+    expect(screen.lastFrame()).not.toContain("首次开启 Jev");
+    expect(screen.lastFrame()).toContain("安全审查：Jev · opencode-zen · jev-1.13-free");
+    await click("save");
+    expect(screen.update).toHaveBeenCalledWith(
+      {
+        "permission.reviewer": {
+          backend: "jev",
+          endpoint: "opencode-zen",
+          model: "jev-1.13-free",
+          credential: { stored: true },
+          minConfidence: 0.7,
+        },
+      },
+      { reviewerKey: "test-secret" },
+    );
+    expect(screen.preference).toHaveBeenCalledWith("jevDisclosureAccepted", "yes");
+    expect(screen.close).toHaveBeenCalledOnce();
     screen.unmount();
   });
   it("分组、来源和覆盖提示；草稿保存不更改会话权限或档位", async () => {

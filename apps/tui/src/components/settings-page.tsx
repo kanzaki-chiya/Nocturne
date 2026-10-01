@@ -2,7 +2,7 @@ import { Box, Text, useInput, type DOMElement } from "ink";
 import { useEffect, useRef, useState } from "react";
 import stringWidth from "string-width";
 import type {
-  ModelRef,
+  SecurityReviewerConfig,
   PermissionPresetName,
   Runtime,
   RuntimeSession,
@@ -17,7 +17,7 @@ import { ConfirmDiscard } from "./dialog/confirm-discard.js";
 import { moveFocus } from "./dialog/focus.js";
 import { screenRect, type DialogMouseFrame } from "./dialog/mouse.js";
 import { PickList } from "./pick-list.js";
-import { ModelPicker } from "./model-picker.js";
+import { ReviewerDialog } from "./reviewer-dialog.js";
 import { ThemePage } from "./theme-page.js";
 
 const SOURCES: Record<SettingItem["source"], string> = {
@@ -57,14 +57,31 @@ export function SettingsPage({
   }));
   const item = (key: SettingItem["key"]) => initial.items.find((entry) => entry.key === key);
   const [preset, setPreset] = useState(item("permissions.preset")?.saved ?? "");
-  const [reviewer, setReviewer] = useState(item("permission.reviewer")?.saved ?? "");
-  const effectiveReviewer = (reviewer || item("permission.reviewer")?.effective) ?? "off";
+  const legacyReviewer = (value: string | undefined): SecurityReviewerConfig | undefined => {
+    if (!value) return undefined;
+    if (value === "off") return { backend: "off" };
+    const slash = value.indexOf("/");
+    return slash > 0
+      ? {
+          backend: "model",
+          model: { provider: value.slice(0, slash), model: value.slice(slash + 1) },
+        }
+      : undefined;
+  };
+  const savedReviewer =
+    item("permission.reviewer")?.reviewer?.saved ??
+    legacyReviewer(item("permission.reviewer")?.saved);
+  const [reviewer, setReviewer] = useState(savedReviewer);
+  const [reviewerKey, setReviewerKey] = useState<string>();
+  const [disclosureAccepted, setDisclosureAccepted] = useState(false);
+  const effectiveReviewer =
+    reviewer ??
+    item("permission.reviewer")?.reviewer?.effective ??
+    legacyReviewer(item("permission.reviewer")?.effective);
   const [theme, setTheme] = useState(initial.theme);
   const [shell, setShell] = useState(initial.shell);
   const [focus, setFocus] = useState("preset");
-  const [nested, setNested] = useState<
-    "theme" | "shell" | "reviewer" | "reviewer-model" | undefined
-  >();
+  const [nested, setNested] = useState<"theme" | "shell" | "reviewer" | undefined>();
   const [confirm, setConfirm] = useState(false);
   const [discard, setDiscard] = useState(false);
   const [error, setError] = useState<string>();
@@ -85,7 +102,8 @@ export function SettingsPage({
     );
   const dirty =
     preset !== (item("permissions.preset")?.saved ?? "") ||
-    reviewer !== (item("permission.reviewer")?.saved ?? "") ||
+    JSON.stringify(reviewer) !== JSON.stringify(savedReviewer) ||
+    reviewerKey !== undefined ||
     theme !== initial.theme ||
     shell !== initial.shell;
   const cancel = () => {
@@ -113,19 +131,13 @@ export function SettingsPage({
       const patch: SettingsPatch = {};
       if (preset !== (item("permissions.preset")?.saved ?? ""))
         patch["permissions.preset"] = (preset || null) as PermissionPresetName | null;
-      if (reviewer !== (item("permission.reviewer")?.saved ?? "")) {
-        const slash = reviewer.indexOf("/");
-        patch["permission.reviewer"] =
-          reviewer === ""
-            ? null
-            : reviewer === "off"
-              ? { backend: "off" }
-              : {
-                  backend: "model",
-                  model: { provider: reviewer.slice(0, slash), model: reviewer.slice(slash + 1) },
-                };
+      if (JSON.stringify(reviewer) !== JSON.stringify(savedReviewer) || reviewerKey !== undefined)
+        patch["permission.reviewer"] = reviewer ?? null;
+      if (Object.keys(patch).length > 0) {
+        if (reviewerKey === undefined) await runtime.updateSettings(patch);
+        else await runtime.updateSettings(patch, { reviewerKey });
       }
-      if (Object.keys(patch).length > 0) await runtime.updateSettings(patch);
+      if (disclosureAccepted) await runtime.setPreference("jevDisclosureAccepted", "yes");
       if (shell !== initial.shell) await session.setShell(shell);
       if (theme !== initial.theme) await runtime.setPreference("theme", theme);
       onClose();
@@ -264,67 +276,26 @@ export function SettingsPage({
         }}
       />
     );
-  if (nested === "reviewer-model") {
-    const selected = effectiveReviewer;
-    const slash = selected.indexOf("/");
-    const current: ModelRef | undefined =
-      slash < 0
-        ? undefined
-        : { provider: selected.slice(0, slash), model: selected.slice(slash + 1) };
-    return (
-      <DialogFrame title="/settings · 安全审查模型" width={width} height={height} framed>
-        <ModelPicker
-          models={runtime.listModels()}
-          recents={runtime.listRecentModels()}
-          providers={[]}
-          presets={[]}
-          current={current}
-          defaultModel={undefined}
-          wizard={undefined}
-          onStartWizard={() => {
-            setNested("reviewer");
-          }}
-          selectionOnly
-          onPick={(ref) => {
-            setReviewer(ref);
-            setNested("reviewer");
-          }}
-          onClose={() => {
-            setNested("reviewer");
-          }}
-          width={width - 4}
-          height={Math.max(1, height - 4)}
-          active
-        />
-      </DialogFrame>
-    );
-  }
   if (nested === "reviewer")
     return (
-      <DialogFrame title="/settings · 安全审查" width={width} height={height} framed>
-        <PickList
-          title="选择审查后端"
-          width={width - 4}
-          active
-          initialValue={effectiveReviewer === "off" ? "off" : "model"}
-          items={[
-            { label: "关闭", value: "off" },
-            {
-              label: `小模型${reviewer && reviewer !== "off" ? ` · ${reviewer}` : ""}`,
-              value: "model",
-            },
-          ]}
-          onCancel={() => {
-            setNested(undefined);
-          }}
-          onPick={(backend) => {
-            if (backend === "off") {
-              setReviewer("off");
-              setNested(undefined);
-            } else setNested("reviewer-model");
-          }}
-        />
-      </DialogFrame>
+      <ReviewerDialog
+        runtime={runtime}
+        initial={effectiveReviewer}
+        initialKey={reviewerKey}
+        disclosureAccepted={disclosureAccepted}
+        width={width}
+        height={height}
+        onCancel={() => {
+          setNested(undefined);
+        }}
+        onMouseFrame={onMouseFrame}
+        onApply={(selected, key, accepted) => {
+          setReviewer(selected);
+          setReviewerKey(key);
+          setDisclosureAccepted(accepted ?? false);
+          setNested(undefined);
+        }}
+      />
     );
   if (nested === "shell")
     return (
@@ -409,8 +380,12 @@ export function SettingsPage({
           >
             <Text wrap="truncate" color={focus === "reviewer" ? palette.selected : palette.text}>
               {focus === "reviewer" ? "> " : "  "}安全审查：
-              {effectiveReviewer === "off" ? "关闭" : `小模型 · ${effectiveReviewer}`} ·{" "}
-              {source("permission.reviewer")} · Enter 选择
+              {!effectiveReviewer || effectiveReviewer.backend === "off"
+                ? "关闭"
+                : effectiveReviewer.backend === "jev"
+                  ? `Jev · ${effectiveReviewer.endpoint} · ${effectiveReviewer.model}`
+                  : `小模型 · ${effectiveReviewer.model.provider}/${effectiveReviewer.model.model}`}{" "}
+              · {source("permission.reviewer")} · Enter 选择
             </Text>
           </Box>
           <Text wrap="truncate">
