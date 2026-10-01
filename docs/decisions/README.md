@@ -43,6 +43,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0035](ADR-0035-apply-patch.md) | `apply_patch` 编辑工具与系统提示更新 | 已接受 |
 | [ADR-0036](ADR-0036-smart-permissions.md) | 权限预设重排：guarded / smart / bypass 与安全审查 | 已接受 |
 | [ADR-0037](ADR-0037-compaction-retention.md) | 压缩保留最近原文、可设置阈值与缓存友好的压缩请求 | 已接受 |
+| [ADR-0038](ADR-0038-transcript-polish.md) | 界面打磨第一批：点击展开、对话节奏与会话标题、速度与用量条 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
