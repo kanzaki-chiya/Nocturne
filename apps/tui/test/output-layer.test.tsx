@@ -176,6 +176,58 @@ function tty() {
   return { stdin, stdout, stderr, writes };
 }
 
+it.each([61, 100])("助手续行在 %i 列启动、缩到 61 列后仍保留两列缩进", async (columns) => {
+  const runtime = await createRuntime({
+    cwd: temp(),
+    sessionsDir: temp(),
+    providers: [
+      new FakeProvider({
+        scripts: [
+          [
+            { type: "text_delta", text: "甲".repeat(45) },
+            { type: "finish", reason: "stop" },
+          ],
+        ],
+      }),
+    ],
+  });
+  const session = await runtime.createSession({ model: "fake/fake-model" });
+  await session.submit({ text: "重排" });
+  const io = tty();
+  io.stdout.columns = columns;
+  const done = runTui({ session }, runtime, {
+    stdin: io.stdin,
+    stdout: io.stdout,
+    stderr: io.stderr,
+    patchConsole: false,
+  });
+  const assistantRows = () =>
+    io.writes.flatMap((write) =>
+      [...write.matchAll(/\x1b\[\d+;1H\x1b\[0m(.*?)\x1b\[0m\x1b\[K/g)]
+        .map((match) => (match[1] ?? "").replace(/\x1b\[[\d;]*m/g, ""))
+        .filter((row) => row.includes("甲")),
+    );
+  try {
+    await vi.waitFor(() => expect(assistantRows().join("")).toContain("甲".repeat(18)));
+    if (columns === 61) {
+      expect(assistantRows()).toContain(`● ${"甲".repeat(27)}`);
+      expect(assistantRows()).toContain(`  ${"甲".repeat(18)}`);
+    }
+    io.writes.length = 0;
+    io.stdout.columns = 61;
+    io.stdout.emit("resize");
+    // 宽屏缩窄必须发生实际重排；直接窄屏启动则检查其初帧。
+    if (columns === 100) {
+      await vi.waitFor(() => expect(assistantRows()).toContain(`  ${"甲".repeat(18)}`));
+      expect(assistantRows()).toEqual([`● ${"甲".repeat(27)}`, `  ${"甲".repeat(18)}`]);
+    }
+  } finally {
+    io.stdin.send("\x04");
+    await done;
+    await session.close();
+  }
+});
+
 it("120 行流式思考保持固定窗口，每帧至多改 6 行且不清屏", async () => {
   const scripts = [
     [
