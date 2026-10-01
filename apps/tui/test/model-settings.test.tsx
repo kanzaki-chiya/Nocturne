@@ -594,7 +594,7 @@ describe("服务商页 Delete 入口与底部提示（ADR-0030 §6）", () => {
     unmount();
   });
 
-  it("当前会话所用服务商：Delete 与操作条「删除」都拒绝，提示先 /model 切换", async () => {
+  it("当前会话所用服务商：Delete 拒绝，操作对话框「删除」灰显并跳过焦点", async () => {
     const onConfirmRemove = vi.fn();
     const { lastFrame, stdin, frames, unmount } = render(
       createElement(ProviderPage, pageProps({ currentProviderId: "up", onConfirmRemove })),
@@ -604,14 +604,16 @@ describe("服务商页 Delete 入口与底部提示（ADR-0030 §6）", () => {
     await waitFor(() => (lastFrame() ?? "").includes("先 /model 切换"));
     expect(lastFrame() ?? "").not.toContain("删除服务商");
     expect(onConfirmRemove).not.toHaveBeenCalled();
-    // 操作条里的「删除」走同样的拒绝：不开确认框
+    // 操作对话框的删除不可聚焦，左箭头环绕到取消。
     stdin.write(ENTER);
-    await waitFor(() => (lastFrame() ?? "").includes("[删除]"));
-    stdin.write(LEFT); // 焦点 0 环绕到 3「删除」
+    await waitFor(() => (lastFrame() ?? "").includes("[ 删除 ]（不可用）"));
+    expect(lastFrame() ?? "").toContain("先用 /model 切换");
+    await flushInput();
+    stdin.write(LEFT);
     await nextFrame(frames);
+    expect(lastFrame() ?? "").toContain("> [ 取消 ]");
     stdin.write(ENTER);
-    await waitFor(() => !(lastFrame() ?? "").includes("[删除]"));
-    expect(lastFrame() ?? "").toContain("先 /model 切换");
+    await waitFor(() => !(lastFrame() ?? "").includes("[ 删除 ]（不可用）"));
     expect(lastFrame() ?? "").not.toContain("删除服务商");
     expect(onConfirmRemove).not.toHaveBeenCalled();
     unmount();
@@ -687,19 +689,18 @@ describe("服务商页 Delete 入口与底部提示（ADR-0030 §6）", () => {
     unmount();
   });
 
-  it("底部提示宽时一行列出四项操作，并保留其余按键", async () => {
+  it("宽屏底部使用 ADR-0039 列表提示", async () => {
     const { lastFrame, unmount } = render(
       createElement(ProviderPage, pageProps({ width: 120, height: 30, termRows: 30 })),
     );
     await waitFor(() => (lastFrame() ?? "").includes("已配置"));
-    const hint = (lastFrame() ?? "").split("\n").find((l) => l.includes("Enter 打开操作")) ?? "";
-    expect(hint).toContain("Enter 打开操作（换密钥 / 刷新 / 编辑模型 / 删除）");
-    for (const k of ["↑/↓ 选择", "Delete 删除", "Esc 返回", "Ctrl+C 退出"])
-      expect(hint).toContain(k);
+    const hint = (lastFrame() ?? "").split("\n").find((l) => l.includes("Enter 操作")) ?? "";
+    expect(hint).toBe("↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回");
+    expect(lastFrame() ?? "").not.toContain("换密钥 / 刷新 / 编辑模型 / 删除");
     unmount();
   });
 
-  it("底部提示窄时缩写，四项操作在相邻行完整列出", async () => {
+  it("70 列仍显示同一列表提示，不再重复列出操作名", async () => {
     const { lastFrame, unmount } = render(
       createElement(ProviderPage, pageProps({ width: 70, height: 30, termRows: 30 })),
     );
@@ -708,8 +709,8 @@ describe("服务商页 Delete 入口与底部提示（ADR-0030 §6）", () => {
     expect(frame).toContain("Enter 操作");
     expect(frame).toContain("Esc 返回");
     expect(frame).not.toContain("Enter 打开操作");
-    const ops = frame.split("\n").find((l) => l.includes("换密钥")) ?? "";
-    expect(ops).toContain("换密钥 / 刷新 / 编辑模型 / 删除");
+    expect(frame).toContain("↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回");
+    expect(frame).not.toContain("换密钥 / 刷新 / 编辑模型 / 删除");
     unmount();
   });
 });

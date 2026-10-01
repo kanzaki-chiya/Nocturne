@@ -261,7 +261,7 @@ describe("dialog mouse app routing", () => {
       parser.feed(`\x1b[<0;${col};${row + 1}M\x1b[<0;${col};${row + 1}m`);
     };
     try {
-      await waitLong(() => expect(ui.lastFrame()).toContain("Nocturne"));
+      await waitLong(() => expect(ui.lastFrame()).toContain("v0.4.0"));
       await changed(ui, () => ui.stdin.write("/provider model up m1"));
       ui.stdin.write("\r");
       await waitLong(() => expect(ui.lastFrame()).toContain("编辑档位"));
@@ -283,9 +283,11 @@ describe("dialog mouse app routing", () => {
       expect(ui.lastFrame()).not.toContain("编辑档位");
       await changed(ui, () => ui.stdin.write("\x1b"));
       expect(ui.lastFrame()).toContain("过滤");
-      const page = ui.lastFrame();
-      parser.feed("\x1b[<0;4;4M\x1b[<0;4;4m\x1b[<65;4;4M");
-      expect(ui.lastFrame()).toBe(page);
+      await changed(ui, () => clickText("● up"));
+      expect(ui.lastFrame()).not.toContain("[ 换密钥 ]");
+      await changed(ui, () => clickText("● up"));
+      expect(ui.lastFrame()).toContain("[ 换密钥 ]");
+      await changed(ui, () => ui.stdin.write("\x1b"));
       await changed(ui, () => ui.stdin.write("\x1b"));
       expect(ui.lastFrame()).toContain("idle");
     } finally {
@@ -463,7 +465,9 @@ describe("model dialog SGR clicks", () => {
         active: true,
       }),
     );
-    await waitLong(() => expect(mouse.frame).toBeDefined());
+    await waitLong(() =>
+      expect(mouse.frame?.boxes.some((box) => box.id === "displayName")).toBe(true),
+    );
     const frame = ui.lastFrame();
     mouse.send(0, 1, 1);
     mouse.send(0, 1, 1, true);

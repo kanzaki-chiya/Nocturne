@@ -400,6 +400,7 @@ function SetupFlow({
   provider,
   setup,
   inline,
+  mouse,
   onOutputLayout,
   onDone,
 }: {
@@ -407,12 +408,31 @@ function SetupFlow({
   provider: ProviderBridge;
   setup: SetupFlowSpec;
   inline: boolean;
+  mouse?: MouseSource | undefined;
   onOutputLayout?: ((conversation: number, page: string) => void) | undefined;
   onDone: (d: SetupDone) => void;
 }): React.JSX.Element | null {
   const theme = useTheme();
   const { stdout } = useStdout();
   const alt = useAltScreen(inline);
+  const dialogMouse = useRef<DialogMouseFrame | undefined>(undefined);
+  const dialogClicks = useRef(createClickTracker());
+  const reportDialogMouse = useCallback((next: DialogMouseFrame | undefined): void => {
+    if (next?.layer !== dialogMouse.current?.layer) dialogClicks.current.reset();
+    dialogMouse.current = next;
+  }, []);
+  useEffect(() => {
+    if (inline || mouse === undefined) return;
+    return mouse.subscribe((event) => {
+      const frame = dialogMouse.current;
+      if (frame === undefined) return;
+      if (event.type === "wheel") frame.wheel(event);
+      else {
+        const id = dialogClicks.current.feed(event, frame.boxes);
+        if (id !== undefined) frame.click(id, event);
+      }
+    });
+  }, [inline, mouse]);
   const [width, setWidth] = useState(stdout.columns || 80);
   const [rows, setRows] = useState(stdout.rows || 24);
   useEffect(() => {
@@ -541,6 +561,7 @@ function SetupFlow({
         width={width}
         height={frame.frameHeight}
         termRows={rows}
+        onMouseFrame={inline ? undefined : reportDialogMouse}
         active
       />
     );
@@ -628,6 +649,7 @@ export function App({
             provider={provider}
             setup={setup}
             inline={inline === true}
+            mouse={mouse}
             onOutputLayout={onOutputLayout}
             onDone={onSetupDone}
           />

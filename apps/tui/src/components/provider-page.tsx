@@ -5,19 +5,18 @@
  * 页头与底部按键提示始终完整可见。
  * Logo 自适应：行数 <30 或宽度 <64 时降级为单行文字标题，不画像素 Logo。
  *
- * 未配置预设 Enter → 同页内嵌向导（WizardView，Core 编排，omp 风格表单）；
- * 已配置条目 Enter → 内联操作条（换密钥/刷新模型列表/编辑模型/删除）；
+ * 未配置预设 Enter → 覆盖列表的配置对话框（WizardView，Core 编排）；
+ * 已配置条目 Enter → 居中操作对话框（換密钥/刷新模型列表/编辑模型/删除）；
  * 「编辑模型」打开模型列表/编辑子视图（ADR-0024 第 5 节，model-settings-view.tsx）；
  * 手写层条目 Enter → 模型列表只读查看；当前会话所用服务商不可删除。
  * Delete → 可删除条目直达删除确认（ADR-0030 §6）；当前会话在用/只读/未配置条目
  * 拒绝并给原因（沿用结果行），不开确认框；Backspace 仍只删过滤字符。
- * 全页无打字是非题：删除确认等为 ↑↓/←→ 选项式（ConfirmBox）。
+ * 全页无打字是非题：删除确认等复用对话框按钮。
  * 由 App 在备用屏内渲染；进出序列在 App（ADR-0017 约束沿用）。
  * 本组件只管页面内状态与按键，业务逻辑都在父级（Core 公开 API）。
  */
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, type DOMElement } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
-import stringWidth from "string-width";
 
 import type {
   ModelSettingsPatch,
@@ -30,9 +29,9 @@ import { useTuiEnv } from "../env.js";
 import { truncateLine } from "../format.js";
 import { useTheme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
-import { ConfirmBox } from "./confirm-box.js";
+import { ProviderDialog } from "./provider-dialog.js";
 import { ModelEditPane, ModelListPane } from "./model-settings-view.js";
-import type { DialogMouseFrame } from "./dialog/mouse.js";
+import { screenRect, type DialogMouseFrame } from "./dialog/mouse.js";
 import { PixelLogo } from "./pixel-logo.js";
 import { WizardView } from "./wizard-view.js";
 import { InputCursor } from "./input-cursor.js";
@@ -107,18 +106,13 @@ function rowLabel(row: ProviderRow, currentId: string | undefined, env: { ascii:
   return { mark: dotOn, name: p.id, detail, configured: true };
 }
 
-const OPS = ["换密钥", "刷新模型列表", "编辑模型", "删除"] as const;
 /** 交给父级执行的操作（删除在页内确认后走 onConfirmRemove；「编辑模型」为页内子视图） */
 export type ProviderOp = "key" | "refresh";
 
 /**
- * 底部按键提示（ADR-0030 §6）：宽能放下时一行写全，Enter 段列出四项操作；
- * 放不下时 Enter 段缩写为「Enter 操作」，四项操作在相邻一行完整列出。
+ * 底部列表提示（ADR-0039 §2）；操作名称只在对话框内显示。
  */
-const KEY_HINT_FULL =
-  "↑/↓ 选择 • Enter 打开操作（换密钥 / 刷新 / 编辑模型 / 删除） • Delete 删除 • Esc 返回/完成 • Ctrl+C 退出";
-const KEY_HINT_SHORT = "↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回/完成 • Ctrl+C 退出";
-const KEY_HINT_OPS = "操作：换密钥 / 刷新 / 编辑模型 / 删除";
+const KEY_HINT = "↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回";
 
 export function ProviderPage({
   presets,
@@ -161,7 +155,7 @@ export function ProviderPage({
   onOp: (providerId: string, op: ProviderOp) => void;
   /** 只读条目的提示文案（父级按 origin 给文件路径） */
   onReadonlyHint: (entry: ProviderOverview) => string;
-  /** 删除确认由父级执行后的提示/执行回调（页面负责 y/n 确认交互） */
+  /** 删除确认后交给父级执行（默认取消的按钮确认）。 */
   onConfirmRemove: (providerId: string) => void;
   /**
    * 模型设置读取（ADR-0024）：Core listModelSettings 的桥；
@@ -201,11 +195,12 @@ export function ProviderPage({
   const allRows = useMemo(() => buildProviderRows(presets, entries), [presets, entries]);
   const [cursor, setCursor] = useState(0);
   const [query, setQuery] = useState("");
-  const [action, setAction] = useState<{ providerId: string; index: number } | undefined>(
-    undefined,
-  );
+  const [action, setAction] = useState<{ providerId: string } | undefined>(undefined);
   const [confirmRemove, setConfirmRemove] = useState<string | undefined>(undefined);
   const [localNotice, setLocalNotice] = useState<string | undefined>(undefined);
+  const [wizardTitle, setWizardTitle] = useState("配置服务商");
+  const rowBoxes = useRef(new Map<number, DOMElement>());
+  const listBox = useRef<DOMElement | null>(null);
   // 模型设置子视图（ADR-0024）：列表 → 编辑；数据经 onListModels/onSaveModel
   const [subView, setSubView] = useState<
     | { kind: "models"; providerId: string }
@@ -327,13 +322,9 @@ export function ProviderPage({
   // 像素 Logo 只在高度 ≥30 且宽度 ≥64 时绘制；否则单行文字标题。
   const showLogo = width >= 64 && (termRows ?? height) >= 30;
   const headerH = showLogo ? 5 : stepLabel !== undefined ? 3 : 2;
-  // 底部：结果/操作/确认区 + 按键提示行。确认框（边框+标题+说明+选项）5 行；
-  // 子视图打开时页面不再追加自己的提示行（提示由子视图提供，footer 只留结果/操作行）；
-  // Enter 提示放不下完整四项时占两行（缩写 + 四项操作行）
-  const enterHintFits = stringWidth(KEY_HINT_FULL) <= width - 4;
-  const footerH =
-    subView !== undefined ? 1 : 1 + (confirmRemove !== undefined ? 5 : 1) + (enterHintFits ? 0 : 1);
-  const contentH = Math.max(4, height - headerH - footerH);
+  // 底部保留结果与列表提示；子视图自带提示，页面只保留结果行。
+  const footerH = subView !== undefined ? 1 : 2;
+  const contentH = Math.max(1, height - headerH - footerH);
   const listH = Math.max(1, contentH - 1); // 过滤行占 1 行
   const start = Math.min(
     Math.max(0, cur - Math.floor(listH / 2)),
@@ -344,47 +335,78 @@ export function ProviderPage({
   const thumbH = Math.max(1, Math.round((listH / rows.length) * listH));
   const thumbStart = Math.round((start / Math.max(1, rows.length - listH)) * (listH - thumbH));
 
+  const openRow = (row: ProviderRow): void => {
+    setLocalNotice(undefined);
+    if (row.kind === "preset" && row.configured === undefined) {
+      setWizardTitle(`配置 ${row.preset.label}`);
+      onStartWizard(row.preset.id);
+      return;
+    }
+    const entry = row.kind === "preset" ? row.configured : row.overview;
+    if (entry === undefined) return;
+    if (!entry.managed) {
+      setLocalNotice(onReadonlyHint(entry));
+      openModels(entry.id);
+      return;
+    }
+    setActionNow({ providerId: entry.id });
+  };
+
+  useEffect(() => {
+    if (
+      !active ||
+      !onMouseFrame ||
+      wizardActive ||
+      action !== undefined ||
+      confirmRemove !== undefined ||
+      subView !== undefined
+    )
+      return;
+    onMouseFrame({
+      layer: "provider-list",
+      boxes: [...rowBoxes.current].map(([index, node]) => {
+        const rect = screenRect(node);
+        return {
+          id: String(index),
+          row: rect.row,
+          colStart: rect.col,
+          colEnd: rect.col + rect.width - 1,
+        };
+      }),
+      click: (id) => {
+        const index = Number(id);
+        const row = rows[index];
+        if (row === undefined) return;
+        if (index === cursorRef.current) openRow(row);
+        else setCursorNow(index);
+      },
+      wheel: (mouse) => {
+        const rect = screenRect(listBox.current ?? undefined);
+        if (
+          mouse.y < rect.row ||
+          mouse.y >= rect.row + rect.height ||
+          mouse.x < rect.col ||
+          mouse.x >= rect.col + rect.width
+        )
+          return;
+        setCursorNow(
+          Math.max(0, Math.min(rows.length - 1, cursorRef.current + (mouse.dir === "up" ? -3 : 3))),
+        );
+      },
+    });
+    return () => {
+      onMouseFrame(undefined);
+    };
+  });
+
   useInput(
     (ch, key) => {
       // 子视图/对话框打开时本页不吃键（ADR-0030 §4）。isActive 的退订在
       // useEffect 里落后于已提交的帧，旧订阅仍可能被分发到，必须在处理器内再判一次。
       if (subViewRef.current !== undefined) return;
-      // 删除确认（ConfirmBox 自己吃键时这里不再处理）
+      // 对话框自管按键，冻结下层列表。
       if (confirmRemoveRef.current !== undefined) return;
-      // 操作条：←/→ 选择、Enter 执行、Esc 返回
-      const act = actionRef.current;
-      if (act !== undefined) {
-        if (key.escape) {
-          setActionNow(undefined);
-          return;
-        }
-        if (key.leftArrow) {
-          setActionNow({ ...act, index: (act.index + OPS.length - 1) % OPS.length });
-          return;
-        }
-        if (key.rightArrow) {
-          setActionNow({ ...act, index: (act.index + 1) % OPS.length });
-          return;
-        }
-        if (key.return) {
-          const op = OPS[act.index] ?? OPS[0];
-          const id = act.providerId;
-          setActionNow(undefined);
-          if (op === "删除") {
-            const entry = entries.find((e) => e.id === id);
-            if (entry !== undefined) requestRemove(entry);
-            return;
-          }
-          if (op === "编辑模型") {
-            openModels(id);
-            return;
-          }
-          const realOp: ProviderOp = op === "换密钥" ? "key" : "refresh";
-          onOp(id, realOp);
-          return;
-        }
-        return;
-      }
+      if (actionRef.current !== undefined || wizardActive) return;
 
       if (key.escape) {
         if (queryRef.current !== "") {
@@ -424,19 +446,7 @@ export function ProviderPage({
       if (key.return) {
         const row = rowsNow[curNow];
         if (row === undefined) return;
-        setLocalNotice(undefined);
-        if (row.kind === "preset" && row.configured === undefined) {
-          onStartWizard(row.preset.id);
-          return;
-        }
-        const entry = row.kind === "preset" ? row.configured : row.overview;
-        if (entry === undefined) return;
-        if (!entry.managed) {
-          // 只读条目：进入模型列表只读查看（ADR-0024 第 5 节）
-          openModels(entry.id);
-          return;
-        }
-        setActionNow({ providerId: entry.id, index: 0 });
+        openRow(row);
         return;
       }
       if (key.delete) {
@@ -465,7 +475,14 @@ export function ProviderPage({
         setCursorNow(0);
       }
     },
-    { isActive: active && !wizardActive && confirmRemove === undefined && subView === undefined },
+    {
+      isActive:
+        active &&
+        !wizardActive &&
+        action === undefined &&
+        confirmRemove === undefined &&
+        subView === undefined,
+    },
   );
 
   const titleRow = (
@@ -497,91 +514,89 @@ export function ProviderPage({
       ? modelsData?.views?.find((v) => v.modelId === subView.modelId)
       : undefined;
 
-  const content = wizardActive ? (
-    <WizardView
-      title="添加服务商"
-      state={wizard.state}
-      active={active}
-      width={width - 2}
-      maxRows={contentH}
-      offsetY={headerH - height}
-      onSubmit={wizard.submit}
-      onSubmitMulti={wizard.submitMulti}
-      onCancel={wizard.cancel}
-    />
-  ) : subView?.kind === "models" ? (
-    <ModelListPane
-      providerId={subView.providerId}
-      views={modelsData?.providerId === subView.providerId ? modelsData.views : undefined}
-      readonlyHint={modelsHint}
-      error={modelsData?.providerId === subView.providerId ? modelsData.error : undefined}
-      active={active}
-      width={width}
-      height={contentH}
-      onOpen={(modelId) => {
-        setSubViewNow({ kind: "edit", providerId: subView.providerId, modelId });
-        setSaveError(undefined);
-      }}
-      onBack={() => {
-        setSubViewNow(undefined);
-        setModelsData(undefined);
-      }}
-    />
-  ) : subView?.kind === "edit" && editView !== undefined ? (
-    <ModelListPane
-      providerId={subView.providerId}
-      views={modelsData?.views}
-      readonlyHint={modelsHint}
-      active={false}
-      width={width}
-      height={contentH}
-      onOpen={() => undefined}
-      onBack={() => undefined}
-    />
-  ) : (
-    <Box flexDirection="column">
-      <Text wrap="truncate">
-        <Text color={theme.muted}>{"过滤: "}</Text>
-        {query}
-        <Text color={theme.selected} backgroundColor={theme.selectionBg}>
-          {" "}
+  const content =
+    subView?.kind === "models" ? (
+      <ModelListPane
+        providerId={subView.providerId}
+        views={modelsData?.providerId === subView.providerId ? modelsData.views : undefined}
+        readonlyHint={modelsHint}
+        error={modelsData?.providerId === subView.providerId ? modelsData.error : undefined}
+        active={active}
+        width={width}
+        height={contentH}
+        onOpen={(modelId) => {
+          setSubViewNow({ kind: "edit", providerId: subView.providerId, modelId });
+          setSaveError(undefined);
+        }}
+        onBack={() => {
+          setSubViewNow(undefined);
+          setModelsData(undefined);
+        }}
+      />
+    ) : subView?.kind === "edit" && editView !== undefined ? (
+      <ModelListPane
+        providerId={subView.providerId}
+        views={modelsData?.views}
+        readonlyHint={modelsHint}
+        active={false}
+        width={width}
+        height={contentH}
+        onOpen={() => undefined}
+        onBack={() => undefined}
+      />
+    ) : (
+      <Box flexDirection="column">
+        <Text wrap="truncate">
+          <Text color={theme.muted}>{"过滤: "}</Text>
+          {query}
+          <Text color={theme.selected} backgroundColor={theme.selectionBg}>
+            {" "}
+          </Text>
         </Text>
-      </Text>
-      <Box flexDirection="row" height={listH}>
-        <Box flexDirection="column" flexGrow={1}>
-          {visible.map((row, i) => {
-            const idx = start + i;
-            const focused = idx === cur;
-            const l = rowLabel(row, currentProviderId, env);
-            const text = ` ${l.mark} ${l.name}  ${l.detail}`;
-            return (
-              <Text key={idx} wrap="truncate">
-                <Text
-                  color={focused ? theme.selected : l.configured ? theme.success : theme.muted}
-                  {...(focused ? { backgroundColor: theme.selectionBg } : {})}
+        <Box ref={listBox} flexDirection="row" height={listH}>
+          <Box flexDirection="column" flexGrow={1}>
+            {visible.map((row, i) => {
+              const idx = start + i;
+              const focused = idx === cur;
+              const l = rowLabel(row, currentProviderId, env);
+              const marker = focused ? (env.ascii ? ">" : "▸") : " ";
+              const text = `${marker} ${l.mark} ${l.name}  ${l.detail}`;
+              return (
+                <Box
+                  key={idx}
+                  ref={(node) => {
+                    if (node) rowBoxes.current.set(idx, node);
+                    else rowBoxes.current.delete(idx);
+                  }}
                 >
-                  {truncateLine(text, width - (showScroll ? 6 : 4))}
-                </Text>
-              </Text>
-            );
-          })}
-          {rows.length === 0 ? <Text color={theme.muted}>（无匹配）</Text> : null}
-        </Box>
-        {showScroll ? (
-          <Box flexDirection="column" width={1} marginLeft={1}>
-            {Array.from({ length: listH }, (_, i) => (
-              <Text
-                key={i}
-                color={i >= thumbStart && i < thumbStart + thumbH ? theme.accent : theme.muted}
-              >
-                {env.ascii ? (i >= thumbStart && i < thumbStart + thumbH ? "#" : "|") : "█"}
-              </Text>
-            ))}
+                  <Text wrap="truncate">
+                    <Text
+                      color={focused ? theme.selected : l.configured ? theme.success : theme.muted}
+                      {...(focused ? { backgroundColor: theme.selectionBg } : {})}
+                    >
+                      {truncateLine(text, width - (showScroll ? 6 : 4))}
+                    </Text>
+                  </Text>
+                </Box>
+              );
+            })}
+            {rows.length === 0 ? <Text color={theme.muted}>（无匹配）</Text> : null}
           </Box>
-        ) : null}
+          {showScroll ? (
+            <Box flexDirection="column" width={1} marginLeft={1}>
+              {Array.from({ length: listH }, (_, i) => (
+                <Text
+                  key={i}
+                  color={i >= thumbStart && i < thumbStart + thumbH ? theme.accent : theme.muted}
+                >
+                  {env.ascii ? (i >= thumbStart && i < thumbStart + thumbH ? "#" : "|") : "█"}
+                </Text>
+              ))}
+            </Box>
+          ) : null}
+        </Box>
       </Box>
-    </Box>
-  );
+    );
 
   return (
     <Box flexDirection="column" width={width} height={height} overflow="hidden">
@@ -602,55 +617,61 @@ export function ProviderPage({
       <Box flexDirection="column" height={contentH} overflow="hidden">
         {content}
       </Box>
-      {confirmRemove !== undefined ? (
-        <ConfirmBox
-          title={`删除服务商 ${confirmRemove}`}
-          detail="同时删除其凭据（providers.json 条目与凭据索引）"
-          confirmLabel="删除"
-          active={active}
-          width={width}
-          onConfirm={() => {
-            const id = confirmRemove;
-            setConfirmRemoveNow(undefined);
-            onConfirmRemove(id);
-          }}
-          onCancel={() => {
-            setConfirmRemoveNow(undefined);
-            setLocalNotice("已取消删除");
-          }}
-        />
-      ) : action !== undefined ? (
-        <Text wrap="truncate">
-          {OPS.map((op, i) => (
-            <Text key={op}>
-              {i > 0 ? " " : ""}
-              <Text
-                {...(action.index === i
-                  ? { color: theme.selected, backgroundColor: theme.selectionBg }
-                  : {})}
-              >
-                [{op}]
-              </Text>
-            </Text>
-          ))}
-          <Text color={theme.muted}> 左右选择，Enter 执行，Esc 返回</Text>
-        </Text>
-      ) : (
-        <Text wrap="truncate" color={noticeLine !== undefined ? theme.accent : theme.muted}>
-          {truncateLine(busyText ?? noticeLine ?? "", width - 4)}
-        </Text>
-      )}
+      <Text wrap="truncate" color={noticeLine !== undefined ? theme.accent : theme.muted}>
+        {truncateLine(busyText ?? noticeLine ?? "", width - 4)}
+      </Text>
       {subView === undefined ? (
-        <>
-          <Text color={theme.muted} wrap="truncate">
-            {truncateLine(enterHintFits ? KEY_HINT_FULL : KEY_HINT_SHORT, width - 4)}
-          </Text>
-          {enterHintFits ? null : (
-            <Text color={theme.muted} wrap="truncate">
-              {truncateLine(KEY_HINT_OPS, width - 4)}
-            </Text>
-          )}
-        </>
+        <Text color={theme.muted} wrap="truncate">
+          {truncateLine(KEY_HINT, width - 2)}
+        </Text>
+      ) : null}
+      {wizardActive ? (
+        <Box position="absolute" width={width} height={height}>
+          <WizardView
+            title={wizardTitle}
+            state={wizard.state}
+            active={active}
+            width={width}
+            height={height}
+            onSubmit={wizard.submit}
+            onSubmitMulti={wizard.submitMulti}
+            onCancel={wizard.cancel}
+            onMouseFrame={onMouseFrame}
+          />
+        </Box>
+      ) : confirmRemove !== undefined || action !== undefined ? (
+        <Box position="absolute" width={width} height={height}>
+          <ProviderDialog
+            key={confirmRemove !== undefined ? "remove" : "actions"}
+            providerId={confirmRemove ?? action?.providerId ?? ""}
+            confirmRemove={confirmRemove !== undefined}
+            deleteDisabled={(confirmRemove ?? action?.providerId) === currentProviderId}
+            width={width}
+            height={height}
+            active={active}
+            onMouseFrame={onMouseFrame}
+            onActivate={(op) => {
+              if (confirmRemove !== undefined) {
+                const id = confirmRemove;
+                setConfirmRemoveNow(undefined);
+                if (op === "remove") onConfirmRemove(id);
+                else setLocalNotice("已取消删除");
+                return;
+              }
+              if (action === undefined) return;
+              const id = action.providerId;
+              setActionNow(undefined);
+              if (op === "remove") {
+                const entry = entries.find((e) => e.id === id);
+                if (entry !== undefined) requestRemove(entry);
+              } else if (op === "model") openModels(id);
+              else if (op === "key" || op === "refresh") {
+                if (op === "key") setWizardTitle(`换密钥 ${id}`);
+                onOp(id, op);
+              }
+            }}
+          />
+        </Box>
       ) : null}
       {subView?.kind === "edit" && editView !== undefined ? (
         <Box position="absolute" width={width} height={height}>

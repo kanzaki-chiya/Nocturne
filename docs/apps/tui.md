@@ -201,7 +201,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 `/provider`（无参）打开服务商管理页（ADR-0019）。全屏模式下替换同一帧的内容区；`--inline` 模式临时进入备用屏幕，关闭后返回普通屏幕。只在会话空闲时可打开；首次配置流程中由启动路径直接打开，不要求已有会话。
 
-**布局**：页面高度锁定为终端行数——页头（Logo/标题/副标题/步骤标记）与底部按键提示始终完整可见，内容超出时只在列表或表单区域内滚动。像素 Logo 只在终端行数 ≥30 且宽度 ≥64 列时绘制；不满足时页头降级为单行文字标题，不画像素 Logo。
+**布局**：页面高度锁定为终端行数——页头（Logo/标题/副标题/步骤标记）与底部按键提示始终完整可见，列表超出时在内容区滚动。像素 Logo 只在终端行数 ≥30 且宽度 ≥64 列时绘制；不满足时页头降级为单行文字标题。操作、删除确认、换密钥和配置向导使用 [ADR-0039](../decisions/ADR-0039-welcome-provider-dialogs.md) 的居中对话框，复用 DialogFrame、Buttons、TextInput 与 ConfirmDiscard，下层列表保留选中项和过滤，冻结输入。`--inline` 在临时备用屏中显示同一套对话框，不开启鼠标。
 
 ```text
 ┌ <像素 Logo>  Nocturne · 服务商
@@ -215,33 +215,47 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 │   ○ 其他 Anthropic 兼容服务
 │   ● commandcode     已配置 • 凭据文件 • 5 个模型        ← providers.json 自定义条目
 ├ 已保存 command，12 个模型                              ← 结果行（操作完成后出现）
-└ ↑/↓ 选择 • Enter 打开操作（换密钥 / 刷新 / 编辑模型 / 删除） • Delete 删除 • Esc 返回/完成 • Ctrl+C 退出
+└ ↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回
+```
+
+```text
+ Nocturne · 服务商
+ 过滤:
+ ● command       ┌ 服务商 command ────────────────────┐
+ ○ 其他 OpenAI   │  [ 换密钥 ]                        │
+ ○ 其他 Anthropic│  [ 刷新模型列表 ]                  │
+                 │  [ 编辑模型 ]                      │
+                 │  [ 删除 ]                          │
+                 │  [ 取消 ]                          │
+                 │  ↑↓/Tab 移动 · Enter 执行 · Esc 关闭│
+                 └────────────────────────────────────┘
+ ↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回
 ```
 
 **列表** = 7 个预设行 + 未被预设覆盖的已配置条目（`providers.json` 自定义条目、`config.json`/项目层手写条目按追加行展示）：
 
 - 预设行按固定顺序：DeepSeek、OpenRouter、Anthropic、OpenCode Zen、OpenCode Go、其他 OpenAI 兼容、其他 Anthropic 兼容。与已配置条目 id 匹配的预设显示 `● 已配置`（绿色）+ 密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）+ 模型数；未匹配显示 `○ 未配置`。
 - 手写配置层的条目（`origin` ≠ `setup`）标注来源层并**只读**：Enter 后提示去哪个文件修改（`config.json` 层 → `<NOCTURNE_HOME>/config.json`；项目层 → `<工作区>/.nocturne/config.json`；env/cli 层 → 对应环境变量或命令行参数）。
-- 当前会话正在使用的服务商加注「当前」标记，删除它被拒绝（提示先 `/model` 切换）。
+- 当前会话正在使用的服务商加注「当前」标记；操作对话框的「删除」灰显且不可聚焦，下方说明「当前会话正在使用，先用 /model 切换」。
 - 直接打字进入过滤（对 id/标签/主机名做子串匹配），`Backspace` 删字符；`Esc` 先清过滤，过滤已空时再按关闭页面（首次配置流程中为"完成"语义）；`↑`/`↓`/`PageUp`/`PageDown`/`Home`/`End` 移动；列表超出可视高度时右侧出滚动条。
-- `Delete` 直接进入选中服务商的删除确认，过滤非空时也一样；不再删除过滤字符。未配置或只读条目给出不可删除原因，当前会话使用的条目提示「先用 /model 切换」。底部显示四项操作与 Delete 入口；宽度不够时缩为「Enter 操作」，相邻一行仍完整列出「换密钥 / 刷新 / 编辑模型 / 删除」。
+- `Delete` 直接进入选中服务商的删除确认，过滤非空时也一样；不删除过滤字符。未配置或只读条目给出不可删除原因，当前会话使用的条目提示「先用 /model 切换」。底部统一为 `↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回`，不重复列出操作名。
 
-**未配置预设 `Enter` → 就地展开步骤**（正文区替换为向导视图，页头页脚保持；步骤编排在 Core `runProviderSetupWizard`，v0.3 起不再含选模型步骤）。向导视图是 omp 风格的就地表单：已完成步骤折叠为一行摘要（`名称 x • 地址 y • 密钥已保存`），只展开当前步骤——当前提问用强调色、下方用灰色小字给说明（密钥来源、回车改用环境变量等），不堆叠逐行问答历史：
+**未配置预设 `Enter` → 配置对话框**：标题为「配置 <预设名>」，覆盖列表居中，首次配置的「第 1 步，共 2 步」标记仍留在下层页头。步骤编排仍由 Core `runProviderSetupWizard` 决定，不含选模型步骤。已完成步骤在上部折叠为一行摘要（`名称 x • 地址 y • 密钥已保存`）；当前步骤显示提问、输入框与灰色说明。底部 `[ 取消 ] [ 下一步 ]`，最后一步 `[ 取消 ] [ 保存 ]`。Tab/↑↓ 移动焦点，Enter 提交输入或激活按钮，Esc 取消；输入已改动时用 ConfirmDiscard 确认放弃。输入光标按对话框整数偏移显式定位，与输入文字对齐：
 
 1. 仅自定义预设问「名称」（必填）、「服务地址」（openai 兼容必填；anthropic 兼容可留空用官方端点）与「会话标识请求头」（可选，回车跳过，写入条目 `sessionHeader`，[provider-setup.md](../architecture/provider-setup.md) 第 1 节）——五个内置预设直接跳过这三步（OpenCode 预设自带 `x-opencode-session`）；
 2. 「API Key」掩码输入（`*` 回显）：输入后回车 → 交系统凭据后端；直接回车 → 环境变量路径（问「凭据环境变量名」，默认取预设 `defaultKeyEnv`）；后端不可用时直接进环境变量路径；
-3. `GET /models` 拉模型列表与限额（不发模型请求，provider-setup.md 第 7 节）：进行中显示「正在获取模型列表…」，完成后被结果行替换——成功为 `✓ 已获取 N 个模型`；失败显示原因并继续后续步骤（401/403 → 密钥可能无效；404/网络错误等 → 模型将手动填写），保存后可用「刷新模型列表」重试；
+3. `GET /models` 拉模型列表与限额（不发模型请求，provider-setup.md 第 7 节）：进行中显示「正在获取模型列表…」，Esc 取消请求并回到上一步。完成后显示结果——成功为 `✓ 已获取 N 个模型`；失败显示原因并继续后续步骤（401/403 → 密钥可能无效；404/网络错误等 → 模型将手动填写），保存后可用「刷新模型列表」重试；
 4. 顺带更新 models.dev 缓存；失败时用本地数据并在结果行提示，不中断保存；
 5. 保存 → 回列表，底部结果显示如 `已保存 command，12 个模型`（未取到模型时为 `已保存 <id>`）。
 
-**已配置条目 `Enter` → 操作菜单**（内联选项条，`←`/`→` 移动、`Enter` 执行、`Esc` 返回）：
+**已配置条目 `Enter` → 操作对话框**：标题为「服务商 <名>」，竖排「换密钥 / 刷新模型列表 / 编辑模型 / 删除 / 取消」，↑↓/Tab 移动、Enter 执行、Esc 关闭。
 
 | 操作 | 效果 | 等价子命令 |
 |---|---|---|
-| 换密钥 | 掩码输入新密钥 → 系统凭据后端 | `/provider key <名>` |
+| 换密钥 | 对话框中掩码输入新密钥（`*`）与 `[ 取消 ] [ 保存 ]` → 系统凭据后端；保存失败保留输入并显示原因 | `/provider key <名>` |
 | 刷新模型列表 | 重新 `GET /models` 写回限额与能力标记，并尝试更新 models.dev 缓存 | `/provider refresh <名>` |
 | 编辑模型 | 进入模型列表子视图（见下）；`/provider model <名> [<模型>]` 直达 | `/provider model <名> [<模型>]` |
-| 删除 | 选项式确认框（默认焦点在「取消」；`←`/`→`/`↑`/`↓` 移动、`Enter` 执行、`Esc` 取消）确认后删除条目与凭据；当前会话使用的拒绝；只读条目不可达 | `/provider remove <名>` |
+| 删除 | 居中确认对话框写明「删除 <名> 的配置与已保存的密钥」，按钮 `[ 取消 ] [ 删除 ]`，默认焦点在「取消」；方向键/Tab 移动、Enter 执行、Esc 取消。确认后删除条目与凭据；当前会话使用的灰显；只读条目不可达 | `/provider remove <名>` |
 
 **模型列表与编辑对话框**（[ADR-0030](../decisions/ADR-0030-dialog-settings-pages.md)，字段契约沿用 ADR-0024 第 5 节）：「编辑模型」把内容区换成**模型列表**——页头面包屑 `服务商 <名> › 模型（N）`，下一行与服务商页一致的 `过滤: <query>`；行显示模型 id、`上下文/最大输出` 缩写与 `R`（推理）/`I`（图片输入）能力标记，不可用模型行尾加灰色「协议不支持」，按模型 id 排序、按显示宽度对齐。`Enter` 打开覆盖列表的**模型编辑对话框**，下层保留选中项与过滤但不收输入。关闭对话框回模型列表，再 Esc 返回服务商列表。模型列表底部提示为 `↑/↓ 选择 • Enter 编辑 • Esc 返回 • Ctrl+C 退出`，服务商页不再追加提示行。只读服务商直接进模型列表的**只读查看**，显示定义位置，底部提示改为 `只读 • Esc 返回 • Ctrl+C 退出`；对话框所有字段灰显不可聚焦，仅保留「返回」。
 
@@ -260,13 +274,15 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 **向导对外只发 `GET /models`**（provider-setup.md 第 1、6 节）：不做连接测试、不发模型请求；测试用 fake fetch 断言只出现 `GET /models`。
 
-**不做**：页内切换会话模型（去 `/model`）、密钥明文回显、模型编辑对话框之外的页内鼠标操作。
+**鼠标（仅全屏）**：复用 DialogMouseFrame 与 ADR-0030 的点击判定，左键松开执行；按下后收到任何移动都取消点击，拖回原处也不执行。列表行单击选中，单击已选中行等同 Enter；列表区域响应滚轮。对话框的按钮和输入框响应单击，打开时滚轮不做任何事。页面内拖动不产生选区；`--inline` 不开启鼠标。只读条目的提示与 `/provider key|refresh|model|remove` 子命令行为保持不变。
+
+**不做**：页内切换会话模型（去 `/model`）、密钥明文回显、页面内拖选。
 
 ## 9. 工程约束
 
 - `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口及批准的终端依赖（ink、react、string-width、marked；`ink-testing-library` 为 devDependency）。CLI 可惰性加载 `@nocturne/tui`，或静态引用 `@nocturne/tui/slash-catalog` 与 `@nocturne/tui/text-format`。命令表不得 import 任何模块；纯文本入口复用 `truncateMiddle` 与控制字符过滤，仅依赖纯格式化函数、协议类型与 string-width，不加载 Ink。依赖方向见 [modules.md](../architecture/modules.md) 第 1 节。
 - 目录：`src/index.ts`（`runTui`：全屏/普通屏幕装配、鼠标上报开闭、退出导出）、`src/app.tsx`（界面状态与布局）、`src/lines.ts`（`SessionView` → 内容行块，按条目 key + 宽度 + 主题 ID 缓存布局）、`src/viewport.ts`（可见窗口选择）、`src/scroll.ts`（翻阅状态）、`src/mouse.ts`（SGR 鼠标序列解析与 stdin 包装）、`src/selection.ts`（选区坐标与高亮/复制文本）、`src/clipboard.ts`（系统剪贴板 + OSC 52，只用 Node 内置模块）、`src/cursor.ts`（硬件光标补位与帧外写出通道）、`src/output-layer.ts`（全屏帧差异写出与滚动区域平移）、`src/frame.ts`（活动区高度预算）、`src/alt-screen.ts`（`--inline` 与首配流程的临时备用屏）、`src/markdown.ts`（助手文本排版）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。
-- 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎区/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/就地步骤/操作菜单/模型编辑子视图/Esc/Ctrl+C。
+- 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎区/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/四个对话框/模型编辑子视图/键鼠/Esc/Ctrl+C。交互等待帧变化并等提交后的输入订阅接上，不用固定延时猜测就绪。
 - **显示宽度**：按 `string-width` 预算中文和动态文本，框内动态文本经 `format.ts` 的 `boxSafe()` 处理；窄屏时截断摘要和列表字段，边框保留安全余量。
 - `runTui` 只消费 Core 公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`、`readInputHistory`/`recordInputHistory`、`fileIndex()`（文件补全索引）、`mcpServers()`（`/mcp` 面板），以及 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`/`runtime.getPreference`；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
 
@@ -287,6 +303,10 @@ v0.3 增补（ADR-0019）：
 不新增事件类型；不改 Agent Loop；权限判定仍只在权限层（对话框只是 `respondPermission` 的 UI）。
 
 ## 11. 鼠标、折叠与 `/settings` 设置页
+
+### 页内控件
+
+全屏的模型编辑、`/settings` 与服务商页复用 DialogMouseFrame 命中框和 ADR-0030 的按下/移动/松开判定，控件可单击。服务商列表单击选中，再单击已选中行打开对话框；列表区域响应滚轮，对话框打开后下层冻结，滚轮无动作。页内拖动不产生选区。`--inline` 的页面在临时备用屏中显示同一套控件，仅使用键盘；服务商页完整行为见 §8。
 
 ### 对话折叠块
 
@@ -315,7 +335,7 @@ smart 的每次审查在对应工具上方显示「审查：放行/拦截/拿不
 ## 12. 本阶段不做
 
 - 独立 `nctrn-tui` 命令（需要共享启动语义时再评估，可能以独立命令复制薄壳或重新讨论 Core 入口上移的方式引入）；
-- 模型编辑对话框与 `/settings` 开放单击，其余页内控件暂不开放；页面内拖选留待以后，双击/三击选词选段仍不做（[ADR-0030 及修订](../decisions/ADR-0030-dialog-settings-pages.md)）；
+- 模型编辑对话框、`/settings` 与服务商页开放单击，其余页内控件暂不开放；页面内拖选、双击/三击选词选段仍不做（[ADR-0030 及修订](../decisions/ADR-0030-dialog-settings-pages.md)、[ADR-0039](../decisions/ADR-0039-welcome-provider-dialogs.md)）；
 - 代码块语法高亮（助手 Markdown 已做结构化排版）；
 - 多会话标签页；
 - 独立工具输出详情页/分页器（对话内已支持单击展开，超过工具预算的原始输出仍通过 spillPath 查看）；
