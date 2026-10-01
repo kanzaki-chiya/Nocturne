@@ -9,7 +9,7 @@ import { glyphs, useTuiEnv } from "../env.js";
 import { splitInputTokens, userText, fileRefLine } from "../file-refs.js";
 import { layoutEntry } from "../lines.js";
 import type { ReasoningMap } from "../reasoning.js";
-import { renderMarkdown } from "../markdown.js";
+import { renderAssistant } from "../markdown.js";
 import { useTheme } from "../theme.js";
 import type { LaidLine } from "../viewport.js";
 import { ToolRow } from "./tool-row.js";
@@ -18,7 +18,8 @@ import type { ViewEntry } from "@nocturne/core/protocol";
 
 /** 回放区条目：会话视图条目 + 客户端本地分隔线（/resume 切换标记） */
 export type TranscriptItem =
-  | ViewEntry
+  | Exclude<ViewEntry, { kind: "assistant" }>
+  | (Extract<ViewEntry, { kind: "assistant" }> & { bodyContinued?: boolean })
   | { kind: "separator"; key: string; text: string }
   | { kind: "header"; key: string; lines: LaidLine[] };
 
@@ -58,7 +59,7 @@ function AssistantRow({
   reasoning,
   now,
 }: {
-  entry: Extract<ViewEntry, { kind: "assistant" }>;
+  entry: Extract<TranscriptItem, { kind: "assistant" }>;
   width: number;
   reasoning?: ReasoningMap | undefined;
   now?: number | undefined;
@@ -86,24 +87,26 @@ function AssistantRow({
         </Box>
       ) : null}
       {entry.text !== ""
-        ? renderMarkdown(entry.text, width, entry.key, theme).map((line) => (
-            <Text key={line.key}>
-              {line.segments?.map((seg, i) => (
-                <Text
-                  key={i}
-                  bold={seg.bold === true}
-                  italic={seg.italic === true}
-                  dimColor={seg.dim === true}
-                  {...(seg.color !== undefined ? { color: seg.color } : {})}
-                  {...(seg.backgroundColor !== undefined
-                    ? { backgroundColor: seg.backgroundColor }
-                    : {})}
-                >
-                  {seg.text}
-                </Text>
-              )) ?? line.text}
-            </Text>
-          ))
+        ? renderAssistant(entry.text, width, entry.key, env.ascii, theme, entry.bodyContinued).map(
+            (line) => (
+              <Text key={line.key}>
+                {line.segments?.map((seg, i) => (
+                  <Text
+                    key={i}
+                    bold={seg.bold === true}
+                    italic={seg.italic === true}
+                    dimColor={seg.dim === true}
+                    {...(seg.color !== undefined ? { color: seg.color } : {})}
+                    {...(seg.backgroundColor !== undefined
+                      ? { backgroundColor: seg.backgroundColor }
+                      : {})}
+                  >
+                    {seg.text}
+                  </Text>
+                )) ?? line.text}
+              </Text>
+            ),
+          )
         : null}
       {entry.finishReason === "aborted" ? <Text dimColor>（中断）</Text> : null}
     </Box>

@@ -3,13 +3,14 @@
  * 上下文为「百分比 / 上下文长度」（单位大写）；长度未知只显示已用量。
  * 模型段与 /model 一致（服务商/模型 ID 或简称），整行按显示宽度截断，不换行。
  * Shift+Tab / Alt+M 只短暂高亮对应段，不往对话区插条目。
- * 缓存命中率为本会话累计值（含进行中 Turn 已完成的步骤），紧贴上下文段；宽度不够时先去目录段，再去缓存段。
+ * 缓存命中率为本会话累计值（含进行中 Turn 已完成的步骤），紧贴上下文段；宽度不够时依次去速度、用量条、目录、缓存。
  */
 import { Box, Text } from "ink";
 import stringWidth from "string-width";
 
 import { useTuiEnv } from "../env.js";
 import {
+  contextBar,
   formatCacheHitRate,
   formatContextOccupancy,
   formatModelLabel,
@@ -47,6 +48,7 @@ interface Segment {
   color: string;
   highlight: boolean;
   emphasis?: boolean;
+  bar?: ReturnType<typeof contextBar>;
 }
 
 export function StatusBar({
@@ -57,6 +59,7 @@ export function StatusBar({
   models,
   highlight,
   note,
+  speed,
 }: {
   view: SessionView;
   width: number;
@@ -70,6 +73,7 @@ export function StatusBar({
   highlight?: StatusHighlight | undefined;
   /** 短暂提示（复制结果等，由调用方控制时长）；显示为最左段 */
   note?: string | undefined;
+  speed?: string | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
@@ -79,7 +83,7 @@ export function StatusBar({
       ? `${STATUS_TEXT.retrying} ${view.retry.attempt}/${view.retry.maxAttempts}`
       : STATUS_TEXT[view.status];
   const statusColor = view.status === "idle" ? theme.secondary : theme.warning;
-  const ctx = formatContextOccupancy(context.used, context.limit);
+  const ctx = `上下文 ${formatContextOccupancy(context.used, context.limit)}`;
 
   const effortText =
     effort === undefined
@@ -132,7 +136,7 @@ export function StatusBar({
   });
   const dir = view.meta?.cwd ?? "";
   const dirSeg: Segment | undefined =
-    width >= 80 && dir !== "" ? { text: dir, color: theme.secondary, highlight: false } : undefined;
+    dir !== "" ? { text: dir, color: theme.secondary, highlight: false } : undefined;
   if (dirSeg !== undefined) segments.push(dirSeg);
   const cacheSeg: Segment = {
     text: formatCacheHitRate(sessionUsageSoFar(view)),
@@ -140,18 +144,33 @@ export function StatusBar({
     highlight: false,
   };
   segments.push(cacheSeg);
-  segments.push({ text: ctx, color: theme.muted, highlight: false });
+  const contextSeg: Segment = {
+    text: ctx,
+    color: theme.muted,
+    highlight: false,
+    bar: contextBar(context.used, context.limit, env.ascii),
+  };
+  segments.push(contextSeg);
+  const speedSeg: Segment | undefined =
+    speed === undefined ? undefined : { text: speed, color: theme.muted, highlight: false };
+  if (speedSeg) segments.push(speedSeg);
 
   const head = segments[0];
-  const last = segments.at(-1);
+  const last = contextSeg;
   let shown =
-    width < 40 && head !== undefined && last !== undefined
+    width < 40 && head !== undefined
       ? [head, ...(progress === undefined ? [] : [progress]), last]
       : segments;
+  const total = (): number =>
+    shown.reduce(
+      (w, s) => w + stringWidth(s.text) + (s.bar ? 1 + stringWidth(s.bar.filled + s.bar.empty) : 0),
+      0,
+    ) +
+    (shown.length - 1) * stringWidth(sep);
+  if (width < 40 || total() > width - 4) shown = shown.filter((s) => s !== speedSeg);
+  if (width < 40 || total() > width - 4) contextSeg.bar = undefined;
   for (const optional of [dirSeg, cacheSeg]) {
-    if (optional === undefined) continue;
-    const total = shown.reduce((w, s) => w + stringWidth(s.text), 0) + (shown.length - 1) * 3;
-    if (total > width - 4) shown = shown.filter((s) => s !== optional);
+    if (optional !== undefined && total() > width - 4) shown = shown.filter((s) => s !== optional);
   }
 
   return (
@@ -167,6 +186,13 @@ export function StatusBar({
             >
               {s.text}
             </Text>
+            {s.bar ? (
+              <Text>
+                {" "}
+                <Text color={s.bar.warning ? theme.warning : theme.secondary}>{s.bar.filled}</Text>
+                <Text color={s.bar.warning ? theme.warning : theme.muted}>{s.bar.empty}</Text>
+              </Text>
+            ) : null}
           </Text>
         ))}
       </Text>

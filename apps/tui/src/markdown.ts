@@ -8,6 +8,30 @@ import type { LaidLine, LineSegment } from "./viewport.js";
 type Run = LineSegment;
 const limitFor = (width: number): number => Math.max(1, width - 4);
 
+/** 正文缩窄两列，首行标记与所有续行使用同一条渲染路径。 */
+export function renderAssistant(
+  text: string,
+  width: number,
+  key: string,
+  ascii: boolean,
+  theme: ThemePalette = palettes.dark,
+  continued = false,
+): LaidLine[] {
+  return renderMarkdown(text, width - 2, key, theme).map((line, i) => {
+    const first = i === 0 && !continued;
+    const prefix = first ? `${ascii ? "o" : "●"} ` : "  ";
+    return {
+      ...line,
+      text: prefix + line.text,
+      segments: [
+        { text: prefix, ...(first ? { color: theme.accent } : {}) },
+        ...(line.segments ?? [{ text: line.text }]),
+      ],
+      copyIndent: 2,
+    };
+  });
+}
+
 /** A token is immutable once the lexer has found the following block (or a blank line). */
 export function splitMarkdownBlocks(
   text: string,

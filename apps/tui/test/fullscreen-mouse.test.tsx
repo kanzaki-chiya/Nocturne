@@ -139,11 +139,21 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
       mouse.emit({ type: "release", button: 0, x: 4, y });
     };
     clickMore();
-    await waitFor(() => (lastFrame() ?? "").includes("单击收起"));
+    // 省略行对应的工具标题原本在视口之上，展开后标题成为新的顶部。
+    await waitFor(() => (lastFrame() ?? "").split("\n")[0]?.includes("write") === true);
+    for (let i = 0; i < 15 && !(lastFrame() ?? "").includes("单击收起"); i++) {
+      const before = lastFrame();
+      mouse.emit({ type: "wheel", dir: "down", x: 1, y: 1 });
+      await waitFor(() => lastFrame() !== before);
+    }
     clickMore();
-    await waitFor(() => (lastFrame() ?? "").includes("还有 10 行")).catch(() => {
-      throw new Error(`收起后未见省略行：\n${lastFrame() ?? "<empty>"}`);
-    });
+    await waitFor(() => (lastFrame() ?? "").split("\n")[0]?.includes("write") === true);
+    for (let i = 0; i < 15 && !(lastFrame() ?? "").includes("还有 10 行"); i++) {
+      const before = lastFrame();
+      mouse.emit({ type: "wheel", dir: "down", x: 1, y: 1 });
+      await waitFor(() => lastFrame() !== before);
+    }
+    expect(lastFrame()).toContain("还有 10 行");
     unmount();
     await session.close();
   });
@@ -196,9 +206,8 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     expect(rowInFrame).toBeGreaterThan(-1);
     const y = rowInFrame + 1; // SGR 坐标 1 基
     mouse.emit({ type: "press", button: 0, x: 1, y });
-    mouse.emit({ type: "drag", button: 0, x: 8, y });
-    await pause(60); // 等 React 把选区提交进状态，release 才读得到
-    mouse.emit({ type: "release", button: 0, x: 8, y });
+    mouse.emit({ type: "drag", button: 0, x: 10, y });
+    mouse.emit({ type: "release", button: 0, x: 10, y });
     await waitFor(() => (lastFrame() ?? "").includes("已复制"));
     // 两行路都走了：OSC 52 与系统剪贴板
     expect(oob).toHaveBeenCalledWith(expect.stringMatching(/^\x1b\]52;c;[A-Za-z0-9+/=]+\x07$/));
@@ -269,14 +278,14 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     await waitFor(() => (lastFrame() ?? "").includes("Nocturne"));
     await session.submit({ text: "起点问题" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
-    expect(lastFrame()).not.toContain("起点问题");
+    expect(lastFrame()).not.toContain("› 起点问题");
     const y = (lastFrame() ?? "").split("\n").findIndex((l) => l.includes("末尾标记")) + 1;
     mouse.emit({ type: "press", button: 0, x: 1, y });
     // 终端报告的坐标最小为 1：拖出上沿时也只会报第一行
     mouse.emit({ type: "drag", button: 0, x: 1, y: 1 });
     // 自动滚动每步都重绘整段长对话；全量并发时 CPU 紧张，滚到顶可能超过 5s
-    await waitFor(() => (lastFrame() ?? "").includes("起点问题"), 15_000);
-    await pause(300); // 按住期间继续滚到顶，选区头跟到第一行
+    await waitFor(() => (lastFrame() ?? "").includes("› 起点问题"), 15_000);
+    await waitFor(() => (lastFrame() ?? "").split("\n")[0]?.includes("Nocturne") === true);
     mouse.emit({ type: "release", button: 0, x: 1, y: 1 });
     await waitFor(() => calls.length === 1);
     expect(calls[0]?.input).toContain("起点问题");

@@ -308,7 +308,7 @@ describe("全屏退出（默认模式）", () => {
     const output = io.stdoutChunks.join("");
     expect(output).not.toContain("\x1b[2J");
     const after = output.slice(output.indexOf("\x1b[?1049l"));
-    expect(after).toContain("∴ 思考了 0s（Ctrl+O 展开）");
+    expect(after).toContain("∴ 思考了 0s（单击或 Ctrl+O 展开）");
     expect(after).not.toContain("先想想");
     expect(after).not.toContain("（思考）");
     expect(after).toContain("正文");
@@ -451,4 +451,37 @@ describe("全屏退出（默认模式）", () => {
     await done;
     await session.close();
   });
+});
+
+it.each([
+  { inline: false, ascii: false },
+  { inline: false, ascii: true },
+  { inline: true, ascii: false },
+  { inline: true, ascii: true },
+])("主屏文本保留助手标记与换行缩进：%j", async ({ inline, ascii }) => {
+  vi.stubEnv("NOCTURNE_ASCII", ascii ? "1" : "0");
+  const { runtime, session } = await openSession([
+    [
+      { type: "text_delta", text: "导出首行\n导出续行" },
+      { type: "finish", reason: "stop" },
+    ],
+  ]);
+  const io = ttyPair();
+  const done = runTui({ session }, runtime, {
+    stdin: io.stdin,
+    stdout: io.stdout,
+    stderr: io.stderr,
+    inline,
+    patchConsole: false,
+  });
+  await waitFor(() => io.stdoutChunks.join("").includes("Nocturne"));
+  await session.submit({ text: "导出验证" });
+  await waitFor(() => io.stdoutChunks.join("").includes("导出续行"));
+  io.stdin.write("\x04");
+  await done;
+  const output = io.stdoutChunks.join("");
+  const exported = inline ? output : output.slice(output.lastIndexOf("\x1b[?1049l"));
+  expect(exported).toContain(`${ascii ? "o" : "●"} 导出首行`);
+  expect(exported).toContain("  导出续行");
+  await session.close();
 });

@@ -22,7 +22,7 @@ import {
   tailLines,
   truncateLine,
 } from "./format.js";
-import { renderMarkdown } from "./markdown.js";
+import { renderAssistant } from "./markdown.js";
 import { reasoningLabel, type ReasoningMap, type ReasoningPart } from "./reasoning.js";
 import { palettes, type ThemePalette } from "./theme.js";
 import { todoHeadline, todoItemRows, todoSnapshotWindow } from "./todo-format.js";
@@ -127,6 +127,13 @@ function diffLines(
   return out;
 }
 
+interface LayoutOptions {
+  fullscreen?: boolean;
+  reasoningExpanded?: ReadonlyMap<string, boolean> | undefined;
+  continued?: boolean;
+  written?: ReadonlyMap<string, number>;
+}
+
 export function layoutEntry(
   entry: TranscriptItem,
   width: number,
@@ -136,6 +143,7 @@ export function layoutEntry(
   expanded = false,
   diffExpanded = false,
   theme: ThemePalette = palettes.dark,
+  options: LayoutOptions = {},
 ): LaidLine[] {
   const dot = ascii ? "*" : "•";
   const prompt = ascii ? ">" : "›";
@@ -176,31 +184,57 @@ export function layoutEntry(
       if (entry.reasoning !== "") {
         const sections = parts.get(entry.messageId) ?? [{ text: entry.reasoning, active: false }];
         sections.forEach((part, i) => {
-          lines.push({
-            key: `${entry.key}:r:${i}`,
-            text: paint(reasoningLabel(part, now, ascii, expanded), width),
-            dim: true,
-          });
-          if (expanded) lines.push(...reasoningBody(`${entry.key}:r:${i}`, part.text, width));
+          const id = `reasoning:${entry.messageId}:${i}`;
+          const open = options.reasoningExpanded?.get(id) ?? expanded;
+          const anchor = `${entry.key}:r:${i}`;
+          lines.push(
+            ...(options.fullscreen
+              ? rows(anchor, reasoningLabel(part, now, ascii, open, true), width, {
+                  toggle: { id, anchor: `${anchor}:0` },
+                  dim: true,
+                })
+              : [
+                  {
+                    key: anchor,
+                    text: paint(reasoningLabel(part, now, ascii, open), width),
+                    dim: true,
+                  },
+                ]),
+          );
+          if (open) lines.push(...reasoningBody(`${entry.key}:r:${i}`, part.text, width));
         });
       }
       if (entry.text !== "")
-        lines.push(...renderMarkdown(entry.text, width, `${entry.key}:t`, theme));
+        lines.push(
+          ...renderAssistant(
+            entry.text,
+            width,
+            `${entry.key}:t`,
+            ascii,
+            theme,
+            options.continued ?? entry.bodyContinued,
+          ),
+        );
       if (entry.finishReason === "aborted") {
         lines.push({ key: `${entry.key}:x`, text: "（中断）", dim: true });
       }
       return lines.length > 0 ? lines : [{ key: entry.key, text: "" }];
     }
     case "tool": {
+      const available =
+        entry.result !== undefined &&
+        !entry.result.modelContent.includes("[结构化 output 超过大小上限，已省略]");
+      const toggle = available ? { id: `tool:${entry.key}`, anchor: `${entry.key}:0` } : undefined;
       const review = entry.review
         ? rows(`${entry.key}:review`, permissionReviewLine(entry.review), width, { dim: true })
         : [];
-      if (entry.name === "ask_user")
+      if (entry.name === "ask_user" && !diffExpanded)
         return [
           ...review,
           ...questionToolLines(entry).map((text, i) => ({
             key: `${entry.key}:${i}`,
             text: paint(text, width),
+            ...(i === 0 ? { toggle } : {}),
           })),
         ];
       const mark =
@@ -221,7 +255,7 @@ export function layoutEntry(
               status: entry.status,
               output: entry.result.output,
             });
-      if (todoItems !== undefined) {
+      if (todoItems !== undefined && !diffExpanded) {
         // 非 ASCII 时 📋 图标已标明这一行，不再重复成功符号
         const segments = [
           ...(ascii ? [{ text: `${mark} `, color: theme.success }] : []),
@@ -231,6 +265,7 @@ export function layoutEntry(
           ...review,
           {
             key: `${entry.key}:0`,
+            toggle,
             text: segments.map((seg) => seg.text).join(""),
             segments,
           },
@@ -257,7 +292,7 @@ export function layoutEntry(
       }
       const summary = summarizeToolInput(entry.name, entry.input);
       const head = `${mark} ${entry.name ?? "?"} ${summary} ${entry.status}`;
-      const lines = [...review, ...rows(entry.key, head, width)];
+      const lines = [...review, ...rows(entry.key, head, width, { toggle })];
       const attachmentRows = (entry.result?.attachments ?? []).flatMap((att, i) =>
         rows(`${entry.key}:image:${i}`, `  ${attachmentLine(att, i, ascii)}`, width, {
           color: theme.accent,
@@ -295,7 +330,9 @@ export function layoutEntry(
               ...diffLines(`${entry.key}:f${fi}`, f.diff, width, ascii, diffExpanded, theme),
             );
         });
-        return [...lines, ...attachmentRows];
+        return [...lines, ...attachmentRows].map((line) =>
+          line.key.endsWith(":diff:more") ? { ...line, toggle } : line,
+        );
       }
       if (single !== undefined) {
         // 摘要行（已修改/已创建 …）保留，其后接 diff
@@ -308,19 +345,27 @@ export function layoutEntry(
           });
         }
         lines.push(...diffLines(entry.key, single, width, ascii, diffExpanded, theme));
-        return [...lines, ...attachmentRows];
+        return [...lines, ...attachmentRows].map((line) =>
+          line.key.endsWith(":diff:more") ? { ...line, toggle } : line,
+        );
       }
-      const content = webFetchSummary(entry) ?? entry.result?.modelContent;
+      const content = diffExpanded
+        ? entry.result?.modelContent
+        : (webFetchSummary(entry) ?? entry.result?.modelContent);
       if (content !== undefined && content !== "") {
-        for (const [i, line] of tailLines(content, 4).entries()) {
-          lines.push({
-            key: `${entry.key}:out:${i}`,
-            text: paint(`  ${line}`, width),
-            dim: true,
-          });
-        }
+        if (diffExpanded) lines.push(...reasoningBody(`${entry.key}:out`, content, width));
+        else
+          for (const [i, line] of tailLines(content, 4).entries()) {
+            lines.push({
+              key: `${entry.key}:out:${i}`,
+              text: paint(`  ${line}`, width),
+              dim: true,
+            });
+          }
       }
-      return [...lines, ...attachmentRows];
+      return [...lines, ...attachmentRows].map((line) =>
+        line.key.endsWith(":diff:more") ? { ...line, toggle } : line,
+      );
     }
     case "notice":
       return rows(entry.key, `${dot} ${entry.message}`, width, { dim: true });
@@ -339,6 +384,7 @@ export function layoutLive(
   now = Date.now(),
   expanded = false,
   theme: ThemePalette = palettes.dark,
+  options: LayoutOptions = {},
 ): LaidLine[] {
   const lines: LaidLine[] = [];
   const cursor = ascii ? "_" : "|";
@@ -357,20 +403,39 @@ export function layoutLive(
       (a.reasoning !== "" ? [{ text: a.reasoning, active: a.text === "" }] : []);
     const text =
       a.text !== "" || sections.length === 0
-        ? renderMarkdown(a.text, width, `live-a:${a.messageId}`, theme)
+        ? renderAssistant(
+            a.text,
+            width,
+            `live-a:${a.messageId}`,
+            ascii,
+            theme,
+            (options.written?.get(a.messageId) ?? 0) > 0,
+          )
         : [];
     const thoughtActive = sections.at(-1)?.active === true;
     sections.forEach((part, section) => {
-      lines.push({
-        key: `live-r:${a.messageId}:${section}:head`,
-        text: paint(reasoningLabel(part, now, ascii, expanded), width),
-        dim: true,
-      });
-      if (!part.active && !expanded) return;
-      const visible = expanded ? wrap(part.text, width - 2) : wrap(part.text, width).slice(-4);
+      const id = `reasoning:${a.messageId}:${section}`;
+      const open = options.reasoningExpanded?.get(id) ?? expanded;
+      const anchor = `live-r:${a.messageId}:${section}:head`;
+      lines.push(
+        ...(options.fullscreen
+          ? rows(anchor, reasoningLabel(part, now, ascii, open, true), width, {
+              toggle: { id, anchor: `${anchor}:0` },
+              dim: true,
+            })
+          : [
+              {
+                key: anchor,
+                text: paint(reasoningLabel(part, now, ascii, open), width),
+                dim: true,
+              },
+            ]),
+      );
+      if (!part.active && !open) return;
+      const visible = open ? wrap(part.text, width - 2) : wrap(part.text, width).slice(-4);
       visible.forEach((line, i) => {
         const last = part.active && section === sections.length - 1 && i === visible.length - 1;
-        const body = `${expanded ? "  " : ""}${line.text}`;
+        const body = `${open ? "  " : ""}${line.text}`;
         lines.push({
           key: `live-r:${a.messageId}:${section}:${i}`,
           text: last
@@ -378,7 +443,7 @@ export function layoutLive(
             : paint(body, width),
           continued: line.continued,
           dim: true,
-          ...(expanded ? { copyIndent: 2 } : {}),
+          ...(open ? { copyIndent: 2 } : {}),
         });
       });
     });
@@ -386,7 +451,7 @@ export function layoutLive(
       const last = !thoughtActive && i === text.length - 1;
       lines.push({
         ...line,
-        text: paint(last ? `${line.text}${cursor}` : line.text, width),
+        text: last ? truncateLine(`${line.text}${cursor}`, budget(width), "") : line.text,
         segments: last ? [...(line.segments ?? []), { text: cursor, dim: true }] : line.segments,
       });
     });
@@ -426,10 +491,12 @@ interface TranscriptSource {
   live: SessionView;
   clientLines: readonly ClientLine[];
   ascii: boolean;
+  fullscreen?: boolean;
   reasoning?: ReasoningMap;
   now?: number;
   expanded?: boolean;
   diffExpanded?: ReadonlySet<string>;
+  reasoningExpanded?: ReadonlyMap<string, boolean> | undefined;
   theme?: ThemePalette;
 }
 
@@ -445,6 +512,8 @@ function block(key: string, revision: string, lines: (width: number) => LaidLine
  */
 export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
   const theme = src.theme ?? palettes.dark;
+  const options = { fullscreen: src.fullscreen ?? true, reasoningExpanded: src.reasoningExpanded };
+  const overrides = JSON.stringify([...(src.reasoningExpanded ?? [])]);
   const blocks: LineBlock[] = [block("welcome", String(src.welcome.length), () => src.welcome)];
   if (src.notices.length > 0) {
     blocks.push(
@@ -459,7 +528,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
     blocks.push(
       block(
         item.key,
-        `${item.kind === "separator" ? item.text : item.key}:${src.expanded}:${src.diffExpanded?.has(item.key)}`,
+        `${item.kind === "separator" ? item.text : item.key}:${src.expanded}:${src.diffExpanded?.has(item.key)}:${overrides}`,
         (width) =>
           layoutEntry(
             item,
@@ -470,6 +539,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
             src.expanded,
             src.diffExpanded?.has(item.key),
             theme,
+            options,
           ),
       ),
     );
@@ -501,7 +571,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
           : entry.key;
     return block(
       entry.key,
-      `${revision}:${src.expanded}:${src.diffExpanded?.has(entry.key)}`,
+      `${revision}:${src.expanded}:${src.diffExpanded?.has(entry.key)}:${overrides}`,
       (width) =>
         layoutEntry(
           entry,
@@ -512,12 +582,14 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
           src.expanded,
           src.diffExpanded?.has(entry.key),
           theme,
+          options,
         ),
     );
   }
   // 缓存标记要覆盖布局的全部输入：思考长度、进行中工具、重试
   const liveRev = [
     src.expanded,
+    overrides,
     src.live.live.assistants.map((a) => `${a.text.length}/${a.reasoning.length}`).join(","),
     src.live.live.tools.map((t) => t.callId).join(","),
     src.live.retry?.attempt ?? "",
@@ -539,7 +611,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
   ].join("|");
   blocks.push(
     block("live", liveRev, (width) =>
-      layoutLive(src.live, width, src.ascii, src.reasoning, src.now, src.expanded, theme),
+      layoutLive(src.live, width, src.ascii, src.reasoning, src.now, src.expanded, theme, options),
     ),
   );
   blocks.push(

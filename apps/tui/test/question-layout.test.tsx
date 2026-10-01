@@ -102,7 +102,7 @@ describe("弹窗位置", () => {
           expect(top).toBeGreaterThan(0);
           expect(lines.slice(0, top).join("\n")).toContain("最新一行");
         }
-        expect(lines[bottom + 1]).toMatch(/^─+$/);
+        expect(lines[bottom + 1]).toMatch(/^── 检查布局 ─+$/);
         expect(lines[bottom + 2]).toContain(name === "ask_user" ? "等待回答" : "等待权限确认");
         expect(lines[bottom - 1]?.trim()).not.toBe("│");
         if (!inline) expect(lines.length).toBeLessThanOrEqual(rows - 1);

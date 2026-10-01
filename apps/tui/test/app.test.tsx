@@ -477,14 +477,14 @@ describe("TUI", () => {
       unmount();
       return frame;
     };
-    expect(frameAt(120)).toContain("缓存 0% • 0.1% / 1M");
+    expect(frameAt(120)).toContain("缓存 0% • 上下文 0.1% / 1M");
     view.usage = { inputTokens: 40_000, outputTokens: 100, cacheReadTokens: 30_000 };
     const wide = frameAt(120);
     expect(wide).toContain("fairly");
-    expect(wide).toContain("缓存 75% • 0.1% / 1M");
+    expect(wide).toContain("缓存 75% • 上下文 0.1% / 1M");
     const mid = frameAt(80);
     expect(mid).not.toContain("fairly");
-    expect(mid).toContain("缓存 75% • 0.1% / 1M");
+    expect(mid).toContain("缓存 75% • 上下文 0.1% / 1M");
     const narrow = frameAt(42);
     expect(narrow).not.toContain("缓存");
     expect(narrow).toContain("0.1% / 1M");

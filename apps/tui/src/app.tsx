@@ -31,7 +31,7 @@ import {
 } from "@nocturne/core";
 import type { spawn } from "node:child_process";
 
-import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
+import { firstUserText, type SessionView, type ViewEntry } from "@nocturne/core/protocol";
 
 import {
   contextLines,
@@ -47,7 +47,7 @@ import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { copyText } from "./clipboard.js";
 import { composerWindow } from "./cursor.js";
 import { checkImage, createImageStore, droppedImage } from "./images.js";
-import { renderMarkdown, splitMarkdownBlocks, takeMarkdownBlocks } from "./markdown.js";
+import { renderAssistant, splitMarkdownBlocks, takeMarkdownBlocks } from "./markdown.js";
 import type { MouseSource } from "./mouse.js";
 import { createClickTracker } from "./click.js";
 import type { DialogMouseFrame } from "./components/dialog/mouse.js";
@@ -83,6 +83,7 @@ import {
   countLaidLines,
   layoutCached,
   reanchorFromBottom,
+  anchorFromBottom,
   selectVisible,
   type LaidLine,
   type LineBlock,
@@ -108,6 +109,8 @@ import { useAltScreen, waitCommit } from "./alt-screen.js";
 import { WizardView } from "./components/wizard-view.js";
 import { TuiEnvContext, glyphs, type TuiEnv } from "./env.js";
 import { useSessionView } from "./session-view.js";
+import { useGenerationSpeed } from "./speed.js";
+import stringWidth from "string-width";
 import { useReasoning } from "./reasoning.js";
 import { useTheme, type ThemeId } from "./theme.js";
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
@@ -145,7 +148,7 @@ export const splitTextBlocks = splitMarkdownBlocks;
 function assistantBlocks(
   entry: Extract<ViewEntry, { kind: "assistant" }>,
   written: Map<string, number>,
-): ViewEntry[] {
+): TranscriptItem[] {
   const from = Math.min(written.get(entry.messageId) ?? 0, entry.text.length);
   const { blocks } = splitMarkdownBlocks(entry.text.slice(from), true);
   written.set(entry.messageId, entry.text.length);
@@ -154,10 +157,12 @@ function assistantBlocks(
   let at = from;
   return blocks.map((text, i) => {
     const key = `${entry.key}:@${at}`;
+    const bodyContinued = at > 0;
     at += text.length;
     return {
       ...entry,
       key,
+      bodyContinued,
       text,
       reasoning: i === 0 ? entry.reasoning : "",
       finishReason: i === blocks.length - 1 ? entry.finishReason : "stop",
@@ -716,6 +721,9 @@ function SessionApp({
   const [session, setSession] = useState(initialSession);
   const view = useSessionView(session);
   const { parts: reasoning, now: reasoningNow } = useReasoning(session);
+  const speed = useGenerationSpeed(session);
+  const firstUser = view.entries.find((entry) => entry.kind === "user");
+  const title = firstUser?.kind === "user" ? firstUserText(firstUser) : undefined;
   useEffect(() => {
     onSessionId?.(session.id);
   }, [session, onSessionId]);
@@ -755,6 +763,12 @@ function SessionApp({
   /** 全屏模式：对话视口滚动状态（fromBottom=0 跟随最新） */
   const [scroll, setScroll] = useState<ScrollState>(scrollFollow);
   const [expanded, setExpanded] = useState(false);
+  const [reasoningExpanded, setReasoningExpanded] = useState<ReadonlyMap<string, boolean>>(
+    new Map(),
+  );
+  const reasoningExpandedRef = useRef(reasoningExpanded);
+  reasoningExpandedRef.current = reasoningExpanded;
+  const transcriptClicks = useRef(createClickTracker());
   const [diffExpanded, setDiffExpanded] = useState<ReadonlySet<string>>(new Set());
   const [recordOpen, setRecordOpen] = useState(false);
   const [recordScroll, setRecordScroll] = useState<ScrollState>(scrollFollow);
@@ -1050,6 +1064,7 @@ function SessionApp({
     const off = mouse.subscribe((ev) => {
       const dialog = dialogMouse.current;
       if (dialog) {
+        transcriptClicks.current.reset();
         if (ev.type === "wheel") dialog.wheel(ev);
         else {
           const id = dialogClicks.current.feed(ev, dialog.boxes);
@@ -1058,11 +1073,21 @@ function SessionApp({
         return;
       }
       const g = geomRef.current;
-      if (g.blocked) return;
+      if (g.blocked) {
+        transcriptClicks.current.reset();
+        return;
+      }
       if (ev.type === "wheel") {
+        transcriptClicks.current.reset();
         moveScroll((s) => scrollPage(s, ev.dir === "up" ? 3 : -3));
         return;
       }
+      const boxes = g.visible.lines.flatMap((line, i) =>
+        line.toggle
+          ? [{ id: line.toggle.id, row: i + 1, colStart: 1, colEnd: stringWidth(line.text) }]
+          : [],
+      );
+      const clicked = transcriptClicks.current.feed(ev, boxes);
       const base = absStartOf(g.visible);
       const row = ev.y - 1;
       const lineAt = (r: number): LaidLine | undefined =>
@@ -1102,7 +1127,9 @@ function SessionApp({
         const line = lineAt(row);
         if (line === undefined) return;
         const head = { abs: base + row, col: colFromDisplay(line.text, ev.x - 1) };
-        setSel((prev) => (prev === undefined ? prev : { ...prev, head }));
+        const next = selRef.current === undefined ? undefined : { ...selRef.current, head };
+        selRef.current = next;
+        setSel(next);
         return;
       }
       if (ev.type === "release") {
@@ -1111,32 +1138,48 @@ function SessionApp({
         stopEdgeScroll();
         const s = selRef.current;
         if (s === undefined) return;
-        // 单击省略行切换当前工具 diff；拖动仍按原选区复制。
-        if (selIsEmpty(s)) {
+        if (clicked !== undefined) {
           setSel(undefined);
-          const key = lineAt(row)?.key;
-          if (key?.endsWith(":diff:more") === true) {
-            const owner = key.slice(0, -":diff:more".length);
+          const toggle = g.visible.lines.find((line) => line.toggle?.id === clicked)?.toggle;
+          const source = sourceRef.current;
+          if (toggle === undefined || source === undefined) return;
+          let nextSource = source;
+          if (clicked.startsWith("reasoning:")) {
+            const next = new Map(reasoningExpandedRef.current);
+            next.set(clicked, !(next.get(clicked) ?? source.expanded));
+            reasoningExpandedRef.current = next;
+            setReasoningExpanded(next);
+            nextSource = { ...source, reasoningExpanded: next };
+          } else {
+            const owner = clicked.slice("tool:".length);
             const next = new Set(diffExpandedRef.current);
             if (next.has(owner)) next.delete(owner);
             else next.add(owner);
             diffExpandedRef.current = next;
-            const source = sourceRef.current;
-            if (source !== undefined && !g.visible.atBottom) {
-              const after = transcriptBlocks({ ...source, diffExpanded: next });
-              const fromBottom = reanchorFromBottom(
-                blocksRef.current.blocks,
-                after,
-                width,
-                g.transcriptRows,
-                g.visible.lines[0],
-                lineCache.current,
-              );
-              setScroll((current) => ({ ...current, fromBottom, follow: fromBottom === 0 }));
-            }
-            laidTotal.current = undefined;
             setDiffExpanded(next);
+            nextSource = { ...source, diffExpanded: next };
           }
+          const after = transcriptBlocks(nextSource);
+          const bottom = selectVisible(after, width, g.transcriptRows, 0, lineCache.current);
+          if (!g.visible.atBottom || !bottom.lines.some((line) => line.key === toggle.anchor)) {
+            const screenRow = g.visible.lines.findIndex((line) => line.key === toggle.anchor);
+            // 离开跟随态会新增翻阅提示，视口相应少一行。
+            const viewport = g.transcriptRows - (g.visible.atBottom ? 1 : 0);
+            const fromBottom = anchorFromBottom(
+              after,
+              width,
+              viewport,
+              toggle.anchor,
+              screenRow,
+              lineCache.current,
+            );
+            setScroll((current) => ({ ...current, fromBottom, follow: fromBottom === 0 }));
+          }
+          laidTotal.current = undefined;
+          return;
+        }
+        if (selIsEmpty(s)) {
+          setSel(undefined);
           return;
         }
         copySelection(false);
@@ -1193,6 +1236,7 @@ function SessionApp({
   useEffect(() => {
     if (!fullscreen && !recordOpen) return;
     lineCache.current.clear();
+    transcriptClicks.current.reset();
     laidTotal.current = undefined;
     setSel(undefined);
   }, [fullscreen, width, recordOpen]);
@@ -1564,8 +1608,15 @@ function SessionApp({
     }
     setSel(undefined);
     if (fullscreen) {
+      const cleared = new Map<string, boolean>();
+      reasoningExpandedRef.current = cleared;
+      setReasoningExpanded(cleared);
       if (!scroll.follow) {
-        const next = transcriptBlocks({ ...source, expanded: !expanded });
+        const next = transcriptBlocks({
+          ...source,
+          expanded: !expanded,
+          reasoningExpanded: cleared,
+        });
         const fromBottom = reanchorFromBottom(
           blocksRef.current.blocks,
           next,
@@ -2320,6 +2371,8 @@ function SessionApp({
     now: reasoningNow,
     expanded: fullscreen ? expanded : true,
     diffExpanded,
+    reasoningExpanded,
+    fullscreen,
     theme,
   };
   sourceRef.current = transcriptSource;
@@ -2391,7 +2444,7 @@ function SessionApp({
         staticEntries.push({
           kind: "header",
           key,
-          lines: renderMarkdown(part.text, width, key, theme),
+          lines: renderAssistant(part.text, width, key, env.ascii, theme, part.offset > 0),
         });
       }
       staticWritten.current.set(assistant.messageId, step.written);
@@ -2430,7 +2483,9 @@ function SessionApp({
         ],
         clientRows,
       ).flat(),
-      ...layoutLive(activityView, width, env.ascii, reasoning, reasoningNow, false, theme),
+      ...layoutLive(activityView, width, env.ascii, reasoning, reasoningNow, false, theme, {
+        written: staticWritten.current,
+      }),
       ...pendingLines.filter((line) => line.after >= view.entries.length).flatMap(clientRows),
     );
   }
@@ -2626,11 +2681,9 @@ function SessionApp({
     ) : null;
 
   // 鼠标处理器读最新一帧的视口几何；页面/弹层占用对话区时整块屏蔽
-  geomRef.current = {
-    visible,
-    transcriptRows,
-    blocked: pageOpen || overlayBody !== null,
-  };
+  useLayoutEffect(() => {
+    geomRef.current = { visible, transcriptRows, blocked: pageOpen || overlayBody !== null };
+  });
 
   /** LaidLine → Text；selected 给本行的选区字符范围时用主题底色拆分 */
   const renderLine = (
@@ -2733,6 +2786,7 @@ function SessionApp({
         width={width}
         height={budget.input}
         showRule={budget.inputRule > 0}
+        title={title}
         suspendNav={completionOpen}
         swallowRef={swallowRef}
       />
@@ -2757,6 +2811,7 @@ function SessionApp({
           effort={effort}
           context={{ used: contextReport.estimatedTokens, limit: contextWindow }}
           models={runtime.listModels()}
+          speed={speed}
           highlight={highlight}
           note={note ?? (expanded && fullscreen ? "思考已展开（Ctrl+O 收起）" : undefined)}
         />

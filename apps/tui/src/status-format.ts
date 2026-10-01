@@ -33,6 +33,21 @@ export function formatContextOccupancy(used: number, limit: number | undefined):
   return `${pctText} / ${formatContextUnit(limit)}`;
 }
 
+export function contextBar(
+  used: number,
+  limit: number | undefined,
+  ascii: boolean,
+): { filled: string; empty: string; warning: boolean } | undefined {
+  if (limit === undefined || !(limit > 0)) return undefined;
+  const ratio = Math.max(0, used / limit);
+  const cells = Math.min(8, Math.max(ratio > 0 ? 1 : 0, Math.round(ratio * 8)));
+  return {
+    filled: (ascii ? "[" : "") + (ascii ? "#" : "█").repeat(cells),
+    empty: (ascii ? "-" : "░").repeat(8 - cells) + (ascii ? "]" : ""),
+    warning: ratio >= 0.8,
+  };
+}
+
 /**
  * 状态栏与欢迎区的模型标签：模型 ID 放得进预算就用 ID；否则用 displayName；
  * 再否则截断 ID（省略号用 `...`，避免 conhost 歧义宽度）。

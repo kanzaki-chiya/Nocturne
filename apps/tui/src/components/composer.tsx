@@ -4,6 +4,7 @@
  * Enter 提交；Ctrl 组合键交给全局路由。
  */
 import { Box, Text, useInput, usePaste } from "ink";
+import stringWidth from "string-width";
 import { useLayoutEffect, useRef, useState } from "react";
 
 import { composerWindow, normalizeNewlines, verticalCursor } from "../cursor.js";
@@ -12,6 +13,7 @@ import { imageTokenAt, imageTokenBefore } from "../images.js";
 import { splitInputTokens } from "../file-refs.js";
 import { pasteTokenAt, pasteTokenBefore, type PasteStore } from "../paste.js";
 import { useTheme } from "../theme.js";
+import { boxSafe, truncateLine } from "../format.js";
 
 export function Composer({
   value,
@@ -22,6 +24,7 @@ export function Composer({
   disabledReason,
   width,
   showRule = true,
+  title,
   suspendNav = false,
   swallowRef,
   onCursor,
@@ -46,6 +49,7 @@ export function Composer({
   height?: number | undefined;
   /** 帧预算允许时在输入行上方画分隔线 */
   showRule?: boolean | undefined;
+  title?: string | undefined;
   /** 补全列表打开时，上下/Tab/Enter/Esc 交给列表，不在这里处理 */
   suspendNav?: boolean | undefined;
   /** conhost 拆开的 Esc+字母：为真时吞掉下一个字母 */
@@ -231,7 +235,10 @@ export function Composer({
             part.text
           ),
         );
-  const rule = env.ascii ? "-".repeat(Math.max(1, width)) : "─".repeat(Math.max(1, width));
+  const dash = env.ascii ? "-" : "─";
+  const label = title ? truncateLine(boxSafe(title), Math.max(0, width - 8), "…") : "";
+  const prefix = label ? `${dash}${dash} ${label} ` : "";
+  const rule = prefix + dash.repeat(Math.max(0, width - stringWidth(prefix)));
   return (
     <Box flexDirection="column">
       {showRule ? (

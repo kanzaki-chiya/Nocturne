@@ -278,7 +278,7 @@ describe("长文本粘贴与流式思考", () => {
       1000,
     ).map((l) => l.text);
     expect(texts).toContain("想了很久的第二段|");
-    expect(texts).toContain("The");
+    expect(texts).toContain("● The");
   });
 });
 

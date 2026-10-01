@@ -106,11 +106,12 @@ export function reasoningLabel(
   now: number,
   ascii: boolean,
   expanded = false,
+  fullscreen = false,
 ): string {
   const mark = ascii ? "*" : "∴";
   const seconds =
     part.started === undefined
       ? ""
       : ` ${Math.floor(Math.max(0, (part.ended ?? now) - part.started) / 1000)}s`;
-  return `${mark} ${part.active ? "思考中" : part.started === undefined ? "思考" : "思考了"}${seconds}${expanded ? "" : "（Ctrl+O 展开）"}`;
+  return `${mark} ${part.active ? "思考中" : part.started === undefined ? "思考" : "思考了"}${seconds}${expanded ? "" : fullscreen ? "（单击或 Ctrl+O 展开）" : "（Ctrl+O 展开）"}`;
 }

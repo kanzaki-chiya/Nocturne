@@ -31,6 +31,8 @@ export interface LaidLine {
   continued?: boolean | undefined;
   /** 仅显示用的左缩进；复制时去掉。 */
   copyIndent?: number | undefined;
+  /** 折叠入口；命中范围由最终可见行计算，anchor 始终指向标题首行。 */
+  toggle?: { id: string; anchor: string } | undefined;
 }
 
 export interface LineBlock {
@@ -108,6 +110,26 @@ export function reanchorFromBottom(
     total += length;
   }
   return Math.max(0, total - start - viewport);
+}
+
+/** 保持被点的标题在原屏幕行；标题在视口上方时放到顶部。 */
+export function anchorFromBottom(
+  blocks: readonly LineBlock[],
+  width: number,
+  viewport: number,
+  key: string,
+  screenRow: number,
+  cache: Map<string, LaidLine[]>,
+): number {
+  let total = 0;
+  let anchor = 0;
+  for (const block of blocks) {
+    const lines = layoutCached(block, width, cache);
+    const index = lines.findIndex((line) => line.key === key);
+    if (index >= 0) anchor = total + index;
+    total += lines.length;
+  }
+  return Math.max(0, total - viewport - Math.max(0, anchor - Math.max(0, screenRow)));
 }
 
 /**
