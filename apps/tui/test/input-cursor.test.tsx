@@ -1,8 +1,9 @@
 import { Box, Text } from "ink";
 import { render } from "ink-testing-library";
 import { createElement, useEffect, useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { CompactionThresholdDialog } from "../src/components/compaction-threshold-dialog.js";
 import { CursorClaimsContext, InputCursor } from "../src/components/input-cursor.js";
 import { createCursorStream, type CursorClaims, type CursorPoint } from "../src/cursor.js";
 
@@ -181,5 +182,31 @@ describe("createCursorStream", () => {
     const { stream } = createCursorStream(raw);
     expect(stream.columns).toBe(80);
     expect(stream.isTTY).toBe(true);
+  });
+});
+
+describe("压缩阈值对话框的真实光标", () => {
+  it.each([100, 101])("宽 %i 时光标落在输入值末尾之后一列", async (width) => {
+    const claims = recorder();
+    const screen = render(
+      createElement(
+        CursorClaimsContext.Provider,
+        { value: claims },
+        createElement(CompactionThresholdDialog, {
+          initial: "90%",
+          width,
+          height: 24,
+          onApply: () => undefined,
+          onCancel: () => undefined,
+        }),
+      ),
+    );
+    await vi.waitFor(() => expect(screen.lastFrame()).toContain("压缩阈值"));
+    await pause(100);
+    screen.stdin.write("\t");
+    await vi.waitFor(() => expect(claims.current()).toBeDefined());
+    const line = (screen.lastFrame() ?? "").split("\n").find((l) => l.includes("[ 90"));
+    expect(claims.current()?.x).toBe((line ?? "").indexOf("[ 90") + 4);
+    screen.unmount();
   });
 });

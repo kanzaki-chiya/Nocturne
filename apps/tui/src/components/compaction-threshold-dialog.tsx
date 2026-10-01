@@ -40,6 +40,9 @@ export function CompactionThresholdDialog({
   const framed = width >= 24 && height >= 10;
   const inner = Math.max(1, dialogWidth - (framed ? 4 : 0));
   const dialogHeight = Math.min(10, height);
+  // 显式偏移而非 flex 居中：真实光标按同一坐标定位，奇数差值时 Yoga 居中与 floor 取整会差一列
+  const left = Math.max(0, Math.floor((width - dialogWidth) / 2));
+  const top = Math.max(0, Math.floor((height - dialogHeight) / 2));
   const close = () => {
     if (unit !== parsed.unit || value !== initialValue) setConfirm(true);
     else onCancel();
@@ -179,7 +182,7 @@ export function CompactionThresholdDialog({
     };
   });
   return (
-    <Box width={width} height={height} alignItems="center" justifyContent="center">
+    <Box width={width} height={height} flexDirection="column" paddingLeft={left} paddingTop={top}>
       <DialogFrame title="压缩阈值" width={dialogWidth} height={dialogHeight} framed={framed}>
         {height < 6 || width < 12 ? (
           <Text>终端太小，请放大 · Esc 返回</Text>
@@ -217,13 +220,8 @@ export function CompactionThresholdDialog({
                   prefix=""
                   text=""
                   width={inner}
-                  x={
-                    Math.floor((width - dialogWidth) / 2) +
-                    (framed ? 2 : 0) +
-                    2 +
-                    inputWindow(value, cursor, inner).column
-                  }
-                  y={Math.floor((height - dialogHeight) / 2) + (framed ? 1 : 0) + 3 - height}
+                  x={left + (framed ? 2 : 0) + 2 + inputWindow(value, cursor, inner).column}
+                  y={top + (framed ? 1 : 0) + 3 - height}
                 />
               </Box>
             </Box>
