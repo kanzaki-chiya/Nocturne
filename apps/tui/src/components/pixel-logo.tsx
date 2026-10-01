@@ -5,23 +5,37 @@
 import { Box, Text } from "ink";
 
 import { useTuiEnv } from "../env.js";
-import { LOGO_ROWS, LOGO_SPLIT, useTheme } from "../theme.js";
+import { LOGO_ROWS, LOGO_SPLIT, useTheme, type ThemePalette } from "../theme.js";
+import type { LaidLine } from "../viewport.js";
+
+export function pixelLogoLines(ascii: boolean, theme: ThemePalette): LaidLine[] {
+  return LOGO_ROWS.map((row, i) => {
+    const text = ascii ? row.replaceAll("█", "#") : row;
+    return {
+      key: `logo:${i}`,
+      text,
+      segments: [
+        { text: text.slice(0, LOGO_SPLIT), color: theme.accent },
+        { text: text.slice(LOGO_SPLIT), color: theme.accentAlt },
+      ],
+    };
+  });
+}
 
 export function PixelLogo(): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
-  const block = env.ascii ? "#" : "█";
   return (
     <Box flexDirection="column">
-      {LOGO_ROWS.map((row, i) => {
-        const line = env.ascii ? row.replaceAll("█", block) : row;
-        return (
-          <Text key={i} wrap="truncate">
-            <Text color={theme.accent}>{line.slice(0, LOGO_SPLIT)}</Text>
-            <Text color={theme.accentAlt}>{line.slice(LOGO_SPLIT)}</Text>
-          </Text>
-        );
-      })}
+      {pixelLogoLines(env.ascii, theme).map((line) => (
+        <Text key={line.key} wrap="truncate">
+          {line.segments?.map((segment, i) => (
+            <Text key={i} {...(segment.color !== undefined ? { color: segment.color } : {})}>
+              {segment.text}
+            </Text>
+          ))}
+        </Text>
+      ))}
     </Box>
   );
 }

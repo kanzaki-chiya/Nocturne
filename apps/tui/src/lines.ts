@@ -514,7 +514,9 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
   const theme = src.theme ?? palettes.dark;
   const options = { fullscreen: src.fullscreen ?? true, reasoningExpanded: src.reasoningExpanded };
   const overrides = JSON.stringify([...(src.reasoningExpanded ?? [])]);
-  const blocks: LineBlock[] = [block("welcome", String(src.welcome.length), () => src.welcome)];
+  const blocks: LineBlock[] = [
+    block("welcome", src.welcome.map((line) => line.text).join("\n"), () => src.welcome),
+  ];
   if (src.notices.length > 0) {
     blocks.push(
       block("notices", src.notices.join("\n"), (width) =>

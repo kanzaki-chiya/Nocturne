@@ -89,7 +89,7 @@ import {
   type LineBlock,
   type VisibleWindow,
 } from "./viewport.js";
-import { welcomeLines } from "./welcome.js";
+import { emptyWelcomeLines, welcomeLines } from "./welcome.js";
 import { APP_VERSION } from "./version.js";
 import { Composer } from "./components/composer.js";
 import { ConfirmBox } from "./components/confirm-box.js";
@@ -2348,7 +2348,7 @@ function SessionApp({
   };
 
   const modelText = view.config.model !== undefined ? view.config.model.model : "?";
-  const welcome = welcomeLines({
+  const welcomeInfo = {
     version: APP_VERSION,
     model: modelText,
     effort: effort !== undefined ? effort.current : undefined,
@@ -2356,7 +2356,8 @@ function SessionApp({
     ascii: env.ascii,
     width,
     theme,
-  });
+  };
+  const welcome = welcomeLines(welcomeInfo);
   // —— 全屏视口（ADR-0021 第 1 条）：欢迎区在块表最前随对话滚走；
   // 冻结前缀是 /resume 切换时旧会话的完结条目；live 块每次渲染重排。
   const transcriptSource: Parameters<typeof transcriptBlocks>[0] = {
@@ -2377,8 +2378,40 @@ function SessionApp({
     theme,
   };
   sourceRef.current = transcriptSource;
-  const blocks: LineBlock[] = fullscreen || recordOpen ? transcriptBlocks(transcriptSource) : [];
-  exportBlocksRef.current = { blocks, width };
+  const exportBlocks: LineBlock[] =
+    fullscreen || recordOpen ? transcriptBlocks(transcriptSource) : [];
+  const emptyWelcome =
+    fullscreen &&
+    !recordOpen &&
+    firstUser === undefined &&
+    frozen.length === 0 &&
+    clientLines.length === 0 &&
+    view.entries.every(hideNotice) &&
+    view.live.assistants.length === 0 &&
+    view.live.tools.length === 0 &&
+    !busy &&
+    !submitPending;
+  const blocks = emptyWelcome
+    ? exportBlocks.map((block) =>
+        block.key === "welcome"
+          ? {
+              ...block,
+              revision: `empty:${theme.id}:${conversationHeight}:${modelText}:${effort?.current}:${env.ascii}:${welcomeInfo.cwd}:${bootNotes.join("\n")}`,
+              layout: () =>
+                emptyWelcomeLines(
+                  welcomeInfo,
+                  conversationHeight,
+                  countLaidLines(
+                    exportBlocks.filter((entry) => entry.key !== "welcome"),
+                    width,
+                    lineCache.current,
+                  ),
+                ),
+            }
+          : block,
+      )
+    : exportBlocks;
+  exportBlocksRef.current = { blocks: exportBlocks, width };
   blocksRef.current = { blocks, width };
   const showBanner = fullscreen && !scroll.follow && !promptOverlay;
   const transcriptRows = recordOpen
