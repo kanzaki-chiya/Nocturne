@@ -20,6 +20,7 @@ import { withReasoningEfforts } from "../reasoning.js";
 import type {
   CredentialResolver,
   ModelInfo,
+  ModelMessage,
   ModelRequest,
   ModelStreamEvent,
   Provider,
@@ -170,16 +171,39 @@ export function createOpenAIResponsesProvider(
       // ADR-0031 §3：会话标识头——请求带 sessionId 且条目声明
       // sessionHeader 才写；静态 headers 同名头优先
       const sessionHeaders = sessionRequestHeaders(config, request.sessionId);
+      let droppedReasoning = 0;
+      const messages = request.messages.flatMap<ModelMessage>((message) => {
+        if (message.role !== "assistant") return [message];
+        const content = message.content.filter((block) => {
+          if (block.type !== "reasoning") return true;
+          const data = block.providerData as { openai?: { itemId?: unknown } } | undefined;
+          if (typeof data?.openai?.itemId === "string" && data.openai.itemId.length > 0) {
+            return true;
+          }
+          droppedReasoning++;
+          return false;
+        });
+        return content.length > 0 || message.toolCalls.length > 0 ? [{ ...message, content }] : [];
+      });
+      if (droppedReasoning > 0) {
+        config.diagnostics?.record("provider.reasoning_dropped", {
+          count: droppedReasoning,
+          reason: "missing_openai_item_id",
+        });
+      }
 
       const result = streamText({
         model: sdk.responses(request.model),
         system: request.system.map((b) => b.text).join("\n\n"),
-        messages: toAiMessages(request, {
-          // providerData 就是 providerMetadata 原值（{ openai: {...} }），直接回传
-          reasoningProviderOptions: (pd) => pd as Record<string, Record<string, JSONValue>>,
-          // Responses 的 function_call_output 支持原生 input_image 部件
-          toolResultImages: "native",
-        }),
+        messages: toAiMessages(
+          { ...request, messages },
+          {
+            // providerData 就是 providerMetadata 原值（{ openai: {...} }），直接回传
+            reasoningProviderOptions: (pd) => pd as Record<string, Record<string, JSONValue>>,
+            // Responses 的 function_call_output 支持原生 input_image 部件
+            toolResultImages: "native",
+          },
+        ),
         tools: toAiTools(request),
         // ADR-0016：最大输出长度未知时请求不带 max_output_tokens，由上游按自己的上限处理
         ...(request.maxOutputTokens !== undefined

@@ -43,6 +43,7 @@
 | `provider.result` | agent | finishReason、usage（token 明细）、耗时、text/toolCalls 概要 |
 | `provider.error` | agent | ProviderError kind、message、retryable、attempt |
 | `provider.sdk_warning` | provider | AI SDK 的调用警告（provider、model、warnings 原文）；适配器装配时设置 `AI_SDK_LOG_WARNINGS`，SDK 不再经 `process.emitWarning` 打到 stderr；用户已自行设置该全局时不覆盖 |
+| `provider.reasoning_dropped` | provider | Responses 丢弃缺少 OpenAI 条目标识的推理块：仅 count 与 reason，不记录正文 |
 | `context.build` | context | 各段落名与字符/token 数、estimatedTokens、预算、是否裁剪/压缩（进 `context.section` 明细） |
 | `context.attachment_missing` | agent | 历史引用了但 `AttachmentStore` 读不回字节的图片附件：turnId、file、sha256（ADR-0023） |
 | `tool.permission` | tools/gate | callId、工具名、subjects、action、source、命中规则描述、耗时 |

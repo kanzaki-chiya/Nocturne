@@ -354,6 +354,105 @@ describe("openai-responses 适配器", () => {
     expect(reasoningItem?.["summary"]).toEqual([{ type: "summary_text", text: "先想想" }]);
   });
 
+  it("混合历史只回传有 OpenAI 标识的推理，丢弃诊断不含正文且没有 SDK 警告", async () => {
+    const capture: Captured = {};
+    const records: { kind: string; data: unknown }[] = [];
+    const p = createOpenAIResponsesProvider(
+      config({ diagnostics: { record: (kind, data) => records.push({ kind, data }) } }),
+      envWithKey,
+      sseFetch([...messageChunks(["ok", ""]), completed()], capture),
+    );
+    const mixed = request({
+      messages: [
+        {
+          role: "assistant",
+          toolCalls: [],
+          content: [
+            { type: "reasoning", text: "foreign secret" },
+            {
+              type: "reasoning",
+              text: "missing id secret",
+              providerData: { openai: { reasoningEncryptedContent: "x" } },
+            },
+            {
+              type: "reasoning",
+              text: "valid",
+              providerData: { openai: { itemId: "r_1", reasoningEncryptedContent: "enc_abc" } },
+            },
+            { type: "text", text: "answer" },
+          ],
+        },
+        {
+          role: "assistant",
+          toolCalls: [],
+          content: [{ type: "reasoning", text: "only foreign" }],
+        },
+        { role: "user", content: [{ type: "text", text: "next" }] },
+      ],
+    });
+    const original = JSON.stringify(mixed);
+    await collect(p, mixed);
+    const input = capture.body?.["input"] as Record<string, unknown>[];
+    expect(input.filter((item) => item["type"] === "reasoning")).toEqual([
+      {
+        type: "reasoning",
+        id: "r_1",
+        encrypted_content: "enc_abc",
+        summary: [{ type: "summary_text", text: "valid" }],
+      },
+    ]);
+    expect(records).toEqual([
+      { kind: "provider.reasoning_dropped", data: { count: 3, reason: "missing_openai_item_id" } },
+    ]);
+    expect(JSON.stringify(mixed)).toBe(original);
+  });
+
+  it("同服务商连续两轮：流中保存的推理标识与加密内容原样回放", async () => {
+    const capture: Captured = {};
+    const p = createOpenAIResponsesProvider(
+      config(),
+      envWithKey,
+      sseFetch(
+        [...reasoningChunks("enc_round1"), ...messageChunks(["答", "案"]), completed()],
+        capture,
+      ),
+    );
+    const first = await collect(p, request());
+    const reasoning = first.filter((event) => event.type === "reasoning_delta");
+    const providerData = reasoning
+      .filter((event) => event.providerData !== undefined)
+      .at(-1)?.providerData;
+    await collect(
+      p,
+      request({
+        messages: [
+          ...request().messages,
+          {
+            role: "assistant",
+            toolCalls: [],
+            content: [
+              {
+                type: "reasoning",
+                text: reasoning.map((event) => event.text).join(""),
+                provider: "zen",
+                providerData,
+              },
+              { type: "text", text: "答案" },
+            ],
+          },
+          { role: "user", content: [{ type: "text", text: "继续" }] },
+        ],
+      }),
+    );
+    const input = capture.body?.["input"] as Record<string, unknown>[];
+    expect(input.find((item) => item["type"] === "reasoning")).toEqual({
+      type: "reasoning",
+      id: "r_1",
+      encrypted_content: "enc_round1",
+      summary: [{ type: "summary_text", text: "先想想" }],
+    });
+  });
+
   it("工具调用：tool-input delta 累积 → tool_call 完整入参；finish reason tool_calls", async () => {
     const p = createOpenAIResponsesProvider(
       config(),

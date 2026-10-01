@@ -100,6 +100,8 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 **请求头（[ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md) §2/§3）**：三种协议的模型请求与 `fetchModels` 都携带 `User-Agent: nocturne/<version>`（版本为 Core 的 `NOCTURNE_VERSION`，SDK 追加的后缀保留）；条目 `headers` 中同名的 `User-Agent`（大小写不敏感）优先。条目可选字段 `sessionHeader` 声明一个会话标识请求头名（如 `x-opencode-session`）：适配器仅在「`ModelRequest.sessionId` 非空且条目声明了 `sessionHeader`」时写该头，值为 `sessionId`；条目 `headers` 已有同名头时以静态值为准。`sessionId` 由 Runtime 填入根会话 ID（provider-api.md 第 3 节），适配器不生成、不缓存、不修改它；`fetchModels` 属于服务商级请求，永远不写会话头。
 
+Responses 组装请求时只回传带非空 `providerData.openai.itemId` 的推理块，保留原标识、摘要与 `reasoningEncryptedContent`；其他推理块在适配器内丢弃，不交给 SDK。丢弃时每次请求记录一条 `provider.reasoning_dropped` 诊断，仅含数量和缺少标识的原因，不记录正文、不发 `runtime.warning`。
+
 ## 5. 不属于 Provider 的事
 
 - **重试**：Provider 只报告错误是否可重试；是否重试、重试几次、何时停止，由 Agent Loop 决定（它知道是否已经输出过内容），见 [agent-loop.md](agent-loop.md)。
