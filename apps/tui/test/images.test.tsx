@@ -58,6 +58,7 @@ async function session(imageInput = true) {
               reasoning: "none",
               imageInput,
               promptCache: false,
+              editTool: "edit",
             },
           },
           {
@@ -68,6 +69,7 @@ async function session(imageInput = true) {
               reasoning: "none",
               imageInput: false,
               promptCache: false,
+              editTool: "edit",
             },
           },
         ],

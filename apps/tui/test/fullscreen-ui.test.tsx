@@ -68,6 +68,7 @@ async function sessionWithEffort(): Promise<{ runtime: Runtime; session: Runtime
               reasoning: "visible",
               imageInput: false,
               promptCache: false,
+              editTool: "edit",
               reasoningEffort: ["low", "high"],
             },
           },

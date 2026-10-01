@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { render } from "ink-testing-library";
+import stringWidth from "string-width";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -89,6 +90,7 @@ const fullView = (
     protocol: field<"openai-compatible" | "anthropic" | undefined>("openai-compatible", {
       kind: "entryType",
     }),
+    editTool: field<"edit" | "apply_patch">("edit", { kind: "default" }),
     ...over,
   } as ModelSettingsView["fields"],
   ...top,
@@ -104,6 +106,7 @@ const blankDraft = {
   reasoning: "follow",
   reasoningEffort: "follow",
   protocol: "follow",
+  editTool: "follow",
 } as const;
 
 const entry = (over?: Partial<ProviderOverview>): ProviderOverview => ({
@@ -285,7 +288,7 @@ describe("模型设置编辑页（ADR-0024）", () => {
     stdin.write(RIGHT);
     await nextFrame(frames);
     // Tab 跨过剩余字段与取消，到保存。
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 6; i += 1) {
       stdin.write("\t");
       await nextFrame(frames);
     }
@@ -349,7 +352,7 @@ describe("模型设置编辑页（ADR-0024）", () => {
     }
     stdin.write(LEFT);
     await nextFrame(frames);
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 6; i += 1) {
       stdin.write("\t");
       await nextFrame(frames);
     }
@@ -369,7 +372,7 @@ describe("模型设置编辑页（ADR-0024）", () => {
     await waitFor(() => (lastFrame() ?? "").includes("[ 保存 ]"));
     await flushInput();
     // Tab 遍历所有字段与取消，到保存。
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 9; i += 1) {
       stdin.write("\t");
       await nextFrame(frames);
     }
@@ -492,9 +495,12 @@ describe("模型设置编辑页（ADR-0024）", () => {
     await waitFor(() => (lastFrame() ?? "").includes("[ 保存 ]"));
     const frame = lastFrame() ?? "";
     // 不同显示宽度的标签后，输入框从同一列开始。
+    // 行里还拼着左侧服务商面板，先裁到对话框边框 "│" 再比列位
     const nameRow = frame.split("\n").find((l) => l.includes("显示名")) ?? "";
     const ctxRow = frame.split("\n").find((l) => l.includes("上下文长度")) ?? "";
-    expect(nameRow.indexOf("[ 跟随")).toBe(ctxRow.indexOf("[ 跟随"));
+    // 输入框 "[" 到对话框左边框的显示宽度即为标签列宽
+    const fromBox = (l: string) => stringWidth(l.slice(l.indexOf("│"), l.indexOf("[")));
+    expect(fromBox(nameRow)).toBe(fromBox(ctxRow));
     unmount();
   });
 
@@ -795,7 +801,7 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     stdin.write("X");
     await waitFor(() => (lastFrame() ?? "").includes("[ X"));
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 9; i += 1) {
       stdin.write("\t");
       await nextFrame(frames);
     }
@@ -871,7 +877,7 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     await waitFor(() => (lastFrame() ?? "").includes("[ k"));
     expect(lastFrame()).toContain("> 显示名");
     // Tab 到末尾的保存，再 Tab 回第一个字段（循环）
-    for (let i = 0; i < 8; i += 1) stdin.write("\t");
+    for (let i = 0; i < 9; i += 1) stdin.write("\t");
     await waitFor(() => (lastFrame() ?? "").includes("> [ 保存 ]"));
     stdin.write("\t");
     await waitFor(
@@ -905,6 +911,8 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     expect(effortRow).not.toContain("只读");
     stdin.write(DOWN);
     await waitFor(() => (lastFrame() ?? "").includes("> 思考档位"));
+    // ↓×3：协议 → 编辑工具 → 保存
+    stdin.write(DOWN);
     stdin.write(DOWN);
     stdin.write(DOWN);
     await waitFor(() => (lastFrame() ?? "").includes("> [ 保存 ]"));
@@ -941,7 +949,7 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     const { stdin, lastFrame, onBack, unmount } = editor();
     await waitFor(() => (lastFrame() ?? "").includes("> 显示名"));
     await flushInput();
-    for (let i = 0; i < 7; i += 1) stdin.write("\t");
+    for (let i = 0; i < 8; i += 1) stdin.write("\t");
     await waitFor(() => (lastFrame() ?? "").includes("> [ 取消 ]"));
     // ↓ 在按钮区停住：随后 Enter 仍执行取消
     stdin.write(DOWN);
@@ -952,16 +960,16 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     const again = editor();
     await waitFor(() => (again.lastFrame() ?? "").includes("> 显示名"));
     await flushInput();
-    for (let i = 0; i < 7; i += 1) again.stdin.write("\t");
+    for (let i = 0; i < 8; i += 1) again.stdin.write("\t");
     await waitFor(() => (again.lastFrame() ?? "").includes("> [ 取消 ]"));
     // ←/→ 在取消与保存之间移动
     again.stdin.write(RIGHT);
     await waitFor(() => (again.lastFrame() ?? "").includes("> [ 保存 ]"));
     again.stdin.write(LEFT);
     await waitFor(() => (again.lastFrame() ?? "").includes("> [ 取消 ]"));
-    // ↑ 回最后一个可编辑字段（协议）
+    // ↑ 回最后一个可编辑字段（编辑工具）
     again.stdin.write(UP);
-    await waitFor(() => (again.lastFrame() ?? "").includes("> 协议"));
+    await waitFor(() => (again.lastFrame() ?? "").includes("> 编辑工具"));
     again.unmount();
   });
 
@@ -977,11 +985,31 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     stdin.write(RIGHT);
     stdin.write(RIGHT);
     await waitFor(() => (lastFrame() ?? "").includes("[* 否]"));
-    for (let i = 0; i < 5; i += 1) stdin.write("\t");
+    for (let i = 0; i < 6; i += 1) stdin.write("\t");
     await waitFor(() => (lastFrame() ?? "").includes("> [ 保存 ]"));
     stdin.write(ENTER);
     await waitFor(() => save.mock.calls.length === 1);
     expect(save).toHaveBeenCalledWith({ imageInput: false });
+    unmount();
+  });
+
+  it("编辑工具：跟随/edit/apply_patch 循环；选 apply_patch 保存（ADR-0035 §5）", async () => {
+    const save = vi.fn();
+    const { stdin, lastFrame, unmount } = editor({ onSave: save });
+    await waitFor(() => (lastFrame() ?? "").includes("> 显示名"));
+    await flushInput();
+    // ↓×7 到「编辑工具」（最后一个字段）
+    for (let i = 0; i < 7; i += 1) stdin.write(DOWN);
+    await waitFor(() => (lastFrame() ?? "").includes("> 编辑工具"));
+    // →→：跟随 → edit → apply_patch
+    stdin.write(RIGHT);
+    stdin.write(RIGHT);
+    await waitFor(() => (lastFrame() ?? "").includes("[* apply_patch]"));
+    stdin.write(DOWN);
+    await waitFor(() => (lastFrame() ?? "").includes("> [ 保存 ]"));
+    stdin.write(ENTER);
+    await waitFor(() => save.mock.calls.length === 1);
+    expect(save).toHaveBeenCalledWith({ editTool: "apply_patch" });
     unmount();
   });
 

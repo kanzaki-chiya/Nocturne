@@ -219,6 +219,8 @@ const FIELD_ORDER = [
   "reasoning",
   "reasoningEffort",
   "protocol",
+  // ADR-0035 §5：第八个字段「编辑工具」
+  "editTool",
 ] as const;
 type FieldKey = (typeof FIELD_ORDER)[number];
 const FIELD_LABELS: Record<FieldKey, string> = {
@@ -230,18 +232,26 @@ const FIELD_LABELS: Record<FieldKey, string> = {
   reasoningEffort: "思考档位",
   // ADR-0026 §7：第七个字段「协议」
   protocol: "协议",
+  editTool: "编辑工具",
 };
 const TEXT_FIELDS: ReadonlySet<FieldKey> = new Set([
   "displayName",
   "contextWindow",
   "maxOutputTokens",
 ]);
-const CYCLE_FIELDS: ReadonlySet<FieldKey> = new Set(["imageInput", "reasoning", "protocol"]);
+const CYCLE_FIELDS: ReadonlySet<FieldKey> = new Set([
+  "imageInput",
+  "reasoning",
+  "protocol",
+  "editTool",
+]);
 
 type TriState = "follow" | "true" | "false";
 type ReasoningDraft = "follow" | "yes" | "no";
 /** 协议选项（ADR-0026 §7；Responses 由 ADR-0031 §1 接入）：跟随 / Chat / Messages / Responses */
 type ProtocolDraft = "follow" | "chat" | "messages" | "responses";
+/** 编辑工具选项（ADR-0035 §5）：跟随 / edit+write / apply_patch */
+type EditToolDraft = "follow" | "edit" | "patch";
 
 interface Draft {
   displayName: string;
@@ -251,6 +261,7 @@ interface Draft {
   reasoning: ReasoningDraft;
   reasoningEffort: "follow" | ReasoningEffortLevel[];
   protocol: ProtocolDraft;
+  editTool: EditToolDraft;
 }
 
 function initDraft(view: ModelSettingsView): Draft {
@@ -277,6 +288,12 @@ function initDraft(view: ModelSettingsView): Draft {
           : f.protocol.userValue === "openai-responses"
             ? "responses"
             : "chat",
+    editTool:
+      f.editTool.userValue === undefined
+        ? "follow"
+        : f.editTool.userValue === "apply_patch"
+          ? "patch"
+          : "edit",
   };
 }
 
@@ -305,6 +322,7 @@ function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>)
       if (value === "openai-responses") return "Responses";
       return "协议不支持";
     }
+    if (key === "editTool") return value === "apply_patch" ? "apply_patch" : "edit";
     return scalarText(value);
   };
   if (!field.editable) return show(field.value);
@@ -332,6 +350,10 @@ function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>)
         : d === "messages"
           ? "Messages"
           : "Responses";
+  }
+  if (key === "editTool") {
+    const d = draft.editTool;
+    return d === "follow" ? follow : d === "patch" ? "apply_patch" : "edit";
   }
   // reasoningEffort
   const d = draft.reasoningEffort;
@@ -377,6 +399,10 @@ export function draftToPatch(view: ModelSettingsView, draft: Draft): ModelSettin
           ? "openai-responses"
           : "openai-compatible";
   else if (f.protocol.userValue !== undefined) patch.protocol = null;
+  // ADR-0035 §5：跟随 = 清除用户编辑（写 null），仅在有用户编辑时
+  if (draft.editTool !== "follow")
+    patch.editTool = draft.editTool === "patch" ? "apply_patch" : "edit";
+  else if (f.editTool.userValue !== undefined) patch.editTool = null;
   return patch;
 }
 
@@ -510,14 +536,19 @@ export function ModelEditPane({
       setDiscard(false);
     } else onBack();
   };
-  const cycle = (field: "imageInput" | "reasoning" | "protocol", delta: number): void => {
+  const cycle = (
+    field: "imageInput" | "reasoning" | "protocol" | "editTool",
+    delta: number,
+  ): void => {
     const d = draftRef.current;
     const choices =
       field === "imageInput"
         ? ["follow", "true", "false"]
         : field === "reasoning"
           ? ["follow", "yes", "no"]
-          : ["follow", "chat", "messages", "responses"];
+          : field === "editTool"
+            ? ["follow", "edit", "patch"]
+            : ["follow", "chat", "messages", "responses"];
     draftRef.current = {
       ...d,
       [field]:
@@ -631,7 +662,7 @@ export function ModelEditPane({
     }
     if (CYCLE_FIELDS.has(cur as FieldKey)) {
       if (key.leftArrow || key.rightArrow)
-        cycle(cur as "imageInput" | "reasoning" | "protocol", key.leftArrow ? -1 : 1);
+        cycle(cur as "imageInput" | "reasoning" | "protocol" | "editTool", key.leftArrow ? -1 : 1);
       return;
     }
     if (TEXT_FIELDS.has(cur as FieldKey)) {
@@ -675,7 +706,14 @@ export function ModelEditPane({
   };
   useInput(handleInput, { isActive: active });
   const preferredWidth = Math.max(1, Math.min(72, width - 4));
-  const fieldMin = currentField === "protocol" ? 19 : currentField === "reasoningEffort" ? 18 : 10;
+  const fieldMin =
+    currentField === "protocol"
+      ? 19
+      : currentField === "reasoningEffort"
+        ? 18
+        : currentField === "editTool"
+          ? 22
+          : 10;
   const framed = preferredWidth - 4 >= 12 + fieldMin && height - 2 >= 8;
   const outerWidth = framed ? preferredWidth : width;
   const innerWidth = outerWidth - (framed ? 4 : 2);
@@ -691,7 +729,9 @@ export function ModelEditPane({
         ? segmentedLines(
             key === "protocol"
               ? ["跟随", "Chat Completions", "Messages", "Responses"]
-              : ["跟随", "是", "否"],
+              : key === "editTool"
+                ? ["跟随", "edit", "apply_patch"]
+                : ["跟随", "是", "否"],
             0,
             Math.max(1, available),
             single ? 1 : 2,
@@ -730,7 +770,9 @@ export function ModelEditPane({
       ? ["follow", "chat", "messages", "responses"]
       : field === "reasoning"
         ? ["follow", "yes", "no"]
-        : ["follow", "true", "false"];
+        : field === "editTool"
+          ? ["follow", "edit", "patch"]
+          : ["follow", "true", "false"];
   useEffect(() => {
     if (!onMouseFrame) return;
     if (!active || tiny) {
@@ -835,12 +877,14 @@ export function ModelEditPane({
           );
         } else if (CYCLE_FIELDS.has(field)) {
           const selected = choices(field).indexOf(
-            draft[field as "imageInput" | "reasoning" | "protocol"],
+            draft[field as "imageInput" | "reasoning" | "protocol" | "editTool"],
           );
           const options =
             field === "protocol"
               ? ["跟随", "Chat Completions", "Messages", "Responses"]
-              : ["跟随", "是", "否"];
+              : field === "editTool"
+                ? ["跟随", "edit", "apply_patch"]
+                : ["跟随", "是", "否"];
           const lines = segmentedLines(options, selected, rect.width, single ? 1 : 2);
           let option = 0;
           for (const [lineIndex, line] of lines.entries()) {
@@ -857,7 +901,7 @@ export function ModelEditPane({
                 stringWidth(token),
                 () => {
                   focus(field);
-                  const key = field as "imageInput" | "reasoning" | "protocol";
+                  const key = field as "imageInput" | "reasoning" | "protocol" | "editTool";
                   cycle(key, index - choices(field).indexOf(draftRef.current[key]));
                 },
                 true,
@@ -943,13 +987,17 @@ export function ModelEditPane({
           ? ["follow", "true", "false"].indexOf(draft.imageInput)
           : field === "reasoning"
             ? ["follow", "yes", "no"].indexOf(draft.reasoning)
-            : ["follow", "chat", "messages", "responses"].indexOf(draft.protocol);
+            : field === "editTool"
+              ? ["follow", "edit", "patch"].indexOf(draft.editTool)
+              : ["follow", "chat", "messages", "responses"].indexOf(draft.protocol);
       control = (
         <Segmented
           options={
             field === "protocol"
               ? ["跟随", "Chat Completions", "Messages", "Responses"]
-              : ["跟随", "是", "否"]
+              : field === "editTool"
+                ? ["跟随", "edit", "apply_patch"]
+                : ["跟随", "是", "否"]
           }
           selected={selected}
           inline

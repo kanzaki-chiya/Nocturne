@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { questionToolLines } from "../question-format.js";
 import { webFetchSummary } from "../web-fetch.js";
 import { attachmentLine } from "../attachment-line.js";
-import { diffSummary, parseDiff } from "../diff-format.js";
+import { diffSummary, parseDiff, toolFileDiffs, type ToolFileDiff } from "../diff-format.js";
 import { glyphs, useTuiEnv } from "../env.js";
 import { formatDuration, summarizeToolInput, tailLines, truncateLine } from "../format.js";
 import { useTheme, type ThemePalette } from "../theme.js";
@@ -63,27 +63,9 @@ function badge(
   }
 }
 
-/** 结果输出里的 diff；旧新建记录按输入内容合成 + 行。 */
-function diffOf(entry: ToolEntry): string | undefined {
-  if (entry.status !== "ok") return undefined;
-  const out = entry.result?.output;
-  if (typeof out !== "object" || out === null) return undefined;
-  const d = (out as Record<string, unknown>).diff;
-  if (typeof d === "string" && d !== "") return d;
-  const content = (entry.input as { content?: unknown } | undefined)?.content;
-  if (
-    (out as { created?: unknown }).created === true &&
-    typeof content === "string" &&
-    content !== ""
-  ) {
-    return content
-      .replace(/\r\n?/g, "\n")
-      .replace(/\n$/, "")
-      .split("\n")
-      .map((line) => `+${line}`)
-      .join("\n");
-  }
-  return undefined;
+/** 结果输出里的逐文件 diff（edit/write 单文件；apply_patch 多文件，ADR-0035） */
+function diffsOf(entry: ToolEntry): ToolFileDiff[] | undefined {
+  return toolFileDiffs(entry.status, entry.result?.output, entry.input);
 }
 
 export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): React.JSX.Element {
@@ -165,7 +147,8 @@ function ToolResult({ entry, width }: { entry: ToolEntry; width: number }): Reac
   const g = glyphs(env);
   const result = entry.result;
   if (result === undefined) return <></>;
-  const diff = diffOf(entry);
+  const diffs = diffsOf(entry);
+  const single = diffs?.length === 1 && diffs[0]?.label === "" ? diffs[0].diff : undefined;
   const spill = result.spillPath;
   const webSummary = webFetchSummary(entry);
   return (
@@ -175,12 +158,30 @@ function ToolResult({ entry, width }: { entry: ToolEntry; width: number }): Reac
           dimColor
           wrap="truncate"
         >{`  ${truncateLine(webSummary, Math.max(1, width - 2), g.ellipsis)}`}</Text>
-      ) : diff !== undefined ? (
+      ) : diffs !== undefined && single === undefined ? (
+        // apply_patch：按文件逐个显示标题与 diff（ADR-0035 §8 / tui.md）
+        <>
+          <Text dimColor>{`  ${result.modelContent.split("\n")[0] ?? ""}`}</Text>
+          {diffs.map((f, i) => (
+            <Box key={i} flexDirection="column">
+              <Text dimColor wrap="truncate">
+                {"  "}
+                {truncateLine(
+                  `${f.label}${f.diff !== undefined ? `（${diffSummary(parseDiff(f.diff))}）` : ""}`,
+                  Math.max(8, width - 2),
+                  g.ellipsis,
+                )}
+              </Text>
+              {f.diff !== undefined ? <DiffView diff={f.diff} width={width} /> : null}
+            </Box>
+          ))}
+        </>
+      ) : single !== undefined ? (
         <>
           <Text
             dimColor
-          >{`  ${result.modelContent.split("\n")[0] ?? ""}；${diffSummary(parseDiff(diff))}`}</Text>
-          <DiffView diff={diff} width={width} />
+          >{`  ${result.modelContent.split("\n")[0] ?? ""}；${diffSummary(parseDiff(single))}`}</Text>
+          <DiffView diff={single} width={width} />
         </>
       ) : result.modelContent !== "" ? (
         tailLines(result.modelContent, RESULT_TAIL).map((l, i) => (

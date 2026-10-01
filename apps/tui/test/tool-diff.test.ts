@@ -10,6 +10,7 @@ import type { ToolEntry } from "@nocturne/core/protocol";
 
 import { layoutEntry } from "../src/lines.js";
 import { diffSummary, layoutDiffRow, parseDiff } from "../src/diff-format.js";
+import { summarizeToolInput } from "../src/format.js";
 import { selCopyText } from "../src/selection.js";
 import { ToolRow } from "../src/components/tool-row.js";
 import { TodoPanel } from "../src/components/todo-panel.js";
@@ -345,6 +346,101 @@ describe("工具行 diff", () => {
     const lines = layoutEntry(e, 80, false);
     expect(lines.map((l) => l.text).join("\n")).toContain("结构化 output 超过大小上限，已省略");
     expect(lines.some((l) => l.key.endsWith(":diff:more"))).toBe(false);
+  });
+
+  it("apply_patch：逐文件 op 标签与各自 diff；摘要行在后（ADR-0035 §8）", () => {
+    const output = {
+      files: [
+        {
+          path: "src/new.ts",
+          op: "add",
+          diff: "@@ -0,0 +1,1 @@\n+export const x = 1;",
+        },
+        {
+          path: "src/app.ts",
+          op: "move",
+          movedTo: "src/main.ts",
+          diff: "@@ -1,2 +1,2 @@\n a\n-b\n+B",
+        },
+        { path: "src/old.ts", op: "delete" },
+      ],
+    };
+    const tool = {
+      ...entry(
+        {
+          input:
+            "*** Begin Patch\n*** Add File: src/new.ts\n+x\n*** Update File: src/app.ts\n*** Move to: src/main.ts\n-a\n+A\n*** Delete File: src/old.ts\n*** End Patch",
+        },
+        output,
+        "Success. Updated the following files:\nA src/new.ts\nM src/app.ts -> src/main.ts\nD src/old.ts",
+      ),
+      name: "apply_patch",
+    };
+    const texts = layoutEntry(tool, 80, false).map((l) => l.text);
+    const joined = texts.join("\n");
+    // 摘要行：modelContent 首行
+    expect(joined).toContain("Success. Updated the following files:");
+    // 三个文件的 op 标签；改名带目标
+    expect(joined).toContain("A src/new.ts（新增 1 行，删除 0 行）");
+    expect(joined).toMatch(/M src\/app\.ts (→|>) src\/main\.ts/);
+    expect(joined).toContain("D src/old.ts");
+    // 各自的 diff 内容
+    expect(joined).toContain("+ export const x = 1;");
+    expect(joined).toContain("- b");
+    expect(joined).toContain("+ B");
+    // 文件标签行在各自 diff 之前
+    const labelIdx = texts.findIndex((l) => l.includes("M src/app.ts"));
+    const diffIdx = texts.findIndex((l) => l.includes("+ B"));
+    expect(labelIdx).toBeGreaterThanOrEqual(0);
+    expect(diffIdx).toBeGreaterThan(labelIdx);
+  });
+
+  it("apply_patch：ToolRow 实渲染列出文件标签与 diff", () => {
+    const tool = {
+      ...entry(
+        { input: "*** Begin Patch\n*** Update File: a.ts\n-x\n+y\n*** End Patch" },
+        {
+          files: [
+            { path: "a.ts", op: "update", diff: "@@ -1,1 +1,1 @@\n-x\n+y" },
+            { path: "b.ts", op: "delete" },
+          ],
+        },
+        "Success. Updated the following files:\nM a.ts\nD b.ts",
+      ),
+      name: "apply_patch",
+    };
+    const frame = render(
+      createElement(
+        TuiEnvContext.Provider,
+        { value: { ascii: true, animated: false } },
+        createElement(ToolRow, { entry: tool, width: 60 }),
+      ),
+    );
+    const shown = frame.lastFrame() ?? "";
+    expect(shown).toContain("M a.ts（新增 1 行，删除 1 行）");
+    expect(shown).toContain("D b.ts");
+    expect(shown).toContain("+ y");
+    frame.unmount();
+  });
+
+  it("apply_patch 输入摘要列出涉及文件，不回显补丁原文", () => {
+    const input = {
+      input: [
+        "*** Begin Patch",
+        "*** Add File: a.ts",
+        "+x",
+        "*** Update File: b.ts",
+        "-1",
+        "+2",
+        "*** Delete File: c.ts",
+        "*** Update File: d.ts",
+        "-1",
+        "+2",
+        "*** End Patch",
+      ].join("\n"),
+    };
+    expect(summarizeToolInput("apply_patch", input)).toBe("a.ts, b.ts, c.ts 等 4 个文件");
+    expect(summarizeToolInput("apply_patch", { input: "*** Begin Patch\n*** End Patch" })).toBe("");
   });
 
   it("NO_COLOR 不给 diff 行铺背景，但保留行号和标记", () => {

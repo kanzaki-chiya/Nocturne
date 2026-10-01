@@ -30,6 +30,7 @@ const caps = (
   reasoning,
   imageInput,
   promptCache: false,
+  editTool: "edit",
   toolCalls: true,
   parallelToolCalls: false,
 });

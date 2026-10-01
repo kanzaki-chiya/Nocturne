@@ -11,7 +11,7 @@ import { todoItemsFromCompletion } from "@nocturne/core/protocol";
 import { questionToolLines } from "./question-format.js";
 import { webFetchSummary } from "./web-fetch.js";
 import { attachmentLine } from "./attachment-line.js";
-import { diffSummary, layoutDiffRow, parseDiff } from "./diff-format.js";
+import { diffSummary, layoutDiffRow, parseDiff, toolFileDiffs } from "./diff-format.js";
 import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { splitInputTokens, userText, fileRefLine } from "./file-refs.js";
 import { boxSafe, stripControls, summarizeToolInput, tailLines, truncateLine } from "./format.js";
@@ -79,25 +79,9 @@ function rows(key: string, text: string, width: number, extra?: Partial<LaidLine
 const DIFF_HEAD = 20;
 const DIFF_TAIL = 20;
 
-/**
- * 工具结果里可展示的 diff；旧新建记录无 diff 时按输入内容铺成 + 行。
- */
-function toolDiff(entry: Extract<ViewEntry, { kind: "tool" }>): string | undefined {
-  if (entry.status !== "ok") return undefined;
-  const out = entry.result?.output;
-  if (out === null || typeof out !== "object") return undefined;
-  const { diff, created } = out as { diff?: unknown; created?: unknown };
-  if (typeof diff === "string" && diff !== "") return diff;
-  const content = (entry.input as { content?: unknown } | undefined)?.content;
-  if (created === true && typeof content === "string" && content !== "") {
-    return content
-      .replace(/\r\n?/g, "\n")
-      .replace(/\n$/, "")
-      .split("\n")
-      .map((l) => `+${l}`)
-      .join("\n");
-  }
-  return undefined;
+/** 工具结果里可展示的逐文件 diff（ADR-0035：apply_patch 的 output.files 逐文件渲染） */
+function toolDiffs(entry: Extract<ViewEntry, { kind: "tool" }>) {
+  return toolFileDiffs(entry.status, entry.result?.output, entry.input);
 }
 
 /** 全屏 diff 超过 40 个内容行时折叠为前后各 20 行。 */
@@ -274,18 +258,42 @@ export function layoutEntry(
           });
         }
       }
-      const diff = toolDiff(entry);
-      if (diff !== undefined) {
+      const fileDiffs = toolDiffs(entry);
+      const single =
+        fileDiffs?.length === 1 && fileDiffs[0]?.label === "" ? fileDiffs[0].diff : undefined;
+      if (fileDiffs !== undefined && single === undefined) {
+        // apply_patch：摘要行 + 逐文件标题与 diff
+        const first = entry.result?.modelContent.split("\n")[0] ?? "";
+        if (first !== "") {
+          lines.push({ key: `${entry.key}:sum`, text: paint(`  ${first}`, width), dim: true });
+        }
+        fileDiffs.forEach((f, fi) => {
+          lines.push({
+            key: `${entry.key}:f${fi}`,
+            text: paint(
+              `  ${f.label}${f.diff !== undefined ? `（${diffSummary(parseDiff(f.diff))}）` : ""}`,
+              width,
+            ),
+            dim: true,
+          });
+          if (f.diff !== undefined)
+            lines.push(
+              ...diffLines(`${entry.key}:f${fi}`, f.diff, width, ascii, diffExpanded, theme),
+            );
+        });
+        return [...lines, ...attachmentRows];
+      }
+      if (single !== undefined) {
         // 摘要行（已修改/已创建 …）保留，其后接 diff
         const first = entry.result?.modelContent.split("\n")[0] ?? "";
         if (first !== "") {
           lines.push({
             key: `${entry.key}:sum`,
-            text: paint(`  ${first}；${diffSummary(parseDiff(diff))}`, width),
+            text: paint(`  ${first}；${diffSummary(parseDiff(single))}`, width),
             dim: true,
           });
         }
-        lines.push(...diffLines(entry.key, diff, width, ascii, diffExpanded, theme));
+        lines.push(...diffLines(entry.key, single, width, ascii, diffExpanded, theme));
         return [...lines, ...attachmentRows];
       }
       const content = webFetchSummary(entry) ?? entry.result?.modelContent;

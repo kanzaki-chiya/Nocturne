@@ -122,12 +122,24 @@ const inputString = (input: unknown, key: string): string | undefined => {
   return typeof v === "string" ? v : undefined;
 };
 
-/** 工具输入单行摘要：shell→command；read/write/edit→path；grep/glob→pattern */
+/** 工具输入单行摘要：shell→command；read/write/edit→path；grep/glob→pattern；apply_patch→文件清单 */
 export function summarizeToolInput(name: string | undefined, input: unknown): string {
   if (name === "todo_write") {
     const items =
       typeof input === "object" && input !== null && "items" in input ? input.items : undefined;
     return Array.isArray(items) ? `${items.length} 项` : "";
+  }
+  if (name === "apply_patch") {
+    // ADR-0035：摘要列出补丁涉及的文件（不整段回显补丁原文）
+    const text = inputString(input, "input");
+    if (text === undefined) return "";
+    const files = [...text.matchAll(/^\*\*\* (?:Add|Delete|Update) File:\s*(\S+)/gm)].map(
+      (m) => m[1] ?? "",
+    );
+    if (files.length === 0) return "";
+    return files.length <= 3
+      ? files.join(", ")
+      : `${files.slice(0, 3).join(", ")} 等 ${files.length} 个文件`;
   }
   const byKey =
     name === "web_fetch"

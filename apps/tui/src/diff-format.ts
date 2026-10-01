@@ -40,6 +40,63 @@ export function diffSummary(rows: readonly DiffRow[]): string {
   return `新增 ${rows.filter((r) => r.mark === "+").length} 行，删除 ${rows.filter((r) => r.mark === "-").length} 行`;
 }
 
+/** 工具结果里可展示的逐文件 diff（ADR-0035：apply_patch 的 output.files） */
+export interface ToolFileDiff {
+  /** 文件标题：op 字母 + 路径，改名带 " → 目标"；单文件工具为空串 */
+  label: string;
+  diff?: string | undefined;
+}
+
+const PATCH_OP_LETTER: Record<string, string> = { add: "A", update: "M", delete: "D", move: "M" };
+
+/**
+ * 工具结果 → 逐文件 diff 列表：
+ * - apply_patch：output.files[] 每项 {path, op, movedTo?, diff?}，无 diff 的
+ *   文件（纯改名）也列出标题；
+ * - edit/write 等：单个 output.diff；旧的新建记录无 diff 时按输入内容合成 + 行。
+ */
+export function toolFileDiffs(
+  status: string,
+  output: unknown,
+  input: unknown,
+): ToolFileDiff[] | undefined {
+  if (status !== "ok" || output === null || typeof output !== "object") return undefined;
+  const files = (output as { files?: unknown }).files;
+  if (Array.isArray(files)) {
+    const out: ToolFileDiff[] = [];
+    for (const f of files) {
+      if (f === null || typeof f !== "object") continue;
+      const file = f as { path?: unknown; op?: unknown; movedTo?: unknown; diff?: unknown };
+      if (typeof file.path !== "string") continue;
+      const label =
+        `${PATCH_OP_LETTER[file.op as string] ?? "?"} ${file.path}` +
+        (typeof file.movedTo === "string" ? ` → ${file.movedTo}` : "");
+      out.push({
+        label,
+        ...(typeof file.diff === "string" && file.diff !== "" ? { diff: file.diff } : {}),
+      });
+    }
+    return out;
+  }
+  const { diff, created } = output as { diff?: unknown; created?: unknown };
+  if (typeof diff === "string" && diff !== "") return [{ label: "", diff }];
+  const content = (input as { content?: unknown } | undefined)?.content;
+  if (created === true && typeof content === "string" && content !== "") {
+    return [
+      {
+        label: "",
+        diff: content
+          .replace(/\r\n?/g, "\n")
+          .replace(/\n$/, "")
+          .split("\n")
+          .map((l) => `+${l}`)
+          .join("\n"),
+      },
+    ];
+  }
+  return undefined;
+}
+
 function pieces(text: string, width: number): string[] {
   const out: string[] = [];
   let part = "";

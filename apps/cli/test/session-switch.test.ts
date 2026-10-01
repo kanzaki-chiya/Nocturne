@@ -218,6 +218,7 @@ describe("createNewSession", () => {
           reasoning: "visible" as const,
           imageInput: false,
           promptCache: false,
+          editTool: "edit" as const,
           reasoningEffort: ["low" as const, "high" as const],
         },
       })),

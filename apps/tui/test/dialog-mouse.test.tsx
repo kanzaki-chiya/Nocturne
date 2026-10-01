@@ -38,6 +38,7 @@ const view: ModelSettingsView = {
     reasoning: field("visible"),
     reasoningEffort: field(["low", "high"]),
     protocol: field("openai-compatible"),
+    editTool: field("edit" as const),
   },
 };
 function mouseController() {
