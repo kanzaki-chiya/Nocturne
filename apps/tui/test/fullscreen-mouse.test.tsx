@@ -103,7 +103,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
   it("大 diff 的省略行单击展开、再次单击收起，翻阅位置仍落在 diff", async () => {
     const { runtime, session } = await longSession();
     const mouse = fakeMouse();
-    const { lastFrame, unmount } = render(
+    const { lastFrame, unmount, frames } = render(
       createElement(App, { session, runtime, env: ENV, mouse }),
     );
     await waitFor(() => (lastFrame() ?? "").includes("Nocturne"));
@@ -123,12 +123,6 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
       output: { path: "a.ts", created: true, diff },
     });
     await waitFor(() => (lastFrame() ?? "").includes("line50"));
-    for (let i = 0; i < 15 && !(lastFrame() ?? "").includes("还有 10 行"); i++) {
-      const before = lastFrame();
-      mouse.emit({ type: "wheel", dir: "up", x: 1, y: 1 });
-      await waitFor(() => lastFrame() !== before);
-    }
-    await waitFor(() => (lastFrame() ?? "").includes("还有 10 行"));
     const clickMore = () => {
       const y =
         (lastFrame() ?? "")
@@ -138,9 +132,33 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
       mouse.emit({ type: "press", button: 0, x: 4, y });
       mouse.emit({ type: "release", button: 0, x: 4, y });
     };
-    clickMore();
-    // 省略行对应的工具标题原本在视口之上，展开后标题成为新的顶部。
-    await waitFor(() => (lastFrame() ?? "").split("\n")[0]?.includes("write") === true);
+    // 帧写出后立即点击/滚动，覆盖被动 effect 尚未运行时再次输入的时序。
+    const push = frames.push.bind(frames);
+    let clicked = false;
+    let anchored: string | undefined;
+    frames.push = (...next) => {
+      const count = push(...next);
+      const frame = next.at(-1) ?? "";
+      if (!clicked && frame.includes("还有 10 行")) {
+        clicked = true;
+        queueMicrotask(clickMore);
+      } else if (clicked && anchored === undefined && frame.split("\n")[0]?.includes("write")) {
+        anchored = frame;
+        queueMicrotask(() => mouse.emit({ type: "wheel", dir: "down", x: 1, y: 1 }));
+      }
+      return count;
+    };
+    for (let i = 0; i < 15 && !clicked; i++) {
+      const before = lastFrame();
+      mouse.emit({ type: "wheel", dir: "up", x: 1, y: 1 });
+      await waitFor(() => lastFrame() !== before);
+    }
+    await waitFor(() => anchored !== undefined);
+    await waitFor(() => (lastFrame() ?? "").split("\n")[0]?.includes("line2") === true);
+    frames.push = push;
+    // 省略行对应的工具标题原本在视口之上，展开时标题成为新的顶部。
+    expect(anchored?.split("\n")[0]).toContain("write");
+    expect(lastFrame()).not.toContain("有新内容");
     for (let i = 0; i < 15 && !(lastFrame() ?? "").includes("单击收起"); i++) {
       const before = lastFrame();
       mouse.emit({ type: "wheel", dir: "down", x: 1, y: 1 });

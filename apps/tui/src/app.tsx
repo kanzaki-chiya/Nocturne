@@ -1195,40 +1195,41 @@ function SessionApp({
     };
   }, [fullscreen, mouse, absStartOf, copySelection, stopEdgeScroll, moveScroll, width]);
 
-  // 全屏滚动状态维护：离开底部后新内容只标记不打断；到顶后夹紧 fromBottom
-  useEffect(() => {
+  // 在同一次提交中维护滚动；延后的被动 effect 会把旧 scroll 与新几何混用，
+  // 将展开增加的行重复补偿，或用旧帧的夹紧结果覆盖刚到达的滚轮。
+  useLayoutEffect(() => {
     if (!fullscreen) return;
     if (scroll.follow) {
       laidTotal.current = undefined;
       return;
     }
-    const total = countLaidLines(blocksRef.current.blocks, width, lineCache.current);
+    const total = countLaidLines(blocks, width, lineCache.current);
     const prev = laidTotal.current;
     laidTotal.current = total;
     if (prev !== undefined && total > prev) {
       setScroll((s) =>
         s.follow ? s : { ...s, fromBottom: s.fromBottom + (total - prev), newContent: true },
       );
-    } else if (geomRef.current.visible.clampedFromBottom !== scroll.fromBottom) {
-      setScroll(applyClamp(scroll, geomRef.current.visible.clampedFromBottom));
+    } else if (visible.clampedFromBottom !== scroll.fromBottom) {
+      setScroll((s) => (s === scroll ? applyClamp(s, visible.clampedFromBottom) : s));
     }
   });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!recordOpen) return;
     if (recordScroll.follow) {
       recordTotal.current = undefined;
       return;
     }
-    const total = countLaidLines(blocksRef.current.blocks, width, lineCache.current);
+    const total = countLaidLines(blocks, width, lineCache.current);
     const prev = recordTotal.current;
     recordTotal.current = total;
     if (prev !== undefined && total > prev) {
       setRecordScroll((s) =>
         s.follow ? s : { ...s, fromBottom: s.fromBottom + total - prev, newContent: true },
       );
-    } else if (geomRef.current.visible.clampedFromBottom !== recordScroll.fromBottom) {
-      setRecordScroll(applyClamp(recordScroll, geomRef.current.visible.clampedFromBottom));
+    } else if (visible.clampedFromBottom !== recordScroll.fromBottom) {
+      setRecordScroll((s) => (s === recordScroll ? applyClamp(s, visible.clampedFromBottom) : s));
     }
   });
 
