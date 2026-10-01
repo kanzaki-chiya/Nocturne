@@ -187,6 +187,14 @@ describe("/provider 向导对话框", () => {
     await settle(() => ui.lastFrame()?.includes("凭据环境变量名") === true);
     expect(ui.onDone).not.toHaveBeenCalled();
   });
+  it("向导输入框空时不显示「跟随」，长说明折成两行保留回车提示", async () => {
+    const { config } = makeConfig("dpapi");
+    const ui = screen(config, { kind: "add", presetId: "deepseek" }, { width: 56 });
+    await settle(() => ui.lastFrame()?.includes("API Key") === true);
+    const frame = ui.lastFrame() ?? "";
+    expect(frame).not.toContain("跟随");
+    expect(frame.replace(/[│\s]/g, "")).toContain("直接回车改用环境变量");
+  });
   it("空输入 Esc 直接取消，草稿 Esc 默认继续编辑，确认放弃才退出", async () => {
     const { config, saved } = makeConfig("none");
     const ui = screen(config, { kind: "add", presetId: "deepseek" });

@@ -306,14 +306,17 @@ export function WizardView({
                         focused={focus === "input"}
                         width={inner}
                         invalid={state.error !== undefined}
+                        placeholder=""
                       />
                     </Box>
                   )}
-                  {!compact && prompt.hint ? (
-                    <Text color={theme.muted} wrap="truncate">
-                      {truncateLine(boxSafe(prompt.hint), inner)}
-                    </Text>
-                  ) : null}
+                  {!compact && prompt.hint
+                    ? hintLines(boxSafe(prompt.hint), inner).map((line, i) => (
+                        <Text key={i} color={theme.muted} wrap="truncate">
+                          {line}
+                        </Text>
+                      ))
+                    : null}
                 </>
               ) : (
                 <Text color={theme.muted} wrap="truncate">
@@ -365,4 +368,15 @@ export function WizardView({
       </DialogFrame>
     </Box>
   );
+}
+
+/** 说明行最多两行：常含「直接回车改用环境变量」等操作提示，单行截断会丢掉关键信息。 */
+function hintLines(hint: string, width: number): string[] {
+  let first = "";
+  const chars = Array.from(hint);
+  let i = 0;
+  while (i < chars.length && stringWidth(first + (chars[i] ?? "")) <= width)
+    first += chars[i++] ?? "";
+  const rest = chars.slice(i).join("").trimStart();
+  return rest === "" ? [first] : [first, truncateLine(rest, width)];
 }
