@@ -35,6 +35,43 @@ afterEach(async () => {
 const load = () => loadConfig(platform, { nocturneHome: home, env: noEnv });
 
 describe("ADR-0034 设置层", () => {
+  it("压缩阈值：默认、设置、用户与可信项目逐层覆盖，清除保留未知字段", async () => {
+    const defaults = await load();
+    expect(
+      defaults.describeSettings().find((item) => item.key === "compaction.threshold"),
+    ).toMatchObject({ effective: "90%", source: "default" });
+    await json("settings.json", { compaction: { threshold: "200k", future: true } });
+    const settings = await load();
+    expect(settings.resolvedSettings().compactionThreshold).toBe("200k");
+    await json("config.json", { compaction: { threshold: "75%" } });
+    await mkdir(path.join(workspace, ".nocturne"));
+    await writeFile(
+      path.join(workspace, ".nocturne", "config.json"),
+      JSON.stringify({ compaction: { threshold: 300000 } }),
+    );
+    const config = await load();
+    await config.forWorkspace(workspace);
+    expect(config.resolvedSettings(workspace).compactionThreshold).toBe("75%");
+    await config.setWorkspaceTrusted(workspace, true);
+    await config.forWorkspace(workspace);
+    expect(
+      config.describeSettings(workspace).find((item) => item.key === "compaction.threshold"),
+    ).toMatchObject({ effective: "300000", saved: "200k", source: "project", overridden: true });
+    await expect(config.updateSettings({ "compaction.threshold": "101%" })).rejects.toThrow();
+    expect((await readSettings()).compaction).toEqual({ threshold: "200k", future: true });
+    await config.updateSettings({ "compaction.threshold": "1.5m" });
+    expect((await readSettings()).compaction).toEqual({ threshold: "1.5m", future: true });
+    await config.updateSettings({ "compaction.threshold": null });
+    expect((await readSettings()).compaction).toEqual({ future: true });
+    expect(config.resolvedSettings(workspace).compactionThreshold).toBe(300000);
+  });
+  it("设置层无效压缩阈值被忽略，合法字段仍生效", async () => {
+    await json("settings.json", { compaction: { threshold: "0%" }, shell: "cmd" });
+    const config = await load();
+    expect(config.resolvedSettings().compactionThreshold).toBeUndefined();
+    expect(config.base.shell).toBe("cmd");
+    expect(config.base.warnings.join("\n")).toContain("compaction");
+  });
   it("审查器保存、清除、关闭与高层覆盖；未知字段保留，坏配置拒绝写入", async () => {
     await json("settings.json", { permission: { extra: 1 }, other: true });
     const config = await load();

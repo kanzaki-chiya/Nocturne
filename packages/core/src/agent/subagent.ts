@@ -93,6 +93,7 @@ export interface SubagentDeps {
   recentUserMessages?(): string[];
   /** 父会话当前思考档位（ADR-0018 §4）：子会话继承，受子模型可用档位约束 */
   reasoningEffort?(): ReasoningEffort | undefined;
+  compactionThreshold?(): string | number | undefined;
   nocturneVersion: string;
   /** 父会话 Turn 配置（maxSteps 被子会话独立上限覆盖） */
   turnConfig: TurnConfig;
@@ -376,6 +377,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
                 ? "你还没有提交结果。立即调用 finish 工具提交 result；不要输出其他内容。"
                 : "你还没有提交结果；请调用 finish 工具提交 result 后结束。";
           const turnDeps: TurnDeps = {
+            compactionThreshold: deps.compactionThreshold?.(),
             session: child,
             model: deps.model(),
             tools: registry,

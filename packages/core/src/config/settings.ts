@@ -36,6 +36,7 @@ const reservedFields = new Set([
   "permission",
   "shell",
   "shellPath",
+  "compaction",
 ]);
 
 export function validateSettingsPatch(input: unknown): asserts input is SettingsPatch {
@@ -43,16 +44,24 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
     typeof input !== "object" ||
     input === null ||
     Array.isArray(input) ||
-    Object.keys(input).some((key) => key !== "permissions.preset" && key !== "permission.reviewer")
+    Object.keys(input).some(
+      (key) =>
+        key !== "permissions.preset" &&
+        key !== "permission.reviewer" &&
+        key !== "compaction.threshold",
+    )
   ) {
     throw new TypeError(
-      "仅支持 permissions.preset 与 permission.reviewer；默认档位随默认模型经 setDefaultModel 保存",
+      "仅支持 permissions.preset、permission.reviewer 与 compaction.threshold；默认档位随默认模型经 setDefaultModel 保存",
     );
   }
   const patch = input as SettingsPatch;
   const preset = patch["permissions.preset"];
   parseConfigFile(
     {
+      ...(patch["compaction.threshold"] != null
+        ? { compaction: { threshold: patch["compaction.threshold"] } }
+        : {}),
       ...(preset !== null && preset !== undefined ? { permissions: { preset } } : {}),
       ...(patch["permission.reviewer"] != null
         ? { permission: { reviewer: patch["permission.reviewer"] } }
@@ -71,6 +80,7 @@ function configFields(data: SettingsData, warn?: (message: string) => void): Con
     "shellPath",
     "permissions",
     "permission",
+    "compaction",
   ] as const) {
     if (!Object.hasOwn(data, key)) continue;
     const value =
@@ -201,6 +211,18 @@ export async function loadSettingsStore(
         validateSettingsPatch(patch);
         const preset = patch["permissions.preset"];
         await write((next) => {
+          const threshold = patch["compaction.threshold"];
+          if (threshold !== undefined) {
+            const compaction =
+              typeof next.compaction === "object" &&
+              next.compaction !== null &&
+              !Array.isArray(next.compaction)
+                ? { ...(next.compaction as Record<string, unknown>) }
+                : {};
+            if (threshold === null) delete compaction.threshold;
+            else compaction.threshold = threshold;
+            next.compaction = compaction;
+          }
           const reviewer = patch["permission.reviewer"];
           if (reviewer !== undefined) {
             const permission =

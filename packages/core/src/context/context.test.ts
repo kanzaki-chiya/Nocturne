@@ -9,6 +9,8 @@ import {
   chooseSummaryBoundary,
   closedBoundaries,
   estimateTokens,
+  inputBudgetTokens,
+  retentionTokens,
   renderTranscript,
 } from "./index.js";
 import type { BuildContextInput } from "./index.js";
@@ -482,11 +484,18 @@ describe("note 投影遵守 toolCalls/结果邻接（协议约束）", () => {
 });
 
 describe("estimateTokens", () => {
+  it("统一计数 CJK、假名、谚文与全角标点，其他字符每四个一 token", () => {
+    expect(estimateTokens("中文ひカ한，。！？")).toBe(9);
+    expect(estimateTokens("ー゛゜ｶﾞ")).toBe(5);
+    expect(estimateTokens("𠀀abcd")).toBe(2);
+    expect(estimateTokens("ＡＢＣＤ")).toBe(1);
+    expect(estimateTokens("中abc")).toBe(2);
+  });
   it("字符数 / 4 向上取整", () => {
-    expect(estimateTokens(0)).toBe(0);
-    expect(estimateTokens(1)).toBe(1);
-    expect(estimateTokens(4)).toBe(1);
-    expect(estimateTokens(5)).toBe(2);
+    expect(estimateTokens("")).toBe(0);
+    expect(estimateTokens("a")).toBe(1);
+    expect(estimateTokens("abcd")).toBe(1);
+    expect(estimateTokens("abcde")).toBe(2);
   });
 });
 
@@ -504,6 +513,354 @@ function ev(
     payload,
   } as unknown as DurableEvent;
 }
+
+describe("ADR-0037 保留、触发、缓存与用量", () => {
+  const small: ModelInfo = { ...model, contextWindow: 20_000, maxOutputTokens: 1000 };
+  const tool = (seq: number, tokens: number): HistoryEntry => ({
+    kind: "tool",
+    seq,
+    turnId: "t",
+    callId: `c${seq}`,
+    name: "arbitrary",
+    status: "ok",
+    modelContent: "中".repeat(tokens),
+  });
+  const assistant = (
+    seq: number,
+    tokens: number,
+    inputTokens?: number,
+  ): Extract<HistoryEntry, { kind: "assistant" }> => ({
+    kind: "assistant",
+    seq,
+    turnId: "t",
+    messageId: `a${seq}`,
+    model: small.ref,
+    content: [{ type: "text", text: "文".repeat(tokens) }],
+    toolCalls: [],
+    usage:
+      inputTokens === undefined
+        ? undefined
+        : { inputTokens, outputTokens: 100, cacheReadTokens: 1000 },
+    finishReason: "stop",
+  });
+  const input = (history: HistoryEntry[], over: Partial<BuildContextInput> = {}) =>
+    baseInput({
+      basePrompt: "base",
+      model: small,
+      history,
+      events: [
+        ev(2, "turn.completed", {}),
+        ev(4, "turn.completed", {}),
+        ev(6, "turn.completed", {}),
+      ],
+      ...over,
+    });
+
+  it("K 使用预算且受 20k/40k 与四分之一约束", () => {
+    expect(retentionTokens(10_000)).toBe(2500);
+    expect(retentionTokens(80_000)).toBe(20_000);
+    expect(retentionTokens(150_000)).toBe(30_000);
+    expect(retentionTokens(1_000_000)).toBe(40_000);
+  });
+  it("P/S 分离：严格超过 P 才修剪，修剪不可行且超过 S 才摘要", () => {
+    const B = inputBudgetTokens(small);
+    const anchored = (tokens: number, history: HistoryEntry[] = [tool(1, 4000)]) =>
+      input([...history, assistant(7, 1, tokens - 100)], { compactionThreshold: "90%" });
+    expect(buildContext(anchored(0.8 * B)).compaction).toBeUndefined();
+    expect(buildContext(anchored(0.8 * B + 1)).compaction?.kind).toBe("prune");
+    expect(buildContext(anchored(0.9 * B, [])).compaction).toBeUndefined();
+    expect(buildContext(anchored(0.9 * B + 1, [assistant(1, 10)])).compaction?.kind).toBe(
+      "summary",
+    );
+    expect(buildContext(anchored(0.85 * B, [tool(1, 100)])).compaction).toBeUndefined();
+    expect(buildContext(anchored(0.91 * B, [tool(1, 100)])).compaction?.kind).toBe("summary");
+    expect(
+      buildContext({ ...anchored(0.85 * B), compactionThreshold: "70%" }).compaction?.kind,
+    ).toBe("prune");
+    expect(
+      buildContext({
+        ...anchored(0.85 * B),
+        compactionThreshold: "70%",
+        compactionState: { pruneAttempted: true },
+      }).compaction?.kind,
+    ).toBe("summary");
+    expect(
+      buildContext({
+        ...anchored(0.95 * B),
+        compactionState: { pruneAttempted: true, summaryAttempted: true },
+      }).compaction,
+    ).toBeUndefined();
+  });
+  it("200k 在大预算模型中严格超过 200000 token 才触发", () => {
+    const large = { ...small, contextWindow: 1_000_000 };
+    const at = (tokens: number) =>
+      buildContext(
+        input([assistant(1, 10), assistant(7, 1, tokens - 100)], {
+          model: large,
+          compactionThreshold: "200k",
+        }),
+      );
+    expect(at(200_000).compaction).toBeUndefined();
+    expect(at(200_001).compaction?.kind).toBe("summary");
+  });
+  it.each(["100%", "200k", 200000])("S 按预算封顶：%s 不预防，超预算或溢出才强制", (threshold) => {
+    const B = inputBudgetTokens(small);
+    const history = [tool(1, 4000), assistant(7, 1, B - 101)];
+    expect(
+      buildContext(input(history, { compactionThreshold: threshold })).compaction,
+    ).toBeUndefined();
+    expect(
+      buildContext(
+        input(history, { compactionThreshold: threshold, compactionState: { force: true } }),
+      ).compaction?.kind,
+    ).toBe("prune");
+    const exceeded = buildContext(
+      input([tool(1, 4000), assistant(7, 1, B)], { compactionThreshold: threshold }),
+    );
+    expect(exceeded.mustCompact).toBe(true);
+    expect(exceeded.compaction?.kind).toBe("prune");
+  });
+  it("摘要和修剪使用最早满足 K 的闭合边界，保留最近原文；巨大最后一步退到最新边界", () => {
+    const history = [tool(1, 4000), tool(3, 3000), tool(5, 1000)];
+    expect(
+      buildContext(input(history, { compactionState: { force: true } })).compaction,
+    ).toMatchObject({ kind: "prune", throughSeq: 2 });
+    expect(chooseSummaryBoundary(input(history).events ?? [], history, small)).toBe(2);
+    const giant = [tool(1, 100), tool(3, 6000), tool(5, 6000)];
+    expect(chooseSummaryBoundary(input(giant).events ?? [], giant, small)).toBe(6);
+    const compacted: HistoryEntry = {
+      kind: "compaction",
+      seq: 8,
+      turnId: undefined,
+      compactKind: "summary",
+      throughSeq: 2,
+      summary: "old",
+    };
+    expect(chooseSummaryBoundary(input(history).events ?? [], [...history, compacted], small)).toBe(
+      4,
+    );
+    const retained = buildContext(input([...history, { ...compacted, throughSeq: 2 }])).request
+      .messages;
+    expect(JSON.stringify(retained)).toContain("会话历史摘要");
+    expect(JSON.stringify(retained)).toContain("中".repeat(3000));
+    expect(JSON.stringify(retained)).not.toContain("中".repeat(4000));
+  });
+  it("最小回收量按实际占位差额计算，小额修剪跳过", () => {
+    const R = 0.1 * inputBudgetTokens(small);
+    expect(
+      buildContext(input([tool(1, Math.floor(R))], { compactionState: { force: true } })).compaction
+        ?.kind,
+    ).toBe("summary");
+    expect(
+      buildContext(input([tool(1, Math.ceil(R) + 100)], { compactionState: { force: true } }))
+        .compaction?.kind,
+    ).toBe("prune");
+  });
+  it("最近文件最多 20 个、去重最近优先、只用 read/edit 主体，序列化后投影相同", () => {
+    const events: DurableEvent[] = [
+      ev(1, "session.created", {
+        cwd: "C:/ws",
+        workspaceRoot: "C:/ws",
+        formatVersion: 1,
+        nocturneVersion: "test",
+        model: small.ref,
+        permissionPreset: "default",
+      }),
+    ];
+    for (let i = 0; i < 25; i++)
+      events.push(
+        ev(i + 2, "tool.started", {
+          name: "unrelated",
+          callId: `c${i}`,
+          subjects: [
+            { kind: i % 2 ? "edit" : "read", target: `file${i}` },
+            { kind: "network", target: "private-host" },
+          ],
+        }),
+      );
+    events.push(
+      ev(27, "tool.started", {
+        name: "other",
+        callId: "latest",
+        subjects: [{ kind: "read", target: "file5" }],
+      }),
+    );
+    events.push(
+      ev(28, "context.compacted", { kind: "summary", throughSeq: 27, summary: "summary" }),
+    );
+    const history: HistoryEntry[] = [
+      {
+        kind: "compaction",
+        seq: 28,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 27,
+        summary: "summary",
+      },
+    ];
+    const request = buildContext(input(history, { events })).request;
+    const text = JSON.stringify(request.messages);
+    expect(text).toContain("本会话最近读过或改过的文件");
+    expect(text.indexOf("file5")).toBeLessThan(text.indexOf("file24"));
+    expect(text.match(/file\d+/g)).toHaveLength(20);
+    expect(text).not.toContain("private-host");
+    expect(text).not.toContain("file0");
+    const restored = JSON.parse(JSON.stringify(events)) as DurableEvent[];
+    expect(
+      buildContext(
+        input(JSON.parse(JSON.stringify(history)) as HistoryEntry[], { events: restored }),
+      ).request,
+    ).toEqual(request);
+  });
+  it("摘要前缀逐字节沿用 system、tools、历史投影（摘要、修剪、图片），缓存止于摘要指令", () => {
+    const att: ImageAttachment = {
+      type: "image",
+      source: "paste",
+      file: "x.png",
+      sha256: "x",
+      mimeType: "image/png",
+      bytes: 1,
+    };
+    const history: HistoryEntry[] = [
+      tool(1, 100),
+      {
+        kind: "compaction",
+        seq: 2,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 1,
+        summary: "first summary",
+      },
+      tool(3, 100),
+      {
+        kind: "compaction",
+        seq: 4,
+        turnId: undefined,
+        compactKind: "prune",
+        throughSeq: 3,
+        summary: undefined,
+      },
+      {
+        kind: "user",
+        seq: 5,
+        turnId: "t",
+        messageId: "u",
+        content: [{ type: "text", text: "image" }],
+        attachments: [att],
+      },
+      assistant(7, 10),
+    ];
+    const info = { ...small, capabilities: { ...small.capabilities, imageInput: true } };
+    const main = buildContext(
+      input(history, {
+        model: info,
+        attachmentData: new Map([["x", "base64"]]),
+        todos: [{ text: "todo", status: "pending" }],
+      }),
+    ).request;
+    const summary = buildSummaryRequest({
+      history,
+      model: info,
+      throughSeq: 6,
+      mainRequest: { ...main, reasoningEffort: "high" },
+    });
+    expect(JSON.stringify(summary.system)).toBe(JSON.stringify(main.system));
+    expect(JSON.stringify(summary.tools)).toBe(JSON.stringify(main.tools));
+    expect(JSON.stringify(summary.messages.slice(0, -1))).toBe(
+      JSON.stringify(main.messages.slice(0, 3)),
+    );
+    expect(summary.cachePrefix).toEqual({ systemBlocks: main.system.length, messages: 3 });
+    expect(summary.reasoningEffort).toBeUndefined();
+    expect(summary.maxOutputTokens).toBeLessThanOrEqual(4000);
+    expect(JSON.stringify(summary.messages.at(-1))).toContain("不要调用工具");
+    expect(JSON.stringify(summary.messages)).toContain("base64");
+    expect(JSON.stringify(summary.messages)).toContain("输出已省略");
+    expect(JSON.stringify(summary.messages)).not.toContain("todo");
+  });
+  it("主前缀装不下退回转录，仍应用修剪；转录也装不下则提前边界", () => {
+    const history = [tool(1, 100), tool(3, 19000)];
+    const main = buildContext(input(history, { basePrompt: "文".repeat(20000) })).request;
+    const summary = buildSummaryRequest({
+      history,
+      model: small,
+      throughSeq: 2,
+      mainRequest: main,
+    });
+    expect(summary.tools).toEqual([]);
+    expect(summary.cachePrefix).toBeUndefined();
+    expect(JSON.stringify(summary.messages)).toContain("转录");
+    expect(chooseSummaryBoundary(input(history).events ?? [], history, small, main)).toBe(2);
+    const pruned: HistoryEntry = {
+      kind: "compaction",
+      seq: 8,
+      turnId: undefined,
+      compactKind: "prune",
+      throughSeq: 4,
+      summary: undefined,
+    };
+    expect(
+      JSON.stringify(
+        buildSummaryRequest({
+          history: [...history, pruned],
+          model: small,
+          throughSeq: 4,
+          mainRequest: main,
+        }).messages,
+      ),
+    ).toContain("输出已省略");
+  });
+  it("锚定最近同模型主请求 input+output（不重复加缓存），新增内容使用 CJK 估算", () => {
+    const history = [
+      assistant(1, 20, 12000),
+      tool(3, 100),
+      {
+        kind: "user" as const,
+        seq: 5,
+        turnId: "t",
+        messageId: "u",
+        content: [{ type: "text" as const, text: "abcd中文" }],
+      },
+    ];
+    expect(buildContext(input(history)).report.estimatedTokens).toBe(12203);
+    expect(buildContext(input([...history, assistant(7, 1, 15000)])).report.estimatedTokens).toBe(
+      15100,
+    );
+    const pure = (history: HistoryEntry[], over: Partial<BuildContextInput> = {}) =>
+      buildContext(
+        input(
+          history.map((entry) =>
+            entry.kind === "assistant" ? { ...entry, usage: undefined } : entry,
+          ),
+          over,
+        ),
+      ).report.estimatedTokens;
+    for (const kind of ["prune", "summary"] as const) {
+      const changed = [
+        ...history,
+        {
+          kind: "compaction" as const,
+          seq: 8,
+          turnId: undefined,
+          compactKind: kind,
+          throughSeq: 2,
+          summary: kind === "summary" ? "brief" : undefined,
+        },
+      ];
+      expect(buildContext(input(changed)).report.estimatedTokens).toBe(pure(changed));
+    }
+    const other = { ...small, ref: { provider: "other", model: "m1" } };
+    expect(buildContext(input(history, { model: other })).report.estimatedTokens).toBe(
+      pure(history, { model: other }),
+    );
+    const events = [
+      ev(6, "session.config_changed", { model: other.ref }),
+      ev(7, "session.config_changed", { model: small.ref }),
+    ];
+    expect(buildContext(input(history, { events })).report.estimatedTokens).toBe(
+      pure(history, { events }),
+    );
+  });
+});
 
 describe("压缩边界与有效历史（context.md 6.3/6.4）", () => {
   const toolEntry = (seq: number, content: string): HistoryEntry => ({
@@ -784,7 +1141,7 @@ describe("自动 L2 与进行中输入保留（context.md 6.5）", () => {
     expect(built.compaction?.kind).toBe("summary");
     expect(built.compaction?.throughSeq).toBe(3);
     expect(built.compaction?.summaryRequest).toBeDefined();
-    expect(built.compaction?.summaryRequest?.tools).toHaveLength(0);
+    expect(built.compaction?.summaryRequest?.tools).toEqual(built.request.tools);
     expect(built.compaction?.summaryRequest?.maxOutputTokens).toBeLessThanOrEqual(4_000);
   });
 

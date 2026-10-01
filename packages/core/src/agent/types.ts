@@ -34,6 +34,7 @@ export const DEFAULT_TURN_CONFIG: TurnConfig = {
 export type IdFactory = (kind: "turn" | "message" | "call") => string;
 
 export interface TurnDeps {
+  compactionThreshold?: string | number | undefined;
   session: Session;
   model: ResolvedModel;
   tools: ToolRegistry;

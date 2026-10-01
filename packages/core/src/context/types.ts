@@ -39,6 +39,16 @@ export interface EnvironmentInfo {
 }
 
 export interface BuildContextInput {
+  compactionThreshold?: string | number | undefined;
+  /** 编排者提供本 Turn 已尝试级别；强制路径不受预防阈值限制。 */
+  compactionState?:
+    | {
+        pruneAttempted?: boolean;
+        summaryAttempted?: boolean;
+        force?: boolean;
+        summaryOnly?: boolean;
+      }
+    | undefined;
   /** 折叠后的历史（SessionState.history 结构） */
   history: readonly HistoryEntry[];
   /** 当前会话清单，独立于可能被压缩的历史 */

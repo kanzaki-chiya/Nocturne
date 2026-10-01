@@ -829,8 +829,17 @@ describe("上下文与运行时命令（Phase 2）", () => {
 
   it("Provider context_overflow：存在边界时先 prune 再重试", async () => {
     const ws = makeTmpDir("nct-rt-ovf-");
-    writeFileSync(path.join(ws, "big.txt"), "y".repeat(20_000));
+    writeFileSync(path.join(ws, "big.txt"), ("y".repeat(200) + "\n").repeat(100));
     const provider = new FakeProvider({
+      // ADR-0037：20k 字符的输出须达到 R，才能测试溢出后的修剪路径。
+      models: [
+        {
+          ...tinyModel,
+          ref: { provider: "fake", model: "fake-model" },
+          contextWindow: 40_000,
+          maxOutputTokens: 8192,
+        },
+      ],
       scripts: [
         [
           {
@@ -870,8 +879,16 @@ describe("上下文与运行时命令（Phase 2）", () => {
 
   it("Provider context_overflow：prune 用尽后升级为 L2 摘要，重注入进行中输入", async () => {
     const ws = makeTmpDir("nct-rt-ovf2-");
-    writeFileSync(path.join(ws, "big.txt"), "y".repeat(20_000));
+    writeFileSync(path.join(ws, "big.txt"), ("y".repeat(200) + "\n").repeat(100));
     const provider = new FakeProvider({
+      models: [
+        {
+          ...tinyModel,
+          ref: { provider: "fake", model: "fake-model" },
+          contextWindow: 40_000,
+          maxOutputTokens: 8192,
+        },
+      ],
       scripts: [
         [
           {
@@ -895,7 +912,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
             error: new ProviderError({ kind: "context_overflow", message: "still too many" }),
           },
         ],
-        // 摘要调用（无工具）
+        // 摘要调用沿用工具声明，但指令要求不调用。
         [
           { type: "text_delta", text: "自动摘要：读取了大文件 big.txt" },
           { type: "finish", reason: "stop" },
@@ -918,9 +935,9 @@ describe("上下文与运行时命令（Phase 2）", () => {
       "prune",
       "summary",
     ]);
-    // 摘要请求是第 4 次模型调用：不带工具、输出受限
+    // 摘要请求是第 4 次模型调用：沿用主请求工具声明、输出受限。
     const summaryReq = provider.requests[3];
-    expect(summaryReq?.tools).toHaveLength(0);
+    expect(summaryReq?.tools).toEqual(provider.requests[2]?.tools);
     expect(summaryReq?.maxOutputTokens).toBeLessThanOrEqual(4_000);
     // 最终请求：摘要覆盖到 tool.completed，且进行中 Turn 的用户输入被重新注入
     const finalText = JSON.stringify(provider.requests[4]?.messages);
@@ -932,10 +949,18 @@ describe("上下文与运行时命令（Phase 2）", () => {
     await session.close();
   });
 
-  it("自动 L2 摘要失败且不超预算：降级为未压缩继续并告警", async () => {
+  it("Provider context_overflow：L2 摘要失败以 compaction_failed 结束", async () => {
     const ws = makeTmpDir("nct-rt-ovf3-");
-    writeFileSync(path.join(ws, "big.txt"), "y".repeat(20_000));
+    writeFileSync(path.join(ws, "big.txt"), ("y".repeat(200) + "\n").repeat(100));
     const provider = new FakeProvider({
+      models: [
+        {
+          ...tinyModel,
+          ref: { provider: "fake", model: "fake-model" },
+          contextWindow: 40_000,
+          maxOutputTokens: 8192,
+        },
+      ],
       scripts: [
         [
           {
@@ -983,6 +1008,184 @@ describe("上下文与运行时命令（Phase 2）", () => {
     await session.close();
   });
 
+  it("compact() 保留最近报错与改动，文件提示在恢复后相同，摘要工具调用被忽略", async () => {
+    const ws = makeTmpDir("nct-rt-retain-");
+    writeFileSync(path.join(ws, "old.txt"), "旧".repeat(6000));
+    writeFileSync(path.join(ws, "recent.txt"), "最新报错 E42：改动后重试");
+    const provider = new FakeProvider({
+      models: [{ ...tinyModel, contextWindow: 20_000, maxOutputTokens: 1000 }],
+      scripts: [
+        [
+          { type: "tool_call", toolCallId: "old", name: "read", input: { path: "old.txt" } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "旧文件已检查" },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "tool_call", toolCallId: "recent", name: "read", input: { path: "recent.txt" } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "刚修改了最近的报错" },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "text_delta", text: "旧工作摘要" },
+          {
+            type: "tool_call",
+            toolCallId: "ignored",
+            name: "edit",
+            input: { path: "old.txt", old: "旧", new: "破坏" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, ws, { provider });
+    const session = await runtime.createSession({ model: "fake/tiny" });
+    await session.submit({ text: "查看旧文件" });
+    await session.submit({ text: "检查最新的报错" });
+    const events = collect(session);
+    await session.compact();
+    expect(events.filter((event) => event.type === "tool.started")).toHaveLength(0);
+    expect(readFileSync(path.join(ws, "old.txt"), "utf8")).toBe("旧".repeat(6000));
+    const projected = session.describeContext().request;
+    const text = JSON.stringify(projected.messages);
+    expect(text).toContain("旧工作摘要");
+    expect(text).toContain("本会话最近读过或改过的文件");
+    expect(text).toContain("old.txt");
+    expect(text).toContain("最新报错 E42：改动后重试");
+    expect(text).toContain("刚修改了最近的报错");
+    expect(text).not.toContain("旧旧旧");
+    await session.close();
+    const restored = await runtime.resumeSession(session.id);
+    expect(restored.describeContext().request).toEqual(projected);
+    await restored.close();
+  });
+
+  it("压缩阈值设置即时用于当前与恢复会话的下一 Turn，预防摘要失败只尝试一次", async () => {
+    const ws = makeTmpDir("nct-rt-threshold-");
+    const config = await loadConfig(createPlatform(), {
+      nocturneHome: makeTmpDir("nct-rt-home-"),
+      env: () => undefined,
+    });
+    const provider = new FakeProvider({
+      models: [{ ...tinyModel, contextWindow: 20_000, maxOutputTokens: 1000 }],
+      scripts: [
+        [
+          { type: "text_delta", text: "第一轮" },
+          { type: "usage", usage: { inputTokens: 16_000, outputTokens: 100 } },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "text_delta", text: "未压缩" },
+          { type: "usage", usage: { inputTokens: 16_100, outputTokens: 100 } },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "tool_call", toolCallId: "ignored", name: "read", input: { path: "never" } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "摘要失败仍可继续" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: makeTmpDir("nct-rt-sessions-"),
+      providers: [provider],
+      config,
+    });
+    const session = await runtime.createSession({ model: "fake/tiny" });
+    await session.submit({ text: "第一轮" });
+    await runtime.updateSettings({ "compaction.threshold": "200k" });
+    const events = collect(session);
+    expect(await session.submit({ text: "第二轮" })).toBe("done");
+    expect(provider.requests).toHaveLength(2);
+    expect(events.filter((event) => event.type === "context.compacted")).toHaveLength(0);
+    await session.close();
+    const restored = await runtime.resumeSession(session.id);
+    await runtime.updateSettings({ "compaction.threshold": "80%" });
+    const resumedEvents = collect(restored);
+    expect(await restored.submit({ text: "第三轮" })).toBe("done");
+    expect(provider.requests).toHaveLength(4);
+    expect(
+      resumedEvents.filter(
+        (event) => event.type === "runtime.warning" && event.payload.code === "compaction_failed",
+      ),
+    ).toHaveLength(1);
+    expect(
+      resumedEvents.filter(
+        (event) => event.type === "context.compacted" || event.type === "tool.started",
+      ),
+    ).toHaveLength(0);
+    expect(JSON.stringify(provider.requests[3]?.messages)).toContain("第一轮");
+    expect(provider.requests[2]?.reasoningEffort).toBeUndefined();
+    await restored.close();
+  });
+
+  it("预防摘要失败后上游溢出，仍可尝试尚未用过的修剪且不重复摘要", async () => {
+    const ws = makeTmpDir("nct-rt-failed-summary-");
+    writeFileSync(path.join(ws, "large.txt"), ("新".repeat(100) + "\n").repeat(50));
+    const config = await loadConfig(createPlatform(), {
+      nocturneHome: makeTmpDir("nct-rt-home-"),
+      env: () => undefined,
+    });
+    await config.updateSettings({ "compaction.threshold": "80%" });
+    const provider = new FakeProvider({
+      models: [{ ...tinyModel, contextWindow: 20_000, maxOutputTokens: 1000 }],
+      scripts: [
+        [
+          { type: "text_delta", text: "第一轮" },
+          { type: "usage", usage: { inputTokens: 16_000, outputTokens: 100 } },
+          { type: "finish", reason: "stop" },
+        ],
+        [{ type: "finish", reason: "stop" }],
+        [
+          { type: "tool_call", toolCallId: "read", name: "read", input: { path: "large.txt" } },
+          { type: "usage", usage: { inputTokens: 1000, outputTokens: 100 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "context_overflow", message: "too many" }),
+          },
+        ],
+        [
+          { type: "text_delta", text: "修剪后继续" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: makeTmpDir("nct-rt-sessions-"),
+      providers: [provider],
+      config,
+    });
+    const session = await runtime.createSession({ model: "fake/tiny" });
+    await session.submit({ text: "第一轮" });
+    const events = collect(session);
+    expect(await session.submit({ text: "读取大文件" })).toBe("done");
+    expect(provider.requests).toHaveLength(5);
+    expect(
+      events
+        .filter((event) => event.type === "context.compacted")
+        .map((event) => event.payload.kind),
+    ).toEqual(["prune"]);
+    expect(
+      events.filter(
+        (event) => event.type === "runtime.warning" && event.payload.code === "compaction_failed",
+      ),
+    ).toHaveLength(1);
+    await session.close();
+  });
+
   it("compact()：一次模型调用写 context.compacted(summary)，历史被折叠", async () => {
     const provider = new FakeProvider({
       scripts: [
@@ -1010,9 +1213,9 @@ describe("上下文与运行时命令（Phase 2）", () => {
     const compacted = events.find((e) => e.type === "context.compacted");
     expect(compacted?.type === "context.compacted" && compacted.payload.kind).toBe("summary");
     expect(compacted?.type === "context.compacted" && compacted.payload.summary).toContain("摘要");
-    // 摘要请求拿到了转录文本
+    // 摘要请求沿用主请求投影。
     const summaryReq = provider.requests[1];
-    expect(summaryReq?.tools).toHaveLength(0);
+    expect(summaryReq?.tools).toEqual(provider.requests[0]?.tools);
     const userMsg = summaryReq?.messages.find((m) => m.role === "user");
     expect(userMsg?.role === "user" && JSON.stringify(userMsg.content)).toContain("hi");
 

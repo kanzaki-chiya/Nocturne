@@ -235,6 +235,14 @@ export async function loadConfig(
     return (
       [
         [
+          "compaction.threshold",
+          "compaction.threshold",
+          String(merged.resolved.compactionThreshold ?? "90%"),
+          saved.compaction?.threshold === undefined
+            ? undefined
+            : String(saved.compaction.threshold),
+        ],
+        [
           "permissions.preset",
           "permissions.preset",
           merged.resolved.permissionPreset ?? "default",

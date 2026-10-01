@@ -69,6 +69,7 @@ export interface MergeResult {
       | "shell"
       | "shellPath"
       | "permissions.preset"
+      | "compaction.threshold"
       | "permission.reviewer",
       LayerKind
     >
@@ -279,6 +280,10 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     }
     if (file.permissions?.preset !== undefined) origins["permissions.preset"] = kind;
     if (file.model !== undefined) out.model = file.model;
+    if (file.compaction?.threshold !== undefined) {
+      out.compactionThreshold = file.compaction.threshold;
+      origins["compaction.threshold"] = kind;
+    }
     if (file.reasoningEffort !== undefined) out.reasoningEffort = file.reasoningEffort;
     // ADR-0034：所有 shell 声明均在配置合并链里处理。
     if (file.shell !== undefined) out.shell = file.shell;

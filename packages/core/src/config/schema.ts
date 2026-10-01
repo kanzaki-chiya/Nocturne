@@ -9,6 +9,7 @@ import {
   REASONING_EFFORT_LEVELS,
   REASONING_EFFORT_ORDER,
   PERMISSION_PRESET_NAMES,
+  parseCompactionThreshold,
 } from "../protocol/index.js";
 import type { ConfigFile } from "./types.js";
 import { ConfigError } from "./errors.js";
@@ -159,6 +160,21 @@ const mcpServerEntrySchema = z.object({
 });
 
 const configFileSchema = z.object({
+  compaction: z
+    .object({
+      threshold: z
+        .union([z.string(), z.number()])
+        .refine((value) => {
+          try {
+            parseCompactionThreshold(value);
+            return true;
+          } catch {
+            return false;
+          }
+        }, "无效的压缩阈值")
+        .optional(),
+    })
+    .optional(),
   modelsDev: z.literal(false).optional(),
   model: z.string().min(1).optional(),
   /** 会话默认思考档位（ADR-0018） */

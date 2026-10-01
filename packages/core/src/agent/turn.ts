@@ -11,9 +11,6 @@ import {
   attachmentsToLoad,
   buildContext,
   buildSummaryRequest,
-  chooseSummaryBoundary,
-  compactionCutoffs,
-  lastClosedBoundary,
   runSummaryCall,
   type CompactionPlan,
 } from "../context/index.js";
@@ -213,6 +210,7 @@ export async function runTurn(
   // context.md 6.5：每类压缩每个 Turn 至多一次（成功或失败均不重复）
   let pruneAttempted = false;
   let summaryAttempted = false;
+  let forceCompaction = false;
   /** 最近一次请求实际携带的思考档位（invalid_request 定向提示用） */
   let sentEffort: string | undefined;
   // 思考档位快照（ADR-0018 §3）：Turn 开始时对会话意图按模型可用集合
@@ -336,6 +334,8 @@ export async function runTurn(
         instructions: deps.instructions,
         environment: deps.environment,
         events: session.durableEvents(),
+        compactionThreshold: deps.compactionThreshold,
+        compactionState: { pruneAttempted, summaryAttempted, force: forceCompaction },
         ...(deps.basePrompt !== undefined ? { basePrompt: deps.basePrompt } : {}),
         ...(attachmentData !== undefined ? { attachmentData } : {}),
       });
@@ -367,6 +367,7 @@ export async function runTurn(
       const plan = built.compaction;
       if (plan?.kind === "prune" && !pruneAttempted) {
         pruneAttempted = true;
+        forceCompaction = false;
         status("compacting");
         await session.emit(
           "context.compacted",
@@ -380,7 +381,10 @@ export async function runTurn(
         status("compacting");
         const ok = await runSummaryPlan(plan);
         if (aborted(signal)) return await finish("aborted");
-        if (ok) continue;
+        if (ok) {
+          forceCompaction = false;
+          continue;
+        }
         if (!built.mustCompact) {
           session.emitEphemeral(
             "runtime.warning",
@@ -435,39 +439,9 @@ export async function runTurn(
         // 6.5：Provider 报告 context_overflow → 逐档升级：
         // 先 L1 修剪（有新边界时），否则 L2 摘要；都不可用才按 6.6 结束
         if (isProviderError(e) && e.kind === "context_overflow") {
-          const events = session.durableEvents();
-          const { summaryThrough, pruneThrough } = compactionCutoffs(state.history);
-          const boundary = lastClosedBoundary(events);
-          if (
-            !pruneAttempted &&
-            boundary !== undefined &&
-            boundary > Math.max(summaryThrough, pruneThrough)
-          ) {
-            pruneAttempted = true;
-            status("compacting");
-            await session.emit(
-              "context.compacted",
-              { kind: "prune", throughSeq: boundary },
-              { turnId },
-            );
+          if (!pruneAttempted || !summaryAttempted) {
+            forceCompaction = true;
             continue;
-          }
-          if (!summaryAttempted) {
-            summaryAttempted = true;
-            const summaryBoundary = chooseSummaryBoundary(
-              events,
-              session.state().history,
-              deps.model.model,
-            );
-            if (summaryBoundary !== undefined) {
-              status("compacting");
-              const ok = await runSummaryPlan({
-                kind: "summary",
-                throughSeq: summaryBoundary,
-              });
-              if (aborted(signal)) return await finish("aborted");
-              if (ok) continue;
-            }
           }
           return await finish("error", {
             code: "compaction_failed",

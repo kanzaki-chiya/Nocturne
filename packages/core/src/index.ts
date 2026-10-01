@@ -12,8 +12,7 @@ import {
 } from "./agent/index.js";
 import {
   buildContext,
-  buildSummaryRequest,
-  chooseSummaryBoundary,
+  attachmentsToLoad,
   runSummaryCall,
   type BuiltContext,
   type EnvironmentInfo,
@@ -1088,6 +1087,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         // 子会话继承父会话的思考档位（ADR-0018 §4；受子模型可用档位约束，
         // 就近降档在 launcher 内完成）
         reasoningEffort: () => session.state().config.reasoningEffort,
+        compactionThreshold: () =>
+          config?.resolvedSettings(session.state().meta.workspaceRoot).compactionThreshold,
         nocturneVersion: options.version ?? NOCTURNE_VERSION,
         turnConfig,
         parentFailedSignal: session.failedSignal,
@@ -1247,6 +1248,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             throw new RuntimeCommandError("invalid_model", model.model.unavailable.reason);
           }
           const deps: TurnDeps = {
+            compactionThreshold: config?.resolvedSettings(session.state().meta.workspaceRoot)
+              .compactionThreshold,
             session,
             model,
             tools,
@@ -1500,18 +1503,30 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           await rebuildProviders();
           const events = session.durableEvents();
           const history = session.state().history;
-          const boundary = chooseSummaryBoundary(events, history, model.model);
-          if (boundary === undefined) {
+          const attachmentData = new Map<string, string>();
+          for (const ref of attachmentsToLoad(history, model.model, events)) {
+            const bytes = await execEnv.attachments?.load(ref);
+            if (bytes !== undefined)
+              attachmentData.set(ref.sha256, Buffer.from(bytes).toString("base64"));
+          }
+          const plan = buildContext({
+            history,
+            todos: session.state().todos,
+            model: model.model,
+            tools: tools.specs(model.model.capabilities.editTool),
+            instructions,
+            environment,
+            events,
+            attachmentData,
+            compactionState: { force: true, summaryOnly: true },
+          }).compaction;
+          if (plan?.summaryRequest === undefined) {
             throw new RuntimeCommandError(
               "compaction_failed",
               "没有可行的压缩边界（历史为空、最新摘要之后没有新内容，或摘要请求在任何边界下都装不进窗口）",
             );
           }
-          const request = buildSummaryRequest({
-            history,
-            model: model.model,
-            throughSeq: boundary,
-          });
+          const request = { ...plan.summaryRequest, sessionId: session.id };
           // context.md 6.6：摘要请求只尝试一轮，不嵌套压缩
           const summary = await runSummaryCall(
             model,
@@ -1522,7 +1537,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           );
           await session.emit(
             "context.compacted",
-            { kind: "summary", throughSeq: boundary, summary },
+            { kind: "summary", throughSeq: plan.throughSeq, summary },
             {},
           );
         } catch (e) {
@@ -1550,6 +1565,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       describeContext() {
         const state = session.state();
         return buildContext({
+          compactionThreshold: config?.resolvedSettings(state.meta.workspaceRoot)
+            .compactionThreshold,
           history: state.history,
           todos: state.todos,
           model: model.model,

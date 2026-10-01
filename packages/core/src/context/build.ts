@@ -1,7 +1,7 @@
 /**
  * Context Builder（context.md）：从会话历史组装一个装得进窗口的 ModelRequest。
  * 组装顺序（稳定前缀在前）：基础系统提示 → 工具规格 → 项目指令 → 环境信息 → 历史。
- * Phase 2：应用压缩边界（6.4），并在估算超过阈值时给出 L1 修剪计划（6.5）。
+ * 应用压缩边界（6.4），按阈值与保留区给出两级压缩计划（6.5）。
  */
 import type {
   ContentBlock,
@@ -10,6 +10,7 @@ import type {
   ImageAttachment,
   ModelProtocol,
 } from "../protocol/index.js";
+import { parseCompactionThreshold } from "../protocol/index.js";
 import type {
   ModelImage,
   ModelInfo,
@@ -32,9 +33,101 @@ const SUMMARY_SYSTEM = `你是 Nocturne 会话的压缩器。把给定的会话�
 摘要必须包含：用户的总体目标、已完成的工作及结论、关键文件与工具调用结果、未决事项与下一步建议。
 只输出摘要正文，不要寒暄、不要复述指令。`;
 
-/** 单字符估算 token（context.md 第 5 节：字符数 / 4） */
-export function estimateTokens(chars: number): number {
-  return Math.ceil(chars / 4);
+/** CJK 约 1 字 / token，其余字符约 4 字 / token。 */
+export function estimateTokens(text: string): number {
+  let units = 0;
+  for (const char of text) {
+    units +=
+      /[\p{Unified_Ideograph}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script=Hangul}\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]/u.test(
+        char,
+      )
+        ? 4
+        : 1;
+  }
+  return Math.ceil(units / 4);
+}
+
+function messageTokens(message: ModelMessage): number {
+  return (
+    (message.role === "tool"
+      ? estimateTokens(message.content)
+      : message.content.reduce((total, block) => total + estimateTokens(block.text), 0) +
+        (message.role === "assistant" ? estimateTokens(JSON.stringify(message.toolCalls)) : 0)) +
+    (message.role !== "assistant" ? (message.images?.length ?? 0) * IMAGE_TOKEN_ESTIMATE : 0)
+  );
+}
+
+function requestTokens(request: ModelRequest): number {
+  return (
+    request.system.reduce((total, block) => total + estimateTokens(block.text), 0) +
+    estimateTokens(JSON.stringify(request.tools)) +
+    request.messages.reduce((total, message) => total + messageTokens(message), 0)
+  );
+}
+
+export function retentionTokens(budget: number): number {
+  return Math.min(Math.max(20_000, Math.min(40_000, 0.2 * budget)), 0.25 * budget);
+}
+
+function retentionBoundary(
+  events: readonly DurableEvent[],
+  history: readonly HistoryEntry[],
+  model: ModelInfo,
+): number | undefined {
+  const { summaryThrough } = compactionCutoffs(history);
+  const boundaries = closedBoundaries(events).filter(
+    (boundary) =>
+      boundary > summaryThrough &&
+      history.some(
+        (entry) =>
+          entry.kind !== "compaction" && entry.seq > summaryThrough && entry.seq <= boundary,
+      ),
+  );
+  const limit = retentionTokens(inputBudgetTokens(model));
+  // ponytail: 候选边界扫描为 O(n²)；超长事件日志成为瓶颈时改用投影 token 的后缀和。
+  for (const boundary of boundaries) {
+    const tail = history.filter(
+      (entry) =>
+        entry.seq > boundary && (entry.kind !== "compaction" || entry.compactKind === "prune"),
+    );
+    const tokens = projectedTokens(tail, model);
+    if (tokens <= limit) return boundary;
+  }
+  return boundaries.at(-1);
+}
+
+function projectedTokens(
+  history: readonly HistoryEntry[],
+  model: ModelInfo,
+  data?: ReadonlyMap<string, string>,
+  events?: readonly DurableEvent[],
+): number {
+  const virtual = new Map<ModelMessage, number>();
+  const projected = historyToMessages(
+    history,
+    model.ref.provider,
+    model.protocol,
+    {
+      mode: data === undefined ? "estimate" : "project",
+      supported: model.capabilities.imageInput,
+      data,
+      virtual,
+      ...(data !== undefined ? { inCap: new Set(imageRefsInCap(history, events)) } : {}),
+    },
+    events,
+  );
+  projected.messages.push(...projected.deferred);
+  const cap = enforceImageCap(projected.messages, virtual);
+  return (
+    projected.messages.reduce(
+      (total, message) =>
+        total +
+        messageTokens(message) -
+        (message.role !== "assistant" ? (message.images?.length ?? 0) * IMAGE_TOKEN_ESTIMATE : 0),
+      0,
+    ) +
+    cap.count * IMAGE_TOKEN_ESTIMATE
+  );
 }
 
 /** 输出预留上限：取 min(model.maxOutputTokens, 此值) */
@@ -434,6 +527,7 @@ function historyToMessages(
   currentModelProvider: string,
   currentModelProtocol: ModelProtocol | undefined,
   images?: ImageProjectionOpts,
+  events?: readonly DurableEvent[],
 ): HistoryProjection {
   const messages: ModelMessage[] = [];
   let chars = 0;
@@ -441,6 +535,27 @@ function historyToMessages(
   // 未提供投影参数（历史调用方）按"不支持看图"处理：附件 → 不支持占位
   const imgOpts: ImageProjectionOpts = images ?? { mode: "estimate", supported: false };
   const { summaryThrough, pruneThrough } = compactionCutoffs(history);
+  const latestSummary = history.find(
+    (entry) =>
+      entry.kind === "compaction" &&
+      entry.compactKind === "summary" &&
+      entry.throughSeq === summaryThrough,
+  );
+  if (latestSummary?.kind === "compaction" && latestSummary.summary !== undefined) {
+    const paths = new Set<string>();
+    for (const event of [...(events ?? [])].reverse()) {
+      if (event.seq > summaryThrough || event.type !== "tool.started") continue;
+      for (const subject of event.payload.subjects) {
+        if ((subject.kind === "read" || subject.kind === "edit") && paths.size < 20)
+          paths.add(subject.target);
+      }
+    }
+    const text =
+      `[会话历史摘要]\n${latestSummary.summary}` +
+      (paths.size > 0 ? `\n\n本会话最近读过或改过的文件：\n${[...paths].join("\n")}` : "");
+    chars += text.length;
+    messages.push({ role: "user", content: [{ type: "text", text }] });
+  }
   // 协议邻接约束（OpenAI/Anthropic）：assistant 携带的 toolCalls 必须由对应
   // tool 结果紧随。note 类注入（/shell 切换说明可在 Turn 进行中写入）若落在
   // 未决调用之间会违反邻接——先排队，等全部未决调用的结果齐了再放行；
@@ -520,14 +635,6 @@ function historyToMessages(
         break;
       }
       case "compaction": {
-        if (entry.compactKind === "summary" && entry.summary !== undefined) {
-          const text = `[会话历史摘要]\n${entry.summary}`;
-          chars += text.length;
-          inject({
-            role: "user",
-            content: [{ type: "text", text }],
-          });
-        }
         // prune 事件不产生消息，只改变其上界之前工具结果的呈现
         break;
       }
@@ -584,15 +691,50 @@ export interface BuildSummaryRequestInput {
   model: ModelInfo;
   /** 摘要覆盖到该 seq 为止（必须是闭合步骤边界） */
   throughSeq: number;
+  /** 已投影的主请求：直接截取，避免图片、修剪与缓存前缀出现两种口径。 */
+  mainRequest?: ModelRequest | undefined;
+  events?: readonly DurableEvent[] | undefined;
 }
 
 /**
- * 组装一次摘要请求：上一个摘要 + 其后到边界的历史（应用既有修剪/摘要规则）
- * 渲染为转录文本，附上摘要指令。
+ * 组装一次摘要请求：沿用主请求投影直到边界，追加摘要指令；
+ * 沿用前缀装不下（或未提供主请求）时，退回独立 system 加转录。
  */
 export function buildSummaryRequest(input: BuildSummaryRequestInput): ModelRequest {
   const { model, throughSeq } = input;
-  const covered = input.history.filter((e) => e.seq <= throughSeq);
+  const covered = input.history.filter((e) => e.kind === "compaction" || e.seq <= throughSeq);
+  const maxOutputTokens = Math.min(
+    model.maxOutputTokens ?? SUMMARY_MAX_OUTPUT_TOKENS,
+    SUMMARY_MAX_OUTPUT_TOKENS,
+  );
+  if (input.mainRequest !== undefined) {
+    const main = input.mainRequest;
+    const count = historyToMessages(
+      covered,
+      model.ref.provider,
+      model.protocol,
+      undefined,
+      input.events,
+    ).messages.length;
+    const request: ModelRequest = {
+      model: main.model,
+      ...(main.protocol !== undefined ? { protocol: main.protocol } : {}),
+      system: main.system,
+      tools: main.tools,
+      messages: [
+        ...main.messages.slice(0, count),
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `请把以上对话压缩为摘要，不要调用工具。\n${SUMMARY_SYSTEM}` },
+          ],
+        },
+      ],
+      cachePrefix: { systemBlocks: main.system.length, messages: count },
+      maxOutputTokens,
+    };
+    if (requestTokens(request) <= inputBudgetTokens(model, maxOutputTokens)) return request;
+  }
   const transcript = renderTranscript(covered, model.ref.provider, model.protocol);
   const userText = `以下是会话历史转录，请按系统提示压缩为摘要。\n\n${transcript}`;
   return {
@@ -610,7 +752,7 @@ export function buildSummaryRequest(input: BuildSummaryRequestInput): ModelReque
 }
 
 /**
- * 6.6 边界回退：从最新闭合边界向前找第一个"摘要请求装得进窗口"的边界；
+ * 6.6 边界回退：从保留区选中的边界向前找第一个"摘要请求装得进窗口"的边界；
  * 候选边界必须晚于最新摘要的 throughSeq 且其后确有新的非压缩历史——
  * 否则等于对同一范围重复压缩（旧摘要不会被替代，反而叠加）。
  * 不存在任何可行边界时返回 undefined（调用方按 compaction_failed 处理）。
@@ -619,10 +761,17 @@ export function chooseSummaryBoundary(
   events: readonly DurableEvent[],
   history: readonly HistoryEntry[],
   model: ModelInfo,
+  mainRequest?: ModelRequest,
 ): number | undefined {
-  const budget = inputBudgetTokens(model, SUMMARY_MAX_OUTPUT_TOKENS);
+  const budget = inputBudgetTokens(
+    model,
+    Math.min(model.maxOutputTokens ?? SUMMARY_MAX_OUTPUT_TOKENS, SUMMARY_MAX_OUTPUT_TOKENS),
+  );
   const { summaryThrough } = compactionCutoffs(history);
-  const boundaries = closedBoundaries(events);
+  const preferred = retentionBoundary(events, history, model);
+  const boundaries = closedBoundaries(events).filter(
+    (boundary) => preferred !== undefined && boundary <= preferred,
+  );
   for (let i = boundaries.length - 1; i >= 0; i--) {
     const b = boundaries[i];
     if (b === undefined) continue;
@@ -631,16 +780,8 @@ export function chooseSummaryBoundary(
       (e) => e.seq > summaryThrough && e.seq <= b && e.kind !== "compaction",
     );
     if (!hasNewContent) continue;
-    const req = buildSummaryRequest({ history, model, throughSeq: b });
-    const chars =
-      req.system.reduce((a, s) => a + s.text.length, 0) +
-      req.messages.reduce(
-        (a, m) =>
-          a +
-          (m.role === "tool" ? m.content.length : m.content.reduce((n, b) => n + b.text.length, 0)),
-        0,
-      );
-    if (estimateTokens(chars) <= budget) return b;
+    const req = buildSummaryRequest({ history, model, throughSeq: b, mainRequest, events });
+    if (requestTokens(req) <= budget) return b;
   }
   return undefined;
 }
@@ -661,6 +802,62 @@ export function lastOpenTurnId(events: readonly DurableEvent[]): string | undefi
   return [...open].at(-1);
 }
 
+function anchoredEstimate(input: BuildContextInput): number | undefined {
+  const ref = input.model.ref;
+  const anchor = input.history.findLast(
+    (entry) => entry.kind === "assistant" && entry.usage !== undefined,
+  );
+  if (
+    anchor?.kind !== "assistant" ||
+    anchor.usage === undefined ||
+    anchor.model.provider !== ref.provider ||
+    anchor.model.model !== ref.model
+  )
+    return undefined;
+  const tail = input.history.filter((entry) => entry.seq > anchor.seq);
+  if (
+    tail.some(
+      (entry) =>
+        entry.kind === "compaction" ||
+        (entry.kind === "assistant" &&
+          (entry.model.provider !== ref.provider || entry.model.model !== ref.model)),
+    )
+  )
+    return undefined;
+  if (
+    input.events?.some(
+      (event) =>
+        event.seq > anchor.seq &&
+        event.type === "session.config_changed" &&
+        event.payload.model !== undefined &&
+        (event.payload.model.provider !== ref.provider || event.payload.model.model !== ref.model),
+    )
+  )
+    return undefined;
+  const virtual = new Map<ModelMessage, number>();
+  const projection = historyToMessages(tail, ref.provider, input.model.protocol, {
+    mode: input.attachmentData === undefined ? "estimate" : "project",
+    supported: input.model.capabilities.imageInput,
+    data: input.attachmentData,
+    virtual,
+  });
+  projection.messages.push(...projection.deferred, ...(input.pendingMessages ?? []));
+  const cap = enforceImageCap(projection.messages, virtual);
+  const textTokens = projection.messages.reduce(
+    (total, message) =>
+      total +
+      messageTokens(message) -
+      (message.role !== "assistant" ? (message.images?.length ?? 0) * IMAGE_TOKEN_ESTIMATE : 0),
+    0,
+  );
+  return (
+    anchor.usage.inputTokens +
+    anchor.usage.outputTokens +
+    textTokens +
+    cap.count * IMAGE_TOKEN_ESTIMATE
+  );
+}
+
 export function buildContext(input: BuildContextInput): BuiltContext {
   const { model } = input;
 
@@ -672,7 +869,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       name: "system",
       source: input.basePrompt !== undefined ? "custom base prompt" : "nocturne base prompt",
       chars: basePrompt.length,
-      estimatedTokens: estimateTokens(basePrompt.length),
+      estimatedTokens: estimateTokens(basePrompt),
     },
   ];
 
@@ -682,7 +879,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     name: "tools",
     source: `${input.tools.length} tools`,
     chars: toolsJson.length,
-    estimatedTokens: estimateTokens(toolsJson.length),
+    estimatedTokens: estimateTokens(toolsJson),
   });
 
   // 3. 项目指令（用户级 + 各级目录）
@@ -697,7 +894,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       name: "instructions",
       source: instrFiles.map((f) => f.source).join(", "),
       chars: text.length,
-      estimatedTokens: estimateTokens(text.length),
+      estimatedTokens: estimateTokens(text),
       truncated: instrFiles.some((f) => f.truncated === true) || undefined,
     });
   }
@@ -709,7 +906,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     name: "environment",
     source: input.environment.cwd,
     chars: envText.length,
-    estimatedTokens: estimateTokens(envText.length),
+    estimatedTokens: estimateTokens(envText),
   });
 
   // ADR-0028 修订：清单不进 system（每次更新会让其后整段历史的提示缓存失效），
@@ -721,7 +918,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       name: "todos",
       source: `${input.todos?.length ?? 0} items`,
       chars: todoText.length,
-      estimatedTokens: estimateTokens(todoText.length),
+      estimatedTokens: estimateTokens(todoText),
     });
   }
 
@@ -743,7 +940,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     entries,
     unsettled,
     deferred,
-  } = historyToMessages(input.history, model.ref.provider, model.protocol, imageOpts);
+  } = historyToMessages(input.history, model.ref.provider, model.protocol, imageOpts, input.events);
   // context.md 6.5：进行中 Turn 的 message.user 被摘要覆盖时重新注入，
   // 保证"当前任务"不因压缩丢失（恢复投影中 open Turn 同理）
   const { summaryThrough: summaryCut } = compactionCutoffs(input.history);
@@ -804,44 +1001,29 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     name: "history",
     source: `${entries} entries`,
     chars: historyChars + pendingChars + reinjectedChars + imageCap.addedChars,
-    estimatedTokens: estimateTokens(
-      historyChars + pendingChars + reinjectedChars + imageCap.addedChars,
-    ),
+    estimatedTokens:
+      messages.reduce((total, message) => total + messageTokens(message), 0) -
+      (todoText !== undefined ? estimateTokens(todoText) : 0) -
+      messages.reduce(
+        (total, message) =>
+          total +
+          (message.role !== "assistant" ? (message.images?.length ?? 0) * IMAGE_TOKEN_ESTIMATE : 0),
+        0,
+      ),
   });
 
   // 预算（context.md 第 5 节）；图片按每张 1600 token 固定估算加入总数
   const budgetTokens = inputBudgetTokens(model);
   const totalChars = sections.reduce((a, s) => a + s.chars, 0);
   const imageTokens = imageCap.count * IMAGE_TOKEN_ESTIMATE;
-  const estimated = sections.reduce((a, s) => a + s.estimatedTokens, 0) + imageTokens;
+  const estimated =
+    anchoredEstimate(input) ?? sections.reduce((a, s) => a + s.estimatedTokens, 0) + imageTokens;
   const overBudget = estimated > budgetTokens;
 
   // 6.5：估算超过阈值（或已超预算）→ 两级压缩计划：
   //   存在"最新压缩边界之后"的新闭合边界 → 先 L1 修剪（便宜、立刻生效）；
   //   无新边界（修剪已用过或没有可剪内容）→ L2 摘要计划（携带请求）。
   // 调用方每类每 Turn 至多执行一次；都失败且仍超预算 → 6.6 报错路径。
-  const { summaryThrough, pruneThrough } = compactionCutoffs(input.history);
-  let compaction: CompactionPlan | undefined;
-  if (input.events !== undefined && estimated > PRUNE_THRESHOLD * budgetTokens) {
-    const boundary = lastClosedBoundary(input.events);
-    if (boundary !== undefined && boundary > Math.max(summaryThrough, pruneThrough)) {
-      compaction = { kind: "prune", throughSeq: boundary };
-    } else {
-      const summaryBoundary = chooseSummaryBoundary(input.events, input.history, model);
-      if (summaryBoundary !== undefined) {
-        compaction = {
-          kind: "summary",
-          throughSeq: summaryBoundary,
-          summaryRequest: buildSummaryRequest({
-            history: input.history,
-            model,
-            throughSeq: summaryBoundary,
-          }),
-        };
-      }
-    }
-  }
-
   const request: ModelRequest = {
     model: model.ref.model,
     // ADR-0026 §4：生效协议随请求带给路由 Provider（不透明数据，不解释）
@@ -854,6 +1036,68 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     // 可缓存前缀：全部 system 块（base + 指令 + 环境）与末尾任务清单之前的全部消息
     cachePrefix: { systemBlocks: system.length, messages: cacheableMessages },
   };
+  const { summaryThrough, pruneThrough } = compactionCutoffs(input.history);
+  const threshold = parseCompactionThreshold(input.compactionThreshold ?? "90%");
+  const summaryThreshold = Math.min(
+    budgetTokens,
+    threshold.unit === "percent" ? (threshold.value / 100) * budgetTokens : threshold.value,
+  );
+  const forced = overBudget || input.compactionState?.force === true;
+  let compaction: CompactionPlan | undefined;
+  if (
+    input.events !== undefined &&
+    (forced ||
+      (summaryThreshold < budgetTokens &&
+        estimated > Math.min(PRUNE_THRESHOLD * budgetTokens, summaryThreshold)))
+  ) {
+    const boundary = retentionBoundary(input.events, input.history, model);
+    if (
+      !input.compactionState?.pruneAttempted &&
+      !input.compactionState?.summaryOnly &&
+      boundary !== undefined &&
+      boundary > Math.max(summaryThrough, pruneThrough)
+    ) {
+      const reclaimed =
+        projectedTokens(input.history, model, input.attachmentData, input.events) -
+        projectedTokens(
+          [
+            ...input.history,
+            {
+              kind: "compaction",
+              seq: Math.max(0, ...input.history.map((entry) => entry.seq)) + 1,
+              turnId: undefined,
+              compactKind: "prune",
+              throughSeq: boundary,
+              summary: undefined,
+            },
+          ],
+          model,
+          input.attachmentData,
+          input.events,
+        );
+      if (reclaimed >= Math.min(20_000, 0.1 * budgetTokens))
+        compaction = { kind: "prune", throughSeq: boundary };
+    }
+    if (
+      compaction === undefined &&
+      !input.compactionState?.summaryAttempted &&
+      (forced || estimated > summaryThreshold)
+    ) {
+      const summaryBoundary = chooseSummaryBoundary(input.events, input.history, model, request);
+      if (summaryBoundary !== undefined)
+        compaction = {
+          kind: "summary",
+          throughSeq: summaryBoundary,
+          summaryRequest: buildSummaryRequest({
+            history: input.history,
+            model,
+            throughSeq: summaryBoundary,
+            mainRequest: request,
+            events: input.events,
+          }),
+        };
+    }
+  }
 
   return {
     request,
@@ -879,6 +1123,6 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     // 调用方先执行 compaction（若有），执行后重建；无计划可用且仍超预算
     // 才进入 6.6 的"必须压缩却失败"路径
     compaction,
-    mustCompact: overBudget,
+    mustCompact: forced,
   };
 }

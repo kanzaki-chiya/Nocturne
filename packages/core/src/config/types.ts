@@ -158,6 +158,7 @@ export type SecurityReviewerConfig =
 
 /** 各层配置字段共用的 schema（config.md 第 2 节）；程序从不改写 config.json */
 export interface ConfigFile {
+  compaction?: { threshold?: string | number | undefined } | undefined;
   /** false 时只使用本地 models.dev 数据，不联网刷新 */
   modelsDev?: false | undefined;
   model?: string | undefined;
@@ -192,6 +193,7 @@ export interface ConfigFile {
 
 /** 一层合并后的结果（config.md 第 1 节） */
 export interface ResolvedConfig {
+  compactionThreshold?: string | number | undefined;
   providerThinkingWarnings?: string[] | undefined;
   model?: string | undefined;
   permissionPreset?: PermissionPresetName | undefined;
@@ -417,7 +419,13 @@ export interface SettingItem {
     effective: SecurityReviewerConfig | undefined;
     saved: SecurityReviewerConfig | undefined;
   };
-  key: "permission.reviewer" | "permissions.preset" | "reasoningEffort" | "shell" | "defaultModel";
+  key:
+    | "permission.reviewer"
+    | "permissions.preset"
+    | "reasoningEffort"
+    | "shell"
+    | "defaultModel"
+    | "compaction.threshold";
   effective: string | undefined;
   source: "default" | "setup" | "settings" | "user" | "project" | "env" | "cli";
   saved: string | undefined;
@@ -427,6 +435,7 @@ export interface SettingItem {
 
 /** 默认档位随默认模型经 setDefaultModel 成对保存，不在此单独修改（ADR-0034 修订） */
 export type SettingsPatch = Partial<{
+  "compaction.threshold": string | number | null;
   "permissions.preset": PermissionPresetName | null;
   "permission.reviewer": SecurityReviewerConfig | null;
 }>;

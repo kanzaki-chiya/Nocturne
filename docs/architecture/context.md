@@ -69,10 +69,12 @@ Builder 在请求的 `cachePrefix` 中标出"可缓存前缀"的边界：全部 
 
 ```text
 可用输入预算 = model.contextWindow − 输出预留（min(maxOutputTokens, 上限)；maxOutputTokens 未知时按兜底值预留，只用于本地估算，见 [provider-setup.md](provider-setup.md) 第 7 节）− 安全余量
-当前估算     = 上一次请求 Provider 报告的输入 token 数 + 此后新增内容的估算（字符数 / 4）
+当前估算     = 最近一次同一模型主请求的 inputTokens + outputTokens + 此后新增内容的估算
 ```
 
-没有 Provider 用量数据时（第一个 Step、刚切换模型）完全使用估算。估算只用于决定是否压缩，不需要精确。
+`inputTokens` 已包含缓存读写，不重复加缓存用量（[events.md](../protocols/events.md) 的 Usage 口径）。锚点之后发生压缩或切换模型/服务商（包括切走再切回）即失效；没有有效锚点时完全使用估算，直到主请求再次返回用量。摘要请求不建立锚点。
+
+所有字符估算统一为：CJK 统一表意文字、假名、谚文、全角标点按 1 字 1 token，其余按 4 字符 1 token；适用于纯估算、锚点后的增量、保留区边界和 `/context`。各 section 仍展示本地估算，总用量在有效时采用上游锚点。估算用于预算和压缩判定，不是计费用量。
 
 图片附件按**每张固定 1600 token** 计入估算（`IMAGE_TOKEN_ESTIMATE`），与实际分辨率、base64 长度无关——base64 长度绝不进入字符/token 估算；`report.images` 仅在 count>0 时给出 `{ count, estimatedTokens }`（`/context` 显示为 `images` 行），占位文字按普通字符计入。
 
@@ -104,6 +106,8 @@ Agent Loop                 → prune：直接写入事件
 
 因此压缩永远不会把一对工具调用与结果拆到边界两侧，也不会切进一条消息内部。
 
+修剪和摘要共用保留区 `K = min(clamp(0.2·B, 20k, 40k), 0.25·B)`（`B` 为可用输入预算，[ADR-0037](../decisions/ADR-0037-compaction-retention.md)）。从最新摘要之后、之前确有新内容的闭合边界中，选择最早且其后历史估算不超过 `K` 的边界；其后的最近原文保留。最后一步本身超过 `K` 时退到最新闭合边界；摘要请求装不下时继续按 §6.6 提前边界。
+
 进行中的 Turn 被摘要覆盖时（长 Turn 的中途压缩），该 Turn 的 `message.user` 原文在摘要之后保留，模型不会丢失当前任务的原始要求。
 
 ### 6.4 多次压缩的叠加
@@ -111,17 +115,19 @@ Agent Loop                 → prune：直接写入事件
 - 同一会话中，每种压缩的 `throughSeq` 必须严格递增；Agent Loop 保证这一点，折叠时遇到不递增的压缩事件视为不变量被破坏（记录诊断并忽略该事件）。
 - **摘要是累积的**：新摘要的输入是"上一个摘要 + 其后到新边界为止的历史"，因此只有最新的摘要生效，更早的摘要与其覆盖的历史都不再进入上下文。
 - **修剪只作用于最新摘要之后的历史**：生效的修剪截止点是最新摘要之后、`throughSeq` 最大的那次修剪；在其之前的工具结果显示为占位说明。
-- 有效历史 = 最新摘要（若有）+ 摘要之后的事件（修剪截止点之前的工具输出替换为占位）+ 被覆盖的进行中 Turn 的 `message.user` 原文。
+- 最新摘要之后附上「本会话最近读过或改过的文件」提示：从被覆盖的 `tool.started.subjects` 中取 `kind: read/edit` 的路径，去重、最近优先，最多 20 个；不按工具名判断、不带文件内容。来源仍是持久事件，恢复后投影相同，不改变旧会话的事件重放与状态折叠结果。
+- 有效历史 = 最新摘要（若有）+ 最近文件提示 + 摘要之后的事件（修剪截止点之前的工具输出替换为占位）+ 被覆盖的进行中 Turn 的 `message.user` 原文。
 
 ### 6.5 触发
 
-- 构建结果超过预算的某个阈值（默认 80%）时，Builder 先给出 prune 计划；修剪后仍超出阈值，给出 summary 计划。这类压缩是预防性的（`mustCompact = false`）。
+- 摘要阈值 `S` 来自 `compaction.threshold`（默认 `90%`，格式与分层见 [config.md](config.md) §2）；修剪阈值 `P = min(0.8·B, S)`。估算超过 `P` 时先尝试修剪；修剪后或不可修剪时仍超过 `S` 才尝试摘要。这类压缩是预防性的（`mustCompact = false`）。
+- `S = B`（`100%` 或绝对值达到预算）时两种预防性压缩都停用，只在超预算或 `context_overflow` 时走强制路径。
 - 请求已超出预算，或 Provider 返回 `context_overflow` 时，`mustCompact = true`（见 [agent-loop.md](agent-loop.md) 第 3.5 节）。
 - 用户可以用 `/compact` 手动触发摘要，走同一条路径。
 
 落地细节（自动摘要自 Phase 3 起启用，与手动 `/compact` 共用同一条 L2 路径）：
 
-- Builder 的 `compaction` 计划按序给出：估算超过阈值且存在更新于当前修剪点的闭合边界 → `prune`；prune 之后仍超阈值（或 prune 无可行边界）且存在可行摘要边界 → `summary`（`CompactionPlan` 携带 `summaryRequest`）。两种计划的判定都在 Builder 内完成，Agent Loop 只按计划执行。
+- Builder 的 `compaction` 计划按序给出：超过 `P` 且存在更新于当前修剪点的保留区边界时，计算该范围工具输出替换为占位后实际回收的估算 token；只有回收量 ≥ `R = min(20k, 0.1·B)` 才给出 `prune`。不足时跳过；超过 `S` 或必须压缩时再尝试 `summary`（计划携带 `summaryRequest`）。两种计划的判定都在 Builder 内完成，Agent Loop 只按计划执行。
 - **每个 Turn 每种压缩至多执行一次**（成功或失败均不重复）：预防性压缩失败后本 Turn 不再尝试（§6.6）；`context_overflow` 到达时从未尝试过的下一级继续（prune 未试过先 prune，否则 summary），两级都已尝试后仍溢出发 `compaction_failed`。
 - `summary` 计划执行成功后重建一次；重建结果仍超硬预算时不再追加尝试，Turn 以 `error(code = "compaction_failed")` 结束。
 - 摘要可以在 Turn 进行中发生：此时摘要边界只落在已闭合的步骤边界上（6.3），被覆盖的进行中 Turn 的 `message.user` 原文由 Builder 依据 `state.openTurn` 在摘要后重新注入。
@@ -129,10 +135,12 @@ Agent Loop                 → prune：直接写入事件
 
 ### 6.6 摘要请求本身的约束与失败处理
 
-- **摘要请求必须装得进窗口**：Builder 选择边界时保证"上一个摘要 + 待总结历史（先按修剪规则省略工具输出）+ 摘要指令"在预算内；装不下就把边界提前到更早的闭合边界；不存在任何可行边界时不给出计划。
+- **沿用主请求前缀**：摘要请求直接复用主请求的全部 system、工具声明，以及投影中直到边界的消息，包含上一个摘要、修剪占位与当前模型的图片投影；末尾追加一条 user 消息，要求不调用工具，并按目标、已完成、关键文件与工具结果、未决事项和下一步输出摘要。`cachePrefix` 覆盖全部 system 与边界内消息，末尾摘要指令不缓存；不携带 `reasoningEffort`。
+- **摘要请求必须装得进窗口**：沿用前缀装不下时，退回独立 system + 文本转录 + 空工具集；转录沿用修剪规则。仍装不下则把边界提前到更早的闭合边界；不存在任何可行边界时不给出计划。自动压缩与 `/compact` 共用该路径。
 - **边界只取新内容**：候选边界必须落在最新摘要的 `throughSeq` 之后（即摘要覆盖之后存在新的闭合边界）；最新摘要之后没有新内容时不给出计划，手动 `/compact` 因此返回 `compaction_failed` 而不是对同一历史再压出第二份摘要。
 - **摘要输出有上限**（默认约 4,000 token），并作为有界内容写入事件。
-- **转录不携带图片字节**：`renderTranscript`/`buildSummaryRequest` 对每个附件输出文本标记 `[image: <label ?? file>]`（不管模型能力），摘要请求的消息里没有 `images`。
+- **仅回退转录不携带图片字节**：`renderTranscript` 对每个附件输出文本标记 `[image: <label ?? file>]`（不管模型能力）。正常前缀请求保留主请求的图片投影。
+- **摘要只取非空文本**：有非空文本即采用并忽略模型输出的工具调用；只有工具调用、推理或空文本则按摘要失败处理，不执行工具。
 - **失败、超时、被中断**：不写任何压缩事件，会话历史不变。
   - 预防性压缩失败：本 Step 照常使用未压缩的上下文，并发出 `runtime.warning`；本 Turn 内不再尝试预防性压缩，避免每个 Step 重复失败。
   - 必须压缩却失败（或没有可行边界）：Turn 以 `error` 结束，`error.code = "compaction_failed"`，提示用户手动 `/compact` 或切换到更大窗口的模型。

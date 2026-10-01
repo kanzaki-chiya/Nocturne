@@ -9,3 +9,4 @@ export * from "./schema.js";
 export * from "./view.js";
 export * from "./todo.js";
 export * from "./file-refs.js";
+export * from "./compaction.js";
