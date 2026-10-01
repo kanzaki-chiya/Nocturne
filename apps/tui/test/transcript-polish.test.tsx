@@ -142,7 +142,7 @@ it("工具标题展开完整输出并收起；diff 标题和省略行共享状�
       transcriptOut: out,
     }),
   );
-  await vi.waitFor(() => expect(screen.lastFrame()).toContain("Nocturne"));
+  await vi.waitFor(() => expect(screen.lastFrame()).toContain("v0.4.0"));
   await session.session.emit("tool.started", {
     callId: "read1",
     name: "read",
