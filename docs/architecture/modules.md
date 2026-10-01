@@ -52,7 +52,7 @@
 
 - **负责**：事件信封与事件类型；客户端命令类型（submit、interrupt、respondPermission 等）；跨模块公共数据（消息内容块、用量、工具调用引用）；面向客户端的派生视图 reducer（`SessionView`，Phase 4，见 [view.md](../protocols/view.md)）。
 - **不负责**：任何行为、I/O、可变状态（reducer 是纯函数，状态由调用方持有）。
-- **公开接口**：`RuntimeEvent`、`ClientCommand`、`ContentBlock`、`Usage` 等类型；`createSessionView` / `reduceSessionView` / `replaySessionView`。
+- **公开接口**：`RuntimeEvent`、`ClientCommand`、`ContentBlock`、`Usage` 等类型；`createSessionView` / `reduceSessionView` / `replaySessionView`；`firstUserText`（用户消息原文首行）、`parseCompactionThreshold` 与 `estimateTokens`（共享的 token 估算）。
 - **依赖**：无。**不能依赖**：一切。
 
 ### session

@@ -10,7 +10,8 @@ import type {
   ImageAttachment,
   ModelProtocol,
 } from "../protocol/index.js";
-import { parseCompactionThreshold } from "../protocol/index.js";
+import { estimateTokens, parseCompactionThreshold } from "../protocol/index.js";
+export { estimateTokens } from "../protocol/index.js";
 import type {
   ModelImage,
   ModelInfo,
@@ -32,20 +33,6 @@ export const SUMMARY_MAX_OUTPUT_TOKENS = 4_000;
 const SUMMARY_SYSTEM = `你是 Nocturne 会话的压缩器。把给定的会话转录压缩为一段结构化中文摘要，供后续模型继续任务时阅读。
 摘要必须包含：用户的总体目标、已完成的工作及结论、关键文件与工具调用结果、未决事项与下一步建议。
 只输出摘要正文，不要寒暄、不要复述指令。`;
-
-/** CJK 约 1 字 / token，其余字符约 4 字 / token。 */
-export function estimateTokens(text: string): number {
-  let units = 0;
-  for (const char of text) {
-    units +=
-      /[\p{Unified_Ideograph}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script=Hangul}\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]/u.test(
-        char,
-      )
-        ? 4
-        : 1;
-  }
-  return Math.ceil(units / 4);
-}
 
 function messageTokens(message: ModelMessage): number {
   return (

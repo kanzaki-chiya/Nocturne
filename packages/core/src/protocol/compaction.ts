@@ -1,6 +1,20 @@
 /** ADR-0037：百分比相对可用输入预算，绝对值按 token 计。 */
 export type CompactionThreshold = string | number;
 
+/** CJK 约 1 字 / token，其余字符约 4 字 / token。 */
+export function estimateTokens(text: string): number {
+  let units = 0;
+  for (const char of text) {
+    units +=
+      /[\p{Unified_Ideograph}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script=Hangul}\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]/u.test(
+        char,
+      )
+        ? 4
+        : 1;
+  }
+  return Math.ceil(units / 4);
+}
+
 export function parseCompactionThreshold(input: CompactionThreshold): {
   unit: "percent" | "tokens";
   value: number;

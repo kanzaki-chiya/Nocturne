@@ -12,6 +12,7 @@ import type {
   ProviderRetryPayload,
   RuntimeEvent,
   RuntimeStatus,
+  MessageUserPayload,
   TurnEndReason,
 } from "./events.js";
 import { isDurableEvent, isDurableEventType, isEphemeralEventType } from "./events.js";
@@ -34,6 +35,14 @@ import type {
 } from "./types.js";
 
 // ── 视图类型 ────────────────────────────────────────────────
+
+/** 会话标题与恢复列表：首条用户消息的第一个文本块的原文首行。 */
+export function firstUserText(payload: Pick<MessageUserPayload, "content">): string | undefined {
+  const block = payload.content.find((b) => b.type === "text");
+  if (block?.type !== "text") return undefined;
+  const line = block.text.split("\n", 1)[0]?.trim();
+  return line === "" ? undefined : line;
+}
 
 export interface SessionView {
   /** 最后一次有效且持久化的 todo_write 快照 */
