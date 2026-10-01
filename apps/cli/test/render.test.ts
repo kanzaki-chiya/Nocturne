@@ -367,6 +367,22 @@ describe("智能权限审查行", () => {
       }
     });
   }
+  it("审查器结算不重复输出权限行，用户结算照常输出", () => {
+    for (const mode of ["interactive", "print"] as const) {
+      expect(
+        renderEvent(
+          durable("permission.resolved", { callId: "c", action: "allow", source: "reviewer" }),
+          mode,
+        ),
+      ).toEqual([]);
+      expect(
+        renderEvent(
+          durable("permission.resolved", { callId: "c", action: "allow", source: "user" }),
+          mode,
+        ).map((line) => line.text),
+      ).toEqual(["└ 权限：allow（user）"]);
+    }
+  });
   it("拿不准的理由和一次性选项进入确认提示", () => {
     const text = renderPermissionPrompt(
       [{ kind: "edit", target: "/outside/a" }],

@@ -180,6 +180,8 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
     }
     case "permission.resolved": {
       const p = ev.payload;
+      // 审查器结算已由上一行「审查：」说明，不重复输出
+      if (p.source === "reviewer") return [];
       const detail = p.rule !== undefined ? `${p.source}：${p.rule}` : p.source;
       const remembered =
         p.remember === "project"

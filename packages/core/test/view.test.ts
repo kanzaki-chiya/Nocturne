@@ -758,3 +758,19 @@ it("审查持久重放保留工具理由与待确认理由，started 不覆盖�
   expect(replay.pendingPermission).toBeUndefined();
   expect(toolEntries(replay)[0]).toMatchObject({ status: "running", review });
 });
+
+it("审查器结算不再追加权限提示，用户结算照常追加", () => {
+  const resolved = (callId: string, source: "reviewer" | "user"): DurableEvent => ({
+    type: "permission.resolved",
+    sessionId: "s",
+    seq: source === "reviewer" ? 1 : 2,
+    time: "t",
+    payload: { callId, action: "allow", source },
+  });
+  const events = [resolved("c-auto", "reviewer"), resolved("c-user", "user")];
+  for (const view of [liveView(events), replaySessionView(events)]) {
+    const notices = view.entries.filter((e) => e.kind === "notice" && e.subtype === "permission");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.kind === "notice" && notices[0].message).toContain("user");
+  }
+});

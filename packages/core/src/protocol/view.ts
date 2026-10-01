@@ -376,13 +376,15 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
             ? "，本会话内有效"
             : "";
       const fb = p.feedback !== undefined && p.feedback !== "" ? `（反馈：${p.feedback}）` : "";
-      pushNotice(
-        view,
-        event.seq,
-        "permission",
-        `权限：${p.action}（${detail}）${remembered}${fb}`,
-        p,
-      );
+      // 审查器结算时，permission.reviewed 已给出结论、理由与用量，不再重复一条权限提示
+      if (p.source !== "reviewer")
+        pushNotice(
+          view,
+          event.seq,
+          "permission",
+          `权限：${p.action}（${detail}）${remembered}${fb}`,
+          p,
+        );
       break;
     }
     case "tool.started": {

@@ -132,7 +132,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 
 | `permission.reviewed` | `审查：放行/拦截/拿不准 — 理由`，附缓存标记与审查来源用量；非交互写 stderr，交互显示在工具之前 |
 | `permission.requested` | 第 6 节的确认提示 |
-| `permission.resolved` | `└ 权限：<allow\|deny>（<source>：<rule\|reason>）` 一行——命中规则时展示 `rule`（如"用户配置第 3 条 {…}"），无规则时展示原因 |
+| `permission.resolved` | `└ 权限：<allow\|deny>（<source>：<rule\|reason>）` 一行——命中规则时展示 `rule`（如"用户配置第 3 条 {…}"），无规则时展示原因；`source: "reviewer"` 时不输出（结论已在「审查：」行）|
 | `context.compacted` | `◇ 上下文已压缩（<kind>，至 seq <throughSeq>）` |
 | `session.config_changed` | `◇ 模型已切换为 <provider>/<model>`；`reasoningEffort` 变化时 `◇ 思考档位已切换为 <档位>`；`shell` 变化时 `◇ shell 已切换为 <kind>（<path>）` |
 | `provider.retry` | `! Provider 错误（<kind>），<delayMs>ms 后第 <n>/<max> 次重试` |
