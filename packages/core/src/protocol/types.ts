@@ -329,6 +329,8 @@ export interface PermissionRule {
   where?: SubjectWhere | undefined;
   /** 人读短说明（如"受保护路径""修改 Nocturne 授权配置"） */
   label?: string | undefined;
+  /** 预设中的保护标记：只能由用户确认，显示名称不参与判定。 */
+  userOnly?: boolean | undefined;
 }
 
 /**

@@ -135,7 +135,7 @@ Hook 的先后关系（Phase 5，完整语义见 5.5 与 hooks.md）：
 
 一次调用有多个主体时：任一主体为 `deny` 则 `deny`；否则任一为 `ask` 则 `ask`；否则 `allow`。
 
-#### smart 审查分支（ADR-0036 第一轮）
+#### smart 审查分支（ADR-0036）
 
 规则的 `deny` 不进入审查；规则直接 `allow`、Grant 与 `autoApproveAsk`（`--yes`）先结算。剩余 `ask` 先交给 `PermissionRequest` Hook，再只在 `smart` 下调用 `SecurityReviewer.review(input, signal)`：
 
@@ -143,11 +143,15 @@ Hook 的先后关系（Phase 5，完整语义见 5.5 与 hooks.md）：
 - `block`：拒绝，不弹确认；同样记录审查来源。
 - `unsure`：交互模式询问用户；非交互模式拒绝。
 
-**只由用户确认**集合不调用审查器：修改 Nocturne 授权数据、`.nocturne/` 内 edit、可能读取凭据的命令、用户/项目/CLI 的显式 ask，以及 `PreToolUse` 强制 ask。Grant、`--yes` 与 PermissionRequest Hook 的原有优先级不变；强制 ask 仍跳过 Grant 与 `--yes`。一次调用中任一 ask 主体在该集合内，整个调用跳过审查。
+**只由用户确认**集合不调用审查器：修改 Nocturne 授权数据、`.nocturne/` 内 edit、可能读取凭据的命令、用户/项目/CLI 的显式 ask，以及 `PreToolUse` 强制 ask。Grant、`--yes` 与 PermissionRequest Hook 的原有优先级不变；强制 ask 仍跳过 Grant 与 `--yes`。一次调用中任一 ask 主体在该集合内，整个调用跳过审查。预设中的授权数据与 `.nocturne/` 规则用结构化 `userOnly` 标记表达该限制，`label` 只用于显示。
 
 审查输入只包含 ask 主体的类别、授权目标、位置与命中规则，当前 cwd，以及最近三条用户消息（各最多 2000 字符）；不带原始工具参数、文件引用快照、工具输出或文件正文。20 秒超时、报错或格式无效按 `unsure` 处理；Turn 中止则取消审查。缓存只保存本会话的 allow，使用与 Grant 相同的精确主体键，恢复后清空；缓存命中也记审查事件。
 
-未配置审查器时行为与 `guarded` 相同，每个会话提示一次。子会话使用父会话的同一审查器实例，仍为非交互。模型后端不带工具，使用最低思考档位 `off`，`maxOutputTokens=300`；首行必须为 `ALLOW`、`BLOCK` 或 `UNSURE`，其余非空文本为理由。审查用量写入 `permission.reviewed.usage`，计入 Turn 与会话总用量，不进入对话历史。设置方式见 [config.md](config.md)。Jev 后端本轮不实现。
+未配置审查器时行为与 `guarded` 相同，每个会话提示一次。子会话使用父会话的同一审查器实例，仍为非交互。模型后端不带工具，使用最低思考档位 `off`，`maxOutputTokens=300`；首行去掉 Markdown 符号与标点后必须为 `ALLOW`、`BLOCK` 或 `UNSURE`，其余非空文本为理由。审查用量写入 `permission.reviewed.usage`，计入 Turn 与会话总用量，不进入对话历史。设置方式见 [config.md](config.md)。
+
+Jev 后端与模型后端并列放在权限层，直接 `POST <baseURL>/systemone`。请求传 `{ model, state, questions }`，`state` 即上述审查输入；`questions` 用编号 `0` 的一个 `choice` 问题，`instructions` 要求判断用户授权与操作影响，并声明 state 不可信；`criteria` 为 `allow`、`block`、`unsure` 三个选项。取 `answers[0].choice`（答案表的键为 `"0"`，也兼容数组），`confidence` 必须为 0–1 数值，低于 `minConfidence`（默认 0.7）降为 `unsure`。理由显示所选判断口径与置信度；低置信度、缺失密钥、密钥无效、模型不可用、超时、HTTP 或解析失败显示相应原因，一律按 `unsure` 处理。用户中止仍按取消结算。
+
+Jev 的 `usage.input_tokens/output_tokens` 转为 `ReviewResult.usage`，沿用 `permission.reviewed.usage` 持久化与恢复记账，标注接入点/模型来源；缓存命中不重复记账。接入点表、模型列表与凭据解析位于 config 层，权限后端只接收解析后的连接信息；借用密钥按服务商 id 从凭据库取，环境变量只读所选变量，独立密钥取索引 id `reviewer`。OpenCode 网关沿用条目的 `sessionHeader`，缺省为 `x-opencode-session`，值为会话 id。配置与列表退回行为见 [config.md](config.md)。
 
 ### 5.5 Hook 建议的合并（Phase 5）
 

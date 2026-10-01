@@ -40,6 +40,7 @@ import {
   writeProviderSetup,
 } from "./setup.js";
 import { loadSettingsStore } from "./settings.js";
+import { reviewerText } from "./reviewer.js";
 import { readTrustList } from "./trust.js";
 import type {
   ConfigFile,
@@ -243,12 +244,8 @@ export async function loadConfig(
         [
           "permission.reviewer",
           "permission.reviewer",
-          merged.resolved.permissionReviewer?.backend === "model"
-            ? `${merged.resolved.permissionReviewer.model.provider}/${merged.resolved.permissionReviewer.model.model}`
-            : "off",
-          saved.permission?.reviewer?.backend === "model"
-            ? `${saved.permission.reviewer.model.provider}/${saved.permission.reviewer.model.model}`
-            : saved.permission?.reviewer?.backend,
+          reviewerText(merged.resolved.permissionReviewer),
+          saved.permission?.reviewer ? reviewerText(saved.permission.reviewer) : undefined,
         ],
         [
           "reasoningEffort",
@@ -274,6 +271,14 @@ export async function loadConfig(
           : origin;
       return {
         key,
+        ...(key === "permission.reviewer"
+          ? {
+              reviewer: {
+                effective: merged.resolved.permissionReviewer,
+                saved: saved.permission?.reviewer,
+              },
+            }
+          : {}),
         effective,
         saved: value,
         source,

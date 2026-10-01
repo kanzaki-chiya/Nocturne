@@ -55,7 +55,7 @@ interface ConfigFile {
     rules?: PermissionRule[];
   };
   /** 独立的安全审查器；仅 smart 调用 */
-  permission?: { reviewer?: { backend: "model"; model: ModelRef } | { backend: "off" } };
+  permission?: { reviewer?: SecurityReviewerConfig };
   /** shell 选择（ADR-0022）：auto | pwsh | powershell | bash | cmd | sh */
   shell?: string;
   /** 非标准安装位置的可执行文件路径；种类仍由 shell 决定。
@@ -96,7 +96,10 @@ Shell 也走通用合并，`session.setShell` 仍先探测可执行文件，再�
 
 ```ts
 describeSettings(): SettingItem[]
-updateSettings(patch: SettingsPatch): Promise<SettingItem[]>
+updateSettings(patch: SettingsPatch, options?: { reviewerKey: string }): Promise<SettingItem[]>
+listReviewerProviders(): Promise<ProviderOverview[]>
+defaultReviewer(endpoint: JevEndpoint, baseURL?: string): Promise<JevReviewerConfig>
+listReviewerModels(reviewer: JevReviewerConfig, signal?: AbortSignal): Promise<{ models: string[]; warning?: string }>
 setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<SettingItem[]>
 ```
 
@@ -104,7 +107,7 @@ setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise
 
 这些默认值只影响之后新建的会话，已有会话和恢复的会话继续使用自己的配置快照；`/new` 使用最新生效默认值。`/model` 页「设为默认」是显式切换，会同时修改当前会话；`/settings` 不修改当前会话的模型、档位或权限。
 
-**安全审查器**（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)，第一轮）：`permission.reviewer`（单数 permission）是独立设置，按通用分层覆盖，项目不可信时不参与放宽。模型后端的形状为：
+**安全审查器**（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)）：`permission.reviewer`（单数 permission）是独立设置，按通用分层覆盖，项目不可信时不参与放宽。模型后端的形状为：
 
 ```json
 {
@@ -114,7 +117,37 @@ setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise
 }
 ```
 
-`{ "backend": "off" }` 显式关闭低层审查器，清除设置则跟随低层配置。`SettingItem` 用 `provider/model` 或 `off` 表示保存值；`SettingsPatch["permission.reviewer"]` 接受上述对象或 `null`。`/settings` 的「安全审查」进入「关闭 / 小模型」后端弹窗；小模型复用模型选择器且不修改默认模型。审查器独立于主模型，已有 smart 会话的下一次审查也使用最新设置；该项是前段“仅影响新会话”的例外。未配置时按 guarded 并提示一次；模型不可用或请求失败按 unsure，见 [permissions.md](permissions.md) 5.3。Jev 本轮未实现。
+`{ "backend": "off" }` 显式关闭低层审查器，清除设置则跟随低层配置。第一轮的 model 引用形状保持兼容，无需迁移。Jev 配置形状为：
+
+```json
+{
+  "permission": {
+    "reviewer": {
+      "backend": "jev",
+      "endpoint": "opencode-zen",
+      "model": "jev-1.13-free",
+      "credential": { "provider": "opencode-go" },
+      "minConfidence": 0.7
+    }
+  }
+}
+```
+
+`SecurityReviewerConfig` 是 off / model / jev 的判别联合。Jev 的 `endpoint`、`model`、`credential` 必填；`minConfidence` 可省略，生效值默认 0.7，允许 0–1。接入点表 `JEV_ENDPOINTS` 是 config 层的纯数据：
+
+| endpoint | baseURL | 默认模型 | 会话头 | 模型筛选 |
+|---|---|---|---|---|
+| opencode-zen | `https://opencode.ai/zen/v1` | jev-1.13-free | x-opencode-session（借用条目可覆盖） | id 包含 jev，不区分大小写 |
+| typesafe | `https://api.typesafe.ai/v1` | jev-latest | 无 | 同上 |
+| custom | 用户输入 | jev-latest | 借用条目的 sessionHeader | 同上 |
+
+`baseURL` 只在 custom 时保存，必须是 HTTP(S) 地址，不能含内联凭据、查询或片段；内置接入点禁止写该字段。`credential` 严格三选一：`{ "provider": "id" }` 从凭据库借用该 id 的密钥（不改其服务商 baseURL）；`{ "env": "变量名" }` 读取所选环境变量；`{ "stored": true }` 从 ADR-0015 的系统凭据库取 id `reviewer`。settings.json 不保存密钥，Jev 对象拒绝未知字段与内联密钥。默认按 baseURL 主机匹配已有服务商，优先选有凭据来源的条目（例如 Zen 自动借用 opencode-go）；没有匹配时默认变量分别为 `OPENCODE_API_KEY` / `TYPESAFE_API_KEY`。审查环境变量与服务商密钥变量同样从 shell 子进程环境剥离。
+
+`defaultReviewer` 返回接入点默认模型、阈值与自动匹配凭据；`listReviewerModels` 实时 GET 接入点 `/models`，最多等待 10 秒，按表筛选并去重，网络、HTTP、格式错误或无匹配模型时返回默认模型与提示，界面保留手动输入。审查模型不进入 Provider 模型目录或 `/model` 的对话模型清单。
+
+`SettingItem` 保留可显示的保存值（model 为 `provider/model`，关闭为 `off`，Jev 为后端/接入点/模型），并通过可选 `reviewer: { saved, effective }` 提供结构化配置给客户端；`SettingsPatch["permission.reviewer"]` 接受上述对象或 `null`。单独输入密钥经 `updateSettings(patch, { reviewerKey })` 写凭据库，再原子保存配置；配置写入失败时恢复原密钥或撤销新条目，凭据写入失败则不保存设置。同一 Runtime 的此类更新串行执行，避免失败回滚覆盖另一笔成功保存的密钥。
+
+`/settings` 的交互见 [tui.md](../apps/tui.md) 第 11 节。首次开启 Jev 的披露确认在设置页成功保存时记为界面偏好 `jevDisclosureAccepted: "yes"`，取消不写入。审查器独立于主模型，已有 smart 会话的下一次审查使用最新设置；该项是前段“仅影响新会话”的例外。未配置时按 guarded 并提示一次；模型不可用或请求失败按 unsure，见 [permissions.md](permissions.md) 5.3。
 
 **通用界面偏好**（[ADR-0029](../decisions/ADR-0029-tui-themes.md) 第 3 节）：`RuntimeConfig` 与公开的 `Runtime` 都提供 `getPreference(key: string): string | undefined`、`setPreference(key: string, value: string | undefined): Promise<void>`。它们读写 `settings.json` 顶层的普通字符串字段；`undefined` 删除字段。写入拒绝无效字段名、`shell`/`shellPath` 等有专用接口的保留字段和非字符串值；原子写盘成功后才更新内存，失败时旧值不变，未知字段原样保留。`Runtime` 委托注入的 `RuntimeConfig`；`createRuntime` 未传 `config` 时，读取返回 `undefined`，写入返回被拒绝的 Promise，错误为「未注入 RuntimeConfig，无法保存偏好」。Core 不解释偏好值的 UI 含义；TUI 在首次渲染前读取 `theme`，由 TUI 判断 `dark`/`light`，非法值回退 `dark`；`/theme` 保存失败时保持原主题并留在选择页提示错误。
 

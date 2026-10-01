@@ -143,7 +143,18 @@ export interface TurnOverrides {
   idleTimeoutMs?: number | undefined;
 }
 
-export type SecurityReviewerConfig = { backend: "model"; model: ModelRef } | { backend: "off" };
+export type JevEndpoint = "opencode-zen" | "typesafe" | "custom";
+export type ReviewerCredential = { provider: string } | { env: string } | { stored: true };
+export interface JevReviewerConfig {
+  backend: "jev";
+  endpoint: JevEndpoint;
+  baseURL?: string | undefined;
+  model: string;
+  credential: ReviewerCredential;
+  minConfidence?: number | undefined;
+}
+export type SecurityReviewerConfig =
+  { backend: "model"; model: ModelRef } | { backend: "off" } | JevReviewerConfig;
 
 /** 各层配置字段共用的 schema（config.md 第 2 节）；程序从不改写 config.json */
 export interface ConfigFile {
@@ -402,6 +413,10 @@ export type ModelSettingsPatch = {
 };
 
 export interface SettingItem {
+  reviewer?: {
+    effective: SecurityReviewerConfig | undefined;
+    saved: SecurityReviewerConfig | undefined;
+  };
   key: "permission.reviewer" | "permissions.preset" | "reasoningEffort" | "shell" | "defaultModel";
   effective: string | undefined;
   source: "default" | "setup" | "settings" | "user" | "project" | "env" | "cli";

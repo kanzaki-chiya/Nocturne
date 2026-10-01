@@ -28,6 +28,7 @@ const permissionRuleSchema = z.object({
   action: z.enum(["allow", "ask", "deny"]),
   where: z.enum(["workspace", "outside"]).optional(),
   label: z.string().optional(),
+  userOnly: z.boolean().optional(),
 });
 
 const capabilitiesSchema = z.object({
@@ -176,7 +177,46 @@ const configFileSchema = z.object({
             model: z.object({ provider: z.string().min(1), model: z.string().min(1) }),
           }),
           z.object({ backend: z.literal("off") }),
+          z
+            .object({
+              backend: z.literal("jev"),
+              endpoint: z.enum(["opencode-zen", "typesafe", "custom"]),
+              baseURL: z.url().optional(),
+              model: z.string().min(1),
+              credential: z.union([
+                z.object({ provider: z.string().min(1) }).strict(),
+                z.object({ env: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/) }).strict(),
+                z.object({ stored: z.literal(true) }).strict(),
+              ]),
+              minConfidence: z.number().min(0).max(1).optional(),
+            })
+            .strict(),
         ])
+        .superRefine((reviewer, ctx) => {
+          if (reviewer.backend !== "jev") return;
+          if (reviewer.endpoint !== "custom" && reviewer.baseURL !== undefined)
+            ctx.addIssue({ code: "custom", message: "baseURL 只用于 custom 接入点" });
+          if (reviewer.endpoint === "custom") {
+            let url: URL | undefined;
+            try {
+              url = new URL(reviewer.baseURL ?? "");
+            } catch {
+              /* 校验错误见下 */
+            }
+            if (
+              !url ||
+              !["https:", "http:"].includes(url.protocol) ||
+              url.username ||
+              url.password ||
+              url.search ||
+              url.hash
+            )
+              ctx.addIssue({
+                code: "custom",
+                message: "custom 需要不含凭据、查询或片段的 HTTP(S) baseURL",
+              });
+          }
+        })
         .optional(),
     })
     .optional(),

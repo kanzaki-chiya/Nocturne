@@ -343,9 +343,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     const presetHit = s.kind === "edit" ? lastMatch(preset, s) : undefined;
     const userOnly =
       (s.kind === "shell" && isCredentialBackendCommand(s.target)) ||
-      (s.kind === "edit" &&
-        (presetHit?.rule?.label === "修改 Nocturne 授权配置" ||
-          presetHit?.rule?.pattern === "**/.nocturne/**")) ||
+      presetHit?.rule?.userOnly === true ||
       (hit.rule?.action === "ask" && hit.origin !== "preset" && hit.origin !== "default");
     return { action, hit, note, userOnly };
   }

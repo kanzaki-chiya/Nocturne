@@ -140,7 +140,13 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
     for (const pattern of name === "bypass"
       ? ["**/.nocturne/**"]
       : ["**/.git/**", "**/.nocturne/**"]) {
-      rules.push({ kind: "edit", pattern, action: "ask", label: PROTECTED_LABEL });
+      rules.push({
+        kind: "edit",
+        pattern,
+        action: "ask",
+        label: PROTECTED_LABEL,
+        userOnly: pattern === "**/.nocturne/**",
+      });
     }
     if (ctx.nocturneHome !== undefined) {
       const home = normalizePathText(ctx.nocturneHome, ctx.caseSensitive);
@@ -154,7 +160,13 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
         `${home}/providers.json`,
         `${home}/settings.json`,
       ]) {
-        rules.push({ kind: "edit", pattern, action: "ask", label: AUTH_DATA_LABEL });
+        rules.push({
+          kind: "edit",
+          pattern,
+          action: "ask",
+          label: AUTH_DATA_LABEL,
+          userOnly: true,
+        });
       }
     }
   }

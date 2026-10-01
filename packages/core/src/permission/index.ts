@@ -31,3 +31,4 @@ export * from "./types.js";
 
 export * from "./gate.js";
 export * from "./reviewer.js";
+export * from "./jev-reviewer.js";

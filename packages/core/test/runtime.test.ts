@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config/index.js";
 import { createPlatform } from "../src/platform/index.js";
 
@@ -22,6 +22,8 @@ import { replaySessionView, type RuntimeEvent } from "../src/protocol/index.js";
 const tmpRoots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   for (const r of tmpRoots.splice(0)) {
     rmSync(r, { recursive: true, force: true });
   }
@@ -209,94 +211,135 @@ describe("公开 Runtime API", () => {
     await session.close();
   });
 
-  it("smart 模型审查用量计入会话与 Turn，恢复日志不把审查写进上下文", async () => {
-    const workspace = makeTmpDir("nct-review-ws-");
-    writeFileSync(path.join(workspace, "context.txt"), "FILE SNAPSHOT MUST NOT ENTER REVIEW");
-    const outside = path.join(makeTmpDir("nct-review-out-"), "result.txt");
-    const sessionsDir = makeTmpDir("nct-review-sessions-");
-    const config = await loadConfig(createPlatform(), {
-      nocturneHome: makeTmpDir("nct-review-home-"),
-      env: () => undefined,
-    });
-    await config.updateSettings({
-      "permission.reviewer": { backend: "model", model: { provider: "fake", model: "fake-1" } },
-    });
-    const provider = new FakeProvider({
-      handler: (request) => {
-        if (request.tools.length === 0)
+  it.each(["model", "jev"] as const)(
+    "smart %s 审查用量计入会话与 Turn，恢复日志不把审查写进上下文",
+    async (backend) => {
+      const workspace = makeTmpDir("nct-review-ws-");
+      writeFileSync(path.join(workspace, "context.txt"), "FILE SNAPSHOT MUST NOT ENTER REVIEW");
+      const outside = path.join(makeTmpDir("nct-review-out-"), "result.txt");
+      const sessionsDir = makeTmpDir("nct-review-sessions-");
+      const config = await loadConfig(createPlatform(), {
+        nocturneHome: makeTmpDir("nct-review-home-"),
+        env: () => undefined,
+      });
+      const fetchReview = vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json({
+          answers: { "0": { choice: "allow", confidence: 0.99 } },
+          usage: { input_tokens: 11, output_tokens: 3 },
+        }),
+      );
+      if (backend === "jev") {
+        vi.stubGlobal("fetch", fetchReview);
+        vi.spyOn(config.credentials, "get").mockImplementation(async (id) =>
+          id === "opencode-go" ? "test-key" : undefined,
+        );
+      }
+      await config.updateSettings({
+        "permission.reviewer":
+          backend === "model"
+            ? { backend, model: { provider: "fake", model: "fake-1" } }
+            : {
+                backend,
+                endpoint: "opencode-zen",
+                model: "jev-1.13-free",
+                credential: { provider: "opencode-go" },
+              },
+      });
+      const provider = new FakeProvider({
+        handler: (request) => {
+          if (request.tools.length === 0)
+            return [
+              { type: "text_delta", text: "ALLOW\n用户明确授权写入" },
+              { type: "usage", usage: { inputTokens: 11, outputTokens: 3 } },
+              { type: "finish", reason: "stop" },
+            ];
+          if (request.messages.some((m) => m.role === "tool"))
+            return [
+              { type: "text_delta", text: "done" },
+              { type: "finish", reason: "stop" },
+            ];
           return [
-            { type: "text_delta", text: "ALLOW\n用户明确授权写入" },
-            { type: "usage", usage: { inputTokens: 11, outputTokens: 3 } },
-            { type: "finish", reason: "stop" },
+            {
+              type: "tool_call",
+              toolCallId: "outside-write",
+              name: "write",
+              input: { path: outside, content: "approved" },
+            },
+            { type: "finish", reason: "tool_calls" },
           ];
-        if (request.messages.some((m) => m.role === "tool"))
-          return [
-            { type: "text_delta", text: "done" },
-            { type: "finish", reason: "stop" },
-          ];
-        return [
-          {
-            type: "tool_call",
-            toolCallId: "outside-write",
-            name: "write",
-            input: { path: outside, content: "approved" },
-          },
-          { type: "finish", reason: "tool_calls" },
-        ];
-      },
-    });
-    const runtime = await createRuntime({
-      cwd: workspace,
-      sessionsDir,
-      providers: [provider],
-      config,
-      interactive: false,
-    });
-    const session = await runtime.createSession({
-      model: "fake/fake-1",
-      permissionPreset: "smart",
-    });
-    const events = collect(session);
-    expect(await session.submit({ text: "写入工作区外的 result.txt @context.txt" })).toBe("done");
-    expect(readFileSync(outside, "utf8")).toBe("approved");
-    expect(events.filter((e) => e.type === "permission.reviewed")).toMatchObject([
-      {
-        payload: {
-          verdict: "allow",
-          backend: "model",
-          cached: false,
-          usage: { inputTokens: 11, outputTokens: 3 },
         },
-      },
-    ]);
-    expect(events.find((e) => e.type === "tool.started")).toMatchObject({
-      payload: { permission: { source: "reviewer" } },
-    });
-    expect(events.find((e) => e.type === "turn.completed")).toMatchObject({
-      payload: { usage: { inputTokens: 11, outputTokens: 3 } },
-    });
-    expect(session.state().usage).toMatchObject({ inputTokens: 11, outputTokens: 3 });
-    const audit = provider.requests.find((r) => r.tools.length === 0);
-    if (audit === undefined) throw new Error("未发审查请求");
-    expect(
-      JSON.parse((audit.messages[0] as { content: { text: string }[] }).content[0]?.text ?? ""),
-    ).toMatchObject({ recentUserMessages: ["写入工作区外的 result.txt @context.txt"] });
-    expect(audit).toMatchObject({ maxOutputTokens: 300, tools: [] });
-    expect(JSON.stringify(audit.messages)).not.toContain("FILE SNAPSHOT MUST NOT ENTER REVIEW");
-    expect(
-      provider.requests
-        .at(-1)
-        ?.messages.some((m) => JSON.stringify(m).includes("用户明确授权写入")),
-    ).toBe(false);
-    await session.close();
-    const restored = await runtime.resumeSession(session.id);
-    expect(restored.state().usage).toMatchObject({ inputTokens: 11, outputTokens: 3 });
-    expect(restored.state().config.permissionPreset).toBe("smart");
-    expect(
-      replaySessionView(restored.session.durableEvents()).entries.find((e) => e.kind === "tool"),
-    ).toMatchObject({ review: { verdict: "allow" } });
-    await restored.close();
-  });
+      });
+      const runtime = await createRuntime({
+        cwd: workspace,
+        sessionsDir,
+        providers: [provider],
+        config,
+        interactive: false,
+      });
+      const session = await runtime.createSession({
+        model: "fake/fake-1",
+        permissionPreset: "smart",
+      });
+      const events = collect(session);
+      expect(await session.submit({ text: "写入工作区外的 result.txt @context.txt" })).toBe("done");
+      expect(readFileSync(outside, "utf8")).toBe("approved");
+      expect(events.filter((e) => e.type === "permission.reviewed")).toMatchObject([
+        {
+          payload: {
+            verdict: "allow",
+            backend,
+            cached: false,
+            usage: { inputTokens: 11, outputTokens: 3 },
+          },
+        },
+      ]);
+      expect(events.find((e) => e.type === "tool.started")).toMatchObject({
+        payload: { permission: { source: "reviewer" } },
+      });
+      expect(events.find((e) => e.type === "turn.completed")).toMatchObject({
+        payload: { usage: { inputTokens: 11, outputTokens: 3 } },
+      });
+      expect(session.state().usage).toMatchObject({ inputTokens: 11, outputTokens: 3 });
+      if (backend === "model") {
+        const audit = provider.requests.find((r) => r.tools.length === 0);
+        if (audit === undefined) throw new Error("未发审查请求");
+        expect(
+          JSON.parse((audit.messages[0] as { content: { text: string }[] }).content[0]?.text ?? ""),
+        ).toMatchObject({ recentUserMessages: ["写入工作区外的 result.txt @context.txt"] });
+        expect(audit).toMatchObject({ maxOutputTokens: 300, tools: [] });
+        expect(JSON.stringify(audit.messages)).not.toContain("FILE SNAPSHOT MUST NOT ENTER REVIEW");
+      } else {
+        expect(fetchReview).toHaveBeenCalledOnce();
+        const call = fetchReview.mock.calls[0];
+        if (!call) throw new Error("未发 Jev 请求");
+        const [url, request] = call;
+        expect(url).toBe("https://opencode.ai/zen/v1/systemone");
+        expect(request?.headers).toMatchObject({
+          Authorization: "Bearer test-key",
+          "x-opencode-session": session.id,
+        });
+        const body = JSON.parse(String(request?.body));
+        expect(body.state).toMatchObject({
+          cwd: workspace,
+          recentUserMessages: ["写入工作区外的 result.txt @context.txt"],
+        });
+        expect(JSON.stringify(body)).not.toContain("FILE SNAPSHOT MUST NOT ENTER REVIEW");
+      }
+      expect(
+        provider.requests
+          .at(-1)
+          ?.messages.some((m) => JSON.stringify(m).includes("用户明确授权写入")),
+      ).toBe(false);
+      await session.close();
+      const restored = await runtime.resumeSession(session.id);
+      expect(restored.state().usage).toMatchObject({ inputTokens: 11, outputTokens: 3 });
+      expect(restored.state().config.permissionPreset).toBe("smart");
+      expect(
+        replaySessionView(restored.session.durableEvents()).entries.find((e) => e.kind === "tool"),
+      ).toMatchObject({ review: { verdict: "allow" } });
+      await restored.close();
+    },
+  );
 
   it("smart 未配置审查器只提示一次，旧日志 full-access 可恢复为 guarded", async () => {
     const { runtime } = await makeRuntime([]);

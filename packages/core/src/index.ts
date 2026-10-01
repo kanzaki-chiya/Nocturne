@@ -22,10 +22,19 @@ import {
 } from "./context/index.js";
 import type {
   ProviderEntryConfig,
+  ProviderOverview,
   RuntimeConfig,
   SettingItem,
   SettingsPatch,
+  JevEndpoint,
+  JevReviewerConfig,
 } from "./config/index.js";
+import {
+  defaultJevReviewer,
+  fetchJevModels,
+  JEV_ENDPOINTS,
+  resolveJevConnection,
+} from "./config/reviewer.js";
 // ADR-0035 §5：编辑工具的模型默认表（config 层纯数据）注入 provider 解析
 import { defaultEditToolForModel } from "./config/edit-tool.js";
 import { createDiagnostics } from "./diagnostics/index.js";
@@ -34,6 +43,7 @@ import { appendInputHistory, readInputHistory } from "./input-history.js";
 import {
   createRulePolicy,
   createModelSecurityReviewer,
+  createJevSecurityReviewer,
   type SecurityReviewer,
   isPermissionPresetName,
   type PermissionPolicy,
@@ -348,7 +358,13 @@ export interface ResumeSessionOptions {
 
 export interface Runtime {
   describeSettings(): SettingItem[];
-  updateSettings(patch: SettingsPatch): Promise<SettingItem[]>;
+  updateSettings(patch: SettingsPatch, options?: { reviewerKey: string }): Promise<SettingItem[]>;
+  listReviewerProviders(): Promise<ProviderOverview[]>;
+  defaultReviewer(endpoint: JevEndpoint, baseURL?: string): Promise<JevReviewerConfig>;
+  listReviewerModels(
+    reviewer: JevReviewerConfig,
+    signal?: AbortSignal,
+  ): Promise<{ models: string[]; warning?: string }>;
   setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<SettingItem[]>;
   createSession(options: CreateSessionOptions): Promise<RuntimeSession>;
   resumeSession(id: string, options?: ResumeSessionOptions): Promise<RuntimeSession>;
@@ -526,6 +542,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
    * 各会话在下一次空闲边界 rebuildProviders；close 时移除）
    */
   const markProvidersDirty = new Set<() => void>();
+  let settingsPending = Promise.resolve();
 
   const interactive = options.interactive === true;
 
@@ -747,20 +764,32 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         config === undefined
           ? resolved?.permissionReviewer
           : config.resolvedSettings(meta.workspaceRoot).permissionReviewer;
-      if (selected?.backend !== "model") return undefined;
-      const key = JSON.stringify(selected.model);
+      if (!selected || selected.backend === "off") return undefined;
+      const key = JSON.stringify(selected);
       if (key !== reviewerKey) {
         reviewerKey = key;
-        const ref = selected.model;
-        modelReviewer = {
-          backend: "model",
-          model: ref,
-          review: (input, signal) =>
-            createModelSecurityReviewer(sessionRegistry.resolve(ref), session.id).review(
-              input,
-              signal,
+        if (selected.backend === "jev") {
+          modelReviewer = createJevSecurityReviewer({
+            ...resolveJevConnection(
+              selected,
+              config?.resolvedSettings(meta.workspaceRoot).providers ?? resolved?.providers ?? [],
+              config?.credentials,
+              (name) => platform.env(name),
             ),
-        };
+            sessionId: session.id,
+          });
+        } else {
+          const ref = selected.model;
+          modelReviewer = {
+            backend: "model",
+            model: ref,
+            review: (input, signal) =>
+              createModelSecurityReviewer(sessionRegistry.resolve(ref), session.id).review(
+                input,
+                signal,
+              ),
+          };
+        }
       }
       return modelReviewer;
     };
@@ -883,6 +912,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ...new Set([
         "NOCTURNE_API_KEY",
         "ANTHROPIC_API_KEY",
+        ...Object.values(JEV_ENDPOINTS).map((entry) => entry.env),
+        ...(() => {
+          const reviewer =
+            config?.resolvedSettings(meta.workspaceRoot).permissionReviewer ??
+            resolved?.permissionReviewer;
+          return reviewer?.backend === "jev" && "env" in reviewer.credential
+            ? [reviewer.credential.env]
+            : [];
+        })(),
         ...providers
           .map((p) => p.apiKeyEnv)
           .filter((n): n is string => n !== undefined && n !== ""),
@@ -936,6 +974,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       providersDirty = false;
       const wsNew = await config.forWorkspace(meta.workspaceRoot).catch(() => undefined);
       const entries = wsNew?.resolved.providers ?? config.base.providers;
+      reviewerKey = undefined;
       // 凭据变量剥离名单随配置重算：向导/手写条目新增的 apiKeyEnv 即时生效
       shellEnvStrip.splice(
         0,
@@ -1554,12 +1593,64 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   return {
     describeSettings: () =>
       config?.describeSettings(workspaceRoot, platform.env("NOCTURNE_SHELL")) ?? [],
-    async updateSettings(patch) {
-      if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存设置");
-      validateSettingsPatch(patch);
-      await config.forWorkspace(workspaceRoot);
-      await config.updateSettings(patch);
-      return config.describeSettings(workspaceRoot);
+    listReviewerProviders: async () => (await config?.describeProviders(workspaceRoot)) ?? [],
+    async defaultReviewer(endpoint, baseURL) {
+      return defaultJevReviewer(
+        endpoint,
+        (await config?.describeProviders(workspaceRoot)) ?? [],
+        baseURL,
+      );
+    },
+    async listReviewerModels(reviewer, signal) {
+      validateSettingsPatch({ "permission.reviewer": reviewer });
+      const providers = config
+        ? (await config.forWorkspace(workspaceRoot)).resolved.providers
+        : (options.providerConfigs ?? []);
+      return fetchJevModels(
+        resolveJevConnection(reviewer, providers, config?.credentials, (name) =>
+          platform.env(name),
+        ),
+        JEV_ENDPOINTS[reviewer.endpoint].model,
+        signal,
+        JEV_ENDPOINTS[reviewer.endpoint].modelFilter,
+      );
+    },
+    updateSettings(patch, settingsOptions) {
+      const operation = settingsPending.then(async () => {
+        if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存设置");
+        validateSettingsPatch(patch);
+        await config.forWorkspace(workspaceRoot);
+        const previousKey =
+          settingsOptions?.reviewerKey !== undefined
+            ? await config.credentials.get("reviewer")
+            : undefined;
+        if (settingsOptions?.reviewerKey !== undefined) {
+          const reviewer = patch["permission.reviewer"];
+          if (
+            reviewer?.backend !== "jev" ||
+            !("stored" in reviewer.credential) ||
+            settingsOptions.reviewerKey.trim() === ""
+          )
+            throw new Error("单独密钥只用于凭据库存储的 Jev 审查器");
+          await config.setCredential("reviewer", settingsOptions.reviewerKey);
+        }
+        try {
+          await config.updateSettings(patch);
+        } catch (error) {
+          if (settingsOptions?.reviewerKey !== undefined) {
+            if (previousKey !== undefined) await config.setCredential("reviewer", previousKey);
+            else await config.credentials.delete("reviewer");
+          }
+          throw error;
+        }
+        for (const mark of markProvidersDirty) mark();
+        return config.describeSettings(workspaceRoot);
+      });
+      settingsPending = operation.then(
+        () => undefined,
+        () => undefined,
+      );
+      return operation;
     },
     async setDefaultModel(model, effort) {
       if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存默认模型");

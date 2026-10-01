@@ -32,6 +32,22 @@ describe("ADR-0036 预设", () => {
     ])
       expect(p.evaluate([subject]).decision.action).toBe(broad ? "allow" : "ask");
   });
+  it("只由用户确认依赖结构化标记，与显示 label 无关", () => {
+    const baseRules = presetRules("smart", ctx).map((rule) => ({
+      ...rule,
+      label: rule.userOnly ? "renamed" : "预设：授权数据",
+    }));
+    const policy = createRulePolicy({ ...ctx, baseRules });
+    for (const path of ["C:/ws/.nocturne/config.json", "C:/home/settings.json"])
+      expect(policy.evaluate([edit(path)])).toMatchObject({
+        decision: { action: "ask" },
+        userOnly: true,
+      });
+    expect(policy.evaluate([edit("C:/ws/.git/config")])).toMatchObject({
+      decision: { action: "ask" },
+      userOnly: false,
+    });
+  });
   it("smart 与 guarded 规则序列一致", () => {
     expect(presetRules("smart", ctx)).toEqual(presetRules("guarded", ctx));
   });
@@ -332,6 +348,13 @@ describe("ADR-0036 审查闸门", () => {
 });
 
 describe("模型审查后端", () => {
+  it.each([
+    ["**ALLOW**!", "allow"],
+    ["> BLOCK：", "block"],
+    ["`UNSURE`。", "unsure"],
+  ])("忽略首行 markdown 与标点 %s", (first, verdict) => {
+    expect(parseReview(`${first}\n理由`)).toEqual({ verdict, reason: "理由" });
+  });
   it.each(["ALLOW", "BLOCK", "UNSURE"])("解析 %s 首行", (first) => {
     expect(parseReview(`${first}\n理由`)).toEqual({ verdict: first.toLowerCase(), reason: "理由" });
   });

@@ -9,7 +9,8 @@ const REVIEW_PROMPT = `你是权限安全审查器，只判断本次操作是否
 第一行只能写 ALLOW、BLOCK 或 UNSURE，第二行用一两句中文说明理由。`;
 
 export function parseReview(text: string): ReviewResult {
-  const [first, ...rest] = text.trim().split(/\r?\n/);
+  const [line, ...rest] = text.trim().split(/\r?\n/);
+  const first = line?.replace(/[\p{P}\p{S}]/gu, "").trim();
   const verdict =
     first === "ALLOW"
       ? "allow"

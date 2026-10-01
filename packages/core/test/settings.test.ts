@@ -9,6 +9,7 @@ import {
   loadConfig,
   loadSettingsStore,
   type SettingsPatch,
+  type CredentialStore,
 } from "../src/index.js";
 import { createRulePolicy, PERMISSION_PRESET_NAMES } from "../src/permission/index.js";
 
@@ -59,6 +60,70 @@ describe("ADR-0034 设置层", () => {
     expect(
       overridden.describeSettings().find((item) => item.key === "permission.reviewer"),
     ).toMatchObject({ effective: "fake/review", source: "user", overridden: true });
+  });
+  it("Jev 独立密钥走凭据库，设置只写引用；写入失败恢复原密钥", async () => {
+    const keys = new Map<string, string>([["reviewer", "old-key"]]);
+    const credentials: CredentialStore = {
+      get: async (id) => keys.get(id),
+      set: vi.fn(async (id, key) => {
+        keys.set(id, key);
+      }),
+      delete: vi.fn(async (id) => {
+        keys.delete(id);
+      }),
+      has: (id) => keys.has(id),
+      backend: () => "memory",
+    };
+    const config = await loadConfig(platform, { nocturneHome: home, env: noEnv, credentials });
+    const runtime = await createRuntime({ cwd: workspace, workspaceRoot: workspace, config });
+    const reviewer = {
+      backend: "jev" as const,
+      endpoint: "opencode-zen" as const,
+      model: "jev-1.13-free",
+      credential: { stored: true as const },
+      minConfidence: 0.7,
+    };
+    await runtime.updateSettings({ "permission.reviewer": reviewer }, { reviewerKey: "new-key" });
+    expect(keys.get("reviewer")).toBe("new-key");
+    const saved = await readSettings();
+    expect(saved).toMatchObject({ permission: { reviewer } });
+    expect(JSON.stringify(saved)).not.toContain("new-key");
+    expect(
+      runtime.describeSettings().find((item) => item.key === "permission.reviewer"),
+    ).toMatchObject({
+      reviewer: { saved: reviewer, effective: reviewer },
+      saved: "Jev · opencode-zen · jev-1.13-free",
+    });
+    const write = vi.spyOn(config, "updateSettings").mockRejectedValue(new Error("disk failure"));
+    await expect(
+      runtime.updateSettings({ "permission.reviewer": reviewer }, { reviewerKey: "replacement" }),
+    ).rejects.toThrow("disk failure");
+    expect(keys.get("reviewer")).toBe("new-key");
+    write.mockRestore();
+    vi.mocked(credentials.set).mockRejectedValueOnce(new Error("store unavailable"));
+    await expect(
+      runtime.updateSettings({ "permission.reviewer": reviewer }, { reviewerKey: "replacement" }),
+    ).rejects.toThrow("store unavailable");
+    expect(keys.get("reviewer")).toBe("new-key");
+    expect(await readSettings()).toEqual(saved);
+    await expect(
+      runtime.updateSettings(
+        { "permission.reviewer": { backend: "off" } },
+        { reviewerKey: "invalid" },
+      ),
+    ).rejects.toThrow("单独密钥");
+    const concurrent = vi.spyOn(config, "updateSettings").mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      throw new Error("disk failure");
+    });
+    const results = await Promise.allSettled([
+      runtime.updateSettings({ "permission.reviewer": reviewer }, { reviewerKey: "failed-key" }),
+      runtime.updateSettings({ "permission.reviewer": reviewer }, { reviewerKey: "last-key" }),
+    ]);
+    expect(results.map((result) => result.status)).toEqual(["rejected", "fulfilled"]);
+    expect(keys.get("reviewer")).toBe("last-key");
+    expect(await readSettings()).toMatchObject({ permission: { reviewer } });
+    concurrent.mockRestore();
   });
   it("可信项目默认模型的档位同时用于 setDefaultModel 校验与界面模型清单", async () => {
     await mkdir(path.join(workspace, ".nocturne"));
