@@ -651,7 +651,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       shell: shellResolver.environmentLine(),
       cwd,
       workspaceRoot,
-      sessionDate: new Date().toISOString(),
+      // 取会话创建时间而非打开时间：恢复时不改写 system，保住其后整段历史的缓存
+      sessionDate: meta.createdAt,
     };
 
     // 会话级 ProviderRegistry：基础层 + 可信项目层的 Provider 条目。

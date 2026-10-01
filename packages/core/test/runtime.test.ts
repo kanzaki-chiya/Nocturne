@@ -269,9 +269,13 @@ describe("公开 Runtime API", () => {
   });
 
   it("resumeSession：重开后状态一致，可继续 submit", async () => {
-    const { runtime } = await makeRuntime([
+    const { runtime, provider } = await makeRuntime([
       [
         { type: "text_delta", text: "hi" },
+        { type: "finish", reason: "stop" },
+      ],
+      [
+        { type: "text_delta", text: "again" },
         { type: "finish", reason: "stop" },
       ],
     ]);
@@ -290,6 +294,11 @@ describe("公开 Runtime API", () => {
     const started = events2.find((e) => e.type === "turn.started");
     expect(started?.type === "turn.started" && started.payload.turnIndex).toBe(2);
     expect(started?.turnId).toMatch(/^turn-2-/);
+    // 环境段的日期取会话创建时间：恢复前后 system 完全相同，缓存前缀不破
+    const sys = provider.requests.map((r) => r.system.map((b) => b.text).join("\n"));
+    expect(sys).toHaveLength(2);
+    expect(sys[1]).toBe(sys[0]);
+    expect(sys[0]).toContain(`Session date: ${s2.state().meta.createdAt}`);
     await s2.close();
   });
 
