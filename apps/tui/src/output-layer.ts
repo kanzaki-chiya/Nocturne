@@ -78,8 +78,9 @@ export class OutputLayer {
       for (let i = 0; i < viewport; i++) shifted[i] = old[i + scroll] ?? "";
     }
     for (let i = 0; i < height; i++) {
-      if (next[i] === shifted[i]) continue;
-      output += `\x1b[${i + 1};1H\x1b[0m${next[i]}\x1b[0m\x1b[K`;
+      const line = next[i];
+      if (line === undefined || line === shifted[i]) continue;
+      output += writeRow(i + 1, line);
     }
     output += cursorSequence(cursor, rows);
     this.previous = next;
@@ -87,6 +88,20 @@ export class OutputLayer {
     this.page = page;
     return output + END;
   }
+}
+
+/**
+ * 写一行。Windows Terminal/ConPTY 的增量渲染会丢掉行首以空白开头的行里的空格
+ * （缓冲内容正确、显示时缩进消失），因此行首空格不写字面字符：
+ * 先擦除对应单元格，再把光标定位到缩进之后写正文。
+ */
+function writeRow(row: number, line: string): string {
+  const head = `\x1b[${row};1H\x1b[0m`;
+  const match = /^((?:\x1b\[[0-9;:]*[A-Za-z])*)( *)/.exec(line);
+  const prefix = match?.[1] ?? "";
+  const n = match?.[2]?.length ?? 0;
+  if (n === 0) return `${head}${line}\x1b[0m\x1b[K`;
+  return `${head}${prefix}\x1b[${n}X\x1b[${row};${n + 1}H${line.slice(prefix.length + n)}\x1b[0m\x1b[K`;
 }
 
 export function cursorSequence(point: CursorPoint | undefined, rows: number): string {

@@ -76,6 +76,24 @@ it("单行变更和选区反显只覆盖受影响的行", () => {
   expect(selected).toContain("\x1b[7mrow-3\x1b[27m");
 });
 
+it("行首空格以擦除加二次定位写出，不输出字面空格", () => {
+  const layer = new OutputLayer();
+  const write = layer.render(
+    frame(["● 首行", "  续行正文", "普通行", "\x1b[36m  染色"]),
+    80,
+    6,
+    5,
+    "conversation",
+    undefined,
+  );
+  // WT/ConPTY 增量渲染会丢掉以空白开头的行的行首空格，改擦除后定位写正文。
+  expect(write).toContain("\x1b[2;1H\x1b[0m\x1b[2X\x1b[2;3H续行正文\x1b[0m\x1b[K");
+  expect(write).toContain("\x1b[4;1H\x1b[0m\x1b[36m\x1b[2X\x1b[4;3H染色\x1b[0m\x1b[K");
+  expect(write).not.toContain("  续行正文");
+  expect(write).toContain("\x1b[1;1H\x1b[0m● 首行\x1b[0m\x1b[K");
+  expect(write).toContain("\x1b[3;1H\x1b[0m普通行\x1b[0m\x1b[K");
+});
+
 it("尺寸和页面切换逐行重写整帧，不清屏", () => {
   const layer = new OutputLayer();
   const lines = Array.from({ length: 9 }, (_, i) => `row-${i}`);
@@ -203,8 +221,17 @@ it.each([61, 100])("助手续行在 %i 列启动、缩到 61 列后仍保留两�
   });
   const assistantRows = () =>
     io.writes.flatMap((write) =>
-      [...write.matchAll(/\x1b\[\d+;1H\x1b\[0m(.*?)\x1b\[0m\x1b\[K/g)]
-        .map((match) => (match[1] ?? "").replace(/\x1b\[[\d;]*m/g, ""))
+      [
+        ...write.matchAll(
+          /\x1b\[\d+;1H\x1b\[0m(?:(\x1b\[[0-9;:]*[A-Za-z])*\x1b\[(\d+)X\x1b\[\d+;\d+H)?(.*?)\x1b\[0m\x1b\[K/g,
+        ),
+      ]
+        .map((match) =>
+          `${match[1] ?? ""}${" ".repeat(Number(match[2] ?? 0))}${match[3] ?? ""}`.replace(
+            /\x1b\[[\d;]*m/g,
+            "",
+          ),
+        )
         .filter((row) => row.includes("甲")),
     );
   try {
