@@ -22,6 +22,8 @@ export default defineConfig({
     include: ["test/**/*.test.{ts,tsx}"],
     environment: "node",
     testTimeout: 15_000,
+    // Ink 帧渲染吃 CPU；按核数默认并发时多线程低主频机器上互相拖慢，大批用例超时。
+    maxWorkers: 4,
     // Ink 测试断言的是可见文本；不让宿主 FORCE_COLOR 改写帧里的 ANSI 序列。
     env: { FORCE_COLOR: "0" },
   },
