@@ -90,6 +90,7 @@ execute(call, ctx):
 | `web_fetch` | 抓取公开网页、文档与图片 | 无 | 按主机申请 network 权限；HTML 转 Markdown；请求与结果约定见下 |
 | `write` | 创建或整体覆盖文件 | 写文件 | 覆盖已存在的文件前必须在本会话读过它，且文件自读取后未被外部修改；`output` 携带 `path`、`created`、`lines`，有变化时附 `diff`（含新建） |
 | `edit` | 精确字符串替换 | 写文件 | `old` 必须在文件中唯一出现（或显式 `replaceAll`）；同样要求先读且未过期；未命中只诊断、不写入；`output` 返回 unified 风格 `diff` 供客户端显示 |
+| `apply_patch` | Codex 式多文件补丁（ADR-0035） | 写文件 | 只在 `capabilities.editTool` 为 `apply_patch` 的模型上暴露（取代 `edit`/`write`）；先读后写与过期检测同 `edit`；全部文件算完才写盘，中途失败回滚已写文件；`output.files` 逐文件给出 `op`/`movedTo?`/`diff?` |
 | `grep` | 按正则搜索文件内容 | 无 | 优先使用 ripgrep；遵守 `.gitignore`；不跟随符号链接；结果逐条经权限过滤；数量有上限 |
 | `glob` | 按模式匹配文件路径 | 无 | 遵守 `.gitignore`；不跟随符号链接；结果逐条经权限过滤；按修改时间排序；数量有上限 |
 | `shell` | 执行非交互式命令 | 执行命令 | 指定工作目录与超时；合并输出流并截断；返回退出码；shell 与进程树终止见下 |
@@ -144,6 +145,9 @@ HTML/XHTML 删除 `script/style/noscript/svg/iframe/nav/header/footer/aside/form
   > 命令以分页工具结尾（more/less/Out-Host -Paging）。分页工具会改坏输出编码、可能等待按键卡住；输出会被自动收集，去掉末尾的分页命令后直接执行即可。需要筛选时先重定向到文件再用 grep 工具。
 
   管道中间段的分页工具（`more | sort`）、`more.txt`/`findstr more`、引号内的字样不误伤。词法器是提示性分词而非完整 shell 解析器：引号一律按 POSIX 习惯识别——`'` 在 cmd 中本不是引号符，单引号写法按 POSIX 语义近似处理（如 `'a | more'` 不判为管道）；引号内的 `$(…)`/反引号不展开，`^` 转义、here-doc 等复合语法不处理。
+- **apply_patch 误用拒绝**（[ADR-0035](../decisions/ADR-0035-apply-patch.md) 第 6 节）：GPT 系模型有时把补丁写成 `apply_patch <<'EOF' …` 当 shell 命令执行。同一 `validateInput` 预检在整条命令的**第一个词**是 `apply_patch`（大小写不敏感、忽略段首赋值与重定向、`basename` 比较）时以 `error`/`invalid_input` 结算——同样不请求权限、不发 `tool.started`、不启动进程。补救说明原文：
+
+  > `apply_patch` 不是 shell 命令；工具列表里有 `apply_patch` 时请直接调用该工具，并把补丁原文放进 `input`
 - **输出合并与截断**：stdout 与 stderr 在工具内按到达顺序合并为单一输出流（不等价于 shell 重定向，由 ProcessRunner 的两条流归并）；逐块经 `tool.progress` 上报（带 `stream` 标记），累积内容按 `maxModelChars` 截断。进程持续输出超过缓冲上限时丢弃中间部分但继续排空管道，防止子进程阻塞。
 - **结果**：`output` 携带 `exitCode`、`signal`、`timedOut`、`killed`、`durationMs`；`timedOut` 时 `status="error"`、`code="timeout"`。命令已退出但输出管道仍被占用时另带 `outputDetached=true`（见下条），`modelContent` 末尾追加一行提示（ok 时落在 `[exit code …]` 之前）：`命令已退出，但仍有后台进程占用输出管道，之后的输出未读取；如果启动了服务器等后台进程，它可能仍在运行。`
 - **退出与输出管道分离**：`spawnShell` 的 `wait()` 在直接子进程（cmd/sh 本体）`exit` 时结算，而不是等 stdio 全部关闭的 `close`——`close` 会被继承了输出管道的后台孙进程无限期拖住（`start`、`nohup`、`detached` 派生等）。子进程退出后输出流最多再等 500ms 自然收尾；仍被占用则经 `SpawnedProcess.detachOutput()` 销毁读取端，已捕获输出按原解码规则冲刷后保留，读取方正常结束而非报错。通用 `spawn`/`spawnPipe`（MCP stdio、Hooks）仍按 `close` 结算，行为不变。
@@ -151,7 +155,13 @@ HTML/XHTML 删除 `script/style/noscript/svg/iframe/nav/header/footer/aside/form
 - **输出解码**：Windows 取 `chcp` 代码页映射为 WHATWG 编码（如 CP936 → GBK），其余平台与未识别代码页按 UTF-8。探测到非 UTF-8 代码页时，stdout、stderr 各自按换行分段：整段字节能以 fatal UTF-8 解码就使用 UTF-8，否则按控制台编码解码，原样保留 `\r\n`。未换行尾巴超过 8KB 或空闲 50ms 后也按同一规则冲刷；末尾截断的 UTF-8 多字节字符（最多 3 字节）留待下一块。流结束时解码剩余字节。`NOCTURNE_CONSOLE_ENCODING` 可显式指定任意 WHATWG label（如 `utf-8`、`gbk`），设置后完全按该编码流式解码，不再逐行判定。残留风险：极短的 GBK 字节串偶然也是合法 UTF-8 时，会被识别为 UTF-8。PowerShell 系 shell 的前奏已把输出编码固定为 UTF-8（ADR-0022），逐行判定主要用于 cmd 与输出 GBK 的旧程序。
 - **进程树终止实测记录**（tools.md 第 5 节要求）：Windows（`taskkill /pid /T /F`）：已实测——测试在 `cmd /c` 下启动 Node 父进程并派生孙进程，中断后孙进程消失（`packages/core/src/tools/write-edit-shell.test.ts` "中断：终止整个进程树"用例）；POSIX（`detached` 进程组 + `kill(-pid, SIGKILL)`）：未在当前平台验证，CI/其他平台需复跑该用例。
 
-`apply_patch`（多文件补丁格式）不在 MVP 中。若后续发现某些模型使用它明显更可靠，再作为额外工具加入，与 `edit` 并存。
+`apply_patch` 的约定（[ADR-0035](../decisions/ADR-0035-apply-patch.md)）：
+
+- **格式**：`*** Begin Patch`/`*** End Patch` 包裹 `*** Add File:`、`*** Delete File:`、`*** Update File:`（可接 `*** Move to:` 改名）操作；`@@ <上下文>` 头定位、`*** End of File` 要求文件末尾应用，改动行用空格（上下文）/`-`/`+` 前缀；`@@` 可省略，省略时整个操作体构成一个隐式 hunk。heredoc 外壳（`apply_patch <<'EOF' …` 的包裹）宽松剥离。格式错误以 `invalid_input` 结算，不做猜测解析。
+- **匹配**：Update 的 hunk 按四级降级——逐字 → 忽略行尾空白 → 忽略首尾空白 → Unicode 标点归一（连字符变体、弯引号、省略号、不换行空格）；`@@` 头是子串定位（找**包含**该上下文的行），多个 hunk 顺序应用、后一个从前一个的替换位置之后继续找。模糊命中的上下文行保留文件原字节，不把补丁里的空白写回去；CRLF/LF、BOM 与末尾有无换行按原状保留。
+- **原子性**：所有文件的新内容先全部算好再统一落盘；任一写入失败时回滚已写文件——补丁整体要么成功要么不落盘。`Add`/`Move to` 目标已存在、源与目标相同、`Delete`/`Update` 未先读等均按 `invalid_input`/`not_read`/`stale_file` 返回，且所有文件保持原样；`Update` 匹配失败复用 `edit` 的诊断路径。
+- **权限**：`permissionSubjects` 为每个涉及路径各产出一个 `edit` 主体（Move 含源与目标两条），权限求值仍在权限层。
+- **按模型暴露**：注册表按 `traits.editTool` 与模型的 `capabilities.editTool` 筛选——`edit` 模型见 `edit`/`write`，`apply_patch` 模型只见 `apply_patch`；调用未暴露的编辑工具以 `unknown_tool` 结算，会话中途切换模型后下一次请求的工具单随之改变。系统提示对编辑工具保持中性（"file-editing tools"），两套工具下是同一份文本以保住缓存前缀。
 
 ## 7. 暂不设计
 

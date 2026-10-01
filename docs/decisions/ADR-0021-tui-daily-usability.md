@@ -205,3 +205,7 @@ running commands, investigating bugs, and answering questions about the codebase
 - Reference code as path:line. Use Markdown lightly: short paragraphs, lists for steps
   or comparisons, code blocks for code and commands.
 ```
+
+## 修订
+
+- 2026-10-01：基础系统提示的编辑工具一节按 [ADR-0035](ADR-0035-apply-patch.md) 第 7 节修订——附录中的「Tools」清单与「Prefer edit … write …」一条不再逐字生效；编辑工具以「file-editing tools」中性表述描述、不点名 `edit`/`write`/`apply_patch`，具体工具集随模型 `capabilities.editTool` 动态暴露。本 ADR 正文与附录其余部分保持不变。

@@ -47,7 +47,7 @@ API Key（掩码输入；直接回车表示改用环境变量）：********
 | `/provider add` | 逐行向导（CLI）或服务商页内嵌向导（TUI 打开服务商页并选中预设）；保存后提示"用 /model 选择模型" |
 | `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成；等价于服务商页「换密钥」 |
 | `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置并更新 models.dev 缓存；models.dev 失败只提示，不中断刷新 |
-| `/provider model <name> <模型>` | 编辑该模型的七个设置（显示名 / 上下文长度 / 最大输出 / 推理 / 图片输入 / 思考档位 / 协议），写入条目 `userModels.<模型>`。推理为「跟随 / 是 / 否」，CLI 输入 `-`/`y`/`n`，选否时不询问档位；协议为「跟随 / Chat Completions / Messages / Responses」，CLI 输入 `-`/`chat`/`messages`/`responses`，选「跟随」清除用户编辑（ADR-0026 第 7 节、ADR-0031 §1）；来源含「models.dev」「按接口声明推导」「服务商类型」。手写配置来源的字段只显示不提问；只能编辑清单内模型，程序不改写 `config.json` |
+| `/provider model <name> <模型>` | 编辑该模型的八个设置（显示名 / 上下文长度 / 最大输出 / 推理 / 图片输入 / 思考档位 / 协议 / 编辑工具），写入条目 `userModels.<模型>`。推理为「跟随 / 是 / 否」，CLI 输入 `-`/`y`/`n`，选否时不询问档位；协议为「跟随 / Chat Completions / Messages / Responses」，CLI 输入 `-`/`chat`/`messages`/`responses`，选「跟随」清除用户编辑（ADR-0026 第 7 节、ADR-0031 §1）；编辑工具为「跟随 / edit / apply_patch」，CLI 输入 `edit`/`patch`（或 `apply_patch`）/`-`（ADR-0035 §5）；来源含「models.dev」「按接口声明推导」「服务商类型」。手写配置来源的字段只显示不提问；只能编辑清单内模型，程序不改写 `config.json` |
 | `/provider remove <name>` | 删除向导写入的条目及其凭据；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改；等价于「删除」 |
 
 Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。这些子命令与服务商页操作是同一套 Core 编排的快捷方式，命令名与效果在 CLI 与 TUI 一致。
@@ -69,8 +69,9 @@ interface ProviderSetupFile {
   model?: string;
   /** 形状同 config.json 的 providers 元素（ProviderConfig），apiKeyEnv 可省略（第 3 节）；
       另含 userModels?: Record<modelId, { displayName?; contextWindow?; maxOutputTokens?;
-      capabilities?: { reasoning?; imageInput?; reasoningEffort? }; protocol? }>——/provider model 与
-      服务商页「编辑模型」写入的逐模型用户编辑（ADR-0024；protocol 见 ADR-0026 §7），只在向导层有意义；
+      capabilities?: { reasoning?; imageInput?; reasoningEffort?; editTool? }; protocol? }>——
+      /provider model 与服务商页「编辑模型」写入的逐模型用户编辑（ADR-0024；protocol 见
+      ADR-0026 §7；editTool 见 ADR-0035 §5），只在向导层有意义；
       refresh 重写 models 字段时保留，同名条目整换（重新添加）时同样沿用 */
   providers: ProviderConfig[];
 }
@@ -247,7 +248,7 @@ runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最�
   - OpenRouter（同属 OpenAI 兼容形状）：`top_provider.max_completion_tokens` → `maxOutputTokens`（`top_provider.context_length` 优先于顶层 `context_length`）；`pricing`（按 token 计价的 USD 字符串）换算为每百万 token 写入 `pricing.input`/`pricing.output`；`supported_parameters` 含 `reasoning` → `capabilities.reasoning`；`architecture.input_modalities` 含 `image` → `capabilities.imageInput`；
   - Anthropic 模型列表接口按其官方文档返回的限额字段映射（实现时对照文档，没有的字段不猜）；
   - `supported_endpoints`（字符串数组、非空才记）原文写入 `models.<id>.endpoints`，参与逐字段合并并据此推导模型生效协议（[providers.md](providers.md) 第 2 节、ADR-0026 §2）；手写配置也可在 `models.<id>.endpoints` 声明同一字段。
-- `reasoning`/`imageInput` 复用 `ModelCapabilities` 的既有字段，但**只在有声明时设置**——上游没声明的字段保持目录/保守默认，不因"没在 supported_parameters 里看到"而断言不支持（清单字段的覆盖范围各服务不统一）。七个字段（`displayName`/`contextWindow`/`maxOutputTokens`/`reasoning`/`imageInput`/`reasoningEffort`/`protocol`）另有用户编辑一级：providers.json 条目的 `userModels`（`/provider model` 或服务商页「编辑模型」写入）位于上游声明之上、手写配置之下，完整优先级见 [providers.md](providers.md) 第 2 节。
+- `reasoning`/`imageInput` 复用 `ModelCapabilities` 的既有字段，但**只在有声明时设置**——上游没声明的字段保持目录/保守默认，不因"没在 supported_parameters 里看到"而断言不支持（清单字段的覆盖范围各服务不统一）。八个字段（`displayName`/`contextWindow`/`maxOutputTokens`/`reasoning`/`imageInput`/`reasoningEffort`/`protocol`/`editTool`）另有用户编辑一级：providers.json 条目的 `userModels`（`/provider model` 或服务商页「编辑模型」写入）位于上游声明之上、手写配置之下，完整优先级见 [providers.md](providers.md) 第 2 节。`editTool`（ADR-0035 §5）不接受上游映射——条目/覆盖未声明且内置目录未命中时，由按模型 id 末段匹配的内置默认表兜底（含 `gpt`/`codex`，不区分大小写 → `apply_patch`，否则 `edit`）。
 - 上游或 models.dev 标明支持推理且没有逐模型档位声明时推导完整六档；用户可通过「编辑模型」或手写 `capabilities.reasoningEffort` 收窄。旧 `thinking.levels/source` 在运行时忽略，下次程序写入该条目时删除；启动提示见 [events.md](../protocols/events.md)。
 - 写入 `models` 的 `pricing` 进入 `ModelInfo.pricing`（[provider-api.md](../protocols/provider-api.md) 第 2 节）；模型选择页按这些字段渲染"推理 / 图片输入 / 上下文 / 价格"列（[tui.md](../apps/tui.md) 第 7 节），未声明的列留空，不编造数据。
 - **最大输出长度未知时不替上游做决定**：

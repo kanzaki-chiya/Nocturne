@@ -46,6 +46,10 @@ interface ToolTraits {
   /** 执行时需要与用户交互输入（ADR-0032）：声明后 ToolContext.askUser 可用；
       子代理（非交互）的可选工具池按此特性排除（subagent.md 第 6 节） */
   needsUser?: boolean
+  /** 编辑工具族标记（ADR-0035）：edit/write 声明 "edit"，apply_patch 声明
+      "apply_patch"；未声明的工具不参与该筛选。携带模型的
+      capabilities.editTool 时注册表只暴露同值成员 */
+  editTool?: EditToolKind   // "edit" | "apply_patch"，定义在 protocol
 }
 ```
 
@@ -139,6 +143,7 @@ type RawImageAttachment = {
 - `output`：结构化结果，供客户端渲染（例如 `edit` 返回 diff，`shell` 返回退出码）。有独立大小上限；不发送给模型。
 - `edit` 成功时的 `output` 为 `{ path, replaced, diff }`；`write` 为 `{ path, created, lines, diff? }`，新建与覆盖只要有变化均提供 diff。`diff` 仍是字符串，头部 `@@ -旧起始行,旧行数 +新起始行,新行数 @@`，后续源码行以空格、`-`、`+` 标记；行尾差异用 `\ CRLF` / `\ CR` / `\ No newline at end of file` 标记。路径由 `path` 提供，不嵌入头部。旧日志的 `@@ 路径 @@` 或无头部结果仍可展示，但无可推定的行号。客户端按 `+`/`-` 源码行计算新增/删除数，不计上下文或行尾标记。
 - `edit` 的 `old` 未命中返回 `no_match`，提示写入 `error.message` / `modelContent`；只基于通过路径、权限及先读状态检查的目标文本生成有界建议，不改变文件。`not_unique`、`not_read`、`resource_changed` 等语义保持不变。
+- `apply_patch`（[ADR-0035](../decisions/ADR-0035-apply-patch.md)）的输入仅 `{ input: string }`（补丁原文；语法见 [tools.md](../architecture/tools.md) 第 6 节）。成功的 `output` 为 `{ files: [{ path, op, movedTo?, diff? }] }`——按补丁操作顺序逐文件给出 `op`（`add`/`update`/`delete`/`move`）、改名时的 `movedTo` 与该文件的行级 `diff`（格式同上）；`modelContent` 为逐文件摘要。`permissionSubjects` 为每个涉及路径各产出一个 `edit` 主体（Move 含源与目标）。解析错误、目标冲突或先读检查失败时**不写任何文件**，返回 `error`（`invalid_input`/`not_read`/`stale_file` 等）；写盘中途失败回滚已写文件后同样以 `error` 结算。
 - `attachments`：图片字节；执行器经会话的 `AttachmentStore` 逐张落盘（tools.md 第 4 节），成功的写入 `tool.completed.attachments` 引用，`source` 取 `origin === "mcp" ? "mcp" : "read"`。某张保存失败不影响其余：成功的照常引用，失败的在 `modelContent` 末尾追加 `[图片附件保存失败：<原因>]` 并记 `tool.attachment_failed` 诊断；无论成败都恰好一个 `tool.completed`。`read` 的图片相关错误码为 `image_too_large`（超 5 MB 或任一边超 8000 px）与 `image_corrupt`（文件头损坏/截断）。
 - 可预期的失败（文件不存在、`old` 字符串不唯一、先读检查失败）返回 `status: "error"` 与工具自定义的 `code`；非预期异常直接抛出，由执行器转换为 `tool_failed`。
 - `denied`、`cancelled`、`interrupted` 等状态只由执行器或恢复逻辑产生，工具不会返回它们。
@@ -173,9 +178,13 @@ type RawImageAttachment = {
 interface ToolRegistry {
   register(tool: ToolDefinition): void      // 名称重复时抛错，不静默覆盖
   unregister(name: string): void
-  get(name: string): ToolDefinition | undefined
+  /** 携带模型的 capabilities.editTool 时按 traits.editTool 筛选可见性
+      （ADR-0035 §5）；缺省不筛，未声明该特性的工具不受筛选影响 */
+  get(name: string, editTool?: EditToolKind): ToolDefinition | undefined
   list(): ToolDefinition[]
-  specs(): ToolSpec[]                        // 交给 Context Builder / Provider 的模型可见部分
+  /** 同上筛选；返回交给 Context Builder / Provider 的模型可见部分。
+      执行器查找走同一筛选——未暴露的名字以 unknown_tool 结算 */
+  specs(editTool?: EditToolKind): ToolSpec[]
 }
 
 type ToolSpec = { name: string; description: string; inputSchema: JsonSchema }

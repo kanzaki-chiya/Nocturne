@@ -30,7 +30,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 模型能力来自上游、models.dev 裁剪目录与内置的小型目录，用户可以按模型覆盖。models.dev 只在添加服务商或刷新模型列表时更新，本地缓存与内置快照保证离线可用（[ADR-0025](../decisions/ADR-0025-per-model-reasoning.md)）。
 
-模型字段（`displayName`/`contextWindow`/`maxOutputTokens`/`capabilities.*`）的生效值按**逐字段**优先级取（高者覆盖低者，ADR-0025）：逐模型手写配置 > 用户编辑（`userModels`）> 上游声明（`GET /models`）> models.dev > 内置目录 > 默认。只覆盖实际声明的字段；数组字段（`reasoningEffort`）由最高层整体替换，不并集，显式空数组同样生效。models.dev 只取 `reasoning`（true→visible，false→none）、`modalities.input` 是否包含 `image`、`limit.context`、`limit.output`，不取 `attachment`、显示名和价格。模型 ID 依次尝试完全相同、忽略大小写相同、去冒号后缀后末段模型名相同；每步只有唯一候选才匹配，歧义时不猜。
+模型字段（`displayName`/`contextWindow`/`maxOutputTokens`/`capabilities.*`）的生效值按**逐字段**优先级取（高者覆盖低者，ADR-0025）：逐模型手写配置 > 用户编辑（`userModels`）> 上游声明（`GET /models`）> models.dev > 内置目录 > 默认。只覆盖实际声明的字段；数组字段（`reasoningEffort`）由最高层整体替换，不并集，显式空数组同样生效。models.dev 只取 `reasoning`（true→visible，false→none）、`modalities.input` 是否包含 `image`、`limit.context`、`limit.output`，不取 `attachment`、显示名和价格。模型 ID 依次尝试完全相同、忽略大小写相同、去冒号后缀后末段模型名相同；每步只有唯一候选才匹配，歧义时不猜。`capabilities.editTool` 的「默认」层是按模型 id 末段匹配的内置默认表（不区分大小写：含 `gpt`/`codex` → `apply_patch`，否则 `edit`；ADR-0035 §5）——上游不参与该字段的映射，条目与覆盖未声明且内置目录未命中时才启用。
 
 推理能力只按逐模型声明解析：没有任何层声明 `reasoning`，但有非空 `reasoningEffort` 声明时，视为支持推理；都没有时默认不支持。支持推理时档位取逐模型声明，否则推导六档；推理为 `none` 时没有档位。旧服务商级 `thinking.levels/source` 忽略；读到旧 `levels` 每次启动发 `runtime.warning(provider_thinking_levels_ignored)`。用户编辑设为「否」与手写非空档位冲突时拒绝保存；手写配置自身同时声明 `none` 和非空档位时推理为准，并警告文件、服务商、模型。
 

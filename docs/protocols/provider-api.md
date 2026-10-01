@@ -52,6 +52,10 @@ interface ModelCapabilities {
   reasoningEffort?: ReasoningEffortLevel[]   // 已解析的可用思考档位集合；"off" 恒可用、不在集合中，缺省=不可切换
   imageInput: boolean
   promptCache: boolean
+  /** 生效编辑工具（ADR-0035 §5）："edit" → 工具表含 edit/write；
+      "apply_patch" → 工具表只含 apply_patch（不含 edit/write）。
+      子会话按其自身模型的该值筛选 */
+  editTool: EditToolKind   // "edit" | "apply_patch"，定义在 protocol
 }
 ```
 

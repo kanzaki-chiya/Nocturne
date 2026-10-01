@@ -82,7 +82,7 @@ interface ConfigFile {
 | `mcp.servers` | 按服务器 id 浅合并（同 `providers`）；不同 id 并存 |
 | `hooks.*` | 按事件点追加：用户级条目在前、项目级在后，执行顺序即此顺序（hooks.md 第 2 节） |
 
-**`userModels` 合成层**（ADR-0024 第 2 节）：providers.json 条目里的 `userModels`（模型编辑页 / `/provider model` 写入的逐模型用户编辑）不是合并结果的一部分，而是加载时被包成一个独立层——`providers: [{ id, models: userModels }]`——插在向导层（setup）与 `config.json`（user）之间参与 `models` 逐字段合并。因此用户编辑优先于上游声明、低于任何手写层；只由该层引入、其他层都不声明的模型条目在合并后被丢弃。推理为 `none` 时没有可用思考档位；冲突处理见 [providers.md](providers.md) 第 2 节。
+**`userModels` 合成层**（ADR-0024 第 2 节）：providers.json 条目里的 `userModels`（模型编辑页 / `/provider model` 写入的逐模型用户编辑）不是合并结果的一部分，而是加载时被包成一个独立层——`providers: [{ id, models: userModels }]`——插在向导层（setup）与 `config.json`（user）之间参与 `models` 逐字段合并。因此用户编辑优先于上游声明、低于任何手写层；只由该层引入、其他层都不声明的模型条目在合并后被丢弃。推理为 `none` 时没有可用思考档位；冲突处理见 [providers.md](providers.md) 第 2 节。`capabilities.editTool`（`"edit" | "apply_patch"`，ADR-0035 §5）同样经该链生效：手写配置与 `userModels` 都可声明；都未声明时由内置默认表按模型 id 末段匹配（含 `gpt`/`codex`，不区分大小写 → `apply_patch`，否则 `edit`）。
 
 models.dev 数据在启动时从缓存或内置快照读取，启动不联网；添加服务商或刷新模型列表时才 GET 更新，10 秒超时，失败沿用本地数据并提示。`config.json` 的 `modelsDev: false` 关闭联网并只使用内置快照。缓存比快照新时优先使用缓存。匹配规则与字段映射见 [providers.md](providers.md) 第 2 节。
 
