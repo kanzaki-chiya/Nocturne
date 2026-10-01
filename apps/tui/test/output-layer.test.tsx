@@ -91,6 +91,18 @@ it("尺寸和页面切换逐行重写整帧，不清屏", () => {
   }
 });
 
+it("缩窄时忽略旧宽度布局，随后按新宽度覆盖全部行", () => {
+  const layer = new OutputLayer();
+  const wide = frame([`\x1b[32m${"界".repeat(35)}\x1b[0m`, "unchanged"]);
+  layer.render(wide, 80, 5, 3, "conversation", undefined);
+  expect(layer.render(wide, 60, 5, 3, "conversation", undefined)).toBe("");
+  const narrow = frame(["界".repeat(30), "unchanged"]);
+  const write = layer.render(narrow, 60, 5, 3, "conversation", undefined);
+  expect(rewritten(write)).toEqual([1, 2, 3, 4]);
+  expect(write).not.toContain("\x1b[2J");
+  expect(rewritten(layer.render(narrow, 60, 5, 3, "conversation", undefined))).toEqual([]);
+});
+
 it("全屏帧只写一次同步事务，IME 各输入位置按绝对坐标补位；帧外顺序不变", () => {
   const io = tty();
   const mouseOn = "\x1b[?1000h";
@@ -188,7 +200,7 @@ it("120 行流式思考保持固定窗口，每帧至多改 6 行且不清屏", 
     stderr: io.stderr,
     patchConsole: false,
   });
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  await vi.waitFor(() => expect(io.writes.join("")).toContain("Nocturne"));
   await session.submit({ text: "测试流式" });
   const frames: string[] = [];
   let frame = "";

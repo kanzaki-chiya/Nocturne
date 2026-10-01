@@ -1,3 +1,5 @@
+import stringWidth from "string-width";
+
 import type { CursorPoint } from "./cursor.js";
 
 const BEGIN = "\x1b[?2026h";
@@ -41,6 +43,8 @@ export class OutputLayer {
   ): string {
     const height = Math.max(0, rows - 1);
     const next = frame.replace(/\n$/, "").split("\n").slice(0, height);
+    // Ink 缩窄时会先提交旧布局；等新宽度的帧，避免终端折行污染行缓存。
+    if (next.some((line) => stringWidth(line) > columns)) return "";
     while (next.length < height) next.push("");
     const full = this.dimensions !== `${columns}x${rows}` || this.page !== page;
     const old = full ? [] : this.previous;
