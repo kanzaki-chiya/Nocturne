@@ -165,3 +165,39 @@ decision == ask 时：
 - 直接用一个 `choice` 问题，选项即三档结论，取 `choice` 为结论；`confidence` 低于阈值（默认 0.7，可配）时按 `unsure` 处理。不再用「概率阈值映射三档」的做法。
 - 配置除直连 TypeSafe 外，允许复用已有服务商的密钥：`permission.reviewer = { backend: "jev", baseURL, model, credential }`，`credential` 写服务商 id（如 `opencode-go`，同一个 OpenCode 密钥在 Zen 上可用）或环境变量名（默认 `TYPESAFE_API_KEY`）。经 OpenCode 网关时附带会话头，与该服务商条目的 `sessionHeader` 一致。
 - 开启时告知：命令、工作目录与最近的用户消息会发送到 OpenCode 与 TypeSafe（或直连 TypeSafe）。
+
+### 2026-10-01：审查器设置的形状与 /settings 交互
+
+审查器在设置中独立成一项，不进入服务商与模型体系：Jev 不是对话模型，放进服务商列表会混入 `/model` 选择页；它的协议也与对话请求不同，硬塞会让对话链路变复杂。取代第 7 条与上一条修订中的配置写法。
+
+**settings.json**：
+
+```json
+"permission": {
+  "reviewer": {
+    "backend": "jev",
+    "endpoint": "opencode-zen",
+    "model": "jev-1.13-free",
+    "credential": { "provider": "opencode-go" },
+    "minConfidence": 0.7
+  }
+}
+```
+
+- `endpoint`：内置接入点 id。接入点是 config 层的一张纯数据表（与服务商预设同一做法）：`opencode-zen` → `https://opencode.ai/zen/v1`，附 OpenCode 会话头；`typesafe` → `https://api.typesafe.ai/v1`。`custom` 时另写 `baseURL`（OpenRouter decisions 接口或自建兼容服务）。每个接入点带默认模型（`opencode-zen` 为 `jev-1.13-free`，`typesafe` 为 `jev-latest`）与模型筛选条件（id 包含 `jev`）。
+- `credential`：三选一，settings.json 不保存密钥。`{ "provider": "<服务商 id>" }` 借用已有服务商的密钥；`{ "env": "<变量名>" }` 读环境变量（`typesafe` 默认 `TYPESAFE_API_KEY`）；`{ "stored": true }` 单独存入系统凭据库（ADR-0015，索引 id 为 `reviewer`）。
+- `minConfidence`：`choice` 答案的 `confidence` 低于它时按 `unsure` 处理，默认 0.7。
+- 小模型后端写 `{ "backend": "model", "model": { "provider": "...", "model": "..." } }`，引用已有服务商下的模型。
+- 未设置或 `backend` 为 `"off"` 即未配置审查器（第 6 条）。
+
+**模型列表**：选择模型时对接入点调用 `GET <baseURL>/models` 实时拉取，按筛选条件过滤；拉取失败时退回接入点的默认模型，并允许手动输入。
+
+**/settings 交互**：新增一行「安全审查：<后端> · <接入点> · <模型>」，回车打开对话框（ADR-0030 样式）：
+
+1. 后端：关闭 / Jev / 小模型；
+2. Jev：选接入点 → 选拉取到的模型 → 凭据，默认借用 baseURL 主机与之匹配的已有服务商（如已有 OpenCode 服务商即自动选中），可改为环境变量或单独输入；
+3. 小模型：复用 `/model` 选择页，选定后返回对话框。
+
+首次开启 Jev 时提示一次：命令、工作目录与最近的用户消息会发往所选接入点（OpenCode 与 TypeSafe，或直连 TypeSafe）。
+
+**不做连接测试按钮**：与 v0.2 去掉服务商连接测试的决定一致。配置错误时第一次审查失败、按 `unsure` 处理，界面的审查行显示失败原因（密钥无效、模型不可用等）。
