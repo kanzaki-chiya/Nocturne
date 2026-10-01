@@ -103,7 +103,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - 全新的 `NOCTURNE_HOME` 下运行 `nctrn setup` 完成配置后，不设任何环境变量即可 `nctrn` 进入会话并完成一次工具往返（CLI 与 TUI）。
 - 会话内 `/provider add` 添加第二个服务商并切换过去，不重启进程、不触发 `SessionEnd`/`SessionStart` Hook、不重启 MCP 服务器；`/provider key` 更新密钥后下一次请求即生效。
 - 首次真实请求失败时，对错误密钥、错误地址、错误模型 id 分别给出对应提示；向导不发送模型请求。
-- 在任何预设（含 `full-access`）、任何规则与 Grant、`--yes` 下，`read`/`edit`/`grep`/`glob` 都读不到 `credentials.json`；`shell` 子进程环境中不含已解析的凭据变量。
+- 在任何预设（含 `bypass`）、任何规则与 Grant、`--yes` 下，`read`/`edit`/`grep`/`glob` 都读不到 `credentials.json`；`shell` 子进程环境中不含已解析的凭据变量。
 - `config.json` 在整个流程中字节级不变；手写条目覆盖同名向导条目，`/provider` 正确标注来源层。
 - `credentials.json` 与 `providers.json` 中不出现任何密钥明文；三个平台的凭据写入与读取过程中密钥不出现在子进程命令行参数里（Windows 实测，macOS/Linux 在可用环境实测，否则如实标注未验证）。
 - 上游声明了限额的模型（commandcode 的 `context_length`、OpenRouter 的 `max_completion_tokens`）按声明值生效；最大输出长度未知时 openai-compatible 请求不含 `max_tokens`。
@@ -194,21 +194,11 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - **OpenCode Zen / Go 预设**（已实现，2026-09-30；[ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md)）：内置 `opencode-zen`（`https://opencode.ai/zen/v1`）与 `opencode-go`（`https://opencode.ai/zen/go/v1`）两个预设，默认凭据变量 `OPENCODE_API_KEY`；条目写死 `sessionHeader: "x-opencode-session"`（同系网关路由要求）与 `modelsDevProvider`（`opencode` / `opencode-go`），models.dev 快照新增按服务商保存的 npm 接口声明，据此把逐模型协议推导到三种接口上。起因是第三方编码代理在 OpenCode 网关上必须带会话头才能正常路由。
 - **edit 未命中提示与 diff 行号**（已实现，2026-09-29 验收；[ADR-0027](../decisions/ADR-0027-edit-diagnostics-diff-display.md)）：`old` 找不到时，除「未出现」外告诉模型差在哪——只差空白、缩进或换行时直接点明；否则附上文件中最接近的几行及行号，省去模型再 grep、再 read 的两步。`output.diff` 带上起始行号，TUI 与 CLI 的 diff 显示行号，摘要行改为「新增 N 行，删除 M 行」。diff 样式改为：文字保持正文颜色，整行铺暗红/暗绿底色，左侧行号与 `+`/`-`，长行折行而不截断（NO_COLOR 与 ASCII 模式退化为前缀）；折叠阈值从头 6 行 + 尾 4 行放宽到约 40 行（参考 Claude Code），超出部分显示「… 还有 N 行」，完整内容经点击展开查看。
 - **按模型提供 `apply_patch`**：为 GPT 系模型提供 Codex 格式的补丁工具，按模型能力声明选择给 `edit` 还是 `apply_patch`；优先级视维护者实际使用的模型而定。
-- **智能权限与安全审计模型**（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)，已接受，排在 `apply_patch` 之后；以 ADR 为准：预设改为 `read-only`/`default`/`auto-edit`/`guarded`（原 `full-access`）/`smart`/`bypass`，`smart` 只审查分类规则拦下的操作，`bypass` 基本不询问；下列要点为早期设计）：原本需要用户确认的操作，先交给审查器判断，结果为放行、拦截或拿不准，每项都附理由。
-  - **安全审计模型**：设置里单独选一个轻量模型（写入 `settings.json`），只用于安全审查；与主对话模型分开计费、分开选择，不并入下面的「模型角色」（安全相关，须单独选择、单独展示）。
-  - **审查器后端可选**：统一接口（输入命令、工作目录与用户最近几条消息，输出三选一加理由），先做两种后端——安全审计模型（LLM，在提示里给三个选项、拿不准就选「拿不准」，不让模型自报置信度）与 TypeSafe 的 Jev（托管的判定 API：一次调用返回带概率的 Choice/Noul，按阈值映射三档，比 LLM 快）。由用户按延迟与准确度自选。Jev 不是 chat completions 接口，而是 TypeSafe 的 `systemOne` 判定接口（请求里给类型化问题，返回带概率的答案）；按这一形状做一个判定适配器，地址与密钥可配（TypeSafe 直连用 `TYPESAFE_API_KEY`，也可指向 OpenRouter 的 decisions 接口或自建的兼容服务），密钥走现有凭据存储（ADR-0015），是否引入官方 SDK 在 ADR 中定；命令与用户最近消息会发到 TypeSafe，开启时明确告知。可离线运行的兼容模型（如开源权重的 Laya，ONNX，约 1.7 GB）不内置，留作以后的第三种后端。可参考 vercel-labs/fx 的 Jev 权限审查实现。
-  - **两种用法，各为独立预设**，Alt+M 循环可达：
-    - **智能审批 `smart`**：放行范围同 `auto-edit`；放行即执行，拦截与拿不准都弹窗询问用户，弹窗显示审查理由。用来减少打扰，最终决定仍在用户。
-    - **全自动 `auto`**：放行范围同 `full-access`；拦截直接拒绝并把理由回给主模型，拿不准才询问用户。用来跑无人值守的长任务。
-  - 审查器只看命令、工作目录与用户最近几条消息，不看文件内容与工具输出（防提示注入）。
-  - 内置硬拒绝与用户 `deny` 规则不可被放开；修改 Nocturne 授权配置（`config.json`、`trust.json`、Grant）始终由用户本人确认。
-  - 审查器超时、报错或输出格式不对时按「拿不准」处理；非交互模式下拒绝。
-  - 未配置审查器时两个预设分别按 `auto-edit`、`full-access` 行为，并提示一次去设置。
-  - 每次审查写入会话日志（后端、模型、结果、理由、用户是否推翻），界面显示一行。文档写明这是基于模型的判断，不是安全边界。
+- **智能权限与安全审计模型（第一轮已实现，2026-10-01）**（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)）：六个预设、旧 full-access 兼容、smart 三档审查、模型后端与独立设置、超时/缓存/非交互/子代理继承、持久审计与用量、TUI/CLI 审查展示已实现。模型后端复用 Provider 公开接口；Jev 后端待做。契约见 [permissions.md](../architecture/permissions.md) 5.3、6、7。
 - **模型角色（model roles）**：按用途给模型分工，参考 omp 的 `modelRoles`：`default`（主对话）、`smol`（标题生成等轻量工作）、`vision`（当前模型不能看图时代为看图，把描述交给主模型）、`task`（子代理）等，具体角色集在 ADR 中定；未配置的角色回落到 `default`。这里的「角色」只指模型分工，与子代理阶段不做的 agent 角色系统（persona、自定义 agent 文件）无关。子代理改为可按 `task` 角色选模型，取代子代理阶段「子代理独立模型」不做的决定（届时同步修改 `subagent.md`）。安全审计模型不属于模型角色。依赖设置层；排在视觉输入之后。
 - **跨服务商推理内容回放到 Responses**（待做）：会话中途从 OpenAI 兼容模型切到 Responses 模型时，前者留下的推理片段没有 OpenAI 要求的推理条目标识（`providerData.openai.itemId` 与加密推理内容），AI SDK 发请求时逐条跳过并打出 "Non-OpenAI reasoning parts" 警告（已转入诊断日志 `provider.sdk_warning`）。同一 Responses 服务商产生的推理条目标识与加密内容都已随日志保存，回放不受影响（2026-10-01 核对会话 0f0ffc28：19 条 Responses 推理全部带标识，唯一缺标识的一条来自 OpenAI 兼容模型）。做法：Responses 适配器在组装请求时自行丢弃缺少 openai 标识的推理片段，不再交给 SDK 报警；补一条同服务商多轮回放的适配器测试。
-- **高风险操作只给一次性选项**：full-access 下仍需确认的高风险命令、修改工作区外文件等操作，确认弹窗只提供「允许一次」「拒绝」「拒绝并停止」，不提供会话内与项目级长期允许。
-- ~~**设置层与 `/settings` 页**~~（已实现；[ADR-0034](../decisions/ADR-0034-settings-layer.md)，已接受；默认模型与默认档位在 `/model` 页成对设置）：程序维护的 `settings.json`（文件与 `shell`/`shellPath` 字段已随 ADR-0022 落地），与手写 `config.json` 分层合并、手写优先（程序仍不改写 `config.json`）。`/settings` 集中管理默认权限预设、主题与 Shell；默认模型与档位只读展示。安全审计模型、审查器后端、模型角色等由后续 ADR 扩充。
+- **高风险操作只给一次性选项（第一轮已实现，2026-10-01）**：权限层对高风险命令、编码命令与工作区外 edit 的确认只提供「允许一次」「拒绝」「拒绝并停止」；所有客户端按事件选项渲染。
+- ~~**设置层与 `/settings` 页**~~（已实现；[ADR-0034](../decisions/ADR-0034-settings-layer.md)，已接受；默认模型与默认档位在 `/model` 页成对设置）：程序维护的 `settings.json`（文件与 `shell`/`shellPath` 字段已随 ADR-0022 落地），与手写 `config.json` 分层合并、手写优先（程序仍不改写 `config.json`）。`/settings` 集中管理默认权限预设、主题与 Shell；默认模型与档位只读展示。安全审计模型与模型审查后端已由 ADR-0036 第一轮扩充；Jev 与模型角色待做。
 - **压缩保留最近原文**（待写 ADR，排在设置层之后）：L2 摘要边界往前让出一段按 token 计的保留区（参考 Pi 的做法，约取窗口的 15%–20%，上下限 20k–40k），最近几步的原文不进摘要，避免压缩后忘记刚改到哪、刚看到的报错；保留区装不下时逐步缩小，最坏退回现行为。摘要之后另注入本会话最近读过或改过的文件路径（取自 readState）。同一 ADR 加入可设置的摘要阈值：设置层（与 `config.json`）新增 `compaction.threshold`，可写百分比（相对可用输入预算）或绝对 token 数（如 `200k`，便于给大窗口模型设注意力上限、切换模型时不随窗口缩放），只校验落在 (0, 100%] 或正整数内，不另设上下限；未设置时摘要阈值为 90%。L1 修剪阈值保持 80%，但不高于摘要阈值（先修剪再摘要的顺序不变）。估算中新增内容的 CJK 字符改按约 1 字 1 token 计，避免中文大文件读入后低估。只改 Context Builder 与配置，不新增事件或工具。同一 ADR 一并处理两项缓存问题（2026-10-01 缓存审计）：L2 摘要请求改为沿用主请求的 system、工具声明与历史结构，只在末尾追加摘要指令并禁止调用工具，从而读到已缓存的前缀（参考 Claude Code；现为独立 system + 文本转录 + 空工具集，整段历史按未命中计费）；L1 修剪改为按足够回收量批量进行并加触发滞后，避免跨 Turn 小额修剪反复让同一大段历史失效（参考 OpenCode 的 PRUNE_MINIMUM / PRUNE_PROTECT）。可逆压缩（`context_ref` + 找回工具）与分层摘要暂不做：被省略的内容大多可以重新 `read`/重跑取回，原文已在事件日志中，确有需要时再给占位加 seq 与只读找回工具。
 - **界面打磨**：
   - **配色（已完成）**（见[ADR-0029](../decisions/ADR-0029-tui-themes.md)）：iris 主色的深浅两套主题已落地；`/theme` 在 Campbell 深底和 One Half Light 浅底上预览，↑/↓ 选择、Enter 保存、Esc 取消；选择写入 `settings.json`，未设置或值无效时默认深色。状态行以中性色为主，Markdown 标题、代码、引用靠灰度与粗细区分。
