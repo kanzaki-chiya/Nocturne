@@ -24,7 +24,7 @@ interface WriteOutput {
 export const writeTool: ToolDefinition<WriteInput, WriteOutput> = {
   name: "write",
   description:
-    "创建或整体覆盖文件。覆盖已存在的文件前必须先在本会话中 read 过它或由用户 @文件 附带文本；文件被外部修改后需重新读取。",
+    "创建或整体覆盖文件。覆盖已存在的文件前必须先在本会话中 read 过它或由用户 @文件 附带文本；文件被外部修改后需重新读取。新建文件或整体重写时用本工具。",
   inputSchema: {
     type: "object",
     required: ["path", "content"],
@@ -34,7 +34,7 @@ export const writeTool: ToolDefinition<WriteInput, WriteOutput> = {
     },
     additionalProperties: false,
   },
-  traits: { mutates: true, concurrencySafe: false, timeoutMs: 15_000 },
+  traits: { mutates: true, concurrencySafe: false, timeoutMs: 15_000, editTool: "edit" },
 
   permissionSubjects(input: WriteInput, scope: ToolScope): SubjectRequest[] {
     return [{ kind: "edit", target: scope.paths.resolve(scope.cwd, input.path) }];

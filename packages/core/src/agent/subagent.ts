@@ -266,9 +266,13 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
 
         // 可选池 = 内置 ∪ 父会话 MCP 快照 ∪ task（子会话自身深度未达上限才可再派生）。
         // ADR-0032 §4：子会话非交互，声明 needsUser 的工具按特性排除——
-        // 显式 tools 白名单点名时也按不可用名处理
+        // 显式 tools 白名单点名时也按不可用名处理；
+        // ADR-0035 §5：编辑工具按子会话模型的 editTool 能力筛选
+        const childEditTool = childModel.model.capabilities.editTool;
         const pool: ToolDefinition[] = [...builtinTools(), ...deps.mcpTools()].filter(
-          (t) => t.traits.needsUser !== true,
+          (t) =>
+            t.traits.needsUser !== true &&
+            (t.traits.editTool === undefined || t.traits.editTool === childEditTool),
         );
         if (deps.depth + 1 < deps.limits.maxDepth) {
           pool.push(createTaskTool(createSubagentLauncher({ ...deps, depth: deps.depth + 1 })));

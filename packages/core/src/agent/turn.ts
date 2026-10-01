@@ -200,6 +200,9 @@ export async function runTurn(
           session.emitEphemeral(type, payload, options ?? {});
         },
       },
+      // ADR-0035 §5：每次调用按当时模型的编辑工具能力筛选——
+      // 模型切换后下一次调用即生效
+      editTool: deps.model.model.capabilities.editTool,
     });
   }
 
@@ -325,7 +328,7 @@ export async function runTurn(
         history: state.history,
         todos: state.todos,
         model: deps.model.model,
-        tools: deps.tools.specs(),
+        tools: deps.tools.specs(deps.model.model.capabilities.editTool),
         instructions: deps.instructions,
         environment: deps.environment,
         events: session.durableEvents(),

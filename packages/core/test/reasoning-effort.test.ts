@@ -299,6 +299,7 @@ describe("Runtime：思考档位", () => {
         reasoning: "none",
         imageInput: false,
         promptCache: false,
+        editTool: "edit",
       },
     };
     const provider = new FakeProvider({ models: [noReasoning] });
@@ -327,6 +328,7 @@ describe("Runtime：思考档位", () => {
       reasoning: "visible",
       imageInput: false,
       promptCache: false,
+      editTool: "edit",
       reasoningEffort: efforts,
     });
     const provider = new FakeProvider({
@@ -339,6 +341,7 @@ describe("Runtime：思考档位", () => {
           reasoning: "none",
           imageInput: false,
           promptCache: false,
+          editTool: "edit",
         }),
       ],
     });

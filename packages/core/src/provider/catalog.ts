@@ -12,6 +12,7 @@ const FULL_CAPS: ModelCapabilities = {
   reasoning: "none",
   imageInput: false,
   promptCache: false,
+  editTool: "edit",
 };
 
 /** 各 Provider 的内置目录：<providerId>/<modelId> */
@@ -44,6 +45,9 @@ export const DEFAULT_MODEL_FALLBACK: CatalogEntry = {
     reasoning: "none",
     imageInput: false,
     promptCache: false,
+    // ADR-0035 §5：占位值——目录未命中的模型在 resolve 时由配置层
+    // 默认表（含 gpt/codex → apply_patch）或 "edit" 兜底覆盖
+    editTool: "edit",
   },
 };
 

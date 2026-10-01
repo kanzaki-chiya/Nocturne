@@ -539,8 +539,11 @@ describe("ask_user 恢复与协议不变量", () => {
         const p = path.join(dir, name);
         if (statSync(p).isDirectory()) {
           scan(p);
-        } else if (name.endsWith(".ts") && readFileSync(p, "utf8").includes("ask_user")) {
-          offenders.push(p);
+        } else if (name.endsWith(".ts")) {
+          // 系统提示会点名 ask_user（ADR-0035 §7 的新版 Tools 节），那不是分支；
+          // 按名字分支的写法必然带引号比较/字面量，只查带引号的引用
+          const src = readFileSync(p, "utf8");
+          if (src.includes('"ask_user"') || src.includes("'ask_user'")) offenders.push(p);
         }
       }
     };

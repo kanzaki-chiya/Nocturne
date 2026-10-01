@@ -54,6 +54,14 @@ const DEFAULT_PAGER_EXECUTABLES = new Set(["more", "more.com", "less"]);
 const TRAILING_PAGER_MESSAGE =
   "命令以分页工具结尾（more/less/Out-Host -Paging）。分页工具会改坏输出编码、可能等待按键卡住；输出会被自动收集，去掉末尾的分页命令后直接执行即可。需要筛选时先重定向到文件再用 grep 工具。";
 
+/**
+ * apply_patch 误用拒绝（ADR-0035 §6）：GPT 模型有时把补丁写成
+ * `apply_patch <<'EOF' …` 当 shell 命令执行——命令的第一个词是
+ * apply_patch 时按 invalid_input 拒绝，与分页器预检同一机制。
+ */
+const APPLY_PATCH_MESSAGE =
+  "`apply_patch` 不是 shell 命令；工具列表里有 `apply_patch` 时请直接调用该工具，并把补丁原文放进 `input`";
+
 function endsWithPager(command: string, shell: ShellDescriptor | undefined): boolean {
   const pagers =
     shell === undefined
@@ -143,6 +151,10 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
   },
 
   validateInput(input: ShellInput, scope?: ToolScope): string | undefined {
+    const first = stageExecutable(input.command);
+    if (first?.toLowerCase() === "apply_patch") {
+      return APPLY_PATCH_MESSAGE;
+    }
     return endsWithPager(input.command, scope?.shell?.descriptor)
       ? TRAILING_PAGER_MESSAGE
       : undefined;

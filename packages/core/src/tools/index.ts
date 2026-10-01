@@ -25,6 +25,7 @@ export { grepTool } from "./builtin/grep.js";
 export { globTool } from "./builtin/glob.js";
 export { writeTool } from "./builtin/write.js";
 export { editTool } from "./builtin/edit.js";
+export { applyPatchTool, parsePatch } from "./builtin/apply-patch.js";
 export { shellTool } from "./builtin/shell.js";
 export { todoWriteTool } from "./builtin/todo-write.js";
 export { askUserTool } from "./builtin/ask-user.js";
@@ -40,6 +41,7 @@ import { grepTool } from "./builtin/grep.js";
 import { globTool } from "./builtin/glob.js";
 import { writeTool } from "./builtin/write.js";
 import { editTool } from "./builtin/edit.js";
+import { applyPatchTool } from "./builtin/apply-patch.js";
 import { shellTool } from "./builtin/shell.js";
 import { todoWriteTool } from "./builtin/todo-write.js";
 import { askUserTool } from "./builtin/ask-user.js";
@@ -53,6 +55,9 @@ export function builtinTools(): ToolDefinition[] {
     globTool,
     writeTool,
     editTool,
+    // ADR-0035 §5：apply_patch 与 edit/write 互斥，靠 traits.editTool 按
+    // 模型能力筛选；三套编辑工具都注册，暴露谁由 specs/get 决定
+    applyPatchTool,
     shellTool,
     todoWriteTool,
     askUserTool,

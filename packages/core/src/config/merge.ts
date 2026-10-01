@@ -90,6 +90,7 @@ const CAP_FIELDS = [
   "reasoningEffort",
   "imageInput",
   "promptCache",
+  "editTool",
 ] as const;
 
 type ModelCaps = NonNullable<ModelOverrideShape["capabilities"]>;

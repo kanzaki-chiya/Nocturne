@@ -26,6 +26,8 @@ import type {
   SettingItem,
   SettingsPatch,
 } from "./config/index.js";
+// ADR-0035 §5：编辑工具的模型默认表（config 层纯数据）注入 provider 解析
+import { defaultEditToolForModel } from "./config/edit-tool.js";
 import { createDiagnostics } from "./diagnostics/index.js";
 import { createHookRunner } from "./hooks/index.js";
 import { appendInputHistory, readInputHistory } from "./input-history.js";
@@ -407,6 +409,7 @@ function instantiateProvider(
       ...(entry.providerOptions !== undefined ? { providerOptions: entry.providerOptions } : {}),
       ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
       ...(entry.sessionHeader !== undefined ? { sessionHeader: entry.sessionHeader } : {}),
+      editToolDefault: defaultEditToolForModel,
       userAgent,
       ...(entry.thinking !== undefined ? { thinking: entry.thinking } : {}),
       ...(diagnostics !== undefined ? { diagnostics } : {}),
@@ -475,14 +478,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     for (const c of options.providerConfigs ?? []) {
       // ADR-0026 §4：与 config 条目同一路由 Provider（按模型生效协议分发）
       const instance = createEntryProvider(
-        { ...c, credentials: credentialResolver, diagnostics, userAgent },
+        {
+          ...c,
+          credentials: credentialResolver,
+          diagnostics,
+          userAgent,
+          editToolDefault: defaultEditToolForModel,
+        },
         env,
       );
       byId.set(instance.id, instance);
     }
     for (const e of configProviders)
       byId.set(e.id, instantiateProvider(e, env, diagnostics, credentialResolver, userAgent));
-    return createProviderRegistry([...byId.values()], options.modelOverrides);
+    return createProviderRegistry(
+      [...byId.values()],
+      options.modelOverrides,
+      defaultEditToolForModel,
+    );
   }
 
   // 运行时级注册表：注入 + providerConfigs + config 基础层；
@@ -1428,7 +1441,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           history: state.history,
           todos: state.todos,
           model: model.model,
-          tools: tools.specs(),
+          tools: tools.specs(model.model.capabilities.editTool),
           instructions,
           environment,
           events: session.durableEvents(),

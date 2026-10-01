@@ -8,9 +8,11 @@ import {
   REASONING_EFFORT_LEVELS,
   resolveEffectiveProtocol,
   unavailableProtocolReason,
+  type EditToolKind,
   type ModelProtocol,
   type ReasoningEffortLevel,
 } from "../protocol/index.js";
+import { defaultEditToolForModel } from "./edit-tool.js";
 import type { FieldDecl, FieldOrigin, ModelFieldOrigins } from "./merge.js";
 import type {
   BuiltinModelLookup,
@@ -343,13 +345,22 @@ export function buildModelSettingsViews(input: ModelSettingsViewInput): ModelSet
         ),
         reasoningEffort,
         protocol: protocol.field,
+        // ADR-0035 §5：内置默认表作最低兜底，缺省值来源为 default
+        editTool: scalarField<EditToolKind>(
+          ctx,
+          "capabilities.editTool",
+          model?.capabilities?.editTool,
+          builtin?.capabilities?.editTool,
+          defaultEditToolForModel(modelId),
+          uCaps?.editTool,
+        ),
       },
     });
   }
   return views;
 }
 
-/** 七个可编辑字段（ADR-0024 第 3 节 + ADR-0026 第 7 节的「协议」） */
+/** 八个可编辑字段（ADR-0024 第 3 节 + ADR-0026「协议」+ ADR-0035「编辑工具」） */
 const FIELD_KEYS = [
   "displayName",
   "contextWindow",
@@ -358,13 +369,19 @@ const FIELD_KEYS = [
   "imageInput",
   "reasoningEffort",
   "protocol",
+  "editTool",
 ] as const;
 type FieldKey = (typeof FIELD_KEYS)[number];
 
 /** patch 里的键 → userModels 条目上的位置 */
 function applyField(entry: UserModelEntry, key: FieldKey, v: unknown): void {
   const u = entry as Record<string, unknown>;
-  if (key === "reasoning" || key === "imageInput" || key === "reasoningEffort") {
+  if (
+    key === "reasoning" ||
+    key === "imageInput" ||
+    key === "reasoningEffort" ||
+    key === "editTool"
+  ) {
     const caps = { ...(entry.capabilities ?? {}) } as Record<string, unknown>;
     if (v === null) Reflect.deleteProperty(caps, key);
     else caps[key] = v;
@@ -420,7 +437,9 @@ export function configFieldError(
                 ? "图片输入"
                 : key === "protocol"
                   ? "协议"
-                  : "思考档位";
+                  : key === "editTool"
+                    ? "编辑工具"
+                    : "思考档位";
     return `${name}${label}，不能在编辑页修改`;
   }
   return undefined;
@@ -451,6 +470,10 @@ export function patchValueError(patch: ModelSettingsPatch): string | undefined {
     p !== "openai-responses"
   ) {
     return `协议只能为 openai-compatible/anthropic/openai-responses`;
+  }
+  const t: unknown = patch.editTool;
+  if (t !== undefined && t !== null && t !== "edit" && t !== "apply_patch") {
+    return `编辑工具只能为 edit/apply_patch`;
   }
   return undefined;
 }

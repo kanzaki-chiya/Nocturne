@@ -24,5 +24,7 @@ export function createExecutionScope(
     // ADR-0022：每次调用组装 scope 时取当前生效 shell，不在 Turn 开始快照
     shell: env.shell?.current(),
     askUser: env.askUser,
+    // ADR-0035 §5：能力值随调用传入，模型切换后下一次调用即生效
+    editTool: call.editTool,
   };
 }

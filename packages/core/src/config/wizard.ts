@@ -340,6 +340,8 @@ const MODEL_FIELD_LABELS = {
   reasoningEffort: "思考档位",
   // ADR-0026 第 7 节：第七个字段「协议」
   protocol: "协议",
+  // ADR-0035 §5：第八个字段「编辑工具」
+  editTool: "编辑工具",
 } as const;
 type ModelFieldKey = keyof typeof MODEL_FIELD_LABELS;
 const MODEL_FIELD_ORDER: readonly ModelFieldKey[] = [
@@ -350,6 +352,7 @@ const MODEL_FIELD_ORDER: readonly ModelFieldKey[] = [
   "imageInput",
   "reasoningEffort",
   "protocol",
+  "editTool",
 ];
 
 /** 当前值的一行显示（用户未声明时显示生效值；未声明显示 "—"） */
@@ -401,6 +404,13 @@ function parseModelField(key: ModelFieldKey, input: string): unknown {
       if (t === "chat") return "openai-compatible";
       if (t === "messages") return "anthropic";
       if (t === "responses") return "openai-responses";
+      return undefined;
+    }
+    case "editTool": {
+      // ADR-0035 §5：CLI 输入 edit / patch（apply_patch 的短写）
+      const t = s.toLowerCase();
+      if (t === "edit") return "edit";
+      if (t === "patch" || t === "apply_patch") return "apply_patch";
       return undefined;
     }
   }
@@ -462,7 +472,9 @@ export async function runProviderModelWizard(
                 ? `逗号分隔（${REASONING_EFFORT_LEVELS.join(",")}）或 none = 不支持；- 清除用户编辑`
                 : key === "protocol"
                   ? "chat / messages / responses；- 清除用户编辑（跟随）"
-                  : "正整数；- 清除用户编辑",
+                  : key === "editTool"
+                    ? "edit = edit+write / patch = apply_patch；- 清除用户编辑"
+                    : "正整数；- 清除用户编辑",
     });
     const t = answer.trim();
     if (t === "") continue;

@@ -375,6 +375,7 @@ describe("恢复投影：/shell note 不破坏 toolCalls 邻接（ADR-0022 + 协
           reasoning: "none",
           imageInput: false,
           promptCache: false,
+          editTool: "edit",
         },
       },
       tools: [],

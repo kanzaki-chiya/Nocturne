@@ -6,6 +6,7 @@
  */
 import type {
   AnnotatedRule,
+  EditToolKind,
   Grant,
   HookEntry,
   HookPoint,
@@ -35,6 +36,8 @@ export interface ModelOverrideShape {
         reasoningEffort?: ReasoningEffortLevel[] | undefined;
         imageInput?: boolean | undefined;
         promptCache?: boolean | undefined;
+        /** 编辑工具选择（ADR-0035 §5）：未声明时按内置默认表取值 */
+        editTool?: EditToolKind | undefined;
       }
     | undefined;
   /**
@@ -54,7 +57,7 @@ export interface ModelOverrideShape {
   endpoints?: string[] | undefined;
 }
 
-/** userModels 中单个模型的用户编辑（ADR-0024 第 1 节；七个可编辑字段） */
+/** userModels 中单个模型的用户编辑（ADR-0024 第 1 节；ADR-0035 起八个可编辑字段） */
 export interface UserModelEntry {
   displayName?: string | undefined;
   contextWindow?: number | undefined;
@@ -65,6 +68,8 @@ export interface UserModelEntry {
         imageInput?: boolean | undefined;
         /** 逐模型可用思考档位；空数组 = 明确无可用档位 */
         reasoningEffort?: ReasoningEffortLevel[] | undefined;
+        /** 用户编辑的编辑工具选择（ADR-0035 §5） */
+        editTool?: EditToolKind | undefined;
       }
     | undefined;
   /** 用户编辑的协议指定（ADR-0026 第 7 节）；高于 endpoints 推导、低于手写 */
@@ -311,6 +316,8 @@ export type BuiltinModelLookup = (
         | {
             reasoning?: "none" | "hidden" | "visible" | undefined;
             imageInput?: boolean | undefined;
+            /** 内置目录声明的编辑工具（ADR-0035 §5） */
+            editTool?: EditToolKind | undefined;
           }
         | undefined;
     }
@@ -375,6 +382,8 @@ export interface ModelSettingsView {
      * 推导结果为 unavailable 时 value 为 undefined、unavailable 给出原因。
      */
     protocol: ModelField<ModelProtocol>;
+    /** 编辑工具（ADR-0035 §5）：value 恒有值（默认表兜底） */
+    editTool: ModelField<EditToolKind>;
   };
   /** 模型当前不可用时的原因（协议推导为 unavailable，ADR-0026 第 5 节） */
   unavailable?: { reason: string } | undefined;

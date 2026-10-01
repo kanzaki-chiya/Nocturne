@@ -178,11 +178,12 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         return finish("cancelled", errorResult("cancelled", "调用已被中断"));
       }
 
-      // 1. 查找
-      const tool = registry.get(call.name);
+      // 1. 查找（ADR-0035 §5：按当前模型的编辑工具能力筛可见性——
+      // 未对模型暴露的工具按 unknown_tool 结算，可用列表同口径）
+      const tool = registry.get(call.name, scope.editTool);
       if (tool === undefined) {
         const names = registry
-          .list()
+          .specs(scope.editTool)
           .map((t) => t.name)
           .join(", ");
         return finish(

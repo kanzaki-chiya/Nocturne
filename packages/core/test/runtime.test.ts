@@ -595,6 +595,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
       reasoning: "none",
       imageInput: false,
       promptCache: false,
+      editTool: "edit",
     },
   };
 
@@ -1012,6 +1013,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
             reasoning: "none",
             imageInput: false,
             promptCache: false,
+            editTool: "edit",
           },
         },
       ],
@@ -1049,6 +1051,54 @@ describe("上下文与运行时命令（Phase 2）", () => {
     });
     await session.close();
   });
+
+  it("editTool 能力：换模型后下一次请求的工具单随之变化（ADR-0035 §5）", async () => {
+    const patchModel: ModelInfo = {
+      ...tinyModel,
+      ref: { provider: "fake", model: "patchy" },
+      capabilities: { ...tinyModel.capabilities, editTool: "apply_patch" },
+    };
+    const provider = new FakeProvider({
+      models: [tinyModel, patchModel],
+      // finish-only 脚本算空响应会触发重试——带一个 text_delta
+      // 让每次 submit 恰好消耗一份脚本
+      scripts: [
+        [
+          { type: "text_delta", text: "ok" },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "text_delta", text: "ok" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, undefined, { provider });
+    const session = await runtime.createSession({ model: "fake/tiny" });
+
+    await session.submit({ text: "hi" });
+    const names = (i: number) => provider.requests[i]?.tools.map((t) => t.name) ?? [];
+    expect(names(0)).toContain("edit");
+    expect(names(0)).toContain("write");
+    expect(names(0)).not.toContain("apply_patch");
+
+    await session.setModel("fake/patchy");
+    await session.submit({ text: "hi" });
+    expect(names(1)).toContain("apply_patch");
+    expect(names(1)).not.toContain("edit");
+    expect(names(1)).not.toContain("write");
+    // 非编辑工具不受影响
+    expect(names(1)).toContain("read");
+
+    // 系统提示对编辑工具中性：两套工具下是同一份文本（缓存前缀不破）
+    const sys = provider.requests.map((r) => r.system.map((b) => b.text).join("\n"));
+    expect(sys[0]).toBe(sys[1]);
+    expect(sys[0]).toContain("File-editing tools");
+    expect(sys[0]).not.toMatch(/\bapply_patch\b/);
+    expect(sys[0]).not.toMatch(/\bedit\b/);
+    expect(sys[0]).not.toMatch(/\bwrite\b/);
+    await session.close();
+  }, 20_000);
 
   it("setModel / compact 在 Turn 进行中拒绝 session_busy", async () => {
     const provider = new FakeProvider({
@@ -1178,6 +1228,7 @@ describe("按模型协议（ADR-0026）", () => {
         reasoning: "none",
         imageInput: false,
         promptCache: false,
+        editTool: "edit",
       },
     };
     const provider = new FakeProvider({

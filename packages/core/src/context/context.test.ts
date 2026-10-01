@@ -23,6 +23,7 @@ const model: ModelInfo = {
     reasoning: "none",
     imageInput: false,
     promptCache: false,
+    editTool: "edit",
   },
 };
 

@@ -116,6 +116,13 @@ export const REASONING_EFFORT_LEVELS = [
 export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
 export type ReasoningEffort = "off" | ReasoningEffortLevel;
 
+/**
+ * 模型暴露的编辑工具（ADR-0035 §5）：
+ * "edit"（默认）= edit + write；"apply_patch" = 只有 apply_patch。
+ * 筛选只依据该能力值与工具声明，Agent Loop 不出现工具名/模型名分支。
+ */
+export type EditToolKind = "edit" | "apply_patch";
+
 /** 档位全局顺序（含 off，循环切换与就近降档用） */
 export const REASONING_EFFORT_ORDER: readonly ReasoningEffort[] = [
   "off",

@@ -12,6 +12,7 @@ import {
   FakeProvider,
   ProviderError,
   type FakeScript,
+  type ModelInfo,
   type ModelRequest,
 } from "../src/provider/index.js";
 import type { RuntimeEvent } from "../src/protocol/index.js";
@@ -1251,5 +1252,103 @@ describe("subagent：恢复", () => {
     const child = await runtime.resumeSession(childId);
     expect(child.state().meta.parent).toEqual({ sessionId: parentId, callId: "c1" });
     await child.close();
+  });
+});
+
+describe("subagent：编辑工具能力筛选（ADR-0035 §5）", () => {
+  const patchModel: ModelInfo = {
+    ref: { provider: "fake", model: "patchy" },
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    capabilities: {
+      toolCalls: true,
+      parallelToolCalls: true,
+      reasoning: "none",
+      imageInput: false,
+      promptCache: false,
+      editTool: "apply_patch",
+    },
+  };
+
+  it("子会话工具池按子会话模型的 editTool 筛选；父侧同样口径", async () => {
+    const childToolNames: string[][] = [];
+    const provider = new FakeProvider({
+      models: [patchModel],
+      handler: (req) => {
+        if (isChildRequest(req)) {
+          childToolNames.push(req.tools.map((t) => t.name));
+          return [
+            {
+              type: "tool_call",
+              toolCallId: "cf1",
+              name: "finish",
+              input: { result: "ok" },
+            },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return req.messages.some((m) => m.role === "tool")
+          ? [{ type: "finish", reason: "stop" }]
+          : [
+              {
+                type: "tool_call",
+                toolCallId: "task-1",
+                name: "task",
+                input: { task: "看看", preset: "general" },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ];
+      },
+    });
+    const { runtime } = await makeRuntime(undefined, { provider, autoApproveAsk: true });
+    const session = await runtime.createSession({ model: "fake/patchy" });
+    const events = collect(session);
+    await session.submit({ text: "go" });
+    const completed = taskCompleted(events);
+    expect(completed?.type === "tool.completed" && completed.payload.status).toBe("ok");
+    // 父侧请求也只有 apply_patch（无 edit/write）
+    const parentNames = provider.requests[0]?.tools.map((t) => t.name) ?? [];
+    expect(parentNames).toContain("apply_patch");
+    expect(parentNames).not.toContain("edit");
+    // 子会话工具池同口径
+    const names = childToolNames[0] ?? [];
+    expect(names).toContain("apply_patch");
+    expect(names).toContain("finish");
+    expect(names).not.toContain("edit");
+    expect(names).not.toContain("write");
+    await session.close();
+  });
+
+  it("tools 白名单点名未暴露的编辑工具 → invalid_input", async () => {
+    const provider = new FakeProvider({
+      models: [patchModel],
+      scripts: [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "task-1",
+            name: "task",
+            input: { task: "改东西", tools: ["edit"] },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, { provider, autoApproveAsk: true });
+    const session = await runtime.createSession({ model: "fake/patchy" });
+    const events = collect(session);
+    await session.submit({ text: "go" });
+    const completed = taskCompleted(events);
+    expect(completed?.type === "tool.completed" && completed.payload.status).toBe("error");
+    const content =
+      completed?.type === "tool.completed" ? String(completed.payload.modelContent) : "";
+    expect(content).toContain("tools 含不可用名");
+    expect(content).toContain("edit");
+    expect(content).toContain("apply_patch");
+    await session.close();
   });
 });

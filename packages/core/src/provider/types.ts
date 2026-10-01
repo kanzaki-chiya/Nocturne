@@ -4,6 +4,7 @@
  */
 import type {
   ContentBlock,
+  EditToolKind,
   FinishReason,
   ImageMimeType,
   ModelProtocol,
@@ -29,6 +30,11 @@ export interface ModelCapabilities {
   reasoningEffort?: ReasoningEffortLevel[] | undefined;
   imageInput: boolean;
   promptCache: boolean;
+  /**
+   * 编辑工具选择（ADR-0035 §5）："edit"（默认）= 暴露 edit/write；
+   * "apply_patch" = 只暴露 apply_patch。resolve 后恒有值。
+   */
+  editTool: EditToolKind;
 }
 
 export interface ModelInfo {

@@ -28,6 +28,7 @@ const DEFAULT_MODEL: ModelInfo = {
     reasoning: "visible",
     imageInput: false,
     promptCache: false,
+    editTool: "edit",
   },
 };
 

@@ -128,6 +128,7 @@ describe("ToolRegistry", () => {
         .map((s) => s.name)
         .sort(),
     ).toEqual([
+      "apply_patch",
       "ask_user",
       "edit",
       "glob",

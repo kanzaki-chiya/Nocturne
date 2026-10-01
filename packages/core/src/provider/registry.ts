@@ -2,7 +2,11 @@
  * ProviderRegistry：按 ModelRef 解析 Provider + ModelInfo。
  * 模型信息 = 内置目录 ← 用户配置覆盖 ← 保守默认。
  */
-import { normalizeReasoningEffortLevels, type ModelRef } from "../protocol/index.js";
+import {
+  normalizeReasoningEffortLevels,
+  type EditToolKind,
+  type ModelRef,
+} from "../protocol/index.js";
 import { BUILTIN_MODEL_CATALOG, DEFAULT_MODEL_FALLBACK } from "./catalog.js";
 import { isModelProtocol, withEffectiveProtocol } from "./effective-protocol.js";
 import { withReasoningEfforts } from "./reasoning.js";
@@ -51,8 +55,18 @@ export function applyModelOverride(
   };
 }
 
+/**
+ * 编辑工具的模型默认表（ADR-0035 §5）：config 层纯数据函数经装配处注入；
+ * 只在「条目/覆盖均未声明 editTool 且内置目录未命中」时参与兜底。
+ */
+export type EditToolDefault = (modelId: string) => EditToolKind;
+
 /** 合并目录项与覆盖项，生成 ModelInfo */
-export function resolveModelInfo(ref: ModelRef, override: ModelOverride | undefined): ModelInfo {
+export function resolveModelInfo(
+  ref: ModelRef,
+  override: ModelOverride | undefined,
+  editToolDefault?: EditToolDefault,
+): ModelInfo {
   const builtin = BUILTIN_MODEL_CATALOG[ref.provider]?.[ref.model];
   const base: ModelInfo = {
     ref,
@@ -62,7 +76,7 @@ export function resolveModelInfo(ref: ModelRef, override: ModelOverride | undefi
     builtin === undefined &&
     override?.capabilities?.reasoning === undefined &&
     (override?.capabilities?.reasoningEffort?.length ?? 0) > 0;
-  return applyModelOverride(
+  const merged = applyModelOverride(
     inferred
       ? {
           ...base,
@@ -71,11 +85,23 @@ export function resolveModelInfo(ref: ModelRef, override: ModelOverride | undefi
       : base,
     override,
   );
+  // ADR-0035 §5：条目/覆盖声明 > 内置目录 > 按模型名的默认表 > "edit"
+  if (override?.capabilities?.editTool === undefined && builtin === undefined) {
+    return {
+      ...merged,
+      capabilities: {
+        ...merged.capabilities,
+        editTool: editToolDefault?.(ref.model) ?? "edit",
+      },
+    };
+  }
+  return merged;
 }
 
 export function createProviderRegistry(
   providers: Provider[],
   modelOverrides: Record<string, Record<string, ModelOverride>> = {},
+  editToolDefault?: EditToolDefault,
 ): ProviderRegistry {
   const byId = new Map<string, Provider>();
   for (const p of providers) {
@@ -91,7 +117,7 @@ export function createProviderRegistry(
         throw new UnknownModelError(ref, `未配置的 Provider: ${ref.provider}`);
       }
       const configured = provider.models().find((m) => m.ref.model === ref.model);
-      const base = configured ?? resolveModelInfo(ref, undefined);
+      const base = configured ?? resolveModelInfo(ref, undefined, editToolDefault);
       const merged = applyModelOverride(base, modelOverrides[ref.provider]?.[ref.model]);
       // 清单内模型适配器已解析（幂等）；清单外模型按逐模型能力推导档位。
       const merged2 = withReasoningEfforts(merged);

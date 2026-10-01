@@ -37,7 +37,7 @@ function occurrences(text: string, needle: string): number {
 export const editTool: ToolDefinition<EditInput, EditOutput> = {
   name: "edit",
   description:
-    "精确字符串替换：old 必须在文件中唯一出现，或用 replaceAll 替换全部。目标文件必须先在本会话中 read 过或由用户 @文件 附带文本，且未被外部修改。",
+    "精确字符串替换：old 必须在文件中唯一出现，或用 replaceAll 替换全部。目标文件必须先在本会话中 read 过或由用户 @文件 附带文本，且未被外部修改。修改已有文件优先用本工具。",
   inputSchema: {
     type: "object",
     required: ["path", "old", "new"],
@@ -49,7 +49,7 @@ export const editTool: ToolDefinition<EditInput, EditOutput> = {
     },
     additionalProperties: false,
   },
-  traits: { mutates: true, concurrencySafe: false, timeoutMs: 15_000 },
+  traits: { mutates: true, concurrencySafe: false, timeoutMs: 15_000, editTool: "edit" },
 
   permissionSubjects(input: EditInput, scope: ToolScope): SubjectRequest[] {
     return [{ kind: "edit", target: scope.paths.resolve(scope.cwd, input.path) }];

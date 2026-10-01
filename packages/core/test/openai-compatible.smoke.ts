@@ -52,6 +52,7 @@ async function openSession(cwd: string, model = MODEL, imageInput = false) {
                   reasoning: "none",
                   imageInput: true,
                   promptCache: false,
+                  editTool: "edit",
                 },
               }
             : {},

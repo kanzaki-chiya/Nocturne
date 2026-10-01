@@ -13,6 +13,7 @@ import type { PermissionDecision } from "../permission/index.js";
 import type {
   Diagnostics,
   DurablePayload,
+  EditToolKind,
   HookPoint,
   ImageMimeType,
   JsonSchema,
@@ -54,6 +55,13 @@ export interface ToolTraits {
    * 按此特性排除，不按名字判断。
    */
   needsUser?: boolean | undefined;
+  /**
+   * 编辑工具归属（ADR-0035 §5）：声明后仅当模型的
+   * capabilities.editTool 等于该值时对模型可见（specs 不列出、
+   * 执行按 unknown_tool 结算）；未声明始终可见。子代理按子会话
+   * 模型的同一能力值筛池。
+   */
+  editTool?: EditToolKind | undefined;
 }
 
 /**
@@ -165,10 +173,19 @@ export interface ToolRegistry {
   /** 名称重复时抛错，不静默覆盖 */
   register(tool: ToolDefinition): void;
   unregister(name: string): void;
-  get(name: string): ToolDefinition | undefined;
+  /**
+   * 按名称取工具；携带 editTool 时同时按 ADR-0035 §5 的可见性
+   * 筛选——未对当前模型暴露的工具返回 undefined（执行按
+   * unknown_tool 结算）。不带能力值时不筛选。
+   */
+  get(name: string, editTool?: EditToolKind): ToolDefinition | undefined;
+  /** 全部已注册工具（不经可见性筛选） */
   list(): ToolDefinition[];
-  /** 交给 Context Builder / Provider 的模型可见部分 */
-  specs(): ToolSpec[];
+  /**
+   * 交给 Context Builder / Provider 的模型可见部分（ADR-0035 §5）：
+   * 携带 editTool 时只列出对当前模型暴露的工具。
+   */
+  specs(editTool?: EditToolKind): ToolSpec[];
 }
 
 // ── 执行管线 ──────────────────────────────────────────────
@@ -466,6 +483,11 @@ export interface ExecutionScope extends ToolScope {
   shellEnvStrip?: readonly string[] | undefined;
   /** 提问通道（ADR-0032）：缺省时声明 needsUser 的工具按 not_interactive 结算 */
   askUser?: QuestionBroker | undefined;
+  /**
+   * 当前会话模型的编辑工具能力（ADR-0035 §5）：Agent Loop 每次调用
+   * 按当时模型取值，模型切换后下一次调用即生效；缺省不筛选。
+   */
+  editTool?: EditToolKind | undefined;
 }
 
 /**
@@ -504,6 +526,8 @@ export interface TurnCallScope {
   turnId: string;
   signal: AbortSignal;
   events: ToolEventSink;
+  /** 当前模型的编辑工具能力（ADR-0035 §5）；缺省不筛选 */
+  editTool?: EditToolKind | undefined;
 }
 
 export type ToolExecutionStatus = "ok" | "error" | "denied" | "cancelled";

@@ -660,6 +660,7 @@ describe("图片附件接线（ADR-0023）", () => {
             reasoning: "none",
             imageInput: true,
             promptCache: false,
+            editTool: "edit",
           },
         },
       ],

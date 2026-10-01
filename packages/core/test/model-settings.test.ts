@@ -9,7 +9,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { loadConfig } from "../src/config/index.js";
+import { defaultEditToolForModel, loadConfig } from "../src/config/index.js";
 import { createRuntime } from "../src/index.js";
 import { createPlatform, type Platform } from "../src/platform/index.js";
 import { FakeProvider } from "../src/provider/index.js";
@@ -529,6 +529,97 @@ describe("listModelSettings 来源标注", () => {
     expect(v2?.fields.protocol.value).toBe("anthropic");
     expect(v2?.fields.protocol.source.kind).toBe("config");
     expect(v2?.fields.protocol.editable).toBe(false);
+  });
+});
+
+// ── 编辑工具字段（ADR-0035 §5）───────────────────────────
+
+describe("编辑工具字段（ADR-0035 §5）", () => {
+  it("默认表：模型 id 末段含 gpt/codex → apply_patch，其余 → edit", async () => {
+    // 函数本身：最后一段、不区分大小写
+    expect(defaultEditToolForModel("openai/gpt-5-codex")).toBe("apply_patch");
+    expect(defaultEditToolForModel("gpt-6.1-sol")).toBe("apply_patch");
+    expect(defaultEditToolForModel("gpt-6-astra")).toBe("apply_patch");
+    expect(defaultEditToolForModel("GPT-4.1")).toBe("apply_patch");
+    expect(defaultEditToolForModel("codex-mini")).toBe("apply_patch");
+    expect(defaultEditToolForModel("claude-sonnet-4")).toBe("edit");
+    expect(defaultEditToolForModel("deepseek-v3.2")).toBe("edit");
+    expect(defaultEditToolForModel("qwen3-coder")).toBe("edit");
+
+    await writeProviders([
+      {
+        ...ENTRY,
+        models: {
+          "gpt-6.1-sol": { contextWindow: 100_000 },
+          "codex-mini": { contextWindow: 100_000 },
+          m1: ENTRY.models.m1,
+        },
+      },
+    ]);
+    const rc = await load();
+    const views = await rc.listModelSettings("corp");
+    const at = (id: string) => views.find((v) => v.modelId === id)?.fields.editTool;
+    expect(at("gpt-6.1-sol")).toMatchObject({ value: "apply_patch" });
+    expect(at("gpt-6.1-sol")?.source.kind).toBe("default");
+    expect(at("codex-mini")?.value).toBe("apply_patch");
+    expect(at("m1")?.value).toBe("edit");
+  });
+
+  it("手写 config capabilities.editTool 覆盖默认表；config 来源只读", async () => {
+    await writeProviders([
+      { ...ENTRY, models: { "gpt-6.1-sol": { contextWindow: 100_000 }, m1: ENTRY.models.m1 } },
+    ]);
+    await writeJson(configPath(), {
+      providers: [
+        {
+          id: "corp",
+          baseURL: "https://api.corp.test/v1",
+          models: { "gpt-6.1-sol": { capabilities: { editTool: "edit" } } },
+        },
+      ],
+    });
+    const rc = await load();
+    const v = (await rc.listModelSettings("corp")).find((x) => x.modelId === "gpt-6.1-sol");
+    const f = v?.fields.editTool;
+    expect(f?.value).toBe("edit");
+    expect(f?.source.kind).toBe("config");
+    expect(f?.editable).toBe(false);
+    // patch 触及 config 来源字段被拒绝
+    await expect(
+      rc.saveModelSettings("corp", "gpt-6.1-sol", { editTool: "apply_patch" }),
+    ).rejects.toMatchObject({ code: "config_invalid" });
+  });
+
+  it("userModels 覆盖默认表：保存写 capabilities.editTool，清除回落默认表", async () => {
+    await writeProviders([
+      { ...ENTRY, models: { "gpt-6.1-sol": { contextWindow: 100_000 }, m1: ENTRY.models.m1 } },
+    ]);
+    const rc = await load();
+    // m1 默认 edit → 用户改 apply_patch
+    await rc.saveModelSettings("corp", "m1", { editTool: "apply_patch" });
+    let raw = (await readJson(providersPath())) as {
+      providers: {
+        id: string;
+        userModels?: Record<string, { capabilities?: Record<string, unknown> }>;
+      }[];
+    };
+    expect(raw.providers[0]?.userModels?.m1).toEqual({
+      capabilities: { editTool: "apply_patch" },
+    });
+    let v = (await rc.listModelSettings("corp")).find((x) => x.modelId === "m1");
+    expect(v?.fields.editTool.value).toBe("apply_patch");
+    expect(v?.fields.editTool.source.kind).toBe("user");
+    // 清除 → 回落默认表（m1 → edit）
+    await rc.saveModelSettings("corp", "m1", { editTool: null });
+    raw = (await readJson(providersPath())) as typeof raw;
+    expect(raw.providers[0]?.userModels).toBeUndefined();
+    v = (await rc.listModelSettings("corp")).find((x) => x.modelId === "m1");
+    expect(v?.fields.editTool.value).toBe("edit");
+    expect(v?.fields.editTool.source.kind).toBe("default");
+    // 非法值拒绝
+    await expect(
+      rc.saveModelSettings("corp", "m1", { editTool: "sed" } as never),
+    ).rejects.toMatchObject({ code: "config_invalid" });
   });
 });
 

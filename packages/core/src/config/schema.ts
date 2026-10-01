@@ -34,6 +34,8 @@ const capabilitiesSchema = z.object({
   reasoningEffort: z.array(reasoningEffortLevelSchema).optional(),
   imageInput: z.boolean().optional(),
   promptCache: z.boolean().optional(),
+  /** 编辑工具选择（ADR-0035 §5） */
+  editTool: z.enum(["edit", "apply_patch"]).optional(),
 });
 
 /** 模型条目 schema（config.json 与 providers.json 共用） */
@@ -97,6 +99,8 @@ export const providerEntrySchema = z
               reasoning: z.enum(["none", "hidden", "visible"]).optional(),
               imageInput: z.boolean().optional(),
               reasoningEffort: z.array(reasoningEffortLevelSchema).optional(),
+              // ADR-0035 §5：编辑页「编辑工具」字段的用户编辑
+              editTool: z.enum(["edit", "apply_patch"]).optional(),
             })
             .optional(),
           // ADR-0026 第 7 节：编辑页「协议」字段的用户编辑

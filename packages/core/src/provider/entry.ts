@@ -12,7 +12,7 @@ import { createOpenAIResponsesProvider } from "./adapters/openai-responses.js";
 import { ProviderError } from "./errors.js";
 import { withEffectiveProtocol } from "./effective-protocol.js";
 import { withReasoningEfforts } from "./reasoning.js";
-import { resolveModelInfo, type ModelOverride } from "./registry.js";
+import { resolveModelInfo, type EditToolDefault, type ModelOverride } from "./registry.js";
 import type {
   CredentialResolver,
   ModelInfo,
@@ -49,6 +49,11 @@ export interface EntryProviderConfig {
    */
   userAgent?: string | undefined;
   thinking?: ProviderThinkingOptions | undefined;
+  /**
+   * 编辑工具默认表（ADR-0035 §5）：装配层注入 config 的
+   * defaultEditToolForModel；缺省时目录未命中模型一律 "edit"。
+   */
+  editToolDefault?: EditToolDefault | undefined;
   diagnostics?: Diagnostics | undefined;
 }
 
@@ -64,7 +69,11 @@ export function createEntryProvider(
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
     withEffectiveProtocol(
       withReasoningEfforts(
-        resolveModelInfo({ provider: config.id, model: id }, config.models?.[id]),
+        resolveModelInfo(
+          { provider: config.id, model: id },
+          config.models?.[id],
+          config.editToolDefault,
+        ),
       ),
       entryType,
     ),
