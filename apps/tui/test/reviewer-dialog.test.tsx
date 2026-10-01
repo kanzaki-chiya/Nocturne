@@ -65,22 +65,33 @@ function dialog(
     ),
   );
   screens.push(screen);
-  const input = async (value: string) => {
-    screen.stdin.write(value);
+  // Ink 渲染一帧可能超过 100ms；固定等待会在新组件订阅 useInput 前写入按键而丢键，
+  // 因此先等帧变化（不变的按键最多等 300ms），再留 100ms 给被动 effect 订阅输入。
+  const settle = async (before: string | undefined) => {
+    const deadline = Date.now() + 300;
+    while (screen.lastFrame() === before && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
     await pause();
+  };
+  const input = async (value: string) => {
+    const before = screen.lastFrame();
+    screen.stdin.write(value);
+    await settle(before);
   };
   const click = async (id: string, offset?: number) => {
     const box = mouse?.boxes.find((box) => box.id === id);
     if (!box) throw new Error(`无可点击区域：${id}`);
+    const before = screen.lastFrame();
     mouse?.click(id, {
       type: "release",
       y: box.row,
       x: offset === undefined ? box.colEnd : box.colStart + offset,
       button: 0,
     });
-    await pause();
+    await settle(before);
   };
-  return { ...screen, apply, cancel, list, input, click, ready: pause, mouse: () => mouse };
+  const ready = () => settle("");
+  return { ...screen, apply, cancel, list, input, click, ready, mouse: () => mouse };
 }
 describe("ADR-0036 安全审查对话框", () => {
   it("Jev 流程、主机匹配借用、模型列表、一次披露与返回草稿", async () => {

@@ -114,11 +114,29 @@ function page(
     await waitFor(() => (screen.lastFrame() ?? "").includes("/settings 设置"));
     await pause();
   };
-  const input = async (value: string) => {
-    screen.stdin.write(value);
+  // 先等帧变化（不变的按键最多等 300ms），再留时间给新组件订阅 useInput，避免慢机器上丢键
+  const settle = async (before: string | undefined) => {
+    const deadline = Date.now() + 300;
+    while (screen.lastFrame() === before && Date.now() < deadline) await pause(10);
     await pause();
   };
-  return { ...screen, ready, input, update, preference, shell, close, preview, mouse: () => mouse };
+  const input = async (value: string) => {
+    const before = screen.lastFrame();
+    screen.stdin.write(value);
+    await settle(before);
+  };
+  return {
+    ...screen,
+    ready,
+    input,
+    settle,
+    update,
+    preference,
+    shell,
+    close,
+    preview,
+    mouse: () => mouse,
+  };
 }
 
 describe("ADR-0034 设置页", () => {
@@ -155,8 +173,9 @@ describe("ADR-0034 设置页", () => {
     const click = async (id: string) => {
       const box = screen.mouse()?.boxes.find((box) => box.id === id);
       if (!box) throw new Error(`无可点击区域：${id}`);
+      const before = screen.lastFrame();
       screen.mouse()?.click(id, { type: "release", y: box.row, x: box.colEnd, button: 0 });
-      await pause();
+      await screen.settle(before);
     };
     await click("reviewer");
     await click("backend:1");
