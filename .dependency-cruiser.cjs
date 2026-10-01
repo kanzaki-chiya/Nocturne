@@ -116,10 +116,11 @@ module.exports = {
     {
       name: "permission-deps",
       severity: "error",
-      comment: "permission 只能依赖 protocol（不能依赖 tools/agent/platform）",
+      comment:
+        "permission 只能依赖 protocol 与 provider（模型审查公开接口）（不能依赖 tools/agent/platform）",
       from: { path: "^packages/core/src/permission/" },
       to: {
-        path: "^packages/core/src/(?!permission/|protocol/)",
+        path: "^packages/core/src/(?!permission/|protocol/|provider/)",
       },
     },
     {

@@ -192,6 +192,17 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         }
         break;
       }
+      case "permission.reviewed": {
+        const u = event.payload.usage;
+        if (u !== undefined && !event.payload.cached) {
+          usage.inputTokens += u.inputTokens;
+          usage.outputTokens += u.outputTokens;
+          usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + (u.cacheReadTokens ?? 0);
+          usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + (u.cacheWriteTokens ?? 0);
+          usage.reasoningTokens = (usage.reasoningTokens ?? 0) + (u.reasoningTokens ?? 0);
+        }
+        break;
+      }
       case "permission.requested":
       case "permission.resolved": {
         // 审计事实，不改变折叠状态

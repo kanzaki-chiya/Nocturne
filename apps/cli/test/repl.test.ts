@@ -159,7 +159,7 @@ describe("REPL 生命周期", () => {
 
     const done = runRepl(session, fakeRuntime, io);
     await tick();
-    const requested = (id: string) =>
+    const requested = (id: string, restricted = false) =>
       listener?.({
         type: "permission.requested",
         sessionId: "s1",
@@ -170,7 +170,9 @@ describe("REPL 生命周期", () => {
           callId: "c1",
           subjects: [{ kind: "edit", target: "/x/a.ts" }],
           reason: "命中规则：工作区外编辑",
-          options: ["allow_once", "allow_session", "allow_project", "deny", "deny_stop"],
+          options: restricted
+            ? ["allow_once", "deny", "deny_stop"]
+            : ["allow_once", "allow_session", "allow_project", "deny", "deny_stop"],
         },
       } as RuntimeEvent);
 
@@ -188,6 +190,16 @@ describe("REPL 生命周期", () => {
       await tick();
       expect(replies.at(-1)).toEqual({ requestId: `req-${i}`, reply: expected });
     }
+    requested("restricted", true);
+    await tick();
+    stdin.write("s\n");
+    await tick();
+    stdin.write("p\n");
+    await tick();
+    expect(replies).toHaveLength(5);
+    stdin.write("a\n");
+    await tick();
+    expect(replies.at(-1)).toEqual({ requestId: "restricted", reply: { decision: "allow" } });
     // 提示块列出了全部五个选项
     const prompt = stdoutChunks.join("");
     expect(prompt).toContain("本会话内允许");

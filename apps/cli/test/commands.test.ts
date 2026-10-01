@@ -106,6 +106,9 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     ["preset default", { "permissions.preset": "default" }],
     ["preset auto-edit", { "permissions.preset": "auto-edit" }],
     ["preset guarded", { "permissions.preset": "guarded" }],
+    ["preset smart", { "permissions.preset": "smart" }],
+    ["preset bypass", { "permissions.preset": "bypass" }],
+    ["preset full-access", { "permissions.preset": "guarded" }],
     ["preset reset", { "permissions.preset": null }],
   ])("/settings %s 写入默认值", async (args, patch) => {
     const updateSettings = vi.fn(async () => []);

@@ -31,7 +31,7 @@ nocturne/
 │   │   │   │   └── adapters/    openai-compatible、anthropic
 │   │   │   ├── tools/           注册表、执行管线、结果预算、图片附件存储
 │   │   │   │   └── builtin/     read、write、edit、grep、glob、shell、task
-│   │   │   ├── permission/      规则求值、权限闸门、Grant 匹配
+│   │   │   ├── permission/      规则求值、权限闸门、审查器与 Grant 匹配
 │   │   │   ├── config/          配置分层加载、项目信任、Grant 文件读写、models.dev 缓存与快照
 │   │   │   │   └── models-dev-snapshot.ts  随版本内置的裁剪模型表（由脚本生成）
 │   │   │   ├── hooks/           HookRunner：外部命令 + JSON 契约

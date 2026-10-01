@@ -29,22 +29,34 @@ export interface SettingsStore {
   setPreference(key: string, value: string | undefined): Promise<void>;
 }
 
-const reservedFields = new Set(["model", "reasoningEffort", "permissions", "shell", "shellPath"]);
+const reservedFields = new Set([
+  "model",
+  "reasoningEffort",
+  "permissions",
+  "permission",
+  "shell",
+  "shellPath",
+]);
 
 export function validateSettingsPatch(input: unknown): asserts input is SettingsPatch {
   if (
     typeof input !== "object" ||
     input === null ||
     Array.isArray(input) ||
-    Object.keys(input).some((key) => key !== "permissions.preset")
+    Object.keys(input).some((key) => key !== "permissions.preset" && key !== "permission.reviewer")
   ) {
-    throw new TypeError("仅支持 permissions.preset；默认档位随默认模型经 setDefaultModel 保存");
+    throw new TypeError(
+      "仅支持 permissions.preset 与 permission.reviewer；默认档位随默认模型经 setDefaultModel 保存",
+    );
   }
   const patch = input as SettingsPatch;
   const preset = patch["permissions.preset"];
   parseConfigFile(
     {
       ...(preset !== null && preset !== undefined ? { permissions: { preset } } : {}),
+      ...(patch["permission.reviewer"] != null
+        ? { permission: { reviewer: patch["permission.reviewer"] } }
+        : {}),
     },
     "settings.json",
   );
@@ -52,7 +64,14 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
 
 function configFields(data: SettingsData, warn?: (message: string) => void): ConfigFile {
   let result: ConfigFile = {};
-  for (const key of ["model", "reasoningEffort", "shell", "shellPath", "permissions"] as const) {
+  for (const key of [
+    "model",
+    "reasoningEffort",
+    "shell",
+    "shellPath",
+    "permissions",
+    "permission",
+  ] as const) {
     if (!Object.hasOwn(data, key)) continue;
     const value =
       key === "permissions" &&
@@ -182,6 +201,18 @@ export async function loadSettingsStore(
         validateSettingsPatch(patch);
         const preset = patch["permissions.preset"];
         await write((next) => {
+          const reviewer = patch["permission.reviewer"];
+          if (reviewer !== undefined) {
+            const permission =
+              typeof next.permission === "object" &&
+              next.permission !== null &&
+              !Array.isArray(next.permission)
+                ? { ...(next.permission as Record<string, unknown>) }
+                : {};
+            if (reviewer === null) delete permission.reviewer;
+            else permission.reviewer = reviewer;
+            next.permission = permission;
+          }
           if (preset !== undefined) {
             const permissions =
               typeof next.permissions === "object" &&

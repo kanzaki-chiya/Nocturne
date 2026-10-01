@@ -50,10 +50,12 @@ interface ConfigFile {
   providers?: ProviderConfig[];
   permissions?: {
     /** 预设名；缺省 "default" */
-    preset?: "read-only" | "default" | "auto-edit" | "guarded";
+    preset?: "read-only" | "default" | "auto-edit" | "guarded" | "smart" | "bypass";
     /** 追加的权限规则，形状即 PermissionRule（permissions.md 第 2 节） */
     rules?: PermissionRule[];
   };
+  /** 独立的安全审查器；仅 smart 调用 */
+  permission?: { reviewer?: { backend: "model"; model: ModelRef } | { backend: "off" } };
   /** shell 选择（ADR-0022）：auto | pwsh | powershell | bash | cmd | sh */
   shell?: string;
   /** 非标准安装位置的可执行文件路径；种类仍由 shell 决定。
@@ -76,7 +78,7 @@ interface ConfigFile {
 
 | 字段 | 合并方式 |
 |---|---|
-| `model`、`permissions.preset`、`reasoningEffort`、`turn.*`、`shell`、`shellPath` | 高层覆盖低层 |
+| `model`、`permissions.preset`、`permission.reviewer`、`reasoningEffort`、`turn.*`、`shell`、`shellPath` | 高层覆盖低层 |
 | `providers` | 按 `id` 合并：同 id 条目浅合并（高层字段覆盖），其中 `models` 按模型 id **逐字段合并**（ADR-0024 第 2 节）：顶层字段（`displayName`/`contextWindow`/`maxOutputTokens`/`pricing`/`protocol`/`endpoints`）逐个覆盖、`capabilities` 逐键覆盖、数组字段（`reasoningEffort`/`endpoints`）由最高层整体替换（显式空数组同样生效、不并集）；不同 id 并存 |
 | `permissions.rules` | 追加：高层规则排在低层之后（权限"后写优先"语义见 permissions.md 5.1） |
 | `mcp.servers` | 按服务器 id 浅合并（同 `providers`）；不同 id 并存 |
@@ -86,7 +88,7 @@ interface ConfigFile {
 
 models.dev 数据在启动时从缓存或内置快照读取，启动不联网；添加服务商或刷新模型列表时才 GET 更新，10 秒超时，失败沿用本地数据并提示。`config.json` 的 `modelsDev: false` 关闭联网并只使用内置快照。缓存比快照新时优先使用缓存。匹配规则与字段映射见 [providers.md](providers.md) 第 2 节。
 
-**程序设置层 `settings.json`**（[ADR-0034](../decisions/ADR-0034-settings-layer.md)）：白名单为 `model`、`reasoningEffort`、`permissions.preset`、`shell`、`shellPath`，与 `config.json` 共用 schema，按第 1 节的顺序参与通用合并。损坏文件忽略并警告；无效字段逐个忽略并警告，其余合法字段继续生效，不阻塞启动。白名单外字段（包括 `permissions` 中的未知成员）原样保留，但不参与合并；`theme` 等界面偏好仍由客户端解释。写入采用临时文件 + rename，成功后才更新内存，失败保留旧值，同进程并发写入串行执行，避免设置与偏好互相覆盖。
+**程序设置层 `settings.json`**（[ADR-0034](../decisions/ADR-0034-settings-layer.md)）：白名单为 `model`、`reasoningEffort`、`permissions.preset`、`permission.reviewer`、`shell`、`shellPath`，与 `config.json` 共用 schema，按第 1 节的顺序参与通用合并。损坏文件忽略并警告；无效字段逐个忽略并警告，其余合法字段继续生效，不阻塞启动。白名单外字段（包括 `permissions` 中的未知成员）原样保留，但不参与合并；`theme` 等界面偏好仍由客户端解释。写入采用临时文件 + rename，成功后才更新内存，失败保留旧值，同进程并发写入串行执行，避免设置与偏好互相覆盖。
 
 Shell 也走通用合并，`session.setShell` 仍先探测可执行文件，再写 `shell`/`shellPath`；`auto` 清除保存值。保留 ADR-0022 的声明边界：手写层之间逐字段覆盖；手写配置覆盖程序 shell 设置、环境变量覆盖配置时，替换整份 shell 声明，不继承低层路径。自动选择与非法环境变量降级见 [tools.md](tools.md) 第 6 节。
 
@@ -98,9 +100,21 @@ updateSettings(patch: SettingsPatch): Promise<SettingItem[]>
 setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<SettingItem[]>
 ```
 
-`SettingItem` 给出默认预设、默认模型、默认档位和 shell 的生效值、来源、保存值与覆盖标记；默认模型与默认档位只读。`SettingsPatch` 只接受 `permissions.preset`，`null` 清除；默认档位不能单独修改，只随默认模型经 `setDefaultModel` 成对保存（ADR-0034 修订），`setDefaultModel` 按该模型的可用档位校验，不支持时以 `invalid_command` 拒绝并列出可选值。`setDefaultModel` 在一次原子写入中保存模型和档位，`null` 清除档位；不再写 `providers.json`，其中旧 `model` 仍按向导层读取。完整类型见 ADR-0034 第 3 节。未注入 `RuntimeConfig` 时读取返回空数组，写入 Promise 拒绝。
+`SettingItem` 给出默认预设、安全审查模型、默认模型、默认档位和 shell 的生效值、来源、保存值与覆盖标记；默认模型与默认档位只读。`SettingsPatch` 接受 `permissions.preset` 与 `permission.reviewer`，`null` 清除；默认档位不能单独修改，只随默认模型经 `setDefaultModel` 成对保存（ADR-0034 修订），`setDefaultModel` 按该模型的可用档位校验，不支持时以 `invalid_command` 拒绝并列出可选值。`setDefaultModel` 在一次原子写入中保存模型和档位，`null` 清除档位；不再写 `providers.json`，其中旧 `model` 仍按向导层读取。完整类型见 ADR-0034 第 3 节。未注入 `RuntimeConfig` 时读取返回空数组，写入 Promise 拒绝。
 
 这些默认值只影响之后新建的会话，已有会话和恢复的会话继续使用自己的配置快照；`/new` 使用最新生效默认值。`/model` 页「设为默认」是显式切换，会同时修改当前会话；`/settings` 不修改当前会话的模型、档位或权限。
+
+**安全审查器**（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)，第一轮）：`permission.reviewer`（单数 permission）是独立设置，按通用分层覆盖，项目不可信时不参与放宽。模型后端的形状为：
+
+```json
+{
+  "permission": {
+    "reviewer": { "backend": "model", "model": { "provider": "my-provider", "model": "my-model" } }
+  }
+}
+```
+
+`{ "backend": "off" }` 显式关闭低层审查器，清除设置则跟随低层配置。`SettingItem` 用 `provider/model` 或 `off` 表示保存值；`SettingsPatch["permission.reviewer"]` 接受上述对象或 `null`。`/settings` 的「安全审查」进入「关闭 / 小模型」后端弹窗；小模型复用模型选择器且不修改默认模型。审查器独立于主模型，已有 smart 会话的下一次审查也使用最新设置；该项是前段“仅影响新会话”的例外。未配置时按 guarded 并提示一次；模型不可用或请求失败按 unsure，见 [permissions.md](permissions.md) 5.3。Jev 本轮未实现。
 
 **通用界面偏好**（[ADR-0029](../decisions/ADR-0029-tui-themes.md) 第 3 节）：`RuntimeConfig` 与公开的 `Runtime` 都提供 `getPreference(key: string): string | undefined`、`setPreference(key: string, value: string | undefined): Promise<void>`。它们读写 `settings.json` 顶层的普通字符串字段；`undefined` 删除字段。写入拒绝无效字段名、`shell`/`shellPath` 等有专用接口的保留字段和非字符串值；原子写盘成功后才更新内存，失败时旧值不变，未知字段原样保留。`Runtime` 委托注入的 `RuntimeConfig`；`createRuntime` 未传 `config` 时，读取返回 `undefined`，写入返回被拒绝的 Promise，错误为「未注入 RuntimeConfig，无法保存偏好」。Core 不解释偏好值的 UI 含义；TUI 在首次渲染前读取 `theme`，由 TUI 判断 `dark`/`light`，非法值回退 `dark`；`/theme` 保存失败时保持原主题并留在选择页提示错误。
 

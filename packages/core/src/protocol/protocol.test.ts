@@ -35,6 +35,43 @@ function makeEvent(overrides: Partial<DurableEvent> = {}): DurableEvent {
 }
 
 describe("decodeDurableEvent", () => {
+  it.each(["allow", "block", "unsure"] as const)("permission.reviewed %s 往返", (verdict) => {
+    const event = makeEvent({
+      type: "permission.reviewed",
+      payload: {
+        callId: "c",
+        requestId: "r",
+        backend: "model",
+        model: { provider: "p", model: "m" },
+        verdict,
+        reason: "测试",
+        durationMs: 5,
+        cached: false,
+        usage: { inputTokens: 3, outputTokens: 1 },
+      },
+    });
+    expect(decodeDurableEvent(encodeDurableEvent(event))).toEqual(event);
+  });
+  it("reviewer 来源在 resolved 与 tool.started 往返", () => {
+    for (const event of [
+      makeEvent({
+        type: "permission.resolved",
+        payload: { callId: "c", action: "allow", source: "reviewer" },
+      }),
+      makeEvent({
+        type: "tool.started",
+        payload: {
+          callId: "c",
+          name: "edit",
+          input: {},
+          subjects: [],
+          permission: { action: "allow", source: "reviewer" },
+        },
+      }),
+    ]) {
+      expect(decodeDurableEvent(encodeDurableEvent(event))).toEqual(event);
+    }
+  });
   it.each(["read-only", "default", "auto-edit", "guarded", "smart", "bypass", "full-access"])(
     "预设 %s 在创建与配置事件中往返，旧名归一化",
     (preset) => {

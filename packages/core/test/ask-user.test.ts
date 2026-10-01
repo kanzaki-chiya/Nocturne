@@ -521,6 +521,7 @@ describe("ask_user 恢复与协议不变量", () => {
       "tool.started",
       "permission.requested",
       "permission.resolved",
+      "permission.reviewed",
       "tool.completed",
       "context.compacted",
       "turn.completed",

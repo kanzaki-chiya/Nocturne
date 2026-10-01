@@ -16,7 +16,7 @@ import {
   type ModelRequest,
 } from "../src/provider/index.js";
 import type { RuntimeEvent } from "../src/protocol/index.js";
-import { createRulePolicy } from "../src/permission/index.js";
+import { type SecurityReviewer, createRulePolicy } from "../src/permission/index.js";
 import type { McpSession, ToolDefinition } from "../src/tools/index.js";
 
 const tmpRoots: string[] = [];
@@ -38,6 +38,7 @@ const isGrandchild = (r: ModelRequest) => isChildRequest(r) && !isNestedChild(r)
 interface RuntimeExtra {
   interactive?: boolean;
   autoApproveAsk?: boolean;
+  reviewer?: SecurityReviewer;
   provider?: FakeProvider;
   /** 主会话 Turn 上限覆盖（验证不影响子会话独立上限） */
   turn?: { maxSteps?: number };
@@ -66,7 +67,7 @@ async function makeRuntime(
     sessionsDir,
     providers: [provider],
     interactive: extra.interactive,
-    permissions: extra.autoApproveAsk === true ? { autoApproveAsk: true } : undefined,
+    permissions: { autoApproveAsk: extra.autoApproveAsk, reviewer: extra.reviewer },
     ...(extra.turn !== undefined ? { turn: extra.turn } : {}),
     ...(extra.subagent !== undefined ? { subagent: extra.subagent } : {}),
     ...(extra.mcp !== undefined ? { mcp: extra.mcp } : {}),
@@ -1351,4 +1352,77 @@ describe("subagent：编辑工具能力筛选（ADR-0035 §5）", () => {
     expect(content).toContain("apply_patch");
     await session.close();
   });
+});
+
+describe("smart 子代理继承审查器", () => {
+  for (const verdict of ["allow", "block", "unsure"] as const) {
+    it(`${verdict} 经父审查器处理子会话工作区外 edit，非交互不询问`, async () => {
+      const target = path.join(makeTmp("nct-review-child-outside-"), "result.txt");
+      const inputs: unknown[] = [];
+      const reviewer: SecurityReviewer = {
+        backend: "custom",
+        review: async (input) => {
+          inputs.push(input);
+          return { verdict, reason: "继承父会话审查" };
+        },
+      };
+      const provider = new FakeProvider({
+        handler: (request) => {
+          const hasResult = request.messages.some((message) => message.role === "tool");
+          if (isChildRequest(request))
+            return hasResult
+              ? [
+                  {
+                    type: "tool_call",
+                    toolCallId: "child-finish",
+                    name: "finish",
+                    input: { result: "结束" },
+                  },
+                  { type: "finish", reason: "tool_calls" },
+                ]
+              : [
+                  {
+                    type: "tool_call",
+                    toolCallId: "child-write",
+                    name: "write",
+                    input: { path: target, content: "approved" },
+                  },
+                  { type: "finish", reason: "tool_calls" },
+                ];
+          return hasResult
+            ? [
+                { type: "text_delta", text: "完成" },
+                { type: "finish", reason: "stop" },
+              ]
+            : (parentTaskScript({ task: "写指定目标", preset: "general" })[0] ?? []);
+        },
+      });
+      const { runtime } = await makeRuntime(undefined, { provider, reviewer, interactive: false });
+      const session = await runtime.createSession({
+        model: "fake/fake-model",
+        permissionPreset: "smart",
+      });
+      const events = collect(session);
+      const reason = await session.submit({ text: "请子代理写指定目标" });
+      expect(
+        reason,
+        JSON.stringify(
+          events.filter(
+            (event) => event.type === "turn.completed" || event.type === "runtime.error",
+          ),
+        ),
+      ).toBe("done");
+      expect(inputs).toHaveLength(1);
+      expect(inputs[0]).toMatchObject({ recentUserMessages: ["请子代理写指定目标"] });
+      expect(existsSync(target)).toBe(verdict === "allow");
+      const completed = taskCompleted(events);
+      if (completed?.type !== "tool.completed") throw new Error("缺少子代理结果");
+      const output = completed.payload.output as { childLogPath: string };
+      const log = readFileSync(output.childLogPath, "utf-8");
+      expect(log).toContain('"type":"permission.reviewed"');
+      expect(log).toContain(`"verdict":"${verdict}"`);
+      expect(log).not.toContain('"type":"permission.requested"');
+      await session.close();
+    });
+  }
 });

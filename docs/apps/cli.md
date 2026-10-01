@@ -102,8 +102,8 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `/compact` | 手动触发 L2 摘要压缩 | `session.compact()` → `context.compacted(kind="summary")` |
 | `/resume` | 列出**当前目录**的会话（编号、id、创建时间、绑定目录、模型、锁状态），与 `-c/--continue` 同口径；输入编号切换，空行取消；其他目录的会话用 `/resume <id>`，全部会话用 `--sessions` 查看 | `runtime.listSessions({ cwd })` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
-| `/settings` | 按会话默认、界面、执行分组列出生效值、来源和覆盖提示；默认模型与档位只读，修改去 `/model`，Shell 去 `/shell`，`/theme` 仅 TUI | `runtime.describeSettings()` |
-| `/settings preset <名称\|reset>` | 保存默认预设，`reset` 清除；可选 `read-only`、`default`、`auto-edit`、`guarded` | `runtime.updateSettings()` |
+| `/settings` | 按会话默认、界面、执行分组列出生效值、来源和覆盖提示；安全审查显示独立后端与模型引用，选择用 TUI `/settings` 或 settings.json；默认模型与档位只读，修改去 `/model`，Shell 去 `/shell`，`/theme` 仅 TUI | `runtime.describeSettings()` |
+| `/settings preset <名称\|reset>` | 保存默认预设，`reset` 清除；可选 `read-only`、`default`、`auto-edit`、`guarded`、`smart`、`bypass` | `runtime.updateSettings()` |
 | `/new`、`/clear` | 新建空会话并切换，使用最新生效的默认模型、思考档位与权限预设；未注入配置时沿用当前会话值；旧会话仍可恢复，`/clear` 不是清屏 | CLI 注入的 `newSession` 回调 |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
 | `/provider` | 列出服务商与来源，不显示密钥；TUI 中打开服务商页。`add` 与 `nctrn setup --cli` 共用向导；`key <name>` / `refresh <name>` / `remove <name>` 为快捷操作。`model <名> <模型>` 逐字段显示 `当前值（来源）`，来源可为 models.dev；回车保留、`-` 清除用户编辑。图片输入和推理接受 `y`/`n`/`-`，推理为否时不询问档位；编辑工具接受 `edit`/`patch`/`apply_patch`/`-`（ADR-0035 §5）；来源为手写配置的字段只读。成功后写入 `userModels`，详见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveModelSettings()` 等 + `runtime.updateProviders` |
@@ -130,6 +130,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `tool.progress` | `stdout`/`stderr` 的片段按顺序拼接，只在原始换行处结束行；`info` 每次调用是一行独立摘要，渲染层补换行。两类输出均缩进两格（约定见 [tool-api.md](../protocols/tool-api.md) 第 2 节） |
 | `tool.completed` | `└ <status>` + 耗时；`error`/`denied`/`cancelled`/`interrupted` 附 `error.code` 与原因；`edit`/`write` 的 `output.diff` 完整显示旧/新行号、`+`/`-` 标记及「新增 N 行，删除 M 行」，无色终端仍保留标记，旧头部不臆造行号；结构化输出超限时显示省略提示；`truncated` 为真时附一行"输出已截断，完整内容在 \<path\>"（落盘路径见 [tools.md](../architecture/tools.md) 第 4 节） |
 
+| `permission.reviewed` | `审查：放行/拦截/拿不准 — 理由`，附缓存标记与审查来源用量；非交互写 stderr，交互显示在工具之前 |
 | `permission.requested` | 第 6 节的确认提示 |
 | `permission.resolved` | `└ 权限：<allow\|deny>（<source>：<rule\|reason>）` 一行——命中规则时展示 `rule`（如"用户配置第 3 条 {…}"），无规则时展示原因 |
 | `context.compacted` | `◇ 上下文已压缩（<kind>，至 seq <throughSeq>）` |
@@ -152,9 +153,11 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 
 预设与规则由配置决定（第 8 节、permissions.md 第 6 节），`--preset` 或 `/preset` 切换会话预设。ask 走协议流程：`permission.requested` → `session.respondPermission(requestId, reply)` → `permission.resolved`。
 
+smart 拿不准时，确认提示的原因包含审查理由；权限回复只接受事件给出的选项，隐藏的 s/p 不会授予长期权限。`full-access` 在 --preset、/preset 与 /settings preset 输入时兼容为 guarded，但不在补全中显示。
+
 主体有 `detail` 时在目标下方显示一行，过宽时省略中间并保留两端；`web_fetch` 的该行是完整 URL。网络主体的 `s` 选项显示「本会话允许访问 <主机>」，明确授权范围；`detail` 只用于展示，判定仍由权限层完成。
 
-- **交互模式**：提示块列出主体（kind、target、解析后路径）、原因与命中的规则（`reason` 与规则来源），提供完整选项：
+- **交互模式**：提示块列出主体（kind、target、解析后路径）、原因与命中的规则（`reason` 与规则来源），按事件 `options` 提供选项（高风险/编码命令及工作区外 edit 只有 a/d/x）：
 
   | 按键 | 选项 | reply |
   |---|---|---|
@@ -165,7 +168,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
   | `x` | 拒绝并停止本 Turn | `{ decision: "deny", stop: true }` |
 
   回复经 `respondPermission` 送回；回复到达前 Turn 挂起（Ctrl+C 可中断，该请求记 `cancelled`）。
-- **非交互模式**：不产生等待——`ask` 一律拒绝，`permission.resolved` 记 `source: "non_interactive"`。CLI 以 `RuntimeOptions.interactive` 告知 Runtime 是否有回复能力（交互 `true`，非交互 `false`，默认 `false`）。
+- **非交互模式**：不产生等待——smart 审查 allow 执行、block 拒绝，审查后的剩余 `ask` 拒绝，`permission.resolved` 记 `source: "non_interactive"`。CLI 以 `RuntimeOptions.interactive` 告知 Runtime 是否有回复能力（交互 `true`，非交互 `false`，默认 `false`）。
 - **`-y, --yes`**：只把**最终判定为 `ask`** 的调用提升为 `allow`（`source: "rule"`，理由注明来自命令行参数）；不覆盖显式 `deny`（包括不可信项目规则的 `deny`），不绕过输入校验、路径限制或工具边界，转换在权限层完成（permissions.md 第 5.3 节）。是用户主动选择的自动批准能力（非交互批处理等场景），默认不开启；程序化的测试也可以注入限定范围的 `policy`，不必依赖它。
 - `deny` 后模型会收到带理由的工具结果并可自我修正。
 

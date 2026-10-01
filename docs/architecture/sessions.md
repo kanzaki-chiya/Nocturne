@@ -131,3 +131,5 @@ interface SessionRecovery {
 ## 9. 暂不设计
 
 分叉、回退、跨设备同步、会话分享、断电级持久性选项。它们都可以在事件日志模型上实现，届时单独写设计。
+
+安全审查的 `permission.reviewed` 是持久事件（[events.md](../protocols/events.md)）：折叠仅将其可选 `usage` 加入会话累计用量，不插入模型历史；审查来源与理由由客户端派生视图按 callId 重放，见 [view.md](../protocols/view.md)。`turn.completed.usage` 已包含审查用量，SessionState 不再按该汇总重复计费。

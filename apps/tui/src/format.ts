@@ -4,7 +4,7 @@
  */
 import stringWidth from "string-width";
 
-import type { Usage } from "@nocturne/core/protocol";
+import type { PermissionReviewedPayload, Usage } from "@nocturne/core/protocol";
 
 /**
  * conhost（GBK 代码页）把歧义宽度字符渲染为 2 列，与 string-width 的 1 列不一致：
@@ -150,4 +150,11 @@ export function summarizeToolInput(name: string | undefined, input: unknown): st
           ? inputString(input, "pattern")
           : (inputString(input, "path") ?? inputString(input, "command"));
   return byKey ?? (input === undefined ? "" : JSON.stringify(input));
+}
+
+/** ADR-0036：审查来源及用量与主模型输出分开标注。 */
+export function permissionReviewLine(review: PermissionReviewedPayload): string {
+  const label = { allow: "放行", block: "拦截", unsure: "拿不准" }[review.verdict];
+  const usage = review.usage;
+  return `审查：${label} — ${review.reason.replace(/\s+/g, " ")}${review.cached ? "（缓存）" : ""}${usage ? `（审查用量：${usage.inputTokens} 输入 / ${usage.outputTokens} 输出）` : ""}`;
 }

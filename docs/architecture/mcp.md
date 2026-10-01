@@ -138,7 +138,7 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 ## 7. 权限与可见性
 
 - **主体**：`{ kind: "mcp", target: "<server>/<tool>" }`（target 用**服务器原始名**与**工具原始名**，不做规范化——规则匹配与确认框显示的都是用户配置里的名字）。
-- **求值**：与 shell 相同的字符串通配符匹配（permissions.md 5.1），`mcp github/*`、`mcp *` 等模式可用；预设中 `network / mcp` 列已就位——`read-only`/`default`/`auto-edit` 为 `ask`，`full-access` 为 `allow`；无匹配落 `ask`。
+- **求值**：与 shell 相同的字符串通配符匹配（permissions.md 5.1），`mcp github/*`、`mcp *` 等模式可用；预设中 `network / mcp` 列已就位——`read-only`/`default`/`auto-edit` 为 `ask`，`guarded`/`smart`/`bypass` 为 `allow`；无匹配落 `ask`。
 - **Grant**：`mcp` 授权键取 `target` 原值（permissions.md 5.4），"本会话允许 / 本项目始终允许"对该服务器工具精确生效。
 - **不可信项目配置**：`mcp` 段整体忽略（第 3 节）——它定义的是要启动的进程，没有"收紧方向"可用。
 - 权限确认框展示 `mcp <server>/<tool>`，与既有主体展示一致；`--yes`、非交互拒绝等规则照常。

@@ -28,6 +28,7 @@ import type {
   FileRef,
   FinishReason,
   ImageAttachment,
+  PermissionReviewedPayload,
   RuntimeStatus,
   TurnEndReason,
   Usage,
@@ -194,8 +195,11 @@ export async function runTurn(
       turnId,
       signal,
       events: {
-        emit: (type, payload, options) =>
-          session.emit(type, payload, options ?? {}).then(() => undefined),
+        emit: async (type, payload, options) => {
+          await session.emit(type, payload, options ?? {});
+          if (type === "permission.reviewed")
+            addUsage((payload as PermissionReviewedPayload).usage);
+        },
         emitEphemeral: (type, payload, options) => {
           session.emitEphemeral(type, payload, options ?? {});
         },

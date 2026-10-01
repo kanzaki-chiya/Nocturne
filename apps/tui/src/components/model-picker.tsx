@@ -120,6 +120,7 @@ export function ModelPicker({
   defaultModel,
   currentEffort,
   savedEffort,
+  selectionOnly = false,
   initialScope,
   initialFocus,
   wizard,
@@ -152,6 +153,8 @@ export function ModelPicker({
   onStartWizard: (presetId: string) => void;
   currentEffort?: ReasoningEffort | undefined;
   savedEffort?: ReasoningEffort | undefined;
+  /** 审查模型选择只返回引用，不更改会话模型、默认模型或档位。 */
+  selectionOnly?: boolean;
   onPick: (ref: string, setDefault: boolean, effort: ReasoningEffort | null) => void;
   onClose: () => void;
   width: number;
@@ -342,7 +345,11 @@ export function ModelPicker({
           return;
         }
         if (key.return) {
-          if (selected !== undefined) setAction(0);
+          if (selected !== undefined) {
+            if (selectionOnly)
+              onPick(`${selected.ref.provider}/${selected.ref.model}`, false, null);
+            else setAction(0);
+          }
           return;
         }
       }

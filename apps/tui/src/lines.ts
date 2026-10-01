@@ -14,7 +14,14 @@ import { attachmentLine } from "./attachment-line.js";
 import { diffSummary, layoutDiffRow, parseDiff, toolFileDiffs } from "./diff-format.js";
 import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { splitInputTokens, userText, fileRefLine } from "./file-refs.js";
-import { boxSafe, stripControls, summarizeToolInput, tailLines, truncateLine } from "./format.js";
+import {
+  boxSafe,
+  permissionReviewLine,
+  stripControls,
+  summarizeToolInput,
+  tailLines,
+  truncateLine,
+} from "./format.js";
 import { renderMarkdown } from "./markdown.js";
 import { reasoningLabel, type ReasoningMap, type ReasoningPart } from "./reasoning.js";
 import { palettes, type ThemePalette } from "./theme.js";
@@ -185,11 +192,17 @@ export function layoutEntry(
       return lines.length > 0 ? lines : [{ key: entry.key, text: "" }];
     }
     case "tool": {
+      const review = entry.review
+        ? rows(`${entry.key}:review`, permissionReviewLine(entry.review), width, { dim: true })
+        : [];
       if (entry.name === "ask_user")
-        return questionToolLines(entry).map((text, i) => ({
-          key: `${entry.key}:${i}`,
-          text: paint(text, width),
-        }));
+        return [
+          ...review,
+          ...questionToolLines(entry).map((text, i) => ({
+            key: `${entry.key}:${i}`,
+            text: paint(text, width),
+          })),
+        ];
       const mark =
         entry.status === "ok"
           ? ascii
@@ -215,6 +228,7 @@ export function layoutEntry(
           ...todoHeadline(todoItems, ascii, theme),
         ];
         const lines: LaidLine[] = [
+          ...review,
           {
             key: `${entry.key}:0`,
             text: segments.map((seg) => seg.text).join(""),
@@ -243,7 +257,7 @@ export function layoutEntry(
       }
       const summary = summarizeToolInput(entry.name, entry.input);
       const head = `${mark} ${entry.name ?? "?"} ${summary} ${entry.status}`;
-      const lines = rows(entry.key, head, width);
+      const lines = [...review, ...rows(entry.key, head, width)];
       const attachmentRows = (entry.result?.attachments ?? []).flatMap((att, i) =>
         rows(`${entry.key}:image:${i}`, `  ${attachmentLine(att, i, ascii)}`, width, {
           color: theme.accent,

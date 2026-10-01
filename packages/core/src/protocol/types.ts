@@ -293,7 +293,8 @@ export type PermissionAction = "allow" | "ask" | "deny";
  * 判定来源（permissions.md 5.5、hooks.md）：`hook` 表示 PreToolUse /
  * PermissionRequest Hook 的判定进入了最终决定（收紧，或经信任的 Hook 放行 ask）。
  */
-export type PermissionSource = "user" | "rule" | "grant" | "hook" | "non_interactive" | "cancelled";
+export type PermissionSource =
+  "user" | "rule" | "grant" | "hook" | "reviewer" | "non_interactive" | "cancelled";
 
 /** 权限预设名（permissions.md 第 6 节） */
 export const PERMISSION_PRESET_NAMES = [

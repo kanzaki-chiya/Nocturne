@@ -31,11 +31,11 @@
 
 - `protocol` 不依赖任何模块，只包含类型和少量纯函数。
 - `agent` 是 Core 内唯一的编排者，位于依赖图顶端；除 `core/index` 外，任何模块都不能 import `agent`。
-- `tools` 可以调用 `permission`，但 `permission` 不知道任何具体工具。
+- `tools` 可以调用 `permission`，但 `permission` 不知道任何具体工具。`permission` 可调用 `provider` 的公开接口实现安全审查；不按工具名、Provider 或模型写分支。
 - `provider` 不依赖 `tools`、`session`、`agent`；它只看到中性的消息与工具规格数据。
 - `context` 只依赖 `protocol` 与 `provider` 的**类型**，不调用 Provider，也不执行工具。
 - 真实 I/O（文件系统、子进程、环境变量、网络之外的系统访问）集中在 `platform` 与 Provider 适配器中，业务逻辑不直接调用 `node:fs`、`node:child_process`。
-- `hooks`（实现模块）依赖 protocol、platform、diagnostics；`HookRunner` 接口定义在 `tools`，实例由 `core/index` 按会话配置装配注入——`tools` 与 `agent` 只见接口，不 import 实现（见 [hooks.md](hooks.md)）。
+- `hooks`（实现模块）依赖 protocol、platform、diagnostics；`HookRunner` 接口定义在 `permission`（`tools` 保留类型重导出），实例由 `core/index` 按会话配置装配注入——`tools` 与 `agent` 只见接口，不 import 实现（见 [hooks.md](hooks.md)）。
 - `diagnostics`（调试通道）只依赖 protocol、platform；被 agent / context / tools / hooks / index 经注入使用，并经 `McpConnector` 传给 `packages/mcp`（见 [observability.md](observability.md)）。
 - `packages/mcp`（`@nocturne/mcp`）只允许依赖 `@nocturne/core` 的 `index` / `protocol/index` 两个入口与 `@modelcontextprotocol/sdk`——与 `apps/*` 同一检查规则；**Core 不依赖 `mcp`**（见 [mcp.md](mcp.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)）。
 - 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。CLI 对 TUI 可惰性 `import()` 主入口，或静态引用 `@nocturne/tui/slash-catalog` 与 `@nocturne/tui/text-format`；命令表不得 import 任何模块，纯文本入口仅复用格式函数、protocol 类型与 `string-width`，保证逐行模式不加载 Ink/React。其余 apps→apps 依赖禁止（[tui.md](../apps/tui.md) 第 9 节）。
@@ -91,16 +91,18 @@
 
 - **负责**：工具注册表；执行管线（输入校验 → 资源解析（经 platform）→ 权限 → 执行 → 结果归一化 → 生命周期事件）；中断与超时；结果大小预算；内置工具实现；图片附件存储（`AttachmentStore`，ADR-0023——字节落盘在 tools，Agent Loop 经注入接口读回，依赖方向不变）。
 - **不负责**：权限规则本身；决定何时调用工具；渲染工具结果。
-- **公开接口**：`ToolRegistry`、`ToolExecutor`、`ToolDefinition`（见 [tool-api.md](../protocols/tool-api.md)）；另定义 `HookRunner`（hooks 实现的注入点）、`McpConnector` / `McpSession`（`packages/mcp` 的装配点）与 `SubagentLauncher`（`agent` 的注入点，Phase 6，见 [subagent.md](subagent.md)）类型。
+- **公开接口**：`ToolRegistry`、`ToolExecutor`、`ToolDefinition`（见 [tool-api.md](../protocols/tool-api.md)）；重导出权限层的 `HookRunner`（hooks 实现的注入点），另定义 `McpConnector` / `McpSession`（`packages/mcp` 的装配点）与 `SubagentLauncher`（`agent` 的注入点，Phase 6，见 [subagent.md](subagent.md)）类型。
 - **依赖**：protocol、permission、platform、diagnostics（仅接口注入，未启用时为空实现）。**不能依赖**：agent、session、provider、context、hooks（实现）。
 - 详见 [tools.md](tools.md)。
 
 ### permission
 
+规则求值与异步闸门都在本模块；闸门负责审查、缓存、超时、一次性选项与确认，模型后端通过 Provider 公开接口调用。
+
 - **负责**：规则分层与求值（allow / ask / deny）；生成决定的理由；管理待确认请求与会话级授权。
-- **不负责**：展示确认对话框（客户端）；判断某个工具碰到了什么（工具通过 `permissionSubjects` 声明）；任何 I/O（真实路径等由 Tool Executor 经 platform 解析后传入，见 [permissions.md](permissions.md) 第 4 节）。
-- **公开接口**：`PermissionPolicy.evaluate(subjects)`、`PermissionGate.check(request, signal)`。
-- **依赖**：protocol。**不能依赖**：tools、agent、任何 UI。
+- **不负责**：展示确认对话框（客户端）；判断某个工具碰到了什么（工具通过 `permissionSubjects` 声明）；文件系统 I/O（真实路径等由 Tool Executor 经 platform 解析后传入，见 [permissions.md](permissions.md) 第 4 节）。
+- **公开接口**：`PermissionPolicy.evaluate(subjects)`、`PermissionGate.check(request, signal)`、`SecurityReviewer.review(input, signal)`。
+- **依赖**：protocol、provider。**不能依赖**：tools、agent、任何 UI。
 - 详见 [permissions.md](permissions.md)。
 
 ### config

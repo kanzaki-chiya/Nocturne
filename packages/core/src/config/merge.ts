@@ -63,7 +63,15 @@ export interface MergeResult {
   resolved: ResolvedConfig;
   modelInfo: ModelFieldOrigins;
   origins: Partial<
-    Record<"model" | "reasoningEffort" | "shell" | "shellPath" | "permissions.preset", LayerKind>
+    Record<
+      | "model"
+      | "reasoningEffort"
+      | "shell"
+      | "shellPath"
+      | "permissions.preset"
+      | "permission.reviewer",
+      LayerKind
+    >
   >;
 }
 
@@ -264,6 +272,10 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     }
     for (const key of ["model", "reasoningEffort", "shell", "shellPath"] as const) {
       if (file[key] !== undefined) origins[key] = kind;
+    }
+    if (file.permission?.reviewer !== undefined) {
+      out.permissionReviewer = file.permission.reviewer;
+      origins["permission.reviewer"] = layer.kind;
     }
     if (file.permissions?.preset !== undefined) origins["permissions.preset"] = kind;
     if (file.model !== undefined) out.model = file.model;

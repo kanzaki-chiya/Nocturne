@@ -23,6 +23,7 @@ import { App, splitCompletedPrefix } from "../src/app.js";
 import { captureConsole } from "../src/console-capture.js";
 import { PermissionDialog } from "../src/components/permission-dialog.js";
 import { StatusBar } from "../src/components/status-bar.js";
+import { layoutEntry } from "../src/lines.js";
 import { ToolRow } from "../src/components/tool-row.js";
 import { Transcript } from "../src/components/transcript.js";
 import { TuiEnvContext } from "../src/env.js";
@@ -357,6 +358,73 @@ describe("TUI", () => {
     await session.close();
   });
 
+  for (const [verdict, label] of [
+    ["allow", "放行"],
+    ["block", "拦截"],
+    ["unsure", "拿不准"],
+  ] as const) {
+    it(`审查${label}行在工具上方，普通与全屏帧一致`, () => {
+      const entry = toolEntry("review-tool", "running");
+      entry.name = "write";
+      entry.review = {
+        callId: "review-tool",
+        backend: "model",
+        verdict,
+        reason: "授权依据充分",
+        cached: false,
+        durationMs: 2,
+        usage: { inputTokens: 12, outputTokens: 3 },
+      };
+      const screen = render(inEnv(createElement(ToolRow, { entry, width: 120 })));
+      const frame = screen.lastFrame() ?? "";
+      expect(frame).toContain(`审查：${label} — 授权依据充分`);
+      expect(frame).toContain("审查用量：12 输入 / 3 输出");
+      expect(frame.indexOf("审查：")).toBeLessThan(frame.indexOf("write"));
+      const full = layoutEntry(entry, 120, true)
+        .map((line) => line.text)
+        .join("\n");
+      expect(full).toContain(`审查：${label}`);
+      expect(full).toContain("授权依据充分");
+      expect(full.indexOf("审查：")).toBeLessThan(full.indexOf("write"));
+      screen.unmount();
+    });
+  }
+  it("确认帧显示审查理由，只显示权限层给出的三选项，隐藏快捷键无效", async () => {
+    const pending: PendingPermission = {
+      requestId: "p-review",
+      callId: "c",
+      toolName: "write",
+      subjects: [{ kind: "edit", target: "/outside/file" }],
+      reason: "需要确认",
+      options: ["allow_once", "deny", "deny_stop"],
+      review: {
+        callId: "c",
+        backend: "model",
+        verdict: "unsure",
+        reason: "未明确授权目标",
+        cached: false,
+        durationMs: 1,
+      },
+    };
+    const reply = vi.fn();
+    const screen = render(
+      inEnv(createElement(PermissionDialog, { pending, active: true, onReply: reply, width: 100 })),
+    );
+    expect(screen.lastFrame()).toContain("审查：拿不准");
+    expect(screen.lastFrame()).toContain("未明确授权目标");
+    expect(screen.lastFrame()).not.toContain("[s]");
+    expect(screen.lastFrame()).not.toContain("[p]");
+    await pause();
+    screen.stdin.write("s");
+    await pause();
+    screen.stdin.write("p");
+    await pause();
+    expect(reply).not.toHaveBeenCalled();
+    screen.stdin.write("a");
+    await pause();
+    expect(reply).toHaveBeenCalledWith({ decision: "allow" });
+    screen.unmount();
+  });
   it("子代理运行中进度按行显示", () => {
     const entry = toolEntry("c1", "running");
     entry.name = "task";

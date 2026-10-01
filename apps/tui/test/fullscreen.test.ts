@@ -174,6 +174,8 @@ describe("补全", () => {
       "/preset default",
       "/preset auto-edit",
       "/preset guarded",
+      "/preset smart",
+      "/preset bypass",
     ]);
   });
 
@@ -182,6 +184,14 @@ describe("补全", () => {
     expect(prefix).toBe("/effort ");
     expect(matches).toContain("/effort off");
     expect(matches).toContain("/effort low");
+    expect(readlineCompleter("/preset ", ctx)[0]).toEqual([
+      "/preset read-only",
+      "/preset default",
+      "/preset auto-edit",
+      "/preset guarded",
+      "/preset smart",
+      "/preset bypass",
+    ]);
   });
 });
 

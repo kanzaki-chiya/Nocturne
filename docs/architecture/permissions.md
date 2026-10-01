@@ -9,7 +9,7 @@
 - 它不属于工具实现：工具只声明自己会碰到什么，不决定是否需要确认。
 - 它不属于 UI：需要确认时发出事件，由客户端展示并回复。
 - 它不属于 Agent 推理：模型无法通过参数或提示词改变判定。
-- 它不做 I/O：需要查询文件系统的信息（真实路径、是否存在）由 Tool Executor 通过 `platform` 预先解析，权限层只对解析结果做纯策略判断（第 4 节）。
+- `PermissionPolicy` 只做纯策略判断；文件系统信息由 Tool Executor 通过 `platform` 预先解析（第 4 节）。异步的 `PermissionGate` 同属权限层，负责 Hook、审查器、确认等待与取消；模型审查器经 Provider 公开接口调用。
 
 **它不是沙箱。** 权限层在调用发生前做判定，无法约束一条已获准执行的 shell 命令实际做了什么（例如命令内部访问网络或写工作区外的文件）。操作系统级沙箱是后续独立议题，文档和界面都不应暗示当前版本具备这种隔离。
 
@@ -135,6 +135,20 @@ Hook 的先后关系（Phase 5，完整语义见 5.5 与 hooks.md）：
 
 一次调用有多个主体时：任一主体为 `deny` 则 `deny`；否则任一为 `ask` 则 `ask`；否则 `allow`。
 
+#### smart 审查分支（ADR-0036 第一轮）
+
+规则的 `deny` 不进入审查；规则直接 `allow`、Grant 与 `autoApproveAsk`（`--yes`）先结算。剩余 `ask` 先交给 `PermissionRequest` Hook，再只在 `smart` 下调用 `SecurityReviewer.review(input, signal)`：
+
+- `allow`：放行，`permission.resolved.source` 与 `tool.started.permission.source` 为 `reviewer`。
+- `block`：拒绝，不弹确认；同样记录审查来源。
+- `unsure`：交互模式询问用户；非交互模式拒绝。
+
+**只由用户确认**集合不调用审查器：修改 Nocturne 授权数据、`.nocturne/` 内 edit、可能读取凭据的命令、用户/项目/CLI 的显式 ask，以及 `PreToolUse` 强制 ask。Grant、`--yes` 与 PermissionRequest Hook 的原有优先级不变；强制 ask 仍跳过 Grant 与 `--yes`。一次调用中任一 ask 主体在该集合内，整个调用跳过审查。
+
+审查输入只包含 ask 主体的类别、授权目标、位置与命中规则，当前 cwd，以及最近三条用户消息（各最多 2000 字符）；不带原始工具参数、文件引用快照、工具输出或文件正文。20 秒超时、报错或格式无效按 `unsure` 处理；Turn 中止则取消审查。缓存只保存本会话的 allow，使用与 Grant 相同的精确主体键，恢复后清空；缓存命中也记审查事件。
+
+未配置审查器时行为与 `guarded` 相同，每个会话提示一次。子会话使用父会话的同一审查器实例，仍为非交互。模型后端不带工具，使用最低思考档位 `off`，`maxOutputTokens=300`；首行必须为 `ALLOW`、`BLOCK` 或 `UNSURE`，其余非空文本为理由。审查用量写入 `permission.reviewed.usage`，计入 Turn 与会话总用量，不进入对话历史。设置方式见 [config.md](config.md)。Jev 后端本轮不实现。
+
 ### 5.5 Hook 建议的合并（Phase 5）
 
 `PreToolUse` Hook 与 `PermissionRequest` Hook 的输出作为**建议**进入求值，不改变规则排序本身（完整契约见 [hooks.md](hooks.md) 第 3、6 节）：
@@ -170,7 +184,7 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 
 ## 6. 预设
 
-预设只是一组有序规则，没有隐藏逻辑，用户可以在其上追加规则覆盖。预设构造时拿到 `workspaceRoot`、`sessionsDir`、`sessionId` 与 `nocturneHome`（据此生成具体的路径模式）；求值时预设与其他层规则没有任何差别。
+预设提供一组有序规则；权限层还按第 6 项对命令做保守降级，`bypass` 跳过其中的高风险与编码命令降级。用户可以追加显式规则。预设构造时拿到 `workspaceRoot`、`sessionsDir`、`sessionId` 与 `nocturneHome`（据此生成具体的路径模式）；求值时预设与其他层规则没有任何差别。
 
 | 预设 | read（工作区） | read（外部） | edit（工作区） | edit（外部） | shell | network / mcp | subagent |
 |---|---|---|---|---|---|---|---|
@@ -189,10 +203,10 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 
 1. 宽规则（按上表，如 `default` 的 `read ** where=workspace → allow`）；
 2. **本会话落盘目录可读**：`read <sessionsDir>/attachments/<sessionId>/** → allow`——只放行**当前会话**的落盘输出（模型回读自己的完整输出不触发确认），读其他会话的附件仍走正常求值（`default` 下即 `ask`）；
-3. **受保护路径**：对 `.git/` 内部与 `.nocturne/` 配置目录的 `edit` 保证"至少 ask"——在 `read-only`（`edit` 一律 `deny`）中不生成这两条 ask 规则，受保护路径保持 `deny`；其余预设中生成 `ask` 且排在宽 `allow` 之后；
+3. **受保护路径**：对 `.git/` 内部与 `.nocturne/` 配置目录的 `edit` 保证"至少 ask"——在 `read-only`（`edit` 一律 `deny`）中不生成这两条 ask 规则，受保护路径保持 `deny`；其余预设中生成 `ask` 且排在宽 `allow` 之后；`bypass` 只保留 `.nocturne/` 的保护，不生成 `.git/` 的 ask；
 4. **Nocturne 授权数据**：对 `<NOCTURNE_HOME>/config.json`、`settings.json`（ADR-0034）、`trust.json`、`grants/**`、`providers.json`（v0.2）的 `edit` 保证"至少 ask"（同上，`read-only` 保持 `deny`），`label` 为"修改 Nocturne 授权配置"，命中时出现在确认提示与 `permission.resolved.rule` 中。**如实说明**：这是提示而非安全边界——`--yes` 会把这类 `ask` 提升为 `allow`，`guarded` 预设下的 `shell` 也可以绕过（权限不是沙箱，见第 1 节）；
-5. **可能读取凭据的命令**（v0.2，全部预设含 `guarded`）：命令字符串含 `credentials.json` 或凭据后端命令（`security …-generic-password` 族、`secret-tool`、`ProtectedData`）的 `shell` 至少 `ask`，`label` 为"可能读取 Nocturne 凭据"，同样只是基于模式的提示（[provider-setup.md](provider-setup.md) 第 4 节）；
-6. **高风险命令**（仅 `guarded`）：一组已知高风险命令模式保持 `ask`。按种类表集中在 `platform/shells.ts` 的 `ShellDescriptor.risk`（ADR-0022 第 1 节），经主体 `shellRisk` 字段透传到权限层；主体未携带元数据时按 POSIX 基础表保守处理。基础表各 shell 共用——`rm -rf *`、`rm -fr *`、`sudo *`、`git push --force*`、`git push -f *`、`git reset --hard*`；`cmd` 追加 `rd /s`、`rmdir /s`、`del /s`、`erase /s`、`format`；PowerShell 系追加 `Remove-Item` 及其别名（`rm`/`ri`/`del`/`erase`/`rd`/`rmdir`）同时带递归与强制参数（`-Recurse`+`-Force`，允许 PowerShell 参数前缀缩写与任意顺序）、`Format-Volume`、`Clear-Disk`、`Stop-Computer`、`Restart-Computer`、`Invoke-Expression`/`iex`。PowerShell 与 cmd 的内建匹配不区分大小写；用户规则仍按命令原文匹配、大小写敏感（5.1）。嵌套 shell 调用（`pwsh -c "…"`、`powershell -Command …`、`cmd /c "…"`、`bash -c`/`-lc`、`sh -c` 等）的命令体按内层 shell 的方言与表再查一遍（最多三层）：段首词是 shell 时高风险表只看得到 `pwsh`/`cmd`/`bash`，认不出引号里交出去的命令；各方言的表经主体 `shellRiskByDialect` 字段透传，命令体取到整条文本末尾并去掉一层外引号，多取只会多查。元数据只描述"命令词 + 通配符/开关/参数组合"这类纯数据（通配符表达不了"两个标志共存/参数前缀缩写"的匹配语义在权限层执行），只把**预设级宽规则的 allow** 降级为 `ask`——用户/项目/命令行的显式规则照旧覆盖。另外：命令文本中出现 `pwsh`/`powershell` 搭配 `-EncodedCommand`（含 `-ec` 等前缀缩写、含嵌套调用）时，编码负载无法做内容审查，任何 `allow` 都降级为 `ask`（Grant 与 `--yes` 仍可在 `ask` 层批准）。这是基于模式的提示，不是可靠的危险检测。
+5. **可能读取凭据的命令**（v0.2，全部预设含 `bypass`）：命令字符串含 `credentials.json` 或凭据后端命令（`security …-generic-password` 族、`secret-tool`、`ProtectedData`）的 `shell` 至少 `ask`，`label` 为"可能读取 Nocturne 凭据"，同样只是基于模式的提示（[provider-setup.md](provider-setup.md) 第 4 节）；
+6. **高风险命令**（`guarded`、`smart`）：一组已知高风险命令模式保持 `ask`。按种类表集中在 `platform/shells.ts` 的 `ShellDescriptor.risk`（ADR-0022 第 1 节），经主体 `shellRisk` 字段透传到权限层；主体未携带元数据时按 POSIX 基础表保守处理。基础表各 shell 共用——`rm -rf *`、`rm -fr *`、`sudo *`、`git push --force*`、`git push -f *`、`git reset --hard*`；`cmd` 追加 `rd /s`、`rmdir /s`、`del /s`、`erase /s`、`format`；PowerShell 系追加 `Remove-Item` 及其别名（`rm`/`ri`/`del`/`erase`/`rd`/`rmdir`）同时带递归与强制参数（`-Recurse`+`-Force`，允许 PowerShell 参数前缀缩写与任意顺序）、`Format-Volume`、`Clear-Disk`、`Stop-Computer`、`Restart-Computer`、`Invoke-Expression`/`iex`。PowerShell 与 cmd 的内建匹配不区分大小写；用户规则仍按命令原文匹配、大小写敏感（5.1）。嵌套 shell 调用（`pwsh -c "…"`、`powershell -Command …`、`cmd /c "…"`、`bash -c`/`-lc`、`sh -c` 等）的命令体按内层 shell 的方言与表再查一遍（最多三层）：段首词是 shell 时高风险表只看得到 `pwsh`/`cmd`/`bash`，认不出引号里交出去的命令；各方言的表经主体 `shellRiskByDialect` 字段透传，命令体取到整条文本末尾并去掉一层外引号，多取只会多查。元数据只描述"命令词 + 通配符/开关/参数组合"这类纯数据（通配符表达不了"两个标志共存/参数前缀缩写"的匹配语义在权限层执行），只把**预设级宽规则的 allow** 降级为 `ask`——用户/项目/命令行的显式规则照旧覆盖。另外：命令文本中出现 `pwsh`/`powershell` 搭配 `-EncodedCommand`（含 `-ec` 等前缀缩写、含嵌套调用）时，编码负载无法做内容审查，除 `bypass` 外任何 `allow` 都降级为 `ask`（Grant 与 `--yes` 仍可在 `ask` 层批准）。这是基于模式的提示，不是可靠的危险检测。
 
 ## 7. 需要确认时（ask）
 
@@ -213,9 +227,9 @@ PermissionGate.check(subjects, signal)
 | 拒绝 | `deny` | 工具结果为拒绝，可附带反馈给模型，Turn 继续 |
 | 拒绝并停止 | `deny_stop` | 工具结果为拒绝，并中止当前 Turn |
 
-`permission.requested.options` 对所有主体给出同一组完整选项；`PermissionReply.remember` 与所选 Grant 的持久化由权限层完成，客户端只表达意图。
+选项集由权限层计算：任一主体命中高风险命令表、`-EncodedCommand` 或工作区外 edit 时，只给 `allow_once`、`deny`、`deny_stop`；其余请求给出上表五项。客户端照 `permission.requested.options` 渲染，权限层也拒绝回复里不在选项集中的长期授权；`PermissionReply.remember` 与所选 Grant 的持久化由权限层完成，客户端只表达意图。
 
-两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时（Runtime 选项 `interactive = false`），`ask` 一律视为 `deny`（`source: "non_interactive"`，不发 `permission.requested`）；要在无人值守场景放行使用 `--yes`（5.3 的命令行提升）或预写规则，不提供"非交互默认允许"的配置项。非交互拒绝的提示文案可由调用方注入（`nonInteractiveDenyHint`）——子会话用它告诉子模型"无法请求用户确认，需要写入或执行的操作在 `finish` 结果中说明，由父代理执行"（[subagent.md](subagent.md) 7.3），CLI 非交互模式沿用通用文案。
+两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时（Runtime 选项 `interactive = false`），审查后的剩余 `ask` 视为 `deny`（`source: "non_interactive"`，不发 `permission.requested`）；`smart` 的审查 allow 执行、block 拒绝，unsure 走上述非交互拒绝；要在无人值守场景放行使用 `--yes`（5.3 的命令行提升）或预写规则，不提供"非交互默认允许"的配置项。非交互拒绝的提示文案可由调用方注入（`nonInteractiveDenyHint`）——子会话用它告诉子模型"无法请求用户确认，需要写入或执行的操作在 `finish` 结果中说明，由父代理执行"（[subagent.md](subagent.md) 7.3），CLI 非交互模式沿用通用文案。
 
 等待回复期间 `signal` 中止：记 `permission.resolved(action="deny", source="cancelled")`，该调用按 `cancelled` 结算。
 
@@ -224,4 +238,4 @@ PermissionGate.check(subjects, signal)
 - Tool Executor 负责解析资源并调用 `PermissionGate`，见 [tools.md](tools.md) 第 3 节。
 - Hooks 在权限求值前后给出建议：`PreToolUse` 的建议在第 5 步前合并，`PermissionRequest` 在 `ask` 分支内优先回答；`allow` 不能越过 `deny`，且仅可信来源能放宽 `ask`（5.5、[hooks.md](hooks.md)）。
 - 规则的配置格式与加载由 `config` 负责；本模块只接收已合并、已标注来源与信任状态的规则列表。
-- **子会话（Phase 6）**：子代理会话的有效策略用与父会话相同的输入重建（同一预设、合并规则、项目 Grant、共享的会话 Grant、`autoApproveAsk`），但 gate 恒为非交互——`ask` 一律 `deny(source: "non_interactive")`。因此子会话的每个 `allow` 都是父会话同一求值下也会得到的 `allow`，差异方向只有更严；完整论证与机制行为表见 [subagent.md](subagent.md) 第 7 节。
+- **子会话（Phase 6）**：子代理会话的有效策略用与父会话相同的输入重建（同一预设、合并规则、项目 Grant、共享的会话 Grant、`autoApproveAsk` 与审查器实例），但 gate 恒为非交互——剩余 `ask` 一律 `deny(source: "non_interactive")`，`smart` 的审查 allow 可执行。子会话不能向用户弹确认；完整论证与机制行为表见 [subagent.md](subagent.md) 第 7 节。

@@ -33,6 +33,8 @@ import { createHookRunner } from "./hooks/index.js";
 import { appendInputHistory, readInputHistory } from "./input-history.js";
 import {
   createRulePolicy,
+  createModelSecurityReviewer,
+  type SecurityReviewer,
   isPermissionPresetName,
   type PermissionPolicy,
 } from "./permission/index.js";
@@ -201,6 +203,8 @@ export interface RuntimeSubagentOptions {
 }
 
 export interface RuntimePermissionsOptions {
+  /** 测试或嵌入方注入；子会话沿用同一实例。 */
+  reviewer?: SecurityReviewer | undefined;
   /**
    * 命令行允许（permissions.md 第 7 节）：最终判定为 ask 的调用自动批准。
    * 只提升 ask；不覆盖 deny，不绕过输入校验与路径限制，由权限层完成。
@@ -735,12 +739,75 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     };
     const hookRunner = makeHookRunner(session);
 
+    let modelReviewer: SecurityReviewer | undefined;
+    let reviewerKey: string | undefined;
+    const getReviewer = (): SecurityReviewer | undefined => {
+      if (options.permissions?.reviewer !== undefined) return options.permissions.reviewer;
+      const selected =
+        config === undefined
+          ? resolved?.permissionReviewer
+          : config.resolvedSettings(meta.workspaceRoot).permissionReviewer;
+      if (selected?.backend !== "model") return undefined;
+      const key = JSON.stringify(selected.model);
+      if (key !== reviewerKey) {
+        reviewerKey = key;
+        const ref = selected.model;
+        modelReviewer = {
+          backend: "model",
+          model: ref,
+          review: (input, signal) =>
+            createModelSecurityReviewer(sessionRegistry.resolve(ref), session.id).review(
+              input,
+              signal,
+            ),
+        };
+      }
+      return modelReviewer;
+    };
+    const recentUserMessages = () =>
+      session
+        .state()
+        .history.flatMap((entry) => {
+          if (entry.kind !== "user") return [];
+          // @ 引用的文件/目录快照附在消息尾部；审查只读取用户亲自输入的部分。
+          const snapshots = entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0;
+          return [
+            entry.content
+              .slice(0, entry.content.length - snapshots)
+              .filter((b) => b.type === "text")
+              .map((b) => b.text)
+              .join(""),
+          ];
+        })
+        .slice(-3);
+    let warnedMissingReviewer = false;
+    const warnMissingReviewer = () => {
+      if (
+        session.state().config.permissionPreset !== "smart" ||
+        getReviewer() !== undefined ||
+        warnedMissingReviewer
+      )
+        return;
+      warnedMissingReviewer = true;
+      const message = "未设置安全审查，去 /settings 设置";
+      warnings.push(message);
+      session.emitEphemeral("runtime.warning", { code: "permission_reviewer_missing", message });
+    };
+    warnMissingReviewer();
+
     // gate 按会话持有：等待中的权限请求与会话绑定，respondPermission 按会话路由；
     // 经委托读取当前 policy，使 setPermissionPreset 立即生效
     const gate: PermissionGate = createPolicyGate(
-      { evaluate: (subjects) => policy.evaluate(subjects) },
+      { evaluate: (subjects, evaluationOptions) => policy.evaluate(subjects, evaluationOptions) },
       {
         interactive,
+        preset: () => session.state().config.permissionPreset,
+        reviewer: () => {
+          warnMissingReviewer();
+          return getReviewer();
+        },
+        cwd: meta.cwd,
+        recentUserMessages,
         caseSensitive: platform.caseSensitivePaths,
         grants: { session: sessionGrants, project: ws?.grants },
         hooks: hookRunner,
@@ -977,6 +1044,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         environment,
         model: () => model,
         permissionPreset: () => session.state().config.permissionPreset,
+        reviewer: getReviewer,
+        recentUserMessages,
         // 子会话继承父会话的思考档位（ADR-0018 §4；受子模型可用档位约束，
         // 就近降档在 launcher 内完成）
         reasoningEffort: () => session.state().config.reasoningEffort,
@@ -1264,6 +1333,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         await session.emit("session.config_changed", { permissionPreset: name });
         policy = buildPolicy(name);
+        warnMissingReviewer();
       },
       shellInfo() {
         const res = shellResolver.current();
@@ -1692,3 +1762,10 @@ export type {
   ToolDefinition,
   ToolResult,
 } from "./tools/index.js";
+
+export type {
+  SecurityReviewer,
+  ReviewInput,
+  ReviewResult,
+  ReviewSubject,
+} from "./permission/index.js";

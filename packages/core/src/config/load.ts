@@ -241,6 +241,16 @@ export async function loadConfig(
         ],
         ["defaultModel", "model", merged.resolved.model, saved.model],
         [
+          "permission.reviewer",
+          "permission.reviewer",
+          merged.resolved.permissionReviewer?.backend === "model"
+            ? `${merged.resolved.permissionReviewer.model.provider}/${merged.resolved.permissionReviewer.model.model}`
+            : "off",
+          saved.permission?.reviewer?.backend === "model"
+            ? `${saved.permission.reviewer.model.provider}/${saved.permission.reviewer.model.model}`
+            : saved.permission?.reviewer?.backend,
+        ],
+        [
           "reasoningEffort",
           "reasoningEffort",
           merged.resolved.reasoningEffort ?? "off",

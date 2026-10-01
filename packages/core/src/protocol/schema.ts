@@ -58,6 +58,7 @@ const permissionSourceSchema = z.enum([
   "rule",
   "grant",
   "hook",
+  "reviewer",
   "non_interactive",
   "cancelled",
 ]);
@@ -147,6 +148,17 @@ const payloadSchemas = {
     reason: z.string(),
     options: z.array(z.enum(["allow_once", "allow_session", "allow_project", "deny", "deny_stop"])),
   }),
+  "permission.reviewed": z.object({
+    callId: z.string(),
+    requestId: z.string().optional(),
+    backend: z.string(),
+    model: modelRefSchema.optional(),
+    verdict: z.enum(["allow", "block", "unsure"]),
+    reason: z.string(),
+    durationMs: z.number().nonnegative(),
+    cached: z.boolean(),
+    usage: usageSchema.optional(),
+  }),
   "permission.resolved": z.object({
     requestId: z.string().optional(),
     callId: z.string(),
@@ -204,6 +216,7 @@ export const durableEventSchema = z.discriminatedUnion("type", [
   envelope("tool.started", payloadSchemas["tool.started"]),
   envelope("permission.requested", payloadSchemas["permission.requested"]),
   envelope("permission.resolved", payloadSchemas["permission.resolved"]),
+  envelope("permission.reviewed", payloadSchemas["permission.reviewed"]),
   envelope("tool.completed", payloadSchemas["tool.completed"]),
   envelope("context.compacted", payloadSchemas["context.compacted"]),
   envelope("turn.completed", payloadSchemas["turn.completed"]),

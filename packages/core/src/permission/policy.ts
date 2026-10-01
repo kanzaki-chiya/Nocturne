@@ -68,6 +68,7 @@ interface SubjectVerdict {
   hit: RuleHit;
   /** 补充说明（组合命令降级、命令行提升等） */
   note?: string | undefined;
+  userOnly?: boolean | undefined;
 }
 
 const STRICTNESS: Record<PermissionAction, number> = { deny: 2, ask: 1, allow: 0 };
@@ -339,7 +340,14 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
         };
       }
     }
-    return { action, hit, note };
+    const presetHit = s.kind === "edit" ? lastMatch(preset, s) : undefined;
+    const userOnly =
+      (s.kind === "shell" && isCredentialBackendCommand(s.target)) ||
+      (s.kind === "edit" &&
+        (presetHit?.rule?.label === "修改 Nocturne 授权配置" ||
+          presetHit?.rule?.pattern === "**/.nocturne/**")) ||
+      (hit.rule?.action === "ask" && hit.origin !== "preset" && hit.origin !== "default");
+    return { action, hit, note, userOnly };
   }
 
   return {
@@ -359,7 +367,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       for (const v of verdicts) {
         if (v.action === "deny") {
           action = "deny";
-          decisive ??= v;
+          decisive = v;
         } else if (v.action === "ask" && action === "allow") {
           action = "ask";
           decisive ??= v;
@@ -387,6 +395,19 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
 
       return {
         subjects: evaluated,
+        userOnly: verdicts.some((v) => v.action === "ask" && v.userOnly),
+        reviewSubjects: evaluated.flatMap((s, i) =>
+          verdicts[i]?.action === "ask"
+            ? [
+                {
+                  kind: s.kind,
+                  target: s.resolved ?? s.target,
+                  where: s.where,
+                  rule: verdicts[i].hit,
+                },
+              ]
+            : [],
+        ),
         decision: {
           action,
           // Grant / autoApproveAsk 产生的 allow 仍属规则层的最终判定；用户应答的

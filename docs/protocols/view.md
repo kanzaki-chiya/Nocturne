@@ -102,6 +102,7 @@ interface ToolEntry {
   permission: { action: PermissionAction; source: PermissionSource; rule: string | undefined }
     | undefined;                // tool.started 带来
   resolution: PermissionResolvedPayload | undefined; // 最近一条 resolved
+  review?: PermissionReviewedPayload; // 最近一条审查，工具上方与确认框显示
   /** tool.progress 累计（临时数据）；completed 时清空，收敛点上必为空 */
   liveOutput: string;
   result:
@@ -147,6 +148,7 @@ interface LiveTool {
 
 ```ts
 interface PendingPermission {
+  review?: PermissionReviewedPayload; // 同一 callId 的最近审查
   requestId: string;
   callId: string;
   toolName: string | undefined; // live.tools / entries 里能取到就填，否则 undefined
@@ -177,6 +179,7 @@ interface SessionNotice {
 | `turn.started` | `currentTurn = {turnId, turnIndex}`；`turnCount = max(turnCount, turnIndex)` |
 | `message.user` | 追加 `user` 条目（key `u:<messageId>`），保留 `attachments` 与 `fileRefs`；引用内容仍在 `content` 中，客户端可用元数据显示摘要 |
 | `message.assistant` | `live.assistants` 中同 `messageId` 者移除并晋升：新建条目插入时间线（流式 text/reasoning 丢弃，以 `content` 为准）；无 live 对应物则直接新建条目 |
+| `permission.reviewed` | 同 callId 的 live 工具晋升为 awaiting 条目，记录 `review`；不写 notice，避免同一审查显示两次。后续 requested 将审查理由复制到 `pendingPermission.review` |
 | `permission.requested` | `pendingPermission` 设置；同 `callId` 的 `live.tools` 项移除并晋升为 `awaiting_permission` 条目（回填 `subjects`），无 live/entries 对应物则新建 `awaiting_permission` 条目（`name` 暂缺）；记录进 `pendingByCallId` |
 | `permission.resolved` | `requestId` 匹配则清 `pendingPermission`、`pendingByCallId`；`callId` 的 entries 条目更新 `resolution`（`deny` 时 `status` 仍等 `tool.completed` 落定）；追加 `permission` notice 条目。归约器内部维护 `Map<callId, resolved>`，供晚到的 `started`/`completed` 回填 |
 | `tool.started` | 同 `callId` 的 `live.tools` 项移除并晋升（`inputText` 丢弃）；`entries` 中已有条目（requested 建的 awaiting）则更新为 `running` 并填 `input`/`subjects`/`permission`/`turnId`/`name`；否则新建 `running` 条目 |
@@ -237,7 +240,7 @@ ask 判定
 
 支撑 V1 的三条构造规则：
 
-1. `entries` 条目只能由持久事件创建/更新（§3）——`permission.requested`/`resolved`/`tool.started`/`completed` 都是持久事件，两条路径产生**相同顺序相同内容**的条目；
+1. `entries` 条目只能由持久事件创建/更新（§3）——`permission.reviewed`/`requested`/`resolved`/`tool.started`/`completed` 都是持久事件，两条路径产生**相同顺序相同内容**的条目；
 2. 临时事件只写瞬态区（§4），且每个瞬态字段都有归零/晋升规则：`live` 条目在持久落点到达时转入 entries（流式字段丢弃），`liveOutput` 在 `completed` 时清空，`retry` 离开 `retrying` 时清空，`status` 在 `turn.completed` 归 `idle`；
 3. `revision`、`notices` 被显式排除：`revision` 随临时事件计数，两路径必然不同；`notices` 只由临时事件产生，重放缺失是设计行为（CLI 的对应输出同样不进日志）。
 

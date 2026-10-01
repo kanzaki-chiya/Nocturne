@@ -478,10 +478,13 @@ describe("全屏界面", () => {
     await pause(80);
     expect(lastFrame()).toContain("思考:low");
     expect(lastFrame()).not.toContain("思考档位已切换");
-    stdin.write("\x1bm");
-    await pause(80);
-    expect(lastFrame()).toContain("auto-edit");
-    expect(lastFrame()).not.toContain("权限预设已切换");
+    for (const preset of ["auto-edit", "guarded", "smart", "bypass", "read-only", "default"]) {
+      stdin.write("\x1bm");
+      await pause(80);
+      expect(lastFrame()).toContain(preset);
+      expect(lastFrame()).not.toContain("权限预设已切换");
+      expect(lastFrame()).not.toContain("full-access");
+    }
     unmount();
     await session.close();
   });

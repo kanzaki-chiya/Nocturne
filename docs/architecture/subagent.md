@@ -184,16 +184,16 @@ launch(request, ctx)
 - 同一 `autoApproveAsk`：`--yes` 是运行级操作者决定，子会话继承它（提升范围与父会话逐点一致，不覆盖 deny、不绕过 Hook 强制的 ask）；
 - `presetContext.sessionId` 换为**子会话** id（附件目录规则绑定自己的落盘目录）。
 
-子会话 gate：`createPolicyGate(childPolicy, { interactive: false, hooks: childHookRunner, caseSensitive })`。
+子会话 gate：`createPolicyGate(childPolicy, { interactive: false, hooks: childHookRunner, caseSensitive, preset, reviewer, recentUserMessages })`，审查器 getter 沿用父会话实例。
 
-**不宽于父会话的论证**：对每个主体，子会话的求值输入（规则、Grant、autoApproveAsk、Hook 建议）与父会话完全相同，唯一差异是 ask 分支——父会话等人回答，子会话直接 `deny(source: "non_interactive")`。因此子会话的任何 `allow` 都是父会话同一求值下也会得到的 `allow`；差异方向只有"更严"。
+**不宽于父会话的论证**：对每个主体，子会话的求值输入（规则、Grant、autoApproveAsk、Hook 建议）与父会话完全相同，唯一差异是 ask 分支——smart 的剩余 ask 都先经同一审查器，allow/block 直接结算；仍需确认时父会话等人回答，子会话 `deny(source: "non_interactive")`。因此子会话的任何 `allow` 都是父会话同一求值下也会得到的 `allow`；差异方向只有"更严"。
 
 ### 7.3 各机制在子会话中的行为
 
 | 机制 | 子会话行为 |
 |---|---|
 | 规则 deny（含不可信项目收紧、受保护路径） | 照常 deny——没有任何子会话机制能越过 |
-| 规则 ask | `non_interactive` deny（不发 `permission.requested`）。拒绝消息由子会话 gate 的 `nonInteractiveDenyHint` 注入指引文案：**"子代理无法请求用户确认；需要写入或执行的操作请在 `finish` 结果中说明，由父代理执行"**——让子模型把受阻操作转化为结果内容，而不是反复重试浪费步数 |
+| 规则 ask | 先按父策略经 Hook 与 smart 审查；剩余 ask 为 `non_interactive` deny（不发 `permission.requested`）。拒绝消息由子会话 gate 的 `nonInteractiveDenyHint` 注入指引文案：**"子代理无法请求用户确认；需要写入或执行的操作请在 `finish` 结果中说明，由父代理执行"**——让子模型把受阻操作转化为结果内容，而不是反复重试浪费步数 |
 | 会话 Grant | 继承父会话的授权集（只读共享），精确匹配照常 `allow(source:"grant")` |
 | 项目 Grant | 同一 workspaceRoot，照常生效 |
 | `--yes` / `autoApproveAsk` | 继承：规则判定的 ask 提升为 allow；**仍不覆盖 deny，也不提升 Hook 强制的 ask** |
@@ -291,3 +291,5 @@ launch(request, ctx)
 - **并行 task 数组**：一次调用一个子会话；批量并行等并行调度存在后再评估；
 - **子代理独立模型选择**：子会话继承父会话模型；
 - **配置文件 `subagent` 段**：默认值已覆盖本阶段；开关走 `RuntimeOptions.subagent.enabled` 或权限规则 `subagent * → deny`。
+
+ADR-0036 第一轮：子会话沿用父会话的审查器实例与最近用户意图，smart 的剩余 ask 可先经审查放行或拦截；unsure 仍按非交互 deny 处理，不向用户发确认。只由用户确认的集合沿用父策略，审查用量随子会话汇总。见 [permissions.md](permissions.md) 5.3、7。

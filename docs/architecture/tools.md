@@ -41,10 +41,10 @@ execute(call, ctx):
   3. 权限主体  requests = tool.permissionSubjects(input, scope)   # 纯函数：本次调用会碰到什么
   4. 解析资源  subjects = platform.resolve(requests)               # 唯一做 I/O 的准备步骤：真实路径
                解析失败（如权限不足无法访问父目录）→ error(code="resource_unavailable")
-  5. 权限      decision = permissionGate.check(subjects, signal)
+  5. 权限      decision = permissionGate.check(subjects, signal) # 闸门实现位于 permission/
                deny → error(code="permission_denied")，附理由与用户反馈
                ask  → 先过 PermissionRequest Hook（hooks.md 第 6 节）；无回答则
-                      发出 permission.requested，等待客户端回复（可被中断）
+                      先经 Hook 与 smart 审查，仍 ask 时发出 permission.requested，等待客户端回复（可被中断）
   6. 开始      emit tool.started（含解析后的 subjects 与权限决定），写入成功后才继续
   7. 执行      tool.execute(input, ctx)，ctx.subjects = 已批准的解析结果，携带 AbortSignal 与超时
                工具抛出的异常 → error(code="tool_failed")；超时 → error(code="timeout")

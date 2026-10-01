@@ -8,6 +8,7 @@ import type {
   DurableEvent,
   EphemeralEvent,
   PermissionResolvedPayload,
+  PermissionReviewedPayload,
   ProviderRetryPayload,
   RuntimeEvent,
   RuntimeStatus,
@@ -119,6 +120,7 @@ export interface ToolEntry {
   permission:
     { action: PermissionAction; source: PermissionSource; rule: string | undefined } | undefined;
   resolution: PermissionResolvedPayload | undefined;
+  review?: PermissionReviewedPayload | undefined;
   /** tool.progress 累计；completed 时清空，收敛点上必为空 */
   liveOutput: string;
   result:
@@ -169,6 +171,7 @@ export interface PendingPermission {
   subjects: PermissionSubject[];
   reason: string;
   options: PermissionOption[];
+  review?: PermissionReviewedPayload | undefined;
 }
 
 /** 待回答的提问（ADR-0032）：客户端据此渲染提问面板并 respondQuestion */
@@ -331,6 +334,11 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
       });
       break;
     }
+    case "permission.reviewed": {
+      const entry = promoteTool(view, b, event.payload.callId, turnId ?? "", event.seq);
+      entry.review = event.payload;
+      break;
+    }
     case "permission.requested": {
       const p = event.payload;
       const liveTool = view.live.tools.find((t) => t.callId === p.callId);
@@ -344,6 +352,7 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
         subjects: p.subjects,
         reason: p.reason,
         options: p.options,
+        review: entry.review,
       };
       break;
     }

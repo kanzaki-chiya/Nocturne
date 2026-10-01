@@ -34,6 +34,32 @@ afterEach(async () => {
 const load = () => loadConfig(platform, { nocturneHome: home, env: noEnv });
 
 describe("ADR-0034 设置层", () => {
+  it("审查器保存、清除、关闭与高层覆盖；未知字段保留，坏配置拒绝写入", async () => {
+    await json("settings.json", { permission: { extra: 1 }, other: true });
+    const config = await load();
+    const reviewer = { backend: "model" as const, model: { provider: "fake", model: "review" } };
+    await config.updateSettings({ "permission.reviewer": reviewer });
+    expect(config.resolvedSettings().permissionReviewer).toEqual(reviewer);
+    expect(
+      config.describeSettings().find((item) => item.key === "permission.reviewer"),
+    ).toMatchObject({ effective: "fake/review", saved: "fake/review", source: "settings" });
+    expect(await readSettings()).toMatchObject({ permission: { reviewer, extra: 1 }, other: true });
+    await expect(
+      config.updateSettings({
+        "permission.reviewer": { backend: "model", model: { provider: "", model: "x" } },
+      }),
+    ).rejects.toThrow();
+    await config.updateSettings({ "permission.reviewer": { backend: "off" } });
+    expect(config.resolvedSettings().permissionReviewer).toEqual({ backend: "off" });
+    await config.updateSettings({ "permission.reviewer": null });
+    expect(config.resolvedSettings().permissionReviewer).toBeUndefined();
+    await json("config.json", { permission: { reviewer } });
+    const overridden = await load();
+    await overridden.updateSettings({ "permission.reviewer": { backend: "off" } });
+    expect(
+      overridden.describeSettings().find((item) => item.key === "permission.reviewer"),
+    ).toMatchObject({ effective: "fake/review", source: "user", overridden: true });
+  });
   it("可信项目默认模型的档位同时用于 setDefaultModel 校验与界面模型清单", async () => {
     await mkdir(path.join(workspace, ".nocturne"));
     await writeFile(

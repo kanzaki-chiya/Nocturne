@@ -8,7 +8,7 @@ import { useState } from "react";
 import stringWidth from "string-width";
 
 import { glyphs, useTuiEnv } from "../env.js";
-import { boxSafe, truncateLine, truncateMiddle } from "../format.js";
+import { boxSafe, permissionReviewLine, truncateLine, truncateMiddle } from "../format.js";
 import { useTheme } from "../theme.js";
 
 import type { PendingPermission, PermissionOption } from "@nocturne/core/protocol";
@@ -76,7 +76,8 @@ export function permissionDialogRows(pending: PendingPermission, width: number):
   return (
     6 +
     pending.subjects.filter((s) => s.detail !== undefined).length +
-    (pending.reason !== "" && width >= 40 ? 1 : 0)
+    (pending.reason !== "" && width >= 40 ? 1 : 0) +
+    (pending.review ? 1 : 0)
   );
 }
 
@@ -157,6 +158,7 @@ export function PermissionDialog({
     ...pending.subjects.flatMap((s) =>
       s.detail === undefined ? [] : [truncateMiddle(s.detail, Math.max(1, width - 4), g.ellipsis)],
     ),
+    ...(pending.review ? [permissionReviewLine(pending.review)] : []),
     ...(pending.reason !== "" && !narrow ? [`原因：${pending.reason}`] : []),
     feedback !== undefined
       ? `d${g.prompt} ${feedback}_`
@@ -234,6 +236,11 @@ export function PermissionDialog({
               </Text>,
             ],
       )}
+      {pending.review ? (
+        <Text dimColor wrap="truncate">
+          {truncateLine(boxSafe(permissionReviewLine(pending.review)), width - 8, g.ellipsis)}
+        </Text>
+      ) : null}
       {pending.reason !== "" && !narrow ? (
         <Text dimColor wrap="truncate">
           {truncateLine(boxSafe(`原因：${pending.reason}`), width - 8, g.ellipsis)}

@@ -692,3 +692,69 @@ describe("SessionView reducer", () => {
     expect(() => JSON.stringify(view)).not.toThrow();
   });
 });
+
+it("审查持久重放保留工具理由与待确认理由，started 不覆盖审查", () => {
+  const review = {
+    callId: "c-review",
+    backend: "model",
+    model: { provider: "fake", model: "fake-1" },
+    verdict: "unsure" as const,
+    reason: "用户意图不明确",
+    durationMs: 12,
+    cached: false,
+  };
+  const events: DurableEvent[] = [
+    {
+      type: "permission.reviewed",
+      sessionId: "s",
+      seq: 1,
+      time: "t",
+      turnId: "turn-1",
+      payload: review,
+    },
+    {
+      type: "permission.requested",
+      sessionId: "s",
+      seq: 2,
+      time: "t",
+      turnId: "turn-1",
+      payload: {
+        callId: "c-review",
+        requestId: "r-review",
+        subjects: [{ kind: "edit", target: "/outside.txt", where: "outside" }],
+        reason: "审查：拿不准 — 用户意图不明确",
+        options: ["allow_once", "deny", "deny_stop"],
+      },
+    },
+  ];
+  const view = liveView(events);
+  expect(view.pendingPermission?.review).toEqual(review);
+  expect(toolEntries(view)[0]?.review).toEqual(review);
+  expect(replaySessionView(events).pendingPermission?.review).toEqual(review);
+  events.push(
+    {
+      type: "permission.resolved",
+      sessionId: "s",
+      seq: 3,
+      time: "t",
+      payload: { callId: "c-review", requestId: "r-review", action: "allow", source: "user" },
+    },
+    {
+      type: "tool.started",
+      sessionId: "s",
+      seq: 4,
+      time: "t",
+      turnId: "turn-1",
+      payload: {
+        callId: "c-review",
+        name: "write",
+        input: {},
+        subjects: [],
+        permission: { action: "allow", source: "user" },
+      },
+    },
+  );
+  const replay = replaySessionView(events);
+  expect(replay.pendingPermission).toBeUndefined();
+  expect(toolEntries(replay)[0]).toMatchObject({ status: "running", review });
+});

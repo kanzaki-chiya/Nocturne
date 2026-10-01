@@ -17,7 +17,7 @@ import {
   type FakeScript,
   type ModelInfo,
 } from "../src/provider/index.js";
-import type { RuntimeEvent } from "../src/protocol/index.js";
+import { replaySessionView, type RuntimeEvent } from "../src/protocol/index.js";
 
 const tmpRoots: string[] = [];
 
@@ -207,6 +207,125 @@ describe("公开 Runtime API", () => {
     const toolMsg = req2?.messages.find((m) => m.role === "tool");
     expect(toolMsg?.role === "tool" && toolMsg.content).toContain("content-A");
     await session.close();
+  });
+
+  it("smart 模型审查用量计入会话与 Turn，恢复日志不把审查写进上下文", async () => {
+    const workspace = makeTmpDir("nct-review-ws-");
+    writeFileSync(path.join(workspace, "context.txt"), "FILE SNAPSHOT MUST NOT ENTER REVIEW");
+    const outside = path.join(makeTmpDir("nct-review-out-"), "result.txt");
+    const sessionsDir = makeTmpDir("nct-review-sessions-");
+    const config = await loadConfig(createPlatform(), {
+      nocturneHome: makeTmpDir("nct-review-home-"),
+      env: () => undefined,
+    });
+    await config.updateSettings({
+      "permission.reviewer": { backend: "model", model: { provider: "fake", model: "fake-1" } },
+    });
+    const provider = new FakeProvider({
+      handler: (request) => {
+        if (request.tools.length === 0)
+          return [
+            { type: "text_delta", text: "ALLOW\n用户明确授权写入" },
+            { type: "usage", usage: { inputTokens: 11, outputTokens: 3 } },
+            { type: "finish", reason: "stop" },
+          ];
+        if (request.messages.some((m) => m.role === "tool"))
+          return [
+            { type: "text_delta", text: "done" },
+            { type: "finish", reason: "stop" },
+          ];
+        return [
+          {
+            type: "tool_call",
+            toolCallId: "outside-write",
+            name: "write",
+            input: { path: outside, content: "approved" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ];
+      },
+    });
+    const runtime = await createRuntime({
+      cwd: workspace,
+      sessionsDir,
+      providers: [provider],
+      config,
+      interactive: false,
+    });
+    const session = await runtime.createSession({
+      model: "fake/fake-1",
+      permissionPreset: "smart",
+    });
+    const events = collect(session);
+    expect(await session.submit({ text: "写入工作区外的 result.txt @context.txt" })).toBe("done");
+    expect(readFileSync(outside, "utf8")).toBe("approved");
+    expect(events.filter((e) => e.type === "permission.reviewed")).toMatchObject([
+      {
+        payload: {
+          verdict: "allow",
+          backend: "model",
+          cached: false,
+          usage: { inputTokens: 11, outputTokens: 3 },
+        },
+      },
+    ]);
+    expect(events.find((e) => e.type === "tool.started")).toMatchObject({
+      payload: { permission: { source: "reviewer" } },
+    });
+    expect(events.find((e) => e.type === "turn.completed")).toMatchObject({
+      payload: { usage: { inputTokens: 11, outputTokens: 3 } },
+    });
+    expect(session.state().usage).toMatchObject({ inputTokens: 11, outputTokens: 3 });
+    const audit = provider.requests.find((r) => r.tools.length === 0);
+    if (audit === undefined) throw new Error("未发审查请求");
+    expect(
+      JSON.parse((audit.messages[0] as { content: { text: string }[] }).content[0]?.text ?? ""),
+    ).toMatchObject({ recentUserMessages: ["写入工作区外的 result.txt @context.txt"] });
+    expect(audit).toMatchObject({ maxOutputTokens: 300, tools: [] });
+    expect(JSON.stringify(audit.messages)).not.toContain("FILE SNAPSHOT MUST NOT ENTER REVIEW");
+    expect(
+      provider.requests
+        .at(-1)
+        ?.messages.some((m) => JSON.stringify(m).includes("用户明确授权写入")),
+    ).toBe(false);
+    await session.close();
+    const restored = await runtime.resumeSession(session.id);
+    expect(restored.state().usage).toMatchObject({ inputTokens: 11, outputTokens: 3 });
+    expect(restored.state().config.permissionPreset).toBe("smart");
+    expect(
+      replaySessionView(restored.session.durableEvents()).entries.find((e) => e.kind === "tool"),
+    ).toMatchObject({ review: { verdict: "allow" } });
+    await restored.close();
+  });
+
+  it("smart 未配置审查器只提示一次，旧日志 full-access 可恢复为 guarded", async () => {
+    const { runtime } = await makeRuntime([]);
+    const session = await runtime.createSession({
+      model: "fake/fake-model",
+      permissionPreset: "full-access",
+    });
+    expect(session.state().config.permissionPreset).toBe("guarded");
+    const events = collect(session);
+    await session.setPermissionPreset("smart");
+    await session.setPermissionPreset("guarded");
+    await session.setPermissionPreset("smart");
+    expect(
+      events.filter(
+        (e) => e.type === "runtime.warning" && e.payload.code === "permission_reviewer_missing",
+      ),
+    ).toHaveLength(1);
+    await session.close();
+    // 真实旧版日志的两种字段都要能打开，而非只测 API 别名。
+    const logPath = session.session.logPath;
+    writeFileSync(
+      logPath,
+      readFileSync(logPath, "utf8")
+        .replaceAll('"permissionPreset":"guarded"', '"permissionPreset":"full-access"')
+        .replaceAll('"permissionPreset":"smart"', '"permissionPreset":"full-access"'),
+    );
+    const restored = await runtime.resumeSession(session.id);
+    expect(restored.state().config.permissionPreset).toBe("guarded");
+    await restored.close();
   });
 
   it("模型字符串解析：非法形式抛 invalid_command", async () => {

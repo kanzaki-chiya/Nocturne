@@ -56,6 +56,7 @@ function page(
     updateSettings: update,
     setPreference: preference,
     getPreference: () => undefined,
+    listRecentModels: () => [],
     listModels: () => [
       { ref: { provider: "fake", model: "m" }, capabilities: { reasoningEffort: ["low", "high"] } },
     ],
@@ -107,6 +108,33 @@ function page(
 }
 
 describe("ADR-0034 设置页", () => {
+  it("审查模型草稿复用选择页，保存独立模型引用", async () => {
+    const screen = page();
+    await screen.ready();
+    expect(screen.lastFrame()).toContain("安全审查：关闭");
+    await screen.input("\t");
+    await screen.input("\r");
+    expect(screen.lastFrame()).toContain("选择审查后端");
+    expect(screen.lastFrame()).not.toContain("Jev");
+    await screen.input("\x1b[B");
+    await screen.input("\r");
+    expect(screen.lastFrame()).toContain("安全审查模型");
+    expect(screen.lastFrame()).toContain("fake");
+    await screen.input("\r");
+    expect(screen.lastFrame()).toContain("小模型 • fake/m");
+    expect(screen.update).not.toHaveBeenCalled();
+    await screen.input("\x1b");
+    expect(screen.lastFrame()).toContain("安全审查：小模型 · fake/m");
+    expect(screen.lastFrame()).toContain("默认模型与档位 · fake/m · 档位 low");
+    await screen.input("\x1b[Z");
+    await screen.input("\x1b[Z");
+    await screen.input("\r");
+    await waitFor(() => screen.close.mock.calls.length === 1);
+    expect(screen.update).toHaveBeenCalledWith({
+      "permission.reviewer": { backend: "model", model: { provider: "fake", model: "m" } },
+    });
+    screen.unmount();
+  });
   it("分组、来源和覆盖提示；草稿保存不更改会话权限或档位", async () => {
     const screen = page();
     await screen.ready();
@@ -127,6 +155,7 @@ describe("ADR-0034 设置页", () => {
   it("主题即时预览，Esc 确认放弃后恢复，取消不写入", async () => {
     const screen = page();
     await screen.ready();
+    await screen.input("\t");
     await screen.input("\t");
     await screen.input("\x1b[C");
     expect(screen.preview).toHaveBeenLastCalledWith("light");
@@ -157,6 +186,7 @@ describe("ADR-0034 设置页", () => {
   it("Enter 进入 /theme 和 shell 选择器，返回后仅保存草稿", async () => {
     const screen = page();
     await screen.ready();
+    await screen.input("\t");
     await screen.input("\t");
     await screen.input("\r");
     await waitFor(() => (screen.lastFrame() ?? "").includes("选择主题"));
@@ -213,7 +243,7 @@ describe("ADR-0034 设置页", () => {
     const screen = page({ width: 36, height: 15, ascii: true });
     await screen.ready();
     expect(screen.lastFrame()).toContain("+");
-    expect(screen.lastFrame()).toContain("< default > / 共 5 项");
+    expect(screen.lastFrame()).toContain("< default > / 共 7 项");
     await screen.input("\x1b[Z");
     expect(screen.lastFrame()).toContain("保存");
     expect(screen.lastFrame()?.split("\n").length).toBe(15);

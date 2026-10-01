@@ -10,7 +10,13 @@ import { webFetchSummary } from "../web-fetch.js";
 import { attachmentLine } from "../attachment-line.js";
 import { diffSummary, parseDiff, toolFileDiffs, type ToolFileDiff } from "../diff-format.js";
 import { glyphs, useTuiEnv } from "../env.js";
-import { formatDuration, summarizeToolInput, tailLines, truncateLine } from "../format.js";
+import {
+  formatDuration,
+  permissionReviewLine,
+  summarizeToolInput,
+  tailLines,
+  truncateLine,
+} from "../format.js";
 import { useTheme, type ThemePalette } from "../theme.js";
 import { todoHeadline } from "../todo-format.js";
 import { DiffView } from "./diff.js";
@@ -72,11 +78,17 @@ export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): 
   const env = useTuiEnv();
   const theme = useTheme();
   const g = glyphs(env);
+  const review = entry.review ? (
+    <Text dimColor wrap="truncate">
+      {truncateLine(permissionReviewLine(entry.review), width, g.ellipsis)}
+    </Text>
+  ) : null;
   const running = entry.status === "running";
   const spinner = useSpinner(running);
   if (entry.name === "ask_user")
     return (
       <Box flexDirection="column">
+        {review}
         {questionToolLines(entry).map((line, i) => (
           <Text key={i} wrap="truncate">
             {truncateLine(line, width, g.ellipsis)}
@@ -106,6 +118,7 @@ export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): 
   if (todos !== undefined) {
     return (
       <Box flexDirection="column">
+        {review}
         <SegmentText
           segments={[
             ...(env.ascii ? [{ text: `${b.glyph} `, color: b.color }] : []),
@@ -118,6 +131,7 @@ export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): 
   }
   return (
     <Box flexDirection="column">
+      {review}
       <Text wrap="truncate">
         <Text color={b.color}>{b.glyph}</Text>
         <Text>{head}</Text>

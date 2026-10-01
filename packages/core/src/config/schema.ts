@@ -167,6 +167,19 @@ const configFileSchema = z.object({
   /** 非标准安装位置的可执行文件路径；种类仍由 shell 决定 */
   shellPath: z.string().min(1).optional(),
   providers: z.array(providerEntrySchema).optional(),
+  permission: z
+    .object({
+      reviewer: z
+        .discriminatedUnion("backend", [
+          z.object({
+            backend: z.literal("model"),
+            model: z.object({ provider: z.string().min(1), model: z.string().min(1) }),
+          }),
+          z.object({ backend: z.literal("off") }),
+        ])
+        .optional(),
+    })
+    .optional(),
   permissions: z
     .object({
       preset: z

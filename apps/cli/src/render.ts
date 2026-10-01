@@ -168,6 +168,16 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
     case "permission.requested":
       // 交互模式的确认提示由 permission.ts 接管，这里只兜底说明
       return [aux(`! 权限请求 ${ev.payload.requestId}：${ev.payload.reason}`)];
+    case "permission.reviewed": {
+      const p = ev.payload;
+      const label = { allow: "放行", block: "拦截", unsure: "拿不准" }[p.verdict];
+      const usage = p.usage;
+      return [
+        aux(
+          `审查：${label} — ${p.reason.replace(/\s+/g, " ")}${p.cached ? "（缓存）" : ""}${usage ? `（审查用量：${usage.inputTokens} 输入 / ${usage.outputTokens} 输出）` : ""}`,
+        ),
+      ];
+    }
     case "permission.resolved": {
       const p = ev.payload;
       const detail = p.rule !== undefined ? `${p.source}：${p.rule}` : p.source;

@@ -2,6 +2,7 @@ import { Box, Text, useInput, type DOMElement } from "ink";
 import { useEffect, useRef, useState } from "react";
 import stringWidth from "string-width";
 import type {
+  ModelRef,
   PermissionPresetName,
   Runtime,
   RuntimeSession,
@@ -16,6 +17,7 @@ import { ConfirmDiscard } from "./dialog/confirm-discard.js";
 import { moveFocus } from "./dialog/focus.js";
 import { screenRect, type DialogMouseFrame } from "./dialog/mouse.js";
 import { PickList } from "./pick-list.js";
+import { ModelPicker } from "./model-picker.js";
 import { ThemePage } from "./theme-page.js";
 
 const SOURCES: Record<SettingItem["source"], string> = {
@@ -28,7 +30,7 @@ const SOURCES: Record<SettingItem["source"], string> = {
   cli: "命令行",
 };
 const PRESETS = ["read-only", "default", "auto-edit", "guarded", "smart", "bypass"] as const;
-const ORDER = ["preset", "theme", "shell", "cancel", "save"];
+const ORDER = ["preset", "reviewer", "theme", "shell", "cancel", "save"];
 
 export function SettingsPage({
   runtime,
@@ -55,10 +57,14 @@ export function SettingsPage({
   }));
   const item = (key: SettingItem["key"]) => initial.items.find((entry) => entry.key === key);
   const [preset, setPreset] = useState(item("permissions.preset")?.saved ?? "");
+  const [reviewer, setReviewer] = useState(item("permission.reviewer")?.saved ?? "");
+  const effectiveReviewer = (reviewer || item("permission.reviewer")?.effective) ?? "off";
   const [theme, setTheme] = useState(initial.theme);
   const [shell, setShell] = useState(initial.shell);
   const [focus, setFocus] = useState("preset");
-  const [nested, setNested] = useState<"theme" | "shell" | undefined>();
+  const [nested, setNested] = useState<
+    "theme" | "shell" | "reviewer" | "reviewer-model" | undefined
+  >();
   const [confirm, setConfirm] = useState(false);
   const [discard, setDiscard] = useState(false);
   const [error, setError] = useState<string>();
@@ -79,6 +85,7 @@ export function SettingsPage({
     );
   const dirty =
     preset !== (item("permissions.preset")?.saved ?? "") ||
+    reviewer !== (item("permission.reviewer")?.saved ?? "") ||
     theme !== initial.theme ||
     shell !== initial.shell;
   const cancel = () => {
@@ -106,6 +113,18 @@ export function SettingsPage({
       const patch: SettingsPatch = {};
       if (preset !== (item("permissions.preset")?.saved ?? ""))
         patch["permissions.preset"] = (preset || null) as PermissionPresetName | null;
+      if (reviewer !== (item("permission.reviewer")?.saved ?? "")) {
+        const slash = reviewer.indexOf("/");
+        patch["permission.reviewer"] =
+          reviewer === ""
+            ? null
+            : reviewer === "off"
+              ? { backend: "off" }
+              : {
+                  backend: "model",
+                  model: { provider: reviewer.slice(0, slash), model: reviewer.slice(slash + 1) },
+                };
+      }
       if (Object.keys(patch).length > 0) await runtime.updateSettings(patch);
       if (shell !== initial.shell) await session.setShell(shell);
       if (theme !== initial.theme) await runtime.setPreference("theme", theme);
@@ -121,7 +140,7 @@ export function SettingsPage({
     if (busy.current) return;
     if (id === "save") void save();
     else if (id === "cancel") requestCancel();
-    else if (id === "theme" || id === "shell") setNested(id);
+    else if (id === "theme" || id === "shell" || id === "reviewer") setNested(id);
   };
   useInput(
     (input, key) => {
@@ -245,6 +264,68 @@ export function SettingsPage({
         }}
       />
     );
+  if (nested === "reviewer-model") {
+    const selected = effectiveReviewer;
+    const slash = selected.indexOf("/");
+    const current: ModelRef | undefined =
+      slash < 0
+        ? undefined
+        : { provider: selected.slice(0, slash), model: selected.slice(slash + 1) };
+    return (
+      <DialogFrame title="/settings · 安全审查模型" width={width} height={height} framed>
+        <ModelPicker
+          models={runtime.listModels()}
+          recents={runtime.listRecentModels()}
+          providers={[]}
+          presets={[]}
+          current={current}
+          defaultModel={undefined}
+          wizard={undefined}
+          onStartWizard={() => {
+            setNested("reviewer");
+          }}
+          selectionOnly
+          onPick={(ref) => {
+            setReviewer(ref);
+            setNested("reviewer");
+          }}
+          onClose={() => {
+            setNested("reviewer");
+          }}
+          width={width - 4}
+          height={Math.max(1, height - 4)}
+          active
+        />
+      </DialogFrame>
+    );
+  }
+  if (nested === "reviewer")
+    return (
+      <DialogFrame title="/settings · 安全审查" width={width} height={height} framed>
+        <PickList
+          title="选择审查后端"
+          width={width - 4}
+          active
+          initialValue={effectiveReviewer === "off" ? "off" : "model"}
+          items={[
+            { label: "关闭", value: "off" },
+            {
+              label: `小模型${reviewer && reviewer !== "off" ? ` · ${reviewer}` : ""}`,
+              value: "model",
+            },
+          ]}
+          onCancel={() => {
+            setNested(undefined);
+          }}
+          onPick={(backend) => {
+            if (backend === "off") {
+              setReviewer("off");
+              setNested(undefined);
+            } else setNested("reviewer-model");
+          }}
+        />
+      </DialogFrame>
+    );
   if (nested === "shell")
     return (
       <DialogFrame title="/settings · Shell" width={width} height={height} framed>
@@ -314,13 +395,24 @@ export function SettingsPage({
           marginTop={
             -Math.max(
               0,
-              (({ preset: 2, theme: 6, shell: 8 } as Record<string, number>)[focus] ?? 8) -
-                Math.max(1, height - 8),
+              (({ preset: 2, reviewer: 4, theme: 7, shell: 9 } as Record<string, number>)[focus] ??
+                8) - Math.max(1, height - 8),
             )
           }
         >
           <Text bold>会话默认</Text>
           {field("preset", "默认权限预设", "permissions.preset")}
+          <Box
+            ref={(node) => {
+              onBox("reviewer", node);
+            }}
+          >
+            <Text wrap="truncate" color={focus === "reviewer" ? palette.selected : palette.text}>
+              {focus === "reviewer" ? "> " : "  "}安全审查：
+              {effectiveReviewer === "off" ? "关闭" : `小模型 · ${effectiveReviewer}`} ·{" "}
+              {source("permission.reviewer")} · Enter 选择
+            </Text>
+          </Box>
           <Text wrap="truncate">
             默认模型与档位 · {model ?? "未设置"} · 档位 {effort} · {source("defaultModel")} · 在
             /model 页设置

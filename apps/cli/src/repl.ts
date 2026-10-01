@@ -72,7 +72,7 @@ export async function runRepl(
   /** readline 已关闭：此后任何异步回调不得再 rl.prompt() */
   let closed = false;
   /** 等待用户回答的权限请求（permission.requested 优先于普通输入） */
-  let pendingPermission: { requestId: string } | undefined;
+  let pendingPermission: { requestId: string; options: readonly string[] } | undefined;
   /** 等待用户回答的提问（ADR-0032 §6 逐行交互；与权限确认同级优先） */
   let pendingQuestion:
     | {
@@ -119,7 +119,7 @@ export async function runRepl(
       pendingQuestion = undefined;
     }
     if (ev.type === "permission.requested") {
-      pendingPermission = { requestId: ev.payload.requestId };
+      pendingPermission = { requestId: ev.payload.requestId, options: ev.payload.options };
       out.line(
         "stdout",
         renderPermissionPrompt(
@@ -275,8 +275,26 @@ export async function runRepl(
         // 权限确认优先（cli.md 第 6 节）：a/s/p/d/x；
         // "d <文本>" 把其余内容作为给模型的反馈
         if (pendingPermission !== undefined) {
-          const { requestId } = pendingPermission;
+          const { requestId, options } = pendingPermission;
           const key = line === "" ? "d" : (line.split(/\s+/, 1)[0] ?? "d").toLowerCase();
+          const selected = (
+            {
+              a: "allow_once",
+              allow: "allow_once",
+              s: "allow_session",
+              session: "allow_session",
+              p: "allow_project",
+              project: "allow_project",
+              d: "deny",
+              deny: "deny",
+              x: "deny_stop",
+            } as Record<string, string>
+          )[key];
+          if (selected === undefined || !options.includes(selected)) {
+            write(io, "stdout", "  请输入当前确认框中的选项\n");
+            prompt();
+            return;
+          }
           const feedback = line.length > key.length ? line.slice(key.length).trim() : undefined;
           const reply = (r: Parameters<typeof session.respondPermission>[1]) => {
             pendingPermission = undefined;

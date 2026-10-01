@@ -143,6 +143,8 @@ export interface TurnOverrides {
   idleTimeoutMs?: number | undefined;
 }
 
+export type SecurityReviewerConfig = { backend: "model"; model: ModelRef } | { backend: "off" };
+
 /** 各层配置字段共用的 schema（config.md 第 2 节）；程序从不改写 config.json */
 export interface ConfigFile {
   /** false 时只使用本地 models.dev 数据，不联网刷新 */
@@ -159,6 +161,7 @@ export interface ConfigFile {
   /** 非标准安装位置的可执行文件；种类仍由 shell 决定（ADR-0022） */
   shellPath?: string | undefined;
   providers?: ProviderEntryConfig[] | undefined;
+  permission?: { reviewer?: SecurityReviewerConfig | undefined } | undefined;
   permissions?:
     | {
         preset?: PermissionPresetName | undefined;
@@ -181,6 +184,7 @@ export interface ResolvedConfig {
   providerThinkingWarnings?: string[] | undefined;
   model?: string | undefined;
   permissionPreset?: PermissionPresetName | undefined;
+  permissionReviewer?: SecurityReviewerConfig | undefined;
   /** 会话默认思考档位（ADR-0018）：未配置时 undefined（off 语义） */
   reasoningEffort?: ReasoningEffort | undefined;
   /** 手写 config.json 层的 shell 选择原文（ADR-0022）；未配置时 undefined */
@@ -398,7 +402,7 @@ export type ModelSettingsPatch = {
 };
 
 export interface SettingItem {
-  key: "permissions.preset" | "reasoningEffort" | "shell" | "defaultModel";
+  key: "permission.reviewer" | "permissions.preset" | "reasoningEffort" | "shell" | "defaultModel";
   effective: string | undefined;
   source: "default" | "setup" | "settings" | "user" | "project" | "env" | "cli";
   saved: string | undefined;
@@ -409,6 +413,7 @@ export interface SettingItem {
 /** 默认档位随默认模型经 setDefaultModel 成对保存，不在此单独修改（ADR-0034 修订） */
 export type SettingsPatch = Partial<{
   "permissions.preset": PermissionPresetName | null;
+  "permission.reviewer": SecurityReviewerConfig | null;
 }>;
 
 /**

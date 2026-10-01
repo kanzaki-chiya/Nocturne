@@ -340,3 +340,41 @@ describe("写出器：整行与流式片段的换行（cli.md 第 5 节）", () 
     expect(joined("stdout")).toBe("a\nb\n");
   });
 });
+
+describe("智能权限审查行", () => {
+  for (const [verdict, label] of [
+    ["allow", "放行"],
+    ["block", "拦截"],
+    ["unsure", "拿不准"],
+  ] as const) {
+    it(`${label} 理由及审查用量在交互和打印输出单列显示`, () => {
+      const event = durable("permission.reviewed", {
+        callId: "c",
+        backend: "model",
+        verdict,
+        reason: "用户授权范围\n检查完毕",
+        durationMs: 30,
+        cached: false,
+        usage: { inputTokens: 12, outputTokens: 3 },
+      });
+      for (const mode of ["interactive", "print"] as const) {
+        expect(renderEvent(event, mode)).toEqual([
+          {
+            channel: mode === "print" ? "stderr" : "stdout",
+            text: `审查：${label} — 用户授权范围 检查完毕（审查用量：12 输入 / 3 输出）`,
+          },
+        ]);
+      }
+    });
+  }
+  it("拿不准的理由和一次性选项进入确认提示", () => {
+    const text = renderPermissionPrompt(
+      [{ kind: "edit", target: "/outside/a" }],
+      "审查：拿不准 — 未明确授权",
+      ["allow_once", "deny", "deny_stop"],
+    );
+    expect(text).toContain("审查：拿不准 — 未明确授权");
+    expect(text).not.toContain("本会话内允许");
+    expect(text).not.toContain("始终允许");
+  });
+});

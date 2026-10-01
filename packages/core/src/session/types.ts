@@ -59,7 +59,7 @@ export interface SessionState {
   history: HistoryEntry[];
   /** 最后一次有效且持久化的 todo_write 快照 */
   todos: TodoItem[];
-  /** 累计 token 用量（由各 message.assistant.usage 累加） */
+  /** 累计 token 用量（由 message.assistant 与 permission.reviewed 的 usage 累加） */
   usage: Usage;
   lastSeq: number;
   openTurn: OpenTurn | undefined;

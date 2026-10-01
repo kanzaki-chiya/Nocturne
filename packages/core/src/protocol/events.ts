@@ -93,6 +93,19 @@ export interface PermissionRequestedPayload {
   options: PermissionOption[];
 }
 
+export interface PermissionReviewedPayload {
+  callId: string;
+  requestId?: string | undefined;
+  backend: string;
+  model?: ModelRef | undefined;
+  verdict: "allow" | "block" | "unsure";
+  reason: string;
+  durationMs: number;
+  cached: boolean;
+  /** 来源为安全审查的独立用量；不计入上下文。 */
+  usage?: Usage | undefined;
+}
+
 export interface PermissionResolvedPayload {
   requestId?: string | undefined;
   callId: string;
@@ -226,6 +239,7 @@ export interface DurablePayloadMap {
   "tool.started": ToolStartedPayload;
   "permission.requested": PermissionRequestedPayload;
   "permission.resolved": PermissionResolvedPayload;
+  "permission.reviewed": PermissionReviewedPayload;
   "tool.completed": ToolCompletedPayload;
   "context.compacted": ContextCompactedPayload;
   "turn.completed": TurnCompletedPayload;
@@ -295,6 +309,7 @@ export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
   "tool.started",
   "permission.requested",
   "permission.resolved",
+  "permission.reviewed",
   "tool.completed",
   "context.compacted",
   "turn.completed",

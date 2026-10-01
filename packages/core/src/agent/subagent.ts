@@ -1,3 +1,4 @@
+import type { SecurityReviewer } from "../permission/index.js";
 /**
  * SubagentLauncher 实现（subagent.md 第 3–5 节）。
  * 子会话是普通会话：独立 JSONL 日志与锁、同一 runTurn 与执行管线；
@@ -88,6 +89,8 @@ export interface SubagentDeps {
   /** 启动时刻读取父会话当前模型/预设（setModel/setPermissionPreset 后派生反映最新值） */
   model(): ResolvedModel;
   permissionPreset(): string;
+  reviewer?(): SecurityReviewer | undefined;
+  recentUserMessages?(): string[];
   /** 父会话当前思考档位（ADR-0018 §4）：子会话继承，受子模型可用档位约束 */
   reasoningEffort?(): ReasoningEffort | undefined;
   nocturneVersion: string;
@@ -204,30 +207,8 @@ function tailTextOf(session: Session): string | undefined {
 }
 
 function usageOf(session: Session): Usage | undefined {
-  const turns = session.state().history;
-  let usage: Usage | undefined;
-  for (const h of turns) {
-    if (h.kind !== "assistant" || h.usage === undefined) continue;
-    const add = (a: number | undefined, b: number | undefined) =>
-      a !== undefined || b !== undefined ? (a ?? 0) + (b ?? 0) : undefined;
-    usage =
-      usage === undefined
-        ? { ...h.usage }
-        : {
-            inputTokens: usage.inputTokens + h.usage.inputTokens,
-            outputTokens: usage.outputTokens + h.usage.outputTokens,
-            ...(add(usage.cacheReadTokens, h.usage.cacheReadTokens) !== undefined
-              ? { cacheReadTokens: add(usage.cacheReadTokens, h.usage.cacheReadTokens) }
-              : {}),
-            ...(add(usage.cacheWriteTokens, h.usage.cacheWriteTokens) !== undefined
-              ? { cacheWriteTokens: add(usage.cacheWriteTokens, h.usage.cacheWriteTokens) }
-              : {}),
-            ...(add(usage.reasoningTokens, h.usage.reasoningTokens) !== undefined
-              ? { reasoningTokens: add(usage.reasoningTokens, h.usage.reasoningTokens) }
-              : {}),
-          };
-  }
-  return usage;
+  const usage = session.state().usage;
+  return usage.inputTokens > 0 || usage.outputTokens > 0 ? usage : undefined;
 }
 
 export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
@@ -306,13 +287,20 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         );
 
         // 子会话权限：同一批策略输入（makePolicy 闭包），gate 恒非交互——
-        // ask 一律 non_interactive deny，拒绝文案带受阻操作指引
+        // smart 先用父审查器；仍需用户确认时 non_interactive deny，附受阻指引
         const childPolicy = deps.makePolicy(child.id);
         const childRunner = deps.makeHookRunner(child, meta);
         const gate = createPolicyGate(
-          { evaluate: (subjects) => childPolicy.evaluate(subjects) },
+          {
+            evaluate: (subjects, evaluationOptions) =>
+              childPolicy.evaluate(subjects, evaluationOptions),
+          },
           {
             interactive: false,
+            preset: () => deps.permissionPreset(),
+            reviewer: () => deps.reviewer?.(),
+            cwd: deps.environment.cwd,
+            recentUserMessages: () => deps.recentUserMessages?.() ?? [],
             caseSensitive: deps.platform.caseSensitivePaths,
             ...(deps.grants !== undefined ? { grants: deps.grants } : {}),
             ...(childRunner !== undefined ? { hooks: childRunner } : {}),
