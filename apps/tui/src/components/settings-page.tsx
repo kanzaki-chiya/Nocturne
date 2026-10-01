@@ -19,6 +19,7 @@ import { screenRect, type DialogMouseFrame } from "./dialog/mouse.js";
 import { PickList } from "./pick-list.js";
 import { ReviewerDialog } from "./reviewer-dialog.js";
 import { ThemePage } from "./theme-page.js";
+import { CompactionThresholdDialog } from "./compaction-threshold-dialog.js";
 
 const SOURCES: Record<SettingItem["source"], string> = {
   default: "默认",
@@ -30,7 +31,7 @@ const SOURCES: Record<SettingItem["source"], string> = {
   cli: "命令行",
 };
 const PRESETS = ["read-only", "default", "auto-edit", "guarded", "smart", "bypass"] as const;
-const ORDER = ["preset", "reviewer", "theme", "shell", "cancel", "save"];
+const ORDER = ["preset", "reviewer", "theme", "shell", "threshold", "cancel", "save"];
 
 export function SettingsPage({
   runtime,
@@ -80,8 +81,9 @@ export function SettingsPage({
     legacyReviewer(item("permission.reviewer")?.effective);
   const [theme, setTheme] = useState(initial.theme);
   const [shell, setShell] = useState(initial.shell);
+  const [threshold, setThreshold] = useState(item("compaction.threshold")?.saved);
   const [focus, setFocus] = useState("preset");
-  const [nested, setNested] = useState<"theme" | "shell" | "reviewer" | undefined>();
+  const [nested, setNested] = useState<"theme" | "shell" | "reviewer" | "threshold" | undefined>();
   const [confirm, setConfirm] = useState(false);
   const [discard, setDiscard] = useState(false);
   const [error, setError] = useState<string>();
@@ -104,6 +106,7 @@ export function SettingsPage({
     preset !== (item("permissions.preset")?.saved ?? "") ||
     JSON.stringify(reviewer) !== JSON.stringify(savedReviewer) ||
     reviewerKey !== undefined ||
+    threshold !== item("compaction.threshold")?.saved ||
     theme !== initial.theme ||
     shell !== initial.shell;
   const cancel = () => {
@@ -129,6 +132,8 @@ export function SettingsPage({
     setError(undefined);
     try {
       const patch: SettingsPatch = {};
+      if (threshold !== item("compaction.threshold")?.saved)
+        patch["compaction.threshold"] = threshold ?? null;
       if (preset !== (item("permissions.preset")?.saved ?? ""))
         patch["permissions.preset"] = (preset || null) as PermissionPresetName | null;
       if (JSON.stringify(reviewer) !== JSON.stringify(savedReviewer) || reviewerKey !== undefined)
@@ -152,7 +157,8 @@ export function SettingsPage({
     if (busy.current) return;
     if (id === "save") void save();
     else if (id === "cancel") requestCancel();
-    else if (id === "theme" || id === "shell" || id === "reviewer") setNested(id);
+    else if (id === "theme" || id === "shell" || id === "reviewer" || id === "threshold")
+      setNested(id);
   };
   useInput(
     (input, key) => {
@@ -276,6 +282,22 @@ export function SettingsPage({
         }}
       />
     );
+  if (nested === "threshold")
+    return (
+      <CompactionThresholdDialog
+        initial={threshold ?? item("compaction.threshold")?.effective ?? "90%"}
+        width={width}
+        height={height}
+        onMouseFrame={onMouseFrame}
+        onCancel={() => {
+          setNested(undefined);
+        }}
+        onApply={(value) => {
+          setThreshold(value);
+          setNested(undefined);
+        }}
+      />
+    );
   if (nested === "reviewer")
     return (
       <ReviewerDialog
@@ -366,8 +388,12 @@ export function SettingsPage({
           marginTop={
             -Math.max(
               0,
-              (({ preset: 2, reviewer: 4, theme: 7, shell: 9 } as Record<string, number>)[focus] ??
-                8) - Math.max(1, height - 8),
+              ((
+                { preset: 2, reviewer: 4, theme: 7, shell: 9, threshold: 10 } as Record<
+                  string,
+                  number
+                >
+              )[focus] ?? 8) - Math.max(1, height - 8),
             )
           }
         >
@@ -406,6 +432,17 @@ export function SettingsPage({
               {source("shell")} · Enter 选择
             </Text>
           </Box>
+          <Box
+            ref={(node) => {
+              onBox("threshold", node);
+            }}
+          >
+            <Text wrap="truncate" color={focus === "threshold" ? palette.selected : palette.text}>
+              {focus === "threshold" ? "> " : "  "}压缩阈值 ·{" "}
+              {threshold ?? item("compaction.threshold")?.effective ?? "90%"} ·{" "}
+              {source("compaction.threshold")} · Enter 设置
+            </Text>
+          </Box>
         </Box>
       </Box>
       <Text wrap="truncate" color={error ? palette.error : palette.muted}>
@@ -413,7 +450,9 @@ export function SettingsPage({
           ? `保存失败：${error}`
           : saving
             ? "正在保存…"
-            : "↑↓/Tab 移动 · ←→ 选择 · Enter 确认 · Esc 取消"}
+            : focus === "threshold"
+              ? "压缩阈值对下一 Turn 生效 · Enter 设置 · Esc 取消"
+              : "↑↓/Tab 移动 · ←→ 选择 · Enter 确认 · Esc 取消"}
       </Text>
       {confirm ? (
         <ConfirmDiscard discard={discard} onBox={onBox} />

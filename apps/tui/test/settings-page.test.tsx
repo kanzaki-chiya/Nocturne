@@ -20,6 +20,13 @@ afterEach(() => {
 async function waitFor(check: () => boolean) {
   await vi.waitFor(() => expect(check()).toBe(true), { timeout: 4000, interval: 20 });
 }
+async function changedFrame(screen: ReturnType<typeof page>, action: () => void) {
+  const before = screen.lastFrame();
+  action();
+  await waitFor(() => screen.lastFrame() !== before);
+  // 等提交后的 effect 接上新层的输入处理；不依赖固定延时。
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
 function page(
   options: { width?: number; height?: number; ascii?: boolean; failure?: boolean } = {},
 ) {
@@ -140,6 +147,58 @@ function page(
 }
 
 describe("ADR-0034 设置页", () => {
+  it("压缩阈值行打开单位与输入框，200k 草稿只在设置页保存时落盘", async () => {
+    const screen = page();
+    await waitFor(() => screen.mouse()?.layer === "settings");
+    const click = (id: string) => {
+      const mouse = screen.mouse();
+      const box = mouse?.boxes.find((box) => box.id === id);
+      if (!box) throw new Error(`无可点击区域：${id}`);
+      mouse?.click(id, { type: "release", y: box.row, x: box.colEnd, button: 0 });
+    };
+    expect(screen.lastFrame()).toContain("压缩阈值 · 90%");
+    await changedFrame(screen, () => click("threshold"));
+    expect(screen.lastFrame()).toContain("[* 百分比]");
+    expect(screen.lastFrame()).toContain("[  token]");
+    expect(screen.lastFrame()).toContain("90");
+    await changedFrame(screen, () => screen.stdin.write("\x1b[C"));
+    expect(screen.lastFrame()).toContain("[* token]");
+    await changedFrame(screen, () => screen.stdin.write("\r"));
+    await changedFrame(screen, () => screen.stdin.write("\x15"));
+    await changedFrame(screen, () => screen.stdin.write("200k"));
+    expect(screen.lastFrame()).toContain("200k");
+    await changedFrame(screen, () => screen.stdin.write("\r"));
+    await changedFrame(screen, () => screen.stdin.write("\r"));
+    expect(screen.lastFrame()).toContain("压缩阈值 · 200k");
+    expect(screen.update).not.toHaveBeenCalled();
+    click("save");
+    await waitFor(() => screen.close.mock.calls.length === 1);
+    expect(screen.update).toHaveBeenCalledExactlyOnceWith({ "compaction.threshold": "200k" });
+    screen.unmount();
+  });
+  it("压缩阈值窄屏帧保留输入、错误与按钮，非法百分比不能保存", async () => {
+    const screen = page({ width: 36, height: 15, ascii: true });
+    await waitFor(() => screen.mouse()?.layer === "settings");
+    const click = (id: string) => {
+      const mouse = screen.mouse();
+      const box = mouse?.boxes.find((box) => box.id === id);
+      if (!box) throw new Error(`无可点击区域：${id}`);
+      mouse?.click(id, { type: "release", y: box.row, x: box.colEnd, button: 0 });
+    };
+    await changedFrame(screen, () => click("threshold"));
+    expect(screen.lastFrame()?.split("\n")).toHaveLength(15);
+    expect(screen.lastFrame()).toContain("百分比");
+    expect(screen.lastFrame()).toContain("保存");
+    await changedFrame(screen, () => screen.stdin.write("\r"));
+    await changedFrame(screen, () => screen.stdin.write("\x15"));
+    await changedFrame(screen, () => screen.stdin.write("101"));
+    await changedFrame(screen, () => click("save"));
+    expect(screen.lastFrame()).toContain("压缩阈值须为");
+    expect(screen.update).not.toHaveBeenCalled();
+    await changedFrame(screen, () => screen.stdin.write("\x1b"));
+    expect(screen.lastFrame()).toContain("放弃修改？");
+    screen.unmount();
+  });
   it("审查模型草稿复用选择页，保存独立模型引用", async () => {
     const screen = page();
     await screen.ready();
@@ -286,6 +345,7 @@ describe("ADR-0034 设置页", () => {
     await pause();
     expect(screen.shell).not.toHaveBeenCalled();
     expect(screen.preference).not.toHaveBeenCalled();
+    await screen.input("\t");
     await screen.input("\t");
     await screen.input("\t");
     await screen.input("\r");
