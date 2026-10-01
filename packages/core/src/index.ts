@@ -78,6 +78,7 @@ import type {
   TurnEndReason,
 } from "./protocol/index.js";
 import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
+import { normalizePermissionPreset } from "./protocol/index.js";
 import { resolveFileRefs } from "./tools/file-refs.js";
 import { buildFileIndex, type FileIndexEntry } from "./tools/file-index.js";
 import { isReasoningEffort, REASONING_EFFORT_ORDER } from "./protocol/index.js";
@@ -1249,6 +1250,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         });
       },
       async setPermissionPreset(name) {
+        name = normalizePermissionPreset(name);
         assertUsable();
         if (busy() || compactController !== undefined) {
           throw new RuntimeCommandError("session_busy", "会话正忙，不能切换权限预设");
@@ -1257,7 +1259,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (!isPermissionPresetName(name)) {
           throw new RuntimeCommandError(
             "invalid_command",
-            `未知权限预设：${name}（可选：read-only | default | auto-edit | full-access）`,
+            `未知权限预设：${name}（可选：read-only | default | auto-edit | guarded | smart | bypass）`,
           );
         }
         await session.emit("session.config_changed", { permissionPreset: name });
@@ -1507,12 +1509,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async createSession(opts) {
       const defaults =
         config !== undefined ? (await config.forWorkspace(workspaceRoot)).resolved : undefined;
-      const preset =
-        opts.permissionPreset ?? defaults?.permissionPreset ?? DEFAULT_PERMISSION_PRESET;
+      const preset = normalizePermissionPreset(
+        opts.permissionPreset ?? defaults?.permissionPreset ?? DEFAULT_PERMISSION_PRESET,
+      );
       if (!isPermissionPresetName(preset)) {
         throw new RuntimeCommandError(
           "invalid_command",
-          `未知权限预设：${preset}（可选：read-only | default | auto-edit | full-access）`,
+          `未知权限预设：${preset}（可选：read-only | default | auto-edit | guarded | smart | bypass）`,
         );
       }
       // 模型解析在 wrapSession 内进行（会话级注册表含项目层条目）；

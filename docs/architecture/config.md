@@ -50,7 +50,7 @@ interface ConfigFile {
   providers?: ProviderConfig[];
   permissions?: {
     /** 预设名；缺省 "default" */
-    preset?: "read-only" | "default" | "auto-edit" | "full-access";
+    preset?: "read-only" | "default" | "auto-edit" | "guarded";
     /** 追加的权限规则，形状即 PermissionRule（permissions.md 第 2 节） */
     rules?: PermissionRule[];
   };

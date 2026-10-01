@@ -49,7 +49,7 @@ export interface RulePolicyOptions {
   /**
    * 内置硬拒绝路径集（provider-setup.md 第 4 节：凭据索引 credentials.json
    * 及其原子写临时文件）。lexical 匹配词法 target、resolved 匹配真实路径；
-   * 任何规则、Grant、--yes、full-access 都不能放开。
+   * 任何规则、Grant、--yes、guarded 都不能放开。
    */
   protectedPaths?:
     | { lexical?: readonly string[] | undefined; resolved?: readonly string[] | undefined }
@@ -202,7 +202,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
 
   function decideSubject(s: PermissionSubject, skipApprovals: boolean | undefined): SubjectVerdict {
     // 内置硬拒绝（provider-setup.md 第 4 节）：凭据索引等文件在任何
-    // 规则/Grant/--yes/full-access/Hook 下都不可读写——词法与真实路径都查
+    // 规则/Grant/--yes/guarded/Hook 下都不可读写——词法与真实路径都查
     if (isProtected(s)) {
       return {
         action: "deny",
@@ -223,6 +223,14 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       } satisfies RuleHit);
     let note: string | undefined;
 
+    // bypass 仍保护 Runtime 的授权数据；显式 deny 不受影响。
+    const protectedEdit =
+      presetName === "bypass" && s.kind === "edit" ? lastMatch(preset, s) : undefined;
+    if (action === "allow" && protectedEdit?.rule?.action === "ask") {
+      action = "ask";
+      hit = protectedEdit;
+    }
+
     // 不可信项目规则只收紧：取更严格者（permissions.md 5.2）
     const untrustedHit = lastMatch(untrusted, s);
     const untrustedAction = untrustedHit?.rule?.action;
@@ -236,7 +244,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     }
 
     // 组合命令（permissions.md 5.3）：窄模式的 allow 降级为 ask（deny 不受影响，grant 精确匹配不受影响）。
-    // 全放行规则（pattern 为 "*"，如 full-access）降级没有意义，改为逐段求值：
+    // 全放行规则（pattern 为 "*"，如 guarded）降级没有意义，改为逐段求值：
     // 任一段命中 ask/deny（高风险命令、用户 deny 等）就取最严格者。
     // ADR-0022：分段方言由主体携带的 shell 种类决定（PowerShell 另切脚本块）
     const dialect = shellDialect(s.kind === "shell" ? s.shell : undefined);
@@ -272,7 +280,12 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     // 透传，通配符表达不了的 PowerShell/cmd 语义（参数前缀缩写、标志共存、
     // 大小写不敏感）在此按元数据匹配；只把预设级宽规则的 allow 降级为 ask，
     // 用户/项目/CLI 显式规则照旧覆盖
-    if (s.kind === "shell" && action === "allow" && hit.origin === "preset") {
+    if (
+      s.kind === "shell" &&
+      action === "allow" &&
+      hit.origin === "preset" &&
+      presetName !== "bypass"
+    ) {
       // 含嵌套 shell 调用（pwsh -c "…"、cmd /c "…"）的命令体，按内层方言再查
       const risky = findRiskySegment(s.target, dialect, s.shellRisk, s.shellRiskByDialect);
       if (risky !== undefined) {
@@ -293,7 +306,12 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
 
     // 不透明 PowerShell -EncodedCommand 至少 ask（ADR-0022 第 6 节）：
     // 编码负载无法做内容审查，含嵌套调用同样降级
-    if (s.kind === "shell" && action === "allow" && isOpaquePowerShellCommand(s.target)) {
+    if (
+      s.kind === "shell" &&
+      action === "allow" &&
+      presetName !== "bypass" &&
+      isOpaquePowerShellCommand(s.target)
+    ) {
       action = "ask";
       note = [note, "包含 PowerShell -EncodedCommand（内容不透明）"].filter(Boolean).join("；");
     }

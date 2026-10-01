@@ -840,7 +840,7 @@ describe("shell 工具 × ADR-0022（描述符 / 分页器名单 / 主体 shell 
     const policy = createRulePolicy({
       workspaceRoot: "C:\\ws",
       caseSensitive: false,
-      preset: "full-access",
+      preset: "guarded",
     });
     const subs = shellTool.permissionSubjects({ command: "Remove-Item x -Recurse -Force" }, {
       shell: resolution(pwshScope.descriptor),

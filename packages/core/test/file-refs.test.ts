@@ -265,7 +265,7 @@ describe("@ 引用语法与快照", () => {
       });
       const session = await runtime.createSession({
         model: "fake/fake-1",
-        permissionPreset: "full-access",
+        permissionPreset: "guarded",
       });
       try {
         await session.submit({ text: "@edit.txt 修改第一行" });

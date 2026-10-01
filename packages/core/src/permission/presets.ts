@@ -7,18 +7,13 @@
  *   4. Nocturne 授权数据 edit 至少 ask（label "修改 Nocturne 授权配置"）
  *
  * 高风险 shell 命令不再由预设规则表达（ADR-0022 第 1 节）：表集中在
- * platform 的 ShellDescriptor.risk，full-access 的宽 allow 命中时由
+ * platform 的 ShellDescriptor.risk，guarded 的宽 allow 命中时由
  * policy 按主体透传的元数据降级为 ask。
  */
 import type { PermissionPresetName, PermissionRule } from "../protocol/index.js";
 import { normalizePathText } from "./pattern.js";
-
-export const PERMISSION_PRESET_NAMES: readonly PermissionPresetName[] = [
-  "read-only",
-  "default",
-  "auto-edit",
-  "full-access",
-];
+import { PERMISSION_PRESET_NAMES } from "../protocol/index.js";
+export { PERMISSION_PRESET_NAMES } from "../protocol/index.js";
 
 export function isPermissionPresetName(name: string): name is PermissionPresetName {
   return (PERMISSION_PRESET_NAMES as readonly string[]).includes(name);
@@ -103,12 +98,22 @@ function broadRules(name: PermissionPresetName): BroadRule[] {
         ...other("ask"),
         ...subagentExplore,
       ];
-    case "full-access":
+    case "guarded":
+    case "smart":
       return [
         readWs,
         readOut("allow"),
         edit("allow", "workspace"),
         edit("ask", "outside"),
+        shell("allow"),
+        ...other("allow"),
+        { kind: "subagent", pattern: "*", action: "allow" },
+      ];
+    case "bypass":
+      return [
+        readWs,
+        readOut("allow"),
+        edit("allow"),
         shell("allow"),
         ...other("allow"),
         { kind: "subagent", pattern: "*", action: "allow" },
@@ -132,7 +137,9 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
 
   // 受保护路径与授权数据"至少 ask"：read-only 中 edit 已一律 deny，不再生成 ask 规则
   if (name !== "read-only") {
-    for (const pattern of ["**/.git/**", "**/.nocturne/**"]) {
+    for (const pattern of name === "bypass"
+      ? ["**/.nocturne/**"]
+      : ["**/.git/**", "**/.nocturne/**"]) {
       rules.push({ kind: "edit", pattern, action: "ask", label: PROTECTED_LABEL });
     }
     if (ctx.nocturneHome !== undefined) {

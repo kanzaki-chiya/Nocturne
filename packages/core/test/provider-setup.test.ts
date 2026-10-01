@@ -670,7 +670,7 @@ describe("shell 子进程剥离凭据变量（provider-setup.md 第 4 节）", (
     return { rc, runtime };
   };
 
-  it("向导条目不声明 apiKeyEnv：NOCTURNE/ANTHROPIC_API_KEY 仍被剥离（full-access + --yes）", async () => {
+  it("向导条目不声明 apiKeyEnv：NOCTURNE/ANTHROPIC_API_KEY 仍被剥离（guarded + --yes）", async () => {
     await writeJson(path.join(home, "providers.json"), {
       version: 1,
       providers: [ENTRY],
@@ -686,7 +686,7 @@ describe("shell 子进程剥离凭据变量（provider-setup.md 第 4 节）", (
       const { runtime } = await makeRuntime(provider);
       const session = await runtime.createSession({
         model: "fake/fake-model",
-        permissionPreset: "full-access",
+        permissionPreset: "guarded",
       });
       await session.submit({ text: "echo env" });
       await session.close();
@@ -716,7 +716,7 @@ describe("shell 子进程剥离凭据变量（provider-setup.md 第 4 节）", (
       const { runtime } = await makeRuntime(provider);
       const session = await runtime.createSession({
         model: "fake/fake-model",
-        permissionPreset: "full-access",
+        permissionPreset: "guarded",
       });
       // 条目未声明 apiKeyEnv：该变量不在名单 → 子进程可见（对照）
       await session.submit({ text: "one" });

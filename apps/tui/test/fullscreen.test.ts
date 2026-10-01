@@ -173,7 +173,7 @@ describe("补全", () => {
       "/preset read-only",
       "/preset default",
       "/preset auto-edit",
-      "/preset full-access",
+      "/preset guarded",
     ]);
   });
 

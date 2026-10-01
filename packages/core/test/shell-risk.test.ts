@@ -20,7 +20,7 @@ const policyFor = (extra?: { rules?: { rule: PermissionRule; origin: "user" }[] 
   createRulePolicy({
     workspaceRoot: WS,
     caseSensitive: false,
-    preset: "full-access",
+    preset: "guarded",
     ...extra,
   });
 const policy = policyFor();
@@ -38,7 +38,7 @@ const act = (target: string, shell?: ShellKind) =>
     },
   ]).decision.action;
 
-describe("full-access 高风险表按 shell 种类判定（ADR-0022 第 6 节）", () => {
+describe("guarded 高风险表按 shell 种类判定（ADR-0022 第 6 节）", () => {
   it("基础表各 shell 共用：rm -rf / sudo / git push --force / git reset --hard", () => {
     for (const shell of ["pwsh", "powershell", "bash", "cmd", "sh"] as const) {
       expect(act("rm -rf /tmp/x", shell), `rm -rf @${shell}`).toBe("ask");

@@ -181,7 +181,7 @@ describe("ADR-0034 设置层", () => {
     });
     const before = await readFile(path.join(home, "config.json"), "utf8");
     const user = await load();
-    await user.updateSettings({ "permissions.preset": "full-access" });
+    await user.updateSettings({ "permissions.preset": "guarded" });
     await user.setDefaultModel("fake/new", "medium");
     expect(user.describeSettings().find((item) => item.key === "reasoningEffort")).toMatchObject({
       effective: "high",
@@ -192,7 +192,7 @@ describe("ADR-0034 设置层", () => {
     expect(await readSettings()).toMatchObject({
       theme: "light",
       extra: { nested: true },
-      permissions: { preset: "full-access", future: 7 },
+      permissions: { preset: "guarded", future: 7 },
       providers: [{ id: "evil" }],
     });
     expect(await readFile(path.join(home, "config.json"), "utf8")).toBe(before);

@@ -92,7 +92,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 对话输入之外的全局键：`Esc` 次序最前是清除选区，然后依次关闭补全列表、弹层、权限反馈行或提问文本输入；没有这些焦点时忙碌中中断 Turn，空闲时不退出、不清空输入。选区存在时其他按键（翻阅键除外）清除高亮。拆成 Esc + 字母的 Alt 组合在 80ms 内不会误中断。`Tab` 在权限对话框选项间移动焦点、在提问面板的题间切换；补全列表打开时 `Tab` 补全当前候选。`Shift+Tab`（`\x1B[Z`）在输入框状态下循环思考档位 `[off, …当前模型可用档位]`，只高亮状态栏，不插入对话条目；Turn 进行中同样可切，新档位从下一个 Turn 生效（状态栏显示 `思考:<生效档>→<新档>`，ADR-0018）。权限确认框内 `Shift+Tab` 仍是反向移动焦点；提问面板内 `Tab`/`Shift+Tab` 与 `←`/`→` 一样是题间切换。当前模型没有可用档位时 `Shift+Tab` 不响应、不插入提示。
 
-`Alt+M` 在 `read-only → default → auto-edit → full-access` 间循环，走与 `/preset` 相同的 `setPermissionPreset`（`session.config_changed`），Turn 进行中同样拒绝；只高亮状态栏，不插入对话条目。Windows Terminal 发送 `\x1bm`，必须能识别；若把 Alt 拆成 Esc 加字母，吞掉该字母，不写入输入框，也不触发其他操作。
+`Alt+M` 在 `read-only → default → auto-edit → guarded` 间循环，走与 `/preset` 相同的 `setPermissionPreset`（`session.config_changed`），Turn 进行中同样拒绝；只高亮状态栏，不插入对话条目。Windows Terminal 发送 `\x1bm`，必须能识别；若把 Alt 拆成 Esc 加字母，吞掉该字母，不写入输入框，也不触发其他操作。
 
 不带参数的 `/preset` 与 `/effort` 打开活动区内的选择列表，高亮当前值，↑/↓ 选择、Enter 生效、Esc 取消；`/effort` 仅列出当前模型的可用档位与 `off`，不支持思考的模型只显示说明。带参数的调用和逐行 CLI 的可选值输出不变（[ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 第 8 条）。
 

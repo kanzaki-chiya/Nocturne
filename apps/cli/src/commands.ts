@@ -322,7 +322,15 @@ export async function runSlashCommand(
         return "handled";
       }
       const [sub, value = ""] = rest;
-      const presets = ["read-only", "default", "auto-edit", "full-access"];
+      const presets = [
+        "read-only",
+        "default",
+        "auto-edit",
+        "guarded",
+        "smart",
+        "bypass",
+        "full-access",
+      ];
       try {
         if (rest.length !== 2 || sub !== "preset")
           throw new RuntimeCommandError(
@@ -332,7 +340,10 @@ export async function runSlashCommand(
         if (value !== "reset" && !presets.includes(value))
           throw new RuntimeCommandError("invalid_command", `可选：${presets.join(" | ")} | reset`);
         await runtime.updateSettings({
-          "permissions.preset": value === "reset" ? null : (value as PermissionPresetName),
+          "permissions.preset":
+            value === "reset"
+              ? null
+              : ((value === "full-access" ? "guarded" : value) as PermissionPresetName),
         });
         io.print("已保存默认设置（对新会话生效）");
       } catch (cause) {
@@ -439,7 +450,7 @@ export async function runSlashCommand(
       const current = session.state().config.permissionPreset;
       if (rest.length === 0) {
         io.print(
-          `当前权限预设：${current}\n可用预设：read-only | default | auto-edit | full-access`,
+          `当前权限预设：${current}\n可用预设：read-only | default | auto-edit | guarded | smart | bypass`,
         );
         return "handled";
       }

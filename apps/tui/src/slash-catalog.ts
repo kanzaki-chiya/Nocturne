@@ -45,7 +45,14 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
 ];
 
 /** 与权限层预设名一致；补全与 Alt+M 共用，不另抄一份。 */
-export const PRESET_NAMES = ["read-only", "default", "auto-edit", "full-access"] as const;
+export const PRESET_NAMES = [
+  "read-only",
+  "default",
+  "auto-edit",
+  "guarded",
+  "smart",
+  "bypass",
+] as const;
 
 /** 与 platform SHELL_KINDS 一致（本文件不许 import，depcheck 固化）；补全只列名字，可用性以 /shell 为准 */
 const SHELL_KIND_NAMES = ["pwsh", "powershell", "bash", "cmd", "sh"] as const;

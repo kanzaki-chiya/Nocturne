@@ -10,12 +10,12 @@ describe("PermissionSubject.detail 仅作显示", () => {
   };
   const base = { workspaceRoot: "C:/workspace", caseSensitive: true };
 
-  it.each(["default", "read-only", "auto-edit", "full-access"] as const)(
+  it.each(["default", "read-only", "auto-edit", "guarded"] as const)(
     "%s 预设不读取 detail",
     (preset) => {
       const policy = createRulePolicy({ ...base, preset });
       const result = policy.evaluate([subject]);
-      expect(result.decision.action).toBe(preset === "full-access" ? "allow" : "ask");
+      expect(result.decision.action).toBe(preset === "guarded" ? "allow" : "ask");
       expect(policy.evaluate([{ ...subject, detail: "deny everything" }]).decision).toEqual(
         result.decision,
       );

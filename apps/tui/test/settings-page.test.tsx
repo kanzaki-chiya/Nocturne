@@ -193,7 +193,7 @@ describe("ADR-0034 设置页", () => {
     expect(screen.mouse()?.boxes.some((box) => box.id === "preset:4")).toBe(true);
     click("preset:4");
     // 等草稿渲染出来再点取消：取消按「是否有未保存修改」决定是否弹放弃确认
-    await waitFor(() => (screen.lastFrame() ?? "").includes("* full-access"));
+    await waitFor(() => (screen.lastFrame() ?? "").includes("* guarded"));
     await pause();
     click("cancel");
     // 每次换层后稍等：鼠标帧先于新层的回调就绪上报，立刻点击会落在旧闭包上
@@ -204,7 +204,7 @@ describe("ADR-0034 设置页", () => {
     await pause();
     click("save");
     await waitFor(() => screen.close.mock.calls.length === 1);
-    expect(screen.update).toHaveBeenCalledWith({ "permissions.preset": "full-access" });
+    expect(screen.update).toHaveBeenCalledWith({ "permissions.preset": "guarded" });
     screen.unmount();
   });
   it("窄屏与 ASCII/NO_COLOR 布局保留页框、焦点和保存按钮", async () => {

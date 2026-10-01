@@ -75,7 +75,7 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
       --resume <id>      恢复指定会话；可与 --model、-p 组合
       --sessions         列出全部会话（id、时间、目录、模型、锁状态）
       --force-unlock     恢复前先删除残留锁（确认持有者已退出再用）
-      --preset <name>    权限预设：read-only | default | auto-edit | full-access
+      --preset <name>    权限预设：read-only | default | auto-edit | guarded | smart | bypass
                          （仅新建会话；恢复会话以日志为准，用 /preset 切换）
       --model <id>       模型 id（覆盖 NOCTURNE_MODEL 与配置文件）
       --api-type <type>  openai-compatible（默认）| anthropic

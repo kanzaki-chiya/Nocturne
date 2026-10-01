@@ -35,6 +35,24 @@ function makeEvent(overrides: Partial<DurableEvent> = {}): DurableEvent {
 }
 
 describe("decodeDurableEvent", () => {
+  it.each(["read-only", "default", "auto-edit", "guarded", "smart", "bypass", "full-access"])(
+    "预设 %s 在创建与配置事件中往返，旧名归一化",
+    (preset) => {
+      for (const type of ["session.created", "session.config_changed"] as const) {
+        const event = makeEvent();
+        const encoded = JSON.stringify({
+          ...event,
+          type,
+          payload: { ...event.payload, permissionPreset: preset },
+        });
+        const decoded = decodeDurableEvent(encoded);
+        expect((decoded.payload as { permissionPreset: string }).permissionPreset).toBe(
+          preset === "full-access" ? "guarded" : preset,
+        );
+        expect(decodeDurableEvent(encodeDurableEvent(decoded))).toEqual(decoded);
+      }
+    },
+  );
   it("解析合法持久化事件", () => {
     const event = makeEvent();
     const decoded = decodeDurableEvent(encodeDurableEvent(event));

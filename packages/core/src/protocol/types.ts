@@ -296,7 +296,20 @@ export type PermissionAction = "allow" | "ask" | "deny";
 export type PermissionSource = "user" | "rule" | "grant" | "hook" | "non_interactive" | "cancelled";
 
 /** 权限预设名（permissions.md 第 6 节） */
-export type PermissionPresetName = "read-only" | "default" | "auto-edit" | "full-access";
+export const PERMISSION_PRESET_NAMES = [
+  "read-only",
+  "default",
+  "auto-edit",
+  "guarded",
+  "smart",
+  "bypass",
+] as const;
+export type PermissionPresetName = (typeof PERMISSION_PRESET_NAMES)[number];
+
+/** 旧配置与日志的别名只在输入边界归一化。 */
+export function normalizePermissionPreset(name: string): string {
+  return name === "full-access" ? "guarded" : name;
+}
 
 /**
  * 一条权限规则（permissions.md 第 2、5 节）。

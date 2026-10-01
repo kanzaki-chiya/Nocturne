@@ -85,7 +85,7 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
         {
           key: "permissions.preset",
           effective: "read-only",
-          saved: "full-access",
+          saved: "guarded",
           source: "user",
           overridden: true,
         },
@@ -105,7 +105,7 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     ["preset read-only", { "permissions.preset": "read-only" }],
     ["preset default", { "permissions.preset": "default" }],
     ["preset auto-edit", { "permissions.preset": "auto-edit" }],
-    ["preset full-access", { "permissions.preset": "full-access" }],
+    ["preset guarded", { "permissions.preset": "guarded" }],
     ["preset reset", { "permissions.preset": null }],
   ])("/settings %s 写入默认值", async (args, patch) => {
     const updateSettings = vi.fn(async () => []);

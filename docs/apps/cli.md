@@ -30,7 +30,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `--resume <id>` | 恢复指定会话；支持 `-p` 组合（恢复后直接执行该 prompt）与 `--model` 组合（见下） |
 | `--sessions` | 列出全部顶层会话（id、创建时间、绑定目录、模型、锁状态），按修改时间倒序，随后退出（退出码 0）；子代理会话（`session.created.parent` 存在者）默认不列出（[subagent.md](../architecture/subagent.md) 第 5 节） |
 | `--force-unlock` | 与 `--resume` / `--continue` 搭配：先删除残留锁再打开（[sessions.md](../architecture/sessions.md) 第 4 节） |
-| `--preset <name>` | 会话权限预设：`read-only` \| `default` \| `auto-edit` \| `full-access`，写入 `session.created`；恢复会话时该参数拒绝（预设以日志为准，改用 `/preset`） |
+| `--preset <name>` | 会话权限预设：`read-only` \| `default` \| `auto-edit` \| `guarded`，写入 `session.created`；恢复会话时该参数拒绝（预设以日志为准，改用 `/preset`） |
 | `--model <id>` | 模型 id（当前 Provider 内），覆盖 `NOCTURNE_MODEL` 与配置文件；`provider/model` 写法在前缀等于当前 Provider 时剥掉前缀，前缀是另一种 api-type 时拒绝；其余含斜杠的值（如 `deepseek/deepseek-v4.1-flash` 这类命名空间 id）按模型 id 原样使用。生效协议为 unavailable 的模型以同一说明拒绝（ADR-0026 §5） |
 | `--api-type <type>` | `openai-compatible`（默认）或 `anthropic`，覆盖 `NOCTURNE_API_TYPE` |
 | `--base-url <url>` | Provider 端点，覆盖 `NOCTURNE_BASE_URL`；`anthropic` 类型省略时用官方端点 |
@@ -103,7 +103,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `/resume` | 列出**当前目录**的会话（编号、id、创建时间、绑定目录、模型、锁状态），与 `-c/--continue` 同口径；输入编号切换，空行取消；其他目录的会话用 `/resume <id>`，全部会话用 `--sessions` 查看 | `runtime.listSessions({ cwd })` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
 | `/settings` | 按会话默认、界面、执行分组列出生效值、来源和覆盖提示；默认模型与档位只读，修改去 `/model`，Shell 去 `/shell`，`/theme` 仅 TUI | `runtime.describeSettings()` |
-| `/settings preset <名称\|reset>` | 保存默认预设，`reset` 清除；可选 `read-only`、`default`、`auto-edit`、`full-access` | `runtime.updateSettings()` |
+| `/settings preset <名称\|reset>` | 保存默认预设，`reset` 清除；可选 `read-only`、`default`、`auto-edit`、`guarded` | `runtime.updateSettings()` |
 | `/new`、`/clear` | 新建空会话并切换，使用最新生效的默认模型、思考档位与权限预设；未注入配置时沿用当前会话值；旧会话仍可恢复，`/clear` 不是清屏 | CLI 注入的 `newSession` 回调 |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
 | `/provider` | 列出服务商与来源，不显示密钥；TUI 中打开服务商页。`add` 与 `nctrn setup --cli` 共用向导；`key <name>` / `refresh <name>` / `remove <name>` 为快捷操作。`model <名> <模型>` 逐字段显示 `当前值（来源）`，来源可为 models.dev；回车保留、`-` 清除用户编辑。图片输入和推理接受 `y`/`n`/`-`，推理为否时不询问档位；编辑工具接受 `edit`/`patch`/`apply_patch`/`-`（ADR-0035 §5）；来源为手写配置的字段只读。成功后写入 `userModels`，详见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveModelSettings()` 等 + `runtime.updateProviders` |

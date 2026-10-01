@@ -27,7 +27,7 @@ const SOURCES: Record<SettingItem["source"], string> = {
   env: "环境变量",
   cli: "命令行",
 };
-const PRESETS = ["read-only", "default", "auto-edit", "full-access"] as const;
+const PRESETS = ["read-only", "default", "auto-edit", "guarded", "smart", "bypass"] as const;
 const ORDER = ["preset", "theme", "shell", "cancel", "save"];
 
 export function SettingsPage({

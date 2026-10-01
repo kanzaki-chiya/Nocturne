@@ -40,7 +40,7 @@ function harness(timeoutMs = 30_000, signal = new AbortController().signal) {
     turnId: "t1",
     signal,
     gate: createPolicyGate(
-      createRulePolicy({ workspaceRoot: root, caseSensitive: true, preset: "full-access" }),
+      createRulePolicy({ workspaceRoot: root, caseSensitive: true, preset: "guarded" }),
     ),
     readState: createReadStateStore(platform.paths),
     attachmentsDir: root,

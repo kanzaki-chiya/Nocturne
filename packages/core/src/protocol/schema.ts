@@ -5,7 +5,7 @@
  */
 import { z } from "zod";
 import { DURABLE_EVENT_TYPES, type DurableEvent, type DurableType } from "./events.js";
-import { PROTOCOL_ENDPOINTS, type ModelProtocol } from "./types.js";
+import { PROTOCOL_ENDPOINTS, normalizePermissionPreset, type ModelProtocol } from "./types.js";
 
 // ── 公共类型 schema ────────────────────────────────────────
 
@@ -100,13 +100,13 @@ const payloadSchemas = {
     cwd: z.string(),
     workspaceRoot: z.string(),
     model: modelRefSchema,
-    permissionPreset: z.string(),
+    permissionPreset: z.string().transform(normalizePermissionPreset),
     reasoningEffort: reasoningEffortSchema.optional(),
     parent: z.object({ sessionId: z.string(), callId: z.string() }).optional(),
   }),
   "session.config_changed": z.object({
     model: modelRefSchema.optional(),
-    permissionPreset: z.string().optional(),
+    permissionPreset: z.string().transform(normalizePermissionPreset).optional(),
     reasoningEffort: reasoningEffortSchema.optional(),
     shell: z.object({ kind: z.string(), path: z.string() }).optional(),
   }),

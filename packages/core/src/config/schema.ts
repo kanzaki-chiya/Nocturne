@@ -5,7 +5,11 @@
  */
 import { z } from "zod";
 
-import { REASONING_EFFORT_LEVELS, REASONING_EFFORT_ORDER } from "../protocol/index.js";
+import {
+  REASONING_EFFORT_LEVELS,
+  REASONING_EFFORT_ORDER,
+  PERMISSION_PRESET_NAMES,
+} from "../protocol/index.js";
 import type { ConfigFile } from "./types.js";
 import { ConfigError } from "./errors.js";
 
@@ -165,7 +169,10 @@ const configFileSchema = z.object({
   providers: z.array(providerEntrySchema).optional(),
   permissions: z
     .object({
-      preset: z.enum(["read-only", "default", "auto-edit", "full-access"]).optional(),
+      preset: z
+        .enum([...PERMISSION_PRESET_NAMES, "full-access"])
+        .transform((name) => (name === "full-access" ? ("guarded" as const) : name))
+        .optional(),
       rules: z.array(permissionRuleSchema).optional(),
     })
     .optional(),

