@@ -148,3 +148,20 @@ decision == ask 时：
 - **审查器放在工具实现或 UI 里**：违反「权限判定只能发生在权限层」的约束。
 - **让审查器自报置信度再按阈值分档**：LLM 的自报置信度不可靠；三选一加「拿不准就选拿不准」更直接。Jev 返回的是模型本身的概率，可以按阈值分档。
 - **审查器看文件内容或工具输出以提高准确度**：扩大了提示注入面（工具输出正是注入的主要来源），不采用。
+
+## 修订
+
+### 2026-10-01：Jev 接口已核实，可经 OpenCode Zen 调用
+
+第 7 条要求实现前核对 TypeSafe 接口。已用维护者的 OpenCode 密钥实测：
+
+- **地址**：OpenCode Zen 网关提供 `POST https://opencode.ai/zen/v1/systemone`，模型 `jev-1.13`（付费）与 `jev-1.13-free`，`GET https://opencode.ai/zen/v1/models` 可列出；OpenCode Go（`/zen/go/v1`）的模型列表里没有 Jev，调用报 `Model is unavailable`。直连 TypeSafe 为 `POST https://api.typesafe.ai/v1/systemone`，模型名 `jev-latest` 或 `jev-1.13.0`。两者请求格式相同。
+- **请求**：`{ model, state, questions }`。`state` 可以是字符串或 JSON 对象，审查器直接传 `{ command 或 path, cwd, recentUserMessages }`；`questions` 是以自定 id 为键的问题表，题型 `choice`（`instructions` + `criteria` 选项表）、`noul`（是/否，返回概率）、`score`。
+- **响应**：`{ model, answers, usage }`；`choice` 答案含 `choice`、`probabilities`、`confidence`，`noul` 答案为 `noul` 概率。
+- **实测结果**：`choice` 三选项（allow / block / unsure）对 `git status --short` 判 allow（confidence 0.99），对用户只要求改 README 时的 `Remove-Item -Recurse -Force …\Documents` 判 block（confidence 1）；单次延迟约 0.5 秒（付费）至 1 秒（免费）。
+
+据此调整第 7 条的 Jev 后端：
+
+- 直接用一个 `choice` 问题，选项即三档结论，取 `choice` 为结论；`confidence` 低于阈值（默认 0.7，可配）时按 `unsure` 处理。不再用「概率阈值映射三档」的做法。
+- 配置除直连 TypeSafe 外，允许复用已有服务商的密钥：`permission.reviewer = { backend: "jev", baseURL, model, credential }`，`credential` 写服务商 id（如 `opencode-go`，同一个 OpenCode 密钥在 Zen 上可用）或环境变量名（默认 `TYPESAFE_API_KEY`）。经 OpenCode 网关时附带会话头，与该服务商条目的 `sessionHeader` 一致。
+- 开启时告知：命令、工作目录与最近的用户消息会发送到 OpenCode 与 TypeSafe（或直连 TypeSafe）。
