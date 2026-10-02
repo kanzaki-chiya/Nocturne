@@ -3,16 +3,22 @@
  * （/model、/resume 弹列表选择器；/context、/help 弹可滚动面板）。
  * 不共享 CLI 的渲染代码（cli.md §1）；语义参数（模型归一化等）走 core 公开 API。
  */
-import { normalizeModelRef, type RuntimeConfig, type RuntimeSession } from "@nocturne/core";
+import {
+  logoutProvider,
+  normalizeModelRef,
+  type RuntimeConfig,
+  type RuntimeSession,
+} from "@nocturne/core";
 
 import { helpLines as catalogHelpLines } from "./slash-catalog.js";
+import { safeLoginError } from "./provider-login.js";
 
 export type OverlayName =
   "context" | "help" | "resume" | "preset" | "effort" | "shell" | "theme" | "settings";
 
 /** /provider 向导启动形态（add / key） */
 export type ProviderWizardStart =
-  { kind: "add"; presetId?: string | undefined } | { kind: "key"; providerId: string };
+  { kind: "add"; presetId?: string | undefined } | { kind: "key" | "login"; providerId: string };
 
 export type SlashResult =
   | { kind: "overlay"; name: OverlayName }
@@ -86,6 +92,18 @@ export async function runSlash(
       const [sub, ...subRest] = arg.split(/\s+/);
       const name = subRest.join(" ").trim();
       switch (sub) {
+        case "login":
+          if (!name) return { kind: "message", text: "用法：/provider login <名称>" };
+          return { kind: "provider-wizard", start: { kind: "login", providerId: name } };
+        case "logout":
+          if (!name) return { kind: "message", text: "用法：/provider logout <名称>" };
+          try {
+            await logoutProvider(provider.config, name);
+            provider.updateProviders(await provider.reloadConfig());
+            return { kind: "message", text: `已退出登录 ${name}` };
+          } catch (error) {
+            return { kind: "message", text: `! ${safeLoginError(error).message}` };
+          }
         case "add":
           return {
             kind: "provider-page",
@@ -127,7 +145,7 @@ export async function runSlash(
         default:
           return {
             kind: "message",
-            text: `未知子命令 ${sub}；可用：add | key <名称> | model <名称> [<模型>] | refresh <名称> | remove <名称>`,
+            text: `未知子命令 ${sub}；可用：add | login <名称> | logout <名称> | key <名称> | model <名称> [<模型>] | refresh <名称> | remove <名称>`,
           };
       }
     }

@@ -86,6 +86,8 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 
 ## 4. 斜杠命令
 
+`/provider login <名称>` 发起浏览器登录并接受手动粘贴，`/provider logout <名称>` 删除本地保存的登录凭据；没有服务端吊销承诺。`nctrn setup --cli` 使用同一流程。登录等待可取消，错误信息不含授权码或令牌，详见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md)。
+
 | 命令 | 行为 | 对应 Runtime 能力 |
 |---|---|---|
 | `/help` | 列出命令与快捷键 | — |

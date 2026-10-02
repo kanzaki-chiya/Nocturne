@@ -11,6 +11,8 @@ const ACTIONS = [
   ["refresh", "刷新模型列表"],
   ["model", "编辑模型"],
   ["remove", "删除"],
+  ["login", "重新登录"],
+  ["logout", "退出登录"],
   ["cancel", "取消"],
 ] as const;
 
@@ -45,7 +47,7 @@ export function ProviderDialog({
   const order: string[] = items
     .map(([id]) => id)
     .filter((id) => id !== "remove" || !deleteDisabled);
-  const needed = confirmRemove ? 7 : deleteDisabled ? 12 : 11;
+  const needed = confirmRemove ? 7 : deleteDisabled ? 14 : 13;
   const framed = width >= 28 && height >= needed + 2;
   const dialogWidth = framed ? Math.min(72, width - 4) : width;
   const dialogHeight = Math.min(needed, height);

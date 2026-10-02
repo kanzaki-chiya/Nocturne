@@ -297,6 +297,10 @@ export interface ProviderSetupFile {
 
 /** /provider 列表条目（不含密钥；provider-setup.md 第 1 节） */
 export interface ProviderOverview {
+  /** 仅用于显示的鉴权描述，不含令牌。 */
+  auth?: string | undefined;
+  credentialStatus?: "valid" | "expiring" | "expired" | "missing" | undefined;
+  credentialStorage?: "system" | "plaintext" | "memory" | undefined;
   id: string;
   type: "openai-compatible" | "anthropic";
   /** baseURL 的主机名；无 baseURL（Anthropic 官方端点）时为 undefined */

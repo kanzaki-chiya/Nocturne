@@ -505,7 +505,7 @@ export async function loadConfig(
               },
             )
           : undefined;
-      return describeProviderLayers(
+      const overview = describeProviderLayers(
         {
           setup: setupNow.file?.providers,
           user: userFile.providers,
@@ -516,6 +516,57 @@ export async function loadConfig(
         credentials,
         env,
       );
+      // 凭据内容只用于计算状态，绝不返回给客户端。
+      const effective = (await mergeFor(setupNow.file ?? { version: 1 }, workspaceRoot)).resolved
+        .providers;
+      await Promise.all(
+        overview.map(async (item) => {
+          const entry = effective.find((p) => p.id === item.id);
+          if (entry?.auth?.kind === "external-file") {
+            const auth = entry.auth;
+            const file =
+              auth.path.startsWith("~/") || auth.path.startsWith("~\\")
+                ? paths.join(platform.homeDir(), auth.path.slice(2))
+                : paths.resolve(".", auth.path);
+            try {
+              let value: unknown = JSON.parse(await platform.fs.readTextFile(file));
+              for (const key of auth.keyPath) {
+                value =
+                  value !== null && typeof value === "object" && Object.hasOwn(value, key)
+                    ? (value as Record<string, unknown>)[key]
+                    : undefined;
+              }
+              item.credentialStatus =
+                typeof value === "string" && value.trim() !== "" ? "valid" : "missing";
+            } catch {
+              item.credentialStatus = "missing";
+            }
+            item.auth = `CLI 凭据 ${auth.path}`;
+            item.keySource = "missing";
+            delete item.credentialStorage;
+          } else if (entry?.auth?.kind === "openai-siwc") {
+            try {
+              const raw = await credentials.get(entry.id);
+              const record =
+                raw === undefined
+                  ? undefined
+                  : (JSON.parse(raw) as { email?: unknown; expiresAt?: unknown });
+              item.auth = `ChatGPT 账号${typeof record?.email === "string" ? ` ${record.email}` : ""}`;
+              item.credentialStatus =
+                typeof record?.expiresAt !== "number"
+                  ? "missing"
+                  : record.expiresAt <= Date.now()
+                    ? "expired"
+                    : record.expiresAt - Date.now() < 300_000
+                      ? "expiring"
+                      : "valid";
+            } catch {
+              item.credentialStatus = "missing";
+            }
+          }
+        }),
+      );
+      return overview;
     },
     refreshUpstreamLimits: async (providerId: string) => {
       await refreshUpstreamLimits(

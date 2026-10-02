@@ -180,6 +180,71 @@ async function rc_helper_save() {
 // ── describeProviders ───────────────────────────────────
 
 describe("describeProviders", () => {
+  it("外部凭据概览只含状态与路径，不返回令牌且忽略 apiKeyEnv", async () => {
+    const file = path.join(home, "fake-external-auth.json");
+    await writeJson(file, { nested: { key: "fake-secret-external" } });
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [
+        {
+          id: "external",
+          type: "openai-compatible",
+          baseURL: "https://example.test/v1",
+          apiKeyEnv: "IGNORED",
+          auth: {
+            kind: "external-file",
+            path: file,
+            keyPath: ["nested", "key"],
+            renewHint: "login",
+          },
+        },
+      ],
+    });
+    const rc = await loadConfig(platform, { nocturneHome: home, env: () => "ignored-value" });
+    const [item] = await rc.describeProviders();
+    expect(item?.credentialStatus).toBe("valid");
+    expect(item?.credentialStorage).toBeUndefined();
+    expect(item?.keyEnvName).toBeUndefined();
+    expect(JSON.stringify(item)).not.toContain("fake-secret-external");
+    await writeJson(file, { broken: true });
+    expect((await rc.describeProviders())[0]?.credentialStatus).toBe("missing");
+    await fs.unlink(file);
+    await fs.unlink(path.join(home, "providers.json"));
+  });
+
+  it.each([
+    [600_000, "valid"],
+    [100_000, "expiring"],
+    [-1, "expired"],
+  ] as const)("账号凭据状态按剩余时间 %i ms 显示 %s", async (remaining, status) => {
+    const credentials = (await createCredentialStore(platform, home, { backend: "memory" })).store;
+    await credentials.set(
+      "account",
+      JSON.stringify({
+        email: "person@example.test",
+        accessToken: "fake-private-token",
+        expiresAt: Date.now() + remaining,
+      }),
+    );
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [
+        {
+          id: "account",
+          type: "openai-compatible",
+          baseURL: "https://api.openai.com/v1",
+          auth: { kind: "openai-siwc" },
+        },
+      ],
+    });
+    const rc = await loadConfig(platform, { nocturneHome: home, env: noEnv, credentials });
+    const [item] = await rc.describeProviders();
+    expect(item?.credentialStatus).toBe(status);
+    expect(item?.credentialStorage).toBe("memory");
+    expect(item?.auth).toContain("person@example.test");
+    expect(JSON.stringify(item)).not.toContain("fake-private-token");
+    await fs.unlink(path.join(home, "providers.json"));
+  });
   it("标注来源层/密钥来源/覆盖关系；不含密钥", async () => {
     const creds = (await createCredentialStore(platform, home, { backend: "memory" })).store;
     await creds.set("corp", "sk-hidden");

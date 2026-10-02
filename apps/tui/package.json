@@ -9,6 +9,10 @@
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
     },
+    "./provider-login": {
+      "types": "./dist/provider-login.d.mts",
+      "import": "./dist/provider-login.mjs"
+    },
     "./text-format": {
       "types": "./dist/text-format.d.mts",
       "import": "./dist/text-format.mjs"

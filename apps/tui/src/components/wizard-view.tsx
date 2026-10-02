@@ -5,6 +5,7 @@ import stringWidth from "string-width";
 import { boxSafe, truncateLine } from "../format.js";
 import { useTheme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
+import { unstoredKeyCommands } from "../provider-login.js";
 import { Buttons } from "./dialog/buttons.js";
 import { ConfirmDiscard } from "./dialog/confirm-discard.js";
 import { DialogFrame } from "./dialog/dialog-frame.js";
@@ -50,12 +51,19 @@ export function WizardView({
   const boxes = useRef(new Map<string, DOMElement>());
   const previousPrompt = useRef<string | undefined>(undefined);
   const prompt = state.prompt;
+  const secretDisplay = state.secretDisplay?.();
   const multi = prompt?.multi;
   const height = suppliedHeight ?? maxRows ?? 16;
   const logs = state.logs.slice(-2);
   const stepsLine = state.steps.map(boxSafe).join(" • ");
   const metadata = (stepsLine ? 1 : 0) + logs.length;
-  const needed = Math.min(18, 9 + metadata + (multi ? Math.min(multi.options.length, 7) : 0));
+  const loginRows = state.login
+    ? Math.ceil(stringWidth(state.login.authorizeUrl) / Math.max(1, Math.min(68, width - 8))) + 1
+    : 0;
+  const needed = Math.max(
+    9 + loginRows + (secretDisplay ? 6 : 0),
+    Math.min(18, 9 + metadata + (multi ? Math.min(multi.options.length, 7) : 0)),
+  );
   const framed = width >= 28 && height >= 10;
   const dialogWidth = framed ? Math.min(72, width - 4) : Math.max(1, width);
   const dialogHeight = Math.min(needed, framed ? height - 2 : height);
@@ -76,7 +84,13 @@ export function WizardView({
     Math.max(0, (multi?.options.length ?? 0) - optionCount),
   );
   const echo = prompt?.secret ? "*".repeat(Array.from(value).length) : boxSafe(value);
-  const saveLabel = prompt?.confirmation || state.mode === "key" ? "保存" : "下一步";
+  const saveLabel = secretDisplay
+    ? "已保存，继续"
+    : state.login
+      ? "提交"
+      : prompt?.confirmation || state.mode === "key"
+        ? "保存"
+        : "下一步";
   useEffect(() => {
     if (!prompt) return;
     // 同一提问重试保留草稿（换密钥保存失败、拉模型 Esc 回上一步）。
@@ -90,6 +104,10 @@ export function WizardView({
     setFocus(prompt.confirmation ? "save" : "input");
   }, [prompt]);
   const close = () => {
+    if (state.login) {
+      onCancel();
+      return;
+    }
     if (value !== "" || checked.size > 0) {
       setConfirm(true);
       setDiscard(false);
@@ -254,6 +272,23 @@ export function WizardView({
         ) : (
           <>
             <Box flexDirection="column" flexGrow={1} overflow="hidden">
+              {state.login ? (
+                <>
+                  <Text wrap="wrap">{boxSafe(state.login.authorizeUrl)}</Text>
+                  <Text color={theme.muted}>
+                    {state.login.browserOpened ? "已在浏览器打开" : "请复制到浏览器"}
+                  </Text>
+                </>
+              ) : null}
+              {secretDisplay ? (
+                <>
+                  <Text>系统凭据后端不可用；密钥仅显示一次</Text>
+                  <Text wrap="wrap">{boxSafe(secretDisplay.key)}</Text>
+                  <Text wrap="wrap">
+                    {boxSafe(unstoredKeyCommands(secretDisplay.key, secretDisplay.envName))}
+                  </Text>
+                </>
+              ) : null}
               {!compact && stepsLine ? (
                 <Text color={theme.muted} wrap="truncate">
                   {truncateLine(stepsLine, inner)}

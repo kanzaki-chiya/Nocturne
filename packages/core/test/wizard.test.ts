@@ -122,6 +122,70 @@ const deps: SetupWizardDeps = {
 };
 
 describe("provider 向导（无连接测试，v0.3 不选模型）", () => {
+  it("OpenRouter 浏览器登录代替密钥输入，仍以 apiKey 条目保存", async () => {
+    const { config, saved } = makeConfig("memory");
+    config.credentials.get = async () => "fake-login-key";
+    const login = vi.fn(async () => undefined);
+    const fetchModels = vi.fn<SetupWizardDeps["fetchModels"]>(async () => [{ id: "model" }]);
+    const { io, printed } = scriptedIo([[0]]);
+    await runProviderSetupWizard(
+      io,
+      config,
+      {
+        ...deps,
+        login,
+        fetchModels,
+        presets: () => [
+          { ...PRESET, id: "openrouter", defaultName: "openrouter", login: "openrouter" },
+        ],
+      },
+      { presetId: "openrouter" },
+    );
+    expect(login).toHaveBeenCalledOnce();
+    expect(printed).not.toContain("API Key：");
+    expect(fetchModels.mock.calls[0]?.[1]).toBe("fake-login-key");
+    expect(saved[0]?.entry.auth).toBeUndefined();
+    expect(saved[0]?.opts).toEqual({ key: "fake-login-key" });
+  });
+
+  it("OpenRouter 粘贴密钥保留 API key 原流程", async () => {
+    const { config, saved } = makeConfig("memory");
+    const login = vi.fn(async () => undefined);
+    const { io } = scriptedIo([[1], "fake-pasted-key"]);
+    await runProviderSetupWizard(
+      io,
+      config,
+      {
+        ...deps,
+        login,
+        fetchModels: async () => [],
+        presets: () => [{ ...PRESET, id: "openrouter", login: "openrouter" }],
+      },
+      { presetId: "openrouter" },
+    );
+    expect(login).not.toHaveBeenCalled();
+    expect(saved[0]?.opts).toEqual({ key: "fake-pasted-key" });
+  });
+
+  it("OpenRouter 无后端时登录流程负责一次展示，不再次索取密钥", async () => {
+    const { config, saved } = makeConfig("none");
+    config.credentials.get = async () => undefined;
+    const { io, printed } = scriptedIo([[0]]);
+    await runProviderSetupWizard(
+      io,
+      config,
+      {
+        ...deps,
+        login: async () => undefined,
+        fetchModels: async () => [],
+        presets: () => [{ ...PRESET, id: "openrouter", login: "openrouter" }],
+      },
+      { presetId: "openrouter" },
+    );
+    expect(saved[0]?.entry.apiKeyEnv).toBe("DEEPSEEK_API_KEY");
+    expect(printed.some((p) => p.startsWith("凭据环境变量名"))).toBe(false);
+  });
+
   it("全程只发 GET /models：不问名称/模型/默认，结果带 modelCount", async () => {
     const calls = stubFetch(() => jsonRes({ data: [{ id: "m1" }, { id: "m2" }] }));
     const { config, saved } = makeConfig("memory");

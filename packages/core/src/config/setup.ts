@@ -129,7 +129,8 @@ export function describeProviderLayers(
     }
   }
   return [...byId.values()].map(({ entry, layer }) => {
-    const apiKeyEnv = entry.apiKeyEnv;
+    const kind = entry.auth?.kind ?? "apiKey";
+    const apiKeyEnv = kind === "apiKey" ? entry.apiKeyEnv : undefined;
     const envSet = apiKeyEnv !== undefined && env(apiKeyEnv) !== undefined && env(apiKeyEnv) !== "";
     const keySource = envSet
       ? ("env" as const)
@@ -137,6 +138,19 @@ export function describeProviderLayers(
         ? ("credential" as const)
         : ("missing" as const);
     return {
+      auth:
+        kind === "external-file"
+          ? `外部登录凭据 ${entry.auth?.kind === "external-file" ? entry.auth.path : ""}`
+          : kind === "openai-siwc"
+            ? "ChatGPT 账号"
+            : `API key（${envSet ? `环境变量 ${apiKeyEnv}` : keySource === "credential" ? "凭据存储" : "未配置"}）`,
+      credentialStatus: keySource === "missing" ? "missing" : "valid",
+      ...(keySource === "credential"
+        ? {
+            credentialStorage:
+              credentials.backend() === "memory" ? ("memory" as const) : ("system" as const),
+          }
+        : {}),
       id: entry.id,
       type: entry.type ?? "openai-compatible",
       host: hostOf(entry.baseURL),

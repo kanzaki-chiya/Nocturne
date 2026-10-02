@@ -26,6 +26,7 @@ const SENSITIVE_WORDS = new Set([
 ]);
 
 function isSensitiveKey(key: string): boolean {
+  if (["code", "code_verifier", "codeVerifier"].includes(key)) return true;
   const parts = key
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .split(/[\s_\-.]+/)

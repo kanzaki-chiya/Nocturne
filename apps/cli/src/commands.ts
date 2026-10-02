@@ -9,7 +9,8 @@ import type {
   RuntimeSession,
   SessionShellInfo,
 } from "@nocturne/core";
-import { RuntimeCommandError, type PermissionPresetName } from "@nocturne/core";
+import { logoutProvider, RuntimeCommandError, type PermissionPresetName } from "@nocturne/core";
+import { providerCredentialDescription } from "@nocturne/tui/text-format";
 import { cliHelpText } from "@nocturne/tui/slash-catalog";
 
 import { normalizeModelRef } from "./config.js";
@@ -35,6 +36,7 @@ export interface CommandDeps {
   runAddWizard?: (() => Promise<void>) | undefined;
   /** /provider key <name>：同上密钥向导 */
   runKeyWizard?: ((providerId: string) => Promise<void>) | undefined;
+  runLoginWizard?: ((providerId: string) => Promise<void>) | undefined;
   /** /provider model <name> <model>：同上模型设置问答（ADR-0024） */
   runModelWizard?: ((providerId: string, modelId: string) => Promise<void>) | undefined;
 }
@@ -210,6 +212,7 @@ export async function runSlashCommand(
           return (
             `  ${p.id.padEnd(16)} ${p.type.padEnd(18)} ${host.padEnd(28)} ` +
             `${key.padEnd(16)} ${describeOrigin(p.origin)}` +
+            (providerCredentialDescription(p) ? `  ${providerCredentialDescription(p)}` : "") +
             (p.modelCount > 0 ? `  ${p.modelCount} 个模型` : "") +
             (marks !== "" ? `  ← ${marks}` : "")
           );
@@ -253,6 +256,30 @@ export async function runSlashCommand(
         return "handled";
       }
       switch (sub) {
+        case "login": {
+          if (!deps.runLoginWizard) {
+            io.print("! /provider login 需要交互式终端");
+            return "handled";
+          }
+          try {
+            await deps.runLoginWizard(name);
+          } catch (error) {
+            const { safeLoginError } = await import("@nocturne/tui/provider-login");
+            io.print(`! ${safeLoginError(error).message}`);
+          }
+          return "handled";
+        }
+        case "logout": {
+          try {
+            await logoutProvider(config, name);
+            updateProviders(await reloadConfig());
+            io.print(`已退出登录 ${name}`);
+          } catch (error) {
+            const { safeLoginError } = await import("@nocturne/tui/provider-login");
+            io.print(`! ${safeLoginError(error).message}`);
+          }
+          return "handled";
+        }
         case "key": {
           if (deps.runKeyWizard === undefined) {
             io.print("! /provider key 需要交互式终端");

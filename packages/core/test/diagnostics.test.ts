@@ -33,6 +33,25 @@ async function waitForLines(file: string, count: number): Promise<void> {
 }
 
 describe("diagnostics", () => {
+  it("OAuth 授权码和 verifier 与令牌均脱敏", () => {
+    const lines: string[] = [];
+    const d = createDiagnostics({
+      platform,
+      enabled: true,
+      logsDir: tmp(),
+      writeLine: (line) => lines.push(line),
+    });
+    d.record("oauth.request", {
+      code: "private-code",
+      code_verifier: "private-verifier",
+      refresh_token: "private-refresh",
+      access_token: "private-access",
+      id_token: "private-id",
+      Authorization: "private-auth",
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain("private-");
+  });
   it("未启用时 no-op：不产生文件", async () => {
     const ws = tmp();
     const d = createDiagnostics({ platform, enabled: false, logsDir: ws });

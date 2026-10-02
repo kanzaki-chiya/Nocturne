@@ -5,7 +5,8 @@
  * print() 追加到日志区。密钥经 askSecret 回显为 *（WizardView 渲染）。
  */
 import { appendFileSync } from "node:fs";
-import { useCallback, useRef, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
+import { runProviderLogin, type LoginIo } from "./provider-login.js";
 
 import {
   fetchModels,
@@ -14,9 +15,10 @@ import {
   runProviderKeyWizard,
   runProviderSetupWizard,
   WizardAbort,
+  ProviderLoginError,
+  type ProviderEntryConfig,
   type RuntimeConfig,
   type SetupWizardDeps,
-  type WizardIo,
   type WizardResult,
 } from "@nocturne/core";
 
@@ -32,7 +34,10 @@ export interface WizardPrompt {
 }
 
 export interface WizardState {
-  mode?: "add" | "key";
+  mode?: "add" | "key" | "login";
+  login?: { authorizeUrl: string; browserOpened: boolean } | undefined;
+  /** 临时显示；函数不进入 JSON 调试记录，确认后闭包释放密钥。 */
+  secretDisplay?: (() => { key: string; envName: string } | undefined) | undefined;
   error?: string | undefined;
   /** 向导是否运行中 */
   running: boolean;
@@ -57,11 +62,12 @@ type Pending =
 export type WizardOutcome =
   | { kind: "added"; providerId: string; modelCount: number }
   | { kind: "key-updated"; providerId: string }
+  | { kind: "logged-in"; providerId: string }
   | { kind: "cancel" }
   | { kind: "error"; message: string };
 
 export type WizardStart =
-  { kind: "add"; presetId?: string | undefined } | { kind: "key"; providerId: string };
+  { kind: "add"; presetId?: string | undefined } | { kind: "key" | "login"; providerId: string };
 
 export interface ProviderWizard {
   state: WizardState;
@@ -110,6 +116,13 @@ export function useProviderWizard(
   configRef.current = config;
   const generation = useRef(0);
   const cancelRef = useRef<() => void>(() => undefined);
+  useEffect(
+    () => () => {
+      cancelRef.current();
+      generation.current++;
+    },
+    [],
+  );
 
   const submit = useCallback((value: string) => {
     const pending = pendingRef.current;
@@ -142,6 +155,8 @@ export function useProviderWizard(
         const answers: (string | number[])[] = [];
         let fetching = false;
         let saving = false;
+        let loggingIn = false;
+        let displayedKey: { key: string; envName: string } | undefined;
         let lastPrompt: WizardPrompt | undefined;
         const guard = () => {
           if (generation.current !== current || controller.signal.aborted) throw new WizardAbort();
@@ -158,7 +173,7 @@ export function useProviderWizard(
           setState((st) => ({ ...st, prompt, busyText: undefined }));
           return new Promise<string | number[]>((resolve, reject) => {
             const accept = (value: string | number[]) => {
-              if (!prompt.confirmation) answers.push(value);
+              if (!prompt.confirmation && !loggingIn) answers.push(value);
               resolve(value);
             };
             pendingRef.current = prompt.multi
@@ -166,7 +181,13 @@ export function useProviderWizard(
               : { kind: "text", resolve: accept, reject };
           });
         };
-        const io: WizardIo = {
+        const io: LoginIo = {
+          cancelPending: () => {
+            const pending = pendingRef.current;
+            pendingRef.current = undefined;
+            pending?.reject(new WizardAbort());
+            if (generation.current === current) setState((st) => ({ ...st, prompt: undefined }));
+          },
           ask: (text, opts) => ask({ text, secret: false, hint: opts?.hint }) as Promise<string>,
           askSecret: (text, opts) =>
             ask({ text, secret: true, hint: opts?.hint }) as Promise<string>,
@@ -242,8 +263,48 @@ export function useProviderWizard(
           return config.refreshModelsDev();
         };
         const source = deps ?? tuiWizardDeps(undefined, controller.signal);
+        const login = async (entry: ProviderEntryConfig): Promise<void> => {
+          guard();
+          loggingIn = true;
+          try {
+            await runProviderLogin(config, entry.id, io, {
+              entry,
+              signal: controller.signal,
+              onWaiting: (authorizeUrl, browserOpened) => {
+                guard();
+                setState((st) => ({ ...st, login: { authorizeUrl, browserOpened } }));
+              },
+              showUnstoredKey: async (key, envName) => {
+                guard();
+                io.cancelPending?.();
+                displayedKey = { key, envName };
+                setState((st) => ({ ...st, secretDisplay: () => displayedKey }));
+                try {
+                  await ask({
+                    text: "密钥仅显示一次，请保存环境变量命令",
+                    secret: false,
+                    confirmation: true,
+                  });
+                } finally {
+                  displayedKey = undefined;
+                  if (generation.current === current)
+                    setState((st) => ({ ...st, secretDisplay: undefined }));
+                }
+              },
+            });
+          } finally {
+            loggingIn = false;
+            if (generation.current === current) setState((st) => ({ ...st, login: undefined }));
+          }
+        };
+        const loginExisting = async (providerId: string): Promise<void> => {
+          const entry = config.base.providers.find((entry) => entry.id === providerId);
+          if (!entry) throw new ProviderLoginError("missing");
+          await login(entry);
+        };
         const wrappedDeps: SetupWizardDeps = {
           ...source,
+          login,
           fetchModels: async (req, key) => {
             guard();
             fetching = true;
@@ -267,6 +328,12 @@ export function useProviderWizard(
           },
         };
         cancelRef.current = () => {
+          if (loggingIn) {
+            controller.abort();
+            displayedKey = undefined;
+            io.cancelPending?.();
+            return;
+          }
           if (saving) return;
           if (fetching) {
             controller.abort();
@@ -288,10 +355,15 @@ export function useProviderWizard(
                   modelCount: result.modelCount,
                 }),
               )
-            : runProviderKeyWizard(io, wrapped, request.providerId).then((): WizardOutcome => ({
-                kind: "key-updated",
-                providerId: request.providerId,
-              }));
+            : request.kind === "login"
+              ? loginExisting(request.providerId).then((): WizardOutcome => ({
+                  kind: "logged-in",
+                  providerId: request.providerId,
+                }))
+              : runProviderKeyWizard(io, wrapped, request.providerId).then((): WizardOutcome => ({
+                  kind: "key-updated",
+                  providerId: request.providerId,
+                }));
         void promise
           .then((outcome) => {
             if (generation.current !== current) return;
@@ -300,13 +372,17 @@ export function useProviderWizard(
               running: false,
               prompt: undefined,
               busyText: undefined,
+              login: undefined,
+              secretDisplay: undefined,
               done: "done",
               doneText:
                 outcome.kind === "added"
                   ? `已保存 ${outcome.providerId}${outcome.modelCount > 0 ? `，${outcome.modelCount} 个模型` : ""}`
                   : outcome.kind === "key-updated"
                     ? `已更新 ${outcome.providerId} 的密钥`
-                    : "",
+                    : outcome.kind === "logged-in"
+                      ? `已登录 ${outcome.providerId}`
+                      : "",
             }));
             onDone(outcome);
           })
@@ -324,6 +400,8 @@ export function useProviderWizard(
               running: false,
               prompt: undefined,
               busyText: undefined,
+              login: undefined,
+              secretDisplay: undefined,
               done: outcome.kind === "cancel" ? "cancel" : "error",
               doneText: outcome.kind === "cancel" ? "已取消" : outcome.message,
             }));

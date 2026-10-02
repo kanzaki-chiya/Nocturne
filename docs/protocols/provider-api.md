@@ -6,6 +6,8 @@
 
 ## 1. Provider
 
+Core 公开 `startProviderLogin(config, providerId)`、`logoutProvider(config, providerId)` 与 `LoginSession`。会话包含 `authorizeUrl`、`manualInput`、`completion`、`submitManual`、`cancel`；结果仅包含 `providerId` 与可选账号描述。回环监听一次性并校验 state，客户端只负责浏览器与交互，不持有鉴权解析策略，详见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 8 节。
+
 ```ts
 interface Provider {
   readonly id: string            // 配置中的名称，如 "deepseek"

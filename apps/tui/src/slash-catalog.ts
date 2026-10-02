@@ -60,6 +60,8 @@ export const PRESET_NAMES = [
 const SHELL_KIND_NAMES = ["pwsh", "powershell", "bash", "cmd", "sh"] as const;
 
 export const PROVIDER_SUBCOMMANDS: readonly { name: string; summary: string }[] = [
+  { name: "login", summary: "登录服务商账号" },
+  { name: "logout", summary: "退出服务商登录" },
   { name: "add", summary: "添加服务商" },
   { name: "key", summary: "更新密钥" },
   { name: "refresh", summary: "刷新模型列表" },

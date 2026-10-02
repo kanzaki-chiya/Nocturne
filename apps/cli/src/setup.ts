@@ -25,7 +25,12 @@ type Stdin = NodeJS.ReadableStream & {
 };
 
 /** TTY raw mode 逐字符读一行；echo=false 时回显 * */
-async function readLineRaw(stdin: Stdin, echo: boolean): Promise<string> {
+async function readLineRaw(
+  stdin: Stdin,
+  echo: boolean,
+  stdout: NodeJS.WritableStream,
+  signal: AbortSignal,
+): Promise<string> {
   const inAny = stdin as NodeJS.ReadStream;
   return await new Promise<string>((resolve, reject) => {
     let buf = "";
@@ -34,11 +39,11 @@ async function readLineRaw(stdin: Stdin, echo: boolean): Promise<string> {
       for (const ch of s) {
         if (ch === "\r" || ch === "\n") {
           cleanup();
-          process.stdout.write("\n");
+          stdout.write("\n");
           resolve(buf);
           return;
         }
-        if (ch === "\u0003" || ch === "\u0004" || ch === "\u001a") {
+        if (ch === "\u0003" || ch === "\u0004" || ch === "\u001a" || ch === "\u001b") {
           // Ctrl+C / Ctrl+D / Ctrl+Z
           cleanup();
           reject(new WizardAbort());
@@ -47,20 +52,26 @@ async function readLineRaw(stdin: Stdin, echo: boolean): Promise<string> {
         if (ch === "\u007f" || ch === "\b") {
           if (buf.length > 0) {
             buf = buf.slice(0, -1);
-            process.stdout.write("\b \b");
+            stdout.write("\b \b");
           }
           continue;
         }
         if (ch < " ") continue; // 忽略其余控制字符
         buf += ch;
-        process.stdout.write(echo ? ch : "*");
+        stdout.write(echo ? ch : "*");
       }
     };
     const cleanup = (): void => {
       inAny.off("data", onData);
       inAny.pause();
       inAny.setRawMode(false);
+      signal.removeEventListener("abort", abort);
     };
+    const abort = () => {
+      cleanup();
+      reject(new WizardAbort());
+    };
+    signal.addEventListener("abort", abort, { once: true });
     inAny.setRawMode(true);
     inAny.resume();
     inAny.on("data", onData);
@@ -68,9 +79,9 @@ async function readLineRaw(stdin: Stdin, echo: boolean): Promise<string> {
 }
 
 /** 非 TTY：按行读（readline 逐行；测试管道友好） */
-async function readLineStream(stdin: Stdin): Promise<string | undefined> {
+async function readLineStream(stdin: Stdin, signal: AbortSignal): Promise<string | undefined> {
   const { createInterface } = await import("node:readline");
-  const rl = createInterface({ input: stdin, terminal: false });
+  const rl = createInterface({ input: stdin, terminal: false, signal });
   try {
     for await (const line of rl) return line;
     return undefined;
@@ -80,23 +91,37 @@ async function readLineStream(stdin: Stdin): Promise<string | undefined> {
 }
 
 /** nctrn setup / /provider add 的终端实现 */
-export function createWizardIo(stdin: Stdin, stdout: NodeJS.WritableStream): WizardIo {
+export function createWizardIo(
+  stdin: Stdin,
+  stdout: NodeJS.WritableStream,
+): WizardIo & { cancelPending(): void } {
   const tty = stdin.isTTY === true;
+  let pending: AbortController | undefined;
+  const read = (echo: boolean) => {
+    pending = new AbortController();
+    return tty
+      ? readLineRaw(stdin, echo, stdout, pending.signal)
+      : readLineStream(stdin, pending.signal);
+  };
   const writeHint = (hint: string | undefined): void => {
     if (hint !== undefined && hint !== "") stdout.write(`  ${hint}\n`);
   };
   return {
+    cancelPending: () => {
+      pending?.abort();
+      pending = undefined;
+    },
     ask: async (prompt, opts) => {
       writeHint(opts?.hint);
       stdout.write(prompt);
-      const line = tty ? await readLineRaw(stdin, true) : await readLineStream(stdin);
+      const line = await read(true);
       if (line === undefined) throw new WizardAbort();
       return line.trim();
     },
     askSecret: async (prompt, opts) => {
       writeHint(opts?.hint);
       stdout.write(prompt);
-      const line = tty ? await readLineRaw(stdin, false) : await readLineStream(stdin);
+      const line = await read(false);
       if (line === undefined) throw new WizardAbort();
       return line.trim();
     },
@@ -116,7 +141,7 @@ export function createWizardIo(stdin: Stdin, stdout: NodeJS.WritableStream): Wiz
       });
       for (;;) {
         stdout.write("编号（逗号分隔，如 2,3,4；空 = 不选）：");
-        const line = tty ? await readLineRaw(stdin, true) : await readLineStream(stdin);
+        const line = await read(true);
         if (line === undefined) throw new WizardAbort();
         const trimmed = line.trim();
         if (trimmed === "") return [];
@@ -136,11 +161,20 @@ export function createWizardIo(stdin: Stdin, stdout: NodeJS.WritableStream): Wiz
 /** CLI 侧的向导依赖注入：provider 层能力 + 进程环境变量 */
 export function cliWizardDeps(
   env: (name: string) => string | undefined = (n) => process.env[n],
+  config?: RuntimeConfig,
 ): SetupWizardDeps {
   return {
     presets: () => listProviderPresets(),
     fetchModels: (req, key) => fetchModels(req, key),
     env,
+    ...(config
+      ? {
+          login: async (entry, io) => {
+            const { runProviderLogin } = await import("@nocturne/tui/provider-login");
+            await runProviderLogin(config, entry.id, io, { entry });
+          },
+        }
+      : {}),
   };
 }
 
@@ -150,7 +184,7 @@ export async function runProviderSetupWizard(
   config: RuntimeConfig,
   opts?: { presetId?: string | undefined },
 ) {
-  return await coreSetupWizard(io, config, cliWizardDeps(), opts);
+  return await coreSetupWizard(io, config, cliWizardDeps(undefined, config), opts);
 }
 
 /** /provider key <name> */

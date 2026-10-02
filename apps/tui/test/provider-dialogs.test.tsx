@@ -172,6 +172,8 @@ describe("服务商四个对话框与页内鼠标（ADR-0039 §2）", () => {
     expect(ui.lastFrame()).toContain("当前会话正在使用，先用 /model 切换");
     expect(ui.mouse.frame?.boxes.some((box) => box.id === "remove")).toBe(false);
     for (let i = 0; i < 3; i++) await changedFrame(ui, () => ui.stdin.write("\t"));
+    expect(ui.lastFrame()).toContain("> [ 重新登录 ]");
+    for (let i = 0; i < 2; i++) await changedFrame(ui, () => ui.stdin.write("\t"));
     expect(ui.lastFrame()).toContain("> [ 取消 ]");
     await changedFrame(ui, () => ui.stdin.write("\r"));
     await changedFrame(ui, () => ui.stdin.write("\x1b[3~"));

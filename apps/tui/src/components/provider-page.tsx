@@ -29,6 +29,7 @@ import { useTuiEnv } from "../env.js";
 import { truncateLine } from "../format.js";
 import { useTheme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
+import { providerCredentialDescription } from "../text-format.js";
 import { ProviderDialog } from "./provider-dialog.js";
 import { ModelEditPane, ModelListPane } from "./model-settings-view.js";
 import { screenRect, type DialogMouseFrame } from "./dialog/mouse.js";
@@ -101,13 +102,13 @@ function rowLabel(row: ProviderRow, currentId: string | undefined, env: { ascii:
   if (p.overridden) tags.push("被 config.json 覆盖");
   if (!p.managed) tags.push("只读");
   const detail =
-    `已配置 • ${keySourceText(p)} • ${p.modelCount} 个模型` +
+    `已配置 • ${providerCredentialDescription(p) || keySourceText(p)} • ${p.modelCount} 个模型` +
     (tags.length > 0 ? ` • ${tags.join(" • ")}` : "");
   return { mark: dotOn, name: p.id, detail, configured: true };
 }
 
 /** 交给父级执行的操作（删除在页内确认后走 onConfirmRemove；「编辑模型」为页内子视图） */
-export type ProviderOp = "key" | "refresh";
+export type ProviderOp = "key" | "refresh" | "login" | "logout";
 
 /**
  * 底部列表提示（ADR-0039 §2）；操作名称只在对话框内显示。
@@ -665,8 +666,9 @@ export function ProviderPage({
                 const entry = entries.find((e) => e.id === id);
                 if (entry !== undefined) requestRemove(entry);
               } else if (op === "model") openModels(id);
-              else if (op === "key" || op === "refresh") {
+              else if (op === "key" || op === "refresh" || op === "login" || op === "logout") {
                 if (op === "key") setWizardTitle(`换密钥 ${id}`);
+                if (op === "login") setWizardTitle(`登录 ${id}`);
                 onOp(id, op);
               }
             }}

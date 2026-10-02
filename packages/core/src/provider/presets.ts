@@ -23,6 +23,7 @@ export interface ProviderPreset {
   auth?: ProviderAuth | undefined;
   headers?: Record<string, string> | undefined;
   modelHeader?: string | undefined;
+  login?: "openrouter" | undefined;
   /** 模型列表能否经 GET /models 自动获取 */
   fetchableModels: boolean;
   /**
@@ -73,6 +74,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   },
   {
     id: "openrouter",
+    login: "openrouter",
     label: "OpenRouter",
     type: "openai-compatible",
     defaultName: "openrouter",

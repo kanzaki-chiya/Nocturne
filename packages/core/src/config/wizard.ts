@@ -77,6 +77,7 @@ export interface WizardPreset {
   auth?: ProviderAuth | undefined;
   headers?: Record<string, string> | undefined;
   modelHeader?: string | undefined;
+  login?: "openrouter" | undefined;
   id: string;
   label: string;
   type: "openai-compatible" | "anthropic";
@@ -107,6 +108,8 @@ export interface WizardFetchRequest {
 
 /** 向导编排依赖：客户端注入 provider 层能力与环境变量读取 */
 export interface SetupWizardDeps {
+  /** 客户端显示登录会话并打开浏览器；Core 流程不依赖终端。 */
+  login?: ((entry: ProviderEntryConfig, io: WizardIo) => Promise<void>) | undefined;
   presets(): readonly WizardPreset[];
   /**
    * GET /models 模型列表；失败时抛出错误（约定可携带数字 `status`，
@@ -208,7 +211,19 @@ export async function runProviderSetupWizard(
   const backend = config.credentials.backend();
   let key: string | undefined;
   let apiKeyEnv: string | undefined;
-  if (preset.auth?.kind === "external-file") {
+  let browserLogin = preset.auth?.kind === "openai-siwc";
+  if (preset.login !== undefined && deps.login !== undefined) {
+    const choices = await io.chooseMulti("密钥获取方式（选择一项）：", ["浏览器登录", "粘贴密钥"]);
+    if (choices.length !== 1) throw new WizardAbort();
+    browserLogin = choices[0] === 0;
+  }
+  if (browserLogin) {
+    if (deps.login === undefined) throw new Error("客户端未提供登录入口");
+    await deps.login({ id: providerId, type: preset.type, baseURL, auth: preset.auth }, io);
+    key = await config.credentials.get(providerId);
+    io.step("登录已完成");
+    if (backend === "none") apiKeyEnv = preset.defaultKeyEnv ?? "NOCTURNE_API_KEY";
+  } else if (preset.auth?.kind === "external-file") {
     io.step(`凭据来源：外部登录文件；续期运行 ${preset.auth.renewHint}`);
   } else if (backend !== "none") {
     key = await io.askSecret("API Key：", {
@@ -223,7 +238,11 @@ export async function runProviderSetupWizard(
       key = undefined;
     }
   }
-  if (key === undefined && (preset.auth === undefined || preset.auth.kind === "apiKey")) {
+  if (
+    !browserLogin &&
+    key === undefined &&
+    (preset.auth === undefined || preset.auth.kind === "apiKey")
+  ) {
     const defEnv = preset.defaultKeyEnv ?? "NOCTURNE_API_KEY";
     const envName = await io.ask(`凭据环境变量名 [${defEnv}]：`, {
       hint: "该变量的值会作为请求凭据发送",

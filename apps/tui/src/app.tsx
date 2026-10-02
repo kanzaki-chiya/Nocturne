@@ -14,6 +14,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import {
   listProviderPresets,
+  logoutProvider,
   createPlatform,
   completeFileRefs,
   type FileIndexEntry,
@@ -122,6 +123,7 @@ import { useTheme, type ThemeId } from "./theme.js";
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 import type { ConsoleLines } from "./console-capture.js";
 import { useProviderWizard } from "./wizard-io.js";
+import { safeLoginError } from "./provider-login.js";
 
 const EMPTY_WINDOW: VisibleWindow = {
   lines: [],
@@ -280,6 +282,8 @@ function useProviderOps(provider: ProviderBridge | undefined): {
           );
         } else if (outcome.kind === "key-updated") {
           setNotice(`已更新 ${outcome.providerId} 的密钥`);
+        } else if (outcome.kind === "logged-in") {
+          setNotice(`已登录 ${outcome.providerId}`);
         } else if (outcome.kind === "error") {
           setNotice(`! ${outcome.message ?? ""}`);
         }
@@ -298,8 +302,21 @@ function useProviderOps(provider: ProviderBridge | undefined): {
   const runOp = useCallback(
     (providerId: string, op: ProviderOp): void => {
       if (provider === undefined) return;
-      if (op === "key") {
-        wizard.start({ kind: "key", providerId }, afterWizard);
+      if (op === "key" || op === "login") {
+        wizard.start({ kind: op, providerId }, afterWizard);
+        return;
+      }
+      if (op === "logout") {
+        void (async () => {
+          try {
+            await logoutProvider(provider.config, providerId);
+            provider.updateProviders(await provider.reloadConfig());
+            await reload();
+            setNotice(`已退出登录 ${providerId}`);
+          } catch (error) {
+            setNotice(`! ${safeLoginError(error).message}`);
+          }
+        })();
         return;
       }
       // refresh：同步执行（页面 busyText 显示进行中）
@@ -1643,6 +1660,9 @@ function SessionApp({
           } else if (outcome.kind === "key-updated") {
             provider.updateProviders(await provider.reloadConfig());
             pushLine(`已更新 ${outcome.providerId} 的密钥`);
+          } else if (outcome.kind === "logged-in") {
+            provider.updateProviders(await provider.reloadConfig());
+            pushLine(`已登录 ${outcome.providerId}`);
           } else if (outcome.kind === "error") {
             pushLine(`! ${outcome.message}`);
           }
@@ -2824,7 +2844,11 @@ function SessionApp({
       />
     ) : wizardOverlay !== undefined ? (
       <WizardView
-        title={wizardOverlay.kind === "add" ? "添加服务商" : `更新密钥 ${wizardOverlay.providerId}`}
+        title={
+          wizardOverlay.kind === "add"
+            ? "添加服务商"
+            : `${wizardOverlay.kind === "login" ? "登录" : "更新密钥"} ${wizardOverlay.providerId}`
+        }
         state={wizard.state}
         active
         width={width}

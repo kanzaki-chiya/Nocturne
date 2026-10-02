@@ -629,6 +629,12 @@ export async function runRepl(
                         },
                       }),
                     ),
+                  runLoginWizard: (providerId: string) =>
+                    startWizard(async (wio) => {
+                      const { runProviderLogin } = await import("@nocturne/tui/provider-login");
+                      await runProviderLogin(bridge.config, providerId, wio);
+                      runtime.updateProviders(await bridge.reloadConfig());
+                    }),
                   runKeyWizard: (providerId: string) =>
                     startWizard((wio) =>
                       runKeyWizardInSession(wio, {

@@ -2175,3 +2175,11 @@ export type {
   ReviewResult,
   ReviewSubject,
 } from "./permission/index.js";
+
+export {
+  startProviderLogin,
+  logoutProvider,
+  ProviderLoginError,
+  type ProviderLoginErrorCode,
+  type ProviderLoginOptions,
+} from "./provider-login.js";
