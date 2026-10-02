@@ -28,6 +28,7 @@ import {
   toAiTools,
   toProviderError,
   routeSdkWarnings,
+  createLiveness,
 } from "./ai-sdk-common.js";
 import { createAuthFetch, modelRequestHeaders, withUserAgent } from "../http.js";
 import type { JSONValue } from "ai";
@@ -95,15 +96,17 @@ export function createOpenAICompatibleProvider(
     },
     fetchImpl,
   );
-  const sdk = createOpenAICompatible({
-    name: config.id,
-    baseURL: config.baseURL,
-    apiKey: "resolved-by-fetch",
-    // ADR-0031 §2：User-Agent 以 nocturne/<version> 开头（条目 headers
-    // 里用户写的 UA 优先）；SDK 追加的 ai-sdk/... 后缀保留
-    headers: withUserAgent(config.headers, config.userAgent),
-    fetch: wrappedFetch,
-  });
+  // 每个请求单独创建 SDK 实例：fetch 带本请求的存活观察（createLiveness）
+  const createSdk = (fetch: typeof globalThis.fetch) =>
+    createOpenAICompatible({
+      name: config.id,
+      baseURL: config.baseURL,
+      apiKey: "resolved-by-fetch",
+      // ADR-0031 §2：User-Agent 以 nocturne/<version> 开头（条目 headers
+      // 里用户写的 UA 优先）；SDK 追加的 ai-sdk/... 后缀保留
+      headers: withUserAgent(config.headers, config.userAgent),
+      fetch,
+    });
   // SDK 的 providerOptions 命名空间是 name.split(".")[0] 的驼峰形；
   // 含连字符/下划线的 id 用原名会触发 SDK 弃用告警，统一写驼峰键
   const optionsNs = (config.id.split(".")[0] ?? config.id).replace(
@@ -163,8 +166,9 @@ export function createOpenAICompatibleProvider(
       // sessionHeader 才写；静态 headers 同名头优先
       const requestHeaders = modelRequestHeaders(config, request);
 
+      const live = createLiveness(wrappedFetch);
       const result = streamText({
-        model: sdk.chatModel(request.model),
+        model: createSdk(live.fetch).chatModel(request.model),
         system: request.system.map((b) => b.text).join("\n\n"),
         // ADR-0023：Chat Completions 的 tool 消息不能携带图片——
         // 工具结果图以批末 user 消息转发（ai-sdk-common.ts 说明）
@@ -191,8 +195,12 @@ export function createOpenAICompatibleProvider(
       let sawFinish = false;
       let sawUsage = false;
       try {
-        for await (const part of result.stream) {
+        for await (const part of live.events(result.stream)) {
           if (signal.aborted) throw abortError();
+          if (part.type === "heartbeat") {
+            yield part;
+            continue;
+          }
           const events = mapPart(part, toolNames);
           for (const ev of events) {
             if (ev.type === "usage") {

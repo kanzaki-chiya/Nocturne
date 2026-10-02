@@ -243,6 +243,35 @@ describe("openai-responses 适配器", () => {
     expect(capture.headers?.get("x-custom")).toBe("yes");
   });
 
+  it("上游先回响应头、内容迟到时，心跳在内容之前到达（ADR-0014 修订）", async () => {
+    const base = sseFetch([...messageChunks(["ok", ""]), completed()]);
+    const fetchImpl = async (input: unknown, init?: RequestInit): Promise<Response> => {
+      const response = await base(input, init);
+      const reader = response.body?.getReader();
+      const delayed = new ReadableStream<Uint8Array>({
+        async start(c) {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          for (;;) {
+            const chunk = await reader?.read();
+            if (chunk === undefined || chunk.done) break;
+            c.enqueue(chunk.value);
+          }
+          c.close();
+        },
+      });
+      return new Response(delayed, { status: 200, headers: response.headers });
+    };
+    const p = createOpenAIResponsesProvider(config(), envWithKey, fetchImpl);
+    const start = Date.now();
+    const timeline: [string, number][] = [];
+    for await (const ev of p.stream(request(), new AbortController().signal))
+      timeline.push([ev.type, Date.now() - start]);
+    const heartbeat = timeline.find(([type]) => type === "heartbeat");
+    const text = timeline.find(([type]) => type === "text_delta");
+    expect(heartbeat?.[1]).toBeLessThan(200);
+    expect(text?.[1]).toBeGreaterThanOrEqual(250);
+  });
+
   it("文本流：text_delta → usage → finish(stop)，恰好一个 finish", async () => {
     const p = createOpenAIResponsesProvider(
       config(),

@@ -38,6 +38,7 @@ import {
   toAiTools,
   toProviderError,
   routeSdkWarnings,
+  createLiveness,
 } from "./ai-sdk-common.js";
 
 /** Messages API 的 cache_control 断点（默认 5 分钟有效） */
@@ -115,15 +116,17 @@ export function createAnthropicProvider(
     },
     fetchImpl,
   );
-  const sdk = createAnthropic({
-    // SDK 在调用 fetch 前校验 apiKey；真实凭据仍由 wrappedFetch 按请求覆盖。
-    apiKey: "resolved-by-fetch",
-    ...(config.baseURL !== undefined ? { baseURL: config.baseURL } : {}),
-    // ADR-0031 §2：User-Agent 以 nocturne/<version> 开头（条目 headers
-    // 里用户写的 UA 优先）；SDK 追加的 ai-sdk/... 后缀保留
-    headers: withUserAgent(config.headers, config.userAgent),
-    fetch: wrappedFetch,
-  });
+  // 每个请求单独创建 SDK 实例：fetch 带本请求的存活观察（createLiveness）
+  const createSdk = (fetch: typeof globalThis.fetch) =>
+    createAnthropic({
+      // SDK 在调用 fetch 前校验 apiKey；真实凭据仍由 wrappedFetch 按请求覆盖。
+      apiKey: "resolved-by-fetch",
+      ...(config.baseURL !== undefined ? { baseURL: config.baseURL } : {}),
+      // ADR-0031 §2：User-Agent 以 nocturne/<version> 开头（条目 headers
+      // 里用户写的 UA 优先）；SDK 追加的 ai-sdk/... 后缀保留
+      headers: withUserAgent(config.headers, config.userAgent),
+      fetch,
+    });
 
   // 预算覆盖表仍按服务商的协议格式配置；档位能力只看模型声明。
   const budgets: Partial<Record<ReasoningEffortLevel, number>> = {};
@@ -199,8 +202,9 @@ export function createAnthropicProvider(
       const cacheSystem =
         prefix !== undefined && systemText !== "" && prefix.systemBlocks >= request.system.length;
 
+      const live = createLiveness(wrappedFetch);
       const result = streamText({
-        model: sdk(request.model),
+        model: createSdk(live.fetch)(request.model),
         system: cacheSystem
           ? { role: "system", content: systemText, providerOptions: EPHEMERAL_CACHE }
           : systemText,
@@ -247,8 +251,12 @@ export function createAnthropicProvider(
       let sawFinish = false;
       let sawUsage = false;
       try {
-        for await (const part of result.stream) {
+        for await (const part of live.events(result.stream)) {
           if (signal.aborted) throw abortError();
+          if (part.type === "heartbeat") {
+            yield part;
+            continue;
+          }
           const events = mapPart(part, toolNames);
           for (const ev of events) {
             if (ev.type === "usage") {

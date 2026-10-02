@@ -163,7 +163,7 @@ type FinishReason = "stop" | "tool_calls" | "length" | "content_filter" | "other
 4. `usage` 至多出现一次，语义已换算为统一口径（`inputTokens` 不重复计入缓存 token 等）。
 5. 失败时迭代器抛出 `ProviderError`；`signal` 中止时抛出 `name === "AbortError"` 的错误。不使用"错误事件"。
 6. 适配器不重试、不裁剪上下文、不执行工具。
-7. 上游开始响应（拿到响应头、流已建立）时可发 `heartbeat`，可在任意位置出现、可多次；流式计时包装据此重置等待，消费后不向下游转发（ADR-0014 修订）。
+7. 上游有动静（拿到响应头、读到任意字节）时可发 `heartbeat`，可在任意位置出现、可多次；流式计时包装据此重置等待，消费后不向下游转发（ADR-0014 修订）。
 
 流消费的公共包装为首个事件和事件间空闲设置独立超时；超时中止底层请求并抛出 `ProviderError(kind="timeout", retryable=true)`。这改变了静默流的失败语义，决策见 [ADR-0014](../decisions/ADR-0014-stream-timeout-empty-response.md)。适配器自身仍不重试。
 

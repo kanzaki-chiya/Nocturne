@@ -38,6 +38,7 @@ import {
   toAiTools,
   toProviderError,
   routeSdkWarnings,
+  createLiveness,
 } from "./ai-sdk-common.js";
 import { constrainResponsesFetch } from "./responses-constraints.js";
 
@@ -99,15 +100,6 @@ export function createOpenAIResponsesProvider(
   );
   // 按会话保存的粘性路由令牌（requestConstraints.stickyRoutingHeader）；只在内存里，随进程结束
   const routingTokens = new Map<string, string>();
-  const sdk = createOpenAI({
-    baseURL: config.baseURL,
-    // SDK 在组装请求头时强制读取 apiKey；真实凭据仍由 wrappedFetch 按请求覆盖
-    apiKey: "resolved-by-fetch",
-    // ADR-0031 §2：User-Agent 以 nocturne/<version> 开头（条目 headers
-    // 里用户写的 UA 优先）；SDK 追加的 ai-sdk/... 后缀保留
-    headers: withUserAgent(config.headers, config.userAgent),
-    fetch: wrappedFetch,
-  });
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
     withReasoningEfforts(resolveModelInfo({ provider: config.id, model: id }, config.models?.[id])),
   );
@@ -133,15 +125,17 @@ export function createOpenAIResponsesProvider(
                     clear: () => routingTokens.delete(request.sessionId ?? ""),
                   },
             );
-      const requestSdk =
-        constrained === undefined
-          ? sdk
-          : createOpenAI({
-              baseURL: config.baseURL,
-              apiKey: "resolved-by-fetch",
-              headers: withUserAgent(config.headers, config.userAgent),
-              fetch: constrained.fetch,
-            });
+      // 每个请求单独创建 SDK 实例：fetch 带本请求的存活观察（createLiveness）
+      const live = createLiveness(constrained?.fetch ?? wrappedFetch);
+      const requestSdk = createOpenAI({
+        baseURL: config.baseURL,
+        // SDK 在组装请求头时强制读取 apiKey；真实凭据仍由 wrappedFetch 按请求覆盖
+        apiKey: "resolved-by-fetch",
+        // ADR-0031 §2：User-Agent 以 nocturne/<version> 开头（条目 headers
+        // 里用户写的 UA 优先）；SDK 追加的 ai-sdk/... 后缀保留
+        headers: withUserAgent(config.headers, config.userAgent),
+        fetch: live.fetch,
+      });
       // providerOptions 命名空间固定为 "openai"（SDK providerOptionsName =
       // provider 名首段；ADR-0031 §6：条目级 providerOptions 不进入本适配器）。
       // store:false 与 encrypted_content include 是推理加密回传的前提，
@@ -245,8 +239,12 @@ export function createOpenAIResponsesProvider(
       let sawFinish = false;
       let sawUsage = false;
       try {
-        for await (const part of result.stream) {
+        for await (const part of live.events(result.stream)) {
           if (signal.aborted) throw abortError();
+          if (part.type === "heartbeat") {
+            yield part;
+            continue;
+          }
           if (
             part.type === "finish" &&
             auth.requestConstraints?.requireCompleted === true &&

@@ -286,6 +286,85 @@ export function planToolChoice(
  */
 export const suppressSdkErrorLog = (): void => undefined;
 
+// ── 上游存活信号（ADR-0014 修订） ───────────────────────────
+
+const HEARTBEAT_INTERVAL_MS = 1_000;
+
+/**
+ * 在 fetch 层观察上游：拿到响应头、读到任意字节（含 SSE 保活注释）都算存活。
+ * SDK 只在首个内容事件到来时才发 start-step，长上下文或推理模型在此之前可能静默很久，
+ * 不能用它判断连接是否建立。每个请求单独创建，events() 把存活信号并入 SDK 的流，
+ * 以 heartbeat 交给计时包装（至多每秒一次）。
+ */
+export function createLiveness(fetchImpl: typeof fetch): {
+  fetch: typeof fetch;
+  events<T>(source: AsyncIterable<T>): AsyncIterable<T | { type: "heartbeat" }>;
+} {
+  let beaten = false;
+  let waiter: (() => void) | undefined;
+  const beat = (): void => {
+    beaten = true;
+    const wake = waiter;
+    waiter = undefined;
+    wake?.();
+  };
+  const livenessFetch: typeof fetch = async (input, init) => {
+    const response = await fetchImpl(input, init);
+    beat();
+    if (response.body === null) return response;
+    const body = response.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          beat();
+          controller.enqueue(chunk);
+        },
+      }),
+    );
+    const headers = new Headers(response.headers);
+    headers.delete("content-length");
+    headers.delete("content-encoding");
+    return new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  };
+  async function* events<T>(source: AsyncIterable<T>): AsyncIterable<T | { type: "heartbeat" }> {
+    const iterator = source[Symbol.asyncIterator]();
+    let pending: Promise<IteratorResult<T>> | undefined;
+    let lastHeartbeat = -Infinity;
+    try {
+      for (;;) {
+        pending ??= iterator.next();
+        const woke = beaten
+          ? Promise.resolve("beat" as const)
+          : new Promise<"beat">((resolve) => {
+              waiter = () => {
+                resolve("beat");
+              };
+            });
+        const result = await Promise.race([pending, woke]);
+        if (result === "beat") {
+          beaten = false;
+          if (Date.now() - lastHeartbeat >= HEARTBEAT_INTERVAL_MS) {
+            lastHeartbeat = Date.now();
+            yield { type: "heartbeat" };
+          }
+          continue;
+        }
+        waiter = undefined;
+        pending = undefined;
+        if (result.done === true) return;
+        yield result.value;
+      }
+    } finally {
+      waiter = undefined;
+      await iterator.return?.();
+    }
+  }
+  return { fetch: livenessFetch, events };
+}
+
 // ── 流式事件归一化 ─────────────────────────────────────────
 
 export function mapPart(
@@ -330,10 +409,6 @@ export function mapPart(
         ? [{ type: "reasoning_delta", text: "", providerData }]
         : [];
     }
-    case "start-step":
-      // SDK 在拿到上游响应头、流开始后发出；长上下文与推理模型可能很久才有首个内容事件，
-      // 以此告诉计时器连接已通（ADR-0014 修订）
-      return [{ type: "heartbeat" }];
     case "tool-input-start":
       toolNames.set(part.id, part.toolName);
       return [];
