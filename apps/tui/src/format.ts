@@ -4,7 +4,18 @@
  */
 import stringWidth from "string-width";
 
-import type { PermissionReviewedPayload, Usage } from "@nocturne/core/protocol";
+import type { PermissionReviewedPayload, ToolEntry, Usage } from "@nocturne/core/protocol";
+
+export function subagentModel(entry: ToolEntry): string {
+  const output = entry.result?.output;
+  return entry.name === "task" &&
+    typeof output === "object" &&
+    output !== null &&
+    "model" in output &&
+    typeof output.model === "string"
+    ? ` [${output.model}]`
+    : "";
+}
 
 /**
  * conhost（GBK 代码页）把歧义宽度字符渲染为 2 列，与 string-width 的 1 列不一致：

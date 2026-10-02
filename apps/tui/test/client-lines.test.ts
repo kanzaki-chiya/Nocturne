@@ -3,10 +3,18 @@ import { describe, expect, it } from "vitest";
 import { createSessionView, type ViewEntry } from "@nocturne/core/protocol";
 import { interleaveClient } from "../src/client-lines.js";
 import { transcriptBlocks } from "../src/lines.js";
+import { subagentModel } from "../src/format.js";
+import type { ToolEntry } from "@nocturne/core/protocol";
 
 const line = (id: number, after: number) => ({ id, text: `! 提示${id}`, after });
 
 describe("本地提示行定位", () => {
+  it("task 摘要显示实际执行模型，旧结果和普通工具保持兼容", () => {
+    const entry = { name: "task", result: { output: { model: "fake/child" } } } as ToolEntry;
+    expect(subagentModel(entry)).toBe(" [fake/child]");
+    expect(subagentModel({ ...entry, name: "read" })).toBe("");
+    expect(subagentModel({ ...entry, result: undefined })).toBe("");
+  });
   it("按推入时的条目数插在条目之间，其余排在最后", () => {
     const out = interleaveClient(
       ["a", "b", "c"],

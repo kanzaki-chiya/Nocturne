@@ -2,7 +2,13 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { createPlatform, createRuntime, FakeProvider, loadConfig } from "../src/index.js";
+import {
+  createPlatform,
+  createRuntime,
+  FakeProvider,
+  loadConfig,
+  type RuntimeEvent,
+} from "../src/index.js";
 
 let root: string;
 let home: string;
@@ -85,3 +91,73 @@ it("设置接口保存、清除角色，Settings 包含三行；畸形引用拒�
   await runtime.setModelRole("task", null);
   expect(runtime.describeModelRoles()[0]?.configured).toBeUndefined();
 });
+
+it.each([true, false])(
+  "task 角色配置=%s：请求、日志、结果模型一致，档位按子模型降档",
+  async (configured) => {
+    if (configured) await json("settings.json", { modelRoles: { task: "fake/child" } });
+    const base = new FakeProvider({}).models()[0];
+    if (base === undefined) throw new Error("FakeProvider 必须有默认模型");
+    const provider = new FakeProvider({
+      models: [
+        base,
+        {
+          ...base,
+          ref: { provider: "fake", model: "child" },
+          capabilities: { ...base.capabilities, reasoningEffort: ["low"] },
+        },
+      ],
+      handler: (request) =>
+        request.tools.some((t) => t.name === "finish")
+          ? [
+              {
+                type: "tool_call",
+                toolCallId: "finish",
+                name: "finish",
+                input: { result: "结果" },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ]
+          : request.messages.some((m) => m.role === "tool")
+            ? [
+                { type: "text_delta", text: "done" },
+                { type: "finish", reason: "stop" },
+              ]
+            : [
+                {
+                  type: "tool_call",
+                  toolCallId: "task",
+                  name: "task",
+                  input: { task: "调查", preset: "explore" },
+                },
+                { type: "finish", reason: "tool_calls" },
+              ],
+    });
+    const runtime = await createRuntime({
+      cwd: workspace,
+      config: await load(),
+      providers: [provider],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1", reasoningEffort: "high" });
+    const events: RuntimeEvent[] = [];
+    session.subscribe((e) => events.push(e));
+    expect(await session.submit({ text: "调查" })).toBe("done");
+    const childRequest = provider.requests.find((r) => r.tools.some((t) => t.name === "finish"));
+    expect(childRequest).toMatchObject({
+      model: configured ? "child" : "fake-1",
+      reasoningEffort: configured ? "low" : "high",
+    });
+    const completed = events.find((e) => e.type === "tool.completed" && e.payload.name === "task");
+    expect(completed?.type === "tool.completed" && completed.payload.output).toMatchObject({
+      model: configured ? "fake/child" : "fake/fake-1",
+    });
+    if (completed?.type === "tool.completed") {
+      const output = completed.payload.output as { childLogPath: string };
+      const created = JSON.parse(
+        (await readFile(output.childLogPath, "utf8")).split("\n")[0] ?? "",
+      );
+      expect(created.payload.model.model).toBe(childRequest?.model);
+    }
+    await session.close();
+  },
+);

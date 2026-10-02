@@ -1118,7 +1118,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         diagnostics,
         instructions,
         environment,
-        model: () => model,
+        model: () =>
+          resolveModelRole(
+            sessionRegistry,
+            config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.task,
+            "task",
+          ) ?? model,
         permissionPreset: () => session.state().config.permissionPreset,
         reviewer: getReviewer,
         recentUserMessages,

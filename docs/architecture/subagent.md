@@ -45,7 +45,7 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 
 **ToolResult**：
 
-- `status: "ok"`：`modelContent` 为子代理 `finish` 提交的结果文本（`outputSchema` 时为序列化 JSON）；`output` 携带 `{ childSessionId, childLogPath, turns, steps, usage, structured? }`。`modelContent` 超预算走既有截断+落盘路径（[tools.md](tools.md) 第 4 节，`spillPath` 在父会话附件目录）；完整过程永远在子会话日志里，`childLogPath` 随结果告知。
+- `status: "ok"`：`modelContent` 为子代理 `finish` 提交的结果文本（`outputSchema` 时为序列化 JSON）；`output` 携带 `{ childSessionId, childLogPath, model, turns, steps, usage, structured? }`。`modelContent` 超预算走既有截断+落盘路径（[tools.md](tools.md) 第 4 节，`spillPath` 在父会话附件目录）；完整过程永远在子会话日志里，`childLogPath` 随结果告知。
 - `status: "error"` 的错误码：
 
 | code | 含义 |
@@ -206,11 +206,13 @@ launch(request, ctx)
 
 - **不继承父会话历史**：子会话的 `message.user` 就是 `task` 文本；父会话的对话、工具结果、压缩记录一律不进入子上下文。
 - **系统提示**：`BuildContextInput` 新增可选 `basePrompt`（缺省即现有 `BASE_SYSTEM_PROMPT`），子会话传入子代理提示：身份（父代理派生的任务会话）、`finish` 提交协议（含 `outputSchema` 要求）、不能向用户提问的约束、其余工作约定。工具规格、项目指令、环境信息段的组装不变。
-- **继承**：项目指令（用户级与各级 `AGENTS.md`——它们是项目事实）、环境信息、同一 `ResolvedModel`（模型清单与 Provider 由会话级注册表解析，子会话不另建）。思考档位同样继承：子会话 `session.created.reasoningEffort` 写父会话当前档位按子模型可用集合就近降档后的值（ADR-0018 第 5 节）。
-- **预算与压缩**：同一模型同一窗口，子会话独立计算；L1/L2 压缩机制照常（它就是一次普通 Turn）。子会话通常短命，压缩很少触发，但机制不需要例外。
+- **继承**：项目指令（用户级与各级 `AGENTS.md`——它们是项目事实）、环境信息、由 task 角色决定的 `ResolvedModel`（未配置时继承父模型，模型清单与 Provider 由会话级注册表解析，子会话不另建）。思考档位同样继承：子会话 `session.created.reasoningEffort` 写父会话当前档位按子模型可用集合就近降档后的值（ADR-0018 第 5 节）。
+- **预算与压缩**：按子模型自己的能力与窗口独立计算；L1/L2 压缩机制照常（它就是一次普通 Turn）。子会话通常短命，压缩很少触发，但机制不需要例外。
 - **token 成本**：子会话的用量记在子日志的 `turn.completed.usage`，并随 `task` 结果的 `output.usage` 汇总给父侧。
 
-## 9. 与 Turn / Agent Loop 的关系
+## 9. 模型选择与 Turn / Agent Loop
+
+[ADR-0040](../decisions/ADR-0040-model-roles.md)：子代理独立模型由 `task` 角色决定，未配置或引用无效时继承父会话当前模型。派生时固定模型与档位，催促轮继续使用同一个子模型；档位继承父会话意图并按子模型可用集合就近降档。`session.created.model` 与 `task.output.model` 记录实际模型，TUI 工具行显示该模型。
 
 `runTurn` 的改动仅限两个注入点，都不含工具名/角色分支：
 
@@ -289,7 +291,7 @@ launch(request, ctx)
 - **隔离工作区**（worktree/overlay）：子代理与父会话共享同一工作区视图；
 - **子会话权限冒泡**：见 7.1；
 - **并行 task 数组**：一次调用一个子会话；批量并行等并行调度存在后再评估；
-- **子代理独立模型选择**：子会话继承父会话模型；
+
 - **配置文件 `subagent` 段**：默认值已覆盖本阶段；开关走 `RuntimeOptions.subagent.enabled` 或权限规则 `subagent * → deny`。
 
 ADR-0036 第一轮：子会话沿用父会话的审查器实例与最近用户意图，smart 的剩余 ask 可先经审查放行或拦截；unsure 仍按非交互 deny 处理，不向用户发确认。只由用户确认的集合沿用父策略，审查用量随子会话汇总。见 [permissions.md](permissions.md) 5.3、7。

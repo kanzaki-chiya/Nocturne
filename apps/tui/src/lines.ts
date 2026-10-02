@@ -19,6 +19,7 @@ import {
   permissionReviewLine,
   stripControls,
   summarizeToolInput,
+  subagentModel,
   tailLines,
   truncateLine,
 } from "./format.js";
@@ -291,7 +292,7 @@ export function layoutEntry(
         return lines;
       }
       const summary = summarizeToolInput(entry.name, entry.input);
-      const head = `${mark} ${entry.name ?? "?"} ${summary} ${entry.status}`;
+      const head = `${mark} ${entry.name ?? "?"}${subagentModel(entry)} ${summary} ${entry.status}`;
       const lines = [...review, ...rows(entry.key, head, width, { toggle })];
       const attachmentRows = (entry.result?.attachments ?? []).flatMap((att, i) =>
         rows(`${entry.key}:image:${i}`, `  ${attachmentLine(att, i, ascii)}`, width, {

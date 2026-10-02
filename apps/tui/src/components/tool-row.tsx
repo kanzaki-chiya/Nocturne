@@ -14,6 +14,7 @@ import {
   formatDuration,
   permissionReviewLine,
   summarizeToolInput,
+  subagentModel,
   tailLines,
   truncateLine,
 } from "../format.js";
@@ -103,7 +104,7 @@ export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): 
     Math.max(10, width - 24),
     g.ellipsis,
   );
-  const head = ` ${name} ${summary}`;
+  const head = ` ${name}${subagentModel(entry)} ${summary}`;
   const duration = entry.result?.durationMs;
   const suffix =
     entry.status === "awaiting_permission"

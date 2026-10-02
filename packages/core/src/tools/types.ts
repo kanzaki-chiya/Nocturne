@@ -407,6 +407,7 @@ export interface SubagentRequest {
 
 /** task 工具结果的 output 形状（subagent.md 第 1 节） */
 export interface SubagentStats {
+  model: string;
   childSessionId: string;
   childLogPath: string;
   turns: number;

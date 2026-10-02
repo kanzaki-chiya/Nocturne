@@ -379,7 +379,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           const turnDeps: TurnDeps = {
             compactionThreshold: deps.compactionThreshold?.(),
             session: child,
-            model: deps.model(),
+            model: childModel,
             tools: registry,
             executor,
             execEnv,
@@ -404,6 +404,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             const stats: SubagentStats = {
               childSessionId: child.id,
               childLogPath: child.logPath,
+              model: `${childModel.model.ref.provider}/${childModel.model.ref.model}`,
               turns: attempt,
               steps: child.state().history.filter((h) => h.kind === "tool").length,
               ...(usageOf(child) !== undefined ? { usage: usageOf(child) } : {}),
@@ -452,6 +453,7 @@ function statsOf(session: Session, turns: number): SubagentStats {
   return {
     childSessionId: session.id,
     childLogPath: session.logPath,
+    model: `${session.state().config.model.provider}/${session.state().config.model.model}`,
     turns,
     steps: session.state().history.filter((h) => h.kind === "tool").length,
     ...(usageOf(session) !== undefined ? { usage: usageOf(session) } : {}),
