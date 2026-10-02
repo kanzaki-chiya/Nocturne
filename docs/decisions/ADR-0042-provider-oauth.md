@@ -92,11 +92,13 @@ interface AuthResolver {
 
 **存储**：
 
-- 凭据记录序列化为 JSON 字符串，经现有 `CredentialStore.set(providerId, …)` 交给系统后端保存：DPAPI、钥匙串或 libsecret，不落明文，不新增后端。
+- 凭据记录序列化为 JSON 字符串，经现有 `CredentialStore.set(providerId, …)` 交给系统后端保存：DPAPI、钥匙串或 libsecret。有系统后端时不落明文；没有时见下文。
 - 记录内容：`{ version: 1, clientId, subject, email?, idToken, accessToken, refreshToken, expiresAt, scopes }`。
-- 没有系统后端（`none`，如无桌面密钥环的 Linux）时仍可登录，但凭据**只保存在当前进程内存**：本进程内照常刷新，退出后丢失，下次启动需要重新登录。不退回明文文件（provider-setup.md 第 3 节）。
-  - 登录完成时提示「未找到系统凭据存储，ChatGPT 登录只在本次运行有效」，`/provider` 的凭据状态标注「仅本次运行」。
-  - 这种情况下不取跨进程锁：其他进程拿不到这份凭据，不存在共用 refresh token 的问题。
+- 没有系统后端（`none`，实际只会出现在无桌面密钥环的 Linux 上）时仍可登录，登录完成后让用户二选一：
+  - **保存到 `credentials.json`（明文，仅你可读）**：索引新增后端 `plaintext`，条目里直接存记录 JSON。文件沿用现有的原子写与 POSIX `0600`，也沿用 `credentials.json` 的硬拒绝（permissions.md 5.3），不新增文件。`/provider` 的凭据状态标注「明文保存」。
+  - **仅本次运行**：凭据只放在进程内存，本进程内照常刷新，退出后丢失，下次启动重新登录。`/provider` 标注「仅本次运行」，这种情况下不取跨进程锁。
+  - 不默认选明文，也不静默写入。界面如实说明明文的风险：文件被备份、同步或拷走时凭据随之泄漏，refresh token 在被撤销前可以持续使用。
+- 明文后端**只用于账号登录凭据**（本 ADR 的 `openai-siwc` 记录）。API key 维持 provider-setup.md 第 3 节「没有可用后端时不退回明文、只提供环境变量方式」，因为 API key 有环境变量可用，而 refresh token 每次刷新都会轮换，没法放进环境变量。
 
 **刷新**：
 
@@ -190,7 +192,7 @@ logoutProvider(config: RuntimeConfig, providerId: string): Promise<void>
 ```
 
 - `runProviderSetupWizard` 遇到预设的鉴权方式不是 `apiKey`，或者用户选了「浏览器登录」时，用 `LoginSession` 代替「输入密钥」这一步。
-- `ProviderOverview` 增加 `auth` 描述：`apiKey`（来源：环境变量或系统保存）、`ChatGPT 账号 <email>`、`Grok CLI 凭据 ~/.grok/auth.json`，以及凭据状态（有效、即将过期、已失效、缺少）。只描述，不含令牌。
+- `ProviderOverview` 增加 `auth` 描述：`apiKey`（来源：环境变量或系统保存）、`ChatGPT 账号 <email>`、`Grok CLI 凭据 ~/.grok/auth.json`，以及凭据状态（有效、即将过期、已失效、缺少）和保存位置（系统保存、明文保存、仅本次运行）。只描述，不含令牌。
 - **TUI**：
   - 服务商页的登录等待页显示授权地址、「已在浏览器打开」或「请复制到浏览器」、粘贴输入框和 Esc 取消。
   - 服务商详情增加「重新登录」「退出登录」。
@@ -225,7 +227,7 @@ logoutProvider(config: RuntimeConfig, providerId: string): Promise<void>
 - ChatGPT 订阅用户不必另买 API 额度，就能用 Nocturne 调用套餐内的模型；Grok CLI 用户复用已有登录；OpenRouter 用户省去复制 key 的步骤。
 - 新增 `auth` 字段、`modelHeader` 字段、鉴权解析层、登录会话接口和 `oauth-host.json`，没有新的持久事件。需要同步的文档：
   - providers.md 第 3、4、6 节；
-  - provider-setup.md 第 1、3、4、5、6、8 节；
+  - provider-setup.md 第 1、3（`plaintext` 后端只用于账号登录凭据）、4、5、6、8 节；
   - provider-api.md（`AuthResolver`、`ProviderAuthError`）；
   - permissions.md 5.3、config.md（`auth` 只在用户级生效）；
   - cli.md、tui.md。
