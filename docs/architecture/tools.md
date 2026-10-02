@@ -166,3 +166,7 @@ HTML/XHTML 删除 `script/style/noscript/svg/iframe/nav/header/footer/aside/form
 ## 7. 暂不设计
 
 工具别名、Provider 原生工具（如服务端网页搜索）、后台运行的 shell。工具结果图片已有落地通道（`ToolResult.attachments` → `AttachmentStore` → 按 `imageInput` 投影，ADR-0023）；MCP 返回的图片目前仍按占位符处理（见 [mcp.md](mcp.md) 第 6 节），接入时转换为 `ToolResult.attachments`，不修改执行管线的步骤。
+
+## 文件检查点
+
+执行器在权限通过后，按解析后的 `edit` 主体，在执行前和执行结束后调用根会话检查点记录器；异常与中断同样记录 after，不按工具名识别文件改动。多文件编辑与改名自然覆盖所有 edit 路径。每轮首次 before、落盘与事件契约见 [sessions.md](sessions.md#文件检查点) 和 [events.md](../protocols/events.md#文件检查点adr-0041)。

@@ -259,3 +259,7 @@ type QuestionAnswer = { declined: true } | {
 `permission.reviewed` 是持久事件，在审查结束、权限结算或用户确认之前发出；拿不准的审查也必须记录。它与工具共用 `callId`，客户端在工具行和确认框显示“审查：放行/拦截/拿不准 — 理由”。`usage` 单独标注审查来源，折叠时计入会话总用量，Turn 的 `usage` 也包含它；不产生助手消息或模型上下文。未配置 smart 审查器时发一次 `runtime.warning(code: "permission_reviewer_missing")`。
 
 `session.created` 与 `session.config_changed` 的 `permissionPreset` schema 接受六个预设 `read-only/default/auto-edit/guarded/smart/bypass`；旧日志 `full-access` 读入时归一化为 `guarded`。保留早期日志自定义预设字符串的恢复兼容性。
+
+## 文件检查点（ADR-0041）
+
+`checkpoint.file` 是持久化事实，字段为 `callId`、绝对 `path`、`phase`，子代理改动另带来源 `sessionId`。`before` 阶段包含 `before: { sha256, size } | null | { untracked: string }`；`after` 阶段包含 `sha256: string | null`。同一轮每路径只保留第一次 before，每次调用结束（包括失败）均记录 after。它不进入模型历史或 SessionView。读取失败、目录、大于 10MB 的文件发临时 `runtime.warning(code="checkpoint_untracked")`，不阻止工具执行。格式版本保持 1；旧实现遇到新持久事件按既有规则拒绝。设计见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。

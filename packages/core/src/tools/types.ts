@@ -304,6 +304,7 @@ export interface McpConnector {
 
 /** Agent Loop 提供给 Executor 的运行环境；工具看不到它 */
 export interface ExecutionScope extends ToolScope {
+  checkpoint?: ExecutionEnvironment["checkpoint"];
   sessionId: string;
   turnId: string;
   /** Turn 级中断信号 */
@@ -344,6 +345,15 @@ export interface ShellProvider {
  * 不直接接触 Platform——平台能力经 ExecutionScope 进入工具。
  */
 export interface ExecutionEnvironment {
+  /** ADR-0041: root-session recorder; executors supply resolved subjects. */
+  checkpoint?:
+    | ((
+        phase: "before" | "after",
+        callId: string,
+        subjects: readonly PermissionSubject[],
+        sessionId: string,
+      ) => Promise<void>)
+    | undefined;
   platform: Platform;
   gate: PermissionGate;
   readState: ReadStateStore;

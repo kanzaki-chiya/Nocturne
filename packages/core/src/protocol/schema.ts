@@ -95,6 +95,29 @@ const fileRefSchema = z.object({
 // ── payload schema ─────────────────────────────────────────
 
 const payloadSchemas = {
+  "checkpoint.file": z.intersection(
+    z.object({ callId: z.string(), path: z.string(), sessionId: z.string().optional() }),
+    z.discriminatedUnion("phase", [
+      z.object({
+        phase: z.literal("before"),
+        before: z.union([
+          z.object({
+            sha256: z.string().regex(/^[a-f0-9]{64}$/),
+            size: z.number().int().nonnegative(),
+          }),
+          z.null(),
+          z.object({ untracked: z.string() }),
+        ]),
+      }),
+      z.object({
+        phase: z.literal("after"),
+        sha256: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .nullable(),
+      }),
+    ]),
+  ),
   "session.titled": z.object({
     title: z.string().min(1),
     model: z.string(),
@@ -222,6 +245,7 @@ function envelope<T extends DurableType>(type: T, payload: (typeof payloadSchema
 }
 
 export const durableEventSchema = z.discriminatedUnion("type", [
+  envelope("checkpoint.file", payloadSchemas["checkpoint.file"]),
   envelope("session.created", payloadSchemas["session.created"]),
   envelope("session.config_changed", payloadSchemas["session.config_changed"]),
   envelope("session.titled", payloadSchemas["session.titled"]),

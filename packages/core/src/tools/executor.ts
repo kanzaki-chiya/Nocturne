@@ -430,27 +430,29 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       };
 
       let result: ToolResult;
+      let executionStatus: "error" | "cancelled" | undefined;
       const execStart = Date.now();
+      await scope.checkpoint?.("before", call.callId, outcome.subjects, scope.sessionId);
       try {
         result = await tool.execute(input, toolCtx);
       } catch (e) {
         if (aborted(scope.signal)) {
-          return finish("cancelled", errorResult("cancelled", "调用已被中断"));
-        }
-        if (aborted(timeoutSignal)) {
-          return finish(
-            "error",
-            errorResult("timeout", `工具 "${call.name}" 超过 ${timeoutMs}ms 超时`),
-          );
-        }
-        return finish(
-          "error",
-          errorResult(
+          executionStatus = "cancelled";
+          result = errorResult("cancelled", "调用已被中断");
+        } else if (aborted(timeoutSignal)) {
+          result = errorResult("timeout", `工具 "${call.name}" 超过 ${timeoutMs}ms 超时`);
+          executionStatus = "error";
+        } else {
+          executionStatus = "error";
+          result = errorResult(
             "tool_failed",
             `工具 "${call.name}" 抛出异常：${e instanceof Error ? e.message : String(e)}`,
-          ),
-        );
+          );
+        }
+      } finally {
+        await scope.checkpoint?.("after", call.callId, outcome.subjects, scope.sessionId);
       }
+      if (executionStatus !== undefined) return finish(executionStatus, result);
       if (aborted(scope.signal)) {
         return finish("cancelled", errorResult("cancelled", "调用已被中断"));
       }

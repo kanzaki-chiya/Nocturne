@@ -43,6 +43,7 @@ import { defaultEditToolForModel } from "./config/edit-tool.js";
 import { createDiagnostics } from "./diagnostics/index.js";
 import { createHookRunner } from "./hooks/index.js";
 import { appendInputHistory, readInputHistory } from "./input-history.js";
+import { createCheckpointRecorder } from "./session/checkpoints.js";
 import {
   createRulePolicy,
   createModelSecurityReviewer,
@@ -963,6 +964,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ...(options.providerConfigs ?? []),
     ]);
     const execEnv: ExecutionEnvironment = {
+      checkpoint: createCheckpointRecorder(session, platform, sessionsDir),
       platform,
       gate,
       readState: createReadStateStore(paths),
@@ -1115,6 +1117,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     // task 与内置工具同一注册表——Agent Loop 无工具名分支
     if (subagentEnabled) {
       const launcher = createSubagentLauncher({
+        checkpoint: execEnv.checkpoint,
         store,
         sessionsDir,
         platform,

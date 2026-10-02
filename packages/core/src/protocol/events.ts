@@ -245,7 +245,15 @@ export interface QuestionRequestedPayload {
 
 // ── 类型映射与信封 ─────────────────────────────────────────
 
+export type CheckpointBefore = { sha256: string; size: number } | null | { untracked: string };
+export type CheckpointFilePayload = {
+  callId: string;
+  path: string;
+  sessionId?: string;
+} & ({ phase: "before"; before: CheckpointBefore } | { phase: "after"; sha256: string | null });
+
 export interface DurablePayloadMap {
+  "checkpoint.file": CheckpointFilePayload;
   "session.created": SessionCreatedPayload;
   "session.config_changed": SessionConfigChangedPayload;
   "session.titled": SessionTitledPayload;
@@ -318,6 +326,7 @@ export type EphemeralEvent<T extends EphemeralType = EphemeralType> = T extends 
 export type RuntimeEvent = DurableEvent | EphemeralEvent;
 
 export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
+  "checkpoint.file",
   "session.created",
   "session.config_changed",
   "session.titled",

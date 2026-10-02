@@ -79,6 +79,7 @@ export function createSubagentLimiter(max: number): SubagentLimiter {
 }
 
 export interface SubagentDeps {
+  checkpoint?: ExecutionEnvironment["checkpoint"];
   store: SessionStore;
   sessionsDir: string;
   /** 子会话执行环境的共享部分（ExecutionEnvironment 同名成员） */
@@ -310,6 +311,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           },
         );
         const execEnv: ExecutionEnvironment = {
+          checkpoint: deps.checkpoint,
           platform: deps.platform,
           gate,
           readState: createReadStateStore(deps.platform.paths),
