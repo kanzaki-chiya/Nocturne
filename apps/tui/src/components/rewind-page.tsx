@@ -68,7 +68,7 @@ export function RewindPage({
     target === undefined
       ? []
       : operation === "fork"
-        ? ["文件保持当前状态；需要文件也回到那一轮，", "可在新会话里再执行只还原文件的回退。"]
+        ? ["文件保持当前状态；需要文件也回到那一轮，", "可在原会话里对同一轮执行「只还原文件」。"]
         : [
             ...target.files.map(
               (file) =>
