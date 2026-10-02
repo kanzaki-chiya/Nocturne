@@ -164,6 +164,9 @@ export interface FetchModelsRequest {
 
 const FETCH_TIMEOUT_MS = 15_000;
 
+/** /v1/models 按未入文档的 client_version 过滤较新模型；发足够大的版本以列出全部（ADR-0042 修订） */
+const SIWC_MODELS_CLIENT_VERSION = "99.0.0";
+
 function joinUrl(base: string, path: string): string {
   return `${base.replace(/\/+$/, "")}${path}`;
 }
@@ -363,12 +366,15 @@ export async function fetchModels(
             token: () => Promise.resolve(key ?? ""),
             invalidate: () => Promise.resolve(),
           };
+  // 仅 siwc 模型列表带 client_version；其他服务商地址不变。
+  const modelsUrl =
+    resolver.modelFormat === "siwc" ? `${url}?client_version=${SIWC_MODELS_CLIENT_VERSION}` : url;
   const requestSignal = signal ?? new AbortController().signal;
   let raw: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       raw = await fetchJson(
-        url,
+        modelsUrl,
         {
           ...uaHeader,
           Accept: "application/json",

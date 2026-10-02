@@ -103,7 +103,7 @@ describe("fetchModels 字段映射", () => {
       { id: "declared", contextWindow: 272000, capabilities: { imageInput: true } },
       { id: "text-only", capabilities: { imageInput: false } },
     ]);
-    expect(calls[0]?.url).toBe("https://api.test/v1/models");
+    expect(calls[0]?.url).toBe("https://api.test/v1/models?client_version=99.0.0");
     expect(calls[0]?.init?.redirect).toBe("error");
     expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe("Bearer test-access");
   });
@@ -115,10 +115,11 @@ describe("fetchModels 字段映射", () => {
       token: async () => "secret",
       invalidate: vi.fn(() => Promise.resolve()),
     };
-    stubFetch(() => jsonRes({ data: [{ id: "api-key-only" }] }));
+    const listed = stubFetch(() => jsonRes({ data: [{ id: "api-key-only" }] }));
     expect(
       await fetchModels({ type: "openai-compatible", baseURL: "https://api.test/v1" }, auth),
     ).toEqual([]);
+    expect(listed[0]?.url).toBe("https://api.test/v1/models?client_version=99.0.0");
     const calls = stubFetch(() => jsonRes({ detail: "secret upstream" }, 401));
     await expect(
       fetchModels({ type: "openai-compatible", baseURL: "https://api.test/v1" }, auth),
@@ -129,6 +130,10 @@ describe("fetchModels 字段映射", () => {
       providerMessage: undefined,
     });
     expect(calls).toHaveLength(2);
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://api.test/v1/models?client_version=99.0.0",
+      "https://api.test/v1/models?client_version=99.0.0",
+    ]);
     expect(auth.invalidate).toHaveBeenCalledTimes(1);
   });
   it("OpenRouter 形状：top_provider 限额、pricing 换算、能力位声明", async () => {
@@ -159,6 +164,7 @@ describe("fetchModels 字段映射", () => {
       "sk-or",
     );
     expect(calls[0]?.url).toBe("https://openrouter.ai/api/v1/models");
+    expect(calls[0]?.url).not.toContain("client_version");
     expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe("Bearer sk-or");
 
     const flash = models.find((m) => m.id === "deepseek/deepseek-v4.1-flash");
@@ -195,10 +201,11 @@ describe("fetchModels 字段映射", () => {
     expect(models[1]?.displayName).toBe("No Caps");
     // 无 key 时不发 Authorization
     expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBeNull();
+    expect(calls[0]?.url).not.toContain("client_version");
   });
 
   it("supported_endpoints 原文映射：字符串数组、非空才记（ADR-0026 §1）", async () => {
-    stubFetch(() =>
+    const calls = stubFetch(() =>
       jsonRes({
         data: [
           { id: "m-chat", supported_endpoints: ["/chat/completions", "/responses"] },
@@ -220,12 +227,14 @@ describe("fetchModels 字段映射", () => {
     expect(byId.get("m-empty")?.endpoints).toBeUndefined();
     expect(byId.get("m-bad")?.endpoints).toEqual(["/messages"]);
     expect(byId.get("m-none")?.endpoints).toBeUndefined();
+    expect(calls[0]?.url).not.toContain("client_version");
   });
 
   it("anthropic 条目自定义 baseURL：列表走 <baseURL>/models（不再叠 /v1）", async () => {
     const calls = stubFetch(() => jsonRes({ data: [{ id: "claude-x" }] }));
     await fetchModels({ type: "anthropic", baseURL: "https://gw.test/anthropic/v1" }, "sk-ant");
     expect(calls[0]?.url).toBe("https://gw.test/anthropic/v1/models");
+    expect(calls[0]?.url).not.toContain("client_version");
     const headers = new Headers(calls[0]?.init?.headers);
     expect(headers.get("x-api-key")).toBe("sk-ant");
   });
@@ -246,6 +255,7 @@ describe("fetchModels 字段映射", () => {
     );
     const models = await fetchModels({ type: "anthropic" }, "sk-ant");
     expect(calls[0]?.url).toBe("https://api.anthropic.com/v1/models");
+    expect(calls[0]?.url).not.toContain("client_version");
     const headers = new Headers(calls[0]?.init?.headers);
     expect(headers.get("x-api-key")).toBe("sk-ant");
     expect(headers.get("authorization")).toBeNull();
@@ -261,14 +271,16 @@ describe("fetchModels 字段映射", () => {
   });
 
   it("HTTP 错误抛带状态码的错误；data 缺失返回 []", async () => {
-    stubFetch(() => jsonRes({ error: "nope" }, 401));
+    const denied = stubFetch(() => jsonRes({ error: "nope" }, 401));
     await expect(
       fetchModels({ type: "openai-compatible", baseURL: "http://x/v1" }, "k"),
     ).rejects.toMatchObject({ status: 401 });
-    stubFetch(() => jsonRes({}));
+    expect(denied.every((call) => !call.url.includes("client_version"))).toBe(true);
+    const empty = stubFetch(() => jsonRes({}));
     expect(await fetchModels({ type: "openai-compatible", baseURL: "http://x/v1" }, "k")).toEqual(
       [],
     );
+    expect(empty[0]?.url).not.toContain("client_version");
   });
 });
 
