@@ -78,7 +78,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 |---|---|---|
 | 提交输入 | Enter 提交一行 | Enter 提交输入框内容 |
 | 图片输入 | 无 | Windows 下 `Alt+V` 粘贴剪贴板图片，或把单个图片文件拖入终端；当前模型须支持图片输入或配置可用的 vision 角色，附件以 `[Image #n]` 占位 |
-| 斜杠命令 | `/help /model /preset /effort /context /compact /resume /new /clear /mcp /provider /shell /settings /exit /quit`（`/provider` 子命令见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节） | 同一集合；`/model` 打开全屏模型选择页（§7），`/provider` 打开全屏服务商页（§8），`/resume` 弹出列表选择器（↑↓ + Enter，Esc 取消），`/context` 弹出可滚动报告面板（请求携带图片附件时含 `images <count> 张 ~<tok> tok` 行，context.md 第 5 节），`/mcp` 弹出服务器状态面板（复用 Panel 组件，Esc/Enter 关闭），`/shell` 弹出 shell 选择器（`auto` 加五种探测结果，未安装灰显不可选、光标自动跳过，当前值高亮；被 `NOCTURNE_SHELL`/`config.json` 覆盖时页面顶部说明「写入 settings.json 但不生效」，ADR-0022 第 4 节）；`/shell <种类>` 直接切换，未安装的种类在写盘前被拒绝并列出可选项（`invalid_command`）。`/settings` 打开全屏设置页（§11），`/theme` 打开主题预览（仅 TUI）。 |
+| 斜杠命令 | `/help /model /preset /effort /context /compact /resume /rewind /fork /new /clear /mcp /provider /shell /settings /exit /quit`（`/provider` 子命令见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节） | 同一集合；`/model` 打开全屏模型选择页（§7），`/provider` 打开全屏服务商页（§8），`/resume` 弹出列表选择器（↑↓ + Enter，Esc 取消），`/rewind` 打开轮次列表，`/fork` 从当前位置分叉（§12）；`/context` 弹出可滚动报告面板（请求携带图片附件时含 `images <count> 张 ~<tok> tok` 行，context.md 第 5 节），`/mcp` 弹出服务器状态面板（复用 Panel 组件，Esc/Enter 关闭），`/shell` 弹出 shell 选择器（`auto` 加五种探测结果，未安装灰显不可选、光标自动跳过，当前值高亮；被 `NOCTURNE_SHELL`/`config.json` 覆盖时页面顶部说明「写入 settings.json 但不生效」，ADR-0022 第 4 节）；`/shell <种类>` 直接切换，未安装的种类在写盘前被拒绝并列出可选项（`invalid_command`）。`/settings` 打开全屏设置页（§11），`/theme` 打开主题预览（仅 TUI）。 |
 | 权限确认 | `a`/`s`/`p`/`d`/`x`，`d <文本>` 带反馈 | 同五键；`d` 先进入反馈行：`Enter` 发送拒绝（内容为空 = 不带反馈，等价裸 `d`），`Esc` 退出反馈行回到五选项 |
 | 提问面板（`ask_user`，[ADR-0032](../decisions/ADR-0032-ask-user-tool.md)） | 逐题编号选择，最后一项「拒绝回答」；直接文字为「其他」，空行重新提示 | 模型选项之后依次为「其他（自己输入）」「拒绝回答」；无选项题只有输入行与「拒绝回答」。`↑`/`↓` 移动焦点，单选 `Enter` 选择当前项或拒绝该题并进入下一题；多选 `Space` 勾选（拒绝与其他回答互斥，选择拒绝清除其他勾选与文本，选择其他项取消拒绝），`Enter` 下一题；焦点在「其他」直接输入文本。`←`/`→` 或 `Tab`/`Shift+Tab` 切题；最后一题之后进入确认行，列出每题回答或「拒绝回答」，`Enter` 提交。`Esc` 输入中退出输入，否则按全局规则中断忙碌 Turn；`Ctrl+C` 沿用中断。选中状态使用文字符号，窄终端、ASCII、NO_COLOR 不依赖颜色。对话仅由 ask_user 工具条目显示「? 提问」（多题加「（N 题）」）及逐题「问题 → 回答」，多选与其他文本以「、」连接，拒绝为「拒绝回答」；取消、超时、非交互分别显示「已取消」「已超时」「无法提问（非交互）」，不显示 JSON 或重复摘要；恢复后一致 |
 | 中断 | Ctrl+C：Turn 中中断；权限提示中取消；空闲退出 | 同：pendingPermission 时先中断（结算为 cancelled）；busy 时中断 Turn；空闲时退出。**例外**：存在选区时 Ctrl+C 复制并清除选区，不中断、不退出 |
@@ -87,12 +87,13 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 | 恢复 | `--resume <id>` / `--continue` | 同参数 |
 | 会话列表 | `--sessions` 打印后退出 | 同（`--tui` 不改变 `--sessions` 的只读退出行为） |
 | 会话内切换 | `/resume`（REPL：编号列表，`/resume <id>` 直达） | `/resume` 弹出列表选择器（复用 PickList 组件，Esc 取消）；`/resume <id>` 直达。切换语义见 §6 |
+| 回退与分叉 | `/rewind` 编号、操作和默认取消的预览确认；`/fork` 复制并切换 | `/rewind` 或空闲空输入 600ms 内双 Esc 打开轮次列表；`/fork` 从当前位置分叉，见 §12 |
 | 跨目录恢复确认 | `y/N` 提问（默认拒绝） | 确认对话框，默认拒绝（启动恢复与 `/resume` 一致） |
 | 恢复摘要/警告 | stderr 行 | 提示区 `!` 行（挂载与 `/resume` 切换时写入 clientLines） |
 | 忙时输入 | "会话忙，稍后再试" | 输入框禁用，状态栏显示当前状态；Ctrl+C 中断 |
 | 退出码 | 交互模式 0；用法/配置/恢复错误 2；中断 130 | 正常退出 0；启动错误同 CLI 映射（2）；显式 `--tui` 在非 TTY 报 2 并提示 `nctrn --cli` 或 `nctrn -p` |
 
-对话输入之外的全局键：`Esc` 次序最前是清除选区，然后依次关闭补全列表、弹层、权限反馈行或提问文本输入；没有这些焦点时忙碌中中断 Turn，空闲时不退出、不清空输入。选区存在时其他按键（翻阅键除外）清除高亮。拆成 Esc + 字母的 Alt 组合在 80ms 内不会误中断。`Tab` 在权限对话框选项间移动焦点、在提问面板的题间切换；补全列表打开时 `Tab` 补全当前候选。`Shift+Tab`（`\x1B[Z`）在输入框状态下循环思考档位 `[off, …当前模型可用档位]`，只高亮状态栏，不插入对话条目；Turn 进行中同样可切，新档位从下一个 Turn 生效（状态栏显示 `思考:<生效档>→<新档>`，ADR-0018）。权限确认框内 `Shift+Tab` 仍是反向移动焦点；提问面板内 `Tab`/`Shift+Tab` 与 `←`/`→` 一样是题间切换。当前模型没有可用档位时 `Shift+Tab` 不响应、不插入提示。
+对话输入之外的全局键：`Esc` 次序最前是清除选区，然后依次关闭补全列表、弹层、权限反馈行或提问文本输入；没有这些焦点时忙碌中中断 Turn，空闲时不退出、不清空输入，空输入下 600ms 内双 Esc 打开轮次列表（§12）。选区存在时其他按键（翻阅键除外）清除高亮。拆成 Esc + 字母的 Alt 组合在 80ms 内不会误中断。`Tab` 在权限对话框选项间移动焦点、在提问面板的题间切换；补全列表打开时 `Tab` 补全当前候选。`Shift+Tab`（`\x1B[Z`）在输入框状态下循环思考档位 `[off, …当前模型可用档位]`，只高亮状态栏，不插入对话条目；Turn 进行中同样可切，新档位从下一个 Turn 生效（状态栏显示 `思考:<生效档>→<新档>`，ADR-0018）。权限确认框内 `Shift+Tab` 仍是反向移动焦点；提问面板内 `Tab`/`Shift+Tab` 与 `←`/`→` 一样是题间切换。当前模型没有可用档位时 `Shift+Tab` 不响应、不插入提示。
 
 `Alt+M` 在 `read-only → default → auto-edit → guarded` 间循环，走与 `/preset` 相同的 `setPermissionPreset`（`session.config_changed`），Turn 进行中同样拒绝；只高亮状态栏，不插入对话条目。Windows Terminal 发送 `\x1bm`，必须能识别；若把 Alt 拆成 Esc 加字母，吞掉该字母，不写入输入框，也不触发其他操作。
 
@@ -285,7 +286,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 - 目录：`src/index.ts`（`runTui`：全屏/普通屏幕装配、鼠标上报开闭、退出导出）、`src/app.tsx`（界面状态与布局）、`src/lines.ts`（`SessionView` → 内容行块，按条目 key + 宽度 + 主题 ID 缓存布局）、`src/viewport.ts`（可见窗口选择）、`src/scroll.ts`（翻阅状态）、`src/mouse.ts`（SGR 鼠标序列解析与 stdin 包装）、`src/selection.ts`（选区坐标与高亮/复制文本）、`src/clipboard.ts`（系统剪贴板 + OSC 52，只用 Node 内置模块）、`src/cursor.ts`（硬件光标补位与帧外写出通道）、`src/output-layer.ts`（全屏帧差异写出与滚动区域平移）、`src/frame.ts`（活动区高度预算）、`src/alt-screen.ts`（`--inline` 与首配流程的临时备用屏）、`src/markdown.ts`（助手文本排版）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。
 - 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎区/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/四个对话框/模型编辑子视图/键鼠/Esc/Ctrl+C。交互等待帧变化并等提交后的输入订阅接上，不用固定延时猜测就绪。
 - **显示宽度**：按 `string-width` 预算中文和动态文本，框内动态文本经 `format.ts` 的 `boxSafe()` 处理；窄屏时截断摘要和列表字段，边框保留安全余量。
-- `runTui` 只消费 Core 公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`、`readInputHistory`/`recordInputHistory`、`fileIndex()`（文件补全索引）、`mcpServers()`（`/mcp` 面板），以及 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`/`runtime.getPreference`；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
+- `runTui` 只消费 Core 公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`、`readInputHistory`/`recordInputHistory`、`rewindTargets`/`rewind`、`fileIndex()`（文件补全索引）、`mcpServers()`（`/mcp` 面板），以及 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`/`runtime.getPreference`/`runtime.forkSession`；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
 
 ## 10. 需要的 Core API 变更
 
@@ -301,7 +302,7 @@ v0.3 增补（ADR-0019）：
 
 **不上移**：配置收集（`collectSessionConfig`）与会话打开组合（`openSession`）留在 CLI——它们携带 CLI 参数结构与"跨目录确认"这类客户端交互，进 Core 会违反"Core 不依赖客户端"的边界。CLI 单入口保证启动语义只有一份实现，TUI 从 CLI 手里接过已打开的 `Session`（或 setup 完成后的打开回调），不存在漂移面。
 
-不新增事件类型；不改 Agent Loop；权限判定仍只在权限层（对话框只是 `respondPermission` 的 UI）。
+ADR-0041 增补 `session.rewindTargets()`、`session.rewind()` 和 `runtime.forkSession()`；`checkpoint.file` 不显示，`session.rewound` 显示回退通知。权限判定仍只在权限层；用户发起的文件还原按 ADR-0041 绕过工具权限流程。
 
 ## 11. 鼠标、折叠与 `/settings` 设置页
 
@@ -335,10 +336,20 @@ v0.3 增补（ADR-0019）：
 
 smart 的每次审查在对应工具上方显示「审查：放行/拦截/拿不准 — 理由」，确认框也显示拿不准的理由；缓存命中与审查来源用量附在审查行。临时普通屏和全屏重放均保留审查行。确认选项完全按 `permission.requested.options` 绘制；高风险命令、编码命令和工作区外 edit 的三项集合由权限层计算，客户端不判断风险。完整契约见 [permissions.md](../architecture/permissions.md) 5.3、7。
 
-## 12. 本阶段不做
+## 12. 回退与分叉
+
+契约见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。`/rewind` 打开轮次列表；空闲、输入为空且没有弹层或补全时，600ms 内连按两次 Esc 同样打开。Turn 中 Esc 保持中断语义。列表只含当前有效用户消息，最新在前，每行显示首行、相对时间、改动文件数与「含 shell」。方向键、PgUp/PgDn、Home/End 选择，Enter 操作，Esc 返回。
+
+操作及预览使用 `DialogFrame`，初始焦点均为「取消」。没有可还原文件时「对话和文件一起回退」「只还原文件」灰显并说明原因；预览展示文件还原、删除、无法还原原因、外部修改标记和未追踪调用提示，只回退对话明确说明文件保持当前状态。确认失败留在预览中显示错误，可重试；执行期间防止重复提交。全屏鼠标沿用 ADR-0039：单击先选择，单击选中行打开操作；移动过的按下/松开不激活。滚轮仅在列表或预览内容区翻页，操作对话框忽略滚轮，页面中不产生拖选。
+
+回退成功按新视图重排，并显示 `已回退到「<首行>」之前 • 还原 N 个文件`，失败数附在末尾。对话回退将目标原始文字（不含 @ 引用快照）放回输入框，图片不回填；「原消息的图片未放回」在下一次编辑时消失。`--inline` 列表与确认临时进入备用屏，仅用键盘；关闭后保留原回滚区，只追加通知行，不重复输出旧对话。
+
+`/fork` 从当前位置分叉；操作对话框也可从选中消息之前分叉，预览说明文件保持当前状态。成功后按 `/resume` 切换，保留原会话并释放锁；中途分叉回填目标原文和图片提示。命令表、`/help` 与补全共用这两个命令。
+
+## 13. 本阶段不做
 
 - 独立 `nctrn-tui` 命令（需要共享启动语义时再评估，可能以独立命令复制薄壳或重新讨论 Core 入口上移的方式引入）；
-- 模型编辑对话框、`/settings` 与服务商页开放单击，其余页内控件暂不开放；页面内拖选、双击/三击选词选段仍不做（[ADR-0030 及修订](../decisions/ADR-0030-dialog-settings-pages.md)、[ADR-0039](../decisions/ADR-0039-welcome-provider-dialogs.md)）；
+- 模型编辑对话框、`/settings`、服务商页及回退页开放单击，其余页内控件暂不开放；页面内拖选、双击/三击选词选段仍不做（[ADR-0030 及修订](../decisions/ADR-0030-dialog-settings-pages.md)、[ADR-0039](../decisions/ADR-0039-welcome-provider-dialogs.md)、[ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)）；
 - 代码块语法高亮（助手 Markdown 已做结构化排版）；
 - 多会话标签页；
 - 独立工具输出详情页/分页器（对话内已支持单击展开，超过工具预算的原始输出仍通过 spillPath 查看）；

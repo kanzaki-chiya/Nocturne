@@ -13,7 +13,14 @@ import {
   type RuntimeSession,
   type SessionSummary,
 } from "@nocturne/core";
-import type { QuestionAnswer, QuestionItem, RuntimeEvent } from "@nocturne/core/protocol";
+import {
+  rewindNotification,
+  type RewindMode,
+  type RewindTarget,
+  type QuestionAnswer,
+  type QuestionItem,
+  type RuntimeEvent,
+} from "@nocturne/core/protocol";
 import { completeLine } from "./completer.js";
 
 import { runSlashCommand, type CommandDeps } from "./commands.js";
@@ -57,6 +64,8 @@ function write(io: ReplIo, channel: "stdout" | "stderr", text: string): void {
 
 /** /resume 待决状态：编号选择中 或 跨目录确认中 */
 type PendingResume = { rows: SessionSummary[] } | { confirmId: string; root: string };
+type PendingRewind =
+  { rows: RewindTarget[] } | { target: RewindTarget; mode?: RewindMode | "fork" };
 
 export async function runRepl(
   initialSession: RuntimeSession,
@@ -67,6 +76,7 @@ export async function runRepl(
   // /resume 切换后 session 指向新会话；事件订阅随之换绑
   let session = initialSession;
   let busy = false;
+  let sessionCommand = false;
   /** 进行中的 Turn 的 Promise；close 后由关闭路径等待其收敛 */
   let activeTurn: Promise<unknown> | undefined;
   /** readline 已关闭：此后任何异步回调不得再 rl.prompt() */
@@ -86,6 +96,7 @@ export async function runRepl(
     | undefined;
   /** /resume 的行内交互状态（编号选择 / 跨目录确认） */
   let pendingResume: PendingResume | undefined;
+  let pendingRewind: PendingRewind | undefined;
   // 交互模式全部走 stdout：由写出器补齐流式文本与状态行之间的换行
   const out = createEventWriter((channel, text) => {
     write(io, channel, text);
@@ -100,6 +111,10 @@ export async function runRepl(
   };
 
   const onEvent = (ev: RuntimeEvent): void => {
+    if (ev.type === "session.rewound") {
+      out.line("stdout", rewindNotification(ev.payload, session.session.durableEvents()));
+      return;
+    }
     if (ev.type === "question.requested") {
       pendingQuestion = {
         requestId: ev.payload.requestId,
@@ -203,11 +218,11 @@ export async function runRepl(
   };
 
   /** 会话切换：成功则换绑 session + 重订阅事件 + 打印分隔线 */
-  const doSwitch = async (id: string, allowForeign = false): Promise<void> => {
+  const doSwitch = async (id: string, allowForeign = false): Promise<boolean> => {
     const switchSession = opts.switchSession;
     if (switchSession === undefined) {
       out.line("stdout", "! 当前环境不支持会话切换");
-      return;
+      return false;
     }
     const res = await switchSession(id, { allowForeign });
     if (res.kind === "ok") {
@@ -217,18 +232,64 @@ export async function runRepl(
       await reloadHistory();
       out.line("stdout", `── 已切换到会话 ${session.id} ──`);
       for (const n of sessionOpenNotes(session)) out.line("stderr", `! ${n}`);
-      return;
+      return true;
     }
     if (res.kind === "foreign") {
       pendingResume = { confirmId: id, root: res.workspaceRoot };
       out.line("stdout", `? 会话绑定到 ${res.workspaceRoot}，与当前目录不同。仍要切换吗？[y/N] `);
-      return;
+      return false;
     }
     if (res.kind === "busy") {
       out.line("stdout", "! 会话忙（Turn 进行中）；先 Ctrl+C 中断再切换");
-      return;
+      return false;
     }
     out.line("stdout", `! ${res.message}`);
+    return false;
+  };
+
+  const refill = (target: RewindTarget): void => {
+    if (target.hasImages) out.line("stdout", "原消息的图片未放回");
+    if (io.stdin.isTTY === true && !closed) rl.write(target.text);
+    else out.line("stdout", `可修改后重发：${target.text}`);
+  };
+  const fork = async (target?: RewindTarget): Promise<void> => {
+    if (!opts.switchSession) throw new Error("当前环境不支持会话切换");
+    const id = await runtime.forkSession(session.id, target ? { targetSeq: target.seq } : {});
+    if (await doSwitch(id)) {
+      if (target) refill(target);
+    }
+  };
+  const runSessionCommand = (work: () => Promise<void>): void => {
+    busy = true;
+    sessionCommand = true;
+    activeTurn = work()
+      .catch((e: unknown) => {
+        out.line("stdout", `! ${e instanceof Error ? e.message : String(e)}`);
+      })
+      .finally(() => {
+        sessionCommand = false;
+        busy = false;
+        activeTurn = undefined;
+        prompt();
+      });
+  };
+  const startRewindPick = async (): Promise<void> => {
+    const rows = await session.rewindTargets();
+    if (!rows.length) {
+      out.line("stdout", "当前没有可回退的轮次");
+      return;
+    }
+    pendingRewind = { rows };
+    out.line(
+      "stdout",
+      [
+        "选择轮次（输入编号，空行取消）：",
+        ...rows.map(
+          (target, index) =>
+            `  ${index + 1}. ${target.firstLine} · ${target.time} · 改动 ${target.files.length} 个文件${target.untrackedCalls ? " · 含 shell" : ""}`,
+        ),
+      ].join("\n"),
+    );
   };
 
   const startResumePick = async (): Promise<void> => {
@@ -392,6 +453,75 @@ export async function runRepl(
           return;
         }
 
+        if (pendingRewind !== undefined) {
+          const state = pendingRewind;
+          if (line === "") {
+            pendingRewind = undefined;
+            out.line("stdout", "已取消");
+          } else if ("rows" in state) {
+            const target = /^\d+$/.test(line) ? state.rows[Number(line) - 1] : undefined;
+            if (!target) out.line("stdout", "! 无效轮次编号");
+            else {
+              pendingRewind = { target };
+              const disabled = !target.files.some((file) => file.action !== "untracked");
+              out.line(
+                "stdout",
+                `回退到「${target.firstLine}」之前：\n1. 对话和文件一起回退${disabled ? "（不可用）" : ""}\n2. 只回退对话\n3. 只还原文件${disabled ? "（不可用）" : ""}\n4. 从这里分叉新会话\n5. 取消${disabled ? "\n这一轮之后没有可还原的文件" : ""}`,
+              );
+            }
+          } else if (state.mode === undefined) {
+            const modes = ["both", "conversation", "files", "fork"] as const;
+            const mode = /^\d+$/.test(line) ? modes[Number(line) - 1] : undefined;
+            if (line === "5") {
+              pendingRewind = undefined;
+              out.line("stdout", "已取消");
+            } else if (!mode) out.line("stdout", "! 无效操作编号");
+            else if (
+              (mode === "both" || mode === "files") &&
+              !state.target.files.some((file) => file.action !== "untracked")
+            )
+              out.line("stdout", "这一轮之后没有可还原的文件");
+            else {
+              pendingRewind = { target: state.target, mode };
+              const target = state.target;
+              const lines =
+                mode === "fork"
+                  ? ["文件保持当前状态；需要文件也回到那一轮，可在新会话里再执行只还原文件的回退"]
+                  : [
+                      ...target.files.map(
+                        (file) =>
+                          `${file.action === "restore" ? "还原" : file.action === "delete" ? "删除" : `无法还原（${file.reason ?? "未追踪"}）`} ${file.path}${file.external ? " [已在外部修改]" : ""}`,
+                      ),
+                      ...(target.untrackedCalls
+                        ? [
+                            `这一轮之后有 ${target.untrackedCalls} 次 shell/MCP 调用，它们造成的改动不会被还原`,
+                          ]
+                        : []),
+                      ...(mode === "conversation" ? ["文件保持当前状态"] : []),
+                    ];
+              out.line(
+                "stdout",
+                [...lines, `确认${mode === "fork" ? "分叉" : "回退"}？[y/N]`].join("\n"),
+              );
+            }
+          } else {
+            pendingRewind = undefined;
+            if (/^y(es)?$/i.test(line)) {
+              runSessionCommand(async () => {
+                if (state.mode === "fork") await fork(state.target);
+                else {
+                  await session.rewind(state.target.seq, state.mode ?? "conversation");
+                  if (state.mode !== "files") refill(state.target);
+                }
+              });
+              return;
+            }
+            out.line("stdout", "已取消");
+          }
+          prompt();
+          return;
+        }
+
         // /resume 的行内交互：编号选择 / 跨目录确认（沿用启动的默认拒绝语义）
         if (pendingResume !== undefined) {
           const state = pendingResume;
@@ -429,6 +559,15 @@ export async function runRepl(
           return;
         }
         remember(line);
+        if (line.startsWith("/rewind ") || line.startsWith("/fork ")) {
+          out.line("stdout", `! 用法：${line.startsWith("/rewind ") ? "/rewind" : "/fork"}`);
+          prompt();
+          return;
+        }
+        if (line === "/rewind" || line === "/fork") {
+          runSessionCommand(line === "/rewind" ? startRewindPick : () => fork());
+          return;
+        }
         if (line === "/resume" || line.startsWith("/resume ")) {
           const arg = line.slice("/resume".length).trim();
           void (arg === "" ? startResumePick() : doSwitch(arg)).finally(prompt);
@@ -542,6 +681,17 @@ export async function runRepl(
           });
       });
       r.on("SIGINT", () => {
+        if (sessionCommand) {
+          out.line("stdout", "操作进行中，请稍候");
+          prompt();
+          return;
+        }
+        if (pendingRewind !== undefined) {
+          pendingRewind = undefined;
+          out.line("stdout", "已取消");
+          prompt();
+          return;
+        }
         if (pendingResume !== undefined) {
           pendingResume = undefined;
           out.line("stdout", "已取消");

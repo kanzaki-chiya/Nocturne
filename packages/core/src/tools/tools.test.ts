@@ -265,6 +265,43 @@ describe("Executor 管线", () => {
     });
   });
 
+  it("任意工具的 edit 主体在执行前后记录检查点，失败后仍记录改动状态", async () => {
+    const ws = tmpWorkspace();
+    await writeWs(ws, "a.txt", "before");
+    const h = await makeHarness(ws, {
+      check: (subjects) =>
+        Promise.resolve({
+          subjects,
+          decision: { action: "allow", source: "rule", reason: "test" },
+        }),
+      checkLexical: () => "allow",
+    });
+    const file = path.join(h.workspaceRoot, "a.txt");
+    const snapshots: string[] = [];
+    h.scope.checkpoint = async (phase, callId, subjects, sessionId) => {
+      expect(callId).toBe("c1");
+      expect(sessionId).toBe("s1");
+      expect(subjects).toMatchObject([{ kind: "edit", resolved: file }]);
+      snapshots.push(`${phase}:${await platform.fs.readFile(file)}`);
+    };
+    const registry = createToolRegistry();
+    registry.register({
+      name: "arbitrary",
+      description: "x",
+      inputSchema: { type: "object" },
+      traits: { mutates: true, concurrencySafe: false, timeoutMs: 1000 },
+      permissionSubjects: () => [{ kind: "edit", target: file }],
+      execute: async () => {
+        await platform.fs.writeFile(file, "partial");
+        throw new Error("failed after write");
+      },
+    });
+    expect(
+      (await createToolExecutor(registry).execute(call("arbitrary", {}), h.scope)).status,
+    ).toBe("error");
+    expect(snapshots).toEqual(["before:before", "after:partial"]);
+  });
+
   it("执行前已中断 → cancelled", async () => {
     const ws = tmpWorkspace();
     const ac = new AbortController();

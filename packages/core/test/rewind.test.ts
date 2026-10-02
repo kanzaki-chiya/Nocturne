@@ -130,6 +130,24 @@ it("只回退对话后仍按原始日志取最早 before；新文件删除、外
   await resumed.close();
 }, 20_000);
 
+it("回填原用户文字不包含 @ 引用的文件快照", async () => {
+  const { session } = await setup();
+  try {
+    await session.session.emit("message.user", {
+      messageId: "ref",
+      content: [
+        { type: "text", text: "检查 @a.txt" },
+        { type: "text", text: "原消息第二段" },
+        { type: "text", text: "文件快照内容" },
+      ],
+      fileRefs: [{ path: "a.txt", kind: "file", chars: 6, truncated: false }],
+    });
+    expect((await session.rewindTargets())[0]?.text).toBe("检查 @a.txt\n原消息第二段");
+  } finally {
+    await session.close();
+  }
+});
+
 it("回退重算任务清单与图片描述，保持配置、标题和累计用量，移除压缩边界", async () => {
   const { session } = await setup();
   const s = session.session;
@@ -147,6 +165,7 @@ it("回退重算任务清单与图片描述，保持配置、标题和累计用�
       },
     ],
   });
+
   await s.emit("tool.completed", {
     callId: "todo",
     name: "todo_write",

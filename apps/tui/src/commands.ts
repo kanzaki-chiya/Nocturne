@@ -30,6 +30,7 @@ export type SlashResult =
   | { kind: "message"; text: string }
   | { kind: "exit" }
   | { kind: "new" }
+  | { kind: "rewind" | "fork" }
   /** /resume <id>：由 App 调用注入的 switchSession 执行切换 */
   | { kind: "switch"; id: string }
   /** /provider add/key：App 侧打开向导弹层 */
@@ -71,6 +72,11 @@ export async function runSlash(
     case "/new":
     case "/clear":
       return { kind: "new" };
+    case "/rewind":
+    case "/fork":
+      return arg === ""
+        ? { kind: cmd === "/rewind" ? "rewind" : "fork" }
+        : { kind: "message", text: `用法：${cmd}` };
     case "/provider": {
       // 无参：打开全屏服务商页（tui.md §8）；add 同页内嵌向导
       if (arg === "") return { kind: "provider-page" };

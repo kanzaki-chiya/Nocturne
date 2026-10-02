@@ -75,6 +75,11 @@ export async function rewindTargets(
       firstLine: firstUserText(event.payload) ?? "",
       time: event.time,
       text: event.payload.content
+        .slice(
+          0,
+          event.payload.content.length -
+            (event.payload.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0),
+        )
         .filter((b) => b.type === "text")
         .map((b) => b.text)
         .join("\n"),

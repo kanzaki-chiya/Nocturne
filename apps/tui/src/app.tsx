@@ -5,7 +5,7 @@
  *   权限对话框 + 弹层 + 输入行（上下横线）+ 分段状态栏；
  * - 无会话（首次配置，ADR-0019 第 4 条）：服务商页 → 模型页两步流程，
  *   完成后经注入的 openSession 回调创建会话再进入主界面。
- * 键位路由：Ctrl+C 忙时中断、空闲退出，Esc 忙时中断、空闲无动作；弹层优先自闭。
+ * 键位路由：Ctrl+C 忙时中断、空闲退出；Esc 忙时中断，空闲空输入双击打开回退；弹层优先自闭。
  * /resume：注入的 switchSession 回调执行切换；旧回放冻结进 Static，
  * 新会话重建 SessionView 重放（tui.md §4）。
  */
@@ -31,7 +31,12 @@ import {
 } from "@nocturne/core";
 import type { spawn } from "node:child_process";
 
-import { type SessionView, type ViewEntry } from "@nocturne/core/protocol";
+import {
+  type RewindMode,
+  type RewindTarget,
+  type SessionView,
+  type ViewEntry,
+} from "@nocturne/core/protocol";
 
 import {
   contextLines,
@@ -103,6 +108,7 @@ import { ProviderPage, type ProviderOp } from "./components/provider-page.js";
 import { StatusBar, type EffortSegment, type StatusHighlight } from "./components/status-bar.js";
 import { ThemePage } from "./components/theme-page.js";
 import { SettingsPage } from "./components/settings-page.js";
+import { RewindPage } from "./components/rewind-page.js";
 import { TodoPanel, todoPanelRows } from "./components/todo-panel.js";
 import { Transcript, type TranscriptItem } from "./components/transcript.js";
 import { useAltScreen, waitCommit } from "./alt-screen.js";
@@ -750,12 +756,14 @@ function SessionApp({
   }, [session, onSessionId]);
   const [input, setInput] = useState("");
   const [cursor, setCursor] = useState(0);
+  const [rewindImageHint, setRewindImageHint] = useState<string>();
   const inputRef = useRef("");
   const cursorRef = useRef(0);
   const images = useMemo(() => createImageStore(), []);
   const pastes = useMemo(() => createPasteStore(), []);
   const imagePlatform = useMemo(() => createPlatform(), []);
   const updateInput = (value: string, at: number): void => {
+    setRewindImageHint(undefined);
     inputRef.current = value;
     cursorRef.current = at;
     images.prune(value);
@@ -826,6 +834,12 @@ function SessionApp({
   >(undefined);
   const pickerOpen = picker !== undefined;
   const [providerPageOpen, setProviderPageOpen] = useState(false);
+  const [rewindTargets, setRewindTargets] = useState<readonly RewindTarget[]>();
+  const rewindCommitted = useRef(false);
+  const openingRewind = useRef(false);
+  useLayoutEffect(() => {
+    rewindCommitted.current = rewindTargets !== undefined;
+  }, [rewindTargets]);
   const dialogMouse = useRef<DialogMouseFrame | undefined>(undefined);
   const dialogClicks = useRef(createClickTracker());
   const reportDialogMouse = useCallback((frame: DialogMouseFrame | undefined): void => {
@@ -856,6 +870,7 @@ function SessionApp({
   const suppressConfigNotice = useRef(false);
   const swallowUntil = useRef(0);
   const escapeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const lastEscape = useRef(0);
   const swallowRef = useRef(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const noteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -1311,7 +1326,7 @@ function SessionApp({
 
   /** 会话切换：冻结旧回放进 Static、换绑 session、新日志重放进 SessionView */
   const doSwitch = useCallback(
-    async (id: string, allowForeign = false): Promise<void> => {
+    async (id: string, allowForeign = false, draft?: RewindTarget): Promise<void> => {
       if (submitting.current || busy) {
         pushLine("! 会话忙（Turn 进行中）；先 Ctrl+C 中断再切换");
         return;
@@ -1361,6 +1376,12 @@ function SessionApp({
           pastes.reset(inputRef.current);
           setSession(res.session);
           setOverlay(undefined);
+          if (draft !== undefined) {
+            images.clear();
+            updateInput(draft.text, draft.text.length);
+            setCompletionOn(false);
+            if (draft.hasImages) setRewindImageHint("原消息的图片未放回");
+          }
           for (const n of sessionNotes(res.session)) pushLine(`! ${n}`);
           return;
         }
@@ -1381,6 +1402,74 @@ function SessionApp({
       }
     },
     [switchSession, pushLine, fullscreen, busy, pastes],
+  );
+
+  const closeRewind = useCallback(
+    () =>
+      alt.leave(async () => {
+        setRewindTargets(undefined);
+        await waitCommit(rewindCommitted, false);
+      }),
+    [alt],
+  );
+  const openRewind = useCallback((): void => {
+    if (busy || submitting.current || switching.current || openingRewind.current) {
+      pushLine("! 请先等待或按 Esc 中断");
+      return;
+    }
+    openingRewind.current = true;
+    void session
+      .rewindTargets()
+      .then((targets) =>
+        alt.enter(async () => {
+          updateInput("", 0);
+          setSel(undefined);
+          setRewindTargets(targets);
+          await waitCommit(rewindCommitted, true);
+        }),
+      )
+      .catch((e: unknown) => {
+        pushLine(`! ${errText(e)}`);
+      })
+      .finally(() => {
+        openingRewind.current = false;
+      });
+  }, [session, busy, pushLine, alt]);
+  const doRewind = useCallback(
+    async (target: RewindTarget, mode: RewindMode): Promise<void> => {
+      await session.rewind(target.seq, mode);
+      await closeRewind();
+      if (mode !== "files") {
+        images.clear();
+        pastes.reset(inputRef.current);
+        updateInput(target.text, target.text.length);
+        setCompletionOn(false);
+        if (target.hasImages) setRewindImageHint("原消息的图片未放回");
+      }
+      lineCache.current.clear();
+      laidTotal.current = undefined;
+      setSel(undefined);
+      setScroll(scrollToBottom());
+    },
+    [session, closeRewind, images, pastes],
+  );
+  const doFork = useCallback(
+    async (target?: RewindTarget): Promise<void> => {
+      if (busy || submitting.current || switching.current) throw new Error("请先等待或按 Esc 中断");
+      if (switchSession === undefined) throw new Error("当前环境不支持会话切换");
+      switching.current = true;
+      setSwitchPending(true);
+      try {
+        const id = await runtime.forkSession(session.id, target ? { targetSeq: target.seq } : {});
+        await closeRewind();
+        switching.current = false;
+        await doSwitch(id, false, target);
+      } finally {
+        switching.current = false;
+        setSwitchPending(false);
+      }
+    },
+    [runtime, session, busy, switchSession, closeRewind, doSwitch],
   );
 
   const doNew = useCallback(async (): Promise<void> => {
@@ -1600,7 +1689,12 @@ function SessionApp({
     foreign !== undefined ||
     wizardOverlay !== undefined ||
     providerRemove !== undefined;
-  const pageOpen = pickerOpen || providerPageOpen || recordOpen || overlay === "settings";
+  const pageOpen =
+    pickerOpen ||
+    providerPageOpen ||
+    recordOpen ||
+    overlay === "settings" ||
+    rewindTargets !== undefined;
   const closeRecord = useCallback(
     () =>
       alt.leave(async () => {
@@ -1616,7 +1710,7 @@ function SessionApp({
       void closeRecord();
       return;
     }
-    if (pickerOpen || providerPageOpen || dialogOpen) return;
+    if (pickerOpen || providerPageOpen || rewindTargets !== undefined || dialogOpen) return;
     const source = sourceRef.current;
     if (
       source === undefined ||
@@ -1834,6 +1928,7 @@ function SessionApp({
   // 全局键：退出、翻页、Shift+Tab、Alt+M、补全列表。弹层内的键由各自组件处理。
   useInput((ch, key) => {
     const now = Date.now();
+    if (!(key.escape && ch === "" && !key.meta && !key.ctrl)) lastEscape.current = 0;
     if (shouldSwallowAfterEscape(ch, key, swallowUntil.current, now)) {
       if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
       escapeTimer.current = undefined;
@@ -1851,7 +1946,10 @@ function SessionApp({
       setSel(undefined);
       dragRef.current.dragging = false;
       stopEdgeScroll();
-      if (key.escape && ch === "" && !key.meta && !key.ctrl) return;
+      if (key.escape && ch === "" && !key.meta && !key.ctrl) {
+        lastEscape.current = 0;
+        return;
+      }
     }
     if (key.ctrl && ch === "o") {
       toggleReasoning();
@@ -1861,13 +1959,18 @@ function SessionApp({
       if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
       escapeTimer.current = undefined;
       swallowUntil.current = noteBareEscape(now);
+      const previousEscape = lastEscape.current;
+      lastEscape.current = 0;
       if (recordOpen) {
         void closeRecord();
         return;
       }
       if (!pageOpen && !dialogOpen && pending === undefined && pendingQ === undefined) {
         if (completionOpen) setCompletionOn(false);
-        else {
+        else if (!busy && !submitting.current && !switching.current && inputRef.current === "") {
+          if (previousEscape > 0 && now - previousEscape <= 600) openRewind();
+          else lastEscape.current = now;
+        } else {
           escapeTimer.current = setTimeout(() => {
             escapeTimer.current = undefined;
             if (interruptible.current) session.interrupt();
@@ -1966,6 +2069,11 @@ function SessionApp({
             if (!opens) clearInput();
             if (r.kind === "exit") requestExit();
             else if (r.kind === "new") void doNew();
+            else if (r.kind === "rewind") openRewind();
+            else if (r.kind === "fork")
+              void doFork().catch((e: unknown) => {
+                pushLine(`! ${errText(e)}`);
+              });
             else if (r.kind === "overlay") {
               if (r.name === "theme") clearInput();
               if (r.name === "resume" && submitting.current)
@@ -1991,6 +2099,10 @@ function SessionApp({
       }
     }
     if (key.ctrl && ch === "c") {
+      if (rewindTargets !== undefined) {
+        void closeRewind();
+        return;
+      }
       if (recordOpen) {
         if (busy) session.interrupt();
         else void closeRecord().then(exit);
@@ -2031,6 +2143,10 @@ function SessionApp({
       return;
     }
     if (key.ctrl && ch === "d") {
+      if (rewindTargets !== undefined) {
+        void closeRewind().then(requestExit);
+        return;
+      }
       if (recordOpen) {
         void closeRecord().then(requestExit);
         return;
@@ -2085,7 +2201,7 @@ function SessionApp({
     (line: string) => {
       const text = line.trim();
       if (text === "") return;
-      if (switching.current) {
+      if (switching.current || openingRewind.current) {
         pushLine("! 正在切换会话，请稍候");
         return;
       }
@@ -2111,6 +2227,11 @@ function SessionApp({
             if (!opens) clearInput();
             if (r.kind === "exit") requestExit();
             else if (r.kind === "new") void doNew();
+            else if (r.kind === "rewind") openRewind();
+            else if (r.kind === "fork")
+              void doFork().catch((e: unknown) => {
+                pushLine(`! ${errText(e)}`);
+              });
             else if (r.kind === "overlay") {
               if (r.name === "theme") clearInput();
               if (r.name === "resume" && submitting.current)
@@ -2159,6 +2280,8 @@ function SessionApp({
       requestExit,
       doSwitch,
       doNew,
+      openRewind,
+      doFork,
       openPicker,
       openProviderPage,
       openProviderWizard,
@@ -2217,9 +2340,10 @@ function SessionApp({
 
   const vision = session.visionInfo();
   const imageHint =
-    !vision.imageInput && vision.available && images.in(input).length > 0
+    rewindImageHint ??
+    (!vision.imageInput && vision.available && images.in(input).length > 0
       ? `当前模型不支持图片，将由 ${vision.model} 描述后发送`
-      : undefined;
+      : undefined);
   const budget = frameBudget(
     rows,
     completionOpen ? Math.min(8, Math.max(indexing ? 1 : 0, candidates.length)) : imageHint ? 1 : 0,
@@ -2248,7 +2372,19 @@ function SessionApp({
 
   // Static 始终保持挂载，进出备用屏幕时不会重新写入旧回滚区。
   const pageBody =
-    overlay === "settings" ? (
+    rewindTargets !== undefined ? (
+      <RewindPage
+        targets={rewindTargets}
+        width={width}
+        height={budget.frameHeight}
+        onClose={() => {
+          void closeRewind();
+        }}
+        onRewind={doRewind}
+        onFork={doFork}
+        onMouseFrame={fullscreen ? reportDialogMouse : undefined}
+      />
+    ) : overlay === "settings" ? (
       <SettingsPage
         runtime={runtime}
         session={session}
@@ -2884,15 +3020,17 @@ function SessionApp({
 
   onOutputLayout?.(
     pageBody !== null || recordBody !== null || overlayBody !== null ? 0 : budget.conversation,
-    pickerOpen
-      ? "model"
-      : providerPageOpen
-        ? "provider"
-        : recordOpen
-          ? "record"
-          : overlayBody !== null
-            ? "overlay"
-            : "conversation",
+    rewindTargets !== undefined
+      ? "rewind"
+      : pickerOpen
+        ? "model"
+        : providerPageOpen
+          ? "provider"
+          : recordOpen
+            ? "record"
+            : overlayBody !== null
+              ? "overlay"
+              : "conversation",
   );
 
   return (

@@ -80,7 +80,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 - 权限详情经 `@nocturne/tui/text-format` 纯文本入口复用 `truncateMiddle`，按显示列宽保留 URL 两端；该静态入口不加载 Ink。
 - `@` 开头或紧跟空白的路径词用同一 completer 补全：异步读取 `session.fileIndex()`，复用 Core 的排序与逐级目录补全，空格路径自动加双引号。索引最多包含 20000 个工作区文件与目录，遵守 `.gitignore`，排除隐藏项与链接；当前 Turn 内复用，Turn 结束后重建。提交读取规则由 Core 统一处理，见 [ADR-0033](../decisions/ADR-0033-web-fetch-file-refs.md)。
 - `--cli` 的 TTY readline ↑/↓ 从当前工作区的持久输入历史回填，切换会话后改用新会话的工作区；历史经 Core 公开 API 保存，明文文件与保留规则见 [config.md](../architecture/config.md)。`/help` 同样提示明文存储。
-- EOF 发生在 Turn 进行中时：先 `session.interrupt()` 中断并等待该 Turn 收束后再退出；readline 关闭后任何异步回调不得再显示提示符。
+- EOF 发生在 Turn 进行中时：先 `session.interrupt()` 中断并等待该 Turn 收束后再退出；回退或分叉正在执行时等待操作完成。执行期间 Ctrl+C 提示等待，不取消文件还原或释放忙碌状态。readline 关闭后任何异步回调不得再显示提示符。
 - Turn 进行中不接受新的输入行（只响应中断）；权限确认提示出现时优先处理（第 6 节）。
 - Phase 2 单行输入；多行与粘贴不作特殊处理。
 
@@ -100,6 +100,8 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `/shell <种类\|编号>` | 会话内切换 shell（`auto` 清除选择回自动）；写入 `settings.json`，下一次 shell 调用生效；目标未安装时拒绝并列出可选项（`invalid_command`，不写 `settings.json`）；被 `NOCTURNE_SHELL`/`config.json` 覆盖时提示已写入但不生效 | `session.setShell(kind)` → `session.config_changed`（`shell`） |
 | `/context` | 显示若现在构建请求，上下文由什么组成 | `session.describeContext()` → `{ report: ContextReport; overBudget: boolean }`（见下） |
 | `/compact` | 手动触发 L2 摘要压缩 | `session.compact()` → `context.compacted(kind="summary")` |
+| `/rewind` | 编号选择轮次、操作和预览确认；空行或默认 `N` 取消 | `session.rewindTargets()`、`session.rewind()` |
+| `/fork` | 从当前位置分叉，复制会话后切换 | `runtime.forkSession()` + `/resume` 的打开逻辑 |
 | `/resume` | 列出**当前目录**的会话（编号、id、创建时间、绑定目录、模型、锁状态），与 `-c/--continue` 同口径；输入编号切换，空行取消；其他目录的会话用 `/resume <id>`，全部会话用 `--sessions` 查看 | `runtime.listSessions({ cwd })` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
 | `/settings` | 按会话默认、界面、执行分组列出生效值、来源和覆盖提示；安全审查显示独立后端与模型引用，选择用 TUI `/settings` 或 settings.json；默认模型与档位只读，修改去 `/model`，Shell 去 `/shell`，`/theme` 仅 TUI | `runtime.describeSettings()` |
@@ -116,6 +118,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 - `/compact` 输出结果摘要（`throughSeq`、摘要字符数）；没有可压缩内容或摘要失败时打印原因，返回码不产生——REPL 命令的错误只显示，不影响进程。
 - **`/resume` 会话内切换**：复用第 2 节的会话打开语义（锁冲突 `session_locked`、日志损坏、跨目录默认拒绝需 `y/N` 确认）。Turn 进行中拒绝并提示先中断；**先打开新会话**——失败时报错并留在原会话；打开成功后才 `session.close()` 旧会话（释放锁），打印一行"已切换到会话 \<id\>"与恢复摘要（`session.recovery`，若有修复）。该打开逻辑由 CLI 统一实现并以回调注入 TUI（[apps/tui.md](tui.md) 第 6 节）。
 - `/resume` 列表为分叉会话显示「分叉」标记，标题沿用复制日志中的最新标题，见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
+- **回退与分叉**（[ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)）：`/rewind` 按最新在前列出当前有效用户消息，显示首行、时间、改动文件数和未追踪调用提示。输入轮次编号后，选择对话和文件、只回退对话、只还原文件、从这里分叉或取消；没有可还原文件时前者和只还原文件不可用。预览列出文件结果、外部修改标记与未追踪调用，`[y/N]` 默认取消，空行及 Ctrl+C 取消当前流程。确认后只打印回退通知，不重新输出旧对话；TTY 把目标原文放回 readline，管道模式打印可修改后重发的文字，图片未放回时单独提示。Turn 或压缩进行中拒绝操作；`/fork` 与中途分叉均复用会话切换，失败保留原会话。
 - **`/new` 会话内新建**：Turn 进行中拒绝；按最新默认设置创建并换入新会话（未配置默认模型时沿用当前模型），创建失败保留旧会话，成功后才关闭旧会话。逐行模式打印新会话分隔行；`/clear` 是同义别名，不删除旧日志也不清屏。`/settings` 保存只影响之后的新会话，当前会话仍用 `/preset`、`/effort` 切换。
 
 ## 5. 事件渲染

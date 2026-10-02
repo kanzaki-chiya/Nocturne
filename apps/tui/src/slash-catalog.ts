@@ -37,6 +37,8 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "/mcp", summary: "MCP 状态", cli: "显示本会话 MCP 服务器状态" },
   { name: "/compact", summary: "压缩上下文", cli: "手动压缩上下文" },
   { name: "/resume", summary: "切换会话", cli: "列出会话或按 id 切换" },
+  { name: "/rewind", summary: "回退对话或还原文件" },
+  { name: "/fork", summary: "从当前位置分叉新会话" },
   { name: "/new", summary: "新建会话", cli: "新建并切换到空会话" },
   { name: "/clear", summary: "新建会话", cli: "/new 的别名" },
   { name: "/provider", summary: "管理服务商", cli: "列出或管理服务商", args: "provider" },
@@ -87,6 +89,7 @@ export function helpLines(): string[] {
     lines.push(`  ${cmd.name}${extra}`.padEnd(18) + cmd.summary);
   }
   lines.push("快捷键：Ctrl+O 展开/收起思考；Shift+Tab 思考档位；Alt+M 权限预设；Ctrl+J 换行；");
+  lines.push("Esc 中断；空闲且输入为空时 600ms 内双按 Esc 打开回退列表。");
   lines.push("Ctrl+C 中断（空闲时退出）；Ctrl+D 退出。输入历史按工作区保存为明文 history.jsonl。");
   return lines;
 }

@@ -282,6 +282,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         view.pendingQuestion = undefined;
         view.live = { assistants: [], tools: [] };
         view.status = "idle";
+        view.retry = undefined;
         b.attachments = book(rebuilt).attachments;
         b.tools = book(rebuilt).tools;
         b.resolved = book(rebuilt).resolved;
