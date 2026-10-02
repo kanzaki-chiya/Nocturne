@@ -661,7 +661,7 @@ describe("声明式 Responses 约束（ADR-0042 §5）", () => {
           ],
         },
       ],
-      tool_choice: { type: "function", name: "functions.echo" },
+      tool_choice: { type: "function", name: "echo", namespace: "functions" },
       include: ["reasoning.encrypted_content"],
     });
     for (const field of constraints.omitFields) expect(capture.body).not.toHaveProperty(field);
@@ -731,12 +731,16 @@ describe("声明式 Responses 约束（ADR-0042 §5）", () => {
         ],
       }),
     );
+    // 历史调用名不带点号（通道要求 ^[a-zA-Z0-9_-]+$），命名空间单列
     expect(capture.body?.input).toContainEqual({
       type: "function_call",
       call_id: "call_1",
-      name: "functions.finish",
+      name: "finish",
+      namespace: "functions",
       arguments: '{"result":"ok"}',
     });
+    for (const item of capture.body?.input as { name?: string }[])
+      if (item.name !== undefined) expect(item.name).toMatch(/^[a-zA-Z0-9_-]+$/);
     expect(capture.body?.input).toContainEqual({
       type: "function_call_output",
       call_id: "call_1",

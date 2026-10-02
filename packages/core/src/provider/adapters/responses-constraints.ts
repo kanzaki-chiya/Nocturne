@@ -22,6 +22,8 @@ export function constrainResponsesFetch(
     names.set(qualified, name);
     return qualified;
   };
+  const plainName = (name: string): string =>
+    name.startsWith(`${TOOL_NAMESPACE}.`) ? name.slice(TOOL_NAMESPACE.length + 1) : name;
 
   const rewriteRequest = (body: Record<string, unknown>): void => {
     body.store = false;
@@ -78,14 +80,17 @@ export function constrainResponsesFetch(
       }
       for (const value of input) {
         const item = record(value);
+        // 历史里的调用名只允许 [a-zA-Z0-9_-]（实测 400：input[n].name 不匹配），
+        // 命名空间放在单独的 namespace 字段，不拼进 name。
         if (item?.type === "function_call" && typeof item.name === "string") {
-          item.name = namespaceName(item.name);
-          Reflect.deleteProperty(item, "namespace");
+          item.name = plainName(item.name);
+          item.namespace = TOOL_NAMESPACE;
         }
       }
       const choice = record(body.tool_choice);
       if (choice?.type === "function" && typeof choice.name === "string") {
-        choice.name = namespaceName(choice.name);
+        choice.name = plainName(choice.name);
+        choice.namespace = TOOL_NAMESPACE;
       }
     }
     for (const field of constraints.omitFields) Reflect.deleteProperty(body, field);
@@ -103,7 +108,7 @@ export function constrainResponsesFetch(
       item.type === "function_call" &&
       typeof item.name === "string"
     ) {
-      item.name = names.get(item.name) ?? item.name;
+      item.name = names.get(item.name) ?? plainName(item.name);
       Reflect.deleteProperty(item, "namespace");
     }
     for (const child of Object.values(item)) rewriteEvent(child);
