@@ -132,7 +132,8 @@ export interface ModelRequest {
   providerOptions?: Record<string, unknown> | undefined;
   /**
    * 会话标识（ADR-0031 §3）：Runtime 填入会话 ID（子代理填根会话 ID），
-   * 不透明数据；仅当条目声明 sessionHeader 时适配器把它写成请求头，
+   * 不透明数据；条目声明 sessionHeader 时适配器把它写成请求头，
+   * openai-responses 另作为 prompt_cache_key 发送；
    * fetchModels 不携带。
    */
   sessionId?: string | undefined;

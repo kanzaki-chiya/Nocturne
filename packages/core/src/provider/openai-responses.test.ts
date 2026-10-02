@@ -276,6 +276,24 @@ describe("openai-responses 适配器", () => {
     expect(capture.body?.["reasoning"]).toBeUndefined();
   });
 
+  it("带 sessionId 时作为 prompt_cache_key 发送；配置已给时不覆盖；不带时不发", async () => {
+    const send = async (extra: Parameters<typeof request>[0]) => {
+      const capture: Captured = {};
+      const p = createOpenAIResponsesProvider(
+        config(),
+        envWithKey,
+        sseFetch([...messageChunks(["ok", ""]), completed()], capture),
+      );
+      await collect(p, request(extra));
+      return capture.body?.["prompt_cache_key"];
+    };
+    expect(await send({ sessionId: "sess-1" })).toBe("sess-1");
+    expect(await send({ sessionId: "sess-1", providerOptions: { promptCacheKey: "custom" } })).toBe(
+      "custom",
+    );
+    expect(await send({})).toBeUndefined();
+  });
+
   it("maxOutputTokens 未声明时请求体不带 max_output_tokens", async () => {
     const capture: Captured = {};
     const p = createOpenAIResponsesProvider(

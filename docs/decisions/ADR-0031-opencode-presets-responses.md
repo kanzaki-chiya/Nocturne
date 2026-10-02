@@ -118,3 +118,7 @@ models.dev 现已收录 `opencode`（Zen）与 `opencode-go` 两个服务商，�
 - **Responses 继续暂缓，只标「协议不支持」**：Go 里 7 个模型（GPT、Grok、muse-spark 系）不能用，预设的价值大打折扣。
 - **Responses 用 `openai` 官方 SDK**：需要另写一套流式归一化；`@ai-sdk/openai` 与现有两个适配器共用路径，契约测试也能复用。
 - **有状态 Responses（`store: true` + `previous_response_id`）**：依赖服务端保存历史，与本地事件日志作为唯一事实来源的设计冲突，第三方网关对它的支持也不确定。
+
+## 修订
+
+- 2026-10-03：§6 补充：请求带会话标识时，openai-responses 把它作为 `prompt_cache_key` 发送（请求级 `promptCacheKey` 已给时不覆盖）。无状态请求下缓存只能按前缀命中，不带该键时同一会话的请求可能落到不同缓存分片；ChatGPT 账号冒烟中多轮工具会话命中率仅 8%。

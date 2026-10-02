@@ -92,7 +92,8 @@ interface ModelRequest {
   providerOptions?: Record<string, unknown>                  // 请求级 Provider 专有选项，原样交给适配器，Core 不解释
   /** 会话标识（ADR-0031 §3）：Runtime 对每个模型请求填入根会话 ID（主 Turn、
       压缩、子代理兜底轮同一值；子代理沿 parent 链到顶取根会话）。
-      对适配器不透明：仅当条目声明 sessionHeader 时映射为同名请求头 */
+      对适配器不透明：条目声明 sessionHeader 时映射为同名请求头；
+      openai-responses 另作为 prompt_cache_key 发送（请求级未给该键时） */
   sessionId?: string
 }
 ```

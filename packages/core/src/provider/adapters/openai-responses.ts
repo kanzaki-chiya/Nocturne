@@ -144,6 +144,11 @@ export function createOpenAIResponsesProvider(
         merged.forceReasoning = true;
       }
       merged.store = false;
+      // 缓存路由键：不在服务端存储时缓存只能按前缀命中，同一会话带同一个键
+      // 才会落到同一缓存分片；子代理用根会话 ID（ADR-0031 §3）。配置已给时不覆盖。
+      if (request.sessionId !== undefined && merged.promptCacheKey === undefined) {
+        merged.promptCacheKey = request.sessionId;
+      }
       const declaredInclude = Array.isArray(merged.include)
         ? merged.include.filter((v): v is string => typeof v === "string")
         : [];
