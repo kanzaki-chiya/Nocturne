@@ -1005,17 +1005,22 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   // 估算模式（virtual）同样受限。图片字节/base64 长度不计入字符估算。
   const imageCap = enforceImageCap(messages, imageOpts.virtual ?? new Map<ModelMessage, number>());
   // 任务清单附在请求末尾，可缓存前缀止于它之前。末尾已是 user 消息时并入该消息
-  // （部分兼容服务拒绝连续两条 user 消息），该条随之移出前缀；否则（工具结果等）
-  // 另起一条 user 消息。新对象替换，不改动调用方传入的 pendingMessages。
+  // （部分兼容服务拒绝连续两条 user 消息）；末尾是工具结果时并入最后一条工具结果
+  // （ADR-0028 修订：另起 user 消息会让推理模型把每一步当成新一轮，丢弃本轮推理，
+  // 服务端前缀缓存也随之失效）；两种情况该条都移出前缀。其余情况另起一条 user 消息。
+  // 新对象替换，不改动调用方传入的 pendingMessages。
   let cacheableMessages = messages.length;
   if (todoText !== undefined) {
-    const block: ContentBlock = { type: "text", text: todoText };
     const last = messages.at(-1);
     if (last?.role === "user") {
+      const block: ContentBlock = { type: "text", text: todoText };
       messages[messages.length - 1] = { ...last, content: [...last.content, block] };
       cacheableMessages = messages.length - 1;
+    } else if (last?.role === "tool") {
+      messages[messages.length - 1] = { ...last, content: `${last.content}\n\n${todoText}` };
+      cacheableMessages = messages.length - 1;
     } else {
-      messages.push({ role: "user", content: [block] });
+      messages.push({ role: "user", content: [{ type: "text", text: todoText }] });
     }
   }
   sections.push({

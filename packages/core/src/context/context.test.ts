@@ -72,7 +72,7 @@ describe("buildContext", () => {
       buildContext(baseInput({ todos: [] })).report.sections.some((s) => s.name === "todos"),
     ).toBe(false);
   });
-  it("任务清单：末尾是 user 消息时并入该条（不产生连续 user），末尾是工具结果时另起一条", () => {
+  it("任务清单：末尾是 user 消息时并入该条（不产生连续 user），末尾是工具结果时并入该工具结果", () => {
     const todos = [{ text: "当前任务", status: "in_progress" as const }];
     const userTail = buildContext(
       baseInput({
@@ -118,8 +118,11 @@ describe("buildContext", () => {
         todos,
       }),
     ).request;
-    expect(toolTail.messages.map((m) => m.role)).toEqual(["user", "tool", "user"]);
-    expect(toolTail.cachePrefix?.messages).toBe(2);
+    // ADR-0028 修订：不另起 user 消息，推理模型不会把每一步当成新一轮
+    expect(toolTail.messages.map((m) => m.role)).toEqual(["user", "tool"]);
+    const tail = toolTail.messages[1];
+    expect(tail?.role === "tool" ? tail.content : "").toMatch(/^结果\n\n当前会话任务清单/);
+    expect(toolTail.cachePrefix?.messages).toBe(1);
     expect(pending.content).toBe("结果");
   });
   it("组装顺序：system → tools → instructions → environment → history", () => {
