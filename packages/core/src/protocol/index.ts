@@ -11,3 +11,4 @@ export * from "./todo.js";
 export * from "./file-refs.js";
 export * from "./compaction.js";
 export * from "./rewind.js";
+export * from "./provider-auth.js";

@@ -18,7 +18,8 @@ import {
   type OpenAIResponsesConfig,
 } from "./adapters/openai-responses.js";
 import { fetchModels } from "./presets.js";
-import type { ModelRequest, ModelStreamEvent } from "./types.js";
+import { ProviderError } from "./errors.js";
+import type { ModelRequest, ModelStreamEvent, Provider } from "./types.js";
 
 const envWithKey = () => "sk-test";
 
@@ -127,16 +128,40 @@ function responsesConfig(over: Partial<OpenAIResponsesConfig> = {}): OpenAIRespo
   };
 }
 
-function createFor(config: AnyConfig, fetchImpl: typeof fetch) {
+function createFor(
+  config: AnyConfig,
+  fetchImpl: typeof fetch,
+  env: (name: string) => string | undefined = envWithKey,
+) {
   // config.type 可选（适配器缺省值）：本文件的工厂始终显式设置 type，
   // default 分支只可能是 openai-compatible
   if (config.type === "anthropic") {
-    return createAnthropicProvider(config, envWithKey, fetchImpl);
+    return createAnthropicProvider(config, env, fetchImpl);
   }
   if (config.type === "openai-responses") {
-    return createOpenAIResponsesProvider(config, envWithKey, fetchImpl);
+    return createOpenAIResponsesProvider(config, env, fetchImpl);
   }
-  return createOpenAICompatibleProvider(config as OpenAICompatibleConfig, envWithKey, fetchImpl);
+  return createOpenAICompatibleProvider(config as OpenAICompatibleConfig, env, fetchImpl);
+}
+
+async function consume(
+  provider: Provider,
+  request: Partial<ModelRequest> = {},
+  signal = new AbortController().signal,
+): Promise<ModelStreamEvent[]> {
+  const events: ModelStreamEvent[] = [];
+  for await (const event of provider.stream(
+    {
+      model: "m",
+      system: [],
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      tools: [],
+      ...request,
+    },
+    signal,
+  ))
+    events.push(event);
+  return events;
 }
 
 async function drain(
@@ -213,6 +238,199 @@ describe("会话标识请求头（ADR-0031 §3）", () => {
         { sessionId: "dynamic-id" },
       );
       expect(captured.headers?.get("x-opencode-session")).toBe("static-value");
+    });
+  }
+});
+
+describe("鉴权请求边界（ADR-0042 §3/§6）", () => {
+  for (const [name, make] of Object.entries(CONFIGS)) {
+    it(`${name}：resolver 在请求时取 token，override 不读取环境变量或旧凭据`, async () => {
+      const captured: Captured = {};
+      const env = vi.fn(() => "ignored-env");
+      const credentials = vi.fn(async () => "ignored-store");
+      const token = vi.fn(async (signal: AbortSignal) => {
+        signal.throwIfAborted();
+        return "resolved-token";
+      });
+      const invalidate = vi.fn(async () => undefined);
+      const provider = createFor(
+        make({ authResolver: { token, invalidate }, credentials }),
+        fakeFetch(captured),
+        env,
+      );
+      expect(token).not.toHaveBeenCalled();
+      await consume(provider);
+      expect(token).toHaveBeenCalledTimes(1);
+      expect(token.mock.calls[0]).toHaveLength(1);
+      expect(token.mock.calls[0]?.[0]).toBeInstanceOf(AbortSignal);
+      expect(env).not.toHaveBeenCalled();
+      expect(credentials).not.toHaveBeenCalled();
+      expect(invalidate).not.toHaveBeenCalled();
+      const header = name === "anthropic" ? "x-api-key" : "authorization";
+      expect(captured.headers?.get(header)).toBe(
+        name === "anthropic" ? "resolved-token" : "Bearer resolved-token",
+      );
+    });
+
+    it(`${name}：首次 401 后失效、取新 token 并仅重发一次`, async () => {
+      const tokens = ["expired-token", "renewed-token"];
+      const token = vi.fn(async () => tokens.shift() ?? "unexpected-third-token");
+      const invalidate = vi.fn(async () => undefined);
+      const success = fakeFetch({});
+      const sent: { headers: Headers; body: unknown; redirect: RequestInit["redirect"] }[] = [];
+      const fetchImpl: typeof fetch = async (input, init) => {
+        sent.push({
+          headers: new Headers(init?.headers),
+          body: init?.body,
+          redirect: init?.redirect,
+        });
+        return sent.length === 1
+          ? new Response("expired-token in upstream body", { status: 401 })
+          : success(input, init);
+      };
+      const events = await consume(
+        createFor(make({ authResolver: { token, invalidate }, modelHeader: "x-model" }), fetchImpl),
+      );
+      expect(events.some((event) => event.type === "finish")).toBe(true);
+      expect(token).toHaveBeenCalledTimes(2);
+      expect(invalidate).toHaveBeenCalledTimes(1);
+      expect(sent).toHaveLength(2);
+      const header = name === "anthropic" ? "x-api-key" : "authorization";
+      expect(sent.map((request) => request.headers.get(header))).toEqual(
+        name === "anthropic"
+          ? ["expired-token", "renewed-token"]
+          : ["Bearer expired-token", "Bearer renewed-token"],
+      );
+      expect(sent[0]?.body).toBe(sent[1]?.body);
+      expect(sent.map((request) => request.headers.get("x-model"))).toEqual(["m", "m"]);
+      expect(sent.map((request) => request.redirect)).toEqual(["error", "error"]);
+    });
+
+    it(`${name}：二次 401 是不可重试的安全 auth 错误，不读取或附带上游 body`, async () => {
+      const token = vi.fn(async () => "private-token");
+      const invalidate = vi.fn(async () => undefined);
+      const cancel = vi.fn();
+      const fetchImpl = vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode("private-token upstream-body"));
+              },
+              cancel,
+            }),
+            { status: 401 },
+          ),
+      );
+      const provider = createFor(
+        make({
+          authResolver: {
+            token,
+            invalidate,
+            unauthorizedMessage: "请执行 grok login",
+          },
+        }),
+        fetchImpl,
+      );
+      const error: unknown = await consume(provider).catch((value: unknown) => value);
+      expect(error).toBeInstanceOf(ProviderError);
+      expect(error).toMatchObject({
+        kind: "auth",
+        retryable: false,
+        status: 401,
+        message: "请执行 grok login",
+      });
+      expect(error).toHaveProperty("cause", undefined);
+      expect(error).toHaveProperty("providerMessage", undefined);
+      expect(String(error)).not.toContain("private-token");
+      expect(JSON.stringify(error)).not.toContain("upstream-body");
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(invalidate).toHaveBeenCalledTimes(1);
+      expect(cancel).toHaveBeenCalledTimes(2);
+    });
+
+    it(`${name}：401 没有 resolver 提示时使用安全固定提示`, async () => {
+      const provider = createFor(
+        make(),
+        async () => new Response("secret-upstream-body", { status: 401 }),
+      );
+      await expect(consume(provider)).rejects.toMatchObject({
+        kind: "auth",
+        retryable: false,
+        message: "服务商凭据已失效，请重新配置密钥或登录",
+      });
+    });
+
+    it(`${name}：旧 credentials/apiKeyEnv 路径保留环境变量优先与空值回退`, async () => {
+      const stored = vi.fn(async () => "stored-key");
+      const captured: Captured = {};
+      const config = make({ credentials: stored });
+      await consume(createFor(config, fakeFetch(captured)));
+      expect(stored).not.toHaveBeenCalled();
+      await consume(createFor(config, fakeFetch(captured), () => ""));
+      expect(stored).toHaveBeenCalledExactlyOnceWith(config.id);
+      const header = name === "anthropic" ? "x-api-key" : "authorization";
+      expect(captured.headers?.get(header)).toBe(
+        name === "anthropic" ? "stored-key" : "Bearer stored-key",
+      );
+    });
+
+    it(`${name}：modelHeader 逐请求写模型并覆盖不同大小写的静态值`, async () => {
+      const captured: Captured = {};
+      const fetchImpl = fakeFetch(captured);
+      const dynamic = createFor(
+        make({ modelHeader: "x-model", headers: { "X-Model": "stale-model" } }),
+        fetchImpl,
+      );
+      await consume(dynamic, { model: "first-model" });
+      expect(captured.headers?.get("x-model")).toBe("first-model");
+      await consume(dynamic, { model: "second-model" });
+      expect(captured.headers?.get("x-model")).toBe("second-model");
+    });
+
+    it(`${name}：成功响应后的流中断不失效或重发`, async () => {
+      const invalidate = vi.fn(async () => undefined);
+      const fetchImpl = vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new TypeError("connection closed"));
+              },
+            }),
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          ),
+      );
+      const provider = createFor(
+        make({ authResolver: { token: async () => "token", invalidate } }),
+        fetchImpl,
+      );
+      await expect(consume(provider)).rejects.toBeInstanceOf(ProviderError);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(invalidate).not.toHaveBeenCalled();
+    });
+
+    it(`${name}：401 后取消不会发第二次请求`, async () => {
+      const controller = new AbortController();
+      const invalidate = vi.fn(async () => {
+        controller.abort();
+      });
+      const token = vi.fn(async () => "token");
+      const fetchImpl = vi.fn(async () => new Response("unauthorized", { status: 401 }));
+      const provider = createFor(make({ authResolver: { token, invalidate } }), fetchImpl);
+      await expect(consume(provider, {}, controller.signal)).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(token).toHaveBeenCalledTimes(1);
+      expect(invalidate).toHaveBeenCalledTimes(1);
+    });
+
+    it(`${name}：缺少凭据在发 HTTP 前结束`, async () => {
+      const fetchImpl = vi.fn(fakeFetch({}));
+      const provider = createFor(make(), fetchImpl, () => "");
+      await expect(consume(provider)).rejects.toMatchObject({ kind: "auth", retryable: false });
+      expect(fetchImpl).not.toHaveBeenCalled();
     });
   }
 });

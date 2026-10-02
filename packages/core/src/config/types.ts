@@ -15,6 +15,7 @@ import type {
   ModelRef,
   PermissionPresetName,
   PermissionRule,
+  ProviderAuth,
   ReasoningEffort,
   ReasoningEffortLevel,
 } from "../protocol/index.js";
@@ -92,6 +93,8 @@ export interface ProviderEntryConfig {
   baseURL?: string | undefined;
   /** 环境变量名（不是凭据值）；可选——未声明时凭据经凭据索引/系统后端解析 */
   apiKeyEnv?: string | undefined;
+  /** 鉴权方式；省略等同 apiKey，仅用户级声明生效（ADR-0042）。 */
+  auth?: ProviderAuth | undefined;
   models?: Record<string, ModelOverrideShape> | undefined;
   allowUndeclaredModels?: boolean | undefined;
   providerOptions?: Record<string, unknown> | undefined;
@@ -102,6 +105,8 @@ export interface ProviderEntryConfig {
    * <sessionId>`，headers 里同名静态头优先；未声明不发送。
    */
   sessionHeader?: string | undefined;
+  /** 请求模型 id 所在的请求头名（ADR-0042）。 */
+  modelHeader?: string | undefined;
   /**
    * models.dev 服务商键（ADR-0031 §4）：如 "opencode-go"；声明后
    * models.dev 缓存/快照中该服务商的逐模型 npm 原文映射为 endpoints，
@@ -200,6 +205,8 @@ export interface ResolvedConfig {
   modelRoles?: Partial<Record<ModelRole, string | undefined>> | undefined;
   compactionThreshold?: string | number | undefined;
   providerThinkingWarnings?: string[] | undefined;
+  /** Runtime 以 provider_auth_conflict 发出的鉴权配置警告。 */
+  providerAuthWarnings?: string[] | undefined;
   model?: string | undefined;
   permissionPreset?: PermissionPresetName | undefined;
   permissionReviewer?: SecurityReviewerConfig | undefined;

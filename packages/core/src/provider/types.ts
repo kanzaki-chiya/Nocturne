@@ -214,6 +214,24 @@ export interface ProviderRegistry {
  */
 export type CredentialResolver = (providerId: string) => Promise<string | undefined>;
 
+export type { ProviderAuth } from "../protocol/index.js";
+
+/** 鉴权实现提供的 Responses 通道约束，适配器消费声明。 */
+export interface ResponsesRequestConstraints {
+  omitFields: readonly string[];
+  systemAsInstructions: boolean;
+  namespaceTools: boolean;
+  requireCompleted: boolean;
+}
+
+export interface AuthResolver {
+  token(signal: AbortSignal): Promise<string>;
+  invalidate(): Promise<void>;
+  readonly unauthorizedMessage?: string | undefined;
+  readonly modelFormat?: "siwc" | undefined;
+  readonly requestConstraints?: ResponsesRequestConstraints | undefined;
+}
+
 /**
  * 上游模型列表条目（fetchModels 返回值；provider-setup.md 第 7 节）。
  * 只含上游明确声明的字段；未声明的字段保持 undefined，不猜。

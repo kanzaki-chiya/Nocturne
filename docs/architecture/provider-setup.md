@@ -157,6 +157,8 @@ interface ProviderSetupFile {
 
 ## 5. 服务商预设
 
+Grok CLI 预设使用 `https://cli-chat-proxy.grok.com/v1`、静态头 `X-XAI-Token-Auth: xai-grok-cli`、模型头 `x-grok-model-override` 与外部文件 `~/.grok/auth.json`（`keyPath: ["https://accounts.x.ai/sign-in", "key"]`，续期 `grok login`）。向导跳过密钥输入，先获取模型列表，失败询问模型 id；不修改官方 CLI 的文件（[ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 6 节）。
+
 预设是 `provider` 模块里的纯数据：
 
 | 预设 | 类型 | 默认名称 | 服务地址 | 模型列表 | thinking-format |

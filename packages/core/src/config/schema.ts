@@ -62,6 +62,22 @@ export const modelOverrideSchema = z.object({
 });
 
 /** Provider 条目 schema（config.json 与 providers.json 共用） */
+const providerAuthSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("apiKey") }).strict(),
+  z.object({ kind: z.literal("openai-siwc") }).strict(),
+  z
+    .object({
+      kind: z.literal("external-file"),
+      path: z
+        .string()
+        .min(1)
+        .refine((value) => value.trim().length > 0),
+      keyPath: z.array(z.string().min(1)).min(1),
+      renewHint: z.string().trim().min(1),
+    })
+    .strict(),
+]);
+
 export const providerEntrySchema = z
   .object({
     id: z.string().min(1),
@@ -69,6 +85,7 @@ export const providerEntrySchema = z
     baseURL: z.string().min(1).optional(),
     // v0.2：可选——缺省时凭据经凭据索引/系统后端解析（provider-setup.md 第 3 节）
     apiKeyEnv: z.string().min(1).optional(),
+    auth: providerAuthSchema.optional(),
     models: z.record(z.string(), modelOverrideSchema).optional(),
     allowUndeclaredModels: z.boolean().optional(),
     providerOptions: z.record(z.string(), z.unknown()).optional(),
@@ -76,6 +93,10 @@ export const providerEntrySchema = z
     // 会话标识请求头名（ADR-0031 §3）：如 "x-opencode-session"；
     // 请求带 sessionId 时写该头，未声明不发送任何会话头
     sessionHeader: z.string().min(1).optional(),
+    modelHeader: z
+      .string()
+      .regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/)
+      .optional(),
     // models.dev 服务商键（ADR-0031 §4）：启用按服务商的接口声明参与合并
     modelsDevProvider: z.string().min(1).optional(),
     // 思考兼容开关（ADR-0018）：format 由预设写死；levels/source 仅为旧文件读取；
@@ -313,6 +334,10 @@ export function rejectCredentialKeys(raw: unknown, filePath: string): void {
     for (const entry of providers as unknown[]) {
       if (typeof entry !== "object" || entry === null) continue;
       for (const key of Object.keys(entry)) {
+        // auth 现在是声明式鉴权对象；字符串凭据与旧内联字段仍硬拒绝。
+        const value = (entry as Record<string, unknown>)[key];
+        if (key === "auth" && typeof value === "object" && value !== null && !Array.isArray(value))
+          continue;
         if (CREDENTIAL_KEYS.has(key.toLowerCase())) {
           throw new ConfigError(
             "config_credential_rejected",

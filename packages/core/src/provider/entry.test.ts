@@ -4,7 +4,7 @@
  * 生效协议走 /chat/completions、/messages 或 /responses，并携带协议对应
  * 的鉴权头；不可用模型照常列出但发请求前以说明拒绝（不发 HTTP）。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createEntryProvider, type EntryProviderConfig } from "./entry.js";
 import { ProviderError } from "./errors.js";
@@ -400,5 +400,81 @@ describe("路由 Provider：不可用模型（ADR-0026 §5）", () => {
       async () => new Response("x", { status: 500 }),
     );
     expect(p.models()[0]?.protocol).toBe("anthropic");
+  });
+});
+
+describe("路由 Provider：共享 AuthResolver（ADR-0042 §3）", () => {
+  it("三个协议共用失效后的 token，非 API key override 不读取 env/credentials", async () => {
+    let key = "old-token";
+    const token = vi.fn(async () => key);
+    const invalidate = vi.fn(async () => {
+      key = "new-token";
+    });
+    const env = vi.fn(() => "unused-env-token");
+    const credentials = vi.fn(async () => "unused-stored-token");
+    const capture: Capture = {};
+    const success = routingFetch(capture);
+    const fetchImpl = vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (new Headers(init?.headers).get("authorization") === "Bearer old-token") {
+        return new Response("old-token in body", { status: 401 });
+      }
+      return success(input, init);
+    });
+    const provider = createEntryProvider(
+      {
+        id: "mixed",
+        baseURL: "https://api.test/v1",
+        apiKeyEnv: "IGNORED",
+        auth: {
+          kind: "external-file",
+          path: "unused-auth-file",
+          keyPath: ["key"],
+          renewHint: "renew",
+        },
+        authResolver: { token, invalidate },
+        credentials,
+        modelHeader: "x-model",
+        models: {
+          chat: { protocol: "openai-compatible" },
+          messages: { protocol: "anthropic" },
+          responses: { protocol: "openai-responses" },
+        },
+      },
+      env,
+      fetchImpl,
+    );
+    for (const model of ["chat", "messages", "responses"]) {
+      const events = await collect(provider, request(model));
+      expect(events.some((event) => event.type === "finish")).toBe(true);
+      expect(capture.headers?.authorization).toBe("Bearer new-token");
+      expect(capture.headers?.["x-model"]).toBe(model);
+      if (model === "messages") expect(capture.headers?.["x-api-key"]).toBe("new-token");
+    }
+    expect(env).not.toHaveBeenCalled();
+    expect(credentials).not.toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(token).toHaveBeenCalledTimes(4);
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+  });
+
+  it("API key resolver 构造一次，延迟构造三个适配器不会重复读 env", async () => {
+    const env = vi.fn(() => "entry-key");
+    const capture: Capture = {};
+    const provider = createEntryProvider(
+      {
+        id: "mixed",
+        baseURL: "https://api.test/v1",
+        apiKeyEnv: "ENTRY_KEY",
+        models: {
+          chat: { protocol: "openai-compatible" },
+          messages: { protocol: "anthropic" },
+          responses: { protocol: "openai-responses" },
+        },
+      },
+      env,
+      routingFetch(capture),
+    );
+    for (const model of ["chat", "messages", "responses"]) await collect(provider, request(model));
+    expect(env).toHaveBeenCalledExactlyOnceWith("ENTRY_KEY");
   });
 });

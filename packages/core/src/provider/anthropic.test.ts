@@ -84,9 +84,10 @@ describe("anthropic 适配器", () => {
   it("缺少凭据环境变量 → auth ProviderError（无网络）", async () => {
     const p = createAnthropicProvider(config(), () => undefined);
     await expect(collect(p, request())).rejects.toMatchObject({
-      name: "ProviderError",
       kind: "auth",
+      retryable: false,
     });
+    await expect(collect(p, request())).rejects.toBeInstanceOf(ProviderError);
   });
 
   it("文本流：text_delta + usage + finish(stop)", async () => {

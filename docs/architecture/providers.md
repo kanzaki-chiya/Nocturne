@@ -70,6 +70,8 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 ## 4. 适配器
 
+条目可声明用户级 `auth`（省略等同 `apiKey`）及 `modelHeader`；后者把本次模型 id 写入指定请求头。鉴权解析器由条目共享，主对话、子代理、角色调用、审查、摘要与模型发现使用同一解析语义。`external-file` 按 mtime 缓存，只读指定 JSON 路径；失效后重读一次，失败提示 `renewHint`，不复制到 Nocturne 凭据库。完整契约见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md)。
+
 | 适配器 | 覆盖 | 阶段 | 传输实现 |
 |---|---|---|---|
 | `openai-compatible`（Chat Completions） | DeepSeek、GLM、OpenRouter、Ollama / vLLM / LM Studio 等 OpenAI 兼容服务 | Phase 1 | `@ai-sdk/openai-compatible`（peer: `ai`） |

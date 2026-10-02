@@ -1,5 +1,7 @@
 /** provider — Provider 接口、模型目录、适配器（providers.md、provider-api.md） */
 export * from "./types.js";
+export * from "./auth.js";
+export { externalAuthPath } from "./adapters/external-file-auth.js";
 export * from "./http.js";
 export * from "./timeout.js";
 export * from "./errors.js";

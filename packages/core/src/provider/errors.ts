@@ -54,6 +54,14 @@ export function isProviderError(e: unknown): e is ProviderError {
   return e instanceof ProviderError;
 }
 
+/** 安全的鉴权错误：不携带上游响应或凭据。 */
+export class ProviderAuthError extends ProviderError {
+  constructor(message: string, status?: number) {
+    super({ kind: "auth", message, retryable: false, status });
+    this.name = "ProviderAuthError";
+  }
+}
+
 /** 中止错误：signal 中止时抛出 name === "AbortError" 的错误（provider-api.md 第 4 节） */
 export function abortError(): Error {
   const e = new Error("The operation was aborted");

@@ -164,6 +164,8 @@ type FinishReason = "stop" | "tool_calls" | "length" | "content_filter" | "other
 
 ## 5. 错误
 
+鉴权通过 `AuthResolver.token(signal)` 与 `invalidate()` 统一解析（[ADR-0042](../decisions/ADR-0042-provider-oauth.md)）。适配器在响应流开始前收到 401 时失效并重发一次；第二次 401 为 `ProviderAuthError`（`kind: auth`、`retryable: false`），不进入 Turn 通用重试。错误不携带凭据或原始鉴权响应。
+
 ```ts
 class ProviderError extends Error {
   kind:

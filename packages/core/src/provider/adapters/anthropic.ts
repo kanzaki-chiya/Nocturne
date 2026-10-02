@@ -9,16 +9,19 @@
  */
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { streamText, type JSONValue } from "ai";
-import { abortError, ProviderError } from "../errors.js";
+import { abortError } from "../errors.js";
+import { createAuthResolver } from "../auth.js";
 import { MAX_OUTPUT_FALLBACK } from "../catalog.js";
 import { planAnthropicThinking, withReasoningEfforts } from "../reasoning.js";
 import { resolveModelInfo, type ModelOverride } from "../registry.js";
 import type {
+  AuthResolver,
   CredentialResolver,
   ModelInfo,
   ModelRequest,
   ModelStreamEvent,
   Provider,
+  ProviderAuth,
   ProviderThinkingOptions,
 } from "../types.js";
 import {
@@ -26,7 +29,7 @@ import {
   type Diagnostics,
   type ReasoningEffortLevel,
 } from "../../protocol/index.js";
-import { sessionRequestHeaders, withUserAgent } from "../http.js";
+import { createAuthFetch, modelRequestHeaders, withUserAgent } from "../http.js";
 import {
   mapPart,
   planToolChoice,
@@ -52,6 +55,8 @@ export interface AnthropicConfig {
    * （provider-setup.md 第 3 节的凭据索引，密钥不落配置文件）。
    */
   apiKeyEnv?: string | undefined;
+  auth?: ProviderAuth | undefined;
+  authResolver?: AuthResolver | undefined;
   /**
    * 凭据解析器（装配处注入 CredentialStore.get）：apiKeyEnv 未设置或
    * 对应环境变量为空时，请求前经它取密钥；结果由存储层进程内缓存。
@@ -64,6 +69,7 @@ export interface AnthropicConfig {
   /** 原样传给适配器（providerOptions.anthropic） */
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
+  modelHeader?: string | undefined;
   /**
    * 思考兼容开关（ADR-0018）：levels 是服务商级可用档位（用户声明）；
    * budgets 覆盖档位 → thinking.budget_tokens 的默认预算表。
@@ -100,39 +106,18 @@ export function createAnthropicProvider(
   fetchImpl?: typeof fetch,
 ): Provider {
   routeSdkWarnings(config.diagnostics);
-  // 构造时只取环境变量；凭据存储在请求时解析（异步），两条路径在 stream 里汇合
-  const apiKeyFromEnv =
-    config.apiKeyEnv !== undefined && env(config.apiKeyEnv) !== ""
-      ? env(config.apiKeyEnv)
-      : undefined;
-  const missingKeyError = (): ProviderError =>
-    new ProviderError({
-      kind: "auth",
-      message:
-        config.apiKeyEnv !== undefined
-          ? `环境变量 ${config.apiKeyEnv} 未设置，凭据存储中也没有 "${config.id}" 的密钥（anthropic Provider）——可运行 nctrn setup 或 /provider key 配置`
-          : `Provider "${config.id}" 未配置凭据——可运行 nctrn setup 或 /provider key 配置，或在条目上声明 apiKeyEnv`,
-      retryable: false,
-    });
-  /** 请求时解析密钥：环境变量优先，其次凭据存储（结果由存储层缓存） */
-  const resolveKey = async (): Promise<string | undefined> =>
-    apiKeyFromEnv ?? (await config.credentials?.(config.id));
-  // SDK 的 apiKey 只接受静态字符串；凭据存储的密钥经包装 fetch
-  // 覆盖 x-api-key 头注入（每次请求取最新值，/provider key 后立即生效）。
-  // 惰性取 globalThis.fetch：测试在构造后替换全局 fetch 的场景保持有效
-  const baseFetch: typeof fetch = (...args) => (fetchImpl ?? globalThis.fetch)(...args);
-  const wrappedFetch: typeof fetch = async (url, init) => {
-    const key = await resolveKey();
-    if (key === undefined) throw missingKeyError();
-    const headers = new Headers(init?.headers);
-    headers.set("x-api-key", key);
-    // ADR-0026 §3：openai-compatible 条目下的 Messages 请求双发鉴权头
-    if (config.dualAuth === true) headers.set("Authorization", `Bearer ${key}`);
-    return baseFetch(url, { ...init, headers });
-  };
+  const auth = createAuthResolver(config, env);
+  const wrappedFetch = createAuthFetch(
+    auth,
+    (headers, token) => {
+      headers.set("x-api-key", token);
+      if (config.dualAuth === true) headers.set("Authorization", `Bearer ${token}`);
+    },
+    fetchImpl,
+  );
   const sdk = createAnthropic({
     // SDK 在调用 fetch 前校验 apiKey；真实凭据仍由 wrappedFetch 按请求覆盖。
-    apiKey: apiKeyFromEnv ?? "resolved-by-fetch",
+    apiKey: "resolved-by-fetch",
     ...(config.baseURL !== undefined ? { baseURL: config.baseURL } : {}),
     // ADR-0031 §2：User-Agent 以 nocturne/<version> 开头（条目 headers
     // 里用户写的 UA 优先）；SDK 追加的 ai-sdk/... 后缀保留
@@ -158,9 +143,6 @@ export function createAnthropicProvider(
     models: () => modelList,
 
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
-      if ((await resolveKey()) === undefined) {
-        throw missingKeyError();
-      }
       // 归一化档位 → thinking.budget_tokens（ADR-0018 §3）：预算查
       // thinking.budgets 覆盖表否则默认表；max_tokens 不满足"预算+余量"
       // 时先抬升（不超过模型声明上限），仍不够则压预算；压到协议下限
@@ -207,7 +189,7 @@ export function createAnthropicProvider(
           : undefined;
       // ADR-0031 §3：会话标识头——请求带 sessionId 且条目声明
       // sessionHeader 才写；静态 headers 同名头优先
-      const sessionHeaders = sessionRequestHeaders(config, request.sessionId);
+      const requestHeaders = modelRequestHeaders(config, request);
 
       // 提示缓存（providers.md 第 4 节）：Messages API 只缓存显式 cache_control
       // 断点之前的前缀。按 cachePrefix 打两个断点：system 末尾（连同其前的
@@ -252,7 +234,7 @@ export function createAnthropicProvider(
         streamRetries: 0,
         abortSignal: signal,
         onError: suppressSdkErrorLog,
-        ...(sessionHeaders !== undefined ? { headers: sessionHeaders } : {}),
+        ...(requestHeaders !== undefined ? { headers: requestHeaders } : {}),
         // SDK 命名空间固定为 "anthropic"（与 config.id 无关）；
         // 配置级 providerOptions 为底，请求级覆盖
         ...(providerOptions !== undefined && Object.keys(providerOptions).length > 0

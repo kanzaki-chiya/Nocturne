@@ -18,6 +18,7 @@ import type {
   TurnOverrides,
 } from "./types.js";
 import { MODEL_ROLES } from "./types.js";
+import { ConfigError } from "./errors.js";
 
 /** 层的身份（模型字段来源标注用；ADR-0024/0025） */
 export type LayerKind =
@@ -181,8 +182,13 @@ function mergeProviders(
   entries: readonly ProviderEntryConfig[],
   layer: MergeLayer,
   info: ModelFieldOrigins,
+  warn: (message: string) => void,
 ): void {
-  for (const entry of entries) {
+  const safeEntries =
+    layer.kind === "project"
+      ? restrictProjectProviderAuth(entries, [...into.values()], warn)
+      : entries;
+  for (const entry of safeEntries) {
     info.providers.set(entry.id, {
       kind: layer.kind,
       ...(layer.path !== undefined ? { path: layer.path } : {}),
@@ -211,6 +217,32 @@ function mergeProviders(
       headers: { ...existing.headers, ...entry.headers },
     });
   }
+}
+
+/** 项目即使可信也不能改变用户账号的鉴权或令牌发送目标（ADR-0042 §2）。 */
+export function restrictProjectProviderAuth(
+  entries: readonly ProviderEntryConfig[],
+  userProviders: readonly ProviderEntryConfig[],
+  warn: (message: string) => void,
+): ProviderEntryConfig[] {
+  return entries.map((entry) => {
+    const userAuth = userProviders.find((p) => p.id === entry.id)?.auth;
+    const protectedAccount = userAuth !== undefined && userAuth.kind !== "apiKey";
+    const ignored = new Set<string>();
+    if (entry.auth !== undefined && (entry.auth.kind !== "apiKey" || protectedAccount))
+      ignored.add("auth");
+    if (protectedAccount) {
+      if (entry.baseURL !== undefined) ignored.add("baseURL");
+      if (entry.headers !== undefined) ignored.add("headers");
+    }
+    if (ignored.size === 0) return entry;
+    warn(
+      `项目配置中服务商 ${entry.id} 的 ${[...ignored].join(" / ")} 已忽略：账号鉴权只允许用户级配置`,
+    );
+    return Object.fromEntries(
+      Object.entries(entry).filter(([field]) => !ignored.has(field)),
+    ) as ProviderEntryConfig;
+  });
 }
 
 /** 警告文案中的层指代（手写配置矛盾用） */
@@ -310,7 +342,10 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
             out.providerThinkingWarnings.push(entry.id);
         }
       }
-      mergeProviders(providers, file.providers, layer, info);
+      mergeProviders(providers, file.providers, layer, info, (message) => {
+        out.providerAuthWarnings ??= [];
+        out.providerAuthWarnings.push(message);
+      });
     }
     // hooks：按点位追加（高层条目排在其后，hooks.md 第 2 节）
     for (const [point, entries] of Object.entries(file.hooks ?? {})) {
@@ -396,9 +431,30 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
   }
 
   out.providers = [...providers.values()].map((entry) => {
-    if (entry.thinking === undefined) return entry;
-    const { levels: _levels, source: _source, ...thinking } = entry.thinking;
-    return { ...entry, thinking };
+    // 在项目限制与全部层合并后校验，覆盖与继承的 URL 都不能绕过。
+    if (entry.auth?.kind === "openai-siwc" && entry.baseURL !== "https://api.openai.com/v1") {
+      throw new ConfigError(
+        "config_invalid",
+        `服务商 ${entry.id} 的 openai-siwc baseURL 必须是 https://api.openai.com/v1`,
+      );
+    }
+    const effective = { ...entry };
+    if (
+      effective.auth !== undefined &&
+      effective.auth.kind !== "apiKey" &&
+      effective.apiKeyEnv !== undefined
+    ) {
+      out.providerAuthWarnings ??= [];
+      out.providerAuthWarnings.push(
+        `服务商 ${entry.id} 使用 ${effective.auth.kind} 鉴权，已忽略 apiKeyEnv`,
+      );
+      delete effective.apiKeyEnv;
+    }
+    if (effective.thinking !== undefined) {
+      const { levels: _levels, source: _source, ...thinking } = effective.thinking;
+      effective.thinking = thinking;
+    }
+    return effective;
   });
   out.mcpServers = [...mcpServers.entries()].map(([name, v]) => ({
     name,

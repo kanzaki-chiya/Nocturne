@@ -54,6 +54,10 @@ export interface RulePolicyOptions {
   protectedPaths?:
     | { lexical?: readonly string[] | undefined; resolved?: readonly string[] | undefined }
     | undefined;
+  /** 生效 external-file 的绝对词法路径与真实路径，由 Runtime 解析后注入。 */
+  externalCredentialPaths?:
+    | { lexical?: readonly string[] | undefined; resolved?: readonly string[] | undefined }
+    | undefined;
   /** Grant 集合：session 数组由 gate 就地追加（policy 读取活引用），project 为只读快照 */
   grants?: { session?: Grant[]; project?: readonly Grant[] } | undefined;
   /**
@@ -158,6 +162,24 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
   const protectedResolved = new Set(
     (options.protectedPaths?.resolved ?? []).map((p) => normalizePathText(p, caseSensitive)),
   );
+  const externalPaths = new Set(
+    [
+      ...(options.externalCredentialPaths?.lexical ?? []),
+      ...(options.externalCredentialPaths?.resolved ?? []),
+    ].map((p) => normalizePathText(p, caseSensitive)),
+  );
+  const isExternalCredential = (s: PermissionSubject): boolean =>
+    isPathKind(s.kind) &&
+    [s.target, s.resolved].some(
+      (p) => p !== undefined && externalPaths.has(normalizePathText(p, caseSensitive)),
+    );
+  // 和已有凭据命令提示一致：按文件名保守匹配，可覆盖 ~、相对路径及分隔符别名。
+  const externalFileNames = [...externalPaths].map((p) => p.split("/").at(-1) ?? p);
+  const isCredentialCommand = (command: string): boolean =>
+    isCredentialBackendCommand(command) ||
+    externalFileNames.some((name) =>
+      (caseSensitive ? command : command.toLowerCase()).includes(name),
+    );
   const isProtected = (s: PermissionSubject): boolean => {
     if (!isPathKind(s.kind)) return false;
     const lex = normalizePathText(s.target, caseSensitive);
@@ -204,12 +226,13 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
   function decideSubject(s: PermissionSubject, skipApprovals: boolean | undefined): SubjectVerdict {
     // 内置硬拒绝（provider-setup.md 第 4 节）：凭据索引等文件在任何
     // 规则/Grant/--yes/guarded/Hook 下都不可读写——词法与真实路径都查
-    if (isProtected(s)) {
+    const externalCredential = isExternalCredential(s);
+    if (isProtected(s) || externalCredential) {
       return {
         action: "deny",
         hit: {
           origin: "default",
-          description: "Nocturne 凭据文件（内置硬拒绝：任何规则与授权都不能放开）",
+          description: `${externalCredential ? "外部服务商凭据文件" : "Nocturne 凭据文件"}（内置硬拒绝：任何规则与授权都不能放开）`,
         },
       };
     }
@@ -300,7 +323,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
 
     // 凭据相关命令至少 ask（provider-setup.md 第 4 节）：shell allow 命中
     // 凭据文件名或后端读取命令时降级；Grant/--yes 仍可在 ask 层批准
-    if (s.kind === "shell" && action === "allow" && isCredentialBackendCommand(s.target)) {
+    if (s.kind === "shell" && action === "allow" && isCredentialCommand(s.target)) {
       action = "ask";
       note = [note, "可能读取 Nocturne 凭据"].filter(Boolean).join("；");
     }
@@ -342,7 +365,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     }
     const presetHit = s.kind === "edit" ? lastMatch(preset, s) : undefined;
     const userOnly =
-      (s.kind === "shell" && isCredentialBackendCommand(s.target)) ||
+      (s.kind === "shell" && isCredentialCommand(s.target)) ||
       presetHit?.rule?.userOnly === true ||
       (hit.rule?.action === "ask" && hit.origin !== "preset" && hit.origin !== "default");
     return { action, hit, note, userOnly };

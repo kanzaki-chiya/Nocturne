@@ -67,6 +67,8 @@ import {
 import {
   clampReasoningEffort,
   createEntryProvider,
+  createAuthResolver,
+  externalAuthPath,
   createProviderRegistry,
   nocturneUserAgent,
   UnknownModelError,
@@ -460,6 +462,8 @@ function instantiateProvider(
       ...(entry.type !== undefined ? { type: entry.type } : {}),
       ...(entry.baseURL !== undefined ? { baseURL: entry.baseURL } : {}),
       apiKeyEnv: entry.apiKeyEnv,
+      auth: entry.auth,
+      modelHeader: entry.modelHeader,
       ...(credentials !== undefined ? { credentials } : {}),
       ...(entry.models !== undefined
         ? { models: entry.models as Record<string, ModelOverride> }
@@ -516,6 +520,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
    */
   const credentialResolver: CredentialResolver = (providerId) =>
     config?.credentials.get(providerId) ?? Promise.resolve(undefined);
+  const reviewerCredentials = (
+    providers: readonly Pick<ProviderEntryConfig, "id" | "auth" | "apiKeyEnv">[],
+  ) => {
+    const store = config?.credentials;
+    if (store === undefined) return undefined;
+    return {
+      ...store,
+      get: (id: string) => {
+        const entry = providers.find((provider) => provider.id === id);
+        return entry === undefined
+          ? store.get(id)
+          : createAuthResolver({ ...entry, credentials: credentialResolver }, (name) =>
+              platform.env(name),
+            ).token(new AbortController().signal);
+      },
+    };
+  };
 
   /**
    * Provider 构造：显式注入 + keepProviders + options.providerConfigs +
@@ -629,6 +650,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         message,
       });
     }
+    for (const message of resolved?.providerAuthWarnings ?? []) {
+      warnings.push(message);
+      session.emitEphemeral("runtime.warning", { code: "provider_auth_conflict", message });
+    }
     // providers.json 损坏/版本不符：被忽略但明确提示（provider-setup.md 第 2 节）
     if (config?.providerSetupWarning !== undefined) {
       session.emitEphemeral("runtime.warning", {
@@ -734,6 +759,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       await platform.resolveReal(nocturneHome),
       "credentials.json",
     );
+    const externalPaths = [
+      ...(resolved?.providers ?? []),
+      ...(options.providerConfigs ?? []),
+    ].flatMap((entry) =>
+      entry.auth?.kind === "external-file" ? [externalAuthPath(entry.auth.path)] : [],
+    );
+    const externalResolved = await Promise.all(
+      externalPaths.map((path) => platform.resolveReal(path)),
+    );
     // presetContext.sessionId 参数化：子会话重建策略时换自己的 id
     // （attachments 目录等规则绑定子会话自己的落盘位置，subagent.md 7.2）
     const buildPolicy = (
@@ -756,6 +790,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           lexical: [credentialsIndexLexical],
           resolved: [credentialsIndexResolved],
         },
+        externalCredentialPaths: { lexical: externalPaths, resolved: externalResolved },
         grants: { session: sessionGrants, project: projectGrants },
         autoApproveAsk,
       });
@@ -814,7 +849,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             ...resolveJevConnection(
               selected,
               config?.resolvedSettings(meta.workspaceRoot).providers ?? resolved?.providers ?? [],
-              config?.credentials,
+              reviewerCredentials(
+                config?.resolvedSettings(meta.workspaceRoot).providers ?? resolved?.providers ?? [],
+              ),
               (name) => platform.env(name),
             ),
             sessionId: session.id,
@@ -1863,7 +1900,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ? (await config.forWorkspace(workspaceRoot)).resolved.providers
         : (options.providerConfigs ?? []);
       return fetchJevModels(
-        resolveJevConnection(reviewer, providers, config?.credentials, (name) =>
+        resolveJevConnection(reviewer, providers, reviewerCredentials(providers), (name) =>
           platform.env(name),
         ),
         JEV_ENDPOINTS[reviewer.endpoint].model,

@@ -14,19 +14,22 @@
  */
 import { createOpenAI } from "@ai-sdk/openai";
 import { streamText, type JSONValue } from "ai";
-import { abortError, ProviderError } from "../errors.js";
+import { abortError } from "../errors.js";
+import { createAuthResolver } from "../auth.js";
 import { resolveModelInfo, type ModelOverride } from "../registry.js";
 import { withReasoningEfforts } from "../reasoning.js";
 import type {
+  AuthResolver,
   CredentialResolver,
   ModelInfo,
   ModelMessage,
   ModelRequest,
   ModelStreamEvent,
   Provider,
+  ProviderAuth,
 } from "../types.js";
 import { type Diagnostics } from "../../protocol/index.js";
-import { sessionRequestHeaders, withUserAgent } from "../http.js";
+import { createAuthFetch, modelRequestHeaders, withUserAgent } from "../http.js";
 import {
   mapPart,
   planToolChoice,
@@ -49,6 +52,8 @@ export interface OpenAIResponsesConfig {
    * （provider-setup.md 第 3 节的凭据索引，密钥不落配置文件）。
    */
   apiKeyEnv?: string | undefined;
+  auth?: ProviderAuth | undefined;
+  authResolver?: AuthResolver | undefined;
   /**
    * 凭据解析器（装配处注入 CredentialStore.get）：apiKeyEnv 未设置或
    * 对应环境变量为空时，请求前经它取密钥；结果由存储层进程内缓存。
@@ -59,6 +64,7 @@ export interface OpenAIResponsesConfig {
   /** true 时接受清单外的模型 id（回退内置目录/保守默认；见 Provider.strictModels） */
   allowUndeclaredModels?: boolean | undefined;
   headers?: Record<string, string> | undefined;
+  modelHeader?: string | undefined;
   /**
    * User-Agent 基值（ADR-0031 §2）：装配处注入 `nocturne/<version>`；
    * 缺省用内置版本。条目 headers 里的 UA（不区分大小写）优先。
@@ -82,39 +88,18 @@ export function createOpenAIResponsesProvider(
   fetchImpl?: typeof fetch,
 ): Provider {
   routeSdkWarnings(config.diagnostics);
-  // 构造时只取环境变量；凭据存储在请求时解析（异步），两条路径在 stream 里汇合
-  const apiKeyFromEnv =
-    config.apiKeyEnv !== undefined && env(config.apiKeyEnv) !== ""
-      ? env(config.apiKeyEnv)
-      : undefined;
-  const missingKeyError = (): ProviderError =>
-    new ProviderError({
-      kind: "auth",
-      message:
-        config.apiKeyEnv !== undefined
-          ? `环境变量 ${config.apiKeyEnv} 未设置，凭据存储中也没有 "${config.id}" 的密钥（openai-responses Provider）——可运行 nctrn setup 或 /provider key 配置`
-          : `Provider "${config.id}" 未配置凭据——可运行 nctrn setup 或 /provider key 配置，或在条目上声明 apiKeyEnv`,
-      retryable: false,
-    });
-  /** 请求时解析密钥：环境变量优先，其次凭据存储（结果由存储层缓存） */
-  const resolveKey = async (): Promise<string | undefined> =>
-    apiKeyFromEnv ?? (await config.credentials?.(config.id));
-  // SDK 的 apiKey 只接受静态字符串；凭据存储的密钥经包装 fetch
-  // 覆盖 Authorization 头注入（每次请求取最新值，/provider key 后立即生效）。
-  // 惰性取 globalThis.fetch：测试在构造后替换全局 fetch 的场景保持有效
-  const baseFetch: typeof fetch = (...args) => (fetchImpl ?? globalThis.fetch)(...args);
-  const wrappedFetch: typeof fetch = async (url, init) => {
-    const key = await resolveKey();
-    if (key === undefined) throw missingKeyError();
-    const headers = new Headers(init?.headers);
-    // 鉴权只发 Authorization: Bearer（ADR-0031 §6）
-    headers.set("Authorization", `Bearer ${key}`);
-    return baseFetch(url, { ...init, headers });
-  };
+  const auth = createAuthResolver(config, env);
+  const wrappedFetch = createAuthFetch(
+    auth,
+    (headers, token) => {
+      headers.set("Authorization", `Bearer ${token}`);
+    },
+    fetchImpl,
+  );
   const sdk = createOpenAI({
     baseURL: config.baseURL,
     // SDK 在组装请求头时强制读取 apiKey；真实凭据仍由 wrappedFetch 按请求覆盖
-    apiKey: apiKeyFromEnv ?? "resolved-by-fetch",
+    apiKey: "resolved-by-fetch",
     // ADR-0031 §2：User-Agent 以 nocturne/<version> 开头（条目 headers
     // 里用户写的 UA 优先）；SDK 追加的 ai-sdk/... 后缀保留
     headers: withUserAgent(config.headers, config.userAgent),
@@ -131,9 +116,6 @@ export function createOpenAIResponsesProvider(
     models: () => modelList,
 
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
-      if ((await resolveKey()) === undefined) {
-        throw missingKeyError();
-      }
       // providerOptions 命名空间固定为 "openai"（SDK providerOptionsName =
       // provider 名首段；ADR-0031 §6：条目级 providerOptions 不进入本适配器）。
       // store:false 与 encrypted_content include 是推理加密回传的前提，
@@ -170,7 +152,7 @@ export function createOpenAIResponsesProvider(
           : undefined;
       // ADR-0031 §3：会话标识头——请求带 sessionId 且条目声明
       // sessionHeader 才写；静态 headers 同名头优先
-      const sessionHeaders = sessionRequestHeaders(config, request.sessionId);
+      const requestHeaders = modelRequestHeaders(config, request);
       let droppedReasoning = 0;
       const messages = request.messages.flatMap<ModelMessage>((message) => {
         if (message.role !== "assistant") return [message];
@@ -214,7 +196,7 @@ export function createOpenAIResponsesProvider(
         streamRetries: 0,
         abortSignal: signal,
         onError: suppressSdkErrorLog,
-        ...(sessionHeaders !== undefined ? { headers: sessionHeaders } : {}),
+        ...(requestHeaders !== undefined ? { headers: requestHeaders } : {}),
         ...(providerOptions !== undefined && Object.keys(providerOptions).length > 0
           ? { providerOptions: { openai: providerOptions as Record<string, JSONValue> } }
           : {}),

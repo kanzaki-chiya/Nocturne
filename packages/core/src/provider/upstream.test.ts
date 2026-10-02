@@ -31,9 +31,10 @@ const jsonRes = (data: unknown, status = 200) =>
 // ── 预设 ────────────────────────────────────────────────
 
 describe("服务商预设", () => {
-  it("七个预设：deepseek/openrouter/anthropic + 两个 opencode + 两个自定义", () => {
+  it("API key 与 Grok 外部登录预设", () => {
     const presets = listProviderPresets();
     expect(presets.map((p) => p.id)).toEqual([
+      "grok-cli",
       "deepseek",
       "openrouter",
       "anthropic",

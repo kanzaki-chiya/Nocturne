@@ -114,6 +114,8 @@ PermissionPolicy.evaluate()             → 计算 where，匹配规则   纯函
 
 ### 5.3 完整算法
 
+所有生效 `external-file` 鉴权路径的词法路径与真实路径同样内置硬拒绝 `read` / `edit`；shell 提及对应凭据文件名时至少 `ask`，且不交给模型审查器自动批准（[ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 9 节）。
+
 对每个主体：
 
 内置硬拒绝先于下面的算法（v0.2，[provider-setup.md](provider-setup.md) 第 4 节）：主体命中 `<NOCTURNE_HOME>/credentials.json`（词法路径或真实路径）的 `read`/`edit` 直接 `deny`（`source: "rule"`，`label` 为"Nocturne 凭据文件"）。任何规则、Grant、`--yes`、预设与 Hook 都不能放开它。

@@ -19,7 +19,12 @@ import {
 import { modelsDevSnapshot } from "./models-dev-snapshot.js";
 import { createCredentialStore } from "./credentials.js";
 import { loadGrantStore } from "./grants.js";
-import { mergeLayers, type MergeLayer, type MergeResult } from "./merge.js";
+import {
+  mergeLayers,
+  restrictProjectProviderAuth,
+  type MergeLayer,
+  type MergeResult,
+} from "./merge.js";
 import {
   applyModelPatch,
   buildModelSettingsViews,
@@ -369,6 +374,10 @@ export async function loadConfig(
     resolved.warnings.push(...loadWarnings, ...warnings);
 
     if (!trusted && projectFile !== undefined) {
+      restrictProjectProviderAuth(projectFile.providers ?? [], resolved.providers, (message) => {
+        resolved.providerAuthWarnings ??= [];
+        resolved.providerAuthWarnings.push(message);
+      });
       // 未信任项目配置：其余字段全部忽略；rules 中只保留收紧方向（permissions.md 5.2）
       for (const rule of projectFile.permissions?.rules ?? []) {
         if (rule.action === "allow") continue;
@@ -416,6 +425,8 @@ export async function loadConfig(
     for (const w of next) trustedSet.add(w);
   }
 
+  // 用户鉴权 URL 无效时在加载阶段失败，而不是等首次读取 base。
+  base();
   return {
     nocturneHome: home,
     sessionsDir,
@@ -478,11 +489,27 @@ export async function loadConfig(
       const setupNow = await loadProviderSetup(platform, home);
       const project =
         workspaceRoot !== undefined ? await projectFileIfTrusted(workspaceRoot) : undefined;
+      const userProviders = mergeLayers([
+        ...setupLayers(setupNow.file ?? { version: 1 }, providersPath),
+        { kind: "user", path: userConfigPath, file: userFile },
+      ]).resolved.providers;
+      const projectProviders =
+        project?.providers !== undefined
+          ? restrictProjectProviderAuth(project.providers, userProviders, () => undefined).map(
+              (entry) => {
+                const userEntry = userProviders.find((provider) => provider.id === entry.id);
+                // 概览按整条取最高层；受保护账号需补回被过滤掉的用户字段。
+                return userEntry?.auth !== undefined && userEntry.auth.kind !== "apiKey"
+                  ? { ...userEntry, ...entry }
+                  : entry;
+              },
+            )
+          : undefined;
       return describeProviderLayers(
         {
           setup: setupNow.file?.providers,
           user: userFile.providers,
-          project: project?.providers,
+          project: projectProviders,
           env: envLayer.file.providers,
           cli: cliLayer.file.providers,
         },

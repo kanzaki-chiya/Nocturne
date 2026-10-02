@@ -6,6 +6,8 @@
 
 ## 1. 配置来源与分层
 
+服务商 `auth` 省略等同 `{ kind: "apiKey" }`。非 API key 鉴权只允许用户级来源：项目声明的非 API key `auth` 被忽略；用户账号条目的项目 `auth`、`baseURL`、`headers` 覆盖被忽略并告警。非 API key 条目忽略 `apiKeyEnv`，报告 `provider_auth_conflict`。`openai-siwc` 的生效地址必须精确为 `https://api.openai.com/v1`（[ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 2 节）。
+
 ```text
 内置默认 < models.dev < 向导配置 < 用户编辑 < 程序设置 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
 ```

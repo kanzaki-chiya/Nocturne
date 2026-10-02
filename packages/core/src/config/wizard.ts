@@ -8,7 +8,11 @@
  * 与环境变量读取全部由调用方注入；fetchModels 抛出的错误可携带
  * 数字 status（ProviderUpstreamError），401/403 时提示密钥可能无效。
  */
-import { isReasoningEffortLevel, REASONING_EFFORT_LEVELS } from "../protocol/index.js";
+import {
+  isReasoningEffortLevel,
+  REASONING_EFFORT_LEVELS,
+  type ProviderAuth,
+} from "../protocol/index.js";
 import { modelFieldSourceText } from "./model-settings.js";
 import type {
   ModelOverrideShape,
@@ -70,6 +74,9 @@ export class WizardAbort extends Error {
 
 /** 预设形状（与 provider 层 ProviderPreset 结构兼容；客户端注入 listProviderPresets） */
 export interface WizardPreset {
+  auth?: ProviderAuth | undefined;
+  headers?: Record<string, string> | undefined;
+  modelHeader?: string | undefined;
   id: string;
   label: string;
   type: "openai-compatible" | "anthropic";
@@ -91,6 +98,9 @@ export interface WizardPreset {
 }
 
 export interface WizardFetchRequest {
+  id?: string | undefined;
+  auth?: ProviderAuth | undefined;
+  headers?: Record<string, string> | undefined;
   type: "openai-compatible" | "anthropic";
   baseURL?: string | undefined;
 }
@@ -198,7 +208,9 @@ export async function runProviderSetupWizard(
   const backend = config.credentials.backend();
   let key: string | undefined;
   let apiKeyEnv: string | undefined;
-  if (backend !== "none") {
+  if (preset.auth?.kind === "external-file") {
+    io.step(`凭据来源：外部登录文件；续期运行 ${preset.auth.renewHint}`);
+  } else if (backend !== "none") {
     key = await io.askSecret("API Key：", {
       hint:
         (preset.keyHint !== undefined ? `从 ${preset.keyHint} 获取；` : "") +
@@ -211,7 +223,7 @@ export async function runProviderSetupWizard(
       key = undefined;
     }
   }
-  if (key === undefined) {
+  if (key === undefined && (preset.auth === undefined || preset.auth.kind === "apiKey")) {
     const defEnv = preset.defaultKeyEnv ?? "NOCTURNE_API_KEY";
     const envName = await io.ask(`凭据环境变量名 [${defEnv}]：`, {
       hint: "该变量的值会作为请求凭据发送",
@@ -229,6 +241,9 @@ export async function runProviderSetupWizard(
   // 模型列表：只获取不选择（v0.3）——上游声明的限额/能力写回条目 models；
   // 失败显示原因并继续后续步骤，保存后可用 /provider refresh 重试
   const fetchReq = {
+    id: providerId,
+    auth: preset.auth,
+    headers: preset.headers,
     type: preset.type,
     ...(baseURL !== undefined ? { baseURL } : {}),
   };
@@ -256,6 +271,11 @@ export async function runProviderSetupWizard(
   }
 
   // models 字段写入上游声明的能力/价格/限额/接口（provider-setup.md 第 7 节）
+  if (upstreamModels.length === 0 && preset.auth?.kind === "external-file") {
+    const id = (await io.ask("模型 ID：", { hint: "服务不提供模型列表时手动填写" })).trim();
+    if (id === "") throw new WizardAbort();
+    upstreamModels = [{ id }];
+  }
   const models: Record<string, ModelOverrideShape> = {};
   for (const m of upstreamModels) {
     models[m.id] = {
@@ -278,6 +298,9 @@ export async function runProviderSetupWizard(
   await config.saveSetupProvider(
     {
       id: providerId,
+      ...(preset.auth !== undefined ? { auth: preset.auth } : {}),
+      ...(preset.headers !== undefined ? { headers: preset.headers } : {}),
+      ...(preset.modelHeader !== undefined ? { modelHeader: preset.modelHeader } : {}),
       type: preset.type,
       ...(baseURL !== undefined ? { baseURL } : {}),
       ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),

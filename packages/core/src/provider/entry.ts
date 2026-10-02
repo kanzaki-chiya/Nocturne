@@ -1,7 +1,7 @@
 /**
  * 服务商条目的路由 Provider（ADR-0026 §4）：每个条目仍是一个 Provider
  * 实例，id/type 保留原义——type 兼作模型的默认协议与鉴权「本家」写法。
- * 实例内部按需构造两种协议的适配器，共用凭据解析器、headers 与诊断
+ * 实例内部按需构造三种协议的适配器，共用鉴权解析器、headers 与诊断
  * 通道；stream() 按请求模型的生效协议分发。Agent Loop / Context 不感知
  * 协议分支。
  */
@@ -9,16 +9,19 @@ import { PROTOCOL_ENDPOINTS, type Diagnostics, type ModelProtocol } from "../pro
 import { createAnthropicProvider } from "./adapters/anthropic.js";
 import { createOpenAICompatibleProvider } from "./adapters/openai-compatible.js";
 import { createOpenAIResponsesProvider } from "./adapters/openai-responses.js";
+import { createAuthResolver } from "./auth.js";
 import { ProviderError } from "./errors.js";
 import { withEffectiveProtocol } from "./effective-protocol.js";
 import { withReasoningEfforts } from "./reasoning.js";
 import { resolveModelInfo, type EditToolDefault, type ModelOverride } from "./registry.js";
 import type {
+  AuthResolver,
   CredentialResolver,
   ModelInfo,
   ModelRequest,
   ModelStreamEvent,
   Provider,
+  ProviderAuth,
   ProviderThinkingOptions,
 } from "./types.js";
 
@@ -30,6 +33,8 @@ export interface EntryProviderConfig {
   /** 默认协议（= 条目 type）；缺省 openai-compatible */
   type?: ModelProtocol | undefined;
   baseURL?: string | undefined;
+  auth?: ProviderAuth | undefined;
+  authResolver?: AuthResolver | undefined;
   apiKeyEnv?: string | undefined;
   credentials?: CredentialResolver | undefined;
   /** 逐模型声明（含 protocol/endpoints；ADR-0026 §2） */
@@ -38,6 +43,7 @@ export interface EntryProviderConfig {
   /** 只交给与条目 type 同协议的请求（ADR-0026 §3） */
   providerOptions?: Record<string, unknown> | undefined;
   headers?: Record<string, string> | undefined;
+  modelHeader?: string | undefined;
   /**
    * 会话标识请求头名（ADR-0031 §3）：配置字段，值为请求头名称
    * （如 "x-opencode-session"）；未声明时不发送任何会话头。
@@ -64,6 +70,7 @@ export function createEntryProvider(
   fetchImpl?: typeof fetch,
 ): Provider {
   const entryType: ModelProtocol = config.type ?? "openai-compatible";
+  const authResolver = createAuthResolver(config, env);
 
   // 清单模型逐枚盖章（ADR-0026 §2）：unavailable 模型照常列出（§5）
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
@@ -83,9 +90,9 @@ export function createEntryProvider(
   // 三种适配器共用的条目级输入（凭据解析器/headers/会话头/UA/诊断/thinking 一致）
   const common = {
     id: config.id,
-    apiKeyEnv: config.apiKeyEnv,
-    credentials: config.credentials,
+    authResolver,
     headers: config.headers,
+    modelHeader: config.modelHeader,
     sessionHeader: config.sessionHeader,
     userAgent: config.userAgent,
     thinking: config.thinking,

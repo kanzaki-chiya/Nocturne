@@ -83,6 +83,7 @@ export function makeConfigLoader(
       upstreamFetch: (entry, key, signal) =>
         fetchModels(
           {
+            ...entry,
             type: entry.type ?? "openai-compatible",
             ...(entry.baseURL !== undefined ? { baseURL: entry.baseURL } : {}),
             ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
@@ -114,6 +115,7 @@ export async function collectConfig(
     upstreamFetch: (entry, key, signal) =>
       fetchModels(
         {
+          ...entry,
           type: entry.type ?? "openai-compatible",
           ...(entry.baseURL !== undefined ? { baseURL: entry.baseURL } : {}),
           ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
@@ -186,7 +188,11 @@ export async function collectConfig(
         provider.apiKeyEnv !== undefined && env(provider.apiKeyEnv) !== ""
           ? env(provider.apiKeyEnv)
           : undefined;
-      if (envKey === undefined && !runtime.credentials.has(provider.id)) {
+      if (
+        (provider.auth === undefined || provider.auth.kind === "apiKey") &&
+        envKey === undefined &&
+        !runtime.credentials.has(provider.id)
+      ) {
         problems.push(
           provider.apiKeyEnv !== undefined
             ? `缺少凭据：环境变量 ${provider.apiKeyEnv} 未设置，凭据存储中也没有 "${provider.id}" 的密钥——运行 nctrn setup 或用 /provider key 配置`

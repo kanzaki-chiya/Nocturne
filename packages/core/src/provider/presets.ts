@@ -3,7 +3,9 @@
  * 写进 providers.json 的是完整条目；预设更新不会改变已写入的条目。
  * 新增预设门槛：服务地址与协议兼容性有官方文档可查，并实测过连接。
  */
-import type { UpstreamModelInfo } from "./types.js";
+import type { AuthResolver, ProviderAuth, UpstreamModelInfo } from "./types.js";
+import { createAuthResolver } from "./auth.js";
+import { ProviderAuthError } from "./errors.js";
 import { hasStaticHeader, nocturneUserAgent } from "./http.js";
 
 export interface ProviderPreset {
@@ -18,6 +20,9 @@ export interface ProviderPreset {
   baseURL?: string | undefined;
   /** 建议的环境变量名（凭据走环境变量时的默认值；用户可改） */
   defaultKeyEnv?: string | undefined;
+  auth?: ProviderAuth | undefined;
+  headers?: Record<string, string> | undefined;
+  modelHeader?: string | undefined;
   /** 模型列表能否经 GET /models 自动获取 */
   fetchableModels: boolean;
   /**
@@ -40,6 +45,22 @@ export interface ProviderPreset {
 }
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
+  {
+    id: "grok-cli",
+    label: "Grok CLI",
+    type: "openai-compatible",
+    defaultName: "grok-cli",
+    baseURL: "https://cli-chat-proxy.grok.com/v1",
+    headers: { "X-XAI-Token-Auth": "xai-grok-cli" },
+    modelHeader: "x-grok-model-override",
+    auth: {
+      kind: "external-file",
+      path: "~/.grok/auth.json",
+      keyPath: ["https://accounts.x.ai/sign-in", "key"],
+      renewHint: "grok login",
+    },
+    fetchableModels: true,
+  },
   {
     id: "deepseek",
     label: "DeepSeek",
@@ -119,6 +140,8 @@ export function listProviderPresets(): ProviderPreset[] {
 
 /** fetchModels 的入参：与 ProviderEntryConfig 同形但松一档（向导半成品也能测） */
 export interface FetchModelsRequest {
+  id?: string | undefined;
+  auth?: ProviderAuth | undefined;
   type: "openai-compatible" | "anthropic";
   baseURL?: string | undefined;
   headers?: Record<string, string> | undefined;
@@ -180,7 +203,7 @@ async function fetchJson(
 ): Promise<unknown> {
   const t = withTimeout(signal);
   try {
-    const res = await fetch(url, { headers, signal: t.signal });
+    const res = await fetch(url, { headers, signal: t.signal, redirect: "error" });
     if (!res.ok) {
       throw new ProviderUpstreamError(`上游返回 HTTP ${res.status}`, res.status);
     }
@@ -298,7 +321,7 @@ function mapUpstreamModel(raw: RawModel): UpstreamModelInfo | undefined {
  */
 export async function fetchModels(
   entry: FetchModelsRequest,
-  key: string | undefined,
+  key: string | AuthResolver | undefined,
   signal?: AbortSignal,
 ): Promise<UpstreamModelInfo[]> {
   // ADR-0031 §2：模型列表请求同样以 nocturne/<version> 开头；
@@ -318,11 +341,35 @@ export async function fetchModels(
               "openai-compatible 服务商缺少 baseURL，无法获取模型列表",
             );
           })();
-  const raw = await fetchJson(
-    url,
-    { ...uaHeader, Accept: "application/json", ...authHeaders(entry, key) },
-    signal,
-  );
+  const resolver =
+    typeof key === "object"
+      ? key
+      : entry.auth !== undefined && entry.auth.kind !== "apiKey"
+        ? createAuthResolver({ id: entry.id ?? "provider", auth: entry.auth })
+        : {
+            token: () => Promise.resolve(key ?? ""),
+            invalidate: () => Promise.resolve(),
+          };
+  const requestSignal = signal ?? new AbortController().signal;
+  let raw: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      raw = await fetchJson(
+        url,
+        {
+          ...uaHeader,
+          Accept: "application/json",
+          ...authHeaders(entry, await resolver.token(requestSignal)),
+        },
+        signal,
+      );
+      break;
+    } catch (error) {
+      if (!(error instanceof ProviderUpstreamError) || error.status !== 401) throw error;
+      if (attempt === 1) throw new ProviderAuthError("服务商凭据已失效，请重新登录或更新密钥", 401);
+      await resolver.invalidate();
+    }
+  }
   const data =
     typeof raw === "object" && raw !== null && Array.isArray((raw as { data?: unknown }).data)
       ? ((raw as { data: unknown[] }).data as RawModel[])
