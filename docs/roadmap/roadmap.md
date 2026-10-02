@@ -222,6 +222,17 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - **回退与分叉界面（第 4 轮已实现，2026-10-02）**：TUI `/rewind`、`/fork`、空闲空输入双 Esc（600ms）、轮次列表、操作及预览确认、原文回填与图片提示；全屏沿用 ADR-0039 点击规则，`--inline` 仅键盘并追加通知。CLI 提供编号与默认取消的逐行流程，命令表、帮助与补全同步。已覆盖实际 Ink 帧与真实 Runtime 的 REPL 集成；WT 截图验收等维护者安排。
 - **用量与费用**：`/cost` 显示本会话 token 用量与按已知价格估算的费用（价格未声明时只显示用量）。
 
+## 服务商账号登录（ADR-0042 提议，待确认）
+
+**前提**：维护者确认 [ADR-0042](../decisions/ADR-0042-provider-oauth.md)；真实账号冒烟需要维护者在场登录。调查依据见 [provider-oauth.md](../research/provider-oauth.md)。
+
+**内容**：
+
+- **ChatGPT 账号**：Nocturne 自己按 OpenAI 开源应用通道动态注册并登录，令牌经系统凭据后端保存，跨进程加锁刷新；Responses 请求按通道约束改写。
+- **Grok CLI 凭据**：只读官方 CLI 的 `~/.grok/auth.json`，经 CLI chat proxy 调用；从不写入或刷新该文件。
+- **OpenRouter 浏览器登录**：PKCE 换得普通 API key，之后与手填 key 无异。
+- **配置与界面**：`auth` 字段与协议分开、只在用户级生效；`/provider login|logout`、服务商页登录等待页与凭据状态。
+
 ## v0.7 — 扩展与分发（已排期，待设计）
 
 **前提**：v0.6 验收。进入实现前先写 ADR。
