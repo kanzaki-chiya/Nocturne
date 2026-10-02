@@ -97,6 +97,8 @@ export function createOpenAIResponsesProvider(
     },
     fetchImpl,
   );
+  // 按会话保存的粘性路由令牌（requestConstraints.stickyRoutingHeader）；只在内存里，随进程结束
+  const routingTokens = new Map<string, string>();
   const sdk = createOpenAI({
     baseURL: config.baseURL,
     // SDK 在组装请求头时强制读取 apiKey；真实凭据仍由 wrappedFetch 按请求覆盖
@@ -120,7 +122,17 @@ export function createOpenAIResponsesProvider(
       const constrained =
         auth.requestConstraints === undefined
           ? undefined
-          : constrainResponsesFetch(auth.requestConstraints, wrappedFetch);
+          : constrainResponsesFetch(
+              auth.requestConstraints,
+              wrappedFetch,
+              request.sessionId === undefined
+                ? undefined
+                : {
+                    get: () => routingTokens.get(request.sessionId ?? ""),
+                    set: (value) => routingTokens.set(request.sessionId ?? "", value),
+                    clear: () => routingTokens.delete(request.sessionId ?? ""),
+                  },
+            );
       const requestSdk =
         constrained === undefined
           ? sdk

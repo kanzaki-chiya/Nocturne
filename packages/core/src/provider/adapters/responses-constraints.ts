@@ -13,6 +13,8 @@ function record(value: unknown): Record<string, unknown> | undefined {
 export function constrainResponsesFetch(
   constraints: ResponsesRequestConstraints,
   fetchImpl: typeof fetch,
+  /** 本会话的粘性路由令牌存取（constraints.stickyRoutingHeader 声明时使用） */
+  routing?: { get(): string | undefined; set(value: string): void; clear(): void },
 ): { fetch: typeof fetch; completed: () => boolean; failure: () => ProviderError | undefined } {
   let completed = false;
   let failure: ProviderError | undefined;
@@ -130,7 +132,19 @@ export function constrainResponsesFetch(
       if (request === undefined)
         throw new ProviderError({ kind: "invalid_request", message: "Responses 请求格式无效" });
       rewriteRequest(request);
-      const response = await fetchImpl(input, { ...init, body: JSON.stringify(request) });
+      const sticky = constraints.stickyRoutingHeader;
+      const token = sticky === undefined ? undefined : routing?.get();
+      const requestHeaders = new Headers(init?.headers);
+      if (sticky !== undefined && token !== undefined) requestHeaders.set(sticky, token);
+      const response = await fetchImpl(input, {
+        ...init,
+        headers: requestHeaders,
+        body: JSON.stringify(request),
+      });
+      const returned = sticky === undefined ? null : response.headers.get(sticky);
+      if (returned !== null && returned !== "") routing?.set(returned);
+      // 失败时丢掉令牌，重试不再带可能已失效的值
+      else if (!response.ok && token !== undefined) routing?.clear();
       if (!response.ok) {
         const error: unknown = await response.json().catch(() => undefined);
         throw constrainedResponseError(response.status, error);

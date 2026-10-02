@@ -225,6 +225,11 @@ export interface ResponsesRequestConstraints {
   requireCompleted: boolean;
   /** 通道要求的会话标识头名；条目未声明 sessionHeader 时使用（ADR-0031 §3 同一规则） */
   sessionHeader?: string | undefined;
+  /**
+   * 粘性路由头名：上游在响应头里返回该头时记下，同一会话的后续请求原样带回，
+   * 让多步请求落到同一后端（缓存只在那里）。上游返回新值时替换。
+   */
+  stickyRoutingHeader?: string | undefined;
 }
 
 export interface AuthResolver {

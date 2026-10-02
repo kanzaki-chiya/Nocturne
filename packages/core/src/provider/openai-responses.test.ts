@@ -645,6 +645,30 @@ function constrainedConfig(overrides: Partial<AuthResolver> = {}): OpenAIRespons
 }
 
 describe("声明式 Responses 约束（ADR-0042 §5）", () => {
+  it("粘性路由头：响应返回的令牌在同一会话后续请求带回，其他会话不带", async () => {
+    const seen: (string | null)[] = [];
+    let n = 0;
+    const base = sseFetch([...messageChunks(["ok", ""]), completed()]);
+    const fetchImpl = async (input: unknown, init?: RequestInit): Promise<Response> => {
+      seen.push(new Headers(init?.headers).get("x-route"));
+      const response = await base(input, init);
+      n += 1;
+      response.headers.set("x-route", `tok-${n}`);
+      return response;
+    };
+    const p = createOpenAIResponsesProvider(
+      constrainedConfig({
+        requestConstraints: { ...constraints, stickyRoutingHeader: "x-route" },
+      }),
+      envNoKey,
+      fetchImpl,
+    );
+    await collect(p, request({ sessionId: "a" }));
+    await collect(p, request({ sessionId: "a" }));
+    await collect(p, request({ sessionId: "b" }));
+    expect(seen).toEqual([null, "tok-1", null]);
+  });
+
   it("通道声明的会话头：条目未声明时按通道头名发送会话 ID", async () => {
     const capture: Captured = {};
     const p = createOpenAIResponsesProvider(
