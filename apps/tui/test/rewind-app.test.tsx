@@ -110,7 +110,7 @@ it("双 Esc 600ms 内打开，超时或输入非空不打开，关闭页不触�
   const ui = await app();
   try {
     ui.stdin.write("\x1b");
-    await pause(650);
+    await pause(1000); // 首个 Esc 可能晚到一帧（Ink 帧延迟 140–290ms），留足余量
     ui.stdin.write("\x1b");
     await pause();
     expect(ui.lastFrame()).not.toContain("轮次列表");
