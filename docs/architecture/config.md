@@ -21,7 +21,7 @@
 | 程序设置 | `<NOCTURNE_HOME>/settings.json` | 可信 | 白名单设置参与合并，界面偏好只保留；低于所有手写配置（[ADR-0034](../decisions/ADR-0034-settings-layer.md)，见第 2 节） |
 | 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；**程序从不改写它** |
 | 项目配置 | `<workspaceRoot>/.nocturne/config.json` | **默认不可信** | 来自被操作的仓库，见第 3 节信任模型 |
-| 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；凭据经环境变量或操作系统凭据后端进入（索引文件 `credentials.json` 不含明文）（v0.2，[provider-setup.md](provider-setup.md)） |
+| 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；API key 经环境变量或操作系统凭据后端进入。`credentials.json` 默认只存索引或密文；用户显式选择后，账号登录记录可以 `plaintext` 写入该文件（[provider-setup.md](provider-setup.md) 第 3 节） |
 | 命令行参数 | `nctrn` 参数 | 可信 | 本次启动的显式意图，优先级最高 |
 
 机器维护的运行时数据（信任列表、项目 Grant、向导配置、程序设置、凭据索引、最近模型列表、models.dev 缓存）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。
@@ -235,7 +235,7 @@ CLI:   loadConfig(platform, { cliArgs })          → RuntimeConfig
 
 ## 7. 暂不设计
 
-- 配置文件中的凭据值（`config.json` 与 `providers.json` 都不存密钥；密钥只在环境变量或 `credentials.json`，见 [provider-setup.md](provider-setup.md) 第 3 节）；
+- 配置文件中的凭据值（`config.json` 与 `providers.json` 都不存密钥；API key 只在环境变量或系统凭据后端，账号记录的明文例外只在 `credentials.json`，见 [provider-setup.md](provider-setup.md) 第 3 节）；
 - JSONC / TOML / 其他格式（ADR-0007 记录了取舍）；
 - 通用的配置编辑命令（服务商的交互配置见 [provider-setup.md](provider-setup.md)）、Grant 的查看与撤销界面；
 - 每会话不同的用户配置 profile。

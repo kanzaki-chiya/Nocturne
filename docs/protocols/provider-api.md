@@ -166,7 +166,21 @@ type FinishReason = "stop" | "tool_calls" | "length" | "content_filter" | "other
 
 ## 5. 错误
 
-鉴权通过 `AuthResolver.token(signal)` 与 `invalidate()` 统一解析（[ADR-0042](../decisions/ADR-0042-provider-oauth.md)）。适配器在响应流开始前收到 401 时失效并重发一次；第二次 401 为 `ProviderAuthError`（`kind: auth`、`retryable: false`），不进入 Turn 通用重试。错误不携带凭据或原始鉴权响应。
+鉴权通过 `AuthResolver` 统一解析，适配器不按服务商名分支（[ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 3 节）。响应流开始前收到 401 时调用 `invalidate()` 并用新令牌重发一次；第二次 401 抛 `ProviderAuthError`，不进入 Turn 通用重试。错误不携带凭据或原始鉴权响应。
+
+```ts
+interface AuthResolver {
+  token(signal: AbortSignal): Promise<string>;
+  invalidate(): Promise<void>;
+  readonly unauthorizedMessage?: string;
+}
+
+class ProviderAuthError extends ProviderError {
+  // kind: "auth"；retryable: false；message 为用户可读建议，不含令牌
+}
+```
+
+`openai-siwc` 的请求约束是鉴权实现提供的声明，不改变 `Provider` 或 `ModelRequest`。Responses 适配器按声明改写请求与工具名，并只在收到 `response.completed` 时发出成功 `finish`。
 
 ```ts
 class ProviderError extends Error {

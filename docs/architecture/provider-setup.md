@@ -11,7 +11,7 @@ v0.1 接入一个模型服务要做三件事：设置持久的用户级环境变
 
 ## 1. 用户看到的流程
 
-OpenRouter 的密钥步骤可选择浏览器登录或粘贴密钥。登录由 Core 的 `LoginSession` 完成，客户端负责打开浏览器、展示地址和粘贴入口；Esc 取消，五分钟超时。远程终端粘贴授权码，登录得到的普通 API key 仍交给原有凭据存储。系统后端不可用时仅向用户显示一次 key 与环境变量设置命令，不落明文（[ADR-0042](../decisions/ADR-0042-provider-oauth.md)）。
+ChatGPT、Grok CLI 与 OpenRouter 可以不手填 API key（[ADR-0042](../decisions/ADR-0042-provider-oauth.md)）。ChatGPT 走浏览器登录，回调失败或远程终端时粘贴完整回调 URL；Grok 只读官方 CLI 的 `~/.grok/auth.json`，向导不写该文件；OpenRouter 在「浏览器登录」与「粘贴密钥」中二选一，远程终端粘贴授权码。登录由 Core 的 `LoginSession` 完成，客户端打开浏览器并展示地址；Esc 取消，五分钟超时。OpenRouter 得到的是普通 API key。没有系统凭据后端时，API key 只显示一次并给出环境变量命令，不落明文；ChatGPT 账号记录必须由用户显式选择明文保存或仅本次运行，不默认明文。
 
 ### TTY：服务商页 → 模型页的两步流程
 
@@ -30,12 +30,12 @@ API Key（掩码输入；直接回车表示改用环境变量）：********
 已保存 command，12 个模型                                ← 底部结果行，回到列表
 ```
 
-- 三个内置预设不再问名称与地址（直接用预设默认值）；两个自定义预设问名称（必填）、服务地址（openai 兼容必填，anthropic 兼容可留空用官方端点）与**会话标识请求头**（ADR-0031 §3，可选）：填写请求头名（如 `x-opencode-session`）则写入条目 `sessionHeader`，之后每个模型请求携带该头（值为根会话 ID，见 [providers.md](providers.md) 第 4 节）；回车留空不写该字段。
+- 内置预设不再问名称与地址（直接用预设默认值）。ChatGPT 与 Grok CLI 跳过密钥输入，改走登录或外部文件（第 5 节）。两个自定义预设问名称（必填）、服务地址（openai 兼容必填，anthropic 兼容可留空用官方端点）与**会话标识请求头**（ADR-0031 §3，可选）：填写请求头名（如 `x-opencode-session`）则写入条目 `sessionHeader`，之后每个模型请求携带该头（值为根会话 ID，见 [providers.md](providers.md) 第 4 节）；回车留空不写该字段。
 - **向导不再选择模型**（v0.3）：模型列表仍经 `GET /models` 获取并把上游声明的上下文窗口、最大输出长度与能力标记写回条目 `models`（第 7 节），但不再出现"编号选择模型"与"设为默认模型"两步；默认模型在 `/model` 页设置。获取结果替换进行中提示：成功显示"已获取 N 个模型"；失败显示原因并继续后续步骤——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，404/网络错误等其余失败提示"模型将手动填写"；保存后可用服务商页「刷新模型列表」或 `/provider refresh <名>` 重试。
 - 添加服务商和刷新模型列表时顺带更新 models.dev 缓存；失败沿用本地缓存或内置快照，并在结果中提示一行，不影响上游列表的保存。向导不再询问服务商级思考档位。
 - **TUI 表单形态**（ADR-0019 第 2 条）：全屏页面内不出现需要打字回答的是非题；已完成步骤折叠为一行摘要（如"名称 command • 地址 api.xxx.com • 密钥已保存"），当前步骤用强调色提问、灰色小字给说明（密钥获取入口、回车改用环境变量等）。
 - **向导不发送模型请求**：连接测试会消耗 token 且重复了首次真实请求才能发现的问题，因此不做。密钥、地址与模型 id 的有效性由会话中的首次真实请求检验；请求失败时按 `ProviderError.kind` 给出可操作提示（`auth` → 密钥可能无效，附 `/provider key <name>`；`network`/`timeout` → 地址不通，附 `nctrn setup`；`invalid_request`/404 → 模型 id 或地址路径有误），实现位置为 `agent/turn.ts` 的 `providerFailureHint`（turn.completed.error.message，CLI 与 TUI 共用）。
-- 系统凭据后端不可用时（第 3 节），跳过保存密钥这一步，直接进入环境变量方式；选择"改用环境变量"时询问变量名（默认按预设 `defaultKeyEnv`），条目写入 `apiKeyEnv`，密钥不落盘。
+- 系统凭据后端不可用时（第 3 节），API key 预设跳过保存密钥，直接进入环境变量方式；选择"改用环境变量"时询问变量名（默认按预设 `defaultKeyEnv`），条目写入 `apiKeyEnv`，密钥不落盘。ChatGPT 改为询问明文或仅本次运行，不默认明文。
 
 ### 逐行 CLI
 
@@ -45,12 +45,14 @@ API Key（掩码输入；直接回车表示改用环境变量）：********
 
 | 命令 | 行为 |
 |---|---|
-| `/provider` | CLI 列出全部服务商：名称、类型、服务地址（只显示主机名）、密钥来源（`凭据文件` / `环境变量 <NAME>` / `缺失`）、来源层（向导 / `config.json` / 项目 / 环境变量），以及当前会话使用的是哪一个。TUI 中打开全屏**服务商页**（[tui.md](../apps/tui.md) 第 8 节） |
+| `/provider` | CLI 列出全部服务商：名称、类型、主机名、鉴权描述、凭据状态（有效 / 即将过期 / 已失效 / 缺少）、保存位置（系统保存 / 明文保存 / 仅本次运行）、来源层，以及当前会话使用的是哪一个。不含令牌。TUI 中打开全屏**服务商页**（[tui.md](../apps/tui.md) 第 8 节） |
 | `/provider add` | 逐行向导（CLI）或服务商页内嵌向导（TUI 打开服务商页并选中预设）；保存后提示"用 /model 选择模型" |
 | `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成；等价于服务商页「换密钥」 |
 | `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置并更新 models.dev 缓存；models.dev 失败只提示，不中断刷新 |
 | `/provider model <name> <模型>` | 编辑该模型的八个设置（显示名 / 上下文长度 / 最大输出 / 推理 / 图片输入 / 思考档位 / 协议 / 编辑工具），写入条目 `userModels.<模型>`。推理为「跟随 / 是 / 否」，CLI 输入 `-`/`y`/`n`，选否时不询问档位；协议为「跟随 / Chat Completions / Messages / Responses」，CLI 输入 `-`/`chat`/`messages`/`responses`，选「跟随」清除用户编辑（ADR-0026 第 7 节、ADR-0031 §1）；编辑工具为「跟随 / edit / apply_patch」，CLI 输入 `edit`/`patch`（或 `apply_patch`）/`-`（ADR-0035 §5）；来源含「models.dev」「按接口声明推导」「服务商类型」。手写配置来源的字段只显示不提问；只能编辑清单内模型，程序不改写 `config.json` |
 | `/provider remove <name>` | 删除向导写入的条目及其凭据；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改；等价于「删除」 |
+| `/provider login <name>` | 重新走该条目的浏览器登录；不支持登录的条目提示原因。等待可取消，错误不含授权码或令牌 |
+| `/provider logout <name>` | 删除本地保存的登录凭据。官方没有吊销接口，界面不声称已在服务端注销 |
 
 Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。这些子命令与服务商页操作是同一套 Core 编排的快捷方式，命令名与效果在 CLI 与 TUI 一致。
 
@@ -90,7 +92,7 @@ interface ProviderSetupFile {
 
 ## 3. 凭据存储：交给操作系统
 
-密钥**不以明文落盘**。向导把密钥交给操作系统自带的凭据保护能力，全部通过系统自带的命令完成，不引入原生依赖：
+API key **不以明文落盘**。向导把密钥交给操作系统自带的凭据保护能力，全部通过系统自带的命令完成，不引入原生依赖。账号登录记录的明文例外只在用户显式选择后发生，见下文。
 
 | 平台 | 后端 | 写入 | 读取 | 密钥存放在 |
 |---|---|---|---|---|
@@ -104,20 +106,27 @@ interface ProviderSetupFile {
   - stdin 与 stdout 两个方向都只传 Base64：5.1 按控制台代码页读取 stdin，直接传 UTF-8 会把非 ASCII 字符读乱。
   - 实测一次解密约 0.3 秒；篡改过的密文解密失败（按"缺少凭据"处理）。
 - **密钥只经管道传递**：写入与读取时密钥都走子进程的 stdin/stdout，**永不出现在命令行参数里**（命令行参数对同机其他进程可见）。每个平台的这一性质在实现时逐一验证并写进测试。
-- **没有可用后端时不退回明文**：例如无桌面环境的 Linux 服务器没有密钥环。此时向导说明原因，只提供环境变量方式（打印设置命令，不保存密钥）。例外（[ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 4 节，已接受，待实现）：账号登录凭据可在用户明确选择后以 `plaintext` 后端存入 `credentials.json`；API key 不适用。
+- **没有可用后端时，API key 不退回明文**：例如无桌面环境的 Linux 服务器没有密钥环。此时向导说明原因，只提供环境变量方式（打印设置命令，不保存密钥）。**账号登录记录例外**（[ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 4 节）：仅 `openai-siwc` 记录可以在用户明确选择后写入。二选一，且不默认、不静默写入：
+  - **保存到 `credentials.json`（明文，仅你可读）**：索引条目为 `{ backend: "plaintext", value }`，`value` 是账号记录 JSON。文件仍原子写，POSIX 上 `0600`，并继续受凭据文件硬拒绝。`/provider` 标注「明文保存」。界面说明风险：文件被备份、同步或拷走时凭据随之泄漏，refresh token 在被撤销前可以持续使用。
+  - **仅本次运行**：记录只在进程内存，本进程内照常刷新，退出后丢失。`/provider` 标注「仅本次运行」，不取跨进程锁。
+  API key 不能走这两项，因为 API key 有环境变量可用，而轮换的 refresh token 不能放进环境变量。
 - `<NOCTURNE_HOME>/credentials.json` 是索引文件：
 
   ```ts
   interface CredentialIndex {
     version: 1;
-    /** 写入时使用的后端；跨机器拷贝后后端不可用或密文解不开，按"缺少凭据"处理 */
-    entries: Record<string, { backend: "dpapi" | "keychain" | "libsecret"; ciphertext?: string }>;
+    /** 系统后端条目含可选 ciphertext；plaintext 只存已校验的账号记录 JSON */
+    entries: Record<
+      string,
+      | { backend: "dpapi" | "keychain" | "libsecret"; ciphertext?: string }
+      | { backend: "plaintext"; value: string }
+    >;
   }
   ```
 
   只有 DPAPI 需要 `ciphertext`（密文本身）；钥匙串与 libsecret 的密钥留在系统里，索引只记录"这个服务商的密钥存在哪个后端"。原子写，POSIX 上 `0600`。
 
-- **统一接口 `CredentialStore`**（参考 oh-my-pi 的 `AuthStorage → CredentialStore` 分层；区别是它把密钥以明文 JSON 存进 SQLite，我们不存明文）：
+- **统一接口 `CredentialStore`**（参考 oh-my-pi 的 `AuthStorage → CredentialStore` 分层；区别是 API key 不存明文 JSON）：
 
   ```ts
   interface CredentialStore {
@@ -127,12 +136,16 @@ interface ProviderSetupFile {
     set(providerId: string, key: string): Promise<void>;
     /** 删除密钥与索引条目；不存在时无操作 */
     delete(providerId: string): Promise<void>;
-    /** 当前后端标识：界面提示（如"密钥已交给 Windows DPAPI 加密保存"）与测试断言用 */
+    /** 当前系统后端。plaintext 是条目级保存位置，用 storage(id) 查询 */
     backend(): "dpapi" | "keychain" | "libsecret" | "memory" | "none";
+    /** 保存账号记录。无系统后端时 storage 必填，省略则拒绝 */
+    setAccount(providerId: string, record: string, storage?: "plaintext" | "memory"): Promise<void>;
+    /** 不返回凭据内容 */
+    storage(providerId: string): "system" | "plaintext" | "memory" | undefined;
   }
   ```
 
-  每个平台一个实现：`dpapi`（Windows，索引存密文）、`keychain`（macOS，`security -i`/`find-generic-password`）、`libsecret`（Linux，`secret-tool`）——三者各自维护 `credentials.json` 索引的原子写与 POSIX `0600`；`memory` 只在内存中保存、不落任何文件，仅供测试；`none` 表示无可用后端（`get` 恒返回 `undefined`，`set`/`delete` 拒绝）。创建时按平台探测：找不到 `security`/`secret-tool` 可执行文件时落到 `none`。
+  每个平台一个实现：`dpapi`（Windows，索引存密文）、`keychain`（macOS，`security -i`/`find-generic-password`）、`libsecret`（Linux，`secret-tool`）——三者各自维护 `credentials.json` 索引的原子写与 POSIX `0600`；`memory` 只在内存中保存、不落任何文件，仅供测试；`none` 表示无可用系统后端（API key 的 `set` 拒绝，`get` 仍可读用户已选择的 `plaintext` 账号条目）。创建时按平台探测：找不到 `security`/`secret-tool` 可执行文件时落到 `none`。
 - **密钥解析顺序**（按服务商 id）：
   1. 条目声明了 `apiKeyEnv` 且该环境变量已设置 → 用环境变量；
   2. 凭据索引中有该 id → 经对应后端取出；
@@ -150,16 +163,16 @@ interface ProviderSetupFile {
 
 凭据索引（含 Windows 上的 DPAPI 密文）位于 Agent 能触及的文件系统里，而当前用户的进程能解开它；同时 v0.1 已经存在一个同类问题：`shell` 工具的子进程继承完整进程环境，模型可以通过 `echo %NOCTURNE_API_KEY%` 这类命令读到环境变量里的密钥（`default` 预设下会先询问）。本阶段一并处理：
 
-1. **内置硬拒绝**（[permissions.md](permissions.md) 5.3）：对 `<NOCTURNE_HOME>/credentials.json` 的 `read` 与 `edit` 一律 `deny`，在规则求值之前生效。任何规则、Grant、`--yes`、`guarded`/`smart`/`bypass` 预设、Hook 都不能放开它。`grep`/`glob` 的逐条过滤因此自然跳过它。路径同时按词法路径与真实路径匹配（与普通路径规则相同），符号链接绕不过去。
+1. **内置硬拒绝**（[permissions.md](permissions.md) 5.3）：对 `<NOCTURNE_HOME>/credentials.json` 以及所有生效 `external-file` 路径的 `read` 与 `edit` 一律 `deny`，在规则求值之前生效。明文账号记录仍在这个文件里，不另建凭据文件。任何规则、Grant、`--yes`、预设与 Hook 都不能放开它。
 2. **shell 子进程剥离凭据变量**：`shell` 工具启动子进程时，从环境中移除所有已解析服务商的 `apiKeyEnv` 变量名，以及 `NOCTURNE_API_KEY`、`ANTHROPIC_API_KEY` 两个默认名。默认补入 `PYTHONUNBUFFERED` 的规则见 [tools.md](tools.md) 第 6 节。MCP 服务器已经使用白名单环境（[mcp.md](mcp.md) 第 2 节），不受影响。Hook 维持继承完整环境（它是用户自己配置的脚本，[ADR-0012](../decisions/ADR-0012-hooks.md)）。
-3. **命令提示**：命令字符串中出现 `credentials.json`，或调用凭据后端命令（macOS `security …-generic-password` 族、Linux `secret-tool`、Windows `ProtectedData`——DPAPI 的 .NET 入口类名，比 `ConvertTo-SecureString` 更贴近实际读取路径）的 `shell` 调用，在全部预设（含 `guarded`/`smart`/`bypass`）中至少 `ask`，`label` 为"可能读取 Nocturne 凭据"。这是基于模式的提示，不是可靠检测。
+3. **命令提示**：命令字符串中出现 `credentials.json` 或生效 `external-file` 的凭据文件名，或调用凭据后端命令（macOS `security …-generic-password` 族、Linux `secret-tool`、Windows `ProtectedData`）的 `shell` 调用，在全部预设（含 `guarded`/`smart`/`bypass`）中至少 `ask`，`label` 为"可能读取 Nocturne 凭据"。这是基于模式的提示，不是可靠检测。详见 [permissions.md](permissions.md) 5.3。
 4. `providers.json` 加入"Nocturne 授权数据"一组（permissions.md 第 6 节第 4 条）：对它的 `edit` 至少 `ask`——它能把会话重定向到别的端点。
 
 **权限不是沙箱**（permissions.md 第 1 节）：一条已获准的 shell 命令仍然可以用任何方式取出密钥（比如拼接路径、调用脚本、间接调用系统凭据命令）。第 1、2 条挡住的是工具层面的直接读取与环境变量泄漏，第 3 条只是提示。文档与界面都不暗示凭据文件对 shell 完全不可见。
 
 ## 5. 服务商预设
 
-Grok CLI 预设使用 `https://cli-chat-proxy.grok.com/v1`、静态头 `X-XAI-Token-Auth: xai-grok-cli`、模型头 `x-grok-model-override` 与外部文件 `~/.grok/auth.json`（`keyPath: ["https://accounts.x.ai/sign-in", "key"]`，续期 `grok login`）。向导跳过密钥输入，先获取模型列表，失败询问模型 id；不修改官方 CLI 的文件（[ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 6 节）。
+内置预设除下表外还有 ChatGPT 与 Grok CLI（[ADR-0042](../decisions/ADR-0042-provider-oauth.md)）。ChatGPT（`chatgpt`）使用 `auth: { kind: "openai-siwc" }`、`https://api.openai.com/v1` 与 `modelsDevProvider: "openai"`；登记的模型协议为 `openai-responses`。Grok CLI 使用 `https://cli-chat-proxy.grok.com/v1`、静态头 `X-XAI-Token-Auth: xai-grok-cli`、模型头 `x-grok-model-override` 与外部文件 `~/.grok/auth.json`（`keyPath: ["https://accounts.x.ai/sign-in", "key"]`，续期 `grok login`）。向导跳过密钥输入，先获取模型列表，失败询问模型 id；不修改官方 CLI 的文件。
 
 预设是 `provider` 模块里的纯数据：
 
@@ -179,7 +192,7 @@ Grok CLI 预设使用 `https://cli-chat-proxy.grok.com/v1`、静态头 `X-XAI-To
 
 ## 6. Core 接口
 
-向导的逻辑（预设、模型列表、文件写入）放在 Core，客户端只负责交互；这样 CLI 与 TUI 共用一份行为，也为将来的 RPC 客户端留好入口。向导全程只发 `GET /models`，不发送任何模型请求。v0.3 起向导不再选择模型：`runProviderSetupWizard` 只把服务商配上（凭据 + 上游声明 + 可选思考档位），`WizardResult` 只含 `providerId` 与已登记模型数；选择模型与设默认一律走 `/model`。
+向导的逻辑（预设、模型列表、文件写入、登录会话）放在 Core，客户端只负责交互。登录接口是 `startProviderLogin` / `logoutProvider` / `LoginSession`（[provider-api.md](../protocols/provider-api.md) 第 1 节）。向导遇到非 `apiKey` 鉴权或用户选择浏览器登录时，用登录会话代替输入密钥；ChatGPT 在无系统后端时经 `setAccount` 要求显式选择保存位置。`fetchModels` 与模型请求都经同一 `AuthResolver` 取令牌。向导不发送模型对话请求。v0.3 起向导不再选择模型：`runProviderSetupWizard` 只把服务商配上，`WizardResult` 只含 `providerId` 与已登记模型数。
 
 ```ts
 // @nocturne/core 公开导出
@@ -199,7 +212,7 @@ setCredential(providerId: string, key: string): Promise<void>
   // 经 credentials.set 完成（缓存随之失效，下一次请求即用新密钥）
 removeSetupProvider(providerId: string): Promise<void>     // 删除条目并经 credentials.delete 删凭据
 describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>
-  // /provider 与服务商页列表数据：名称、类型、主机名、密钥来源、来源层、模型数；不含密钥。
+  // /provider 与服务商页列表数据：名称、类型、主机名、鉴权描述、凭据状态、保存位置、来源层、模型数；不含令牌。
   // 给 workspaceRoot 时并入该工作区可信项目层的条目
 refreshUpstreamLimits(providerId: string): Promise<string | undefined> // 刷新上游及 models.dev；失败仅返回提示
 refreshModelsDev(): Promise<string | undefined>          // 显式更新 models.dev 缓存；失败返回提示
@@ -264,9 +277,9 @@ runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最�
 
 ## 8. 本阶段不做
 
-- 明文凭据文件作为后备：没有系统后端时只提供环境变量方式（第 3 节）。
+- API key 的明文凭据后备：没有系统后端时只提供环境变量方式。账号登录记录的明文或内存选择见第 3 节，不适用于 API key。
 - Windows 凭据管理器（Credential Manager）：读取需要经 PowerShell 动态编译 P/Invoke 代码，启动慢且易被安全软件拦截；DPAPI 提供同等的"仅当前用户可解密"保护，本阶段只用 DPAPI。
-- OAuth 登录、订阅账号登录：providers.md 第 6 节已排除；模拟官方客户端特征的登录方式不纳入。
+- 官方未开放给第三方的订阅登录（如 Claude.ai）：不模拟官方客户端，不借用未公开的 client_id。已接入的 ChatGPT、Grok CLI 凭据与 OpenRouter 登录见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md)。
 - 非交互的 `nctrn setup --provider ... --key ...`：命令行上的密钥会进入 shell 历史与进程列表，与"凭据不经命令行"的规则冲突；自动化场景继续使用环境变量或手写配置。
 - 项目级向导配置：向导只写用户级文件。项目级服务商配置仍然手写在 `.nocturne/config.json`，并受信任模型约束。
 - 探测上游未声明的能力：各服务的模型列表字段不统一，本阶段只映射上游明确声明的字段（第 7 节），不发探测请求、不按模型名猜测。

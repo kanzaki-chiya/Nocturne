@@ -57,20 +57,21 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
       },
       "providerOptions": {},                     // 配置级选项，与请求级合并后传给适配器（provider-api.md §3）
       "sessionHeader": "x-opencode-session",      // 可选：会话标识请求头名（ADR-0031 §3，见第 4 节）
+      "modelHeader": "x-grok-model-override",      // 可选：把本次模型 id 写入该请求头（ADR-0042）
+      "auth": { "kind": "apiKey" },                 // 可省略；非 apiKey 只在用户级生效（config.md 第 1 节）
       "modelsDevProvider": "opencode-go",          // 可选：models.dev 服务商键（ADR-0031 §4，见第 2 节）
-      "allowUndeclaredModels": false              // true → strictModels=false，接受清单外模型 id（CLI 用）
     }
   }
 }
 ```
 
-凭据只从环境变量或用户级凭据文件读取，不写入会话日志、事件或普通日志。交互式配置（`nctrn setup`、`/provider`）、服务商预设与凭据解析顺序见 [provider-setup.md](provider-setup.md)（v0.2）。
+凭据只从环境变量或用户级凭据存储读取，不写入会话日志、事件或普通日志。`auth` 与协议分开：省略等同 `{ "kind": "apiKey" }`；`openai-siwc` 与 `external-file` 的字段、用户级限制和请求约束见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md)。交互式配置见 [provider-setup.md](provider-setup.md)。
 
 思考强度档位（[ADR-0025](../decisions/ADR-0025-per-model-reasoning.md)）：中性档位集合为 `off | minimal | low | medium | high | xhigh | max`。每个模型的可用档位按上段规则解析；`ModelRequest.reasoningEffort` 由 Runtime 按会话配置就近降档赋值。适配器把档位翻译为 `reasoning_effort`（openai 格式）、`reasoning.effort`（openrouter 格式）或 `thinking.budget_tokens`（anthropic）；`thinking.format` 与 `thinking.budgets` 保留。`providerOptions` 中的原生推理键仍可直传，与归一化字段同义时归一化字段胜出；子代理兜底轮不携带 `reasoningEffort`。
 
 ## 4. 适配器
 
-条目可声明用户级 `auth`（省略等同 `apiKey`）及 `modelHeader`；后者把本次模型 id 写入指定请求头。鉴权解析器由条目共享，主对话、子代理、角色调用、审查、摘要与模型发现使用同一解析语义。`external-file` 按 mtime 缓存，只读指定 JSON 路径；失效后重读一次，失败提示 `renewHint`，不复制到 Nocturne 凭据库。完整契约见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md)。
+条目可声明用户级 `auth`（省略等同 `apiKey`）及 `modelHeader`。适配器只认 `AuthResolver`，不按服务商名分支。主对话、子代理、模型角色、审查器、压缩摘要和 `fetchModels` 共用同一解析器。响应流开始前的 401 调用 `invalidate()` 后重发一次，仍失败则为不可重试的 `auth`。`external-file` 按 mtime 缓存，只读指定 JSON 路径；失效后重读一次，失败提示 `renewHint`，不复制到 Nocturne 凭据库。`openai-siwc` 向 Responses 适配器提供一份请求约束声明：固定 `store: false`、`stream: true`，不发 `max_output_tokens` 等通道禁用字段，system 改为 `instructions`，function 工具放入 namespace，只有 `response.completed` 算成功；`{detail}` 与 `{error:{code}}` 都归一化，额度用完不重试。完整字段与错误表见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 3–5 节，接口见 [provider-api.md](../protocols/provider-api.md) 第 5 节。
 
 | 适配器 | 覆盖 | 阶段 | 传输实现 |
 |---|---|---|---|
@@ -112,4 +113,4 @@ Responses 组装请求时只回传带非空 `providerData.openai.itemId` 的推�
 
 ## 6. 暂不设计
 
-Provider 原生工具（服务端网页搜索等）、结构化输出（JSON schema 响应）、多模态输出、账号登录类凭据、按量计费展示。接入时以能力字段与可选请求字段扩展，不改变现有事件。
+Provider 原生工具（服务端网页搜索等）、结构化输出（JSON schema 响应）、多模态输出、按量计费展示。官方未开放给第三方的订阅登录（如 Claude.ai）不接入（[ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 1 节）。接入时以能力字段与可选请求字段扩展，不改变现有事件。
