@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createPlatform } from "../platform/index.js";
-import { replaySessionView, type RuntimeEvent } from "../protocol/index.js";
+import { reduceSessionView, replaySessionView, type RuntimeEvent } from "../protocol/index.js";
 import { createSessionStore, type SessionStore } from "./index.js";
 
 let dir: string;
@@ -103,6 +103,45 @@ describe("create + emit", () => {
 });
 
 describe("load / 状态折叠", () => {
+  it.each(["completed", "pending", "in_progress"] as const)(
+    "新用户消息归档全部完成的清单，保留未完成项（%s）；在线与恢复一致",
+    async (status) => {
+      const session = await store.create(INPUT);
+      const view = replaySessionView(session.durableEvents());
+      const unsubscribe = session.subscribe((event) => reduceSessionView(view, event));
+      const items = [
+        { text: "第一步", status: "completed" as const },
+        { text: "第二步", status },
+      ];
+      await session.emit("tool.completed", {
+        callId: "todo",
+        name: "todo_write",
+        status: "ok",
+        modelContent: "任务快照",
+        output: { items },
+      });
+      expect(session.state().todos).toEqual(items);
+      expect(view.todos).toEqual(items);
+      await session.emit("message.user", {
+        messageId: "next",
+        content: [{ type: "text", text: "下一个任务" }],
+      });
+      const expected = status === "completed" ? [] : items;
+      expect(session.state().todos).toEqual(expected);
+      expect(view.todos).toEqual(expected);
+      expect(replaySessionView(session.durableEvents()).todos).toEqual(view.todos);
+      expect(view.entries.find((entry) => entry.kind === "tool")?.result?.output).toEqual({
+        items,
+      });
+      unsubscribe();
+      await session.close();
+      const restored = await store.load(session.id);
+      expect(restored.state().todos).toEqual(expected);
+      expect(replaySessionView(restored.durableEvents()).todos).toEqual(expected);
+      await restored.close();
+    },
+  );
+
   it("清单只跟随有效已落盘的完成事件，恢复与子会话隔离", async () => {
     const parent = await store.create(INPUT);
     const item = { text: "第一步", status: "completed" as const };

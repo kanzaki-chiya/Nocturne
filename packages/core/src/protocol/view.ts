@@ -47,7 +47,7 @@ export function firstUserText(payload: Pick<MessageUserPayload, "content">): str
 
 export interface SessionView {
   title: string | undefined;
-  /** 最后一次有效且持久化的 todo_write 快照 */
+  /** 当前任务清单；全部完成后由下一条持久化 message.user 归档 */
   todos: TodoItem[];
   /** 每次归约 +1；不参与重放等价 */
   revision: number;
@@ -312,6 +312,8 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
       break;
     }
     case "message.user": {
+      if (view.todos.length > 0 && view.todos.every((item) => item.status === "completed"))
+        view.todos = [];
       if (!view.entries.some((entry) => entry.kind === "user"))
         view.title ??= firstUserText(event.payload);
       view.entries.push({

@@ -128,6 +128,34 @@ const durableTypes = (events: RuntimeEvent[]) =>
 const prompt = (text = "hi"): Parameters<typeof runTurn>[1] => [{ type: "text", text }];
 
 describe("runTurn", () => {
+  it.each(["completed", "in_progress"] as const)(
+    "新用户消息后的请求仅保留未完成清单（%s）",
+    async (status) => {
+      const h = await makeHarness({
+        scripts: [
+          [
+            { type: "text_delta", text: "ok" },
+            { type: "finish", reason: "stop" },
+          ],
+        ],
+      });
+      await h.session.emit("tool.completed", {
+        callId: "todo",
+        name: "todo_write",
+        status: "ok",
+        modelContent: "历史任务快照",
+        output: { items: [{ text: "之前的任务", status }] },
+      });
+      expect(await runTurn(h.deps, prompt("下一项工作"))).toBe("done");
+      const request = JSON.stringify(h.provider.requests[0]?.messages);
+      if (status === "completed")
+        expect(request).not.toContain("当前会话任务清单（由 Runtime 附加");
+      else expect(request).toContain("当前会话任务清单（由 Runtime 附加");
+      expect(request).toContain("历史任务快照");
+      await h.session.close();
+    },
+  );
+
   it("空 stop 重试后成功；重试用尽返回明确错误码", async () => {
     const recovered = await makeHarness({
       scripts: [

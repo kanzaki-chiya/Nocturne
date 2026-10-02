@@ -106,6 +106,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         break;
       }
       case "message.user": {
+        if (todos.length > 0 && todos.every((item) => item.status === "completed")) todos = [];
         const p = event.payload;
         history.push({
           kind: "user",

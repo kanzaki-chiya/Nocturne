@@ -54,11 +54,13 @@ async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
 const inEnv = (child: React.ReactNode) =>
   createElement(TuiEnvContext.Provider, { value: ENV }, child);
 
-async function makeSession(): Promise<{ runtime: Runtime; session: RuntimeSession }> {
+async function makeSession(
+  provider = new FakeProvider({ scripts: [] }),
+): Promise<{ runtime: Runtime; session: RuntimeSession }> {
   const runtime = await createRuntime({
     cwd: tmp("nct-tui-ws-"),
     sessionsDir: tmp("nct-tui-sd-"),
-    providers: [new FakeProvider({ scripts: [] })],
+    providers: [provider],
   });
   const session = await runtime.createSession({ model: "fake/fake-model" });
   return { runtime, session };
@@ -90,6 +92,45 @@ const noticeEntry = (seq: number, message: string): ViewEntry => ({
 });
 
 describe("TUI", () => {
+  it("新用户消息归档已完成清单：全屏固定区与状态栏撤去，历史快照保留", async () => {
+    const { runtime, session } = await makeSession(
+      new FakeProvider({
+        scripts: [
+          [
+            { type: "text_delta", text: "继续" },
+            { type: "finish", reason: "stop" },
+          ],
+        ],
+      }),
+    );
+    await session.session.emit("tool.completed", {
+      callId: "todo",
+      name: "todo_write",
+      status: "ok",
+      modelContent: "历史快照",
+      output: { items: [{ text: "已做完的任务", status: "completed" }] },
+    });
+    const screen = render(createElement(App, { session, runtime, env: ENV, inline: false }));
+    try {
+      await waitFor(() => (screen.lastFrame() ?? "").includes("任务 1/1"));
+      expect(screen.lastFrame()).toMatch(/任务\s{2}1\/1/);
+      expect(screen.lastFrame()).toMatch(/任务清单\s+1\/1/);
+      const before = screen.lastFrame();
+      await session.submit({ text: "下一个任务" });
+      await waitFor(
+        () =>
+          screen.lastFrame() !== before &&
+          !(screen.lastFrame() ?? "").includes("任务 1/1") &&
+          !/任务\s{2}1\/1/.test(screen.lastFrame() ?? ""),
+      );
+      expect(screen.lastFrame()).toMatch(/任务清单\s+1\/1/);
+      expect(screen.lastFrame()).toContain("下一个任务");
+    } finally {
+      screen.unmount();
+      await session.close();
+    }
+  });
+
   it.each([false, true])("/settings 整帧打开并取消返回对话（inline=%s）", async (inline) => {
     const { runtime, session } = await makeSession();
     const screen = render(createElement(App, { session, runtime, env: ENV, inline }));
