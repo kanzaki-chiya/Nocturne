@@ -149,7 +149,7 @@ interface ProviderSetupFile {
 凭据索引（含 Windows 上的 DPAPI 密文）位于 Agent 能触及的文件系统里，而当前用户的进程能解开它；同时 v0.1 已经存在一个同类问题：`shell` 工具的子进程继承完整进程环境，模型可以通过 `echo %NOCTURNE_API_KEY%` 这类命令读到环境变量里的密钥（`default` 预设下会先询问）。本阶段一并处理：
 
 1. **内置硬拒绝**（[permissions.md](permissions.md) 5.3）：对 `<NOCTURNE_HOME>/credentials.json` 的 `read` 与 `edit` 一律 `deny`，在规则求值之前生效。任何规则、Grant、`--yes`、`guarded`/`smart`/`bypass` 预设、Hook 都不能放开它。`grep`/`glob` 的逐条过滤因此自然跳过它。路径同时按词法路径与真实路径匹配（与普通路径规则相同），符号链接绕不过去。
-2. **shell 子进程剥离凭据变量**：`shell` 工具启动子进程时，从环境中移除所有已解析服务商的 `apiKeyEnv` 变量名，以及 `NOCTURNE_API_KEY`、`ANTHROPIC_API_KEY` 两个默认名。MCP 服务器已经使用白名单环境（[mcp.md](mcp.md) 第 2 节），不受影响。Hook 维持继承完整环境（它是用户自己配置的脚本，[ADR-0012](../decisions/ADR-0012-hooks.md)）。
+2. **shell 子进程剥离凭据变量**：`shell` 工具启动子进程时，从环境中移除所有已解析服务商的 `apiKeyEnv` 变量名，以及 `NOCTURNE_API_KEY`、`ANTHROPIC_API_KEY` 两个默认名。默认补入 `PYTHONUNBUFFERED` 的规则见 [tools.md](tools.md) 第 6 节。MCP 服务器已经使用白名单环境（[mcp.md](mcp.md) 第 2 节），不受影响。Hook 维持继承完整环境（它是用户自己配置的脚本，[ADR-0012](../decisions/ADR-0012-hooks.md)）。
 3. **命令提示**：命令字符串中出现 `credentials.json`，或调用凭据后端命令（macOS `security …-generic-password` 族、Linux `secret-tool`、Windows `ProtectedData`——DPAPI 的 .NET 入口类名，比 `ConvertTo-SecureString` 更贴近实际读取路径）的 `shell` 调用，在全部预设（含 `guarded`/`smart`/`bypass`）中至少 `ask`，`label` 为"可能读取 Nocturne 凭据"。这是基于模式的提示，不是可靠检测。
 4. `providers.json` 加入"Nocturne 授权数据"一组（permissions.md 第 6 节第 4 条）：对它的 `edit` 至少 `ask`——它能把会话重定向到别的端点。
 

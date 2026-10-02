@@ -443,6 +443,47 @@ describe("edit 工具", () => {
 describe("shell 工具", () => {
   const node = JSON.stringify(process.execPath);
 
+  it.each([
+    [undefined, "1"],
+    ["0", "0"],
+    ["", ""],
+  ])("父进程 PYTHONUNBUFFERED=%j 时子进程看到 %j", async (value, expected) => {
+    vi.stubEnv("PYTHONUNBUFFERED", value);
+    try {
+      const ws = tmpWorkspace();
+      writeFileSync(
+        path.join(ws, "env.js"),
+        "process.stdout.write(JSON.stringify(process.env.PYTHONUNBUFFERED));",
+      );
+      const h = await makeHarness(ws);
+      const r = await h.executor.execute(call("shell", { command: `${node} env.js` }), h.scope);
+      expect(r.status).toBe("ok");
+      expect(r.result.modelContent).toBe(`${JSON.stringify(expected)}\n[exit code 0]`);
+      expect(process.env.PYTHONUNBUFFERED).toBe(value);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("模型可见说明引导按预计耗时设置短超时并根据输出定位问题", () => {
+    expect(shellTool.description).toContain("timeout 30 python3 test.py");
+    expect(shellTool.description).toContain("PowerShell/cmd 用对应写法");
+    expect(shellTool.description).toContain("运行自己写的测试或脚本");
+    expect(shellTool.description).toContain("先用较短的超时");
+    expect(shellTool.description).toContain("根据已输出的内容定位问题");
+    expect(shellTool.description).toContain("不要为了保险把 timeoutMs 设得很长");
+    expect(shellTool.inputSchema).toMatchObject({
+      properties: {
+        timeoutMs: {
+          maximum: 600_000,
+          description: expect.stringMatching(
+            /默认 120000，上限 600000.*按预计耗时.*较短的超时.*已输出的内容.*不要为了保险/,
+          ),
+        },
+      },
+    });
+  });
+
   it("合并 stdout/stderr 输出并返回退出码", async () => {
     const ws = tmpWorkspace();
     const h = await makeHarness(ws);

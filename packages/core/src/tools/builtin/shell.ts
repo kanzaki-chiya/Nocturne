@@ -113,7 +113,7 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
   name: "shell",
   // ADR-0022：描述保持中性、稳定——具体种类与语法见环境信息 Shell 行
   description:
-    "经当前会话选定的 shell 执行非交互式命令（种类与语法见环境信息）。合并 stdout/stderr 输出并截断，返回退出码。超时或中断会尝试终止进程树中仍可达的后代；detached 方式脱离进程树的后台进程可能仍在运行。",
+    "经当前会话选定的 shell 执行非交互式命令（种类与语法见环境信息）。合并 stdout/stderr 输出并截断，返回退出码。超时或中断会尝试终止进程树中仍可达的后代；detached 方式脱离进程树的后台进程可能仍在运行。运行自己写的测试或脚本、或可能卡住的命令时，按预计耗时在命令中加超时（如 timeout 30 python3 test.py；PowerShell/cmd 用对应写法），或设置 timeoutMs。没有把握时先用较短的超时，超时后根据已输出的内容定位问题，不要为了保险把 timeoutMs 设得很长。",
   inputSchema: {
     type: "object",
     required: ["command"],
@@ -123,7 +123,7 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
         type: "integer",
         minimum: 1,
         maximum: MAX_TIMEOUT_MS,
-        description: `超时毫秒数，默认 ${DEFAULT_TIMEOUT_MS}，上限 ${MAX_TIMEOUT_MS}`,
+        description: `超时毫秒数，默认 ${DEFAULT_TIMEOUT_MS}，上限 ${MAX_TIMEOUT_MS}。运行自己写的测试或脚本、或可能卡住的命令时按预计耗时设置；没有把握时先用较短的超时，超时后根据已输出的内容定位问题，不要为了保险设得很长。`,
       },
       cwd: { type: "string", description: "工作目录（须位于工作区内），默认会话 cwd" },
     },
@@ -202,6 +202,7 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
       signal: ctx.signal,
       timeoutMs,
       ...(ctx.shell?.descriptor !== undefined ? { shell: ctx.shell.descriptor } : {}),
+      env: { PYTHONUNBUFFERED: process.env.PYTHONUNBUFFERED ?? "1" },
       // 凭据变量不进模型驱动的子进程环境（provider-setup.md 第 4 节）；
       // envStrip 由装配层按 Provider 条目的 apiKeyEnv + 默认名汇总给出
       ...(ctx.shellEnvStrip !== undefined ? { envStrip: ctx.shellEnvStrip } : {}),
