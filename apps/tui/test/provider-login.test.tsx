@@ -21,9 +21,11 @@ import { providerCredentialDescription } from "../src/text-format.js";
 import { WizardView } from "../src/components/wizard-view.js";
 import { ProviderDialog } from "../src/components/provider-dialog.js";
 import { useProviderWizard, type WizardOutcome } from "../src/wizard-io.js";
+import { copyText } from "../src/clipboard.js";
 import { settle } from "./provider-test-utils.js";
 
 vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
+vi.mock("../src/clipboard.js", () => ({ copyText: vi.fn(() => Promise.resolve(["system"])) }));
 vi.mock("@nocturne/core", async (original) => ({
   ...(await original<typeof Core>()),
   startProviderLogin: vi.fn(),
@@ -88,14 +90,15 @@ describe("登录客户端", () => {
     ).toBe(true);
     const [command, args, options] = required(vi.mocked(execFile).mock.calls[0]);
     expect(command).toBe(
-      platform === "win32" ? "cmd.exe" : platform === "darwin" ? "open" : "xdg-open",
+      platform === "win32" ? "rundll32.exe" : platform === "darwin" ? "open" : "xdg-open",
     );
     if (platform === "win32") {
-      expect(args).toEqual(["/d", "/c", 'start "" "%NOCTURNE_AUTHORIZE_URL%"']);
-      expect(options).toMatchObject({
-        windowsHide: true,
-        env: { NOCTURNE_AUTHORIZE_URL: "https://example.test/a?state=mock&challenge=x%20y" },
-      });
+      // 不经 cmd：地址原样作为单个参数，& 不会被当作命令分隔符
+      expect(args).toEqual([
+        "url.dll,FileProtocolHandler",
+        "https://example.test/a?state=mock&challenge=x%20y",
+      ]);
+      expect(options).toMatchObject({ windowsHide: true });
     } else expect(args).toEqual(["https://example.test/a?state=mock&challenge=x%20y"]);
   });
   it("浏览器失败返回 false，拒绝不安全地址", async () => {
@@ -289,7 +292,20 @@ describe("登录等待页实际渲染", () => {
     session();
     browser(new Error("mock unavailable"));
     const ui = screen();
-    await settle(() => ui.lastFrame()?.includes("请复制到浏览器") === true);
+    await settle(() => ui.lastFrame()?.includes("未能打开浏览器") === true);
+    expect(ui.lastFrame()).toContain("[ 复制地址 ]");
+    // 输入框 → 取消 → 复制地址；Enter 把完整授权地址交给剪贴板
+    ui.stdin.write("\t");
+    await settle(() => ui.lastFrame()?.includes("> [ 取消 ]") === true);
+    ui.stdin.write("\t");
+    await settle(() => ui.lastFrame()?.includes("> [ 复制地址 ]") === true);
+    ui.stdin.write("\r");
+    await settle(() => ui.lastFrame()?.includes("已复制授权地址") === true);
+    expect(vi.mocked(copyText).mock.calls[0]?.[0]).toMatch(/^https:\/\//);
+    ui.stdin.write("\t");
+    await settle(() => ui.lastFrame()?.includes("> [ 提交 ]") === true);
+    ui.stdin.write("\t");
+    await settle(() => ui.lastFrame()?.includes("> [") === false);
     ui.stdin.write("mock-screenshot-code");
     await settle(() => ui.lastFrame()?.includes("********************") === true);
     const dir = process.env.NOCTURNE_LOGIN_FRAMES_DIR;

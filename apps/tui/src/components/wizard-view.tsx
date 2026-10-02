@@ -5,6 +5,7 @@ import stringWidth from "string-width";
 import { boxSafe, truncateLine } from "../format.js";
 import { useTheme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
+import { copyText } from "../clipboard.js";
 import { unstoredKeyCommands } from "../provider-login.js";
 import { Buttons } from "./dialog/buttons.js";
 import { ConfirmDiscard } from "./dialog/confirm-discard.js";
@@ -48,6 +49,7 @@ export function WizardView({
   const [focus, setFocus] = useState("input");
   const [confirm, setConfirm] = useState(false);
   const [discard, setDiscard] = useState(false);
+  const [copyNote, setCopyNote] = useState<string>();
   const boxes = useRef(new Map<string, DOMElement>());
   const previousPrompt = useRef<string | undefined>(undefined);
   const prompt = state.prompt;
@@ -125,8 +127,20 @@ export function WizardView({
       return next;
     });
   };
+  const copyUrl = () => {
+    const url = state.login?.authorizeUrl;
+    if (url === undefined) return;
+    void copyText(url).then((ok) => {
+      setCopyNote(
+        ok.length > 0 ? "已复制授权地址，粘贴到浏览器打开" : "! 复制失败，请手动选中地址",
+      );
+    });
+  };
+  // 登录等待时多一个「复制地址」：长地址折行后终端只能识别首行链接，选中复制又会带上边框。
+  const buttonIds = state.login && prompt ? ["cancel", "copy", "save"] : ["cancel", "save"];
   const activate = (id: string) => {
     if (id === "cancel") close();
+    else if (id === "copy") copyUrl();
     else if (id === "save" && prompt) {
       if (multi) onSubmitMulti([...checked].sort((a, b) => a - b));
       else onSubmit(prompt.confirmation ? "" : value);
@@ -150,7 +164,7 @@ export function WizardView({
         return;
       }
       if (!prompt || tooSmall) return;
-      const order = prompt.confirmation ? ["cancel", "save"] : ["input", "cancel", "save"];
+      const order = prompt.confirmation ? buttonIds : ["input", ...buttonIds];
       if (key.tab) {
         setFocus(
           order[(order.indexOf(focus) + (key.shift ? -1 : 1) + order.length) % order.length] ??
@@ -160,8 +174,13 @@ export function WizardView({
       }
       if (focus !== "input") {
         if (key.upArrow && !prompt.confirmation) setFocus("input");
-        else if (key.leftArrow || key.rightArrow) setFocus(focus === "cancel" ? "save" : "cancel");
-        else if (key.return || input === " ") activate(focus);
+        else if (key.leftArrow || key.rightArrow) {
+          const at = buttonIds.indexOf(focus);
+          setFocus(
+            buttonIds[(at + (key.leftArrow ? -1 : 1) + buttonIds.length) % buttonIds.length] ??
+              "cancel",
+          );
+        } else if (key.return || input === " ") activate(focus);
         return;
       }
       if (multi) {
@@ -276,7 +295,10 @@ export function WizardView({
                 <>
                   <Text wrap="wrap">{boxSafe(state.login.authorizeUrl)}</Text>
                   <Text color={theme.muted}>
-                    {state.login.browserOpened ? "已在浏览器打开" : "请复制到浏览器"}
+                    {copyNote ??
+                      (state.login.browserOpened
+                        ? "已在浏览器打开；没有打开时选「复制地址」"
+                        : "未能打开浏览器，选「复制地址」后粘贴到浏览器")}
                   </Text>
                 </>
               ) : null}
@@ -389,10 +411,16 @@ export function WizardView({
                 width={inner}
                 items={
                   prompt
-                    ? [
-                        ["cancel", "取消"],
-                        ["save", saveLabel],
-                      ]
+                    ? state.login
+                      ? [
+                          ["cancel", "取消"],
+                          ["copy", "复制地址"],
+                          ["save", saveLabel],
+                        ]
+                      : [
+                          ["cancel", "取消"],
+                          ["save", saveLabel],
+                        ]
                     : [["cancel", "取消"]]
                 }
                 onBox={onBox}

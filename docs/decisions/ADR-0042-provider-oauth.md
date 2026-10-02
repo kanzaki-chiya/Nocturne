@@ -198,7 +198,7 @@ logoutProvider(config: RuntimeConfig, providerId: string): Promise<void>
   - 服务商详情增加「重新登录」「退出登录」。
   - 状态与错误文案按本 ADR 第 4–7 节。
 - **CLI**：新增 `/provider login <名称>` 和 `/provider logout <名称>`，行式流程同上。`nctrn setup` 跟随向导。
-- 打开浏览器由客户端调用系统命令（Windows `start`、macOS `open`、Linux `xdg-open`）。失败不算错误，只显示地址。
+- 打开浏览器由客户端调用系统命令（Windows `start`、macOS `open`、Linux `xdg-open`）。失败不算错误，只显示地址。Windows 实际用 `rundll32 url.dll,FileProtocolHandler`（见修订）。
 
 ### 9. 安全
 
@@ -242,3 +242,7 @@ logoutProvider(config: RuntimeConfig, providerId: string): Promise<void>
 - **为 OAuth 凭据新建独立的存储文件**：凭据存储已经按服务商 id 保存任意字符串，并且有平台加密。JSON 记录直接放进去即可，不需要第二套加密与索引。
 - **把请求约束做成通用的 `omitRequestFields` 配置项让用户手写**：约束是 ChatGPT 通道的接口契约，不是用户偏好。放在鉴权实现里，用户不会因为漏写一项而遇到 400。以后有第二个服务商需要同类约束时，再考虑抽成通用字段。
 - **OpenRouter 也按「账号」建模、显示登录状态**：它登录后就是 key，没有过期和刷新。当作 key 处理最简单，也和用户在 OpenRouter 后台看到的一致。
+
+## 修订
+
+- 2026-10-03：Windows 打开浏览器改用 `rundll32.exe url.dll,FileProtocolHandler <地址>`。原先经 `cmd.exe /c start` 时，Node 给参数加的反斜杠转义 cmd 不认，授权地址里的 `&` 被当作命令分隔符，浏览器打不开。TUI 登录等待页另加「复制地址」按钮：长地址折行后终端只识别首行链接，框选会带上边框字符。

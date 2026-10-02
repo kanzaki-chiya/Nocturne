@@ -25,8 +25,10 @@ export async function openLoginBrowser(
   platform: NodeJS.Platform = process.platform,
 ): Promise<boolean> {
   if (!/^https?:\/\//.test(url) || /["\r\n]/.test(url)) return false;
-  const command = platform === "win32" ? "cmd.exe" : platform === "darwin" ? "open" : "xdg-open";
-  const args = platform === "win32" ? ["/d", "/c", 'start "" "%NOCTURNE_AUTHORIZE_URL%"'] : [url];
+  // Windows 不经 cmd：Node 给 cmd 参数加的反斜杠转义 cmd 不认，地址里的 & 会被当成命令分隔符。
+  const command =
+    platform === "win32" ? "rundll32.exe" : platform === "darwin" ? "open" : "xdg-open";
+  const args = platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
   return await new Promise<boolean>((resolve) => {
     execFile(
       command,
@@ -34,7 +36,6 @@ export async function openLoginBrowser(
       {
         windowsHide: true,
         timeout: 10_000,
-        env: platform === "win32" ? { ...process.env, NOCTURNE_AUTHORIZE_URL: url } : process.env,
       },
       (error) => {
         resolve(error === null);
