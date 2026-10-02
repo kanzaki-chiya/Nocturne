@@ -13,7 +13,7 @@ export async function runSummaryCall(
   request: ModelRequest,
   signal: AbortSignal,
   firstEventTimeoutMs = 30_000,
-  idleTimeoutMs = 120_000,
+  idleTimeoutMs = 300_000,
 ): Promise<string> {
   let summary = "";
   for await (const ev of timedStream(

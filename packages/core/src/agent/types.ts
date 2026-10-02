@@ -27,7 +27,7 @@ export const DEFAULT_TURN_CONFIG: TurnConfig = {
   retryLimit: 4,
   retryBaseDelayMs: 250,
   firstEventTimeoutMs: 30_000,
-  idleTimeoutMs: 120_000,
+  idleTimeoutMs: 300_000,
 };
 
 /** id 工厂：生产环境用随机 id；测试可注入确定性序列 */

@@ -338,6 +338,32 @@ describe("openai-responses 适配器", () => {
     });
   });
 
+  it("推理摘要分段：段间补空行，不首尾相连", async () => {
+    const [added = {}, delta0 = {}, done0 = {}, itemDone = {}] = reasoningChunks("enc_abc");
+    const part = { item_id: "r_1", output_index: 0, summary_index: 1 };
+    const p = createOpenAIResponsesProvider(
+      config(),
+      envWithKey,
+      sseFetch([
+        added,
+        { ...delta0, delta: "**A**" },
+        done0,
+        { type: "response.reasoning_summary_part.added", ...part },
+        { type: "response.reasoning_summary_text.delta", ...part, delta: "**B**" },
+        { type: "response.reasoning_summary_part.done", ...part },
+        itemDone,
+        ...messageChunks(["ok", ""]),
+        completed(),
+      ]),
+    );
+    const events = await collect(p, request());
+    const text = events
+      .filter((e) => e.type === "reasoning_delta")
+      .map((d) => d.text)
+      .join("");
+    expect(text).toBe("**A**\n\n**B**");
+  });
+
   it("推理块回传：providerData 还原为 encrypted_content 推理项（store:false）", async () => {
     const capture: Captured = {};
     const p = createOpenAIResponsesProvider(

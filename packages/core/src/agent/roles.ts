@@ -23,7 +23,7 @@ export async function runRoleCall(
   request: ModelRequest,
   signal: AbortSignal,
   firstTimeout = 30_000,
-  idleTimeout = 120_000,
+  idleTimeout = 300_000,
 ): Promise<{ text: string; usage?: Usage | undefined }> {
   signal.throwIfAborted();
   let text = "";

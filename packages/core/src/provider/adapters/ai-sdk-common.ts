@@ -313,6 +313,19 @@ export function mapPart(
       // reasoning_delta 上送——stream.ts 对 text==="" 只合并数据不产生新块
       const providerData =
         part.providerMetadata !== undefined ? { ...part.providerMetadata } : undefined;
+      // Responses 把一个推理项的摘要分段发送，后续段的 id 为 `<itemId>:<n>`（n ≥ 1），
+      // 各段合并进同一推理块；段间补空行，否则段落标题首尾相连。
+      // 其他协议的推理块 id 不是这种形式，文本不变（Anthropic 思考块带签名，改文本会失效）。
+      const summaryIndex = part.type === "reasoning-start" ? /:(\d+)$/.exec(part.id) : null;
+      const separator = summaryIndex !== null && Number(summaryIndex[1]) > 0 ? "\n\n" : "";
+      if (separator !== "")
+        return [
+          {
+            type: "reasoning_delta",
+            text: separator,
+            ...(providerData !== undefined ? { providerData } : {}),
+          },
+        ];
       return providerData !== undefined
         ? [{ type: "reasoning_delta", text: "", providerData }]
         : [];
