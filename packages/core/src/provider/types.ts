@@ -174,7 +174,15 @@ export type ModelStreamEvent =
       rawInput?: string | undefined;
     }
   | { type: "usage"; usage: Usage }
-  | { type: "finish"; reason: FinishReason; rawReason?: string | undefined };
+  | { type: "finish"; reason: FinishReason; rawReason?: string | undefined }
+  /**
+   * 上游已开始响应的存活信号（ADR-0014 修订）：只给流式计时用，
+   * timedStream 消费后不向下游转发，不算输出、不影响重试。
+   */
+  | { type: "heartbeat" };
+
+/** 经 timedStream 过滤后交给 Agent Loop 的事件 */
+export type ModelOutputEvent = Exclude<ModelStreamEvent, { type: "heartbeat" }>;
 
 // ── Provider 与注册表（provider-api.md 第 1 节） ───────────
 

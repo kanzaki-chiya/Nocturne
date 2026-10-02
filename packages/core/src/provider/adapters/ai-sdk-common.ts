@@ -330,6 +330,10 @@ export function mapPart(
         ? [{ type: "reasoning_delta", text: "", providerData }]
         : [];
     }
+    case "start-step":
+      // SDK 在拿到上游响应头、流开始后发出；长上下文与推理模型可能很久才有首个内容事件，
+      // 以此告诉计时器连接已通（ADR-0014 修订）
+      return [{ type: "heartbeat" }];
     case "tool-input-start":
       toolNames.set(part.id, part.toolName);
       return [];

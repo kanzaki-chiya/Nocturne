@@ -1,5 +1,5 @@
 import { abortError, ProviderError } from "./errors.js";
-import type { ModelRequest, ModelStreamEvent, Provider } from "./types.js";
+import type { ModelOutputEvent, ModelRequest, ModelStreamEvent, Provider } from "./types.js";
 
 /** 普通 Step 与摘要共用的流式等待上限；不负责重试。 */
 export async function* timedStream(
@@ -8,7 +8,7 @@ export async function* timedStream(
   signal: AbortSignal,
   firstEventTimeoutMs: number,
   idleTimeoutMs: number,
-): AsyncIterable<ModelStreamEvent> {
+): AsyncIterable<ModelOutputEvent> {
   const controller = new AbortController();
   const combined = AbortSignal.any([signal, controller.signal]);
   const iterator = provider.stream(request, combined)[Symbol.asyncIterator]();
@@ -50,6 +50,8 @@ export async function* timedStream(
       });
       if (event.done) return;
       first = false;
+      // 心跳只重置计时，不向下游转发
+      if (event.value.type === "heartbeat") continue;
       yield event.value;
     }
   } finally {

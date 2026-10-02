@@ -250,8 +250,10 @@ describe("openai-responses 适配器", () => {
       sseFetch([...messageChunks(["hel", "lo"]), completed()]),
     );
     const events = await collect(p, request());
-    expect(events[0]).toEqual({ type: "text_delta", text: "hel" });
-    expect(events[1]).toEqual({ type: "text_delta", text: "lo" });
+    // 上游开始响应时先发心跳（ADR-0014 修订），随后才是内容
+    expect(events[0]).toEqual({ type: "heartbeat" });
+    expect(events[1]).toEqual({ type: "text_delta", text: "hel" });
+    expect(events[2]).toEqual({ type: "text_delta", text: "lo" });
     expect(events.filter((e) => e.type === "finish")).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ type: "finish", reason: "stop" });
     const usageEvent = events.find((e) => e.type === "usage");
