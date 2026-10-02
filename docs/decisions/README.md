@@ -46,6 +46,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0038](ADR-0038-transcript-polish.md) | 界面打磨第一批：点击展开、对话节奏与会话标题、速度与用量条 | 已接受 |
 | [ADR-0039](ADR-0039-welcome-provider-dialogs.md) | 空会话欢迎区与服务商页对话框化 | 已接受 |
 | [ADR-0040](ADR-0040-model-roles.md) | 模型角色：子代理、看图与标题 | 已接受 |
+| [ADR-0041](ADR-0041-checkpoints-rewind-fork.md) | 检查点、回退与会话分叉 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
