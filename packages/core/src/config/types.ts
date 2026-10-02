@@ -22,6 +22,9 @@ import type {
 export type { AnnotatedRule };
 export type { HookEntry, HookPoint, McpServerEntry };
 
+export type ModelRole = "task" | "vision" | "smol";
+export const MODEL_ROLES = ["task", "vision", "smol"] as const;
+
 /** Provider 条目中模型能力的覆盖形状（对齐 provider 的 ModelOverride） */
 export interface ModelOverrideShape {
   displayName?: string | undefined;
@@ -162,6 +165,7 @@ export interface ConfigFile {
   /** false 时只使用本地 models.dev 数据，不联网刷新 */
   modelsDev?: false | undefined;
   model?: string | undefined;
+  modelRoles?: Partial<Record<ModelRole, string | undefined>> | undefined;
   /** 会话默认思考档位（ADR-0018 第 4 节）：七档中性值之一 */
   reasoningEffort?: ReasoningEffort | undefined;
   /**
@@ -193,6 +197,7 @@ export interface ConfigFile {
 
 /** 一层合并后的结果（config.md 第 1 节） */
 export interface ResolvedConfig {
+  modelRoles?: Partial<Record<ModelRole, string | undefined>> | undefined;
   compactionThreshold?: string | number | undefined;
   providerThinkingWarnings?: string[] | undefined;
   model?: string | undefined;
@@ -425,6 +430,7 @@ export interface SettingItem {
     | "reasoningEffort"
     | "shell"
     | "defaultModel"
+    | `modelRoles.${ModelRole}`
     | "compaction.threshold";
   effective: string | undefined;
   source: "default" | "setup" | "settings" | "user" | "project" | "env" | "cli";
@@ -435,6 +441,9 @@ export interface SettingItem {
 
 /** 默认档位随默认模型经 setDefaultModel 成对保存，不在此单独修改（ADR-0034 修订） */
 export type SettingsPatch = Partial<{
+  "modelRoles.task": string | null;
+  "modelRoles.vision": string | null;
+  "modelRoles.smol": string | null;
   "compaction.threshold": string | number | null;
   "permissions.preset": PermissionPresetName | null;
   "permission.reviewer": SecurityReviewerConfig | null;
@@ -501,6 +510,7 @@ export interface RuntimeConfig {
   resolvedSettings(workspaceRoot?: string, shellEnv?: string): ResolvedConfig;
   updateSettings(patch: SettingsPatch): Promise<void>;
   setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<void>;
+  setModelRole(role: ModelRole, ref: string | null): Promise<void>;
 
   /**
    * settings.json 当前的 shell 层值原文（ADR-0022 第 3 节；live 快照——

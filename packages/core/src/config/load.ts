@@ -250,6 +250,24 @@ export async function loadConfig(
         ],
         ["defaultModel", "model", merged.resolved.model, saved.model],
         [
+          "modelRoles.task",
+          "modelRoles.task",
+          merged.resolved.modelRoles?.task,
+          saved.modelRoles?.task,
+        ],
+        [
+          "modelRoles.vision",
+          "modelRoles.vision",
+          merged.resolved.modelRoles?.vision,
+          saved.modelRoles?.vision,
+        ],
+        [
+          "modelRoles.smol",
+          "modelRoles.smol",
+          merged.resolved.modelRoles?.smol,
+          saved.modelRoles?.smol,
+        ],
+        [
           "permission.reviewer",
           "permission.reviewer",
           reviewerText(merged.resolved.permissionReviewer),
@@ -490,6 +508,7 @@ export async function loadConfig(
     resolvedSettings: (root, shellEnv) => mergedSettings(root, shellEnv).resolved,
     updateSettings: (patch) => settings.store.update(patch),
     setDefaultModel: (model, effort) => settings.store.setDefaultModel(model, effort),
+    setModelRole: (role, ref) => settings.store.update({ [`modelRoles.${role}`]: ref }),
     shellSetting: () => settings.store.shellFields(),
     setShellSetting: (kind, path) => settings.store.setShell(kind, path),
     getPreference: (key) => settings.store.getPreference(key),

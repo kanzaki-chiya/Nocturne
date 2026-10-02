@@ -177,6 +177,22 @@ const configFileSchema = z.object({
     .optional(),
   modelsDev: z.literal(false).optional(),
   model: z.string().min(1).optional(),
+  modelRoles: z
+    .object({
+      task: z
+        .string()
+        .regex(/^[^/]+\/.+$/u)
+        .optional(),
+      vision: z
+        .string()
+        .regex(/^[^/]+\/.+$/u)
+        .optional(),
+      smol: z
+        .string()
+        .regex(/^[^/]+\/.+$/u)
+        .optional(),
+    })
+    .optional(),
   /** 会话默认思考档位（ADR-0018） */
   reasoningEffort: reasoningEffortSchema.optional(),
   /** shell 选择（ADR-0022 第 2 节）：auto | pwsh | powershell | bash | cmd | sh */

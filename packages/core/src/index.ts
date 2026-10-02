@@ -27,7 +27,9 @@ import type {
   SettingsPatch,
   JevEndpoint,
   JevReviewerConfig,
+  ModelRole,
 } from "./config/index.js";
+import { MODEL_ROLES } from "./config/index.js";
 import {
   defaultJevReviewer,
   fetchJevModels,
@@ -356,6 +358,8 @@ export interface ResumeSessionOptions {
 }
 
 export interface Runtime {
+  describeModelRoles(): ModelRoleInfo[];
+  setModelRole(role: ModelRole, ref: string | null): Promise<SettingItem[]>;
   describeSettings(): SettingItem[];
   updateSettings(patch: SettingsPatch, options?: { reviewerKey: string }): Promise<SettingItem[]>;
   listReviewerProviders(): Promise<ProviderOverview[]>;
@@ -388,6 +392,32 @@ export interface Runtime {
   getPreference(key: string): string | undefined;
   /** 原子保存或删除偏好；未注入 RuntimeConfig 时拒绝。 */
   setPreference(key: string, value: string | undefined): Promise<void>;
+}
+
+export interface ModelRoleInfo {
+  role: ModelRole;
+  configured: string | undefined;
+  model: string | undefined;
+  source: SettingItem["source"];
+  available: boolean;
+}
+
+function resolveModelRole(
+  registry: ProviderRegistry,
+  ref: string | undefined,
+  role: ModelRole,
+): ResolvedModel | undefined {
+  if (ref === undefined) return undefined;
+  const parsed = parseModelRef(ref);
+  const provider = registry.providers().find((p) => p.id === parsed.provider);
+  if (!provider?.models().some((m) => m.ref.model === parsed.model)) return undefined;
+  const resolved = registry.resolve(parsed);
+  if (
+    resolved.model.unavailable !== undefined ||
+    (role === "vision" && !resolved.model.capabilities.imageInput)
+  )
+    return undefined;
+  return resolved;
 }
 
 function parseModelRef(model: string | ModelRef): ModelRef {
@@ -961,6 +991,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
 
     const resolveSessionModel = (ref: ModelRef): ResolvedModel => sessionRegistry.resolve(ref);
+    for (const role of MODEL_ROLES) {
+      const ref = resolved?.modelRoles?.[role];
+      if (ref !== undefined && resolveModelRole(sessionRegistry, ref, role) === undefined) {
+        const message = `模型角色 ${role} 的模型 ${ref} 不可用，按未配置处理`;
+        warnings.push(message);
+        session.emitEphemeral("runtime.warning", { code: "model_role_unavailable", message });
+      }
+    }
     let model: ResolvedModel;
     let providersDirty = false;
     /**
@@ -1608,6 +1646,39 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   }
 
   return {
+    describeModelRoles() {
+      const settings = config?.describeSettings(workspaceRoot) ?? [];
+      const rolesRegistry = buildRegistry(config?.resolvedSettings(workspaceRoot).providers ?? []);
+      return MODEL_ROLES.map((role) => {
+        const item = settings.find((s) => s.key === `modelRoles.${role}`);
+        const resolved = resolveModelRole(rolesRegistry, item?.effective, role);
+        return {
+          role,
+          configured: item?.effective,
+          model: resolved
+            ? `${resolved.model.ref.provider}/${resolved.model.ref.model}`
+            : undefined,
+          source: item?.source ?? "default",
+          available: resolved !== undefined,
+        };
+      });
+    },
+    async setModelRole(role, ref) {
+      if (!MODEL_ROLES.includes(role))
+        throw new RuntimeCommandError("invalid_command", `未知模型角色：${role}`);
+      if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存模型角色");
+      if (
+        ref !== null &&
+        resolveModelRole(
+          buildRegistry(config.resolvedSettings(workspaceRoot).providers),
+          ref,
+          role,
+        ) === undefined
+      )
+        throw new RuntimeCommandError("invalid_model", `模型角色 ${role} 的模型 ${ref} 不可用`);
+      await config.setModelRole(role, ref);
+      return config.describeSettings(workspaceRoot);
+    },
     describeSettings: () =>
       config?.describeSettings(workspaceRoot, platform.env("NOCTURNE_SHELL")) ?? [],
     listReviewerProviders: async () => (await config?.describeProviders(workspaceRoot)) ?? [],
@@ -1637,6 +1708,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存设置");
         validateSettingsPatch(patch);
         await config.forWorkspace(workspaceRoot);
+        const roleRegistry = buildRegistry(config.resolvedSettings(workspaceRoot).providers);
+        for (const role of MODEL_ROLES) {
+          const ref = patch[`modelRoles.${role}`];
+          if (ref != null && resolveModelRole(roleRegistry, ref, role) === undefined)
+            throw new RuntimeCommandError("invalid_model", `模型角色 ${role} 的模型 ${ref} 不可用`);
+        }
         const previousKey =
           settingsOptions?.reviewerKey !== undefined
             ? await config.credentials.get("reviewer")

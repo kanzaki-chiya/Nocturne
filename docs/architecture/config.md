@@ -44,6 +44,8 @@ interface ConfigFile {
   modelsDev?: false;
   /** 默认模型，"provider/model" 形式 */
   model?: string;
+  /** 模型角色（ADR-0040）：逐角色覆盖；不可信项目忽略 */
+  modelRoles?: { task?: string; vision?: string; smol?: string };
   /** 新会话的默认思考档位（ADR-0018；缺省 off）。档位是否可用由所选模型的声明决定，
       不支持时按就近降档生效 */
   reasoningEffort?: ReasoningEffort;
@@ -90,7 +92,7 @@ interface ConfigFile {
 
 models.dev 数据在启动时从缓存或内置快照读取，启动不联网；添加服务商或刷新模型列表时才 GET 更新，10 秒超时，失败沿用本地数据并提示。`config.json` 的 `modelsDev: false` 关闭联网并只使用内置快照。缓存比快照新时优先使用缓存。匹配规则与字段映射见 [providers.md](providers.md) 第 2 节。
 
-**程序设置层 `settings.json`**（[ADR-0034](../decisions/ADR-0034-settings-layer.md)）：白名单为 `model`、`reasoningEffort`、`permissions.preset`、`permission.reviewer`、`compaction.threshold`、`shell`、`shellPath`，与 `config.json` 共用 schema，按第 1 节的顺序参与通用合并。损坏文件忽略并警告；无效字段逐个忽略并警告，其余合法字段继续生效，不阻塞启动。白名单外字段（包括 `permissions`、`compaction` 中的未知成员）原样保留，但不参与合并；`theme` 等界面偏好仍由客户端解释。写入采用临时文件 + rename，成功后才更新内存，失败保留旧值，同进程并发写入串行执行，避免设置与偏好互相覆盖。
+**程序设置层 `settings.json`**（[ADR-0034](../decisions/ADR-0034-settings-layer.md)）：白名单为 `modelRoles`、`model`、`reasoningEffort`、`permissions.preset`、`permission.reviewer`、`compaction.threshold`、`shell`、`shellPath`，与 `config.json` 共用 schema，按第 1 节的顺序参与通用合并。损坏文件忽略并警告；无效字段逐个忽略并警告，其余合法字段继续生效，不阻塞启动。白名单外字段（包括 `permissions`、`compaction` 中的未知成员）原样保留，但不参与合并；`theme` 等界面偏好仍由客户端解释。写入采用临时文件 + rename，成功后才更新内存，失败保留旧值，同进程并发写入串行执行，避免设置与偏好互相覆盖。
 
 **压缩阈值**（[ADR-0037](../decisions/ADR-0037-compaction-retention.md)）：`compaction.threshold` 支持 `"90%"`（须在 `(0,100%]`）、正整数 token（如 `200000`）或简写字符串（`"200k"`、`"1.5m"`，解析后须为正整数）。默认 `"90%"`；绝对值超过当前可用输入预算时按预算处理。`config.json`、`settings.json` 与可信项目配置按通用分层高层覆盖低层，不可信项目忽略。保存值不随模型窗口改写；`100%` 或达到预算的绝对值关闭预防性修剪与摘要。触发与保留区见 [context.md](context.md) §6。
 
@@ -100,6 +102,8 @@ Shell 也走通用合并，`session.setShell` 仍先探测可执行文件，再�
 
 ```ts
 describeSettings(): SettingItem[]
+describeModelRoles(): ModelRoleInfo[]
+setModelRole(role: "task" | "vision" | "smol", ref: string | null): Promise<SettingItem[]>
 updateSettings(patch: SettingsPatch, options?: { reviewerKey: string }): Promise<SettingItem[]>
 listReviewerProviders(): Promise<ProviderOverview[]>
 defaultReviewer(endpoint: JevEndpoint, baseURL?: string): Promise<JevReviewerConfig>
@@ -107,7 +111,7 @@ listReviewerModels(reviewer: JevReviewerConfig, signal?: AbortSignal): Promise<{
 setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<SettingItem[]>
 ```
 
-`SettingItem` 给出默认预设、安全审查模型、默认模型、默认档位、shell 和压缩阈值的生效值、来源、保存值与覆盖标记；默认模型与默认档位只读。`SettingsPatch` 接受 `permissions.preset`、`permission.reviewer` 与 `compaction.threshold`，`null` 清除；默认档位不能单独修改，只随默认模型经 `setDefaultModel` 成对保存（ADR-0034 修订），`setDefaultModel` 按该模型的可用档位校验，不支持时以 `invalid_command` 拒绝并列出可选值。`setDefaultModel` 在一次原子写入中保存模型和档位，`null` 清除档位；不再写 `providers.json`，其中旧 `model` 仍按向导层读取。完整类型见 ADR-0034 第 3 节。未注入 `RuntimeConfig` 时读取返回空数组，写入 Promise 拒绝。
+`SettingItem` 给出默认预设、安全审查模型、默认模型、默认档位、shell、压缩阈值和三个模型角色的生效值、来源、保存值与覆盖标记；默认模型与默认档位只读。`SettingsPatch` 接受 `permissions.preset`、`permission.reviewer` 、`compaction.threshold` 与 `modelRoles.*`，`null` 清除；默认档位不能单独修改，只随默认模型经 `setDefaultModel` 成对保存（ADR-0034 修订），`setDefaultModel` 按该模型的可用档位校验，不支持时以 `invalid_command` 拒绝并列出可选值。`setDefaultModel` 在一次原子写入中保存模型和档位，`null` 清除档位；不再写 `providers.json`，其中旧 `model` 仍按向导层读取。完整类型见 ADR-0034 第 3 节。未注入 `RuntimeConfig` 时读取返回空数组，写入 Promise 拒绝。
 
 这些默认值只影响之后新建的会话，已有会话和恢复的会话继续使用自己的配置快照；`/new` 使用最新生效默认值。`/model` 页「设为默认」是显式切换，会同时修改当前会话；`/settings` 不修改当前会话的模型、档位或权限。
 
@@ -158,6 +162,8 @@ setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise
 **通用界面偏好**（[ADR-0029](../decisions/ADR-0029-tui-themes.md) 第 3 节）：`RuntimeConfig` 与公开的 `Runtime` 都提供 `getPreference(key: string): string | undefined`、`setPreference(key: string, value: string | undefined): Promise<void>`。它们读写 `settings.json` 顶层的普通字符串字段；`undefined` 删除字段。写入拒绝无效字段名、`shell`/`shellPath` 等有专用接口的保留字段和非字符串值；原子写盘成功后才更新内存，失败时旧值不变，未知字段原样保留。`Runtime` 委托注入的 `RuntimeConfig`；`createRuntime` 未传 `config` 时，读取返回 `undefined`，写入返回被拒绝的 Promise，错误为「未注入 RuntimeConfig，无法保存偏好」。Core 不解释偏好值的 UI 含义；TUI 在首次渲染前读取 `theme`，由 TUI 判断 `dark`/`light`，非法值回退 `dark`；`/theme` 保存失败时保持原主题并留在选择页提示错误。
 
 ## 3. 项目配置的信任模型
+
+`modelRoles` 属于 `settings.json` 白名单，与用户配置、可信项目配置逐角色合并。三个值均为 `provider/model`；不可信项目忽略整段，避免改变数据接收方。`describeModelRoles()` 返回每个角色的 `configured`、生效 `model`、`source` 与 `available`，`SettingItem` 含 `modelRoles.task`、`modelRoles.vision`、`modelRoles.smol`。未知服务商、清单外模型、不可用模型或不支持图片的 vision 发 `runtime.warning(model_role_unavailable)` 并按未配置处理。`setModelRole` 原子保存单个角色，`null` 清除设置层值；设置页也可通过 `updateSettings` 一次保存多个 `modelRoles.*` 补丁。task/smol 未配置时跟随会话模型，vision 未配置时停用（[ADR-0040](../decisions/ADR-0040-model-roles.md)）。角色在使用时读取当前工作区设置。
 
 项目配置来自被操作的仓库——它可能是恶意的。因此：
 

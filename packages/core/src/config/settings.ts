@@ -10,6 +10,7 @@ import type { Platform } from "../platform/index.js";
 import { writeJsonAtomic } from "./files.js";
 import { parseConfigFile } from "./schema.js";
 import type { ConfigFile, SettingsPatch } from "./types.js";
+import { MODEL_ROLES } from "./types.js";
 import type { ReasoningEffort } from "../protocol/index.js";
 
 /** settings.json 的原始 JSON 对象（未知字段保留） */
@@ -31,6 +32,7 @@ export interface SettingsStore {
 
 const reservedFields = new Set([
   "model",
+  "modelRoles",
   "reasoningEffort",
   "permissions",
   "permission",
@@ -48,17 +50,24 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
       (key) =>
         key !== "permissions.preset" &&
         key !== "permission.reviewer" &&
+        !MODEL_ROLES.some((role) => key === `modelRoles.${role}`) &&
         key !== "compaction.threshold",
     )
   ) {
     throw new TypeError(
-      "仅支持 permissions.preset、permission.reviewer 与 compaction.threshold；默认档位随默认模型经 setDefaultModel 保存",
+      "仅支持 permissions.preset、permission.reviewer、compaction.threshold 与 modelRoles.*；默认档位随默认模型经 setDefaultModel 保存",
     );
   }
   const patch = input as SettingsPatch;
   const preset = patch["permissions.preset"];
   parseConfigFile(
     {
+      modelRoles: Object.fromEntries(
+        MODEL_ROLES.flatMap((role) => {
+          const ref = patch[`modelRoles.${role}`];
+          return ref != null ? [[role, ref]] : [];
+        }),
+      ),
       ...(patch["compaction.threshold"] != null
         ? { compaction: { threshold: patch["compaction.threshold"] } }
         : {}),
@@ -75,6 +84,7 @@ function configFields(data: SettingsData, warn?: (message: string) => void): Con
   let result: ConfigFile = {};
   for (const key of [
     "model",
+    "modelRoles",
     "reasoningEffort",
     "shell",
     "shellPath",
@@ -211,6 +221,14 @@ export async function loadSettingsStore(
         validateSettingsPatch(patch);
         const preset = patch["permissions.preset"];
         await write((next) => {
+          const roles = { ...(next.modelRoles as Record<string, unknown> | undefined) };
+          for (const role of MODEL_ROLES) {
+            const ref = patch[`modelRoles.${role}`];
+            if (ref === undefined) continue;
+            if (ref === null) Reflect.deleteProperty(roles, role);
+            else roles[role] = ref;
+            next.modelRoles = roles;
+          }
           const threshold = patch["compaction.threshold"];
           if (threshold !== undefined) {
             const compaction =

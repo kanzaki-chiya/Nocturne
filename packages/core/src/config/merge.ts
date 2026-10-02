@@ -12,10 +12,12 @@ import type {
   ConfigFile,
   McpServerEntry,
   ModelOverrideShape,
+  ModelRole,
   ProviderEntryConfig,
   ResolvedConfig,
   TurnOverrides,
 } from "./types.js";
+import { MODEL_ROLES } from "./types.js";
 
 /** 层的身份（模型字段来源标注用；ADR-0024/0025） */
 export type LayerKind =
@@ -70,7 +72,8 @@ export interface MergeResult {
       | "shellPath"
       | "permissions.preset"
       | "compaction.threshold"
-      | "permission.reviewer",
+      | "permission.reviewer"
+      | `modelRoles.${ModelRole}`,
       LayerKind
     >
   >;
@@ -260,6 +263,13 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
 
   for (const layer of layers) {
     const { kind, file } = layer;
+    for (const role of MODEL_ROLES) {
+      const ref = file.modelRoles?.[role];
+      if (ref !== undefined) {
+        out.modelRoles = { ...out.modelRoles, [role]: ref };
+        origins[`modelRoles.${role}`] = kind;
+      }
+    }
     // 旧 shell 选择把程序设置、手写配置、环境各作为一份声明；
     // 手写层之间仍逐字段覆盖，跨这些边界时不沿用低层的可执行路径。
     if (
