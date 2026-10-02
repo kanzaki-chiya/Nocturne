@@ -16,6 +16,11 @@ const sample: SessionSummary = {
 };
 
 describe("/resume 摘要行", () => {
+  it("分叉标记在窄行中也保留", () => {
+    expect(
+      resumeLabel({ ...sample, forkedFrom: { sessionId: "original", seq: 2 } }, 25, now),
+    ).toMatch(/^分叉  /);
+  });
   it("先显示首句与相对时间，后显示会话标识等次要信息", () => {
     const label = resumeLabel(sample, 120, now);
     expect(label).toMatch(/^修复窗口.*7 分钟前  session-123  fake\/fake-1  C:\/repo/);

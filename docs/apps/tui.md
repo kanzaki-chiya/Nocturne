@@ -142,7 +142,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 会话内切换走 **`/resume` 斜杠命令**（REPL 与 TUI 同一套语义，cli.md 第 4 节为唯一主文档）：
 
-- `/resume`：列出当前目录的会话（`runtime.listSessions({ cwd })`，与 `-c/--continue` 同口径；其他目录的会话用 `/resume <id>`），TUI 弹出 PickList 列表选择器（↑↓ + Enter，Esc 取消）；每行以生成标题（缺省时用首条用户消息首行）和相对修改时间开头，后列 id、模型、路径及锁定标记，首句在可用宽度内截断；`/resume <id>` 直达。首句为空时显示占位。
+- `/resume`：列出当前目录的会话（`runtime.listSessions({ cwd })`，与 `-c/--continue` 同口径；其他目录的会话用 `/resume <id>`），TUI 弹出 PickList 列表选择器（↑↓ + Enter，Esc 取消）；每行以生成标题（缺省时用首条用户消息首行）和相对修改时间开头，后列 id、模型、路径及锁定标记，首句在可用宽度内截断；分叉会话带「分叉」标记（[ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)）；`/resume <id>` 直达。首句为空时显示占位。
 - `/new`（`/clear`）：CLI 注入新建会话回调，使用最新默认模型、档位和权限预设；未配置默认模型时沿用当前模型，未注入配置时沿用当前会话配置。成功后切到空会话。全屏模式下欢迎区重新出现、翻阅状态与选区清空，旧会话仍可 `/resume`；`--inline` 模式下旧内容与分隔行保留在回滚区。忙时拒绝，不清屏。
 - **打开逻辑只在 CLI 有一份**：`runTui(session, runtime, { switchSession })`，`switchSession(id, { allowForeign? }) => Promise<SessionSwitchResult>`，结果为 `{ kind: "ok"; session } | { kind: "busy" } | { kind: "foreign"; workspaceRoot } | { kind: "error"; message }`。TUI 不直接打开会话，Core 不新增入口。跨目录确认在客户端完成：回调先返回 `kind: "foreign"`，TUI 弹确认对话框（默认拒绝）同意后带 `allowForeign` 重调。
 - **切换顺序**：提交已接受但尚未写入 `turn.started` 时也拒绝 `/new`、`/resume`，提示会话忙；模型页、服务商页也只在提交收束后打开。切换回调等待期间拒绝新提交，输入框提示稍候；先打开新会话——锁冲突/日志损坏/跨目录被拒时报错并**留在原会话**；打开成功后才 `close()` 旧会话、释放锁。

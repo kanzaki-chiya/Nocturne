@@ -3,7 +3,7 @@ import type { SessionSummary } from "@nocturne/core";
 
 import { boxSafe, truncateLine } from "./format.js";
 
-function relativeTime(ms: number, now: number): string {
+export function relativeTime(ms: number, now = Date.now()): string {
   const elapsed = Math.max(0, now - ms);
   if (elapsed < 60_000) return "刚刚";
   if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)} 分钟前`;
@@ -18,7 +18,7 @@ export function resumeLabel(summary: SessionSummary, width: number, now = Date.n
   );
   const detail = `${summary.id}  ${summary.model.provider}/${summary.model.model}  ${summary.workspaceRoot}`;
   return truncateLine(
-    `${first}  ${relativeTime(summary.mtimeMs, now)}  ${boxSafe(detail)}`,
+    `${summary.forkedFrom ? "分叉  " : ""}${first}  ${relativeTime(summary.mtimeMs, now)}  ${boxSafe(detail)}`,
     Math.max(1, width),
   );
 }

@@ -381,6 +381,7 @@ export interface Runtime {
   setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<SettingItem[]>;
   createSession(options: CreateSessionOptions): Promise<RuntimeSession>;
   resumeSession(id: string, options?: ResumeSessionOptions): Promise<RuntimeSession>;
+  forkSession(id: string, options?: { targetSeq?: number }): Promise<string>;
   listSessions(filter?: {
     cwd?: string | undefined;
     /** 默认 false：子会话（session.created.parent 存在）不进列表 */
@@ -581,6 +582,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
    * 各会话在下一次空闲边界 rebuildProviders；close 时移除）
    */
   const markProvidersDirty = new Set<() => void>();
+  const openForkers = new Map<string, (targetSeq?: number) => Promise<string>>();
   let settingsPending = Promise.resolve();
 
   const interactive = options.interactive === true;
@@ -1196,6 +1198,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     };
     const busy = () => controller !== undefined || rewinding;
+    const validateForkTarget = (targetSeq?: number) => {
+      if (
+        targetSeq !== undefined &&
+        !session.state().history.some((e) => e.kind === "user" && e.seq === targetSeq)
+      )
+        throw new RuntimeCommandError("invalid_command", "目标不是当前有效对话中的用户消息");
+    };
 
     // SessionStart Hook（hooks.md）：会话打开完成后触发（新建与恢复都算）
     if (hookRunner !== undefined) {
@@ -1268,6 +1277,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     });
 
+    openForkers.set(session.id, async (targetSeq) => {
+      assertUsable();
+      if (busy() || compactController !== undefined)
+        throw new RuntimeCommandError("session_busy", "请先等待或按 Esc 中断");
+      validateForkTarget(targetSeq);
+      rewinding = true;
+      let settle!: () => void;
+      rewindSettled = new Promise((resolve) => {
+        settle = resolve;
+      });
+      try {
+        await titleSettled;
+        return await store.fork(session, targetSeq);
+      } finally {
+        rewinding = false;
+        settle();
+      }
+    });
     return {
       id: session.id,
       session,
@@ -1765,6 +1792,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         questions.cancelAll();
         await Promise.all([turnSettled, compactSettled, titleSettled, rewindSettled]);
         markProvidersDirty.delete(markDirty);
+        openForkers.delete(session.id);
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
         if (hookRunner !== undefined) {
           await hookRunner.run("SessionEnd", { reason: "close" }).catch(() => undefined);
@@ -1954,6 +1982,22 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     },
     listSessions: (filter) => store.list(filter),
+    async forkSession(id, forkOptions) {
+      const open = openForkers.get(id);
+      if (open !== undefined) return open(forkOptions?.targetSeq);
+      const source = await store.load(id);
+      try {
+        const target = forkOptions?.targetSeq;
+        if (
+          target !== undefined &&
+          !source.state().history.some((e) => e.kind === "user" && e.seq === target)
+        )
+          throw new RuntimeCommandError("invalid_command", "目标不是当前有效对话中的用户消息");
+        return await store.fork(source, target);
+      } finally {
+        await source.close();
+      }
+    },
     listModels: () =>
       (config !== undefined
         ? buildRegistry(config.resolvedSettings(workspaceRoot).providers)

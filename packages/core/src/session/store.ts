@@ -45,12 +45,13 @@ interface UnsettledFix {
  */
 function firstUserTextInLog(logText: string): string | undefined {
   let firstText: string | undefined;
+  let title: string | undefined;
   let sawUser = false;
   for (const line of logText.split("\n")) {
     if (!line.includes("message.user") && !line.includes("session.titled")) continue;
     try {
       const ev = decodeDurableEvent(line);
-      if (ev.type === "session.titled") return ev.payload.title;
+      if (ev.type === "session.titled") title = ev.payload.title;
       if (ev.type === "message.user" && !sawUser) {
         sawUser = true;
         firstText = firstUserText(ev.payload);
@@ -59,7 +60,7 @@ function firstUserTextInLog(logText: string): string | undefined {
       continue;
     }
   }
-  return firstText;
+  return title ?? firstText;
 }
 
 export interface SessionStoreDeps {
@@ -244,6 +245,72 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
   }
 
   return {
+    async fork(source, targetSeq) {
+      await source.flush();
+      const events = [...source.durableEvents()];
+      const first = events[0];
+      if (first?.type !== "session.created")
+        throw new SessionError("session_log_corrupt", "日志第一行不是 session.created");
+      const id = newSessionId();
+      const lock = await acquireSessionLock(fs, platform, lockPath(id));
+      const pendingLog = `${logPath(id)}.fork`;
+      const copied: string[] = [];
+      async function copyDirectory(from: string, to: string): Promise<void> {
+        let entries;
+        try {
+          entries = await fs.readdir(from);
+        } catch (error) {
+          if (fsErrorCode(error) === "ENOENT") return;
+          throw error;
+        }
+        await fs.mkdir(to);
+        for (const entry of entries) {
+          const dest = paths.join(to, entry.name);
+          if (entry.type === "directory") await copyDirectory(entry.path, dest);
+          else if (entry.type === "file") {
+            await fs.createExclusive(dest, await fs.readFile(entry.path));
+            copied.push(dest);
+          } else throw new Error(`无法复制会话数据：${entry.path}`);
+        }
+      }
+      try {
+        events[0] = {
+          ...first,
+          sessionId: id,
+          time: new Date().toISOString(),
+          payload: {
+            ...first.payload,
+            parent: undefined,
+            forkedFrom: { sessionId: source.id, seq: targetSeq ?? source.state().lastSeq },
+          },
+        };
+        for (const dir of ["attachments", "checkpoints"])
+          await copyDirectory(
+            paths.join(sessionsDir, dir, source.id),
+            paths.join(sessionsDir, dir, id),
+          );
+        await fs.createExclusive(
+          pendingLog,
+          events.map((e) => `${encodeDurableEvent(e)}\n`).join(""),
+        );
+        const fork = new SessionImpl({ id, logPath: pendingLog, fs, events });
+        try {
+          if (targetSeq !== undefined)
+            await fork.emit("session.rewound", { targetSeq, mode: "conversation", files: [] });
+          await fork.flush();
+          await fs.rename(pendingLog, logPath(id));
+        } finally {
+          await fork.close();
+        }
+        return id;
+      } catch (error) {
+        await fs.unlink(pendingLog).catch(() => undefined);
+        for (const file of copied) await fs.unlink(file).catch(() => undefined);
+        throw error;
+      } finally {
+        await lock.release();
+      }
+    },
     async create(input: CreateSessionInput): Promise<Session> {
       await fs.mkdir(sessionsDir);
       const id = newSessionId();
@@ -340,6 +407,9 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             mtimeMs: stat.mtimeMs,
             locked: await lockLooksHeld(fs, platform, lockPath(id)),
             ...(event.payload.parent !== undefined ? { parent: event.payload.parent } : {}),
+            ...(event.payload.forkedFrom !== undefined
+              ? { forkedFrom: event.payload.forkedFrom }
+              : {}),
             ...(firstText !== undefined ? { firstText } : {}),
           });
         } catch {

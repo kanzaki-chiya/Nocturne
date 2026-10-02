@@ -152,6 +152,7 @@ const payloadSchemas = {
     permissionPreset: z.string().transform(normalizePermissionPreset),
     reasoningEffort: reasoningEffortSchema.optional(),
     parent: z.object({ sessionId: z.string(), callId: z.string() }).optional(),
+    forkedFrom: z.object({ sessionId: z.string(), seq: z.number().int().positive() }).optional(),
   }),
   "session.config_changed": z.object({
     model: modelRefSchema.optional(),

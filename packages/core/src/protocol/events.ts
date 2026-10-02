@@ -33,6 +33,7 @@ export interface SessionCreatedPayload {
   reasoningEffort?: ReasoningEffort | undefined;
   /** 子会话的父关联（Phase 6，subagent.md 第 5 节）；仅子会话存在 */
   parent?: { sessionId: string; callId: string } | undefined;
+  forkedFrom?: { sessionId: string; seq: number } | undefined;
 }
 
 export interface SessionConfigChangedPayload {

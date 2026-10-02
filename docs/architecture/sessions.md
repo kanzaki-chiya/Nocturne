@@ -140,6 +140,10 @@ interface SessionRecovery {
 
 `RuntimeSession.rewindTargets()` 返回有效用户消息（最新优先）、文字、时间、文件状态与未追踪调用数。`rewind(targetSeq, mode)` 仅在空闲时执行；Turn（包括中断未收束）、压缩、回退进行中拒绝 `session_busy`，非法目标或模式拒绝 `invalid_command`。关闭等待回退落盘。回退追加 `session.rewound`，原日志完整保留。还原扫描原日志所有 `seq > targetSeq` 的 before，每路径取最早一条；每文件独立报告结果，绕过权限层但仅写记录路径，缺失或损坏的快照、当前路径变成链接或目录均报告失败。历史、清单、图片描述按有效事件重建；配置、标题和累计用量保留。详见 ADR-0041 第 2、4 节。
 
+## 会话分叉
+
+`Runtime.forkSession(sessionId, { targetSeq? })` 返回新 id，随后客户端沿用 `/resume` 切换并关闭原会话。复制全部持久事件，仅替换第一行的 id、创建时间与 `forkedFrom: { sessionId, seq }`；其余事件（包括信封）与 seq 原样保留，图片描述、压缩边界和回退引用无需重写。指定有效用户消息时，在复制日志末尾追加只回退对话的事件。附件、检查点复制到新 id，子会话日志不复制，工作区文件保持当前状态。新会话保留标题，列表带「分叉」标记。正在 Turn、压缩、回退或分叉的会话拒绝操作；日志完成落盘后才发布到会话列表。详见 ADR-0041 第 3 节。
+
 ## 文件检查点
 
 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md) 的原始字节存于 `<sessionsDir>/checkpoints/<rootSessionId>/<sha256>`，按内容去重，不自动清理。不存在的文件记 null，无法追踪的路径记原因。根会话每条用户消息到下一条用户消息之前是一轮，所有层级的子代理共用这一轮的首次 before；检查点事件写入根日志，payload.sessionId 标明子会话来源。历史折叠与视图忽略检查点，恢复读取日志仍须校验它们。

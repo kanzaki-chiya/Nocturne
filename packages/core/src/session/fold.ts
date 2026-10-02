@@ -83,6 +83,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           formatVersion: p.formatVersion,
           nocturneVersion: p.nocturneVersion,
           ...(p.parent !== undefined ? { parent: p.parent } : {}),
+          ...(p.forkedFrom !== undefined ? { forkedFrom: p.forkedFrom } : {}),
         };
         config = {
           model: p.model,

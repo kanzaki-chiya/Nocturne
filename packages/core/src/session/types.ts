@@ -28,6 +28,7 @@ export interface SessionMeta {
   nocturneVersion: string;
   /** 子会话的父关联（Phase 6，subagent.md 第 5 节）；仅子会话存在 */
   parent?: { sessionId: string; callId: string } | undefined;
+  forkedFrom?: { sessionId: string; seq: number } | undefined;
 }
 
 export interface SessionConfig {
@@ -129,6 +130,7 @@ export interface Session {
 
 export interface SessionSummary {
   id: string;
+  forkedFrom?: { sessionId: string; seq: number } | undefined;
   createdAt: string;
   cwd: string;
   workspaceRoot: string;
@@ -165,6 +167,7 @@ export interface LoadSessionOptions {
 
 export interface SessionStore {
   create(input: CreateSessionInput): Promise<Session>;
+  fork(source: Session, targetSeq?: number): Promise<string>;
   /**
    * 打开会话：先取得排他锁，再读取日志——截断损坏尾部、校验、
    * 追加恢复修复事件（sessions.md 第 4 节顺序不可调换）

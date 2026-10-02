@@ -244,7 +244,7 @@ export async function runRepl(
     const lines = rows.map((s, i) => {
       const cur = s.id === session.id ? "（当前）" : "";
       const locked = s.locked === true ? "  [locked]" : "";
-      return `  ${i + 1}. ${s.id}  ${s.createdAt}  ${s.model.provider}/${s.model.model}  ${s.workspaceRoot}${locked}${cur}`;
+      return `  ${i + 1}. ${s.forkedFrom ? "[分叉] " : ""}${s.id}  ${s.createdAt}  ${s.model.provider}/${s.model.model}  ${s.workspaceRoot}${locked}${cur}`;
     });
     out.line("stdout", ["选择要切换的会话（输入编号，空行取消）：", ...lines].join("\n"));
   };
