@@ -1,3 +1,4 @@
+import path from "node:path";
 import { Box, Text, useInput, type DOMElement } from "ink";
 import { useEffect, useRef, useState } from "react";
 import type { RewindMode, RewindTarget } from "@nocturne/core/protocol";
@@ -19,6 +20,7 @@ type Operation = RewindMode | "fork";
 
 export function RewindPage({
   targets,
+  cwd,
   width,
   height,
   onClose,
@@ -27,6 +29,8 @@ export function RewindPage({
   onMouseFrame,
 }: {
   targets: readonly RewindTarget[];
+  /** 会话工作目录：预览里工作区内的路径按相对路径显示 */
+  cwd: string;
   width: number;
   height: number;
   onClose: () => void;
@@ -72,7 +76,7 @@ export function RewindPage({
         : [
             ...target.files.map(
               (file) =>
-                `${file.action === "restore" ? "还原" : file.action === "delete" ? "删除" : `无法还原（${file.reason ?? "未追踪"}）`} ${file.path}${file.external ? " [已在外部修改]" : ""}`,
+                `${file.action === "restore" ? "还原" : file.action === "delete" ? "删除" : `无法还原（${file.reason ?? "未追踪"}）`} ${displayPath(file.path, cwd)}${file.external ? " [已在外部修改]" : ""}`,
             ),
             ...(target.untrackedCalls > 0
               ? [
@@ -316,4 +320,11 @@ export function RewindPage({
       </DialogFrame>
     </Box>
   );
+}
+
+/** 工作区内的文件显示相对路径，避免长绝对路径把「已在外部修改」标记挤出行尾 */
+export function displayPath(file: string, cwd: string): string {
+  if (cwd === "") return file;
+  const rel = path.relative(cwd, file);
+  return rel === "" || rel.startsWith("..") || path.isAbsolute(rel) ? file : rel;
 }

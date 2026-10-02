@@ -27,6 +27,7 @@ async function page(targets: RewindTarget[] = [target], width = 81, height = 24,
   const ui = render(
     createElement(RewindPage, {
       targets,
+      cwd: "C:/work",
       width,
       height,
       onClose,
@@ -51,9 +52,9 @@ it("竖排操作和两级默认取消；预览标明删除、无法还原、外�
   await changedFrame(ui, () => ui.stdin.write("\r"));
   expect(ui.lastFrame()).toContain("确认回退");
   for (const text of [
-    "还原 C:/work/a.txt",
+    "还原 a.txt [已在外部修改]",
     "已在外部修改",
-    "删除 C:/work/new.txt",
+    "删除 new.txt",
     "无法还原（目录）",
     "2 次 shell/MCP",
     "> [ 取消 ]",

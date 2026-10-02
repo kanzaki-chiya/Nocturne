@@ -2375,6 +2375,7 @@ function SessionApp({
     rewindTargets !== undefined ? (
       <RewindPage
         targets={rewindTargets}
+        cwd={session.state().meta.cwd}
         width={width}
         height={budget.frameHeight}
         onClose={() => {

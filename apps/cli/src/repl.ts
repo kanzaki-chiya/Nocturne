@@ -2,6 +2,7 @@
  * 交互模式（cli.md 第 3 节）：nctrn> 提示符循环、斜杠命令、
  * 权限确认提示、Ctrl+C/Ctrl+D。只用 node:readline。
  */
+import path from "node:path";
 import { createInterface, type Interface } from "node:readline";
 
 type HistoryInterface = Interface & { history: string[] };
@@ -492,7 +493,7 @@ export async function runRepl(
                   : [
                       ...target.files.map(
                         (file) =>
-                          `${file.action === "restore" ? "还原" : file.action === "delete" ? "删除" : `无法还原（${file.reason ?? "未追踪"}）`} ${file.path}${file.external ? " [已在外部修改]" : ""}`,
+                          `${file.action === "restore" ? "还原" : file.action === "delete" ? "删除" : `无法还原（${file.reason ?? "未追踪"}）`} ${displayPath(file.path, session.state().meta.cwd)}${file.external ? " [已在外部修改]" : ""}`,
                       ),
                       ...(target.untrackedCalls
                         ? [
@@ -746,4 +747,11 @@ export async function runRepl(
   await historyWrite;
   unsubscribe();
   return code;
+}
+
+/** 工作区内的文件显示相对路径（与 TUI 回退预览一致） */
+function displayPath(file: string, cwd: string): string {
+  if (cwd === "") return file;
+  const rel = path.relative(cwd, file);
+  return rel === "" || rel.startsWith("..") || path.isAbsolute(rel) ? file : rel;
 }
