@@ -79,7 +79,7 @@ it("无可还原文件灰显两项，键盘跳过；分叉说明共享文件且�
   expect(ui.lastFrame()).toContain("> [ 从这里分叉新会话 ]");
   await changedFrame(ui, () => ui.stdin.write("\r"));
   expect(ui.lastFrame()).toContain("文件保持当前状态");
-  expect(ui.lastFrame()).toContain("只还原文件的回退");
+  expect(ui.lastFrame()).toContain("可在原会话里对同一轮执行「只还原文件」");
   await changedFrame(ui, () => ui.stdin.write("\t"));
   ui.stdin.write("\r");
   await settle(() => ui.onFork.mock.calls.length === 1);
