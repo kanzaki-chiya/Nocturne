@@ -286,6 +286,7 @@ export async function refreshUpstreamLimits(
   const models: NonNullable<ProviderEntryConfig["models"]> = {};
   for (const m of upstream) {
     models[m.id] = {
+      ...(entry.auth?.kind === "openai-siwc" ? { protocol: "openai-responses" as const } : {}),
       ...(m.displayName !== undefined ? { displayName: m.displayName } : {}),
       ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
       ...(m.maxOutputTokens !== undefined ? { maxOutputTokens: m.maxOutputTokens } : {}),

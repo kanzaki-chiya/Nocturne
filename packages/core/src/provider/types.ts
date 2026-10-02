@@ -229,6 +229,8 @@ export interface AuthResolver {
   invalidate(): Promise<void>;
   readonly unauthorizedMessage?: string | undefined;
   readonly modelFormat?: "siwc" | undefined;
+  /** 鉴权通道限定的协议，优先于条目与逐模型声明。 */
+  readonly protocol?: ModelProtocol | undefined;
   readonly requestConstraints?: ResponsesRequestConstraints | undefined;
 }
 

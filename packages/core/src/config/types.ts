@@ -266,19 +266,23 @@ export interface CliConfigArgs {
 // ── 凭据与向导配置（provider-setup.md 第 2、3、6 节） ──────
 
 /** 凭据后端标识（界面提示与测试断言用） */
-export type CredentialBackend = "dpapi" | "keychain" | "libsecret" | "memory" | "none";
+export type CredentialBackend =
+  "dpapi" | "keychain" | "libsecret" | "plaintext" | "memory" | "none";
 
 /**
  * 统一凭据存储接口（provider-setup.md 第 3 节）。
- * 密钥不以明文落盘：交给操作系统后端（DPAPI / 钥匙串 / Secret Service），
- * credentials.json 索引只记录后端与密文元数据。get 结果在实现内按
- * providerId 缓存，set/delete 使对应条目失效。
+ * API key 只交给操作系统后端；账号记录可在无系统后端时显式选择明文或内存。
+ * get 结果按 providerId 缓存，fresh 强制重读索引与后端。
  */
 export interface CredentialStore {
   /** 取出该服务商的密钥；索引无此 id 或后端取出失败时返回 undefined */
-  get(providerId: string): Promise<string | undefined>;
+  get(providerId: string, options?: { fresh?: boolean | undefined }): Promise<string | undefined>;
   /** 写入/更新密钥并登记索引；后端不可用时拒绝 */
   set(providerId: string, key: string): Promise<void>;
+  /** 验证并保存账号 JSON；无系统后端时必须显式选择保存位置。 */
+  setAccount?(providerId: string, record: string, storage?: "plaintext" | "memory"): Promise<void>;
+  /** 不解密、不返回凭据；未登记时为 undefined。 */
+  storage?(providerId: string): "system" | "plaintext" | "memory" | undefined;
   /** 删除密钥与索引条目；不存在时无操作 */
   delete(providerId: string): Promise<void>;
   /** 索引中是否登记了该服务商（不解密、不起子进程；describeProviders 用） */

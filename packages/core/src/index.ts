@@ -67,11 +67,11 @@ import {
 import {
   clampReasoningEffort,
   createEntryProvider,
-  createAuthResolver,
   externalAuthPath,
   createProviderRegistry,
   nocturneUserAgent,
   UnknownModelError,
+  type AuthResolver,
   type CredentialResolver,
   type ModelInfo,
   type ModelOverride,
@@ -80,6 +80,7 @@ import {
   type ProviderRegistry,
   type ResolvedModel,
 } from "./provider/index.js";
+import { resolveProviderAuth } from "./provider-oauth.js";
 import type {
   CommandRejectCode,
   ContentBlock,
@@ -455,6 +456,7 @@ function instantiateProvider(
   diagnostics: Diagnostics | undefined,
   credentials: CredentialResolver | undefined,
   userAgent: string,
+  authResolver?: AuthResolver,
 ) {
   return createEntryProvider(
     {
@@ -464,6 +466,7 @@ function instantiateProvider(
       apiKeyEnv: entry.apiKeyEnv,
       auth: entry.auth,
       modelHeader: entry.modelHeader,
+      ...(authResolver !== undefined ? { authResolver } : {}),
       ...(credentials !== undefined ? { credentials } : {}),
       ...(entry.models !== undefined
         ? { models: entry.models as Record<string, ModelOverride> }
@@ -524,19 +527,27 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     providers: readonly Pick<ProviderEntryConfig, "id" | "auth" | "apiKeyEnv">[],
   ) => {
     const store = config?.credentials;
-    if (store === undefined) return undefined;
+    if (store === undefined || config === undefined) return undefined;
     return {
       ...store,
       get: (id: string) => {
         const entry = providers.find((provider) => provider.id === id);
-        return entry === undefined
-          ? store.get(id)
-          : createAuthResolver({ ...entry, credentials: credentialResolver }, (name) =>
-              platform.env(name),
-            ).token(new AbortController().signal);
+        if (entry === undefined) return store.get(id);
+        return entryAuth(entry).token(new AbortController().signal);
       },
     };
   };
+  function entryAuth(entry: Pick<ProviderEntryConfig, "id" | "auth" | "apiKeyEnv">) {
+    if (config === undefined) {
+      throw new Error("缺少运行时配置，无法解析服务商鉴权");
+    }
+    return resolveProviderAuth(config, {
+      id: entry.id,
+      ...(entry.auth !== undefined ? { auth: entry.auth } : {}),
+      ...(entry.apiKeyEnv !== undefined ? { apiKeyEnv: entry.apiKeyEnv } : {}),
+      credentials: credentialResolver,
+    });
+  }
 
   /**
    * Provider 构造：显式注入 + keepProviders + options.providerConfigs +
@@ -559,10 +570,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
     for (const c of options.providerConfigs ?? []) {
       // ADR-0026 §4：与 config 条目同一路由 Provider（按模型生效协议分发）
+      const authResolver = config === undefined ? undefined : entryAuth(c);
       const instance = createEntryProvider(
         {
           ...c,
           credentials: credentialResolver,
+          ...(authResolver !== undefined ? { authResolver } : {}),
           diagnostics,
           userAgent,
           editToolDefault: defaultEditToolForModel,
@@ -571,8 +584,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       );
       byId.set(instance.id, instance);
     }
-    for (const e of configProviders)
-      byId.set(e.id, instantiateProvider(e, env, diagnostics, credentialResolver, userAgent));
+    for (const e of configProviders) {
+      byId.set(
+        e.id,
+        instantiateProvider(
+          e,
+          env,
+          diagnostics,
+          credentialResolver,
+          userAgent,
+          config === undefined ? undefined : entryAuth(e),
+        ),
+      );
+    }
     return createProviderRegistry(
       [...byId.values()],
       options.modelOverrides,
@@ -2183,3 +2207,4 @@ export {
   type ProviderLoginErrorCode,
   type ProviderLoginOptions,
 } from "./provider-login.js";
+export { fetchProviderModels } from "./provider-oauth.js";

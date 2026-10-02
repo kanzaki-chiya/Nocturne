@@ -23,7 +23,7 @@ export interface ProviderPreset {
   auth?: ProviderAuth | undefined;
   headers?: Record<string, string> | undefined;
   modelHeader?: string | undefined;
-  login?: "openrouter" | undefined;
+  login?: "openrouter" | "openai-siwc" | undefined;
   /** 模型列表能否经 GET /models 自动获取 */
   fetchableModels: boolean;
   /**
@@ -46,6 +46,17 @@ export interface ProviderPreset {
 }
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
+  {
+    id: "chatgpt",
+    label: "ChatGPT",
+    type: "openai-compatible",
+    defaultName: "chatgpt",
+    baseURL: "https://api.openai.com/v1",
+    auth: { kind: "openai-siwc" },
+    login: "openai-siwc",
+    modelsDevProvider: "openai",
+    fetchableModels: true,
+  },
   {
     id: "grok-cli",
     label: "Grok CLI",
@@ -343,7 +354,7 @@ export async function fetchModels(
               "openai-compatible 服务商缺少 baseURL，无法获取模型列表",
             );
           })();
-  const resolver =
+  const resolver: AuthResolver =
     typeof key === "object"
       ? key
       : entry.auth !== undefined && entry.auth.kind !== "apiKey"
@@ -368,9 +379,33 @@ export async function fetchModels(
       break;
     } catch (error) {
       if (!(error instanceof ProviderUpstreamError) || error.status !== 401) throw error;
-      if (attempt === 1) throw new ProviderAuthError("服务商凭据已失效，请重新登录或更新密钥", 401);
+      if (attempt === 1)
+        throw new ProviderAuthError(
+          resolver.unauthorizedMessage ?? "服务商凭据已失效，请重新登录或更新密钥",
+          401,
+        );
       await resolver.invalidate();
     }
+  }
+  if (resolver.modelFormat === "siwc") {
+    const models =
+      typeof raw === "object" && raw !== null && "models" in raw && Array.isArray(raw.models)
+        ? (raw.models as unknown[])
+        : [];
+    return models.flatMap((value): UpstreamModelInfo[] => {
+      if (typeof value !== "object" || value === null) return [];
+      const model = value as { visibility?: unknown; slug?: unknown; display_name?: unknown };
+      if (model.visibility !== "list" || typeof model.slug !== "string" || model.slug === "")
+        return [];
+      return [
+        {
+          id: model.slug,
+          ...(typeof model.display_name === "string" && model.display_name !== ""
+            ? { displayName: model.display_name }
+            : {}),
+        },
+      ];
+    });
   }
   const data =
     typeof raw === "object" && raw !== null && Array.isArray((raw as { data?: unknown }).data)

@@ -146,6 +146,27 @@ describe("路由 Provider：openai-compatible 条目（ADR-0026 §3/§4）", () 
     ...over,
   });
 
+  it("鉴权限定 Responses 优先于请求/模型协议及不支持的 endpoints", async () => {
+    const capture: Capture = {};
+    const token = vi.fn(async () => "test-access");
+    const env = vi.fn(() => "must-not-read");
+    const p = createEntryProvider(
+      entry({
+        auth: { kind: "openai-siwc" },
+        authResolver: { protocol: "openai-responses", token, invalidate: () => Promise.resolve() },
+        models: { m: { protocol: "anthropic", endpoints: ["/unknown"] } },
+      }),
+      env,
+      routingFetch(capture),
+    );
+    expect(p.models()[0]).toMatchObject({ protocol: "openai-responses", unavailable: undefined });
+    await collect(p, request("m", { protocol: "openai-compatible" }));
+    expect(capture.url).toBe("https://gw.test/v1/responses");
+    expect(capture.headers?.authorization).toBe("Bearer test-access");
+    expect(token).toHaveBeenCalledTimes(1);
+    expect(env).not.toHaveBeenCalled();
+  });
+
   it("默认协议模型 → /chat/completions，只发 Authorization: Bearer", async () => {
     const capture: Capture = {};
     const p = createEntryProvider(entry(), envWithKey, routingFetch(capture));

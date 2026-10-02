@@ -14,7 +14,7 @@
  */
 import { createOpenAI } from "@ai-sdk/openai";
 import { streamText, type JSONValue } from "ai";
-import { abortError } from "../errors.js";
+import { abortError, ProviderError } from "../errors.js";
 import { createAuthResolver } from "../auth.js";
 import { resolveModelInfo, type ModelOverride } from "../registry.js";
 import { withReasoningEfforts } from "../reasoning.js";
@@ -39,6 +39,7 @@ import {
   toProviderError,
   routeSdkWarnings,
 } from "./ai-sdk-common.js";
+import { constrainResponsesFetch } from "./responses-constraints.js";
 
 export interface OpenAIResponsesConfig {
   /** Provider id */
@@ -116,6 +117,19 @@ export function createOpenAIResponsesProvider(
     models: () => modelList,
 
     async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
+      const constrained =
+        auth.requestConstraints === undefined
+          ? undefined
+          : constrainResponsesFetch(auth.requestConstraints, wrappedFetch);
+      const requestSdk =
+        constrained === undefined
+          ? sdk
+          : createOpenAI({
+              baseURL: config.baseURL,
+              apiKey: "resolved-by-fetch",
+              headers: withUserAgent(config.headers, config.userAgent),
+              fetch: constrained.fetch,
+            });
       // providerOptions 命名空间固定为 "openai"（SDK providerOptionsName =
       // provider 名首段；ADR-0031 §6：条目级 providerOptions 不进入本适配器）。
       // store:false 与 encrypted_content include 是推理加密回传的前提，
@@ -175,7 +189,7 @@ export function createOpenAIResponsesProvider(
       }
 
       const result = streamText({
-        model: sdk.responses(request.model),
+        model: requestSdk.responses(request.model),
         system: request.system.map((b) => b.text).join("\n\n"),
         messages: toAiMessages(
           { ...request, messages },
@@ -209,6 +223,17 @@ export function createOpenAIResponsesProvider(
       try {
         for await (const part of result.stream) {
           if (signal.aborted) throw abortError();
+          if (
+            part.type === "finish" &&
+            auth.requestConstraints?.requireCompleted === true &&
+            constrained?.completed() !== true
+          ) {
+            throw new ProviderError({
+              kind: "network",
+              message: "服务商响应流中断，请重试",
+              retryable: true,
+            });
+          }
           const events = mapPart(part, toolNames);
           for (const ev of events) {
             if (ev.type === "usage") {
@@ -220,7 +245,30 @@ export function createOpenAIResponsesProvider(
           }
         }
       } catch (e) {
+        const mapped = constrained?.failure();
+        if (mapped !== undefined) throw mapped;
+        if (
+          constrained !== undefined &&
+          !signal.aborted &&
+          !(e instanceof Error && e.name === "AbortError") &&
+          (!(e instanceof ProviderError) ||
+            e.providerMessage !== undefined ||
+            e.cause !== undefined)
+        ) {
+          throw new ProviderError({
+            kind: "network",
+            message: "服务商响应流中断，请重试",
+            retryable: true,
+          });
+        }
         throw toProviderError(e, signal);
+      }
+      if (auth.requestConstraints?.requireCompleted === true && constrained?.completed() !== true) {
+        throw new ProviderError({
+          kind: "network",
+          message: "服务商响应流中断，请重试",
+          retryable: true,
+        });
       }
       // 契约：成功的流以且仅以一个 finish 结束
       if (!sawFinish) {

@@ -3,14 +3,19 @@
  * Responses SSE，覆盖文本、推理（含加密内容回传）、工具调用（含并行）、
  * 用量（缓存读、推理 token）、结束原因、错误映射、请求地址与鉴权头。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createOpenAIResponsesProvider,
   type OpenAIResponsesConfig,
 } from "./adapters/openai-responses.js";
 import { ProviderError } from "./errors.js";
-import type { ModelRequest, ModelStreamEvent } from "./types.js";
+import type {
+  AuthResolver,
+  ModelRequest,
+  ModelStreamEvent,
+  ResponsesRequestConstraints,
+} from "./types.js";
 
 const envWithKey = (name: string) => (name === "TEST_OAI_KEY" ? "sk-test" : undefined);
 const envNoKey = () => undefined;
@@ -564,5 +569,324 @@ describe("openai-responses 适配器", () => {
     await expect(collect(p, request())).rejects.toBeInstanceOf(ProviderError);
     await expect(collect(p, request())).rejects.toMatchObject({ kind: "auth" });
     expect(called).toBe(0);
+  });
+});
+
+const constraints: ResponsesRequestConstraints = {
+  omitFields: [
+    "max_output_tokens",
+    "temperature",
+    "top_p",
+    "metadata",
+    "truncation",
+    "user",
+    "prompt_cache_retention",
+    "safety_identifier",
+    "previous_response_id",
+  ],
+  systemAsInstructions: true,
+  namespaceTools: true,
+  requireCompleted: true,
+};
+
+function constrainedConfig(overrides: Partial<AuthResolver> = {}): OpenAIResponsesConfig {
+  return config({
+    authResolver: {
+      token: async () => "test-access",
+      invalidate: () => Promise.resolve(),
+      requestConstraints: constraints,
+      ...overrides,
+    },
+  });
+}
+
+describe("声明式 Responses 约束（ADR-0042 §5）", () => {
+  it("请求快照：system 转 instructions、函数 namespace、禁用参数、保留加密推理", async () => {
+    const capture: Captured = {};
+    const p = createOpenAIResponsesProvider(
+      constrainedConfig(),
+      envNoKey,
+      sseFetch(
+        [
+          ...functionCallChunks(0, "call_echo", "{}").map(
+            (event) =>
+              JSON.parse(
+                JSON.stringify(event).replaceAll('"finish"', '"functions.echo"'),
+              ) as object,
+          ),
+          completed(),
+        ],
+        capture,
+      ),
+    );
+    await collect(
+      p,
+      request({
+        tools: [
+          {
+            name: "echo",
+            description: "回显",
+            inputSchema: { type: "object", properties: { text: { type: "string" } } },
+          },
+        ],
+        providerOptions: {
+          metadata: { secret: "should-not-send" },
+          truncation: "auto",
+          previousResponseId: "must-not-send",
+          user: "user",
+          safetyIdentifier: "private",
+          promptCacheRetention: "24h",
+        },
+        toolChoice: { name: "echo" },
+      }),
+    );
+    expect(capture.body).toMatchObject({
+      model: "gpt-x",
+      store: false,
+      stream: true,
+      instructions: "sys",
+      input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }],
+      tools: [
+        {
+          type: "namespace",
+          name: "functions",
+          tools: [
+            {
+              type: "function",
+              name: "echo",
+              description: "回显",
+              parameters: { type: "object", properties: { text: { type: "string" } } },
+            },
+          ],
+        },
+      ],
+      tool_choice: { type: "function", name: "functions.echo" },
+      include: ["reasoning.encrypted_content"],
+    });
+    for (const field of constraints.omitFields) expect(capture.body).not.toHaveProperty(field);
+  });
+
+  it("工具两轮往返：入站流和 completed 名称还原，历史带 namespace 且 call_id 配对", async () => {
+    const capture: Captured = {};
+    const chunks = functionCallChunks(0, "call_1", '{"result":"ok"}').map(
+      (event) =>
+        JSON.parse(JSON.stringify(event).replaceAll('"finish"', '"functions.finish"')) as object,
+    );
+    const p = createOpenAIResponsesProvider(
+      constrainedConfig(),
+      envNoKey,
+      sseFetch(
+        [
+          ...chunks,
+          completed({
+            output: [
+              {
+                type: "function_call",
+                id: "fc_call_1",
+                call_id: "call_1",
+                name: "functions.finish",
+                arguments: '{"result":"ok"}',
+                status: "completed",
+              },
+            ],
+          }),
+        ],
+        capture,
+      ),
+    );
+    const first = await collect(p, request());
+    expect(first.filter((event) => event.type === "tool_call")).toEqual([
+      {
+        type: "tool_call",
+        toolCallId: "call_1",
+        name: "finish",
+        input: { result: "ok" },
+        rawInput: undefined,
+      },
+    ]);
+    expect(
+      first
+        .filter((event) => event.type === "tool_call_delta")
+        .every((event) => event.name === "finish"),
+    ).toBe(true);
+    await collect(
+      p,
+      request({
+        messages: [
+          ...request().messages,
+          {
+            role: "assistant",
+            content: [],
+            toolCalls: [
+              {
+                callId: "local",
+                providerCallId: "call_1",
+                name: "finish",
+                input: { result: "ok" },
+              },
+            ],
+          },
+          { role: "tool", callId: "local", name: "finish", content: "done", isError: false },
+        ],
+      }),
+    );
+    expect(capture.body?.input).toContainEqual({
+      type: "function_call",
+      call_id: "call_1",
+      name: "functions.finish",
+      arguments: '{"result":"ok"}',
+    });
+    expect(capture.body?.input).toContainEqual({
+      type: "function_call_output",
+      call_id: "call_1",
+      output: "done",
+    });
+  });
+
+  it.each(["EOF", "response.incomplete"])(
+    "%s 缺 completed 时可重试，不能发成功 finish",
+    async (ending) => {
+      const streamEvents: object[] = messageChunks(["part", "ial"]);
+      if (ending === "response.incomplete")
+        streamEvents.push({ ...completed(), type: "response.incomplete" });
+      const p = createOpenAIResponsesProvider(
+        constrainedConfig(),
+        envNoKey,
+        sseFetch(streamEvents),
+      );
+      const events: ModelStreamEvent[] = [];
+      await expect(
+        (async () => {
+          for await (const event of p.stream(request(), new AbortController().signal))
+            events.push(event);
+        })(),
+      ).rejects.toMatchObject({ kind: "network", retryable: true });
+      expect(events.some((event) => event.type === "finish")).toBe(false);
+    },
+  );
+
+  it("API key 通道仍接受 EOF 的 SDK finish、发送原函数名与 max_output_tokens", async () => {
+    const capture: Captured = {};
+    const p = createOpenAIResponsesProvider(
+      config(),
+      envWithKey,
+      sseFetch(messageChunks(["o", "k"]), capture),
+    );
+    expect((await collect(p, request())).at(-1)).toMatchObject({ type: "finish" });
+    expect(capture.body).toHaveProperty("max_output_tokens", 1024);
+    expect(capture.body?.tools).toContainEqual(
+      expect.objectContaining({ type: "function", name: "finish" }),
+    );
+    expect(capture.body).not.toHaveProperty("instructions");
+  });
+
+  const mappings = [
+    [
+      429,
+      "subscription_sharing_usage_limit_exceeded",
+      "rate_limit",
+      false,
+      "ChatGPT 套餐额度已用完，稍后再试或换模型",
+    ],
+    [
+      403,
+      "subscription_sharing_user_not_eligible",
+      "auth",
+      false,
+      "该 ChatGPT 账号的套餐不支持第三方应用调用",
+    ],
+    [
+      400,
+      "subscription_sharing_unsupported_capability",
+      "invalid_request",
+      false,
+      "该功能不支持经 ChatGPT 账号调用，请调整模型或请求参数",
+    ],
+    [503, "subscription_sharing_usage_unavailable", "server", true, "ChatGPT 额度服务暂不可用"],
+  ] as const;
+  for (const shape of ["detail", "error.code"] as const) {
+    it.each(mappings)(`${shape}：HTTP %i / %s`, async (status, code, kind, retryable, message) => {
+      const fetch = vi.fn<typeof globalThis.fetch>(
+        async () =>
+          new Response(
+            JSON.stringify(
+              shape === "detail"
+                ? { detail: code, extra: "secret-access" }
+                : { error: { code, message: "secret-access" } },
+            ),
+            { status, headers: { "content-type": "application/json" } },
+          ),
+      );
+      const p = createOpenAIResponsesProvider(constrainedConfig(), envNoKey, fetch);
+      await expect(collect(p, request())).rejects.toMatchObject({
+        kind,
+        retryable,
+        message,
+        status,
+        providerMessage: undefined,
+        cause: undefined,
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  it("第二个 401 用 resolver 提示，invalidate 一次，不返回正文/令牌", async () => {
+    const invalidate = vi.fn(() => Promise.resolve());
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () => new Response("secret-access", { status: 401 }),
+    );
+    const p = createOpenAIResponsesProvider(
+      constrainedConfig({
+        invalidate,
+        unauthorizedMessage: "ChatGPT 登录已失效，请执行 /provider login",
+      }),
+      envNoKey,
+      fetch,
+    );
+    await expect(collect(p, request())).rejects.toMatchObject({
+      kind: "auth",
+      retryable: false,
+      message: "ChatGPT 登录已失效，请执行 /provider login",
+      providerMessage: undefined,
+      cause: undefined,
+    });
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls.every(([, init]) => init?.redirect === "error")).toBe(true);
+  });
+
+  it("流中失败按安全错误映射，未知坏 JSON 不泄漏正文", async () => {
+    const p = createOpenAIResponsesProvider(
+      constrainedConfig(),
+      envNoKey,
+      sseFetch([
+        {
+          type: "error",
+          code: "subscription_sharing_usage_limit_exceeded",
+          message: "secret-access",
+        },
+      ]),
+    );
+    await expect(collect(p, request())).rejects.toMatchObject({
+      kind: "rate_limit",
+      retryable: false,
+      providerMessage: undefined,
+      cause: undefined,
+    });
+    const broken = createOpenAIResponsesProvider(
+      constrainedConfig(),
+      envNoKey,
+      async () =>
+        new Response("data: secret-access\n\n", {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    );
+    await expect(collect(broken, request())).rejects.toMatchObject({
+      kind: "network",
+      retryable: true,
+      message: "服务商响应流中断，请重试",
+      providerMessage: undefined,
+      cause: undefined,
+    });
   });
 });

@@ -6,6 +6,7 @@
  */
 import {
   fetchModels,
+  fetchProviderModels,
   listProviderPresets,
   runProviderKeyWizard as coreKeyWizard,
   runProviderModelWizard as coreModelWizard,
@@ -165,7 +166,10 @@ export function cliWizardDeps(
 ): SetupWizardDeps {
   return {
     presets: () => listProviderPresets(),
-    fetchModels: (req, key) => fetchModels(req, key),
+    fetchModels: (req, key) =>
+      config === undefined
+        ? fetchModels(req, key)
+        : fetchProviderModels(config, { ...req, id: req.id ?? "provider" }, key),
     env,
     ...(config
       ? {

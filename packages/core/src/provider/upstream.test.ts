@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createOpenAICompatibleProvider, fetchModels, listProviderPresets } from "./index.js";
+import type { AuthResolver } from "./types.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -34,6 +35,7 @@ describe("服务商预设", () => {
   it("API key 与 Grok 外部登录预设", () => {
     const presets = listProviderPresets();
     expect(presets.map((p) => p.id)).toEqual([
+      "chatgpt",
       "grok-cli",
       "deepseek",
       "openrouter",
@@ -47,11 +49,76 @@ describe("服务商预设", () => {
     // ADR-0026 §3：「其他 Anthropic 兼容」可拉取 /models（失败照旧转手动）
     expect(presets.find((p) => p.id === "custom-anthropic")?.fetchableModels).toBe(true);
   });
+
+  it("ChatGPT 预设声明账号登录、模型目录与官方端点", () => {
+    expect(listProviderPresets().find((preset) => preset.id === "chatgpt")).toEqual({
+      id: "chatgpt",
+      label: "ChatGPT",
+      defaultName: "chatgpt",
+      type: "openai-compatible",
+      baseURL: "https://api.openai.com/v1",
+      auth: { kind: "openai-siwc" },
+      login: "openai-siwc",
+      modelsDevProvider: "openai",
+      fetchableModels: true,
+    });
+  });
 });
 
 // ── fetchModels 上游字段映射（provider-setup.md 第 7 节） ─
 
 describe("fetchModels 字段映射", () => {
+  it("SIWC models[] 只接受 list 可见模型的 slug/display_name", async () => {
+    const calls = stubFetch(() =>
+      jsonRes({
+        data: [{ id: "wrong-format" }],
+        models: [
+          { slug: "visible", display_name: "显示模型", visibility: "list", context_length: 999 },
+          { slug: "bare", visibility: "list" },
+          { slug: "hidden", visibility: "hidden" },
+          { slug: "missing-visibility" },
+          { visibility: "list", id: "wrong-id" },
+          { slug: "", visibility: "list" },
+          null,
+        ],
+      }),
+    );
+    const auth: AuthResolver = {
+      modelFormat: "siwc",
+      token: vi.fn(async () => "test-access"),
+      invalidate: vi.fn(() => Promise.resolve()),
+    };
+    expect(
+      await fetchModels({ type: "openai-compatible", baseURL: "https://api.test/v1" }, auth),
+    ).toEqual([{ id: "visible", displayName: "显示模型" }, { id: "bare" }]);
+    expect(calls[0]?.url).toBe("https://api.test/v1/models");
+    expect(calls[0]?.init?.redirect).toBe("error");
+    expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe("Bearer test-access");
+  });
+
+  it("SIWC 不回退 data[]，第二个 401 使用 resolver 安全提示", async () => {
+    const auth: AuthResolver = {
+      modelFormat: "siwc",
+      unauthorizedMessage: "请执行 /provider login account",
+      token: async () => "secret",
+      invalidate: vi.fn(() => Promise.resolve()),
+    };
+    stubFetch(() => jsonRes({ data: [{ id: "api-key-only" }] }));
+    expect(
+      await fetchModels({ type: "openai-compatible", baseURL: "https://api.test/v1" }, auth),
+    ).toEqual([]);
+    const calls = stubFetch(() => jsonRes({ detail: "secret upstream" }, 401));
+    await expect(
+      fetchModels({ type: "openai-compatible", baseURL: "https://api.test/v1" }, auth),
+    ).rejects.toMatchObject({
+      message: "请执行 /provider login account",
+      kind: "auth",
+      retryable: false,
+      providerMessage: undefined,
+    });
+    expect(calls).toHaveLength(2);
+    expect(auth.invalidate).toHaveBeenCalledTimes(1);
+  });
   it("OpenRouter 形状：top_provider 限额、pricing 换算、能力位声明", async () => {
     const calls = stubFetch(() =>
       jsonRes({

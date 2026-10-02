@@ -6,6 +6,8 @@ export interface ProviderLoginOptions {
   remote?: boolean | undefined;
   /** 唯一允许向人展示未保存密钥的通道，不进入 completion。 */
   onUnstoredKey?: ((key: string, envName: string) => void | Promise<void>) | undefined;
+  /** 无系统后端时必须显式选择；没有默认明文选项。 */
+  chooseAccountStorage?: (() => Promise<"plaintext" | "memory">) | undefined;
 }
 
 const messages = {
@@ -19,6 +21,9 @@ const messages = {
   network: "无法连接授权服务，请重新登录。",
   storage: "无法保存登录凭据。",
   unstored: "系统凭据后端不可用，需要由客户端一次性显示密钥。",
+  accountStorage: "系统凭据后端不可用，请选择明文保存或仅本次运行。",
+  identity: "账号身份校验失败，请重新登录。",
+  scope: "该账号未授予推理权限，请重新授权。",
 } as const;
 
 export type ProviderLoginErrorCode = keyof typeof messages;

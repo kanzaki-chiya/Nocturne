@@ -50,6 +50,23 @@ export function unstoredKeyCommands(key: string, envName: string): string {
   return `PowerShell: $env:${envName}='${powershellKey}'\nbash: export ${envName}='${shellKey}'`;
 }
 
+const ACCOUNT_STORAGE_RISK =
+  "明文保存在 credentials.json。文件被备份、同步或拷走时凭据随之泄漏；refresh token 在被撤销前可以持续使用。不会默认选择明文。";
+
+async function askAccountStorage(io: LoginIo): Promise<"plaintext" | "memory"> {
+  io.print(`系统凭据后端不可用。${ACCOUNT_STORAGE_RISK}`);
+  for (;;) {
+    const picked = await io.chooseMulti(
+      "账号凭据保存方式（必须选择一项）：",
+      ["保存到 credentials.json（明文，仅你可读）", "仅本次运行（退出后丢失，下次启动重新登录）"],
+      { hint: ACCOUNT_STORAGE_RISK },
+    );
+    if (picked.length === 1 && picked[0] === 0) return "plaintext";
+    if (picked.length === 1 && picked[0] === 1) return "memory";
+    io.print("请只选择一项，不能留空。");
+  }
+}
+
 export async function runProviderLogin(
   config: RuntimeConfig,
   providerId: string,
@@ -58,6 +75,7 @@ export async function runProviderLogin(
 ): Promise<void> {
   const remote = options.remote ?? Boolean(process.env.SSH_CONNECTION ?? process.env.SSH_TTY);
   let shown = false;
+  const phase = { choosingStorage: false, finished: false };
   const session = await startProviderLogin(config, providerId, {
     ...(options.entry ? { entry: options.entry } : {}),
     remote,
@@ -70,11 +88,20 @@ export async function runProviderLogin(
           `系统凭据后端不可用；密钥仅显示这一次：\n${key}\n${unstoredKeyCommands(key, envName)}`,
         );
     },
+    chooseAccountStorage: async () => {
+      phase.choosingStorage = true;
+      io.cancelPending?.();
+      try {
+        return await askAccountStorage(io);
+      } catch (error) {
+        if (error instanceof WizardAbort) throw new ProviderLoginError("cancelled");
+        throw error;
+      }
+    },
   }).catch((error: unknown) => {
     throw safeLoginError(error);
   });
-  const lifecycle = { finished: false };
-  const isFinished = () => lifecycle.finished;
+  const isFinished = () => phase.finished;
   const cancel = () => {
     session.cancel();
     io.cancelPending?.();
@@ -98,9 +125,15 @@ export async function runProviderLogin(
     let manualError: unknown;
     void (async () => {
       while (!isFinished()) {
-        const text = await io.askSecret(
-          session.manualInput === "code" ? "粘贴授权码：" : "粘贴完整回调 URL：",
-        );
+        let text: string;
+        try {
+          text = await io.askSecret(
+            session.manualInput === "code" ? "粘贴授权码：" : "粘贴完整回调 URL：",
+          );
+        } catch (error) {
+          if (phase.choosingStorage || isFinished()) return;
+          throw error;
+        }
         if (isFinished()) return;
         try {
           await session.submitManual(text.trim());
@@ -109,7 +142,7 @@ export async function runProviderLogin(
         }
       }
     })().catch((error: unknown) => {
-      if (isFinished() || (shown && !options.signal?.aborted)) return;
+      if (isFinished() || phase.choosingStorage || (shown && !options.signal?.aborted)) return;
       manualError = error;
       session.cancel();
     });
@@ -120,7 +153,7 @@ export async function runProviderLogin(
       `已登录 ${outcome.result.providerId}${outcome.result.account ? `（${outcome.result.account}）` : ""}`,
     );
   } finally {
-    lifecycle.finished = true;
+    phase.finished = true;
     options.signal?.removeEventListener("abort", cancel);
     cancel();
   }

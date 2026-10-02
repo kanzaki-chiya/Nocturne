@@ -1,11 +1,12 @@
 /**
  * 凭据存储（provider-setup.md 第 3 节）：密钥交给操作系统后端，
- * credentials.json 只存索引（后端标识；DPAPI 附带密文）。
+ * credentials.json 存索引（DPAPI 附带密文；账号可显式选择明文）。
  * 密钥永不出现在子进程命令行参数里——写入/读取都经 stdin/stdout 管道。
  */
 import { z } from "zod";
 
-import type { Platform } from "../platform/index.js";
+import { fsErrorCode, type Platform } from "../platform/index.js";
+import { parseOAuthCredential } from "../protocol/index.js";
 import { ConfigError } from "./errors.js";
 import { writeJsonAtomic } from "./files.js";
 import type { CredentialBackend, CredentialStore } from "./types.js";
@@ -14,10 +15,17 @@ const INDEX_VERSION = 1;
 const SERVICE_NAME = "nocturne";
 const BACKEND_TIMEOUT_MS = 15_000;
 
-const indexEntrySchema = z.object({
-  backend: z.enum(["dpapi", "keychain", "libsecret"]),
-  ciphertext: z.string().optional(),
-});
+function validAccount(record: string): boolean {
+  return parseOAuthCredential(record) !== undefined;
+}
+
+const indexEntrySchema = z.discriminatedUnion("backend", [
+  z.object({
+    backend: z.enum(["dpapi", "keychain", "libsecret"]),
+    ciphertext: z.string().optional(),
+  }),
+  z.object({ backend: z.literal("plaintext"), value: z.string().refine(validAccount) }),
+]);
 
 const indexFileSchema = z.object({
   version: z.literal(INDEX_VERSION),
@@ -38,13 +46,11 @@ function backendUnavailable(detail: string): ConfigError {
 interface BackendRunResult {
   ok: boolean;
   stdout: string;
-  stderr: string;
 }
 
 /**
  * 经 PipeProcess 执行一次后端调用：stdin 写入 input 后关闭，
- * 收集 stdout/stderr。stderr 进入错误信息前截断（不含密钥——
- * 密钥只走 stdin/stdout，命令行参数永不含密钥）。
+ * 收集 stdout 并排空 stderr；stderr 可能含密钥，永不保留或进入错误。
  */
 async function runBackend(
   platform: Platform,
@@ -60,18 +66,18 @@ async function runBackend(
   if (input !== undefined) proc.stdin.write(input);
   proc.stdin.end();
   const stdoutChunks: Buffer[] = [];
-  const stderrChunks: string[] = [];
   const pumpOut = (async () => {
     for await (const c of proc.stdoutRaw) stdoutChunks.push(c);
   })();
   const pumpErr = (async () => {
-    for await (const c of proc.stderr) stderrChunks.push(c);
+    for await (const _chunk of proc.stderr) {
+      // 只排空管道。
+    }
   })();
   const [exit] = await Promise.all([proc.wait(), pumpOut, pumpErr]);
   return {
     ok: exit.code === 0 && !exit.timedOut && !exit.killed,
     stdout: Buffer.concat(stdoutChunks).toString("utf8").trim(),
-    stderr: stderrChunks.join("").slice(0, 500).trim(),
   };
 }
 
@@ -103,10 +109,7 @@ async function dpapiRun(platform: Platform, script: string, inputB64: string): P
     "PSModulePath",
   ]);
   if (!r.ok) {
-    throw new ConfigError(
-      "credential_backend_unavailable",
-      `DPAPI 调用失败${r.stderr !== "" ? `：${r.stderr}` : ""}`,
-    );
+    throw backendUnavailable("DPAPI");
   }
   return r.stdout;
 }
@@ -138,7 +141,7 @@ function dpapiDriver(platform: Platform): BackendDriver {
       return { ciphertext };
     },
     async load(id, entry) {
-      if (entry.ciphertext === undefined) return undefined;
+      if (entry.backend !== "dpapi" || entry.ciphertext === undefined) return undefined;
       try {
         const out = await dpapiRun(platform, DPAPI_UNPROTECT, entry.ciphertext);
         return Buffer.from(out, "base64").toString("utf8");
@@ -163,10 +166,7 @@ function keychainDriver(platform: Platform): BackendDriver {
         `add-generic-password -s ${SERVICE_NAME} -a ${securityQuote(id)} -U -w ${securityQuote(key)}\n`,
       );
       if (!r.ok) {
-        throw new ConfigError(
-          "credential_backend_unavailable",
-          `macOS 钥匙串写入失败${r.stderr !== "" ? `：${r.stderr}` : ""}`,
-        );
+        throw backendUnavailable("macOS 钥匙串");
       }
       return {};
     },
@@ -183,13 +183,14 @@ function keychainDriver(platform: Platform): BackendDriver {
       return r.ok ? r.stdout : undefined;
     },
     async remove(id) {
-      await runBackend(platform, "security", [
+      const result = await runBackend(platform, "security", [
         "delete-generic-password",
         "-s",
         SERVICE_NAME,
         "-a",
         id,
       ]);
+      if (!result.ok) throw backendUnavailable("macOS 钥匙串");
     },
   };
 }
@@ -205,10 +206,7 @@ function libsecretDriver(platform: Platform): BackendDriver {
         `${key}\n`,
       );
       if (!r.ok) {
-        throw new ConfigError(
-          "credential_backend_unavailable",
-          `Secret Service 写入失败${r.stderr !== "" ? `：${r.stderr}` : ""}`,
-        );
+        throw backendUnavailable("Secret Service");
       }
       return {};
     },
@@ -218,7 +216,8 @@ function libsecretDriver(platform: Platform): BackendDriver {
       return r.ok && r.stdout !== "" ? r.stdout : undefined;
     },
     async remove(id) {
-      await runBackend(platform, "secret-tool", ["clear", ...attrs, id]);
+      const result = await runBackend(platform, "secret-tool", ["clear", ...attrs, id]);
+      if (!result.ok) throw backendUnavailable("Secret Service");
     },
   };
 }
@@ -250,7 +249,7 @@ export interface CredentialStoreInit {
 
 /**
  * 创建凭据存储。backend 缺省按平台探测；传 "memory" 为不落盘的测试实现；
- * 传 "none" 或无可用后端时 set/delete 拒绝、get 恒 undefined（不退回明文）。
+ * API key 的 set 不退回明文；账号的 setAccount 在无系统后端时必须显式选择。
  */
 export async function createCredentialStore(
   platform: Platform,
@@ -260,7 +259,13 @@ export async function createCredentialStore(
   const { fs, paths } = platform;
   const indexPath = paths.join(nocturneHome, "credentials.json");
 
-  // 内存实现：不进索引文件，不落盘（仅供测试）
+  const validateAccount = (record: string) => {
+    if (!validAccount(record)) {
+      throw new ConfigError("config_credential_rejected", "账号凭据记录无效，无法保存。");
+    }
+  };
+
+  // 显式内存后端兼容已有测试；不读取或写入任何索引。
   if (options?.backend === "memory") {
     const mem = new Map<string, string>();
     return {
@@ -270,6 +275,13 @@ export async function createCredentialStore(
           mem.set(id, key);
           return Promise.resolve();
         },
+        setAccount: (id, record) => {
+          return Promise.resolve().then(() => {
+            validateAccount(record);
+            mem.set(id, record);
+          });
+        },
+        storage: (id) => (mem.has(id) ? "memory" : undefined),
         delete: (id) => {
           mem.delete(id);
           return Promise.resolve();
@@ -290,64 +302,205 @@ export async function createCredentialStore(
           ? libsecretDriver(platform)
           : undefined;
 
-  // 索引加载：损坏/版本不符按空索引处理 + 警告（与其他机器维护文件一致）
-  const entries = new Map<string, CredentialIndexEntry>();
-  let warning: string | undefined;
-  if (driver !== undefined && (await fs.exists(indexPath))) {
+  async function readIndex(): Promise<Map<string, CredentialIndexEntry>> {
     try {
       const raw: unknown = JSON.parse(await fs.readTextFile(indexPath));
       const parsed = indexFileSchema.safeParse(raw);
       if (!parsed.success) throw new Error("schema mismatch");
-      for (const [id, e] of Object.entries(parsed.data.entries)) entries.set(id, e);
-    } catch {
-      warning = `凭据索引 ${indexPath} 损坏或版本不符，已按空索引处理`;
+      return new Map(Object.entries(parsed.data.entries));
+    } catch (error) {
+      if (fsErrorCode(error) === "ENOENT") return new Map();
+      throw new ConfigError("config_unavailable", "无法读取凭据索引。");
     }
   }
 
-  const persistIndex = async (): Promise<void> => {
-    await writeJsonAtomic(
-      fs,
-      paths,
-      indexPath,
-      {
-        version: INDEX_VERSION,
-        entries: Object.fromEntries(entries),
-      },
-      { fileMode: 0o600, dirMode: 0o700 },
-    );
+  // none 也读取明文账号条目；初始化损坏时保持既有空索引与警告语义。
+  let entries = new Map<string, CredentialIndexEntry>();
+  let warning: string | undefined;
+  try {
+    entries = await readIndex();
+  } catch {
+    warning = `凭据索引 ${indexPath} 损坏或版本不符，已按空索引处理`;
+  }
+
+  const persistIndex = async (next: Map<string, CredentialIndexEntry>): Promise<void> => {
+    try {
+      await writeJsonAtomic(
+        fs,
+        paths,
+        indexPath,
+        { version: INDEX_VERSION, entries: Object.fromEntries(next) },
+        { fileMode: 0o600, dirMode: 0o700 },
+      );
+    } catch {
+      // writeJsonAtomic 的 cause 可能含写入内容，凭据边界不传播原异常。
+      throw new ConfigError("config_unavailable", "无法保存凭据索引。");
+    }
   };
 
   // 解密结果进程内缓存：避免每次请求都起子进程（DPAPI 一次解密约 0.3s）
   const cache = new Map<string, string>();
+  const memory = new Map<string, string>();
+  let mutations = Promise.resolve();
+
+  function serialize<T>(task: () => Promise<T>): Promise<T> {
+    const pending = mutations.then(task);
+    mutations = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    return pending;
+  }
+
+  function commit(next: Map<string, CredentialIndexEntry>) {
+    entries = next;
+    cache.clear();
+  }
+
+  async function load(providerId: string): Promise<string | undefined> {
+    const ephemeral = memory.get(providerId);
+    if (ephemeral !== undefined) return ephemeral;
+    const entry = entries.get(providerId);
+    if (entry === undefined) return undefined;
+    let key: string | undefined;
+    if (entry.backend === "plaintext") key = entry.value;
+    else if (entry.backend === backend && driver !== undefined) {
+      try {
+        key = await driver.load(providerId, entry);
+      } catch {
+        // 后端读取失败按缺少凭据处理，不传播 stderr 或原异常。
+        return undefined;
+      }
+    }
+    if (key !== undefined && entries.get(providerId) === entry && !memory.has(providerId)) {
+      cache.set(providerId, key);
+    }
+    return key;
+  }
+
+  // 钥匙串/Secret Service 的值不在索引内；索引写失败时恢复之前的系统值。
+  async function previousSystemValue(providerId: string, previous?: CredentialIndexEntry) {
+    if (!driver || backend === "dpapi" || previous?.backend !== backend) return undefined;
+    try {
+      return await driver.load(providerId, previous);
+    } catch {
+      throw backendUnavailable(backend);
+    }
+  }
+
+  async function restoreSystemValue(providerId: string, previous: string | undefined) {
+    if (!driver || backend === "dpapi") return;
+    try {
+      if (previous === undefined) await driver.remove(providerId);
+      else await driver.store(providerId, previous);
+    } catch {
+      // 保留原操作的固定错误；绝不把回滚失败异常或秘密附加为 cause。
+    }
+  }
 
   const store: CredentialStore = {
-    async get(providerId) {
+    async get(providerId, options) {
+      if (options?.fresh) {
+        return serialize(async () => {
+          if (memory.has(providerId)) return memory.get(providerId);
+          cache.clear();
+          const next = await readIndex();
+          commit(next);
+          return load(providerId);
+        });
+      }
+      if (memory.has(providerId)) return memory.get(providerId);
       const cached = cache.get(providerId);
       if (cached !== undefined) return cached;
-      const entry = entries.get(providerId);
-      if (entry === undefined || driver === undefined) return undefined;
-      const key = await driver.load(providerId, entry);
-      if (key === undefined) return undefined;
-      cache.set(providerId, key);
-      return key;
+      return load(providerId);
     },
-    async set(providerId, key) {
-      if (driver === undefined) throw backendUnavailable(backend);
-      const result = await driver.store(providerId, key);
-      entries.set(providerId, {
-        backend: backend as Exclude<CredentialBackend, "memory" | "none">,
-        ...(result.ciphertext !== undefined ? { ciphertext: result.ciphertext } : {}),
+    set(providerId, key) {
+      return serialize(async () => {
+        if (driver === undefined) throw backendUnavailable(backend);
+        const next = await readIndex();
+        const previous = await previousSystemValue(providerId, next.get(providerId));
+        try {
+          const result = await driver.store(providerId, key);
+          next.set(providerId, {
+            backend: backend as "dpapi" | "keychain" | "libsecret",
+            ...(result.ciphertext !== undefined ? { ciphertext: result.ciphertext } : {}),
+          });
+        } catch {
+          await restoreSystemValue(providerId, previous);
+          throw backendUnavailable(backend);
+        }
+        try {
+          await persistIndex(next);
+        } catch {
+          await restoreSystemValue(providerId, previous);
+          throw new ConfigError("config_unavailable", "无法保存凭据索引。");
+        }
+        commit(next);
+        memory.delete(providerId);
+        cache.set(providerId, key);
       });
-      await persistIndex();
-      cache.set(providerId, key);
     },
-    async delete(providerId) {
-      cache.delete(providerId);
-      if (!entries.delete(providerId)) return;
-      await driver?.remove(providerId).catch(() => undefined);
-      await persistIndex();
+    async setAccount(providerId, record, storage) {
+      validateAccount(record);
+      if (driver !== undefined) {
+        await store.set(providerId, record);
+        return;
+      }
+      if (storage !== "plaintext" && storage !== "memory") throw backendUnavailable(backend);
+      await serialize(async () => {
+        // 新的内存账号无需文件 I/O；如有持久记录，先原子删除再切换。
+        if (storage === "memory" && !entries.has(providerId)) {
+          memory.set(providerId, record);
+          cache.delete(providerId);
+          return;
+        }
+        const next = await readIndex();
+        if (storage === "plaintext") next.set(providerId, { backend: "plaintext", value: record });
+        else next.delete(providerId);
+        await persistIndex(next);
+        commit(next);
+        if (storage === "memory") memory.set(providerId, record);
+        else {
+          memory.delete(providerId);
+          cache.set(providerId, record);
+        }
+      });
     },
-    has: (providerId) => entries.has(providerId),
+    delete(providerId) {
+      return serialize(async () => {
+        const next = await readIndex();
+        const entry = next.get(providerId);
+        if (entry === undefined) {
+          commit(next);
+          memory.delete(providerId);
+          return;
+        }
+        const previous = await previousSystemValue(providerId, entry);
+        if (entry.backend === backend && driver !== undefined) {
+          try {
+            await driver.remove(providerId);
+          } catch {
+            throw backendUnavailable(backend);
+          }
+        }
+        next.delete(providerId);
+        try {
+          await persistIndex(next);
+        } catch {
+          await restoreSystemValue(providerId, previous);
+          throw new ConfigError("config_unavailable", "无法保存凭据索引。");
+        }
+        commit(next);
+        memory.delete(providerId);
+      });
+    },
+    has: (providerId) => memory.has(providerId) || entries.has(providerId),
+    storage(providerId) {
+      if (memory.has(providerId)) return "memory";
+      const entry = entries.get(providerId);
+      if (entry === undefined) return undefined;
+      return entry.backend === "plaintext" ? "plaintext" : "system";
+    },
     backend: () => backend,
   };
   return { store, warning };

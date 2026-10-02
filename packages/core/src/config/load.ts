@@ -545,6 +545,9 @@ export async function loadConfig(
             item.keySource = "missing";
             delete item.credentialStorage;
           } else if (entry?.auth?.kind === "openai-siwc") {
+            const place = credentials.storage?.(entry.id);
+            if (place !== undefined) item.credentialStorage = place;
+            else delete item.credentialStorage;
             try {
               const raw = await credentials.get(entry.id);
               const record =

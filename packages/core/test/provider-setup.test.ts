@@ -515,8 +515,8 @@ describe("凭据存储", () => {
     await fs.writeFile(path.join(home, "credentials.json"), "not json");
     const { store, warning } = await createCredentialStore(platform, home, { backend: "none" });
     void store;
-    // none 后端不读索引 → 无警告
-    expect(warning).toBeUndefined();
+    // ADR-0042：none 也要加载明文账号索引，因此同样报告损坏。
+    expect(warning).toContain("credentials.json");
     const dpapiInit = await createCredentialStore(platform, home, { backend: "dpapi" });
     expect(dpapiInit.warning).toContain("credentials.json");
     expect(dpapiInit.store.has("corp")).toBe(false);

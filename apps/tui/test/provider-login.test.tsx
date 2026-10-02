@@ -197,6 +197,33 @@ describe("登录客户端", () => {
       }),
     ).toBe("ChatGPT 账号 mock@example.test • 即将过期 • 仅本次运行");
   });
+  it("无系统后端时必须显式选择，空选和多选都重问", async () => {
+    const wio = io();
+    vi.mocked(wio.chooseMulti)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([0, 1])
+      .mockResolvedValueOnce([1]);
+    vi.mocked(startProviderLogin).mockImplementation(async (_config, _id, options) => {
+      const completion = (async () => {
+        const storage = await options?.chooseAccountStorage?.();
+        return { providerId: entry.id, account: storage };
+      })();
+      return {
+        authorizeUrl: "https://example.test/authorize?state=mock-state",
+        manualInput: "callback-url",
+        completion,
+        submitManual: vi.fn(async () => undefined),
+        cancel: vi.fn(),
+      };
+    });
+    await runProviderLogin(config, entry.id, wio, { remote: true, openBrowser: async () => false });
+    expect(wio.cancelPending).toHaveBeenCalled();
+    expect(wio.chooseMulti).toHaveBeenCalledTimes(3);
+    expect(wio.print).toHaveBeenCalledWith(expect.stringContaining("不会默认选择明文"));
+    expect(wio.print).toHaveBeenCalledWith(expect.stringContaining("文件被备份、同步或拷走"));
+    expect(wio.step).toHaveBeenCalledWith(expect.stringContaining("memory"));
+    expect(JSON.stringify(vi.mocked(wio.print).mock.calls)).not.toContain("stored-access");
+  });
 });
 
 function screen(onDone = vi.fn<(outcome: WizardOutcome) => void>()) {

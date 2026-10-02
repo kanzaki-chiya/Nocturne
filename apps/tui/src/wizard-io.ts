@@ -10,6 +10,7 @@ import { runProviderLogin, type LoginIo } from "./provider-login.js";
 
 import {
   fetchModels,
+  fetchProviderModels,
   type UpstreamModelEntry,
   listProviderPresets,
   runProviderKeyWizard,
@@ -85,10 +86,14 @@ export interface ProviderWizard {
 export function tuiWizardDeps(
   env: (n: string) => string | undefined = (n) => process.env[n],
   signal?: AbortSignal,
+  config?: RuntimeConfig,
 ): SetupWizardDeps {
   return {
     presets: () => listProviderPresets(),
-    fetchModels: (req, key) => fetchModels(req, key, signal),
+    fetchModels: (req, key) =>
+      config === undefined
+        ? fetchModels(req, key, signal)
+        : fetchProviderModels(config, { ...req, id: req.id ?? "provider" }, key, signal),
     env,
   };
 }
@@ -262,7 +267,7 @@ export function useProviderWizard(
           guard();
           return config.refreshModelsDev();
         };
-        const source = deps ?? tuiWizardDeps(undefined, controller.signal);
+        const source = deps ?? tuiWizardDeps(undefined, controller.signal, config);
         const login = async (entry: ProviderEntryConfig): Promise<void> => {
           guard();
           loggingIn = true;

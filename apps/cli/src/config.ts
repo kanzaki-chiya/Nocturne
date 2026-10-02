@@ -5,7 +5,7 @@
  */
 import {
   BUILTIN_MODEL_CATALOG,
-  fetchModels,
+  fetchProviderModels,
   loadConfig,
   normalizeModelRef,
   type BuiltinModelLookup,
@@ -14,6 +14,35 @@ import {
 } from "@nocturne/core";
 
 import type { CliArgs } from "./args.js";
+function accountAwareModels(
+  holder: { current?: RuntimeConfig },
+  entry: {
+    id: string;
+    type?: "openai-compatible" | "anthropic" | undefined;
+    baseURL?: string | undefined;
+    headers?: Record<string, string> | undefined;
+    auth?: RuntimeConfig["base"]["providers"][number]["auth"];
+    apiKeyEnv?: string | undefined;
+  },
+  key: string | undefined,
+  signal?: AbortSignal,
+) {
+  const config = holder.current;
+  if (config === undefined) throw new Error("配置尚未完成，不能获取模型列表");
+  return fetchProviderModels(
+    config,
+    {
+      id: entry.id,
+      type: entry.type ?? "openai-compatible",
+      ...(entry.baseURL !== undefined ? { baseURL: entry.baseURL } : {}),
+      ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
+      ...(entry.auth !== undefined ? { auth: entry.auth } : {}),
+      ...(entry.apiKeyEnv !== undefined ? { apiKeyEnv: entry.apiKeyEnv } : {}),
+    },
+    key,
+    signal,
+  );
+}
 
 export interface CliConfig {
   /** loadConfig 产物：注入 createRuntime({ config }) */
@@ -71,8 +100,9 @@ export function makeConfigLoader(
   platform: Platform,
   env: Env = (n) => process.env[n],
 ): () => Promise<RuntimeConfig> {
-  return () =>
-    loadConfig(platform, {
+  return async () => {
+    const holder: { current?: RuntimeConfig } = {};
+    const config = await loadConfig(platform, {
       cliArgs: {
         model: args.model,
         apiType: args.apiType,
@@ -80,19 +110,12 @@ export function makeConfigLoader(
         apiKeyEnv: args.apiKeyEnv,
       },
       env,
-      upstreamFetch: (entry, key, signal) =>
-        fetchModels(
-          {
-            ...entry,
-            type: entry.type ?? "openai-compatible",
-            ...(entry.baseURL !== undefined ? { baseURL: entry.baseURL } : {}),
-            ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
-          },
-          key,
-          signal,
-        ),
+      upstreamFetch: (entry, key, signal) => accountAwareModels(holder, entry, key, signal),
       builtinModel,
     });
+    holder.current = config;
+    return config;
+  };
 }
 
 export async function collectConfig(
@@ -102,6 +125,7 @@ export async function collectConfig(
   options?: { requireModel?: boolean | undefined },
 ): Promise<CollectResult> {
   const requireModel = options?.requireModel !== false;
+  const holder: { current?: RuntimeConfig } = {};
   const runtime = await loadConfig(platform, {
     cliArgs: {
       model: args.model,
@@ -111,20 +135,11 @@ export async function collectConfig(
     },
     env,
     // /provider refresh 的上游获取（provider-setup.md 第 6 节）：
-    // config 不依赖 provider，这里桥接 provider 层的 fetchModels
-    upstreamFetch: (entry, key, signal) =>
-      fetchModels(
-        {
-          ...entry,
-          type: entry.type ?? "openai-compatible",
-          ...(entry.baseURL !== undefined ? { baseURL: entry.baseURL } : {}),
-          ...(entry.headers !== undefined ? { headers: entry.headers } : {}),
-        },
-        key,
-        signal,
-      ),
+    // config 不依赖 provider，这里桥接装配层的鉴权解析。
+    upstreamFetch: (entry, key, signal) => accountAwareModels(holder, entry, key, signal),
     builtinModel,
   });
+  holder.current = runtime;
   const resolved = runtime.base;
   const problems: string[] = [];
   const warnings: string[] = [...resolved.warnings];

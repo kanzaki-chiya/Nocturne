@@ -70,21 +70,22 @@ export function createEntryProvider(
   fetchImpl?: typeof fetch,
 ): Provider {
   const entryType: ModelProtocol = config.type ?? "openai-compatible";
+  // 装配层注入 openai-siwc 解析器；本模块不持有存储或跨进程锁。
   const authResolver = createAuthResolver(config, env);
 
   // 清单模型逐枚盖章（ADR-0026 §2）：unavailable 模型照常列出（§5）
-  const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
-    withEffectiveProtocol(
-      withReasoningEfforts(
-        resolveModelInfo(
-          { provider: config.id, model: id },
-          config.models?.[id],
-          config.editToolDefault,
-        ),
+  const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) => {
+    const model = withReasoningEfforts(
+      resolveModelInfo(
+        { provider: config.id, model: id },
+        config.models?.[id],
+        config.editToolDefault,
       ),
-      entryType,
-    ),
-  );
+    );
+    return authResolver.protocol === undefined
+      ? withEffectiveProtocol(model, entryType)
+      : { ...model, protocol: authResolver.protocol, unavailable: undefined };
+  });
   const byModel = new Map(modelList.map((m) => [m.ref.model, m]));
 
   // 三种适配器共用的条目级输入（凭据解析器/headers/会话头/UA/诊断/thinking 一致）
@@ -152,9 +153,9 @@ export function createEntryProvider(
     return responsesAdapter;
   };
 
-  /** 请求的生效协议：决议值随请求携带 > 清单盖章 > 条目 type */
+  /** 鉴权通道限定 > 请求携带 > 清单盖章 > 条目 type */
   const protocolOf = (request: ModelRequest): ModelProtocol =>
-    request.protocol ?? byModel.get(request.model)?.protocol ?? entryType;
+    authResolver.protocol ?? request.protocol ?? byModel.get(request.model)?.protocol ?? entryType;
 
   return {
     id: config.id,
