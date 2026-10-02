@@ -94,3 +94,4 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 | 文档 | 内容 |
 |---|---|
 | [research/zcode-review.md](research/zcode-review.md) | ZCode 源码架构评审：哪些借鉴、哪些简化、哪些不带入 |
+| [research/provider-oauth.md](research/provider-oauth.md) | 主流 Provider OAuth 官方开放范围、首批选型与接入边界 |
