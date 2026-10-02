@@ -1,6 +1,6 @@
 # ADR-0042：服务商账号登录：ChatGPT、Grok CLI 凭据与 OpenRouter
 
-- 状态：提议
+- 状态：已接受
 - 日期：2026-10-02
 
 ## 背景
@@ -94,7 +94,9 @@ interface AuthResolver {
 
 - 凭据记录序列化为 JSON 字符串，经现有 `CredentialStore.set(providerId, …)` 交给系统后端保存：DPAPI、钥匙串或 libsecret，不落明文，不新增后端。
 - 记录内容：`{ version: 1, clientId, subject, email?, idToken, accessToken, refreshToken, expiresAt, scopes }`。
-- 没有系统后端（`none`）时不提供 ChatGPT 登录，说明原因。refresh token 不能只放在内存里，也没有环境变量方式可替代。
+- 没有系统后端（`none`，如无桌面密钥环的 Linux）时仍可登录，但凭据**只保存在当前进程内存**：本进程内照常刷新，退出后丢失，下次启动需要重新登录。不退回明文文件（provider-setup.md 第 3 节）。
+  - 登录完成时提示「未找到系统凭据存储，ChatGPT 登录只在本次运行有效」，`/provider` 的凭据状态标注「仅本次运行」。
+  - 这种情况下不取跨进程锁：其他进程拿不到这份凭据，不存在共用 refresh token 的问题。
 
 **刷新**：
 
