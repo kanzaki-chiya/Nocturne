@@ -8,6 +8,7 @@ import type {
   RuntimeSession,
   SettingItem,
   SettingsPatch,
+  ModelRole,
 } from "@nocturne/core";
 import { useTheme, type ThemeId } from "../theme.js";
 import { DialogFrame } from "./dialog/dialog-frame.js";
@@ -20,6 +21,7 @@ import { PickList } from "./pick-list.js";
 import { ReviewerDialog } from "./reviewer-dialog.js";
 import { ThemePage } from "./theme-page.js";
 import { CompactionThresholdDialog } from "./compaction-threshold-dialog.js";
+import { ModelPicker } from "./model-picker.js";
 
 const SOURCES: Record<SettingItem["source"], string> = {
   default: "默认",
@@ -31,7 +33,9 @@ const SOURCES: Record<SettingItem["source"], string> = {
   cli: "命令行",
 };
 const PRESETS = ["read-only", "default", "auto-edit", "guarded", "smart", "bypass"] as const;
-const ORDER = ["preset", "reviewer", "theme", "shell", "threshold", "cancel", "save"];
+const ROLES = ["task", "vision", "smol"] as const;
+const ROLE_LABELS = { task: "子代理模型", vision: "看图模型", smol: "标题模型" };
+const ORDER = ["preset", "reviewer", "theme", "shell", "threshold", ...ROLES, "cancel", "save"];
 
 export function SettingsPage({
   runtime,
@@ -82,8 +86,17 @@ export function SettingsPage({
   const [theme, setTheme] = useState(initial.theme);
   const [shell, setShell] = useState(initial.shell);
   const [threshold, setThreshold] = useState(item("compaction.threshold")?.saved);
+  const [roles, setRoles] = useState(
+    () =>
+      Object.fromEntries(ROLES.map((role) => [role, item(`modelRoles.${role}`)?.saved])) as Record<
+        ModelRole,
+        string | undefined
+      >,
+  );
   const [focus, setFocus] = useState("preset");
-  const [nested, setNested] = useState<"theme" | "shell" | "reviewer" | "threshold" | undefined>();
+  const [nested, setNested] = useState<
+    "theme" | "shell" | "reviewer" | "threshold" | ModelRole | undefined
+  >();
   const [confirm, setConfirm] = useState(false);
   const [discard, setDiscard] = useState(false);
   const [error, setError] = useState<string>();
@@ -107,6 +120,7 @@ export function SettingsPage({
     JSON.stringify(reviewer) !== JSON.stringify(savedReviewer) ||
     reviewerKey !== undefined ||
     threshold !== item("compaction.threshold")?.saved ||
+    ROLES.some((role) => roles[role] !== item(`modelRoles.${role}`)?.saved) ||
     theme !== initial.theme ||
     shell !== initial.shell;
   const cancel = () => {
@@ -132,6 +146,18 @@ export function SettingsPage({
     setError(undefined);
     try {
       const patch: SettingsPatch = {};
+      if (
+        roles.vision !== undefined &&
+        !runtime
+          .listModels()
+          .some(
+            (m) => `${m.ref.provider}/${m.ref.model}` === roles.vision && m.capabilities.imageInput,
+          )
+      )
+        throw new Error("看图模型必须支持图片，请重新选择或清除");
+      for (const role of ROLES)
+        if (roles[role] !== item(`modelRoles.${role}`)?.saved)
+          patch[`modelRoles.${role}`] = roles[role] ?? null;
       if (threshold !== item("compaction.threshold")?.saved)
         patch["compaction.threshold"] = threshold ?? null;
       if (preset !== (item("permissions.preset")?.saved ?? ""))
@@ -159,6 +185,7 @@ export function SettingsPage({
     else if (id === "cancel") requestCancel();
     else if (id === "theme" || id === "shell" || id === "reviewer" || id === "threshold")
       setNested(id);
+    else if (ROLES.includes(id as ModelRole)) setNested(id as ModelRole);
   };
   useInput(
     (input, key) => {
@@ -266,6 +293,39 @@ export function SettingsPage({
     if (node) boxes.current.set(id, node);
     else boxes.current.delete(id);
   };
+  if (nested !== undefined && ROLES.includes(nested as ModelRole)) {
+    const role = nested as ModelRole;
+    const ref = roles[role] ?? item(`modelRoles.${role}`)?.effective;
+    const slash = ref?.indexOf("/") ?? -1;
+    return (
+      <ModelPicker
+        models={runtime.listModels().filter((m) => role !== "vision" || m.capabilities.imageInput)}
+        recents={[]}
+        providers={[]}
+        presets={[]}
+        defaultModel={undefined}
+        current={
+          ref !== undefined && slash > 0
+            ? { provider: ref.slice(0, slash), model: ref.slice(slash + 1) }
+            : undefined
+        }
+        wizard={undefined}
+        onStartWizard={() => undefined}
+        selectionOnly
+        clearLabel={role === "vision" ? "不使用" : "跟随当前模型"}
+        width={width}
+        height={height}
+        active
+        onClose={() => {
+          setNested(undefined);
+        }}
+        onPick={(selected) => {
+          setRoles((previous) => ({ ...previous, [role]: selected || undefined }));
+          setNested(undefined);
+        }}
+      />
+    );
+  }
   if (nested === "theme")
     return (
       <ThemePage
@@ -389,10 +449,16 @@ export function SettingsPage({
             -Math.max(
               0,
               ((
-                { preset: 2, reviewer: 4, theme: 7, shell: 9, threshold: 10 } as Record<
-                  string,
-                  number
-                >
+                {
+                  preset: 2,
+                  reviewer: 4,
+                  theme: 7,
+                  shell: 9,
+                  threshold: 10,
+                  task: 12,
+                  vision: 13,
+                  smol: 14,
+                } as Record<string, number>
               )[focus] ?? 8) - Math.max(1, height - 8),
             )
           }
@@ -443,6 +509,25 @@ export function SettingsPage({
               {source("compaction.threshold")} · Enter 设置
             </Text>
           </Box>
+          <Text bold>模型角色</Text>
+          {ROLES.map((role) => {
+            const key = `modelRoles.${role}` as const;
+            const value = roles[role] === item(key)?.saved ? item(key)?.effective : roles[role];
+            return (
+              <Box
+                key={role}
+                ref={(node) => {
+                  onBox(role, node);
+                }}
+              >
+                <Text wrap="truncate" color={focus === role ? palette.selected : palette.text}>
+                  {focus === role ? "> " : "  "}
+                  {ROLE_LABELS[role]}：{value ?? (role === "vision" ? "未设置" : "跟随当前模型")} ·{" "}
+                  {source(key)} · Enter 选择
+                </Text>
+              </Box>
+            );
+          })}
         </Box>
       </Box>
       <Text wrap="truncate" color={error ? palette.error : palette.muted}>

@@ -67,6 +67,12 @@ export interface AttachmentDescribedPayload {
   usage?: Usage | undefined;
 }
 
+export interface SessionTitledPayload {
+  title: string;
+  model: string;
+  usage?: Usage | undefined;
+}
+
 export interface MessageAssistantPayload {
   messageId: string;
   model: ModelRef;
@@ -242,6 +248,7 @@ export interface QuestionRequestedPayload {
 export interface DurablePayloadMap {
   "session.created": SessionCreatedPayload;
   "session.config_changed": SessionConfigChangedPayload;
+  "session.titled": SessionTitledPayload;
   "turn.started": TurnStartedPayload;
   "message.user": MessageUserPayload;
   "attachment.described": AttachmentDescribedPayload;
@@ -313,6 +320,7 @@ export type RuntimeEvent = DurableEvent | EphemeralEvent;
 export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
   "session.created",
   "session.config_changed",
+  "session.titled",
   "turn.started",
   "message.user",
   "attachment.described",

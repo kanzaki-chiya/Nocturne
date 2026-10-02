@@ -41,20 +41,25 @@ interface UnsettledFix {
 
 /**
  * 会话摘要的首句摘要（SessionSummary.firstText）：首条 message.user
- * 的首行文本。日志可能很大，只对含 "message.user" 的行做完整解码。
+ * 的首行文本，优先使用生成的标题。只解码用户消息与标题事件。
  */
 function firstUserTextInLog(logText: string): string | undefined {
+  let firstText: string | undefined;
+  let sawUser = false;
   for (const line of logText.split("\n")) {
-    if (!line.includes("message.user")) continue;
+    if (!line.includes("message.user") && !line.includes("session.titled")) continue;
     try {
       const ev = decodeDurableEvent(line);
-      if (ev.type !== "message.user") continue;
-      return firstUserText(ev.payload);
+      if (ev.type === "session.titled") return ev.payload.title;
+      if (ev.type === "message.user" && !sawUser) {
+        sawUser = true;
+        firstText = firstUserText(ev.payload);
+      }
     } catch {
       continue;
     }
   }
-  return undefined;
+  return firstText;
 }
 
 export interface SessionStoreDeps {
@@ -325,6 +330,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
           }
           const stat = await fs.stat(entry.path);
           const id = entry.name.slice(0, -".jsonl".length);
+          const firstText = firstUserTextInLog(text);
           summaries.push({
             id: event.sessionId,
             createdAt: event.time,
@@ -334,9 +340,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             mtimeMs: stat.mtimeMs,
             locked: await lockLooksHeld(fs, platform, lockPath(id)),
             ...(event.payload.parent !== undefined ? { parent: event.payload.parent } : {}),
-            ...(firstUserTextInLog(text) !== undefined
-              ? { firstText: firstUserTextInLog(text) }
-              : {}),
+            ...(firstText !== undefined ? { firstText } : {}),
           });
         } catch {
           // 列表是只读操作：单个损坏文件不阻塞其他会话

@@ -7,6 +7,8 @@ import {
   createSubagentLimiter,
   DEFAULT_TURN_CONFIG,
   runTurn,
+  runRoleCall,
+  cleanTitle,
   type TurnConfig,
   type TurnDeps,
 } from "./agent/index.js";
@@ -1198,6 +1200,63 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       durationMs: Date.now() - openedAt,
     });
 
+    const titleController = new AbortController();
+    let titleSettled: Promise<void> | undefined;
+    const unsubscribeTitle = session.subscribe((event) => {
+      if (
+        resume !== undefined ||
+        meta.parent !== undefined ||
+        event.type !== "message.user" ||
+        titleSettled !== undefined ||
+        session.durableEvents().some((e) => e.type === "session.titled")
+      )
+        return;
+      const titleModel =
+        resolveModelRole(
+          sessionRegistry,
+          config?.resolvedSettings(meta.workspaceRoot).modelRoles?.smol,
+          "smol",
+        ) ?? model;
+      const text = event.payload.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n")
+        .slice(0, 2000);
+      const signal = AbortSignal.any([titleController.signal, session.failedSignal]);
+      titleSettled = (async () => {
+        const result = await runRoleCall(
+          titleModel,
+          {
+            purpose: "title",
+            model: titleModel.model.ref.model,
+            protocol: titleModel.model.protocol,
+            system: [{ text: "用与用户相同的语言，生成不超过 20 个字的会话标题，只输出标题。" }],
+            messages: [{ role: "user", content: [{ type: "text", text }] }],
+            tools: [],
+            maxOutputTokens: 100,
+            sessionId: session.id,
+          },
+          signal,
+          options.turn?.firstEventTimeoutMs,
+          options.turn?.idleTimeoutMs,
+        );
+        const title = cleanTitle(result.text);
+        if (!title) throw new Error("标题为空");
+        if (signal.aborted || closing) return;
+        // 复用 Session 的单一写入通道，与 Turn 保持统一 seq 和先写后发顺序。
+        await session.emit("session.titled", {
+          title,
+          model: `${titleModel.model.ref.provider}/${titleModel.model.ref.model}`,
+          ...(result.usage !== undefined ? { usage: result.usage } : {}),
+        });
+      })().catch((cause: unknown) => {
+        diagnostics.record("session.title_failed", {
+          sessionId: session.id,
+          error: cause instanceof Error ? cause.message : String(cause),
+        });
+      });
+    });
+
     return {
       id: session.id,
       session,
@@ -1652,11 +1711,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       async close() {
         closing = true;
+        unsubscribeTitle();
+        titleController.abort();
         controller?.abort();
         compactController?.abort();
         gate.cancelAll?.();
         questions.cancelAll();
-        await Promise.all([turnSettled, compactSettled]);
+        await Promise.all([turnSettled, compactSettled, titleSettled]);
         markProvidersDirty.delete(markDirty);
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
         if (hookRunner !== undefined) {

@@ -2,6 +2,19 @@ import { imageRefsInCap } from "../context/index.js";
 import { timedStream, type ModelRequest, type ResolvedModel } from "../provider/index.js";
 import type { Usage } from "../protocol/index.js";
 import type { TurnDeps } from "./types.js";
+import stringWidth from "string-width";
+
+export function cleanTitle(text: string): string {
+  const clean = text.replace(/["'“”‘’「」『』\r\n]/gu, "").trim();
+  let title = "";
+  for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(
+    clean,
+  )) {
+    if (stringWidth(title + segment) > 40) break;
+    title += segment;
+  }
+  return title.trim();
+}
 
 /** 单轮角色调用：共用 Provider、图片适配与等待上限，独立记录用量。 */
 export async function runRoleCall(

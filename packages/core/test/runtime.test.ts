@@ -195,7 +195,7 @@ describe("公开 Runtime API", () => {
     const reason = await session.submit({ text: "read a.txt" });
 
     expect(reason).toBe("done");
-    expect(durableTypes(events)).toEqual([
+    expect(durableTypes(events).filter((type) => type !== "session.titled")).toEqual([
       "turn.started",
       "message.user",
       "message.assistant",

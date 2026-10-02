@@ -50,13 +50,15 @@ async function session(imageInput = true, vision = false, wait = false) {
     config: await loadConfig(createPlatform(), { nocturneHome: home, env: () => undefined }),
     providers: [
       new FakeProvider({
-        roleHandler: () =>
-          wait
-            ? [{ type: "wait" }]
-            : [
-                { type: "text_delta", text: "独立图片描述全文" },
-                { type: "finish", reason: "stop" },
-              ],
+        roleHandler: (request) =>
+          request.purpose === "title"
+            ? [{ type: "text_delta", text: "图片会话" }]
+            : wait
+              ? [{ type: "wait" }]
+              : [
+                  { type: "text_delta", text: "独立图片描述全文" },
+                  { type: "finish", reason: "stop" },
+                ],
         scripts: [
           [
             { type: "text_delta", text: "完成" },

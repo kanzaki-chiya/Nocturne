@@ -46,6 +46,7 @@ export function firstUserText(payload: Pick<MessageUserPayload, "content">): str
 }
 
 export interface SessionView {
+  title: string | undefined;
   /** 最后一次有效且持久化的 todo_write 快照 */
   todos: TodoItem[];
   /** 每次归约 +1；不参与重放等价 */
@@ -227,6 +228,7 @@ function book(view: SessionView): Bookkeeping {
 
 export function createSessionView(): SessionView {
   return {
+    title: undefined,
     todos: [],
     revision: 0,
     meta: undefined,
@@ -310,6 +312,8 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
       break;
     }
     case "message.user": {
+      if (!view.entries.some((entry) => entry.kind === "user"))
+        view.title ??= firstUserText(event.payload);
       view.entries.push({
         kind: "user",
         key: `u:${event.payload.messageId}`,
@@ -329,6 +333,10 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
       const entry = b.attachments.get(event.payload.attachmentRef.seq);
       if (entry !== undefined && event.payload.text !== "")
         (entry.descriptions ??= []).push(event.payload);
+      break;
+    }
+    case "session.titled": {
+      view.title = event.payload.title;
       break;
     }
     case "message.assistant": {

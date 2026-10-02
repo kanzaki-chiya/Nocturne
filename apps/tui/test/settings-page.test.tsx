@@ -345,9 +345,7 @@ describe("ADR-0034 设置页", () => {
     await pause();
     expect(screen.shell).not.toHaveBeenCalled();
     expect(screen.preference).not.toHaveBeenCalled();
-    await screen.input("\t");
-    await screen.input("\t");
-    await screen.input("\t");
+    for (let i = 0; i < 6; i++) await screen.input("\t");
     await screen.input("\r");
     await waitFor(() => screen.close.mock.calls.length === 1);
     expect(screen.shell).toHaveBeenCalledWith("bash");

@@ -31,7 +31,7 @@ import {
 } from "@nocturne/core";
 import type { spawn } from "node:child_process";
 
-import { firstUserText, type SessionView, type ViewEntry } from "@nocturne/core/protocol";
+import { type SessionView, type ViewEntry } from "@nocturne/core/protocol";
 
 import {
   contextLines,
@@ -744,8 +744,7 @@ function SessionApp({
   const view = useSessionView(session);
   const { parts: reasoning, now: reasoningNow } = useReasoning(session);
   const speed = useGenerationSpeed(session);
-  const firstUser = view.entries.find((entry) => entry.kind === "user");
-  const title = firstUser?.kind === "user" ? firstUserText(firstUser) : undefined;
+  const title = view.title;
   useEffect(() => {
     onSessionId?.(session.id);
   }, [session, onSessionId]);
@@ -2408,7 +2407,7 @@ function SessionApp({
   const emptyWelcome =
     fullscreen &&
     !recordOpen &&
-    firstUser === undefined &&
+    !view.entries.some((entry) => entry.kind === "user") &&
     frozen.length === 0 &&
     clientLines.length === 0 &&
     view.entries.every(hideNotice) &&

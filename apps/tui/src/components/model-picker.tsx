@@ -78,7 +78,8 @@ function matchQuery(m: ModelInfo, q: string): boolean {
 }
 
 interface Row {
-  model: ModelInfo;
+  model?: ModelInfo;
+  clearLabel?: string;
   recent: boolean;
 }
 
@@ -121,6 +122,7 @@ export function ModelPicker({
   currentEffort,
   savedEffort,
   selectionOnly = false,
+  clearLabel,
   initialScope,
   initialFocus,
   wizard,
@@ -153,8 +155,9 @@ export function ModelPicker({
   onStartWizard: (presetId: string) => void;
   currentEffort?: ReasoningEffort | undefined;
   savedEffort?: ReasoningEffort | undefined;
-  /** 审查模型选择只返回引用，不更改会话模型、默认模型或档位。 */
+  /** 审查/角色模型选择只返回引用，不更改会话模型、默认模型或档位。 */
   selectionOnly?: boolean;
+  clearLabel?: string | undefined;
   onPick: (ref: string, setDefault: boolean, effort: ReasoningEffort | null) => void;
   onClose: () => void;
   width: number;
@@ -190,7 +193,14 @@ export function ModelPicker({
     () => rightRows(scope, models, recents, query),
     [scope, models, recents, query],
   );
-  const rows = useMemo(() => [...recentRows, ...restRows], [recentRows, restRows]);
+  const rows = useMemo(
+    () => [
+      ...(clearLabel !== undefined ? [{ clearLabel, recent: false }] : []),
+      ...recentRows,
+      ...restRows,
+    ],
+    [clearLabel, recentRows, restRows],
+  );
   const cursor = Math.min(rightCursor, Math.max(0, rows.length - 1));
   const selected = rows[cursor]?.model;
 
@@ -345,6 +355,10 @@ export function ModelPicker({
           return;
         }
         if (key.return) {
+          if (rows[cursor]?.clearLabel !== undefined) {
+            onPick("", false, null);
+            return;
+          }
           if (selected !== undefined) {
             if (selectionOnly)
               onPick(`${selected.ref.provider}/${selected.ref.model}`, false, null);
@@ -553,6 +567,18 @@ function RightPane({
     }
     const m = row.model;
     const focused = focus === "right" && idx === cursor;
+    if (m === undefined) {
+      lines.push(
+        <Text
+          key={idx}
+          wrap="truncate"
+          {...(focused ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}
+        >
+          {focused ? ">" : " "} {row.clearLabel}
+        </Text>,
+      );
+      return;
+    }
     const name = refText(m.ref);
     const isCur = current !== undefined && refEq(m.ref, current);
     const isDef = defaultModel !== undefined && refEq(m.ref, defaultModel);

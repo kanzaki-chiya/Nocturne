@@ -95,6 +95,11 @@ const fileRefSchema = z.object({
 // ── payload schema ─────────────────────────────────────────
 
 const payloadSchemas = {
+  "session.titled": z.object({
+    title: z.string().min(1),
+    model: z.string(),
+    usage: usageSchema.optional(),
+  }),
   "attachment.described": z.object({
     attachmentRef: z.object({
       seq: z.number().int().positive(),
@@ -219,6 +224,7 @@ function envelope<T extends DurableType>(type: T, payload: (typeof payloadSchema
 export const durableEventSchema = z.discriminatedUnion("type", [
   envelope("session.created", payloadSchemas["session.created"]),
   envelope("session.config_changed", payloadSchemas["session.config_changed"]),
+  envelope("session.titled", payloadSchemas["session.titled"]),
   envelope("turn.started", payloadSchemas["turn.started"]),
   envelope("message.user", payloadSchemas["message.user"]),
   envelope("message.assistant", payloadSchemas["message.assistant"]),

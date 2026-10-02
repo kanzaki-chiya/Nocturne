@@ -165,6 +165,8 @@ setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise
 
 `modelRoles` 属于 `settings.json` 白名单，与用户配置、可信项目配置逐角色合并。三个值均为 `provider/model`；不可信项目忽略整段，避免改变数据接收方。`describeModelRoles()` 返回每个角色的 `configured`、生效 `model`、`source` 与 `available`，`SettingItem` 含 `modelRoles.task`、`modelRoles.vision`、`modelRoles.smol`。未知服务商、清单外模型、不可用模型或不支持图片的 vision 发 `runtime.warning(model_role_unavailable)` 并按未配置处理。`setModelRole` 原子保存单个角色，`null` 清除设置层值；设置页也可通过 `updateSettings` 一次保存多个 `modelRoles.*` 补丁。task/smol 未配置时跟随会话模型，vision 未配置时停用（[ADR-0040](../decisions/ADR-0040-model-roles.md)）。角色在使用时读取当前工作区设置。
 
+`RuntimeSession.visionInfo()` 返回 `imageInput`、`available` 与可用时的 `model`（provider/model），供客户端决定图片入口提示。task 继承父会话思考档位并按子模型就近降档；vision 与 smol 请求不携带档位。模型角色设置页只修改草稿，统一保存后落盘，界面与过滤规则见 [tui.md §11](../apps/tui.md#11-鼠标折叠与-settings-设置页)。
+
 项目配置来自被操作的仓库——它可能是恶意的。因此：
 
 - **未信任时**，项目配置里只有 `permissions.rules` 中**收紧方向**（`ask` / `deny`）的规则参与求值：与可信结果取更严格者，`allow` 被忽略。其余字段（`model`、`providers`、`preset`、`reasoningEffort`、`turn`、`shell`、`shellPath`）全部忽略；`mcp` 与 `hooks` 两段同样**整段忽略**——它们定义的是要启动的进程，"运行但收紧"没有意义（进程一旦启动就是任意代码），收紧方向在可执行配置上不存在。这保证一份仓库配置永远无法放宽用户的安全边界、无法把会话引到别的 Provider 或模型，也无法让它在用户不知情时执行任何命令。

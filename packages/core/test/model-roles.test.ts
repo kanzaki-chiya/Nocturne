@@ -32,6 +32,8 @@ const png = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2,
   0, 0, 0, 3, 8, 6, 0, 0, 0,
 ]);
+const visionRequests = (provider: FakeProvider) =>
+  provider.roleRequests.filter((r) => r.purpose === "vision");
 const image = { data: png, mimeType: "image/png" as const, label: "截图" };
 async function visionSetup(
   roleHandler: FakeHandler = () => [
@@ -54,7 +56,10 @@ async function visionSetup(
         capabilities: { ...base.capabilities, imageInput: true },
       },
     ],
-    roleHandler,
+    roleHandler: (request, index) =>
+      request.purpose == "title"
+        ? [{ type: "text_delta", text: "测试标题" }]
+        : roleHandler(request, index),
     handler:
       handler ??
       (() => [
@@ -84,14 +89,14 @@ it("用户图片描述一次：请求约束、文字投影、重放恢复与独�
     model: "fake/vision",
   });
   expect(await session.submit({ text: "检查报错", attachments: [image] })).toBe("done");
-  expect(provider.roleRequests[0]).toMatchObject({
+  expect(visionRequests(provider)[0]).toMatchObject({
     purpose: "vision",
     model: "vision",
     tools: [],
     maxOutputTokens: 1000,
   });
-  expect(provider.roleRequests[0]).not.toHaveProperty("reasoningEffort");
-  expect(provider.roleRequests[0]?.messages[0]).toMatchObject({
+  expect(visionRequests(provider)[0]).not.toHaveProperty("reasoningEffort");
+  expect(visionRequests(provider)[0]?.messages[0]).toMatchObject({
     images: [{ data: Buffer.from(png).toString("base64") }],
     content: [{ text: "检查报错" }],
   });
@@ -109,7 +114,7 @@ it("用户图片描述一次：请求约束、文字投影、重放恢复与独�
   await session.close();
   const resumed = await runtime.resumeSession(id);
   await resumed.submit({ text: "恢复继续" });
-  expect(provider.roleRequests).toHaveLength(1);
+  expect(visionRequests(provider)).toHaveLength(1);
   await resumed.close();
 });
 
@@ -132,7 +137,7 @@ it("工具附件由同一通道描述，附带工具名与路径", async () => {
         ],
   );
   expect(await session.submit({ text: "查看截图" })).toBe("done");
-  expect(JSON.stringify(provider.roleRequests[0]?.messages)).toMatch(/read.*screen.png/u);
+  expect(JSON.stringify(visionRequests(provider)[0]?.messages)).toMatch(/read.*screen.png/u);
   expect(JSON.stringify(provider.requests[1]?.messages)).toContain("屏幕显示错误 E42");
   expect(
     replaySessionView(session.session.durableEvents()).entries.find((e) => e.kind === "tool"),
@@ -144,17 +149,17 @@ it("能看图的模型收到原图，切到文字模型后补描述，再切回�
   const { provider, session } = await visionSetup();
   await session.setModel("fake/vision");
   await session.submit({ text: "看图", attachments: [image] });
-  expect(provider.roleRequests).toHaveLength(0);
+  expect(visionRequests(provider)).toHaveLength(0);
   expect(provider.requests[0]?.messages[0]).toHaveProperty("images");
   await session.setModel("fake/fake-1");
   await session.submit({ text: "继续" });
-  expect(provider.roleRequests).toHaveLength(1);
+  expect(visionRequests(provider)).toHaveLength(1);
   await session.setModel("fake/vision");
   await session.submit({ text: "直接看图" });
   expect(
     provider.requests.at(-1)?.messages.some((m) => m.role !== "assistant" && m.images?.length),
   ).toBe(true);
-  expect(provider.roleRequests).toHaveLength(1);
+  expect(visionRequests(provider)).toHaveLength(1);
   await session.close();
 });
 
@@ -184,7 +189,7 @@ it.each(["error", "empty", "timeout"])("描述 %s 时警告并继续，恢复后
   await session.close();
   const resumed = await runtime.resumeSession(id);
   await resumed.submit({ text: "再看" });
-  expect(provider.roleRequests).toHaveLength(1);
+  expect(visionRequests(provider)).toHaveLength(1);
   await resumed.close();
 });
 
@@ -198,7 +203,7 @@ it("Esc 中断同时取消正在进行的描述请求，已完成描述保留", 
       : [{ type: "wait" }],
   );
   const pending = session.submit({ text: "看图", attachments: [image, image] });
-  await vi.waitFor(() => expect(provider.roleRequests).toHaveLength(2));
+  await vi.waitFor(() => expect(visionRequests(provider)).toHaveLength(2));
   session.interrupt();
   expect(await pending).toBe("aborted");
   expect(
@@ -339,7 +344,9 @@ it.each([true, false])(
         (await readFile(output.childLogPath, "utf8")).split("\n")[0] ?? "",
       );
       expect(created.payload.model.model).toBe(childRequest?.model);
+      expect(await readFile(output.childLogPath, "utf8")).not.toContain('"session.titled"');
     }
+    expect(provider.roleRequests.filter((r) => r.purpose === "title")).toHaveLength(1);
     await session.close();
   },
 );

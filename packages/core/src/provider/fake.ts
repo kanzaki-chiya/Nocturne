@@ -71,11 +71,22 @@ export class FakeProvider implements Provider {
 
   async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
     const role = request.purpose !== undefined;
-    const index = role ? this.roleRequests.length : this.callCount++;
+    const index = role
+      ? this.roleRequests.filter((r) => r.purpose === request.purpose).length
+      : this.callCount++;
     (role ? this.roleRequests : this.requests).push(request);
+    const content = request.messages[0]?.content;
+    const titleText =
+      typeof content === "string" ? content : content?.find((b) => b.type === "text")?.text;
     const script = role
       ? await (this.roleHandler?.(request, index) ?? [
-          { type: "text_delta", text: "测试会话" },
+          {
+            type: "text_delta",
+            text:
+              request.purpose === "title"
+                ? (titleText?.split("\n", 1)[0]?.trim() ?? "测试会话")
+                : "测试会话",
+          },
           { type: "finish", reason: "stop" },
         ])
       : typeof this.source === "function"
