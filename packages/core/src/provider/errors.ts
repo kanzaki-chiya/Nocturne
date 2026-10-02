@@ -65,7 +65,7 @@ export class ProviderAuthError extends ProviderError {
 function safeExplanation(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const text = value.replace(/\s+/g, " ").trim();
-  if (text.length === 0 || text.length > 160) return undefined;
+  if (text.length === 0 || text.length > 300) return undefined;
   if (/bearer|token|secret|password|authorization|sk-|eyJ/i.test(text)) return undefined;
   return text;
 }
@@ -131,7 +131,22 @@ export function constrainedResponseError(status: number | undefined, body: unkno
             : status !== undefined && status >= 400
               ? "invalid_request"
               : "network";
-  return new ProviderError({ kind, status, message: "服务商请求失败，请稍后重试或调整请求" });
+  // 未映射的 4xx 附上游说明（经脱敏过滤），否则无从判断是哪个参数被拒
+  const upstream =
+    status !== undefined && status >= 400 && status < 500
+      ? (safeExplanation(record(root.error).message) ??
+        safeExplanation(record(detail).message) ??
+        safeExplanation(typeof detail === "string" ? detail : undefined))
+      : undefined;
+  const param = safeExplanation(record(root.error).param);
+  return new ProviderError({
+    kind,
+    status,
+    message:
+      upstream === undefined
+        ? "服务商请求失败，请稍后重试或调整请求"
+        : `服务商拒绝请求（${upstream}${param === undefined ? "" : `；参数 ${param}`}）`,
+  });
 }
 
 /** 中止错误：signal 中止时抛出 name === "AbortError" 的错误（provider-api.md 第 4 节） */

@@ -670,4 +670,17 @@ describe("ChatGPT 刷新与请求链路", () => {
     });
     expect(leaked.message).not.toContain("secret-access");
   });
+
+  it("未映射的 4xx 附带脱敏后的上游说明与参数名，5xx 不附", () => {
+    const rejected = constrainedResponseError(400, {
+      error: { message: "Unsupported parameter: reasoning.summary", param: "reasoning.summary" },
+    });
+    expect(rejected).toMatchObject({ kind: "invalid_request" });
+    expect(rejected.message).toContain("Unsupported parameter: reasoning.summary");
+    expect(rejected.message).toContain("参数 reasoning.summary");
+    expect(constrainedResponseError(400, { detail: "Bearer abc" }).message).not.toContain("abc");
+    expect(constrainedResponseError(500, { error: { message: "boom" } }).message).not.toContain(
+      "boom",
+    );
+  });
 });
