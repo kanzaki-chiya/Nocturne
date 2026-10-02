@@ -28,6 +28,7 @@ const STATUS_TEXT: Record<RuntimeStatus, string> = {
   waiting_permission: "等待确认",
   waiting_user: "等待回答",
   compacting: "压缩中",
+  describing_images: "描述图片中",
   retrying: "重试中",
   failed: "failed",
 };

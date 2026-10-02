@@ -88,6 +88,7 @@ export interface SubagentDeps {
   environment: EnvironmentInfo;
   /** 启动时刻读取父会话当前模型/预设（setModel/setPermissionPreset 后派生反映最新值） */
   model(): ResolvedModel;
+  visionModel?(): ResolvedModel | undefined;
   permissionPreset(): string;
   reviewer?(): SecurityReviewer | undefined;
   recentUserMessages?(): string[];
@@ -380,6 +381,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             compactionThreshold: deps.compactionThreshold?.(),
             session: child,
             model: childModel,
+            visionModel: () => deps.visionModel?.(),
             tools: registry,
             executor,
             execEnv,

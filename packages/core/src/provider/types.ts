@@ -105,6 +105,8 @@ export type ModelMessage =
 
 /** 纯数据请求：不含重试预算、回调等运行时对象 */
 export interface ModelRequest {
+  /** 本地诊断用途；适配器不向上游发送。 */
+  purpose?: "vision" | "title" | undefined;
   /** Provider 内的模型 id */
   model: string;
   /**

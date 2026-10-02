@@ -37,6 +37,7 @@ export interface TurnDeps {
   compactionThreshold?: string | number | undefined;
   session: Session;
   model: ResolvedModel;
+  visionModel?: (() => ResolvedModel | undefined) | undefined;
   tools: ToolRegistry;
   executor: ToolExecutor;
   /** 会话级执行环境（tools 的类型；Agent 不接触 Platform） */

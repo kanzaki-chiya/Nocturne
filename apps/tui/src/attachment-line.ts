@@ -1,6 +1,17 @@
-import type { ImageAttachment } from "@nocturne/core/protocol";
+import type { ImageAttachment, AttachmentDescribedPayload } from "@nocturne/core/protocol";
 
 import { boxSafe } from "./format.js";
+
+export function descriptionLine(
+  description: AttachmentDescribedPayload,
+  att?: ImageAttachment,
+): string {
+  const number =
+    /^img-(\d+)\./u.exec(att?.file ?? "")?.[1] ?? String(description.attachmentRef.index + 1);
+  return boxSafe(
+    `图片 #${number} 已由 ${description.model} 描述（${Array.from(description.text).length} 字）`,
+  );
+}
 
 /**
  * img-n 的 n 是会话附件的保存顺序，与输入框占位编号无关。

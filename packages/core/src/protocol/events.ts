@@ -59,6 +59,14 @@ export interface MessageUserPayload {
   fileRefs?: FileRef[] | undefined;
 }
 
+export interface AttachmentDescribedPayload {
+  attachmentRef: { seq: number; index: number };
+  model: string;
+  /** 空串记录已失败的描述尝试，恢复后仍不重试。 */
+  text: string;
+  usage?: Usage | undefined;
+}
+
 export interface MessageAssistantPayload {
   messageId: string;
   model: ModelRef;
@@ -184,6 +192,7 @@ export type RuntimeStatus =
   | "waiting_user"
   | "retrying"
   | "compacting"
+  | "describing_images"
   | "failed";
 
 export interface RuntimeStatusPayload {
@@ -235,6 +244,7 @@ export interface DurablePayloadMap {
   "session.config_changed": SessionConfigChangedPayload;
   "turn.started": TurnStartedPayload;
   "message.user": MessageUserPayload;
+  "attachment.described": AttachmentDescribedPayload;
   "message.assistant": MessageAssistantPayload;
   "tool.started": ToolStartedPayload;
   "permission.requested": PermissionRequestedPayload;
@@ -305,6 +315,7 @@ export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
   "session.config_changed",
   "turn.started",
   "message.user",
+  "attachment.described",
   "message.assistant",
   "tool.started",
   "permission.requested",

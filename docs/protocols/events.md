@@ -81,6 +81,9 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 
 | `context.compacted` | ✓ 或 — | `kind: "prune" \| "summary"`、`throughSeq`、`summary?`（规则见 [context.md](../architecture/context.md) 第 6 节） |
 | `turn.completed` | ✓ | `reason`、`steps`、`usage`、`error?`、`recovered?` |
+| `attachment.described` | ✓ | `attachmentRef: { seq, index }`（`message.user` 或 `tool.completed` 的 seq、从 0 开始的附件序号）、`model: string`（provider/model）、`text`、`usage?` |
+
+`attachment.described` 是 ADR-0040 的兼容扩展，不提升 `formatVersion`。成功描述供投影与界面复用；描述失败时写空 `text`，记录已尝试，恢复后也不重试，界面不显示空描述。角色用量只保存在该事件，不加入 `turn.completed.usage`、主对话缓存命中率或速度。
 
 `todo_write` 不新增事件类型或 `formatVersion`：成功且已持久化的 `tool.completed` 在 `output.items` 中携带规范化后的完整清单。折叠规则与边界见 [sessions.md](../architecture/sessions.md) 和 [tool-api.md](tool-api.md)；其他状态和无效输出均不改变当前清单。
 
@@ -106,7 +109,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `message.assistant.delta` | ✓ | `messageId`、`kind: "text" \| "reasoning"`、`delta` |
 | `tool.input.delta` | ✓ | `callId`、`name`、`delta`（参数 JSON 片段，仅供显示） |
 | `tool.progress` | ✓ | `callId`、`stream: "stdout" \| "stderr" \| "info"`、`chunk` |
-| `runtime.status` | ✓ 或 — | `status: "idle" \| "thinking" \| "running_tool" \| "waiting_permission" \| "waiting_user" \| "retrying" \| "compacting" \| "failed"` |
+| `runtime.status` | ✓ 或 — | `status: "idle" \| "thinking" \| "running_tool" \| "waiting_permission" \| "waiting_user" \| "retrying" \| "compacting" \| "describing_images" \| "failed"` |
 | `question.requested` | ✓ | `requestId`、`callId`、`questions: QuestionItem[]`（ADR-0032；等待 `respondQuestion`，回复校验失败返回 `invalid_reply` 且请求保持等待） |
 | `provider.retry` | ✓ | `attempt`、`maxAttempts`、`delayMs`、`error: { kind, message }` |
 | `runtime.warning` | ✓ 或 — | `code`、`message`（Phase 5 增补的 `code`：`project_config_untrusted`（含被忽略的 `mcp`/`hooks` 段）、`mcp_server_failed`、`mcp_server_crashed`、`mcp_tool_conflict`、`mcp_env_missing`、`hook_failed`、`debug_sink_failed`、`grant_persist_failed` 等；v0.2 增补 `model_capabilities_defaulted`、`provider_setup_invalid`，见 [provider-setup.md](../architecture/provider-setup.md)；ADR-0022 增补 `shell_env_invalid`（非法 `NOCTURNE_SHELL` 回退自动）、`shell_overridden`（settings 层的 shell 选择被 env/config 覆盖）；ADR-0025 增补 `provider_thinking_levels_ignored`（旧向导配置的服务商级 `thinking.levels` 已忽略，需逐模型设置）） |
@@ -222,7 +225,7 @@ type QuestionAnswer = { declined: true } | {
 
 | 命令 | 前置条件 | 效果事件 | 实现阶段 |
 |---|---|---|---|
-| `submit({ text?, content?, attachments? })` | 会话空闲，否则返回 `session_busy`；`attachments` 是可选的 `{ data, mimeType, label? }[]`，由 Core 校验并落盘；文本中的 `@文件` 由 Core 读取并固定为快照 | `turn.started`、`message.user`（含 `attachments`、`fileRefs`）、…… | 图片见 ADR-0023；文件引用见 ADR-0033 |
+| `submit({ text?, content?, attachments? })` | 会话空闲，否则返回 `session_busy`；`attachments` 是可选的 `{ data, mimeType, label? }[]`，由 Core 校验并落盘；文本中的 `@文件` 由 Core 读取并固定为快照 | `turn.started`、`message.user`（含 `attachments`、`fileRefs`）、…… | 图片见 ADR-0023、ADR-0040；文件引用见 ADR-0033 |
 | `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` | Phase 1 |
 | `fileIndex()` | 会话可用；首次请求建立工作区索引，每个 Turn 后失效 | 无事件，返回至多 20,000 个文件与目录候选；规则见 [tools.md](../architecture/tools.md) | ADR-0033 |
 | `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 2 起 ask 流程生效；Phase 3 起 `reply.remember` 生效，生成对应范围的 Grant（[permissions.md](../architecture/permissions.md) 5.4） |

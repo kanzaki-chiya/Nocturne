@@ -1166,7 +1166,7 @@ function SessionApp({
           const source = sourceRef.current;
           if (toggle === undefined || source === undefined) return;
           let nextSource = source;
-          if (clicked.startsWith("reasoning:")) {
+          if (clicked.startsWith("reasoning:") || clicked.startsWith("description:")) {
             const next = new Map(reasoningExpandedRef.current);
             next.set(clicked, !(next.get(clicked) ?? source.expanded));
             reasoningExpandedRef.current = next;
@@ -1677,11 +1677,9 @@ function SessionApp({
     !pageOpen && !dialogOpen && pending === undefined && pendingQ === undefined && !busy;
   const imageModel = (): { supported: boolean; hint: string } => {
     const ref = session.state().config.model;
-    const found = runtime
-      .listModels()
-      .find((m) => m.ref.provider === ref.provider && m.ref.model === ref.model);
+    const info = session.visionInfo();
     return {
-      supported: found?.capabilities.imageInput === true,
+      supported: info.imageInput || info.available,
       hint: `当前模型 ${ref.provider}/${ref.model} 未声明支持图片输入；可在 /provider → 编辑模型里开启`,
     };
   };
@@ -2218,9 +2216,14 @@ function SessionApp({
       ? `当前由 ${shellPick.info.overriddenBy === "env" ? "NOCTURNE_SHELL" : "config.json"} 指定，选择写入 settings.json 但不生效`
       : undefined;
 
+  const vision = session.visionInfo();
+  const imageHint =
+    !vision.imageInput && vision.available && images.in(input).length > 0
+      ? `当前模型不支持图片，将由 ${vision.model} 描述后发送`
+      : undefined;
   const budget = frameBudget(
     rows,
-    completionOpen ? Math.min(8, Math.max(indexing ? 1 : 0, candidates.length)) : 0,
+    completionOpen ? Math.min(8, Math.max(indexing ? 1 : 0, candidates.length)) : imageHint ? 1 : 0,
     input.split("\n").length,
     fullscreen && !pageOpen ? todoPanelRows(view.todos.length) : 0,
   );
@@ -2847,6 +2850,11 @@ function SessionApp({
         swallowRef={swallowRef}
       />
       {budget.completion > 0 && indexing ? <Text dimColor>正在索引…</Text> : null}
+      {budget.completion > 0 && !completionOpen && imageHint ? (
+        <Text dimColor wrap="truncate">
+          {imageHint}
+        </Text>
+      ) : null}
       {budget.completion > 0 && !indexing
         ? shownCandidates.map((item, i) => (
             <Text

@@ -95,6 +95,15 @@ const fileRefSchema = z.object({
 // ── payload schema ─────────────────────────────────────────
 
 const payloadSchemas = {
+  "attachment.described": z.object({
+    attachmentRef: z.object({
+      seq: z.number().int().positive(),
+      index: z.number().int().nonnegative(),
+    }),
+    model: z.string(),
+    text: z.string(),
+    usage: usageSchema.optional(),
+  }),
   "session.created": z.object({
     formatVersion: z.number().int(),
     nocturneVersion: z.string(),
@@ -218,6 +227,7 @@ export const durableEventSchema = z.discriminatedUnion("type", [
   envelope("permission.resolved", payloadSchemas["permission.resolved"]),
   envelope("permission.reviewed", payloadSchemas["permission.reviewed"]),
   envelope("tool.completed", payloadSchemas["tool.completed"]),
+  envelope("attachment.described", payloadSchemas["attachment.described"]),
   envelope("context.compacted", payloadSchemas["context.compacted"]),
   envelope("turn.completed", payloadSchemas["turn.completed"]),
 ]);

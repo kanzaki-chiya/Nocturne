@@ -36,8 +36,10 @@ export class FakeProvider implements Provider {
   readonly id: string;
   readonly type = "fake";
   readonly strictModels: boolean;
-  /** 已收到的全部请求（测试断言用） */
+  /** 已收到的主对话请求（测试断言用；角色请求独立记录）。 */
   readonly requests: ModelRequest[] = [];
+  readonly roleRequests: ModelRequest[] = [];
+  private readonly roleHandler: FakeHandler | undefined;
   private readonly modelInfos: ModelInfo[];
   private readonly source: FakeScript[] | FakeHandler;
   private callCount = 0;
@@ -51,6 +53,8 @@ export class FakeProvider implements Provider {
     scripts?: FakeScript[] | undefined;
     /** 或按请求动态生成脚本 */
     handler?: FakeHandler | undefined;
+    /** 角色请求独立于对话脚本，避免后台标题改变对话脚本顺序。 */
+    roleHandler?: FakeHandler | undefined;
   }) {
     this.id = options.id ?? "fake";
     this.strictModels = options.strictModels ?? true;
@@ -58,6 +62,7 @@ export class FakeProvider implements Provider {
       { ...DEFAULT_MODEL, ref: { provider: this.id, model: "fake-1" } },
     ];
     this.source = options.handler ?? options.scripts ?? [];
+    this.roleHandler = options.roleHandler;
   }
 
   models(): ModelInfo[] {
@@ -65,10 +70,15 @@ export class FakeProvider implements Provider {
   }
 
   async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelStreamEvent> {
-    this.requests.push(request);
-    const index = this.callCount++;
-    const script =
-      typeof this.source === "function"
+    const role = request.purpose !== undefined;
+    const index = role ? this.roleRequests.length : this.callCount++;
+    (role ? this.roleRequests : this.requests).push(request);
+    const script = role
+      ? await (this.roleHandler?.(request, index) ?? [
+          { type: "text_delta", text: "测试会话" },
+          { type: "finish", reason: "stop" },
+        ])
+      : typeof this.source === "function"
         ? await this.source(request, index)
         : (this.source[index] ?? [{ type: "finish", reason: "stop" } satisfies ModelStreamEvent]);
     let sawFinish = false;

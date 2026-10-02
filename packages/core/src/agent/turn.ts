@@ -34,6 +34,7 @@ import { SessionError } from "../session/index.js";
 import { createExecutionScope, type ExecutionScope } from "../tools/index.js";
 import { consumeStream, EmptyResponseError, type StreamAccumulation } from "./stream.js";
 import type { TurnDeps } from "./types.js";
+import { describeImages } from "./roles.js";
 
 function isPersistenceFailure(e: unknown): boolean {
   return e instanceof SessionError && (e.code === "session_failed" || e.code === "session_closed");
@@ -305,6 +306,7 @@ export async function runTurn(
       steps += 1;
 
       // 1. 构建上下文（纯计算）
+      await describeImages(deps, turnId);
       status("thinking");
       const state = session.state();
       // ADR-0023：把将进入请求的图片附件引用经 AttachmentStore 读为

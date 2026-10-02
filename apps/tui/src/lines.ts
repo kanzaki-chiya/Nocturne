@@ -10,7 +10,7 @@ import { todoItemsFromCompletion } from "@nocturne/core/protocol";
 
 import { questionToolLines } from "./question-format.js";
 import { webFetchSummary } from "./web-fetch.js";
-import { attachmentLine } from "./attachment-line.js";
+import { attachmentLine, descriptionLine } from "./attachment-line.js";
 import { diffSummary, layoutDiffRow, parseDiff, toolFileDiffs } from "./diff-format.js";
 import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { splitInputTokens, userText, fileRefLine } from "./file-refs.js";
@@ -136,6 +136,49 @@ interface LayoutOptions {
 }
 
 export function layoutEntry(
+  entry: TranscriptItem,
+  width: number,
+  ascii: boolean,
+  parts: ReasoningMap = new Map(),
+  now = Date.now(),
+  expanded = false,
+  diffExpanded = false,
+  theme: ThemePalette = palettes.dark,
+  options: LayoutOptions = {},
+): LaidLine[] {
+  const out = layoutEntryBody(
+    entry,
+    width,
+    ascii,
+    parts,
+    now,
+    expanded,
+    diffExpanded,
+    theme,
+    options,
+  );
+  if (entry.kind === "user" || entry.kind === "tool") {
+    for (const description of entry.descriptions ?? []) {
+      const index = description.attachmentRef.index;
+      const id = `description:${entry.key}:${index}`;
+      const anchor = `${entry.key}:description:${index}`;
+      const open = options.reasoningExpanded?.get(id) ?? expanded;
+      const att = (entry.kind === "user" ? entry.attachments : entry.result?.attachments)?.[index];
+      out.push(
+        ...rows(
+          anchor,
+          `  ${descriptionLine(description, att)}${options.fullscreen ? (open ? " • 单击收起" : " • 单击展开") : ""}`,
+          width,
+          { dim: true, ...(options.fullscreen ? { toggle: { id, anchor: `${anchor}:0` } } : {}) },
+        ),
+      );
+      if (open) out.push(...reasoningBody(anchor, description.text, width));
+    }
+  }
+  return out;
+}
+
+function layoutEntryBody(
   entry: TranscriptItem,
   width: number,
   ascii: boolean,
@@ -574,7 +617,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
           : entry.key;
     return block(
       entry.key,
-      `${revision}:${src.expanded}:${src.diffExpanded?.has(entry.key)}:${overrides}`,
+      `${revision}:${entry.kind === "user" || entry.kind === "tool" ? entry.descriptions?.map((d) => `${d.model}:${d.text}`).join("|") : ""}:${src.expanded}:${src.diffExpanded?.has(entry.key)}:${overrides}`,
       (width) =>
         layoutEntry(
           entry,

@@ -5,7 +5,8 @@ import { render } from "ink-testing-library";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createRuntime, FakeProvider, type Clipboard } from "@nocturne/core";
+import { createRuntime, FakeProvider, loadConfig, type Clipboard } from "@nocturne/core";
+import type { MouseEvent } from "../src/mouse.js";
 import type { ImageAttachment } from "@nocturne/core/protocol";
 import { App } from "../src/app.js";
 import { attachmentLine } from "../src/attachment-line.js";
@@ -37,12 +38,25 @@ async function waitFor(check: () => boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
-async function session(imageInput = true) {
+async function session(imageInput = true, vision = false, wait = false) {
+  const home = tmp();
+  writeFileSync(
+    path.join(home, "settings.json"),
+    JSON.stringify({ modelRoles: vision ? { vision: "fake/vision" } : {} }),
+  );
   const runtime = await createRuntime({
     cwd: tmp(),
     sessionsDir: tmp(),
+    config: await loadConfig(createPlatform(), { nocturneHome: home, env: () => undefined }),
     providers: [
       new FakeProvider({
+        roleHandler: () =>
+          wait
+            ? [{ type: "wait" }]
+            : [
+                { type: "text_delta", text: "独立图片描述全文" },
+                { type: "finish", reason: "stop" },
+              ],
         scripts: [
           [
             { type: "text_delta", text: "完成" },
@@ -76,7 +90,10 @@ async function session(imageInput = true) {
       }),
     ],
   });
-  return { runtime, active: await runtime.createSession({ model: "fake/vision" }) };
+  return {
+    runtime,
+    active: await runtime.createSession({ model: vision ? "fake/text" : "fake/vision" }),
+  };
 }
 const clip = (data?: Uint8Array): Clipboard => ({
   readImage: vi.fn(async () =>
@@ -85,6 +102,74 @@ const clip = (data?: Uint8Array): Clipboard => ({
 });
 
 describe("TUI 图片输入", () => {
+  it("vision 放行图片并显示提示，描述可点击展开、收起且保持锚点", async () => {
+    const { runtime, active } = await session(true, true);
+    const listeners = new Set<(event: MouseEvent) => void>();
+    const mouse = {
+      subscribe: (fn: (event: MouseEvent) => void) => {
+        listeners.add(fn);
+        return () => listeners.delete(fn);
+      },
+    };
+    const screen = render(
+      createElement(App, {
+        session: active,
+        runtime,
+        env,
+        mouse,
+        clipboard: clip(png),
+        clipboardPlatform: "win32",
+      }),
+    );
+    await waitFor(() => (screen.lastFrame() ?? "").includes("idle"));
+    screen.stdin.write("\x1bv");
+    await waitFor(() => (screen.lastFrame() ?? "").includes("将由 fake/vision 描述后发送"));
+    expect(screen.lastFrame()).toContain("[Image #1]");
+    screen.stdin.write("\r");
+    await waitFor(() => (screen.lastFrame() ?? "").includes("图片 #1 已由 fake/vision 描述"));
+    expect(screen.lastFrame()).not.toContain("独立图片描述全文");
+    const y =
+      (screen.lastFrame() ?? "")
+        .split("\n")
+        .findIndex((line) => line.includes("已由 fake/vision")) + 1;
+    const click = () => {
+      for (const type of ["press", "release"] as const)
+        listeners.forEach((fn) => fn({ type, button: 0, x: 3, y }));
+    };
+    click();
+    await waitFor(() => (screen.lastFrame() ?? "").includes("独立图片描述全文"));
+    expect((screen.lastFrame() ?? "").split("\n")[y - 1]).toContain("已由 fake/vision");
+    click();
+    await waitFor(() => !(screen.lastFrame() ?? "").includes("独立图片描述全文"));
+    screen.unmount();
+    await active.close();
+  });
+
+  it("描述图片中显示状态，Esc 取消并回到 idle", async () => {
+    const { runtime, active } = await session(true, true, true);
+    const screen = render(
+      createElement(App, {
+        session: active,
+        runtime,
+        env,
+        clipboard: clip(png),
+        clipboardPlatform: "win32",
+      }),
+    );
+    await waitFor(() => (screen.lastFrame() ?? "").includes("idle"));
+    screen.stdin.write("\x1bv");
+    await waitFor(() => (screen.lastFrame() ?? "").includes("[Image #1]"));
+    screen.stdin.write("\r");
+    await waitFor(() => (screen.lastFrame() ?? "").includes("描述图片中"));
+    screen.stdin.write("\x1b");
+    await waitFor(() => (screen.lastFrame() ?? "").includes("idle"));
+    expect(
+      active.session.durableEvents().filter((event) => event.type === "attachment.described"),
+    ).toHaveLength(0);
+    screen.unmount();
+    await active.close();
+  });
+
   it("Alt+V 插入占位并提交，历史不含占位", async () => {
     vi.stubEnv("NO_COLOR", "1");
     const { runtime, active } = await session();

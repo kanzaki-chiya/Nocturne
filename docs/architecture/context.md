@@ -37,10 +37,10 @@ Context Builder 不做 I/O，也不调用 Provider：指令文件由 `config` / 
 
 用户的 `@文件` 引用在 Core `submit` 时读取并固定为消息快照：原文之后追加 `<file>` 或 `<directory>` 文本块，图片使用既有 `attachments` 通道；读取与截断规则见 [tools.md](tools.md#用户文件引用)。`fileRefs` 只供客户端显示摘要，Builder 不据此读取文件或区别处理内容，文件块照常参与上下文预算与压缩，恢复时使用日志中的内容。
 
-图片附件（ADR-0023）：历史条目上的 `attachments` 只是引用（events.md 第 4 节）。每个 Step 构建前，Agent Loop 先调 `attachmentsToLoad(history, model)`——与构建共用同一套 6.4 压缩边界——得到本次会作为图片发出的引用集（模型 `imageInput` 为 false 时为空；跳过摘要/修剪覆盖的条目；含进行中 Turn 被摘要覆盖而重注入的 `message.user`；按 `sha256` 去重、只取最新 20 个引用），再经会话的 `AttachmentStore` 读字节、转 base64 放进 `attachmentData` 传给 Builder。投影规则：
+图片附件（ADR-0023）：历史条目上的 `attachments` 只是引用（events.md 第 4 节）。每个 Step 构建前，Agent Loop 先调 `attachmentsToLoad(history, model)`——与构建共用同一套 6.4 压缩边界——得到本次会作为图片发出的引用集（模型 `imageInput` 为 false 时为空；跳过摘要/修剪覆盖的条目；含进行中 Turn 被摘要覆盖而重注入的 `message.user`；按 `sha256` 去重、只取最新 20 个引用），再经会话的 `AttachmentStore` 读字节、转 base64 放进 `attachmentData` 传给 Builder。当前模型不能看图且 vision 可用时，Loop 在构建前逐个描述同一投影窗口内最新 20 个图片附件（用户与工具结果均适用），复用 Provider 图片适配器；固定指令附同条用户文字或工具名和路径，最大输出 1000 token，不带工具定义或 reasoningEffort。成功或失败均写 `attachment.described`，每个附件只尝试一次；失败警告后继续，Esc 同时取消正在进行的请求。Builder 只读这些事件，不做 I/O。投影规则：
 
 - `imageInput` 为 true 且 `attachmentData` 命中该 sha256 → 消息带 `images`（`ModelImage`，provider-api.md 第 3 节）；user 消息的图片走消息级 `images` 字段，tool 消息同理。
-- `imageInput` 为 false → 每个附件换成占位文字 `[image omitted: current model does not support image input]`。
+- `imageInput` 为 false → 有 `attachment.described` 描述的附件投影为 `[图片 #n 描述（由 <模型> 生成）]\n<描述>`；没有描述或描述失败时保留占位文字 `[image omitted: current model does not support image input]`。
 - 数据缺失 → `[image unavailable: attachment file missing]`，引用记入 `missingAttachments`；Builder 不记诊断，由 Agent Loop 逐条记 `context.attachment_missing`。
 - 占位文字的落位：user 消息追加一个 text 块；tool 消息在 `content` 末尾每个占位前加 `\n` 追加。L1 修剪覆盖的 tool 条目保持原占位说明，不附加任何图片占位或图片。
 - `attachmentData` 缺省（`undefined`）是**估算模式**——`describeContext`（`/context` 报告）走这条路：支持看图的模型按将发送的引用数估算，不产生 `images` 也不算缺失。
@@ -72,7 +72,7 @@ Builder 在请求的 `cachePrefix` 中标出"可缓存前缀"的边界：全部 
 当前估算     = 最近一次同一模型主请求的 inputTokens + outputTokens + 此后新增内容的估算
 ```
 
-`inputTokens` 已包含缓存读写，不重复加缓存用量（[events.md](../protocols/events.md) 的 Usage 口径）。锚点之后发生压缩或切换模型/服务商（包括切走再切回）即失效；没有有效锚点时完全使用估算，直到主请求再次返回用量。摘要请求不建立锚点。
+`inputTokens` 已包含缓存读写，不重复加缓存用量（[events.md](../protocols/events.md) 的 Usage 口径）。锚点之后发生图片描述、压缩或切换模型/服务商（包括切走再切回）即失效；没有有效锚点时完全使用估算，直到主请求再次返回用量。摘要请求不建立锚点。
 
 所有字符估算统一为：CJK 统一表意文字、假名、谚文、全角标点按 1 字 1 token，其余按 4 字符 1 token；适用于纯估算、锚点后的增量、保留区边界和 `/context`。各 section 仍展示本地估算，总用量在有效时采用上游锚点。估算用于预算和压缩判定，不是计费用量。
 
@@ -155,7 +155,7 @@ Phase 2 提供自动修剪与手动 `/compact`；Phase 3 加入自动摘要（6.
 历史中的内容大多是中性的（文本、工具调用、工具结果），可以直接用于新模型。例外：
 
 - 推理内容若携带 Provider 专有数据（签名、加密内容），只能回传给产生它的 Provider **且同一协议**（ADR-0026 §6）：历史 `message.assistant` 记录的协议与当前模型的生效协议相同才保留 `providerData`，否则（跨 Provider、跨协议，或新模型协议无从比对时）丢弃这类推理块的专有数据。历史条目缺 `protocol` 字段（旧日志）时按旧规则只比较服务商。
-- 新模型不支持图片输入（`capabilities.imageInput` 为 false）时，历史中的图片附件投影为占位文字 `[image omitted: current model does not support image input]`——附件引用仍在历史里，切回支持图片的模型后同一附件会重新以图片发出（第 3 节投影规则）。同一逻辑还产出另外两种占位：`[image unavailable: attachment file missing]`（附件文件读不回）与 `[image omitted: exceeds the per-request limit of 20 images]`（超出单请求 20 张上限的较旧图片）。
+- 新模型不支持图片输入（`capabilities.imageInput` 为 false）时，历史中的图片附件优先使用已持久化的描述；vision 可用时在下一次请求前补描述，没有描述则投影为占位文字 `[image omitted: current model does not support image input]`——附件引用仍在历史里，切回支持图片的模型后同一附件会重新以图片发出（第 3 节投影规则）。同一逻辑还产出另外两种占位：`[image unavailable: attachment file missing]`（附件文件读不回）与 `[image omitted: exceeds the per-request limit of 20 images]`（超出单请求 20 张上限的较旧图片）。
 - 新模型窗口更小时，按第 6 节的规则压缩。
 
 这些判断依据 `ModelInfo.capabilities` 与内容块上记录的来源 Provider，而不是按 Provider 名字写分支。

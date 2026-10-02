@@ -68,7 +68,7 @@ interface SessionView {
 ```ts
 type ViewEntry =
   | { kind: "user"; key: string; seq: number; turnId: string; content: ContentBlock[];
-      attachments?: ImageAttachment[]; fileRefs?: FileRef[] }
+      attachments?: ImageAttachment[]; fileRefs?: FileRef[]; descriptions?: AttachmentDescribedPayload[] }
   | AssistantEntry
   | ToolEntry
   | NoticeEntry;
@@ -103,6 +103,7 @@ interface ToolEntry {
     | undefined;                // tool.started 带来
   resolution: PermissionResolvedPayload | undefined; // 最近一条 resolved
   review?: PermissionReviewedPayload; // 最近一条审查，工具上方与确认框显示
+  descriptions?: AttachmentDescribedPayload[]; // 图片描述，按 attachmentRef 关联
   /** tool.progress 累计（临时数据）；completed 时清空，收敛点上必为空 */
   liveOutput: string;
   result:
@@ -167,6 +168,8 @@ interface SessionNotice {
   message: string;
 }
 ```
+
+`attachment.described` 按附件所在事件 seq 与序号关联用户或工具条目，非空描述加入 `descriptions`；空描述只记录已尝试，不生成展示行。描述及其角色用量不加入主对话累计用量，重放与实时归约一致。
 
 ## 3. 持久事件归约
 

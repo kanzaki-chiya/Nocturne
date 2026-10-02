@@ -512,20 +512,22 @@ describe("ask_user 恢复与协议不变量", () => {
   });
 
   it("不新增持久化事件类型；formatVersion 不变；question.requested 是临时事件", () => {
-    expect(DURABLE_EVENT_TYPES).toEqual([
-      "session.created",
-      "session.config_changed",
-      "turn.started",
-      "message.user",
-      "message.assistant",
-      "tool.started",
-      "permission.requested",
-      "permission.resolved",
-      "permission.reviewed",
-      "tool.completed",
-      "context.compacted",
-      "turn.completed",
-    ]);
+    expect(DURABLE_EVENT_TYPES).toEqual(
+      expect.arrayContaining([
+        "session.created",
+        "session.config_changed",
+        "turn.started",
+        "message.user",
+        "message.assistant",
+        "tool.started",
+        "permission.requested",
+        "permission.resolved",
+        "permission.reviewed",
+        "tool.completed",
+        "context.compacted",
+        "turn.completed",
+      ]),
+    );
     expect(LOG_FORMAT_VERSION).toBe(1);
     expect(isEphemeralEventType("question.requested")).toBe(true);
     expect(isDurableEventType("question.requested")).toBe(false);

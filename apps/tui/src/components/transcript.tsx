@@ -4,7 +4,7 @@
  */
 import { Box, Static, Text } from "ink";
 
-import { attachmentLine } from "../attachment-line.js";
+import { attachmentLine, descriptionLine } from "../attachment-line.js";
 import { glyphs, useTuiEnv } from "../env.js";
 import { splitInputTokens, userText, fileRefLine } from "../file-refs.js";
 import { layoutEntry } from "../lines.js";
@@ -48,6 +48,12 @@ function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): Re
         <Text key={`${att.file}:${i}`} color={theme.accent} wrap="truncate">
           {`  ${attachmentLine(att, i, env.ascii)}`}
         </Text>
+      ))}
+      {(entry.descriptions ?? []).map((description) => (
+        <Text
+          key={`description:${description.attachmentRef.index}`}
+          dimColor
+        >{`  ${descriptionLine(description, entry.attachments?.[description.attachmentRef.index])}`}</Text>
       ))}
     </Box>
   );
@@ -155,7 +161,17 @@ export function EntryRow({
     case "assistant":
       return <AssistantRow entry={entry} width={width} reasoning={reasoning} now={now} />;
     case "tool":
-      return <ToolRow entry={entry} width={width} />;
+      return (
+        <Box flexDirection="column">
+          <ToolRow entry={entry} width={width} />
+          {(entry.descriptions ?? []).map((description) => (
+            <Text
+              key={`description:${description.attachmentRef.index}`}
+              dimColor
+            >{`  ${descriptionLine(description, entry.result?.attachments?.[description.attachmentRef.index])}`}</Text>
+          ))}
+        </Box>
+      );
     case "notice":
       return <NoticeRow entry={entry} />;
     case "separator":

@@ -2,6 +2,8 @@ export * from "./types.js";
 export * from "./compact.js";
 export {
   attachmentsToLoad,
+  attachmentDescriptions,
+  imageRefsInCap,
   buildContext,
   buildSummaryRequest,
   chooseSummaryBoundary,

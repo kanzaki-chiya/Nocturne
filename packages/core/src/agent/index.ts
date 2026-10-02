@@ -1,5 +1,6 @@
 export * from "./types.js";
 export { runTurn } from "./turn.js";
+export { runRoleCall } from "./roles.js";
 export { consumeStream, type StreamOutcome, type StreamAccumulation } from "./stream.js";
 export {
   createSubagentLauncher,

@@ -296,6 +296,7 @@ export interface RuntimeSession {
    * 来源——此时写入 settings.json 的选择不生效（无论它当前是否有值）。
    */
   shellInfo(): SessionShellInfo;
+  visionInfo(): { imageInput: boolean; available: boolean; model: string | undefined };
   /** 本机探测到的全部 shell 种类（含未安装的；/shell 列表的数据来源） */
   listShells(): readonly DetectedShell[];
   /**
@@ -1125,6 +1126,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             "task",
           ) ?? model,
         permissionPreset: () => session.state().config.permissionPreset,
+        visionModel: () =>
+          resolveModelRole(
+            sessionRegistry,
+            config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.vision,
+            "vision",
+          ),
         reviewer: getReviewer,
         recentUserMessages,
         // 子会话继承父会话的思考档位（ADR-0018 §4；受子模型可用档位约束，
@@ -1291,6 +1298,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             throw new RuntimeCommandError("invalid_model", model.model.unavailable.reason);
           }
           const deps: TurnDeps = {
+            visionModel: () =>
+              resolveModelRole(
+                sessionRegistry,
+                config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.vision,
+                "vision",
+              ),
             compactionThreshold: config?.resolvedSettings(session.state().meta.workspaceRoot)
               .compactionThreshold,
             session,
@@ -1335,7 +1348,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             workspaceRoot: session.state().meta.workspaceRoot,
             readState: execEnv.readState,
             attachments: execEnv.attachments,
-            imageInput: model.model.capabilities.imageInput,
+            imageInput: model.model.capabilities.imageInput || deps.visionModel?.() !== undefined,
             signal: ac.signal,
           });
           for (const message of refs.warnings) {
@@ -1440,6 +1453,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       listShells() {
         return shellResolver.list();
+      },
+      visionInfo() {
+        const vision = resolveModelRole(
+          sessionRegistry,
+          config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.vision,
+          "vision",
+        );
+        return {
+          imageInput: model.model.capabilities.imageInput,
+          available: vision !== undefined,
+          model:
+            vision !== undefined
+              ? `${vision.model.ref.provider}/${vision.model.ref.model}`
+              : undefined,
+        };
       },
       async setShell(kind) {
         assertUsable();

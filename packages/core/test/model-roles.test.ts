@@ -1,14 +1,16 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   createPlatform,
   createRuntime,
   FakeProvider,
   loadConfig,
   type RuntimeEvent,
+  type FakeHandler,
 } from "../src/index.js";
+import { replaySessionView } from "../src/protocol/index.js";
 
 let root: string;
 let home: string;
@@ -25,6 +27,186 @@ afterEach(async () => {
 const json = (name: string, value: unknown) =>
   writeFile(path.join(home, name), JSON.stringify(value));
 const load = () => loadConfig(createPlatform(), { nocturneHome: home, env: () => undefined });
+
+const png = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2,
+  0, 0, 0, 3, 8, 6, 0, 0, 0,
+]);
+const image = { data: png, mimeType: "image/png" as const, label: "截图" };
+async function visionSetup(
+  roleHandler: FakeHandler = () => [
+    { type: "text_delta", text: "屏幕显示错误 E42" },
+    { type: "usage", usage: { inputTokens: 500, outputTokens: 100, cacheReadTokens: 400 } },
+    { type: "finish", reason: "stop" },
+  ],
+  handler?: FakeHandler,
+  firstEventTimeoutMs?: number,
+) {
+  await json("settings.json", { modelRoles: { vision: "fake/vision" } });
+  const base = new FakeProvider({}).models()[0];
+  if (base === undefined) throw new Error("missing fake model");
+  const provider = new FakeProvider({
+    models: [
+      base,
+      {
+        ...base,
+        ref: { provider: "fake", model: "vision" },
+        capabilities: { ...base.capabilities, imageInput: true },
+      },
+    ],
+    roleHandler,
+    handler:
+      handler ??
+      (() => [
+        { type: "text_delta", text: "完成" },
+        { type: "usage", usage: { inputTokens: 10, outputTokens: 2 } },
+        { type: "finish", reason: "stop" },
+      ]),
+  });
+  const runtime = await createRuntime({
+    cwd: workspace,
+    config: await load(),
+    providers: [provider],
+    turn: firstEventTimeoutMs === undefined ? {} : { firstEventTimeoutMs },
+  });
+  return {
+    runtime,
+    provider,
+    session: await runtime.createSession({ model: "fake/fake-1", reasoningEffort: "high" }),
+  };
+}
+
+it("用户图片描述一次：请求约束、文字投影、重放恢复与独立用量", async () => {
+  const { runtime, provider, session } = await visionSetup();
+  expect(session.visionInfo()).toEqual({
+    imageInput: false,
+    available: true,
+    model: "fake/vision",
+  });
+  expect(await session.submit({ text: "检查报错", attachments: [image] })).toBe("done");
+  expect(provider.roleRequests[0]).toMatchObject({
+    purpose: "vision",
+    model: "vision",
+    tools: [],
+    maxOutputTokens: 1000,
+  });
+  expect(provider.roleRequests[0]).not.toHaveProperty("reasoningEffort");
+  expect(provider.roleRequests[0]?.messages[0]).toMatchObject({
+    images: [{ data: Buffer.from(png).toString("base64") }],
+    content: [{ text: "检查报错" }],
+  });
+  expect(JSON.stringify(provider.requests[0]?.messages)).toContain(
+    "图片 #1 描述（由 fake/vision 生成）",
+  );
+  expect(JSON.stringify(provider.requests[0]?.messages)).toContain("屏幕显示错误 E42");
+  const view = replaySessionView(session.session.durableEvents());
+  expect(view.usage).toEqual({ inputTokens: 10, outputTokens: 2 });
+  expect(view.entries.find((e) => e.kind === "user")).toMatchObject({
+    descriptions: [{ model: "fake/vision", usage: { inputTokens: 500 } }],
+  });
+  await session.submit({ text: "继续" });
+  const id = session.id;
+  await session.close();
+  const resumed = await runtime.resumeSession(id);
+  await resumed.submit({ text: "恢复继续" });
+  expect(provider.roleRequests).toHaveLength(1);
+  await resumed.close();
+});
+
+it("工具附件由同一通道描述，附带工具名与路径", async () => {
+  await writeFile(path.join(workspace, "screen.png"), png);
+  const { provider, session } = await visionSetup(undefined, (_request, index) =>
+    index === 0
+      ? [
+          {
+            type: "tool_call",
+            toolCallId: "read-image",
+            name: "read",
+            input: { path: "screen.png" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ]
+      : [
+          { type: "text_delta", text: "完成" },
+          { type: "finish", reason: "stop" },
+        ],
+  );
+  expect(await session.submit({ text: "查看截图" })).toBe("done");
+  expect(JSON.stringify(provider.roleRequests[0]?.messages)).toMatch(/read.*screen.png/u);
+  expect(JSON.stringify(provider.requests[1]?.messages)).toContain("屏幕显示错误 E42");
+  expect(
+    replaySessionView(session.session.durableEvents()).entries.find((e) => e.kind === "tool"),
+  ).toMatchObject({ descriptions: [{ text: "屏幕显示错误 E42" }] });
+  await session.close();
+});
+
+it("能看图的模型收到原图，切到文字模型后补描述，再切回仍发原图", async () => {
+  const { provider, session } = await visionSetup();
+  await session.setModel("fake/vision");
+  await session.submit({ text: "看图", attachments: [image] });
+  expect(provider.roleRequests).toHaveLength(0);
+  expect(provider.requests[0]?.messages[0]).toHaveProperty("images");
+  await session.setModel("fake/fake-1");
+  await session.submit({ text: "继续" });
+  expect(provider.roleRequests).toHaveLength(1);
+  await session.setModel("fake/vision");
+  await session.submit({ text: "直接看图" });
+  expect(
+    provider.requests.at(-1)?.messages.some((m) => m.role !== "assistant" && m.images?.length),
+  ).toBe(true);
+  expect(provider.roleRequests).toHaveLength(1);
+  await session.close();
+});
+
+it.each(["error", "empty", "timeout"])("描述 %s 时警告并继续，恢复后不重试", async (kind) => {
+  const { runtime, provider, session } = await visionSetup(
+    () =>
+      kind === "error"
+        ? [{ type: "throw", error: new Error("fail") }]
+        : kind === "timeout"
+          ? [{ type: "wait" }]
+          : [{ type: "finish", reason: "stop" }],
+    undefined,
+    kind === "timeout" ? 20 : undefined,
+  );
+  const events: RuntimeEvent[] = [];
+  session.subscribe((e) => events.push(e));
+  const pending = session.submit({ text: "看图", attachments: [image] });
+  expect(await pending).toBe("done");
+  expect(
+    events.some(
+      (e) => e.type === "runtime.warning" && e.payload.code === "attachment_description_failed",
+    ),
+  ).toBe(true);
+  expect(JSON.stringify(provider.requests[0]?.messages)).toContain("image omitted");
+  await session.submit({ text: "继续" });
+  const id = session.id;
+  await session.close();
+  const resumed = await runtime.resumeSession(id);
+  await resumed.submit({ text: "再看" });
+  expect(provider.roleRequests).toHaveLength(1);
+  await resumed.close();
+});
+
+it("Esc 中断同时取消正在进行的描述请求，已完成描述保留", async () => {
+  const { provider, session } = await visionSetup((_r, index) =>
+    index === 0
+      ? [
+          { type: "text_delta", text: "第一张" },
+          { type: "finish", reason: "stop" },
+        ]
+      : [{ type: "wait" }],
+  );
+  const pending = session.submit({ text: "看图", attachments: [image, image] });
+  await vi.waitFor(() => expect(provider.roleRequests).toHaveLength(2));
+  session.interrupt();
+  expect(await pending).toBe("aborted");
+  expect(
+    session.session.durableEvents().filter((e) => e.type === "attachment.described"),
+  ).toHaveLength(1);
+  expect(provider.requests).toHaveLength(0);
+  await session.close();
+});
 
 it("模型角色逐项分层合并，项目仅信任后参与；来源与保存值可复核", async () => {
   await json("settings.json", {

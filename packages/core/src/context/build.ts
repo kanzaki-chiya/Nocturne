@@ -337,7 +337,27 @@ function prunedPlaceholder(entry: Extract<HistoryEntry, { kind: "tool" }>): stri
  * - transcript：摘要转录——附件一律渲染为 `[image: <label ?? file>]`
  *   文本标记，不管模型能力，不产生 images。
  */
+export function attachmentDescriptions(
+  history: readonly HistoryEntry[],
+  events?: readonly DurableEvent[],
+) {
+  const out = new Map<ImageAttachment, { model: string; text: string; index: number }>();
+  for (const event of events ?? []) {
+    if (event.type !== "attachment.described") continue;
+    const { attachmentRef, model, text } = event.payload;
+    const entry = history.find((entry) => entry.seq === attachmentRef.seq);
+    const att =
+      entry?.kind === "user" || entry?.kind === "tool"
+        ? entry.attachments?.[attachmentRef.index]
+        : undefined;
+    if (att !== undefined) out.set(att, { model, text, index: attachmentRef.index });
+  }
+  return out;
+}
+
 interface ImageProjectionOpts {
+  descriptions?:
+    ReadonlyMap<ImageAttachment, { model: string; text: string; index: number }> | undefined;
   mode: "project" | "estimate" | "transcript";
   supported: boolean;
   data?: ReadonlyMap<string, string> | undefined;
@@ -358,7 +378,15 @@ function resolveAttachment(
   opts: ImageProjectionOpts,
 ): { image?: string; text?: string; virtual?: boolean } {
   if (opts.mode === "transcript") return { text: `[image: ${att.label ?? att.file}]` };
-  if (!opts.supported) return { text: IMAGE_PLACEHOLDER_UNSUPPORTED };
+  if (!opts.supported) {
+    const description = opts.descriptions?.get(att);
+    const number = /^img-(\d+)\./u.exec(att.file)?.[1] ?? String((description?.index ?? 0) + 1);
+    return {
+      text: description?.text
+        ? `[图片 #${number} 描述（由 ${description.model} 生成）]\n${description.text}`
+        : IMAGE_PLACEHOLDER_UNSUPPORTED,
+    };
+  }
   if (opts.mode === "estimate") return { virtual: true };
   if (opts.inCap !== undefined && !opts.inCap.has(att)) return { text: IMAGE_PLACEHOLDER_LIMIT };
   const data = opts.data?.get(att.sha256);
@@ -397,7 +425,7 @@ function resolveAttachments(
  * user 条目排在最后。attachmentsToLoad 与 buildContext 的上限判定都用它，
  * 保证"加载了哪些"与"哪些以图片发出"一致。
  */
-function imageRefsInCap(
+export function imageRefsInCap(
   history: readonly HistoryEntry[],
   events?: readonly DurableEvent[],
 ): ImageAttachment[] {
@@ -520,7 +548,10 @@ function historyToMessages(
   let chars = 0;
   let entries = 0;
   // 未提供投影参数（历史调用方）按"不支持看图"处理：附件 → 不支持占位
-  const imgOpts: ImageProjectionOpts = images ?? { mode: "estimate", supported: false };
+  const imgOpts: ImageProjectionOpts = {
+    ...(images ?? { mode: "estimate", supported: false }),
+    descriptions: attachmentDescriptions(history, events),
+  };
   const { summaryThrough, pruneThrough } = compactionCutoffs(history);
   const latestSummary = history.find(
     (entry) =>
@@ -815,9 +846,11 @@ function anchoredEstimate(input: BuildContextInput): number | undefined {
     input.events?.some(
       (event) =>
         event.seq > anchor.seq &&
-        event.type === "session.config_changed" &&
-        event.payload.model !== undefined &&
-        (event.payload.model.provider !== ref.provider || event.payload.model.model !== ref.model),
+        (event.type === "attachment.described" ||
+          (event.type === "session.config_changed" &&
+            event.payload.model !== undefined &&
+            (event.payload.model.provider !== ref.provider ||
+              event.payload.model.model !== ref.model))),
     )
   )
     return undefined;
@@ -912,6 +945,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   // 5. 历史（含图片附件投影，ADR-0023：Builder 不做 I/O，
   //    字节由调用方按 sha256 读入 attachmentData；未提供 = 估算模式）
   const imageOpts: ImageProjectionOpts = {
+    descriptions: attachmentDescriptions(input.history, input.events),
     mode: input.attachmentData === undefined ? "estimate" : "project",
     supported: model.capabilities.imageInput,
     data: input.attachmentData,

@@ -5,6 +5,7 @@
  * 临时事件创建，收敛点上除 revision/notices 外重放等价（V1）。
  */
 import type {
+  AttachmentDescribedPayload,
   DurableEvent,
   EphemeralEvent,
   PermissionResolvedPayload,
@@ -90,6 +91,7 @@ export interface SessionView {
 export type ViewEntry = UserEntry | AssistantEntry | ToolEntry | NoticeEntry;
 
 export interface UserEntry {
+  descriptions?: AttachmentDescribedPayload[] | undefined;
   kind: "user";
   key: string;
   seq: number;
@@ -117,6 +119,7 @@ export interface AssistantEntry {
 export type ToolEntryStatus = "awaiting_permission" | "running" | ToolCallStatus;
 
 export interface ToolEntry {
+  descriptions?: AttachmentDescribedPayload[] | undefined;
   kind: "tool";
   key: string;
   turnId: string;
@@ -199,6 +202,7 @@ export interface SessionNotice {
 // ── 归约器内部簿记（不进 JSON；符号键 + 不可枚举） ──────────
 
 interface Bookkeeping {
+  attachments: Map<number, UserEntry | ToolEntry>;
   /** callId → entries 中的工具条目（O(1) 查找） */
   tools: Map<string, ToolEntry>;
   /** callId → 最近的 permission.resolved payload（供晚到的 started/completed 回填） */
@@ -213,7 +217,7 @@ function book(view: SessionView): Bookkeeping {
   const iv = view as InternalView;
   let b = iv[BOOKKEEPING];
   if (b === undefined) {
-    b = { tools: new Map(), resolved: new Map() };
+    b = { tools: new Map(), resolved: new Map(), attachments: new Map() };
     Object.defineProperty(iv, BOOKKEEPING, { value: b, enumerable: false });
   }
   return b;
@@ -317,6 +321,14 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
           ? { attachments: event.payload.attachments }
           : {}),
       });
+      const entry = view.entries.at(-1);
+      if (entry?.kind === "user") b.attachments.set(event.seq, entry);
+      break;
+    }
+    case "attachment.described": {
+      const entry = b.attachments.get(event.payload.attachmentRef.seq);
+      if (entry !== undefined && event.payload.text !== "")
+        (entry.descriptions ??= []).push(event.payload);
       break;
     }
     case "message.assistant": {
@@ -429,6 +441,7 @@ function reduceDurable(view: SessionView, event: DurableEvent): void {
         ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
         durationMs: p.durationMs,
       };
+      b.attachments.set(event.seq, entry);
       // ADR-0032 §3：待回答的提问随对应调用的结算清除
       if (view.pendingQuestion?.callId === p.callId) view.pendingQuestion = undefined;
       break;
