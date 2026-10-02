@@ -1,6 +1,7 @@
 import { imageRefsInCap } from "../context/index.js";
 import { timedStream, type ModelRequest, type ResolvedModel } from "../provider/index.js";
 import type { Usage } from "../protocol/index.js";
+import { effectiveEvents } from "../protocol/index.js";
 import type { TurnDeps } from "./types.js";
 import stringWidth from "string-width";
 
@@ -48,7 +49,7 @@ export async function describeImages(deps: TurnDeps, turnId: string): Promise<vo
   if (model === undefined) return;
   const { session, signal } = deps;
   const history = session.state().history;
-  const events = session.durableEvents();
+  const events = effectiveEvents(session.durableEvents());
   const attempted = new Set(
     events.flatMap((event) =>
       event.type === "attachment.described"

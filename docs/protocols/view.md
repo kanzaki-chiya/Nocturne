@@ -305,3 +305,7 @@ function replaySessionView(events: readonly DurableEvent[]): SessionView; // ≡
 - 视图增量 diff 协议（op-based patch）：客户端用 `revision` 全量重渲染，Ink/React 自行 diff；
 - 跨会话聚合视图、搜索索引；
 - 虚拟滚动窗口化（条目量过大时的裁剪策略——TUI 静态回放天然规避）。
+
+## 回退
+
+`session.rewound` 含对话时，归约器使用与 Core 折叠同源的 `effectiveEvents` 重建条目、清单、附件描述和工具簿记，移除目标用户消息及后续事件（其 turn.started 同时移除）。当前配置、标题、累计用量与 Turn 计数保留。通知是可重放的 `NoticeEntry(subtype="rewound")`，显示目标首行、成功还原数、失败数；仅还原文件时保留已有条目并追加通知。`checkpoint.file` 不创建条目。在线与重放遵循相同规则，见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。

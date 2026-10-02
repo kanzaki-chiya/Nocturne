@@ -10,7 +10,7 @@ import type {
   ImageAttachment,
   ModelProtocol,
 } from "../protocol/index.js";
-import { estimateTokens, parseCompactionThreshold } from "../protocol/index.js";
+import { estimateTokens, parseCompactionThreshold, effectiveEvents } from "../protocol/index.js";
 export { estimateTokens } from "../protocol/index.js";
 import type {
   ModelImage,
@@ -342,7 +342,7 @@ export function attachmentDescriptions(
   events?: readonly DurableEvent[],
 ) {
   const out = new Map<ImageAttachment, { model: string; text: string; index: number }>();
-  for (const event of events ?? []) {
+  for (const event of effectiveEvents(events ?? [])) {
     if (event.type !== "attachment.described") continue;
     const { attachmentRef, model, text } = event.payload;
     const entry = history.find((entry) => entry.seq === attachmentRef.seq);

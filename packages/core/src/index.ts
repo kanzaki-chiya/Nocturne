@@ -44,6 +44,7 @@ import { createDiagnostics } from "./diagnostics/index.js";
 import { createHookRunner } from "./hooks/index.js";
 import { appendInputHistory, readInputHistory } from "./input-history.js";
 import { createCheckpointRecorder } from "./session/checkpoints.js";
+import { rewindTargets, restoreCheckpointFiles } from "./session/rewind.js";
 import {
   createRulePolicy,
   createModelSecurityReviewer,
@@ -91,6 +92,9 @@ import type {
   ReasoningEffort,
   ReasoningEffortLevel,
   RuntimeEvent,
+  RewindTarget,
+  RewindMode,
+  SessionRewoundPayload,
   TurnEndReason,
 } from "./protocol/index.js";
 import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
@@ -247,6 +251,8 @@ export interface SubmitInput {
 }
 
 export interface RuntimeSession {
+  rewindTargets(): Promise<RewindTarget[]>;
+  rewind(targetSeq: number, mode: RewindMode): Promise<SessionRewoundPayload["files"]>;
   readonly id: string;
   readonly session: Session;
   state(): SessionState;
@@ -1176,6 +1182,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     let turnSettled: Promise<void> | undefined;
     let compactSettled: Promise<void> | undefined;
     let closing = false;
+    let rewinding = false;
+    let rewindSettled: Promise<void> | undefined;
     // 进行中 Turn 的档位快照（ADR-0018 §3）：submit 时对持久化意图
     // 就近降档一次，reasoningEffortInfo().effective 据此报告；
     // Turn 中切档只改 current，effective 维持快照至 Turn 结束
@@ -1187,7 +1195,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         throw new RuntimeCommandError("session_failed", "会话已处于 failed 状态");
       }
     };
-    const busy = () => controller !== undefined && !controller.signal.aborted;
+    const busy = () => controller !== undefined || rewinding;
 
     // SessionStart Hook（hooks.md）：会话打开完成后触发（新建与恢复都算）
     if (hookRunner !== undefined) {
@@ -1263,6 +1271,41 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     return {
       id: session.id,
       session,
+      rewindTargets() {
+        assertUsable();
+        if (busy() || compactController !== undefined)
+          throw new RuntimeCommandError("session_busy", "请先等待或按 Esc 中断");
+        return rewindTargets(session, platform, sessionsDir);
+      },
+      async rewind(targetSeq, mode) {
+        assertUsable();
+        if (busy() || compactController !== undefined)
+          throw new RuntimeCommandError("session_busy", "请先等待或按 Esc 中断");
+        if (
+          !["both", "conversation", "files"].includes(mode) ||
+          !session.state().history.some((e) => e.kind === "user" && e.seq === targetSeq)
+        )
+          throw new RuntimeCommandError("invalid_command", "目标不是当前有效对话中的用户消息");
+        rewinding = true;
+        let settle!: () => void;
+        rewindSettled = new Promise((resolve) => {
+          settle = resolve;
+        });
+        try {
+          const files =
+            mode === "conversation"
+              ? []
+              : await restoreCheckpointFiles(session, platform, sessionsDir, targetSeq);
+          await session.emit("session.rewound", { targetSeq, mode, files });
+          await session.flush();
+          execEnv.readState = createReadStateStore(paths);
+          fileIndexPromise = undefined;
+          return files;
+        } finally {
+          rewinding = false;
+          settle();
+        }
+      },
       state: () => session.state(),
       subscribe: (listener) => session.subscribe(listener),
       async readInputHistory() {
@@ -1720,7 +1763,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         compactController?.abort();
         gate.cancelAll?.();
         questions.cancelAll();
-        await Promise.all([turnSettled, compactSettled, titleSettled]);
+        await Promise.all([turnSettled, compactSettled, titleSettled, rewindSettled]);
         markProvidersDirty.delete(markDirty);
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
         if (hookRunner !== undefined) {

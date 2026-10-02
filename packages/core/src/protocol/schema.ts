@@ -95,6 +95,17 @@ const fileRefSchema = z.object({
 // ── payload schema ─────────────────────────────────────────
 
 const payloadSchemas = {
+  "session.rewound": z.object({
+    targetSeq: z.number().int().positive(),
+    mode: z.enum(["both", "conversation", "files"]),
+    files: z.array(
+      z.object({
+        path: z.string(),
+        result: z.enum(["restored", "deleted", "skipped", "failed"]),
+        reason: z.string().optional(),
+      }),
+    ),
+  }),
   "checkpoint.file": z.intersection(
     z.object({ callId: z.string(), path: z.string(), sessionId: z.string().optional() }),
     z.discriminatedUnion("phase", [
@@ -168,6 +179,7 @@ const payloadSchemas = {
     finishReason: z.union([finishReasonSchema, z.literal("aborted")]),
   }),
   "tool.started": z.object({
+    mutates: z.boolean().optional(),
     callId: z.string(),
     name: z.string(),
     input: z.unknown().optional(),
@@ -245,6 +257,7 @@ function envelope<T extends DurableType>(type: T, payload: (typeof payloadSchema
 }
 
 export const durableEventSchema = z.discriminatedUnion("type", [
+  envelope("session.rewound", payloadSchemas["session.rewound"]),
   envelope("checkpoint.file", payloadSchemas["checkpoint.file"]),
   envelope("session.created", payloadSchemas["session.created"]),
   envelope("session.config_changed", payloadSchemas["session.config_changed"]),

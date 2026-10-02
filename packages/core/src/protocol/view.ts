@@ -13,11 +13,12 @@ import type {
   ProviderRetryPayload,
   RuntimeEvent,
   RuntimeStatus,
-  MessageUserPayload,
   TurnEndReason,
 } from "./events.js";
 import { isDurableEvent, isDurableEventType, isEphemeralEventType } from "./events.js";
 import { todoItemsFromCompletion, type TodoItem } from "./todo.js";
+import { effectiveEvents, rewindNotification, firstUserText } from "./rewind.js";
+export { firstUserText } from "./rewind.js";
 import type {
   ContentBlock,
   FileRef,
@@ -38,12 +39,6 @@ import type {
 // ── 视图类型 ────────────────────────────────────────────────
 
 /** 会话标题与恢复列表：首条用户消息的第一个文本块的原文首行。 */
-export function firstUserText(payload: Pick<MessageUserPayload, "content">): string | undefined {
-  const block = payload.content.find((b) => b.type === "text");
-  if (block?.type !== "text") return undefined;
-  const line = block.text.split("\n", 1)[0]?.trim();
-  return line === "" ? undefined : line;
-}
 
 export interface SessionView {
   title: string | undefined;
@@ -155,7 +150,7 @@ export interface NoticeEntry {
   kind: "notice";
   key: string;
   seq: number;
-  subtype: "permission" | "turn_end" | "compacted" | "config";
+  subtype: "permission" | "turn_end" | "compacted" | "config" | "rewound";
   /** 已格式化的单行摘要（与 CLI 同文案口径） */
   message: string;
   payload: unknown;
@@ -203,6 +198,7 @@ export interface SessionNotice {
 // ── 归约器内部簿记（不进 JSON；符号键 + 不可枚举） ──────────
 
 interface Bookkeeping {
+  events: DurableEvent[];
   attachments: Map<number, UserEntry | ToolEntry>;
   /** callId → entries 中的工具条目（O(1) 查找） */
   tools: Map<string, ToolEntry>;
@@ -218,7 +214,7 @@ function book(view: SessionView): Bookkeeping {
   const iv = view as InternalView;
   let b = iv[BOOKKEEPING];
   if (b === undefined) {
-    b = { tools: new Map(), resolved: new Map(), attachments: new Map() };
+    b = { events: [], tools: new Map(), resolved: new Map(), attachments: new Map() };
     Object.defineProperty(iv, BOOKKEEPING, { value: b, enumerable: false });
   }
   return b;
@@ -251,6 +247,7 @@ export function createSessionView(): SessionView {
 export function reduceSessionView(view: SessionView, event: RuntimeEvent): void {
   view.revision += 1;
   if (isDurableEvent(event)) {
+    book(view).events.push(event);
     view.lastSeq = event.seq;
     if (isDurableEventType(event.type)) reduceDurable(view, event);
   } else if (isEphemeralEventType(event.type)) {
@@ -267,10 +264,38 @@ export function replaySessionView(events: readonly DurableEvent[]): SessionView 
 
 // ── 持久事件 ────────────────────────────────────────────────
 
-function reduceDurable(view: SessionView, event: DurableEvent): void {
+function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = false): void {
   const b = book(view);
   const turnId = event.turnId;
   switch (event.type) {
+    case "session.rewound": {
+      if (!rebuilding && event.payload.mode !== "files") {
+        // ponytail: rebuild only on explicit rewind; normal event delivery stays O(1).
+        const rebuilt = createSessionView();
+        book(rebuilt).events = b.events;
+        for (const ev of effectiveEvents(b.events)) reduceDurable(rebuilt, ev, true);
+        view.entries = rebuilt.entries;
+        view.todos = rebuilt.todos;
+        view.lastTurn = rebuilt.lastTurn;
+        view.currentTurn = undefined;
+        view.pendingPermission = undefined;
+        view.pendingQuestion = undefined;
+        view.live = { assistants: [], tools: [] };
+        view.status = "idle";
+        b.attachments = book(rebuilt).attachments;
+        b.tools = book(rebuilt).tools;
+        b.resolved = book(rebuilt).resolved;
+      } else {
+        pushNotice(
+          view,
+          event.seq,
+          "rewound",
+          rewindNotification(event.payload, b.events),
+          event.payload,
+        );
+      }
+      break;
+    }
     case "session.created": {
       const p = event.payload;
       view.meta = {

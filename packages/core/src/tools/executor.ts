@@ -373,6 +373,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           name: call.name,
           input,
           subjects: outcome.subjects,
+          mutates: tool.traits.mutates,
           permission: {
             action: decision.action,
             source: decision.source,

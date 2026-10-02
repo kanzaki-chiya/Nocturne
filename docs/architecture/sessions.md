@@ -132,9 +132,13 @@ interface SessionRecovery {
 
 ## 9. 暂不设计
 
-分叉、回退、跨设备同步、会话分享、断电级持久性选项。它们都可以在事件日志模型上实现，届时单独写设计。
+分叉、回退见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。跨设备同步、会话分享、断电级持久性选项仍待单独设计。
 
 安全审查的 `permission.reviewed` 是持久事件（[events.md](../protocols/events.md)）：折叠仅将其可选 `usage` 加入会话累计用量，不插入模型历史；审查来源与理由由客户端派生视图按 callId 重放，见 [view.md](../protocols/view.md)。`turn.completed.usage` 已包含审查用量，SessionState 不再按该汇总重复计费。
+
+## 回退
+
+`RuntimeSession.rewindTargets()` 返回有效用户消息（最新优先）、文字、时间、文件状态与未追踪调用数。`rewind(targetSeq, mode)` 仅在空闲时执行；Turn（包括中断未收束）、压缩、回退进行中拒绝 `session_busy`，非法目标或模式拒绝 `invalid_command`。关闭等待回退落盘。回退追加 `session.rewound`，原日志完整保留。还原扫描原日志所有 `seq > targetSeq` 的 before，每路径取最早一条；每文件独立报告结果，绕过权限层但仅写记录路径，缺失或损坏的快照、当前路径变成链接或目录均报告失败。历史、清单、图片描述按有效事件重建；配置、标题和累计用量保留。详见 ADR-0041 第 2、4 节。
 
 ## 文件检查点
 

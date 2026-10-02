@@ -5,6 +5,8 @@
 import { shellSwitchNote } from "../platform/index.js";
 import {
   todoItemsFromCompletion,
+  effectiveEvents,
+  rewindNote,
   type DurableEvent,
   type TodoItem,
   type Usage,
@@ -55,8 +57,20 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
   const unsettled = new Map<string, UnsettledCall>();
   // tool.started 的规范化输入 → 折叠成 tool 条目的 inputSummary
   const startedInputs = new Map<string, string | undefined>();
+  const effective = new Set(effectiveEvents(events).map((e) => e.seq));
 
   for (const event of events) {
+    const active = effective.has(event.seq);
+    if (
+      !active &&
+      ![
+        "session.created",
+        "session.config_changed",
+        "message.assistant",
+        "permission.reviewed",
+      ].includes(event.type)
+    )
+      continue;
     const turnId = event.turnId;
     switch (event.type) {
       case "session.created": {
@@ -89,7 +103,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         };
         // ADR-0022 第 4 节：shell 切换在历史中该位置留一条给模型的说明；
         // 措辞与环境信息同源（platform/shells.ts），恢复后旧说明原样重建
-        if (p.shell !== undefined) {
+        if (p.shell !== undefined && active) {
           history.push({
             kind: "note",
             seq: event.seq,
@@ -122,19 +136,20 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
       }
       case "message.assistant": {
         const p = event.payload;
-        history.push({
-          kind: "assistant",
-          seq: event.seq,
-          turnId: turnId ?? "",
-          messageId: p.messageId,
-          model: p.model,
-          // ADR-0026 §6：协议随历史条目保存；旧日志无此字段
-          ...(p.protocol !== undefined ? { protocol: p.protocol } : {}),
-          content: p.content,
-          toolCalls: p.toolCalls,
-          usage: p.usage,
-          finishReason: p.finishReason,
-        });
+        if (active)
+          history.push({
+            kind: "assistant",
+            seq: event.seq,
+            turnId: turnId ?? "",
+            messageId: p.messageId,
+            model: p.model,
+            // ADR-0026 §6：协议随历史条目保存；旧日志无此字段
+            ...(p.protocol !== undefined ? { protocol: p.protocol } : {}),
+            content: p.content,
+            toolCalls: p.toolCalls,
+            usage: p.usage,
+            finishReason: p.finishReason,
+          });
         if (p.usage !== undefined) {
           usage.inputTokens += p.usage.inputTokens;
           usage.outputTokens += p.usage.outputTokens;
@@ -142,7 +157,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + (p.usage.cacheWriteTokens ?? 0);
           usage.reasoningTokens = (usage.reasoningTokens ?? 0) + (p.usage.reasoningTokens ?? 0);
         }
-        for (const call of p.toolCalls) {
+        for (const call of active ? p.toolCalls : []) {
           unsettled.set(call.callId, {
             callId: call.callId,
             turnId: turnId ?? "",
@@ -207,6 +222,11 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
       case "permission.requested":
       case "permission.resolved": {
         // 审计事实，不改变折叠状态
+        break;
+      }
+      case "session.rewound": {
+        const text = rewindNote(event.payload);
+        if (text !== undefined) history.push({ kind: "note", seq: event.seq, turnId, text });
         break;
       }
     }

@@ -89,6 +89,7 @@ export interface MessageAssistantPayload {
 }
 
 export interface ToolStartedPayload {
+  mutates?: boolean | undefined;
   callId: string;
   name: string;
   /** 规范化后的输入 */
@@ -246,6 +247,15 @@ export interface QuestionRequestedPayload {
 // ── 类型映射与信封 ─────────────────────────────────────────
 
 export type CheckpointBefore = { sha256: string; size: number } | null | { untracked: string };
+export interface SessionRewoundPayload {
+  targetSeq: number;
+  mode: "both" | "conversation" | "files";
+  files: {
+    path: string;
+    result: "restored" | "deleted" | "skipped" | "failed";
+    reason?: string | undefined;
+  }[];
+}
 export type CheckpointFilePayload = {
   callId: string;
   path: string;
@@ -253,6 +263,7 @@ export type CheckpointFilePayload = {
 } & ({ phase: "before"; before: CheckpointBefore } | { phase: "after"; sha256: string | null });
 
 export interface DurablePayloadMap {
+  "session.rewound": SessionRewoundPayload;
   "checkpoint.file": CheckpointFilePayload;
   "session.created": SessionCreatedPayload;
   "session.config_changed": SessionConfigChangedPayload;
@@ -326,6 +337,7 @@ export type EphemeralEvent<T extends EphemeralType = EphemeralType> = T extends 
 export type RuntimeEvent = DurableEvent | EphemeralEvent;
 
 export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
+  "session.rewound",
   "checkpoint.file",
   "session.created",
   "session.config_changed",
