@@ -246,3 +246,4 @@ logoutProvider(config: RuntimeConfig, providerId: string): Promise<void>
 ## 修订
 
 - 2026-10-03：Windows 打开浏览器改用 `rundll32.exe url.dll,FileProtocolHandler <地址>`。原先经 `cmd.exe /c start` 时，Node 给参数加的反斜杠转义 cmd 不认，授权地址里的 `&` 被当作命令分隔符，浏览器打不开。TUI 登录等待页另加「复制地址」按钮：长地址折行后终端只识别首行链接，框选会带上边框字符。
+- 2026-10-03：真实账号冒烟发现 `/v1/models` 每项还声明 `context_window`（实测 272000）、`input_modalities`、`supported_reasoning_levels` 等字段。第 5 节改为：`context_window` 映射为上下文长度，`input_modalities` 含 `image` 时可看图，二者作为上游声明优先于 models.dev（ADR-0016）；思考档位仍按现有规则。另：该接口按 `client_version` 查询参数过滤较新的模型（不带时 gpt-6.x 不出现），这是官方文档未写明的参数，Nocturne 不伪造客户端版本号，不发送它。

@@ -394,7 +394,13 @@ export async function fetchModels(
         : [];
     return models.flatMap((value): UpstreamModelInfo[] => {
       if (typeof value !== "object" || value === null) return [];
-      const model = value as { visibility?: unknown; slug?: unknown; display_name?: unknown };
+      const model = value as {
+        visibility?: unknown;
+        slug?: unknown;
+        display_name?: unknown;
+        context_window?: unknown;
+        input_modalities?: unknown;
+      };
       if (model.visibility !== "list" || typeof model.slug !== "string" || model.slug === "")
         return [];
       return [
@@ -402,6 +408,15 @@ export async function fetchModels(
           id: model.slug,
           ...(typeof model.display_name === "string" && model.display_name !== ""
             ? { displayName: model.display_name }
+            : {}),
+          // 账号通道声明的上下文长度（如 272000）优先于 models.dev 的 API 数值（ADR-0016）
+          ...(typeof model.context_window === "number" &&
+          Number.isInteger(model.context_window) &&
+          model.context_window > 0
+            ? { contextWindow: model.context_window }
+            : {}),
+          ...(Array.isArray(model.input_modalities)
+            ? { capabilities: { imageInput: model.input_modalities.includes("image") } }
             : {}),
         },
       ];

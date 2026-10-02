@@ -68,13 +68,20 @@ describe("服务商预设", () => {
 // ── fetchModels 上游字段映射（provider-setup.md 第 7 节） ─
 
 describe("fetchModels 字段映射", () => {
-  it("SIWC models[] 只接受 list 可见模型的 slug/display_name", async () => {
+  it("SIWC models[] 只接受 list 可见模型，映射 slug/display_name/context_window/input_modalities", async () => {
     const calls = stubFetch(() =>
       jsonRes({
         data: [{ id: "wrong-format" }],
         models: [
           { slug: "visible", display_name: "显示模型", visibility: "list", context_length: 999 },
           { slug: "bare", visibility: "list" },
+          {
+            slug: "declared",
+            visibility: "list",
+            context_window: 272000,
+            input_modalities: ["text", "image"],
+          },
+          { slug: "text-only", visibility: "list", input_modalities: ["text"], context_window: 0 },
           { slug: "hidden", visibility: "hidden" },
           { slug: "missing-visibility" },
           { visibility: "list", id: "wrong-id" },
@@ -90,7 +97,12 @@ describe("fetchModels 字段映射", () => {
     };
     expect(
       await fetchModels({ type: "openai-compatible", baseURL: "https://api.test/v1" }, auth),
-    ).toEqual([{ id: "visible", displayName: "显示模型" }, { id: "bare" }]);
+    ).toEqual([
+      { id: "visible", displayName: "显示模型" },
+      { id: "bare" },
+      { id: "declared", contextWindow: 272000, capabilities: { imageInput: true } },
+      { id: "text-only", capabilities: { imageInput: false } },
+    ]);
     expect(calls[0]?.url).toBe("https://api.test/v1/models");
     expect(calls[0]?.init?.redirect).toBe("error");
     expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe("Bearer test-access");
