@@ -64,7 +64,16 @@ export function constrainResponsesFetch(
         }
         body.tools =
           functions.length > 0
-            ? [...others, { type: "namespace", name: TOOL_NAMESPACE, tools: functions }]
+            ? [
+                ...others,
+                // 通道要求 namespace 带 description（实测缺少时 400：tools[0].description）
+                {
+                  type: "namespace",
+                  name: TOOL_NAMESPACE,
+                  description: "Tools provided by the local coding agent",
+                  tools: functions,
+                },
+              ]
             : others;
       }
       for (const value of input) {

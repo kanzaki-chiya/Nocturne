@@ -650,6 +650,7 @@ describe("声明式 Responses 约束（ADR-0042 §5）", () => {
         {
           type: "namespace",
           name: "functions",
+          description: "Tools provided by the local coding agent",
           tools: [
             {
               type: "function",
