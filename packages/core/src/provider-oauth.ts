@@ -206,6 +206,8 @@ export function resolveProviderAuth(
       systemAsInstructions: true,
       namespaceTools: true,
       requireCompleted: true,
+      // 缓存按会话路由：只带 prompt_cache_key 时命中率仍很低（实测约 1%），官方客户端另发 session_id 头
+      sessionHeader: "session_id",
     },
     async token(signal) {
       signal.throwIfAborted();

@@ -645,6 +645,18 @@ function constrainedConfig(overrides: Partial<AuthResolver> = {}): OpenAIRespons
 }
 
 describe("声明式 Responses 约束（ADR-0042 §5）", () => {
+  it("通道声明的会话头：条目未声明时按通道头名发送会话 ID", async () => {
+    const capture: Captured = {};
+    const p = createOpenAIResponsesProvider(
+      constrainedConfig({ requestConstraints: { ...constraints, sessionHeader: "session_id" } }),
+      envNoKey,
+      sseFetch([...messageChunks(["ok", ""]), completed()], capture),
+    );
+    await collect(p, request({ sessionId: "sess-9" }));
+    expect(capture.headers?.get("session_id")).toBe("sess-9");
+    expect(capture.body?.["prompt_cache_key"]).toBe("sess-9");
+  });
+
   it("请求快照：system 转 instructions、函数 namespace、禁用参数、保留加密推理", async () => {
     const capture: Captured = {};
     const p = createOpenAIResponsesProvider(

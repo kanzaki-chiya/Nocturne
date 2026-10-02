@@ -223,6 +223,8 @@ export interface ResponsesRequestConstraints {
   systemAsInstructions: boolean;
   namespaceTools: boolean;
   requireCompleted: boolean;
+  /** 通道要求的会话标识头名；条目未声明 sessionHeader 时使用（ADR-0031 §3 同一规则） */
+  sessionHeader?: string | undefined;
 }
 
 export interface AuthResolver {

@@ -171,7 +171,14 @@ export function createOpenAIResponsesProvider(
           : undefined;
       // ADR-0031 §3：会话标识头——请求带 sessionId 且条目声明
       // sessionHeader 才写；静态 headers 同名头优先
-      const requestHeaders = modelRequestHeaders(config, request);
+      // 条目未声明时用鉴权通道要求的头名
+      const requestHeaders = modelRequestHeaders(
+        {
+          ...config,
+          sessionHeader: config.sessionHeader ?? auth.requestConstraints?.sessionHeader,
+        },
+        request,
+      );
       let droppedReasoning = 0;
       const messages = request.messages.flatMap<ModelMessage>((message) => {
         if (message.role !== "assistant") return [message];
