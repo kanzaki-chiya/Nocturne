@@ -254,7 +254,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 **内容**：
 
-- **RPC 第一版**：`nctrn rpc --stdio`，JSON-RPC 按行分隔，一个后台一个 Runtime、一个客户端；事件按 `afterSeq` 回放后衔接实时推送。按 ADR-0044 第 10 节分五步实现，其中服务商配置改为数据接口（`describeProviderSetup` / `addProvider`），CLI 与 TUI 向导迁移其上。
+- **RPC 第一版**（已实现，2026-10-04，待维护者验收）：`nctrn rpc --stdio`，JSON-RPC 按行分隔，一个后台一个 Runtime、一个客户端；事件按 `afterSeq` 回放后衔接实时推送。按 ADR-0044 第 10 节分五步实现，其中服务商配置改为数据接口（`describeProviderSetup` / `prepareProvider` + `commitProvider`），CLI 与 TUI 向导迁移其上。
 - **桌面端**：Tauri 外壳 + 随附 `nctrn` Node 单文件作后台，界面经 RPC 驱动；框架细节、前端技术栈与界面范围待桌面端 ADR。
 
 ## 之后（未排期）

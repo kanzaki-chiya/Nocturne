@@ -42,7 +42,7 @@
 | `getPreference` / `setPreference` | `{ key }` → `string \| null`；`{ key, value? }` → `null` |
 | `listReviewerProviders` / `defaultReviewer` / `listReviewerModels` | 智能权限审查模型相关（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)） |
 
-`SessionOpened`：`{ sessionId, meta, config, warnings, recovery?, lastSeq }`。打开会话**不推事件**——事件要另行 `session.subscribe`。同一连接里已打开的会话再次 `resumeSession` 报 `session_already_open`。`Runtime.updateProviders` 的参数是含函数的进程内配置，无法序列化，不在本版映射（见 ADR-0044 第 10 节第 5 步）。
+`SessionOpened`：`{ sessionId, meta, config, warnings, recovery?, lastSeq }`。打开会话**不推事件**——事件要另行 `session.subscribe`。同一连接里已打开的会话再次 `resumeSession` 报 `session_already_open`。`Runtime.updateProviders` 不单独映射：服务端在每个 `provider.*` 变更方法之后自动重载配置并重建 Provider 注册表，客户端收 `runtime.providersChanged` 通知（见 3.3）。
 
 ### 3.2 `session.*`
 
@@ -63,14 +63,60 @@
 
 `submit.attachments` 是 `[{ data: base64, mimeType, label? }]`；解码后交给 Core，大小与格式校验仍在 Core（[ADR-0023](../decisions/ADR-0023-image-input.md)）。`data` 不是合法 base64 报 `invalid_params`，不进 Runtime。
 
-### 3.3 通知
+### 3.3 `provider.*`
+
+服务商配置（[provider-setup.md](../architecture/provider-setup.md) 第 6 节）。方法名与 Core 数据接口一致；`prepareProvider` 的 `credential` 是判别联合（`{kind:"apiKey",key}` / `{kind:"env",name}` / `{kind:"login",loginId}` / `{kind:"external-file"}`），其余形状校验与配置判断全部在 Core，RPC 层不复制。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `listProviderPresets` | `{}` → `ProviderPreset[]` |
+| `describeProviders` | `{}` → `{ providers: ProviderOverview[]; setupWarning? }` |
+| `describeProviderSetup` | `{ presetId }` → `ProviderSetupDescription` |
+| `describeAccountStorage` | `{ providerId }` → `AccountStorageSetup \| null` |
+| `prepareProvider` | `Omit<AddProviderInput,"modelId">` → `PrepareProviderResult`（只校验、暂存草稿，不落盘） |
+| `commitProvider` | `{ draftId, manualModelId? }` → `AddProviderResult`；**变更方法** |
+| `discardProvider` | `{ draftId }` → `null` |
+| `setCredential` | `{ providerId, key }` → `null`；**变更方法** |
+| `listModelSettings` | `{ providerId }` → `ModelSettingsView[]` |
+| `saveModelSettings` | `{ providerId, modelId, patch }` → `null`；**变更方法** |
+| `refreshUpstreamLimits` | `{ providerId }` → `{ warning: string \| null }`；**变更方法** |
+| `refreshModelsDev` | `{}` → `{ warning: string \| null }`；**变更方法** |
+| `removeSetupProvider` | `{ providerId }` → `null`；**变更方法**；本连接任一会话正在使用时报 `provider_in_use`（同 CLI/TUI 的规则；因服务端持有会话，由服务端对本连接全部已打开会话判断） |
+| `logoutProvider` | `{ providerId }` → `null`；**变更方法** |
+
+**配置对象与重载**（ADR-0044 追加记录）：
+
+- 服务端持有一份"当前" `RuntimeConfig`——初始是创建 Runtime 的那个对象，每次变更方法成功后换成注入的 `reload()` 重新加载出的新对象，随后 `updateProviders` 重建 Provider 注册表并推 `runtime.providersChanged`（在响应之前到达），响应返回时 `runtime.listModels` 等读到的已是新值。变更方法串行执行（配置队列），不会并发重载。
+- 启动时配置对象的 `base` 是加载时快照：本进程新添加的服务商只有重载后的对象看得到（`login.start`、`provider.logoutProvider` 依赖它），这是服务端必须换成新对象的原因。
+- **草稿与草稿登录固定在创建时的配置对象**：Core 的草稿（`draftId`）与草稿登录暂存凭据按 `RuntimeConfig` 对象登记；`prepareProvider` 用 `credential.kind === "login"` 的 loginId 是本连接 `login.startDraft` 产生的时用该登录创建时的对象，`commitProvider`/`discardProvider` 用该 `draftId` 创建时的对象。草稿跨连接无效：连接断开即被丢弃（第 6 节）。
+- 变更本身抛错：不重载，原样返回错误。**重载抛错：请求以重载错误失败，但此前的写入已生效**（providers.json / 凭据已落盘，Runtime 仍用旧配置），不伪造回滚。
+- `addProvider` 不映射：它是 prepare+commit 的兼容组合，客户端分两步调用以便保存前展示 `PrepareProviderResult`。
+
+### 3.4 `login.*`
+
+登录会话（[provider-setup.md](../architecture/provider-setup.md) 第 6 节）：`start`/`startDraft` 返回 `loginId`、`authorizeUrl`（浏览器由客户端打开，服务端不打开）与 `manualInput`（`"callback-url"` / `"code"` / `"none"`；`"none"` 是设备码登录，`userCode` 供在浏览器核对），完成或失败经 `login.completed` 通知。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `login.start` | `{ providerId, accountStorage?, remote? }` → `LoginStarted`；已保存服务商（重）登录，`loginId` 由服务端生成 |
+| `login.startDraft` | `{ presetId, name, baseURL?, accountStorage?, remote? }` → `LoginStarted`；表单里未保存的草稿登录，`name` 必填，`loginId` 沿用 Core 分配的 |
+| `login.submitManual` | `{ loginId, text }` → `null`；粘贴回调 URL 或授权码 |
+| `login.cancel` | `{ loginId }` → `null`；进行中 → 取消（随后收到 `cancelled` 的 `login.completed`）；已完成未提交的草稿登录 → 丢弃暂存凭据（无通知）。不存在的 `loginId` 报 `unknown_login` |
+
+`accountStorage`：`"plaintext" \| "memory"`，服务端没有系统凭据后端且为账号型登录时由客户端先经 `describeAccountStorage` 了解选项、再由用户选择后传入，没有默认值；`remote` 为真时不开本机回环端口，改走手动粘贴。
+
+`login.completed` 参数：`{ loginId, result?: { providerId, account? }, error?: { code, message }, unstoredKey?, warning? }`——`result` 只含 providerId 与账号描述，不含令牌；`error` 对 `ProviderLoginError` 用其固定文案，其他异常一律 `{code:"failed",message:"登录未完成，请重新登录"}`；**通知绝不先于对应 `start`/`startDraft` 的响应到达**。已保存服务商登录成功先触发一次自动重载（`runtime.providersChanged` 在 `login.completed` 之前）；重载失败时 `warning` 带提示（凭据已写入）。OpenRouter 在无系统凭据后端时的一次性密钥只出现在该登录的 `login.completed.unstoredKey` 一条通知里，设置环境变量的命令文本由客户端生成。
+
+### 3.5 通知
 
 | 方向 | 方法 | 参数 | 说明 |
 |---|---|---|---|
 | 客户端→服务端 | `session.interrupt` | `{ sessionId }` | 中断运行中的 Turn；无 Turn 时无操作。`submit` 请求随后以 `aborted` 返回。服务端也接受带 `id` 的请求形式（回复 `null`） |
 | 服务端→客户端 | `event` | `{ sessionId, event }` | `event` 原样是 [events.md](events.md) 的 `RuntimeEvent` 信封，不另包一层 |
+| 服务端→客户端 | `runtime.providersChanged` | `{}` | 服务商配置/凭据变更完成且 Runtime 已用重载后配置重建：在对应 `provider.*` 变更方法（或已保存服务商 `login.start` 成功）的响应/完成通知之前到达一次（3.3、3.4） |
+| 服务端→客户端 | `login.completed` | `LoginCompleted` | 登录会话完成或失败（含取消）；绝不先于对应 `login.start`/`startDraft` 的响应到达（3.4） |
 
-### 3.4 `shutdown`
+### 3.6 `shutdown`
 
 请求，无参数。服务端完成与"传输断开"相同的清理（第 6 节）后回复 `null`，再关闭传输。
 
@@ -98,7 +144,8 @@
 | `-32001` | `RuntimeCommandError`（命令被拒绝，原因码见 [events.md](events.md) 第 7 节） | `session_busy`、`unknown_request`、`invalid_reply`、`invalid_command` |
 | `-32002` | `SessionError` | 会话层错误码 |
 | `-32003` | `ProviderLoginError` | 登录错误码 |
-| `-32004` | RPC 层状态错误 | `not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down` |
+| `-32004` | RPC 层状态错误 | `not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down`、`provider_config_unavailable`（服务端未注入服务商配置）、`provider_in_use`（会话正在使用的服务商拒绝删除）、`unknown_login`（登录会话不存在或已结束） |
+| `-32005` | `ProviderSetupError`（服务商配置表单的字段错误） | `invalid_field`；`data.field` 是字段名（`preset`、`name`、`baseURL`、`credential`、`draftId`、`modelId`），客户端据此标输入框 |
 
 客户端侧另有 `connection_closed`：连接断开时所有在途请求以它失败，而不是悬挂。
 
@@ -106,6 +153,7 @@
 
 - **输入结束**（stdin EOF）：不再接收请求，输出仍可用。服务端中断运行中的 Turn，等待已接收的请求（包括等待握手或打开会话的请求）返回；EOF 后才开始的 submit 同样中断并返回 `aborted`。所有回复写完并刷出后，关闭全部会话（刷盘、释放会话锁）、释放 Runtime 之外的资源，再结束 `serve`。之后新 Runtime 可直接恢复会话，没有残留锁。
 - **完整断开**（输出 EPIPE、客户端崩溃）：执行同样的中断与清理，但输出不可用时丢弃回复。`LineTransport.onClose` 表示输入结束或完整断开；异步缓冲输出的传输实现可选的 `flush()`，保证清理前已发送的报文刷出。
+- **登录与草稿清理**（两种断开与 `shutdown` 相同）：进行中的登录会话全部 `cancel`（关闭回环端口，其 `login.completed` 照常推送）；本连接未提交的 `prepareProvider` 草稿丢弃（只释放内存，不写盘、不消费登录）；已完成未提交的草稿登录经 `discardDraftLogin` 丢弃暂存凭据。草稿与草稿登录因此不跨连接存活。
 - **`shutdown` 请求**：同样的清理完成后回复，再关闭传输。
 - 握手前断开：不创建 Runtime，正常结束。
 
@@ -113,11 +161,12 @@
 
 - 第一版不监听端口，不鉴权：能连上传输的只有启动服务端的父进程，权限等同于运行 `nctrn` 的用户（[ADR-0044](../decisions/ADR-0044-rpc-stdio.md) 第 8 节）。
 - 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` 事件与 `respondPermission` 回复，不判断"要不要确认"。
-- 诊断记录（`diagnostics` 回调）只含连接状态、方法名与结果（成功与否、错误码），**不含任何参数**——参数里可能有密钥明文（`addProvider`、`setCredential`，第 5 步映射后同样适用）或用户输入。
+- 诊断记录（`diagnostics` 回调）只含连接状态、方法名与结果（成功与否、错误码），**不含任何参数与通知内容**——参数里可能有密钥明文（`provider.prepareProvider`、`provider.setCredential`）或用户输入，通知里可能有一次性密钥（`login.completed.unstoredKey`）。
+- **敏感参数**：服务端维护一张敏感方法表（`SENSITIVE_METHODS`）——`runtime.updateSettings` 的 `reviewerKey`、`provider.prepareProvider` 中 `credential.kind === "apiKey"` 的 `key`、`provider.setCredential` 的 `key`、`login.submitManual` 的 `text`。这些方法失败时，错误响应 `message` 与 `data` 里出现的秘密值一律替换为 `[redacted]`；其他方法沿用 Core 的固定文案错误（Core 错误本身不含秘密）。通知内容不进诊断，密钥只经其语义通道传递（如 `login.completed.unstoredKey` 恰好一次）。
 
 ## 8. 与公开 API 保持一致
 
-方法清单以公开 API 为准，RPC 层不另加能力。`packages/rpc/src/server/coverage.ts` 登记 `Runtime` 与 `RuntimeSession` 每个成员对应的 RPC 方法或"不映射"的原因，键类型由 `keyof` 推导：公开 API 新增成员而没有登记，编译失败；覆盖测试再用真实对象的键与服务端方法表对照。公开 API 新增方法时，同步在 `RpcMethods`、服务端处理表、客户端封装与本文补映射。
+方法清单以公开 API 为准，RPC 层不另加能力。`packages/rpc/src/server/coverage.ts` 登记 `Runtime`、`RuntimeSession` 与 `RuntimeConfig` 每个成员对应的 RPC 方法或"不映射"的原因，键类型由 `keyof` 推导：公开 API 新增成员而没有登记，编译失败；覆盖测试再用真实对象的键与服务端方法表对照。服务商配置函数另有 `PROVIDER_FUNCTION_METHODS` / `PROVIDER_FUNCTIONS_NOT_MAPPED` 一张表，覆盖测试直接读 `packages/core/src/index.ts` 的导出块校验全集。公开 API 新增方法时，同步在 `RpcMethods`、服务端处理表、客户端封装与本文补映射。
 
 ## 9. 服务端进程
 

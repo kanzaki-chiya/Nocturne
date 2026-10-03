@@ -192,7 +192,7 @@ API key **不以明文落盘**。向导把密钥交给操作系统自带的凭�
 
 ## 6. Core 接口
 
-服务商配置的判断逻辑（预设、哪些字段要问、凭据方式、无后端时怎么办、模型列表失败怎么提示、文件写入、登录会话）全部在 Core，以**数据接口**暴露（[ADR-0044](../decisions/ADR-0044-rpc-stdio.md) 第 6 节）：`describeProviderSetup` 描述某个预设需要填什么，`prepareProvider` 获取模型列表并暂存表单，`commitProvider` 在确认后保存。Core 不回调客户端、不持有任何界面概念；CLI 逐行向导、TUI 服务商页与 RPC 客户端（桌面端原生表单）都是这些接口的外壳。登录接口是 `startProviderLogin` / `startDraftProviderLogin` / `logoutProvider` / `LoginSession`（[provider-api.md](../protocols/provider-api.md) 第 1 节）。`fetchModels` 与模型请求都经同一 `AuthResolver` 取令牌。接口不发送模型对话请求。v0.3 起配置不再选择模型：`addProvider` 只把服务商配上，结果只含 `providerId` 与已登记模型数。
+服务商配置的判断逻辑（预设、哪些字段要问、凭据方式、无后端时怎么办、模型列表失败怎么提示、文件写入、登录会话）全部在 Core，以**数据接口**暴露（[ADR-0044](../decisions/ADR-0044-rpc-stdio.md) 第 6 节）：`describeProviderSetup` 描述某个预设需要填什么，`prepareProvider` 获取模型列表并暂存表单，`commitProvider` 在确认后保存。Core 不回调客户端、不持有任何界面概念；CLI 逐行向导、TUI 服务商页与 RPC 客户端（桌面端原生表单）都是这些接口的外壳——RPC 客户端经 `provider.*` / `login.*` 方法使用同一组接口，配置变更由服务端串行重载并推 `runtime.providersChanged`（[rpc.md](../protocols/rpc.md) 3.3、3.4）。登录接口是 `startProviderLogin` / `startDraftProviderLogin` / `discardDraftLogin` / `logoutProvider` / `LoginSession`（[provider-api.md](../protocols/provider-api.md) 第 1 节）。`fetchModels` 与模型请求都经同一 `AuthResolver` 取令牌。接口不发送模型对话请求。v0.3 起配置不再选择模型：`addProvider` 只把服务商配上，结果只含 `providerId` 与已登记模型数。
 
 ```ts
 // @nocturne/core 公开导出
@@ -240,6 +240,8 @@ startDraftProviderLogin(config, target: { presetId, name, baseURL }, options): P
   accountStorage: "plaintext" | "memory"（ProviderLoginOptions）
   // 无系统凭据后端时的账号凭据保存位置，由客户端经 accountStorage 描述让用户显式选择后传入；缺省不落盘，
   //   startProviderLogin / startDraftProviderLogin 在授权开始前就以 ProviderLoginError("accountStorage") 拒绝
+discardDraftLogin(config, loginId): void
+  // 丢弃草稿登录暂存的凭据（表单放弃或客户端断开）；进行中的登录用 LoginSession.cancel，commit 后为空操作
 
 // RuntimeConfig（config 模块）新增
 credentials: CredentialStore                             // 第 3 节的统一接口；get 结果在进程内缓存
