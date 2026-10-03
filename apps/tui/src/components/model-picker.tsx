@@ -97,14 +97,13 @@ function rightRows(
   };
   const pool = models.filter((m) => inScope(m) && matchQuery(m, query));
   const isRecent = (m: ModelInfo): boolean => recents.some((r) => refEq(r, m.ref));
-  if (scope.kind === "recent") {
-    // 保持 recents 新→旧顺序
-    const ordered = recents
-      .map((r) => pool.find((m) => refEq(m.ref, r)))
-      .filter((m): m is ModelInfo => m !== undefined);
-    return { recentRows: [], restRows: ordered.map((model) => ({ model, recent: true })) };
-  }
-  const recentRows = pool.filter(isRecent).map((model) => ({ model, recent: true }));
+  // 最近项一律按 recents 新→旧排列，不按模型列表顺序
+  const ordered = recents
+    .map((r) => pool.find((m) => refEq(m.ref, r)))
+    .filter((m): m is ModelInfo => m !== undefined)
+    .map((model) => ({ model, recent: true }));
+  if (scope.kind === "recent") return { recentRows: [], restRows: ordered };
+  const recentRows = ordered;
   const restRows = pool.filter((m) => !isRecent(m)).map((model) => ({ model, recent: false }));
   return { recentRows, restRows };
 }
@@ -557,11 +556,11 @@ function RightPane({
   const lines: React.JSX.Element[] = [];
   visible.forEach((row, i) => {
     const idx = start + i;
-    // 最近使用区与其余模型之间的分隔线
+    // 最近使用区与其余模型之间的分隔线：标签说明线下是什么
     if (recentCount > 0 && idx === recentCount && restVisibleOnce(rows, recentCount)) {
       lines.push(
         <Text key="sep" dimColor>
-          {line.repeat(6)} 最近使用 {line.repeat(Math.max(2, width - 18))}
+          {line.repeat(6)} 其余模型 {line.repeat(Math.max(2, width - 18))}
         </Text>,
       );
     }

@@ -230,6 +230,24 @@ describe("模型选择页", () => {
     unmount();
   });
 
+  it("全部模型范围最近项按新→旧置顶，分隔线标「其余模型」", async () => {
+    const { lastFrame, unmount } = renderPicker({
+      recents: [
+        { provider: "openrouter", model: "llama-4" },
+        { provider: "deepseek", model: "deepseek-chat" },
+      ],
+    });
+    await pause();
+    const frame = lastFrame() ?? "";
+    const llama = frame.indexOf("openrouter/llama-4");
+    const chat = frame.indexOf("deepseek/deepseek-chat");
+    const sep = frame.indexOf("其余模型");
+    expect(llama).toBeGreaterThan(-1);
+    expect(llama).toBeLessThan(chat);
+    expect(chat).toBeLessThan(sep);
+    unmount();
+  });
+
   it("打字自动聚焦搜索框并模糊过滤；Esc 先清搜索再关闭", async () => {
     const { lastFrame, stdin, unmount, onClose } = renderPicker();
     await pause();
