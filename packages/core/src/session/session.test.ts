@@ -526,11 +526,6 @@ describe("会话锁（ADR-0009）", () => {
 
   it("force：强制清锁后打开", async () => {
     const s1 = await store.create(INPUT);
-    // 锁归属按 {pid, hostname, startedAt} 区分；同进程同毫秒的两次取锁内容
-    // 完全相同，旧持有者 release 会误删新锁。推进到下一毫秒再取第二把，
-    // 保证两把锁的 startedAt 不同、归属可区分
-    const ms = Date.now();
-    while (Date.now() === ms) await new Promise((r) => setImmediate(r));
     const s2 = await store.load(s1.id, { force: true });
     expect(s2.id).toBe(s1.id);
     // 旧持有者释放时不得误删新锁（release 校验锁内容归属）

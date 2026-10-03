@@ -61,7 +61,7 @@ MVP 不做快照；若将来出现加载瓶颈，再追加 `session.snapshot` �
 
 顺序不能调换：**先取得锁，再读取和修改日志**。否则两个进程同时恢复时，可能各自追加修复事件后才发现对方存在。
 
-1. **取得排他锁**：以"文件不存在才创建"的原子方式创建锁文件 `<sessionId>.lock`（`writeFile` 的排他创建），内容为 `{ pid, hostname, startedAt }` JSON。锁已存在时按失效判定处理（ADR-0009）：锁的 `startedAt` 早于本机最近一次开机（`Date.now() - os.uptime() * 1000`）→ 失效；主机名相同且该 pid 已不存在 → 失效；两者皆判为失效时删除后重试一次，重试仍撞上锁则拒绝；主机名不同、pid 存活或无法判定 → 拒绝打开，`SessionError(code = "session_locked")`；`resumeSession(id, { force: true })`（CLI `--force-unlock`）先删锁再走正常流程。网络文件系统上的会话目录不受支持；锁的已知限制（pid 复用、非强制性）见 ADR-0009。
+1. **取得排他锁**：以"文件不存在才创建"的原子方式创建锁文件 `<sessionId>.lock`（`writeFile` 的排他创建），内容为 `{ pid, hostname, startedAt, token }` JSON，`token` 是每把锁的随机值，释放时只删 `token` 与自己相同的锁（force 或失效清理后可能已有新持有者，同进程同一毫秒取的两把锁只能靠它区分）。锁已存在时按失效判定处理（ADR-0009）：锁的 `startedAt` 早于本机最近一次开机（`Date.now() - os.uptime() * 1000`）→ 失效；主机名相同且该 pid 已不存在 → 失效；两者皆判为失效时删除后重试一次，重试仍撞上锁则拒绝；主机名不同、pid 存活或无法判定 → 拒绝打开，`SessionError(code = "session_locked")`；`resumeSession(id, { force: true })`（CLI `--force-unlock`）先删锁再走正常流程。网络文件系统上的会话目录不受支持；锁的已知限制（pid 复用、非强制性）见 ADR-0009。
 2. **读取并校验**：逐行解析。
    - 检查 `session.created.formatVersion` 与全部事件类型；遇到高于自身支持的版本或不认识的持久化事件类型，拒绝恢复（`session_log_newer`），见 [events.md](../protocols/events.md) 第 8 节。
    - 检查 `seq` 从 1 连续递增。
