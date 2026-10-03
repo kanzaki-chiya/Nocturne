@@ -11,7 +11,7 @@ import { reduceSessionView, replaySessionView, type SessionView } from "@nocturn
 export function useSessionView(session: RuntimeSession): SessionView {
   const ref = useRef<{ session: RuntimeSession; view: SessionView } | undefined>(undefined);
   if (ref.current?.session !== session) {
-    ref.current = { session, view: replaySessionView(session.session.durableEvents()) };
+    ref.current = { session, view: replaySessionView(session.durableEvents()) };
   }
   const [, bump] = useReducer((c: number) => c + 1, 0);
   useEffect(() => {

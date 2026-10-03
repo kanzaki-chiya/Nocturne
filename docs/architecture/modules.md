@@ -148,6 +148,7 @@
 const runtime = await createRuntime({ cwd, providerConfigs, interactive, config })  // 选项见 RuntimeOptions
 const session = await runtime.createSession({ model: "provider/model" })  // 或 resumeSession(id, { force?, model? }) / listSessions()
 const unsubscribe = session.subscribe((event) => render(event))
+session.durableEvents()                                      // 已写入日志的持久事件（旧→新）；先回放再 subscribe，见 view.md 第 6 节
 await session.submit({ text: "修复登录测试" })                 // 返回在 Turn 结束时 resolve
 session.interrupt()
 await session.respondPermission(requestId, { decision: "allow", remember: "project" })  // Phase 3 起生成 Grant
@@ -173,6 +174,8 @@ Phase 6 增补：`subagent` 选项（`enabled`/`maxDepth`/`maxConcurrent`/`maxSt
 `RuntimeConfig` 与 `Runtime` 的通用字符串偏好读写接口及未注入配置时的行为见 [config.md](config.md) 第 2 节；Core 不解释 TUI 主题取值。
 
 恢复相关的会话 API：`resumeSession(id, { force?: boolean })`（`force` 对应强制解锁，见 [sessions.md](sessions.md) 第 4 节）；`listSessions({ cwd? })` 的摘要含 `locked` 字段；`session.recovery` 暴露本次打开执行的修复（截断尾部、补齐调用与 Turn）。
+
+`RuntimeSession` 只暴露上面这些方法，不暴露内部 `Session` 对象：客户端回放视图用 `durableEvents()`，不得绕道读会话内部状态（[ADR-0044](../decisions/ADR-0044-rpc-stdio.md) 第 5 节）。Core 与客户端自己的测试需要直接发事件时，经 `createRuntime` 挂在会话对象上的 `Symbol.for("nocturne.core.internalSession")` 属性取内部 `Session`——该属性不在公开类型里，也不可枚举。
 
 `describeContext` 与 `listModels` 是**只读查询**：不改变会话状态、不产生事件，只为客户端展示服务。
 

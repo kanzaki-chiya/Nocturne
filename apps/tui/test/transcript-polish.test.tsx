@@ -27,6 +27,7 @@ import {
 import { anchorFromBottom, selectVisible, type LineBlock } from "../src/viewport.js";
 import type { MouseEvent, MouseSource } from "../src/mouse.js";
 import { palettes } from "../src/theme.js";
+import { internalSession } from "./internal-session.js";
 
 const roots: string[] = [];
 function temp() {
@@ -143,14 +144,14 @@ it("工具标题展开完整输出并收起；diff 标题和省略行共享状�
     }),
   );
   await vi.waitFor(() => expect(screen.lastFrame()).toContain("v0.4.0"));
-  await session.session.emit("tool.started", {
+  await internalSession(session).emit("tool.started", {
     callId: "read1",
     name: "read",
     input: { path: "a.ts" },
     subjects: [],
     permission: { action: "allow", source: "rule" },
   });
-  await session.session.emit("tool.completed", {
+  await internalSession(session).emit("tool.completed", {
     callId: "read1",
     name: "read",
     status: "ok",
@@ -165,14 +166,14 @@ it("工具标题展开完整输出并收起；diff 标题和省略行共享状�
   await changed(screen, () => click(mouse, y));
   expect(screen.lastFrame()).not.toContain("完整输出第一行");
   const diff = `@@ -0,0 +1,50 @@\n${Array.from({ length: 50 }, (_, i) => `+line${i + 1}`).join("\n")}`;
-  await session.session.emit("tool.started", {
+  await internalSession(session).emit("tool.started", {
     callId: "diff1",
     name: "write",
     input: { path: "b.ts", content: "" },
     subjects: [],
     permission: { action: "allow", source: "rule" },
   });
-  await session.session.emit("tool.completed", {
+  await internalSession(session).emit("tool.completed", {
     callId: "diff1",
     name: "write",
     status: "ok",

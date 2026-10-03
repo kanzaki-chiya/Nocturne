@@ -18,6 +18,7 @@ import {
   type ModelInfo,
 } from "../src/provider/index.js";
 import { replaySessionView, type RuntimeEvent } from "../src/protocol/index.js";
+import { internalSession } from "./internal-session.js";
 
 const tmpRoots: string[] = [];
 
@@ -335,7 +336,7 @@ describe("公开 Runtime API", () => {
       expect(restored.state().usage).toMatchObject({ inputTokens: 11, outputTokens: 3 });
       expect(restored.state().config.permissionPreset).toBe("smart");
       expect(
-        replaySessionView(restored.session.durableEvents()).entries.find((e) => e.kind === "tool"),
+        replaySessionView(restored.durableEvents()).entries.find((e) => e.kind === "tool"),
       ).toMatchObject({ review: { verdict: "allow" } });
       await restored.close();
     },
@@ -359,7 +360,7 @@ describe("公开 Runtime API", () => {
     ).toHaveLength(1);
     await session.close();
     // 真实旧版日志的两种字段都要能打开，而非只测 API 别名。
-    const logPath = session.session.logPath;
+    const logPath = internalSession(session).logPath;
     writeFileSync(
       logPath,
       readFileSync(logPath, "utf8")
@@ -379,6 +380,31 @@ describe("公开 Runtime API", () => {
     await expect(runtime.createSession({ model: "unknown/m" })).rejects.toThrow(
       /未配置的 Provider/,
     );
+  });
+
+  it("durableEvents 经公开方法返回持久事件，内部 Session 不出现在公开会话对象上", async () => {
+    const { runtime } = await makeRuntime([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "finish", reason: "stop" },
+      ],
+    ]);
+    const session = await makeSession(runtime);
+    const live: number[] = [];
+    session.subscribe((e) => {
+      if ("seq" in e) live.push(e.seq);
+    });
+    await session.submit({ text: "hi" });
+
+    const durable = session.durableEvents();
+    expect(durable[0]?.type).toBe("session.created");
+    expect(durable.map((e) => e.seq)).toEqual(durable.map((_, i) => i + 1));
+    expect(live.every((seq) => durable.some((e) => e.seq === seq))).toBe(true);
+    expect(replaySessionView(durable).entries.some((e) => e.kind === "user")).toBe(true);
+    // 公开对象的可枚举键里没有内部 Session
+    expect(Object.keys(session)).not.toContain("session");
+    expect(internalSession(session).durableEvents()).toEqual(durable);
+    await session.close();
   });
 
   it("submit 忙时拒绝 session_busy", async () => {

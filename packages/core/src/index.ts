@@ -88,6 +88,7 @@ import type {
   Grant,
   HookEntry,
   HookPoint,
+  DurableEvent,
   ImageMimeType,
   ModelRef,
   PermissionReply,
@@ -144,6 +145,12 @@ export class RuntimeCommandError extends Error {
     this.code = code;
   }
 }
+
+/**
+ * RuntimeSession 上挂内部 Session 的属性键：不在公开类型里，客户端拿不到；
+ * 只供各包测试经 Symbol.for 取用（直接发事件、读日志路径）。
+ */
+const INTERNAL_SESSION = Symbol.for("nocturne.core.internalSession");
 
 /** 指令文件大小上限（context.md 6.2：每项注入内容都有上限） */
 const INSTRUCTION_FILE_LIMIT = 64 * 1024;
@@ -257,8 +264,12 @@ export interface RuntimeSession {
   rewindTargets(): Promise<RewindTarget[]>;
   rewind(targetSeq: number, mode: RewindMode): Promise<SessionRewoundPayload["files"]>;
   readonly id: string;
-  readonly session: Session;
   state(): SessionState;
+  /**
+   * 本会话已写入日志的全部持久化事件（旧→新）。客户端用它按
+   * protocol 的 reducer 回放视图，再 subscribe 接实时事件（view.md 第 6 节）。
+   */
+  durableEvents(): readonly DurableEvent[];
   /** 订阅会话事件（durable + ephemeral），返回退订函数 */
   subscribe(listener: (event: RuntimeEvent) => void): () => void;
   /** 当前工作区的持久输入历史（旧→新）。读取失败时警告并返回空列表。 */
@@ -1356,9 +1367,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         settle();
       }
     });
-    return {
+    const runtimeSession: RuntimeSession = {
       id: session.id,
-      session,
+      durableEvents: () => session.durableEvents(),
       rewindTargets() {
         assertUsable();
         if (busy() || compactController !== undefined)
@@ -1872,6 +1883,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await session.close();
       },
     };
+    // 内部 Session 句柄只留给各包测试：非导出 Symbol 键，不在 RuntimeSession 类型里
+    Object.defineProperty(runtimeSession, INTERNAL_SESSION, { value: session });
+    return runtimeSession;
   }
 
   return {

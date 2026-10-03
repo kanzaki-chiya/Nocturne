@@ -1233,7 +1233,7 @@ describe("subagent：恢复", () => {
 
     const session = await runtime.resumeSession(parentId);
     // 未结算 task 调用被补 interrupted，未结束 Turn 收束
-    const durable = session.session.durableEvents();
+    const durable = session.durableEvents();
     const interrupted = durable.find(
       (e) => e.type === "tool.completed" && e.payload.callId === "c1",
     );

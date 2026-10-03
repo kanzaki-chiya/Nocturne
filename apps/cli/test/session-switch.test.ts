@@ -317,7 +317,7 @@ describe("REPL /resume 与切换器组合", () => {
     expect(res.kind).toBe("ok");
     if (res.kind !== "ok") return;
     // 新会话重放：durableEvents 含 session.created
-    expect(res.session.session.durableEvents().map((e) => e.type)).toContain("session.created");
+    expect(res.session.durableEvents().map((e) => e.type)).toContain("session.created");
     await res.session.close();
   });
 });

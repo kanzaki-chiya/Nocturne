@@ -23,6 +23,7 @@ import {
   replaySessionView,
   type ToolEntry,
 } from "../src/protocol/index.js";
+import { internalSession } from "./internal-session.js";
 
 const tmpRoots: string[] = [];
 
@@ -93,7 +94,7 @@ function assertConverged(view: SessionView): void {
  * 回放获得——这正是真实客户端路径：先回放日志，再订阅实时事件（view.md §6）。
  */
 function collect(session: RuntimeSession): { pre: DurableEvent[]; events: RuntimeEvent[] } {
-  const pre = [...session.session.durableEvents()];
+  const pre = [...session.durableEvents()];
   const events: RuntimeEvent[] = [];
   session.subscribe((e) => {
     events.push(e);
@@ -111,7 +112,7 @@ function viewFrom(
   return view;
 }
 
-const durableOf = (session: RuntimeSession) => session.session.durableEvents();
+const durableOf = (session: RuntimeSession) => session.durableEvents();
 
 const toolEntries = (view: SessionView): ToolEntry[] =>
   view.entries.filter((e): e is ToolEntry => e.kind === "tool");
@@ -378,12 +379,12 @@ describe("SessionView reducer", () => {
         if (e.type === "permission.requested") resolve();
       });
     });
-    await session.session.close();
+    await internalSession(session).close();
     // 提交 Promise 悬挂（gate 无回复）；不等待
 
     const restored = await runtime.resumeSession(session.id);
     const { events: events2 } = collect(restored);
-    const view = replaySessionView(restored.session.durableEvents());
+    const view = replaySessionView(restored.durableEvents());
     assertConverged(view);
     const tool = toolEntries(view)[0];
     expect(tool?.status).toBe("interrupted");
@@ -412,7 +413,7 @@ describe("SessionView reducer", () => {
     await session.submit({ text: "第一轮" });
     await session.setModel("fake/fake-1");
     // 直接发持久事件构造压缩记录（压缩本身在别处测试）
-    await session.session.emit(
+    await internalSession(session).emit(
       "context.compacted",
       { kind: "summary", throughSeq: 3, summary: "早期内容摘要" },
       {},

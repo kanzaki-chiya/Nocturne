@@ -15,6 +15,7 @@ import { createPlatform } from "../src/platform/index.js";
 import { createCheckpointRecorder } from "../src/session/checkpoints.js";
 import { attachmentDescriptions } from "../src/context/index.js";
 import { createSessionView, reduceSessionView, replaySessionView } from "../src/protocol/index.js";
+import { internalSession } from "./internal-session.js";
 
 const dirs: string[] = [];
 const temp = () => {
@@ -37,16 +38,16 @@ async function setup(provider = new FakeProvider({})) {
     platform,
     runtime,
     session,
-    recorder: createCheckpointRecorder(session.session, platform, sessionsDir),
+    recorder: createCheckpointRecorder(internalSession(session), platform, sessionsDir),
   };
 }
 
 it("只回退对话后仍按原始日志取最早 before；新文件删除、外部标记、失败逐项处理，多次回退可重放", async () => {
   const { cwd, session, recorder, runtime } = await setup();
   const online = createSessionView();
-  for (const event of session.session.durableEvents()) reduceSessionView(online, event);
+  for (const event of session.durableEvents()) reduceSessionView(online, event);
   session.subscribe((e) => reduceSessionView(online, e));
-  const first = await session.session.emit("message.user", {
+  const first = await internalSession(session).emit("message.user", {
     messageId: "u1",
     content: [{ type: "text", text: "first" }],
   });
@@ -65,12 +66,12 @@ it("只回退对话后仍按原始日志取最早 before；新文件删除、外
     await recorder("after", call, subjects, session.id);
   };
   await edit("one", "one");
-  const second = await session.session.emit("message.user", {
+  const second = await internalSession(session).emit("message.user", {
     messageId: "u2",
     content: [{ type: "text", text: "second" }],
   });
   await edit("two", "two");
-  await session.session.emit("tool.started", {
+  await internalSession(session).emit("tool.started", {
     callId: "shell",
     name: "anything",
     mutates: true,
@@ -78,7 +79,7 @@ it("只回退对话后仍按原始日志取最早 before；新文件删除、外
     subjects: [],
     permission: { action: "allow", source: "rule" },
   });
-  await session.session.emit("checkpoint.file", {
+  await internalSession(session).emit("checkpoint.file", {
     callId: "x",
     path: path.join(cwd, "dir"),
     phase: "before",
@@ -114,14 +115,14 @@ it("只回退对话后仍按原始日志取最早 before；新文件删除、外
   await session.rewind(first.seq, "both");
   expect(await session.rewindTargets()).toEqual([]);
   expect(session.state().history).toEqual([]);
-  const third = await session.session.emit("message.user", {
+  const third = await internalSession(session).emit("message.user", {
     messageId: "u3",
     content: [{ type: "text", text: "new branch" }],
   });
   expect((await session.rewindTargets()).map((t) => t.seq)).toEqual([third.seq]);
   await session.rewind(third.seq, "conversation");
-  expect(online.entries).toEqual(replaySessionView(session.session.durableEvents()).entries);
-  expect(online.todos).toEqual(replaySessionView(session.session.durableEvents()).todos);
+  expect(online.entries).toEqual(replaySessionView(session.durableEvents()).entries);
+  expect(online.todos).toEqual(replaySessionView(session.durableEvents()).todos);
   const expected = session.state();
   const id = session.id;
   await session.close();
@@ -133,7 +134,7 @@ it("只回退对话后仍按原始日志取最早 before；新文件删除、外
 it("回填原用户文字不包含 @ 引用的文件快照", async () => {
   const { session } = await setup();
   try {
-    await session.session.emit("message.user", {
+    await internalSession(session).emit("message.user", {
       messageId: "ref",
       content: [
         { type: "text", text: "检查 @a.txt" },
@@ -150,7 +151,7 @@ it("回填原用户文字不包含 @ 引用的文件快照", async () => {
 
 it("回退重算任务清单与图片描述，保持配置、标题和累计用量，移除压缩边界", async () => {
   const { session } = await setup();
-  const s = session.session;
+  const s = internalSession(session);
   const old = await s.emit("message.user", {
     messageId: "old",
     content: [{ type: "text", text: "old" }],

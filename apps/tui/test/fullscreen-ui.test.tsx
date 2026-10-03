@@ -15,6 +15,7 @@ import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "
 
 import { App } from "../src/app.js";
 import { splitTextBlocks } from "../src/app.js";
+import { internalSession } from "./internal-session.js";
 
 const tmpRoots: string[] = [];
 beforeEach(() => vi.stubEnv("NOCTURNE_HOME", tmp("nct-tui-home-")));
@@ -100,7 +101,7 @@ describe("全屏界面", () => {
     await waitFor(() => (lastFrame() ?? "").includes("idle"));
     // 对话里的快照只列三项；多次更新把对话撑过一屏，才有历史可翻
     for (let round = 1; round <= 3; round++) {
-      await session.session.emit("tool.completed", {
+      await internalSession(session).emit("tool.completed", {
         callId: `todo-warm-${round}`,
         name: "todo_write",
         status: "ok",
@@ -108,7 +109,7 @@ describe("全屏界面", () => {
         output: { items: [{ text: `预热${round}`, status: "in_progress" }] },
       });
     }
-    await session.session.emit("tool.completed", {
+    await internalSession(session).emit("tool.completed", {
       callId: "todo-1",
       name: "todo_write",
       status: "ok",
@@ -130,7 +131,7 @@ describe("全屏界面", () => {
     stdin.write("\x1b[5~"); // PageUp
     await waitFor(() => (lastFrame() ?? "").includes("已向上翻阅"));
     expect(lastFrame()).toMatch(PANEL_HEAD);
-    await session.session.emit("tool.completed", {
+    await internalSession(session).emit("tool.completed", {
       callId: "todo-2",
       name: "todo_write",
       status: "ok",
@@ -148,7 +149,7 @@ describe("全屏界面", () => {
     const { lastFrame, unmount } = render(
       createElement(App, { session, runtime, env: { ascii: true, animated: false } }),
     );
-    await session.session.emit("tool.completed", {
+    await internalSession(session).emit("tool.completed", {
       callId: "todo-small",
       name: "todo_write",
       status: "ok",

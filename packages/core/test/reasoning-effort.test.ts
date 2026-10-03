@@ -243,7 +243,7 @@ describe("Runtime：思考档位", () => {
     const { runtime } = await makeRuntime(new FakeProvider({}));
     const s = await runtime.createSession({ model: "fake/fake-1", reasoningEffort: "high" });
     expect(s.state().config.reasoningEffort).toBe("high");
-    const created = s.session.durableEvents().find((e) => e.type === "session.created");
+    const created = s.durableEvents().find((e) => e.type === "session.created");
     expect(created?.type === "session.created" && created.payload.reasoningEffort).toBe("high");
     const id = s.id;
     await s.close();

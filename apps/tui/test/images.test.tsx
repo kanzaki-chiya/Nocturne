@@ -166,7 +166,7 @@ describe("TUI 图片输入", () => {
     screen.stdin.write("\x1b");
     await waitFor(() => (screen.lastFrame() ?? "").includes("idle"));
     expect(
-      active.session.durableEvents().filter((event) => event.type === "attachment.described"),
+      active.durableEvents().filter((event) => event.type === "attachment.described"),
     ).toHaveLength(0);
     screen.unmount();
     await active.close();

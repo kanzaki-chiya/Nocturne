@@ -56,7 +56,7 @@ it("每轮每路径只记最初 before，每次执行都记 after；原始字节
   const session = await runtime.createSession({ model: "fake/fake-1" });
   await session.submit({ text: "first" });
   await session.submit({ text: "second" });
-  const events = session.session.durableEvents();
+  const events = session.durableEvents();
   const checkpoints = events.filter((e) => e.type === "checkpoint.file");
   expect(checkpoints.map((e) => e.payload.phase)).toEqual([
     "before",
@@ -157,7 +157,7 @@ it("子代理编辑的检查点只进入根日志，指明来源并共用根轮�
   });
   const session = await runtime.createSession({ model: "fake/fake-1" });
   await session.submit({ text: "go" });
-  const checkpoints = session.session.durableEvents().filter((e) => e.type === "checkpoint.file");
+  const checkpoints = session.durableEvents().filter((e) => e.type === "checkpoint.file");
   expect(checkpoints.map((e) => e.payload.phase)).toEqual(["before", "after", "after"]);
   const childId = checkpoints[0]?.payload.sessionId;
   expect(childId).toBeTruthy();

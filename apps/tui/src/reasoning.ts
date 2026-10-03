@@ -73,7 +73,7 @@ export function useReasoning(session: RuntimeSession): { parts: ReasoningMap; no
   const ref = useRef<{ session: RuntimeSession; parts: ReasoningMap } | undefined>(undefined);
   if (ref.current?.session !== session) {
     const parts: ReasoningMap = new Map();
-    for (const event of session.session.durableEvents()) {
+    for (const event of session.durableEvents()) {
       if (event.type === "message.assistant") recordReasoning(parts, event);
     }
     ref.current = { session, parts };

@@ -147,7 +147,7 @@ it("生成标题进入输入框与 /resume 列表", async () => {
   const { runtime, session } = await setup();
   await session.submit({ text: "首条原文\n正文" });
   await vi.waitFor(() =>
-    expect(session.session.durableEvents().some((e) => e.type === "session.titled")).toBe(true),
+    expect(session.durableEvents().some((e) => e.type === "session.titled")).toBe(true),
   );
   await session.close();
   const resumed = await runtime.resumeSession(session.id);

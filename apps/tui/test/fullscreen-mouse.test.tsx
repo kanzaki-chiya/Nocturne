@@ -18,6 +18,7 @@ import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "
 
 import { App } from "../src/app.js";
 import type { MouseEvent, MouseSource } from "../src/mouse.js";
+import { internalSession } from "./internal-session.js";
 
 const tmpRoots: string[] = [];
 beforeEach(() => vi.stubEnv("NOCTURNE_HOME", tmp("nct-mouse-home-")));
@@ -108,14 +109,14 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     );
     await waitFor(() => (lastFrame() ?? "").includes("v0.4.0"));
     const diff = `@@ -0,0 +1,50 @@\n${Array.from({ length: 50 }, (_, i) => `+line${i + 1}`).join("\n")}`;
-    await session.session.emit("tool.started", {
+    await internalSession(session).emit("tool.started", {
       callId: "diff-1",
       name: "write",
       input: { path: "a.ts", content: "" },
       subjects: [],
       permission: { action: "allow", source: "rule" },
     });
-    await session.session.emit("tool.completed", {
+    await internalSession(session).emit("tool.completed", {
       callId: "diff-1",
       name: "write",
       status: "ok",

@@ -5,6 +5,7 @@ import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createRuntime, FakeProvider } from "@nocturne/core";
 import { runRepl } from "../src/repl.js";
+import { internalSession } from "./internal-session.js";
 
 const dirs: string[] = [];
 const temp = () => {
@@ -24,11 +25,11 @@ async function repl(pending = false, tty = false) {
     providers: [new FakeProvider({ scripts: pending ? [[{ type: "wait", ms: 60_000 }]] : [] })],
   });
   let session = await runtime.createSession({ model: "fake/fake-1" });
-  await session.session.emit("message.user", {
+  await internalSession(session).emit("message.user", {
     messageId: "first",
     content: [{ type: "text", text: "保留" }],
   });
-  await session.session.emit("message.user", {
+  await internalSession(session).emit("message.user", {
     messageId: "second",
     content: [{ type: "text", text: "修改这轮\n第二行" }],
   });

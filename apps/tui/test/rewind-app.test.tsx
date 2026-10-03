@@ -8,6 +8,7 @@ import { createRuntime, FakeProvider, type RuntimeSession } from "@nocturne/core
 import { App } from "../src/app.js";
 import { settle, changedFrame } from "./provider-test-utils.js";
 import type { SwitchSessionFn } from "../src/types.js";
+import { internalSession } from "./internal-session.js";
 
 const dirs: string[] = [];
 const temp = () => {
@@ -29,11 +30,11 @@ async function app(inline = false, pending = false) {
     providers: [new FakeProvider({ scripts: pending ? [[{ type: "wait", ms: 60_000 }]] : [] })],
   });
   let session = await runtime.createSession({ model: "fake/fake-1" });
-  await session.session.emit("message.user", {
+  await internalSession(session).emit("message.user", {
     messageId: "first",
     content: [{ type: "text", text: "保留这一轮" }],
   });
-  await session.session.emit("message.user", {
+  await internalSession(session).emit("message.user", {
     messageId: "second",
     content: [{ type: "text", text: "修改这轮\n第二行" }],
     attachments: [
@@ -136,9 +137,7 @@ it("Turn 进行中双 Esc 中断且不打开列表，Core 拒绝回退", async (
   try {
     const turn = ui.original.submit({ text: "正在执行" });
     await settle(() => ui.original.state().openTurn !== undefined);
-    const target = ui.original.session
-      .durableEvents()
-      .find((event) => event.type === "message.user");
+    const target = ui.original.durableEvents().find((event) => event.type === "message.user");
     await expect(ui.original.rewind(target?.seq ?? 0, "conversation")).rejects.toMatchObject({
       code: "session_busy",
     });

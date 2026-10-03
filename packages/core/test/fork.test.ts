@@ -8,6 +8,7 @@ import { createPlatform } from "../src/platform/index.js";
 import { createCheckpointRecorder } from "../src/session/checkpoints.js";
 import { attachmentDescriptions } from "../src/context/index.js";
 import { replaySessionView, decodeDurableEvent } from "../src/protocol/index.js";
+import { internalSession } from "./internal-session.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -34,7 +35,7 @@ it("完整分叉保留 seq 引用、标题与配置，复制附件/快照，文�
     sha256: "a".repeat(64),
     source: "paste" as const,
   };
-  const image = await source.session.emit("message.user", {
+  const image = await internalSession(source).emit("message.user", {
     messageId: "image",
     content: [{ type: "text", text: "image" }],
     attachments: [attachment],
@@ -43,27 +44,27 @@ it("完整分叉保留 seq 引用、标题与配置，复制附件/快照，文�
   mkdirSync(attachmentDir, { recursive: true });
   writeFileSync(path.join(attachmentDir, attachment.file), Buffer.from([0, 1, 255]));
   writeFileSync(path.join(attachmentDir, "output.txt"), "落盘工具输出");
-  const described = await source.session.emit("attachment.described", {
+  const described = await internalSession(source).emit("attachment.described", {
     attachmentRef: { seq: image.seq, index: 0 },
     model: "fake/fake-1",
     text: "图片描述",
   });
-  const compacted = await source.session.emit("context.compacted", {
+  const compacted = await internalSession(source).emit("context.compacted", {
     kind: "summary",
     throughSeq: image.seq,
     summary: "概要",
   });
-  await source.session.emit("session.titled", { title: "原标题", model: "fake/fake-1" });
-  await source.session.emit("session.config_changed", { permissionPreset: "read-only" });
+  await internalSession(source).emit("session.titled", { title: "原标题", model: "fake/fake-1" });
+  await internalSession(source).emit("session.config_changed", { permissionPreset: "read-only" });
   const file = path.join(cwd, "data.txt");
   writeFileSync(file, "before\r\n");
-  const record = createCheckpointRecorder(source.session, platform, sessionsDir);
+  const record = createCheckpointRecorder(internalSession(source), platform, sessionsDir);
   const subjects = [{ kind: "edit" as const, target: file, resolved: file }];
   await record("before", "edit", subjects, source.id);
   writeFileSync(file, "after");
   await record("after", "edit", subjects, source.id);
-  const original = [...source.session.durableEvents()];
-  const titleLine = readFileSync(source.session.logPath, "utf8")
+  const original = [...source.durableEvents()];
+  const titleLine = readFileSync(internalSession(source).logPath, "utf8")
     .split("\n")
     .findLast((line) => line.includes('"session.titled"'));
   expect(decodeDurableEvent(titleLine ?? "")).toMatchObject({
@@ -72,10 +73,10 @@ it("完整分叉保留 seq 引用、标题与配置，复制附件/快照，文�
   });
   const id = await runtime.forkSession(source.id);
   expect(readFileSync(file, "utf8")).toBe("after");
-  expect(source.session.durableEvents()).toEqual(original);
+  expect(source.durableEvents()).toEqual(original);
   expect(existsSync(path.join(sessionsDir, `${source.id}.lock`))).toBe(true);
   const fork = await runtime.resumeSession(id);
-  expect(fork.session.durableEvents().slice(1)).toEqual(original.slice(1));
+  expect(fork.durableEvents().slice(1)).toEqual(original.slice(1));
   expect(fork.state().meta).toMatchObject({
     id,
     forkedFrom: { sessionId: source.id, seq: original.at(-1)?.seq },
@@ -83,9 +84,9 @@ it("完整分叉保留 seq 引用、标题与配置，复制附件/快照，文�
   expect(fork.state().history).toContainEqual(
     expect.objectContaining({ kind: "compaction", seq: compacted.seq, throughSeq: image.seq }),
   );
-  expect(attachmentDescriptions(fork.state().history, fork.session.durableEvents()).size).toBe(1);
-  expect(fork.session.durableEvents()[described.seq - 1]).toEqual(described);
-  expect(replaySessionView(fork.session.durableEvents()).title).toBe("原标题");
+  expect(attachmentDescriptions(fork.state().history, fork.durableEvents()).size).toBe(1);
+  expect(fork.durableEvents()[described.seq - 1]).toEqual(described);
+  expect(replaySessionView(fork.durableEvents()).title).toBe("原标题");
   expect(readFileSync(path.join(sessionsDir, "attachments", id, attachment.file))).toEqual(
     Buffer.from([0, 1, 255]),
   );
@@ -98,18 +99,18 @@ it("完整分叉保留 seq 引用、标题与配置，复制附件/快照，文�
   });
   await fork.rewind(image.seq, "files");
   expect(readFileSync(file, "utf8")).toBe("before\r\n");
-  expect(source.session.durableEvents()).toEqual(original);
+  expect(source.durableEvents()).toEqual(original);
   await fork.close();
   await source.close();
 }, 20_000);
 
 it("中途分叉追加 conversation 回退，原会话不截断，关闭后的会话也可分叉", async () => {
   const { runtime, source } = await setup();
-  const first = await source.session.emit("message.user", {
+  const first = await internalSession(source).emit("message.user", {
     messageId: "one",
     content: [{ type: "text", text: "one" }],
   });
-  const second = await source.session.emit("message.user", {
+  const second = await internalSession(source).emit("message.user", {
     messageId: "two",
     content: [{ type: "text", text: "two" }],
   });
@@ -125,7 +126,7 @@ it("中途分叉追加 conversation 回退，原会话不截断，关闭后的�
     kind: "note",
     text: expect.stringContaining("文件保持回退前"),
   });
-  expect(fork.session.durableEvents().at(-1)).toMatchObject({
+  expect(fork.durableEvents().at(-1)).toMatchObject({
     type: "session.rewound",
     payload: { targetSeq: second.seq, mode: "conversation", files: [] },
   });

@@ -33,6 +33,7 @@ import {
   createToolRegistry,
   type ExecutionScope,
 } from "../src/tools/index.js";
+import { internalSession } from "./internal-session.js";
 
 const tmpRoots: string[] = [];
 afterEach(() => {
@@ -496,11 +497,11 @@ describe("ask_user 恢复与协议不变量", () => {
     void turn.catch(() => undefined);
     await waitEvent(session, events, (e) => e.type === "question.requested");
     // 模拟进程退出：绕过 RuntimeSession.close 的 Turn 收束，只释放存储锁
-    await session.session.close();
+    await internalSession(session).close();
 
     const s2 = await runtime.resumeSession(session.id);
     expect(s2.recovery?.interruptedCalls).toBe(1);
-    const durable = s2.session.durableEvents();
+    const durable = s2.durableEvents();
     const fixed = durable.find((e) => e.type === "tool.completed" && e.payload.name === "ask_user");
     expect(fixed?.type === "tool.completed" && fixed.payload.status).toBe("interrupted");
     // 提问是临时事件，不写日志；重放视图没有待回答问题

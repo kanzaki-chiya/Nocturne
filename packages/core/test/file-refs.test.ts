@@ -210,7 +210,7 @@ describe("@ 引用语法与快照", () => {
     try {
       await session.submit({ text: `@"${path.join(outside, "outside.txt")}"` });
       const original = session.state().history;
-      const view = replaySessionView(session.session.durableEvents());
+      const view = replaySessionView(session.durableEvents());
       expect(original.find((entry) => entry.kind === "user")?.fileRefs?.[0]?.kind).toBe("file");
       expect(evaluate).not.toHaveBeenCalled();
       expect(existsSync(marker)).toBe(false);
@@ -225,7 +225,7 @@ describe("@ 引用语法与快照", () => {
       const resumed = await runtime.resumeSession(id);
       try {
         expect(resumed.state().history).toEqual(original);
-        expect(replaySessionView(resumed.session.durableEvents()).entries).toEqual(view.entries);
+        expect(replaySessionView(resumed.durableEvents()).entries).toEqual(view.entries);
       } finally {
         await resumed.close();
       }
@@ -273,7 +273,7 @@ describe("@ 引用语法与快照", () => {
         const user = session.state().history.find((entry) => entry.kind === "user");
         expect(user?.fileRefs?.[0]?.truncated).toBe(partial);
         expect(
-          session.session
+          session
             .durableEvents()
             .filter((event) => event.type === "tool.completed")
             .map((event) => event.payload.name),

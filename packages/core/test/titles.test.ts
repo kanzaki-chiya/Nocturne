@@ -11,6 +11,7 @@ import {
   type RuntimeEvent,
 } from "../src/index.js";
 import { decodeDurableEvent, replaySessionView } from "../src/protocol/index.js";
+import { internalSession } from "./internal-session.js";
 
 let root: string;
 let home: string;
@@ -66,7 +67,7 @@ it.each([true, false])(
     expect(provider.roleRequests).toHaveLength(0);
     await session.submit({ text: "你好\n" + "长".repeat(2500) });
     await vi.waitFor(() =>
-      expect(session.session.durableEvents().some((e) => e.type === "session.titled")).toBe(true),
+      expect(session.durableEvents().some((e) => e.type === "session.titled")).toBe(true),
     );
     const request = provider.roleRequests[0];
     if (request === undefined) throw new Error("未收到标题请求");
@@ -80,23 +81,23 @@ it.each([true, false])(
     expect(request.messages[0]?.content).toEqual([
       { type: "text", text: ("你好\n" + "长".repeat(2500)).slice(0, 2000) },
     ]);
-    const view = replaySessionView(session.session.durableEvents());
+    const view = replaySessionView(session.durableEvents());
     expect(view.title).toBe("排查登录错误");
     expect(view.usage).toEqual({ inputTokens: 10, outputTokens: 2 });
-    expect(
-      session.session.durableEvents().find((e) => e.type === "session.titled")?.payload,
-    ).toMatchObject({
-      title: "排查登录错误",
-      model: configured ? "fake/small" : "fake/fake-1",
-      usage: { inputTokens: 80, cacheReadTokens: 70 },
-    });
+    expect(session.durableEvents().find((e) => e.type === "session.titled")?.payload).toMatchObject(
+      {
+        title: "排查登录错误",
+        model: configured ? "fake/small" : "fake/fake-1",
+        usage: { inputTokens: 80, cacheReadTokens: 70 },
+      },
+    );
     await session.submit({ text: "继续" });
     await session.close();
     expect((await runtime.listSessions())[0]?.firstText).toBe("排查登录错误");
     const resumed = await runtime.resumeSession(session.id);
     await resumed.submit({ text: "再次继续" });
     expect(provider.roleRequests).toHaveLength(1);
-    expect(replaySessionView(resumed.session.durableEvents()).title).toBe("排查登录错误");
+    expect(replaySessionView(resumed.durableEvents()).title).toBe("排查登录错误");
     await resumed.close();
   },
 );
@@ -106,7 +107,7 @@ it("标题按 grapheme 截到 40 显示宽度", async () => {
   ]);
   await session.submit({ text: "输入" });
   await vi.waitFor(() =>
-    expect(replaySessionView(session.session.durableEvents()).title).toBe("甲".repeat(20)),
+    expect(replaySessionView(session.durableEvents()).title).toBe("甲".repeat(20)),
   );
   await session.close();
 });
@@ -131,7 +132,7 @@ it.each(["error", "empty", "timeout"])("标题 %s 静默放弃，仅记诊断，
     ),
   );
   expect(events.some((e) => e.type === "runtime.warning")).toBe(false);
-  expect(replaySessionView(session.session.durableEvents()).title).toBe("原文首行");
+  expect(replaySessionView(session.durableEvents()).title).toBe("原文首行");
   await session.submit({ text: "继续" });
   expect(provider.roleRequests).toHaveLength(1);
   await session.close();
@@ -162,7 +163,7 @@ it("标题请求不阻塞 Turn，Esc 不取消标题，会话关闭才取消", a
   await session.setModel("fake/small");
   expect(provider.roleRequests[0]?.model).toBe("fake-1");
   await session.close();
-  expect(session.session.durableEvents().some((e) => e.type === "session.titled")).toBe(false);
+  expect(session.durableEvents().some((e) => e.type === "session.titled")).toBe(false);
 });
 it("后台标题与 Turn 同时完成：日志、发布、重放的 seq 顺序一致", async () => {
   let finishTitle!: () => void;
@@ -197,11 +198,11 @@ it("后台标题与 Turn 同时完成：日志、发布、重放的 seq 顺序�
   finishTurn();
   await pending;
   await vi.waitFor(() =>
-    expect(session.session.durableEvents().some((e) => e.type === "session.titled")).toBe(true),
+    expect(session.durableEvents().some((e) => e.type === "session.titled")).toBe(true),
   );
-  const live = [...session.session.durableEvents()];
+  const live = [...session.durableEvents()];
   await session.close();
-  const disk = (await readFile(session.session.logPath, "utf8"))
+  const disk = (await readFile(internalSession(session).logPath, "utf8"))
     .trim()
     .split("\n")
     .map(decodeDurableEvent);

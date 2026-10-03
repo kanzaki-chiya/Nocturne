@@ -104,7 +104,7 @@ it("用户图片描述一次：请求约束、文字投影、重放恢复与独�
     "图片 #1 描述（由 fake/vision 生成）",
   );
   expect(JSON.stringify(provider.requests[0]?.messages)).toContain("屏幕显示错误 E42");
-  const view = replaySessionView(session.session.durableEvents());
+  const view = replaySessionView(session.durableEvents());
   expect(view.usage).toEqual({ inputTokens: 10, outputTokens: 2 });
   expect(view.entries.find((e) => e.kind === "user")).toMatchObject({
     descriptions: [{ model: "fake/vision", usage: { inputTokens: 500 } }],
@@ -140,7 +140,7 @@ it("工具附件由同一通道描述，附带工具名与路径", async () => {
   expect(JSON.stringify(visionRequests(provider)[0]?.messages)).toMatch(/read.*screen.png/u);
   expect(JSON.stringify(provider.requests[1]?.messages)).toContain("屏幕显示错误 E42");
   expect(
-    replaySessionView(session.session.durableEvents()).entries.find((e) => e.kind === "tool"),
+    replaySessionView(session.durableEvents()).entries.find((e) => e.kind === "tool"),
   ).toMatchObject({ descriptions: [{ text: "屏幕显示错误 E42" }] });
   await session.close();
 });
@@ -206,9 +206,7 @@ it("Esc 中断同时取消正在进行的描述请求，已完成描述保留", 
   await vi.waitFor(() => expect(visionRequests(provider)).toHaveLength(2));
   session.interrupt();
   expect(await pending).toBe("aborted");
-  expect(
-    session.session.durableEvents().filter((e) => e.type === "attachment.described"),
-  ).toHaveLength(1);
+  expect(session.durableEvents().filter((e) => e.type === "attachment.described")).toHaveLength(1);
   expect(provider.requests).toHaveLength(0);
   await session.close();
 });

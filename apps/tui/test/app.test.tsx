@@ -28,6 +28,7 @@ import { ToolRow } from "../src/components/tool-row.js";
 import { Transcript } from "../src/components/transcript.js";
 import { TuiEnvContext } from "../src/env.js";
 import type { SwitchSessionFn } from "../src/types.js";
+import { internalSession } from "./internal-session.js";
 
 const tmpRoots: string[] = [];
 beforeEach(() => vi.stubEnv("NOCTURNE_HOME", tmp("nct-tui-home-")));
@@ -103,7 +104,7 @@ describe("TUI", () => {
         ],
       }),
     );
-    await session.session.emit("tool.completed", {
+    await internalSession(session).emit("tool.completed", {
       callId: "todo",
       name: "todo_write",
       status: "ok",
