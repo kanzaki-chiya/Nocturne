@@ -93,16 +93,29 @@ describe("PathOps（纯词法）", () => {
     expect(pathsSensitive.canonicalize("/WS/Foo.txt")).toBe(path.normalize("/WS/Foo.txt"));
   });
 
-  it("equals 按大小写规则比较", () => {
+  it.runIf(isWin)("equals 按大小写规则比较（Windows 路径）", () => {
     expect(pathsInsensitive.equals("C:\\WS", "c:\\ws\\")).toBe(true);
+  });
+
+  it("equals 按大小写规则比较（POSIX 路径）", () => {
+    expect(pathsInsensitive.equals("/Home/X", "/home/x/")).toBe(true);
     expect(pathsSensitive.equals("/WS", "/ws")).toBe(false);
   });
 
-  it("isWithin：前缀陷阱 C:\\ws vs C:\\ws2", () => {
+  it.runIf(isWin)("isWithin：前缀陷阱 C:\\ws vs C:\\ws2", () => {
     expect(pathsInsensitive.isWithin("C:\\ws", "C:\\ws\\a.txt")).toBe(true);
     expect(pathsInsensitive.isWithin("C:\\ws", "c:\\WS")).toBe(true);
     expect(pathsInsensitive.isWithin("C:\\ws", "C:\\ws2\\a.txt")).toBe(false);
     expect(pathsInsensitive.isWithin("C:\\ws", "C:\\other")).toBe(false);
+  });
+
+  it("isWithin：前缀陷阱与 .. 词法回退（POSIX 路径）", () => {
+    expect(pathsSensitive.isWithin("/home/x", "/home/x/a.txt")).toBe(true);
+    expect(pathsInsensitive.isWithin("/Home/X", "/home/x")).toBe(true);
+    expect(pathsSensitive.isWithin("/home/x", "/home/x2/a.txt")).toBe(false);
+    // ".." 先经词法规范化：折回区内判在区内，跳出区外判在区外
+    expect(pathsSensitive.isWithin("/home/x", "/home/x/../x/f")).toBe(true);
+    expect(pathsSensitive.isWithin("/home/x", "/home/x/../y")).toBe(false);
   });
 
   it("isWithin 处理以分隔符结尾的根", () => {

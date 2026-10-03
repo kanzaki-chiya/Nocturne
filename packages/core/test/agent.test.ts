@@ -608,7 +608,7 @@ describe("runTurn", () => {
             type: "tool_call",
             toolCallId: "p",
             name: "read",
-            input: { path: "..\\outside-secret.txt" },
+            input: { path: path.join("..", "outside-secret.txt") },
           },
           { type: "finish", reason: "tool_calls" },
         ],

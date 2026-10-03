@@ -375,7 +375,7 @@ describe("read 工具", () => {
     await writeWs(parent, `escape-${path.basename(ws)}.txt`, "x");
     const h = await makeHarness(ws);
     const r = await h.executor.execute(
-      call("read", { path: `..\\escape-${path.basename(ws)}.txt` }),
+      call("read", { path: path.join("..", `escape-${path.basename(ws)}.txt`) }),
       h.scope,
     );
     expect(r.status).toBe("denied");

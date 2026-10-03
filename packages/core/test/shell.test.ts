@@ -21,6 +21,7 @@ import { FakeProvider, type FakeScript } from "../src/provider/index.js";
 import type { DurableEvent, RuntimeEvent } from "../src/protocol/index.js";
 
 const platform: Platform = createPlatform();
+const isWin = process.platform === "win32";
 const tmpRoots: string[] = [];
 
 afterEach(() => {
@@ -163,7 +164,9 @@ describe("RuntimeSession shell API（ADR-0022 第 2、4 节）", () => {
   });
 
   it("env 覆盖下 setShell 未安装种类同样拒绝（先校验后写盘）", async () => {
-    process.env["NOCTURNE_SHELL"] = "cmd";
+    // env 声明须指向本机已安装的种类：Windows 恒有 cmd，POSIX 用 sh
+    const envShell = isWin ? "cmd" : "sh";
+    process.env["NOCTURNE_SHELL"] = envShell;
     const { runtime, home } = await makeRuntime({ withConfig: true });
     const session = await makeSession(runtime);
     const missing = session.listShells().find((d) => !d.available)?.kind;
@@ -172,7 +175,7 @@ describe("RuntimeSession shell API（ADR-0022 第 2、4 节）", () => {
       code: "invalid_command",
     });
     expect(existsSync(path.join(home as string, "settings.json"))).toBe(false);
-    expect(session.shellInfo().effective?.kind).toBe("cmd");
+    expect(session.shellInfo().effective?.kind).toBe(envShell);
   });
 
   it("无配置层时 setShell 仅本会话内存生效（不写文件）", async () => {
@@ -205,23 +208,24 @@ describe("RuntimeSession shell API（ADR-0022 第 2、4 节）", () => {
   });
 
   it("NOCTURNE_SHELL 覆盖 settings：setShell 写盘但不生效，发 shell_overridden 警告", async () => {
-    process.env["NOCTURNE_SHELL"] = "cmd";
+    const envShell = isWin ? "cmd" : "sh";
+    process.env["NOCTURNE_SHELL"] = envShell;
     const { runtime, home } = await makeRuntime({ withConfig: true });
     const session = await makeSession(runtime);
     const events = collect(session);
     expect(session.shellInfo().source).toBe("env");
-    expect(session.shellInfo().effective?.kind).toBe("cmd");
+    expect(session.shellInfo().effective?.kind).toBe(envShell);
     // settings.json 尚无值时 overriddenBy 已报告覆盖来源（写入不会生效）
     expect(session.shellInfo().overriddenBy).toBe("env");
 
-    const target = session.listShells().find((d) => d.available && d.kind !== "cmd")?.kind;
+    const target = session.listShells().find((d) => d.available && d.kind !== envShell)?.kind;
     expect(target).toBeDefined();
     await session.setShell(target as string);
 
     const info = session.shellInfo();
-    expect(info.effective?.kind).toBe("cmd"); // 生效不变
+    expect(info.effective?.kind).toBe(envShell); // 生效不变
     expect(info.overriddenBy).toBe("env");
-    expect(info.selected).toBe("cmd"); // selected 为生效层（env）声明值；settings 层选择见 settings.json
+    expect(info.selected).toBe(envShell); // selected 为生效层（env）声明值；settings 层选择见 settings.json
     const settings = JSON.parse(
       readFileSync(path.join(home as string, "settings.json"), "utf8"),
     ) as {
@@ -248,7 +252,7 @@ describe("RuntimeSession shell API（ADR-0022 第 2、4 节）", () => {
   });
 
   it("切换对下一次 shell 调用生效：Turn 中不做快照（逐次解析）", async () => {
-    // cmd 与另一种 shell 语法分歧命令：%OS% 在 cmd 展开、pwsh/bash 原样输出
+    // cmd 与其他 shell 的语法分歧命令：%OS% 在 cmd 展开、pwsh/bash/sh 原样输出
     const scripts: FakeScript[] = [
       [
         {
@@ -267,14 +271,17 @@ describe("RuntimeSession shell API（ADR-0022 第 2、4 节）", () => {
     const { runtime } = await makeRuntime({ scripts });
     const session = await makeSession(runtime);
     const events = collect(session);
-    await session.setShell("cmd");
+    const target = otherAvailable(session);
+    if (target === undefined) return; // 只有一个可用 shell 时无可切换对象
+    await session.setShell(target);
     expect(await session.submit({ text: "run" })).toBe("done");
     const done = events.find((e) => e.type === "tool.completed");
-    expect(done?.type === "tool.completed" && done.payload.modelContent).toContain("Windows_NT");
+    const echo = target === "cmd" ? "Windows_NT" : "%OS%";
+    expect(done?.type === "tool.completed" && done.payload.modelContent).toContain(echo);
     // tool.started 的主体携带 shell 种类（权限方言化依据）
     const started = events.find((e) => e.type === "tool.started");
     if (started?.type === "tool.started") {
-      expect(started.payload.subjects[0]?.shell).toBe("cmd");
+      expect(started.payload.subjects[0]?.shell).toBe(target);
     }
   });
 });

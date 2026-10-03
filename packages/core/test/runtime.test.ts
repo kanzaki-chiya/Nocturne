@@ -504,7 +504,7 @@ describe("公开 Runtime API", () => {
           type: "tool_call",
           toolCallId: "e",
           name: "read",
-          input: { path: "..\\..\\outside.txt" },
+          input: { path: path.join("..", "..", "outside.txt") },
         },
         { type: "finish", reason: "tool_calls" },
       ],
