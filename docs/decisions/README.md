@@ -50,6 +50,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0042](ADR-0042-provider-oauth.md) | 服务商账号登录：ChatGPT、Grok CLI 凭据与 OpenRouter | 已接受；Grok 自有登录被 ADR-0043 取代 |
 | [ADR-0043](ADR-0043-grok-build-oauth.md) | Grok Build 账号登录 | 已接受 |
 | [ADR-0044](ADR-0044-rpc-stdio.md) | RPC 第一版：stdio 上的 JSON-RPC，一个进程一个 Runtime | 已接受 |
+| [ADR-0045](ADR-0045-fullscreen-page-shell.md) | 统一全屏页骨架：双栏布局、页面与对话框分层、页头/选中/底部统一、设置页逐项保存 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
