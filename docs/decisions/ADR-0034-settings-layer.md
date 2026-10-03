@@ -160,3 +160,4 @@ type SettingsPatch = Partial<{
 ## 修订
 
 - **2026-10-01**：`/settings` 不再单独设置默认档位。设置页把默认模型与档位合并为一行只读显示，提示去 `/model` 页「设为默认」成对修改；`SettingsPatch` 去掉 `reasoningEffort`，`describeSettings()` 中该项标记 `readonly`；CLI 删除 `/settings effort`。理由：档位依赖模型，两个入口会重新引入本 ADR 想避免的「一方变了另一方失效」。
+- **2026-10-04**：第 5 节「保存方式」由 [ADR-0045](ADR-0045-fullscreen-page-shell.md) 第 7 节取代：`/settings` 改为逐项保存，单值项 `←`/`→` 立即写入，复合项在各自对话框里保存，去掉底部取消/保存按钮与放弃确认。备选方案里「每项改动立即保存」的顾虑（多字段需一起保存和校验）由对话框承担。页面布局改为 ADR-0045 的双栏。
