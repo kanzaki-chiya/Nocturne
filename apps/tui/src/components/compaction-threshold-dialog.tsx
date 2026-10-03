@@ -22,7 +22,8 @@ export function CompactionThresholdDialog({
   initial: string;
   width: number;
   height: number;
-  onApply: (value: string) => void;
+  /** 保存即落盘：返回错误文案则留在对话框内显示，成功返回 undefined 由调用方关闭 */
+  onApply: (value: string) => Promise<string | undefined>;
   onCancel: () => void;
   onMouseFrame?: ((frame: DialogMouseFrame | undefined) => void) | undefined;
 }): React.JSX.Element {
@@ -35,6 +36,8 @@ export function CompactionThresholdDialog({
   const [error, setError] = useState<string>();
   const [confirm, setConfirm] = useState(false);
   const [discard, setDiscard] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const boxes = useRef(new Map<string, DOMElement>());
   const dialogWidth = Math.max(1, Math.min(72, width - 4));
   const framed = width >= 24 && height >= 10;
@@ -50,14 +53,25 @@ export function CompactionThresholdDialog({
   const activate = (id: string) => {
     if (id === "cancel") close();
     else if (id === "save") {
+      if (savingRef.current) return;
       const threshold = unit === "percent" ? `${value}%` : value;
       try {
         parseCompactionThreshold(threshold);
-        onApply(threshold);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
         setFocus("value");
+        return;
       }
+      savingRef.current = true;
+      setSaving(true);
+      void onApply(threshold).then((failure) => {
+        savingRef.current = false;
+        setSaving(false);
+        if (failure !== undefined) {
+          setError(`保存失败：${failure}`);
+          setFocus("save");
+        }
+      });
     }
   };
   useInput((input, key) => {
@@ -225,7 +239,9 @@ export function CompactionThresholdDialog({
                 />
               </Box>
             </Box>
-            <Text wrap="truncate">{error ?? "Tab/↑↓ 移动 · Enter 确认 · Esc 取消"}</Text>
+            <Text wrap="truncate">
+              {error ?? (saving ? "正在保存…" : "Tab/↑↓ 移动 · Enter 保存 · Esc 取消")}
+            </Text>
             {confirm ? (
               <ConfirmDiscard discard={discard} onBox={onBox} />
             ) : (

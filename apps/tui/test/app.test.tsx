@@ -139,14 +139,14 @@ describe("TUI", () => {
     await pause(100);
     screen.stdin.write("/settings");
     screen.stdin.write("\r");
-    await waitFor(() => (screen.lastFrame() ?? "").includes("/settings 设置"));
-    expect(screen.lastFrame()).toContain("在 /model 页设置");
+    await waitFor(() => (screen.lastFrame() ?? "").includes("默认权限预设"));
+    expect(screen.lastFrame()).toContain("在 /model 设置");
     expect(screen.lastFrame()).not.toContain("上下文");
     await pause(100);
     screen.stdin.write("\x1b");
     await waitFor(
       () =>
-        !(screen.lastFrame() ?? "").includes("/settings 设置") &&
+        !(screen.lastFrame() ?? "").includes("默认权限预设") &&
         (screen.lastFrame() ?? "").includes("fake-model"),
     );
     screen.unmount();

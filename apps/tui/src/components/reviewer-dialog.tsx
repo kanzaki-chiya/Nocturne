@@ -40,7 +40,12 @@ export function ReviewerDialog({
   disclosureAccepted?: boolean | undefined;
   width: number;
   height: number;
-  onApply: (reviewer: SecurityReviewerConfig, key?: string, disclosure?: boolean) => void;
+  /** 保存即落盘：返回错误文案则留在对话框内显示，成功返回 undefined 由调用方关闭 */
+  onApply: (
+    reviewer: SecurityReviewerConfig,
+    key?: string,
+    disclosure?: boolean,
+  ) => Promise<string | undefined>;
   onCancel: () => void;
   onMouseFrame?: ((frame: DialogMouseFrame | undefined) => void) | undefined;
 }): React.JSX.Element {
@@ -75,6 +80,7 @@ export function ReviewerDialog({
   const boxes = useRef(new Map<string, DOMElement>());
   const request = useRef<AbortController | undefined>(undefined);
   const mounted = useRef(true);
+  const saving = useRef(false);
   const generation = useRef(0);
   useEffect(
     () => () => {
@@ -199,11 +205,19 @@ export function ReviewerDialog({
       setFocus("cancel");
       return;
     }
-    onApply(
+    if (saving.current) return;
+    saving.current = true;
+    setNotice("正在保存…");
+    void onApply(
       selected,
       backend === "jev" && "stored" in jev.credential && secret ? secret : undefined,
       backend === "jev" && confirmed,
-    );
+    ).then((failure) => {
+      saving.current = false;
+      if (failure === undefined || !mounted.current) return;
+      setDisclosure(false);
+      setNotice(`保存失败：${failure}`);
+    });
   };
   const activate = (id: string) => {
     if (id === "cancel") {
@@ -613,7 +627,7 @@ export function ReviewerDialog({
                       接收方：{JEV_ENDPOINTS[jev.endpoint].recipient}。地址：{jevBaseURL(jev)}
                       ；可能包含任务代码或命令文本。
                     </Text>
-                    <Text>确认后在设置页保存才会生效。</Text>
+                    <Text>确认后保存即生效。</Text>
                   </>
                 ) : (
                   fields.slice(start, start + visibleCount).map((id, index) => (

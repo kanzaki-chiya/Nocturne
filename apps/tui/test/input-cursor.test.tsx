@@ -196,7 +196,7 @@ describe("压缩阈值对话框的真实光标", () => {
           initial: "90%",
           width,
           height: 24,
-          onApply: () => undefined,
+          onApply: () => Promise.resolve(undefined),
           onCancel: () => undefined,
         }),
       ),

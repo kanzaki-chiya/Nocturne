@@ -80,7 +80,7 @@ export class OutputLayer {
     for (let i = 0; i < height; i++) {
       const line = next[i];
       if (line === undefined || line === shifted[i]) continue;
-      output += writeRow(i + 1, line);
+      output += writeRow(i + 1, line, stringWidth(line) >= columns);
     }
     output += cursorSequence(cursor, rows);
     this.previous = next;
@@ -95,13 +95,15 @@ export class OutputLayer {
  * （缓冲内容正确、显示时缩进消失），因此行首空格不写字面字符：
  * 先擦除对应单元格，再把光标定位到缩进之后写正文。
  */
-function writeRow(row: number, line: string): string {
+function writeRow(row: number, line: string, full: boolean): string {
   const head = `\x1b[${row};1H\x1b[0m`;
   const match = /^((?:\x1b\[[0-9;:]*[A-Za-z])*)( *)/.exec(line);
   const prefix = match?.[1] ?? "";
   const n = match?.[2]?.length ?? 0;
-  if (n === 0) return `${head}${line}\x1b[0m\x1b[K`;
-  return `${head}${prefix}\x1b[${n}X\x1b[${row};${n + 1}H${line.slice(prefix.length + n)}\x1b[0m\x1b[K`;
+  // 写满整行时光标停在待换行状态，此时 EL 会擦掉最后一列，所以只在未写满时补 EL。
+  const tail = full ? "\x1b[0m" : "\x1b[0m\x1b[K";
+  if (n === 0) return `${head}${line}${tail}`;
+  return `${head}${prefix}\x1b[${n}X\x1b[${row};${n + 1}H${line.slice(prefix.length + n)}${tail}`;
 }
 
 export function cursorSequence(point: CursorPoint | undefined, rows: number): string {

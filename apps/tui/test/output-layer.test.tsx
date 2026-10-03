@@ -94,6 +94,13 @@ it("行首空格以擦除加二次定位写出，不输出字面空格", () => {
   expect(write).toContain("\x1b[3;1H\x1b[0m普通行\x1b[0m\x1b[K");
 });
 
+it("写满整行的行不补 EL，避免待换行状态下擦掉最后一列", () => {
+  const layer = new OutputLayer();
+  const write = layer.render(frame(["12345", "123"]), 5, 3, 2, "conversation", undefined);
+  expect(write).toContain("\x1b[1;1H\x1b[0m12345\x1b[0m\x1b[2;1H");
+  expect(write).toContain("\x1b[2;1H\x1b[0m123\x1b[0m\x1b[K");
+});
+
 it("尺寸和页面切换逐行重写整帧，不清屏", () => {
   const layer = new OutputLayer();
   const lines = Array.from({ length: 9 }, (_, i) => `row-${i}`);

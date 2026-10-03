@@ -32,7 +32,7 @@ function dialog(
     ascii?: boolean;
   } = {},
 ) {
-  const apply = vi.fn();
+  const apply = vi.fn(() => Promise.resolve(undefined as string | undefined));
   const cancel = vi.fn();
   const list = vi.fn(async (_config: JevReviewerConfig, _signal: AbortSignal) =>
     options.fallback

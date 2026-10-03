@@ -76,7 +76,7 @@ async function page(roles: Partial<Record<ModelRole, string>> = {}) {
       },
     }),
   );
-  await vi.waitFor(() => expect(screen.lastFrame()).toContain("模型角色"));
+  await vi.waitFor(() => expect(screen.lastFrame()).toContain("看图模型"));
   await new Promise<void>((resolve) => setImmediate(resolve));
   const click = (id: string) => {
     const frame = mouse;
@@ -86,60 +86,55 @@ async function page(roles: Partial<Record<ModelRole, string>> = {}) {
   };
   return { runtime, session, screen, click, close };
 }
-it("模型角色三行默认显示，选择草稿并保存落盘；vision 只列能看图的模型", async () => {
+const roleRow = async (
+  screen: ReturnType<typeof render>,
+  click: (id: string) => void,
+  id: string,
+) => {
+  await changed(screen, () => click(`row:${id}`));
+  await changed(screen, () => click(`row:${id}`));
+};
+it("模型角色三行默认显示，选定即落盘；vision 只列能看图的模型", async () => {
   const { runtime, session, screen, click, close } = await page();
-  expect(screen.lastFrame()).toContain("子代理模型：跟随当前模型");
-  expect(screen.lastFrame()).toContain("看图模型：未设置");
-  expect(screen.lastFrame()).toContain("标题模型：跟随当前模型");
+  expect(screen.lastFrame()).toMatch(/子代理模型\s+跟随当前模型/);
+  expect(screen.lastFrame()).toMatch(/看图模型\s+未设置/);
+  expect(screen.lastFrame()).toMatch(/标题模型\s+跟随当前模型/);
   for (const role of ["task", "vision", "smol"] as const) {
-    await changed(screen, () => click(role));
+    await roleRow(screen, click, role);
     expect(screen.lastFrame()).toContain(role === "vision" ? "不使用" : "跟随当前模型");
     if (role === "vision") expect(screen.lastFrame()).not.toContain("fake/fake-1");
     await changed(screen, () => screen.stdin.write("\x1b[B"));
     await changed(screen, () => screen.stdin.write("\r"));
-    expect(runtime.describeModelRoles().find((r) => r.role === role)?.configured).toBeUndefined();
+    await vi.waitFor(() =>
+      expect(runtime.describeModelRoles().find((r) => r.role === role)?.configured).toBeDefined(),
+    );
   }
-  expect(JSON.parse(await readFile(path.join(home, "settings.json"), "utf8")).modelRoles).toEqual(
-    {},
-  );
-  click("save");
-  await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
   expect(JSON.parse(await readFile(path.join(home, "settings.json"), "utf8")).modelRoles).toEqual({
     task: "fake/fake-1",
     vision: "fake/image",
     smol: "fake/fake-1",
   });
+  expect(close).not.toHaveBeenCalled();
   screen.unmount();
   await session.close();
 });
-it("选择列表顶部清除三个角色，保存前不写盘", async () => {
-  const { runtime, session, screen, click, close } = await page({
+it("选择列表顶部清除三个角色，立即写盘", async () => {
+  const { runtime, session, screen, click } = await page({
     task: "fake/fake-1",
     vision: "fake/image",
     smol: "fake/fake-1",
   });
   for (const role of ["task", "vision", "smol"] as const) {
-    await changed(screen, () => click(role));
+    await roleRow(screen, click, role);
     await changed(screen, () => screen.stdin.write("\r"));
-    expect(runtime.describeModelRoles().find((r) => r.role === role)?.configured).toBeDefined();
+    await vi.waitFor(() =>
+      expect(runtime.describeModelRoles().find((r) => r.role === role)?.configured).toBeUndefined(),
+    );
   }
-  expect(screen.lastFrame()).toContain("看图模型：未设置");
-  click("save");
-  await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(screen.lastFrame()).toMatch(/看图模型\s+未设置/));
   expect(
     JSON.parse(await readFile(path.join(home, "settings.json"), "utf8")).modelRoles ?? {},
   ).toEqual({});
-  screen.unmount();
-  await session.close();
-});
-it("保存前提示不能看图的 vision 配置，不写盘", async () => {
-  const { session, screen, click, close } = await page({ vision: "fake/fake-1" });
-  click("save");
-  await vi.waitFor(() => expect(screen.lastFrame()).toContain("看图模型必须支持图片"));
-  expect(close).not.toHaveBeenCalled();
-  expect(JSON.parse(await readFile(path.join(home, "settings.json"), "utf8")).modelRoles).toEqual({
-    vision: "fake/fake-1",
-  });
   screen.unmount();
   await session.close();
 });
