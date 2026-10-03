@@ -1,6 +1,6 @@
 # ADR-0042：服务商账号登录：ChatGPT、Grok CLI 凭据与 OpenRouter
 
-- 状态：已接受
+- 状态：已接受；Grok 自有登录被 [ADR-0043](ADR-0043-grok-build-oauth.md) 取代
 - 日期：2026-10-02
 
 ## 背景

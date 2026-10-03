@@ -36,6 +36,7 @@ describe("服务商预设", () => {
     const presets = listProviderPresets();
     expect(presets.map((p) => p.id)).toEqual([
       "chatgpt",
+      "grok",
       "grok-cli",
       "deepseek",
       "openrouter",

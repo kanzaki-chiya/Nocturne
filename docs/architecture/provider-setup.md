@@ -11,7 +11,7 @@ v0.1 接入一个模型服务要做三件事：设置持久的用户级环境变
 
 ## 1. 用户看到的流程
 
-ChatGPT、Grok CLI 与 OpenRouter 可以不手填 API key（[ADR-0042](../decisions/ADR-0042-provider-oauth.md)）。ChatGPT 走浏览器登录，回调失败或远程终端时粘贴完整回调 URL；Grok 只读官方 CLI 的 `~/.grok/auth.json`，向导不写该文件；OpenRouter 在「浏览器登录」与「粘贴密钥」中二选一，远程终端粘贴授权码。登录由 Core 的 `LoginSession` 完成，客户端打开浏览器并展示地址；Esc 取消，五分钟超时。OpenRouter 得到的是普通 API key。没有系统凭据后端时，API key 只显示一次并给出环境变量命令，不落明文；ChatGPT 账号记录必须由用户显式选择明文保存或仅本次运行，不默认明文。
+ChatGPT、Grok 与 OpenRouter 可以不手填 API key（[ADR-0042](../decisions/ADR-0042-provider-oauth.md)、[ADR-0043](../decisions/ADR-0043-grok-build-oauth.md)）。ChatGPT 走浏览器登录，回调失败或远程终端时粘贴完整回调 URL。Grok（`grok`）由 Nocturne 自己向 `auth.x.ai` 做授权码或设备码登录，令牌存在凭据后端；远程终端显示确认码，不粘贴回本进程。Grok CLI 仍只读官方 CLI 的 `~/.grok/auth.json`，向导不写该文件。OpenRouter 在「浏览器登录」与「粘贴密钥」中二选一，远程终端粘贴授权码。登录由 Core 的 `LoginSession` 完成，客户端打开浏览器并展示地址；Esc 取消。ChatGPT 与 OpenRouter 五分钟超时，Grok 十分钟。OpenRouter 得到的是普通 API key。没有系统凭据后端时，API key 只显示一次并给出环境变量命令，不落明文；ChatGPT 与 Grok 账号记录必须由用户显式选择明文保存或仅本次运行，不默认明文。
 
 ### TTY：服务商页 → 模型页的两步流程
 
@@ -30,12 +30,12 @@ API Key（掩码输入；直接回车表示改用环境变量）：********
 已保存 command，12 个模型                                ← 底部结果行，回到列表
 ```
 
-- 内置预设不再问名称与地址（直接用预设默认值）。ChatGPT 与 Grok CLI 跳过密钥输入，改走登录或外部文件（第 5 节）。两个自定义预设问名称（必填）、服务地址（openai 兼容必填，anthropic 兼容可留空用官方端点）与**会话标识请求头**（ADR-0031 §3，可选）：填写请求头名（如 `x-opencode-session`）则写入条目 `sessionHeader`，之后每个模型请求携带该头（值为根会话 ID，见 [providers.md](providers.md) 第 4 节）；回车留空不写该字段。
+- 内置预设不再问名称与地址（直接用预设默认值）。ChatGPT、Grok 与 Grok CLI 跳过密钥输入，改走登录或外部文件（第 5 节）。两个自定义预设问名称（必填）、服务地址（openai 兼容必填，anthropic 兼容可留空用官方端点）与**会话标识请求头**（ADR-0031 §3，可选）：填写请求头名（如 `x-opencode-session`）则写入条目 `sessionHeader`，之后每个模型请求携带该头（值为根会话 ID，见 [providers.md](providers.md) 第 4 节）；回车留空不写该字段。
 - **向导不再选择模型**（v0.3）：模型列表仍经 `GET /models` 获取并把上游声明的上下文窗口、最大输出长度与能力标记写回条目 `models`（第 7 节），但不再出现"编号选择模型"与"设为默认模型"两步；默认模型在 `/model` 页设置。获取结果替换进行中提示：成功显示"已获取 N 个模型"；失败显示原因并继续后续步骤——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，404/网络错误等其余失败提示"模型将手动填写"；保存后可用服务商页「刷新模型列表」或 `/provider refresh <名>` 重试。
 - 添加服务商和刷新模型列表时顺带更新 models.dev 缓存；失败沿用本地缓存或内置快照，并在结果中提示一行，不影响上游列表的保存。向导不再询问服务商级思考档位。
 - **TUI 表单形态**（ADR-0019 第 2 条）：全屏页面内不出现需要打字回答的是非题；已完成步骤折叠为一行摘要（如"名称 command • 地址 api.xxx.com • 密钥已保存"），当前步骤用强调色提问、灰色小字给说明（密钥获取入口、回车改用环境变量等）。
 - **向导不发送模型请求**：连接测试会消耗 token 且重复了首次真实请求才能发现的问题，因此不做。密钥、地址与模型 id 的有效性由会话中的首次真实请求检验；请求失败时按 `ProviderError.kind` 给出可操作提示（`auth` → 密钥可能无效，附 `/provider key <name>`；`network`/`timeout` → 地址不通，附 `nctrn setup`；`invalid_request`/404 → 模型 id 或地址路径有误），实现位置为 `agent/turn.ts` 的 `providerFailureHint`（turn.completed.error.message，CLI 与 TUI 共用）。
-- 系统凭据后端不可用时（第 3 节），API key 预设跳过保存密钥，直接进入环境变量方式；选择"改用环境变量"时询问变量名（默认按预设 `defaultKeyEnv`），条目写入 `apiKeyEnv`，密钥不落盘。ChatGPT 改为询问明文或仅本次运行，不默认明文。
+- 系统凭据后端不可用时（第 3 节），API key 预设跳过保存密钥，直接进入环境变量方式；选择"改用环境变量"时询问变量名（默认按预设 `defaultKeyEnv`），条目写入 `apiKeyEnv`，密钥不落盘。ChatGPT 与 Grok 改为询问明文或仅本次运行，不默认明文。
 
 ### 逐行 CLI
 
@@ -172,7 +172,7 @@ API key **不以明文落盘**。向导把密钥交给操作系统自带的凭�
 
 ## 5. 服务商预设
 
-内置预设除下表外还有 ChatGPT 与 Grok CLI（[ADR-0042](../decisions/ADR-0042-provider-oauth.md)）。ChatGPT（`chatgpt`）使用 `auth: { kind: "openai-siwc" }`、`https://api.openai.com/v1` 与 `modelsDevProvider: "openai"`；登记的模型协议为 `openai-responses`。Grok CLI 使用 `https://cli-chat-proxy.grok.com/v1`、静态头 `X-XAI-Token-Auth: xai-grok-cli`、模型头 `x-grok-model-override` 与外部文件 `~/.grok/auth.json`（`keyPath: ["https://accounts.x.ai/sign-in", "key"]`，续期 `grok login`）。向导跳过密钥输入，先获取模型列表，失败询问模型 id；不修改官方 CLI 的文件。
+内置预设除下表外还有 ChatGPT、Grok 与 Grok CLI（[ADR-0042](../decisions/ADR-0042-provider-oauth.md)、[ADR-0043](../decisions/ADR-0043-grok-build-oauth.md)）。ChatGPT（`chatgpt`）使用 `auth: { kind: "openai-siwc" }`、`https://api.openai.com/v1` 与 `modelsDevProvider: "openai"`；登记的模型协议为 `openai-responses`。Grok（`grok`）使用 `auth: { kind: "xai-oauth2" }`、`https://cli-chat-proxy.grok.com/v1`、静态头 `X-XAI-Token-Auth: xai-grok-cli` 与模型头 `x-grok-model-override`。Grok CLI 使用同一代理与请求头，凭据来自外部文件 `~/.grok/auth.json`（`keyPath: ["https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828", "key"]`，续期 `grok login`）。向导跳过密钥输入。Grok CLI 先获取模型列表，失败询问模型 id；不修改官方 CLI 的文件。
 
 预设是 `provider` 模块里的纯数据：
 
@@ -280,7 +280,7 @@ runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最�
 
 - API key 的明文凭据后备：没有系统后端时只提供环境变量方式。账号登录记录的明文或内存选择见第 3 节，不适用于 API key。
 - Windows 凭据管理器（Credential Manager）：读取需要经 PowerShell 动态编译 P/Invoke 代码，启动慢且易被安全软件拦截；DPAPI 提供同等的"仅当前用户可解密"保护，本阶段只用 DPAPI。
-- 官方未开放给第三方的订阅登录（如 Claude.ai）：不模拟官方客户端，不借用未公开的 client_id。已接入的 ChatGPT、Grok CLI 凭据与 OpenRouter 登录见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md)。
+- 官方未开放给第三方的订阅登录（如 Claude.ai）：不模拟官方客户端，不借用未公开的 client_id。Grok Build 是例外：没有注册端点，使用官方公开客户端，但不伪装 User-Agent，见 [ADR-0043](../decisions/ADR-0043-grok-build-oauth.md)。已接入的 ChatGPT、Grok、Grok CLI 凭据与 OpenRouter 登录见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md)。
 - 非交互的 `nctrn setup --provider ... --key ...`：命令行上的密钥会进入 shell 历史与进程列表，与"凭据不经命令行"的规则冲突；自动化场景继续使用环境变量或手写配置。
 - 项目级向导配置：向导只写用户级文件。项目级服务商配置仍然手写在 `.nocturne/config.json`，并受信任模型约束。
 - 探测上游未声明的能力：各服务的模型列表字段不统一，本阶段只映射上游明确声明的字段（第 7 节），不发探测请求、不按模型名猜测。

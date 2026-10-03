@@ -77,7 +77,7 @@ export interface WizardPreset {
   auth?: ProviderAuth | undefined;
   headers?: Record<string, string> | undefined;
   modelHeader?: string | undefined;
-  login?: "openrouter" | "openai-siwc" | undefined;
+  login?: "openrouter" | "openai-siwc" | "xai-oauth2" | undefined;
   id: string;
   label: string;
   type: "openai-compatible" | "anthropic";
@@ -211,19 +211,19 @@ export async function runProviderSetupWizard(
   const backend = config.credentials.backend();
   let key: string | undefined;
   let apiKeyEnv: string | undefined;
-  let browserLogin = preset.auth?.kind === "openai-siwc";
+  let browserLogin = preset.auth?.kind === "openai-siwc" || preset.auth?.kind === "xai-oauth2";
   if (preset.login === "openrouter" && deps.login !== undefined) {
     const choices = await io.chooseMulti("密钥获取方式（选择一项）：", ["浏览器登录", "粘贴密钥"]);
     if (choices.length !== 1) throw new WizardAbort();
     browserLogin = choices[0] === 0;
   }
+  const accountLogin = preset.auth?.kind === "openai-siwc" || preset.auth?.kind === "xai-oauth2";
   if (browserLogin) {
     if (deps.login === undefined) throw new Error("客户端未提供登录入口");
     await deps.login({ id: providerId, type: preset.type, baseURL, auth: preset.auth }, io);
-    if (preset.auth?.kind !== "openai-siwc") key = await config.credentials.get(providerId);
+    if (!accountLogin) key = await config.credentials.get(providerId);
     io.step("登录已完成");
-    if (backend === "none" && preset.auth?.kind !== "openai-siwc")
-      apiKeyEnv = preset.defaultKeyEnv ?? "NOCTURNE_API_KEY";
+    if (backend === "none" && !accountLogin) apiKeyEnv = preset.defaultKeyEnv ?? "NOCTURNE_API_KEY";
   } else if (preset.auth?.kind === "external-file") {
     io.step(`凭据来源：外部登录文件；续期运行 ${preset.auth.renewHint}`);
   } else if (backend !== "none") {

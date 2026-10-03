@@ -183,7 +183,7 @@ class ProviderAuthError extends ProviderError {
 }
 ```
 
-`openai-siwc` 的请求约束是鉴权实现提供的声明，不改变 `Provider` 或 `ModelRequest`。Responses 适配器按声明改写请求与工具名，并只在收到 `response.completed` 时发出成功 `finish`。
+`openai-siwc` 的请求约束是鉴权实现提供的声明，不改变 `Provider` 或 `ModelRequest`。Responses 适配器按声明改写请求与工具名，并只在收到 `response.completed` 时发出成功 `finish`。`xai-oauth2` 只换令牌，不改 Chat Completions 请求体，见 [ADR-0043](../decisions/ADR-0043-grok-build-oauth.md)。
 
 ```ts
 class ProviderError extends Error {

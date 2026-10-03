@@ -65,6 +65,7 @@ export const modelOverrideSchema = z.object({
 const providerAuthSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("apiKey") }).strict(),
   z.object({ kind: z.literal("openai-siwc") }).strict(),
+  z.object({ kind: z.literal("xai-oauth2") }).strict(),
   z
     .object({
       kind: z.literal("external-file"),

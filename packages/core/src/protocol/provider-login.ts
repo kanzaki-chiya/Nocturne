@@ -6,7 +6,10 @@ export interface LoginResult {
 
 export interface LoginSession {
   authorizeUrl: string;
-  manualInput: "callback-url" | "code";
+  /** `none`：设备码登录，用户在浏览器确认，不向本进程粘贴。 */
+  manualInput: "callback-url" | "code" | "none";
+  /** 设备码登录时展示，供用户在浏览器核对。不含令牌。 */
+  userCode?: string | undefined;
   completion: Promise<LoginResult>;
   submitManual(text: string): Promise<void>;
   cancel(): void;
@@ -45,6 +48,47 @@ export function parseOAuthCredential(text: string | undefined): OAuthCredentialR
     )
       return undefined;
     return record as unknown as OAuthCredentialRecord;
+  } catch {
+    return undefined;
+  }
+}
+
+/** xAI OAuth2 账号记录。只存 Nocturne 自己换到的令牌，不读官方 CLI 文件。ADR-0043。 */
+export interface XaiOAuthCredentialRecord {
+  version: 1;
+  kind: "xai-oauth2";
+  clientId: string;
+  subject: string;
+  email?: string | undefined;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  scopes: string[];
+}
+
+export function parseXaiOAuthCredential(
+  text: string | undefined,
+): XaiOAuthCredentialRecord | undefined {
+  if (text === undefined) return undefined;
+  try {
+    const value: unknown = JSON.parse(text);
+    if (!value || typeof value !== "object") return undefined;
+    const record = value as Record<string, unknown>;
+    if (
+      record.version !== 1 ||
+      record.kind !== "xai-oauth2" ||
+      !["clientId", "subject", "accessToken", "refreshToken"].every(
+        (key) => typeof record[key] === "string" && record[key] !== "",
+      ) ||
+      typeof record.expiresAt !== "number" ||
+      !Number.isFinite(record.expiresAt) ||
+      !Array.isArray(record.scopes) ||
+      !record.scopes.every((scope) => typeof scope === "string") ||
+      !record.scopes.includes("grok-cli:access") ||
+      (record.email !== undefined && typeof record.email !== "string")
+    )
+      return undefined;
+    return record as unknown as XaiOAuthCredentialRecord;
   } catch {
     return undefined;
   }

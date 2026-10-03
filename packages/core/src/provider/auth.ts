@@ -17,7 +17,7 @@ export function createAuthResolver(
 ): AuthResolver {
   if (config.authResolver !== undefined) return config.authResolver;
   if (config.auth?.kind === "external-file") return createExternalFileAuth(config.auth);
-  if (config.auth?.kind === "openai-siwc") {
+  if (config.auth?.kind === "openai-siwc" || config.auth?.kind === "xai-oauth2") {
     const message = `登录凭据缺少或已失效，请执行 /provider login ${config.id}`;
     return {
       unauthorizedMessage: message,

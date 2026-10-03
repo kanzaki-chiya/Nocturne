@@ -438,6 +438,15 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
         `服务商 ${entry.id} 的 openai-siwc baseURL 必须是 https://api.openai.com/v1`,
       );
     }
+    if (
+      entry.auth?.kind === "xai-oauth2" &&
+      entry.baseURL !== "https://cli-chat-proxy.grok.com/v1"
+    ) {
+      throw new ConfigError(
+        "config_invalid",
+        `服务商 ${entry.id} 的 xai-oauth2 baseURL 必须是 https://cli-chat-proxy.grok.com/v1`,
+      );
+    }
     const effective = { ...entry };
     if (
       effective.auth !== undefined &&

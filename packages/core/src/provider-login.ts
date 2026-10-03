@@ -4,6 +4,7 @@ import { listProviderPresets } from "./provider/index.js";
 import { ProviderLoginError, type ProviderLoginOptions } from "./provider-login/errors.js";
 import { createOpenRouterLogin } from "./provider-login/openrouter.js";
 import { createSiwcLogin } from "./provider-login/openai-siwc.js";
+import { createXaiLogin } from "./provider-login/xai-oauth.js";
 import { createPlatform } from "./platform/index.js";
 
 export { ProviderLoginError, type ProviderLoginErrorCode } from "./provider-login/errors.js";
@@ -18,6 +19,15 @@ export async function startProviderLogin(
   if (entry?.id !== providerId) throw new ProviderLoginError("missing");
   if (entry.auth?.kind === "openai-siwc") {
     return createSiwcLogin(
+      entry,
+      config.credentials,
+      createPlatform(),
+      config.nocturneHome,
+      options,
+    );
+  }
+  if (entry.auth?.kind === "xai-oauth2") {
+    return createXaiLogin(
       entry,
       config.credentials,
       createPlatform(),

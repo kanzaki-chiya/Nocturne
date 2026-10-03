@@ -23,7 +23,7 @@ export interface ProviderPreset {
   auth?: ProviderAuth | undefined;
   headers?: Record<string, string> | undefined;
   modelHeader?: string | undefined;
-  login?: "openrouter" | "openai-siwc" | undefined;
+  login?: "openrouter" | "openai-siwc" | "xai-oauth2" | undefined;
   /** 模型列表能否经 GET /models 自动获取 */
   fetchableModels: boolean;
   /**
@@ -45,6 +45,19 @@ export interface ProviderPreset {
   modelsDevProvider?: string | undefined;
 }
 
+/**
+ * Grok 代理（cli-chat-proxy.grok.com）要求的请求头，两个 Grok 预设共用（ADR-0043）。
+ * 缺版本门头时代理回 426；版本号对齐当前能过门的官方 CLI，不是 Nocturne 版本，
+ * 代理提高门槛时只改这里。User-Agent 仍是 nocturne/<version>。
+ */
+const GROK_PROXY_HEADERS: Readonly<Record<string, string>> = {
+  "X-XAI-Token-Auth": "xai-grok-cli",
+  "x-grok-client-version": "1.0.44",
+  "x-grok-client-identifier": "nocturne",
+  "x-authenticateresponse": "authenticate-response",
+  "x-grok-client-mode": "headless",
+};
+
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   {
     id: "chatgpt",
@@ -58,17 +71,29 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     fetchableModels: true,
   },
   {
+    id: "grok",
+    label: "Grok",
+    type: "openai-compatible",
+    defaultName: "grok",
+    baseURL: "https://cli-chat-proxy.grok.com/v1",
+    headers: { ...GROK_PROXY_HEADERS },
+    modelHeader: "x-grok-model-override",
+    auth: { kind: "xai-oauth2" },
+    login: "xai-oauth2",
+    fetchableModels: true,
+  },
+  {
     id: "grok-cli",
     label: "Grok CLI",
     type: "openai-compatible",
     defaultName: "grok-cli",
     baseURL: "https://cli-chat-proxy.grok.com/v1",
-    headers: { "X-XAI-Token-Auth": "xai-grok-cli" },
+    headers: { ...GROK_PROXY_HEADERS },
     modelHeader: "x-grok-model-override",
     auth: {
       kind: "external-file",
       path: "~/.grok/auth.json",
-      keyPath: ["https://accounts.x.ai/sign-in", "key"],
+      keyPath: ["https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828", "key"],
       renewHint: "grok login",
     },
     fetchableModels: true,

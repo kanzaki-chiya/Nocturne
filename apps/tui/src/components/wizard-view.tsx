@@ -60,7 +60,8 @@ export function WizardView({
   const stepsLine = state.steps.map(boxSafe).join(" • ");
   const metadata = (stepsLine ? 1 : 0) + logs.length;
   const loginRows = state.login
-    ? Math.ceil(stringWidth(state.login.authorizeUrl) / Math.max(1, Math.min(68, width - 8))) + 1
+    ? Math.ceil(stringWidth(state.login.authorizeUrl) / Math.max(1, Math.min(68, width - 8))) +
+      (state.login.userCode !== undefined ? 2 : 1)
     : 0;
   const needed = Math.max(
     9 + loginRows + (secretDisplay ? 6 : 0),
@@ -294,6 +295,9 @@ export function WizardView({
               {state.login ? (
                 <>
                   <Text wrap="wrap">{boxSafe(state.login.authorizeUrl)}</Text>
+                  {state.login.userCode !== undefined ? (
+                    <Text>确认码 {boxSafe(state.login.userCode)}</Text>
+                  ) : null}
                   <Text color={theme.muted}>
                     {copyNote ??
                       (state.login.browserOpened

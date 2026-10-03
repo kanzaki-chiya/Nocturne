@@ -15,7 +15,7 @@ export interface LoginClientOptions {
   signal?: AbortSignal;
   remote?: boolean;
   openBrowser?: (url: string) => Promise<boolean>;
-  onWaiting?: (authorizeUrl: string, browserOpened: boolean) => void;
+  onWaiting?: (authorizeUrl: string, browserOpened: boolean, userCode?: string) => void;
   showUnstoredKey?: (key: string, envName: string) => Promise<void>;
 }
 
@@ -118,35 +118,40 @@ export async function runProviderLogin(
     const opened =
       !remote &&
       (await (options.openBrowser ?? openLoginBrowser)(session.authorizeUrl).catch(() => false));
-    if (options.onWaiting) options.onWaiting(session.authorizeUrl, opened);
-    else
-      io.print(
-        `${session.authorizeUrl}\n${opened ? "已在浏览器打开" : "请复制到浏览器"} · Esc / Ctrl+C 取消`,
-      );
+    const hint = [
+      session.authorizeUrl,
+      ...(session.userCode !== undefined ? [`确认码 ${session.userCode}`] : []),
+      `${opened ? "已在浏览器打开" : "请复制到浏览器"} · Esc / Ctrl+C 取消`,
+      ...(session.manualInput === "none" ? ["在浏览器确认后等待完成，无需粘贴"] : []),
+    ].join("\n");
+    if (options.onWaiting) options.onWaiting(session.authorizeUrl, opened, session.userCode);
+    else io.print(hint);
     let manualError: unknown;
-    void (async () => {
-      while (!isFinished()) {
-        let text: string;
-        try {
-          text = await io.askSecret(
-            session.manualInput === "code" ? "粘贴授权码：" : "粘贴完整回调 URL：",
-          );
-        } catch (error) {
-          if (phase.choosingStorage || isFinished()) return;
-          throw error;
+    if (session.manualInput !== "none") {
+      void (async () => {
+        while (!isFinished()) {
+          let text: string;
+          try {
+            text = await io.askSecret(
+              session.manualInput === "code" ? "粘贴授权码：" : "粘贴完整回调 URL：",
+            );
+          } catch (error) {
+            if (phase.choosingStorage || isFinished()) return;
+            throw error;
+          }
+          if (isFinished()) return;
+          try {
+            await session.submitManual(text.trim());
+          } catch {
+            if (!isFinished()) io.print("授权输入未被接受，请重新粘贴");
+          }
         }
-        if (isFinished()) return;
-        try {
-          await session.submitManual(text.trim());
-        } catch {
-          if (!isFinished()) io.print("授权输入未被接受，请重新粘贴");
-        }
-      }
-    })().catch((error: unknown) => {
-      if (isFinished() || phase.choosingStorage || (shown && !options.signal?.aborted)) return;
-      manualError = error;
-      session.cancel();
-    });
+      })().catch((error: unknown) => {
+        if (isFinished() || phase.choosingStorage || (shown && !options.signal?.aborted)) return;
+        manualError = error;
+        session.cancel();
+      });
+    }
     const outcome = await completion;
     if (manualError instanceof WizardAbort || options.signal?.aborted) throw new WizardAbort();
     if ("error" in outcome) throw outcome.error;

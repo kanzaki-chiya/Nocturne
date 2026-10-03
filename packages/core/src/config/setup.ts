@@ -143,7 +143,9 @@ export function describeProviderLayers(
           ? `外部登录凭据 ${entry.auth?.kind === "external-file" ? entry.auth.path : ""}`
           : kind === "openai-siwc"
             ? "ChatGPT 账号"
-            : `API key（${envSet ? `环境变量 ${apiKeyEnv}` : keySource === "credential" ? "凭据存储" : "未配置"}）`,
+            : kind === "xai-oauth2"
+              ? "Grok 账号"
+              : `API key（${envSet ? `环境变量 ${apiKeyEnv}` : keySource === "credential" ? "凭据存储" : "未配置"}）`,
       credentialStatus: keySource === "missing" ? "missing" : "valid",
       ...(keySource === "credential"
         ? {

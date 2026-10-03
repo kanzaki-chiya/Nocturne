@@ -229,7 +229,8 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 **内容**（第 1–3 轮已实现，2026-10-03）：
 
 - **ChatGPT 账号**：Nocturne 自己按 OpenAI 开源应用通道动态注册并登录，令牌经系统凭据后端保存；无系统后端时由用户显式选择明文或仅本次运行。跨进程加锁刷新。Responses 请求按通道约束改写。主对话、子代理、模型角色、审查器、压缩摘要与模型列表共用 `AuthResolver`；401 失效后强制刷新并只重发一次。
-- **Grok CLI 凭据**：只读官方 CLI 的 `~/.grok/auth.json`，经 CLI chat proxy 调用；从不写入或刷新该文件。
+- **Grok CLI 凭据**：只读官方 CLI 的 `~/.grok/auth.json`，经 CLI chat proxy 调用；从不写入或刷新该文件。现行文件键见 [ADR-0043](../decisions/ADR-0043-grok-build-oauth.md)。
+- **Grok 账号**：Nocturne 自己走 `auth.x.ai` 的授权码或设备码登录，令牌经系统凭据后端保存并刷新；请求仍打到 CLI chat proxy。不伪装官方 CLI 的 User-Agent。
 - **OpenRouter 浏览器登录**：PKCE 换得普通 API key，之后与手填 key 无异。无系统后端时只显示一次 key 与环境变量命令。
 - **配置与界面**：`auth` 字段与协议分开、只在用户级生效；`/provider login|logout`、服务商页登录等待页与凭据状态。令牌不进入事件、诊断日志或 `/provider` 输出。
 

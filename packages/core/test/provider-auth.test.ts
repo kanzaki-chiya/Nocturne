@@ -112,7 +112,11 @@ describe("provider authentication", () => {
       baseURL: "https://cli-chat-proxy.grok.com/v1",
       modelHeader: "x-grok-model-override",
       headers: { "X-XAI-Token-Auth": "xai-grok-cli" },
-      auth: { kind: "external-file", renewHint: "grok login" },
+      auth: {
+        kind: "external-file",
+        renewHint: "grok login",
+        keyPath: ["https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828", "key"],
+      },
     });
   });
 });

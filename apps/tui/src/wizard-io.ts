@@ -36,7 +36,7 @@ export interface WizardPrompt {
 
 export interface WizardState {
   mode?: "add" | "key" | "login";
-  login?: { authorizeUrl: string; browserOpened: boolean } | undefined;
+  login?: { authorizeUrl: string; browserOpened: boolean; userCode?: string } | undefined;
   /** 临时显示；函数不进入 JSON 调试记录，确认后闭包释放密钥。 */
   secretDisplay?: (() => { key: string; envName: string } | undefined) | undefined;
   error?: string | undefined;
@@ -275,9 +275,16 @@ export function useProviderWizard(
             await runProviderLogin(config, entry.id, io, {
               entry,
               signal: controller.signal,
-              onWaiting: (authorizeUrl, browserOpened) => {
+              onWaiting: (authorizeUrl, browserOpened, userCode) => {
                 guard();
-                setState((st) => ({ ...st, login: { authorizeUrl, browserOpened } }));
+                setState((st) => ({
+                  ...st,
+                  login: {
+                    authorizeUrl,
+                    browserOpened,
+                    ...(userCode !== undefined ? { userCode } : {}),
+                  },
+                }));
               },
               showUnstoredKey: async (key, envName) => {
                 guard();

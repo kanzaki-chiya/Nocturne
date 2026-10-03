@@ -65,13 +65,13 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 }
 ```
 
-凭据只从环境变量或用户级凭据存储读取，不写入会话日志、事件或普通日志。`auth` 与协议分开：省略等同 `{ "kind": "apiKey" }`；`openai-siwc` 与 `external-file` 的字段、用户级限制和请求约束见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md)。交互式配置见 [provider-setup.md](provider-setup.md)。
+凭据只从环境变量或用户级凭据存储读取，不写入会话日志、事件或普通日志。`auth` 与协议分开：省略等同 `{ "kind": "apiKey" }`；`openai-siwc`、`xai-oauth2` 与 `external-file` 的字段、用户级限制和请求约束见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md) 与 [ADR-0043](../decisions/ADR-0043-grok-build-oauth.md)。交互式配置见 [provider-setup.md](provider-setup.md)。
 
 思考强度档位（[ADR-0025](../decisions/ADR-0025-per-model-reasoning.md)）：中性档位集合为 `off | minimal | low | medium | high | xhigh | max`。每个模型的可用档位按上段规则解析；`ModelRequest.reasoningEffort` 由 Runtime 按会话配置就近降档赋值。适配器把档位翻译为 `reasoning_effort`（openai 格式）、`reasoning.effort`（openrouter 格式）或 `thinking.budget_tokens`（anthropic）；`thinking.format` 与 `thinking.budgets` 保留。`providerOptions` 中的原生推理键仍可直传，与归一化字段同义时归一化字段胜出；子代理兜底轮不携带 `reasoningEffort`。
 
 ## 4. 适配器
 
-条目可声明用户级 `auth`（省略等同 `apiKey`）及 `modelHeader`。适配器只认 `AuthResolver`，不按服务商名分支。主对话、子代理、模型角色、审查器、压缩摘要和 `fetchModels` 共用同一解析器。响应流开始前的 401 调用 `invalidate()` 后重发一次，仍失败则为不可重试的 `auth`。`external-file` 按 mtime 缓存，只读指定 JSON 路径；失效后重读一次，失败提示 `renewHint`，不复制到 Nocturne 凭据库。`openai-siwc` 向 Responses 适配器提供一份请求约束声明：固定 `store: false`、`stream: true`，不发 `max_output_tokens` 等通道禁用字段，system 改为 `instructions`，function 工具放入 namespace，只有 `response.completed` 算成功；`{detail}` 与 `{error:{code}}` 都归一化，额度用完不重试。完整字段与错误表见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 3–5 节，接口见 [provider-api.md](../protocols/provider-api.md) 第 5 节。
+条目可声明用户级 `auth`（省略等同 `apiKey`）及 `modelHeader`。适配器只认 `AuthResolver`，不按服务商名分支。主对话、子代理、模型角色、审查器、压缩摘要和 `fetchModels` 共用同一解析器。响应流开始前的 401 调用 `invalidate()` 后重发一次，仍失败则为不可重试的 `auth`。`external-file` 按 mtime 缓存，只读指定 JSON 路径；失效后重读一次，失败提示 `renewHint`，不复制到 Nocturne 凭据库。`xai-oauth2` 自己持有可刷新的访问令牌，请求仍走 OpenAI 兼容 Chat Completions，不另加 Responses 约束。`openai-siwc` 向 Responses 适配器提供一份请求约束声明：固定 `store: false`、`stream: true`，不发 `max_output_tokens` 等通道禁用字段，system 改为 `instructions`，function 工具放入 namespace，只有 `response.completed` 算成功；`{detail}` 与 `{error:{code}}` 都归一化，额度用完不重试。完整字段与错误表见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 3–5 节和 [ADR-0043](../decisions/ADR-0043-grok-build-oauth.md)，接口见 [provider-api.md](../protocols/provider-api.md) 第 5 节。
 
 | 适配器 | 覆盖 | 阶段 | 传输实现 |
 |---|---|---|---|
@@ -82,7 +82,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 传输实现的理由与约定：
 
-- **`openai-compatible` 用 `@ai-sdk/openai-compatible`**：该包专为"实现 `/v1/chat/completions` 的第三方服务"设计，已处理 SSE 边界、按 `index` 分片的 `tool_calls` 组装、用量与错误体归一化；自托管 / 中转兼容服务是它的明示使用场景。SDK 类型只存在于适配器内部，不泄漏到 Core（ADR-0005）。已知风险是各家在推理字段（`reasoning_content` 等）、用量口径、错误体结构上的差异不一定全部透传——契约测试与真实服务冒烟测试用于检验这一点；若暴露拿不到必需字段的限制，退路是适配器内自建 `fetch` + SSE 解析（不引第三方 SDK）。
+- **`openai-compatible` 用 `@ai-sdk/openai-compatible`**：该包专为"实现 `/v1/chat/completions` 的第三方服务"设计，已处理 SSE 边界、按 `index` 分片的 `tool_calls` 组装、用量与错误体归一化；流式请求固定带 `stream_options.include_usage`（Grok 代理等服务不带就不返回用量）；自托管 / 中转兼容服务是它的明示使用场景。SDK 类型只存在于适配器内部，不泄漏到 Core（ADR-0005）。已知风险是各家在推理字段（`reasoning_content` 等）、用量口径、错误体结构上的差异不一定全部透传——契约测试与真实服务冒烟测试用于检验这一点；若暴露拿不到必需字段的限制，退路是适配器内自建 `fetch` + SSE 解析（不引第三方 SDK）。
 - **`anthropic` 用 `@ai-sdk/anthropic`**（[ADR-0006](../decisions/ADR-0006-anthropic-transport.md)）：与 openai-compatible 共用 `streamText` / `TextStreamPart` 归一化路径。Anthropic 特有字段在适配器内经 `providerMetadata` ↔ `providerData` 往返（thinking 签名回传）；提示缓存按请求的 `cachePrefix` 打两个 `cache_control` 断点：system 末尾（连同其前的工具规格）与前缀内最后一条消息，没有 `cachePrefix` 时不打（Messages API 只缓存显式断点之前的前缀，其他协议由服务商自动缓存）；`baseURL` 可省略（默认官方端点），凭据经 `apiKeyEnv` 环境变量名引用。冒烟变量为 `NOCTURNE_SMOKE_ANTHROPIC_*`（workflow.md 第 5 节）。
 - **`openai-responses` 用 `@ai-sdk/openai` 的 Responses 模型**（`provider.responses(id)`，[ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md) §1）：与另外两种协议共用 `streamText` 归一化路径；请求发送 `store: false`（无状态，每次带完整历史，不使用 `previous_response_id`），推理项以 `include: ["reasoning.encrypted_content"]` 取回加密内容并经 `providerMetadata` ↔ `providerData` 往返；`reasoningEffort` 档位翻译为 `reasoning.effort` 并请求 `reasoning.summary: "auto"`（推理摘要当作可见推理文本，同一推理项的多段摘要合并为一个推理块、段间补空行）；请求带 `sessionId` 时作为 `prompt_cache_key` 发送（无状态下缓存只按前缀命中，同一会话同一个键才会路由到同一缓存分片；请求级 `promptCacheKey` 已给时不覆盖）；鉴权只发 `Authorization: Bearer`（`anthropic` 条目下也一样），条目级 `providerOptions` 不交给它。
 - 无论底层如何实现，适配器都必须通过同一组契约测试（[provider-api.md](../protocols/provider-api.md) 第 4 节的流式契约）；遇到具体限制时按 ADR-0005 替换传输实现，不改 Core 接口。

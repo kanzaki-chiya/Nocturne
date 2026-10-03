@@ -544,17 +544,18 @@ export async function loadConfig(
             item.auth = `CLI 凭据 ${auth.path}`;
             item.keySource = "missing";
             delete item.credentialStorage;
-          } else if (entry?.auth?.kind === "openai-siwc") {
+          } else if (entry?.auth?.kind === "openai-siwc" || entry?.auth?.kind === "xai-oauth2") {
             const place = credentials.storage?.(entry.id);
             if (place !== undefined) item.credentialStorage = place;
             else delete item.credentialStorage;
+            const label = entry.auth.kind === "xai-oauth2" ? "Grok 账号" : "ChatGPT 账号";
             try {
               const raw = await credentials.get(entry.id);
               const record =
                 raw === undefined
                   ? undefined
                   : (JSON.parse(raw) as { email?: unknown; expiresAt?: unknown });
-              item.auth = `ChatGPT 账号${typeof record?.email === "string" ? ` ${record.email}` : ""}`;
+              item.auth = `${label}${typeof record?.email === "string" ? ` ${record.email}` : ""}`;
               item.credentialStatus =
                 typeof record?.expiresAt !== "number"
                   ? "missing"

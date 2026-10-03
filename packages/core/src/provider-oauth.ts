@@ -12,6 +12,7 @@ import {
 } from "./provider/index.js";
 import type { AuthConfig } from "./provider/auth.js";
 import { SIWC_RESOURCE, siwcRecord, type SiwcDependencies } from "./provider-login/openai-siwc.js";
+import { createXaiAuthResolver, type XaiOAuthDependencies } from "./provider-login/xai-oauth.js";
 import { acquireSessionLock } from "./session/lock.js";
 import { SessionError } from "./session/errors.js";
 
@@ -22,10 +23,31 @@ export function resolveProviderAuth(
   config: Pick<RuntimeConfig, "credentials" | "nocturneHome"> | undefined,
   entry: AuthConfig,
   platform: Platform = createPlatform(),
-  deps: SiwcDependencies = {},
+  deps: SiwcDependencies & XaiOAuthDependencies = {},
 ): AuthResolver {
   if (entry.authResolver) return entry.authResolver;
-  if (entry.auth?.kind !== "openai-siwc" || config === undefined) {
+  if (entry.auth?.kind === "xai-oauth2" && config !== undefined) {
+    let byId = resolvers.get(config.credentials);
+    if (!byId) {
+      byId = new Map();
+      resolvers.set(config.credentials, byId);
+    }
+    const existing = byId.get(entry.id);
+    if (existing) return existing;
+    const resolver = createXaiAuthResolver(
+      entry,
+      config.credentials,
+      platform,
+      config.nocturneHome,
+      deps,
+    );
+    byId.set(entry.id, resolver);
+    return resolver;
+  }
+  if (
+    (entry.auth?.kind !== "openai-siwc" && entry.auth?.kind !== "xai-oauth2") ||
+    config === undefined
+  ) {
     return createAuthResolver(
       {
         ...entry,
