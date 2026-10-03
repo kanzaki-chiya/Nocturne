@@ -1,0 +1,34 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vitest/config";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig({
+  resolve: {
+    // 离线测试直接对 core 源码运行，不需要先构建 dist
+    alias: [
+      {
+        find: /^@nocturne\/core\/protocol$/,
+        replacement: path.resolve(here, "../core/src/protocol/index.ts"),
+      },
+      {
+        find: /^@nocturne\/core$/,
+        replacement: path.resolve(here, "../core/src/index.ts"),
+      },
+      {
+        find: /^@nocturne\/rpc\/server$/,
+        replacement: path.resolve(here, "src/server/index.ts"),
+      },
+      {
+        find: /^@nocturne\/rpc\/client$/,
+        replacement: path.resolve(here, "src/client/index.ts"),
+      },
+    ],
+  },
+  test: {
+    include: ["src/**/*.test.ts", "test/**/*.test.ts"],
+    environment: "node",
+    testTimeout: 30_000,
+  },
+});

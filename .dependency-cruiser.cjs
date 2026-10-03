@@ -180,8 +180,8 @@ module.exports = {
       name: "no-deep-import-from-outside-core",
       severity: "error",
       comment:
-        "包外（apps、packages/mcp）只能 import @nocturne/core（src/index.ts）或 @nocturne/core/protocol（src/protocol/index.ts），任何内部路径一律禁止",
-      from: { path: "^(apps|packages/mcp)/" },
+        "包外（apps、packages/mcp、packages/rpc）只能 import @nocturne/core（src/index.ts）或 @nocturne/core/protocol（src/protocol/index.ts），任何内部路径一律禁止",
+      from: { path: "^(apps|packages/mcp|packages/rpc)/" },
       to: {
         path: "^packages/core/src/",
         pathNot: ["^packages/core/src/index\\.ts$", "^packages/core/src/protocol/index\\.ts$"],
@@ -194,6 +194,39 @@ module.exports = {
         "packages/mcp 只能依赖 @nocturne/core 公开入口与 MCP SDK（modules.md：Core 不依赖 mcp，mcp 不依赖 apps）",
       from: { path: "^packages/mcp/src" },
       to: { path: "^(packages/(?!mcp)|apps)/" },
+    },
+    {
+      name: "rpc-deps",
+      severity: "error",
+      comment:
+        "packages/rpc 只能依赖 @nocturne/core 公开入口（modules.md：rpc 不依赖 apps 与 mcp）",
+      from: { path: "^packages/rpc/src" },
+      to: { path: "^(packages/(?!rpc|core)|apps)/" },
+    },
+    {
+      name: "rpc-client-runtime-deps",
+      severity: "error",
+      comment:
+        "RPC 客户端与共享层运行时只能依赖 @nocturne/core/protocol（可在浏览器等无 Node 环境使用）；对 @nocturne/core 的引用只能是 import type（被擦除，依赖图中不可见）",
+      from: { path: "^packages/rpc/src/(client|shared)/" },
+      to: {
+        path: "^packages/core/src/",
+        pathNot: "^packages/core/src/protocol/index\.ts$",
+      },
+    },
+    {
+      name: "rpc-client-no-node",
+      severity: "error",
+      comment: "RPC 客户端与共享层不使用 Node 内置模块，传输由使用方注入",
+      from: { path: "^packages/rpc/src/(client|shared)/" },
+      to: { dependencyTypes: ["core"] },
+    },
+    {
+      name: "rpc-client-no-server",
+      severity: "error",
+      comment: "RPC 客户端与共享层不依赖服务端",
+      from: { path: "^packages/rpc/src/(client|shared)/" },
+      to: { path: "^packages/rpc/src/server/" },
     },
     {
       name: "cli-tui-static-boundary",

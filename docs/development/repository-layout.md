@@ -38,9 +38,13 @@ nocturne/
 │   │   │   ├── diagnostics/     调试诊断 JSONL 记录与脱敏
 │   │   │   └── platform/        文件系统、子进程、路径（含 spawnPipe）
 │   │   └── test/                集成测试（脚本化假 Provider）
-│   └── mcp/                     @nocturne/mcp：MCP 客户端（ADR-0011）
-│       ├── package.json         依赖 @nocturne/core 公开入口与 @modelcontextprotocol/sdk
-│       └── src/                 connector、stdio 传输、工具包装
+│   ├── mcp/                     @nocturne/mcp：MCP 客户端（ADR-0011）
+│   │   ├── package.json         依赖 @nocturne/core 公开入口与 @modelcontextprotocol/sdk
+│   │   └── src/                 connector、stdio 传输、工具包装
+│   └── rpc/                     @nocturne/rpc：JSON-RPC 服务端与类型化客户端（ADR-0044）
+│       ├── package.json         exports: "./server" 与 "./client"；依赖 @nocturne/core 公开入口
+│       ├── src/                 server（方法映射、订阅回放）、client、shared（报文、方法表、传输）
+│       └── test/                内存管道 + FakeProvider 的离线测试
 └── apps/
     ├── cli/                     nctrn 命令行入口
     │   ├── src/                 main、args、config、repl、session-switch、commands、render
@@ -54,7 +58,7 @@ nocturne/
 
 ## 2. 包边界
 
-- `packages/core`、`packages/mcp`、`apps/cli`、`apps/tui` 是四个 workspace 包；Core 不依赖客户端或 MCP SDK，MCP 和客户端只使用 Core 的公开入口。
+- `packages/core`、`packages/mcp`、`packages/rpc`、`apps/cli`、`apps/tui` 是五个 workspace 包；Core 不依赖客户端或 MCP SDK，MCP、RPC 和客户端只使用 Core 的公开入口。
 - Core 内部的模块边界用目录加静态依赖检查维护，不再拆成十几个包。
 - `protocol` 以子路径导出（`@nocturne/core/protocol`），客户端可以只导入类型，为将来独立成包提前划好界线。
 
@@ -66,7 +70,6 @@ nocturne/
 |---|---|
 | `packages/protocol` | 出现第一个进程外客户端（RPC）需要只依赖协议类型 |
 | `packages/provider-<name>` | 某个适配器引入较重的依赖，不应让所有用户安装 |
-| `packages/server` | 实现 RPC 服务端时 |
 
 ## 4. 模块 README
 

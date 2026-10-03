@@ -18,7 +18,7 @@
 | Tool Call 如何关联？ | Runtime 为每个工具调用分配会话内唯一的 `callId`，贯穿所有生命周期事件；Provider 给出的原始 ID 保存在 `providerCallId` 中，仅用于回传 Provider |
 | Message 与 Event 的关系？ | 消息就是事件：`message.user`、`message.assistant` 本身就是会话中的消息记录，工具结果就是 `tool.completed`。没有另一张消息表 |
 | Session state 如何得到？ | 由持久化事件折叠重建；MVP 不做快照 |
-| CLI/TUI 消费什么？ | CLI（行式输出）直接消费事件；TUI 等需要整体视图的客户端使用 `protocol` 提供的纯函数 reducer 派生视图（[view.md](view.md)，Phase 4）；远程客户端先按 `seq` 回放持久化事件，再接收实时事件 |
+| CLI/TUI 消费什么？ | CLI（行式输出）直接消费事件；TUI 等需要整体视图的客户端使用 `protocol` 提供的纯函数 reducer 派生视图（[view.md](view.md)，Phase 4）；远程客户端先按 `seq` 回放持久化事件，再接收实时事件（`session.subscribe`，见 [rpc.md](rpc.md)） |
 
 ## 2. 事件信封
 
@@ -218,7 +218,7 @@ type QuestionAnswer = { declined: true } | {
 
 - 同一会话的事件按发出顺序交付给每个订阅者：持久化事件按 `seq`，临时事件按 `eseq`，两者之间按发出顺序（`afterSeq` 可用于事后对齐）。
 - **订阅者不影响执行**：Runtime 不等待订阅者处理完成；订阅者抛出的异常被捕获并记录到诊断日志，不影响 Runtime，也不影响其他订阅者，该订阅者继续接收后续事件。
-- 处理跟不上的订阅者：持久化事件不丢弃（可按 `seq` 从日志补读）；临时事件允许丢弃。进程内 MVP 使用无界队列；引入 RPC 时改为有界队列并在溢出时丢弃临时事件，届时在本文补充。
+- 处理跟不上的订阅者：持久化事件不丢弃（可按 `seq` 从日志补读）；临时事件允许丢弃。进程内使用无界队列；RPC 服务端第一版同样不限流（事件直接写入传输，见 [rpc.md](rpc.md) 第 4 节），有界队列与临时事件丢弃策略留到出现慢连接问题时再定。
 
 ## 7. 客户端命令
 

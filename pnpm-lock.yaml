@@ -112,6 +112,12 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/rpc:
+    dependencies:
+      '@nocturne/core':
+        specifier: workspace:*
+        version: link:../core
+
 packages:
 
   '@ai-sdk/anthropic@4.0.58':

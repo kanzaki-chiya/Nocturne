@@ -26,6 +26,8 @@
       "@nocturne/core": ["./packages/core/src/index.ts"],
       "@nocturne/core/*": ["./packages/core/src/*"],
       "@nocturne/mcp": ["./packages/mcp/src/index.ts"],
+      "@nocturne/rpc/server": ["./packages/rpc/src/server/index.ts"],
+      "@nocturne/rpc/client": ["./packages/rpc/src/client/index.ts"],
       "@nocturne/tui": ["./apps/tui/src/index.ts"],
       "@nocturne/tui/slash-catalog": ["./apps/tui/src/slash-catalog.ts"]
     }

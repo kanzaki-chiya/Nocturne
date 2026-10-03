@@ -1,0 +1,242 @@
+/**
+ * 方法表：每个 RPC 方法的参数与结果类型（ADR-0044 第 4 节、docs/protocols/rpc.md）。
+ * 服务端按它做类型检查地实现，客户端按它生成类型化调用；对 @nocturne/core 只有类型导入。
+ *
+ * 线上约定：`undefined` 以 `null` 表示（JSON 没有 undefined）；二进制用 base64 字符串。
+ */
+import type {
+  BuiltContext,
+  ContentBlock,
+  CreateSessionOptions,
+  FileIndexEntry,
+  ImageMimeType,
+  JevEndpoint,
+  JevReviewerConfig,
+  ModelInfo,
+  ModelRef,
+  ModelRole,
+  ModelRoleInfo,
+  PermissionReply,
+  ProviderOverview,
+  QuestionReply,
+  ReasoningEffort,
+  RewindMode,
+  RewindTarget,
+  RuntimeEvent,
+  RuntimeSession,
+  SessionRewoundPayload,
+  SessionState,
+  SessionSummary,
+  SettingItem,
+  SettingsPatch,
+  TurnEndReason,
+} from "@nocturne/core";
+
+export interface InitializeParams {
+  /** 客户端实现的协议版本；与服务端不一致直接报错（第一版不做向下兼容） */
+  protocolVersion: number;
+  clientName: string;
+  capabilities: {
+    /** 客户端能否回复权限与提问请求；false 时权限请求按非交互规则处理 */
+    interactive: boolean;
+  };
+}
+
+export interface InitializeResult {
+  protocolVersion: number;
+  nocturneVersion: string;
+  /** 会话日志目录（只读信息）；服务端不知道时缺省 */
+  sessionsDir?: string;
+}
+
+/** createSession / resumeSession 的结果：会话已打开，事件要另行 session.subscribe */
+export interface SessionOpened {
+  sessionId: string;
+  meta: SessionState["meta"];
+  config: SessionState["config"];
+  /** 打开时聚合的警告（配置降级、未信任项目配置等） */
+  warnings: string[];
+  /** 打开时执行的恢复修复汇总；无修复则缺省 */
+  recovery?: NonNullable<RuntimeSession["recovery"]>;
+  /** 打开时日志里最后一个持久事件的 seq */
+  lastSeq: number;
+}
+
+/** `session.state` 的结果：SessionState 去掉可由持久事件折叠得到的 history 与进程内 Map */
+export type SessionStateSummary = Omit<SessionState, "history" | "unsettledCalls">;
+
+/** `session.describeContext` 的结果：去掉发给模型的整份请求，只留报告与判定 */
+export type ContextSummary = Omit<BuiltContext, "request">;
+
+export interface WireAttachment {
+  /** base64（标准字母表，带填充） */
+  data: string;
+  mimeType: ImageMimeType;
+  label?: string;
+}
+
+export interface SessionParams {
+  sessionId: string;
+}
+
+type Ret<K extends keyof RuntimeSession> = RuntimeSession[K] extends (...args: never[]) => infer R
+  ? Awaited<R>
+  : never;
+
+/** 方法名 → 参数与结果 */
+export interface RpcMethods {
+  initialize: { params: InitializeParams; result: InitializeResult };
+  shutdown: { params: Record<string, never>; result: null };
+
+  "runtime.listSessions": {
+    params: { cwd?: string; includeSubagents?: boolean };
+    result: SessionSummary[];
+  };
+  "runtime.createSession": { params: CreateSessionOptions; result: SessionOpened };
+  "runtime.resumeSession": {
+    params: { sessionId: string; model?: string | ModelRef; force?: boolean };
+    result: SessionOpened;
+  };
+  "runtime.forkSession": {
+    params: { sessionId: string; targetSeq?: number };
+    /** 新会话 id；会话本身未打开，要用 resumeSession 打开 */
+    result: { sessionId: string };
+  };
+  "runtime.listModels": { params: Record<string, never>; result: ModelInfo[] };
+  "runtime.defaultModel": { params: Record<string, never>; result: ModelRef | null };
+  "runtime.listRecentModels": { params: Record<string, never>; result: ModelRef[] };
+  "runtime.describeSettings": { params: Record<string, never>; result: SettingItem[] };
+  "runtime.updateSettings": {
+    params: { patch: SettingsPatch; reviewerKey?: string };
+    result: SettingItem[];
+  };
+  "runtime.setDefaultModel": {
+    params: { model: string; reasoningEffort: ReasoningEffort | null };
+    result: SettingItem[];
+  };
+  "runtime.describeModelRoles": { params: Record<string, never>; result: ModelRoleInfo[] };
+  "runtime.setModelRole": {
+    params: { role: ModelRole; ref: string | null };
+    result: SettingItem[];
+  };
+  "runtime.getPreference": { params: { key: string }; result: string | null };
+  "runtime.setPreference": {
+    params: { key: string; value?: string | null };
+    result: null;
+  };
+  "runtime.listReviewerProviders": { params: Record<string, never>; result: ProviderOverview[] };
+  "runtime.defaultReviewer": {
+    params: { endpoint: JevEndpoint; baseURL?: string };
+    result: JevReviewerConfig;
+  };
+  "runtime.listReviewerModels": {
+    params: { reviewer: JevReviewerConfig };
+    result: { models: string[]; warning?: string };
+  };
+
+  "session.subscribe": {
+    params: SessionParams & { afterSeq?: number };
+    /** 回放与实时衔接已完成时返回；`lastSeq` 是已推送的最后一个持久事件的 seq */
+    result: { lastSeq: number };
+  };
+  "session.unsubscribe": { params: SessionParams; result: null };
+  "session.submit": {
+    params: SessionParams & {
+      text?: string;
+      content?: ContentBlock[];
+      attachments?: WireAttachment[];
+    };
+    result: TurnEndReason;
+  };
+  "session.respondPermission": {
+    params: SessionParams & { requestId: string; reply: PermissionReply };
+    result: null;
+  };
+  "session.respondQuestion": {
+    params: SessionParams & { requestId: string; reply: QuestionReply };
+    result: null;
+  };
+  "session.setModel": { params: SessionParams & { model: string | ModelRef }; result: null };
+  "session.setPermissionPreset": { params: SessionParams & { name: string }; result: null };
+  "session.setReasoningEffort": { params: SessionParams & { level: string }; result: null };
+  "session.setShell": { params: SessionParams & { kind: string }; result: null };
+  "session.compact": { params: SessionParams; result: null };
+  "session.rewindTargets": { params: SessionParams; result: RewindTarget[] };
+  "session.rewind": {
+    params: SessionParams & { targetSeq: number; mode: RewindMode };
+    result: SessionRewoundPayload["files"];
+  };
+  "session.state": { params: SessionParams; result: SessionStateSummary };
+  "session.describeContext": { params: SessionParams; result: ContextSummary };
+  "session.reasoningEffortInfo": { params: SessionParams; result: Ret<"reasoningEffortInfo"> };
+  "session.shellInfo": { params: SessionParams; result: Ret<"shellInfo"> };
+  "session.listShells": { params: SessionParams; result: Ret<"listShells"> };
+  "session.visionInfo": { params: SessionParams; result: Ret<"visionInfo"> };
+  "session.mcpServers": { params: SessionParams; result: Ret<"mcpServers"> };
+  "session.fileIndex": { params: SessionParams; result: FileIndexEntry[] };
+  "session.readInputHistory": { params: SessionParams; result: string[] };
+  "session.recordInputHistory": { params: SessionParams & { text: string }; result: null };
+  "session.close": { params: SessionParams; result: null };
+}
+
+export type RpcMethodName = keyof RpcMethods;
+export type RpcParams<M extends RpcMethodName> = RpcMethods[M]["params"];
+export type RpcResult<M extends RpcMethodName> = RpcMethods[M]["result"];
+
+/** 客户端→服务端的通知（无 id、无应答） */
+export interface RpcClientNotifications {
+  "session.interrupt": SessionParams;
+}
+
+/** 服务端→客户端的通知 */
+export interface RpcServerNotifications {
+  event: { sessionId: string; event: RuntimeEvent };
+}
+
+const METHOD_TABLE: Record<RpcMethodName, true> = {
+  initialize: true,
+  shutdown: true,
+  "runtime.listSessions": true,
+  "runtime.createSession": true,
+  "runtime.resumeSession": true,
+  "runtime.forkSession": true,
+  "runtime.listModels": true,
+  "runtime.defaultModel": true,
+  "runtime.listRecentModels": true,
+  "runtime.describeSettings": true,
+  "runtime.updateSettings": true,
+  "runtime.setDefaultModel": true,
+  "runtime.describeModelRoles": true,
+  "runtime.setModelRole": true,
+  "runtime.getPreference": true,
+  "runtime.setPreference": true,
+  "runtime.listReviewerProviders": true,
+  "runtime.defaultReviewer": true,
+  "runtime.listReviewerModels": true,
+  "session.subscribe": true,
+  "session.unsubscribe": true,
+  "session.submit": true,
+  "session.respondPermission": true,
+  "session.respondQuestion": true,
+  "session.setModel": true,
+  "session.setPermissionPreset": true,
+  "session.setReasoningEffort": true,
+  "session.setShell": true,
+  "session.compact": true,
+  "session.rewindTargets": true,
+  "session.rewind": true,
+  "session.state": true,
+  "session.describeContext": true,
+  "session.reasoningEffortInfo": true,
+  "session.shellInfo": true,
+  "session.listShells": true,
+  "session.visionInfo": true,
+  "session.mcpServers": true,
+  "session.fileIndex": true,
+  "session.readInputHistory": true,
+  "session.recordInputHistory": true,
+  "session.close": true,
+};
+
+/** 全部请求方法名（`RpcMethods` 增删方法而这里没跟着改，编译失败） */
+export const RPC_METHOD_NAMES = Object.keys(METHOD_TABLE) as RpcMethodName[];

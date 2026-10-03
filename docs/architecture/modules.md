@@ -205,11 +205,15 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 - **依赖**：`@nocturne/core` 公开 API 与 `protocol`；终端依赖 Ink、React、`string-width` 按 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)，Markdown 词法分析依赖 `marked` 按 [ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 批准。
 - 详见 [apps/tui.md](../apps/tui.md)。
 
+### packages/rpc（v0.5，[ADR-0044](../decisions/ADR-0044-rpc-stdio.md)）
+
+- **负责**：把 `Runtime` / `RuntimeSession` 的公开 API 映射成 JSON-RPC 2.0 方法，把会话事件推成 `event` 通知（`@nocturne/rpc/server`，与传输无关）；提供类型化客户端（`@nocturne/rpc/client`）。方法、报文与错误码见 [rpc.md](../protocols/rpc.md)。
+- **不负责**：任何 Agent 行为、权限判定（只转发 `permission.requested` 与回复）、配置加载与 MCP 装配（由 `apps/cli` 的 `nctrn rpc --stdio` 入口完成）、传输之外的网络与鉴权。
+- **依赖**：服务端依赖 `@nocturne/core` 公开入口；客户端运行时只依赖 `@nocturne/core/protocol`，对 `@nocturne/core` 只有 `import type`，不用 Node 内置模块。由 depcheck 的 `rpc-*` 规则强制。
+
 ## 5. 未来模块（现在不创建目录）
 
-| 模块 | 接入点 | 依赖约束 |
-|---|---|---|
-| `rpc` | 服务端把公开 API 映射到传输层（stdio / WebSocket）；客户端只依赖 protocol | 服务端依赖公开 API；RPC 客户端不依赖 Core 实现 |
+目前没有待创建的模块。WebSocket 等网络传输、`packages/protocol` 拆包、多客户端共享后台，都留到真实需求出现时再写 ADR。
 
 `subagent` 已在 Phase 6 落地：它不是独立模块——接口在 `tools`、实现在 `agent`、装配在 `core/index`，见 [subagent.md](subagent.md) 第 3 节。
 

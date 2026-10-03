@@ -117,3 +117,19 @@
 - **订阅时由服务端推送整份 `SessionView` 快照**：省去客户端折叠，但要在服务端维护视图并定义快照增量协议，违背"派生视图由 protocol reducer 在客户端计算"（ADR-0002 第 5 条）。
 - **把装配从 CLI 移进 Core 或新包**：更"干净"，但改动面大且现在只有一个服务端入口；先让 `nctrn rpc` 复用 CLI 装配，等出现第二个入口再抽。
 - **向导保留回调形状，映射成服务端→客户端请求**：改动最小，但桌面端只能做一问一答的界面，并且 RPC 要多支持一种反向请求。维护者选择做原生表单，不采用。
+
+
+## 修订
+
+### 2026-10-03：第 2 步实现时与正文不一致之处
+
+正文不改，以本节为准：
+
+1. **方法清单**：第 4 节表格里的 `runtime.*` 以"等"收尾，实际映射为公开 `Runtime` 的全部成员，包括 `listReviewerProviders`、`defaultReviewer`、`listReviewerModels`；另有 `session.subscribe` 的退订半边 `session.unsubscribe`。`Runtime.updateProviders` 的参数是含函数的进程内 `RuntimeConfig`，无法序列化，第 2 步不映射（在 `coverage.ts` 登记了原因），按第 10 节第 5 步改为服务端重载配置的数据方法。
+2. **返回值形状**：`runtime.forkSession` 返回 `{ sessionId }`（对象，便于以后加字段），客户端封装仍还原成字符串；`createSession` / `resumeSession` 的结果 `SessionOpened` 带 `lastSeq`；`session.state` 去掉 `history` 与 `unsettledCalls`（历史可由持久事件折叠，后者是进程内 Map），`session.describeContext` 去掉发给模型的整份 `request`。
+3. **通知的请求形式**：`session.interrupt` 除通知外也接受带 `id` 的请求（回复 `null`），便于只会发请求的简易客户端；语义相同。
+4. **单订阅**：第 5 节未说明同一会话重复订阅。实现为同一会话同一时刻只有一路订阅，再次 `subscribe` 替换前一路（否则旧监听器会收到回放重复）；多个消费者用 `RpcClient.onEvent` 分发。
+5. **错误码数值**：第 4 节只说"实现定义区间内的固定值"，现固定为：`-32000` 其他 Core 错误、`-32001` `RuntimeCommandError`、`-32002` `SessionError`、`-32003` `ProviderLoginError`、`-32004` RPC 层状态错误（`not_initialized`、`protocol_version_mismatch` 等）。完整表见 [rpc.md](../protocols/rpc.md) 第 5 节。
+6. **客户端依赖规则更严**：第 2 节只要求运行时只依赖 `protocol`；depcheck 同时禁止客户端与共享层使用 Node 内置模块、依赖服务端，传输由使用方注入。
+7. **慢订阅者**：[events.md](../protocols/events.md) 第 6 节预告"引入 RPC 时改为有界队列"。第一版 RPC 服务端不限流，事件直接写入传输（stdio 管道由操作系统缓冲），有界队列与临时事件丢弃策略留到出现慢连接问题时再定；events.md 第 6 节已同步。
+8. **握手时创建 Runtime**：第 3 节说 `interactive` 决定传给 `createRuntime` 的值，因此 Runtime 在 `initialize` 时才创建（服务端以工厂函数注入，创建失败时握手报错、连接保持可重试）。
