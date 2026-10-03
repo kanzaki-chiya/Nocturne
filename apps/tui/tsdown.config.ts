@@ -1,7 +1,14 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/slash-catalog.ts", "src/text-format.ts", "src/provider-login.ts"],
+  entry: [
+    "src/index.ts",
+    "src/slash-catalog.ts",
+    "src/text-format.ts",
+    "src/provider-login.ts",
+    "src/provider-setup-flow.ts",
+    "src/provider-prompts.ts",
+  ],
   format: "esm",
   dts: true,
   sourcemap: true,

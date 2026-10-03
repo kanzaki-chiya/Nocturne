@@ -19,7 +19,7 @@ import {
   type ModelSettingsView,
   type ProviderOverview,
   type ReasoningEffortLevel,
-  type WizardPreset,
+  type ProviderPreset,
 } from "@nocturne/core";
 
 import { ProviderPage } from "../src/components/provider-page.js";
@@ -636,7 +636,7 @@ describe("服务商页 Delete 入口与底部提示（ADR-0030 §6）", () => {
   });
 
   it("未配置预设：Delete 提示不能删除的原因，不开确认框", async () => {
-    const presets: WizardPreset[] = [
+    const presets: ProviderPreset[] = [
       {
         id: "other-oai",
         label: "其他 OpenAI 兼容服务",

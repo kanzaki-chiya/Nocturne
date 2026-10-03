@@ -29,7 +29,7 @@
 | [subagent.md](architecture/subagent.md) | Subagent（子代理）：`task` 工具契约、Launcher 注入、子会话生命周期、受限工具集与权限收敛 |
 | [observability.md](architecture/observability.md) | 诊断日志：开关与输出位置、记录种类、脱敏规则 |
 | [providers.md](architecture/providers.md) | Provider 抽象、模型能力、流式与错误归一化 |
-| [provider-setup.md](architecture/provider-setup.md) | 服务商配置向导（`nctrn setup`、`/provider`）、向导配置层、操作系统凭据后端、模型限额以上游为准；v0.3 起向导不再选模型，模型选择收归 `/model`（v0.2/v0.3） |
+| [provider-setup.md](architecture/provider-setup.md) | 服务商配置（`nctrn setup`、`/provider`；Core 数据接口 `describeProviderSetup` / `addProvider`）、向导配置层、操作系统凭据后端、模型限额以上游为准；v0.3 起向导不再选模型，模型选择收归 `/model`（v0.2/v0.3） |
 | [pitfalls.md](architecture/pitfalls.md) | 最容易犯的架构错误、早期症状与规避方式 |
 
 ## Apps（客户端）

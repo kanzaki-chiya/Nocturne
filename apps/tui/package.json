@@ -13,6 +13,14 @@
       "types": "./dist/provider-login.d.mts",
       "import": "./dist/provider-login.mjs"
     },
+    "./provider-setup-flow": {
+      "types": "./dist/provider-setup-flow.d.mts",
+      "import": "./dist/provider-setup-flow.mjs"
+    },
+    "./provider-prompts": {
+      "types": "./dist/provider-prompts.d.mts",
+      "import": "./dist/provider-prompts.mjs"
+    },
     "./text-format": {
       "types": "./dist/text-format.d.mts",
       "import": "./dist/text-format.mjs"

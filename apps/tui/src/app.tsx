@@ -28,7 +28,7 @@ import {
   type Runtime,
   type RuntimeSession,
   type SessionSummary,
-  type WizardPreset,
+  type ProviderPreset,
 } from "@nocturne/core";
 import type { spawn } from "node:child_process";
 
@@ -237,7 +237,7 @@ export interface AppProps {
  */
 function useProviderOps(provider: ProviderBridge | undefined): {
   entries: readonly ProviderOverview[];
-  presets: readonly WizardPreset[];
+  presets: readonly ProviderPreset[];
   wizard: ReturnType<typeof useProviderWizard>;
   notice: string | undefined;
   busyText: string | undefined;
@@ -847,7 +847,7 @@ function SessionApp({
   const [pickerKey, setPickerKey] = useState(0);
   /** 打开时快照的左栏数据（providers + 未配置预设） */
   const [pickerData, setPickerData] = useState<
-    { providers: ProviderOverview[]; presets: WizardPreset[] } | undefined
+    { providers: ProviderOverview[]; presets: ProviderPreset[] } | undefined
   >(undefined);
   const pickerOpen = picker !== undefined;
   const [providerPageOpen, setProviderPageOpen] = useState(false);

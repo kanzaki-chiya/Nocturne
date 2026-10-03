@@ -141,3 +141,15 @@
 3. **退出机制**：清理完成后依靠事件循环自然排空退出，另设 3 秒不阻止自然退出的兜底定时器强制 `process.exit`。直接在清理后立即 `process.exit` 会在 Windows 上触发 libuv 断言崩溃（退出码 `0xC0000409`，端到端测试发现）。终止信号（SIGINT/SIGTERM/SIGHUP）与 stdin 关闭等价。
 4. **配置要求**：与 `trust` / `setup` 一致不要求已有模型或服务商，但配置里已声明却无法解析的模型/服务商照常以退出码 2 报错。
 5. **打包**：`@nocturne/rpc` 的构建产物是 `.js` / `.d.ts`（`platform: "neutral"`），`package.json` 的 `exports` 按此声明。
+
+### 2026-10-03：第 4 步实现时与正文不一致之处
+
+正文不改，以本节为准：
+
+1. **`describeProviderSetup` 的签名**：第 6 节写作按预设描述，实际为 `describeProviderSetup(config, presetId)`——"没有系统凭据后端"等差异取决于当前 `RuntimeConfig` 的凭据后端，描述必须带上它。描述额外给出 `fetchableModels`（提交时是否获取模型列表，界面据此显示"正在获取模型列表…"或"正在保存…"）与 `manualModel`（上游无列表时手填模型 ID 的提问）。
+2. **文案的归属**：步骤摘要行、"已获取 N 个模型"、401/403 与其他失败的提示、保存后可用的命令提示、models.dev 警告、结果行"已保存 X，N 个模型"都由 Core 给出（`AddProviderResult.notices` / `message`，辅助函数 `setupFieldStep` / `setupCredentialStep` / `setupCredentialNotice`），客户端不拼文案。
+3. **登录与草稿**：条目未保存时的浏览器登录经新增的 `startDraftProviderLogin`，会话带 `loginId`，凭据暂存在 Core（不落盘），`addProvider` 收到 `{ kind: "login", loginId }` 才校验并提交。账号凭据在获取模型列表之前写入存储（令牌要用来取列表）。
+4. **保存位置的选择提前**：`ProviderLoginOptions.chooseAccountStorage` 回调删除（回调不能走 RPC），改为 `accountStorage: "plaintext" | "memory"` 参数，客户端先根据描述的 `accountStorage` 让用户选择再启动登录；缺省时 Core 在授权开始前就拒绝。**可见变化**：无系统凭据后端时，选择发生在浏览器授权之前，而不是授权完成之后。
+5. **"确认页"先于获取模型列表**：`addProvider` 是一次性提交（校验 → 获取列表 → 保存 → 刷新 models.dev），所以 TUI 的「保存配置」确认页出现在获取模型列表之前；原来先获取、后确认的顺序无法在不回调的前提下保留。获取结果与失败提示改在确认之后显示；获取期间 Esc 中止请求并回到确认页（原为回到上一步重放答案）。Grok CLI 这类要手填模型 ID 的服务，在确认之后才出现「模型 ID」提问（`addProvider` 抛 `ProviderSetupError("modelId")` 后补问重交）。获取与保存期间的忙碌行文案为"正在获取模型列表…"或"正在保存…"。其余步骤、文案与结果行不变（见验收截图对照）。
+6. **`WizardIo` 的去向**：Core 中的 `WizardIo`、`runProviderSetupWizard`、`runProviderKeyWizard`、`runProviderModelWizard` 与 `config/wizard.ts` 删除。CLI 与 TUI 需要完全相同的提问顺序，所以共享一份**客户端**流程放在 `apps/tui`（`provider-setup-flow`、`provider-prompts` 的 `SetupPrompts`/`SetupAbort`），CLI 经 `@nocturne/tui` 子路径引用；它只按 Core 的描述提问，不含预设判断。`/provider model` 的逐字段问答是纯客户端流程，移到 `apps/cli/src/model-wizard.ts`。`/provider key` 直接调用 `RuntimeConfig.setCredential`。
+7. **未映射的方法**：`describeProviderSetup`、`addProvider` 与草稿登录依赖进程内的 `RuntimeConfig`，与 `Runtime.updateProviders` 一样留到第 5 步改为服务端数据方法，第 4 步不新增 RPC 映射。

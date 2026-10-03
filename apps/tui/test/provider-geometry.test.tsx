@@ -2,7 +2,7 @@ import { render } from "ink-testing-library";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { WizardPreset } from "@nocturne/core";
+import type { ProviderPreset } from "@nocturne/core";
 
 import { ProviderPage } from "../src/components/provider-page.js";
 import { TuiEnvContext } from "../src/env.js";
@@ -14,7 +14,7 @@ import type { WizardState } from "../src/wizard-io.js";
  */
 const ENV = { ascii: false, animated: true };
 
-const PRESETS: WizardPreset[] = [
+const PRESETS: ProviderPreset[] = [
   {
     id: "other-oai",
     label: "其他 OpenAI 兼容服务",

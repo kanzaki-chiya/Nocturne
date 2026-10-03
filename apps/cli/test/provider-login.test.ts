@@ -5,12 +5,11 @@ import type * as LoginClient from "@nocturne/tui/provider-login";
 import {
   logoutProvider,
   ProviderLoginError,
-  WizardAbort,
   type RuntimeConfig,
   type RuntimeSession,
 } from "@nocturne/core";
 import { runSlashCommand } from "../src/commands.js";
-import { cliWizardDeps, createWizardIo } from "../src/setup.js";
+import { createSetupPrompts, runProviderSetupWizard, SetupAbort } from "../src/setup.js";
 import { runProviderLogin } from "@nocturne/tui/provider-login";
 
 vi.mock("@nocturne/core", async (original) => ({
@@ -19,7 +18,7 @@ vi.mock("@nocturne/core", async (original) => ({
 }));
 vi.mock("@nocturne/tui/provider-login", async (original) => ({
   ...(await original<typeof LoginClient>()),
-  runProviderLogin: vi.fn(async () => undefined),
+  runProviderLogin: vi.fn(async (): Promise<{ loginId?: string }> => ({ loginId: "login-1" })),
 }));
 afterEach(() => vi.clearAllMocks());
 const config = { base: { providers: [] } } as unknown as RuntimeConfig;
@@ -66,13 +65,28 @@ describe("CLI 服务商登录入口", () => {
     await runSlashCommand("/provider login openrouter", session, {} as never, io, deps);
     expect(lines.join("\n")).not.toContain("mock-secret-token");
   });
-  it("setup 向导注入 entry 与原 IO", async () => {
-    const deps = cliWizardDeps(() => undefined, config);
-    const entry = { id: "openrouter", baseURL: "https://openrouter.ai/api/v1" };
-    const wio = createWizardIo(new PassThrough(), new PassThrough());
-    if (!deps.login) throw new Error("login dependency missing");
-    await deps.login(entry, wio);
-    expect(runProviderLogin).toHaveBeenCalledWith(config, "openrouter", wio, { entry });
+  it("setup 向导：OpenRouter 选浏览器登录时以草稿（预设、名称、地址）和原 IO 调登录客户端", async () => {
+    const prompts = {
+      ask: async () => "",
+      askSecret: async () => "",
+      chooseMulti: async () => [0],
+      busy: () => undefined,
+      step: () => undefined,
+      print: () => undefined,
+    };
+    const loginConfig = {
+      credentials: { backend: () => "memory" },
+      base: { providers: [] },
+    } as unknown as RuntimeConfig;
+    // loginId 不是 Core 登记的草稿登录（客户端已被 mock），提交阶段按字段 credential 拒绝
+    await expect(
+      runProviderSetupWizard(prompts, loginConfig, { presetId: "openrouter" }),
+    ).rejects.toMatchObject({ field: "credential" });
+    expect(runProviderLogin).toHaveBeenCalledWith(
+      loginConfig,
+      { presetId: "openrouter", name: "openrouter", baseURL: "https://openrouter.ai/api/v1" },
+      prompts,
+    );
   });
   it("Overview 输出中文鉴权状态与保存位置", async () => {
     const { deps, io, lines } = bridge();
@@ -111,12 +125,12 @@ describe("CLI 登录输入清理", () => {
         callback();
       },
     });
-    return { stdin, chunks, io: createWizardIo(stdin, stdout) };
+    return { stdin, chunks, io: createSetupPrompts(stdin, stdout) };
   }
   it("授权输入遮罩，Esc 取消恢复 raw mode", async () => {
     const { stdin, chunks, io } = tty();
     const work = io.askSecret("粘贴授权码：");
-    const rejected = expect(work).rejects.toBeInstanceOf(WizardAbort);
+    const rejected = expect(work).rejects.toBeInstanceOf(SetupAbort);
     stdin.write("mock-private-code\x1b");
     await rejected;
     expect(chunks.join("")).not.toContain("mock-private-code");
@@ -127,7 +141,7 @@ describe("CLI 登录输入清理", () => {
   it("回调成功可取消挂起输入，恢复 stdin 后继续问答", async () => {
     const { stdin, io } = tty();
     const work = io.askSecret("粘贴授权码：");
-    const rejected = expect(work).rejects.toBeInstanceOf(WizardAbort);
+    const rejected = expect(work).rejects.toBeInstanceOf(SetupAbort);
     io.cancelPending();
     await rejected;
     const next = io.ask("模型：");

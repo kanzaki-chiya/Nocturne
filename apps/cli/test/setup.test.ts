@@ -6,7 +6,7 @@
 import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
-import { createWizardIo } from "../src/setup.js";
+import { createSetupPrompts } from "../src/setup.js";
 
 function ioWith(stdin: PassThrough) {
   const out: string[] = [];
@@ -16,7 +16,7 @@ function ioWith(stdin: PassThrough) {
       cb();
     },
   });
-  return { io: createWizardIo(stdin, stdout), out };
+  return { io: createSetupPrompts(stdin, stdout), out };
 }
 
 const OPTIONS = ["minimal", "low", "medium", "high", "xhigh", "max"];

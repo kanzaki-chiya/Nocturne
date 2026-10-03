@@ -22,20 +22,7 @@ export {
   type DescribeLayers,
   type ProviderSetupState,
 } from "./setup.js";
-// 模型设置编辑（ADR-0024）：编辑页/CLI 问答用的来源文案与行式问答向导
+// 模型设置编辑（ADR-0024）：编辑页/CLI 问答用的来源文案
 export { modelFieldSourceText } from "./model-settings.js";
 // 编辑工具内置默认表（ADR-0035 §5）：装配处注入 provider 的模型解析
 export { defaultEditToolForModel } from "./edit-tool.js";
-export { runProviderModelWizard } from "./wizard.js";
-// 向导流程编排（provider-setup.md 第 1、6 节）：交互外壳在客户端，
-// fetch/presets/env 能力由客户端注入
-export {
-  runProviderKeyWizard,
-  runProviderSetupWizard,
-  WizardAbort,
-  type SetupWizardDeps,
-  type WizardFetchRequest,
-  type WizardIo,
-  type WizardPreset,
-  type WizardResult,
-} from "./wizard.js";

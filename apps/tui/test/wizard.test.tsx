@@ -2,12 +2,12 @@
 import { cleanup, render } from "ink-testing-library";
 import { createElement, useEffect, useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type {
-  ModelOverrideShape,
-  ProviderEntryConfig,
-  RuntimeConfig,
-  SetupWizardDeps,
-  WizardPreset,
+import {
+  listProviderPresets,
+  type AddProviderOptions,
+  type ModelOverrideShape,
+  type ProviderEntryConfig,
+  type RuntimeConfig,
 } from "@nocturne/core";
 import { WizardView } from "../src/components/wizard-view.js";
 import { ModelPicker } from "../src/components/model-picker.js";
@@ -21,15 +21,12 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-const PRESET: WizardPreset = {
-  id: "deepseek",
-  label: "DeepSeek",
-  type: "openai-compatible",
-  defaultName: "deepseek",
-  baseURL: "https://api.deepseek.com/v1",
-  defaultKeyEnv: "DEEPSEEK_API_KEY",
-  fetchableModels: true,
-};
+const PRESET = (() => {
+  const preset = listProviderPresets().find((p) => p.id === "deepseek");
+  if (preset === undefined) throw new Error("缺少 deepseek 预设");
+  return preset;
+})();
+const DEEPSEEK_URL = "https://api.deepseek.com/v1";
 function makeConfig(backend: "none" | "dpapi") {
   const saved: {
     entry: ProviderEntryConfig;
@@ -51,9 +48,8 @@ function makeConfig(backend: "none" | "dpapi") {
   };
   return { config: config as unknown as RuntimeConfig, methods: config, saved, creds };
 }
-function makeDeps(overrides?: Partial<SetupWizardDeps>): SetupWizardDeps {
+function makeDeps(overrides?: Partial<AddProviderOptions>): AddProviderOptions {
   return {
-    presets: () => [PRESET],
     fetchModels: vi.fn(async () => [
       {
         id: "deepseek-chat",
@@ -72,7 +68,7 @@ function screen(
   config: RuntimeConfig,
   start: WizardStart,
   options: {
-    deps?: SetupWizardDeps;
+    deps?: AddProviderOptions;
     realFetch?: boolean;
     width?: number;
     ascii?: boolean;
@@ -82,7 +78,7 @@ function screen(
   const onDone = vi.fn<(o: WizardOutcome) => void>();
   const mouse = providerMouse();
   const points = new Map<symbol, CursorPoint>();
-  const deps = options.realFetch ? undefined : (options.deps ?? makeDeps());
+  const deps = options.realFetch ? { env: () => undefined } : (options.deps ?? makeDeps());
   function Probe() {
     const w = useProviderWizard(config, deps);
     const started = useRef(false);
@@ -155,7 +151,7 @@ describe("/provider 向导对话框", () => {
     expect(saved).toHaveLength(1);
     expect(saved[0]?.entry).toMatchObject({
       id: "deepseek",
-      baseURL: PRESET.baseURL,
+      baseURL: DEEPSEEK_URL,
       apiKeyEnv: "DEEPSEEK_API_KEY",
       source: "upstream",
     });
@@ -182,7 +178,10 @@ describe("/provider 向导对话框", () => {
   it("API Key 留空仍走 Core 环境变量步骤", async () => {
     const { config } = makeConfig("dpapi");
     const ui = screen(config, { kind: "add", presetId: "deepseek" });
-    await settle(() => ui.lastFrame()?.includes("直接回车改用环境变量") === true);
+    // 真实预设的获取地址让说明变长，折行位置不固定，按去掉边框和空白后的文本比较。
+    await settle(
+      () => ui.lastFrame()?.replace(/[│\s]/g, "").includes("直接回车改用环境变量") === true,
+    );
     await answer(ui);
     await settle(() => ui.lastFrame()?.includes("凭据环境变量名") === true);
     expect(ui.onDone).not.toHaveBeenCalled();
@@ -266,13 +265,15 @@ describe("/provider 向导对话框", () => {
     expect(requests).toEqual([{ url: "https://api.deepseek.com/v1/models", method: "GET" }]);
     expect(saved[0]?.entry.models).toHaveProperty("fake-model");
   });
-  it("GET /models 中 Esc 真正 abort 并返回上一步，晚到结果不会保存", async () => {
+  it("GET /models 中 Esc 真正 abort 并回到确认页，晚到结果不会保存", async () => {
     let signal: AbortSignal | undefined;
     let finish: ((response: Response) => void) | undefined;
     const fetch = vi.fn((_url: unknown, init?: RequestInit) => {
       signal = init?.signal ?? undefined;
-      return new Promise<Response>((resolve) => {
+      return new Promise<Response>((resolve, reject) => {
         finish = resolve;
+        // 真实 fetch 在 signal 中止时拒绝；晚到的响应对已中止的请求无效
+        signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
       });
     });
     vi.stubGlobal("fetch", fetch);
@@ -280,26 +281,24 @@ describe("/provider 向导对话框", () => {
     const ui = screen(config, { kind: "add", presetId: "deepseek" }, { realFetch: true });
     await settle(() => ui.lastFrame()?.includes("API Key") === true);
     await answer(ui, "offline-key");
+    await settle(() => ui.lastFrame()?.includes("保存配置") === true);
+    ui.stdin.write("\r");
     await settle(
       () => ui.lastFrame()?.includes("正在获取模型列表") === true && signal !== undefined,
     );
     ui.stdin.write("\x1b");
-    await settle(() => ui.lastFrame()?.includes("API Key：") === true && signal?.aborted === true);
-    expect(ui.lastFrame()).toContain("***********");
+    await settle(() => ui.lastFrame()?.includes("保存配置") === true && signal?.aborted === true);
     finish?.(new Response(JSON.stringify({ data: [{ id: "late" }] }), { status: 200 }));
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(saved).toHaveLength(0);
     expect(ui.onDone).not.toHaveBeenCalled();
-    expect(ui.lastFrame()).not.toContain("保存配置");
     expect(methods.setCredential).not.toHaveBeenCalled();
     expect(methods.saveSetupProvider).not.toHaveBeenCalled();
     expect(methods.refreshModelsDev).not.toHaveBeenCalled();
     fetch.mockImplementationOnce(
       async () => new Response(JSON.stringify({ data: [{ id: "fresh" }] }), { status: 200 }),
     );
-    await answer(ui); // 重试上一步，保留的密钥再次交 Core。
-    await settle(() => ui.lastFrame()?.includes("保存配置") === true);
-    ui.stdin.write("\r");
+    ui.stdin.write("\r"); // 回到确认页后重新保存，保留的密钥再次交 Core。
     await settle(() => ui.onDone.mock.calls.length === 1);
     expect(methods.saveSetupProvider).toHaveBeenCalledTimes(1);
     expect(methods.refreshModelsDev).toHaveBeenCalledTimes(1);

@@ -18,7 +18,6 @@ import { createCredentialStore } from "./config/credentials.js";
 import { loadConfig, type CredentialStore, type ProviderEntryConfig } from "./config/index.js";
 import { createRuntime } from "./index.js";
 import { createPlatform, type Platform } from "./platform/index.js";
-import { ProviderLoginError } from "./provider-login/errors.js";
 import { createSiwcLogin } from "./provider-login/openai-siwc.js";
 import { resolveProviderAuth } from "./provider-oauth.js";
 import { constrainedResponseError } from "./provider/errors.js";
@@ -192,7 +191,7 @@ describe("ChatGPT 登录", () => {
       platform,
       root,
       {
-        chooseAccountStorage: async () => "memory",
+        accountStorage: "memory",
       },
       {
         issuer: base,
@@ -325,7 +324,7 @@ describe("ChatGPT 登录", () => {
     await expect(timed.completion).rejects.toMatchObject({ code: "timeout" });
   });
 
-  it("无系统后端时必须显式选择，取消选择不落盘", async () => {
+  it("无系统后端时必须显式给出保存位置，缺省不落盘", async () => {
     const { credentials, root, platform } = await noneStore();
     let nonce = "";
     const base = await listen((url, _body, respond) => {
@@ -357,21 +356,6 @@ describe("ChatGPT 登录", () => {
     nonce = new URL(missing.authorizeUrl).searchParams.get("nonce") ?? "";
     await fetch(callbackOf(new URL(missing.authorizeUrl), "oaiapp_issued"));
     await expect(missing.completion).rejects.toMatchObject({ code: "accountStorage" });
-    const session = await createSiwcLogin(
-      entry,
-      credentials,
-      platform,
-      root,
-      {
-        chooseAccountStorage: async () => {
-          throw new ProviderLoginError("cancelled");
-        },
-      },
-      deps,
-    );
-    nonce = new URL(session.authorizeUrl).searchParams.get("nonce") ?? "";
-    await fetch(callbackOf(new URL(session.authorizeUrl), "oaiapp_issued"));
-    await expect(session.completion).rejects.toMatchObject({ code: "cancelled" });
     expect(await credentials.get("chatgpt")).toBeUndefined();
   });
 });

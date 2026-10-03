@@ -32,7 +32,7 @@ import {
   renderQuestionPrompt,
 } from "./render.js";
 import {
-  createWizardIo,
+  createSetupPrompts,
   runAddWizardInSession,
   runKeyWizardInSession,
   runModelWizardInSession,
@@ -315,12 +315,12 @@ export async function runRepl(
    *  跑向导、结束后重建 readline；Promise 在向导结束时 settle，由
    *  runSlashCommand 的 .then 统一恢复 prompt */
   const startWizard = (
-    work: (wio: ReturnType<typeof createWizardIo>) => Promise<void>,
+    work: (wio: ReturnType<typeof createSetupPrompts>) => Promise<void>,
   ): Promise<void> =>
     new Promise<void>((resolve, reject) => {
       wizardWork = async () => {
         try {
-          await work(createWizardIo(io.stdin, io.stdout));
+          await work(createSetupPrompts(io.stdin, io.stdout));
           resolve();
         } catch (e) {
           reject(e instanceof Error ? e : new Error(String(e)));

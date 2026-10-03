@@ -22,7 +22,7 @@ import type {
   ModelSettingsPatch,
   ModelSettingsView,
   ProviderOverview,
-  WizardPreset,
+  ProviderPreset,
 } from "@nocturne/core";
 
 import { useTuiEnv } from "../env.js";
@@ -39,12 +39,12 @@ import { InputCursor } from "./input-cursor.js";
 
 /** 列表行：预设（可附带同 id 已配置条目）或预设外的已配置条目 */
 export type ProviderRow =
-  | { kind: "preset"; preset: WizardPreset; configured?: ProviderOverview }
+  | { kind: "preset"; preset: ProviderPreset; configured?: ProviderOverview }
   | { kind: "entry"; overview: ProviderOverview };
 
 /** 预设行与已配置条目合并：内置预设按 defaultName 匹配，其余条目追加 */
 export function buildProviderRows(
-  presets: readonly WizardPreset[],
+  presets: readonly ProviderPreset[],
   entries: readonly ProviderOverview[],
 ): ProviderRow[] {
   const used = new Set<string>();
@@ -137,7 +137,7 @@ export function ProviderPage({
   termRows,
   active,
 }: {
-  presets: readonly WizardPreset[];
+  presets: readonly ProviderPreset[];
   /** 已配置条目（describeProviders 结果） */
   entries: readonly ProviderOverview[];
   /** 当前会话所用服务商 id（删除保护 + 「当前」标记） */

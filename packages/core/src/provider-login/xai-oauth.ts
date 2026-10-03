@@ -234,11 +234,8 @@ async function saveLoginRecord(
   signal.throwIfAborted();
   try {
     if (credentials.backend() === "none") {
-      if (!options.chooseAccountStorage || !credentials.setAccount)
-        throw new ProviderLoginError("accountStorage");
-      const storage: string = await options.chooseAccountStorage();
-      signal.throwIfAborted();
-      if (storage !== "plaintext" && storage !== "memory")
+      const storage = options.accountStorage;
+      if (!credentials.setAccount || (storage !== "plaintext" && storage !== "memory"))
         throw new ProviderLoginError("accountStorage");
       await credentials.setAccount(entry.id, JSON.stringify(record), storage);
     } else await credentials.set(entry.id, JSON.stringify(record));

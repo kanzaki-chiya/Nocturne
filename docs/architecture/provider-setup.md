@@ -7,17 +7,17 @@ v0.1 接入一个模型服务要做三件事：设置持久的用户级环境变
 - `nctrn setup`：首次配置向导，独立于会话运行；
 - `/provider`：会话内查看、添加、更新密钥、删除服务商（CLI 与 TUI 都提供）。
 
-两个入口共用同一套 Core 能力（第 6 节），只是交互外壳不同。v0.3 起服务商配置与模型选择分离：向导只管"把服务商配上"，`/model` 是唯一的模型选择入口（[ADR-0019](../decisions/ADR-0019-tui-visual-provider-page.md) 第 3 条）。
+两个入口共用同一套 Core 数据接口（第 6 节），只是交互外壳不同。v0.3 起服务商配置与模型选择分离：向导只管"把服务商配上"，`/model` 是唯一的模型选择入口（[ADR-0019](../decisions/ADR-0019-tui-visual-provider-page.md) 第 3 条）。
 
 ## 1. 用户看到的流程
 
-ChatGPT、Grok 与 OpenRouter 可以不手填 API key（[ADR-0042](../decisions/ADR-0042-provider-oauth.md)、[ADR-0043](../decisions/ADR-0043-grok-build-oauth.md)）。ChatGPT 走浏览器登录，回调失败或远程终端时粘贴完整回调 URL。Grok（`grok`）由 Nocturne 自己向 `auth.x.ai` 做授权码或设备码登录，令牌存在凭据后端；远程终端显示确认码，不粘贴回本进程。Grok CLI 仍只读官方 CLI 的 `~/.grok/auth.json`，向导不写该文件。OpenRouter 在「浏览器登录」与「粘贴密钥」中二选一，远程终端粘贴授权码。登录由 Core 的 `LoginSession` 完成，客户端打开浏览器并展示地址；Esc 取消。ChatGPT 与 OpenRouter 五分钟超时，Grok 十分钟。OpenRouter 得到的是普通 API key。没有系统凭据后端时，API key 只显示一次并给出环境变量命令，不落明文；ChatGPT 与 Grok 账号记录必须由用户显式选择明文保存或仅本次运行，不默认明文。
+ChatGPT、Grok 与 OpenRouter 可以不手填 API key（[ADR-0042](../decisions/ADR-0042-provider-oauth.md)、[ADR-0043](../decisions/ADR-0043-grok-build-oauth.md)）。ChatGPT 走浏览器登录，回调失败或远程终端时粘贴完整回调 URL。Grok（`grok`）由 Nocturne 自己向 `auth.x.ai` 做授权码或设备码登录，令牌存在凭据后端；远程终端显示确认码，不粘贴回本进程。Grok CLI 仍只读官方 CLI 的 `~/.grok/auth.json`，向导不写该文件。OpenRouter 在「浏览器登录」与「粘贴密钥」中二选一，远程终端粘贴授权码。登录由 Core 的 `LoginSession` 完成，客户端打开浏览器并展示地址；Esc 取消。ChatGPT 与 OpenRouter 五分钟超时，Grok 十分钟。OpenRouter 得到的是普通 API key。没有系统凭据后端时，API key 只显示一次并给出环境变量命令，不落明文；ChatGPT 与 Grok 账号记录必须由用户显式选择明文保存或仅本次运行，不默认明文；保存位置在打开浏览器授权之前选择。
 
 ### TTY：服务商页 → 模型页的两步流程
 
 `nctrn setup` 在交互终端直接打开**服务商页**（第 1 步，与 TUI 同一全屏，[tui.md](../apps/tui.md) 第 8 节）；按 `Esc` 完成后，如果没有默认模型自动进入**模型选择页**（第 2 步）设为默认；两页头部都显示"第 N 步，共 2 步"。没有任何已配置服务商时运行 `nctrn` 走同一流程，选完模型才创建会话进入主界面；有服务商但没有可解析的默认模型时直接进入第 2 步。
 
-服务商页里选中未配置预设后的就地步骤（逐行向导是同一套 Core 编排的同构外壳）：
+服务商页里选中未配置预设后的就地步骤（逐行向导与服务商页共用同一套客户端流程，第 6 节）：
 
 ```text
 ▸ ○ DeepSeek / OpenRouter / Anthropic / 其他 OpenAI 兼容 / 其他 Anthropic 兼容
@@ -26,16 +26,16 @@ ChatGPT、Grok 与 OpenRouter 可以不手填 API key（[ADR-0042](../decisions/
 （仅自定义预设）会话标识请求头（可选，回车跳过）：x-opencode-session
 API Key（掩码输入；直接回车表示改用环境变量）：********
 密钥已交给 Windows DPAPI 加密保存
-✓ 已获取 12 个模型                                       ← 只发 GET /models；失败显示原因并继续
+✓ 已获取 12 个模型                                       ← 保存时只发 GET /models；失败显示原因并继续
 已保存 command，12 个模型                                ← 底部结果行，回到列表
 ```
 
 - 内置预设不再问名称与地址（直接用预设默认值）。ChatGPT、Grok 与 Grok CLI 跳过密钥输入，改走登录或外部文件（第 5 节）。两个自定义预设问名称（必填）、服务地址（openai 兼容必填，anthropic 兼容可留空用官方端点）与**会话标识请求头**（ADR-0031 §3，可选）：填写请求头名（如 `x-opencode-session`）则写入条目 `sessionHeader`，之后每个模型请求携带该头（值为根会话 ID，见 [providers.md](providers.md) 第 4 节）；回车留空不写该字段。
-- **向导不再选择模型**（v0.3）：模型列表仍经 `GET /models` 获取并把上游声明的上下文窗口、最大输出长度与能力标记写回条目 `models`（第 7 节），但不再出现"编号选择模型"与"设为默认模型"两步；默认模型在 `/model` 页设置。获取结果替换进行中提示：成功显示"已获取 N 个模型"；失败显示原因并继续后续步骤——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，404/网络错误等其余失败提示"模型将手动填写"；保存后可用服务商页「刷新模型列表」或 `/provider refresh <名>` 重试。
+- **向导不再选择模型**（v0.3）：模型列表仍经 `GET /models` 获取并把上游声明的上下文窗口、最大输出长度与能力标记写回条目 `models`（第 7 节），但不再出现"编号选择模型"与"设为默认模型"两步；默认模型在 `/model` 页设置。保存配置确认后才获取，获取结果替换进行中提示：成功显示"已获取 N 个模型"；失败显示原因并继续后续步骤——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，404/网络错误等其余失败提示"模型将手动填写"；保存后可用服务商页「刷新模型列表」或 `/provider refresh <名>` 重试。
 - 添加服务商和刷新模型列表时顺带更新 models.dev 缓存；失败沿用本地缓存或内置快照，并在结果中提示一行，不影响上游列表的保存。向导不再询问服务商级思考档位。
 - **TUI 表单形态**（ADR-0019 第 2 条）：全屏页面内不出现需要打字回答的是非题；已完成步骤折叠为一行摘要（如"名称 command • 地址 api.xxx.com • 密钥已保存"），当前步骤用强调色提问、灰色小字给说明（密钥获取入口、回车改用环境变量等）。
 - **向导不发送模型请求**：连接测试会消耗 token 且重复了首次真实请求才能发现的问题，因此不做。密钥、地址与模型 id 的有效性由会话中的首次真实请求检验；请求失败时按 `ProviderError.kind` 给出可操作提示（`auth` → 密钥可能无效，附 `/provider key <name>`；`network`/`timeout` → 地址不通，附 `nctrn setup`；`invalid_request`/404 → 模型 id 或地址路径有误），实现位置为 `agent/turn.ts` 的 `providerFailureHint`（turn.completed.error.message，CLI 与 TUI 共用）。
-- 系统凭据后端不可用时（第 3 节），API key 预设跳过保存密钥，直接进入环境变量方式；选择"改用环境变量"时询问变量名（默认按预设 `defaultKeyEnv`），条目写入 `apiKeyEnv`，密钥不落盘。ChatGPT 与 Grok 改为询问明文或仅本次运行，不默认明文。
+- 系统凭据后端不可用时（第 3 节），API key 预设跳过保存密钥，直接进入环境变量方式；选择"改用环境变量"时询问变量名（默认按预设 `defaultKeyEnv`），条目写入 `apiKeyEnv`，密钥不落盘。ChatGPT 与 Grok 改为询问明文或仅本次运行，不默认明文；保存位置在打开浏览器授权之前选择。
 
 ### 逐行 CLI
 
@@ -54,7 +54,7 @@ API Key（掩码输入；直接回车表示改用环境变量）：********
 | `/provider login <name>` | 重新走该条目的浏览器登录；不支持登录的条目提示原因。等待可取消，错误不含授权码或令牌 |
 | `/provider logout <name>` | 删除本地保存的登录凭据。官方没有吊销接口，界面不声称已在服务端注销 |
 
-Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。这些子命令与服务商页操作是同一套 Core 编排的快捷方式，命令名与效果在 CLI 与 TUI 一致。
+Turn 进行中这些命令一律提示"会话忙"（与 `/model` 相同的前置条件）。这些子命令与服务商页操作调用同一套 Core 接口，命令名与效果在 CLI 与 TUI 一致。
 
 TUI 另有全屏的**模型选择页**（`/model` 打开）：左右双栏（范围/服务商 + 搜索与模型列表）、最近使用置顶、上游声明的上下文/价格/能力标记、窄终端降级、左栏 `○` 预设内嵌添加向导。完整规格见 [tui.md](../apps/tui.md) 第 7 节。
 
@@ -192,7 +192,7 @@ API key **不以明文落盘**。向导把密钥交给操作系统自带的凭�
 
 ## 6. Core 接口
 
-向导的逻辑（预设、模型列表、文件写入、登录会话）放在 Core，客户端只负责交互。登录接口是 `startProviderLogin` / `logoutProvider` / `LoginSession`（[provider-api.md](../protocols/provider-api.md) 第 1 节）。向导遇到非 `apiKey` 鉴权或用户选择浏览器登录时，用登录会话代替输入密钥；ChatGPT 在无系统后端时经 `setAccount` 要求显式选择保存位置。`fetchModels` 与模型请求都经同一 `AuthResolver` 取令牌。向导不发送模型对话请求。v0.3 起向导不再选择模型：`runProviderSetupWizard` 只把服务商配上，`WizardResult` 只含 `providerId` 与已登记模型数。
+服务商配置的判断逻辑（预设、哪些字段要问、凭据方式、无后端时怎么办、模型列表失败怎么提示、文件写入、登录会话）全部在 Core，以**数据接口**暴露（[ADR-0044](../decisions/ADR-0044-rpc-stdio.md) 第 6 节）：`describeProviderSetup` 描述某个预设需要填什么，`addProvider` 一次提交整张表单。Core 不回调客户端、不持有任何界面概念；CLI 逐行向导、TUI 服务商页与 RPC 客户端（桌面端原生表单）都是这两个接口的外壳。登录接口是 `startProviderLogin` / `startDraftProviderLogin` / `logoutProvider` / `LoginSession`（[provider-api.md](../protocols/provider-api.md) 第 1 节）。`fetchModels` 与模型请求都经同一 `AuthResolver` 取令牌。接口不发送模型对话请求。v0.3 起配置不再选择模型：`addProvider` 只把服务商配上，结果只含 `providerId` 与已登记模型数。
 
 ```ts
 // @nocturne/core 公开导出
@@ -204,12 +204,43 @@ fetchModels(entry: ProviderConfig, key: string | undefined, signal): Promise<Ups
   //   为 supported_endpoints 原文；HTTP 错误抛
   //   ProviderUpstreamError（携带 status），不支持时返回 []
 
+// 服务商配置（provider-setup.ts）
+describeProviderSetup(config: RuntimeConfig, presetId: string): ProviderSetupDescription
+  // { presetId, label, type, fields, credential, fetchableModels, manualModel? }
+  //   fields：该预设要问的 name / baseURL / sessionHeader，每项带提问行、灰色说明、是否必填，
+  //     预设写死的值带 fixed（不询问，客户端仍把它显示进步骤摘要）；
+  //   credential：{ backend, methods, choose?, accountStorage? }
+  //     methods 按首选顺序：apiKey（available 取决于凭据后端，留空回落到 env）、env（默认变量名）、
+  //     login（account 区分账号登录与 OpenRouter 的 API key 登录）、external-file（Grok CLI）；
+  //     choose 存在时先选一项（OpenRouter：浏览器登录 / 粘贴密钥）；
+  //     accountStorage 仅账号型登录且无系统后端时给出（风险说明、选项、重试提示）；
+  //   fetchableModels：提交时是否会获取模型列表；manualModel：上游无列表时手填模型 ID 的提问
+addProvider(config, input: AddProviderInput, options?: AddProviderOptions): Promise<AddProviderResult>
+  // input = { presetId, name?, baseURL?, sessionHeader?, credential, modelId? }
+  //   credential = { kind: "apiKey", key } | { kind: "env", name } | { kind: "login", loginId } | { kind: "external-file" }
+  // 一次完成：校验 → 经凭据存储写入 → GET /models（可由 options.signal 取消）→ 保存条目 → 刷新 models.dev。
+  //   校验失败抛 ProviderSetupError(field)，field 指向出错的输入（preset/name/baseURL/sessionHeader/credential/modelId）；
+  //   取消抛 AbortError，条目与密钥均不写入（登录凭据在草稿阶段只暂存在内存，账号凭据已先写入存储的情形除外）。
+  //   AddProviderResult = { providerId, modelCount, notices, message }：notices 是步骤摘要行（"已获取 N 个模型"、
+  //   "! 获取模型列表失败（HTTP 401）：密钥可能无效"）与说明行（"保存后可用 /provider key 更新密钥，再 /provider refresh 重试"、
+  //   models.dev 警告），message 是结果行"已保存 X，N 个模型"。文案都由 Core 给出。
+  //   日志与诊断只记方法名，永不记 input（含密钥明文）。
+setupFieldStep / setupCredentialStep / setupCredentialNotice(description, ...)
+  // 已完成步骤的摘要行（"名称 x"、"密钥来源：环境变量 X"）与无后端时的环境变量提示，供各客户端按同一文案显示
+startDraftProviderLogin(config, target: { presetId, name, baseURL }, options): Promise<LoginSession>
+  // 条目尚未保存时的浏览器登录：会话带 loginId；凭据暂存在 Core（provider-login/pending.ts，随 RuntimeConfig 登记，
+  //   不落盘），addProvider 收到 { kind: "login", loginId } 才校验并提交——账号凭据先写入存储再获取模型列表，
+  //   OpenRouter 的密钥作为 key 交给 saveSetupProvider，无后端时条目改读环境变量。预设、名称、地址必须与草稿一致
+  accountStorage: "plaintext" | "memory"（ProviderLoginOptions）
+  // 无系统凭据后端时的账号凭据保存位置，由客户端经 accountStorage 描述让用户显式选择后传入；缺省不落盘，
+  //   startProviderLogin / startDraftProviderLogin 在授权开始前就以 ProviderLoginError("accountStorage") 拒绝
+
 // RuntimeConfig（config 模块）新增
 credentials: CredentialStore                             // 第 3 节的统一接口；get 结果在进程内缓存
 saveSetupProvider(entry: ProviderConfig, opts: { key?: string }): Promise<void>
   // key 存在时经 credentials.set 写入系统后端并登记 credentials.json 索引
 setCredential(providerId: string, key: string): Promise<void>
-  // 经 credentials.set 完成（缓存随之失效，下一次请求即用新密钥）
+  // 经 credentials.set 完成（缓存随之失效，下一次请求即用新密钥）；/provider key 与服务商页「换密钥」直接调用它
 removeSetupProvider(providerId: string): Promise<void>     // 删除条目并经 credentials.delete 删凭据
 describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>
   // /provider 与服务商页列表数据：名称、类型、主机名、鉴权描述、凭据状态、保存位置、来源层、模型数；不含令牌。
@@ -226,15 +257,6 @@ saveModelSettings(providerId: string, modelId: string, patch: ModelSettingsPatch
   //   校验以"保存后的最终生效值"计算（非向导条目、清单外模型、patch 触及
   //   config 来源字段、非正整数、生效最大输出>上下文、推理否与手写档位冲突等抛
   //   config_invalid 且不写文件）；原子写 providers.json，绝不写 config.json
-runProviderModelWizard(io, config, providerId, modelId, opts?): Promise<void>
-  // /provider model 的行式问答（ADR-0024 第 4 节、ADR-0026 第 7 节）：逐字段显示"当前值（来源）"，
-  //   回车保留、- 清除；推理用 y/n/-，为否时不问档位；协议输入 chat/messages/responses/-；
-  //   收集完一次性 saveModelSettings
-runProviderSetupWizard(io, config, deps, opts?): Promise<WizardResult>
-  // 步骤：预设选择（opts.presetId 直达）→（自定义预设才问）名称/地址 → 密钥
-  //   → GET /models 并尝试刷新 models.dev → 保存。
-  //   WizardResult = { providerId, modelCount }；modelCount 供客户端显示
-  //   "已保存 X，N 个模型"的结果行。不再询问模型与默认模型（v0.3）。
 setDefaultModel(model: string, effort: ReasoningEffort | null): Promise<SettingItem[]> // 成对写入 settings.json；Runtime 同名公开接口
 recentModels(): ModelRef[]                               // recent-models.json 当前内容（新→旧）
 recordRecentModel(ref: ModelRef): Promise<void>          // Runtime 在 setModel/新建会话时调用
@@ -244,6 +266,10 @@ runtime.updateProviders(config: RuntimeConfig): void
 runtime.defaultModel(): ModelRef | undefined             // 分层合并后的默认模型（"默认模型"标记）
 runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最近使用"范围的数据源
 ```
+
+**客户端外壳**：行式 CLI 与 TUI 服务商页的步骤顺序必须一致，所以不各写一遍，而是共用 `apps/tui` 的 `provider-setup-flow`（`runProviderSetupFlow` / `runProviderKeyFlow`）与 `provider-prompts`（`SetupPrompts`：`ask` / `askSecret` / `chooseMulti` / `busy` / `step` / `print`，`SetupAbort`）——这是客户端自己的流程，不属于 Core：它按 `describeProviderSetup` 的描述逐项提问、把答案交给 `addProvider`，不判断任何预设差异。CLI 实现 `SetupPrompts` 为逐行输入（`apps/cli/src/setup.ts` 的 `createSetupPrompts`），TUI 实现为服务商页弹层（`wizard-io.ts` 的 `useProviderWizard`）。RPC 客户端不需要这层，直接按描述渲染表单后调用 `addProvider`。`/provider model` 的逐字段问答是纯客户端流程（`apps/cli` 的 `runProviderModelWizard`），收集完一次性 `saveModelSettings`（ADR-0024 第 4 节、ADR-0026 第 7 节）：逐字段显示"当前值（来源）"，回车保留、- 清除；推理用 y/n/-，为否时不问档位；协议输入 chat/messages/responses/-。
+
+**提交流程与取消**：客户端先收完字段与凭据，再显示「保存配置」确认页（TUI；行式 CLI 直接提交），然后调用 `addProvider`。获取模型列表期间 Esc 取消 `options.signal`，回到确认页，什么都没有写入；已进入保存则放行到完成。外部登录文件的服务（Grok CLI）在上游没有列表时 `addProvider` 抛 `ProviderSetupError("modelId")`，客户端按 `manualModel` 补问模型 ID 后重新提交。
 
 `runtime.updateProviders`：用新的基础层配置重建运行时级 Provider 注册表；每个已打开会话在下一次空闲边界重建自己的会话级注册表（基础层 + 该会话的可信项目层）。`listModels` 展示当前工作区已加载的合并结果，包含可信项目层，供 `/model` 和 `/settings` 按生效模型能力列出档位。当前会话正在使用的服务商不会被移除（客户端在删除前检查，Core 在重建时对仍被引用的服务商保留原实例并发出 `runtime.warning`）。它不产生持久事件；随后的 `setModel` 照常写 `session.config_changed`。
 

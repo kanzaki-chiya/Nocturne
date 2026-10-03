@@ -244,7 +244,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 - 直接打字进入过滤（对 id/标签/主机名做子串匹配），`Backspace` 删字符；`Esc` 先清过滤，过滤已空时再按关闭页面（首次配置流程中为"完成"语义）；`↑`/`↓`/`PageUp`/`PageDown`/`Home`/`End` 移动；列表超出可视高度时右侧出滚动条。
 - `Delete` 直接进入选中服务商的删除确认，过滤非空时也一样；不删除过滤字符。未配置或只读条目给出不可删除原因，当前会话使用的条目提示「先用 /model 切换」。底部统一为 `↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回`，不重复列出操作名。
 
-**未配置预设 `Enter` → 配置对话框**：标题为「配置 <预设名>」，覆盖列表居中，首次配置的「第 1 步，共 2 步」标记仍留在下层页头。步骤编排仍由 Core `runProviderSetupWizard` 决定，不含选模型步骤。已完成步骤在上部折叠为一行摘要（`名称 x • 地址 y • 密钥已保存`）；当前步骤显示提问、输入框与灰色说明。底部 `[ 取消 ] [ 下一步 ]`，最后一步 `[ 取消 ] [ 保存 ]`。Tab/↑↓ 移动焦点，Enter 提交输入或激活按钮，Esc 取消；输入已改动时用 ConfirmDiscard 确认放弃。输入光标按对话框整数偏移显式定位，与输入文字对齐：
+**未配置预设 `Enter` → 配置对话框**：标题为「配置 <预设名>」，覆盖列表居中，首次配置的「第 1 步，共 2 步」标记仍留在下层页头。步骤由 Core `describeProviderSetup` 的描述决定，按 `provider-setup-flow` 逐项提问，最后在「保存配置」确认后一次交给 `addProvider`（[provider-setup.md](../architecture/provider-setup.md) 第 6 节），不含选模型步骤。已完成步骤在上部折叠为一行摘要（`名称 x • 地址 y • 密钥已保存`）；当前步骤显示提问、输入框与灰色说明。底部 `[ 取消 ] [ 下一步 ]`，最后一步 `[ 取消 ] [ 保存 ]`。Tab/↑↓ 移动焦点，Enter 提交输入或激活按钮，Esc 取消；输入已改动时用 ConfirmDiscard 确认放弃。输入光标按对话框整数偏移显式定位，与输入文字对齐：
 
 1. 仅自定义预设问「名称」（必填）、「服务地址」（openai 兼容必填；anthropic 兼容可留空用官方端点）与「会话标识请求头」（可选，回车跳过，写入条目 `sessionHeader`，[provider-setup.md](../architecture/provider-setup.md) 第 1 节）——内置预设直接跳过这三步（OpenCode 预设自带 `x-opencode-session`；ChatGPT、Grok 与 Grok CLI 改走登录或外部文件）；
 2. API key 预设显示「API Key」掩码输入（`*` 回显）：输入后回车 → 交系统凭据后端；直接回车 → 环境变量路径；后端不可用时直接进环境变量路径。ChatGPT 与 Grok 不走这一步，无系统后端时先选择明文或仅本次运行。Grok 远程登录显示确认码，不要求粘贴。Grok CLI 只提示外部文件与续期命令；
@@ -300,7 +300,7 @@ v0.2 增补（provider-setup.md 第 6 节）：模型选择页与 `/provider` �
 
 v0.3 增补（ADR-0019）：
 
-- `runProviderSetupWizard` 不再包含选模型与"设为默认"两步；`WizardResult` 移除 `model`/`setDefault`、新增 `modelCount`（服务商页底部结果行的数据源）；
+- 服务商配置不再包含选模型与"设为默认"两步；`AddProviderResult` 只含 `providerId`/`modelCount`（服务商页底部结果行的数据源）；
 - `SessionSummary.firstText?`：`/resume` 列表标题的数据源（读日志时优先识别 `session.titled`，否则复用 protocol 的 `firstUserText` 提取原文首行，标题规则见 §2）；
 - `runTui` 可无会话启动（首次配置流程）：注入 `openSession` 回调，服务商页 → 模型页走完后由 CLI 完成延迟装配；打开会话的逻辑仍在 CLI 一份。
 

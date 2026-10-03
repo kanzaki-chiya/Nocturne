@@ -10,7 +10,7 @@ import { Box, Text, useInput } from "ink";
 import { useMemo, useState } from "react";
 import stringWidth from "string-width";
 
-import type { ModelInfo, ModelRef, ProviderOverview, WizardPreset } from "@nocturne/core";
+import type { ModelInfo, ModelRef, ProviderOverview, ProviderPreset } from "@nocturne/core";
 import { clampReasoningEffort, type ReasoningEffort } from "@nocturne/core";
 import { Segmented } from "./dialog/segmented.js";
 
@@ -136,7 +136,7 @@ export function ModelPicker({
   recents: readonly ModelRef[];
   providers: readonly ProviderOverview[];
   /** 尚未配置的预设服务商（左栏 ○） */
-  presets: readonly WizardPreset[];
+  presets: readonly ProviderPreset[];
   current: ModelRef | undefined;
   defaultModel: ModelRef | undefined;
   initialScope?: PickerScope | undefined;

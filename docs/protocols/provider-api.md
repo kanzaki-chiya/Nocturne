@@ -6,7 +6,7 @@
 
 ## 1. Provider
 
-Core 公开 `startProviderLogin(config, providerId)`、`logoutProvider(config, providerId)` 与 `LoginSession`。会话包含 `authorizeUrl`、`manualInput`、`completion`、`submitManual`、`cancel`；结果仅包含 `providerId` 与可选账号描述。回环监听一次性并校验 state，客户端只负责浏览器与交互，不持有鉴权解析策略，详见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 8 节。
+Core 公开 `startProviderLogin(config, providerId)`、`logoutProvider(config, providerId)` 与 `LoginSession`。会话包含 `authorizeUrl`、`manualInput`、`completion`、`submitManual`、`cancel`；结果仅包含 `providerId` 与可选账号描述。无系统凭据后端时，保存位置经 `accountStorage: "plaintext" | "memory"` 由客户端在授权开始前传入，缺省以 `ProviderLoginError("accountStorage")` 拒绝；条目尚未保存时用 `startDraftProviderLogin(config, { presetId, name, baseURL }, options)`，会话多带 `loginId`，凭据暂存在 Core，交给 `addProvider` 提交（[provider-setup.md](../architecture/provider-setup.md) 第 6 节）。回环监听一次性并校验 state，客户端只负责浏览器与交互，不持有鉴权解析策略，详见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 8 节。
 
 ```ts
 interface Provider {

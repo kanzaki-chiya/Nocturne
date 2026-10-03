@@ -6,8 +6,11 @@ export interface ProviderLoginOptions {
   remote?: boolean | undefined;
   /** 唯一允许向人展示未保存密钥的通道，不进入 completion。 */
   onUnstoredKey?: ((key: string, envName: string) => void | Promise<void>) | undefined;
-  /** 无系统后端时必须显式选择；没有默认明文选项。 */
-  chooseAccountStorage?: (() => Promise<"plaintext" | "memory">) | undefined;
+  /**
+   * 无系统后端时账号凭据的保存位置，由客户端显式选择后作为登录参数传入（ADR-0044 第 6 节）；
+   * 没有默认值，更没有默认明文。有系统后端时忽略。
+   */
+  accountStorage?: "plaintext" | "memory" | undefined;
 }
 
 const messages = {

@@ -11,7 +11,7 @@ import type {
   ModelInfo,
   ModelRef,
   ProviderOverview,
-  WizardPreset,
+  ProviderPreset,
   ReasoningEffort,
 } from "@nocturne/core";
 
@@ -90,7 +90,7 @@ const PROVIDERS: ProviderOverview[] = [
   },
 ];
 
-const PRESETS: WizardPreset[] = [
+const PRESETS: ProviderPreset[] = [
   {
     id: "commandcode",
     label: "CommandCode",

@@ -1,24 +1,20 @@
 /**
  * nctrn setup 与 /provider add 的终端输入实现（provider-setup.md 第 1、6 节）。
- * 向导编排在 Core（runProviderSetupWizard/runProviderKeyWizard）；
- * 这里提供 TTY raw mode 的 WizardIo（密钥输入回显为 *）与 provider 层能力注入。
- * 密钥永远不出现在命令行参数里。
+ * 向导步骤与文案来自 Core 的 describeProviderSetup / addProvider，流程由
+ * @nocturne/tui/provider-setup-flow 与 TUI 共用；这里只提供 TTY raw mode 的
+ * SetupPrompts（密钥输入回显为 *）。密钥永远不出现在命令行参数里。
  */
+import { type RuntimeConfig } from "@nocturne/core";
+import { SetupAbort, type SetupPrompts } from "@nocturne/tui/provider-prompts";
 import {
-  fetchModels,
-  fetchProviderModels,
-  listProviderPresets,
-  runProviderKeyWizard as coreKeyWizard,
-  runProviderModelWizard as coreModelWizard,
-  runProviderSetupWizard as coreSetupWizard,
-  type RuntimeConfig,
-  type SetupWizardDeps,
-  type WizardIo,
-} from "@nocturne/core";
+  runProviderKeyFlow,
+  runProviderSetupFlow,
+  type SetupFlowHooks,
+} from "@nocturne/tui/provider-setup-flow";
 
-import { WizardAbort } from "@nocturne/core";
-export type { WizardIo } from "@nocturne/core";
-export { WizardAbort } from "@nocturne/core";
+import { runProviderModelWizard } from "./model-wizard.js";
+
+export { SetupAbort, type SetupPrompts } from "@nocturne/tui/provider-prompts";
 
 type Stdin = NodeJS.ReadableStream & {
   isTTY?: boolean;
@@ -47,7 +43,7 @@ async function readLineRaw(
         if (ch === "\u0003" || ch === "\u0004" || ch === "\u001a" || ch === "\u001b") {
           // Ctrl+C / Ctrl+D / Ctrl+Z
           cleanup();
-          reject(new WizardAbort());
+          reject(new SetupAbort());
           return;
         }
         if (ch === "\u007f" || ch === "\b") {
@@ -70,7 +66,7 @@ async function readLineRaw(
     };
     const abort = () => {
       cleanup();
-      reject(new WizardAbort());
+      reject(new SetupAbort());
     };
     signal.addEventListener("abort", abort, { once: true });
     inAny.setRawMode(true);
@@ -91,11 +87,11 @@ async function readLineStream(stdin: Stdin, signal: AbortSignal): Promise<string
   }
 }
 
-/** nctrn setup / /provider add 的终端实现 */
-export function createWizardIo(
+/** nctrn setup / /provider add 的终端输入实现 */
+export function createSetupPrompts(
   stdin: Stdin,
   stdout: NodeJS.WritableStream,
-): WizardIo & { cancelPending(): void } {
+): SetupPrompts & { cancelPending(): void } {
   const tty = stdin.isTTY === true;
   let pending: AbortController | undefined;
   const read = (echo: boolean) => {
@@ -116,14 +112,14 @@ export function createWizardIo(
       writeHint(opts?.hint);
       stdout.write(prompt);
       const line = await read(true);
-      if (line === undefined) throw new WizardAbort();
+      if (line === undefined) throw new SetupAbort();
       return line.trim();
     },
     askSecret: async (prompt, opts) => {
       writeHint(opts?.hint);
       stdout.write(prompt);
       const line = await read(false);
-      if (line === undefined) throw new WizardAbort();
+      if (line === undefined) throw new SetupAbort();
       return line.trim();
     },
     busy: (text) => {
@@ -143,7 +139,7 @@ export function createWizardIo(
       for (;;) {
         stdout.write("编号（逗号分隔，如 2,3,4；空 = 不选）：");
         const line = await read(true);
-        if (line === undefined) throw new WizardAbort();
+        if (line === undefined) throw new SetupAbort();
         const trimmed = line.trim();
         if (trimmed === "") return [];
         const nums = trimmed.split(/[，,\s]+/).map((s) => Number.parseInt(s, 10));
@@ -159,45 +155,35 @@ export function createWizardIo(
   };
 }
 
-/** CLI 侧的向导依赖注入：provider 层能力 + 进程环境变量 */
-export function cliWizardDeps(
-  env: (name: string) => string | undefined = (n) => process.env[n],
-  config?: RuntimeConfig,
-): SetupWizardDeps {
-  return {
-    presets: () => listProviderPresets(),
-    fetchModels: (req, key) =>
-      config === undefined
-        ? fetchModels(req, key)
-        : fetchProviderModels(config, { ...req, id: req.id ?? "provider" }, key),
-    env,
-    ...(config
-      ? {
-          login: async (entry, io) => {
-            const { runProviderLogin } = await import("@nocturne/tui/provider-login");
-            await runProviderLogin(config, entry.id, io, { entry });
-          },
-        }
-      : {}),
-  };
-}
-
-/** nctrn setup / /provider add：注入 CLI 依赖后跑 Core 向导编排 */
+/** nctrn setup / /provider add：跑共享的向导流程；浏览器登录经 tui 的登录客户端 */
 export async function runProviderSetupWizard(
-  io: WizardIo,
+  io: SetupPrompts & { cancelPending?: () => void },
   config: RuntimeConfig,
-  opts?: { presetId?: string | undefined },
+  opts?: { presetId?: string | undefined; hooks?: Partial<SetupFlowHooks> | undefined },
 ) {
-  return await coreSetupWizard(io, config, cliWizardDeps(undefined, config), opts);
+  return await runProviderSetupFlow(
+    io,
+    config,
+    {
+      login: async (target) => {
+        const { runProviderLogin } = await import("@nocturne/tui/provider-login");
+        const { loginId } = await runProviderLogin(config, target, io);
+        if (loginId === undefined) throw new Error("登录未完成，请重新运行 /provider login");
+        return loginId;
+      },
+      ...opts?.hooks,
+    },
+    { presetId: opts?.presetId },
+  );
 }
 
 /** /provider key <name> */
 export async function runProviderKeyWizard(
-  io: WizardIo,
+  io: SetupPrompts,
   config: RuntimeConfig,
   providerId: string,
 ): Promise<void> {
-  await coreKeyWizard(io, config, providerId);
+  await runProviderKeyFlow(io, config, providerId);
 }
 
 /**
@@ -206,7 +192,7 @@ export async function runProviderKeyWizard(
  * 也不再询问"切换当前会话"）。
  */
 export async function runAddWizardInSession(
-  io: WizardIo,
+  io: SetupPrompts & { cancelPending?: () => void },
   ctx: {
     config: RuntimeConfig;
     session: { setModel(input: string): Promise<void> };
@@ -223,7 +209,7 @@ export async function runAddWizardInSession(
  * /provider key <name> 的会话内流程：密钥向导 → 重载配置 → updateProviders。
  */
 export async function runKeyWizardInSession(
-  io: WizardIo,
+  io: SetupPrompts & { cancelPending?: () => void },
   ctx: {
     config: RuntimeConfig;
     providerId: string;
@@ -240,7 +226,7 @@ export async function runKeyWizardInSession(
  * 行式问答 → saveModelSettings → 重载配置 → updateProviders。
  */
 export async function runModelWizardInSession(
-  io: WizardIo,
+  io: SetupPrompts & { cancelPending?: () => void },
   ctx: {
     config: RuntimeConfig;
     providerId: string;
@@ -250,7 +236,7 @@ export async function runModelWizardInSession(
     updateProviders: (rc: RuntimeConfig) => void;
   },
 ): Promise<void> {
-  await coreModelWizard(io, ctx.config, ctx.providerId, ctx.modelId, {
+  await runProviderModelWizard(io, ctx.config, ctx.providerId, ctx.modelId, {
     workspaceRoot: ctx.workspaceRoot,
   });
   ctx.updateProviders(await ctx.reloadConfig());

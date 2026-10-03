@@ -134,7 +134,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 **内容**：TUI 视觉统一（集中主题常量、紧凑欢迎区、分段彩色状态栏、宽度降级）；`/provider` 改为服务商管理页（模型选择收归 `/model`）；向导去除选模型步骤；首次配置两步流程；交互模式默认 TUI。全屏渲染（[ADR-0020](../decisions/ADR-0020-tui-fullscreen-rendering.md)）：启动即进入 Ink 备用屏幕，增量渲染，帧高为行数减 1，对话区只渲染可见行；页面与浮层不再逐页切屏；斜杠补全与逐行 readline completer 共用命令表。设计见 [ADR-0019](../decisions/ADR-0019-tui-visual-provider-page.md)。
 
-**约束**：服务商页只编排界面，业务逻辑复用 Core `wizard.ts` 编排与 RuntimeConfig 公开 API；颜色集中为一套主题常量，组件不直接写死色值；图标只用 Windows Terminal 与 conhost 都能显示的字符（emoji 与 Nerd Font 实测后再定）；本地提交不打标签不推送。
+**约束**：服务商页只编排界面，业务逻辑复用 Core 的 `describeProviderSetup` / `addProvider` 与 RuntimeConfig 公开 API（原 `wizard.ts` 编排已由 ADR-0044 替换）；颜色集中为一套主题常量，组件不直接写死色值；图标只用 Windows Terminal 与 conhost 都能显示的字符（emoji 与 Nerd Font 实测后再定）；本地提交不打标签不推送。
 
 **验收**：
 

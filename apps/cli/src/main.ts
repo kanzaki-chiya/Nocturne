@@ -33,7 +33,7 @@ import {
   sessionOpenNotes,
   type SessionHolder,
 } from "./session-switch.js";
-import { createWizardIo, runProviderSetupWizard, WizardAbort } from "./setup.js";
+import { createSetupPrompts, runProviderSetupWizard, SetupAbort } from "./setup.js";
 
 const VERSION = "0.4.0";
 
@@ -188,11 +188,11 @@ async function main(): Promise<number> {
     }
     try {
       await runProviderSetupWizard(
-        createWizardIo(process.stdin, process.stdout),
+        createSetupPrompts(process.stdin, process.stdout),
         collected.config.runtime,
       );
     } catch (e) {
-      if (e instanceof WizardAbort) {
+      if (e instanceof SetupAbort) {
         process.stdout.write("已取消\n");
         return 0;
       }
@@ -248,13 +248,13 @@ async function main(): Promise<number> {
         }
         try {
           await runProviderSetupWizard(
-            createWizardIo(process.stdin, process.stdout),
+            createSetupPrompts(process.stdin, process.stdout),
             runtimeConfig,
           );
           process.stdout.write("配置完成：运行 nctrn 启动；用 /model 选择模型\n");
           return 0;
         } catch (e) {
-          if (e instanceof WizardAbort) {
+          if (e instanceof SetupAbort) {
             process.stdout.write("已取消\n");
             return 0;
           }

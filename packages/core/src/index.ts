@@ -2216,9 +2216,35 @@ export type {
 
 export {
   startProviderLogin,
+  startDraftProviderLogin,
   logoutProvider,
+  type DraftLoginTarget,
   ProviderLoginError,
   type ProviderLoginErrorCode,
   type ProviderLoginOptions,
 } from "./provider-login.js";
 export { fetchProviderModels } from "./provider-oauth.js";
+// 服务商配置数据接口（ADR-0044 第 6 节，provider-setup.md 第 6 节）
+export {
+  addProvider,
+  credentialBackendLabel,
+  describeAccountStorage,
+  describeProviderSetup,
+  ProviderSetupError,
+  setupCredentialNotice,
+  setupCredentialStep,
+  setupFieldStep,
+  type AccountStorageOption,
+  type AccountStorageSetup,
+  type AddProviderInput,
+  type AddProviderOptions,
+  type AddProviderResult,
+  type CredentialMethodKind,
+  type ProviderCredentialInput,
+  type ProviderCredentialMethod,
+  type ProviderCredentialSetup,
+  type ProviderSetupDescription,
+  type ProviderSetupField,
+  type ProviderSetupFieldName,
+  type ProviderSetupNotice,
+} from "./provider-setup.js";

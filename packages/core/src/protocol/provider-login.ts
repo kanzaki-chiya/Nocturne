@@ -5,6 +5,8 @@ export interface LoginResult {
 }
 
 export interface LoginSession {
+  /** 仅草稿登录（表单里尚未保存的服务商）有：完成后交给 addProvider 引用，见 ADR-0044 第 6 节。 */
+  loginId?: string | undefined;
   authorizeUrl: string;
   /** `none`：设备码登录，用户在浏览器确认，不向本进程粘贴。 */
   manualInput: "callback-url" | "code" | "none";

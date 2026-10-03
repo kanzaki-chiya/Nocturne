@@ -4,19 +4,15 @@ import { cleanup, render } from "ink-testing-library";
 import { createElement, useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as Core from "@nocturne/core";
-import {
-  startProviderLogin,
-  ProviderLoginError,
-  WizardAbort,
-  type RuntimeConfig,
-} from "@nocturne/core";
+import { startProviderLogin, ProviderLoginError, type RuntimeConfig } from "@nocturne/core";
 import type { LoginSession } from "@nocturne/core/protocol";
 import {
   openLoginBrowser,
   runProviderLogin,
   unstoredKeyCommands,
-  type LoginIo,
+  type LoginPrompts,
 } from "../src/provider-login.js";
+import { SetupAbort } from "../src/provider-prompts.js";
 import { providerCredentialDescription } from "../src/text-format.js";
 import { WizardView } from "../src/components/wizard-view.js";
 import { ProviderDialog } from "../src/components/provider-dialog.js";
@@ -40,7 +36,10 @@ const entry = {
   type: "openai-compatible" as const,
   baseURL: "https://openrouter.ai/api/v1",
 };
-const config = { base: { providers: [entry] } } as unknown as RuntimeConfig;
+const config = {
+  credentials: { backend: () => "memory" },
+  base: { providers: [entry] },
+} as unknown as RuntimeConfig;
 function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("missing test fixture");
   return value;
@@ -64,7 +63,7 @@ function session(manualInput: LoginSession["manualInput"] = "code") {
   vi.mocked(startProviderLogin).mockResolvedValue(s);
   return { s, resolve, reject };
 }
-function io(): LoginIo {
+function io(): LoginPrompts {
   return {
     ask: vi.fn(),
     askSecret: vi.fn(() => new Promise<string>(() => undefined)),
@@ -149,9 +148,9 @@ describe("登录客户端", () => {
   it("Esc/Ctrl+C 输入取消会关闭会话", async () => {
     const { s } = session();
     const wio = io();
-    vi.mocked(wio.askSecret).mockRejectedValue(new WizardAbort());
+    vi.mocked(wio.askSecret).mockRejectedValue(new SetupAbort());
     await expect(runProviderLogin(config, entry.id, wio, { remote: true })).rejects.toBeInstanceOf(
-      WizardAbort,
+      SetupAbort,
     );
     expect(s.cancel).toHaveBeenCalled();
   });
@@ -200,30 +199,42 @@ describe("登录客户端", () => {
       }),
     ).toBe("ChatGPT 账号 mock@example.test • 即将过期 • 仅本次运行");
   });
-  it("无系统后端时必须显式选择，空选和多选都重问", async () => {
+  it("无系统后端时授权前必须显式选择，空选和多选都重问，选定位置作为登录参数传入", async () => {
     const wio = io();
     vi.mocked(wio.chooseMulti)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([0, 1])
       .mockResolvedValueOnce([1]);
+    const account = {
+      id: "chatgpt",
+      type: "openai-compatible" as const,
+      auth: { kind: "openai-siwc" as const },
+    };
+    const noneConfig = {
+      credentials: { backend: () => "none" },
+      base: { providers: [account] },
+    } as unknown as RuntimeConfig;
     vi.mocked(startProviderLogin).mockImplementation(async (_config, _id, options) => {
-      const completion = (async () => {
-        const storage = await options?.chooseAccountStorage?.();
-        return { providerId: entry.id, account: storage };
-      })();
+      expect(vi.mocked(wio.chooseMulti)).toHaveBeenCalledTimes(3);
       return {
         authorizeUrl: "https://example.test/authorize?state=mock-state",
         manualInput: "callback-url",
-        completion,
+        completion: Promise.resolve({ providerId: account.id, account: options?.accountStorage }),
         submitManual: vi.fn(async () => undefined),
         cancel: vi.fn(),
       };
     });
-    await runProviderLogin(config, entry.id, wio, { remote: true, openBrowser: async () => false });
-    expect(wio.cancelPending).toHaveBeenCalled();
+    await runProviderLogin(noneConfig, account.id, wio, {
+      remote: true,
+      openBrowser: async () => false,
+    });
     expect(wio.chooseMulti).toHaveBeenCalledTimes(3);
+    expect(required(vi.mocked(startProviderLogin).mock.calls[0])[2]).toMatchObject({
+      accountStorage: "memory",
+    });
     expect(wio.print).toHaveBeenCalledWith(expect.stringContaining("不会默认选择明文"));
     expect(wio.print).toHaveBeenCalledWith(expect.stringContaining("文件被备份、同步或拷走"));
+    expect(wio.print).toHaveBeenCalledWith("请只选择一项，不能留空。");
     expect(wio.step).toHaveBeenCalledWith(expect.stringContaining("memory"));
     expect(JSON.stringify(vi.mocked(wio.print).mock.calls)).not.toContain("stored-access");
   });

@@ -1,11 +1,12 @@
 import { cleanup, render } from "ink-testing-library";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type {
-  ProviderOverview,
-  RuntimeConfig,
-  SetupWizardDeps,
-  WizardPreset,
+import {
+  listProviderPresets,
+  type AddProviderOptions,
+  type ProviderOverview,
+  type ProviderPreset,
+  type RuntimeConfig,
 } from "@nocturne/core";
 import { ProviderPage } from "../src/components/provider-page.js";
 import { TuiEnvContext } from "../src/env.js";
@@ -23,14 +24,10 @@ const entry = (id: string, managed = true): ProviderOverview => ({
   modelCount: 1,
   managed,
 });
-const preset: WizardPreset = {
-  id: "offline",
-  label: "离线测试服务",
-  defaultName: "offline",
-  baseURL: "https://example.test/v1",
-  type: "openai-compatible",
-  fetchableModels: true,
-};
+// Core 按预设 id 解析描述，向导测试必须用真实预设（DeepSeek：地址写死、API Key 与环境变量两步）
+const preset: ProviderPreset = listProviderPresets().find(
+  (p) => p.id === "deepseek",
+) as ProviderPreset;
 async function page(
   options: {
     current?: string;
@@ -56,8 +53,7 @@ async function page(
     saveSetupProvider,
     refreshModelsDev: async () => undefined,
   } as unknown as RuntimeConfig;
-  const deps: SetupWizardDeps = {
-    presets: () => [preset],
+  const deps: AddProviderOptions = {
     fetchModels: async () => [{ id: "offline-model" }],
     env: () => undefined,
   };
@@ -199,7 +195,7 @@ describe("服务商四个对话框与页内鼠标（ADR-0039 §2）", () => {
   it("配置向导保留下层列表、步骤标记，空 API Key 回车仍进入环境变量步骤，Esc 取消", async () => {
     const ui = await page();
     await changedFrame(ui, () => ui.stdin.write("\r"));
-    expect(ui.lastFrame()).toContain("配置 离线测试服务");
+    expect(ui.lastFrame()).toContain("配置 DeepSeek");
     expect(ui.lastFrame()).toContain("第 1 步，共 2 步");
     expect(ui.lastFrame()).toContain("过滤:");
     expect(ui.lastFrame()).toContain("[ 下一步 ]");

@@ -1,0 +1,619 @@
+/**
+ * 服务商配置的数据接口（ADR-0044 第 6 节，provider-setup.md 第 6 节）：
+ * `describeProviderSetup` 描述某个预设需要填写什么，`addProvider` 一次提交表单。
+ * 预设之间的差异（哪些问名称与地址、哪些走登录、无凭据后端怎么办、模型列表失败怎么提示）
+ * 全部在这里判断；界面只负责按描述收集输入并显示结果，不回调、不自己判断。
+ * 不发送模型请求（不消耗 token）：密钥与地址的有效性由会话中的首次真实请求检验。
+ * 日志与诊断里永远不要出现 input（密钥明文）。
+ */
+import type {
+  CredentialBackend,
+  ModelOverrideShape,
+  ProviderEntryConfig,
+  RuntimeConfig,
+  UpstreamModelEntry,
+} from "./config/index.js";
+import {
+  listProviderPresets,
+  type FetchModelsRequest,
+  type ProviderPreset,
+} from "./provider/index.js";
+import { fetchProviderModels } from "./provider-oauth.js";
+import { dropPendingLogin, findPendingLogin } from "./provider-login/pending.js";
+
+/** 表单字段名；校验失败的错误带它，客户端据此标到对应输入框 */
+export type ProviderSetupFieldName =
+  "preset" | "name" | "baseURL" | "sessionHeader" | "credential" | "modelId";
+
+export class ProviderSetupError extends Error {
+  constructor(
+    readonly field: ProviderSetupFieldName,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ProviderSetupError";
+  }
+}
+
+export interface ProviderSetupField {
+  key: "name" | "baseURL" | "sessionHeader";
+  /** 输入框的提问行 */
+  prompt: string;
+  /** 提问下方的灰色说明 */
+  hint: string;
+  required: boolean;
+  /** 预设写死的值：不询问，直接用 */
+  fixed?: string | undefined;
+}
+
+export type CredentialMethodKind = "apiKey" | "env" | "login" | "external-file";
+
+export type ProviderCredentialMethod =
+  | {
+      kind: "apiKey";
+      label: string;
+      /** 凭据后端不可用时为 false：不询问密钥，直接走环境变量 */
+      available: boolean;
+      prompt: string;
+      hint: string;
+    }
+  | {
+      kind: "env";
+      label: string;
+      prompt: string;
+      hint: string;
+      /** 留空时使用的变量名 */
+      defaultName: string;
+    }
+  | { kind: "login"; label: string; account: boolean }
+  | { kind: "external-file"; label: string; renewHint: string };
+
+export interface AccountStorageOption {
+  value: "plaintext" | "memory";
+  label: string;
+}
+
+/** 无系统凭据后端时账号凭据必须由用户显式选择保存位置（没有默认值，更没有默认明文） */
+export interface AccountStorageSetup {
+  /** 选择前显示的风险说明（一行文字） */
+  notice: string;
+  prompt: string;
+  hint: string;
+  options: AccountStorageOption[];
+  /** 没有选满一项时的提示 */
+  retry: string;
+}
+
+export interface ProviderCredentialSetup {
+  backend: { kind: CredentialBackend; available: boolean; label: string };
+  /**
+   * 凭据方式，按首选顺序。apiKey 留空回落到下一个 env；
+   * 存在 choose 时先让用户在其中选一项（OpenRouter：浏览器登录 / 粘贴密钥），
+   * 选 apiKey 才进入 apiKey → env 的顺序，选 login 直接走登录。
+   */
+  methods: ProviderCredentialMethod[];
+  choose?: { prompt: string; options: { method: "login" | "apiKey"; label: string }[] } | undefined;
+  /** 仅账号型登录且无系统后端时给出 */
+  accountStorage?: AccountStorageSetup | undefined;
+}
+
+export interface ProviderSetupDescription {
+  presetId: string;
+  label: string;
+  type: "openai-compatible" | "anthropic";
+  fields: ProviderSetupField[];
+  credential: ProviderCredentialSetup;
+  /** 提交时会不会向上游获取模型列表（决定界面显示"正在获取模型列表…"还是"正在保存…"） */
+  fetchableModels: boolean;
+  /** 上游没给出模型列表时（如外部登录文件的服务）需要手填模型 ID */
+  manualModel?: { prompt: string; hint: string } | undefined;
+}
+
+export type ProviderCredentialInput =
+  | { kind: "apiKey"; key: string }
+  | { kind: "env"; name: string }
+  | { kind: "login"; loginId: string }
+  | { kind: "external-file" };
+
+export interface AddProviderInput {
+  presetId: string;
+  /** 预设询问名称时必填 */
+  name?: string | undefined;
+  baseURL?: string | undefined;
+  sessionHeader?: string | undefined;
+  credential: ProviderCredentialInput;
+  /** 外部登录文件且上游无模型列表时的手填模型 ID */
+  modelId?: string | undefined;
+}
+
+/** 提交结果里的一条提示：step 是折叠进步骤摘要的一行，print 是独立的说明行 */
+export interface ProviderSetupNotice {
+  code: "models_fetched" | "models_unauthorized" | "models_failed" | "models_dev";
+  kind: "step" | "print";
+  text: string;
+}
+
+export interface AddProviderResult {
+  providerId: string;
+  /** 已登记到条目 models 的上游模型数 */
+  modelCount: number;
+  notices: ProviderSetupNotice[];
+  /** 结果行：已保存 xxx，N 个模型 */
+  message: string;
+}
+
+export interface AddProviderOptions {
+  /** 模型列表获取（测试注入离线实现）；缺省走 provider 层的 GET /models */
+  fetchModels?:
+    | ((
+        request: FetchModelsRequest & { apiKeyEnv?: string | undefined },
+        key: string | undefined,
+        signal: AbortSignal | undefined,
+      ) => Promise<UpstreamModelEntry[]>)
+    | undefined;
+  /** 读取环境变量（决定 env 方式下能否带密钥获取模型列表）；缺省读进程环境 */
+  env?: ((name: string) => string | undefined) | undefined;
+  signal?: AbortSignal | undefined;
+}
+
+const ACCOUNT_STORAGE_RISK =
+  "明文保存在 credentials.json。文件被备份、同步或拷走时凭据随之泄漏；refresh token 在被撤销前可以持续使用。不会默认选择明文。";
+
+export function credentialBackendLabel(backend: string): string {
+  switch (backend) {
+    case "dpapi":
+      return "Windows DPAPI";
+    case "keychain":
+      return "macOS 钥匙串";
+    case "libsecret":
+      return "Secret Service";
+    default:
+      return backend;
+  }
+}
+
+function isAccountPreset(preset: Pick<ProviderPreset, "auth">): boolean {
+  return preset.auth?.kind === "openai-siwc" || preset.auth?.kind === "xai-oauth2";
+}
+
+/**
+ * 账号型登录在无系统后端时需要用户选择保存位置；其余情况返回 undefined。
+ * 已保存服务商重新登录（/provider login）与表单里的草稿登录共用。
+ */
+export function describeAccountStorage(
+  config: RuntimeConfig,
+  entry: { auth?: { kind: string } | undefined },
+): AccountStorageSetup | undefined {
+  if (config.credentials.backend() !== "none") return undefined;
+  if (entry.auth?.kind !== "openai-siwc" && entry.auth?.kind !== "xai-oauth2") return undefined;
+  return {
+    notice: `系统凭据后端不可用。${ACCOUNT_STORAGE_RISK}`,
+    prompt: "账号凭据保存方式（必须选择一项）：",
+    hint: ACCOUNT_STORAGE_RISK,
+    options: [
+      { value: "plaintext", label: "保存到 credentials.json（明文，仅你可读）" },
+      { value: "memory", label: "仅本次运行（退出后丢失，下次启动重新登录）" },
+    ],
+    retry: "请只选择一项，不能留空。",
+  };
+}
+
+function findPreset(presetId: string): ProviderPreset {
+  const preset = listProviderPresets().find((p) => p.id === presetId);
+  if (preset === undefined) throw new ProviderSetupError("preset", `未知预设：${presetId}`);
+  return preset;
+}
+
+function describeFields(preset: ProviderPreset): ProviderSetupField[] {
+  const fields: ProviderSetupField[] = [];
+  fields.push(
+    preset.defaultName !== ""
+      ? { key: "name", prompt: "名称：", hint: "", required: true, fixed: preset.defaultName }
+      : {
+          key: "name",
+          prompt: "名称：",
+          hint: "该服务商在 providers.json、/model 与状态栏中的标识",
+          required: true,
+        },
+  );
+  if (preset.baseURL !== undefined) {
+    fields.push({
+      key: "baseURL",
+      prompt: "服务地址：",
+      hint: "",
+      required: true,
+      fixed: preset.baseURL,
+    });
+  } else if (preset.type === "openai-compatible") {
+    fields.push({
+      key: "baseURL",
+      prompt: "服务地址：",
+      hint: "OpenAI 兼容端点，通常以 /v1 结尾（如 https://api.example.com/v1）",
+      required: true,
+    });
+  } else {
+    fields.push({
+      key: "baseURL",
+      prompt: "服务地址：",
+      hint: "留空使用官方端点",
+      required: false,
+    });
+  }
+  // 会话标识请求头（ADR-0031 §3）：仅自定义预设询问，可选；内置预设由预设值写死
+  if (preset.id.startsWith("custom-")) {
+    fields.push({
+      key: "sessionHeader",
+      prompt: "会话标识请求头（可选，回车跳过）：",
+      hint: "部分网关要求每个对话带固定的会话 ID，填请求头名称，例如 x-opencode-session；留空不发送",
+      required: false,
+    });
+  }
+  return fields;
+}
+
+function describeCredential(
+  config: RuntimeConfig,
+  preset: ProviderPreset,
+): ProviderCredentialSetup {
+  const kind = config.credentials.backend();
+  const available = kind !== "none";
+  const backend = { kind, available, label: credentialBackendLabel(kind) };
+  const defaultEnv = preset.defaultKeyEnv ?? "NOCTURNE_API_KEY";
+  const apiKey: ProviderCredentialMethod = {
+    kind: "apiKey",
+    label: "粘贴密钥",
+    available,
+    prompt: "API Key：",
+    hint:
+      (preset.keyHint !== undefined ? `从 ${preset.keyHint} 获取；` : "") +
+      "输入不回显；直接回车改用环境变量",
+  };
+  const env: ProviderCredentialMethod = {
+    kind: "env",
+    label: "环境变量",
+    prompt: `凭据环境变量名 [${defaultEnv}]：`,
+    hint: "该变量的值会作为请求凭据发送",
+    defaultName: defaultEnv,
+  };
+  if (isAccountPreset(preset)) {
+    return {
+      backend,
+      methods: [{ kind: "login", label: "浏览器登录", account: true }],
+      accountStorage: describeAccountStorage(config, preset),
+    };
+  }
+  if (preset.auth?.kind === "external-file") {
+    return {
+      backend,
+      methods: [{ kind: "external-file", label: "外部登录文件", renewHint: preset.auth.renewHint }],
+    };
+  }
+  if (preset.login === "openrouter") {
+    return {
+      backend,
+      methods: [{ kind: "login", label: "浏览器登录", account: false }, apiKey, env],
+      choose: {
+        prompt: "密钥获取方式（选择一项）：",
+        options: [
+          { method: "login", label: "浏览器登录" },
+          { method: "apiKey", label: "粘贴密钥" },
+        ],
+      },
+    };
+  }
+  return { backend, methods: [apiKey, env] };
+}
+
+/** 描述一个预设的配置表单；客户端据此画表单，不自己判断预设差异 */
+export function describeProviderSetup(
+  config: RuntimeConfig,
+  presetId: string,
+): ProviderSetupDescription {
+  const preset = findPreset(presetId);
+  return {
+    presetId: preset.id,
+    label: preset.label,
+    type: preset.type,
+    fields: describeFields(preset),
+    credential: describeCredential(config, preset),
+    fetchableModels: preset.fetchableModels,
+    ...(preset.auth?.kind === "external-file"
+      ? {
+          manualModel: {
+            prompt: "模型 ID：",
+            hint: "服务不提供模型列表时手动填写",
+          },
+        }
+      : {}),
+  };
+}
+
+/** 已回答字段的一行步骤摘要（"名称 x"、"地址 y"、"会话头 z"）；value 为空表示留空 */
+export function setupFieldStep(key: ProviderSetupField["key"], value: string | undefined): string {
+  const v = value === undefined || value === "" ? undefined : value;
+  switch (key) {
+    case "name":
+      return `名称 ${v ?? ""}`;
+    case "baseURL":
+      return `地址 ${v ?? "官方端点"}`;
+    case "sessionHeader":
+      return `会话头 ${v ?? "不发送"}`;
+  }
+}
+
+/** 凭据步骤的一行摘要；login 不含登录等待，仅表示已完成 */
+export function setupCredentialStep(
+  description: ProviderSetupDescription,
+  credential: ProviderCredentialInput,
+): string {
+  switch (credential.kind) {
+    case "apiKey":
+      return "密钥已保存（凭据存储）";
+    case "env":
+      return `密钥来源：环境变量 ${credential.name}`;
+    case "login":
+      return "登录已完成";
+    case "external-file": {
+      const method = description.credential.methods.find((m) => m.kind === "external-file");
+      return `凭据来源：外部登录文件；续期运行 ${method?.kind === "external-file" ? method.renewHint : ""}`;
+    }
+  }
+}
+
+/** 提交凭据后的独立说明行（无则 undefined） */
+export function setupCredentialNotice(
+  description: ProviderSetupDescription,
+  credential: ProviderCredentialInput,
+): string | undefined {
+  const { backend } = description.credential;
+  if (credential.kind === "apiKey") return `密钥已交给 ${backend.label} 加密保存`;
+  if (credential.kind === "env" && !backend.available)
+    return "系统凭据后端不可用，使用环境变量方式";
+  return undefined;
+}
+
+/** 注入的 fetchModels 抛错约定：可携带数字 status（ProviderUpstreamError） */
+function upstreamStatus(e: unknown): number | undefined {
+  const s = (e as { status?: unknown } | null | undefined)?.status;
+  return typeof s === "number" ? s : undefined;
+}
+
+function resolveField(field: ProviderSetupField, value: string | undefined): string | undefined {
+  if (field.fixed !== undefined) return field.fixed;
+  const trimmed = value?.trim() ?? "";
+  if (trimmed === "") {
+    if (field.required) {
+      throw new ProviderSetupError(field.key, `${field.prompt.replace(/[：:]$/, "")}不能为空`);
+    }
+    return undefined;
+  }
+  return trimmed;
+}
+
+/**
+ * 一次提交表单：校验 → 获取模型列表 → 保存条目 → 刷新 models.dev。
+ * 获取模型列表失败不阻止保存，只产生 notices；校验失败抛带字段名的 ProviderSetupError。
+ * v0.3 起不再询问模型与"设为默认"——模型选择走 /model（ADR-0019 第 3 条）。
+ */
+export async function addProvider(
+  config: RuntimeConfig,
+  input: AddProviderInput,
+  options: AddProviderOptions = {},
+): Promise<AddProviderResult> {
+  const preset = findPreset(input.presetId);
+  const description = describeProviderSetup(config, preset.id);
+  const values: Record<ProviderSetupField["key"], string | undefined> = {
+    name: undefined,
+    baseURL: undefined,
+    sessionHeader: undefined,
+  };
+  const given: Record<ProviderSetupField["key"], string | undefined> = {
+    name: input.name,
+    baseURL: input.baseURL,
+    sessionHeader: input.sessionHeader,
+  };
+  for (const field of description.fields) values[field.key] = resolveField(field, given[field.key]);
+  const providerId = values.name ?? "";
+  const baseURL = values.baseURL;
+  const sessionHeader = values.sessionHeader ?? preset.sessionHeader;
+
+  // ── 凭据 ──
+  const backendAvailable = config.credentials.backend() !== "none";
+  const account = isAccountPreset(preset);
+  const credential = input.credential;
+  let key: string | undefined;
+  let apiKeyEnv: string | undefined;
+  let loginId: string | undefined;
+  let stagedAccount: { value: string; storage: "plaintext" | "memory" | undefined } | undefined;
+  switch (credential.kind) {
+    case "apiKey": {
+      if (account || preset.auth?.kind === "external-file") {
+        throw new ProviderSetupError("credential", `${preset.label} 不使用 API Key`);
+      }
+      if (!backendAvailable) {
+        throw new ProviderSetupError(
+          "credential",
+          "系统凭据后端不可用，无法保存密钥；请改用环境变量方式",
+        );
+      }
+      if (credential.key === "") throw new ProviderSetupError("credential", "API Key 不能为空");
+      key = credential.key;
+      break;
+    }
+    case "env": {
+      if (account || preset.auth?.kind === "external-file") {
+        throw new ProviderSetupError("credential", `${preset.label} 不使用环境变量`);
+      }
+      const name = credential.name.trim();
+      apiKeyEnv = name !== "" ? name : (preset.defaultKeyEnv ?? "NOCTURNE_API_KEY");
+      break;
+    }
+    case "external-file": {
+      if (preset.auth?.kind !== "external-file") {
+        throw new ProviderSetupError("credential", `${preset.label} 不使用外部登录文件`);
+      }
+      break;
+    }
+    case "login": {
+      if (preset.login === undefined) {
+        throw new ProviderSetupError("credential", `${preset.label} 不支持浏览器登录`);
+      }
+      const pending = findPendingLogin(config, credential.loginId);
+      if (pending === undefined) {
+        throw new ProviderSetupError("credential", "登录会话不存在或已结束，请重新登录");
+      }
+      if (
+        pending.presetId !== preset.id ||
+        pending.providerId !== providerId ||
+        pending.baseURL !== baseURL
+      ) {
+        throw new ProviderSetupError("credential", "登录与表单内容不一致，请重新登录");
+      }
+      if (!pending.settled) throw new ProviderSetupError("credential", "登录尚未完成");
+      loginId = credential.loginId;
+      if (pending.account) {
+        if (pending.staged !== undefined) {
+          stagedAccount = {
+            value: pending.staged.value,
+            storage: pending.staged.kind === "account" ? pending.staged.storage : undefined,
+          };
+        }
+      } else if (pending.staged?.kind === "secret") {
+        key = pending.staged.value;
+      } else if (!backendAvailable) {
+        // 无后端的 OpenRouter 登录：密钥已由客户端一次性展示，条目改读环境变量
+        apiKeyEnv = preset.defaultKeyEnv ?? "NOCTURNE_API_KEY";
+      }
+      break;
+    }
+  }
+
+  // 外部登录文件且没有模型列表时需要手填模型 ID：在任何写入前校验
+  const manualModelId = input.modelId?.trim() ?? "";
+
+  // 账号凭据先落盘：随后获取模型列表要经凭据存储取令牌
+  if (stagedAccount !== undefined) {
+    try {
+      if (config.credentials.backend() === "none") {
+        if (config.credentials.setAccount === undefined) throw new Error("storage");
+        await config.credentials.setAccount(providerId, stagedAccount.value, stagedAccount.storage);
+      } else {
+        await config.credentials.set(providerId, stagedAccount.value);
+      }
+    } catch {
+      throw new ProviderSetupError("credential", "无法保存登录凭据");
+    }
+  }
+
+  // ── 模型列表 ──
+  const env = options.env ?? ((name: string) => process.env[name]);
+  const effectiveKey = key ?? (apiKeyEnv !== undefined ? env(apiKeyEnv) : undefined);
+  const request: FetchModelsRequest & { apiKeyEnv?: string | undefined } = {
+    id: providerId,
+    auth: preset.auth,
+    headers: preset.headers,
+    type: preset.type,
+    ...(baseURL !== undefined ? { baseURL } : {}),
+  };
+  const notices: ProviderSetupNotice[] = [];
+  let upstreamModels: UpstreamModelEntry[] = [];
+  if (preset.fetchableModels) {
+    const fetchKey = effectiveKey !== undefined && effectiveKey !== "" ? effectiveKey : undefined;
+    try {
+      upstreamModels = options.fetchModels
+        ? await options.fetchModels(request, fetchKey, options.signal)
+        : await fetchProviderModels(config, request, fetchKey, options.signal);
+      notices.push({
+        code: "models_fetched",
+        kind: "step",
+        text: `已获取 ${upstreamModels.length} 个模型`,
+      });
+    } catch (e) {
+      options.signal?.throwIfAborted();
+      const status = upstreamStatus(e);
+      if (status === 401 || status === 403) {
+        notices.push({
+          code: "models_unauthorized",
+          kind: "step",
+          text: `! 获取模型列表失败（HTTP ${status}）：密钥可能无效`,
+        });
+        notices.push({
+          code: "models_unauthorized",
+          kind: "print",
+          text: "保存后可用 /provider key 更新密钥，再 /provider refresh 重试",
+        });
+      } else {
+        const why =
+          status !== undefined ? `HTTP ${status}` : e instanceof Error ? e.message : String(e);
+        notices.push({
+          code: "models_failed",
+          kind: "step",
+          text: `! 获取模型列表失败（${why}）：模型将手动填写`,
+        });
+        notices.push({
+          code: "models_failed",
+          kind: "print",
+          text: "保存后可用 /provider refresh 重试",
+        });
+      }
+    }
+  }
+  if (upstreamModels.length === 0 && preset.auth?.kind === "external-file") {
+    if (manualModelId === "") throw new ProviderSetupError("modelId", "模型 ID 不能为空");
+    upstreamModels = [{ id: manualModelId }];
+  }
+
+  // models 字段写入上游声明的能力/价格/限额/接口（provider-setup.md 第 7 节）
+  const models: Record<string, ModelOverrideShape> = {};
+  for (const m of upstreamModels) {
+    models[m.id] = {
+      ...(preset.auth?.kind === "openai-siwc" ? { protocol: "openai-responses" as const } : {}),
+      ...(m.displayName !== undefined ? { displayName: m.displayName } : {}),
+      ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
+      ...(m.maxOutputTokens !== undefined ? { maxOutputTokens: m.maxOutputTokens } : {}),
+      ...(m.pricing !== undefined ? { pricing: m.pricing } : {}),
+      ...(m.capabilities !== undefined ? { capabilities: m.capabilities } : {}),
+      // ADR-0026 第 2 节：上游 supported_endpoints 原文随条目保存
+      ...(m.endpoints !== undefined ? { endpoints: m.endpoints } : {}),
+    };
+  }
+
+  // thinking.format 是协议格式开关；能力和档位只按模型声明。
+  const thinking: ProviderEntryConfig["thinking"] = {
+    ...(preset.thinkingFormat !== undefined ? { format: preset.thinkingFormat } : {}),
+  };
+  const modelCount = upstreamModels.length;
+  await config.saveSetupProvider(
+    {
+      id: providerId,
+      ...(preset.auth !== undefined ? { auth: preset.auth } : {}),
+      ...(preset.headers !== undefined ? { headers: preset.headers } : {}),
+      ...(preset.modelHeader !== undefined ? { modelHeader: preset.modelHeader } : {}),
+      type: preset.type,
+      ...(baseURL !== undefined ? { baseURL } : {}),
+      ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+      ...(sessionHeader !== undefined ? { sessionHeader } : {}),
+      ...(preset.modelsDevProvider !== undefined
+        ? { modelsDevProvider: preset.modelsDevProvider }
+        : {}),
+      models,
+      ...(Object.keys(thinking).length > 0 ? { thinking } : {}),
+      ...(modelCount > 0
+        ? { source: "upstream" as const, fetchedAt: new Date().toISOString() }
+        : {}),
+    },
+    { ...(key !== undefined ? { key } : {}) },
+  );
+  if (loginId !== undefined) dropPendingLogin(config, loginId);
+
+  const modelsDevWarning = await config.refreshModelsDev();
+  if (modelsDevWarning !== undefined) {
+    notices.push({ code: "models_dev", kind: "print", text: `! ${modelsDevWarning}` });
+  }
+  return {
+    providerId,
+    modelCount,
+    notices,
+    message: `已保存 ${providerId}${modelCount > 0 ? `，${modelCount} 个模型` : ""}`,
+  };
+}
