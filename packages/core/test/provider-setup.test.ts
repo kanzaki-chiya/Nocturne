@@ -15,7 +15,12 @@ import {
   type ProviderEntryConfig,
   type UpstreamModelEntry,
 } from "../src/config/index.js";
-import { createRuntime, type RuntimeOptions } from "../src/index.js";
+import {
+  prepareProvider,
+  commitProvider,
+  createRuntime,
+  type RuntimeOptions,
+} from "../src/index.js";
 import { createPlatform, type PipeProcess, type Platform } from "../src/platform/index.js";
 import { FakeProvider, type FakeScript } from "../src/provider/index.js";
 
@@ -801,4 +806,24 @@ describe("shell 子进程剥离凭据变量（provider-setup.md 第 4 节）", (
       delete process.env.NCTR_TEST_KEY;
     }
   });
+});
+
+it("准备不改变 providers.json 或凭据，只有 commit 才写入", async () => {
+  const credentials = (await createCredentialStore(platform, home, { backend: "memory" })).store;
+  const rc = await loadConfig(platform, { nocturneHome: home, env: noEnv, credentials });
+  rc.refreshModelsDev = async () => undefined;
+  await writeJson(path.join(home, "providers.json"), { version: 1, providers: [ENTRY] });
+  const before = await fs.readFile(path.join(home, "providers.json"), "utf8");
+  const draft = await prepareProvider(
+    rc,
+    { presetId: "deepseek", credential: { kind: "apiKey", key: "synthetic-private" } },
+    { fetchModels: async () => [{ id: "m" }] },
+  );
+  expect(await fs.readFile(path.join(home, "providers.json"), "utf8")).toBe(before);
+  expect(credentials.has("deepseek")).toBe(false);
+  await commitProvider(rc, draft.draftId);
+  expect((await readJson(path.join(home, "providers.json"))) as object).toMatchObject({
+    providers: expect.arrayContaining([expect.objectContaining({ id: "deepseek" })]),
+  });
+  expect(credentials.has("deepseek")).toBe(true);
 });

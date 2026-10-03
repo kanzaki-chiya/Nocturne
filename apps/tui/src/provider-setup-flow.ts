@@ -1,15 +1,16 @@
 /**
  * 服务商配置向导的客户端外壳（provider-setup.md 第 6 节）：
- * 按 Core 的 describeProviderSetup 描述依次收集字段与凭据，一次交给 addProvider。
+ * 按 Core 的 describeProviderSetup 描述依次收集字段与凭据，交给 prepareProvider / commitProvider。
  * 步骤顺序、提问文案、结果行都来自 Core 的描述与返回值；这里不判断预设差异。
  * CLI 逐行向导与 TUI 服务商页共用本流程，各自实现 SetupPrompts 与 SetupFlowHooks。
  */
 import {
-  addProvider,
+  prepareProvider,
+  commitProvider,
+  discardProvider,
   credentialBackendLabel,
   describeProviderSetup,
   listProviderPresets,
-  ProviderSetupError,
   setupCredentialNotice,
   setupCredentialStep,
   setupFieldStep,
@@ -23,7 +24,7 @@ import {
 import { SetupAbort, type SetupPrompts } from "./provider-prompts.js";
 
 export interface SetupFlowHooks {
-  /** 浏览器登录：客户端显示授权并等待完成，返回交给 addProvider 的 loginId */
+  /** 浏览器登录：客户端显示授权并等待完成，返回交给 prepareProvider 的 loginId */
   login(target: DraftLoginTarget): Promise<string>;
   /** 保存前的确认页（TUI 弹层最后一步）；缺省直接提交 */
   confirm?: (() => Promise<void>) | undefined;
@@ -36,7 +37,7 @@ export interface SetupFlowHooks {
   onSubmitError?: ((error: Error) => boolean) | undefined;
   /** 提交期间（获取模型列表与保存）的开关，TUI 用来屏蔽取消按键 */
   submitting?: ((on: boolean) => void) | undefined;
-  /** 注入 addProvider 的选项（测试注入离线 fetchModels 与 env） */
+  /** 注入 prepareProvider 的选项（测试注入离线 fetchModels 与 env） */
   addOptions?: AddProviderOptions | undefined;
 }
 
@@ -115,59 +116,66 @@ export async function runProviderSetupFlow(
   const notice = setupCredentialNotice(description, finalCredential);
   if (notice !== undefined) prompts.print(notice);
 
-  // 提交：校验、获取模型列表、保存条目；失败按客户端的方式处理
+  let prepared;
   for (;;) {
-    await hooks.confirm?.();
     const signal = hooks.newSignal?.();
-    const submit = (modelId?: string) =>
-      addProvider(
+    hooks.submitting?.(true);
+    prompts.busy(description.fetchableModels ? "正在获取模型列表…" : "正在准备…");
+    try {
+      prepared = await prepareProvider(
         config,
         {
           presetId: description.presetId,
           name,
-          ...(baseURL !== undefined ? { baseURL } : {}),
-          ...(values.sessionHeader !== undefined ? { sessionHeader: values.sessionHeader } : {}),
+          baseURL,
+          sessionHeader: values.sessionHeader,
           credential: finalCredential,
-          ...(modelId !== undefined ? { modelId } : {}),
         },
         { ...hooks.addOptions, ...(signal !== undefined ? { signal } : {}) },
       );
-    prompts.busy(description.fetchableModels ? "正在获取模型列表…" : "正在保存…");
-    hooks.submitting?.(true);
-    try {
-      let result: AddProviderResult;
-      try {
-        result = await submit();
-      } catch (e) {
-        // 上游没给出模型列表且服务不提供：补问一个模型 ID 再提交
-        if (e instanceof ProviderSetupError && e.field === "modelId" && description.manualModel) {
-          hooks.submitting?.(false);
-          const id = (
-            await prompts.ask(description.manualModel.prompt, {
-              hint: description.manualModel.hint,
-            })
-          ).trim();
-          if (id === "") throw new SetupAbort();
-          hooks.submitting?.(true);
-          result = await submit(id);
-        } else {
-          throw e;
-        }
-      }
-      for (const n of result.notices) {
-        if (n.kind === "step") prompts.step(n.text);
-        else prompts.print(n.text);
-      }
-      prompts.print(result.message);
-      return result;
+      break;
     } catch (e) {
       if (isAbort(e)) throw e;
-      if (signal?.aborted === true) continue; // 获取模型列表期间取消：回到确认页
-      if (e instanceof Error && hooks.onSubmitError?.(e) === true) continue;
-      throw e;
+      if (signal?.aborted !== true && !(e instanceof Error && hooks.onSubmitError?.(e) === true))
+        throw e;
     } finally {
       hooks.submitting?.(false);
     }
+    // 取消请求后保留输入，由用户决定是否重新准备。
+    await hooks.confirm?.();
+  }
+  try {
+    for (const n of prepared.notices) {
+      if (n.kind === "step") prompts.step(n.text);
+      else prompts.print(n.text);
+    }
+    let manualModelId: string | undefined;
+    if (prepared.needsManualModel && description.manualModel) {
+      manualModelId = (
+        await prompts.ask(description.manualModel.prompt, { hint: description.manualModel.hint })
+      ).trim();
+      if (manualModelId === "") throw new SetupAbort();
+    }
+    for (;;) {
+      await hooks.confirm?.();
+      hooks.submitting?.(true);
+      prompts.busy("正在保存…");
+      try {
+        const result = await commitProvider(config, prepared.draftId, { manualModelId });
+        for (const n of result.notices) {
+          if (n.kind === "step") prompts.step(n.text);
+          else prompts.print(n.text);
+        }
+        prompts.print(result.message);
+        return result;
+      } catch (e) {
+        if (isAbort(e) || !(e instanceof Error && hooks.onSubmitError?.(e) === true)) throw e;
+      } finally {
+        hooks.submitting?.(false);
+      }
+    }
+  } finally {
+    discardProvider(config, prepared.draftId);
   }
 }
 

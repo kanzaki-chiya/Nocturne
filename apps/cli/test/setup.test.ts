@@ -4,6 +4,8 @@
  * 非 TTY 路径用 PassThrough 供行，stdout 用数组收集。
  */
 import { PassThrough, Writable } from "node:stream";
+import { runProviderSetupFlow } from "@nocturne/tui/provider-setup-flow";
+import type { RuntimeConfig } from "@nocturne/core";
 import { describe, expect, it } from "vitest";
 
 import { createSetupPrompts } from "../src/setup.js";
@@ -52,3 +54,50 @@ describe("chooseMulti 编号勾选解析（ADR-0018）", () => {
     await expect(answer).resolves.toEqual([]);
   });
 });
+
+it.each(["deepseek", "grok-cli"])(
+  "逐行 %s：提示/模型 ID 先于确认，确认前不保存",
+  async (presetId) => {
+    const stdin = new PassThrough();
+    const { io, out } = ioWith(stdin);
+    const saved: unknown[] = [];
+    const config = {
+      credentials: { backend: () => "none" },
+      saveSetupProvider: async (entry: unknown) => {
+        saved.push(entry);
+      },
+      refreshModelsDev: async () => undefined,
+    } as unknown as RuntimeConfig;
+    const flow = runProviderSetupFlow(
+      io,
+      config,
+      {
+        login: async () => {
+          throw new Error("unused");
+        },
+        confirm: async () => {
+          expect(saved).toHaveLength(0);
+          expect(out.join("")).toContain(
+            presetId === "deepseek" ? "保存后可用 /provider refresh 重试" : "模型 ID",
+          );
+          io.print("保存配置");
+        },
+        addOptions: {
+          fetchModels: async () => {
+            throw Object.assign(new Error("missing"), { status: 404 });
+          },
+          env: () => undefined,
+        },
+      },
+      { presetId },
+    );
+    await waitFor(out, presetId === "deepseek" ? "凭据环境变量名" : "模型 ID", 1);
+    stdin.write(presetId === "deepseek" ? "TEST_ENV\n" : "grok-code\n");
+    await flow;
+    const text = out.join("");
+    expect(text.indexOf(presetId === "deepseek" ? "保存后可用" : "模型 ID")).toBeLessThan(
+      text.indexOf("保存配置"),
+    );
+    expect(saved).toHaveLength(1);
+  },
+);

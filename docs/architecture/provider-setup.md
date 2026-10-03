@@ -26,12 +26,12 @@ ChatGPT、Grok 与 OpenRouter 可以不手填 API key（[ADR-0042](../decisions/
 （仅自定义预设）会话标识请求头（可选，回车跳过）：x-opencode-session
 API Key（掩码输入；直接回车表示改用环境变量）：********
 密钥已交给 Windows DPAPI 加密保存
-✓ 已获取 12 个模型                                       ← 保存时只发 GET /models；失败显示原因并继续
+✓ 已获取 12 个模型                                       ← 确认前只发 GET /models；失败显示原因并继续
 已保存 command，12 个模型                                ← 底部结果行，回到列表
 ```
 
 - 内置预设不再问名称与地址（直接用预设默认值）。ChatGPT、Grok 与 Grok CLI 跳过密钥输入，改走登录或外部文件（第 5 节）。两个自定义预设问名称（必填）、服务地址（openai 兼容必填，anthropic 兼容可留空用官方端点）与**会话标识请求头**（ADR-0031 §3，可选）：填写请求头名（如 `x-opencode-session`）则写入条目 `sessionHeader`，之后每个模型请求携带该头（值为根会话 ID，见 [providers.md](providers.md) 第 4 节）；回车留空不写该字段。
-- **向导不再选择模型**（v0.3）：模型列表仍经 `GET /models` 获取并把上游声明的上下文窗口、最大输出长度与能力标记写回条目 `models`（第 7 节），但不再出现"编号选择模型"与"设为默认模型"两步；默认模型在 `/model` 页设置。保存配置确认后才获取，获取结果替换进行中提示：成功显示"已获取 N 个模型"；失败显示原因并继续后续步骤——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，404/网络错误等其余失败提示"模型将手动填写"；保存后可用服务商页「刷新模型列表」或 `/provider refresh <名>` 重试。
+- **向导不再选择模型**（v0.3）：模型列表仍经 `GET /models` 获取并把上游声明的上下文窗口、最大输出长度与能力标记写回条目 `models`（第 7 节），但不再出现"编号选择模型"与"设为默认模型"两步；默认模型在 `/model` 页设置。保存配置确认前获取并展示结果，需要手填模型时先填写模型 ID，获取结果替换进行中提示：成功显示"已获取 N 个模型"；失败显示原因并继续后续步骤——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，404/网络错误等其余失败提示"模型将手动填写"；保存后可用服务商页「刷新模型列表」或 `/provider refresh <名>` 重试。
 - 添加服务商和刷新模型列表时顺带更新 models.dev 缓存；失败沿用本地缓存或内置快照，并在结果中提示一行，不影响上游列表的保存。向导不再询问服务商级思考档位。
 - **TUI 表单形态**（ADR-0019 第 2 条）：全屏页面内不出现需要打字回答的是非题；已完成步骤折叠为一行摘要（如"名称 command • 地址 api.xxx.com • 密钥已保存"），当前步骤用强调色提问、灰色小字给说明（密钥获取入口、回车改用环境变量等）。
 - **向导不发送模型请求**：连接测试会消耗 token 且重复了首次真实请求才能发现的问题，因此不做。密钥、地址与模型 id 的有效性由会话中的首次真实请求检验；请求失败时按 `ProviderError.kind` 给出可操作提示（`auth` → 密钥可能无效，附 `/provider key <name>`；`network`/`timeout` → 地址不通，附 `nctrn setup`；`invalid_request`/404 → 模型 id 或地址路径有误），实现位置为 `agent/turn.ts` 的 `providerFailureHint`（turn.completed.error.message，CLI 与 TUI 共用）。
@@ -192,7 +192,7 @@ API key **不以明文落盘**。向导把密钥交给操作系统自带的凭�
 
 ## 6. Core 接口
 
-服务商配置的判断逻辑（预设、哪些字段要问、凭据方式、无后端时怎么办、模型列表失败怎么提示、文件写入、登录会话）全部在 Core，以**数据接口**暴露（[ADR-0044](../decisions/ADR-0044-rpc-stdio.md) 第 6 节）：`describeProviderSetup` 描述某个预设需要填什么，`addProvider` 一次提交整张表单。Core 不回调客户端、不持有任何界面概念；CLI 逐行向导、TUI 服务商页与 RPC 客户端（桌面端原生表单）都是这两个接口的外壳。登录接口是 `startProviderLogin` / `startDraftProviderLogin` / `logoutProvider` / `LoginSession`（[provider-api.md](../protocols/provider-api.md) 第 1 节）。`fetchModels` 与模型请求都经同一 `AuthResolver` 取令牌。接口不发送模型对话请求。v0.3 起配置不再选择模型：`addProvider` 只把服务商配上，结果只含 `providerId` 与已登记模型数。
+服务商配置的判断逻辑（预设、哪些字段要问、凭据方式、无后端时怎么办、模型列表失败怎么提示、文件写入、登录会话）全部在 Core，以**数据接口**暴露（[ADR-0044](../decisions/ADR-0044-rpc-stdio.md) 第 6 节）：`describeProviderSetup` 描述某个预设需要填什么，`prepareProvider` 获取模型列表并暂存表单，`commitProvider` 在确认后保存。Core 不回调客户端、不持有任何界面概念；CLI 逐行向导、TUI 服务商页与 RPC 客户端（桌面端原生表单）都是这些接口的外壳。登录接口是 `startProviderLogin` / `startDraftProviderLogin` / `logoutProvider` / `LoginSession`（[provider-api.md](../protocols/provider-api.md) 第 1 节）。`fetchModels` 与模型请求都经同一 `AuthResolver` 取令牌。接口不发送模型对话请求。v0.3 起配置不再选择模型：`addProvider` 只把服务商配上，结果只含 `providerId` 与已登记模型数。
 
 ```ts
 // @nocturne/core 公开导出
@@ -215,21 +215,27 @@ describeProviderSetup(config: RuntimeConfig, presetId: string): ProviderSetupDes
   //     choose 存在时先选一项（OpenRouter：浏览器登录 / 粘贴密钥）；
   //     accountStorage 仅账号型登录且无系统后端时给出（风险说明、选项、重试提示）；
   //   fetchableModels：提交时是否会获取模型列表；manualModel：上游无列表时手填模型 ID 的提问
-addProvider(config, input: AddProviderInput, options?: AddProviderOptions): Promise<AddProviderResult>
+prepareProvider(config, input: AddProviderInput, options?: AddProviderOptions): Promise<PrepareProviderResult>
   // input = { presetId, name?, baseURL?, sessionHeader?, credential, modelId? }
-  //   credential = { kind: "apiKey", key } | { kind: "env", name } | { kind: "login", loginId } | { kind: "external-file" }
-  // 一次完成：校验 → 经凭据存储写入 → GET /models（可由 options.signal 取消）→ 保存条目 → 刷新 models.dev。
-  //   校验失败抛 ProviderSetupError(field)，field 指向出错的输入（preset/name/baseURL/sessionHeader/credential/modelId）；
-  //   取消抛 AbortError，条目与密钥均不写入（登录凭据在草稿阶段只暂存在内存，账号凭据已先写入存储的情形除外）。
-  //   AddProviderResult = { providerId, modelCount, notices, message }：notices 是步骤摘要行（"已获取 N 个模型"、
-  //   "! 获取模型列表失败（HTTP 401）：密钥可能无效"）与说明行（"保存后可用 /provider key 更新密钥，再 /provider refresh 重试"、
-  //   models.dev 警告），message 是结果行"已保存 X，N 个模型"。文案都由 Core 给出。
-  //   日志与诊断只记方法名，永不记 input（含密钥明文）。
+  // credential = { kind: "apiKey", key } | { kind: "env", name } | { kind: "login", loginId } | { kind: "external-file" }
+  // 校验 → GET /models（options.signal 可取消）；不写文件、凭据，也不消费 loginId。
+  // 账号令牌解析和续期使用独立的内存存储，不创建锁文件。
+  // 返回 { draftId, modelCount, notices, needsManualModel, steps }；draftId 不透明，绑定 config，15 分钟过期自动清理。
+  // notices 包含模型列表成功/失败的步骤与说明；steps 为已完成步骤摘要，均不包含密钥。
+commitProvider(config, draftId, { manualModelId? }): Promise<AddProviderResult>
+  // 校验模型 ID → 写入凭据和条目 → 消费 loginId → 刷新 models.dev。
+  // needsManualModel 时缺模型 ID 抛 ProviderSetupError("modelId")；草稿不存在、过期或重复提交抛 draftId 字段错误。
+  // 返回 { providerId, modelCount, notices, message }；此处 notices 只有保存阶段的 models.dev 警告。
+  // 保存成功后草稿失效；保存失败可以重试。日志/诊断不记 input、令牌或草稿内容。
+discardProvider(config, draftId): void // Esc / 放弃时释放草稿；不消费 loginId
+addProvider(config, input, options?): Promise<AddProviderResult>
+  // 无中间确认的兼容入口：prepare + commit（input.modelId 作为 manualModelId），合并两阶段 notices；失败也释放草稿。
+  // 字段校验抛 ProviderSetupError(field)，取消抛 AbortError；准备阶段什么都没有写入。
 setupFieldStep / setupCredentialStep / setupCredentialNotice(description, ...)
   // 已完成步骤的摘要行（"名称 x"、"密钥来源：环境变量 X"）与无后端时的环境变量提示，供各客户端按同一文案显示
 startDraftProviderLogin(config, target: { presetId, name, baseURL }, options): Promise<LoginSession>
   // 条目尚未保存时的浏览器登录：会话带 loginId；凭据暂存在 Core（provider-login/pending.ts，随 RuntimeConfig 登记，
-  //   不落盘），addProvider 收到 { kind: "login", loginId } 才校验并提交——账号凭据先写入存储再获取模型列表，
+  //   不落盘），prepareProvider 收到 { kind: "login", loginId } 校验并使用内存凭据获取模型列表，commitProvider 才落盘并消费登录；
   //   OpenRouter 的密钥作为 key 交给 saveSetupProvider，无后端时条目改读环境变量。预设、名称、地址必须与草稿一致
   accountStorage: "plaintext" | "memory"（ProviderLoginOptions）
   // 无系统凭据后端时的账号凭据保存位置，由客户端经 accountStorage 描述让用户显式选择后传入；缺省不落盘，
@@ -267,9 +273,9 @@ runtime.defaultModel(): ModelRef | undefined             // 分层合并后的�
 runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最近使用"范围的数据源
 ```
 
-**客户端外壳**：行式 CLI 与 TUI 服务商页的步骤顺序必须一致，所以不各写一遍，而是共用 `apps/tui` 的 `provider-setup-flow`（`runProviderSetupFlow` / `runProviderKeyFlow`）与 `provider-prompts`（`SetupPrompts`：`ask` / `askSecret` / `chooseMulti` / `busy` / `step` / `print`，`SetupAbort`）——这是客户端自己的流程，不属于 Core：它按 `describeProviderSetup` 的描述逐项提问、把答案交给 `addProvider`，不判断任何预设差异。CLI 实现 `SetupPrompts` 为逐行输入（`apps/cli/src/setup.ts` 的 `createSetupPrompts`），TUI 实现为服务商页弹层（`wizard-io.ts` 的 `useProviderWizard`）。RPC 客户端不需要这层，直接按描述渲染表单后调用 `addProvider`。`/provider model` 的逐字段问答是纯客户端流程（`apps/cli` 的 `runProviderModelWizard`），收集完一次性 `saveModelSettings`（ADR-0024 第 4 节、ADR-0026 第 7 节）：逐字段显示"当前值（来源）"，回车保留、- 清除；推理用 y/n/-，为否时不问档位；协议输入 chat/messages/responses/-。
+**客户端外壳**：行式 CLI 与 TUI 服务商页的步骤顺序必须一致，所以不各写一遍，而是共用 `apps/tui` 的 `provider-setup-flow`（`runProviderSetupFlow` / `runProviderKeyFlow`）与 `provider-prompts`（`SetupPrompts`：`ask` / `askSecret` / `chooseMulti` / `busy` / `step` / `print`，`SetupAbort`）——这是客户端自己的流程，不属于 Core：它按 `describeProviderSetup` 的描述逐项提问、把答案交给 `prepareProvider`，显示列表结果与手填模型提问后再确认并 `commitProvider`，不判断任何预设差异。CLI 实现 `SetupPrompts` 为逐行输入（`apps/cli/src/setup.ts` 的 `createSetupPrompts`），TUI 实现为服务商页弹层（`wizard-io.ts` 的 `useProviderWizard`）。RPC 客户端不需要这层，直接按描述渲染表单后调用 prepare / commit。`/provider model` 的逐字段问答是纯客户端流程（`apps/cli` 的 `runProviderModelWizard`），收集完一次性 `saveModelSettings`（ADR-0024 第 4 节、ADR-0026 第 7 节）：逐字段显示"当前值（来源）"，回车保留、- 清除；推理用 y/n/-，为否时不问档位；协议输入 chat/messages/responses/-。
 
-**提交流程与取消**：客户端先收完字段与凭据，再显示「保存配置」确认页（TUI；行式 CLI 直接提交），然后调用 `addProvider`。获取模型列表期间 Esc 取消 `options.signal`，回到确认页，什么都没有写入；已进入保存则放行到完成。外部登录文件的服务（Grok CLI）在上游没有列表时 `addProvider` 抛 `ProviderSetupError("modelId")`，客户端按 `manualModel` 补问模型 ID 后重新提交。
+**提交流程与取消**：收集字段与凭据 → `prepareProvider`（「正在获取模型列表…」）→ 显示 notices → `needsManualModel` 时问「模型 ID」→「保存配置」确认（TUI；行式 CLI 直接提交）→ `commitProvider` → 结果行。列表失败提示必须在确认前可见，外部登录文件的手填模型步骤同样在确认前。获取模型列表期间 Esc 取消信号并保留输入，回到确认页决定是否重新准备；取消确认或模型输入时 `discardProvider` 释放草稿。保存阶段放行到完成。
 
 `runtime.updateProviders`：用新的基础层配置重建运行时级 Provider 注册表；每个已打开会话在下一次空闲边界重建自己的会话级注册表（基础层 + 该会话的可信项目层）。`listModels` 展示当前工作区已加载的合并结果，包含可信项目层，供 `/model` 和 `/settings` 按生效模型能力列出档位。当前会话正在使用的服务商不会被移除（客户端在删除前检查，Core 在重建时对仍被引用的服务商保留原实例并发出 `runtime.warning`）。它不产生持久事件；随后的 `setModel` 照常写 `session.config_changed`。
 

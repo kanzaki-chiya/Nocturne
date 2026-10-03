@@ -281,8 +281,6 @@ describe("/provider 向导对话框", () => {
     const ui = screen(config, { kind: "add", presetId: "deepseek" }, { realFetch: true });
     await settle(() => ui.lastFrame()?.includes("API Key") === true);
     await answer(ui, "offline-key");
-    await settle(() => ui.lastFrame()?.includes("保存配置") === true);
-    ui.stdin.write("\r");
     await settle(
       () => ui.lastFrame()?.includes("正在获取模型列表") === true && signal !== undefined,
     );
@@ -299,6 +297,8 @@ describe("/provider 向导对话框", () => {
       async () => new Response(JSON.stringify({ data: [{ id: "fresh" }] }), { status: 200 }),
     );
     ui.stdin.write("\r"); // 回到确认页后重新保存，保留的密钥再次交 Core。
+    await settle(() => ui.lastFrame()?.includes("保存配置") === true);
+    ui.stdin.write("\r");
     await settle(() => ui.onDone.mock.calls.length === 1);
     expect(methods.saveSetupProvider).toHaveBeenCalledTimes(1);
     expect(methods.refreshModelsDev).toHaveBeenCalledTimes(1);
@@ -396,4 +396,46 @@ describe("/provider 向导对话框", () => {
     await settle(() => submit.mock.calls.length === 1);
     expect(submit).toHaveBeenCalledWith("legacy-key");
   });
+});
+
+it("失败提示先于保存配置，取消不会保存", async () => {
+  const { config, saved } = makeConfig("none");
+  const ui = screen(
+    config,
+    { kind: "add", presetId: "deepseek" },
+    {
+      deps: {
+        fetchModels: async () => {
+          throw Object.assign(new Error("missing"), { status: 404 });
+        },
+      },
+    },
+  );
+  await settle(() => ui.lastFrame()?.includes("凭据环境变量名") === true);
+  await answer(ui, "TEST_ENV");
+  await settle(() => ui.lastFrame()?.includes("保存配置") === true);
+  const frame = ui.lastFrame() ?? "";
+  expect(frame.indexOf("保存后可用 /provider refresh 重试")).toBeLessThan(
+    frame.indexOf("保存配置"),
+  );
+  expect(saved).toHaveLength(0);
+  ui.stdin.write("\x1b");
+  await settle(() => ui.onDone.mock.calls.length === 1);
+  expect(saved).toHaveLength(0);
+});
+it("Grok CLI 模型 ID 先于保存配置", async () => {
+  const { config, saved } = makeConfig("none");
+  const ui = screen(
+    config,
+    { kind: "add", presetId: "grok-cli" },
+    { deps: { fetchModels: async () => [] } },
+  );
+  await settle(() => ui.lastFrame()?.includes("模型 ID") === true);
+  expect(ui.lastFrame()).not.toContain("保存配置");
+  expect(saved).toHaveLength(0);
+  await answer(ui, "grok-code");
+  await settle(() => ui.lastFrame()?.includes("保存配置") === true);
+  ui.stdin.write("\r");
+  await settle(() => saved.length === 1);
+  expect(saved[0]?.entry.models).toHaveProperty("grok-code");
 });

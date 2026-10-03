@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   addProvider,
+  prepareProvider,
+  commitProvider,
+  discardProvider,
   describeAccountStorage,
   describeProviderSetup,
   ProviderLoginError,
@@ -81,6 +84,7 @@ const jsonRes = (data: unknown, status = 200) =>
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("describeProviderSetup", () => {
@@ -391,6 +395,7 @@ describe("addProvider", () => {
         "保存后可用 /provider refresh 重试",
       );
       vi.unstubAllGlobals();
+      vi.useRealTimers();
     }
     expect(saved).toHaveLength(2);
   });
@@ -616,5 +621,141 @@ describe("草稿登录（loginId）", () => {
         startDraftProviderLogin(config, { presetId, name: presetId }),
       ).rejects.toMatchObject({ code: "accountStorage" });
     }
+  });
+});
+
+describe("prepare / commit 草稿", () => {
+  const input = { presetId: "deepseek", credential: { kind: "env" as const, name: "TEST_KEY" } };
+  it.each([401, 403, 404])("HTTP %i 的提示在准备阶段返回，确认前没有保存", async (status) => {
+    const { config, saved, stored } = makeConfig("memory");
+    const draft = await prepareProvider(config, input, {
+      fetchModels: async () => {
+        throw Object.assign(new Error("upstream"), { status });
+      },
+    });
+    expect(draft.notices[0]?.text).toContain(`HTTP ${status}`);
+    expect(draft.notices.some((n) => n.text.includes("保存后可用"))).toBe(true);
+    expect(saved).toHaveLength(0);
+    expect(stored.size).toBe(0);
+    expect(config.refreshModelsDev).not.toHaveBeenCalled();
+    await commitProvider(config, draft.draftId);
+    expect(saved).toHaveLength(1);
+    expect(config.refreshModelsDev).toHaveBeenCalledOnce();
+  });
+  it("外部登录文件先要求模型 ID，缺少时可重试同一草稿", async () => {
+    const { config, saved } = makeConfig("memory");
+    const draft = await prepareProvider(config, {
+      presetId: "grok-cli",
+      credential: { kind: "external-file" },
+    });
+    expect(draft.needsManualModel).toBe(true);
+    await expect(commitProvider(config, draft.draftId)).rejects.toMatchObject({ field: "modelId" });
+    expect(saved).toHaveLength(0);
+    await commitProvider(config, draft.draftId, { manualModelId: "grok-code" });
+    expect(saved[0]?.entry.models).toHaveProperty("grok-code");
+  });
+  it("丢弃和过期的草稿不可保存，也不跨配置共享", async () => {
+    vi.useFakeTimers();
+    const { config, saved } = makeConfig("memory");
+    const opts = { fetchModels: async () => [] };
+    const draft = await prepareProvider(config, input, opts);
+    await expect(commitProvider(makeConfig("memory").config, draft.draftId)).rejects.toMatchObject({
+      field: "draftId",
+    });
+    discardProvider(config, draft.draftId);
+    await expect(commitProvider(config, draft.draftId)).rejects.toMatchObject({ field: "draftId" });
+    const expired = await prepareProvider(config, input, opts);
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    await expect(commitProvider(config, expired.draftId)).rejects.toMatchObject({
+      field: "draftId",
+    });
+    expect(saved).toHaveLength(0);
+  });
+  it("登录只有保存成功才被消费；丢弃保留登录", async () => {
+    const { config, saved } = makeConfig("memory");
+    const loginId = registerPendingLogin(config, {
+      presetId: "openrouter",
+      providerId: "openrouter",
+      baseURL: "https://openrouter.ai/api/v1",
+      account: false,
+      settled: true,
+      staged: { kind: "secret", value: "synthetic-key" },
+    });
+    const form = { presetId: "openrouter", credential: { kind: "login" as const, loginId } };
+    const draft = await prepareProvider(config, form, { fetchModels: async () => [] });
+    expect(findPendingLogin(config, loginId)).toBeDefined();
+    expect(saved).toHaveLength(0);
+    discardProvider(config, draft.draftId);
+    expect(findPendingLogin(config, loginId)).toBeDefined();
+    const next = await prepareProvider(config, form, { fetchModels: async () => [] });
+    await commitProvider(config, next.draftId);
+    expect(findPendingLogin(config, loginId)).toBeUndefined();
+    await expect(commitProvider(config, next.draftId)).rejects.toMatchObject({ field: "draftId" });
+  });
+  it("账号续期和模型列表只使用草稿内存，commit 保存续期后的令牌", async () => {
+    const { config, stored, saved } = makeConfig("none");
+    const loginId = registerPendingLogin(config, {
+      presetId: "chatgpt",
+      providerId: "chatgpt",
+      baseURL: "https://api.openai.com/v1",
+      account: true,
+      settled: true,
+      staged: {
+        kind: "account",
+        storage: "plaintext",
+        value: JSON.stringify({
+          version: 1,
+          clientId: "test",
+          subject: "test",
+          idToken: "synthetic-id",
+          accessToken: "synthetic-old",
+          refreshToken: "synthetic-refresh",
+          expiresAt: 0,
+          scopes: ["chatgpt.tokens.use.direct"],
+        }),
+      },
+    });
+    const calls = stubFetch(async (url) => {
+      expect(stored.size).toBe(0);
+      expect(saved).toHaveLength(0);
+      return url.includes("oauth/token")
+        ? new Response(
+            JSON.stringify({
+              access_token: "synthetic-new",
+              refresh_token: "synthetic-next",
+              expires_in: 3600,
+            }),
+            { status: 200 },
+          )
+        : new Response(JSON.stringify({ models: [{ slug: "gpt", visibility: "list" }] }), {
+            status: 200,
+          });
+    });
+    const draft = await prepareProvider(config, {
+      presetId: "chatgpt",
+      credential: { kind: "login", loginId },
+    });
+    expect(draft.notices).toEqual([
+      { code: "models_fetched", kind: "step", text: "已获取 1 个模型" },
+    ]);
+    expect(calls.map((c) => c.method)).toEqual(["POST", "GET"]);
+    expect(stored.size).toBe(0);
+    expect(findPendingLogin(config, loginId)).toBeDefined();
+    await commitProvider(config, draft.draftId);
+    expect(stored.get("chatgpt")?.value.includes("synthetic-new")).toBe(true);
+  });
+  it("上游错误不泄露草稿密钥", async () => {
+    const { config } = makeConfig("memory");
+    const draft = await prepareProvider(
+      config,
+      { presetId: "deepseek", credential: { kind: "apiKey", key: "synthetic-private" } },
+      {
+        fetchModels: async () => {
+          throw new Error("failed synthetic-private");
+        },
+      },
+    );
+    expect(JSON.stringify(draft)).not.toContain("synthetic-private");
+    discardProvider(config, draft.draftId);
   });
 });

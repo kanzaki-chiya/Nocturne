@@ -2227,6 +2227,10 @@ export { fetchProviderModels } from "./provider-oauth.js";
 // 服务商配置数据接口（ADR-0044 第 6 节，provider-setup.md 第 6 节）
 export {
   addProvider,
+  prepareProvider,
+  commitProvider,
+  discardProvider,
+  type PrepareProviderResult,
   credentialBackendLabel,
   describeAccountStorage,
   describeProviderSetup,

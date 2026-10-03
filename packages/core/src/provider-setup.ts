@@ -1,11 +1,12 @@
 /**
  * 服务商配置的数据接口（ADR-0044 第 6 节，provider-setup.md 第 6 节）：
- * `describeProviderSetup` 描述某个预设需要填写什么，`addProvider` 一次提交表单。
+ * `describeProviderSetup` 描述某个预设需要填写什么，`prepareProvider` 准备草稿，`commitProvider` 确认后保存。
  * 预设之间的差异（哪些问名称与地址、哪些走登录、无凭据后端怎么办、模型列表失败怎么提示）
  * 全部在这里判断；界面只负责按描述收集输入并显示结果，不回调、不自己判断。
  * 不发送模型请求（不消耗 token）：密钥与地址的有效性由会话中的首次真实请求检验。
  * 日志与诊断里永远不要出现 input（密钥明文）。
  */
+import { randomUUID } from "node:crypto";
 import type {
   CredentialBackend,
   ModelOverrideShape,
@@ -23,7 +24,7 @@ import { dropPendingLogin, findPendingLogin } from "./provider-login/pending.js"
 
 /** 表单字段名；校验失败的错误带它，客户端据此标到对应输入框 */
 export type ProviderSetupFieldName =
-  "preset" | "name" | "baseURL" | "sessionHeader" | "credential" | "modelId";
+  "preset" | "name" | "baseURL" | "sessionHeader" | "credential" | "modelId" | "draftId";
 
 export class ProviderSetupError extends Error {
   constructor(
@@ -103,7 +104,7 @@ export interface ProviderSetupDescription {
   type: "openai-compatible" | "anthropic";
   fields: ProviderSetupField[];
   credential: ProviderCredentialSetup;
-  /** 提交时会不会向上游获取模型列表（决定界面显示"正在获取模型列表…"还是"正在保存…"） */
+  /** 准备时会不会向上游获取模型列表（决定界面显示获取列表还是准备） */
   fetchableModels: boolean;
   /** 上游没给出模型列表时（如外部登录文件的服务）需要手填模型 ID */
   manualModel?: { prompt: string; hint: string } | undefined;
@@ -154,6 +155,54 @@ export interface AddProviderOptions {
   /** 读取环境变量（决定 env 方式下能否带密钥获取模型列表）；缺省读进程环境 */
   env?: ((name: string) => string | undefined) | undefined;
   signal?: AbortSignal | undefined;
+}
+
+export interface PrepareProviderResult {
+  draftId: string;
+  modelCount: number;
+  notices: ProviderSetupNotice[];
+  needsManualModel: boolean;
+  steps: string[];
+}
+
+interface ProviderDraft {
+  commit(manualModelId?: string): Promise<AddProviderResult>;
+  timer: ReturnType<typeof setTimeout>;
+  expiresAt: number;
+  committing: boolean;
+}
+
+const drafts = new WeakMap<RuntimeConfig, Map<string, ProviderDraft>>();
+const DRAFT_TTL = 15 * 60_000;
+
+/** 放弃或过期只释放内存；不会消费登录或写入凭据。 */
+export function discardProvider(config: RuntimeConfig, draftId: string): void {
+  const table = drafts.get(config);
+  const draft = table?.get(draftId);
+  if (draft === undefined) return;
+  clearTimeout(draft.timer);
+  table?.delete(draftId);
+}
+
+export async function commitProvider(
+  config: RuntimeConfig,
+  draftId: string,
+  options: { manualModelId?: string | undefined } = {},
+): Promise<AddProviderResult> {
+  const draft = drafts.get(config)?.get(draftId);
+  if (draft === undefined || draft.expiresAt <= Date.now()) {
+    discardProvider(config, draftId);
+    throw new ProviderSetupError("draftId", "配置草稿不存在或已过期，请重新开始");
+  }
+  if (draft.committing) throw new ProviderSetupError("draftId", "配置草稿正在保存");
+  draft.committing = true;
+  try {
+    const result = await draft.commit(options.manualModelId);
+    discardProvider(config, draftId);
+    return result;
+  } finally {
+    draft.committing = false;
+  }
 }
 
 const ACCOUNT_STORAGE_RISK =
@@ -391,15 +440,15 @@ function resolveField(field: ProviderSetupField, value: string | undefined): str
 }
 
 /**
- * 一次提交表单：校验 → 获取模型列表 → 保存条目 → 刷新 models.dev。
+ * 准备表单：校验与获取模型列表；凭据和条目只在 commitProvider 写入。
  * 获取模型列表失败不阻止保存，只产生 notices；校验失败抛带字段名的 ProviderSetupError。
  * v0.3 起不再询问模型与"设为默认"——模型选择走 /model（ADR-0019 第 3 条）。
  */
-export async function addProvider(
+export async function prepareProvider(
   config: RuntimeConfig,
   input: AddProviderInput,
   options: AddProviderOptions = {},
-): Promise<AddProviderResult> {
+): Promise<PrepareProviderResult> {
   const preset = findPreset(input.presetId);
   const description = describeProviderSetup(config, preset.id);
   const values: Record<ProviderSetupField["key"], string | undefined> = {
@@ -488,22 +537,30 @@ export async function addProvider(
     }
   }
 
-  // 外部登录文件且没有模型列表时需要手填模型 ID：在任何写入前校验
-  const manualModelId = input.modelId?.trim() ?? "";
-
-  // 账号凭据先落盘：随后获取模型列表要经凭据存储取令牌
-  if (stagedAccount !== undefined) {
-    try {
-      if (config.credentials.backend() === "none") {
-        if (config.credentials.setAccount === undefined) throw new Error("storage");
-        await config.credentials.setAccount(providerId, stagedAccount.value, stagedAccount.storage);
-      } else {
-        await config.credentials.set(providerId, stagedAccount.value);
-      }
-    } catch {
-      throw new ProviderSetupError("credential", "无法保存登录凭据");
-    }
-  }
+  // 账号令牌解析与刷新仅使用草稿内存；不写凭据、锁文件或官方 CLI 文件。
+  const fetchConfig = !account
+    ? config
+    : {
+        ...config,
+        credentials: {
+          backend: () => config.credentials.backend(),
+          has: () => stagedAccount !== undefined,
+          get: () => Promise.resolve(stagedAccount?.value),
+          set: (_id: string, value: string) => {
+            if (stagedAccount !== undefined) stagedAccount.value = value;
+            return Promise.resolve();
+          },
+          setAccount: (_id: string, value: string) => {
+            if (stagedAccount !== undefined) stagedAccount.value = value;
+            return Promise.resolve();
+          },
+          delete: () => {
+            stagedAccount = undefined;
+            return Promise.resolve();
+          },
+          storage: () => "memory" as const,
+        },
+      };
 
   // ── 模型列表 ──
   const env = options.env ?? ((name: string) => process.env[name]);
@@ -522,7 +579,7 @@ export async function addProvider(
     try {
       upstreamModels = options.fetchModels
         ? await options.fetchModels(request, fetchKey, options.signal)
-        : await fetchProviderModels(config, request, fetchKey, options.signal);
+        : await fetchProviderModels(fetchConfig, request, fetchKey, options.signal);
       notices.push({
         code: "models_fetched",
         kind: "step",
@@ -543,8 +600,12 @@ export async function addProvider(
           text: "保存后可用 /provider key 更新密钥，再 /provider refresh 重试",
         });
       } else {
-        const why =
+        const reason =
           status !== undefined ? `HTTP ${status}` : e instanceof Error ? e.message : String(e);
+        const secrets = [effectiveKey, stagedAccount?.value].filter(
+          (value): value is string => !!value,
+        );
+        const why = secrets.reduce((text, secret) => text.split(secret).join("[redacted]"), reason);
         notices.push({
           code: "models_failed",
           kind: "step",
@@ -558,62 +619,124 @@ export async function addProvider(
       }
     }
   }
-  if (upstreamModels.length === 0 && preset.auth?.kind === "external-file") {
-    if (manualModelId === "") throw new ProviderSetupError("modelId", "模型 ID 不能为空");
-    upstreamModels = [{ id: manualModelId }];
+  options.signal?.throwIfAborted();
+  const needsManualModel = upstreamModels.length === 0 && preset.auth?.kind === "external-file";
+  const draftId = randomUUID();
+  let table = drafts.get(config);
+  if (table === undefined) {
+    table = new Map();
+    drafts.set(config, table);
   }
+  const timer = setTimeout(() => {
+    discardProvider(config, draftId);
+  }, DRAFT_TTL);
+  timer.unref();
+  table.set(draftId, {
+    timer,
+    expiresAt: Date.now() + DRAFT_TTL,
+    committing: false,
+    commit: async (manualModelId) => {
+      const id = manualModelId?.trim() ?? "";
+      if (needsManualModel && id === "")
+        throw new ProviderSetupError("modelId", "模型 ID 不能为空");
+      if (loginId !== undefined && findPendingLogin(config, loginId) === undefined) {
+        throw new ProviderSetupError("credential", "登录会话不存在或已结束，请重新登录");
+      }
+      const modelsToSave = needsManualModel ? [{ id }] : upstreamModels;
+      if (stagedAccount !== undefined) {
+        try {
+          if (config.credentials.backend() === "none") {
+            if (config.credentials.setAccount === undefined) throw new Error("storage");
+            await config.credentials.setAccount(
+              providerId,
+              stagedAccount.value,
+              stagedAccount.storage,
+            );
+          } else await config.credentials.set(providerId, stagedAccount.value);
+        } catch {
+          throw new ProviderSetupError("credential", "无法保存登录凭据");
+        }
+      }
+      // models 字段写入上游声明的能力/价格/限额/接口（provider-setup.md 第 7 节）
+      const models: Record<string, ModelOverrideShape> = {};
+      for (const m of modelsToSave) {
+        models[m.id] = {
+          ...(preset.auth?.kind === "openai-siwc" ? { protocol: "openai-responses" as const } : {}),
+          ...(m.displayName !== undefined ? { displayName: m.displayName } : {}),
+          ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
+          ...(m.maxOutputTokens !== undefined ? { maxOutputTokens: m.maxOutputTokens } : {}),
+          ...(m.pricing !== undefined ? { pricing: m.pricing } : {}),
+          ...(m.capabilities !== undefined ? { capabilities: m.capabilities } : {}),
+          // ADR-0026 第 2 节：上游 supported_endpoints 原文随条目保存
+          ...(m.endpoints !== undefined ? { endpoints: m.endpoints } : {}),
+        };
+      }
 
-  // models 字段写入上游声明的能力/价格/限额/接口（provider-setup.md 第 7 节）
-  const models: Record<string, ModelOverrideShape> = {};
-  for (const m of upstreamModels) {
-    models[m.id] = {
-      ...(preset.auth?.kind === "openai-siwc" ? { protocol: "openai-responses" as const } : {}),
-      ...(m.displayName !== undefined ? { displayName: m.displayName } : {}),
-      ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
-      ...(m.maxOutputTokens !== undefined ? { maxOutputTokens: m.maxOutputTokens } : {}),
-      ...(m.pricing !== undefined ? { pricing: m.pricing } : {}),
-      ...(m.capabilities !== undefined ? { capabilities: m.capabilities } : {}),
-      // ADR-0026 第 2 节：上游 supported_endpoints 原文随条目保存
-      ...(m.endpoints !== undefined ? { endpoints: m.endpoints } : {}),
-    };
-  }
+      // thinking.format 是协议格式开关；能力和档位只按模型声明。
+      const thinking: ProviderEntryConfig["thinking"] = {
+        ...(preset.thinkingFormat !== undefined ? { format: preset.thinkingFormat } : {}),
+      };
+      const modelCount = modelsToSave.length;
+      await config.saveSetupProvider(
+        {
+          id: providerId,
+          ...(preset.auth !== undefined ? { auth: preset.auth } : {}),
+          ...(preset.headers !== undefined ? { headers: preset.headers } : {}),
+          ...(preset.modelHeader !== undefined ? { modelHeader: preset.modelHeader } : {}),
+          type: preset.type,
+          ...(baseURL !== undefined ? { baseURL } : {}),
+          ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+          ...(sessionHeader !== undefined ? { sessionHeader } : {}),
+          ...(preset.modelsDevProvider !== undefined
+            ? { modelsDevProvider: preset.modelsDevProvider }
+            : {}),
+          models,
+          ...(Object.keys(thinking).length > 0 ? { thinking } : {}),
+          ...(modelCount > 0
+            ? { source: "upstream" as const, fetchedAt: new Date().toISOString() }
+            : {}),
+        },
+        { ...(key !== undefined ? { key } : {}) },
+      );
+      if (loginId !== undefined) dropPendingLogin(config, loginId);
 
-  // thinking.format 是协议格式开关；能力和档位只按模型声明。
-  const thinking: ProviderEntryConfig["thinking"] = {
-    ...(preset.thinkingFormat !== undefined ? { format: preset.thinkingFormat } : {}),
-  };
-  const modelCount = upstreamModels.length;
-  await config.saveSetupProvider(
-    {
-      id: providerId,
-      ...(preset.auth !== undefined ? { auth: preset.auth } : {}),
-      ...(preset.headers !== undefined ? { headers: preset.headers } : {}),
-      ...(preset.modelHeader !== undefined ? { modelHeader: preset.modelHeader } : {}),
-      type: preset.type,
-      ...(baseURL !== undefined ? { baseURL } : {}),
-      ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
-      ...(sessionHeader !== undefined ? { sessionHeader } : {}),
-      ...(preset.modelsDevProvider !== undefined
-        ? { modelsDevProvider: preset.modelsDevProvider }
-        : {}),
-      models,
-      ...(Object.keys(thinking).length > 0 ? { thinking } : {}),
-      ...(modelCount > 0
-        ? { source: "upstream" as const, fetchedAt: new Date().toISOString() }
-        : {}),
+      const commitNotices: ProviderSetupNotice[] = [];
+      const modelsDevWarning = await config.refreshModelsDev();
+      if (modelsDevWarning !== undefined) {
+        commitNotices.push({ code: "models_dev", kind: "print", text: `! ${modelsDevWarning}` });
+      }
+      return {
+        providerId,
+        modelCount,
+        notices: commitNotices,
+        message: `已保存 ${providerId}${modelCount > 0 ? `，${modelCount} 个模型` : ""}`,
+      };
     },
-    { ...(key !== undefined ? { key } : {}) },
-  );
-  if (loginId !== undefined) dropPendingLogin(config, loginId);
-
-  const modelsDevWarning = await config.refreshModelsDev();
-  if (modelsDevWarning !== undefined) {
-    notices.push({ code: "models_dev", kind: "print", text: `! ${modelsDevWarning}` });
-  }
+  });
   return {
-    providerId,
-    modelCount,
+    draftId,
+    modelCount: upstreamModels.length,
     notices,
-    message: `已保存 ${providerId}${modelCount > 0 ? `，${modelCount} 个模型` : ""}`,
+    needsManualModel,
+    steps: [
+      ...description.fields.map((field) => setupFieldStep(field.key, values[field.key])),
+      setupCredentialStep(description, credential),
+      ...notices.filter((notice) => notice.kind === "step").map((notice) => notice.text),
+    ],
   };
+}
+
+/** 不需要中间确认的调用者可一次提交；客户端向导使用 prepare/commit。 */
+export async function addProvider(
+  config: RuntimeConfig,
+  input: AddProviderInput,
+  options: AddProviderOptions = {},
+): Promise<AddProviderResult> {
+  const prepared = await prepareProvider(config, input, options);
+  try {
+    const result = await commitProvider(config, prepared.draftId, { manualModelId: input.modelId });
+    return { ...result, notices: [...prepared.notices, ...result.notices] };
+  } finally {
+    discardProvider(config, prepared.draftId);
+  }
 }
