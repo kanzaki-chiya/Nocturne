@@ -105,6 +105,9 @@ export function createOpenAICompatibleProvider(
       // ADR-0031 §2：User-Agent 以 nocturne/<version> 开头（条目 headers
       // 里用户写的 UA 优先）；SDK 追加的 ai-sdk/... 后缀保留
       headers: withUserAgent(config.headers, config.userAgent),
+      // 流式请求带 stream_options.include_usage：部分服务（如 Grok 代理）不带就不返回用量，
+      // 状态栏的上下文、缓存命中与速度都依赖它
+      includeUsage: true,
       fetch,
     });
   // SDK 的 providerOptions 命名空间是 name.split(".")[0] 的驼峰形；

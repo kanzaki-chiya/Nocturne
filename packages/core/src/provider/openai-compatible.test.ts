@@ -110,6 +110,17 @@ async function collect(p: ReturnType<typeof createOpenAICompatibleProvider>, req
 }
 
 describe("openai-compatible 适配器：toolChoice", () => {
+  it("流式请求带 stream_options.include_usage（部分服务不带就不返回用量）", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(
+      config(),
+      envWithKey,
+      sseFetch(finishCallChunk, capture),
+    );
+    await collect(p, request());
+    expect(capture.body?.["stream_options"]).toEqual({ include_usage: true });
+  });
+
   it("toolChoice 映射为具体 tool_choice（function 指定名）", async () => {
     const capture: { body?: Record<string, unknown> } = {};
     const p = createOpenAICompatibleProvider(
