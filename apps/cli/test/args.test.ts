@@ -91,6 +91,26 @@ describe("参数解析（cli.md 第 2 节）", () => {
     expect(() => parseArgs(["trust", "--cli"])).toThrow(UsageError);
   });
 
+  it("rpc --stdio：RPC 服务端子命令（ADR-0044），只接受传输与配置层参数", () => {
+    const r = parseArgs(["rpc", "--stdio"]);
+    expect(r.command).toBe("rpc");
+    expect(r.stdio).toBe(true);
+    expect(parseArgs([]).stdio).toBe(false);
+    // 配置层与诊断参数可以带
+    const withConfig = parseArgs(["rpc", "--stdio", "--base-url", "http://x/v1", "--debug"]);
+    expect(withConfig.baseUrl).toBe("http://x/v1");
+    expect(withConfig.debug).toBe(true);
+    // 没有传输、或 --stdio 脱离 rpc：用法错
+    expect(() => parseArgs(["rpc"])).toThrow("--stdio");
+    expect(() => parseArgs(["--stdio"])).toThrow("rpc");
+    // 会话与交互选项不适用：会话与权限由客户端决定
+    for (const extra of [["-c"], ["--resume", "x"], ["--sessions"], ["--tui"], ["--cli"], ["-y"]]) {
+      expect(() => parseArgs(["rpc", "--stdio", ...extra])).toThrow(UsageError);
+    }
+    expect(() => parseArgs(["rpc", "--stdio", "--preset", "default"])).toThrow(UsageError);
+    expect(() => parseArgs(["-p", "hi", "rpc", "--stdio"])).toThrow(UsageError);
+  });
+
   it("--inline：默认 false；可与 -c / --resume 组合；互斥项与 --tui 相同", () => {
     expect(parseArgs([]).inline).toBe(false);
     expect(parseArgs(["--inline"]).inline).toBe(true);

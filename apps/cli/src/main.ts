@@ -26,6 +26,7 @@ import {
 } from "./config.js";
 import { createEventWriter, renderEvent } from "./render.js";
 import { runRepl } from "./repl.js";
+import { runRpcStdio } from "./rpc.js";
 import {
   createNewSession,
   createSessionSwitcher,
@@ -126,6 +127,21 @@ async function main(): Promise<number> {
     } catch {
       cwd = process.cwd();
     }
+  }
+
+  // rpc --stdio：RPC 服务端（ADR-0044）。stdout 被协议独占；正常情况下清理完成后事件循环自然排空，
+  // 为防 MCP/HTTP 连接留有句柄，另设一个不阻止自然退出的兜底定时器强制结束
+  // （不在这里直接 process.exit：Windows 上对仍在关闭的句柄调用会触发 libuv 断言崩溃）
+  if (args.command === "rpc") {
+    const code = await runRpcStdio({
+      args,
+      platform,
+      cwd,
+      version: VERSION,
+      io: { stdin: process.stdin, stdout: process.stdout, stderr: process.stderr },
+    });
+    setTimeout(() => process.exit(code), 3000).unref();
+    return code;
   }
 
   // setup：服务商配置向导（provider-setup.md 第 1 节）。

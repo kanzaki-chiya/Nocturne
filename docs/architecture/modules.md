@@ -195,7 +195,7 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 
 - **负责**：参数解析；REPL 输入；把事件渲染为终端输出（流式文本、工具状态、diff 摘要）；权限确认提示并调用 `respondPermission`；退出码。
 - **不负责**：任何 Agent 行为、会话状态、权限判定、上下文构建。
-- **依赖**：`@nocturne/core` 公开 API 与 `protocol`；对 `apps/tui` 仅有 `@nocturne/tui` 的惰性 `import()` 及 `@nocturne/tui/slash-catalog`、`@nocturne/tui/text-format` 的静态引用。
+- **依赖**：`@nocturne/core` 公开 API 与 `protocol`；`rpc --stdio` 入口使用 `@nocturne/rpc/server`；对 `apps/tui` 仅有 `@nocturne/tui` 的惰性 `import()` 及 `@nocturne/tui/slash-catalog`、`@nocturne/tui/text-format` 的静态引用。
 - 详见 [apps/cli.md](../apps/cli.md)。
 
 ### apps/tui（Phase 4，已验收）

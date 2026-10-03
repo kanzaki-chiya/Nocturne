@@ -118,6 +118,10 @@
 
 方法清单以公开 API 为准，RPC 层不另加能力。`packages/rpc/src/server/coverage.ts` 登记 `Runtime` 与 `RuntimeSession` 每个成员对应的 RPC 方法或"不映射"的原因，键类型由 `keyof` 推导：公开 API 新增成员而没有登记，编译失败；覆盖测试再用真实对象的键与服务端方法表对照。公开 API 新增方法时，同步在 `RpcMethods`、服务端处理表、客户端封装与本文补映射。
 
-## 9. 客户端包
+## 9. 服务端进程
+
+`nctrn rpc --stdio`（`apps/cli`，[cli.md](../apps/cli.md) 第 2 节）是第一个服务端入口：stdout 只写本文的报文，诊断与警告写 stderr；stdin 关闭、`shutdown` 请求或终止信号都按第 6 节清理后以退出码 0 退出。桌面端附带的 Node 单文件就是 `nctrn` 本身。端到端测试 `apps/cli/test/rpc.e2e.test.ts` 启动真实子进程，核对回放视图与磁盘日志一致、stdout 纯协议、断开后会话锁被释放。
+
+## 10. 客户端包
 
 `@nocturne/rpc/client` 运行时只依赖 `@nocturne/core/protocol`，对 `@nocturne/core` 只有 `import type`，也不使用 Node 内置模块（传输由使用方注入），由 `.dependency-cruiser.cjs` 的 `rpc-client-*` 规则强制。桌面端前端只引这个入口和 `protocol`，打包不会带进 Node 代码。入口：`createRpcClient(transport, { clientName, interactive? })`、`RpcError`、`trackSessionView`、`encodeBase64`。

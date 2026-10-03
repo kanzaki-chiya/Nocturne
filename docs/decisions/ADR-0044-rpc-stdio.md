@@ -133,3 +133,11 @@
 6. **客户端依赖规则更严**：第 2 节只要求运行时只依赖 `protocol`；depcheck 同时禁止客户端与共享层使用 Node 内置模块、依赖服务端，传输由使用方注入。
 7. **慢订阅者**：[events.md](../protocols/events.md) 第 6 节预告"引入 RPC 时改为有界队列"。第一版 RPC 服务端不限流，事件直接写入传输（stdio 管道由操作系统缓冲），有界队列与临时事件丢弃策略留到出现慢连接问题时再定；events.md 第 6 节已同步。
 8. **握手时创建 Runtime**：第 3 节说 `interactive` 决定传给 `createRuntime` 的值，因此 Runtime 在 `initialize` 时才创建（服务端以工厂函数注入，创建失败时握手报错、连接保持可重试）。
+
+### 2026-10-03：第 3 步实现时与正文不一致之处
+
+1. **"关闭 MCP 进程"**：MCP 连接是会话级的（[mcp.md](../architecture/mcp.md) 第 5 节），不存在进程级 MCP 句柄；"关闭全部会话"已包含 MCP 服务器进程树的清理，入口不另设 MCP 收尾步骤。
+2. **参数范围**：`nctrn rpc --stdio` 不接受 `-y`、`--preset`、`-p`、`--cli`、`--tui`、`-c`、`--resume`、`--sessions`（用法错误，退出码 2）；`-y` 的"自动批准"与"权限由客户端决定"冲突，`--stdio` 缺省也是用法错误。配置层参数（`--model`、`--base-url` 等）与 `--debug` 照常生效。
+3. **退出机制**：清理完成后依靠事件循环自然排空退出，另设 3 秒不阻止自然退出的兜底定时器强制 `process.exit`。直接在清理后立即 `process.exit` 会在 Windows 上触发 libuv 断言崩溃（退出码 `0xC0000409`，端到端测试发现）。终止信号（SIGINT/SIGTERM/SIGHUP）与 stdin 关闭等价。
+4. **配置要求**：与 `trust` / `setup` 一致不要求已有模型或服务商，但配置里已声明却无法解析的模型/服务商照常以退出码 2 报错。
+5. **打包**：`@nocturne/rpc` 的构建产物是 `.js` / `.d.ts`（`platform: "neutral"`），`package.json` 的 `exports` 按此声明。

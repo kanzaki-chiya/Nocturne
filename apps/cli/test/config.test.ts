@@ -16,6 +16,7 @@ const base: CliArgs = {
   inline: false,
   cli: false,
   yes: false,
+  stdio: false,
   debug: false,
   help: false,
   version: false,

@@ -47,6 +47,9 @@ importers:
       '@nocturne/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
+      '@nocturne/rpc':
+        specifier: workspace:*
+        version: link:../../packages/rpc
       '@nocturne/tui':
         specifier: workspace:*
         version: link:../tui

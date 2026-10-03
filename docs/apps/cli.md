@@ -21,6 +21,7 @@ nctrn --resume <id>          # 恢复指定会话后进入所选模式
 nctrn --sessions             # 列出会话后退出（只读）
 nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trustedWorkspaces 后退出
 nctrn setup                  # 服务商配置向导（TTY 打开服务商页，provider-setup.md）
+nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（ADR-0044，v0.5）
 ```
 
 | 参数 | 说明 |
@@ -38,6 +39,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 | `--cli` | 以逐行 REPL 启动交互模式（v0.3）；与 `--tui` 互斥（用法错误，退出码 2） |
 | `--tui` | 以终端界面（TUI）启动交互模式（[apps/tui.md](tui.md)）；与 `-p`/`--print`/`--cli`/`--sessions` 互斥（退出码 2）；显式给出且 stdin/stdout 非 TTY 时报错退出 2 |
 | `--inline` | TUI 走普通屏幕模式（已完结内容进终端回滚区，见 [tui.md](tui.md) §2 末节）；与 `-p`/`--print`/`--cli`/`--sessions` 互斥（退出码 2） |
+| `--stdio` | 只与 `rpc` 子命令搭配：传输走 stdin/stdout（缺省或脱离 `rpc` 都是用法错误，退出码 2） |
 | `-y, --yes` | 把需要确认的操作按"允许一次"自动批准（第 6 节）；对两类模式都生效 |
 | `--debug` | 启用诊断日志（JSONL；[observability.md](../architecture/observability.md)），等价 `NOCTURNE_DEBUG=1` |
 | `--debug-file <path>` | 诊断输出文件；`-` 表示 stderr。缺省写 `<NOCTURNE_HOME>/logs/debug-<时间戳>-<pid>.jsonl` |
@@ -67,6 +69,9 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 - 启动时校验配置：缺 `baseURL`（openai-compatible）、缺凭据、缺模型 id，都打印缺失项并以退出码 2 退出，两种模式一致；stdin/stdout 均为交互终端时提示可运行 `nctrn setup`——完全没有任何服务商来源（无 `providers.json` 条目、无 `config.json` providers、无环境变量/命令行合成）时该提示置首，环境变量与手写说明退为次要；非 TTY 输出不变，不含向导提示。
 - 未知参数、参数缺值：打印用法并以退出码 2 退出。
 - `trust` / `untrust` 子命令原子写 `<NOCTURNE_HOME>/trust.json`（[config.md](../architecture/config.md) 第 3 节），打印结果后以退出码 0 退出；程序不改写手写的 `config.json`。
+- `rpc --stdio` 子命令（[ADR-0044](../decisions/ADR-0044-rpc-stdio.md)，协议见 [rpc.md](../protocols/rpc.md)）：把 Runtime 经 stdin/stdout 上的 JSON-RPC 交给进程外客户端（桌面端后台）。复用本 CLI 的配置加载（含 `--model`/`--base-url` 等配置层参数与 `--debug`）、代理设置与 MCP 装配；一个进程一个 Runtime、一个客户端，可同时打开多个会话。**stdout 只写 JSON-RPC 报文**，配置警告、诊断与错误一律写 stderr（`console.log` 也被改道到 stderr）。握手时才创建 Runtime，`interactive` 取自客户端声明。不接受会话与交互参数（`-c`/`--resume`/`--sessions`/`--preset`/`-p`/`--cli`/`--tui`/`-y`）：会话与权限由客户端决定，`-y`（自动批准）在这里没有意义。与 `trust` 一致，不要求已配置模型或服务商（桌面端首次启动时还没有），但已声明却无法解析的配置照常报错退出 2。
+  - **生命周期**：stdin 关闭（客户端退出或崩溃）、收到 `shutdown` 请求、收到 SIGINT/SIGTERM/SIGHUP 都走同一套清理——中断运行中的 Turn（落盘为 `aborted`）、关闭全部会话（刷盘、释放会话锁；会话关闭时其 MCP 服务器进程树随之清理）——然后以退出码 0 退出；清理完成后事件循环自然排空，另设 3 秒兜底定时器防残留句柄。
+  - `-p`/`--print` 与 `--stdio` 不能同用；缺 `--stdio` 报用法错误。
 - `setup` 子命令：TTY 下打开服务商页（第 1 步），完成后无默认模型时自动进入模型选择页（第 2 步），流程结束即退出；`setup --cli` 走逐行向导（v0.3 起向导不再包含选模型步骤，配置完第一个服务商后提示"用 /model 选择模型"）；非 TTY 以退出码 2 退出并提示手写配置方式。密钥输入不回显，**不存在**把密钥放在命令行参数上的形式（provider-setup.md 第 1、8 节）。
 
 ## 3. 交互模式（REPL）
@@ -225,6 +230,7 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
   - 解析方式：`tsconfig.base.json` 的 `paths` 把 `@nocturne/core` 映射到 `packages/core/src/index.ts`、`@nocturne/core/*` 到 `packages/core/src/*`，使 depcheck 与 typecheck 在源码层工作；运行期经 pnpm workspace 链接解析到 `dist`。
 - **测试分层**：
   - `apps/cli/test/*.test.ts`：离线单测——参数解析、渲染映射、配置收集、命令分发（注入假会话，不需要 `dist`；vitest 用 `resolve.alias` 把 `@nocturne/core` 指到 core 源码）。
+  - `apps/cli/test/rpc.e2e.test.ts`：`nctrn rpc --stdio` 端到端——启动真实子进程，模型是测试内的本地假 SSE 服务（不访问网络）；子进程跑构建产物，所以 `beforeAll` 先执行一次 `pnpm build`（几秒），避免用过期 `dist` 给出假通过。
   - `apps/cli/test/*.smoke.ts`：真实服务验收（fixture 仓库 + 非交互 `nctrn --yes -p`），只在设置 `NOCTURNE_SMOKE_*` 时运行；根 `test:smoke` 先 `pnpm build` 再跑各包冒烟。
   - 涉及写文件与 shell 的测试一律在 `tmpdir` 下新建的临时目录中执行，不得触碰仓库与用户目录。
 - **dev 运行**：`pnpm build` 后 `node apps/cli/dist/main.js`；不改写 Node 的 `.ts` 直跑假设。
@@ -233,7 +239,7 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 
 | 退出码 | 场景 |
 |---|---|
-| 0 | Turn 以 `done` 结束；`--help` / `--version` / `--sessions` / `trust` / `untrust` 正常输出 |
+| 0 | Turn 以 `done` 结束；`--help` / `--version` / `--sessions` / `trust` / `untrust` 正常输出；`rpc --stdio` 在客户端断开或 `shutdown` 后完成清理退出 |
 | 1 | Turn 非 `done` 结束：`error`、`max_steps`、`truncated`、`refused`；会话进入 `failed` |
 | 2 | 用法或配置错误：未知参数、缺 `baseURL`/凭据/模型、模型未配置；恢复失败：会话不存在、被锁占用、日志损坏或版本过高、跨目录恢复被非交互模式拒绝 |
 | 130 | 被中断（SIGINT → `aborted`） |

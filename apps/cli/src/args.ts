@@ -11,8 +11,8 @@ export class UsageError extends Error {
   }
 }
 
-/** trust / untrust / setup 子命令（trust 写 trust.json；setup 走配置向导） */
-export type CliCommand = "trust" | "untrust" | "setup";
+/** trust / untrust / setup / rpc 子命令（trust 写 trust.json；setup 走配置向导；rpc 是 RPC 服务端） */
+export type CliCommand = "trust" | "untrust" | "setup" | "rpc";
 
 export interface CliArgs {
   /** -p/--print：非交互模式 */
@@ -44,9 +44,11 @@ export interface CliArgs {
   debug: boolean;
   /** --debug-file <path>：诊断输出文件；"-" 写 stderr */
   debugFile?: string | undefined;
+  /** --stdio：RPC 服务端走 stdin/stdout（rpc 子命令必需，ADR-0044） */
+  stdio: boolean;
   help: boolean;
   version: boolean;
-  /** trust / untrust / setup 子命令 */
+  /** trust / untrust / setup / rpc 子命令 */
   command?: CliCommand | undefined;
 }
 
@@ -64,6 +66,7 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
   nctrn --sessions             列出会话后退出
   nctrn trust | untrust        信任/取消信任当前目录后退出
   nctrn setup                  服务商配置：TTY 打开服务商页；--cli 用行式向导
+  nctrn rpc --stdio            RPC 服务端：stdin/stdout 上的 JSON-RPC（桌面端等进程外客户端使用）
 
 参数：
   -p, --print [prompt]   非交互模式；值省略时读 stdin
@@ -81,6 +84,7 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
       --api-type <type>  openai-compatible（默认）| anthropic
       --base-url <url>   Provider 端点（覆盖 NOCTURNE_BASE_URL）
       --api-key-env <名> 读取凭据的环境变量名
+      --stdio            rpc 子命令的传输：从 stdin 读、向 stdout 写 JSON-RPC，诊断走 stderr
   -y, --yes              自动批准需要确认的操作
       --debug            启用诊断输出（等价 NOCTURNE_DEBUG=1）
       --debug-file <p>   诊断输出文件；"-" 写 stderr（等价 NOCTURNE_DEBUG_FILE）
@@ -125,6 +129,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         sessions: { type: "boolean", default: false },
         "force-unlock": { type: "boolean", default: false },
         preset: { type: "string" },
+        stdio: { type: "boolean", default: false },
         yes: { type: "boolean", short: "y", default: false },
         debug: { type: "boolean", default: false },
         "debug-file": { type: "string" },
@@ -139,13 +144,13 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   const { values, positionals } = result;
   const print = values.print;
 
-  // trust / untrust / setup 子命令：唯一合法的位置参数（且不与 -p 混用）
+  // trust / untrust / setup / rpc 子命令：唯一合法的位置参数（且不与 -p 混用）
   let command: CliCommand | undefined;
   if (positionals.length > 0) {
     const first = positionals[0];
     if (
       !print &&
-      (first === "trust" || first === "untrust" || first === "setup") &&
+      (first === "trust" || first === "untrust" || first === "setup" || first === "rpc") &&
       positionals.length === 1
     ) {
       command = first;
@@ -183,7 +188,19 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   ) {
     throw new UsageError(`${command} 子命令不接受会话选项`);
   }
-  if (command !== undefined && command !== "setup" && cli) {
+  if (command === "rpc") {
+    if (!values.stdio) {
+      throw new UsageError("rpc 子命令目前只支持 --stdio 传输：nctrn rpc --stdio");
+    }
+    if (print || cli || values.yes || values.preset !== undefined) {
+      throw new UsageError(
+        "rpc 子命令不接受 -p、--cli、--yes 与 --preset（会话与权限由客户端决定）",
+      );
+    }
+  } else if (values.stdio) {
+    throw new UsageError("--stdio 只能与 rpc 子命令搭配：nctrn rpc --stdio");
+  }
+  if (command !== undefined && command !== "setup" && command !== "rpc" && cli) {
     throw new UsageError(`${command} 子命令不接受 --cli`);
   }
   if (
@@ -228,6 +245,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     forceUnlock: values["force-unlock"],
     preset: values.preset,
     yes: values.yes,
+    stdio: values.stdio,
     debug: values.debug,
     debugFile: values["debug-file"],
     help: values.help,

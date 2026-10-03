@@ -21,6 +21,14 @@ export default defineConfig({
         replacement: path.resolve(here, "../../packages/core/src/protocol/index.ts"),
       },
       {
+        find: /^@nocturne\/rpc\/server$/,
+        replacement: path.resolve(here, "../../packages/rpc/src/server/index.ts"),
+      },
+      {
+        find: /^@nocturne\/rpc\/client$/,
+        replacement: path.resolve(here, "../../packages/rpc/src/client/index.ts"),
+      },
+      {
         find: /^@nocturne\/core$/,
         replacement: path.resolve(here, "../../packages/core/src/index.ts"),
       },

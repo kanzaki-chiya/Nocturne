@@ -22,6 +22,7 @@
   "dependencies": {
     "@nocturne/core": "workspace:*",
     "@nocturne/mcp": "workspace:*",
+    "@nocturne/rpc": "workspace:*",
     "@nocturne/tui": "workspace:*"
   }
 }
