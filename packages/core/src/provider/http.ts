@@ -29,6 +29,8 @@ export function createAuthFetch(
         init?.headers ?? (input instanceof Request ? input.headers : undefined),
       );
       applyToken(headers, token);
+      for (const [name, value] of Object.entries(auth.requestHeaders ?? {}))
+        headers.set(name, value);
       // 禁止重定向：外部文件与登录令牌不能被转发给其他端点。
       const response = await (fetchImpl ?? globalThis.fetch)(input, {
         ...init,

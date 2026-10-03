@@ -1,4 +1,5 @@
 import { createPublicKey, verify, type JsonWebKey } from "node:crypto";
+import { GROK_PROXY_HEADERS } from "../provider/grok-proxy.js";
 import { setTimeout as delay } from "node:timers/promises";
 import type { CredentialStore, ProviderEntryConfig } from "../config/index.js";
 import type { Platform } from "../platform/index.js";
@@ -615,6 +616,7 @@ export function createXaiAuthResolver(
 
   return {
     unauthorizedMessage: message,
+    requestHeaders: GROK_PROXY_HEADERS,
     async token(signal: AbortSignal) {
       signal.throwIfAborted();
       flight ??= refresh(signal).finally(() => {

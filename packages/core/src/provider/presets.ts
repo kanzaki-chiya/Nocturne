@@ -7,6 +7,7 @@ import type { AuthResolver, ProviderAuth, UpstreamModelInfo } from "./types.js";
 import { createAuthResolver } from "./auth.js";
 import { ProviderAuthError } from "./errors.js";
 import { hasStaticHeader, nocturneUserAgent } from "./http.js";
+import { GROK_PROXY_HEADERS } from "./grok-proxy.js";
 
 export interface ProviderPreset {
   /** 预设标识（向导内部使用；"custom-*" 表示手动填写地址的预设） */
@@ -44,19 +45,6 @@ export interface ProviderPreset {
    */
   modelsDevProvider?: string | undefined;
 }
-
-/**
- * Grok 代理（cli-chat-proxy.grok.com）要求的请求头，两个 Grok 预设共用（ADR-0043）。
- * 缺版本门头时代理回 426；版本号对齐当前能过门的官方 CLI，不是 Nocturne 版本，
- * 代理提高门槛时只改这里。User-Agent 仍是 nocturne/<version>。
- */
-const GROK_PROXY_HEADERS: Readonly<Record<string, string>> = {
-  "X-XAI-Token-Auth": "xai-grok-cli",
-  "x-grok-client-version": "1.0.44",
-  "x-grok-client-identifier": "nocturne",
-  "x-authenticateresponse": "authenticate-response",
-  "x-grok-client-mode": "headless",
-};
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   {
@@ -404,6 +392,7 @@ export async function fetchModels(
           ...uaHeader,
           Accept: "application/json",
           ...authHeaders(entry, await resolver.token(requestSignal)),
+          ...resolver.requestHeaders,
         },
         signal,
       );

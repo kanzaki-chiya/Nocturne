@@ -90,3 +90,31 @@ describe("createAuthFetch 重定向隔离", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("createAuthFetch 通道请求头", () => {
+  it("鉴权通道声明的请求头覆盖条目里的同名旧值", async () => {
+    const fetchImpl = vi.fn<typeof globalThis.fetch>(async (_input, init) => {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("x-grok-client-version")).toBe("9.9.9");
+      expect(headers.get("x-custom")).toBe("kept");
+      return new Response("ok");
+    });
+    const fetch = createAuthFetch(
+      {
+        token: async () => "t",
+        invalidate: async () => undefined,
+        requestHeaders: { "x-grok-client-version": "9.9.9" },
+      },
+      (headers, value) => {
+        headers.set("authorization", `Bearer ${value}`);
+      },
+      fetchImpl,
+    );
+    await fetch(
+      new Request("http://127.0.0.1/request", {
+        headers: { "x-custom": "kept", "x-grok-client-version": "0.0.1" },
+      }),
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});

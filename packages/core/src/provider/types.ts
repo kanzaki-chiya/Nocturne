@@ -248,6 +248,11 @@ export interface AuthResolver {
   /** 鉴权通道限定的协议，优先于条目与逐模型声明。 */
   readonly protocol?: ModelProtocol | undefined;
   readonly requestConstraints?: ResponsesRequestConstraints | undefined;
+  /**
+   * 鉴权通道要求的固定请求头：每次请求覆盖条目里的同名头。
+   * 写在通道里而不是只写进预设，条目保存后通道要求变了（如代理版本门）也能跟上。
+   */
+  readonly requestHeaders?: Readonly<Record<string, string>> | undefined;
 }
 
 /**
