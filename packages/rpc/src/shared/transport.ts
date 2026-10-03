@@ -7,8 +7,10 @@ export interface LineTransport {
   send(line: string): void;
   /** 注册收到一行的处理函数；注册前已到达的行要缓冲到注册时再交付 */
   onLine(handler: (line: string) => void): void;
-  /** 注册连接结束的处理函数（对端关闭、进程退出、本端 close 都触发，且只触发一次） */
+  /** 注册输入结束的处理函数；半关闭传输仍可发送，完整断开时发送可丢弃。只触发一次 */
   onClose(handler: () => void): void;
+  /** 等待已发送的报文刷出；有异步输出缓冲的传输需实现 */
+  flush?(): Promise<void>;
   /** 主动关闭 */
   close(): void;
 }

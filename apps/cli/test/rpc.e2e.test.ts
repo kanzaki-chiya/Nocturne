@@ -191,6 +191,39 @@ async function exitWithin(c: Child, ms = 20_000): Promise<number | null> {
 }
 
 describe("nctrn rpc --stdio（真实子进程）", () => {
+  it("管线化握手和查询后立即关闭 stdin：全部回复写出再退出", async () => {
+    const c = spawnRpc();
+    c.proc.stdin.end(
+      [
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: 1,
+            clientName: "probe",
+            capabilities: { interactive: false },
+          },
+        },
+        { jsonrpc: "2.0", id: 2, method: "runtime.listSessions", params: {} },
+      ]
+        .map((message) => JSON.stringify(message))
+        .join("\n") + "\n",
+    );
+    expect(await exitWithin(c), c.stderr()).toBe(0);
+    expect(c.stdoutLines.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({
+        jsonrpc: "2.0",
+        id: 1,
+        result: expect.objectContaining({
+          protocolVersion: 1,
+          sessionsDir: sessionsDirOf(c),
+        }),
+      }),
+      { jsonrpc: "2.0", id: 2, result: [] },
+    ]);
+  }, 60_000);
+
   it("握手 → 跑一轮会话 → 经 RPC 折叠的视图与磁盘日志重放相等；stdout 只有 JSON-RPC 报文", async () => {
     const c = spawnRpc();
     const client = createRpcClient(c.transport, { clientName: "e2e" });
@@ -265,7 +298,7 @@ describe("nctrn rpc --stdio（真实子进程）", () => {
 
     c.proc.stdin.end();
     expect(await exitWithin(c), c.stderr()).toBe(0);
-    await expect(turn).rejects.toMatchObject({ code: "connection_closed" });
+    await expect(turn).resolves.toBe("aborted");
     expect(existsSync(lockOf(c, session.id))).toBe(false);
     const completed = readLog(c, session.id).find((e) => e.type === "turn.completed");
     expect(completed?.type === "turn.completed" && completed.payload.reason).toBe("aborted");

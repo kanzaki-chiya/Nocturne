@@ -12,6 +12,7 @@ export function createStdioTransport(input: Readable, output: Writable): LineTra
   let closeHandler: (() => void) | undefined;
   const pending: string[] = [];
   let ended = false;
+  let outputClosed = false;
   let closeNotified = false;
 
   const notifyClose = (): void => {
@@ -31,13 +32,22 @@ export function createStdioTransport(input: Readable, output: Writable): LineTra
   });
   // 输出管道被对端关掉（EPIPE）：当作连接结束，不让它变成未处理错误
   output.on("error", () => {
+    outputClosed = true;
     reader.close();
   });
 
   return {
     send(line) {
-      if (ended) return;
+      if (outputClosed) return;
       output.write(`${line}\n`);
+    },
+    flush() {
+      if (outputClosed || output.destroyed) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        output.write("", () => {
+          resolve();
+        });
+      });
     },
     onLine(handler) {
       lineHandler = handler;

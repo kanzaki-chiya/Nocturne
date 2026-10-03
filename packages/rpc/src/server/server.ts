@@ -89,8 +89,8 @@ export interface RpcServer {
   /** 本服务端实现的请求方法（不含通知）；覆盖测试用它与公开 API 对照 */
   readonly methods: readonly RpcMethodName[];
   /**
-   * 在一条传输上服务一个客户端。传输关闭或收到 `shutdown` 后，先中断运行中的 Turn、
-   * 关闭全部会话（刷盘、释放会话锁）、释放 Runtime 资源，再 resolve。
+   * 在一条传输上服务一个客户端。输入结束时中断 Turn、等待在途请求并刷出回复，
+   * 再关闭全部会话（刷盘、释放锁）和释放 Runtime 资源。shutdown 先清理再回复。
    */
   serve(transport: LineTransport): Promise<void>;
 }
@@ -131,11 +131,12 @@ class Connection {
   private initialized = false;
   private shuttingDown = false;
   private closed = false;
+  private inputEnded = false;
+  private readonly requests = new Set<Promise<void>>();
   private cleanupPromise: Promise<void> | undefined;
   private readonly sessions = new Map<string, OpenSession>();
   private readonly opening = new Set<Promise<unknown>>();
   private readonly abort = new AbortController();
-  private resolveDone: (() => void) | undefined;
   private readonly handlers: HandlerTable;
 
   constructor(
@@ -147,17 +148,21 @@ class Connection {
 
   run(): Promise<void> {
     return new Promise<void>((resolve) => {
-      this.resolveDone = resolve;
       this.diagnose({ kind: "connection", state: "open" });
       this.transport.onLine((line) => {
         this.onLine(line);
       });
       this.transport.onClose(() => {
-        this.closed = true;
-        void this.cleanup().then(() => {
+        this.inputEnded = true;
+        for (const entry of this.sessions.values()) entry.session.interrupt();
+        void (async () => {
+          await Promise.allSettled([...this.requests]);
+          await this.transport.flush?.();
+          await this.cleanup();
+          this.closed = true;
           this.diagnose({ kind: "connection", state: "closed" });
           resolve();
-        });
+        })();
       });
     });
   }
@@ -219,7 +224,9 @@ class Connection {
       this.fail(invalidRequestFailure(null, "id 必须是字符串或数字"));
       return;
     }
-    void this.onRequest(id, method, message.params);
+    const request = this.onRequest(id, method, message.params);
+    this.requests.add(request);
+    void request.finally(() => this.requests.delete(request));
   }
 
   private onNotification(method: string, params: unknown): void {
@@ -271,7 +278,12 @@ class Connection {
       if (this.shuttingDown) throw new RpcProtocolError("shutting_down", "服务端正在关闭");
     }
     const handler = this.handlers[name] as (p: Params) => unknown;
-    return await handler(asParams(params));
+    const result = handler(asParams(params));
+    // EOF 可能发生在等待 initialize 时；刚开始的 Turn/压缩同样必须中断。
+    if (this.inputEnded) {
+      for (const entry of this.sessions.values()) entry.session.interrupt();
+    }
+    return await result;
   }
 
   // ── 生命周期 ─────────────────────────────────────────────
