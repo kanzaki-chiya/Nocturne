@@ -5,24 +5,33 @@
  * 一个服务端同一时刻只接一个客户端，可同时打开多个会话。权限判定仍只在
  * Runtime 的权限层——这里只转发 `permission.requested` 事件与回复（AGENTS.md 硬性约束）。
  */
+import { randomUUID } from "node:crypto";
+
 import {
   commitProvider,
   describeAccountStorage,
   describeProviderSetup,
+  discardDraftLogin,
   discardProvider,
   isReasoningEffort,
   listProviderPresets,
   logoutProvider,
   MODEL_ROLES,
   prepareProvider,
+  ProviderLoginError,
+  startDraftProviderLogin,
+  startProviderLogin,
   type AddProviderInput,
   type ContentBlock,
   type CreateSessionOptions,
   type JevEndpoint,
   type JevReviewerConfig,
+  type LoginResult,
+  type LoginSession,
   type ModelRole,
   type PermissionReply,
   type ProviderCredentialInput,
+  type ProviderLoginOptions,
   type QuestionReply,
   type RewindMode,
   type Runtime,
@@ -45,6 +54,8 @@ import {
 } from "../shared/jsonrpc.js";
 import {
   RPC_METHOD_NAMES,
+  type LoginCompleted,
+  type LoginStarted,
   type RpcMethodName,
   type RpcMethods,
   type SessionOpened,
@@ -107,6 +118,7 @@ export const SENSITIVE_METHODS: Partial<Record<RpcMethodName, (p: Params) => str
     return kind === "apiKey" && typeof key === "string" ? [key] : [];
   },
   "provider.setCredential": (p) => (typeof p.key === "string" ? [p.key] : []),
+  "login.submitManual": (p) => (typeof p.text === "string" ? [p.text] : []),
 };
 
 export interface RpcServerOptions {
@@ -147,6 +159,19 @@ interface OpenSession {
   unsubscribe: (() => void) | undefined;
   /** 每次 subscribe/unsubscribe/close 递增；回放循环发现自己过期就停手 */
   generation: number;
+}
+
+/** 进行中的登录会话：saved 是已保存服务商的重新登录，draft 是表单里未保存的草稿登录 */
+interface LoginEntry {
+  session: LoginSession;
+  kind: "saved" | "draft";
+  /** 创建登录时用的配置对象（草稿登录的暂存凭据按它登记） */
+  config: RuntimeConfig;
+  /** 对应 start/startDraft 响应写出后 resolve——login.completed 绝不先于它到达 */
+  started: Promise<void>;
+  resolveStarted: () => void;
+  /** 无系统后端时经 onUnstoredKey 记录的密钥（只记第一次；随 login.completed 发出后丢弃） */
+  unstored: { value: { key: string; envName: string } | undefined };
 }
 
 type Handler<K extends RpcMethodName> = (
@@ -204,6 +229,8 @@ class Connection {
   >();
   /** loginId → 本连接 login.startDraft 创建时的配置对象（进行中或已完成未提交） */
   private readonly draftLogins = new Map<string, RuntimeConfig>();
+  /** 进行中的登录会话（loginId → 条目）；完成或取消时移出并推 login.completed */
+  private readonly logins = new Map<string, LoginEntry>();
 
   constructor(
     private readonly options: RpcServerOptions,
@@ -323,6 +350,11 @@ class Connection {
       }
       this.diagnose({ kind: "response", id, ok: true });
       this.send({ jsonrpc: "2.0", id, result: result ?? null });
+      // login.completed 绝不先于对应 start 响应到达（rpc.md 3.4）
+      if (method === "login.start" || method === "login.startDraft") {
+        const loginId = (result as { loginId?: unknown } | null)?.loginId;
+        if (typeof loginId === "string") this.logins.get(loginId)?.resolveStarted();
+      }
       if (method === "shutdown") this.transport.close();
     } catch (error) {
       const err = this.redactSecrets(method, params, toRpcError(error));
@@ -362,11 +394,20 @@ class Connection {
       // 握手与会话打开可能还在途中：等它们落定，新打开的会话在 register 里被直接关闭
       await this.initPromise?.catch(() => undefined);
       await Promise.allSettled([...this.opening]);
+      // 进行中的登录先取消（关闭回环端口）；其 login.completed 仍照常推送
+      for (const entry of this.logins.values()) {
+        entry.resolveStarted();
+        entry.session.cancel();
+      }
       // 本连接的未提交草稿绑定其创建配置；丢弃只释放内存，不写盘也不消费登录
       for (const [draftId, record] of this.providerDrafts) {
         discardProvider(record.config, draftId);
       }
       this.providerDrafts.clear();
+      // 完成未提交的草稿登录：丢弃暂存凭据
+      for (const [loginId, config] of this.draftLogins) {
+        discardDraftLogin(config, loginId);
+      }
       this.draftLogins.clear();
       await this.configQueue.catch(() => undefined);
       const entries = [...this.sessions.values()];
@@ -411,15 +452,106 @@ class Connection {
     return run;
   }
 
+  private async reloadProviders(): Promise<void> {
+    const next = await this.providerConfig().reload();
+    this.runtime().updateProviders(next);
+    this.providerConfig().current = next;
+    this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+  }
+
   private mutateAndReload<T>(mutate: (config: RuntimeConfig) => Promise<T>): Promise<T> {
     return this.enqueueConfig(async (config) => {
       const result = await mutate(config);
-      const next = await this.providerConfig().reload();
-      this.runtime().updateProviders(next);
-      this.providerConfig().current = next;
-      this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+      await this.reloadProviders();
       return result;
     });
+  }
+
+  // ── 登录会话 ─────────────────────────────────────────────
+
+  private loginOptions(p: Params, unstored: LoginEntry["unstored"]): ProviderLoginOptions {
+    const options: ProviderLoginOptions = {
+      onUnstoredKey: (key, envName) => {
+        unstored.value ??= { key, envName };
+      },
+    };
+    const remote = optBool(p, "remote");
+    if (remote !== undefined) options.remote = remote;
+    const accountStorage = optString(p, "accountStorage");
+    if (accountStorage !== undefined) {
+      if (accountStorage !== "plaintext" && accountStorage !== "memory") {
+        throw new InvalidParamsError(`accountStorage 必须是 "plaintext" 或 "memory"`);
+      }
+      options.accountStorage = accountStorage;
+    }
+    return options;
+  }
+
+  private loginStarted(loginId: string, session: LoginSession): LoginStarted {
+    return {
+      loginId,
+      authorizeUrl: session.authorizeUrl,
+      manualInput: session.manualInput,
+      ...(session.userCode !== undefined ? { userCode: session.userCode } : {}),
+    };
+  }
+
+  private registerLogin(
+    loginId: string,
+    kind: LoginEntry["kind"],
+    config: RuntimeConfig,
+    session: LoginSession,
+    unstored: LoginEntry["unstored"],
+  ): void {
+    let resolveStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+    this.logins.set(loginId, { session, kind, config, started, resolveStarted, unstored });
+    void session.completion.then(
+      (result) => this.finishLogin(loginId, result),
+      (error: unknown) => this.finishLogin(loginId, undefined, error),
+    );
+  }
+
+  /**
+   * 登录完成：移出进行中表，先等对应 start 响应写出（顺序保证），
+   * saved 成功时先串行重载（providersChanged），最后推 login.completed。
+   */
+  private async finishLogin(loginId: string, result?: LoginResult, error?: unknown): Promise<void> {
+    const entry = this.logins.get(loginId);
+    if (entry === undefined) return;
+    this.logins.delete(loginId);
+    if (result === undefined) this.draftLogins.delete(loginId);
+    await entry.started;
+    let warning: string | undefined;
+    if (result !== undefined && entry.kind === "saved") {
+      try {
+        await this.enqueueConfig(() => this.reloadProviders());
+      } catch (e) {
+        // 凭据已写入但 Runtime 仍用旧配置：结果照常推，附重载失败提示
+        warning = e instanceof Error ? e.message : String(e);
+      }
+    }
+    const params: LoginCompleted = { loginId };
+    if (result !== undefined) {
+      params.result = {
+        providerId: result.providerId,
+        ...(result.account !== undefined ? { account: result.account } : {}),
+      };
+    } else {
+      // ProviderLoginError 只有固定文案；其他异常不能把授权内容带给客户端（同 safeLoginError）
+      params.error =
+        error instanceof ProviderLoginError
+          ? { code: error.code, message: error.message }
+          : { code: "failed", message: "登录未完成，请重新登录" };
+    }
+    if (entry.unstored.value !== undefined) {
+      params.unstoredKey = entry.unstored.value;
+      entry.unstored.value = undefined;
+    }
+    if (warning !== undefined) params.warning = warning;
+    this.send({ jsonrpc: "2.0", method: "login.completed", params });
   }
 
   /** 请求失败时把敏感参数值从错误文本中抹掉（SENSITIVE_METHODS） */
@@ -796,6 +928,68 @@ class Connection {
           await logoutProvider(config, providerId);
           return null;
         });
+      },
+
+      // 登录会话（rpc.md 3.4）：start 返回句柄，完成经 login.completed 通知
+      "login.start": async (p) => {
+        const { current } = this.providerConfig();
+        const unstored: LoginEntry["unstored"] = { value: undefined };
+        const session = await startProviderLogin(
+          current,
+          reqString(p, "providerId"),
+          this.loginOptions(p, unstored),
+        );
+        // 已保存服务商的 loginId 由服务端生成（rpc.md 3.4）
+        const loginId = randomUUID();
+        this.registerLogin(loginId, "saved", current, session, unstored);
+        return this.loginStarted(loginId, session);
+      },
+      "login.startDraft": async (p) => {
+        const { current } = this.providerConfig();
+        const name = reqString(p, "name");
+        const baseURL = optString(p, "baseURL");
+        const unstored: LoginEntry["unstored"] = { value: undefined };
+        const session = await startDraftProviderLogin(
+          current,
+          {
+            presetId: reqString(p, "presetId"),
+            name,
+            ...(baseURL !== undefined ? { baseURL } : {}),
+          },
+          this.loginOptions(p, unstored),
+        );
+        // 草稿登录沿用 Core 分配的 loginId——暂存凭据按它登记
+        const loginId = session.loginId;
+        this.draftLogins.set(loginId, current);
+        this.registerLogin(loginId, "draft", current, session, unstored);
+        return this.loginStarted(loginId, session);
+      },
+      "login.submitManual": async (p) => {
+        this.providerConfig();
+        const entry = this.logins.get(reqString(p, "loginId"));
+        if (entry === undefined) {
+          throw new RpcProtocolError("unknown_login", "登录会话不存在或已结束");
+        }
+        await entry.session.submitManual(reqString(p, "text"));
+        return null;
+      },
+      "login.cancel": (p) => {
+        this.providerConfig();
+        const loginId = reqString(p, "loginId");
+        const entry = this.logins.get(loginId);
+        if (entry !== undefined) {
+          // 进行中：取消后照常推带 cancelled 错误的 login.completed
+          entry.session.cancel();
+          return null;
+        }
+        const draftConfig = this.draftLogins.get(loginId);
+        if (draftConfig !== undefined) {
+          // 已完成但未提交的草稿登录：丢弃暂存凭据，不推通知
+          discardDraftLogin(draftConfig, loginId);
+          this.draftLogins.delete(loginId);
+          return null;
+        }
+        throw new RpcProtocolError("unknown_login", "登录会话不存在或已结束");
       },
 
       "session.subscribe": async (p) => {

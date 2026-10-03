@@ -100,6 +100,40 @@ export interface ProvidersDescribed {
   setupWarning?: string;
 }
 
+/** 账号凭据的保存位置（无系统凭据后端时由客户端显式选择后传入，没有默认值） */
+export type LoginAccountStorage = "plaintext" | "memory";
+
+/**
+ * `login.start` / `login.startDraft` 的结果：浏览器由客户端打开，服务端不打开。
+ * `manualInput === "none"` 是设备码登录，用户在浏览器确认，不用粘贴。
+ */
+export interface LoginStarted {
+  loginId: string;
+  authorizeUrl: string;
+  manualInput: "callback-url" | "code" | "none";
+  /** 设备码登录时展示，供用户在浏览器核对；不含令牌 */
+  userCode?: string;
+}
+
+/**
+ * `login.completed` 通知：登录完成或失败（取消以 `cancelled` 报告）。
+ * `loginId` 与对应 start 响应里的一致；通知绝不先于 start 响应到达。
+ */
+export interface LoginCompleted {
+  loginId: string;
+  /** 成功：只含 providerId 与可选账号描述，不含令牌 */
+  result?: { providerId: string; account?: string };
+  /** 失败：ProviderLoginError 的固定文案；其他异常一律 { code: "failed" } */
+  error?: { code: string; message: string };
+  /**
+   * 无系统凭据后端的 OpenRouter 登录：一次性显示的密钥与环境变量名，
+   * 只出现在这一条通知里（设置环境变量的命令文本由客户端生成）。不进诊断。
+   */
+  unstoredKey?: { key: string; envName: string };
+  /** 登录成功但随后的配置重载失败时的提示 */
+  warning?: string;
+}
+
 type Ret<K extends keyof RuntimeSession> = RuntimeSession[K] extends (...args: never[]) => infer R
   ? Awaited<R>
   : never;
@@ -197,6 +231,25 @@ export interface RpcMethods {
   "provider.removeSetupProvider": { params: { providerId: string }; result: null };
   "provider.logoutProvider": { params: { providerId: string }; result: null };
 
+  // 登录会话（rpc.md 3.4）：start 返回句柄，完成经 login.completed 通知；
+  // 浏览器与授权码粘贴都是客户端的事
+  "login.start": {
+    params: { providerId: string; accountStorage?: LoginAccountStorage; remote?: boolean };
+    result: LoginStarted;
+  };
+  "login.startDraft": {
+    params: {
+      presetId: string;
+      name: string;
+      baseURL?: string;
+      accountStorage?: LoginAccountStorage;
+      remote?: boolean;
+    };
+    result: LoginStarted;
+  };
+  "login.submitManual": { params: { loginId: string; text: string }; result: null };
+  "login.cancel": { params: { loginId: string }; result: null };
+
   "session.subscribe": {
     params: SessionParams & { afterSeq?: number };
     /** 回放与实时衔接已完成时返回；`lastSeq` 是已推送的最后一个持久事件的 seq */
@@ -259,6 +312,8 @@ export interface RpcServerNotifications {
    * Runtime 的 Provider 注册表已用重载后的配置重建，listModels 等读到的已是新值
    */
   "runtime.providersChanged": Record<string, never>;
+  /** 登录会话完成或失败（含取消）；绝不先于对应 login.start/startDraft 的响应到达 */
+  "login.completed": LoginCompleted;
 }
 
 const METHOD_TABLE: Record<RpcMethodName, true> = {
@@ -295,6 +350,10 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "provider.refreshModelsDev": true,
   "provider.removeSetupProvider": true,
   "provider.logoutProvider": true,
+  "login.start": true,
+  "login.startDraft": true,
+  "login.submitManual": true,
+  "login.cancel": true,
   "session.subscribe": true,
   "session.unsubscribe": true,
   "session.submit": true,

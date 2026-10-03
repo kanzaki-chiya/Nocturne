@@ -119,6 +119,9 @@ export const PROVIDER_FUNCTION_METHODS = {
   prepareProvider: "provider.prepareProvider",
   commitProvider: "provider.commitProvider",
   discardProvider: "provider.discardProvider",
+  startProviderLogin: "login.start",
+  startDraftProviderLogin: "login.startDraft",
+  discardDraftLogin: "login.cancel",
   logoutProvider: "provider.logoutProvider",
 } as const satisfies Record<string, RpcMethodName>;
 
@@ -135,6 +138,4 @@ export const PROVIDER_FUNCTIONS_NOT_MAPPED = {
   ProviderSetupError: "错误类，经 RPC error 映射（-32005，data.field 给字段名）",
   ProviderLoginError: "错误类，经 RPC error 映射（-32003）",
   ProviderUpstreamError: "错误类，经 RPC error 映射",
-  startProviderLogin: "登录会话经 login.* 方法组映射（方法与通知拆分的下一步）",
-  startDraftProviderLogin: "草稿登录经 login.* 方法组映射（方法与通知拆分的下一步）",
 } as const satisfies Record<string, string>;

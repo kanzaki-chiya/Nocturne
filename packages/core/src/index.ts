@@ -2217,6 +2217,7 @@ export type {
 export {
   startProviderLogin,
   startDraftProviderLogin,
+  discardDraftLogin,
   logoutProvider,
   type DraftLoginTarget,
   ProviderLoginError,

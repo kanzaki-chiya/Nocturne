@@ -9,6 +9,7 @@ import {
   addProvider,
   prepareProvider,
   commitProvider,
+  discardDraftLogin,
   discardProvider,
   describeAccountStorage,
   describeProviderSetup,
@@ -602,6 +603,32 @@ describe("草稿登录（loginId）", () => {
     await expect(session.completion).rejects.toMatchObject({ code: "cancelled" });
     await Promise.resolve();
     expect(findPendingLogin(config, session.loginId)).toBeUndefined();
+  });
+
+  it("discardDraftLogin：草稿登录完成后丢弃暂存凭据，prepare 引用该 loginId 报 credential 错误", async () => {
+    const { config } = makeConfig("memory");
+    stubFetch(async () => new Response(JSON.stringify({ key: "sk-or-test" }), { status: 200 }));
+    const session = await startDraftProviderLogin(
+      config,
+      { presetId: "openrouter", name: "openrouter" },
+      { remote: true },
+    );
+    const loginId = session.loginId;
+    await session.submitManual("code-ok");
+    await expect(session.completion).resolves.toMatchObject({ providerId: "openrouter" });
+    expect(findPendingLogin(config, loginId)?.settled).toBe(true);
+
+    discardDraftLogin(config, loginId);
+    expect(findPendingLogin(config, loginId)).toBeUndefined();
+    await expect(
+      prepareProvider(
+        config,
+        { presetId: "openrouter", credential: { kind: "login", loginId } },
+        { fetchModels: async () => [] },
+      ),
+    ).rejects.toMatchObject({ field: "credential", name: "ProviderSetupError" });
+    // 重复调用是空操作
+    discardDraftLogin(config, loginId);
   });
 
   it("startDraftProviderLogin：不支持登录的预设与空名称被拒绝", async () => {

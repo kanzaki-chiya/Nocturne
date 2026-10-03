@@ -51,6 +51,8 @@ import {
 import type {
   ContextSummary,
   InitializeResult,
+  LoginCompleted,
+  LoginStarted,
   PrepareProviderParams,
   ProvidersDescribed,
   RpcMethodName,
@@ -202,12 +204,43 @@ export interface RpcProvider {
   logoutProvider(providerId: string): Promise<void>;
 }
 
+/**
+ * 登录会话（rpc.md 3.4）：start/startDraft 返回 `authorizeUrl`（浏览器由客户端打开）
+ * 与 `loginId`，完成或失败经 `onLoginCompleted` 通知。`remote` 模式不占用本机
+ * 回环端口；`accountStorage` 只在服务端没有系统凭据后端时需要。
+ */
+export interface RpcLogin {
+  /** 已保存服务商重新登录/补登；loginId 由服务端生成 */
+  start(params: {
+    providerId: string;
+    accountStorage?: "plaintext" | "memory";
+    remote?: boolean;
+  }): Promise<LoginStarted>;
+  /** 表单里未保存的草稿登录；`name` 必填 */
+  startDraft(params: {
+    presetId: string;
+    name: string;
+    baseURL?: string;
+    accountStorage?: "plaintext" | "memory";
+    remote?: boolean;
+  }): Promise<LoginStarted>;
+  /** 粘贴回调 URL 或授权码（manualInput 为 "callback-url"/"code" 时） */
+  submitManual(loginId: string, text: string): Promise<void>;
+  /**
+   * 进行中 → 取消（随后收到带 `cancelled` 的 login.completed）；
+   * 已完成未提交的草稿登录 → 丢弃暂存凭据（无通知）
+   */
+  cancel(loginId: string): Promise<void>;
+}
+
 export interface RpcClient {
   /** 握手：必须是第一个调用；协议版本不一致时抛 `protocol_version_mismatch` */
   initialize(): Promise<InitializeResult>;
   readonly runtime: RpcRuntime;
   /** 服务商配置（provider.* 方法） */
   readonly provider: RpcProvider;
+  /** 登录会话（login.* 方法 + login.completed 通知） */
+  readonly login: RpcLogin;
   /** 已打开会话的句柄（`createSession`/`resumeSession` 返回的就是它） */
   session(sessionId: string): RpcSession;
   /** 任意方法的类型化调用（上面的封装都建立在它上面） */
@@ -219,6 +252,8 @@ export interface RpcClient {
    * 响应之前到达一次。桌面端据此刷新服务商/模型相关视图。
    */
   onProvidersChanged(handler: () => void): () => void;
+  /** 登录会话完成或失败（含取消）；绝不先于对应 start/startDraft 的返回到达 */
+  onLoginCompleted(handler: (notification: LoginCompleted) => void): () => void;
   /** 请求服务端清理并退出，回复后关闭传输 */
   shutdown(): Promise<void>;
   /** 直接关闭传输（服务端按"连接断开"清理） */
@@ -239,6 +274,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   const sessionListeners = new Map<string, Set<EventListener>>();
   const globalListeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
   const providersChangedListeners = new Set<() => void>();
+  const loginCompletedListeners = new Set<(n: LoginCompleted) => void>();
   let resolveClosed!: () => void;
   const closed = new Promise<void>((resolve) => {
     resolveClosed = resolve;
@@ -290,6 +326,18 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
           handler();
         } catch {
           // 监听器异常不影响其他监听器
+        }
+      }
+    }
+    if (message.method === "login.completed") {
+      const params = message.params as LoginCompleted | undefined;
+      if (typeof params?.loginId === "string") {
+        for (const handler of [...loginCompletedListeners]) {
+          try {
+            handler(params);
+          } catch {
+            // 监听器异常不影响其他监听器
+          }
         }
       }
     }
@@ -490,6 +538,17 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     },
   };
 
+  const login: RpcLogin = {
+    start: (params) => call("login.start", params),
+    startDraft: (params) => call("login.startDraft", params),
+    submitManual: async (loginId, text) => {
+      await call("login.submitManual", { loginId, text });
+    },
+    cancel: async (loginId) => {
+      await call("login.cancel", { loginId });
+    },
+  };
+
   return {
     async initialize() {
       const result = await call("initialize", {
@@ -507,6 +566,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     },
     runtime,
     provider,
+    login,
     session,
     call,
     onEvent(handler) {
@@ -519,6 +579,12 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       providersChangedListeners.add(handler);
       return () => {
         providersChangedListeners.delete(handler);
+      };
+    },
+    onLoginCompleted(handler) {
+      loginCompletedListeners.add(handler);
+      return () => {
+        loginCompletedListeners.delete(handler);
       };
     },
     async shutdown() {

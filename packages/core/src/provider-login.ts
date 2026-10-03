@@ -118,6 +118,11 @@ export async function startDraftProviderLogin(
   return { ...session, loginId };
 }
 
+/** 丢弃草稿登录暂存的凭据（表单放弃或客户端断开）；进行中的登录用 LoginSession.cancel。commit 后调用为空操作。 */
+export function discardDraftLogin(config: RuntimeConfig, loginId: string): void {
+  dropPendingLogin(config, loginId);
+}
+
 export async function logoutProvider(config: RuntimeConfig, providerId: string): Promise<void> {
   const entry = config.base.providers.find((item) => item.id === providerId);
   if (!entry) throw new ProviderLoginError("missing");
