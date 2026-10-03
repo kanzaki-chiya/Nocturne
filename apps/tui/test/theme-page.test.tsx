@@ -39,7 +39,7 @@ async function openTheme(screen: ReturnType<typeof render>): Promise<void> {
   screen.stdin.write("/theme");
   await waitFor(() => (screen.lastFrame() ?? "").includes("/theme"));
   screen.stdin.write("\r");
-  await waitFor(() => (screen.lastFrame() ?? "").includes("/theme 选择主题"));
+  await waitFor(() => (screen.lastFrame() ?? "").includes("选择主题"));
   await new Promise((resolve) => setImmediate(resolve));
 }
 

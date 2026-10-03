@@ -871,8 +871,8 @@ describe("TUI", () => {
     // 首帧出现后页面的按键订阅在 effect 里才挂上，留一点时间再打字
     await pause(100);
     const frame = lastFrame() ?? "";
-    // 备用屏内渲染模型选择页：搜索框 + 模型行
-    expect(frame).toContain("搜索");
+    // 备用屏内渲染模型选择页：面包屑 + 模型行
+    expect(frame).toContain("全部模型");
     expect(frame).toContain("fake/fake-1");
     // 输入字符 → 搜索过滤
     stdin.write("zzz");
@@ -913,7 +913,7 @@ describe("TUI", () => {
     await pause(100);
     const frame = lastFrame() ?? "";
     expect(frame).toContain("服务商");
-    expect(frame).toContain("过滤");
+    expect(frame).toContain("可添加");
     // 未配置的预设服务商以 ○ 列出
     expect(frame).toContain("○");
     // 打字过滤 → 无匹配

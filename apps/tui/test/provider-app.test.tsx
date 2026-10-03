@@ -60,7 +60,7 @@ async function mount(inline: boolean) {
   const row = () =>
     (ui.lastFrame() ?? "").split("\n").findIndex((line) => line.includes("offline")) + 1;
   const click = () => {
-    const point = { button: 0, x: 3, y: row() };
+    const point = { button: 0, x: 24, y: row() };
     emit({ type: "press", ...point });
     emit({ type: "release", ...point });
   };
@@ -69,9 +69,10 @@ async function mount(inline: boolean) {
 
 it("首次配置的 App 路由列表点击，拖回原处不触发动作", async () => {
   const { ui, click, emit, row } = await mount(false);
+  await changedFrame(ui, () => ui.stdin.write("\x1b[B")); // 光标先离开 offline，单击才是"选中"
   await changedFrame(ui, click);
   const before = ui.lastFrame();
-  const point = { button: 0, x: 3, y: row() };
+  const point = { button: 0, x: 24, y: row() };
   emit({ type: "press", ...point });
   emit({ type: "drag", ...point, x: 4 });
   emit({ type: "drag", ...point });

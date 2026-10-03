@@ -8,6 +8,7 @@ import { useTheme } from "../theme.js";
 import { Buttons } from "./dialog/buttons.js";
 import { DialogFrame } from "./dialog/dialog-frame.js";
 import { screenRect, type DialogMouseFrame } from "./dialog/mouse.js";
+import { PageFooter, PageHeader } from "./page/page-shell.js";
 
 const ACTIONS = [
   ["both", "对话和文件一起回退"],
@@ -60,7 +61,8 @@ export function RewindPage({
   const restorable = target?.files.some((file) => file.action !== "untracked") === true;
   const disabled = (id: string) => !restorable && (id === "both" || id === "files");
   const small = width < 12 || height < 8;
-  const listRows = Math.max(1, height - 3);
+  // 列表页：页头 2 行 + 页脚（分隔线、提示）2 行
+  const listRows = Math.max(1, height - 4);
   const start = Math.max(0, Math.min(state.cursor - listRows + 1, targets.length - listRows));
   const framed = width >= 28 && height >= 12;
   const dialogWidth = framed ? Math.min(80, width - 4) : width;
@@ -199,9 +201,11 @@ export function RewindPage({
   if (state.stage === "list")
     return (
       <Box width={width} height={height} flexDirection="column" overflow="hidden">
-        <Text bold color={theme.accent}>
-          /rewind 轮次列表
-        </Text>
+        <PageHeader
+          title={["回退", "轮次列表"]}
+          subtitle={`选择要回到其之前的那一轮${targets.length > 0 ? ` · 共 ${targets.length} 轮` : ""}`}
+          width={width}
+        />
         <Box ref={scrollBox} flexDirection="column" flexGrow={1} overflow="hidden">
           {small ? (
             <Text>终端太小，请放大 · Esc 返回</Text>
@@ -233,9 +237,14 @@ export function RewindPage({
             ))
           )}
         </Box>
-        <Text color={theme.muted} wrap="truncate">
-          ↑↓ 选择 · Enter 操作 · Esc 返回
-        </Text>
+        <PageFooter
+          width={width}
+          hints={[
+            ["↑↓", "选择"],
+            ["Enter", "操作"],
+            ["Esc", "返回"],
+          ]}
+        />
       </Box>
     );
   return (

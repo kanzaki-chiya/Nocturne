@@ -282,9 +282,8 @@ describe("dialog mouse app routing", () => {
       await waitLong(() => expect(ui.lastFrame()).toContain("已保存"));
       expect(ui.lastFrame()).not.toContain("编辑档位");
       await changed(ui, () => ui.stdin.write("\x1b"));
-      expect(ui.lastFrame()).toContain("过滤");
-      await changed(ui, () => clickText("● up"));
-      expect(ui.lastFrame()).not.toContain("[ 换密钥 ]");
+      expect(ui.lastFrame()).toContain("已配置");
+      // 唯一一行默认已选中，单击即打开操作对话框
       await changed(ui, () => clickText("● up"));
       expect(ui.lastFrame()).toContain("[ 换密钥 ]");
       await changed(ui, () => ui.stdin.write("\x1b"));

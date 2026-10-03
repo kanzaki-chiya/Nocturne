@@ -127,6 +127,65 @@ function Line({ spans }: { spans: readonly RenderSpan[] }): React.JSX.Element {
   );
 }
 
+/** 页头：粗体主色面包屑 + 灰色说明行；不含列表的页面（主题、回退）直接复用 */
+export function PageHeader({
+  title,
+  subtitle,
+  width,
+}: {
+  title: readonly string[];
+  subtitle?: string | undefined;
+  width: number;
+}): React.JSX.Element {
+  const env = useTuiEnv();
+  const palette = useTheme();
+  return (
+    <>
+      <Line
+        spans={clipSpans(
+          [{ text: title.join(env.ascii ? " > " : " › "), color: palette.accent, bold: true }],
+          width - 1,
+        )}
+      />
+      {subtitle !== undefined ? (
+        <Line spans={clipSpans([{ text: subtitle, color: palette.muted }], width - 1)} />
+      ) : null}
+    </>
+  );
+}
+
+/** 页脚：分隔线 + 可选状态行（报错/保存中）+ 提示行，样式与 PageShell 一致 */
+export function PageFooter({
+  hints,
+  width,
+  notice,
+}: {
+  hints: HintPairs;
+  width: number;
+  notice?: ShellNotice | undefined;
+}): React.JSX.Element {
+  const env = useTuiEnv();
+  const palette = useTheme();
+  return (
+    <>
+      <Line
+        spans={[
+          { text: (env.ascii ? "-" : "─").repeat(Math.max(0, width - 1)), color: palette.border },
+        ]}
+      />
+      {notice !== undefined ? (
+        <Line
+          spans={clipSpans(
+            [{ text: notice.text, color: toneColor(palette, notice.tone) }],
+            width - 2,
+          )}
+        />
+      ) : null}
+      <Line spans={hintSpans(hints, palette, width - 1)} />
+    </>
+  );
+}
+
 export function PageShell(props: PageShellProps): React.JSX.Element {
   const { title, subtitle, rows: allRows, groups = [], sidebar, width, height, active } = props;
   const env = useTuiEnv();

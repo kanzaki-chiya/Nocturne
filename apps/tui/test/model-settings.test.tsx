@@ -695,7 +695,7 @@ describe("服务商页 Delete 入口与底部提示（ADR-0030 §6）", () => {
     );
     await waitFor(() => (lastFrame() ?? "").includes("已配置"));
     const hint = (lastFrame() ?? "").split("\n").find((l) => l.includes("Enter 操作")) ?? "";
-    expect(hint).toBe("↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回");
+    expect(hint).toContain("↑↓ 移动  Enter 操作  Delete 删除  Tab 切换栏  Esc 返回");
     expect(lastFrame() ?? "").not.toContain("换密钥 / 刷新 / 编辑模型 / 删除");
     unmount();
   });
@@ -709,7 +709,7 @@ describe("服务商页 Delete 入口与底部提示（ADR-0030 §6）", () => {
     expect(frame).toContain("Enter 操作");
     expect(frame).toContain("Esc 返回");
     expect(frame).not.toContain("Enter 打开操作");
-    expect(frame).toContain("↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回");
+    expect(frame).toContain("↑↓ 移动  Enter 操作  Delete 删除  Tab 切换分组  Esc 返回");
     expect(frame).not.toContain("换密钥 / 刷新 / 编辑模型 / 删除");
     unmount();
   });

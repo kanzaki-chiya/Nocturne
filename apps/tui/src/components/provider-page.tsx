@@ -1,21 +1,18 @@
 /**
- * 全屏服务商页（tui.md §8；ADR-0019 第 2 条）：
- * 页头（Logo/标题/副标题，首次配置含"第 N 步，共 2 步"）固定不动——
- * 页面高度锁定为终端行数，内容超出时只在列表或表单区域内滚动，
- * 页头与底部按键提示始终完整可见。
- * Logo 自适应：行数 <30 或宽度 <64 时降级为单行文字标题，不画像素 Logo。
+ * 全屏服务商页（tui.md §8；ADR-0019 第 2 条、ADR-0045）：
+ * 用 PageShell 画双栏——左栏「已配置 / 可添加」用于跳转，右栏按组列出全部服务商。
+ * 首次配置（带 stepLabel）时顶部保留像素 Logo；从 /provider 进入则不画 Logo。
  *
  * 未配置预设 Enter → 覆盖列表的配置对话框（WizardView，Core 编排）；
  * 已配置条目 Enter → 居中操作对话框（換密钥/刷新模型列表/编辑模型/删除）；
  * 「编辑模型」打开模型列表/编辑子视图（ADR-0024 第 5 节，model-settings-view.tsx）；
  * 手写层条目 Enter → 模型列表只读查看；当前会话所用服务商不可删除。
  * Delete → 可删除条目直达删除确认（ADR-0030 §6）；当前会话在用/只读/未配置条目
- * 拒绝并给原因（沿用结果行），不开确认框；Backspace 仍只删过滤字符。
- * 全页无打字是非题：删除确认等复用对话框按钮。
+ * 拒绝并给原因（沿用说明区），不开确认框；Backspace 仍只删过滤字符。
  * 由 App 在备用屏内渲染；进出序列在 App（ADR-0017 约束沿用）。
  * 本组件只管页面内状态与按键，业务逻辑都在父级（Core 公开 API）。
  */
-import { Box, Text, useInput, type DOMElement } from "ink";
+import { Box, Text } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
@@ -26,16 +23,22 @@ import type {
 } from "@nocturne/core";
 
 import { useTuiEnv } from "../env.js";
-import { truncateLine } from "../format.js";
 import { useTheme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
 import { providerCredentialDescription } from "../text-format.js";
 import { ProviderDialog } from "./provider-dialog.js";
 import { ModelEditPane, ModelListPane } from "./model-settings-view.js";
-import { screenRect, type DialogMouseFrame } from "./dialog/mouse.js";
+import type { DialogMouseFrame } from "./dialog/mouse.js";
+import {
+  PageShell,
+  type ShellGroup,
+  type ShellNotice,
+  type ShellRow,
+  type ShellSideItem,
+  type ShellSpan,
+} from "./page/page-shell.js";
 import { PixelLogo } from "./pixel-logo.js";
 import { WizardView } from "./wizard-view.js";
-import { InputCursor } from "./input-cursor.js";
 
 /** 列表行：预设（可附带同 id 已配置条目）或预设外的已配置条目 */
 export type ProviderRow =
@@ -60,20 +63,6 @@ export function buildProviderRows(
   return rows;
 }
 
-/** 按过滤词筛选行（渲染 useMemo 与按键 handler 共用，后者从 queryRef 取最新值） */
-function filterRows(allRows: ProviderRow[], query: string): ProviderRow[] {
-  if (query === "") return allRows;
-  const q = query.toLowerCase();
-  return allRows.filter((r) => {
-    const label = (r.kind === "preset" ? r.preset.label : r.overview.id).toLowerCase();
-    const id = (
-      r.kind === "preset" ? (r.configured?.id ?? r.preset.id) : r.overview.id
-    ).toLowerCase();
-    const host = (r.kind === "preset" ? r.configured?.host : r.overview.host)?.toLowerCase() ?? "";
-    return label.includes(q) || id.includes(q) || host.includes(q);
-  });
-}
-
 function keySourceText(p: ProviderOverview): string {
   switch (p.keySource) {
     case "credential":
@@ -85,35 +74,78 @@ function keySourceText(p: ProviderOverview): string {
   }
 }
 
-function rowLabel(row: ProviderRow, currentId: string | undefined, env: { ascii: boolean }) {
-  const dotOn = env.ascii ? "*" : "●";
-  const dotOff = env.ascii ? "o" : "○";
-  const p = row.kind === "preset" ? row.configured : row.overview;
+const STATUS_TEXT = {
+  valid: "有效",
+  expiring: "即将过期",
+  expired: "已失效",
+  missing: "缺少密钥",
+} as const;
+
+const GROUPS: readonly ShellGroup[] = [
+  { id: "configured", label: "已配置" },
+  { id: "available", label: "可添加" },
+];
+
+function entryOf(row: ProviderRow): ProviderOverview | undefined {
+  return row.kind === "preset" ? row.configured : row.overview;
+}
+
+/** 服务商页右栏的一行（ADR-0045 第 3 节）：状态点、名称、状态、认证方式 + 当前/模型数 */
+function shellRow(
+  row: ProviderRow,
+  id: string,
+  currentId: string | undefined,
+  dots: { on: string; off: string },
+): ShellRow {
+  const p = entryOf(row);
   if (p === undefined) {
+    const label = row.kind === "preset" ? row.preset.label : "";
     return {
-      mark: dotOff,
-      name: row.kind === "preset" ? row.preset.label : "",
-      detail: "未配置",
-      configured: false,
+      id,
+      group: "available",
+      cells: [
+        {
+          spans: [
+            { text: dots.off, tone: "muted" },
+            { text: ` ${label}`, tone: "muted" },
+          ],
+        },
+        { text: "未配置", tone: "muted" },
+      ],
+      search: label,
     };
   }
-  const tags: string[] = [];
-  if (p.id === currentId) tags.push("当前");
-  if (p.overridden) tags.push("被 config.json 覆盖");
-  if (!p.managed) tags.push("只读");
-  const detail =
-    `已配置 • ${providerCredentialDescription(p) || keySourceText(p)} • ${p.modelCount} 个模型` +
-    (tags.length > 0 ? ` • ${tags.join(" • ")}` : "");
-  return { mark: dotOn, name: p.id, detail, configured: true };
+  const status =
+    p.credentialStatus !== undefined
+      ? STATUS_TEXT[p.credentialStatus]
+      : p.keySource === "missing"
+        ? STATUS_TEXT.missing
+        : "已配置";
+  const statusTone =
+    p.credentialStatus === undefined || p.credentialStatus === "valid" ? "success" : "warning";
+  const auth = [p.auth ?? keySourceText(p)].join("");
+  const trail: { text: string; tone: "accent" | "muted" | "warning" }[] = [];
+  if (p.id === currentId) trail.push({ text: "当前", tone: "accent" });
+  if (p.overridden) trail.push({ text: "被 config.json 覆盖", tone: "warning" });
+  if (!p.managed) trail.push({ text: "只读", tone: "muted" });
+  trail.push({ text: `${p.modelCount} 个模型`, tone: "muted" });
+  return {
+    id,
+    group: "configured",
+    cells: [
+      {
+        spans: [{ text: dots.on, tone: statusTone }, { text: ` ${p.id}` }],
+      },
+      { text: status, tone: statusTone },
+      { text: auth, tone: "muted" },
+    ],
+    trail,
+    search: `${p.id} ${p.host ?? ""} ${row.kind === "preset" ? row.preset.label : ""}`,
+  };
 }
 
 /** 交给父级执行的操作（删除在页内确认后走 onConfirmRemove；「编辑模型」为页内子视图） */
 export type ProviderOp = "key" | "refresh" | "login" | "logout";
-
-/**
- * 底部列表提示（ADR-0039 §2）；操作名称只在对话框内显示。
- */
-const KEY_HINT = "↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回";
 
 export function ProviderPage({
   presets,
@@ -194,14 +226,10 @@ export function ProviderPage({
   const env = useTuiEnv();
   const theme = useTheme();
   const allRows = useMemo(() => buildProviderRows(presets, entries), [presets, entries]);
-  const [cursor, setCursor] = useState(0);
-  const [query, setQuery] = useState("");
   const [action, setAction] = useState<{ providerId: string } | undefined>(undefined);
   const [confirmRemove, setConfirmRemove] = useState<string | undefined>(undefined);
   const [localNotice, setLocalNotice] = useState<string | undefined>(undefined);
   const [wizardTitle, setWizardTitle] = useState("配置服务商");
-  const rowBoxes = useRef(new Map<number, DOMElement>());
-  const listBox = useRef<DOMElement | null>(null);
   // 模型设置子视图（ADR-0024）：列表 → 编辑；数据经 onListModels/onSaveModel
   const [subView, setSubView] = useState<
     | { kind: "models"; providerId: string }
@@ -216,8 +244,6 @@ export function ProviderPage({
   const [saving, setSaving] = useState(false);
   // 镜像 ref：一次 'data' 突发里的多个按键可能在 React 提交前到达，
   // handler 读写同步更新的 ref，不用渲染闭包里的旧状态（子视图门控同理）。
-  const cursorRef = useRef(0);
-  const queryRef = useRef("");
   const actionRef = useRef(action);
   const confirmRemoveRef = useRef(confirmRemove);
   const subViewRef = useRef(subView);
@@ -232,14 +258,6 @@ export function ProviderPage({
   const setConfirmRemoveNow = (v: string | undefined): void => {
     confirmRemoveRef.current = v;
     setConfirmRemove(v);
-  };
-  const setQueryNow = (v: string): void => {
-    queryRef.current = v;
-    setQuery(v);
-  };
-  const setCursorNow = (v: number): void => {
-    cursorRef.current = v;
-    setCursor(v);
   };
 
   const openModels = (providerId: string, modelId?: string): void => {
@@ -296,9 +314,6 @@ export function ProviderPage({
     // 仅挂载时执行一次
   }, []);
 
-  const rows = useMemo(() => filterRows(allRows, query), [allRows, query]);
-  const cur = Math.min(cursor, Math.max(0, rows.length - 1));
-
   const wizardActive = wizard?.state.running === true;
   const noticeLine = localNotice ?? notice;
 
@@ -319,22 +334,27 @@ export function ProviderPage({
     setConfirmRemoveNow(entry.id);
   };
 
-  // 布局预算（ADR-0019 第 3 条）：页头固定、整页锁高、内容区内部滚动。
-  // 像素 Logo 只在高度 ≥30 且宽度 ≥64 时绘制；否则单行文字标题。
-  const showLogo = width >= 64 && (termRows ?? height) >= 30;
-  const headerH = showLogo ? 5 : stepLabel !== undefined ? 3 : 2;
-  // 底部保留结果与列表提示；子视图自带提示，页面只保留结果行。
-  const footerH = subView !== undefined ? 1 : 2;
-  const contentH = Math.max(1, height - headerH - footerH);
-  const listH = Math.max(1, contentH - 1); // 过滤行占 1 行
-  const start = Math.min(
-    Math.max(0, cur - Math.floor(listH / 2)),
-    Math.max(0, rows.length - listH),
-  );
-  const visible = rows.slice(start, start + listH);
-  const showScroll = rows.length > listH;
-  const thumbH = Math.max(1, Math.round((listH / rows.length) * listH));
-  const thumbStart = Math.round((start / Math.max(1, rows.length - listH)) * (listH - thumbH));
+  // 布局（ADR-0045）：首次配置保留像素 Logo（高度 ≥30 且宽度 ≥64），其余全交给 PageShell。
+  const showLogo = stepLabel !== undefined && width >= 64 && (termRows ?? height) >= 30;
+  const logoH = showLogo ? 5 : 0;
+  const subtitle = `${stepLabel !== undefined && !showLogo ? `${stepLabel} · ` : ""}选择服务商进行配置；可配置多个，完成后按 Esc`;
+  const dots = { on: env.ascii ? "*" : "●", off: env.ascii ? "o" : "○" };
+  const shellRows = useMemo(() => {
+    const configured: ShellRow[] = [];
+    const available: ShellRow[] = [];
+    allRows.forEach((row, index) => {
+      const shell = shellRow(row, String(index), currentProviderId, dots);
+      (entryOf(row) !== undefined ? configured : available).push(shell);
+    });
+    return [...configured, ...available];
+  }, [allRows, currentProviderId, dots.on, dots.off]);
+  const configuredCount = shellRows.filter((r) => r.group === "configured").length;
+  const sideItems: ShellSideItem[] = [
+    { id: "configured", label: "已配置", count: configuredCount },
+    { id: "available", label: "可添加", count: shellRows.length - configuredCount, tone: "muted" },
+  ];
+  const rowOf = (id: string | undefined): ProviderRow | undefined =>
+    id === undefined ? undefined : allRows[Number(id)];
 
   const openRow = (row: ProviderRow): void => {
     setLocalNotice(undefined);
@@ -353,154 +373,6 @@ export function ProviderPage({
     setActionNow({ providerId: entry.id });
   };
 
-  useEffect(() => {
-    if (
-      !active ||
-      !onMouseFrame ||
-      wizardActive ||
-      action !== undefined ||
-      confirmRemove !== undefined ||
-      subView !== undefined
-    )
-      return;
-    onMouseFrame({
-      layer: "provider-list",
-      boxes: [...rowBoxes.current].map(([index, node]) => {
-        const rect = screenRect(node);
-        return {
-          id: String(index),
-          row: rect.row,
-          colStart: rect.col,
-          colEnd: rect.col + rect.width - 1,
-        };
-      }),
-      click: (id) => {
-        const index = Number(id);
-        const row = rows[index];
-        if (row === undefined) return;
-        if (index === cursorRef.current) openRow(row);
-        else setCursorNow(index);
-      },
-      wheel: (mouse) => {
-        const rect = screenRect(listBox.current ?? undefined);
-        if (
-          mouse.y < rect.row ||
-          mouse.y >= rect.row + rect.height ||
-          mouse.x < rect.col ||
-          mouse.x >= rect.col + rect.width
-        )
-          return;
-        setCursorNow(
-          Math.max(0, Math.min(rows.length - 1, cursorRef.current + (mouse.dir === "up" ? -3 : 3))),
-        );
-      },
-    });
-    return () => {
-      onMouseFrame(undefined);
-    };
-  });
-
-  useInput(
-    (ch, key) => {
-      // 子视图/对话框打开时本页不吃键（ADR-0030 §4）。isActive 的退订在
-      // useEffect 里落后于已提交的帧，旧订阅仍可能被分发到，必须在处理器内再判一次。
-      if (subViewRef.current !== undefined) return;
-      // 对话框自管按键，冻结下层列表。
-      if (confirmRemoveRef.current !== undefined) return;
-      if (actionRef.current !== undefined || wizardActive) return;
-
-      if (key.escape) {
-        if (queryRef.current !== "") {
-          setQueryNow("");
-          setCursorNow(0);
-          return;
-        }
-        onClose();
-        return;
-      }
-      const rowsNow = filterRows(allRows, queryRef.current);
-      const curNow = Math.min(cursorRef.current, Math.max(0, rowsNow.length - 1));
-      if (key.upArrow) {
-        setCursorNow((curNow + rowsNow.length - 1) % Math.max(1, rowsNow.length));
-        return;
-      }
-      if (key.downArrow) {
-        setCursorNow((curNow + 1) % Math.max(1, rowsNow.length));
-        return;
-      }
-      if (key.pageUp) {
-        setCursorNow(Math.max(0, curNow - listH));
-        return;
-      }
-      if (key.pageDown) {
-        setCursorNow(Math.min(Math.max(0, rowsNow.length - 1), curNow + listH));
-        return;
-      }
-      if (key.home) {
-        setCursorNow(0);
-        return;
-      }
-      if (key.end) {
-        setCursorNow(Math.max(0, rowsNow.length - 1));
-        return;
-      }
-      if (key.return) {
-        const row = rowsNow[curNow];
-        if (row === undefined) return;
-        openRow(row);
-        return;
-      }
-      if (key.delete) {
-        // Delete = 删除入口（ADR-0030 §6），不再删除过滤字符。
-        // 未配置预设 / 当前会话在用 / 只读条目都给原因并停在这里，不开确认框。
-        const row = rowsNow[curNow];
-        if (row === undefined) return;
-        if (row.kind === "preset" && row.configured === undefined) {
-          setLocalNotice(`"${row.preset.label}" 尚未配置，没有可删除的内容`);
-          return;
-        }
-        const entry = row.kind === "preset" ? row.configured : row.overview;
-        if (entry !== undefined) requestRemove(entry);
-        return;
-      }
-      if (key.backspace) {
-        // Backspace 仍只删过滤字符（行为不变）
-        if (queryRef.current !== "") {
-          setQueryNow(queryRef.current.slice(0, -1));
-          setCursorNow(0);
-        }
-        return;
-      }
-      if (ch !== "" && !key.ctrl && !key.meta) {
-        setQueryNow(queryRef.current + ch);
-        setCursorNow(0);
-      }
-    },
-    {
-      isActive:
-        active &&
-        !wizardActive &&
-        action === undefined &&
-        confirmRemove === undefined &&
-        subView === undefined,
-    },
-  );
-
-  const titleRow = (
-    <Box flexDirection="row" height={headerH}>
-      {showLogo ? <PixelLogo /> : null}
-      <Box flexDirection="column" marginLeft={showLogo ? 2 : 0}>
-        <Text bold color={theme.accent} wrap="truncate">
-          Nocturne · 服务商
-        </Text>
-        <Text color={theme.muted} wrap="truncate">
-          {truncateLine("选择服务商进行配置；可配置多个，完成后按 Esc", width - 2)}
-        </Text>
-        {stepLabel !== undefined ? <Text color={theme.info}>{stepLabel}</Text> : null}
-      </Box>
-    </Box>
-  );
-
   const modelsEntry =
     subView !== undefined ? entries.find((e) => e.id === subView.providerId) : undefined;
   // 只读以 Core 视图为准（服务商在 providers.json 才可编辑，ADR-0024）；
@@ -515,6 +387,7 @@ export function ProviderPage({
       ? modelsData?.views?.find((v) => v.modelId === subView.modelId)
       : undefined;
 
+  const subHeight = Math.max(1, height - 2);
   const content =
     subView?.kind === "models" ? (
       <ModelListPane
@@ -524,7 +397,7 @@ export function ProviderPage({
         error={modelsData?.providerId === subView.providerId ? modelsData.error : undefined}
         active={active}
         width={width}
-        height={contentH}
+        height={subHeight}
         onOpen={(modelId) => {
           setSubViewNow({ kind: "edit", providerId: subView.providerId, modelId });
           setSaveError(undefined);
@@ -541,90 +414,142 @@ export function ProviderPage({
         readonlyHint={modelsHint}
         active={false}
         width={width}
-        height={contentH}
+        height={subHeight}
         onOpen={() => undefined}
         onBack={() => undefined}
       />
-    ) : (
-      <Box flexDirection="column">
-        <Text wrap="truncate">
-          <Text color={theme.muted}>{"过滤: "}</Text>
-          {query}
-          <Text color={theme.selected} backgroundColor={theme.selectionBg}>
-            {" "}
-          </Text>
-        </Text>
-        <Box ref={listBox} flexDirection="row" height={listH}>
-          <Box flexDirection="column" flexGrow={1}>
-            {visible.map((row, i) => {
-              const idx = start + i;
-              const focused = idx === cur;
-              const l = rowLabel(row, currentProviderId, env);
-              const marker = focused ? (env.ascii ? ">" : "▸") : " ";
-              const text = `${marker} ${l.mark} ${l.name}  ${l.detail}`;
-              return (
-                <Box
-                  key={idx}
-                  ref={(node) => {
-                    if (node) rowBoxes.current.set(idx, node);
-                    else rowBoxes.current.delete(idx);
-                  }}
-                >
-                  <Text wrap="truncate">
-                    <Text
-                      color={focused ? theme.selected : l.configured ? theme.success : theme.muted}
-                      {...(focused ? { backgroundColor: theme.selectionBg } : {})}
-                    >
-                      {truncateLine(text, width - (showScroll ? 6 : 4))}
-                    </Text>
-                  </Text>
-                </Box>
-              );
-            })}
-            {rows.length === 0 ? <Text color={theme.muted}>（无匹配）</Text> : null}
-          </Box>
-          {showScroll ? (
-            <Box flexDirection="column" width={1} marginLeft={1}>
-              {Array.from({ length: listH }, (_, i) => (
-                <Text
-                  key={i}
-                  color={i >= thumbStart && i < thumbStart + thumbH ? theme.accent : theme.muted}
-                >
-                  {env.ascii ? (i >= thumbStart && i < thumbStart + thumbH ? "#" : "|") : "█"}
-                </Text>
-              ))}
-            </Box>
-          ) : null}
-        </Box>
-      </Box>
-    );
+    ) : null;
+
+  const noticeTone: ShellNotice["tone"] =
+    noticeLine?.startsWith("!") === true ? "warning" : "accent";
+  const shellNotice =
+    busyText !== undefined || noticeLine !== undefined
+      ? { text: busyText ?? noticeLine ?? "", tone: noticeTone }
+      : undefined;
+  const describe = (row: ShellRow | undefined): ShellSpan[][] => {
+    const source = rowOf(row?.id);
+    if (source === undefined) return [];
+    const p = entryOf(source);
+    if (p === undefined) {
+      const label = source.kind === "preset" ? source.preset.label : "";
+      return [
+        [
+          { text: label, tone: "secondary" },
+          { text: "  尚未配置", tone: "muted" },
+        ],
+        [{ text: "Enter 开始配置（向导会依次询问地址、密钥和模型）", tone: "muted" }],
+      ];
+    }
+    const credential = providerCredentialDescription(p) || keySourceText(p);
+    return [
+      [
+        { text: p.id, tone: "secondary" },
+        {
+          text: `  ${p.host ?? p.type} · ${p.type} · ${p.modelCount} 个模型${p.id === currentProviderId ? " · 当前会话在用" : ""}`,
+          tone: "muted",
+        },
+      ],
+      [
+        {
+          text: p.managed ? `认证：${credential}` : onReadonlyHint(p),
+          tone: p.managed ? "muted" : "warning",
+        },
+      ],
+    ];
+  };
 
   return (
     <Box flexDirection="column" width={width} height={height} overflow="hidden">
-      <InputCursor
-        active={
-          active &&
-          !wizardActive &&
-          confirmRemove === undefined &&
-          action === undefined &&
-          subView === undefined
-        }
-        prefix="过滤: "
-        text={query}
-        width={width - 2}
-        y={headerH - height}
-      />
-      {titleRow}
-      <Box flexDirection="column" height={contentH} overflow="hidden">
-        {content}
+      <Box flexDirection="column" display={subView === undefined ? "flex" : "none"}>
+        {showLogo ? (
+          <Box flexDirection="row" height={logoH}>
+            <PixelLogo />
+            <Box flexDirection="column" marginLeft={2}>
+              <Text bold color={theme.accent} wrap="truncate">
+                Nocturne · 首次配置
+              </Text>
+              <Text color={theme.info}>{stepLabel}</Text>
+            </Box>
+          </Box>
+        ) : null}
+        <PageShell
+          title={["服务商"]}
+          count={`${configuredCount} 已配置`}
+          subtitle={subtitle}
+          rows={shellRows}
+          groups={GROUPS}
+          sidebar={{ items: sideItems, mode: "jump" }}
+          arrows="focus"
+          describe={describe}
+          notice={shellNotice}
+          hints={({ focus }) =>
+            focus === "side"
+              ? [
+                  ["↑↓", "移动"],
+                  ["Enter", "跳转"],
+                  ["Tab", width < 72 ? "切换分组" : "切换栏"],
+                  ["Esc", "返回"],
+                ]
+              : [
+                  ["↑↓", "移动"],
+                  ["Enter", "操作"],
+                  ["Delete", "删除"],
+                  ["Tab", width < 72 ? "切换分组" : "切换栏"],
+                  ["Esc", "返回"],
+                ]
+          }
+          emptyText="（无匹配）"
+          width={width}
+          height={height - logoH}
+          active={
+            active &&
+            !wizardActive &&
+            action === undefined &&
+            confirmRemove === undefined &&
+            subView === undefined
+          }
+          mouseLayer="provider-list"
+          onMouseFrame={onMouseFrame}
+          onSelect={() => {
+            setLocalNotice(undefined);
+          }}
+          onClose={onClose}
+          onActivate={(id) => {
+            const row = rowOf(id);
+            if (row !== undefined) openRow(row);
+          }}
+          onKey={(_input, key, ctx) => {
+            if (!key.delete || ctx.focus !== "list") return false;
+            // Delete = 删除入口（ADR-0030 §6），不再删除过滤字符。
+            // 未配置预设 / 当前会话在用 / 只读条目都给原因并停在这里，不开确认框。
+            const row = rowOf(ctx.rowId);
+            if (row === undefined) return true;
+            const entry = entryOf(row);
+            if (entry === undefined) {
+              setLocalNotice(
+                `"${row.kind === "preset" ? row.preset.label : ""}" 尚未配置，没有可删除的内容`,
+              );
+              return true;
+            }
+            requestRemove(entry);
+            return true;
+          }}
+        />
       </Box>
-      <Text wrap="truncate" color={noticeLine !== undefined ? theme.accent : theme.muted}>
-        {truncateLine(busyText ?? noticeLine ?? "", width - 4)}
-      </Text>
-      {subView === undefined ? (
-        <Text color={theme.muted} wrap="truncate">
-          {truncateLine(KEY_HINT, width - 2)}
-        </Text>
+      {subView !== undefined ? (
+        <>
+          <Box flexShrink={0}>
+            <Text bold color={theme.accent} wrap="truncate">
+              {`服务商 › ${subView.providerId} › 模型`}
+            </Text>
+          </Box>
+          <Box flexDirection="column" height={subHeight} overflow="hidden">
+            {content}
+          </Box>
+          <Text wrap="truncate" color={noticeLine !== undefined ? theme.accent : theme.muted}>
+            {busyText ?? noticeLine ?? ""}
+          </Text>
+        </>
       ) : null}
       {wizardActive ? (
         <Box position="absolute" width={width} height={height}>

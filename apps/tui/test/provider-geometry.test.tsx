@@ -60,7 +60,7 @@ function expectHeaderIntact(frame: string, height: number, compactTitle: boolean
   const rows = frame.split("\n");
   expect(rows.length).toBeLessThanOrEqual(height);
   if (compactTitle) {
-    expect(rows[0]).toContain("Nocturne");
+    expect(rows[0]).toContain("服务商");
   }
 }
 
@@ -131,7 +131,8 @@ describe("provider page geometry (header never scrolls off)", () => {
     const { lastFrame, unmount } = renderPage(STATES["busy-fetch"], 120, 40);
     const frame = lastFrame() ?? "";
     expectHeaderIntact(frame, 40, false);
-    expect(frame).toContain("Nocturne · 服务商");
+    expect(frame).toContain("Nocturne · 首次配置");
+    expect(frame).toContain("第 1 步，共 2 步");
     unmount();
   });
 });

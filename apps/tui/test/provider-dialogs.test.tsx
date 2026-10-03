@@ -92,7 +92,7 @@ async function page(
       createElement(Harness),
     ),
   );
-  await settle(() => ui.lastFrame()?.includes("过滤:") === true);
+  await settle(() => ui.lastFrame()?.includes("可添加") === true);
   return {
     ...ui,
     mouse,
@@ -106,7 +106,6 @@ async function page(
   };
 }
 async function configured(ui: Awaited<ReturnType<typeof page>>) {
-  await changedFrame(ui, () => ui.stdin.write("\x1b[B")); // 未配置预设 → alpha
   await changedFrame(ui, () => ui.stdin.write("\r"));
   expect(ui.lastFrame()).toContain("服务商 alpha");
 }
@@ -146,7 +145,6 @@ describe("服务商四个对话框与页内鼠标（ADR-0039 §2）", () => {
   });
   it("删除确认默认取消，Delete 与操作对话框入口一致，右箭头确认后才删除", async () => {
     const ui = await page();
-    await changedFrame(ui, () => ui.stdin.write("\x1b[B"));
     await changedFrame(ui, () => ui.stdin.write("\x1b[3~"));
     expect(ui.lastFrame()).toContain("删除 alpha 的配置与已保存的密钥");
     expect(ui.lastFrame()).toContain("> [ 取消 ]");
@@ -183,7 +181,7 @@ describe("服务商四个对话框与页内鼠标（ADR-0039 §2）", () => {
     await changedFrame(ui, () => ui.stdin.write("\r"));
     expect(ui.lastFrame()).toContain("换密钥 alpha");
     expect(ui.lastFrame()).toContain("第 1 步，共 2 步");
-    expect(ui.lastFrame()).toContain("过滤:");
+    expect(ui.lastFrame()).toContain("服务商");
     expect(ui.mouse.frame?.layer).toBe("provider-wizard");
     await changedFrame(ui, () => ui.stdin.write("offline-key"));
     ui.stdin.write("\r");
@@ -194,10 +192,11 @@ describe("服务商四个对话框与页内鼠标（ADR-0039 §2）", () => {
   });
   it("配置向导保留下层列表、步骤标记，空 API Key 回车仍进入环境变量步骤，Esc 取消", async () => {
     const ui = await page();
+    for (let i = 0; i < 2; i++) await changedFrame(ui, () => ui.stdin.write("\x1b[B")); // alpha → beta → DeepSeek
     await changedFrame(ui, () => ui.stdin.write("\r"));
     expect(ui.lastFrame()).toContain("配置 DeepSeek");
     expect(ui.lastFrame()).toContain("第 1 步，共 2 步");
-    expect(ui.lastFrame()).toContain("过滤:");
+    expect(ui.lastFrame()).toContain("服务商");
     expect(ui.lastFrame()).toContain("[ 下一步 ]");
     ui.stdin.write("\r");
     await settle(() => ui.lastFrame()?.includes("凭据环境变量名") === true);
@@ -209,21 +208,23 @@ describe("服务商四个对话框与页内鼠标（ADR-0039 §2）", () => {
   });
   it("列表单击选中，再次单击打开；操作和删除按钮单击可执行", async () => {
     const ui = await page();
-    await changedFrame(ui, () => ui.mouse.click("1")); // alpha 未选中
+    await changedFrame(ui, () => ui.mouse.click("row:2")); // beta 未选中：只选中
     expect(ui.mouse.frame?.layer).toBe("provider-list");
-    await changedFrame(ui, () => ui.mouse.click("1"));
+    await changedFrame(ui, () => ui.mouse.click("row:1")); // 选中 alpha
+    expect(ui.mouse.frame?.layer).toBe("provider-list");
+    await changedFrame(ui, () => ui.mouse.click("row:1"));
     expect(ui.mouse.frame?.layer).toBe("provider-actions");
     ui.mouse.click("refresh");
     await settle(
       () => ui.onOp.mock.calls.length === 1 && ui.mouse.frame?.layer === "provider-list",
     );
     expect(ui.onOp).toHaveBeenCalledWith("alpha", "refresh");
-    await changedFrame(ui, () => ui.mouse.click("1"));
+    await changedFrame(ui, () => ui.mouse.click("row:1"));
     await changedFrame(ui, () => ui.mouse.click("remove"));
     expect(ui.lastFrame()).toContain("> [ 取消 ]");
     await changedFrame(ui, () => ui.mouse.click("cancel"));
     expect(ui.onConfirmRemove).not.toHaveBeenCalled();
-    await changedFrame(ui, () => ui.mouse.click("1"));
+    await changedFrame(ui, () => ui.mouse.click("row:1"));
     await changedFrame(ui, () => ui.mouse.click("remove"));
     ui.mouse.click("remove");
     await settle(() => ui.onConfirmRemove.mock.calls.length === 1);
@@ -234,18 +235,18 @@ describe("服务商四个对话框与页内鼠标（ADR-0039 §2）", () => {
     ui.mouse.feed({ type: "wheel", dir: "down", x: 1, y: 1 }); // 页头不滚
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(ui.lastFrame()).toBe(first);
-    for (let i = 0; i < 5; i++) {
-      const box = ui.mouse.frame?.boxes[0];
+    for (let i = 0; i < 10; i++) {
+      const box = ui.mouse.frame?.boxes.find((b) => b.id.startsWith("row:"));
       if (!box) throw new Error("missing provider rows");
       await changedFrame(ui, () =>
         ui.mouse.feed({ type: "wheel", dir: "down", x: box.colStart, y: box.row }),
       );
     }
     expect(ui.lastFrame()).not.toContain("provider-00");
-    expect(ui.lastFrame()).toContain("provider-15");
+    expect(ui.lastFrame()).toContain("provider-30");
     const list = ui.lastFrame();
     await changedFrame(ui, () => ui.stdin.write("\r"));
-    expect(ui.lastFrame()).toContain("服务商 provider-15");
+    expect(ui.lastFrame()).toContain("服务商 provider-30");
     ui.mouse.feed({ type: "wheel", dir: "down", x: 2, y: 8 });
     ui.stdin.write("ignored-filter");
     await changedFrame(ui, () => ui.stdin.write("\x1b"));
@@ -253,7 +254,7 @@ describe("服务商四个对话框与页内鼠标（ADR-0039 §2）", () => {
   });
   it("拖动经过控件再返回松开也不触发动作、选中或向导", async () => {
     const ui = await page();
-    const box = ui.mouse.at("1");
+    const box = ui.mouse.at("row:1");
     const original = ui.lastFrame();
     ui.mouse.feed({ type: "press", button: 0, x: box.colStart, y: box.row });
     ui.mouse.feed({ type: "drag", button: 0, x: box.colStart + 2, y: box.row });
@@ -273,7 +274,6 @@ describe("服务商四个对话框与页内鼠标（ADR-0039 §2）", () => {
   });
   it("只读条目仍给配置文件提示并打开只读模型列表，Delete 不开删除对话框", async () => {
     const ui = await page({ readonly: true });
-    await changedFrame(ui, () => ui.stdin.write("\x1b[B"));
     await changedFrame(ui, () => ui.stdin.write("\x1b[3~"));
     expect(ui.lastFrame()).toContain("请编辑该处配置");
     await changedFrame(ui, () => ui.stdin.write("\r"));
@@ -285,7 +285,7 @@ describe("服务商四个对话框与页内鼠标（ADR-0039 §2）", () => {
   });
   it("inline 同套对话框键盘可用、不登记鼠标；ASCII 边框和底部提示", async () => {
     const ui = await page({ inline: true, ascii: true });
-    expect(ui.lastFrame()).toContain("↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回");
+    expect(ui.lastFrame()).toContain("↑↓ 移动  Enter 操作  Delete 删除  Tab 切换栏  Esc 返回");
     expect(ui.mouse.frame).toBeUndefined();
     await configured(ui);
     expect(ui.lastFrame()).toContain("+");

@@ -620,6 +620,7 @@ function SetupFlow({
         }}
         width={width}
         height={Math.max(1, frame.frameHeight - 1)}
+        onMouseFrame={inline ? undefined : reportDialogMouse}
         active
       />
     </Box>
@@ -2459,6 +2460,7 @@ function SessionApp({
         }}
         width={width}
         height={budget.frameHeight}
+        onMouseFrame={fullscreen ? reportDialogMouse : undefined}
         active={wizardOverlay === undefined}
       />
     ) : providerPageOpen ? (

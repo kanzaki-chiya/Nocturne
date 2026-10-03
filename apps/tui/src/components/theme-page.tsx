@@ -5,6 +5,7 @@ import { createSessionView, type PendingPermission, type ToolEntry } from "@noct
 
 import { glyphs, useTuiEnv } from "../env.js";
 import { palettes, ThemeContext, useTheme, type ThemeId, type ThemePalette } from "../theme.js";
+import { PageFooter, PageHeader } from "./page/page-shell.js";
 import { PermissionDialog } from "./permission-dialog.js";
 import { StatusBar } from "./status-bar.js";
 import { TodoPanel } from "./todo-panel.js";
@@ -165,11 +166,21 @@ export function ThemePage({
     { isActive: active },
   );
 
+  const notice =
+    error !== undefined
+      ? { text: `保存失败：${error}`, tone: "error" as const }
+      : saving
+        ? { text: "正在保存…", tone: "muted" as const }
+        : undefined;
+  // 页头 2 行 + 选项 2 行 + 页脚（分隔线、状态、提示）3 行
+  const previewHeight = Math.max(0, height - 7);
   return (
     <Box flexDirection="column" width={width} height={height}>
-      <Text bold color={current.accent}>
-        /theme 选择主题
-      </Text>
+      <PageHeader
+        title={["主题"]}
+        subtitle="选择主题：上下移动即时预览，Enter 保存为默认主题"
+        width={width}
+      />
       {(["dark", "light"] as const).map((id) => (
         <Text
           key={id}
@@ -180,19 +191,22 @@ export function ThemePage({
           {id === current.id ? "  当前" : ""}
         </Text>
       ))}
-      <Text color={error === undefined ? current.muted : current.error} wrap="truncate">
-        {error === undefined
-          ? saving
-            ? "正在保存…"
-            : "↑↓ 预览 · Enter 保存 · Esc 取消 · PgUp/PgDn 翻阅示例"
-          : `保存失败：${error}`}
-      </Text>
-      <Box flexDirection="column" height={Math.max(0, height - 4)} overflow="hidden">
+      <Box flexDirection="column" height={previewHeight} overflow="hidden">
         <Box flexDirection={sideBySide ? "row" : "column"} marginTop={-scroll}>
           <Preview palette={palette} background="#0C0C0C" width={cardWidth} />
           <Preview palette={palette} background="#FAFAFA" width={cardWidth} />
         </Box>
       </Box>
+      <PageFooter
+        width={width}
+        notice={notice}
+        hints={[
+          ["↑↓", "预览"],
+          ["Enter", "保存"],
+          ["PgUp/PgDn", "翻阅示例"],
+          ["Esc", "取消"],
+        ]}
+      />
     </Box>
   );
 }

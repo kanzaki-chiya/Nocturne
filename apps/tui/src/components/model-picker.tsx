@@ -1,6 +1,7 @@
 /**
- * 全屏模型选择页（tui.md §7；ADR-0017）：
- * 左栏范围/服务商 + 右栏搜索/列表/详情 + 底部按键提示。
+ * 全屏模型选择页（tui.md §7；ADR-0017、ADR-0045）：
+ * PageShell 双栏——左栏是范围筛选（最近使用 / 全部模型 / 已配置服务商 / 未配置预设），
+ * 右栏列出模型，说明区显示当前行的详情。「仅本会话 / 设为默认」与思考档位选择是页内小对话框。
  * 由 App 在备用屏内渲染（进出序列在 App）；本组件只管页面内状态与按键。
  *
  * 数据只展示上游或配置明确声明的字段：未声明的上下文/最大输出/价格
@@ -8,26 +9,26 @@
  */
 import { Box, Text, useInput } from "ink";
 import { useMemo, useState } from "react";
-import stringWidth from "string-width";
 
 import type { ModelInfo, ModelRef, ProviderOverview, ProviderPreset } from "@nocturne/core";
 import { clampReasoningEffort, type ReasoningEffort } from "@nocturne/core";
 import { Segmented } from "./dialog/segmented.js";
 
 import { useTuiEnv } from "../env.js";
-import { boxSafe, truncateLine } from "../format.js";
 import { useTheme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
-import { InputCursor } from "./input-cursor.js";
+import type { DialogMouseFrame } from "./dialog/mouse.js";
+import {
+  PageShell,
+  type ShellGroup,
+  type ShellRow,
+  type ShellSideItem,
+  type ShellSpan,
+} from "./page/page-shell.js";
 import { WizardView } from "./wizard-view.js";
 
 /** 右栏范围（tui.md §7 左栏前两项 + 已配置服务商） */
 export type PickerScope = { kind: "recent" } | { kind: "all" } | { kind: "provider"; id: string };
-
-type LeftItem =
-  | { kind: "scope"; scope: "recent" | "all"; label: string }
-  | { kind: "provider"; id: string; count: number }
-  | { kind: "preset"; id: string };
 
 function refEq(a: ModelRef, b: ModelRef): boolean {
   return a.provider === b.provider && a.model === b.model;
@@ -67,49 +68,29 @@ function priceText(m: ModelInfo): string {
   return `$${fmt(p.input)}/${fmt(p.output)}`;
 }
 
-/** 模糊过滤：provider/model 全形与 displayName 的子串匹配（大小写不敏感） */
-function matchQuery(m: ModelInfo, q: string): boolean {
-  if (q === "") return true;
-  const needle = q.toLowerCase();
-  return (
-    refText(m.ref).toLowerCase().includes(needle) ||
-    (m.displayName?.toLowerCase().includes(needle) ?? false)
-  );
-}
+const CLEAR_ID = "__clear__";
 
-interface Row {
-  model?: ModelInfo;
-  clearLabel?: string;
-  recent: boolean;
-}
-
-/** 右栏模型集合：scope 过滤 → query 过滤；all/provider 范围最近使用置顶 */
-function rightRows(
+/** 范围内的模型：最近使用按 recents 新→旧排在前，其余按模型列表顺序 */
+function scopeRows(
   scope: PickerScope,
   models: readonly ModelInfo[],
   recents: readonly ModelRef[],
-  query: string,
-): { recentRows: Row[]; restRows: Row[] } {
+): { recent: ModelInfo[]; rest: ModelInfo[] } {
   const inScope = (m: ModelInfo): boolean => {
     if (scope.kind === "provider") return m.ref.provider === scope.id;
     if (scope.kind === "recent") return recents.some((r) => refEq(r, m.ref));
     return true;
   };
-  const pool = models.filter((m) => inScope(m) && matchQuery(m, query));
-  const isRecent = (m: ModelInfo): boolean => recents.some((r) => refEq(r, m.ref));
-  // 最近项一律按 recents 新→旧排列，不按模型列表顺序
-  const ordered = recents
+  const pool = models.filter(inScope);
+  const recent = recents
     .map((r) => pool.find((m) => refEq(m.ref, r)))
-    .filter((m): m is ModelInfo => m !== undefined)
-    .map((model) => ({ model, recent: true }));
-  if (scope.kind === "recent") return { recentRows: [], restRows: ordered };
-  const recentRows = ordered;
-  const restRows = pool.filter((m) => !isRecent(m)).map((model) => ({ model, recent: false }));
-  return { recentRows, restRows };
+    .filter((m): m is ModelInfo => m !== undefined);
+  if (scope.kind === "recent") return { recent, rest: [] };
+  return { recent, rest: pool.filter((m) => !recents.some((r) => refEq(r, m.ref))) };
 }
 
-const NARROW = 80;
-const LEFT_W = 18;
+const scopeId = (scope: PickerScope): string =>
+  scope.kind === "provider" ? `provider:${scope.id}` : `scope:${scope.kind}`;
 
 export function ModelPicker({
   models,
@@ -122,12 +103,14 @@ export function ModelPicker({
   savedEffort,
   selectionOnly = false,
   clearLabel,
+  title,
   initialScope,
   initialFocus,
   wizard,
   onStartWizard,
   onPick,
   onClose,
+  onMouseFrame,
   width,
   height,
   active,
@@ -157,105 +140,156 @@ export function ModelPicker({
   /** 审查/角色模型选择只返回引用，不更改会话模型、默认模型或档位。 */
   selectionOnly?: boolean;
   clearLabel?: string | undefined;
+  /** 面包屑；默认「模型」，设置页里选角色模型时传「设置 › 子代理模型」 */
+  title?: readonly string[] | undefined;
   onPick: (ref: string, setDefault: boolean, effort: ReasoningEffort | null) => void;
   onClose: () => void;
+  onMouseFrame?: ((frame: DialogMouseFrame | undefined) => void) | undefined;
   width: number;
   height: number;
   active: boolean;
 }): React.JSX.Element {
-  const narrow = width < NARROW;
-  const [focus, setFocus] = useState<"left" | "right">(
-    narrow ? "right" : (initialFocus ?? "right"),
-  );
+  const env = useTuiEnv();
+  const theme = useTheme();
   const [scope, setScope] = useState<PickerScope>(initialScope ?? { kind: "all" });
-  const [query, setQuery] = useState("");
-  const [leftCursor, setLeftCursor] = useState(0);
-  const [rightCursor, setRightCursor] = useState(0);
+  const [picked, setPicked] = useState<string | undefined>(undefined);
   const [action, setAction] = useState<0 | 1 | undefined>(undefined);
   const [effort, setEffort] = useState<ReasoningEffort | undefined>();
 
-  const leftItems = useMemo<LeftItem[]>(() => {
-    const items: LeftItem[] = [
-      { kind: "scope", scope: "recent", label: "最近使用" },
-      { kind: "scope", scope: "all", label: "全部模型" },
+  const { recent, rest } = useMemo(
+    () => scopeRows(scope, models, recents),
+    [scope, models, recents],
+  );
+  const byId = useMemo(() => {
+    const map = new Map<string, ModelInfo>();
+    for (const m of [...recent, ...rest]) map.set(refText(m.ref), m);
+    return map;
+  }, [recent, rest]);
+
+  const scopeLabel =
+    scope.kind === "recent" ? "最近使用" : scope.kind === "all" ? "全部模型" : scope.id;
+  const groups: ShellGroup[] = [
+    { id: "recent", label: "最近使用" },
+    { id: "rest", label: recent.length > 0 ? "其余模型" : scopeLabel },
+  ];
+
+  const rows = useMemo<ShellRow[]>(() => {
+    const out: ShellRow[] = [];
+    if (clearLabel !== undefined)
+      out.push({ id: CLEAR_ID, cells: [{ text: clearLabel }], search: clearLabel });
+    const build = (m: ModelInfo, group: "recent" | "rest"): ShellRow => {
+      const reasoning = m.capabilities.reasoning !== "none" ? "R" : " ";
+      const image = m.capabilities.imageInput ? "I" : " ";
+      const trail: { text: string; tone: "accent" | "accentAlt" | "muted" }[] = [];
+      if (m.unavailable !== undefined) trail.push({ text: "协议不支持", tone: "muted" });
+      if (current !== undefined && refEq(m.ref, current))
+        trail.push({ text: "当前", tone: "accent" });
+      if (defaultModel !== undefined && refEq(m.ref, defaultModel))
+        trail.push({ text: "默认", tone: "accentAlt" });
+      return {
+        id: refText(m.ref),
+        group,
+        cells: [
+          { text: refText(m.ref) },
+          { text: `${reasoning} ${image}`, tone: "muted" },
+          { text: ctxText(m), tone: "muted", align: "right" },
+        ],
+        trail,
+        search: `${refText(m.ref)} ${m.displayName ?? ""}`,
+      };
+    };
+    for (const m of recent) out.push(build(m, "recent"));
+    for (const m of rest) out.push(build(m, "rest"));
+    return out;
+  }, [clearLabel, recent, rest, current, defaultModel]);
+
+  const sideItems = useMemo<ShellSideItem[]>(() => {
+    const items: ShellSideItem[] = [
+      { id: "scope:recent", label: "最近使用" },
+      { id: "scope:all", label: "全部模型" },
     ];
-    for (const p of providers) {
-      items.push({ kind: "provider", id: p.id, count: p.modelCount });
-    }
-    for (const p of presets) {
-      items.push({ kind: "preset", id: p.id });
-    }
+    providers.forEach((p, i) => {
+      items.push({
+        id: `provider:${p.id}`,
+        label: p.id,
+        count: p.modelCount,
+        dot: { text: env.ascii ? "*" : "●", tone: "success" },
+        ...(i === 0 ? { separatorBefore: true } : {}),
+      });
+    });
+    presets.forEach((p, i) => {
+      items.push({
+        id: `preset:${p.id}`,
+        label: p.id,
+        dot: { text: env.ascii ? "o" : "○", tone: "muted" },
+        tone: "muted",
+        cyclable: false,
+        ...(i === 0 ? { separatorBefore: true } : {}),
+      });
+    });
     return items;
-  }, [providers, presets]);
-
-  const { recentRows, restRows } = useMemo(
-    () => rightRows(scope, models, recents, query),
-    [scope, models, recents, query],
-  );
-  const rows = useMemo(
-    () => [
-      ...(clearLabel !== undefined ? [{ clearLabel, recent: false }] : []),
-      ...recentRows,
-      ...restRows,
-    ],
-    [clearLabel, recentRows, restRows],
-  );
-  const cursor = Math.min(rightCursor, Math.max(0, rows.length - 1));
-  const selected = rows[cursor]?.model;
-
-  // 窄屏 ←/→ 循环范围：recent → all → 各 provider
-  const scopeCycle = useMemo<PickerScope[]>(
-    () => [
-      { kind: "recent" },
-      { kind: "all" },
-      ...providers.map((p): PickerScope => ({ kind: "provider", id: p.id })),
-    ],
-    [providers],
-  );
-
-  const scopeIndex = scopeCycle.findIndex((s) =>
-    s.kind === scope.kind
-      ? s.kind !== "provider"
-        ? true
-        : s.id === (scope as { id: string }).id
-      : false,
-  );
-
-  const applyLeft = (item: LeftItem): void => {
-    if (item.kind === "scope") {
-      setScope({ kind: item.scope });
-      setRightCursor(0);
-      return;
-    }
-    if (item.kind === "provider") {
-      setScope({ kind: "provider", id: item.id });
-      setRightCursor(0);
-      setFocus("right");
-      return;
-    }
-    // ○ 预设 → /provider add 弹层流程（完成后回到本页，App 侧选中新增服务商）
-    onStartWizard(item.id);
-  };
-
-  const cycleScope = (dir: 1 | -1): void => {
-    const next = scopeCycle[(scopeIndex + dir + scopeCycle.length) % scopeCycle.length];
-    if (next !== undefined) {
-      setScope(next);
-      setRightCursor(0);
-    }
-  };
+  }, [providers, presets, env.ascii]);
 
   const wizardActive = wizard?.state.running === true;
-  const pageSize = Math.max(1, height - 8);
+  const narrow = width < 72;
+  const selectedModel = picked !== undefined ? byId.get(picked) : undefined;
+  const overlayOpen = action !== undefined || effort !== undefined;
 
+  const describe = (row: ShellRow | undefined): ShellSpan[][] => {
+    if (row === undefined) return [];
+    if (row.id === CLEAR_ID)
+      return [[{ text: `选择「${clearLabel ?? ""}」会清除设置层里的这项引用`, tone: "muted" }]];
+    const m = byId.get(row.id);
+    if (m === undefined) return [];
+    const price = priceText(m);
+    const details = [
+      `上下文 ${ctxText(m)}`,
+      `最大输出 ${outText(m)}`,
+      price !== "" ? `${price} 每 M` : "",
+      m.capabilities.reasoning !== "none" ? "推理" : "",
+      m.capabilities.imageInput ? "图片输入" : "",
+      current !== undefined && refEq(m.ref, current) ? "当前会话" : "",
+      defaultModel !== undefined && refEq(m.ref, defaultModel) ? "默认模型" : "",
+    ].filter((t) => t !== "");
+    return [
+      [
+        { text: refText(m.ref), tone: "secondary" },
+        ...(m.displayName !== undefined
+          ? [{ text: `  ${m.displayName}`, tone: "muted" as const }]
+          : []),
+      ],
+      // ADR-0026 §5：不可用模型在详情位置显示原因
+      m.unavailable !== undefined
+        ? [{ text: m.unavailable.reason, tone: "warning" as const }]
+        : [{ text: details.join(" • "), tone: "muted" as const }],
+    ];
+  };
+
+  const pick = (id: string): void => {
+    if (id === CLEAR_ID) {
+      onPick("", false, null);
+      return;
+    }
+    const m = byId.get(id);
+    if (m === undefined) return;
+    if (selectionOnly) onPick(refText(m.ref), false, null);
+    else {
+      setPicked(id);
+      setAction(0);
+    }
+  };
+
+  // 页内小对话框：「仅本会话 / 设为默认」→ 思考档位
   useInput(
-    (ch, key) => {
-      // 内联选项条：←/→ 选择、Enter 确认、Esc 返回
-      if (effort !== undefined && selected !== undefined) {
-        const choices: ReasoningEffort[] = [
-          "off",
-          ...(selected.capabilities.reasoningEffort ?? []),
-        ];
+    (_ch, key) => {
+      const m = selectedModel;
+      if (m === undefined) {
+        setAction(undefined);
+        setEffort(undefined);
+        return;
+      }
+      if (effort !== undefined) {
+        const choices: ReasoningEffort[] = ["off", ...(m.capabilities.reasoningEffort ?? [])];
         if (key.escape) setEffort(undefined);
         else if (key.leftArrow || key.rightArrow) {
           setEffort(
@@ -263,445 +297,154 @@ export function ModelPicker({
               (choices.indexOf(effort) + (key.leftArrow ? -1 : 1) + choices.length) % choices.length
             ],
           );
-        } else if (key.return) onPick(refText(selected.ref), true, effort);
+        } else if (key.return) onPick(refText(m.ref), true, effort);
         return;
       }
-      if (action !== undefined) {
-        if (key.escape) {
-          setAction(undefined);
-          return;
-        }
-        if (key.leftArrow || key.rightArrow) {
-          setAction((a) => (a === 0 ? 1 : 0));
-          return;
-        }
-        if (key.return) {
-          const m = selected;
-          if (m !== undefined) {
-            const levels = m.capabilities.reasoningEffort ?? [];
-            if (action === 1 && levels.length > 0) {
-              const preferred =
-                currentEffort !== undefined &&
-                (currentEffort === "off" || levels.includes(currentEffort))
-                  ? currentEffort
-                  : (clampReasoningEffort(savedEffort ?? "off", levels) ?? "off");
-              setEffort(preferred);
-            } else onPick(refText(m.ref), action === 1, null);
-          }
-          return;
-        }
-        return;
-      }
-
       if (key.escape) {
-        if (query !== "") {
-          setQuery("");
-          setRightCursor(0);
-          return;
-        }
-        onClose();
+        setAction(undefined);
         return;
       }
-
-      if (key.leftArrow) {
-        if (narrow) cycleScope(-1);
-        else setFocus("left");
+      if (key.leftArrow || key.rightArrow) {
+        setAction((a) => (a === 0 ? 1 : 0));
         return;
       }
-      if (key.rightArrow) {
-        if (narrow) cycleScope(1);
-        else setFocus("right");
-        return;
-      }
-
-      if (focus === "left" && !narrow) {
-        if (key.upArrow) {
-          setLeftCursor((c) => (c + leftItems.length - 1) % leftItems.length);
-          return;
-        }
-        if (key.downArrow) {
-          setLeftCursor((c) => (c + 1) % leftItems.length);
-          return;
-        }
-        if (key.return) {
-          const item = leftItems[leftCursor];
-          if (item !== undefined) applyLeft(item);
-          return;
-        }
-      } else {
-        if (key.upArrow) {
-          setRightCursor((c) => (c + rows.length - 1) % Math.max(1, rows.length));
-          return;
-        }
-        if (key.downArrow) {
-          setRightCursor((c) => (c + 1) % Math.max(1, rows.length));
-          return;
-        }
-        if (key.pageUp) {
-          setRightCursor((c) => Math.max(0, c - pageSize));
-          return;
-        }
-        if (key.pageDown) {
-          setRightCursor((c) => Math.min(Math.max(0, rows.length - 1), c + pageSize));
-          return;
-        }
-        if (key.home) {
-          setRightCursor(0);
-          return;
-        }
-        if (key.end) {
-          setRightCursor(Math.max(0, rows.length - 1));
-          return;
-        }
-        if (key.return) {
-          if (rows[cursor]?.clearLabel !== undefined) {
-            onPick("", false, null);
-            return;
-          }
-          if (selected !== undefined) {
-            if (selectionOnly)
-              onPick(`${selected.ref.provider}/${selected.ref.model}`, false, null);
-            else setAction(0);
-          }
-          return;
-        }
-      }
-
-      // 打字自动聚焦右栏搜索框；Backspace 删字符
-      if (key.backspace || key.delete) {
-        if (query !== "") {
-          setQuery((q) => q.slice(0, -1));
-          setRightCursor(0);
-        }
-        return;
-      }
-      if (ch !== "" && !key.ctrl && !key.meta) {
-        setFocus("right");
-        setQuery((q) => q + ch);
-        setRightCursor(0);
+      if (key.return) {
+        const levels = m.capabilities.reasoningEffort ?? [];
+        if (action === 1 && levels.length > 0) {
+          const preferred =
+            currentEffort !== undefined &&
+            (currentEffort === "off" || levels.includes(currentEffort))
+              ? currentEffort
+              : (clampReasoningEffort(savedEffort ?? "off", levels) ?? "off");
+          setEffort(preferred);
+        } else onPick(refText(m.ref), action === 1, null);
       }
     },
-    { isActive: active && !wizardActive },
+    { isActive: active && !wizardActive && overlayOpen },
   );
 
-  // 向导内嵌：右栏替换为向导视图（preset Enter 启动；完成回列表由 App 驱动）
-  const rightPane = wizardActive ? (
-    <WizardView
-      title="添加服务商"
-      state={wizard.state}
-      active={active}
-      width={width - (narrow ? 6 : LEFT_W + 6)}
-      maxRows={height}
-      offsetY={-height}
-      offsetX={narrow ? 0 : LEFT_W}
-      onSubmit={wizard.submit}
-      onSubmitMulti={wizard.submitMulti}
-      onCancel={wizard.cancel}
-    />
-  ) : (
-    <RightPane
-      scope={scope}
-      query={query}
-      rows={rows}
-      recentCount={recentRows.length}
-      cursor={cursor}
-      focus={focus}
-      narrow={narrow}
-      action={action}
-      effort={effort}
-      current={current}
-      defaultModel={defaultModel}
-      width={width - (narrow ? 4 : LEFT_W + 4)}
-      height={height}
-      offsetX={narrow ? 0 : LEFT_W}
-    />
-  );
-
+  const dialogW = Math.min(60, Math.max(20, width - 4));
   return (
-    <Box flexDirection="row" width={width} height={height}>
-      {narrow ? null : (
-        <LeftPane
-          items={leftItems}
-          cursor={leftCursor}
-          focus={focus}
-          scope={scope}
-          width={LEFT_W}
-          height={height}
-        />
-      )}
-      {rightPane}
-    </Box>
-  );
-}
-
-function LeftPane({
-  items,
-  cursor,
-  focus,
-  scope,
-  width,
-  height,
-}: {
-  items: readonly LeftItem[];
-  cursor: number;
-  focus: "left" | "right";
-  scope: PickerScope;
-  width: number;
-  height: number;
-}): React.JSX.Element {
-  const env = useTuiEnv();
-  const theme = useTheme();
-  const dotOn = env.ascii ? "*" : "●";
-  const dotOff = env.ascii ? "o" : "○";
-  const line = env.ascii ? "-" : "─";
-  // 分组渲染：scope 项 → 分隔 → provider → 分隔 → preset
-  const rendered: React.JSX.Element[] = [];
-  let lastKind: LeftItem["kind"] | "" = "";
-  items.forEach((item, i) => {
-    if (lastKind !== "" && item.kind !== lastKind && item.kind !== "scope") {
-      rendered.push(
-        <Text key={`sep-${i}`} dimColor>
-          {line.repeat(Math.max(4, width - 4))}
-        </Text>,
-      );
-    }
-    lastKind = item.kind;
-    const focused = focus === "left" && i === cursor;
-    const cur =
-      (item.kind === "scope" &&
-        ((item.scope === "recent" && scope.kind === "recent") ||
-          (item.scope === "all" && scope.kind === "all"))) ||
-      (item.kind === "provider" && scope.kind === "provider" && scope.id === item.id);
-    // ●/○ 状态点保留（2 列膨胀由栏宽余量吸收）；id/label 等动态文本过 boxSafe
-    const label =
-      item.kind === "scope"
-        ? boxSafe(item.label)
-        : item.kind === "provider"
-          ? `${dotOn} ${boxSafe(item.id)} ${item.count}`
-          : `${dotOff} ${boxSafe(item.id)}`;
-    rendered.push(
-      <Text key={i} wrap="truncate">
-        <Text {...(focused ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}>
-          {truncateLine(`${cur ? "> " : "  "}${label}`, width - 2)}
-        </Text>
-      </Text>,
-    );
-  });
-  return (
-    <Box
-      flexDirection="column"
-      width={width}
-      height={height}
-      borderStyle={env.ascii ? "single" : undefined}
-      borderRight={!env.ascii}
-      borderLeft={false}
-      borderTop={false}
-      borderBottom={false}
-      borderColor={theme.border}
-    >
-      {rendered}
-    </Box>
-  );
-}
-
-function RightPane({
-  scope,
-  query,
-  rows,
-  recentCount,
-  cursor,
-  focus,
-  narrow,
-  action,
-  effort,
-  current,
-  defaultModel,
-  width,
-  height,
-  offsetX,
-}: {
-  scope: PickerScope;
-  query: string;
-  rows: readonly Row[];
-  recentCount: number;
-  cursor: number;
-  focus: "left" | "right";
-  narrow: boolean;
-  action: 0 | 1 | undefined;
-  effort: ReasoningEffort | undefined;
-  current: ModelRef | undefined;
-  defaultModel: ModelRef | undefined;
-  width: number;
-  height: number;
-  offsetX: number;
-}): React.JSX.Element {
-  const env = useTuiEnv();
-  const theme = useTheme();
-  const line = env.ascii ? "-" : "─";
-  const sel = rows[cursor]?.model;
-  const listTop = 2; // 搜索框 + 空行
-  // 分隔 + 详情 2 行（不可用模型多一行原因说明，ADR-0026 §5）
-  const detailH = sel?.unavailable !== undefined ? 4 : 3;
-  const hintH = effort === undefined ? 1 : 2;
-  const listH = Math.max(3, height - listTop - detailH - hintH);
-
-  const start = Math.min(
-    Math.max(0, cursor - Math.floor(listH / 2)),
-    Math.max(0, rows.length - listH),
-  );
-  const visible = rows.slice(start, start + listH);
-
-  const scopeLabel =
-    scope.kind === "recent" ? "最近使用" : scope.kind === "all" ? "全部模型" : scope.id;
-  const lines: React.JSX.Element[] = [];
-  visible.forEach((row, i) => {
-    const idx = start + i;
-    // 最近使用区与其余模型之间的分隔线：标签说明线下是什么
-    if (recentCount > 0 && idx === recentCount && restVisibleOnce(rows, recentCount)) {
-      lines.push(
-        <Text key="sep" dimColor>
-          {line.repeat(6)} 其余模型 {line.repeat(Math.max(2, width - 18))}
-        </Text>,
-      );
-    }
-    const m = row.model;
-    const focused = focus === "right" && idx === cursor;
-    if (m === undefined) {
-      lines.push(
-        <Text
-          key={idx}
-          wrap="truncate"
-          {...(focused ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}
-        >
-          {focused ? ">" : " "} {row.clearLabel}
-        </Text>,
-      );
-      return;
-    }
-    const name = refText(m.ref);
-    const isCur = current !== undefined && refEq(m.ref, current);
-    const isDef = defaultModel !== undefined && refEq(m.ref, defaultModel);
-    const r = m.capabilities.reasoning !== "none" ? "R" : " ";
-    const im = m.capabilities.imageInput ? "I" : " ";
-    const mark = `${isCur ? "*" : " "}${isDef ? "d" : " "}`;
-    const unavailableTag = m.unavailable !== undefined ? " 协议不支持" : "";
-    lines.push(
-      <Text key={idx} wrap="truncate">
-        <Text {...(focused ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}>
-          {truncateLine(
-            boxSafe(
-              `${focused ? ">" : " "}${mark} ${name}  ${r} ${im}  ${ctxText(m).padStart(5)} ${priceText(m).padStart(11)}`,
-            ),
-            width - 2 - stringWidth(unavailableTag),
-          )}
-        </Text>
-        {/* ADR-0026 §5：不可用模型行尾灰色标注（照常列出，不可请求） */}
-        {unavailableTag !== "" ? <Text dimColor>{unavailableTag}</Text> : null}
-      </Text>,
-    );
-  });
-
-  return (
-    <Box flexDirection="column" width={width} height={height}>
-      <InputCursor
-        active
-        prefix="搜索: "
-        text={boxSafe(query)}
-        width={width - 2}
-        x={offsetX}
-        y={-height}
+    <Box flexDirection="column" width={width} height={height} overflow="hidden">
+      <PageShell
+        title={title ?? ["模型"]}
+        count={({ index, total }) => (total > 0 ? `${index}/${total}` : "无匹配")}
+        subtitle={
+          selectionOnly
+            ? "只选择模型，不改变当前模型、默认模型或思考档位"
+            : "选择当前会话使用的模型；也可以设为默认"
+        }
+        rows={rows}
+        groups={groups}
+        sidebar={{ items: sideItems, mode: "filter", activeId: scopeId(scope) }}
+        arrows="focus"
+        describe={describe}
+        hints={({ focus }) =>
+          focus === "side"
+            ? [
+                ["↑↓", "移动"],
+                ["Enter", "应用"],
+                ["←→", "切换栏"],
+                ["Esc", "关闭"],
+              ]
+            : [
+                ["↑↓", "移动"],
+                ["←→", narrow ? "切换范围" : "切换栏"],
+                ["输入", "过滤"],
+                ["Enter", "选择"],
+                ["Esc", "关闭"],
+              ]
+        }
+        emptyText="（无匹配模型）"
+        width={width}
+        height={height}
+        active={active && !wizardActive && !overlayOpen}
+        {...(initialFocus === "left" ? { initialFocus: "side" as const } : {})}
+        resetToken={scopeId(scope)}
+        mouseLayer="model-picker"
+        onMouseFrame={onMouseFrame}
+        onClose={onClose}
+        onActivate={pick}
+        onSideActivate={(id) => {
+          if (id.startsWith("preset:")) {
+            onStartWizard(id.slice("preset:".length));
+            return undefined;
+          }
+          if (id === "scope:recent") setScope({ kind: "recent" });
+          else if (id === "scope:all") setScope({ kind: "all" });
+          else setScope({ kind: "provider", id: id.slice("provider:".length) });
+          return id.startsWith("provider:") ? "list" : undefined;
+        }}
       />
-      <Text wrap="truncate">
-        {truncateLine(boxSafe(`搜索: ${query}`), width - 2)}
-        <Text color={theme.selected} backgroundColor={theme.selectionBg}>
-          {" "}
-        </Text>
-      </Text>
-      <Text dimColor>
-        {scopeLabel}
-        {rows.length > 0 ? ` • ${cursor + 1}/${rows.length}` : " • 无匹配"}
-      </Text>
-      {lines}
-      {rows.length === 0 ? <Text dimColor>（无匹配模型）</Text> : null}
-      <Box flexDirection="column" marginTop={1}>
-        <Text dimColor>{line.repeat(Math.max(4, width - 2))}</Text>
-        {sel !== undefined ? (
-          <>
-            <Text wrap="truncate">
-              {truncateLine(
-                boxSafe(
-                  `${refText(sel.ref)}${sel.displayName !== undefined ? ` - ${sel.displayName}` : ""}`,
-                ),
-                width - 2,
-              )}
+      {overlayOpen && selectedModel !== undefined && !wizardActive ? (
+        <Box
+          position="absolute"
+          width={width}
+          height={height}
+          alignItems="center"
+          justifyContent="center"
+        >
+          <Box
+            flexDirection="column"
+            width={dialogW}
+            paddingX={1}
+            borderStyle={env.ascii ? "classic" : "round"}
+            borderColor={theme.border}
+            backgroundColor={theme.overlayBg}
+          >
+            <Text bold color={theme.accent} wrap="truncate">
+              {refText(selectedModel.ref)}
             </Text>
-            <Text wrap="truncate">
-              {truncateLine(
-                [
-                  `上下文 ${ctxText(sel)}`,
-                  `最大输出 ${outText(sel)}`,
-                  priceText(sel) !== "" ? `${priceText(sel)} 每 M` : "",
-                  sel.capabilities.reasoning !== "none" ? "推理" : "",
-                  sel.capabilities.imageInput ? "图片输入" : "",
-                  current !== undefined && refEq(sel.ref, current) ? "当前会话" : "",
-                  defaultModel !== undefined && refEq(sel.ref, defaultModel) ? "默认模型" : "",
-                ]
-                  .filter((s) => s !== "")
-                  .join(" • "),
-                width - 2,
-              )}
-            </Text>
-            {/* ADR-0026 §5：选中不可用模型时底部显示原因 */}
-            {sel.unavailable !== undefined ? (
-              <Text wrap="truncate" dimColor>
-                {truncateLine(boxSafe(sel.unavailable.reason), width - 2)}
+            {effort !== undefined ? (
+              <>
+                <Text>默认思考档位 · Enter 确认，Esc 返回</Text>
+                <Segmented
+                  options={["off", ...(selectedModel.capabilities.reasoningEffort ?? [])]}
+                  selected={["off", ...(selectedModel.capabilities.reasoningEffort ?? [])].indexOf(
+                    effort,
+                  )}
+                  focused
+                  width={dialogW - 4}
+                  maxLines={1}
+                />
+              </>
+            ) : (
+              <Text>
+                <Text
+                  {...(action === 0
+                    ? { color: theme.selected, backgroundColor: theme.selectionBg }
+                    : {})}
+                >
+                  [仅本会话]
+                </Text>{" "}
+                <Text
+                  {...(action === 1
+                    ? { color: theme.selected, backgroundColor: theme.selectionBg }
+                    : {})}
+                >
+                  [设为默认]
+                </Text>
+                <Text color={theme.muted}> 左右选择，Enter 确认，Esc 返回</Text>
               </Text>
-            ) : null}
-          </>
-        ) : (
-          <Text dimColor>（未选中）</Text>
-        )}
-      </Box>
-      {effort !== undefined ? (
-        <Box flexDirection="column">
-          <Text>默认思考档位 · Enter 确认，Esc 返回</Text>
-          <Segmented
-            options={["off", ...(sel?.capabilities.reasoningEffort ?? [])]}
-            selected={["off", ...(sel?.capabilities.reasoningEffort ?? [])].indexOf(effort)}
-            focused
-            width={width - 2}
-            maxLines={1}
+            )}
+          </Box>
+        </Box>
+      ) : null}
+      {wizardActive ? (
+        <Box position="absolute" width={width} height={height}>
+          <WizardView
+            title="添加服务商"
+            state={wizard.state}
+            active={active}
+            width={width}
+            height={height}
+            onSubmit={wizard.submit}
+            onSubmitMulti={wizard.submitMulti}
+            onCancel={wizard.cancel}
+            onMouseFrame={onMouseFrame}
           />
         </Box>
-      ) : action !== undefined ? (
-        <Text>
-          <Text
-            {...(action === 0 ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}
-          >
-            [仅本会话]
-          </Text>{" "}
-          <Text
-            {...(action === 1 ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}
-          >
-            [设为默认]
-          </Text>
-          <Text dimColor> 左右选择，Enter 确认，Esc 返回</Text>
-        </Text>
-      ) : (
-        <Text dimColor wrap="truncate">
-          {truncateLine(
-            narrow
-              ? "左右切范围 上下移动 输入=搜索 Enter选择 PgUp/PgDn翻页 Esc关闭"
-              : "左右切换栏 上下移动 输入=搜索 Enter选择 PgUp/PgDn翻页 Esc关闭",
-            width - 2,
-          )}
-        </Text>
-      )}
+      ) : null}
     </Box>
   );
-}
-
-/** 最近使用分隔线只画一次（rest 区首个可见行前） */
-function restVisibleOnce(rows: readonly Row[], recentCount: number): boolean {
-  return rows.length > recentCount;
 }

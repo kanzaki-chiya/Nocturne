@@ -466,6 +466,8 @@ export function SettingsPage({
           wizard={undefined}
           onStartWizard={() => undefined}
           selectionOnly
+          title={["设置", ROLE_LABELS[role]]}
+          onMouseFrame={onMouseFrame}
           clearLabel={role === "vision" ? "不使用" : "跟随当前模型"}
           width={width}
           height={height}

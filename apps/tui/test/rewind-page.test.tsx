@@ -36,7 +36,7 @@ async function page(targets: RewindTarget[] = [target], width = 81, height = 24,
       onMouseFrame: inline ? undefined : mouse.report,
     }),
   );
-  await settle(() => ui.lastFrame()?.includes("轮次列表") === true);
+  await settle(() => /轮次列表|终端太小/.test(ui.lastFrame() ?? ""));
   return { ...ui, mouse, onClose, onRewind, onFork };
 }
 it("竖排操作和两级默认取消；预览标明删除、无法还原、外部修改和未追踪调用", async () => {

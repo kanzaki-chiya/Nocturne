@@ -460,7 +460,7 @@ describe("全屏界面", () => {
     stdin.write("/model");
     stdin.write("\r");
     await pause(250);
-    expect(lastFrame()).toContain("搜索");
+    expect(lastFrame()).toContain("全部模型");
     stdin.write("\x1b");
     stdin.write("\x1b");
     await pause(150);

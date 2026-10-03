@@ -204,10 +204,9 @@ describe("模型选择页", () => {
     expect(frame).toContain("全部模型");
     expect(frame).toContain("● deepseek 1");
     expect(frame).toContain("○ commandcode");
-    // 右栏模型行：provider/model + 能力标记 + 上下文 + 价格
+    // 右栏模型行：provider/model + 能力标记 + 上下文（价格只在说明区显示选中行）
     expect(frame).toContain("deepseek/deepseek-chat");
     expect(frame).toContain("128k");
-    expect(frame).toContain("$0.27/1.1"); // 1.10 去尾零显示
     expect(frame).toContain("openrouter/gpt-5.2-codex");
     expect(frame).toContain("400k");
     // 未声明字段：llama-4 无 ctx/价格 → 不编造
@@ -437,6 +436,56 @@ describe("模型选择页", () => {
     await vi.waitFor(() => expect(lastFrame()).toContain("responses-only"));
     const row = (lastFrame() ?? "").split("\n").find((line) => line.includes("responses-only"));
     expect(row).toContain("协议不支持");
+    unmount();
+  });
+});
+
+describe("模型选择页 PageShell 形态（ADR-0045）", () => {
+  it("面包屑加序号计数，分组名「最近使用 / 其余模型」，当前/默认变成附注标签", async () => {
+    const { lastFrame, unmount } = renderPicker();
+    await pause();
+    const frame = lastFrame() ?? "";
+    expect(frame.split("\n")[0]).toMatch(/^模型\s+1\/4/);
+    expect(frame).toContain("其余模型");
+    expect(frame).toMatch(/deepseek\/deepseek-chat\s+R I\s+128k\s+当前/);
+    expect(frame).toMatch(/openrouter\/gpt-5\.2-codex\s+R\s+400k\s+默认/);
+    expect(frame).not.toMatch(/>\*d|\*d /);
+    unmount();
+  });
+
+  it("→/← 与 Tab 都能切换栏；左栏 Enter 应用服务商范围并回到右栏", async () => {
+    const { lastFrame, stdin, unmount } = renderPicker();
+    await pause();
+    stdin.write("\x1b[D");
+    await pause(80);
+    expect(lastFrame()).toContain("Enter 应用");
+    // 左栏光标从当前范围（全部模型）开始 → 下移到 deepseek
+    stdin.write("\x1b[B");
+    await pause(60);
+    stdin.write("\r");
+    await pause(100);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Enter 选择");
+    expect(frame).toContain("deepseek/deepseek-chat");
+    expect(frame).not.toContain("openrouter/llama-4");
+    stdin.write("\t");
+    await pause(80);
+    expect(lastFrame()).toContain("Enter 应用");
+    unmount();
+  });
+
+  it("选中行的价格、最大输出进说明区", async () => {
+    const { lastFrame, stdin, unmount } = renderPicker({ recents: [] });
+    await pause();
+    // 第一行即 deepseek/deepseek-chat
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("上下文 128k");
+    expect(frame).toContain("最大输出 8k");
+    expect(frame).toContain("$0.27/1.1 每 M");
+    expect(frame).toContain("当前会话");
+    stdin.write("\x1b[B");
+    await pause(80);
+    expect(lastFrame()).toContain("默认模型");
     unmount();
   });
 });
