@@ -38,7 +38,7 @@
 - `hooks`（实现模块）依赖 protocol、platform、diagnostics；`HookRunner` 接口定义在 `permission`（`tools` 保留类型重导出），实例由 `core/index` 按会话配置装配注入——`tools` 与 `agent` 只见接口，不 import 实现（见 [hooks.md](hooks.md)）。
 - `diagnostics`（调试通道）只依赖 protocol、platform；被 agent / context / tools / hooks / index 经注入使用，并经 `McpConnector` 传给 `packages/mcp`（见 [observability.md](observability.md)）。
 - `packages/mcp`（`@nocturne/mcp`）只允许依赖 `@nocturne/core` 的 `index` / `protocol/index` 两个入口与 `@modelcontextprotocol/sdk`——与 `apps/*` 同一检查规则；**Core 不依赖 `mcp`**（见 [mcp.md](mcp.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)）。
-- 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。CLI 对 TUI 可惰性 `import()` 主入口，或静态引用 `@nocturne/tui/slash-catalog` 与 `@nocturne/tui/text-format`；命令表不得 import 任何模块，纯文本入口仅复用格式函数、protocol 类型与 `string-width`，保证逐行模式不加载 Ink/React。其余 apps→apps 依赖禁止（[tui.md](../apps/tui.md) 第 9 节）。
+- 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。CLI 对 TUI 可惰性 `import()` 主入口，或静态引用 `@nocturne/tui/slash-catalog`、`@nocturne/tui/text-format`、`@nocturne/tui/provider-setup-flow`、`@nocturne/tui/provider-prompts` 与 `@nocturne/tui/provider-login`；命令表不得 import 任何模块，纯文本入口仅复用格式函数、protocol 类型与 `string-width`，三个共享向导入口及其间接依赖也不得加载 Ink/React，保证逐行模式不加载 Ink/React。其余 apps→apps 依赖禁止（[tui.md](../apps/tui.md) 第 9 节）。
 
 依赖规则已由 dependency-cruiser 固化，见 [workflow.md](../development/workflow.md)。
 
@@ -195,7 +195,7 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 
 - **负责**：参数解析；REPL 输入；把事件渲染为终端输出（流式文本、工具状态、diff 摘要）；权限确认提示并调用 `respondPermission`；退出码。
 - **不负责**：任何 Agent 行为、会话状态、权限判定、上下文构建。
-- **依赖**：`@nocturne/core` 公开 API 与 `protocol`；`rpc --stdio` 入口使用 `@nocturne/rpc/server`；对 `apps/tui` 仅有 `@nocturne/tui` 的惰性 `import()` 及 `@nocturne/tui/slash-catalog`、`@nocturne/tui/text-format` 的静态引用。
+- **依赖**：`@nocturne/core` 公开 API 与 `protocol`；`rpc --stdio` 入口使用 `@nocturne/rpc/server`；对 `apps/tui` 仅有 `@nocturne/tui` 的惰性 `import()` 及上述五个子路径的静态引用。
 - 详见 [apps/cli.md](../apps/cli.md)。
 
 ### apps/tui（Phase 4，已验收）

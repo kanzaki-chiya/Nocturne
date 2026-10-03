@@ -155,3 +155,4 @@
 7. **未映射的方法**：`describeProviderSetup`、`addProvider` 与草稿登录依赖进程内的 `RuntimeConfig`，与 `Runtime.updateProviders` 一样留到第 5 步改为服务端数据方法，第 4 步不新增 RPC 映射。
 
 - **2026-10-04：服务商准备与保存分离。** 第 4 步验收发现模型列表失败提示和 Grok CLI 模型 ID 被移到保存确认后。新增 `prepareProvider` / `commitProvider` / `discardProvider`；准备阶段只在内存解析及续期凭据、获取模型列表，不落盘或消费 loginId；草稿绑定配置，15 分钟过期清理。共享 CLI/TUI 流程先显示准备结果和手填模型再确认，桌面表单也可在保存前展示结果。保留 `addProvider` 为 prepare + commit 兼容组合。
+- **2026-10-04：CLI/TUI 静态边界补齐。** 允许清单加入 provider-setup-flow、provider-prompts、provider-login，与既有 slash-catalog、text-format 共五个入口；其他 TUI 入口必须惰性加载。依赖规则同时覆盖 src 与 exports 指向的 dist，纯文本规则覆盖构建共享块，三个向导入口及其间接依赖不得加载 Ink/React。

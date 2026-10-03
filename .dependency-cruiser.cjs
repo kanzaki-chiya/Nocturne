@@ -231,10 +231,10 @@ module.exports = {
     {
       name: "cli-tui-static-boundary",
       severity: "error",
-      comment: "CLI 仅能静态引用 slash-catalog 和纯文本 text-format；其余 TUI 入口必须惰性加载",
+      comment: "CLI 仅能静态引用命令表、纯文本格式与三个共享向导入口；其余 TUI 入口必须惰性加载",
       from: { path: "^apps/cli/src/" },
       to: {
-        path: "^apps/tui/src/(?!(?:slash-catalog|text-format)\\.ts$)",
+        path: "^apps/tui/(?:src|dist)/(?!(?:slash-catalog|text-format|provider-setup-flow|provider-prompts|provider-login)\\.(?:ts|m?js)$)",
         dependencyTypesNot: ["dynamic-import"],
       },
     },
@@ -243,11 +243,13 @@ module.exports = {
       severity: "error",
       comment:
         "CLI 复用的文本格式入口只允许纯格式函数、protocol 类型与 string-width，不加载 Ink/React",
-      from: { path: "^apps/tui/src/(?:text-format|format)\\.ts$" },
+      from: {
+        path: "^apps/tui/(?:src|dist)/(?:text-format|text-format-[^/]+|format)\\.(?:ts|m?js)$",
+      },
       to: {
         pathNot: [
-          "^apps/tui/src/format\\.ts$",
-          "^packages/core/src/protocol/index\\.ts$",
+          "^apps/tui/(?:src|dist)/(?:format|text-format-[^/]+)\\.(?:ts|m?js)$",
+          "^packages/core/(?:src/protocol/index\\.ts|dist/protocol/index\\.mjs|dist/protocol\\.mjs)$",
           "node_modules/string-width/",
         ],
       },
@@ -256,8 +258,17 @@ module.exports = {
       name: "slash-catalog-depends-on-nothing",
       severity: "error",
       comment: "逐行 REPL 引用的命令表不得加载 Ink 或任何其他模块",
-      from: { path: "^apps/tui/src/slash-catalog\\.ts$" },
+      from: { path: "^apps/tui/(?:src|dist)/slash-catalog\\.(?:ts|m?js)$" },
       to: {},
+    },
+    {
+      name: "provider-setup-no-ui",
+      severity: "error",
+      comment: "CLI 静态复用的向导入口及其间接依赖不得加载 Ink/React",
+      from: {
+        path: "^apps/tui/(?:src|dist)/(?:provider-setup-flow|provider-prompts|provider-login)\\.(?:ts|m?js)$",
+      },
+      to: { path: "(^|/)(?:ink|react)(?:/|@)", reachable: true },
     },
   ],
   options: {
