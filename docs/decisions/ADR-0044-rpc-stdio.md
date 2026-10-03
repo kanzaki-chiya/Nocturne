@@ -1,6 +1,6 @@
 # ADR-0044：RPC 第一版：stdio 上的 JSON-RPC，一个进程一个 Runtime
 
-- 状态：提议
+- 状态：已接受（维护者 2026-10-03 确认：服务商向导改为原生数据接口；一个后台一个客户端；暂不拆 `packages/protocol`）
 - 日期：2026-10-03
 
 ## 背景
@@ -21,7 +21,7 @@
 
 - 第一版只做 **stdio**：服务端从 stdin 读、向 stdout 写，stderr 只用于诊断。不开网络端口。
 - 报文用 **JSON-RPC 2.0**，每行一条 JSON（以 `\n` 分隔，不用 Content-Length 头）。MCP 也用 JSON-RPC，团队和工具链都熟悉；按行分隔便于调试和用 Tauri 逐行转发。
-- 三种报文：客户端→服务端的请求（有 `id`，等结果）、客户端→服务端的通知（无 `id`，如中断）、服务端→客户端的通知（事件推送）。第 6 节的向导是唯一允许服务端→客户端**请求**的地方。
+- 三种报文：客户端→服务端的请求（有 `id`，等结果）、客户端→服务端的通知（无 `id`，如中断）、服务端→客户端的通知（事件推送）。没有服务端→客户端的请求：需要用户参与的流程一律是"通知或事件 + 客户端请求回复"（ADR-0002 第 3 条）。
 - 二进制数据（图片附件）用 base64 字符串。单图上限沿用 ADR-0023 的 5 MB，编码后约 6.7 MB 一行，可接受。
 
 ### 2. 进程与包
@@ -35,7 +35,7 @@
 
 ### 3. 握手与版本
 
-- 第一条请求必须是 `initialize`：客户端报 `protocolVersion`（整数）、`clientName`、能力（`interactive`：能否回复权限与提问请求；`wizard`：能否承接第 6 节的向导请求）。
+- 第一条请求必须是 `initialize`：客户端报 `protocolVersion`（整数）、`clientName`、能力（`interactive`：能否回复权限与提问请求）。
 - 服务端回 `protocolVersion`、`nocturneVersion`、`sessionsDir` 等只读信息。版本不一致直接报错，第一版不做向下兼容；桌面端和后台随同一版本发布，不会错配。
 - `interactive` 决定传给 `createRuntime` 的 `interactive`：客户端声明不能回复时，权限请求按配置的非交互规则处理，与今天的 `-p` 模式一致。
 
@@ -65,9 +65,13 @@
 ### 6. 需要用户参与的流程
 
 - **权限与提问**：已经是"事件请求 + 命令回复"，直接映射，无需改动。
-- **登录**：`LoginSession` 拆成方法与通知。`login.start` 返回 `loginId`、`authorizeUrl`、`manualInput`、`userCode`；完成或失败以通知 `login.completed` 推送；`login.submitManual`、`login.cancel` 是请求。浏览器由客户端打开（Tauri 用系统浏览器），不由服务端打开。
-- **服务商向导（`WizardIo`）**：第一版保留回调形状，映射为服务端→客户端的 JSON-RPC 请求（`wizard.ask`、`wizard.askSecret`、`wizard.chooseMulti` 等），客户端回结果。向导逻辑留在 Core（provider-setup.md 的既有约定），不在客户端重写。这是对 ADR-0002 第 3 条的有意例外：向导发生在配置阶段，不属于会话，也不进事件日志。桌面端若要原生表单，在桌面端 ADR 里另行决定是否把向导改成数据接口。
-- `wizard.askSecret` 的回复是密钥明文，只在本机两个进程之间的管道里传输。服务端诊断日志对这类报文只记方法名，不记参数和结果；客户端（Tauri 外壳）转发时同样不落日志。
+- **登录**：`LoginSession` 拆成方法与通知。`login.start` 返回 `loginId`、`authorizeUrl`、`manualInput`、`userCode`；完成或失败以通知 `login.completed` 推送；`login.submitManual`、`login.cancel` 是请求。`login.start` 可以针对已保存的服务商（重新登录），也可以针对添加中的草稿（预设 id 加表单里的名称与地址），后者完成后把 `loginId` 交给 `addProvider`。账号凭据在无系统后端时的保存位置（明文或仅本次运行）作为 `login.start` 的参数，由表单显式选择。浏览器由客户端打开（Tauri 用系统浏览器），不由服务端打开。
+- **服务商配置改为数据接口，不再回调客户端**。现有 `runProviderSetupWizard` / `runProviderKeyWizard` 经 `WizardIo` 一问一答，界面只能是问答式；桌面端要原生表单，所以 Core 改为"描述 + 提交"两个数据接口，向导的判断逻辑（哪些预设问名称与地址、哪些走登录、无凭据后端时怎么办、模型列表失败怎么提示）全部留在 Core：
+  - `describeProviderSetup(presetId)`：返回这个预设需要填写的字段与可选的凭据方式（名称、服务地址、会话标识请求头、API key / 环境变量 / 浏览器登录 / 外部登录文件、账号凭据的保存位置），每项带默认值、是否必填、说明文案，以及当前凭据后端是否可用。客户端据此画表单，不自己判断预设差异。
+  - `addProvider(input)`：一次提交表单。凭据部分是判别联合：`{ kind: "apiKey", key }`、`{ kind: "env", name }`、`{ kind: "login", loginId }`（引用已完成的登录，见上一条）、`{ kind: "external-file" }`。Core 校验、获取模型列表、保存条目、刷新 models.dev，返回 `{ providerId, modelCount, notices }`，`notices` 是"密钥可能无效""模型将手动填写"这类结果提示。校验失败以带字段名的错误返回，客户端标到对应输入框。
+  - 换密钥用已有的 `setCredential`；模型设置编辑本来就是数据接口（`listModelSettings` / `saveModelSettings`），直接映射。
+  - CLI 逐行向导与 TUI 服务商页改为基于这两个接口的外壳，行为与文案不变；`WizardIo` 及 `runProviderSetupWizard` / `runProviderKeyWizard` 在迁移完成后删除。provider-setup.md 第 6 节随之改写。
+- `addProvider`、`setCredential` 的参数里有密钥明文，只在本机两个进程之间的管道里传输。服务端诊断日志对这类方法只记方法名，不记参数；客户端（Tauri 外壳）转发时同样不落日志。
 
 ### 7. 生命周期
 
@@ -92,7 +96,8 @@
 1. 公开 API 整理：`RuntimeSession.durableEvents()`，TUI/CLI 改用，移除公开的 `session` 字段；补充测试。
 2. `packages/rpc`：报文层、server 映射、client 封装、订阅回放，离线测试。
 3. `nctrn rpc --stdio` 入口与生命周期，端到端测试。
-4. 登录与向导的 RPC 映射。
+4. 服务商配置数据接口：Core 新增 `describeProviderSetup` / `addProvider`，CLI 与 TUI 向导迁移到其上（行为与文案不变，现有向导测试改写后全部通过），删除 `WizardIo`。
+5. 登录与服务商配置的 RPC 映射。
 
 每步结束运行全部检查，文档同步（modules.md 第 5 节转为正式模块、repository-layout.md 包表、events.md 第 1 节远程客户端一行指向本 ADR、新增 `docs/protocols/rpc.md` 作为方法与报文的主文档）。
 
@@ -100,7 +105,7 @@
 
 - 桌面端、将来的 IDE 插件和远程客户端共用一套接口，Core 不为任何一个客户端改行为。
 - 公开 API 每加一个方法，RPC 也要跟一个映射，测试会强制两边一致；这是持续的维护成本。
-- 向导保留回调形状，RPC 多了一种服务端→客户端请求，实现和测试都要覆盖这条反向路径。
+- 服务商配置改成数据接口，CLI 与 TUI 的向导要迁移一遍，工作量比保留回调大；换来桌面端可以做原生表单，三个客户端共用同一套校验与提示，RPC 也不需要反向请求。
 - 第一版一进程一客户端，桌面端同一窗口多标签没问题；多个窗口共享后台、或 TUI 与桌面端同时连同一后台，需要以后另行设计。
 - `nctrn` 单文件同时承担 CLI 和桌面后台，分发（v0.7）和桌面端打包共享同一构建流程。
 
@@ -111,4 +116,4 @@
 - **Content-Length 分帧（LSP 风格）**：能承载多行内容，但 JSON 本身可以不含换行，按行分隔调试更直观，转发也更简单。
 - **订阅时由服务端推送整份 `SessionView` 快照**：省去客户端折叠，但要在服务端维护视图并定义快照增量协议，违背"派生视图由 protocol reducer 在客户端计算"（ADR-0002 第 5 条）。
 - **把装配从 CLI 移进 Core 或新包**：更"干净"，但改动面大且现在只有一个服务端入口；先让 `nctrn rpc` 复用 CLI 装配，等出现第二个入口再抽。
-- **向导第一版就改成纯数据接口**：长期更适合原生界面，但要重写向导状态机，并让 CLI、TUI 一起迁移。先用反向请求保持行为不变，桌面端需要时再改。
+- **向导保留回调形状，映射成服务端→客户端请求**：改动最小，但桌面端只能做一问一答的界面，并且 RPC 要多支持一种反向请求。维护者选择做原生表单，不采用。
