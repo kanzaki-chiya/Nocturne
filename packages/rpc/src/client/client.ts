@@ -10,6 +10,8 @@ import {
   type RuntimeEvent,
 } from "@nocturne/core/protocol";
 import type {
+  AccountStorageSetup,
+  AddProviderResult,
   CreateSessionOptions,
   FileIndexEntry,
   JevEndpoint,
@@ -18,8 +20,13 @@ import type {
   ModelRef,
   ModelRole,
   ModelRoleInfo,
+  ModelSettingsPatch,
+  ModelSettingsView,
   PermissionReply,
+  PrepareProviderResult,
   ProviderOverview,
+  ProviderPreset,
+  ProviderSetupDescription,
   QuestionReply,
   ReasoningEffort,
   RewindMode,
@@ -44,6 +51,8 @@ import {
 import type {
   ContextSummary,
   InitializeResult,
+  PrepareProviderParams,
+  ProvidersDescribed,
   RpcMethodName,
   RpcParams,
   RpcResult,
@@ -62,13 +71,16 @@ export class RpcError extends Error {
   readonly rpcCode: number;
   /** 原始错误类名（RuntimeCommandError、SessionError……） */
   readonly errorName: string | undefined;
+  /** ProviderSetupError 的表单字段名（-32005，data.field）；客户端据此标输入框 */
+  readonly field: string | undefined;
 
-  constructor(code: string, message: string, rpcCode = 0, errorName?: string) {
+  constructor(code: string, message: string, rpcCode = 0, errorName?: string, field?: string) {
     super(message);
     this.name = "RpcError";
     this.code = code;
     this.rpcCode = rpcCode;
     this.errorName = errorName;
+    this.field = field;
   }
 
   static fromObject(error: RpcErrorObject): RpcError {
@@ -77,6 +89,7 @@ export class RpcError extends Error {
       error.message,
       error.code,
       error.data?.name,
+      error.data?.field,
     );
   }
 }
@@ -161,16 +174,51 @@ export interface RpcRuntime {
   listReviewerModels(reviewer: JevReviewerConfig): Promise<{ models: string[]; warning?: string }>;
 }
 
+/**
+ * 服务商配置（provider-setup.md 第 6 节、rpc.md 3.3）：方法名与 Core 数据接口一致。
+ * 写操作由服务端串行执行"变更 → 重载 → providersChanged"，所以响应返回时
+ * `runtime.listModels()` 读到的已是新值；响应之前先收到 `onProvidersChanged`。
+ */
+export interface RpcProvider {
+  listProviderPresets(): Promise<ProviderPreset[]>;
+  describeProviders(): Promise<ProvidersDescribed>;
+  describeProviderSetup(presetId: string): Promise<ProviderSetupDescription>;
+  /** 无系统凭据后端且为账号型登录时返回保存位置描述；否则 undefined */
+  describeAccountStorage(providerId: string): Promise<AccountStorageSetup | undefined>;
+  /** 校验 + 获取模型列表并暂存草稿（draftId 绑定服务端配置对象，15 分钟过期）；不落盘 */
+  prepareProvider(input: PrepareProviderParams): Promise<PrepareProviderResult>;
+  /** 保存草稿（可带手填模型 ID）；失败可重试同一 draftId */
+  commitProvider(draftId: string, manualModelId?: string): Promise<AddProviderResult>;
+  discardProvider(draftId: string): Promise<void>;
+  setCredential(providerId: string, key: string): Promise<void>;
+  listModelSettings(providerId: string): Promise<ModelSettingsView[]>;
+  saveModelSettings(providerId: string, modelId: string, patch: ModelSettingsPatch): Promise<void>;
+  /** 重新获取上游模型列表与限额；返回提示文案或 undefined */
+  refreshUpstreamLimits(providerId: string): Promise<string | undefined>;
+  /** 刷新 models.dev 缓存；返回提示文案或 undefined */
+  refreshModelsDev(): Promise<string | undefined>;
+  /** 删除向导条目及凭据；本连接任一会话正在使用时拒绝（provider_in_use） */
+  removeSetupProvider(providerId: string): Promise<void>;
+  logoutProvider(providerId: string): Promise<void>;
+}
+
 export interface RpcClient {
   /** 握手：必须是第一个调用；协议版本不一致时抛 `protocol_version_mismatch` */
   initialize(): Promise<InitializeResult>;
   readonly runtime: RpcRuntime;
+  /** 服务商配置（provider.* 方法） */
+  readonly provider: RpcProvider;
   /** 已打开会话的句柄（`createSession`/`resumeSession` 返回的就是它） */
   session(sessionId: string): RpcSession;
   /** 任意方法的类型化调用（上面的封装都建立在它上面） */
   call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>>;
   /** 收到任意会话的事件 */
   onEvent(handler: (sessionId: string, event: RuntimeEvent) => void): () => void;
+  /**
+   * 服务商配置变更完成（Runtime 已用重载后配置重建）：在对应写方法的
+   * 响应之前到达一次。桌面端据此刷新服务商/模型相关视图。
+   */
+  onProvidersChanged(handler: () => void): () => void;
   /** 请求服务端清理并退出，回复后关闭传输 */
   shutdown(): Promise<void>;
   /** 直接关闭传输（服务端按"连接断开"清理） */
@@ -190,6 +238,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   const pending = new Map<RpcId, Pending>();
   const sessionListeners = new Map<string, Set<EventListener>>();
   const globalListeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
+  const providersChangedListeners = new Set<() => void>();
   let resolveClosed!: () => void;
   const closed = new Promise<void>((resolve) => {
     resolveClosed = resolve;
@@ -233,6 +282,15 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       const params = message.params as { sessionId?: unknown; event?: unknown } | undefined;
       if (typeof params?.sessionId === "string" && typeof params.event === "object") {
         dispatchEvent(params.sessionId, params.event as RuntimeEvent);
+      }
+    }
+    if (message.method === "runtime.providersChanged") {
+      for (const handler of [...providersChangedListeners]) {
+        try {
+          handler();
+        } catch {
+          // 监听器异常不影响其他监听器
+        }
       }
     }
   });
@@ -398,6 +456,40 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     listReviewerModels: (reviewer) => call("runtime.listReviewerModels", { reviewer }),
   };
 
+  const provider: RpcProvider = {
+    listProviderPresets: () => call("provider.listProviderPresets", {}),
+    describeProviders: () => call("provider.describeProviders", {}),
+    describeProviderSetup: (presetId) => call("provider.describeProviderSetup", { presetId }),
+    describeAccountStorage: async (providerId) =>
+      (await call("provider.describeAccountStorage", { providerId })) ?? undefined,
+    prepareProvider: (input) => call("provider.prepareProvider", input),
+    commitProvider: (draftId, manualModelId) =>
+      call("provider.commitProvider", {
+        draftId,
+        ...(manualModelId !== undefined ? { manualModelId } : {}),
+      }),
+    discardProvider: async (draftId) => {
+      await call("provider.discardProvider", { draftId });
+    },
+    setCredential: async (providerId, key) => {
+      await call("provider.setCredential", { providerId, key });
+    },
+    listModelSettings: (providerId) => call("provider.listModelSettings", { providerId }),
+    saveModelSettings: async (providerId, modelId, patch) => {
+      await call("provider.saveModelSettings", { providerId, modelId, patch });
+    },
+    refreshUpstreamLimits: async (providerId) =>
+      (await call("provider.refreshUpstreamLimits", { providerId })).warning ?? undefined,
+    refreshModelsDev: async () =>
+      (await call("provider.refreshModelsDev", {})).warning ?? undefined,
+    removeSetupProvider: async (providerId) => {
+      await call("provider.removeSetupProvider", { providerId });
+    },
+    logoutProvider: async (providerId) => {
+      await call("provider.logoutProvider", { providerId });
+    },
+  };
+
   return {
     async initialize() {
       const result = await call("initialize", {
@@ -414,12 +506,19 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       return result;
     },
     runtime,
+    provider,
     session,
     call,
     onEvent(handler) {
       globalListeners.add(handler);
       return () => {
         globalListeners.delete(handler);
+      };
+    },
+    onProvidersChanged(handler) {
+      providersChangedListeners.add(handler);
+      return () => {
+        providersChangedListeners.delete(handler);
       };
     },
     async shutdown() {

@@ -1,4 +1,9 @@
-import { ProviderLoginError, RuntimeCommandError, SessionError } from "@nocturne/core";
+import {
+  ProviderLoginError,
+  ProviderSetupError,
+  RuntimeCommandError,
+  SessionError,
+} from "@nocturne/core";
 
 import { RPC_ERROR, type RpcErrorObject } from "../shared/jsonrpc.js";
 import { InvalidParamsError } from "./params.js";
@@ -64,5 +69,13 @@ export function toRpcError(error: unknown): RpcErrorObject {
   }
   if (error instanceof SessionError) return { code: RPC_ERROR.sessionError, message, data };
   if (error instanceof ProviderLoginError) return { code: RPC_ERROR.loginError, message, data };
+  if (error instanceof ProviderSetupError) {
+    // 字段名让客户端把错误标到对应输入框（ADR-0044 第 6 节）
+    return {
+      code: RPC_ERROR.providerSetupError,
+      message,
+      data: { code: "invalid_field", name: error.name, field: error.field },
+    };
+  }
   return { code: RPC_ERROR.serverError, message, data };
 }

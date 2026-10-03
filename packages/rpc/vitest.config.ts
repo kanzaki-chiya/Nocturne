@@ -28,6 +28,7 @@ export default defineConfig({
   },
   test: {
     include: ["src/**/*.test.ts", "test/**/*.test.ts"],
+    setupFiles: ["test/setup-offline.ts"],
     environment: "node",
     testTimeout: 30_000,
   },

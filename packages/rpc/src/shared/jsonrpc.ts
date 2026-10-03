@@ -31,6 +31,8 @@ export interface RpcSuccess {
 export interface RpcErrorData {
   code?: string;
   name?: string;
+  /** ProviderSetupError 的字段名（preset/name/credential/draftId/modelId），客户端据此标输入框 */
+  field?: string;
 }
 
 export interface RpcErrorObject {
@@ -65,6 +67,8 @@ export const RPC_ERROR = {
   loginError: -32003,
   /** RPC 层自身的状态错误：未握手、版本不符、会话已打开、服务端关闭中 */
   protocolError: -32004,
+  /** ProviderSetupError（data.field 给出表单字段名） */
+  providerSetupError: -32005,
 } as const;
 
 /** 标准码对应的字符串错误码（响应没带 data.code 时客户端用它） */
@@ -79,6 +83,7 @@ export const RPC_CODE_NAMES: Readonly<Record<number, string>> = {
   [RPC_ERROR.sessionError]: "session_error",
   [RPC_ERROR.loginError]: "login_error",
   [RPC_ERROR.protocolError]: "protocol_error",
+  [RPC_ERROR.providerSetupError]: "provider_setup_error",
 };
 
 /** 一条报文编码成一行（JSON.stringify 不产生裸换行） */

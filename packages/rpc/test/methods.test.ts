@@ -1,13 +1,25 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createRuntime, FakeProvider } from "@nocturne/core";
+import * as core from "@nocturne/core";
+import {
+  createCredentialStore,
+  createPlatform,
+  createRuntime,
+  FakeProvider,
+  loadConfig,
+} from "@nocturne/core";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
 import { encodeBase64 } from "@nocturne/rpc/client";
 import {
+  CONFIG_METHODS,
+  CONFIG_NOT_MAPPED,
   createRpcServer,
+  PROVIDER_FUNCTION_METHODS,
+  PROVIDER_FUNCTIONS_NOT_MAPPED,
   RUNTIME_METHODS,
   RUNTIME_NOT_MAPPED,
   SESSION_METHODS,
@@ -15,6 +27,18 @@ import {
 } from "@nocturne/rpc/server";
 
 import { cleanupTmp, connect, MODEL, textScript, tmpDir, VISION_MODELS } from "./harness.js";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+/** packages/core/src/index.ts：覆盖测试按源文件解析服务商配置导出块 */
+const coreIndexPath = path.resolve(here, "../../core/src/index.ts");
+
+/** 只取服务端的方法名集合（覆盖检查不需要真的会话） */
+function methodNames(): readonly string[] {
+  return createRpcServer({
+    nocturneVersion: "0",
+    createRuntime: () => Promise.resolve({ runtime: {} as never }),
+  }).methods;
+}
 
 afterEach(cleanupTmp);
 
@@ -235,16 +259,73 @@ describe("公开 API 与 RPC 方法集合一致", () => {
     check(Object.keys(runtime), RUNTIME_METHODS, RUNTIME_NOT_MAPPED);
     check(Object.keys(session), SESSION_METHODS, SESSION_NOT_MAPPED);
 
-    // 服务端方法表里的每个 runtime./session. 方法都对应公开成员（unsubscribe 是 subscribe 的退订半边）
+    // 服务端方法表里的每个 runtime./session./provider./login. 方法都对应公开成员
+    // （unsubscribe 是 subscribe 的退订半边；login.submitManual 是 LoginSession 的方法）
     const mappedMethods = new Set<string>([
       ...Object.values(RUNTIME_METHODS),
       ...Object.values(SESSION_METHODS),
+      ...Object.values(CONFIG_METHODS),
+      ...Object.values(PROVIDER_FUNCTION_METHODS),
       "session.unsubscribe",
+      "login.submitManual",
     ]);
     for (const method of server.methods) {
       if (method === "initialize" || method === "shutdown") continue;
       expect(mappedMethods.has(method)).toBe(true);
     }
     await session.close();
+  });
+
+  it("RuntimeConfig 的每个成员要么映射到 RPC 方法，要么登记了不映射的原因", async () => {
+    const platform = createPlatform();
+    const config = await loadConfig(platform, {
+      nocturneHome: tmpDir("nct-rpc-cov-home-"),
+      env: () => undefined,
+      credentials: (
+        await createCredentialStore(platform, tmpDir("nct-rpc-cov-creds-"), {
+          backend: "memory",
+        })
+      ).store,
+      modelsDevFetch: () => Promise.reject(new Error("离线")),
+      upstreamFetch: () => Promise.resolve([]),
+    });
+    expect(Object.keys(config).sort()).toEqual(
+      [...Object.keys(CONFIG_METHODS), ...Object.keys(CONFIG_NOT_MAPPED)].sort(),
+    );
+    const served = new Set<string>(methodNames());
+    for (const method of Object.values(CONFIG_METHODS)) expect(served.has(method)).toBe(true);
+  });
+
+  it("Core 顶层导出的服务商配置函数：每个都映射到方法或登记了原因", async () => {
+    // 从 index.ts 源文件取三个导出块 + 含 listProviderPresets 的 provider/index 块，
+    // 以运行时 typeof === "function" 为准——新增函数漏登记时这里失败
+    const indexSource = readFileSync(coreIndexPath, "utf8");
+    const exported = new Set<string>();
+    const exportBlock = /export\s*\{([^}]*)\}\s*from\s*"(\.\/[^"]+)"/g;
+    for (const match of indexSource.matchAll(exportBlock)) {
+      const names = match[1] ?? "";
+      const from = match[2] ?? "";
+      const watched =
+        from === "./provider-setup.js" ||
+        from === "./provider-login.js" ||
+        from === "./provider-oauth.js" ||
+        (from === "./provider/index.js" && names.includes("listProviderPresets"));
+      if (!watched) continue;
+      for (const raw of names.split(",")) {
+        const name = raw.trim().replace(/^type\s+/, "");
+        if (name === "" || raw.trim().startsWith("type ")) continue;
+        if (typeof (core as Record<string, unknown>)[name] === "function") exported.add(name);
+      }
+    }
+    expect([...exported].sort()).toEqual(
+      [
+        ...Object.keys(PROVIDER_FUNCTION_METHODS),
+        ...Object.keys(PROVIDER_FUNCTIONS_NOT_MAPPED),
+      ].sort(),
+    );
+    const served = new Set<string>(methodNames());
+    for (const method of Object.values(PROVIDER_FUNCTION_METHODS)) {
+      expect(served.has(method)).toBe(true);
+    }
   });
 });

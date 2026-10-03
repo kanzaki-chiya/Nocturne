@@ -5,6 +5,9 @@
  * 线上约定：`undefined` 以 `null` 表示（JSON 没有 undefined）；二进制用 base64 字符串。
  */
 import type {
+  AccountStorageSetup,
+  AddProviderInput,
+  AddProviderResult,
   BuiltContext,
   ContentBlock,
   CreateSessionOptions,
@@ -16,8 +19,13 @@ import type {
   ModelRef,
   ModelRole,
   ModelRoleInfo,
+  ModelSettingsPatch,
+  ModelSettingsView,
   PermissionReply,
+  PrepareProviderResult,
   ProviderOverview,
+  ProviderPreset,
+  ProviderSetupDescription,
   QuestionReply,
   ReasoningEffort,
   RewindMode,
@@ -79,6 +87,19 @@ export interface SessionParams {
   sessionId: string;
 }
 
+/**
+ * `provider.prepareProvider` 的表单（= AddProviderInput 去掉 modelId；
+ * 手填模型 ID 在确认后由 `provider.commitProvider` 的 manualModelId 传入）。
+ * credential 是判别联合，含 `{ kind: "apiKey", key }` 的密钥明文。
+ */
+export type PrepareProviderParams = Omit<AddProviderInput, "modelId">;
+
+/** `provider.describeProviders` 的结果：列表 + providers.json 损坏/版本不符的人读说明 */
+export interface ProvidersDescribed {
+  providers: ProviderOverview[];
+  setupWarning?: string;
+}
+
 type Ret<K extends keyof RuntimeSession> = RuntimeSession[K] extends (...args: never[]) => infer R
   ? Awaited<R>
   : never;
@@ -133,6 +154,48 @@ export interface RpcMethods {
     params: { reviewer: JevReviewerConfig };
     result: { models: string[]; warning?: string };
   };
+
+  // 服务商配置（provider-setup.md 第 6 节、docs/protocols/rpc.md 3.3）：
+  // 只读描述 + 两阶段提交；写操作由服务端串行执行"变更 → 重载 →
+  // runtime.providersChanged 通知"，响应在通知之后到达。
+  "provider.listProviderPresets": { params: Record<string, never>; result: ProviderPreset[] };
+  "provider.describeProviders": { params: Record<string, never>; result: ProvidersDescribed };
+  "provider.describeProviderSetup": {
+    params: { presetId: string };
+    result: ProviderSetupDescription;
+  };
+  "provider.describeAccountStorage": {
+    params: { providerId: string };
+    result: AccountStorageSetup | null;
+  };
+  "provider.prepareProvider": {
+    params: PrepareProviderParams;
+    result: PrepareProviderResult;
+  };
+  "provider.commitProvider": {
+    params: { draftId: string; manualModelId?: string };
+    result: AddProviderResult;
+  };
+  "provider.discardProvider": { params: { draftId: string }; result: null };
+  "provider.setCredential": { params: { providerId: string; key: string }; result: null };
+  "provider.listModelSettings": {
+    params: { providerId: string };
+    result: ModelSettingsView[];
+  };
+  "provider.saveModelSettings": {
+    params: { providerId: string; modelId: string; patch: ModelSettingsPatch };
+    result: null;
+  };
+  "provider.refreshUpstreamLimits": {
+    params: { providerId: string };
+    result: { warning: string | null };
+  };
+  "provider.refreshModelsDev": {
+    params: Record<string, never>;
+    result: { warning: string | null };
+  };
+  "provider.removeSetupProvider": { params: { providerId: string }; result: null };
+  "provider.logoutProvider": { params: { providerId: string }; result: null };
 
   "session.subscribe": {
     params: SessionParams & { afterSeq?: number };
@@ -191,6 +254,11 @@ export interface RpcClientNotifications {
 /** 服务端→客户端的通知 */
 export interface RpcServerNotifications {
   event: { sessionId: string; event: RuntimeEvent };
+  /**
+   * 配置变更方法（provider.commitProvider 等）成功后、响应之前推送：
+   * Runtime 的 Provider 注册表已用重载后的配置重建，listModels 等读到的已是新值
+   */
+  "runtime.providersChanged": Record<string, never>;
 }
 
 const METHOD_TABLE: Record<RpcMethodName, true> = {
@@ -213,6 +281,20 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.listReviewerProviders": true,
   "runtime.defaultReviewer": true,
   "runtime.listReviewerModels": true,
+  "provider.listProviderPresets": true,
+  "provider.describeProviders": true,
+  "provider.describeProviderSetup": true,
+  "provider.describeAccountStorage": true,
+  "provider.prepareProvider": true,
+  "provider.commitProvider": true,
+  "provider.discardProvider": true,
+  "provider.setCredential": true,
+  "provider.listModelSettings": true,
+  "provider.saveModelSettings": true,
+  "provider.refreshUpstreamLimits": true,
+  "provider.refreshModelsDev": true,
+  "provider.removeSetupProvider": true,
+  "provider.logoutProvider": true,
   "session.subscribe": true,
   "session.unsubscribe": true,
   "session.submit": true,

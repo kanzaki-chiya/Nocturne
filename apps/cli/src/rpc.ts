@@ -13,7 +13,7 @@ import { createMcpConnector } from "@nocturne/mcp";
 import { createRpcServer, createStdioTransport } from "@nocturne/rpc/server";
 
 import type { CliArgs } from "./args.js";
-import { collectConfig } from "./config.js";
+import { collectConfig, makeConfigLoader } from "./config.js";
 
 export interface RpcIo {
   stdin: Readable;
@@ -83,7 +83,17 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
             file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,
           },
         });
-        return { runtime, sessionsDir };
+        return {
+          runtime,
+          sessionsDir,
+          // 服务商配置经 RPC 开放（rpc.md 3.3）：变更方法后服务端串行重载，
+          // 等价 CLI 的 updateProviders(await reloadConfig())
+          providerConfig: {
+            config: runtimeConfig,
+            reload: makeConfigLoader(args, platform),
+            workspaceRoot: cwd,
+          },
+        };
       },
       // 诊断只含方法名与结果，从不含参数（参数里可能有密钥明文）
       diagnostics: debugEnabled

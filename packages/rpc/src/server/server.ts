@@ -6,17 +6,27 @@
  * Runtime 的权限层——这里只转发 `permission.requested` 事件与回复（AGENTS.md 硬性约束）。
  */
 import {
+  commitProvider,
+  describeAccountStorage,
+  describeProviderSetup,
+  discardProvider,
   isReasoningEffort,
+  listProviderPresets,
+  logoutProvider,
   MODEL_ROLES,
+  prepareProvider,
+  type AddProviderInput,
   type ContentBlock,
   type CreateSessionOptions,
   type JevEndpoint,
   type JevReviewerConfig,
   type ModelRole,
   type PermissionReply,
+  type ProviderCredentialInput,
   type QuestionReply,
   type RewindMode,
   type Runtime,
+  type RuntimeConfig,
   type RuntimeEvent,
   type RuntimeSession,
   type SubmitInput,
@@ -28,6 +38,7 @@ import {
   isRpcId,
   parseLine,
   RPC_PROTOCOL_VERSION,
+  type RpcErrorObject,
   type RpcFailure,
   type RpcId,
   type RpcMessage,
@@ -62,7 +73,41 @@ export interface RpcRuntimeHandle {
   sessionsDir?: string | undefined;
   /** 全部会话关闭之后调用，释放 Runtime 之外的资源 */
   dispose?: (() => Promise<void> | void) | undefined;
+  /**
+   * 服务商配置（docs/protocols/rpc.md 3.3）：缺省时 provider.* / login.*
+   * 一律以 `provider_config_unavailable` 拒绝。
+   */
+  providerConfig?:
+    | {
+        /**
+         * 创建 Runtime 用的同一个配置对象。服务端在每次变更后重载并整体替换
+         * （启动时对象的 `base` 是加载时快照，不能发现本进程新加的服务商），
+         * 与 CLI/TUI 的 `updateProviders(await reloadConfig())` 等价。
+         */
+        config: RuntimeConfig;
+        /** 重新分层加载（apps 注入，等价 CLI 的 makeConfigLoader） */
+        reload: () => Promise<RuntimeConfig>;
+        /** describeProviders / listModelSettings / saveModelSettings 的工作区 */
+        workspaceRoot?: string | undefined;
+      }
+    | undefined;
 }
+
+/**
+ * 参数里可能含秘密值的方法（ADR-0044 第 6 节：密钥明文只在两个进程的管道里）：
+ * 请求失败时把错误 message 与 data 各字符串中出现的每个非空秘密值替换为
+ * `[redacted]`，避免密钥随报错文本回流客户端或进入日志。诊断记录本来就不含参数。
+ */
+export const SENSITIVE_METHODS: Partial<Record<RpcMethodName, (p: Params) => string[]>> = {
+  "runtime.updateSettings": (p) => (typeof p.reviewerKey === "string" ? [p.reviewerKey] : []),
+  "provider.prepareProvider": (p) => {
+    const credential = p.credential;
+    if (typeof credential !== "object" || credential === null) return [];
+    const { kind, key } = credential as { kind?: unknown; key?: unknown };
+    return kind === "apiKey" && typeof key === "string" ? [key] : [];
+  },
+  "provider.setCredential": (p) => (typeof p.key === "string" ? [p.key] : []),
+};
 
 export interface RpcServerOptions {
   nocturneVersion: string;
@@ -138,6 +183,27 @@ class Connection {
   private readonly opening = new Set<Promise<unknown>>();
   private readonly abort = new AbortController();
   private readonly handlers: HandlerTable;
+  /**
+   * 服务商配置（握手时取自 handle.providerConfig）：`current` 是最近一次
+   * 重载的结果——Core 的草稿与草稿登录按 RuntimeConfig 对象登记，而启动时
+   * 对象的 `base` 是快照，所以变更方法后整体换成重载出的新对象。
+   */
+  private providerState:
+    | {
+        current: RuntimeConfig;
+        reload: () => Promise<RuntimeConfig>;
+        workspaceRoot: string | undefined;
+      }
+    | undefined;
+  /** 配置变更串行队列：变更 → 重载 → updateProviders → providersChanged 通知，响应最后 */
+  private configQueue: Promise<unknown> = Promise.resolve();
+  /** draftId → 创建草稿时的配置对象（与该登录的创建配置一致；见 buildHandlers 的 prepareProvider） */
+  private readonly providerDrafts = new Map<
+    string,
+    { config: RuntimeConfig; loginId?: string | undefined }
+  >();
+  /** loginId → 本连接 login.startDraft 创建时的配置对象（进行中或已完成未提交） */
+  private readonly draftLogins = new Map<string, RuntimeConfig>();
 
   constructor(
     private readonly options: RpcServerOptions,
@@ -259,7 +325,7 @@ class Connection {
       this.send({ jsonrpc: "2.0", id, result: result ?? null });
       if (method === "shutdown") this.transport.close();
     } catch (error) {
-      const err = toRpcError(error);
+      const err = this.redactSecrets(method, params, toRpcError(error));
       this.fail({ jsonrpc: "2.0", id, error: err });
     }
   }
@@ -296,6 +362,13 @@ class Connection {
       // 握手与会话打开可能还在途中：等它们落定，新打开的会话在 register 里被直接关闭
       await this.initPromise?.catch(() => undefined);
       await Promise.allSettled([...this.opening]);
+      // 本连接的未提交草稿绑定其创建配置；丢弃只释放内存，不写盘也不消费登录
+      for (const [draftId, record] of this.providerDrafts) {
+        discardProvider(record.config, draftId);
+      }
+      this.providerDrafts.clear();
+      this.draftLogins.clear();
+      await this.configQueue.catch(() => undefined);
       const entries = [...this.sessions.values()];
       this.sessions.clear();
       for (const entry of entries) {
@@ -314,6 +387,67 @@ class Connection {
       throw new RpcProtocolError("not_initialized", "第一条请求必须是 initialize");
     }
     return this.handle.runtime;
+  }
+
+  private providerConfig(): NonNullable<Connection["providerState"]> {
+    if (this.providerState === undefined) {
+      throw new RpcProtocolError("provider_config_unavailable", "服务端未提供服务商配置");
+    }
+    return this.providerState;
+  }
+
+  /**
+   * 变更入队执行，随后 reload → updateProviders → 推 `runtime.providersChanged`
+   * （docs/protocols/rpc.md 3.3）。变更抛错不重载、原样抛；重载抛错则请求
+   * 以重载错误失败——此时写入已生效、Runtime 仍用旧配置。
+   */
+  private enqueueConfig<T>(task: (config: RuntimeConfig) => Promise<T>): Promise<T> {
+    const run = this.configQueue.then(() => task(this.providerConfig().current));
+    // 前一个任务失败不阻塞后续任务
+    this.configQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private mutateAndReload<T>(mutate: (config: RuntimeConfig) => Promise<T>): Promise<T> {
+    return this.enqueueConfig(async (config) => {
+      const result = await mutate(config);
+      const next = await this.providerConfig().reload();
+      this.runtime().updateProviders(next);
+      this.providerConfig().current = next;
+      this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+      return result;
+    });
+  }
+
+  /** 请求失败时把敏感参数值从错误文本中抹掉（SENSITIVE_METHODS） */
+  private redactSecrets(method: string, params: unknown, error: RpcErrorObject): RpcErrorObject {
+    const extract = SENSITIVE_METHODS[method as RpcMethodName];
+    if (extract === undefined) return error;
+    const p =
+      typeof params === "object" && params !== null && !Array.isArray(params)
+        ? (params as Params)
+        : {};
+    const secrets = extract(p).filter((secret) => secret !== "");
+    if (secrets.length === 0) return error;
+    const redact = (text: string): string =>
+      secrets.reduce((out, secret) => out.split(secret).join("[redacted]"), text);
+    const data =
+      error.data === undefined
+        ? undefined
+        : Object.fromEntries(
+            Object.entries(error.data).map(([key, value]) => [
+              key,
+              typeof value === "string" ? redact(value) : value,
+            ]),
+          );
+    return {
+      code: error.code,
+      message: redact(error.message),
+      ...(data !== undefined ? { data } : {}),
+    };
   }
 
   private session(p: Params): OpenSession {
@@ -417,6 +551,15 @@ class Connection {
           .createRuntime({ clientName, interactive })
           .then((handle) => {
             this.handle = handle;
+            const providerConfig = handle.providerConfig;
+            this.providerState =
+              providerConfig !== undefined
+                ? {
+                    current: providerConfig.config,
+                    reload: providerConfig.reload,
+                    workspaceRoot: providerConfig.workspaceRoot,
+                  }
+                : undefined;
             this.initialized = true;
           })
           .catch((error: unknown) => {
@@ -532,6 +675,129 @@ class Connection {
           this.abort.signal,
         ),
 
+      // 服务商配置（rpc.md 3.3）：只读方法用最近一次重载出的配置对象；
+      // Core 的预设/凭据判断不在此复制，RPC 层只做形状校验与转发。
+      "provider.listProviderPresets": () => {
+        this.providerConfig();
+        return listProviderPresets();
+      },
+      "provider.describeProviders": async () => {
+        const { current, workspaceRoot } = this.providerConfig();
+        const providers = await current.describeProviders(workspaceRoot);
+        const setupWarning = current.providerSetupWarning;
+        return {
+          providers,
+          ...(setupWarning !== undefined ? { setupWarning } : {}),
+        };
+      },
+      "provider.describeProviderSetup": (p) =>
+        describeProviderSetup(this.providerConfig().current, reqString(p, "presetId")),
+      "provider.describeAccountStorage": (p) => {
+        const { current } = this.providerConfig();
+        const providerId = reqString(p, "providerId");
+        const entry = current.base.providers.find((item) => item.id === providerId);
+        return describeAccountStorage(current, entry ?? {}) ?? null;
+      },
+      "provider.prepareProvider": async (p) => {
+        const input = parsePrepareInput(p);
+        // 引用本连接草稿登录时用该登录创建时的配置对象：Core 的暂存凭据
+        // 按 RuntimeConfig 对象登记，重载出的新对象上找不到它
+        let config = this.providerConfig().current;
+        if (input.credential.kind === "login") {
+          config = this.draftLogins.get(input.credential.loginId) ?? config;
+        }
+        const result = await prepareProvider(config, input, { signal: this.abort.signal });
+        this.providerDrafts.set(result.draftId, {
+          config,
+          ...(input.credential.kind === "login" ? { loginId: input.credential.loginId } : {}),
+        });
+        return result;
+      },
+      "provider.commitProvider": async (p) => {
+        const draftId = reqString(p, "draftId");
+        const manualModelId = optString(p, "manualModelId");
+        return await this.mutateAndReload(async () => {
+          const record = this.providerDrafts.get(draftId);
+          const config = record?.config ?? this.providerConfig().current;
+          const result = await commitProvider(
+            config,
+            draftId,
+            manualModelId !== undefined ? { manualModelId } : {},
+          );
+          // 只在保存成功后移除草稿记录（Core 侧草稿随之失效）；失败可重试
+          this.providerDrafts.delete(draftId);
+          if (record?.loginId !== undefined) this.draftLogins.delete(record.loginId);
+          return result;
+        });
+      },
+      "provider.discardProvider": (p) => {
+        const draftId = reqString(p, "draftId");
+        const record = this.providerDrafts.get(draftId);
+        discardProvider(record?.config ?? this.providerConfig().current, draftId);
+        this.providerDrafts.delete(draftId);
+        return null;
+      },
+      "provider.setCredential": async (p) => {
+        const providerId = reqString(p, "providerId");
+        const key = reqString(p, "key");
+        return await this.mutateAndReload(async (config) => {
+          await config.setCredential(providerId, key);
+          return null;
+        });
+      },
+      "provider.listModelSettings": (p) => {
+        const { current, workspaceRoot } = this.providerConfig();
+        return current.listModelSettings(reqString(p, "providerId"), workspaceRoot);
+      },
+      "provider.saveModelSettings": async (p) => {
+        const providerId = reqString(p, "providerId");
+        const modelId = reqString(p, "modelId");
+        const patch = reqObject(p, "patch");
+        return await this.mutateAndReload(async (config) => {
+          await config.saveModelSettings(
+            providerId,
+            modelId,
+            patch,
+            this.providerConfig().workspaceRoot,
+          );
+          return null;
+        });
+      },
+      "provider.refreshUpstreamLimits": async (p) => {
+        const providerId = reqString(p, "providerId");
+        return await this.mutateAndReload(async (config) => ({
+          warning: (await config.refreshUpstreamLimits(providerId)) ?? null,
+        }));
+      },
+      "provider.refreshModelsDev": async () =>
+        await this.mutateAndReload(async (config) => ({
+          warning: (await config.refreshModelsDev()) ?? null,
+        })),
+      "provider.removeSetupProvider": async (p) => {
+        const providerId = reqString(p, "providerId");
+        return await this.mutateAndReload(async (config) => {
+          // "正在使用拒绝删除"是客户端规则（同 CLI/TUI）；服务端持有会话，
+          // 所以在服务端对本连接全部已打开会话判断——Core 不判断这条
+          for (const entry of this.sessions.values()) {
+            if (entry.session.state().config.model.provider === providerId) {
+              throw new RpcProtocolError(
+                "provider_in_use",
+                `当前会话正在使用 ${providerId}，不能删除；先切换到其他服务商的模型`,
+              );
+            }
+          }
+          await config.removeSetupProvider(providerId);
+          return null;
+        });
+      },
+      "provider.logoutProvider": async (p) => {
+        const providerId = reqString(p, "providerId");
+        return await this.mutateAndReload(async (config) => {
+          await logoutProvider(config, providerId);
+          return null;
+        });
+      },
+
       "session.subscribe": async (p) => {
         const entry = this.session(p);
         const lastSeq = await this.subscribe(entry, optInt(p, "afterSeq") ?? 0);
@@ -639,6 +905,40 @@ class Connection {
         return null;
       },
     };
+  }
+}
+
+/** provider.prepareProvider 的入参形状：presetId 必填，其余字段按 credential.kind 判别 */
+function parsePrepareInput(p: Params): AddProviderInput {
+  const input: AddProviderInput = {
+    presetId: reqString(p, "presetId"),
+    credential: parseCredential(p.credential),
+  };
+  const name = optString(p, "name");
+  if (name !== undefined) input.name = name;
+  const baseURL = optString(p, "baseURL");
+  if (baseURL !== undefined) input.baseURL = baseURL;
+  const sessionHeader = optString(p, "sessionHeader");
+  if (sessionHeader !== undefined) input.sessionHeader = sessionHeader;
+  return input;
+}
+
+function parseCredential(value: unknown): ProviderCredentialInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new InvalidParamsError("参数 credential 必须是对象");
+  }
+  const o = value as Params;
+  switch (o.kind) {
+    case "apiKey":
+      return { kind: "apiKey", key: reqString(o, "key") };
+    case "env":
+      return { kind: "env", name: reqString(o, "name") };
+    case "login":
+      return { kind: "login", loginId: reqString(o, "loginId") };
+    case "external-file":
+      return { kind: "external-file" };
+    default:
+      throw new InvalidParamsError("credential.kind 必须是 apiKey/env/login/external-file 之一");
   }
 }
 

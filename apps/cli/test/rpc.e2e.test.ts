@@ -6,7 +6,15 @@
  * 子进程跑的是构建产物，所以 beforeAll 先执行一次 `pnpm build`（几秒），避免用过期 dist 给出假通过。
  */
 import { execSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -44,6 +52,11 @@ beforeAll(async () => {
       if (request.method === "POST") modelRequests++;
       if (hang && request.method === "POST") {
         hanging.push(response);
+        return;
+      }
+      if (request.method === "GET" && request.url === "/v1/models") {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ data: [{ id: "e2e-model", context_length: 128000 }] }));
         return;
       }
       response.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -84,13 +97,21 @@ interface Child {
 const temps: string[] = [];
 const children: Child[] = [];
 
-function spawnRpc(args: string[] = ["rpc", "--stdio"]): Child {
+interface SpawnExtras {
+  /** 追加/覆盖子进程环境变量 */
+  env?: Record<string, string>;
+  /** 子进程启动前向 home 预写文件（config.json、providers.json 等） */
+  seedHome?: (home: string) => void;
+}
+
+function spawnRpc(args: string[] = ["rpc", "--stdio"], extras: SpawnExtras = {}): Child {
   const root = mkdtempSync(path.join(tmpdir(), "nct-rpc-e2e-"));
   temps.push(root);
   const home = path.join(root, "home");
   const workspace = path.join(root, "workspace");
   mkdirSync(home);
   mkdirSync(workspace);
+  extras.seedHome?.(home);
   const proc = spawn(process.execPath, [cli, ...args], {
     cwd: workspace,
     stdio: ["pipe", "pipe", "pipe"],
@@ -100,6 +121,7 @@ function spawnRpc(args: string[] = ["rpc", "--stdio"]): Child {
       NOCTURNE_API_KEY: "e2e-placeholder",
       NOCTURNE_BASE_URL: baseURL,
       NOCTURNE_MODEL: "e2e-model",
+      ...extras.env,
     },
   });
   let stderr = "";
@@ -312,6 +334,40 @@ describe("nctrn rpc --stdio（真实子进程）", () => {
     const files = existsSync(sessionsDirOf(c)) ? readdirSync(sessionsDirOf(c)) : [];
     expect(files.filter((f) => f.endsWith(".jsonl"))).toEqual([]);
     await client.shutdown();
+    expect(await exitWithin(c), c.stderr()).toBe(0);
+  }, 60_000);
+
+  it("经 RPC 用 custom-openai 预设 prepare + commit 添加服务商，listModels 立刻含新模型", async () => {
+    // modelsDev:false 关闭 models.dev 联网刷新（config.md）：commit 内的
+    // refreshModelsDev 不再访问网络，整个用例完全离线
+    const c = spawnRpc(["rpc", "--stdio"], {
+      env: { NCT_E2E_KEY: "e2e-credential" },
+      seedHome: (home) => {
+        writeFileSync(path.join(home, "config.json"), JSON.stringify({ modelsDev: false }));
+      },
+    });
+    const client = createRpcClient(c.transport, { clientName: "e2e" });
+    let changed = 0;
+    client.onProvidersChanged(() => {
+      changed += 1;
+    });
+    await client.initialize();
+
+    const prepared = await client.provider.prepareProvider({
+      presetId: "custom-openai",
+      name: "e2e-setup",
+      baseURL,
+      credential: { kind: "env", name: "NCT_E2E_KEY" },
+    });
+    expect(prepared.modelCount).toBe(1);
+    const result = await client.provider.commitProvider(prepared.draftId);
+    expect(result).toMatchObject({ providerId: "e2e-setup", modelCount: 1 });
+    // providersChanged 在 commit 响应之前到达，listModels 已是新值
+    expect(changed).toBe(1);
+    const models = await client.runtime.listModels();
+    expect(models.map((m) => `${m.ref.provider}/${m.ref.model}`)).toContain("e2e-setup/e2e-model");
+
+    c.proc.stdin.end();
     expect(await exitWithin(c), c.stderr()).toBe(0);
   }, 60_000);
 
