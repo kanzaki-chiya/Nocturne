@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { cleanup, render } from "ink-testing-library";
 import { createElement, useEffect } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Core from "@nocturne/core";
 import { startProviderLogin, ProviderLoginError, type RuntimeConfig } from "@nocturne/core";
 import type { LoginSession } from "@nocturne/core/protocol";
@@ -26,10 +26,16 @@ vi.mock("@nocturne/core", async (original) => ({
   ...(await original<typeof Core>()),
   startProviderLogin: vi.fn(),
 }));
+// 远程判定读 SSH_CONNECTION/SSH_TTY：经 ssh 跑测试时不能让宿主环境改变走向
+beforeEach(() => {
+  vi.stubEnv("SSH_CONNECTION", "");
+  vi.stubEnv("SSH_TTY", "");
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 const entry = {
   id: "openrouter",

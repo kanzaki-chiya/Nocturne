@@ -60,7 +60,7 @@ pnpm depcheck       # dependency-cruiser 依赖方向检查（modules.md 依赖�
 pnpm build          # tsdown 构建 packages/core/dist
 ```
 
-core 的默认测试经 `test/setup-offline.ts` 把全局 `fetch` 限制为只能访问本机地址，访问外网直接报错；需要网络行为的用例自行注入 fetch（如 `modelsDevFetch`）或用 `vi.stubGlobal` 桩掉。
+core 的默认测试经 `test/setup-offline.ts` 把全局 `fetch` 限制为只能访问本机地址，访问外网直接报错；需要网络行为的用例自行注入 fetch（如 `modelsDevFetch`）或用 `vi.stubGlobal` 桩掉。rpc 包的同名文件还把 `NOCTURNE_HOME` 指向每个测试文件独立的临时目录，测试不得读写维护者的真实数据目录。
 
 发布前手动运行 `node scripts/update-models-dev-snapshot.mjs` 更新随版本内置的 models.dev 裁剪快照；检查生成文件的模型数、大小与变更，再执行完整验证。运行时启动不联网，添加服务商或刷新模型列表才更新本地缓存（[config.md](../architecture/config.md)）。
 
