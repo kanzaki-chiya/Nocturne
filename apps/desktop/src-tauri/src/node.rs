@@ -127,49 +127,12 @@ pub fn satisfies(version: (u64, u64, u64)) -> bool {
     version >= REQUIRED_NODE
 }
 
-/// Windows 下 `.cmd`/`.bat` 不能直接 CreateProcess，包一层 cmd /c。
-/// 返回 `(program, prepend_args)`：实际执行 `program prepend_args... args`。
-fn interpreter_for(program: &Path) -> (PathBuf, Vec<String>) {
-    if cfg!(windows) {
-        let is_script = program
-            .extension()
-            .map(|e| {
-                let e = e.to_string_lossy().to_lowercase();
-                e == "cmd" || e == "bat"
-            })
-            .unwrap_or(false);
-        if is_script {
-            return (
-                PathBuf::from("cmd"),
-                vec![
-                    "/d".into(),
-                    "/s".into(),
-                    "/c".into(),
-                    format!("\"{}\"", program.display()),
-                ],
-            );
-        }
-    }
-    (program.to_path_buf(), Vec::new())
-}
-
 /// 构造执行 `program args...` 的命令；Windows 上加 CREATE_NO_WINDOW 防止弹控制台窗口。
+/// `.cmd`/`.bat` 不用手工包 cmd /c：Rust ≥1.77 的 std 在 Windows 上会自动经 cmd.exe
+/// 执行脚本并对命令行做安全转义（参数里的空格与引号由 std 处理）。
 pub fn program_command(program: &Path, args: &[&OsStr]) -> Command {
-    let (program, mut prepend) = interpreter_for(program);
     let mut cmd = Command::new(program);
-    if !prepend.is_empty() {
-        // cmd /c 需要一条完整的命令行字符串：可执行文件已带引号，参数逐个加引号拼接
-        let mut line = prepend.pop().unwrap_or_default();
-        for arg in args {
-            line.push(' ');
-            line.push('"');
-            line.push_str(&arg.to_string_lossy());
-            line.push('"');
-        }
-        cmd.args(&prepend).arg(line);
-    } else {
-        cmd.args(args);
-    }
+    cmd.args(args);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -367,5 +330,46 @@ mod tests {
         assert!(!satisfies((24, 13, 9)));
         assert!(satisfies((25, 0, 0)));
         assert!(!satisfies((22, 11, 0)));
+    }
+
+    /// Windows：`.cmd` 脚本经 std 自动的 cmd.exe 包装执行，
+    /// 路径含空格、参数含空格都要原样到达。
+    #[cfg(windows)]
+    #[test]
+    fn cmd_script_version_and_arg_forwarding() {
+        let dir = std::env::temp_dir().join(format!("nocturne desktop test {}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 假 node.cmd：run_node_version 拿到 --version 输出
+        let fake_node = dir.join("fake node.cmd");
+        std::fs::write(&fake_node, "@echo off\r\n@echo v22.11.0\r\n").unwrap();
+        assert_eq!(run_node_version(&fake_node), Ok("v22.11.0".into()));
+
+        // @echo %*：断言参数原样到达（含空格的参数完整、不被拆散或吃掉）
+        let echo_args = dir.join("echo args.cmd");
+        std::fs::write(&echo_args, "@echo off\r\n@echo %*\r\n").unwrap();
+        let out = program_command(
+            &echo_args,
+            &[
+                OsStr::new("C:\\some dir\\main.js"),
+                OsStr::new("rpc"),
+                OsStr::new("--stdio"),
+            ],
+        )
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut c| {
+            let mut buf = String::new();
+            c.stdout.take().unwrap().read_to_string(&mut buf)?;
+            c.wait()?;
+            Ok(buf)
+        })
+        .unwrap();
+        let line = out.trim();
+        assert!(line.contains("C:\\some dir\\main.js"), "参数丢失或被拆散: {line}");
+        assert!(line.contains("rpc"), "输出: {line}");
+        assert!(line.contains("--stdio"), "输出: {line}");
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

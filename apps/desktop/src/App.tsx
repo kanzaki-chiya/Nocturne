@@ -10,8 +10,15 @@ import type { NodeProbe } from "./types";
 
 type Phase =
   | { kind: "probing" }
+  | { kind: "probe-error"; message: string }
   | { kind: "node-help"; probe: NodeProbe; checking: boolean }
   | { kind: "ready" };
+
+type ConnectResult = { ok: true } | { ok: false; message: string };
+
+function errMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 interface StartupError {
   message: string;
@@ -45,43 +52,54 @@ export function App({ host }: { host: DesktopHost }) {
       setSessions(list);
       setStartupError(null);
     } catch (error) {
-      setStartupError({ message: error instanceof Error ? error.message : String(error) });
+      setStartupError({ message: errMessage(error) });
     }
   }, [pool]);
 
   const connect = useCallback(
-    async (workspace: string): Promise<boolean> => {
+    async (workspace: string): Promise<ConnectResult> => {
       try {
         await pool.ensure(workspace);
-        return true;
-      } catch {
-        return false;
+        return { ok: true };
+      } catch (error) {
+        // DesktopError/RpcError/Error 的 message 直接给用户看
+        // （如 backend_script_missing 提示先 pnpm build、protocol_version_mismatch、invalid_workspace）
+        return { ok: false, message: errMessage(error) };
       }
     },
     [pool],
   );
 
   const boot = useCallback(async () => {
-    // 启动项目：lastProject，否则第一个手动项目；全失败则显示错误
+    // 启动项目：lastProject，否则第一个手动项目；全失败显示每个候选的原因
     const { lastProject, projects } = prefs.get();
     const candidates = [
       ...(lastProject !== null ? [lastProject] : []),
       ...projects.filter((p) => p !== lastProject),
     ];
+    const failures: string[] = [];
     for (const workspace of candidates) {
-      if (await connect(workspace)) {
+      const result = await connect(workspace);
+      if (result.ok) {
         await refresh();
         return;
       }
+      failures.push(`${workspace}：${result.message}`);
     }
-    if (candidates.length > 0) {
-      setStartupError({ message: "无法连接后台：所有项目目录都不可用" });
+    if (failures.length > 0) {
+      setStartupError({ message: `无法连接后台：${failures.join("；")}` });
     }
     // 没有候选项目：左栏只显示「打开项目…」
   }, [prefs, connect, refresh]);
 
   const probe = useCallback(async () => {
-    const result = (await host.invoke("node_probe")) as NodeProbe;
+    let result: NodeProbe;
+    try {
+      result = (await host.invoke("node_probe")) as NodeProbe;
+    } catch (error) {
+      setPhase({ kind: "probe-error", message: errMessage(error) });
+      return;
+    }
     if (result.ok) {
       setPhase({ kind: "ready" });
       void boot();
@@ -135,8 +153,9 @@ export function App({ host }: { host: DesktopHost }) {
     });
     bumpPrefs();
     if (pool.any() === undefined) {
-      if (!(await connect(dir))) {
-        setStartupError({ message: `无法连接后台：${dir}` });
+      const result = await connect(dir);
+      if (!result.ok) {
+        setStartupError({ message: `无法连接后台：${dir}：${result.message}` });
         return;
       }
     }
@@ -149,14 +168,22 @@ export function App({ host }: { host: DesktopHost }) {
       ...(lastProject !== null ? [lastProject] : []),
       ...projects.filter((p) => p !== lastProject),
     ];
+    const failures: string[] = [];
     for (const workspace of candidates) {
-      if (await connect(workspace)) {
+      const result = await connect(workspace);
+      if (result.ok) {
         setBackendExit(null);
         await refresh();
         return;
       }
+      failures.push(`${workspace}：${result.message}`);
     }
-    setStartupError({ message: "重新连接失败" });
+    setStartupError({
+      message:
+        failures.length > 0
+          ? `重新连接失败：${failures.join("；")}`
+          : "重新连接失败：没有可用的项目目录",
+    });
   }, [prefs, connect, refresh]);
 
   const p = prefs.get();
@@ -183,6 +210,21 @@ export function App({ host }: { host: DesktopHost }) {
 
   if (phase.kind === "probing") {
     return <div className="center" />;
+  }
+  if (phase.kind === "probe-error") {
+    return (
+      <div className="center">
+        <div className="nodecard">
+          <h3>无法检测 Node.js</h3>
+          <div className="lead">{phase.message}</div>
+          <div className="acts">
+            <button className="btn primary" onClick={reprobe}>
+              重新检测
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
   if (phase.kind === "node-help") {
     return (

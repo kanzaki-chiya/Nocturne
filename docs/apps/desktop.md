@@ -41,7 +41,7 @@ type BackendMessage =
 2. 资源目录 `<resource_dir>/node/node.exe`（非 Windows 为 `node`；本版不随附，`not-bundled`）；
 3. `PATH` 逐目录找 `node.exe` / 可执行的 `node`。
 
-找到后运行 `<node> --version`（5 秒超时，Windows 加 `CREATE_NO_WINDOW`；`.cmd`/`.bat` 脚本经 `cmd /d /s /c` 执行），取 stdout 第一行。版本解析接受可选 `v` 前缀、忽略 `-`/`+` 后缀，要求 ≥ 24.14.0（与 CLI 的 engines 一致）。
+找到后运行 `<node> --version`（5 秒超时，Windows 加 `CREATE_NO_WINDOW`；`.cmd`/`.bat` 脚本由 Rust std 自动经 cmd.exe 执行），取 stdout 第一行。版本解析接受可选 `v` 前缀、忽略 `-`/`+` 后缀，要求 ≥ 24.14.0（ADR-0046 第 2 节；CLI 的 `engines` 目前写的是 `>=24`）。
 
 `NodeProbe` 结构（camelCase；步骤恒为 env/bundled/path 三项，`status` 为 kebab-case）：
 

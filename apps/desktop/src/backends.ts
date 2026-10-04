@@ -71,9 +71,11 @@ export class BackendPool {
     })();
 
     this.pending.set(key, opening);
-    void opening.finally(() => {
+    // then(cleanup, cleanup)：失败时也走到清理且不产生未接住的 rejection
+    const cleanup = () => {
       if (this.pending.get(key) === opening) this.pending.delete(key);
-    });
+    };
+    void opening.then(cleanup, cleanup);
     return opening;
   }
 
