@@ -1,0 +1,219 @@
+import { useEffect, useRef, useState } from "react";
+
+import type { PinnedRow, ProjectNode, SessionRow, SessionTree } from "./session-tree";
+
+export interface SidebarProps {
+  tree: SessionTree;
+  pinnedIds: ReadonlySet<string>;
+  selectedId: string | null;
+  collapsed: ReadonlySet<string>;
+  expanded: ReadonlySet<string>;
+  onSelectSession: (id: string) => void;
+  onToggleCollapse: (key: string) => void;
+  onToggleExpand: (key: string) => void;
+  onPin: (id: string) => void;
+  onUnpin: (id: string) => void;
+  onHideProject: (key: string) => void;
+  onOpenProject: () => void;
+}
+
+type MenuState =
+  | { kind: "session"; x: number; y: number; id: string; pinned: boolean }
+  | { kind: "project"; x: number; y: number; key: string };
+
+function dotClass(row: SessionRow): string {
+  if (row.status === "running") return "dot run";
+  if (row.status === "pending") return "dot warn";
+  return "dot";
+}
+
+const FOLD_OPEN = "M1.5 4.5v8h11l2-5.5H4l-2 5.5M1.5 4.5V3h4l1.5 1.5h5.5V7";
+const FOLD_CLOSED = "M1.5 3h4l1.5 1.5h7.5v8h-13z";
+
+function FoldIcon({ open }: { open: boolean }) {
+  return (
+    <svg className="fold" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d={open ? FOLD_OPEN : FOLD_CLOSED}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function RowButton({
+  row,
+  pinned,
+  selected,
+  onSelect,
+  onContext,
+}: {
+  row: SessionRow;
+  pinned?: { project: string };
+  selected: boolean;
+  onSelect: () => void;
+  onContext: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <button className={`item${selected ? " on" : ""}`} onClick={onSelect} onContextMenu={onContext}>
+      <span className={dotClass(row)} />
+      <span className="t">{row.title}</span>
+      {pinned !== undefined ? (
+        <span className="proj">{pinned.project}</span>
+      ) : (
+        <span className={`meta${row.status === "pending" ? " pend" : ""}`}>{row.meta}</span>
+      )}
+    </button>
+  );
+}
+
+export function Sidebar(props: SidebarProps) {
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (menu === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current !== null && !menuRef.current.contains(e.target as Node)) {
+        setMenu(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onDown);
+    };
+  }, [menu]);
+
+  const sessionMenu = (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    setMenu({ kind: "session", x: e.clientX, y: e.clientY, id, pinned: props.pinnedIds.has(id) });
+  };
+
+  const projectMenu = (e: React.MouseEvent, key: string) => {
+    e.preventDefault();
+    setMenu({ kind: "project", x: e.clientX, y: e.clientY, key });
+  };
+
+  const renderRow = (row: SessionRow, pinned?: PinnedRow) => (
+    <RowButton
+      key={row.id}
+      row={row}
+      {...(pinned !== undefined ? { pinned: { project: pinned.project } } : {})}
+      selected={props.selectedId === row.id}
+      onSelect={() => {
+        props.onSelectSession(row.id);
+      }}
+      onContext={(e) => {
+        sessionMenu(e, row.id);
+      }}
+    />
+  );
+
+  const renderProject = (project: ProjectNode) => {
+    const collapsed = props.collapsed.has(project.key);
+    const expanded = props.expanded.has(project.key);
+    return (
+      <div className="grp" key={project.key}>
+        <button
+          className="gh"
+          onClick={() => {
+            props.onToggleCollapse(project.key);
+          }}
+          onContextMenu={(e) => {
+            projectMenu(e, project.key);
+          }}
+        >
+          <span className="tw">{collapsed ? "▸" : "▾"}</span>
+          <FoldIcon open={!collapsed} />
+          <span className="gname">{project.name}</span>
+          {collapsed && <span className="meta">{project.count}</span>}
+        </button>
+        {!collapsed && (
+          <nav className="nav sub">
+            {project.sessions.map((row) => renderRow(row))}
+            {project.moreCount > 0 && (
+              <button
+                className="item more"
+                onClick={() => {
+                  props.onToggleExpand(project.key);
+                }}
+              >
+                展开显示（还有 {project.moreCount} 个）
+              </button>
+            )}
+            {expanded && project.count > 0 && (
+              <button
+                className="item more"
+                onClick={() => {
+                  props.onToggleExpand(project.key);
+                }}
+              >
+                收起
+              </button>
+            )}
+          </nav>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <aside className="side">
+      <div className="shead">
+        <span className="brand">Nocturne</span>
+      </div>
+      <div className="tree">
+        {props.tree.pinned.length > 0 && (
+          <>
+            <h4>置顶</h4>
+            <nav className="nav">{props.tree.pinned.map((row) => renderRow(row, row))}</nav>
+          </>
+        )}
+        <h4>项目</h4>
+        {props.tree.projects.map(renderProject)}
+        <nav className="nav">
+          <button
+            className="item add"
+            onClick={() => {
+              props.onOpenProject();
+            }}
+          >
+            <span className="glyph">＋</span>打开项目…
+          </button>
+        </nav>
+      </div>
+      {menu !== null && (
+        <div className="ctxmenu" ref={menuRef} style={{ left: menu.x, top: menu.y }}>
+          {menu.kind === "session" ? (
+            <button
+              onClick={() => {
+                if (menu.pinned) props.onUnpin(menu.id);
+                else props.onPin(menu.id);
+                setMenu(null);
+              }}
+            >
+              {menu.pinned ? "取消置顶" : "置顶"}
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                props.onHideProject(menu.key);
+                setMenu(null);
+              }}
+            >
+              从列表移除
+            </button>
+          )}
+        </div>
+      )}
+    </aside>
+  );
+}
