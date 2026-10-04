@@ -252,12 +252,12 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 ## RPC 与桌面端（RPC 第一版随 0.5.0 发布，实验性；桌面端已排期）
 
-**前提**：RPC 设计见 [ADR-0044](../decisions/ADR-0044-rpc-stdio.md)（已接受，2026-10-03）；桌面端选定 Tauri，另写 ADR。
+**前提**：RPC 设计见 [ADR-0044](../decisions/ADR-0044-rpc-stdio.md)（已接受，2026-10-03）；桌面端设计见 [ADR-0046](../decisions/ADR-0046-desktop-tauri.md)（已接受，2026-10-04）。
 
 **内容**：
 
 - **RPC 第一版**（已实现并验收，2026-10-04；随 0.5.0 以实验性发布）：`nctrn rpc --stdio`，JSON-RPC 按行分隔，一个后台一个 Runtime、一个客户端；事件按 `afterSeq` 回放后衔接实时推送。按 ADR-0044 第 10 节分五步实现，其中服务商配置改为数据接口（`describeProviderSetup` / `prepareProvider` + `commitProvider`），CLI 与 TUI 向导迁移其上。
-- **桌面端**：Tauri 外壳 + 随附 `nctrn` Node 单文件作后台，界面经 RPC 驱动；框架细节、前端技术栈与界面范围待桌面端 ADR。
+- **桌面端**（ADR-0046 已接受，待实现）：Tauri 外壳逐行转发，每个有打开会话的项目一个 `nctrn rpc --stdio` 后台，要求用户自装 Node 24.14+；React + Vite 前端经 RPC 驱动；左栏按项目分组的会话树与置顶，对话、权限、服务商、设置；第一版只出 Windows 安装包。按 ADR 第 9 节分四步实现。
 
 ## 之后（未排期）
 

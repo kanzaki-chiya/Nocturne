@@ -1,0 +1,155 @@
+# ADR-0046：桌面端第一版：Tauri 外壳经 RPC 驱动 nctrn 后台
+
+- 状态：已接受（维护者 2026-10-04 确认：要求用户自装 Node；React + Vite；第一版范围按第 5 节；只出 Windows 安装包；左栏采用按项目分组的会话树并支持置顶；上下文用量可点开查看占比）
+- 日期：2026-10-04
+
+## 背景
+
+维护者 2026-10-03 选定 Tauri 做桌面端，理由是不想像 Electron 应用那样臃肿（[ADR-0044](ADR-0044-rpc-stdio.md) 背景）。ADR-0044 已经把进程外接口做完并随 0.5.0 发布：`nctrn rpc --stdio` 一个进程一个 Runtime、一个客户端，可以同时打开多个会话；服务商配置是"描述 + 准备 + 提交"的数据接口，登录拆成请求与通知；`@nocturne/rpc/client` 只依赖 `@nocturne/core/protocol`，传输由使用方注入（`LineTransport`）。
+
+桌面端还缺这些决定：Node 从哪里来、外壳与后台怎么连、一个窗口对应几个后台、前端用什么技术栈、第一版做哪些界面、怎么打包和测试。本 ADR 把它们定下来。
+
+现状约束：
+
+- Runtime 的工作区根目录在进程启动时绑定（`nctrn rpc --stdio` 取进程 cwd），项目配置 `.nocturne/config.json`、权限规则、文件索引都跟着它走。一个后台只能服务一个项目目录。
+- 维护者的验收环境是 Windows 11 + WebView2；macOS、Linux 没有日常测试条件。
+- 默认测试集完全离线，`pnpm build` / `pnpm test` 不能要求装 Rust。
+
+## 决定
+
+### 1. 进程结构
+
+```
+┌──────────── Tauri 应用（一个进程）────────────┐
+│ WebView 前端（TS）        Rust 外壳            │
+│  @nocturne/rpc/client ⇄  逐行转发、进程管理    │
+└─────────────────────────────┬─────────────────┘
+                              │ stdin/stdout（JSON-RPC，按行）
+              ┌───────────────┼───────────────┐
+        node nctrn.mjs   node nctrn.mjs   …   每个有打开会话的项目一个后台
+        rpc --stdio      rpc --stdio          cwd = 项目目录
+```
+
+- **一个项目一个后台，打开会话时才启动**。用户在某个项目里新建或打开会话时，Rust 外壳才以该项目目录为 cwd 启动一个 `nctrn rpc --stdio` 子进程；同一项目的多个会话共用这个后台，与 ADR-0044 第 2 节"一个进程多个会话"一致。一个项目的会话全部关闭后，它的后台退出。不同项目互不影响，一个后台崩溃不波及其他项目。
+- **会话列表不依赖各项目的后台**。会话存储是全局的（`<NOCTURNE_HOME>/sessions`），任意一个后台的 `runtime.listSessions` 都能列出所有项目的会话。前端用任意一个运行中的后台查询列表；窗口打开期间至少保留一个后台（最近使用的项目），没有会话打开时也不退出。
+- **一个窗口**。第一版只有一个主窗口，左栏是按项目分组的会话树（第 5 节）。多窗口留到以后。
+- **前端是唯一的 RPC 客户端**。Rust 外壳不解析报文、不调用任何 RPC 方法，只做三件事：启停子进程、按行转发 stdin/stdout、把子进程退出通知前端。所有 Nocturne 语义（会话、权限、登录）都在前端经 `@nocturne/rpc/client` 处理，Core 不为桌面端改行为。
+
+### 2. Node 运行时
+
+后台就是 `nctrn` 本身的单文件构建（`nctrn.mjs`，无 `node_modules`），随应用放在资源目录。Node 本体按以下顺序查找：
+
+1. 环境变量 `NOCTURNE_NODE` 指定的可执行文件；
+2. 应用资源目录里随附的 `node(.exe)`（第一版不随附，见下）；
+3. `PATH` 上的 `node`。
+
+找到后先运行 `node --version` 检查 `>= 24.14`（与 CLI 的 `engines` 一致）。找不到或版本过低时，前端显示一页说明：当前找到的版本、要求的版本、Node 官网链接、"重新检测"按钮，不启动后台。
+
+**第一版不随附 Node**，要求用户自己装 Node 24.14+。理由：随附 Node 会让安装包从十几 MB 涨到四五十 MB，和选 Tauri 的初衷相反；目标用户是开发者，本来就要装 Node 才能用 CLI。查找顺序里预留了第 2 步，以后要做"开箱即用"版本时只需把 `node.exe` 放进资源目录，不改代码。
+
+### 3. 外壳与后台的连接
+
+Rust 外壳提供四个 Tauri 命令，前端用它们实现 `LineTransport`：
+
+| 命令 | 作用 |
+|---|---|
+| `backend_open { workspace, channel }` | 查找 Node、以 `workspace` 为 cwd 启动后台，返回 `backendId`；之后 stdout 的每一行经 `channel`（Tauri `Channel`）推给前端，子进程退出时推一条带退出码的关闭消息 |
+| `backend_send { backendId, line }` | 写一行到 stdin（外壳负责加 `\n`） |
+| `backend_close { backendId }` | 关闭 stdin，等待子进程自行退出（[rpc.md](../protocols/rpc.md) 第 6 节的清理流程），5 秒后仍未退出则强杀 |
+| `node_probe {}` | 返回第 2 节的查找结果（路径、版本、是否满足），供说明页使用 |
+
+- 前端的 `TauriLineTransport` 把 `send` 映射到 `backend_send`，`onLine` / `onClose` 映射到 channel 消息，`close` 映射到 `backend_close`。`@nocturne/rpc/client` 不改。
+- **日志**：外壳不记录 stdin/stdout 的内容。`provider.setCredential` 等方法的参数含密钥明文（[rpc.md](../protocols/rpc.md) 第 7 节），只允许在两个进程之间的管道里出现。子进程的 stderr 是 rpc.md 规定的诊断与警告输出，外壳保留最近 500 行放在内存里，前端可在"后台日志"面板查看；不写盘。
+- **退出**：关闭主窗口时，外壳对所有后台执行 `backend_close`，全部退出（或超时强杀）后再退出应用。Windows 上子进程放进 Job Object，外壳被强杀时后台一起结束，避免孤儿进程。
+- **崩溃**：后台意外退出时，前端在该项目顶部显示横幅（退出码与 stderr 最后几行）和"重启后台"按钮。重启后对原先打开的会话逐个 `resumeSession` 并 `subscribe { afterSeq }`，按 ADR-0044 第 5 节回放衔接。
+
+### 4. 前端技术栈
+
+- **TypeScript + React + Vite**。TUI 已经用 React（Ink），团队熟悉；会话视图的折叠逻辑在 `@nocturne/core/protocol` 的 `reduceSessionView` 里（[view.md](../protocols/view.md)），与框架无关，桌面端直接复用。
+- **样式**：普通 CSS + CSS 变量。颜色变量按 TUI 主题的语义名（`accent`、`muted`、`selectionBg`、`border`、`success`、`warning`、`error` 等）定义深色与浅色两套，跟随系统，也可在设置里切换。第一版不引入组件库。
+- **Markdown**：选用一个只把 Markdown 转成 React 元素、默认不渲染原始 HTML 的库（候选 `react-markdown`，许可证与体积在实现时核对）；代码块高亮第一版只做等宽与语言标签，不引高亮库。模型输出不可信，**任何情况下都不用 `dangerouslySetInnerHTML` 渲染模型或工具输出**。
+- 新增依赖都在实现时列入 [repository-layout.md](../development/repository-layout.md) 第 6 节的工具链表并注明许可证。
+
+### 5. 第一版界面范围
+
+主窗口布局：
+
+```
+┌────────────────────────┬──────────────────────────────────────────────┐
+│ Nocturne            ⌕  │ nocturne › 修复服务商页状态                   │
+│ ＋ 新会话               ├──────────────────────────────────────────────┤
+│ 置顶                    │ › 服务商页刷新后还显示已失效                  │
+│   发布 0.5.0  [nocturne]│ ● 读取 packages/core/src/config/load.ts       │
+│   重设计前端  [Inkloom] │ ● 编辑 load.ts  +2 −1           [展开 diff]   │
+│ 项目                    │ ┌ 需要确认 ─────────────────────────────────┐ │
+│ ▾ nocturne           ＋ │ │ shell: pnpm test                          │ │
+│  ▌● 修复服务商页状态    │ │ [允许一次] [会话内允许] [项目内允许] [拒绝]│ │
+│     桌面端 ADR   2 小时 │ └───────────────────────────────────────────┘ │
+│     展开显示（还有 12） ├──────────────────────────────────────────────┤
+│ ▾ Inkloom            ＋ │ 输入消息，Enter 发送，Shift+Enter 换行         │
+│   ● 修复预览页面 待确认 │                                              │
+│ ▸ omp                 4 ├──────────────────────────────────────────────┤
+│ ⛁ 服务商  ⚙ 设置        │ gpt-5.5 · 思考 high · smart · 上下文 12% · 缓存 83% │
+└────────────────────────┴──────────────────────────────────────────────┘
+```
+
+第一版包含：
+
+- **项目与会话**：左栏是按项目分组的会话树。项目来自已有会话的工作目录，加上用户用「打开项目」（系统文件夹对话框）手动添加的目录；从列表移除只隐藏，不删会话。每个项目默认列最近 5 个会话，其余折进「展开显示」；项目标题旁的 ＋ 在该项目里新建会话。运行中的会话带主色圆点，等待权限确认的会话（包括其他项目里的）带警告色圆点和「待确认」，被其他进程锁定的会话显示锁，打开时提示可强制打开。
+- **置顶**：会话可以置顶，置顶区在会话树上方，每条都标出所属项目。置顶列表、手动添加与隐藏的项目都是桌面端自己的界面状态，存在应用数据目录，不进 Core。
+- **对话**：消息流按 view reducer 的条目渲染（用户消息、助手回答、思考折叠、工具调用卡片、diff、警告与通知）；输入框支持多行、粘贴或拖入图片（`attachments`）；运行中可中断。
+- **权限与提问**：`permission.requested` 和提问请求显示为消息流底部的卡片，按钮与 TUI 相同；界面只把用户的选择回传，不做任何判定（[permissions.md](../architecture/permissions.md)）。
+- **输入框的斜杠命令**：支持与 TUI 相同的会话命令和补全（`/compact`、`/model`、`/effort`、`/preset`、`/context` 等），手动压缩只走命令，界面上不另设按钮。
+- **底部状态栏**：模型、思考档位、权限预设（点击切换，对应 `setModel` / `setReasoningEffort` / `setPermissionPreset`）、上下文用量、缓存命中、Turn 状态。点上下文用量弹出占比面板：总量与预算、按 `describeContext` 报告各段（系统提示、工具定义、项目说明、环境与任务清单、对话历史、图片）的堆叠条与数值，对话历史再按用户消息、助手回答、工具调用与结果、压缩摘要细分。
+- **上下文报告的历史细分**：现有 `ContextReport` 的 `history` 段只有总数。在该段增加可选字段 `breakdown`（`user`、`assistant`、`tool`、`summary` 各自的字符数与估算 token），由 Context Builder 在组装历史时顺带统计；TUI `/context` 同步显示。这是 Core 公开类型的增量扩展，按 [rpc.md](../protocols/rpc.md) 第 8 节先改公开 API，RPC 自动带出，主文档 [context.md](../architecture/context.md)（`ContextReport` 说明处）同步。
+- **服务商**：原生表单走 `describeProviderSetup` → `prepareProvider` → `commitProvider`；账号登录走 `login.*`，授权地址用系统浏览器打开，远程粘贴用输入框；模型列表与模型设置编辑。
+- **设置**：`describeSettings` / `updateSettings`，逐项保存，规则与 [ADR-0045](ADR-0045-fullscreen-page-shell.md) 第 7 节相同；模型角色、安全审查。
+
+第一版不包含（以后另行排期）：回退与分叉界面、MCP 服务器管理、多窗口、系统托盘、自动更新、代码签名、内置终端、文件树与编辑器、macOS/Linux 安装包。
+
+### 6. 安全边界
+
+- Tauri capabilities 只开放第 3 节的四个命令、文件夹选择对话框和"用系统浏览器打开链接"；不启用 fs、shell、http 插件，前端不能直接读写文件或启动进程。
+- 打开链接只接受 `https:` 和 `http://127.0.0.1` / `http://localhost`（本机回调页），其他协议忽略。
+- CSP 只允许加载应用自带资源，禁止远程脚本、样式和 `eval`；图片附件预览用 `blob:`。
+- 前端不持久化任何凭据或会话内容；项目列表、置顶的会话 id 与窗口尺寸存在 Tauri 的应用数据目录，内容只有路径、id 与布局。
+
+### 7. 仓库与构建
+
+- 新增 `apps/desktop`：`src/`（前端）、`src-tauri/`（Rust 外壳）、`index.html`、`vite.config.ts`。
+- 依赖方向：`apps/desktop/src` 只能引 `@nocturne/rpc/client` 和 `@nocturne/core/protocol`，不能引 `@nocturne/core` 运行时、`apps/*`、Node 内置模块；在 `.dependency-cruiser.cjs` 增加 `desktop-*` 规则强制。
+- **默认流程不需要 Rust**：`pnpm typecheck`、`pnpm lint`、`pnpm test` 覆盖 `apps/desktop/src` 的 TS 代码；`pnpm build` 不构建桌面端。桌面端单独用 `pnpm desktop:dev`（Vite + `tauri dev`）和 `pnpm desktop:build`（打包）。Tauri CLI 作为 `apps/desktop` 的开发依赖安装，不要求全局装。
+- **后台构建脚本**：新增 `scripts/bundle-nctrn.mjs`，用 tsdown `noExternal` 把 `apps/cli` 打成单文件 `nctrn.mjs`。`desktop:build` 先跑它，再把产物放进 `src-tauri` 资源目录。v0.7 的分发复用同一脚本。
+- 版本：桌面端与 `nctrn` 同版本发布；握手时比对 `protocolVersion`，不一致直接报错（ADR-0044 第 3 节），正常打包不会出现。
+- 安装包：第一版只出 Windows NSIS 安装包（按当前用户安装，不需要管理员权限），未签名，SmartScreen 会提示。
+
+### 8. 测试
+
+- **前端**：Vitest + jsdom。用 `createMemoryTransportPair` 接一个假服务端（或真实 `@nocturne/rpc/server` + 假 Provider 的 Runtime），测试会话列表、消息流渲染、权限卡片回复、服务商表单字段错误（`-32005` 的 `data.field`）、后台断开横幅与重连回放。进入默认测试集。
+- **Rust**：`cargo test` 覆盖逐行切分（半行、超长行、CRLF）、Node 版本解析、关闭超时；不进入默认测试集，在 `desktop:build` 前运行。
+- **手测**：维护者在 WT 之外的真实窗口里验收，按第 9 节每步列出的清单进行；界面改动以截图核对。
+
+### 9. 实现分步
+
+1. **骨架与连接**：`apps/desktop` 脚手架、Rust 四个命令、Job Object、Node 查找与说明页、`TauriLineTransport`；界面只做打开项目、握手、列出会话。
+2. **对话**：新建/恢复/关闭会话，消息流、输入框与斜杠命令、中断，权限与提问卡片，状态栏切换模型、档位、预设，上下文占比面板（含 Core 的历史细分与 TUI `/context` 同步）。
+3. **服务商与设置**：服务商表单、登录、模型设置；设置页。
+4. **打磨与打包**：图片附件、后台崩溃与重连、后台日志面板、深浅主题；`bundle-nctrn` 脚本与 NSIS 安装包；文档同步（新增 `docs/apps/desktop.md`，更新 modules.md、repository-layout.md、README）。
+
+每步完成后维护者验收再进入下一步。
+
+## 后果
+
+- 桌面端不改 Core 与 RPC 协议，验证了 ADR-0044 的接口足够驱动一个完整客户端；若实现中发现缺口，按 [rpc.md](../protocols/rpc.md) 第 8 节先补公开 API，再暴露到 RPC。
+- 一个项目一个 Node 进程，同时打开多个项目时内存按进程数增长（每个后台约一百多 MB）。换来项目之间完全隔离，且与 Runtime 绑定工作区的现有设计一致。
+- 要求用户自装 Node，没装 Node 的人第一次打开会看到说明页；以后可以出随附 Node 的版本而不改代码。
+- 仓库多了 Rust 代码和 Tauri 工具链，但只影响 `desktop:*` 脚本，默认的检查与测试流程不变。
+- 需要新增 `docs/apps/desktop.md` 作为桌面端主文档，ADR 只记录决定。
+
+## 备选方案
+
+- **随附 Node（Node SEA 或直接带 `node.exe`）**：开箱即用，但安装包大三四倍。保留为以后的选项，见第 2 节。
+- **用 Bun / Deno 编译成单个可执行文件**：体积比随附 Node 小一些，但 Core 依赖 Node 的 `child_process`、DPAPI 调用方式和一些 Node 24 行为，换运行时要重新验证，风险大于收益。
+- **一个后台服务所有项目**：进程少，但 Runtime 绑定工作区，需要改 Core 让工作区随会话走，影响配置加载、权限规则与文件索引，超出桌面端第一版的范围。
+- **Rust 外壳解析 RPC、前端调 Tauri 命令**：Rust 侧要重写一遍类型与方法，和 `@nocturne/rpc/client` 重复；且密钥会经过 Rust 的结构化处理，日志边界更难守。
+- **前端用 Svelte / Solid**：产物更小，但团队已有 React 经验，view reducer 与 TUI 的条目渲染思路可以直接参照；体积差异对桌面应用不关键。
