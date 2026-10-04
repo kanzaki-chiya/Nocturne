@@ -250,6 +250,43 @@ describe("describeProviders", () => {
     expect(JSON.stringify(item)).not.toContain("fake-private-token");
     await fs.unlink(path.join(home, "providers.json"));
   });
+  it("账号状态读盘上最新记录：另一个存储实例刷新后不再显示已失效", async () => {
+    const account = (expiresAt: number, accessToken: string) =>
+      JSON.stringify({
+        version: 1,
+        clientId: "client",
+        subject: "subject",
+        idToken: "fake-id-token",
+        accessToken,
+        refreshToken: "fake-refresh-token",
+        expiresAt,
+        scopes: ["chatgpt.tokens.use.direct"],
+      });
+    const viewer = (await createCredentialStore(platform, home, { backend: "none" })).store;
+    await viewer.setAccount?.("account", account(Date.now() - 1, "fake-old-token"), "plaintext");
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [
+        {
+          id: "account",
+          type: "openai-compatible",
+          baseURL: "https://api.openai.com/v1",
+          auth: { kind: "openai-siwc" },
+        },
+      ],
+    });
+    const rc = await loadConfig(platform, { nocturneHome: home, env: noEnv, credentials: viewer });
+    expect((await rc.describeProviders())[0]?.credentialStatus).toBe("expired");
+    const refresher = (await createCredentialStore(platform, home, { backend: "none" })).store;
+    await refresher.setAccount?.(
+      "account",
+      account(Date.now() + 3_600_000, "fake-new-token"),
+      "plaintext",
+    );
+    expect((await rc.describeProviders())[0]?.credentialStatus).toBe("valid");
+    await fs.unlink(path.join(home, "providers.json"));
+    await fs.unlink(path.join(home, "credentials.json"));
+  });
   it("标注来源层/密钥来源/覆盖关系；不含密钥", async () => {
     const creds = (await createCredentialStore(platform, home, { backend: "memory" })).store;
     await creds.set("corp", "sk-hidden");

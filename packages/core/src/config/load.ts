@@ -550,7 +550,8 @@ export async function loadConfig(
             else delete item.credentialStorage;
             const label = entry.auth.kind === "xai-oauth2" ? "Grok 账号" : "ChatGPT 账号";
             try {
-              const raw = await credentials.get(entry.id);
+              // 令牌刷新可能由另一个凭据存储实例写入，按盘上最新记录计算状态。
+              const raw = await credentials.get(entry.id, { fresh: true });
               const record =
                 raw === undefined
                   ? undefined
