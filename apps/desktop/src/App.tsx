@@ -32,9 +32,11 @@ export function App({ host }: { host: DesktopHost }) {
 
   const [phase, setPhase] = useState<Phase>({ kind: "probing" });
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [plainWorkspace, setPlainWorkspace] = useState<string | null>(null);
   const [prefsVersion, setPrefsVersion] = useState(0);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [chatsExpanded, setChatsExpanded] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [startupError, setStartupError] = useState<StartupError | null>(null);
   const [backendExit, setBackendExit] = useState<{ code: number | null } | null>(null);
@@ -70,27 +72,25 @@ export function App({ host }: { host: DesktopHost }) {
     [pool],
   );
 
+  // 启动链：普通对话工作区（外壳创建）→ 常驻后台 → 会话列表。
+  // plain_workspace 或 ensure 失败都显示真实错误，「重试」重走这条链。
   const boot = useCallback(async () => {
-    // 启动项目：lastProject，否则第一个手动项目；全失败显示每个候选的原因
-    const { lastProject, projects } = prefs.get();
-    const candidates = [
-      ...(lastProject !== null ? [lastProject] : []),
-      ...projects.filter((p) => p !== lastProject),
-    ];
-    const failures: string[] = [];
-    for (const workspace of candidates) {
-      const result = await connect(workspace);
-      if (result.ok) {
-        await refresh();
-        return;
-      }
-      failures.push(`${workspace}：${result.message}`);
+    let workspace: string;
+    try {
+      workspace = (await host.invoke("plain_workspace")) as string;
+    } catch (error) {
+      setStartupError({ message: errMessage(error) });
+      return;
     }
-    if (failures.length > 0) {
-      setStartupError({ message: `无法连接后台：${failures.join("；")}` });
+    setPlainWorkspace(workspace);
+    const result = await connect(workspace);
+    if (!result.ok) {
+      setStartupError({ message: result.message });
+      return;
     }
-    // 没有候选项目：左栏只显示「打开项目…」
-  }, [prefs, connect, refresh]);
+    setBackendExit(null);
+    await refresh();
+  }, [host, connect, refresh]);
 
   const probe = useCallback(async () => {
     let result: NodeProbe;
@@ -141,6 +141,7 @@ export function App({ host }: { host: DesktopHost }) {
     };
   }, [refresh]);
 
+  // 「打开项目」只更新 prefs 并刷新列表，不启动后台（项目后台在打开会话时才启动）
   const openProject = useCallback(async () => {
     const dir = await host.pickFolder();
     if (dir === null) return;
@@ -149,57 +150,35 @@ export function App({ host }: { host: DesktopHost }) {
     prefs.update({
       projects: current.projects.includes(dir) ? current.projects : [...current.projects, dir],
       hidden: current.hidden.filter((k) => projectKey(k) !== key),
-      lastProject: dir,
     });
     bumpPrefs();
-    if (pool.any() === undefined) {
-      const result = await connect(dir);
-      if (!result.ok) {
-        setStartupError({ message: `无法连接后台：${dir}：${result.message}` });
-        return;
-      }
-    }
     await refresh();
-  }, [host, prefs, pool, connect, refresh, bumpPrefs]);
+  }, [host, prefs, refresh, bumpPrefs]);
 
-  const reconnect = useCallback(async () => {
-    const { lastProject, projects } = prefs.get();
-    const candidates = [
-      ...(lastProject !== null ? [lastProject] : []),
-      ...projects.filter((p) => p !== lastProject),
-    ];
-    const failures: string[] = [];
-    for (const workspace of candidates) {
-      const result = await connect(workspace);
-      if (result.ok) {
-        setBackendExit(null);
-        await refresh();
-        return;
-      }
-      failures.push(`${workspace}：${result.message}`);
-    }
-    setStartupError({
-      message:
-        failures.length > 0
-          ? `重新连接失败：${failures.join("；")}`
-          : "重新连接失败：没有可用的项目目录",
-    });
-  }, [prefs, connect, refresh]);
+  // 后台退出后的「重新连接」= 重走启动链
+  const reconnect = boot;
 
   const p = prefs.get();
   const tree = useMemo(
     () =>
       buildSessionTree(sessions, p, {
+        plainWorkspace,
+        chatsExpanded,
         expanded,
         collapsed,
       }),
     // prefs 快照经 prefsVersion 驱动重算
-    [sessions, prefsVersion, expanded, collapsed],
+    [sessions, prefsVersion, plainWorkspace, chatsExpanded, expanded, collapsed],
   );
 
   const pinnedIds = new Set(p.pinned);
 
   const selected = sessions.find((s) => s.id === selectedId);
+  // 一个可显示会话都没有时主区提示「还没有会话」
+  const hasAnySession =
+    tree.pinned.length > 0 ||
+    tree.chats.rows.length > 0 ||
+    tree.projects.some((pr) => pr.count > 0);
 
   const toggleIn = (set: ReadonlySet<string>, key: string): Set<string> => {
     const next = new Set(set);
@@ -245,19 +224,26 @@ export function App({ host }: { host: DesktopHost }) {
         selectedId={selectedId}
         collapsed={collapsed}
         expanded={expanded}
+        chatsExpanded={chatsExpanded}
         onSelectSession={(id) => {
           setSelectedId(id);
-          const session = sessions.find((s) => s.id === id);
-          if (session !== undefined) {
-            prefs.update({ lastProject: session.cwd });
-            bumpPrefs();
-          }
         }}
         onToggleCollapse={(key) => {
           setCollapsed((s) => toggleIn(s, key));
         }}
         onToggleExpand={(key) => {
           setExpanded((s) => toggleIn(s, key));
+        }}
+        onToggleChats={() => {
+          setChatsExpanded((v) => !v);
+        }}
+        onToggleAllProjects={() => {
+          setCollapsed((current) => {
+            // 有任一项目处于展开就把全部折叠，否则全部展开
+            const anyOpen = tree.projects.some((pr) => !current.has(pr.key));
+            if (!anyOpen) return new Set();
+            return new Set(tree.projects.map((pr) => pr.key));
+          });
         }}
         onPin={(id) => {
           const cur = prefs.get();
@@ -294,7 +280,12 @@ export function App({ host }: { host: DesktopHost }) {
             )}
             {startupError !== null && (
               <div className="crash">
-                <div className="t">{startupError.message}</div>
+                <div className="t">
+                  {startupError.message}
+                  <button className="btn" onClick={() => void boot()}>
+                    重试
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -319,9 +310,7 @@ export function App({ host }: { host: DesktopHost }) {
           <div className="stream">
             <div className="col">
               <div className="placeholder">
-                {tree.projects.length === 0 && sessions.length === 0
-                  ? "打开一个项目目录后列出会话"
-                  : "从左侧选择一个会话"}
+                {hasAnySession ? "从左侧选择一个会话" : "还没有会话"}
               </div>
             </div>
           </div>

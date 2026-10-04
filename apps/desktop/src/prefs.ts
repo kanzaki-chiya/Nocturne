@@ -1,5 +1,5 @@
 /**
- * 桌面端界面状态：置顶会话、手动添加与隐藏的项目、最近项目。
+ * 桌面端界面状态：置顶会话、手动添加与隐藏的项目。
  * 存 localStorage（键 nocturne.desktop.prefs.v1）；读写失败都不影响本次运行，
  * 只是 persistent 变 false（docs/apps/desktop.md）。
  */
@@ -13,11 +13,9 @@ export interface Prefs {
   projects: string[];
   /** 从列表移除（隐藏）的项目 key */
   hidden: string[];
-  /** 最近使用的项目路径 */
-  lastProject: string | null;
 }
 
-const DEFAULTS: Prefs = { pinned: [], projects: [], hidden: [], lastProject: null };
+const DEFAULTS: Prefs = { pinned: [], projects: [], hidden: [] };
 
 export interface PrefsStore {
   /** false 表示写不进存储，本次运行内仍生效 */
@@ -50,7 +48,7 @@ function parse(raw: string | null): Prefs {
   if (pinned !== undefined) prefs.pinned = pinned;
   if (projects !== undefined) prefs.projects = projects;
   if (hidden !== undefined) prefs.hidden = hidden;
-  if (typeof obj.lastProject === "string") prefs.lastProject = obj.lastProject;
+  // lastProject 已废弃：旧数据里的这个字段直接忽略
   return prefs;
 }
 
@@ -71,7 +69,6 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         pinned: [...prefs.pinned],
         projects: [...prefs.projects],
         hidden: [...prefs.hidden],
-        lastProject: prefs.lastProject,
       };
     },
     update(patch) {

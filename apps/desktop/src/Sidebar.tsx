@@ -8,9 +8,13 @@ export interface SidebarProps {
   selectedId: string | null;
   collapsed: ReadonlySet<string>;
   expanded: ReadonlySet<string>;
+  chatsExpanded: boolean;
   onSelectSession: (id: string) => void;
   onToggleCollapse: (key: string) => void;
   onToggleExpand: (key: string) => void;
+  onToggleChats: () => void;
+  /** 「…」：有任一项目处于展开则全部折叠，否则全部展开 */
+  onToggleAllProjects: () => void;
   onPin: (id: string) => void;
   onUnpin: (id: string) => void;
   onHideProject: (key: string) => void;
@@ -117,25 +121,43 @@ export function Sidebar(props: SidebarProps) {
     />
   );
 
+  // 有任一项目未折叠 → 「…」意为全部折叠，否则全部展开
+  const anyOpen = props.tree.projects.some((p) => !props.collapsed.has(p.key));
+
   const renderProject = (project: ProjectNode) => {
     const collapsed = props.collapsed.has(project.key);
     const expanded = props.expanded.has(project.key);
     return (
       <div className="grp" key={project.key}>
-        <button
-          className="gh"
-          onClick={() => {
-            props.onToggleCollapse(project.key);
-          }}
-          onContextMenu={(e) => {
-            projectMenu(e, project.key);
-          }}
-        >
-          <span className="tw">{collapsed ? "▸" : "▾"}</span>
-          <FoldIcon open={!collapsed} />
-          <span className="gname">{project.name}</span>
-          {collapsed && <span className="meta">{project.count}</span>}
-        </button>
+        {/* .gh 是容器 div：按钮不能嵌套按钮（悬停的「＋」是兄弟元素） */}
+        <div className="gh">
+          <button
+            className="gh-toggle"
+            onClick={() => {
+              props.onToggleCollapse(project.key);
+            }}
+            onContextMenu={(e) => {
+              projectMenu(e, project.key);
+            }}
+          >
+            <span className="tw">{collapsed ? "▸" : "▾"}</span>
+            <FoldIcon open={!collapsed} />
+            <span className="gname">{project.name}</span>
+            <span className="gh-right">
+              {collapsed && <span className="meta">{project.count}</span>}
+            </span>
+          </button>
+          <button
+            className="gadd"
+            aria-disabled="true"
+            title="第 2 步实现"
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            ＋
+          </button>
+        </div>
         {!collapsed && (
           <nav className="nav sub">
             {project.sessions.map((row) => renderRow(row))}
@@ -170,6 +192,18 @@ export function Sidebar(props: SidebarProps) {
       <div className="shead">
         <span className="brand">Nocturne</span>
       </div>
+      <nav className="nav">
+        <button
+          className="item add"
+          aria-disabled="true"
+          title="第 2 步实现"
+          onClick={(e) => {
+            e.preventDefault();
+          }}
+        >
+          <span className="glyph">＋</span>新会话
+        </button>
+      </nav>
       <div className="tree">
         {props.tree.pinned.length > 0 && (
           <>
@@ -177,18 +211,58 @@ export function Sidebar(props: SidebarProps) {
             <nav className="nav">{props.tree.pinned.map((row) => renderRow(row, row))}</nav>
           </>
         )}
-        <h4>项目</h4>
+        {props.tree.chats.rows.length > 0 && (
+          <>
+            <h4>对话</h4>
+            <nav className="nav">
+              {props.tree.chats.rows.map((row) => renderRow(row))}
+              {props.tree.chats.moreCount > 0 && (
+                <button
+                  className="item more flat"
+                  onClick={() => {
+                    props.onToggleChats();
+                  }}
+                >
+                  展开显示（还有 {props.tree.chats.moreCount} 个）
+                </button>
+              )}
+              {props.chatsExpanded && (
+                <button
+                  className="item more flat"
+                  onClick={() => {
+                    props.onToggleChats();
+                  }}
+                >
+                  收起
+                </button>
+              )}
+            </nav>
+          </>
+        )}
+        <div className="h4row">
+          <h4>项目</h4>
+          <span className="hbtns">
+            <button
+              className="hb"
+              title={anyOpen ? "全部折叠" : "全部展开"}
+              onClick={() => {
+                props.onToggleAllProjects();
+              }}
+            >
+              …
+            </button>
+            <button
+              className="hb"
+              title="打开项目…"
+              onClick={() => {
+                props.onOpenProject();
+              }}
+            >
+              ＋
+            </button>
+          </span>
+        </div>
         {props.tree.projects.map(renderProject)}
-        <nav className="nav">
-          <button
-            className="item add"
-            onClick={() => {
-              props.onOpenProject();
-            }}
-          >
-            <span className="glyph">＋</span>打开项目…
-          </button>
-        </nav>
       </div>
       {menu !== null && (
         <div className="ctxmenu" ref={menuRef} style={{ left: menu.x, top: menu.y }}>

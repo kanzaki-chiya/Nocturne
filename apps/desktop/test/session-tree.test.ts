@@ -28,7 +28,15 @@ function session(
 }
 
 const noPrefs = { pinned: [] as string[], projects: [] as string[], hidden: [] as string[] };
-const opts = (o?: { expanded?: string[]; collapsed?: string[] }) => ({
+const WS = "C:\\Users\\A\\.nocturne\\workspace";
+const opts = (o?: {
+  plainWorkspace?: string | null;
+  chatsExpanded?: boolean;
+  expanded?: string[];
+  collapsed?: string[];
+}) => ({
+  plainWorkspace: o?.plainWorkspace ?? null,
+  chatsExpanded: o?.chatsExpanded ?? false,
   expanded: new Set(o?.expanded ?? []),
   collapsed: new Set(o?.collapsed ?? []),
   now: NOW,
@@ -129,7 +137,7 @@ describe("buildSessionTree", () => {
     const tree = buildSessionTree(
       [
         session("a", "Z:\\repo", NOW - 1000, { locked: true }),
-        session("b", "Z:\\repo", NOW - 2000, { firstText: undefined }),
+        session("b", "Z:\\repo", NOW - 2000, { firstText: undefined, locked: true }),
       ],
       noPrefs,
       opts(),
@@ -145,5 +153,85 @@ describe("buildSessionTree", () => {
     const tree = buildSessionTree([session("a", "Z:\\repo", NOW)], noPrefs, opts());
     expect(tree.projects[0]?.sessions[0]?.status).toBe("idle");
     expect(tree.projects[0]?.sessions[0]?.meta).toBe("现在");
+  });
+
+  it("cwd 归并后等于普通对话工作区的会话进「对话」，不进项目", () => {
+    const tree = buildSessionTree(
+      [
+        session("c1", "c:/users/a/.nocturne/workspace/", NOW - 500),
+        session("c2", "C:\\Users\\A\\.nocturne\\workspace", NOW - 1000),
+        session("p1", "Z:\\repo", NOW - 800),
+      ],
+      noPrefs,
+      opts({ plainWorkspace: WS }),
+    );
+    expect(tree.chats.rows.map((r) => r.id)).toEqual(["c1", "c2"]);
+    expect(tree.chats.moreCount).toBe(0);
+    expect(tree.projects.map((p) => p.key)).toEqual(["z:\\repo"]);
+  });
+
+  it("对话区默认 5 条 + moreCount，chatsExpanded 后全量", () => {
+    const sessions = Array.from({ length: 7 }, (_, i) => session(`c${i}`, WS, NOW - i * 1000));
+    const tree = buildSessionTree(sessions, noPrefs, opts({ plainWorkspace: WS }));
+    expect(tree.chats.rows).toHaveLength(5);
+    expect(tree.chats.moreCount).toBe(2);
+    const expanded = buildSessionTree(
+      sessions,
+      noPrefs,
+      opts({ plainWorkspace: WS, chatsExpanded: true }),
+    );
+    expect(expanded.chats.rows).toHaveLength(7);
+    expect(expanded.chats.moreCount).toBe(0);
+    expect(expanded.projects).toHaveLength(0);
+  });
+
+  it("置顶的对话会话项目标签为「对话」且不在对话区重复", () => {
+    const tree = buildSessionTree(
+      [session("c1", WS, NOW - 500), session("p1", "Z:\\repo", NOW - 1000)],
+      { ...noPrefs, pinned: ["c1"] },
+      opts({ plainWorkspace: WS }),
+    );
+    expect(tree.pinned).toHaveLength(1);
+    expect(tree.pinned[0]?.project).toBe("对话");
+    expect(tree.chats.rows).toHaveLength(0);
+  });
+
+  it("plainWorkspace 为 null 时所有会话按项目处理", () => {
+    const tree = buildSessionTree(
+      [session("c1", WS, NOW - 500), session("p1", "Z:\\repo", NOW - 1000)],
+      noPrefs,
+      opts({ plainWorkspace: null }),
+    );
+    expect(tree.chats.rows).toHaveLength(0);
+    expect(tree.projects.map((p) => p.key)).toHaveLength(2);
+  });
+
+  it("手动项目路径等于普通对话工作区时不显示为项目", () => {
+    const tree = buildSessionTree(
+      [session("p1", "Z:\\repo", NOW - 1000)],
+      { pinned: [], projects: [WS], hidden: [] },
+      opts({ plainWorkspace: WS }),
+    );
+    expect(tree.projects.map((p) => p.key)).toEqual(["z:\\repo"]);
+  });
+
+  it("空会话（无 firstText 且未锁定）在对话、项目、置顶区都不显示", () => {
+    const tree = buildSessionTree(
+      [
+        session("e1", "Z:\\repo", NOW - 100, { firstText: undefined }),
+        session("e2", "Z:\\repo", NOW - 200, { firstText: "   " }),
+        session("e3", "Z:\\repo", NOW - 300, { firstText: undefined, locked: true }),
+        session("e4", WS, NOW - 400, { firstText: "" }),
+        session("ok", "Z:\\repo", NOW - 500),
+      ],
+      { ...noPrefs, pinned: ["e1", "e2", "ok"] },
+      opts({ plainWorkspace: WS }),
+    );
+    expect(tree.pinned.map((r) => r.id)).toEqual(["ok"]);
+    expect(tree.chats.rows).toHaveLength(0);
+    const repo = tree.projects.find((p) => p.key === "z:\\repo");
+    expect(repo?.sessions.map((s) => s.id)).toEqual(["e3"]);
+    expect(repo?.sessions[0]?.title).toBe("未命名会话");
+    expect(repo?.count).toBe(2);
   });
 });

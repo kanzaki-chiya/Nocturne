@@ -1,7 +1,7 @@
 /**
- * 会话树（纯函数）：按项目分组、置顶区、默认每项目 5 条。
- * 项目归并以 projectKey 比较（Windows 路径忽略大小写与分隔符差异），
- * 显示用第一次见到的原始路径（docs/apps/desktop.md）。
+ * 会话树（纯函数）：置顶区、普通对话区（<NOCTURNE_HOME>/workspace 的会话）、
+ * 按项目分组、默认每区 5 条。项目归并以 projectKey 比较（Windows 路径忽略大小写
+ * 与分隔符差异），显示用第一次见到的原始路径（docs/apps/desktop.md）。
  */
 import type { RpcRuntime } from "@nocturne/rpc/client";
 
@@ -76,8 +76,15 @@ export interface ProjectNode {
   manual: boolean;
 }
 
+/** 「对话」分区（普通对话工作区的会话平铺列表） */
+export interface ChatsSection {
+  rows: SessionRow[];
+  moreCount: number;
+}
+
 export interface SessionTree {
   pinned: PinnedRow[];
+  chats: ChatsSection;
   projects: ProjectNode[];
 }
 
@@ -88,16 +95,26 @@ export interface TreePrefs {
 }
 
 export interface TreeOptions {
+  /** 普通对话工作区路径；为 null 时全部会话按项目处理 */
+  plainWorkspace: string | null;
+  /** 「对话」区是否已展开 */
+  chatsExpanded: boolean;
   /** 「展开显示」已展开的项目 key */
   expanded: ReadonlySet<string>;
   /** 已折叠的项目 key */
   collapsed: ReadonlySet<string>;
   now?: number;
-  /** 每项目默认显示条数 */
+  /** 每区默认显示条数 */
   limit?: number;
 }
 
 const DEFAULT_LIMIT = 5;
+
+/** 空会话（无用户消息且未锁定）不显示（ADR-0046 修订第 4 条） */
+function isVisible(session: SessionSummary): boolean {
+  const hasText = session.firstText !== undefined && session.firstText.trim() !== "";
+  return hasText || session.locked === true;
+}
 
 function toRow(session: SessionSummary, now: number, status: SessionStatus): SessionRow {
   let meta = status === "pending" ? "待确认" : formatRelative(session.mtimeMs, now);
@@ -112,8 +129,11 @@ function toRow(session: SessionSummary, now: number, status: SessionStatus): Ses
 }
 
 /**
- * 构建会话树：项目 = 会话 cwd 的 key ∪ 手动项目 − hidden。
- * 排序：有会话的按最新 mtimeMs 降序，其后是无会话的手动项目（按添加顺序）。
+ * 构建会话树：
+ * - 空会话（firstText 缺省/空白且未锁定）一律过滤；
+ * - cwd == plainWorkspace 的会话进 chats（不进 projects），手动项目里同路径的也不显示为项目；
+ * - projects = 其余会话 cwd 的 key ∪ 手动项目 − hidden；
+ *   排序：有会话的按最新 mtimeMs 降序，其后是无会话的手动项目（按添加顺序）。
  */
 export function buildSessionTree(
   sessions: SessionSummary[],
@@ -124,11 +144,26 @@ export function buildSessionTree(
   const limit = options.limit ?? DEFAULT_LIMIT;
   const hidden = new Set(prefs.hidden.map(projectKey));
   const pinnedIds = new Set(prefs.pinned);
+  const chatKey = options.plainWorkspace !== null ? projectKey(options.plainWorkspace) : null;
 
-  // 分组 + 每个 key 的显示路径（第一次见到的原始路径）
+  const visible = sessions.filter(isVisible);
+
+  // 对话区：cwd 归并后等于普通对话工作区
+  const chatSessions = chatKey === null ? [] : visible.filter((s) => projectKey(s.cwd) === chatKey);
+  const chatRows = chatSessions
+    .filter((s) => !pinnedIds.has(s.id))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const chatsShown = options.chatsExpanded ? chatRows : chatRows.slice(0, limit);
+  const chats: ChatsSection = {
+    rows: chatsShown.map((s) => toRow(s, now, "idle")),
+    moreCount: options.chatsExpanded ? 0 : chatRows.length - chatsShown.length,
+  };
+
+  // 项目分组（对话会话与对话工作区本身不进 projects）
   const groups = new Map<string, { path: string; sessions: SessionSummary[] }>();
-  for (const session of sessions) {
+  for (const session of visible) {
     const key = projectKey(session.cwd);
+    if (chatKey !== null && key === chatKey) continue;
     let group = groups.get(key);
     if (group === undefined) {
       group = { path: session.cwd, sessions: [] };
@@ -137,23 +172,28 @@ export function buildSessionTree(
     group.sessions.push(session);
   }
 
-  // 手动项目：合并进分组（保留添加顺序与原始路径）
+  // 手动项目：合并进分组（保留添加顺序与原始路径）；对话工作区不算手动项目
   const manualOrder: string[] = [];
   for (const path of prefs.projects) {
     const key = projectKey(path);
+    if (chatKey !== null && key === chatKey) continue;
     if (!groups.has(key)) {
       groups.set(key, { path, sessions: [] });
     }
     manualOrder.push(key);
   }
 
-  // 置顶区：按 pinned 数组顺序；隐藏项目的置顶会话仍显示
-  const byId = new Map(sessions.map((s) => [s.id, s]));
+  // 置顶区：按 pinned 数组顺序；隐藏项目的置顶会话仍显示；对话会话标「对话」
+  const byId = new Map(visible.map((s) => [s.id, s]));
   const pinned: PinnedRow[] = [];
   for (const id of prefs.pinned) {
     const session = byId.get(id);
     if (session === undefined) continue;
-    pinned.push({ ...toRow(session, now, "idle"), project: projectName(session.cwd) });
+    const isChat = chatKey !== null && projectKey(session.cwd) === chatKey;
+    pinned.push({
+      ...toRow(session, now, "idle"),
+      project: isChat ? "对话" : projectName(session.cwd),
+    });
   }
 
   const withSessions: { key: string; latest: number }[] = [];
@@ -175,21 +215,21 @@ export function buildSessionTree(
   for (const key of order) {
     const group = groups.get(key);
     if (group === undefined) continue;
-    const visible = group.sessions
+    const unpinned = group.sessions
       .filter((s) => !pinnedIds.has(s.id))
       .sort((a, b) => b.mtimeMs - a.mtimeMs);
     const expanded = options.expanded.has(key);
-    const shown = expanded ? visible : visible.slice(0, limit);
+    const shown = expanded ? unpinned : unpinned.slice(0, limit);
     projects.push({
       key,
       name: projectName(group.path),
       path: group.path,
       count: group.sessions.length,
       sessions: shown.map((s) => toRow(s, now, "idle")),
-      moreCount: expanded ? 0 : visible.length - shown.length,
+      moreCount: expanded ? 0 : unpinned.length - shown.length,
       manual: manualOrder.includes(key),
     });
   }
 
-  return { pinned, projects };
+  return { pinned, chats, projects };
 }

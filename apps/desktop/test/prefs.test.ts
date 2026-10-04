@@ -25,20 +25,19 @@ describe("prefs store", () => {
   it("读写往返", () => {
     const storage = memoryStorage();
     const store = createPrefsStore(storage);
-    store.update({ pinned: ["s1"], projects: ["Z:\\a"], lastProject: "Z:\\a" });
+    store.update({ pinned: ["s1"], projects: ["Z:\\a"] });
     const store2 = createPrefsStore(storage);
     expect(store2.get()).toEqual({
       pinned: ["s1"],
       projects: ["Z:\\a"],
       hidden: [],
-      lastProject: "Z:\\a",
     });
     expect(store2.persistent).toBe(true);
   });
 
   it("损坏 JSON 回退默认", () => {
     const store = createPrefsStore(memoryStorage({ [PREFS_KEY]: "{oops" }));
-    expect(store.get()).toEqual({ pinned: [], projects: [], hidden: [], lastProject: null });
+    expect(store.get()).toEqual({ pinned: [], projects: [], hidden: [] });
   });
 
   it("字段类型不对逐字段回退", () => {
@@ -48,7 +47,6 @@ describe("prefs store", () => {
           pinned: "nope",
           projects: ["Z:\\ok"],
           hidden: [1],
-          lastProject: 42,
         }),
       }),
     );
@@ -56,8 +54,21 @@ describe("prefs store", () => {
       pinned: [],
       projects: ["Z:\\ok"],
       hidden: [],
-      lastProject: null,
     });
+  });
+
+  it("旧数据含 lastProject 字段时正常读取（该字段已废弃）", () => {
+    const store = createPrefsStore(
+      memoryStorage({
+        [PREFS_KEY]: JSON.stringify({
+          pinned: ["s1"],
+          projects: ["Z:\\a"],
+          hidden: [],
+          lastProject: "Z:\\a",
+        }),
+      }),
+    );
+    expect(store.get()).toEqual({ pinned: ["s1"], projects: ["Z:\\a"], hidden: [] });
   });
 
   it("getItem 抛错时用默认值", () => {

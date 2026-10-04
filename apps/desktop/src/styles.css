@@ -129,9 +129,48 @@ button {
   min-height: 0;
   overflow-y: auto;
   flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: var(--a-borderStrong) transparent;
 }
 .side .tree h4 {
   margin-top: 6px;
+}
+/* 「项目」标题行：h4 + 悬停/focus-within 才显示的两个小按钮（… 全部折叠/展开，＋ 打开项目） */
+.side .h4row {
+  display: flex;
+  align-items: center;
+  padding: 0 6px 0 10px;
+  margin: 6px 0 4px;
+}
+.side .h4row h4 {
+  margin: 0;
+  padding: 0;
+}
+.side .h4row .hbtns {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+.side .h4row .hb {
+  font-size: 12px;
+  color: var(--a-faint);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 4px;
+  opacity: 0;
+  cursor: pointer;
+}
+.side .h4row:hover .hb,
+.side .h4row:focus-within .hb {
+  opacity: 1;
+}
+.side .h4row .hb:hover {
+  color: var(--a-text);
+  background: var(--a-raised);
+}
+.side .h4row .hb:focus-visible {
+  opacity: 1;
 }
 .side .foot {
   margin-top: auto;
@@ -184,6 +223,13 @@ button {
 .nav .item.add {
   color: var(--a-muted);
 }
+.nav .item[aria-disabled="true"] {
+  color: var(--a-faint);
+  cursor: default;
+}
+.nav .item[aria-disabled="true"]:hover {
+  background: transparent;
+}
 .nav .item .proj {
   margin-left: auto;
   font-size: 11px;
@@ -205,8 +251,14 @@ button {
   font-size: 12px;
   padding-left: 41px;
 }
+/* 「对话」平铺区的 .more 与行标题文字对齐（10 内边距 + 7 圆点 + 8 间隙） */
+.nav .item.more.flat {
+  padding-left: 25px;
+}
 .nav .item:focus-visible,
-.gh:focus-visible,
+.gh-toggle:focus-visible,
+.gadd:focus-visible,
+.hb:focus-visible,
 .btn:focus-visible,
 .ctxmenu button:focus-visible {
   outline: 2px solid var(--a-accent);
@@ -251,16 +303,27 @@ button {
   display: grid;
   gap: 1px;
 }
+/* .gh 是 div 容器：.gh-toggle 负责折叠切换，悬停出现的 .gadd 是不能嵌套的兄弟按钮 */
 .gh {
   display: flex;
   align-items: center;
-  gap: 6px;
   padding: 5px 10px 5px 4px;
   color: var(--a-text);
   font-weight: 500;
   border-radius: 6px;
+  position: relative;
+}
+.gh-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  color: inherit;
+  font-weight: inherit;
   text-align: left;
-  width: 100%;
+  cursor: pointer;
 }
 .gh .fold {
   width: 15px;
@@ -279,9 +342,11 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.gh .gadd,
-.gh .meta {
+.gh .gh-right {
   margin-left: auto;
+  flex: none;
+}
+.gh .meta {
   color: var(--a-faint);
   font-size: 12px;
   font-weight: 400;
@@ -289,6 +354,30 @@ button {
 }
 .gh .meta.stop {
   color: var(--a-warning);
+}
+/* 项目行的「＋」：默认隐藏，gh 悬停/focus-within 时显示并代替折叠态的会话数 */
+.gh .gadd {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--a-faint);
+  font-size: 12px;
+  font-weight: 400;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 4px;
+  opacity: 0;
+  cursor: default;
+}
+.gh:hover .gadd,
+.gh:focus-within .gadd {
+  opacity: 1;
+}
+.gh:hover .gh-right,
+.gh:focus-within .gh-right {
+  visibility: hidden;
 }
 
 /* 主区 */
