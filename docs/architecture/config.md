@@ -209,7 +209,7 @@ Grant 文件的读写由 `config` 完成（它是"按工作区存放的用户数
 
 读取 `HTTP_PROXY`、`HTTPS_PROXY` 及小写 `http_proxy`、`https_proxy`，并将 `NO_PROXY` / `no_proxy` 交给 Node 处理；同名大小写变量都设置时小写优先。`NO_PROXY` 是逗号分隔的绕过列表，可匹配主机、域名、端口等，`*` 绕过所有地址；具体语法遵循 [Node 内置代理文档](https://nodejs.org/docs/latest-v24.x/api/http.html#built-in-proxy-support)。这些变量是进程级网络设置，不参与 `NOCTURNE_*` 配置分层，也不控制 MCP 子进程自身的网络实现。
 
-自动初始化使用 Node 的 `http.setGlobalProxyFromEnv`，该 API [自 Node 24.14.0 提供](https://nodejs.org/docs/latest-v24.x/api/http.html#httpsetglobalproxyfromenvproxyenv)。仓库仍支持 Node >=24；有代理地址而当前 Node 缺少该 API 时，启动警告提示升级到 24.14.0 或设置 `NODE_USE_ENV_PROXY=1`，不阻断启动。无代理地址时不做任何设置；已设 `NODE_USE_ENV_PROXY=1` 时沿用 Node 在进程启动时完成的初始化，不重复调用。代理配置触发 `ERR_PROXY_INVALID_CONFIG` 时，启动警告仅报告变量名，不输出地址或用户名、密码；本次自动初始化未完成。启动后修改变量不会自动重配全局代理。
+自动初始化使用 Node 的 `http.setGlobalProxyFromEnv`，该 API [自 Node 24.14.0 提供](https://nodejs.org/docs/latest-v24.x/api/http.html#httpsetglobalproxyfromenvproxyenv)。仓库要求 Node >=24.14（`engines`），但运行时不强制；在更早的 Node 上有代理地址而缺少该 API 时，启动警告提示升级到 24.14.0 或设置 `NODE_USE_ENV_PROXY=1`，不阻断启动。无代理地址时不做任何设置；已设 `NODE_USE_ENV_PROXY=1` 时沿用 Node 在进程启动时完成的初始化，不重复调用。代理配置触发 `ERR_PROXY_INVALID_CONFIG` 时，启动警告仅报告变量名，不输出地址或用户名、密码；本次自动初始化未完成。启动后修改变量不会自动重配全局代理。
 
 Node 的 fetch dispatcher 对不支持的代理协议也可能抛 `UND_ERR_INVALID_ARG`，按同样的无地址警告处理。
 

@@ -4,7 +4,7 @@ Nocturne 是在代码仓库中工作的命令行编程助手。运行 `nctrn` �
 
 ## 安装
 
-需要 Node.js 24 或更新版本，以及 pnpm 11.24.0。从源码构建，并把 `nctrn` 注册为全局命令：
+需要 Node.js 24.14 或更新版本，以及 pnpm 11.24.0。从源码构建，并把 `nctrn` 注册为全局命令：
 
 ```sh
 git clone https://github.com/kanzaki-chiya/Nocturne.git
@@ -41,7 +41,7 @@ $env:NOCTURNE_MODEL = "<模型 ID>"
 nctrn --sessions
 ```
 
-代理环境下设置 `HTTPS_PROXY`（例如 `http://127.0.0.1:7897`）即可，Node 24.14.0 起会自动生效；也支持 `HTTP_PROXY` 和 `NO_PROXY`，详见[网络代理说明](docs/architecture/config.md#网络代理)。较早的 Node 24 版本请升级，或在启动前设置 `NODE_USE_ENV_PROXY=1`。
+代理环境下设置 `HTTPS_PROXY`（例如 `http://127.0.0.1:7897`）即可，Node 24.14.0 起会自动生效；也支持 `HTTP_PROXY` 和 `NO_PROXY`，详见[网络代理说明](docs/architecture/config.md#网络代理)。
 
 用户配置位于 `<NOCTURNE_HOME>/config.json`；项目配置位于仓库的 `.nocturne/config.json`。两者都是严格 JSON。向导写入独立的 `<NOCTURNE_HOME>/providers.json`，同名手头条目会覆盖向导条目。
 
