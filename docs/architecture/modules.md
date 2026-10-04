@@ -39,6 +39,7 @@
 - `diagnostics`（调试通道）只依赖 protocol、platform；被 agent / context / tools / hooks / index 经注入使用，并经 `McpConnector` 传给 `packages/mcp`（见 [observability.md](observability.md)）。
 - `packages/mcp`（`@nocturne/mcp`）只允许依赖 `@nocturne/core` 的 `index` / `protocol/index` 两个入口与 `@modelcontextprotocol/sdk`——与 `apps/*` 同一检查规则；**Core 不依赖 `mcp`**（见 [mcp.md](mcp.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)）。
 - 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。CLI 对 TUI 可惰性 `import()` 主入口，或静态引用 `@nocturne/tui/slash-catalog`、`@nocturne/tui/text-format`、`@nocturne/tui/provider-setup-flow`、`@nocturne/tui/provider-prompts` 与 `@nocturne/tui/provider-login`；命令表不得 import 任何模块，纯文本入口仅复用格式函数、protocol 类型与 `string-width`，三个共享向导入口及其间接依赖也不得加载 Ink/React，保证逐行模式不加载 Ink/React。其余 apps→apps 依赖禁止（[tui.md](../apps/tui.md) 第 9 节）。
+- 桌面端（`apps/desktop/src`）边界更窄：只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`，不引 core 运行时、其他 workspace 包与 Node 内置模块（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 7 节，depcheck `desktop-*` 规则强制）。
 
 依赖规则已由 dependency-cruiser 固化，见 [workflow.md](../development/workflow.md)。
 
@@ -204,6 +205,13 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 - **不负责**：任何 Agent 行为、事件投影（用 `protocol` 的 reducer）、权限判定；不复用 CLI 渲染代码。
 - **依赖**：`@nocturne/core` 公开 API 与 `protocol`；终端依赖 Ink、React、`string-width` 按 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)，Markdown 词法分析依赖 `marked` 按 [ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 批准。
 - 详见 [apps/tui.md](../apps/tui.md)。
+
+### apps/desktop（v0.5，[ADR-0046](../decisions/ADR-0046-desktop-tauri.md)）
+
+- **负责**：桌面端客户端——Tauri 外壳（Rust）管理 `nctrn rpc --stdio` 后台进程（启动、按行转发、关闭与 Job Object 清理、Node 查找），React 前端经 `@nocturne/rpc/client` 完成握手与全部会话操作；窗口与会话树界面、本地界面状态。
+- **不负责**：任何 Agent 行为、事件投影、权限判定、RPC 语义（外壳不解析报文，前端复用 `@nocturne/rpc/client`）；不随附 Node（要求用户自装 24.14+）。
+- **依赖**：前端只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`，由 depcheck `desktop-*` 规则强制（不引 core 运行时、其他 workspace、Node 内置模块）；UI 依赖 React 19、Vite、@tauri-apps/api 及 dialog/opener 插件（ADR-0046 第 4 节）。
+- 详见 [apps/desktop.md](../apps/desktop.md)。
 
 ### packages/rpc（v0.5，[ADR-0044](../decisions/ADR-0044-rpc-stdio.md)）
 

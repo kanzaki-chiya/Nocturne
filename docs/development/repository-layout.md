@@ -49,16 +49,21 @@ nocturne/
     ├── cli/                     nctrn 命令行入口
     │   ├── src/                 main、args、config、repl、session-switch、commands、render
     │   └── test/                离线测试、真实进程验收与独立冒烟测试
-    └── tui/                     Ink 终端客户端，经 nctrn --tui 进入
-        ├── src/                 app、commands、session-view、components 等
-        └── test/                ink-testing-library 渲染与按键测试
+    ├── tui/                     Ink 终端客户端，经 nctrn --tui 进入
+    │   ├── src/                 app、commands、session-view、components 等
+    │   └── test/                ink-testing-library 渲染与按键测试
+    └── desktop/                 桌面端（Tauri 外壳 + React 前端，ADR-0046）
+        ├── index.html、vite.config.ts、vitest.config.ts
+        ├── src/                 host 抽象、TauriLineTransport、BackendPool、会话树、界面
+        ├── test/                vitest + jsdom 离线测试（进默认测试集）
+        └── src-tauri/           Rust 外壳：四个命令、行切分、Node 查找、Job Object（cargo test 手动跑）
 ```
 
 单元测试与源文件放在一起（`*.test.ts`）；跨模块的 Turn 级测试放在 `packages/core/test/`，使用按脚本返回流式事件的假 Provider，使 Agent Loop 的行为可以确定性地测试，不依赖真实模型服务。
 
 ## 2. 包边界
 
-- `packages/core`、`packages/mcp`、`packages/rpc`、`apps/cli`、`apps/tui` 是五个 workspace 包；Core 不依赖客户端或 MCP SDK，MCP、RPC 和客户端只使用 Core 的公开入口。
+- `packages/core`、`packages/mcp`、`packages/rpc`、`apps/cli`、`apps/tui`、`apps/desktop` 是六个 workspace 包；Core 不依赖客户端或 MCP SDK，MCP、RPC 和客户端只使用 Core 的公开入口。桌面端边界更窄：只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`。
 - Core 内部的模块边界用目录加静态依赖检查维护，不再拆成十几个包。
 - `protocol` 以子路径导出（`@nocturne/core/protocol`），客户端可以只导入类型，为将来独立成包提前划好界线。
 
@@ -128,5 +133,6 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
 | Anthropic 传输 | **`@ai-sdk/anthropic`**（peer：`ai`） | 与 openai-compatible 共用同一传输栈与归一化路径（[ADR-0006](../decisions/ADR-0006-anthropic-transport.md)） | 官方 `@anthropic-ai/sdk` 或适配器内自建 `fetch` + SSE |
 | CLI 运行时依赖 | **零**：`util.parseArgs` + `node:readline` + `util.styleText` | Phase 2 的 CLI 需求（单值参数、行输入、着色）Node 内置已够；不引 commander/chalk 类依赖（[apps/cli.md](../apps/cli.md) 第 9 节）。零第三方依赖约定只对 `apps/cli` 生效（workspace 包除外）；`packages/core` 的运行时依赖是本表列出的 `ai`、`@ai-sdk/*`、AJV、Zod，以及 ADR-0033 批准的 `node-html-markdown`，`apps/tui` 与 `packages/mcp` 的依赖分别由 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md) 批准。ADR-0010 中"core 保持零依赖"的表述不准确，以本表为准 | 需求超出内置能力时（如交互式选择列表）再评估 |
 | TUI 渲染 | **Ink + React**（`apps/tui`） | 选型见 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)；全屏滚动见 [ADR-0020](../decisions/ADR-0020-tui-fullscreen-rendering.md) | 自研 ANSI（渲染层收敛在 apps/tui 内，可替换） |
+| 桌面端 | **Tauri 2 + Vite + React**（`apps/desktop`） | 选型见 [ADR-0046](../decisions/ADR-0046-desktop-tauri.md)。npm：react-dom、`@tauri-apps/api`、`@tauri-apps/plugin-dialog`、`@tauri-apps/plugin-opener`（运行时，MIT/Apache-2.0）、`@tauri-apps/cli`、`vite`、`@vitejs/plugin-react`、`jsdom`、`@testing-library/react`、`@testing-library/dom`、`@types/react-dom`（开发，MIT）；Rust crate：tauri、tauri-build、tauri-plugin-dialog、tauri-plugin-opener（Apache-2.0 OR MIT）、serde、windows-sys（MIT OR Apache-2.0），许可证以包元数据为准（THIRD-PARTY-NOTICES.md） | Electron（重）、Svelte/Solid（团队已有 React 经验） |
 
 版本策略：全部依赖写精确版本（不浮动、不用 `latest`），由 `pnpm-lock.yaml` 保证；`engines.node >= 24`；许可证均与 GPL-3.0 兼容（MIT / Apache-2.0）。OpenAI 兼容适配器的传输选型理由与限制记录在 [providers.md](../architecture/providers.md) 适配器表。
