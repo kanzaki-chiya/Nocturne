@@ -75,6 +75,21 @@ describe("prefs store", () => {
     expect(bad.get().projectSort).toBe("activity");
   });
 
+  it("lastEffort 读写往返；非字符串字段按未设置处理", () => {
+    const storage = memoryStorage();
+    const store = createPrefsStore(storage);
+    expect(store.get().lastEffort).toBeUndefined();
+    store.update({ lastEffort: "high" });
+    expect(createPrefsStore(storage).get().lastEffort).toBe("high");
+    const bad = createPrefsStore(
+      memoryStorage({
+        [PREFS_KEY]: JSON.stringify({ lastEffort: 3, pinned: ["s1"] }),
+      }),
+    );
+    expect(bad.get().lastEffort).toBeUndefined();
+    expect(bad.get().pinned).toEqual(["s1"]);
+  });
+
   it("旧数据含 lastProject 字段时正常读取（该字段已废弃）", () => {
     const store = createPrefsStore(
       memoryStorage({

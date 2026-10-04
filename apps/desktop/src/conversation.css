@@ -17,35 +17,11 @@
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 10px;
 }
 .conversation-empty {
   color: var(--a-muted);
   padding: 32px 0;
-}
-.conversation-message {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.conversation-speaker {
-  font-size: 12px;
-  font-weight: 700;
-  margin-bottom: 5px;
-  color: var(--a-muted);
-}
-.conversation-speaker span {
-  font-weight: 400;
-  margin-left: 8px;
-}
-.conversation-assistant .conversation-speaker {
-  color: var(--a-accent);
-}
-.conversation-user {
-  border-left: 2px solid var(--a-borderStrong);
-  padding-left: 14px;
-}
-.conversation-user-text {
-  white-space: pre-wrap;
 }
 .conversation pre {
   font: 12px/1.65 var(--mono);
@@ -63,11 +39,79 @@
   font-size: 12px;
   padding: 5px 0;
 }
-.conversation-reasoning {
+
+/* ── 用户消息（右侧气泡） ── */
+.conversation .u {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.conversation .u-bubble {
+  max-width: 76%;
+  background: var(--a-sel);
+  border-radius: 10px 10px 3px 10px;
+  padding: 8px 12px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.conversation .u-text {
+  white-space: pre-wrap;
+}
+.conversation .ref {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  color: var(--a-accent);
+  background: var(--a-selStrong);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+.conversation .u-img {
+  display: block;
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+.conversation .u-img-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--a-secondary);
+  background: var(--a-side);
+  border: 1px solid var(--a-border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  margin: 0 6px 6px 0;
+}
+.conversation .u-img-chip svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* ── 助手消息（无标签、无竖线） ── */
+.conversation .a {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.conversation .think {
+  margin-bottom: 4px;
+}
+.conversation .think > summary {
+  font-size: 11px;
   color: var(--a-muted);
-  border-left: 2px solid var(--a-selStrong);
-  padding-left: 12px;
-  margin-bottom: 10px;
+  padding: 2px 0;
+}
+.conversation .think > pre {
+  color: var(--a-muted);
+  font-size: 12px;
+  margin: 4px 0 8px;
+}
+.conversation div.think {
+  font-size: 11px;
+  color: var(--a-muted);
+  padding: 2px 0;
 }
 .conversation-markdown {
   line-height: 1.75;
@@ -160,57 +204,78 @@
 .conversation-table th {
   background: var(--a-panel);
 }
-.conversation-image-ref,
-.conversation-attachments {
+.conversation-image-ref {
   color: var(--a-muted);
   font-size: 12px;
 }
-.conversation-attachments {
-  padding-left: 18px;
-  margin: 8px 0;
-}
-.conversation-tool {
-  border-left: 2px solid var(--a-border);
-  padding: 4px 0 4px 14px;
-  color: var(--a-secondary);
+
+/* ── 工具行 ── */
+.conversation .tool {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.conversation-tool-heading {
+.conversation .tool-line {
   display: flex;
-  align-items: baseline;
-  white-space: nowrap;
-  gap: 10px;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
   color: var(--a-muted);
-  font-size: 11px;
+  white-space: nowrap;
+  min-width: 0;
+  padding: 2px 0;
 }
-.conversation-tool-details > summary .conversation-tool-heading {
+.conversation .tool-details > summary.tool-line {
+  list-style: none;
+}
+.conversation .tool-details > summary.tool-line::-webkit-details-marker {
+  display: none;
+}
+.conversation .tool-details > summary.tool-line:hover {
+  color: var(--a-secondary);
+}
+.conversation .tool .ic {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--a-border);
   display: inline-flex;
-  width: calc(100% - 20px);
-  vertical-align: baseline;
+  align-items: center;
+  justify-content: center;
+  font: 600 9px/1 var(--mono);
+  color: var(--a-secondary);
 }
-.conversation-tool-argument {
+.conversation .tool-name {
+  flex: none;
+  color: var(--a-secondary);
+}
+.conversation .tool-arg {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--mono);
+  font-size: 11.5px;
 }
-.conversation-tool-heading > :not(.conversation-tool-argument) {
-  flex-shrink: 0;
+.conversation .tool-range {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--a-faint);
 }
-.conversation-tool-name {
-  color: var(--a-secondary);
-  font: 600 12px/1.6 var(--mono);
+.conversation .tool-res {
+  flex: none;
+  font-size: 11px;
+  color: var(--a-faint);
 }
-.conversation-tool-status-ok {
-  color: var(--a-success);
-}
-.conversation-tool-status-error {
+.conversation .tool-res.err {
   color: var(--a-error);
 }
-.conversation-tool-status-awaiting_permission {
-  color: var(--a-warning);
+.conversation .tool-details {
+  min-width: 0;
+}
+.conversation .tool-details[open] {
+  margin-bottom: 6px;
 }
 .conversation-subjects {
   font: 12px/1.6 var(--mono);
@@ -232,17 +297,57 @@
   color: var(--a-error);
   overflow-wrap: anywhere;
 }
-.conversation-file-diff {
+
+/* ── diff 卡片 ── */
+.conversation .diff {
   border: 1px solid var(--a-border);
-  border-radius: 5px;
+  border-radius: 9px;
   overflow: hidden;
-  margin: 8px 0;
+  margin: 6px 0;
 }
-.conversation .conversation-file-diff > summary {
-  padding: 7px 10px;
+.conversation .diff-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  background: var(--a-side);
+  font-size: 12px;
+}
+.conversation .diff-path {
   font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--a-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.conversation-diff {
+.conversation .diff-add {
+  color: var(--a-success);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.conversation .diff-del {
+  color: var(--a-error);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.conversation .diff-toggle {
+  margin-left: auto;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 10px;
+  color: var(--a-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.conversation .diff-toggle:hover {
+  color: var(--a-text);
+}
+.conversation .diff-body {
   overflow-x: auto;
   max-height: 400px;
   overflow-y: auto;
@@ -250,41 +355,55 @@
   background: var(--a-panel);
   font: 12px/1.7 var(--mono);
 }
-.conversation-diff-row {
+.conversation .diff-row {
   display: flex;
   width: max-content;
   min-width: 100%;
   white-space: pre;
 }
-.conversation-diff-row code {
+.conversation .diff-row code {
   padding-right: 12px;
   font-size: inherit;
 }
-.conversation-diff-number {
+.conversation .diff-num {
   display: inline-block;
   flex: 0 0 4em;
   text-align: right;
-  padding-right: 12px;
+  padding-right: 10px;
   color: var(--a-faint);
   user-select: none;
 }
-.conversation-diff-add {
+.conversation .diff-mark {
+  flex: 0 0 1em;
+  user-select: none;
+  color: var(--a-muted);
+}
+.conversation .diff-add-row,
+.conversation .diff-row.diff-add {
   background: var(--a-add);
 }
-.conversation-diff-delete {
+.conversation .diff-row.diff-delete {
   background: var(--a-del);
 }
-.conversation-diff-header {
+.conversation .diff-sep {
+  padding: 2px 0 2px calc(4em + 1em);
+  color: var(--a-faint);
+  letter-spacing: 2px;
+}
+
+/* ── 通知行 ── */
+.conversation .note {
+  font-size: 11.5px;
   color: var(--a-muted);
+  padding: 2px 0;
+}
+.conversation .note.deny {
+  color: var(--a-error);
 }
 .conversation-notice {
   color: var(--a-muted);
   font-size: 12px;
   overflow-wrap: anywhere;
-}
-.conversation-notice-code {
-  margin-right: 8px;
-  font-family: var(--mono);
 }
 .conversation-notice-warning,
 .conversation-notice-error {
@@ -303,49 +422,81 @@
   flex-shrink: 0;
   background: var(--a-raised);
 }
+
+/* ── 权限与提问卡片 ── */
 .conversation-requests {
   flex-shrink: 0;
   max-height: 50%;
   overflow-y: auto;
-  border-top: 1px solid var(--a-borderStrong);
+  border-top: 1px solid var(--a-border);
   padding: 12px 24px;
 }
-.conversation-request {
+.conversation .ask {
   max-width: 820px;
   margin: 0 auto;
-  padding: 12px 14px;
-  border: 1px solid var(--a-borderStrong);
+  padding: 10px 12px;
+  border: 1px solid var(--a-border);
   border-left: 3px solid var(--a-warning);
-  border-radius: 7px;
+  border-radius: 10px;
   background: var(--a-panel);
   overflow-wrap: anywhere;
 }
-.conversation-request + .conversation-request {
+.conversation .ask + .ask {
   margin-top: 12px;
 }
-.conversation-request h3 {
-  margin: 0 0 8px;
-  font-size: 13px;
+.conversation .ask-t {
+  font-size: 12px;
+  font-weight: 600;
   color: var(--a-warning);
 }
-.conversation-request p {
+.conversation .ask-why {
+  margin-left: 10px;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--a-muted);
+}
+.conversation .ask p {
   margin: 6px 0;
 }
-.conversation-request-actions {
+.conversation .ask-subjects {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 2px;
+}
+.conversation .ask-subjects li {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--a-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 0;
+}
+.conversation .ask-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-top: 10px;
 }
-.conversation-request :is(button, input, textarea):disabled {
+.conversation .ask-kbd {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--a-faint);
+}
+.conversation .ask .btn.danger {
+  color: var(--a-error);
+  border-color: var(--a-error);
+}
+.conversation .ask :is(button, input, textarea):disabled {
   cursor: default;
   opacity: 0.6;
 }
-.conversation-request label {
+.conversation .ask label {
   display: block;
   font-size: 12px;
 }
-.conversation-request textarea {
+.conversation .ask textarea {
   display: block;
   width: 100%;
   min-height: 60px;
@@ -358,17 +509,17 @@
   border-radius: 4px;
   font: inherit;
 }
-.conversation-request fieldset {
+.conversation .ask fieldset {
   border: 0;
   padding: 0;
   margin: 12px 0 16px;
   min-width: 0;
 }
-.conversation-request legend {
+.conversation .ask legend {
   padding: 0;
   font-weight: 600;
 }
-.conversation-request .conversation-question-option {
+.conversation .ask .conversation-question-option {
   display: flex;
   align-items: baseline;
   gap: 7px;
@@ -395,7 +546,7 @@
     padding: 10px 12px;
     max-height: 60%;
   }
-  .conversation-request {
+  .conversation .ask {
     padding: 10px;
   }
 }

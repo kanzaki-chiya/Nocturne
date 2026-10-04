@@ -59,6 +59,8 @@ function fakeHost() {
     },
     openUrl: () => Promise.resolve(),
     pickFolder: () => Promise.resolve(null),
+    pickImages: () => Promise.resolve([]),
+    homeDir: () => Promise.resolve(null),
   };
 
   return {

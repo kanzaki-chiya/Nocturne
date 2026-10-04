@@ -435,7 +435,6 @@ button {
 .head .path {
   color: var(--a-faint);
   font-size: 12px;
-  font-family: var(--mono);
 }
 .head .tools {
   margin-left: auto;
@@ -491,6 +490,30 @@ button {
 .crash .t .btn {
   margin-left: auto;
 }
+.pane-error {
+  margin: auto;
+  max-width: 460px;
+  display: grid;
+  gap: 8px;
+  padding: 18px 20px;
+  border: 1px solid color-mix(in srgb, var(--a-error) 45%, var(--a-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--a-error) 6%, transparent);
+}
+.pane-error b {
+  color: var(--a-error);
+  font-size: 14px;
+}
+.pane-error p {
+  margin: 0;
+  color: var(--a-secondary);
+  font-size: 13px;
+  word-break: break-all;
+}
+.pane-error .btn {
+  justify-self: start;
+}
+
 .crash pre {
   margin: 0;
   font: 11.5px/1.6 var(--mono);
@@ -666,48 +689,46 @@ button {
   opacity: 1;
 }
 
-.welcome {
+.hero {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  display: grid;
-  place-items: center;
-  padding: 32px 24px;
-}
-.welcome-col {
-  width: 100%;
-  max-width: 680px;
-  text-align: center;
-}
-.welcome-icon {
-  color: var(--a-accent);
-  font-size: 46px;
-  line-height: 1;
-}
-.welcome h1 {
-  font-size: 22px;
-  font-weight: 500;
-  margin: 16px 0 24px;
-}
-.workspace-picker {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  color: var(--a-muted);
-  margin-bottom: 12px;
+  padding: 32px 24px;
+  gap: 4px;
 }
-.workspace-picker select {
+.hero-mark {
+  color: var(--a-accent);
+}
+.hero-mark svg {
+  width: 40px;
+  height: 40px;
+  display: block;
+}
+.hero h3 {
+  font-size: 17px;
+  font-weight: 500;
+  margin: 12px 0 20px;
+  text-align: center;
+}
+.hero .hero-project {
   font: inherit;
-  color: var(--a-text);
-  background: var(--a-input);
-  border: 1px solid var(--a-borderStrong);
-  border-radius: 6px;
-  padding: 6px 10px;
-}
-.welcome .composer {
+  color: var(--a-accent);
+  background: none;
+  border: none;
+  border-bottom: 1px dashed var(--a-accent);
   padding: 0;
-  text-align: left;
+  cursor: pointer;
+}
+.hero-composer {
+  width: 100%;
+  max-width: 680px;
+}
+.hero-composer .composer {
+  padding: 0;
 }
 .dialog-backdrop {
   position: absolute;

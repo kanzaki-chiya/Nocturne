@@ -101,11 +101,22 @@ function tool(overrides: Partial<ToolEntry> = {}): ToolEntry {
   };
 }
 
+function conversationProps(rendered: { session: RpcSession; openUrl: (url: string) => void }) {
+  return {
+    session: rendered.session,
+    openUrl: rendered.openUrl,
+    cwd: "Z:/project",
+    subscribeEvents: () => () => undefined,
+    images: { url: () => undefined, register: async () => "" },
+  };
+}
+
 function mount(view: SessionView = createSessionView()) {
   const { session, methods } = sessionFixture();
   const openUrl = vi.fn();
+  const rendered = { session, openUrl };
   return {
-    ...render(<Conversation session={session} view={view} openUrl={openUrl} />),
+    ...render(<Conversation view={view} {...conversationProps(rendered)} />),
     session,
     methods,
     openUrl,
@@ -117,9 +128,9 @@ afterEach(cleanup);
 describe("Conversation 权限卡片", () => {
   const choices: [PermissionOption, string, PermissionReply][] = [
     ["allow_once", "允许一次", { decision: "allow" }],
-    ["allow_session", "本会话内允许", { decision: "allow", remember: "session" }],
-    ["allow_project", "在此项目中始终允许", { decision: "allow", remember: "project" }],
-    ["deny_stop", "拒绝并停止本 Turn", { decision: "deny", stop: true }],
+    ["allow_session", "本会话允许", { decision: "allow", remember: "session" }],
+    ["allow_project", "本项目允许", { decision: "allow", remember: "project" }],
+    ["deny_stop", "拒绝并停止", { decision: "deny", stop: true }],
   ];
   it.each(choices)(
     "%s 原样回传 requestId 与 reply，不在客户端结算",
@@ -143,7 +154,7 @@ describe("Conversation 权限卡片", () => {
     const view = createSessionView();
     view.pendingPermission = permission();
     const { methods } = mount(view);
-    fireEvent.click(screen.getByRole("button", { name: "拒绝（可附反馈）" }));
+    fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
     expect(methods.respondPermission).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole("textbox", { name: "拒绝反馈（可选）" }), {
       target: { value: feedback },
@@ -164,15 +175,13 @@ describe("Conversation 权限卡片", () => {
     const view = createSessionView();
     view.pendingPermission = permission({ options: ["allow_once", "deny"] });
     const rendered = mount(view);
-    expect(screen.queryByRole("button", { name: "本会话内允许" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "在此项目中始终允许" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "拒绝并停止本 Turn" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "本会话允许" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "本项目允许" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "拒绝并停止" })).toBeNull();
     view.pendingPermission = permission({ requestId: "permission-2", options: [] });
-    rendered.rerender(
-      <Conversation session={rendered.session} view={view} openUrl={rendered.openUrl} />,
-    );
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     expect(screen.getByRole("button", { name: "允许一次" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "拒绝（可附反馈）" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "拒绝" })).toBeTruthy();
   });
 
   it("网络授权标题沿用 TUI，反馈 Esc 返回而不发送", () => {
@@ -180,7 +189,7 @@ describe("Conversation 权限卡片", () => {
     view.pendingPermission = permission({ subjects: [{ kind: "network", target: "example.com" }] });
     const { methods } = mount(view);
     expect(screen.getByRole("button", { name: "本会话允许访问 example.com" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "拒绝（可附反馈）" }));
+    fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
     expect(screen.getByRole("button", { name: "允许一次" })).toBeTruthy();
     expect(methods.respondPermission).not.toHaveBeenCalled();
@@ -200,9 +209,7 @@ describe("Conversation 权限卡片", () => {
     fireEvent.click(screen.getByRole("button", { name: "允许一次" }));
     await waitFor(() => expect(rendered.methods.respondPermission).toHaveBeenCalledTimes(2));
     view.pendingPermission = permission({ requestId: "permission-next" });
-    rendered.rerender(
-      <Conversation session={rendered.session} view={view} openUrl={rendered.openUrl} />,
-    );
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     fireEvent.click(screen.getByRole("button", { name: "允许一次" }));
     await waitFor(() =>
       expect(rendered.methods.respondPermission).toHaveBeenLastCalledWith("permission-next", {
@@ -312,9 +319,7 @@ describe("Conversation 提问卡片", () => {
       requestId: "question-new",
       questions: [{ question: "说明" }],
     });
-    rendered.rerender(
-      <Conversation session={rendered.session} view={view} openUrl={rendered.openUrl} />,
-    );
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     expect(screen.getByRole("textbox")).toHaveProperty("value", "");
     fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
     await waitFor(() =>
@@ -359,17 +364,19 @@ describe("Conversation 渲染与滚动", () => {
     const reasoning = screen.getByText("思考").closest("details");
     expect(reasoning?.open).toBe(false);
     expect(reasoning?.textContent).toContain("先检查文件");
-    expect(screen.getByText("模型已切换")).toBeTruthy();
+    // config 子类不进消息流
+    expect(screen.queryByText("模型已切换")).toBeNull();
     expect(screen.getByRole("alert").textContent).toContain("响应较慢");
-    const diff = screen.getByText("查看差异 · file.ts").closest("details");
-    expect(diff?.open).toBe(true);
-    fireEvent.click(screen.getByText("查看差异 · file.ts"));
-    expect(diff?.open).toBe(false);
-    expect(container.querySelector(".conversation-diff-add code")?.textContent).toBe("+new");
-    expect(container.querySelector(".conversation-diff-delete code")?.textContent).toBe("-old");
-    expect(
-      container.querySelector(".conversation-diff-delete .conversation-diff-number")?.textContent,
-    ).toBe("1");
+    const card = container.querySelector(".diff");
+    expect(card?.textContent).toContain("file.ts");
+    expect(card?.textContent).toContain("+1");
+    expect(card?.textContent).toContain("−1");
+    fireEvent.click(screen.getByRole("button", { name: "收起" }));
+    expect(container.querySelector(".diff-body")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    expect(container.querySelector(".diff-row.diff-add code")?.textContent).toBe("+new");
+    expect(container.querySelector(".diff-row.diff-delete code")?.textContent).toBe("-old");
+    expect(container.querySelector(".diff-row.diff-delete .diff-num")?.textContent).toBe("1");
   });
 
   it("原始 HTML、事件属性、脚本、远程图片和不允许的 URL 不产生执行元素", () => {
@@ -400,9 +407,12 @@ describe("Conversation 渲染与滚动", () => {
       ],
     };
     view.entries = [entry];
-    mount(view);
-    expect(screen.getByText("查看差异 · M a.ts")).toBeTruthy();
-    expect(screen.getByText("M old.ts → new.ts")).toBeTruthy();
+    const { container } = mount(view);
+    const cards = container.querySelectorAll(".diff");
+    expect(cards).toHaveLength(2);
+    expect(cards[0]?.textContent).toContain("a.ts");
+    expect(cards[0]?.textContent).toContain("+1");
+    expect(cards[1]?.textContent).toContain("old.ts → new.ts");
   });
 
   it("读取工具默认只有单行摘要，完整输出和主体说明在折叠详情中", () => {
@@ -459,9 +469,7 @@ describe("Conversation 渲染与滚动", () => {
     assistant.text = "正在 **回复**";
     liveTool.inputText += '"pwd"}';
     view.revision += 1;
-    rendered.rerender(
-      <Conversation session={rendered.session} view={view} openUrl={rendered.openUrl} />,
-    );
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     expect(screen.getByText("回复", { selector: "strong" })).toBeTruthy();
     expect(screen.getByText('{"command":"pwd"}')).toBeTruthy();
   });
@@ -487,9 +495,7 @@ describe("Conversation 渲染与滚动", () => {
       },
     });
     view.revision += 1;
-    rendered.rerender(
-      <Conversation session={rendered.session} view={view} openUrl={rendered.openUrl} />,
-    );
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     expect(top).toBe(800);
     fireEvent.wheel(scroll, { deltaY: -100 });
     scroll.scrollTop = 300;
@@ -499,25 +505,215 @@ describe("Conversation 渲染与滚动", () => {
     if (assistant === undefined) throw new Error("缺少流式回复");
     assistant.text += " 第二段";
     view.revision += 1;
-    rendered.rerender(
-      <Conversation session={rendered.session} view={view} openUrl={rendered.openUrl} />,
-    );
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     expect(top).toBe(300);
     fireEvent.click(screen.getByRole("button", { name: "回到最新消息" }));
     expect(top).toBe(1100);
     height = 1500;
     view.revision += 1;
-    rendered.rerender(
-      <Conversation session={rendered.session} view={view} openUrl={rendered.openUrl} />,
-    );
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     expect(top).toBe(1300);
     scroll.scrollTop = 400;
     fireEvent.scroll(scroll);
     expect(screen.getByRole("button", { name: "回到最新消息" })).toBeTruthy();
     const next = sessionFixture("session-2");
     rendered.rerender(
-      <Conversation session={next.session} view={createSessionView()} openUrl={rendered.openUrl} />,
+      <Conversation
+        view={createSessionView()}
+        {...conversationProps({ session: next.session, openUrl: rendered.openUrl })}
+      />,
     );
     expect(screen.queryByRole("button", { name: "回到最新消息" })).toBeNull();
+  });
+});
+
+describe("Conversation 工具行与拒绝", () => {
+  it("工作区内路径相对化、区外绝对化；10 秒以上才显示时长", () => {
+    const view = createSessionView();
+    const inside = tool({ name: "edit", input: { path: "Z:/project/src/a.ts" } });
+    inside.result = {
+      status: "ok",
+      modelContent: "",
+      output: { path: "Z:/project/src/a.ts", replaced: 2 },
+      error: undefined,
+      truncated: false,
+      spillPath: undefined,
+      durationMs: 12_000,
+    };
+    const outside = tool({ name: "edit", input: { path: "Z:/other/x.ts" } });
+    if (outside.result) outside.result.output = { path: "Z:/other/x.ts", replaced: 1 };
+    view.entries = [inside, outside];
+    const { container } = mount(view);
+    const args = Array.from(container.querySelectorAll(".tool-arg")).map(
+      (node) => node.textContent,
+    );
+    expect(args).toEqual(["src/a.ts", "Z:/other/x.ts"]);
+    const rows = screen.getAllByRole("article", { name: /工具 edit/ });
+    expect(rows[0]?.textContent).toContain("2 处");
+    expect(rows[0]?.textContent).toContain("12 秒");
+    expect(rows[1]?.textContent).not.toContain("ms");
+  });
+
+  it("被拒绝的工具只显示一行红色说明，feedback 进 title", () => {
+    const view = createSessionView();
+    const entry = tool({ status: "denied", result: undefined });
+    entry.resolution = { callId: "call-1", action: "deny", source: "user", feedback: "不要动" };
+    view.entries = [entry];
+    const { container } = mount(view);
+    const deny = container.querySelector(".note.deny");
+    expect(deny?.textContent).toBe("✕ 已拒绝修改 file.ts");
+    expect(deny?.getAttribute("title")).toBe("不要动");
+    expect(container.querySelector(".tool")).toBeNull();
+  });
+
+  it("permission 与 config 子类通知不进入消息流，其他通知原样显示", () => {
+    const view = createSessionView();
+    view.entries = [
+      {
+        kind: "notice",
+        key: "n1",
+        seq: 1,
+        subtype: "permission",
+        message: "允许了 read",
+        payload: {},
+      },
+      { kind: "notice", key: "n2", seq: 2, subtype: "config", message: "模型切换", payload: {} },
+      { kind: "notice", key: "n3", seq: 3, subtype: "turn_end", message: "Turn 结束", payload: {} },
+    ];
+    mount(view);
+    expect(screen.queryByText("允许了 read")).toBeNull();
+    expect(screen.queryByText("模型切换")).toBeNull();
+    expect(screen.getByText("Turn 结束")).toBeTruthy();
+  });
+
+  it("用户消息里的 @ 引用渲染成带说明的 chip，历史图片降级为占位", () => {
+    const view = createSessionView();
+    view.entries = [
+      {
+        kind: "user",
+        key: "u1",
+        seq: 1,
+        turnId: "t",
+        content: [
+          { type: "text", text: "看 @src/a.ts 这里" },
+          { type: "text", text: "（a.ts 快照内容）" },
+        ],
+        fileRefs: [
+          {
+            path: "src/a.ts",
+            kind: "file",
+            chars: 10,
+            lines: 36,
+            totalLines: 120,
+            truncated: false,
+          },
+        ],
+        attachments: [
+          {
+            type: "image",
+            file: "img-1.png",
+            mimeType: "image/png",
+            bytes: 10,
+            sha256: "x",
+            source: "paste",
+          },
+        ],
+      },
+    ];
+    const { container } = mount(view);
+    const ref = container.querySelector(".ref");
+    expect(ref?.textContent).toBe("@src/a.ts");
+    expect(ref?.getAttribute("title")).toBe("已附带 36/120 行");
+    const chip = container.querySelector(".u-img-chip");
+    expect(chip?.textContent).toContain("img-1.png");
+    expect(chip?.getAttribute("title")).toBe("暂不支持查看历史图片");
+  });
+});
+
+describe("Conversation 权限卡片 v2", () => {
+  it("标题给出操作与审查者结论，主体单行排列且 shell 带 kind 前缀", () => {
+    const view = createSessionView();
+    view.pendingPermission = permission({
+      toolName: "shell",
+      subjects: [{ kind: "shell", target: "rm -rf x", shell: "pwsh" }],
+      review: {
+        callId: "call-1",
+        backend: "b",
+        verdict: "unsure",
+        reason: "拿不准",
+        durationMs: 1,
+        cached: false,
+      },
+    });
+    mount(view);
+    const card = screen.getByRole("region", { name: "权限确认" });
+    expect(card.textContent).toContain("需要确认 · 执行命令");
+    expect(card.textContent).toContain("审查器拿不准，交给你决定");
+    expect(card.textContent).toContain("pwsh › rm -rf x");
+    expect(within(card).getByRole("button", { name: "允许一次" })).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "拒绝" })).toBeTruthy();
+    expect(card.textContent).toContain("Esc 拒绝");
+  });
+
+  it("数字键直选选项、Esc 直接拒绝；均不经过输入框", async () => {
+    const view = createSessionView();
+    view.pendingPermission = permission();
+    const rendered = mount(view);
+    fireEvent.keyDown(window, { key: "3" });
+    await waitFor(() =>
+      expect(rendered.methods.respondPermission).toHaveBeenCalledWith("permission-1", {
+        decision: "allow",
+        remember: "project",
+      }),
+    );
+    rendered.methods.respondPermission.mockClear();
+    view.pendingPermission = permission({ requestId: "permission-2" });
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(rendered.methods.respondPermission).toHaveBeenCalledWith("permission-2", {
+        decision: "deny",
+      }),
+    );
+    rendered.methods.respondPermission.mockClear();
+    view.pendingPermission = permission({ requestId: "permission-3" });
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    // 焦点在可编辑字段时数字与 Esc 不触发
+    fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
+    const textarea = screen.getByRole("textbox", { name: "拒绝反馈（可选）" });
+    fireEvent.keyDown(textarea, { key: "1" });
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    expect(rendered.methods.respondPermission).not.toHaveBeenCalled();
+  });
+
+  it("卡片挂载即获得焦点；数字键 1 触发第一个选项", async () => {
+    const view = createSessionView();
+    view.pendingPermission = permission();
+    const { methods } = mount(view);
+    const card = screen.getByRole("region", { name: "权限确认" });
+    await waitFor(() => expect(document.activeElement).toBe(card));
+    fireEvent.keyDown(card, { key: "1" });
+    await waitFor(() =>
+      expect(methods.respondPermission).toHaveBeenCalledWith("permission-1", {
+        decision: "allow",
+      }),
+    );
+  });
+
+  it("焦点在卡片外可编辑字段时 Esc 也直接拒绝", async () => {
+    const view = createSessionView();
+    view.pendingPermission = permission();
+    const { methods } = mount(view);
+    // 卡片外的可编辑焦点（如输入框）：Esc 照样拒绝，外层调用方负责防误中断
+    const outside = document.createElement("textarea");
+    document.body.appendChild(outside);
+    outside.focus();
+    fireEvent.keyDown(outside, { key: "Escape" });
+    await waitFor(() =>
+      expect(methods.respondPermission).toHaveBeenCalledWith("permission-1", {
+        decision: "deny",
+      }),
+    );
+    document.body.removeChild(outside);
   });
 });

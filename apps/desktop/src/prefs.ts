@@ -17,6 +17,8 @@ export interface Prefs {
   hidden: string[];
   /** 项目排序：最近活动 / 名称 */
   projectSort: ProjectSort;
+  /** 上次选用的思考档位（新会话草稿的默认档位） */
+  lastEffort?: string;
 }
 
 const DEFAULTS: Prefs = { pinned: [], projects: [], hidden: [], projectSort: "activity" };
@@ -55,6 +57,7 @@ function parse(raw: string | null): Prefs {
   if (obj.projectSort === "activity" || obj.projectSort === "name") {
     prefs.projectSort = obj.projectSort;
   }
+  if (typeof obj.lastEffort === "string") prefs.lastEffort = obj.lastEffort;
   // lastProject 已废弃：旧数据里的这个字段直接忽略
   return prefs;
 }
@@ -77,6 +80,7 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         projects: [...prefs.projects],
         hidden: [...prefs.hidden],
         projectSort: prefs.projectSort,
+        ...(prefs.lastEffort !== undefined ? { lastEffort: prefs.lastEffort } : {}),
       };
     },
     update(patch) {

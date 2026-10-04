@@ -13,15 +13,16 @@
 
 ## 2. 命令与消息格式
 
-Rust 外壳提供五个 Tauri 命令（经 `tauri_build` 的 `AppManifest::commands` 声明为应用命令，在 `capabilities/main.json` 中逐个授予 `allow-backend-open` 等权限；第 4 步再加 `backend_stderr`，共六个），错误统一返回可序列化的 `{ code, message }`（message 为中文）：`node_unavailable`、`backend_script_missing`、`invalid_workspace`、`spawn_failed`、`unknown_backend`、`workspace_unavailable`、`io`。
+Rust 外壳提供六个 Tauri 命令（经 `tauri_build` 的 `AppManifest::commands` 声明为应用命令，在 `capabilities/main.json` 中逐个授予 `allow-backend-open` 等权限；第 4 步再加 `backend_stderr`，共七个），错误统一返回可序列化的 `{ code, message }`（message 为中文）：`node_unavailable`、`backend_script_missing`、`invalid_workspace`、`spawn_failed`、`unknown_backend`、`workspace_unavailable`、`file_too_large`、`io`。
 
-| 命令 | 参数 → 结果 | 说明 |
-|---|---|---|
-| `backend_open` | `{ workspace, channel }` → `backendId`（u32，自增） | 校验工作区目录存在；取缓存的 Node 探测结果（无缓存先探测一次，不满足报 `node_unavailable`）；解析后台脚本；spawn 后 stdout 行经 channel 推给前端 |
-| `backend_send` | `{ backendId, line }` → `null` | 写 `line + \n` 到该后台 stdin 并 flush；每个后台的 stdin 有独立 Mutex |
-| `backend_close` | `{ backendId }` → `null` | 关 stdin、等自行退出、5 秒超时强杀，进程确实结束才返回；重复调用或对已退出的后台调用返回 `null` |
-| `node_probe` | `{}` → `NodeProbe` | 每次重新探测并刷新缓存（说明页的「重新检测」） |
-| `plain_workspace` | `{}` → 绝对路径字符串 | 解析 `<NOCTURNE_HOME>/workspace`（`NOCTURNE_HOME` 规则与 Core `nocturneHome()` 一致），不存在时创建（POSIX 上新建目录 0700），返回绝对路径；失败报 `workspace_unavailable` |
+| 命令              | 参数 → 结果                                         | 说明                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend_open`    | `{ workspace, channel }` → `backendId`（u32，自增） | 校验工作区目录存在；取缓存的 Node 探测结果（无缓存先探测一次，不满足报 `node_unavailable`）；解析后台脚本；spawn 后 stdout 行经 channel 推给前端                                                                                                                                                                                                                                              |
+| `backend_send`    | `{ backendId, line }` → `null`                      | 写 `line + \n` 到该后台 stdin 并 flush；每个后台的 stdin 有独立 Mutex                                                                                                                                                                                                                                                                                                                         |
+| `backend_close`   | `{ backendId }` → `null`                            | 关 stdin、等自行退出、5 秒超时强杀，进程确实结束才返回；重复调用或对已退出的后台调用返回 `null`                                                                                                                                                                                                                                                                                               |
+| `node_probe`      | `{}` → `NodeProbe`                                  | 每次重新探测并刷新缓存（说明页的「重新检测」）                                                                                                                                                                                                                                                                                                                                                |
+| `plain_workspace` | `{}` → 绝对路径字符串                               | 解析 `<NOCTURNE_HOME>/workspace`（`NOCTURNE_HOME` 规则与 Core `nocturneHome()` 一致），不存在时创建（POSIX 上新建目录 0700），返回绝对路径；失败报 `workspace_unavailable`                                                                                                                                                                                                                    |
+| `pick_images`     | `{}` → 原始字节（`Response`）                       | 系统文件对话框多选图片（过滤 png/jpg/jpeg/gif/webp）；外壳读取所选文件字节返回，前端不传路径——读取范围仅限用户显式选中的文件。单个文件 > 64 MiB 报 `file_too_large`：与 stdout 单行上限同级的内存护栏（不是附件规则，格式与尺寸校验仍在 Core）。自定义二进制帧，重复记录 `[u32 LE 文件名 UTF-8 字节数][文件名][u32 LE 数据字节数][数据]`；取消选择返回空体。前端解码在 `src/picked-images.ts` |
 
 `plain_workspace` 单独成命令而不并入 `backend_open`：前端归类「对话」需要这个路径且目录必须由外壳创建，而 `backend_open` 仍只接受已存在的目录——前端不能借它创建任意目录。
 
@@ -29,8 +30,7 @@ Channel 消息（serde tag `kind`）：
 
 ```ts
 type BackendMessage =
-  | { kind: "line"; line: string }
-  | { kind: "closed"; code: number | null; stderr: string[] };
+  { kind: "line"; line: string } | { kind: "closed"; code: number | null; stderr: string[] };
 ```
 
 `code` 是退出码，被强杀或拿不到时为 `null`；`stderr` 是该后台内存缓冲的全部内容（≤500 行）。监督线程（`try_wait` 约 50ms 轮询）在进程退出后等待 stdout 读线程排空（最多 2 秒，防孙进程继承管道卡住），保证**所有 line 消息都在 closed 之前发出**；closed 每个后台只发一次。stdout 切行上限 64 MiB/行，超过则记一行 stderr 并强杀后台（宁可显式失败也不悄悄丢报文让请求挂死）。
@@ -51,11 +51,20 @@ type BackendMessage =
 
 ```ts
 type NodeSource = "env" | "bundled" | "path";
-interface NodeProbeStep { source: NodeSource; status: "unset" | "not-bundled" | "missing" | "found" | "skipped"; path: string | null }
+interface NodeProbeStep {
+  source: NodeSource;
+  status: "unset" | "not-bundled" | "missing" | "found" | "skipped";
+  path: string | null;
+}
 interface NodeProbe {
-  required: string;   // "24.14.0"
+  required: string; // "24.14.0"
   steps: NodeProbeStep[];
-  selected: { source: NodeSource; path: string; version: string | null; error: string | null } | null;
+  selected: {
+    source: NodeSource;
+    path: string;
+    version: string | null;
+    error: string | null;
+  } | null;
   ok: boolean;
 }
 ```
@@ -80,45 +89,71 @@ interface NodeProbe {
 - **置顶**：按置顶数组顺序列出仍存在的会话，每条标出所属项目名（对话为「对话」）；置顶不受项目隐藏影响。右键会话行置顶/取消置顶，右键项目标题「从列表移除」（把项目路径加入隐藏集合，不删会话、不动手动项目列表，可在「…」菜单恢复）。
 - 会话行优先显示已打开会话视图的标题，否则为 `firstText ?? "未命名会话"`；meta 为相对时间（<60s「现在」<1h「N 分钟」<24h「N 小时」<48h「昨天」<30d「N 天」否则 `YYYY-MM-DD`，锁定加「🔒 」前缀）。运行中的会话显示主色圆点；等待权限确认或提问回复的会话显示「待确认」，切走后仍保持这个状态。
 
-界面状态存 localStorage 键 `nocturne.desktop.prefs.v1`：`{ pinned: string[]; projects: string[]; hidden: string[]; projectSort: "activity" | "name" }`（会话 id、原始路径、项目路径；`projectSort` 缺省 `"activity"`；旧数据里的 `lastProject` 字段忽略）。读写失败均不影响本次运行，写失败时 `persistent` 标为 false（`src/prefs.ts`）。
+界面状态存 localStorage 键 `nocturne.desktop.prefs.v1`：`{ pinned: string[]; projects: string[]; hidden: string[]; projectSort: "activity" | "name"; lastEffort?: string }`（会话 id、原始路径、项目路径；`projectSort` 缺省 `"activity"`；`lastEffort` 是上次选用的思考档位，作为新会话草稿的默认档位，非字符串字段被忽略；旧数据里的 `lastProject` 字段忽略）。读写失败均不影响本次运行，写失败时 `persistent` 标为 false（`src/prefs.ts`）。
 
-启动流程：`node_probe` → 不 ok 显示说明页；ok 后 `plain_workspace` 取普通对话工作区 → `ensure` 开常驻后台（握手）→ `listSessions()`（不传 cwd）。`plain_workspace` 或 `ensure` 失败显示真实错误与「重试」，后台退出横幅的「重新连接」同样重走这条链。「打开项目…」（「项目」标题行的「＋」）走系统文件夹对话框 → 加入手动项目、取消隐藏、刷新列表，不启动后台。列表在连上后、打开项目后、窗口重新获得焦点时（节流 ≥ 2 秒）刷新。未选中会话时主区居中显示图标、标题、工作区选择和输入框，工作区列表末项为「打开其他文件夹…」。
+启动流程：`node_probe` → 不 ok 显示说明页；ok 后 `plain_workspace` 取普通对话工作区 → `ensure` 开常驻后台（握手）→ `listSessions()`（不传 cwd）。`plain_workspace` 或 `ensure` 失败显示真实错误与「重试」，后台退出横幅的「重新连接」同样重走这条链。「打开项目…」（「项目」标题行的「＋」）走系统文件夹对话框 → 加入手动项目、取消隐藏、刷新列表，不启动后台。列表在连上后、打开项目后、窗口重新获得焦点时（节流 ≥ 2 秒）刷新。
+
+未选中会话时主区显示 hero 空状态（`src/App.tsx` `DraftPane`）：月亮标记 + 标题 + 同一个输入框（宽度上限 680）。普通对话标题为「有什么可以帮你？」；项目草稿为「要在 <项目名> 里做什么？」——项目名是可点按钮（虚线下划线），点击打开与输入框托盘目录 chip 同一个目录菜单。目录菜单内容：「普通对话」（副标题「不属于任何项目」）/ 分隔线 /「项目」组逐项目（名称 + 小字路径）/ 分隔线 /「打开其他文件夹…」。
 
 ### 5.1 会话打开、创建与关闭
 
 `src/conversations.ts` 管理打开的会话与订阅。点击会话先 `ensure` 所属项目后台，再 `resumeSession`、通过 `trackSessionView` 订阅并回放历史；普通对话共用常驻后台。遇到 `session_locked` 先显示「正在别处使用」，只有用户选择「强制打开」后才以 `force: true` 重试。
 
-「＋ 新会话」、项目行「＋」和 `/new`（`/clear`）只进入草稿；第一条普通消息发送时才 `createSession`，不创建空会话。切换时关闭空闲的旧会话及订阅；运行中、等待权限确认或提问回复的旧会话保留打开，结束后若不再选中则关闭。项目没有打开会话时释放其后台；普通对话常驻后台不释放。主区始终只有当前会话的一条消息流和一组请求卡片；`Conversation` 与 `Composer` 使用带组件前缀的不同 React key，切换会话时分别重建，不能共用同一个会话 id 作为同级 key。
+「＋ 新会话」、项目行「＋」和空状态目录菜单只进入草稿；第一条普通消息发送时才 `createSession`，不创建空会话。草稿里显式选过的字段（模型、思考档位、权限预设）写进 `createSession({ model, reasoningEffort?, permissionPreset? })`——模型总会带上（默认取最近使用或 `defaultModel`），未触碰的档位/预设省略，由 Core 解析项目级默认。发送采用接受语义：`session.submit` 返回即视为已接受（持久用户事件随后才到），Turn 视图出现新条目或新 Turn 也算接受；`submit` 在接受前拒绝（如附件校验失败）则抛错，输入框保留草稿与全部附件。接受后才设置选中会话并清掉草稿工作区；被拒的刚创建会话走正常 `closeIfIdle` 路径关闭。切换时关闭空闲的旧会话及订阅；运行中、等待权限确认或提问回复的旧会话保留打开，结束后若不再选中则关闭。项目没有打开会话时释放其后台；普通对话常驻后台不释放。主区始终只有当前会话的一条消息流和一组请求卡片；`Conversation` 与 `Composer` 使用带组件前缀的不同 React key，切换会话时分别重建，不能共用同一个会话 id 作为同级 key。
 
 ### 5.2 消息、输入与交互请求
 
-`src/Conversation.tsx` 按共享 `SessionView` 渲染用户消息、助手 Markdown、可折叠思考、工具调用和文件 diff、警告与通知，不另写事件折叠。Markdown 原始 HTML 和远程图片不执行、不加载；允许的链接由宿主打开。工具行默认收起；结构化 edit/write 输出的 diff 展开显示。流式更新自动跟随底部，用户向上滚动后停止跟随，点击「回到最新消息」恢复。左栏和消息滚动区使用细、无箭头滚动条，滑块为 `--a-borderStrong`。
+`src/Conversation.tsx` 按共享 `SessionView` 渲染用户消息、助手 Markdown、可折叠思考、工具调用和文件 diff、警告与通知，不另写事件折叠。用户消息是右对齐气泡，`@路径` 渲染成等宽 chip（title 来自匹配的 fileRef 元数据：「已附带 N/M 行」「目录」「已附带文件 · 已截断」）；助手行无标签无边线；思考折叠为一行（「思考中 Ns」/「思考了 Ns」/「思考」，时长由 `src/reasoning.ts` 从流式事件累计）。工具行单行显示「图标字母 + 动作 + 参数 + · 范围 + 简短结果」：cwd 内路径相对化（`src/paths.ts` `displayPath`，Windows 风格忽略大小写与分隔符），区外按原样绝对路径；>10 秒才显示时长（「12 秒」/「1 分 45 秒」）。ok 的 edit/write/apply_patch 只渲染 diff 卡片（`+N`/`−M` 计数，去掉 `---`/`+++`/`index`/`\ No newline` 行，hunk 之间「⋯」分隔，默认展开可收起）；出错仍渲染工具行。被拒绝的工具只显示一行红色「✕ 已拒绝<操作>」（feedback 放 title）；`permission`（allow/deny）与 `config` 子类型的 notice 不进消息流。Markdown 原始 HTML、脚本、事件属性和远程图片不执行、不加载；允许的链接由宿主打开。流式更新自动跟随底部，用户向上滚动后停止跟随，点击「回到最新消息」恢复。左栏和消息滚动区使用细、无箭头滚动条，滑块为 `--a-borderStrong`。
 
-`src/Composer.tsx`：Enter 发送，Shift+Enter 换行；`isComposing`、composition 状态或旧输入法 `keyCode=229` 时不发送。输入历史经 `readInputHistory` / `recordInputHistory`；运行中按钮与 Esc 调用 `interrupt`。图片附件留到第 4 步。
+历史图片附件经 `AttachmentImageSource`（`src/attachment-images.ts`，按 sha256 缓存的 blob URL）解析；发送成功后把附件字节哈希注册进去，未知哈希显示占位 chip（title「暂不支持查看历史图片」）——历史图片读取等 RPC 附件读取能力，见文末限制说明。
 
-权限和提问请求显示在消息流底部，按钮与 TUI 的选择一致；仅调用 `respondPermission` / `respondQuestion` 回传选择，权限判定仍在 Core。权限卡片支持拒绝反馈、允许一次、会话允许、创建规则，以及请求给出的其他选项；提问支持单选、多选、自由文本和明确拒答。
+`src/Composer.tsx` 是空状态与会话共用的输入框（`variant: "draft" | "session"`）：Enter 发送，Shift+Enter 换行；`isComposing`、composition 状态或旧输入法 `keyCode=229` 时不发送。输入历史经 `readInputHistory` / `recordInputHistory`；运行中发送键变成 ■ 与 Esc 一样调用 `interrupt`。两种布局：draft 是卡片 + 托盘两层（`.cbox`/`.tray`：附件缩略图行、textarea、工具行「＋ + 模型 chip + 档位 chip + 发送键」、托盘「目录 chip + 权限预设 chip + 输入提示」，托盘负 margin 塞在卡片底边之下、卡片压在上层）；session 是单行（＋ | 输入区 | 发送/中断 三者一行底对齐，输入行内默认 26px 与按钮等高，多行时 textarea 向上长高、按钮钉底），无 tray、无 chip。textarea 自动长高到 ~40vh/280px 后内部滚动；redirect/vision 提示显示在卡片上方气泡，错误在下方。菜单统一走 `src/Menu.tsx`（`role="menu"`，↑↓/Home/End/Enter/Esc，外部点击关闭，焦点回触发键）；展开方向：渲染后量高度，下方放得下就向下（`top = anchor.bottom + 6`），放不下向上，两侧都放不下取较大一侧并限高滚动；项标题不换行、detail 单行省略号（悬停见全文），菜单宽 250–420px，滚动条与消息流一致（细、无箭头）。
+
+- 模型 chip（仅空状态）：「最近使用」（`listRecentModels` ∩ `listModels`，按 recents 顺序）+「全部模型」两组；不可用的模型带原因置灰。会话内切换在状态栏 pill（同一 ChoiceControl 数据与 Menu）。
+- 档位 chip（仅空状态）：当前模型可用档位（会话来自 `reasoningEffortInfo`，草稿来自 `ModelInfo.capabilities.reasoningEffort`）；current≠effective 时提示「本 Turn 使用 X；Y 将在下一 Turn 生效」。选择写入 `prefs.lastEffort`。
+- 预设 chip（仅空状态托盘）：`PERMISSION_PRESET_NAMES`；草稿里未触碰不计入选项。
+- 运行中模型与预设控件禁用（title「当前 Turn 结束后可切换」），档位仍可切；Shell pill 同样 Turn 中禁用。
+- 「＋」菜单：「添加图片…」（系统对话框 `pick_images`）与「引用文件…」（在光标处插入 `@` 并打开文件弹层）；`fileRefs` 为 null 时「引用文件…」置灰并给出原因。
+- 图片附件三条路径：对话框、粘贴（剪贴板 image/* 文件）、拖入（`dragDropEnabled: false` 让 HTML5 drop 拿到 File 对象；非图片报「只能拖入图片」，不支持的类型报「不支持的图片类型（支持 PNG、JPEG、GIF、WebP）」）。缩略图 `<img>` + 文件名 + ✕（`aria-label`「移除 <名>」），object URL 随移除/卸载回收。附件存在且有 `getVisionHint` 时拉一次提示（如「当前模型不支持图片，将由 <模型> 描述后发送」）。发送载荷 `{ data: Uint8Array, mimeType, label }`，提交被拒时附件与草稿一并保留。
+- `@` 引用：文件索引懒加载（`fileRefs.load()`，`key` 变化才重取；会话内 `key` 用 `view.turnCount`）。弹层按 `src/file-refs.ts` 的排序（文件名前缀 > 文件名包含 > 路径包含，同级短路径优先），Tab/Enter 选择插入 `@路径 `（含空格路径写成 `@"a b.txt" `；目录不带尾随空格、弹层继续展开列下一级）。纯文本里输入的 `@` 引用经 textarea 底下的镜像层高亮（`parseFileRefs` 区间上色，发送的仍是纯文本）。草稿/普通对话没有项目文件索引：`fileRefs` 为 null，输入 `@` 不弹层，菜单项 title 给出原因（`fileRefsUnavailable`）；空状态下项目文件搜索等 runtime 级 `fileIndex` 能力，见文末限制说明。
+
+权限和提问请求显示在消息流底部；仅调用 `respondPermission` / `respondQuestion` 回传选择，权限判定仍在 Core。权限卡片按钮严格按 Core 给出的 `options` 顺序渲染（`allow_once 允许一次`、`allow_session 本会话允许`、`allow_project 本项目允许`、`deny 拒绝`、`deny_stop 拒绝并停止`），不自行增删选项；标题是「需要确认 · <操作>」（操作来自首个 subject kind：shell 执行命令 / edit 修改文件 / read 读取文件 / network 访问网络 / mcp 调用 MCP 工具 / subagent 启动子任务），右侧短理由来自审查结论（「审查器拿不准，交给你决定」「审查器建议拒绝」「审查器认为可以执行」，无审查为「按权限规则需要确认」），原始 reason 放 title。subject 逐行等宽显示（shell 前缀「<shell kind> ›」，路径按 `displayPath` 相对化）。键盘：卡片挂载即获得焦点，数字键 1–N 直选第 N 项（焦点在可编辑字段时数字键不触发）；Esc 立即拒绝（capture 阶段拦截并 preventDefault，焦点在输入框时也生效且不触发输入框的中断）——只有当目标在卡片内部（反馈 textarea 自己处理 Esc 退回选项）或输入框的补全/菜单弹层开着时让位。提问支持单选、多选、自由文本和明确拒答。
 
 ### 5.3 桌面斜杠命令
 
-命令表独立维护在 `src/commands.ts`，不导入 TUI。输入 `/` 显示补全，支持键盘选择及模型、档位、预设、Shell、会话参数补全；命令输出在主区显示。
+命令表独立维护在 `src/commands.ts`，不导入 TUI。界面上已有对应操作的旧命令不再作为命令：输入它们只在输入框上方显示「去哪里操作」的提示（`role="status"`），Enter 不发送也不执行；未知 `/xxx` 提示「未知命令 /xxx；输入 / 查看可用命令」。
 
-| 状态 | 命令 |
-| --- | --- |
-| 已实现 | `/help`、`/model`、`/effort`、`/preset`、`/shell`、`/context`、`/mcp`、`/compact`、`/resume`、`/new`、`/clear` |
-| 提示「第 3 步实现」 | `/provider`（含子命令）、`/settings` |
-| 提示「暂不支持」 | `/rewind`、`/fork`、`/theme`、`/exit`、`/quit` |
+| 命令       | 行为                                                           |
+| ---------- | -------------------------------------------------------------- |
+| `/compact` | `session.compact()` 压缩当前上下文；无会话时报「请先打开会话」 |
+| `/mcp`     | 查看本会话 MCP 状态（对话框输出）                              |
 
-`/theme` 当前跟随系统外观；退出请关闭窗口。无参数的 `/model`、`/effort`、`/preset`、`/shell` 打开对应状态栏选择面板，`/context` 打开上下文面板；`/resume` 无参数列出会话，有参数打开对应 id。
+| 已移除命令                            | 提示的界面操作                                          |
+| ------------------------------------- | ------------------------------------------------------- |
+| `/model` `/effort` `/preset` `/shell` | 会话内指向底部状态栏对应 pill；空状态指向输入框卡片/托盘对应控件（Shell 提示在会话内切换） |
+| `/context`                            | 底部状态栏的上下文用量（空状态提示会话内可用）            |
+| `/new` `/clear`                       | 左栏「＋ 新会话」                                       |
+| `/resume`                             | 在左栏选择要继续的会话                                  |
+| `/help`                               | 输入 `/` 查看可用命令；其余按场景指向控件位置           |
+| `/provider` `/settings`               | 页面在后续版本提供                                      |
+| `/theme`                              | 主题跟随系统外观                                        |
+| `/rewind` `/fork`                     | 后续版本提供                                            |
+| `/exit` `/quit`                       | 关闭窗口即可退出                                        |
+
+输入 `/` 显示分组补全弹层（`role="listbox"`）：「命令」组只含 `/compact`、`/mcp`；组结构（`completeSlash` 返回 `SlashGroup[]`，`id` 预留 `"skills"`）为将来技能命令留口，空组不渲染。
 
 ### 5.4 状态栏与上下文
 
-`src/StatusBar.tsx` 的模型、思考档位、权限预设和 Shell 选择分别调用 `setModel`、`setReasoningEffort`、`setPermissionPreset`、`setShell`；模型候选来自 `listModels`，档位和 Shell 候选来自当前会话 RPC。状态栏右侧显示上下文用量、累计缓存命中和 Turn 状态。
+`src/StatusBar.tsx` 左侧是会话控件 pill 组：模型（绿点 +「provider · model」+ ▾）、「思考 <level> ▾」、「权限 <preset> ▾」（预设值用警告色）、「Shell <kind> ▾」——各自打开与空状态 chip 共用的 `ChoiceMenu`（`src/Menu.tsx`，锚定 pill 自动向上弹出）；数据来自 `useSessionControls`（模型/档位/预设复用 `controls.controls`，Shell 是 `shellControl`：`auto`（「自动选择」）+ 探测到的 shell，未安装的置灰并标注「未安装」，被 env/config 覆盖时菜单底部给提示；打开 Shell 菜单时调 `loadShells()` 探测）。选择分别调 `setModel` / `setReasoningEffort`（并写 `prefs.lastEffort`）/ `setPermissionPreset` / `setShell`。右侧不变：上下文用量（点击开上下文面板）、累计缓存命中、Turn 状态。
 
-上下文面板取 `describeContext`，展示总量与预算、分段堆叠条和数值；对话历史从 `history.breakdown` 细分用户消息、助手回答、工具调用与结果、压缩摘要，不从可见消息重新估算。底部提示「可以输入 /compact 压缩」。
+上下文面板取 `describeContext`，展示总量与预算、分段堆叠条和数值；对话历史从 `history.breakdown` 细分用户消息、助手回答、工具调用与结果、压缩摘要，不从可见消息重新估算。来源文本按 `contextSourceLabel` 中文化（「内置提示词」「自定义提示词」「N 个工具」「N 项」「N 条」，路径按主目录缩写）。底部提示「可以输入 /compact 压缩」。
+
+已知限制（等 RPC 能力）：空状态的项目文件搜索需要 runtime 级 `fileIndex`（`fileIndex` 目前是 session 级，前端已用 `Composer.fileRefs` 作为数据接缝，届时只换数据源）；消息流里的历史图片缩略图需要附件读取 RPC（现在是 `AttachmentImageSource` 按 sha256 的窗口内缓存，未命中显示占位 chip）。
 
 ## 6. 安全边界
 
-- `capabilities/main.json` 只授予：五个应用命令（`allow-backend-open/send/close`、`allow-node-probe`、`allow-plain-workspace`）、`dialog:allow-open`、`opener:allow-open-url`（scope 只允许 `https:*` 与 `http://127.0.0.1:*` / `http://localhost:*`）。不启用 fs、shell、http 插件，`withGlobalTauri: false`。
+- `capabilities/main.json` 只授予：六个应用命令（`allow-backend-open/send/close`、`allow-node-probe`、`allow-plain-workspace`、`allow-pick-images`）、`core:path:allow-resolve-directory`（前端 `homeDir()` 主目录解析所需；`pick_images` 的对话框与读文件都在 Rust 侧，不需要它）、`dialog:allow-open`、`opener:allow-open-url`（scope 只允许 `https:*` 与 `http://127.0.0.1:*` / `http://localhost:*`）。不启用 fs、shell、http 插件，`withGlobalTauri: false`。
+- 主窗口 `dragDropEnabled: false`：关掉 Tauri 的原生拖放接管，HTML5 drop 才能向输入框交付 `File` 对象（图片附件的拖入路径）。
 - CSP：`default-src 'self'`；`connect-src` 只允许 `ipc:`/`http://ipc.localhost`；图片额外允许 `blob:`（图片附件预览用）；禁 `object-src`、`base-uri`、`form-action`、`frame-ancestors`。dev 模式（`devCsp`）仅为 Vite 额外放开 `ws://localhost:1420`、`http://localhost:1420` 与 style `'unsafe-inline'`。
 - 外链白名单（`src/external-url.ts`）：`https:` 放行；`http:` 仅 `127.0.0.1` 与 `localhost`（本机回调页）；其余协议与解析失败忽略不打开。Rust 侧 opener scope 与之一致。
 - 前端只用本机字体，不加载远程资源；不持久化任何凭据或会话内容。

@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RpcError } from "@nocturne/rpc/client";
+import { RpcError, type RpcClient, type RpcRuntime, type RpcSession } from "@nocturne/rpc/client";
+import type { RuntimeEvent, SessionView } from "@nocturne/core/protocol";
 
-import { Composer } from "./Composer";
+import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
+import { Composer, type ComposerSubmit, type WorkspaceChoice } from "./Composer";
 import { Conversation } from "./Conversation";
-import { Conversations, conversationStatus } from "./conversations";
-import { parseCommand, COMMANDS } from "./commands";
+import { Conversations, conversationStatus, type CreateSessionChoice } from "./conversations";
+import { parseSlash } from "./commands";
 import { StatusBar, type StatusPanel } from "./StatusBar";
+import { PaneErrorBoundary } from "./ErrorBoundary";
 
 import { BackendPool } from "./backends";
 import type { DesktopHost } from "./host";
 import { NodeHelp } from "./NodeHelp";
-import { createPrefsStore } from "./prefs";
+import { abbreviateHome, middleTruncate } from "./paths";
+import { createPrefsStore, type PrefsStore } from "./prefs";
+import { useDraftControls, useSessionControls } from "./session-controls";
 import { buildSessionTree, projectKey, projectName, type SessionSummary } from "./session-tree";
 import { Sidebar } from "./Sidebar";
 import type { NodeProbe } from "./types";
@@ -36,10 +41,12 @@ const FOCUS_THROTTLE_MS = 2_000;
 export function App({ host }: { host: DesktopHost }) {
   const prefs = useMemo(() => createPrefsStore(globalThis.localStorage), []);
   const pool = useMemo(() => new BackendPool(host), [host]);
+  const images = useMemo(() => createAttachmentImageSource(), []);
 
   const [phase, setPhase] = useState<Phase>({ kind: "probing" });
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [plainWorkspace, setPlainWorkspace] = useState<string | null>(null);
+  const [home, setHome] = useState<string | null>(null);
   const [prefsVersion, setPrefsVersion] = useState(0);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -52,6 +59,7 @@ export function App({ host }: { host: DesktopHost }) {
   const [panel, setPanel] = useState<StatusPanel | null>(null);
   const [commandOutput, setCommandOutput] = useState<string | null>(null);
   const [lockedSession, setLockedSession] = useState<SessionSummary | null>(null);
+  const [dirMenuOpen, setDirMenuOpen] = useState(false);
   const workspaceRef = useRef<string | null>(null);
   workspaceRef.current = plainWorkspace;
   const conversations = useMemo(
@@ -145,6 +153,11 @@ export function App({ host }: { host: DesktopHost }) {
     void probe();
   }, [probe]);
 
+  // 主目录只读一次（路径 ~ 缩写）
+  useEffect(() => {
+    void host.homeDir().then(setHome);
+  }, [host]);
+
   // 后台退出：提示"后台已退出（退出码 N）"与「重新连接」
   useEffect(
     () =>
@@ -213,96 +226,44 @@ export function App({ host }: { host: DesktopHost }) {
     }
   };
 
-  const submitInput = async (line: string): Promise<boolean> => {
-    try {
-      const parsed = parseCommand(line);
-      if (parsed === null) {
-        await conversations.send(line);
-        setSelectedId(conversations.selectedId);
-        await refresh();
-        return true;
-      }
-      if (parsed.kind === "unknown") throw new Error(`未知命令 ${parsed.name}；/help 列出可用命令`);
-      if (parsed.kind === "invalid") throw new Error(parsed.message);
-      await conversations.selected?.session.recordInputHistory(line);
-      const { name, args } = parsed;
-      if (parsed.command.status !== "supported") {
-        setCommandOutput(parsed.command.statusText);
-        return true;
-      }
-      if (args !== "" && parsed.command.arguments === undefined)
-        throw new Error(`用法：${parsed.command.usage}`);
-      if (name === "/new" || name === "/clear") {
-        await newSession(
-          conversations.selected?.workspace ?? conversations.draftWorkspace ?? undefined,
-        );
-        return true;
-      }
-      if (name === "/help") {
-        setCommandOutput(
-          COMMANDS.map(
-            (command) => `${command.name}  ${command.summary} · ${command.statusText}`,
-          ).join("\n"),
-        );
-        return true;
-      }
-      if (name === "/resume") {
-        if (args === "") setCommandOutput("从左侧选择要恢复的会话");
-        else {
-          const target = sessions.find((s) => s.id === args);
-          if (target === undefined) throw new Error("找不到该会话");
-          await selectSession(target);
-        }
-        return true;
-      }
-      const active = conversations.selected;
-      if (active === undefined) throw new Error("请先打开会话");
-      const session = active.session;
-      switch (name) {
-        case "/compact":
-          await conversations.compact();
-          break;
-        case "/context":
-          setPanel("context");
-          break;
-        case "/model":
-          if (args === "") setPanel("model");
-          else await session.setModel(args);
-          break;
-        case "/effort":
-          if (args === "") setPanel("effort");
-          else await session.setReasoningEffort(args);
-          break;
-        case "/preset":
-          if (args === "") setPanel("preset");
-          else await session.setPermissionPreset(args);
-          break;
-        case "/shell":
-          if (args === "") setPanel("shell");
-          else await session.setShell(args);
-          break;
-        case "/mcp": {
-          const servers = await session.mcpServers();
-          setCommandOutput(
-            servers.length === 0
-              ? "本会话没有配置 MCP 服务器"
-              : servers
-                  .map(
-                    (server) =>
-                      `${server.name}  ${server.state}${server.error === undefined ? "" : ` · ${server.error}`}`,
-                  )
-                  .join("\n"),
-          );
-          break;
-        }
-        default:
-          setCommandOutput("该命令不属于当前会话的 RPC 操作");
-      }
+  // 发送消息：接受成功后登记附件缩略图源（以 sha256 命中消息流里的图片）
+  const submitInput = async (
+    input: ComposerSubmit,
+    create?: CreateSessionChoice,
+  ): Promise<boolean> => {
+    // 先登记附件字节：发送被拒也只是缓存里多一条，而接受后首帧用户气泡就有缩略图
+    await Promise.all(
+      input.attachments.map((attachment) => images.register(attachment.data, attachment.mimeType)),
+    );
+    await conversations.send(input, create);
+    setSelectedId(conversations.selectedId);
+    await refresh();
+    return true;
+  };
+
+  const runSlash = async (line: string): Promise<boolean> => {
+    const parsed = parseSlash(line);
+    if (parsed?.kind !== "command") return false;
+    await conversations.selected?.session.recordInputHistory(line);
+    if (parsed.name === "/compact") {
+      await conversations.compact();
+      await refresh();
       return true;
-    } catch (error) {
-      setStartupError({ message: errMessage(error) });
-      return false;
     }
+    const active = conversations.selected;
+    if (active === undefined) throw new Error("请先打开会话");
+    const servers = await active.session.mcpServers();
+    setCommandOutput(
+      servers.length === 0
+        ? "本会话没有配置 MCP 服务器"
+        : servers
+            .map(
+              (server) =>
+                `${server.name}  ${server.state}${server.error === undefined ? "" : ` · ${server.error}`}`,
+            )
+            .join("\n"),
+    );
+    return true;
   };
 
   const p = prefs.get();
@@ -381,6 +342,13 @@ export function App({ host }: { host: DesktopHost }) {
       />
     );
   }
+
+  const plainKey = plainWorkspace === null ? null : projectKey(plainWorkspace);
+  const projects = tree.projects.map((project) => ({
+    key: project.key,
+    path: project.path,
+    name: project.name,
+  }));
 
   return (
     <div className="body">
@@ -465,86 +433,53 @@ export function App({ host }: { host: DesktopHost }) {
           </div>
         )}
         {active !== undefined ? (
-          <>
-            <div className="head">
-              <div className="crumb">
-                {projectKey(active.workspace) === projectKey(plainWorkspace ?? "")
-                  ? "对话"
-                  : projectName(active.workspace)}
-                <span>›</span>
-                <em>{active.view.title ?? selected?.firstText ?? "新会话"}</em>
-              </div>
-              <div className="path">{active.workspace}</div>
-            </div>
-            {active.warnings.map((warning) => (
-              <div className="banner" key={warning}>
-                {warning}
-              </div>
-            ))}
-            <Conversation
-              key={`conversation:${active.session.id}`}
-              session={active.session}
+          <PaneErrorBoundary key={active.session.id}>
+            <SessionPane
               view={active.view}
-              openUrl={(url) => void host.openUrl(url)}
-            />
-            <Composer
-              key={`composer:${active.session.id}`}
+              workspace={active.workspace}
+              session={active.session}
+              client={active.client}
+              prefs={prefs}
+              images={images}
+              plainKey={plainKey}
+              home={home}
+              selected={selected}
               running={conversationStatus(active) !== "idle"}
-              onSubmit={submitInput}
+              onSubmit={(input) => submitInput(input)}
               onInterrupt={() => {
                 conversations.interrupt();
               }}
-              historyKey={active.session.id}
-              readInputHistory={() => active.session.readInputHistory()}
-            />
-            <StatusBar
-              session={active.session}
-              runtime={active.client.runtime}
-              view={active.view}
+              onSlash={runSlash}
+              pickImages={() => host.pickImages()}
+              openUrl={(url) => void host.openUrl(url)}
               panel={panel}
               onPanelChange={setPanel}
             />
-          </>
+          </PaneErrorBoundary>
         ) : (
-          <div className="welcome">
-            <div className="welcome-col">
-              <div className="welcome-icon" aria-hidden="true">
-                ☾
-              </div>
-              <h1>开始一段新对话</h1>
-              <div className="workspace-picker">
-                <label htmlFor="draft-project">工作区</label>
-                <select
-                  id="draft-project"
-                  value={conversations.draftWorkspace ?? plainWorkspace ?? ""}
-                  onChange={(event) => {
-                    if (event.target.value === "__open__") {
-                      void openProject().then((dir) => {
-                        if (dir !== undefined) void newSession(dir);
-                      });
-                    } else void newSession(event.target.value);
-                  }}
-                >
-                  <option value={plainWorkspace ?? ""}>普通对话</option>
-                  {tree.projects.map((project) => (
-                    <option value={project.path} key={project.key}>
-                      {project.name}
-                    </option>
-                  ))}
-                  <option value="__open__">打开其他文件夹…</option>
-                </select>
-              </div>
-              <Composer
-                running={false}
-                disabled={plainWorkspace === null || pool.any() === undefined}
-                onSubmit={submitInput}
-                onInterrupt={() => {
-                  conversations.interrupt();
-                }}
-                historyKey={conversations.draftWorkspace ?? plainWorkspace}
-              />
-            </div>
-          </div>
+          <PaneErrorBoundary key="draft">
+            <DraftPane
+              runtime={pool.any()?.runtime}
+              prefs={prefs}
+              workspace={conversations.draftWorkspace ?? plainWorkspace}
+              plainKey={plainKey}
+              projects={projects}
+              disabled={plainWorkspace === null || pool.any() === undefined}
+              historyKey={conversations.draftWorkspace ?? plainWorkspace}
+              onSubmit={submitInput}
+              onSlash={runSlash}
+              pickImages={() => host.pickImages()}
+              onSelectPlain={() => void newSession(plainWorkspace ?? undefined)}
+              onSelectProject={(path) => void newSession(path)}
+              onOpenOther={() =>
+                void openProject().then((dir) => {
+                  if (dir !== undefined) void newSession(dir);
+                })
+              }
+              dirMenuOpen={dirMenuOpen}
+              onDirMenuOpenChange={setDirMenuOpen}
+            />
+          </PaneErrorBoundary>
         )}
         {lockedSession !== null && (
           <div className="dialog-backdrop">
@@ -590,6 +525,204 @@ export function App({ host }: { host: DesktopHost }) {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── 会话界面：消息流 + 输入框 + 状态栏 ──
+
+interface SessionPaneProps {
+  view: SessionView;
+  workspace: string;
+  session: RpcSession;
+  client: RpcClient;
+  prefs: PrefsStore;
+  images: AttachmentImageSource;
+  plainKey: string | null;
+  home: string | null;
+  selected: SessionSummary | undefined;
+  running: boolean;
+  onSubmit: (input: ComposerSubmit) => Promise<boolean>;
+  onInterrupt: () => void;
+  onSlash: (line: string) => Promise<boolean>;
+  pickImages: DesktopHost["pickImages"];
+  openUrl: (url: string) => void;
+  panel: StatusPanel | null;
+  onPanelChange: (panel: StatusPanel | null) => void;
+}
+
+function SessionPane({
+  view,
+  workspace,
+  session,
+  client,
+  prefs,
+  images,
+  plainKey,
+  home,
+  selected,
+  running,
+  onSubmit,
+  onInterrupt,
+  onSlash,
+  pickImages,
+  openUrl,
+  panel,
+  onPanelChange,
+}: SessionPaneProps) {
+  const runtime = client.runtime;
+  const controls = useSessionControls(session, runtime, view, prefs);
+  const subscribeEvents = useCallback(
+    (listener: (event: RuntimeEvent) => void) =>
+      client.onEvent((sessionId, event) => {
+        if (sessionId === session.id) listener(event);
+      }),
+    [client, session.id],
+  );
+  const isPlain = plainKey !== null && projectKey(workspace) === plainKey;
+  const head = abbreviateHome(workspace, home);
+  const shown = middleTruncate(head, 56);
+  return (
+    <>
+      <div className="head">
+        <div className="crumb">
+          {isPlain ? "对话" : projectName(workspace)}
+          <span>›</span>
+          <em>{view.title ?? selected?.firstText ?? "新会话"}</em>
+        </div>
+        <div className="path" title={workspace}>
+          {shown}
+        </div>
+      </div>
+      <Conversation
+        key={`conversation:${session.id}`}
+        session={session}
+        view={view}
+        openUrl={openUrl}
+        cwd={workspace}
+        shellKind={controls.shell?.effective?.kind}
+        subscribeEvents={subscribeEvents}
+        images={images}
+      />
+      <Composer
+        key={`composer:${session.id}`}
+        variant="session"
+        running={running}
+        onSubmit={onSubmit}
+        onInterrupt={onInterrupt}
+        historyKey={session.id}
+        readInputHistory={() => session.readInputHistory()}
+        fileRefs={isPlain ? null : { load: () => session.fileIndex(), key: view.turnCount }}
+        fileRefsUnavailable="普通对话没有项目文件"
+        getVisionHint={controls.visionHint}
+        pickImages={pickImages}
+        onSlash={onSlash}
+      />
+      <StatusBar
+        session={session}
+        view={view}
+        controls={controls}
+        panel={panel}
+        onPanelChange={onPanelChange}
+        home={home}
+      />
+    </>
+  );
+}
+
+// ── 空状态（草稿）：hero + 同一个输入框 ──
+
+interface DraftPaneProps {
+  runtime: RpcRuntime | undefined;
+  prefs: PrefsStore;
+  workspace: string | null;
+  plainKey: string | null;
+  projects: { key: string; path: string; name: string }[];
+  disabled: boolean;
+  historyKey: string | null;
+  onSubmit: (input: ComposerSubmit, create: CreateSessionChoice) => Promise<boolean>;
+  onSlash: (line: string) => Promise<boolean>;
+  pickImages: DesktopHost["pickImages"];
+  onSelectPlain: () => void;
+  onSelectProject: (path: string) => void;
+  onOpenOther: () => void;
+  dirMenuOpen: boolean;
+  onDirMenuOpenChange: (open: boolean) => void;
+}
+
+function DraftPane({
+  runtime,
+  prefs,
+  workspace,
+  plainKey,
+  projects,
+  disabled,
+  historyKey,
+  onSubmit,
+  onSlash,
+  pickImages,
+  onSelectPlain,
+  onSelectProject,
+  onOpenOther,
+  dirMenuOpen,
+  onDirMenuOpenChange,
+}: DraftPaneProps) {
+  const draft = useDraftControls(runtime, prefs);
+  const isPlain = workspace === null || (plainKey !== null && projectKey(workspace) === plainKey);
+  const workspaceChoice: WorkspaceChoice = {
+    label: isPlain ? "普通对话" : projectName(workspace),
+    kind: isPlain ? "plain" : "project",
+    ...(workspace === null ? {} : { title: workspace }),
+    readOnly: false,
+    currentKey: isPlain ? null : projectKey(workspace),
+    projects,
+    onSelectPlain,
+    onSelectProject,
+    onOpenOther,
+  };
+  return (
+    <div className="hero">
+      <div className="hero-mark" aria-hidden="true">
+        <svg viewBox="0 0 16 16" width={40} height={40}>
+          <path d="M10.5 1.5a6.5 6.5 0 1 0 4 11.6A7 7 0 0 1 10.5 1.5z" fill="var(--a-accent)" />
+        </svg>
+      </div>
+      <h3>
+        {isPlain ? (
+          "有什么可以帮你？"
+        ) : (
+          <>
+            要在{" "}
+            <button
+              type="button"
+              className="hero-project"
+              onClick={() => {
+                onDirMenuOpenChange(true);
+              }}
+            >
+              {projectName(workspace)}
+            </button>{" "}
+            里做什么？
+          </>
+        )}
+      </h3>
+      <div className="hero-composer">
+        <Composer
+          running={false}
+          disabled={disabled}
+          onSubmit={(input) => onSubmit(input, draft.createOptions())}
+          onInterrupt={() => undefined}
+          historyKey={historyKey}
+          controls={draft.controls}
+          workspace={workspaceChoice}
+          fileRefs={null}
+          fileRefsUnavailable={isPlain ? "普通对话没有项目文件" : "发送第一条消息后可搜索项目文件"}
+          pickImages={pickImages}
+          dirMenuOpen={dirMenuOpen}
+          onDirMenuOpenChange={onDirMenuOpenChange}
+          onSlash={onSlash}
+        />
       </div>
     </div>
   );

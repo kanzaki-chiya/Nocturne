@@ -1,156 +1,513 @@
 .composer {
-  position: relative;
-  flex: 0 0 auto;
-  padding: 12px 20px 14px;
-  border-top: 1px solid var(--a-border);
+  display: grid;
+  gap: 8px;
+  padding: 10px 16px 14px;
   background: var(--a-bg);
 }
-.composer-label {
+
+.composer .cw {
+  position: relative;
+}
+
+/* 会话内输入框与消息列同宽居中（mockup C：.composer.v2 .cw） */
+.composer.session {
+  padding: 6px 24px 12px;
+}
+
+.composer.session .cw {
+  max-width: 820px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ── 输入卡片 ── */
+.composer .cbox {
+  position: relative;
+  z-index: 2;
+  border: 1px solid var(--a-border);
+  border-radius: 14px;
+  background: var(--a-panel);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.composer .cbox:focus-within {
+  border-color: var(--a-accent);
+  box-shadow: 0 0 0 3px var(--a-sel);
+}
+
+.composer .cbox.drop {
+  border-color: var(--a-accent);
+  box-shadow: 0 0 0 3px var(--a-sel);
+  background: var(--a-sel);
+}
+
+/* ── 附件缩略图 ── */
+.composer .atts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 16px 0;
+}
+
+.composer .thumb2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--a-secondary);
+  background: var(--a-side);
+  border: 1px solid var(--a-border);
+  border-radius: 8px;
+  padding: 3px 6px 3px 3px;
+  max-width: 220px;
+  min-width: 0;
+}
+
+.composer .thumb2 img {
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+  object-fit: cover;
+  display: block;
+}
+
+.composer .thumb2 .x {
+  margin-left: 2px;
+  background: none;
+  border: none;
+  color: var(--a-muted);
+  font-size: 9px;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.composer .thumb2 .x:hover {
+  color: var(--a-error);
+}
+
+/* ── 文本区（镜像高亮 @ 引用） ── */
+.composer .txt {
+  position: relative;
+  min-height: 52px;
+}
+
+.composer .composer-label {
   position: absolute;
   width: 1px;
   height: 1px;
   overflow: hidden;
   clip-path: inset(50%);
-  white-space: nowrap;
 }
-.composer-field {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--a-borderStrong);
-  border-radius: 9px;
-  background: var(--a-input);
-}
-.composer-field:focus-within {
-  border-color: var(--a-accent);
-}
+
+.composer .composer-mirror,
 .composer textarea {
-  display: block;
-  flex: 1;
-  min-width: 0;
-  min-height: 62px;
-  max-height: 220px;
-  resize: vertical;
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: var(--a-text);
   font: inherit;
+  font-size: 13.5px;
   line-height: 1.6;
+  padding: 12px 16px 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
+
+.composer .composer-mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: var(--a-text);
+  pointer-events: none;
+}
+
+.composer .composer-ref {
+  color: var(--a-accent);
+  background: var(--a-sel);
+  border-radius: 3px;
+}
+
+.composer textarea {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  max-height: 280px;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--a-text);
+}
+
 .composer textarea::placeholder {
   color: var(--a-faint);
 }
-.composer-action {
-  flex: 0 0 auto;
-  min-height: 32px;
-  padding: 5px 12px;
-  border: 1px solid var(--a-borderStrong);
-  border-radius: 6px;
-  font-size: 12px;
+
+.composer textarea::selection {
+  background: color-mix(in srgb, var(--a-selStrong) 55%, transparent);
 }
-.composer-action.send {
-  background: var(--a-accent);
-  border-color: var(--a-accent);
-  color: var(--a-onAccent);
-}
-.composer-action.interrupt {
-  color: var(--a-warning);
-}
-.composer-action:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-.composer-action:focus-visible {
-  outline: 2px solid var(--a-accentAlt);
-  outline-offset: 3px;
-}
-.composer-action:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.composer-hint {
+
+/* ── 工具行 ── */
+.composer .tb {
   display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  margin-top: 6px;
-  color: var(--a-muted);
-  font-size: 11px;
-}
-.composer-error {
-  margin-top: 6px;
-  color: var(--a-error);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.composer-commands {
-  position: absolute;
-  z-index: 10;
-  bottom: calc(100% - 5px);
-  left: 20px;
-  right: 20px;
-  max-height: min(320px, 45vh);
-  overflow-y: auto;
-  list-style: none;
-  margin: 0;
-  padding: 5px;
-  border: 1px solid var(--a-borderStrong);
-  border-left: 2px solid var(--a-accent);
-  border-radius: 8px;
-  background: var(--a-panel);
-  box-shadow: 0 8px 24px #0003;
-}
-.composer-command {
-  display: grid;
-  grid-template-columns: minmax(90px, auto) 1fr auto;
   align-items: center;
-  gap: 12px;
-  padding: 7px 10px;
-  border-radius: 4px;
+  gap: 8px;
+  padding: 4px 10px 10px;
+}
+
+/* ── 会话内单行输入：＋ | 输入区 | 发送，多行时按钮钉底 ── */
+.composer .session-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 10px;
+}
+
+.composer .session-row .txt {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 单行时与按钮（26px）等高 → 视觉上三者居中 */
+.composer .session-row .composer-mirror,
+.composer .session-row textarea {
+  padding: 2px 4px;
+}
+
+.composer .session-row textarea {
+  min-height: 26px;
+}
+
+.composer .ib {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--a-border);
+  background: transparent;
+  color: var(--a-secondary);
+  font-size: 14px;
   cursor: pointer;
-  font-size: 12px;
+  flex: none;
 }
-.composer-command:hover,
-.composer-command.is-active {
-  background: var(--a-sel);
+
+.composer .ib:hover,
+.composer .ib.on {
+  color: var(--a-accent);
+  border-color: var(--a-accent);
 }
-.composer-command-name {
-  font-family: var(--mono);
-  overflow-wrap: anywhere;
+
+.composer .sp {
+  flex: 1;
 }
-.composer-command-summary {
+
+.composer .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--a-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 3px 8px;
+  cursor: pointer;
+  max-width: 320px;
+  min-width: 0;
+}
+
+.composer .chip:hover,
+.composer .chip.on {
+  background: var(--a-side);
+  border-color: var(--a-border);
+}
+
+.composer .chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.composer .chip svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+.composer .chip .pd {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--a-success);
+  flex: none;
+}
+
+.composer .chip .caret {
+  color: var(--a-muted);
+  font-size: 10px;
+}
+
+.composer .chip b {
+  font-weight: 600;
+  color: var(--a-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer .send {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: var(--a-accent);
+  color: var(--a-onAccent);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  flex: none;
+}
+
+.composer .send.off {
+  background: var(--a-side);
   color: var(--a-muted);
 }
-.composer-command-status {
+
+.composer .send.stop {
+  background: var(--a-error);
+}
+
+.composer .send:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ── 托盘（卡片下沿的目录与预设） ── */
+.composer .tray {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: -10px 10px 0;
+  padding: 14px 6px 4px;
+  border: 1px solid var(--a-border);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  background: var(--a-side);
+}
+
+.composer .tray .hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--a-faint);
+  white-space: nowrap;
+}
+
+/* ── 弹出菜单 ── */
+.menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 250px;
+  max-width: 420px;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--a-panel);
+  border: 1px solid var(--a-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* 与侧栏/消息流一致的无按钮细滚动条 */
+.menu::-webkit-scrollbar {
+  width: 6px;
+}
+.menu::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+.menu::-webkit-scrollbar-thumb {
+  background: var(--a-borderStrong);
+  border-radius: 4px;
+}
+
+.menu .menu-h,
+.menu h6 {
+  margin: 6px 8px 4px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--a-muted);
+}
+
+.menu .menu-sep,
+.menu hr {
+  border: none;
+  border-top: 1px solid var(--a-border);
+  margin: 5px 0;
+}
+
+.menu .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  color: var(--a-secondary);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.menu .menu-item:hover,
+.menu .menu-item:focus-visible {
+  background: var(--a-sel);
+  color: var(--a-text);
+  outline: none;
+}
+
+.menu .menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.menu .menu-ck {
+  width: 12px;
+  color: var(--a-accent);
+  font-size: 10px;
+  flex: none;
+  text-align: center;
+}
+
+.menu .menu-item svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: var(--a-muted);
+}
+
+.menu .menu-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.menu .menu-label small {
+  color: var(--a-muted);
+  font-size: 10px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu .menu-r {
+  margin-left: auto;
   color: var(--a-faint);
   font-size: 10px;
   white-space: nowrap;
 }
-.composer-command-status.planned {
-  color: var(--a-warning);
+
+.menu .menu-r.mono {
+  font-family: var(--a-mono, ui-monospace, monospace);
 }
-.composer-command-status.supported {
-  color: var(--a-success);
+
+.menu .menu-note {
+  margin: 6px 8px 4px;
+  font-size: 10px;
+  color: var(--a-muted);
+  white-space: normal;
 }
-@media (max-width: 600px) {
-  .composer {
-    padding: 10px;
-  }
-  .composer-commands {
-    left: 10px;
-    right: 10px;
-  }
-  .composer-command {
-    grid-template-columns: 1fr auto;
-    gap: 2px 8px;
-  }
-  .composer-command-summary {
-    grid-column: 1;
-    grid-row: 2;
-  }
-  .composer-command-status {
-    grid-column: 2;
-    grid-row: 1 / 3;
-  }
+
+/* ── 补全弹出（/ 命令与 @ 引用） ── */
+.composer-popup {
+  position: absolute;
+  z-index: 40;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 224px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--a-panel);
+  border: 1px solid var(--a-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.composer-popup-h {
+  margin: 4px 8px 2px;
+  font-size: 10px;
+  color: var(--a-muted);
+}
+
+.composer-popup-note {
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--a-muted);
+}
+
+.composer-popup-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--a-secondary);
+}
+
+.composer-popup-row.is-active {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+
+.composer-popup-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-popup-summary {
+  margin-left: auto;
+  color: var(--a-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* ── 提示与错误 ── */
+.composer-redirect {
+  position: absolute;
+  z-index: 40;
+  bottom: calc(100% + 6px);
+  left: 0;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--a-secondary);
+  background: var(--a-panel);
+  border: 1px solid var(--a-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.composer-error {
+  color: var(--a-error);
+  font-size: 12px;
+  padding: 0 4px;
 }

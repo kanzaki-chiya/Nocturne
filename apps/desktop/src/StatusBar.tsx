@@ -7,38 +7,28 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { PERMISSION_PRESET_NAMES, type SessionView } from "@nocturne/core/protocol";
-import type {
-  ContextSummary,
-  RpcResult,
-  RpcRuntime,
-  RpcSession,
-  SessionStateSummary,
-} from "@nocturne/rpc/client";
+import { type SessionView } from "@nocturne/core/protocol";
+import type { ContextSummary, RpcSession } from "@nocturne/rpc/client";
 
+import { abbreviateHome } from "./paths";
+import { ChoiceMenu } from "./Menu";
+import type { SessionControls } from "./session-controls";
 import "./status-bar.css";
 
-export type StatusPanel = "context" | "model" | "effort" | "preset" | "shell";
+export type StatusPanel = "context";
 
 export interface StatusBarProps {
   session: RpcSession;
-  runtime: RpcRuntime;
   view: SessionView;
+  controls: SessionControls;
   panel?: StatusPanel | null;
   onPanelChange?: (panel: StatusPanel | null) => void;
-  onChanged?: () => void | Promise<void>;
+  /** 主目录（上下文来源路径的 ~ 缩写） */
+  home?: string | null;
 }
 
 type Report = ContextSummary["report"];
 type Section = Report["sections"][number];
-interface Snapshot {
-  session: RpcSession;
-  state: SessionStateSummary;
-  context: ContextSummary;
-  effort: RpcResult<"session.reasoningEffortInfo">;
-  shell: RpcResult<"session.shellInfo">;
-  models: RpcResult<"runtime.listModels">;
-}
 
 export interface ContextRow {
   key: string;
@@ -68,10 +58,6 @@ const HISTORY = [
 ] as const;
 const PANEL_TITLES: Record<StatusPanel, string> = {
   context: "上下文用量",
-  model: "选择模型",
-  effort: "选择思考档位",
-  preset: "选择权限预设",
-  shell: "选择 Shell",
 };
 const STATUS_TEXT: Record<SessionView["status"], string> = {
   idle: "空闲",
@@ -126,11 +112,30 @@ export function contextRows(report: Report): ContextRow[] {
   return rows;
 }
 
+/** 上下文报告里的英文来源文本 → 中文；路径按主目录缩写。 */
+export function contextSourceLabel(source: string, home?: string | null): string {
+  if (source === "nocturne base prompt") return "内置提示词";
+  if (source === "custom base prompt") return "自定义提示词";
+  const tools = /^(\d+) tools$/.exec(source);
+  if (tools !== null) return `${tools[1]} 个工具`;
+  const items = /^(\d+) items$/.exec(source);
+  if (items !== null) return `${items[1]} 项`;
+  const entries = /^(\d+) entries$/.exec(source);
+  if (entries !== null) return `${entries[1]} 条`;
+  return abbreviateHome(source, home);
+}
+
 function percent(used: number, budget: number): number | null {
   return budget > 0 ? Math.round((used / budget) * 100) : null;
 }
 
-export function ContextPanel({ context }: { context: ContextSummary }) {
+export function ContextPanel({
+  context,
+  home,
+}: {
+  context: ContextSummary;
+  home?: string | null | undefined;
+}) {
   const { report } = context;
   const rows = contextRows(report);
   const used = percent(report.estimatedTokens, report.budgetTokens);
@@ -159,22 +164,26 @@ export function ContextPanel({ context }: { context: ContextSummary }) {
           ))}
       </div>
       <dl className="context-details">
-        {rows.map((row) => (
-          <div
-            key={row.key}
-            className={row.nested ? "context-nested" : row.group ? "context-group" : undefined}
-          >
-            <dt>
-              {!row.group && <i style={{ background: row.color }} aria-hidden="true" />}
-              {row.label}
-              {row.source && <small title={row.source}>{row.source}</small>}
-              {row.truncated && <small>已截断</small>}
-            </dt>
-            <dd title={row.chars === undefined ? undefined : `${number.format(row.chars)} chars`}>
-              {number.format(row.tokens)}
-            </dd>
-          </div>
-        ))}
+        {rows.map((row) => {
+          const source =
+            row.source === undefined ? undefined : contextSourceLabel(row.source, home);
+          return (
+            <div
+              key={row.key}
+              className={row.nested ? "context-nested" : row.group ? "context-group" : undefined}
+            >
+              <dt>
+                {!row.group && <i style={{ background: row.color }} aria-hidden="true" />}
+                {row.label}
+                {source !== undefined && source !== "" && <small title={source}>{source}</small>}
+                {row.truncated && <small>已截断</small>}
+              </dt>
+              <dd title={row.chars === undefined ? undefined : `${number.format(row.chars)} chars`}>
+                {number.format(row.tokens)}
+              </dd>
+            </div>
+          );
+        })}
       </dl>
       {context.overBudget && <p className="status-warning">已超出输入预算</p>}
       {report.modelDefaults?.contextWindow && (
@@ -190,30 +199,20 @@ export function ContextPanel({ context }: { context: ContextSummary }) {
   );
 }
 
-export function StatusBar({
-  session,
-  runtime,
-  view,
-  panel,
-  onPanelChange,
-  onChanged,
-}: StatusBarProps) {
+type StatusMenu = "model" | "effort" | "preset" | "shell";
+
+export function StatusBar({ session, view, controls, panel, onPanelChange, home }: StatusBarProps) {
   const [localPanel, setLocalPanel] = useState<StatusPanel | null>(null);
   const activePanel = panel === undefined ? localPanel : panel;
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [shells, setShells] = useState<RpcResult<"session.listShells"> | null>(null);
+  const [openMenu, setOpenMenu] = useState<StatusMenu | null>(null);
+  const [context, setContext] = useState<ContextSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [changing, setChanging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const request = useRef(0);
-  const mutation = useRef(false);
-  const currentSession = useRef(session);
-  currentSession.current = session;
   const root = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
-  const triggers = useRef<Partial<Record<StatusPanel, HTMLButtonElement | null>>>({});
+  const triggers = useRef<Partial<Record<StatusPanel | StatusMenu, HTMLButtonElement | null>>>({});
   const dialogId = useId();
-  const data = snapshot?.session === session ? snapshot : null;
 
   const changePanel = useCallback(
     (next: StatusPanel | null) => {
@@ -233,44 +232,26 @@ export function StatusBar({
     setLoading(true);
     setError(null);
     try {
-      const [state, context, effort, shell, models] = await Promise.all([
-        session.state(),
-        session.describeContext(),
-        session.reasoningEffortInfo(),
-        session.shellInfo(),
-        runtime.listModels(),
-      ]);
-      if (id !== request.current) return false;
-      setSnapshot({ session, state, context, effort, shell, models });
-      return true;
+      const summary = await session.describeContext();
+      if (id !== request.current) return;
+      setContext(summary);
     } catch (failure) {
       if (id === request.current) setError(message(failure));
-      return false;
     } finally {
       if (id === request.current) setLoading(false);
     }
-  }, [session, runtime]);
+  }, [session]);
 
-  // 持久条目、状态与配置变化时刷新；流式 delta 不重复构建上下文。
+  // 持久条目与状态变化时刷新；流式 delta 不重复构建上下文。
   useEffect(() => {
     void refresh();
     return () => {
       request.current += 1;
     };
-  }, [
-    refresh,
-    view.entries.length,
-    view.status,
-    view.config.model?.provider,
-    view.config.model?.model,
-    view.config.reasoningEffort,
-    view.config.permissionPreset,
-  ]);
+  }, [refresh, view.entries.length, view.status]);
   useEffect(() => {
     setLocalPanel(null);
-    setShells(null);
-    setChanging(false);
-    mutation.current = false;
+    setOpenMenu(null);
   }, [session]);
   useEffect(() => {
     if (activePanel === null) return;
@@ -278,22 +259,8 @@ export function StatusBar({
       'button[aria-pressed="true"]:not(:disabled), button:not(:disabled)',
     );
     (focused ?? dialog.current)?.focus();
-    if (activePanel === "context" || activePanel === "model") void refresh();
-    if (activePanel !== "shell") return;
-    let cancelled = false;
-    setShells(null);
-    void session.listShells().then(
-      (detected) => {
-        if (!cancelled) setShells(detected);
-      },
-      (failure: unknown) => {
-        if (!cancelled) setError(message(failure));
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [activePanel, session, refresh]);
+    void refresh();
+  }, [activePanel, refresh]);
   useEffect(() => {
     if (activePanel === null) return;
     const outside = (event: PointerEvent) => {
@@ -305,26 +272,20 @@ export function StatusBar({
     };
   }, [activePanel, changePanel]);
 
-  const choose = async (action: () => Promise<void>) => {
-    if (mutation.current) return;
-    mutation.current = true;
-    setChanging(true);
-    setError(null);
-    try {
-      await action();
-      if (currentSession.current !== session) return;
-      if (!(await refresh())) return;
-      await onChanged?.();
-      if (currentSession.current === session) closePanel();
-    } catch (failure) {
-      if (currentSession.current === session) setError(message(failure));
-    } finally {
-      if (currentSession.current === session) {
-        mutation.current = false;
-        setChanging(false);
-      }
+  const toggleMenu = (kind: StatusMenu) => {
+    if (openMenu === kind) {
+      setOpenMenu(null);
+      return;
     }
+    setError(null);
+    if (kind === "shell") controls.loadShells();
+    setOpenMenu(kind);
   };
+  const closeMenu = (kind: StatusMenu) => {
+    setOpenMenu(null);
+    triggers.current[kind]?.focus();
+  };
+
   const keyboard = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -347,9 +308,8 @@ export function StatusBar({
     event.preventDefault();
     buttons[next]?.focus();
   };
-  const model = data?.state.config.model ?? view.config.model;
-  const preset = data?.state.config.permissionPreset ?? view.config.permissionPreset;
-  const usage = data?.context.report;
+
+  const usage = context?.report;
   const used = usage === undefined ? null : percent(usage.estimatedTokens, usage.budgetTokens);
   const cacheUsage = view.usage;
   const cache =
@@ -363,12 +323,13 @@ export function StatusBar({
       ref={(node) => {
         triggers.current[name] = node;
       }}
-      className={`status-pill${activePanel === name ? " status-pill-active" : ""}${name === "preset" ? " status-preset" : ""}`}
+      className={`status-pill${activePanel === name ? " status-pill-active" : ""}`}
       aria-label={label}
       aria-expanded={activePanel === name}
       aria-controls={activePanel === name ? dialogId : undefined}
       aria-haspopup="dialog"
       onClick={() => {
+        setOpenMenu(null);
         if (activePanel === name) closePanel();
         else changePanel(name);
       }}
@@ -379,62 +340,97 @@ export function StatusBar({
       </span>
     </button>
   );
-  const option = (
-    key: string,
+
+  const pill = (
+    kind: StatusMenu,
     label: string,
-    selected: boolean,
-    action: () => Promise<void>,
-    disabled = false,
-    detail?: string,
+    control: { disabled?: string },
+    content: ReactNode,
+    preset = false,
   ) => (
     <button
       type="button"
-      className="status-option"
-      key={key}
-      aria-pressed={selected}
-      disabled={disabled || changing || data === null}
+      ref={(node) => {
+        triggers.current[kind] = node;
+      }}
+      className={`status-pill${openMenu === kind ? " status-pill-active" : ""}${preset ? " status-preset" : ""}`}
+      aria-label={label}
+      aria-haspopup="menu"
+      aria-expanded={openMenu === kind}
+      disabled={control.disabled !== undefined}
+      title={control.disabled}
       onClick={() => {
-        void choose(action);
+        toggleMenu(kind);
       }}
     >
-      <span>
-        {label}
-        {detail && <small>{detail}</small>}
+      {content}
+      <span className="status-caret" aria-hidden="true">
+        ▾
       </span>
-      <span aria-hidden="true">{selected ? "✓" : ""}</span>
     </button>
   );
+
+  const shell = controls.shell;
+  const model = view.config.model;
+  const menuControl = (kind: StatusMenu) => {
+    const control =
+      kind === "model"
+        ? controls.controls.model
+        : kind === "effort"
+          ? controls.controls.effort
+          : kind === "preset"
+            ? controls.controls.preset
+            : controls.shellControl;
+    return (
+      <ChoiceMenu
+        anchor={triggers.current[kind] ?? null}
+        label={control.heading ?? control.label}
+        control={control}
+        onClose={() => {
+          closeMenu(kind);
+        }}
+        onError={(reason: unknown) => {
+          setError(message(reason));
+        }}
+      />
+    );
+  };
 
   return (
     <div className="desktop-status" ref={root}>
       <div className="status-controls">
-        {trigger(
+        {pill(
           "model",
           "切换模型",
+          controls.controls.model,
           <>
             <span className="status-dot" aria-hidden="true" />
-            <b>{model ? `${model.provider} · ${model.model}` : "模型 —"}</b>
+            <b>{model === undefined ? "模型 —" : `${model.provider} · ${model.model}`}</b>
           </>,
         )}
-        {trigger(
+        {pill(
           "effort",
           "切换思考档位",
+          controls.controls.effort,
           <>
-            思考 <b>{data?.effort.current ?? view.config.reasoningEffort ?? "—"}</b>
+            思考 <b>{controls.controls.effort.label}</b>
           </>,
         )}
-        {trigger(
+        {pill(
           "preset",
           "切换权限预设",
+          controls.controls.preset,
           <>
-            权限 <b>{preset ?? "—"}</b>
+            权限 <b>{controls.controls.preset.label}</b>
           </>,
+          true,
         )}
-        {trigger(
+        {pill(
           "shell",
           "切换 Shell",
+          controls.shellControl,
           <>
-            Shell <b>{data?.shell.effective?.kind ?? data?.shell.selected ?? "—"}</b>
+            Shell <b>{shell?.effective?.kind ?? shell?.selected ?? "—"}</b>
           </>,
         )}
       </div>
@@ -462,6 +458,7 @@ export function StatusBar({
           {view.currentTurn ? ` · Turn ${view.currentTurn.turnIndex}` : ""}
         </span>
       </div>
+      {openMenu !== null && menuControl(openMenu)}
       {activePanel !== null && (
         <div
           id={dialogId}
@@ -470,8 +467,8 @@ export function StatusBar({
           tabIndex={-1}
           ref={dialog}
           onKeyDown={keyboard}
-          className={`status-popover${activePanel === "context" ? " status-context-popover" : ""}`}
-          aria-busy={loading || changing}
+          className="status-popover status-context-popover"
+          aria-busy={loading}
         >
           <div className="status-popover-heading">
             <b>{PANEL_TITLES[activePanel]}</b>
@@ -489,78 +486,7 @@ export function StatusBar({
               {error}
             </p>
           )}
-          {activePanel === "context" && data && <ContextPanel context={data.context} />}
-          <div className="status-options">
-            {activePanel === "model" &&
-              data?.models.map((item) =>
-                option(
-                  `${item.ref.provider}/${item.ref.model}`,
-                  `${item.ref.provider} · ${item.ref.model}`,
-                  model?.provider === item.ref.provider && model.model === item.ref.model,
-                  () => session.setModel(item.ref),
-                  busy || item.unavailable !== undefined,
-                  item.unavailable?.reason ?? item.displayName,
-                ),
-              )}
-            {activePanel === "model" && data?.models.length === 0 && (
-              <p className="status-note">没有已配置的模型</p>
-            )}
-            {activePanel === "effort" && data && (
-              <>
-                {data.effort.available.length === 0 ? (
-                  <p className="status-note">该模型未声明可用思考档位</p>
-                ) : (
-                  ["off", ...data.effort.available].map((level) =>
-                    option(level, level, data.effort.current === level, () =>
-                      session.setReasoningEffort(level),
-                    ),
-                  )
-                )}
-                {data.effort.current !== data.effort.effective && (
-                  <p className="status-note">
-                    本 Turn 使用 {data.effort.effective}；{data.effort.current} 将在下一 Turn 生效。
-                  </p>
-                )}
-              </>
-            )}
-            {activePanel === "preset" &&
-              PERMISSION_PRESET_NAMES.map((name) =>
-                option(name, name, preset === name, () => session.setPermissionPreset(name), busy),
-              )}
-            {activePanel === "shell" && (
-              <>
-                {option(
-                  "auto",
-                  "auto",
-                  data?.shell.selected === "auto",
-                  () => session.setShell("auto"),
-                  busy,
-                  "自动选择",
-                )}
-                {shells?.map((item) =>
-                  option(
-                    item.kind,
-                    `${item.kind} · ${item.name}`,
-                    data?.shell.selected === item.kind,
-                    () => session.setShell(item.kind),
-                    busy || !item.available,
-                    item.available ? item.executable : "未安装",
-                  ),
-                )}
-                {shells === null && <p className="status-note">正在探测 Shell…</p>}
-                {data?.shell.overriddenBy && (
-                  <p className="status-note">
-                    选择被 {data.shell.overriddenBy} 覆盖，当前实际使用{" "}
-                    {data.shell.effective?.kind ?? "—"}。
-                  </p>
-                )}
-                {data?.shell.error && <p className="status-error">{data.shell.error}</p>}
-              </>
-            )}
-          </div>
-          {busy && activePanel !== "context" && activePanel !== "effort" && (
-            <p className="status-note">当前 Turn 结束后可切换</p>
-          )}
+          {context !== null && <ContextPanel context={context} home={home} />}
         </div>
       )}
       {error !== null && activePanel === null && (

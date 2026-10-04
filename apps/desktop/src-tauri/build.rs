@@ -7,6 +7,7 @@ fn main() {
                 "backend_close",
                 "node_probe",
                 "plain_workspace",
+                "pick_images",
             ]),
         ),
     )

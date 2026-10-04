@@ -1,15 +1,16 @@
 import { createSessionView } from "@nocturne/core/protocol";
-import type {
-  ContextSummary,
-  RpcResult,
-  RpcRuntime,
-  RpcSession,
-  SessionStateSummary,
-} from "@nocturne/rpc/client";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ContextSummary, RpcSession } from "@nocturne/rpc/client";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ContextPanel, StatusBar, contextRows, type StatusPanel } from "../src/StatusBar";
+import {
+  ContextPanel,
+  StatusBar,
+  contextRows,
+  contextSourceLabel,
+  type StatusPanel,
+} from "../src/StatusBar";
+import type { SessionControls } from "../src/session-controls";
 
 afterEach(cleanup);
 
@@ -38,65 +39,71 @@ const context: ContextSummary = {
   mustCompact: false,
 };
 
-function fixture() {
-  let model = { provider: "fixture", model: "one" };
-  let effort: RpcResult<"session.reasoningEffortInfo">["current"] = "off";
-  let preset = "default";
-  let shell = "auto";
-  const api = {
-    id: "session-one",
-    state: vi.fn(
-      async () =>
-        ({
-          config: { model, permissionPreset: preset, reasoningEffort: effort },
-        }) as SessionStateSummary,
-    ),
-    describeContext: vi.fn(async () => context),
-    reasoningEffortInfo: vi.fn(async (): Promise<RpcResult<"session.reasoningEffortInfo">> => ({
-      current: effort,
-      effective: effort,
-      available: ["low", "high"],
-    })),
-    shellInfo: vi.fn(async () => ({
-      selected: shell,
+function controlsFixture() {
+  const setShell = vi.fn(async (_kind: string) => undefined);
+  const shellControl = {
+    value: "auto" as string | undefined,
+    label: "pwsh",
+    groups: [
+      {
+        options: [
+          { value: "auto", label: "auto", detail: "自动选择" },
+          { value: "bash", label: "bash · Bash", detail: "/bin/bash" },
+          { value: "cmd", label: "cmd · cmd.exe", disabled: "未安装" },
+        ],
+      },
+    ],
+    onSelect: setShell,
+  };
+  const controls: SessionControls = {
+    controls: {
+      model: {
+        value: "fixture/one",
+        label: "one",
+        groups: [{ options: [{ value: "fixture/one", label: "one" }] }],
+        onSelect: vi.fn(),
+      },
+      effort: {
+        value: "off",
+        label: "off",
+        groups: [{ options: [{ value: "off", label: "off" }] }],
+        onSelect: vi.fn(),
+      },
+      preset: {
+        value: "default",
+        label: "default",
+        groups: [{ options: [{ value: "default", label: "default" }] }],
+        onSelect: vi.fn(),
+      },
+    },
+    shellControl,
+    shell: {
+      selected: "auto",
       source: "settings",
-      effective: { kind: shell === "auto" ? "pwsh" : shell, name: shell, path: "/bin/shell" },
-    })),
-    listShells: vi.fn(async () => [
+      effective: { kind: "pwsh", name: "pwsh", path: "/bin/pwsh" },
+    },
+    shells: [
       { kind: "bash", name: "Bash", available: true, executable: "/bin/bash" },
       { kind: "cmd", name: "cmd.exe", available: false },
-    ]),
-    setModel: vi.fn(async (next: { provider: string; model: string }) => {
-      model = next;
-    }),
-    setReasoningEffort: vi.fn(async (next: string) => {
-      effort = next as typeof effort;
-    }),
-    setPermissionPreset: vi.fn(async (next: string) => {
-      preset = next;
-    }),
-    setShell: vi.fn(async (next: string) => {
-      shell = next;
-    }),
+    ],
+    loadShells: vi.fn(),
+    setShell,
+    visionHint: async () => undefined,
   };
-  const models: RpcResult<"runtime.listModels"> = ["one", "two"].map((name) => ({
-    ref: { provider: "fixture", model: name },
-    capabilities: {
-      toolCalls: true,
-      parallelToolCalls: true,
-      reasoning: "hidden",
-      imageInput: false,
-      promptCache: true,
-      editTool: "edit",
-    },
-  }));
-  const runtimeApi = { listModels: vi.fn(async () => models) };
+  return controls;
+}
+
+function fixture() {
+  const api = {
+    id: "session-one",
+    describeContext: vi.fn(async () => context),
+  };
+  const controls = controlsFixture();
   return {
     api,
-    runtimeApi,
     session: api as unknown as RpcSession,
-    runtime: runtimeApi as unknown as RpcRuntime,
     view: createSessionView(),
+    controls,
   };
 }
 
@@ -111,7 +118,7 @@ describe("上下文 breakdown", () => {
     ] as const) {
       const row = screen.getByText(label).closest("div");
       if (row === null) throw new Error("缺少历史明细行");
-      expect(within(row).getByText(tokens)).toBeTruthy();
+      expect(row.textContent).toContain(tokens);
     }
     expect(screen.getByText("1,400 / 10,000 tokens · 14%")).toBeTruthy();
     expect(screen.getByText("8 条消息")).toBeTruthy();
@@ -203,6 +210,20 @@ describe("上下文 breakdown", () => {
   });
 });
 
+describe("contextSourceLabel", () => {
+  it("已知来源翻译成中文，其余原样返回（路径按主目录缩写）", () => {
+    expect(contextSourceLabel("nocturne base prompt")).toBe("内置提示词");
+    expect(contextSourceLabel("custom base prompt")).toBe("自定义提示词");
+    expect(contextSourceLabel("3 tools")).toBe("3 个工具");
+    expect(contextSourceLabel("8 items")).toBe("8 项");
+    expect(contextSourceLabel("2 entries")).toBe("2 条");
+    expect(contextSourceLabel("C:\\Users\\me\\proj\\file.ts", "C:/Users/me")).toBe(
+      "~\\proj\\file.ts",
+    );
+    expect(contextSourceLabel("任意其他来源")).toBe("任意其他来源");
+  });
+});
+
 describe("StatusBar", () => {
   it("受控 /context 面板读取 RPC 报告，Escape 通知关闭", async () => {
     const state = fixture();
@@ -214,88 +235,49 @@ describe("StatusBar", () => {
     expect(onPanelChange).toHaveBeenCalledWith(null);
   });
 
-  it.each([
-    {
-      panel: "model",
-      trigger: "切换模型",
-      option: /fixture · two/,
-      method: "setModel",
-      argument: { provider: "fixture", model: "two" },
-      updated: "fixture · two",
-    },
-    {
-      panel: "effort",
-      trigger: "切换思考档位",
-      option: /^high$/,
-      method: "setReasoningEffort",
-      argument: "high",
-      updated: "high",
-    },
-    {
-      panel: "preset",
-      trigger: "切换权限预设",
-      option: /^auto-edit$/,
-      method: "setPermissionPreset",
-      argument: "auto-edit",
-      updated: "auto-edit",
-    },
-    {
-      panel: "shell",
-      trigger: "切换 Shell",
-      option: /bash · Bash/,
-      method: "setShell",
-      argument: "bash",
-      updated: "bash",
-    },
-  ] as const)(
-    "$panel 选择调用真实 RPC 路径并刷新状态",
-    async ({ trigger, option, method, argument, updated }) => {
-      const state = fixture();
-      const onChanged = vi.fn();
-      render(<StatusBar {...state} onChanged={onChanged} />);
-      await screen.findByText("fixture · one");
-      fireEvent.click(screen.getByRole("button", { name: trigger }));
-      const item = await screen.findByRole("button", { name: option });
-      await waitFor(() => expect((item as HTMLButtonElement).disabled).toBe(false));
-      fireEvent.click(item);
-      await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
-      expect(state.api[method]).toHaveBeenCalledWith(argument);
-      expect(state.api.state.mock.calls.length).toBeGreaterThan(1);
-      expect(screen.queryByRole("dialog")).toBeNull();
-      expect(screen.getByText(updated)).toBeTruthy();
-    },
-  );
-
-  it("未安装 Shell 禁用；运行中模型与预设禁用，思考档位仍可切换", async () => {
+  it("Shell 菜单列出生效值与候选，选择调用 controls.setShell", async () => {
     const state = fixture();
-    const { rerender } = render(<StatusBar {...state} panel="shell" />);
-    const missing = await screen.findByRole("button", { name: /cmd · cmd.exe/ });
-    expect((missing as HTMLButtonElement).disabled).toBe(true);
-    const running = { ...state.view, status: "thinking" as const };
-    rerender(<StatusBar {...state} view={running} panel="model" />);
-    expect(
-      ((await screen.findByRole("button", { name: /fixture · two/ })) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    rerender(<StatusBar {...state} view={running} panel="effort" />);
-    await waitFor(() =>
-      expect((screen.getByRole("button", { name: "high" }) as HTMLButtonElement).disabled).toBe(
-        false,
-      ),
-    );
+    render(<StatusBar {...state} />);
+    const trigger = screen.getByRole("button", { name: "切换 Shell" });
+    expect(trigger.textContent).toContain("pwsh");
+    fireEvent.click(trigger);
+    expect(state.controls.loadShells).toHaveBeenCalled();
+    const bash = await screen.findByRole("menuitemradio", { name: /bash · Bash/ });
+    const cmd = screen.getByRole("menuitemradio", { name: /cmd · cmd.exe/ });
+    expect((cmd as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(bash);
+    await waitFor(() => expect(state.controls.setShell).toHaveBeenCalledWith("bash"));
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("配置失败保留面板并显示真实错误，不调用成功回调", async () => {
+  it("setShell 失败显示真实错误", async () => {
     const state = fixture();
-    state.api.setPermissionPreset.mockRejectedValue(new Error("session_busy"));
-    const onChanged = vi.fn();
-    render(<StatusBar {...state} panel="preset" onChanged={onChanged} />);
-    const item = await screen.findByRole("button", { name: "smart" });
-    await waitFor(() => expect((item as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(item);
+    state.controls.setShell = vi.fn(async () => {
+      throw new Error("session_busy");
+    });
+    state.controls.shellControl = {
+      ...state.controls.shellControl,
+      onSelect: state.controls.setShell,
+    };
+    render(<StatusBar {...state} />);
+    fireEvent.click(screen.getByRole("button", { name: "切换 Shell" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /bash · Bash/ }));
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "session_busy");
-    expect(screen.getByRole("dialog", { name: "选择权限预设" })).toBeTruthy();
-    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("模型/档位/预设 pill 打开同一个菜单组件并调用对应 onSelect", async () => {
+    const state = fixture();
+    render(<StatusBar {...state} />);
+    fireEvent.click(screen.getByRole("button", { name: "切换模型" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "one" }));
+    await waitFor(() =>
+      expect(state.controls.controls.model.onSelect).toHaveBeenCalledWith("fixture/one"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "切换权限预设" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "default" }));
+    await waitFor(() =>
+      expect(state.controls.controls.preset.onSelect).toHaveBeenCalledWith("default"),
+    );
   });
 
   it("流式 revision 不重复 describeContext，缓存来自包含口径的累计用量", async () => {
@@ -305,7 +287,7 @@ describe("StatusBar", () => {
       usage: { inputTokens: 1000, outputTokens: 20, cacheReadTokens: 800 },
     };
     const { rerender } = render(<StatusBar {...state} view={view} />);
-    await screen.findByText("fixture · one");
+    await screen.findByText(/14%/);
     const calls = state.api.describeContext.mock.calls.length;
     rerender(<StatusBar {...state} view={{ ...view, revision: view.revision + 1 }} />);
     expect(state.api.describeContext.mock.calls.length).toBe(calls);
@@ -316,8 +298,19 @@ describe("StatusBar", () => {
     const state = fixture();
     const onPanelChange = vi.fn<(panel: StatusPanel | null) => void>();
     render(<StatusBar {...state} panel={null} onPanelChange={onPanelChange} />);
-    await screen.findByText("fixture · one");
+    await screen.findByText(/14%/);
     fireEvent.click(screen.getByRole("button", { name: "上下文用量" }));
     expect(onPanelChange).toHaveBeenCalledWith("context");
+  });
+
+  it("Turn 状态与当前 Turn 序号显示在右侧", async () => {
+    const state = fixture();
+    const view = {
+      ...state.view,
+      status: "thinking" as const,
+      currentTurn: { turnId: "t1", turnIndex: 3 },
+    };
+    render(<StatusBar {...state} view={view} />);
+    expect(await screen.findByText(/Turn 3/)).toBeTruthy();
   });
 });

@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { Conversations, conversationStatus } from "../src/conversations";
 
-function fixture(lockedId?: string) {
+function fixture(lockedId?: string, rejectSubmit = false) {
   const clients = new Map<string, RpcClient>();
   const opened = new Map<string, string>();
   const calls: { workspace: string; method: string; params: Record<string, unknown> }[] = [];
@@ -65,7 +65,40 @@ function fixture(lockedId?: string) {
         if (request.method === "session.subscribe") result = { lastSeq: 0 };
         if (request.method === "session.close") opened.delete(id);
         if (request.method === "session.submit") {
+          if (rejectSubmit) {
+            server.send(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: request.id,
+                error: {
+                  code: -32003,
+                  message: "图片格式或尺寸不符合要求",
+                  data: { code: "invalid_command" },
+                },
+              }),
+            );
+            return;
+          }
           turns.set(id, { workspace, id: request.id });
+          // 接受语义：先发 message.user 事件，响应留到 complete()
+          const seq = (seqs.get(id) ?? 0) + 1;
+          seqs.set(id, seq);
+          server.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              method: "event",
+              params: {
+                sessionId: id,
+                event: {
+                  sessionId: id,
+                  seq,
+                  time: "2026-01-01T00:00:00Z",
+                  type: "message.user",
+                  payload: { content: [{ type: "text", text: "hi" }] },
+                },
+              },
+            }),
+          );
           return;
         }
         server.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
@@ -124,7 +157,7 @@ describe("desktop conversation lifecycle", () => {
     await f.controller.newConversation("plain");
     expect(f.pool.ensure).not.toHaveBeenCalled();
     expect(f.controller.opened.size).toBe(0);
-    await f.controller.send("hello");
+    await f.controller.send({ text: "hello", attachments: [] });
     const id = f.controller.selectedId;
     expect(id).not.toBeNull();
     expect(f.calls.filter((c) => c.method === "runtime.createSession")).toHaveLength(1);
@@ -155,7 +188,7 @@ describe("desktop conversation lifecycle", () => {
   it("运行与待确认旧会话保持打开，完成后自动释放；同项目其他会话不退出", async () => {
     const f = fixture();
     await f.controller.open("a", "project");
-    await f.controller.send("run");
+    await f.controller.send({ text: "run", attachments: [] });
     await f.controller.open("b", "project");
     expect(f.opened.has("a")).toBe(true);
     f.event("a", "permission.requested", {
@@ -200,5 +233,47 @@ describe("desktop conversation lifecycle", () => {
     expect(f.controller.selectedId).toBeNull();
     expect(f.opened.size).toBe(0);
     expect(f.pool.release.mock.calls).toEqual([["project-a"], ["project-b"]]);
+  });
+});
+
+describe("send 接受语义与创建选项", () => {
+  it("草稿发送把显式模型/档位/预设传给 createSession，未选项省略", async () => {
+    const f = fixture();
+    await f.controller.newConversation("plain");
+    await f.controller.send(
+      { text: "hi", attachments: [] },
+      {
+        model: { provider: "test", model: "fancy" },
+        reasoningEffort: "high",
+        permissionPreset: "smart",
+      },
+    );
+    const create = f.calls.find((c) => c.method === "runtime.createSession");
+    expect(create?.params).toMatchObject({
+      model: { provider: "test", model: "fancy" },
+      reasoningEffort: "high",
+      permissionPreset: "smart",
+    });
+    const submit = f.calls.find((c) => c.method === "session.submit");
+    expect(submit?.params).toMatchObject({ text: "hi", attachments: [] });
+  });
+
+  it("未触碰的档位与预设不进 createSession 参数", async () => {
+    const f = fixture();
+    await f.controller.newConversation("plain");
+    await f.controller.send({ text: "hi", attachments: [] });
+    const create = f.calls.find((c) => c.method === "runtime.createSession");
+    expect(create?.params).toEqual({ model: { provider: "test", model: "cheap" } });
+  });
+
+  it("submit 在接受前被拒绝时抛出，会话保持未选中并按空闲路径关闭", async () => {
+    const f = fixture(undefined, true);
+    await f.controller.newConversation("plain");
+    await expect(f.controller.send({ text: "hi", attachments: [] })).rejects.toThrow(
+      "图片格式或尺寸不符合要求",
+    );
+    expect(f.controller.selectedId).toBeNull();
+    await vi.waitFor(() => expect(f.opened.size).toBe(0));
+    expect(f.calls.some((c) => c.method === "session.close")).toBe(true);
   });
 });

@@ -1,9 +1,11 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { homeDir } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
 
 import { isAllowedExternalUrl } from "./external-url";
 import type { DesktopHost } from "./host";
+import { decodePickedImages } from "./picked-images";
 import type { BackendMessage } from "./types";
 
 export function createTauriHost(): DesktopHost {
@@ -19,5 +21,15 @@ export function createTauriHost(): DesktopHost {
       await tauriOpenUrl(url);
     },
     pickFolder: () => openDialog({ directory: true, multiple: false }),
+    async pickImages() {
+      return decodePickedImages(await invoke<ArrayBuffer>("pick_images"));
+    },
+    async homeDir() {
+      try {
+        return await homeDir();
+      } catch {
+        return null;
+      }
+    },
   };
 }

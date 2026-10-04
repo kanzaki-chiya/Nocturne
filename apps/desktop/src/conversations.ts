@@ -1,4 +1,9 @@
-import { createSessionView, type SessionView } from "@nocturne/core/protocol";
+import {
+  createSessionView,
+  type ModelRef,
+  type ReasoningEffort,
+  type SessionView,
+} from "@nocturne/core/protocol";
 import {
   trackSessionView,
   type RpcClient,
@@ -7,6 +12,7 @@ import {
   type SessionViewTracker,
 } from "@nocturne/rpc/client";
 
+import type { ComposerSubmit } from "./Composer";
 import { projectKey, type SessionStatus } from "./session-tree";
 
 export interface ConversationBackendPool {
@@ -22,6 +28,8 @@ export interface OpenConversation {
   warnings: string[];
   busy: boolean;
   tracker?: SessionViewTracker;
+  /** 每次视图折叠后回调（send 用来等待 Turn 被接受） */
+  readonly listeners: Set<() => void>;
 }
 
 export function conversationStatus(entry: OpenConversation): SessionStatus {
@@ -34,6 +42,13 @@ export function conversationStatus(entry: OpenConversation): SessionStatus {
 }
 
 /** 会话切换串行；Turn 不占切换队列，后台中的其他会话仍可继续运行。 */
+export interface CreateSessionChoice {
+  /** 草稿选中的模型；undefined 时回落后台默认模型 */
+  model?: ModelRef | string | undefined;
+  reasoningEffort?: string;
+  permissionPreset?: string;
+}
+
 export class Conversations {
   readonly opened = new Map<string, OpenConversation>();
   selectedId: string | null = null;
@@ -69,12 +84,14 @@ export class Conversations {
       view: createSessionView(),
       warnings: result.opened.warnings,
       busy: false,
+      listeners: new Set(),
     };
     this.opened.set(entry.session.id, entry);
     try {
       entry.tracker = await trackSessionView(
         entry.session,
         () => {
+          for (const listener of entry.listeners) listener();
           this.changed();
           // 非当前会话完成后释放锁；submit/compact 的 promise 收束前仍保持 busy。
           void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
@@ -123,8 +140,14 @@ export class Conversations {
     });
   }
 
-  /** 仅第一条消息才创建日志；先标 busy，避免 submit 准备阶段被切换关掉。 */
-  async send(text: string): Promise<void> {
+  /**
+   * 发一条消息（可带图片附件）。仅第一条消息才创建会话日志；先标 busy，
+   * 避免 submit 准备阶段被切换关掉。返回时 Turn 已被后台接受：持久视图
+   * 出现新 Turn 或新用户条目、或 submit 响应到达，三者先到为准；
+   * submit 在接受前拒绝则抛出（输入框保留草稿与附件）。草稿选项里只有
+   * 显式选过的字段写进 createSession，其余交给 Core 解析项目默认。
+   */
+  async send(input: ComposerSubmit, create?: CreateSessionChoice): Promise<void> {
     const entry = await this.serial(async () => {
       let selected = this.selected;
       if (selected === undefined) {
@@ -132,13 +155,21 @@ export class Conversations {
         if (workspace === null) throw new Error("普通对话工作区尚未就绪");
         const client = await this.pool.ensure(workspace);
         try {
-          const model = await client.runtime.defaultModel();
+          const model = create?.model ?? (await client.runtime.defaultModel());
           if (model === undefined)
             throw new Error("尚未配置默认模型，请先用 nctrn setup 配置服务商");
           selected = await this.attach(
             client,
             workspace,
-            await client.runtime.createSession({ model }),
+            await client.runtime.createSession({
+              model,
+              ...(create?.reasoningEffort !== undefined
+                ? { reasoningEffort: create.reasoningEffort as ReasoningEffort }
+                : {}),
+              ...(create?.permissionPreset !== undefined
+                ? { permissionPreset: create.permissionPreset }
+                : {}),
+            }),
           );
         } catch (error) {
           await this.releaseIfUnused(workspace);
@@ -146,22 +177,51 @@ export class Conversations {
         }
       }
       if (conversationStatus(selected) !== "idle") throw new Error("会话正在运行");
-      await selected.session.recordInputHistory(text);
-      this.selectedId = selected.session.id;
-      this.draftWorkspace = null;
+      if (input.text !== "") await selected.session.recordInputHistory(input.text);
       selected.busy = true;
       this.changed();
       return selected;
     });
-    // 接受发送后立即归还输入框控制；Turn 完成由订阅更新，切换不会等整轮输出。
-    void entry.session
-      .submit({ text })
-      .catch(this.failed)
-      .finally(() => {
-        entry.busy = false;
-        this.changed();
-        void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
-      });
+
+    const baseline = entry.view.entries.length;
+    const isAccepted = () =>
+      entry.view.currentTurn !== undefined || entry.view.entries.length > baseline;
+    const accepted = new Promise<"accepted">((resolve) => {
+      if (isAccepted()) {
+        resolve("accepted");
+        return;
+      }
+      const listener = () => {
+        if (isAccepted()) {
+          entry.listeners.delete(listener);
+          resolve("accepted");
+        }
+      };
+      entry.listeners.add(listener);
+    });
+    const submission = entry.session.submit({
+      text: input.text,
+      attachments: input.attachments,
+    });
+    try {
+      await Promise.race([accepted, submission.then(() => "finished" as const)]);
+    } catch (error) {
+      // submit 在接受前拒绝（如附件校验失败）：会话保持空闲，普通关闭路径清理
+      entry.busy = false;
+      this.changed();
+      void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
+      throw error;
+    }
+    // 接受后才选中并清空草稿工作区
+    this.selectedId = entry.session.id;
+    this.draftWorkspace = null;
+    this.changed();
+    // 接受后归还输入框控制；Turn 完成由订阅更新，切换不会等整轮输出。
+    void submission.catch(this.failed).finally(() => {
+      entry.busy = false;
+      this.changed();
+      void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
+    });
   }
 
   async compact(): Promise<void> {

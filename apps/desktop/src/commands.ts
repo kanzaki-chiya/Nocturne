@@ -1,314 +1,94 @@
-export type CommandStatus = "supported" | "planned" | "unsupported";
+/**
+ * 桌面斜杠命令（docs/apps/desktop.md 5.3）：界面上没有对应操作的才保留为命令，
+ * 其余旧命令解析为「去哪里操作」的提示，不作为消息发出。
+ */
 
-export type CommandName =
-  | "/help"
-  | "/theme"
-  | "/settings"
-  | "/model"
-  | "/effort"
-  | "/preset"
-  | "/shell"
-  | "/context"
-  | "/mcp"
-  | "/compact"
-  | "/resume"
-  | "/rewind"
-  | "/fork"
-  | "/new"
-  | "/clear"
-  | "/provider"
-  | "/exit"
-  | "/quit";
+export const COMMANDS = [
+  { name: "/compact", summary: "压缩当前上下文" },
+  { name: "/mcp", summary: "查看本会话 MCP 状态" },
+] as const;
 
-export interface CommandDefinition {
-  name: CommandName;
-  summary: string;
-  usage: string;
-  status: CommandStatus;
-  statusText: string;
-  arguments?: "model" | "effort" | "preset" | "shell" | "resume" | "provider";
-}
+export type SlashCommandName = (typeof COMMANDS)[number]["name"];
 
-// 桌面有自己的能力表；不加载 TUI 的页面或命令分发代码。
-export const COMMANDS: readonly CommandDefinition[] = [
-  {
-    name: "/help",
-    summary: "列出命令与快捷键",
-    usage: "/help",
-    status: "supported",
-    statusText: "可用",
-  },
-  {
-    name: "/theme",
-    summary: "主题跟随系统外观",
-    usage: "/theme",
-    status: "unsupported",
-    statusText: "暂不支持",
-  },
-  {
-    name: "/settings",
-    summary: "设置默认值与界面偏好",
-    usage: "/settings",
-    status: "planned",
-    statusText: "第 3 步实现",
-  },
-  {
-    name: "/model",
-    summary: "列出或切换模型",
-    usage: "/model [服务商/模型]",
-    status: "supported",
-    statusText: "可用",
-    arguments: "model",
-  },
-  {
-    name: "/effort",
-    summary: "查看或切换思考强度",
-    usage: "/effort [档位]",
-    status: "supported",
-    statusText: "可用",
-    arguments: "effort",
-  },
-  {
-    name: "/preset",
-    summary: "查看或切换权限预设",
-    usage: "/preset [预设]",
-    status: "supported",
-    statusText: "可用",
-    arguments: "preset",
-  },
-  {
-    name: "/shell",
-    summary: "列出或切换 shell",
-    usage: "/shell [种类]",
-    status: "supported",
-    statusText: "可用",
-    arguments: "shell",
-  },
-  {
-    name: "/context",
-    summary: "查看上下文组成",
-    usage: "/context",
-    status: "supported",
-    statusText: "可用",
-  },
-  {
-    name: "/mcp",
-    summary: "查看本会话 MCP 状态",
-    usage: "/mcp",
-    status: "supported",
-    statusText: "可用",
-  },
-  {
-    name: "/compact",
-    summary: "压缩当前上下文",
-    usage: "/compact",
-    status: "supported",
-    statusText: "可用",
-  },
-  {
-    name: "/resume",
-    summary: "列出或切换会话",
-    usage: "/resume [会话 id]",
-    status: "supported",
-    statusText: "可用",
-    arguments: "resume",
-  },
-  {
-    name: "/rewind",
-    summary: "回退对话或还原文件",
-    usage: "/rewind",
-    status: "unsupported",
-    statusText: "暂不支持",
-  },
-  {
-    name: "/fork",
-    summary: "从当前位置分叉会话",
-    usage: "/fork",
-    status: "unsupported",
-    statusText: "暂不支持",
-  },
-  {
-    name: "/new",
-    summary: "新建并切换到空会话",
-    usage: "/new",
-    status: "supported",
-    statusText: "可用",
-  },
-  {
-    name: "/clear",
-    summary: "/new 的别名",
-    usage: "/clear",
-    status: "supported",
-    statusText: "可用",
-  },
-  {
-    name: "/provider",
-    summary: "管理服务商",
-    usage: "/provider [子命令]",
-    status: "planned",
-    statusText: "第 3 步实现",
-    arguments: "provider",
-  },
-  {
-    name: "/exit",
-    summary: "请使用窗口的关闭按钮退出",
-    usage: "/exit",
-    status: "unsupported",
-    statusText: "暂不支持",
-  },
-  {
-    name: "/quit",
-    summary: "/exit 的别名；请关闭窗口",
-    usage: "/quit",
-    status: "unsupported",
-    statusText: "暂不支持",
-  },
-];
+/** 输入框所在场景：空状态控件在卡片/托盘里，会话内控件在底部状态栏。 */
+export type SlashContext = "draft" | "session";
 
-export type ParsedCommand =
-  | { kind: "command"; command: CommandDefinition; name: CommandName; args: string; raw: string }
-  | {
-      kind: "invalid";
-      command: CommandDefinition;
-      name: CommandName;
-      args: string;
-      raw: string;
-      message: string;
-    }
-  | { kind: "unknown"; name: string; args: string; raw: string };
+type RedirectHint = string | Record<SlashContext, string>;
 
-/** 非命令返回 null；参数仅去掉边缘空白，模型 id 等内容不做解释或归一化。 */
-export function parseCommand(line: string): ParsedCommand | null {
-  const match = /^\s*(\/[^\s]*)(?:\s+([\s\S]*))?$/.exec(line);
+/** 已移除命令 → 提示对应的界面操作。 */
+const REDIRECTS: Record<string, RedirectHint> = {
+  "/model": { draft: "在输入框右下角切换模型", session: "在底部状态栏切换模型" },
+  "/effort": { draft: "在输入框右下角切换思考档位", session: "在底部状态栏切换思考档位" },
+  "/preset": { draft: "在输入框下方切换权限预设", session: "在底部状态栏切换权限预设" },
+  "/shell": { draft: "Shell 在会话内的底部状态栏切换", session: "在底部状态栏切换 Shell" },
+  "/context": {
+    draft: "会话内可点底部状态栏的上下文用量查看占比",
+    session: "点底部状态栏的上下文用量查看占比",
+  },
+  "/new": "点左栏「＋ 新会话」新建会话",
+  "/clear": "点左栏「＋ 新会话」新建会话",
+  "/resume": "在左栏选择要继续的会话",
+  "/help": {
+    draft: "输入 / 查看可用命令；模型与档位在输入框右下、权限预设在下方托盘",
+    session: "输入 / 查看可用命令；模型、档位和预设在底部状态栏切换",
+  },
+  "/provider": "服务商页面在后续版本提供",
+  "/settings": "设置页面在后续版本提供",
+  "/theme": "主题跟随系统外观",
+  "/rewind": "回退在后续版本提供",
+  "/fork": "分叉在后续版本提供",
+  "/exit": "关闭窗口即可退出",
+  "/quit": "关闭窗口即可退出",
+};
+
+export type ParsedSlash =
+  | { kind: "command"; name: SlashCommandName; raw: string }
+  | { kind: "redirect"; name: string; hint: string }
+  | { kind: "unknown"; name: string; hint: string };
+
+/** 非斜杠行或多行返回 null；已知命令带多余参数时按 unknown 给出用法提示。 */
+export function parseSlash(line: string, context: SlashContext = "session"): ParsedSlash | null {
+  if (/[\r\n]/.test(line)) return null;
+  const match = /^\s*(\/\S*)(?:\s+([\s\S]*))?$/.exec(line);
   if (match === null) return null;
   const name = match[1] ?? "/";
   const args = (match[2] ?? "").trim();
-  const command = COMMANDS.find((item) => item.name === name);
-  if (command === undefined) return { kind: "unknown", name, args, raw: line };
-  if (args !== "" && command.arguments === undefined) {
-    return {
-      kind: "invalid",
-      command,
-      name: command.name,
-      args,
-      raw: line,
-      message: `用法：${command.usage}`,
-    };
+  const known = COMMANDS.some((command) => command.name === name);
+  if (known) {
+    if (args !== "") return { kind: "unknown", name, hint: `用法：${name}` };
+    return { kind: "command", name: name as SlashCommandName, raw: line };
   }
-  return { kind: "command", command, name: command.name, args, raw: line };
+  const hint = REDIRECTS[name];
+  if (hint !== undefined)
+    return { kind: "redirect", name, hint: typeof hint === "string" ? hint : hint[context] };
+  return { kind: "unknown", name, hint: `未知命令 ${name}；输入 / 查看可用命令` };
 }
 
-export interface CommandCompletionContext {
-  effortLevels?: readonly string[];
-  providerIds?: readonly string[];
-  modelRefs?: readonly string[];
-  sessionIds?: readonly string[];
-}
-
-export interface CommandCompletion {
+export interface SlashItem {
   label: string;
   summary: string;
   insert: string;
-  status: CommandStatus;
-  statusText: string;
 }
 
-const PRESETS = ["read-only", "default", "auto-edit", "guarded", "smart", "bypass"] as const;
-const SHELLS = ["auto", "pwsh", "powershell", "bash", "cmd", "sh"] as const;
-const PROVIDER_SUBCOMMANDS = [
-  { name: "login", summary: "登录服务商账号" },
-  { name: "logout", summary: "退出服务商登录" },
-  { name: "add", summary: "添加服务商" },
-  { name: "key", summary: "更新密钥" },
-  { name: "refresh", summary: "刷新模型列表" },
-  { name: "model", summary: "编辑模型设置" },
-  { name: "remove", summary: "删除服务商" },
-] as const;
-
-function rank(query: string, items: CommandCompletion[]): CommandCompletion[] {
-  const q = query.toLowerCase();
-  return [
-    ...items.filter((item) => item.label.toLowerCase().startsWith(q)),
-    ...items.filter(
-      (item) => !item.label.toLowerCase().startsWith(q) && item.label.toLowerCase().includes(q),
-    ),
-  ];
+export interface SlashGroup {
+  id: "commands" | "skills";
+  label: string;
+  items: SlashItem[];
 }
 
-/** 只补全单行命令，避免把多行草稿整体替换；不执行命令。 */
-export function completeCommands(
-  line: string,
-  context: CommandCompletionContext = {},
-): CommandCompletion[] {
+/** 单行 / 前缀的分组补全；空组不返回。 */
+export function completeSlash(line: string): SlashGroup[] {
   if (/[\r\n]/.test(line)) return [];
   const text = line.trimStart();
-  if (!text.startsWith("/")) return [];
+  if (!text.startsWith("/") || /\s/.test(text.slice(1))) return [];
+  const query = text.slice(1).toLowerCase();
   const leading = line.slice(0, line.length - text.length);
-  const separator = text.search(/\s/);
-  if (separator < 0) {
-    return rank(
-      text,
-      COMMANDS.map((command) => ({
-        label: command.name,
-        summary: command.summary,
-        insert: `${leading}${command.name} `,
-        status: command.status,
-        statusText: command.statusText,
-      })),
-    );
-  }
-  const command = COMMANDS.find((item) => item.name === text.slice(0, separator));
-  if (command?.arguments === undefined) return [];
-  const argument = text.slice(separator).trimStart();
-  let values: readonly string[] = [];
-  let prefix = `${leading}${command.name} `;
-  let query = argument;
-  switch (command.arguments) {
-    case "effort":
-      values = [...new Set(["off", ...(context.effortLevels ?? [])])];
-      break;
-    case "preset":
-      values = PRESETS;
-      break;
-    case "shell":
-      values = SHELLS;
-      break;
-    case "model":
-      values = context.modelRefs ?? [];
-      break;
-    case "resume":
-      values = context.sessionIds ?? [];
-      break;
-    case "provider": {
-      const split = argument.search(/\s/);
-      if (split < 0) {
-        return rank(
-          query,
-          PROVIDER_SUBCOMMANDS.map((sub) => ({
-            label: sub.name,
-            summary: sub.summary,
-            insert: `${prefix}${sub.name} `,
-            status: command.status,
-            statusText: command.statusText,
-          })),
-        );
-      }
-      const sub = argument.slice(0, split);
-      if (!PROVIDER_SUBCOMMANDS.some((item) => item.name === sub)) return [];
-      query = argument.slice(split).trimStart();
-      prefix += `${sub} `;
-      values = context.providerIds ?? [];
-      break;
-    }
-  }
-  return rank(
-    query,
-    [...new Set(values)].map((value) => ({
-      label: value,
-      summary: command.summary,
-      insert: `${prefix}${value}`,
-      status: command.status,
-      statusText: command.statusText,
-    })),
-  );
+  const items: SlashItem[] = COMMANDS.filter((command) =>
+    command.name.slice(1).startsWith(query),
+  ).map((command) => ({
+    label: command.name,
+    summary: command.summary,
+    insert: `${leading}${command.name} `,
+  }));
+  return items.length === 0 ? [] : [{ id: "commands", label: "命令", items }];
 }
