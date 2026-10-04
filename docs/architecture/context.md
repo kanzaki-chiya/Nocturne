@@ -63,7 +63,7 @@ Builder 在请求的 `cachePrefix` 中标出"可缓存前缀"的边界：全部 
 - **增量构建**：除压缩边界外，不改写已经发给模型的历史，让相邻 Step 的请求共享最长前缀。
 - 旧会话日志中无内容且无工具调用的 assistant 条目在请求投影时跳过；事件日志本身保持原样，避免向 Messages 接口发送空消息。
 - **每一项都有上限**：工具结果在执行时就按预算截断（见 [tools.md](tools.md)），指令文件有上限，任何注入内容都不能无界增长。上下文层不负责修补无界输入。
-- **可解释**：`ContextReport` 列出每一部分的来源与估算 token，用户和开发者能看到"窗口被什么占满了"。
+- **可解释**：`ContextReport` 列出每一部分的来源与估算 token，用户和开发者能看到"窗口被什么占满了"。`history` 段附带 `breakdown`（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 5 节）：user / assistant / tool / summary 各自的字符数与估算 token，四项之和即该段总数——assistant 的 toolCalls 序列化归 `tool`、推理块归 `assistant`、L1 修剪占位归 `tool`、摘要注入（含最近文件提示）归 `summary`、以 user 角色投影的 note 归 `user`；图片附件不计入任何一项（`report.images` 单列），其占位/描述文字随所在消息归类。估算模式与正式请求同口径给出。
 
 ## 5. Token 预算
 

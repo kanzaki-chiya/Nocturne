@@ -1450,3 +1450,171 @@ describe("图片附件投影（ADR-0023）", () => {
     expect(attachmentsToLoad(many, visionModel)[0]?.sha256).toBe("m2");
   });
 });
+
+describe("history 细分（ADR-0046 第 5 节）", () => {
+  const historySection = (built: ReturnType<typeof buildContext>) => {
+    const s = built.report.sections.find((sec) => sec.name === "history");
+    if (s === undefined) throw new Error("missing history section");
+    return s;
+  };
+  const expectSumsToTotal = (s: ReturnType<typeof historySection>): void => {
+    const b = s.breakdown;
+    expect(b).toBeDefined();
+    if (b === undefined) return;
+    expect(b.user.chars + b.assistant.chars + b.tool.chars + b.summary.chars).toBe(s.chars);
+    expect(
+      b.user.estimatedTokens +
+        b.assistant.estimatedTokens +
+        b.tool.estimatedTokens +
+        b.summary.estimatedTokens,
+    ).toBe(s.estimatedTokens);
+  };
+  const userEntry = (seq: number, text: string): HistoryEntry => ({
+    kind: "user",
+    seq,
+    turnId: "t",
+    messageId: `u${seq}`,
+    content: [{ type: "text", text }],
+  });
+  const toolEntry = (seq: number, content: string, inputSummary?: string): HistoryEntry => ({
+    kind: "tool",
+    seq,
+    turnId: "t",
+    callId: `c${seq}`,
+    name: "read",
+    status: "ok",
+    modelContent: content,
+    ...(inputSummary !== undefined ? { inputSummary } : {}),
+  });
+
+  it("四类各自计入：user 含 note，assistant 含推理，tool 含调用参数与结果", () => {
+    const toolCalls = [{ callId: "c1", name: "read", input: { path: "a" } }];
+    const noteText = "[Environment change] shell is now bash";
+    const history: HistoryEntry[] = [
+      userEntry(1, "读一下 a"),
+      {
+        kind: "assistant",
+        seq: 2,
+        turnId: "t",
+        messageId: "a1",
+        model: { provider: "test", model: "m1" },
+        content: [
+          { type: "reasoning", text: "推理内容", providerData: { sig: 1 } },
+          { type: "text", text: "回答" },
+        ],
+        toolCalls,
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      toolEntry(3, "工具结果"),
+      { kind: "note", seq: 4, turnId: "t", text: noteText },
+      userEntry(5, "继续"),
+    ];
+    const s = historySection(buildContext(baseInput({ history })));
+    const b = s.breakdown;
+    expect(b?.user.chars).toBe("读一下 a".length + noteText.length + "继续".length);
+    expect(b?.assistant.chars).toBe("推理内容".length + "回答".length);
+    expect(b?.tool.chars).toBe(JSON.stringify(toolCalls).length + "工具结果".length);
+    expect(b?.summary.chars).toBe(0);
+    // note 以 user 角色投影，token 同样归 user；推理内容回传模型，归 assistant
+    expect(b?.user.estimatedTokens).toBe(
+      estimateTokens("读一下 a") + estimateTokens(noteText) + estimateTokens("继续"),
+    );
+    expect(b?.assistant.estimatedTokens).toBe(estimateTokens("推理内容") + estimateTokens("回答"));
+    expect(b?.tool.estimatedTokens).toBe(
+      estimateTokens(JSON.stringify(toolCalls)) + estimateTokens("工具结果"),
+    );
+    expectSumsToTotal(s);
+  });
+
+  it("摘要注入归 summary，修剪占位归 tool；被覆盖与 pending 的归类", () => {
+    const history: HistoryEntry[] = [
+      userEntry(1, "旧问题"),
+      toolEntry(2, "旧结果"),
+      {
+        kind: "compaction",
+        seq: 3,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 2,
+        summary: "进展摘要",
+      },
+      toolEntry(4, "被修剪的结果", "path=b"),
+      {
+        kind: "compaction",
+        seq: 5,
+        turnId: "t",
+        compactKind: "prune",
+        throughSeq: 4,
+        summary: undefined,
+      },
+      toolEntry(6, "新结果"),
+    ];
+    const pending: ModelMessage[] = [
+      { role: "tool", callId: "c7", name: "read", content: "pending结果", isError: false },
+      { role: "user", content: [{ type: "text", text: "pending输入" }] },
+    ];
+    const s = historySection(buildContext(baseInput({ history, pendingMessages: pending })));
+    const b = s.breakdown;
+    const summaryText = "[会话历史摘要]\n进展摘要";
+    expect(b?.summary.chars).toBe(summaryText.length);
+    expect(b?.summary.estimatedTokens).toBe(estimateTokens(summaryText));
+    // 修剪占位说明与未覆盖的新结果都归 tool；pending 工具结果同归 tool
+    const placeholder = "[输出已省略] 工具 read（path=b） 的结果已被 context.compacted 修剪";
+    expect(b?.tool.chars).toBe(placeholder.length + "新结果".length + "pending结果".length);
+    // 旧问题被摘要覆盖不计；pending 用户输入归 user
+    expect(b?.user.chars).toBe("pending输入".length);
+    expectSumsToTotal(s);
+  });
+
+  it("末尾任务清单不计入任何一类（归 todos section），发给模型的内容不变", () => {
+    const history = [userEntry(1, "问题")];
+    const built = buildContext(
+      baseInput({ history, todos: [{ text: "当前任务", status: "in_progress" }] }),
+    );
+    const s = historySection(built);
+    expect(s.breakdown?.user.chars).toBe("问题".length);
+    expect(s.breakdown?.user.estimatedTokens).toBe(estimateTokens("问题"));
+    expectSumsToTotal(s);
+    // 清单并入末尾 user 消息且计入 todos section，与历史细分互不重叠
+    const last = built.request.messages.at(-1);
+    expect(last?.role === "user" ? last.content : []).toHaveLength(2);
+    expect(built.report.sections.some((sec) => sec.name === "todos")).toBe(true);
+  });
+
+  it("估算模式与正式请求（attachmentData 提供）同样给出 breakdown；图片不计入任何一类", () => {
+    const attachment: ImageAttachment = {
+      type: "image",
+      source: "paste",
+      file: "img-a.png",
+      sha256: "a",
+      mimeType: "image/png",
+      bytes: 1,
+    };
+    const vision: ModelInfo = {
+      ...model,
+      capabilities: { ...model.capabilities, imageInput: true },
+    };
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [{ type: "text", text: "看看这张图" }],
+        attachments: [attachment],
+      },
+    ];
+    const estimate = historySection(buildContext(baseInput({ history, model: vision })));
+    const project = historySection(
+      buildContext(baseInput({ history, model: vision, attachmentData: new Map([["a", "aGk="]]) })),
+    );
+    expect(estimate.breakdown).toBeDefined();
+    expect(project.breakdown).toBeDefined();
+    expectSumsToTotal(estimate);
+    expectSumsToTotal(project);
+    // 图片按每张 1600 token 单列 report.images，细分只含消息文字
+    expect(project.breakdown?.user.chars).toBe("看看这张图".length);
+    expect(project.breakdown?.user.estimatedTokens).toBe(estimateTokens("看看这张图"));
+  });
+});

@@ -89,6 +89,29 @@ export interface CompactionPlan {
   summaryRequest?: ModelRequest | undefined;
 }
 
+/** 一项内容在上下文中的体量：字符数与按统一口径估算的 token */
+export interface ContextSize {
+  chars: number;
+  estimatedTokens: number;
+}
+
+/**
+ * history section 的对话历史细分（ADR-0046 第 5 节）。
+ * 四项之和等于该 section 的 chars / estimatedTokens：
+ * history 的总数即由这四项相加得出。图片附件不属任何一项——
+ * 按每张固定 token 计入 report.images；其占位/描述文字随所在消息归类。
+ */
+export interface ContextHistoryBreakdown {
+  /** 用户消息与以 user 角色注入的 note（含其中的文字附件说明） */
+  user: ContextSize;
+  /** 助手回答文字与回传给模型的推理内容 */
+  assistant: ContextSize;
+  /** 工具调用参数与工具结果（含 L1 修剪后的占位文本） */
+  tool: ContextSize;
+  /** L2 压缩摘要注入的内容（含最近文件提示） */
+  summary: ContextSize;
+}
+
 /** ContextReport 中的一个部分（context.md 第 4 节"可解释"） */
 export interface ContextSection {
   name: "system" | "tools" | "instructions" | "environment" | "todos" | "history";
@@ -96,6 +119,8 @@ export interface ContextSection {
   source: string;
   chars: number;
   estimatedTokens: number;
+  /** 仅 name === "history"：对话历史细分（ADR-0046 第 5 节） */
+  breakdown?: ContextHistoryBreakdown | undefined;
   truncated?: boolean | undefined;
 }
 

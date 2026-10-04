@@ -19,7 +19,13 @@ import type {
   ModelRequest,
   SystemBlock,
 } from "../provider/index.js";
-import type { BuildContextInput, BuiltContext, CompactionPlan, ContextSection } from "./types.js";
+import type {
+  BuildContextInput,
+  BuiltContext,
+  CompactionPlan,
+  ContextHistoryBreakdown,
+  ContextSection,
+} from "./types.js";
 
 // ADR-0016 兜底常量：context 只能 import type provider（modules.md），
 // 与 provider/catalog.ts 的同名常量保持一致（值相同、语义不同侧：
@@ -474,15 +480,15 @@ export function attachmentsToLoad(
 /**
  * 20 张上限后处理（ADR-0023）：从消息尾部往前保留最新 MAX_IMAGES_PER_REQUEST
  * 张图片，更早的从 images 中移除并按落位规则换上限占位。返回最终发出的图片数
- * 与新增占位文本的字符数。估算模式的 virtual 计数同样受限（不产生占位）。
+ * 与新增占位文本的字符数（按所在消息角色细分）。估算模式的 virtual 计数同样受限（不产生占位）。
  */
 function enforceImageCap(
   messages: ModelMessage[],
   virtual: Map<ModelMessage, number>,
-): { count: number; addedChars: number } {
+): { count: number; addedByRole: { user: number; tool: number } } {
   let remaining = MAX_IMAGES_PER_REQUEST;
   let count = 0;
-  let addedChars = 0;
+  const addedByRole = { user: 0, tool: 0 };
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m === undefined || m.role === "assistant") continue;
@@ -502,7 +508,9 @@ function enforceImageCap(
       const dropped = Math.min(drop, real);
       drop -= dropped;
       const kept = m.images.slice(dropped);
-      addedChars += dropped * IMAGE_PLACEHOLDER_LIMIT.length;
+      // 占位文本计入所在消息的一类（history 细分，ADR-0046 §5）
+      if (m.role === "user") addedByRole.user += dropped * IMAGE_PLACEHOLDER_LIMIT.length;
+      else addedByRole.tool += dropped * IMAGE_PLACEHOLDER_LIMIT.length;
       messages[i] =
         m.role === "user"
           ? {
@@ -524,17 +532,27 @@ function enforceImageCap(
     }
     if (drop > 0 && virt > 0) virtual.set(m, virt - drop);
   }
-  return { count, addedChars };
+  return { count, addedByRole };
+}
+
+/** history 细分的字符数累加器（ADR-0046 §5：user/assistant/tool/summary） */
+type BreakdownChars = Record<keyof ContextHistoryBreakdown, number>;
+
+function emptyBreakdown(): BreakdownChars {
+  return { user: 0, assistant: 0, tool: 0, summary: 0 };
 }
 
 interface HistoryProjection {
   messages: ModelMessage[];
-  chars: number;
+  /** 按消息角色/来源归类的字符数；四项之和即历史总字符数 */
+  byChars: BreakdownChars;
   entries: number;
   /** 历史末尾仍未结算的 toolCalls（其结果可能在 pendingMessages 中） */
   unsettled: Set<string>;
   /** 等待未决工具调用结算后才放行的延迟消息（note / 摘要注入） */
   deferred: ModelMessage[];
+  /** 摘要注入产生的 user 角色消息（至多一条）：token 归类时靠对象身份区分 */
+  summaryMessage?: ModelMessage | undefined;
 }
 
 function historyToMessages(
@@ -545,8 +563,9 @@ function historyToMessages(
   events?: readonly DurableEvent[],
 ): HistoryProjection {
   const messages: ModelMessage[] = [];
-  let chars = 0;
+  const byChars = emptyBreakdown();
   let entries = 0;
+  let summaryMessage: ModelMessage | undefined;
   // 未提供投影参数（历史调用方）按"不支持看图"处理：附件 → 不支持占位
   const imgOpts: ImageProjectionOpts = {
     ...(images ?? { mode: "estimate", supported: false }),
@@ -571,8 +590,9 @@ function historyToMessages(
     const text =
       `[会话历史摘要]\n${latestSummary.summary}` +
       (paths.size > 0 ? `\n\n本会话最近读过或改过的文件：\n${[...paths].join("\n")}` : "");
-    chars += text.length;
-    messages.push({ role: "user", content: [{ type: "text", text }] });
+    byChars.summary += text.length;
+    summaryMessage = { role: "user", content: [{ type: "text", text }] };
+    messages.push(summaryMessage);
   }
   // 协议邻接约束（OpenAI/Anthropic）：assistant 携带的 toolCalls 必须由对应
   // tool 结果紧随。note 类注入（/shell 切换说明可在 Turn 进行中写入）若落在
@@ -597,7 +617,7 @@ function historyToMessages(
           ...entry.content,
           ...atts.texts.map((text) => ({ type: "text" as const, text })),
         ];
-        chars += blockChars(blocks);
+        byChars.user += blockChars(blocks);
         const msg: ModelMessage = {
           role: "user",
           content: blocks,
@@ -619,7 +639,9 @@ function historyToMessages(
           : entry.content.filter((b) => !(b.type === "reasoning" && b.providerData !== undefined));
         // 旧日志里失败轮次可能留下空 assistant；Messages 不接受空 content。
         if (content.length === 0 && entry.toolCalls.length === 0) break;
-        chars += blockChars(content) + JSON.stringify(entry.toolCalls).length;
+        // 细分（ADR-0046 §5）：回答文字与推理归 assistant，调用参数归 tool
+        byChars.assistant += blockChars(content);
+        byChars.tool += JSON.stringify(entry.toolCalls).length;
         messages.push({
           role: "assistant",
           content,
@@ -636,7 +658,7 @@ function historyToMessages(
           ? { images: [], texts: [], virtual: 0 }
           : resolveAttachments(entry.attachments, imgOpts);
         for (const text of atts.texts) content += `\n${text}`;
-        chars += content.length;
+        byChars.tool += content.length;
         const msg: ModelMessage = {
           role: "tool",
           callId: entry.callId,
@@ -658,7 +680,7 @@ function historyToMessages(
       }
       case "note": {
         // ADR-0022：shell 切换说明在该事件位置注入（user 角色，与摘要注入同式）
-        chars += entry.text.length;
+        byChars.user += entry.text.length;
         inject({
           role: "user",
           content: [{ type: "text", text: entry.text }],
@@ -667,7 +689,7 @@ function historyToMessages(
       }
     }
   }
-  return { messages, chars, entries, unsettled, deferred };
+  return { messages, byChars, entries, unsettled, deferred, summaryMessage };
 }
 
 /**
@@ -957,16 +979,18 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   };
   const {
     messages,
-    chars: historyChars,
+    byChars,
     entries,
     unsettled,
     deferred,
+    summaryMessage: injectedSummary,
   } = historyToMessages(input.history, model.ref.provider, model.protocol, imageOpts, input.events);
+  // 摘要注入消息的对象身份：末尾任务清单并入末条 user 消息会重建对象
+  let summaryMessage = injectedSummary;
   // context.md 6.5：进行中 Turn 的 message.user 被摘要覆盖时重新注入，
   // 保证"当前任务"不因压缩丢失（恢复投影中 open Turn 同理）
   const { summaryThrough: summaryCut } = compactionCutoffs(input.history);
   const openTurn = input.events !== undefined ? lastOpenTurnId(input.events) : undefined;
-  let reinjectedChars = 0;
   if (openTurn !== undefined) {
     const coveredUser = input.history.find(
       (e) => e.kind === "user" && e.turnId === openTurn && e.seq <= summaryCut,
@@ -984,7 +1008,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       };
       if (atts.virtual > 0) imageOpts.virtual?.set(msg, atts.virtual);
       messages.push(msg);
-      reinjectedChars = blockChars(blocks);
+      byChars.user += blockChars(blocks);
     }
   }
   for (const m of input.pendingMessages ?? []) {
@@ -995,15 +1019,17 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     }
   }
   messages.push(...deferred);
-  const pendingChars = (input.pendingMessages ?? [])
-    .map((m) => {
-      if (m.role === "tool") return m.content.length;
-      return blockChars(m.content);
-    })
-    .reduce((a, b) => a + b, 0);
+  // pending 按角色归类（assistant 的 toolCalls 序列化与持久条目同口径不计字符数）
+  for (const m of input.pendingMessages ?? []) {
+    if (m.role === "tool") byChars.tool += m.content.length;
+    else if (m.role === "assistant") byChars.assistant += blockChars(m.content);
+    else byChars.user += blockChars(m.content);
+  }
   // ADR-0023：单次请求最多 20 张图片；从最新往前保留，更早的换上限占位。
   // 估算模式（virtual）同样受限。图片字节/base64 长度不计入字符估算。
   const imageCap = enforceImageCap(messages, imageOpts.virtual ?? new Map<ModelMessage, number>());
+  byChars.user += imageCap.addedByRole.user;
+  byChars.tool += imageCap.addedByRole.tool;
   // 任务清单附在请求末尾，可缓存前缀止于它之前。末尾已是 user 消息时并入该消息
   // （部分兼容服务拒绝连续两条 user 消息）；末尾是工具结果时并入最后一条工具结果
   // （ADR-0028 修订：另起 user 消息会让推理模型把每一步当成新一轮，丢弃本轮推理，
@@ -1015,6 +1041,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     if (last?.role === "user") {
       const block: ContentBlock = { type: "text", text: todoText };
       messages[messages.length - 1] = { ...last, content: [...last.content, block] };
+      if (last === summaryMessage) summaryMessage = messages[messages.length - 1];
       cacheableMessages = messages.length - 1;
     } else if (last?.role === "tool") {
       messages[messages.length - 1] = { ...last, content: `${last.content}\n\n${todoText}` };
@@ -1023,19 +1050,44 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       messages.push({ role: "user", content: [{ type: "text", text: todoText }] });
     }
   }
+  // ADR-0046 §5 历史细分：token 按最终投影逐条归类（与上方字符口径一一对应）——
+  // assistant 的文字/推理归 assistant、toolCalls 序列化归 tool；
+  // user 角色的摘要注入按对象身份归 summary，其余 user 消息（含 note、
+  // 重新注入的当前任务、pending）归 user；图片不计（report.images 单列）。
+  const byTokens = emptyBreakdown();
+  for (const m of messages) {
+    if (m.role === "assistant") {
+      byTokens.assistant += m.content.reduce(
+        (total, block) => total + estimateTokens(block.text),
+        0,
+      );
+      byTokens.tool += estimateTokens(JSON.stringify(m.toolCalls));
+    } else if (m.role === "tool") {
+      byTokens.tool += estimateTokens(m.content);
+    } else {
+      const tokens = m.content.reduce((total, block) => total + estimateTokens(block.text), 0);
+      byTokens[m === summaryMessage ? "summary" : "user"] += tokens;
+    }
+  }
+  // 清单并入末条或另起一条 user 消息：其估算归入 todos section，从历史细分中减去
+  if (todoText !== undefined) {
+    const tail = messages.at(-1);
+    byTokens[tail?.role === "tool" ? "tool" : tail === summaryMessage ? "summary" : "user"] -=
+      estimateTokens(todoText);
+  }
+  const breakdown: ContextHistoryBreakdown = {
+    user: { chars: byChars.user, estimatedTokens: byTokens.user },
+    assistant: { chars: byChars.assistant, estimatedTokens: byTokens.assistant },
+    tool: { chars: byChars.tool, estimatedTokens: byTokens.tool },
+    summary: { chars: byChars.summary, estimatedTokens: byTokens.summary },
+  };
+  // 总数由四项相加得出：细分与总数的口径结构性一致
   sections.push({
     name: "history",
     source: `${entries} entries`,
-    chars: historyChars + pendingChars + reinjectedChars + imageCap.addedChars,
-    estimatedTokens:
-      messages.reduce((total, message) => total + messageTokens(message), 0) -
-      (todoText !== undefined ? estimateTokens(todoText) : 0) -
-      messages.reduce(
-        (total, message) =>
-          total +
-          (message.role !== "assistant" ? (message.images?.length ?? 0) * IMAGE_TOKEN_ESTIMATE : 0),
-        0,
-      ),
+    chars: byChars.user + byChars.assistant + byChars.tool + byChars.summary,
+    estimatedTokens: byTokens.user + byTokens.assistant + byTokens.tool + byTokens.summary,
+    breakdown,
   });
 
   // 预算（context.md 第 5 节）；图片按每张 1600 token 固定估算加入总数
