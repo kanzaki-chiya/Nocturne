@@ -175,7 +175,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 当前进度：实现与自动化测试完成。维护者已在 Windows Terminal 实测全屏滚轮与拖动复制、视口写满后的流式输出不闪烁、思考折叠与 Ctrl+O 原位展开，以及 UTF-8 中文命令输出。`--inline` 全流程、跨折行与拖出视口选区、异常退出清理、多行输入法候选窗等验收项尚无逐项真实终端记录；系统提示新旧版本的四类任务真实模型对比未做。0.4.0 的发布标签与推送待审查方完成。
 
-## v0.5 — Agent 能力补齐、智能权限与界面打磨（已排期，待设计）
+## v0.5 — Agent 能力补齐、智能权限与界面打磨（随 0.5.0 发布；已完成，2026-10-04 验收）
 
 **前提**：v0.4 验收。进入实现前先写 ADR。
 
@@ -186,14 +186,14 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - ~~**向用户提问工具**~~（已实现；[ADR-0032](../decisions/ADR-0032-ask-user-tool.md)）：模型遇到需要用户拍板的问题时暂停并提问（可给选项），用户回答后继续；非交互模式下返回"无法提问"，由模型自行取默认。
 - ~~**网页抓取**~~（已实现；[ADR-0033](../decisions/ADR-0033-web-fetch-file-refs.md)）：按 URL 抓取并转成文本交给模型，走权限层的 `network` 类（按主机授权，确认框显示完整 URL）；搜索不内置，交给 MCP。
 - ~~**`@文件` 引用**~~（已实现；[ADR-0033](../decisions/ADR-0033-web-fetch-file-refs.md)）：输入框里 `@` 补全工作区路径，提交时把文件内容随用户消息带入（在 Core 解析，不经过权限层）。自动化验收已覆盖读取、恢复、补全与引用显示；Windows Terminal 的真实抓取与引用交互由维护者手测。
-- **MCP 服务器管理**：在 `/settings` 或独立的 `/mcp` 页里添加、删除、启停 MCP 服务器，取代只能手写 `config.json` 的现状；同一轮实现 MCP 工具返回图片走附件通道（[ADR-0023](../decisions/ADR-0023-image-input.md) 第 8 节，已决定未实现），届时用真实服务器手测。依赖设置层。
-- **视觉输入**：沿用已有的模型能力位 `imageInput`（上游声明或用户声明，未声明按不支持处理），用户声明经「编辑模型」入口维护（见 [ADR-0024](../decisions/ADR-0024-model-settings-editor.md)）。先做 `read` 读图片（附件复制到会话附件目录、日志只存引用；发送时用 base64，OpenAI 兼容协议下图片随工具结果之后的一条 user 消息发送，转换在 Provider 适配器内完成），再做 TUI 粘贴（Alt+V 读剪贴板、拖入图片路径）：当前模型不支持图片时粘贴当场提示、不附加；发送时历史里的图片按当前模型能力替换为文字占位兜底（中途换模型、旧图片）；最后让 MCP 图片结果走同一通道。设计见 [ADR-0023](../decisions/ADR-0023-image-input.md)（已接受）。
+- **MCP 服务器管理**（未在 0.5.0 完成，移到 [v0.7](#v07--扩展与分发已排期待设计)）：在 `/settings` 或独立的 `/mcp` 页里添加、删除、启停 MCP 服务器，取代只能手写 `config.json` 的现状；同一轮实现 MCP 工具返回图片走附件通道（[ADR-0023](../decisions/ADR-0023-image-input.md) 第 8 节，已决定未实现），届时用真实服务器手测。依赖设置层。
+- ~~**视觉输入**~~（已实现；MCP 图片结果随 MCP 服务器管理移到 v0.7）：沿用已有的模型能力位 `imageInput`（上游声明或用户声明，未声明按不支持处理），用户声明经「编辑模型」入口维护（见 [ADR-0024](../decisions/ADR-0024-model-settings-editor.md)）。先做 `read` 读图片（附件复制到会话附件目录、日志只存引用；发送时用 base64，OpenAI 兼容协议下图片随工具结果之后的一条 user 消息发送，转换在 Provider 适配器内完成），再做 TUI 粘贴（Alt+V 读剪贴板、拖入图片路径）：当前模型不支持图片时粘贴当场提示、不附加；发送时历史里的图片按当前模型能力替换为文字占位兜底（中途换模型、旧图片）；最后让 MCP 图片结果走同一通道。设计见 [ADR-0023](../decisions/ADR-0023-image-input.md)（已接受）。
 - **模型设置编辑页**（已实现，[ADR-0024](../decisions/ADR-0024-model-settings-editor.md)）：服务商页「编辑模型」与 `/provider model`，逐模型修改显示名、上下文长度、最大输出、推理、看图与思考档位，每项标明来源；取代 `/provider image`。
 - **模型能力来源与逐模型推理**（[ADR-0025](../decisions/ADR-0025-per-model-reasoning.md)，已接受）：接入 models.dev 作为上游之下的能力来源层（刷新时拉取并缓存，随版本内置裁剪快照）；取消服务商级思考档位（`/provider thinking`、向导「是否支持思考」），推理与档位只按模型声明，推理为否就没有档位；编辑页推理改为「跟随 / 是 / 否」。排在图片粘贴之前。
 - **按模型选择协议**（已实现，2026-09-29 验收；[ADR-0026](../decisions/ADR-0026-per-model-protocol.md)）：同一服务商下的模型按上游 `supported_endpoints` 各自选择协议（`/chat/completions` 走 OpenAI 兼容，只有 `/messages` 的走 Anthropic），共用密钥与基础地址，编辑页可手动改。起因是 command code 这类聚合服务里 Claude 只支持 `/messages`。2026-09-30 起 Responses 接口已由 [ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md) 接入：只声明 `/responses` 的模型推导为 `openai-responses` 并可用（OpenCode Go 的 GPT/Grok 系等），不再标「协议不支持」。
 - **OpenCode Zen / Go 预设**（已实现，2026-09-30；[ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md)）：内置 `opencode-zen`（`https://opencode.ai/zen/v1`）与 `opencode-go`（`https://opencode.ai/zen/go/v1`）两个预设，默认凭据变量 `OPENCODE_API_KEY`；条目写死 `sessionHeader: "x-opencode-session"`（同系网关路由要求）与 `modelsDevProvider`（`opencode` / `opencode-go`），models.dev 快照新增按服务商保存的 npm 接口声明，据此把逐模型协议推导到三种接口上。起因是第三方编码代理在 OpenCode 网关上必须带会话头才能正常路由。
 - **edit 未命中提示与 diff 行号**（已实现，2026-09-29 验收；[ADR-0027](../decisions/ADR-0027-edit-diagnostics-diff-display.md)）：`old` 找不到时，除「未出现」外告诉模型差在哪——只差空白、缩进或换行时直接点明；否则附上文件中最接近的几行及行号，省去模型再 grep、再 read 的两步。`output.diff` 带上起始行号，TUI 与 CLI 的 diff 显示行号，摘要行改为「新增 N 行，删除 M 行」。diff 样式改为：文字保持正文颜色，整行铺暗红/暗绿底色，左侧行号与 `+`/`-`，长行折行而不截断（NO_COLOR 与 ASCII 模式退化为前缀）；折叠阈值从头 6 行 + 尾 4 行放宽到约 40 行（参考 Claude Code），超出部分显示「… 还有 N 行」，完整内容经点击展开查看。
-- **按模型提供 `apply_patch`**：为 GPT 系模型提供 Codex 格式的补丁工具，按模型能力声明选择给 `edit` 还是 `apply_patch`；优先级视维护者实际使用的模型而定。
+- ~~**按模型提供 `apply_patch`**~~（已实现，2026-10-01；[ADR-0035](../decisions/ADR-0035-apply-patch.md)）：为 GPT 系模型提供 Codex 格式的补丁工具，按模型能力 `editTool` 选择给 `edit` 还是 `apply_patch`。
 - **智能权限与安全审计模型（第二轮已实现，2026-10-01）**（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)）：六个预设、旧 full-access 兼容、smart 三档审查、模型后端与独立设置、超时/缓存/非交互/子代理继承、持久审计与用量、TUI/CLI 审查展示已实现。模型后端复用 Provider 公开接口；Jev choice 后端、接入点/模型列表/凭据设置与首次启用披露已实现。契约见 [permissions.md](../architecture/permissions.md) 5.3、6、7。
 - ~~**模型角色（model roles）**~~（已实现（2026-10-02），[ADR-0040](../decisions/ADR-0040-model-roles.md)）：`task` 为子代理选模型，`vision` 为不能看图的模型生成持久描述，`smol` 在后台生成会话标题。配置与接口见 [config.md](../architecture/config.md)，子代理模型与档位见 [subagent.md §9](../architecture/subagent.md#9-模型选择与-turn--agent-loop)，图片投影见 [context.md](../architecture/context.md)，事件与派生标题见 [events.md](../protocols/events.md)、[view.md](../protocols/view.md)，输入、折叠描述与设置页见 [tui.md](../apps/tui.md)。
 - **跨服务商推理内容回放到 Responses**（已实现，2026-10-01）：Responses 适配器丢弃缺少 `providerData.openai.itemId` 的推理片段，只记数量与原因的诊断，避免 SDK 警告；带标识的加密推理照常回放，混合历史和同服务商连续两轮均有离线测试。契约见 [providers.md](../architecture/providers.md) 第 4 节。
@@ -206,11 +206,12 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
   - **服务商页操作的可发现性（已实现）**：四项操作的底部提示与 `Delete` 删除确认入口已落地，当前会话服务商仍需先 `/model` 切换。见 [ADR-0030](../decisions/ADR-0030-dialog-settings-pages.md) 与 [tui.md §8](../apps/tui.md#8-服务商页)。
   - **底部信息**（生成速度与用量条已实现（2026-10-01），见 [tui.md](../apps/tui.md#2-界面布局)，见 [ADR-0038](../decisions/ADR-0038-transcript-polish.md)；估算费用移到 v0.6 `/cost`）：状态行补充生成速度（tokens/s）、~~本会话累计缓存命中率~~（已实现，见 [tui.md](../apps/tui.md) 状态栏）、估算费用（服务商未返回对应数据或未声明价格时不显示该项），并加上下文用量条（已用/窗口与百分比）。
   - **思考折叠**：已提前到 v0.4（ADR-0021 第 11 条）。
+  - **统一全屏页**（已实现，2026-10-04；[ADR-0045](../decisions/ADR-0045-fullscreen-page-shell.md)）：设置页、服务商页、模型选择页共用双栏骨架 `PageShell`，页面与对话框分层，设置页逐项保存。
   - **空会话欢迎区**（已实现（2026-10-01），见 [tui.md §2](../apps/tui.md#2-界面布局)，按 [ADR-0039](../decisions/ADR-0039-welcome-provider-dialogs.md)）：空会话全屏显示居中大字标，首条消息后对话开头保留小欢迎区；`/new` 后重新出现，`/resume` 打开有历史的会话不显示。视口不足 51 列或 12 行去掉字标，不足 4 行退回小欢迎区文字；大号欢迎区不写入回滚区、不导出，`--inline` 不变。
   - **点击展开折叠块**（已实现（2026-10-01），见 [tui.md](../apps/tui.md#11-鼠标折叠与-settings-设置页)；范围以 [ADR-0038](../decisions/ADR-0038-transcript-polish.md) 为准：工具行默认显示不变，只加展开）（点击判定方案见 [ADR-0030（已接受）](../decisions/ADR-0030-dialog-settings-pages.md)）：全屏模式下单击思考标题展开或收起这一段，工具行同理（默认输出形态保持不变；展开查看完整输出，diff 标题与省略行共用展开状态）。松开时才判定：按下后没有移动过才算点击，移动过（包括拖回原处）一律按拖选处理；展开状态按块记录，Ctrl+O 仍为全部展开/收起；展开或收起时保持被点的标题在屏幕原位。点击范围见 [tui.md 第 11 节](../apps/tui.md#11-鼠标折叠与-settings-设置页)。
   - **对话节奏与会话标题**（已实现（2026-10-01），见 [tui.md](../apps/tui.md#2-界面布局)；以 [ADR-0038](../decisions/ADR-0038-transcript-polish.md) 为准：用户前缀保留 `›`）：用户前缀保留 `›`，助手回答前加 `●`；输入框横线与 `/resume` 列表共用标题规则，ADR-0040 已增加后台生成标题，缺省仍取首条用户消息第一个文本块的原文首行。
 
-## v0.6 — 检查点与回退（已完成，2026-10-02 验收；费用排在服务商账号登录之后）
+## v0.6 — 检查点与回退（检查点与回退随 0.5.0 发布，2026-10-02 验收；`/cost` 待做）
 
 **前提**：v0.5 验收。进入实现前先写 ADR。检查点、回退与会话分叉见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)；`/cost` 另写 ADR。
 
@@ -222,7 +223,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - **回退与分叉界面（第 4 轮已实现，2026-10-02）**：TUI `/rewind`、`/fork`、空闲空输入双 Esc（600ms）、轮次列表、操作及预览确认、原文回填与图片提示；全屏沿用 ADR-0039 点击规则，`--inline` 仅键盘并追加通知。CLI 提供编号与默认取消的逐行流程，命令表、帮助与补全同步。已覆盖实际 Ink 帧与真实 Runtime 的 REPL 集成；2026-10-02 WT 实机验收 13 项通过；回退预览随后改为工作区内显示相对路径。
 - **用量与费用**（排在服务商账号登录之后）：`/cost` 显示本会话 token 用量与按已知价格估算的费用（价格未声明时只显示用量）。
 
-## 服务商账号登录（ADR-0042 已实现，2026-10-03；真实账号冒烟待维护者在场）
+## 服务商账号登录（随 0.5.0 发布；ADR-0042、ADR-0043 已实现，2026-10-03）
 
 **前提**：设计见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md)；真实账号冒烟需要维护者在场登录。调查依据见 [provider-oauth.md](../research/provider-oauth.md)。
 
@@ -234,7 +235,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - **OpenRouter 浏览器登录**：PKCE 换得普通 API key，之后与手填 key 无异。无系统后端时只显示一次 key 与环境变量命令。
 - **配置与界面**：`auth` 字段与协议分开、只在用户级生效；`/provider login|logout`、服务商页登录等待页与凭据状态。令牌不进入事件、诊断日志或 `/provider` 输出。
 
-离线测试已覆盖 ADR 第 10 节列出的假授权服务器、刷新、锁、请求快照、错误映射与 API key 回归。ChatGPT、Grok、OpenRouter 的真实账号冒烟尚未执行，不能用离线测试代替。
+离线测试已覆盖 ADR 第 10 节列出的假授权服务器、刷新、锁、请求快照、错误映射与 API key 回归。真实账号冒烟：ChatGPT 登录、对话、工具多轮与令牌刷新已通过（2026-10-03）；Grok 账号登录、对话与用量显示已通过（2026-10-03）；Grok 令牌刷新与 OpenRouter 浏览器登录待维护者在场测试。
 
 ## v0.7 — 扩展与分发（已排期，待设计）
 
@@ -244,17 +245,18 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 - **自定义斜杠命令**：项目 `.nocturne/commands/*.md` 注册为命令；**项目级自定义 agent**：复用 `trust.json` 的项目信任机制，设计定义文件的加载、权限收敛与提示词边界。
 - **子会话 ask 冒泡**：按 [subagent.md](../architecture/subagent.md) 第 7.1 节方案 (a)，把子会话的确认请求路由到父客户端；**可展开的子代理进度**：结构化进度替代单行摘要。
+- **MCP 服务器管理**：从 v0.5 移入，见 v0.5 同名条目。
 - **MCP 强杀清理**：评估纯 Node 看护进程，detached 启动，主进程消失后清理 MCP 进程树；沿用会话锁的"开机时间 + PID"判定规避 PID 复用。**MCP 图片与二进制内容**正常显示。
 - **分发**：npm 发布或单文件可执行，一行命令安装。
 - **补验证**：macOS 钥匙串与 Linux Secret Service 实机验证；Anthropic 格式思考强度在真实端点验证。
 
-## RPC 与桌面端（已排期）
+## RPC 与桌面端（RPC 第一版随 0.5.0 发布，实验性；桌面端已排期）
 
 **前提**：RPC 设计见 [ADR-0044](../decisions/ADR-0044-rpc-stdio.md)（已接受，2026-10-03）；桌面端选定 Tauri，另写 ADR。
 
 **内容**：
 
-- **RPC 第一版**（已实现，2026-10-04，待维护者验收）：`nctrn rpc --stdio`，JSON-RPC 按行分隔，一个后台一个 Runtime、一个客户端；事件按 `afterSeq` 回放后衔接实时推送。按 ADR-0044 第 10 节分五步实现，其中服务商配置改为数据接口（`describeProviderSetup` / `prepareProvider` + `commitProvider`），CLI 与 TUI 向导迁移其上。
+- **RPC 第一版**（已实现并验收，2026-10-04；随 0.5.0 以实验性发布）：`nctrn rpc --stdio`，JSON-RPC 按行分隔，一个后台一个 Runtime、一个客户端；事件按 `afterSeq` 回放后衔接实时推送。按 ADR-0044 第 10 节分五步实现，其中服务商配置改为数据接口（`describeProviderSetup` / `prepareProvider` + `commitProvider`），CLI 与 TUI 向导迁移其上。
 - **桌面端**：Tauri 外壳 + 随附 `nctrn` Node 单文件作后台，界面经 RPC 驱动；框架细节、前端技术栈与界面范围待桌面端 ADR。
 
 ## 之后（未排期）

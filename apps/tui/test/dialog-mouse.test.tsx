@@ -261,7 +261,7 @@ describe("dialog mouse app routing", () => {
       parser.feed(`\x1b[<0;${col};${row + 1}M\x1b[<0;${col};${row + 1}m`);
     };
     try {
-      await waitLong(() => expect(ui.lastFrame()).toContain("v0.4.0"));
+      await waitLong(() => expect(ui.lastFrame()).toContain("v0.5.0"));
       await changed(ui, () => ui.stdin.write("/provider model up m1"));
       ui.stdin.write("\r");
       await waitLong(() => expect(ui.lastFrame()).toContain("编辑档位"));

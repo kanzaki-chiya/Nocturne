@@ -286,7 +286,7 @@ it("120 行流式思考保持固定窗口，每帧至多改 6 行且不清屏", 
     stderr: io.stderr,
     patchConsole: false,
   });
-  await vi.waitFor(() => expect(io.writes.join("")).toContain("v0.4.0"));
+  await vi.waitFor(() => expect(io.writes.join("")).toContain("v0.5.0"));
   await session.submit({ text: "测试流式" });
   const frames: string[] = [];
   let frame = "";

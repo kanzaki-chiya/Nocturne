@@ -748,11 +748,11 @@ describe("TUI", () => {
     stdin.write("\r");
     await waitFor(() => created.length === 1);
     await waitFor(
-      () => (lastFrame() ?? "").includes("v0.4.0") && !(lastFrame() ?? "").includes("旧回答"),
+      () => (lastFrame() ?? "").includes("v0.5.0") && !(lastFrame() ?? "").includes("旧回答"),
     );
     const frame = lastFrame() ?? "";
     // 旧对话整体换出：欢迎区重新出现，翻阅提示与旧内容都不在
-    expect(frame).toContain("v0.4.0");
+    expect(frame).toContain("v0.5.0");
     expect(frame).not.toContain("旧回答");
     expect(frame).not.toContain("已向上翻阅");
     await created[0]?.submit({ text: "新问题" });
