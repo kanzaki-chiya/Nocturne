@@ -278,6 +278,41 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(text).toContain("~4800");
   });
 
+  it("/context 渲染 history 细分，为 0 的项省略（ADR-0046 §5）", async () => {
+    const { lines, io } = capture();
+    const session = fakeSession({
+      describeContext: () =>
+        ({
+          report: {
+            sections: [
+              {
+                name: "history",
+                source: "3 条",
+                chars: 400,
+                estimatedTokens: 100,
+                breakdown: {
+                  user: { chars: 200, estimatedTokens: 50 },
+                  assistant: { chars: 0, estimatedTokens: 0 },
+                  tool: { chars: 150, estimatedTokens: 40 },
+                  summary: { chars: 50, estimatedTokens: 10 },
+                },
+              },
+            ],
+            totalChars: 400,
+            estimatedTokens: 100,
+            budgetTokens: 100_000,
+          },
+          overBudget: false,
+        }) as ReturnType<RuntimeSession["describeContext"]>,
+    });
+    await runSlashCommand("/context", session, fakeRuntime, io);
+    const text = lines.join("");
+    expect(text).toContain("    user           200 chars  ~50 tok");
+    expect(text).toContain("    tool           150 chars  ~40 tok");
+    expect(text).toContain("    summary         50 chars  ~10 tok");
+    expect(text).not.toContain("assistant");
+  });
+
   it("/compact 调 compact；失败只显示不抛", async () => {
     let compacted = false;
     const session = fakeSession({

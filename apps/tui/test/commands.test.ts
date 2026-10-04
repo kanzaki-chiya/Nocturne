@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import type { RuntimeConfig, RuntimeSession, SessionShellInfo } from "@nocturne/core";
 
-import { runSlash, type ProviderBridge } from "../src/commands.js";
+import { contextLines, runSlash, type ProviderBridge } from "../src/commands.js";
 
 function fakeSession(overrides: Partial<RuntimeSession> = {}): RuntimeSession {
   return {
@@ -143,5 +143,52 @@ describe("TUI /provider model（ADR-0024 第 5 节）", () => {
       expect(r.text).toContain("model <名称>");
       expect(r.text).not.toContain("image");
     }
+  });
+});
+
+describe("TUI /context 面板（ADR-0046 第 5 节）", () => {
+  const contextSession = (breakdown?: object): RuntimeSession =>
+    fakeSession({
+      describeContext: () =>
+        ({
+          report: {
+            sections: [
+              { name: "system", source: "v1", chars: 100, estimatedTokens: 25 },
+              {
+                name: "history",
+                source: "3 entries",
+                chars: 400,
+                estimatedTokens: 100,
+                ...(breakdown !== undefined ? { breakdown } : {}),
+              },
+            ],
+            totalChars: 500,
+            estimatedTokens: 125,
+            budgetTokens: 100_000,
+          },
+          overBudget: false,
+        }) as ReturnType<RuntimeSession["describeContext"]>,
+    });
+
+  it("history 行下缩进列出细分，为 0 的项省略", () => {
+    const text = contextLines(
+      contextSession({
+        user: { chars: 200, estimatedTokens: 50 },
+        assistant: { chars: 0, estimatedTokens: 0 },
+        tool: { chars: 150, estimatedTokens: 40 },
+        summary: { chars: 50, estimatedTokens: 10 },
+      }),
+    ).join("\n");
+    expect(text).toContain("history");
+    expect(text).toContain("    user           200 chars  ~50 tok");
+    expect(text).toContain("    tool           150 chars  ~40 tok");
+    expect(text).toContain("    summary         50 chars  ~10 tok");
+    expect(text).not.toContain("assistant");
+  });
+
+  it("无 breakdown（旧报告）时只渲染分区行", () => {
+    const text = contextLines(contextSession()).join("\n");
+    expect(text).toContain("history");
+    expect(text).not.toContain("    user");
   });
 });

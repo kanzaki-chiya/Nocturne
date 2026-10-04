@@ -491,10 +491,20 @@ export async function runSlashCommand(
     }
     case "/context": {
       const { report, overBudget } = session.describeContext();
-      const lines = report.sections.map(
-        (s) =>
-          `  ${s.name.padEnd(12)} ${String(s.chars).padStart(7)} chars  ~${s.estimatedTokens} tok  ${s.source}${s.truncated === true ? "  [已截断]" : ""}`,
-      );
+      // ADR-0046 §5：history 段在下一级缩进列出对话历史细分（为 0 的项省略）
+      const lines = report.sections.flatMap((s) => {
+        const row = `  ${s.name.padEnd(12)} ${String(s.chars).padStart(7)} chars  ~${s.estimatedTokens} tok  ${s.source}${s.truncated === true ? "  [已截断]" : ""}`;
+        const breakdown = s.breakdown;
+        if (breakdown === undefined) return [row];
+        const sub = (["user", "assistant", "tool", "summary"] as const)
+          .map((key) => ({ key, ...breakdown[key] }))
+          .filter((v) => v.chars > 0 || v.estimatedTokens > 0)
+          .map(
+            (v) =>
+              `    ${v.key.padEnd(10)} ${String(v.chars).padStart(7)} chars  ~${v.estimatedTokens} tok`,
+          );
+        return [row, ...sub];
+      });
       // ADR-0023：图片附件按固定 1600 tok/张计入总量，单列一行
       if (report.images !== undefined) {
         lines.push(

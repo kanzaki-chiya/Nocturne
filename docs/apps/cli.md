@@ -121,7 +121,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 - 未知命令打印提示（不报错退出）。命令在 Turn 进行中给出"会话忙"提示（`setModel` / `compact` 的前置条件是空闲，见 events.md 第 7 节）。
 - `/model` 参数先按模型 id 精确匹配：匹配到已知 id（含 `provider/model` 归一化后）时直选切换，行为与 v0.1 一致；未匹配时按关键词过滤列表（子串、大小写不敏感），不切换。
 - `/model <id>` 在 Provider 内切换：裸 id 与 `provider/model` 写法都按 `--model` 同规则归一化（前缀等于当前 Provider 时剥掉、是另一种 api-type 时报错、其余含斜杠的值按模型 id 原样），再以 `<当前 Provider>/<id>` 调 `session.setModel`。CLI 的 Provider 配置以 `allowUndeclaredModels` 创建（`strictModels=false`），清单外的模型 id 也可切换，能力回退内置目录/保守默认（见 provider-api.md）。
-- `/context` 渲染 `ContextReport`：各 section 的名称、来源、字符数、估算 token，加上合计 `estimatedTokens / budgetTokens` 与 `overBudget`；请求会携带图片附件时另有 `images <count> 张 ~<tok> tok` 行（`report.images`，按估算模式计数，见 [context.md](../architecture/context.md) 第 3、5 节）。查询只读，不构建请求也不产生事件。
+- `/context` 渲染 `ContextReport`：各 section 的名称、来源、字符数、估算 token，加上合计 `estimatedTokens / budgetTokens` 与 `overBudget`；`history` 段下一级缩进列出 `breakdown` 细分（user/assistant/tool/summary，为 0 的项省略，见 [context.md](../architecture/context.md) 第 4 节"可解释"）；请求会携带图片附件时另有 `images <count> 张 ~<tok> tok` 行（`report.images`，按估算模式计数，见 [context.md](../architecture/context.md) 第 3、5 节）。查询只读，不构建请求也不产生事件。
 - `/compact` 输出结果摘要（`throughSeq`、摘要字符数）；没有可压缩内容或摘要失败时打印原因，返回码不产生——REPL 命令的错误只显示，不影响进程。
 - **`/resume` 会话内切换**：复用第 2 节的会话打开语义（锁冲突 `session_locked`、日志损坏、跨目录默认拒绝需 `y/N` 确认）。Turn 进行中拒绝并提示先中断；**先打开新会话**——失败时报错并留在原会话；打开成功后才 `session.close()` 旧会话（释放锁），打印一行"已切换到会话 \<id\>"与恢复摘要（`session.recovery`，若有修复）。该打开逻辑由 CLI 统一实现并以回调注入 TUI（[apps/tui.md](tui.md) 第 6 节）。
 - `/resume` 列表为分叉会话显示「分叉」标记，标题沿用复制日志中的最新标题，见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
