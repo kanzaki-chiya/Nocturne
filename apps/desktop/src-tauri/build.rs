@@ -6,6 +6,7 @@ fn main() {
                 "backend_send",
                 "backend_close",
                 "node_probe",
+                "plain_workspace",
             ]),
         ),
     )

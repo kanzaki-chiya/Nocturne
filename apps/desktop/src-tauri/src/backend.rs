@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use crate::lines::{LineSplitter, Split, TruncatingLineSplitter};
 use crate::node;
+use crate::workspace;
 
 /// stdout 单行上限 64 MiB；超过就强杀后台（宁可显式失败也不悄悄丢报文）。
 const STDOUT_MAX_LINE: usize = 64 * 1024 * 1024;
@@ -310,6 +311,31 @@ pub async fn node_probe(state: tauri::State<'_, Arc<AppState>>) -> CmdResult<nod
     let probe = node::probe_node(state.resource_dir());
     state.set_node_probe(probe.clone());
     Ok(probe)
+}
+
+/// 普通对话工作区：解析 `<NOCTURNE_HOME>/workspace`，不存在就创建，返回绝对路径。
+/// 与 backend_open 分开：前端归类「对话」需要这个路径、目录必须由外壳创建，
+/// 而 backend_open 仍只接受已存在的目录，不给前端"创建任意目录"的能力。
+#[tauri::command]
+pub async fn plain_workspace() -> CmdResult<String> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| CommandError::new("workspace_unavailable", format!("无法取得当前目录：{e}")))?;
+    let env = std::env::var_os("NOCTURNE_HOME");
+    let home = std::env::home_dir();
+    let nocturne_home = workspace::resolve_nocturne_home(env, home, &cwd).ok_or_else(|| {
+        CommandError::new(
+            "workspace_unavailable",
+            "无法确定用户主目录，也不能解析 NOCTURNE_HOME",
+        )
+    })?;
+    let path = workspace::plain_workspace_path(&nocturne_home);
+    workspace::ensure_dir(&path).map_err(|e| {
+        CommandError::new(
+            "workspace_unavailable",
+            format!("无法创建普通对话工作区 {}：{e}", path.display()),
+        )
+    })?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 #[tauri::command]

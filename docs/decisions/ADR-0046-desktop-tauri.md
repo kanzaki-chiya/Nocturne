@@ -168,5 +168,6 @@ Rust 外壳提供四个 Tauri 命令，前端用它们实现 `LineTransport`：
 6. **界面状态的存放位置**（修订第 5 节"存在应用数据目录"）。置顶、手动添加与隐藏的项目等界面状态存 WebView 的 localStorage，键与结构见 [desktop.md](../apps/desktop.md)。
 7. **Node 版本**（修订第 2 节"与 CLI 的 engines 一致"）。实现按 `>= 24.14.0` 检查，CLI 与仓库根的 `engines` 同步提到 `>=24.14`。
 8. **第五个外壳命令**（补充第 3 节）。第 4 步的后台日志面板需要查看运行中后台的 stderr，增加 `backend_stderr { backendId } → string[]`，返回外壳缓存的最近 500 行，前端需要时才拉取，stderr 平时不进前端。第 1 步只在后台退出时随关闭通知带出最近 500 行。
-9. **超长行**（补充第 3 节）。stdout 单行超过 64 MiB 时，外壳在 stderr 记一行说明并结束该后台，不丢弃这条报文后继续运行，避免对应请求一直挂起。
-10. **文档时间**（修订第 9 节第 4 步）。`docs/apps/desktop.md` 在第 1 步已新增，后续各步随实现更新。
+9. **普通对话工作区命令**（补充第 3 节）。增加 `plain_workspace {} → string`：解析 `<NOCTURNE_HOME>/workspace`（`NOCTURNE_HOME` 规则与 Core 相同），不存在时创建（POSIX 上新建目录 0700），返回绝对路径。单独成命令而不并入 `backend_open`，是因为前端归类「对话」需要这个路径、目录必须由外壳创建，而 `backend_open` 仍只接受已存在的目录，前端不能借它创建任意目录。外壳命令因此共六个（含第 4 步的 `backend_stderr`）。
+10. **超长行**（补充第 3 节）。stdout 单行超过 64 MiB 时，外壳在 stderr 记一行说明并结束该后台，不丢弃这条报文后继续运行，避免对应请求一直挂起。
+11. **文档时间**（修订第 9 节第 4 步）。`docs/apps/desktop.md` 在第 1 步已新增，后续各步随实现更新。

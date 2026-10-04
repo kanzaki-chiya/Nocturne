@@ -5,6 +5,7 @@
 mod backend;
 mod job;
 mod lines;
+mod workspace;
 mod node;
 
 use backend::{close_backend, AppState};
@@ -50,6 +51,7 @@ pub fn run() {
             backend::backend_send,
             backend::backend_close,
             backend::node_probe,
+            backend::plain_workspace,
         ])
         .setup(|app| {
             let resource_dir = app

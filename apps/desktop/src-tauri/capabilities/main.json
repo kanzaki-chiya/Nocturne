@@ -8,6 +8,7 @@
     "allow-backend-send",
     "allow-backend-close",
     "allow-node-probe",
+    "allow-plain-workspace",
     "dialog:allow-open",
     {
       "identifier": "opener:allow-open-url",
