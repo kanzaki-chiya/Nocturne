@@ -7,12 +7,13 @@
 ## 1. 进程结构与后台策略
 
 - **一个项目一个后台**：`backend_open` 以项目目录为 cwd 启动 `node <脚本> rpc --stdio`，同一项目的会话共用这个后台。会话列表是全局的（`<NOCTURNE_HOME>/sessions`），前端用任意一个运行中的后台 `runtime.listSessions()` 取全部会话。
+- **常驻后台**：应用启动即以普通对话工作区（见第 3 节）为 cwd 开一个后台，用它列出全部会话，窗口打开期间常驻；项目的后台仍按原规则在打开该项目的会话时才启动（第 2 步实现）。因此第一次启动、没有任何项目时，左栏也能直接列出全部会话。
 - **后台生命周期**：窗口关闭时对所有后台并行执行关闭（关 stdin → 等自行退出 → 5 秒强杀），全部结束后退出应用；Windows 上后台在 spawn 后被放入全局 Job Object（`KILL_ON_JOB_CLOSE`），外壳被强杀时后台一起结束。Job 创建或加入失败不致命，往该后台的 stderr 缓冲记一行说明。
 - **日志边界**：stdin/stdout 的内容在任何地方都不记录、不打印、不写盘（报文里可能含密钥明文）；stderr 按行截断（64 KiB/行）保留最近 500 行在内存中，随 `closed` 消息交给前端。
 
 ## 2. 命令与消息格式
 
-Rust 外壳提供四个 Tauri 命令（经 `tauri_build` 的 `AppManifest::commands` 声明为应用命令，在 `capabilities/main.json` 中逐个授予 `allow-backend-open` 等权限），错误统一返回可序列化的 `{ code, message }`（message 为中文）：`node_unavailable`、`backend_script_missing`、`invalid_workspace`、`spawn_failed`、`unknown_backend`、`io`。
+Rust 外壳提供五个 Tauri 命令（经 `tauri_build` 的 `AppManifest::commands` 声明为应用命令，在 `capabilities/main.json` 中逐个授予 `allow-backend-open` 等权限；第 4 步再加 `backend_stderr`，共六个），错误统一返回可序列化的 `{ code, message }`（message 为中文）：`node_unavailable`、`backend_script_missing`、`invalid_workspace`、`spawn_failed`、`unknown_backend`、`workspace_unavailable`、`io`。
 
 | 命令 | 参数 → 结果 | 说明 |
 |---|---|---|
@@ -20,6 +21,9 @@ Rust 外壳提供四个 Tauri 命令（经 `tauri_build` 的 `AppManifest::comma
 | `backend_send` | `{ backendId, line }` → `null` | 写 `line + \n` 到该后台 stdin 并 flush；每个后台的 stdin 有独立 Mutex |
 | `backend_close` | `{ backendId }` → `null` | 关 stdin、等自行退出、5 秒超时强杀，进程确实结束才返回；重复调用或对已退出的后台调用返回 `null` |
 | `node_probe` | `{}` → `NodeProbe` | 每次重新探测并刷新缓存（说明页的「重新检测」） |
+| `plain_workspace` | `{}` → 绝对路径字符串 | 解析 `<NOCTURNE_HOME>/workspace`（`NOCTURNE_HOME` 规则与 Core `nocturneHome()` 一致），不存在时创建（POSIX 上新建目录 0700），返回绝对路径；失败报 `workspace_unavailable` |
+
+`plain_workspace` 单独成命令而不并入 `backend_open`：前端归类「对话」需要这个路径且目录必须由外壳创建，而 `backend_open` 仍只接受已存在的目录——前端不能借它创建任意目录。
 
 Channel 消息（serde tag `kind`）：
 
@@ -41,7 +45,7 @@ type BackendMessage =
 2. 资源目录 `<resource_dir>/node/node.exe`（非 Windows 为 `node`；本版不随附，`not-bundled`）；
 3. `PATH` 逐目录找 `node.exe` / 可执行的 `node`。
 
-找到后运行 `<node> --version`（5 秒超时，Windows 加 `CREATE_NO_WINDOW`；`.cmd`/`.bat` 脚本由 Rust std 自动经 cmd.exe 执行），取 stdout 第一行。版本解析接受可选 `v` 前缀、忽略 `-`/`+` 后缀，要求 ≥ 24.14.0（ADR-0046 第 2 节；CLI 的 `engines` 目前写的是 `>=24`）。
+找到后运行 `<node> --version`（5 秒超时，Windows 加 `CREATE_NO_WINDOW`；`.cmd`/`.bat` 脚本由 Rust std 自动经 cmd.exe 执行），取 stdout 第一行。版本解析接受可选 `v` 前缀、忽略 `-`/`+` 后缀，要求 ≥ 24.14.0（ADR-0046 第 2 节；与根及 CLI 的 `engines` `>=24.14` 一致）。
 
 `NodeProbe` 结构（camelCase；步骤恒为 env/bundled/path 三项，`status` 为 kebab-case）：
 
@@ -68,21 +72,21 @@ interface NodeProbe {
 
 ## 5. 会话树与界面状态
 
-左栏是按项目分组的会话树（`src/session-tree.ts` 为纯函数，`src/Sidebar.tsx` 渲染）：
+左栏结构从上到下（`src/session-tree.ts` 为纯函数，`src/Sidebar.tsx` 渲染）：「＋ 新会话」（本步置灰不可点，第 2 步实现）→「置顶」→「对话」→「项目」。
 
-- 项目 = 会话 `cwd` 的归并键 ∪ 手动添加的项目 − 隐藏项目。`projectKey(path)` 去末尾分隔符（根目录除外）；像 Windows 路径（`盘符:` 或含 `\`）则统一 `\` 并小写。显示用第一次见到的原始路径，项目名取末段。
-- 排序：有会话的项目按其最新 `mtimeMs` 降序，其后是无会话的手动项目（按添加顺序）。
-- 项目内会话按 `mtimeMs` 降序，已置顶的不在项目内重复；默认显示前 5 条，其余计入「展开显示（还有 N 个）」；展开后全显示并可「收起」。项目可折叠（折叠时标题右侧显示会话总数）。
-- 置顶区在项目区上方，按置顶数组顺序列出仍存在的会话，每条标出所属项目名；置顶不受项目隐藏影响。右键会话行可置顶/取消置顶，右键项目标题可「从列表移除」（加入隐藏集合并从手动项目删除，不删会话）。
+- **空会话过滤**：`firstText` 缺省或 trim 后为空且未锁定的会话不显示（置顶、对话、项目都过滤）；被锁定的空会话照常显示为「未命名会话」。
+- **对话**：普通对话工作区 `<NOCTURNE_HOME>/workspace` 的会话平铺列出（cwd 经 `projectKey` 归并比较），按 `mtimeMs` 降序，默认前 5 条 +「展开显示（还有 N 个）」/「收起」；已置顶的不重复出现，置顶的对话会话项目标签为「对话」。手动项目里路径等于工作区的也不显示为项目。还没拿到工作区路径时所有会话按项目处理。
+- **项目**：项目 = 其余会话 `cwd` 的归并键 ∪ 手动添加的项目 − 隐藏项目。`projectKey(path)` 去末尾分隔符（根目录除外）；像 Windows 路径（`盘符:` 或含 `\`）则统一 `\` 并小写。显示用第一次见到的原始路径，项目名取末段。有会话的项目按最新 `mtimeMs` 降序，其后是无会话的手动项目（按添加顺序）；项目内规则同对话区。「项目」标题行右侧的「…」（全部折叠/全部展开）与「＋」（打开项目）在悬停时显示；项目行悬停显示的「＋」在该项目新建会话（第 2 步实现，本步置灰）。
+- **置顶**：按置顶数组顺序列出仍存在的会话，每条标出所属项目名（对话为「对话」）；置顶不受项目隐藏影响。右键会话行置顶/取消置顶，右键项目标题「从列表移除」（加入隐藏集合并从手动项目删除，不删会话）。
 - 会话行：`firstText ?? "未命名会话"`，meta 为相对时间（<60s「现在」<1h「N 分钟」<24h「N 小时」<48h「昨天」<30d「N 天」否则 `YYYY-MM-DD`，锁定加「🔒 」前缀）；状态 `idle`/`running`/`pending` 本步恒为 `idle`，组件已支持另外两种（`.dot.run`、`.dot.warn` + `.meta.pend`「待确认」）。
 
-界面状态存 localStorage 键 `nocturne.desktop.prefs.v1`：`{ pinned: string[]; projects: string[]; hidden: string[]; lastProject: string | null }`（会话 id、原始路径、项目 key）。读写失败均不影响本次运行，写失败时 `persistent` 标为 false（`src/prefs.ts`）。
+界面状态存 localStorage 键 `nocturne.desktop.prefs.v1`：`{ pinned: string[]; projects: string[]; hidden: string[] }`（会话 id、原始路径、项目 key；旧数据里的 `lastProject` 字段忽略）。读写失败均不影响本次运行，写失败时 `persistent` 标为 false（`src/prefs.ts`）。
 
-启动流程：`node_probe` → 不 ok 显示说明页；ok 后依次尝试 `lastProject` 与各手动项目做 `ensure`（打开后台 + `initialize` 握手），全失败显示错误与「打开项目…」；都没有项目时左栏只显示「打开项目…」。连上后 `listSessions()`（不传 cwd）。列表在连上后、打开项目后、窗口重新获得焦点时（节流 ≥ 2 秒）刷新。「打开项目…」走系统文件夹对话框 → 加入手动项目、取消隐藏、设为 `lastProject`；没有运行中的后台时为它 `ensure`。
+启动流程：`node_probe` → 不 ok 显示说明页；ok 后 `plain_workspace` 取普通对话工作区 → `ensure` 开常驻后台（握手）→ `listSessions()`（不传 cwd）。`plain_workspace` 或 `ensure` 失败显示真实错误与「重试」，后台退出横幅的「重新连接」同样重走这条链。「打开项目…」（「项目」标题行的「＋」）走系统文件夹对话框 → 加入手动项目、取消隐藏、刷新列表，不启动后台。列表在连上后、打开项目后、窗口重新获得焦点时（节流 ≥ 2 秒）刷新。主区未选中会话时提示「从左侧选择一个会话」，一个会话都没有时提示「还没有会话」。
 
 ## 6. 安全边界
 
-- `capabilities/main.json` 只授予：四个应用命令（`allow-backend-open/send/close`、`allow-node-probe`）、`dialog:allow-open`、`opener:allow-open-url`（scope 只允许 `https:*` 与 `http://127.0.0.1:*` / `http://localhost:*`）。不启用 fs、shell、http 插件，`withGlobalTauri: false`。
+- `capabilities/main.json` 只授予：五个应用命令（`allow-backend-open/send/close`、`allow-node-probe`、`allow-plain-workspace`）、`dialog:allow-open`、`opener:allow-open-url`（scope 只允许 `https:*` 与 `http://127.0.0.1:*` / `http://localhost:*`）。不启用 fs、shell、http 插件，`withGlobalTauri: false`。
 - CSP：`default-src 'self'`；`connect-src` 只允许 `ipc:`/`http://ipc.localhost`；图片额外允许 `blob:`（图片附件预览用）；禁 `object-src`、`base-uri`、`form-action`、`frame-ancestors`。dev 模式（`devCsp`）仅为 Vite 额外放开 `ws://localhost:1420`、`http://localhost:1420` 与 style `'unsafe-inline'`。
 - 外链白名单（`src/external-url.ts`）：`https:` 放行；`http:` 仅 `127.0.0.1` 与 `localhost`（本机回调页）；其余协议与解析失败忽略不打开。Rust 侧 opener scope 与之一致。
 - 前端只用本机字体，不加载远程资源；不持久化任何凭据或会话内容。

@@ -56,7 +56,7 @@ nocturne/
         ├── index.html、vite.config.ts、vitest.config.ts
         ├── src/                 host 抽象、TauriLineTransport、BackendPool、会话树、界面
         ├── test/                vitest + jsdom 离线测试（进默认测试集）
-        └── src-tauri/           Rust 外壳：四个命令、行切分、Node 查找、Job Object（cargo test 手动跑）
+        └── src-tauri/           Rust 外壳：五个命令、行切分、Node 查找、Job Object（cargo test 手动跑）
 ```
 
 单元测试与源文件放在一起（`*.test.ts`）；跨模块的 Turn 级测试放在 `packages/core/test/`，使用按脚本返回流式事件的假 Provider，使 Agent Loop 的行为可以确定性地测试，不依赖真实模型服务。
