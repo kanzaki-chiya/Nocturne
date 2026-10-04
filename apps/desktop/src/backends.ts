@@ -79,6 +79,18 @@ export class BackendPool {
     return opening;
   }
 
+  /** 项目最后一个会话关闭后结束后台；主动退出不触发崩溃横幅。 */
+  async release(workspace: string): Promise<void> {
+    const key = projectKey(workspace);
+    const pending = this.pending.get(key);
+    if (pending !== undefined) await pending;
+    const entry = this.entries.get(key);
+    if (entry === undefined) return;
+    this.entries.delete(key);
+    entry.client.close();
+    await entry.transport.exited;
+  }
+
   /** 任意一个运行中的 client；会话列表是全局的，用哪个后台查都一样 */
   any(): RpcClient | undefined {
     for (const entry of this.entries.values()) return entry.client;

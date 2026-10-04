@@ -5,8 +5,8 @@
 mod backend;
 mod job;
 mod lines;
-mod workspace;
 mod node;
+mod workspace;
 
 use backend::{close_backend, AppState};
 use std::path::PathBuf;
@@ -16,12 +16,12 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
-/// 窗口关闭时每个后台的关闭超时（与 backend_close 相同）。
+/// 页面重载或窗口关闭时每个后台的关闭超时（与 backend_close 相同）。
 const SHUTDOWN_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// 对所有后台并行执行关闭（各自超时后强杀），全部结束才返回。
-fn close_all_backends(app: &AppHandle) {
-    let backends = app.state::<Arc<AppState>>().backends_snapshot();
+/// 对捕获的后台并行执行关闭（各自超时后强杀），全部结束才返回。
+/// 不在清理线程中重新读取状态，避免旧页面清理关掉新页面后台。
+fn close_backends(backends: Vec<Arc<backend::Backend>>) {
     let handles: Vec<_> = backends
         .into_iter()
         .map(|backend| thread::spawn(move || close_backend(&backend, SHUTDOWN_CLOSE_TIMEOUT)))
@@ -36,23 +36,30 @@ fn close_all_backends(app: &AppHandle) {
 fn begin_shutdown(app: &AppHandle) {
     let app = app.clone();
     thread::spawn(move || {
-        close_all_backends(&app);
+        close_backends(app.state::<Arc<AppState>>().backends_snapshot());
         app.exit(0);
     });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let commands: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        backend::backend_send,
+        backend::backend_close,
+        backend::node_probe,
+        backend::plain_workspace,
+    ];
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![
-            backend::backend_open,
-            backend::backend_send,
-            backend::backend_close,
-            backend::node_probe,
-            backend::plain_workspace,
-        ])
+        .invoke_handler(move |invoke| {
+            if invoke.message.command() == "backend_open" {
+                backend::handle_backend_open(invoke);
+                true
+            } else {
+                commands(invoke)
+            }
+        })
         .setup(|app| {
             let resource_dir = app
                 .path()
@@ -63,6 +70,21 @@ pub fn run() {
             state.init_job();
             app.manage(state);
             Ok(())
+        })
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main"
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
+            {
+                // Tauri 创建初始窗口早于 setup；此时尚无状态，也不可能有后台。
+                let Some(state) = webview.try_state::<Arc<AppState>>() else {
+                    return;
+                };
+                // 换代必须在钩子内完成；不能放进可能晚于新页面启动的清理线程。
+                let previous = state.begin_page_load();
+                if !previous.is_empty() {
+                    thread::spawn(move || close_backends(previous));
+                }
+            }
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

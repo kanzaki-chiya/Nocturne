@@ -11,6 +11,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use tauri::Manager;
+
 use crate::lines::{LineSplitter, Split, TruncatingLineSplitter};
 use crate::node;
 use crate::workspace;
@@ -32,8 +34,13 @@ const STDOUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum BackendMessage {
-    Line { line: String },
-    Closed { code: Option<i32>, stderr: Vec<String> },
+    Line {
+        line: String,
+    },
+    Closed {
+        code: Option<i32>,
+        stderr: Vec<String>,
+    },
 }
 
 /// 命令错误：可序列化，message 为中文用户可读文案。
@@ -234,9 +241,20 @@ pub fn close_backend(backend: &Arc<Backend>, timeout: Duration) {
     }
 }
 
+/// 页面代际与后台登记共用一把锁：重载不能漏掉已启动但尚未登记的后台。
+struct BackendRegistry {
+    page_generation: u64,
+    backends: HashMap<u32, PageBackend>,
+}
+
+struct PageBackend {
+    generation: u64,
+    backend: Arc<Backend>,
+}
+
 /// 应用状态。
 pub struct AppState {
-    backends: Mutex<HashMap<u32, Arc<Backend>>>,
+    registry: Mutex<BackendRegistry>,
     next_backend_id: AtomicU32,
     node_probe_cache: Mutex<Option<node::NodeProbe>>,
     resource_dir: std::path::PathBuf,
@@ -252,7 +270,10 @@ pub struct AppState {
 impl AppState {
     pub fn new(resource_dir: std::path::PathBuf) -> Self {
         Self {
-            backends: Mutex::new(HashMap::new()),
+            registry: Mutex::new(BackendRegistry {
+                page_generation: 0,
+                backends: HashMap::new(),
+            }),
             next_backend_id: AtomicU32::new(1),
             node_probe_cache: Mutex::new(None),
             resource_dir,
@@ -275,16 +296,66 @@ impl AppState {
     }
 
     pub fn backend(&self, id: u32) -> Option<Arc<Backend>> {
-        lock(&self.backends).get(&id).cloned()
+        lock(&self.registry)
+            .backends
+            .get(&id)
+            .map(|entry| Arc::clone(&entry.backend))
     }
 
     pub fn remove_backend(&self, id: u32) {
-        lock(&self.backends).remove(&id);
+        lock(&self.registry).backends.remove(&id);
     }
 
-    /// 所有后台的快照（用于窗口关闭时并行关闭）。
+    /// 所有后台的快照，包含正在被旧页面清理的后台，供整个应用退出时使用。
     pub fn backends_snapshot(&self) -> Vec<Arc<Backend>> {
-        lock(&self.backends).values().cloned().collect()
+        lock(&self.registry)
+            .backends
+            .values()
+            .map(|entry| Arc::clone(&entry.backend))
+            .collect()
+    }
+
+    fn page_generation(&self) -> u64 {
+        lock(&self.registry).page_generation
+    }
+
+    /// 在页面开始加载的回调内同步换代；清理线程只使用返回的旧代快照。
+    pub fn begin_page_load(&self) -> Vec<Arc<Backend>> {
+        let mut registry = lock(&self.registry);
+        let previous = registry.page_generation;
+        registry.page_generation += 1;
+        registry
+            .backends
+            .values()
+            .filter(|entry| entry.generation == previous)
+            .map(|entry| Arc::clone(&entry.backend))
+            .collect()
+    }
+
+    /// 启动与登记保持原子性；探测期间重载的旧请求不会启动任何进程。
+    /// 退出监督也用此锁移出后台，避免快速退出先移除、后登记而留下死条目。
+    fn open_in_page(
+        &self,
+        generation: u64,
+        spawn: impl FnOnce(u32) -> CmdResult<Arc<Backend>>,
+    ) -> CmdResult<u32> {
+        let mut registry = lock(&self.registry);
+        if self.shutting_down.load(Ordering::SeqCst) || registry.page_generation != generation {
+            return Err(CommandError::new(
+                "unknown_backend",
+                "页面已重新加载或应用正在退出，后台启动已取消",
+            ));
+        }
+        let id = self.next_backend_id.fetch_add(1, Ordering::SeqCst);
+        let backend = spawn(id)?;
+        registry.backends.insert(
+            id,
+            PageBackend {
+                generation,
+                backend,
+            },
+        );
+        Ok(id)
     }
 
     pub fn resource_dir(&self) -> &Path {
@@ -297,7 +368,9 @@ impl AppState {
         if cache.is_none() {
             *cache = Some(node::probe_node(&self.resource_dir));
         }
-        cache.clone().unwrap_or_else(|| node::probe_node(&self.resource_dir))
+        cache
+            .clone()
+            .unwrap_or_else(|| node::probe_node(&self.resource_dir))
     }
 
     fn set_node_probe(&self, probe: node::NodeProbe) {
@@ -318,8 +391,9 @@ pub async fn node_probe(state: tauri::State<'_, Arc<AppState>>) -> CmdResult<nod
 /// 而 backend_open 仍只接受已存在的目录，不给前端"创建任意目录"的能力。
 #[tauri::command]
 pub async fn plain_workspace() -> CmdResult<String> {
-    let cwd = std::env::current_dir()
-        .map_err(|e| CommandError::new("workspace_unavailable", format!("无法取得当前目录：{e}")))?;
+    let cwd = std::env::current_dir().map_err(|e| {
+        CommandError::new("workspace_unavailable", format!("无法取得当前目录：{e}"))
+    })?;
     let env = std::env::var_os("NOCTURNE_HOME");
     let home = std::env::home_dir();
     let nocturne_home = workspace::resolve_nocturne_home(env, home, &cwd).ok_or_else(|| {
@@ -338,9 +412,49 @@ pub async fn plain_workspace() -> CmdResult<String> {
     Ok(path.to_string_lossy().into_owned())
 }
 
-#[tauri::command]
-pub async fn backend_open(
-    state: tauri::State<'_, Arc<AppState>>,
+/// 在同步 invoke 分发阶段捕获页面代际，不能等异步命令开始执行才读取。
+/// Tauri 的默认 async 命令包装器会把参数提取也延迟到异步任务中。
+pub fn handle_backend_open(invoke: tauri::ipc::Invoke) {
+    use tauri::ipc::{CommandArg, CommandItem};
+
+    let state = Arc::clone(
+        invoke
+            .message
+            .webview_ref()
+            .state::<Arc<AppState>>()
+            .inner(),
+    );
+    let generation = state.page_generation();
+    let workspace = String::from_command(CommandItem {
+        plugin: None,
+        name: "backend_open",
+        key: "workspace",
+        message: &invoke.message,
+        acl: &invoke.acl,
+    });
+    let channel = tauri::ipc::Channel::<BackendMessage>::from_command(CommandItem {
+        plugin: None,
+        name: "backend_open",
+        key: "channel",
+        message: &invoke.message,
+        acl: &invoke.acl,
+    });
+    let (workspace, channel) = match (workspace, channel) {
+        (Ok(workspace), Ok(channel)) => (workspace, channel),
+        (Err(error), _) | (_, Err(error)) => {
+            invoke.resolver.invoke_error(error);
+            return;
+        }
+    };
+    let resolver = invoke.resolver;
+    tauri::async_runtime::spawn_blocking(move || {
+        resolver.respond(backend_open(&state, generation, workspace, channel).map_err(Into::into));
+    });
+}
+
+fn backend_open(
+    state: &Arc<AppState>,
+    generation: u64,
     workspace: String,
     channel: tauri::ipc::Channel<BackendMessage>,
 ) -> CmdResult<u32> {
@@ -359,10 +473,7 @@ pub async fn backend_open(
             "没有找到满足要求的 Node.js（需要 v24.14.0 或更高版本）",
         ));
     }
-    let node_path = probe
-        .selected
-        .map(|s| s.path)
-        .unwrap_or_default();
+    let node_path = probe.selected.map(|s| s.path).unwrap_or_default();
 
     let script = node::backend_script(state.resource_dir());
     if !script.is_file() {
@@ -389,50 +500,44 @@ pub async fn backend_open(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let id = state.next_backend_id.fetch_add(1, Ordering::SeqCst);
-    let state_arc = Arc::clone(state.inner());
-    let backend = spawn_backend(
-        id,
-        command,
-        move |message| {
-            let _ = channel.send(message);
-        },
-        move |id| {
-            state_arc.remove_backend(id);
-        },
-    )
-    .map_err(|e| {
-        CommandError::new(
-            "spawn_failed",
-            format!("无法启动后台进程：{e}"),
+    state.open_in_page(generation, |id| {
+        let state_arc = Arc::clone(state);
+        let backend = spawn_backend(
+            id,
+            command,
+            move |message| {
+                let _ = channel.send(message);
+            },
+            move |id| {
+                state_arc.remove_backend(id);
+            },
         )
-    })?;
+        .map_err(|e| CommandError::new("spawn_failed", format!("无法启动后台进程：{e}")))?;
 
-    // Windows：放进 Job Object，外壳被强杀时后台一起结束。失败不致命，记 stderr。
-    #[cfg(windows)]
-    {
-        let job = lock(&state.job);
-        match job.as_ref() {
-            Some(job) => {
-                if let Err(e) = job.assign_process(backend_pid(&backend)) {
+        // Windows：放进 Job Object，外壳被强杀时后台一起结束。失败不致命，记 stderr。
+        #[cfg(windows)]
+        {
+            let job = lock(&state.job);
+            match job.as_ref() {
+                Some(job) => {
+                    if let Err(e) = job.assign_process(backend_pid(&backend)) {
+                        backend.push_stderr_note(format!(
+                            "[nocturne-desktop] 无法把后台加入 Job Object：{e}"
+                        ));
+                    }
+                }
+                None => {
+                    let reason = lock(&state.job_error)
+                        .clone()
+                        .unwrap_or_else(|| "Job Object 不可用".into());
                     backend.push_stderr_note(format!(
-                        "[nocturne-desktop] 无法把后台加入 Job Object：{e}"
+                        "[nocturne-desktop] {reason}，外壳被强杀时此后台可能残留"
                     ));
                 }
             }
-            None => {
-                let reason = lock(&state.job_error)
-                    .clone()
-                    .unwrap_or_else(|| "Job Object 不可用".into());
-                backend.push_stderr_note(format!(
-                    "[nocturne-desktop] {reason}，外壳被强杀时此后台可能残留"
-                ));
-            }
         }
-    }
-
-    lock(&state.backends).insert(id, backend);
-    Ok(id)
+        Ok(backend)
+    })
 }
 
 #[cfg(windows)]
@@ -462,7 +567,10 @@ pub async fn backend_send(
 }
 
 #[tauri::command]
-pub async fn backend_close(state: tauri::State<'_, Arc<AppState>>, backend_id: u32) -> CmdResult<()> {
+pub async fn backend_close(
+    state: tauri::State<'_, Arc<AppState>>,
+    backend_id: u32,
+) -> CmdResult<()> {
     let Some(backend) = state.backend(backend_id) else {
         return Ok(()); // 重复关闭或对已退出的后台调用：Ok
     };
@@ -480,7 +588,140 @@ mod tests {
         mpsc::Receiver<BackendMessage>,
     ) {
         let (tx, rx) = mpsc::channel::<BackendMessage>();
-        (move |m| { let _ = tx.send(m); }, rx)
+        (
+            move |m| {
+                let _ = tx.send(m);
+            },
+            rx,
+        )
+    }
+
+    fn spawn_sort(state: &Arc<AppState>, id: u32) -> CmdResult<Arc<Backend>> {
+        let mut command = Command::new("sort");
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let state = Arc::clone(state);
+        spawn_backend(id, command, |_| {}, move |id| state.remove_backend(id))
+            .map_err(|error| CommandError::new("spawn_failed", error.to_string()))
+    }
+
+    #[test]
+    fn reload_closes_all_old_backends_without_closing_new_page() {
+        let state = Arc::new(AppState::new(std::path::PathBuf::new()));
+        let generation = state.page_generation();
+        for _ in 0..2 {
+            state
+                .open_in_page(generation, |id| spawn_sort(&state, id))
+                .unwrap();
+        }
+        let previous = state.begin_page_load();
+        assert_eq!(previous.len(), 2);
+        let id = state
+            .open_in_page(state.page_generation(), |id| spawn_sort(&state, id))
+            .unwrap();
+        let current = state.backend(id).unwrap();
+
+        // 模拟清理线程晚于新页面启动；它只能拿旧页面的快照。
+        for backend in previous {
+            close_backend(&backend, Duration::from_secs(5));
+            assert!(lock(&backend.child).try_wait().unwrap().is_some());
+        }
+        assert!(lock(&current.child).try_wait().unwrap().is_none());
+        close_backend(&current, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn open_dispatched_before_reload_never_spawns() {
+        let state = AppState::new(std::path::PathBuf::new());
+        let generation = state.page_generation();
+        assert!(state.begin_page_load().is_empty());
+        let error = state
+            .open_in_page(generation, |_| panic!("旧页面的后台不得启动"))
+            .unwrap_err();
+        assert_eq!(error.code, "unknown_backend");
+        assert!(state.backends_snapshot().is_empty());
+    }
+
+    #[test]
+    fn shutdown_rejects_new_backend_opens() {
+        let state = AppState::new(std::path::PathBuf::new());
+        state.shutting_down.store(true, Ordering::SeqCst);
+        let error = state
+            .open_in_page(state.page_generation(), |_| panic!("退出期间不得启动后台"))
+            .unwrap_err();
+        assert_eq!(error.code, "unknown_backend");
+    }
+
+    #[test]
+    fn reload_waits_for_in_flight_spawn_to_be_registered() {
+        let state = Arc::new(AppState::new(std::path::PathBuf::new()));
+        let generation = state.page_generation();
+        let (spawning_tx, spawning_rx) = mpsc::channel();
+        let (continue_tx, continue_rx) = mpsc::channel();
+        let opening_state = Arc::clone(&state);
+        let opening = thread::spawn(move || {
+            opening_state.open_in_page(generation, |id| {
+                spawning_tx.send(()).unwrap();
+                continue_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                spawn_sort(&opening_state, id)
+            })
+        });
+        spawning_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let (reloading_tx, reloading_rx) = mpsc::channel();
+        let reloading_state = Arc::clone(&state);
+        let reloading = thread::spawn(move || {
+            reloading_tx.send(()).unwrap();
+            reloading_state.begin_page_load()
+        });
+        reloading_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        continue_tx.send(()).unwrap();
+        opening.join().unwrap().unwrap();
+        let previous = reloading.join().unwrap();
+        assert_eq!(previous.len(), 1);
+
+        let id = state
+            .open_in_page(state.page_generation(), |id| spawn_sort(&state, id))
+            .unwrap();
+        let current = state.backend(id).unwrap();
+        close_backend(&previous[0], Duration::from_secs(5));
+        assert!(lock(&previous[0].child).try_wait().unwrap().is_some());
+        assert!(lock(&current.child).try_wait().unwrap().is_none());
+        close_backend(&current, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn shutdown_snapshot_includes_in_flight_spawn_and_reloading_backends() {
+        let state = Arc::new(AppState::new(std::path::PathBuf::new()));
+        state
+            .open_in_page(state.page_generation(), |id| spawn_sort(&state, id))
+            .unwrap();
+        let previous = state.begin_page_load();
+        let generation = state.page_generation();
+        let (spawning_tx, spawning_rx) = mpsc::channel();
+        let (continue_tx, continue_rx) = mpsc::channel();
+        let opening_state = Arc::clone(&state);
+        let opening = thread::spawn(move || {
+            opening_state.open_in_page(generation, |id| {
+                spawning_tx.send(()).unwrap();
+                continue_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                spawn_sort(&opening_state, id)
+            })
+        });
+        spawning_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        state.shutting_down.store(true, Ordering::SeqCst);
+        let closing_state = Arc::clone(&state);
+        let closing = thread::spawn(move || closing_state.backends_snapshot());
+        continue_tx.send(()).unwrap();
+        opening.join().unwrap().unwrap();
+        let all = closing.join().unwrap();
+        assert_eq!(all.len(), 2);
+        assert!(all.iter().any(|backend| Arc::ptr_eq(backend, &previous[0])));
+        for backend in all {
+            close_backend(&backend, Duration::from_secs(5));
+            assert!(lock(&backend.child).try_wait().unwrap().is_some());
+        }
     }
 
     #[test]

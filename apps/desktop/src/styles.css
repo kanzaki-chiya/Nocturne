@@ -129,8 +129,31 @@ button {
   min-height: 0;
   overflow-y: auto;
   flex: 1;
-  scrollbar-width: thin;
-  scrollbar-color: var(--a-borderStrong) transparent;
+}
+/* WebView2 的原生 thin 滚动条仍会显示箭头；统一使用无按钮的自定义滚动条。 */
+.tree::-webkit-scrollbar,
+.stream::-webkit-scrollbar,
+.conversation-stream::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.tree::-webkit-scrollbar-button,
+.stream::-webkit-scrollbar-button,
+.conversation-stream::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.tree::-webkit-scrollbar-track,
+.stream::-webkit-scrollbar-track,
+.conversation-stream::-webkit-scrollbar-track {
+  background: transparent;
+}
+.tree::-webkit-scrollbar-thumb,
+.stream::-webkit-scrollbar-thumb,
+.conversation-stream::-webkit-scrollbar-thumb {
+  background: var(--a-borderStrong);
+  border-radius: 4px;
 }
 .side .tree h4 {
   margin-top: 6px;
@@ -369,7 +392,7 @@ button {
   border-radius: 4px;
   padding: 0 4px;
   opacity: 0;
-  cursor: default;
+  cursor: pointer;
 }
 .gh:hover .gadd,
 .gh:focus-within .gadd {
@@ -382,8 +405,8 @@ button {
 
 /* 主区 */
 .main {
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   min-width: 0;
   position: relative;
@@ -427,6 +450,7 @@ button {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  flex: 1;
 }
 .col {
   width: 100%;
@@ -640,4 +664,72 @@ button {
 /* 「…」菜单打开期间让标题行的按钮保持可见（鼠标已移到菜单上，不再悬停标题行） */
 .h4row.menu-open .hb {
   opacity: 1;
+}
+
+.welcome {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  place-items: center;
+  padding: 32px 24px;
+}
+.welcome-col {
+  width: 100%;
+  max-width: 680px;
+  text-align: center;
+}
+.welcome-icon {
+  color: var(--a-accent);
+  font-size: 46px;
+  line-height: 1;
+}
+.welcome h1 {
+  font-size: 22px;
+  font-weight: 500;
+  margin: 16px 0 24px;
+}
+.workspace-picker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--a-muted);
+  margin-bottom: 12px;
+}
+.workspace-picker select {
+  font: inherit;
+  color: var(--a-text);
+  background: var(--a-input);
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.welcome .composer {
+  padding: 0;
+  text-align: left;
+}
+.dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--a-bg) 60%, transparent);
+  display: grid;
+  place-items: center;
+}
+.desktop-dialog {
+  background: var(--a-panel);
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 10px;
+  padding: 20px;
+  width: min(520px, 90%);
+  max-height: 80%;
+  overflow: auto;
+}
+.desktop-dialog h3 {
+  margin: 0 0 10px;
+}
+.desktop-dialog pre {
+  white-space: pre-wrap;
+  font: 12.5px/1.8 var(--mono);
 }

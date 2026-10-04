@@ -108,6 +108,7 @@ export interface TreeOptions {
   now?: number;
   /** 每区默认显示条数 */
   limit?: number;
+  statuses?: Readonly<Record<string, SessionStatus>>;
 }
 
 const DEFAULT_LIMIT = 5;
@@ -158,7 +159,7 @@ export function buildSessionTree(
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const chatsShown = options.chatsExpanded ? chatRows : chatRows.slice(0, limit);
   const chats: ChatsSection = {
-    rows: chatsShown.map((s) => toRow(s, now, "idle")),
+    rows: chatsShown.map((s) => toRow(s, now, options.statuses?.[s.id] ?? "idle")),
     moreCount: options.chatsExpanded ? 0 : chatRows.length - chatsShown.length,
   };
 
@@ -194,7 +195,7 @@ export function buildSessionTree(
     if (session === undefined) continue;
     const isChat = chatKey !== null && projectKey(session.cwd) === chatKey;
     pinned.push({
-      ...toRow(session, now, "idle"),
+      ...toRow(session, now, options.statuses?.[session.id] ?? "idle"),
       project: isChat ? "对话" : projectName(session.cwd),
     });
   }
@@ -228,7 +229,7 @@ export function buildSessionTree(
       name: projectName(group.path),
       path: group.path,
       count: group.sessions.length,
-      sessions: shown.map((s) => toRow(s, now, "idle")),
+      sessions: shown.map((s) => toRow(s, now, options.statuses?.[s.id] ?? "idle")),
       moreCount: expanded ? 0 : unpinned.length - shown.length,
       manual: manualOrder.includes(key),
     });

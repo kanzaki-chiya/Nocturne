@@ -1,4 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RpcError } from "@nocturne/rpc/client";
+
+import { Composer } from "./Composer";
+import { Conversation } from "./Conversation";
+import { Conversations, conversationStatus } from "./conversations";
+import { parseCommand, COMMANDS } from "./commands";
+import { StatusBar, type StatusPanel } from "./StatusBar";
 
 import { BackendPool } from "./backends";
 import type { DesktopHost } from "./host";
@@ -41,6 +48,26 @@ export function App({ host }: { host: DesktopHost }) {
   const [startupError, setStartupError] = useState<StartupError | null>(null);
   const [backendExit, setBackendExit] = useState<{ code: number | null } | null>(null);
   const lastFocusRefresh = useRef(0);
+  const [conversationVersion, setConversationVersion] = useState(0);
+  const [panel, setPanel] = useState<StatusPanel | null>(null);
+  const [commandOutput, setCommandOutput] = useState<string | null>(null);
+  const [lockedSession, setLockedSession] = useState<SessionSummary | null>(null);
+  const workspaceRef = useRef<string | null>(null);
+  workspaceRef.current = plainWorkspace;
+  const conversations = useMemo(
+    () =>
+      new Conversations(
+        pool,
+        () => workspaceRef.current,
+        () => {
+          setConversationVersion((v) => v + 1);
+        },
+        (error) => {
+          setStartupError({ message: errMessage(error) });
+        },
+      ),
+    [pool],
+  );
 
   const bumpPrefs = useCallback(() => {
     setPrefsVersion((v) => v + 1);
@@ -121,10 +148,11 @@ export function App({ host }: { host: DesktopHost }) {
   // 后台退出：提示"后台已退出（退出码 N）"与「重新连接」
   useEffect(
     () =>
-      pool.onExit(({ code }) => {
+      pool.onExit(({ key, code }) => {
+        conversations.backendExited(key);
         setBackendExit({ code });
       }),
-    [pool],
+    [pool, conversations],
   );
 
   // 窗口重新获得焦点时刷新列表（节流 ≥ 2 秒）
@@ -153,32 +181,170 @@ export function App({ host }: { host: DesktopHost }) {
     });
     bumpPrefs();
     await refresh();
+    return dir;
   }, [host, prefs, refresh, bumpPrefs]);
 
   // 后台退出后的「重新连接」= 重走启动链
   const reconnect = boot;
 
+  const selectSession = async (summary: SessionSummary, force = false) => {
+    try {
+      await conversations.open(summary.id, summary.cwd, force);
+      setSelectedId(conversations.selectedId);
+      setPanel(null);
+      setLockedSession(null);
+      await refresh();
+    } catch (error) {
+      if (error instanceof RpcError && error.code === "session_locked") setLockedSession(summary);
+      else setStartupError({ message: errMessage(error) });
+    }
+  };
+
+  const newSession = async (workspace?: string) => {
+    const target = workspace ?? plainWorkspace;
+    if (target === null) return;
+    try {
+      await conversations.newConversation(target);
+      setSelectedId(null);
+      setPanel(null);
+      await refresh();
+    } catch (error) {
+      setStartupError({ message: errMessage(error) });
+    }
+  };
+
+  const submitInput = async (line: string): Promise<boolean> => {
+    try {
+      const parsed = parseCommand(line);
+      if (parsed === null) {
+        await conversations.send(line);
+        setSelectedId(conversations.selectedId);
+        await refresh();
+        return true;
+      }
+      if (parsed.kind === "unknown") throw new Error(`未知命令 ${parsed.name}；/help 列出可用命令`);
+      if (parsed.kind === "invalid") throw new Error(parsed.message);
+      await conversations.selected?.session.recordInputHistory(line);
+      const { name, args } = parsed;
+      if (parsed.command.status !== "supported") {
+        setCommandOutput(parsed.command.statusText);
+        return true;
+      }
+      if (args !== "" && parsed.command.arguments === undefined)
+        throw new Error(`用法：${parsed.command.usage}`);
+      if (name === "/new" || name === "/clear") {
+        await newSession(
+          conversations.selected?.workspace ?? conversations.draftWorkspace ?? undefined,
+        );
+        return true;
+      }
+      if (name === "/help") {
+        setCommandOutput(
+          COMMANDS.map(
+            (command) => `${command.name}  ${command.summary} · ${command.statusText}`,
+          ).join("\n"),
+        );
+        return true;
+      }
+      if (name === "/resume") {
+        if (args === "") setCommandOutput("从左侧选择要恢复的会话");
+        else {
+          const target = sessions.find((s) => s.id === args);
+          if (target === undefined) throw new Error("找不到该会话");
+          await selectSession(target);
+        }
+        return true;
+      }
+      const active = conversations.selected;
+      if (active === undefined) throw new Error("请先打开会话");
+      const session = active.session;
+      switch (name) {
+        case "/compact":
+          await conversations.compact();
+          break;
+        case "/context":
+          setPanel("context");
+          break;
+        case "/model":
+          if (args === "") setPanel("model");
+          else await session.setModel(args);
+          break;
+        case "/effort":
+          if (args === "") setPanel("effort");
+          else await session.setReasoningEffort(args);
+          break;
+        case "/preset":
+          if (args === "") setPanel("preset");
+          else await session.setPermissionPreset(args);
+          break;
+        case "/shell":
+          if (args === "") setPanel("shell");
+          else await session.setShell(args);
+          break;
+        case "/mcp": {
+          const servers = await session.mcpServers();
+          setCommandOutput(
+            servers.length === 0
+              ? "本会话没有配置 MCP 服务器"
+              : servers
+                  .map(
+                    (server) =>
+                      `${server.name}  ${server.state}${server.error === undefined ? "" : ` · ${server.error}`}`,
+                  )
+                  .join("\n"),
+          );
+          break;
+        }
+        default:
+          setCommandOutput("该命令不属于当前会话的 RPC 操作");
+      }
+      return true;
+    } catch (error) {
+      setStartupError({ message: errMessage(error) });
+      return false;
+    }
+  };
+
   const p = prefs.get();
   const tree = useMemo(
     () =>
-      buildSessionTree(sessions, p, {
-        plainWorkspace,
-        chatsExpanded,
-        expanded,
-        collapsed,
-      }),
+      buildSessionTree(
+        sessions.map((summary) => {
+          const entry = conversations.opened.get(summary.id);
+          return entry === undefined
+            ? summary
+            : { ...summary, locked: false, firstText: entry.view.title ?? summary.firstText };
+        }),
+        p,
+        {
+          plainWorkspace,
+          chatsExpanded,
+          expanded,
+          collapsed,
+          statuses: Object.fromEntries(
+            [...conversations.opened].map(([id, entry]) => [id, conversationStatus(entry)]),
+          ),
+        },
+      ),
     // prefs 快照经 prefsVersion 驱动重算
-    [sessions, prefsVersion, plainWorkspace, chatsExpanded, expanded, collapsed],
+    [
+      sessions,
+      prefsVersion,
+      plainWorkspace,
+      chatsExpanded,
+      expanded,
+      collapsed,
+      conversationVersion,
+    ],
   );
 
   const pinnedIds = new Set(p.pinned);
 
-  const selected = sessions.find((s) => s.id === selectedId);
-  // 一个可显示会话都没有时主区提示「还没有会话」
-  const hasAnySession =
-    tree.pinned.length > 0 ||
-    tree.chats.rows.length > 0 ||
-    tree.projects.some((pr) => pr.count > 0);
+  const active = conversations.selected;
+  const selected = sessions.find((s) => s.id === conversations.selectedId);
+  useEffect(() => {
+    if (active !== undefined && !active.busy) void refresh();
+  }, [active?.view.turnCount, selectedId, refresh]);
 
   const toggleIn = (set: ReadonlySet<string>, key: string): Set<string> => {
     const next = new Set(set);
@@ -226,7 +392,8 @@ export function App({ host }: { host: DesktopHost }) {
         expanded={expanded}
         chatsExpanded={chatsExpanded}
         onSelectSession={(id) => {
-          setSelectedId(id);
+          const summary = sessions.find((s) => s.id === id);
+          if (summary !== undefined) void selectSession(summary);
         }}
         onToggleCollapse={(key) => {
           setCollapsed((s) => toggleIn(s, key));
@@ -270,6 +437,7 @@ export function App({ host }: { host: DesktopHost }) {
           bumpPrefs();
         }}
         onOpenProject={() => void openProject()}
+        onNewSession={(workspace) => void newSession(workspace)}
       />
       <div className="main">
         {(backendExit !== null || startupError !== null) && (
@@ -296,28 +464,129 @@ export function App({ host }: { host: DesktopHost }) {
             )}
           </div>
         )}
-        {selected !== undefined ? (
+        {active !== undefined ? (
           <>
             <div className="head">
               <div className="crumb">
-                {projectName(selected.cwd)}
+                {projectKey(active.workspace) === projectKey(plainWorkspace ?? "")
+                  ? "对话"
+                  : projectName(active.workspace)}
                 <span>›</span>
-                <em>{selected.firstText ?? "未命名会话"}</em>
+                <em>{active.view.title ?? selected?.firstText ?? "新会话"}</em>
               </div>
-              <div className="path">{selected.cwd}</div>
+              <div className="path">{active.workspace}</div>
             </div>
-            <div className="stream">
-              <div className="col">
-                <div className="placeholder">会话视图在第 2 步实现</div>
+            {active.warnings.map((warning) => (
+              <div className="banner" key={warning}>
+                {warning}
               </div>
-            </div>
+            ))}
+            <Conversation
+              key={`conversation:${active.session.id}`}
+              session={active.session}
+              view={active.view}
+              openUrl={(url) => void host.openUrl(url)}
+            />
+            <Composer
+              key={`composer:${active.session.id}`}
+              running={conversationStatus(active) !== "idle"}
+              onSubmit={submitInput}
+              onInterrupt={() => {
+                conversations.interrupt();
+              }}
+              historyKey={active.session.id}
+              readInputHistory={() => active.session.readInputHistory()}
+            />
+            <StatusBar
+              session={active.session}
+              runtime={active.client.runtime}
+              view={active.view}
+              panel={panel}
+              onPanelChange={setPanel}
+            />
           </>
         ) : (
-          <div className="stream">
-            <div className="col">
-              <div className="placeholder">
-                {hasAnySession ? "从左侧选择一个会话" : "还没有会话"}
+          <div className="welcome">
+            <div className="welcome-col">
+              <div className="welcome-icon" aria-hidden="true">
+                ☾
               </div>
+              <h1>开始一段新对话</h1>
+              <div className="workspace-picker">
+                <label htmlFor="draft-project">工作区</label>
+                <select
+                  id="draft-project"
+                  value={conversations.draftWorkspace ?? plainWorkspace ?? ""}
+                  onChange={(event) => {
+                    if (event.target.value === "__open__") {
+                      void openProject().then((dir) => {
+                        if (dir !== undefined) void newSession(dir);
+                      });
+                    } else void newSession(event.target.value);
+                  }}
+                >
+                  <option value={plainWorkspace ?? ""}>普通对话</option>
+                  {tree.projects.map((project) => (
+                    <option value={project.path} key={project.key}>
+                      {project.name}
+                    </option>
+                  ))}
+                  <option value="__open__">打开其他文件夹…</option>
+                </select>
+              </div>
+              <Composer
+                running={false}
+                disabled={plainWorkspace === null || pool.any() === undefined}
+                onSubmit={submitInput}
+                onInterrupt={() => {
+                  conversations.interrupt();
+                }}
+                historyKey={conversations.draftWorkspace ?? plainWorkspace}
+              />
+            </div>
+          </div>
+        )}
+        {lockedSession !== null && (
+          <div className="dialog-backdrop">
+            <div
+              className="desktop-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="locked-title"
+            >
+              <h3 id="locked-title">正在别处使用</h3>
+              <p>强制打开会接管会话锁。请先确认其他进程已停止使用此会话，避免并发写入。</p>
+              <div className="acts">
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setLockedSession(null);
+                  }}
+                >
+                  取消
+                </button>
+                <button
+                  className="btn primary"
+                  onClick={() => void selectSession(lockedSession, true)}
+                >
+                  强制打开
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {commandOutput !== null && (
+          <div className="dialog-backdrop">
+            <div className="desktop-dialog" role="dialog" aria-modal="true" aria-label="命令结果">
+              <pre>{commandOutput}</pre>
+              <button
+                className="btn"
+                onClick={() => {
+                  setCommandOutput(null);
+                }}
+              >
+                关闭
+              </button>
             </div>
           </div>
         )}

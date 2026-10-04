@@ -1,6 +1,6 @@
 # 桌面端（Tauri 外壳 + React 前端）
 
-> 状态：v0.5 骨架与连接已实现（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 9 节第 1 步）；会话视图、服务商与设置页在后续步骤｜前置阅读：[protocols/rpc.md](../protocols/rpc.md)｜代码位置：`apps/desktop/`
+> 状态：v0.5 骨架与连接、对话已实现（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 9 节第 1、2 步）；服务商与设置页在第 3 步实现 | 前置阅读：[protocols/rpc.md](../protocols/rpc.md) | 代码位置：`apps/desktop/`
 
 `apps/desktop` 是 Nocturne 的桌面端：一个 Tauri 进程内，React 前端经 `@nocturne/rpc/client` 与若干 `nctrn rpc --stdio` 后台进程通信，Rust 外壳只负责进程管理与按行转发。所有会话语义（握手、方法调用、事件）都在前端处理，外壳不解析报文。
 
@@ -8,7 +8,7 @@
 
 - **一个项目一个后台**：`backend_open` 以项目目录为 cwd 启动 `node <脚本> rpc --stdio`，同一项目的会话共用这个后台。会话列表是全局的（`<NOCTURNE_HOME>/sessions`），前端用任意一个运行中的后台 `runtime.listSessions()` 取全部会话。
 - **常驻后台**：应用启动即以普通对话工作区（见第 3 节）为 cwd 开一个后台，用它列出全部会话，窗口打开期间常驻；项目的后台仍按原规则在打开该项目的会话时才启动（第 2 步实现）。因此第一次启动、没有任何项目时，左栏也能直接列出全部会话。
-- **后台生命周期**：窗口关闭时对所有后台并行执行关闭（关 stdin → 等自行退出 → 5 秒强杀），全部结束后退出应用；Windows 上后台在 spawn 后被放入全局 Job Object（`KILL_ON_JOB_CLOSE`），外壳被强杀时后台一起结束。Job 创建或加入失败不致命，往该后台的 stderr 缓冲记一行说明。
+- **后台生命周期**：Rust 外壳在 Tauri 页面开始加载钩子中同步推进后台代际，F5 或 Vite 整页重载后并行关闭旧页面全部后台（关 stdin → 等自行退出 → 5 秒强杀），不依赖前端异步 `beforeunload`；在途 `backend_open` 在启动前校验分发时捕获的代际，旧页面请求被取消，旧清理只使用旧代快照，不影响新页面后台。窗口关闭时对所有后台（含正在重载清理的后台）执行相同关闭流程，全部结束后退出应用；Windows 上后台在 spawn 后被放入全局 Job Object（`KILL_ON_JOB_CLOSE`），外壳被强杀时后台一起结束。Job 创建或加入失败不致命，往该后台的 stderr 缓冲记一行说明。纯 React Fast Refresh 不重新加载文档，由前端组件生命周期释放连接。
 - **日志边界**：stdin/stdout 的内容在任何地方都不记录、不打印、不写盘（报文里可能含密钥明文）；stderr 按行截断（64 KiB/行）保留最近 500 行在内存中，随 `closed` 消息交给前端。
 
 ## 2. 命令与消息格式
@@ -72,17 +72,49 @@ interface NodeProbe {
 
 ## 5. 会话树与界面状态
 
-左栏结构从上到下（`src/session-tree.ts` 为纯函数，`src/Sidebar.tsx` 渲染）：「＋ 新会话」（本步置灰不可点，第 2 步实现）→「置顶」→「对话」→「项目」。
+左栏结构从上到下（`src/session-tree.ts` 为纯函数，`src/Sidebar.tsx` 渲染）：「＋ 新会话」→「置顶」→「对话」→「项目」。
 
 - **空会话过滤**：`firstText` 缺省或 trim 后为空且未锁定的会话不显示（置顶、对话、项目都过滤）；被锁定的空会话照常显示为「未命名会话」。
 - **对话**：普通对话工作区 `<NOCTURNE_HOME>/workspace` 的会话平铺列出（cwd 经 `projectKey` 归并比较），按 `mtimeMs` 降序，默认前 5 条 +「展开显示（还有 N 个）」/「收起」；已置顶的不重复出现，置顶的对话会话项目标签为「对话」。手动项目里路径等于工作区的也不显示为项目。还没拿到工作区路径时所有会话按项目处理。
-- **项目**：项目 = 其余会话 `cwd` 的归并键 ∪ 手动添加的项目 − 隐藏项目。`projectKey(path)` 去末尾分隔符（根目录除外）；像 Windows 路径（`盘符:` 或含 `\`）则统一 `\` 并小写。显示用第一次见到的原始路径，项目名取末段。排序存 `projectSort`：默认「最近活动」（有会话的项目按最新 `mtimeMs` 降序，其后是无会话的手动项目按添加顺序），「名称」时对全部项目按名称排序；项目内规则同对话区。「项目」标题行右侧的「…」（弹出菜单：排序、已移除的项目…）与「＋」（打开项目）在悬停时显示；项目行悬停显示的「＋」在该项目新建会话（第 2 步实现，本步置灰）。「…」菜单的「已移除的项目…」列出隐藏的项目（显示名称、悬停见完整路径），点一项即从隐藏集合移除并恢复显示。
+- **项目**：项目 = 其余会话 `cwd` 的归并键 ∪ 手动添加的项目 − 隐藏项目。`projectKey(path)` 去末尾分隔符（根目录除外）；像 Windows 路径（`盘符:` 或含 `\`）则统一 `\` 并小写。显示用第一次见到的原始路径，项目名取末段。排序存 `projectSort`：默认「最近活动」（有会话的项目按最新 `mtimeMs` 降序，其后是无会话的手动项目按添加顺序），「名称」时对全部项目按名称排序；项目内规则同对话区。「项目」标题行右侧的「…」（弹出菜单：排序、已移除的项目…）与「＋」（打开项目）在悬停时显示；项目行悬停显示的「＋」在该项目新建会话。「…」菜单的「已移除的项目…」列出隐藏的项目（显示名称、悬停见完整路径），点一项即从隐藏集合移除并恢复显示。
 - **置顶**：按置顶数组顺序列出仍存在的会话，每条标出所属项目名（对话为「对话」）；置顶不受项目隐藏影响。右键会话行置顶/取消置顶，右键项目标题「从列表移除」（把项目路径加入隐藏集合，不删会话、不动手动项目列表，可在「…」菜单恢复）。
-- 会话行：`firstText ?? "未命名会话"`，meta 为相对时间（<60s「现在」<1h「N 分钟」<24h「N 小时」<48h「昨天」<30d「N 天」否则 `YYYY-MM-DD`，锁定加「🔒 」前缀）；状态 `idle`/`running`/`pending` 本步恒为 `idle`，组件已支持另外两种（`.dot.run`、`.dot.warn` + `.meta.pend`「待确认」）。
+- 会话行优先显示已打开会话视图的标题，否则为 `firstText ?? "未命名会话"`；meta 为相对时间（<60s「现在」<1h「N 分钟」<24h「N 小时」<48h「昨天」<30d「N 天」否则 `YYYY-MM-DD`，锁定加「🔒 」前缀）。运行中的会话显示主色圆点；等待权限确认或提问回复的会话显示「待确认」，切走后仍保持这个状态。
 
 界面状态存 localStorage 键 `nocturne.desktop.prefs.v1`：`{ pinned: string[]; projects: string[]; hidden: string[]; projectSort: "activity" | "name" }`（会话 id、原始路径、项目路径；`projectSort` 缺省 `"activity"`；旧数据里的 `lastProject` 字段忽略）。读写失败均不影响本次运行，写失败时 `persistent` 标为 false（`src/prefs.ts`）。
 
-启动流程：`node_probe` → 不 ok 显示说明页；ok 后 `plain_workspace` 取普通对话工作区 → `ensure` 开常驻后台（握手）→ `listSessions()`（不传 cwd）。`plain_workspace` 或 `ensure` 失败显示真实错误与「重试」，后台退出横幅的「重新连接」同样重走这条链。「打开项目…」（「项目」标题行的「＋」）走系统文件夹对话框 → 加入手动项目、取消隐藏、刷新列表，不启动后台。列表在连上后、打开项目后、窗口重新获得焦点时（节流 ≥ 2 秒）刷新。主区未选中会话时提示「从左侧选择一个会话」，一个会话都没有时提示「还没有会话」。
+启动流程：`node_probe` → 不 ok 显示说明页；ok 后 `plain_workspace` 取普通对话工作区 → `ensure` 开常驻后台（握手）→ `listSessions()`（不传 cwd）。`plain_workspace` 或 `ensure` 失败显示真实错误与「重试」，后台退出横幅的「重新连接」同样重走这条链。「打开项目…」（「项目」标题行的「＋」）走系统文件夹对话框 → 加入手动项目、取消隐藏、刷新列表，不启动后台。列表在连上后、打开项目后、窗口重新获得焦点时（节流 ≥ 2 秒）刷新。未选中会话时主区居中显示图标、标题、工作区选择和输入框，工作区列表末项为「打开其他文件夹…」。
+
+### 5.1 会话打开、创建与关闭
+
+`src/conversations.ts` 管理打开的会话与订阅。点击会话先 `ensure` 所属项目后台，再 `resumeSession`、通过 `trackSessionView` 订阅并回放历史；普通对话共用常驻后台。遇到 `session_locked` 先显示「正在别处使用」，只有用户选择「强制打开」后才以 `force: true` 重试。
+
+「＋ 新会话」、项目行「＋」和 `/new`（`/clear`）只进入草稿；第一条普通消息发送时才 `createSession`，不创建空会话。切换时关闭空闲的旧会话及订阅；运行中、等待权限确认或提问回复的旧会话保留打开，结束后若不再选中则关闭。项目没有打开会话时释放其后台；普通对话常驻后台不释放。主区始终只有当前会话的一条消息流和一组请求卡片；`Conversation` 与 `Composer` 使用带组件前缀的不同 React key，切换会话时分别重建，不能共用同一个会话 id 作为同级 key。
+
+### 5.2 消息、输入与交互请求
+
+`src/Conversation.tsx` 按共享 `SessionView` 渲染用户消息、助手 Markdown、可折叠思考、工具调用和文件 diff、警告与通知，不另写事件折叠。Markdown 原始 HTML 和远程图片不执行、不加载；允许的链接由宿主打开。工具行默认收起；结构化 edit/write 输出的 diff 展开显示。流式更新自动跟随底部，用户向上滚动后停止跟随，点击「回到最新消息」恢复。左栏和消息滚动区使用细、无箭头滚动条，滑块为 `--a-borderStrong`。
+
+`src/Composer.tsx`：Enter 发送，Shift+Enter 换行；`isComposing`、composition 状态或旧输入法 `keyCode=229` 时不发送。输入历史经 `readInputHistory` / `recordInputHistory`；运行中按钮与 Esc 调用 `interrupt`。图片附件留到第 4 步。
+
+权限和提问请求显示在消息流底部，按钮与 TUI 的选择一致；仅调用 `respondPermission` / `respondQuestion` 回传选择，权限判定仍在 Core。权限卡片支持拒绝反馈、允许一次、会话允许、创建规则，以及请求给出的其他选项；提问支持单选、多选、自由文本和明确拒答。
+
+### 5.3 桌面斜杠命令
+
+命令表独立维护在 `src/commands.ts`，不导入 TUI。输入 `/` 显示补全，支持键盘选择及模型、档位、预设、Shell、会话参数补全；命令输出在主区显示。
+
+| 状态 | 命令 |
+| --- | --- |
+| 已实现 | `/help`、`/model`、`/effort`、`/preset`、`/shell`、`/context`、`/mcp`、`/compact`、`/resume`、`/new`、`/clear` |
+| 提示「第 3 步实现」 | `/provider`（含子命令）、`/settings` |
+| 提示「暂不支持」 | `/rewind`、`/fork`、`/theme`、`/exit`、`/quit` |
+
+`/theme` 当前跟随系统外观；退出请关闭窗口。无参数的 `/model`、`/effort`、`/preset`、`/shell` 打开对应状态栏选择面板，`/context` 打开上下文面板；`/resume` 无参数列出会话，有参数打开对应 id。
+
+### 5.4 状态栏与上下文
+
+`src/StatusBar.tsx` 的模型、思考档位、权限预设和 Shell 选择分别调用 `setModel`、`setReasoningEffort`、`setPermissionPreset`、`setShell`；模型候选来自 `listModels`，档位和 Shell 候选来自当前会话 RPC。状态栏右侧显示上下文用量、累计缓存命中和 Turn 状态。
+
+上下文面板取 `describeContext`，展示总量与预算、分段堆叠条和数值；对话历史从 `history.breakdown` 细分用户消息、助手回答、工具调用与结果、压缩摘要，不从可见消息重新估算。底部提示「可以输入 /compact 压缩」。
 
 ## 6. 安全边界
 

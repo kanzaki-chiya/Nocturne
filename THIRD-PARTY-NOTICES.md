@@ -20,6 +20,8 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `@tauri-apps/plugin-dialog` | 2.8.0 | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-opener` | 2.6.0 | MIT OR Apache-2.0 |
 
+桌面端第 2 步复用 `marked` **18.0.7**（MIT；2026-07-21 发布，采用时已满 7 天）解析 Markdown token，由 React 元素渲染；不使用其 HTML 输出，不渲染原始 HTML。
+
 | 开发与测试依赖 | 版本 | 许可证 |
 |---|---:|---|
 | `@types/node` | 24.13.5 | MIT |

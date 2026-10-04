@@ -23,6 +23,7 @@ export interface SidebarProps {
   onHideProject: (path: string) => void;
   onRestoreProject: (path: string) => void;
   onOpenProject: () => void;
+  onNewSession: (workspace?: string) => void;
 }
 
 type MenuState =
@@ -71,7 +72,10 @@ function RowButton({
       <span className={dotClass(row)} />
       <span className="t">{row.title}</span>
       {pinned !== undefined ? (
-        <span className="proj">{pinned.project}</span>
+        <>
+          <span className="proj">{pinned.project}</span>
+          {row.status === "pending" && <span className="meta pend">待确认</span>}
+        </>
       ) : (
         <span className={`meta${row.status === "pending" ? " pend" : ""}`}>{row.meta}</span>
       )}
@@ -152,10 +156,10 @@ export function Sidebar(props: SidebarProps) {
           </button>
           <button
             className="gadd"
-            aria-disabled="true"
-            title="第 2 步实现"
+            title={`在 ${project.name} 新建会话`}
             onClick={(e) => {
               e.stopPropagation();
+              props.onNewSession(project.path);
             }}
           >
             ＋
@@ -198,10 +202,8 @@ export function Sidebar(props: SidebarProps) {
       <nav className="nav">
         <button
           className="item add"
-          aria-disabled="true"
-          title="第 2 步实现"
-          onClick={(e) => {
-            e.preventDefault();
+          onClick={() => {
+            props.onNewSession();
           }}
         >
           <span className="glyph">＋</span>新会话

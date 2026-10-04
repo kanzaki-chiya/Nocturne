@@ -28,6 +28,7 @@ function props(overrides?: Partial<SidebarProps>): SidebarProps {
     onHideProject: noop,
     onRestoreProject: noop,
     onOpenProject: noop,
+    onNewSession: noop,
     ...overrides,
   };
 }
@@ -35,14 +36,6 @@ function props(overrides?: Partial<SidebarProps>): SidebarProps {
 afterEach(cleanup);
 
 describe("Sidebar", () => {
-  it("「＋ 新会话」置灰不可点（aria-disabled + title），无 Ctrl+N 提示", () => {
-    render(<Sidebar {...props()} />);
-    const add = screen.getByText("新会话").closest("button");
-    expect(add?.getAttribute("aria-disabled")).toBe("true");
-    expect(add?.title).toBe("第 2 步实现");
-    expect(screen.queryByText(/Ctrl\+N/)).toBeNull();
-  });
-
   it("没有对话会话时不渲染「对话」标题", () => {
     const { container } = render(<Sidebar {...props()} />);
     expect(screen.queryByText("对话")).toBeNull();
@@ -100,32 +93,5 @@ describe("Sidebar", () => {
   it("不再渲染左栏底部的「＋ 打开项目…」行", () => {
     render(<Sidebar {...props()} />);
     expect(screen.queryByText("打开项目…", { selector: ".nav .item" })).toBeNull();
-  });
-
-  it("项目行的「＋」置灰且点击不触发折叠切换", () => {
-    const onToggleCollapse = vi.fn();
-    const tree: SessionTree = {
-      pinned: [],
-      chats: { rows: [], moreCount: 0 },
-      projects: [
-        {
-          key: "z:\\repo",
-          name: "repo",
-          path: "Z:\\repo",
-          count: 1,
-          sessions: [{ id: "s1", title: "会话", meta: "现在", locked: false, status: "idle" }],
-          moreCount: 0,
-          manual: false,
-        },
-      ],
-    };
-    const { container } = render(<Sidebar {...props({ tree, onToggleCollapse })} />);
-    const gadd = container.querySelector<HTMLElement>(".gadd");
-    expect(gadd).not.toBeNull();
-    expect(gadd?.getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(gadd as HTMLElement);
-    expect(onToggleCollapse).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText("repo"));
-    expect(onToggleCollapse).toHaveBeenCalledWith("z:\\repo");
   });
 });
