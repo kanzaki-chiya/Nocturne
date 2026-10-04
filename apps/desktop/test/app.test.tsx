@@ -203,6 +203,9 @@ function replayHost(failRpc: readonly string[] = []) {
           // 立即返回 = 已接受；发送方随后才看到持久事件
           result = "done";
           break;
+        case "session.readAttachment":
+          result = { data: "AQID", mimeType: "image/png", bytes: 3 };
+          break;
         case "session.readInputHistory":
           result = [];
           break;

@@ -1,8 +1,11 @@
+import { webcrypto } from "node:crypto";
+import type { ReadAttachmentResult } from "@nocturne/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   createSessionView,
   type AssistantEntry,
+  type ImageAttachment,
   type PendingPermission,
   type PendingQuestion,
   type PermissionOption,
@@ -15,6 +18,78 @@ import {
 import type { RpcSession } from "@nocturne/rpc/client";
 
 import { Conversation, type ConversationProps } from "../src/Conversation";
+import { createAttachmentImageSource } from "../src/attachment-images";
+
+const imageData = new Uint8Array([1, 2, 3]);
+const historyImage: ImageAttachment = {
+  type: "image",
+  file: "history.png",
+  label: "历史截图",
+  mimeType: "image/png",
+  bytes: 3,
+  sha256: "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+  source: "paste",
+};
+
+const visibilityObservers: {
+  callback: IntersectionObserverCallback;
+  root: Element | Document | null;
+  observe: Mock;
+  disconnect: Mock;
+}[] = [];
+
+beforeEach(() => {
+  visibilityObservers.length = 0;
+  vi.stubGlobal("crypto", webcrypto);
+  vi.stubGlobal(
+    "URL",
+    class extends URL {
+      static override createObjectURL = vi.fn(() => "blob:history");
+      static override revokeObjectURL = vi.fn();
+    },
+  );
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe = vi.fn();
+      disconnect = vi.fn();
+      constructor(callback: IntersectionObserverCallback, options: IntersectionObserverInit) {
+        visibilityObservers.push({
+          callback,
+          root: options.root ?? null,
+          observe: this.observe,
+          disconnect: this.disconnect,
+        });
+      }
+    },
+  );
+});
+
+function enterViewport(index = 0, isIntersecting = true) {
+  const observer = visibilityObservers[index];
+  if (!observer) throw new Error("缺少图片可视区观察器");
+  act(() => {
+    observer.callback(
+      [{ isIntersecting } as IntersectionObserverEntry],
+      {} as IntersectionObserver,
+    );
+  });
+}
+
+function imageView(attachments = [historyImage]) {
+  const view = createSessionView();
+  view.entries = [
+    {
+      kind: "user",
+      key: "history-user",
+      seq: 1,
+      turnId: "history-turn",
+      content: [{ type: "text", text: "看图" }],
+      attachments,
+    },
+  ];
+  return view;
+}
 
 function sessionFixture(id = "session-1") {
   const methods = {
@@ -23,6 +98,9 @@ function sessionFixture(id = "session-1") {
       .fn<(requestId: string, reply: PermissionReply) => Promise<void>>()
       .mockResolvedValue(undefined),
     respondQuestion: vi.fn<RpcSession["respondQuestion"]>().mockResolvedValue(undefined),
+    readAttachment: vi
+      .fn<RpcSession["readAttachment"]>()
+      .mockRejectedValue(new Error("附件文件缺失")),
     interrupt: vi.fn(),
   };
   // Conversation only consumes these RPC methods; fail visibly if its boundary grows.
@@ -119,13 +197,13 @@ function conversationProps(rendered: { session: RpcSession; openUrl: (url: strin
     openUrl: rendered.openUrl,
     cwd: "Z:/project",
     subscribeEvents: () => () => undefined,
-    images: { url: () => undefined, register: async () => "" },
+    images: createAttachmentImageSource(),
   };
 }
 
 function mount(
   view: SessionView = createSessionView(),
-  overrides: Partial<Pick<ConversationProps, "cwd" | "subscribeEvents">> = {},
+  overrides: Partial<Pick<ConversationProps, "cwd" | "subscribeEvents" | "images">> = {},
 ) {
   const { session, methods } = sessionFixture();
   const openUrl = vi.fn();
@@ -138,7 +216,157 @@ function mount(
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("Conversation 历史图片", () => {
+  it("用户气泡进入消息滚动区才读取；加载中占位，成功显示缩略图", async () => {
+    const images = createAttachmentImageSource();
+    const rendered = mount(imageView(), { images });
+    let finish!: (result: ReadAttachmentResult) => void;
+    rendered.methods.readAttachment.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    expect(visibilityObservers[0]?.root).toBe(screen.getByRole("region", { name: "会话消息" }));
+    expect(visibilityObservers[0]?.observe).toHaveBeenCalledWith(
+      rendered.container.querySelector(".u-bubble"),
+    );
+    expect(rendered.methods.readAttachment).not.toHaveBeenCalled();
+    enterViewport(0, false);
+    expect(rendered.methods.readAttachment).not.toHaveBeenCalled();
+    enterViewport();
+    expect(rendered.methods.readAttachment).toHaveBeenCalledExactlyOnceWith("history.png");
+    expect(rendered.container.querySelector(".u-img-placeholder")?.getAttribute("aria-busy")).toBe(
+      "true",
+    );
+    expect(screen.queryByRole("img")).toBeNull();
+    await act(async () => {
+      finish({ data: imageData, mimeType: "image/png", bytes: 3 });
+    });
+    const image = await screen.findByRole("img", { name: "历史截图" });
+    expect(image.getAttribute("src")).toBe("blob:history");
+    expect(rendered.container.querySelector(".u-img-placeholder")).toBeNull();
+    expect(visibilityObservers[0]?.disconnect).toHaveBeenCalled();
+    images.dispose();
+  });
+
+  it("可视区内命中发送字节的 sha256 缓存，不调用 RPC", async () => {
+    const images = createAttachmentImageSource();
+    const url = await images.register(imageData, "image/png");
+    const rendered = mount(imageView(), { images });
+    expect(screen.queryByRole("img")).toBeNull();
+    enterViewport();
+    expect((await screen.findByRole("img")).getAttribute("src")).toBe(url);
+    expect(rendered.methods.readAttachment).not.toHaveBeenCalled();
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    images.dispose();
+  });
+
+  it("重复图片的并发请求按 sha256 合并", async () => {
+    const images = createAttachmentImageSource();
+    const rendered = mount(imageView([historyImage, { ...historyImage, file: "copy.png" }]), {
+      images,
+    });
+    rendered.methods.readAttachment.mockResolvedValue({
+      data: imageData,
+      mimeType: "image/png",
+      bytes: 3,
+    });
+    enterViewport();
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(2));
+    expect(rendered.methods.readAttachment).toHaveBeenCalledTimes(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    images.dispose();
+  });
+
+  it.each(["附件文件缺失：history.png", "附件完整性校验失败：history.png", "连接已断开"])(
+    "读取失败退回 filename chip，title 保留具体原因：%s",
+    async (reason) => {
+      const rendered = mount(imageView());
+      rendered.methods.readAttachment.mockRejectedValue(new Error(reason));
+      enterViewport();
+      await waitFor(() => {
+        const chip = rendered.container.querySelector(".u-img-chip");
+        expect(chip?.textContent).toBe("history.png");
+        expect(chip?.getAttribute("title")).toBe(`图片加载失败：${reason}`);
+      });
+      expect(screen.queryByRole("img")).toBeNull();
+      expect(rendered.container.querySelector(".u-img-placeholder")).toBeNull();
+    },
+  );
+
+  it("图片解码或显示失败也回退 chip，不留下破损图片", async () => {
+    const images = createAttachmentImageSource();
+    await images.register(imageData, "image/png");
+    const rendered = mount(imageView(), { images });
+    enterViewport();
+    fireEvent.error(await screen.findByRole("img"));
+    const chip = rendered.container.querySelector(".u-img-chip");
+    expect(chip?.textContent).toBe("history.png");
+    expect(chip?.getAttribute("title")).toBe("图片加载失败：图片无法解码或显示");
+    expect(screen.queryByRole("img")).toBeNull();
+    images.dispose();
+  });
+
+  it("工具图片只显示 chip，即便缓存命中也不读取或显示缩略图", async () => {
+    const images = createAttachmentImageSource();
+    await images.register(imageData, "image/png");
+    const entry = tool({ name: "read", input: { path: "history.png" } });
+    if (!entry.result) throw new Error("工具 fixture 缺少结果");
+    entry.result.attachments = [historyImage];
+    entry.result.output = undefined;
+    const view = createSessionView();
+    view.entries = [entry];
+    const rendered = mount(view, { images });
+    expect(rendered.container.querySelector(".u-img-chip")?.textContent).toBe("历史截图");
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(visibilityObservers).toHaveLength(0);
+    expect(rendered.methods.readAttachment).not.toHaveBeenCalled();
+    images.dispose();
+  });
+
+  it("卸载断开观察器；旧请求完成后不更新新会话", async () => {
+    const images = createAttachmentImageSource();
+    const rendered = mount(imageView(), { images });
+    let finish!: (result: ReadAttachmentResult) => void;
+    rendered.methods.readAttachment.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    enterViewport();
+    const next = sessionFixture("next-session");
+    rendered.rerender(
+      <Conversation
+        view={createSessionView()}
+        {...conversationProps({ session: next.session, openUrl: rendered.openUrl })}
+        images={images}
+      />,
+    );
+    expect(visibilityObservers[0]?.disconnect).toHaveBeenCalled();
+    await act(async () => {
+      finish({ data: imageData, mimeType: "image/png", bytes: 3 });
+    });
+    await waitFor(() => expect(images.url(historyImage)).toBe("blob:history"));
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(rendered.container.querySelector(".u-img-chip")).toBeNull();
+    images.dispose();
+  });
+
+  it("未进入可视区便卸载，不因旧观察器回调读取附件", () => {
+    const rendered = mount(imageView());
+    rendered.unmount();
+    enterViewport();
+    expect(rendered.methods.readAttachment).not.toHaveBeenCalled();
+    expect(visibilityObservers[0]?.disconnect).toHaveBeenCalled();
+  });
+});
 
 describe("Conversation 权限卡片", () => {
   const choices: [PermissionOption, string, PermissionReply][] = [
@@ -866,7 +1094,7 @@ describe("Conversation 工具行与拒绝", () => {
     expect(container.textContent).not.toMatch(/summary|seq|41|42|不应显示的摘要正文/);
   });
 
-  it("用户消息里的 @ 引用渲染成带说明的 chip，历史图片降级为占位", () => {
+  it("用户消息里的 @ 引用渲染成带说明的 chip，历史图片等待进入可视区", () => {
     const view = createSessionView();
     view.entries = [
       {
@@ -904,9 +1132,9 @@ describe("Conversation 工具行与拒绝", () => {
     const ref = container.querySelector(".ref");
     expect(ref?.textContent).toBe("@src/a.ts");
     expect(ref?.getAttribute("title")).toBe("已附带 36/120 行");
-    const chip = container.querySelector(".u-img-chip");
-    expect(chip?.textContent).toContain("img-1.png");
-    expect(chip?.getAttribute("title")).toBe("暂不支持查看历史图片");
+    const placeholder = container.querySelector(".u-img-placeholder");
+    expect(placeholder?.getAttribute("aria-label")).toBe("加载图片：img-1.png");
+    expect(placeholder?.getAttribute("title")).toBe("图片进入可视区后加载");
   });
 });
 

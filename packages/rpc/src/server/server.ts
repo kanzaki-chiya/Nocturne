@@ -1004,6 +1004,14 @@ class Connection {
         entry.unsubscribe = undefined;
         return null;
       },
+      "session.readAttachment": async (p) => {
+        const attachment = await this.session(p).session.readAttachment(reqString(p, "file"));
+        return {
+          data: Buffer.from(attachment.data).toString("base64"),
+          mimeType: attachment.mimeType,
+          bytes: attachment.bytes,
+        };
+      },
       "session.submit": async (p) => {
         const { session } = this.session(p);
         const input: SubmitInput = {};

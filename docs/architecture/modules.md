@@ -150,6 +150,7 @@ const runtime = await createRuntime({ cwd, providerConfigs, interactive, config 
 const session = await runtime.createSession({ model: "provider/model" })  // 或 resumeSession(id, { force?, model? }) / listSessions()
 const unsubscribe = session.subscribe((event) => render(event))
 session.durableEvents()                                      // 已写入日志的持久事件（旧→新）；先回放再 subscribe，见 view.md 第 6 节
+await session.readAttachment("img-1.png")                     // → { data: Uint8Array, mimeType, bytes }；授权与校验见 sessions.md
 await session.submit({ text: "修复登录测试" })                 // 返回在 Turn 结束时 resolve
 session.interrupt()
 await session.respondPermission(requestId, { decision: "allow", remember: "project" })  // Phase 3 起生成 Grant

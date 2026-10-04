@@ -2,6 +2,8 @@
  * @nocturne/core 公开入口（modules.md 第 3 节"core/index（公开 API）"）。
  * 客户端看到的全部能力都经由这里；进程内与将来的 RPC 客户端共用同一份语义（ADR-0002）。
  */
+import { createHash } from "node:crypto";
+
 import {
   createSubagentLauncher,
   createSubagentLimiter,
@@ -57,6 +59,7 @@ import {
   createPlatform,
   createShellResolver,
   detectShells,
+  fsErrorCode,
   isShellKind,
   parseShellSpec,
   specFromConfigFields,
@@ -89,6 +92,7 @@ import type {
   HookEntry,
   HookPoint,
   DurableEvent,
+  ImageAttachment,
   ImageMimeType,
   ModelRef,
   PermissionReply,
@@ -260,6 +264,13 @@ export interface SubmitInput {
     { data: Uint8Array; mimeType: ImageMimeType; label?: string | undefined }[] | undefined;
 }
 
+/** 本会话已登记并通过磁盘完整性校验的图片附件。 */
+export interface ReadAttachmentResult {
+  data: Uint8Array;
+  mimeType: ImageMimeType;
+  bytes: number;
+}
+
 export interface RuntimeSession {
   rewindTargets(): Promise<RewindTarget[]>;
   rewind(targetSeq: number, mode: RewindMode): Promise<SessionRewoundPayload["files"]>;
@@ -270,6 +281,8 @@ export interface RuntimeSession {
    * protocol 的 reducer 回放视图，再 subscribe 接实时事件（view.md 第 6 节）。
    */
   durableEvents(): readonly DurableEvent[];
+  /** 只读取本会话持久事件登记的图片附件；每次从磁盘校验大小与 sha256。 */
+  readAttachment(file: string): Promise<ReadAttachmentResult>;
   /** 订阅会话事件（durable + ephemeral），返回退订函数 */
   subscribe(listener: (event: RuntimeEvent) => void): () => void;
   /** 当前工作区的持久输入历史（旧→新）。读取失败时警告并返回空列表。 */
@@ -1370,6 +1383,73 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const runtimeSession: RuntimeSession = {
       id: session.id,
       durableEvents: () => session.durableEvents(),
+      async readAttachment(file) {
+        assertUsable();
+        if (
+          typeof file !== "string" ||
+          file.length === 0 ||
+          file.includes("..") ||
+          /[<>:"/\\|?*\u0000-\u001f]/.test(file) ||
+          /[. ]$/.test(file) ||
+          /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(file)
+        ) {
+          throw new SessionError("invalid_attachment_file", "附件必须是单个安全文件名");
+        }
+        // 原始持久日志是授权来源，包含已被回退或压缩隐藏的图片；不沿 parent 回溯。
+        let attachment: ImageAttachment | undefined;
+        for (const event of session.durableEvents()) {
+          if (event.type !== "message.user" && event.type !== "tool.completed") continue;
+          attachment = event.payload.attachments?.find((ref) => ref.file === file);
+          if (attachment !== undefined) break;
+        }
+        if (attachment === undefined) {
+          throw new SessionError("attachment_not_found", "本会话未登记该图片附件");
+        }
+        const root = paths.join(sessionsDir, "attachments");
+        const dir = paths.join(root, session.id);
+        const target = paths.join(dir, file);
+        try {
+          // 拒绝文件链接、会话目录 junction 与附件根链接；realpath 再检查实际归属。
+          if (
+            (await fs.lstat(root)).type !== "directory" ||
+            (await fs.lstat(dir)).type !== "directory"
+          ) {
+            throw new SessionError("invalid_attachment_file", "附件目录不能是链接");
+          }
+          const stat = await fs.lstat(target);
+          if (stat.type !== "file") {
+            throw new SessionError("invalid_attachment_file", "附件必须是普通文件");
+          }
+          const realRoot = await fs.realpath(root);
+          const realDir = await fs.realpath(dir);
+          const realTarget = await fs.realpath(target);
+          if (
+            !paths.equals(realDir, paths.join(realRoot, session.id)) ||
+            !paths.equals(realTarget, paths.join(realDir, file))
+          ) {
+            throw new SessionError("invalid_attachment_file", "附件路径超出本会话目录");
+          }
+          if (stat.size !== attachment.bytes) {
+            throw new SessionError("attachment_corrupt", "图片附件大小与记录不符");
+          }
+          // 不走 AttachmentStore.load 的 sha 缓存：落盘文件可能在上次读取后被改动。
+          const data = await fs.readFile(realTarget);
+          if (
+            data.byteLength !== attachment.bytes ||
+            createHash("sha256").update(data).digest("hex") !== attachment.sha256
+          ) {
+            throw new SessionError("attachment_corrupt", "图片附件内容与记录不符");
+          }
+          return { data, mimeType: attachment.mimeType, bytes: data.byteLength };
+        } catch (error) {
+          if (error instanceof SessionError) throw error;
+          const code = fsErrorCode(error);
+          if (code === "ENOENT" || code === "ENOTDIR") {
+            throw new SessionError("attachment_missing", "图片附件文件缺失", { cause: error });
+          }
+          throw new SessionError("attachment_read_failed", "图片附件读取失败", { cause: error });
+        }
+      },
       rewindTargets() {
         assertUsable();
         if (busy() || compactController !== undefined)

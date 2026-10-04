@@ -97,6 +97,9 @@ function fixture() {
   const api = {
     id: "session-one",
     describeContext: vi.fn(async () => context),
+    readAttachment: vi
+      .fn<RpcSession["readAttachment"]>()
+      .mockRejectedValue(new Error("附件文件缺失")),
   };
   const controls = controlsFixture();
   return {

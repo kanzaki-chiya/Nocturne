@@ -3,6 +3,7 @@ import { marked, type Token, type Tokens } from "marked";
 import {
   parseFileRefs,
   type PendingPermission,
+  type ImageAttachment,
   type PendingQuestion,
   type PermissionOption,
   type PermissionReply,
@@ -259,7 +260,99 @@ function ImageIcon() {
   );
 }
 
-function UserMessage({ entry, images }: { entry: UserEntry; images: AttachmentImageSource }) {
+function UserImage({
+  attachment,
+  images,
+  session,
+  visible,
+}: {
+  attachment: ImageAttachment;
+  images: AttachmentImageSource;
+  session: RpcSession;
+  visible: boolean;
+}) {
+  const [url, setUrl] = useState<string>();
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    if (!visible) return;
+    let active = true;
+    void images.load(attachment, session).then(
+      (loaded) => {
+        if (active) setUrl(loaded);
+      },
+      (reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : String(reason));
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [attachment, images, session, visible]);
+  if (error !== undefined) {
+    return (
+      <span className="u-img-chip" title={`图片加载失败：${error}`}>
+        <ImageIcon />
+        {attachment.file}
+      </span>
+    );
+  }
+  if (url !== undefined) {
+    return (
+      <span className="u-img-frame">
+        <img
+          className="u-img"
+          src={url}
+          alt={attachment.label ?? attachment.file}
+          onError={() => {
+            setError("图片无法解码或显示");
+          }}
+        />
+      </span>
+    );
+  }
+  return (
+    <span
+      className="u-img-placeholder"
+      role="status"
+      aria-label={`加载图片：${attachment.file}`}
+      aria-busy={visible}
+      title={visible ? "图片加载中…" : "图片进入可视区后加载"}
+    >
+      <ImageIcon />
+    </span>
+  );
+}
+
+function UserMessage({
+  entry,
+  images,
+  session,
+}: {
+  entry: UserEntry;
+  images: AttachmentImageSource;
+  session: RpcSession;
+}) {
+  const bubble = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  const hasImages = (entry.attachments?.length ?? 0) > 0;
+  useEffect(() => {
+    const element = bubble.current;
+    if (!hasImages || !element) return;
+    let active = true;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!active || !entries.some((item) => item.isIntersecting)) return;
+        setVisible(true);
+        observer.disconnect();
+      },
+      { root: element.closest(".conversation-scroll") },
+    );
+    observer.observe(element);
+    return () => {
+      active = false;
+      observer.disconnect();
+    };
+  }, [hasImages]);
   const body = userText(entry);
   const refs = parseFileRefs(body);
   const byPath = new Map((entry.fileRefs ?? []).map((ref) => [ref.path, ref]));
@@ -282,23 +375,16 @@ function UserMessage({ entry, images }: { entry: UserEntry; images: AttachmentIm
   if (at < body.length) segments.push(body.slice(at));
   return (
     <article className="u" aria-label="用户消息">
-      <div className="u-bubble">
-        {(entry.attachments ?? []).map((attachment, index) => {
-          const url = images.url(attachment);
-          return url !== undefined ? (
-            <img
-              key={index}
-              className="u-img"
-              src={url}
-              alt={attachment.label ?? attachment.file}
-            />
-          ) : (
-            <span key={index} className="u-img-chip" title="暂不支持查看历史图片">
-              <ImageIcon />
-              {attachment.label ?? attachment.file}
-            </span>
-          );
-        })}
+      <div className="u-bubble" ref={bubble}>
+        {(entry.attachments ?? []).map((attachment, index) => (
+          <UserImage
+            key={`${attachment.file}:${attachment.sha256}:${index}`}
+            attachment={attachment}
+            images={images}
+            session={session}
+            visible={visible}
+          />
+        ))}
         {body !== "" && <div className="u-text">{segments}</div>}
       </div>
       {entry.descriptions?.map((description, index) =>
@@ -811,6 +897,7 @@ function EntryView({
   parts,
   now,
   images,
+  session,
 }: {
   entry: ViewEntry;
   openUrl: OpenUrl;
@@ -818,10 +905,11 @@ function EntryView({
   parts: ReasoningMap;
   now: number;
   images: AttachmentImageSource;
+  session: RpcSession;
 }) {
   switch (entry.kind) {
     case "user":
-      return <UserMessage entry={entry} images={images} />;
+      return <UserMessage entry={entry} images={images} session={session} />;
     case "assistant":
       return (
         <article className="a" aria-label="助手消息">
@@ -1284,6 +1372,7 @@ function ConversationContent({
               parts={parts}
               now={now}
               images={images}
+              session={session}
             />
           ))}
           {view.live.assistants.map((assistant) => (

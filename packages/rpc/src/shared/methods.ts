@@ -256,6 +256,10 @@ export interface RpcMethods {
     result: { lastSeq: number };
   };
   "session.unsubscribe": { params: SessionParams; result: null };
+  "session.readAttachment": {
+    params: SessionParams & { file: string };
+    result: { data: string; mimeType: ImageMimeType; bytes: number };
+  };
   "session.submit": {
     params: SessionParams & {
       text?: string;
@@ -356,6 +360,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "login.cancel": true,
   "session.subscribe": true,
   "session.unsubscribe": true,
+  "session.readAttachment": true,
   "session.submit": true,
   "session.respondPermission": true,
   "session.respondQuestion": true,

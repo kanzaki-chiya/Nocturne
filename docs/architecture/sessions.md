@@ -144,6 +144,12 @@ interface SessionRecovery {
 
 `Runtime.forkSession(sessionId, { targetSeq? })` 返回新 id，随后客户端沿用 `/resume` 切换并关闭原会话。复制全部持久事件，仅替换第一行的 id、创建时间与 `forkedFrom: { sessionId, seq }`；其余事件（包括信封）与 seq 原样保留，图片描述、压缩边界和回退引用无需重写。指定有效用户消息时，在复制日志末尾追加只回退对话的事件。附件、检查点复制到新 id，子会话日志不复制，工作区文件保持当前状态。新会话保留标题，列表带「分叉」标记。正在 Turn、压缩、回退或分叉的会话拒绝操作；日志完成落盘后才发布到会话列表。详见 ADR-0041 第 3 节。
 
+## 图片附件读取
+
+`RuntimeSession.readAttachment(file)` 返回校验后的原始字节、`mimeType` 与 `bytes`，供进程内和 RPC 客户端读取持久附件，不产生事件。授权范围是当前会话全部持久 `message.user` / `tool.completed` 的附件引用，包括回退后保留的原始记录；只接受单文件名，不接受任意路径或跨会话目录。每次读取实际文件并校验大小和 sha256，缺失与损坏明确报错；精确参数与错误码见 [rpc.md](../protocols/rpc.md)。
+
+分叉沿用上文的附件目录复制约定，读取新会话自己的副本。子会话附件目录与编号独立，仅允许自身日志登记的附件；未定义父附件继承，因此不回溯父会话日志或目录。文件链接不得逃逸当前会话附件目录。
+
 ## 文件检查点
 
 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md) 的原始字节存于 `<sessionsDir>/checkpoints/<rootSessionId>/<sha256>`，按内容去重，不自动清理。不存在的文件记 null，无法追踪的路径记原因。根会话每条用户消息到下一条用户消息之前是一轮，所有层级的子代理共用这一轮的首次 before；检查点事件写入根日志，payload.sessionId 标明子会话来源。历史折叠与视图忽略检查点，恢复读取日志仍须校验它们。

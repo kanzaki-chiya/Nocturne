@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import fsPromises from "node:fs/promises";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as core from "@nocturne/core";
 import {
@@ -213,6 +214,16 @@ describe("session.* 方法映射", () => {
     });
     const saved = path.join(h.sessionsDir, "attachments", session.id, "img-1.png");
     expect(new Uint8Array(readFileSync(saved))).toEqual(PNG_2x3);
+    expect(
+      await h.client.call("session.readAttachment", { sessionId: session.id, file: "img-1.png" }),
+    ).toEqual({
+      data: Buffer.from(PNG_2x3).toString("base64"),
+      mimeType: "image/png",
+      bytes: PNG_2x3.length,
+    });
+    const image = await session.readAttachment("img-1.png");
+    expect(image.data).toBeInstanceOf(Uint8Array);
+    expect(image).toEqual({ data: PNG_2x3, mimeType: "image/png", bytes: PNG_2x3.length });
 
     // 不是 base64：invalid_params，不进 Runtime
     await expect(
@@ -222,6 +233,96 @@ describe("session.* 方法映射", () => {
         attachments: [{ data: "###", mimeType: "image/png" }],
       }),
     ).rejects.toMatchObject({ code: "invalid_params" });
+    await session.close();
+    h.client.close();
+    await h.served;
+  });
+
+  it("附件错误码和 SessionError 类经内存管道原样往返，参数校验留在 RPC", async () => {
+    const h = await connect({ scripts: [textScript("看到了")] });
+    const { session } = await h.client.runtime.createSession({ model: MODEL });
+    await session.submit({
+      text: "image",
+      attachments: [{ data: PNG_2x3, mimeType: "image/png" }],
+    });
+    const saved = path.join(h.sessionsDir, "attachments", session.id, "img-1.png");
+    for (const file of ["output.txt", "not-registered.png"]) {
+      await expect(session.readAttachment(file)).rejects.toMatchObject({
+        code: "attachment_not_found",
+        rpcCode: -32002,
+        errorName: "SessionError",
+      });
+    }
+    for (const file of ["../img-1.png", "nested\\img-1.png", "C:\\image.png", "img-1.png:secret"]) {
+      await expect(session.readAttachment(file)).rejects.toMatchObject({
+        code: "invalid_attachment_file",
+        rpcCode: -32002,
+        errorName: "SessionError",
+      });
+    }
+    const read = vi
+      .spyOn(fsPromises, "readFile")
+      .mockRejectedValueOnce(Object.assign(new Error("access denied"), { code: "EACCES" }));
+    try {
+      await expect(session.readAttachment("img-1.png")).rejects.toMatchObject({
+        code: "attachment_read_failed",
+        rpcCode: -32002,
+        errorName: "SessionError",
+      });
+    } finally {
+      read.mockRestore();
+    }
+    const changed = new Uint8Array(PNG_2x3);
+    changed[changed.length - 1] = 7;
+    writeFileSync(saved, changed);
+    await expect(session.readAttachment("img-1.png")).rejects.toMatchObject({
+      code: "attachment_corrupt",
+      rpcCode: -32002,
+      errorName: "SessionError",
+    });
+    writeFileSync(saved, PNG_2x3.subarray(0, 4));
+    await expect(session.readAttachment("img-1.png")).rejects.toMatchObject({
+      code: "attachment_corrupt",
+      rpcCode: -32002,
+    });
+    unlinkSync(saved);
+    await expect(session.readAttachment("img-1.png")).rejects.toMatchObject({
+      code: "attachment_missing",
+      rpcCode: -32002,
+      errorName: "SessionError",
+    });
+    await expect(
+      h.client.call("session.readAttachment", {
+        sessionId: session.id,
+        file: 42 as unknown as string,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_params", rpcCode: -32602 });
+    await session.close();
+    h.client.close();
+    await h.served;
+  });
+
+  it("附件读取绑定会话，分叉与回退仍从各自目录读取持久引用", async () => {
+    const h = await connect({ scripts: [textScript("看到了")] });
+    const { session } = await h.client.runtime.createSession({ model: MODEL });
+    await session.submit({
+      text: "image",
+      attachments: [{ data: PNG_2x3, mimeType: "image/png" }],
+    });
+    const { session: other } = await h.client.runtime.createSession({ model: MODEL });
+    await expect(other.readAttachment("img-1.png")).rejects.toMatchObject({
+      code: "attachment_not_found",
+    });
+    const target = (await session.rewindTargets())[0];
+    if (target === undefined) throw new Error("missing image user");
+    const forkId = await h.client.runtime.forkSession(session.id, { targetSeq: target.seq });
+    const { session: fork } = await h.client.runtime.resumeSession(forkId);
+    await session.rewind(target.seq, "conversation");
+    expect((await session.readAttachment("img-1.png")).data).toEqual(PNG_2x3);
+    unlinkSync(path.join(h.sessionsDir, "attachments", session.id, "img-1.png"));
+    expect((await fork.readAttachment("img-1.png")).data).toEqual(PNG_2x3);
+    await fork.close();
+    await other.close();
     await session.close();
     h.client.close();
     await h.served;

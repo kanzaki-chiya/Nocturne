@@ -63,6 +63,9 @@ function fixture(lockedId?: string, rejectSubmit = false) {
           };
         }
         if (request.method === "session.subscribe") result = { lastSeq: 0 };
+        if (request.method === "session.readAttachment") {
+          result = { data: "AQID", mimeType: "image/png", bytes: 3 };
+        }
         if (request.method === "session.close") opened.delete(id);
         if (request.method === "session.submit") {
           if (rejectSubmit) {

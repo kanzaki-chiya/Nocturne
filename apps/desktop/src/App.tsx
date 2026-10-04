@@ -42,6 +42,12 @@ export function App({ host }: { host: DesktopHost }) {
   const prefs = useMemo(() => createPrefsStore(globalThis.localStorage), []);
   const pool = useMemo(() => new BackendPool(host), [host]);
   const images = useMemo(() => createAttachmentImageSource(), []);
+  useEffect(
+    () => () => {
+      images.dispose();
+    },
+    [images],
+  );
 
   const [phase, setPhase] = useState<Phase>({ kind: "probing" });
   const [sessions, setSessions] = useState<SessionSummary[]>([]);

@@ -59,9 +59,14 @@
 | `describeContext` | → `BuiltContext` 去掉发给模型的整份 `request`，只留报告与判定 |
 | `reasoningEffortInfo` / `shellInfo` / `listShells` / `visionInfo` / `mcpServers` / `fileIndex` | 只读查询，结果同进程内 |
 | `readInputHistory` / `recordInputHistory` | → `string[]`；`{ text }` → `null` |
+| `readAttachment` | `{ file }` → `{ data: base64, mimeType, bytes }`；只读取当前会话持久事件登记过的图片附件，见下文 |
 | `close` | → `null`；关闭这一个会话（刷盘、释放会话锁），其余会话不受影响 |
 
 `submit.attachments` 是 `[{ data: base64, mimeType, label? }]`；解码后交给 Core，大小与格式校验仍在 Core（[ADR-0023](../decisions/ADR-0023-image-input.md)）。`data` 不是合法 base64 报 `invalid_params`，不进 Runtime。
+
+`readAttachment` 对应 `RuntimeSession.readAttachment(file)`，客户端 `RpcSession.readAttachment(file)` 将标准 base64 解码为 `Uint8Array`。Core 仅接受单个文件名，拒绝路径分隔符、`..`、绝对路径与 Windows 替代数据流；文件必须出现于本会话的持久 `message.user.attachments` 或 `tool.completed.attachments`（包括回退后仍保留的原始记录）。读取当前会话附件目录中的实际文件，每次校验字节数与 sha256，不通过父会话目录兜底，也不允许链接逃逸。分叉读取复制到新 id 的附件；子会话仅授权自身日志里的引用（[sessions.md](../architecture/sessions.md)）。
+
+附件错误以 `SessionError`（`-32002`）返回：`invalid_attachment_file`（非法文件名或链接路径）、`attachment_not_found`（本会话未登记）、`attachment_missing`（文件缺失）、`attachment_corrupt`（大小或 sha256 不符）、`attachment_read_failed`（其他文件读取 I/O 错误，如访问被拒绝）。
 
 ### 3.3 `provider.*`
 
@@ -167,6 +172,10 @@
 ## 8. 与公开 API 保持一致
 
 方法清单以公开 API 为准，RPC 层不另加能力。`packages/rpc/src/server/coverage.ts` 登记 `Runtime`、`RuntimeSession` 与 `RuntimeConfig` 每个成员对应的 RPC 方法或"不映射"的原因，键类型由 `keyof` 推导：公开 API 新增成员而没有登记，编译失败；覆盖测试再用真实对象的键与服务端方法表对照。服务商配置函数另有 `PROVIDER_FUNCTION_METHODS` / `PROVIDER_FUNCTIONS_NOT_MAPPED` 一张表，覆盖测试直接读 `packages/core/src/index.ts` 的导出块校验全集。公开 API 新增方法时，同步在 `RpcMethods`、服务端处理表、客户端封装与本文补映射。
+
+| Core 公开 API | RPC 方法 | 客户端返回 |
+|---|---|---|
+| `RuntimeSession.readAttachment(file)` | `session.readAttachment({ sessionId, file })` | `{ data: Uint8Array, mimeType, bytes }`（线上 `data` 为 base64） |
 
 ## 9. 服务端进程
 

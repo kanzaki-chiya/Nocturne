@@ -53,6 +53,7 @@ export const SESSION_METHODS: Record<
   rewind: "session.rewind",
   state: "session.state",
   subscribe: "session.subscribe",
+  readAttachment: "session.readAttachment",
   readInputHistory: "session.readInputHistory",
   recordInputHistory: "session.recordInputHistory",
   fileIndex: "session.fileIndex",

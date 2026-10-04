@@ -32,6 +32,7 @@ import type {
   RewindMode,
   RewindTarget,
   SessionRewoundPayload,
+  ReadAttachmentResult,
   SessionSummary,
   SettingItem,
   SettingsPatch,
@@ -124,6 +125,7 @@ export interface RpcSession {
    * 同一会话同一时刻只有一路订阅，再次调用替换之前的监听器；需要多个消费者时用 `RpcClient.onEvent` 分发。
    */
   subscribe(listener: EventListener, options?: SubscribeOptions): Promise<Subscription>;
+  readAttachment(file: string): Promise<ReadAttachmentResult>;
   /** 挂到 Turn 结束，结果与进程内 `submit()` 的 resolve 时机相同 */
   submit(input: SubmitInput): Promise<TurnEndReason>;
   /** 中断运行中的 Turn（通知，无应答）；submit 随后以 aborted 返回 */
@@ -401,6 +403,13 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
           if (sessionListeners.get(sessionId) === listeners) sessionListeners.delete(sessionId);
           throw error;
         }
+      },
+      async readAttachment(file) {
+        const result = await call("session.readAttachment", { ...p, file });
+        const binary = atob(result.data);
+        const data = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) data[i] = binary.charCodeAt(i);
+        return { data, mimeType: result.mimeType, bytes: result.bytes };
       },
       submit: async (input) => {
         const attachments = input.attachments?.map((a) => ({
