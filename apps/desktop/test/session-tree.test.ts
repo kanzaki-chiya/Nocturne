@@ -133,6 +133,19 @@ describe("buildSessionTree", () => {
     expect(tree.projects[1]?.sessions).toHaveLength(0);
   });
 
+  it("projectSort 为 name 时全部项目按名称排序（含无会话的手动项目）", () => {
+    const tree = buildSessionTree(
+      [
+        session("a", "Z:\\zeta", NOW - 100),
+        session("b", "Z:\\alpha", NOW - 5000),
+        session("c", "Z:\\beta", NOW - 9000),
+      ],
+      { pinned: [], projects: ["Z:\\mango"], hidden: [], projectSort: "name" },
+      opts(),
+    );
+    expect(tree.projects.map((p) => p.name)).toEqual(["alpha", "beta", "mango", "zeta"]);
+  });
+
   it("锁定会话 meta 前缀 🔒；无标题回退「未命名会话」", () => {
     const tree = buildSessionTree(
       [

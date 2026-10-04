@@ -6,16 +6,20 @@
 
 export const PREFS_KEY = "nocturne.desktop.prefs.v1";
 
+export type ProjectSort = "activity" | "name";
+
 export interface Prefs {
   /** 置顶会话 id（数组顺序即显示顺序） */
   pinned: string[];
   /** 手动添加的项目路径（原始字符串，添加顺序） */
   projects: string[];
-  /** 从列表移除（隐藏）的项目 key */
+  /** 从列表移除（隐藏）的项目路径 */
   hidden: string[];
+  /** 项目排序：最近活动 / 名称 */
+  projectSort: ProjectSort;
 }
 
-const DEFAULTS: Prefs = { pinned: [], projects: [], hidden: [] };
+const DEFAULTS: Prefs = { pinned: [], projects: [], hidden: [], projectSort: "activity" };
 
 export interface PrefsStore {
   /** false 表示写不进存储，本次运行内仍生效 */
@@ -48,6 +52,9 @@ function parse(raw: string | null): Prefs {
   if (pinned !== undefined) prefs.pinned = pinned;
   if (projects !== undefined) prefs.projects = projects;
   if (hidden !== undefined) prefs.hidden = hidden;
+  if (obj.projectSort === "activity" || obj.projectSort === "name") {
+    prefs.projectSort = obj.projectSort;
+  }
   // lastProject 已废弃：旧数据里的这个字段直接忽略
   return prefs;
 }
@@ -69,6 +76,7 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         pinned: [...prefs.pinned],
         projects: [...prefs.projects],
         hidden: [...prefs.hidden],
+        projectSort: prefs.projectSort,
       };
     },
     update(patch) {

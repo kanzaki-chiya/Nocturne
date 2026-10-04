@@ -92,6 +92,8 @@ export interface TreePrefs {
   pinned: readonly string[];
   projects: readonly string[];
   hidden: readonly string[];
+  /** 项目排序（默认最近活动） */
+  projectSort?: "activity" | "name";
 }
 
 export interface TreeOptions {
@@ -133,7 +135,8 @@ function toRow(session: SessionSummary, now: number, status: SessionStatus): Ses
  * - 空会话（firstText 缺省/空白且未锁定）一律过滤；
  * - cwd == plainWorkspace 的会话进 chats（不进 projects），手动项目里同路径的也不显示为项目；
  * - projects = 其余会话 cwd 的 key ∪ 手动项目 − hidden；
- *   排序：有会话的按最新 mtimeMs 降序，其后是无会话的手动项目（按添加顺序）。
+ *   排序：默认最近活动（有会话的按最新 mtimeMs 降序，其后是无会话的手动项目按添加顺序），
+ *   projectSort 为 name 时按名称排序（大小写不敏感、数字按数值比）。
  */
 export function buildSessionTree(
   sessions: SessionSummary[],
@@ -229,6 +232,13 @@ export function buildSessionTree(
       moreCount: expanded ? 0 : unpinned.length - shown.length,
       manual: manualOrder.includes(key),
     });
+  }
+
+  // 名称排序时对全部项目（含无会话的手动项目）统一排序；最近活动排序保持原有顺序
+  if (prefs.projectSort === "name") {
+    projects.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }),
+    );
   }
 
   return { pinned, chats, projects };

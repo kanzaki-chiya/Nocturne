@@ -593,3 +593,51 @@ button {
   background: var(--a-sel);
   color: var(--a-text);
 }
+.ctxmenu button:disabled {
+  color: var(--a-faint);
+}
+.ctxmenu button:disabled:hover {
+  background: transparent;
+}
+/* 「…」菜单的条目：行内 hover 展开右侧子菜单（沿用 ctxmenu 面板样式） */
+.ctxmenu .mi {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 5px;
+  color: var(--a-secondary);
+  font-size: 12.5px;
+  cursor: default;
+}
+.ctxmenu .mi .arr {
+  margin-left: auto;
+  color: var(--a-faint);
+}
+.ctxmenu .mi:hover,
+.ctxmenu .mi:focus-within {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+.ctxmenu .mi .sub {
+  position: absolute;
+  left: 100%;
+  top: -5px;
+  display: none;
+  min-width: 120px;
+}
+.ctxmenu .mi:hover > .sub,
+.ctxmenu .mi:focus-within > .sub,
+.ctxmenu .mi.open > .sub {
+  display: block;
+}
+.ctxmenu .mi .sub .ck {
+  display: inline-block;
+  width: 14px;
+  color: var(--a-accent);
+}
+/* 「…」菜单打开期间让标题行的按钮保持可见（鼠标已移到菜单上，不再悬停标题行） */
+.h4row.menu-open .hb {
+  opacity: 1;
+}

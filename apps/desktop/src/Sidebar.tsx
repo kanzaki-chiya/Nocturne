@@ -9,21 +9,26 @@ export interface SidebarProps {
   collapsed: ReadonlySet<string>;
   expanded: ReadonlySet<string>;
   chatsExpanded: boolean;
+  /** 项目排序（菜单「排序」选择） */
+  projectSort: "activity" | "name";
+  /** 已移除（隐藏）的项目路径，菜单里逐个恢复 */
+  hiddenProjects: readonly { path: string; name: string }[];
   onSelectSession: (id: string) => void;
   onToggleCollapse: (key: string) => void;
   onToggleExpand: (key: string) => void;
   onToggleChats: () => void;
-  /** 「…」：有任一项目处于展开则全部折叠，否则全部展开 */
-  onToggleAllProjects: () => void;
+  onSetSort: (sort: "activity" | "name") => void;
   onPin: (id: string) => void;
   onUnpin: (id: string) => void;
-  onHideProject: (key: string) => void;
+  onHideProject: (path: string) => void;
+  onRestoreProject: (path: string) => void;
   onOpenProject: () => void;
 }
 
 type MenuState =
   | { kind: "session"; x: number; y: number; id: string; pinned: boolean }
-  | { kind: "project"; x: number; y: number; key: string };
+  | { kind: "project"; x: number; y: number; key: string; path: string }
+  | { kind: "projects"; x: number; y: number };
 
 function dotClass(row: SessionRow): string {
   if (row.status === "running") return "dot run";
@@ -76,6 +81,7 @@ function RowButton({
 
 export function Sidebar(props: SidebarProps) {
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const [subOpen, setSubOpen] = useState<"sort" | "removed" | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -101,9 +107,9 @@ export function Sidebar(props: SidebarProps) {
     setMenu({ kind: "session", x: e.clientX, y: e.clientY, id, pinned: props.pinnedIds.has(id) });
   };
 
-  const projectMenu = (e: React.MouseEvent, key: string) => {
+  const projectMenu = (e: React.MouseEvent, project: ProjectNode) => {
     e.preventDefault();
-    setMenu({ kind: "project", x: e.clientX, y: e.clientY, key });
+    setMenu({ kind: "project", x: e.clientX, y: e.clientY, key: project.key, path: project.path });
   };
 
   const renderRow = (row: SessionRow, pinned?: PinnedRow) => (
@@ -121,9 +127,6 @@ export function Sidebar(props: SidebarProps) {
     />
   );
 
-  // 有任一项目未折叠 → 「…」意为全部折叠，否则全部展开
-  const anyOpen = props.tree.projects.some((p) => !props.collapsed.has(p.key));
-
   const renderProject = (project: ProjectNode) => {
     const collapsed = props.collapsed.has(project.key);
     const expanded = props.expanded.has(project.key);
@@ -137,7 +140,7 @@ export function Sidebar(props: SidebarProps) {
               props.onToggleCollapse(project.key);
             }}
             onContextMenu={(e) => {
-              projectMenu(e, project.key);
+              projectMenu(e, project);
             }}
           >
             <span className="tw">{collapsed ? "▸" : "▾"}</span>
@@ -239,14 +242,16 @@ export function Sidebar(props: SidebarProps) {
             </nav>
           </>
         )}
-        <div className="h4row">
+        <div className={`h4row${menu?.kind === "projects" ? " menu-open" : ""}`}>
           <h4>项目</h4>
           <span className="hbtns">
             <button
               className="hb"
-              title={anyOpen ? "全部折叠" : "全部展开"}
-              onClick={() => {
-                props.onToggleAllProjects();
+              title="项目菜单"
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setSubOpen(null);
+                setMenu({ kind: "projects", x: rect.left, y: rect.bottom + 4 });
               }}
             >
               …
@@ -266,7 +271,7 @@ export function Sidebar(props: SidebarProps) {
       </div>
       {menu !== null && (
         <div className="ctxmenu" ref={menuRef} style={{ left: menu.x, top: menu.y }}>
-          {menu.kind === "session" ? (
+          {menu.kind === "session" && (
             <button
               onClick={() => {
                 if (menu.pinned) props.onUnpin(menu.id);
@@ -276,15 +281,99 @@ export function Sidebar(props: SidebarProps) {
             >
               {menu.pinned ? "取消置顶" : "置顶"}
             </button>
-          ) : (
+          )}
+          {menu.kind === "project" && (
             <button
               onClick={() => {
-                props.onHideProject(menu.key);
+                props.onHideProject(menu.path);
                 setMenu(null);
               }}
             >
               从列表移除
             </button>
+          )}
+          {menu.kind === "projects" && (
+            <>
+              {/* .mi 是 div+tabIndex：子菜单里还有按钮，不能用 <button> 嵌套 */}
+              <div
+                className={`mi has-sub${subOpen === "sort" ? " open" : ""}`}
+                role="button"
+                tabIndex={0}
+                autoFocus
+                onMouseEnter={() => {
+                  setSubOpen("sort");
+                }}
+                onClick={() => {
+                  setSubOpen("sort");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSubOpen("sort");
+                  }
+                }}
+              >
+                <span>排序</span>
+                <span className="arr">▸</span>
+                <div className="ctxmenu sub">
+                  {(
+                    [
+                      ["activity", "最近活动"],
+                      ["name", "名称"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      onClick={() => {
+                        props.onSetSort(value);
+                        setMenu(null);
+                      }}
+                    >
+                      <span className="ck">{props.projectSort === value ? "✓" : ""}</span>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div
+                className={`mi has-sub${subOpen === "removed" ? " open" : ""}`}
+                role="button"
+                tabIndex={0}
+                onMouseEnter={() => {
+                  setSubOpen("removed");
+                }}
+                onClick={() => {
+                  setSubOpen("removed");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSubOpen("removed");
+                  }
+                }}
+              >
+                <span>已移除的项目…</span>
+                <span className="arr">▸</span>
+                <div className="ctxmenu sub">
+                  {props.hiddenProjects.length === 0 ? (
+                    <button disabled>（没有已移除的项目）</button>
+                  ) : (
+                    props.hiddenProjects.map((p) => (
+                      <button
+                        key={p.path}
+                        title={p.path}
+                        onClick={() => {
+                          props.onRestoreProject(p.path);
+                          setMenu(null);
+                        }}
+                      >
+                        {p.name}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}

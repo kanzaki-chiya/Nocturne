@@ -20,10 +20,13 @@ function props(overrides?: Partial<SidebarProps>): SidebarProps {
     onToggleCollapse: noop,
     onToggleExpand: noop,
     onToggleChats: noop,
-    onToggleAllProjects: noop,
+    projectSort: "activity",
+    hiddenProjects: [],
+    onSetSort: noop,
     onPin: noop,
     onUnpin: noop,
     onHideProject: noop,
+    onRestoreProject: noop,
     onOpenProject: noop,
     ...overrides,
   };
@@ -61,14 +64,37 @@ describe("Sidebar", () => {
     expect(screen.getByText("展开显示（还有 3 个）")).toBeTruthy();
   });
 
-  it("点「…」调用全部折叠/展开回调；「＋」调用打开项目", () => {
-    const onToggleAllProjects = vi.fn();
+  it("点「…」弹出项目菜单：排序选项标当前值并回调 onSetSort；「＋」调用打开项目", () => {
+    const onSetSort = vi.fn();
     const onOpenProject = vi.fn();
-    render(<Sidebar {...props({ onToggleAllProjects, onOpenProject })} />);
-    fireEvent.click(screen.getByTitle("全部展开"));
-    expect(onToggleAllProjects).toHaveBeenCalledTimes(1);
+    render(<Sidebar {...props({ projectSort: "name", onSetSort, onOpenProject })} />);
+    fireEvent.click(screen.getByTitle("项目菜单"));
+    expect(screen.getByText("排序")).toBeTruthy();
+    expect(screen.getByText("已移除的项目…")).toBeTruthy();
+    expect(screen.getByText("名称").querySelector(".ck")?.textContent).toBe("✓");
+    expect(screen.getByText("最近活动").querySelector(".ck")?.textContent).toBe("");
+    fireEvent.click(screen.getByText("最近活动"));
+    expect(onSetSort).toHaveBeenCalledWith("activity");
     fireEvent.click(screen.getByTitle("打开项目…"));
     expect(onOpenProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("「已移除的项目…」列出隐藏项目，点击逐个恢复", () => {
+    const onRestoreProject = vi.fn();
+    const hiddenProjects = [
+      { path: "Z:\\old\\alpha", name: "alpha" },
+      { path: "Z:\\old\\beta", name: "beta" },
+    ];
+    render(<Sidebar {...props({ hiddenProjects, onRestoreProject })} />);
+    fireEvent.click(screen.getByTitle("项目菜单"));
+    fireEvent.click(screen.getByText("beta"));
+    expect(onRestoreProject).toHaveBeenCalledWith("Z:\\old\\beta");
+  });
+
+  it("没有已移除的项目时菜单显示空提示", () => {
+    render(<Sidebar {...props({ hiddenProjects: [] })} />);
+    fireEvent.click(screen.getByTitle("项目菜单"));
+    expect(screen.getByText("（没有已移除的项目）")).toBeTruthy();
   });
 
   it("不再渲染左栏底部的「＋ 打开项目…」行", () => {

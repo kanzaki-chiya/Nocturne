@@ -237,13 +237,11 @@ export function App({ host }: { host: DesktopHost }) {
         onToggleChats={() => {
           setChatsExpanded((v) => !v);
         }}
-        onToggleAllProjects={() => {
-          setCollapsed((current) => {
-            // 有任一项目处于展开就把全部折叠，否则全部展开
-            const anyOpen = tree.projects.some((pr) => !current.has(pr.key));
-            if (!anyOpen) return new Set();
-            return new Set(tree.projects.map((pr) => pr.key));
-          });
+        projectSort={p.projectSort}
+        hiddenProjects={p.hidden.map((path) => ({ path, name: projectName(path) }))}
+        onSetSort={(sort) => {
+          prefs.update({ projectSort: sort });
+          bumpPrefs();
         }}
         onPin={(id) => {
           const cur = prefs.get();
@@ -255,12 +253,20 @@ export function App({ host }: { host: DesktopHost }) {
           prefs.update({ pinned: cur.pinned.filter((x) => x !== id) });
           bumpPrefs();
         }}
-        onHideProject={(key) => {
+        onHideProject={(path) => {
           const cur = prefs.get();
+          const key = projectKey(path);
           prefs.update({
-            hidden: cur.hidden.includes(key) ? cur.hidden : [...cur.hidden, key],
-            projects: cur.projects.filter((x) => projectKey(x) !== key),
+            hidden: cur.hidden.some((h) => projectKey(h) === key)
+              ? cur.hidden
+              : [...cur.hidden, path],
           });
+          bumpPrefs();
+        }}
+        onRestoreProject={(path) => {
+          const cur = prefs.get();
+          const key = projectKey(path);
+          prefs.update({ hidden: cur.hidden.filter((h) => projectKey(h) !== key) });
           bumpPrefs();
         }}
         onOpenProject={() => void openProject()}
