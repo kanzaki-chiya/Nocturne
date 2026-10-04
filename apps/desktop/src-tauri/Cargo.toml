@@ -1,0 +1,28 @@
+[package]
+name = "nocturne-desktop"
+version = "0.5.0"
+description = "Nocturne desktop shell (Tauri)"
+license = "GPL-3.0-only"
+publish = false
+edition = "2021"
+
+[lib]
+name = "nocturne_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.0", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.0", features = [] }
+tauri-plugin-dialog = "=2.8.0"
+tauri-plugin-opener = "=2.6.0"
+serde = { version = "=1.0.229", features = ["derive"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
