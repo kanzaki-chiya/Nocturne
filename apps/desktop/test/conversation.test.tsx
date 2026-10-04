@@ -10,6 +10,7 @@ import {
   type RuntimeEvent,
   type SessionView,
   type ToolEntry,
+  type TurnEndReason,
 } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
@@ -388,9 +389,9 @@ describe("Conversation 渲染与滚动", () => {
     fireEvent.click(screen.getByRole("button", { name: "收起" }));
     expect(container.querySelector(".diff-body")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "展开" }));
-    expect(container.querySelector(".diff-row.diff-add code")?.textContent).toBe("new");
-    expect(container.querySelector(".diff-row.diff-delete code")?.textContent).toBe("old");
-    expect(container.querySelector(".diff-row.diff-delete .diff-num")?.textContent).toBe("1");
+    expect(container.querySelector(".diff-row.diff-row-add code")?.textContent).toBe("new");
+    expect(container.querySelector(".diff-row.diff-row-delete code")?.textContent).toBe("old");
+    expect(container.querySelector(".diff-row.diff-row-delete .diff-num")?.textContent).toBe("1");
   });
 
   it("原始 HTML、事件属性、脚本、远程图片和不允许的 URL 不产生执行元素", () => {
@@ -467,6 +468,27 @@ describe("Conversation 渲染与滚动", () => {
     );
     expect(container.querySelector(".diff-h .diff-add")?.textContent).toBe("+3");
     expect(container.querySelector(".diff-h .diff-del")?.textContent).toBe("−3");
+    const rows = container.querySelectorAll(".diff-row:not(.diff-sep)");
+    expect(container.querySelectorAll(".diff-row-add")).toHaveLength(3);
+    expect(container.querySelectorAll(".diff-row-delete")).toHaveLength(3);
+    const countClasses = Array.from(
+      container.querySelectorAll(".diff-h .diff-add, .diff-h .diff-del"),
+      (node) => Array.from(node.classList),
+    ).flat();
+    expect(countClasses).toEqual(["diff-add", "diff-del"]);
+    for (const row of rows) {
+      for (const countClass of countClasses) {
+        expect(row.classList.contains(countClass)).toBe(false);
+      }
+      expect(Array.from(row.children, (node) => node.className || node.tagName)).toEqual([
+        "diff-num",
+        "diff-mark",
+        "CODE",
+      ]);
+    }
+    expect(container.querySelector(".diff-row-add .diff-mark")?.textContent).toBe("+");
+    expect(container.querySelector(".diff-row-delete .diff-mark")?.textContent).toBe("−");
+    expect(container.querySelector(".diff-add-row, .diff-delete")).toBeNull();
   });
 
   it("读取工具默认只有单行摘要，完整输出和主体说明在折叠详情中", () => {
@@ -561,8 +583,16 @@ describe("Conversation 渲染与滚动", () => {
     view.revision += 1;
     rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     expect(top).toBe(300);
-    fireEvent.click(screen.getByRole("button", { name: "回到最新消息" }));
+    const jump = screen.getByRole("button", { name: "回到最新消息" });
+    const jumpRow = jump.parentElement;
+    expect(jumpRow?.className).toBe("conversation-jump-row");
+    expect(jumpRow?.previousElementSibling).toBe(scroll);
+    expect(jumpRow?.parentElement?.className).toBe("conversation");
+    expect(scroll.contains(jumpRow)).toBe(false);
+    expect(scroll.contains(jump)).toBe(false);
+    fireEvent.click(jump);
     expect(top).toBe(1100);
+    expect(rendered.container.querySelector(".conversation-jump-row")).toBeNull();
     height = 1500;
     view.revision += 1;
     rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
@@ -570,6 +600,11 @@ describe("Conversation 渲染与滚动", () => {
     scroll.scrollTop = 400;
     fireEvent.scroll(scroll);
     expect(screen.getByRole("button", { name: "回到最新消息" })).toBeTruthy();
+    scroll.scrollTop = 1300;
+    fireEvent.scroll(scroll);
+    expect(rendered.container.querySelector(".conversation-jump-row")).toBeNull();
+    scroll.scrollTop = 400;
+    fireEvent.scroll(scroll);
     const next = sessionFixture("session-2");
     rendered.rerender(
       <Conversation
@@ -578,6 +613,7 @@ describe("Conversation 渲染与滚动", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: "回到最新消息" })).toBeNull();
+    expect(rendered.container.querySelector(".conversation-jump-row")).toBeNull();
   });
 
   it.each<[boolean, number, string]>([
@@ -764,6 +800,53 @@ describe("Conversation 工具行与拒绝", () => {
     expect(screen.queryByText("允许了 read")).toBeNull();
     expect(screen.queryByText("模型切换")).toBeNull();
     expect(screen.getByText("Turn 结束")).toBeTruthy();
+  });
+
+  it.each<[TurnEndReason, string]>([
+    ["done", "已完成"],
+    ["truncated", "回复已截断"],
+    ["refused", "已拒绝"],
+    ["aborted", "已中断"],
+    ["max_steps", "已达到最大步骤数"],
+    ["error", "发生错误"],
+  ])("Turn 结束原因 %s 使用中文回执 %s，保留错误详情", (reason, label) => {
+    const view = createSessionView();
+    const error = reason === "error" ? { code: "provider_error", message: "连接失败" } : undefined;
+    const detail = error ? `：${error.code} ${error.message}` : "";
+    view.entries = [
+      {
+        kind: "notice",
+        key: "turn-end-1",
+        seq: 1,
+        subtype: "turn_end",
+        message: `Turn 结束（${reason}）${detail}`,
+        payload: { reason, steps: 1, usage: { inputTokens: 1, outputTokens: 1 }, error },
+      },
+    ];
+    const { container } = mount(view);
+    expect(container.querySelector(".note")?.textContent).toBe(`${label}${detail}`);
+    expect(container.textContent).not.toContain(`Turn 结束（${reason}）`);
+  });
+
+  it("恢复收束回执保留进程退出说明与错误详情", () => {
+    const view = createSessionView();
+    const message = "上次进程退出，已按 backend_closed 收束：连接断开";
+    view.entries = [
+      {
+        kind: "notice",
+        key: "recovered-turn-1",
+        seq: 1,
+        subtype: "turn_end",
+        message,
+        payload: {
+          reason: "error",
+          recovered: true,
+          error: { code: "backend_closed", message: "连接断开" },
+        },
+      },
+    ];
+    mount(view);
+    expect(screen.getByText(message)).toBeTruthy();
   });
 
   it("压缩回执只显示上下文已压缩，不泄漏摘要种类、序号或 payload", () => {

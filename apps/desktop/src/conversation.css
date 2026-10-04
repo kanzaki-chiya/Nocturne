@@ -366,13 +366,16 @@
 }
 .conversation .diff-row {
   display: flex;
+  align-items: baseline;
   width: max-content;
   min-width: 100%;
   white-space: pre;
+  color: var(--a-text);
 }
 .conversation .diff-row code {
   padding-right: 12px;
-  font-size: inherit;
+  font: inherit;
+  color: inherit;
 }
 .conversation .diff-num {
   display: inline-block;
@@ -387,12 +390,17 @@
   user-select: none;
   color: var(--a-muted);
 }
-.conversation .diff-add-row,
-.conversation .diff-row.diff-add {
+.conversation .diff-row-add {
   background: var(--a-add);
 }
-.conversation .diff-row.diff-delete {
+.conversation .diff-row-delete {
   background: var(--a-del);
+}
+.conversation .diff-row-add .diff-mark {
+  color: var(--a-success);
+}
+.conversation .diff-row-delete .diff-mark {
+  color: var(--a-error);
 }
 .conversation .diff-sep {
   padding: 2px 0 2px calc(4em + 1em);
@@ -425,10 +433,14 @@
   border-color: var(--a-error);
   color: var(--a-error);
 }
-.conversation .conversation-jump {
-  align-self: center;
-  margin: 4px 0 10px;
+.conversation-jump-row {
+  display: flex;
+  justify-content: center;
   flex-shrink: 0;
+  padding: 4px 24px 10px;
+}
+.conversation .conversation-jump {
+  margin: 0;
   background: var(--a-raised);
 }
 

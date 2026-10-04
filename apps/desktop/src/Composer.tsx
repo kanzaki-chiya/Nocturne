@@ -97,7 +97,7 @@ export interface ComposerProps {
   onInterrupt: () => void | Promise<void>;
   /**
    * draft（空状态）：卡片 + 下方 tray（目录/预设/提示）；模型/档位 chip 在卡内工具栏。
-   * session：单行输入框（＋/输入区/发送），无 tray、无 chip——切换都在底部状态栏。
+   * session：同一卡片，文字区在上、工具行左 ＋ 右发送/中断；无 tray、无 chip，切换都在底部状态栏。
    */
   variant?: "draft" | "session";
   historyKey?: string | null;
@@ -111,7 +111,7 @@ export interface ComposerProps {
   /** null 表示本目录无项目文件索引（普通对话、或尚未建会话） */
   fileRefs: FileRefSource | null;
   fileRefsUnavailable?: string;
-  /** 首张图片加入时调用一次，返回托盘里的能力提示 */
+  /** 首张图片加入时调用一次；draft 显示在托盘，session 显示在卡片上方 */
   getVisionHint?: () => Promise<string | undefined>;
   pickImages: () => Promise<PickedImage[]>;
   dirMenuOpen?: boolean;
@@ -1098,45 +1098,37 @@ export function Composer({
               ))}
             </div>
           )}
-          {isSession ? (
-            <div className="session-row">
-              {plusButton}
-              {txtBlock}
-              {sendButton}
-            </div>
-          ) : (
-            <>
-              {txtBlock}
-              <div className="tb">
-                {plusButton}
-                <span className="sp" />
-                {controls !== undefined &&
-                  chip(
-                    "model",
-                    controls.model,
-                    <>
-                      <span className="pd" aria-hidden="true" />
-                      {controls.model.label}
-                      <span className="caret" aria-hidden="true">
-                        ▾
-                      </span>
-                    </>,
-                  )}
-                {controls !== undefined &&
-                  chip(
-                    "effort",
-                    controls.effort,
-                    <>
-                      {controls.effort.label}
-                      <span className="caret" aria-hidden="true">
-                        ▾
-                      </span>
-                    </>,
-                  )}
-                {sendButton}
-              </div>
-            </>
-          )}
+          {txtBlock}
+          <div className="tb">
+            {plusButton}
+            <span className="sp" />
+            {!isSession &&
+              controls !== undefined &&
+              chip(
+                "model",
+                controls.model,
+                <>
+                  <span className="pd" aria-hidden="true" />
+                  {controls.model.label}
+                  <span className="caret" aria-hidden="true">
+                    ▾
+                  </span>
+                </>,
+              )}
+            {!isSession &&
+              controls !== undefined &&
+              chip(
+                "effort",
+                controls.effort,
+                <>
+                  {controls.effort.label}
+                  <span className="caret" aria-hidden="true">
+                    ▾
+                  </span>
+                </>,
+              )}
+            {sendButton}
+          </div>
         </div>
         {!isSession && workspace !== undefined && controls !== undefined && (
           <div className="tray">

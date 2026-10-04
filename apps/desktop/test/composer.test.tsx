@@ -491,20 +491,35 @@ describe("Composer 控件与附件", () => {
     await screen.findByText(/test\/desc 描述后发送/);
   });
 
-  it("session 变体：单行布局无 chip/无 tray，提示与附件仍工作", async () => {
+  it("session 变体：卡片上层文字区、下层工具行，无 chip/无 tray，提示与附件仍工作", async () => {
     const getVisionHint = vi.fn(async () => "当前模型不支持图片，将由 test/desc 描述后发送");
-    render(
-      <Composer
-        {...props({ variant: "session", controls: undefined, workspace: undefined, getVisionHint })}
-      />,
-    );
+    const { container } = render(<Composer {...props({ variant: "session", getVisionHint })} />);
     expect(screen.queryByRole("button", { name: "切换模型" })).toBeNull();
     expect(screen.queryByRole("button", { name: "切换思考档位" })).toBeNull();
     expect(screen.queryByRole("button", { name: "切换权限预设" })).toBeNull();
     expect(screen.queryByRole("button", { name: "切换目录" })).toBeNull();
     const field = screen.getByLabelText<HTMLTextAreaElement>("消息输入");
-    expect(screen.getByRole("button", { name: "添加图片或引用文件" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
+    const card = container.querySelector(".composer.session .cbox");
+    const text = card?.querySelector(".txt");
+    const toolbar = card?.querySelector(".tb");
+    const plus = screen.getByRole("button", { name: "添加图片或引用文件" });
+    const send = screen.getByRole("button", { name: "发送" });
+    expect(card).not.toBeNull();
+    expect(Array.from(card?.children ?? [])).toEqual([text, toolbar]);
+    expect(text?.contains(field)).toBe(true);
+    expect(text?.querySelector(".composer-mirror")).not.toBeNull();
+    expect(text?.querySelector("button")).toBeNull();
+    expect(toolbar?.parentElement).toBe(card);
+    expect(plus.parentElement).toBe(toolbar);
+    expect(send.parentElement).toBe(toolbar);
+    expect(Array.from(toolbar?.children ?? [])).toEqual([
+      plus,
+      toolbar?.querySelector(".sp"),
+      send,
+    ]);
+    expect(container.querySelector(".session-row")).toBeNull();
+    expect(container.querySelector(".chip")).toBeNull();
+    expect(container.querySelector(".tray")).toBeNull();
     // 附件缩略图在卡内，vision 提示显示在卡片上方气泡（role=status）
     fireEvent.paste(field, {
       clipboardData: {
@@ -518,15 +533,34 @@ describe("Composer 控件与附件", () => {
     expect(document.querySelector(".atts .thumb2 img")).not.toBeNull();
   });
 
-  it("session 变体运行中 placeholder 为中断提示", () => {
-    render(
-      <Composer
-        {...props({ variant: "session", controls: undefined, workspace: undefined, running: true })}
-      />,
+  it("session 运行中：下层工具行右侧为 ■，点击中断且保留上层草稿", async () => {
+    const onInterrupt = vi.fn();
+    const { container } = render(
+      <Composer {...props({ variant: "session", running: true, onInterrupt })} />,
     );
-    const field = screen.getByLabelText<HTMLTextAreaElement>("消息输入");
+    const field = input("下一条草稿");
+    const card = container.querySelector(".composer.session .cbox");
+    const text = card?.querySelector(".txt");
+    const toolbar = card?.querySelector(".tb");
+    const plus = screen.getByRole("button", { name: "添加图片或引用文件" });
+    const stop = screen.getByRole<HTMLButtonElement>("button", { name: "中断" });
     expect(field.placeholder).toBe("继续输入，Esc 中断");
-    expect(screen.getByRole("button", { name: "中断" })).toBeTruthy();
+    expect(Array.from(card?.children ?? [])).toEqual([text, toolbar]);
+    expect(text?.contains(field)).toBe(true);
+    expect(Array.from(toolbar?.children ?? [])).toEqual([
+      plus,
+      toolbar?.querySelector(".sp"),
+      stop,
+    ]);
+    expect(stop.className).toBe("send stop");
+    expect(stop.textContent).toBe("■");
+    expect(screen.queryByRole("button", { name: "发送" })).toBeNull();
+    expect(container.querySelector(".chip")).toBeNull();
+    expect(container.querySelector(".tray")).toBeNull();
+    fireEvent.click(stop);
+    expect(onInterrupt).toHaveBeenCalledTimes(1);
+    expect(field.value).toBe("下一条草稿");
+    await waitFor(() => expect(stop.disabled).toBe(false));
   });
 });
 

@@ -10,6 +10,7 @@ import {
   type RuntimeEvent,
   type SessionView,
   type ToolEntry,
+  type TurnEndReason,
   type UserEntry,
   type ViewEntry,
 } from "@nocturne/core/protocol";
@@ -637,7 +638,7 @@ function DiffCard({ label, diff }: { label: string; diff: string }) {
                 ⋯
               </div>
             ) : (
-              <div key={index} className={`diff-row diff-${row.kind}`}>
+              <div key={index} className={`diff-row diff-row-${row.kind}`}>
                 <span className="diff-num" aria-hidden="true">
                   {row.num ?? ""}
                 </span>
@@ -794,6 +795,15 @@ function ToolEntryView({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
   return <ToolRow entry={entry} cwd={cwd} />;
 }
 
+const TURN_END_LABELS: Record<TurnEndReason, string> = {
+  done: "已完成",
+  truncated: "回复已截断",
+  refused: "已拒绝",
+  aborted: "已中断",
+  max_steps: "已达到最大步骤数",
+  error: "发生错误",
+};
+
 function EntryView({
   entry,
   openUrl,
@@ -824,11 +834,15 @@ function EntryView({
       );
     case "tool":
       return <ToolEntryView entry={entry} cwd={cwd} />;
-    case "notice":
+    case "notice": {
       if (entry.subtype === "permission" || entry.subtype === "config") return null;
-      return (
-        <div className="note">{entry.subtype === "compacted" ? "上下文已压缩" : entry.message}</div>
-      );
+      let message = entry.subtype === "compacted" ? "上下文已压缩" : entry.message;
+      if (entry.subtype === "turn_end") {
+        const reason = (entry.payload as { reason?: TurnEndReason } | null)?.reason;
+        if (reason) message = message.replace(`Turn 结束（${reason}）`, TURN_END_LABELS[reason]);
+      }
+      return <div className="note">{message}</div>;
+    }
   }
 }
 
@@ -1321,16 +1335,19 @@ function ConversationContent({
         </div>
       </div>
       {!following ? (
-        <button
-          className="conversation-jump btn"
-          onClick={() => {
-            follow.current = true;
-            setFollowing(true);
-            scrollToBottom();
-          }}
-        >
-          回到最新消息
-        </button>
+        <div className="conversation-jump-row">
+          <button
+            type="button"
+            className="conversation-jump btn"
+            onClick={() => {
+              follow.current = true;
+              setFollowing(true);
+              scrollToBottom();
+            }}
+          >
+            回到最新消息
+          </button>
+        </div>
       ) : null}
       {view.pendingPermission || view.pendingQuestion ? (
         <div className="conversation-requests">
