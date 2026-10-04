@@ -217,12 +217,12 @@ function Think({
 }) {
   const part = parts.get(messageId)?.at(-1);
   if (reasoning === "" && part === undefined) return null;
+  const seconds =
+    part?.started === undefined
+      ? 0
+      : Math.max(0, Math.floor(((part.active ? now : (part.ended ?? now)) - part.started) / 1000));
   const label =
-    part?.active === true && part.started !== undefined
-      ? `思考中 ${Math.max(0, Math.floor((now - part.started) / 1000))}s`
-      : part?.started !== undefined
-        ? `思考了 ${Math.max(0, Math.floor(((part.ended ?? now) - part.started) / 1000))}s`
-        : "思考";
+    seconds < 1 ? "思考" : part?.active === true ? `思考中 ${seconds}s` : `思考了 ${seconds}s`;
   const body = reasoning !== "" ? reasoning : (part?.text ?? "");
   if (body === "") return <div className="think">{label}</div>;
   return (
@@ -442,6 +442,27 @@ export function toolResultText(entry: ToolEntry): { text: string; error?: boolea
   return { text: duration === undefined ? base : `${base} · ${duration}` };
 }
 
+/** 简述只取 Core 的第一句；扩展名与小数中的 "." 不算句末。 */
+function toolErrorSummary(entry: ToolEntry, cwd: string): string {
+  const error = entry.result?.error;
+  if (error?.code === "not_read") return "文件需要先读取";
+  if (error?.code === "stale_file") return "文件在读取后被修改过";
+  const message = error?.message.trim() ?? "";
+  const end = /[。！？!?]|\.(?=\s|$)|\r?\n/u.exec(message);
+  const first = end === null ? message : message.slice(0, end.index + end[0].trim().length);
+  if (cwd === "") return first;
+  // 只匹配工作区前缀，保留路径中的空格及后续原文；是否确实属于 cwd 由 displayPath 判定。
+  const prefix = cwd
+    .replaceAll("\\", "/")
+    .replace(/\/+$/, "")
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replaceAll("/", "[\\\\/]");
+  return first.replace(
+    new RegExp(`${prefix}[\\\\/][^\\s"'\\x60<>，。！？；：（）]*`, "gi"),
+    (path) => displayPath(path, cwd),
+  );
+}
+
 /** 被拒绝的工具：一行红字，feedback 放 title。 */
 export function deniedLine(entry: ToolEntry, cwd: string): string {
   const input = inputOf(entry);
@@ -554,18 +575,24 @@ function diffRows(diff: string): DiffRow[] {
       line.startsWith("+++ ") ||
       line.startsWith("diff ") ||
       line.startsWith("index ") ||
+      line.startsWith("@@") ||
       line.startsWith("\\")
     )
       continue;
     const mark = line[0];
     if (mark === "+") {
-      rows.push({ kind: "add", num: newLine, mark: "+", code: line });
+      rows.push({ kind: "add", num: newLine, mark: "+", code: line.slice(1) });
       newLine += 1;
     } else if (mark === "-") {
-      rows.push({ kind: "delete", num: oldLine, mark: "−", code: line });
+      rows.push({ kind: "delete", num: oldLine, mark: "−", code: line.slice(1) });
       oldLine += 1;
     } else {
-      rows.push({ kind: "context", num: newLine, mark: " ", code: line });
+      rows.push({
+        kind: "context",
+        num: newLine,
+        mark: " ",
+        code: mark === " " ? line.slice(1) : line,
+      });
       oldLine += 1;
       newLine += 1;
     }
@@ -657,7 +684,7 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
           安全审查 · {entry.review.verdict} · {entry.review.reason}
         </p>
       ) : null}
-      {result?.modelContent ? (
+      {result?.modelContent && result.error === undefined ? (
         <pre className="conversation-tool-output">{result.modelContent}</pre>
       ) : null}
       {result?.output !== undefined ? (
@@ -725,11 +752,9 @@ function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
         </details>
       ) : null}
       {entry.result?.error ? (
-        <details className="conversation-tool-error" open>
-          <summary className="conversation-error">{entry.result.error.code}</summary>
-          <pre className="conversation-tool-output conversation-error">
-            {entry.result.error.message}
-          </pre>
+        <details className="conversation-tool-error">
+          <summary>{toolErrorSummary(entry, cwd)}</summary>
+          <pre className="conversation-tool-output">{entry.result.error.message}</pre>
         </details>
       ) : null}
     </article>
@@ -801,7 +826,9 @@ function EntryView({
       return <ToolEntryView entry={entry} cwd={cwd} />;
     case "notice":
       if (entry.subtype === "permission" || entry.subtype === "config") return null;
-      return <div className="note">{entry.message}</div>;
+      return (
+        <div className="note">{entry.subtype === "compacted" ? "上下文已压缩" : entry.message}</div>
+      );
   }
 }
 

@@ -81,6 +81,8 @@ interface NodeProbe {
 
 ## 5. 会话树与界面状态
 
+主窗口保留系统窗口标题「Nocturne」（任务栏与 Alt+Tab），但 `decorations: false` 隐藏原生标题栏。`src/WindowFrame.tsx` 自绘右侧顶部 32px 标题栏，左栏延伸到窗口顶部；空白区使用 `data-tauri-drag-region`，由 Tauri 的原生拖动和双击最大化处理。右端提供最小化、最大化/还原、关闭按钮；关闭悬停红底白字，其余悬停使用主题浅底。最大化状态随 WebView resize、focus 及按钮操作查询更新，不保存或自行计算还原尺寸，贴靠、还原与边框缩放交给系统。Windows 11 最大化按钮悬停贴靠布局菜单暂不提供。
+
 左栏结构从上到下（`src/session-tree.ts` 为纯函数，`src/Sidebar.tsx` 渲染）：「＋ 新会话」→「置顶」→「对话」→「项目」。
 
 - **空会话过滤**：`firstText` 缺省或 trim 后为空且未锁定的会话不显示（置顶、对话、项目都过滤）；被锁定的空会话照常显示为「未命名会话」。
@@ -104,10 +106,16 @@ interface NodeProbe {
 ### 5.2 消息、输入与交互请求
 
 `src/Conversation.tsx` 按共享 `SessionView` 渲染用户消息、助手 Markdown、可折叠思考、工具调用和文件 diff、警告与通知，不另写事件折叠。用户消息是右对齐气泡，`@路径` 渲染成等宽 chip（title 来自匹配的 fileRef 元数据：「已附带 N/M 行」「目录」「已附带文件 · 已截断」）；助手行无标签无边线；思考折叠为一行（「思考中 Ns」/「思考了 Ns」/「思考」，时长由 `src/reasoning.ts` 从流式事件累计）。工具行单行显示「图标字母 + 动作 + 参数 + · 范围 + 简短结果」：cwd 内路径相对化（`src/paths.ts` `displayPath`，Windows 风格忽略大小写与分隔符），区外按原样绝对路径；>10 秒才显示时长（「12 秒」/「1 分 45 秒」）。ok 的 edit/write/apply_patch 只渲染 diff 卡片（`+N`/`−M` 计数，去掉 `---`/`+++`/`index`/`\ No newline` 行，hunk 之间「⋯」分隔，默认展开可收起）；出错仍渲染工具行。被拒绝的工具只显示一行红色「✕ 已拒绝<操作>」（feedback 放 title）；`permission`（allow/deny）与 `config` 子类型的 notice 不进消息流。Markdown 原始 HTML、脚本、事件属性和远程图片不执行、不加载；允许的链接由宿主打开。流式更新自动跟随底部，用户向上滚动后停止跟随，点击「回到最新消息」恢复。左栏和消息滚动区使用细、无箭头滚动条，滑块为 `--a-borderStrong`。
+思考时长不足 1 秒时，无论进行中还是已结束都只显示「思考」。diff 正文剥离每行自带的第一个 `+`、`-` 或空格，仅在标记列显示符号，保留正文自己的符号与缩进，`@@` 不进入正文。压缩回执只显示「上下文已压缩」，不展示压缩模式、seq 或 payload。
+
+失败工具行右侧标红「失败」，下一行灰色简述是可展开的原文入口：`not_read` 对应「文件需要先读取」，`stale_file` 对应「文件在读取后被修改过」，其他取 Core message 第一句（不把扩展名或小数中的句点当句末），工作区内路径相对化；不显示错误码。完整错误 message 保持原文，默认折叠，点击简述后显示，避免同时重复展示 modelContent。
+
 
 历史图片附件经 `AttachmentImageSource`（`src/attachment-images.ts`，按 sha256 缓存的 blob URL）解析；发送成功后把附件字节哈希注册进去，未知哈希显示占位 chip（title「暂不支持查看历史图片」）——历史图片读取等 RPC 附件读取能力，见文末限制说明。
 
 `src/Composer.tsx` 是空状态与会话共用的输入框（`variant: "draft" | "session"`）：Enter 发送，Shift+Enter 换行；`isComposing`、composition 状态或旧输入法 `keyCode=229` 时不发送。输入历史经 `readInputHistory` / `recordInputHistory`；运行中发送键变成 ■ 与 Esc 一样调用 `interrupt`。两种布局：draft 是卡片 + 托盘两层（`.cbox`/`.tray`：附件缩略图行、textarea、工具行「＋ + 模型 chip + 档位 chip + 发送键」、托盘「目录 chip + 权限预设 chip + 输入提示」，托盘负 margin 塞在卡片底边之下、卡片压在上层）；session 是单行（＋ | 输入区 | 发送/中断 三者一行底对齐，输入行内默认 26px 与按钮等高，多行时 textarea 向上长高、按钮钉底），无 tray、无 chip。textarea 自动长高到 ~40vh/280px 后内部滚动；redirect/vision 提示显示在卡片上方气泡，错误在下方。菜单统一走 `src/Menu.tsx`（`role="menu"`，↑↓/Home/End/Enter/Esc，外部点击关闭，焦点回触发键）；展开方向：渲染后量高度，下方放得下就向下（`top = anchor.bottom + 6`），放不下向上，两侧都放不下取较大一侧并限高滚动；项标题不换行、detail 单行省略号（悬停见全文），菜单宽 250–420px，滚动条与消息流一致（细、无箭头）。
+
+空状态占位文字为「输入消息，@ 引用文件」，不提示只有会话内可用的斜杠命令；会话内占位文字仍包含 Enter 发送与 Shift+Enter 换行。
 
 - 模型 chip（仅空状态）：「最近使用」（`listRecentModels` ∩ `listModels`，按 recents 顺序）+「全部模型」两组；不可用的模型带原因置灰。会话内切换在状态栏 pill（同一 ChoiceControl 数据与 Menu）。
 - 档位 chip（仅空状态）：当前模型可用档位（会话来自 `reasoningEffortInfo`，草稿来自 `ModelInfo.capabilities.reasoningEffort`）；current≠effective 时提示「本 Turn 使用 X；Y 将在下一 Turn 生效」。选择写入 `prefs.lastEffort`。
@@ -145,6 +153,8 @@ interface NodeProbe {
 ### 5.4 状态栏与上下文
 
 `src/StatusBar.tsx` 左侧是会话控件 pill 组：模型（绿点 +「provider · model」+ ▾）、「思考 <level> ▾」、「权限 <preset> ▾」（预设值用警告色）、「Shell <kind> ▾」——各自打开与空状态 chip 共用的 `ChoiceMenu`（`src/Menu.tsx`，锚定 pill 自动向上弹出）；数据来自 `useSessionControls`（模型/档位/预设复用 `controls.controls`，Shell 是 `shellControl`：`auto`（「自动选择」）+ 探测到的 shell，未安装的置灰并标注「未安装」，被 env/config 覆盖时菜单底部给提示；打开 Shell 菜单时调 `loadShells()` 探测）。选择分别调 `setModel` / `setReasoningEffort`（并写 `prefs.lastEffort`）/ `setPermissionPreset` / `setShell`。右侧不变：上下文用量（点击开上下文面板）、累计缓存命中、Turn 状态。
+状态栏始终一行：右侧上下文与 Turn 状态固定不缩，左侧仅模型 pill 可收缩，过长名称省略号截断，悬停显示完整「provider · model」（运行中同时提示不可切换）。主区宽度 ≤700px 时先隐藏累计缓存命中和上下文进度条、收紧间距，保留上下文数值与 Turn 状态；窗口最小宽度仍为 760px。
+
 
 上下文面板取 `describeContext`，展示总量与预算、分段堆叠条和数值；对话历史从 `history.breakdown` 细分用户消息、助手回答、工具调用与结果、压缩摘要，不从可见消息重新估算。来源文本按 `contextSourceLabel` 中文化（「内置提示词」「自定义提示词」「N 个工具」「N 项」「N 条」，路径按主目录缩写）。底部提示「可以输入 /compact 压缩」。
 
@@ -152,7 +162,7 @@ interface NodeProbe {
 
 ## 6. 安全边界
 
-- `capabilities/main.json` 只授予：六个应用命令（`allow-backend-open/send/close`、`allow-node-probe`、`allow-plain-workspace`、`allow-pick-images`）、`core:path:allow-resolve-directory`（前端 `homeDir()` 主目录解析所需；`pick_images` 的对话框与读文件都在 Rust 侧，不需要它）、`dialog:allow-open`、`opener:allow-open-url`（scope 只允许 `https:*` 与 `http://127.0.0.1:*` / `http://localhost:*`）。不启用 fs、shell、http 插件，`withGlobalTauri: false`。
+- `capabilities/main.json` 只授予：六个应用命令（`allow-backend-open/send/close`、`allow-node-probe`、`allow-plain-workspace`、`allow-pick-images`）、`core:path:allow-resolve-directory`（前端 `homeDir()` 主目录解析所需；`pick_images` 的对话框与读文件都在 Rust 侧，不需要它）、窗口权限 `core:window:allow-minimize`、`allow-toggle-maximize`、`allow-internal-toggle-maximize`（Tauri drag-region 的原生双击）、`allow-close`、`allow-start-dragging`、`allow-is-maximized`（后五项同属 `core:window:`）、`dialog:allow-open`、`opener:allow-open-url`（scope 只允许 `https:*` 与 `http://127.0.0.1:*` / `http://localhost:*`）。不授予 `core:default` 或 `core:window:default`，不启用 fs、shell、http 插件，`withGlobalTauri: false`。
 - 主窗口 `dragDropEnabled: false`：关掉 Tauri 的原生拖放接管，HTML5 drop 才能向输入框交付 `File` 对象（图片附件的拖入路径）。
 - CSP：`default-src 'self'`；`connect-src` 只允许 `ipc:`/`http://ipc.localhost`；图片额外允许 `blob:`（图片附件预览用）；禁 `object-src`、`base-uri`、`form-action`、`frame-ancestors`。dev 模式（`devCsp`）仅为 Vite 额外放开 `ws://localhost:1420`、`http://localhost:1420` 与 style `'unsafe-inline'`。
 - 外链白名单（`src/external-url.ts`）：`https:` 放行；`http:` 仅 `127.0.0.1` 与 `localhost`（本机回调页）；其余协议与解析失败忽略不打开。Rust 侧 opener scope 与之一致。

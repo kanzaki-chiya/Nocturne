@@ -265,6 +265,7 @@
 }
 .conversation .tool-res {
   flex: none;
+  margin-left: auto;
   font-size: 11px;
   color: var(--a-faint);
 }
@@ -296,6 +297,14 @@
 .conversation-error {
   color: var(--a-error);
   overflow-wrap: anywhere;
+}
+.conversation-tool-error {
+  color: var(--a-muted);
+  font-size: 12px;
+  margin: 4px 0 0 23px;
+}
+.conversation-tool-error > summary {
+  cursor: pointer;
 }
 
 /* ── diff 卡片 ── */

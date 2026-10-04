@@ -933,7 +933,7 @@ export function Composer({
 
   const defaultPlaceholder = isSession
     ? "输入消息，@ 引用文件，Enter 发送，Shift+Enter 换行"
-    : "输入消息，@ 引用文件，/ 查看命令";
+    : "输入消息，@ 引用文件";
 
   const txtBlock = (
     <div className="txt">

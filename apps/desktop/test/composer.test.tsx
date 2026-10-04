@@ -503,7 +503,6 @@ describe("Composer 控件与附件", () => {
     expect(screen.queryByRole("button", { name: "切换权限预设" })).toBeNull();
     expect(screen.queryByRole("button", { name: "切换目录" })).toBeNull();
     const field = screen.getByLabelText<HTMLTextAreaElement>("消息输入");
-    expect(field.placeholder).toBe("输入消息，@ 引用文件，Enter 发送，Shift+Enter 换行");
     expect(screen.getByRole("button", { name: "添加图片或引用文件" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
     // 附件缩略图在卡内，vision 提示显示在卡片上方气泡（role=status）

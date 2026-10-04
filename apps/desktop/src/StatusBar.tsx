@@ -353,12 +353,16 @@ export function StatusBar({ session, view, controls, panel, onPanelChange, home 
       ref={(node) => {
         triggers.current[kind] = node;
       }}
-      className={`status-pill${openMenu === kind ? " status-pill-active" : ""}${preset ? " status-preset" : ""}`}
+      className={`status-pill${kind === "model" ? " status-model" : ""}${openMenu === kind ? " status-pill-active" : ""}${preset ? " status-preset" : ""}`}
       aria-label={label}
       aria-haspopup="menu"
       aria-expanded={openMenu === kind}
       disabled={control.disabled !== undefined}
-      title={control.disabled}
+      title={
+        kind === "model"
+          ? `${model === undefined ? "模型 —" : `${model.provider} · ${model.model}`}${control.disabled === undefined ? "" : ` · ${control.disabled}`}`
+          : control.disabled
+      }
       onClick={() => {
         toggleMenu(kind);
       }}
@@ -450,7 +454,7 @@ export function StatusBar({ session, view, controls, panel, onPanelChange, home 
             </span>
           </>,
         )}
-        <span title="会话累计缓存读取 token / 输入 token">
+        <span className="status-cache" title="会话累计缓存读取 token / 输入 token">
           缓存 <span className="mono">{cache === null ? "—" : `${cache}%`}</span>
         </span>
         <span className={`status-turn${busy ? " status-turn-busy" : ""}`}>

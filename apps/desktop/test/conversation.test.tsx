@@ -7,12 +7,13 @@ import {
   type PendingQuestion,
   type PermissionOption,
   type PermissionReply,
+  type RuntimeEvent,
   type SessionView,
   type ToolEntry,
 } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
-import { Conversation } from "../src/Conversation";
+import { Conversation, type ConversationProps } from "../src/Conversation";
 
 function sessionFixture(id = "session-1") {
   const methods = {
@@ -101,6 +102,16 @@ function tool(overrides: Partial<ToolEntry> = {}): ToolEntry {
   };
 }
 
+function failedTool(code: string, message: string): ToolEntry {
+  const entry = tool({ status: "error" });
+  if (!entry.result) throw new Error("fixture 缺少结果");
+  entry.result.status = "error";
+  entry.result.output = undefined;
+  entry.result.modelContent = message;
+  entry.result.error = { code, message };
+  return entry;
+}
+
 function conversationProps(rendered: { session: RpcSession; openUrl: (url: string) => void }) {
   return {
     session: rendered.session,
@@ -111,12 +122,15 @@ function conversationProps(rendered: { session: RpcSession; openUrl: (url: strin
   };
 }
 
-function mount(view: SessionView = createSessionView()) {
+function mount(
+  view: SessionView = createSessionView(),
+  overrides: Partial<Pick<ConversationProps, "cwd" | "subscribeEvents">> = {},
+) {
   const { session, methods } = sessionFixture();
   const openUrl = vi.fn();
   const rendered = { session, openUrl };
   return {
-    ...render(<Conversation view={view} {...conversationProps(rendered)} />),
+    ...render(<Conversation view={view} {...conversationProps(rendered)} {...overrides} />),
     session,
     methods,
     openUrl,
@@ -374,8 +388,8 @@ describe("Conversation 渲染与滚动", () => {
     fireEvent.click(screen.getByRole("button", { name: "收起" }));
     expect(container.querySelector(".diff-body")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "展开" }));
-    expect(container.querySelector(".diff-row.diff-add code")?.textContent).toBe("+new");
-    expect(container.querySelector(".diff-row.diff-delete code")?.textContent).toBe("-old");
+    expect(container.querySelector(".diff-row.diff-add code")?.textContent).toBe("new");
+    expect(container.querySelector(".diff-row.diff-delete code")?.textContent).toBe("old");
     expect(container.querySelector(".diff-row.diff-delete .diff-num")?.textContent).toBe("1");
   });
 
@@ -413,6 +427,46 @@ describe("Conversation 渲染与滚动", () => {
     expect(cards[0]?.textContent).toContain("a.ts");
     expect(cards[0]?.textContent).toContain("+1");
     expect(cards[1]?.textContent).toContain("old.ts → new.ts");
+  });
+
+  it("diff 只剥一个标记，保留第二字符和缩进，不把 hunk 与换行元信息当正文", () => {
+    const view = createSessionView();
+    const entry = tool();
+    if (!entry.result) throw new Error("fixture 缺少结果");
+    entry.result.output = {
+      path: "file.ts",
+      diff: [
+        "diff --git a/file.ts b/file.ts",
+        "index abc..def 100644",
+        "--- a/file.ts",
+        "+++ b/file.ts",
+        "@@ -2,3 +2,3 @@",
+        "-  old",
+        "+  new",
+        "   keep",
+        "--negative",
+        "++positive",
+        "\\ No newline at end of file",
+        "@@ malformed metadata",
+        "@@ -8 +8 @@",
+        "-\told",
+        "+\tnew",
+      ].join("\n"),
+    };
+    view.entries = [entry];
+    const { container } = mount(view);
+    expect(
+      Array.from(container.querySelectorAll(".diff-row code"), (node) => node.textContent),
+    ).toEqual(["  old", "  new", "  keep", "-negative", "+positive", "\told", "\tnew"]);
+    expect(Array.from(container.querySelectorAll(".diff-num"), (node) => node.textContent)).toEqual(
+      ["2", "2", "3", "4", "4", "8", "8"],
+    );
+    expect(container.querySelectorAll(".diff-sep")).toHaveLength(1);
+    expect(container.querySelector(".diff-body")?.textContent).not.toMatch(
+      /@@|No newline|diff --git|index abc|a\/file.ts|b\/file.ts/,
+    );
+    expect(container.querySelector(".diff-h .diff-add")?.textContent).toBe("+3");
+    expect(container.querySelector(".diff-h .diff-del")?.textContent).toBe("−3");
   });
 
   it("读取工具默认只有单行摘要，完整输出和主体说明在折叠详情中", () => {
@@ -525,6 +579,64 @@ describe("Conversation 渲染与滚动", () => {
     );
     expect(screen.queryByRole("button", { name: "回到最新消息" })).toBeNull();
   });
+
+  it.each<[boolean, number, string]>([
+    [true, 0, "思考"],
+    [true, 999, "思考"],
+    [true, 1000, "思考中 1s"],
+    [true, 2500, "思考中 2s"],
+    [false, 0, "思考"],
+    [false, 999, "思考"],
+    [false, 1000, "思考了 1s"],
+    [false, 2500, "思考了 2s"],
+  ])("思考 active=%s、%dms 展示 %s", (active, elapsed, label) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const listeners = new Set<(event: RuntimeEvent) => void>();
+      const view = createSessionView();
+      view.entries = [assistant({ reasoning: "先检查文件" })];
+      mount(view, {
+        subscribeEvents: (listener) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+      });
+      const emit = (kind: "reasoning" | "text", delta: string) => {
+        const event: RuntimeEvent = {
+          type: "message.assistant.delta",
+          sessionId: "session-1",
+          runId: "run-1",
+          eseq: kind === "reasoning" ? 1 : 2,
+          afterSeq: 1,
+          time: new Date().toISOString(),
+          turnId: "turn-1",
+          payload: { messageId: "message-1", kind, delta },
+        };
+        for (const listener of listeners) listener(event);
+      };
+      act(() => {
+        emit("reasoning", "先检查文件");
+      });
+      act(() => {
+        vi.advanceTimersByTime(elapsed);
+        if (!active) emit("text", "完成");
+      });
+      const summary = screen.getByText(label, { selector: ".think > summary" });
+      expect(summary.textContent).toBe(label);
+      expect(summary.closest("details")?.open).toBe(false);
+      if (!active) {
+        act(() => {
+          vi.advanceTimersByTime(3000);
+        });
+        expect(summary.textContent).toBe(label);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("Conversation 工具行与拒绝", () => {
@@ -552,6 +664,74 @@ describe("Conversation 工具行与拒绝", () => {
     expect(rows[0]?.textContent).toContain("2 处");
     expect(rows[0]?.textContent).toContain("12 秒");
     expect(rows[1]?.textContent).not.toContain("ms");
+  });
+
+  it.each<[string, string]>([
+    ["not_read", "文件需要先读取"],
+    ["stale_file", "文件在读取后被修改过"],
+  ])("失败 %s 使用灰色简述，完整原文默认折叠且不展示错误码", (code, brief) => {
+    const message = "拒绝修改文件：Z:/project/src/a.ts。请先读取文件后重试";
+    const view = createSessionView();
+    view.entries = [failedTool(code, message)];
+    const { container } = mount(view);
+    const article = screen.getByRole("article", { name: "工具 edit" });
+    const details = container.querySelector<HTMLDetailsElement>(".conversation-tool-error");
+    expect(article.querySelector(".tool-res.err")?.textContent).toBe("失败");
+    expect(details?.querySelector("summary")?.textContent).toBe(brief);
+    expect(details?.querySelector(".conversation-error")).toBeNull();
+    expect(details?.open).toBe(false);
+    expect(article.textContent).not.toContain(code);
+    expect(
+      Array.from(article.querySelectorAll("[title]"), (node) => node.getAttribute("title")).join(
+        " ",
+      ),
+    ).not.toContain(code);
+    expect(article.querySelector(".tool-details .conversation-tool-output")).toBeNull();
+    fireEvent.click(within(article).getByText(brief));
+    expect(details?.open).toBe(true);
+    expect(details?.querySelector("pre")?.textContent).toBe(message);
+    fireEvent.click(within(article).getByText(brief));
+    expect(details?.open).toBe(false);
+  });
+
+  it.each<[string, string, string]>([
+    ["Z:/project", "old 在 Z:/project/src/a.ts 中未出现。请重试", "old 在 src/a.ts 中未出现。"],
+    ["Z:/project", "读取 Z:\\PROJECT\\src\\a.ts 失败。请重试", "读取 src/a.ts 失败。"],
+    [
+      "Z:\\my project\\repo.v2",
+      "读取 z:/MY PROJECT/repo.v2/src/a b.ts 失败，耗时 1.25 秒。请重试",
+      "读取 src/a b.ts 失败，耗时 1.25 秒。",
+    ],
+    [
+      "/workspace/project",
+      "Failed to read /workspace/project/src/a.ts after 1.25 seconds. Try again.",
+      "Failed to read src/a.ts after 1.25 seconds.",
+    ],
+    ["Z:/project", "读取 Z:/project-other/a.ts 失败。请重试", "读取 Z:/project-other/a.ts 失败。"],
+    ["Z:/project", "读取 Z:/outside/a.ts 失败。请重试", "读取 Z:/outside/a.ts 失败。"],
+    [
+      "/workspace/project",
+      "读取 /Workspace/project/a.ts 失败。请重试",
+      "读取 /Workspace/project/a.ts 失败。",
+    ],
+    ["Z:/project", "插件无法完成请求\n详细诊断", "插件无法完成请求"],
+    ["Z:/project", "插件无法完成请求", "插件无法完成请求"],
+  ])("未知失败仅显示第一句并正确处理路径（cwd=%s）", (cwd, message, brief) => {
+    const view = createSessionView();
+    view.entries = [failedTool("unknown_plugin_error", message)];
+    const { container } = mount(view, { cwd });
+    const details = container.querySelector<HTMLDetailsElement>(".conversation-tool-error");
+    expect(details?.querySelector("summary")?.textContent).toBe(brief);
+    expect(details?.open).toBe(false);
+    expect(container.textContent).not.toContain("unknown_plugin_error");
+    expect(
+      Array.from(container.querySelectorAll("[title]"), (node) => node.getAttribute("title")).join(
+        " ",
+      ),
+    ).not.toContain("unknown_plugin_error");
+    fireEvent.click(screen.getByText(brief, { selector: "summary" }));
+    expect(details?.open).toBe(true);
+    expect(details?.querySelector("pre")?.textContent).toBe(message);
   });
 
   it("被拒绝的工具只显示一行红色说明，feedback 进 title", () => {
@@ -584,6 +764,23 @@ describe("Conversation 工具行与拒绝", () => {
     expect(screen.queryByText("允许了 read")).toBeNull();
     expect(screen.queryByText("模型切换")).toBeNull();
     expect(screen.getByText("Turn 结束")).toBeTruthy();
+  });
+
+  it("压缩回执只显示上下文已压缩，不泄漏摘要种类、序号或 payload", () => {
+    const view = createSessionView();
+    view.entries = [
+      {
+        kind: "notice",
+        key: "compacted-1",
+        seq: 42,
+        subtype: "compacted",
+        message: "上下文已压缩（summary，至 seq 41）",
+        payload: { kind: "summary", throughSeq: 41, summary: "不应显示的摘要正文" },
+      },
+    ];
+    const { container } = mount(view);
+    expect(screen.getByText("上下文已压缩").textContent).toBe("上下文已压缩");
+    expect(container.textContent).not.toMatch(/summary|seq|41|42|不应显示的摘要正文/);
   });
 
   it("用户消息里的 @ 引用渲染成带说明的 chip，历史图片降级为占位", () => {

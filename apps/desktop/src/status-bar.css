@@ -3,7 +3,7 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px 12px;
   min-height: 30px;
   padding: 2px 16px;
@@ -11,16 +11,31 @@
   background: var(--a-side);
   color: var(--a-muted);
   font-size: 12px;
+  white-space: nowrap;
 }
 .status-controls,
 .status-right {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
   min-width: 0;
 }
+.status-controls {
+  flex: 1 1 0;
+}
+.status-controls .status-pill {
+  flex: none;
+}
+.status-controls .status-model {
+  flex: 0 1 auto;
+  min-width: 24px;
+}
+.status-model b {
+  min-width: 0;
+}
 .status-right {
+  flex: none;
   margin-left: auto;
   gap: 12px;
 }
@@ -33,6 +48,7 @@
   padding: 2px 8px;
   border-radius: 5px;
   color: var(--a-secondary);
+  white-space: nowrap;
 }
 .status-pill:hover,
 .status-pill-active {
@@ -289,5 +305,26 @@
   }
   .status-context-popover {
     right: 8px;
+  }
+}
+
+@container (max-width: 700px) {
+  .desktop-status {
+    gap: 4px;
+    padding-inline: 4px;
+    font-size: 11px;
+  }
+  .status-cache,
+  .status-meter {
+    display: none;
+  }
+  .status-right {
+    gap: 4px;
+  }
+  .status-controls {
+    gap: 0;
+  }
+  .status-pill {
+    padding-inline: 4px;
   }
 }

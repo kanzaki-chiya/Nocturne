@@ -1,0 +1,63 @@
+.window-frame {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+.window-titlebar {
+  position: absolute;
+  top: 0;
+  left: 236px;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  height: 32px;
+  background: var(--a-bg);
+  color: var(--a-muted);
+  user-select: none;
+}
+.window-drag-region {
+  flex: 1;
+  min-width: 0;
+}
+.window-controls {
+  display: flex;
+  flex: none;
+}
+.window-controls button {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 32px;
+}
+.window-controls button:hover {
+  background: var(--a-raised);
+  color: var(--a-text);
+}
+.window-controls .window-close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+.window-controls button:focus-visible {
+  outline: 2px solid var(--a-accent);
+  outline-offset: -3px;
+}
+.window-controls svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+}
+.window-frame .main {
+  padding-top: 32px;
+}
+.window-error {
+  position: absolute;
+  top: 32px;
+  right: 12px;
+  z-index: 21;
+  max-width: calc(100% - 24px);
+  color: var(--a-error);
+  background: var(--a-panel);
+  padding: 6px 10px;
+}

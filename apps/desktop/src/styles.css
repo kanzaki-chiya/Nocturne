@@ -83,10 +83,10 @@ button {
   cursor: pointer;
 }
 
-/* 布局：无自绘标题栏，左栏 236px + 主区 */
+/* 布局：左栏延伸到顶部，主区预留自绘标题栏 */
 .body {
   display: grid;
-  grid-template-columns: 236px 1fr;
+  grid-template-columns: 236px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
 }
@@ -410,6 +410,7 @@ button {
   min-height: 0;
   min-width: 0;
   position: relative;
+  container-type: inline-size;
 }
 .head {
   display: flex;
