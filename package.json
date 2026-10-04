@@ -16,7 +16,8 @@
     "format:check": "prettier --check .",
     "test": "pnpm -r --workspace-concurrency=1 test",
     "test:smoke": "pnpm build && pnpm -r test:smoke",
-    "depcheck": "dependency-cruiser packages apps --config .dependency-cruiser.cjs"
+    "depcheck": "dependency-cruiser packages apps --config .dependency-cruiser.cjs",
+    "desktop:dev": "pnpm --filter @nocturne/desktop dev"
   },
   "devDependencies": {
     "@types/node": "24.13.5",

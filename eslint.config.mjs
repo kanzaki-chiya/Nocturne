@@ -25,6 +25,25 @@ export default tseslint.config(
     },
   },
   {
+    // 桌面端前端不使用 Node 全局（types 里带 node 仅为上游源码 typecheck）
+    files: ["apps/desktop/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-globals": [
+        "error",
+        "process",
+        "Buffer",
+        "require",
+        "module",
+        "exports",
+        "__dirname",
+        "__filename",
+        "global",
+        "setImmediate",
+        "clearImmediate",
+      ],
+    },
+  },
+  {
     files: [
       "**/*.test.{ts,tsx}",
       "**/*.smoke.ts",
@@ -41,6 +60,13 @@ export default tseslint.config(
     ...tseslint.configs.disableTypeChecked,
   },
   {
-    ignores: ["dist/", "node_modules/", "**/dist/", "coverage/"],
+    ignores: [
+      "dist/",
+      "node_modules/",
+      "**/dist/",
+      "coverage/",
+      "**/src-tauri/target/",
+      "**/src-tauri/gen/",
+    ],
   },
 );

@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // typecheck 经 paths 对 rpc/client 与 core 源码做检查，上游文件需要 node 类型；
+    // src 自身不使用 Node 全局由 eslint no-restricted-globals 与 depcheck desktop-no-node 强制
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src"]
+}

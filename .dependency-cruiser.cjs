@@ -228,6 +228,42 @@ module.exports = {
       from: { path: "^packages/rpc/src/(client|shared)/" },
       to: { path: "^packages/rpc/src/server/" },
     },
+    // ── 桌面端前端（ADR-0046 第 7 节：只能引 @nocturne/rpc/client 与
+    //    @nocturne/core/protocol，不引 core 运行时、其他 workspace、Node 内置模块）
+    {
+      name: "desktop-no-core-runtime",
+      severity: "error",
+      comment: "桌面端不能引 @nocturne/core 运行时（ADR-0046 第 7 节）",
+      from: { path: "^apps/desktop/src/" },
+      to: {
+        path: "^packages/core/src/",
+        pathNot: "^packages/core/src/protocol/index\\.ts$",
+      },
+    },
+    {
+      name: "desktop-rpc-client-only",
+      severity: "error",
+      comment: "桌面端只能引 @nocturne/rpc/client 入口（ADR-0046 第 7 节）",
+      from: { path: "^apps/desktop/src/" },
+      to: {
+        path: "^packages/rpc/src/",
+        pathNot: "^packages/rpc/src/client/index\\.ts$",
+      },
+    },
+    {
+      name: "desktop-no-other-workspace",
+      severity: "error",
+      comment: "桌面端不依赖其他 apps 与 packages（ADR-0046 第 7 节）",
+      from: { path: "^apps/desktop/src/" },
+      to: { path: "^(apps/(?!desktop/)|packages/(?!rpc/|core/))" },
+    },
+    {
+      name: "desktop-no-node",
+      severity: "error",
+      comment: "桌面端前端不使用 Node 内置模块（ADR-0046 第 7 节）",
+      from: { path: "^apps/desktop/src/" },
+      to: { dependencyTypes: ["core"] },
+    },
     {
       name: "cli-tui-static-boundary",
       severity: "error",
@@ -273,6 +309,7 @@ module.exports = {
   ],
   options: {
     doNotFollow: { path: "node_modules" },
+    exclude: { path: "(^|/)src-tauri/" },
     tsConfig: { fileName: "tsconfig.base.json" },
     enhancedResolveOptions: {
       exportsFields: ["exports"],

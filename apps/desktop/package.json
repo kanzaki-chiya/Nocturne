@@ -1,0 +1,33 @@
+{
+  "name": "@nocturne/desktop",
+  "version": "0.5.0",
+  "description": "Nocturne 桌面端（Tauri 外壳经 RPC 驱动 nctrn 后台，ADR-0046）",
+  "license": "GPL-3.0-only",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "vite": "vite",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nocturne/core": "workspace:*",
+    "@nocturne/rpc": "workspace:*",
+    "@tauri-apps/api": "2.12.0",
+    "@tauri-apps/plugin-dialog": "2.8.0",
+    "@tauri-apps/plugin-opener": "2.6.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.0",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "jsdom": "30.1.1",
+    "vite": "8.3.0"
+  }
+}
