@@ -32,6 +32,7 @@ function toSource(origin: FieldOrigin): ModelFieldSource {
     case "modelsDev":
       return { kind: "modelsDev" };
     case "setup":
+    case "app":
       return { kind: "upstream" };
     case "userModels":
       return { kind: "user" };

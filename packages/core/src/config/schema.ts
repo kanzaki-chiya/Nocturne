@@ -11,7 +11,7 @@ import {
   PERMISSION_PRESET_NAMES,
   parseCompactionThreshold,
 } from "../protocol/index.js";
-import type { ConfigFile } from "./types.js";
+import type { ConfigFile, McpServerEntry } from "./types.js";
 import { ConfigError } from "./errors.js";
 
 const subjectKindSchema = z.enum(["read", "edit", "shell", "network", "mcp", "subagent"]);
@@ -81,7 +81,10 @@ const providerAuthSchema = z.discriminatedUnion("kind", [
 
 export const providerEntrySchema = z
   .object({
-    id: z.string().min(1),
+    id: z
+      .string()
+      .min(1)
+      .refine((id) => !id.includes("/"), "服务商 id 不能含 /"),
     type: z.enum(["openai-compatible", "anthropic"]).optional(),
     baseURL: z.string().min(1).optional(),
     // v0.2：可选——缺省时凭据经凭据索引/系统后端解析（provider-setup.md 第 3 节）
@@ -171,15 +174,52 @@ const hookEntrySchema = z.object({
   timeoutMs: z.number().int().positive().optional(),
 });
 
-const mcpServerEntrySchema = z.object({
-  command: z.string().min(1),
-  args: z.array(z.string()).optional(),
-  env: z.record(z.string(), z.string()).optional(),
-  cwd: z.string().min(1).optional(),
+const mcpCommon = {
   enabled: z.boolean().optional(),
   startupTimeoutMs: z.number().int().positive().optional(),
   callTimeoutMs: z.number().int().positive().optional(),
-});
+};
+export const MCP_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$/;
+export const mcpValueSchema = z.union([z.string(), z.object({ stored: z.literal(true) }).strict()]);
+export function mcpEntrySchema(stored: boolean) {
+  const values = z.record(z.string(), stored ? mcpValueSchema : z.string());
+  return z.union([
+    z
+      .object({
+        ...mcpCommon,
+        type: z.literal("stdio").optional(),
+        command: z.string().min(1),
+        args: z.array(z.string()).optional(),
+        env: values.optional(),
+        cwd: z.string().min(1).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        ...mcpCommon,
+        type: z.literal("http"),
+        url: z.string().refine((value) => {
+          try {
+            const url = new URL(value);
+            return (
+              !url.username &&
+              !url.password &&
+              !url.hash &&
+              (url.protocol === "https:" ||
+                (url.protocol === "http:" &&
+                  (url.hostname === "localhost" ||
+                    url.hostname === "[::1]" ||
+                    /^127(?:\.\d{1,3}){3}$/.test(url.hostname))))
+            );
+          } catch {
+            return false;
+          }
+        }, "地址必须是 HTTPS 或回环 HTTP，且不能含凭据"),
+        headers: values.optional(),
+      })
+      .strict(),
+  ]);
+}
 
 const configFileSchema = z.object({
   compaction: z
@@ -295,7 +335,7 @@ const configFileSchema = z.object({
   hooks: z.partialRecord(hookPointSchema, z.array(hookEntrySchema)).optional(),
   mcp: z
     .object({
-      servers: z.record(z.string(), mcpServerEntrySchema).optional(),
+      servers: z.record(z.string(), z.unknown()).optional(),
     })
     .optional(),
 });
@@ -353,10 +393,16 @@ export function rejectCredentialKeys(raw: unknown, filePath: string): void {
   const servers = (raw as { mcp?: { servers?: unknown } }).mcp?.servers;
   if (typeof servers !== "object" || servers === null) return;
   for (const [name, server] of Object.entries(servers as Record<string, unknown>)) {
-    const env = (server as { env?: unknown } | null)?.env;
-    if (typeof env !== "object" || env === null) continue;
+    const env = {
+      ...(server as { env?: Record<string, unknown> } | null)?.env,
+      ...(server as { headers?: Record<string, unknown> } | null)?.headers,
+    };
     for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
-      if (typeof value === "string" && CREDENTIAL_NAME.test(key) && !ENV_REFERENCE.test(value)) {
+      if (
+        typeof value === "string" &&
+        (CREDENTIAL_NAME.test(key) || /^(sk-|ghp_|ntn_|Bearer\s)/i.test(value)) &&
+        !ENV_REFERENCE.test(value)
+      ) {
         throw new ConfigError(
           "config_credential_rejected",
           `mcp.servers.${name}.env.${key} 疑似内联凭据；请写成 "${key}": "\${${key}}" 引用环境变量`,
@@ -381,5 +427,13 @@ export function parseConfigFile(raw: unknown, filePath: string): ConfigFile {
       cause: parsed.error,
     });
   }
-  return parsed.data;
+  const servers: Record<string, McpServerEntry> = {};
+  const mcpWarnings: string[] = [];
+  for (const [id, entry] of Object.entries(parsed.data.mcp?.servers ?? {})) {
+    const result = mcpEntrySchema(false).safeParse(entry);
+    if (MCP_ID.test(id) && result.success) servers[id] = result.data;
+    else mcpWarnings.push(`mcp_config_invalid：${filePath} 中服务器 ${id} 无效，已忽略`);
+  }
+  const { mcp, ...fields } = parsed.data;
+  return { ...fields, ...(mcp ? { mcp: { servers }, mcpWarnings } : {}) };
 }

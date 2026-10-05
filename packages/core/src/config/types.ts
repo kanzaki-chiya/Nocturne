@@ -11,6 +11,8 @@ import type {
   HookEntry,
   HookPoint,
   McpServerEntry,
+  McpServerOverview,
+  McpSaveInput,
   ModelProtocol,
   ModelRef,
   PermissionPresetName,
@@ -166,6 +168,7 @@ export type SecurityReviewerConfig =
 
 /** 各层配置字段共用的 schema（config.md 第 2 节）；程序从不改写 config.json */
 export interface ConfigFile {
+  mcpWarnings?: string[] | undefined;
   compaction?: { threshold?: string | number | undefined } | undefined;
   /** false 时只使用本地 models.dev 数据，不联网刷新 */
   modelsDev?: false | undefined;
@@ -230,9 +233,9 @@ export interface ResolvedConfig {
   /** 合并后的 MCP 服务器（带来源标注）；项目层只在信任时并入 */
   mcpServers: {
     name: string;
-    origin: "user" | "project";
+    origin: "app" | "user" | "project";
     entry: McpServerEntry;
-    /** 定义该条目的配置文件所在目录（相对路径的解析基点） */
+    /** 定义该条目的配置文件所在目录；MCP 相对 cwd 按会话工作区解析 */
     dir?: string | undefined;
   }[];
   /** 加载与降级过程中产生的警告（人读说明） */
@@ -475,6 +478,17 @@ export type SettingsPatch = Partial<{
  * base 不含项目层；forWorkspace 按会话 workspaceRoot 加载项目层与 Grant。
  */
 export interface RuntimeConfig {
+  reload(): Promise<RuntimeConfig>;
+  describeMcpServers(input?: {
+    workspaceRoot?: string | undefined;
+  }): Promise<{ servers: McpServerOverview[]; warnings: string[] }>;
+  saveMcpServer(input: McpSaveInput): Promise<McpServerOverview>;
+  deleteMcpServer(input: { id: string; workspaceRoot?: string | undefined }): Promise<void>;
+  setMcpServerEnabled(input: {
+    id: string;
+    enabled: boolean;
+    workspaceRoot?: string | undefined;
+  }): Promise<void>;
   readonly nocturneHome: string;
   readonly sessionsDir: string;
   /** 工具输出落盘根目录（sessionsDir 推导，tools.md 第 4 节） */

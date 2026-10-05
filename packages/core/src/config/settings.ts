@@ -7,7 +7,7 @@
  */
 import { inferShellKindFromPath, isShellKind, type ShellSpec } from "../platform/index.js";
 import type { Platform } from "../platform/index.js";
-import { writeJsonAtomic } from "./files.js";
+import { enqueueConfigWrite, writeJsonAtomic } from "./files.js";
 import { parseConfigFile } from "./schema.js";
 import type { ConfigFile, SettingsPatch } from "./types.js";
 import { MODEL_ROLES } from "./types.js";
@@ -203,12 +203,14 @@ export async function loadSettingsStore(
 
   let pending = Promise.resolve();
   function write(update: (next: SettingsData) => void): Promise<void> {
-    const operation = pending.then(async () => {
-      const next = { ...data };
-      update(next);
-      await writeJsonAtomic(fs, platform.paths, settingsPath, next);
-      data = next;
-    });
+    const operation = pending.then(() =>
+      enqueueConfigWrite(fs, async () => {
+        const next = { ...data };
+        update(next);
+        await writeJsonAtomic(fs, platform.paths, settingsPath, next);
+        data = next;
+      }),
+    );
     pending = operation.catch(() => undefined);
     return operation;
   }

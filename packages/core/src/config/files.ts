@@ -8,6 +8,16 @@ import { parseConfigFile } from "./schema.js";
 import type { ConfigFile } from "./types.js";
 
 export type ConfigLayer = "user" | "project";
+// ponytail: 同一文件系统串行写入；多 home 高吞吐时可按配置根目录拆队列。
+const writes = new WeakMap<FileSystem, Promise<unknown>>();
+export function enqueueConfigWrite<T>(fs: FileSystem, task: () => Promise<T>): Promise<T> {
+  const run = (writes.get(fs) ?? Promise.resolve()).then(task);
+  writes.set(
+    fs,
+    run.catch(() => undefined),
+  );
+  return run;
+}
 
 /**
  * 读取并校验一份配置文件。

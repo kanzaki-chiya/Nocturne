@@ -9,7 +9,7 @@ import { z } from "zod";
 import type { Platform } from "../platform/index.js";
 import { type ModelRef } from "../protocol/index.js";
 import { ConfigError } from "./errors.js";
-import { writeJsonAtomic } from "./files.js";
+import { enqueueConfigWrite, writeJsonAtomic } from "./files.js";
 import { providerEntrySchema, rejectCredentialKeys } from "./schema.js";
 import type {
   CredentialStore,
@@ -69,23 +69,25 @@ export async function writeProviderSetup(
   nocturneHome: string,
   file: ProviderSetupFile,
 ): Promise<void> {
-  await writeJsonAtomic(
-    platform.fs,
-    platform.paths,
-    platform.paths.join(nocturneHome, "providers.json"),
-    {
-      ...file,
-      version: SETUP_FILE_VERSION,
-      providers: file.providers?.map((entry) => {
-        if (entry.thinking === undefined) return entry;
-        const { levels: _levels, source: _source, ...thinking } = entry.thinking;
-        return {
-          ...entry,
-          ...(Object.keys(thinking).length > 0 ? { thinking } : { thinking: undefined }),
-        };
-      }),
-    },
-    { dirMode: 0o700 },
+  await enqueueConfigWrite(platform.fs, () =>
+    writeJsonAtomic(
+      platform.fs,
+      platform.paths,
+      platform.paths.join(nocturneHome, "providers.json"),
+      {
+        ...file,
+        version: SETUP_FILE_VERSION,
+        providers: file.providers?.map((entry) => {
+          if (entry.thinking === undefined) return entry;
+          const { levels: _levels, source: _source, ...thinking } = entry.thinking;
+          return {
+            ...entry,
+            ...(Object.keys(thinking).length > 0 ? { thinking } : { thinking: undefined }),
+          };
+        }),
+      },
+      { dirMode: 0o700 },
+    ),
   );
 }
 

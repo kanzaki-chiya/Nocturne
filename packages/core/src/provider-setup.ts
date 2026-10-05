@@ -769,6 +769,7 @@ async function assertNameFree(
   providerId: string,
   workspaceRoot: string | undefined,
 ): Promise<void> {
+  if (providerId.includes("/")) throw new ProviderSetupError("name", "服务商名称不能包含 / 字符");
   const conflict = await config.findProviderConflict(providerId, workspaceRoot);
   if (conflict !== undefined) {
     throw new ProviderSetupError("name", `已有同名服务商 ${conflict.id}（${conflict.layer}）`);

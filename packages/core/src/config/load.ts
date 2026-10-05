@@ -18,6 +18,7 @@ import {
 } from "./models-dev.js";
 import { modelsDevSnapshot } from "./models-dev-snapshot.js";
 import { createCredentialStore } from "./credentials.js";
+import { describeMcp, loadMcpStore, McpSettingsError } from "./mcp.js";
 import { loadGrantStore } from "./grants.js";
 import {
   mergeLayers,
@@ -106,6 +107,12 @@ export async function loadConfig(
       ? { store: options.credentials, warning: undefined }
       : await createCredentialStore(platform, home);
   const credentials = credentialsInit.store;
+  const mcpStore = await loadMcpStore(platform, home, credentials);
+  const mcpLayer = (): MergeLayer => ({
+    kind: "app",
+    path: paths.join(home, "mcp.json"),
+    file: mcpStore.fields(),
+  });
 
   // 向导配置层（providers.json）：损坏/版本不符 → 忽略 + provider_setup_invalid
   const setup = await loadProviderSetup(platform, home);
@@ -180,6 +187,7 @@ export async function loadConfig(
   async function mergeFor(sFile: ProviderSetupFile, workspaceRoot?: string): Promise<MergeResult> {
     const layers: MergeLayer[] = [
       ...setupLayers(sFile, providersPath),
+      mcpLayer(),
       settingsLayer(),
       { kind: "user", path: userConfigPath, file: userFile },
     ];
@@ -204,12 +212,14 @@ export async function loadConfig(
   // 合并产物之外的加载期警告：base 与工作区 resolved 各加一次（合并自身
   // 的警告已在 mergeLayers 内计算，不再重复）
   const loadWarnings: string[] = [...envLayer.warnings, ...cliLayer.warnings];
+  loadWarnings.push(...mcpStore.warnings);
   if (credentialsInit.warning !== undefined) loadWarnings.push(credentialsInit.warning);
   if (settings.warning !== undefined) loadWarnings.push(settings.warning);
   if (trust.warning !== undefined) loadWarnings.push(trust.warning);
 
   const baseLayers = (): MergeLayer[] => [
     ...setupLayers(setupFile, providersPath),
+    mcpLayer(),
     settingsLayer(),
     { kind: "user", path: userConfigPath, file: userFile },
     { kind: "env", file: envLayer.file },
@@ -300,7 +310,10 @@ export async function loadConfig(
           ? merged.origins.shellPath
           : merged.origins[field];
       const source =
-        origin === "modelsDev" || origin === "userModels" || origin === undefined
+        origin === "modelsDev" ||
+        origin === "app" ||
+        origin === "userModels" ||
+        origin === undefined
           ? "default"
           : origin;
       return {
@@ -359,6 +372,7 @@ export async function loadConfig(
 
     const layers: MergeLayer[] = [
       ...setupLayers(setupFile, providersPath),
+      mcpLayer(),
       settingsLayer(),
       { kind: "user", path: userConfigPath, file: userFile },
       ...(trusted && projectFile !== undefined
@@ -468,6 +482,71 @@ export async function loadConfig(
   // 用户鉴权 URL 无效时在加载阶段失败，而不是等首次读取 base。
   base();
   return {
+    reload: () => loadConfig(platform, { ...options, nocturneHome: home, credentials }),
+    async describeMcpServers(input = {}) {
+      const resolved = input.workspaceRoot
+        ? (await forWorkspace(input.workspaceRoot)).resolved
+        : base().resolved;
+      const servers = describeMcp(resolved, home, input.workspaceRoot, credentials, platform);
+      if (input.workspaceRoot) {
+        const workspace = await forWorkspace(input.workspaceRoot);
+        if (!workspace.projectConfig.trusted && workspace.projectConfig.path) {
+          const project = await loadConfigFile(fs, workspace.projectConfig.path).catch(
+            () => undefined,
+          );
+          for (const [name, entry] of Object.entries(project?.mcp?.servers ?? {})) {
+            const item = describeMcp(
+              { ...resolved, mcpServers: [{ name, entry, origin: "project" }] },
+              home,
+              input.workspaceRoot,
+              credentials,
+              platform,
+            )[0];
+            if (item) servers.push({ ...item, trusted: false });
+          }
+        }
+      }
+      return { servers, warnings: resolved.warnings };
+    },
+    async saveMcpServer(input) {
+      if (input.mode === "create" && input.workspaceRoot) {
+        const workspace = await forWorkspace(input.workspaceRoot);
+        const project = workspace.projectConfig.path
+          ? await loadConfigFile(fs, workspace.projectConfig.path).catch(() => undefined)
+          : undefined;
+        if (
+          Object.keys(project?.mcp?.servers ?? {}).some(
+            (id) => id.toLowerCase() === input.id.toLowerCase(),
+          )
+        )
+          throw new McpSettingsError("id", "服务器名称已存在");
+      }
+      const resolved = input.workspaceRoot
+        ? (await forWorkspace(input.workspaceRoot)).resolved
+        : base().resolved;
+      await mcpStore.save(input, resolved);
+      const updated = input.workspaceRoot
+        ? (await forWorkspace(input.workspaceRoot)).resolved
+        : base().resolved;
+      const server = describeMcp(updated, home, input.workspaceRoot, credentials, platform).find(
+        (s) => s.id === input.id,
+      );
+      if (server === undefined) throw new Error("保存后的服务器不存在");
+      return server;
+    },
+    async deleteMcpServer(input) {
+      await mcpStore.remove(
+        input.id,
+        input.workspaceRoot ? (await forWorkspace(input.workspaceRoot)).resolved : base().resolved,
+      );
+    },
+    async setMcpServerEnabled(input) {
+      await mcpStore.enabled(
+        input.id,
+        input.enabled,
+        input.workspaceRoot ? (await forWorkspace(input.workspaceRoot)).resolved : base().resolved,
+      );
+    },
     nocturneHome: home,
     sessionsDir,
     attachmentsDir: paths.join(sessionsDir, "attachments"),

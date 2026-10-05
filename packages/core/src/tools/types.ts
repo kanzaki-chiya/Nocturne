@@ -1,3 +1,4 @@
+import type { McpProbeResult } from "../protocol/index.js";
 /**
  * 工具契约（docs/protocols/tool-api.md）。
  * 内置工具与将来的 MCP / 插件工具走同一接口与同一执行管线（tools.md 第 1 节）。
@@ -246,8 +247,8 @@ export interface QuestionBroker {
 /** 合并配置层后交给装配点的单服务器配置 */
 export interface McpServerConfig extends McpServerEntry {
   name: string;
-  origin: "user" | "project";
-  /** 定义该条目的配置文件所在目录（相对 cwd/env 路径的解析基点） */
+  origin: "app" | "user" | "project";
+  /** 定义该条目的配置文件所在目录；相对 cwd 按 workspaceRoot 解析 */
   dir?: string | undefined;
 }
 
@@ -269,6 +270,9 @@ export interface McpOpenScope {
   workspaceRoot: string;
   sessionId: string;
   platform: Platform;
+  credentials?:
+    | { get(id: string, options?: { fresh?: boolean | undefined }): Promise<string | undefined> }
+    | undefined;
   /** 发出 mcp.server 临时事件 */
   emitServer(payload: McpServerPayload): void;
   /** 发出 runtime.warning 临时事件 */
@@ -288,6 +292,7 @@ export interface McpToolDiff {
  * 在 Turn 边界由 Runtime 调用并应用到会话注册表。
  */
 export interface McpSession {
+  reconcile(servers: readonly McpServerConfig[]): Promise<void>;
   tools(): readonly ToolDefinition[];
   status(): McpServerStatus[];
   applyPendingTools(): McpToolDiff;
@@ -299,6 +304,7 @@ export interface McpSession {
  * packages/mcp 提供实现，CLI/TUI 装配时传入。
  */
 export interface McpConnector {
+  probe(scope: McpOpenScope): Promise<McpProbeResult>;
   open(scope: McpOpenScope): Promise<McpSession>;
 }
 

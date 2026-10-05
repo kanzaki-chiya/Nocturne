@@ -22,7 +22,7 @@ import { ConfigError } from "./errors.js";
 
 /** 层的身份（模型字段来源标注用；ADR-0024/0025） */
 export type LayerKind =
-  "modelsDev" | "setup" | "userModels" | "settings" | "user" | "project" | "env" | "cli";
+  "modelsDev" | "setup" | "app" | "userModels" | "settings" | "user" | "project" | "env" | "cli";
 
 export interface MergeLayer {
   /**
@@ -251,6 +251,7 @@ function layerLabel(origin: FieldOrigin): string {
     case "userModels":
       return "providers.json 的用户编辑";
     case "setup":
+    case "app":
       return origin.path ?? "providers.json";
     case "settings":
       return origin.path ?? "settings.json";
@@ -286,7 +287,10 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     warnings: [],
   };
   const providers = new Map<string, ProviderEntryConfig>();
-  const mcpServers = new Map<string, { origin: "user" | "project"; entry: McpServerEntry }>();
+  const mcpServers = new Map<
+    string,
+    { origin: "app" | "user" | "project"; entry: McpServerEntry }
+  >();
   const info: ModelFieldOrigins = {
     fields: new Map(),
     providers: new Map(),
@@ -295,6 +299,7 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
 
   for (const layer of layers) {
     const { kind, file } = layer;
+    out.warnings.push(...(file.mcpWarnings ?? []));
     for (const role of MODEL_ROLES) {
       const ref = file.modelRoles?.[role];
       if (ref !== undefined) {
@@ -357,8 +362,11 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     for (const [name, entry] of Object.entries(file.mcp?.servers ?? {})) {
       const existing = mcpServers.get(name);
       mcpServers.set(name, {
-        origin: kind === "project" ? "project" : "user",
-        entry: existing === undefined ? { ...entry } : { ...existing.entry, ...entry },
+        origin: kind === "project" ? "project" : kind === "app" ? "app" : "user",
+        entry:
+          existing === undefined || (existing.entry.type ?? "stdio") !== (entry.type ?? "stdio")
+            ? { ...entry }
+            : { ...existing.entry, ...entry },
       });
     }
     const t = file.turn;

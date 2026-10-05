@@ -496,11 +496,16 @@ export interface HookEntry {
  * env 值支持 `${NAME}` 展开；未配置 env 时子进程只拿到平台白名单基线
  * 环境（不含 Provider API Key 等敏感变量）。
  */
+export type McpValue = string | { stored: true };
+
 export interface McpServerEntry {
-  command: string;
+  type?: "stdio" | "http" | undefined;
+  command?: string | undefined;
   args?: string[] | undefined;
-  env?: Record<string, string> | undefined;
-  /** 相对路径按该层配置文件所在目录解析（config.md） */
+  env?: Record<string, McpValue> | undefined;
+  url?: string | undefined;
+  headers?: Record<string, McpValue> | undefined;
+  /** 相对路径按会话 workspaceRoot 解析（mcp.md） */
   cwd?: string | undefined;
   /** 缺省 true */
   enabled?: boolean | undefined;
