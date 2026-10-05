@@ -5,6 +5,7 @@
   "identifier": "io.github.kanzaki-chiya.nocturne",
   "build": {
     "beforeDevCommand": "pnpm vite",
+    "beforeBuildCommand": "pnpm vite build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
@@ -28,7 +29,16 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "targets": ["nsis"],
+    "resources": {
+      "resources/nctrn.mjs": "nctrn.mjs"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
