@@ -7,6 +7,9 @@
  * - close() 终止全部服务器进程树。
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { createHash } from "node:crypto";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   ToolListChangedNotificationSchema,
   type CallToolResult,
@@ -18,6 +21,8 @@ import type {
   McpServerConfig,
   McpServerStatus,
   McpToolDiff,
+  McpProbeResult,
+  McpValue,
   PipeProcess,
   ToolContext,
   ToolDefinition,
@@ -31,13 +36,13 @@ const CLIENT_NAME = "nocturne";
 const CLIENT_VERSION = "0.5.0";
 const DEFAULT_STARTUP_MS = 15_000;
 const MAX_STARTUP_MS = 60_000;
-const DEFAULT_CALL_MS = 120_000;
+const DEFAULT_CALL_MS = 60_000;
 const MAX_CALL_MS = 600_000;
 const MAX_RESTARTS = 3;
 
 interface ServerRuntime {
-  proc: PipeProcess;
-  transport: StdioPipeTransport;
+  proc?: PipeProcess | undefined;
+  transport: StdioPipeTransport | StreamableHTTPClientTransport;
   client: Client;
 }
 
@@ -54,6 +59,12 @@ interface Server {
   refreshing?: Promise<void> | undefined;
   restarting?: Promise<boolean> | undefined;
   closed: boolean;
+  fingerprint?: string | undefined;
+  code?: NonNullable<McpProbeResult["error"]>["code"] | undefined;
+  httpStatus?: number | undefined;
+  stderrTail?: string[] | undefined;
+  secrets: string[];
+  listed?: McpProbeResult["tools"] | undefined;
 }
 
 function err(code: string, message: string): ToolResult {
@@ -61,28 +72,99 @@ function err(code: string, message: string): ToolResult {
 }
 
 /** ${NAME} 展开；未定义变量展开为空串并告警（mcp.md 第 2 节） */
-function expandEnv(
-  env: Record<string, string> | undefined,
+async function expandEnv(
+  env: Record<string, McpValue> | undefined,
   scope: McpOpenScope,
-  server: string,
-): Record<string, string> | undefined {
+  st: Server,
+): Promise<Record<string, string> | undefined> {
   if (env === undefined) return undefined;
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
+    if (typeof value !== "string") {
+      const id = `mcp/${st.cfg.name}/${st.cfg.type === "http" ? key.toLowerCase() : key}`;
+      const secret = await scope.credentials?.get(id, { fresh: true });
+      if (secret === undefined) {
+        st.code = "mcp_secret_missing";
+        st.error = `MCP 服务器 ${st.cfg.name} 缺少凭据 ${key}`;
+        throw new Error(`MCP 服务器 ${st.cfg.name} 缺少凭据 ${key}`);
+      }
+      st.secrets.push(secret);
+      out[key] = secret;
+      continue;
+    }
     const expanded = value.replaceAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_m, name: string) => {
       const v = scope.platform.env(name);
       if (v === undefined) {
         scope.warn(
           "mcp_env_missing",
-          `MCP 服务器 ${server}: env.${key} 引用的环境变量 ${name} 未定义，已展开为空串`,
+          `MCP 服务器 ${st.cfg.name}: ${key} 引用的环境变量 ${name} 未定义，已展开为空串`,
         );
         return "";
       }
       return v;
     });
     out[key] = expanded;
+    if (expanded !== value) st.secrets.push(expanded);
   }
   return out;
+}
+
+function safeText(st: Server, text: string): string {
+  for (const secret of st.secrets) if (secret) text = text.replaceAll(secret, "***");
+  return text.replace(/(authorization|token|password|secret|api[_-]?key)\s*[:=]\s*\S+/gi, "$1=***");
+}
+
+function safeOutput(st: Server, value: unknown): unknown {
+  if (typeof value === "string") return safeText(st, value);
+  if (Array.isArray(value)) return value.map((item: unknown) => safeOutput(st, item));
+  if (value !== null && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [safeText(st, key), safeOutput(st, item)]),
+    );
+  return value;
+}
+
+function fingerprint(cfg: McpServerConfig, values: Record<string, string> | undefined): string {
+  const normalized = {
+    type: cfg.type ?? "stdio",
+    command: cfg.command,
+    args: cfg.args ?? [],
+    cwd: cfg.cwd ?? "",
+    url: cfg.url,
+    enabled: cfg.enabled !== false,
+    startupTimeoutMs: cfg.startupTimeoutMs ?? DEFAULT_STARTUP_MS,
+    callTimeoutMs: cfg.callTimeoutMs ?? DEFAULT_CALL_MS,
+    values: Object.entries(values ?? {})
+      .map(([key, value]) => [cfg.type === "http" ? key.toLowerCase() : key, value])
+      .sort(([a], [b]) => (a ?? "").localeCompare(b ?? "")),
+  };
+  return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+}
+
+async function stopServer(st: Server): Promise<void> {
+  st.closed = true;
+  const runtime = st.runtime;
+  st.runtime = undefined;
+  if (!runtime) return;
+  if (runtime.transport instanceof StreamableHTTPClientTransport && runtime.transport.sessionId) {
+    const status = st.httpStatus;
+    const code = st.code;
+    await timeout(runtime.transport.terminateSession(), 2000, "MCP 结束会话").catch(
+      () => undefined,
+    );
+    st.httpStatus = status;
+    st.code = code;
+  }
+  await runtime.client.close().catch(() => undefined);
+  await runtime.proc?.kill().catch(() => undefined);
+  if (runtime.transport instanceof StdioPipeTransport) {
+    await runtime.transport.whenStderrDrained();
+    st.stderrTail = safeText(st, runtime.transport.stderrText())
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .slice(-20)
+      .map((line) => line.slice(0, 300));
+  }
 }
 
 function timeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -113,10 +195,15 @@ async function fetchToolDefs(
   const client = st.runtime?.client;
   if (client === undefined) throw new Error("客户端未连接");
   const defs = new Map<string, ToolDefinition>();
+  st.listed = [];
   let cursor: string | undefined;
   do {
     const res = await client.listTools(cursor !== undefined ? { cursor } : {});
     for (const tool of res.tools) {
+      st.listed.push({
+        name: safeText(st, tool.name),
+        description: tool.description ? safeText(st, tool.description) : undefined,
+      });
       const def = wrapTool(scope, st, tool, new Set(defs.keys()));
       defs.set(def.name, def);
     }
@@ -132,32 +219,87 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
     st.cfg.cwd !== undefined
       ? scope.platform.paths.isAbsolute(st.cfg.cwd)
         ? st.cfg.cwd
-        : scope.platform.paths.resolve(st.cfg.dir ?? scope.cwd, st.cfg.cwd)
+        : scope.platform.paths.resolve(scope.workspaceRoot, st.cfg.cwd)
       : scope.cwd;
-  const proc = scope.platform.process.spawnPipe(st.cfg.command, st.cfg.args ?? [], {
-    cwd,
-    envMode: "minimal",
-    env: expandEnv(st.cfg.env, scope, st.cfg.name),
-  });
-  const transport = new StdioPipeTransport(proc);
+  const values = await expandEnv(st.cfg.type === "http" ? st.cfg.headers : st.cfg.env, scope, st);
+  st.fingerprint = fingerprint(st.cfg, values);
+  let proc: PipeProcess | undefined;
+  let transport: StdioPipeTransport | StreamableHTTPClientTransport;
+  if (st.cfg.type === "http") {
+    st.code = "connect_failed";
+    transport = new StreamableHTTPClientTransport(new URL(st.cfg.url ?? ""), {
+      requestInit: { headers: values ?? {} },
+      reconnectionOptions: {
+        maxRetries: 0,
+        maxReconnectionDelay: 0,
+        initialReconnectionDelay: 0,
+        reconnectionDelayGrowFactor: 1,
+      },
+      fetch: async (input, init) => {
+        let url = new URL(input);
+        const request = { ...init, redirect: "manual" as const };
+        for (let hop = 0; hop < 20; hop++) {
+          const response = await globalThis.fetch(url, request);
+          st.httpStatus = response.status;
+          if ([301, 302, 303, 307, 308].includes(response.status)) {
+            const location = response.headers.get("location");
+            if (!location) return response;
+            const next = new URL(location, url);
+            await response.body?.cancel();
+            if (next.origin !== url.origin) {
+              st.code = "http_redirect";
+              throw new Error("跨域重定向已拒绝");
+            }
+            if (
+              response.status === 303 ||
+              ((response.status === 301 || response.status === 302) && request.method === "POST")
+            ) {
+              request.method = "GET";
+              delete request.body;
+            }
+            url = next;
+            continue;
+          }
+          if (response.status === 401 || response.status === 403) {
+            st.code = "auth_required";
+            throw new Error("请检查请求头凭据");
+          }
+          if (!response.ok && !(request.method === "GET" && response.status === 405))
+            st.code = "http_status";
+          return response;
+        }
+        st.code = "http_redirect";
+        throw new Error("重定向次数超限");
+      },
+    });
+  } else {
+    st.code = "spawn_failed";
+    proc = scope.platform.process.spawnPipe(st.cfg.command ?? "", st.cfg.args ?? [], {
+      cwd,
+      envMode: "minimal",
+      env: values,
+    });
+    if (proc.pid <= 0) {
+      await proc.kill();
+      throw new Error("spawn failed");
+    }
+    transport = new StdioPipeTransport(proc);
+  }
   const client = new Client({ name: CLIENT_NAME, version: CLIENT_VERSION }, { capabilities: {} });
   const runtime: ServerRuntime = { proc, transport, client };
   st.runtime = runtime;
   // 进程退出/管道关闭即视为崩溃；st.runtime 换防后旧 runtime 的 close 不生效
   transport.onclose = () => {
     if (st.runtime !== runtime || st.closed) return;
-    st.state = "crashed";
+    st.state = st.cfg.type === "http" ? "failed" : "crashed";
     st.error = "进程已退出或管道已关闭";
-    scope.emitServer({ name: st.cfg.name, state: "crashed", error: st.error });
+    scope.emitServer({ name: st.cfg.name, state: st.state, error: st.error });
     scope.diagnostics?.record("mcp.event", {
       server: st.cfg.name,
       state: "crashed",
       error: st.error,
     });
-    scope.warn(
-      "mcp_server_crashed",
-      `MCP 服务器 ${st.cfg.name} 连接断开（${transport.stderrText().trim().slice(0, 300) || "进程退出"}）；下一次调用将尝试重连`,
-    );
+    scope.warn("mcp_server_crashed", `MCP 服务器 ${st.cfg.name} 连接断开`);
   };
   client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
     st.refreshing ??= refreshTools(scope, st).finally(() => {
@@ -167,15 +309,21 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
   try {
     await timeout(
       (async () => {
-        await client.connect(transport);
+        await client.connect(transport as Transport);
         st.staged = await fetchToolDefs(scope, st);
       })(),
       startupMs,
       `MCP 服务器 ${st.cfg.name} 启动`,
     );
   } catch (e) {
-    st.runtime = undefined;
-    await proc.kill().catch(() => undefined);
+    if (e instanceof Error && e.message.includes("超时")) st.code = "startup_timeout";
+    else if (st.cfg.type !== "http") {
+      st.code =
+        e instanceof Error && /ENOENT|spawn|找不到|not found/i.test(e.message)
+          ? "spawn_failed"
+          : "initialize_failed";
+    }
+    await stopServer(st);
     throw e;
   }
 }
@@ -197,6 +345,7 @@ async function refreshTools(scope: McpOpenScope, st: Server): Promise<void> {
 /** 惰性重连：崩溃/失败后的下一次调用触发；每会话至多 MAX_RESTARTS 次 */
 async function ensureClient(scope: McpOpenScope, st: Server): Promise<Client> {
   if (st.state === "ready" && st.runtime !== undefined) return st.runtime.client;
+  if (st.cfg.type === "http") throw new Error("HTTP 连接不可用，请停用后重新启用服务器");
   if (st.closed || st.state === "stopped") {
     throw new Error(`MCP 服务器 ${st.cfg.name} 已关闭`);
   }
@@ -229,7 +378,7 @@ async function ensureClient(scope: McpOpenScope, st: Server): Promise<Client> {
       return true;
     } catch (e) {
       st.state = "failed";
-      st.error = toolError(e);
+      st.error = safeText(st, toolError(e));
       scope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
       scope.diagnostics?.record("mcp.event", {
         server: st.cfg.name,
@@ -336,13 +485,16 @@ function wrapTool(
   tool: Tool,
   taken: ReadonlySet<string>,
 ): ToolDefinition {
-  const name = mcpToolName(st.cfg.name, tool.name, taken);
+  const name = mcpToolName(st.cfg.name, safeText(st, tool.name), taken);
   const remote = tool.name;
   const callMs = Math.min(st.cfg.callTimeoutMs ?? DEFAULT_CALL_MS, MAX_CALL_MS);
   return {
     name,
-    description: tool.description ?? tool.title ?? `MCP 工具 ${st.cfg.name}/${remote}`,
-    inputSchema: tool.inputSchema,
+    description: safeText(
+      st,
+      tool.description ?? tool.title ?? `MCP 工具 ${st.cfg.name}/${remote}`,
+    ),
+    inputSchema: safeOutput(st, tool.inputSchema) as Tool["inputSchema"],
     // 来源标记：结果图片附件记为 source "mcp"（ADR-0023）
     origin: "mcp",
     traits: {
@@ -354,7 +506,7 @@ function wrapTool(
     },
     permissionSubjects() {
       // 权限主体固定为 mcp <server>/<tool>（mcp.md 第 7 节）
-      return [{ kind: "mcp", target: `${st.cfg.name}/${remote}` }];
+      return [{ kind: "mcp", target: safeText(st, `${st.cfg.name}/${remote}`) }];
     },
     async execute(_input: unknown, ctx: ToolContext): Promise<ToolResult> {
       if (ctx.signal.aborted) return err("cancelled", "调用已被中断");
@@ -362,7 +514,7 @@ function wrapTool(
       try {
         client = await ensureClient(scope, st);
       } catch (e) {
-        return err("mcp_unavailable", toolError(e));
+        return err("mcp_unavailable", safeText(st, toolError(e)));
       }
       const timeoutSignal = AbortSignal.timeout(callMs);
       const combined = AbortSignal.any([ctx.signal, timeoutSignal]);
@@ -375,12 +527,14 @@ function wrapTool(
         );
         scope.diagnostics?.record("mcp.call", {
           server: st.cfg.name,
-          tool: remote,
+          tool: safeText(st, remote),
           callId: ctx.callId,
           durationMs: Date.now() - startedAt,
           isError: isErrorResult(res),
         });
-        const { text, output } = mapContent(res);
+        const mapped = mapContent(res);
+        const text = safeText(st, mapped.text);
+        const output = safeOutput(st, mapped.output) as Record<string, unknown>;
         if (isErrorResult(res)) {
           return {
             status: "error",
@@ -393,12 +547,18 @@ function wrapTool(
       } catch (e) {
         if (isAborted(ctx.signal)) return err("cancelled", "调用已被中断");
         if (timeoutSignal.aborted) {
-          return err("timeout", `MCP 工具 ${remote} 超过 ${callMs}ms 超时`);
+          return err("timeout", safeText(st, `MCP 工具 ${remote} 超过 ${callMs}ms 超时`));
+        }
+        if (st.cfg.type === "http") {
+          st.state = "failed";
+          st.error = "HTTP 请求失败，请检查连接和请求头";
+          scope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
+          return err("mcp_unavailable", st.error);
         }
         if (st.state !== "ready") {
-          return err("mcp_server_crashed", `MCP 服务器 ${st.cfg.name} 连接中断：${toolError(e)}`);
+          return err("mcp_server_crashed", `MCP 服务器 ${st.cfg.name} 连接中断`);
         }
-        return err("tool_error", `MCP 工具 ${remote} 调用失败：${toolError(e)}`);
+        return err("tool_error", safeText(st, `MCP 工具 ${remote} 调用失败：${toolError(e)}`));
       }
     },
   };
@@ -416,14 +576,65 @@ function statusOf(st: Server): McpServerStatus {
 
 export function createMcpConnector(): McpConnector {
   return {
-    async open(scope) {
-      const servers: Server[] = scope.servers.map((cfg) => ({
+    async probe(scope) {
+      const started = Date.now();
+      const cfg = scope.servers[0];
+      if (!cfg) throw new Error("缺少服务器");
+      const st: Server = {
         cfg,
         state: "starting",
         restarts: 0,
         tools: new Map(),
         closed: false,
-      }));
+        secrets: [],
+      };
+      try {
+        await connectServer(scope, st);
+        const info = st.runtime?.client.getServerVersion();
+        const tools = st.listed ?? [];
+        await stopServer(st);
+        return {
+          ok: true,
+          durationMs: Date.now() - started,
+          tools,
+          serverInfo: info
+            ? { name: safeText(st, info.name), version: safeText(st, info.version) }
+            : undefined,
+          ...(cfg.type === "http"
+            ? { httpStatus: st.httpStatus }
+            : { stderrTail: st.stderrTail ?? [] }),
+        };
+      } catch {
+        await stopServer(st);
+        return {
+          ok: false,
+          durationMs: Date.now() - started,
+          tools: [],
+          error: {
+            code: st.code ?? "initialize_failed",
+            message:
+              st.code === "mcp_secret_missing"
+                ? (st.error ?? `服务器 ${cfg.name} 缺少 stored 凭据`)
+                : "连接失败，请检查服务器配置、连接和凭据",
+          },
+          ...(cfg.type === "http"
+            ? { httpStatus: st.httpStatus }
+            : { stderrTail: st.stderrTail ?? [] }),
+        };
+      }
+    },
+    async open(scope) {
+      const removed: string[] = [];
+      const servers: Server[] = scope.servers
+        .filter((cfg) => cfg.enabled !== false)
+        .map((cfg) => ({
+          cfg,
+          state: "starting",
+          restarts: 0,
+          tools: new Map(),
+          closed: false,
+          secrets: [],
+        }));
       // 并行启动；单服务器失败只影响自身（降级为无该服务器工具）
       await Promise.all(
         servers.map(async (st) => {
@@ -449,19 +660,87 @@ export function createMcpConnector(): McpConnector {
             });
           } catch (e) {
             st.state = "failed";
-            st.error = toolError(e);
+            st.error =
+              st.code === "mcp_secret_missing"
+                ? safeText(st, toolError(e))
+                : "连接失败，请检查服务器配置、连接和凭据";
             scope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
             scope.diagnostics?.record("mcp.event", {
               server: st.cfg.name,
               state: "failed",
               error: st.error,
             });
-            scope.warn("mcp_server_failed", `MCP 服务器 ${st.cfg.name} 启动失败：${st.error}`);
+            scope.warn(
+              st.code === "mcp_secret_missing" ? "mcp_secret_missing" : "mcp_server_failed",
+              `MCP 服务器 ${st.cfg.name} 启动失败：${st.error}`,
+            );
           }
         }),
       );
 
       return {
+        async reconcile(configs) {
+          const wanted = new Map(
+            configs.filter((cfg) => cfg.enabled !== false).map((cfg) => [cfg.name, cfg]),
+          );
+          for (const st of [...servers]) {
+            if (wanted.has(st.cfg.name)) continue;
+            removed.push(...st.tools.keys());
+            await stopServer(st);
+            servers.splice(servers.indexOf(st), 1);
+            scope.emitServer({ name: st.cfg.name, state: "stopped" });
+          }
+          for (const cfg of wanted.values()) {
+            const signature: Server = {
+              cfg,
+              state: "starting",
+              restarts: 0,
+              tools: new Map(),
+              closed: false,
+              secrets: [],
+            };
+            const values = await expandEnv(
+              cfg.type === "http" ? cfg.headers : cfg.env,
+              scope,
+              signature,
+            ).catch(() => undefined);
+            const digest = fingerprint(cfg, values);
+            let st = servers.find((s) => s.cfg.name === cfg.name);
+            if (st?.fingerprint === digest) continue;
+            if (st) await stopServer(st);
+            else {
+              st = signature;
+              servers.push(st);
+            }
+            st.cfg = cfg;
+            st.closed = false;
+            st.fingerprint = digest;
+            st.state = "starting";
+            scope.emitServer({ name: cfg.name, state: "starting" });
+            try {
+              await connectServer(scope, st);
+              st.state = "ready";
+              st.error = undefined;
+            } catch {
+              st.state = "failed";
+              st.error =
+                st.code === "mcp_secret_missing"
+                  ? (st.error ?? `MCP 服务器 ${cfg.name} 缺少凭据`)
+                  : "连接失败，请检查配置和凭据";
+              st.staged = new Map();
+              scope.warn(
+                st.code === "mcp_secret_missing" ? st.code : "mcp_server_failed",
+                `MCP 服务器 ${cfg.name} 启动失败：${st.error}`,
+              );
+            }
+            scope.emitServer({
+              name: cfg.name,
+              state: st.state,
+              toolCount: st.staged?.size ?? 0,
+              error: st.error,
+            });
+          }
+        },
         tools() {
           return servers.flatMap((st) => [...st.tools.values()]);
         },
@@ -469,7 +748,7 @@ export function createMcpConnector(): McpConnector {
           return servers.map(statusOf);
         },
         applyPendingTools(): McpToolDiff {
-          const diff: McpToolDiff = { add: [], remove: [] };
+          const diff: McpToolDiff = { add: [], remove: removed.splice(0) };
           for (const st of servers) {
             if (st.staged === undefined) continue;
             const staged = st.staged;
@@ -478,7 +757,8 @@ export function createMcpConnector(): McpConnector {
               if (!staged.has(name)) diff.remove.push(name);
             }
             for (const [name, def] of staged) {
-              if (!st.tools.has(name)) diff.add.push(def);
+              diff.remove.push(name);
+              diff.add.push(def);
             }
             st.tools = staged;
           }
@@ -487,21 +767,8 @@ export function createMcpConnector(): McpConnector {
         async close() {
           await Promise.all(
             servers.map(async (st) => {
-              st.closed = true;
+              await stopServer(st);
               st.state = "stopped";
-              const runtime = st.runtime;
-              st.runtime = undefined;
-              if (runtime === undefined) return;
-              try {
-                await runtime.client.close();
-              } catch {
-                // 关闭失败只影响进程清理，kill 兜底
-              }
-              try {
-                await runtime.proc.kill();
-              } catch {
-                // 已退出
-              }
             }),
           );
         },
