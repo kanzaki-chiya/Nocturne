@@ -9,17 +9,18 @@
 - **一个项目一个后台**：`backend_open` 以项目目录为 cwd 启动 `node <脚本> rpc --stdio`，同一项目的会话共用这个后台。会话列表是全局的（`<NOCTURNE_HOME>/sessions`），前端用任意一个运行中的后台 `runtime.listSessions()` 取全部会话。
 - **常驻后台**：应用启动即以普通对话工作区（见第 3 节）为 cwd 开一个后台，用它列出全部会话，窗口打开期间常驻；项目的后台仍按原规则在打开该项目的会话时才启动（第 2 步实现）。因此第一次启动、没有任何项目时，左栏也能直接列出全部会话。
 - **后台生命周期**：Rust 外壳在 Tauri 页面开始加载钩子中同步推进后台代际，F5 或 Vite 整页重载后并行关闭旧页面全部后台（关 stdin → 等自行退出 → 5 秒强杀），不依赖前端异步 `beforeunload`；在途 `backend_open` 在启动前校验分发时捕获的代际，旧页面请求被取消，旧清理只使用旧代快照，不影响新页面后台。窗口关闭时对所有后台（含正在重载清理的后台）执行相同关闭流程，全部结束后退出应用；Windows 上后台在 spawn 后被放入全局 Job Object（`KILL_ON_JOB_CLOSE`），外壳被强杀时后台一起结束。Job 创建或加入失败不致命，往该后台的 stderr 缓冲记一行说明。纯 React Fast Refresh 不重新加载文档，由前端组件生命周期释放连接。
-- **日志边界**：stdin/stdout 的内容在任何地方都不记录、不打印、不写盘（报文里可能含密钥明文）；stderr 按行截断（64 KiB/行）保留最近 500 行在内存中，随 `closed` 消息交给前端。
+- **日志边界**：stdin/stdout 的内容在任何地方都不记录、不打印、不写盘（报文里可能含密钥明文）；stderr 按行截断（64 KiB/行）保留最近 500 行在内存中。缓冲只在两处离开外壳：后台退出时随 `closed` 消息交给前端（崩溃横幅显示末尾几行），以及前端经 `backend_stderr` 命令按需拉取（「后台日志」页，只在打开页面或点「刷新」时读，不轮询）。后台退出即从注册表移除，此后 `backend_stderr` 返回 `unknown_backend`——缓冲不随进程保留，退出后唯一的 stderr 副本在 `closed` 消息里。
 
 ## 2. 命令与消息格式
 
-Rust 外壳提供六个 Tauri 命令（经 `tauri_build` 的 `AppManifest::commands` 声明为应用命令，在 `capabilities/main.json` 中逐个授予 `allow-backend-open` 等权限；第 4 步再加 `backend_stderr`，共七个），错误统一返回可序列化的 `{ code, message }`（message 为中文）：`node_unavailable`、`backend_script_missing`、`invalid_workspace`、`spawn_failed`、`unknown_backend`、`workspace_unavailable`、`file_too_large`、`io`。
+Rust 外壳提供七个 Tauri 命令（经 `tauri_build` 的 `AppManifest::commands` 声明为应用命令，在 `capabilities/main.json` 中逐个授予 `allow-backend-open` 等权限），错误统一返回可序列化的 `{ code, message }`（message 为中文）：`node_unavailable`、`backend_script_missing`、`invalid_workspace`、`spawn_failed`、`unknown_backend`、`workspace_unavailable`、`file_too_large`、`io`。
 
 | 命令              | 参数 → 结果                                         | 说明                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `backend_open`    | `{ workspace, channel }` → `backendId`（u32，自增） | 校验工作区目录存在；取缓存的 Node 探测结果（无缓存先探测一次，不满足报 `node_unavailable`）；解析后台脚本；spawn 后 stdout 行经 channel 推给前端                                                                                                                                                                                                                                              |
 | `backend_send`    | `{ backendId, line }` → `null`                      | 写 `line + \n` 到该后台 stdin 并 flush；每个后台的 stdin 有独立 Mutex                                                                                                                                                                                                                                                                                                                         |
 | `backend_close`   | `{ backendId }` → `null`                            | 关 stdin、等自行退出、5 秒超时强杀，进程确实结束才返回；重复调用或对已退出的后台调用返回 `null`                                                                                                                                                                                                                                                                                               |
+| `backend_stderr`  | `{ backendId }` → `string[]`                        | 返回该后台内存中的 stderr 缓冲（最近 500 行，每行 ≤ 64 KiB）；不写盘。后台不存在或已退出（缓冲随进程回收）报 `unknown_backend`                                                                                                                                                                                                                                                                |
 | `node_probe`      | `{}` → `NodeProbe`                                  | 每次重新探测并刷新缓存（说明页的「重新检测」）                                                                                                                                                                                                                                                                                                                                                |
 | `plain_workspace` | `{}` → 绝对路径字符串                               | 解析 `<NOCTURNE_HOME>/workspace`（`NOCTURNE_HOME` 规则与 Core `nocturneHome()` 一致），不存在时创建（POSIX 上新建目录 0700），返回绝对路径；失败报 `workspace_unavailable`                                                                                                                                                                                                                    |
 | `pick_images`     | `{}` → 原始字节（`Response`）                       | 系统文件对话框多选图片（过滤 png/jpg/jpeg/gif/webp）；外壳读取所选文件字节返回，前端不传路径——读取范围仅限用户显式选中的文件。单个文件 > 64 MiB 报 `file_too_large`：与 stdout 单行上限同级的内存护栏（不是附件规则，格式与尺寸校验仍在 Core）。自定义二进制帧，重复记录 `[u32 LE 文件名 UTF-8 字节数][文件名][u32 LE 数据字节数][数据]`；取消选择返回空体。前端解码在 `src/picked-images.ts` |
@@ -35,7 +36,9 @@ type BackendMessage =
 
 `code` 是退出码，被强杀或拿不到时为 `null`；`stderr` 是该后台内存缓冲的全部内容（≤500 行）。监督线程（`try_wait` 约 50ms 轮询）在进程退出后等待 stdout 读线程排空（最多 2 秒，防孙进程继承管道卡住），保证**所有 line 消息都在 closed 之前发出**；closed 每个后台只发一次。stdout 切行上限 64 MiB/行，超过则记一行 stderr 并强杀后台（宁可显式失败也不悄悄丢报文让请求挂死）。
 
-前端 `TauriLineTransport`（`src/transport.ts`）把这套命令实现成 `LineTransport`：`send` 经 promise 链串行保证顺序（写失败吞掉，断开会经 closed 体现）；注册 `onLine` 前到达的行被缓冲并按序交付；`closed` 在已交付完缓冲行后触发 `onClose`（只一次）；`exited` 暴露退出结果；`backend_open` 失败包装成带 `code` 的 `DesktopError`。`BackendPool`（`src/backends.ts`）按 `projectKey` 保持一个后台并做握手，退出时移出池并通知 UI（显示「后台已退出（退出码 N）」与「重新连接」）。
+前端 `TauriLineTransport`（`src/transport.ts`）把这套命令实现成 `LineTransport`：`send` 经 promise 链串行保证顺序（写失败吞掉，断开会经 closed 体现）；注册 `onLine` 前到达的行被缓冲并按序交付；`closed` 在已交付完缓冲行后触发 `onClose`（只一次）；`exited` 暴露退出结果；`backend_open` 失败包装成带 `code` 的 `DesktopError`。`BackendPool`（`src/backends.ts`）按 `projectKey` 保持一个后台并做握手，退出时移出池并通知 UI。握手失败（含后台 spawn 后秒退）的 `ensure` 会等 `exited` 拿到退出码与 stderr 尾部，把它们带进抛出的错误——否则横幅只看到「连接已断开」，后台为什么没起来无从排查。
+
+**崩溃与恢复**：后台退出后 UI 显示「后台已退出（退出码 N）」横幅，附 `closed` 消息里 stderr 的末尾几行（可展开全部），操作是「重启后台」与「查看日志」（进入「后台日志」页）。退出时 `src/conversations.ts` 把该后台上的已打开会话标为 `dead` 并各自保留 `SessionView` 与 `lastSeq`：当前会话保持选中，空闲清理跳过 dead 会话，打开 dead 会话自动走恢复流程。「重启后台」只重开退出的那一个后台（其余不动），随后对每个 dead 会话依次 `resumeSession` 并以 `afterSeq: lastSeq` 重新订阅，拿到退出期间落盘但没收到的持久事件；恢复失败的会话单独记录错误并保持 dead，不阻塞其余会话的恢复，之后重新打开时重试。
 
 ## 3. Node 查找与说明页
 
@@ -71,13 +74,17 @@ interface NodeProbe {
 
 探测不通过时前端显示说明页（`src/NodeHelp.tsx`）：逐项展示查找结果、要求版本与「打开 nodejs.org」「重新检测」按钮；重新检测通过后不重启应用直接进正常流程。
 
-## 4. 后台脚本路径
+## 4. 后台脚本路径与单文件打包
 
 - 环境变量 `NOCTURNE_DESKTOP_BACKEND` 非空则优先使用；
 - debug 构建用 `<仓库>/apps/cli/dist/main.js`（`pnpm build` 的产物）；
-- release 构建用 `<resource_dir>/nctrn.mjs`（随应用打包，第 4 步实现）。
+- release 构建用 `<resource_dir>/nctrn.mjs`（随应用打包）。
 
 文件不存在报 `backend_script_missing`，message 带路径并提示先 `pnpm build`。
+
+`nctrn.mjs` 由 `scripts/bundle-nctrn.mjs` 生成（`pnpm build` 后用 `tsdown` 把 `apps/cli/src/main.ts` 打成单个 ESM 文件，输出到 `apps/desktop/src-tauri/resources/nctrn.mjs`，`.gitignore` 排除）：运行时依赖（workspace 包与 npm 依赖，含 `@nocturne/tui` 的动态 import 及其 Ink/React/yoga 链路）全部内联、不拆 chunk，`react-devtools-core` 可选依赖别名成空模块（仅 `DEV=true` 时 Ink 才探测它），`bufferutil`/`utf-8-validate` 经 `WS_NO_*` 环境变量禁用。产物自包含，复制到没有 `node_modules` 的目录可直接 `node nctrn.mjs` 运行。
+
+一个 Windows 细节：Tauri 的 `resource_dir()` 经 `canonicalize` 返回 `\\?\` 前缀的 verbatim 路径，Node 不能正确处理 `\\?\X:\…` 形式的入口参数（解析时退化成 `lstat 'X:'` 直接 EISDIR 退出）。`AppState` 构造时统一用 `node::strip_verbatim_prefix` 剥掉前缀（`\\?\UNC\` → `\\`，`\\?\X:\` → `X:\`，无法安全还原的保持原样），后台脚本与随附 Node 查找都消费还原后的路径。
 
 ## 5. 会话树与界面状态
 
@@ -95,7 +102,7 @@ interface NodeProbe {
 
 界面状态存 localStorage 键 `nocturne.desktop.prefs.v1`：`{ pinned: string[]; projects: string[]; hidden: string[]; projectSort: "activity" | "name"; lastEffort?: string; theme?: "light" | "dark"; plainWorkspace?: string; plainWorkspaces: string[] }`（会话 id、原始路径、项目路径；`projectSort` 缺省 `"activity"`；`lastEffort` 是上次选用的思考档位，作为新会话草稿的默认档位，非字符串字段被忽略；`theme` 缺省即跟随系统；`plainWorkspace` 是自选的普通对话工作区，缺省用外壳的默认路径；`plainWorkspaces` 缺省 `[]`，记住用过的工作区路径；各字段逐个校验，类型不对的回退默认，缺新字段的旧数据照常读取；旧数据里的 `lastProject` 字段忽略）。读写失败均不影响本次运行，写失败时 `persistent` 标为 false（`src/prefs.ts`）。
 
-启动流程：`node_probe` → 不 ok 显示说明页；ok 后 `plain_workspace` 取默认普通对话工作区（`prefs.plainWorkspace` 优先）→ `ensure` 开常驻后台（握手）→ `listSessions()`（不传 cwd）。`plain_workspace` 或 `ensure` 失败显示真实错误与「重试」，后台退出横幅的「重新连接」同样重走这条链。「打开项目…」（「项目」标题行的「＋」）走系统文件夹对话框 → 加入手动项目、取消隐藏、刷新列表，不启动后台。列表在连上后、打开项目后、窗口重新获得焦点时（节流 ≥ 2 秒）刷新。
+启动流程：`node_probe` → 不 ok 显示说明页；ok 后 `plain_workspace` 取默认普通对话工作区（`prefs.plainWorkspace` 优先）→ `ensure` 开常驻后台（握手）→ `listSessions()`（不传 cwd）。`plain_workspace` 或 `ensure` 失败显示真实错误与「重试」；后台退出则显示崩溃横幅，「重启后台」只重开那个后台并恢复其会话（见第 2 节崩溃与恢复）。「打开项目…」（「项目」标题行的「＋」）走系统文件夹对话框 → 加入手动项目、取消隐藏、刷新列表，不启动后台。列表在连上后、打开项目后、窗口重新获得焦点时（节流 ≥ 2 秒）刷新。
 
 未选中会话时主区显示 hero 空状态（`src/App.tsx` `DraftPane`）：月亮标记 + 标题 + 同一个输入框（宽度上限 680）。普通对话标题为「有什么可以帮你？」；项目草稿为「要在 <项目名> 里做什么？」——项目名是可点按钮（虚线下划线），点击打开与输入框托盘目录 chip 同一个目录菜单。目录菜单内容：「普通对话」（副标题「不属于任何项目」）/ 分隔线 /「项目」组逐项目（名称 + 小字路径）/ 分隔线 /「打开其他文件夹…」。
 
@@ -169,7 +176,7 @@ interface NodeProbe {
 
 ### 5.5 设置区
 
-左栏底部「设置」进入设置区：左栏整列换成设置导航（「← 返回 Esc」、「设置」标题、常规 / 模型 / 服务商 / 外观四项、底部一行说明），会话树不显示；主区换成对应页面。空状态与状态栏的模型菜单底部「管理服务商…」直接进入「服务商」。设置区以 `.settings-over` 盖在主区之上，原来的会话或空状态（`.mainpane`）保持挂载并设为 `inert`，所以「← 返回」或 Esc 回到的是同一个会话，滚动位置不变；在导航项之间切换不算返回。Esc 只在没有被下拉、对话框先处理时才返回（下拉的 Esc 会 `preventDefault` 并停止冒泡；设置区里有打开的对话框时不返回）。被盖住的会话的窗口级快捷键（权限卡片的 Esc 拒绝与数字键作答、输入框的 Esc 中断）在其所在区域 `inert` 时一律不响应。服务商页与常规 / 模型 / 外观页都走常驻的普通对话后台读写全局配置。
+左栏底部「设置」进入设置区：左栏整列换成设置导航（「← 返回 Esc」、「设置」标题、常规 / 模型 / 服务商 / 外观 / 后台日志五项、底部一行说明），会话树不显示；主区换成对应页面。空状态与状态栏的模型菜单底部「管理服务商…」直接进入「服务商」。设置区以 `.settings-over` 盖在主区之上，原来的会话或空状态（`.mainpane`）保持挂载并设为 `inert`，所以「← 返回」或 Esc 回到的是同一个会话，滚动位置不变；在导航项之间切换不算返回。Esc 只在没有被下拉、对话框先处理时才返回（下拉的 Esc 会 `preventDefault` 并停止冒泡；设置区里有打开的对话框时不返回）。被盖住的会话的窗口级快捷键（权限卡片的 Esc 拒绝与数字键作答、输入框的 Esc 中断）在其所在区域 `inert` 时一律不响应。服务商页与常规 / 模型 / 外观页都走常驻的普通对话后台读写全局配置。
 
 设置布局按容器宽度调整，不使用窗口媒体查询：整个设置区宽度 <1000px 时导航从 295px 收到 200px，会话左栏不变；设置主内容 <900px 时服务商列表从 252px 收到 200px，名称与右侧模型数各自单行省略。详情标题与不收缩的状态标签一行，操作按钮另起一行横排并允许换行。详情内容 <520px 时信息卡改两列，<320px 时改一列，值允许折行。模型表名称列至少 12ch，<520px 先隐藏最大输出，<400px 再隐藏上下文；名称和能力始终保留，长模型名折行，无横向滚动。页尾说明为「R 推理 · I 图片输入。默认模型在「模型」页修改。」，其中「模型」可进入模型页。
 
@@ -212,9 +219,13 @@ interface NodeProbe {
 
 已知限制：RPC 请求不能真正中止，「取消获取」只在前端丢弃结果。
 
+### 5.7 后台日志页
+
+「后台日志」（`src/BackendLogsPage.tsx`）查看运行中后台的 stderr：页头写明「后台进程 stderr 的内存缓冲（最近 500 行），不写盘、不轮询」；一个后台选择器（`Dropdown`，列出每个项目后台与常驻聊天后台，标签为「项目名（类型） + 工作区」）、等宽字体日志区、「刷新」与「复制全部」按钮（`backend_stderr` 只在打开页面或点「刷新」时调用，不轮询；「复制全部」把当前显示的缓冲整体写进剪贴板）。没有运行中的后台时选择器置灰并写「打开一个会话后再来看」；所选后台缓冲为空时写「该后台暂无 stderr 输出；已退出后台的最后几行日志显示在崩溃横幅里」（退出后缓冲已回收，只有 `closed` 消息保留了尾部，见第 1 节日志边界）。读取失败显示错误与重试。
+
 ## 6. 安全边界
 
-- `capabilities/main.json` 只授予：六个应用命令（`allow-backend-open/send/close`、`allow-node-probe`、`allow-plain-workspace`、`allow-pick-images`）、`core:path:allow-resolve-directory`（前端 `homeDir()` 主目录解析所需；`pick_images` 的对话框与读文件都在 Rust 侧，不需要它）、窗口权限 `core:window:allow-minimize`、`allow-toggle-maximize`、`allow-internal-toggle-maximize`（Tauri drag-region 的原生双击）、`allow-close`、`allow-start-dragging`、`allow-is-maximized`（后五项同属 `core:window:`）、`dialog:allow-open`、`opener:allow-open-url`（scope 只允许 `https:*` 与 `http://127.0.0.1:*` / `http://localhost:*`）。不授予 `core:default` 或 `core:window:default`，不启用 fs、shell、http 插件，`withGlobalTauri: false`。
+- `capabilities/main.json` 只授予：七个应用命令（`allow-backend-open/send/close/stderr`、`allow-node-probe`、`allow-plain-workspace`、`allow-pick-images`）、`core:path:allow-resolve-directory`（前端 `homeDir()` 主目录解析所需；`pick_images` 的对话框与读文件都在 Rust 侧，不需要它）、窗口权限 `core:window:allow-minimize`、`allow-toggle-maximize`、`allow-internal-toggle-maximize`（Tauri drag-region 的原生双击）、`allow-close`、`allow-start-dragging`、`allow-is-maximized`（后五项同属 `core:window:`）、`dialog:allow-open`、`opener:allow-open-url`（scope 只允许 `https:*` 与 `http://127.0.0.1:*` / `http://localhost:*`）。不授予 `core:default` 或 `core:window:default`，不启用 fs、shell、http 插件，`withGlobalTauri: false`。
 - 主窗口 `dragDropEnabled: false`：关掉 Tauri 的原生拖放接管，HTML5 drop 才能向输入框交付 `File` 对象（图片附件的拖入路径）。
 - CSP：`default-src 'self'`；`connect-src` 只允许 `ipc:`/`http://ipc.localhost`；图片额外允许 `blob:`（图片附件预览用）；禁 `object-src`、`base-uri`、`form-action`、`frame-ancestors`。dev 模式（`devCsp`）仅为 Vite 额外放开 `ws://localhost:1420`、`http://localhost:1420` 与 style `'unsafe-inline'`。
 - 外链白名单（`src/external-url.ts`）：`https:` 放行；`http:` 仅 `127.0.0.1` 与 `localhost`（本机回调页）；其余协议与解析失败忽略不打开。Rust 侧 opener scope 与之一致。
@@ -225,5 +236,6 @@ interface NodeProbe {
 `apps/desktop/src` 只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`，不引 core 运行时、其他 workspace 包、Node 内置模块（含 Node 全局，eslint `no-restricted-globals` + depcheck `desktop-*` 规则强制）。Vite/vitest 用 alias 直接跑 `packages/rpc/src/client` 与 `packages/core/src/protocol` 源码，dev 与测试不需要先构建 rpc。
 
 - `pnpm desktop:dev`（= `pnpm --filter @nocturne/desktop dev` → `tauri dev`，自动先跑 `pnpm vite`）：开发运行，后台用 `apps/cli/dist/main.js`，需先 `pnpm build`。
+- `pnpm desktop:build`（根 `package.json`）：依次跑 `pnpm build` → `node scripts/bundle-nctrn.mjs` → `tauri build`（`beforeBuildCommand` 自动先跑 `pnpm vite build`），任何一步失败即终止。产出 NSIS 安装包 `apps/desktop/src-tauri/target/release/bundle/nsis/Nocturne_<ver>_x64-setup.exe`：per-user 安装（`installMode: "currentUser"`，装进 `%LOCALAPPDATA%\Nocturne`，不需要管理员权限），不签名，不打包 Node（用户需自装 ≥ 24.14.0）；`resources/nctrn.mjs` 随包放进安装目录根。卸载器只删安装目录，用户数据（`%APPDATA%\io.github.kanzaki-chiya.nocturne`）按 Tauri 默认保留。Rust 工具链只在这条流程需要。
 - `pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test`（vitest + jsdom，完全离线，进入默认测试集）覆盖 `src/` 与 `test/`；`pnpm build` 不构建桌面端，也不需要 Rust。
 - Rust 外壳只在 `desktop:*` 流程需要：在 `apps/desktop/src-tauri` 手动跑 `cargo build`、`cargo test`（切行、版本解析、关闭超时、进程级转发）、`cargo clippy --all-targets`；不进默认测试集。

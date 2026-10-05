@@ -209,8 +209,8 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 
 ### apps/desktop（v0.5，[ADR-0046](../decisions/ADR-0046-desktop-tauri.md)）
 
-- **负责**：桌面端客户端——Tauri 外壳（Rust）管理 `nctrn rpc --stdio` 后台进程（启动、按行转发、关闭与 Job Object 清理、Node 查找），React 前端经 `@nocturne/rpc/client` 完成握手与全部会话操作；窗口与会话树界面、本地界面状态。
-- **不负责**：任何 Agent 行为、事件投影、权限判定、RPC 语义（外壳不解析报文，前端复用 `@nocturne/rpc/client`）；不随附 Node（要求用户自装 24.14+）。
+- **负责**：桌面端客户端——Tauri 外壳（Rust）管理 `nctrn rpc --stdio` 后台进程（启动、按行转发、stderr 内存缓冲与 `backend_stderr` 按需读取、关闭与 Job Object 清理、Node 查找），React 前端经 `@nocturne/rpc/client` 完成握手与全部会话操作；窗口与会话树界面、崩溃横幅与单后台重启恢复（`resumeSession` + `afterSeq`）、本地界面状态。
+- **不负责**：任何 Agent 行为、事件投影、权限判定、RPC 语义（外壳不解析报文，前端复用 `@nocturne/rpc/client`）；不随附 Node（要求用户自装 24.14+，release 用 `scripts/bundle-nctrn.mjs` 打的单文件 `nctrn.mjs`，NSIS per-user 安装包）。
 - **依赖**：前端只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`，由 depcheck `desktop-*` 规则强制（不引 core 运行时、其他 workspace、Node 内置模块）；UI 依赖 React 19、Vite、@tauri-apps/api 及 dialog/opener 插件（ADR-0046 第 4 节）。
 - 详见 [apps/desktop.md](../apps/desktop.md)。
 

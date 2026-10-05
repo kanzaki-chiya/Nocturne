@@ -14,6 +14,7 @@ nocturne/
 ├── package.json                 pnpm workspace 根
 ├── pnpm-workspace.yaml
 ├── scripts/
+│   ├── bundle-nctrn.mjs                 tsdown 把 apps/cli 打成单文件后台 src-tauri/resources/nctrn.mjs
 │   └── update-models-dev-snapshot.mjs  手动更新内置 models.dev 裁剪快照
 ├── tsconfig.base.json
 ├── docs/                        所有正式文档
@@ -56,7 +57,8 @@ nocturne/
         ├── index.html、vite.config.ts、vitest.config.ts
         ├── src/                 host 抽象、TauriLineTransport、BackendPool、会话树、界面
         ├── test/                vitest + jsdom 离线测试（进默认测试集）
-        └── src-tauri/           Rust 外壳：五个命令、行切分、Node 查找、Job Object（cargo test 手动跑）
+        └── src-tauri/           Rust 外壳：七个命令、行切分、stderr 缓冲、Node 查找、Job Object（cargo test 手动跑）
+            └── resources/       打包产物 nctrn.mjs（.gitignore 排除，由 scripts/bundle-nctrn.mjs 生成）
 ```
 
 单元测试与源文件放在一起（`*.test.ts`）；跨模块的 Turn 级测试放在 `packages/core/test/`，使用按脚本返回流式事件的假 Provider，使 Agent Loop 的行为可以确定性地测试，不依赖真实模型服务。

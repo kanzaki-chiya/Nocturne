@@ -225,3 +225,14 @@ Rust 外壳提供四个 Tauri 命令，前端用它们实现 `LineTransport`：
    - 不做：RPC 请求的中途取消。「取消获取」继续由前端丢弃结果并释放晚到的草稿。
 
 4. **窄窗口状态栏的让位顺序**（细化上一节第 3 条）。宽度不够时依次隐藏：累计缓存命中 → 上下文进度条 → Shell 项 → 模型名前的服务商前缀；模型名本身最后才省略，且至少保留约 10 个字符，悬停显示全名。避免出现模型名被挤成「o…」而其他项都还完整的情况。
+
+### 2026-10-06：第 4 步实现中的偏差与补充
+
+第 4 步（后台日志面板、崩溃恢复、单文件后台与 NSIS 安装包）实现时确认了以下细节，正文与 [desktop.md](../apps/desktop.md) 以此为准。
+
+1. **已退出后台的 stderr 不可再读**（细化修订 8 的 `backend_stderr`）。后台退出即从注册表移除，`backend_stderr` 对已退出后台返回 `unknown_backend`——缓冲随进程回收，不保留可查询的副本。退出后唯一的 stderr 副本在 `closed` 消息的尾部里，由崩溃横幅展示。日志页的空态文案已写明这一点。
+2. **崩溃恢复流程**（细化第 9 节第 4 步）。后台退出时前端把该后台上的已打开会话标为 `dead`，各保留 `SessionView` 与 `lastSeq`，空闲清理跳过、当前会话保持选中。「重启后台」只重开退出的那一个后台，随后逐会话 `resumeSession` 并以 `afterSeq: lastSeq` 重新订阅（取得退出期间落盘但没收到的持久事件）；恢复失败的会话单独记录并保持 dead，不阻塞其余会话，重新打开时重试。打开 dead 会话自动走同一恢复流程，不另设手动「恢复会话」按钮。
+3. **握手失败带出 stderr 尾部**。`BackendPool.ensure` 在握手失败（含后台 spawn 后秒退）时等待 `exited` 拿到退出码与 stderr 最后几行并入抛出的错误——否则横幅只显示「连接已断开」，后台死因完全不可见。这正是排查出第 4 条问题所需的诊断通道。
+4. **release 资源路径要剥 verbatim 前缀**（补充第 4 节）。Windows 上 Tauri 的 `resource_dir()` 经 `canonicalize` 返回 `\?\` 前缀路径，Node 不能正确处理 `\?\X:\…` 形式的入口参数（退化成 `lstat 'X:'`，EISDIR 退出码 1）。`AppState` 构造时统一 `strip_verbatim_prefix` 还原（`\?\UNC\` → `\`，`\?\X:\` → `X:\`，其余保持原样），后台脚本与随附 Node 查找都消费还原后的路径。ADR 正文未提这个细节，属实现必要项而非设计变更。
+5. **单文件后台的可选依赖处理**（细化第 9 节第 4 步打包）。`scripts/bundle-nctrn.mjs` 用 tsdown 把 `apps/cli` 打成单文件 `resources/nctrn.mjs`（全部依赖内联、不拆 chunk、shebang 保留、target node24、产物 .gitignore）。两处可选依赖按最小方式处理：`react-devtools-core`（Ink 的可选 peer，仅 `DEV=true` 才探测）别名成空模块；`bufferutil` / `utf-8-validate`（`ws` 的可选加速依赖，仅 devtools 路径间接引入）经 `WS_NO_BUFFER_UTIL` / `WS_NO_UTF_8_VALIDATE` 禁用。产物复制到无 `node_modules` 的目录可独立完成 `--version`、`--help` 与 `rpc --stdio` 握手。
+6. **NSIS 打包参数**（细化第 9 节第 4 步）。`bundle.active: true`、`targets: ["nsis"]`、`installMode: "currentUser"`（装进 `%LOCALAPPDATA%\Nocturne`，无需管理员）、不签名、`resources` 把 `resources/nctrn.mjs` 映射到资源目录根；不打包 Node。根 `package.json` 新增 `desktop:build`：`pnpm build` → `bundle-nctrn.mjs` → `tauri build`，`pnpm build` 本身不触发桌面构建。卸载器只删安装目录，`%APPDATA%\io.github.kanzaki-chiya.nocturne` 用户数据按 Tauri 默认保留。

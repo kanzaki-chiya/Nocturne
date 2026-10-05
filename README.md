@@ -28,6 +28,12 @@ pnpm build
 
 卸载：`npm unlink -g @nocturne/cli`。
 
+### 桌面版
+
+桌面版以 Windows 安装包分发（NSIS，按用户安装到 `%LOCALAPPDATA%\Nocturne`，不需要管理员权限）。安装前需自行安装 Node.js 24.14 或更新版本——桌面端不随附 Node，启动时若找不到会显示安装说明。安装包未做代码签名，Windows SmartScreen 可能提示「无法验证发行者」，确认来源后选择「仍要运行」。
+
+卸载走系统「应用与功能」或安装目录下的 `uninstall.exe`：只删除安装目录，会话、设置与凭据等用户数据（`%APPDATA%\io.github.kanzaki-chiya.nocturne` 与 `~/.nocturne`）保留。
+
 ## 配置
 
 首次使用直接运行 `nctrn setup`：在交互终端打开服务商页完成配置，随后自动进入模型选择页挑选模型。密钥交给操作系统安全存储（Windows DPAPI、macOS 钥匙串、Linux Secret Service），不写进任何配置文件；ChatGPT、Grok 可在服务商页用账号登录（浏览器授权或设备码），OpenRouter 可用浏览器授权换取密钥。会话内可用 `/provider` 打开服务商管理页、`/model` 查看与切换模型。
