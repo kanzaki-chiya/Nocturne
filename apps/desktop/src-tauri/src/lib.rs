@@ -47,6 +47,7 @@ pub fn run() {
     let commands: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
         backend::backend_send,
         backend::backend_close,
+        backend::backend_stderr,
         backend::node_probe,
         backend::plain_workspace,
         images::pick_images,
@@ -67,7 +68,7 @@ pub fn run() {
                 .path()
                 .resource_dir()
                 .unwrap_or_else(|_| PathBuf::from("."));
-            let state = Arc::new(AppState::new(resource_dir));
+            let state = Arc::new(AppState::new(node::strip_verbatim_prefix(resource_dir)));
             #[cfg(windows)]
             state.init_job();
             app.manage(state);

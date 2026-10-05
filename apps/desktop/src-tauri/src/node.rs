@@ -273,6 +273,34 @@ pub fn probe_node(resource_dir: &Path) -> NodeProbe {
     }
 }
 
+/// Windows 上 Tauri 的 `resource_dir()` 来自 `canonicalize`，返回 `\\?\` 前缀的
+/// verbatim 路径。子进程不能统一处理这种形式（Node 解析 `\\?\Z:\x.mjs` 时会退化成
+/// `lstat 'Z:'` 直接 EISDIR 退出），所以在进 AppState 前剥掉前缀还原普通路径。
+/// `\\?\UNC\server\share` 对应 `\\server\share`；其余 `\\?\X:\…` 去掉 4 字符前缀。
+pub fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        if let Some(text) = path.as_os_str().to_str() {
+            if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+                return PathBuf::from(format!(r"\\{rest}"));
+            }
+            if let Some(rest) = text.strip_prefix(r"\\?\") {
+                // 只剥形如 \\?\X:\… 的：剥完是带盘符的绝对路径；
+                // \\?\Z:（无反斜杠）剥完会退化成盘相对路径，保持原样更安全
+                let b = rest.as_bytes();
+                if b.len() >= 3
+                    && b[0].is_ascii_alphabetic()
+                    && b[1] == b':'
+                    && b[2] == b'\\'
+                {
+                    return PathBuf::from(rest);
+                }
+            }
+        }
+    }
+    path
+}
+
 /// 后台脚本：`NOCTURNE_DESKTOP_BACKEND` > debug 构建用仓库内 cli/dist/main.js > release 用资源目录 nctrn.mjs。
 pub fn backend_script(resource_dir: &Path) -> PathBuf {
     if let Ok(value) = env::var("NOCTURNE_DESKTOP_BACKEND") {
@@ -330,6 +358,31 @@ mod tests {
         assert!(!satisfies((24, 13, 9)));
         assert!(satisfies((25, 0, 0)));
         assert!(!satisfies((22, 11, 0)));
+    }
+
+    /// resource_dir() 经 canonicalize 返回 \\?\ verbatim 路径，
+    /// 传给子进程前要还原成普通形式（Node 不认 \\?\Z:\…）。
+    #[cfg(windows)]
+    #[test]
+    fn strips_verbatim_prefix() {
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from(r"\\?\Z:\app\nctrn.mjs")),
+            PathBuf::from(r"Z:\app\nctrn.mjs")
+        );
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from(r"\\?\UNC\server\share\x")),
+            PathBuf::from(r"\\server\share\x")
+        );
+        // 无反斜杠的盘根剥完是盘相对路径，不剥
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from(r"\\?\Z:")),
+            PathBuf::from(r"\\?\Z:")
+        );
+        // 普通路径原样返回
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from(r"Z:\app\nctrn.mjs")),
+            PathBuf::from(r"Z:\app\nctrn.mjs")
+        );
     }
 
     /// Windows：`.cmd` 脚本经 std 自动的 cmd.exe 包装执行，
