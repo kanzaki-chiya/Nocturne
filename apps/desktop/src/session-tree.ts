@@ -97,12 +97,14 @@ export interface TreePrefs {
 }
 
 export interface TreeOptions {
-  /** 普通对话工作区路径；为 null 时全部会话按项目处理 */
+  /** 当前普通对话工作区路径；与 plainWorkspaces 都为 null/空时全部会话按项目处理 */
   plainWorkspace: string | null;
-  /** 「对话」区是否已展开 */
-  chatsExpanded: boolean;
+  /** 用过的全部普通对话工作区：cwd 命中任意一个的会话归入「对话」区 */
+  plainWorkspaces?: readonly string[];
   /** 「展开显示」已展开的项目 key */
   expanded: ReadonlySet<string>;
+  /** 「对话」区已展开（显示全部，不再限 limit 条） */
+  chatsExpanded?: boolean;
   /** 已折叠的项目 key */
   collapsed: ReadonlySet<string>;
   now?: number;
@@ -148,12 +150,15 @@ export function buildSessionTree(
   const limit = options.limit ?? DEFAULT_LIMIT;
   const hidden = new Set(prefs.hidden.map(projectKey));
   const pinnedIds = new Set(prefs.pinned);
-  const chatKey = options.plainWorkspace !== null ? projectKey(options.plainWorkspace) : null;
+  // 当前工作区 + prefs 记下的历史工作区都归「对话」（换位置后旧会话不跑进「项目」）
+  const chatKeys = new Set<string>();
+  if (options.plainWorkspace !== null) chatKeys.add(projectKey(options.plainWorkspace));
+  for (const path of options.plainWorkspaces ?? []) chatKeys.add(projectKey(path));
 
   const visible = sessions.filter(isVisible);
 
-  // 对话区：cwd 归并后等于普通对话工作区
-  const chatSessions = chatKey === null ? [] : visible.filter((s) => projectKey(s.cwd) === chatKey);
+  // 对话区：cwd 归并后等于任一普通对话工作区
+  const chatSessions = visible.filter((s) => chatKeys.has(projectKey(s.cwd)));
   const chatRows = chatSessions
     .filter((s) => !pinnedIds.has(s.id))
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -167,7 +172,7 @@ export function buildSessionTree(
   const groups = new Map<string, { path: string; sessions: SessionSummary[] }>();
   for (const session of visible) {
     const key = projectKey(session.cwd);
-    if (chatKey !== null && key === chatKey) continue;
+    if (chatKeys.has(key)) continue;
     let group = groups.get(key);
     if (group === undefined) {
       group = { path: session.cwd, sessions: [] };
@@ -180,7 +185,7 @@ export function buildSessionTree(
   const manualOrder: string[] = [];
   for (const path of prefs.projects) {
     const key = projectKey(path);
-    if (chatKey !== null && key === chatKey) continue;
+    if (chatKeys.has(key)) continue;
     if (!groups.has(key)) {
       groups.set(key, { path, sessions: [] });
     }
@@ -193,7 +198,7 @@ export function buildSessionTree(
   for (const id of prefs.pinned) {
     const session = byId.get(id);
     if (session === undefined) continue;
-    const isChat = chatKey !== null && projectKey(session.cwd) === chatKey;
+    const isChat = chatKeys.has(projectKey(session.cwd));
     pinned.push({
       ...toRow(session, now, options.statuses?.[session.id] ?? "idle"),
       project: isChat ? "对话" : projectName(session.cwd),

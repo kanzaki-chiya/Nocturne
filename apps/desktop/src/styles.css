@@ -57,6 +57,58 @@
   }
 }
 
+/* 设置页「桌面端 · 主题」：非跟随系统时用 data-theme 覆盖 prefers-color-scheme */
+:root[data-theme="light"] {
+  --a-bg: #fafafb;
+  --a-side: #f0f0f4;
+  --a-panel: #ffffff;
+  --a-raised: #f4f3fa;
+  --a-input: #ffffff;
+  --a-text: #252b35;
+  --a-secondary: #454f5c;
+  --a-muted: #656f7b;
+  --a-faint: #9aa2ad;
+  --a-accent: #6255aa;
+  --a-accentAlt: #24727a;
+  --a-onAccent: #ffffff;
+  --a-sel: #ece8f8;
+  --a-selStrong: #dfd9f1;
+  --a-border: #e2e3ea;
+  --a-borderStrong: #c9ccd6;
+  --a-success: #287044;
+  --a-warning: #865b14;
+  --a-error: #ad3340;
+  --a-add: rgba(40, 112, 68, 0.08);
+  --a-del: rgba(173, 51, 64, 0.08);
+  --a-warnBg: rgba(134, 91, 20, 0.06);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --a-bg: #121419;
+  --a-side: #0d0f13;
+  --a-panel: #181b22;
+  --a-raised: #1f2330;
+  --a-input: #151820;
+  --a-text: #d8dce3;
+  --a-secondary: #b7c0cc;
+  --a-muted: #88919d;
+  --a-faint: #5a626e;
+  --a-accent: #a6a4e8;
+  --a-accentAlt: #83c4c8;
+  --a-onAccent: #17152b;
+  --a-sel: #2a2840;
+  --a-selStrong: #383555;
+  --a-border: #262b36;
+  --a-borderStrong: #3a4150;
+  --a-success: #84c49a;
+  --a-warning: #e5bd77;
+  --a-error: #e58f90;
+  --a-add: rgba(132, 196, 154, 0.12);
+  --a-del: rgba(229, 143, 144, 0.12);
+  --a-warnBg: rgba(229, 189, 119, 0.08);
+  color-scheme: dark;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -133,12 +185,14 @@ button {
 /* WebView2 的原生 thin 滚动条仍会显示箭头；统一使用无按钮的自定义滚动条。 */
 .tree::-webkit-scrollbar,
 .stream::-webkit-scrollbar,
+.composer textarea::-webkit-scrollbar,
 .conversation-stream::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 .tree::-webkit-scrollbar-button,
 .stream::-webkit-scrollbar-button,
+.composer textarea::-webkit-scrollbar-button,
 .conversation-stream::-webkit-scrollbar-button {
   display: none;
   width: 0;
@@ -146,11 +200,13 @@ button {
 }
 .tree::-webkit-scrollbar-track,
 .stream::-webkit-scrollbar-track,
+.composer textarea::-webkit-scrollbar-track,
 .conversation-stream::-webkit-scrollbar-track {
   background: transparent;
 }
 .tree::-webkit-scrollbar-thumb,
 .stream::-webkit-scrollbar-thumb,
+.composer textarea::-webkit-scrollbar-thumb,
 .conversation-stream::-webkit-scrollbar-thumb {
   background: var(--a-borderStrong);
   border-radius: 4px;
@@ -418,24 +474,42 @@ button {
   gap: 10px;
   padding: 12px 24px 10px;
   border-bottom: 1px solid var(--a-border);
+  min-width: 0;
 }
 .crumb {
   font-weight: 700;
   color: var(--a-accent);
   font-size: 14px;
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  flex: 1 1 auto;
+  white-space: nowrap;
 }
 .crumb span {
   color: var(--a-faint);
   font-weight: 400;
   margin: 0 6px;
+  flex: none;
 }
 .crumb em {
   font-style: normal;
   color: var(--a-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .head .path {
   color: var(--a-faint);
   font-size: 12px;
+  flex: none;
+  white-space: nowrap;
+}
+/* 空间不够时先隐藏路径，标题继续单行省略（与状态栏同一容器阈值） */
+@container (max-width: 700px) {
+  .head .path {
+    display: none;
+  }
 }
 .head .tools {
   margin-left: auto;

@@ -9,6 +9,8 @@ import { Conversations, conversationStatus, type CreateSessionChoice } from "./c
 import { parseSlash } from "./commands";
 import { StatusBar, type StatusPanel } from "./StatusBar";
 import { PaneErrorBoundary } from "./ErrorBoundary";
+import { ProvidersPage } from "./ProvidersPage";
+import { SettingsPage } from "./SettingsPage";
 
 import { BackendPool } from "./backends";
 import type { DesktopHost } from "./host";
@@ -42,6 +44,7 @@ export function App({ host }: { host: DesktopHost }) {
   const prefs = useMemo(() => createPrefsStore(globalThis.localStorage), []);
   const pool = useMemo(() => new BackendPool(host), [host]);
   const images = useMemo(() => createAttachmentImageSource(), []);
+  const p = prefs.get();
   useEffect(
     () => () => {
       images.dispose();
@@ -51,7 +54,8 @@ export function App({ host }: { host: DesktopHost }) {
 
   const [phase, setPhase] = useState<Phase>({ kind: "probing" });
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [plainWorkspace, setPlainWorkspace] = useState<string | null>(null);
+  /** 外壳 plain_workspace 的默认路径（恢复默认用）；生效路径另看 prefs.plainWorkspace */
+  const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(null);
   const [home, setHome] = useState<string | null>(null);
   const [prefsVersion, setPrefsVersion] = useState(0);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -62,12 +66,17 @@ export function App({ host }: { host: DesktopHost }) {
   const [backendExit, setBackendExit] = useState<{ code: number | null } | null>(null);
   const lastFocusRefresh = useRef(0);
   const [conversationVersion, setConversationVersion] = useState(0);
+  const [providersVersion, setProvidersVersion] = useState(0);
   const [panel, setPanel] = useState<StatusPanel | null>(null);
   const [commandOutput, setCommandOutput] = useState<string | null>(null);
   const [lockedSession, setLockedSession] = useState<SessionSummary | null>(null);
   const [dirMenuOpen, setDirMenuOpen] = useState(false);
+  /** 主区整页（服务商/设置）；null 回到会话或空状态 */
+  const [page, setPage] = useState<"providers" | "settings" | null>(null);
+  // 生效的普通对话工作区 = prefs 覆盖 ?? 外壳默认
+  const effectiveWorkspace = p.plainWorkspace ?? defaultWorkspace;
   const workspaceRef = useRef<string | null>(null);
-  workspaceRef.current = plainWorkspace;
+  workspaceRef.current = effectiveWorkspace;
   const conversations = useMemo(
     () =>
       new Conversations(
@@ -113,25 +122,36 @@ export function App({ host }: { host: DesktopHost }) {
     [pool],
   );
 
-  // 启动链：普通对话工作区（外壳创建）→ 常驻后台 → 会话列表。
+  // 启动链：普通对话工作区（外壳创建，prefs.plainWorkspace 可覆盖）→ 常驻后台 → 会话列表。
   // plain_workspace 或 ensure 失败都显示真实错误，「重试」重走这条链。
   const boot = useCallback(async () => {
-    let workspace: string;
+    let fallback: string;
     try {
-      workspace = (await host.invoke("plain_workspace")) as string;
+      fallback = (await host.invoke("plain_workspace")) as string;
     } catch (error) {
       setStartupError({ message: errMessage(error) });
       return;
     }
-    setPlainWorkspace(workspace);
-    const result = await connect(workspace);
+    setDefaultWorkspace(fallback);
+    // 记进用过的普通对话工作区列表（cwd 命中任意一个的会话都归「对话」区）
+    const current = prefs.get();
+    const override = current.plainWorkspace;
+    const known = current.plainWorkspaces;
+    const next = [fallback, ...(override !== undefined ? [override] : [])].filter(
+      (path) => !known.some((entry) => projectKey(entry) === projectKey(path)),
+    );
+    if (next.length > 0) {
+      prefs.update({ plainWorkspaces: [...known, ...next] });
+      bumpPrefs();
+    }
+    const result = await connect(override ?? fallback);
     if (!result.ok) {
       setStartupError({ message: result.message });
       return;
     }
     setBackendExit(null);
     await refresh();
-  }, [host, connect, refresh]);
+  }, [host, connect, refresh, prefs, bumpPrefs]);
 
   const probe = useCallback(async () => {
     let result: NodeProbe;
@@ -158,6 +178,26 @@ export function App({ host }: { host: DesktopHost }) {
   useEffect(() => {
     void probe();
   }, [probe]);
+
+  // 主题：prefs.theme 覆盖系统外观，立即生效；跟随系统则删掉属性回到 media query
+  useEffect(() => {
+    const theme = p.theme ?? "system";
+    if (theme === "system") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = theme;
+  }, [p.theme]);
+
+  // 每个后台的 providersChanged：刷新会话列表并 bump providersVersion，
+  // 状态栏与空状态的模型菜单、打开中的服务商页随之重取数据
+  useEffect(
+    () =>
+      pool.onClient((client) =>
+        client.onProvidersChanged(() => {
+          setProvidersVersion((v) => v + 1);
+          void refresh();
+        }),
+      ),
+    [pool, refresh],
+  );
 
   // 主目录只读一次（路径 ~ 缩写）
   useEffect(() => {
@@ -220,7 +260,7 @@ export function App({ host }: { host: DesktopHost }) {
   };
 
   const newSession = async (workspace?: string) => {
-    const target = workspace ?? plainWorkspace;
+    const target = workspace ?? effectiveWorkspace;
     if (target === null) return;
     try {
       await conversations.newConversation(target);
@@ -231,6 +271,42 @@ export function App({ host }: { host: DesktopHost }) {
       setStartupError({ message: errMessage(error) });
     }
   };
+
+  // 「普通对话工作区」切换：prefs 记覆盖与新路径 → 常驻后台在新位置重启 → 刷新列表。
+  // 旧位置的会话 cwd 仍在 plainWorkspaces 里，继续归「对话」区。
+  const changePlainWorkspace = useCallback(
+    async (dir: string | null): Promise<string | undefined> => {
+      const target = dir ?? defaultWorkspace;
+      if (target === null || defaultWorkspace === null) return "默认工作区尚未就绪";
+      try {
+        await pool.ensure(target);
+      } catch (error) {
+        return errMessage(error);
+      }
+      const current = prefs.get();
+      const known = current.plainWorkspaces;
+      const remembered = [target, defaultWorkspace].filter(
+        (path): path is string => !known.some((entry) => projectKey(entry) === projectKey(path)),
+      );
+      prefs.update({ plainWorkspace: dir === null ? undefined : target });
+      prefs.update({ plainWorkspaces: [...known, ...remembered] });
+      bumpPrefs();
+      const previous = workspaceRef.current;
+      workspaceRef.current = target;
+      if (
+        previous !== null &&
+        projectKey(previous) !== projectKey(target) &&
+        ![...conversations.opened.values()].some(
+          (entry) => projectKey(entry.workspace) === projectKey(previous),
+        )
+      ) {
+        await pool.release(previous);
+      }
+      await refresh();
+      return undefined;
+    },
+    [pool, prefs, bumpPrefs, refresh, conversations, defaultWorkspace],
+  );
 
   // 发送消息：接受成功后登记附件缩略图源（以 sha256 命中消息流里的图片）
   const submitInput = async (
@@ -272,7 +348,6 @@ export function App({ host }: { host: DesktopHost }) {
     return true;
   };
 
-  const p = prefs.get();
   const tree = useMemo(
     () =>
       buildSessionTree(
@@ -284,7 +359,8 @@ export function App({ host }: { host: DesktopHost }) {
         }),
         p,
         {
-          plainWorkspace,
+          plainWorkspace: effectiveWorkspace,
+          plainWorkspaces: p.plainWorkspaces,
           chatsExpanded,
           expanded,
           collapsed,
@@ -297,7 +373,7 @@ export function App({ host }: { host: DesktopHost }) {
     [
       sessions,
       prefsVersion,
-      plainWorkspace,
+      effectiveWorkspace,
       chatsExpanded,
       expanded,
       collapsed,
@@ -312,6 +388,16 @@ export function App({ host }: { host: DesktopHost }) {
   useEffect(() => {
     if (active !== undefined && !active.busy) void refresh();
   }, [active?.view.turnCount, selectedId, refresh]);
+
+  // 服务商 / 设置页走常驻的普通对话后台（全局配置用哪个后台读写都一样，优先固定一个）
+  const pageClient =
+    (effectiveWorkspace !== null ? pool.get(effectiveWorkspace) : undefined) ?? pool.any();
+  // 打开的会话正在用的服务商：删除按钮预先置灰（真正的拦截仍以服务端 provider_in_use 为准）
+  const providersInUse = new Set<string>();
+  for (const entry of conversations.opened.values()) {
+    const provider = entry.view.config.model?.provider;
+    if (provider !== undefined) providersInUse.add(provider);
+  }
 
   const toggleIn = (set: ReadonlySet<string>, key: string): Set<string> => {
     const next = new Set(set);
@@ -349,7 +435,7 @@ export function App({ host }: { host: DesktopHost }) {
     );
   }
 
-  const plainKey = plainWorkspace === null ? null : projectKey(plainWorkspace);
+  const plainKey = effectiveWorkspace === null ? null : projectKey(effectiveWorkspace);
   const projects = tree.projects.map((project) => ({
     key: project.key,
     path: project.path,
@@ -367,7 +453,10 @@ export function App({ host }: { host: DesktopHost }) {
         chatsExpanded={chatsExpanded}
         onSelectSession={(id) => {
           const summary = sessions.find((s) => s.id === id);
-          if (summary !== undefined) void selectSession(summary);
+          if (summary !== undefined) {
+            setPage(null);
+            void selectSession(summary);
+          }
         }}
         onToggleCollapse={(key) => {
           setCollapsed((s) => toggleIn(s, key));
@@ -411,7 +500,14 @@ export function App({ host }: { host: DesktopHost }) {
           bumpPrefs();
         }}
         onOpenProject={() => void openProject()}
-        onNewSession={(workspace) => void newSession(workspace)}
+        onNewSession={(workspace) => {
+          setPage(null);
+          void newSession(workspace);
+        }}
+        page={page}
+        onOpenPage={(target) => {
+          setPage(target);
+        }}
       />
       <div className="main">
         {(backendExit !== null || startupError !== null) && (
@@ -438,7 +534,41 @@ export function App({ host }: { host: DesktopHost }) {
             )}
           </div>
         )}
-        {active !== undefined ? (
+        {page === "providers" ? (
+          <PaneErrorBoundary key="providers">
+            <ProvidersPage
+              client={pageClient}
+              currentProvider={active?.view.config.model?.provider}
+              inUse={providersInUse}
+              openUrl={(url) => void host.openUrl(url)}
+              providersVersion={providersVersion}
+              onBack={() => {
+                setPage(null);
+              }}
+            />
+          </PaneErrorBoundary>
+        ) : page === "settings" ? (
+          <PaneErrorBoundary key="settings">
+            <SettingsPage
+              client={pageClient}
+              theme={p.theme ?? "system"}
+              workspace={effectiveWorkspace}
+              defaultWorkspace={defaultWorkspace}
+              workspaceOverridden={p.plainWorkspace !== undefined}
+              onThemeChange={(theme) => {
+                prefs.update({ theme: theme === "system" ? undefined : theme });
+                bumpPrefs();
+                return prefs.persistent;
+              }}
+              onWorkspaceChange={changePlainWorkspace}
+              pickFolder={() => host.pickFolder()}
+              providersVersion={providersVersion}
+              onBack={() => {
+                setPage(null);
+              }}
+            />
+          </PaneErrorBoundary>
+        ) : active !== undefined ? (
           <PaneErrorBoundary key={active.session.id}>
             <SessionPane
               view={active.view}
@@ -460,6 +590,7 @@ export function App({ host }: { host: DesktopHost }) {
               openUrl={(url) => void host.openUrl(url)}
               panel={panel}
               onPanelChange={setPanel}
+              providersVersion={providersVersion}
             />
           </PaneErrorBoundary>
         ) : (
@@ -467,15 +598,16 @@ export function App({ host }: { host: DesktopHost }) {
             <DraftPane
               runtime={pool.any()?.runtime}
               prefs={prefs}
-              workspace={conversations.draftWorkspace ?? plainWorkspace}
+              workspace={conversations.draftWorkspace ?? effectiveWorkspace}
               plainKey={plainKey}
               projects={projects}
-              disabled={plainWorkspace === null || pool.any() === undefined}
-              historyKey={conversations.draftWorkspace ?? plainWorkspace}
+              disabled={effectiveWorkspace === null || pool.any() === undefined}
+              historyKey={conversations.draftWorkspace ?? effectiveWorkspace}
+              providersVersion={providersVersion}
               onSubmit={submitInput}
               onSlash={runSlash}
               pickImages={() => host.pickImages()}
-              onSelectPlain={() => void newSession(plainWorkspace ?? undefined)}
+              onSelectPlain={() => void newSession()}
               onSelectProject={(path) => void newSession(path)}
               onOpenOther={() =>
                 void openProject().then((dir) => {
@@ -556,6 +688,8 @@ interface SessionPaneProps {
   openUrl: (url: string) => void;
   panel: StatusPanel | null;
   onPanelChange: (panel: StatusPanel | null) => void;
+  /** 服务商配置变更计数：状态栏的模型/档位/预设数据随之重取 */
+  providersVersion: number;
 }
 
 function SessionPane({
@@ -576,9 +710,10 @@ function SessionPane({
   openUrl,
   panel,
   onPanelChange,
+  providersVersion,
 }: SessionPaneProps) {
   const runtime = client.runtime;
-  const controls = useSessionControls(session, runtime, view, prefs);
+  const controls = useSessionControls(session, runtime, view, prefs, providersVersion);
   const subscribeEvents = useCallback(
     (listener: (event: RuntimeEvent) => void) =>
       client.onEvent((sessionId, event) => {
@@ -595,7 +730,9 @@ function SessionPane({
         <div className="crumb">
           {isPlain ? "对话" : projectName(workspace)}
           <span>›</span>
-          <em>{view.title ?? selected?.firstText ?? "新会话"}</em>
+          <em title={view.title ?? selected?.firstText ?? "新会话"}>
+            {view.title ?? selected?.firstText ?? "新会话"}
+          </em>
         </div>
         <div className="path" title={workspace}>
           {shown}
@@ -655,6 +792,8 @@ interface DraftPaneProps {
   onOpenOther: () => void;
   dirMenuOpen: boolean;
   onDirMenuOpenChange: (open: boolean) => void;
+  /** 服务商配置变更计数：空状态模型菜单随之重取 */
+  providersVersion: number;
 }
 
 function DraftPane({
@@ -673,8 +812,9 @@ function DraftPane({
   onOpenOther,
   dirMenuOpen,
   onDirMenuOpenChange,
+  providersVersion,
 }: DraftPaneProps) {
-  const draft = useDraftControls(runtime, prefs);
+  const draft = useDraftControls(runtime, prefs, providersVersion);
   const isPlain = workspace === null || (plainKey !== null && projectKey(workspace) === plainKey);
   const workspaceChoice: WorkspaceChoice = {
     label: isPlain ? "普通对话" : projectName(workspace),

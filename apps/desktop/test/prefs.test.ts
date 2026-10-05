@@ -32,6 +32,7 @@ describe("prefs store", () => {
       projects: ["Z:\\a"],
       hidden: [],
       projectSort: "activity",
+      plainWorkspaces: [],
     });
     expect(store2.persistent).toBe(true);
   });
@@ -43,6 +44,7 @@ describe("prefs store", () => {
       projects: [],
       hidden: [],
       projectSort: "activity",
+      plainWorkspaces: [],
     });
   });
 
@@ -61,6 +63,7 @@ describe("prefs store", () => {
       projects: ["Z:\\ok"],
       hidden: [],
       projectSort: "activity",
+      plainWorkspaces: [],
     });
   });
 
@@ -106,7 +109,29 @@ describe("prefs store", () => {
       projects: ["Z:\\a"],
       hidden: [],
       projectSort: "activity",
+      plainWorkspaces: [],
     });
+  });
+
+  it("theme / plainWorkspace / plainWorkspaces 读写往返；非法值按未设置处理", () => {
+    const storage = memoryStorage();
+    const store = createPrefsStore(storage);
+    store.update({ theme: "dark", plainWorkspace: "D:\\chat", plainWorkspaces: ["C:\\old"] });
+    const reread = createPrefsStore(storage).get();
+    expect(reread.theme).toBe("dark");
+    expect(reread.plainWorkspace).toBe("D:\\chat");
+    expect(reread.plainWorkspaces).toEqual(["C:\\old"]);
+    // 改回跟随系统：键被删掉
+    store.update({ theme: undefined });
+    expect(createPrefsStore(storage).get().theme).toBeUndefined();
+    const bad = createPrefsStore(
+      memoryStorage({
+        [PREFS_KEY]: JSON.stringify({ theme: "sepia", plainWorkspace: "  ", plainWorkspaces: "x" }),
+      }),
+    );
+    expect(bad.get().theme).toBeUndefined();
+    expect(bad.get().plainWorkspace).toBeUndefined();
+    expect(bad.get().plainWorkspaces).toEqual([]);
   });
 
   it("getItem 抛错时用默认值", () => {

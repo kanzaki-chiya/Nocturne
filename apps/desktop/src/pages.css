@@ -1,0 +1,995 @@
+/* 服务商页与设置页（desktop-v3.html A–E 屏；变量沿用 styles.css 主题语义名）。 */
+
+.page3 {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+.page3 .ph3 {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 28px;
+  border-bottom: 1px solid var(--a-border);
+  flex: none;
+}
+.page3 .ph3 .back {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: var(--a-muted);
+  border: 1px solid var(--a-border);
+  font-size: 14px;
+  flex: none;
+  cursor: pointer;
+  background: transparent;
+}
+.page3 .ph3 .back:hover {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+.page3 .ph3 h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+.page3 .ph3 .sub {
+  color: var(--a-muted);
+  font-size: 12.5px;
+}
+.page3 .ph3 .grow {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.page3 .cols3 {
+  display: grid;
+  grid-template-columns: 252px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+.page3 .plist {
+  border-right: 1px solid var(--a-border);
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.page3 .plist h5 {
+  margin: 12px 10px 4px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--a-faint);
+  font-weight: 500;
+}
+.page3 .plist h5:first-child {
+  margin-top: 0;
+}
+.page3 .plist a {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--a-secondary);
+  position: relative;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.page3 .plist a:hover {
+  background: var(--a-sel);
+}
+.page3 .plist a .r {
+  margin-left: auto;
+  color: var(--a-faint);
+  font-size: 11.5px;
+}
+.page3 .plist a .r.warn {
+  color: var(--a-warning);
+}
+.page3 .plist a.on {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+.page3 .plist a.on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--a-accent);
+}
+.page3 .tagc {
+  font-size: 11px;
+  color: var(--a-accent);
+  border: 1px solid color-mix(in srgb, var(--a-accent) 40%, transparent);
+  border-radius: 4px;
+  padding: 0 5px;
+  line-height: 17px;
+}
+.page3 .tagw {
+  font-size: 11px;
+  color: var(--a-warning);
+  border: 1px solid color-mix(in srgb, var(--a-warning) 45%, transparent);
+  border-radius: 4px;
+  padding: 0 5px;
+  line-height: 17px;
+}
+.page3 .pane {
+  padding: 20px 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.page3 .pane .t1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.page3 .pane .t1 h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+.page3 .pane .t1 .acts {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.page3 .kv {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 22px;
+  border: 1px solid var(--a-border);
+  border-radius: 10px;
+  background: var(--a-panel);
+  padding: 12px 16px;
+}
+.page3 .kv div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.page3 .kv dt {
+  font-size: 11.5px;
+  color: var(--a-faint);
+}
+.page3 .kv dd {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--a-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.page3 .kv dd.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.page3 .kv dd.ok {
+  color: var(--a-success);
+}
+.page3 .kv dd.warn {
+  color: var(--a-warning);
+}
+.page3 .kv dd.bad {
+  color: var(--a-error);
+}
+.page3 .sh {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.page3 .sh h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--a-text);
+}
+.page3 .sh small {
+  color: var(--a-faint);
+  font-size: 12px;
+}
+.page3 .search {
+  margin-left: auto;
+  width: 220px;
+  max-width: 40%;
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  color: var(--a-text);
+  background: var(--a-input);
+  outline: none;
+  font-family: inherit;
+}
+.page3 .search::placeholder {
+  color: var(--a-faint);
+}
+.page3 .mt {
+  border: 1px solid var(--a-border);
+  border-radius: 10px;
+  overflow: hidden auto;
+  min-height: 0;
+}
+.page3 .mr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px 88px 70px 58px;
+  gap: 12px;
+  align-items: center;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--a-border);
+  font-size: 12.5px;
+}
+.page3 .mr:last-child {
+  border-bottom: none;
+}
+.page3 .mr.h {
+  font-size: 11.5px;
+  color: var(--a-faint);
+  background: var(--a-side);
+  padding-block: 5px;
+  position: sticky;
+  top: 0;
+}
+.page3 .mr .m {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--a-text);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.page3 .mr .m > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.page3 .mr .num {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--a-secondary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.page3 .cap {
+  display: flex;
+  gap: 3px;
+}
+.page3 .cap b {
+  font: 600 10px/16px var(--mono);
+  width: 16px;
+  text-align: center;
+  border-radius: 3px;
+  background: var(--a-raised);
+  color: var(--a-accentAlt);
+  border: 1px solid var(--a-border);
+}
+.page3 .mr .lnk {
+  color: var(--a-faint);
+  text-align: right;
+  font-size: 12px;
+  cursor: pointer;
+}
+.page3 .mr:hover {
+  background: var(--a-raised);
+}
+.page3 .mr:hover .lnk {
+  color: var(--a-accent);
+}
+.page3 .edited {
+  font: 11px/16px var(--sans);
+  color: var(--a-accentAlt);
+  border: 1px solid color-mix(in srgb, var(--a-accentAlt) 45%, transparent);
+  border-radius: 4px;
+  padding: 0 5px;
+  flex: none;
+}
+.page3 .dflt {
+  font: 11px/16px var(--sans);
+  color: var(--a-accent);
+  flex: none;
+}
+.page3 .fine {
+  font-size: 12px;
+  color: var(--a-faint);
+}
+.page3 .done {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--a-secondary);
+}
+.page3 .done b {
+  color: var(--a-success);
+  font-weight: 500;
+}
+
+/* 表单（添加服务商） */
+.page3 .form {
+  display: grid;
+  gap: 13px;
+  max-width: 560px;
+}
+.page3 .field {
+  display: grid;
+  gap: 6px;
+}
+.page3 .field .lab {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.page3 .field .lab label {
+  font-size: 12.5px;
+  color: var(--a-secondary);
+  font-weight: 500;
+}
+.page3 .field .lab small {
+  color: var(--a-faint);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+.page3 .field .lab .lk {
+  margin-left: auto;
+  color: var(--a-accent);
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+}
+.page3 .input,
+.page3 input.input,
+.page3 select.input {
+  border: 1px solid var(--a-borderStrong);
+  background: var(--a-input);
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--a-text);
+  outline: none;
+  width: 100%;
+}
+.page3 .input:focus {
+  border-color: var(--a-accent);
+}
+.page3 .input::placeholder {
+  color: var(--a-faint);
+  font-family: var(--sans);
+}
+.page3 .field .input.err {
+  border-color: var(--a-error);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-error) 14%, transparent);
+}
+.page3 .field .errt {
+  font-size: 12px;
+  color: var(--a-error);
+}
+.page3 .field .hint {
+  font-size: 12px;
+  color: var(--a-faint);
+}
+.page3 .formacts {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-top: 4px;
+}
+.page3 .formacts .fine {
+  margin-left: 6px;
+}
+.page3 .seg {
+  display: inline-flex;
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 7px;
+  overflow: hidden;
+  width: max-content;
+  max-width: 100%;
+}
+.page3 .seg button {
+  padding: 6px 14px;
+  font-size: 12.5px;
+  color: var(--a-secondary);
+  border: none;
+  border-right: 1px solid var(--a-borderStrong);
+  background: transparent;
+  cursor: pointer;
+}
+.page3 .seg button:last-child {
+  border-right: none;
+}
+.page3 .seg button.on {
+  background: var(--a-sel);
+  color: var(--a-text);
+  box-shadow: inset 0 -2px 0 var(--a-accent);
+}
+.page3 .seg button:disabled {
+  color: var(--a-faint);
+  cursor: default;
+}
+.page3 .fetch {
+  border: 1px solid var(--a-border);
+  border-radius: 10px;
+  background: var(--a-panel);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+.page3 .fetch .fl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  flex-wrap: wrap;
+}
+.page3 .fetch .fl .ok {
+  color: var(--a-success);
+  font-weight: 500;
+}
+.page3 .fetch .fl .bad {
+  color: var(--a-error);
+  font-weight: 500;
+}
+.page3 .fetch .fl .tog {
+  margin-left: auto;
+  color: var(--a-accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+.page3 .fetch .ms {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.page3 .fetch .ms span {
+  font: 11.5px/20px var(--mono);
+  padding: 0 7px;
+  border-radius: 5px;
+  background: var(--a-raised);
+  color: var(--a-secondary);
+  border: 1px solid var(--a-border);
+}
+.page3 .fetch .ms span.more {
+  font-family: var(--sans);
+  background: none;
+  border-color: transparent;
+  color: var(--a-faint);
+}
+.page3 .flist {
+  border: 1px solid var(--a-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--a-input);
+}
+.page3 .fr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px 76px 60px;
+  gap: 10px;
+  align-items: center;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.page3 .fr.h {
+  font-size: 11px;
+  color: var(--a-faint);
+  background: var(--a-side);
+  border-bottom: 1px solid var(--a-border);
+}
+.page3 .fr .m {
+  font-family: var(--mono);
+  color: var(--a-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.page3 .fr .num {
+  font-family: var(--mono);
+  color: var(--a-secondary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.page3 .fbody {
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+/* 登录等待卡 */
+.page3 .wait {
+  border: 1px solid var(--a-border);
+  background: var(--a-panel);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+  max-width: 640px;
+}
+.page3 .wait.warnb {
+  border-color: color-mix(in srgb, var(--a-warning) 40%, var(--a-border));
+}
+.page3 .wait .l1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+}
+.page3 .spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--a-selStrong);
+  border-top-color: var(--a-accent);
+  animation: page3-spin 0.9s linear infinite;
+}
+@keyframes page3-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.page3 .wait .url {
+  font: 12px/1.5 var(--mono);
+  color: var(--a-muted);
+  background: var(--a-input);
+  border: 1px solid var(--a-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.page3 .wait .row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.page3 .wait .row .cd {
+  margin-left: auto;
+  color: var(--a-faint);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.page3 .wait .manual {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.page3 .wait .manual .input {
+  flex: 1;
+}
+.page3 .pbanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border));
+  background: var(--a-warnBg);
+  color: var(--a-warning);
+  border-radius: 10px;
+  padding: 9px 14px;
+  font-size: 12.5px;
+  max-width: 640px;
+}
+.page3 .pbanner span {
+  color: var(--a-secondary);
+}
+.page3 .pbanner .btn {
+  margin-left: auto;
+}
+.page3 .keybox {
+  border: 1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border));
+  background: var(--a-warnBg);
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: grid;
+  gap: 6px;
+  max-width: 640px;
+  font-size: 12.5px;
+}
+.page3 .keybox code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--a-text);
+  word-break: break-all;
+  user-select: all;
+}
+.page3 .keybox .fine {
+  font-size: 12px;
+  color: var(--a-warning);
+}
+
+/* 对话框（模型设置、设置页复合项共用） */
+.page3 .scrim {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, #000 32%, transparent);
+  display: grid;
+  place-items: center;
+  z-index: 4;
+}
+.page3 .dlg {
+  width: 580px;
+  max-width: calc(100% - 48px);
+  max-height: calc(100% - 48px);
+  overflow-y: auto;
+  background: var(--a-panel);
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  display: grid;
+}
+.page3 .dlg .dh3 {
+  padding: 16px 20px 10px;
+  display: grid;
+  gap: 2px;
+}
+.page3 .dlg .dh3 b {
+  font-size: 15px;
+}
+.page3 .dlg .dh3 span {
+  color: var(--a-muted);
+  font-size: 12px;
+}
+.page3 .dlg .db {
+  padding: 4px 20px 14px;
+  display: grid;
+  gap: 2px;
+}
+.page3 .mrow {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--a-border);
+}
+.page3 .mrow:last-child {
+  border-bottom: none;
+}
+.page3 .mrow > span:first-child {
+  font-size: 12.5px;
+  color: var(--a-secondary);
+}
+.page3 .mrow .src {
+  font-size: 11.5px;
+  color: var(--a-faint);
+  text-align: right;
+  white-space: nowrap;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.page3 .mrow .src.ed {
+  color: var(--a-accentAlt);
+}
+.page3 .mrow .ro {
+  font-size: 12.5px;
+  color: var(--a-faint);
+}
+.page3 .mrow .input {
+  padding: 4px 9px;
+}
+.page3 .mrow .seg button {
+  padding: 4px 11px;
+}
+.page3 .effs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.page3 .effs button {
+  font: 12px/22px var(--mono);
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--a-borderStrong);
+  color: var(--a-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+.page3 .effs button.on {
+  background: var(--a-sel);
+  border-color: color-mix(in srgb, var(--a-accent) 50%, transparent);
+  color: var(--a-text);
+}
+.page3 .effs button:disabled {
+  color: var(--a-faint);
+  cursor: default;
+}
+.page3 .dlg .df {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--a-border);
+  align-items: center;
+}
+.page3 .dlg .df .sp {
+  margin-left: auto;
+}
+.page3 .dlg .errt {
+  font-size: 12px;
+  color: var(--a-error);
+  padding: 0 20px 8px;
+}
+.page3 .dlg .picklist {
+  display: grid;
+  gap: 1px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.page3 .dlg .picklist button {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--a-secondary);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.page3 .dlg .picklist button:hover {
+  background: var(--a-sel);
+}
+.page3 .dlg .picklist button .pv {
+  font-family: var(--mono);
+  color: var(--a-text);
+}
+.page3 .dlg .picklist button small {
+  color: var(--a-faint);
+}
+.page3 .dlg .picklist button.on {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+
+/* 设置页 */
+.page3 .sets3 {
+  padding: 12px 30px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 880px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.page3 .sets3 h5 {
+  margin: 8px 0 2px 12px;
+  font-size: 12px;
+  color: var(--a-accent);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.page3 .sets3 h5:first-child {
+  margin-top: 0;
+}
+.page3 .s3 {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 8px;
+  position: relative;
+}
+.page3 .s3 .n {
+  color: var(--a-text);
+  display: grid;
+  gap: 0;
+}
+.page3 .s3 .n small {
+  color: var(--a-faint);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.page3 .s3 .v {
+  color: var(--a-secondary);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.page3 .s3 .v.sans {
+  font-family: var(--sans);
+}
+.page3 .s3 .v .t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.page3 .s3 .v .ro {
+  color: var(--a-faint);
+  font-family: var(--sans);
+}
+.page3 .s3 .src {
+  font-size: 11.5px;
+  color: var(--a-faint);
+  white-space: nowrap;
+}
+.page3 .s3 .src.ov {
+  color: var(--a-warning);
+}
+.page3 .s3.bad {
+  background: color-mix(in srgb, var(--a-error) 6%, transparent);
+}
+.page3 .s3 .errl {
+  grid-column: 2 / 4;
+  font-size: 12px;
+  color: var(--a-error);
+  margin-top: -4px;
+}
+.page3 .s3 .select {
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 6px;
+  padding: 3px 10px;
+  background: var(--a-input);
+  color: var(--a-text);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.page3 .s3 .select::after {
+  content: "▾";
+  color: var(--a-faint);
+  font-size: 10px;
+}
+.page3 .toast3 {
+  position: absolute;
+  right: 26px;
+  top: 58px;
+  background: var(--a-panel);
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  color: var(--a-secondary);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  z-index: 5;
+}
+.page3 .toast3 b {
+  color: var(--a-success);
+  font-weight: 500;
+}
+
+/* 页面列表滚动条与消息流一致（细、无箭头） */
+.page3 .plist::-webkit-scrollbar,
+.page3 .pane::-webkit-scrollbar,
+.page3 .mt::-webkit-scrollbar,
+.page3 .fbody::-webkit-scrollbar,
+.page3 .sets3::-webkit-scrollbar,
+.page3 .dlg::-webkit-scrollbar,
+.page3 .dlg .picklist::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.page3 .plist::-webkit-scrollbar-button,
+.page3 .pane::-webkit-scrollbar-button,
+.page3 .mt::-webkit-scrollbar-button,
+.page3 .fbody::-webkit-scrollbar-button,
+.page3 .sets3::-webkit-scrollbar-button,
+.page3 .dlg::-webkit-scrollbar-button,
+.page3 .dlg .picklist::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.page3 .plist::-webkit-scrollbar-track,
+.page3 .pane::-webkit-scrollbar-track,
+.page3 .mt::-webkit-scrollbar-track,
+.page3 .fbody::-webkit-scrollbar-track,
+.page3 .sets3::-webkit-scrollbar-track,
+.page3 .dlg::-webkit-scrollbar-track,
+.page3 .dlg .picklist::-webkit-scrollbar-track {
+  background: transparent;
+}
+.page3 .plist::-webkit-scrollbar-thumb,
+.page3 .pane::-webkit-scrollbar-thumb,
+.page3 .mt::-webkit-scrollbar-thumb,
+.page3 .fbody::-webkit-scrollbar-thumb,
+.page3 .sets3::-webkit-scrollbar-thumb,
+.page3 .dlg::-webkit-scrollbar-thumb,
+.page3 .dlg .picklist::-webkit-scrollbar-thumb {
+  background: var(--a-borderStrong);
+  border-radius: 4px;
+}
+
+/* 第 3 步补充：列表截断、只读摘要、获取失败原因、空状态与提示色 */
+.page3 .plist a .nm {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.page3 .plist a .r {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex: none;
+}
+.page3 .pad {
+  padding: 4px 10px;
+}
+.page3 .pane .t1 h3.mono {
+  font-family: var(--mono);
+}
+.page3 .errt {
+  font-size: 12px;
+  color: var(--a-error);
+}
+.page3 .hint {
+  font-size: 12px;
+  color: var(--a-faint);
+}
+.page3 .hint.warnt {
+  color: var(--a-warning);
+}
+.page3 .form .fixed {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: 12.5px;
+  color: var(--a-muted);
+}
+.page3 .form .fixed b {
+  color: var(--a-text);
+  font-weight: 400;
+}
+.page3 .fetch .reason {
+  color: var(--a-error);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.page3 .mr.empty {
+  display: block;
+  padding: 14px 12px;
+}
+.page3 .wait .code {
+  font-size: 12.5px;
+  color: var(--a-secondary);
+}
+.page3 .wait .code b {
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--a-text);
+}
+.page3 .dlg.narrow {
+  width: 440px;
+}
+.page3 .dlg .db > .field,
+.page3 .dlg .db > .hint,
+.page3 .dlg .db > .seg,
+.page3 .dlg .db > .input,
+.page3 .dlg .db > .pbanner {
+  margin-top: 8px;
+}
+.page3 .input.narrow {
+  width: 120px;
+}
+.page3 .s3 select.select::after {
+  content: none;
+}
+.page3 .pane .pbanner,
+.page3 .pane > .wait {
+  max-width: none;
+}

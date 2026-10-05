@@ -1,6 +1,6 @@
 # 桌面端（Tauri 外壳 + React 前端）
 
-> 状态：v0.5 骨架与连接、对话已实现（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 9 节第 1、2 步）；服务商与设置页在第 3 步实现 | 前置阅读：[protocols/rpc.md](../protocols/rpc.md) | 代码位置：`apps/desktop/`
+> 状态：v0.5 骨架与连接、对话、服务商与设置页已实现（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 9 节第 1–3 步） | 前置阅读：[protocols/rpc.md](../protocols/rpc.md) | 代码位置：`apps/desktop/`
 
 `apps/desktop` 是 Nocturne 的桌面端：一个 Tauri 进程内，React 前端经 `@nocturne/rpc/client` 与若干 `nctrn rpc --stdio` 后台进程通信，Rust 外壳只负责进程管理与按行转发。所有会话语义（握手、方法调用、事件）都在前端处理，外壳不解析报文。
 
@@ -83,17 +83,17 @@ interface NodeProbe {
 
 主窗口保留系统窗口标题「Nocturne」（任务栏与 Alt+Tab），但 `decorations: false` 隐藏原生标题栏。`src/WindowFrame.tsx` 自绘右侧顶部 32px 标题栏，左栏延伸到窗口顶部；空白区使用 `data-tauri-drag-region`，由 Tauri 的原生拖动和双击最大化处理。右端提供最小化、最大化/还原、关闭按钮；关闭悬停红底白字，其余悬停使用主题浅底。最大化状态随 WebView resize、focus 及按钮操作查询更新，不保存或自行计算还原尺寸，贴靠、还原与边框缩放交给系统。Windows 11 最大化按钮悬停贴靠布局菜单暂不提供。
 
-左栏结构从上到下（`src/session-tree.ts` 为纯函数，`src/Sidebar.tsx` 渲染）：「＋ 新会话」→「置顶」→「对话」→「项目」。
+左栏结构从上到下（`src/session-tree.ts` 为纯函数，`src/Sidebar.tsx` 渲染）：「＋ 新会话」→「置顶」→「对话」→「项目」，底部固定「服务商」「设置」两个入口（见 5.5、5.6）。
 
 - **空会话过滤**：`firstText` 缺省或 trim 后为空且未锁定的会话不显示（置顶、对话、项目都过滤）；被锁定的空会话照常显示为「未命名会话」。
-- **对话**：普通对话工作区 `<NOCTURNE_HOME>/workspace` 的会话平铺列出（cwd 经 `projectKey` 归并比较），按 `mtimeMs` 降序，默认前 5 条 +「展开显示（还有 N 个）」/「收起」；已置顶的不重复出现，置顶的对话会话项目标签为「对话」。手动项目里路径等于工作区的也不显示为项目。还没拿到工作区路径时所有会话按项目处理。
+- **对话**：普通对话工作区（默认 `<NOCTURNE_HOME>/workspace`，可在设置页更改）以及 `prefs.plainWorkspaces` 里记住的历任工作区的会话平铺列出（cwd 经 `projectKey` 归并比较），按 `mtimeMs` 降序，默认前 5 条 +「展开显示（还有 N 个）」/「收起」；已置顶的不重复出现，置顶的对话会话项目标签为「对话」。手动项目里路径等于这些工作区的也不显示为项目。还没拿到工作区路径时所有会话按项目处理。
 - **项目**：项目 = 其余会话 `cwd` 的归并键 ∪ 手动添加的项目 − 隐藏项目。`projectKey(path)` 去末尾分隔符（根目录除外）；像 Windows 路径（`盘符:` 或含 `\`）则统一 `\` 并小写。显示用第一次见到的原始路径，项目名取末段。排序存 `projectSort`：默认「最近活动」（有会话的项目按最新 `mtimeMs` 降序，其后是无会话的手动项目按添加顺序），「名称」时对全部项目按名称排序；项目内规则同对话区。「项目」标题行右侧的「…」（弹出菜单：排序、已移除的项目…）与「＋」（打开项目）在悬停时显示；项目行悬停显示的「＋」在该项目新建会话。「…」菜单的「已移除的项目…」列出隐藏的项目（显示名称、悬停见完整路径），点一项即从隐藏集合移除并恢复显示。
 - **置顶**：按置顶数组顺序列出仍存在的会话，每条标出所属项目名（对话为「对话」）；置顶不受项目隐藏影响。右键会话行置顶/取消置顶，右键项目标题「从列表移除」（把项目路径加入隐藏集合，不删会话、不动手动项目列表，可在「…」菜单恢复）。
 - 会话行优先显示已打开会话视图的标题，否则为 `firstText ?? "未命名会话"`；meta 为相对时间（<60s「现在」<1h「N 分钟」<24h「N 小时」<48h「昨天」<30d「N 天」否则 `YYYY-MM-DD`，锁定加「🔒 」前缀）。运行中的会话显示主色圆点；等待权限确认或提问回复的会话显示「待确认」，切走后仍保持这个状态。
 
-界面状态存 localStorage 键 `nocturne.desktop.prefs.v1`：`{ pinned: string[]; projects: string[]; hidden: string[]; projectSort: "activity" | "name"; lastEffort?: string }`（会话 id、原始路径、项目路径；`projectSort` 缺省 `"activity"`；`lastEffort` 是上次选用的思考档位，作为新会话草稿的默认档位，非字符串字段被忽略；旧数据里的 `lastProject` 字段忽略）。读写失败均不影响本次运行，写失败时 `persistent` 标为 false（`src/prefs.ts`）。
+界面状态存 localStorage 键 `nocturne.desktop.prefs.v1`：`{ pinned: string[]; projects: string[]; hidden: string[]; projectSort: "activity" | "name"; lastEffort?: string; theme?: "light" | "dark"; plainWorkspace?: string; plainWorkspaces: string[] }`（会话 id、原始路径、项目路径；`projectSort` 缺省 `"activity"`；`lastEffort` 是上次选用的思考档位，作为新会话草稿的默认档位，非字符串字段被忽略；`theme` 缺省即跟随系统；`plainWorkspace` 是自选的普通对话工作区，缺省用外壳的默认路径；`plainWorkspaces` 缺省 `[]`，记住用过的工作区路径；各字段逐个校验，类型不对的回退默认，缺新字段的旧数据照常读取；旧数据里的 `lastProject` 字段忽略）。读写失败均不影响本次运行，写失败时 `persistent` 标为 false（`src/prefs.ts`）。
 
-启动流程：`node_probe` → 不 ok 显示说明页；ok 后 `plain_workspace` 取普通对话工作区 → `ensure` 开常驻后台（握手）→ `listSessions()`（不传 cwd）。`plain_workspace` 或 `ensure` 失败显示真实错误与「重试」，后台退出横幅的「重新连接」同样重走这条链。「打开项目…」（「项目」标题行的「＋」）走系统文件夹对话框 → 加入手动项目、取消隐藏、刷新列表，不启动后台。列表在连上后、打开项目后、窗口重新获得焦点时（节流 ≥ 2 秒）刷新。
+启动流程：`node_probe` → 不 ok 显示说明页；ok 后 `plain_workspace` 取默认普通对话工作区（`prefs.plainWorkspace` 优先）→ `ensure` 开常驻后台（握手）→ `listSessions()`（不传 cwd）。`plain_workspace` 或 `ensure` 失败显示真实错误与「重试」，后台退出横幅的「重新连接」同样重走这条链。「打开项目…」（「项目」标题行的「＋」）走系统文件夹对话框 → 加入手动项目、取消隐藏、刷新列表，不启动后台。列表在连上后、打开项目后、窗口重新获得焦点时（节流 ≥ 2 秒）刷新。
 
 未选中会话时主区显示 hero 空状态（`src/App.tsx` `DraftPane`）：月亮标记 + 标题 + 同一个输入框（宽度上限 680）。普通对话标题为「有什么可以帮你？」；项目草稿为「要在 <项目名> 里做什么？」——项目名是可点按钮（虚线下划线），点击打开与输入框托盘目录 chip 同一个目录菜单。目录菜单内容：「普通对话」（副标题「不属于任何项目」）/ 分隔线 /「项目」组逐项目（名称 + 小字路径）/ 分隔线 /「打开其他文件夹…」。
 
@@ -145,8 +145,9 @@ interface NodeProbe {
 | `/new` `/clear`                       | 左栏「＋ 新会话」                                       |
 | `/resume`                             | 在左栏选择要继续的会话                                  |
 | `/help`                               | 输入 `/` 查看可用命令；其余按场景指向控件位置           |
-| `/provider` `/settings`               | 页面在后续版本提供                                      |
-| `/theme`                              | 主题跟随系统外观                                        |
+| `/provider`                           | 点左栏底部「服务商」打开服务商页                        |
+| `/settings`                           | 点左栏底部「设置」打开设置页                            |
+| `/theme`                              | 在左栏底部「设置」→ 桌面端 · 主题 切换                  |
 | `/rewind` `/fork`                     | 后续版本提供                                            |
 | `/exit` `/quit`                       | 关闭窗口即可退出                                        |
 
@@ -161,6 +162,39 @@ interface NodeProbe {
 上下文面板取 `describeContext`，展示总量与预算、分段堆叠条和数值；对话历史从 `history.breakdown` 细分用户消息、助手回答、工具调用与结果、压缩摘要，不从可见消息重新估算。来源文本按 `contextSourceLabel` 中文化（「内置提示词」「自定义提示词」「N 个工具」「N 项」「N 条」，路径按主目录缩写）。底部提示「可以输入 /compact 压缩」。
 
 已知限制（等 RPC 能力）：空状态的项目文件搜索需要 runtime 级 `fileIndex`（`fileIndex` 目前是 session 级，前端已用 `Composer.fileRefs` 作为数据接缝，届时只换数据源）。
+
+### 5.5 服务商页
+
+左栏底部「服务商」把主区换成服务商页（左栏不动，页头「←」返回原会话或空状态）。页面与设置页都走常驻的普通对话后台读写全局配置（`src/ProvidersPage.tsx`）。
+
+- **列表**：左列分「已配置」（`describeProviders`）与「可添加」（`listProviderPresets`，已按默认名配置过的预设不再列出，自定义类预设始终可添加）。行内显示状态点、「N 个模型」；当前会话正在用的服务商标「当前」（没有选中会话时取 `defaultModel` 的服务商，即新会话将用的那个），进入页面时默认选中它，凭据失效的行尾写「已失效」并标黄。
+- **详情**：标题 + 操作按钮 + 信息卡（类型、地址、认证、凭据、保存位置、来源）+ 模型表。API key 类有「换密钥」（`setCredential`，password 输入，保存后清空）、「刷新模型列表」（`refreshUpstreamLimits`）、「删除」（`removeSetupProvider`）；账号类有「退出登录」（`logoutProvider`，只删本机凭据，确认对话框说明），失效时信息卡上方出现「账号登录已失效」横幅和「重新登录」，登录等待卡片内联在详情里。打开的会话在用该服务商时删除按钮置灰，悬停说明「当前会话正在使用，不能删除」；服务端返回 `provider_in_use` 时同样置灰。来自其他配置层（config.json、项目配置）的条目只读：没有换密钥、删除置灰并说明。界面不按 `ProviderOverview` 推断权限，删除是否允许以服务端为准。
+- **模型表**：可搜索；列为名称、能力（R 推理、I 图片输入）、上下文（千分位）、最大输出（K），带「默认」「已编辑」标记；悬停行显示「设置」，打开模型设置对话框。
+- **模型设置对话框**（`src/ModelSettingsDialog.tsx`）：显示名、上下文、最大输出、图片输入、推理、思考档位、协议、编辑工具八项，每项写来源（上游、推导、默认、已编辑等）；「全部恢复跟随」清掉全部用户值。改动只在「保存」时经 `saveModelSettings` 写入 providers.json 的 userModels，「取消」不写。推理选「否」时思考档位置灰。
+- **添加服务商**：选「可添加」里的预设进入表单，字段由 `describeProviderSetup` 驱动（固定值只读显示；凭据方式按 apiKey / 环境变量 / 账号登录 / 外部文件，OpenRouter 可选浏览器登录或粘贴密钥）。「获取模型」调 `prepareProvider` 拿到草稿，之后「保存」才可点（`commitProvider`）；获取前保存置灰，获取后改任何字段都作废结果、释放草稿并重新置灰。获取期间可「取消获取」：前端立即回到可编辑，输入保留，晚到的响应若带回草稿立即 `discardProvider` 释放。结果区显示「已获取 N 个模型」与 notices，失败写原因；`-32005` 带 `data.field` 时错误显示在对应字段下。`needsManualModel` 时出现「模型 ID」输入框。「取消」、切走或离开页面都会 `discardProvider` 释放草稿，进行中的草稿登录经 `login.cancel` 取消（RPC 层把 Core 的 `discardDraftLogin` 映射为 `login.cancel`）。
+- **登录**：`login.start` / `login.startDraft` 后用外链白名单打开系统浏览器；等待卡片（`src/LoginWaitCard.tsx`）有复制链接、重新打开浏览器、取消、倒计时（按服务端超时估算，仅展示），可展开「粘贴回调地址 / 粘贴授权码」走 `login.submitManual`。`login.completed` 带 `unstoredKey` 时密钥只在卡片里显示这一次，前端不存储、不打日志。
+- **同步**：服务商变更后后台推 `runtime.providersChanged`，页面、状态栏模型菜单与空状态模型 chip 随之刷新。
+
+### 5.6 设置页
+
+左栏底部「设置」打开设置页（`src/SettingsPage.tsx`），页头说明「默认值对新会话生效；当前会话在状态栏切换模型、思考档位和权限」。按 [ADR-0045](../decisions/ADR-0045-fullscreen-page-shell.md) 第 7 节逐项保存，每行右侧写来源层：
+
+| 分组 | 项 | 保存方式 |
+| --- | --- | --- |
+| 会话默认 | 默认权限预设 | 下拉框，改完立即 `updateSettings`，提示「已保存 默认权限预设 = X」 |
+| 会话默认 | 安全审查 | 对话框：关闭 / Jev / 小模型；Jev 首次启用先显示数据外发说明（偏好 `jevDisclosureAccepted`），单独密钥用 password 输入、经 `reviewerKey` 提交、保存后清空 |
+| 会话默认 | 默认模型与档位 | 对话框，`setDefaultModel` 成对保存；所选模型没有档位时传 null |
+| 执行 | Shell | 只读，写明由谁指定；会话内在状态栏切换 |
+| 执行 | 压缩阈值 | 对话框，百分比或 token 数，留空恢复默认 |
+| 模型角色 | 子代理模型 / 看图模型 / 轻量模型 | 对话框选择模型或清除；看图模型只列支持图片输入的模型 |
+| 桌面端 | 主题 | 跟随系统 / 浅色 / 深色，只写 prefs，立即生效 |
+| 桌面端 | 普通对话工作区 | 「更改…」选目录、「恢复默认」；只写 prefs |
+
+保存失败时值回到原样，该行描红并写「保存失败：原因，已恢复原值」；保存的值被更高层覆盖时来源写「已被覆盖 · 层名」并标黄。
+
+主题写 `document.documentElement.dataset.theme`，跟随系统时删掉该属性回到 `prefers-color-scheme`。更改普通对话工作区时先在新位置开常驻后台，成功后写 `prefs.plainWorkspace` 并把新旧路径记进 `prefs.plainWorkspaces`，旧位置的对话仍归「对话」区；旧位置没有打开的会话时释放其后台。
+
+已知限制：每个项目一个后台，只有发起变更的后台会重载配置并推 `providersChanged`。在 A 项目的后台里改了服务商，B 项目已经运行的后台要重启后才能看到。`PrepareProviderResult` 只有模型数，获取结果暂不列模型名；RPC 请求不能真正中止，「取消获取」只在前端丢弃结果。
 
 ## 6. 安全边界
 

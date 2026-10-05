@@ -403,7 +403,7 @@ describe("Composer 斜杠命令", () => {
     expect(field.value).toBe("/model");
     fireEvent.change(field, { target: { value: "/provider" } });
     await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toContain("服务商页面在后续版本提供"),
+      expect(screen.getByRole("status").textContent).toContain("点左栏底部「服务商」打开服务商页"),
     );
   });
 

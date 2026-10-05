@@ -12,7 +12,7 @@ type ShellEntry = Awaited<ReturnType<RpcSession["listShells"]>>[number];
 type EffortInfo = Awaited<ReturnType<RpcSession["reasoningEffortInfo"]>>;
 type SettingItem = Awaited<ReturnType<RpcRuntime["describeSettings"]>>[number];
 
-const refKey = (ref: ModelRef): string => `${ref.provider}/${ref.model}`;
+export const refKey = (ref: ModelRef): string => `${ref.provider}/${ref.model}`;
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
@@ -62,6 +62,8 @@ export function useSessionControls(
   runtime: RpcRuntime,
   view: SessionView,
   prefs: PrefsStore,
+  /** 服务商配置变更计数：变化时重新拉取模型/预设等数据 */
+  providersVersion = 0,
 ): SessionControls {
   const [snapshot, setSnapshot] = useState<{
     model: ModelRef | undefined;
@@ -112,6 +114,7 @@ export function useSessionControls(
     };
   }, [
     refresh,
+    providersVersion,
     view.entries.length,
     view.status,
     view.config.model?.provider,
@@ -308,6 +311,8 @@ function pickDefaultModel(
 export function useDraftControls(
   runtime: RpcRuntime | undefined,
   prefs: PrefsStore,
+  /** 服务商配置变更计数：变化时重新拉取模型列表 */
+  providersVersion = 0,
 ): DraftControls {
   const [data, setData] = useState<{
     models: ModelInfo[];
@@ -352,7 +357,7 @@ export function useDraftControls(
     return () => {
       cancelled = true;
     };
-  }, [runtime]);
+  }, [runtime, providersVersion]);
 
   const models = data?.models ?? [];
   const byKey = new Map(models.map((info) => [refKey(info.ref), info]));

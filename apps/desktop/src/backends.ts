@@ -24,9 +24,11 @@ interface Entry {
 export class BackendPool {
   private readonly host: DesktopHost;
   private readonly entries = new Map<string, Entry>();
-  private readonly pending = new Map<string, Promise<RpcClient>>();
   private readonly exitListeners = new Set<(e: BackendExited) => void>();
-
+  /** 同一项目并发 ensure 共享的打开中 Promise */
+  private readonly pending = new Map<string, Promise<RpcClient>>();
+  /** 新后台握手成功后通知：App 据此给每个 client 订阅 providersChanged */
+  private readonly clientListeners = new Set<(client: RpcClient) => void>();
   constructor(host: DesktopHost) {
     this.host = host;
   }
@@ -49,6 +51,13 @@ export class BackendPool {
         await client.initialize();
         const entry: Entry = { key, workspace, transport, client };
         this.entries.set(key, entry);
+        for (const listener of this.clientListeners) {
+          try {
+            listener(client);
+          } catch {
+            // 监听器异常不影响后台接入
+          }
+        }
         void transport.exited.then(({ code, stderr }) => {
           // 后台退出：从池中移除并通知（UI 显示"后台已退出"与重新连接）
           if (this.entries.get(key) === entry) {
@@ -91,6 +100,11 @@ export class BackendPool {
     await entry.transport.exited;
   }
 
+  /** 该项目已握手的 client；没有运行中的后台返回 undefined */
+  get(workspace: string): RpcClient | undefined {
+    return this.entries.get(projectKey(workspace))?.client;
+  }
+
   /** 任意一个运行中的 client；会话列表是全局的，用哪个后台查都一样 */
   any(): RpcClient | undefined {
     for (const entry of this.entries.values()) return entry.client;
@@ -99,6 +113,14 @@ export class BackendPool {
 
   runningKeys(): string[] {
     return [...this.entries.keys()];
+  }
+
+  /** 每个新后台握手成功后回调一次（订阅 providersChanged 等全局通知用）。 */
+  onClient(listener: (client: RpcClient) => void): () => void {
+    this.clientListeners.add(listener);
+    return () => {
+      this.clientListeners.delete(listener);
+    };
   }
 
   onExit(listener: (e: BackendExited) => void): () => void {

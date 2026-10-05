@@ -18,10 +18,22 @@ export interface Prefs {
   /** 项目排序：最近活动 / 名称 */
   projectSort: ProjectSort;
   /** 上次选用的思考档位（新会话草稿的默认档位） */
-  lastEffort?: string;
+  lastEffort?: string | undefined;
+  /** 主题：跟随系统 / 浅色 / 深色（桌面端本机设置，不进 Core） */
+  theme?: "system" | "light" | "dark" | undefined;
+  /** 用户选过的普通对话工作区；undefined 用外壳 plain_workspace 的默认路径 */
+  plainWorkspace?: string | undefined;
+  /** 所有当普通对话工作区用过的路径：cwd 命中任意一个的会话都归入「对话」 */
+  plainWorkspaces: string[];
 }
 
-const DEFAULTS: Prefs = { pinned: [], projects: [], hidden: [], projectSort: "activity" };
+const DEFAULTS: Prefs = {
+  pinned: [],
+  projects: [],
+  hidden: [],
+  projectSort: "activity",
+  plainWorkspaces: [],
+};
 
 export interface PrefsStore {
   /** false 表示写不进存储，本次运行内仍生效 */
@@ -58,6 +70,14 @@ function parse(raw: string | null): Prefs {
     prefs.projectSort = obj.projectSort;
   }
   if (typeof obj.lastEffort === "string") prefs.lastEffort = obj.lastEffort;
+  if (obj.theme === "system" || obj.theme === "light" || obj.theme === "dark") {
+    prefs.theme = obj.theme;
+  }
+  if (typeof obj.plainWorkspace === "string" && obj.plainWorkspace.trim() !== "") {
+    prefs.plainWorkspace = obj.plainWorkspace;
+  }
+  const plainWorkspaces = strings(obj.plainWorkspaces);
+  if (plainWorkspaces !== undefined) prefs.plainWorkspaces = plainWorkspaces;
   // lastProject 已废弃：旧数据里的这个字段直接忽略
   return prefs;
 }
@@ -80,7 +100,10 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         projects: [...prefs.projects],
         hidden: [...prefs.hidden],
         projectSort: prefs.projectSort,
+        plainWorkspaces: [...prefs.plainWorkspaces],
         ...(prefs.lastEffort !== undefined ? { lastEffort: prefs.lastEffort } : {}),
+        ...(prefs.theme !== undefined ? { theme: prefs.theme } : {}),
+        ...(prefs.plainWorkspace !== undefined ? { plainWorkspace: prefs.plainWorkspace } : {}),
       };
     },
     update(patch) {

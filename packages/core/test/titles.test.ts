@@ -23,7 +23,8 @@ beforeEach(async () => {
   await Promise.all([mkdir(home), mkdir(workspace)]);
 });
 afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
+  // Windows 上会话/诊断日志句柄偶发延迟释放，目录删除需要重试（ENOTEMPTY）
+  await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 async function setup(
   configured = false,

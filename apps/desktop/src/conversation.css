@@ -75,12 +75,15 @@
   background: var(--a-side);
   border: 1px solid var(--a-border);
   border-radius: 8px;
+  /* 外框收缩到图片：内图 ≤160px + 3px padding + 1px border；
+     不设上限时原图固有宽度会把 fit-content 撑到气泡宽，图片只占 160px，右侧留白 */
+  max-width: 168px;
 }
 .conversation .u-img {
   display: block;
   width: auto;
   height: auto;
-  max-width: min(160px, 100%);
+  max-width: 100%;
   max-height: 160px;
   object-fit: contain;
   border-radius: 5px;

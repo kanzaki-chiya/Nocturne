@@ -24,6 +24,9 @@ export interface SidebarProps {
   onRestoreProject: (path: string) => void;
   onOpenProject: () => void;
   onNewSession: (workspace?: string) => void;
+  /** 当前打开的页面（null = 会话/空状态） */
+  page?: "providers" | "settings" | null;
+  onOpenPage?: (page: "providers" | "settings") => void;
 }
 
 type MenuState =
@@ -379,6 +382,39 @@ export function Sidebar(props: SidebarProps) {
           )}
         </div>
       )}
+      <nav className="nav foot" aria-label="页面">
+        <button
+          className={`item${props.page === "providers" ? " on" : ""}`}
+          onClick={() => props.onOpenPage?.("providers")}
+        >
+          <svg className="glyph" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <path
+              d="M5.5 1.8v3M10.5 1.8v3M3.5 4.8h9v2.6a4.5 4.5 0 0 1-9 0zM8 11.9v2.3"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          服务商
+        </button>
+        <button
+          className={`item${props.page === "settings" ? " on" : ""}`}
+          onClick={() => props.onOpenPage?.("settings")}
+        >
+          <svg className="glyph" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+            <path
+              d="M8 1.6v2M8 12.4v2M1.6 8h2M12.4 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4-1.4M3.5 12.5l1.4-1.4M11.1 4.9l1.4-1.4"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+            />
+          </svg>
+          设置
+        </button>
+      </nav>
     </aside>
   );
 }
