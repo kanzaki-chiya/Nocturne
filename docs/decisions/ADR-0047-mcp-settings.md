@@ -140,3 +140,54 @@ Core 的 `Runtime` 新增以下方法，RPC 一一映射为 `mcp.*` 命名空间
 2. **手写条目保持只读**：`mcp.json` 层级不高于 `config.json`，界面不改手写配置。
 3. **对已打开的会话热生效**：在 Turn 边界按 id 比对后增量启停，见第 4a 节。
 4. **TUI 和 CLI 本轮不加管理命令**：`/mcp` 维持只读，等桌面端形态稳定后再评估。
+
+## 修订
+
+### 2026-10-06：加入流式 HTTP 传输与静态请求头
+
+维护者在审界面稿时指出添加表单缺少「类型」选择，并决定本轮就支持带请求头的远程服务器（OAuth 留到以后）。本条修订 mcp.md 第 2 节「Streamable HTTP 不做」的结论，并扩展上文第 1–5 节；未提到的部分不变。
+
+1. **条目形态**。条目新增判别字段 `type: "stdio" | "http"`，省略时为 `"stdio"`，现有配置不受影响。HTTP 条目的形状：
+
+   ```jsonc
+   "context7": {
+     "type": "http",
+     "url": "https://mcp.context7.com/mcp",
+     "headers": {
+       "CONTEXT7_API_KEY": { "stored": true },
+       "X-Trace": "${TRACE_ID}"
+     },
+     "enabled": true,
+     "startupTimeoutMs": 15000,
+     "callTimeoutMs": 60000
+   }
+   ```
+
+   - HTTP 条目不接受 `command`、`args`、`env`、`cwd`；stdio 条目不接受 `url`、`headers`。混写按无效条目处理，只忽略该条并警告。同 id 跨层合并时，若高层与低层的 `type` 不同，高层条目整体替换低层，不做字段浅合并。
+   - `url` 只接受 `https:`；`http:` 只允许回环地址（`localhost`、`127.0.0.0/8`、`::1`），便于本机调试。其他协议和非回环的明文 HTTP 按字段错误拒绝。
+   - `headers` 的值与 `env` 规则相同：`config.json` 和项目配置里只能写字符串（字面值或 `${NAME}`），疑似凭据的字面值按 `config_credential_rejected` 拒绝；`mcp.json` 里还可以写 `{ "stored": true }`。
+   - 这个形态适用于所有配置层，不只 `mcp.json`。未信任项目的 `mcp` 段仍然整段忽略，HTTP 条目也不例外：向远程地址发送工具输入，与启动进程一样属于可执行内容的信任范围。
+
+2. **请求头密钥**。凭据 id 沿用 `mcp/<serverId>/<name>`：stdio 条目的 `name` 是环境变量名，HTTP 条目的 `name` 是请求头名的小写形式（请求头名不区分大小写）。一个条目只能是一种类型，两类名字不会同时出现。类型从 stdio 改为 http（或反过来）时，旧类型下不再使用的 stored 凭据随保存一起删除，规则同第 2 节「跟着条目一起删」。
+
+3. **连接与生命周期**。传输使用 SDK 的 `StreamableHTTPClientTransport`，网络请求走 Node 内置 `fetch`，因此遵循 config.md 中 `configureEnvProxy()` 设置的进程级代理。与 stdio 的对应关系：
+   - 「启动」= 建立连接、`initialize`、`tools/list`，受 `startupTimeoutMs` 约束；「停止」= 有会话 id 时发 `DELETE` 结束会话，再关闭传输。没有子进程，也就没有白名单环境和进程树清理。
+   - 不给 SDK 传 `authProvider`，所以不会触发 OAuth 流程。服务器返回 401 / 403 时，状态记为 `failed`，错误码 `auth_required`，消息提示检查请求头。
+   - 跨域重定向一律拒绝（错误码 `http_redirect`），避免把请求头带到别的主机；同源重定向照常跟随。
+   - 本轮不做自动重连：会话中途连接断开或请求失败，该次工具调用返回错误结果，服务器状态记为 `failed` 并照常发 `mcp.server` 事件。用户可以在设置页关掉再打开该服务器（触发第 4a 节的 `reconcile` 重启），或重开会话。
+   - 工具包装、权限 subject（`mcp <server>/<tool>`）、结果映射、超时语义都不变。
+
+4. **管理接口与探测**。
+   - `McpServerOverview` 新增 `transport: "stdio" | "http"`；HTTP 条目带 `url` 和 `headers`，`headers` 的形状与 `env` 相同（`{ name, kind, value?, stored? }[]`），这时 `command`、`args`、`env`、`cwd` 缺省。
+   - `saveMcpServer` 的 `secrets` 键既可以是环境变量名，也可以是请求头名；Core 按条目类型解释。
+   - `probeMcpServer` 对 HTTP 条目走一遍连接 → `initialize` → `tools/list` → 关闭。结果里没有 `stderrTail`，改为可选的 `httpStatus`。错误码在第 4 节的基础上新增 `connect_failed`、`http_status`、`auth_required`、`http_redirect`。
+   - 探测仍不经过权限层，未信任项目的条目仍拒绝探测。
+
+5. **桌面端**。
+   - 添加表单顶部加类型选择「STDIO / 流式 HTTP」，默认 STDIO。切换后显示对应字段：STDIO 是命令、参数、工作目录、环境变量；流式 HTTP 是地址和请求头。请求头表格与环境变量表格同一套交互，每行也选「明文」「引用环境变量」「保存到凭据库」。编辑已有条目时类型可以改。
+   - 列表的命令摘要列，对 HTTP 条目显示地址（只显示主机和路径），并带「HTTP」小标签。
+   - 从 JSON 导入：`type` 为 `"http"` 或 `"streamable-http"`、或者只有 `url` 没有 `command` 的条目，按 HTTP 导入。请求头里的 `Authorization`、名字含 `KEY`/`TOKEN`/`SECRET`/`PASSWORD` 的头，以及看起来像令牌的值，默认切换为「保存到凭据库」。`type: "sse"` 仍明确提示「暂不支持」。条目若声明了 OAuth 相关字段，或者没有任何认证头，导入照常进行，结果行附一句「如需 OAuth 登录，本版本暂不支持」。
+
+6. **文档**（在第 6 节清单之外补充）：mcp.md 第 2 节把 Streamable HTTP 改为「做」，并注明 OAuth 不做；第 3 节加入 `type`、`url`、`headers` 字段；第 4 节加入 HTTP 的启动、停止与失败语义；第 9 节只保留 OAuth 与 SSE。rpc.md 的 `mcp.*` 小节写入新字段与错误码。
+
+7. **仍不做**：OAuth（以后单独修订，可复用 ADR-0042 的登录基础设施）、旧版 SSE 传输、断线自动重连。
