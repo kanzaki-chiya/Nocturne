@@ -99,6 +99,8 @@ interface ProviderSetupFile {
 
 ## 3. 凭据存储：交给操作系统
 
+凭据 id 分命名空间：服务商 id 禁止 `/`；MCP 使用 `mcp/<serverId>/<name>`，stdio 的 name 为环境变量名，HTTP 为小写请求头名。MCP 的保存、回滚与清理规则见 [mcp.md](mcp.md)。
+
 API key **不以明文落盘**。向导把密钥交给操作系统自带的凭据保护能力，全部通过系统自带的命令完成，不引入原生依赖。账号登录记录的明文例外只在用户显式选择后发生，见下文。
 
 | 平台 | 后端 | 写入 | 读取 | 密钥存放在 |
@@ -291,7 +293,7 @@ recentModels(): ModelRef[]                               // recent-models.json �
 recordRecentModel(ref: ModelRef): Promise<void>          // Runtime 在 setModel/新建会话时调用
 
 // Runtime 新增
-runtime.updateProviders(config: RuntimeConfig): void
+runtime.updateProviders(config: RuntimeConfig): Promise<void>
 runtime.defaultModel(): ModelRef | undefined             // 分层合并后的默认模型（"默认模型"标记）
 runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最近使用"范围的数据源
 ```
@@ -300,7 +302,7 @@ runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最�
 
 **提交流程与取消**：收集字段与凭据 → `prepareProvider`（「正在获取模型列表…」）→ 显示 notices → `needsManualModel` 时问「模型 ID」→「保存配置」确认（TUI；行式 CLI 直接提交）→ `commitProvider` → 结果行。列表失败提示必须在确认前可见，外部登录文件的手填模型步骤同样在确认前。获取模型列表期间 Esc 取消信号并保留输入，回到确认页决定是否重新准备；取消确认或模型输入时 `discardProvider` 释放草稿。保存阶段放行到完成。
 
-`runtime.updateProviders`：用新的基础层配置重建运行时级 Provider 注册表；每个已打开会话在下一次空闲边界重建自己的会话级注册表（基础层 + 该会话的可信项目层）。`listModels` 展示当前工作区已加载的合并结果，包含可信项目层，供 `/model` 和 `/settings` 按生效模型能力列出档位。当前会话正在使用的服务商不会被移除（客户端在删除前检查，Core 在重建时对仍被引用的服务商保留原实例并发出 `runtime.warning`）。它不产生持久事件；随后的 `setModel` 照常写 `session.config_changed`。
+`runtime.updateProviders`：用新的基础层配置重建运行时级 Provider 注册表；每个已打开会话在下一次空闲边界重建自己的会话级注册表（基础层 + 该会话的可信项目层）。`listModels` 展示当前工作区已加载的合并结果，包含可信项目层，供 `/model` 和 `/settings` 按生效模型能力列出档位。当前会话正在使用的服务商不会被移除（客户端在删除前检查，Core 在重建时对仍被引用的服务商保留原实例并发出 `runtime.warning`）。重载同时按各会话工作区增量 reconcile MCP（见 [mcp.md](mcp.md) 第 4 节），调用方等待完成；未变化的服务器不重启。它不产生持久事件；随后的 `setModel` 照常写 `session.config_changed`。
 
 为什么不"关闭会话再用新配置重新打开"：那会触发 `SessionEnd`/`SessionStart` Hook、重启全部 MCP 服务器、重新取锁——添加一个服务商不应该有这些副作用。
 

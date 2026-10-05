@@ -9,7 +9,7 @@
 服务商 `auth` 省略等同 `{ kind: "apiKey" }`。非 API key 鉴权只允许用户级来源：项目声明的非 API key `auth` 被忽略；用户账号条目的项目 `auth`、`baseURL`、`headers` 覆盖被忽略并告警。非 API key 条目忽略 `apiKeyEnv`，报告 `provider_auth_conflict`。`openai-siwc` 的生效地址必须精确为 `https://api.openai.com/v1`（[ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 2 节）。
 
 ```text
-内置默认 < models.dev < 向导配置 < 用户编辑 < 程序设置 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
+内置默认 < models.dev < 向导配置 / MCP 管理 < 用户编辑 < 程序设置 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
 ```
 
 | 层 | 位置 / 来源 | 信任 | 说明 |
@@ -17,6 +17,7 @@
 | 内置默认 | 代码内常量 | 可信 | 预设名 `default`、Turn 默认值等；不是一个文件 |
 | models.dev | 随版本快照或 `<NOCTURNE_HOME>/cache/models-dev.json` | 可信 | 只为已有模型补全推理、图片输入、上下文与最大输出；低于上游逐字段声明，不写入 `providers.json`（ADR-0025）；条目声明 `modelsDevProvider` 时另按服务商提供逐模型 `endpoints`（ADR-0031 §4，[providers.md](providers.md) 第 2 节） |
 | 向导配置 | `<NOCTURNE_HOME>/providers.json` | 可信 | `nctrn setup` 与 `/provider` 原子写服务商；旧 `model` 继续读取但不再写入，默认模型改存程序设置层（[provider-setup.md](provider-setup.md)） |
+| MCP 程序维护 | `<NOCTURNE_HOME>/mcp.json` | 可信 | 与 providers.json 同级，低于所有手写配置，逐条校验与原子串行写；详情见 [mcp.md](mcp.md) |
 | 用户编辑（`userModels`） | 同上 providers.json 条目的 `userModels` 字段 | 可信 | **合成层**：加载时由条目内 `userModels` 包成 `{providers:[{id,models:userModels}]}`，插在向导层与用户配置之间；只作用于 `models` 逐字段合并，不产生权限规则等其他字段（ADR-0024，见第 2 节） |
 | 程序设置 | `<NOCTURNE_HOME>/settings.json` | 可信 | 白名单设置参与合并，界面偏好只保留；低于所有手写配置（[ADR-0034](../decisions/ADR-0034-settings-layer.md)，见第 2 节） |
 | 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；**程序从不改写它** |
@@ -24,7 +25,7 @@
 | 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；API key 经环境变量或操作系统凭据后端进入。`credentials.json` 默认只存索引或密文；用户显式选择后，账号登录记录可以 `plaintext` 写入该文件（[provider-setup.md](provider-setup.md) 第 3 节） |
 | 命令行参数 | `nctrn` 参数 | 可信 | 本次启动的显式意图，优先级最高 |
 
-机器维护的运行时数据（信任列表、项目 Grant、向导配置、程序设置、凭据索引、最近模型列表、models.dev 缓存）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。
+机器维护的运行时数据（信任列表、项目 Grant、向导配置、程序设置、凭据索引、最近模型列表、models.dev 缓存）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`mcp.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。
 
 交互输入历史由 Core 的 `RuntimeSession.readInputHistory()` / `recordInputHistory(text)` 管理，保存在 `<NOCTURNE_HOME>/history.jsonl`，**明文保存输入原文**，文件创建权限 `0600`（POSIX）；每行是 `{text, workspaceRoot, time}`。历史按会话绑定的工作区过滤，连续重复输入只记录一次，超过 1000 条保留最近 1000 条。TUI 提交前展开粘贴占位，读取后在输入框重新收起多行原文。读写故障发 `runtime.warning`，不阻断输入；CLI 与 TUI 都不直接读写此文件。
 

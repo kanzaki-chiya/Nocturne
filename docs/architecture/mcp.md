@@ -15,7 +15,7 @@ Nocturne 作为 MCP **客户端**接入外部 MCP 服务器：把服务器提供
 | 传输 | 本阶段 | 理由 |
 |---|---|---|
 | **stdio**（子进程 + 换行分隔 JSON-RPC） | **做** | Coding Agent 场景的绝对主流形态（`npx`/`uvx`/本地脚本）；进程生命周期由 platform 统一管理，崩溃清理、进程树终止与 `shell` 工具同一套保证 |
-| Streamable HTTP（远程服务器） | **不做** | 远程端点引入 OAuth/bearer 凭据管理、远程接收工具输入的信息边界、断线重连语义等一整组新问题，需要单独的凭据与信任设计；配置 schema 预留了扩展空间（见第 9 节），届时新增 `type: "http"` 条目形态，不改变 stdio 配置与工具包装语义 |
+| Streamable HTTP（远程服务器） | **做** | SDK 1.30.0 的 `StreamableHTTPClientTransport`，支持静态请求头和凭据库引用；不做 OAuth、旧版 SSE 和自动重连（ADR-0047） |
 | SSE（旧版 HTTP+SSE） | 不做 | 已被 Streamable HTTP 取代，不为已废弃传输投入 |
 
 stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行 `spawn`，进程管理绕过 platform）：`packages/mcp` 实现一个符合 SDK `Transport` 接口的自定义传输，底层走 platform 新增的 `spawnPipe` 能力（第 8 节），从而获得与 `shell` 一致的进程树终止（Windows `taskkill /T /F`、POSIX 进程组）与 `windowsHide` 行为。
@@ -44,6 +44,9 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 
 | 字段 | 说明 |
 |---|---|
+| `type` | `stdio` / `http`，省略为 `stdio`。两类专属字段不能混写，无效条目逐条忽略并警告 |
+| `url` | HTTP 必填；只允许 HTTPS 或回环 HTTP（localhost、127.0.0.0/8、::1），拒绝内联凭据 |
+| `headers` | HTTP 专属；字符串或 `mcp.json` 专属的 `{ stored: true }`，字符串支持 `${NAME}`，疑似字面凭据拒绝 |
 | `command` | 可执行文件（必填）。经 `platform.spawnPipe` 启动，不经 shell 解释——参数用 `args` 数组，不做引号解析 |
 | `args` | 参数数组，原样传递 |
 | `env` | 显式传给该服务器的变量，叠加在**白名单默认环境**之上（见下）。值中的 `${NAME}` 启动时从 Nocturne 进程环境展开；引用的变量不存在时展开为空字符串并记警告（`mcp_env_missing`）。**禁止内联凭据**：与 `providers` 条目同规则，env 值只应引用环境变量名（`${NAME}` 形式），出现疑似凭据字面量的字段按 `config_credential_rejected` 拒绝该层文件——见 config.md 第 2 节的既有约定扩展 |
@@ -56,12 +59,17 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 
 分层与合并：
 
-- **来源**：用户配置 `<NOCTURNE_HOME>/config.json` 与项目配置 `<workspaceRoot>/.nocturne/config.json`。环境变量层与命令行参数层本阶段不提供 MCP 配置。
-- **合并**：按服务器 id 浅合并（与 `providers` 同规则）：同 id 条目高层字段覆盖低层，不同 id 并存。
+- **来源**：程序维护的 `<NOCTURNE_HOME>/mcp.json`（`{ version: 1, servers: {...} }`，origin 为 `app`），与 `providers.json` 同级，低于所有手写配置；用户 `config.json` 与项目 `.nocturne/config.json` 分别为 `user` / `project`。环境与 CLI 层不提供 MCP 配置。写入使用共享串行队列与临时文件 + rename，损坏文件忽略并警告，单条无效只忽略该条。
+- **合并**：按服务器 id 浅合并；同 id 的 `type` 不同时，高层整条替换低层，不继承另一种传输的字段。
+- **凭据**：只有 `mcp.json` 的 `env` / `headers` 允许 `{ stored: true }`。启动前从注入的 CredentialStore 取 `mcp/<serverId>/<name>`（请求头名转小写）；缺失时 failed 并警告 `mcp_secret_missing`，不包含值。`none` 后端拒绝保存 stored；删除条目、移除 stored 或切换类型同步删除旧凭据。密钥不进入合并配置、事件、诊断或错误。
 - **信任**：项目配置的 `mcp` 段是**可执行内容**——未信任时整段忽略（不是收紧语义；规则可以只收紧，但"启动哪个进程"没有收紧方向），并随 `project_config_untrusted` 警告一并提示。`nctrn trust` 后生效。用户级配置始终可信。
-- 合并产物进入 `ResolvedConfig.mcpServers`（带来源标注 `origin: "user" | "project"`），由 `forWorkspace` 按会话 `workspaceRoot` 输出——与权限规则、Provider 条目同一时机。
+- 合并产物进入 `ResolvedConfig.mcpServers`（`origin: "app" | "user" | "project"`），由 `forWorkspace` 按工作区与信任状态输出。相对 cwd 按会话工作区解析。
 
 ## 4. 服务器生命周期
+
+HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；停止时有 session id 先 DELETE，再关闭传输。使用 Node 内置 fetch，遵循入口 `configureEnvProxy()` 的全局代理。fetch 注入点逐跳检查同源重定向，跨域拒绝为 `http_redirect`；401/403 为 `auth_required`。HTTP 不自动重连，中途请求失败或连接断开记 failed，发 `mcp.server`，在途工具调用返回错误；可停用后再启用。
+
+每次配置重载都对已打开会话调用 `McpSession.reconcile(servers)`。按 id 比较规范化配置与当前 stored 值的摘要：新增/启用启动，删除/停用停止，内容变化先停再启，无变化不动。空闲立即执行；Turn 内暂存到结束边界，更新注册表供下一 Turn 使用，子会话仍持父 Turn 的工具快照。
 
 ```text
 会话打开（wrapSession，新建与恢复同样处理）
@@ -137,6 +145,8 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 
 ## 7. 权限与可见性
 
+设置页的连接探测由用户主动操作，不经权限层；未信任项目的条目拒绝探测。stdio 走 spawn → initialize → tools/list → 清理进程树，HTTP 走连接 → initialize → tools/list → 结束会话。探测结果只保存在界面内存，含耗时、服务器信息、工具和分类错误；stdio 附脱敏的最多 20 行 stderrTail，HTTP 附 httpStatus。精确字段与错误码见 [rpc.md](../protocols/rpc.md#35-mcp)。
+
 - **主体**：`{ kind: "mcp", target: "<server>/<tool>" }`（target 用**服务器原始名**与**工具原始名**，不做规范化——规则匹配与确认框显示的都是用户配置里的名字）。
 - **求值**：与 shell 相同的字符串通配符匹配（permissions.md 5.1），`mcp github/*`、`mcp *` 等模式可用；预设中 `network / mcp` 列已就位——`read-only`/`default`/`auto-edit` 为 `ask`，`guarded`/`smart`/`bypass` 为 `allow`；无匹配落 `ask`。
 - **Grant**：`mcp` 授权键取 `target` 原值（permissions.md 5.4），"本会话允许 / 本项目始终允许"对该服务器工具精确生效。
@@ -153,25 +163,24 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 
 ## 8. 与 Core 的接线
 
+Runtime 管理方法为 `describeMcpServers`、`saveMcpServer`、`deleteMcpServer`、`setMcpServerEnabled`、`probeMcpServer`；只修改 `app` 来源。保存先更新凭据再原子写配置，失败回滚凭据，成功自动重载并 reconcile。创建时任何来源同 id（不区分大小写）均报字段错误；手写来源只读。RPC 同名映射在 `mcp.*`，桌面端变更成功后传播至其他后台。
+
 ```text
 apps/cli:  createPlatform() → createMcpConnector(platform)（@nocturne/mcp）
            → createRuntime({ ..., mcp: connector })
-core:      wrapSession 中 resolved.mcpServers 非空且 options.mcp 存在时
+core:      wrapSession 中 options.mcp 存在时（空集合也建会话以支持热添加）
            → connector.open({ servers, cwd, workspaceRoot, sessionId, events, diagnostics })
-           → McpSession { tools(), status(), close() }
+           → McpSession { tools(), status(), reconcile(), applyPendingTools(), close() }
            → 会话注册表 = 内置 ∪ mcpSession.tools()
            → session.mcpServers() 查询；close() 时连接全部关闭
 ```
 
 - `McpConnector` / `McpSession` / `McpServerConfig` / `McpServerStatus` 接口类型定义在 `tools`（注册接口的消费方），经 `@nocturne/core` 公开导出；`@nocturne/mcp` 只依赖 `@nocturne/core` 的两个公开入口与 `@modelcontextprotocol/sdk`，depcheck 与 `apps/*` 同规则（只允许 `index` / `protocol/index` 两个入口）。
 - `RuntimeOptions.mcp` 缺省时整个 MCP 路径不存在（行为与 Phase 4 一致）；测试可注入假 connector 或直接用 `RuntimeOptions.mcpServers` + 假 connector。
-- `platform` 的 `spawnPipe(command, args, opts)`：`stdin` 可写、`stdout` 原始字节流（MCP 是换行分隔 UTF-8 JSON-RPC，不走控制台代码页解码）、`stderr` 按控制台编码解码进诊断、`kill()` 走进程树终止。这是 platform 的通用能力，`hooks` 也使用它。
+- `platform` 的 `spawnPipe(command, args, opts)`：`stdin` 可写、`stdout` 原始字节流（MCP 是换行分隔 UTF-8 JSON-RPC，不走控制台代码页解码）、`stderr` 按控制台编码解码，经脱敏后只进入探测尾部、`kill()` 走进程树终止。这是 platform 的通用能力，`hooks` 也使用它。
 - Core 侧的公开导出：`ToolDefinition`、`ToolResult`、`ToolContext`、`ToolScope`、`ToolTraits`、`McpConnector` 等类型经 `@nocturne/core` 导出（纯类型，兼容变更；platform 的 `FileSystem`/`ProcessRunner`/`PathOps` 等类型同理）。
 
 ## 9. 暂不设计
 
-- **Streamable HTTP / OAuth**：见第 2 节；schema 预留判别字段位（未来 `type: "http"` + `url` + `headers`）。
-- **resources / prompts**：MCP 资源与提示词模板没有对应的本体（我们的上下文由 Context Builder 组装）；接入时将作为新的内容来源或指令来源单独设计。
-- **sampling / elicitation / roots**：服务器反向调用客户端能力。sampling 意味着服务器驱动我们的模型调用（成本与信任边界都要单独论证）；roots 可用 `workspaceRoot` 应答，但 Phase 5 没有依赖它的目标服务器，先不接。
-- **服务器日志流给用户**：`notifications/message` 只进诊断日志。
-- **MCP 服务器发现的 UI**（`/mcp install` 等）：`/mcp` 只做只读状态查看。
+- **OAuth**：本轮只支持静态请求头，不传 authProvider；需要登录的端点提示本版本暂不支持。
+- **旧版 SSE**：导入时明确提示暂不支持并跳过。

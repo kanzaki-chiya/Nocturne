@@ -113,7 +113,25 @@
 
 `login.completed` 参数：`{ loginId, result?: { providerId, account? }, error?: { code, message }, unstoredKey?, warning? }`——`result` 只含 providerId 与账号描述，不含令牌；`error` 对 `ProviderLoginError` 用其固定文案，其他异常一律 `{code:"failed",message:"登录未完成，请重新登录"}`；**通知绝不先于对应 `start`/`startDraft` 的响应到达**。已保存服务商登录成功先触发一次自动重载（`runtime.providersChanged` 在 `login.completed` 之前）；重载失败时 `warning` 带提示（凭据已写入）。OpenRouter 在无系统凭据后端时的一次性密钥只出现在该登录的 `login.completed.unstoredKey` 一条通知里，设置环境变量的命令文本由客户端生成。
 
-### 3.5 通知
+### 3.5 `mcp.*`
+
+管理接口由 Core 校验，探测不经过权限层。配置详见 [mcp.md](../architecture/mcp.md)。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `mcp.describeMcpServers` | `{ workspaceRoot? }` → `{ servers: McpServerOverview[], warnings: string[] }` |
+| `mcp.saveMcpServer` | `{ mode: "create" \| "replace", id, config, secrets?, workspaceRoot? }` → `McpServerOverview` |
+| `mcp.deleteMcpServer` | `{ id, workspaceRoot? }` → `null` |
+| `mcp.setMcpServerEnabled` | `{ id, enabled, workspaceRoot? }` → `null` |
+| `mcp.probeMcpServer` | `{ id, workspaceRoot? }` 或 `{ config, secrets?, credentialServerId?, workspaceRoot? }` → `McpProbeResult` |
+
+Overview 含 `id/origin/editable/trusted/path/transport/enabled/startupTimeoutMs/callTimeoutMs`；stdio 含 `command/args/cwd/env`，HTTP 含 `url/headers`。值列表为 `{ name, kind: "literal" | "env" | "stored", value?, stored?: "set" | "missing" }[]`，不返回凭据。`config` 是对应传输的条目，stored 值只用 `{ stored: true }`；`secrets` 是变量或请求头名到字符串或 null 的映射，HTTP 凭据名转小写。只有 app 条目可修改，create 名称跨来源不区分大小写，冲突为 `-32005`、`data.field: "id"`；其他管理校验错误同样带字段。未信任项目拒绝探测。
+
+Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, message }`。stdio 带脱敏的 `stderrTail`（最多 20 行），HTTP 带可选 `httpStatus`。错误码为 `spawn_failed/startup_timeout/initialize_failed/mcp_secret_missing/connect_failed/http_status/auth_required/http_redirect`。草稿编辑可以通过 `credentialServerId` 引用可编辑的已保存条目的凭据，不返回密钥值。
+
+三种变更成功后自动重载并更新已打开会话；MCP 变更响应不发送 `providersChanged`，桌面端显式调用 `BackendPool.propagateConfig`。其他后台的 `reloadConfig` 仍发送原通知，由现有 echo 计数消费。
+
+### 3.6 通知
 
 | 方向 | 方法 | 参数 | 说明 |
 |---|---|---|---|
@@ -122,7 +140,7 @@
 | 服务端→客户端 | `runtime.providersChanged` | `{}` | 服务商配置/凭据变更完成且 Runtime 已用重载后配置重建：在对应 `provider.*` 变更方法（或已保存服务商 `login.start` 成功）的响应/完成通知之前到达一次（3.3、3.4） |
 | 服务端→客户端 | `login.completed` | `LoginCompleted` | 登录会话完成或失败（含取消）；绝不先于对应 `login.start`/`startDraft` 的响应到达（3.4） |
 
-### 3.6 `shutdown`
+### 3.7 `shutdown`
 
 请求，无参数。服务端完成与"传输断开"相同的清理（第 6 节）后回复 `null`，再关闭传输。
 

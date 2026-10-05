@@ -191,3 +191,7 @@ Core 的 `Runtime` 新增以下方法，RPC 一一映射为 `mcp.*` 命名空间
 6. **文档**（在第 6 节清单之外补充）：mcp.md 第 2 节把 Streamable HTTP 改为「做」，并注明 OAuth 不做；第 3 节加入 `type`、`url`、`headers` 字段；第 4 节加入 HTTP 的启动、停止与失败语义；第 9 节只保留 OAuth 与 SSE。rpc.md 的 `mcp.*` 小节写入新字段与错误码。
 
 7. **仍不做**：OAuth（以后单独修订，可复用 ADR-0042 的登录基础设施）、旧版 SSE 传输、断线自动重连。
+
+## 修订 2026-10-06：编辑草稿的已保存凭据
+
+草稿探测增加可选 `credentialServerId`，只接受可信且可编辑的 app 条目，用于测试尚未保存的编辑配置时沿用该条目的 stored 引用。Core 校验来源，新增 secrets 可覆盖本次探测的引用，密钥不返回客户端。MCP 变更由桌面端显式传播，服务端不另发 providersChanged，避免重复重载及 echo 计数错乱。
