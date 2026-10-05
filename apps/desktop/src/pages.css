@@ -1094,12 +1094,14 @@
 #root {
   container: settings-layout / inline-size;
 }
+.window-frame:has(.body.settings-mode),
 .body.settings-mode {
-  grid-template-columns: 295px minmax(0, 1fr);
+  --sidebar-width: 295px;
 }
 @container settings-layout (width < 1000px) {
+  .window-frame:has(.body.settings-mode),
   .body.settings-mode {
-    grid-template-columns: 200px minmax(0, 1fr);
+    --sidebar-width: 200px;
   }
 }
 .settings-over {

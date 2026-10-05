@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
 
 import { App } from "../src/App";
+import { WindowFrame } from "../src/WindowFrame";
 import type { DesktopHost } from "../src/host";
 import type { BackendMessage } from "../src/types";
 
@@ -413,6 +414,41 @@ it("权限卡片聚焦后，焦点在输入框时 Esc 直接拒绝且不中断�
     ).toBe(true),
   );
   expect(host.calls.some((call) => call.method === "session.interrupt")).toBe(false);
+});
+
+it("常规与服务商设置打开时，窗口按钮保持可访问并执行宿主操作", async () => {
+  const host = replayHost();
+  const invoke = host.invoke;
+  const windowCalls: string[] = [];
+  host.invoke = async (command, args) => {
+    if (command.startsWith("plugin:window|")) {
+      windowCalls.push(command);
+      return false;
+    }
+    return invoke(command, args);
+  };
+  render(
+    <WindowFrame host={host}>
+      <App host={host} />
+    </WindowFrame>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+  const nav = await screen.findByRole("navigation", { name: "设置" });
+  for (const page of ["常规", "服务商"]) {
+    fireEvent.click(within(nav).getByRole("button", { name: new RegExp(page) }));
+    for (const [name, command] of [
+      ["最小化", "minimize"],
+      ["最大化", "toggle_maximize"],
+      ["关闭", "close"],
+    ] as const) {
+      const button = screen.getByRole("button", { name });
+      expect(button.closest('[inert], [aria-hidden="true"]')).toBeNull();
+      expect(button.closest(".window-titlebar")).not.toBeNull();
+      windowCalls.length = 0;
+      fireEvent.click(button);
+      await waitFor(() => expect(windowCalls).toContain(`plugin:window|${command}`));
+    }
+  }
 });
 
 it("设置区接管左栏：返回与 Esc 回到原会话且滚动位置不变", async () => {

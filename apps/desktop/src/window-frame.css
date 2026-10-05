@@ -6,9 +6,9 @@
 .window-titlebar {
   position: absolute;
   top: 0;
-  left: 236px;
+  left: var(--sidebar-width, 236px);
   right: 0;
-  z-index: 20;
+  z-index: 21;
   display: flex;
   height: 32px;
   background: var(--a-bg);
@@ -50,6 +50,9 @@
 }
 .window-frame .main {
   padding-top: 32px;
+}
+.window-frame .settings-over {
+  top: 32px;
 }
 .window-error {
   position: absolute;
