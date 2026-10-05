@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 
 import type { PinnedRow, ProjectNode, SessionRow, SessionTree } from "./session-tree";
 
-/** 设置区的导航项（ADR-0046 2026-10-05 修订第 1 条） */
-export type SettingsSection = "general" | "models" | "providers" | "appearance";
+/** 设置区的导航项（ADR-0046 2026-10-05 修订第 1 条；logs = 后台日志页） */
+export type SettingsSection = "general" | "models" | "providers" | "appearance" | "logs";
 
 export interface SidebarProps {
   tree: SessionTree;
@@ -116,6 +116,32 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
           stroke="currentColor"
           strokeWidth="1.3"
           strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
+  {
+    key: "logs",
+    label: "后台日志",
+    icon: (
+      <svg {...GLYPH_PROPS}>
+        <rect
+          x="1.8"
+          y="2.5"
+          width="12.4"
+          height="11"
+          rx="1.6"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+        />
+        <path
+          d="M4.4 6.2l2.3 1.9-2.3 1.9M7.8 10h3.8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
       </svg>
     ),

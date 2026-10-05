@@ -2,11 +2,14 @@ import { createRpcClient, type RpcClient } from "@nocturne/rpc/client";
 
 import type { DesktopHost } from "./host";
 import { projectKey } from "./session-tree";
-import { TauriLineTransport } from "./transport";
+import { DesktopError, TauriLineTransport } from "./transport";
 
 export interface BackendExited {
   key: string;
+  /** 退出后台的工作区路径：重启该后台时复用 */
+  workspace: string;
   code: number | null;
+  /** closed 消息携带的 stderr 尾部（缓冲随进程回收后只有这里有） */
   stderr: string[];
 }
 
@@ -65,13 +68,13 @@ export class BackendPool {
           }
         }
         void transport.exited.then(({ code, stderr }) => {
-          // 后台退出：从池中移除并通知（UI 显示"后台已退出"与重新连接）
+          // 后台退出：从池中移除并通知（UI 显示"后台已退出"与重启入口）
           this.echoes.delete(client);
           if (this.entries.get(key) === entry) {
             this.entries.delete(key);
             for (const listener of this.exitListeners) {
               try {
-                listener({ key, code, stderr });
+                listener({ key, workspace: entry.workspace, code, stderr });
               } catch {
                 // 监听器异常不影响其他监听器
               }
@@ -80,8 +83,16 @@ export class BackendPool {
         });
         return client;
       } catch (error) {
-        // 握手失败（含 protocol_version_mismatch）：关闭后台，把错误抛给 UI
+        // 握手失败（含 protocol_version_mismatch、后台秒退）：关闭后台，并把
+        // 进程退出码与 stderr 尾部带进错误——否则横幅只看到"连接已断开"，
+        // 后台为什么没起来无从排查。
         transport.close();
+        const { code, stderr } = await transport.exited;
+        const tail = stderr.slice(-5).filter((line) => line.trim() !== "");
+        if (tail.length > 0 && error instanceof Error) {
+          const exitNote = code === null ? "" : `（退出码 ${code}）`;
+          throw new DesktopError("backend_died", `${error.message}${exitNote}\n${tail.join("\n")}`);
+        }
         throw error;
       }
     })();
@@ -119,8 +130,13 @@ export class BackendPool {
     return undefined;
   }
 
-  runningKeys(): string[] {
-    return [...this.entries.keys()];
+  /** 运行中后台的快照：「后台日志」页的后台选择器数据 */
+  running(): { key: string; workspace: string; backendId: number }[] {
+    return [...this.entries.values()].map((entry) => ({
+      key: entry.key,
+      workspace: entry.workspace,
+      backendId: entry.transport.backendId,
+    }));
   }
 
   /**

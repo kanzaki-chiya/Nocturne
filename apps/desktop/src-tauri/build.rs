@@ -5,6 +5,7 @@ fn main() {
                 "backend_open",
                 "backend_send",
                 "backend_close",
+                "backend_stderr",
                 "node_probe",
                 "plain_workspace",
                 "pick_images",

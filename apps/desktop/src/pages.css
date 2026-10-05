@@ -1226,3 +1226,47 @@
     grid-row: 2;
   }
 }
+
+/* 后台日志页（BackendLogsPage） */
+.page3 .ph3 .ddw {
+  min-width: 240px;
+}
+.page3 .logpage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 28px 20px;
+  overflow: hidden;
+}
+.page3 .logempty {
+  margin: auto;
+  color: var(--a-muted);
+  font-size: 13px;
+  text-align: center;
+}
+.page3 .logerr {
+  color: var(--a-error);
+  font-size: 12.5px;
+}
+.page3 .logview {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--a-border);
+  border-radius: 10px;
+  background: var(--a-input);
+  font: 11.5px/1.65 var(--mono);
+  color: var(--a-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+@container settings-content (width < 700px) {
+  .page3 .logpage {
+    padding-inline: 16px;
+  }
+}

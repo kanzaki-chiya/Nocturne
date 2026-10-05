@@ -78,6 +78,12 @@ impl Backend {
         }
         buf.push_back(line.into());
     }
+
+    /// 内存 stderr 缓冲的快照：最近 STDERR_BUFFER_LINES 行，每行 ≤ STDERR_MAX_LINE 字节。
+    /// 缓冲只存在于内存，不写盘；进程退出后随 Backend 一起回收。
+    fn stderr_lines(&self) -> Vec<String> {
+        lock(&self.stderr).iter().cloned().collect()
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -304,6 +310,17 @@ impl AppState {
 
     pub fn remove_backend(&self, id: u32) {
         lock(&self.registry).backends.remove(&id);
+    }
+
+    /// backend_stderr 命令的实现主体，与命令包装分开便于单测。
+    /// 回收时机：退出监督线程发出 closed 消息后立即 remove_backend，此后
+    /// backend_stderr 返回 unknown_backend；已退出后台的尾部日志只能从
+    /// closed 消息携带的 stderr 字段读取。页面重载与应用退出路径同样经
+    /// 退出监督线程回收，没有第二条路径。
+    pub fn backend_stderr(&self, id: u32) -> CmdResult<Vec<String>> {
+        self.backend(id)
+            .map(|backend| backend.stderr_lines())
+            .ok_or_else(|| CommandError::new("unknown_backend", "后台不存在或已退出"))
     }
 
     /// 所有后台的快照，包含正在被旧页面清理的后台，供整个应用退出时使用。
@@ -578,6 +595,16 @@ pub async fn backend_close(
     Ok(())
 }
 
+/// 返回后台内存里的 stderr 缓冲（最近 500 行、每行 ≤ 64 KiB）。
+/// 只读运行中或尚未回收的后台；已退出后台经 closed 消息携带 stderr。
+#[tauri::command]
+pub async fn backend_stderr(
+    state: tauri::State<'_, Arc<AppState>>,
+    backend_id: u32,
+) -> CmdResult<Vec<String>> {
+    state.backend_stderr(backend_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -810,6 +837,123 @@ mod tests {
         assert!(kinds[..closed_pos].iter().all(|k| k.starts_with("line:")));
         assert_eq!(kinds.last().unwrap(), "closed:Some(3)");
         assert!(kinds.iter().any(|k| k == "line:two&three"));
+    }
+
+    /// 经 open_in_page 登记一个执行任意命令的后台（on_exit 从表里移除）。
+    fn open_with(state: &Arc<AppState>, command: Command) -> CmdResult<u32> {
+        let generation = state.page_generation();
+        let owner = Arc::clone(state);
+        state.open_in_page(generation, |id| {
+            let owner = Arc::clone(&owner);
+            spawn_backend(id, command, |_| {}, move |id| owner.remove_backend(id))
+                .map_err(|error| CommandError::new("spawn_failed", error.to_string()))
+        })
+    }
+
+    #[test]
+    fn backend_stderr_reads_buffer_and_rejects_unknown_ids() {
+        let state = Arc::new(AppState::new(std::path::PathBuf::new()));
+        let error = state.backend_stderr(424_242).unwrap_err();
+        assert_eq!(error.code, "unknown_backend");
+
+        // 子进程先往 stderr 写两行再停住（不立即退出，保证回收前可读）
+        #[cfg(windows)]
+        let mut command = {
+            let mut c = Command::new("cmd");
+            c.args([
+                "/c",
+                "echo first-err>&2& echo second-err>&2& timeout /t 30 /nobreak >nul",
+            ]);
+            c
+        };
+        #[cfg(unix)]
+        let mut command = {
+            let mut c = Command::new("sh");
+            c.args(["-c", "echo first-err >&2; echo second-err >&2; sleep 30"]);
+            c
+        };
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        let id = open_with(&state, command).unwrap();
+
+        // stderr 读线程异步写缓冲：轮询直到两行都进来
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        let lines = loop {
+            let lines = state.backend_stderr(id).unwrap();
+            if lines.len() >= 2 {
+                break lines;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "stderr 未及时进入缓冲"
+            );
+            thread::sleep(Duration::from_millis(20));
+        };
+        assert!(lines.iter().any(|line| line.contains("first-err")));
+        assert!(lines.iter().any(|line| line.contains("second-err")));
+        close_backend(&state.backend(id).unwrap(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn backend_stderr_buffer_is_bounded() {
+        let state = Arc::new(AppState::new(std::path::PathBuf::new()));
+        let id = state
+            .open_in_page(state.page_generation(), |id| spawn_sort(&state, id))
+            .unwrap();
+        let backend = state.backend(id).unwrap();
+        for i in 0..STDERR_BUFFER_LINES + 10 {
+            backend.push_stderr_note(format!("line-{i}"));
+        }
+        let lines = state.backend_stderr(id).unwrap();
+        assert_eq!(lines.len(), STDERR_BUFFER_LINES);
+        assert_eq!(lines.first().unwrap(), "line-10");
+        assert_eq!(
+            lines.last().unwrap(),
+            &format!("line-{}", STDERR_BUFFER_LINES + 9)
+        );
+        close_backend(&backend, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn backend_stderr_is_reclaimed_after_exit() {
+        // closed 发出后退出监督线程立即移出登记表，此后读取报 unknown_backend；
+        // 已退出后台的尾部 stderr 只能经 closed 消息携带的副本获取。
+        let state = Arc::new(AppState::new(std::path::PathBuf::new()));
+        #[cfg(windows)]
+        let mut command = {
+            let mut c = Command::new("cmd");
+            c.args(["/c", "echo bye>&2& exit /b 5"]);
+            c
+        };
+        #[cfg(unix)]
+        let mut command = {
+            let mut c = Command::new("sh");
+            c.args(["-c", "echo bye >&2; exit 5"]);
+            c
+        };
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let id = open_with(&state, command).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        loop {
+            match state.backend_stderr(id) {
+                Err(error) => {
+                    assert_eq!(error.code, "unknown_backend");
+                    break;
+                }
+                Ok(_) => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "后台退出后 stderr 缓冲未回收"
+                    );
+                    thread::sleep(Duration::from_millis(20));
+                }
+            }
+        }
     }
 
     #[test]
