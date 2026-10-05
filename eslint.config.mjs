@@ -67,6 +67,8 @@ export default tseslint.config(
       "coverage/",
       "**/src-tauri/target/",
       "**/src-tauri/gen/",
+      // 打包产物：scripts/bundle-nctrn.mjs 生成的单文件后台
+      "**/src-tauri/resources/",
     ],
   },
 );
