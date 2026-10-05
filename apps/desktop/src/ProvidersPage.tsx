@@ -141,8 +141,8 @@ function FetchedModels({ models, open }: { models: FetchedModel[]; open: boolean
       <div className="fr h">
         <span>模型</span>
         <span>能力</span>
-        <span className="num">上下文</span>
-        <span className="num">最大输出</span>
+        <span className="num model-context">上下文</span>
+        <span className="num model-output">最大输出</span>
       </div>
       <div className="fbody">
         {models.map((m) => {
@@ -156,8 +156,8 @@ function FetchedModels({ models, open }: { models: FetchedModel[]; open: boolean
                 {r && <b title="推理">R</b>}
                 {m.imageInput === true && <b title="看图">I</b>}
               </span>
-              <span className="num">{fullTokens(m.contextWindow)}</span>
-              <span className="num">{shortTokens(m.maxOutputTokens)}</span>
+              <span className="num model-context">{fullTokens(m.contextWindow)}</span>
+              <span className="num model-output">{shortTokens(m.maxOutputTokens)}</span>
             </div>
           );
         })}
@@ -176,6 +176,7 @@ export function ProvidersPage({
   inUse,
   openUrl,
   providersVersion,
+  onOpenModels,
 }: {
   /** 常驻后台的 client；全局服务商配置与 cwd 无关，可为 undefined（尚未就绪） */
   client: RpcClient | undefined;
@@ -186,6 +187,7 @@ export function ProvidersPage({
   openUrl: (url: string) => void;
   /** providersChanged 计数：变化时重取 */
   providersVersion: number;
+  onOpenModels?: (() => void) | undefined;
 }) {
   const [data, setData] = useState<{
     providers: ProviderOverview[];
@@ -325,6 +327,7 @@ export function ProvidersPage({
                   defaultKey={data.defaultKey}
                   openUrl={openUrl}
                   onChanged={() => void refresh()}
+                  onOpenModels={onOpenModels}
                 />
               )}
               {selPreset !== undefined && (
@@ -365,6 +368,7 @@ function ProviderDetail({
   defaultKey,
   openUrl,
   onChanged,
+  onOpenModels,
 }: {
   client: RpcClient;
   provider: ProviderOverview;
@@ -373,6 +377,7 @@ function ProviderDetail({
   defaultKey: string | null;
   openUrl: (url: string) => void;
   onChanged: () => void;
+  onOpenModels?: (() => void) | undefined;
 }) {
   const [models, setModels] = useState<ModelSettingsView[] | null>(null);
   const [query, setQuery] = useState("");
@@ -485,10 +490,12 @@ function ProviderDetail({
   return (
     <>
       <div className="t1">
-        <h3 className="mono">{p.id}</h3>
-        {current && <span className="tagc">当前</span>}
-        {failed(p) && <span className="tagw">已失效</span>}
-        {p.overridden && <span className="tagw">被更高层覆盖</span>}
+        <div className="provider-heading">
+          <h3 className="mono">{p.id}</h3>
+          {current && <span className="tagc">当前</span>}
+          {failed(p) && <span className="tagw">已失效</span>}
+          {p.overridden && <span className="tagw">被更高层覆盖</span>}
+        </div>
         <span className="acts">
           {(auth === "apiKey" || auth === "none") && p.managed && (
             <button
@@ -634,8 +641,8 @@ function ProviderDetail({
         <div className="mr h">
           <span>模型</span>
           <span>能力</span>
-          <span className="num">上下文</span>
-          <span className="num">最大输出</span>
+          <span className="num model-context">上下文</span>
+          <span className="num model-output">最大输出</span>
           <span />
         </div>
         {filtered.map((m) => {
@@ -654,8 +661,10 @@ function ProviderDetail({
                 {c.r && <b title="推理">R</b>}
                 {c.i && <b title="图片输入">I</b>}
               </span>
-              <span className="num">{fullTokens(m.fields.contextWindow.value)}</span>
-              <span className="num">{shortTokens(m.fields.maxOutputTokens.value)}</span>
+              <span className="num model-context">{fullTokens(m.fields.contextWindow.value)}</span>
+              <span className="num model-output">
+                {shortTokens(m.fields.maxOutputTokens.value)}
+              </span>
               <a
                 className="lnk"
                 onClick={() => {
@@ -673,7 +682,13 @@ function ProviderDetail({
           </div>
         )}
       </div>
-      <span className="fine">R 推理 · I 图片输入。默认模型在设置页修改。</span>
+      <span className="fine">
+        R 推理 · I 图片输入。默认模型在「
+        <button type="button" className="lk" onClick={onOpenModels}>
+          模型
+        </button>
+        」页修改。
+      </span>
 
       {editModel !== null && (
         <ModelSettingsDialog

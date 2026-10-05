@@ -137,7 +137,8 @@
 }
 .page3 .pane .t1 {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 10px;
 }
 .page3 .pane .t1 h3 {
@@ -146,7 +147,6 @@
   font-weight: 700;
 }
 .page3 .pane .t1 .acts {
-  margin-left: auto;
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
@@ -173,9 +173,7 @@
   margin: 0;
   font-size: 12.5px;
   color: var(--a-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .page3 .kv dd.mono {
   font-family: var(--mono);
@@ -225,11 +223,12 @@
   border: 1px solid var(--a-border);
   border-radius: 10px;
   overflow: hidden auto;
+  flex-shrink: 0;
   min-height: 0;
 }
 .page3 .mr {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 56px 88px 70px 58px;
+  grid-template-columns: minmax(12ch, 1fr) 36px 88px 70px 32px;
   gap: 12px;
   align-items: center;
   padding: 7px 14px;
@@ -489,7 +488,7 @@
 }
 .page3 .fr {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 52px 76px 60px;
+  grid-template-columns: minmax(12ch, 1fr) 36px 76px 60px;
   gap: 10px;
   align-items: center;
   padding: 3px 10px;
@@ -1074,7 +1073,7 @@
 .sets-foot {
   margin: 10px 0 0 12px;
 }
-.sets-foot .lk {
+.page3 .lk {
   color: var(--a-accent);
   background: none;
   border: 0;
@@ -1082,11 +1081,146 @@
   font: inherit;
   cursor: pointer;
 }
-.sets-foot .lk:hover {
+.page3 .lk:hover {
   text-decoration: underline;
 }
-.sets-foot .lk:focus-visible {
+.page3 .lk:focus-visible {
   outline: 2px solid var(--a-accent);
   outline-offset: 2px;
   border-radius: 3px;
+}
+
+/* 设置布局仅依据容器宽度；会话左栏保持原宽度。 */
+#root {
+  container: settings-layout / inline-size;
+}
+.body.settings-mode {
+  grid-template-columns: 295px minmax(0, 1fr);
+}
+@container settings-layout (width < 1000px) {
+  .body.settings-mode {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+}
+.settings-over {
+  container: settings-content / inline-size;
+}
+.page3 .pane {
+  container: provider-detail / inline-size;
+  min-width: 0;
+}
+.page3 .plist {
+  min-width: 0;
+}
+.page3 .plist .nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.page3 .plist a .r {
+  min-width: 0;
+  max-width: 52%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.page3 .provider-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.page3 .provider-heading h3 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.page3 .tagc,
+.page3 .tagw,
+.page3 .acts .btn,
+.page3 .s3 .v .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.page3 .mr .m {
+  flex-wrap: wrap;
+}
+.page3 .mr .m > span:first-child {
+  flex-basis: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.page3 .model-value {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+.page3 .model-primary {
+  overflow-wrap: anywhere;
+}
+.page3 .model-provider {
+  color: var(--a-faint);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@container settings-content (width < 900px) {
+  .page3 .cols3 {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+  .page3 .pane {
+    padding: 16px;
+  }
+}
+@container provider-detail (width < 520px) {
+  .page3 .kv {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .page3 .mr {
+    grid-template-columns: minmax(12ch, 1fr) 36px 88px 32px;
+    gap: 8px;
+    padding-inline: 10px;
+  }
+  .page3 .fr {
+    grid-template-columns: minmax(12ch, 1fr) 36px 76px;
+  }
+  .page3 .model-output {
+    display: none;
+  }
+}
+@container provider-detail (width < 400px) {
+  .page3 .mr {
+    grid-template-columns: minmax(12ch, 1fr) 36px 32px;
+  }
+  .page3 .fr {
+    grid-template-columns: minmax(12ch, 1fr) 36px;
+  }
+  .page3 .model-context {
+    display: none;
+  }
+  .page3 .pbanner {
+    flex-wrap: wrap;
+  }
+}
+@container provider-detail (width < 320px) {
+  .page3 .kv {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@container settings-content (width < 700px) {
+  .page3 .sets3 {
+    padding-inline: 16px;
+  }
+  .page3 .model-setting {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+  }
+  .page3 .model-setting .v {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
 }

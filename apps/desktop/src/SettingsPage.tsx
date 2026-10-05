@@ -67,6 +67,22 @@ function refText(ref: string): string {
   return at < 0 ? ref : `${ref.slice(0, at)} · ${ref.slice(at + 1)}`;
 }
 
+/** 模型名与档位优先展示，服务商单独一行允许省略。 */
+function ModelValue({ value, effort }: { value: string; effort?: string | undefined }) {
+  const at = value.indexOf("/");
+  const provider = at < 0 ? "" : value.slice(0, at);
+  const model = at < 0 ? value : value.slice(at + 1);
+  return (
+    <span className="model-value" title={refText(value)}>
+      <span className="model-primary">
+        {model}
+        {effort !== undefined ? ` · ${effort}` : ""}
+      </span>
+      {provider !== "" && <span className="model-provider">{provider}</span>}
+    </span>
+  );
+}
+
 function reviewerText(cfg: SecurityReviewerConfig | undefined): string {
   if (cfg === undefined || cfg.backend === "off") return "关闭";
   if (cfg.backend === "model") return `模型 · ${refText(refKey(cfg.model))}`;
@@ -209,13 +225,6 @@ export function SettingsPage({
   const errLine = (key: string) =>
     rowError[key] !== undefined ? <span className="errl">{rowError[key]}</span> : null;
   const rowClass = (key: string) => `s3${rowError[key] !== undefined ? " bad" : ""}`;
-
-  const defaultText = (() => {
-    const model = defaultModelItem?.effective;
-    if (model === undefined) return undefined;
-    const effort = effortItem?.effective;
-    return `${refText(model)}${effort !== undefined ? ` · ${effort}` : ""}`;
-  })();
 
   const changeWorkspace = async (dir: string | null) => {
     setWsBusy(true);
@@ -383,12 +392,14 @@ export function SettingsPage({
         {section === "models" && items !== null && (
           <>
             <h5>默认</h5>
-            <div className={rowClass("defaultModel")}>
+            <div className={`${rowClass("defaultModel")} model-setting`}>
               <span className="n">默认模型与档位</span>
               <span className="v">
-                <span className={defaultText === undefined ? "ro" : "t"}>
-                  {defaultText ?? "未设置"}
-                </span>
+                {defaultModelItem?.effective === undefined ? (
+                  <span className="ro">未设置</span>
+                ) : (
+                  <ModelValue value={defaultModelItem.effective} effort={effortItem?.effective} />
+                )}
                 <button
                   className="btn"
                   onClick={() => {
@@ -407,15 +418,17 @@ export function SettingsPage({
               const key = `modelRoles.${role}` as const;
               const it = item(key);
               return (
-                <div key={role} className={rowClass(key)}>
+                <div key={role} className={`${rowClass(key)} model-setting`}>
                   <span className="n">
                     {label}
                     {hint !== undefined && <small>{hint}</small>}
                   </span>
                   <span className="v">
-                    <span className={it?.effective === undefined ? "ro" : "t"}>
-                      {it?.effective === undefined ? unset : refText(it.effective)}
-                    </span>
+                    {it?.effective === undefined ? (
+                      <span className="ro">{unset}</span>
+                    ) : (
+                      <ModelValue value={it.effective} />
+                    )}
                     <button
                       className="btn"
                       onClick={() => {

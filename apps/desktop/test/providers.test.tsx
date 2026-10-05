@@ -205,8 +205,12 @@ describe("ProvidersPage 列表与详情", () => {
       }),
     );
     await server.initialize();
+    const onOpenModels = vi.fn();
     render(
-      <ProvidersPage {...pageProps({ client: server.client, currentProvider: "openrouter" })} />,
+      <ProvidersPage
+        {...pageProps({ client: server.client, currentProvider: "openrouter" })}
+        onOpenModels={onOpenModels}
+      />,
     );
     await screen.findByText("已配置");
     const list = screen.getByRole("navigation", { name: "服务商列表" });
@@ -215,6 +219,19 @@ describe("ProvidersPage 列表与详情", () => {
     await waitFor(() => expect(row("openrouter")).toBeDefined());
     expect(row("openrouter")?.textContent).toContain("当前");
     expect(row("openrouter")?.textContent).toContain("2 个模型");
+    const page = screen.getByTestId("providers-page");
+    const heading = page.querySelector(".provider-heading");
+    expect(heading?.querySelector("h3")?.textContent).toBe("openrouter");
+    expect(heading?.querySelector(".tagc")?.textContent).toBe("当前");
+    expect(heading?.querySelector(".acts")).toBeNull();
+    expect(page.querySelector(".t1 > .acts")).not.toBeNull();
+    await screen.findByText("Claude Sonnet 4");
+    expect(page.querySelectorAll(".mr .model-context")).toHaveLength(3);
+    expect(page.querySelectorAll(".mr .model-output")).toHaveLength(3);
+    expect(page.querySelector(".mr .m")).not.toBeNull();
+    expect(page.querySelector(".mr .cap")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "模型" }));
+    expect(onOpenModels).toHaveBeenCalledTimes(1);
     expect(row("chatgpt")?.querySelector(".r.warn")?.textContent).toContain("已失效");
     // 已配置的 openrouter 不再出现在「可添加」；自定义预设始终可添加
     expect(row("OpenRouter")).toBeUndefined();

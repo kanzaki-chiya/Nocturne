@@ -200,7 +200,11 @@ describe("SettingsPage", () => {
     await server.initialize();
     const onConfigSaved = vi.fn();
     render(<SettingsPage {...props(server.client, { section: "models", onConfigSaved })} />);
-    await screen.findByText("openrouter · gpt-5 · high");
+    const primary = await screen.findByText("gpt-5 · high");
+    expect(primary.className).toBe("model-primary");
+    expect(primary.parentElement?.title).toBe("openrouter · gpt-5");
+    expect(primary.parentElement?.querySelector(".model-provider")?.textContent).toBe("openrouter");
+    expect(primary.closest(".s3")?.classList.contains("model-setting")).toBe(true);
     fireEvent.click(row("默认模型与档位").querySelector("button") ?? document.body);
     await screen.findByRole("dialog", { name: "默认模型与档位" });
     fireEvent.click(screen.getByRole("button", { name: "medium" }));
@@ -222,6 +226,27 @@ describe("SettingsPage", () => {
       const calls = server.calls.filter((c) => c.method === "runtime.setDefaultModel");
       expect(calls[1]?.params).toEqual({ model: "openrouter/tiny", reasoningEffort: null });
     });
+    server.close();
+  });
+
+  it("模型角色先显示完整模型名，服务商单独展示", async () => {
+    const value = "opencode-go/deepseek-v4.1-flash";
+    const server = fakeServer(
+      handlers({
+        "runtime.describeSettings": ITEMS.map((item) =>
+          item.key === "modelRoles.vision" ? { ...item, effective: value } : item,
+        ),
+      }),
+    );
+    await server.initialize();
+    render(<SettingsPage {...props(server.client, { section: "models" })} />);
+    const primary = await screen.findByText("deepseek-v4.1-flash");
+    expect(primary.className).toBe("model-primary");
+    expect(primary.parentElement?.querySelector(".model-provider")?.textContent).toBe(
+      "opencode-go",
+    );
+    expect(primary.parentElement?.title).toBe("opencode-go · deepseek-v4.1-flash");
+    expect(primary.closest(".s3")?.classList.contains("model-setting")).toBe(true);
     server.close();
   });
 

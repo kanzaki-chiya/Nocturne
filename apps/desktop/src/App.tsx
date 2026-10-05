@@ -463,7 +463,7 @@ export function App({ host }: { host: DesktopHost }) {
   }));
 
   return (
-    <div className="body">
+    <div className={`body${page !== null ? " settings-mode" : ""}`}>
       <Sidebar
         tree={tree}
         pinnedIds={pinnedIds}
@@ -567,6 +567,9 @@ export function App({ host }: { host: DesktopHost }) {
                   inUse={providersInUse}
                   openUrl={(url) => void host.openUrl(url)}
                   providersVersion={providersVersion}
+                  onOpenModels={() => {
+                    setPage("models");
+                  }}
                 />
               </PaneErrorBoundary>
             ) : (
