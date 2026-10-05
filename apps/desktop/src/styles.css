@@ -57,7 +57,7 @@
   }
 }
 
-/* 设置页「桌面端 · 主题」：非跟随系统时用 data-theme 覆盖 prefers-color-scheme */
+/* 设置 › 外观 · 主题：非跟随系统时用 data-theme 覆盖 prefers-color-scheme */
 :root[data-theme="light"] {
   --a-bg: #fafafb;
   --a-side: #f0f0f4;
@@ -255,6 +255,62 @@ button {
   margin-top: auto;
   border-top: 1px solid var(--a-border);
   padding-top: 8px;
+}
+
+/* 设置区接管左栏（desktop-v4.html） */
+.snav {
+  gap: 6px;
+}
+.snav .sback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--a-secondary);
+  font-weight: 500;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.snav .sback:hover {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+.snav .sback:focus-visible {
+  outline: 2px solid var(--a-accent);
+  outline-offset: -2px;
+}
+.snav .sback .k {
+  margin-left: auto;
+  font: 11px/1 var(--mono);
+  color: var(--a-faint);
+  border: 1px solid var(--a-border);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+.snav h4 {
+  margin-top: 12px;
+}
+.snav .nav .item {
+  padding: 7px 10px;
+}
+.snav .nav .item svg {
+  width: 15px;
+  height: 15px;
+  color: var(--a-muted);
+  flex: none;
+}
+.snav .nav .item.on svg {
+  color: var(--a-accent);
+}
+.snav .ver {
+  margin-top: auto;
+  padding: 8px 10px 2px;
+  border-top: 1px solid var(--a-border);
+  font-size: 11.5px;
+  color: var(--a-faint);
 }
 
 .nav {

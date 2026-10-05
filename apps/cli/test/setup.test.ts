@@ -62,7 +62,8 @@ it.each(["deepseek", "grok-cli"])(
     const { io, out } = ioWith(stdin);
     const saved: unknown[] = [];
     const config = {
-      credentials: { backend: () => "none" },
+      credentials: { backend: () => "none", has: () => false },
+      findProviderConflict: async () => undefined,
       saveSetupProvider: async (entry: unknown) => {
         saved.push(entry);
       },

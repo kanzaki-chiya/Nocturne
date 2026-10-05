@@ -9,10 +9,7 @@ import type { Runtime, RuntimeConfig, RuntimeSession } from "@nocturne/core";
 import type { RpcMethodName } from "../shared/methods.js";
 
 /** 没有（或没有一一对应的）RPC 方法的 Runtime 成员，附原因 */
-export const RUNTIME_NOT_MAPPED = {
-  updateProviders:
-    "参数是含函数的进程内 RuntimeConfig，无法序列化；服务端在配置变更方法后自动重载，客户端收 runtime.providersChanged 通知",
-} as const satisfies Partial<Record<keyof Runtime, string>>;
+export const RUNTIME_NOT_MAPPED = {} as const satisfies Partial<Record<keyof Runtime, string>>;
 
 export const RUNTIME_METHODS: Record<
   Exclude<keyof Runtime, keyof typeof RUNTIME_NOT_MAPPED>,
@@ -35,6 +32,9 @@ export const RUNTIME_METHODS: Record<
   listRecentModels: "runtime.listRecentModels",
   getPreference: "runtime.getPreference",
   setPreference: "runtime.setPreference",
+  // 参数是含函数的进程内 RuntimeConfig，无法序列化：服务端从磁盘重载出新配置
+  // 再调用它（配置变更方法之后也自动这样做），客户端收 runtime.providersChanged
+  updateProviders: "runtime.reloadConfig",
 };
 
 export const SESSION_NOT_MAPPED = {
@@ -86,6 +86,8 @@ export const CONFIG_NOT_MAPPED = {
   setWorkspaceTrusted: "项目信任由 nctrn trust 管理，第一版不经 RPC",
   credentials: "凭据存储对象，含明文凭据，不离开服务端进程",
   saveSetupProvider: "底层写入接口，经 provider.prepareProvider + provider.commitProvider 使用",
+  findProviderConflict:
+    "名称唯一性检查，provider.prepareProvider / provider.commitProvider 内部调用，冲突以 -32005 data.field=name 报告",
   recordRecentModel: "setModel / 新建会话时 Runtime 自动记录",
   providerSetupWarning: "随 provider.describeProviders 的 setupWarning 返回",
 } as const satisfies Partial<Record<keyof RuntimeConfig, string>>;

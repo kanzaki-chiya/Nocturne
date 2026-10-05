@@ -1,0 +1,155 @@
+/* 自绘下拉（Dropdown.tsx；desktop-v4.html A 屏） */
+.ddw {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+.dd {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 260px;
+  max-width: 100%;
+  padding: 6px 10px 6px 12px;
+  border: 1px solid var(--a-border);
+  border-radius: 8px;
+  background: var(--a-raised);
+  color: var(--a-text);
+  font: 500 13px/1.3 var(--sans);
+  text-align: left;
+  cursor: pointer;
+}
+.dd:hover {
+  border-color: var(--a-borderStrong);
+}
+.dd:focus-visible {
+  outline: none;
+  border-color: var(--a-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-accent) 18%, transparent);
+}
+.dd:disabled {
+  cursor: default;
+  color: var(--a-faint);
+}
+.dd .dd-v {
+  flex: none;
+  white-space: nowrap;
+}
+.dd .dd-d {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--a-faint);
+  font-weight: 400;
+  font-size: 12px;
+}
+.dd .dd-a {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  color: var(--a-muted);
+  transition: transform 0.15s;
+}
+.dd.open {
+  border-color: var(--a-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-accent) 18%, transparent);
+  background: var(--a-panel);
+}
+.dd.open .dd-a {
+  transform: rotate(180deg);
+  color: var(--a-accent);
+}
+.ddm {
+  position: fixed;
+  z-index: 60;
+  font-family: var(--sans);
+  background: var(--a-panel);
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 10px;
+  padding: 5px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--a-borderStrong) transparent;
+}
+.ddm [role="listbox"] {
+  display: grid;
+  gap: 1px;
+}
+.ddm .ddm-h {
+  padding: 5px 10px 6px 8px;
+  font-size: 11.5px;
+  color: var(--a-faint);
+}
+.ddm .ddm-n {
+  margin: 4px 0 0;
+  padding: 6px 10px 3px 8px;
+  border-top: 1px solid var(--a-border);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--a-muted);
+}
+.ddm .ddo {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  column-gap: 8px;
+  align-items: baseline;
+  padding: 7px 10px 7px 8px;
+  border-radius: 7px;
+  color: var(--a-text);
+  cursor: pointer;
+}
+.ddm .ddo.sep {
+  margin-top: 9px;
+  position: relative;
+}
+.ddm .ddo.sep::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: -5px;
+  border-top: 1px solid var(--a-border);
+}
+.ddm .ddo .ck {
+  color: var(--a-accent);
+  font-size: 12px;
+  text-align: center;
+}
+.ddm .ddo b {
+  font-weight: 500;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ddm .ddo .tg {
+  font-size: 11px;
+  color: var(--a-faint);
+}
+.ddm .ddo .ds {
+  grid-column: 2 / 4;
+  color: var(--a-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.ddm .ddo.on {
+  background: var(--a-sel);
+}
+.ddm .ddo.act {
+  background: var(--a-raised);
+}
+.ddm .ddo.on.act {
+  background: var(--a-selStrong);
+}
+.ddm .ddo.risk b,
+.ddm .ddo.risk .tg {
+  color: var(--a-warning);
+}
+.ddm .ddo[aria-disabled="true"] {
+  cursor: default;
+  color: var(--a-faint);
+}

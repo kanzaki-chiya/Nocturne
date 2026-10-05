@@ -1,4 +1,13 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  Fragment,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { marked, type Token, type Tokens } from "marked";
 import {
   parseFileRefs,
@@ -206,6 +215,26 @@ function Markdown({ text: markdown, openUrl }: { text: string; openUrl: OpenUrl 
   );
 }
 
+/**
+ * 消息流与思考块之间的滚动协作：思考块要知道一屏多高（决定是否显示底部「收起思考」），
+ * 收起后由消息流决定怎么滚（跟随最新时保持在底部，否则把标题行滚回视野）。
+ */
+interface ThinkScroll {
+  viewportHeight: () => number;
+  collapsed: (header: HTMLElement) => void;
+}
+
+const ThinkScrollContext = createContext<ThinkScroll>({
+  viewportHeight: () => Number.POSITIVE_INFINITY,
+  collapsed: () => undefined,
+});
+
+function durationText(seconds: number): string {
+  if (seconds < 60) return `${String(seconds)} 秒`;
+  const rest = seconds % 60;
+  return `${String(Math.floor(seconds / 60))} 分${rest > 0 ? ` ${String(rest)} 秒` : ""}`;
+}
+
 function Think({
   messageId,
   text: reasoning,
@@ -217,7 +246,32 @@ function Think({
   parts: ReasoningMap;
   now: number;
 }) {
+  const scroll = useContext(ThinkScrollContext);
+  const [open, setOpen] = useState(false);
+  const [tall, setTall] = useState(false);
+  const header = useRef<HTMLButtonElement>(null);
+  const bodyRef = useRef<HTMLPreElement>(null);
+  const reveal = useRef(false);
   const part = parts.get(messageId)?.at(-1);
+  const body = reasoning !== "" ? reasoning : (part?.text ?? "");
+
+  // 展开时量一次：思考不到一屏就不显示底部「收起思考」，只用标题行
+  useLayoutEffect(() => {
+    if (!open) {
+      setTall(false);
+      return;
+    }
+    const el = bodyRef.current;
+    if (el !== null) setTall(el.scrollHeight > scroll.viewportHeight());
+  }, [open, body, scroll]);
+
+  // 收起后再滚：此时块已经变矮，标题行回到正常流里
+  useLayoutEffect(() => {
+    if (open || !reveal.current) return;
+    reveal.current = false;
+    if (header.current !== null) scroll.collapsed(header.current);
+  }, [open, scroll]);
+
   if (reasoning === "" && part === undefined) return null;
   const seconds =
     part?.started === undefined
@@ -225,13 +279,46 @@ function Think({
       : Math.max(0, Math.floor(((part.active ? now : (part.ended ?? now)) - part.started) / 1000));
   const label =
     seconds < 1 ? "思考" : part?.active === true ? `思考中 ${seconds}s` : `思考了 ${seconds}s`;
-  const body = reasoning !== "" ? reasoning : (part?.text ?? "");
   if (body === "") return <div className="think">{label}</div>;
+  const openLabel =
+    seconds < 1
+      ? "思考"
+      : `${part?.active === true ? "思考中" : "思考"} · ${durationText(seconds)}`;
+  const collapse = () => {
+    reveal.current = true;
+    setOpen(false);
+  };
   return (
-    <details className="think">
-      <summary>{label}</summary>
-      <pre>{body}</pre>
-    </details>
+    <div className={`think${open ? " open" : ""}`}>
+      <button
+        ref={header}
+        type="button"
+        className="think-h"
+        aria-expanded={open}
+        title={open ? "收起思考" : "展开思考"}
+        onClick={() => {
+          if (open) collapse();
+          else setOpen(true);
+        }}
+      >
+        <span className="think-label">{open ? openLabel : label}</span>
+        <span className="think-tw" aria-hidden="true">
+          {open ? "▴" : "▾"}
+        </span>
+      </button>
+      {open && (
+        <>
+          <pre ref={bodyRef}>{body}</pre>
+          {tall && (
+            <div className="think-end">
+              <button type="button" onClick={collapse}>
+                ▴ 收起思考
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1049,6 +1136,8 @@ function PermissionCard({
       cardRef.current.contains(target);
     const onKey = (event: KeyboardEvent) => {
       if (event.isComposing) return;
+      // 设置区盖住会话时（会话区 inert）快捷键属于设置区
+      if (cardRef.current?.closest("[inert]") != null) return;
       if (event.key === "Escape") {
         if (insideCard(event.target)) return;
         if (document.querySelector('[role="menu"], .composer-popup') !== null) return;
@@ -1322,6 +1411,25 @@ function ConversationContent({
   useLayoutEffect(() => {
     if (follow.current) scrollToBottom();
   });
+  // 思考块收起：跟随最新时留在底部（先于滚动事件把位置定下来，跟随不会被误关）；
+  // 否则标题行若已在视野上方，把它滚回顶部，读者停在刚收起的位置
+  const [thinkScroll] = useState<ThinkScroll>(() => ({
+    viewportHeight: () => scroll.current?.clientHeight ?? Number.POSITIVE_INFINITY,
+    collapsed: (header) => {
+      const element = scroll.current;
+      if (!element) return;
+      if (follow.current) {
+        element.scrollTop = element.scrollHeight;
+        previousTop.current = element.scrollTop;
+        return;
+      }
+      const delta = header.getBoundingClientRect().top - element.getBoundingClientRect().top;
+      if (delta < 0) {
+        element.scrollTop += delta;
+        previousTop.current = element.scrollTop;
+      }
+    },
+  }));
   useLayoutEffect(() => {
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
@@ -1359,69 +1467,71 @@ function ConversationContent({
           previousTop.current = element.scrollTop;
         }}
       >
-        <div className="conversation-transcript" ref={content}>
-          {!view.entries.length && !view.live.assistants.length && !view.live.tools.length ? (
-            <div className="conversation-empty">发送消息，开始这个会话。</div>
-          ) : null}
-          {view.entries.map((entry) => (
-            <EntryView
-              key={entry.key}
-              entry={entry}
-              openUrl={openUrl}
-              cwd={cwd}
-              parts={parts}
-              now={now}
-              images={images}
-              session={session}
-            />
-          ))}
-          {view.live.assistants.map((assistant) => (
-            <article
-              className="a"
-              key={`assistant:${assistant.messageId}`}
-              aria-label="助手实时回复"
-            >
-              <Think
-                messageId={assistant.messageId}
-                text={assistant.reasoning}
+        <ThinkScrollContext.Provider value={thinkScroll}>
+          <div className="conversation-transcript" ref={content}>
+            {!view.entries.length && !view.live.assistants.length && !view.live.tools.length ? (
+              <div className="conversation-empty">发送消息，开始这个会话。</div>
+            ) : null}
+            {view.entries.map((entry) => (
+              <EntryView
+                key={entry.key}
+                entry={entry}
+                openUrl={openUrl}
+                cwd={cwd}
                 parts={parts}
                 now={now}
+                images={images}
+                session={session}
               />
-              <Markdown text={assistant.text} openUrl={openUrl} />
-            </article>
-          ))}
-          {view.live.tools.map((tool) => {
-            const meta = toolMeta(tool.name);
-            return (
+            ))}
+            {view.live.assistants.map((assistant) => (
               <article
-                className="tool"
-                key={`tool:${tool.callId}`}
-                aria-label={`工具 ${tool.name} 实时参数`}
+                className="a"
+                key={`assistant:${assistant.messageId}`}
+                aria-label="助手实时回复"
               >
-                <div className="tool-line">
-                  <span className="ic" aria-hidden="true">
-                    {meta.icon}
-                  </span>
-                  <span className="tool-name">{meta.label}</span>
-                  <span className="tool-arg" title={tool.inputText}>
-                    {tool.inputText}
-                  </span>
-                  <span className="tool-res">接收参数中</span>
-                </div>
+                <Think
+                  messageId={assistant.messageId}
+                  text={assistant.reasoning}
+                  parts={parts}
+                  now={now}
+                />
+                <Markdown text={assistant.text} openUrl={openUrl} />
               </article>
-            );
-          })}
-          {view.notices.map((notice, index) => (
-            <div
-              key={index}
-              className={`conversation-notice conversation-notice-${notice.level}`}
-              role={notice.level === "info" ? "status" : "alert"}
-              title={notice.code}
-            >
-              {notice.message}
-            </div>
-          ))}
-        </div>
+            ))}
+            {view.live.tools.map((tool) => {
+              const meta = toolMeta(tool.name);
+              return (
+                <article
+                  className="tool"
+                  key={`tool:${tool.callId}`}
+                  aria-label={`工具 ${tool.name} 实时参数`}
+                >
+                  <div className="tool-line">
+                    <span className="ic" aria-hidden="true">
+                      {meta.icon}
+                    </span>
+                    <span className="tool-name">{meta.label}</span>
+                    <span className="tool-arg" title={tool.inputText}>
+                      {tool.inputText}
+                    </span>
+                    <span className="tool-res">接收参数中</span>
+                  </div>
+                </article>
+              );
+            })}
+            {view.notices.map((notice, index) => (
+              <div
+                key={index}
+                className={`conversation-notice conversation-notice-${notice.level}`}
+                role={notice.level === "info" ? "status" : "alert"}
+                title={notice.code}
+              >
+                {notice.message}
+              </div>
+            ))}
+          </div>
+        </ThinkScrollContext.Provider>
       </div>
       {!following ? (
         <div className="conversation-jump-row">

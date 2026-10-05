@@ -119,6 +119,7 @@ export async function createOpenRouterLogin(
   return {
     authorizeUrl: authorize.toString(),
     manualInput: "code",
+    expiresAt: lifecycle.expiresAt,
     completion: lifecycle.completion,
     async submitManual(text) {
       const code = text.trim();

@@ -41,8 +41,9 @@
 | `describeModelRoles` / `setModelRole` | → `ModelRoleInfo[]`；`setModelRole { role, ref }` → `SettingItem[]` |
 | `getPreference` / `setPreference` | `{ key }` → `string \| null`；`{ key, value? }` → `null` |
 | `listReviewerProviders` / `defaultReviewer` / `listReviewerModels` | 智能权限审查模型相关（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)） |
+| `reloadConfig` | `{}` → `null`；重新读取配置文件并重建 Provider 注册表，推 `runtime.providersChanged`（在响应之前到达）；**变更方法**，走同一配置队列 |
 
-`SessionOpened`：`{ sessionId, meta, config, warnings, recovery?, lastSeq }`。打开会话**不推事件**——事件要另行 `session.subscribe`。同一连接里已打开的会话再次 `resumeSession` 报 `session_already_open`。`Runtime.updateProviders` 不单独映射：服务端在每个 `provider.*` 变更方法之后自动重载配置并重建 Provider 注册表，客户端收 `runtime.providersChanged` 通知（见 3.3）。
+`SessionOpened`：`{ sessionId, meta, config, warnings, recovery?, lastSeq }`。打开会话**不推事件**——事件要另行 `session.subscribe`。同一连接里已打开的会话再次 `resumeSession` 报 `session_already_open`。`Runtime.updateProviders` 映射为 `runtime.reloadConfig`：服务端在每个 `provider.*` 变更方法之后已经自动重载配置并推 `runtime.providersChanged`（见 3.3），`reloadConfig` 用于**别的进程**改了配置文件之后让本服务端同步（例如桌面端一个项目后台写了 providers.json 或 settings.json，其他项目后台随之重载）。`updateSettings` / `setDefaultModel` / `setModelRole` 只写设置层，不推 `runtime.providersChanged`。服务端不追踪重载的来源：多个后台之间协调时，客户端必须自己识别由 `reloadConfig` 引起的那次通知，不再转发，否则会互相触发成环（桌面端的做法见 [desktop.md](../apps/desktop.md)）。
 
 ### 3.2 `session.*`
 
@@ -75,11 +76,11 @@
 | 方法 | 参数 → 结果 |
 |---|---|
 | `listProviderPresets` | `{}` → `ProviderPreset[]` |
-| `describeProviders` | `{}` → `{ providers: ProviderOverview[]; setupWarning? }` |
+| `describeProviders` | `{}` → `{ providers: ProviderOverview[]; setupWarning? }`；`ProviderOverview.authKind`（`"apiKey"` / `"env"` / `"account"` / `"external-file"` / `"none"`）是条目的认证方式，客户端据此决定显示「换密钥」还是「重新登录」，不再自行推断 |
 | `describeProviderSetup` | `{ presetId }` → `ProviderSetupDescription` |
 | `describeAccountStorage` | `{ providerId }` → `AccountStorageSetup \| null` |
-| `prepareProvider` | `Omit<AddProviderInput,"modelId">` → `PrepareProviderResult`（只校验、暂存草稿，不落盘） |
-| `commitProvider` | `{ draftId, manualModelId? }` → `AddProviderResult`；**变更方法** |
+| `prepareProvider` | `Omit<AddProviderInput,"modelId">` → `PrepareProviderResult`（只校验、暂存草稿，不落盘）；名称与已有服务商重复时报 -32005 / `field: "name"`（[provider-setup.md](../architecture/provider-setup.md)「名称唯一性」）。结果的 `models` 是获取到的上游模型摘要（`id`、`displayName?`、`reasoning?`、`imageInput?`、`contextWindow?`、`maxOutputTokens?`，与 `modelCount` 同数），供保存前预览 |
+| `commitProvider` | `{ draftId, manualModelId? }` → `AddProviderResult`；**变更方法**；提交时再查一次同名，准备之后别处写入了同名条目同样报 -32005 / `field: "name"` |
 | `discardProvider` | `{ draftId }` → `null` |
 | `setCredential` | `{ providerId, key }` → `null`；**变更方法** |
 | `listModelSettings` | `{ providerId }` → `ModelSettingsView[]` |
@@ -99,7 +100,7 @@
 
 ### 3.4 `login.*`
 
-登录会话（[provider-setup.md](../architecture/provider-setup.md) 第 6 节）：`start`/`startDraft` 返回 `loginId`、`authorizeUrl`（浏览器由客户端打开，服务端不打开）与 `manualInput`（`"callback-url"` / `"code"` / `"none"`；`"none"` 是设备码登录，`userCode` 供在浏览器核对），完成或失败经 `login.completed` 通知。
+登录会话（[provider-setup.md](../architecture/provider-setup.md) 第 6 节）：`start`/`startDraft` 返回 `loginId`、`authorizeUrl`（浏览器由客户端打开，服务端不打开）、`manualInput`（`"callback-url"` / `"code"` / `"none"`；`"none"` 是设备码登录，`userCode` 供在浏览器核对）与 `expiresAt`（Unix 毫秒，服务端放弃等待的时刻；客户端倒计时以它为准，不自行假设超时时长），完成或失败经 `login.completed` 通知。
 
 | 方法 | 参数 → 结果 |
 |---|---|
@@ -150,7 +151,7 @@
 | `-32002` | `SessionError` | 会话层错误码 |
 | `-32003` | `ProviderLoginError` | 登录错误码 |
 | `-32004` | RPC 层状态错误 | `not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down`、`provider_config_unavailable`（服务端未注入服务商配置）、`provider_in_use`（会话正在使用的服务商拒绝删除）、`unknown_login`（登录会话不存在或已结束） |
-| `-32005` | `ProviderSetupError`（服务商配置表单的字段错误） | `invalid_field`；`data.field` 是字段名（`preset`、`name`、`baseURL`、`credential`、`draftId`、`modelId`），客户端据此标输入框 |
+| `-32005` | `ProviderSetupError`（服务商配置表单的字段错误） | `invalid_field`；`data.field` 是字段名（`preset`、`name`、`baseURL`、`credential`、`draftId`、`modelId`），客户端据此标输入框；`name` 也用于报告与已有服务商重名（`已有同名服务商 X（所在层）`） |
 
 客户端侧另有 `connection_closed`：连接断开时所有在途请求以它失败，而不是悬挂。
 

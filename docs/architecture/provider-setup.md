@@ -45,7 +45,7 @@ API Key（掩码输入；直接回车表示改用环境变量）：********
 
 | 命令 | 行为 |
 |---|---|
-| `/provider` | CLI 列出全部服务商：名称、类型、主机名、鉴权描述、凭据状态（有效 / 即将过期 / 已失效 / 缺少）、保存位置（系统保存 / 明文保存 / 仅本次运行）、来源层，以及当前会话使用的是哪一个。不含令牌。TUI 中打开全屏**服务商页**（[tui.md](../apps/tui.md) 第 8 节） |
+| `/provider` | CLI 列出全部服务商：名称、类型、主机名、鉴权描述、凭据状态（有效 / 即将过期 / 已失效 / 缺少；判定见第 6 节 `describeProviders`）、保存位置（系统保存 / 明文保存 / 仅本次运行）、来源层，以及当前会话使用的是哪一个。不含令牌。TUI 中打开全屏**服务商页**（[tui.md](../apps/tui.md) 第 8 节） |
 | `/provider add` | 逐行向导（CLI）或服务商页内嵌向导（TUI 打开服务商页并选中预设）；保存后提示"用 /model 选择模型" |
 | `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成；等价于服务商页「换密钥」 |
 | `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置并更新 models.dev 缓存；models.dev 失败只提示，不中断刷新 |
@@ -76,7 +76,7 @@ interface ProviderSetupFile {
       capabilities?: { reasoning?; imageInput?; reasoningEffort?; editTool? }; protocol? }>——
       /provider model 与服务商页「编辑模型」写入的逐模型用户编辑（ADR-0024；protocol 见
       ADR-0026 §7；editTool 见 ADR-0035 §5），只在向导层有意义；
-      refresh 重写 models 字段时保留，同名条目整换（重新添加）时同样沿用 */
+      refresh 重写 models 字段时保留；重新添加同名服务商会被拒绝（见下文「名称唯一性」） */
   providers: ProviderConfig[];
 }
 ```
@@ -85,6 +85,13 @@ interface ProviderSetupFile {
 - 条目里的 `userModels` 不直接出现在合并结果中：加载时它被包成一个独立合成层（`providers: [{ id, models: userModels }]`）插在向导层与用户配置之间参与逐字段合并——用户编辑优先于上游声明、低于手写配置；只由该层引入的清单外模型在合并后被丢弃（详见 [config.md](config.md) 第 2 节与 [ADR-0024](../decisions/ADR-0024-model-settings-editor.md)）。
 - 写入方式与 `trust.json` 一致：整文件原子替换（临时文件 + rename）；解析失败或版本不符时忽略该文件并发出 `runtime.warning(code="provider_setup_invalid")`（不阻塞启动，与 Grant 文件的处理一致），`/provider` 在列表顶部显示该警告。
 - 只有向导与 `/provider` 写这个文件；用户也可以手工编辑，但推荐的手写位置仍是 `config.json`。
+
+**名称唯一性**：服务商 id 在合并后的全部层（providers.json、config.json、可信项目配置、环境变量、命令行参数）里唯一，比较**不区分大小写**；保存时保留用户输入的拼写，已有文件不做迁移。
+
+- 添加服务商时，`prepareProvider` 在字段校验通过后、获取模型列表之前检查一次，`commitProvider` 开头再检查一次（准备之后别的进程可能已写入同名条目）；重名抛 `ProviderSetupError("name", "已有同名服务商 grok（providers.json）")`，括号里是冲突条目所在的最高层，报错里用已有条目的原拼写。CLI、TUI 与 RPC（-32005 / `field: "name"`）都依赖这一处检查，客户端不各自实现。
+- 写文件时 `saveSetupProvider` 带模式：`create`（只有 `commitProvider` 使用）在写入前重读 providers.json，发现同 id（不分大小写）即抛 `ConfigError("provider_exists")`，`commitProvider` 把它转成上面的 name 字段错误，并撤回本次已写入的账号凭据；`replace`（缺省）保持整条替换，刷新模型列表、编辑模型等更新已有条目的路径都用它。providers.json 的写入没有跨进程锁，重读与原子替换之间仍有极小的竞争窗口，两个进程恰好同时添加同名服务商时后写者覆盖，与此前行为相同。
+- `create` 提交前先删除同 id 的**孤立凭据**（条目已被手工删掉、凭据还在），新条目不会继承旧密钥或旧账号。
+- 此前重新添加同名服务商会静默整条替换已有条目（地址、凭据方式等被新表单覆盖，只有 `userModels` 保留），属于缺陷，已直接修正，不提供兼容开关。要换地址或密钥，用服务商页的「换密钥」或先删除再添加。
 
 为什么不直接改 `config.json`：程序改写用户手写的 JSON 会丢失用户的排版与字段顺序（JSON 没有注释，但顺序和分组对人有意义），并且会模糊"哪些是我写的、哪些是程序生成的"。ADR-0007/0008 已经确立"程序写自己的文件"的模式，本设计沿用它。
 
@@ -220,10 +227,15 @@ prepareProvider(config, input: AddProviderInput, options?: AddProviderOptions): 
   // credential = { kind: "apiKey", key } | { kind: "env", name } | { kind: "login", loginId } | { kind: "external-file" }
   // 校验 → GET /models（options.signal 可取消）；不写文件、凭据，也不消费 loginId。
   // 账号令牌解析和续期使用独立的内存存储，不创建锁文件。
-  // 返回 { draftId, modelCount, notices, needsManualModel, steps }；draftId 不透明，绑定 config，15 分钟过期自动清理。
+  // 字段校验后检查名称唯一性（第 2 节「名称唯一性」，options.workspaceRoot 给出时并入该工作区的项目层），
+  //   重名抛 ProviderSetupError("name")，不发请求。
+  // 返回 { draftId, modelCount, models, notices, needsManualModel, steps }；models 是获取到的上游模型摘要
+  //   （id、displayName?、reasoning?、imageInput?、contextWindow?、maxOutputTokens?），供保存前预览；
+  //   draftId 不透明，绑定 config，15 分钟过期自动清理。
   // notices 包含模型列表成功/失败的步骤与说明；steps 为已完成步骤摘要，均不包含密钥。
 commitProvider(config, draftId, { manualModelId? }): Promise<AddProviderResult>
-  // 校验模型 ID → 写入凭据和条目 → 消费 loginId → 刷新 models.dev。
+  // 再查一次名称唯一性 → 校验模型 ID → 删除同 id 孤立凭据 → 写入凭据和条目（saveSetupProvider mode "create"）
+  //   → 消费 loginId → 刷新 models.dev。
   // needsManualModel 时缺模型 ID 抛 ProviderSetupError("modelId")；草稿不存在、过期或重复提交抛 draftId 字段错误。
   // 返回 { providerId, modelCount, notices, message }；此处 notices 只有保存阶段的 models.dev 警告。
   // 保存成功后草稿失效；保存失败可以重试。日志/诊断不记 input、令牌或草稿内容。
@@ -245,14 +257,23 @@ discardDraftLogin(config, loginId): void
 
 // RuntimeConfig（config 模块）新增
 credentials: CredentialStore                             // 第 3 节的统一接口；get 结果在进程内缓存
-saveSetupProvider(entry: ProviderConfig, opts: { key?: string }): Promise<void>
-  // key 存在时经 credentials.set 写入系统后端并登记 credentials.json 索引
+saveSetupProvider(entry: ProviderConfig, opts: { key?: string; mode?: "create" | "replace" }): Promise<void>
+  // key 存在时经 credentials.set 写入系统后端并登记 credentials.json 索引；
+  //   mode "create" 重读文件后遇同 id（不分大小写）抛 ConfigError("provider_exists")，缺省 "replace" 整条替换
+findProviderConflict(id: string, workspaceRoot?: string): Promise<{ id: string; layer: string } | undefined>
+  // 名称唯一性检查：在合并层里不分大小写找同名条目，返回原拼写与最高所在层的显示名
 setCredential(providerId: string, key: string): Promise<void>
   // 经 credentials.set 完成（缓存随之失效，下一次请求即用新密钥）；/provider key 与服务商页「换密钥」直接调用它
 removeSetupProvider(providerId: string): Promise<void>     // 删除条目并经 credentials.delete 删凭据
 describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>
-  // /provider 与服务商页列表数据：名称、类型、主机名、鉴权描述、凭据状态、保存位置、来源层、模型数；不含令牌。
-  // 给 workspaceRoot 时并入该工作区可信项目层的条目
+  // /provider 与服务商页列表数据：名称、类型、主机名、鉴权描述、认证方式 authKind、凭据状态、保存位置、来源层、
+  //   模型数；不含令牌。给 workspaceRoot 时并入该工作区可信项目层的条目。
+  // authKind："apiKey"（凭据存储里的密钥）/ "env"（环境变量）/ "account"（ChatGPT、Grok 账号登录）/
+  //   "external-file"（外部登录文件）/ "none"（尚无凭据）；客户端据此选择「换密钥」或「重新登录」。
+  // 账号凭据状态：每次从磁盘读最新记录（不用进程内缓存），只看本地记录，不发网络请求——
+  //   有刷新令牌即为 valid，访问令牌是否过期都一样（下一次请求自动续期）；没有刷新令牌时按访问令牌到期时间
+  //   给 valid / expiring（5 分钟内到期）/ expired。刷新令牌被服务端拒绝（invalid_grant 等终止性失败）时，
+  //   续期路径在刷新锁内删除该凭据记录，下一次 describeProviders 因此显示 missing（缺少，需要重新登录）。
 refreshUpstreamLimits(providerId: string): Promise<string | undefined> // 刷新上游及 models.dev；失败仅返回提示
 refreshModelsDev(): Promise<string | undefined>          // 显式更新 models.dev 缓存；失败返回提示
 listModelSettings(providerId: string, workspaceRoot?: string): Promise<ModelSettingsView[]>

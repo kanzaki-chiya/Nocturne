@@ -36,6 +36,7 @@ describe("CLI 账号凭据保存选择", () => {
     vi.mocked(startProviderLogin).mockImplementation(async () => ({
       authorizeUrl: "http://127.0.0.1/authorize?state=mock-state",
       manualInput: "callback-url",
+      expiresAt: Date.now() + 300_000,
       completion: Promise.resolve({ providerId: "chatgpt", account: "ada@example.test" }),
       submitManual: async () => undefined,
       cancel: () => undefined,

@@ -16,6 +16,8 @@ export function createLoginSecrets() {
 /** 一次性任务、超时、取消与资源释放，供各登录实现共享。 */
 export interface LoginLifecycle {
   completion: Promise<LoginResult>;
+  /** 超时截止时刻（Unix 毫秒），随 LoginSession.expiresAt 交给客户端 */
+  expiresAt: number;
   signal: AbortSignal;
   readonly accepting: boolean;
   addCleanup: (cleanup: () => void) => void;
@@ -36,6 +38,7 @@ export function createLoginLifecycle(timeoutMs = 5 * 60_000): LoginLifecycle {
   });
   // 客户端可能尚未开始 await；保留原 Promise 的拒绝语义。
   void completion.catch(() => undefined);
+  const expiresAt = Date.now() + timeoutMs;
   const timer = setTimeout(() => {
     fail(new ProviderLoginError("timeout"));
   }, timeoutMs);
@@ -56,6 +59,7 @@ export function createLoginLifecycle(timeoutMs = 5 * 60_000): LoginLifecycle {
 
   return {
     completion,
+    expiresAt,
     signal: controller.signal,
     get accepting() {
       return phase === "waiting";

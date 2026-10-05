@@ -102,23 +102,6 @@ function typeText(t: ProviderOverview["type"]): string {
   return t === "openai-compatible" ? "OpenAI 兼容" : "Anthropic 兼容";
 }
 
-type AuthKind = "apiKey" | "account" | "external";
-/**
- * 认证方式。ProviderOverview 只有显示用的 auth 文案，没有类型字段：
- * 优先按同名预设的 login/auth 判断（账号预设的名称是固定的），否则按文案兜底。
- */
-function authKind(p: ProviderOverview, presets: readonly ProviderPreset[]): AuthKind {
-  const preset = presets.find((item) => item.defaultName === p.id);
-  if (preset?.login === "openai-siwc" || preset?.login === "xai-oauth2") return "account";
-  if (preset?.auth?.kind === "external-file") return "external";
-  if (p.auth?.startsWith("外部登录") === true) return "external";
-  if (p.auth?.endsWith("账号") === true) return "account";
-  return "apiKey";
-}
-/** 登录倒计时（秒）：与 TUI 一致，Grok 十分钟，其余五分钟；只用于展示 */
-function loginTimeoutSec(login: ProviderPreset["login"]): number {
-  return login === "xai-oauth2" ? 600 : 300;
-}
 /** Core 的提问行面向终端（结尾冒号、「回车跳过」）：表单只取标签部分 */
 function labelOf(prompt: string): string {
   return prompt
@@ -135,6 +118,54 @@ function hintOf(hint: string): string {
     .join("；");
 }
 
+/** 获取结果默认只露出的模型名个数；更多时可展开为限高内部滚动的完整列表 */
+const PEEK_MODELS = 4;
+
+type FetchedModel = PrepareProviderResult["models"][number];
+
+function FetchedModels({ models, open }: { models: FetchedModel[]; open: boolean }) {
+  if (!open) {
+    return (
+      <div className="ms" data-testid="fetched-peek">
+        {models.slice(0, PEEK_MODELS).map((m) => (
+          <span key={m.id} title={m.displayName ?? m.id}>
+            {m.id}
+          </span>
+        ))}
+        <span className="more">等 {models.length - PEEK_MODELS} 个</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flist" data-testid="fetched-list">
+      <div className="fr h">
+        <span>模型</span>
+        <span>能力</span>
+        <span className="num">上下文</span>
+        <span className="num">最大输出</span>
+      </div>
+      <div className="fbody">
+        {models.map((m) => {
+          const r = m.reasoning !== undefined && m.reasoning !== "none";
+          return (
+            <div className="fr" key={m.id}>
+              <span className="m" title={m.displayName ?? m.id}>
+                {m.id}
+              </span>
+              <span className="cap">
+                {r && <b title="推理">R</b>}
+                {m.imageInput === true && <b title="看图">I</b>}
+              </span>
+              <span className="num">{fullTokens(m.contextWindow)}</span>
+              <span className="num">{shortTokens(m.maxOutputTokens)}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- 页面 ---------------- */
 
 type Sel = { kind: "provider"; id: string } | { kind: "preset"; id: string } | null;
@@ -145,7 +176,6 @@ export function ProvidersPage({
   inUse,
   openUrl,
   providersVersion,
-  onBack,
 }: {
   /** 常驻后台的 client；全局服务商配置与 cwd 无关，可为 undefined（尚未就绪） */
   client: RpcClient | undefined;
@@ -156,7 +186,6 @@ export function ProvidersPage({
   openUrl: (url: string) => void;
   /** providersChanged 计数：变化时重取 */
   providersVersion: number;
-  onBack: () => void;
 }) {
   const [data, setData] = useState<{
     providers: ProviderOverview[];
@@ -239,9 +268,6 @@ export function ProvidersPage({
   return (
     <section className="page3" data-testid="providers-page">
       <div className="ph3">
-        <button className="back" onClick={onBack} aria-label="返回" title="返回">
-          ←
-        </button>
         <div className="grow">
           <h3>服务商</h3>
           <span className="sub">
@@ -294,8 +320,6 @@ export function ProvidersPage({
                   key={selProvider.id}
                   client={client}
                   provider={selProvider}
-                  auth={authKind(selProvider, data.presets)}
-                  loginKind={data.presets.find((x) => x.defaultName === selProvider.id)?.login}
                   current={selProvider.id === currentProvider}
                   inUse={inUse?.has(selProvider.id) === true}
                   defaultKey={data.defaultKey}
@@ -336,8 +360,6 @@ type ReloginState =
 function ProviderDetail({
   client,
   provider: p,
-  auth,
-  loginKind,
   current,
   inUse,
   defaultKey,
@@ -346,8 +368,6 @@ function ProviderDetail({
 }: {
   client: RpcClient;
   provider: ProviderOverview;
-  auth: AuthKind;
-  loginKind: ProviderPreset["login"];
   current: boolean;
   inUse: boolean;
   defaultKey: string | null;
@@ -459,6 +479,7 @@ function ProviderDetail({
     : inUse || refusedInUse
       ? "当前会话正在使用，不能删除"
       : null;
+  const auth = p.authKind;
   const showRelogin = auth === "account" && failed(p);
 
   return (
@@ -469,7 +490,7 @@ function ProviderDetail({
         {failed(p) && <span className="tagw">已失效</span>}
         {p.overridden && <span className="tagw">被更高层覆盖</span>}
         <span className="acts">
-          {auth === "apiKey" && p.managed && (
+          {(auth === "apiKey" || auth === "none") && p.managed && (
             <button
               className="btn"
               disabled={busy !== null}
@@ -477,7 +498,7 @@ function ProviderDetail({
                 setDialog("rekey");
               }}
             >
-              换密钥
+              {auth === "none" ? "设置密钥" : "换密钥"}
             </button>
           )}
           <button
@@ -542,7 +563,6 @@ function ProviderDetail({
         <LoginWaitCard
           login={relogin.login}
           warn
-          timeoutSec={loginTimeoutSec(loginKind)}
           onOpenAuthorize={() => {
             openUrl(relogin.login.authorizeUrl);
           }}
@@ -923,6 +943,8 @@ function PresetForm({
   const [manualId, setManualId] = useState("");
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
   const [fetchState, setFetchState] = useState<FetchState>({ kind: "idle" });
+  /** 获取结果的完整列表是否展开（每次重新获取后回到折叠） */
+  const [listOpen, setListOpen] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [commitErr, setCommitErr] = useState<string | null>(null);
   const [draftLogin, setDraftLogin] = useState<DraftLogin>({ kind: "none" });
@@ -1114,6 +1136,7 @@ function PresetForm({
     invalidate();
     const seq = fetchSeq.current;
     setFetchState({ kind: "busy" });
+    setListOpen(false);
     setFieldErr({});
     const name = nameValue();
     const baseURL = baseURLValue();
@@ -1387,7 +1410,6 @@ function PresetForm({
             ) : draftLogin.kind === "waiting" ? (
               <LoginWaitCard
                 login={draftLogin.login}
-                timeoutSec={loginTimeoutSec(preset.login)}
                 onOpenAuthorize={() => {
                   openUrl(draftLogin.login.authorizeUrl);
                 }}
@@ -1477,23 +1499,37 @@ function PresetForm({
                       ? "未获取到模型"
                       : "✓ 凭据可用"}
                 </span>
+                {fetchState.result.models.length > PEEK_MODELS && (
+                  <button
+                    type="button"
+                    className="tog"
+                    aria-expanded={listOpen}
+                    onClick={() => {
+                      setListOpen((v) => !v);
+                    }}
+                  >
+                    {listOpen ? "收起 ▴" : "展开全部 ▾"}
+                  </button>
+                )}
               </>
             )}
-            {fetchState.kind === "err" && (
+            {/* 字段错误已标在输入框下时，这里不再重复「获取失败」 */}
+            {fetchState.kind === "err" && !fetchState.field && (
               <>
                 <span className="bad">获取失败</span>
-                {!fetchState.field && <span className="reason">{fetchState.message}</span>}
+                <span className="reason">{fetchState.message}</span>
               </>
             )}
           </div>
+          {fetchState.kind === "ok" && fetchState.result.models.length > 0 && (
+            <FetchedModels
+              models={fetchState.result.models}
+              open={listOpen || fetchState.result.models.length <= PEEK_MODELS}
+            />
+          )}
           {printNotices.length > 0 && (
             <div className="hint">{printNotices.map((n) => n.text).join(" ")}</div>
           )}
-          {/*
-            模型列表的位置：PrepareProviderResult 目前只有 modelCount，没有模型名（RPC 缺口）。
-            结果里带上模型列表后，在这里接默认折叠的前几个名字和限高内部滚动的完整列表
-            （pages.css 的 .fetch .ms / .flist 已备好样式）。
-          */}
         </div>
 
         {needManual && (

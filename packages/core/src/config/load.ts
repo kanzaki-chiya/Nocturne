@@ -35,6 +35,7 @@ import {
 } from "./model-settings.js";
 import {
   describeProviderLayers,
+  findProviderConflict as findLayerConflict,
   loadProviderSetup,
   readRecentModels,
   recordRecentModel,
@@ -43,6 +44,8 @@ import {
   saveSetupProvider,
   saveSetupUserModels,
   writeProviderSetup,
+  type DescribeLayers,
+  type ProviderSetupState,
 } from "./setup.js";
 import { loadSettingsStore } from "./settings.js";
 import { reviewerText } from "./reviewer.js";
@@ -425,6 +428,43 @@ export async function loadConfig(
     for (const w of next) trustedSet.add(w);
   }
 
+  // /provider 概览与名称冲突检查共用的分层条目。向导层每次现读：本会话内
+  // /provider add|remove 写入 providers.json 后立即可见（user/env/cli 层沿用
+  // 加载时快照，与运行时配置一致）。
+  async function describeLayersFor(
+    workspaceRoot: string | undefined,
+  ): Promise<{ setupNow: ProviderSetupState; layers: DescribeLayers }> {
+    const setupNow = await loadProviderSetup(platform, home);
+    const project =
+      workspaceRoot !== undefined ? await projectFileIfTrusted(workspaceRoot) : undefined;
+    const userProviders = mergeLayers([
+      ...setupLayers(setupNow.file ?? { version: 1 }, providersPath),
+      { kind: "user", path: userConfigPath, file: userFile },
+    ]).resolved.providers;
+    const projectProviders =
+      project?.providers !== undefined
+        ? restrictProjectProviderAuth(project.providers, userProviders, () => undefined).map(
+            (entry) => {
+              const userEntry = userProviders.find((provider) => provider.id === entry.id);
+              // 概览按整条取最高层；受保护账号需补回被过滤掉的用户字段。
+              return userEntry?.auth !== undefined && userEntry.auth.kind !== "apiKey"
+                ? { ...userEntry, ...entry }
+                : entry;
+            },
+          )
+        : undefined;
+    return {
+      setupNow,
+      layers: {
+        setup: setupNow.file?.providers,
+        user: userFile.providers,
+        project: projectProviders,
+        env: envLayer.file.providers,
+        cli: cliLayer.file.providers,
+      },
+    };
+  }
+
   // 用户鉴权 URL 无效时在加载阶段失败，而不是等首次读取 base。
   base();
   return {
@@ -483,39 +523,13 @@ export async function loadConfig(
       ),
     removeSetupProvider: (providerId) =>
       removeSetupProvider(platform, home, credentials, providerId),
+    async findProviderConflict(id: string, workspaceRoot?: string) {
+      const { layers } = await describeLayersFor(workspaceRoot);
+      return findLayerConflict(layers, id);
+    },
     async describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]> {
-      // 向导层每次现读：本会话内 /provider add|remove 写入 providers.json 后
-      // 立即可见（user/env/cli 层沿用加载时快照，与运行时配置一致）
-      const setupNow = await loadProviderSetup(platform, home);
-      const project =
-        workspaceRoot !== undefined ? await projectFileIfTrusted(workspaceRoot) : undefined;
-      const userProviders = mergeLayers([
-        ...setupLayers(setupNow.file ?? { version: 1 }, providersPath),
-        { kind: "user", path: userConfigPath, file: userFile },
-      ]).resolved.providers;
-      const projectProviders =
-        project?.providers !== undefined
-          ? restrictProjectProviderAuth(project.providers, userProviders, () => undefined).map(
-              (entry) => {
-                const userEntry = userProviders.find((provider) => provider.id === entry.id);
-                // 概览按整条取最高层；受保护账号需补回被过滤掉的用户字段。
-                return userEntry?.auth !== undefined && userEntry.auth.kind !== "apiKey"
-                  ? { ...userEntry, ...entry }
-                  : entry;
-              },
-            )
-          : undefined;
-      const overview = describeProviderLayers(
-        {
-          setup: setupNow.file?.providers,
-          user: userFile.providers,
-          project: projectProviders,
-          env: envLayer.file.providers,
-          cli: cliLayer.file.providers,
-        },
-        credentials,
-        env,
-      );
+      const { setupNow, layers } = await describeLayersFor(workspaceRoot);
+      const overview = describeProviderLayers(layers, credentials, env);
       // 凭据内容只用于计算状态，绝不返回给客户端。
       const effective = (await mergeFor(setupNow.file ?? { version: 1 }, workspaceRoot)).resolved
         .providers;
@@ -542,6 +556,7 @@ export async function loadConfig(
               item.credentialStatus = "missing";
             }
             item.auth = `CLI 凭据 ${auth.path}`;
+            item.authKind = "external-file";
             item.keySource = "missing";
             delete item.credentialStorage;
           } else if (entry?.auth?.kind === "openai-siwc" || entry?.auth?.kind === "xai-oauth2") {
@@ -549,22 +564,32 @@ export async function loadConfig(
             if (place !== undefined) item.credentialStorage = place;
             else delete item.credentialStorage;
             const label = entry.auth.kind === "xai-oauth2" ? "Grok 账号" : "ChatGPT 账号";
+            item.authKind = "account";
             try {
               // 令牌刷新可能由另一个凭据存储实例写入，按盘上最新记录计算状态。
               const raw = await credentials.get(entry.id, { fresh: true });
               const record =
                 raw === undefined
                   ? undefined
-                  : (JSON.parse(raw) as { email?: unknown; expiresAt?: unknown });
+                  : (JSON.parse(raw) as {
+                      email?: unknown;
+                      expiresAt?: unknown;
+                      refreshToken?: unknown;
+                    });
               item.auth = `${label}${typeof record?.email === "string" ? ` ${record.email}` : ""}`;
+              // 访问令牌过期后由下一次请求用刷新令牌自动续期，所以只要刷新令牌还在就是有效。
+              // 终止性刷新失败（invalid_grant 等）时刷新逻辑在锁内删除整条记录
+              // （provider-oauth.ts / xai-oauth.ts），这里读盘即得 missing；不发网络请求。
               item.credentialStatus =
                 typeof record?.expiresAt !== "number"
                   ? "missing"
-                  : record.expiresAt <= Date.now()
-                    ? "expired"
-                    : record.expiresAt - Date.now() < 300_000
-                      ? "expiring"
-                      : "valid";
+                  : typeof record.refreshToken === "string" && record.refreshToken !== ""
+                    ? "valid"
+                    : record.expiresAt <= Date.now()
+                      ? "expired"
+                      : record.expiresAt - Date.now() < 300_000
+                        ? "expiring"
+                        : "valid";
             } catch {
               item.credentialStatus = "missing";
             }

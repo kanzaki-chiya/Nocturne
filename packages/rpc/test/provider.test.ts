@@ -153,6 +153,7 @@ describe("provider.prepareProvider / commitProvider", () => {
       credential: { kind: "apiKey", key: "sk-e2e" },
     });
     expect(prepared.modelCount).toBe(1);
+    expect(prepared.models).toEqual([expect.objectContaining({ id: "e2e-model" })]);
     expect(prepared.draftId).toMatch(/^[0-9a-f-]{36}$/);
     expect(providersFile(h)?.providers).toBeUndefined();
     expect(h.reloadCount()).toBe(0);
@@ -166,6 +167,11 @@ describe("provider.prepareProvider / commitProvider", () => {
 
     const models = await h.client.runtime.listModels();
     expect(models.map((m) => `${m.ref.provider}/${m.ref.model}`)).toContain("e2e/e2e-model");
+    const overview = await h.client.provider.describeProviders();
+    expect(overview.providers.find((p) => p.id === "e2e")).toMatchObject({
+      authKind: "apiKey",
+      credentialStatus: "valid",
+    });
     // 服务端 Runtime 同样已看到新配置
     expect(h.runtimes[0]?.listModels().map((m) => m.ref.provider)).toContain("e2e");
     h.client.close();
@@ -209,6 +215,27 @@ describe("provider.prepareProvider / commitProvider", () => {
     });
     client2.close();
     await served2;
+  });
+
+  it("同名（不分大小写）：prepare 报 -32005 / field=name，不覆盖已有条目", async () => {
+    const { baseURL } = await serveUpstream([{ id: "m" }]);
+    const h = await connectWithConfig();
+    await addProvider(h, baseURL, "e2e");
+    await expect(
+      h.client.provider.prepareProvider({
+        presetId: "custom-openai",
+        name: "E2E",
+        baseURL,
+        credential: { kind: "env", name: "NCT_E2E_KEY" },
+      }),
+    ).rejects.toMatchObject({
+      rpcCode: -32005,
+      field: "name",
+      message: "已有同名服务商 e2e（providers.json）",
+    });
+    expect(providersFile(h)?.providers?.map((p) => p.id)).toEqual(["e2e"]);
+    h.client.close();
+    await h.served;
   });
 
   it("重载失败：请求以重载错误失败，但写入已生效", async () => {
@@ -377,6 +404,43 @@ describe("敏感参数", () => {
     expect(text).not.toContain("sk-secret-one");
     expect(text).not.toContain("rk-secret-two");
     expect(text).not.toContain("sk-secret-three");
+    h.client.close();
+    await h.served;
+  });
+});
+
+describe("runtime.reloadConfig", () => {
+  it("别处改了配置文件：重载后 listModels 含新服务商，providersChanged 先于响应", async () => {
+    const h = await connectWithConfig();
+    let changed = 0;
+    h.client.onProvidersChanged(() => {
+      changed += 1;
+    });
+    // 另一个后台（另一个配置对象）写入 providers.json
+    writeFileSync(
+      path.join(h.home, "providers.json"),
+      JSON.stringify({
+        version: 1,
+        providers: [
+          {
+            id: "elsewhere",
+            type: "openai-compatible",
+            baseURL: "http://127.0.0.1:9/v1",
+            apiKeyEnv: "NCT_ELSEWHERE_KEY",
+            models: { m1: { contextWindow: 8000, maxOutputTokens: 1000 } },
+          },
+        ],
+      }),
+    );
+    expect((await h.client.runtime.listModels()).some((m) => m.ref.provider === "elsewhere")).toBe(
+      false,
+    );
+    await h.client.runtime.reloadConfig();
+    expect(changed).toBe(1);
+    expect(h.reloadCount()).toBe(1);
+    expect((await h.client.runtime.listModels()).some((m) => m.ref.provider === "elsewhere")).toBe(
+      true,
+    );
     h.client.close();
     await h.served;
   });

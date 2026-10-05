@@ -7,6 +7,7 @@
  * 日志与诊断里永远不要出现 input（密钥明文）。
  */
 import { randomUUID } from "node:crypto";
+import { ConfigError } from "./config/errors.js";
 import type {
   CredentialBackend,
   ModelOverrideShape,
@@ -155,11 +156,25 @@ export interface AddProviderOptions {
   /** 读取环境变量（决定 env 方式下能否带密钥获取模型列表）；缺省读进程环境 */
   env?: ((name: string) => string | undefined) | undefined;
   signal?: AbortSignal | undefined;
+  /** 名称冲突检查时参与的项目层（与 describeProviders 同口径）；缺省只查全局各层 */
+  workspaceRoot?: string | undefined;
+}
+
+/** 准备结果里的一条模型摘要（供表单展示；上游没给的字段省略） */
+export interface PreparedModelSummary {
+  id: string;
+  displayName?: string | undefined;
+  reasoning?: "none" | "hidden" | "visible" | undefined;
+  imageInput?: boolean | undefined;
+  contextWindow?: number | undefined;
+  maxOutputTokens?: number | undefined;
 }
 
 export interface PrepareProviderResult {
   draftId: string;
   modelCount: number;
+  /** 获取到的上游模型（与 modelCount 同序同数） */
+  models: PreparedModelSummary[];
   notices: ProviderSetupNotice[];
   needsManualModel: boolean;
   steps: string[];
@@ -465,6 +480,7 @@ export async function prepareProvider(
   const providerId = values.name ?? "";
   const baseURL = values.baseURL;
   const sessionHeader = values.sessionHeader ?? preset.sessionHeader;
+  await assertNameFree(config, providerId, options.workspaceRoot);
 
   // ── 凭据 ──
   const backendAvailable = config.credentials.backend() !== "none";
@@ -574,6 +590,8 @@ export async function prepareProvider(
   };
   const notices: ProviderSetupNotice[] = [];
   let upstreamModels: UpstreamModelEntry[] = [];
+  // 同名检查是异步的：期间已取消就不再发请求
+  options.signal?.throwIfAborted();
   if (preset.fetchableModels) {
     const fetchKey = effectiveKey !== undefined && effectiveKey !== "" ? effectiveKey : undefined;
     try {
@@ -643,6 +661,17 @@ export async function prepareProvider(
         throw new ProviderSetupError("credential", "登录会话不存在或已结束，请重新登录");
       }
       const modelsToSave = needsManualModel ? [{ id }] : upstreamModels;
+      // 写入前再查一次：准备之后可能有别的配置对象或进程保存了同名条目。
+      await assertNameFree(config, providerId, options.workspaceRoot);
+      // 同 id 的孤立凭据（条目已手工删掉而凭据残留）先清掉，新条目不继承旧密钥或旧账号。
+      if (config.credentials.has(providerId)) {
+        try {
+          await config.credentials.delete(providerId);
+        } catch {
+          throw new ProviderSetupError("credential", "无法清理同名服务商残留的凭据");
+        }
+      }
+      let wroteAccount = false;
       if (stagedAccount !== undefined) {
         try {
           if (config.credentials.backend() === "none") {
@@ -653,6 +682,7 @@ export async function prepareProvider(
               stagedAccount.storage,
             );
           } else await config.credentials.set(providerId, stagedAccount.value);
+          wroteAccount = true;
         } catch {
           throw new ProviderSetupError("credential", "无法保存登录凭据");
         }
@@ -677,27 +707,34 @@ export async function prepareProvider(
         ...(preset.thinkingFormat !== undefined ? { format: preset.thinkingFormat } : {}),
       };
       const modelCount = modelsToSave.length;
-      await config.saveSetupProvider(
-        {
-          id: providerId,
-          ...(preset.auth !== undefined ? { auth: preset.auth } : {}),
-          ...(preset.headers !== undefined ? { headers: preset.headers } : {}),
-          ...(preset.modelHeader !== undefined ? { modelHeader: preset.modelHeader } : {}),
-          type: preset.type,
-          ...(baseURL !== undefined ? { baseURL } : {}),
-          ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
-          ...(sessionHeader !== undefined ? { sessionHeader } : {}),
-          ...(preset.modelsDevProvider !== undefined
-            ? { modelsDevProvider: preset.modelsDevProvider }
-            : {}),
-          models,
-          ...(Object.keys(thinking).length > 0 ? { thinking } : {}),
-          ...(modelCount > 0
-            ? { source: "upstream" as const, fetchedAt: new Date().toISOString() }
-            : {}),
-        },
-        { ...(key !== undefined ? { key } : {}) },
-      );
+      try {
+        await config.saveSetupProvider(
+          {
+            id: providerId,
+            ...(preset.auth !== undefined ? { auth: preset.auth } : {}),
+            ...(preset.headers !== undefined ? { headers: preset.headers } : {}),
+            ...(preset.modelHeader !== undefined ? { modelHeader: preset.modelHeader } : {}),
+            type: preset.type,
+            ...(baseURL !== undefined ? { baseURL } : {}),
+            ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+            ...(sessionHeader !== undefined ? { sessionHeader } : {}),
+            ...(preset.modelsDevProvider !== undefined
+              ? { modelsDevProvider: preset.modelsDevProvider }
+              : {}),
+            models,
+            ...(Object.keys(thinking).length > 0 ? { thinking } : {}),
+            ...(modelCount > 0
+              ? { source: "upstream" as const, fetchedAt: new Date().toISOString() }
+              : {}),
+          },
+          { ...(key !== undefined ? { key } : {}), mode: "create" },
+        );
+      } catch (e) {
+        if (!(e instanceof ConfigError) || e.code !== "provider_exists") throw e;
+        // 两次检查之间被抢先写入：撤回刚写的账号凭据，不留孤立记录。
+        if (wroteAccount) await config.credentials.delete(providerId).catch(() => undefined);
+        throw new ProviderSetupError("name", e.message);
+      }
       if (loginId !== undefined) dropPendingLogin(config, loginId);
 
       const commitNotices: ProviderSetupNotice[] = [];
@@ -716,6 +753,7 @@ export async function prepareProvider(
   return {
     draftId,
     modelCount: upstreamModels.length,
+    models: upstreamModels.map(summarizeModel),
     notices,
     needsManualModel,
     steps: [
@@ -723,6 +761,28 @@ export async function prepareProvider(
       setupCredentialStep(description, credential),
       ...notices.filter((notice) => notice.kind === "step").map((notice) => notice.text),
     ],
+  };
+}
+
+async function assertNameFree(
+  config: RuntimeConfig,
+  providerId: string,
+  workspaceRoot: string | undefined,
+): Promise<void> {
+  const conflict = await config.findProviderConflict(providerId, workspaceRoot);
+  if (conflict !== undefined) {
+    throw new ProviderSetupError("name", `已有同名服务商 ${conflict.id}（${conflict.layer}）`);
+  }
+}
+
+function summarizeModel(m: UpstreamModelEntry): PreparedModelSummary {
+  return {
+    id: m.id,
+    ...(m.displayName !== undefined ? { displayName: m.displayName } : {}),
+    ...(m.capabilities?.reasoning !== undefined ? { reasoning: m.capabilities.reasoning } : {}),
+    ...(m.capabilities?.imageInput !== undefined ? { imageInput: m.capabilities.imageInput } : {}),
+    ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
+    ...(m.maxOutputTokens !== undefined ? { maxOutputTokens: m.maxOutputTokens } : {}),
   };
 }
 

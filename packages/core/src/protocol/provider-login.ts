@@ -12,6 +12,8 @@ export interface LoginSession {
   manualInput: "callback-url" | "code" | "none";
   /** 设备码登录时展示，供用户在浏览器核对。不含令牌。 */
   userCode?: string | undefined;
+  /** 本次登录等待的截止时刻（Unix 毫秒）：到时以 timeout 失败；客户端倒计时以它为准。 */
+  expiresAt: number;
   completion: Promise<LoginResult>;
   submitManual(text: string): Promise<void>;
   cancel(): void;

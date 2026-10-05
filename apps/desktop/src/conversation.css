@@ -121,18 +121,72 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* 思考块（desktop-v4.html F/G 屏）：展开后标题行吸顶，块滚出视野时随块离开 */
 .conversation .think {
   margin-bottom: 4px;
 }
-.conversation .think > summary {
-  font-size: 11px;
-  color: var(--a-muted);
+.conversation .think-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
   padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--a-muted);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.conversation .think-h:hover {
+  color: var(--a-secondary);
+}
+.conversation .think-tw {
+  font-size: 10px;
+  color: var(--a-faint);
+}
+.conversation .think.open > .think-h {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 2px 7px;
+  font-size: 12.5px;
+  color: var(--a-secondary);
+  background: var(--a-bg);
+  border-bottom: 1px solid var(--a-border);
+}
+.conversation .think.open > .think-h .think-tw {
+  margin-left: auto;
+  color: var(--a-accent);
+  font-size: 12px;
 }
 .conversation .think > pre {
   color: var(--a-muted);
   font-size: 12px;
-  margin: 4px 0 8px;
+  margin: 0;
+  padding: 10px 0 6px 14px;
+  margin-left: 4px;
+  border-left: 2px solid var(--a-border);
+}
+.conversation .think-end {
+  margin-left: 4px;
+  padding: 2px 0 6px 14px;
+  border-left: 2px solid var(--a-border);
+}
+.conversation .think-end button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--a-accent);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--a-accent) 35%, var(--a-border));
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.conversation .think-end button:hover {
+  background: color-mix(in srgb, var(--a-accent) 10%, transparent);
 }
 .conversation div.think {
   font-size: 11px;

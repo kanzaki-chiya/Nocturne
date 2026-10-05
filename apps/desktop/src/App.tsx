@@ -19,7 +19,7 @@ import { abbreviateHome, middleTruncate } from "./paths";
 import { createPrefsStore, type PrefsStore } from "./prefs";
 import { useDraftControls, useSessionControls } from "./session-controls";
 import { buildSessionTree, projectKey, projectName, type SessionSummary } from "./session-tree";
-import { Sidebar } from "./Sidebar";
+import { Sidebar, type SettingsSection } from "./Sidebar";
 import type { NodeProbe } from "./types";
 
 type Phase =
@@ -71,8 +71,12 @@ export function App({ host }: { host: DesktopHost }) {
   const [commandOutput, setCommandOutput] = useState<string | null>(null);
   const [lockedSession, setLockedSession] = useState<SessionSummary | null>(null);
   const [dirMenuOpen, setDirMenuOpen] = useState(false);
-  /** 主区整页（服务商/设置）；null 回到会话或空状态 */
-  const [page, setPage] = useState<"providers" | "settings" | null>(null);
+  /**
+   * 设置区当前导航项；null = 会话或空状态。设置区盖在会话区之上，会话区保持挂载
+   * （inert），返回时还是原来的会话和滚动位置。
+   */
+  const [page, setPage] = useState<SettingsSection | null>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
   // 生效的普通对话工作区 = prefs 覆盖 ?? 外壳默认
   const effectiveWorkspace = p.plainWorkspace ?? defaultWorkspace;
   const workspaceRef = useRef<string | null>(null);
@@ -187,17 +191,33 @@ export function App({ host }: { host: DesktopHost }) {
   }, [p.theme]);
 
   // 每个后台的 providersChanged：刷新会话列表并 bump providersVersion，
-  // 状态栏与空状态的模型菜单、打开中的服务商页随之重取数据
+  // 状态栏与空状态的模型菜单、打开中的服务商页随之重取数据；
+  // 这个后台自己的变更再让其他后台 reloadConfig（重载引起的回声不转发）
   useEffect(
     () =>
       pool.onClient((client) =>
         client.onProvidersChanged(() => {
           setProvidersVersion((v) => v + 1);
           void refresh();
+          if (!pool.consumeEcho(client)) pool.propagateConfig(client);
         }),
       ),
     [pool, refresh],
   );
+
+  // 设置区里按 Esc = 「← 返回」；下拉、对话框自己处理的 Esc 不算
+  useEffect(() => {
+    if (page === null) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (settingsRef.current?.querySelector('[role="dialog"]') != null) return;
+      setPage(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [page]);
 
   // 主目录只读一次（路径 ~ 缩写）
   useEffect(() => {
@@ -508,6 +528,9 @@ export function App({ host }: { host: DesktopHost }) {
         onOpenPage={(target) => {
           setPage(target);
         }}
+        onLeaveSettings={() => {
+          setPage(null);
+        }}
       />
       <div className="main">
         {(backendExit !== null || startupError !== null) && (
@@ -534,91 +557,109 @@ export function App({ host }: { host: DesktopHost }) {
             )}
           </div>
         )}
-        {page === "providers" ? (
-          <PaneErrorBoundary key="providers">
-            <ProvidersPage
-              client={pageClient}
-              currentProvider={active?.view.config.model?.provider}
-              inUse={providersInUse}
-              openUrl={(url) => void host.openUrl(url)}
-              providersVersion={providersVersion}
-              onBack={() => {
-                setPage(null);
-              }}
-            />
-          </PaneErrorBoundary>
-        ) : page === "settings" ? (
-          <PaneErrorBoundary key="settings">
-            <SettingsPage
-              client={pageClient}
-              theme={p.theme ?? "system"}
-              workspace={effectiveWorkspace}
-              defaultWorkspace={defaultWorkspace}
-              workspaceOverridden={p.plainWorkspace !== undefined}
-              onThemeChange={(theme) => {
-                prefs.update({ theme: theme === "system" ? undefined : theme });
-                bumpPrefs();
-                return prefs.persistent;
-              }}
-              onWorkspaceChange={changePlainWorkspace}
-              pickFolder={() => host.pickFolder()}
-              providersVersion={providersVersion}
-              onBack={() => {
-                setPage(null);
-              }}
-            />
-          </PaneErrorBoundary>
-        ) : active !== undefined ? (
-          <PaneErrorBoundary key={active.session.id}>
-            <SessionPane
-              view={active.view}
-              workspace={active.workspace}
-              session={active.session}
-              client={active.client}
-              prefs={prefs}
-              images={images}
-              plainKey={plainKey}
-              home={home}
-              selected={selected}
-              running={conversationStatus(active) !== "idle"}
-              onSubmit={(input) => submitInput(input)}
-              onInterrupt={() => {
-                conversations.interrupt();
-              }}
-              onSlash={runSlash}
-              pickImages={() => host.pickImages()}
-              openUrl={(url) => void host.openUrl(url)}
-              panel={panel}
-              onPanelChange={setPanel}
-              providersVersion={providersVersion}
-            />
-          </PaneErrorBoundary>
-        ) : (
-          <PaneErrorBoundary key="draft">
-            <DraftPane
-              runtime={pool.any()?.runtime}
-              prefs={prefs}
-              workspace={conversations.draftWorkspace ?? effectiveWorkspace}
-              plainKey={plainKey}
-              projects={projects}
-              disabled={effectiveWorkspace === null || pool.any() === undefined}
-              historyKey={conversations.draftWorkspace ?? effectiveWorkspace}
-              providersVersion={providersVersion}
-              onSubmit={submitInput}
-              onSlash={runSlash}
-              pickImages={() => host.pickImages()}
-              onSelectPlain={() => void newSession()}
-              onSelectProject={(path) => void newSession(path)}
-              onOpenOther={() =>
-                void openProject().then((dir) => {
-                  if (dir !== undefined) void newSession(dir);
-                })
-              }
-              dirMenuOpen={dirMenuOpen}
-              onDirMenuOpenChange={setDirMenuOpen}
-            />
-          </PaneErrorBoundary>
+        {page !== null && (
+          <div className="settings-over" ref={settingsRef}>
+            {page === "providers" ? (
+              <PaneErrorBoundary key="providers">
+                <ProvidersPage
+                  client={pageClient}
+                  currentProvider={active?.view.config.model?.provider}
+                  inUse={providersInUse}
+                  openUrl={(url) => void host.openUrl(url)}
+                  providersVersion={providersVersion}
+                />
+              </PaneErrorBoundary>
+            ) : (
+              <PaneErrorBoundary key="settings">
+                <SettingsPage
+                  section={page}
+                  client={pageClient}
+                  theme={p.theme ?? "system"}
+                  workspace={effectiveWorkspace}
+                  defaultWorkspace={defaultWorkspace}
+                  workspaceOverridden={p.plainWorkspace !== undefined}
+                  onThemeChange={(theme) => {
+                    prefs.update({ theme: theme === "system" ? undefined : theme });
+                    bumpPrefs();
+                    return prefs.persistent;
+                  }}
+                  onWorkspaceChange={changePlainWorkspace}
+                  pickFolder={() => host.pickFolder()}
+                  providersVersion={providersVersion}
+                  onConfigSaved={() => {
+                    if (pageClient !== undefined) pool.propagateConfig(pageClient);
+                  }}
+                  onOpenProviders={() => {
+                    setPage("providers");
+                  }}
+                />
+              </PaneErrorBoundary>
+            )}
+          </div>
         )}
+        <div
+          className="mainpane"
+          inert={page !== null}
+          aria-hidden={page !== null ? true : undefined}
+        >
+          {active !== undefined ? (
+            <PaneErrorBoundary key={active.session.id}>
+              <SessionPane
+                view={active.view}
+                workspace={active.workspace}
+                session={active.session}
+                client={active.client}
+                prefs={prefs}
+                images={images}
+                plainKey={plainKey}
+                home={home}
+                selected={selected}
+                running={conversationStatus(active) !== "idle"}
+                onSubmit={(input) => submitInput(input)}
+                onInterrupt={() => {
+                  conversations.interrupt();
+                }}
+                onSlash={runSlash}
+                pickImages={() => host.pickImages()}
+                openUrl={(url) => void host.openUrl(url)}
+                panel={panel}
+                onPanelChange={setPanel}
+                providersVersion={providersVersion}
+                onManageProviders={() => {
+                  setPage("providers");
+                }}
+              />
+            </PaneErrorBoundary>
+          ) : (
+            <PaneErrorBoundary key="draft">
+              <DraftPane
+                runtime={pool.any()?.runtime}
+                prefs={prefs}
+                workspace={conversations.draftWorkspace ?? effectiveWorkspace}
+                plainKey={plainKey}
+                projects={projects}
+                disabled={effectiveWorkspace === null || pool.any() === undefined}
+                historyKey={conversations.draftWorkspace ?? effectiveWorkspace}
+                providersVersion={providersVersion}
+                onSubmit={submitInput}
+                onSlash={runSlash}
+                pickImages={() => host.pickImages()}
+                onSelectPlain={() => void newSession()}
+                onSelectProject={(path) => void newSession(path)}
+                onOpenOther={() =>
+                  void openProject().then((dir) => {
+                    if (dir !== undefined) void newSession(dir);
+                  })
+                }
+                dirMenuOpen={dirMenuOpen}
+                onDirMenuOpenChange={setDirMenuOpen}
+                onManageProviders={() => {
+                  setPage("providers");
+                }}
+              />
+            </PaneErrorBoundary>
+          )}
+        </div>
         {lockedSession !== null && (
           <div className="dialog-backdrop">
             <div
@@ -688,6 +729,7 @@ interface SessionPaneProps {
   openUrl: (url: string) => void;
   panel: StatusPanel | null;
   onPanelChange: (panel: StatusPanel | null) => void;
+  onManageProviders: () => void;
   /** 服务商配置变更计数：状态栏的模型/档位/预设数据随之重取 */
   providersVersion: number;
 }
@@ -711,6 +753,7 @@ function SessionPane({
   panel,
   onPanelChange,
   providersVersion,
+  onManageProviders,
 }: SessionPaneProps) {
   const runtime = client.runtime;
   const controls = useSessionControls(session, runtime, view, prefs, providersVersion);
@@ -769,6 +812,7 @@ function SessionPane({
         panel={panel}
         onPanelChange={onPanelChange}
         home={home}
+        onManageProviders={onManageProviders}
       />
     </>
   );
@@ -794,6 +838,8 @@ interface DraftPaneProps {
   onDirMenuOpenChange: (open: boolean) => void;
   /** 服务商配置变更计数：空状态模型菜单随之重取 */
   providersVersion: number;
+  /** 模型菜单底部「管理服务商…」 */
+  onManageProviders: () => void;
 }
 
 function DraftPane({
@@ -813,6 +859,7 @@ function DraftPane({
   dirMenuOpen,
   onDirMenuOpenChange,
   providersVersion,
+  onManageProviders,
 }: DraftPaneProps) {
   const draft = useDraftControls(runtime, prefs, providersVersion);
   const isPlain = workspace === null || (plainKey !== null && projectKey(workspace) === plainKey);
@@ -868,6 +915,7 @@ function DraftPane({
           dirMenuOpen={dirMenuOpen}
           onDirMenuOpenChange={onDirMenuOpenChange}
           onSlash={onSlash}
+          onManageProviders={onManageProviders}
         />
       </div>
     </div>

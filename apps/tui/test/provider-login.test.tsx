@@ -60,6 +60,7 @@ function session(manualInput: LoginSession["manualInput"] = "code") {
   const s: LoginSession = {
     authorizeUrl: "https://example.test/authorize?state=mock-state&code_challenge=mock-challenge",
     manualInput,
+    expiresAt: Date.now() + 300_000,
     completion,
     submitManual: vi.fn(async () => {
       resolve({ providerId: entry.id });
@@ -225,6 +226,7 @@ describe("登录客户端", () => {
       return {
         authorizeUrl: "https://example.test/authorize?state=mock-state",
         manualInput: "callback-url",
+        expiresAt: Date.now() + 300_000,
         completion: Promise.resolve({ providerId: account.id, account: options?.accountStorage }),
         submitManual: vi.fn(async () => undefined),
         cancel: vi.fn(),

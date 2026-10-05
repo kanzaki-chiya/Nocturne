@@ -10,6 +10,7 @@ import {
   contextSourceLabel,
   type StatusPanel,
 } from "../src/StatusBar";
+import { presetOptions } from "../src/choice-info";
 import type { SessionControls } from "../src/session-controls";
 
 afterEach(cleanup);
@@ -70,9 +71,9 @@ function controlsFixture() {
         onSelect: vi.fn(),
       },
       preset: {
-        value: "default",
-        label: "default",
-        groups: [{ options: [{ value: "default", label: "default" }] }],
+        value: "smart",
+        label: "smart",
+        groups: [{ options: presetOptions() }],
         onSelect: vi.fn(),
       },
     },
@@ -268,19 +269,32 @@ describe("StatusBar", () => {
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "session_busy");
   });
 
-  it("模型/档位/预设 pill 打开同一个菜单组件并调用对应 onSelect", async () => {
+  it("模型菜单调用 onSelect；权限预设是自绘下拉，选项带说明，危险项在最后", async () => {
     const state = fixture();
-    render(<StatusBar {...state} />);
+    const onManageProviders = vi.fn();
+    render(<StatusBar {...state} onManageProviders={onManageProviders} />);
     fireEvent.click(screen.getByRole("button", { name: "切换模型" }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "one" }));
     await waitFor(() =>
       expect(state.controls.controls.model.onSelect).toHaveBeenCalledWith("fixture/one"),
     );
-    fireEvent.click(screen.getByRole("button", { name: "切换权限预设" }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "default" }));
+    fireEvent.click(screen.getByRole("button", { name: "切换模型" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "管理服务商…" }));
+    expect(onManageProviders).toHaveBeenCalledTimes(1);
+
+    const preset = screen.getByRole("combobox", { name: "切换权限预设" });
+    fireEvent.click(preset);
+    expect(preset.getAttribute("aria-expanded")).toBe("true");
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(6);
+    expect(options.at(-1)?.textContent).toMatch(/bypass/);
+    expect(options.at(-1)?.className).toContain("risk");
+    expect(screen.getByRole("option", { name: /^default/ }).textContent).toContain("默认");
+    fireEvent.click(screen.getByRole("option", { name: /^default/ }));
     await waitFor(() =>
       expect(state.controls.controls.preset.onSelect).toHaveBeenCalledWith("default"),
     );
+    expect(preset.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("流式 revision 不重复 describeContext，缓存来自包含口径的累计用量", async () => {

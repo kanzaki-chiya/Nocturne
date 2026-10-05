@@ -351,6 +351,7 @@ async function deviceLogin(
     authorizeUrl: display,
     userCode,
     manualInput: "none",
+    expiresAt: lifecycle.expiresAt,
     completion: lifecycle.completion,
     submitManual() {
       return Promise.reject(new ProviderLoginError("input"));
@@ -453,6 +454,7 @@ export async function createXaiLogin(
     return {
       authorizeUrl: authorize.toString(),
       manualInput: "callback-url",
+      expiresAt: lifecycle.expiresAt,
       completion: lifecycle.completion,
       async submitManual(text) {
         let url;

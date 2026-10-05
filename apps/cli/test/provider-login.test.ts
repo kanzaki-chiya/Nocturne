@@ -75,8 +75,9 @@ describe("CLI 服务商登录入口", () => {
       print: () => undefined,
     };
     const loginConfig = {
-      credentials: { backend: () => "memory" },
+      credentials: { backend: () => "memory", has: () => false },
       base: { providers: [] },
+      findProviderConflict: async () => undefined,
     } as unknown as RuntimeConfig;
     // loginId 不是 Core 登记的草稿登录（客户端已被 mock），提交阶段按字段 credential 拒绝
     await expect(

@@ -113,6 +113,8 @@ export interface LoginStarted {
   manualInput: "callback-url" | "code" | "none";
   /** 设备码登录时展示，供用户在浏览器核对；不含令牌 */
   userCode?: string;
+  /** 本次登录等待的截止时刻（Unix 毫秒），到时服务端以 timeout 结束；客户端倒计时以它为准 */
+  expiresAt: number;
 }
 
 /**
@@ -180,6 +182,11 @@ export interface RpcMethods {
     result: null;
   };
   "runtime.listReviewerProviders": { params: Record<string, never>; result: ProviderOverview[] };
+  /**
+   * 从磁盘重新加载配置（服务商与设置）并替换 Runtime 的注册表，随后推
+   * runtime.providersChanged；用于另一个进程改了配置文件之后同步。
+   */
+  "runtime.reloadConfig": { params: Record<string, never>; result: null };
   "runtime.defaultReviewer": {
     params: { endpoint: JevEndpoint; baseURL?: string };
     result: JevReviewerConfig;
@@ -338,6 +345,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.getPreference": true,
   "runtime.setPreference": true,
   "runtime.listReviewerProviders": true,
+  "runtime.reloadConfig": true,
   "runtime.defaultReviewer": true,
   "runtime.listReviewerModels": true,
   "provider.listProviderPresets": true,

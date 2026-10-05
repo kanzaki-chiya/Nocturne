@@ -10,7 +10,9 @@ export type ConfigErrorCode =
   /** 配置试图内联凭据值（只允许 apiKeyEnv 指向环境变量名） */
   | "config_credential_rejected"
   /** 无可用系统凭据后端（provider-setup.md 第 3 节：不退回明文） */
-  | "credential_backend_unavailable";
+  | "credential_backend_unavailable"
+  /** 新建服务商时 providers.json 已有同名条目（不区分大小写；provider-setup.md「名称唯一性」） */
+  | "provider_exists";
 
 export class ConfigError extends Error {
   readonly code: ConfigErrorCode;

@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 
 import type { PinnedRow, ProjectNode, SessionRow, SessionTree } from "./session-tree";
 
+/** 设置区的导航项（ADR-0046 2026-10-05 修订第 1 条） */
+export type SettingsSection = "general" | "models" | "providers" | "appearance";
+
 export interface SidebarProps {
   tree: SessionTree;
   pinnedIds: ReadonlySet<string>;
@@ -24,10 +27,100 @@ export interface SidebarProps {
   onRestoreProject: (path: string) => void;
   onOpenProject: () => void;
   onNewSession: (workspace?: string) => void;
-  /** 当前打开的页面（null = 会话/空状态） */
-  page?: "providers" | "settings" | null;
-  onOpenPage?: (page: "providers" | "settings") => void;
+  /** 设置区当前导航项；null = 会话/空状态（左栏显示会话树） */
+  page?: SettingsSection | null;
+  /** 进入设置区或在导航项之间切换 */
+  onOpenPage?: (page: SettingsSection) => void;
+  /** 「← 返回」：回到进入设置前的会话或空状态 */
+  onLeaveSettings?: () => void;
 }
+
+const GLYPH_PROPS = {
+  className: "glyph",
+  viewBox: "0 0 16 16",
+  width: 15,
+  height: 15,
+  "aria-hidden": true,
+} as const;
+
+const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode }[] = [
+  {
+    key: "general",
+    label: "常规",
+    icon: (
+      <svg {...GLYPH_PROPS}>
+        <path
+          d="M2.5 4.5h11M2.5 11.5h11"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+        />
+        <circle
+          cx="10.5"
+          cy="4.5"
+          r="1.7"
+          fill="var(--a-side)"
+          stroke="currentColor"
+          strokeWidth="1.3"
+        />
+        <circle
+          cx="5.5"
+          cy="11.5"
+          r="1.7"
+          fill="var(--a-side)"
+          stroke="currentColor"
+          strokeWidth="1.3"
+        />
+      </svg>
+    ),
+  },
+  {
+    key: "models",
+    label: "模型",
+    icon: (
+      <svg {...GLYPH_PROPS}>
+        <path
+          d="M8 1.8 13.5 4.8v6.4L8 14.2 2.5 11.2V4.8zM2.5 4.8 8 7.8l5.5-3M8 7.8v6.4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
+  },
+  {
+    key: "providers",
+    label: "服务商",
+    icon: (
+      <svg {...GLYPH_PROPS}>
+        <path
+          d="M5.5 1.8v3M10.5 1.8v3M3.5 4.8h9v2.6a4.5 4.5 0 0 1-9 0zM8 11.9v2.3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
+  },
+  {
+    key: "appearance",
+    label: "外观",
+    icon: (
+      <svg {...GLYPH_PROPS}>
+        <circle cx="8" cy="8" r="2.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <path
+          d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
+];
 
 type MenuState =
   | { kind: "session"; x: number; y: number; id: string; pinned: boolean }
@@ -108,6 +201,42 @@ export function Sidebar(props: SidebarProps) {
       window.removeEventListener("mousedown", onDown);
     };
   }, [menu]);
+
+  // 设置区：左栏整列换成设置导航，会话树不显示
+  if (props.page !== undefined && props.page !== null) {
+    const page = props.page;
+    return (
+      <aside className="side snav">
+        <button
+          type="button"
+          className="sback"
+          onClick={() => {
+            props.onLeaveSettings?.();
+          }}
+        >
+          ← 返回<span className="k">Esc</span>
+        </button>
+        <h4>设置</h4>
+        <nav className="nav" aria-label="设置">
+          {SETTINGS_NAV.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`item${page === item.key ? " on" : ""}`}
+              aria-current={page === item.key ? "page" : undefined}
+              onClick={() => {
+                props.onOpenPage?.(item.key);
+              }}
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <div className="ver">设置保存在 ~/.nocturne，主题只存在本机</div>
+      </aside>
+    );
+  }
 
   const sessionMenu = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
@@ -383,26 +512,7 @@ export function Sidebar(props: SidebarProps) {
         </div>
       )}
       <nav className="nav foot" aria-label="页面">
-        <button
-          className={`item${props.page === "providers" ? " on" : ""}`}
-          onClick={() => props.onOpenPage?.("providers")}
-        >
-          <svg className="glyph" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-            <path
-              d="M5.5 1.8v3M10.5 1.8v3M3.5 4.8h9v2.6a4.5 4.5 0 0 1-9 0zM8 11.9v2.3"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          服务商
-        </button>
-        <button
-          className={`item${props.page === "settings" ? " on" : ""}`}
-          onClick={() => props.onOpenPage?.("settings")}
-        >
+        <button type="button" className="item" onClick={() => props.onOpenPage?.("general")}>
           <svg className="glyph" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
             <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
             <path

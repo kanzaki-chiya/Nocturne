@@ -143,6 +143,12 @@ export interface ChoiceMenuControl {
   onSelect: (value: string) => void | Promise<void>;
 }
 
+/** 选项列表之后、分隔线下面的动作项（如模型菜单的「管理服务商…」） */
+export interface MenuAction {
+  label: string;
+  onSelect: () => void;
+}
+
 /**
  * 控件菜单：渲染 ChoiceControl 的分组选项（menuitemradio + ✓），
  * 输入框 chip 与底部状态栏共用。选择先同步关菜单再触发 onSelect，
@@ -153,6 +159,7 @@ export function ChoiceMenu({
   align,
   label,
   control,
+  action,
   onClose,
   onError,
 }: {
@@ -160,6 +167,7 @@ export function ChoiceMenu({
   align?: "left" | "right";
   label?: string;
   control: ChoiceMenuControl;
+  action?: MenuAction | undefined;
   onClose: () => void;
   onError?: (reason: unknown) => void;
 }) {
@@ -193,6 +201,18 @@ export function ChoiceMenu({
         </Fragment>
       ))}
       {control.note !== undefined && <p className="menu-note">{control.note}</p>}
+      {action !== undefined && (
+        <>
+          <MenuSeparator />
+          <MenuItem
+            label={action.label}
+            onSelect={() => {
+              onClose();
+              action.onSelect();
+            }}
+          />
+        </>
+      )}
     </Menu>
   );
 }

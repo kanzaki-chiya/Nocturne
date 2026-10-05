@@ -19,6 +19,7 @@ const entry = (id: string, managed = true): ProviderOverview => ({
   type: "openai-compatible",
   host: "example.test",
   keySource: "credential",
+  authKind: "apiKey",
   origin: "setup",
   overridden: false,
   modelCount: 1,
@@ -47,8 +48,9 @@ async function page(
   const setCredential = vi.fn(async () => undefined);
   const saveSetupProvider = vi.fn(async () => undefined);
   const config = {
-    credentials: { backend: () => "dpapi" },
+    credentials: { backend: () => "dpapi", has: () => false },
     base: { providers: [] },
+    findProviderConflict: async () => undefined,
     setCredential,
     saveSetupProvider,
     refreshModelsDev: async () => undefined,

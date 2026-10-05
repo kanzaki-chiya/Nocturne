@@ -92,6 +92,9 @@ describe("login.startDraft：草稿登录", () => {
       name: "openrouter",
     });
     expect(started.manualInput).toBe("code");
+    // 截止时间由服务端给出（Unix 毫秒），客户端倒计时以它为准
+    expect(started.expiresAt).toBeGreaterThan(Date.now());
+    expect(started.expiresAt).toBeLessThanOrEqual(Date.now() + 15 * 60_000);
     const authorize = new URL(started.authorizeUrl);
     expect(authorize.origin).toBe("https://openrouter.ai");
     expect(authorize.searchParams.get("state")).toBeTruthy();

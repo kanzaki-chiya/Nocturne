@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { PERMISSION_PRESET_NAMES, type ModelRef, type SessionView } from "@nocturne/core/protocol";
+import type { ModelRef, SessionView } from "@nocturne/core/protocol";
 import type { RpcRuntime, RpcSession } from "@nocturne/rpc/client";
 
+import { effortOption, presetOptions } from "./choice-info";
 import type { ChoiceControl, ChoiceGroup, ComposerControls } from "./Composer";
 import type { PrefsStore } from "./prefs";
 
@@ -201,10 +202,7 @@ export function useSessionControls(
     heading: `思考档位 · ${model?.model ?? "—"}`,
     groups: [
       {
-        options: ["off", ...(effort?.available ?? [])].map((level) => ({
-          value: level,
-          label: level,
-        })),
+        options: ["off", ...(effort?.available ?? [])].map(effortOption),
       },
     ],
     ...(effortNote !== "" ? { note: effortNote } : {}),
@@ -217,7 +215,7 @@ export function useSessionControls(
   const presetControl: ChoiceControl = {
     value: snapshot?.preset ?? view.config.permissionPreset,
     label: snapshot?.preset ?? view.config.permissionPreset ?? "—",
-    groups: [{ options: PERMISSION_PRESET_NAMES.map((name) => ({ value: name, label: name })) }],
+    groups: [{ options: presetOptions() }],
     ...(busy ? { disabled: "当前 Turn 结束后可切换" } : {}),
     onSelect: (value) =>
       choose(async () => {
@@ -392,7 +390,7 @@ export function useDraftControls(
       value: effort,
       label: effort,
       heading: `思考档位 · ${model?.ref.model ?? "—"}`,
-      groups: [{ options: levels.map((level) => ({ value: level, label: level })) }],
+      groups: [{ options: levels.map(effortOption) }],
       ...(effortNote !== undefined ? { note: effortNote } : {}),
       onSelect: (value) => {
         setPicked((current) => ({ ...current, effort: value }));
@@ -402,7 +400,7 @@ export function useDraftControls(
     preset: {
       value: preset,
       label: preset ?? "—",
-      groups: [{ options: PERMISSION_PRESET_NAMES.map((name) => ({ value: name, label: name })) }],
+      groups: [{ options: presetOptions() }],
       onSelect: (value) => {
         setPicked((current) => ({ ...current, preset: value }));
       },

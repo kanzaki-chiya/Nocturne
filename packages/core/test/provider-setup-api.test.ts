@@ -30,11 +30,15 @@ import {
   type PendingLogin,
 } from "../src/provider-login/pending.js";
 import { fetchModels, listProviderPresets } from "../src/provider/index.js";
+import { ConfigError } from "../src/config/errors.js";
 
 type Backend = "memory" | "none" | "dpapi";
 
 function makeConfig(backend: Backend) {
   const saved: { entry: ProviderEntryConfig; opts: unknown }[] = [];
+  /** 合并各层里已有的服务商；saveSetupProvider 的 create 模式与 findProviderConflict 都查它 */
+  const existing: { id: string; layer: string }[] = [];
+  const conflict = (id: string) => existing.find((e) => e.id.toLowerCase() === id.toLowerCase());
   const stored = new Map<string, { value: string; storage?: string | undefined }>();
   const credentials = {
     backend: () => backend,
@@ -57,13 +61,20 @@ function makeConfig(backend: Backend) {
     credentials,
     base: { providers: [] as ProviderEntryConfig[] },
     nocturneHome: "unused",
-    saveSetupProvider: (entry: ProviderEntryConfig, opts?: unknown) => {
+    saveSetupProvider: (entry: ProviderEntryConfig, opts?: { mode?: string }) => {
+      const hit = conflict(entry.id);
+      if (opts?.mode === "create" && hit !== undefined) {
+        return Promise.reject(
+          new ConfigError("provider_exists", `已有同名服务商 ${hit.id}（providers.json）`),
+        );
+      }
       saved.push({ entry, opts });
       return Promise.resolve();
     },
+    findProviderConflict: (id: string) => Promise.resolve(conflict(id)),
     refreshModelsDev: vi.fn(async (): Promise<string | undefined> => undefined),
   } as unknown as RuntimeConfig;
-  return { config, saved, stored };
+  return { config, saved, stored, existing };
 }
 
 interface FetchCall {
@@ -225,7 +236,7 @@ describe("addProvider", () => {
     expect(saved).toHaveLength(1);
     expect(saved[0]?.entry).toMatchObject({ id: "deepseek", source: "upstream" });
     expect(saved[0]?.entry.models?.m1).toBeDefined();
-    expect(saved[0]?.opts).toEqual({ key: "sk-test" });
+    expect(saved[0]?.opts).toEqual({ key: "sk-test", mode: "create" });
     expect(JSON.stringify(saved[0]?.entry)).not.toContain("sk-test");
     expect(saved[0]?.entry.apiKeyEnv).toBeUndefined();
   });
@@ -245,7 +256,7 @@ describe("addProvider", () => {
       },
     );
     expect(saved[0]?.entry.apiKeyEnv).toBe("MY_KEY");
-    expect(saved[0]?.opts).toEqual({});
+    expect(saved[0]?.opts).toEqual({ mode: "create" });
     await addProvider(
       config,
       { presetId: "deepseek", credential: { kind: "env", name: "" } },
@@ -507,7 +518,7 @@ describe("草稿登录（loginId）", () => {
     );
     expect(res.modelCount).toBe(1);
     expect(keys).toEqual(["sk-login"]);
-    expect(saved[0]?.opts).toEqual({ key: "sk-login" });
+    expect(saved[0]?.opts).toEqual({ key: "sk-login", mode: "create" });
     expect(saved[0]?.entry.apiKeyEnv).toBeUndefined();
     expect(saved[0]?.entry.auth).toBeUndefined();
     // 提交后 loginId 作废
@@ -543,7 +554,7 @@ describe("草稿登录（loginId）", () => {
       { fetchModels: async () => [{ id: "gpt" }] },
     );
     expect(stored.get("chatgpt")).toEqual({ value: '{"v":1}', storage: "plaintext" });
-    expect(saved[0]?.opts).toEqual({});
+    expect(saved[0]?.opts).toEqual({ mode: "create" });
     expect(saved[0]?.entry.models?.gpt?.protocol).toBe("openai-responses");
     expect(res.providerId).toBe("chatgpt");
   });
@@ -784,5 +795,83 @@ describe("prepare / commit 草稿", () => {
     );
     expect(JSON.stringify(draft)).not.toContain("synthetic-private");
     discardProvider(config, draft.draftId);
+  });
+});
+
+describe("名称唯一性", () => {
+  const pendingFor = (over: Partial<PendingLogin>): PendingLogin => ({
+    presetId: "openrouter",
+    providerId: "openrouter",
+    baseURL: "https://openrouter.ai/api/v1",
+    account: false,
+    settled: true,
+    ...over,
+  });
+  const input = { presetId: "deepseek", credential: { kind: "env" as const, name: "TEST_KEY" } };
+
+  it("准备时与任一层同名（不分大小写）：name 字段报错并写明所在层，不发请求", async () => {
+    const { config, saved, existing } = makeConfig("memory");
+    existing.push({ id: "DeepSeek", layer: "config.json" });
+    const fetch = vi.fn(async () => [{ id: "m" }]);
+    const error = await prepareProvider(config, input, { fetchModels: fetch }).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(ProviderSetupError);
+    expect(error).toMatchObject({
+      field: "name",
+      message: "已有同名服务商 DeepSeek（config.json）",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(saved).toHaveLength(0);
+  });
+
+  it("准备后别处写入同名：提交时再查一次，name 字段报错且不保存", async () => {
+    const { config, saved, existing } = makeConfig("memory");
+    const draft = await prepareProvider(config, input, { fetchModels: async () => [{ id: "m" }] });
+    existing.push({ id: "deepseek", layer: "providers.json" });
+    await expect(commitProvider(config, draft.draftId)).rejects.toMatchObject({
+      field: "name",
+      message: "已有同名服务商 deepseek（providers.json）",
+    });
+    expect(saved).toHaveLength(0);
+  });
+
+  it("写入时撞名（create 模式重读文件发现）：转成 name 字段错误，刚写的账号凭据被撤回", async () => {
+    const { config, saved, stored, existing } = makeConfig("dpapi");
+    const loginId = registerPendingLogin(
+      config,
+      pendingFor({
+        presetId: "grok",
+        providerId: "grok",
+        baseURL: "https://cli-chat-proxy.grok.com/v1",
+        account: true,
+        staged: { kind: "secret", value: '{"v":2}' },
+      }),
+    );
+    const draft = await prepareProvider(
+      config,
+      { presetId: "grok", credential: { kind: "login", loginId } },
+      { fetchModels: async () => [] },
+    );
+    // 提交前的检查通过，写文件那一刻另一个进程已经写了同名条目
+    const findConflict = vi.spyOn(config, "findProviderConflict").mockResolvedValueOnce(undefined);
+    existing.push({ id: "Grok", layer: "providers.json" });
+    await expect(commitProvider(config, draft.draftId)).rejects.toMatchObject({
+      field: "name",
+      message: "已有同名服务商 Grok（providers.json）",
+    });
+    expect(findConflict).toHaveBeenCalled();
+    expect(saved).toHaveLength(0);
+    expect(stored.has("grok")).toBe(false);
+  });
+
+  it("提交前清掉同 id 的孤立凭据：新条目不继承旧密钥", async () => {
+    const { config, saved, stored } = makeConfig("memory");
+    stored.set("deepseek", { value: "sk-orphan" });
+    const draft = await prepareProvider(config, input, { fetchModels: async () => [{ id: "m" }] });
+    expect(stored.has("deepseek")).toBe(true);
+    await commitProvider(config, draft.draftId);
+    expect(saved[0]?.entry.apiKeyEnv).toBe("TEST_KEY");
+    expect(stored.has("deepseek")).toBe(false);
   });
 });

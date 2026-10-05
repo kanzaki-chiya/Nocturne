@@ -218,7 +218,7 @@ Rust 外壳提供四个 Tauri 命令，前端用它们实现 `LineTransport`：
 
 3. **RPC 补充**（按"后果"第一条：先补 Core 公开 API，再暴露到 RPC；主文档 [rpc.md](../protocols/rpc.md)）。第 3 步实现时发现的缺口一并补齐，均为增量字段或新增方法，旧客户端不受影响：
    - `PrepareProviderResult` 增加 `models`：上游返回的模型摘要数组，每项含 id、显示名、推理、图片输入、上下文、最大输出（缺省的字段省略），与详情页模型表同口径。桌面端获取结果按效果图显示前几个名字，可展开为限高、内部滚动的完整列表。
-   - `prepareProvider` 在准备阶段检查名称冲突，与 `commitProvider` 相同规则，以 `-32005` 和 `data.field: "name"` 报告，不必等到保存才发现重名。
+   - `prepareProvider` 与 `commitProvider` 都检查名称冲突：新 id 不得与合并后任一层已有的服务商同名（不分大小写），以 `-32005` 和 `data.field: "name"` 报告，准备阶段就能发现重名。此前重新添加同名服务商会静默覆盖已有条目，这一行为作为缺陷一并修正，不保留兼容路径（规则见 [provider-setup.md](../architecture/provider-setup.md) 第 2 节「名称唯一性」）。
    - `ProviderOverview` 增加 `authKind`（`apiKey` / `env` / `account` / `external-file` / `none`）。桌面端删除按预设登录名和显示文案推断认证类型的代码，按钮组只看这个字段。
    - `LoginStarted` 增加 `expiresAt`（Unix 毫秒），登录等待卡片的倒计时以它为准，删除前端按服务商写死的超时。
    - 新增 `runtime.reloadConfig {}`：重新加载全部配置（服务商、凭据、设置）、重建 Provider 注册表并推 `runtime.providersChanged`，与变更方法之后的重载走同一串行队列；运行中的 Turn 不受影响，下一个 Turn 起生效。桌面端是多后台的协调者：任一后台完成服务商变更（收到 `providersChanged`）或 `updateSettings` 成功后，对其他已连接的后台各调用一次 `reloadConfig`。后台之间不直接通信，Core 不感知多进程。

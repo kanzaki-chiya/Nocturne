@@ -111,6 +111,33 @@ export interface DescribeLayers {
 const LAYER_ORDER = ["setup", "user", "project", "env", "cli"] as const;
 type LayerName = (typeof LAYER_ORDER)[number];
 
+/** 名称冲突报错里给用户看的层名（provider-setup.md「名称唯一性」） */
+const LAYER_LABEL: Record<LayerName, string> = {
+  setup: "providers.json",
+  user: "config.json",
+  project: "项目配置",
+  env: "环境变量",
+  cli: "命令行参数",
+};
+
+/**
+ * 新建服务商的名称冲突：任一层已有同名条目（不区分大小写）时返回该条目原名与层的人读标签，
+ * 取最高层（用户眼里生效的那份）；无冲突时 undefined。
+ */
+export function findProviderConflict(
+  layers: DescribeLayers,
+  id: string,
+): { id: string; layer: string } | undefined {
+  const wanted = id.toLowerCase();
+  let found: { id: string; layer: string } | undefined;
+  for (const layer of LAYER_ORDER) {
+    for (const entry of layers[layer] ?? []) {
+      if (entry.id.toLowerCase() === wanted) found = { id: entry.id, layer: LAYER_LABEL[layer] };
+    }
+  }
+  return found;
+}
+
 /**
  * /provider 列表数据：按分层顺序合并各层 Provider 条目并标注来源。
  * 同 id 高层胜出；向导层条目被更高层同名覆盖时标 overridden。
@@ -138,6 +165,18 @@ export function describeProviderLayers(
         ? ("credential" as const)
         : ("missing" as const);
     return {
+      authKind:
+        kind === "external-file"
+          ? ("external-file" as const)
+          : kind === "openai-siwc" || kind === "xai-oauth2"
+            ? ("account" as const)
+            : envSet
+              ? ("env" as const)
+              : keySource === "credential"
+                ? ("apiKey" as const)
+                : apiKeyEnv !== undefined
+                  ? ("env" as const)
+                  : ("none" as const),
       auth:
         kind === "external-file"
           ? `外部登录凭据 ${entry.auth?.kind === "external-file" ? entry.auth.path : ""}`
@@ -167,7 +206,12 @@ export function describeProviderLayers(
   });
 }
 
-/** 保存/更新向导条目：同 id 条目整体替换（向导写完整条目）；key 经凭据存储写入后端 */
+/**
+ * 保存/更新向导条目；key 经凭据存储写入后端。
+ * - mode "replace"（默认）：同 id 条目整体替换（换密钥、重新登录、刷新模型等更新路径）。
+ * - mode "create"：新建；现读文件后发现同 id（不区分大小写）即拒绝，绝不覆盖
+ *   （provider-setup.md「名称唯一性」，只有 commitProvider 用）。
+ */
 export async function saveSetupProvider(
   platform: Platform,
   nocturneHome: string,
@@ -175,9 +219,20 @@ export async function saveSetupProvider(
   entry: ProviderEntryConfig,
   opts?: {
     key?: string | undefined;
+    mode?: "create" | "replace" | undefined;
   },
 ): Promise<void> {
   const state = await loadProviderSetup(platform, nocturneHome);
+  if (opts?.mode === "create") {
+    const wanted = entry.id.toLowerCase();
+    const existing = (state.file?.providers ?? []).find((p) => p.id.toLowerCase() === wanted);
+    if (existing !== undefined) {
+      throw new ConfigError(
+        "provider_exists",
+        `已有同名服务商 ${existing.id}（${LAYER_LABEL.setup}）`,
+      );
+    }
+  }
   const previous = (state.file?.providers ?? []).find((p) => p.id === entry.id);
   const providers = (state.file?.providers ?? []).filter((p) => p.id !== entry.id);
   // 同 id 整换时保留逐模型用户编辑（ADR-0024 第 1 节）：向导没有重答

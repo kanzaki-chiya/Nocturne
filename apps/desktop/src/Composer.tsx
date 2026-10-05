@@ -34,6 +34,10 @@ export interface ChoiceOption {
   value: string;
   label: string;
   detail?: string;
+  /** 自绘下拉（Dropdown）里的中文名、说明与危险标记；说明统一来自 choice-info.ts */
+  tag?: string;
+  description?: string;
+  risk?: boolean;
   /** 禁用原因（menu item 的 title） */
   disabled?: string;
 }
@@ -118,6 +122,8 @@ export interface ComposerProps {
   onDirMenuOpenChange?: (open: boolean) => void;
   /** 处理 /compact、/mcp；false 时草稿保留 */
   onSlash: (line: string) => boolean | Promise<boolean>;
+  /** 模型菜单底部「管理服务商…」（进入设置 › 服务商）；不传则不显示 */
+  onManageProviders?: () => void;
   placeholder?: string;
 }
 
@@ -232,6 +238,7 @@ export function Composer({
   dirMenuOpen,
   onDirMenuOpenChange,
   onSlash,
+  onManageProviders,
   placeholder,
 }: ComposerProps) {
   const isSession = variant === "session";
@@ -702,7 +709,9 @@ export function Composer({
         event.key !== "Escape" ||
         event.defaultPrevented ||
         event.isComposing ||
-        composingRef.current
+        composingRef.current ||
+        // 设置区盖住会话时（会话区 inert）Esc 属于设置区，不中断
+        textarea.current?.closest("[inert]") != null
       )
         return;
       if (popupOpenRef.current) {
@@ -877,6 +886,11 @@ export function Composer({
       align={kind === "preset" ? "left" : "right"}
       label={control.heading ?? control.label}
       control={control}
+      action={
+        kind === "model" && onManageProviders !== undefined
+          ? { label: "管理服务商…", onSelect: onManageProviders }
+          : undefined
+      }
       onClose={closeMenu}
       // 先同步关菜单：若异步关闭会误伤用户随后打开的下一个菜单
       onError={(reason: unknown) => {

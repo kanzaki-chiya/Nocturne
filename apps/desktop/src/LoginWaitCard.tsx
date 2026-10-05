@@ -14,15 +14,13 @@ function clock(seconds: number): string {
 
 export function LoginWaitCard({
   login,
-  timeoutSec,
   warn = false,
   onOpenAuthorize,
   onCancel,
   onSubmitManual,
 }: {
+  /** 倒计时以服务端给的 login.expiresAt（Unix 毫秒）为准 */
   login: LoginStarted;
-  /** 服务端登录超时（秒），只用于倒计时展示 */
-  timeoutSec: number;
   /** 凭据失效后的重新登录：卡片用警告色描边 */
   warn?: boolean;
   onOpenAuthorize: () => void;
@@ -30,8 +28,8 @@ export function LoginWaitCard({
   /** 粘贴回调地址或授权码；失败抛错，错误显示在卡片里 */
   onSubmitManual: (text: string) => Promise<void>;
 }) {
-  const [deadline] = useState(() => Date.now() + timeoutSec * 1000);
-  const [left, setLeft] = useState(timeoutSec);
+  const deadline = login.expiresAt;
+  const [left, setLeft] = useState(() => Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
   const [cancelling, setCancelling] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualText, setManualText] = useState("");

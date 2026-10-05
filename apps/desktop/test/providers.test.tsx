@@ -19,6 +19,7 @@ const PROVIDER: ProviderOverview = {
   auth: "API Key · 凭据存储",
   credentialStatus: "valid",
   credentialStorage: "system",
+  authKind: "apiKey",
   keySource: "credential",
   origin: "setup",
   overridden: false,
@@ -33,6 +34,7 @@ const EXPIRED: ProviderOverview = {
   auth: "ChatGPT 账号",
   credentialStatus: "expired",
   credentialStorage: "system",
+  authKind: "account",
   keySource: "credential",
   origin: "setup",
   overridden: false,
@@ -141,6 +143,11 @@ const MODEL_SETTINGS = [
 const PREPARED = {
   draftId: "draft-1",
   modelCount: 120,
+  models: Array.from({ length: 120 }, (_, i) => ({
+    id: `vendor/model-${String(i + 1)}`,
+    contextWindow: 128_000,
+    ...(i === 0 ? { reasoning: "visible" as const, imageInput: true } : {}),
+  })),
   needsManualModel: false,
   notices: [],
   steps: ["已获取模型列表"],
@@ -158,7 +165,6 @@ function pageProps(overrides?: {
     inUse: overrides?.inUse,
     openUrl: overrides?.openUrl ?? noop,
     providersVersion: 0,
-    onBack: noop,
   };
 }
 
@@ -326,6 +332,42 @@ describe("ProvidersPage 列表与详情", () => {
 });
 
 describe("添加服务商", () => {
+  it("获取结果先折叠成前几个模型，展开为表格（能力、上下文、最大输出），可再收起", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [] },
+        "provider.listProviderPresets": [PRESET],
+        "runtime.defaultModel": null,
+        "provider.describeProviderSetup": SETUP,
+        "provider.prepareProvider": PREPARED,
+        "provider.discardProvider": null,
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await openForm();
+    fireEvent.click(button("获取模型"));
+    const peek = await screen.findByTestId("fetched-peek");
+    expect(peek.textContent).toContain("vendor/model-1");
+    expect(peek.textContent).toContain("vendor/model-4");
+    expect(peek.textContent).not.toContain("vendor/model-5");
+    expect(peek.textContent).toContain("等 116 个");
+
+    const toggle = screen.getByRole("button", { name: /展开全部/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    const list = screen.getByTestId("fetched-list");
+    expect(screen.queryByTestId("fetched-peek")).toBeNull();
+    expect(list.querySelectorAll(".fbody .fr")).toHaveLength(120);
+    const first = list.querySelector(".fbody .fr");
+    expect(first?.querySelector(".cap")?.textContent).toBe("RI");
+    expect(first?.textContent).toContain("128,000");
+
+    fireEvent.click(screen.getByRole("button", { name: /收起/ }));
+    expect(screen.getByTestId("fetched-peek")).toBeTruthy();
+    server.close();
+  });
+
   it("获取模型前保存置灰；获取后可保存；改字段后重新置灰并释放草稿", async () => {
     const server = fakeServer(
       withInit({
@@ -405,7 +447,8 @@ describe("添加服务商", () => {
     fireEvent.click(button("获取模型"));
     await screen.findByText("服务商 ID 已被占用");
     expect(screen.getByLabelText("名称").className).toContain("err");
-    expect(screen.getByText("获取失败")).toBeTruthy();
+    // 字段错误只写在字段下，结果区不再重复「获取失败」
+    expect(screen.queryByText("获取失败")).toBeNull();
     server.close();
   });
 
@@ -536,6 +579,7 @@ describe("登录", () => {
         "login.start": {
           loginId: "login-1",
           authorizeUrl: "https://chatgpt.com/authorize",
+          expiresAt: Date.now() + 300_000,
           manualInput: "callback-url",
         },
         "login.cancel": null,

@@ -22,6 +22,7 @@ import {
   type RuntimeOptions,
 } from "../src/index.js";
 import { createPlatform, type PipeProcess, type Platform } from "../src/platform/index.js";
+import { resolveProviderAuth } from "../src/provider-oauth.js";
 import { FakeProvider, type FakeScript } from "../src/provider/index.js";
 
 let root: string;
@@ -250,20 +251,24 @@ describe("describeProviders", () => {
     expect(JSON.stringify(item)).not.toContain("fake-private-token");
     await fs.unlink(path.join(home, "providers.json"));
   });
-  it("账号状态读盘上最新记录：另一个存储实例刷新后不再显示已失效", async () => {
-    const account = (expiresAt: number, accessToken: string) =>
+  it("账号状态读盘上最新记录；访问令牌过期但刷新令牌在时为有效", async () => {
+    const account = (expiresAt: number, accessToken: string, refreshToken: string) =>
       JSON.stringify({
         version: 1,
         clientId: "client",
         subject: "subject",
         idToken: "fake-id-token",
         accessToken,
-        refreshToken: "fake-refresh-token",
+        refreshToken,
         expiresAt,
         scopes: ["chatgpt.tokens.use.direct"],
       });
     const viewer = (await createCredentialStore(platform, home, { backend: "none" })).store;
-    await viewer.setAccount?.("account", account(Date.now() - 1, "fake-old-token"), "plaintext");
+    await viewer.setAccount?.(
+      "account",
+      account(Date.now() - 86_400_000, "fake-old-token", "fake-refresh-token"),
+      "plaintext",
+    );
     await writeJson(path.join(home, "providers.json"), {
       version: 1,
       providers: [
@@ -276,16 +281,56 @@ describe("describeProviders", () => {
       ],
     });
     const rc = await loadConfig(platform, { nocturneHome: home, env: noEnv, credentials: viewer });
-    expect((await rc.describeProviders())[0]?.credentialStatus).toBe("expired");
-    const refresher = (await createCredentialStore(platform, home, { backend: "none" })).store;
-    await refresher.setAccount?.(
-      "account",
-      account(Date.now() + 3_600_000, "fake-new-token"),
-      "plaintext",
-    );
+    // 过期一天：不发网络请求，按刷新令牌判为有效
     expect((await rc.describeProviders())[0]?.credentialStatus).toBe("valid");
+    // 另一个存储实例删除了记录（退出登录或终止性刷新失败）：读盘即得缺失
+    const other = (await createCredentialStore(platform, home, { backend: "none" })).store;
+    await other.delete("account");
+    expect((await rc.describeProviders())[0]?.credentialStatus).toBe("missing");
     await fs.unlink(path.join(home, "providers.json"));
     await fs.unlink(path.join(home, "credentials.json"));
+  });
+  it("终止性刷新失败删除记录，下一次 describeProviders 显示缺失", async () => {
+    const credentials = (await createCredentialStore(platform, home, { backend: "memory" })).store;
+    await credentials.setAccount?.(
+      "account",
+      JSON.stringify({
+        version: 1,
+        clientId: "client",
+        subject: "subject",
+        idToken: "fake-id-token",
+        accessToken: "fake-old-token",
+        refreshToken: "fake-revoked-refresh",
+        expiresAt: Date.now() - 1,
+        scopes: ["chatgpt.tokens.use.direct"],
+      }),
+      "memory",
+    );
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [
+        {
+          id: "account",
+          type: "openai-compatible",
+          baseURL: "https://api.openai.com/v1",
+          auth: { kind: "openai-siwc" },
+        },
+      ],
+    });
+    const rc = await loadConfig(platform, { nocturneHome: home, env: noEnv, credentials });
+    expect((await rc.describeProviders())[0]?.credentialStatus).toBe("valid");
+    const resolver = resolveProviderAuth(
+      rc,
+      { id: "account", auth: { kind: "openai-siwc" } },
+      platform,
+      {
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }),
+      },
+    );
+    await expect(resolver.token(new AbortController().signal)).rejects.toThrow(/登录已失效/);
+    expect((await rc.describeProviders())[0]?.credentialStatus).toBe("missing");
+    await fs.unlink(path.join(home, "providers.json"));
   });
   it("标注来源层/密钥来源/覆盖关系；不含密钥", async () => {
     const creds = (await createCredentialStore(platform, home, { backend: "memory" })).store;
@@ -863,4 +908,90 @@ it("准备不改变 providers.json 或凭据，只有 commit 才写入", async (
     providers: expect.arrayContaining([expect.objectContaining({ id: "deepseek" })]),
   });
   expect(credentials.has("deepseek")).toBe(true);
+});
+
+describe("名称唯一性（真实分层）", () => {
+  async function fresh() {
+    const credentials = (await createCredentialStore(platform, home, { backend: "memory" })).store;
+    const rc = await loadConfig(platform, { nocturneHome: home, env: noEnv, credentials });
+    rc.refreshModelsDev = async () => undefined;
+    return { rc, credentials };
+  }
+  const named = (name: string) => ({
+    presetId: "custom-openai",
+    name,
+    baseURL: "https://api.corp.test/v1",
+    credential: { kind: "apiKey" as const, key: "sk-new" },
+  });
+
+  it("与 config.json 里的服务商同名：准备即报 name 字段错误", async () => {
+    await writeJson(path.join(home, "config.json"), {
+      providers: [{ id: "grok", type: "openai-compatible", baseURL: "https://x.test/v1" }],
+    });
+    const { rc } = await fresh();
+    await expect(
+      prepareProvider(rc, named("grok"), { fetchModels: async () => [{ id: "m" }] }),
+    ).rejects.toMatchObject({ field: "name", message: "已有同名服务商 grok（config.json）" });
+    expect(await exists(path.join(home, "providers.json"))).toBe(false);
+  });
+
+  it("只差大小写也算同名；报错里是已有条目的原拼写", async () => {
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [{ ...ENTRY, id: "Corp" }],
+    });
+    const { rc } = await fresh();
+    await expect(
+      prepareProvider(rc, named("corp"), { fetchModels: async () => [{ id: "m" }] }),
+    ).rejects.toMatchObject({ field: "name", message: "已有同名服务商 Corp（providers.json）" });
+  });
+
+  it("准备之后另一个配置对象写入同名：提交失败，文件里只有对方的条目", async () => {
+    const { rc, credentials } = await fresh();
+    const draft = await prepareProvider(rc, named("Acme"), {
+      fetchModels: async () => [{ id: "m" }],
+    });
+    const other = await fresh();
+    await other.rc.saveSetupProvider({ ...ENTRY, id: "acme" }, { mode: "create" });
+    await expect(commitProvider(rc, draft.draftId)).rejects.toMatchObject({ field: "name" });
+    const raw = (await readJson(path.join(home, "providers.json"))) as {
+      providers: { id: string }[];
+    };
+    expect(raw.providers.map((p) => p.id)).toEqual(["acme"]);
+    expect(credentials.has("Acme")).toBe(false);
+  });
+
+  it("create 模式重读文件拒绝同名（provider_exists）；replace（刷新模型）照旧覆盖", async () => {
+    await writeJson(path.join(home, "providers.json"), { version: 1, providers: [ENTRY] });
+    const { rc } = await fresh();
+    await expect(
+      rc.saveSetupProvider({ ...ENTRY, id: "CORP" }, { mode: "create" }),
+    ).rejects.toMatchObject({
+      code: "provider_exists",
+      message: "已有同名服务商 corp（providers.json）",
+    });
+    await rc.saveSetupProvider({ ...ENTRY, baseURL: "https://api.corp.test/v2" });
+    await rc.saveSetupProvider(
+      { ...ENTRY, baseURL: "https://api.corp.test/v3" },
+      { mode: "replace" },
+    );
+    const raw = (await readJson(path.join(home, "providers.json"))) as {
+      providers: { id: string; baseURL: string }[];
+    };
+    expect(raw.providers).toEqual([
+      expect.objectContaining({ id: "corp", baseURL: "https://api.corp.test/v3" }),
+    ]);
+  });
+
+  it("新 id 保留用户拼写写入", async () => {
+    const { rc } = await fresh();
+    const draft = await prepareProvider(rc, named("MyCorp"), {
+      fetchModels: async () => [{ id: "m" }],
+    });
+    await commitProvider(rc, draft.draftId);
+    const raw = (await readJson(path.join(home, "providers.json"))) as {
+      providers: { id: string }[];
+    };
+    expect(raw.providers.map((p) => p.id)).toEqual(["MyCorp"]);
+  });
 });

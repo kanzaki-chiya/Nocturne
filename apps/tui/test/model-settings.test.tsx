@@ -114,6 +114,7 @@ const entry = (over?: Partial<ProviderOverview>): ProviderOverview => ({
   type: "openai-compatible",
   host: "api.example.com",
   keySource: "credential",
+  authKind: "apiKey",
   origin: "setup",
   overridden: false,
   modelCount: 2,

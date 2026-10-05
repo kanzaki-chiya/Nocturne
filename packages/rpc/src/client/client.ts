@@ -174,6 +174,8 @@ export interface RpcRuntime {
   getPreference(key: string): Promise<string | undefined>;
   setPreference(key: string, value: string | undefined): Promise<void>;
   listReviewerProviders(): Promise<ProviderOverview[]>;
+  /** 从磁盘重新加载配置并替换注册表；完成前先收到 onProvidersChanged */
+  reloadConfig(): Promise<void>;
   defaultReviewer(endpoint: JevEndpoint, baseURL?: string): Promise<JevReviewerConfig>;
   listReviewerModels(reviewer: JevReviewerConfig): Promise<{ models: string[]; warning?: string }>;
 }
@@ -505,6 +507,9 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       await call("runtime.setPreference", { key, value: value ?? null });
     },
     listReviewerProviders: () => call("runtime.listReviewerProviders", {}),
+    reloadConfig: async () => {
+      await call("runtime.reloadConfig", {});
+    },
     defaultReviewer: (endpoint, baseURL) =>
       call("runtime.defaultReviewer", {
         endpoint,

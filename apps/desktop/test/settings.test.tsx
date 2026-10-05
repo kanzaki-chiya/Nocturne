@@ -1,12 +1,13 @@
 /**
- * 设置页测试（假服务端）：单值项立即保存与失败回滚、覆盖标黄、
- * 默认模型与档位成对保存、模型角色、审查器密钥按 password 处理、桌面端主题。
+ * 设置区常规 / 模型 / 外观页测试（假服务端）：各页分组、单值项立即保存与失败回滚、
+ * 覆盖标黄、默认模型与档位成对保存、模型角色、审查器密钥按 password 处理、主题卡片、
+ * 写成功后通知桌面端协调其他后台。
  */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RpcClient } from "@nocturne/rpc/client";
 
-import { SettingsPage, type ThemePref } from "../src/SettingsPage";
+import { SettingsPage, type SettingsPageSection, type ThemePref } from "../src/SettingsPage";
 import type { SettingItem } from "../src/rpc-types";
 import { fakeServer, RpcFail, withInit } from "./fake-server";
 
@@ -108,9 +109,16 @@ function handlers(extra: Record<string, unknown> = {}) {
 
 function props(
   client: RpcClient,
-  overrides?: { theme?: ThemePref; onThemeChange?: (t: ThemePref) => boolean },
+  overrides?: {
+    section?: SettingsPageSection;
+    theme?: ThemePref;
+    onThemeChange?: (t: ThemePref) => boolean;
+    onConfigSaved?: () => void;
+    onOpenProviders?: () => void;
+  },
 ) {
   return {
+    section: overrides?.section ?? ("general" as const),
     client,
     theme: overrides?.theme ?? ("system" as const),
     workspace: "C:\\Users\\me\\Nocturne",
@@ -120,7 +128,8 @@ function props(
     onWorkspaceChange: () => Promise.resolve(undefined),
     pickFolder: () => Promise.resolve(null),
     providersVersion: 0,
-    onBack: noop,
+    onConfigSaved: overrides?.onConfigSaved ?? noop,
+    onOpenProviders: overrides?.onOpenProviders ?? noop,
   };
 }
 
@@ -155,19 +164,25 @@ describe("SettingsPage", () => {
       }),
     );
     await server.initialize();
-    render(<SettingsPage {...props(server.client)} />);
-    const select = await screen.findByLabelText("默认权限预设");
-    fireEvent.change(select, { target: { value: "read-only" } });
+    const onConfigSaved = vi.fn();
+    render(<SettingsPage {...props(server.client, { onConfigSaved })} />);
+    const trigger = await screen.findByRole("combobox", { name: "默认权限预设" });
+    expect(trigger.textContent).toContain("跟随默认");
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("option", { name: /^read-only/ }));
     await waitFor(() => {
       expect(screen.getByRole("status").textContent).toBe("✓已保存 默认权限预设 = read-only");
     });
-    expect(select).toHaveProperty("value", "read-only");
+    expect(trigger.textContent).toContain("read-only");
+    expect(onConfigSaved).toHaveBeenCalledTimes(1);
 
     fail = true;
-    fireEvent.change(select, { target: { value: "bypass" } });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("option", { name: /^bypass/ }));
     await screen.findByText(/保存失败：磁盘只读/);
-    expect(select).toHaveProperty("value", "read-only");
+    expect(trigger.textContent).toContain("read-only");
     expect(row("默认权限预设").className).toContain("bad");
+    expect(onConfigSaved).toHaveBeenCalledTimes(1);
     server.close();
   });
 
@@ -183,7 +198,8 @@ describe("SettingsPage", () => {
   it("默认模型与档位经 setDefaultModel 成对保存；无档位的模型传 null", async () => {
     const server = fakeServer(handlers({ "runtime.setDefaultModel": ITEMS }));
     await server.initialize();
-    render(<SettingsPage {...props(server.client)} />);
+    const onConfigSaved = vi.fn();
+    render(<SettingsPage {...props(server.client, { section: "models", onConfigSaved })} />);
     await screen.findByText("openrouter · gpt-5 · high");
     fireEvent.click(row("默认模型与档位").querySelector("button") ?? document.body);
     await screen.findByRole("dialog", { name: "默认模型与档位" });
@@ -192,6 +208,9 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       const call = server.calls.find((c) => c.method === "runtime.setDefaultModel");
       expect(call?.params).toEqual({ model: "openrouter/gpt-5", reasoningEffort: "medium" });
+    });
+    await waitFor(() => {
+      expect(onConfigSaved).toHaveBeenCalledTimes(1);
     });
 
     fireEvent.click(row("默认模型与档位").querySelector("button") ?? document.body);
@@ -209,7 +228,7 @@ describe("SettingsPage", () => {
   it("看图模型只列支持图片输入的模型；取消不写", async () => {
     const server = fakeServer(handlers());
     await server.initialize();
-    render(<SettingsPage {...props(server.client)} />);
+    render(<SettingsPage {...props(server.client, { section: "models" })} />);
     await screen.findByText("看图模型");
     fireEvent.click(row("看图模型").querySelector("button") ?? document.body);
     await screen.findByRole("dialog", { name: "看图模型" });
@@ -268,11 +287,40 @@ describe("SettingsPage", () => {
     const server = fakeServer(handlers());
     await server.initialize();
     const onThemeChange = vi.fn(() => true);
-    render(<SettingsPage {...props(server.client, { onThemeChange })} />);
-    fireEvent.click(await screen.findByRole("button", { name: "深色" }));
+    render(<SettingsPage {...props(server.client, { section: "appearance", onThemeChange })} />);
+    const dark = await screen.findByRole("radio", { name: "深色" });
+    expect(screen.getByRole("radio", { name: "跟随系统" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    fireEvent.click(dark);
     expect(onThemeChange).toHaveBeenCalledWith("dark");
     expect((await screen.findByRole("status")).textContent).toBe("✓已保存 主题 = 深色");
     expect(server.calls.some((c) => c.method === "runtime.updateSettings")).toBe(false);
+    server.close();
+  });
+
+  it("各页只显示自己的分组；模型页尾的链接进入服务商", async () => {
+    const server = fakeServer(handlers());
+    await server.initialize();
+    const onOpenProviders = vi.fn();
+    const view = render(<SettingsPage {...props(server.client)} />);
+    await screen.findByText("默认权限预设");
+    const groups = () => [...document.querySelectorAll("h5")].map((h) => h.textContent);
+    expect(groups()).toEqual(["权限", "执行", "普通对话"]);
+    expect(screen.getByRole("heading", { name: "常规" })).toBeTruthy();
+    expect(screen.queryByText("看图模型")).toBeNull();
+
+    view.rerender(
+      <SettingsPage {...props(server.client, { section: "models", onOpenProviders })} />,
+    );
+    expect(groups()).toEqual(["默认", "模型角色"]);
+    expect(screen.queryByText("默认权限预设")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "服务商 › 模型表" }));
+    expect(onOpenProviders).toHaveBeenCalledTimes(1);
+
+    view.rerender(<SettingsPage {...props(server.client, { section: "appearance" })} />);
+    expect(groups()).toEqual(["主题"]);
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
     server.close();
   });
 });

@@ -13,6 +13,7 @@ const entry = (id: string, over: Partial<ProviderOverview> = {}): ProviderOvervi
   type: "openai-compatible",
   host: "example.test",
   keySource: "credential",
+  authKind: "apiKey",
   origin: "setup",
   overridden: false,
   modelCount: 3,

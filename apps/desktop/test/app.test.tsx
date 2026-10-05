@@ -33,8 +33,20 @@ function replayHost(failRpc: readonly string[] = []) {
     firstText: `${id} 会话`,
   }));
   const workspaces = new Map<number, string>();
-  const host: DesktopHost & { calls: RpcCall[] } = {
+  const notify = (backendId: number, method: string) => {
+    channels.get(backendId)?.({
+      kind: "line",
+      line: JSON.stringify({ jsonrpc: "2.0", method, params: {} }),
+    });
+  };
+  const host: DesktopHost & {
+    calls: RpcCall[];
+    workspaces: Map<number, string>;
+    notify: typeof notify;
+  } = {
     calls,
+    workspaces,
+    notify,
     createChannel: (onMessage) => onMessage,
     openUrl: async () => undefined,
     pickFolder: async () => null,
@@ -91,6 +103,19 @@ function replayHost(failRpc: readonly string[] = []) {
           break;
         case "runtime.defaultModel":
           result = cheap;
+          break;
+        case "runtime.listReviewerProviders":
+          result = [];
+          break;
+        case "runtime.updateSettings":
+          // 与真实服务端一致：写 settings.json 不推 providersChanged，由桌面端协调
+          result = [
+            { key: "reasoningEffort", effective: "low" },
+            { key: "permissions.preset", effective: "smart", saved: "smart", source: "settings" },
+          ];
+          break;
+        case "runtime.reloadConfig":
+          notify(backendId, "runtime.providersChanged");
           break;
         case "runtime.describeSettings":
           result = [
@@ -311,8 +336,8 @@ it("会话内状态栏控件调用真实 setter", async () => {
     ).toBe(true),
   );
   // 档位 pill
-  fireEvent.click(screen.getByRole("button", { name: "切换思考档位" }));
-  fireEvent.click(await screen.findByRole("menuitemradio", { name: "high" }));
+  fireEvent.click(screen.getByRole("combobox", { name: "切换思考档位" }));
+  fireEvent.click(await screen.findByRole("option", { name: /^high/ }));
   await waitFor(() =>
     expect(
       host.calls.some(
@@ -321,8 +346,8 @@ it("会话内状态栏控件调用真实 setter", async () => {
     ).toBe(true),
   );
   // 预设 pill
-  fireEvent.click(screen.getByRole("button", { name: "切换权限预设" }));
-  fireEvent.click(await screen.findByRole("menuitemradio", { name: "smart" }));
+  fireEvent.click(screen.getByRole("combobox", { name: "切换权限预设" }));
+  fireEvent.click(await screen.findByRole("option", { name: /^smart/ }));
   await waitFor(() =>
     expect(
       host.calls.some(
@@ -388,4 +413,84 @@ it("权限卡片聚焦后，焦点在输入框时 Esc 直接拒绝且不中断�
     ).toBe(true),
   );
   expect(host.calls.some((call) => call.method === "session.interrupt")).toBe(false);
+});
+
+it("设置区接管左栏：返回与 Esc 回到原会话且滚动位置不变", async () => {
+  const host = replayHost();
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  const stream = await screen.findByRole("region", { name: "会话消息" });
+  await within(stream).findByText("alpha 正文");
+  // 用户往上翻过：不再跟随最新，滚动位置由用户决定
+  fireEvent.wheel(stream, { deltaY: -100 });
+  stream.scrollTop = 120;
+  expect(stream.scrollTop).toBe(120);
+
+  fireEvent.click(screen.getByRole("button", { name: "设置" }));
+  const nav = await screen.findByRole("navigation", { name: "设置" });
+  expect(within(nav).getByRole("button", { name: /常规/ }).getAttribute("aria-current")).toBe(
+    "page",
+  );
+  expect(screen.queryByRole("button", { name: /^beta (?:会话|正文)/ })).toBeNull();
+  expect(await screen.findByRole("heading", { name: "常规" })).toBeTruthy();
+  // 会话区仍挂载，只是不可交互
+  expect(stream.isConnected).toBe(true);
+  expect(stream.closest(".mainpane")?.hasAttribute("inert")).toBe(true);
+
+  fireEvent.click(within(nav).getByRole("button", { name: /外观/ }));
+  expect(await screen.findByRole("heading", { name: "外观" })).toBeTruthy();
+  fireEvent.click(within(nav).getByRole("button", { name: /服务商/ }));
+  expect(await screen.findByTestId("providers-page")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: /← 返回/ }));
+  await waitFor(() => {
+    expect(screen.queryByRole("navigation", { name: "设置" })).toBeNull();
+  });
+  expect(screen.getByRole("region", { name: "会话消息" })).toBe(stream);
+  expect(stream.scrollTop).toBe(120);
+  expect(stream.closest(".mainpane")?.hasAttribute("inert")).toBe(false);
+
+  fireEvent.click(screen.getByRole("button", { name: "设置" }));
+  await screen.findByRole("navigation", { name: "设置" });
+  // 被盖住的会话有待确认权限：设置区里的 Esc 和数字键不能替它作答
+  fireEvent.keyDown(document.body, { key: "1" });
+  fireEvent.keyDown(window, { key: "Escape" });
+  await waitFor(() => {
+    expect(screen.queryByRole("navigation", { name: "设置" })).toBeNull();
+  });
+  expect(screen.getByRole("region", { name: "会话消息" })).toBe(stream);
+  expect(host.calls.some((c) => c.method === "session.respondPermission")).toBe(false);
+  expect(screen.getByRole("region", { name: "权限确认" })).toBeTruthy();
+});
+
+it("配置变更让其他后台 reloadConfig，重载引起的通知不再转发", async () => {
+  const host = replayHost();
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("alpha 正文");
+  const idOf = (ws: string) => [...host.workspaces].find(([, w]) => w === ws)?.[0];
+  await waitFor(() => {
+    expect(idOf("Z:/plain")).toBeDefined();
+    expect(idOf("Z:/qa-alpha")).toBeDefined();
+  });
+  const plain = idOf("Z:/plain") ?? -1;
+  const alpha = idOf("Z:/qa-alpha") ?? -1;
+  const reloads = () =>
+    host.calls.filter((c) => c.method === "runtime.reloadConfig").map((c) => c.backendId);
+
+  // 设置页（走普通对话后台）保存成功 → 只让 alpha 重载，alpha 的回声不再回传
+  fireEvent.click(screen.getByRole("button", { name: "设置" }));
+  fireEvent.click(await screen.findByRole("combobox", { name: "默认权限预设" }));
+  fireEvent.click(screen.getByRole("option", { name: /^smart/ }));
+  await waitFor(() => {
+    expect(reloads()).toEqual([alpha]);
+  });
+
+  // alpha 自己的变更（例如另一个窗口改了文件后它先重载）→ 让普通对话后台重载一次
+  host.notify(alpha, "runtime.providersChanged");
+  await waitFor(() => {
+    expect(reloads()).toEqual([alpha, plain]);
+  });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(reloads()).toEqual([alpha, plain]);
 });

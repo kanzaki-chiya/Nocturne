@@ -1,6 +1,6 @@
 # 桌面端（Tauri 外壳 + React 前端）
 
-> 状态：v0.5 骨架与连接、对话、服务商与设置页已实现（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 9 节第 1–3 步） | 前置阅读：[protocols/rpc.md](../protocols/rpc.md) | 代码位置：`apps/desktop/`
+> 状态：v0.5 骨架与连接、对话、设置区（服务商、常规、模型、外观）已实现（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 9 节第 1–3 步） | 前置阅读：[protocols/rpc.md](../protocols/rpc.md) | 代码位置：`apps/desktop/`
 
 `apps/desktop` 是 Nocturne 的桌面端：一个 Tauri 进程内，React 前端经 `@nocturne/rpc/client` 与若干 `nctrn rpc --stdio` 后台进程通信，Rust 外壳只负责进程管理与按行转发。所有会话语义（握手、方法调用、事件）都在前端处理，外壳不解析报文。
 
@@ -83,10 +83,10 @@ interface NodeProbe {
 
 主窗口保留系统窗口标题「Nocturne」（任务栏与 Alt+Tab），但 `decorations: false` 隐藏原生标题栏。`src/WindowFrame.tsx` 自绘右侧顶部 32px 标题栏，左栏延伸到窗口顶部；空白区使用 `data-tauri-drag-region`，由 Tauri 的原生拖动和双击最大化处理。右端提供最小化、最大化/还原、关闭按钮；关闭悬停红底白字，其余悬停使用主题浅底。最大化状态随 WebView resize、focus 及按钮操作查询更新，不保存或自行计算还原尺寸，贴靠、还原与边框缩放交给系统。Windows 11 最大化按钮悬停贴靠布局菜单暂不提供。
 
-左栏结构从上到下（`src/session-tree.ts` 为纯函数，`src/Sidebar.tsx` 渲染）：「＋ 新会话」→「置顶」→「对话」→「项目」，底部固定「服务商」「设置」两个入口（见 5.5、5.6）。
+左栏结构从上到下（`src/session-tree.ts` 为纯函数，`src/Sidebar.tsx` 渲染）：「＋ 新会话」→「置顶」→「对话」→「项目」，底部只有「设置」一个入口（进入设置区的「常规」，见 5.5）。
 
 - **空会话过滤**：`firstText` 缺省或 trim 后为空且未锁定的会话不显示（置顶、对话、项目都过滤）；被锁定的空会话照常显示为「未命名会话」。
-- **对话**：普通对话工作区（默认 `<NOCTURNE_HOME>/workspace`，可在设置页更改）以及 `prefs.plainWorkspaces` 里记住的历任工作区的会话平铺列出（cwd 经 `projectKey` 归并比较），按 `mtimeMs` 降序，默认前 5 条 +「展开显示（还有 N 个）」/「收起」；已置顶的不重复出现，置顶的对话会话项目标签为「对话」。手动项目里路径等于这些工作区的也不显示为项目。还没拿到工作区路径时所有会话按项目处理。
+- **对话**：普通对话工作区（默认 `<NOCTURNE_HOME>/workspace`，可在 设置 › 常规 更改）以及 `prefs.plainWorkspaces` 里记住的历任工作区的会话平铺列出（cwd 经 `projectKey` 归并比较），按 `mtimeMs` 降序，默认前 5 条 +「展开显示（还有 N 个）」/「收起」；已置顶的不重复出现，置顶的对话会话项目标签为「对话」。手动项目里路径等于这些工作区的也不显示为项目。还没拿到工作区路径时所有会话按项目处理。
 - **项目**：项目 = 其余会话 `cwd` 的归并键 ∪ 手动添加的项目 − 隐藏项目。`projectKey(path)` 去末尾分隔符（根目录除外）；像 Windows 路径（`盘符:` 或含 `\`）则统一 `\` 并小写。显示用第一次见到的原始路径，项目名取末段。排序存 `projectSort`：默认「最近活动」（有会话的项目按最新 `mtimeMs` 降序，其后是无会话的手动项目按添加顺序），「名称」时对全部项目按名称排序；项目内规则同对话区。「项目」标题行右侧的「…」（弹出菜单：排序、已移除的项目…）与「＋」（打开项目）在悬停时显示；项目行悬停显示的「＋」在该项目新建会话。「…」菜单的「已移除的项目…」列出隐藏的项目（显示名称、悬停见完整路径），点一项即从隐藏集合移除并恢复显示。
 - **置顶**：按置顶数组顺序列出仍存在的会话，每条标出所属项目名（对话为「对话」）；置顶不受项目隐藏影响。右键会话行置顶/取消置顶，右键项目标题「从列表移除」（把项目路径加入隐藏集合，不删会话、不动手动项目列表，可在「…」菜单恢复）。
 - 会话行优先显示已打开会话视图的标题，否则为 `firstText ?? "未命名会话"`；meta 为相对时间（<60s「现在」<1h「N 分钟」<24h「N 小时」<48h「昨天」<30d「N 天」否则 `YYYY-MM-DD`，锁定加「🔒 」前缀）。运行中的会话显示主色圆点；等待权限确认或提问回复的会话显示「待确认」，切走后仍保持这个状态。
@@ -105,9 +105,11 @@ interface NodeProbe {
 
 ### 5.2 消息、输入与交互请求
 
-`src/Conversation.tsx` 按共享 `SessionView` 渲染用户消息、助手 Markdown、可折叠思考、工具调用和文件 diff、警告与通知，不另写事件折叠。用户消息是右对齐气泡，`@路径` 渲染成等宽 chip（title 来自匹配的 fileRef 元数据：「已附带 N/M 行」「目录」「已附带文件 · 已截断」）；助手行无标签无边线；思考折叠为一行（「思考中 Ns」/「思考了 Ns」/「思考」，时长由 `src/reasoning.ts` 从流式事件累计）。工具行单行显示「图标字母 + 动作 + 参数 + · 范围 + 简短结果」：cwd 内路径相对化（`src/paths.ts` `displayPath`，Windows 风格忽略大小写与分隔符），区外按原样绝对路径；>10 秒才显示时长（「12 秒」/「1 分 45 秒」）。ok 的 edit/write/apply_patch 只渲染 diff 卡片（`+N`/`−M` 计数，去掉 `---`/`+++`/`index`/`\ No newline` 行，hunk 之间「⋯」分隔，默认展开可收起）；出错仍渲染工具行。被拒绝的工具只显示一行红色「✕ 已拒绝<操作>」（feedback 放 title）；`permission`（allow/deny）与 `config` 子类型的 notice 不进消息流。Markdown 原始 HTML、脚本、事件属性和远程图片不执行、不加载；允许的链接由宿主打开。流式更新自动跟随底部，用户向上滚动后停止跟随，点击「回到最新消息」恢复。左栏和消息滚动区使用细、无箭头滚动条，滑块为 `--a-borderStrong`。
+`src/Conversation.tsx` 按共享 `SessionView` 渲染用户消息、助手 Markdown、可折叠思考、工具调用和文件 diff、警告与通知，不另写事件折叠。用户消息是右对齐气泡，`@路径` 渲染成等宽 chip（title 来自匹配的 fileRef 元数据：「已附带 N/M 行」「目录」「已附带文件 · 已截断」）；助手行无标签无边线；思考默认折叠为一行（「思考中 Ns」/「思考了 Ns」/「思考」，时长由 `src/reasoning.ts` 从流式事件累计），点开展开全文（规则见下文「长思考」）。工具行单行显示「图标字母 + 动作 + 参数 + · 范围 + 简短结果」：cwd 内路径相对化（`src/paths.ts` `displayPath`，Windows 风格忽略大小写与分隔符），区外按原样绝对路径；>10 秒才显示时长（「12 秒」/「1 分 45 秒」）。ok 的 edit/write/apply_patch 只渲染 diff 卡片（`+N`/`−M` 计数，去掉 `---`/`+++`/`index`/`\ No newline` 行，hunk 之间「⋯」分隔，默认展开可收起）；出错仍渲染工具行。被拒绝的工具只显示一行红色「✕ 已拒绝<操作>」（feedback 放 title）；`permission`（allow/deny）与 `config` 子类型的 notice 不进消息流。Markdown 原始 HTML、脚本、事件属性和远程图片不执行、不加载；允许的链接由宿主打开。流式更新自动跟随底部，用户向上滚动后停止跟随，点击「回到最新消息」恢复。左栏和消息滚动区使用细、无箭头滚动条，滑块为 `--a-borderStrong`。
 
-思考时长不足 1 秒时，无论进行中还是已结束都只显示「思考」。diff 正文剥离每行自带的第一个 `+`、`-` 或空格，仅在标记列显示符号，保留正文自己的符号与缩进，`@@` 不进入正文。压缩回执只显示「上下文已压缩」，不展示压缩模式、seq 或 payload。
+思考时长不足 1 秒时，无论进行中还是已结束都只显示「思考」。
+
+**长思考**（desktop-v4.html F/G 屏）：思考块的标题行是按钮（`aria-expanded`），展开后标题为「思考 · N 秒 ▴」（超过一分钟写「M 分 S 秒」，进行中写「思考中 · …」），并吸附在消息滚动区顶部（`position: sticky`），读到块中间也能一键收起；整块滚出视野后标题随之离开，不会盖住后面的消息。思考正文高于一屏（滚动区可视高度）时，正文末尾再给一个「▴ 收起思考」按钮，不到一屏只用标题行。收起由消息流决定怎么滚（`ThinkScrollContext`）：处于跟随最新时同步滚到底部，跟随保持开启（在滚动事件之前定好位置，块变矮引起的回滚不会被当成用户上翻）；未跟随时若标题行已在视野上方，把它滚回滚动区顶部，读者停在刚收起的位置。diff 正文剥离每行自带的第一个 `+`、`-` 或空格，仅在标记列显示符号，保留正文自己的符号与缩进，`@@` 不进入正文。压缩回执只显示「上下文已压缩」，不展示压缩模式、seq 或 payload。
 
 增删 diff 行与标题计数使用独立的样式类；增删正文均使用默认文字颜色和相同字号，行号、标记与正文对齐，仅背景和标记列区分增删。结束回执不展示英文原因标识，中断显示「已中断」。「回到最新消息」位于消息滚动区下方的独立操作行，不覆盖正文。
 
@@ -145,9 +147,9 @@ interface NodeProbe {
 | `/new` `/clear`                       | 左栏「＋ 新会话」                                       |
 | `/resume`                             | 在左栏选择要继续的会话                                  |
 | `/help`                               | 输入 `/` 查看可用命令；其余按场景指向控件位置           |
-| `/provider`                           | 点左栏底部「服务商」打开服务商页                        |
-| `/settings`                           | 点左栏底部「设置」打开设置页                            |
-| `/theme`                              | 在左栏底部「设置」→ 桌面端 · 主题 切换                  |
+| `/provider`                           | 在 设置 › 服务商 管理；状态栏模型菜单的「管理服务商…」也能进入 |
+| `/settings`                           | 点左栏底部「设置」打开 设置 › 常规                      |
+| `/theme`                              | 在 设置 › 外观 切换主题                                 |
 | `/rewind` `/fork`                     | 后续版本提供                                            |
 | `/exit` `/quit`                       | 关闭窗口即可退出                                        |
 
@@ -155,46 +157,54 @@ interface NodeProbe {
 
 ### 5.4 状态栏与上下文
 
-`src/StatusBar.tsx` 左侧是会话控件 pill 组：模型（绿点 +「provider · model」+ ▾）、「思考 <level> ▾」、「权限 <preset> ▾」（预设值用警告色）、「Shell <kind> ▾」——各自打开与空状态 chip 共用的 `ChoiceMenu`（`src/Menu.tsx`，锚定 pill 自动向上弹出）；数据来自 `useSessionControls`（模型/档位/预设复用 `controls.controls`，Shell 是 `shellControl`：`auto`（「自动选择」）+ 探测到的 shell，未安装的置灰并标注「未安装」，被 env/config 覆盖时菜单底部给提示；打开 Shell 菜单时调 `loadShells()` 探测）。选择分别调 `setModel` / `setReasoningEffort`（并写 `prefs.lastEffort`）/ `setPermissionPreset` / `setShell`。右侧不变：上下文用量（点击开上下文面板）、累计缓存命中、Turn 状态。
+`src/StatusBar.tsx` 左侧是会话控件 pill 组：模型（绿点 +「provider · model」+ ▾）、「思考 <level> ▾」、「权限 <preset> ▾」（预设值用警告色）、「Shell <kind> ▾」。模型与 Shell 打开与空状态 chip 共用的 `ChoiceMenu`（`src/Menu.tsx`，锚定 pill 自动向上弹出），模型菜单底部有「管理服务商…」，进入 设置 › 服务商；思考档位与权限预设用自绘下拉 `Dropdown`（见 5.6），选项带中文名与一句说明；数据来自 `useSessionControls`（模型/档位/预设复用 `controls.controls`，Shell 是 `shellControl`：`auto`（「自动选择」）+ 探测到的 shell，未安装的置灰并标注「未安装」，被 env/config 覆盖时菜单底部给提示；打开 Shell 菜单时调 `loadShells()` 探测）。选择分别调 `setModel` / `setReasoningEffort`（并写 `prefs.lastEffort`）/ `setPermissionPreset` / `setShell`。右侧不变：上下文用量（点击开上下文面板）、累计缓存命中、Turn 状态。
 
-状态栏始终一行：右侧上下文与 Turn 状态固定不缩，左侧仅模型 pill 可收缩，过长名称省略号截断，悬停显示完整「provider · model」（运行中同时提示不可切换）。主区宽度 ≤700px 时先隐藏累计缓存命中和上下文进度条、收紧间距，保留上下文数值与 Turn 状态；窗口最小宽度仍为 760px。
+状态栏始终一行：右侧上下文与 Turn 状态固定不缩，左侧仅模型 pill 可收缩，过长名称省略号截断，悬停显示完整「provider · model」（运行中同时提示不可切换）。主区变窄时按容器宽度依次让位：≤900px 隐藏累计缓存命中 → ≤820px 隐藏上下文进度条 → ≤740px 隐藏 Shell 项 → ≤660px 隐藏模型名前的「provider · 」前缀；≤700px 另外收紧间距。模型名最后才省略，至少保留约 10 个字符（`min-width: 10ch`），上下文数值与 Turn 状态始终保留；窗口最小宽度仍为 760px（主区宽度还要减去左栏）。
 
 上下文面板取 `describeContext`，展示总量与预算、分段堆叠条和数值；对话历史从 `history.breakdown` 细分用户消息、助手回答、工具调用与结果、压缩摘要，不从可见消息重新估算。来源文本按 `contextSourceLabel` 中文化（「内置提示词」「自定义提示词」「N 个工具」「N 项」「N 条」，路径按主目录缩写）。底部提示「可以输入 /compact 压缩」。
 
 已知限制（等 RPC 能力）：空状态的项目文件搜索需要 runtime 级 `fileIndex`（`fileIndex` 目前是 session 级，前端已用 `Composer.fileRefs` 作为数据接缝，届时只换数据源）。
 
-### 5.5 服务商页
+### 5.5 设置区
 
-左栏底部「服务商」把主区换成服务商页（左栏不动，页头「←」返回原会话或空状态）。页面与设置页都走常驻的普通对话后台读写全局配置（`src/ProvidersPage.tsx`）。
+左栏底部「设置」进入设置区：左栏整列换成设置导航（「← 返回 Esc」、「设置」标题、常规 / 模型 / 服务商 / 外观四项、底部一行说明），会话树不显示；主区换成对应页面。空状态与状态栏的模型菜单底部「管理服务商…」直接进入「服务商」。设置区以 `.settings-over` 盖在主区之上，原来的会话或空状态（`.mainpane`）保持挂载并设为 `inert`，所以「← 返回」或 Esc 回到的是同一个会话，滚动位置不变；在导航项之间切换不算返回。Esc 只在没有被下拉、对话框先处理时才返回（下拉的 Esc 会 `preventDefault` 并停止冒泡；设置区里有打开的对话框时不返回）。被盖住的会话的窗口级快捷键（权限卡片的 Esc 拒绝与数字键作答、输入框的 Esc 中断）在其所在区域 `inert` 时一律不响应。服务商页与常规 / 模型 / 外观页都走常驻的普通对话后台读写全局配置。
+
+**多后台同步**：每个项目一个后台，服务端只在自己的变更后重载。桌面端（`src/backends.ts` 的 `BackendPool`）做协调：某个后台推来 `runtime.providersChanged`（它自己的服务商变更），或设置页写设置成功（`updateSettings` / `setDefaultModel` / 模型角色），就对**其他**已连接的后台各调一次 `runtime.reloadConfig`。为了不形成循环，`BackendPool` 为每个后台记一个「由我发起、通知还没到」的计数：发起 `reloadConfig` 前加一，该后台的下一次 `providersChanged`（服务端保证先于响应到达）消费一次计数且不再转发；`reloadConfig` 失败时把计数还回去，后台退出或释放时清掉。
+
+#### 服务商
+
+服务商页（`src/ProvidersPage.tsx`）在设置区内有自己的两列：
 
 - **列表**：左列分「已配置」（`describeProviders`）与「可添加」（`listProviderPresets`，已按默认名配置过的预设不再列出，自定义类预设始终可添加）。行内显示状态点、「N 个模型」；当前会话正在用的服务商标「当前」（没有选中会话时取 `defaultModel` 的服务商，即新会话将用的那个），进入页面时默认选中它，凭据失效的行尾写「已失效」并标黄。
-- **详情**：标题 + 操作按钮 + 信息卡（类型、地址、认证、凭据、保存位置、来源）+ 模型表。API key 类有「换密钥」（`setCredential`，password 输入，保存后清空）、「刷新模型列表」（`refreshUpstreamLimits`）、「删除」（`removeSetupProvider`）；账号类有「退出登录」（`logoutProvider`，只删本机凭据，确认对话框说明），失效时信息卡上方出现「账号登录已失效」横幅和「重新登录」，登录等待卡片内联在详情里。打开的会话在用该服务商时删除按钮置灰，悬停说明「当前会话正在使用，不能删除」；服务端返回 `provider_in_use` 时同样置灰。来自其他配置层（config.json、项目配置）的条目只读：没有换密钥、删除置灰并说明。界面不按 `ProviderOverview` 推断权限，删除是否允许以服务端为准。
+- **详情**：标题 + 操作按钮 + 信息卡（类型、地址、认证、凭据、保存位置、来源）+ 模型表。按钮组只看 `ProviderOverview.authKind`，不按预设名或文案推断：`apiKey` 有「换密钥」（`setCredential`，password 输入，保存后清空），`none` 且为向导条目时显示为「设置密钥」；`account` 有「退出登录」（`logoutProvider`，只删本机凭据，确认对话框说明），失效时信息卡上方出现「账号登录已失效」横幅和「重新登录」，登录等待卡片内联在详情里；向导条目另有「刷新模型列表」（`refreshUpstreamLimits`）与「删除」（`removeSetupProvider`）。打开的会话在用该服务商时删除按钮置灰，悬停说明「当前会话正在使用，不能删除」；服务端返回 `provider_in_use` 时同样置灰。来自其他配置层（config.json、项目配置）的条目只读：没有换密钥、删除置灰并说明。删除是否允许以服务端为准。账号的访问令牌过期但刷新令牌还在时显示「有效」（Core 规则，[provider-setup.md](../architecture/provider-setup.md) 第 6 节）。
 - **模型表**：可搜索；列为名称、能力（R 推理、I 图片输入）、上下文（千分位）、最大输出（K），带「默认」「已编辑」标记；悬停行显示「设置」，打开模型设置对话框。
 - **模型设置对话框**（`src/ModelSettingsDialog.tsx`）：显示名、上下文、最大输出、图片输入、推理、思考档位、协议、编辑工具八项，每项写来源（上游、推导、默认、已编辑等）；「全部恢复跟随」清掉全部用户值。改动只在「保存」时经 `saveModelSettings` 写入 providers.json 的 userModels，「取消」不写。推理选「否」时思考档位置灰。
-- **添加服务商**：选「可添加」里的预设进入表单，字段由 `describeProviderSetup` 驱动（固定值只读显示；凭据方式按 apiKey / 环境变量 / 账号登录 / 外部文件，OpenRouter 可选浏览器登录或粘贴密钥）。「获取模型」调 `prepareProvider` 拿到草稿，之后「保存」才可点（`commitProvider`）；获取前保存置灰，获取后改任何字段都作废结果、释放草稿并重新置灰。获取期间可「取消获取」：前端立即回到可编辑，输入保留，晚到的响应若带回草稿立即 `discardProvider` 释放。结果区显示「已获取 N 个模型」与 notices，失败写原因；`-32005` 带 `data.field` 时错误显示在对应字段下。`needsManualModel` 时出现「模型 ID」输入框。「取消」、切走或离开页面都会 `discardProvider` 释放草稿，进行中的草稿登录经 `login.cancel` 取消（RPC 层把 Core 的 `discardDraftLogin` 映射为 `login.cancel`）。
-- **登录**：`login.start` / `login.startDraft` 后用外链白名单打开系统浏览器；等待卡片（`src/LoginWaitCard.tsx`）有复制链接、重新打开浏览器、取消、倒计时（按服务端超时估算，仅展示），可展开「粘贴回调地址 / 粘贴授权码」走 `login.submitManual`。`login.completed` 带 `unstoredKey` 时密钥只在卡片里显示这一次，前端不存储、不打日志。
-- **同步**：服务商变更后后台推 `runtime.providersChanged`，页面、状态栏模型菜单与空状态模型 chip 随之刷新。
+- **添加服务商**：选「可添加」里的预设进入表单，字段由 `describeProviderSetup` 驱动（固定值只读显示；凭据方式按 apiKey / 环境变量 / 账号登录 / 外部文件，OpenRouter 可选浏览器登录或粘贴密钥）。「获取模型」调 `prepareProvider` 拿到草稿，之后「保存」才可点（`commitProvider`）；获取前保存置灰，获取后改任何字段都作废结果、释放草稿并重新置灰。获取期间可「取消获取」：前端立即回到可编辑，输入保留，晚到的响应若带回草稿立即 `discardProvider` 释放。结果区显示「已获取 N 个模型」与 notices，并按 `PrepareProviderResult.models` 预览：折叠时列前 4 个模型名和「等 N 个」，「展开全部 ▾」后是限高、内部滚动的表格（名称、能力、上下文、最大输出），「收起 ▴」还原，每次重新获取都回到折叠。失败写「获取失败」与原因；`-32005` 带 `data.field` 时错误只显示在对应字段下，结果区不再重复「获取失败」——与已有服务商重名也以 `field: "name"` 报告（[provider-setup.md](../architecture/provider-setup.md) 第 2 节「名称唯一性」）。`needsManualModel` 时出现「模型 ID」输入框。「取消」、切走或离开页面都会 `discardProvider` 释放草稿，进行中的草稿登录经 `login.cancel` 取消（RPC 层把 Core 的 `discardDraftLogin` 映射为 `login.cancel`）。
+- **登录**：`login.start` / `login.startDraft` 后用外链白名单打开系统浏览器；等待卡片（`src/LoginWaitCard.tsx`）有复制链接、重新打开浏览器、取消、倒计时（以 `LoginStarted.expiresAt` 为准，仅展示），可展开「粘贴回调地址 / 粘贴授权码」走 `login.submitManual`。`login.completed` 带 `unstoredKey` 时密钥只在卡片里显示这一次，前端不存储、不打日志。
+- **同步**：服务商变更后后台推 `runtime.providersChanged`，页面、状态栏模型菜单与空状态模型 chip 随之刷新，其他后台经上面的协调重载。
 
-### 5.6 设置页
+### 5.6 常规、模型与外观页
 
-左栏底部「设置」打开设置页（`src/SettingsPage.tsx`），页头说明「默认值对新会话生效；当前会话在状态栏切换模型、思考档位和权限」。按 [ADR-0045](../decisions/ADR-0045-fullscreen-page-shell.md) 第 7 节逐项保存，每行右侧写来源层：
+`src/SettingsPage.tsx` 按导航项渲染三页，页头是标题与一句说明。按 [ADR-0045](../decisions/ADR-0045-fullscreen-page-shell.md) 第 7 节逐项保存，每行右侧写来源层：
 
-| 分组 | 项 | 保存方式 |
-| --- | --- | --- |
-| 会话默认 | 默认权限预设 | 下拉框，改完立即 `updateSettings`，提示「已保存 默认权限预设 = X」 |
-| 会话默认 | 安全审查 | 对话框：关闭 / Jev / 小模型；Jev 首次启用先显示数据外发说明（偏好 `jevDisclosureAccepted`），单独密钥用 password 输入、经 `reviewerKey` 提交、保存后清空 |
-| 会话默认 | 默认模型与档位 | 对话框，`setDefaultModel` 成对保存；所选模型没有档位时传 null |
-| 执行 | Shell | 只读，写明由谁指定；会话内在状态栏切换 |
-| 执行 | 压缩阈值 | 对话框，百分比或 token 数，留空恢复默认 |
-| 模型角色 | 子代理模型 / 看图模型 / 轻量模型 | 对话框选择模型或清除；看图模型只列支持图片输入的模型 |
-| 桌面端 | 主题 | 跟随系统 / 浅色 / 深色，只写 prefs，立即生效 |
-| 桌面端 | 普通对话工作区 | 「更改…」选目录、「恢复默认」；只写 prefs |
+| 页 | 分组 | 项 | 保存方式 |
+| --- | --- | --- | --- |
+| 常规 | 权限 | 默认权限预设 | 下拉（`Dropdown`），首项「跟随默认」标出当前生效值；改完立即 `updateSettings`，提示「已保存 默认权限预设 = X」 |
+| 常规 | 权限 | 安全审查 | 对话框：关闭 / Jev / 小模型；Jev 首次启用先显示数据外发说明（偏好 `jevDisclosureAccepted`），沿用其他服务商的凭据时用下拉选服务商，单独密钥用 password 输入、经 `reviewerKey` 提交、保存后清空 |
+| 常规 | 执行 | Shell | 只读，写明由谁指定；会话内在状态栏切换 |
+| 常规 | 执行 | 压缩阈值 | 对话框，百分比或 token 数，留空恢复默认 |
+| 常规 | 普通对话 | 工作区 | 「更改…」选目录、「恢复默认」；只写 prefs |
+| 模型 | 默认 | 默认模型与档位 | 对话框，`setDefaultModel` 成对保存；所选模型没有档位时传 null |
+| 模型 | 模型角色 | 子代理模型 / 看图模型 / 轻量模型 | 对话框选择模型或清除；看图模型只列支持图片输入的模型。页尾链接「服务商 › 模型表」进入服务商页改单个模型的设置 |
+| 外观 | 主题 | 跟随系统 / 浅色 / 深色 | 三张预览卡片（`role="radio"`），只写 prefs，立即生效 |
 
-保存失败时值回到原样，该行描红并写「保存失败：原因，已恢复原值」；保存的值被更高层覆盖时来源写「已被覆盖 · 层名」并标黄。
+保存失败时值回到原样，该行描红并写「保存失败：原因，已恢复原值」；保存的值被更高层覆盖时来源写「已被覆盖 · 层名」并标黄。写设置成功后通知 `BackendPool` 让其他后台重载（5.5）。
 
 主题写 `document.documentElement.dataset.theme`，跟随系统时删掉该属性回到 `prefers-color-scheme`。更改普通对话工作区时先在新位置开常驻后台，成功后写 `prefs.plainWorkspace` 并把新旧路径记进 `prefs.plainWorkspaces`，旧位置的对话仍归「对话」区；旧位置没有打开的会话时释放其后台。
 
-已知限制：每个项目一个后台，只有发起变更的后台会重载配置并推 `providersChanged`。在 A 项目的后台里改了服务商，B 项目已经运行的后台要重启后才能看到。`PrepareProviderResult` 只有模型数，获取结果暂不列模型名；RPC 请求不能真正中止，「取消获取」只在前端丢弃结果。
+**下拉**（`src/Dropdown.tsx`，desktop-v4.html A 屏）：设置页的下拉与状态栏的思考档位、权限预设菜单共用这一个组件，不用原生 `select`。触发器是 `role="combobox"`（`aria-haspopup="listbox"`、`aria-expanded`、打开时 `aria-controls` 指向 `role="listbox"`），焦点始终留在触发器，当前项用 `aria-activedescendant` 指示，选项是 `role="option"`（`aria-selected`，不可选的 `aria-disabled` 并悬停说明原因）。键盘：Tab 聚焦；Enter / 空格 / ↓ 打开；↑↓ 移动并跳过不可选项，Home / End 到首尾；Enter / 空格选择并关闭；Esc 关闭、焦点留在触发器且不冒泡给外层；Tab 关闭。点外部关闭。列表 `position: fixed`，优先向下，下方放不下且上方更宽裕时向上（状态栏在底部），放不下时限高滚动，最小宽 300px。每个选项是「名称 + 中文名 + 一行说明」，危险项（`bypass`）排在分隔线之后并用警告色。权限预设与思考档位的中文名和说明只在 `src/choice-info.ts` 维护一份。输入框卡片与托盘里的 chip 菜单仍用 `ChoiceMenu`。
+
+已知限制：RPC 请求不能真正中止，「取消获取」只在前端丢弃结果。
 
 ## 6. 安全边界
 

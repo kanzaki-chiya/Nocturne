@@ -34,8 +34,11 @@ function makeConfig(backend: "none" | "dpapi") {
   }[] = [];
   const creds: { providerId: string; key: string }[] = [];
   const config = {
-    credentials: { backend: () => backend },
+    credentials: { backend: () => backend, has: () => false },
     base: { providers: [] as ProviderEntryConfig[] },
+    findProviderConflict: vi.fn(
+      async (_id: string): Promise<{ id: string; layer: string } | undefined> => undefined,
+    ),
     saveSetupProvider: vi.fn(
       async (entry: ProviderEntryConfig, opts?: { key?: string; defaultModel?: string }) => {
         saved.push({ entry, opts });
@@ -174,6 +177,19 @@ describe("/provider 向导对话框", () => {
     await settle(() => saved.length === 1);
     expect(saved[0]?.opts?.key).toBe("sk-secret-123");
     expect(JSON.stringify(saved[0]?.entry)).not.toContain("sk-secret-123");
+  });
+  it("与已有服务商同名：显示 Core 的名称错误，不保存", async () => {
+    const { config, methods, saved } = makeConfig("none");
+    methods.findProviderConflict.mockResolvedValue({ id: "DeepSeek", layer: "providers.json" });
+    const ui = screen(config, { kind: "add", presetId: "deepseek" });
+    await settle(() => ui.lastFrame()?.includes("凭据环境变量名") === true);
+    await answer(ui);
+    await settle(
+      () => ui.lastFrame()?.includes("已有同名服务商 DeepSeek（providers.json）") === true,
+    );
+    expect(methods.findProviderConflict).toHaveBeenCalledWith("deepseek", undefined);
+    expect(saved).toHaveLength(0);
+    expect(ui.onDone).not.toHaveBeenCalled();
   });
   it("API Key 留空仍走 Core 环境变量步骤", async () => {
     const { config } = makeConfig("dpapi");

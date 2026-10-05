@@ -29,6 +29,12 @@ export class BackendPool {
   private readonly pending = new Map<string, Promise<RpcClient>>();
   /** 新后台握手成功后通知：App 据此给每个 client 订阅 providersChanged */
   private readonly clientListeners = new Set<(client: RpcClient) => void>();
+  /**
+   * 由 propagateConfig 发起、对应的 providersChanged 还没到的 reloadConfig 个数。
+   * 服务端先推通知再回响应，所以通知到达时计数一定还在；据此认出"回声"不再转发，
+   * 避免后台之间互相触发成环。
+   */
+  private readonly echoes = new Map<RpcClient, number>();
   constructor(host: DesktopHost) {
     this.host = host;
   }
@@ -60,6 +66,7 @@ export class BackendPool {
         }
         void transport.exited.then(({ code, stderr }) => {
           // 后台退出：从池中移除并通知（UI 显示"后台已退出"与重新连接）
+          this.echoes.delete(client);
           if (this.entries.get(key) === entry) {
             this.entries.delete(key);
             for (const listener of this.exitListeners) {
@@ -96,6 +103,7 @@ export class BackendPool {
     const entry = this.entries.get(key);
     if (entry === undefined) return;
     this.entries.delete(key);
+    this.echoes.delete(entry.client);
     entry.client.close();
     await entry.transport.exited;
   }
@@ -113,6 +121,36 @@ export class BackendPool {
 
   runningKeys(): string[] {
     return [...this.entries.keys()];
+  }
+
+  /**
+   * 配置协调（ADR-0046 2026-10-05 修订第 3 条）：origin 上的配置变了（收到它的
+   * providersChanged，或它的 updateSettings 等写设置的请求成功），让其他已连接的后台
+   * 各 reloadConfig 一次。后台之间不直接通信，Core 不感知多进程。
+   */
+  propagateConfig(origin: RpcClient): void {
+    for (const entry of this.entries.values()) {
+      const client = entry.client;
+      if (client === origin) continue;
+      this.echoes.set(client, (this.echoes.get(client) ?? 0) + 1);
+      client.runtime.reloadConfig().catch(() => {
+        // 失败时服务端没推通知（重载在推送之前抛错），把计数还回去；
+        // 该后台继续用旧配置，下一次变更或重启时再同步
+        this.consumeEcho(client);
+      });
+    }
+  }
+
+  /**
+   * providersChanged 到达时调用：是 propagateConfig 引起的重载就消费一次计数并返回
+   * true（调用方不再转发）；否则返回 false，说明这是该后台自己的变更。
+   */
+  consumeEcho(client: RpcClient): boolean {
+    const pending = this.echoes.get(client) ?? 0;
+    if (pending <= 0) return false;
+    if (pending === 1) this.echoes.delete(client);
+    else this.echoes.set(client, pending - 1);
+    return true;
   }
 
   /** 每个新后台握手成功后回调一次（订阅 providersChanged 等全局通知用）。 */

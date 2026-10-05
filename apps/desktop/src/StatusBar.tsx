@@ -10,6 +10,7 @@ import {
 import { type SessionView } from "@nocturne/core/protocol";
 import type { ContextSummary, RpcSession } from "@nocturne/rpc/client";
 
+import { Dropdown } from "./Dropdown";
 import { abbreviateHome } from "./paths";
 import { ChoiceMenu } from "./Menu";
 import type { SessionControls } from "./session-controls";
@@ -25,6 +26,8 @@ export interface StatusBarProps {
   onPanelChange?: (panel: StatusPanel | null) => void;
   /** 主目录（上下文来源路径的 ~ 缩写） */
   home?: string | null;
+  /** 模型菜单底部「管理服务商…」：进入设置 › 服务商 */
+  onManageProviders?: () => void;
 }
 
 type Report = ContextSummary["report"];
@@ -199,9 +202,17 @@ export function ContextPanel({
   );
 }
 
-type StatusMenu = "model" | "effort" | "preset" | "shell";
+type StatusMenu = "model" | "shell";
 
-export function StatusBar({ session, view, controls, panel, onPanelChange, home }: StatusBarProps) {
+export function StatusBar({
+  session,
+  view,
+  controls,
+  panel,
+  onPanelChange,
+  home,
+  onManageProviders,
+}: StatusBarProps) {
   const [localPanel, setLocalPanel] = useState<StatusPanel | null>(null);
   const activePanel = panel === undefined ? localPanel : panel;
   const [openMenu, setOpenMenu] = useState<StatusMenu | null>(null);
@@ -346,14 +357,13 @@ export function StatusBar({ session, view, controls, panel, onPanelChange, home 
     label: string,
     control: { disabled?: string },
     content: ReactNode,
-    preset = false,
   ) => (
     <button
       type="button"
       ref={(node) => {
         triggers.current[kind] = node;
       }}
-      className={`status-pill${kind === "model" ? " status-model" : ""}${openMenu === kind ? " status-pill-active" : ""}${preset ? " status-preset" : ""}`}
+      className={`status-pill status-${kind}${openMenu === kind ? " status-pill-active" : ""}`}
       aria-label={label}
       aria-haspopup="menu"
       aria-expanded={openMenu === kind}
@@ -374,22 +384,52 @@ export function StatusBar({ session, view, controls, panel, onPanelChange, home 
     </button>
   );
 
+  /** 权限与思考档位：与设置页同一个自绘下拉（Dropdown），选项说明来自 choice-info.ts */
+  const choiceDropdown = (
+    label: string,
+    control: SessionControls["controls"]["effort"],
+    content: ReactNode,
+    preset = false,
+  ) => (
+    <Dropdown
+      variant="pill"
+      label={label}
+      value={control.value}
+      options={control.groups.flatMap((group) => group.options)}
+      triggerClassName={`status-pill${preset ? " status-preset" : ""}`}
+      openClassName="status-pill-active"
+      {...(control.heading !== undefined ? { heading: control.heading } : {})}
+      {...(control.note !== undefined ? { note: control.note } : {})}
+      {...(control.disabled !== undefined ? { disabled: control.disabled } : {})}
+      onChange={(value) => {
+        setOpenMenu(null);
+        setError(null);
+        void Promise.resolve(control.onSelect(value)).catch((reason: unknown) => {
+          setError(message(reason));
+        });
+      }}
+    >
+      {content}
+      <span className="status-caret" aria-hidden="true">
+        ▾
+      </span>
+    </Dropdown>
+  );
+
   const shell = controls.shell;
   const model = view.config.model;
   const menuControl = (kind: StatusMenu) => {
-    const control =
-      kind === "model"
-        ? controls.controls.model
-        : kind === "effort"
-          ? controls.controls.effort
-          : kind === "preset"
-            ? controls.controls.preset
-            : controls.shellControl;
+    const control = kind === "model" ? controls.controls.model : controls.shellControl;
     return (
       <ChoiceMenu
         anchor={triggers.current[kind] ?? null}
         label={control.heading ?? control.label}
         control={control}
+        action={
+          kind === "model" && onManageProviders !== undefined
+            ? { label: "管理服务商…", onSelect: onManageProviders }
+            : undefined
+        }
         onClose={() => {
           closeMenu(kind);
         }}
@@ -409,19 +449,26 @@ export function StatusBar({ session, view, controls, panel, onPanelChange, home 
           controls.controls.model,
           <>
             <span className="status-dot" aria-hidden="true" />
-            <b>{model === undefined ? "模型 —" : `${model.provider} · ${model.model}`}</b>
+            <b>
+              {model === undefined ? (
+                "模型 —"
+              ) : (
+                <>
+                  <span className="status-prov">{model.provider} · </span>
+                  {model.model}
+                </>
+              )}
+            </b>
           </>,
         )}
-        {pill(
-          "effort",
+        {choiceDropdown(
           "切换思考档位",
           controls.controls.effort,
           <>
             思考 <b>{controls.controls.effort.label}</b>
           </>,
         )}
-        {pill(
-          "preset",
+        {choiceDropdown(
           "切换权限预设",
           controls.controls.preset,
           <>

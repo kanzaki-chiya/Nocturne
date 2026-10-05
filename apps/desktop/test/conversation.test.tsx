@@ -604,9 +604,12 @@ describe("Conversation 渲染与滚动", () => {
     expect(container.querySelector("strong")?.textContent).toBe("完成");
     expect(screen.getByRole("table")).toBeTruthy();
     expect(screen.getByText("const n = 1;")).toBeTruthy();
-    const reasoning = screen.getByText("思考").closest("details");
-    expect(reasoning?.open).toBe(false);
-    expect(reasoning?.textContent).toContain("先检查文件");
+    const reasoning = screen.getByRole("button", { name: "思考" });
+    expect(reasoning.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("先检查文件")).toBeNull();
+    fireEvent.click(reasoning);
+    expect(reasoning.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("先检查文件")).toBeTruthy();
     // config 子类不进消息流
     expect(screen.queryByText("模型已切换")).toBeNull();
     expect(screen.getByRole("alert").textContent).toContain("响应较慢");
@@ -888,9 +891,9 @@ describe("Conversation 渲染与滚动", () => {
         vi.advanceTimersByTime(elapsed);
         if (!active) emit("text", "完成");
       });
-      const summary = screen.getByText(label, { selector: ".think > summary" });
+      const summary = screen.getByText(label, { selector: ".think-label" });
       expect(summary.textContent).toBe(label);
-      expect(summary.closest("details")?.open).toBe(false);
+      expect(summary.closest("button")?.getAttribute("aria-expanded")).toBe("false");
       if (!active) {
         act(() => {
           vi.advanceTimersByTime(3000);
@@ -1223,5 +1226,142 @@ describe("Conversation 权限卡片 v2", () => {
       }),
     );
     document.body.removeChild(outside);
+  });
+});
+
+describe("长思考收起", () => {
+  const LONG = Array.from({ length: 80 }, (_, i) => `第 ${String(i + 1)} 步推理`).join("\n");
+
+  /** jsdom 不排版：按元素给出高度，模拟一屏 600px、思考正文 bodyHeight */
+  function layout(bodyHeight: number) {
+    const proto = HTMLElement.prototype;
+    const scrollHeight = Object.getOwnPropertyDescriptor(proto, "scrollHeight");
+    const clientHeight = Object.getOwnPropertyDescriptor(proto, "clientHeight");
+    Object.defineProperty(proto, "scrollHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (this.tagName === "PRE" && this.closest(".think") !== null) return bodyHeight;
+        if (this.classList.contains("conversation-scroll")) return bodyHeight + 2000;
+        return 0;
+      },
+    });
+    Object.defineProperty(proto, "clientHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.classList.contains("conversation-scroll") ? 600 : 0;
+      },
+    });
+    return () => {
+      if (scrollHeight) Object.defineProperty(proto, "scrollHeight", scrollHeight);
+      if (clientHeight) Object.defineProperty(proto, "clientHeight", clientHeight);
+    };
+  }
+
+  function withTiming(reasoning: string) {
+    const view = createSessionView();
+    view.entries = [assistant({ reasoning })];
+    return view;
+  }
+
+  it("不到一屏：只有标题行，没有底部「收起思考」；点标题收起", () => {
+    const restore = layout(200);
+    try {
+      mount(withTiming("短思考"));
+      const header = screen.getByRole("button", { name: "思考" });
+      fireEvent.click(header);
+      expect(header.getAttribute("aria-expanded")).toBe("true");
+      expect(header.closest(".think")?.className).toContain("open");
+      expect(screen.queryByRole("button", { name: /收起思考/ })).toBeNull();
+      fireEvent.click(header);
+      expect(header.getAttribute("aria-expanded")).toBe("false");
+      expect(screen.queryByText("短思考")).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("超过一屏：底部「收起思考」；未跟随时收起把标题行滚回视野顶部", () => {
+    const restore = layout(3000);
+    try {
+      mount(withTiming(LONG));
+      const stream = screen.getByRole("region", { name: "会话消息" });
+      const header = screen.getByRole("button", { name: "思考" });
+      fireEvent.click(header);
+      const bottom = screen.getByRole("button", { name: /收起思考/ });
+
+      // 读者往上翻到思考中段：不再跟随最新
+      fireEvent.wheel(stream, { deltaY: -100 });
+      stream.scrollTop = 1500;
+      fireEvent.scroll(stream);
+      expect(screen.getByRole("button", { name: "回到最新消息" })).toBeTruthy();
+
+      // 收起后标题行在视野上方 400px
+      vi.spyOn(stream, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 800, 600));
+      vi.spyOn(header, "getBoundingClientRect").mockReturnValue(new DOMRect(0, -300, 800, 30));
+      fireEvent.click(bottom);
+      expect(header.getAttribute("aria-expanded")).toBe("false");
+      expect(stream.scrollTop).toBe(1100);
+      expect(screen.getByRole("button", { name: "回到最新消息" })).toBeTruthy();
+    } finally {
+      restore();
+    }
+  });
+
+  it("跟随最新时收起：留在底部，跟随不被关闭", () => {
+    const restore = layout(3000);
+    try {
+      mount(withTiming(LONG));
+      const stream = screen.getByRole("region", { name: "会话消息" });
+      const header = screen.getByRole("button", { name: "思考" });
+      fireEvent.click(header);
+      fireEvent.click(screen.getByRole("button", { name: /收起思考/ }));
+      fireEvent.scroll(stream);
+      expect(header.getAttribute("aria-expanded")).toBe("false");
+      expect(screen.queryByRole("button", { name: "回到最新消息" })).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("展开后标题显示时长，并标明可收起", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const listeners = new Set<(event: RuntimeEvent) => void>();
+      mount(withTiming("先检查文件"), {
+        subscribeEvents: (listener) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+      });
+      const emit = (kind: "reasoning" | "text", delta: string) => {
+        const event: RuntimeEvent = {
+          type: "message.assistant.delta",
+          sessionId: "session-1",
+          runId: "run-1",
+          eseq: kind === "reasoning" ? 1 : 2,
+          afterSeq: 1,
+          time: new Date().toISOString(),
+          turnId: "turn-1",
+          payload: { messageId: "message-1", kind, delta },
+        };
+        for (const listener of listeners) listener(event);
+      };
+      act(() => {
+        emit("reasoning", "先检查文件");
+      });
+      act(() => {
+        vi.advanceTimersByTime(72_000);
+        emit("text", "完成");
+      });
+      const header = screen.getByRole("button", { name: "思考了 72s" });
+      fireEvent.click(header);
+      expect(header.textContent).toBe("思考 · 1 分 12 秒▴");
+      expect(header.getAttribute("title")).toBe("收起思考");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -493,6 +493,7 @@ class Connection {
       authorizeUrl: session.authorizeUrl,
       manualInput: session.manualInput,
       ...(session.userCode !== undefined ? { userCode: session.userCode } : {}),
+      expiresAt: session.expiresAt,
     };
   }
 
@@ -797,6 +798,12 @@ class Connection {
         return null;
       },
       "runtime.listReviewerProviders": () => this.runtime().listReviewerProviders(),
+      // 与配置变更方法走同一串行队列；完成后照常推 providersChanged。多后台客户端
+      // 不能再拿这条通知去触发别处的 reloadConfig，否则成环（rpc.md 3.1）
+      "runtime.reloadConfig": async () => {
+        await this.enqueueConfig(() => this.reloadProviders());
+        return null;
+      },
       "runtime.defaultReviewer": (p) => {
         const baseURL = optString(p, "baseURL");
         return this.runtime().defaultReviewer(reqString(p, "endpoint") as JevEndpoint, baseURL);
@@ -838,7 +845,10 @@ class Connection {
         if (input.credential.kind === "login") {
           config = this.draftLogins.get(input.credential.loginId) ?? config;
         }
-        const result = await prepareProvider(config, input, { signal: this.abort.signal });
+        const result = await prepareProvider(config, input, {
+          signal: this.abort.signal,
+          workspaceRoot: this.providerConfig().workspaceRoot,
+        });
         this.providerDrafts.set(result.draftId, {
           config,
           ...(input.credential.kind === "login" ? { loginId: input.credential.loginId } : {}),

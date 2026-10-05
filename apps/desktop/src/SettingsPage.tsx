@@ -1,15 +1,14 @@
 /**
- * 设置页（desktop-v3.html E 屏）：逐项保存（ADR-0045 第 7 节）。
- * 单值项改完立即写 settings.json；复合项开对话框，对话框里「保存」才落盘；
- * 失败时值回到原样，这一行下面写红字。「桌面端」组只写 prefs，不进 Core。
+ * 设置区的常规 / 模型 / 外观三页（desktop-v4.html A、B、E 屏；服务商页在
+ * ProvidersPage.tsx）：逐项保存（ADR-0045 第 7 节）。单值项改完立即写
+ * settings.json；复合项开对话框，对话框里「保存」才落盘；失败时值回到原样，
+ * 这一行下面写红字。主题与普通对话工作区只写本机 prefs，不进 Core。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  PERMISSION_PRESET_NAMES,
-  type PermissionPresetName,
-  type ReasoningEffort,
-} from "@nocturne/core/protocol";
+import type { PermissionPresetName, ReasoningEffort } from "@nocturne/core/protocol";
 import type { RpcClient } from "@nocturne/rpc/client";
+import { presetOptions } from "./choice-info";
+import { Dropdown } from "./Dropdown";
 import { Scrim } from "./ProvidersPage";
 import { refKey } from "./session-controls";
 import type {
@@ -22,6 +21,24 @@ import type {
 } from "./rpc-types";
 
 export type ThemePref = "system" | "light" | "dark";
+
+/** 设置区里由本组件渲染的导航项（服务商页另见 ProvidersPage） */
+export type SettingsPageSection = "general" | "models" | "appearance";
+
+const SECTION_HEAD: Record<SettingsPageSection, { title: string; sub: string }> = {
+  general: {
+    title: "常规",
+    sub: "默认值对新会话生效；当前会话在状态栏切换模型、思考档位和权限",
+  },
+  models: { title: "模型", sub: "新会话默认用哪个模型，以及子任务用哪些模型" },
+  appearance: { title: "外观", sub: "只影响这台电脑上的桌面端" },
+};
+
+const THEMES: { value: ThemePref; label: string; cls: string }[] = [
+  { value: "system", label: "跟随系统", cls: "sys" },
+  { value: "light", label: "浅色", cls: "" },
+  { value: "dark", label: "深色", cls: "dk" },
+];
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -57,6 +74,7 @@ function reviewerText(cfg: SecurityReviewerConfig | undefined): string {
 }
 
 export function SettingsPage({
+  section,
   client,
   theme,
   workspace,
@@ -66,8 +84,10 @@ export function SettingsPage({
   onWorkspaceChange,
   pickFolder,
   providersVersion,
-  onBack,
+  onConfigSaved,
+  onOpenProviders,
 }: {
+  section: SettingsPageSection;
   client: RpcClient | undefined;
   theme: ThemePref;
   /** 生效的普通对话工作区（prefs 覆盖 ?? 默认） */
@@ -82,7 +102,10 @@ export function SettingsPage({
   onWorkspaceChange: (dir: string | null) => Promise<string | undefined>;
   pickFolder: () => Promise<string | null>;
   providersVersion: number;
-  onBack: () => void;
+  /** 写设置成功后调用：桌面端据此让其他后台 reloadConfig */
+  onConfigSaved?: () => void;
+  /** 「模型」页尾的链接：进入设置 › 服务商 */
+  onOpenProviders?: () => void;
 }) {
   const [items, setItems] = useState<SettingItem[] | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -152,6 +175,7 @@ export function SettingsPage({
     try {
       const next = await client.runtime.updateSettings(patch, options);
       setItems(next);
+      onConfigSaved?.();
       const value = next.find((x) => x.key === key)?.effective;
       showToast(`已保存 ${label}${value !== undefined ? ` = ${value}` : ""}`);
       return undefined;
@@ -204,15 +228,14 @@ export function SettingsPage({
     }
   };
 
+  const head = SECTION_HEAD[section];
+  const needsCore = section !== "appearance";
   return (
-    <section className="page3" data-testid="settings-page">
+    <section className="page3" data-testid="settings-page" aria-label={head.title}>
       <div className="ph3">
-        <button className="back" onClick={onBack} aria-label="返回" title="返回">
-          ←
-        </button>
         <div className="grow">
-          <h3>设置</h3>
-          <span className="sub">默认值对新会话生效；当前会话在状态栏切换模型、思考档位和权限</span>
+          <h3>{head.title}</h3>
+          <span className="sub">{head.sub}</span>
         </div>
       </div>
       {toast !== null && (
@@ -222,23 +245,32 @@ export function SettingsPage({
         </div>
       )}
       <div className="sets3">
-        {client === undefined && <span className="fine">后台尚未就绪，稍后自动刷新。</span>}
-        {loadError !== null && <div className="errt">{loadError}</div>}
-        {client !== undefined && items === null && loadError === null && (
+        {needsCore && client === undefined && (
+          <span className="fine">后台尚未就绪，稍后自动刷新。</span>
+        )}
+        {needsCore && loadError !== null && <div className="errt">{loadError}</div>}
+        {needsCore && client !== undefined && items === null && loadError === null && (
           <span className="fine">加载中…</span>
         )}
-        {items !== null && (
+        {section === "general" && items !== null && (
           <>
-            <h5>会话默认</h5>
+            <h5>权限</h5>
             <div className={rowClass("permissions.preset")}>
               <span className="n">默认权限预设</span>
-              <span className="v">
-                <select
-                  className="select"
-                  aria-label="默认权限预设"
+              <span className="v sans">
+                <Dropdown
+                  label="默认权限预设"
                   value={pendingPreset ?? presetItem?.saved ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
+                  options={[
+                    {
+                      value: "",
+                      label: "跟随默认",
+                      tag: presetItem?.effective ?? "—",
+                      description: "不单独保存，使用更低层或内置的默认预设",
+                    },
+                    ...presetOptions(),
+                  ]}
+                  onChange={(v) => {
                     setPendingPreset(v);
                     void save("permissions.preset", "默认权限预设", {
                       "permissions.preset": v === "" ? null : (v as PermissionPresetName),
@@ -246,14 +278,7 @@ export function SettingsPage({
                       setPendingPreset(null);
                     });
                   }}
-                >
-                  <option value="">跟随默认（{presetItem?.effective ?? "—"}）</option>
-                  {PERMISSION_PRESET_NAMES.map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
+                />
               </span>
               {src(presetItem)}
               {errLine("permissions.preset")}
@@ -276,38 +301,24 @@ export function SettingsPage({
               {src(reviewerItem)}
               {errLine("permission.reviewer")}
             </div>
-            <div className={rowClass("defaultModel")}>
-              <span className="n">默认模型与档位</span>
-              <span className="v">
-                <span className={defaultText === undefined ? "ro" : "t"}>
-                  {defaultText ?? "未设置"}
-                </span>
-                <button
-                  className="btn"
-                  onClick={() => {
-                    setDialog("defaultModel");
-                  }}
-                >
-                  选择
-                </button>
-              </span>
-              {src(defaultModelItem)}
-              {errLine("defaultModel")}
-            </div>
 
             <h5>执行</h5>
             {shellItem !== undefined && (
               <div className="s3">
-                <span className="n">Shell</span>
+                <span className="n">
+                  Shell<small>会话内在状态栏切换</small>
+                </span>
                 <span className="v">
                   <span className="t">{shellItem.effective ?? "自动"}</span>
-                  <span className="ro">
-                    {shellItem.source === "env"
-                      ? "由环境变量 NOCTURNE_SHELL 指定"
-                      : shellItem.source === "user" || shellItem.source === "project"
-                        ? `由${LAYER_TEXT[shellItem.source]}指定`
-                        : "当前会话在状态栏切换"}
-                  </span>
+                  {(shellItem.source === "env" ||
+                    shellItem.source === "user" ||
+                    shellItem.source === "project") && (
+                    <span className="ro">
+                      {shellItem.source === "env"
+                        ? "由环境变量 NOCTURNE_SHELL 指定"
+                        : `由${LAYER_TEXT[shellItem.source]}指定`}
+                    </span>
+                  )}
                 </span>
                 {src(shellItem)}
               </div>
@@ -327,6 +338,68 @@ export function SettingsPage({
               </span>
               {src(thresholdItem)}
               {errLine("compaction.threshold")}
+            </div>
+          </>
+        )}
+        {section === "general" && (
+          <>
+            <h5>普通对话</h5>
+            <div className={rowClass("workspace")}>
+              <span className="n">
+                工作区<small>换位置后，旧位置的对话仍显示在「对话」</small>
+              </span>
+              <span className="v">
+                <span className="t" title={workspace ?? ""}>
+                  {workspace ?? "未就绪"}
+                </span>
+                <button
+                  className="btn"
+                  disabled={wsBusy || workspace === null}
+                  onClick={() => {
+                    void pickFolder().then((dir) => {
+                      if (dir !== null) void changeWorkspace(dir);
+                    });
+                  }}
+                >
+                  {wsBusy ? "切换中…" : "更改…"}
+                </button>
+                {workspaceOverridden && (
+                  <button
+                    className="btn ghost"
+                    disabled={wsBusy}
+                    title={defaultWorkspace ?? undefined}
+                    onClick={() => void changeWorkspace(null)}
+                  >
+                    恢复默认
+                  </button>
+                )}
+              </span>
+              <span className="src">本机</span>
+              {errLine("workspace")}
+            </div>
+          </>
+        )}
+
+        {section === "models" && items !== null && (
+          <>
+            <h5>默认</h5>
+            <div className={rowClass("defaultModel")}>
+              <span className="n">默认模型与档位</span>
+              <span className="v">
+                <span className={defaultText === undefined ? "ro" : "t"}>
+                  {defaultText ?? "未设置"}
+                </span>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setDialog("defaultModel");
+                  }}
+                >
+                  选择
+                </button>
+              </span>
+              {src(defaultModelItem)}
+              {errLine("defaultModel")}
             </div>
 
             <h5>模型角色</h5>
@@ -357,73 +430,48 @@ export function SettingsPage({
                 </div>
               );
             })}
+            <div className="fine sets-foot">
+              要改某个模型的上下文、最大输出、思考档位，到{" "}
+              <button type="button" className="lk" onClick={onOpenProviders}>
+                服务商 › 模型表
+              </button>{" "}
+              里点「设置」。
+            </div>
           </>
         )}
 
-        <h5>桌面端</h5>
-        <div className={rowClass("theme")}>
-          <span className="n">主题</span>
-          <span className="v sans">
-            <span className="seg" role="group" aria-label="主题">
-              {(
-                [
-                  ["system", "跟随系统"],
-                  ["light", "浅色"],
-                  ["dark", "深色"],
-                ] as const
-              ).map(([v, label]) => (
-                <button
-                  key={v}
-                  className={theme === v ? "on" : undefined}
-                  aria-pressed={theme === v}
-                  onClick={() => {
-                    if (theme === v) return;
-                    const ok = onThemeChange(v);
-                    setRowErr("theme", ok ? null : "本机存储不可写，主题只在本次运行内生效");
-                    showToast(`已保存 主题 = ${label}`);
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </span>
-          </span>
-          <span className="src">本机</span>
-          {errLine("theme")}
-        </div>
-        <div className={rowClass("workspace")}>
-          <span className="n">
-            普通对话工作区<small>换位置后，旧位置的对话仍显示在「对话」</small>
-          </span>
-          <span className="v">
-            <span className="t" title={workspace ?? ""}>
-              {workspace ?? "未就绪"}
-            </span>
-            <button
-              className="btn"
-              disabled={wsBusy || workspace === null}
-              onClick={() => {
-                void pickFolder().then((dir) => {
-                  if (dir !== null) void changeWorkspace(dir);
-                });
-              }}
-            >
-              {wsBusy ? "切换中…" : "更改…"}
-            </button>
-            {workspaceOverridden && (
-              <button
-                className="btn ghost"
-                disabled={wsBusy}
-                title={defaultWorkspace ?? undefined}
-                onClick={() => void changeWorkspace(null)}
-              >
-                恢复默认
-              </button>
-            )}
-          </span>
-          <span className="src">本机</span>
-          {errLine("workspace")}
-        </div>
+        {section === "appearance" && (
+          <>
+            <h5>主题</h5>
+            <div className={`${rowClass("theme")} s3-themes`}>
+              <div className="themes" role="radiogroup" aria-label="主题">
+                {THEMES.map(({ value, label, cls }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={theme === value}
+                    className={`tcard${cls !== "" ? ` ${cls}` : ""}${theme === value ? " on" : ""}`}
+                    onClick={() => {
+                      if (theme === value) return;
+                      const ok = onThemeChange(value);
+                      setRowErr("theme", ok ? null : "本机存储不可写，主题只在本次运行内生效");
+                      showToast(`已保存 主题 = ${label}`);
+                    }}
+                  >
+                    <span className="pv" aria-hidden="true">
+                      <i />
+                      <i />
+                    </span>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span className="src">本机</span>
+              {errLine("theme")}
+            </div>
+          </>
+        )}
       </div>
 
       {dialog === "defaultModel" && client !== undefined && (
@@ -438,6 +486,7 @@ export function SettingsPage({
             try {
               const next = await client.runtime.setDefaultModel(model, effort);
               setItems(next);
+              onConfigSaved?.();
               setRowErr("defaultModel", null);
               setDialog(null);
               showToast(
@@ -1102,20 +1151,12 @@ function ReviewerDialog({
                   setCredKind,
                 )}
                 {credKind === "provider" && (
-                  <select
-                    className="input"
+                  <Dropdown
+                    label="沿用的服务商"
                     value={credProvider}
-                    aria-label="沿用的服务商"
-                    onChange={(e) => {
-                      setCredProvider(e.target.value);
-                    }}
-                  >
-                    {providers.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
+                    options={providers.map((p) => ({ value: p, label: p }))}
+                    onChange={setCredProvider}
+                  />
                 )}
                 {credKind === "env" && (
                   <input

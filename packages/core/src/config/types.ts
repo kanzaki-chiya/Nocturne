@@ -303,6 +303,12 @@ export interface ProviderSetupFile {
 export interface ProviderOverview {
   /** 仅用于显示的鉴权描述，不含令牌。 */
   auth?: string | undefined;
+  /**
+   * 鉴权方式（客户端据此决定入口，不再自行推断）：apiKey = 密钥在凭据存储；
+   * env = 由环境变量提供（或声明了 apiKeyEnv 但尚未设置）；account = 账号登录；
+   * external-file = 外部登录凭据文件；none = 没有任何密钥来源。
+   */
+  authKind: "apiKey" | "env" | "account" | "external-file" | "none";
   credentialStatus?: "valid" | "expiring" | "expired" | "missing" | undefined;
   credentialStorage?: "system" | "plaintext" | "memory" | undefined;
   id: string;
@@ -488,7 +494,10 @@ export interface RuntimeConfig {
    * credentials.set 写入系统后端并登记索引。旧 model 只保留，不再写入。
    * entry.models 携带上游声明的能力/价格字段（第 7 节）。
    */
-  saveSetupProvider(entry: ProviderEntryConfig, opts?: { key?: string | undefined }): Promise<void>;
+  saveSetupProvider(
+    entry: ProviderEntryConfig,
+    opts?: { key?: string | undefined; mode?: "create" | "replace" | undefined },
+  ): Promise<void>;
   /** 更新密钥（经 credentials.set；缓存失效后下一次请求即用新密钥） */
   setCredential(providerId: string, key: string): Promise<void>;
   /** 添加/刷新模型列表时更新 models.dev 缓存；失败返回一行提示。 */
@@ -513,6 +522,15 @@ export interface RuntimeConfig {
    * 定义或不存在）时抛 ConfigError("config_invalid")，由调用方提示。
    */
   removeSetupProvider(providerId: string): Promise<void>;
+  /**
+   * 新建服务商的名称冲突检查（provider-setup.md「名称唯一性」）：合并各层（向导层现读、
+   * 项目层按 workspaceRoot 且可信时参与）中有同名条目（不区分大小写）时返回原名与层标签。
+   * 不读凭据，不发网络请求。
+   */
+  findProviderConflict(
+    id: string,
+    workspaceRoot?: string,
+  ): Promise<{ id: string; layer: string } | undefined>;
   /**
    * /provider 列表数据：逐层合并后的服务商总览（密钥来源、来源层、
    * 模型数、是否被高层覆盖）。给 workspaceRoot 时并入该工作区可信

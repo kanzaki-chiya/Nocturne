@@ -2312,6 +2312,7 @@ export {
   commitProvider,
   discardProvider,
   type PrepareProviderResult,
+  type PreparedModelSummary,
   credentialBackendLabel,
   describeAccountStorage,
   describeProviderSetup,
