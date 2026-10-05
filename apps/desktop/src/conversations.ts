@@ -28,6 +28,12 @@ export interface OpenConversation {
   warnings: string[];
   busy: boolean;
   tracker?: SessionViewTracker;
+  /**
+   * 所在后台已退出（崩溃或被强杀）：会话保留在 opened 里等「重启后台」恢复，
+   * view 冻结在退出前的状态；session/client 句柄属于死进程，不能再用。
+   * 恢复路径：resumeBackend 逐个 resumeSession 并以 view.lastSeq 续接订阅。
+   */
+  dead?: boolean;
   /** 每次视图折叠后回调（send 用来等待 Turn 被接受） */
   readonly listeners: Set<() => void>;
 }
@@ -72,16 +78,22 @@ export class Conversations {
     return next;
   }
 
+  /**
+   * 把会话句柄接入 opened 并订阅视图。
+   * continuity：后台重启后的续接——沿用崩溃前的 view（保持当前浏览位置），
+   * 订阅从 view.lastSeq 之后回放，崩溃前写入但未送达的事件也会补上。
+   */
   private async attach(
     client: RpcClient,
     workspace: string,
     result: { session: RpcSession; opened: SessionOpened },
+    continuity?: { view: SessionView; afterSeq: number },
   ): Promise<OpenConversation> {
     const entry: OpenConversation = {
       client,
       workspace,
       session: result.session,
-      view: createSessionView(),
+      view: continuity?.view ?? createSessionView(),
       warnings: result.opened.warnings,
       busy: false,
       listeners: new Set(),
@@ -96,7 +108,10 @@ export class Conversations {
           // 非当前会话完成后释放锁；submit/compact 的 promise 收束前仍保持 busy。
           void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
         },
-        { view: entry.view },
+        {
+          view: entry.view,
+          ...(continuity !== undefined ? { afterSeq: continuity.afterSeq } : {}),
+        },
       );
       return entry;
     } catch (error) {
@@ -109,16 +124,24 @@ export class Conversations {
   open(id: string, workspace: string, force = false): Promise<void> {
     return this.serial(async () => {
       let entry = this.opened.get(id);
-      if (entry === undefined) {
-        const client = await this.pool.ensure(workspace);
+      // 后台已退出的会话：点开即用原视图续接重开（ensure 会启动新后台）。
+      // 失败时把死条目放回去，横幅里的「重启后台」仍可重试。
+      const dead = entry?.dead === true ? entry : undefined;
+      if (entry === undefined || dead !== undefined) {
+        const target = dead?.workspace ?? workspace;
+        const continuity =
+          dead !== undefined ? { view: dead.view, afterSeq: dead.view.lastSeq } : undefined;
+        const client = await this.pool.ensure(target);
         try {
           entry = await this.attach(
             client,
-            workspace,
+            target,
             await client.runtime.resumeSession(id, { force }),
+            continuity,
           );
         } catch (error) {
-          await this.releaseIfUnused(workspace);
+          if (dead !== undefined) this.opened.set(id, dead);
+          await this.releaseIfUnused(target);
           throw error;
         }
       }
@@ -176,6 +199,7 @@ export class Conversations {
           throw error;
         }
       }
+      if (selected.dead === true) throw new Error("会话所在的后台已退出，请先重启后台");
       if (conversationStatus(selected) !== "idle") throw new Error("会话正在运行");
       if (input.text !== "") await selected.session.recordInputHistory(input.text);
       selected.busy = true;
@@ -227,6 +251,7 @@ export class Conversations {
   async compact(): Promise<void> {
     const entry = this.selected;
     if (entry === undefined) throw new Error("请先打开会话");
+    if (entry.dead === true) throw new Error("会话所在的后台已退出，请先重启后台");
     if (conversationStatus(entry) !== "idle") throw new Error("会话正在运行");
     entry.busy = true;
     this.changed();
@@ -243,18 +268,53 @@ export class Conversations {
     this.selected?.session.interrupt();
   }
 
+  /**
+   * 后台退出：该后台上的会话标 dead（保留 id、view 与 lastSeq，即恢复所需的
+   * 会话清单与断点），不删除、不改选中——视图冻结在原位等「重启后台」。
+   */
   backendExited(key: string): void {
-    for (const [id, entry] of this.opened) {
-      if (projectKey(entry.workspace) !== key) continue;
-      this.opened.delete(id);
-      if (id === this.selectedId) this.selectedId = null;
+    for (const entry of this.opened.values()) {
+      if (projectKey(entry.workspace) === key) entry.dead = true;
     }
     this.changed();
+  }
+
+  /**
+   * 重启该工作区的后台并恢复其上标记 dead 的会话：先 resumeSession，
+   * 再按崩溃前的 view.lastSeq 续接订阅（attach 的 continuity 路径）。
+   * 会话逐个恢复，单个失败不阻塞其余；失败的保持 dead 并随结果返回 id 与原因。
+   * 后台本身起不来时整个调用抛错（横幅据此显示重启失败）。
+   */
+  async resumeBackend(workspace: string): Promise<{ failed: { id: string; message: string }[] }> {
+    return this.serial(async () => {
+      const key = projectKey(workspace);
+      const dead = [...this.opened.values()].filter(
+        (entry) => entry.dead === true && projectKey(entry.workspace) === key,
+      );
+      const client = await this.pool.ensure(workspace);
+      const failed: { id: string; message: string }[] = [];
+      for (const entry of dead) {
+        const id = entry.session.id;
+        try {
+          await this.attach(client, workspace, await client.runtime.resumeSession(id), {
+            view: entry.view,
+            afterSeq: entry.view.lastSeq,
+          });
+        } catch (error) {
+          // attach 抛错时已删掉新条目：把死条目放回去，会话仍可再次尝试
+          this.opened.set(id, entry);
+          failed.push({ id, message: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      this.changed();
+      return { failed };
+    });
   }
 
   private async closeIfIdle(entry: OpenConversation): Promise<void> {
     if (
       entry.session.id === this.selectedId ||
+      entry.dead === true ||
       conversationStatus(entry) !== "idle" ||
       this.opened.get(entry.session.id) !== entry
     )

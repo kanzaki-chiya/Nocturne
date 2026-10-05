@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
 
 import { App } from "../src/App";
@@ -13,8 +13,15 @@ interface RpcCall {
   params: Record<string, unknown>;
 }
 
-function replayHost(failRpc: readonly string[] = []) {
+function replayHost(
+  failRpc: readonly string[] = [],
+  seedStderr?: (backendId: number, workspace: string) => string[],
+) {
   const channels = new Map<number, (message: BackendMessage) => void>();
+  /** 每个后台的内存 stderr 缓冲（backend_stderr 读取；后台关闭后随之回收） */
+  const stderr = new Map<number, string[]>();
+  /** backend_stderr 命令的调用记录（backendId） */
+  const stderrReads: number[] = [];
   const calls: RpcCall[] = [];
   const models = [
     { ref: { provider: "test", model: "cheap" }, capabilities: {} },
@@ -40,14 +47,27 @@ function replayHost(failRpc: readonly string[] = []) {
       line: JSON.stringify({ jsonrpc: "2.0", method, params: {} }),
     });
   };
+  /** 后台进程退出：closed 消息携带 stderr 尾部，随后缓冲回收、通道移除 */
+  const close = (backendId: number, code: number | null, tail?: string[]) => {
+    const channel = channels.get(backendId);
+    const stderrTail = tail ?? stderr.get(backendId) ?? [];
+    channels.delete(backendId);
+    stderr.delete(backendId);
+    workspaces.delete(backendId);
+    channel?.({ kind: "closed", code, stderr: stderrTail });
+  };
   const host: DesktopHost & {
     calls: RpcCall[];
     workspaces: Map<number, string>;
     notify: typeof notify;
+    close: typeof close;
+    stderrReads: number[];
   } = {
     calls,
     workspaces,
     notify,
+    close,
+    stderrReads,
     createChannel: (onMessage) => onMessage,
     openUrl: async () => undefined,
     pickFolder: async () => null,
@@ -59,12 +79,25 @@ function replayHost(failRpc: readonly string[] = []) {
       if (command === "backend_open") {
         const channel = args?.channel;
         if (typeof channel !== "function") throw new Error("后台缺少消息通道");
-        const id = channels.size + 1;
+        const id = Math.max(0, ...channels.keys()) + 1;
         channels.set(id, channel as (message: BackendMessage) => void);
-        workspaces.set(id, String(args?.workspace ?? ""));
+        const workspace = String(args?.workspace ?? "");
+        workspaces.set(id, workspace);
+        stderr.set(
+          id,
+          seedStderr?.(id, workspace) ?? [`backend-${id} stderr 样例`, `cwd=${workspace}`],
+        );
         return id;
       }
       if (command === "backend_close") return;
+      if (command === "backend_stderr") {
+        const backendId = Number(args?.backendId);
+        stderrReads.push(backendId);
+        const lines = stderr.get(backendId);
+        if (lines === undefined)
+          throw Object.assign(new Error("后台不存在或已退出"), { code: "unknown_backend" });
+        return lines;
+      }
       if (command !== "backend_send") throw new Error(`未处理外壳命令 ${command}`);
       const backendId = Number(args?.backendId);
       const channel = channels.get(backendId);
@@ -529,4 +562,109 @@ it("配置变更让其他后台 reloadConfig，重载引起的通知不再转发
   });
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(reloads()).toEqual([alpha, plain]);
+});
+
+it("后台日志页按后台显示 stderr，支持刷新与复制全部", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText },
+    configurable: true,
+  });
+  const host = replayHost();
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+  const nav = await screen.findByRole("navigation", { name: "设置" });
+  fireEvent.click(within(nav).getByRole("button", { name: /后台日志/ }));
+  const page = await screen.findByTestId("logs-page");
+  // 常驻普通对话后台在选择器里
+  expect(within(page).getByRole("combobox", { name: "后台" }).textContent).toContain("对话");
+  // 打开页面即拉取一次
+  await within(page).findByText(/backend-1 stderr 样例/);
+  expect(host.stderrReads.length).toBe(1);
+  // 刷新再拉一次
+  fireEvent.click(within(page).getByRole("button", { name: "刷新" }));
+  await waitFor(() => expect(host.stderrReads.length).toBe(2));
+  // 复制全部把日志写进剪贴板
+  fireEvent.click(within(page).getByRole("button", { name: "复制全部" }));
+  await waitFor(() =>
+    expect(writeText).toHaveBeenCalledWith("backend-1 stderr 样例\ncwd=Z:/plain"),
+  );
+});
+
+it("后台日志页的空态与已退出后台的回收", async () => {
+  const host = replayHost([], () => []);
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+  const nav = await screen.findByRole("navigation", { name: "设置" });
+  fireEvent.click(within(nav).getByRole("button", { name: /后台日志/ }));
+  const page = await screen.findByTestId("logs-page");
+  await within(page).findByText(/暂无 stderr 输出/);
+  // 已退出的后台缓冲被回收：直接读报 unknown_backend 文案
+  const idOf = (ws: string) => [...host.workspaces].find(([, w]) => w === ws)?.[0];
+  const plain = idOf("Z:/plain") ?? -1;
+  await act(async () => {
+    host.close(plain, 0);
+  });
+  // 后台退出后页面选择器回落到「没有运行中的后台」
+  await within(page).findByText(/打开一个会话后再来看/);
+});
+
+it("后台退出显示 stderr 尾部与「重启后台」；重启按 afterSeq 恢复会话", async () => {
+  const host = replayHost();
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("alpha 正文");
+  const idOf = (ws: string) => [...host.workspaces].find(([, w]) => w === ws)?.[0];
+  const alphaBackend = await waitFor(() => {
+    const id = idOf("Z:/qa-alpha");
+    expect(id).toBeDefined();
+    return id as number;
+  });
+
+  await act(async () => {
+    host.close(alphaBackend, 1, ["e1", "e2", "e3", "e4", "e5", "e6", "e7"]);
+  });
+  const crash = (await screen.findByText(/后台已退出（退出码 1）/)).closest(".crash");
+  if (crash === null) throw new Error("缺少崩溃横幅");
+  // 默认只显示最后 5 行，可展开全部
+  expect(within(crash as HTMLElement).queryByText(/e1/)).toBeNull();
+  expect(within(crash as HTMLElement).getByText(/e7/)).toBeTruthy();
+  fireEvent.click(within(crash as HTMLElement).getByRole("button", { name: /展开全部/ }));
+  expect(within(crash as HTMLElement).getByText(/e1/)).toBeTruthy();
+
+  // 「查看日志」跳到后台日志页；退出后台的缓冲已回收，选择器只剩常驻后台
+  fireEvent.click(within(crash as HTMLElement).getByRole("button", { name: "查看日志" }));
+  const logsPage = await screen.findByTestId("logs-page");
+  expect(within(logsPage).getByRole("combobox", { name: "后台" }).textContent).toContain("对话");
+  fireEvent.keyDown(window, { key: "Escape" });
+
+  // 重启后台：新进程 resumeSession + subscribe { afterSeq: 崩溃前 lastSeq }
+  const crashAgain = await screen.findByText(/后台已退出（退出码 1）/);
+  fireEvent.click(
+    within(crashAgain.closest(".crash") as HTMLElement).getByRole("button", {
+      name: "重启后台",
+    }),
+  );
+  await waitFor(() => expect(screen.queryByText(/后台已退出/)).toBeNull());
+  const newBackend = await waitFor(() => {
+    const id = idOf("Z:/qa-alpha");
+    expect(id).toBeDefined();
+    return id as number;
+  });
+  // 假宿主复用回收的 backendId，用第二次 initialize 证明进程确实重启过
+  expect(
+    host.calls.filter((c) => c.method === "initialize" && c.backendId === newBackend),
+  ).toHaveLength(2);
+  const sub = host.calls
+    .filter(
+      (c) =>
+        c.method === "session.subscribe" &&
+        c.backendId === newBackend &&
+        c.params.sessionId === "alpha",
+    )
+    .at(-1);
+  expect(sub?.params.afterSeq).toBe(4);
+  // 会话视图续接：消息与权限卡片仍在，可以继续对话
+  expect(screen.getByRole("region", { name: "会话消息" }).textContent).toContain("alpha 正文");
+  expect(screen.getByRole("region", { name: "权限确认" })).toBeTruthy();
 });

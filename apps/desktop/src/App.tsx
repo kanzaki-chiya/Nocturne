@@ -3,6 +3,7 @@ import { RpcError, type RpcClient, type RpcRuntime, type RpcSession } from "@noc
 import type { RuntimeEvent, SessionView } from "@nocturne/core/protocol";
 
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
+import { BackendLogsPage, type BackendLogTarget } from "./BackendLogsPage";
 import { Composer, type ComposerSubmit, type WorkspaceChoice } from "./Composer";
 import { Conversation } from "./Conversation";
 import { Conversations, conversationStatus, type CreateSessionChoice } from "./conversations";
@@ -39,6 +40,8 @@ interface StartupError {
 }
 
 const FOCUS_THROTTLE_MS = 2_000;
+/** 崩溃横幅里 stderr 默认只显示最后几行 */
+const CRASH_STDERR_PREVIEW = 5;
 
 export function App({ host }: { host: DesktopHost }) {
   const prefs = useMemo(() => createPrefsStore(globalThis.localStorage), []);
@@ -63,7 +66,22 @@ export function App({ host }: { host: DesktopHost }) {
   const [chatsExpanded, setChatsExpanded] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [startupError, setStartupError] = useState<StartupError | null>(null);
-  const [backendExit, setBackendExit] = useState<{ code: number | null } | null>(null);
+  /**
+   * 最近一次后台退出：key/workspace 定位到那个后台（重启只起它），stderr 是
+   * closed 消息携带的尾部日志；restarting/restartError/sessionErrors 是
+   * 「重启后台」的进度与按会话的失败明细。
+   */
+  const [backendExit, setBackendExit] = useState<{
+    key: string;
+    workspace: string;
+    code: number | null;
+    stderr: string[];
+    restarting?: boolean;
+    restartError?: string;
+    sessionErrors?: { id: string; message: string }[];
+    /** stderr 块默认只显示最后几行，展开看全部 */
+    expanded?: boolean;
+  } | null>(null);
   const lastFocusRefresh = useRef(0);
   const [conversationVersion, setConversationVersion] = useState(0);
   const [providersVersion, setProvidersVersion] = useState(0);
@@ -195,13 +213,15 @@ export function App({ host }: { host: DesktopHost }) {
   // 这个后台自己的变更再让其他后台 reloadConfig（重载引起的回声不转发）
   useEffect(
     () =>
-      pool.onClient((client) =>
-        client.onProvidersChanged(() => {
+      pool.onClient((client) => {
+        // 新后台出现也刷新一次渲染：「后台日志」页的选择器才有候选项
+        setConversationVersion((v) => v + 1);
+        return client.onProvidersChanged(() => {
           setProvidersVersion((v) => v + 1);
           void refresh();
           if (!pool.consumeEcho(client)) pool.propagateConfig(client);
-        }),
-      ),
+        });
+      }),
     [pool, refresh],
   );
 
@@ -224,15 +244,53 @@ export function App({ host }: { host: DesktopHost }) {
     void host.homeDir().then(setHome);
   }, [host]);
 
-  // 后台退出：提示"后台已退出（退出码 N）"与「重新连接」
+  // 后台退出：该后台上的会话标 dead（保留视图与 seq 断点），横幅给「重启后台」
   useEffect(
     () =>
-      pool.onExit(({ key, code }) => {
+      pool.onExit(({ key, workspace, code, stderr }) => {
         conversations.backendExited(key);
-        setBackendExit({ code });
+        setBackendExit({ key, workspace, code, stderr });
       }),
     [pool, conversations],
   );
+
+  // 后台恢复且无 dead 会话残留时收起横幅（「重启后台」成功或逐个点开死会话都算）
+  useEffect(() => {
+    setBackendExit((cur) => {
+      if (cur === null || cur.restarting === true) return cur;
+      const backendUp = pool.get(cur.workspace) !== undefined;
+      const deadLeft = [...conversations.opened.values()].some(
+        (entry) => entry.dead === true && projectKey(entry.workspace) === cur.key,
+      );
+      return backendUp && !deadLeft ? null : cur;
+    });
+  }, [conversationVersion, pool, conversations]);
+
+  // 只重启退出的那个后台；会话按各自 lastSeq 续接恢复，单会话失败单独列出
+  const restartBackend = async () => {
+    const exit = backendExit;
+    if (exit === null) return;
+    setBackendExit((cur) => {
+      if (cur?.key !== exit.key) return cur;
+      const { restarting: _r, restartError: _e, sessionErrors: _s, ...rest } = cur;
+      return { ...rest, restarting: true };
+    });
+    try {
+      const { failed } = await conversations.resumeBackend(exit.workspace);
+      await refresh();
+      setBackendExit((cur) => {
+        if (cur?.key !== exit.key) return cur;
+        if (failed.length === 0) return null;
+        return { ...cur, restarting: false, sessionErrors: failed };
+      });
+    } catch (error) {
+      setBackendExit((cur) =>
+        cur?.key !== exit.key
+          ? cur
+          : { ...cur, restarting: false, restartError: errMessage(error) },
+      );
+    }
+  };
 
   // 窗口重新获得焦点时刷新列表（节流 ≥ 2 秒）
   useEffect(() => {
@@ -262,9 +320,6 @@ export function App({ host }: { host: DesktopHost }) {
     await refresh();
     return dir;
   }, [host, prefs, refresh, bumpPrefs]);
-
-  // 后台退出后的「重新连接」= 重走启动链
-  const reconnect = boot;
 
   const selectSession = async (summary: SessionSummary, force = false) => {
     try {
@@ -461,6 +516,12 @@ export function App({ host }: { host: DesktopHost }) {
     path: project.path,
     name: project.name,
   }));
+  // 「后台日志」页的后台选择器：常驻普通对话后台 + 各项目后台
+  const logTargets: BackendLogTarget[] = pool.running().map((b) => ({
+    backendId: b.backendId,
+    label: plainKey !== null && b.key === plainKey ? "对话（常驻后台）" : projectName(b.workspace),
+    detail: abbreviateHome(b.workspace, home),
+  }));
 
   return (
     <div className={`body${page !== null ? " settings-mode" : ""}`}>
@@ -539,10 +600,60 @@ export function App({ host }: { host: DesktopHost }) {
               <div className="crash">
                 <div className="t">
                   后台已退出（退出码 {backendExit.code ?? "未知"}）
-                  <button className="btn primary" onClick={() => void reconnect()}>
-                    重新连接
-                  </button>
+                  <span className="acts">
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        setPage("logs");
+                      }}
+                    >
+                      查看日志
+                    </button>
+                    <button
+                      className="btn primary"
+                      disabled={backendExit.restarting === true}
+                      onClick={() => void restartBackend()}
+                    >
+                      {backendExit.restarting === true ? "重启中…" : "重启后台"}
+                    </button>
+                  </span>
                 </div>
+                {backendExit.stderr.length > 0 && (
+                  <>
+                    <pre>
+                      {(backendExit.expanded === true
+                        ? backendExit.stderr
+                        : backendExit.stderr.slice(-CRASH_STDERR_PREVIEW)
+                      ).join("\n")}
+                    </pre>
+                    {backendExit.stderr.length > CRASH_STDERR_PREVIEW && (
+                      <button
+                        className="btn ghost logmore"
+                        onClick={() => {
+                          setBackendExit((cur) =>
+                            cur === null ? cur : { ...cur, expanded: cur.expanded !== true },
+                          );
+                        }}
+                      >
+                        {backendExit.expanded === true
+                          ? "收起"
+                          : `展开全部（${backendExit.stderr.length} 行）`}
+                      </button>
+                    )}
+                  </>
+                )}
+                {backendExit.restartError !== undefined && (
+                  <div className="fail">重启失败：{backendExit.restartError}</div>
+                )}
+                {backendExit.sessionErrors?.map(({ id, message }) => (
+                  <div className="fail" key={id}>
+                    会话「
+                    {conversations.opened.get(id)?.view.title ??
+                      sessions.find((s) => s.id === id)?.firstText ??
+                      id}
+                    」恢复失败：{message}
+                  </div>
+                ))}
               </div>
             )}
             {startupError !== null && (
@@ -570,6 +681,15 @@ export function App({ host }: { host: DesktopHost }) {
                   onOpenModels={() => {
                     setPage("models");
                   }}
+                />
+              </PaneErrorBoundary>
+            ) : page === "logs" ? (
+              <PaneErrorBoundary key="logs">
+                <BackendLogsPage
+                  backends={logTargets}
+                  fetchStderr={(backendId) =>
+                    host.invoke("backend_stderr", { backendId }) as Promise<string[]>
+                  }
                 />
               </PaneErrorBoundary>
             ) : (

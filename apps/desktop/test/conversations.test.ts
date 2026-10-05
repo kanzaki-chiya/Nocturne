@@ -7,14 +7,17 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { Conversations, conversationStatus } from "../src/conversations";
+import { projectKey } from "../src/session-tree";
 
-function fixture(lockedId?: string, rejectSubmit = false) {
+function fixture(lockedId?: string, rejectSubmit = false, failResume?: ReadonlySet<string>) {
   const clients = new Map<string, RpcClient>();
   const opened = new Map<string, string>();
   const calls: { workspace: string; method: string; params: Record<string, unknown> }[] = [];
   const streams = new Map<string, LineTransport>();
   const turns = new Map<string, { workspace: string; id: unknown }>();
   const seqs = new Map<string, number>();
+  /** 崩溃过的工作区：failResume 只在新后台的 resumeSession 上生效 */
+  const crashed = new Set<string>();
   let nextSession = 1;
   const pool = {
     ensure: vi.fn(async (workspace: string) => {
@@ -31,6 +34,20 @@ function fixture(lockedId?: string, rejectSubmit = false) {
         calls.push({ workspace, method: request.method, params: request.params });
         const id = String(request.params.sessionId ?? `new-${nextSession++}`);
         let result: unknown = null;
+        if (
+          request.method === "runtime.resumeSession" &&
+          failResume?.has(id) === true &&
+          crashed.has(workspace)
+        ) {
+          server.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: request.id,
+              error: { code: -32004, message: "会话日志已损坏", data: { code: "io" } },
+            }),
+          );
+          return;
+        }
         if (
           request.method === "runtime.resumeSession" &&
           id === lockedId &&
@@ -151,7 +168,13 @@ function fixture(lockedId?: string, rejectSubmit = false) {
       .get(turn.workspace)
       ?.send(JSON.stringify({ jsonrpc: "2.0", id: turn.id, result: "done" }));
   }
-  return { controller, pool, calls, opened, failures, event, complete };
+  /** 模拟后台进程退出：BackendPool 会把条目移除，下一次 ensure 起新进程 */
+  function crash(workspace: string) {
+    clients.delete(workspace);
+    streams.delete(workspace);
+    crashed.add(workspace);
+  }
+  return { controller, pool, calls, opened, failures, event, complete, crash };
 }
 
 describe("desktop conversation lifecycle", () => {
@@ -278,5 +301,98 @@ describe("send 接受语义与创建选项", () => {
     expect(f.controller.selectedId).toBeNull();
     await vi.waitFor(() => expect(f.opened.size).toBe(0));
     expect(f.calls.some((c) => c.method === "session.close")).toBe(true);
+  });
+});
+
+describe("后台崩溃与重启恢复", () => {
+  /** a 忙（send 未 complete）所以切到 b 后仍打开；b 空闲但被选中 */
+  async function twoSessionsOnProject(f: ReturnType<typeof fixture>) {
+    await f.controller.open("a", "project");
+    await f.controller.send({ text: "run", attachments: [] }); // a 收到 seq 1
+    await f.controller.open("b", "project");
+    f.event("a", "message.user", { content: [{ type: "text", text: "x" }] }); // a 收到 seq 2
+  }
+
+  it("后台退出时会话标 dead，保留 id、视图与 lastSeq 断点，选中不变", async () => {
+    const f = fixture();
+    await twoSessionsOnProject(f);
+    const viewA = f.controller.opened.get("a")?.view;
+    f.crash("project");
+    f.controller.backendExited(projectKey("project"));
+    expect(f.controller.opened.get("a")?.dead).toBe(true);
+    expect(f.controller.opened.get("b")?.dead).toBe(true);
+    expect(f.controller.selectedId).toBe("b");
+    expect(f.controller.opened.get("a")?.view).toBe(viewA);
+    expect(viewA?.lastSeq).toBe(2);
+    // dead 会话不可再提交
+    await expect(f.controller.send({ text: "x", attachments: [] })).rejects.toThrow("后台已退出");
+    // dead 会话不被空闲清理
+    await f.controller.newConversation("plain");
+    expect(f.controller.opened.get("a")?.dead).toBe(true);
+  });
+
+  it("重启后台后逐个 resumeSession 并按各自 lastSeq 续接订阅", async () => {
+    const f = fixture();
+    await twoSessionsOnProject(f);
+    const viewA = f.controller.opened.get("a")?.view;
+    const viewB = f.controller.opened.get("b")?.view;
+    f.crash("project");
+    f.controller.backendExited(projectKey("project"));
+
+    const result = await f.controller.resumeBackend("project");
+    expect(result.failed).toEqual([]);
+    // 新后台重新握手并逐个 resumeSession（旧后台的两个 + 新后台的两个）
+    expect(f.calls.filter((c) => c.method === "initialize")).toHaveLength(2);
+    expect(f.calls.filter((c) => c.method === "runtime.resumeSession")).toHaveLength(4);
+    const subA = f.calls
+      .filter((c) => c.method === "session.subscribe" && c.params.sessionId === "a")
+      .at(-1);
+    const subB = f.calls
+      .filter((c) => c.method === "session.subscribe" && c.params.sessionId === "b")
+      .at(-1);
+    expect(subA?.params.afterSeq).toBe(2);
+    expect(subB?.params.afterSeq).toBe(0);
+    // 视图对象延续：浏览位置不变；选中仍是 b
+    expect(f.controller.opened.get("a")?.view).toBe(viewA);
+    expect(f.controller.opened.get("b")?.view).toBe(viewB);
+    expect(f.controller.opened.get("a")?.dead).toBeUndefined();
+    expect(f.controller.selectedId).toBe("b");
+  });
+
+  it("单个会话恢复失败不阻塞其他会话，失败的保持 dead", async () => {
+    const f = fixture(undefined, false, new Set(["a"]));
+    await twoSessionsOnProject(f);
+    f.crash("project");
+    f.controller.backendExited(projectKey("project"));
+
+    const result = await f.controller.resumeBackend("project");
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0]).toMatchObject({ id: "a" });
+    expect(result.failed[0]?.message).toContain("会话日志已损坏");
+    // a 仍是 dead 可重试；b 已正常续接
+    expect(f.controller.opened.get("a")?.dead).toBe(true);
+    expect(f.controller.opened.get("b")?.dead).toBeUndefined();
+    const subB = f.calls
+      .filter((c) => c.method === "session.subscribe" && c.params.sessionId === "b")
+      .at(-1);
+    expect(subB?.params.afterSeq).toBe(0);
+  });
+
+  it("点开 dead 会话自动重启后台并按 lastSeq 续接", async () => {
+    const f = fixture();
+    await twoSessionsOnProject(f);
+    const viewA = f.controller.opened.get("a")?.view;
+    f.crash("project");
+    f.controller.backendExited(projectKey("project"));
+
+    await f.controller.open("a", "project");
+    const subA = f.calls
+      .filter((c) => c.method === "session.subscribe" && c.params.sessionId === "a")
+      .at(-1);
+    expect(subA?.params.afterSeq).toBe(2);
+    expect(f.controller.opened.get("a")?.view).toBe(viewA);
+    expect(f.controller.opened.get("a")?.dead).toBeUndefined();
+    // b 仍是 dead，等「重启后台」或点开时再恢复
+    expect(f.controller.opened.get("b")?.dead).toBe(true);
   });
 });

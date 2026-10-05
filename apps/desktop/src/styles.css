@@ -621,6 +621,24 @@ button {
 .crash .t .btn {
   margin-left: auto;
 }
+.crash .t .acts {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+.crash .t .acts .btn {
+  margin-left: 0;
+}
+.crash .fail {
+  color: var(--a-error);
+  font-size: 12px;
+  font-weight: 400;
+}
+.crash .logmore {
+  justify-self: start;
+  padding: 3px 8px;
+  font-size: 11.5px;
+}
 .pane-error {
   margin: auto;
   max-width: 460px;
@@ -650,6 +668,8 @@ button {
   font: 11.5px/1.6 var(--mono);
   color: var(--a-muted);
   white-space: pre-wrap;
+  max-height: 168px;
+  overflow: auto;
 }
 
 .btn {
