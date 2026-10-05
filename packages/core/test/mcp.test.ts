@@ -61,9 +61,11 @@ function stubConnector(tools: ToolDefinition[]): Stub {
     closed: () => state.closed,
     scope: () => state.scope,
     connector: {
+      probe: async () => ({ ok: true, durationMs: 0, tools: [] }),
       open: (scope) => {
         state.scope = scope;
         return Promise.resolve({
+          reconcile: async () => undefined,
           tools: () => tools,
           status: (): McpServerStatus[] => [
             { name: "fake", state: "ready", toolCount: tools.length, restarts: 0 },

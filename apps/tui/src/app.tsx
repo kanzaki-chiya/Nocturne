@@ -273,7 +273,7 @@ function useProviderOps(provider: ProviderBridge | undefined): {
     }): void => {
       void (async () => {
         if (provider !== undefined) {
-          provider.updateProviders(await provider.reloadConfig());
+          await provider.updateProviders(await provider.reloadConfig());
           await reload();
         }
         if (outcome.kind === "added") {
@@ -310,7 +310,7 @@ function useProviderOps(provider: ProviderBridge | undefined): {
         void (async () => {
           try {
             await logoutProvider(provider.config, providerId);
-            provider.updateProviders(await provider.reloadConfig());
+            await provider.updateProviders(await provider.reloadConfig());
             await reload();
             setNotice(`已退出登录 ${providerId}`);
           } catch (error) {
@@ -324,7 +324,7 @@ function useProviderOps(provider: ProviderBridge | undefined): {
         setBusyText(`正在获取 ${providerId} 的模型列表…`);
         try {
           const warning = await provider.config.refreshUpstreamLimits(providerId);
-          provider.updateProviders(await provider.reloadConfig());
+          await provider.updateProviders(await provider.reloadConfig());
           await reload();
           setNotice(
             `已刷新 ${providerId} 的上游模型列表${warning !== undefined ? `；${warning}` : ""}`,
@@ -345,7 +345,7 @@ function useProviderOps(provider: ProviderBridge | undefined): {
       void (async () => {
         try {
           await provider.config.removeSetupProvider(providerId);
-          provider.updateProviders(await provider.reloadConfig());
+          await provider.updateProviders(await provider.reloadConfig());
           await reload();
           setNotice(`已删除 ${providerId}`);
         } catch (e) {
@@ -390,7 +390,7 @@ function useProviderOps(provider: ProviderBridge | undefined): {
       if (provider === undefined) return "当前环境不支持模型设置编辑";
       try {
         await provider.config.saveModelSettings(providerId, modelId, patch, provider.workspaceRoot);
-        provider.updateProviders(await provider.reloadConfig());
+        await provider.updateProviders(await provider.reloadConfig());
         await reload();
         setNotice(`已保存 ${providerId}/${modelId}`);
         return undefined;
@@ -1595,7 +1595,7 @@ function SessionApp({
       wizard.start({ kind: "add", presetId }, (outcome) => {
         if (outcome.kind === "added") {
           void (async () => {
-            provider.updateProviders(await provider.reloadConfig());
+            await provider.updateProviders(await provider.reloadConfig());
             const data = await loadPickerData().catch(() => undefined);
             if (data !== undefined) setPickerData(data);
             // 回到本页并选中刚添加的服务商（tui.md §7）
@@ -1656,13 +1656,13 @@ function SessionApp({
       wizard.start(start, (outcome) => {
         void (async () => {
           if (outcome.kind === "added") {
-            provider.updateProviders(await provider.reloadConfig());
+            await provider.updateProviders(await provider.reloadConfig());
             pushLine(`已保存 ${outcome.providerId}，${outcome.modelCount} 个模型`);
           } else if (outcome.kind === "key-updated") {
-            provider.updateProviders(await provider.reloadConfig());
+            await provider.updateProviders(await provider.reloadConfig());
             pushLine(`已更新 ${outcome.providerId} 的密钥`);
           } else if (outcome.kind === "logged-in") {
-            provider.updateProviders(await provider.reloadConfig());
+            await provider.updateProviders(await provider.reloadConfig());
             pushLine(`已登录 ${outcome.providerId}`);
           } else if (outcome.kind === "error") {
             pushLine(`! ${outcome.message}`);
@@ -1680,7 +1680,7 @@ function SessionApp({
       if (provider === undefined) return;
       try {
         await provider.config.removeSetupProvider(providerId);
-        provider.updateProviders(await provider.reloadConfig());
+        await provider.updateProviders(await provider.reloadConfig());
         pushLine(`已删除 ${providerId}`);
       } catch (e) {
         pushLine(`! ${errText(e)}`);

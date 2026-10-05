@@ -5,6 +5,10 @@
  * 线上约定：`undefined` 以 `null` 表示（JSON 没有 undefined）；二进制用 base64 字符串。
  */
 import type {
+  McpProbeInput,
+  McpProbeResult,
+  McpSaveInput,
+  McpServerOverview,
   AccountStorageSetup,
   AddProviderInput,
   AddProviderResult,
@@ -186,6 +190,20 @@ export interface RpcMethods {
    * 从磁盘重新加载配置（服务商与设置）并替换 Runtime 的注册表，随后推
    * runtime.providersChanged；用于另一个进程改了配置文件之后同步。
    */
+  "mcp.describeMcpServers": {
+    params: { workspaceRoot?: string | undefined };
+    result: { servers: McpServerOverview[]; warnings: string[] };
+  };
+  "mcp.saveMcpServer": { params: McpSaveInput; result: McpServerOverview };
+  "mcp.deleteMcpServer": {
+    params: { id: string; workspaceRoot?: string | undefined };
+    result: null;
+  };
+  "mcp.setMcpServerEnabled": {
+    params: { id: string; enabled: boolean; workspaceRoot?: string | undefined };
+    result: null;
+  };
+  "mcp.probeMcpServer": { params: McpProbeInput; result: McpProbeResult };
   "runtime.reloadConfig": { params: Record<string, never>; result: null };
   "runtime.defaultReviewer": {
     params: { endpoint: JevEndpoint; baseURL?: string };
@@ -346,6 +364,11 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.setPreference": true,
   "runtime.listReviewerProviders": true,
   "runtime.reloadConfig": true,
+  "mcp.describeMcpServers": true,
+  "mcp.saveMcpServer": true,
+  "mcp.deleteMcpServer": true,
+  "mcp.setMcpServerEnabled": true,
+  "mcp.probeMcpServer": true,
   "runtime.defaultReviewer": true,
   "runtime.listReviewerModels": true,
   "provider.listProviderPresets": true,

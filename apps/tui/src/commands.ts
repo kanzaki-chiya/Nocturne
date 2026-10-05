@@ -50,7 +50,7 @@ export type SlashResult =
 export interface ProviderBridge {
   config: RuntimeConfig;
   reloadConfig: () => Promise<RuntimeConfig>;
-  updateProviders: (rc: RuntimeConfig) => void;
+  updateProviders: (rc: RuntimeConfig) => void | Promise<void>;
   workspaceRoot?: string | undefined;
 }
 
@@ -99,7 +99,7 @@ export async function runSlash(
           if (!name) return { kind: "message", text: "用法：/provider logout <名称>" };
           try {
             await logoutProvider(provider.config, name);
-            provider.updateProviders(await provider.reloadConfig());
+            await provider.updateProviders(await provider.reloadConfig());
             return { kind: "message", text: `已退出登录 ${name}` };
           } catch (error) {
             return { kind: "message", text: `! ${safeLoginError(error).message}` };
@@ -130,7 +130,7 @@ export async function runSlash(
           if (name === "") return { kind: "message", text: "用法：/provider refresh <名称>" };
           try {
             const warning = await provider.config.refreshUpstreamLimits(name);
-            provider.updateProviders(await provider.reloadConfig());
+            await provider.updateProviders(await provider.reloadConfig());
             return {
               kind: "message",
               text: `已刷新 ${name} 的上游模型列表${warning !== undefined ? `；${warning}` : ""}`,

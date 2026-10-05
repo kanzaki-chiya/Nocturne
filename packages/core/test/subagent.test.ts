@@ -17,7 +17,7 @@ import {
 } from "../src/provider/index.js";
 import type { RuntimeEvent } from "../src/protocol/index.js";
 import { type SecurityReviewer, createRulePolicy } from "../src/permission/index.js";
-import type { McpSession, ToolDefinition } from "../src/tools/index.js";
+import type { McpConnector, ToolDefinition } from "../src/tools/index.js";
 
 const tmpRoots: string[] = [];
 afterEach(() => {
@@ -50,7 +50,7 @@ interface RuntimeExtra {
     maxAttempts?: number;
     timeoutMs?: number;
   };
-  mcp?: { open: () => Promise<McpSession> };
+  mcp?: McpConnector;
   mcpServers?: { name: string; command: string; origin: "user" | "project" }[];
   policy?: ReturnType<typeof createRulePolicy>;
 }
@@ -1115,9 +1115,11 @@ describe("subagent：MCP 复用", () => {
       autoApproveAsk: true,
       mcpServers: [{ name: "srv", command: "fake-mcp", origin: "user" }],
       mcp: {
+        probe: async () => ({ ok: true, durationMs: 0, tools: [] }),
         open: async () => {
           opens += 1;
           return {
+            reconcile: async () => undefined,
             tools: () => [pingTool],
             status: () => [],
             applyPendingTools: () => ({ add: [], remove: [] }),

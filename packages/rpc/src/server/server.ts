@@ -452,17 +452,20 @@ class Connection {
     return run;
   }
 
-  private async reloadProviders(): Promise<void> {
+  private async reloadProviders(notify = true): Promise<void> {
     const next = await this.providerConfig().reload();
-    this.runtime().updateProviders(next);
+    await this.runtime().updateProviders(next);
     this.providerConfig().current = next;
-    this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+    if (notify) this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
   }
 
-  private mutateAndReload<T>(mutate: (config: RuntimeConfig) => Promise<T>): Promise<T> {
+  private mutateAndReload<T>(
+    mutate: (config: RuntimeConfig) => Promise<T>,
+    notify = true,
+  ): Promise<T> {
     return this.enqueueConfig(async (config) => {
       const result = await mutate(config);
-      await this.reloadProviders();
+      await this.reloadProviders(notify);
       return result;
     });
   }
@@ -804,6 +807,29 @@ class Connection {
         await this.enqueueConfig(() => this.reloadProviders());
         return null;
       },
+      "mcp.describeMcpServers": (p) => this.runtime().describeMcpServers(p),
+      "mcp.saveMcpServer": (p) =>
+        this.mutateAndReload(
+          () =>
+            this.runtime().saveMcpServer(p as unknown as Parameters<Runtime["saveMcpServer"]>[0]),
+          false,
+        ),
+      "mcp.deleteMcpServer": (p) =>
+        this.mutateAndReload(async () => {
+          await this.runtime().deleteMcpServer(
+            p as unknown as Parameters<Runtime["deleteMcpServer"]>[0],
+          );
+          return null;
+        }, false),
+      "mcp.setMcpServerEnabled": (p) =>
+        this.mutateAndReload(async () => {
+          await this.runtime().setMcpServerEnabled(
+            p as unknown as Parameters<Runtime["setMcpServerEnabled"]>[0],
+          );
+          return null;
+        }, false),
+      "mcp.probeMcpServer": (p) =>
+        this.runtime().probeMcpServer(p as unknown as Parameters<Runtime["probeMcpServer"]>[0]),
       "runtime.defaultReviewer": (p) => {
         const baseURL = optString(p, "baseURL");
         return this.runtime().defaultReviewer(reqString(p, "endpoint") as JevEndpoint, baseURL);

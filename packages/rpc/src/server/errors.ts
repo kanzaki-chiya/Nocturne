@@ -1,6 +1,7 @@
 import {
   ProviderLoginError,
   ProviderSetupError,
+  McpSettingsError,
   RuntimeCommandError,
   SessionError,
 } from "@nocturne/core";
@@ -69,7 +70,7 @@ export function toRpcError(error: unknown): RpcErrorObject {
   }
   if (error instanceof SessionError) return { code: RPC_ERROR.sessionError, message, data };
   if (error instanceof ProviderLoginError) return { code: RPC_ERROR.loginError, message, data };
-  if (error instanceof ProviderSetupError) {
+  if (error instanceof ProviderSetupError || error instanceof McpSettingsError) {
     // 字段名让客户端把错误标到对应输入框（ADR-0044 第 6 节）
     return {
       code: RPC_ERROR.providerSetupError,

@@ -28,7 +28,7 @@ export interface CommandDeps {
     | {
         config: RuntimeConfig;
         reloadConfig: () => Promise<RuntimeConfig>;
-        updateProviders: (rc: RuntimeConfig) => void;
+        updateProviders: (rc: RuntimeConfig) => void | Promise<void>;
         workspaceRoot?: string | undefined;
       }
     | undefined;
@@ -272,7 +272,7 @@ export async function runSlashCommand(
         case "logout": {
           try {
             await logoutProvider(config, name);
-            updateProviders(await reloadConfig());
+            await updateProviders(await reloadConfig());
             io.print(`已退出登录 ${name}`);
           } catch (error) {
             const { safeLoginError } = await import("@nocturne/tui/provider-login");
@@ -295,7 +295,7 @@ export async function runSlashCommand(
         case "refresh": {
           try {
             const warning = await config.refreshUpstreamLimits(name);
-            updateProviders(await reloadConfig());
+            await updateProviders(await reloadConfig());
             io.print(`已刷新 ${name} 的模型列表与限额`);
             if (warning !== undefined) io.print(`! ${warning}`);
           } catch (e) {
@@ -310,7 +310,7 @@ export async function runSlashCommand(
           }
           try {
             await config.removeSetupProvider(name);
-            updateProviders(await reloadConfig());
+            await updateProviders(await reloadConfig());
             io.print(`已删除服务商 ${name} 及其凭据`);
           } catch (e) {
             io.print(`! ${errorText(e)}`);

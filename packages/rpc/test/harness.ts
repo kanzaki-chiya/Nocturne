@@ -12,6 +12,7 @@ import {
   type CredentialStore,
   type FakeScript,
   type ModelInfo,
+  type McpConnector,
   type Runtime,
   type RuntimeConfig,
   type RuntimeSession,
@@ -170,6 +171,7 @@ export interface ProviderHarness extends Harness {
 }
 
 export interface ProviderHarnessOptions extends HarnessOptions {
+  mcp?: McpConnector;
   /** 凭据后端：默认 memory（可写不落盘）；none 表示"无系统后端"场景 */
   credentialBackend?: CredentialBackend;
   /** 直接注入凭据存储（覆盖 credentialBackend；敏感参数测试注入抛错的 store） */
@@ -244,6 +246,7 @@ export async function connectWithConfig(
       inits.push(init);
       const runtime = await createRuntime({
         cwd: ws,
+        ...(options.mcp ? { mcp: options.mcp } : {}),
         config,
         providers: [provider],
         interactive: init.interactive,

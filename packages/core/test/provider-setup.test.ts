@@ -686,9 +686,11 @@ describe("runtime：updateProviders 与警告（provider-setup.md 第 6 节）",
         SessionEnd: [{ command: "node", args: hookArgs }],
       },
       mcp: {
+        probe: async () => ({ ok: true, durationMs: 0, tools: [] }),
         open: async () => {
           mcpOpens++;
           return {
+            reconcile: async () => undefined,
             tools: () => [],
             status: () => [],
             applyPendingTools: () => ({ add: [], remove: [] }),

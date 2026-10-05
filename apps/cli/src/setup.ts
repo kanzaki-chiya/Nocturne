@@ -197,11 +197,11 @@ export async function runAddWizardInSession(
     config: RuntimeConfig;
     session: { setModel(input: string): Promise<void> };
     reloadConfig: () => Promise<RuntimeConfig>;
-    updateProviders: (rc: RuntimeConfig) => void;
+    updateProviders: (rc: RuntimeConfig) => void | Promise<void>;
   },
 ): Promise<void> {
   await runProviderSetupWizard(io, ctx.config);
-  ctx.updateProviders(await ctx.reloadConfig());
+  await ctx.updateProviders(await ctx.reloadConfig());
   io.print("服务商已就绪——用 /model 选择模型");
 }
 
@@ -214,11 +214,11 @@ export async function runKeyWizardInSession(
     config: RuntimeConfig;
     providerId: string;
     reloadConfig: () => Promise<RuntimeConfig>;
-    updateProviders: (rc: RuntimeConfig) => void;
+    updateProviders: (rc: RuntimeConfig) => void | Promise<void>;
   },
 ): Promise<void> {
   await runProviderKeyWizard(io, ctx.config, ctx.providerId);
-  ctx.updateProviders(await ctx.reloadConfig());
+  await ctx.updateProviders(await ctx.reloadConfig());
 }
 
 /**
@@ -233,11 +233,11 @@ export async function runModelWizardInSession(
     modelId: string;
     workspaceRoot?: string | undefined;
     reloadConfig: () => Promise<RuntimeConfig>;
-    updateProviders: (rc: RuntimeConfig) => void;
+    updateProviders: (rc: RuntimeConfig) => void | Promise<void>;
   },
 ): Promise<void> {
   await runProviderModelWizard(io, ctx.config, ctx.providerId, ctx.modelId, {
     workspaceRoot: ctx.workspaceRoot,
   });
-  ctx.updateProviders(await ctx.reloadConfig());
+  await ctx.updateProviders(await ctx.reloadConfig());
 }

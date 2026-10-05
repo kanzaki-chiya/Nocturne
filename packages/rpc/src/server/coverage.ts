@@ -35,6 +35,11 @@ export const RUNTIME_METHODS: Record<
   // 参数是含函数的进程内 RuntimeConfig，无法序列化：服务端从磁盘重载出新配置
   // 再调用它（配置变更方法之后也自动这样做），客户端收 runtime.providersChanged
   updateProviders: "runtime.reloadConfig",
+  describeMcpServers: "mcp.describeMcpServers",
+  saveMcpServer: "mcp.saveMcpServer",
+  deleteMcpServer: "mcp.deleteMcpServer",
+  setMcpServerEnabled: "mcp.setMcpServerEnabled",
+  probeMcpServer: "mcp.probeMcpServer",
 };
 
 export const SESSION_NOT_MAPPED = {
@@ -76,6 +81,7 @@ export const SESSION_METHODS: Record<
 
 /** 没有（或没有一一对应的）RPC 方法的 RuntimeConfig 成员，附原因 */
 export const CONFIG_NOT_MAPPED = {
+  reload: "进程内重新加载，由 runtime.reloadConfig 映射",
   nocturneHome: "本机路径，客户端不需要",
   attachmentsDir: "本机路径，客户端不需要",
   grantsDir: "本机路径，客户端不需要",
@@ -96,6 +102,10 @@ export const CONFIG_METHODS: Record<
   Exclude<keyof RuntimeConfig, keyof typeof CONFIG_NOT_MAPPED>,
   RpcMethodName
 > = {
+  describeMcpServers: "mcp.describeMcpServers",
+  saveMcpServer: "mcp.saveMcpServer",
+  deleteMcpServer: "mcp.deleteMcpServer",
+  setMcpServerEnabled: "mcp.setMcpServerEnabled",
   describeProviders: "provider.describeProviders",
   describeSettings: "runtime.describeSettings",
   updateSettings: "runtime.updateSettings",

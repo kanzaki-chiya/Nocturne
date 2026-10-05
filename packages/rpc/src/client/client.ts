@@ -10,6 +10,10 @@ import {
   type RuntimeEvent,
 } from "@nocturne/core/protocol";
 import type {
+  McpProbeInput,
+  McpProbeResult,
+  McpSaveInput,
+  McpServerOverview,
   AccountStorageSetup,
   AddProviderResult,
   CreateSessionOptions,
@@ -154,6 +158,17 @@ export interface RpcSession {
 
 /** 与进程内 `Runtime` 同名的方法；`undefined` 的返回在线上是 `null`，这里还原 */
 export interface RpcRuntime {
+  describeMcpServers(input?: {
+    workspaceRoot?: string | undefined;
+  }): Promise<{ servers: McpServerOverview[]; warnings: string[] }>;
+  saveMcpServer(input: McpSaveInput): Promise<McpServerOverview>;
+  deleteMcpServer(input: { id: string; workspaceRoot?: string | undefined }): Promise<void>;
+  setMcpServerEnabled(input: {
+    id: string;
+    enabled: boolean;
+    workspaceRoot?: string | undefined;
+  }): Promise<void>;
+  probeMcpServer(input: McpProbeInput): Promise<McpProbeResult>;
   listSessions(filter?: { cwd?: string; includeSubagents?: boolean }): Promise<SessionSummary[]>;
   createSession(
     options: CreateSessionOptions,
@@ -478,6 +493,15 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   };
 
   const runtime: RpcRuntime = {
+    describeMcpServers: (input = {}) => call("mcp.describeMcpServers", input),
+    saveMcpServer: (input) => call("mcp.saveMcpServer", input),
+    deleteMcpServer: async (input) => {
+      await call("mcp.deleteMcpServer", input);
+    },
+    setMcpServerEnabled: async (input) => {
+      await call("mcp.setMcpServerEnabled", input);
+    },
+    probeMcpServer: (input) => call("mcp.probeMcpServer", input),
     listSessions: (filter) => call("runtime.listSessions", filter ?? {}),
     createSession: async (createOptions) => {
       const opened = await call("runtime.createSession", createOptions);

@@ -609,8 +609,8 @@ export async function runRepl(
                   provider: {
                     config: bridge.config,
                     reloadConfig: bridge.reloadConfig,
-                    updateProviders: (rc) => {
-                      runtime.updateProviders(rc);
+                    updateProviders: async (rc) => {
+                      await runtime.updateProviders(rc);
                     },
                     workspaceRoot: bridge.workspaceRoot,
                   },
@@ -624,8 +624,8 @@ export async function runRepl(
                         config: bridge.config,
                         session,
                         reloadConfig: bridge.reloadConfig,
-                        updateProviders: (rc) => {
-                          runtime.updateProviders(rc);
+                        updateProviders: async (rc) => {
+                          await runtime.updateProviders(rc);
                         },
                       }),
                     ),
@@ -633,7 +633,7 @@ export async function runRepl(
                     startWizard(async (wio) => {
                       const { runProviderLogin } = await import("@nocturne/tui/provider-login");
                       await runProviderLogin(bridge.config, providerId, wio);
-                      runtime.updateProviders(await bridge.reloadConfig());
+                      await runtime.updateProviders(await bridge.reloadConfig());
                     }),
                   runKeyWizard: (providerId: string) =>
                     startWizard((wio) =>
@@ -641,8 +641,8 @@ export async function runRepl(
                         config: bridge.config,
                         providerId,
                         reloadConfig: bridge.reloadConfig,
-                        updateProviders: (rc) => {
-                          runtime.updateProviders(rc);
+                        updateProviders: async (rc) => {
+                          await runtime.updateProviders(rc);
                         },
                       }),
                     ),
@@ -654,8 +654,8 @@ export async function runRepl(
                         modelId,
                         workspaceRoot: bridge.workspaceRoot,
                         reloadConfig: bridge.reloadConfig,
-                        updateProviders: (rc) => {
-                          runtime.updateProviders(rc);
+                        updateProviders: async (rc) => {
+                          await runtime.updateProviders(rc);
                         },
                       }),
                     ),

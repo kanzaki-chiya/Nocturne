@@ -3,6 +3,14 @@
  * 客户端看到的全部能力都经由这里；进程内与将来的 RPC 客户端共用同一份语义（ADR-0002）。
  */
 import { createHash } from "node:crypto";
+import { z } from "zod";
+import { McpSettingsError, validateMcpEntry } from "./config/mcp.js";
+import type {
+  McpProbeInput,
+  McpProbeResult,
+  McpSaveInput,
+  McpServerOverview,
+} from "./protocol/index.js";
 
 import {
   createSubagentLauncher,
@@ -395,6 +403,17 @@ export interface ResumeSessionOptions {
 }
 
 export interface Runtime {
+  describeMcpServers(input?: {
+    workspaceRoot?: string | undefined;
+  }): Promise<{ servers: McpServerOverview[]; warnings: string[] }>;
+  saveMcpServer(input: McpSaveInput): Promise<McpServerOverview>;
+  deleteMcpServer(input: { id: string; workspaceRoot?: string | undefined }): Promise<void>;
+  setMcpServerEnabled(input: {
+    id: string;
+    enabled: boolean;
+    workspaceRoot?: string | undefined;
+  }): Promise<void>;
+  probeMcpServer(input: McpProbeInput): Promise<McpProbeResult>;
   describeModelRoles(): ModelRoleInfo[];
   setModelRole(role: ModelRole, ref: string | null): Promise<SettingItem[]>;
   describeSettings(): SettingItem[];
@@ -419,9 +438,9 @@ export interface Runtime {
   /**
    * 用新的基础层配置重建运行时级 Provider 注册表（provider-setup.md
    * 第 6 节）；已打开会话在下一次空闲边界重建会话级注册表。不产生
-   * 持久事件，不触发 SessionEnd/SessionStart Hook，不重启 MCP。
+   * 持久事件，不触发 SessionEnd/SessionStart Hook；MCP 按配置增量更新。
    */
-  updateProviders(config: RuntimeConfig): void;
+  updateProviders(config: RuntimeConfig): Promise<void>;
   /** 分层合并后的默认模型（模型选择页"默认模型"标记）；无法解析时 undefined */
   defaultModel(): ModelRef | undefined;
   /** recent-models.json 当前内容（新→旧，最多 10 条）；无 config 时为空 */
@@ -651,6 +670,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
    * 各会话在下一次空闲边界 rebuildProviders；close 时移除）
    */
   const markProvidersDirty = new Set<() => void>();
+  const reconcileMcp = new Set<() => Promise<void>>();
   const openForkers = new Map<string, (targetSeq?: number) => Promise<string>>();
   let settingsPending = Promise.resolve();
 
@@ -989,7 +1009,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       })),
     ].filter((s) => s.enabled !== false);
     let mcpSession: McpSession | undefined;
-    if (mcpServerConfigs.length > 0) {
+    if (mcpServerConfigs.length > 0 || options.mcp !== undefined) {
       if (options.mcp === undefined) {
         warnings.push(
           `已配置 ${mcpServerConfigs.length} 个 MCP 服务器，但 Runtime 未注入 MCP 连接器（RuntimeOptions.mcp），相关工具不可用`,
@@ -1002,6 +1022,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             workspaceRoot: meta.workspaceRoot,
             sessionId: session.id,
             platform,
+            credentials: config?.credentials,
             emitServer: (p) => session.emitEphemeral("mcp.server", p),
             warn: (code, message) => session.emitEphemeral("runtime.warning", { code, message }),
             diagnostics,
@@ -1026,6 +1047,42 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
       }
     }
+
+    let pendingMcp = false;
+    let mcpUpdate: Promise<void> = Promise.resolve();
+    const applyMcp = (): Promise<void> => {
+      mcpUpdate = mcpUpdate
+        .catch(() => undefined)
+        .then(async () => {
+          if (!pendingMcp || mcpSession === undefined) return;
+          pendingMcp = false;
+          const next = config
+            ? (await config.forWorkspace(meta.workspaceRoot)).resolved.mcpServers
+            : [];
+          await mcpSession.reconcile([
+            ...(options.mcpServers ?? []),
+            ...next.map((s) => ({ ...s.entry, name: s.name, origin: s.origin, dir: s.dir })),
+          ]);
+          const diff = mcpSession.applyPendingTools();
+          for (const name of diff.remove) tools.unregister(name);
+          for (const tool of diff.add) {
+            try {
+              tools.register(tool);
+            } catch {
+              session.emitEphemeral("runtime.warning", {
+                code: "mcp_tool_conflict",
+                message: `MCP 工具 ${tool.name} 注册失败`,
+              });
+            }
+          }
+        });
+      return mcpUpdate;
+    };
+    const refreshMcp = async (): Promise<void> => {
+      pendingMcp = true;
+      if (!busy()) await applyMcp();
+    };
+    reconcileMcp.add(refreshMcp);
 
     // shell 子进程环境剥离的凭据变量（provider-setup.md 第 4 节第 2 条）：
     // 全部 Provider 条目声明的 apiKeyEnv + NOCTURNE_API_KEY /
@@ -1569,6 +1626,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         // 空闲边界：controller 先置位（busy 语义立即生效），再重建
         // updateProviders 标记的会话级注册表（provider-setup.md 第 6 节）
         try {
+          await applyMcp();
           await rebuildProviders();
           // ADR-0026 §5：刷新后条目/模型可能变化——原位重解析拿到最新的
           // 协议与不可用标记（失败沿用旧解析，同一错误仍由 stream 路径报告）
@@ -1650,6 +1708,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           return reason;
         } finally {
           if (controller === ac) controller = undefined;
+          await applyMcp().catch(() =>
+            session.emitEphemeral("runtime.warning", {
+              code: "mcp_server_failed",
+              message: "MCP 热更新失败，请重新加载配置",
+            }),
+          );
           fileIndexPromise = undefined;
           activeTurnEffort = undefined;
           turnSettled = undefined;
@@ -1950,6 +2014,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           await hookRunner.run("SessionEnd", { reason: "close" }).catch(() => undefined);
         }
         if (mcpSession !== undefined) {
+          reconcileMcp.delete(refreshMcp);
+          await mcpUpdate.catch(() => undefined);
           // MCP 服务器进程树清理（mcp.md 第 5 节）；失败只警告不阻塞关闭
           try {
             await mcpSession.close();
@@ -1968,7 +2034,145 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     return runtimeSession;
   }
 
+  function requireMcpConfig(): RuntimeConfig {
+    if (!config) throw new McpSettingsError("config", "未注入 RuntimeConfig");
+    return config;
+  }
+  async function reloadMcpConfig(): Promise<void> {
+    config = await requireMcpConfig().reload();
+    registry = buildRegistry(config.base.providers);
+    for (const mark of markProvidersDirty) mark();
+    await Promise.all([...reconcileMcp].map((refresh) => refresh()));
+  }
+  function mcpInput<T>(schema: z.ZodType<T>, input: unknown): T {
+    const parsed = schema.safeParse(input);
+    if (!parsed.success)
+      throw new McpSettingsError(String(parsed.error.issues[0]?.path[0] ?? "config"), "字段无效");
+    return parsed.data;
+  }
+  const workspaceField = z.string().min(1).optional();
+  const idFields = z.object({ id: z.string().min(1), workspaceRoot: workspaceField });
   return {
+    describeMcpServers: (input = {}) =>
+      requireMcpConfig().describeMcpServers(
+        mcpInput(z.object({ workspaceRoot: workspaceField }), input),
+      ),
+    async saveMcpServer(input) {
+      const parsed = mcpInput(
+        z.object({
+          mode: z.enum(["create", "replace"]),
+          id: z.string().min(1),
+          config: z.unknown(),
+          secrets: z.record(z.string(), z.union([z.string(), z.null()])).optional(),
+          workspaceRoot: workspaceField,
+        }),
+        input,
+      );
+      const operation = settingsPending.then(async () => {
+        const result = await requireMcpConfig().saveMcpServer({
+          ...parsed,
+          config: validateMcpEntry(parsed.config),
+        });
+        await reloadMcpConfig();
+        return result;
+      });
+      settingsPending = operation.then(
+        () => undefined,
+        () => undefined,
+      );
+      return operation;
+    },
+    async deleteMcpServer(input) {
+      const parsed = mcpInput(idFields, input);
+      const operation = settingsPending.then(async () => {
+        await requireMcpConfig().deleteMcpServer(parsed);
+        await reloadMcpConfig();
+      });
+      settingsPending = operation.catch(() => undefined);
+      return operation;
+    },
+    async setMcpServerEnabled(input) {
+      const parsed = mcpInput(idFields.extend({ enabled: z.boolean() }), input);
+      const operation = settingsPending.then(async () => {
+        await requireMcpConfig().setMcpServerEnabled(parsed);
+        await reloadMcpConfig();
+      });
+      settingsPending = operation.catch(() => undefined);
+      return operation;
+    },
+    async probeMcpServer(input) {
+      const parsed = mcpInput(
+        z.union([
+          idFields.strict(),
+          z
+            .object({
+              config: z.unknown(),
+              secrets: z.record(z.string(), z.union([z.string(), z.null()])).optional(),
+              workspaceRoot: workspaceField,
+              credentialServerId: z.string().min(1).optional(),
+            })
+            .strict(),
+        ]),
+        input,
+      );
+      const cfg = requireMcpConfig();
+      const root = parsed.workspaceRoot ?? workspaceRoot;
+      let entry;
+      let id = "draft";
+      let secrets: Record<string, string | null> = {};
+      if ("id" in parsed) {
+        id = parsed.id;
+        const overview = (await cfg.describeMcpServers({ workspaceRoot: root })).servers.find(
+          (s) => s.id === id,
+        );
+        if (!overview?.trusted)
+          throw new McpSettingsError("id", "服务器不存在或项目未信任，无法探测");
+        entry = (await cfg.forWorkspace(root)).resolved.mcpServers.find(
+          (s) => s.name === id,
+        )?.entry;
+        if (!entry) throw new McpSettingsError("id", "服务器不存在");
+      } else {
+        entry = validateMcpEntry(parsed.config);
+        secrets = parsed.secrets ?? {};
+        if (parsed.credentialServerId) {
+          const server = (await cfg.describeMcpServers({ workspaceRoot: root })).servers.find(
+            (s) => s.id === parsed.credentialServerId,
+          );
+          if (!server?.editable || !server.trusted)
+            throw new McpSettingsError("id", "只能引用程序管理服务器的凭据");
+          id = server.id;
+        }
+      }
+      if (!options.mcp) throw new McpSettingsError("config", "MCP 连接器不可用");
+      if (
+        cfg.credentials.backend() === "none" &&
+        Object.values(entry.type === "http" ? (entry.headers ?? {}) : (entry.env ?? {})).some(
+          (value) => typeof value !== "string",
+        )
+      )
+        throw new McpSettingsError("secrets", "系统凭据后端不可用，请引用环境变量");
+      const probeEntry = entry;
+      return options.mcp.probe({
+        servers: [{ ...entry, name: id, origin: "app" }],
+        cwd: root,
+        workspaceRoot: root,
+        sessionId: "probe",
+        platform,
+        credentials: {
+          get: (key) => {
+            const name = key.slice(`mcp/${id}/`.length);
+            const value = Object.entries(secrets).find(
+              ([k]) => (probeEntry.type === "http" ? k.toLowerCase() : k) === name,
+            )?.[1];
+            return value !== undefined
+              ? Promise.resolve(value ?? undefined)
+              : cfg.credentials.get(key, { fresh: true });
+          },
+        },
+        emitServer: () => undefined,
+        warn: () => undefined,
+      });
+    },
     describeModelRoles() {
       const settings = config?.describeSettings(workspaceRoot) ?? [];
       const rolesRegistry = buildRegistry(config?.resolvedSettings(workspaceRoot).providers ?? []);
@@ -2160,11 +2364,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       )
         .providers()
         .flatMap((p) => p.models()),
-    updateProviders(newConfig) {
-      // 只换注册表：不动会话日志、Hook、MCP（provider-setup.md 第 6 节）
+    async updateProviders(newConfig) {
+      // 重建服务商注册表并按会话工作区增量更新 MCP；不动会话日志和 Hook。
       config = newConfig;
       registry = buildRegistry(newConfig.base.providers);
       for (const mark of markProvidersDirty) mark();
+      await Promise.all([...reconcileMcp].map((refresh) => refresh()));
     },
     defaultModel() {
       const model = config?.resolvedSettings(workspaceRoot).model;
@@ -2227,6 +2432,7 @@ async function loadInstructions(
 
 // 公共契约类型与工具再导出：客户端只需要 @nocturne/core 与 @nocturne/core/protocol
 export * from "./protocol/index.js";
+export { McpSettingsError } from "./config/mcp.js";
 export type {
   AnthropicConfig,
   ModelInfo,

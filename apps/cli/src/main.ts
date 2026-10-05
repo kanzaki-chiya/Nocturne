@@ -179,8 +179,8 @@ async function main(): Promise<number> {
         provider: {
           config: collected.config.runtime,
           reloadConfig: makeConfigLoader(args, platform),
-          updateProviders: (rc) => {
-            runtime.updateProviders(rc);
+          updateProviders: async (rc) => {
+            await runtime.updateProviders(rc);
           },
           workspaceRoot: cwd,
         },
@@ -301,8 +301,8 @@ async function main(): Promise<number> {
           provider: {
             config: runtimeConfig,
             reloadConfig: makeConfigLoader(args, platform),
-            updateProviders: (rc) => {
-              runtime.updateProviders(rc);
+            updateProviders: async (rc) => {
+              await runtime.updateProviders(rc);
             },
             workspaceRoot: cwd,
           },
@@ -471,8 +471,8 @@ async function main(): Promise<number> {
         provider: {
           config: runtimeConfig,
           reloadConfig: makeConfigLoader(args, platform),
-          updateProviders: (rc) => {
-            runtime.updateProviders(rc);
+          updateProviders: async (rc) => {
+            await runtime.updateProviders(rc);
           },
           workspaceRoot: cwd,
         },
