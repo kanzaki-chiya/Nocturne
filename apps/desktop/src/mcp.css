@@ -1,0 +1,121 @@
+.mcp-page .pane {
+  overflow-y: auto;
+}
+.mcp-page .cols3.mcp-no-servers {
+  grid-template-columns: 1fr;
+}
+.mcp-no-servers .plist {
+  display: none;
+}
+.mcp-no-servers .mcp-empty {
+  flex: 1;
+}
+.mcp-list-actions {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 14px;
+}
+.mcp-list-actions .btn {
+  padding: 5px 7px;
+  font-size: 12px;
+}
+.mcp-server-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--a-secondary);
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.mcp-server-row.on {
+  background: var(--a-sel);
+  color: var(--a-text);
+  border-left: 3px solid var(--a-accent);
+}
+.mcp-server-row small {
+  margin-left: auto;
+  color: var(--a-muted);
+  font-size: 11px;
+}
+.mcp-values > div {
+  display: grid;
+  grid-template-columns: 2fr 1fr 2fr;
+  padding: 9px 12px;
+  gap: 12px;
+  border-bottom: 1px solid var(--a-border);
+  overflow-wrap: anywhere;
+}
+.mcp-value-editor {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(140px, 1fr) minmax(140px, 1.4fr) 30px;
+  gap: 8px;
+  margin: 8px 0;
+  align-items: center;
+}
+.mcp-value-editor .ddw,
+.mcp-value-editor .dd {
+  width: 100%;
+  min-width: 0;
+}
+.mcp-page input,
+.mcp-page textarea {
+  width: 100%;
+  border: 1px solid var(--a-borderStrong);
+  background: var(--a-input);
+  color: var(--a-text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+}
+.mcp-page .field {
+  display: grid;
+  gap: 7px;
+}
+.mcp-page .form {
+  max-width: 830px;
+}
+.mcp-page .form small {
+  color: var(--a-muted);
+}
+.mcp-page .form {
+  display: grid;
+  gap: 17px;
+}
+.mcp-type {
+  display: flex;
+  gap: 8px;
+}
+.mcp-empty {
+  display: grid;
+  place-content: center;
+  min-height: 350px;
+  text-align: center;
+  gap: 15px;
+}
+.mcp-import {
+  width: min(760px, 90vw);
+}
+.mcp-page .ms {
+  flex-wrap: wrap;
+}
+.mcp-switch::before {
+  content: "";
+  display: inline-block;
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  vertical-align: middle;
+  background: radial-gradient(circle at 8px 8px, white 5px, transparent 6px), var(--a-muted);
+  margin-right: 6px;
+}
+.mcp-switch.on::before {
+  background: radial-gradient(circle at 20px 8px, white 5px, transparent 6px), var(--a-accent);
+}
+.mcp-page .t1 > .tagc {
+  align-self: flex-start;
+}

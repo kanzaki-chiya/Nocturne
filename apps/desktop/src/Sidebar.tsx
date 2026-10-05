@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PinnedRow, ProjectNode, SessionRow, SessionTree } from "./session-tree";
 
 /** 设置区的导航项（ADR-0046 2026-10-05 修订第 1 条；logs = 后台日志页） */
-export type SettingsSection = "general" | "models" | "providers" | "appearance" | "logs";
+export type SettingsSection = "general" | "models" | "providers" | "mcp" | "appearance" | "logs";
 
 export interface SidebarProps {
   tree: SessionTree;
@@ -102,6 +102,15 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
           strokeLinecap="round"
           strokeLinejoin="round"
         />
+      </svg>
+    ),
+  },
+  {
+    key: "mcp",
+    label: "MCP",
+    icon: (
+      <svg {...GLYPH_PROPS}>
+        <path d="M2 3h12v4H2zM2 10h12v4H2zM5 5h5M5 12h5" fill="none" stroke="currentColor" />
       </svg>
     ),
   },

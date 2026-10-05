@@ -11,6 +11,7 @@ import { parseSlash } from "./commands";
 import { StatusBar, type StatusPanel } from "./StatusBar";
 import { PaneErrorBoundary } from "./ErrorBoundary";
 import { ProvidersPage } from "./ProvidersPage";
+import { McpPage } from "./McpPage";
 import { SettingsPage } from "./SettingsPage";
 
 import { BackendPool } from "./backends";
@@ -680,6 +681,17 @@ export function App({ host }: { host: DesktopHost }) {
                   providersVersion={providersVersion}
                   onOpenModels={() => {
                     setPage("models");
+                  }}
+                />
+              </PaneErrorBoundary>
+            ) : page === "mcp" ? (
+              <PaneErrorBoundary key="mcp">
+                <McpPage
+                  client={pageClient}
+                  workspaceRoot={effectiveWorkspace ?? undefined}
+                  version={providersVersion}
+                  onChanged={() => {
+                    if (pageClient) pool.propagateConfig(pageClient);
                   }}
                 />
               </PaneErrorBoundary>
