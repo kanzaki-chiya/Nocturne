@@ -2164,7 +2164,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             const value = Object.entries(secrets).find(
               ([k]) => (probeEntry.type === "http" ? k.toLowerCase() : k) === name,
             )?.[1];
-            return value !== undefined
+            return value !== undefined || !("id" in parsed || parsed.credentialServerId)
               ? Promise.resolve(value ?? undefined)
               : cfg.credentials.get(key, { fresh: true });
           },

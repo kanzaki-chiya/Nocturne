@@ -127,7 +127,7 @@
 
 Overview 含 `id/origin/editable/trusted/path/transport/enabled/startupTimeoutMs/callTimeoutMs`；stdio 含 `command/args/cwd/env`，HTTP 含 `url/headers`。值列表为 `{ name, kind: "literal" | "env" | "stored", value?, stored?: "set" | "missing" }[]`，不返回凭据。`config` 是对应传输的条目，stored 值只用 `{ stored: true }`；`secrets` 是变量或请求头名到字符串或 null 的映射，HTTP 凭据名转小写。只有 app 条目可修改，create 名称跨来源不区分大小写，冲突为 `-32005`、`data.field: "id"`；其他管理校验错误同样带字段。未信任项目拒绝探测。
 
-Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, message }`。stdio 带脱敏的 `stderrTail`（最多 20 行），HTTP 带可选 `httpStatus`。错误码为 `spawn_failed/startup_timeout/initialize_failed/mcp_secret_missing/connect_failed/http_status/auth_required/http_redirect`。草稿编辑可以通过 `credentialServerId` 引用可编辑的已保存条目的凭据，不返回密钥值。
+Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, message }`。stdio 带脱敏的 `stderrTail`（最多 20 行），HTTP 带可选 `httpStatus`。错误码为 `spawn_failed/startup_timeout/initialize_failed/mcp_secret_missing/connect_failed/http_status/auth_required/http_redirect`。草稿编辑可以通过 `credentialServerId` 引用可编辑的已保存条目的凭据，不返回密钥值。不带 `credentialServerId` 的草稿只使用本次 `secrets`，不查询凭据库；stored 引用缺少对应 secret 时返回 `mcp_secret_missing`。
 
 三种变更成功后自动重载并更新已打开会话；MCP 变更响应不发送 `providersChanged`，桌面端显式调用 `BackendPool.propagateConfig`。其他后台的 `reloadConfig` 仍发送原通知，由现有 echo 计数消费。
 

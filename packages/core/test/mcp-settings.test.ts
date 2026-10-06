@@ -12,7 +12,7 @@ import {
 import { parseConfigFile } from "../src/config/schema.js";
 import { mergeLayers } from "../src/config/merge.js";
 import type { CredentialStore } from "../src/config/types.js";
-import type { McpServerConfig } from "../src/tools/types.js";
+import type { McpOpenScope, McpServerConfig } from "../src/tools/types.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -33,6 +33,56 @@ async function setup() {
 const stdio = { command: "node", env: { API_TOKEN: { stored: true as const } } };
 
 describe("MCP schema、层与凭据事务", () => {
+  it("无 credentialServerId 的草稿不读取同名 draft 服务器的凭据", async () => {
+    const { config, credentials, home } = await setup();
+    await config.saveMcpServer({
+      mode: "create",
+      id: "draft",
+      config: stdio,
+      secrets: { API_TOKEN: "test-token-123" },
+    });
+    const get = vi.spyOn(credentials, "get");
+    const runtime = await createRuntime({
+      cwd: home,
+      config,
+      providers: [new FakeProvider({ scripts: [] })],
+      mcp: {
+        probe: async (scope: McpOpenScope) => {
+          const value = await scope.credentials?.get("mcp/draft/API_TOKEN");
+          return {
+            ok: value !== undefined,
+            durationMs: 0,
+            tools: [],
+            ...(value === undefined
+              ? { error: { code: "mcp_secret_missing" as const, message: "missing" } }
+              : {}),
+          };
+        },
+        open: async () => ({
+          tools: () => [],
+          status: () => [],
+          reconcile: async () => undefined,
+          applyPendingTools: () => ({ add: [], remove: [] }),
+          close: async () => undefined,
+        }),
+      },
+    });
+    get.mockClear();
+    expect(await runtime.probeMcpServer({ config: stdio })).toMatchObject({
+      ok: false,
+      error: { code: "mcp_secret_missing" },
+    });
+    expect(get).not.toHaveBeenCalled();
+    expect(
+      await runtime.probeMcpServer({ config: stdio, secrets: { API_TOKEN: "test-token-456" } }),
+    ).toMatchObject({ ok: true });
+    expect(get).not.toHaveBeenCalled();
+    expect(
+      await runtime.probeMcpServer({ config: stdio, credentialServerId: "draft" }),
+    ).toMatchObject({ ok: true });
+    expect(get).toHaveBeenCalledWith("mcp/draft/API_TOKEN", { fresh: true });
+    get.mockRestore();
+  });
   it("混写与非法 URL 逐条忽略并警告，保留合法条目", () => {
     const file = parseConfigFile(
       {

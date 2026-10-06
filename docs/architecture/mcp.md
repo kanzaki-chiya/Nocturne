@@ -145,7 +145,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 
 ## 7. 权限与可见性
 
-设置页的连接探测由用户主动操作，不经权限层；未信任项目的条目拒绝探测。stdio 走 spawn → initialize → tools/list → 清理进程树，HTTP 走连接 → initialize → tools/list → 结束会话。探测结果只保存在界面内存，含耗时、服务器信息、工具和分类错误；stdio 附脱敏的最多 20 行 stderrTail，HTTP 附 httpStatus。精确字段与错误码见 [rpc.md](../protocols/rpc.md#35-mcp)。
+设置页的连接探测由用户主动操作，不经权限层；未信任项目的条目拒绝探测。stdio 走 spawn → initialize → tools/list → 清理进程树，HTTP 走连接 → initialize → tools/list → 结束会话。草稿未指定 `credentialServerId` 时只使用本次传入的 `secrets`，不查询凭据库；缺少 stored 对应值时失败为 `mcp_secret_missing`。探测结果只保存在界面内存，含耗时、服务器信息、工具和分类错误；stdio 附脱敏的最多 20 行 stderrTail，HTTP 附 httpStatus。精确字段与错误码见 [rpc.md](../protocols/rpc.md#35-mcp)。
 
 - **主体**：`{ kind: "mcp", target: "<server>/<tool>" }`（target 用**服务器原始名**与**工具原始名**，不做规范化——规则匹配与确认框显示的都是用户配置里的名字）。
 - **求值**：与 shell 相同的字符串通配符匹配（permissions.md 5.1），`mcp github/*`、`mcp *` 等模式可用；预设中 `network / mcp` 列已就位——`read-only`/`default`/`auto-edit` 为 `ask`，`guarded`/`smart`/`bypass` 为 `allow`；无匹配落 `ask`。
