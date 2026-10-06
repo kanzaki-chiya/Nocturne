@@ -490,7 +490,13 @@ fn backend_open(
             "没有找到满足要求的 Node.js（需要 v24.14.0 或更高版本）",
         ));
     }
-    let node_path = probe.selected.map(|s| s.path).unwrap_or_default();
+    let selected = probe.selected;
+    let node_path = selected
+        .as_ref()
+        .map(|s| s.path.clone())
+        .unwrap_or_default();
+    // 后台日志里能看出 Node 的来源（随附 / env / PATH）与版本
+    let node_desc = selected.map(|s| s.describe());
 
     let script = node::backend_script(state.resource_dir());
     if !script.is_file() {
@@ -517,7 +523,7 @@ fn backend_open(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    state.open_in_page(generation, |id| {
+    state.open_in_page(generation, move |id| {
         let state_arc = Arc::clone(state);
         let backend = spawn_backend(
             id,
@@ -530,6 +536,10 @@ fn backend_open(
             },
         )
         .map_err(|e| CommandError::new("spawn_failed", format!("无法启动后台进程：{e}")))?;
+
+        if let Some(desc) = node_desc {
+            backend.push_stderr_note(format!("[nocturne-desktop] Node {desc}"));
+        }
 
         // Windows：放进 Job Object，外壳被强杀时后台一起结束。失败不致命，记 stderr。
         #[cfg(windows)]

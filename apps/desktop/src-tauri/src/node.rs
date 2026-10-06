@@ -48,6 +48,23 @@ pub struct SelectedNode {
     pub error: Option<String>,
 }
 
+impl SelectedNode {
+    /// 后台日志行里的来源描述，如 `bundled：C:\...\node.exe（v24.21.0）`。
+    /// 来源标签与序列化的 kebab-case 一致，便于和探测页对照。
+    pub fn describe(&self) -> String {
+        let source = match self.source {
+            NodeSource::Env => "env",
+            NodeSource::Bundled => "bundled",
+            NodeSource::Path => "path",
+        };
+        format!(
+            "{source}：{}（{}）",
+            self.path,
+            self.version.as_deref().unwrap_or("未知版本")
+        )
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeProbe {
@@ -73,7 +90,8 @@ fn node_exe_name() -> &'static str {
     }
 }
 
-/// 资源目录里预留的随附 Node 路径（本版不随附）。
+/// 资源目录里的随附 Node：发布构建由 scripts/fetch-node.mjs 放进
+/// resources/node/，版本固定在 scripts/node-version.json（ADR-0050）。
 pub fn bundled_node_path(resource_dir: &Path) -> PathBuf {
     resource_dir.join("node").join(node_exe_name())
 }
@@ -205,7 +223,7 @@ pub fn probe_node(resource_dir: &Path) -> NodeProbe {
         _ => steps.push(step(NodeSource::Env, StepStatus::Unset, None)),
     }
 
-    // ② 资源目录随附 Node（本版不随附）
+    // ② 资源目录随附 Node（安装包内置；开发构建没有时落到 PATH）
     let bundled = bundled_node_path(resource_dir);
     if stop {
         steps.push(step(NodeSource::Bundled, StepStatus::Skipped, None));
@@ -358,6 +376,24 @@ mod tests {
         assert!(!satisfies((24, 13, 9)));
         assert!(satisfies((25, 0, 0)));
         assert!(!satisfies((22, 11, 0)));
+    }
+
+    #[test]
+    fn describes_selected_source() {
+        let bundled = SelectedNode {
+            source: NodeSource::Bundled,
+            path: r"C:\app\node\node.exe".into(),
+            version: Some("v24.21.0".into()),
+            error: None,
+        };
+        assert_eq!(bundled.describe(), r"bundled：C:\app\node\node.exe（v24.21.0）");
+        let missing_version = SelectedNode {
+            source: NodeSource::Path,
+            path: "node".into(),
+            version: None,
+            error: None,
+        };
+        assert!(missing_version.describe().starts_with("path：node（未知版本"));
     }
 
     /// resource_dir() 经 canonicalize 返回 \\?\ verbatim 路径，

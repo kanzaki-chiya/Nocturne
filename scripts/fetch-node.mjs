@@ -44,10 +44,12 @@ function extract(zipFile, dest) {
   // 产物固定为 win-x64.zip，只在 Windows 构建机使用：直接走 Expand-Archive。
   // 其他平台若误调用，尝试系统 bsdtar（GNU tar 不支持 zip）。
   if (process.platform === "win32") {
+    // PowerShell 单引号字符串：内部单引号写两个
+    const ps = (s) => `'${s.replace(/'/g, "''")}'`;
     run("powershell", [
       "-NoProfile",
       "-Command",
-      `Expand-Archive -LiteralPath ${JSON.stringify(zipFile)} -DestinationPath ${JSON.stringify(dest)}`,
+      `Expand-Archive -LiteralPath ${ps(zipFile)} -DestinationPath ${ps(dest)}`,
     ]);
   } else {
     run("tar", ["-xf", zipFile, "-C", dest]);
