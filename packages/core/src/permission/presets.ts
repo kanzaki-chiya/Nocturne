@@ -21,6 +21,7 @@ export function isPermissionPresetName(name: string): name is PermissionPresetNa
 
 /** 预设构造上下文：生成具体路径模式所需的绝对路径（调用方传 realpath 后的值） */
 export interface PresetContext {
+  skillRoots?: readonly string[] | undefined;
   workspaceRoot: string;
   caseSensitive: boolean;
   /** 会话目录与当前会话 id：生成"本会话落盘目录可读"规则 */
@@ -133,6 +134,11 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
       ctx.caseSensitive,
     );
     rules.push({ kind: "read", pattern: `${dir}/**`, action: "allow", label: ATTACHMENTS_LABEL });
+  }
+
+  for (const root of ctx.skillRoots ?? []) {
+    const dir = normalizePathText(root, ctx.caseSensitive);
+    rules.push({ kind: "read", pattern: `${dir}/**`, action: "allow", label: "本会话技能目录" });
   }
 
   // 受保护路径与授权数据"至少 ask"：read-only 中 edit 已一律 deny，不再生成 ask 规则

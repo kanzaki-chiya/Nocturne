@@ -34,6 +34,7 @@ export const DEFAULT_TURN_CONFIG: TurnConfig = {
 export type IdFactory = (kind: "turn" | "message" | "call") => string;
 
 export interface TurnDeps {
+  skills?: { text: string; truncated: boolean } | undefined;
   compactionThreshold?: string | number | undefined;
   session: Session;
   model: ResolvedModel;

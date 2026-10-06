@@ -39,6 +39,7 @@ export interface EnvironmentInfo {
 }
 
 export interface BuildContextInput {
+  skills?: { text: string; truncated: boolean } | undefined;
   compactionThreshold?: string | number | undefined;
   /** 编排者提供本 Turn 已尝试级别；强制路径不受预防阈值限制。 */
   compactionState?:
@@ -114,7 +115,7 @@ export interface ContextHistoryBreakdown {
 
 /** ContextReport 中的一个部分（context.md 第 4 节"可解释"） */
 export interface ContextSection {
-  name: "system" | "tools" | "instructions" | "environment" | "todos" | "history";
+  name: "system" | "tools" | "instructions" | "skills" | "environment" | "todos" | "history";
   /** 来源说明（版本、文件路径、条目数） */
   source: string;
   chars: number;

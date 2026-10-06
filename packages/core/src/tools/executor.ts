@@ -374,6 +374,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           input,
           subjects: outcome.subjects,
           mutates: tool.traits.mutates,
+          pinResult: tool.traits.pinResult,
           permission: {
             action: decision.action,
             source: decision.source,

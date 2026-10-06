@@ -1,4 +1,5 @@
 export * from "./types.js";
+export { createSkillTool } from "./builtin/skill.js";
 export { createToolRegistry } from "./registry.js";
 export { createToolExecutor } from "./executor.js";
 export { createExecutionScope } from "./scope.js";

@@ -1,3 +1,4 @@
+import type { SkillOverview } from "../protocol/index.js";
 import type { SecurityReviewer } from "../permission/index.js";
 /**
  * SubagentLauncher 实现（subagent.md 第 3–5 节）。
@@ -16,6 +17,7 @@ import {
   createPolicyGate,
   createReadStateStore,
   createTaskTool,
+  createSkillTool,
   createToolExecutor,
   createToolRegistry,
   type ExecutionEnvironment,
@@ -79,6 +81,13 @@ export function createSubagentLimiter(max: number): SubagentLimiter {
 }
 
 export interface SubagentDeps {
+  skills?:
+    | (() => {
+        text: string;
+        truncated: boolean;
+        entries: readonly (SkillOverview & { body: string })[];
+      })
+    | undefined;
   checkpoint?: ExecutionEnvironment["checkpoint"];
   store: SessionStore;
   sessionsDir: string;
@@ -253,13 +262,38 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         // 显式 tools 白名单点名时也按不可用名处理；
         // ADR-0035 §5：编辑工具按子会话模型的 editTool 能力筛选
         const childEditTool = childModel.model.capabilities.editTool;
-        const pool: ToolDefinition[] = [...builtinTools(), ...deps.mcpTools()].filter(
+        const skillSnapshot = deps.skills?.();
+        const skillTools = skillSnapshot?.text
+          ? [
+              createSkillTool(
+                skillSnapshot.entries,
+                () =>
+                  child
+                    ?.state()
+                    .history.filter((h) => h.kind === "compaction" && h.compactKind === "summary")
+                    .length ?? 0,
+              ),
+            ]
+          : [];
+        const pool: ToolDefinition[] = [
+          ...builtinTools(),
+          ...deps.mcpTools(),
+          ...skillTools,
+        ].filter(
           (t) =>
             t.traits.needsUser !== true &&
             (t.traits.editTool === undefined || t.traits.editTool === childEditTool),
         );
         if (deps.depth + 1 < deps.limits.maxDepth) {
-          pool.push(createTaskTool(createSubagentLauncher({ ...deps, depth: deps.depth + 1 })));
+          pool.push(
+            createTaskTool(
+              createSubagentLauncher({
+                ...deps,
+                skills: skillSnapshot ? () => skillSnapshot : undefined,
+                depth: deps.depth + 1,
+              }),
+            ),
+          );
         }
         const names = new Set(pool.map((t) => t.name));
         let selected: ToolDefinition[];
@@ -380,6 +414,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
                 ? "你还没有提交结果。立即调用 finish 工具提交 result；不要输出其他内容。"
                 : "你还没有提交结果；请调用 finish 工具提交 result 后结束。";
           const turnDeps: TurnDeps = {
+            skills: skillSnapshot,
             compactionThreshold: deps.compactionThreshold?.(),
             session: child,
             model: childModel,

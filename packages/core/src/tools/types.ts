@@ -50,6 +50,8 @@ import type { AttachmentStore } from "./attachments.js";
 // ── 工具定义 ──────────────────────────────────────────────
 
 export interface ToolTraits {
+  /** 结果保留在 L1 修剪后的上下文中；L2 摘要仍可压缩。 */
+  pinResult?: boolean | undefined;
   /** 执行是否可能改变外部状态 */
   mutates: boolean;
   /** 能否与其他 concurrencySafe 调用并行执行 */

@@ -1,3 +1,4 @@
+import type { SkillSnapshot } from "./skills.js";
 /**
  * 派生视图（docs/protocols/view.md）：把事件流折叠成 SessionView 的纯函数
  * reducer，供 TUI 与后续客户端共享（ADR-0002 第 5 条）。
@@ -87,6 +88,7 @@ export interface SessionView {
 export type ViewEntry = UserEntry | AssistantEntry | ToolEntry | NoticeEntry;
 
 export interface UserEntry {
+  skill?: SkillSnapshot | undefined;
   descriptions?: AttachmentDescribedPayload[] | undefined;
   kind: "user";
   key: string;
@@ -349,6 +351,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         turnId: turnId ?? "",
         content: event.payload.content,
         ...(event.payload.fileRefs !== undefined ? { fileRefs: event.payload.fileRefs } : {}),
+        ...(event.payload.skill !== undefined ? { skill: event.payload.skill } : {}),
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
           : {}),

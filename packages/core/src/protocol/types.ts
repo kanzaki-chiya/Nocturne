@@ -1,3 +1,4 @@
+import type { SkillSnapshot } from "./skills.js";
 /**
  * 公共数据类型（docs/protocols/events.md 第 4 节）。
  * 只包含类型，不包含任何行为或 I/O。
@@ -411,6 +412,7 @@ export type HistoryEntry =
       /** 随用户消息附带的图片引用（ADR-0023）；旧日志无此字段 */
       attachments?: ImageAttachment[] | undefined;
       fileRefs?: FileRef[] | undefined;
+      skill?: SkillSnapshot | undefined;
     }
   | {
       kind: "assistant";
@@ -441,6 +443,7 @@ export type HistoryEntry =
        * L1 修剪后用作占位说明的一部分（context.md 6.5）
        */
       inputSummary?: string | undefined;
+      pinResult?: boolean | undefined;
       /** 工具结果附带的图片引用（ADR-0023）；旧日志无此字段 */
       attachments?: ImageAttachment[] | undefined;
     }

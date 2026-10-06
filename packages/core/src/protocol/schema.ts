@@ -162,6 +162,7 @@ const payloadSchemas = {
   }),
   "turn.started": z.object({ turnIndex: z.number().int() }),
   "message.user": z.object({
+    skill: z.object({ name: z.string(), body: z.string() }).optional(),
     messageId: z.string(),
     content: z.array(contentBlockSchema),
     attachments: z.array(imageAttachmentSchema).optional(),
@@ -180,6 +181,7 @@ const payloadSchemas = {
     finishReason: z.union([finishReasonSchema, z.literal("aborted")]),
   }),
   "tool.started": z.object({
+    pinResult: z.boolean().optional(),
     mutates: z.boolean().optional(),
     callId: z.string(),
     name: z.string(),

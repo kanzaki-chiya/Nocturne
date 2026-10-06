@@ -57,6 +57,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
   const unsettled = new Map<string, UnsettledCall>();
   // tool.started 的规范化输入 → 折叠成 tool 条目的 inputSummary
   const startedInputs = new Map<string, string | undefined>();
+  const pinnedResults = new Set<string>();
   const effective = new Set(effectiveEvents(events).map((e) => e.seq));
 
   for (const event of events) {
@@ -130,6 +131,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           messageId: p.messageId,
           content: p.content,
           ...(p.fileRefs !== undefined ? { fileRefs: p.fileRefs } : {}),
+          ...(p.skill !== undefined ? { skill: p.skill } : {}),
           // ADR-0023：旧日志无 attachments 字段——有值才带上，缺省不落进历史
           ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
         });
@@ -169,6 +171,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         break;
       }
       case "tool.started": {
+        if (event.payload.pinResult) pinnedResults.add(event.payload.callId);
         const existing = unsettled.get(event.payload.callId);
         if (existing !== undefined) existing.started = true;
         startedInputs.set(event.payload.callId, summarizeInput(event.payload.input));
@@ -186,10 +189,12 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           status: p.status,
           modelContent: p.modelContent,
           inputSummary: startedInputs.get(p.callId),
+          ...(pinnedResults.has(p.callId) ? { pinResult: true } : {}),
           ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
         });
         unsettled.delete(p.callId);
         startedInputs.delete(p.callId);
+        pinnedResults.delete(p.callId);
         break;
       }
       case "context.compacted": {

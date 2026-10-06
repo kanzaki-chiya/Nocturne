@@ -1,3 +1,4 @@
+import type { SkillSnapshot } from "../protocol/index.js";
 /**
  * runTurn（agent-loop.md 第 2 节）。
  * 核心不变量：
@@ -82,6 +83,7 @@ export async function runTurn(
   content: ContentBlock[],
   attachments?: ImageAttachment[],
   fileRefs?: FileRef[],
+  skill?: SkillSnapshot,
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -270,6 +272,7 @@ export async function runTurn(
         content,
         ...(attachments?.length ? { attachments } : {}),
         ...(fileRefs?.length ? { fileRefs } : {}),
+        ...(skill ? { skill } : {}),
       },
       { turnId },
     );
@@ -329,6 +332,7 @@ export async function runTurn(
         attachmentData = data;
       }
       const built = buildContext({
+        skills: deps.skills,
         history: state.history,
         todos: state.todos,
         model: deps.model.model,

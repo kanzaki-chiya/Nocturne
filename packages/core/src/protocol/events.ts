@@ -1,3 +1,4 @@
+import type { SkillSnapshot } from "./skills.js";
 /**
  * 事件信封与事件类型（docs/protocols/events.md 第 2、3 节）。
  * 持久化事件构成会话日志的唯一事实来源；临时事件只发布不写日志。
@@ -53,6 +54,7 @@ export interface TurnStartedPayload {
 }
 
 export interface MessageUserPayload {
+  skill?: SkillSnapshot | undefined;
   messageId: string;
   content: ContentBlock[];
   /** 随消息附带的图片引用（ADR-0023，粘贴/拖入）；无附件时缺省 */
@@ -90,6 +92,7 @@ export interface MessageAssistantPayload {
 }
 
 export interface ToolStartedPayload {
+  pinResult?: boolean | undefined;
   mutates?: boolean | undefined;
   callId: string;
   name: string;

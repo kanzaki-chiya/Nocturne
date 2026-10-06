@@ -139,6 +139,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       sessionsDir: options.presetContext?.sessionsDir,
       sessionId: options.presetContext?.sessionId,
       nocturneHome: options.presetContext?.nocturneHome,
+      skillRoots: options.presetContext?.skillRoots,
     });
   const preset = presetRulesList.map((rule, i) => ({
     rule,

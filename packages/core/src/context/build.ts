@@ -37,7 +37,7 @@ const MAX_OUTPUT_FALLBACK = 8_192;
 export const SUMMARY_MAX_OUTPUT_TOKENS = 4_000;
 
 const SUMMARY_SYSTEM = `你是 Nocturne 会话的压缩器。把给定的会话转录压缩为一段结构化中文摘要，供后续模型继续任务时阅读。
-摘要必须包含：用户的总体目标、已完成的工作及结论、关键文件与工具调用结果、未决事项与下一步建议。
+摘要必须包含：用户的总体目标、已完成的工作及结论、关键文件与工具调用结果、未决事项与下一步建议，以及已经加载的技能名（需要正文时可重新加载）。
 只输出摘要正文，不要寒暄、不要复述指令。`;
 
 function messageTokens(message: ModelMessage): number {
@@ -439,7 +439,7 @@ export function imageRefsInCap(
   const refs: ImageAttachment[] = [];
   for (const entry of history) {
     if (entry.seq <= summaryThrough) continue;
-    if (entry.kind === "tool" && entry.seq <= pruneThrough) continue;
+    if (entry.kind === "tool" && entry.seq <= pruneThrough && !entry.pinResult) continue;
     if (entry.kind === "user" || entry.kind === "tool") {
       if (entry.attachments !== undefined) refs.push(...entry.attachments);
     }
@@ -651,7 +651,7 @@ function historyToMessages(
         break;
       }
       case "tool": {
-        const pruned = entry.seq <= pruneThrough;
+        const pruned = entry.seq <= pruneThrough && !entry.pinResult;
         // L1 修剪覆盖的工具结果：占位说明原样，附件随正文省略（不加图片占位）
         let content = pruned ? prunedPlaceholder(entry) : entry.modelContent;
         const atts = pruned
@@ -942,6 +942,16 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   }
 
   // 4. 环境信息
+  if (input.skills?.text) {
+    system.push({ text: input.skills.text });
+    sections.push({
+      name: "skills",
+      source: "会话技能目录",
+      chars: input.skills.text.length,
+      estimatedTokens: estimateTokens(input.skills.text),
+      truncated: input.skills.truncated,
+    });
+  }
   const envText = environmentText(input);
   system.push({ text: envText });
   sections.push({

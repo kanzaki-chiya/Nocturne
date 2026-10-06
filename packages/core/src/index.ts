@@ -41,7 +41,14 @@ import type {
   JevReviewerConfig,
   ModelRole,
 } from "./config/index.js";
-import { MODEL_ROLES } from "./config/index.js";
+import { MODEL_ROLES, discoverSkills } from "./config/index.js";
+import {
+  skillCatalog,
+  renderSkill,
+  type SkillsDescription,
+  type SkillInvocation,
+  type SkillSnapshot,
+} from "./protocol/index.js";
 import {
   defaultJevReviewer,
   fetchJevModels,
@@ -135,6 +142,7 @@ import {
   createQuestionBroker,
   createReadStateStore,
   createTaskTool,
+  createSkillTool,
   createToolExecutor,
   createToolRegistry,
   type ExecutionEnvironment,
@@ -265,6 +273,7 @@ export interface CreateSessionOptions {
 }
 
 export interface SubmitInput {
+  skill?: SkillInvocation | undefined;
   text?: string | undefined;
   content?: ContentBlock[] | undefined;
   /** 图片字节由 Core 落盘，事件只保存引用 */
@@ -280,6 +289,7 @@ export interface ReadAttachmentResult {
 }
 
 export interface RuntimeSession {
+  describeSkills(): SkillsDescription;
   rewindTargets(): Promise<RewindTarget[]>;
   rewind(targetSeq: number, mode: RewindMode): Promise<SessionRewoundPayload["files"]>;
   readonly id: string;
@@ -403,6 +413,8 @@ export interface ResumeSessionOptions {
 }
 
 export interface Runtime {
+  describeSkills(input?: { workspaceRoot?: string | undefined }): Promise<SkillsDescription>;
+  setSkillEnabled(input: { name: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
   describeMcpServers(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<{ servers: McpServerOverview[]; warnings: string[] }>;
@@ -671,6 +683,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
    */
   const markProvidersDirty = new Set<() => void>();
   const reconcileMcp = new Set<() => Promise<void>>();
+  const refreshSkills = new Set<(rescan: boolean) => Promise<void>>();
+  const sessionSkillModels = new Map<
+    string,
+    { workspaceRoot: string; contextWindow: () => number | undefined }
+  >();
   const openForkers = new Map<string, (targetSeq?: number) => Promise<string>>();
   let settingsPending = Promise.resolve();
 
@@ -699,6 +716,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       warnings: resolved?.warnings.length ?? 0,
     });
     const warnings: string[] = [...(resolved?.warnings ?? [])];
+    let skillDiscovery = await discoverSkills(platform, {
+      nocturneHome,
+      workspaceRoot: meta.workspaceRoot,
+      cwd: meta.cwd,
+      config: config?.skillConfig(),
+    });
+    for (const warning of skillDiscovery.warnings)
+      warnings.push(`${warning.path}:${warning.line}：${warning.message}`);
+    let catalog = skillCatalog(skillDiscovery.skills, config?.disabledSkills() ?? [], undefined);
     if (ws?.projectConfig.present === true && !ws.projectConfig.trusted) {
       warnings.push(
         `检测到项目配置 ${ws.projectConfig.path ?? ""}，但该工作区未信任——其中仅收紧方向的规则生效；执行 nctrn trust 信任该工作区`,
@@ -848,6 +874,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         caseSensitive: platform.caseSensitivePaths,
         preset: isPermissionPresetName(presetName) ? presetName : "default",
         presetContext: {
+          skillRoots: skillDiscovery.skills.map((s) => s.realPath),
           sessionsDir,
           sessionId: policySessionId,
           nocturneHome,
@@ -945,7 +972,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         .history.flatMap((entry) => {
           if (entry.kind !== "user") return [];
           // @ 引用的文件/目录快照附在消息尾部；审查只读取用户亲自输入的部分。
-          const snapshots = entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0;
+          const snapshots =
+            (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) +
+            (entry.skill ? 1 : 0);
           return [
             entry.content
               .slice(0, entry.content.length - snapshots)
@@ -996,6 +1025,56 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     // 先暂存，在 submit() 的 Turn 边界经 applyPendingTools() 应用。
     const tools: ToolRegistry = createToolRegistry();
     for (const tool of builtinTools()) tools.register(tool);
+    const loadedSkills = new Map<string, string>();
+    const installSkills = () => {
+      catalog = skillCatalog(
+        skillDiscovery.skills,
+        config?.disabledSkills() ?? [],
+        model.model.contextWindow,
+        "session-model",
+      );
+      tools.unregister("skill");
+      if (catalog.text) {
+        const enabled = skillDiscovery.skills.map((s, i) => ({ ...s, ...catalog.skills[i] }));
+        tools.register(
+          createSkillTool(
+            enabled,
+            () =>
+              session
+                .state()
+                .history.filter((h) => h.kind === "compaction" && h.compactKind === "summary")
+                .length,
+            loadedSkills,
+          ),
+        );
+      }
+    };
+    let pendingSkillRescan = false;
+    let pendingSkillEnable = false;
+    const applySkills = async () => {
+      if (!pendingSkillRescan && !pendingSkillEnable) return;
+      if (pendingSkillRescan)
+        skillDiscovery = await discoverSkills(platform, {
+          nocturneHome,
+          workspaceRoot: meta.workspaceRoot,
+          cwd: meta.cwd,
+          config: config?.skillConfig(),
+        });
+      pendingSkillRescan = false;
+      pendingSkillEnable = false;
+      installSkills();
+      policy = buildPolicy(session.state().config.permissionPreset);
+    };
+    const refreshSessionSkills = async (rescan: boolean) => {
+      pendingSkillRescan ||= rescan;
+      pendingSkillEnable = true;
+      if (!busy() && compactController === undefined) await applySkills();
+    };
+    refreshSkills.add(refreshSessionSkills);
+    sessionSkillModels.set(session.id, {
+      workspaceRoot: meta.workspaceRoot,
+      contextWindow: () => model.model.contextWindow,
+    });
     const executor = createToolExecutor(tools);
 
     // MCP：RuntimeOptions.mcpServers（注入）∪ 配置层 mcpServers（项目层仅信任时并入）
@@ -1183,6 +1262,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           message: `服务商 "${inUse.id}" 已从配置移除；本会话继续使用原实例直至结束`,
         });
       }
+      try {
+        model = resolveSessionModel(session.state().config.model);
+        installSkills();
+      } catch {
+        /* 保留当前可用实例，模型错误仍由下一轮发送路径报告。 */
+      }
     };
     /**
      * 档位就近降档提示（ADR-0018 第 4 节）：会话记录的档位在目标模型
@@ -1262,6 +1347,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       providersDirty = true;
     };
     markProvidersDirty.add(markDirty);
+    installSkills();
 
     // 子代理（subagent.md 第 3 节）：launcher 捕获本会话装配上下文；
     // task 与内置工具同一注册表——Agent Loop 无工具名分支
@@ -1304,6 +1390,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           buildPolicy(session.state().config.permissionPreset, childSessionId),
         makeHookRunner,
         mcpTools: () => mcpSession?.tools() ?? [],
+        skills: () => ({
+          ...catalog,
+          entries: skillDiscovery.skills.map((s, i) => ({ ...s, ...catalog.skills[i] })),
+        }),
         shellEnvStrip,
         // 子会话与父会话共用同一 shell 解析（ADR-0022）：切换即时生效；
         // 子会话环境信息的 Shell 行在派生时重新生成
@@ -1438,6 +1528,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     });
     const runtimeSession: RuntimeSession = {
+      describeSkills: () => ({
+        skills: catalog.skills,
+        budget: catalog.budget,
+        warnings: skillDiscovery.warnings,
+        scannedDirs: skillDiscovery.scannedDirs,
+        homeDir: skillDiscovery.homeDir,
+      }),
       id: session.id,
       durableEvents: () => session.durableEvents(),
       async readAttachment(file) {
@@ -1533,6 +1630,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               ? []
               : await restoreCheckpointFiles(session, platform, sessionsDir, targetSeq);
           await session.emit("session.rewound", { targetSeq, mode, files });
+          if (mode !== "files") loadedSkills.clear();
           await session.flush();
           execEnv.readState = createReadStateStore(paths);
           fileIndexPromise = undefined;
@@ -1601,7 +1699,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (busy() || compactController !== undefined) {
           throw new RuntimeCommandError("session_busy", "会话正忙（Turn 或压缩进行中）");
         }
-        const content: ContentBlock[] = input.content ?? [{ type: "text", text: input.text ?? "" }];
+        const content: ContentBlock[] = [
+          ...(input.content ?? [{ type: "text", text: input.text ?? "" }]),
+        ];
+        if (
+          input.skill &&
+          (typeof input.skill.name !== "string" ||
+            !input.skill.name.trim() ||
+            (input.skill.arguments !== undefined && typeof input.skill.arguments !== "string"))
+        )
+          throw new RuntimeCommandError(
+            "invalid_command",
+            "技能 name 必须是非空字符串，arguments 必须是字符串",
+          );
         // Turn 边界：应用暂存的 MCP 工具集变化（list_changed / 重连刷新）
         if (mcpSession !== undefined) {
           const diff = mcpSession.applyPendingTools();
@@ -1628,6 +1738,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         try {
           await applyMcp();
           await rebuildProviders();
+          await applySkills();
           // ADR-0026 §5：刷新后条目/模型可能变化——原位重解析拿到最新的
           // 协议与不可用标记（失败沿用旧解析，同一错误仍由 stream 路径报告）
           try {
@@ -1640,6 +1751,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             throw new RuntimeCommandError("invalid_model", model.model.unavailable.reason);
           }
           const deps: TurnDeps = {
+            skills: catalog,
             visionModel: () =>
               resolveModelRole(
                 sessionRegistry,
@@ -1696,11 +1808,47 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           for (const message of refs.warnings) {
             session.emitEphemeral("runtime.warning", { code: "file_reference", message });
           }
+          let skillSnapshot: SkillSnapshot | undefined;
+          const invocation = input.skill;
+          if (invocation) {
+            const overview = catalog.skills.find(
+              (s) => s.name.toLowerCase() === invocation.name.toLowerCase() && !s.shadowedBy,
+            );
+            const source = skillDiscovery.skills.find((s) => s.entryPath === overview?.entryPath);
+            if (
+              !overview ||
+              !source ||
+              !overview.enabled ||
+              overview.commandConflict ||
+              overview.fields["user-invocable"] === false
+            )
+              throw new RuntimeCommandError(
+                "invalid_command",
+                `技能 ${invocation.name} 不能由用户调用`,
+              );
+            const body = renderSkill(
+              source.body,
+              overview,
+              invocation,
+              meta.workspaceRoot,
+              session.id,
+            );
+            skillSnapshot = { name: overview.name, body };
+            const escaped = overview.name
+              .replace(/&/g, "&amp;")
+              .replace(/"/g, "&quot;")
+              .replace(/</g, "&lt;");
+            refs.content.push({
+              type: "text",
+              text: `<skill name="${escaped}">\n${body}\n</skill>`,
+            });
+          }
           const reason = await runTurn(
             deps,
             refs.content,
             [...attachments, ...refs.attachments],
             refs.fileRefs,
+            skillSnapshot,
           );
           if (reason === "failed") {
             throw new RuntimeCommandError("session_failed", "会话持久化失败");
@@ -1708,6 +1856,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           return reason;
         } finally {
           if (controller === ac) controller = undefined;
+          await applySkills().catch((error: unknown) =>
+            session.emitEphemeral("runtime.warning", {
+              code: "skills_reload_failed",
+              message: `技能目录更新失败：${error instanceof Error ? error.message : String(error)}`,
+            }),
+          );
           await applyMcp().catch(() =>
             session.emitEphemeral("runtime.warning", {
               code: "mcp_server_failed",
@@ -1755,6 +1909,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         await session.emit("session.config_changed", { model: ref });
         model = resolved;
+        installSkills();
         warnIfCapabilitiesDefaulted(resolved.model);
         warnIfEffortClamped(resolved.model);
         // recent-models.json（provider-setup.md 第 6 节）：写入失败不阻塞切换
@@ -1929,6 +2084,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               attachmentData.set(ref.sha256, Buffer.from(bytes).toString("base64"));
           }
           const plan = buildContext({
+            skills: catalog,
             history,
             todos: session.state().todos,
             model: model.model,
@@ -1974,6 +2130,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           );
         } finally {
           compactController = undefined;
+          await applySkills().catch((error: unknown) =>
+            session.emitEphemeral("runtime.warning", {
+              code: "skills_reload_failed",
+              message: `技能目录更新失败：${error instanceof Error ? error.message : String(error)}`,
+            }),
+          );
           session.emitEphemeral("runtime.status", { status: "idle" });
           compactSettled = undefined;
           settleCompact();
@@ -1984,6 +2146,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       describeContext() {
         const state = session.state();
         return buildContext({
+          skills: catalog,
           compactionThreshold: config?.resolvedSettings(state.meta.workspaceRoot)
             .compactionThreshold,
           history: state.history,
@@ -1999,6 +2162,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return mcpSession?.status() ?? [];
       },
       async close() {
+        refreshSkills.delete(refreshSessionSkills);
+        sessionSkillModels.delete(session.id);
         closing = true;
         unsubscribeTitle();
         titleController.abort();
@@ -2043,6 +2208,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     registry = buildRegistry(config.base.providers);
     for (const mark of markProvidersDirty) mark();
     await Promise.all([...reconcileMcp].map((refresh) => refresh()));
+    await Promise.all([...refreshSkills].map((refresh) => refresh(true)));
   }
   function mcpInput<T>(schema: z.ZodType<T>, input: unknown): T {
     const parsed = schema.safeParse(input);
@@ -2057,6 +2223,48 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       requireMcpConfig().describeMcpServers(
         mcpInput(z.object({ workspaceRoot: workspaceField }), input),
       ),
+    async describeSkills(input = {}) {
+      const parsed = z.object({ workspaceRoot: z.string().min(1).optional() }).parse(input);
+      const root = parsed.workspaceRoot
+        ? await platform.resolveReal(parsed.workspaceRoot)
+        : workspaceRoot;
+      const current = [...sessionSkillModels.values()].find((s) =>
+        paths.equals(s.workspaceRoot, root),
+      );
+      const window =
+        current?.contextWindow() ??
+        (() => {
+          try {
+            const ref = config?.base.model;
+            return ref ? registry.resolve(parseModelRef(ref)).model.contextWindow : undefined;
+          } catch {
+            return undefined;
+          }
+        })();
+      const discovery = await discoverSkills(platform, {
+        nocturneHome,
+        workspaceRoot: root,
+        cwd: root,
+        config: config?.skillConfig(),
+      });
+      const result = skillCatalog(
+        discovery.skills,
+        config?.disabledSkills() ?? [],
+        window,
+        current ? "session-model" : "default-model",
+      );
+      return { ...discovery, skills: result.skills, budget: result.budget };
+    },
+    async setSkillEnabled(input) {
+      const parsed = z
+        .object({ name: z.string().trim().min(1), enabled: z.boolean() })
+        .strict()
+        .parse(input);
+      if (!config) throw new RuntimeCommandError("invalid_command", "技能开关需要配置存储");
+      await config.setSkillEnabled(parsed.name, parsed.enabled);
+      await Promise.all([...refreshSkills].map((refresh) => refresh(false)));
+      return { affectedSessions: refreshSkills.size };
+    },
     async saveMcpServer(input) {
       const parsed = mcpInput(
         z.object({
@@ -2370,6 +2578,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       registry = buildRegistry(newConfig.base.providers);
       for (const mark of markProvidersDirty) mark();
       await Promise.all([...reconcileMcp].map((refresh) => refresh()));
+      await Promise.all([...refreshSkills].map((refresh) => refresh(true)));
     },
     defaultModel() {
       const model = config?.resolvedSettings(workspaceRoot).model;
