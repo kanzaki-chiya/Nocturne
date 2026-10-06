@@ -54,6 +54,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0046](ADR-0046-desktop-tauri.md) | 桌面端第一版：Tauri 外壳逐行转发、一个项目一个 nctrn 后台、要求自装 Node、React 前端经 RPC 驱动 | 已接受 |
 | [ADR-0047](ADR-0047-mcp-settings.md) | MCP 设置管理：程序维护的 mcp.json、凭据库引用、连接探测与会话热更新 | 已接受 |
 | [ADR-0048](ADR-0048-skills.md) | 技能：兼容 .claude/skills 与 .agents/skills、模型按需加载、设置页 | 已接受 |
+| [ADR-0050](ADR-0050-distribution.md) | 分发：npm 单文件包、桌面端随附 Node 与自动更新、草稿发布流水线 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
