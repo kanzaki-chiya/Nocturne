@@ -24,12 +24,17 @@
     "baseUrl": ".",
     "paths": {
       "@nocturne/core": ["./packages/core/src/index.ts"],
+      "@nocturne/core/protocol": ["./packages/core/src/protocol/index.ts"],
       "@nocturne/core/*": ["./packages/core/src/*"],
       "@nocturne/mcp": ["./packages/mcp/src/index.ts"],
       "@nocturne/rpc/server": ["./packages/rpc/src/server/index.ts"],
       "@nocturne/rpc/client": ["./packages/rpc/src/client/index.ts"],
       "@nocturne/tui": ["./apps/tui/src/index.ts"],
-      "@nocturne/tui/slash-catalog": ["./apps/tui/src/slash-catalog.ts"]
+      "@nocturne/tui/provider-login": ["./apps/tui/src/provider-login.ts"],
+      "@nocturne/tui/provider-prompts": ["./apps/tui/src/provider-prompts.ts"],
+      "@nocturne/tui/provider-setup-flow": ["./apps/tui/src/provider-setup-flow.ts"],
+      "@nocturne/tui/slash-catalog": ["./apps/tui/src/slash-catalog.ts"],
+      "@nocturne/tui/text-format": ["./apps/tui/src/text-format.ts"]
     }
   }
 }
