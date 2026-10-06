@@ -4,6 +4,9 @@
 .skills-page .cols3 {
   grid-template-columns: 330px minmax(0, 1fr);
 }
+.skills-page .pane .t1 {
+  flex-wrap: wrap;
+}
 .skill-budget {
   display: flex;
   align-items: center;
@@ -149,6 +152,30 @@
 }
 .skill-truncated {
   color: var(--a-faint);
+}
+.skills-page .chips {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.skills-page .chips span {
+  font: 11.5px/20px var(--mono);
+  padding: 0 7px;
+  border-radius: 5px;
+  background: var(--a-raised);
+  color: var(--a-secondary);
+  border: 1px solid var(--a-border);
+}
+.skills-page .tail {
+  margin: 0;
+  border: 1px solid var(--a-border);
+  border-radius: 8px;
+  background: var(--a-side);
+  padding: 8px 12px;
+  font: 11.5px/1.65 var(--mono);
+  color: var(--a-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .skills-page .chips .skill-unknown {
   border-style: dashed;
