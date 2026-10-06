@@ -130,7 +130,8 @@ async function grepInternal(
     if (includeRe !== undefined && !includeRe.test(file.rel)) continue;
     if (file.size > MAX_FILE_BYTES) continue;
     const text = await ctx.fs.readTextFile(file.path).catch(() => undefined);
-    if (text === undefined || text.includes("")) continue;
+    // 含 NUL 视为二进制文件，跳过（与 rg 默认行为一致）
+    if (text === undefined || text.includes("\0")) continue;
     const lines = text.split("\n");
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i] ?? "";

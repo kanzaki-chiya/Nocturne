@@ -573,6 +573,29 @@ describe("grep / glob 边界与行为", () => {
     expect(r.result.modelContent).toContain("a.ts:1");
   });
 
+  it("rg 不可用时内部 walker 兜底：命中文本文件，跳过含 NUL 的二进制文件", async () => {
+    const ws = tmpWorkspace();
+    await writeWs(ws, "src/a.ts", "const token = 1;\n");
+    await writeWs(ws, "src/bin.dat", "token\0binary\n");
+    const h = await makeHarness(ws);
+    const scope: ExecutionScope = {
+      ...h.scope,
+      platform: {
+        ...platform,
+        process: {
+          ...platform.process,
+          spawn: () => {
+            throw new Error("rg not found");
+          },
+        },
+      },
+    };
+    const r = await h.executor.execute(call("grep", { pattern: "token" }), scope);
+    expect(r.status).toBe("ok");
+    expect(r.result.modelContent).toContain("a.ts:1");
+    expect(r.result.modelContent).not.toContain("bin.dat");
+  });
+
   it("grep 结果不包含 junction 链接到工作区外的内容", async () => {
     const ws = tmpWorkspace();
     const outside = tmpWorkspace();
