@@ -306,9 +306,11 @@ ADR-0036 第一轮：子会话沿用父会话的审查器实例与最近用户�
 
 每次调用新进程，依次 `initialize`、`session/new`（工作区根）、可选 `session/set_mode`、`session/prompt`，完成后清理整个进程树；中断先 `session/cancel`，短宽限后清理。需要认证时返回 `external_agent_auth_required`，由用户去相应命令行工具登录。外部调用与内置子代理共用 Runtime 级并发槽，不常驻、不复用会话。
 
+超时统一由 `task` 执行器控制（默认 600_000ms，超时触发 `ctx.signal`）；connector 不另设隐式默认超时。只有 `request.timeoutMs` 显式传入时，connector 才设置对应计时器。
+
 进程退出通过 `PipeProcess.exited()` 提前检测，异常时 `detachOutput()` 关闭本地输出，避免后代继承管道拖住调用。Windows 清树沿 MCP 的 `taskkill /T /F`，覆盖根进程仍存活时的正常关闭与取消；根已崩溃形成的孤儿后代是该机制的限制，见 [ADR 修订](../decisions/ADR-0049-external-agent-subagent.md#修订)。POSIX 清理独立进程组。
 
-外部过程不创建 Nocturne 子会话或事件类型。只转发带配置名称前缀的单行工具进度，不转发回复片段；最终回复作为 `modelContent`，沿现有预算截断与落盘。`output` 为 `{ agent, agentVersion?, transcriptPath, stopReason, permissionDecisions: { allowed, denied } }`，不填 `usage`。原始 `session/update` 与权限判定（主体、结果、来源）逐行写入父附件目录的 `external/<callId>.jsonl`；写入失败仅诊断，不影响结果。
+外部过程不创建 Nocturne 子会话或事件类型。只转发带配置名称前缀的单行工具进度，不转发回复片段；最终回复作为 `modelContent`，沿现有预算截断与落盘。`output` 为 `{ agent, agentVersion?, transcriptPath, transcriptError?: true, stopReason, permissionDecisions: { allowed, denied } }`，不填 `usage`。原始 `session/update` 与权限判定（主体、结果、来源）逐行写入父附件目录的 `external/<callId>.jsonl`；初始化或追加写入失败只记录一次 `external_agent.transcript_failed` 诊断，设置 `output.transcriptError: true`，停止后续写入，调用与权限判定继续正常进行。此时 `transcriptPath` 可能指向缺失或不完整的审计文件。
 
 **保证边界**：只拦截外部 agent 主动请求的操作，应配置其逐项询问模式；费用与额度计在对方账号上；检查点和回退不追踪外部 agent 改动的文件；外部 agent 看不到 Nocturne 的 `task`，不能嵌套。配置与默认禁用的 omp/Codex 预设见 [config.md](config.md#外部-agent-配置)。
 

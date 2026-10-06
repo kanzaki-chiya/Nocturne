@@ -53,6 +53,7 @@
 | `mcp.event` | mcp | server、state、toolCount、error |
 | `mcp.call` | mcp | server、tool、耗时、isError、结果大小 |
 | `subagent.launch` / `subagent.attempt` / `subagent.done` | agent（subagent） | Phase 6：子 sessionId、`parentSessionId`/`parentCallId`、preset/tools、depth、turnIndex、status、usage、耗时（[subagent.md](subagent.md) 第 13 节） |
+| `external_agent.transcript_failed` | acp | 外部审计文件初始化或追加失败；每次调用最多一次。调用继续，结果携带 `transcriptError: true`，详细语义见 [subagent.md 第 17 节](subagent.md#17-外部-agentacp) |
 
 子会话内的记录（provider.*、tool.*、hook.* 等）照常携带它自己的 `sessionId`——按 `sessionId` 过滤即得子会话视角，按 `parentSessionId`/`parentCallId` 关联到父调用。
 

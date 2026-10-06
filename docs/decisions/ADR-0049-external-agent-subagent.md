@@ -120,3 +120,8 @@ Gemini CLI、Qwen Code、Google Antigravity 等命令行工具自带 ACP（Agent
 - `subagent.enabled: false` 只关闭内置子代理。存在已启用的外部 connector 时仍注册 `task`，此时 `agent` 必填；两类执行独立启用但共用运行级限流。嵌套子会话不注入外部 connector。
 - SDK 1.7.0 的 `initialize.authMethods` 是可用登录方式列表，不是当前未认证状态；不能仅因该列表非空拒绝已登录 agent。协议返回 `AUTH_REQUIRED`（`-32000`）时才映射为 `external_agent_auth_required`，无论发生在初始化、新建会话还是 prompt。
 - 管道进程增加 `exited()` 与 `detachOutput()`：协议调用可在进程退出时及时失败，同时保留原 `wait()` 等待管道关闭的语义，避免 MCP 丢失尾部输出。Windows 沿 MCP 的 `taskkill /T /F` 清理仍存活根进程的整棵树；若根进程先崩溃，已成为孤儿的 Windows 后代无法由该方式定位，调用仍有界结束，但不承诺清理此类孤儿。取消宽限到期时根进程仍存活的树清理纳入离线验收；不为首版引入新的原生 Job Object 依赖。
+
+### 2026-10-07：统一超时与审计写入降级
+
+- connector 不设置隐式默认超时，默认时限由 `task` 执行器及 `ctx.signal` 管理；仅在 `request.timeoutMs` 显式传入时设置本地计时器，避免外部委派被较短的内部默认值提前中断。
+- transcript 的目录创建、文件初始化或追加失败均不影响协议调用：只记录一次 `external_agent.transcript_failed`，停止后续写入，`output` 增加可选的 `transcriptError: true`。该标记表示审计文件可能缺失或不完整，不改变任务成功与否。
