@@ -126,3 +126,34 @@ Phase 2 的 CLI 冒烟（`apps/cli`）：在临时目录生成一个含失败测
 
 - 文档、示例、测试数据、日志、提交信息中不得出现真实凭据、个人路径或未授权内容；示例使用占位值。
 - 凭据只通过环境变量或用户级凭据文件读取，不写入会话日志与事件。
+
+## 8. 发布
+
+> 决策见 [ADR-0050](../decisions/ADR-0050-distribution.md)。npm 包名 `nctrn`；桌面端 Windows x64 安装包内随附官方 Node.js 并支持自动更新。
+
+### 8.1 常规发布顺序
+
+1. **版本号**：`node scripts/release-version.mjs <version>` 一次改齐所有 `package.json`、`tauri.conf.json`、`Cargo.toml`、`Cargo.lock` 与 npm 模板；`--check <version>` 只校验不写（流水线用它核对标签）。
+2. **CHANGELOG.md**：为 `<version>` 补一节（`## <version>` 标题格式），[release-notes.mjs](../../scripts/release-notes.mjs) 提取该节作为 Release 说明与 `latest.json` 的 `notes`；找不到对应小节会让发布构建失败。
+3. **打标签**：审阅变更后 `git tag v<version>` 并推送标签。
+4. **流水线**：`.github/workflows/release.yml` 在 windows-latest 上跑完整检查（typecheck / lint / format / depcheck / build / test）、版本一致性校验、`pnpm release:build`（带签名环境变量）、tgz 安装冒烟，然后 `gh release create --draft` 上传 `setup.exe`、`.sig`、`latest.json`、`nctrn-<version>.tgz`；ubuntu-latest 与 macos-latest 仅对 tgz 做安装冒烟，结果追加进草稿说明。
+5. **审草稿**：核对产物、说明与冒烟结果，确认无误后发布 Release（草稿转正式）。
+6. **npm 发布**：`.github/workflows/publish-npm.yml`（workflow_dispatch，输入版本号）从已发布的 Release 下载 tgz 后 `npm publish`，走 npm 受信发布（OIDC）；预发布号挂 `next` 标签，不动 `latest`。
+
+### 8.2 本地演练
+
+`pnpm release:build`（[release-build.mjs](../../scripts/release-build.mjs)）与 CI 调用同一个入口，产物统一收集到 `release/<version>/`（已被 `.gitignore`）。本机演练时用临时测试密钥签名，并给 `release-build.mjs --config <覆盖.json>` 只覆盖 `plugins.updater.pubkey`，不得把测试公钥写进仓库配置。
+
+```bash
+# 测试密钥放 %TEMP%（示例），用完删除
+pnpm --dir apps/desktop exec tauri signer generate --ci -p <临时密码> -w <临时目录>/test.key
+TAURI_SIGNING_PRIVATE_KEY=<临时目录>/test.key \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD=<临时密码> \
+node scripts/release-build.mjs --config <临时目录>/config-override.json
+node scripts/smoke-nctrn.mjs release/<version>/nctrn-<version>.tgz   # tgz 安装冒烟
+```
+
+### 8.3 一次性配置（维护者）
+
+- **更新签名密钥**：正式密钥已由维护者生成，公钥固定在 `apps/desktop/src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`。私钥留在维护者本机，**必须离线备份**——丢失后已发布版本将无法升级到新签名。仓库 Actions 需要配置 secrets：`TAURI_SIGNING_PRIVATE_KEY`（私钥内容）与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（密码）。私钥与密码不进仓库、不进文档。
+- **npm 首次发布**：受信发布（trusted publishing）要求包已存在并完成绑定。首个 `nctrn` 版本由维护者本机执行 `npm publish packaging` 产物手动发布，随后在 npmjs.com 为包绑定本仓库的 GitHub Actions 受信发布（workflow `publish-npm.yml` + 指定 environment 可选）。绑定后 CI 发布不再需要 `NPM_TOKEN`。

@@ -6,6 +6,27 @@ Nocturne 是在代码仓库中工作的命令行编程助手。运行 `nctrn` �
 
 兼容已安装在 `.agents/skills`、`.claude/skills` 和 Nocturne 技能目录里的 Agent Skills；可用 `/技能名 参数` 调用，并在桌面端「设置 › 技能」查看来源与启停。
 
+### npm（命令行）
+
+需要 Node.js 24.14 或更新版本。全局安装 `nctrn` 命令：
+
+```sh
+npm install -g nctrn
+nctrn --version
+```
+
+升级：`npm install -g nctrn@latest`；卸载：`npm uninstall -g nctrn`。
+
+### 桌面版（Windows）
+
+在桌面端「设置 › MCP」添加服务器，支持本地命令和远程 HTTP。
+
+桌面版以 Windows x64 安装包分发（NSIS，按用户安装到 `%LOCALAPPDATA%\Nocturne`，不需要管理员权限）。安装包内随附官方 Node.js 运行时，无需另行安装；需要覆盖时用 `NOCTURNE_NODE` 环境变量指定其他 Node。桌面端会自动检查更新（每 24 小时最多一次，可在「设置 › 常规」关闭），发现新版本时在窗口底部提示，确认后下载安装并重启。安装包未做代码签名，Windows SmartScreen 可能提示「无法验证发行者」，确认来源后选择「仍要运行」。
+
+卸载走系统「应用与功能」或安装目录下的 `uninstall.exe`：只删除安装目录，会话、设置与凭据等用户数据（`%APPDATA%\io.github.kanzaki-chiya.nocturne` 与 `~/.nocturne`）保留。
+
+### 从源码构建
+
 需要 Node.js 24.14 或更新版本，以及 pnpm 11.24.0。从源码构建，并把 `nctrn` 注册为全局命令：
 
 ```sh
@@ -29,14 +50,6 @@ pnpm build
 ```
 
 卸载：`npm unlink -g @nocturne/cli`。
-
-### 桌面版
-
-在桌面端「设置 › MCP」添加服务器，支持本地命令和远程 HTTP。
-
-桌面版以 Windows 安装包分发（NSIS，按用户安装到 `%LOCALAPPDATA%\Nocturne`，不需要管理员权限）。安装前需自行安装 Node.js 24.14 或更新版本——桌面端不随附 Node，启动时若找不到会显示安装说明。安装包未做代码签名，Windows SmartScreen 可能提示「无法验证发行者」，确认来源后选择「仍要运行」。
-
-卸载走系统「应用与功能」或安装目录下的 `uninstall.exe`：只删除安装目录，会话、设置与凭据等用户数据（`%APPDATA%\io.github.kanzaki-chiya.nocturne` 与 `~/.nocturne`）保留。
 
 ## 配置
 

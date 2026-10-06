@@ -247,17 +247,17 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - **子会话 ask 冒泡**：按 [subagent.md](../architecture/subagent.md) 第 7.1 节方案 (a)，把子会话的确认请求路由到父客户端；**可展开的子代理进度**：结构化进度替代单行摘要。
 - **MCP 服务器管理**：从 v0.5 移入，见 v0.5 同名条目。
 - **MCP 强杀清理**：评估纯 Node 看护进程，detached 启动，主进程消失后清理 MCP 进程树；沿用会话锁的"开机时间 + PID"判定规避 PID 复用。**MCP 图片与二进制内容**正常显示。
-- **分发**：npm 发布或单文件可执行，一行命令安装。
+- **分发**（[ADR-0050](../decisions/ADR-0050-distribution.md) 已接受，实现中）：npm 单文件包 `nctrn`、桌面端随附官方 Node 与自动更新、`pnpm release:build` 发布流水线与草稿 Release / npm 受信发布工作流；公开仓库后的 rc 端到端验收与首次发布见 ADR 第 5 节。
 - **补验证**：macOS 钥匙串与 Linux Secret Service 实机验证；Anthropic 格式思考强度在真实端点验证。
 
-## RPC 与桌面端（RPC 第一版随 0.5.0 发布，实验性；桌面端已排期）
+## RPC 与桌面端（RPC 第一版随 0.5.0 发布，实验性；桌面端已实现，尚未发布）
 
 **前提**：RPC 设计见 [ADR-0044](../decisions/ADR-0044-rpc-stdio.md)（已接受，2026-10-03）；桌面端设计见 [ADR-0046](../decisions/ADR-0046-desktop-tauri.md)（已接受，2026-10-04）。
 
 **内容**：
 
 - **RPC 第一版**（已实现并验收，2026-10-04；随 0.5.0 以实验性发布）：`nctrn rpc --stdio`，JSON-RPC 按行分隔，一个后台一个 Runtime、一个客户端；事件按 `afterSeq` 回放后衔接实时推送。按 ADR-0044 第 10 节分五步实现，其中服务商配置改为数据接口（`describeProviderSetup` / `prepareProvider` + `commitProvider`），CLI 与 TUI 向导迁移其上。
-- **桌面端**（ADR-0046 已接受，待实现）：Tauri 外壳逐行转发，每个有打开会话的项目一个 `nctrn rpc --stdio` 后台，要求用户自装 Node 24.14+；React + Vite 前端经 RPC 驱动；左栏按项目分组的会话树与置顶，对话、权限、服务商、设置；第一版只出 Windows 安装包。按 ADR 第 9 节分四步实现。
+- **桌面端**（ADR-0046 已实现；随附 Node 与自动更新按 [ADR-0050](../decisions/ADR-0050-distribution.md) 实现中）：Tauri 外壳逐行转发，每个有打开会话的项目一个 `nctrn rpc --stdio` 后台；React + Vite 前端经 RPC 驱动；左栏按项目分组的会话树与置顶，对话、权限、服务商、设置；只出 Windows 安装包。安装包随附官方 Node 24.x（不再要求用户自装）、经 Tauri updater 自动更新。
 
 ## 之后（未排期）
 

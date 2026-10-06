@@ -13,7 +13,7 @@
 
 ## 2. 命令与消息格式
 
-Rust 外壳提供八个 Tauri 命令（经 `tauri_build` 的 `AppManifest::commands` 声明为应用命令，在 `capabilities/main.json` 中逐个授予 `allow-backend-open` 等权限），错误统一返回可序列化的 `{ code, message }`（message 为中文）：`node_unavailable`、`backend_script_missing`、`invalid_workspace`、`spawn_failed`、`unknown_backend`、`workspace_unavailable`、`file_too_large`、`io`。
+Rust 外壳提供十个 Tauri 命令（经 `tauri_build` 的 `AppManifest::commands` 声明为应用命令，在 `capabilities/main.json` 中逐个授予 `allow-backend-open` 等权限），错误统一返回可序列化的 `{ code, message }`（message 为中文）：`node_unavailable`、`backend_script_missing`、`invalid_workspace`、`spawn_failed`、`unknown_backend`、`workspace_unavailable`、`file_too_large`、`io`。
 
 | 命令              | 参数 → 结果                                         | 说明                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -26,6 +26,8 @@ Rust 外壳提供八个 Tauri 命令（经 `tauri_build` 的 `AppManifest::comma
 | `pick_images`     | `{}` → 原始字节（`Response`）                       | 系统文件对话框多选图片（过滤 png/jpg/jpeg/gif/webp）；外壳读取所选文件字节返回，前端不传路径——读取范围仅限用户显式选中的文件。单个文件 > 64 MiB 报 `file_too_large`：与 stdout 单行上限同级的内存护栏（不是附件规则，格式与尺寸校验仍在 Core）。自定义二进制帧，重复记录 `[u32 LE 文件名 UTF-8 字节数][文件名][u32 LE 数据字节数][数据]`；取消选择返回空体。前端解码在 `src/picked-images.ts` |
 
 | `open_skill_directory` | `{ path, create }` → `null` | 打开绝对目录；create 只允许创建 `<NOCTURNE_HOME>/skills`；失败报 `workspace_unavailable` |
+| `app_note` | `{ line }` → `null` | 前端把一行诊断写进外壳日志（更新检查结果等静默降级场景）；按 stderr 同样规则截断（≤64 KiB/行，UTF-8 边界内）后进内存缓冲 |
+| `shell_log` | `{}` → `string[]` | 外壳自身诊断日志的快照（最近 500 行，不写盘）；「后台日志」页的「外壳」条目读它 |
 
 `plain_workspace` 单独成命令而不并入 `backend_open`：前端归类「对话」需要这个路径且目录必须由外壳创建，而 `backend_open` 仍只接受已存在的目录——前端不能借它创建任意目录。
 
@@ -47,7 +49,7 @@ type BackendMessage =
 查找顺序（`src-tauri/src/node.rs`）：
 
 1. 环境变量 `NOCTURNE_NODE`（非空即视为指定；文件不存在直接失败，后续步骤记 `skipped`）；
-2. 资源目录 `<resource_dir>/node/node.exe`（非 Windows 为 `node`；本版不随附，`not-bundled`）；
+2. 资源目录 `<resource_dir>/node/node.exe`（非 Windows 为 `node`；发布安装包随附，开发构建经 `pnpm desktop:dev`/`desktop:build` 先跑 `scripts/fetch-node.mjs` 补齐；缺文件时记 `not-bundled`）；
 3. `PATH` 逐目录找 `node.exe` / 可执行的 `node`。
 
 找到后运行 `<node> --version`（5 秒超时，Windows 加 `CREATE_NO_WINDOW`；`.cmd`/`.bat` 脚本由 Rust std 自动经 cmd.exe 执行），取 stdout 第一行。版本解析接受可选 `v` 前缀、忽略 `-`/`+` 后缀，要求 ≥ 24.14.0（ADR-0046 第 2 节；与根及 CLI 的 `engines` `>=24.14` 一致）。
@@ -75,6 +77,8 @@ interface NodeProbe {
 ```
 
 探测不通过时前端显示说明页（`src/NodeHelp.tsx`）：逐项展示查找结果、要求版本与「打开 nodejs.org」「重新检测」按钮；重新检测通过后不重启应用直接进正常流程。
+
+**随附 Node（ADR-0050）**：`scripts/node-version.json` 固定 Node 版本（24.x LTS，不低于 24.14）与官方 `node-v<ver>-win-x64.zip` 的 SHA-256；`scripts/fetch-node.mjs` 下载、校验哈希后只解出 `node.exe` 与 `LICENSE` 放进 `apps/desktop/src-tauri/resources/node/`（.gitignore 排除，不入库），`tauri.conf.json` 的 `bundle.resources` 把它们装进安装目录。校验失败直接中止，没有跳过选项。`backend_open` 成功后往该后台的 stderr 缓冲写一行 `[nocturne-desktop] Node <bundled|env|path>：<路径>（<版本>）`，「后台日志」页能看出 Node 的实际来源。
 
 ## 4. 后台脚本路径与单文件打包
 
@@ -223,6 +227,8 @@ interface NodeProbe {
 | 常规 | 执行 | Shell | 只读，写明由谁指定；会话内在状态栏切换 |
 | 常规 | 执行 | 压缩阈值 | 对话框，百分比或 token 数，留空恢复默认 |
 | 常规 | 普通对话 | 工作区 | 「更改…」选目录、「恢复默认」；只写 prefs |
+| 常规 | 更新 | 自动检查更新 | 拨动开关（`mcp-switch`），只写 `prefs.autoUpdate`（缺省开；显式关才存 `false`） |
+| 常规 | 更新 | 检查更新 | 按钮，手动检查不节流；失败在行内写原因，已是最新给 toast；发现新版本经 App 出更新提示条 |
 | 模型 | 默认 | 默认模型与档位 | 对话框，`setDefaultModel` 成对保存；所选模型没有档位时传 null |
 | 模型 | 模型角色 | 子代理模型 / 看图模型 / 轻量模型 | 对话框选择模型或清除；看图模型只列支持图片输入的模型。页尾链接「服务商 › 模型表」进入服务商页改单个模型的设置 |
 | 外观 | 主题 | 跟随系统 / 浅色 / 深色 | 三张预览卡片（`role="radio"`），只写 prefs，立即生效 |
@@ -239,11 +245,21 @@ interface NodeProbe {
 
 ### 5.7 后台日志页
 
-「后台日志」（`src/BackendLogsPage.tsx`）查看运行中后台的 stderr：页头写明「后台进程 stderr 的内存缓冲（最近 500 行），不写盘、不轮询」；一个后台选择器（`Dropdown`，列出每个项目后台与常驻聊天后台，标签为「项目名（类型） + 工作区」）、等宽字体日志区、「刷新」与「复制全部」按钮（`backend_stderr` 只在打开页面或点「刷新」时调用，不轮询；「复制全部」把当前显示的缓冲整体写进剪贴板）。没有运行中的后台时选择器置灰并写「打开一个会话后再来看」；所选后台缓冲为空时写「该后台暂无 stderr 输出；已退出后台的最后几行日志显示在崩溃横幅里」（退出后缓冲已回收，只有 `closed` 消息保留了尾部，见第 1 节日志边界）。读取失败显示错误与重试。
+「后台日志」（`src/BackendLogsPage.tsx`）查看运行中后台的 stderr：页头写明「后台进程 stderr 的内存缓冲（最近 500 行），不写盘、不轮询」；一个后台选择器（`Dropdown`，列出每个项目后台与常驻聊天后台，标签为「项目名（类型） + 工作区」，末尾固定一项「外壳」读外壳自身诊断日志）、等宽字体日志区、「刷新」与「复制全部」按钮（`backend_stderr` 只在打开页面或点「刷新」时调用，不轮询；选中「外壳」改走 `shell_log` 命令；「复制全部」把当前显示的缓冲整体写进剪贴板）。「外壳」条目（伪 backendId `-1`）始终存在，所以即使没有任何运行中的后台页面也不为空。所选后台缓冲为空时写「该后台暂无 stderr 输出；已退出后台的最后几行日志显示在崩溃横幅里」（外壳为「外壳暂无诊断输出」；退出后缓冲已回收，只有 `closed` 消息保留了尾部，见第 1 节日志边界）。读取失败显示错误与重试。
+
+### 5.8 自动更新（ADR-0050）
+
+`src/updater.ts` 的更新服务封装 `DesktopHost` 上的 `appVersion` / `checkUpdate` / `relaunch` / `note`（测试里用假宿主替换，`tauri-host.ts` 里落到 `@tauri-apps/plugin-updater` 与 `plugin-process`）。行为：
+
+- **检查时机**：启动进入就绪页后自动检查一次；之后由 `prefs.lastUpdateCheck` 节流，24 小时内最多一次。`prefs.autoUpdate` 显式 `false` 时自动检查完全不跑。手动「检查更新」同样计入节流但不等 24 小时。
+- **失败降级**：自动检查失败（网络不可达、签名/端点错误）只写外壳日志（`app_note`），不出任何 UI；手动检查失败把原因写在设置行内。
+- **提示**：发现新版本把 `{ version, notes }` 存进 `prefs.pendingUpdate`，并在窗口底部出提示条（`.updbar`，盖过设置层但不打断输入）：版本号 + 发布说明首行 + 「立即更新」「稍后」。「稍后」只清本次运行的提示状态，`pendingUpdate` 保留，下次启动若仍比当前版本新会继续提示；不比当前版本新时 `pendingUpdate` 被丢弃。
+- **确认与安装**：点「立即更新」时若还有非空闲会话（运行中或等待确认），先弹「将中断 N 个正在运行的会话」确认框；没有则直接下载。安装前再调一次 `checkUpdate` 拿 `Update` 句柄（存的 `pendingUpdate` 没有安装入口），期间提示条显示下载进度；下载/签名校验失败把原因留在提示条并恢复 `pendingUpdate`。Windows 下安装器在 `downloadAndInstall` 期间接管并退出进程（被动安装），随后由更新流程自动重启；其他平台装完调 `process` 插件 `relaunch`。
+- **更新器配置**：`tauri.conf.json` 开 `bundle.createUpdaterArtifacts`，`plugins.updater` 配 `pubkey`（minisign 公钥）、`endpoints` 指向 GitHub Release 的 `latest.json`、Windows `installMode: "passive"`。签名私钥只经 `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` 环境变量在构建期注入（见 [workflow.md](../development/workflow.md) 第 8 节）。
 
 ## 6. 安全边界
 
-- `capabilities/main.json` 只授予：八个应用命令（`allow-backend-open/send/close/stderr`、`allow-node-probe`、`allow-plain-workspace`、`allow-pick-images`、`allow-open-skill-directory`）、`core:path:allow-resolve-directory`（前端 `homeDir()` 主目录解析所需；`pick_images` 的对话框与读文件都在 Rust 侧，不需要它）、窗口权限 `core:window:allow-minimize`、`allow-toggle-maximize`、`allow-internal-toggle-maximize`（Tauri drag-region 的原生双击）、`allow-close`、`allow-start-dragging`、`allow-is-maximized`（后五项同属 `core:window:`）、`dialog:allow-open`、`opener:allow-open-url`（scope 只允许 `https:*` 与 `http://127.0.0.1:*` / `http://localhost:*`）。不授予 `core:default` 或 `core:window:default`，不启用 fs、shell、http 插件，`withGlobalTauri: false`。
+- `capabilities/main.json` 只授予：十个应用命令（`allow-backend-open/send/close/stderr`、`allow-node-probe`、`allow-plain-workspace`、`allow-pick-images`、`allow-open-skill-directory`、`allow-app-note`、`allow-shell-log`）、`core:app:allow-version`（`appVersion()` 显示与版本过滤用）、`core:path:allow-resolve-directory`（前端 `homeDir()` 主目录解析所需；`pick_images` 的对话框与读文件都在 Rust 侧，不需要它）、窗口权限 `core:window:allow-minimize`、`allow-toggle-maximize`、`allow-internal-toggle-maximize`（Tauri drag-region 的原生双击）、`allow-close`、`allow-start-dragging`、`allow-is-maximized`（后五项同属 `core:window:`）、`dialog:allow-open`、自动更新的 `updater:allow-check` 与 `updater:allow-download-and-install` 以及重启用的 `process:allow-restart`、`opener:allow-open-url`（scope 只允许 `https:*` 与 `http://127.0.0.1:*` / `http://localhost:*`）。不授予 `core:default` 或 `core:window:default`，不启用 fs、shell、http 插件，`withGlobalTauri: false`。
 - 主窗口 `dragDropEnabled: false`：关掉 Tauri 的原生拖放接管，HTML5 drop 才能向输入框交付 `File` 对象（图片附件的拖入路径）。
 - CSP：`default-src 'self'`；`connect-src` 只允许 `ipc:`/`http://ipc.localhost`；图片额外允许 `blob:`（图片附件预览用）；禁 `object-src`、`base-uri`、`form-action`、`frame-ancestors`。dev 模式（`devCsp`）仅为 Vite 额外放开 `ws://localhost:1420`、`http://localhost:1420` 与 style `'unsafe-inline'`。
 - 外链白名单（`src/external-url.ts`）：`https:` 放行；`http:` 仅 `127.0.0.1` 与 `localhost`（本机回调页）；其余协议与解析失败忽略不打开。Rust 侧 opener scope 与之一致。
@@ -253,7 +269,8 @@ interface NodeProbe {
 
 `apps/desktop/src` 只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`，不引 core 运行时、其他 workspace 包、Node 内置模块（含 Node 全局，eslint `no-restricted-globals` + depcheck `desktop-*` 规则强制）。Vite/vitest 用 alias 直接跑 `packages/rpc/src/client` 与 `packages/core/src/protocol` 源码，dev 与测试不需要先构建 rpc。
 
-- `pnpm desktop:dev`（= `pnpm --filter @nocturne/desktop dev` → `tauri dev`，自动先跑 `pnpm vite`）：开发运行，后台用 `apps/cli/dist/main.js`，需先 `pnpm build`。
-- `pnpm desktop:build`（根 `package.json`）：依次跑 `pnpm build` → `node scripts/bundle-nctrn.mjs` → `cargo test`（`apps/desktop/src-tauri`）→ `tauri build`（`beforeBuildCommand` 自动先跑 `pnpm vite build`），任何一步失败即终止。产出 NSIS 安装包 `apps/desktop/src-tauri/target/release/bundle/nsis/Nocturne_<ver>_x64-setup.exe`：per-user 安装（`installMode: "currentUser"`，装进 `%LOCALAPPDATA%\Nocturne`，不需要管理员权限），不签名，不打包 Node（用户需自装 ≥ 24.14.0）；`resources/nctrn.mjs` 随包放进安装目录根。卸载器只删安装目录，用户数据（`%APPDATA%\io.github.kanzaki-chiya.nocturne`）按 Tauri 默认保留。Rust 工具链只在这条流程需要。
+- `pnpm desktop:dev`（先跑 `scripts/fetch-node.mjs` 补齐随附 Node，再 `pnpm --filter @nocturne/desktop dev` → `tauri dev`，自动先跑 `pnpm vite`）：开发运行，后台用 `apps/cli/dist/main.js`，需先 `pnpm build`。
+- `pnpm desktop:build`（根 `package.json`）：依次跑 `pnpm build` → `node scripts/bundle-nctrn.mjs` → `node scripts/fetch-node.mjs` → `cargo test`（`apps/desktop/src-tauri`）→ `tauri build`（`beforeBuildCommand` 自动先跑 `pnpm vite build`），任何一步失败即终止。产出 NSIS 安装包 `apps/desktop/src-tauri/target/release/bundle/nsis/Nocturne_<ver>_x64-setup.exe`：per-user 安装（`installMode: "currentUser"`，装进 `%LOCALAPPDATA%\Nocturne`，不需要管理员权限），不签名；`resources/nctrn.mjs` 与 `resources/node/{node.exe,LICENSE}` 随包放进安装目录（`nctrn.mjs` 在根、`node/` 子目录），无需用户自装 Node。`bundle.createUpdaterArtifacts: true` 时旁边还产出 `<setup>.exe.sig` 签名文件（需 `TAURI_SIGNING_PRIVATE_KEY`/`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，见 [workflow.md](../development/workflow.md) 第 8 节）。卸载器只删安装目录，用户数据（`%APPDATA%\io.github.kanzaki-chiya.nocturne`）按 Tauri 默认保留。Rust 工具链只在这条流程需要。
+- `pnpm release:build`（根 `package.json` → `scripts/release-build.mjs`）：发布总入口，bundle → npm pack → 取随附 Node → cargo test → tauri build → 生成 `latest.json`，产物收进 `release/<version>/`（不入库）。本地演练可传 `--config <覆盖.json>` 只覆盖 updater `pubkey`/`endpoints` 等字段。
 - `pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test`（vitest + jsdom，完全离线，进入默认测试集）覆盖 `src/` 与 `test/`；`pnpm build` 不构建桌面端，也不需要 Rust。
 - Rust 外壳只在 `desktop:*` 流程需要：在 `apps/desktop/src-tauri` 手动跑 `cargo build`、`cargo test`（切行、版本解析、关闭超时、进程级转发）、`cargo clippy --all-targets`；不进默认测试集。

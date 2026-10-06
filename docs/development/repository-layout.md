@@ -14,8 +14,19 @@ nocturne/
 ├── package.json                 pnpm workspace 根
 ├── pnpm-workspace.yaml
 ├── scripts/
-│   ├── bundle-nctrn.mjs                 tsdown 把 apps/cli 打成单文件后台 src-tauri/resources/nctrn.mjs
+│   ├── bundle-nctrn.mjs                 tsdown 把 apps/cli 打成单文件后台 nctrn.mjs（默认进 src-tauri/resources/，--out-dir 可改）
+│   ├── pack-npm.mjs                     组装 nctrn npm 包暂存目录并 npm pack（packaging/npm 模板 + LICENSE + THIRD-PARTY-NOTICES.md）
+│   ├── fetch-node.mjs                   下载校验官方 Node（node-version.json 固定版本与 SHA-256），解出 src-tauri/resources/node/
+│   ├── node-version.json                随附 Node 的版本与官方压缩包 SHA-256
+│   ├── release-version.mjs              统一改齐/校验各 package.json、tauri.conf.json、Cargo.toml/lock、npm 模板的版本号
+│   ├── release-notes.mjs                从 CHANGELOG.md 提取指定版本小节
+│   ├── release-build.mjs                发布总入口（pnpm release:build），产物收进 release/<version>/（.gitignore 排除）
+│   ├── smoke-nctrn.mjs                  tgz 干净目录安装 + --version + rpc 握手冒烟
+│   ├── lib/proc.mjs                     脚本共享的子进程辅助
+│   ├── test/                            发布脚本的离线测试（进默认测试集）
 │   └── update-models-dev-snapshot.mjs  手动更新内置 models.dev 裁剪快照
+├── packaging/
+│   └── npm/                         nctrn npm 包模板（package.json + 面向 npm 用户的 README）
 ├── tsconfig.base.json
 ├── docs/                        所有正式文档
 ├── packages/
@@ -57,8 +68,8 @@ nocturne/
         ├── index.html、vite.config.ts、vitest.config.ts
         ├── src/                 host 抽象、TauriLineTransport、BackendPool、会话树、界面
         ├── test/                vitest + jsdom 离线测试（进默认测试集）
-        └── src-tauri/           Rust 外壳：七个命令、行切分、stderr 缓冲、Node 查找、Job Object（cargo test 手动跑）
-            └── resources/       打包产物 nctrn.mjs（.gitignore 排除，由 scripts/bundle-nctrn.mjs 生成）
+        └── src-tauri/           Rust 外壳：十个命令、行切分、stderr 与外壳日志缓冲、Node 查找、Job Object（cargo test 手动跑）
+            └── resources/       打包产物 nctrn.mjs 与 node/{node.exe,LICENSE}（.gitignore 排除，分别由 scripts/bundle-nctrn.mjs、fetch-node.mjs 生成）
 ```
 
 单元测试与源文件放在一起（`*.test.ts`）；跨模块的 Turn 级测试放在 `packages/core/test/`，使用按脚本返回流式事件的假 Provider，使 Agent Loop 的行为可以确定性地测试，不依赖真实模型服务。
@@ -135,7 +146,7 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
 | Anthropic 传输 | **`@ai-sdk/anthropic`**（peer：`ai`） | 与 openai-compatible 共用同一传输栈与归一化路径（[ADR-0006](../decisions/ADR-0006-anthropic-transport.md)） | 官方 `@anthropic-ai/sdk` 或适配器内自建 `fetch` + SSE |
 | CLI 运行时依赖 | **零**：`util.parseArgs` + `node:readline` + `util.styleText` | Phase 2 的 CLI 需求（单值参数、行输入、着色）Node 内置已够；不引 commander/chalk 类依赖（[apps/cli.md](../apps/cli.md) 第 9 节）。零第三方依赖约定只对 `apps/cli` 生效（workspace 包除外）；`packages/core` 的运行时依赖是本表列出的 `ai`、`@ai-sdk/*`、AJV、Zod，以及 ADR-0033 批准的 `node-html-markdown`，`apps/tui` 与 `packages/mcp` 的依赖分别由 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md) 批准。ADR-0010 中"core 保持零依赖"的表述不准确，以本表为准 | 需求超出内置能力时（如交互式选择列表）再评估 |
 | TUI 渲染 | **Ink + React**（`apps/tui`） | 选型见 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)；全屏滚动见 [ADR-0020](../decisions/ADR-0020-tui-fullscreen-rendering.md) | 自研 ANSI（渲染层收敛在 apps/tui 内，可替换） |
-| 桌面端 | **Tauri 2 + Vite + React**（`apps/desktop`） | 选型见 [ADR-0046](../decisions/ADR-0046-desktop-tauri.md)。npm：react-dom、`@tauri-apps/api`、`@tauri-apps/plugin-dialog`、`@tauri-apps/plugin-opener`（运行时，MIT/Apache-2.0）、`@tauri-apps/cli`、`vite`、`@vitejs/plugin-react`、`jsdom`、`@testing-library/react`、`@testing-library/dom`、`@types/react-dom`（开发，MIT）；Rust crate：tauri、tauri-build、tauri-plugin-dialog、tauri-plugin-opener（Apache-2.0 OR MIT）、serde、windows-sys（MIT OR Apache-2.0），许可证以包元数据为准（THIRD-PARTY-NOTICES.md） | Electron（重）、Svelte/Solid（团队已有 React 经验） |
+| 桌面端 | **Tauri 2 + Vite + React**（`apps/desktop`） | 选型见 [ADR-0046](../decisions/ADR-0046-desktop-tauri.md)。npm：react-dom、`@tauri-apps/api`、`@tauri-apps/plugin-dialog`、`@tauri-apps/plugin-opener`、`@tauri-apps/plugin-updater`、`@tauri-apps/plugin-process`（运行时，MIT/Apache-2.0）、`@tauri-apps/cli`、`vite`、`@vitejs/plugin-react`、`jsdom`、`@testing-library/react`、`@testing-library/dom`、`@types/react-dom`（开发，MIT）；Rust crate：tauri、tauri-build、tauri-plugin-dialog、tauri-plugin-opener、tauri-plugin-updater、tauri-plugin-process（Apache-2.0 OR MIT）、serde、serde_json、windows-sys（MIT OR Apache-2.0），许可证以包元数据为准（THIRD-PARTY-NOTICES.md） | Electron（重）、Svelte/Solid（团队已有 React 经验） |
 | 桌面 Markdown | **marked 18.0.7**（MIT，2026-07-21 发布） | 与 TUI 复用精确版本，只用 lexer；桌面端将 token 渲染为 React 元素，原始 HTML 不渲染 | 不使用 HTML 字符串注入 |
 
 版本策略：全部依赖写精确版本（不浮动、不用 `latest`），由 `pnpm-lock.yaml` 保证；`engines.node >= 24.14`（根与 CLI）；许可证均与 GPL-3.0 兼容（MIT / Apache-2.0）。OpenAI 兼容适配器的传输选型理由与限制记录在 [providers.md](../architecture/providers.md) 适配器表。
