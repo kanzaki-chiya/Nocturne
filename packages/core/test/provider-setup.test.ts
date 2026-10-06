@@ -557,7 +557,11 @@ describe("凭据存储", () => {
           yield "";
         })(),
         wait: () => Promise.resolve({ code: 0, signal: null, timedOut: false, killed: false }),
+        exited: () => Promise.resolve({ code: 0, signal: null, timedOut: false, killed: false }),
         kill: () => Promise.resolve(),
+        detachOutput() {
+          /* 内存生成器没有需要关闭的系统句柄。 */
+        },
       };
     };
     const stubPlatform: Platform = {

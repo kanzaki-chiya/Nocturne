@@ -41,6 +41,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@nocturne/acp':
+        specifier: workspace:*
+        version: link:../../packages/acp
       '@nocturne/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -137,6 +140,18 @@ importers:
         specifier: 4.0.0
         version: 4.0.0(@types/react@19.3.0)
 
+  packages/acp:
+    dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: 1.7.0
+        version: 1.7.0(zod@4.6.5)
+      '@nocturne/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
   packages/core:
     dependencies:
       '@ai-sdk/anthropic':
@@ -183,6 +198,11 @@ importers:
         version: link:../core
 
 packages:
+
+  '@agentclientprotocol/sdk@1.7.0':
+    resolution: {integrity: sha512-ZORuxsuEnLjRly7t6Ad7zAsWitjWsyprswyPUHz/yycPb+tTm3DGa8XheaHhRXqX8LS9snuxaYavXSRA50TlHw==}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
 
   '@ai-sdk/anthropic@4.0.58':
     resolution: {integrity: sha512-vhXKBz7jnIhBlOoj2d0joyHicWISuIxDNha65SLrAnagAkVgulLoZBRLZRazstxlO/BtXU+cDERe1opVKte2OQ==}
@@ -2339,6 +2359,10 @@ packages:
     resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
 
 snapshots:
+
+  '@agentclientprotocol/sdk@1.7.0(zod@4.6.5)':
+    dependencies:
+      zod: 4.6.5
 
   '@ai-sdk/anthropic@4.0.58(zod@4.6.5)':
     dependencies:

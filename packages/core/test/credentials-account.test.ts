@@ -105,7 +105,16 @@ function stubBackend() {
             yield syntheticSecret;
           })(),
           wait: async () => ({ code: fail ? 1 : 0, signal: null, killed: false, timedOut: false }),
+          exited: async () => ({
+            code: fail ? 1 : 0,
+            signal: null,
+            killed: false,
+            timedOut: false,
+          }),
           kill: async () => undefined,
+          detachOutput() {
+            /* 内存生成器没有需要关闭的系统句柄。 */
+          },
         };
         return proc;
       },

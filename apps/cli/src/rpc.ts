@@ -8,6 +8,7 @@
  */
 import type { Readable, Writable } from "node:stream";
 
+import { createAcpConnector } from "@nocturne/acp";
 import { createRuntime, type Platform } from "@nocturne/core";
 import { createMcpConnector } from "@nocturne/mcp";
 import { createRpcServer, createStdioTransport } from "@nocturne/rpc/server";
@@ -78,6 +79,7 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
           interactive,
           permissions: { autoApproveAsk: false },
           mcp: createMcpConnector(),
+          externalAgents: createAcpConnector(platform, runtimeConfig.base.externalAgents),
           debug: {
             enabled: debugEnabled,
             file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,

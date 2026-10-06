@@ -6,6 +6,7 @@
 import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 
+import { createAcpConnector } from "@nocturne/acp";
 import {
   configureEnvProxy,
   createPlatform,
@@ -166,6 +167,7 @@ async function main(): Promise<number> {
         interactive: true,
         permissions: { autoApproveAsk: args.yes },
         mcp: createMcpConnector(),
+        externalAgents: createAcpConnector(platform, collected.config.runtime.base.externalAgents),
         debug: {
           enabled: debugEnabled,
           file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,
@@ -268,6 +270,7 @@ async function main(): Promise<number> {
         interactive: true,
         permissions: { autoApproveAsk: args.yes },
         mcp: createMcpConnector(),
+        externalAgents: createAcpConnector(platform, runtimeConfig.base.externalAgents),
         debug: {
           enabled: debugEnabled,
           file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,
@@ -332,6 +335,7 @@ async function main(): Promise<number> {
     interactive: !args.print,
     permissions: { autoApproveAsk: args.yes },
     mcp: createMcpConnector(),
+    externalAgents: createAcpConnector(platform, runtimeConfig.base.externalAgents),
     debug: {
       enabled: debugEnabled,
       file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,

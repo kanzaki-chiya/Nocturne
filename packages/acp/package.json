@@ -1,18 +1,21 @@
 {
-  "name": "@nocturne/cli",
+  "name": "@nocturne/acp",
   "version": "0.6.0",
-  "description": "nctrn — Nocturne CLI client",
+  "description": "Nocturne ACP external agent connector（ADR-0049）",
   "license": "GPL-3.0-only",
   "private": true,
   "type": "module",
-  "bin": {
-    "nctrn": "dist/main.js"
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
   },
   "files": [
     "dist"
   ],
   "engines": {
-    "node": ">=24.14"
+    "node": ">=24"
   },
   "scripts": {
     "build": "tsdown",
@@ -21,10 +24,8 @@
     "test:smoke": "vitest run --config vitest.smoke.config.ts"
   },
   "dependencies": {
-    "@nocturne/acp": "workspace:*",
+    "@agentclientprotocol/sdk": "1.7.0",
     "@nocturne/core": "workspace:*",
-    "@nocturne/mcp": "workspace:*",
-    "@nocturne/rpc": "workspace:*",
-    "@nocturne/tui": "workspace:*"
+    "zod": "4.6.5"
   }
 }

@@ -23,6 +23,7 @@ const JSON_VERSION_FILES = [
   "packages/core/package.json",
   "packages/rpc/package.json",
   "packages/mcp/package.json",
+  "packages/acp/package.json",
   "apps/cli/package.json",
   "apps/tui/package.json",
   "apps/desktop/package.json",
@@ -34,6 +35,7 @@ const JSON_VERSION_FILES = [
 const CONST_VERSION_FILES = {
   "packages/core/src/protocol/version.ts": "NOCTURNE_VERSION",
   "packages/mcp/src/connector.ts": "CLIENT_VERSION",
+  "packages/acp/src/connector.ts": "CLIENT_VERSION",
   "apps/cli/src/main.ts": "VERSION",
   "apps/tui/src/version.ts": "APP_VERSION",
 };

@@ -9,6 +9,10 @@ export default defineConfig({
     // 离线测试直接对 core 源码运行（cli.md 第 9 节），不需要先构建 dist
     alias: [
       {
+        find: /^@nocturne\/acp$/,
+        replacement: path.resolve(here, "../../packages/acp/src/index.ts"),
+      },
+      {
         find: /^@nocturne\/tui\/provider-setup-flow$/,
         replacement: path.resolve(here, "../tui/src/provider-setup-flow.ts"),
       },

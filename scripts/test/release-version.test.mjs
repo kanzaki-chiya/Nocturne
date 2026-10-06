@@ -22,6 +22,7 @@ function makeFixture() {
     "packages/core/package.json",
     "packages/rpc/package.json",
     "packages/mcp/package.json",
+    "packages/acp/package.json",
     "apps/cli/package.json",
     "apps/tui/package.json",
     "apps/desktop/package.json",
@@ -68,6 +69,7 @@ function makeFixture() {
   const constFiles = {
     "packages/core/src/protocol/version.ts": 'export const NOCTURNE_VERSION = "0.5.0";\n',
     "packages/mcp/src/connector.ts": 'import x from "y";\n\nconst CLIENT_VERSION = "0.5.0";\n',
+    "packages/acp/src/connector.ts": 'const CLIENT_VERSION = "0.5.0";\n',
     "apps/cli/src/main.ts": 'const VERSION = "0.5.0";\nconst OTHER_VERSION = "9.9.9";\n',
     "apps/tui/src/version.ts": 'export const APP_VERSION = "0.5.0";\n',
   };

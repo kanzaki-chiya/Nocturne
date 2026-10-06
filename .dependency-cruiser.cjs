@@ -189,8 +189,8 @@ module.exports = {
       name: "no-deep-import-from-outside-core",
       severity: "error",
       comment:
-        "包外（apps、packages/mcp、packages/rpc）只能 import @nocturne/core（src/index.ts）或 @nocturne/core/protocol（src/protocol/index.ts），任何内部路径一律禁止",
-      from: { path: "^(apps|packages/mcp|packages/rpc)/" },
+        "包外（apps、packages/acp、packages/mcp、packages/rpc）只能 import @nocturne/core（src/index.ts）或 @nocturne/core/protocol（src/protocol/index.ts），任何内部路径一律禁止",
+      from: { path: "^(apps|packages/acp|packages/mcp|packages/rpc)/" },
       to: {
         path: "^packages/core/src/",
         pathNot: ["^packages/core/src/index\\.ts$", "^packages/core/src/protocol/index\\.ts$"],
@@ -203,6 +203,14 @@ module.exports = {
         "packages/mcp 只能依赖 @nocturne/core 公开入口与 MCP SDK（modules.md：Core 不依赖 mcp，mcp 不依赖 apps）",
       from: { path: "^packages/mcp/src" },
       to: { path: "^(packages/(?!mcp)|apps)/" },
+    },
+    {
+      name: "acp-deps",
+      severity: "error",
+      comment:
+        "packages/acp 只能依赖 @nocturne/core 公开入口与 ACP SDK（ADR-0049：Core 不依赖 acp，acp 不依赖 apps）",
+      from: { path: "^packages/acp/src" },
+      to: { path: "^(packages/(?!acp)|apps)/" },
     },
     {
       name: "rpc-deps",

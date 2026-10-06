@@ -10,6 +10,7 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `ajv` | 8.20.0 | MIT |
 | `zod` | 4.6.5 | MIT |
 | `@modelcontextprotocol/sdk` | 1.30.0 | MIT |
+| `@agentclientprotocol/sdk` | 1.7.0 | Apache-2.0 |
 | `ink` | 7.1.1 | MIT |
 | `marked` | 18.0.7 | MIT |
 | `node-html-markdown` | 2.0.0 | MIT |

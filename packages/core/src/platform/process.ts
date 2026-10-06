@@ -6,6 +6,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import process from "node:process";
 import type { Readable } from "node:stream";
+import { statSync } from "node:fs";
+import path from "node:path";
 
 import { defaultShellInvocation, type ShellDescriptor } from "./shells.js";
 
@@ -45,7 +47,11 @@ export interface PipeProcess {
   readonly stdoutRaw: AsyncIterable<Buffer>;
   readonly stderr: AsyncIterable<string>;
   wait(): Promise<ProcessExit>;
+  /** 直接子进程 exit 即结算，不受后代继承 stdout/stderr 拖延；wait 仍等待 close。 */
+  exited(): Promise<ProcessExit>;
   kill(): Promise<void>;
+  /** 直接进程已退出后，关闭仍被后代持有的本地输出句柄；不等待这些后代。 */
+  detachOutput(): void;
 }
 
 export interface ProcessExit {
@@ -514,21 +520,30 @@ function attachLifecycle(
 }
 
 async function killTree(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.pid === undefined) return;
+  if (child.pid === undefined) return;
   const pid = child.pid;
   if (process.platform === "win32") {
-    await new Promise<void>((resolve) => {
-      const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
-        windowsHide: true,
-        stdio: "ignore",
-      });
-      killer.once("exit", () => {
-        resolve();
-      });
-      killer.once("error", () => {
-        resolve();
-      });
+    // Windows 的 /T 只能在根进程仍在时枚举树；不能对复用的 pid 发 taskkill。
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => {
+      resolve = done;
     });
+    const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    const timer = setTimeout(() => {
+      killer.kill();
+      resolve();
+    }, 2_000);
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    killer.once("exit", done);
+    killer.once("error", done);
+    await promise;
   } else {
     try {
       // spawn(detached: true) 使子进程成为进程组组长，可整组终止
@@ -543,6 +558,57 @@ async function killTree(child: ChildProcess): Promise<void> {
   }
 }
 
+/** Windows 管道命令按 PATH/PATHEXT 解析；批处理脚本必须经 cmd，而非 shell:true。 */
+function pipeInvocation(command: string, args: string[], env: NodeJS.ProcessEnv, cwd: string) {
+  if (process.platform !== "win32") return { command, args, verbatim: false };
+  const environment: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(env)) environment[key.toUpperCase()] = value;
+  const directories = /[/\\]/.test(command)
+    ? [""]
+    : [cwd, ...(environment.PATH ?? "").split(path.delimiter)];
+  const extensions = path.extname(command)
+    ? [""]
+    : ["", ...(environment.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";")];
+  let resolved: string | undefined;
+  for (const directory of directories) {
+    for (const extension of extensions) {
+      const candidate = path.resolve(cwd, directory, command + extension);
+      try {
+        if (statSync(candidate).isFile()) {
+          resolved = candidate;
+          break;
+        }
+      } catch {
+        // 继续下一个 PATH/PATHEXT 候选。
+      }
+    }
+    if (resolved !== undefined) break;
+  }
+  if (!resolved || !/\.(cmd|bat)$/i.test(resolved)) {
+    return { command: resolved ?? command, args, verbatim: false };
+  }
+  if (
+    /[\r\n]/.test(resolved) ||
+    resolved.includes("\0") ||
+    args.some((arg) => /[\r\n]/.test(arg) || arg.includes("\0"))
+  ) {
+    throw new Error("Windows batch command arguments cannot contain CR, LF or NUL");
+  }
+  // 每个 token 都独立引用。反斜杠按 Windows argv 规则保护引号与末尾；
+  // cmd 元字符在 cmd 与批处理 %* 两次解析中均用 caret 保护。
+  const quote = (token: string) => {
+    const quoted = `"${token.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
+    const escaped = quoted.replace(/([()\][%!^"`<>&|;, *?])/g, "^$1");
+    return escaped.replace(/([()\][%!^"`<>&|;, *?])/g, "^$1");
+  };
+  const executable = resolved.replace(/([()\][%!^"`<>&|;, *?])/g, "^$1");
+  const line = [executable, ...args.map(quote)].join(" ");
+  return {
+    command: environment.COMSPEC ?? "cmd.exe",
+    args: ["/d", "/s", "/v:off", "/c", `"${line}"`],
+    verbatim: true,
+  };
+}
 export function createProcessRunner(): ProcessRunner {
   // 控制台代码页探测只做一次，全部子进程共享同一个编码结论
   let encodingPromise: Promise<OutputEncoding> | undefined;
@@ -599,16 +665,32 @@ export function createProcessRunner(): ProcessRunner {
         options.envMode === "minimal"
           ? minimalEnvironment()
           : stripEnvVars(process.env, options.envStrip);
-      const child = spawn(command, args, {
+      const overridden =
+        process.platform === "win32"
+          ? new Set(Object.keys(options.env ?? {}).map((key) => key.toUpperCase()))
+          : undefined;
+      const inherited =
+        overridden === undefined
+          ? base
+          : Object.fromEntries(
+              Object.entries(base).filter(([key]) => !overridden.has(key.toUpperCase())),
+            );
+      const env = { ...inherited, ...options.env };
+      const invocation = pipeInvocation(command, args, env, options.cwd ?? process.cwd());
+      const child = spawn(invocation.command, invocation.args, {
         cwd: options.cwd,
-        env: { ...base, ...options.env },
+        env,
         windowsHide: true,
+        windowsVerbatimArguments: invocation.verbatim,
         detached: process.platform !== "win32",
         stdio: ["pipe", "pipe", "pipe"],
       });
       const encoding = consoleEncoding();
       const { wait, kill } = attachLifecycle(child, options);
+      const exited = attachLifecycle(child, {}, "exit").wait;
       const stdin = child.stdin;
+      // 远端关闭管道时，异步 EPIPE 不能成为未处理的 EventEmitter error。
+      stdin.on("error", () => undefined);
       return {
         pid: child.pid ?? -1,
         stdin: {
@@ -622,7 +704,12 @@ export function createProcessRunner(): ProcessRunner {
         stdoutRaw: rawOutput(child.stdout),
         stderr: decodeOutput(child.stderr, encoding),
         wait,
+        exited,
         kill,
+        detachOutput() {
+          child.stdout.destroy();
+          child.stderr.destroy();
+        },
       };
     },
   };
