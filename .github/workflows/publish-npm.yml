@@ -1,0 +1,53 @@
+# npm 发布（ADR-0050 第 4 节）：只接受手动触发，输入版本号。
+# 从对应 GitHub Release（v<version>）下载 nctrn-<version>.tgz 后 npm publish。
+# 使用 npm 受信发布（OIDC，id-token: write），不使用 NPM_TOKEN。
+# 注意：首个版本由维护者本机手动发布并在 npm 侧绑定受信发布；
+# 公开仓库后可考虑加 --provenance。
+name: publish-npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "要发布的版本号（对应已发布的 GitHub Release v<version>）"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  publish:
+    name: npm publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # gh release download 读取已发布资产
+      id-token: write # npm 受信发布（OIDC）
+    steps:
+      - name: Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: 升级 npm（受信发布需要 npm >= 11.5.1）
+        run: npm install --global npm@11.6.2
+
+      - name: 下载 Release 里的 nctrn 包
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "v${{ inputs.version }}" --pattern "nctrn-*.tgz" --dir .
+
+      - name: 校验包名与版本
+        run: |
+          test -f "nctrn-${{ inputs.version }}.tgz" || {
+            echo "Release v${{ inputs.version }} 中没有 nctrn-${{ inputs.version }}.tgz"
+            exit 1
+          }
+
+      - name: npm publish（受信发布）
+        run: |
+          # 预发布号（含 -）挂 next 标签，不覆盖 latest
+          tag="latest"
+          case "${{ inputs.version }}" in
+            *-*) tag="next" ;;
+          esac
+          npm publish "nctrn-${{ inputs.version }}.tgz" --access public --tag "$tag"

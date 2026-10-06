@@ -1,0 +1,129 @@
+# 发布流水线（ADR-0050 第 4 节）：推送 v* 标签触发。
+# 主任务在 windows-latest 上跑完整检查与 pnpm release:build，
+# 产物（setup.exe、.sig、latest.json、tgz）经 gh release create 上传为草稿；
+# ubuntu/macos 任务只对 tgz 做安装冒烟，结果追加进草稿说明。
+# 用到的 secrets：GITHUB_TOKEN（内置）、TAURI_SIGNING_PRIVATE_KEY、
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD（更新包签名私钥，维护者配置）。
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+jobs:
+  windows:
+    name: 发布构建（windows-latest）
+    runs-on: windows-latest
+    permissions:
+      contents: write # gh release create --draft 与资产上传
+    steps:
+      - name: 检出
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: lint
+        run: pnpm lint
+
+      - name: format:check
+        run: pnpm format:check
+
+      - name: depcheck
+        run: pnpm depcheck
+
+      - name: build
+        run: pnpm build
+
+      - name: test
+        run: pnpm test
+
+      - name: 版本号与标签一致
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          node scripts/release-version.mjs --check "$VERSION"
+
+      - name: 发布构建（bundle → npm pack → 随附 Node → cargo test → tauri build → latest.json）
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm release:build
+
+      - name: tgz 安装冒烟（本机）
+        shell: bash
+        run: node scripts/smoke-nctrn.mjs "release/$VERSION/nctrn-$VERSION.tgz"
+
+      - name: 创建草稿 Release 并上传产物
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/release-notes.mjs "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --title "Nocturne $GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            release/"$VERSION"/*
+
+  # tgz 的跨平台安装冒烟：串行跑（max-parallel: 1），避免两条任务同时追加
+  # 草稿说明互相覆盖。失败不阻塞已创建的草稿（草稿在 windows 任务里已建成）。
+  smoke:
+    name: tgz 冒烟（${{ matrix.os }}）
+    needs: windows
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # 下载草稿资产 + 把结果追加进草稿说明
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: 检出
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: 下载草稿 Release 里的 tgz
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "$GITHUB_REF_NAME" --pattern "nctrn-*.tgz" --dir .
+
+      - name: 安装冒烟
+        id: smoke
+        run: node scripts/smoke-nctrn.mjs ./nctrn-*.tgz
+
+      - name: 把结果追加进草稿 Release 说明
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ steps.smoke.outcome }}" = "success" ]; then
+            mark="通过"
+          else
+            mark="失败"
+          fi
+          gh release view "$GITHUB_REF_NAME" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          printf '\n- %s tgz 安装冒烟：%s\n' "${{ runner.os }}" "$mark" >> "$RUNNER_TEMP/notes.md"
+          gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
