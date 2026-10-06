@@ -1,6 +1,11 @@
 import { isNode, LineCounter, parseDocument } from "yaml";
 import type { Platform } from "../platform/index.js";
-import type { SkillsConfig, SkillOverview, SkillWarning } from "../protocol/index.js";
+import {
+  BUILTIN_SLASH_COMMANDS,
+  type SkillsConfig,
+  type SkillOverview,
+  type SkillWarning,
+} from "../protocol/index.js";
 
 export interface DiscoveredSkill extends SkillOverview {
   body: string;
@@ -27,11 +32,7 @@ const ignoredReasons: Record<string, string> = {
   paths: "不限制技能匹配路径",
   shell: "不改变 shell，沿用会话设置",
 };
-const builtins = new Set(
-  "help theme settings model effort preset shell context mcp skills compact resume rewind fork new clear provider exit quit".split(
-    " ",
-  ),
-);
+const builtinCommands = new Set<string>(BUILTIN_SLASH_COMMANDS);
 const parseError = (line: number, message: string) => Object.assign(new Error(message), { line });
 
 function parseSkill(
@@ -183,7 +184,7 @@ export async function discoverSkills(
           catalogStatus: "omitted",
           enabled: true,
           shadowedBy: winner?.entryPath,
-          commandConflict: builtins.has(name.toLowerCase()),
+          commandConflict: builtinCommands.has(name.toLowerCase()),
           missingDescription: typeof fields.description !== "string" || !fields.description.trim(),
           fields: Object.fromEntries(Object.entries(fields).filter(([key]) => supported.has(key))),
           unknownFields: Object.fromEntries(

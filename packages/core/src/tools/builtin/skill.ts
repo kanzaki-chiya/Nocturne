@@ -1,4 +1,5 @@
-import { renderSkill, type SkillInvocation, type SkillOverview } from "../../protocol/index.js";
+import { renderSkill } from "../../skills/index.js";
+import type { SkillInvocation, SkillOverview } from "../../protocol/index.js";
 import type { ToolDefinition } from "../types.js";
 
 function distance(a: string, b: string): number {

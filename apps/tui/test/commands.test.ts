@@ -5,8 +5,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeConfig, RuntimeSession, SessionShellInfo } from "@nocturne/core";
+import { BUILTIN_SLASH_COMMANDS } from "@nocturne/core/protocol";
 
 import { contextLines, runSlash, type ProviderBridge } from "../src/commands.js";
+import { SLASH_COMMANDS } from "../src/slash-catalog.js";
 
 function fakeSession(overrides: Partial<RuntimeSession> = {}): RuntimeSession {
   return {
@@ -190,5 +192,15 @@ describe("TUI /context 面板（ADR-0046 第 5 节）", () => {
     const text = contextLines(contextSession()).join("\n");
     expect(text).toContain("history");
     expect(text).not.toContain("    user");
+  });
+});
+
+describe("内置命令名单", () => {
+  it("TUI 每个斜杠命令都在 Core 的 BUILTIN_SLASH_COMMANDS 里", () => {
+    // 技能与命令重名时禁止斜杠调用（skills.md 第 6 节）；新增命令要同步名单
+    const builtin = new Set(BUILTIN_SLASH_COMMANDS);
+    for (const cmd of SLASH_COMMANDS) {
+      expect(builtin.has(cmd.name.slice(1)), cmd.name).toBe(true);
+    }
   });
 });

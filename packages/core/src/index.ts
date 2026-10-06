@@ -41,14 +41,13 @@ import type {
   JevReviewerConfig,
   ModelRole,
 } from "./config/index.js";
-import { MODEL_ROLES, discoverSkills } from "./config/index.js";
+import { MODEL_ROLES } from "./config/index.js";
 import {
-  skillCatalog,
-  renderSkill,
   type SkillsDescription,
   type SkillInvocation,
   type SkillSnapshot,
 } from "./protocol/index.js";
+import { discoverSkills, renderSkill, skillCatalog } from "./skills/index.js";
 import {
   defaultJevReviewer,
   fetchJevModels,

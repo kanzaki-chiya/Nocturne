@@ -107,10 +107,19 @@ module.exports = {
     {
       name: "tools-deps",
       severity: "error",
-      comment: "tools 只能依赖 protocol、permission、platform",
+      comment: "tools 只能依赖 protocol、permission、platform、skills",
       from: { path: "^packages/core/src/tools/" },
       to: {
-        path: "^packages/core/src/(?!tools/|protocol/|permission/|platform/)",
+        path: "^packages/core/src/(?!tools/|protocol/|permission/|platform/|skills/)",
+      },
+    },
+    {
+      name: "skills-deps",
+      severity: "error",
+      comment: "skills（发现/目录/正文渲染）只能依赖 protocol 与 platform（modules.md）",
+      from: { path: "^packages/core/src/skills/" },
+      to: {
+        path: "^packages/core/src/(?!skills/|protocol/|platform/)",
       },
     },
     {

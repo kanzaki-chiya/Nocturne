@@ -17,14 +17,14 @@
                            │
                            ▼
                          agent
-          ┌────────┬───────┼─────────┬──────────┐
-          ▼        ▼       ▼         ▼          ▼
-       session  context  provider   tools     config
-          │        │       │         │  ╲        │
-          │        │       │         ▼   ╲       │
-          │        │       │     permission ╲    │
-          ▼        ▼       ▼         ▼       ▼   ▼
-       platform   (types)  protocol protocol platform
+          ┌────────┬───────┼─────────┬──────────┬────────┐
+          ▼        ▼       ▼         ▼          ▼        ▼
+       session  context  provider   tools     config   skills
+          │        │       │         │  ╲        │        │
+          │        │       │         ▼   ╲       │        │
+          │        │       │     permission ╲    │        │
+          ▼        ▼       ▼         ▼       ▼   ▼        ▼
+       platform   (types)  protocol protocol platform  protocol、platform
 ```
 
 规则汇总：
@@ -37,6 +37,7 @@
 - 真实 I/O（文件系统、子进程、环境变量、网络之外的系统访问）集中在 `platform` 与 Provider 适配器中，业务逻辑不直接调用 `node:fs`、`node:child_process`。
 - `hooks`（实现模块）依赖 protocol、platform、diagnostics；`HookRunner` 接口定义在 `permission`（`tools` 保留类型重导出），实例由 `core/index` 按会话配置装配注入——`tools` 与 `agent` 只见接口，不 import 实现（见 [hooks.md](hooks.md)）。
 - `diagnostics`（调试通道）只依赖 protocol、platform；被 agent / context / tools / hooks / index 经注入使用，并经 `McpConnector` 传给 `packages/mcp`（见 [observability.md](observability.md)）。
+- `skills`（技能发现与目录构建）只依赖 protocol、platform；由 `core/index` 与 `tools` 使用，不经公开 API 导出（见 [skills.md](skills.md)）。
 - `packages/mcp`（`@nocturne/mcp`）只允许依赖 `@nocturne/core` 的 `index` / `protocol/index` 两个入口与 `@modelcontextprotocol/sdk`——与 `apps/*` 同一检查规则；**Core 不依赖 `mcp`**（见 [mcp.md](mcp.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)）。
 - 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。CLI 对 TUI 可惰性 `import()` 主入口，或静态引用 `@nocturne/tui/slash-catalog`、`@nocturne/tui/text-format`、`@nocturne/tui/provider-setup-flow`、`@nocturne/tui/provider-prompts` 与 `@nocturne/tui/provider-login`；命令表不得 import 任何模块，纯文本入口仅复用格式函数、protocol 类型与 `string-width`，三个共享向导入口及其间接依赖也不得加载 Ink/React，保证逐行模式不加载 Ink/React。其余 apps→apps 依赖禁止（[tui.md](../apps/tui.md) 第 9 节）。
 - 桌面端（`apps/desktop/src`）边界更窄：只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`，不引 core 运行时、其他 workspace 包与 Node 内置模块（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 7 节，depcheck `desktop-*` 规则强制）。
@@ -53,7 +54,7 @@
 
 - **负责**：事件信封与事件类型；客户端命令类型（submit、interrupt、respondPermission 等）；跨模块公共数据（消息内容块、用量、工具调用引用）；面向客户端的派生视图 reducer（`SessionView`，Phase 4，见 [view.md](../protocols/view.md)）。
 - **不负责**：任何行为、I/O、可变状态（reducer 是纯函数，状态由调用方持有）。
-- **公开接口**：`RuntimeEvent`、`ClientCommand`、`ContentBlock`、`Usage` 等类型；`createSessionView` / `reduceSessionView` / `replaySessionView`；`firstUserText`（用户消息原文首行）、`parseCompactionThreshold` 与 `estimateTokens`（共享的 token 估算）。
+- **公开接口**：`RuntimeEvent`、`ClientCommand`、`ContentBlock`、`Usage` 等类型；`createSessionView` / `reduceSessionView` / `replaySessionView`；`firstUserText`（用户消息原文首行）、`parseCompactionThreshold` 与 `estimateTokens`（共享的 token 估算）；`BUILTIN_SLASH_COMMANDS`、`parseSkillSlash` 与 `skillListLines`（技能命令名单与斜杠解析，skills.md 第 6 节）。
 - **依赖**：无。**不能依赖**：一切。
 
 ### session
@@ -113,6 +114,14 @@
 - **公开接口**：`loadConfig(platform, { cliArgs })` → `RuntimeConfig`（`base` + `forWorkspace(workspaceRoot)`，见 [config.md](config.md) 第 6 节）。v0.2 增补向导写入与凭据读取（`saveSetupProvider`、`setCredential`、`removeSetupProvider`、`describeProviders`、`credentials`），以及 `runtime.updateProviders`，见 [provider-setup.md](provider-setup.md) 第 6 节。ADR-0022 增补 `shellSetting()` / `setShellSetting(kind, path?)`——`settings.json` 的读取与原子写。
 - **依赖**：protocol、platform。
 - 详见 [config.md](config.md)。
+
+### skills
+
+- **负责**：技能的运行时逻辑——目录扫描与 `SKILL.md` 解析（`discoverSkills`）、模型目录构建与预算（`skillCatalog`）、正文参数与变量渲染（`renderSkill`）。
+- **不负责**：技能类型与客户端可见的纯函数（在 `protocol`）；`skill` 工具的执行管线（`tools`）；发现触发时机、启停与目录更新的编排（`core/index`）。
+- **公开接口**：`discoverSkills`、`skillCatalog`、`renderSkill`、`DiscoveredSkill`——Core 内部模块，不经 `core/index` 重导出；客户端只见 `protocol` 的类型、`parseSkillSlash`、`skillListLines` 与 `BUILTIN_SLASH_COMMANDS`。
+- **依赖**：protocol、platform。**不能依赖**：config、tools、agent、session、provider、context。
+- 详见 [skills.md](skills.md)。
 
 ### diagnostics
 

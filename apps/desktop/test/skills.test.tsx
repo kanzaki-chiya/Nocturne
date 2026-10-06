@@ -1,9 +1,13 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { SkillOverview, SkillsDescription } from "@nocturne/core/protocol";
+import {
+  BUILTIN_SLASH_COMMANDS,
+  type SkillOverview,
+  type SkillsDescription,
+} from "@nocturne/core/protocol";
 import { SkillsPage } from "../src/SkillsPage";
 import { Composer } from "../src/Composer";
-import { completeSlash, parseSlash } from "../src/commands";
+import { completeSlash, parseSlash, COMMANDS, REDIRECTS } from "../src/commands";
 import { fakeServer, withInit } from "./fake-server";
 
 afterEach(cleanup);
@@ -43,6 +47,15 @@ const data = (skills: SkillOverview[]): SkillsDescription => ({
   },
   homeDir: "C:/home/skills",
   scannedDirs: ["C:/home/skills", "Z:/project/.agents/skills"],
+});
+
+it("桌面每个斜杠命令与重定向都在 Core 的 BUILTIN_SLASH_COMMANDS 里", () => {
+  // 技能与命令重名时禁止斜杠调用（skills.md 第 6 节）；新增命令或重定向要同步名单
+  const builtin = new Set(BUILTIN_SLASH_COMMANDS);
+  for (const { name } of COMMANDS) expect(builtin.has(name.slice(1)), name).toBe(true);
+  for (const name of Object.keys(REDIRECTS)) {
+    expect(builtin.has(name.slice(1)), name).toBe(true);
+  }
 });
 
 it("补全命令优先，技能过滤、排序、参数提示及用户调用", () => {

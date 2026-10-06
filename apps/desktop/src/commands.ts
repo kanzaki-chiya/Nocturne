@@ -18,7 +18,7 @@ export type SlashContext = "draft" | "session";
 type RedirectHint = string | Record<SlashContext, string>;
 
 /** 已移除命令 → 提示对应的界面操作。 */
-const REDIRECTS: Record<string, RedirectHint> = {
+export const REDIRECTS: Record<string, RedirectHint> = {
   "/model": { draft: "在输入框右下角切换模型", session: "在底部状态栏切换模型" },
   "/effort": { draft: "在输入框右下角切换思考档位", session: "在底部状态栏切换思考档位" },
   "/preset": { draft: "在输入框下方切换权限预设", session: "在底部状态栏切换权限预设" },

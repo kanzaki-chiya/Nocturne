@@ -26,4 +26,3 @@ export {
 export { modelFieldSourceText } from "./model-settings.js";
 // 编辑工具内置默认表（ADR-0035 §5）：装配处注入 provider 的模型解析
 export { defaultEditToolForModel } from "./edit-tool.js";
-export { discoverSkills, type DiscoveredSkill } from "./skills.js";

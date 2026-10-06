@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { Runtime, RuntimeSession } from "@nocturne/core";
-import { RuntimeCommandError } from "@nocturne/core";
+import { RuntimeCommandError, BUILTIN_SLASH_COMMANDS } from "@nocturne/core";
+import { SLASH_COMMANDS } from "@nocturne/tui/slash-catalog";
 
 import { runSlashCommand } from "../src/commands.js";
 
@@ -656,5 +657,14 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(await runSlashCommand("/exit", fakeSession(), fakeRuntime, io)).toBe("exit");
     expect(await runSlashCommand("/nope", fakeSession(), fakeRuntime, io)).toBe("unknown");
     expect(lines.join("")).toContain("未知命令");
+  });
+
+  it("CLI 每个斜杠命令都在 Core 的 BUILTIN_SLASH_COMMANDS 里", () => {
+    // 技能与命令重名时禁止斜杠调用（skills.md 第 6 节）；CLI 命令表复用
+    // TUI 的 SLASH_COMMANDS（不含 tuiOnly），新增命令要同步名单
+    const builtin = new Set(BUILTIN_SLASH_COMMANDS);
+    for (const cmd of SLASH_COMMANDS.filter((c) => c.tuiOnly !== true)) {
+      expect(builtin.has(cmd.name.slice(1)), cmd.name).toBe(true);
+    }
   });
 });

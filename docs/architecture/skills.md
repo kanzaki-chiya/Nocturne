@@ -53,4 +53,6 @@ SkillOverview 包含名字、层、来源、入口/真实路径与其他入口�
 
 CLI/TUI 的 `/skills` 只读列出当前快照。三个客户端的斜杠补全将命令放在技能前面，过滤停用、覆盖、user-invocable false 与命令冲突，展示名字、argument-hint 和截断说明；发送走 submit.skill。
 
+内置命令名单是 protocol 导出的 `BUILTIN_SLASH_COMMANDS`，内容为三个客户端命令表的并集（TUI 的 `SLASH_COMMANDS` 全集与桌面的 `COMMANDS` ∪ `REDIRECTS`），发现时据此打 `commandConflict`。三个客户端各有测试断言本端每个斜杠命令都在名单内；新增命令必须同步名单，否则与该命令同名的技能会错误获得斜杠调用资格。
+
 桌面设置页在 MCP 后，按用户/所选工作区项目分组，展示预算、来源、状态、只读覆盖开关、横幅原因表、完整路径、说明截断标记、字段 chips、正文预览及支持文件；解析失败汇总可展开路径与行号。目录按钮由 Rust 打开已有目录，只有 `<NOCTURNE_HOME>/skills` 空态按钮允许创建目录；规范按钮打开 agentskills.io。
