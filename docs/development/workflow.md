@@ -50,6 +50,8 @@
 
 在仓库根目录运行（以 `package.json` scripts 为准）：
 
+GitHub Actions 的 `ci` 工作流（`.github/workflows/ci.yml`）在推送 main 与 Pull Request 时于 windows-latest 干净检出上依次跑 typecheck、lint、format:check、depcheck、build、test（不含 cargo test 与冒烟），与发布流水线的检查部分一致。
+
 ```bash
 pnpm install        # 安装依赖
 pnpm typecheck      # tsc --noEmit（src 与 test 两套 tsconfig）
@@ -138,7 +140,7 @@ Phase 2 的 CLI 冒烟（`apps/cli`）：在临时目录生成一个含失败测
 3. **打标签**：审阅变更后 `git tag v<version>` 并推送标签。
 4. **流水线**：`.github/workflows/release.yml` 在 windows-latest 上跑完整检查（typecheck / lint / format / depcheck / build / test）、版本一致性校验、`pnpm release:build`（带签名环境变量）、tgz 安装冒烟，然后 `gh release create --draft`（版本号含 `-` 时另加 `--prerelease`）上传 `setup.exe`、`.sig`、`latest.json`、`nctrn-<version>.tgz`；ubuntu-latest 与 macos-latest 仅对 tgz 做安装冒烟，结果追加进草稿说明。
 5. **审草稿**：核对产物、说明与冒烟结果，确认无误后发布 Release（草稿转正式）。
-6. **npm 发布**：`.github/workflows/publish-npm.yml`（workflow_dispatch，输入版本号）从已发布的 Release 下载 tgz 后 `npm publish`，走 npm 受信发布（OIDC）；预发布号挂 `next` 标签，不动 `latest`；版本号输入只经环境变量进入 shell，并先按 semver 正则校验。
+6. **npm 发布**（暂缓，见 [ADR-0050 修订](../decisions/ADR-0050-distribution.md#修订)；当前命令行版只随 Release 附 tgz）：`.github/workflows/publish-npm.yml`（workflow_dispatch，输入版本号）从已发布的 Release 下载 tgz 后 `npm publish`，走 npm 受信发布（OIDC）；预发布号挂 `next` 标签，不动 `latest`；版本号输入只经环境变量进入 shell，并先按 semver 正则校验。
 
 ### 8.2 预发布版（rc）策略
 

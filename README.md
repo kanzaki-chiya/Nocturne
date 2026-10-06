@@ -2,28 +2,28 @@
 
 Nocturne 是在代码仓库中工作的命令行编程助手。运行 `nctrn` 后，可以用自然语言让它阅读和搜索文件、修改代码、运行命令；它也能调用 MCP 工具、运行 Hooks，并把独立任务交给子代理。会话保存在本地，可以稍后恢复。写入、执行和外部工具调用受权限预设与规则约束。
 
+它也兼容已安装在 `.agents/skills`、`.claude/skills` 和 Nocturne 技能目录里的 Agent Skills，可用 `/技能名 参数` 调用。Windows 另有桌面版，可在「设置」里管理服务商、MCP 服务器（本地命令或远程 HTTP）和技能。
+
 ## 安装
 
-兼容已安装在 `.agents/skills`、`.claude/skills` 和 Nocturne 技能目录里的 Agent Skills；可用 `/技能名 参数` 调用，并在桌面端「设置 › 技能」查看来源与启停。
-
-### npm（命令行）
-
-需要 Node.js 24.14 或更新版本。全局安装 `nctrn` 命令：
-
-```sh
-npm install -g nctrn
-nctrn --version
-```
-
-升级：`npm install -g nctrn@latest`；卸载：`npm uninstall -g nctrn`。
+桌面版安装包和命令行包都在 [GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases) 下载。
 
 ### 桌面版（Windows）
 
-在桌面端「设置 › MCP」添加服务器，支持本地命令和远程 HTTP。
-
-桌面版以 Windows x64 安装包分发（NSIS，按用户安装到 `%LOCALAPPDATA%\Nocturne`，不需要管理员权限）。安装包内随附官方 Node.js 运行时，无需另行安装；需要覆盖时用 `NOCTURNE_NODE` 环境变量指定其他 Node。桌面端会自动检查更新（每 24 小时最多一次，可在「设置 › 常规」关闭），发现新版本时在窗口底部提示，确认后下载安装并重启。安装包未做代码签名，Windows SmartScreen 可能提示「无法验证发行者」，确认来源后选择「仍要运行」。
+下载 `Nocturne_<版本>_x64-setup.exe` 运行即可。桌面版按用户安装到 `%LOCALAPPDATA%\Nocturne`，不需要管理员权限。安装包内随附官方 Node.js 运行时，无需另行安装；需要覆盖时用 `NOCTURNE_NODE` 环境变量指定其他 Node。桌面端会自动检查更新（每 24 小时最多一次，可在「设置 › 常规」关闭），发现新版本时在窗口底部提示，确认后下载安装并重启。安装包未做代码签名，Windows SmartScreen 可能提示「无法验证发行者」，确认来源后选择「仍要运行」。
 
 卸载走系统「应用与功能」或安装目录下的 `uninstall.exe`：只删除安装目录，会话、设置与凭据等用户数据（`%APPDATA%\io.github.kanzaki-chiya.nocturne` 与 `~/.nocturne`）保留。
+
+### 命令行
+
+需要 Node.js 24.14 或更新版本。从 Releases 下载 `nctrn-<版本>.tgz`，用 npm 全局安装（也可以直接把下载地址传给 `npm install -g`）：
+
+```sh
+npm install -g ./nctrn-<版本>.tgz
+nctrn --version
+```
+
+升级时安装新版本的 tgz 即可；卸载：`npm uninstall -g nctrn`。
 
 ### 从源码构建
 

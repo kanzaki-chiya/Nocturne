@@ -115,3 +115,13 @@
 3. **macOS / Linux 冒烟**：失败不阻塞发布，只在 Release 说明里注明（第 4 节）。
 4. **版本号**：首个带分发的版本为 0.6.0，试跑用 `v0.6.0-rc.1`（实施顺序第 3、4 步）。
 5. **公开时机**：维护者看过草稿产物后，在 0.6.0 正式版之前公开仓库；npm 发布与自动更新的端到端验收都排在公开之后。
+
+## 修订
+
+### 2026-10-07：npm 首发暂缓
+
+维护者注册 npm 账号时，注册页持续返回「Access is temporarily restricted」，换设备也一样，首发无法进行。决定：
+
+- 0.6.x 的命令行版经 GitHub Release 附带的 `nctrn-<version>.tgz` 分发，用户以 `npm install -g <tgz 文件或下载地址>` 安装；README 与 Release 说明不再写 `npm install -g nctrn`。
+- `nctrn` 包名、`pack-npm` 产物、tgz 冒烟与 `publish-npm.yml` 保持不变。账号就绪后按 [workflow.md](../development/workflow.md) 第 8 节补做首发与受信发布绑定，届时再恢复 README 的 npm 安装方式。
+- 桌面端分发与自动更新不受影响。
