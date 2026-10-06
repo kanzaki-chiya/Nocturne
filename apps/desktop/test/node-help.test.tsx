@@ -48,7 +48,7 @@ describe("probeRows", () => {
     const rows = probeRows(tooOld);
     expect(rows).toEqual([
       { label: "NOCTURNE_NODE", text: "未设置", cls: "dim" },
-      { label: "随附 Node", text: "此版本不随附", cls: "dim" },
+      { label: "随附 Node", text: "缺失（未随附或已损坏）", cls: "dim" },
       { label: "PATH", text: "C:\\Program Files\\nodejs\\node.exe", cls: undefined },
       { label: "版本", text: "v22.11.0，需要 ≥ 24.14.0", cls: "bad" },
     ]);

@@ -37,7 +37,7 @@ export function probeRows(probe: NodeProbe): Row[] {
   } else if (bundled?.status === "skipped") {
     rows.push({ label: "随附 Node", text: "未检查", cls: "dim" });
   } else {
-    rows.push({ label: "随附 Node", text: "此版本不随附", cls: "dim" });
+    rows.push({ label: "随附 Node", text: "缺失（未随附或已损坏）", cls: "dim" });
   }
 
   const path = stepOf(probe, "path");
