@@ -342,7 +342,7 @@ export async function loadConfig(
     if (!trustedSet.has(canonical)) return undefined;
     const projectPath = paths.join(realRoot, PROJECT_CONFIG_DIR, PROJECT_CONFIG_NAME);
     try {
-      return await loadConfigFile(fs, projectPath);
+      return await loadConfigFile(fs, projectPath, "project");
     } catch {
       return undefined;
     }
@@ -358,7 +358,8 @@ export async function loadConfig(
     let projectFile;
     let projectPresent = false;
     try {
-      projectFile = await loadConfigFile(fs, projectPath);
+      projectFile = await loadConfigFile(fs, projectPath, "project");
+      if (!trusted) warnings.push(...(projectFile?.externalAgentWarnings ?? []));
       projectPresent = projectFile !== undefined;
     } catch (e) {
       // 项目配置损坏：整份忽略 + 警告，不阻塞会话（config.md 第 2 节）
@@ -494,7 +495,7 @@ export async function loadConfig(
       if (input.workspaceRoot) {
         const workspace = await forWorkspace(input.workspaceRoot);
         if (!workspace.projectConfig.trusted && workspace.projectConfig.path) {
-          const project = await loadConfigFile(fs, workspace.projectConfig.path).catch(
+          const project = await loadConfigFile(fs, workspace.projectConfig.path, "project").catch(
             () => undefined,
           );
           for (const [name, entry] of Object.entries(project?.mcp?.servers ?? {})) {
@@ -515,7 +516,7 @@ export async function loadConfig(
       if (input.mode === "create" && input.workspaceRoot) {
         const workspace = await forWorkspace(input.workspaceRoot);
         const project = workspace.projectConfig.path
-          ? await loadConfigFile(fs, workspace.projectConfig.path).catch(() => undefined)
+          ? await loadConfigFile(fs, workspace.projectConfig.path, "project").catch(() => undefined)
           : undefined;
         if (
           Object.keys(project?.mcp?.servers ?? {}).some(

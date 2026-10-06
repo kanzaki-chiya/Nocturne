@@ -126,6 +126,14 @@ function broadRules(name: PermissionPresetName): BroadRule[] {
 /** 生成预设的规则序列（按"后写优先"排序：靠后的规则覆盖靠前的） */
 export function presetRules(name: PermissionPresetName, ctx: PresetContext): PermissionRule[] {
   const rules: PermissionRule[] = broadRules(name);
+  // ADR-0049：委派入口默认须确认，不继承 guarded/smart/bypass 的宽放行。
+  rules.push({
+    kind: "subagent",
+    pattern: "external:*",
+    action: "ask",
+    label: "外部 agent 委派",
+    userOnly: true,
+  });
 
   // 本会话落盘目录可读：模型回读自己的完整输出不触发确认；
   // 只放行当前 sessionId，其他会话附件仍走正常求值

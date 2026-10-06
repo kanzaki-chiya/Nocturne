@@ -44,9 +44,9 @@ function errorResult(code: string, message: string): ToolResult {
 }
 
 /** 步骤 4：把未解析主体经 platform 解析为真实路径（路径类主体） */
-async function resolveSubjects(
+export async function resolveSubjects(
   requests: SubjectRequest[],
-  scope: ExecutionScope,
+  scope: Pick<ExecutionScope, "platform">,
 ): Promise<PermissionSubject[]> {
   const subjects: PermissionSubject[] = [];
   for (const req of requests) {

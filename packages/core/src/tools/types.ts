@@ -454,3 +454,38 @@ export type SubagentOutcome =
 export interface SubagentLauncher {
   launch(request: SubagentRequest, ctx: ToolContext): Promise<SubagentOutcome>;
 }
+
+/** ACP 外部 agent 的注入契约；Core 不依赖协议 SDK。 */
+export interface ExternalAgentInfo {
+  name: string;
+  description?: string | undefined;
+}
+
+export interface ExternalAgentPermissionDecision {
+  decision: "allow" | "deny";
+  source: string;
+}
+
+export interface ExternalAgentRequest {
+  agent: string;
+  task: string;
+  timeoutMs?: number | undefined;
+  cwd: string;
+  transcriptPath: string;
+  requestPermission(subjects: SubjectRequest[]): Promise<ExternalAgentPermissionDecision>;
+}
+
+export interface ExternalAgentOutput {
+  agent: string;
+  agentVersion?: string | undefined;
+  transcriptPath: string;
+  stopReason: string;
+  permissionDecisions: { allowed: number; denied: number };
+}
+
+export type ExternalAgentOutcome = ToolResult<ExternalAgentOutput>;
+
+export interface ExternalAgentConnector {
+  list(): ExternalAgentInfo[];
+  run(request: ExternalAgentRequest, ctx: ToolContext): Promise<ExternalAgentOutcome>;
+}

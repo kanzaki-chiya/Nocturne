@@ -167,10 +167,25 @@ export interface JevReviewerConfig {
 export type SecurityReviewerConfig =
   { backend: "model"; model: ModelRef } | { backend: "off" } | JevReviewerConfig;
 
+/** 用户声明的外部 ACP agent（ADR-0049 §4）；项目层永不生效。 */
+export interface ExternalAgentConfig {
+  name: string;
+  command: string;
+  args: string[];
+  env?: Record<string, string> | undefined;
+  /** 不透明的 ACP mode id，Core 不解释其含义。 */
+  mode?: string | undefined;
+  description?: string | undefined;
+  enabled: boolean;
+}
+
 /** 各层配置字段共用的 schema（config.md 第 2 节）；程序从不改写 config.json */
 export interface ConfigFile {
   skills?: SkillsConfig | undefined;
   mcpWarnings?: string[] | undefined;
+  externalAgentWarnings?: string[] | undefined;
+  /** 只接受用户级声明；重复 name 保留首条并警告。 */
+  externalAgents?: ExternalAgentConfig[] | undefined;
   compaction?: { threshold?: string | number | undefined } | undefined;
   /** false 时只使用本地 models.dev 数据，不联网刷新 */
   modelsDev?: false | undefined;
@@ -240,6 +255,8 @@ export interface ResolvedConfig {
     /** 定义该条目的配置文件所在目录；MCP 相对 cwd 按会话工作区解析 */
     dir?: string | undefined;
   }[];
+  /** 用户级合并结果，包含未启用条目；内置预设不会自动并入。 */
+  externalAgents: ExternalAgentConfig[];
   /** 加载与降级过程中产生的警告（人读说明） */
   warnings: string[];
 }

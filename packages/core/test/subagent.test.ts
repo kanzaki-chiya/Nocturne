@@ -7,7 +7,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createRuntime, type Runtime, type RuntimeSession } from "../src/index.js";
+import {
+  createRuntime,
+  createPlatform,
+  type ExternalAgentConnector,
+  type ExternalAgentPermissionDecision,
+  type ExternalAgentRequest,
+  type Runtime,
+  type RuntimeSession,
+} from "../src/index.js";
 import {
   FakeProvider,
   ProviderError,
@@ -15,9 +23,13 @@ import {
   type ModelInfo,
   type ModelRequest,
 } from "../src/provider/index.js";
-import type { RuntimeEvent } from "../src/protocol/index.js";
+import {
+  PERMISSION_PRESET_NAMES,
+  type JsonSchema,
+  type RuntimeEvent,
+} from "../src/protocol/index.js";
 import { type SecurityReviewer, createRulePolicy } from "../src/permission/index.js";
-import type { McpConnector, ToolDefinition } from "../src/tools/index.js";
+import { createTaskTool, type McpConnector, type ToolDefinition } from "../src/tools/index.js";
 
 const tmpRoots: string[] = [];
 afterEach(() => {
@@ -53,6 +65,7 @@ interface RuntimeExtra {
   mcp?: McpConnector;
   mcpServers?: { name: string; command: string; origin: "user" | "project" }[];
   policy?: ReturnType<typeof createRulePolicy>;
+  externalAgents?: ExternalAgentConnector;
 }
 
 async function makeRuntime(
@@ -73,6 +86,7 @@ async function makeRuntime(
     ...(extra.mcp !== undefined ? { mcp: extra.mcp } : {}),
     ...(extra.mcpServers !== undefined ? { mcpServers: extra.mcpServers } : {}),
     ...(extra.policy !== undefined ? { policy: extra.policy } : {}),
+    ...(extra.externalAgents !== undefined ? { externalAgents: extra.externalAgents } : {}),
   });
   return { runtime, ws, provider, sessionsDir };
 }
@@ -100,7 +114,10 @@ const parentTaskScript = (input: Record<string, unknown>): FakeScript[] => [
 ];
 
 const taskCompleted = (events: RuntimeEvent[]) =>
-  events.find((e) => e.type === "tool.completed" && e.payload.name === "task");
+  events.find(
+    (e): e is Extract<RuntimeEvent, { type: "tool.completed" }> =>
+      e.type === "tool.completed" && e.payload.name === "task",
+  );
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -1425,6 +1442,462 @@ describe("smart 子代理继承审查器", () => {
       expect(log).toContain(`"verdict":"${verdict}"`);
       expect(log).not.toContain('"type":"permission.requested"');
       await session.close();
+    });
+  }
+});
+
+/** 离线 connector seam：所有调用使用真实 Core 装配，只有 ACP 进程被替换。 */
+function fakeExternalAgent(
+  run?: (request: ExternalAgentRequest) => Promise<unknown>,
+): ExternalAgentConnector {
+  return {
+    list: () => [{ name: "offline", description: "离线外部代理" }],
+    async run(request) {
+      const content = await run?.(request);
+      return {
+        status: "ok",
+        modelContent: typeof content === "string" ? content : "外部结果",
+        output: {
+          agent: request.agent,
+          transcriptPath: request.transcriptPath,
+          stopReason: "end_turn",
+          permissionDecisions: { allowed: 0, denied: 0 },
+        },
+      };
+    },
+  };
+}
+
+describe("external agent：Core task 与权限装配", () => {
+  it.each(["preset", "tools", "outputSchema"])("agent 与 %s 互斥，权限前拒绝", async (field) => {
+    let calls = 0;
+    const externalAgents = fakeExternalAgent(async () => {
+      calls += 1;
+    });
+    const value = field === "preset" ? "general" : field === "tools" ? [] : {};
+    const { runtime } = await makeRuntime(
+      parentTaskScript({ task: "x", agent: "offline", [field]: value }),
+      { externalAgents },
+    );
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "go" });
+    const completed = taskCompleted(events);
+    expect(completed?.type === "tool.completed" && completed.payload.error?.code).toBe(
+      "invalid_input",
+    );
+    expect(events.some((e) => e.type === "permission.requested" || e.type === "tool.started")).toBe(
+      false,
+    );
+    expect(calls).toBe(0);
+    await session.close();
+  });
+
+  it("未知 agent 返回 invalid_input 并列出 connector 的可用名称", async () => {
+    const { runtime } = await makeRuntime(parentTaskScript({ task: "x", agent: "missing" }), {
+      externalAgents: fakeExternalAgent(),
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "go" });
+    const completed = taskCompleted(events);
+    expect(completed?.type === "tool.completed" && completed.payload.error?.code).toBe(
+      "invalid_input",
+    );
+    expect(completed?.type === "tool.completed" && completed.payload.modelContent).toContain(
+      "offline",
+    );
+    expect(events.some((e) => e.type === "tool.started")).toBe(false);
+    await session.close();
+  });
+
+  it("没有外部代理时 schema/描述不暴露 agent；外部独占时 agent 必填", () => {
+    const launcher = {
+      launch: async () => ({
+        status: "error" as const,
+        error: { code: "subagent_unavailable", message: "schema-only fixture" },
+      }),
+    };
+    const builtin = createTaskTool(launcher);
+    expect(builtin.inputSchema.properties).not.toHaveProperty("agent");
+    expect(builtin.description).not.toContain("外部 agent");
+    const exclusive = createTaskTool(undefined, fakeExternalAgent());
+    expect(exclusive.inputSchema.required).toEqual(["task", "agent"]);
+    expect(exclusive.inputSchema.properties).not.toHaveProperty("preset");
+    expect(exclusive.description).toContain("offline（离线外部代理）");
+    expect(exclusive.description).toContain("检查点");
+    expect(
+      exclusive.permissionSubjects(
+        { task: "x", agent: "offline" },
+        {
+          cwd: "/workspace",
+          workspaceRoot: "/workspace",
+          paths: createPlatform().paths,
+        },
+      ),
+    ).toEqual([{ kind: "subagent", target: "external:offline" }]);
+  });
+
+  it.each(PERMISSION_PRESET_NAMES)("%s 外部入口默认 ask", (preset) => {
+    const policy = createRulePolicy({
+      workspaceRoot: "/workspace",
+      caseSensitive: true,
+      preset,
+    });
+    const evaluation = policy.evaluate([{ kind: "subagent", target: "external:offline" }]);
+    expect(evaluation.decision.action).toBe("ask");
+    expect(evaluation.userOnly).toBe(true);
+  });
+
+  it("入口走父权限管线，批准后仅执行 external 分流，附件路径由父会话和 callId 构造", async () => {
+    let request: ExternalAgentRequest | undefined;
+    const { runtime, ws, provider, sessionsDir } = await makeRuntime(
+      parentTaskScript({ task: "独立任务", agent: "offline", timeoutMs: 10_000 }),
+      {
+        interactive: true,
+        externalAgents: fakeExternalAgent(async (r) => {
+          request = r;
+        }),
+      },
+    );
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    session.subscribe((e) => {
+      if (e.type === "permission.requested") {
+        expect(e.payload.subjects).toMatchObject([
+          { kind: "subagent", target: "external:offline" },
+        ]);
+        void session.respondPermission(e.payload.requestId, { decision: "allow" });
+      }
+    });
+    await session.submit({ text: "go" });
+    const started = events.find((e) => e.type === "tool.started" && e.payload.name === "task");
+    if (started?.type !== "tool.started") throw new Error("没有委派入口");
+    expect(request).toMatchObject({
+      agent: "offline",
+      task: "独立任务",
+      timeoutMs: 10_000,
+      cwd: ws,
+      transcriptPath: path.join(
+        sessionsDir,
+        "attachments",
+        session.id,
+        "external",
+        `${started.payload.callId}.jsonl`,
+      ),
+    });
+    expect(provider.requests.some(isChildRequest)).toBe(false);
+    expect(await runtime.listSessions({ includeSubagents: true })).toHaveLength(1);
+    expect(taskCompleted(events)?.payload).toMatchObject({
+      status: "ok",
+      modelContent: "外部结果",
+    });
+    await session.close();
+  });
+
+  it("执行期 ask 非交互 deny，使用真实 source，不写父权限事件", async () => {
+    const decisions: ExternalAgentPermissionDecision[] = [];
+    const { runtime } = await makeRuntime(parentTaskScript({ task: "x", agent: "offline" }), {
+      interactive: true,
+      externalAgents: fakeExternalAgent(async (r) => {
+        decisions.push(await r.requestPermission([{ kind: "shell", target: "*" }]));
+        decisions.push(
+          await r.requestPermission([{ kind: "edit", target: path.join(r.cwd, "new.txt") }]),
+        );
+      }),
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    session.subscribe((e) => {
+      if (e.type === "permission.requested")
+        void session.respondPermission(e.payload.requestId, { decision: "allow" });
+    });
+    await session.submit({ text: "go" });
+    expect(decisions).toEqual([
+      { decision: "deny", source: "non_interactive" },
+      { decision: "deny", source: "non_interactive" },
+    ]);
+    expect(events.filter((e) => e.type === "permission.requested")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "permission.resolved")).toHaveLength(1);
+    await session.close();
+  });
+
+  it("未知 read 路径保持未知而不是工作区路径；多 location 任一 ask 则整体拒绝", async () => {
+    const outside = path.join(makeTmp("nct-external-location-"), "outside.txt");
+    const decisions: ExternalAgentPermissionDecision[] = [];
+    const { runtime } = await makeRuntime(parentTaskScript({ task: "x", agent: "offline" }), {
+      interactive: true,
+      externalAgents: fakeExternalAgent(async (r) => {
+        const inside = path.join(r.cwd, "inside.txt");
+        decisions.push(await r.requestPermission([{ kind: "read", target: inside }]));
+        decisions.push(await r.requestPermission([{ kind: "read", target: "*" }]));
+        decisions.push(
+          await r.requestPermission([
+            { kind: "read", target: inside },
+            { kind: "read", target: outside },
+          ]),
+        );
+      }),
+    });
+    const session = await makeSession(runtime);
+    session.subscribe((e) => {
+      if (e.type === "permission.requested") {
+        void session.respondPermission(e.payload.requestId, { decision: "allow" });
+      }
+    });
+    await session.submit({ text: "go" });
+    expect(decisions).toEqual([
+      { decision: "allow", source: "rule" },
+      { decision: "deny", source: "non_interactive" },
+      { decision: "deny", source: "non_interactive" },
+    ]);
+    await session.close();
+  });
+
+  it("父会话 Grant 只读继承；执行期拒绝不生成新 Grant", async () => {
+    const outside = makeTmp("nct-external-outside-");
+    const target = path.join(outside, "data.txt");
+    writeFileSync(target, "content");
+    const decisions: ExternalAgentPermissionDecision[] = [];
+    const { runtime } = await makeRuntime(
+      [
+        [
+          { type: "tool_call", toolCallId: "read", name: "read", input: { path: target } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        ...parentTaskScript({ task: "x", agent: "offline" }),
+      ],
+      {
+        interactive: true,
+        externalAgents: fakeExternalAgent(async (r) => {
+          decisions.push(await r.requestPermission([{ kind: "read", target }]));
+          decisions.push(await r.requestPermission([{ kind: "edit", target }]));
+          decisions.push(await r.requestPermission([{ kind: "edit", target }]));
+        }),
+      },
+    );
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    session.subscribe((e) => {
+      if (e.type === "permission.requested") {
+        void session.respondPermission(e.payload.requestId, {
+          decision: "allow",
+          ...(e.payload.subjects[0]?.kind === "read" ? { remember: "session" as const } : {}),
+        });
+      }
+    });
+    await session.submit({ text: "go" });
+    expect(decisions).toEqual([
+      { decision: "allow", source: "grant" },
+      { decision: "deny", source: "non_interactive" },
+      { decision: "deny", source: "non_interactive" },
+    ]);
+    expect(
+      events.filter((e) => e.type === "permission.resolved" && e.payload.remember),
+    ).toHaveLength(1);
+    expect(events.filter((e) => e.type === "permission.requested")).toHaveLength(2);
+    await session.close();
+  });
+
+  it.each(["allow", "block", "unsure"] as const)(
+    "smart 执行期继承审查器：%s，不记录父审查事件",
+    async (verdict) => {
+      const outside = path.join(makeTmp("nct-external-smart-"), "new.txt");
+      const decisions: ExternalAgentPermissionDecision[] = [];
+      const inputs: Parameters<SecurityReviewer["review"]>[0][] = [];
+      const reviewer: SecurityReviewer = {
+        async review(input) {
+          inputs.push(input);
+          return { verdict, reason: "离线审查" };
+        },
+      };
+      const { runtime } = await makeRuntime(parentTaskScript({ task: "x", agent: "offline" }), {
+        interactive: true,
+        reviewer,
+        externalAgents: fakeExternalAgent(async (r) => {
+          decisions.push(await r.requestPermission([{ kind: "edit", target: outside }]));
+        }),
+      });
+      const session = await runtime.createSession({
+        model: "fake/fake-model",
+        permissionPreset: "smart",
+      });
+      const events = collect(session);
+      session.subscribe((e) => {
+        if (e.type === "permission.requested")
+          void session.respondPermission(e.payload.requestId, { decision: "allow" });
+      });
+      await session.submit({ text: "只审查这个任务" });
+      expect(inputs).toHaveLength(1);
+      expect(inputs[0]?.recentUserMessages).toEqual(["只审查这个任务"]);
+      expect(decisions).toEqual([
+        {
+          decision: verdict === "allow" ? "allow" : "deny",
+          source: verdict === "unsure" ? "non_interactive" : "reviewer",
+        },
+      ]);
+      expect(events.some((e) => e.type === "permission.reviewed")).toBe(false);
+      await session.close();
+    },
+  );
+
+  it("内置 disabled、外部 enabled 仍注册 task；缺少 agent 不调用 connector", async () => {
+    let calls = 0;
+    const { runtime, provider } = await makeRuntime(parentTaskScript({ task: "x" }), {
+      subagent: { enabled: false },
+      externalAgents: fakeExternalAgent(async () => {
+        calls += 1;
+      }),
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "go" });
+    expect(
+      provider.requests[0]?.tools.find((t) => t.name === "task")?.inputSchema.required,
+    ).toEqual(["task", "agent"]);
+    expect(taskCompleted(events)?.payload).toMatchObject({ error: { code: "invalid_input" } });
+    expect(calls).toBe(0);
+    await session.close();
+  });
+
+  it("只有外部代理也可完成任务，超预算复用父附件截断落盘", async () => {
+    const content = "外".repeat(40_000);
+    const { runtime } = await makeRuntime(parentTaskScript({ task: "x", agent: "offline" }), {
+      subagent: { enabled: false },
+      autoApproveAsk: true,
+      externalAgents: fakeExternalAgent(async () => content),
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "go" });
+    const completed = taskCompleted(events);
+    if (completed?.type !== "tool.completed" || completed.payload.spillPath === undefined) {
+      throw new Error("外部结果没有走截断落盘路径");
+    }
+    expect(completed.payload.status).toBe("ok");
+    expect(readFileSync(completed.payload.spillPath, "utf8")).toBe(content);
+    expect(completed.payload.modelContent).toContain(completed.payload.spillPath);
+    await session.close();
+  });
+
+  it("nested task schema/描述隐藏 external；恢复子会话也不暴露外部 agent", async () => {
+    const childSchemas: JsonSchema[] = [];
+    const provider = new FakeProvider({
+      handler: (r) => {
+        if (isChildRequest(r)) {
+          const task = r.tools.find((t) => t.name === "task");
+          if (task !== undefined) {
+            childSchemas.push(task.inputSchema);
+            expect(task.description).not.toContain("外部 agent");
+          }
+          return [
+            { type: "tool_call", toolCallId: "finish", name: "finish", input: { result: "done" } },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return r.messages.some((m) => m.role === "tool")
+          ? [{ type: "finish", reason: "stop" }]
+          : (parentTaskScript({ task: "x", preset: "general" })[0] ?? []);
+      },
+    });
+    const { runtime } = await makeRuntime(undefined, {
+      provider,
+      subagent: { maxDepth: 2 },
+      autoApproveAsk: true,
+      externalAgents: fakeExternalAgent(),
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "go" });
+    expect(childSchemas).toHaveLength(1);
+    expect(childSchemas[0]?.properties).not.toHaveProperty("agent");
+    const completed = taskCompleted(events);
+    if (completed?.type !== "tool.completed") throw new Error("缺少子会话结果");
+    const output = completed.payload.output;
+    if (
+      output === null ||
+      typeof output !== "object" ||
+      !("childSessionId" in output) ||
+      typeof output.childSessionId !== "string"
+    ) {
+      throw new Error("缺少 childSessionId");
+    }
+    const child = await runtime.resumeSession(output.childSessionId);
+    await child.submit({ text: "恢复调查" });
+    const restoredTask = provider.requests.at(-1)?.tools.find((t) => t.name === "task");
+    expect(restoredTask?.inputSchema.properties).not.toHaveProperty("agent");
+    await child.close();
+    await session.close();
+  });
+
+  for (const firstKind of ["external", "builtin"] as const) {
+    it(`${firstKind} 占位会阻止另一类子代理，共享 Runtime limiter，结束后释放`, async () => {
+      let entered!: () => void;
+      let release!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const externalAgents = fakeExternalAgent(async () => {
+        entered();
+        await held;
+      });
+      const provider = new FakeProvider({
+        async handler(r) {
+          if (isChildRequest(r)) {
+            entered();
+            await held;
+            return [
+              {
+                type: "tool_call",
+                toolCallId: "finish",
+                name: "finish",
+                input: { result: "done" },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          if (r.messages.some((m) => m.role === "tool"))
+            return [{ type: "finish", reason: "stop" }];
+          const text = r.messages.find((m) => m.role === "user")?.content;
+          const external = text?.some((b) => b.type === "text" && b.text === "external") ?? false;
+          return (
+            parentTaskScript({
+              task: "x",
+              ...(external ? { agent: "offline" } : { preset: "general" }),
+            })[0] ?? []
+          );
+        },
+      });
+      const { runtime } = await makeRuntime(undefined, {
+        provider,
+        externalAgents,
+        autoApproveAsk: true,
+        subagent: { maxConcurrent: 1 },
+      });
+      const first = await makeSession(runtime);
+      const second = await makeSession(runtime);
+      const secondEvents = collect(second);
+      const firstTurn = first.submit({ text: firstKind });
+      try {
+        await started;
+        await second.submit({ text: firstKind === "external" ? "builtin" : "external" });
+        expect(taskCompleted(secondEvents)?.payload).toMatchObject({
+          error: { code: "subagent_concurrency" },
+        });
+      } finally {
+        release();
+        await firstTurn;
+      }
+      const third = await makeSession(runtime);
+      const thirdEvents = collect(third);
+      await third.submit({ text: firstKind === "external" ? "builtin" : "external" });
+      expect(taskCompleted(thirdEvents)?.payload.status).toBe("ok");
+      await third.close();
+      await second.close();
+      await first.close();
     });
   }
 });

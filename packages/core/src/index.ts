@@ -110,6 +110,7 @@ import type {
   ImageMimeType,
   ModelRef,
   PermissionReply,
+  PermissionSubject,
   QuestionReply,
   ReasoningEffort,
   ReasoningEffortLevel,
@@ -144,6 +145,11 @@ import {
   createSkillTool,
   createToolExecutor,
   createToolRegistry,
+  resolveSubjects,
+  type ExternalAgentConnector,
+  type ExternalAgentRequest,
+  type SubagentLauncher,
+  type ToolContext,
   type ExecutionEnvironment,
   type HookRunner,
   type McpConnector,
@@ -233,6 +239,8 @@ export interface RuntimeOptions {
    * 用户级开关是权限规则 `subagent * → deny`。
    */
   subagent?: RuntimeSubagentOptions | undefined;
+  /** ADR-0049：外部 agent 连接器；Core 只负责委派、权限和共享并发限制。 */
+  externalAgents?: ExternalAgentConnector | undefined;
 }
 
 export interface RuntimeSubagentOptions {
@@ -1348,66 +1356,146 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     };
     markProvidersDirty.add(markDirty);
     installSkills();
+    // 外部 agent 仅在根会话可用；恢复的子会话也不能暴露外部委派入口。
+    const externalConnector = meta.parent === undefined ? options.externalAgents : undefined;
+    const hasExternalAgents = (externalConnector?.list().length ?? 0) > 0;
 
     // 子代理（subagent.md 第 3 节）：launcher 捕获本会话装配上下文；
     // task 与内置工具同一注册表——Agent Loop 无工具名分支
-    if (subagentEnabled) {
-      const launcher = createSubagentLauncher({
-        checkpoint: execEnv.checkpoint,
-        store,
-        sessionsDir,
-        platform,
-        diagnostics,
-        instructions,
-        environment,
-        model: () =>
-          resolveModelRole(
-            sessionRegistry,
-            config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.task,
-            "task",
-          ) ?? model,
-        permissionPreset: () => session.state().config.permissionPreset,
-        visionModel: () =>
-          resolveModelRole(
-            sessionRegistry,
-            config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.vision,
-            "vision",
-          ),
-        reviewer: getReviewer,
-        recentUserMessages,
-        // 子会话继承父会话的思考档位（ADR-0018 §4；受子模型可用档位约束，
-        // 就近降档在 launcher 内完成）
-        reasoningEffort: () => session.state().config.reasoningEffort,
-        compactionThreshold: () =>
-          config?.resolvedSettings(session.state().meta.workspaceRoot).compactionThreshold,
-        nocturneVersion: options.version ?? NOCTURNE_VERSION,
-        turnConfig,
-        parentFailedSignal: session.failedSignal,
-        // ADR-0031 §3：本会话即根会话（depth 0 launcher 只挂在顶层会话上），
-        // 嵌套子代理沿 deps 透传同一个根 ID
-        rootSessionId: session.id,
-        makePolicy: (childSessionId) =>
-          buildPolicy(session.state().config.permissionPreset, childSessionId),
-        makeHookRunner,
-        mcpTools: () => mcpSession?.tools() ?? [],
-        skills: () => ({
-          ...catalog,
-          entries: skillDiscovery.skills.map((s, i) => ({ ...s, ...catalog.skills[i] })),
-        }),
-        shellEnvStrip,
-        // 子会话与父会话共用同一 shell 解析（ADR-0022）：切换即时生效；
-        // 子会话环境信息的 Shell 行在派生时重新生成
-        shell: shellResolver,
-        shellLine: () => shellResolver.environmentLine(),
-        grants: {
-          session: sessionGrants,
-          ...(ws?.grants !== undefined ? { project: ws.grants } : {}),
-        },
-        depth: 0,
-        limits: subagentLimits,
-        limiter: subagentLimiter,
-      });
-      tools.register(createTaskTool(launcher));
+    if (subagentEnabled || hasExternalAgents) {
+      let launcher: SubagentLauncher | undefined;
+      if (subagentEnabled)
+        launcher = createSubagentLauncher({
+          checkpoint: execEnv.checkpoint,
+          store,
+          sessionsDir,
+          platform,
+          diagnostics,
+          instructions,
+          environment,
+          model: () =>
+            resolveModelRole(
+              sessionRegistry,
+              config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.task,
+              "task",
+            ) ?? model,
+          permissionPreset: () => session.state().config.permissionPreset,
+          visionModel: () =>
+            resolveModelRole(
+              sessionRegistry,
+              config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.vision,
+              "vision",
+            ),
+          reviewer: getReviewer,
+          recentUserMessages,
+          // 子会话继承父会话的思考档位（ADR-0018 §4；受子模型可用档位约束，
+          // 就近降档在 launcher 内完成）
+          reasoningEffort: () => session.state().config.reasoningEffort,
+          compactionThreshold: () =>
+            config?.resolvedSettings(session.state().meta.workspaceRoot).compactionThreshold,
+          nocturneVersion: options.version ?? NOCTURNE_VERSION,
+          turnConfig,
+          parentFailedSignal: session.failedSignal,
+          // ADR-0031 §3：本会话即根会话（depth 0 launcher 只挂在顶层会话上），
+          // 嵌套子代理沿 deps 透传同一个根 ID
+          rootSessionId: session.id,
+          makePolicy: (childSessionId) =>
+            buildPolicy(session.state().config.permissionPreset, childSessionId),
+          makeHookRunner,
+          mcpTools: () => mcpSession?.tools() ?? [],
+          skills: () => ({
+            ...catalog,
+            entries: skillDiscovery.skills.map((s, i) => ({ ...s, ...catalog.skills[i] })),
+          }),
+          shellEnvStrip,
+          // 子会话与父会话共用同一 shell 解析（ADR-0022）：切换即时生效；
+          // 子会话环境信息的 Shell 行在派生时重新生成
+          shell: shellResolver,
+          shellLine: () => shellResolver.environmentLine(),
+          grants: {
+            session: sessionGrants,
+            ...(ws?.grants !== undefined ? { project: ws.grants } : {}),
+          },
+          depth: 0,
+          limits: subagentLimits,
+          limiter: subagentLimiter,
+        });
+      const externalRunner =
+        hasExternalAgents && externalConnector !== undefined
+          ? {
+              list: () => externalConnector.list(),
+              async run(
+                request: Pick<ExternalAgentRequest, "agent" | "task" | "timeoutMs">,
+                ctx: ToolContext,
+              ) {
+                if (!subagentLimiter.tryAcquire()) {
+                  const message = `子代理并发上限已满（${subagentLimits.maxConcurrent}），请稍后重试`;
+                  return {
+                    status: "error" as const,
+                    modelContent: message,
+                    error: { code: "subagent_concurrency", message },
+                  };
+                }
+                try {
+                  const externalGate = createPolicyGate(
+                    {
+                      evaluate: (subjects, evaluationOptions) =>
+                        buildPolicy(session.state().config.permissionPreset).evaluate(
+                          subjects,
+                          evaluationOptions,
+                        ),
+                    },
+                    {
+                      interactive: false,
+                      preset: () => session.state().config.permissionPreset,
+                      reviewer: getReviewer,
+                      cwd: meta.cwd,
+                      recentUserMessages,
+                      caseSensitive: platform.caseSensitivePaths,
+                      hooks: hookRunner,
+                    },
+                  );
+                  return await externalConnector.run(
+                    {
+                      ...request,
+                      cwd: meta.workspaceRoot,
+                      transcriptPath: paths.join(
+                        sessionsDir,
+                        "attachments",
+                        session.id,
+                        "external",
+                        `${ctx.callId}.jsonl`,
+                      ),
+                      async requestPermission(requests) {
+                        const subjects: PermissionSubject[] = [];
+                        for (const subject of requests) {
+                          if (
+                            (subject.kind === "read" || subject.kind === "edit") &&
+                            subject.target === "*"
+                          ) {
+                            // ACP 没有 location 时资源未知，不能解析为工作区内的字面路径。
+                            subjects.push({ ...subject });
+                          } else {
+                            subjects.push(...(await resolveSubjects([subject], { platform })));
+                          }
+                        }
+                        // 不给 Turn 事件出口和 Grant 落点：只读继承，判定由 connector 审计。
+                        const outcome = await externalGate.check(subjects, ctx.callId, ctx.signal);
+                        return {
+                          decision: outcome.decision.action === "allow" ? "allow" : "deny",
+                          source: outcome.decision.source,
+                        };
+                      },
+                    },
+                    ctx,
+                  );
+                } finally {
+                  subagentLimiter.release();
+                }
+              },
+            }
+          : undefined;
+      tools.register(createTaskTool(launcher, externalRunner));
     }
 
     let controller: AbortController | undefined;
@@ -2678,6 +2766,7 @@ export {
   type Clipboard,
   SHELL_KINDS,
   type DetectedShell,
+  type PathOps,
   type PipeProcess,
   type PipeSpawnOptions,
   type Platform,
@@ -2688,6 +2777,12 @@ export { completeFileRefs, type FileCompletion, type FileIndexEntry } from "./to
 // MCP / Hook 装配点类型（modules.md：注入方是 apps；实现位于 packages/mcp）
 export type {
   HookCallInput,
+  ExternalAgentConnector,
+  ExternalAgentInfo,
+  ExternalAgentOutcome,
+  ExternalAgentOutput,
+  ExternalAgentPermissionDecision,
+  ExternalAgentRequest,
   HookInput,
   HookOutput,
   HookRunner,

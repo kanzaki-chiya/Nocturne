@@ -364,7 +364,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
         };
       }
     }
-    const presetHit = s.kind === "edit" ? lastMatch(preset, s) : undefined;
+    const presetHit = lastMatch(preset, s);
     const userOnly =
       (s.kind === "shell" && isCredentialCommand(s.target)) ||
       presetHit?.rule?.userOnly === true ||

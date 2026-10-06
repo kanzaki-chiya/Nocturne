@@ -11,10 +11,21 @@ import {
   PERMISSION_PRESET_NAMES,
   parseCompactionThreshold,
 } from "../protocol/index.js";
-import type { ConfigFile, McpServerEntry } from "./types.js";
+import type { ConfigFile, ExternalAgentConfig, McpServerEntry } from "./types.js";
 import { ConfigError } from "./errors.js";
 
 const subjectKindSchema = z.enum(["read", "edit", "shell", "network", "mcp", "subagent"]);
+
+const externalAgentSchema = z.object({
+  // (?![\s\S]) 要求真实字符串末尾，不接受 $ 可匹配的末尾换行。
+  name: z.string().regex(/^[a-z0-9-]+$(?![\s\S])/),
+  command: z.string().min(1),
+  args: z.array(z.string()),
+  env: z.record(z.string(), z.string()).optional(),
+  mode: z.string().min(1).optional(),
+  description: z.string().optional(),
+  enabled: z.boolean(),
+});
 
 /** 逐模型协议（ADR-0026；Responses 由 ADR-0031 §1 接入）：models/userModels 的 protocol 字段取值 */
 const modelProtocolSchema = z.enum(["openai-compatible", "anthropic", "openai-responses"]);
@@ -341,6 +352,7 @@ const configFileSchema = z.object({
     })
     .optional(),
   hooks: z.partialRecord(hookPointSchema, z.array(hookEntrySchema)).optional(),
+  externalAgents: z.array(z.unknown()).optional(),
   mcp: z
     .object({
       servers: z.record(z.string(), z.unknown()).optional(),
@@ -373,7 +385,7 @@ const CREDENTIAL_NAME = /key|token|secret|password|credential|auth/i;
 
 /**
  * 凭据字段硬拒绝（config.md 第 3 节）：providers 条目的内联凭据字段、
- * mcp.servers.*.env 的疑似凭据字面量。parseConfigFile 与 providers.json
+ * MCP 与外部 agent env 的疑似凭据字面量。parseConfigFile 与 providers.json
  * 的加载共用——配置文件的任何位置都不允许出现密钥值。
  */
 export function rejectCredentialKeys(raw: unknown, filePath: string): void {
@@ -391,6 +403,27 @@ export function rejectCredentialKeys(raw: unknown, filePath: string): void {
           throw new ConfigError(
             "config_credential_rejected",
             `provider 条目不允许内联凭据字段 "${key}"；凭据只经环境变量进入，请改用 apiKeyEnv 指定变量名`,
+            filePath,
+          );
+        }
+      }
+    }
+  }
+  const agents = "externalAgents" in raw ? raw.externalAgents : undefined;
+  if (Array.isArray(agents)) {
+    for (const [index, agent] of (agents as unknown[]).entries()) {
+      if (typeof agent !== "object" || agent === null || Array.isArray(agent)) continue;
+      const env = "env" in agent ? agent.env : undefined;
+      if (typeof env !== "object" || env === null || Array.isArray(env)) continue;
+      for (const [key, value] of Object.entries(env)) {
+        if (
+          typeof value === "string" &&
+          (CREDENTIAL_NAME.test(key) || /^(sk-|ghp_|ntn_|Bearer\s)/i.test(value)) &&
+          !ENV_REFERENCE.test(value)
+        ) {
+          throw new ConfigError(
+            "config_credential_rejected",
+            `externalAgents.${index}.env.${key} 疑似内联凭据；请写成 "${key}": "\${${key}}" 引用环境变量`,
             filePath,
           );
         }
@@ -425,7 +458,27 @@ export function rejectCredentialKeys(raw: unknown, filePath: string): void {
  * 校验一份已解析的 JSON 为 ConfigFile。
  * 抛出 ConfigError；调用方决定快速失败（用户配置）还是忽略（项目配置）。
  */
-export function parseConfigFile(raw: unknown, filePath: string): ConfigFile {
+export function parseConfigFile(
+  raw: unknown,
+  filePath: string,
+  layer: "user" | "project" = "user",
+): ConfigFile {
+  const externalAgentWarnings: string[] = [];
+  // 项目中的任意命令声明永不生效；先剥离，避免非法段拖累其他合法字段。
+  if (
+    layer === "project" &&
+    typeof raw === "object" &&
+    raw !== null &&
+    !Array.isArray(raw) &&
+    "externalAgents" in raw &&
+    Object.hasOwn(raw, "externalAgents")
+  ) {
+    const { externalAgents: _ignored, ...fields } = raw;
+    raw = fields;
+    externalAgentWarnings.push(
+      `项目配置 ${filePath} 中的 externalAgents 配置已忽略（只允许用户级配置，信任项目也不生效）`,
+    );
+  }
   rejectCredentialKeys(raw, filePath);
   const parsed = configFileSchema.safeParse(raw);
   if (!parsed.success) {
@@ -442,6 +495,20 @@ export function parseConfigFile(raw: unknown, filePath: string): ConfigFile {
     if (MCP_ID.test(id) && result.success) servers[id] = result.data;
     else mcpWarnings.push(`mcp_config_invalid：${filePath} 中服务器 ${id} 无效，已忽略`);
   }
-  const { mcp, ...fields } = parsed.data;
-  return { ...fields, ...(mcp ? { mcp: { servers }, mcpWarnings } : {}) };
+  const externalAgents: ExternalAgentConfig[] = [];
+  for (const [index, entry] of (parsed.data.externalAgents ?? []).entries()) {
+    const result = externalAgentSchema.safeParse(entry);
+    if (result.success) externalAgents.push(result.data);
+    else
+      externalAgentWarnings.push(
+        `external_agent_config_invalid：${filePath} 中 externalAgents.${index} 无效，已忽略`,
+      );
+  }
+  const { mcp, externalAgents: configuredAgents, ...fields } = parsed.data;
+  return {
+    ...fields,
+    ...(mcp ? { mcp: { servers }, mcpWarnings } : {}),
+    ...(configuredAgents ? { externalAgents } : {}),
+    ...(externalAgentWarnings.length > 0 ? { externalAgentWarnings } : {}),
+  };
 }

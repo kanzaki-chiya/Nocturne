@@ -1,7 +1,7 @@
 export * from "./types.js";
 export { createSkillTool } from "./builtin/skill.js";
 export { createToolRegistry } from "./registry.js";
-export { createToolExecutor } from "./executor.js";
+export { createToolExecutor, resolveSubjects } from "./executor.js";
 export { createExecutionScope } from "./scope.js";
 export { createAttachmentStore, type AttachmentStore } from "./attachments.js";
 export {

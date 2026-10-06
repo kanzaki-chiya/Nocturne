@@ -284,6 +284,7 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     turn: {},
     hooks: {},
     mcpServers: [],
+    externalAgents: [],
     warnings: [],
   };
   const providers = new Map<string, ProviderEntryConfig>();
@@ -291,6 +292,7 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     string,
     { origin: "app" | "user" | "project"; entry: McpServerEntry }
   >();
+  const externalAgentNames = new Set<string>();
   const info: ModelFieldOrigins = {
     fields: new Map(),
     providers: new Map(),
@@ -300,6 +302,23 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
   for (const layer of layers) {
     const { kind, file } = layer;
     out.warnings.push(...(file.mcpWarnings ?? []));
+    out.warnings.push(...(file.externalAgentWarnings ?? []));
+    if (kind === "user") {
+      for (const entry of file.externalAgents ?? []) {
+        if (externalAgentNames.has(entry.name)) {
+          out.warnings.push(
+            `external_agent_config_invalid：${layer.path ?? "config.json"} 中外部 agent ${entry.name} 重复，已忽略（保留首条）`,
+          );
+          continue;
+        }
+        externalAgentNames.add(entry.name);
+        out.externalAgents.push(entry);
+      }
+    } else if (kind === "project" && file.externalAgents !== undefined) {
+      out.warnings.push(
+        `项目配置 ${layer.path ?? "config.json"} 中的 externalAgents 配置已忽略（只允许用户级配置，信任项目也不生效）`,
+      );
+    }
     for (const role of MODEL_ROLES) {
       const ref = file.modelRoles?.[role];
       if (ref !== undefined) {

@@ -28,6 +28,7 @@ export function enqueueConfigWrite<T>(fs: FileSystem, task: () => Promise<T>): P
 export async function loadConfigFile(
   fs: FileSystem,
   path: string,
+  layer: ConfigLayer = "user",
 ): Promise<ConfigFile | undefined> {
   if (!(await fs.exists(path))) return undefined;
   let text: string;
@@ -52,7 +53,7 @@ export async function loadConfigFile(
       { cause: e },
     );
   }
-  return parseConfigFile(raw, path);
+  return parseConfigFile(raw, path, layer);
 }
 
 /** 原子写 JSON 文件：先写同目录临时文件再 rename（config.md 第 3、4 节）。

@@ -12,9 +12,12 @@ import {
   loadConfig,
   loadSettingsStore,
   workspaceKey,
+  EXTERNAL_AGENT_PRESETS,
   type CliConfigArgs,
 } from "../src/config/index.js";
 import type { Grant } from "../src/protocol/index.js";
+import { parseConfigFile } from "../src/config/schema.js";
+import { mergeLayers } from "../src/config/merge.js";
 
 let root: string;
 let home: string;
@@ -141,6 +144,159 @@ describe("分层合并", () => {
     expect(p?.models?.c).toBeDefined(); // env 层追加的当前模型条目
     await fs.unlink(path.join(home, "config.json"));
   });
+});
+
+describe("外部 agent 配置（ADR-0049）", () => {
+  const agent = {
+    name: "local-agent",
+    command: "agent-command",
+    args: ["--acp"],
+    env: { AGENT_OPTION: "value" },
+    mode: "ask-each-operation",
+    description: "用户配置的外部 agent",
+    enabled: true,
+  };
+
+  it("用户数据完整进入 base；禁用条目保留，内置预设不自动启用", async () => {
+    expect((await load()).base.externalAgents).toEqual([]);
+    const entries = [agent, { name: "disabled", command: "other", args: [], enabled: false }];
+    await writeJson(path.join(home, "config.json"), { externalAgents: entries });
+    const rc = await load();
+    expect(rc.base.externalAgents).toEqual(entries);
+    expect((await rc.forWorkspace(workspace)).resolved.externalAgents).toEqual(entries);
+    await fs.unlink(path.join(home, "config.json"));
+    expect(EXTERNAL_AGENT_PRESETS).toEqual([
+      { name: "omp", command: "omp", args: ["--mode", "acp"], enabled: false },
+      {
+        name: "codex",
+        command: "npx",
+        args: ["@agentclientprotocol/codex-acp"],
+        enabled: false,
+      },
+    ]);
+  });
+
+  it.each(["", "Local", "with space", "with/slash", "with_underscore", "中文", "line\n"])(
+    "非法名称 %j 逐条忽略并警告，合法条目不受影响",
+    (name) => {
+      const file = parseConfigFile({ externalAgents: [{ ...agent, name }, agent] }, "config.json");
+      const { resolved } = mergeLayers([{ kind: "user", file }]);
+      expect(resolved.externalAgents).toEqual([agent]);
+      expect(resolved.warnings).toEqual([expect.stringContaining("external_agent_config_invalid")]);
+    },
+  );
+
+  it.each(["a", "agent-123", "-"])("合法名称 %j 不另加名称限制", (name) => {
+    const file = parseConfigFile({ externalAgents: [{ ...agent, name }] }, "config.json");
+    expect(file.externalAgents?.[0]?.name).toBe(name);
+    expect(file.externalAgentWarnings).toBeUndefined();
+  });
+
+  it.each([
+    { command: "" },
+    { args: "not-an-array" },
+    { args: [1] },
+    { env: { OPTION: 1 } },
+    { mode: 1 },
+    { description: 1 },
+    { enabled: "yes" },
+    { enabled: undefined },
+  ])("非法字段 %# 沿用 MCP 逐条警告风格", (patch) => {
+    const file = parseConfigFile(
+      { externalAgents: [{ ...agent, ...patch }, agent] },
+      "config.json",
+    );
+    expect(file.externalAgents).toEqual([agent]);
+    expect(file.externalAgentWarnings).toHaveLength(1);
+  });
+
+  it("用户 externalAgents 本身不是数组时快速失败", () => {
+    expect(() => parseConfigFile({ externalAgents: "invalid" }, "config.json")).toThrow(
+      expect.objectContaining({ code: "config_invalid" }),
+    );
+  });
+
+  it("外部 agent env 与 MCP 共用凭据引用约束", () => {
+    expect(() =>
+      parseConfigFile(
+        { externalAgents: [{ ...agent, env: { API_TOKEN: "inline-secret" } }] },
+        "config.json",
+      ),
+    ).toThrow(expect.objectContaining({ code: "config_credential_rejected" }));
+    const file = parseConfigFile(
+      { externalAgents: [{ ...agent, env: { API_TOKEN: "${AGENT_TOKEN}" } }] },
+      "config.json",
+    );
+    expect(file.externalAgents?.[0]?.env).toEqual({ API_TOKEN: "${AGENT_TOKEN}" });
+    const project = parseConfigFile(
+      { externalAgents: [{ ...agent, env: { API_TOKEN: "inline-secret" } }], model: "p/m" },
+      "project.json",
+      "project",
+    );
+    expect(project.model).toBe("p/m");
+    expect(project.externalAgents).toBeUndefined();
+    expect(project.externalAgentWarnings).toHaveLength(1);
+  });
+
+  it("用户重复名称警告且保留完整首条，不浅合并后续字段", async () => {
+    await writeJson(path.join(home, "config.json"), {
+      externalAgents: [agent, { ...agent, command: "ignored", args: [], enabled: false }],
+    });
+    const rc = await load();
+    expect(rc.base.externalAgents).toEqual([agent]);
+    expect(rc.base.warnings.filter((w) => w.includes("external_agent_config_invalid"))).toEqual([
+      expect.stringContaining("保留首条"),
+    ]);
+    await fs.unlink(path.join(home, "config.json"));
+  });
+
+  it("只有 user 层参与 externalAgents 合并", () => {
+    const { resolved } = mergeLayers([
+      { kind: "setup", file: { externalAgents: [agent] } },
+      { kind: "app", file: { externalAgents: [agent] } },
+      { kind: "settings", file: { externalAgents: [agent] } },
+      { kind: "project", file: { externalAgents: [agent] } },
+      { kind: "env", file: { externalAgents: [agent] } },
+      { kind: "cli", file: { externalAgents: [agent] } },
+    ]);
+    expect(resolved.externalAgents).toEqual([]);
+    expect(resolved.warnings).toEqual([expect.stringContaining("externalAgents 配置已忽略")]);
+  });
+
+  it.each([false, true])(
+    "项目 trusted=%s：合法或非法段都在 schema 前剥离，用户数据和合法项目字段保留",
+    async (trusted) => {
+      await writeJson(path.join(home, "config.json"), { externalAgents: [agent] });
+      const rc = await load();
+      if (trusted) await rc.setWorkspaceTrusted(workspace, true);
+      for (const externalAgents of [
+        [{ ...agent, command: "project-command" }],
+        [{ name: "INVALID", command: 1 }],
+        "not-an-array",
+        null,
+      ]) {
+        await writeJson(projectConfigPath(), {
+          externalAgents,
+          model: "project/model",
+          permissions: { rules: [{ kind: "edit", pattern: "safe/**", action: "deny" }] },
+        });
+        const ws = await rc.forWorkspace(workspace);
+        expect(ws.projectConfig.present).toBe(true);
+        expect(ws.projectConfig.trusted).toBe(trusted);
+        expect(ws.resolved.externalAgents).toEqual([agent]);
+        expect(ws.resolved.model).toBe(trusted ? "project/model" : undefined);
+        expect(trusted ? ws.resolved.rules : ws.resolved.untrustedRules).toHaveLength(1);
+        expect(ws.resolved.warnings.filter((w) => w.includes("externalAgents"))).toEqual([
+          expect.stringContaining("只允许用户级配置"),
+        ]);
+        expect(ws.resolved.warnings.some((w) => w.includes("整份忽略"))).toBe(false);
+      }
+      if (trusted) await rc.setWorkspaceTrusted(workspace, false);
+      await fs.rm(path.join(workspace, ".nocturne"), { recursive: true, force: true });
+      await fs.unlink(path.join(home, "config.json"));
+      if (trusted) await fs.unlink(path.join(home, "trust.json"));
+    },
+  );
 });
 
 describe("项目配置信任", () => {
