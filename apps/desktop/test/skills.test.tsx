@@ -144,6 +144,34 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   );
 });
 
+it("大小格只在有子目录时显示子目录数", async () => {
+  const nested = skill({
+    name: "nested",
+    entryPath: "C:/home/nested",
+    files: [
+      { name: "SKILL.md", directory: false },
+      { name: "scripts", directory: true },
+      { name: "ref", directory: true },
+    ],
+  });
+  const f = fakeServer(withInit({ "skills.describeSkills": data([skill(), nested]) }));
+  await f.initialize();
+  render(
+    <SkillsPage
+      client={f.client}
+      workspaceRoot="Z:/project"
+      version={0}
+      openDirectory={vi.fn()}
+      openUrl={vi.fn()}
+    />,
+  );
+  const size = () => screen.getByText("大小").nextElementSibling?.textContent;
+  expect((await screen.findByText("大小")).nextElementSibling?.textContent).toBe("1.0 KB");
+  const list = screen.getByRole("navigation", { name: "技能列表" });
+  fireEvent.click(within(list).getByRole("button", { name: /nested/ }));
+  expect(size()).toBe("1.0 KB · 2 个子目录");
+});
+
 it("输入技能与参数后 Enter 把 skill 字段交给提交，不执行斜杠命令", () => {
   const onSubmit = vi.fn(async () => true);
   const onSlash = vi.fn(async () => true);

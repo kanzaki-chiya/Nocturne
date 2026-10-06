@@ -322,8 +322,10 @@ export function SkillsPage({
                   <div>
                     <dt>大小</dt>
                     <dd>
-                      {(skill.size / 1024).toFixed(1)} KB ·{" "}
-                      {skill.files.filter((f) => f.directory).length} 个子目录
+                      {(skill.size / 1024).toFixed(1)} KB
+                      {skill.files.some((f) => f.directory)
+                        ? ` · ${skill.files.filter((f) => f.directory).length} 个子目录`
+                        : ""}
                     </dd>
                   </div>
                 </dl>

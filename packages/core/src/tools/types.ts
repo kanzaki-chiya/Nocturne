@@ -50,8 +50,6 @@ import type { AttachmentStore } from "./attachments.js";
 // ── 工具定义 ──────────────────────────────────────────────
 
 export interface ToolTraits {
-  /** 结果保留在 L1 修剪后的上下文中；L2 摘要仍可压缩。 */
-  pinResult?: boolean | undefined;
   /** 执行是否可能改变外部状态 */
   mutates: boolean;
   /** 能否与其他 concurrencySafe 调用并行执行 */
@@ -62,6 +60,8 @@ export interface ToolTraits {
   maxTimeoutMs?: number | undefined;
   /** 模型可见输出字符上限，默认 30000 */
   maxModelChars?: number | undefined;
+  /** 结果保留在 L1 修剪后的上下文中；L2 摘要仍可压缩。 */
+  pinResult?: boolean | undefined;
   /**
    * 执行时需要与用户交互输入（ADR-0032 §5）：声明后
    * ToolContext.askUser 可用；子代理（非交互）的可选工具池

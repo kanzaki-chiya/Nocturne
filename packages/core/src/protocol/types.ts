@@ -412,6 +412,7 @@ export type HistoryEntry =
       /** 随用户消息附带的图片引用（ADR-0023）；旧日志无此字段 */
       attachments?: ImageAttachment[] | undefined;
       fileRefs?: FileRef[] | undefined;
+      /** 技能调用的正文快照（skills.md 第 2 节）；旧日志无此字段 */
       skill?: SkillSnapshot | undefined;
     }
   | {
@@ -443,6 +444,7 @@ export type HistoryEntry =
        * L1 修剪后用作占位说明的一部分（context.md 6.5）
        */
       inputSummary?: string | undefined;
+      /** 结果参与历史折叠的声明（tool.started 透传，skills.md 第 3 节）；旧日志无此字段 */
       pinResult?: boolean | undefined;
       /** 工具结果附带的图片引用（ADR-0023）；旧日志无此字段 */
       attachments?: ImageAttachment[] | undefined;

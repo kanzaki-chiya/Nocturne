@@ -1,4 +1,3 @@
-import type { SkillSnapshot } from "../protocol/index.js";
 /**
  * runTurn（agent-loop.md 第 2 节）。
  * 核心不变量：
@@ -28,6 +27,7 @@ import type {
   ImageAttachment,
   PermissionReviewedPayload,
   RuntimeStatus,
+  SkillSnapshot,
   TurnEndReason,
   Usage,
 } from "../protocol/index.js";

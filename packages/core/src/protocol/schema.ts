@@ -162,11 +162,11 @@ const payloadSchemas = {
   }),
   "turn.started": z.object({ turnIndex: z.number().int() }),
   "message.user": z.object({
-    skill: z.object({ name: z.string(), body: z.string() }).optional(),
     messageId: z.string(),
     content: z.array(contentBlockSchema),
     attachments: z.array(imageAttachmentSchema).optional(),
     fileRefs: z.array(fileRefSchema).optional(),
+    skill: z.object({ name: z.string(), body: z.string() }).optional(),
   }),
   "message.assistant": z.object({
     messageId: z.string(),
@@ -181,8 +181,6 @@ const payloadSchemas = {
     finishReason: z.union([finishReasonSchema, z.literal("aborted")]),
   }),
   "tool.started": z.object({
-    pinResult: z.boolean().optional(),
-    mutates: z.boolean().optional(),
     callId: z.string(),
     name: z.string(),
     input: z.unknown().optional(),
@@ -192,6 +190,8 @@ const payloadSchemas = {
       source: permissionSourceSchema,
       rule: z.string().optional(),
     }),
+    pinResult: z.boolean().optional(),
+    mutates: z.boolean().optional(),
   }),
   "permission.requested": z.object({
     requestId: z.string(),

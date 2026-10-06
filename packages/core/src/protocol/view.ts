@@ -88,8 +88,6 @@ export interface SessionView {
 export type ViewEntry = UserEntry | AssistantEntry | ToolEntry | NoticeEntry;
 
 export interface UserEntry {
-  skill?: SkillSnapshot | undefined;
-  descriptions?: AttachmentDescribedPayload[] | undefined;
   kind: "user";
   key: string;
   seq: number;
@@ -98,6 +96,9 @@ export interface UserEntry {
   /** 随消息附带的图片引用（ADR-0023）；无附件时字段不出现 */
   attachments?: ImageAttachment[] | undefined;
   fileRefs?: FileRef[] | undefined;
+  /** 技能调用的正文快照（skills.md 第 2 节）；普通消息字段不出现 */
+  skill?: SkillSnapshot | undefined;
+  descriptions?: AttachmentDescribedPayload[] | undefined;
 }
 
 export interface AssistantEntry {

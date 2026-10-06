@@ -21,7 +21,6 @@ export function isPermissionPresetName(name: string): name is PermissionPresetNa
 
 /** 预设构造上下文：生成具体路径模式所需的绝对路径（调用方传 realpath 后的值） */
 export interface PresetContext {
-  skillRoots?: readonly string[] | undefined;
   workspaceRoot: string;
   caseSensitive: boolean;
   /** 会话目录与当前会话 id：生成"本会话落盘目录可读"规则 */
@@ -29,6 +28,8 @@ export interface PresetContext {
   sessionId?: string | undefined;
   /** Nocturne 数据目录：生成授权数据保护规则 */
   nocturneHome?: string | undefined;
+  /** 已发现技能的真实目录：生成技能目录只读放行规则（skills.md 第 3 节） */
+  skillRoots?: readonly string[] | undefined;
 }
 
 const PROTECTED_LABEL = "受保护路径";

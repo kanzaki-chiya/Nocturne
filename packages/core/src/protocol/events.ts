@@ -1,8 +1,8 @@
-import type { SkillSnapshot } from "./skills.js";
 /**
  * 事件信封与事件类型（docs/protocols/events.md 第 2、3 节）。
  * 持久化事件构成会话日志的唯一事实来源；临时事件只发布不写日志。
  */
+import type { SkillSnapshot } from "./skills.js";
 import type {
   ContentBlock,
   FileRef,
@@ -54,12 +54,13 @@ export interface TurnStartedPayload {
 }
 
 export interface MessageUserPayload {
-  skill?: SkillSnapshot | undefined;
   messageId: string;
   content: ContentBlock[];
   /** 随消息附带的图片引用（ADR-0023，粘贴/拖入）；无附件时缺省 */
   attachments?: ImageAttachment[] | undefined;
   fileRefs?: FileRef[] | undefined;
+  /** 技能调用随消息持久化的正文快照（skills.md 第 2 节）；普通消息缺省 */
+  skill?: SkillSnapshot | undefined;
 }
 
 export interface AttachmentDescribedPayload {
@@ -92,8 +93,6 @@ export interface MessageAssistantPayload {
 }
 
 export interface ToolStartedPayload {
-  pinResult?: boolean | undefined;
-  mutates?: boolean | undefined;
   callId: string;
   name: string;
   /** 规范化后的输入 */
@@ -102,6 +101,9 @@ export interface ToolStartedPayload {
   subjects: PermissionSubject[];
   /** `rule` 为命中规则的人读说明（permissions.md 5.3） */
   permission: { action: PermissionAction; source: PermissionSource; rule?: string | undefined };
+  /** 工具声明其结果参与历史折叠（tools.md 第 4 节 pinResult）；缺省同 false */
+  pinResult?: boolean | undefined;
+  mutates?: boolean | undefined;
 }
 
 export interface PermissionRequestedPayload {

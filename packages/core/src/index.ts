@@ -272,12 +272,13 @@ export interface CreateSessionOptions {
 }
 
 export interface SubmitInput {
-  skill?: SkillInvocation | undefined;
   text?: string | undefined;
   content?: ContentBlock[] | undefined;
   /** 图片字节由 Core 落盘，事件只保存引用 */
   attachments?:
     { data: Uint8Array; mimeType: ImageMimeType; label?: string | undefined }[] | undefined;
+  /** 技能调用（skills.md 第 2 节）：Core 校验后把正文快照附到用户消息 */
+  skill?: SkillInvocation | undefined;
 }
 
 /** 本会话已登记并通过磁盘完整性校验的图片附件。 */
