@@ -19,6 +19,7 @@ import type {
   SettingItem,
   SettingsPatch,
 } from "./rpc-types";
+import type { CheckResult } from "./updater";
 
 export type ThemePref = "system" | "light" | "dark";
 
@@ -96,6 +97,7 @@ export function SettingsPage({
   workspace,
   defaultWorkspace,
   workspaceOverridden,
+  update,
   onThemeChange,
   onWorkspaceChange,
   pickFolder,
@@ -112,6 +114,15 @@ export function SettingsPage({
   defaultWorkspace: string | null;
   /** prefs 里存了自选位置（显示「恢复默认」） */
   workspaceOverridden: boolean;
+  /** 自动更新设置（ADR-0050）；桌面端总有 */
+  update?: {
+    /** 自动检查更新开关（默认开） */
+    autoUpdate: boolean;
+    /** 写本机 prefs；返回 false 表示写不进存储 */
+    onAutoUpdateChange: (enabled: boolean) => boolean;
+    /** 手动检查更新（不节流）；update 结果经 App 出全局提示条 */
+    onCheck: () => Promise<CheckResult>;
+  };
   /** 只写本机 prefs；返回 false 表示写不进存储 */
   onThemeChange: (theme: ThemePref) => boolean;
   /** 切换普通对话工作区（null = 恢复默认）；返回错误文案或 undefined（成功） */
@@ -234,6 +245,25 @@ export function SettingsPage({
       if (err === undefined) showToast("已保存 普通对话工作区");
     } finally {
       setWsBusy(false);
+    }
+  };
+
+  /** 手动「检查更新」：不节流；发现新版本时经 App 出全局提示条，这里只报失败原因 */
+  const [updBusy, setUpdBusy] = useState(false);
+  const runUpdateCheck = async () => {
+    if (update === undefined) return;
+    setUpdBusy(true);
+    setRowErr("updateCheck", null);
+    try {
+      const result = await update.onCheck();
+      if (result.kind === "error") {
+        setRowErr("updateCheck", `检查失败：${result.message}`);
+      } else if (result.kind === "latest") {
+        showToast("已是最新版本");
+      }
+      // "update"：App 的全局提示条接管
+    } finally {
+      setUpdBusy(false);
     }
   };
 
@@ -385,6 +415,42 @@ export function SettingsPage({
               </span>
               <span className="src">本机</span>
               {errLine("workspace")}
+            </div>
+          </>
+        )}
+        {section === "general" && update !== undefined && (
+          <>
+            <h5>更新</h5>
+            <div className={rowClass("autoUpdate")}>
+              <span className="n">
+                自动检查更新<small>每 24 小时最多一次，失败不会打扰使用</small>
+              </span>
+              <span className="v">
+                <button
+                  role="switch"
+                  aria-checked={update.autoUpdate}
+                  aria-label="自动检查更新"
+                  className={`mcp-switch ${update.autoUpdate ? "on" : ""}`}
+                  onClick={() => {
+                    const ok = update.onAutoUpdateChange(!update.autoUpdate);
+                    setRowErr("autoUpdate", ok ? null : "本机存储不可写，开关只在本次运行内生效");
+                  }}
+                />
+              </span>
+              <span className="src">本机</span>
+              {errLine("autoUpdate")}
+            </div>
+            <div className={rowClass("updateCheck")}>
+              <span className="n">
+                检查更新<small>发现新版本时会在窗口底部提示</small>
+              </span>
+              <span className="v">
+                <button className="btn" disabled={updBusy} onClick={() => void runUpdateCheck()}>
+                  {updBusy ? "检查中…" : "检查更新"}
+                </button>
+              </span>
+              <span className="src" />
+              {errLine("updateCheck")}
             </div>
           </>
         )}

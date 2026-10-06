@@ -3,7 +3,7 @@ import { RpcError, type RpcClient, type RpcRuntime, type RpcSession } from "@noc
 import type { RuntimeEvent, SessionView, SkillOverview } from "@nocturne/core/protocol";
 
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
-import { BackendLogsPage, type BackendLogTarget } from "./BackendLogsPage";
+import { BackendLogsPage, SHELL_LOG_ID, type BackendLogTarget } from "./BackendLogsPage";
 import { Composer, type ComposerSubmit, type WorkspaceChoice } from "./Composer";
 import { Conversation } from "./Conversation";
 import { Conversations, conversationStatus, type CreateSessionChoice } from "./conversations";
@@ -24,6 +24,7 @@ import { useDraftControls, useSessionControls } from "./session-controls";
 import { buildSessionTree, projectKey, projectName, type SessionSummary } from "./session-tree";
 import { Sidebar, type SettingsSection } from "./Sidebar";
 import type { NodeProbe } from "./types";
+import { createUpdateService, type UpdateNotice } from "./updater";
 
 type Phase =
   | { kind: "probing" }
@@ -97,6 +98,25 @@ export function App({ host }: { host: DesktopHost }) {
    */
   const [page, setPage] = useState<SettingsSection | null>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+  // ── 自动更新（ADR-0050）：提示不打断会话，装前确认运行中的 Turn ──
+  const appVersionRef = useRef<string | undefined>(undefined);
+  const updateSvc = useMemo(
+    () =>
+      createUpdateService({
+        host,
+        prefs,
+        currentVersion: () => appVersionRef.current,
+      }),
+    [host, prefs],
+  );
+  /** 待提示的新版本；「稍后」只清这个 state，prefs.pendingUpdate 保留到下次启动 */
+  const [updateNotice, setUpdateNotice] = useState<UpdateNotice | null>(null);
+  const [updateFlow, setUpdateFlow] = useState<
+    | null
+    | { stage: "confirm"; running: number }
+    | { stage: "working"; text: string }
+    | { stage: "error"; message: string }
+  >(null);
   // 生效的普通对话工作区 = prefs 覆盖 ?? 外壳默认
   const effectiveWorkspace = p.plainWorkspace ?? defaultWorkspace;
   const workspaceRef = useRef<string | null>(null);
@@ -202,6 +222,24 @@ export function App({ host }: { host: DesktopHost }) {
   useEffect(() => {
     void probe();
   }, [probe]);
+
+  // 启动后检查一次更新（之后由 24h 节流控制）；失败只写外壳日志，不出 UI
+  const updateBooted = useRef(false);
+  useEffect(() => {
+    if (phase.kind !== "ready" || updateBooted.current) return;
+    updateBooted.current = true;
+    void (async () => {
+      try {
+        appVersionRef.current = await host.appVersion();
+      } catch {
+        // 版本号取不到不阻塞更新流程（pendingUpdate 的版本过滤跳过）
+      }
+      const pending = updateSvc.pendingNotice();
+      if (pending !== undefined) setUpdateNotice(pending);
+      const found = await updateSvc.autoCheck();
+      if (found !== undefined) setUpdateNotice(found);
+    })();
+  }, [phase.kind, host, updateSvc]);
 
   // 主题：prefs.theme 覆盖系统外观，立即生效；跟随系统则删掉属性回到 media query
   useEffect(() => {
@@ -483,6 +521,59 @@ export function App({ host }: { host: DesktopHost }) {
     return next;
   };
 
+  // ── 更新安装：有运行中的 Turn 先确认；下载/签名失败把原因留在提示条里 ──
+  const runningTurns = () =>
+    [...conversations.opened.values()].filter((entry) => conversationStatus(entry) !== "idle")
+      .length;
+
+  const doUpdateInstall = async () => {
+    setUpdateFlow({ stage: "working", text: "正在下载并安装更新…" });
+    try {
+      const result = await updateSvc.install((downloaded, total) => {
+        const mb = (n: number) => (n / 1048576).toFixed(0);
+        setUpdateFlow((cur) =>
+          cur?.stage === "working"
+            ? {
+                stage: "working",
+                text: `正在下载并安装更新…已下载 ${mb(downloaded)}${
+                  total !== undefined ? ` / ${mb(total)}` : ""
+                } MB`,
+              }
+            : cur,
+        );
+      });
+      if (result === "gone") {
+        // 实际已无更新（比如手动装过新版）：清掉提示
+        setUpdateFlow(null);
+        setUpdateNotice(null);
+      }
+      // "installed"：随即重启；Windows 上进程在 downloadAndInstall 期间已被安装器退出
+    } catch (error) {
+      setUpdateFlow({ stage: "error", message: errMessage(error) });
+    }
+  };
+
+  const beginUpdateInstall = () => {
+    const running = runningTurns();
+    if (running > 0) {
+      setUpdateFlow({ stage: "confirm", running });
+    } else {
+      void doUpdateInstall();
+    }
+  };
+
+  const updateNoticeSummary =
+    updateNotice?.notes
+      ?.split("\n")
+      .map((line) =>
+        line
+          .trim()
+          .replace(/^#+\s*/, "")
+          .replace(/^-+\s*/, ""),
+      )
+      .find((line) => line !== "")
+      ?.slice(0, 80) ?? null;
+
   if (phase.kind === "probing") {
     return <div className="center" />;
   }
@@ -518,12 +609,20 @@ export function App({ host }: { host: DesktopHost }) {
     path: project.path,
     name: project.name,
   }));
-  // 「后台日志」页的后台选择器：常驻普通对话后台 + 各项目后台
-  const logTargets: BackendLogTarget[] = pool.running().map((b) => ({
-    backendId: b.backendId,
-    label: plainKey !== null && b.key === plainKey ? "对话（常驻后台）" : projectName(b.workspace),
-    detail: abbreviateHome(b.workspace, home),
-  }));
+  // 「后台日志」页的后台选择器：常驻普通对话后台 + 各项目后台，最后是外壳自身日志
+  const logTargets: BackendLogTarget[] = [
+    ...pool.running().map((b) => ({
+      backendId: b.backendId,
+      label:
+        plainKey !== null && b.key === plainKey ? "对话（常驻后台）" : projectName(b.workspace),
+      detail: abbreviateHome(b.workspace, home),
+    })),
+    {
+      backendId: SHELL_LOG_ID,
+      label: "外壳",
+      detail: "外壳自身诊断（更新检查结果等），不写盘",
+    },
+  ];
 
   return (
     <div className={`body${page !== null ? " settings-mode" : ""}`}>
@@ -716,7 +815,9 @@ export function App({ host }: { host: DesktopHost }) {
                 <BackendLogsPage
                   backends={logTargets}
                   fetchStderr={(backendId) =>
-                    host.invoke("backend_stderr", { backendId }) as Promise<string[]>
+                    backendId === SHELL_LOG_ID
+                      ? (host.invoke("shell_log") as Promise<string[]>)
+                      : (host.invoke("backend_stderr", { backendId }) as Promise<string[]>)
                   }
                 />
               </PaneErrorBoundary>
@@ -729,6 +830,20 @@ export function App({ host }: { host: DesktopHost }) {
                   workspace={effectiveWorkspace}
                   defaultWorkspace={defaultWorkspace}
                   workspaceOverridden={p.plainWorkspace !== undefined}
+                  update={{
+                    autoUpdate: p.autoUpdate !== false,
+                    onAutoUpdateChange: (enabled) => {
+                      // 默认开：开启时清掉显式值，关闭才写 false
+                      prefs.update({ autoUpdate: enabled ? undefined : false });
+                      bumpPrefs();
+                      return prefs.persistent;
+                    },
+                    onCheck: async () => {
+                      const result = await updateSvc.manualCheck();
+                      if (result.kind === "update") setUpdateNotice(result.notice);
+                      return result;
+                    },
+                  }}
                   onThemeChange={(theme) => {
                     prefs.update({ theme: theme === "system" ? undefined : theme });
                     bumpPrefs();
@@ -811,6 +926,66 @@ export function App({ host }: { host: DesktopHost }) {
             </PaneErrorBoundary>
           )}
         </div>
+        {updateNotice !== null && (
+          <div className="updbar" role="status" aria-label="发现新版本">
+            {updateFlow?.stage === "working" ? (
+              <span className="t">{updateFlow.text}</span>
+            ) : (
+              <>
+                <span className="t">发现新版本 v{updateNotice.version}</span>
+                {updateNoticeSummary !== null && (
+                  <span className="notes">{updateNoticeSummary}</span>
+                )}
+                {updateFlow?.stage === "error" && (
+                  <span className="err">更新失败：{updateFlow.message}</span>
+                )}
+                <button className="btn primary" onClick={beginUpdateInstall}>
+                  {updateFlow?.stage === "error" ? "重试" : "立即更新"}
+                </button>
+                <button
+                  className="btn ghost"
+                  onClick={() => {
+                    // 「稍后」只对本次运行有效：prefs.pendingUpdate 保留，
+                    // 下次启动若仍比当前版本新会继续提示
+                    setUpdateNotice(null);
+                    setUpdateFlow(null);
+                  }}
+                >
+                  稍后
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {updateFlow?.stage === "confirm" && (
+          <div className="dialog-backdrop">
+            <div className="desktop-dialog" role="dialog" aria-modal="true" aria-label="更新确认">
+              <h3>更新到 v{updateNotice?.version ?? "新版本"}</h3>
+              <p>
+                将中断 {updateFlow.running}
+                个正在运行的会话。安装更新会关闭窗口与后台进程，完成后自动重启。
+              </p>
+              <div className="acts">
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setUpdateFlow(null);
+                  }}
+                >
+                  取消
+                </button>
+                <button
+                  className="btn primary"
+                  onClick={() => {
+                    void doUpdateInstall();
+                  }}
+                >
+                  继续更新
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {lockedSession !== null && (
           <div className="dialog-backdrop">
             <div

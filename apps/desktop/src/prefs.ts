@@ -25,6 +25,12 @@ export interface Prefs {
   plainWorkspace?: string | undefined;
   /** 所有当普通对话工作区用过的路径：cwd 命中任意一个的会话都归入「对话」 */
   plainWorkspaces: string[];
+  /** 自动检查更新（默认开；只有显式 false 才关闭） */
+  autoUpdate?: boolean | undefined;
+  /** 上次检查更新的时间戳 ms；自动与手动检查都计入 24h 节流 */
+  lastUpdateCheck?: number | undefined;
+  /** 上次检查发现的新版本；「稍后」只清本次运行，重启后若仍比当前新则继续提示 */
+  pendingUpdate?: { version: string; notes: string | null } | undefined;
 }
 
 const DEFAULTS: Prefs = {
@@ -78,6 +84,22 @@ function parse(raw: string | null): Prefs {
   }
   const plainWorkspaces = strings(obj.plainWorkspaces);
   if (plainWorkspaces !== undefined) prefs.plainWorkspaces = plainWorkspaces;
+  if (typeof obj.autoUpdate === "boolean") prefs.autoUpdate = obj.autoUpdate;
+  if (typeof obj.lastUpdateCheck === "number" && Number.isFinite(obj.lastUpdateCheck)) {
+    prefs.lastUpdateCheck = obj.lastUpdateCheck;
+  }
+  const pending = obj.pendingUpdate;
+  if (
+    typeof pending === "object" &&
+    pending !== null &&
+    typeof (pending as Record<string, unknown>).version === "string"
+  ) {
+    const notes = (pending as Record<string, unknown>).notes;
+    prefs.pendingUpdate = {
+      version: (pending as { version: string }).version,
+      notes: typeof notes === "string" ? notes : null,
+    };
+  }
   // lastProject 已废弃：旧数据里的这个字段直接忽略
   return prefs;
 }
@@ -104,6 +126,9 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         ...(prefs.lastEffort !== undefined ? { lastEffort: prefs.lastEffort } : {}),
         ...(prefs.theme !== undefined ? { theme: prefs.theme } : {}),
         ...(prefs.plainWorkspace !== undefined ? { plainWorkspace: prefs.plainWorkspace } : {}),
+        ...(prefs.autoUpdate !== undefined ? { autoUpdate: prefs.autoUpdate } : {}),
+        ...(prefs.lastUpdateCheck !== undefined ? { lastUpdateCheck: prefs.lastUpdateCheck } : {}),
+        ...(prefs.pendingUpdate !== undefined ? { pendingUpdate: { ...prefs.pendingUpdate } } : {}),
       };
     },
     update(patch) {

@@ -672,6 +672,49 @@ button {
   overflow: auto;
 }
 
+/* 更新提示条：钉在主区底部、盖过设置层（.settings-over 是 z 20），不打断输入 */
+.updbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 24px;
+  border-top: 1px solid var(--a-borderStrong);
+  background: var(--a-panel);
+  font-size: 12.5px;
+}
+.updbar .t {
+  color: var(--a-text);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.updbar .notes {
+  color: var(--a-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+.updbar .err {
+  color: var(--a-error);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+.updbar .btn {
+  flex-shrink: 0;
+  padding: 5px 10px;
+}
+.updbar .t:last-child,
+.updbar .notes:last-child {
+  margin-left: 0;
+}
+
 .btn {
   font: 500 12.5px/1 var(--sans);
   border-radius: 6px;

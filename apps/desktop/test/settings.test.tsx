@@ -9,6 +9,7 @@ import type { RpcClient } from "@nocturne/rpc/client";
 
 import { SettingsPage, type SettingsPageSection, type ThemePref } from "../src/SettingsPage";
 import type { SettingItem } from "../src/rpc-types";
+import type { CheckResult } from "../src/updater";
 import { fakeServer, RpcFail, withInit } from "./fake-server";
 
 const noop = () => undefined;
@@ -115,6 +116,11 @@ function props(
     onThemeChange?: (t: ThemePref) => boolean;
     onConfigSaved?: () => void;
     onOpenProviders?: () => void;
+    update?: {
+      autoUpdate: boolean;
+      onAutoUpdateChange: (enabled: boolean) => boolean;
+      onCheck: () => Promise<CheckResult>;
+    };
   },
 ) {
   return {
@@ -124,6 +130,7 @@ function props(
     workspace: "C:\\Users\\me\\Nocturne",
     defaultWorkspace: "C:\\Users\\me\\Nocturne",
     workspaceOverridden: false,
+    ...(overrides?.update !== undefined ? { update: overrides.update } : {}),
     onThemeChange: overrides?.onThemeChange ?? (() => true),
     onWorkspaceChange: () => Promise.resolve(undefined),
     pickFolder: () => Promise.resolve(null),
@@ -346,6 +353,52 @@ describe("SettingsPage", () => {
     view.rerender(<SettingsPage {...props(server.client, { section: "appearance" })} />);
     expect(groups()).toEqual(["主题"]);
     expect(screen.getAllByRole("radio")).toHaveLength(3);
+    server.close();
+  });
+
+  it("自动更新开关：点击切换并写本机；写不进去时该行报错", async () => {
+    const server = fakeServer(handlers());
+    await server.initialize();
+    const changes: boolean[] = [];
+    const update = {
+      autoUpdate: true,
+      onAutoUpdateChange: (enabled: boolean) => {
+        changes.push(enabled);
+        return false; // 模拟本机存储不可写
+      },
+      onCheck: () => Promise.resolve<CheckResult>({ kind: "latest" }),
+    };
+    render(<SettingsPage {...props(server.client, { update })} />);
+    const toggle = await screen.findByRole("switch", { name: "自动检查更新" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+    expect(changes).toEqual([false]);
+    await waitFor(() => expect(row("自动检查更新").textContent).toContain("本机存储不可写"));
+    server.close();
+  });
+
+  it("手动检查更新：失败在行内显示原因；已是最新给提示", async () => {
+    const server = fakeServer(handlers());
+    await server.initialize();
+    let result: CheckResult = { kind: "error", message: "无法连接更新服务" };
+    const update = {
+      autoUpdate: true,
+      onAutoUpdateChange: () => true,
+      onCheck: () => Promise.resolve(result),
+    };
+    render(<SettingsPage {...props(server.client, { update })} />);
+    const button = await screen.findByRole("button", { name: "检查更新" });
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(row("检查更新").textContent).toContain("检查失败：无法连接更新服务"),
+    );
+
+    result = { kind: "latest" };
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toContain("已是最新版本");
+    });
+    expect(row("检查更新").textContent).not.toContain("检查失败");
     server.close();
   });
 });

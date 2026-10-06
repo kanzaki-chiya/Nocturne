@@ -56,26 +56,41 @@ function replayHost(
     workspaces.delete(backendId);
     channel?.({ kind: "closed", code, stderr: stderrTail });
   };
+  /** 外壳日志缓冲（app_note 写入、shell_log 读出） */
+  const shellLog: string[] = [];
   const host: DesktopHost & {
     calls: RpcCall[];
     workspaces: Map<number, string>;
     notify: typeof notify;
     close: typeof close;
     stderrReads: number[];
+    shellLog: string[];
   } = {
     calls,
     workspaces,
     notify,
     close,
     stderrReads,
+    shellLog,
     createChannel: (onMessage) => onMessage,
     openUrl: async () => undefined,
     pickFolder: async () => null,
     pickImages: async () => [],
     homeDir: async () => "C:/Users/me",
+    appVersion: async () => "0.0.0-test",
+    checkUpdate: async () => null,
+    relaunch: async () => undefined,
+    note: (line) => {
+      shellLog.push(line);
+    },
     invoke: async (command, args) => {
       if (command === "node_probe") return { ok: true };
       if (command === "plain_workspace") return "Z:/plain";
+      if (command === "app_note") {
+        shellLog.push(String(args?.line ?? ""));
+        return;
+      }
+      if (command === "shell_log") return [...shellLog];
       if (command === "backend_open") {
         const channel = args?.channel;
         if (typeof channel !== "function") throw new Error("后台缺少消息通道");
@@ -605,8 +620,8 @@ it("后台日志页的空态与已退出后台的回收", async () => {
   await act(async () => {
     host.close(plain, 0);
   });
-  // 后台退出后页面选择器回落到「没有运行中的后台」
-  await within(page).findByText(/打开一个会话后再来看/);
+  // 后台退出后页面选择器回落到剩下的「外壳」条目
+  await within(page).findByText(/外壳暂无诊断输出/);
 });
 
 it("后台退出显示 stderr 尾部与「重启后台」；重启按 afterSeq 恢复会话", async () => {
@@ -667,4 +682,94 @@ it("后台退出显示 stderr 尾部与「重启后台」；重启按 afterSeq �
   // 会话视图续接：消息与权限卡片仍在，可以继续对话
   expect(screen.getByRole("region", { name: "会话消息" }).textContent).toContain("alpha 正文");
   expect(screen.getByRole("region", { name: "权限确认" })).toBeTruthy();
+});
+
+// ── 自动更新（ADR-0050 第 3 节）──────────────────────────────
+
+/** 让假宿主的更新检查返回一个可用的新版本 */
+function serveUpdate(host: ReturnType<typeof replayHost>, failInstall?: unknown) {
+  const install = vi.fn(async () => {
+    if (failInstall !== undefined) throw failInstall;
+  });
+  host.checkUpdate = async () => ({
+    version: "9.9.9",
+    notes: "## 修复\n- 修好了一些事",
+    downloadAndInstall: install,
+  });
+  return install;
+}
+
+it("发现新版本时底部出提示条；「稍后」只隐藏本次运行", async () => {
+  const host = replayHost();
+  serveUpdate(host);
+  render(<App host={host} />);
+  const bar = await screen.findByRole("status", { name: "发现新版本" });
+  expect(bar.textContent).toContain("发现新版本 v9.9.9");
+  expect(bar.textContent).toContain("修复");
+  // 「稍后」隐藏提示条；pendingUpdate 仍留在 prefs 里，下次启动再提示
+  fireEvent.click(within(bar).getByRole("button", { name: "稍后" }));
+  expect(screen.queryByRole("status", { name: "发现新版本" })).toBeNull();
+  const stored = JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}") as {
+    pendingUpdate?: { version?: string };
+  };
+  expect(stored.pendingUpdate?.version).toBe("9.9.9");
+});
+
+it("自动检查失败不出 UI，原因写进外壳日志", async () => {
+  const host = replayHost();
+  host.checkUpdate = async () => {
+    throw new Error("endpoint 404");
+  };
+  render(<App host={host} />);
+  await screen.findByLabelText("消息输入");
+  await waitFor(() =>
+    expect(host.shellLog.some((line) => line.includes("endpoint 404"))).toBe(true),
+  );
+  expect(screen.queryByRole("status", { name: "发现新版本" })).toBeNull();
+});
+
+it("有运行中的会话时点「立即更新」先确认会中断会话", async () => {
+  const host = replayHost();
+  const install = serveUpdate(host);
+  render(<App host={host} />);
+  // alpha 有未决权限卡片 → 非 idle
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await screen.findByRole("region", { name: "权限确认" });
+  const bar = await screen.findByRole("status", { name: "发现新版本" });
+  fireEvent.click(within(bar).getByRole("button", { name: "立即更新" }));
+  const dialog = await screen.findByRole("dialog", { name: "更新确认" });
+  expect(dialog.textContent).toMatch(/将中断\s*1\s*个正在运行的会话/);
+  // 取消：对话框关掉、提示条还在、没有开始安装
+  fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+  expect(screen.queryByRole("dialog", { name: "更新确认" })).toBeNull();
+  expect(screen.getByRole("status", { name: "发现新版本" })).toBeTruthy();
+  expect(install).not.toHaveBeenCalled();
+  // 确认后真正下载安装
+  fireEvent.click(
+    within(screen.getByRole("status", { name: "发现新版本" })).getByRole("button", {
+      name: "立即更新",
+    }),
+  );
+  fireEvent.click(
+    within(await screen.findByRole("dialog", { name: "更新确认" })).getByRole("button", {
+      name: "继续更新",
+    }),
+  );
+  await waitFor(() => expect(install).toHaveBeenCalled());
+});
+
+it("没有运行中的会话时直接下载安装；失败把原因留在提示条", async () => {
+  const host = replayHost();
+  serveUpdate(host, new Error("signature mismatch"));
+  render(<App host={host} />);
+  const bar = await screen.findByRole("status", { name: "发现新版本" });
+  // gamma 会话是 idle；不打开任何会话也没有 running Turn
+  fireEvent.click(within(bar).getByRole("button", { name: "立即更新" }));
+  await waitFor(() => expect(bar.textContent).toContain("更新失败：signature mismatch"));
+  expect(within(bar).getByRole("button", { name: "重试" })).toBeTruthy();
+  // pendingUpdate 恢复，下次启动仍提示
+  const stored = JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}") as {
+    pendingUpdate?: { version?: string };
+  };
+  expect(stored.pendingUpdate?.version).toBe("9.9.9");
 });

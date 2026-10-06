@@ -61,6 +61,10 @@ function fakeHost() {
     pickFolder: () => Promise.resolve(null),
     pickImages: () => Promise.resolve([]),
     homeDir: () => Promise.resolve(null),
+    appVersion: () => Promise.resolve("0.0.0-test"),
+    checkUpdate: () => Promise.resolve(null),
+    relaunch: () => Promise.resolve(),
+    note: () => undefined,
   };
 
   return {

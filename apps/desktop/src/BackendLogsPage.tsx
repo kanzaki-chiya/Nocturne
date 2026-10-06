@@ -8,11 +8,14 @@ import { useEffect, useRef, useState } from "react";
 
 import { Dropdown } from "./Dropdown";
 
+/** 「外壳」日志项的伪 backendId（不存在这样的后台，调用方按此值改走 shell_log） */
+export const SHELL_LOG_ID = -1;
+
 /** 日志页的一个可选后台 */
 export interface BackendLogTarget {
-  /** backend_stderr 命令的参数 */
+  /** backend_stderr 命令的参数；SHELL_LOG_ID 表示外壳自身日志（走 shell_log 命令） */
   backendId: number;
-  /** 项目名或「对话（常驻）」 */
+  /** 项目名或「对话（常驻）」「外壳」 */
   label: string;
   /** 工作区路径（选项里的说明行） */
   detail: string;
@@ -131,7 +134,9 @@ export function BackendLogsPage({
         {error !== null && <div className="logerr">{error}</div>}
         {current !== undefined && lines !== null && lines.length === 0 && error === null && (
           <div className="logempty">
-            该后台暂无 stderr 输出；已退出后台的最后几行日志显示在崩溃横幅里。
+            {current.backendId === SHELL_LOG_ID
+              ? "外壳暂无诊断输出。"
+              : "该后台暂无 stderr 输出；已退出后台的最后几行日志显示在崩溃横幅里。"}
           </div>
         )}
         {lines !== null && lines.length > 0 && <pre className="logview">{lines.join("\n")}</pre>}

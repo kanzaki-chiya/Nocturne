@@ -160,4 +160,32 @@ describe("prefs store", () => {
     expect(store.get().pinned).toEqual(["s1"]);
     expect(store.persistent).toBe(false);
   });
+
+  it("更新相关字段：读写往返、损坏回退、逐字段互不影响", () => {
+    const storage = memoryStorage();
+    const store = createPrefsStore(storage);
+    store.update({
+      autoUpdate: false,
+      lastUpdateCheck: 1_700_000_000_000,
+      pendingUpdate: { version: "0.6.0", notes: "修好了一些事" },
+    });
+    const reread = createPrefsStore(storage).get();
+    expect(reread.autoUpdate).toBe(false);
+    expect(reread.lastUpdateCheck).toBe(1_700_000_000_000);
+    expect(reread.pendingUpdate).toEqual({ version: "0.6.0", notes: "修好了一些事" });
+
+    // 损坏字段回退默认；notes 非字符串归一为 null
+    const bad = createPrefsStore(
+      memoryStorage({
+        [PREFS_KEY]: JSON.stringify({
+          autoUpdate: "yes",
+          lastUpdateCheck: "昨天",
+          pendingUpdate: { version: "0.6.0", notes: 42 },
+        }),
+      }),
+    ).get();
+    expect(bad.autoUpdate).toBeUndefined();
+    expect(bad.lastUpdateCheck).toBeUndefined();
+    expect(bad.pendingUpdate).toEqual({ version: "0.6.0", notes: null });
+  });
 });

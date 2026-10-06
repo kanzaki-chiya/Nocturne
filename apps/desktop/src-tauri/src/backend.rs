@@ -263,6 +263,9 @@ pub struct AppState {
     registry: Mutex<BackendRegistry>,
     next_backend_id: AtomicU32,
     node_probe_cache: Mutex<Option<node::NodeProbe>>,
+    /// 外壳自身的诊断行（更新检查结果等），与后台 stderr 同款的内存环形缓冲；
+    /// 后台日志页以「外壳」条目展示
+    shell_log: Mutex<VecDeque<String>>,
     resource_dir: std::path::PathBuf,
     #[cfg(windows)]
     job: Mutex<Option<crate::job::JobObject>>,
@@ -282,6 +285,7 @@ impl AppState {
             }),
             next_backend_id: AtomicU32::new(1),
             node_probe_cache: Mutex::new(None),
+            shell_log: Mutex::new(VecDeque::new()),
             resource_dir,
             #[cfg(windows)]
             job: Mutex::new(None),
@@ -321,6 +325,28 @@ impl AppState {
         self.backend(id)
             .map(|backend| backend.stderr_lines())
             .ok_or_else(|| CommandError::new("unknown_backend", "后台不存在或已退出"))
+    }
+
+    /// 外壳日志：前端写入的诊断行（如更新检查结果），与 stderr 缓冲同规则。
+    pub fn push_shell_note(&self, line: impl Into<String>) {
+        let mut line = line.into();
+        if line.len() > STDERR_MAX_LINE {
+            // truncate 要求字符边界，先回退到边界内
+            let mut end = STDERR_MAX_LINE;
+            while !line.is_char_boundary(end) {
+                end -= 1;
+            }
+            line.truncate(end);
+        }
+        let mut buf = lock(&self.shell_log);
+        if buf.len() >= STDERR_BUFFER_LINES {
+            buf.pop_front();
+        }
+        buf.push_back(line);
+    }
+
+    pub fn shell_log_lines(&self) -> Vec<String> {
+        lock(&self.shell_log).iter().cloned().collect()
     }
 
     /// 所有后台的快照，包含正在被旧页面清理的后台，供整个应用退出时使用。
@@ -613,6 +639,20 @@ pub async fn backend_stderr(
     backend_id: u32,
 ) -> CmdResult<Vec<String>> {
     state.backend_stderr(backend_id)
+}
+
+/// 前端诊断行写入外壳日志（更新检查失败等静默降级场景）。
+/// 入参不受信：按 stderr 同样的单行上限截断。
+#[tauri::command]
+pub async fn app_note(state: tauri::State<'_, Arc<AppState>>, line: String) -> CmdResult<()> {
+    state.push_shell_note(line);
+    Ok(())
+}
+
+/// 外壳日志快照（后台日志页「外壳」条目）。
+#[tauri::command]
+pub async fn shell_log(state: tauri::State<'_, Arc<AppState>>) -> CmdResult<Vec<String>> {
+    Ok(state.shell_log_lines())
 }
 
 #[cfg(test)]
@@ -977,5 +1017,27 @@ mod tests {
         let backend = spawn_backend(9, command, sink, |_| {}).unwrap();
         close_backend(&backend, Duration::from_secs(5));
         close_backend(&backend, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn shell_log_truncates_at_char_boundary_and_is_bounded() {
+        let state = AppState::new(std::path::PathBuf::new());
+        // 超长行按 STDERR_MAX_LINE 截断；多字节字符不能让 truncate panic
+        state.push_shell_note("中".repeat(STDERR_MAX_LINE));
+        let lines = state.shell_log_lines();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].len() <= STDERR_MAX_LINE);
+        assert!(lines[0].chars().all(|c| c == '中'));
+
+        for i in 0..STDERR_BUFFER_LINES + 10 {
+            state.push_shell_note(format!("note-{i}"));
+        }
+        let lines = state.shell_log_lines();
+        assert_eq!(lines.len(), STDERR_BUFFER_LINES);
+        assert_eq!(lines.first().unwrap(), "note-10");
+        assert_eq!(
+            lines.last().unwrap(),
+            &format!("note-{}", STDERR_BUFFER_LINES + 9)
+        );
     }
 }

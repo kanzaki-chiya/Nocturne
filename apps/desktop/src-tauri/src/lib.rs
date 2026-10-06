@@ -45,17 +45,21 @@ fn begin_shutdown(app: &AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let commands: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        backend::app_note,
         backend::backend_send,
         backend::backend_close,
         backend::backend_stderr,
         backend::node_probe,
         backend::plain_workspace,
+        backend::shell_log,
         images::pick_images,
         workspace::open_skill_directory,
     ];
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(move |invoke| {
             if invoke.message.command() == "backend_open" {
                 backend::handle_backend_open(invoke);
