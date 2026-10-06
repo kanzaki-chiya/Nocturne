@@ -1,3 +1,4 @@
+import type { SkillInvocation, SkillsDescription } from "@nocturne/core";
 /**
  * 方法表：每个 RPC 方法的参数与结果类型（ADR-0044 第 4 节、docs/protocols/rpc.md）。
  * 服务端按它做类型检查地实现，客户端按它生成类型化调用；对 @nocturne/core 只有类型导入。
@@ -146,6 +147,15 @@ type Ret<K extends keyof RuntimeSession> = RuntimeSession[K] extends (...args: n
 
 /** 方法名 → 参数与结果 */
 export interface RpcMethods {
+  "skills.describeSkills": {
+    params: { workspaceRoot?: string | undefined };
+    result: SkillsDescription;
+  };
+  "skills.setSkillEnabled": {
+    params: { name: string; enabled: boolean };
+    result: { affectedSessions: number };
+  };
+  "session.describeSkills": { params: SessionParams; result: SkillsDescription };
   initialize: { params: InitializeParams; result: InitializeResult };
   shutdown: { params: Record<string, never>; result: null };
 
@@ -287,6 +297,7 @@ export interface RpcMethods {
   };
   "session.submit": {
     params: SessionParams & {
+      skill?: SkillInvocation;
       text?: string;
       content?: ContentBlock[];
       attachments?: WireAttachment[];
@@ -365,6 +376,9 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.listReviewerProviders": true,
   "runtime.reloadConfig": true,
   "mcp.describeMcpServers": true,
+  "skills.describeSkills": true,
+  "skills.setSkillEnabled": true,
+  "session.describeSkills": true,
   "mcp.saveMcpServer": true,
   "mcp.deleteMcpServer": true,
   "mcp.setMcpServerEnabled": true,

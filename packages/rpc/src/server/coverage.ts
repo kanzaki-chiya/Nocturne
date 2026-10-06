@@ -36,6 +36,8 @@ export const RUNTIME_METHODS: Record<
   // 再调用它（配置变更方法之后也自动这样做），客户端收 runtime.providersChanged
   updateProviders: "runtime.reloadConfig",
   describeMcpServers: "mcp.describeMcpServers",
+  describeSkills: "skills.describeSkills",
+  setSkillEnabled: "skills.setSkillEnabled",
   saveMcpServer: "mcp.saveMcpServer",
   deleteMcpServer: "mcp.deleteMcpServer",
   setMcpServerEnabled: "mcp.setMcpServerEnabled",
@@ -76,11 +78,15 @@ export const SESSION_METHODS: Record<
   compact: "session.compact",
   describeContext: "session.describeContext",
   mcpServers: "session.mcpServers",
+  describeSkills: "session.describeSkills",
   close: "session.close",
 };
 
 /** 没有（或没有一一对应的）RPC 方法的 RuntimeConfig 成员，附原因 */
 export const CONFIG_NOT_MAPPED = {
+  skillConfig: "用户级技能来源设置由 skills.describeSkills 使用",
+  disabledSkills: "技能开关由 skills.describeSkills 返回",
+  setSkillEnabled: "Runtime 统一写入并更新会话，映射 skills.setSkillEnabled",
   reload: "进程内重新加载，由 runtime.reloadConfig 映射",
   nocturneHome: "本机路径，客户端不需要",
   attachmentsDir: "本机路径，客户端不需要",

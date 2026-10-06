@@ -1,3 +1,4 @@
+import type { SkillsDescription } from "@nocturne/core";
 /**
  * RPC 客户端（ADR-0044）：类型化封装。运行时只依赖 `@nocturne/core/protocol`，
  * 对 `@nocturne/core` 只有类型导入（由 dependency-cruiser 规则强制），桌面端前端
@@ -123,6 +124,7 @@ export interface Subscription {
 
 /** 与进程内 `RuntimeSession` 同名的方法，全部异步化；`sessionId` 已绑定 */
 export interface RpcSession {
+  describeSkills(): Promise<SkillsDescription>;
   readonly id: string;
   /**
    * 订阅：先回放 afterSeq 之后的持久事件，再接实时事件（持久与临时都推）。
@@ -158,6 +160,8 @@ export interface RpcSession {
 
 /** 与进程内 `Runtime` 同名的方法；`undefined` 的返回在线上是 `null`，这里还原 */
 export interface RpcRuntime {
+  describeSkills(input?: { workspaceRoot?: string | undefined }): Promise<SkillsDescription>;
+  setSkillEnabled(input: { name: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
   describeMcpServers(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<{ servers: McpServerOverview[]; warnings: string[] }>;
@@ -436,6 +440,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
         }));
         return await call("session.submit", {
           ...p,
+          ...(input.skill !== undefined ? { skill: input.skill } : {}),
           ...(input.text !== undefined ? { text: input.text } : {}),
           ...(input.content !== undefined ? { content: input.content } : {}),
           ...(attachments !== undefined ? { attachments } : {}),
@@ -474,6 +479,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       listShells: () => call("session.listShells", p),
       visionInfo: () => call("session.visionInfo", p),
       mcpServers: () => call("session.mcpServers", p),
+      describeSkills: () => call("session.describeSkills", p),
       fileIndex: () => call("session.fileIndex", p),
       readInputHistory: () => call("session.readInputHistory", p),
       recordInputHistory: async (text) => {
@@ -494,6 +500,8 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
 
   const runtime: RpcRuntime = {
     describeMcpServers: (input = {}) => call("mcp.describeMcpServers", input),
+    describeSkills: (input = {}) => call("skills.describeSkills", input),
+    setSkillEnabled: (input) => call("skills.setSkillEnabled", input),
     saveMcpServer: (input) => call("mcp.saveMcpServer", input),
     deleteMcpServer: async (input) => {
       await call("mcp.deleteMcpServer", input);

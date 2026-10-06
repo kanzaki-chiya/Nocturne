@@ -808,6 +808,21 @@ class Connection {
         return null;
       },
       "mcp.describeMcpServers": (p) => this.runtime().describeMcpServers(p),
+      "skills.describeSkills": (p) =>
+        this.runtime().describeSkills({ workspaceRoot: optString(p, "workspaceRoot") }),
+      "skills.setSkillEnabled": (p) => {
+        const enabled = optBool(p, "enabled");
+        if (enabled === undefined) throw new InvalidParamsError("enabled 必须是布尔值");
+        return this.enqueueConfig(async () => {
+          const result = await this.runtime().setSkillEnabled({
+            name: reqString(p, "name"),
+            enabled,
+          });
+          this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+          return result;
+        });
+      },
+      "session.describeSkills": (p) => this.session(p).session.describeSkills(),
       "mcp.saveMcpServer": (p) =>
         this.mutateAndReload(
           () =>
@@ -1051,6 +1066,13 @@ class Connection {
       "session.submit": async (p) => {
         const { session } = this.session(p);
         const input: SubmitInput = {};
+        if (p.skill !== undefined) {
+          const skill = reqObject(p, "skill");
+          input.skill = {
+            name: reqString(skill, "name"),
+            arguments: optString(skill, "arguments"),
+          };
+        }
         const text = optString(p, "text");
         if (text !== undefined) input.text = text;
         if (p.content !== undefined && p.content !== null) {
