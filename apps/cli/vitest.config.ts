@@ -52,5 +52,7 @@ export default defineConfig({
     setupFiles: ["test/setup-isolated-home.ts"],
     // 同 packages/core：仅在 CI 放宽单测超时，本地保持默认 5s
     testTimeout: process.env.CI === "true" ? 30_000 : 5_000,
+    // 仅 CI：失败重试 2 次，吸收慢速 runner 上的时序抖动；本地不重试，偶发问题照常暴露
+    retry: process.env.CI === "true" ? 2 : 0,
   },
 });

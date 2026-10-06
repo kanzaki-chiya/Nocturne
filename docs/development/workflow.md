@@ -55,7 +55,7 @@ pnpm install        # 安装依赖
 pnpm typecheck      # tsc --noEmit（src 与 test 两套 tsconfig）
 pnpm lint           # eslint（strictTypeChecked + stylisticTypeChecked）
 pnpm format:check   # prettier --check；修复用 pnpm format
-pnpm test           # vitest run，默认测试集：完全离线，不依赖网络/API key/外部服务；各包依次运行，TUI 包内限 4 个 worker，避免渲染测试在并行负载下超时；core 与 cli 的单测超时本地为默认 5s，`CI=true` 时放宽到 30s（GitHub runner 明显更慢）
+pnpm test           # vitest run，默认测试集：完全离线，不依赖网络/API key/外部服务；各包依次运行，TUI 包内限 4 个 worker，避免渲染测试在并行负载下超时；`CI=true` 时（GitHub runner 明显更慢）core 与 cli 单测超时由 5s 放宽到 30s、TUI 由 15s 放宽到 60s，各包失败重试 2 次，本地不重试；TUI 测试固定 `CI=false`，避免 Ink 在 CI 下关闭增量渲染
 pnpm depcheck       # dependency-cruiser 依赖方向检查（modules.md 依赖图固化为规则）
 pnpm build          # tsdown 构建 packages/core/dist
 ```
