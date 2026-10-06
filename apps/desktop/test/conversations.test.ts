@@ -4,9 +4,15 @@ import {
   type RpcClient,
   type LineTransport,
 } from "@nocturne/rpc/client";
+import { createSessionView } from "@nocturne/core/protocol";
 import { describe, expect, it, vi } from "vitest";
 
-import { Conversations, conversationStatus } from "../src/conversations";
+import {
+  activeConversationCount,
+  Conversations,
+  conversationStatus,
+  type OpenConversation,
+} from "../src/conversations";
 import { projectKey } from "../src/session-tree";
 
 function fixture(lockedId?: string, rejectSubmit = false, failResume?: ReadonlySet<string>) {
@@ -394,5 +400,35 @@ describe("后台崩溃与重启恢复", () => {
     expect(f.controller.opened.get("a")?.dead).toBeUndefined();
     // b 仍是 dead，等「重启后台」或点开时再恢复
     expect(f.controller.opened.get("b")?.dead).toBe(true);
+  });
+});
+
+describe("activeConversationCount", () => {
+  /** 只填状态判断用到的字段 */
+  const entry = (
+    patch: Partial<Pick<OpenConversation, "busy">> & {
+      turn?: boolean;
+      permission?: boolean;
+    },
+  ): OpenConversation => {
+    const view = createSessionView();
+    if (patch.turn === true) view.currentTurn = { turnId: "t1", turnIndex: 0 };
+    if (patch.permission === true) {
+      view.pendingPermission = {} as NonNullable<typeof view.pendingPermission>;
+    }
+    return { view, busy: patch.busy ?? false } as unknown as OpenConversation;
+  };
+
+  it("运行中的 Turn、等待确认、发送中都计入；空闲不计", () => {
+    expect(activeConversationCount([])).toBe(0);
+    expect(activeConversationCount([entry({}), entry({})])).toBe(0);
+    expect(
+      activeConversationCount([
+        entry({ turn: true }),
+        entry({ permission: true }),
+        entry({ busy: true }),
+        entry({}),
+      ]),
+    ).toBe(3);
   });
 });

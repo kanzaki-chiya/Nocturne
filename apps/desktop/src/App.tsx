@@ -6,7 +6,12 @@ import { createAttachmentImageSource, type AttachmentImageSource } from "./attac
 import { BackendLogsPage, SHELL_LOG_ID, type BackendLogTarget } from "./BackendLogsPage";
 import { Composer, type ComposerSubmit, type WorkspaceChoice } from "./Composer";
 import { Conversation } from "./Conversation";
-import { Conversations, conversationStatus, type CreateSessionChoice } from "./conversations";
+import {
+  activeConversationCount,
+  Conversations,
+  conversationStatus,
+  type CreateSessionChoice,
+} from "./conversations";
 import { parseSlash } from "./commands";
 import { StatusBar, type StatusPanel } from "./StatusBar";
 import { PaneErrorBoundary } from "./ErrorBoundary";
@@ -522,10 +527,6 @@ export function App({ host }: { host: DesktopHost }) {
   };
 
   // ── 更新安装：有运行中的 Turn 先确认；下载/签名失败把原因留在提示条里 ──
-  const runningTurns = () =>
-    [...conversations.opened.values()].filter((entry) => conversationStatus(entry) !== "idle")
-      .length;
-
   const doUpdateInstall = async () => {
     setUpdateFlow({ stage: "working", text: "正在下载并安装更新…" });
     try {
@@ -554,7 +555,7 @@ export function App({ host }: { host: DesktopHost }) {
   };
 
   const beginUpdateInstall = () => {
-    const running = runningTurns();
+    const running = activeConversationCount(conversations.opened.values());
     if (running > 0) {
       setUpdateFlow({ stage: "confirm", running });
     } else {

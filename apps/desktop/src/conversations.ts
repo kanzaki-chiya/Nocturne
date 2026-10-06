@@ -47,6 +47,13 @@ export function conversationStatus(entry: OpenConversation): SessionStatus {
     : "idle";
 }
 
+/** 非空闲（运行中或等待确认）的会话数；装更新前据此决定是否先确认 */
+export function activeConversationCount(entries: Iterable<OpenConversation>): number {
+  let count = 0;
+  for (const entry of entries) if (conversationStatus(entry) !== "idle") count += 1;
+  return count;
+}
+
 /** 会话切换串行；Turn 不占切换队列，后台中的其他会话仍可继续运行。 */
 export interface CreateSessionChoice {
   /** 草稿选中的模型；undefined 时回落后台默认模型 */
