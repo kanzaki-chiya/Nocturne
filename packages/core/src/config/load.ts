@@ -483,6 +483,9 @@ export async function loadConfig(
   base();
   return {
     reload: () => loadConfig(platform, { ...options, nocturneHome: home, credentials }),
+    skillConfig: () => userFile.skills ?? {},
+    disabledSkills: () => settings.store.disabledSkills(),
+    setSkillEnabled: (name, enabled) => settings.store.setSkillEnabled(name, enabled),
     async describeMcpServers(input = {}) {
       const resolved = input.workspaceRoot
         ? (await forWorkspace(input.workspaceRoot)).resolved

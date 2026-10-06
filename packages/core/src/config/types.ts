@@ -1,3 +1,4 @@
+import type { SkillsConfig } from "../protocol/index.js";
 /**
  * 配置层类型（config.md 第 1、2、6 节）。
  * 本模块只做加载、校验、合并、标注来源；规则的解释在 permission，
@@ -168,6 +169,7 @@ export type SecurityReviewerConfig =
 
 /** 各层配置字段共用的 schema（config.md 第 2 节）；程序从不改写 config.json */
 export interface ConfigFile {
+  skills?: SkillsConfig | undefined;
   mcpWarnings?: string[] | undefined;
   compaction?: { threshold?: string | number | undefined } | undefined;
   /** false 时只使用本地 models.dev 数据，不联网刷新 */
@@ -478,6 +480,9 @@ export type SettingsPatch = Partial<{
  * base 不含项目层；forWorkspace 按会话 workspaceRoot 加载项目层与 Grant。
  */
 export interface RuntimeConfig {
+  skillConfig(): SkillsConfig;
+  disabledSkills(): string[];
+  setSkillEnabled(name: string, enabled: boolean): Promise<void>;
   reload(): Promise<RuntimeConfig>;
   describeMcpServers(input?: {
     workspaceRoot?: string | undefined;

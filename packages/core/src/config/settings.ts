@@ -17,6 +17,8 @@ import type { ReasoningEffort } from "../protocol/index.js";
 type SettingsData = Record<string, unknown>;
 
 export interface SettingsStore {
+  disabledSkills(): string[];
+  setSkillEnabled(name: string, enabled: boolean): Promise<void>;
   fields(): ConfigFile;
   update(patch: SettingsPatch): Promise<void>;
   setDefaultModel(model: string, effort: ReasoningEffort | null): Promise<void>;
@@ -31,6 +33,7 @@ export interface SettingsStore {
 }
 
 const reservedFields = new Set([
+  "skills",
   "model",
   "modelRoles",
   "reasoningEffort",
@@ -218,6 +221,30 @@ export async function loadSettingsStore(
   return {
     warning,
     store: {
+      disabledSkills: () => {
+        const value = (data.skills as { disabled?: unknown } | undefined)?.disabled;
+        return Array.isArray(value)
+          ? value.filter((name): name is string => typeof name === "string")
+          : [];
+      },
+      async setSkillEnabled(name, enabled) {
+        if (typeof name !== "string" || !name.trim() || typeof enabled !== "boolean")
+          throw new TypeError("无效的技能开关");
+        await write((next) => {
+          const skills =
+            typeof next.skills === "object" && next.skills !== null && !Array.isArray(next.skills)
+              ? { ...(next.skills as Record<string, unknown>) }
+              : {};
+          const disabled = Array.isArray(skills.disabled)
+            ? skills.disabled.filter(
+                (item): item is string =>
+                  typeof item === "string" && item.toLowerCase() !== name.toLowerCase(),
+              )
+            : [];
+          if (!enabled) disabled.push(name);
+          next.skills = { ...skills, disabled };
+        });
+      },
       fields: () => configFields(data),
       async update(patch) {
         validateSettingsPatch(patch);

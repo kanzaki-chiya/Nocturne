@@ -222,6 +222,14 @@ export function mcpEntrySchema(stored: boolean) {
 }
 
 const configFileSchema = z.object({
+  skills: z
+    .object({
+      sources: z
+        .object({ agents: z.boolean().optional(), claude: z.boolean().optional() })
+        .optional(),
+      extraDirs: z.array(z.string().min(1)).optional(),
+    })
+    .optional(),
   compaction: z
     .object({
       threshold: z
