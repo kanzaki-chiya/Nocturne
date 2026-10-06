@@ -113,9 +113,55 @@
   background: radial-gradient(circle at 8px 8px, white 5px, transparent 6px), var(--a-muted);
   margin-right: 6px;
 }
+.mcp-switch {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--a-secondary);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mcp-switch:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.mcp-switch:focus-visible {
+  outline: 2px solid var(--a-accent);
+  outline-offset: 4px;
+}
+.mcp-page .pane .t1 {
+  flex-direction: row;
+  align-items: center;
+}
+.mcp-page .pane .t1 .acts {
+  margin-left: auto;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.mcp-action-divider {
+  height: 18px;
+  width: 1px;
+  background: var(--a-borderStrong);
+  margin-inline: 6px;
+}
+.mcp-page .kv {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.mcp-page .kv .full {
+  grid-column: 1 / -1;
+}
+.mcp-page input.mcp-name-locked {
+  background: var(--a-raised);
+  color: var(--a-faint);
+  cursor: default;
+}
+.mcp-value-editor .dd-d {
+  display: none;
+}
 .mcp-switch.on::before {
   background: radial-gradient(circle at 20px 8px, white 5px, transparent 6px), var(--a-accent);
 }
 .mcp-page .t1 > .tagc {
-  align-self: flex-start;
+  flex-shrink: 0;
 }

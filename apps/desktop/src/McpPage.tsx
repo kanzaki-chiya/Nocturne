@@ -15,8 +15,24 @@ import "./mcp.css";
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 const propagation = "空闲会话立即生效，正在回复的会话在本轮结束后切换";
+const probeErrors = {
+  auth_required: "认证失败，请检查请求头",
+  spawn_failed: "启动失败，请检查命令是否已安装、路径是否正确",
+  startup_timeout: "启动超时，请检查服务器是否正常启动或增加启动超时",
+  http_redirect: "服务器重定向到其他地址，请检查 HTTP 地址",
+  mcp_secret_missing: "缺少已保存的凭据，请替换密钥或引用环境变量",
+  initialize_failed: "MCP 握手失败，请检查服务器是否支持 MCP 协议",
+  connect_failed: "连接失败，请检查 HTTP 地址和网络连接",
+  http_status: "HTTP 请求失败，请检查服务器返回的状态码",
+};
 const resultText = (r: McpProbeResult | undefined): string =>
-  !r ? "未测试" : r.ok ? `已连接 · ${r.tools.length} 个工具` : `测试失败 · ${r.error?.code ?? ""}`;
+  !r
+    ? "未测试"
+    : r.ok
+      ? `已连接 · ${r.tools.length} 个工具`
+      : r.error
+        ? probeErrors[r.error.code]
+        : "测试失败";
 function draftOf(server: McpServerOverview): McpDraft {
   return {
     id: server.id,
@@ -164,7 +180,13 @@ export function McpPage({
                     />
                     <span className="nm">{s.id}</span>
                     {s.transport === "http" && <span className="tagc">HTTP</span>}
-                    <small>{s.enabled ? resultText(results[s.id]) : "已停用"}</small>
+                    <small>
+                      {!s.enabled
+                        ? "已停用"
+                        : results[s.id]?.ok === false
+                          ? "测试失败"
+                          : resultText(results[s.id])}
+                    </small>
                   </button>
                 ))}
             </div>
@@ -196,7 +218,7 @@ export function McpPage({
                   <button
                     role="switch"
                     aria-checked={current.enabled}
-                    className={`btn mcp-switch ${current.enabled ? "on" : ""}`}
+                    className={`mcp-switch ${current.enabled ? "on" : ""}`}
                     disabled={!current.editable || busy}
                     onClick={() => {
                       if (!client) return;
@@ -214,6 +236,7 @@ export function McpPage({
                   >
                     启用
                   </button>
+                  <span className="mcp-action-divider" aria-hidden="true" />
                   <button
                     className="btn"
                     disabled={busy || !current.trusted}
@@ -398,7 +421,6 @@ function ProbeResult({ result }: { result: McpProbeResult }) {
         {(result.durationMs / 1000).toFixed(1)} 秒
         {result.httpStatus ? ` · HTTP ${result.httpStatus}` : ""}
       </span>
-      {result.error && <div>{result.error.message}</div>}
       {result.stderrTail?.length ? (
         <details>
           <summary>诊断信息</summary>
@@ -570,6 +592,7 @@ function McpForm({
         <label className="field">
           名称
           <input
+            className={replace ? "mcp-name-locked" : undefined}
             value={id}
             onChange={(e) => {
               setId(e.target.value);
@@ -638,11 +661,22 @@ function McpForm({
                 label={`值类型 ${index + 1}`}
                 value={row.kind}
                 options={[
-                  { value: "literal", label: "明文" },
-                  { value: "env", label: "引用环境变量" },
+                  {
+                    value: "literal",
+                    label: "明文",
+                    description: "值原样写进 mcp.json，适合地址、开关这类非敏感内容",
+                  },
+                  {
+                    value: "env",
+                    label: "引用环境变量",
+                    description: "启动时从 Nocturne 的进程环境读取同名或指定变量",
+                  },
                   {
                     value: "stored",
                     label: "保存到凭据库",
+                    description: backend
+                      ? "值存进系统凭据库，mcp.json 只记引用，界面不再显示"
+                      : "系统凭据后端不可用，请引用环境变量",
                     ...(!backend ? { disabled: "系统凭据后端不可用，请引用环境变量" } : {}),
                   },
                 ]}

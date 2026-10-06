@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { McpPage } from "../src/McpPage";
 import { parseMcpImport } from "../src/mcp-import";
@@ -37,6 +37,113 @@ describe("MCP JSON 导入", () => {
   });
 });
 describe("MCP 设置页", () => {
+  it.each(["stdio", "http"])("%s 编辑名称锁定、值类型说明与凭据不可用提示", async (transport) => {
+    const f = fakeServer(
+      withInit({
+        "mcp.describeMcpServers": {
+          servers: [
+            {
+              id: "managed",
+              origin: "app",
+              editable: true,
+              trusted: true,
+              path: "home/mcp.json",
+              transport,
+              enabled: true,
+              command: "node",
+              url: "https://example.com/mcp",
+              env: [],
+              headers: [],
+              startupTimeoutMs: 15000,
+              callTimeoutMs: 60000,
+            },
+          ],
+          warnings: [],
+        },
+        "provider.describeProviderSetup": { credential: { backend: { available: false } } },
+      }),
+    );
+    await f.initialize();
+    render(
+      <McpPage
+        client={f.client}
+        workspaceRoot={undefined}
+        version={0}
+        onChanged={() => undefined}
+      />,
+    );
+    await screen.findByRole("heading", { name: "managed" });
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    const name = screen.getByLabelText(/^名称/) as HTMLInputElement;
+    expect(name.disabled).toBe(true);
+    expect(name.classList.contains("mcp-name-locked")).toBe(true);
+    fireEvent.click(
+      screen.getByRole("button", { name: transport === "http" ? "＋ 添加请求头" : "＋ 添加变量" }),
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "值类型 1" }));
+    const list = within(screen.getByRole("listbox"));
+    expect(list.getByText("值原样写进 mcp.json，适合地址、开关这类非敏感内容")).toBeDefined();
+    expect(list.getByText("启动时从 Nocturne 的进程环境读取同名或指定变量")).toBeDefined();
+    const stored = list.getByRole("option", { name: /保存到凭据库/ });
+    expect(stored.getAttribute("aria-disabled")).toBe("true");
+    expect(within(stored).getByText("系统凭据后端不可用，请引用环境变量")).toBeDefined();
+    fireEvent.click(stored);
+    expect(screen.getByRole("combobox").textContent).toContain("明文");
+    f.close();
+  });
+  it.each([
+    ["auth_required", "认证失败，请检查请求头"],
+    ["spawn_failed", "启动失败，请检查命令是否已安装、路径是否正确"],
+    ["startup_timeout", "启动超时，请检查服务器是否正常启动或增加启动超时"],
+    ["http_redirect", "服务器重定向到其他地址，请检查 HTTP 地址"],
+    ["mcp_secret_missing", "缺少已保存的凭据，请替换密钥或引用环境变量"],
+  ])("%s 在最近测试与失败横幅显示具体说明", async (code, text) => {
+    const f = fakeServer(
+      withInit({
+        "mcp.describeMcpServers": {
+          servers: [
+            {
+              id: "managed",
+              origin: "app",
+              editable: true,
+              trusted: true,
+              path: "home/mcp.json",
+              transport: "http",
+              enabled: true,
+              url: "https://example.com/mcp",
+              headers: [],
+              startupTimeoutMs: 15000,
+              callTimeoutMs: 60000,
+            },
+          ],
+          warnings: [],
+        },
+        "provider.describeProviderSetup": { credential: { backend: { available: true } } },
+        "mcp.probeMcpServer": {
+          ok: false,
+          durationMs: 100,
+          tools: [],
+          error: { code, message: "连接失败，请检查服务器配置" },
+          httpStatus: 401,
+        },
+      }),
+    );
+    await f.initialize();
+    render(
+      <McpPage
+        client={f.client}
+        workspaceRoot={undefined}
+        version={0}
+        onChanged={() => undefined}
+      />,
+    );
+    await screen.findByRole("heading", { name: "managed" });
+    fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain(text));
+    expect(screen.getByText("最近测试").nextElementSibling?.textContent).toBe(text);
+    expect(screen.queryByText("连接失败，请检查服务器配置")).toBeNull();
+    f.close();
+  });
   it("来源分组与只读开关、编辑类型切换保留名称、默认 stored 和保存传播", async () => {
     const f = fakeServer(
       withInit({
@@ -98,6 +205,15 @@ describe("MCP 设置页", () => {
     expect(screen.getByRole("combobox", { name: "值类型 1" }).textContent).toContain(
       "保存到凭据库",
     );
+    fireEvent.click(screen.getByRole("combobox", { name: "值类型 1" }));
+    const stored = within(screen.getByRole("listbox")).getByRole("option", {
+      name: /保存到凭据库/,
+    });
+    expect(stored.getAttribute("aria-disabled")).toBeNull();
+    expect(
+      within(stored).getByText("值存进系统凭据库，mcp.json 只记引用，界面不再显示"),
+    ).toBeDefined();
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
     fireEvent.change(screen.getByLabelText("值 1"), { target: { value: "test-token-123" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(changed).toHaveBeenCalledOnce());
