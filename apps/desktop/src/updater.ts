@@ -69,6 +69,25 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+/**
+ * 把 updater 的原始错误（多为 tauri-plugin-updater 的英文信息）映射成界面用的中文说明。
+ * 原始信息仍由调用方写进外壳日志；界面只显示这里的结果。
+ */
+export function describeUpdateError(message: string): string {
+  const lower = message.toLowerCase();
+  if (/minisign|signature|\bsign(ed|ing)?\b|pubkey|public key/.test(lower)) {
+    return "签名校验失败，已取消安装";
+  }
+  if (
+    /network|download|request|fetch|connect|timed? ?out|dns|unreachable|offline|status code|status: \d|https?:|tls|socket/.test(
+      lower,
+    )
+  ) {
+    return "下载失败，请检查网络后重试";
+  }
+  return `更新失败：${message}`;
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

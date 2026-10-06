@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { createPrefsStore, PREFS_KEY } from "../src/prefs";
-import { AUTO_CHECK_INTERVAL_MS, createUpdateService } from "../src/updater";
+import {
+  AUTO_CHECK_INTERVAL_MS,
+  compareVersions,
+  createUpdateService,
+  describeUpdateError,
+} from "../src/updater";
 import type { AvailableUpdate } from "../src/host";
 
 function memoryStorage(initial?: Record<string, string>): Storage {
@@ -27,13 +32,14 @@ function fakeUpdate(
   notes: string | null = null,
 ): AvailableUpdate & {
   installs: number;
-  failInstall?: (e: unknown) => void;
+  /** 安装时要抛出的错误；undefined 表示安装成功 */
+  failInstall: unknown;
 } {
   const update = {
     version,
     notes,
     installs: 0,
-    failInstall: undefined as ((e: unknown) => void) | undefined,
+    failInstall: undefined as unknown,
     downloadAndInstall(onProgress?: (d: number, t: number | undefined) => void) {
       update.installs += 1;
       onProgress?.(1024, 2048);
@@ -220,5 +226,55 @@ describe("update service", () => {
     expect(await h.svc.install()).toBe("gone");
     expect(h.relaunches).toBe(0);
     expect(h.prefs.get().pendingUpdate).toBeUndefined();
+  });
+});
+
+describe("compareVersions", () => {
+  it("正式版大于同基线的 rc：已装 rc 的用户能收到正式版", () => {
+    expect(compareVersions("0.6.0", "0.6.0-rc.2")).toBeGreaterThan(0);
+    expect(compareVersions("0.6.0-rc.2", "0.6.0")).toBeLessThan(0);
+    expect(compareVersions("0.6.0-rc.2", "0.6.0-rc.1")).toBeGreaterThan(0);
+    expect(compareVersions("0.6.0-rc.10", "0.6.0-rc.2")).toBeGreaterThan(0);
+    expect(compareVersions("v0.6.0", "0.6.0")).toBe(0);
+  });
+
+  it("已装 rc 时，存着的正式版提示不会被当成过期丢掉", () => {
+    const h = harness({
+      version: "0.6.0-rc.2",
+      prefs: {
+        [PREFS_KEY]: JSON.stringify({ pendingUpdate: { version: "0.6.0", notes: null } }),
+      },
+    });
+    expect(h.svc.pendingNotice()).toEqual({ version: "0.6.0", notes: null });
+  });
+});
+
+describe("describeUpdateError", () => {
+  it("签名相关 → 签名校验失败", () => {
+    for (const raw of [
+      "Invalid encoding in minisign data",
+      "signature verification failed",
+      "The signature could not be decoded",
+      "failed to decode pubkey",
+    ]) {
+      expect(describeUpdateError(raw)).toBe("签名校验失败，已取消安装");
+    }
+  });
+
+  it("网络 / 下载失败 → 提示检查网络", () => {
+    for (const raw of [
+      "Network error: error sending request for url (https://github.com/x/latest.json)",
+      "Download request failed with status: 404 Not Found",
+      "Could not fetch a valid release JSON from the remote",
+      "operation timed out",
+      "connection refused",
+    ]) {
+      expect(describeUpdateError(raw)).toBe("下载失败，请检查网络后重试");
+    }
+  });
+
+  it("其他 → 更新失败加原始信息", () => {
+    expect(describeUpdateError("disk full")).toBe("更新失败：disk full");
+    expect(describeUpdateError("")).toBe("更新失败：");
   });
 });

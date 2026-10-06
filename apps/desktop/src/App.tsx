@@ -24,7 +24,7 @@ import { useDraftControls, useSessionControls } from "./session-controls";
 import { buildSessionTree, projectKey, projectName, type SessionSummary } from "./session-tree";
 import { Sidebar, type SettingsSection } from "./Sidebar";
 import type { NodeProbe } from "./types";
-import { createUpdateService, type UpdateNotice } from "./updater";
+import { createUpdateService, describeUpdateError, type UpdateNotice } from "./updater";
 
 type Phase =
   | { kind: "probing" }
@@ -937,7 +937,7 @@ export function App({ host }: { host: DesktopHost }) {
                   <span className="notes">{updateNoticeSummary}</span>
                 )}
                 {updateFlow?.stage === "error" && (
-                  <span className="err">更新失败：{updateFlow.message}</span>
+                  <span className="err">{describeUpdateError(updateFlow.message)}</span>
                 )}
                 <button className="btn primary" onClick={beginUpdateInstall}>
                   {updateFlow?.stage === "error" ? "重试" : "立即更新"}

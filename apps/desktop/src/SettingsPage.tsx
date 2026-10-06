@@ -19,7 +19,7 @@ import type {
   SettingItem,
   SettingsPatch,
 } from "./rpc-types";
-import type { CheckResult } from "./updater";
+import { describeUpdateError, type CheckResult } from "./updater";
 
 export type ThemePref = "system" | "light" | "dark";
 
@@ -257,7 +257,7 @@ export function SettingsPage({
     try {
       const result = await update.onCheck();
       if (result.kind === "error") {
-        setRowErr("updateCheck", `检查失败：${result.message}`);
+        setRowErr("updateCheck", describeUpdateError(result.message));
       } else if (result.kind === "latest") {
         showToast("已是最新版本");
       }

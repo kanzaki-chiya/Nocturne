@@ -760,12 +760,20 @@ it("有运行中的会话时点「立即更新」先确认会中断会话", asyn
 
 it("没有运行中的会话时直接下载安装；失败把原因留在提示条", async () => {
   const host = replayHost();
-  serveUpdate(host, new Error("signature mismatch"));
+  const install = serveUpdate(host, new Error("Invalid encoding in minisign data"));
   render(<App host={host} />);
   const bar = await screen.findByRole("status", { name: "发现新版本" });
   // gamma 会话是 idle；不打开任何会话也没有 running Turn
   fireEvent.click(within(bar).getByRole("button", { name: "立即更新" }));
-  await waitFor(() => expect(bar.textContent).toContain("更新失败：signature mismatch"));
+  // 不弹确认框，直接安装
+  expect(screen.queryByRole("dialog", { name: "更新确认" })).toBeNull();
+  await waitFor(() => expect(install).toHaveBeenCalledTimes(1));
+  // 界面只显示中文说明，原始英文信息进外壳日志
+  await waitFor(() => expect(bar.textContent).toContain("签名校验失败，已取消安装"));
+  expect(bar.textContent).not.toContain("minisign");
+  expect(host.shellLog.some((line) => line.includes("Invalid encoding in minisign data"))).toBe(
+    true,
+  );
   expect(within(bar).getByRole("button", { name: "重试" })).toBeTruthy();
   // pendingUpdate 恢复，下次启动仍提示
   const stored = JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}") as {

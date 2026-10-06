@@ -380,7 +380,10 @@ describe("SettingsPage", () => {
   it("手动检查更新：失败在行内显示原因；已是最新给提示", async () => {
     const server = fakeServer(handlers());
     await server.initialize();
-    let result: CheckResult = { kind: "error", message: "无法连接更新服务" };
+    let result: CheckResult = {
+      kind: "error",
+      message: "Network error: error sending request for url",
+    };
     const update = {
       autoUpdate: true,
       onAutoUpdateChange: () => true,
@@ -390,7 +393,7 @@ describe("SettingsPage", () => {
     const button = await screen.findByRole("button", { name: "检查更新" });
     fireEvent.click(button);
     await waitFor(() =>
-      expect(row("检查更新").textContent).toContain("检查失败：无法连接更新服务"),
+      expect(row("检查更新").textContent).toContain("下载失败，请检查网络后重试"),
     );
 
     result = { kind: "latest" };
@@ -398,7 +401,7 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("status").textContent).toContain("已是最新版本");
     });
-    expect(row("检查更新").textContent).not.toContain("检查失败");
+    expect(row("检查更新").textContent).not.toContain("下载失败");
     server.close();
   });
 });

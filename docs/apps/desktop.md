@@ -252,7 +252,7 @@ interface NodeProbe {
 `src/updater.ts` 的更新服务封装 `DesktopHost` 上的 `appVersion` / `checkUpdate` / `relaunch` / `note`（测试里用假宿主替换，`tauri-host.ts` 里落到 `@tauri-apps/plugin-updater` 与 `plugin-process`）。行为：
 
 - **检查时机**：启动进入就绪页后自动检查一次；之后由 `prefs.lastUpdateCheck` 节流，24 小时内最多一次。`prefs.autoUpdate` 显式 `false` 时自动检查完全不跑。手动「检查更新」同样计入节流但不等 24 小时。
-- **失败降级**：自动检查失败（网络不可达、签名/端点错误）只写外壳日志（`app_note`），不出任何 UI；手动检查失败把原因写在设置行内。
+- **失败降级**：自动检查失败（网络不可达、签名/端点错误）只写外壳日志（`app_note`），不出任何 UI；手动检查失败把原因写在设置行内。界面上的失败原因统一经 `describeUpdateError` 映射成中文（签名相关 →「签名校验失败，已取消安装」，网络/下载 →「下载失败，请检查网络后重试」，其他 →「更新失败：」加原始信息），原始英文信息只写外壳日志。
 - **提示**：发现新版本把 `{ version, notes }` 存进 `prefs.pendingUpdate`，并在窗口底部出提示条（`.updbar`，盖过设置层但不打断输入）：版本号 + 发布说明首行 + 「立即更新」「稍后」。「稍后」只清本次运行的提示状态，`pendingUpdate` 保留，下次启动若仍比当前版本新会继续提示；不比当前版本新时 `pendingUpdate` 被丢弃。
 - **确认与安装**：点「立即更新」时若还有非空闲会话（运行中或等待确认），先弹「将中断 N 个正在运行的会话」确认框；没有则直接下载。安装前再调一次 `checkUpdate` 拿 `Update` 句柄（存的 `pendingUpdate` 没有安装入口），期间提示条显示下载进度；下载/签名校验失败把原因留在提示条并恢复 `pendingUpdate`。Windows 下安装器在 `downloadAndInstall` 期间接管并退出进程（被动安装），随后由更新流程自动重启；其他平台装完调 `process` 插件 `relaunch`。
 - **更新器配置**：`tauri.conf.json` 开 `bundle.createUpdaterArtifacts`，`plugins.updater` 配 `pubkey`（minisign 公钥）、`endpoints` 指向 GitHub Release 的 `latest.json`、Windows `installMode: "passive"`。签名私钥只经 `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` 环境变量在构建期注入（见 [workflow.md](../development/workflow.md) 第 8 节）。
