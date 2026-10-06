@@ -19,6 +19,7 @@ import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "
 import { App } from "../src/app.js";
 import type { MouseEvent, MouseSource } from "../src/mouse.js";
 import { internalSession } from "./internal-session.js";
+import { APP_VERSION } from "../src/version.js";
 
 const tmpRoots: string[] = [];
 beforeEach(() => vi.stubEnv("NOCTURNE_HOME", tmp("nct-mouse-home-")));
@@ -107,7 +108,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     const { lastFrame, unmount, frames } = render(
       createElement(App, { session, runtime, env: ENV, mouse }),
     );
-    await waitFor(() => (lastFrame() ?? "").includes("v0.5.0"));
+    await waitFor(() => (lastFrame() ?? "").includes(`v${APP_VERSION}`));
     const diff = `@@ -0,0 +1,50 @@\n${Array.from({ length: 50 }, (_, i) => `+line${i + 1}`).join("\n")}`;
     await internalSession(session).emit("tool.started", {
       callId: "diff-1",
@@ -183,7 +184,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     const { lastFrame, unmount } = render(
       createElement(App, { session, runtime, env: ENV, mouse }),
     );
-    await waitFor(() => (lastFrame() ?? "").includes("v0.5.0"));
+    await waitFor(() => (lastFrame() ?? "").includes(`v${APP_VERSION}`));
     await session.submit({ text: "长" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
     mouse.emit({ type: "wheel", dir: "up", x: 1, y: 1 });
@@ -216,7 +217,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
         writeOob: oob,
       }),
     );
-    await waitFor(() => (lastFrame() ?? "").includes("v0.5.0"));
+    await waitFor(() => (lastFrame() ?? "").includes(`v${APP_VERSION}`));
     await session.submit({ text: "复制目标" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
     // 视口底部往上找"末尾标记"所在行；拖动选中它
@@ -264,7 +265,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
         writeOob: () => true,
       }),
     );
-    await waitFor(() => (lastFrame() ?? "").includes("v0.5.0"));
+    await waitFor(() => (lastFrame() ?? "").includes(`v${APP_VERSION}`));
     // 用户消息原样显示，段间空行各占一行
     await session.submit({ text: "第一段\n\n第二段\n\n第三段" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
@@ -294,7 +295,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     const { lastFrame, unmount } = render(
       createElement(App, { session, runtime, env: ENV, mouse, copySpawn: spawn }),
     );
-    await waitFor(() => (lastFrame() ?? "").includes("v0.5.0"));
+    await waitFor(() => (lastFrame() ?? "").includes(`v${APP_VERSION}`));
     await session.submit({ text: "起点问题" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
     expect(lastFrame()).not.toContain("› 起点问题");
@@ -319,7 +320,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV, mouse, copySpawn: spawn }),
     );
-    await waitFor(() => (lastFrame() ?? "").includes("v0.5.0"));
+    await waitFor(() => (lastFrame() ?? "").includes(`v${APP_VERSION}`));
     await session.submit({ text: "问题" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
     const frame = lastFrame() ?? "";
@@ -358,7 +359,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     const { lastFrame, unmount } = render(
       createElement(App, { session, runtime, env: ENV, mouse, copySpawn: spawn }),
     );
-    await waitFor(() => (lastFrame() ?? "").includes("v0.5.0"));
+    await waitFor(() => (lastFrame() ?? "").includes(`v${APP_VERSION}`));
     await session.submit({ text: "问题" });
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
     mouse.emit({ type: "press", button: 0, x: 3, y: 2 });

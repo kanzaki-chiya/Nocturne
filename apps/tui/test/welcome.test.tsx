@@ -8,9 +8,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime, FakeProvider, type RuntimeSession } from "@nocturne/core";
 import { App } from "../src/app.js";
 import { emptyWelcomeLines, welcomeLines, type WelcomeInfo } from "../src/welcome.js";
+import { APP_VERSION } from "../src/version.js";
 
 const info: WelcomeInfo = {
-  version: "0.5.0",
+  version: APP_VERSION,
   model: "fake-model",
   effort: "high",
   cwd: "Z:\\nocturne",
@@ -76,8 +77,9 @@ describe("ADR-0039 空会话欢迎区", () => {
     expect(lines.some((line) => line.text.includes("█"))).toBe(logo);
     expect(lines.length).toBeLessThanOrEqual(height);
     expect(lines.every((line) => stringWidth(line.text) <= width)).toBe(true);
-    expect(lines.map((line) => line.text).join("\n")).toContain("v0.5.0");
-    if (!logo) expect(lines.some((line) => line.text.trim() === "Nocturne v0.5.0")).toBe(true);
+    expect(lines.map((line) => line.text).join("\n")).toContain(`v${APP_VERSION}`);
+    if (!logo)
+      expect(lines.some((line) => line.text.trim() === `Nocturne v${APP_VERSION}`)).toBe(true);
   });
   it("不足四行回退小欢迎区文字，不居中，也不误截宽屏目录", () => {
     const narrowHeight = { ...info, cwd: `Z:\\${"directory\\".repeat(5)}project` };
@@ -90,7 +92,9 @@ describe("ADR-0039 空会话欢迎区", () => {
     const lines = emptyWelcomeLines(info, 20);
     expect(lines.slice(0, 4).every((line) => line.text === "")).toBe(true);
     expect(lines[4]?.text.startsWith(" ".repeat(26) + "█")).toBe(true);
-    expect(lines.map((line) => line.text.trim())).toContain("v0.5.0 • fake-model • 思考:high");
+    expect(lines.map((line) => line.text.trim())).toContain(
+      `v${APP_VERSION} • fake-model • 思考:high`,
+    );
     const ascii = emptyWelcomeLines({ ...info, ascii: true, effort: undefined }, 20);
     expect(ascii.map((line) => line.text).join("\n")).toContain("#");
     expect(ascii.map((line) => line.text).join("\n")).not.toMatch(/[█▀▄•]|思考:/);
@@ -113,14 +117,14 @@ describe("ADR-0039 空会话欢迎区", () => {
       transcriptOut,
     });
     await waitFor(() => (screen.lastFrame() ?? "").includes("idle"));
-    expect(screen.lastFrame()).not.toContain("Nocturne 0.5.0");
+    expect(screen.lastFrame()).not.toContain(`Nocturne ${APP_VERSION}`);
     expect(screen.lastFrame()).toContain("#");
-    expect(transcriptOut.current?.().join("\n")).toContain("Nocturne 0.5.0");
+    expect(transcriptOut.current?.().join("\n")).toContain(`Nocturne ${APP_VERSION}`);
     expect(transcriptOut.current?.().join("\n")).not.toContain("#");
     await session.submit({ text: "第一条消息" });
     await waitFor(() => (screen.lastFrame() ?? "").includes("离线回答"));
-    expect(screen.lastFrame()).toContain("Nocturne 0.5.0");
-    expect(screen.lastFrame()).not.toContain("v0.5.0");
+    expect(screen.lastFrame()).toContain(`Nocturne ${APP_VERSION}`);
+    expect(screen.lastFrame()).not.toContain(`v${APP_VERSION}`);
     expect(transcriptOut.current?.().join("\n")).toContain("第一条消息");
     expect(transcriptOut.current?.().join("\n")).not.toContain("#");
   });
@@ -130,23 +134,23 @@ describe("ADR-0039 空会话欢迎区", () => {
     Object.defineProperty(session, "warnings", { value: ["离线启动提示"] });
     const screen = mount({ session, runtime, env: { ascii: false, animated: false } });
     await waitFor(() => (screen.lastFrame() ?? "").includes("离线启动提示"));
-    expect(screen.lastFrame()).toContain("v0.5.0");
+    expect(screen.lastFrame()).toContain(`v${APP_VERSION}`);
     Object.defineProperty(screen.stdout, "columns", { configurable: true, value: 51 });
     Object.defineProperty(screen.stdout, "rows", { configurable: true, value: 16 });
     let before = screen.lastFrame();
     screen.stdout.emit("resize");
     await waitFor(() => screen.lastFrame() !== before);
-    expect(screen.lastFrame()).not.toContain("Nocturne v0.5.0");
+    expect(screen.lastFrame()).not.toContain(`Nocturne v${APP_VERSION}`);
     Object.defineProperty(screen.stdout, "rows", { configurable: true, value: 15 });
     before = screen.lastFrame();
     screen.stdout.emit("resize");
     await waitFor(() => screen.lastFrame() !== before);
-    expect(screen.lastFrame()).toContain("Nocturne v0.5.0");
+    expect(screen.lastFrame()).toContain(`Nocturne v${APP_VERSION}`);
     Object.defineProperty(screen.stdout, "rows", { configurable: true, value: 7 });
     before = screen.lastFrame();
     screen.stdout.emit("resize");
     await waitFor(() => screen.lastFrame() !== before);
-    expect(screen.lastFrame()).not.toContain("v0.5.0");
+    expect(screen.lastFrame()).not.toContain(`v${APP_VERSION}`);
     expect(screen.lastFrame()).toContain("fake-model");
   });
   it("/new 重新显示大字标；/resume 有历史的会话显示小欢迎区", async () => {
@@ -161,32 +165,32 @@ describe("ADR-0039 空会话欢迎区", () => {
       newSession: async () => ({ kind: "ok", session: await open() }),
       switchSession: async () => ({ kind: "ok", session: historic }),
     });
-    await waitFor(() => (screen.lastFrame() ?? "").includes("v0.5.0"));
+    await waitFor(() => (screen.lastFrame() ?? "").includes(`v${APP_VERSION}`));
     await original.submit({ text: "首条" });
     await waitFor(() => (screen.lastFrame() ?? "").includes("离线回答"));
     await command(screen, "/new");
-    await waitFor(() => (screen.lastFrame() ?? "").includes("v0.5.0"));
+    await waitFor(() => (screen.lastFrame() ?? "").includes(`v${APP_VERSION}`));
     expect(screen.lastFrame()).not.toContain("首条");
     await command(screen, `/resume ${historic.id}`);
     await waitFor(() => (screen.lastFrame() ?? "").includes("历史消息"));
-    expect(screen.lastFrame()).toContain("Nocturne 0.5.0");
-    expect(screen.lastFrame()).not.toContain("v0.5.0");
+    expect(screen.lastFrame()).toContain(`Nocturne ${APP_VERSION}`);
+    expect(screen.lastFrame()).not.toContain(`v${APP_VERSION}`);
   });
   it("非启动条目阻止大欢迎区；--inline 保持小欢迎区", async () => {
     const { runtime, open } = await fixture();
     const session = await open();
     const screen = mount({ session, runtime, env: { ascii: false, animated: false } });
-    await waitFor(() => (screen.lastFrame() ?? "").includes("v0.5.0"));
+    await waitFor(() => (screen.lastFrame() ?? "").includes(`v${APP_VERSION}`));
     await command(screen, "/invalid");
-    await waitFor(() => (screen.lastFrame() ?? "").includes("Nocturne 0.5.0"));
-    expect(screen.lastFrame()).not.toContain("v0.5.0");
+    await waitFor(() => (screen.lastFrame() ?? "").includes(`Nocturne ${APP_VERSION}`));
+    expect(screen.lastFrame()).not.toContain(`v${APP_VERSION}`);
     const inline = mount({
       session: await open(),
       runtime,
       inline: true,
       env: { ascii: false, animated: false },
     });
-    await waitFor(() => (inline.lastFrame() ?? "").includes("Nocturne 0.5.0"));
-    expect(inline.lastFrame()).not.toContain("v0.5.0");
+    await waitFor(() => (inline.lastFrame() ?? "").includes(`Nocturne ${APP_VERSION}`));
+    expect(inline.lastFrame()).not.toContain(`v${APP_VERSION}`);
   });
 });

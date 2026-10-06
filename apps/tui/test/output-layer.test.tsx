@@ -10,6 +10,7 @@ import { createRuntime, FakeProvider } from "@nocturne/core";
 import { runTui } from "../src/index.js";
 import { createCursorStream } from "../src/cursor.js";
 import { inkFrame, OutputLayer } from "../src/output-layer.js";
+import { APP_VERSION } from "../src/version.js";
 
 const frame = (lines: string[]): string => `${lines.join("\n")}\n`;
 const rewritten = (write: string): number[] =>
@@ -286,7 +287,7 @@ it("120 行流式思考保持固定窗口，每帧至多改 6 行且不清屏", 
     stderr: io.stderr,
     patchConsole: false,
   });
-  await vi.waitFor(() => expect(io.writes.join("")).toContain("v0.5.0"));
+  await vi.waitFor(() => expect(io.writes.join("")).toContain(`v${APP_VERSION}`));
   await session.submit({ text: "测试流式" });
   const frames: string[] = [];
   let frame = "";

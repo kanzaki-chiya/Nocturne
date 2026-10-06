@@ -13,6 +13,7 @@ import type { FakeScript } from "@nocturne/core";
 
 import { runTui } from "../src/index.js";
 import { sessionSavedLine } from "../src/exit-note.js";
+import { APP_VERSION } from "../src/version.js";
 
 const tmpRoots: string[] = [];
 const tmp = (prefix: string) => {
@@ -119,7 +120,7 @@ describe("退出保留回滚区", () => {
       inline: true,
       patchConsole: false,
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     await session.submit({ text: "测试分段" });
     const output = io.stdoutChunks.join("");
     expect(output).toContain("第一段");
@@ -148,7 +149,7 @@ describe("退出保留回滚区", () => {
       inline: true,
       patchConsole: false,
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     for (let i = 1; i <= 5; i++) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       const before = io.stdoutChunks.length;
@@ -181,7 +182,7 @@ describe("退出保留回滚区", () => {
       inline: true,
       patchConsole: false,
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     io.stdin.write("/exit");
     io.stdin.write("\r");
     await done;
@@ -200,7 +201,7 @@ describe("退出保留回滚区", () => {
       inline: true,
       patchConsole: false,
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     io.stdin.write("\x04");
     await done;
     preservedBeforeMessage(io.stdoutChunks, session.id);
@@ -218,7 +219,7 @@ describe("退出保留回滚区", () => {
       inline: true,
       patchConsole: false,
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     io.stdin.write("\x03");
     await done;
     preservedBeforeMessage(io.stdoutChunks, session.id);
@@ -239,7 +240,7 @@ describe("退出保留回滚区", () => {
       inline: true,
       patchConsole: false,
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     process.emit("unhandledRejection", new Error("boom"), Promise.resolve());
     await done;
     expect(crashed).toBe(true);
@@ -272,7 +273,7 @@ describe("全屏退出（默认模式）", () => {
     }).then(() => {
       exited = true;
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     io.stdin.write("hello");
     await waitFor(() => io.stdoutChunks.join("").includes("hello"));
     io.stdin.write("\r");
@@ -301,7 +302,7 @@ describe("全屏退出（默认模式）", () => {
       stderr: io.stderr,
       patchConsole: false,
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     await session.submit({ text: "问题" });
     io.stdin.write("\x04");
     await done;
@@ -332,7 +333,7 @@ describe("全屏退出（默认模式）", () => {
       stderr: io.stderr,
       patchConsole: false,
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     await session.submit({ text: "问题" });
     io.stdin.write("\x0f");
     await waitFor(() => io.stdoutChunks.join("").includes("思考已展开（Ctrl+O 收起）"));
@@ -356,7 +357,7 @@ describe("全屏退出（默认模式）", () => {
       stderr: io.stderr,
       patchConsole: false,
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     await session.submit({ text: "测试分段" });
     await waitFor(() => io.stdoutChunks.join("").includes("第二段"));
     io.stdin.write("\x04");
@@ -386,7 +387,7 @@ describe("全屏退出（默认模式）", () => {
       stderr: io.stderr,
       patchConsole: false,
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     io.stdin.write("\x04");
     await done;
     const text = io.stdoutChunks.join("");
@@ -417,7 +418,7 @@ describe("全屏退出（默认模式）", () => {
       },
       patchConsole: false,
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     process.emit("unhandledRejection", new Error("boom"), Promise.resolve());
     await done;
     expect(crashed).toBe(true);
@@ -440,7 +441,7 @@ describe("全屏退出（默认模式）", () => {
       stderr: io.stderr,
       patchConsole: false,
     });
-    await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+    await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     // 滚轮序列与普通按键字节混在同一块里：按键进输入框，鼠标序列被摘除
     io.stdin.write("\x1b[<65;10;5Mxyz");
     await waitFor(() => io.stdoutChunks.join("").includes("xyz"));
@@ -474,7 +475,7 @@ it.each([
     inline,
     patchConsole: false,
   });
-  await waitFor(() => io.stdoutChunks.join("").includes("0.5.0"));
+  await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
   await session.submit({ text: "导出验证" });
   await waitFor(() => io.stdoutChunks.join("").includes("导出续行"));
   io.stdin.write("\x04");

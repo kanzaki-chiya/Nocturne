@@ -40,7 +40,7 @@ describe("pack-npm", () => {
 
     const tgz = packNpm({ bundleFile: bundle, out });
     expect(existsSync(tgz)).toBe(true);
-    expect(tgz).toMatch(/nctrn-\d+\.\d+\.\d+\.tgz$/);
+    expect(tgz).toMatch(/nctrn-\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?\.tgz$/);
 
     const files = untar(tgz);
     const entries = ["package.json", "README.md", "nctrn.mjs", "LICENSE", "THIRD-PARTY-NOTICES.md"];

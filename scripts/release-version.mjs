@@ -7,7 +7,8 @@
  *
  * 覆盖：根与各 workspace package.json、apps/desktop/src-tauri/tauri.conf.json、
  * Cargo.toml（[package] version）、Cargo.lock（nocturne-desktop 条目）、
- * packaging/npm/package.json。接受 0.6.0-rc.1 这类预发布号。
+ * packaging/npm/package.json，以及源码里的版本常量（CONST_VERSION_FILES）。
+ * 接受 0.6.0-rc.1 这类预发布号。
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -29,6 +30,14 @@ const JSON_VERSION_FILES = [
   "packaging/npm/package.json",
 ];
 
+/** 源码里的版本常量：文件 → 常量名（`[export ]const <名> = "<版本>";`） */
+const CONST_VERSION_FILES = {
+  "packages/core/src/protocol/version.ts": "NOCTURNE_VERSION",
+  "packages/mcp/src/connector.ts": "CLIENT_VERSION",
+  "apps/cli/src/main.ts": "VERSION",
+  "apps/tui/src/version.ts": "APP_VERSION",
+};
+
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 export function isValidVersion(version) {
@@ -43,9 +52,25 @@ function readJsonVersion(file) {
 
 function writeJsonVersion(file, version) {
   const text = readFileSync(file, "utf8");
-  const next = text.replace(/^(\s*)"version":\s*"[^"]*"/m, `$1"version": "${version}"`);
-  if (next === text) throw new Error(`${file} 中找不到 version 字段`);
-  writeFileSync(file, next);
+  const pattern = /^(\s*)"version":\s*"[^"]*"/m;
+  if (!pattern.test(text)) throw new Error(`${file} 中找不到 version 字段`);
+  writeFileSync(file, text.replace(pattern, `$1"version": "${version}"`));
+}
+
+function constPattern(name) {
+  return new RegExp(`^((?:export )?const ${name} = ")([^"]*)(";)`, "m");
+}
+
+function readConstVersion(file, name) {
+  const match = constPattern(name).exec(readFileSync(file, "utf8"));
+  if (match === null) throw new Error(`${file} 中找不到常量 ${name}`);
+  return match[2];
+}
+
+function writeConstVersion(file, name, version) {
+  const text = readFileSync(file, "utf8");
+  if (!constPattern(name).test(text)) throw new Error(`${file} 中找不到常量 ${name}`);
+  writeFileSync(file, text.replace(constPattern(name), `$1${version}$3`));
 }
 
 /** Cargo.toml：只动 [package] 节里的 version 行（[^[] 保证不越出本节） */
@@ -58,9 +83,9 @@ function readCargoVersion(file) {
 
 function writeCargoVersion(file, version) {
   const text = readFileSync(file, "utf8");
-  const next = text.replace(/(\[package\][^[]*?^version\s*=\s*")[^"]*(")/m, `$1${version}$2`);
-  if (next === text) throw new Error(`${file} 中找不到 [package] version`);
-  writeFileSync(file, next);
+  const pattern = /(\[package\][^[]*?^version\s*=\s*")[^"]*(")/m;
+  if (!pattern.test(text)) throw new Error(`${file} 中找不到 [package] version`);
+  writeFileSync(file, text.replace(pattern, `$1${version}$2`));
 }
 
 /** Cargo.lock：只动 [[package]] name = "<crate>" 那一节的 version 行 */
@@ -99,6 +124,9 @@ export function collectVersions(root) {
     join(root, "apps/desktop/src-tauri/Cargo.lock"),
     CRATE,
   );
+  for (const [rel, name] of Object.entries(CONST_VERSION_FILES)) {
+    versions[rel] = readConstVersion(join(root, rel), name);
+  }
   return versions;
 }
 
@@ -109,6 +137,9 @@ export function applyVersion(root, version) {
   }
   writeCargoVersion(join(root, "apps/desktop/src-tauri/Cargo.toml"), version);
   writeLockVersion(join(root, "apps/desktop/src-tauri/Cargo.lock"), CRATE, version);
+  for (const [rel, name] of Object.entries(CONST_VERSION_FILES)) {
+    writeConstVersion(join(root, rel), name, version);
+  }
 }
 
 /** @returns {{ ok: boolean, versions: Record<string, string> }} */

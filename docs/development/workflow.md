@@ -133,7 +133,7 @@ Phase 2 的 CLI 冒烟（`apps/cli`）：在临时目录生成一个含失败测
 
 ### 8.1 常规发布顺序
 
-1. **版本号**：`node scripts/release-version.mjs <version>` 一次改齐所有 `package.json`、`tauri.conf.json`、`Cargo.toml`、`Cargo.lock` 与 npm 模板；`--check <version>` 只校验不写（流水线用它核对标签）。
+1. **版本号**：`node scripts/release-version.mjs <version>` 一次改齐所有 `package.json`、`tauri.conf.json`、`Cargo.toml`、`Cargo.lock`、npm 模板，以及源码里的版本常量（core `NOCTURNE_VERSION`、mcp `CLIENT_VERSION`、cli `VERSION`、tui `APP_VERSION`）；重复执行同一版本号不报错；`--check <version>` 只校验不写（流水线用它核对标签）。
 2. **CHANGELOG.md**：为 `<version>` 补一节（`## <version>` 标题格式），[release-notes.mjs](../../scripts/release-notes.mjs) 提取该节作为 Release 说明与 `latest.json` 的 `notes`；找不到对应小节会让发布构建失败。
 3. **打标签**：审阅变更后 `git tag v<version>` 并推送标签。
 4. **流水线**：`.github/workflows/release.yml` 在 windows-latest 上跑完整检查（typecheck / lint / format / depcheck / build / test）、版本一致性校验、`pnpm release:build`（带签名环境变量）、tgz 安装冒烟，然后 `gh release create --draft`（版本号含 `-` 时另加 `--prerelease`）上传 `setup.exe`、`.sig`、`latest.json`、`nctrn-<version>.tgz`；ubuntu-latest 与 macos-latest 仅对 tgz 做安装冒烟，结果追加进草稿说明。

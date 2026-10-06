@@ -29,6 +29,7 @@ import { Transcript } from "../src/components/transcript.js";
 import { TuiEnvContext } from "../src/env.js";
 import type { SwitchSessionFn } from "../src/types.js";
 import { internalSession } from "./internal-session.js";
+import { APP_VERSION } from "../src/version.js";
 
 const tmpRoots: string[] = [];
 beforeEach(() => vi.stubEnv("NOCTURNE_HOME", tmp("nct-tui-home-")));
@@ -748,11 +749,12 @@ describe("TUI", () => {
     stdin.write("\r");
     await waitFor(() => created.length === 1);
     await waitFor(
-      () => (lastFrame() ?? "").includes("v0.5.0") && !(lastFrame() ?? "").includes("旧回答"),
+      () =>
+        (lastFrame() ?? "").includes(`v${APP_VERSION}`) && !(lastFrame() ?? "").includes("旧回答"),
     );
     const frame = lastFrame() ?? "";
     // 旧对话整体换出：欢迎区重新出现，翻阅提示与旧内容都不在
-    expect(frame).toContain("v0.5.0");
+    expect(frame).toContain(`v${APP_VERSION}`);
     expect(frame).not.toContain("旧回答");
     expect(frame).not.toContain("已向上翻阅");
     await created[0]?.submit({ text: "新问题" });

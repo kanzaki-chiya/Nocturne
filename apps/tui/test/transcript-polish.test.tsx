@@ -28,6 +28,7 @@ import { anchorFromBottom, selectVisible, type LineBlock } from "../src/viewport
 import type { MouseEvent, MouseSource } from "../src/mouse.js";
 import { palettes } from "../src/theme.js";
 import { internalSession } from "./internal-session.js";
+import { APP_VERSION } from "../src/version.js";
 
 const roots: string[] = [];
 function temp() {
@@ -143,7 +144,7 @@ it("工具标题展开完整输出并收起；diff 标题和省略行共享状�
       transcriptOut: out,
     }),
   );
-  await vi.waitFor(() => expect(screen.lastFrame()).toContain("v0.5.0"));
+  await vi.waitFor(() => expect(screen.lastFrame()).toContain(`v${APP_VERSION}`));
   await internalSession(session).emit("tool.started", {
     callId: "read1",
     name: "read",

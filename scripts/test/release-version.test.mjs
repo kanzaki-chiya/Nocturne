@@ -65,6 +65,17 @@ function makeFixture() {
       "",
     ].join("\n"),
   );
+  const constFiles = {
+    "packages/core/src/protocol/version.ts": 'export const NOCTURNE_VERSION = "0.5.0";\n',
+    "packages/mcp/src/connector.ts": 'import x from "y";\n\nconst CLIENT_VERSION = "0.5.0";\n',
+    "apps/cli/src/main.ts": 'const VERSION = "0.5.0";\nconst OTHER_VERSION = "9.9.9";\n',
+    "apps/tui/src/version.ts": 'export const APP_VERSION = "0.5.0";\n',
+  };
+  for (const [rel, text] of Object.entries(constFiles)) {
+    const file = join(root, rel);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text);
+  }
   return root;
 }
 
@@ -98,6 +109,19 @@ describe("release-version", () => {
     const toml = readFileSync(join(root, "apps/desktop/src-tauri/Cargo.toml"), "utf8");
     expect(toml).toContain('version = "0.6.0"');
     expect(toml).toContain('serde = { version = "1" }');
+  });
+
+  it("源码版本常量只改目标常量", () => {
+    applyVersion(root, "0.6.0");
+    const main = readFileSync(join(root, "apps/cli/src/main.ts"), "utf8");
+    expect(main).toBe('const VERSION = "0.6.0";\nconst OTHER_VERSION = "9.9.9";\n');
+    expect(collectVersions(root)["packages/mcp/src/connector.ts"]).toBe("0.6.0");
+  });
+
+  it("重复设置同一版本号不报错", () => {
+    applyVersion(root, "0.6.0");
+    expect(() => applyVersion(root, "0.6.0")).not.toThrow();
+    expect(checkVersion(root, "0.6.0").ok).toBe(true);
   });
 
   it("--check 全部一致时通过", () => {
