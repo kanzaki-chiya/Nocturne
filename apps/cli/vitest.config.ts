@@ -50,5 +50,7 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     environment: "node",
     setupFiles: ["test/setup-isolated-home.ts"],
+    // 同 packages/core：仅在 CI 放宽单测超时，本地保持默认 5s
+    testTimeout: process.env.CI === "true" ? 30_000 : 5_000,
   },
 });
