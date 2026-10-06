@@ -12,7 +12,13 @@ import {
   type ReactNode,
 } from "react";
 
-import { parseFileRefs, type ImageMimeType } from "@nocturne/core/protocol";
+import {
+  parseFileRefs,
+  parseSkillSlash,
+  type ImageMimeType,
+  type SkillOverview,
+  type SkillInvocation,
+} from "@nocturne/core/protocol";
 
 import { completeSlash, parseSlash, type SlashGroup } from "./commands";
 import {
@@ -90,10 +96,12 @@ export interface FileRefSource {
 
 export interface ComposerSubmit {
   text: string;
+  skill?: SkillInvocation;
   attachments: { data: Uint8Array; mimeType: ImageMimeType; label: string }[];
 }
 
 export interface ComposerProps {
+  skills?: readonly SkillOverview[];
   running: boolean;
   disabled?: boolean;
   /** false 表示未接收；resolve 表示已接收（草稿与附件才可清空） */
@@ -213,6 +221,8 @@ function IconPlus() {
 }
 
 interface PopupRow {
+  argumentHint?: string | undefined;
+  source?: string | undefined;
   key: string;
   label: string;
   summary?: string;
@@ -240,6 +250,7 @@ export function Composer({
   onSlash,
   onManageProviders,
   placeholder,
+  skills = [],
 }: ComposerProps) {
   const isSession = variant === "session";
   const [draft, setDraft] = useState("");
@@ -402,8 +413,11 @@ export function Composer({
   const showRefPopup =
     token !== undefined && fileRefs !== null && !dismissed && refCompletion !== undefined;
   const slashGroups = useMemo<SlashGroup[]>(
-    () => (focused && !composing && !dismissed && token === undefined ? completeSlash(draft) : []),
-    [focused, composing, dismissed, token, draft],
+    () =>
+      focused && !composing && !dismissed && token === undefined
+        ? completeSlash(draft, skills)
+        : [],
+    [focused, composing, dismissed, token, draft, skills],
   );
   const popup: PopupKind | null = showRefPopup ? "refs" : slashGroups.length > 0 ? "slash" : null;
 
@@ -425,6 +439,8 @@ export function Composer({
           key: `${group.id}:${item.insert}`,
           label: item.label,
           summary: item.summary,
+          argumentHint: item.argumentHint,
+          source: item.source,
           insert: item.insert,
         },
       })),
@@ -548,8 +564,10 @@ export function Composer({
     if (disabled || running || submittingRef.current || composingRef.current) return;
     if (text.trim() === "" && attachmentsRef.current.length === 0) return;
     const submittedRevision = revision.current;
+    const skill = parseSkillSlash(text.trimStart(), skills);
     const payload: ComposerSubmit = {
       text,
+      ...(skill ? { skill } : {}),
       attachments: attachmentsRef.current.map((attachment) => ({
         data: attachment.data,
         mimeType: attachment.mimeType,
@@ -676,9 +694,13 @@ export function Composer({
     if (event.key === "Enter" && plain) {
       event.preventDefault();
       const line = draftRef.current;
-      const parsed = parseSlash(line, variant);
+      const parsed = parseSlash(line, variant, skills);
       if (parsed?.kind === "command") {
         void runSlash(line);
+        return;
+      }
+      if (parsed?.kind === "skill") {
+        void submit();
         return;
       }
       if (popup !== null && flatRows.length > 0) {
@@ -845,8 +867,8 @@ export function Composer({
     dir: "切换目录",
   };
   const parsedSlash = useMemo(
-    () => (composing ? null : parseSlash(draft, variant)),
-    [composing, draft, variant],
+    () => (composing ? null : parseSlash(draft, variant, skills)),
+    [composing, draft, variant, skills],
   );
   const slashHint = parsedSlash?.kind === "redirect" ? parsedSlash.hint : enterHint;
   const canSend = !running && (draft.trim() !== "" || attachments.length > 0);
@@ -1065,8 +1087,14 @@ export function Composer({
                         chooseRow(item.row);
                       }}
                     >
-                      <span className="composer-popup-name">{item.row.label}</span>
+                      <span className="composer-popup-name">
+                        {item.row.label}
+                        {item.row.argumentHint && <em>{item.row.argumentHint}</em>}
+                      </span>
                       <span className="composer-popup-summary">{item.row.summary}</span>
+                      {item.row.source && (
+                        <small className="composer-popup-source">{item.row.source}</small>
+                      )}
                     </div>
                   </Fragment>
                 );

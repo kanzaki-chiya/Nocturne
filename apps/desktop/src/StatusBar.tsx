@@ -49,6 +49,7 @@ const SECTIONS: Record<Section["name"], { label: string; color: string }> = {
   system: { label: "系统提示", color: "var(--a-faint)" },
   tools: { label: "工具定义", color: "var(--a-accentAlt)" },
   instructions: { label: "项目说明", color: "var(--a-secondary)" },
+  skills: { label: "技能目录", color: "var(--a-accentAlt)" },
   environment: { label: "环境", color: "var(--a-muted)" },
   todos: { label: "任务清单", color: "var(--a-muted)" },
   history: { label: "对话历史", color: "var(--a-accent)" },

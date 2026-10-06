@@ -225,6 +225,7 @@ export class Conversations {
     });
     const submission = entry.session.submit({
       text: input.text,
+      ...(input.skill ? { skill: input.skill } : {}),
       attachments: input.attachments,
     });
     try {

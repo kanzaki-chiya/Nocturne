@@ -51,6 +51,7 @@ pub fn run() {
         backend::node_probe,
         backend::plain_workspace,
         images::pick_images,
+        workspace::open_skill_directory,
     ];
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

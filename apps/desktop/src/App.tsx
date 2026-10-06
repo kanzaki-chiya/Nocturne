@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RpcError, type RpcClient, type RpcRuntime, type RpcSession } from "@nocturne/rpc/client";
-import type { RuntimeEvent, SessionView } from "@nocturne/core/protocol";
+import type { RuntimeEvent, SessionView, SkillOverview } from "@nocturne/core/protocol";
 
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
 import { BackendLogsPage, type BackendLogTarget } from "./BackendLogsPage";
@@ -12,6 +12,7 @@ import { StatusBar, type StatusPanel } from "./StatusBar";
 import { PaneErrorBoundary } from "./ErrorBoundary";
 import { ProvidersPage } from "./ProvidersPage";
 import { McpPage } from "./McpPage";
+import { SkillsPage } from "./SkillsPage";
 import { SettingsPage } from "./SettingsPage";
 
 import { BackendPool } from "./backends";
@@ -695,6 +696,21 @@ export function App({ host }: { host: DesktopHost }) {
                   }}
                 />
               </PaneErrorBoundary>
+            ) : page === "skills" ? (
+              <PaneErrorBoundary key="skills">
+                <SkillsPage
+                  client={pageClient}
+                  workspaceRoot={effectiveWorkspace ?? undefined}
+                  version={providersVersion}
+                  openDirectory={(path, create) =>
+                    host.invoke("open_skill_directory", {
+                      path,
+                      create: create ?? false,
+                    }) as Promise<void>
+                  }
+                  openUrl={host.openUrl}
+                />
+              </PaneErrorBoundary>
             ) : page === "logs" ? (
               <PaneErrorBoundary key="logs">
                 <BackendLogsPage
@@ -892,6 +908,21 @@ function SessionPane({
 }: SessionPaneProps) {
   const runtime = client.runtime;
   const controls = useSessionControls(session, runtime, view, prefs, providersVersion);
+  const [skills, setSkills] = useState<SkillOverview[]>([]);
+  useEffect(() => {
+    let active = true;
+    void session
+      .describeSkills()
+      .then((result) => {
+        if (active) setSkills(result.skills);
+      })
+      .catch(() => {
+        if (active) setSkills([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [session, providersVersion, view.turnCount]);
   const subscribeEvents = useCallback(
     (listener: (event: RuntimeEvent) => void) =>
       client.onEvent((sessionId, event) => {
@@ -928,6 +959,7 @@ function SessionPane({
       />
       <Composer
         key={`composer:${session.id}`}
+        skills={skills}
         variant="session"
         running={running}
         onSubmit={onSubmit}
@@ -997,6 +1029,22 @@ function DraftPane({
   onManageProviders,
 }: DraftPaneProps) {
   const draft = useDraftControls(runtime, prefs, providersVersion);
+  const [skills, setSkills] = useState<SkillOverview[]>([]);
+  useEffect(() => {
+    if (!runtime) return;
+    let active = true;
+    void runtime
+      .describeSkills({ workspaceRoot: workspace ?? undefined })
+      .then((result) => {
+        if (active) setSkills(result.skills);
+      })
+      .catch(() => {
+        if (active) setSkills([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [runtime, workspace, providersVersion]);
   const isPlain = workspace === null || (plainKey !== null && projectKey(workspace) === plainKey);
   const workspaceChoice: WorkspaceChoice = {
     label: isPlain ? "普通对话" : projectName(workspace),
@@ -1037,6 +1085,7 @@ function DraftPane({
       </h3>
       <div className="hero-composer">
         <Composer
+          skills={skills}
           running={false}
           disabled={disabled}
           onSubmit={(input) => onSubmit(input, draft.createOptions())}

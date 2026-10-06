@@ -4,6 +4,41 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+#[tauri::command]
+pub async fn open_skill_directory(
+    app: tauri::AppHandle,
+    path: String,
+    create: bool,
+) -> Result<(), crate::backend::CommandError> {
+    use tauri_plugin_opener::OpenerExt;
+    let open = || -> Result<(), String> {
+        let target = PathBuf::from(&path);
+        if !target.is_absolute() {
+            return Err("技能目录必须是绝对路径".into());
+        }
+        if create {
+            let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+            let home = resolve_nocturne_home(
+                std::env::var_os("NOCTURNE_HOME"),
+                std::env::home_dir(),
+                &cwd,
+            )
+            .ok_or("无法确定技能目录")?;
+            if target != home.join("skills") {
+                return Err("只允许创建 Nocturne 技能目录".into());
+            }
+            ensure_dir(&target).map_err(|e| e.to_string())?;
+        }
+        if !target.is_dir() {
+            return Err("技能目录不存在".into());
+        }
+        app.opener()
+            .open_path(path, None::<&str>)
+            .map_err(|e| e.to_string())
+    };
+    open().map_err(|e| crate::backend::CommandError::new("workspace_unavailable", e))
+}
+
 /// 解析 NOCTURNE_HOME，规则与 Core `nocturneHome()`（platform.ts）一致：
 /// `NOCTURNE_HOME` 存在且非空（不 trim）→ 解析成绝对路径（相对路径相对 `cwd`）；
 /// 否则 `<home>/.nocturne`；home 也拿不到 → None。
@@ -114,10 +149,7 @@ mod tests {
     #[test]
     fn workspace_is_home_workspace() {
         let home = PathBuf::from(if cfg!(windows) { "C:\\h" } else { "/h" });
-        assert_eq!(
-            plain_workspace_path(&home),
-            home.join("workspace")
-        );
+        assert_eq!(plain_workspace_path(&home), home.join("workspace"));
     }
 
     #[test]
@@ -144,10 +176,8 @@ mod tests {
 
     #[test]
     fn ensure_dir_on_file_fails() {
-        let base = std::env::temp_dir().join(format!(
-            "nocturne-ws-test-{}-file",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("nocturne-ws-test-{}-file", std::process::id()));
         std::fs::create_dir_all(&base).unwrap();
         let file = base.join("workspace");
         std::fs::write(&file, "x").unwrap();

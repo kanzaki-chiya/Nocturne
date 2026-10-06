@@ -91,6 +91,37 @@ function imageView(attachments = [historyImage]) {
   return view;
 }
 
+it("用户技能小标签使用日志快照，展开正文，工具行显示已加载", () => {
+  const view = createSessionView();
+  const loaded = tool({ name: "skill", input: { name: "alpha" } });
+  if (!loaded.result) throw new Error("fixture 缺少结果");
+  loaded.result.output = { name: "alpha" };
+  loaded.result.modelContent = "技能 alpha 已加载";
+  view.entries = [
+    {
+      kind: "user",
+      key: "skill-user",
+      seq: 1,
+      turnId: "t",
+      content: [
+        { type: "text", text: "/alpha file" },
+        { type: "text", text: '<skill name="alpha">快照正文</skill>' },
+      ],
+      skill: { name: "alpha", body: "快照正文" },
+      attachments: [],
+    },
+    loaded,
+  ];
+  const rendered = mount(view);
+  expect(screen.getByText("/alpha file")).toBeTruthy();
+  const summary = rendered.container.querySelector(".skill-message summary");
+  expect(summary?.textContent).toBe("技能 alpha · 已附加正文 4 字 ▸");
+  if (!summary) throw new Error("缺少技能标签");
+  fireEvent.click(summary);
+  expect(rendered.container.querySelector(".skill-message pre")?.textContent).toBe("快照正文");
+  expect(screen.getByText("已加载")).toBeTruthy();
+});
+
 function sessionFixture(id = "session-1") {
   const methods = {
     id,

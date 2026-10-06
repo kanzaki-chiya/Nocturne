@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "主窗口：七个外壳命令、文件夹与图片选择、受限外链",
+  "description": "主窗口：八个外壳命令、文件夹与图片选择、受限外链",
   "windows": ["main"],
   "permissions": [
     "allow-backend-open",
@@ -11,6 +11,7 @@
     "allow-node-probe",
     "allow-plain-workspace",
     "allow-pick-images",
+    "allow-open-skill-directory",
     "core:path:allow-resolve-directory",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",

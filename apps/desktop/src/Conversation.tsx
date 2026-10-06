@@ -473,6 +473,15 @@ function UserMessage({
           />
         ))}
         {body !== "" && <div className="u-text">{segments}</div>}
+        {entry.skill && (
+          <details className="skill-message">
+            <summary>
+              技能 <b>{entry.skill.name}</b> · 已附加正文 {entry.skill.body.length.toLocaleString()}{" "}
+              字 ▸
+            </summary>
+            <pre>{entry.skill.body}</pre>
+          </details>
+        )}
       </div>
       {entry.descriptions?.map((description, index) =>
         description.text ? (
@@ -489,6 +498,7 @@ function UserMessage({
 // ── 工具行 ──
 
 const TOOL_META: Record<string, { icon: string; label: string }> = {
+  skill: { icon: "S", label: "技能" },
   read: { icon: "R", label: "读取" },
   grep: { icon: "S", label: "搜索" },
   glob: { icon: "F", label: "查找文件" },
@@ -510,6 +520,8 @@ export function toolMeta(name: string): { icon: string; label: string } {
 export function toolArgument(entry: ToolEntry, cwd: string): string {
   const input = inputOf(entry);
   switch (entry.name) {
+    case "skill":
+      return input === undefined ? "" : text(input.name);
     case "read":
     case "edit":
     case "write":
@@ -585,6 +597,9 @@ export function toolResultText(entry: ToolEntry): { text: string; error?: boolea
     output !== null && typeof output === "object" ? (output as Record<string, unknown>) : undefined;
   let base = "完成";
   switch (entry.name) {
+    case "skill":
+      base = "已加载";
+      break;
     case "read":
       base = `${typeof value?.returnedLines === "number" ? value.returnedLines : 0} 行`;
       break;

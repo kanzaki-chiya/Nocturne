@@ -3,6 +3,8 @@
  * 其余旧命令解析为「去哪里操作」的提示，不作为消息发出。
  */
 
+import { parseSkillSlash, type SkillOverview, type SkillInvocation } from "@nocturne/core/protocol";
+
 export const COMMANDS = [
   { name: "/compact", summary: "压缩当前上下文" },
   { name: "/mcp", summary: "查看本会话 MCP 状态" },
@@ -42,12 +44,17 @@ const REDIRECTS: Record<string, RedirectHint> = {
 };
 
 export type ParsedSlash =
+  | { kind: "skill"; invocation: SkillInvocation }
   | { kind: "command"; name: SlashCommandName; raw: string }
   | { kind: "redirect"; name: string; hint: string }
   | { kind: "unknown"; name: string; hint: string };
 
 /** 非斜杠行或多行返回 null；已知命令带多余参数时按 unknown 给出用法提示。 */
-export function parseSlash(line: string, context: SlashContext = "session"): ParsedSlash | null {
+export function parseSlash(
+  line: string,
+  context: SlashContext = "session",
+  skills: readonly SkillOverview[] = [],
+): ParsedSlash | null {
   if (/[\r\n]/.test(line)) return null;
   const match = /^\s*(\/\S*)(?:\s+([\s\S]*))?$/.exec(line);
   if (match === null) return null;
@@ -61,10 +68,14 @@ export function parseSlash(line: string, context: SlashContext = "session"): Par
   const hint = REDIRECTS[name];
   if (hint !== undefined)
     return { kind: "redirect", name, hint: typeof hint === "string" ? hint : hint[context] };
+  const invocation = parseSkillSlash(line.trimStart(), skills);
+  if (invocation) return { kind: "skill", invocation };
   return { kind: "unknown", name, hint: `未知命令 ${name}；输入 / 查看可用命令` };
 }
 
 export interface SlashItem {
+  argumentHint?: string | undefined;
+  source?: string | undefined;
   label: string;
   summary: string;
   insert: string;
@@ -77,7 +88,7 @@ export interface SlashGroup {
 }
 
 /** 单行 / 前缀的分组补全；空组不返回。 */
-export function completeSlash(line: string): SlashGroup[] {
+export function completeSlash(line: string, skills: readonly SkillOverview[] = []): SlashGroup[] {
   if (/[\r\n]/.test(line)) return [];
   const text = line.trimStart();
   if (!text.startsWith("/") || /\s/.test(text.slice(1))) return [];
@@ -90,5 +101,26 @@ export function completeSlash(line: string): SlashGroup[] {
     summary: command.summary,
     insert: `${leading}${command.name} `,
   }));
-  return items.length === 0 ? [] : [{ id: "commands", label: "命令", items }];
+  const skillItems = skills
+    .filter(
+      (skill) =>
+        (skill.invocation === "both" || skill.invocation === "user") &&
+        !skill.commandConflict &&
+        skill.name.toLowerCase().startsWith(query),
+    )
+    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+    .map((skill) => ({
+      label: `/${skill.name}`,
+      argumentHint:
+        typeof skill.fields["argument-hint"] === "string"
+          ? skill.fields["argument-hint"]
+          : undefined,
+      source: skill.layer === "user" ? "用户" : "项目",
+      summary: Array.from(skill.description).slice(0, 250).join("") || "没有说明",
+      insert: `${leading}/${skill.name} `,
+    }));
+  return [
+    ...(items.length ? [{ id: "commands" as const, label: "命令", items }] : []),
+    ...(skillItems.length ? [{ id: "skills" as const, label: "技能", items: skillItems }] : []),
+  ];
 }
