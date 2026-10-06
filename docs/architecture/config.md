@@ -78,6 +78,8 @@ interface ConfigFile {
   mcp?: { servers?: Record<string, McpServerEntry> };
   /** Hooks（外部命令，Phase 5；见 architecture/hooks.md 第 2 节） */
   hooks?: Partial<Record<HookPoint, HookEntry[]>>;
+  /** 外部 agent：仅用户级生效，见下文 */
+  externalAgents?: ExternalAgentConfig[];
 }
 ```
 
@@ -92,6 +94,7 @@ interface ConfigFile {
 | `permissions.rules` | 追加：高层规则排在低层之后（权限"后写优先"语义见 permissions.md 5.1） |
 | `mcp.servers` | 按服务器 id 浅合并（同 `providers`）；不同 id 并存 |
 | `hooks.*` | 按事件点追加：用户级条目在前、项目级在后，执行顺序即此顺序（hooks.md 第 2 节） |
+| `externalAgents` | 仅用户级，按顺序追加；同名警告并保留首条，项目段无条件忽略 |
 
 **`userModels` 合成层**（ADR-0024 第 2 节）：providers.json 条目里的 `userModels`（模型编辑页 / `/provider model` 写入的逐模型用户编辑）不是合并结果的一部分，而是加载时被包成一个独立层——`providers: [{ id, models: userModels }]`——插在向导层（setup）与 `config.json`（user）之间参与 `models` 逐字段合并。因此用户编辑优先于上游声明、低于任何手写层；只由该层引入、其他层都不声明的模型条目在合并后被丢弃。推理为 `none` 时没有可用思考档位；冲突处理见 [providers.md](providers.md) 第 2 节。`capabilities.editTool`（`"edit" | "apply_patch"`，ADR-0035 §5）同样经该链生效：手写配置与 `userModels` 都可声明；都未声明时由内置默认表按模型 id 末段匹配（含 `gpt`/`codex`，不区分大小写 → `apply_patch`，否则 `edit`）。
 
@@ -166,6 +169,30 @@ setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise
 
 **通用界面偏好**（[ADR-0029](../decisions/ADR-0029-tui-themes.md) 第 3 节）：`RuntimeConfig` 与公开的 `Runtime` 都提供 `getPreference(key: string): string | undefined`、`setPreference(key: string, value: string | undefined): Promise<void>`。它们读写 `settings.json` 顶层的普通字符串字段；`undefined` 删除字段。写入拒绝无效字段名、`shell`/`shellPath` 等有专用接口的保留字段和非字符串值；原子写盘成功后才更新内存，失败时旧值不变，未知字段原样保留。`Runtime` 委托注入的 `RuntimeConfig`；`createRuntime` 未传 `config` 时，读取返回 `undefined`，写入返回被拒绝的 Promise，错误为「未注入 RuntimeConfig，无法保存偏好」。Core 不解释偏好值的 UI 含义；TUI 在首次渲染前读取 `theme`，由 TUI 判断 `dark`/`light`，非法值回退 `dark`；`/theme` 保存失败时保持原主题并留在选择页提示错误。
 
+### 外部 agent 配置
+
+仅用户手写的 `<NOCTURNE_HOME>/config.json` 接受 `externalAgents`：
+
+```ts
+interface ExternalAgentConfig {
+  name: string; // 非空，仅小写字母、数字和 -
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  mode?: string; // ACP session/set_mode 的不透明 id
+  description?: string;
+  enabled: boolean;
+}
+```
+
+合并结果内名称唯一，重复时警告并保留第一项。项目配置中的该段无条件忽略并警告，已信任项目也不例外。配置只是命令声明，Core 与 connector 不按 agent 名称写行为分支。仅已启用条目进入 `task` 的可选列表。
+
+条目校验沿 MCP 的逐条降级方式：非法名称或字段发警告并忽略该条目；用户段本身不是数组时配置加载失败。`env` 中疑似凭据不接受字面量，沿用 `${NAME}` 环境变量引用，在进程启动时展开；普通非凭据字符串保留。
+
+Core 公开导出 `EXTERNAL_AGENT_PRESETS` 数据表，默认全部禁用：omp 为 `omp --mode acp`；Codex 为 `npx @agentclientprotocol/codex-acp`（Windows 由进程平台层处理 `npx.cmd`）。此表供后续设置界面使用，不自动启动、探测或登录。`mode` 应选择外部工具自身的逐项询问模式；Nocturne 只能拦截它主动请求的权限。
+
+CLI 从 `RuntimeConfig.base.externalAgents` 构建 `createAcpConnector`，经 `RuntimeOptions.externalAgents` 注入。生命周期、账号费用、检查点边界与 transcript 见 [subagent.md 第 17 节](subagent.md#17-外部-agentacp)。
+
 ## 3. 项目配置的信任模型
 
 `modelRoles` 属于 `settings.json` 白名单，与用户配置、可信项目配置逐角色合并。三个值均为 `provider/model`；不可信项目忽略整段，避免改变数据接收方。`describeModelRoles()` 返回每个角色的 `configured`、生效 `model`、`source` 与 `available`，`SettingItem` 含 `modelRoles.task`、`modelRoles.vision`、`modelRoles.smol`。未知服务商、清单外模型、不可用模型或不支持图片的 vision 发 `runtime.warning(model_role_unavailable)` 并按未配置处理。`setModelRole` 原子保存单个角色，`null` 清除设置层值；设置页也可通过 `updateSettings` 一次保存多个 `modelRoles.*` 补丁。task/smol 未配置时跟随会话模型，vision 未配置时停用（[ADR-0040](../decisions/ADR-0040-model-roles.md)）。角色在使用时读取当前工作区设置。
@@ -175,7 +202,7 @@ setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise
 项目配置来自被操作的仓库——它可能是恶意的。因此：
 
 - **未信任时**，项目配置里只有 `permissions.rules` 中**收紧方向**（`ask` / `deny`）的规则参与求值：与可信结果取更严格者，`allow` 被忽略。其余字段（`model`、`providers`、`preset`、`reasoningEffort`、`turn`、`shell`、`shellPath`）全部忽略；`mcp` 与 `hooks` 两段同样**整段忽略**——它们定义的是要启动的进程，"运行但收紧"没有意义（进程一旦启动就是任意代码），收紧方向在可执行配置上不存在。这保证一份仓库配置永远无法放宽用户的安全边界、无法把会话引到别的 Provider 或模型，也无法让它在用户不知情时执行任何命令。
-- **信任后**，项目配置整体进入第 1 节的正常分层（规则排序位于用户配置之后、环境变量之前）。
+- **信任后**，项目配置进入第 1 节的正常分层（规则排序位于用户配置之后、环境变量之前）；用户级专属字段仍不生效，尤其 `externalAgents` 无条件忽略并警告。
 - 信任的标记存放在**机器维护的** `<NOCTURNE_HOME>/trust.json`：`{ version, workspaces: string[] }`，列出工作区真实路径（`realpath` 后比较，大小写规则同平台）。文件由 `nctrn trust` / `nctrn untrust` 原子写（临时文件 + rename）；用户也可以手工编辑。它是唯一能授予信任的来源——项目配置里没有这个字段，仓库不能自我授权。
 - 会话打开（create / resume）时若发现项目配置存在但未信任，发出临时事件 `runtime.warning(code="project_config_untrusted")` 告知客户端；CLI 显示如何信任（`nctrn trust`，见 [apps/cli.md](../apps/cli.md)）。
 

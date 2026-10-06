@@ -53,6 +53,10 @@ nocturne/
 │   ├── mcp/                     @nocturne/mcp：MCP 客户端（ADR-0011）
 │   │   ├── package.json         依赖 @nocturne/core 公开入口与 @modelcontextprotocol/sdk
 │   │   └── src/                 connector、stdio 传输、工具包装
+│   ├── acp/                     @nocturne/acp：外部 agent connector（ADR-0049）
+│   │   ├── package.json         依赖 @nocturne/core 公开入口与 @agentclientprotocol/sdk
+│   │   ├── src/                 ACP 调用、权限映射、transcript 与进程生命周期
+│   │   └── test/fixtures/       SDK agent 端离线进程夹具；真实账号冒烟独立运行
 │   └── rpc/                     @nocturne/rpc：JSON-RPC 服务端与类型化客户端（ADR-0044）
 │       ├── package.json         exports: "./server" 与 "./client"；依赖 @nocturne/core 公开入口
 │       ├── src/                 server（方法映射、订阅回放）、client、shared（报文、方法表、传输）
@@ -76,7 +80,7 @@ nocturne/
 
 ## 2. 包边界
 
-- `packages/core`、`packages/mcp`、`packages/rpc`、`apps/cli`、`apps/tui`、`apps/desktop` 是六个 workspace 包；Core 不依赖客户端或 MCP SDK，MCP、RPC 和客户端只使用 Core 的公开入口。桌面端边界更窄：只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`。
+- `packages/core`、`packages/mcp`、`packages/acp`、`packages/rpc`、`apps/cli`、`apps/tui`、`apps/desktop` 是七个 workspace 包；Core 不依赖客户端、MCP 或 ACP SDK，connector、RPC 和客户端只使用 Core 的公开入口。桌面端边界更窄：只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`。
 - Core 内部的模块边界用目录加静态依赖检查维护，不再拆成十几个包。
 - `protocol` 以子路径导出（`@nocturne/core/protocol`），客户端可以只导入类型，为将来独立成包提前划好界线。
 
@@ -126,7 +130,8 @@ Nocturne 的 Runtime：会话、Agent Loop、上下文、工具、权限、Provi
     ├── <sessionId>.jsonl.tail-<ts>   崩溃截断下来的损坏尾部（诊断用）
     └── attachments/<sessionId>/            按会话隔离的工具输出落盘目录：
         ├── <callId>.txt                       超预算工具输出（tools.md 第 4 节）
-        └── img-<n>.<ext>                      read/粘贴/MCP 的图片附件字节（tools.md，n 会话内递增）
+        ├── img-<n>.<ext>                      read/粘贴/MCP 的图片附件字节（tools.md，n 会话内递增）
+        └── external/<callId>.jsonl             外部 agent ACP 更新与权限审计，不参与重放
 ```
 
 目录权限：POSIX 上 `NOCTURNE_HOME` 以 `0700` 创建——会话日志里有代码与对话内容，`credentials.json` 另以 `0600` 写（provider-setup.md 第 3 节）；Windows 维持用户目录的默认权限（凭据保护由 DPAPI 承担）。

@@ -39,6 +39,7 @@
 - `diagnostics`（调试通道）只依赖 protocol、platform；被 agent / context / tools / hooks / index 经注入使用，并经 `McpConnector` 传给 `packages/mcp`（见 [observability.md](observability.md)）。
 - `skills`（技能发现与目录构建）只依赖 protocol、platform；由 `core/index` 与 `tools` 使用，不经公开 API 导出（见 [skills.md](skills.md)）。
 - `packages/mcp`（`@nocturne/mcp`）只允许依赖 `@nocturne/core` 的 `index` / `protocol/index` 两个入口与 `@modelcontextprotocol/sdk`——与 `apps/*` 同一检查规则；**Core 不依赖 `mcp`**（见 [mcp.md](mcp.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)）。
+- `packages/acp`（`@nocturne/acp`）只依赖 Core 公开入口与 `@agentclientprotocol/sdk`，由 CLI 经 `RuntimeOptions.externalAgents` 注入；Core 不依赖 ACP 实现。权限判定留在 Core 权限层，connector 只映射 ACP 主体与一次性选项，见 [subagent.md](subagent.md#17-外部-agentacp)。
 - 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。CLI 对 TUI 可惰性 `import()` 主入口，或静态引用 `@nocturne/tui/slash-catalog`、`@nocturne/tui/text-format`、`@nocturne/tui/provider-setup-flow`、`@nocturne/tui/provider-prompts` 与 `@nocturne/tui/provider-login`；命令表不得 import 任何模块，纯文本入口仅复用格式函数、protocol 类型与 `string-width`，三个共享向导入口及其间接依赖也不得加载 Ink/React，保证逐行模式不加载 Ink/React。其余 apps→apps 依赖禁止（[tui.md](../apps/tui.md) 第 9 节）。
 - 桌面端（`apps/desktop/src`）边界更窄：只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`，不引 core 运行时、其他 workspace 包与 Node 内置模块（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 7 节，depcheck `desktop-*` 规则强制）。
 
@@ -93,7 +94,7 @@
 
 - **负责**：工具注册表；执行管线（输入校验 → 资源解析（经 platform）→ 权限 → 执行 → 结果归一化 → 生命周期事件）；中断与超时；结果大小预算；内置工具实现；图片附件存储（`AttachmentStore`，ADR-0023——字节落盘在 tools，Agent Loop 经注入接口读回，依赖方向不变）。
 - **不负责**：权限规则本身；决定何时调用工具；渲染工具结果。
-- **公开接口**：`ToolRegistry`、`ToolExecutor`、`ToolDefinition`（见 [tool-api.md](../protocols/tool-api.md)）；重导出权限层的 `HookRunner`（hooks 实现的注入点），另定义 `McpConnector` / `McpSession`（`packages/mcp` 的装配点）与 `SubagentLauncher`（`agent` 的注入点，Phase 6，见 [subagent.md](subagent.md)）类型。
+- **公开接口**：`ToolRegistry`、`ToolExecutor`、`ToolDefinition`（见 [tool-api.md](../protocols/tool-api.md)）；重导出权限层的 `HookRunner`（hooks 实现的注入点），另定义 `McpConnector` / `McpSession`（`packages/mcp`）、`SubagentLauncher`（`agent`）与 `ExternalAgentConnector`（`packages/acp`）注入类型，见 [subagent.md](subagent.md)。
 - **依赖**：protocol、permission、platform、diagnostics（仅接口注入，未启用时为空实现）。**不能依赖**：agent、session、provider、context、hooks（实现）。
 - 详见 [tools.md](tools.md)。
 
@@ -199,6 +200,11 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 ### packages/mcp（独立于 Core 的包）
 
 `@nocturne/mcp` 是 MCP 客户端实现：按 `McpConnector` 接口把 MCP 服务器（stdio 子进程）的工具包装成 `ToolDefinition`，并管理服务器进程生命周期（启动、initialize、崩溃重连、关闭时进程树清理）。只依赖 `@nocturne/core` 的公开入口与 `@modelcontextprotocol/sdk`；由 `apps/cli` 装配后经 `RuntimeOptions.mcp` 注入。详见 [mcp.md](../architecture/mcp.md) 与 [ADR-0011](../decisions/ADR-0011-mcp-client.md)。
+
+### packages/acp（独立于 Core 的包）
+
+`@nocturne/acp` 实现 `ExternalAgentConnector`：每调用启动并清理一个 ACP 进程，映射外部权限请求，保存审计 transcript、转发单行工具进度并返回最终文本。依赖方向与 MCP 同类；不作为 Provider、不创建 Nocturne 子会话，不读取外部凭据。生命周期与边界见 [subagent.md](subagent.md#17-外部-agentacp)。
+
 
 ## 4. 客户端
 

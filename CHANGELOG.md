@@ -1,5 +1,11 @@
 # 更新日志
 
+## Unreleased
+
+- 新增 ACP 外部 agent 委派：用户级 `externalAgents` 配置启用后，模型可通过 `task.agent` 调用独立命令行 agent；内置 omp/Codex 预设默认禁用，尚无设置界面。
+- 外部委派入口需授权；执行期主动请求沿父权限策略、只读会话 Grant 与非交互 gate 判定，进度与 JSONL 审计记录留在父会话。费用计在外部账号上，检查点和回退不追踪外部文件修改。
+- Windows 管道进程支持通用 `.cmd`/`.bat` 命令解析与参数引用；外部调用取消先发 ACP cancel，再清理存活根进程的进程树。
+
 ## 0.6.0
 
 ### 桌面端（Windows，首次发布）

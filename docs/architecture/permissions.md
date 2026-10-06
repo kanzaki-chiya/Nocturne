@@ -36,7 +36,7 @@
 | `shell` | 完整命令字符串 | shell |
 | `network` | 小写 hostname；非协议默认端口带 `:端口`，不含协议与路径 | `web_fetch` |
 | `mcp` | `<server>/<tool>`（服务器与工具的**原始名**，不做规范化） | MCP 工具（Phase 5，见 [mcp.md](mcp.md)） |
-| `subagent` | 工具集预设名（`general`/`explore`）或 `"custom"`（显式白名单） | `task` 工具（Phase 6，见 [subagent.md](subagent.md)）；`subagent * → deny` 即关闭子代理派生 |
+| `subagent` | 工具集预设名（`general`/`explore`）、`"custom"`（显式白名单）或 `external:<name>`（外部 agent） | `task` 工具，见 [subagent.md](subagent.md)；`subagent * → deny` 关闭全部委派 |
 
 shell 主体另携带可选的 `shell` 字段（执行该命令的 shell 种类，ADR-0022）：`pwsh` / `powershell` / `bash` / `cmd` / `sh`，以及 `shellRisk` 字段——生效 `ShellDescriptor` 上的高风险命令元数据、`shellRiskByDialect` 字段——各方言的高风险表（检查嵌套 shell 调用的命令体用，见第 6 节第 6 项）（第 6 节的按种类表以纯数据形式集中在 platform 层，随主体透传进来；权限层执行匹配判定，platform 不含权限逻辑）。`shell` 只影响方言化判定（5.3 的组合命令拆段），`shellRisk` 只影响第 6 节的高风险匹配，两者都不参与规则 `pattern` 匹配——用户规则始终按命令原文匹配；缺省或未知一律按 POSIX 保守处理。
 
@@ -196,18 +196,20 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 
 预设提供一组有序规则；权限层还按第 6 项对命令做保守降级，`bypass` 跳过其中的高风险与编码命令降级。用户可以追加显式规则。预设构造时拿到 `workspaceRoot`、`sessionsDir`、`sessionId` 与 `nocturneHome`（据此生成具体的路径模式）；求值时预设与其他层规则没有任何差别。
 
-| 预设 | read（工作区） | read（外部） | edit（工作区） | edit（外部） | shell | network / mcp | subagent |
-|---|---|---|---|---|---|---|---|
-| `read-only` | allow | ask | deny | deny | ask | ask | ask |
-| `default`（默认） | allow | ask | ask | ask | ask | ask | `explore` allow，其余 ask |
-| `auto-edit` | allow | ask | allow | ask | ask | ask | `explore` allow，其余 ask |
-| `guarded` | allow | allow | allow | ask | allow | allow | allow |
-| `smart` | allow | allow | allow | ask | allow | allow | allow |
-| `bypass` | allow | allow | allow | allow | allow | allow | allow |
+| 预设 | read（工作区） | read（外部） | edit（工作区） | edit（外部） | shell | network / mcp | 内置 subagent | `subagent external:*` |
+|---|---|---|---|---|---|---|---|---|
+| `read-only` | allow | ask | deny | deny | ask | ask | ask | ask |
+| `default`（默认） | allow | ask | ask | ask | ask | ask | `explore` allow，其余 ask | ask |
+| `auto-edit` | allow | ask | allow | ask | ask | ask | `explore` allow，其余 ask | ask |
+| `guarded` | allow | allow | allow | ask | allow | allow | allow | ask |
+| `smart` | allow | allow | allow | ask | allow | allow | allow | ask |
+| `bypass` | allow | allow | allow | allow | allow | allow | allow | ask |
 
 `full-access` 是 `guarded` 的输入别名，配置、命令及旧日志读入时归一化；循环、补全和设置页只显示六个新名称。`smart` 与 `guarded` 的规则序列相同。`bypass` 不降级工作区外 edit、`.git/` edit、高风险命令与 `-EncodedCommand`；保留凭据硬拒绝、授权数据与 `.nocturne/` edit、凭据相关命令和显式 ask/deny。见 [ADR-0036](../decisions/ADR-0036-smart-permissions.md)。
 
 `subagent` 一列的分化理由：`explore` 子代理只含只读工具，它能得到的 `allow` 都是父会话本来就会自动放行的操作，唯一代价是 token；`general`/`custom` 可能写文件、跑命令，保留逐项把关（[subagent.md](subagent.md) 第 7 节）。
+
+外部入口 `external:<name>` 在全部交互式预设下默认 `ask`（包括 `guarded`、`smart`、`bypass`）；用户可用 `subagent external:<name>` 显式规则或 Grant 授权，`--yes` 沿既有规则提升。执行期 ACP 主体映射见 [ADR-0049 第 3 节](../decisions/ADR-0049-external-agent-subagent.md#3-权限入口把关加上外部请求进权限层)：用父策略与只读会话 Grant 构造非交互 gate，smart 审查照常，剩余 ask 拒绝，不新增授权。此把关只覆盖外部 agent 主动请求的操作，不是沙箱。
 
 表中没有覆盖到的组合落到"无规则匹配 → `ask`"。所有预设的规则序列都按以下次序排列（后写优先）：
 
