@@ -5,6 +5,7 @@
  */
 import {
   logoutProvider,
+  skillListLines,
   normalizeModelRef,
   type RuntimeConfig,
   type RuntimeSession,
@@ -232,6 +233,8 @@ export async function runSlash(
       });
       return { kind: "message", text: ["MCP 服务器：", ...lines].join("\n") };
     }
+    case "/skills":
+      return { kind: "message", text: skillListLines(session.describeSkills().skills).join("\n") };
     case "/compact": {
       try {
         await session.compact();

@@ -216,6 +216,14 @@ function layoutEntryBody(
         ...(entry.fileRefs ?? []).flatMap((ref, i) =>
           rows(`${entry.key}:ref:${i}`, `  ${fileRefLine(ref)}`, width, { color: theme.accentAlt }),
         ),
+        ...(entry.skill
+          ? rows(
+              `${entry.key}:skill`,
+              `  技能 ${entry.skill.name} · 已附加正文 ${entry.skill.body.length} 字`,
+              width,
+              { color: theme.accentAlt },
+            )
+          : []),
         ...(entry.attachments ?? []).flatMap((att, i) =>
           rows(`${entry.key}:image:${i}`, `  ${attachmentLine(att, i, ascii)}`, width, {
             color: theme.accent,

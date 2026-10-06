@@ -137,11 +137,16 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
 
   switch (ev.type) {
     case "message.user":
-      return (ev.payload.fileRefs ?? []).map((ref) =>
-        aux(
-          `  附带 @${ref.path}${ref.kind === "file" ? `（${ref.lines ?? 0}/${ref.totalLines ?? 0} 行）` : ref.kind === "directory" ? "（目录）" : "（图片）"}`,
+      return [
+        ...(ev.payload.fileRefs ?? []).map((ref) =>
+          aux(
+            `  附带 @${ref.path}${ref.kind === "file" ? `（${ref.lines ?? 0}/${ref.totalLines ?? 0} 行）` : ref.kind === "directory" ? "（目录）" : "（图片）"}`,
+          ),
         ),
-      );
+        ...(ev.payload.skill
+          ? [aux(`  技能 ${ev.payload.skill.name} · 已附加正文 ${ev.payload.skill.body.length} 字`)]
+          : []),
+      ];
     case "message.assistant.delta": {
       const p = ev.payload;
       if (p.kind === "text") return [out(p.delta)];

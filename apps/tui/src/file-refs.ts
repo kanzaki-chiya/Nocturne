@@ -2,7 +2,8 @@ import { parseFileRefs } from "@nocturne/core";
 import type { FileRef, UserEntry } from "@nocturne/core/protocol";
 
 export function userText(entry: UserEntry): string {
-  const snapshots = entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0;
+  const snapshots =
+    (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) + (entry.skill ? 1 : 0);
   const content = snapshots === 0 ? entry.content : entry.content.slice(0, -snapshots);
   return content
     .filter((block) => block.type === "text")

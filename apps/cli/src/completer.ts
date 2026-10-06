@@ -1,5 +1,22 @@
 import { completeFileRefs, type FileIndexEntry } from "@nocturne/core";
-import { readlineCompleter, type CompletionContext } from "@nocturne/tui/slash-catalog";
+import {
+  completeSlash,
+  readlineCompleter,
+  type CompletionContext,
+} from "@nocturne/tui/slash-catalog";
+import { stripControls } from "@nocturne/tui/text-format";
+
+/** readline 只能把候选字符串原样插入；说明分组另行显示，不写进草稿。 */
+export function skillCompletionLines(line: string, context: CompletionContext): string[] {
+  const hits = completeSlash(line, context, false);
+  if (hits.length < 2 || !hits.some((hit) => hit.group === "skills")) return [];
+  return hits.flatMap((hit, i) => [
+    ...(hit.group && (i === 0 || hits[i - 1]?.group !== hit.group)
+      ? [hit.group === "commands" ? "命令" : "技能"]
+      : []),
+    `  ${stripControls(hit.label)}`,
+  ]);
+}
 
 export function completeLine(
   line: string,

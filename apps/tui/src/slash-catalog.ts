@@ -35,6 +35,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   },
   { name: "/context", summary: "查看上下文", cli: "显示上下文组成" },
   { name: "/mcp", summary: "MCP 状态", cli: "显示本会话 MCP 服务器状态" },
+  { name: "/skills", summary: "查看技能目录", cli: "列出当前会话的技能、来源和模型目录状态" },
   { name: "/compact", summary: "压缩上下文", cli: "手动压缩上下文" },
   { name: "/resume", summary: "切换会话", cli: "列出会话或按 id 切换" },
   { name: "/rewind", summary: "回退对话或还原文件" },
@@ -70,6 +71,14 @@ export const PROVIDER_SUBCOMMANDS: readonly { name: string; summary: string }[] 
 ];
 
 export interface CompletionContext {
+  skills?:
+    | readonly {
+        name: string;
+        description: string;
+        invocation: string;
+        fields: Record<string, unknown>;
+      }[]
+    | undefined;
   /** 当前模型可用档位，不含 off（off 由补全自行加上） */
   effortLevels: readonly string[];
   /** 已配置服务商 id */
@@ -77,6 +86,7 @@ export interface CompletionContext {
 }
 
 export interface Candidate {
+  group?: "commands" | "skills" | undefined;
   /** 显示行，如 `/model  切换模型` */
   label: string;
   /** 写入输入框或交给 readline 的完整文本 */
@@ -171,7 +181,30 @@ function argItems(
 export function completeSlash(line: string, ctx: CompletionContext, tui = true): Candidate[] {
   if (!line.startsWith("/")) return [];
   const space = line.indexOf(" ");
-  if (space === -1) return rank(line, commandItems(tui));
+  if (space === -1) {
+    const commands = rank(line, commandItems(tui)).map((c) => ({
+      ...c,
+      group: "commands" as const,
+    }));
+    const skills = (ctx.skills ?? [])
+      .filter(
+        (s) =>
+          (s.invocation === "both" || s.invocation === "user") &&
+          !SLASH_COMMANDS.some((c) => c.name.toLowerCase() === `/${s.name.toLowerCase()}`),
+      )
+      .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+    return [
+      ...commands,
+      ...rank(
+        line,
+        skills.map((s) => ({
+          key: `/${s.name}`,
+          insert: `/${s.name} `,
+          label: `/${s.name} ${typeof s.fields["argument-hint"] === "string" ? s.fields["argument-hint"] : ""}  ${s.description.slice(0, 250) || "没有说明"}`,
+        })),
+      ).map((c) => ({ ...c, group: "skills" as const })),
+    ];
+  }
   const name = line.slice(0, space);
   const command = SLASH_COMMANDS.find((cmd) => cmd.name === name && (tui || cmd.tuiOnly !== true));
   if (command?.args === undefined) return [];

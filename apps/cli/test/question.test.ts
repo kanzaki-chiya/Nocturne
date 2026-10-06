@@ -45,6 +45,7 @@ function fakeSession(interrupted?: { value: boolean }) {
   let control: { resolve(r: TurnEndReason): void } | undefined;
   const replies: QuestionReplySeen[] = [];
   const session = {
+    describeSkills: () => ({ skills: [] }),
     id: "s1",
     subscribe: (fn: (ev: RuntimeEvent) => void) => {
       listener = fn;

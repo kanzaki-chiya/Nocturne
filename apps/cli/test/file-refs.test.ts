@@ -19,6 +19,7 @@ describe("CLI 文件引用", () => {
     const submit = vi.fn().mockResolvedValue("done");
     const fileIndex = vi.fn().mockResolvedValue([{ path: "main.ts", kind: "file" }]);
     const session = {
+      describeSkills: () => ({ skills: [] }),
       subscribe: () => () => undefined,
       readInputHistory: async () => [],
       recordInputHistory: async () => undefined,

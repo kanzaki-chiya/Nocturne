@@ -39,6 +39,7 @@ interface TurnControl {
 function fakeSessionWithPendingTurn(interrupted: { value: boolean }) {
   let control: TurnControl | undefined;
   const session = {
+    describeSkills: () => ({ skills: [] }),
     id: "s1",
     subscribe: (_fn: (ev: RuntimeEvent) => void) => () => undefined,
     submit: (_input: { text: string }) =>
@@ -140,6 +141,7 @@ describe("REPL 生命周期", () => {
     let listener: ((ev: RuntimeEvent) => void) | undefined;
     const replies: { requestId: string; reply: unknown }[] = [];
     const session = {
+      describeSkills: () => ({ skills: [] }),
       id: "s1",
       subscribe: (fn: (ev: RuntimeEvent) => void) => {
         listener = fn;
@@ -212,6 +214,7 @@ describe("REPL 生命周期", () => {
 describe("REPL /resume 会话切换", () => {
   const fakeSession = (id: string) =>
     ({
+      describeSkills: () => ({ skills: [] }),
       id,
       subscribe: (_fn: (ev: RuntimeEvent) => void) => () => undefined,
       submit: () => new Promise<TurnEndReason>(() => undefined),

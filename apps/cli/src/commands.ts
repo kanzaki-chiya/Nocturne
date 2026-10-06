@@ -9,7 +9,12 @@ import type {
   RuntimeSession,
   SessionShellInfo,
 } from "@nocturne/core";
-import { logoutProvider, RuntimeCommandError, type PermissionPresetName } from "@nocturne/core";
+import {
+  logoutProvider,
+  RuntimeCommandError,
+  skillListLines,
+  type PermissionPresetName,
+} from "@nocturne/core";
 import { providerCredentialDescription } from "@nocturne/tui/text-format";
 import { cliHelpText } from "@nocturne/tui/slash-catalog";
 
@@ -519,6 +524,10 @@ export async function runSlashCommand(
           `  合计 ~${report.estimatedTokens} / ${report.budgetTokens} tok${overBudget ? "  [超预算]" : ""}`,
         ].join("\n"),
       );
+      return "handled";
+    }
+    case "/skills": {
+      io.print(skillListLines(session.describeSkills().skills).join("\n"));
       return "handled";
     }
     case "/mcp": {

@@ -145,6 +145,27 @@ describe("状态栏格式", () => {
 describe("补全", () => {
   const ctx = { effortLevels: ["low", "high"], providerIds: ["deepseek", "openrouter"] };
 
+  it("命令在技能之前，技能含参数提示且过滤模型专用条目与命令冲突", () => {
+    const hits = completeSlash("/", {
+      ...ctx,
+      skills: [
+        { name: "zeta", description: "last", invocation: "user", fields: {} },
+        {
+          name: "alpha",
+          description: "first",
+          invocation: "both",
+          fields: { "argument-hint": "<file>" },
+        },
+        { name: "private", description: "hidden", invocation: "model", fields: {} },
+        { name: "compact", description: "conflict", invocation: "both", fields: {} },
+      ],
+    });
+    const skills = hits.filter((hit) => hit.group === "skills");
+    expect(skills.map((hit) => hit.insert)).toEqual(["/alpha ", "/zeta "]);
+    expect(skills[0]?.label).toContain("<file>");
+    expect(hits.slice(0, -2).every((hit) => hit.group === "commands")).toBe(true);
+  });
+
   it("前缀优先于包含，/help 与补全共用命令表", () => {
     const hits = completeSlash("/p", ctx);
     const inserts = hits.map((h) => h.insert);

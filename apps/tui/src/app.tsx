@@ -17,6 +17,7 @@ import {
   logoutProvider,
   createPlatform,
   completeFileRefs,
+  parseSkillSlash,
   type FileIndexEntry,
   type Clipboard,
   type ModelSettingsPatch,
@@ -1867,6 +1868,7 @@ function SessionApp({
     () => ({
       effortLevels: session.reasoningEffortInfo().available,
       providerIds,
+      skills: session.describeSkills().skills,
     }),
     [session, providerIds, view.revision],
   );
@@ -1879,7 +1881,7 @@ function SessionApp({
   const indexing =
     fileCompletion !== undefined &&
     (indexed?.session !== session || indexed.turn !== completedTurn);
-  const candidates =
+  const candidates: { label: string; insert: string; group?: "commands" | "skills" | undefined }[] =
     fileCompletion?.candidates ??
     (input.startsWith("/") ? completeSlash(input, completionCtx) : []);
   const completionOpen = inputIdle && completionOn && (candidates.length > 0 || indexing);
@@ -2241,7 +2243,8 @@ function SessionApp({
         void session.recordInputHistory(historyText);
       }
       setHistoryIndex(undefined);
-      if (text.startsWith("/")) {
+      const skill = parseSkillSlash(pastes.expand(text), session.describeSkills().skills);
+      if (text.startsWith("/") && !skill) {
         void runSlash(text, session, provider)
           .then((r) => {
             const opens = r.kind === "overlay" || r.kind === "picker" || r.kind === "provider-page";
@@ -2285,7 +2288,11 @@ function SessionApp({
       submitting.current = true;
       setSubmitPending(true);
       void session
-        .submit({ text: pastes.expand(text), ...(attachments.length > 0 ? { attachments } : {}) })
+        .submit({
+          text: pastes.expand(text),
+          ...(skill ? { skill } : {}),
+          ...(attachments.length > 0 ? { attachments } : {}),
+        })
         .catch((e: unknown) => {
           pushLine(`! ${errText(e)}`);
         })
@@ -2367,7 +2374,17 @@ function SessionApp({
       : undefined);
   const budget = frameBudget(
     rows,
-    completionOpen ? Math.min(8, Math.max(indexing ? 1 : 0, candidates.length)) : imageHint ? 1 : 0,
+    completionOpen
+      ? Math.min(
+          8,
+          Math.max(
+            indexing ? 1 : 0,
+            candidates.length + new Set(candidates.map((item) => item.group).filter(Boolean)).size,
+          ),
+        )
+      : imageHint
+        ? 1
+        : 0,
     input.split("\n").length,
     fullscreen && !pageOpen ? todoPanelRows(view.todos.length) : 0,
   );
@@ -2711,8 +2728,11 @@ function SessionApp({
   const prompt = `${g.prompt} `;
   const inputY = -(budget.input + budget.completion + budget.status);
 
-  const candidateStart = Math.max(0, completionIndex - budget.completion + 1);
-  const shownCandidates = candidates.slice(candidateStart, candidateStart + budget.completion);
+  const groupCount = new Set(candidates.map((item) => item.group).filter(Boolean)).size;
+  const groupRows = budget.completion > groupCount ? groupCount : 0;
+  const candidateRows = Math.max(1, budget.completion - groupRows);
+  const candidateStart = Math.max(0, completionIndex - candidateRows + 1);
+  const shownCandidates = candidates.slice(candidateStart, candidateStart + candidateRows);
   const overlayBody =
     pending !== undefined ? (
       <PermissionDialog
@@ -3017,8 +3037,17 @@ function SessionApp({
           {imageHint}
         </Text>
       ) : null}
-      {budget.completion > 0 && !indexing
-        ? shownCandidates.map((item, i) => (
+      {budget.completion > 0 && completionOpen && !indexing
+        ? shownCandidates.flatMap((item, i) => [
+            ...(groupRows > 0 &&
+            item.group &&
+            (i === 0 || shownCandidates[i - 1]?.group !== item.group)
+              ? [
+                  <Text key={`group-${item.group}`} dimColor>
+                    {item.group === "commands" ? "命令" : "技能"}
+                  </Text>,
+                ]
+              : []),
             <Text
               key={item.insert}
               wrap="truncate"
@@ -3027,8 +3056,8 @@ function SessionApp({
                 : {})}
             >
               {item.label}
-            </Text>
-          ))
+            </Text>,
+          ])
         : null}
       {budget.status > 0 ? (
         <StatusBar

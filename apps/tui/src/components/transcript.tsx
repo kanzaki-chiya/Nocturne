@@ -44,6 +44,11 @@ function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): Re
       {(entry.fileRefs ?? []).map((ref, i) => (
         <Text key={`ref:${i}`} color={theme.accentAlt}>{`  ${fileRefLine(ref)}`}</Text>
       ))}
+      {entry.skill ? (
+        <Text
+          color={theme.accentAlt}
+        >{`  技能 ${entry.skill.name} · 已附加正文 ${entry.skill.body.length} 字`}</Text>
+      ) : null}
       {(entry.attachments ?? []).map((att, i) => (
         <Text key={`${att.file}:${i}`} color={theme.accent} wrap="truncate">
           {`  ${attachmentLine(att, i, env.ascii)}`}

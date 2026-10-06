@@ -9,6 +9,7 @@ type HistoryInterface = Interface & { history: string[] };
 
 import {
   completeFileRefs,
+  parseSkillSlash,
   type Runtime,
   type RuntimeConfig,
   type RuntimeSession,
@@ -22,7 +23,7 @@ import {
   type QuestionItem,
   type RuntimeEvent,
 } from "@nocturne/core/protocol";
-import { completeLine } from "./completer.js";
+import { completeLine, skillCompletionLines } from "./completer.js";
 
 import { runSlashCommand, type CommandDeps } from "./commands.js";
 import {
@@ -185,8 +186,16 @@ export async function runRepl(
         const context = {
           effortLevels: session.reasoningEffortInfo().available,
           providerIds,
+          skills: session.describeSkills().skills,
         };
         if (completeFileRefs(line, line.length, []) === undefined) {
+          const lines = skillCompletionLines(line, context);
+          if (lines.length) {
+            callback(null, [[], line]);
+            io.stdout.write(`\n${lines.join("\n")}\n`);
+            if (!closed) rl.prompt(true);
+            return;
+          }
           callback(null, completeLine(line, context, []));
           return;
         }
@@ -601,7 +610,8 @@ export async function runRepl(
           })().finally(prompt);
           return;
         }
-        if (line.startsWith("/")) {
+        const skill = parseSkillSlash(line, session.describeSkills().skills);
+        if (line.startsWith("/") && !skill) {
           const bridge = opts.provider;
           const deps: CommandDeps = {
             ...(bridge !== undefined
@@ -680,7 +690,7 @@ export async function runRepl(
         }
         busy = true;
         activeTurn = session
-          .submit({ text: line })
+          .submit({ text: line, ...(skill ? { skill } : {}) })
           .catch((e: unknown) => {
             out.line("stderr", `! ${e instanceof Error ? e.message : String(e)}`);
           })
