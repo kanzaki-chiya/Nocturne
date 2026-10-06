@@ -23,7 +23,6 @@ import type {
 import { stripVTControlCharacters } from "node:util";
 import { permissionOutcome, permissionSubjects } from "./permissions.js";
 
-const DEFAULT_TIMEOUT_MS = 120_000;
 const CANCEL_GRACE_MS = 250;
 const CLIENT_VERSION = "0.6.0";
 
@@ -104,26 +103,49 @@ async function runAgent(
   };
   let timer: NodeJS.Timeout | undefined;
   let text = "";
+  const transcriptFailed = () => {
+    if (output.transcriptError) return;
+    output.transcriptError = true;
+    diagnostics?.record("external_agent.transcript_failed", {
+      agent: config.name,
+      callId: ctx.callId,
+      transcriptPath: request.transcriptPath,
+    });
+  };
   const record = (data: unknown): Promise<void> => {
-    transcript = transcript.then(() =>
-      platform.fs.appendFile(request.transcriptPath, `${JSON.stringify(data)}\n`, { mode: 0o600 }),
-    );
-    void transcript.catch(rejectFailure);
+    if (output.transcriptError) return transcript;
+    transcript = transcript.then(async () => {
+      // 已排队的写入也必须在执行时检查，避免首个失败后继续触碰文件。
+      if (output.transcriptError) return;
+      try {
+        await platform.fs.appendFile(request.transcriptPath, `${JSON.stringify(data)}\n`, {
+          mode: 0o600,
+        });
+      } catch {
+        transcriptFailed();
+      }
+    });
     return transcript;
   };
   const wait = <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, failed]);
   try {
-    await platform.fs.mkdir(platform.paths.dirname(request.transcriptPath), { mode: 0o700 });
-    await platform.fs.writeFile(request.transcriptPath, "", { mode: 0o600 });
+    try {
+      await platform.fs.mkdir(platform.paths.dirname(request.transcriptPath), { mode: 0o700 });
+      await platform.fs.writeFile(request.transcriptPath, "", { mode: 0o600 });
+    } catch {
+      transcriptFailed();
+    }
     ctx.signal.addEventListener("abort", onAbort, { once: true });
     if (ctx.signal.aborted) onAbort();
     if (interrupted) throw new AcpFailure(interrupted, `外部 agent ${config.name} 已中断`);
-    timer = setTimeout(() => {
-      interrupted = "timeout";
-      cancellation.abort();
-      rejectFailure(new AcpFailure("timeout", `外部 agent ${config.name} 执行超时`));
-    }, request.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    timer.unref();
+    if (request.timeoutMs !== undefined) {
+      timer = setTimeout(() => {
+        interrupted = "timeout";
+        cancellation.abort();
+        rejectFailure(new AcpFailure("timeout", `外部 agent ${config.name} 执行超时`));
+      }, request.timeoutMs);
+      timer.unref();
+    }
     const env =
       config.env === undefined
         ? undefined

@@ -7,6 +7,7 @@ import {
   createPlatform,
   type ExternalAgentConfig,
   type ExternalAgentPermissionDecision,
+  type Platform,
   type SubjectRequest,
   type ToolContext,
 } from "@nocturne/core";
@@ -33,7 +34,11 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
-function setup(scenario = "normal", extra: Partial<ExternalAgentConfig> = {}) {
+function setup(
+  scenario = "normal",
+  extra: Partial<ExternalAgentConfig> = {},
+  runPlatform: Platform = platform,
+) {
   const progress = vi.fn();
   const records: { kind: string; data: Record<string, unknown> | undefined }[] = [];
   const config: ExternalAgentConfig = {
@@ -45,21 +50,22 @@ function setup(scenario = "normal", extra: Partial<ExternalAgentConfig> = {}) {
       NOCTURNE_TEST_PID_FILE: path.join(root, "pids.json"),
       NOCTURNE_TEST_CANCEL_FILE: path.join(root, "cancel.txt"),
       NOCTURNE_TEST_READY_FILE: path.join(root, "ready.txt"),
+      NOCTURNE_TEST_RELEASE_FILE: path.join(root, "release.txt"),
     },
     ...extra,
   };
   const ctx: ToolContext = {
     cwd: root,
     workspaceRoot: root,
-    paths: platform.paths,
+    paths: runPlatform.paths,
     sessionId: "parent",
     turnId: "turn",
     callId: "call",
     signal: controller.signal,
     subjects: [],
     permissions: { check: () => "deny" },
-    fs: platform.fs,
-    process: platform.process,
+    fs: runPlatform.fs,
+    process: runPlatform.process,
     readState: {
       record() {
         /* 外部 agent 不走内置已读追踪。 */
@@ -69,7 +75,7 @@ function setup(scenario = "normal", extra: Partial<ExternalAgentConfig> = {}) {
     progress,
   };
   const connector = createAcpConnector(
-    platform,
+    runPlatform,
     [config, { ...config, name: "disabled", enabled: false }],
     {
       record(kind, data) {
@@ -233,6 +239,56 @@ describe("ACP 单调用生命周期", () => {
     },
   );
 
+  it("省略 timeoutMs 时超过 120 秒仍等待真实 agent 完成", async () => {
+    const { connector, ctx, request } = setup("release");
+    const { timeoutMs: _timeoutMs, ...withoutTimeout } = request;
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    const clearedTimers = vi.spyOn(globalThis, "clearTimeout");
+    let settled = false;
+    const running = connector.run(withoutTimeout, ctx).finally(() => {
+      settled = true;
+    });
+    try {
+      const pids = await waitForPid();
+      await vi.waitFor(
+        async () => expect(await fs.readFile(path.join(root, "ready.txt"), "utf8")).toBe("prompt"),
+        { timeout: 10_000, interval: 10 },
+      );
+      // READY 以前使用真实计时器，不能冻结跨进程 initialize/new/prompt 握手。
+      // 将尚未清除的请求期限移入 fake clock，实际触发旧 connector/SDK 超时，
+      // 而不是只检查源码或遗漏启动阶段已创建的原生计时器。
+      const deadlines = timers.mock.calls.flatMap(([callback, ms, ...args], index) => {
+        const handle = timers.mock.results[index]?.value as NodeJS.Timeout;
+        if ((ms ?? 0) < 30_000 || clearedTimers.mock.calls.some(([timer]) => timer === handle))
+          return [];
+        clearTimeout(handle);
+        return [{ callback: () => callback(...args), ms }];
+      });
+      timers.mockRestore();
+      clearedTimers.mockRestore();
+      vi.useFakeTimers();
+      for (const deadline of deadlines) setTimeout(deadline.callback, deadline.ms);
+      await vi.advanceTimersByTimeAsync(121_000);
+      expect(settled).toBe(false);
+      expect(ctx.signal.aborted).toBe(false);
+      vi.useRealTimers();
+      await fs.writeFile(path.join(root, "release.txt"), "release");
+      const result = await running;
+      expect(result).toMatchObject({ status: "ok", output: { stopReason: "end_turn" } });
+      expect(JSON.parse(result.modelContent)).toMatchObject({
+        task: request.task,
+        calls: ["initialize", "new", "prompt"],
+      });
+      await expectGone(pids.pid);
+    } finally {
+      vi.useRealTimers();
+      timers.mockRestore();
+      clearedTimers.mockRestore();
+      if (!settled) controller.abort();
+      await running;
+    }
+  });
+
   it.each(["hangTree", "ignoreCancelTree"])("%s abort 先 cancel，宽限后清树", async (scenario) => {
     const { connector, ctx, request } = setup(scenario);
     const running = connector.run(request, ctx);
@@ -306,6 +362,78 @@ describe("ACP 单调用生命周期", () => {
 });
 
 describe("执行期权限与审计", () => {
+  it.each(["mkdir", "writeFile", "appendFile"] as const)(
+    "%s 失败仅诊断一次，真实协议、权限统计与最终回复继续且停止写入",
+    async (operation) => {
+      const auditFs = {
+        ...platform.fs,
+        mkdir: vi.fn(platform.fs.mkdir),
+        writeFile: vi.fn(platform.fs.writeFile),
+        appendFile: vi.fn(platform.fs.appendFile),
+      };
+      auditFs[operation].mockRejectedValue(new Error("fixture transcript failure"));
+      const { connector, ctx, request, permission, progress, records } = setup(
+        "normal",
+        {},
+        { ...platform, fs: auditFs },
+      );
+      if (operation === "appendFile") {
+        // 首次 append 等全部 gate 被真实 SDK 调用；其他 permission 写入已排队。
+        const approvals = Promise.withResolvers<undefined>();
+        let allowed = 0;
+        permission.mockImplementation(async () => {
+          if (++allowed === 2) approvals.resolve(undefined);
+          return { decision: "allow", source: "rule" };
+        });
+        auditFs.appendFile.mockImplementation(async () => {
+          await approvals.promise;
+          throw new Error("fixture transcript failure");
+        });
+      }
+      request.task = JSON.stringify({
+        concurrentPermissions: true,
+        permissions: [{ kind: "think" }, { kind: "read" }, { kind: "edit" }],
+      });
+      const result = await connector.run(request, ctx);
+      expect(result).toMatchObject({
+        status: "ok",
+        output: {
+          agentVersion: "1.2.3",
+          transcriptPath: request.transcriptPath,
+          transcriptError: true,
+          stopReason: "end_turn",
+          permissionDecisions: { allowed: 2, denied: 1 },
+        },
+      });
+      expect(JSON.parse(result.modelContent)).toMatchObject({
+        task: request.task,
+        calls: ["initialize", "new", "prompt"],
+        permissions: [
+          { outcome: "selected", optionId: "deny" },
+          { outcome: "selected", optionId: "allow" },
+          { outcome: "selected", optionId: "allow" },
+        ],
+      });
+      expect(permission).toHaveBeenCalledTimes(2);
+      expect(progress.mock.calls).toEqual([
+        ["fixture：Read file", "info"],
+        ["fixture：completed", "info"],
+      ]);
+      expect(records.filter((entry) => entry.kind === "external_agent.permission")).toHaveLength(3);
+      expect(records.filter((entry) => entry.kind === "external_agent.transcript_failed")).toEqual([
+        {
+          kind: "external_agent.transcript_failed",
+          data: { agent: "fixture", callId: "call", transcriptPath: request.transcriptPath },
+        },
+      ]);
+      expect(records.filter((entry) => entry.kind === "external_agent.failed")).toHaveLength(0);
+      expect(auditFs.mkdir).toHaveBeenCalledTimes(1);
+      expect(auditFs.writeFile).toHaveBeenCalledTimes(operation === "mkdir" ? 0 : 1);
+      expect(auditFs.appendFile).toHaveBeenCalledTimes(operation === "appendFile" ? 1 : 0);
+      await expectGone((await waitForPid()).pid);
+    },
+  );
+
   it("覆盖全部 kind 与无路径/多路径，危险未知 kind 不调用 gate", async () => {
     const { connector, ctx, request, permission, records } = setup();
     request.task = JSON.stringify({

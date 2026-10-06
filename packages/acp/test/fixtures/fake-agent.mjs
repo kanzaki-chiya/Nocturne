@@ -7,7 +7,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import { Readable, Writable } from "node:stream";
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 
 const scenario = process.argv[2] ?? "normal";
 const calls = [];
@@ -67,6 +67,18 @@ const connection = new AgentSideConnection(
           writeFileSync(process.env.NOCTURNE_TEST_READY_FILE, "prompt");
         return pending.promise;
       }
+      if (scenario === "release") {
+        if (process.env.NOCTURNE_TEST_READY_FILE)
+          writeFileSync(process.env.NOCTURNE_TEST_READY_FILE, "prompt");
+        await new Promise((resolve) => {
+          const timer = setInterval(() => {
+            if (existsSync(process.env.NOCTURNE_TEST_RELEASE_FILE)) {
+              clearInterval(timer);
+              resolve();
+            }
+          }, 10);
+        });
+      }
       const task = params.prompt[0].text;
       let spec;
       try {
@@ -90,7 +102,7 @@ const connection = new AgentSideConnection(
           }
         }
       }
-      for (const [index, toolCall] of (spec.permissions ?? []).entries()) {
+      const requestPermission = async (toolCall, index) => {
         const response = await client.requestPermission({
           sessionId: params.sessionId,
           toolCall: { toolCallId: `p-${index}`, ...toolCall },
@@ -100,7 +112,13 @@ const connection = new AgentSideConnection(
             { optionId: "always", kind: "allow_always", name: "Allow always" },
           ],
         });
-        permissions.push(response.outcome);
+        return response.outcome;
+      };
+      if (spec.concurrentPermissions) {
+        permissions.push(...(await Promise.all(spec.permissions.map(requestPermission))));
+      } else {
+        for (const [index, toolCall] of (spec.permissions ?? []).entries())
+          permissions.push(await requestPermission(toolCall, index));
       }
       await client.sessionUpdate({
         sessionId: params.sessionId,

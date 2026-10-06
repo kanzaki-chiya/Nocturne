@@ -479,6 +479,7 @@ export interface ExternalAgentOutput {
   agent: string;
   agentVersion?: string | undefined;
   transcriptPath: string;
+  transcriptError?: true;
   stopReason: string;
   permissionDecisions: { allowed: number; denied: number };
 }

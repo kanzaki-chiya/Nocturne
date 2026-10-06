@@ -105,7 +105,8 @@ export function createTaskTool(
         ? `外部 agent：${agents.map((agent) => `${agent.name}${agent.description ? `（${agent.description}）` : ""}`).join("、")}。` +
           "给出 agent 时不得给 preset、tools、outputSchema。" +
           "执行期权限请求经过非交互判定，剩余询问会被拒绝；仅覆盖外部 agent 主动请求的操作，不是沙箱。" +
-          "外部 agent 的文件修改不受检查点或按文件回退追踪；费用与额度计在该 agent 自己的账号上。"
+          "外部 agent 的文件修改不受检查点或按文件回退追踪；费用与额度计在该 agent 自己的账号上。" +
+          "外部 agent 看不到 task 工具，不能再委派（不能嵌套）。"
         : ""),
     inputSchema: {
       type: "object",
