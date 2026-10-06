@@ -2,7 +2,14 @@
  * Phase 6 子代理（subagent.md）离线集成测试。
  * 全部经 FakeProvider 脚本化驱动父子两层会话，不触网。
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -101,16 +108,19 @@ function collect(session: RuntimeSession): RuntimeEvent[] {
   return events;
 }
 
+/** 正常文本收尾；裸 stop 是非法空回复，会触发 Provider 重试退避。 */
+const doneScript = (): FakeScript => [
+  { type: "text_delta", text: "done" },
+  { type: "finish", reason: "stop" },
+];
+
 /** 父侧第一个请求：调用 task 后 finish(tool_calls)；其余请求直接收尾 */
 const parentTaskScript = (input: Record<string, unknown>): FakeScript[] => [
   [
     { type: "tool_call", toolCallId: "task-1", name: "task", input },
     { type: "finish", reason: "tool_calls" },
   ],
-  [
-    { type: "text_delta", text: "done" },
-    { type: "finish", reason: "stop" },
-  ],
+  doneScript(),
 ];
 
 const taskCompleted = (events: RuntimeEvent[]) =>
@@ -268,7 +278,7 @@ describe("subagent：结构化结果", () => {
           ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -327,7 +337,7 @@ describe("subagent：结构化结果", () => {
               ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -384,7 +394,7 @@ describe("subagent：催促与兜底", () => {
           ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -427,7 +437,7 @@ describe("subagent：催促与兜底", () => {
           ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -468,7 +478,7 @@ describe("subagent：中断、超时与失败", () => {
           ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -516,7 +526,7 @@ describe("subagent：中断、超时与失败", () => {
           ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -626,7 +636,7 @@ describe("subagent：中断、超时与失败", () => {
           ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -663,10 +673,10 @@ describe("subagent：中断、超时与失败", () => {
       handler: async (req) => {
         if (isChildRequest(req)) {
           await sleep(400);
-          return [{ type: "finish", reason: "stop" }];
+          return doneScript();
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -721,7 +731,7 @@ describe("subagent：递归与并发上限", () => {
               ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -790,7 +800,7 @@ describe("subagent：递归与并发上限", () => {
               ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -853,7 +863,7 @@ describe("subagent：递归与并发上限", () => {
               ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -914,7 +924,7 @@ describe("subagent：权限", () => {
               ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -983,7 +993,7 @@ describe("subagent：权限", () => {
               ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -1033,7 +1043,7 @@ describe("subagent：权限", () => {
               ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -1117,7 +1127,7 @@ describe("subagent：MCP 复用", () => {
                 ];
           }
           return req.messages.some((m) => m.role === "tool")
-            ? [{ type: "finish", reason: "stop" }]
+            ? doneScript()
             : [
                 {
                   type: "tool_call",
@@ -1308,7 +1318,7 @@ describe("subagent：编辑工具能力筛选（ADR-0035 §5）", () => {
           ];
         }
         return req.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : [
               {
                 type: "tool_call",
@@ -1577,7 +1587,7 @@ describe("external agent：Core task 与权限装配", () => {
       agent: "offline",
       task: "独立任务",
       timeoutMs: 10_000,
-      cwd: ws,
+      cwd: realpathSync.native(ws),
       transcriptPath: path.join(
         sessionsDir,
         "attachments",
@@ -1796,7 +1806,7 @@ describe("external agent：Core task 与权限装配", () => {
           ];
         }
         return r.messages.some((m) => m.role === "tool")
-          ? [{ type: "finish", reason: "stop" }]
+          ? doneScript()
           : (parentTaskScript({ task: "x", preset: "general" })[0] ?? []);
       },
     });
@@ -1859,8 +1869,7 @@ describe("external agent：Core task 与权限装配", () => {
               { type: "finish", reason: "tool_calls" },
             ];
           }
-          if (r.messages.some((m) => m.role === "tool"))
-            return [{ type: "finish", reason: "stop" }];
+          if (r.messages.some((m) => m.role === "tool")) return doneScript();
           const text = r.messages.find((m) => m.role === "user")?.content;
           const external = text?.some((b) => b.type === "text" && b.text === "external") ?? false;
           return (
