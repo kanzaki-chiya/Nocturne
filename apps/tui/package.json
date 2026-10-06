@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/tui",
-  "version": "0.5.0",
+  "version": "0.6.0-rc.1",
   "description": "Nocturne terminal UI client (Ink + React)，由 nctrn --tui 惰性加载",
   "license": "GPL-3.0-only",
   "private": true,
