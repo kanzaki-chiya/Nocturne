@@ -21,6 +21,7 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.{ts,tsx}"],
     environment: "node",
+    setupFiles: ["test/setup-isolated-home.ts"],
     testTimeout: 15_000,
     // Ink 帧渲染吃 CPU；按核数默认并发时多线程低主频机器上互相拖慢，大批用例超时。
     maxWorkers: 4,

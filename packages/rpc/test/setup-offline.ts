@@ -4,8 +4,10 @@
  * （如 OpenRouter 授权交换）；忘记注入时在这里暴露，而不是悄悄联网。
  * 与 packages/core/test/setup-offline.ts 同一份策略。
  *
- * 另把 NOCTURNE_HOME 指向每个测试文件独立的临时目录：不传 config 的
- * createRuntime 会落到 ~/.nocturne，输入历史等会写进维护者的真实数据目录。
+ * 另把 NOCTURNE_HOME 与 HOME/USERPROFILE 指向每个测试文件独立的临时目录：
+ * 不传 config 的 createRuntime 会落到 ~/.nocturne，输入历史等会写进维护者
+ * 的真实数据目录；技能发现也会经 os.homedir() 扫真实的 ~/.agents/skills、
+ * ~/.claude/skills。os.homedir() 每次调用都读环境变量。
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,6 +17,8 @@ import { afterAll } from "vitest";
 
 const home = mkdtempSync(path.join(tmpdir(), "nct-rpc-test-home-"));
 process.env.NOCTURNE_HOME = home;
+process.env.HOME = home;
+process.env.USERPROFILE = home;
 afterAll(() => {
   rmSync(home, { recursive: true, force: true });
 });

@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { createPlatform } from "../src/platform/index.js";
@@ -468,6 +468,45 @@ it("L1 pinResult 保留正文，普通工具结果仍修剪，目录放在指令
     "history",
   ]);
   expect(built.report.sections.find((s) => s.name === "skills")?.truncated).toBe(true);
+});
+
+it("守护：默认测试运行时不读真实主目录", async () => {
+  // setup-offline.ts 把 HOME/USERPROFILE 重定向到独立的临时目录。
+  // 先断言重定向仍在（回归时第一时间失败），再端到端验证技能发现
+  // 跟的是重定向后的 home：标记技能写进当前 homedir 能被不传
+  // platform 的 createRuntime 发现；另一个假主目录里的同名位置看不到。
+  const realHome = process.env.NOCTURNE_TEST_REAL_HOME;
+  expect(realHome).toBeTruthy();
+  expect(homedir()).not.toBe(realHome);
+  const marker = `nct-guard-${process.pid}`;
+  const dir = path.join(homedir(), ".agents", "skills", marker);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, "SKILL.md"), "---\ndescription: guard\n---\nbody");
+  const decoyHome = mkdtempSync(path.join(tmpdir(), "nct-decoy-home-"));
+  mkdirSync(path.join(decoyHome, ".agents", "skills", "decoy"), { recursive: true });
+  writeFileSync(
+    path.join(decoyHome, ".agents", "skills", "decoy", "SKILL.md"),
+    "---\ndescription: decoy\n---\nbody",
+  );
+  const ws = mkdtempSync(path.join(tmpdir(), "nct-guard-ws-"));
+  roots.push(ws, decoyHome);
+  try {
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: path.join(ws, "sessions"),
+      providers: [new FakeProvider({})],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    try {
+      const names = session.describeSkills().skills.map((s) => s.name);
+      expect(names).toContain(marker);
+      expect(names).not.toContain("decoy");
+    } finally {
+      await session.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 function item<T>(items: readonly T[], index: number): T {
