@@ -192,6 +192,8 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 
 ## 6. 预设
 
+为本会话已发现技能的真实根目录生成 `read allow <root>/**` 规则，与本会话落盘目录规则一起在宽规则之后求值。技能实现不做权限判定；链接到根目录外的支持文件仍按解析后真实路径求值。写入、shell 与技能目录外读取不放宽，详见 [skills.md](skills.md) 第 3 节。
+
 预设提供一组有序规则；权限层还按第 6 项对命令做保守降级，`bypass` 跳过其中的高风险与编码命令降级。用户可以追加显式规则。预设构造时拿到 `workspaceRoot`、`sessionsDir`、`sessionId` 与 `nocturneHome`（据此生成具体的路径模式）；求值时预设与其他层规则没有任何差别。
 
 | 预设 | read（工作区） | read（外部） | edit（工作区） | edit（外部） | shell | network / mcp | subagent |

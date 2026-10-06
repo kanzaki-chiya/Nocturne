@@ -84,6 +84,8 @@ execute(call, ctx):
 
 ## 6. 内置工具（MVP）
 
+会话技能目录非空时注册 `skill({ name, arguments? })`，返回正文、真实目录和第一层最多 50 个文件；非 mutating、可并发、声明 `pinResult: true`，重复加载与摘要后重载规则见 [skills.md](skills.md) 第 3 节。
+
 | 工具 | 作用 | 副作用 | 关键约定 |
 |---|---|---|---|
 | `read` | 读取文本文件与 PNG、JPEG、GIF、WebP 图片，支持起始行与行数 | 无 | 带行号输出；记录"已读状态"（路径、修改时间）；图片约定见下 |

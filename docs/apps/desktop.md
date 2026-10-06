@@ -13,7 +13,7 @@
 
 ## 2. 命令与消息格式
 
-Rust 外壳提供七个 Tauri 命令（经 `tauri_build` 的 `AppManifest::commands` 声明为应用命令，在 `capabilities/main.json` 中逐个授予 `allow-backend-open` 等权限），错误统一返回可序列化的 `{ code, message }`（message 为中文）：`node_unavailable`、`backend_script_missing`、`invalid_workspace`、`spawn_failed`、`unknown_backend`、`workspace_unavailable`、`file_too_large`、`io`。
+Rust 外壳提供八个 Tauri 命令（经 `tauri_build` 的 `AppManifest::commands` 声明为应用命令，在 `capabilities/main.json` 中逐个授予 `allow-backend-open` 等权限），错误统一返回可序列化的 `{ code, message }`（message 为中文）：`node_unavailable`、`backend_script_missing`、`invalid_workspace`、`spawn_failed`、`unknown_backend`、`workspace_unavailable`、`file_too_large`、`io`。
 
 | 命令              | 参数 → 结果                                         | 说明                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -24,6 +24,8 @@ Rust 外壳提供七个 Tauri 命令（经 `tauri_build` 的 `AppManifest::comma
 | `node_probe`      | `{}` → `NodeProbe`                                  | 每次重新探测并刷新缓存（说明页的「重新检测」）                                                                                                                                                                                                                                                                                                                                                |
 | `plain_workspace` | `{}` → 绝对路径字符串                               | 解析 `<NOCTURNE_HOME>/workspace`（`NOCTURNE_HOME` 规则与 Core `nocturneHome()` 一致），不存在时创建（POSIX 上新建目录 0700），返回绝对路径；失败报 `workspace_unavailable`                                                                                                                                                                                                                    |
 | `pick_images`     | `{}` → 原始字节（`Response`）                       | 系统文件对话框多选图片（过滤 png/jpg/jpeg/gif/webp）；外壳读取所选文件字节返回，前端不传路径——读取范围仅限用户显式选中的文件。单个文件 > 64 MiB 报 `file_too_large`：与 stdout 单行上限同级的内存护栏（不是附件规则，格式与尺寸校验仍在 Core）。自定义二进制帧，重复记录 `[u32 LE 文件名 UTF-8 字节数][文件名][u32 LE 数据字节数][数据]`；取消选择返回空体。前端解码在 `src/picked-images.ts` |
+
+| `open_skill_directory` | `{ path, create }` → `null` | 打开绝对目录；create 只允许创建 `<NOCTURNE_HOME>/skills`；失败报 `workspace_unavailable` |
 
 `plain_workspace` 单独成命令而不并入 `backend_open`：前端归类「对话」需要这个路径且目录必须由外壳创建，而 `backend_open` 仍只接受已存在的目录——前端不能借它创建任意目录。
 
@@ -162,7 +164,7 @@ interface NodeProbe {
 | `/rewind` `/fork`                     | 后续版本提供                                            |
 | `/exit` `/quit`                       | 关闭窗口即可退出                                        |
 
-输入 `/` 显示分组补全弹层（`role="listbox"`）：「命令」组只含 `/compact`、`/mcp`；组结构（`completeSlash` 返回 `SlashGroup[]`，`id` 预留 `"skills"`）为将来技能命令留口，空组不渲染。
+输入 `/` 显示分组补全弹层（`role="listbox"`）：「命令」组只含 `/compact`、`/mcp`；技能组（id `"skills"`）跟在命令组之后，显示名字、argument-hint 和截断说明，过滤停用、覆盖、user-invocable false 与命令冲突；空组不渲染。发送技能走 submit.skill，用户消息带可展开的正文快照标签，模型调用显示「技能 <名字> 已加载」。
 
 ### 5.4 状态栏与上下文
 
@@ -176,7 +178,7 @@ interface NodeProbe {
 
 ### 5.5 设置区
 
-左栏底部「设置」进入设置区：左栏整列换成设置导航（「← 返回 Esc」、「设置」标题、常规 / 模型 / 服务商 / MCP / 外观 / 后台日志六项、底部一行说明），会话树不显示；主区换成对应页面。空状态与状态栏的模型菜单底部「管理服务商…」直接进入「服务商」。设置区以 `.settings-over` 盖在主区之上，原来的会话或空状态（`.mainpane`）保持挂载并设为 `inert`，所以「← 返回」或 Esc 回到的是同一个会话，滚动位置不变；在导航项之间切换不算返回。Esc 只在没有被下拉、对话框先处理时才返回（下拉的 Esc 会 `preventDefault` 并停止冒泡；设置区里有打开的对话框时不返回）。被盖住的会话的窗口级快捷键（权限卡片的 Esc 拒绝与数字键作答、输入框的 Esc 中断）在其所在区域 `inert` 时一律不响应。服务商页与常规 / 模型 / 外观页都走常驻的普通对话后台读写全局配置。
+左栏底部「设置」进入设置区：左栏整列换成设置导航（「← 返回 Esc」、「设置」标题、常规 / 模型 / 服务商 / MCP / 技能 / 外观 / 后台日志七项、底部一行说明），会话树不显示；主区换成对应页面。空状态与状态栏的模型菜单底部「管理服务商…」直接进入「服务商」。设置区以 `.settings-over` 盖在主区之上，原来的会话或空状态（`.mainpane`）保持挂载并设为 `inert`，所以「← 返回」或 Esc 回到的是同一个会话，滚动位置不变；在导航项之间切换不算返回。Esc 只在没有被下拉、对话框先处理时才返回（下拉的 Esc 会 `preventDefault` 并停止冒泡；设置区里有打开的对话框时不返回）。被盖住的会话的窗口级快捷键（权限卡片的 Esc 拒绝与数字键作答、输入框的 Esc 中断）在其所在区域 `inert` 时一律不响应。服务商页与常规 / 模型 / 外观页都走常驻的普通对话后台读写全局配置。
 
 设置布局按容器宽度调整，不使用窗口媒体查询：整个设置区宽度 <1000px 时导航从 295px 收到 200px，会话左栏不变；设置主内容 <900px 时服务商列表从 252px 收到 200px，名称与右侧模型数各自单行省略。详情标题与不收缩的状态标签一行，操作按钮另起一行横排并允许换行。详情内容 <520px 时信息卡改两列，<320px 时改一列，值允许折行。模型表名称列至少 12ch，<520px 先隐藏最大输出，<400px 再隐藏上下文；名称和能力始终保留，长模型名折行，无横向滚动。页尾说明为「R 推理 · I 图片输入。默认模型在「模型」页修改。」，其中「模型」可进入模型页。
 
@@ -193,6 +195,14 @@ interface NodeProbe {
 - **添加服务商**：选「可添加」里的预设进入表单，字段由 `describeProviderSetup` 驱动（固定值只读显示；凭据方式按 apiKey / 环境变量 / 账号登录 / 外部文件，OpenRouter 可选浏览器登录或粘贴密钥）。「获取模型」调 `prepareProvider` 拿到草稿，之后「保存」才可点（`commitProvider`）；获取前保存置灰，获取后改任何字段都作废结果、释放草稿并重新置灰。获取期间可「取消获取」：前端立即回到可编辑，输入保留，晚到的响应若带回草稿立即 `discardProvider` 释放。结果区显示「已获取 N 个模型」与 notices，并按 `PrepareProviderResult.models` 预览：折叠时列前 4 个模型名和「等 N 个」，「展开全部 ▾」后是限高、内部滚动的表格（名称、能力、上下文、最大输出），「收起 ▴」还原，每次重新获取都回到折叠。失败写「获取失败」与原因；`-32005` 带 `data.field` 时错误只显示在对应字段下，结果区不再重复「获取失败」——与已有服务商重名也以 `field: "name"` 报告（[provider-setup.md](../architecture/provider-setup.md) 第 2 节「名称唯一性」）。`needsManualModel` 时出现「模型 ID」输入框。「取消」、切走或离开页面都会 `discardProvider` 释放草稿，进行中的草稿登录经 `login.cancel` 取消（RPC 层把 Core 的 `discardDraftLogin` 映射为 `login.cancel`）。
 - **登录**：`login.start` / `login.startDraft` 后用外链白名单打开系统浏览器；等待卡片（`src/LoginWaitCard.tsx`）有复制链接、重新打开浏览器、取消、倒计时（以 `LoginStarted.expiresAt` 为准，仅展示），可展开「粘贴回调地址 / 粘贴授权码」走 `login.submitManual`。`login.completed` 带 `unstoredKey` 时密钥只在卡片里显示这一次，前端不存储、不打日志。
 - **同步**：服务商变更后后台推 `runtime.providersChanged`，页面、状态栏模型菜单与空状态模型 chip 随之刷新，其他后台经上面的协调重载。
+
+#### 技能
+
+「MCP」之后的「技能」页（`src/SkillsPage.tsx`）复用 MCP 列表与详情样式，按用户和当前设置工作区项目分组。每次挂载重新扫描；标题下展示模型目录 token 预算、完整/名字/停用数量与未知模型兜底依据。详情包含只读覆盖开关、忽略字段原因表、覆盖/缺说明/命令冲突横幅、完整真实路径及其他入口、四格信息、说明截断标记、字段 chips、正文前 40 行和支持文件，解析失败汇总可展开文件路径与行号。
+
+启停保存到 settings.json，提示已打开会话在本轮结束后更新，空闲会话立即生效。技能通知与其他后台同步走已有 providersChanged/propagateConfig；正在对话的输入框取 session.describeSkills 快照，新会话草稿取运行时查询。技能正文标签可展开日志快照，skill 工具使用普通工具行。
+
+外壳 `open_skill_directory({ path, create })` 打开绝对目录，create 只允许 `<NOCTURNE_HOME>/skills`，使用既有 opener；目录错误返回中文说明。空态提供创建并打开该目录及 agentskills.io 规范链接。技能行为主文档见 [skills.md](../architecture/skills.md)。
 
 #### MCP
 
@@ -233,7 +243,7 @@ interface NodeProbe {
 
 ## 6. 安全边界
 
-- `capabilities/main.json` 只授予：七个应用命令（`allow-backend-open/send/close/stderr`、`allow-node-probe`、`allow-plain-workspace`、`allow-pick-images`）、`core:path:allow-resolve-directory`（前端 `homeDir()` 主目录解析所需；`pick_images` 的对话框与读文件都在 Rust 侧，不需要它）、窗口权限 `core:window:allow-minimize`、`allow-toggle-maximize`、`allow-internal-toggle-maximize`（Tauri drag-region 的原生双击）、`allow-close`、`allow-start-dragging`、`allow-is-maximized`（后五项同属 `core:window:`）、`dialog:allow-open`、`opener:allow-open-url`（scope 只允许 `https:*` 与 `http://127.0.0.1:*` / `http://localhost:*`）。不授予 `core:default` 或 `core:window:default`，不启用 fs、shell、http 插件，`withGlobalTauri: false`。
+- `capabilities/main.json` 只授予：八个应用命令（`allow-backend-open/send/close/stderr`、`allow-node-probe`、`allow-plain-workspace`、`allow-pick-images`、`allow-open-skill-directory`）、`core:path:allow-resolve-directory`（前端 `homeDir()` 主目录解析所需；`pick_images` 的对话框与读文件都在 Rust 侧，不需要它）、窗口权限 `core:window:allow-minimize`、`allow-toggle-maximize`、`allow-internal-toggle-maximize`（Tauri drag-region 的原生双击）、`allow-close`、`allow-start-dragging`、`allow-is-maximized`（后五项同属 `core:window:`）、`dialog:allow-open`、`opener:allow-open-url`（scope 只允许 `https:*` 与 `http://127.0.0.1:*` / `http://localhost:*`）。不授予 `core:default` 或 `core:window:default`，不启用 fs、shell、http 插件，`withGlobalTauri: false`。
 - 主窗口 `dragDropEnabled: false`：关掉 Tauri 的原生拖放接管，HTML5 drop 才能向输入框交付 `File` 对象（图片附件的拖入路径）。
 - CSP：`default-src 'self'`；`connect-src` 只允许 `ipc:`/`http://ipc.localhost`；图片额外允许 `blob:`（图片附件预览用）；禁 `object-src`、`base-uri`、`form-action`、`frame-ancestors`。dev 模式（`devCsp`）仅为 Vite 额外放开 `ws://localhost:1420`、`http://localhost:1420` 与 style `'unsafe-inline'`。
 - 外链白名单（`src/external-url.ts`）：`https:` 放行；`http:` 仅 `127.0.0.1` 与 `localhost`（本机回调页）；其余协议与解析失败忽略不打开。Rust 侧 opener scope 与之一致。

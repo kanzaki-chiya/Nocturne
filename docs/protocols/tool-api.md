@@ -34,6 +34,8 @@ interface ToolDefinition<Input = unknown, Output = unknown> {
 }
 
 interface ToolTraits {
+  /** 结果不参与 L1 修剪；经 tool.started 持久化，L2 摘要与执行时预算不豁免 */
+  pinResult?: boolean
   /** 执行是否可能改变外部状态（文件、进程、远端）。用于崩溃恢复提示与将来的调度 */
   mutates: boolean
   /** 能否与其他 concurrencySafe 调用并行执行 */

@@ -48,11 +48,14 @@ Context Builder 不做 I/O，也不调用 Provider：指令文件由 `config` / 
 
 ## 3. 组装顺序（稳定的放前面）
 
+项目指令之后、环境信息之前注入有界的技能目录（`skills` section，含截断标记），其发现、快照和预算规则见 [skills.md](skills.md) 第 3 节。
+
 1. **基础系统提示**：英文的 Nocturne 身份、先读后改与验证的工作方式、工具使用约定（命令输出自动收集，勿接分页工具——shell 会对末尾接 `more`/`less` 的命令硬拒绝并回以补救说明，见 [tools.md](tools.md) 第 6 节；大量输出先重定向到文件再用 `grep` 工具搜索）、安全边界、按用户语言回复。正文以 [ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 第 9 条及附录为准；其中编辑工具一节经 [ADR-0035](../decisions/ADR-0035-apply-patch.md) 第 7 节修订——提示对编辑工具保持中性（"file-editing tools" 标题、不点名 `edit`/`write`/`apply_patch`），两种 `editTool` 能力下是同一份文本以保住缓存前缀。随版本变化，会话内不变。可由 `BuildContextInput.basePrompt` 覆盖——唯一的用户是子会话（Phase 6），它换成中文的"子代理 + `finish` 提交协议"提示，并与主提示对齐验证与安全要求（[subagent.md](subagent.md) 第 8 节）。
 2. **工具规格**：名称、描述、输入 schema。会话内通常不变。
 3. **项目指令**：用户级 `<NOCTURNE_HOME>/AGENTS.md`，以及从 `workspaceRoot` 到 `cwd` 路径上各级目录的 `AGENTS.md`。前言说明这些是用户和项目指令，冲突时优先于默认做法。每个文件有大小上限，超出截断并在报告中标注。
-4. **环境信息**：操作系统、shell、工作目录、会话创建日期（取会话元数据的创建时间，恢复时不变）。Shell 行由会话级 resolver 在会话打开（新建或恢复）时按当时的生效 shell 生成一次（ADR-0022，与 `spawnShell` 同源），内容为 `Commands run with <名称>（<可执行文件>）<调用形态>: <语法说明>`——`cmd` 说明 `&` 是顺序执行而非后台（长命令直接执行并调大 `timeoutMs`），并提醒 `findstr` 控制台代码页关键词无法匹配 UTF-8 输出中的非 ASCII 文字；`pwsh`/`powershell` 说明 PowerShell 语法（7+ 支持 `&&`/`||`，5.1 不支持）；Git Bash 说明 Windows 路径写法（`C:/…` 或 `/c/…`）与 MSYS 参数转换；`sh` 说明 POSIX sh 语法。取会话级的值，不在每个 Step 刷新，避免破坏缓存前缀。会话中途切换 shell 时该行**不改写**（改它会让整段历史的提示缓存失效）：`session.config_changed { shell }` 折叠时在事件位置生成 `note` 历史条目（`[Environment change] shell is now …`，措辞与 Shell 行同源），Context Builder 把它作为 user 消息在该位置注入；恢复会话后历史中的旧切换说明原样保留。协议约束例外：`/shell` 可在工具调用进行中执行，此时持久序上 note 会落在 `assistant`（含 toolCalls）与对应 `tool` 结果之间——OpenAI/Anthropic 要求 tool 结果紧随其调用，所以投影时这类注入说明先排队，等到该批 toolCalls 的**全部**结果就位（含结果在 `pendingMessages` 中到达的情形）才放行；调用悬空到历史末尾时排在消息尾部。持久化序不变，仅投影序调整。
-5. **历史**：最近一个压缩边界之后的消息与工具结果；若存在摘要，摘要作为历史的第一条。
+4. **技能目录**：会话快照，详细规则见 [skills.md](skills.md) 第 3 节。
+5. **环境信息**：操作系统、shell、工作目录、会话创建日期（取会话元数据的创建时间，恢复时不变）。Shell 行由会话级 resolver 在会话打开（新建或恢复）时按当时的生效 shell 生成一次（ADR-0022，与 `spawnShell` 同源），内容为 `Commands run with <名称>（<可执行文件>）<调用形态>: <语法说明>`——`cmd` 说明 `&` 是顺序执行而非后台（长命令直接执行并调大 `timeoutMs`），并提醒 `findstr` 控制台代码页关键词无法匹配 UTF-8 输出中的非 ASCII 文字；`pwsh`/`powershell` 说明 PowerShell 语法（7+ 支持 `&&`/`||`，5.1 不支持）；Git Bash 说明 Windows 路径写法（`C:/…` 或 `/c/…`）与 MSYS 参数转换；`sh` 说明 POSIX sh 语法。取会话级的值，不在每个 Step 刷新，避免破坏缓存前缀。会话中途切换 shell 时该行**不改写**（改它会让整段历史的提示缓存失效）：`session.config_changed { shell }` 折叠时在事件位置生成 `note` 历史条目（`[Environment change] shell is now …`，措辞与 Shell 行同源），Context Builder 把它作为 user 消息在该位置注入；恢复会话后历史中的旧切换说明原样保留。协议约束例外：`/shell` 可在工具调用进行中执行，此时持久序上 note 会落在 `assistant`（含 toolCalls）与对应 `tool` 结果之间——OpenAI/Anthropic 要求 tool 结果紧随其调用，所以投影时这类注入说明先排队，等到该批 toolCalls 的**全部**结果就位（含结果在 `pendingMessages` 中到达的情形）才放行；调用悬空到历史末尾时排在消息尾部。持久化序不变，仅投影序调整。
+6. **历史**：最近一个压缩边界之后的消息与工具结果；若存在摘要，摘要作为历史的第一条。
 
 当前任务清单（[ADR-0028](../decisions/ADR-0028-session-task-list.md)，2026-10-01、2026-10-02、2026-10-03 修订）由 Agent Loop 和 `describeContext` 从 `SessionState.todos` 传入 Builder，作为有界的任务数据块附在请求**末尾**（历史之后）：末尾是 user 消息时并入该消息（部分兼容服务拒绝连续两条 user 消息）；末尾是工具结果时以空行分隔追加到最后一条工具结果（另起 user 消息会让推理模型把每一步当成新一轮，丢弃本轮推理，前缀缓存也随之失效）；其余情况另起一条 user 消息；它不写入历史，也不放进 system，因为清单每次更新都会让其后整段历史的提示缓存失效。空清单不注入。全部完成的清单在下一条持久化 `message.user` 到达时归档，因此该消息对应的请求不再附带当前清单块；尚有未完成项时继续注入，历史工具快照仍保留。该块计入 `ContextReport` 的 `todos` section 与预算，不依赖历史中的工具结果，所以 L1 修剪、L2 摘要与恢复后仍是最新状态。清单文字不能覆盖系统、用户或项目指令。
 
@@ -81,6 +84,8 @@ Builder 在请求的 `cachePrefix` 中标出"可缓存前缀"的边界：全部 
 ## 6. 压缩
 
 ### 6.1 两级压缩
+
+工具声明 `pinResult: true` 的结果不参与 L1 修剪，持久化特性由历史投影读取；L2 摘要的固定指令要求列出已加载技能名，摘要后允许重新加载正文。工具结果的执行时输出预算仍适用。
 
 每一级都以持久化事件 `context.compacted` 记录，使后续构建结果确定、可恢复：
 

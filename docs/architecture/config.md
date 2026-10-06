@@ -33,6 +33,8 @@
 
 ## 2. 配置文件格式与 schema
 
+用户 config.json 支持 `skills: { sources?: { agents?: boolean, claude?: boolean }, extraDirs?: string[] }`；兼容来源默认启用，extraDirs 支持 `~`。项目配置的 skills 段忽略。用户 settings.json 的 `skills.disabled: string[]` 使用既有写队列，按不区分大小写的名字启停；详细来源与 Turn 边界行为见 [skills.md](skills.md) 第 4 节。
+
 两个配置文件都是**严格 JSON**（不支持的写法：注释、尾逗号、单引号）。理由与备选见 ADR-0007。
 
 - 解析失败或不符合 schema：**用户配置**直接报错（快速失败，不带着半截配置启动）；**项目配置**整份忽略并发出警告（仓库里的坏文件不应阻塞会话，但也不能静默生效一半）。

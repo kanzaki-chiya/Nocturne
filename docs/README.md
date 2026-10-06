@@ -14,6 +14,8 @@
 
 ## Architecture（设计与行为）
 
+- [skills.md](architecture/skills.md)：Agent Skills 发现、快照、预算、按需加载与启停。
+
 | 文档 | 回答的问题 |
 |---|---|
 | [overview.md](architecture/overview.md) | Nocturne 是什么、设计原则、核心模块、一次请求的数据流 |

@@ -145,6 +145,8 @@ launch(request, ctx)
 
 ## 6. 受限工具集与递归
 
+父会话存在技能目录时，可选池包含非 mutating 的 `skill`，general 与 explore 默认可用。子会话使用启动时父目录与正文快照，加载记录和摘要后重载属于子会话；技能支持文件的读取仍走父权限策略的只读继承。详见 [skills.md](skills.md) 第 3 节。
+
 **可选池** = 内置工具 ∪ 父会话 MCP 工具（`mcpSession.tools()` 快照）∪ `task`（仅子会话自身 `depth < maxDepth` 时），再按特性排除 `traits.needsUser === true` 的工具——子会话非交互，`ask_user`（ADR-0032）永远不在池内。子注册表 = 池 ∩ 选择 + `finish`（恒在，不可被 `tools` 列出也不可被排除）。
 
 | 选择方式 | 语义 |

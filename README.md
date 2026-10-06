@@ -4,6 +4,8 @@ Nocturne 是在代码仓库中工作的命令行编程助手。运行 `nctrn` �
 
 ## 安装
 
+兼容已安装在 `.agents/skills`、`.claude/skills` 和 Nocturne 技能目录里的 Agent Skills；可用 `/技能名 参数` 调用，并在桌面端「设置 › 技能」查看来源与启停。
+
 需要 Node.js 24.14 或更新版本，以及 pnpm 11.24.0。从源码构建，并把 `nctrn` 注册为全局命令：
 
 ```sh

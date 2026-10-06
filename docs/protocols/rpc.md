@@ -131,7 +131,19 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 
 三种变更成功后自动重载并更新已打开会话；MCP 变更响应不发送 `providersChanged`，桌面端显式调用 `BackendPool.propagateConfig`。其他后台的 `reloadConfig` 仍发送原通知，由现有 echo 计数消费。
 
-### 3.6 通知
+### 3.6 `skills.*`（ADR-0048）
+
+| 方法 | 参数与返回 |
+|---|---|
+| `skills.describeSkills` | `{ workspaceRoot?: string }` → `SkillsDescription`；每次重新扫描 |
+| `skills.setSkillEnabled` | `{ name: string, enabled: boolean }` → `{ affectedSessions: number }`；走配置写队列，响应之前推 `runtime.providersChanged`，当前 Turn 的快照保持不变 |
+| `session.describeSkills` | `{ sessionId }` → `SkillsDescription`；只返回本会话快照 |
+
+`SkillsDescription` 为 `{ skills: SkillOverview[], warnings: { path, line, message, kind }[], budget: { usedTokens, limitTokens, fullCount, nameCount, disabledCount, basis }, scannedDirs: string[], homeDir: string }`；字段定义和默认模型/8000 token 兜底依据见 [skills.md](../architecture/skills.md) 第 5 节。`session.submit` 可带 `skill: { name: string, arguments?: string }`，Core 把渲染正文固定进 message.user，客户端恢复不重读文件。新字段兼容旧日志，不提升 formatVersion。
+
+技能变更通知复用 providersChanged 以刷新客户端目录；其他后台由客户端转发 reloadConfig，继承已有 echo 防环机制。
+
+### 3.7 通知
 
 | 方向 | 方法 | 参数 | 说明 |
 |---|---|---|---|
@@ -140,7 +152,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 | 服务端→客户端 | `runtime.providersChanged` | `{}` | 服务商配置/凭据变更完成且 Runtime 已用重载后配置重建：在对应 `provider.*` 变更方法（或已保存服务商 `login.start` 成功）的响应/完成通知之前到达一次（3.3、3.4） |
 | 服务端→客户端 | `login.completed` | `LoginCompleted` | 登录会话完成或失败（含取消）；绝不先于对应 `login.start`/`startDraft` 的响应到达（3.4） |
 
-### 3.7 `shutdown`
+### 3.8 `shutdown`
 
 请求，无参数。服务端完成与"传输断开"相同的清理（第 6 节）后回复 `null`，再关闭传输。
 

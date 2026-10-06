@@ -91,6 +91,8 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 
 ## 4. 斜杠命令
 
+`/skills` 只读列出当前会话的技能、来源、覆盖和模型目录状态。补全在命令之后列技能，含 argument-hint 和最多 250 字符说明；内置命令优先，停用与 user-invocable false 不出现。`/技能名 参数` 通过 `submit.skill` 固定正文快照，事件输出显示技能名与附加字数，详见 [skills.md](../architecture/skills.md)。
+
 `/provider login <名称>` 发起浏览器登录并接受手动粘贴，`/provider logout <名称>` 删除本地保存的登录凭据；没有服务端吊销承诺。没有系统凭据后端时，ChatGPT 登录必须在明文保存与仅本次运行中显式选择一项，不默认明文，并说明文件被拷走时 refresh token 会泄漏。`nctrn setup --cli` 使用同一流程。登录等待可取消，错误信息不含授权码或令牌，详见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md) 与 [provider-setup.md](../architecture/provider-setup.md) 第 1、3 节。
 
 | 命令 | 行为 | 对应 Runtime 能力 |
