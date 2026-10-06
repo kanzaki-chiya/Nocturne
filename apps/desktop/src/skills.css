@@ -246,6 +246,19 @@
 }
 .skill-message summary {
   cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  border: 1px solid var(--a-border);
+  border-radius: 7px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  color: var(--a-secondary);
+  background: var(--a-raised);
+  list-style: none;
+}
+.skill-message summary b {
+  font: 500 11.5px var(--mono);
+  color: var(--a-accent);
 }
 .skill-message pre {
   white-space: pre-wrap;
@@ -263,6 +276,13 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.composer-popup-row:has(.composer-popup-source) .composer-popup-name {
+  flex: 0 0 210px;
+  max-width: 50%;
+}
+.composer-popup-row:has(.composer-popup-source) .composer-popup-summary {
+  flex: 1;
 }
 .composer-popup-source {
   color: var(--a-faint);
