@@ -22,7 +22,18 @@ jobs:
     permissions:
       contents: read # gh release download 读取已发布资产
       id-token: write # npm 受信发布（OIDC）
+    # 输入只经环境变量进 shell，不直接插进 run:（避免脚本注入）
+    env:
+      VERSION: ${{ inputs.version }}
     steps:
+      - name: 校验版本号是 semver
+        shell: bash
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "版本号不合法：$VERSION"
+            exit 1
+          fi
+
       - name: Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -34,12 +45,12 @@ jobs:
       - name: 下载 Release 里的 nctrn 包
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release download "v${{ inputs.version }}" --pattern "nctrn-*.tgz" --dir .
+        run: gh release download "v$VERSION" --pattern "nctrn-*.tgz" --dir .
 
       - name: 校验包名与版本
         run: |
-          test -f "nctrn-${{ inputs.version }}.tgz" || {
-            echo "Release v${{ inputs.version }} 中没有 nctrn-${{ inputs.version }}.tgz"
+          test -f "nctrn-$VERSION.tgz" || {
+            echo "Release v$VERSION 中没有 nctrn-$VERSION.tgz"
             exit 1
           }
 
@@ -47,7 +58,7 @@ jobs:
         run: |
           # 预发布号（含 -）挂 next 标签，不覆盖 latest
           tag="latest"
-          case "${{ inputs.version }}" in
+          case "$VERSION" in
             *-*) tag="next" ;;
           esac
-          npm publish "nctrn-${{ inputs.version }}.tgz" --access public --tag "$tag"
+          npm publish "nctrn-$VERSION.tgz" --access public --tag "$tag"

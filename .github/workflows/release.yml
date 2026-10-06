@@ -76,8 +76,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           node scripts/release-notes.mjs "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+          # 预发布号（含 -）标成 prerelease：GitHub 的 latest 不含预发布，updater 端点
+          # /releases/latest/download/latest.json 因而不会把 rc 推给正式版用户
+          prerelease=()
+          case "$VERSION" in
+            *-*) prerelease=(--prerelease) ;;
+          esac
           gh release create "$GITHUB_REF_NAME" \
             --draft \
+            "${prerelease[@]}" \
             --title "Nocturne $GITHUB_REF_NAME" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
             release/"$VERSION"/*
@@ -118,12 +125,13 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
         run: |
-          if [ "${{ steps.smoke.outcome }}" = "success" ]; then
+          if [ "$SMOKE_OUTCOME" = "success" ]; then
             mark="通过"
           else
             mark="失败"
           fi
           gh release view "$GITHUB_REF_NAME" --json body --jq .body > "$RUNNER_TEMP/notes.md"
-          printf '\n- %s tgz 安装冒烟：%s\n' "${{ runner.os }}" "$mark" >> "$RUNNER_TEMP/notes.md"
+          printf '\n- %s tgz 安装冒烟：%s\n' "$RUNNER_OS" "$mark" >> "$RUNNER_TEMP/notes.md"
           gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"

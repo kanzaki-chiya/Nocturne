@@ -6,7 +6,7 @@
  *
  * 依次执行：pnpm build → bundle 单文件 → npm pack → 取随附 Node →
  * cargo test → tauri build → 生成 latest.json，产物统一收集到
- * release/<version>/（已加入 .gitignore）。
+ * release/<version>/（已加入 .gitignore；每次构建先清空该版本目录）。
  *
  * --config 与 tauri build 的 --config 一致（JSON 文件路径），同时用于
  * 计算产物目录名与 latest.json 里的版本号；本地演练可经它临时覆盖
@@ -23,6 +23,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -74,7 +75,13 @@ function main() {
     throw new Error("tauri.conf.json 缺少 version");
   }
 
+  // 版本号会拼进要清空的目录路径：只接受 semver，防止 ".." 之类越出 release/
+  if (!/^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error(`tauri.conf.json 的 version 不是合法 semver：${version}`);
+  }
   const releaseDir = join(root, "release", version);
+  // 先清空本版本目录（只这一层），避免本地重复构建残留旧的 setup.exe
+  rmSync(releaseDir, { recursive: true, force: true });
   mkdirSync(releaseDir, { recursive: true });
   const bundleFile = join(tauriDir, "resources", "nctrn.mjs");
 
