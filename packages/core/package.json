@@ -3,6 +3,7 @@
   "version": "0.5.0",
   "description": "Nocturne runtime: sessions, agent loop, context, tools, permissions, providers",
   "license": "GPL-3.0-only",
+  "private": true,
   "type": "module",
   "exports": {
     ".": {

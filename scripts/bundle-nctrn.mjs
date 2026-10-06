@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
- * 把 apps/cli 打成单个 ESM 文件 apps/desktop/src-tauri/resources/nctrn.mjs，
- * 供桌面版 release 构建作为后台进程脚本（不打包 Node 本体）。
+ * 把 apps/cli 打成单个 ESM 文件 nctrn.mjs。默认输出到
+ * apps/desktop/src-tauri/resources/nctrn.mjs，供桌面版 release 构建
+ * 作为后台进程脚本（不打包 Node 本体）；`--out-dir <dir>` 可指定别的
+ * 输出目录（npm 包组装复用同一份产物）。
  *
  * 所有运行时依赖（含 workspace 包和 npm 依赖，以及 @nocturne/tui 的动态
  * import）全部内联；产物自包含，可在没有 node_modules 的目录里直接
@@ -16,8 +18,17 @@ import { build } from "tsdown";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cliDir = join(root, "apps", "cli");
-const resourcesDir = join(root, "apps", "desktop", "src-tauri", "resources");
-const outFile = join(resourcesDir, "nctrn.mjs");
+
+const outDirIndex = process.argv.indexOf("--out-dir");
+const targetDir =
+  outDirIndex >= 0
+    ? resolve(process.argv[outDirIndex + 1] ?? "")
+    : join(root, "apps", "desktop", "src-tauri", "resources");
+if (outDirIndex >= 0 && process.argv[outDirIndex + 1] === undefined) {
+  console.error("用法: node scripts/bundle-nctrn.mjs [--out-dir <目录>]");
+  process.exit(1);
+}
+const outFile = join(targetDir, "nctrn.mjs");
 
 /**
  * 运行时走不到、但静态打包必须能解析的可选依赖：
@@ -71,7 +82,7 @@ try {
   const code = readFileSync(built, "utf8");
   const withShebang = code.startsWith("#!") ? code : `#!/usr/bin/env node\n${code}`;
 
-  mkdirSync(resourcesDir, { recursive: true });
+  mkdirSync(targetDir, { recursive: true });
   writeFileSync(outFile, withShebang);
   const mib = (statSync(outFile).size / 1024 / 1024).toFixed(2);
   console.log(`nctrn.mjs: ${outFile} (${mib} MiB)`);

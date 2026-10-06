@@ -14,11 +14,12 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "pnpm -r --workspace-concurrency=1 test",
+    "test": "pnpm -r --workspace-concurrency=1 test && vitest run --root scripts",
     "test:smoke": "pnpm build && pnpm -r test:smoke",
     "depcheck": "dependency-cruiser packages apps --config .dependency-cruiser.cjs",
     "desktop:dev": "pnpm --filter @nocturne/desktop dev",
-    "desktop:build": "pnpm build && node scripts/bundle-nctrn.mjs && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml && pnpm --dir apps/desktop exec tauri build"
+    "desktop:build": "pnpm build && node scripts/bundle-nctrn.mjs && node scripts/fetch-node.mjs && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml && pnpm --dir apps/desktop exec tauri build",
+    "release:build": "node scripts/release-build.mjs"
   },
   "devDependencies": {
     "@types/node": "24.13.5",
