@@ -186,7 +186,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - ~~**向用户提问工具**~~（已实现；[ADR-0032](../decisions/ADR-0032-ask-user-tool.md)）：模型遇到需要用户拍板的问题时暂停并提问（可给选项），用户回答后继续；非交互模式下返回"无法提问"，由模型自行取默认。
 - ~~**网页抓取**~~（已实现；[ADR-0033](../decisions/ADR-0033-web-fetch-file-refs.md)）：按 URL 抓取并转成文本交给模型，走权限层的 `network` 类（按主机授权，确认框显示完整 URL）；搜索不内置，交给 MCP。
 - ~~**`@文件` 引用**~~（已实现；[ADR-0033](../decisions/ADR-0033-web-fetch-file-refs.md)）：输入框里 `@` 补全工作区路径，提交时把文件内容随用户消息带入（在 Core 解析，不经过权限层）。自动化验收已覆盖读取、恢复、补全与引用显示；Windows Terminal 的真实抓取与引用交互由维护者手测。
-- **MCP 服务器管理**（未在 0.5.0 完成，移到 [v0.7](#v07--扩展与分发已排期待设计)）：在 `/settings` 或独立的 `/mcp` 页里添加、删除、启停 MCP 服务器，取代只能手写 `config.json` 的现状；同一轮实现 MCP 工具返回图片走附件通道（[ADR-0023](../decisions/ADR-0023-image-input.md) 第 8 节，已决定未实现），届时用真实服务器手测。依赖设置层。
+- **MCP 服务器管理**（未在 0.5.0 完成，移到 v0.7；桌面端设置页已随 0.6.0 发布，见 [ADR-0047](../decisions/ADR-0047-mcp-settings.md)）：在 `/settings` 或独立的 `/mcp` 页里添加、删除、启停 MCP 服务器，取代只能手写 `config.json` 的现状；同一轮实现 MCP 工具返回图片走附件通道（[ADR-0023](../decisions/ADR-0023-image-input.md) 第 8 节，已决定未实现），届时用真实服务器手测。依赖设置层。
 - ~~**视觉输入**~~（已实现；MCP 图片结果随 MCP 服务器管理移到 v0.7）：沿用已有的模型能力位 `imageInput`（上游声明或用户声明，未声明按不支持处理），用户声明经「编辑模型」入口维护（见 [ADR-0024](../decisions/ADR-0024-model-settings-editor.md)）。先做 `read` 读图片（附件复制到会话附件目录、日志只存引用；发送时用 base64，OpenAI 兼容协议下图片随工具结果之后的一条 user 消息发送，转换在 Provider 适配器内完成），再做 TUI 粘贴（Alt+V 读剪贴板、拖入图片路径）：当前模型不支持图片时粘贴当场提示、不附加；发送时历史里的图片按当前模型能力替换为文字占位兜底（中途换模型、旧图片）；最后让 MCP 图片结果走同一通道。设计见 [ADR-0023](../decisions/ADR-0023-image-input.md)（已接受）。
 - **模型设置编辑页**（已实现，[ADR-0024](../decisions/ADR-0024-model-settings-editor.md)）：服务商页「编辑模型」与 `/provider model`，逐模型修改显示名、上下文长度、最大输出、推理、看图与思考档位，每项标明来源；取代 `/provider image`。
 - **模型能力来源与逐模型推理**（[ADR-0025](../decisions/ADR-0025-per-model-reasoning.md)，已接受）：接入 models.dev 作为上游之下的能力来源层（刷新时拉取并缓存，随版本内置裁剪快照）；取消服务商级思考档位（`/provider thinking`、向导「是否支持思考」），推理与档位只按模型声明，推理为否就没有档位；编辑页推理改为「跟随 / 是 / 否」。排在图片粘贴之前。
@@ -245,19 +245,21 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 - **自定义斜杠命令**：项目 `.nocturne/commands/*.md` 注册为命令；**项目级自定义 agent**：复用 `trust.json` 的项目信任机制，设计定义文件的加载、权限收敛与提示词边界。
 - **子会话 ask 冒泡**：按 [subagent.md](../architecture/subagent.md) 第 7.1 节方案 (a)，把子会话的确认请求路由到父客户端；**可展开的子代理进度**：结构化进度替代单行摘要。
-- **MCP 服务器管理**：从 v0.5 移入，见 v0.5 同名条目。
+- **MCP 服务器管理**（已随 0.6.0 发布，2026-10-07）：桌面端「MCP」设置页添加、编辑、启停服务器，支持 JSON 导入与 HTTP 传输，已打开的会话在 Turn 边界热重载，见 [ADR-0047](../decisions/ADR-0047-mcp-settings.md)；MCP 工具返回图片走附件通道仍未做。
+- **技能**（已随 0.6.0 发布，2026-10-07）：兼容 Agent Skills，自动发现用户级与项目内技能目录，`/技能名` 调用，桌面端「技能」页管理，见 [ADR-0048](../decisions/ADR-0048-skills.md)。
+- **外部 agent 子代理**（[ADR-0049](../decisions/ADR-0049-external-agent-subagent.md) 已接受，待实现）：经 ACP 把子任务交给 omp、Codex 等外部 agent。
 - **MCP 强杀清理**：评估纯 Node 看护进程，detached 启动，主进程消失后清理 MCP 进程树；沿用会话锁的"开机时间 + PID"判定规避 PID 复用。**MCP 图片与二进制内容**正常显示。
-- **分发**（[ADR-0050](../decisions/ADR-0050-distribution.md) 已接受，实现中）：npm 单文件包 `nctrn`、桌面端随附官方 Node 与自动更新、`pnpm release:build` 发布流水线与草稿 Release / npm 受信发布工作流；公开仓库后的 rc 端到端验收与首次发布见 ADR 第 5 节。
+- **分发**（已随 0.6.0 发布，2026-10-07，见 [ADR-0050](../decisions/ADR-0050-distribution.md)）：桌面端随附官方 Node 与自动更新、`pnpm release:build` 发布流水线与草稿 Release；命令行版以单文件 tgz 随 Release 发布。rc.1 → rc.2 自动更新端到端验收通过（2026-10-07）。npm 首发暂缓，见 ADR-0050 修订。
 - **补验证**：macOS 钥匙串与 Linux Secret Service 实机验证；Anthropic 格式思考强度在真实端点验证。
 
-## RPC 与桌面端（RPC 第一版随 0.5.0 发布，实验性；桌面端已实现，尚未发布）
+## RPC 与桌面端（RPC 第一版随 0.5.0 发布，实验性；桌面端随 0.6.0 发布）
 
 **前提**：RPC 设计见 [ADR-0044](../decisions/ADR-0044-rpc-stdio.md)（已接受，2026-10-03）；桌面端设计见 [ADR-0046](../decisions/ADR-0046-desktop-tauri.md)（已接受，2026-10-04）。
 
 **内容**：
 
 - **RPC 第一版**（已实现并验收，2026-10-04；随 0.5.0 以实验性发布）：`nctrn rpc --stdio`，JSON-RPC 按行分隔，一个后台一个 Runtime、一个客户端；事件按 `afterSeq` 回放后衔接实时推送。按 ADR-0044 第 10 节分五步实现，其中服务商配置改为数据接口（`describeProviderSetup` / `prepareProvider` + `commitProvider`），CLI 与 TUI 向导迁移其上。
-- **桌面端**（ADR-0046 已实现；随附 Node 与自动更新按 [ADR-0050](../decisions/ADR-0050-distribution.md) 实现中）：Tauri 外壳逐行转发，每个有打开会话的项目一个 `nctrn rpc --stdio` 后台；React + Vite 前端经 RPC 驱动；左栏按项目分组的会话树与置顶，对话、权限、服务商、设置；只出 Windows 安装包。安装包随附官方 Node 24.x（不再要求用户自装）、经 Tauri updater 自动更新。
+- **桌面端**（ADR-0046 已实现，随 0.6.0 发布；随附 Node 与自动更新按 [ADR-0050](../decisions/ADR-0050-distribution.md) 实现）：Tauri 外壳逐行转发，每个有打开会话的项目一个 `nctrn rpc --stdio` 后台；React + Vite 前端经 RPC 驱动；左栏按项目分组的会话树与置顶，对话、权限、服务商、设置；只出 Windows 安装包。安装包随附官方 Node 24.x（不再要求用户自装）、经 Tauri updater 自动更新。
 
 ## 之后（未排期）
 
