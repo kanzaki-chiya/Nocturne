@@ -73,6 +73,27 @@ const durableTypes = (events: RuntimeEvent[]) =>
   events.filter((e): e is Extract<RuntimeEvent, { seq: number }> => "seq" in e).map((e) => e.type);
 
 describe("公开 Runtime API", () => {
+  it("createSession 未指定目录时保留 Runtime 的 workspaceRoot，而非 cwd", async () => {
+    const cwd = makeTmpDir("nct-rt-cwd-");
+    const workspaceRoot = makeTmpDir("nct-rt-root-");
+    const sessionsDir = makeTmpDir("nct-rt-sessions-");
+    const runtime = await createRuntime({
+      cwd,
+      workspaceRoot,
+      sessionsDir,
+      providers: [new FakeProvider({})],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    try {
+      expect(session.state().meta.cwd).toBe(cwd);
+      expect(session.state().meta.workspaceRoot).toBe(
+        await createPlatform().resolveReal(workspaceRoot),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+
   it("偏好方法转交 RuntimeConfig；未注入时读取为空且写入明确拒绝", async () => {
     const root = makeTmpDir("nct-prefs-");
     const home = path.join(root, "home");

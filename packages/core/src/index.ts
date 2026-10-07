@@ -301,8 +301,8 @@ export interface CreateSessionOptions {
    */
   cwd?: string | undefined;
   /**
-   * 会话工作区根；缺省取 cwd 解析后的真实路径（语义同
-   * createRuntime 的 workspaceRoot）。项目配置、权限、指令都按它加载。
+   * 会话工作区根；显式 cwd 时缺省取其真实路径，否则沿用 Runtime 的
+   * workspaceRoot。项目配置、权限、指令都按它加载。
    */
   workspaceRoot?: string | undefined;
   permissionPreset?: string | undefined;
@@ -2957,9 +2957,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return config.describeSettings(root);
     },
     async createSession(opts) {
-      // 会话级工作区（ADR-0051）：缺省回到 Runtime 启动目录，行为与原来一致
+      // 会话级工作区（ADR-0051）：未指定目录时保留 Runtime 的 cwd 和工作区根
       const sessionCwd = opts.cwd !== undefined ? paths.resolve(opts.cwd, ".") : cwd;
-      const sessionRoot = await platform.resolveReal(opts.workspaceRoot ?? sessionCwd);
+      const sessionRoot = await platform.resolveReal(
+        opts.workspaceRoot ?? (opts.cwd !== undefined ? sessionCwd : workspaceRoot),
+      );
       const defaults =
         config !== undefined ? (await config.forWorkspace(sessionRoot)).resolved : undefined;
       const preset = normalizePermissionPreset(

@@ -32,7 +32,7 @@
 | 方法 | 参数 → 结果 |
 |---|---|
 | `listSessions` | `{ cwd?, includeSubagents? }` → `SessionSummary[]` |
-| `createSession` | `CreateSessionOptions` → `SessionOpened`；ADR-0051 新增可选 `cwd` 与 `workspaceRoot`，按该目录加载项目层并把两个值写入 `session.created`（缺省为后台启动目录）；恢复会话沿用日志记录的工作区，不带参数 |
+| `createSession` | `CreateSessionOptions` → `SessionOpened`；ADR-0051 新增可选 `cwd` 与 `workspaceRoot`，按该目录加载项目层并把两个值写入 `session.created`。`cwd` 缺省沿用 Runtime 的 cwd；工作区根依次取显式 `workspaceRoot`、显式 `cwd` 的真实路径、Runtime 的 workspaceRoot；恢复会话沿用日志记录的工作区，不带参数 |
 | `resumeSession` | `{ sessionId, model?, force? }` → `SessionOpened` |
 | `forkSession` | `{ sessionId, targetSeq? }` → `{ sessionId }`（新会话未打开，用 `resumeSession` 打开） |
 | `listModels` / `defaultModel` / `listRecentModels` | 模型列表 / `ModelRef \| null` / `ModelRef[]`；前两者可带 `workspaceRoot` |
