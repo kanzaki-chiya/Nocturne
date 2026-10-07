@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RpcError, type RpcClient, type RpcRuntime, type RpcSession } from "@nocturne/rpc/client";
 import type {
   ExternalAgentOverview,
+  ModelRef,
   RewindMode,
   RuntimeEvent,
   SessionView,
@@ -23,6 +24,7 @@ import { StatusBar, type StatusPanel } from "./StatusBar";
 import { PaneErrorBoundary } from "./ErrorBoundary";
 import { ProvidersPage } from "./ProvidersPage";
 import { McpPage } from "./McpPage";
+import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
 import { SkillsPage } from "./SkillsPage";
 import { SettingsPage } from "./SettingsPage";
@@ -140,7 +142,7 @@ export function App({ host }: { host: DesktopHost }) {
     stderr: string[];
     restarting?: boolean;
     restartError?: string;
-    sessionErrors?: { id: string; message: string }[];
+    sessionErrors?: { id: string; message: string; code?: string }[];
     /** stderr 块默认只显示最后几行，展开看全部 */
     expanded?: boolean;
   } | null>(null);
@@ -149,7 +151,12 @@ export function App({ host }: { host: DesktopHost }) {
   const [providersVersion, setProvidersVersion] = useState(0);
   const [panel, setPanel] = useState<StatusPanel | null>(null);
   const [commandOutput, setCommandOutput] = useState<string | null>(null);
-  const [lockedSession, setLockedSession] = useState<{ id: string; cwd: string } | null>(null);
+  /** 会话被别处占用；model 是这次打开携带的替代模型，「强制打开」时一并带上 */
+  const [lockedSession, setLockedSession] = useState<{
+    id: string;
+    cwd: string;
+    model?: ModelRef;
+  } | null>(null);
   const [dirMenuOpen, setDirMenuOpen] = useState(false);
   /**
    * 设置区当前导航项；null = 会话或空状态。设置区盖在会话区之上，会话区保持挂载
@@ -411,20 +418,20 @@ export function App({ host }: { host: DesktopHost }) {
     return dir;
   }, [host, prefs, refresh, bumpPrefs]);
 
-  const selectSession = async (id: string, workspace: string, force = false) => {
+  const selectSession = async (id: string, workspace: string, force = false, model?: ModelRef) => {
     // 选中立即生效：会话区先显示「正在打开…」，内容到了再渲染（ADR-0051）
     setSelectedId(id);
     setPanel(null);
     setLockedSession(null);
     try {
-      await conversations.open(id, workspace, force);
+      await conversations.open(id, workspace, force, model);
       setSelectedId(conversations.selectedId);
       await refresh();
     } catch (error) {
       if (error instanceof RpcError && error.code === "session_locked") {
-        setLockedSession({ id, cwd: workspace });
+        setLockedSession({ id, cwd: workspace, ...(model !== undefined ? { model } : {}) });
       }
-      // 其他失败：openErrors 已记录，该会话的占位区显示错误与「重试」
+      // 其他失败：openErrors 已按错误码记录，占位区显示「换模型」卡片或错误与「重试」
     }
   };
 
@@ -812,13 +819,16 @@ export function App({ host }: { host: DesktopHost }) {
                 {backendExit.restartError !== undefined && (
                   <div className="fail">重启失败：{backendExit.restartError}</div>
                 )}
-                {backendExit.sessionErrors?.map(({ id, message }) => (
+                {backendExit.sessionErrors?.map(({ id, message, code }) => (
                   <div className="fail" key={id}>
                     会话「
                     {conversations.opened.get(id)?.view.title ??
                       sessions.find((s) => s.id === id)?.firstText ??
                       id}
-                    」恢复失败：{message}
+                    」
+                    {code === "invalid_model"
+                      ? "用的模型已不可用，点开它选一个模型继续"
+                      : `恢复失败：${message}`}
                   </div>
                 ))}
               </div>
@@ -989,6 +999,21 @@ export function App({ host }: { host: DesktopHost }) {
                   <span className="spin" aria-hidden="true" />
                   正在打开…
                 </div>
+              ) : selectedOpenError.code === "invalid_model" ? (
+                <ModelRecoveryCard
+                  key={selectedId}
+                  runtime={pool.get()?.runtime}
+                  workspace={selectedOpenError.workspace}
+                  error={selectedOpenError.message}
+                  attempted={selectedOpenError.model}
+                  providersVersion={providersVersion}
+                  onContinue={(model) =>
+                    void selectSession(selectedId, selectedOpenError.workspace, false, model)
+                  }
+                  onOpenProviders={() => {
+                    setPage("providers");
+                  }}
+                />
               ) : (
                 <div className="nodecard">
                   <h3>打开会话失败</h3>
@@ -1115,7 +1140,14 @@ export function App({ host }: { host: DesktopHost }) {
                 </button>
                 <button
                   className="btn primary"
-                  onClick={() => void selectSession(lockedSession.id, lockedSession.cwd, true)}
+                  onClick={() =>
+                    void selectSession(
+                      lockedSession.id,
+                      lockedSession.cwd,
+                      true,
+                      lockedSession.model,
+                    )
+                  }
                 >
                   强制打开
                 </button>

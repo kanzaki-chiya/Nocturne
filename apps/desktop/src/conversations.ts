@@ -6,6 +6,7 @@ import {
   type SessionView,
 } from "@nocturne/core/protocol";
 import {
+  RpcError,
   trackSessionView,
   type RpcClient,
   type RpcSession,
@@ -67,6 +68,27 @@ export interface CreateSessionChoice {
   permissionPreset?: string;
 }
 
+/**
+ * 打开失败的记录。code 取 RPC 错误的 data.code（RpcError.code），界面按它
+ * 分支，不匹配文案：invalid_model 进「换模型」卡片，其余是「打开会话失败 + 重试」。
+ * model 是这次打开携带的替代模型（换模型后仍失败时卡片沿用这个选择）。
+ */
+export interface OpenError {
+  message: string;
+  workspace: string;
+  code?: string;
+  model?: ModelRef | string;
+}
+
+function openError(error: unknown, workspace: string, model?: ModelRef | string): OpenError {
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    workspace,
+    ...(error instanceof RpcError ? { code: error.code } : {}),
+    ...(model !== undefined ? { model } : {}),
+  };
+}
+
 export class Conversations {
   readonly opened = new Map<string, OpenConversation>();
   selectedId: string | null = null;
@@ -77,10 +99,10 @@ export class Conversations {
    */
   openingId: string | null = null;
   /**
-   * 最近一次打开失败按会话记录（消息与工作区）：该会话的占位区显示
-   * 错误与「重试」，不退回上一个会话。
+   * 最近一次打开失败按会话记录（消息、工作区与错误码）：该会话的占位区
+   * 按错误码显示「换模型」卡片或错误与「重试」，不退回上一个会话。
    */
-  readonly openErrors = new Map<string, { message: string; workspace: string }>();
+  readonly openErrors = new Map<string, OpenError>();
   private queue: Promise<unknown> = Promise.resolve();
   /** 每次 open 递增；被更新的点击取代的打开在串行队列里直接跳过 */
   private openToken = 0;
@@ -150,8 +172,10 @@ export class Conversations {
    * 会话就绪后内容替换占位。失败写 openErrors[id]，界面在该会话内显示
    * 错误与「重试」，不回退选中项。连续快速点击时 token 让被取代的打开
    * 在串行队列里跳过，先发出的请求晚返回不会覆盖界面。
+   * model：会话记录的模型已无法解析（invalid_model）时携带的替代模型，原样
+   * 交给 resumeSession，由 Core 先写 config_changed 再开放（sessions.md 4.2）。
    */
-  open(id: string, workspace: string, force = false): Promise<void> {
+  open(id: string, workspace: string, force = false, model?: ModelRef | string): Promise<void> {
     const token = ++this.openToken;
     const previous = this.selected;
     this.selectedId = id;
@@ -177,7 +201,10 @@ export class Conversations {
           entry = await this.attach(
             client,
             target,
-            await client.runtime.resumeSession(id, { force }),
+            await client.runtime.resumeSession(id, {
+              force,
+              ...(model !== undefined ? { model } : {}),
+            }),
             continuity,
           );
         }
@@ -191,10 +218,7 @@ export class Conversations {
         if (dead !== undefined && this.opened.get(id) === undefined) {
           this.opened.set(id, dead);
         }
-        this.openErrors.set(id, {
-          message: error instanceof Error ? error.message : String(error),
-          workspace: target,
-        });
+        this.openErrors.set(id, openError(error, target, model));
         throw error;
       } finally {
         if (this.openingId === id) this.openingId = null;
@@ -354,14 +378,16 @@ export class Conversations {
    * 重启后台并恢复全部标记 dead 的会话（跨项目也在同一个后台恢复，
    * 各会话的工作区由日志元数据携带）：先 resumeSession，再按崩溃前的
    * view.lastSeq 续接订阅（attach 的 continuity 路径）。会话逐个恢复，
-   * 单个失败不阻塞其余；失败的保持 dead 并随结果返回 id 与原因。
+   * 单个失败不阻塞其余；失败的保持 dead 并随结果返回 id、原因与错误码。
+   * 模型已不可用（invalid_model）的会话另记进 openErrors，点开即是「换模型」
+   * 卡片；其余失败点开时照常重试恢复。
    * 后台本身起不来时整个调用抛错（横幅据此显示重启失败）。
    */
-  async resumeBackend(): Promise<{ failed: { id: string; message: string }[] }> {
+  async resumeBackend(): Promise<{ failed: { id: string; message: string; code?: string }[] }> {
     return this.serial(async () => {
       const dead = [...this.opened.values()].filter((entry) => entry.dead === true);
       const client = await this.pool.ensure();
-      const failed: { id: string; message: string }[] = [];
+      const failed: { id: string; message: string; code?: string }[] = [];
       for (const entry of dead) {
         const id = entry.session.id;
         try {
@@ -372,7 +398,13 @@ export class Conversations {
         } catch (error) {
           // attach 抛错时已删掉新条目：把死条目放回去，会话仍可再次尝试
           this.opened.set(id, entry);
-          failed.push({ id, message: error instanceof Error ? error.message : String(error) });
+          const record = openError(error, entry.workspace);
+          if (record.code === "invalid_model") this.openErrors.set(id, record);
+          failed.push({
+            id,
+            message: record.message,
+            ...(record.code !== undefined ? { code: record.code } : {}),
+          });
         }
       }
       this.changed();

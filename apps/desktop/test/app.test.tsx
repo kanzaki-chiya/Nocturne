@@ -19,6 +19,11 @@ function replayHost(
   seedStderr?: (backendId: number, workspace: string) => string[],
   /** 命中 predicate 的请求不应答，暂存到 deferred 由测试放行（模拟晚到的响应） */
   deferRpc?: (request: { method: string; params: Record<string, unknown> }) => boolean,
+  /** 命中时以 RuntimeCommandError 形态失败（-32001，data.code 为返回的错误码） */
+  rpcError?: (request: {
+    method: string;
+    params: Record<string, unknown>;
+  }) => { code: string; message: string } | undefined,
 ) {
   const channels = new Map<number, (message: BackendMessage) => void>();
   /** 被 deferRpc 扣下的请求：respond 把结果发回客户端 */
@@ -31,7 +36,11 @@ function replayHost(
   /** backend_stderr 命令的调用记录（backendId） */
   const stderrReads: number[] = [];
   const calls: RpcCall[] = [];
-  const models = [
+  const models: {
+    ref: { provider: string; model: string };
+    capabilities: Record<string, unknown>;
+    unavailable?: { reason: string };
+  }[] = [
     { ref: { provider: "test", model: "cheap" }, capabilities: {} },
     {
       ref: { provider: "test", model: "fancy" },
@@ -102,8 +111,10 @@ function replayHost(
     stderrReads: number[];
     shellLog: string[];
     deferred: typeof deferred;
+    models: typeof models;
   } = {
     calls,
+    models,
     workspaces,
     notify,
     close,
@@ -177,6 +188,22 @@ function replayHost(
               line: JSON.stringify({ jsonrpc: "2.0", id: request.id, result: r }),
             });
           },
+        });
+        return;
+      }
+      const rejected = rpcError?.({ method: request.method, params: request.params });
+      if (rejected !== undefined) {
+        channel({
+          kind: "line",
+          line: JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            error: {
+              code: -32001,
+              message: rejected.message,
+              data: { code: rejected.code, name: "RuntimeCommandError" },
+            },
+          }),
         });
         return;
       }
@@ -1012,6 +1039,183 @@ it("打开失败时在该会话内显示错误与「重试」，不退回上一�
   failing.length = 0;
   fireEvent.click(screen.getByRole("button", { name: "重试" }));
   await within(await screen.findByRole("region", { name: "会话消息" })).findByText("gamma 正文");
+});
+
+/** gamma 记录的模型已从配置里删掉：不带 model 恢复报 invalid_model */
+const lostModel = (request: { method: string; params: Record<string, unknown> }) =>
+  request.method === "runtime.resumeSession" &&
+  request.params.sessionId === "gamma" &&
+  request.params.model === undefined
+    ? {
+        code: "invalid_model",
+        message:
+          "未配置的 Provider: command；可携带替代模型恢复（resumeSession 的 model 选项 / CLI --model）",
+      }
+    : undefined;
+
+const resumeCalls = (host: ReturnType<typeof replayHost>, id: string) =>
+  host.calls.filter((c) => c.method === "runtime.resumeSession" && c.params.sessionId === id);
+
+it("会话模型已不可用：显示换模型卡片（无「重试」），选模型后带 model 恢复并打开", async () => {
+  const host = replayHost([], undefined, undefined, lostModel);
+  host.models.push({
+    ref: { provider: "test", model: "gone" },
+    capabilities: {},
+    unavailable: { reason: "账号登录已失效" },
+  });
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
+
+  await screen.findByText("这个会话用的模型已不可用");
+  expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+  expect(screen.queryByText("打开会话失败")).toBeNull();
+  // Core 原始信息作为次要说明保留
+  expect(screen.getByText(/未配置的 Provider: command/)).toBeTruthy();
+  // 清单按会话工作区取；默认选中当前生效的默认模型
+  const trigger = await screen.findByRole("button", { name: "选择模型" });
+  await waitFor(() => expect(trigger.textContent).toContain("test · cheap"));
+  expect(
+    host.calls.find(
+      (c) => c.method === "runtime.listModels" && c.params.workspaceRoot === "Z:/qa-gamma",
+    ),
+  ).toBeDefined();
+  expect(
+    host.calls.find(
+      (c) => c.method === "runtime.defaultModel" && c.params.workspaceRoot === "Z:/qa-gamma",
+    ),
+  ).toBeDefined();
+
+  fireEvent.click(trigger);
+  const menu = await screen.findByRole("menu", { name: "选择模型" });
+  // 不可用模型禁用并附原因
+  const gone = within(menu).getByRole("menuitemradio", { name: /gone/ });
+  expect((gone as HTMLButtonElement).disabled).toBe(true);
+  expect(gone.getAttribute("title")).toBe("账号登录已失效");
+  fireEvent.click(within(menu).getByRole("menuitemradio", { name: /fancy/ }));
+  expect(trigger.textContent).toContain("test · fancy");
+
+  fireEvent.click(screen.getByRole("button", { name: "用这个模型继续" }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("gamma 正文");
+  const resumes = resumeCalls(host, "gamma");
+  expect(resumes).toHaveLength(2);
+  expect(resumes[1]?.params.model).toEqual({ provider: "test", model: "fancy" });
+  expect(screen.queryByText("这个会话用的模型已不可用")).toBeNull();
+});
+
+it("打开时其他错误码仍是「打开会话失败 + 重试」", async () => {
+  const host = replayHost([], undefined, undefined, (request) =>
+    request.method === "runtime.resumeSession" && request.params.sessionId === "gamma"
+      ? { code: "session_log_corrupt", message: "会话日志损坏" }
+      : undefined,
+  );
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  await screen.findByText("打开会话失败");
+  expect(screen.getByText("会话日志损坏")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
+  expect(screen.queryByText("这个会话用的模型已不可用")).toBeNull();
+});
+
+it("换模型后仍失败：留在换模型卡片并显示新的错误", async () => {
+  const host = replayHost([], undefined, undefined, (request) =>
+    request.method === "runtime.resumeSession" && request.params.sessionId === "gamma"
+      ? request.params.model === undefined
+        ? { code: "invalid_model", message: "未配置的 Provider: command" }
+        : { code: "invalid_model", message: "替代模型同样无法解析：未配置的 Provider: test" }
+      : undefined,
+  );
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  const trigger = await screen.findByRole("button", { name: "选择模型" });
+  await waitFor(() => expect(trigger.textContent).toContain("test · cheap"));
+  fireEvent.click(trigger);
+  fireEvent.click(
+    within(await screen.findByRole("menu", { name: "选择模型" })).getByRole("menuitemradio", {
+      name: /fancy/,
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "用这个模型继续" }));
+
+  await screen.findByText(/替代模型同样无法解析/);
+  expect(screen.getByText("这个会话用的模型已不可用")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+  expect(screen.queryByRole("region", { name: "会话消息" })).toBeNull();
+  // 卡片沿用刚才的选择
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "选择模型" }).textContent).toContain("test · fancy"),
+  );
+  expect(resumeCalls(host, "gamma")).toHaveLength(2);
+});
+
+it("模型清单为空时换模型卡片只有「去配置服务商」", async () => {
+  const host = replayHost([], undefined, undefined, lostModel);
+  host.models.length = 0;
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  await screen.findByText("这个会话用的模型已不可用");
+  await screen.findByText(/当前配置里没有可用的模型/);
+  expect(screen.queryByRole("button", { name: "用这个模型继续" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "选择模型" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "去配置服务商" }));
+  const nav = await screen.findByRole("navigation", { name: "设置" });
+  expect(within(nav).getByRole("button", { name: /服务商/ }).className).toContain("on");
+});
+
+it("崩溃恢复：模型不可用的会话不阻塞其余会话，点开是换模型卡片", async () => {
+  let lost = false;
+  const host = replayHost([], undefined, undefined, (request) =>
+    lost &&
+    request.method === "runtime.resumeSession" &&
+    request.params.sessionId === "alpha" &&
+    request.params.model === undefined
+      ? { code: "invalid_model", message: "未配置的 Provider: command" }
+      : undefined,
+  );
+  render(<App host={host} />);
+  // alpha、beta 都在等权限确认，切走后仍保持打开
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("alpha 正文");
+  fireEvent.click(screen.getByRole("button", { name: /^beta (?:会话|正文)/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("beta 正文");
+  const backend = [...host.workspaces.keys()][0];
+  if (backend === undefined) throw new Error("后台未启动");
+
+  await act(async () => {
+    host.close(backend, 1);
+  });
+  lost = true;
+  const crash = (await screen.findByText(/后台已退出（退出码 1）/)).closest(".crash");
+  fireEvent.click(within(crash as HTMLElement).getByRole("button", { name: "重启后台" }));
+
+  // beta 照常续接；alpha 失败但不中断其余会话
+  await screen.findByText(/用的模型已不可用，点开它选一个模型继续/);
+  expect(host.calls.filter((c) => c.method === "initialize")).toHaveLength(2);
+  const betaSub = host.calls
+    .filter((c) => c.method === "session.subscribe" && c.params.sessionId === "beta")
+    .at(-1);
+  expect(betaSub?.params.afterSeq).toBe(4);
+  expect(screen.getByRole("region", { name: "会话消息" }).textContent).toContain("beta 正文");
+
+  fireEvent.click(screen.getByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await screen.findByText("这个会话用的模型已不可用");
+  expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+  const trigger = await screen.findByRole("button", { name: "选择模型" });
+  await waitFor(() => expect(trigger.textContent).toContain("test · cheap"));
+  fireEvent.click(screen.getByRole("button", { name: "用这个模型继续" }));
+  // 换模型恢复：沿用崩溃前的视图并按 lastSeq 续接订阅
+  await waitFor(() =>
+    expect(screen.getByRole("region", { name: "会话消息" }).textContent).toContain("alpha 正文"),
+  );
+  const alphaSub = host.calls
+    .filter((c) => c.method === "session.subscribe" && c.params.sessionId === "alpha")
+    .at(-1);
+  expect(alphaSub?.params.afterSeq).toBe(4);
+  expect(resumeCalls(host, "alpha").at(-1)?.params.model).toEqual({
+    provider: "test",
+    model: "cheap",
+  });
+  await waitFor(() => expect(screen.queryByText(/后台已退出/)).toBeNull());
 });
 
 it("一次切换只刷新一次会话列表", async () => {

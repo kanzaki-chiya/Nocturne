@@ -41,7 +41,7 @@ type BackendMessage =
 
 前端 `TauriLineTransport`（`src/transport.ts`）把这套命令实现成 `LineTransport`：`send` 经 promise 链串行保证顺序（写失败吞掉，断开会经 closed 体现）；注册 `onLine` 前到达的行被缓冲并按序交付；`closed` 在已交付完缓冲行后触发 `onClose`（只一次）；`exited` 暴露退出结果；`backend_open` 失败包装成带 `code` 的 `DesktopError`。`BackendPool`（`src/backends.ts`）管理唯一后台的连接：`ensure()` 在后台已在跑时直接返回同一个 client；真正启动时通过注入的取值函数读取当前生效的普通对话工作区（`prefs.plainWorkspace ?? defaultWorkspace`）作为 cwd，与触发启动的会话所属项目无关。并发 `ensure` 共享同一个握手 Promise，后台退出即清空条目并通知 UI。切换普通对话工作区不重启正在运行的后台，下次启动才使用新目录；会话自己的工作区仍由创建参数和恢复日志决定。握手失败（含后台 spawn 后秒退）的 `ensure` 会等 `exited` 拿到退出码与 stderr 尾部，把它们带进抛出的错误——否则横幅只看到「连接已断开」，后台为什么没起来无从排查。
 
-**崩溃与恢复**：后台退出后 UI 显示「后台已退出（退出码 N）」横幅，附 `closed` 消息里 stderr 的末尾几行（可展开全部），操作是「重启后台」与「查看日志」（进入「后台日志」页）。单后台下退出影响的是全部已打开会话：`src/conversations.ts` 把它们都标为 `dead` 并各自保留 `SessionView` 与 `lastSeq`（当前会话保持选中，空闲清理跳过 dead 会话，直接打开 dead 会话也自动走恢复流程）。「重启后台」在同一个新后台里对每个 dead 会话依次 `resumeSession`（跨项目的会话由日志里的工作区元数据承接，Core 按它加载项目层与指令），并以 `afterSeq: lastSeq` 重新订阅，拿到退出期间落盘但没收到的持久事件；恢复失败的会话单独记录错误并保持 dead，不阻塞其余会话的恢复，之后重新打开时重试。
+**崩溃与恢复**：后台退出后 UI 显示「后台已退出（退出码 N）」横幅，附 `closed` 消息里 stderr 的末尾几行（可展开全部），操作是「重启后台」与「查看日志」（进入「后台日志」页）。单后台下退出影响的是全部已打开会话：`src/conversations.ts` 把它们都标为 `dead` 并各自保留 `SessionView` 与 `lastSeq`（当前会话保持选中，空闲清理跳过 dead 会话，直接打开 dead 会话也自动走恢复流程）。「重启后台」在同一个新后台里对每个 dead 会话依次 `resumeSession`（跨项目的会话由日志里的工作区元数据承接，Core 按它加载项目层与指令），并以 `afterSeq: lastSeq` 重新订阅，拿到退出期间落盘但没收到的持久事件；恢复失败的会话单独记录错误并保持 dead，不阻塞其余会话的恢复，之后重新打开时重试；其中错误码为 `invalid_model`（会话记录的模型已不在配置里）的会话同时写进 `openErrors`，横幅写「用的模型已不可用，点开它选一个模型继续」，点开即是 5.1 的「换模型」卡片，选好模型后带 `model` 恢复并按 `lastSeq` 续接。
 
 ## 3. Node 查找与说明页
 
@@ -114,7 +114,9 @@ interface NodeProbe {
 
 ### 5.1 会话打开、创建与关闭
 
-`src/conversations.ts` 管理打开的会话与订阅。**切换立即生效（ADR-0051）**：点击会话先切换选中项，主区显示「正在打开…」占位（`openingId`），再在常驻后台 `resumeSession`、通过 `trackSessionView` 订阅并回放历史；连续快速点击时以 `openToken` 与串行打开队列保证只采用最后一次点击的结果——先发出的请求晚返回时，若该会话已不再选中则按空闲路径关闭、不覆盖界面。打开失败不解释退回上个会话：错误按会话存进 `openErrors`，主区在该会话的占位区显示错误与「重试」，打开失败的会话也不会被发送路径误当草稿新建。遇到 `session_locked` 先显示「正在别处使用」，只有用户选择「强制打开」后才以 `force: true` 重试。
+`src/conversations.ts` 管理打开的会话与订阅。**切换立即生效（ADR-0051）**：点击会话先切换选中项，主区显示「正在打开…」占位（`openingId`），再在常驻后台 `resumeSession`、通过 `trackSessionView` 订阅并回放历史；连续快速点击时以 `openToken` 与串行打开队列保证只采用最后一次点击的结果——先发出的请求晚返回时，若该会话已不再选中则按空闲路径关闭、不覆盖界面。打开失败不解释退回上个会话：错误按会话存进 `openErrors`（消息、工作区、RPC 错误的 `data.code` 与本次携带的替代模型），主区在该会话的占位区按错误码显示，不匹配文案；打开失败的会话也不会被发送路径误当草稿新建。一般错误显示「打开会话失败」、原始信息与「重试」。遇到 `session_locked` 先显示「正在别处使用」，只有用户选择「强制打开」后才以 `force: true` 重试（带着替代模型时一并带上，锁的判定不变）。
+
+**换模型**：错误码为 `invalid_model`（会话记录的模型所属服务商已删除或改名）时，占位区换成 `src/ModelRecoveryCard.tsx` 的卡片，不给「重试」：标题「这个会话用的模型已不可用」，说明原模型已不在当前配置里、选一个模型继续后之后的对话改用它、之前的记录不变；Core 原始信息以次要样式列在下方。模型清单用 `listModels` / `listRecentModels` / `defaultModel`（`listModels` 与 `defaultModel` 带会话工作区 `workspaceRoot`），分组复用状态栏模型菜单的 `modelGroups` + `ChoiceMenu`（最近使用在前，其余按服务商分组，`unavailable` 的模型置灰并悬停说明原因）；默认选中上次尝试的替代模型，其次当前生效的默认模型，再次第一个可用模型。主按钮「用这个模型继续」经 `open(id, workspace, force, model)` 以 `resumeSession(id, { model })` 重新打开，Core 先写 `session.config_changed { model }` 再开放（[sessions.md](../architecture/sessions.md) 第 4 节），以后再打开不会再进这张卡片；次按钮「去配置服务商」进入 设置 › 服务商，配置变化后卡片重新拉清单。清单为空时只有「去配置服务商」。换模型后仍失败（替代模型同样不可用等）留在卡片上并显示新的错误。
 
 「＋ 新会话」、项目行「＋」和空状态目录菜单只进入草稿；第一条普通消息发送时才 `createSession`，不创建空会话。草稿里显式选过的字段（模型、思考档位、权限预设）写进 `createSession({ cwd, workspaceRoot, model, reasoningEffort?, permissionPreset? })`——`cwd`/`workspaceRoot` 始终带上草稿所选目录（ADR-0051 会话级工作区），模型总会带上（默认取最近使用或 `defaultModel`），未触碰的档位/预设省略，由 Core 解析项目级默认。发送采用接受语义：`session.submit` 返回即视为已接受（持久用户事件随后才到），Turn 视图出现新条目或新 Turn 也算接受；`submit` 在接受前拒绝（如附件校验失败）则抛错，输入框保留草稿与全部附件。接受后才设置选中会话并清掉草稿工作区；被拒的刚创建会话走正常 `closeIfIdle` 路径关闭。切换时关闭空闲的旧会话及订阅；运行中、等待权限确认或提问回复的旧会话保留打开，结束后若不再选中则关闭。空闲会话只关闭会话本身（`session.close` 释放锁），常驻后台不随会话释放。主区始终只有当前会话的一条消息流和一组请求卡片；`Conversation` 与 `Composer` 使用带组件前缀的不同 React key，切换会话时分别重建，不能共用同一个会话 id 作为同级 key。
 
