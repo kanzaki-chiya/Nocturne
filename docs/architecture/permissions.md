@@ -207,6 +207,8 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 
 `full-access` 是 `guarded` 的输入别名，配置、命令及旧日志读入时归一化；循环、补全和设置页只显示六个新名称。`smart` 与 `guarded` 的规则序列相同。`bypass` 不降级工作区外 edit、`.git/` edit、高风险命令与 `-EncodedCommand`；保留凭据硬拒绝、授权数据与 `.nocturne/` edit、凭据相关命令和显式 ask/deny。见 [ADR-0036](../decisions/ADR-0036-smart-permissions.md)。
 
+**忙时切换预设**（ADR-0036 修订）：`setPermissionPreset` 在 Turn 进行中、压缩进行中都可调用——立即校验并持久化、重建策略，从**下一次权限求值**起按新预设判定，已执行的操作不受影响。切换时正等待确认的权限请求保持原样，仍由用户决定，不按新预设重新判定，也不会因切到更宽松的预设而自动放行。模型切换仍要求空闲。
+
 `subagent` 一列的分化理由：`explore` 子代理只含只读工具，它能得到的 `allow` 都是父会话本来就会自动放行的操作，唯一代价是 token；`general`/`custom` 可能写文件、跑命令，保留逐项把关（[subagent.md](subagent.md) 第 7 节）。
 
 外部入口 `external:<name>` 在全部交互式预设下默认 `ask`（包括 `guarded`、`smart`、`bypass`）；用户可用 `subagent external:<name>` 显式规则或 Grant 授权，`--yes` 沿既有规则提升。执行期 ACP 主体映射见 [ADR-0049 第 3 节](../decisions/ADR-0049-external-agent-subagent.md#3-权限入口把关加上外部请求进权限层)：用父策略与只读会话 Grant 构造非交互 gate，smart 审查照常，剩余 ask 拒绝，不新增授权。此把关只覆盖外部 agent 主动请求的操作，不是沙箱。

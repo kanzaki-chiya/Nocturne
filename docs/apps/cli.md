@@ -106,7 +106,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 | `/effort` | 列出当前思考档位与该模型的可用档位（ADR-0018）；模型未声明档位时提示如何声明 | `session.reasoningEffortInfo()`（只读） |
 | `/effort <档位>` | 切换会话思考档位：`off` 或当前模型声明的档位；不支持时报错并列出可用档位 | `session.setReasoningEffort(level)` → `session.config_changed` |
 | `/preset` | 显示当前权限预设 | `session.state().config.permissionPreset` |
-| `/preset <name>` | 会话内切换权限预设 | `session.setPermissionPreset(name)` → `session.config_changed` |
+| `/preset <name>` | 会话内切换权限预设；Turn 进行中也可切换，从下一次权限判定起生效（ADR-0036） | `session.setPermissionPreset(name)` → `session.config_changed` |
 | `/shell` | 编号列表：当前生效 shell 与来源层、`auto` 加五种 shell 的探测结果（未安装标注「（未安装）」、`← 当前` 标注生效层声明值）；settings 层被 env/config 覆盖时给出提示 | `session.shellInfo()`、`session.listShells()` |
 | `/shell <种类\|编号>` | 会话内切换 shell（`auto` 清除选择回自动）；写入 `settings.json`，下一次 shell 调用生效；目标未安装时拒绝并列出可选项（`invalid_command`，不写 `settings.json`）；被 `NOCTURNE_SHELL`/`config.json` 覆盖时提示已写入但不生效 | `session.setShell(kind)` → `session.config_changed`（`shell`） |
 | `/context` | 显示若现在构建请求，上下文由什么组成 | `session.describeContext()` → `{ report: ContextReport; overBudget: boolean }`（见下） |
@@ -123,7 +123,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 | `/provider` | 列出服务商与来源，不显示密钥或令牌；附鉴权描述、凭据状态与保存位置。TUI 中打开服务商页。`add` 与 `nctrn setup --cli` 共用向导；`key` / `refresh` / `remove` / `login` / `logout` 为快捷操作。`model <名> <模型>` 逐字段显示 `当前值（来源）`，来源可为 models.dev；回车保留、`-` 清除用户编辑。图片输入和推理接受 `y`/`n`/`-`，推理为否时不询问档位；编辑工具接受 `edit`/`patch`/`apply_patch`/`-`（ADR-0035 §5）；来源为手写配置的字段只读。成功后写入 `userModels`，详见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveModelSettings()` 等 + `runtime.updateProviders` |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
 
-- 未知命令打印提示（不报错退出）。命令在 Turn 进行中给出"会话忙"提示（`setModel` / `compact` 的前置条件是空闲，见 events.md 第 7 节）。
+- 未知命令打印提示（不报错退出）。Turn 进行中 `/preset`（含无参列表与带参切换）照常可用；其余命令在 Turn 进行中给出"会话忙"提示（`setModel` / `compact` 的前置条件是空闲，见 events.md 第 7 节）。
 - `/model` 参数先按模型 id 精确匹配：匹配到已知 id（含 `provider/model` 归一化后）时直选切换，行为与 v0.1 一致；未匹配时按关键词过滤列表（子串、大小写不敏感），不切换。
 - `/model <id>` 在 Provider 内切换：裸 id 与 `provider/model` 写法都按 `--model` 同规则归一化（前缀等于当前 Provider 时剥掉、是另一种 api-type 时报错、其余含斜杠的值按模型 id 原样），再以 `<当前 Provider>/<id>` 调 `session.setModel`。CLI 的 Provider 配置以 `allowUndeclaredModels` 创建（`strictModels=false`），清单外的模型 id 也可切换，能力回退内置目录/保守默认（见 provider-api.md）。
 - `/context` 渲染 `ContextReport`：各 section 的名称、来源、字符数、估算 token，加上合计 `estimatedTokens / budgetTokens` 与 `overBudget`；`history` 段下一级缩进列出 `breakdown` 细分（user/assistant/tool/summary，为 0 的项省略，见 [context.md](../architecture/context.md) 第 4 节"可解释"）；请求会携带图片附件时另有 `images <count> 张 ~<tok> tok` 行（`report.images`，按估算模式计数，见 [context.md](../architecture/context.md) 第 3、5 节）。查询只读，不构建请求也不产生事件。
