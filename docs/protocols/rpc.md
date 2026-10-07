@@ -43,7 +43,7 @@
 | `listReviewerProviders` / `defaultReviewer` / `listReviewerModels` | 智能权限审查模型相关（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)）；均可带 `workspaceRoot` |
 | `reloadConfig` | `{}` → `null`；重新读取配置文件并重建 Provider 注册表，推 `runtime.providersChanged`（在响应之前到达）；**变更方法**，走同一配置队列 |
 
-带 `workspaceRoot` 的运行时级方法（ADR-0051）：`workspaceRoot` 指定按哪个工作区合并项目配置层，缺省为后台启动目录（旧客户端不传不受影响）。同步读方法依赖服务端已加载的工作区层——RPC 服务端在派发前自动对目标工作区执行 `forWorkspace`；写方法自身先加载再校验。该参数解决单后台服务多个项目的场景（桌面端按会话工作区传参），不是跨进程寻址。
+带 `workspaceRoot` 的运行时级方法（ADR-0051）：`workspaceRoot` 指定按哪个工作区合并项目配置层，缺省为后台启动目录（旧客户端不传不受影响）。上述设置、模型、审查器方法及带该参数的 `provider.*` 方法，RPC 服务端先用 Core 的 `platform.resolveReal` 解析真实路径，再对该路径执行 `forWorkspace` 预加载并转交 Runtime 或配置接口；解析失败则保留客户端传入的原字符串，不因该解析失败拒绝请求。客户端不必预先解析短路径、大小写差异或符号链接。同步读方法依赖服务端已加载的工作区层，写方法也使用同一真实路径校验。该参数解决单后台服务多个项目的场景（桌面端按会话工作区传参），不是跨进程寻址。
 
 `SessionOpened`：`{ sessionId, meta, config, warnings, recovery?, lastSeq }`。打开会话**不推事件**——事件要另行 `session.subscribe`。同一连接里已打开的会话再次 `resumeSession` 报 `session_already_open`。`Runtime.updateProviders` 映射为 `runtime.reloadConfig`：服务端在每个 `provider.*` 变更方法之后已经自动重载配置并推 `runtime.providersChanged`（见 3.3），`reloadConfig` 用于**别的进程**改了配置文件之后让本服务端同步（例如桌面端后台运行期间用户用 CLI 改了 providers.json 或 settings.json）。`updateSettings` / `setDefaultModel` / `setModelRole` 只写设置层，不推 `runtime.providersChanged`。服务端不追踪重载的来源：多个服务端进程之间协调时，客户端必须自己识别由 `reloadConfig` 引起的那次通知，不再转发，否则会互相触发成环。
 

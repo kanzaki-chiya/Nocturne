@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   commitProvider,
+  createPlatform,
   describeAccountStorage,
   describeProviderSetup,
   discardDraftLogin,
@@ -222,6 +223,7 @@ class Connection {
   private readonly sessions = new Map<string, OpenSession>();
   private readonly opening = new Set<Promise<unknown>>();
   private readonly abort = new AbortController();
+  private readonly platform = createPlatform();
   private readonly handlers: HandlerTable;
   /**
    * 服务商配置（握手时取自 handle.providerConfig）：`current` 是最近一次
@@ -454,13 +456,15 @@ class Connection {
 
   /**
    * 运行时级方法的 workspaceRoot 参数（ADR-0051）：同步读方法依赖配置的
-   * 工作区层缓存，派发前先把目标工作区加载进当前配置对象；缺省返回
-   * undefined（= 后台启动目录）。无 providerConfig 的连接跳过预加载，
+   * 工作区层缓存，派发前先解析真实路径再加载目标工作区；解析失败保留原串。
+   * 缺省返回 undefined（= 后台启动目录）。无 providerConfig 的连接跳过预加载，
    * 已打开会话的工作区在会话打开时已加载。
    */
   private async workspaceOf(p: Params): Promise<string | undefined> {
-    const root = optString(p, "workspaceRoot");
-    if (root !== undefined && this.providerState !== undefined) {
+    const input = optString(p, "workspaceRoot");
+    if (input === undefined) return undefined;
+    const root = await this.platform.resolveReal(input).catch(() => input);
+    if (this.providerState !== undefined) {
       await this.providerConfig().current.forWorkspace(root);
     }
     return root;
@@ -810,9 +814,9 @@ class Connection {
       "runtime.listRecentModels": () => this.runtime().listRecentModels(),
       "runtime.describeSettings": async (p) =>
         this.runtime().describeSettings({ workspaceRoot: await this.workspaceOf(p) }),
-      "runtime.updateSettings": (p) => {
+      "runtime.updateSettings": async (p) => {
         const reviewerKey = optString(p, "reviewerKey");
-        const workspaceRoot = optString(p, "workspaceRoot");
+        const workspaceRoot = await this.workspaceOf(p);
         return this.runtime().updateSettings(
           reqObject(p, "patch"),
           reviewerKey !== undefined || workspaceRoot !== undefined
@@ -823,12 +827,12 @@ class Connection {
             : undefined,
         );
       },
-      "runtime.setDefaultModel": (p) => {
+      "runtime.setDefaultModel": async (p) => {
         const effort = optString(p, "reasoningEffort");
         if (effort !== undefined && !isReasoningEffort(effort)) {
           throw new InvalidParamsError(`reasoningEffort 不是已知档位：${effort}`);
         }
-        const workspaceRoot = optString(p, "workspaceRoot");
+        const workspaceRoot = await this.workspaceOf(p);
         return this.runtime().setDefaultModel(
           reqString(p, "model"),
           effort ?? null,
@@ -837,12 +841,12 @@ class Connection {
       },
       "runtime.describeModelRoles": async (p) =>
         this.runtime().describeModelRoles({ workspaceRoot: await this.workspaceOf(p) }),
-      "runtime.setModelRole": (p) => {
+      "runtime.setModelRole": async (p) => {
         const role = reqString(p, "role");
         if (!(MODEL_ROLES as readonly string[]).includes(role)) {
           throw new InvalidParamsError(`role 必须是 ${MODEL_ROLES.join("/")} 之一`);
         }
-        const workspaceRoot = optString(p, "workspaceRoot");
+        const workspaceRoot = await this.workspaceOf(p);
         return this.runtime().setModelRole(
           role as ModelRole,
           optString(p, "ref") ?? null,
@@ -955,17 +959,17 @@ class Connection {
         }, false),
       "mcp.probeMcpServer": (p) =>
         this.runtime().probeMcpServer(p as unknown as Parameters<Runtime["probeMcpServer"]>[0]),
-      "runtime.defaultReviewer": (p) => {
+      "runtime.defaultReviewer": async (p) => {
         const baseURL = optString(p, "baseURL");
-        const workspaceRoot = optString(p, "workspaceRoot");
+        const workspaceRoot = await this.workspaceOf(p);
         return this.runtime().defaultReviewer(
           reqString(p, "endpoint") as JevEndpoint,
           baseURL,
           workspaceRoot !== undefined ? { workspaceRoot } : undefined,
         );
       },
-      "runtime.listReviewerModels": (p) => {
-        const workspaceRoot = optString(p, "workspaceRoot");
+      "runtime.listReviewerModels": async (p) => {
+        const workspaceRoot = await this.workspaceOf(p);
         return this.runtime().listReviewerModels(
           reqObject(p, "reviewer") as unknown as JevReviewerConfig,
           this.abort.signal,
@@ -982,7 +986,7 @@ class Connection {
       "provider.describeProviders": async (p) => {
         const { current, workspaceRoot } = this.providerConfig();
         const providers = await current.describeProviders(
-          optString(p, "workspaceRoot") ?? workspaceRoot,
+          (await this.workspaceOf(p)) ?? workspaceRoot,
         );
         const setupWarning = current.providerSetupWarning;
         return {
@@ -1048,18 +1052,18 @@ class Connection {
           return null;
         });
       },
-      "provider.listModelSettings": (p) => {
+      "provider.listModelSettings": async (p) => {
         const { current, workspaceRoot } = this.providerConfig();
         return current.listModelSettings(
           reqString(p, "providerId"),
-          optString(p, "workspaceRoot") ?? workspaceRoot,
+          (await this.workspaceOf(p)) ?? workspaceRoot,
         );
       },
       "provider.saveModelSettings": async (p) => {
         const providerId = reqString(p, "providerId");
         const modelId = reqString(p, "modelId");
         const patch = reqObject(p, "patch");
-        const workspaceRoot = optString(p, "workspaceRoot");
+        const workspaceRoot = await this.workspaceOf(p);
         return await this.mutateAndReload(async (config) => {
           await config.saveModelSettings(
             providerId,

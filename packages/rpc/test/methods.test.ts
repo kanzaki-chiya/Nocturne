@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, unlinkSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fsPromises from "node:fs/promises";
@@ -154,7 +154,7 @@ describe("runtime.* 方法映射", () => {
       ),
     ).toContain(MODEL);
     expect(await h.client.runtime.describeSettings({ workspaceRoot: ws2 })).toEqual(
-      h.runtimes[0]?.describeSettings({ workspaceRoot: ws2 }),
+      h.runtimes[0]?.describeSettings({ workspaceRoot: ws2Real }),
     );
 
     // 恢复的会话沿用日志里记录的工作区
@@ -163,6 +163,36 @@ describe("runtime.* 方法映射", () => {
     await resumed.session.close();
     h.client.close();
     await h.served;
+  });
+
+  it("describeSettings 将工作区别名解析为真实路径并读取项目层", async () => {
+    const workspace = tmpDir("nct-rpc-real-");
+    const alias = path.join(tmpDir("nct-rpc-alias-"), "workspace");
+    symlinkSync(workspace, alias, process.platform === "win32" ? "junction" : "dir");
+    mkdirSync(path.join(workspace, ".nocturne"));
+    writeFileSync(
+      path.join(workspace, ".nocturne", "config.json"),
+      JSON.stringify({ model: "proj/real-model" }),
+    );
+    const h = await connectWithConfig();
+    try {
+      const real = await createPlatform().resolveReal(workspace);
+      await h.config.setWorkspaceTrusted(real, true);
+      const settings = await h.client.runtime.describeSettings({ workspaceRoot: alias });
+      expect(settings.find((item) => item.key === "defaultModel")).toMatchObject({
+        effective: "proj/real-model",
+        source: "project",
+      });
+      // 别名查询预加载的层也必须能被会话元数据中的真实路径同步读取。
+      expect(
+        h.runtimes[0]
+          ?.describeSettings({ workspaceRoot: real })
+          .find((item) => item.key === "defaultModel"),
+      ).toMatchObject({ effective: "proj/real-model", source: "project" });
+    } finally {
+      h.client.close();
+      await h.served;
+    }
   });
 
   it("参数校验与 Runtime 拒绝：reasoningEffort、role、model 形状", async () => {

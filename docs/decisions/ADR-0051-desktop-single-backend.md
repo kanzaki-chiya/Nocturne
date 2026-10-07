@@ -78,3 +78,7 @@ ADR-0046 让每个有打开会话的项目各起一个 `nctrn rpc --stdio` 后�
 - **`list()` 头部读取与标题**：`store.list()` 固定只读前 64 KiB（`FileSystem.readFileSlice`）。第 4 节的「第一条用户消息」是 `firstText` 的来源之一；头部窗口内同时记录 `session.titled` 标题，与整份读取的语义一致——但若标题事件写在 64 KiB 之后，头部读取看不到它，`firstText` 会退回第一条用户消息。该取舍接受：日志头部窗口对正常会话足够大，需要完整扫描时（首行截断、头部没有用户消息）仍会回退整份读取。
 - **「只保留最后一次的结果」的实现**：打开请求经一条串行队列执行（避免对同一后台并发 `resumeSession`/订阅的竞态），由 `openToken` 标记最新选择；在前的请求晚返回时，若该会话已不在选中位，按空闲路径关闭而不覆盖界面。这满足「界面只采用最后一次点击」，不追求取消在途请求。
 - **`workspaceRoot` 键以真实路径为准**：`RuntimeConfig.forWorkspace` 的工作区层按传入字符串缓存；Core 在 `createSession`/恢复时统一写入 `platform.resolveReal` 之后的 `meta.workspaceRoot`，RPC 服务端在派发前也按参数做 `forWorkspace` 预载。客户端应传会话元数据里的 `workspaceRoot`（已解析路径），未解析的短路径会缓存成另一层、查不到项目配置。
+
+### 2026-10-08 RPC 服务端统一解析工作区真实路径
+
+- 第 3 节的运行时级设置、模型、审查器查询与写入，以及带 `workspaceRoot` 的 `provider.*` 方法，统一由 RPC 服务端先经 Core 的 `platform.resolveReal` 解析真实路径，再预加载工作区配置层并转交 Runtime 或配置接口；解析失败时保留原字符串。侧栏目录可能含短路径、大小写差异或符号链接，直接拿原字符串做缓存键会产生重复配置层，因此不再要求客户端必须传已解析路径；2026-10-07 修订中的该客户端要求由本条取代。
