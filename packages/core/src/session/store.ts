@@ -42,8 +42,10 @@ interface UnsettledFix {
 /**
  * 会话摘要的首句摘要（SessionSummary.firstText）：首条 message.user
  * 的首行文本，优先使用生成的标题。只解码用户消息与标题事件。
+ * `sawUser` 标记范围内是否出现过 message.user——list() 用它决定要不要读整份日志
+ * （ADR-0051：开头读不到第一条用户消息才回退全文）。
  */
-function firstUserTextInLog(logText: string): string | undefined {
+function firstUserTextInLog(logText: string): { firstText: string | undefined; sawUser: boolean } {
   let firstText: string | undefined;
   let title: string | undefined;
   let sawUser = false;
@@ -60,7 +62,29 @@ function firstUserTextInLog(logText: string): string | undefined {
       continue;
     }
   }
-  return title ?? firstText;
+  return { firstText: title ?? firstText, sawUser };
+}
+
+/** list() 对每份日志先读的字节数：够装首行与绝大多数会话的首条用户消息 */
+const LIST_HEAD_BYTES = 64 * 1024;
+
+/**
+ * 读日志头部（ADR-0051）：最多 LIST_HEAD_BYTES；文件更短即全文。
+ * 截断时丢弃最后一个不完整行（可能切在多字节字符中间），不作为坏记录处理；
+ * 返回完整行文本与是否被截断。
+ */
+async function readLogHead(
+  fs: Platform["fs"],
+  path: string,
+  size: number,
+): Promise<{ text: string; truncated: boolean }> {
+  const head = await fs.readFileSlice(path, LIST_HEAD_BYTES);
+  if (head.length >= size) {
+    return { text: new TextDecoder().decode(head), truncated: false };
+  }
+  let end = head.length;
+  while (end > 0 && head[end - 1] !== 0x0a) end -= 1;
+  return { text: new TextDecoder().decode(head.subarray(0, end)), truncated: true };
 }
 
 export interface SessionStoreDeps {
@@ -385,9 +409,19 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
       for (const entry of entries) {
         if (entry.type !== "file" || !entry.name.endsWith(".jsonl")) continue;
         try {
-          const text = await fs.readTextFile(entry.path);
-          const firstLine = text.split("\n", 1)[0] ?? "";
-          const event = decodeDurableEvent(firstLine);
+          // 只读日志开头（ADR-0051）：取首行与第一条用户消息就停；
+          // 首行被截断（超长首行）或开头里找不到第一条用户消息时，再读整份。
+          const stat = await fs.stat(entry.path);
+          const head = await readLogHead(fs, entry.path, stat.size);
+          let text = head.text;
+          let event: DurableEvent;
+          try {
+            event = decodeDurableEvent(text.split("\n", 1)[0] ?? "");
+          } catch (e) {
+            if (!head.truncated) throw e;
+            text = await fs.readTextFile(entry.path);
+            event = decodeDurableEvent(text.split("\n", 1)[0] ?? "");
+          }
           if (event.type !== "session.created") continue;
           if (event.payload.parent !== undefined && filter.includeSubagents !== true) {
             continue;
@@ -395,9 +429,13 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
           if (filter.cwd !== undefined && !paths.equals(event.payload.cwd, filter.cwd)) {
             continue;
           }
-          const stat = await fs.stat(entry.path);
           const id = entry.name.slice(0, -".jsonl".length);
-          const firstText = firstUserTextInLog(text);
+          let scan = firstUserTextInLog(text);
+          if (!scan.sawUser && head.truncated && text === head.text) {
+            text = await fs.readTextFile(entry.path);
+            scan = firstUserTextInLog(text);
+          }
+          const firstText = scan.firstText;
           summaries.push({
             id: event.sessionId,
             createdAt: event.time,

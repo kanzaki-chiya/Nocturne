@@ -25,6 +25,11 @@ export interface FileStat {
 export interface FileSystem {
   readFile(path: string): Promise<Uint8Array>;
   readTextFile(path: string): Promise<string>;
+  /**
+   * 只读文件开头至多 maxBytes 字节（ADR-0051：会话列表只取日志头部）。
+   * 文件更短则返回全部；截断可能落在多字节字符或一行的中间，由调用方按业务规则处理。
+   */
+  readFileSlice(path: string, maxBytes: number): Promise<Uint8Array>;
   /** 覆盖写入；mode 仅 POSIX 生效且只在新建文件时应用（如凭据索引 0600） */
   writeFile(path: string, data: string | Uint8Array, options?: { mode?: number }): Promise<void>;
   /** 排他创建（文件已存在时报 EEXIST）：会话锁等存在性锁的实现原语 */
@@ -78,6 +83,16 @@ export function createNodeFileSystem(): FileSystem {
   return {
     readFile: (p) => fs.readFile(p),
     readTextFile: (p) => fs.readFile(p, "utf8"),
+    async readFileSlice(p, maxBytes) {
+      const handle = await fs.open(p, "r");
+      try {
+        const buffer = Buffer.alloc(maxBytes);
+        const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+        return new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
+      } finally {
+        await handle.close();
+      }
+    },
     writeFile: (p, data, options) => fs.writeFile(p, data, { mode: options?.mode }),
     createExclusive: (p, data) => fs.writeFile(p, data, { flag: "wx" }),
     appendFile: (p, data, options) =>
