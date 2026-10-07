@@ -163,7 +163,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 
 ## 8. 与 Core 的接线
 
-Runtime 管理方法为 `describeMcpServers`、`saveMcpServer`、`deleteMcpServer`、`setMcpServerEnabled`、`probeMcpServer`；只修改 `app` 来源。保存先更新凭据再原子写配置，失败回滚凭据，成功自动重载并 reconcile。创建时任何来源同 id（不区分大小写）均报字段错误；手写来源只读。RPC 同名映射在 `mcp.*`，桌面端变更成功后传播至其他后台。
+Runtime 管理方法为 `describeMcpServers`、`saveMcpServer`、`deleteMcpServer`、`setMcpServerEnabled`、`probeMcpServer`；只修改 `app` 来源。保存先更新凭据再原子写配置，失败回滚凭据，成功自动重载并 reconcile。创建时任何来源同 id（不区分大小写）均报字段错误；手写来源只读。RPC 同名映射在 `mcp.*`；桌面端为单后台（ADR-0051），服务端重载即覆盖全部已打开会话，无跨后台传播。
 
 ```text
 apps/cli:  createPlatform() → createMcpConnector(platform)（@nocturne/mcp）

@@ -2,12 +2,11 @@
 
 > 状态：v0.5 骨架与连接、对话、设置区（服务商、常规、模型、外观）已实现（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 9 节第 1–3 步） | 前置阅读：[protocols/rpc.md](../protocols/rpc.md) | 代码位置：`apps/desktop/`
 
-`apps/desktop` 是 Nocturne 的桌面端：一个 Tauri 进程内，React 前端经 `@nocturne/rpc/client` 与若干 `nctrn rpc --stdio` 后台进程通信，Rust 外壳只负责进程管理与按行转发。所有会话语义（握手、方法调用、事件）都在前端处理，外壳不解析报文。
+`apps/desktop` 是 Nocturne 的桌面端：一个 Tauri 进程内，React 前端经 `@nocturne/rpc/client` 与一个常驻 `nctrn rpc --stdio` 后台进程通信，Rust 外壳只负责进程管理与按行转发。所有会话语义（握手、方法调用、事件）都在前端处理，外壳不解析报文。
 
 ## 1. 进程结构与后台策略
 
-- **一个项目一个后台**：`backend_open` 以项目目录为 cwd 启动 `node <脚本> rpc --stdio`，同一项目的会话共用这个后台。会话列表是全局的（`<NOCTURNE_HOME>/sessions`），前端用任意一个运行中的后台 `runtime.listSessions()` 取全部会话。
-- **常驻后台**：应用启动即以普通对话工作区（见第 3 节）为 cwd 开一个后台，用它列出全部会话，窗口打开期间常驻；项目的后台仍按原规则在打开该项目的会话时才启动（第 2 步实现）。因此第一次启动、没有任何项目时，左栏也能直接列出全部会话。
+- **单后台（ADR-0051）**：整个窗口只有一个 `nctrn rpc --stdio` 后台，`backend_open` 以普通对话工作区（见第 3 节）为 cwd 启动 `node <脚本> rpc --stdio`，窗口打开期间常驻；所有项目和普通对话的会话都在这个后台里创建与恢复，不再按项目起停后台。后台的启动目录只是它的缺省工作区：每个会话的 `cwd`/`workspaceRoot` 在 `runtime.createSession` 时传入、并写入 `session.created` 元数据，恢复时以日志记录的目录为准（[sessions.md](../architecture/sessions.md)）。会话列表是全局的（`<NOCTURNE_HOME>/sessions`），前端用这个常驻后台 `runtime.listSessions()` 取全部会话。
 - **后台生命周期**：Rust 外壳在 Tauri 页面开始加载钩子中同步推进后台代际，F5 或 Vite 整页重载后并行关闭旧页面全部后台（关 stdin → 等自行退出 → 5 秒强杀），不依赖前端异步 `beforeunload`；在途 `backend_open` 在启动前校验分发时捕获的代际，旧页面请求被取消，旧清理只使用旧代快照，不影响新页面后台。窗口关闭时对所有后台（含正在重载清理的后台）执行相同关闭流程，全部结束后退出应用；Windows 上后台在 spawn 后被放入全局 Job Object（`KILL_ON_JOB_CLOSE`），外壳被强杀时后台一起结束。Job 创建或加入失败不致命，往该后台的 stderr 缓冲记一行说明。纯 React Fast Refresh 不重新加载文档，由前端组件生命周期释放连接。
 - **日志边界**：stdin/stdout 的内容在任何地方都不记录、不打印、不写盘（报文里可能含密钥明文）；stderr 按行截断（64 KiB/行）保留最近 500 行在内存中。缓冲只在两处离开外壳：后台退出时随 `closed` 消息交给前端（崩溃横幅显示末尾几行），以及前端经 `backend_stderr` 命令按需拉取（「后台日志」页，只在打开页面或点「刷新」时读，不轮询）。后台退出即从注册表移除，此后 `backend_stderr` 返回 `unknown_backend`——缓冲不随进程保留，退出后唯一的 stderr 副本在 `closed` 消息里。
 
@@ -40,9 +39,9 @@ type BackendMessage =
 
 `code` 是退出码，被强杀或拿不到时为 `null`；`stderr` 是该后台内存缓冲的全部内容（≤500 行）。监督线程（`try_wait` 约 50ms 轮询）在进程退出后等待 stdout 读线程排空（最多 2 秒，防孙进程继承管道卡住），保证**所有 line 消息都在 closed 之前发出**；closed 每个后台只发一次。stdout 切行上限 64 MiB/行，超过则记一行 stderr 并强杀后台（宁可显式失败也不悄悄丢报文让请求挂死）。
 
-前端 `TauriLineTransport`（`src/transport.ts`）把这套命令实现成 `LineTransport`：`send` 经 promise 链串行保证顺序（写失败吞掉，断开会经 closed 体现）；注册 `onLine` 前到达的行被缓冲并按序交付；`closed` 在已交付完缓冲行后触发 `onClose`（只一次）；`exited` 暴露退出结果；`backend_open` 失败包装成带 `code` 的 `DesktopError`。`BackendPool`（`src/backends.ts`）按 `projectKey` 保持一个后台并做握手，退出时移出池并通知 UI。握手失败（含后台 spawn 后秒退）的 `ensure` 会等 `exited` 拿到退出码与 stderr 尾部，把它们带进抛出的错误——否则横幅只看到「连接已断开」，后台为什么没起来无从排查。
+前端 `TauriLineTransport`（`src/transport.ts`）把这套命令实现成 `LineTransport`：`send` 经 promise 链串行保证顺序（写失败吞掉，断开会经 closed 体现）；注册 `onLine` 前到达的行被缓冲并按序交付；`closed` 在已交付完缓冲行后触发 `onClose`（只一次）；`exited` 暴露退出结果；`backend_open` 失败包装成带 `code` 的 `DesktopError`。`BackendPool`（`src/backends.ts`）管理唯一后台的连接：`ensure(workspace)` 在后台已在跑时直接返回同一个 client（传入的 workspace 只用于首次启动），并发 `ensure` 共享同一个握手 Promise，后台退出即清空条目并通知 UI。握手失败（含后台 spawn 后秒退）的 `ensure` 会等 `exited` 拿到退出码与 stderr 尾部，把它们带进抛出的错误——否则横幅只看到「连接已断开」，后台为什么没起来无从排查。
 
-**崩溃与恢复**：后台退出后 UI 显示「后台已退出（退出码 N）」横幅，附 `closed` 消息里 stderr 的末尾几行（可展开全部），操作是「重启后台」与「查看日志」（进入「后台日志」页）。退出时 `src/conversations.ts` 把该后台上的已打开会话标为 `dead` 并各自保留 `SessionView` 与 `lastSeq`：当前会话保持选中，空闲清理跳过 dead 会话，打开 dead 会话自动走恢复流程。「重启后台」只重开退出的那一个后台（其余不动），随后对每个 dead 会话依次 `resumeSession` 并以 `afterSeq: lastSeq` 重新订阅，拿到退出期间落盘但没收到的持久事件；恢复失败的会话单独记录错误并保持 dead，不阻塞其余会话的恢复，之后重新打开时重试。
+**崩溃与恢复**：后台退出后 UI 显示「后台已退出（退出码 N）」横幅，附 `closed` 消息里 stderr 的末尾几行（可展开全部），操作是「重启后台」与「查看日志」（进入「后台日志」页）。单后台下退出影响的是全部已打开会话：`src/conversations.ts` 把它们都标为 `dead` 并各自保留 `SessionView` 与 `lastSeq`（当前会话保持选中，空闲清理跳过 dead 会话，直接打开 dead 会话也自动走恢复流程）。「重启后台」在同一个新后台里对每个 dead 会话依次 `resumeSession`（跨项目的会话由日志里的工作区元数据承接，Core 按它加载项目层与指令），并以 `afterSeq: lastSeq` 重新订阅，拿到退出期间落盘但没收到的持久事件；恢复失败的会话单独记录错误并保持 dead，不阻塞其余会话的恢复，之后重新打开时重试。
 
 ## 3. Node 查找与说明页
 
@@ -109,15 +108,15 @@ interface NodeProbe {
 
 界面状态存 localStorage 键 `nocturne.desktop.prefs.v1`：`{ pinned: string[]; projects: string[]; hidden: string[]; projectSort: "activity" | "name"; lastEffort?: string; theme?: "light" | "dark"; plainWorkspace?: string; plainWorkspaces: string[] }`（会话 id、原始路径、项目路径；`projectSort` 缺省 `"activity"`；`lastEffort` 是上次选用的思考档位，作为新会话草稿的默认档位，非字符串字段被忽略；`theme` 缺省即跟随系统；`plainWorkspace` 是自选的普通对话工作区，缺省用外壳的默认路径；`plainWorkspaces` 缺省 `[]`，记住用过的工作区路径；各字段逐个校验，类型不对的回退默认，缺新字段的旧数据照常读取；旧数据里的 `lastProject` 字段忽略）。读写失败均不影响本次运行，写失败时 `persistent` 标为 false（`src/prefs.ts`）。
 
-启动流程：`node_probe` → 不 ok 显示说明页；ok 后 `plain_workspace` 取默认普通对话工作区（`prefs.plainWorkspace` 优先）→ `ensure` 开常驻后台（握手）→ `listSessions()`（不传 cwd）。`plain_workspace` 或 `ensure` 失败显示真实错误与「重试」；后台退出则显示崩溃横幅，「重启后台」只重开那个后台并恢复其会话（见第 2 节崩溃与恢复）。「打开项目…」（「项目」标题行的「＋」）走系统文件夹对话框 → 加入手动项目、取消隐藏、刷新列表，不启动后台。列表在连上后、打开项目后、窗口重新获得焦点时（节流 ≥ 2 秒）刷新。
+启动流程：`node_probe` → 不 ok 显示说明页；ok 后 `plain_workspace` 取默认普通对话工作区（`prefs.plainWorkspace` 优先）→ `ensure` 开常驻后台（握手）→ `listSessions()`。`plain_workspace` 或 `ensure` 失败显示真实错误与「重试」；后台退出则显示崩溃横幅，「重启后台」重开后台并恢复全部已打开会话（见第 2 节崩溃与恢复）。「打开项目…」（「项目」标题行的「＋」）走系统文件夹对话框 → 加入手动项目、取消隐藏、刷新列表，不启动后台。列表在连上后、打开项目后、窗口重新获得焦点时（节流 ≥ 2 秒）刷新。
 
 未选中会话时主区显示 hero 空状态（`src/App.tsx` `DraftPane`）：月亮标记 + 标题 + 同一个输入框（宽度上限 680）。普通对话标题为「有什么可以帮你？」；项目草稿为「要在 <项目名> 里做什么？」——项目名是可点按钮（虚线下划线），点击打开与输入框托盘目录 chip 同一个目录菜单。目录菜单内容：「普通对话」（副标题「不属于任何项目」）/ 分隔线 /「项目」组逐项目（名称 + 小字路径）/ 分隔线 /「打开其他文件夹…」。
 
 ### 5.1 会话打开、创建与关闭
 
-`src/conversations.ts` 管理打开的会话与订阅。点击会话先 `ensure` 所属项目后台，再 `resumeSession`、通过 `trackSessionView` 订阅并回放历史；普通对话共用常驻后台。遇到 `session_locked` 先显示「正在别处使用」，只有用户选择「强制打开」后才以 `force: true` 重试。
+`src/conversations.ts` 管理打开的会话与订阅。**切换立即生效（ADR-0051）**：点击会话先切换选中项，主区显示「正在打开…」占位（`openingId`），再在常驻后台 `resumeSession`、通过 `trackSessionView` 订阅并回放历史；连续快速点击时以 `openToken` 与串行打开队列保证只采用最后一次点击的结果——先发出的请求晚返回时，若该会话已不再选中则按空闲路径关闭、不覆盖界面。打开失败不解释退回上个会话：错误按会话存进 `openErrors`，主区在该会话的占位区显示错误与「重试」，打开失败的会话也不会被发送路径误当草稿新建。遇到 `session_locked` 先显示「正在别处使用」，只有用户选择「强制打开」后才以 `force: true` 重试。
 
-「＋ 新会话」、项目行「＋」和空状态目录菜单只进入草稿；第一条普通消息发送时才 `createSession`，不创建空会话。草稿里显式选过的字段（模型、思考档位、权限预设）写进 `createSession({ model, reasoningEffort?, permissionPreset? })`——模型总会带上（默认取最近使用或 `defaultModel`），未触碰的档位/预设省略，由 Core 解析项目级默认。发送采用接受语义：`session.submit` 返回即视为已接受（持久用户事件随后才到），Turn 视图出现新条目或新 Turn 也算接受；`submit` 在接受前拒绝（如附件校验失败）则抛错，输入框保留草稿与全部附件。接受后才设置选中会话并清掉草稿工作区；被拒的刚创建会话走正常 `closeIfIdle` 路径关闭。切换时关闭空闲的旧会话及订阅；运行中、等待权限确认或提问回复的旧会话保留打开，结束后若不再选中则关闭。项目没有打开会话时释放其后台；普通对话常驻后台不释放。主区始终只有当前会话的一条消息流和一组请求卡片；`Conversation` 与 `Composer` 使用带组件前缀的不同 React key，切换会话时分别重建，不能共用同一个会话 id 作为同级 key。
+「＋ 新会话」、项目行「＋」和空状态目录菜单只进入草稿；第一条普通消息发送时才 `createSession`，不创建空会话。草稿里显式选过的字段（模型、思考档位、权限预设）写进 `createSession({ cwd, workspaceRoot, model, reasoningEffort?, permissionPreset? })`——`cwd`/`workspaceRoot` 始终带上草稿所选目录（ADR-0051 会话级工作区），模型总会带上（默认取最近使用或 `defaultModel`），未触碰的档位/预设省略，由 Core 解析项目级默认。发送采用接受语义：`session.submit` 返回即视为已接受（持久用户事件随后才到），Turn 视图出现新条目或新 Turn 也算接受；`submit` 在接受前拒绝（如附件校验失败）则抛错，输入框保留草稿与全部附件。接受后才设置选中会话并清掉草稿工作区；被拒的刚创建会话走正常 `closeIfIdle` 路径关闭。切换时关闭空闲的旧会话及订阅；运行中、等待权限确认或提问回复的旧会话保留打开，结束后若不再选中则关闭。空闲会话只关闭会话本身（`session.close` 释放锁），常驻后台不随会话释放。主区始终只有当前会话的一条消息流和一组请求卡片；`Conversation` 与 `Composer` 使用带组件前缀的不同 React key，切换会话时分别重建，不能共用同一个会话 id 作为同级 key。
 
 ### 5.2 消息、输入与交互请求
 
@@ -185,11 +184,11 @@ interface NodeProbe {
 
 ### 5.5 设置区
 
-左栏底部「设置」进入设置区：左栏整列换成设置导航（「← 返回 Esc」、「设置」标题、常规 / 模型 / 服务商 / MCP / 技能 / 外部 agent / 外观 / 后台日志八项、底部一行说明），会话树不显示；主区换成对应页面。空状态与状态栏的模型菜单底部「管理服务商…」直接进入「服务商」。设置区以 `.settings-over` 盖在主区之上，原来的会话或空状态（`.mainpane`）保持挂载并设为 `inert`，所以「← 返回」或 Esc 回到的是同一个会话，滚动位置不变；在导航项之间切换不算返回。Esc 只在没有被下拉、对话框先处理时才返回（下拉的 Esc 会 `preventDefault` 并停止冒泡；设置区里有打开的对话框时不返回）。被盖住的会话的窗口级快捷键（权限卡片的 Esc 拒绝与数字键作答、输入框的 Esc 中断）在其所在区域 `inert` 时一律不响应。服务商页与常规 / 模型 / 外观页都走常驻的普通对话后台读写全局配置。
+左栏底部「设置」进入设置区：左栏整列换成设置导航（「← 返回 Esc」、「设置」标题、常规 / 模型 / 服务商 / MCP / 技能 / 外部 agent / 外观 / 后台日志八项、底部一行说明），会话树不显示；主区换成对应页面。空状态与状态栏的模型菜单底部「管理服务商…」直接进入「服务商」。设置区以 `.settings-over` 盖在主区之上，原来的会话或空状态（`.mainpane`）保持挂载并设为 `inert`，所以「← 返回」或 Esc 回到的是同一个会话，滚动位置不变；在导航项之间切换不算返回。Esc 只在没有被下拉、对话框先处理时才返回（下拉的 Esc 会 `preventDefault` 并停止冒泡；设置区里有打开的对话框时不返回）。被盖住的会话的窗口级快捷键（权限卡片的 Esc 拒绝与数字键作答、输入框的 Esc 中断）在其所在区域 `inert` 时一律不响应。服务商页与常规 / 模型 / 外观页都走常驻后台读写全局配置（不带 `workspaceRoot`，即后台启动目录的项目层参与合并）；会话控件（状态栏 pill、会话内查询）则带该会话的工作区——`listModels` / `defaultModel` / `describeSettings` / `describeSkills` / `describeExternalAgents` 等运行时查询都接受可选 `workspaceRoot`（rpc.md 3.1）。
 
 设置布局按容器宽度调整，不使用窗口媒体查询：整个设置区宽度 <1000px 时导航从 295px 收到 200px，会话左栏不变；设置主内容 <900px 时服务商列表从 252px 收到 200px，名称与右侧模型数各自单行省略。详情标题与不收缩的状态标签一行，操作按钮另起一行横排并允许换行。详情内容 <520px 时信息卡改两列，<320px 时改一列，值允许折行。模型表名称列至少 12ch，<520px 先隐藏最大输出，<400px 再隐藏上下文；名称和能力始终保留，长模型名折行，无横向滚动。页尾说明为「R 推理 · I 图片输入。默认模型在「模型」页修改。」，其中「模型」可进入模型页。
 
-**多后台同步**：每个项目一个后台，服务端只在自己的变更后重载。桌面端（`src/backends.ts` 的 `BackendPool`）做协调：某个后台推来 `runtime.providersChanged`（它自己的服务商变更），或设置页写设置成功（`updateSettings` / `setDefaultModel` / 模型角色），就对**其他**已连接的后台各调一次 `runtime.reloadConfig`。为了不形成循环，`BackendPool` 为每个后台记一个「由我发起、通知还没到」的计数：发起 `reloadConfig` 前加一，该后台的下一次 `providersChanged`（服务端保证先于响应到达）消费一次计数且不再转发；`reloadConfig` 失败时把计数还回去，后台退出或释放时清掉。
+**配置同步（ADR-0051 后单后台）**：只有一个后台，不再存在跨后台 `reloadConfig` 协调与「由我发起」计数。`provider.*` / `skills.*` / `agents.*` 的写方法由服务端串行执行「变更 → 重载 → 推 `runtime.providersChanged`」，页面、状态栏模型菜单与空状态模型 chip 收到通知后各自重新查询；`updateSettings` / `setDefaultModel` / `setModelRole` 只写设置层、不推通知，页面用返回值直接刷新。
 
 #### 服务商
 
@@ -201,13 +200,13 @@ interface NodeProbe {
 - **模型设置对话框**（`src/ModelSettingsDialog.tsx`）：显示名、上下文、最大输出、图片输入、推理、思考档位、协议、编辑工具八项，每项写来源（上游、推导、默认、已编辑等）；「全部恢复跟随」清掉全部用户值。改动只在「保存」时经 `saveModelSettings` 写入 providers.json 的 userModels，「取消」不写。推理选「否」时思考档位置灰。
 - **添加服务商**：选「可添加」里的预设进入表单，字段由 `describeProviderSetup` 驱动（固定值只读显示；凭据方式按 apiKey / 环境变量 / 账号登录 / 外部文件，OpenRouter 可选浏览器登录或粘贴密钥）。「获取模型」调 `prepareProvider` 拿到草稿，之后「保存」才可点（`commitProvider`）；获取前保存置灰，获取后改任何字段都作废结果、释放草稿并重新置灰。获取期间可「取消获取」：前端立即回到可编辑，输入保留，晚到的响应若带回草稿立即 `discardProvider` 释放。结果区显示「已获取 N 个模型」与 notices，并按 `PrepareProviderResult.models` 预览：折叠时列前 4 个模型名和「等 N 个」，「展开全部 ▾」后是限高、内部滚动的表格（名称、能力、上下文、最大输出），「收起 ▴」还原，每次重新获取都回到折叠。失败写「获取失败」与原因；`-32005` 带 `data.field` 时错误只显示在对应字段下，结果区不再重复「获取失败」——与已有服务商重名也以 `field: "name"` 报告（[provider-setup.md](../architecture/provider-setup.md) 第 2 节「名称唯一性」）。`needsManualModel` 时出现「模型 ID」输入框。「取消」、切走或离开页面都会 `discardProvider` 释放草稿，进行中的草稿登录经 `login.cancel` 取消（RPC 层把 Core 的 `discardDraftLogin` 映射为 `login.cancel`）。
 - **登录**：`login.start` / `login.startDraft` 后用外链白名单打开系统浏览器；等待卡片（`src/LoginWaitCard.tsx`）有复制链接、重新打开浏览器、取消、倒计时（以 `LoginStarted.expiresAt` 为准，仅展示），可展开「粘贴回调地址 / 粘贴授权码」走 `login.submitManual`。`login.completed` 带 `unstoredKey` 时密钥只在卡片里显示这一次，前端不存储、不打日志。
-- **同步**：服务商变更后后台推 `runtime.providersChanged`，页面、状态栏模型菜单与空状态模型 chip 随之刷新，其他后台经上面的协调重载。
+- **同步**：服务商变更后后台推 `runtime.providersChanged`，页面、状态栏模型菜单与空状态模型 chip 随之刷新（单后台，无跨后台传播）。
 
 #### 技能
 
 「MCP」之后的「技能」页（`src/SkillsPage.tsx`）复用 MCP 列表与详情样式，按用户和当前设置工作区项目分组。每次挂载重新扫描；标题下展示模型目录 token 预算、完整/名字/停用数量与未知模型兜底依据。详情包含只读覆盖开关、忽略字段原因表、覆盖/缺说明/命令冲突横幅、完整真实路径及其他入口、四格信息、说明截断标记、字段 chips、正文前 40 行和支持文件，解析失败汇总可展开文件路径与行号。
 
-启停保存到 settings.json，提示已打开会话在本轮结束后更新，空闲会话立即生效。技能通知与其他后台同步走已有 providersChanged/propagateConfig；正在对话的输入框取 session.describeSkills 快照，新会话草稿取运行时查询。技能正文标签可展开日志快照，skill 工具使用普通工具行。
+启停保存到 settings.json，提示已打开会话在本轮结束后更新，空闲会话立即生效。技能变更经服务端推送的 `runtime.providersChanged` 通知刷新（单后台）；正在对话的输入框取 session.describeSkills 快照，新会话草稿取运行时查询（带草稿工作区）。技能正文标签可展开日志快照，skill 工具使用普通工具行。
 
 外壳 `open_skill_directory({ path, create })` 打开绝对目录，create 只允许 `<NOCTURNE_HOME>/skills`，使用既有 opener；目录错误返回中文说明。空态提供创建并打开该目录及 agentskills.io 规范链接。页眉的「导入技能…」打开导入对话框（U-08）：目标二选一（用户技能默认，当前工作区只在选中工作区时可选）→ 系统文件夹对话框选来源 → `skills.importSkills` 预检列出候选（大小、符号链接跳过数、缺说明、目标同名冲突三选一改名/覆盖/跳过，他层同名只提示不拦截）→ 执行 → 结果页逐项展示并给成功项「停用」按钮。技能行为主文档见 [skills.md](../architecture/skills.md)。
 
@@ -217,7 +216,7 @@ interface NodeProbe {
 
 添加和编辑可切换 STDIO / 流式 HTTP，保留名称和超时；编辑名称以灰底淡色文字显示锁定态。环境变量与请求头共用值表，可选明文、环境变量引用或凭据库，下拉每项带一行说明；密钥形名称默认 stored，已保存值只显示状态并提供替换、清除，后端不可用时禁用 stored 并在说明行写原因。测试连接使用未保存草稿，失败也可保存，字段错误显示于输入框下方。导入在前端解析三种 JSON 形状，推断 HTTP，跳过 SSE 和混写条目，提示 OAuth 不支持，并逐台进入确认表单。
 
-保存、删除和开关成功后显式调用 `BackendPool.propagateConfig`；MCP 变更自身不发 providersChanged，其他后台重载仍由现有 echo 计数协调。toast 说明空闲会话立即生效、运行中的会话在当前 Turn 完成后生效。接口见 [rpc.md](../protocols/rpc.md) 第 3.5 节，生命周期见 [mcp.md](../architecture/mcp.md)。
+保存、删除和开关在服务端走配置写队列，写完后重载配置并更新已打开会话；MCP 变更自身不发 providersChanged，页面以响应回执刷新本页数据。toast 说明空闲会话立即生效、运行中的会话在当前 Turn 完成后生效。接口见 [rpc.md](../protocols/rpc.md) 第 3.5 节，生命周期见 [mcp.md](../architecture/mcp.md)。
 
 #### 外部 agent
 
@@ -227,7 +226,7 @@ interface NodeProbe {
 
 测试既支持已保存名称，也支持未保存草稿；只做 PATH 解析、初始化和临时 ACP 新建会话，从不发送 prompt、不消耗对方额度。探测返回的登录方式不是未登录判据；登录在外部工具自己的界面完成。成功后把 agent 返回的每项 config option 显示为可搜索下拉（高度上限 420px），700 项值同样可按名称或 id 搜索、用键盘选择；每个选项下方显示对方给的说明，没有说明时显示值本身，用来区分同名选项（如多个服务商的「Grok 4.7」），对方分组时以分组名作标签；配置项 id 与名称只差大小写时不重复显示 id。未手动指定的配置沿用 agent 默认值并显示当前默认值，已指定时显示所选值，也可恢复默认或用 JSON 填写不透明 id/value。测试结果保存在本次应用运行的内存里（切换设置页不丢失，不落盘）；保存表单时，若命令、参数和环境变量与测试时一致则保留结果（探测不发送 configOptions，改配置项不影响结果），否则清除。
 
-费用提示固定写明「费用与额度计在该 agent 自己的账号上」。保存、删除和启停的 RPC 在响应前推一次 `runtime.providersChanged`，桌面端只通过现有 BackendPool 通知传播让其他后台重载，不再显式调用 `propagateConfig`。会话输入框取 `session.describeExternalAgents` 的 Turn 快照，新会话草稿取 Runtime 当前列表；空闲会话立即更新，运行中的会话在本轮结束后更新。执行期权限、审计和外部文件不参与检查点回退的边界见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)。
+费用提示固定写明「费用与额度计在该 agent 自己的账号上」。保存、删除和启停的 RPC 在响应前推一次 `runtime.providersChanged`，页面据此重新查询（单后台，无跨后台传播）。会话输入框取 `session.describeExternalAgents` 的 Turn 快照，新会话草稿取 Runtime 当前列表（带草稿工作区）；空闲会话立即更新，运行中的会话在本轮结束后更新。执行期权限、审计和外部文件不参与检查点回退的边界见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)。
 
 ### 5.6 常规、模型与外观页
 
@@ -248,9 +247,9 @@ interface NodeProbe {
 
 模型页的已选值先显示模型名与档位（如 `deepseek-v4.1-flash · high`），服务商放次行并在 title 中保留完整值；模型名可折行，服务商单行省略。设置主内容 <700px 时模型行的值移到第二行，占满可用宽度，来源仍保留在标题右侧。
 
-保存失败时值回到原样，该行描红并写「保存失败：原因，已恢复原值」；保存的值被更高层覆盖时来源写「已被覆盖 · 层名」并标黄。写设置成功后通知 `BackendPool` 让其他后台重载（5.5）。
+保存失败时值回到原样，该行描红并写「保存失败：原因，已恢复原值」；保存的值被更高层覆盖时来源写「已被覆盖 · 层名」并标黄。设置写方法返回更新后的 `SettingItem[]`，页面以返回值刷新（5.5 上文的配置同步）。
 
-主题写 `document.documentElement.dataset.theme`，跟随系统时删掉该属性回到 `prefers-color-scheme`。更改普通对话工作区时先在新位置开常驻后台，成功后写 `prefs.plainWorkspace` 并把新旧路径记进 `prefs.plainWorkspaces`，旧位置的对话仍归「对话」区；旧位置没有打开的会话时释放其后台。
+主题写 `document.documentElement.dataset.theme`，跟随系统时删掉该属性回到 `prefers-color-scheme`。更改普通对话工作区只写 `prefs.plainWorkspace` 并把新旧路径记进 `prefs.plainWorkspaces`，旧位置的对话仍归「对话」区；单后台不随工作区切换重启（ADR-0051）——若后台尚未启动则以新工作区为 cwd 启动，新会话按所选目录传 `cwd`/`workspaceRoot`。
 
 **下拉**（`src/Dropdown.tsx`，desktop-v4.html A 屏）：设置页的下拉与状态栏的思考档位、权限预设菜单共用这一个组件，不用原生 `select`。触发器是 `role="combobox"`（`aria-haspopup="listbox"`、`aria-expanded`、打开时 `aria-controls` 指向 `role="listbox"`），焦点始终留在触发器，当前项用 `aria-activedescendant` 指示，选项是 `role="option"`（`aria-selected`，不可选的 `aria-disabled` 并悬停说明原因）。键盘：Tab 聚焦；Enter / 空格 / ↓ 打开；↑↓ 移动并跳过不可选项，Home / End 到首尾；Enter / 空格选择并关闭；Esc 关闭、焦点留在触发器且不冒泡给外层；Tab 关闭。点外部关闭。列表 `position: fixed`，优先向下，下方放不下且上方更宽裕时向上（状态栏在底部），放不下时限高滚动，最小宽 300px。每个选项是「名称 + 中文名 + 一行说明」，危险项（`bypass`）排在分隔线之后并用警告色。权限预设与思考档位的中文名和说明只在 `src/choice-info.ts` 维护一份。输入框卡片与托盘里的 chip 菜单仍用 `ChoiceMenu`。
 
@@ -258,7 +257,7 @@ interface NodeProbe {
 
 ### 5.7 后台日志页
 
-「后台日志」（`src/BackendLogsPage.tsx`）查看运行中后台的 stderr：页头写明「后台进程 stderr 的内存缓冲（最近 500 行），不写盘、不轮询」；一个后台选择器（`Dropdown`，列出每个项目后台与常驻聊天后台，标签为「项目名（类型） + 工作区」，末尾固定一项「外壳」读外壳自身诊断日志）、等宽字体日志区、「刷新」与「复制全部」按钮（`backend_stderr` 只在打开页面或点「刷新」时调用，不轮询；选中「外壳」改走 `shell_log` 命令；「复制全部」把当前显示的缓冲整体写进剪贴板）。「外壳」条目（伪 backendId `-1`）始终存在，所以即使没有任何运行中的后台页面也不为空。所选后台缓冲为空时写「该后台暂无 stderr 输出；已退出后台的最后几行日志显示在崩溃横幅里」（外壳为「外壳暂无诊断输出」；退出后缓冲已回收，只有 `closed` 消息保留了尾部，见第 1 节日志边界）。读取失败显示错误与重试。
+「后台日志」（`src/BackendLogsPage.tsx`）查看运行中后台的 stderr：页头写明「后台进程 stderr 的内存缓冲（最近 500 行），不写盘、不轮询」；一个后台选择器（`Dropdown`，单后台下只有「后台」——当前后台的启动目录，无后台时不出现——与固定的「外壳」两项，外壳条目读外壳自身诊断日志）、等宽字体日志区、「刷新」与「复制全部」按钮（`backend_stderr` 只在打开页面或点「刷新」时调用，不轮询；选中「外壳」改走 `shell_log` 命令；「复制全部」把当前显示的缓冲整体写进剪贴板）。「外壳」条目（伪 backendId `-1`）始终存在，所以即使没有任何运行中的后台页面也不为空。所选后台缓冲为空时写「该后台暂无 stderr 输出；已退出后台的最后几行日志显示在崩溃横幅里」（外壳为「外壳暂无诊断输出」；退出后缓冲已回收，只有 `closed` 消息保留了尾部，见第 1 节日志边界）。读取失败显示错误与重试。
 
 ### 5.8 自动更新（ADR-0050）
 

@@ -32,18 +32,20 @@
 | 方法 | 参数 → 结果 |
 |---|---|
 | `listSessions` | `{ cwd?, includeSubagents? }` → `SessionSummary[]` |
-| `createSession` | `CreateSessionOptions` → `SessionOpened` |
+| `createSession` | `CreateSessionOptions` → `SessionOpened`；ADR-0051 新增可选 `cwd` 与 `workspaceRoot`，按该目录加载项目层并把两个值写入 `session.created`（缺省为后台启动目录）；恢复会话沿用日志记录的工作区，不带参数 |
 | `resumeSession` | `{ sessionId, model?, force? }` → `SessionOpened` |
 | `forkSession` | `{ sessionId, targetSeq? }` → `{ sessionId }`（新会话未打开，用 `resumeSession` 打开） |
-| `listModels` / `defaultModel` / `listRecentModels` | → 模型列表 / `ModelRef \| null` / `ModelRef[]` |
-| `describeSettings` / `updateSettings` | → `SettingItem[]`；`updateSettings { patch, reviewerKey? }` |
-| `setDefaultModel` | `{ model, reasoningEffort }` → `SettingItem[]` |
-| `describeModelRoles` / `setModelRole` | → `ModelRoleInfo[]`；`setModelRole { role, ref }` → `SettingItem[]` |
+| `listModels` / `defaultModel` / `listRecentModels` | 模型列表 / `ModelRef \| null` / `ModelRef[]`；前两者可带 `workspaceRoot` |
+| `describeSettings` / `updateSettings` | `SettingItem[]`；均可带 `workspaceRoot`，`updateSettings { patch, reviewerKey? }` |
+| `setDefaultModel` | `{ model, reasoningEffort, workspaceRoot? }` → `SettingItem[]` |
+| `describeModelRoles` / `setModelRole` | `ModelRoleInfo[]`；`setModelRole { role, ref }` → `SettingItem[]`；均可带 `workspaceRoot` |
 | `getPreference` / `setPreference` | `{ key }` → `string \| null`；`{ key, value? }` → `null` |
-| `listReviewerProviders` / `defaultReviewer` / `listReviewerModels` | 智能权限审查模型相关（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)） |
+| `listReviewerProviders` / `defaultReviewer` / `listReviewerModels` | 智能权限审查模型相关（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)）；均可带 `workspaceRoot` |
 | `reloadConfig` | `{}` → `null`；重新读取配置文件并重建 Provider 注册表，推 `runtime.providersChanged`（在响应之前到达）；**变更方法**，走同一配置队列 |
 
-`SessionOpened`：`{ sessionId, meta, config, warnings, recovery?, lastSeq }`。打开会话**不推事件**——事件要另行 `session.subscribe`。同一连接里已打开的会话再次 `resumeSession` 报 `session_already_open`。`Runtime.updateProviders` 映射为 `runtime.reloadConfig`：服务端在每个 `provider.*` 变更方法之后已经自动重载配置并推 `runtime.providersChanged`（见 3.3），`reloadConfig` 用于**别的进程**改了配置文件之后让本服务端同步（例如桌面端一个项目后台写了 providers.json 或 settings.json，其他项目后台随之重载）。`updateSettings` / `setDefaultModel` / `setModelRole` 只写设置层，不推 `runtime.providersChanged`。服务端不追踪重载的来源：多个后台之间协调时，客户端必须自己识别由 `reloadConfig` 引起的那次通知，不再转发，否则会互相触发成环（桌面端的做法见 [desktop.md](../apps/desktop.md)）。
+带 `workspaceRoot` 的运行时级方法（ADR-0051）：`workspaceRoot` 指定按哪个工作区合并项目配置层，缺省为后台启动目录（旧客户端不传不受影响）。同步读方法依赖服务端已加载的工作区层——RPC 服务端在派发前自动对目标工作区执行 `forWorkspace`；写方法自身先加载再校验。该参数解决单后台服务多个项目的场景（桌面端按会话工作区传参），不是跨进程寻址。
+
+`SessionOpened`：`{ sessionId, meta, config, warnings, recovery?, lastSeq }`。打开会话**不推事件**——事件要另行 `session.subscribe`。同一连接里已打开的会话再次 `resumeSession` 报 `session_already_open`。`Runtime.updateProviders` 映射为 `runtime.reloadConfig`：服务端在每个 `provider.*` 变更方法之后已经自动重载配置并推 `runtime.providersChanged`（见 3.3），`reloadConfig` 用于**别的进程**改了配置文件之后让本服务端同步（例如桌面端后台运行期间用户用 CLI 改了 providers.json 或 settings.json）。`updateSettings` / `setDefaultModel` / `setModelRole` 只写设置层，不推 `runtime.providersChanged`。服务端不追踪重载的来源：多个服务端进程之间协调时，客户端必须自己识别由 `reloadConfig` 引起的那次通知，不再转发，否则会互相触发成环。
 
 ### 3.2 `session.*`
 
@@ -79,15 +81,15 @@
 | 方法 | 参数 → 结果 |
 |---|---|
 | `listProviderPresets` | `{}` → `ProviderPreset[]` |
-| `describeProviders` | `{}` → `{ providers: ProviderOverview[]; setupWarning? }`；`ProviderOverview.authKind`（`"apiKey"` / `"env"` / `"account"` / `"external-file"` / `"none"`）是条目的认证方式，客户端据此决定显示「换密钥」还是「重新登录」，不再自行推断；`displayName` 是条目声明的显示名（缺省显示 id） |
+| `describeProviders` | `{ workspaceRoot? }` → `{ providers: ProviderOverview[]; setupWarning? }`（`workspaceRoot` 指定按哪个工作区合并项目层，ADR-0051；缺省为后台启动目录）；`ProviderOverview.authKind`（`"apiKey"` / `"env"` / `"account"` / `"external-file"` / `"none"`）是条目的认证方式，客户端据此决定显示「换密钥」还是「重新登录」，不再自行推断；`displayName` 是条目声明的显示名（缺省显示 id） |
 | `describeProviderSetup` | `{ presetId }` → `ProviderSetupDescription` |
 | `describeAccountStorage` | `{ providerId }` → `AccountStorageSetup \| null` |
 | `prepareProvider` | `Omit<AddProviderInput,"modelId">` → `PrepareProviderResult`（只校验、暂存草稿，不落盘）；名称与已有服务商重复时报 -32005 / `field: "name"`（[provider-setup.md](../architecture/provider-setup.md)「名称唯一性」）。结果的 `models` 是获取到的上游模型摘要（`id`、`displayName?`、`reasoning?`、`imageInput?`、`contextWindow?`、`maxOutputTokens?`，与 `modelCount` 同数），供保存前预览 |
 | `commitProvider` | `{ draftId, manualModelId? }` → `AddProviderResult`；**变更方法**；提交时再查一次同名，准备之后别处写入了同名条目同样报 -32005 / `field: "name"` |
 | `discardProvider` | `{ draftId }` → `null` |
 | `setCredential` | `{ providerId, key }` → `null`；**变更方法** |
-| `listModelSettings` | `{ providerId }` → `ModelSettingsView[]` |
-| `saveModelSettings` | `{ providerId, modelId, patch }` → `null`；**变更方法** |
+| `listModelSettings` | `{ providerId, workspaceRoot? }` → `ModelSettingsView[]` |
+| `saveModelSettings` | `{ providerId, modelId, patch, workspaceRoot? }` → `null`；**变更方法** |
 | `refreshUpstreamLimits` | `{ providerId }` → `{ warning: string \| null }`；**变更方法** |
 | `refreshModelsDev` | `{}` → `{ warning: string \| null }`；**变更方法** |
 | `removeSetupProvider` | `{ providerId }` → `null`；**变更方法**；本连接任一会话正在使用时报 `provider_in_use`（同 CLI/TUI 的规则；因服务端持有会话，由服务端对本连接全部已打开会话判断） |
@@ -135,7 +137,7 @@ Overview 含 `id/origin/editable/trusted/path/transport/enabled/startupTimeoutMs
 
 Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, message }`。stdio 带脱敏的 `stderrTail`（最多 20 行），HTTP 带可选 `httpStatus`。错误码为 `spawn_failed/startup_timeout/initialize_failed/mcp_secret_missing/connect_failed/http_status/auth_required/http_redirect`。草稿编辑可以通过 `credentialServerId` 引用可编辑的已保存条目的凭据，不返回密钥值。不带 `credentialServerId` 的草稿只使用本次 `secrets`，不查询凭据库；stored 引用缺少对应 secret 时返回 `mcp_secret_missing`。
 
-三种变更成功后自动重载并更新已打开会话；MCP 变更响应不发送 `providersChanged`，桌面端显式调用 `BackendPool.propagateConfig`。其他后台的 `reloadConfig` 仍发送原通知，由现有 echo 计数消费。
+三种变更成功后自动重载并更新已打开会话；MCP 变更响应不发送 `providersChanged`。桌面端已是单后台（ADR-0051），同进程的 Runtime 重载即全部生效，不再有跨后台传播；多客户端部署时其他进程可经 `runtime.reloadConfig` 同步（3.1）。
 
 ### 3.6 `skills.*`（ADR-0048）
 
@@ -148,7 +150,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 
 `SkillsDescription` 为 `{ skills: SkillOverview[], warnings: { path, line, message, kind }[], budget: { usedTokens, limitTokens, fullCount, nameCount, disabledCount, basis }, scannedDirs: string[], homeDir: string }`；字段定义和默认模型/8000 token 兜底依据见 [skills.md](../architecture/skills.md) 第 5 节。`session.submit` 可带 `skill: { name: string, arguments?: string }`，Core 把渲染正文固定进 message.user，客户端恢复不重读文件。新字段兼容旧日志，不提升 formatVersion。
 
-技能变更（`setSkillEnabled`、`importSkills` 的 commit）通知复用 providersChanged 以刷新客户端目录；其他后台由客户端转发 reloadConfig，继承已有 echo 防环机制。
+技能变更（`setSkillEnabled`、`importSkills` 的 commit）通知复用 providersChanged 以刷新客户端目录；多进程部署时其他后台由客户端转发 `reloadConfig`（3.1 的 echo 防环约定）。
 
 ### 3.7 `agents.*`（ADR-0049）
 
@@ -165,7 +167,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 
 探测结果包含 `ok/durationMs/configOptions`，可带 `agentInfo: { name, version, title? }`、`authMethods: { id, name, description? }[]` 和 `error: { code, message }`。`configOptions` 每项含 `id/name/description?/category?/currentValue/options: { value, name, description?, group? }[]`；对方按分组返回的选项会展平，`group` 为分组名，`description` 原样转交。探测只解析命令并执行 ACP initialize/session-new，从不发送 prompt；草稿探测不写配置、不消耗对方模型额度。
 
-保存、删除、启停串行执行；Runtime 在写入成功后重载配置并在 Turn 边界更新已打开会话，服务端在响应之前发送**一次** `runtime.providersChanged`，失败不发通知。桌面端只经 BackendPool 现有通知传播重载其他后台，页面不再显式传播；继承已有 echo 防环机制，避免重复重载。
+保存、删除、启停串行执行；Runtime 在写入成功后重载配置并在 Turn 边界更新已打开会话，服务端在响应之前发送**一次** `runtime.providersChanged`，失败不发通知。桌面端只监听该通知刷新页面（单后台）；多进程部署时客户端可按 3.1 的 echo 约定转发 `reloadConfig` 给其他后台，避免重复重载成环。
 
 ### 3.8 通知
 

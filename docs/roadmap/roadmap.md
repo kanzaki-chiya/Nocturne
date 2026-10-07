@@ -259,7 +259,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 **内容**：
 
 - **RPC 第一版**（已实现并验收，2026-10-04；随 0.5.0 以实验性发布）：`nctrn rpc --stdio`，JSON-RPC 按行分隔，一个后台一个 Runtime、一个客户端；事件按 `afterSeq` 回放后衔接实时推送。按 ADR-0044 第 10 节分五步实现，其中服务商配置改为数据接口（`describeProviderSetup` / `prepareProvider` + `commitProvider`），CLI 与 TUI 向导迁移其上。
-- **桌面端**（ADR-0046 已实现，随 0.6.0 发布；随附 Node 与自动更新按 [ADR-0050](../decisions/ADR-0050-distribution.md) 实现）：Tauri 外壳逐行转发，每个有打开会话的项目一个 `nctrn rpc --stdio` 后台；React + Vite 前端经 RPC 驱动；左栏按项目分组的会话树与置顶，对话、权限、服务商、设置；只出 Windows 安装包。安装包随附官方 Node 24.x（不再要求用户自装）、经 Tauri updater 自动更新。
+- **桌面端**（ADR-0046 已实现，随 0.6.0 发布；单后台改造见 [ADR-0051](../decisions/ADR-0051-desktop-single-backend.md)；随附 Node 与自动更新按 [ADR-0050](../decisions/ADR-0050-distribution.md) 实现）：Tauri 外壳逐行转发，整个窗口一个常驻 `nctrn rpc --stdio` 后台、工作区随会话；React + Vite 前端经 RPC 驱动；左栏按项目分组的会话树与置顶，对话、权限、服务商、设置；只出 Windows 安装包。安装包随附官方 Node 24.x（不再要求用户自装）、经 Tauri updater 自动更新。
 
 ## 之后（未排期）
 
