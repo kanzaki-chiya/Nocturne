@@ -21,6 +21,7 @@ import {
 import {
   createNewSession,
   createSessionSwitcher,
+  resumeFailureHint,
   sessionOpenNotes,
   type SessionHolder,
 } from "../src/session-switch.js";
@@ -319,5 +320,28 @@ describe("REPL /resume 与切换器组合", () => {
     // 新会话重放：durableEvents 含 session.created
     expect(res.session.durableEvents().map((e) => e.type)).toContain("session.created");
     await res.session.close();
+  });
+});
+
+describe("恢复失败的 CLI 用法提示", () => {
+  it("invalid_model 在恢复路径提示 --model，其余路径与错误不提示", async () => {
+    const cwd = await tmp("nct-hint-cwd-");
+    const sd = await tmp("nct-hint-sd-");
+    // 会话记录的服务商已不存在 → resumeSession 抛 invalid_model（真链路）
+    const before = await createRuntime({
+      cwd,
+      sessionsDir: sd,
+      providers: [new FakeProvider({ id: "gone" })],
+    });
+    const created = await before.createSession({ model: "gone/fake-1" });
+    const id = created.id;
+    await created.close();
+    const runtime = await makeRuntime(cwd, sd);
+    const failure: unknown = await runtime.resumeSession(id).catch((e: unknown) => e);
+    expect(failure).toMatchObject({ code: "invalid_model" });
+    expect(resumeFailureHint(failure, true)).toBe("加 --model <id> 指定替代模型");
+    // 新建路径的同名错误不提示（--model 本就是显式入参）
+    expect(resumeFailureHint(failure, false)).toBeUndefined();
+    expect(resumeFailureHint(new Error("boom"), true)).toBeUndefined();
   });
 });

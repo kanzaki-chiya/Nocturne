@@ -4,6 +4,7 @@
  * 流程约束：先打开新会话（锁冲突/日志损坏/跨目录被拒时留在原会话），
  * 成功后才关闭旧会话释放锁；Turn 进行中拒绝切换。
  */
+import { RuntimeCommandError } from "@nocturne/core";
 import type { Platform, Runtime, RuntimeSession } from "@nocturne/core";
 
 /** 当前会话持有槽：切换成功时换入新会话；关闭权归调用方 */
@@ -23,6 +24,17 @@ export type SessionSwitcher = (
   id: string,
   opts?: { allowForeign?: boolean },
 ) => Promise<SwitchResult>;
+
+/**
+ * 恢复失败时的 CLI 用法提示（sessions.md 4.2）：Core 只给中性说明，
+ * `--model` 这类客户端用法由 CLI 自己补——仅恢复路径的 invalid_model
+ * 给提示，新建会话的同名错误不影响（模型本就是显式传入的）。
+ */
+export function resumeFailureHint(e: unknown, resuming: boolean): string | undefined {
+  return resuming && e instanceof RuntimeCommandError && e.code === "invalid_model"
+    ? "加 --model <id> 指定替代模型"
+    : undefined;
+}
 
 export type NewSessionFn = () => Promise<SwitchResult>;
 

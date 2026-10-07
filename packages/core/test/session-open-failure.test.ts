@@ -66,7 +66,18 @@ describe("会话打开失败的清理", () => {
       mcp: { probe: async () => ({ ok: true, durationMs: 0, tools: [] }), open },
     });
 
-    await expect(runtime.resumeSession(id)).rejects.toMatchObject({ code: "invalid_model" });
+    const failure: unknown = await runtime.resumeSession(id).then(
+      () => {
+        throw new Error("模型无法解析的会话不应恢复成功");
+      },
+      (e: unknown) => e,
+    );
+    expect(failure).toMatchObject({ code: "invalid_model" });
+    // Core 只给中性说明；--model、resumeSession 是客户端用法，不进 Core 文案
+    const failureText = failure instanceof Error ? failure.message : "";
+    expect(failureText).toContain("恢复时可指定替代模型");
+    expect(failureText).not.toContain("--model");
+    expect(failureText).not.toContain("resumeSession");
     // 打开途中已启动的 MCP 连接随失败关闭
     expect(open).toHaveBeenCalledOnce();
     expect(close).toHaveBeenCalledOnce();

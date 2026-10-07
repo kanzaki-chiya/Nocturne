@@ -31,6 +31,7 @@ import { runRpcStdio } from "./rpc.js";
 import {
   createNewSession,
   createSessionSwitcher,
+  resumeFailureHint,
   sessionOpenNotes,
   type SessionHolder,
 } from "./session-switch.js";
@@ -409,6 +410,9 @@ async function main(): Promise<number> {
     }
   } catch (e) {
     process.stderr.write(`! ${errorText(e)}\n`);
+    // 恢复路径的 invalid_model：Core 只给中性说明，用法提示由客户端补充
+    const hint = resumeFailureHint(e, resumeTarget);
+    if (hint !== undefined) process.stderr.write(`! ${hint}\n`);
     return 2;
   }
 

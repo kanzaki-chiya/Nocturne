@@ -63,7 +63,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 - **恢复与会话目录绑定**：`--resume` / `--continue` 打开的会话记录了它自己的 `cwd`/`workspaceRoot`（sessions.md 第 7 节）。会话目录与进程 cwd 不一致时：交互模式提示并默认拒绝（显式确认后继续，工具仍以会话记录的目录为准）；非交互模式直接报错（退出码 2）。
 - **锁冲突**：会话被其他进程占用时报 `session_locked` 并显示锁内容（pid、主机名、启动时间），退出码 2；确认持有者已退出时用 `--force-unlock`。
 - **恢复失败的其余情形**（不存在、`session_log_corrupt`、`session_log_newer`）同样以退出码 2 退出并打印原因。
-- **模型已不可解析**（Provider 清单或配置变了）也拒绝恢复，提示中给出用法：加 `--model <id>` 恢复并切换——Runtime 在取锁、修复之后先写入 `session.config_changed { model }` 再进入空闲（sessions.md 第 4 节），组合写法：`nctrn --resume <id> --model <id>`。
+- **模型已不可解析**（Provider 清单或配置变了）也拒绝恢复：Core 的错误信息只给中性说明，CLI 在 stderr 追加用法提示「加 `--model <id>` 指定替代模型」——Runtime 在取锁、修复之后先写入 `session.config_changed { model }` 再进入空闲（sessions.md 第 4 节），组合写法：`nctrn --resume <id> --model <id>`。
 - 恢复成功后打印一行恢复摘要（`session.recovery`：截断尾部、补齐的中断调用与 Turn 计数；无修复则不打印）。
 - 凭据来自环境变量或用户级凭据文件（v0.2，[provider-setup.md](../architecture/provider-setup.md) 第 3 节），**不接受命令行上的密钥值**；`--api-key-env` 指定的是变量名。
 - 启动时校验配置：缺 `baseURL`（openai-compatible）、缺凭据、缺模型 id，都打印缺失项并以退出码 2 退出，两种模式一致；stdin/stdout 均为交互终端时提示可运行 `nctrn setup`——完全没有任何服务商来源（无 `providers.json` 条目、无 `config.json` providers、无环境变量/命令行合成）时该提示置首，环境变量与手写说明退为次要；非 TTY 输出不变，不含向导提示。

@@ -1509,9 +1509,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       } else if (e instanceof UnknownModelError) {
         throw new RuntimeCommandError(
           "invalid_model",
-          resume !== undefined
-            ? `${e.message}；可携带替代模型恢复（resumeSession 的 model 选项 / CLI --model）`
-            : e.message,
+          resume !== undefined ? `${e.message}；恢复时可指定替代模型` : e.message,
         );
       } else {
         throw e;
