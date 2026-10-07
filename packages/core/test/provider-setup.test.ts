@@ -15,6 +15,7 @@ import {
   type ProviderEntryConfig,
   type UpstreamModelEntry,
 } from "../src/config/index.js";
+import type { FetchModelsRequest } from "../src/provider/presets.js";
 import {
   prepareProvider,
   commitProvider,
@@ -1151,8 +1152,8 @@ describe("编辑自定义服务商（U-07）", () => {
         headers: { "X-New": "1" },
       },
       {
-        fetchModels: async (req, key) => {
-          calls.push({ req: req as Record<string, unknown>, key });
+        fetchModels: async (req: FetchModelsRequest, key: string | undefined) => {
+          calls.push({ req: req as unknown as Record<string, unknown>, key });
           return [{ id: "pm1" }];
         },
       },
@@ -1174,7 +1175,7 @@ describe("编辑自定义服务商（U-07）", () => {
     const { rc } = await fresh();
     await rc.saveSetupProvider({ ...CUSTOM, apiKeyEnv: "CORP_KEY" }, { key: "sk-store" });
     const seen: { key: string | undefined; headers: unknown }[] = [];
-    const fetchModels = async (req: { headers?: Record<string, string> }, key?: string) => {
+    const fetchModels = async (req: FetchModelsRequest, key: string | undefined) => {
       seen.push({ key, headers: req.headers });
       return [];
     };
