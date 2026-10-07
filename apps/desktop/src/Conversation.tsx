@@ -105,6 +105,13 @@ const inputOf = (entry: ToolEntry): Record<string, unknown> | undefined =>
     ? (entry.input as Record<string, unknown>)
     : undefined;
 
+/**
+ * 文件引用收集与渲染共用的解析选项（两处 token 流必须一致）。
+ * `breaks` 让段落内的单个换行按聊天惯例显示为换行，而不是被
+ * CommonMark 软换行折叠成空格；多出的 br token 由 markdownNodes 渲染。
+ */
+const MARKED_OPTIONS = { gfm: true, breaks: true } as const;
+
 /** Only lexer tokens become React elements. Raw HTML and remote images stay inert text. */
 function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] {
   return tokens.map((token, index) => {
@@ -301,7 +308,7 @@ function Markdown({
         }
       }
     };
-    collect(marked.lexer(markdown, { gfm: true }));
+    collect(marked.lexer(markdown, MARKED_OPTIONS));
     if (paths.length === 0) {
       setRefs(new Map());
       return;
@@ -356,7 +363,7 @@ function Markdown({
   return (
     <div className="conversation-markdown">
       <FileLinksContext.Provider value={lookup}>
-        {markdownNodes(marked.lexer(markdown, { gfm: true }), openUrl)}
+        {markdownNodes(marked.lexer(markdown, MARKED_OPTIONS), openUrl)}
       </FileLinksContext.Provider>
     </div>
   );

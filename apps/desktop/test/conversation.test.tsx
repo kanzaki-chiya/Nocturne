@@ -970,6 +970,45 @@ describe("Conversation 渲染与滚动", () => {
   });
 });
 
+describe("Markdown 换行", () => {
+  it("段落内单个换行显示为换行：逐行数字不合并成一段", () => {
+    const view = createSessionView();
+    view.entries = [assistant({ text: "1\n2\n3\n4\n5" })];
+    const { container } = mount(view);
+    expect(container.querySelector(".conversation-markdown p")?.innerHTML).toBe(
+      "1<br>2<br>3<br>4<br>5",
+    );
+  });
+
+  it("句中软换行变 br，空行仍分段", () => {
+    const view = createSessionView();
+    view.entries = [assistant({ text: "第一行\n第二行\n\n新段落" })];
+    const { container } = mount(view);
+    const paragraphs = container.querySelectorAll(".conversation-markdown p");
+    expect(paragraphs).toHaveLength(2);
+    expect(paragraphs[0]?.innerHTML).toBe("第一行<br>第二行");
+    expect(paragraphs[1]?.textContent).toBe("新段落");
+  });
+
+  it("代码块与表格不受换行选项影响", () => {
+    const view = createSessionView();
+    view.entries = [
+      assistant({
+        text: "```\nline1\nline2\n```\n\n| A | B |\n| --- | --- |\n| 1 | 2 |",
+      }),
+    ];
+    const { container } = mount(view);
+    expect(container.querySelector(".conversation-code pre code")?.textContent).toBe(
+      "line1\nline2",
+    );
+    expect(container.querySelector(".conversation-code br")).toBeNull();
+    expect(container.querySelectorAll(".conversation-table th")).toHaveLength(2);
+    expect(
+      [...container.querySelectorAll(".conversation-table td")].map((cell) => cell.textContent),
+    ).toEqual(["1", "2"]);
+  });
+});
+
 describe("Conversation 工具行与拒绝", () => {
   it("工作区内路径相对化、区外绝对化；10 秒以上才显示时长", () => {
     const view = createSessionView();
