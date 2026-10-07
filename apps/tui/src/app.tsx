@@ -1885,7 +1885,9 @@ function SessionApp({
         .describeExternalAgents()
         .then((description) => {
           if (active)
-            setTimeout(() => setExternalAgentCatalog({ session, description }), 0);
+            setTimeout(() => {
+              setExternalAgentCatalog({ session, description });
+            }, 0);
         })
         .catch((error: unknown) => {
           if (active) pushLine(`! ${errText(error)}`);
@@ -2360,13 +2362,11 @@ function SessionApp({
           void session
             .describeExternalAgents()
             .then((description) => {
-              setTimeout(
-                () =>
-                  setExternalAgentCatalog((prev) =>
-                    prev?.session === session ? prev : { session, description },
-                  ),
-                0,
-              );
+              setTimeout(() => {
+                setExternalAgentCatalog((prev) =>
+                  prev?.session === session ? prev : { session, description },
+                );
+              }, 0);
               const late = parseExternalAgentSlash(expanded, description.agents, skills);
               if (late === undefined) dispatchSlash(text);
               else if (late.task.trim() === "") pushLine(`用法：/${late.agent} 任务`);
