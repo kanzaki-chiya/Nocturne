@@ -393,6 +393,8 @@ button {
 .nav .item:focus-visible,
 .gh-toggle:focus-visible,
 .gadd:focus-visible,
+.gmenu:focus-visible,
+.imenu:focus-visible,
 .hb:focus-visible,
 .btn:focus-visible,
 .ctxmenu button:focus-visible {
@@ -400,8 +402,58 @@ button {
   outline-offset: -2px;
 }
 .nav .item:hover,
+.irow:hover .item,
 .gh:hover {
   background: var(--a-sel);
+}
+
+/* 会话行「…」菜单按钮：.irow 是容器（按钮不能嵌套），默认隐藏、
+   行悬停/focus-within 时显示；右侧 meta/项目标签同时让位，
+   不遮标题文字和时间列（与 .gh-right → .gadd 同一模式） */
+.irow {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.irow .item {
+  flex: 1;
+  min-width: 0;
+}
+.irow .imenu,
+.gh .gmenu {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--a-faint);
+  font-size: 12px;
+  font-weight: 400;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 4px;
+  opacity: 0;
+  cursor: pointer;
+}
+.irow .imenu:hover,
+.gh .gmenu:hover {
+  color: var(--a-text);
+}
+.irow:hover .imenu,
+.irow:focus-within .imenu,
+.gh:hover .gmenu,
+.gh:focus-within .gmenu {
+  opacity: 1;
+}
+.irow:hover .meta,
+.irow:focus-within .meta,
+.irow:hover .proj,
+.irow:focus-within .proj {
+  visibility: hidden;
+}
+/* 项目行「…」在「＋」左侧 */
+.gh .gmenu {
+  right: 24px;
 }
 
 .dot {

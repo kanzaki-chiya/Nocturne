@@ -94,4 +94,65 @@ describe("Sidebar", () => {
     render(<Sidebar {...props()} />);
     expect(screen.queryByText("打开项目…", { selector: ".nav .item" })).toBeNull();
   });
+
+  const rowTree: SessionTree = {
+    pinned: [],
+    chats: {
+      rows: [{ id: "s1", title: "一号会话", meta: "昨天", locked: false, status: "idle" }],
+      moreCount: 0,
+    },
+    projects: [
+      {
+        key: "Z:/proj",
+        name: "proj",
+        path: "Z:/proj",
+        count: 1,
+        sessions: [{ id: "s2", title: "项目会话", meta: "现在", locked: false, status: "idle" }],
+        moreCount: 0,
+        manual: false,
+      },
+    ],
+  };
+
+  it("会话行「…」与右键打开同一个置顶菜单（F-02）", () => {
+    const onPin = vi.fn();
+    render(<Sidebar {...props({ tree: rowTree, onPin })} />);
+    // 「…」点击：与右键同款菜单
+    const menuBtn = screen.getAllByRole("button", { name: "会话菜单" })[0];
+    if (menuBtn === undefined) throw new Error("会话行缺少「…」菜单按钮");
+    fireEvent.click(menuBtn);
+    expect(screen.getByText("置顶")).toBeTruthy();
+    fireEvent.click(screen.getByText("置顶"));
+    expect(onPin).toHaveBeenCalledWith("s1");
+    // 右键路径仍可用且菜单一致
+    fireEvent.contextMenu(screen.getByText("一号会话"));
+    expect(screen.getByText("置顶")).toBeTruthy();
+  });
+
+  it("会话行「…」可键盘操作：真实按钮可聚焦，打开菜单后焦点进菜单项（F-02）", () => {
+    render(<Sidebar {...props({ tree: rowTree })} />);
+    const btn = screen.getAllByRole("button", { name: "会话菜单" })[0];
+    if (btn === undefined) throw new Error("会话行缺少「…」菜单按钮");
+    // 原生 <button>：Tab 可达，Enter/Space 派发 click（jsdom 不模拟按键→click，聚焦可达性即键盘入口）
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    fireEvent.click(btn);
+    const item = screen.getByText("置顶");
+    expect(item).toBeTruthy();
+    // 菜单项自动聚焦：Enter 直接选中，Esc 关闭
+    expect(document.activeElement).toBe(item);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByText("置顶")).toBeNull();
+  });
+
+  it("项目行「…」与右键打开同一个「从列表移除」菜单（F-02）", () => {
+    const onHideProject = vi.fn();
+    render(<Sidebar {...props({ tree: rowTree, onHideProject })} />);
+    fireEvent.click(screen.getByRole("button", { name: "项目菜单" }));
+    expect(screen.getByText("从列表移除")).toBeTruthy();
+    fireEvent.click(screen.getByText("从列表移除"));
+    expect(onHideProject).toHaveBeenCalledWith("Z:/proj");
+    fireEvent.contextMenu(screen.getByText("proj"));
+    expect(screen.getByText("从列表移除")).toBeTruthy();
+  });
 });

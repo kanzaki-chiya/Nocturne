@@ -229,26 +229,48 @@ function RowButton({
   selected,
   onSelect,
   onContext,
+  onMenu,
 }: {
   row: SessionRow;
   pinned?: { project: string };
   selected: boolean;
   onSelect: () => void;
   onContext: (e: React.MouseEvent) => void;
+  /** 「…」按钮点击：在同一行右侧锚点打开右键同款菜单 */
+  onMenu: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
-    <button className={`item${selected ? " on" : ""}`} onClick={onSelect} onContextMenu={onContext}>
-      <span className={dotClass(row)} />
-      <span className="t">{row.title}</span>
-      {pinned !== undefined ? (
-        <>
-          <span className="proj">{pinned.project}</span>
-          {row.status === "pending" && <span className="meta pend">待确认</span>}
-        </>
-      ) : (
-        <span className={`meta${row.status === "pending" ? " pend" : ""}`}>{row.meta}</span>
-      )}
-    </button>
+    /* .irow 是容器 div：按钮不能嵌套按钮（悬停的「…」是兄弟元素） */
+    <div className="irow">
+      <button
+        className={`item${selected ? " on" : ""}`}
+        onClick={onSelect}
+        onContextMenu={onContext}
+      >
+        <span className={dotClass(row)} />
+        <span className="t">{row.title}</span>
+        {pinned !== undefined ? (
+          <>
+            <span className="proj">{pinned.project}</span>
+            {row.status === "pending" && <span className="meta pend">待确认</span>}
+          </>
+        ) : (
+          <span className={`meta${row.status === "pending" ? " pend" : ""}`}>{row.meta}</span>
+        )}
+      </button>
+      <button
+        type="button"
+        className="imenu"
+        title="会话菜单"
+        aria-label="会话菜单"
+        onClick={(e) => {
+          e.stopPropagation();
+          onMenu(e);
+        }}
+      >
+        …
+      </button>
+    </div>
   );
 }
 
@@ -333,6 +355,17 @@ export function Sidebar(props: SidebarProps) {
       onContext={(e) => {
         sessionMenu(e, row.id);
       }}
+      onMenu={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        setSubOpen(null);
+        setMenu({
+          kind: "session",
+          x: rect.left,
+          y: rect.bottom + 4,
+          id: row.id,
+          pinned: props.pinnedIds.has(row.id),
+        });
+      }}
     />
   );
 
@@ -358,6 +391,25 @@ export function Sidebar(props: SidebarProps) {
             <span className="gh-right">
               {collapsed && <span className="meta">{project.count}</span>}
             </span>
+          </button>
+          <button
+            className="gmenu"
+            title={`${project.name} 菜单`}
+            aria-label="项目菜单"
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              setSubOpen(null);
+              setMenu({
+                kind: "project",
+                x: rect.left,
+                y: rect.bottom + 4,
+                key: project.key,
+                path: project.path,
+              });
+            }}
+          >
+            …
           </button>
           <button
             className="gadd"
@@ -480,6 +532,7 @@ export function Sidebar(props: SidebarProps) {
         <div className="ctxmenu" ref={menuRef} style={{ left: menu.x, top: menu.y }}>
           {menu.kind === "session" && (
             <button
+              autoFocus
               onClick={() => {
                 if (menu.pinned) props.onUnpin(menu.id);
                 else props.onPin(menu.id);
@@ -491,6 +544,7 @@ export function Sidebar(props: SidebarProps) {
           )}
           {menu.kind === "project" && (
             <button
+              autoFocus
               onClick={() => {
                 props.onHideProject(menu.path);
                 setMenu(null);
