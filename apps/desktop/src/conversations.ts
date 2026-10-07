@@ -14,11 +14,15 @@ import {
 } from "@nocturne/rpc/client";
 
 import type { ComposerSubmit } from "./Composer";
-import { projectKey, type SessionStatus } from "./session-tree";
+import type { SessionStatus } from "./session-tree";
 
+/**
+ * 单后台（ADR-0051）：整个窗口共用一个 nctrn 后台。ensure 的 workspace
+ * 只在真正启动进程时用作后台 cwd；会话的工作区随会话参数走。
+ */
 export interface ConversationBackendPool {
   ensure(workspace: string): Promise<RpcClient>;
-  release(workspace: string): Promise<void>;
+  get(): RpcClient | undefined;
 }
 
 export interface OpenConversation {
@@ -67,7 +71,19 @@ export class Conversations {
   readonly opened = new Map<string, OpenConversation>();
   selectedId: string | null = null;
   draftWorkspace: string | null = null;
+  /**
+   * 正在执行「打开」的会话 id：界面据此显示「正在打开…」占位。
+   * 只有最后一次点击的目标保留这个标记（open 的 token 守卫）。
+   */
+  openingId: string | null = null;
+  /**
+   * 最近一次打开失败按会话记录（消息与工作区）：该会话的占位区显示
+   * 错误与「重试」，不退回上一个会话。
+   */
+  readonly openErrors = new Map<string, { message: string; workspace: string }>();
   private queue: Promise<unknown> = Promise.resolve();
+  /** 每次 open 递增；被更新的点击取代的打开在串行队列里直接跳过 */
+  private openToken = 0;
 
   constructor(
     private readonly pool: ConversationBackendPool,
@@ -129,35 +145,61 @@ export class Conversations {
     }
   }
 
+  /**
+   * 选中并打开会话（ADR-0051）：选中立即生效，占位区显示「正在打开…」，
+   * 会话就绪后内容替换占位。失败写 openErrors[id]，界面在该会话内显示
+   * 错误与「重试」，不回退选中项。连续快速点击时 token 让被取代的打开
+   * 在串行队列里跳过，先发出的请求晚返回不会覆盖界面。
+   */
   open(id: string, workspace: string, force = false): Promise<void> {
+    const token = ++this.openToken;
+    const previous = this.selected;
+    this.selectedId = id;
+    this.draftWorkspace = null;
+    this.openingId = id;
+    this.openErrors.delete(id);
+    this.changed();
+    if (previous !== undefined && previous.session.id !== id) {
+      void this.serial(() => this.closeIfIdle(previous)).catch(this.failed);
+    }
     return this.serial(async () => {
-      let entry = this.opened.get(id);
-      // 后台已退出的会话：点开即用原视图续接重开（ensure 会启动新后台）。
-      // 失败时把死条目放回去，横幅里的「重启后台」仍可重试。
-      const dead = entry?.dead === true ? entry : undefined;
-      if (entry === undefined || dead !== undefined) {
-        const target = dead?.workspace ?? workspace;
-        const continuity =
-          dead !== undefined ? { view: dead.view, afterSeq: dead.view.lastSeq } : undefined;
-        const client = await this.pool.ensure(target);
-        try {
+      // 已被更新的点击取代且会话还没接上：这个请求的结果无人等待，跳过
+      if (token !== this.openToken && this.opened.get(id) === undefined) return;
+      const dead0 = this.opened.get(id);
+      const dead = dead0?.dead === true ? dead0 : undefined;
+      const target = dead?.workspace ?? workspace;
+      try {
+        let entry = dead0;
+        if (entry === undefined || dead !== undefined) {
+          const continuity =
+            dead !== undefined ? { view: dead.view, afterSeq: dead.view.lastSeq } : undefined;
+          const client = await this.pool.ensure(target);
           entry = await this.attach(
             client,
             target,
             await client.runtime.resumeSession(id, { force }),
             continuity,
           );
-        } catch (error) {
-          if (dead !== undefined) this.opened.set(id, dead);
-          await this.releaseIfUnused(target);
-          throw error;
         }
+        this.openErrors.delete(id);
+        // 打开期间被更新的点击取代：接上的会话不再被选中，按空闲路径关掉不留锁
+        if (entry.session.id !== this.selectedId) {
+          await this.closeIfIdle(entry);
+        }
+      } catch (error) {
+        // attach 抛错时已删掉半成品条目：死会话放回原位，横幅仍可重试
+        if (dead !== undefined && this.opened.get(id) === undefined) {
+          this.opened.set(id, dead);
+        }
+        this.openErrors.set(id, {
+          message: error instanceof Error ? error.message : String(error),
+          workspace: target,
+        });
+        throw error;
+      } finally {
+        if (this.openingId === id) this.openingId = null;
+        this.changed();
       }
-      const previous = this.selected;
-      this.selectedId = id;
-      this.draftWorkspace = null;
-      this.changed();
-      if (previous !== undefined && previous !== entry) await this.closeIfIdle(previous);
     });
   }
 
@@ -165,6 +207,7 @@ export class Conversations {
     return this.serial(async () => {
       const previous = this.selected;
       this.selectedId = null;
+      this.openingId = null;
       this.draftWorkspace = workspace;
       this.changed();
       if (previous !== undefined) await this.closeIfIdle(previous);
@@ -182,30 +225,33 @@ export class Conversations {
     const entry = await this.serial(async () => {
       let selected = this.selected;
       if (selected === undefined) {
+        // 选中会话打开失败时不要把消息落到新建的草稿会话上
+        const failedOpen =
+          this.selectedId !== null ? this.openErrors.get(this.selectedId) : undefined;
+        if (failedOpen !== undefined) throw new Error(failedOpen.message);
         const workspace = this.draftWorkspace ?? this.plainWorkspace();
         if (workspace === null) throw new Error("普通对话工作区尚未就绪");
         const client = await this.pool.ensure(workspace);
-        try {
-          const model = create?.model ?? (await client.runtime.defaultModel());
-          if (model === undefined)
-            throw new Error("尚未配置默认模型，请先用 nctrn setup 配置服务商");
-          selected = await this.attach(
-            client,
-            workspace,
-            await client.runtime.createSession({
-              model,
-              ...(create?.reasoningEffort !== undefined
-                ? { reasoningEffort: create.reasoningEffort as ReasoningEffort }
-                : {}),
-              ...(create?.permissionPreset !== undefined
-                ? { permissionPreset: create.permissionPreset }
-                : {}),
-            }),
-          );
-        } catch (error) {
-          await this.releaseIfUnused(workspace);
-          throw error;
-        }
+        const model =
+          create?.model ?? (await client.runtime.defaultModel({ workspaceRoot: workspace }));
+        if (model === undefined) throw new Error("尚未配置默认模型，请先用 nctrn setup 配置服务商");
+        selected = await this.attach(
+          client,
+          workspace,
+          await client.runtime.createSession({
+            // 会话的工作区随会话走（ADR-0051）：后台只有一个，项目会话
+            // 用自己的目录做 cwd 与工作区根
+            cwd: workspace,
+            workspaceRoot: workspace,
+            model,
+            ...(create?.reasoningEffort !== undefined
+              ? { reasoningEffort: create.reasoningEffort as ReasoningEffort }
+              : {}),
+            ...(create?.permissionPreset !== undefined
+              ? { permissionPreset: create.permissionPreset }
+              : {}),
+          }),
+        );
       }
       if (selected.dead === true) throw new Error("会话所在的后台已退出，请先重启后台");
       if (conversationStatus(selected) !== "idle") throw new Error("会话正在运行");
@@ -294,34 +340,32 @@ export class Conversations {
   }
 
   /**
-   * 后台退出：该后台上的会话标 dead（保留 id、view 与 lastSeq，即恢复所需的
+   * 后台退出：全部会话标 dead（保留 id、view 与 lastSeq，即恢复所需的
    * 会话清单与断点），不删除、不改选中——视图冻结在原位等「重启后台」。
+   * 单后台只有一个进程，退出影响所有会话（ADR-0051）。
    */
-  backendExited(key: string): void {
-    for (const entry of this.opened.values()) {
-      if (projectKey(entry.workspace) === key) entry.dead = true;
-    }
+  backendExited(): void {
+    for (const entry of this.opened.values()) entry.dead = true;
+    this.openingId = null;
     this.changed();
   }
 
   /**
-   * 重启该工作区的后台并恢复其上标记 dead 的会话：先 resumeSession，
-   * 再按崩溃前的 view.lastSeq 续接订阅（attach 的 continuity 路径）。
-   * 会话逐个恢复，单个失败不阻塞其余；失败的保持 dead 并随结果返回 id 与原因。
+   * 重启后台并恢复全部标记 dead 的会话（跨项目也在同一个后台恢复，
+   * 各会话的工作区由日志元数据携带）：先 resumeSession，再按崩溃前的
+   * view.lastSeq 续接订阅（attach 的 continuity 路径）。会话逐个恢复，
+   * 单个失败不阻塞其余；失败的保持 dead 并随结果返回 id 与原因。
    * 后台本身起不来时整个调用抛错（横幅据此显示重启失败）。
    */
   async resumeBackend(workspace: string): Promise<{ failed: { id: string; message: string }[] }> {
     return this.serial(async () => {
-      const key = projectKey(workspace);
-      const dead = [...this.opened.values()].filter(
-        (entry) => entry.dead === true && projectKey(entry.workspace) === key,
-      );
+      const dead = [...this.opened.values()].filter((entry) => entry.dead === true);
       const client = await this.pool.ensure(workspace);
       const failed: { id: string; message: string }[] = [];
       for (const entry of dead) {
         const id = entry.session.id;
         try {
-          await this.attach(client, workspace, await client.runtime.resumeSession(id), {
+          await this.attach(client, entry.workspace, await client.runtime.resumeSession(id), {
             view: entry.view,
             afterSeq: entry.view.lastSeq,
           });
@@ -344,19 +388,11 @@ export class Conversations {
       this.opened.get(entry.session.id) !== entry
     )
       return;
-    // 关闭成功后才从集合移除，失败时仍保留可观察的锁与后台。
+    // 关闭成功后才从集合移除，失败时仍保留可观察的锁。
+    // 单后台常驻，不随会话关闭而退出（ADR-0051）。
     await entry.tracker?.stop();
     await entry.session.close();
     this.opened.delete(entry.session.id);
     this.changed();
-    await this.releaseIfUnused(entry.workspace);
-  }
-
-  private async releaseIfUnused(workspace: string): Promise<void> {
-    const key = projectKey(workspace);
-    const plain = this.plainWorkspace();
-    if (plain !== null && key === projectKey(plain)) return;
-    if ([...this.opened.values()].some((entry) => projectKey(entry.workspace) === key)) return;
-    await this.pool.release(workspace);
   }
 }

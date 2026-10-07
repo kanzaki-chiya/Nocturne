@@ -111,7 +111,7 @@ export function ExternalAgentsPage({
   const current = agents.find((agent) => agent.name === selected);
   const recent = current ? results[current.name] : undefined;
   const changed = async (text: string) => {
-    // RPC 在响应之前发 providersChanged；App 统一通知其他后台，不重复 propagateConfig。
+    // RPC 在响应之前发 providersChanged；单后台下 App 只刷新本会话的数据版本。
     setToast(`${text} · 空闲会话立即生效，正在回复的会话在本轮结束后切换`);
     await refresh();
   };

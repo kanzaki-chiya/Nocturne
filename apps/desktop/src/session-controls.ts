@@ -81,6 +81,8 @@ export function useSessionControls(
   prefs: PrefsStore,
   /** 服务商配置变更计数：变化时重新拉取模型/预设等数据 */
   providersVersion = 0,
+  /** 会话自己的工作区（ADR-0051）：模型清单按它合并项目层配置 */
+  workspace?: string,
 ): SessionControls {
   const [snapshot, setSnapshot] = useState<{
     model: ModelRef | undefined;
@@ -106,7 +108,7 @@ export function useSessionControls(
         session.state(),
         session.reasoningEffortInfo(),
         session.shellInfo(),
-        runtime.listModels(),
+        runtime.listModels(workspace !== undefined ? { workspaceRoot: workspace } : undefined),
         runtime.listRecentModels(),
       ]);
       if (id !== request.current || !mounted.current) return;
@@ -122,7 +124,7 @@ export function useSessionControls(
     } catch (failure) {
       if (id === request.current && mounted.current) setError(message(failure));
     }
-  }, [session, runtime]);
+  }, [session, runtime, workspace]);
 
   // 持久条目、状态与配置变化时刷新
   useEffect(() => {
@@ -336,12 +338,16 @@ function pickDefaultModel(
   return models.find((info) => info.unavailable === undefined)?.ref;
 }
 
-/** 空状态（未建会话）的草稿控件：数据来自常驻后台的 runtime。 */
+/**
+ * 空状态（未建会话）的草稿控件：数据来自常驻后台的 runtime。
+ * workspace 是草稿目标工作区（ADR-0051）：模型/设置查询按它合并项目层。
+ */
 export function useDraftControls(
   runtime: RpcRuntime | undefined,
   prefs: PrefsStore,
   /** 服务商配置变更计数：变化时重新拉取模型列表 */
   providersVersion = 0,
+  workspace?: string | null,
 ): DraftControls {
   const [data, setData] = useState<{
     models: ModelInfo[];
@@ -363,11 +369,12 @@ export function useDraftControls(
     if (runtime === undefined) return;
     const id = ++request.current;
     let cancelled = false;
+    const scope = workspace !== undefined && workspace !== null ? { workspaceRoot: workspace } : {};
     void Promise.all([
-      runtime.listModels(),
+      runtime.listModels(scope),
       runtime.listRecentModels(),
-      runtime.defaultModel(),
-      runtime.describeSettings(),
+      runtime.defaultModel(scope),
+      runtime.describeSettings(scope),
     ]).then(
       ([models, recents, configured, settings]) => {
         if (cancelled || id !== request.current) return;
@@ -386,7 +393,7 @@ export function useDraftControls(
     return () => {
       cancelled = true;
     };
-  }, [runtime, providersVersion]);
+  }, [runtime, providersVersion, workspace]);
 
   const models = data?.models ?? [];
   const byKey = new Map(models.map((info) => [refKey(info.ref), info]));

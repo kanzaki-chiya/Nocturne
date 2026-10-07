@@ -17,8 +17,15 @@ interface RpcCall {
 function replayHost(
   failRpc: readonly string[] = [],
   seedStderr?: (backendId: number, workspace: string) => string[],
+  /** 命中 predicate 的请求不应答，暂存到 deferred 由测试放行（模拟晚到的响应） */
+  deferRpc?: (request: { method: string; params: Record<string, unknown> }) => boolean,
 ) {
   const channels = new Map<number, (message: BackendMessage) => void>();
+  /** 被 deferRpc 扣下的请求：respond 把结果发回客户端 */
+  const deferred: {
+    request: { id: number; method: string };
+    respond: (result: unknown) => void;
+  }[] = [];
   /** 每个后台的内存 stderr 缓冲（backend_stderr 读取；后台关闭后随之回收） */
   const stderr = new Map<number, string[]>();
   /** backend_stderr 命令的调用记录（backendId） */
@@ -94,6 +101,7 @@ function replayHost(
     close: typeof close;
     stderrReads: number[];
     shellLog: string[];
+    deferred: typeof deferred;
   } = {
     calls,
     workspaces,
@@ -101,6 +109,7 @@ function replayHost(
     close,
     stderrReads,
     shellLog,
+    deferred,
     createChannel: (onMessage) => onMessage,
     openUrl: async () => undefined,
     openPath: async () => undefined,
@@ -159,6 +168,18 @@ function replayHost(
       const id = request.params.sessionId;
       const workspace = workspaces.get(backendId) ?? "";
       let result: unknown = null;
+      if (deferRpc?.({ method: request.method, params: request.params }) === true) {
+        deferred.push({
+          request: { id: request.id, method: request.method },
+          respond: (r) => {
+            channel({
+              kind: "line",
+              line: JSON.stringify({ jsonrpc: "2.0", id: request.id, result: r }),
+            });
+          },
+        });
+        return;
+      }
       if (failRpc.includes(request.method)) {
         channel({
           kind: "line",
@@ -536,7 +557,11 @@ it("空状态不触碰控件时 createSession 只带解析出的默认模型", a
     expect(host.calls.some((call) => call.method === "runtime.createSession")).toBe(true),
   );
   const create = host.calls.find((call) => call.method === "runtime.createSession");
-  expect(create?.params).toEqual({ model: { provider: "test", model: "cheap" } });
+  expect(create?.params).toEqual({
+    cwd: "Z:/plain",
+    workspaceRoot: "Z:/plain",
+    model: { provider: "test", model: "cheap" },
+  });
 });
 
 it("会话内状态栏控件调用真实 setter", async () => {
@@ -776,36 +801,31 @@ it("设置区接管左栏：返回与 Esc 回到原会话且滚动位置不变",
   expect(screen.getByRole("region", { name: "权限确认" })).toBeTruthy();
 });
 
-it("配置变更让其他后台 reloadConfig，重载引起的通知不再转发", async () => {
+it("单后台没有跨后台协调：配置变更不发 reloadConfig，providersChanged 通知刷新列表", async () => {
   const host = replayHost();
   render(<App host={host} />);
   fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
   await within(await screen.findByRole("region", { name: "会话消息" })).findByText("alpha 正文");
-  const idOf = (ws: string) => [...host.workspaces].find(([, w]) => w === ws)?.[0];
-  await waitFor(() => {
-    expect(idOf("Z:/plain")).toBeDefined();
-    expect(idOf("Z:/qa-alpha")).toBeDefined();
-  });
-  const plain = idOf("Z:/plain") ?? -1;
-  const alpha = idOf("Z:/qa-alpha") ?? -1;
-  const reloads = () =>
-    host.calls.filter((c) => c.method === "runtime.reloadConfig").map((c) => c.backendId);
+  // ADR-0051：自始至终只有一个后台进程
+  await waitFor(() => expect(host.workspaces.size).toBe(1));
+  const backend = [...host.workspaces.keys()][0] ?? -1;
+  const reloads = () => host.calls.filter((c) => c.method === "runtime.reloadConfig").length;
+  const lists = () => host.calls.filter((c) => c.method === "runtime.listSessions").length;
 
-  // 设置页（走普通对话后台）保存成功 → 只让 alpha 重载，alpha 的回声不再回传
+  // 设置页保存成功：写操作由同一个后台串行「变更→重载→通知」，前端不再协调其他后台
   fireEvent.click(screen.getByRole("button", { name: "设置" }));
   fireEvent.click(await screen.findByRole("combobox", { name: "默认权限预设" }));
   fireEvent.click(screen.getByRole("option", { name: /^smart/ }));
-  await waitFor(() => {
-    expect(reloads()).toEqual([alpha]);
-  });
+  await waitFor(() =>
+    expect(host.calls.some((c) => c.method === "runtime.updateSettings")).toBe(true),
+  );
+  expect(reloads()).toBe(0);
 
-  // alpha 自己的变更（例如另一个窗口改了文件后它先重载）→ 让普通对话后台重载一次
-  host.notify(alpha, "runtime.providersChanged");
-  await waitFor(() => {
-    expect(reloads()).toEqual([alpha, plain]);
-  });
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(reloads()).toEqual([alpha, plain]);
+  // 后台自己的 providersChanged 通知到达 → 会话列表刷新一次，仍无 reloadConfig
+  const before = lists();
+  host.notify(backend, "runtime.providersChanged");
+  await waitFor(() => expect(lists()).toBe(before + 1));
+  expect(reloads()).toBe(0);
 });
 
 it("后台日志页按后台显示 stderr，支持刷新与复制全部", async () => {
@@ -820,8 +840,8 @@ it("后台日志页按后台显示 stderr，支持刷新与复制全部", async 
   const nav = await screen.findByRole("navigation", { name: "设置" });
   fireEvent.click(within(nav).getByRole("button", { name: /后台日志/ }));
   const page = await screen.findByTestId("logs-page");
-  // 常驻普通对话后台在选择器里
-  expect(within(page).getByRole("combobox", { name: "后台" }).textContent).toContain("对话");
+  // 单后台（ADR-0051）：选择器只有「后台」与「外壳」
+  expect(within(page).getByRole("combobox", { name: "后台" }).textContent).toContain("后台");
   // 打开页面即拉取一次
   await within(page).findByText(/backend-1 stderr 样例/);
   expect(host.stderrReads.length).toBe(1);
@@ -844,10 +864,9 @@ it("后台日志页的空态与已退出后台的回收", async () => {
   const page = await screen.findByTestId("logs-page");
   await within(page).findByText(/暂无 stderr 输出/);
   // 已退出的后台缓冲被回收：直接读报 unknown_backend 文案
-  const idOf = (ws: string) => [...host.workspaces].find(([, w]) => w === ws)?.[0];
-  const plain = idOf("Z:/plain") ?? -1;
+  const backend = [...host.workspaces.keys()][0] ?? -1;
   await act(async () => {
-    host.close(plain, 0);
+    host.close(backend, 0);
   });
   // 后台退出后页面选择器回落到剩下的「外壳」条目
   await within(page).findByText(/外壳暂无诊断输出/);
@@ -858,15 +877,15 @@ it("后台退出显示 stderr 尾部与「重启后台」；重启按 afterSeq �
   render(<App host={host} />);
   fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
   await within(await screen.findByRole("region", { name: "会话消息" })).findByText("alpha 正文");
-  const idOf = (ws: string) => [...host.workspaces].find(([, w]) => w === ws)?.[0];
-  const alphaBackend = await waitFor(() => {
-    const id = idOf("Z:/qa-alpha");
+  // 单后台：会话都开在同一个后台进程上
+  const backend = await waitFor(() => {
+    const id = [...host.workspaces.keys()][0];
     expect(id).toBeDefined();
     return id as number;
   });
 
   await act(async () => {
-    host.close(alphaBackend, 1, ["e1", "e2", "e3", "e4", "e5", "e6", "e7"]);
+    host.close(backend, 1, ["e1", "e2", "e3", "e4", "e5", "e6", "e7"]);
   });
   const crash = (await screen.findByText(/后台已退出（退出码 1）/)).closest(".crash");
   if (crash === null) throw new Error("缺少崩溃横幅");
@@ -876,10 +895,10 @@ it("后台退出显示 stderr 尾部与「重启后台」；重启按 afterSeq �
   fireEvent.click(within(crash as HTMLElement).getByRole("button", { name: /展开全部/ }));
   expect(within(crash as HTMLElement).getByText(/e1/)).toBeTruthy();
 
-  // 「查看日志」跳到后台日志页；退出后台的缓冲已回收，选择器只剩常驻后台
+  // 「查看日志」跳到后台日志页；退出后台的缓冲已回收，选择器只剩「外壳」
   fireEvent.click(within(crash as HTMLElement).getByRole("button", { name: "查看日志" }));
   const logsPage = await screen.findByTestId("logs-page");
-  expect(within(logsPage).getByRole("combobox", { name: "后台" }).textContent).toContain("对话");
+  expect(within(logsPage).getByRole("combobox", { name: "后台" }).textContent).toContain("外壳");
   fireEvent.keyDown(window, { key: "Escape" });
 
   // 重启后台：新进程 resumeSession + subscribe { afterSeq: 崩溃前 lastSeq }
@@ -891,7 +910,7 @@ it("后台退出显示 stderr 尾部与「重启后台」；重启按 afterSeq �
   );
   await waitFor(() => expect(screen.queryByText(/后台已退出/)).toBeNull());
   const newBackend = await waitFor(() => {
-    const id = idOf("Z:/qa-alpha");
+    const id = [...host.workspaces.keys()][0];
     expect(id).toBeDefined();
     return id as number;
   });
@@ -911,6 +930,86 @@ it("后台退出显示 stderr 尾部与「重启后台」；重启按 afterSeq �
   // 会话视图续接：消息与权限卡片仍在，可以继续对话
   expect(screen.getByRole("region", { name: "会话消息" }).textContent).toContain("alpha 正文");
   expect(screen.getByRole("region", { name: "权限确认" })).toBeTruthy();
+});
+
+it("点击会话立即切换选中项并显示「正在打开…」，内容到了再渲染（ADR-0051）", async () => {
+  // gamma 的 resumeSession 扣住不应答，模拟慢后台
+  const host = replayHost(
+    [],
+    undefined,
+    (request) => request.method === "runtime.resumeSession" && request.params.sessionId === "gamma",
+  );
+  render(<App host={host} />);
+  await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ });
+
+  fireEvent.click(screen.getByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  // 侧栏选中项立即是 gamma，会话区显示占位
+  await screen.findByText("正在打开…");
+  expect(screen.queryByRole("region", { name: "会话消息" })).toBeNull();
+  const row = screen.getByRole("button", { name: /^gamma (?:会话|正文)/ });
+  await waitFor(() => expect(row.className).toContain("on"));
+
+  // 放行后内容到达
+  await act(async () => {
+    host.deferred.forEach((d) => {
+      if (d.request.method === "runtime.resumeSession") {
+        d.respond({
+          sessionId: "gamma",
+          meta: { id: "gamma", cwd: "Z:/qa-gamma" },
+          config: { model: { provider: "test", model: "cheap" }, permissionPreset: "default" },
+          warnings: [],
+          lastSeq: 4,
+        });
+      }
+    });
+  });
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("gamma 正文");
+});
+
+it("打开失败时在该会话内显示错误与「重试」，不退回上一个会话", async () => {
+  const failing: string[] = [];
+  const host = replayHost(failing);
+  render(<App host={host} />);
+  await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ });
+
+  // 先正常打开 alpha
+  fireEvent.click(screen.getByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("alpha 正文");
+
+  // gamma 打开失败：选中留在 gamma，占位区显示错误与重试
+  failing.push("runtime.resumeSession");
+  fireEvent.click(screen.getByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  await screen.findByText("打开会话失败");
+  await screen.findByText(/runtime\.resumeSession 测试失败/);
+  expect(screen.queryByRole("region", { name: "会话消息" })).toBeNull();
+  const gammaRow = screen.getByRole("button", { name: /^gamma (?:会话|正文)/ });
+  await waitFor(() => expect(gammaRow.className).toContain("on"));
+
+  // 修复后点「重试」：同一个会话正常打开
+  failing.length = 0;
+  fireEvent.click(screen.getByRole("button", { name: "重试" }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("gamma 正文");
+});
+
+it("一次切换只刷新一次会话列表", async () => {
+  const host = replayHost();
+  render(<App host={host} />);
+  await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ });
+  const lists = () => host.calls.filter((c) => c.method === "runtime.listSessions").length;
+  const boot = lists();
+  expect(boot).toBeGreaterThan(0);
+
+  fireEvent.click(screen.getByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("gamma 正文");
+  await waitFor(() => expect(lists()).toBe(boot + 1));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(lists()).toBe(boot + 1);
+
+  fireEvent.click(screen.getByRole("button", { name: /^beta (?:会话|正文)/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("beta 正文");
+  await waitFor(() => expect(lists()).toBe(boot + 2));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(lists()).toBe(boot + 2);
 });
 
 // ── 自动更新（ADR-0050 第 3 节）──────────────────────────────

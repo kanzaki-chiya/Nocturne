@@ -138,7 +138,7 @@ export function SettingsPage({
   onWorkspaceChange: (dir: string | null) => Promise<string | undefined>;
   pickFolder: () => Promise<string | null>;
   providersVersion: number;
-  /** 写设置成功后调用：桌面端据此让其他后台 reloadConfig */
+  /** 写设置成功后调用：桌面端据此刷新会话列表 */
   onConfigSaved?: () => void;
   /** 「模型」页尾的链接：进入设置 › 服务商 */
   onOpenProviders?: () => void;

@@ -127,12 +127,11 @@ export function App({ host }: { host: DesktopHost }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [startupError, setStartupError] = useState<StartupError | null>(null);
   /**
-   * 最近一次后台退出：key/workspace 定位到那个后台（重启只起它），stderr 是
-   * closed 消息携带的尾部日志；restarting/restartError/sessionErrors 是
-   * 「重启后台」的进度与按会话的失败明细。
+   * 最近一次后台退出（单后台只有一个）：workspace 是启动它的工作区（重启
+   * 复用），stderr 是 closed 消息携带的尾部日志；restarting/restartError/
+   * sessionErrors 是「重启后台」的进度与按会话的失败明细。
    */
   const [backendExit, setBackendExit] = useState<{
-    key: string;
     workspace: string;
     code: number | null;
     stderr: string[];
@@ -147,7 +146,7 @@ export function App({ host }: { host: DesktopHost }) {
   const [providersVersion, setProvidersVersion] = useState(0);
   const [panel, setPanel] = useState<StatusPanel | null>(null);
   const [commandOutput, setCommandOutput] = useState<string | null>(null);
-  const [lockedSession, setLockedSession] = useState<SessionSummary | null>(null);
+  const [lockedSession, setLockedSession] = useState<{ id: string; cwd: string } | null>(null);
   const [dirMenuOpen, setDirMenuOpen] = useState(false);
   /**
    * 设置区当前导航项；null = 会话或空状态。设置区盖在会话区之上，会话区保持挂载
@@ -198,7 +197,7 @@ export function App({ host }: { host: DesktopHost }) {
   }, []);
 
   const refresh = useCallback(async () => {
-    const client = pool.any();
+    const client = pool.get();
     if (client === undefined) return;
     try {
       const list = await client.runtime.listSessions();
@@ -305,18 +304,17 @@ export function App({ host }: { host: DesktopHost }) {
     else document.documentElement.dataset.theme = theme;
   }, [p.theme]);
 
-  // 每个后台的 providersChanged：刷新会话列表并 bump providersVersion，
-  // 状态栏与空状态的模型菜单、打开中的服务商页随之重取数据；
-  // 这个后台自己的变更再让其他后台 reloadConfig（重载引起的回声不转发）
+  // 后台的 providersChanged：刷新会话列表并 bump providersVersion，
+  // 状态栏与空状态的模型菜单、打开中的服务商页随之重取数据。
+  // 单后台没有跨后台协调（ADR-0051）：写操作由同一个后台串行「变更→重载→通知」。
   useEffect(
     () =>
       pool.onClient((client) => {
-        // 新后台出现也刷新一次渲染：「后台日志」页的选择器才有候选项
+        // 新后台出现也刷新一次渲染：「后台日志」页的后台条目才有候选
         setConversationVersion((v) => v + 1);
         return client.onProvidersChanged(() => {
           setProvidersVersion((v) => v + 1);
           void refresh();
-          if (!pool.consumeEcho(client)) pool.propagateConfig(client);
         });
       }),
     [pool, refresh],
@@ -341,12 +339,12 @@ export function App({ host }: { host: DesktopHost }) {
     void host.homeDir().then(setHome);
   }, [host]);
 
-  // 后台退出：该后台上的会话标 dead（保留视图与 seq 断点），横幅给「重启后台」
+  // 后台退出：全部会话标 dead（保留视图与 seq 断点），横幅给「重启后台」
   useEffect(
     () =>
-      pool.onExit(({ key, workspace, code, stderr }) => {
-        conversations.backendExited(key);
-        setBackendExit({ key, workspace, code, stderr });
+      pool.onExit(({ workspace, code, stderr }) => {
+        conversations.backendExited();
+        setBackendExit({ workspace, code, stderr });
       }),
     [pool, conversations],
   );
@@ -355,36 +353,31 @@ export function App({ host }: { host: DesktopHost }) {
   useEffect(() => {
     setBackendExit((cur) => {
       if (cur === null || cur.restarting === true) return cur;
-      const backendUp = pool.get(cur.workspace) !== undefined;
-      const deadLeft = [...conversations.opened.values()].some(
-        (entry) => entry.dead === true && projectKey(entry.workspace) === cur.key,
-      );
+      const backendUp = pool.get() !== undefined;
+      const deadLeft = [...conversations.opened.values()].some((entry) => entry.dead === true);
       return backendUp && !deadLeft ? null : cur;
     });
   }, [conversationVersion, pool, conversations]);
 
-  // 只重启退出的那个后台；会话按各自 lastSeq 续接恢复，单会话失败单独列出
+  // 重启后台；全部 dead 会话按各自 lastSeq 在同一个新后台续接恢复，单会话失败单独列出
   const restartBackend = async () => {
-    const exit = backendExit;
-    if (exit === null) return;
+    if (backendExit === null) return;
     setBackendExit((cur) => {
-      if (cur?.key !== exit.key) return cur;
+      if (cur === null) return cur;
       const { restarting: _r, restartError: _e, sessionErrors: _s, ...rest } = cur;
       return { ...rest, restarting: true };
     });
     try {
-      const { failed } = await conversations.resumeBackend(exit.workspace);
+      const { failed } = await conversations.resumeBackend(backendExit.workspace);
       await refresh();
       setBackendExit((cur) => {
-        if (cur?.key !== exit.key) return cur;
+        if (cur === null) return cur;
         if (failed.length === 0) return null;
         return { ...cur, restarting: false, sessionErrors: failed };
       });
     } catch (error) {
       setBackendExit((cur) =>
-        cur?.key !== exit.key
-          ? cur
-          : { ...cur, restarting: false, restartError: errMessage(error) },
+        cur === null ? cur : { ...cur, restarting: false, restartError: errMessage(error) },
       );
     }
   };
@@ -418,16 +411,20 @@ export function App({ host }: { host: DesktopHost }) {
     return dir;
   }, [host, prefs, refresh, bumpPrefs]);
 
-  const selectSession = async (summary: SessionSummary, force = false) => {
+  const selectSession = async (id: string, workspace: string, force = false) => {
+    // 选中立即生效：会话区先显示「正在打开…」，内容到了再渲染（ADR-0051）
+    setSelectedId(id);
+    setPanel(null);
+    setLockedSession(null);
     try {
-      await conversations.open(summary.id, summary.cwd, force);
+      await conversations.open(id, workspace, force);
       setSelectedId(conversations.selectedId);
-      setPanel(null);
-      setLockedSession(null);
       await refresh();
     } catch (error) {
-      if (error instanceof RpcError && error.code === "session_locked") setLockedSession(summary);
-      else setStartupError({ message: errMessage(error) });
+      if (error instanceof RpcError && error.code === "session_locked") {
+        setLockedSession({ id, cwd: workspace });
+      }
+      // 其他失败：openErrors 已记录，该会话的占位区显示错误与「重试」
     }
   };
 
@@ -444,7 +441,8 @@ export function App({ host }: { host: DesktopHost }) {
     }
   };
 
-  // 「普通对话工作区」切换：prefs 记覆盖与新路径 → 常驻后台在新位置重启 → 刷新列表。
+  // 「普通对话工作区」切换：prefs 记覆盖与新路径 → 刷新列表。
+  // 单后台不随工作区切换重启（ADR-0051）；后台没在跑时 ensure 以新工作区为 cwd 启动。
   // 旧位置的会话 cwd 仍在 plainWorkspaces 里，继续归「对话」区。
   const changePlainWorkspace = useCallback(
     async (dir: string | null): Promise<string | undefined> => {
@@ -463,21 +461,11 @@ export function App({ host }: { host: DesktopHost }) {
       prefs.update({ plainWorkspace: dir === null ? undefined : target });
       prefs.update({ plainWorkspaces: [...known, ...remembered] });
       bumpPrefs();
-      const previous = workspaceRef.current;
       workspaceRef.current = target;
-      if (
-        previous !== null &&
-        projectKey(previous) !== projectKey(target) &&
-        ![...conversations.opened.values()].some(
-          (entry) => projectKey(entry.workspace) === projectKey(previous),
-        )
-      ) {
-        await pool.release(previous);
-      }
       await refresh();
       return undefined;
     },
-    [pool, prefs, bumpPrefs, refresh, conversations, defaultWorkspace],
+    [pool, prefs, bumpPrefs, refresh, defaultWorkspace],
   );
 
   // 发送消息：接受成功后登记附件缩略图源（以 sha256 命中消息流里的图片）
@@ -563,14 +551,28 @@ export function App({ host }: { host: DesktopHost }) {
   const pinnedIds = new Set(p.pinned);
 
   const active = conversations.selected;
-  const selected = sessions.find((s) => s.id === conversations.selectedId);
+  const selected = sessions.find((s) => s.id === selectedId);
+  /** 当前选中会话的打开失败（占位区显示错误与「重试」，不退回上一个会话） */
+  const selectedOpenError =
+    selectedId === null ? undefined : conversations.openErrors.get(selectedId);
+  // 会话由忙转闲时刷新一次列表（标题/时间可能更新）；切换本身由
+  // selectSession 刷新一次，不在此重复（ADR-0051）
+  const runningSessions = useRef<ReadonlySet<string>>(new Set());
   useEffect(() => {
-    if (active !== undefined && !active.busy) void refresh();
-  }, [active?.view.turnCount, selectedId, refresh]);
+    const now = new Set(
+      [...conversations.opened.values()]
+        .filter(
+          (entry) => entry.dead !== true && (entry.busy || conversationStatus(entry) !== "idle"),
+        )
+        .map((entry) => entry.session.id),
+    );
+    const finished = [...runningSessions.current].filter((id) => !now.has(id));
+    runningSessions.current = now;
+    if (finished.length > 0) void refresh();
+  }, [conversationVersion, conversations, refresh]);
 
-  // 服务商 / 设置页走常驻的普通对话后台（全局配置用哪个后台读写都一样，优先固定一个）
-  const pageClient =
-    (effectiveWorkspace !== null ? pool.get(effectiveWorkspace) : undefined) ?? pool.any();
+  // 服务商 / 设置页走常驻后台（全局配置；项目层查询由各页/控件自带 workspaceRoot）
+  const pageClient = pool.get();
   // 打开的会话正在用的服务商：删除按钮预先置灰（真正的拦截仍以服务端 provider_in_use 为准）
   const providersInUse = new Set<string>();
   for (const entry of conversations.opened.values()) {
@@ -669,14 +671,18 @@ export function App({ host }: { host: DesktopHost }) {
     path: project.path,
     name: project.name,
   }));
-  // 「后台日志」页的后台选择器：常驻普通对话后台 + 各项目后台，最后是外壳自身日志
+  // 「后台日志」页的选择器（ADR-0051）：单后台只有「后台」与「外壳」两项
+  const currentBackend = pool.current();
   const logTargets: BackendLogTarget[] = [
-    ...pool.running().map((b) => ({
-      backendId: b.backendId,
-      label:
-        plainKey !== null && b.key === plainKey ? "对话（常驻后台）" : projectName(b.workspace),
-      detail: abbreviateHome(b.workspace, home),
-    })),
+    ...(currentBackend !== undefined
+      ? [
+          {
+            backendId: currentBackend.backendId,
+            label: "后台",
+            detail: abbreviateHome(currentBackend.workspace, home),
+          },
+        ]
+      : []),
     {
       backendId: SHELL_LOG_ID,
       label: "外壳",
@@ -697,7 +703,7 @@ export function App({ host }: { host: DesktopHost }) {
           const summary = sessions.find((s) => s.id === id);
           if (summary !== undefined) {
             setPage(null);
-            void selectSession(summary);
+            void selectSession(summary.id, summary.cwd);
           }
         }}
         onToggleCollapse={(key) => {
@@ -852,7 +858,7 @@ export function App({ host }: { host: DesktopHost }) {
                   workspaceRoot={effectiveWorkspace ?? undefined}
                   version={providersVersion}
                   onChanged={() => {
-                    if (pageClient) pool.propagateConfig(pageClient);
+                    void refresh();
                   }}
                 />
               </PaneErrorBoundary>
@@ -930,7 +936,7 @@ export function App({ host }: { host: DesktopHost }) {
                   pickFolder={() => host.pickFolder()}
                   providersVersion={providersVersion}
                   onConfigSaved={() => {
-                    if (pageClient !== undefined) pool.propagateConfig(pageClient);
+                    void refresh();
                   }}
                   onOpenProviders={() => {
                     setPage("providers");
@@ -945,7 +951,7 @@ export function App({ host }: { host: DesktopHost }) {
           inert={page !== null}
           aria-hidden={page !== null ? true : undefined}
         >
-          {active !== undefined ? (
+          {active !== undefined && selectedOpenError === undefined ? (
             <PaneErrorBoundary key={active.session.id}>
               <SessionPane
                 view={active.view}
@@ -975,15 +981,37 @@ export function App({ host }: { host: DesktopHost }) {
                 }}
               />
             </PaneErrorBoundary>
+          ) : selectedId !== null ? (
+            // 正在打开 / 打开失败：占位区不退回上一个会话（ADR-0051）
+            <div className="center">
+              <div className="nodecard">
+                {selectedOpenError === undefined ? (
+                  <div className="lead">正在打开…</div>
+                ) : (
+                  <>
+                    <h3>打开会话失败</h3>
+                    <div className="lead">{selectedOpenError.message}</div>
+                    <div className="acts">
+                      <button
+                        className="btn primary"
+                        onClick={() => void selectSession(selectedId, selectedOpenError.workspace)}
+                      >
+                        重试
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           ) : (
             <PaneErrorBoundary key="draft">
               <DraftPane
-                runtime={pool.any()?.runtime}
+                runtime={pool.get()?.runtime}
                 prefs={prefs}
                 workspace={conversations.draftWorkspace ?? effectiveWorkspace}
                 plainKey={plainKey}
                 projects={projects}
-                disabled={effectiveWorkspace === null || pool.any() === undefined}
+                disabled={effectiveWorkspace === null || pool.get() === undefined}
                 historyKey={conversations.draftWorkspace ?? effectiveWorkspace}
                 providersVersion={providersVersion}
                 onSubmit={submitInput}
@@ -1086,7 +1114,7 @@ export function App({ host }: { host: DesktopHost }) {
                 </button>
                 <button
                   className="btn primary"
-                  onClick={() => void selectSession(lockedSession, true)}
+                  onClick={() => void selectSession(lockedSession.id, lockedSession.cwd, true)}
                 >
                   强制打开
                 </button>
@@ -1166,7 +1194,7 @@ function SessionPane({
   onManageProviders,
 }: SessionPaneProps) {
   const runtime = client.runtime;
-  const controls = useSessionControls(session, runtime, view, prefs, providersVersion);
+  const controls = useSessionControls(session, runtime, view, prefs, providersVersion, workspace);
   const [skills, setSkills] = useState<SkillOverview[]>([]);
   const [externalAgents, setExternalAgents] = useState<ExternalAgentOverview[]>([]);
   useEffect(() => {
@@ -1306,7 +1334,7 @@ function DraftPane({
   providersVersion,
   onManageProviders,
 }: DraftPaneProps) {
-  const draft = useDraftControls(runtime, prefs, providersVersion);
+  const draft = useDraftControls(runtime, prefs, providersVersion, workspace);
   const [skills, setSkills] = useState<SkillOverview[]>([]);
   const [externalAgents, setExternalAgents] = useState<ExternalAgentOverview[]>([]);
   useEffect(() => {

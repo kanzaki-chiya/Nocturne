@@ -13,39 +13,56 @@ import {
   conversationStatus,
   type OpenConversation,
 } from "../src/conversations";
-import { projectKey } from "../src/session-tree";
 
-function fixture(lockedId?: string, rejectSubmit = false, failResume?: ReadonlySet<string>) {
-  const clients = new Map<string, RpcClient>();
+/**
+ * 单后台假池（ADR-0051）：ensure 第一次调用建起唯一一个 client，
+ * 之后任何 workspace 都复用它；crash() 模拟进程退出，下一次 ensure 起新进程。
+ * deferResume 里的会话：resumeSession 收到后不立即应答，由 releaseResume 放行，
+ * 用来模拟「先发出的打开请求晚返回」。
+ */
+function fixture(
+  lockedId?: string,
+  rejectSubmit = false,
+  failResume?: ReadonlySet<string>,
+  deferResume?: ReadonlySet<string>,
+) {
+  let client: RpcClient | undefined;
+  let server: LineTransport | undefined;
+  /** 会话所在的工作区（打开时记录；事件回放按会话路由，与真实后台一致） */
   const opened = new Map<string, string>();
-  const calls: { workspace: string; method: string; params: Record<string, unknown> }[] = [];
-  const streams = new Map<string, LineTransport>();
-  const turns = new Map<string, { workspace: string; id: unknown }>();
+  const calls: { method: string; params: Record<string, unknown> }[] = [];
+  const turns = new Map<string, unknown>();
   const seqs = new Map<string, number>();
-  /** 崩溃过的工作区：failResume 只在新后台的 resumeSession 上生效 */
-  const crashed = new Set<string>();
+  const stalled = new Map<string, { id: unknown }>();
+  /** crash 后为 true：failResume 只在重建的新后台生效 */
+  let afterCrash = false;
   let nextSession = 1;
   const pool = {
     ensure: vi.fn(async (workspace: string) => {
-      const existing = clients.get(workspace);
-      if (existing !== undefined) return existing;
-      const [transport, server] = createMemoryTransportPair();
-      streams.set(workspace, server);
-      server.onLine((line) => {
+      if (client !== undefined) return client;
+      const [transport, serverEnd] = createMemoryTransportPair();
+      server = serverEnd;
+      serverEnd.onLine((line) => {
         const request = JSON.parse(line) as {
           id: unknown;
           method: string;
           params: Record<string, unknown>;
         };
-        calls.push({ workspace, method: request.method, params: request.params });
+        calls.push({ method: request.method, params: request.params });
         const id = String(request.params.sessionId ?? `new-${nextSession++}`);
         let result: unknown = null;
+        const sendResult = () =>
+          serverEnd.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
+        if (request.method === "runtime.resumeSession" && deferResume?.has(id) === true) {
+          stalled.set(id, { id: request.id });
+          return;
+        }
         if (
           request.method === "runtime.resumeSession" &&
           failResume?.has(id) === true &&
-          crashed.has(workspace)
+          afterCrash
         ) {
-          server.send(
+          serverEnd.send(
             JSON.stringify({
               jsonrpc: "2.0",
               id: request.id,
@@ -59,7 +76,7 @@ function fixture(lockedId?: string, rejectSubmit = false, failResume?: ReadonlyS
           id === lockedId &&
           request.params.force !== true
         ) {
-          server.send(
+          serverEnd.send(
             JSON.stringify({
               jsonrpc: "2.0",
               id: request.id,
@@ -92,7 +109,7 @@ function fixture(lockedId?: string, rejectSubmit = false, failResume?: ReadonlyS
         if (request.method === "session.close") opened.delete(id);
         if (request.method === "session.submit") {
           if (rejectSubmit) {
-            server.send(
+            serverEnd.send(
               JSON.stringify({
                 jsonrpc: "2.0",
                 id: request.id,
@@ -105,11 +122,11 @@ function fixture(lockedId?: string, rejectSubmit = false, failResume?: ReadonlyS
             );
             return;
           }
-          turns.set(id, { workspace, id: request.id });
+          turns.set(id, request.id);
           // 接受语义：先发 message.user 事件，响应留到 complete()
           const seq = (seqs.get(id) ?? 0) + 1;
           seqs.set(id, seq);
-          server.send(
+          serverEnd.send(
             JSON.stringify({
               jsonrpc: "2.0",
               method: "event",
@@ -127,17 +144,14 @@ function fixture(lockedId?: string, rejectSubmit = false, failResume?: ReadonlyS
           );
           return;
         }
-        server.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
+        sendResult();
       });
-      const client = createRpcClient(transport, { clientName: "test" });
-      await client.initialize();
-      clients.set(workspace, client);
-      return client;
+      const c = createRpcClient(transport, { clientName: "test" });
+      await c.initialize();
+      client = c;
+      return c;
     }),
-    release: vi.fn(async (workspace: string) => {
-      clients.get(workspace)?.close();
-      clients.delete(workspace);
-    }),
+    get: () => client,
   };
   const failures: unknown[] = [];
   const controller = new Conversations(
@@ -147,11 +161,10 @@ function fixture(lockedId?: string, rejectSubmit = false, failResume?: ReadonlyS
     (e) => failures.push(e),
   );
   function event(id: string, type: string, payload: unknown) {
-    const workspace = opened.get(id);
-    if (workspace === undefined) throw new Error("会话未打开");
+    if (!opened.has(id)) throw new Error("会话未打开");
     const seq = (seqs.get(id) ?? 0) + 1;
     seqs.set(id, seq);
-    streams.get(workspace)?.send(
+    server?.send(
       JSON.stringify({
         jsonrpc: "2.0",
         method: "event",
@@ -170,21 +183,40 @@ function fixture(lockedId?: string, rejectSubmit = false, failResume?: ReadonlyS
       steps: 1,
       usage: { inputTokens: 1, outputTokens: 1 },
     });
-    streams
-      .get(turn.workspace)
-      ?.send(JSON.stringify({ jsonrpc: "2.0", id: turn.id, result: "done" }));
+    server?.send(JSON.stringify({ jsonrpc: "2.0", id: turn, result: "done" }));
   }
-  /** 模拟后台进程退出：BackendPool 会把条目移除，下一次 ensure 起新进程 */
-  function crash(workspace: string) {
-    clients.delete(workspace);
-    streams.delete(workspace);
-    crashed.add(workspace);
+  /** 模拟后台进程退出：下一次 ensure 起新进程，已打开会话由 backendExited 标 dead */
+  function crash() {
+    client?.close();
+    client = undefined;
+    server = undefined;
+    afterCrash = true;
   }
-  return { controller, pool, calls, opened, failures, event, complete, crash };
+  /** 放行被 deferResume 卡住的 resumeSession */
+  function releaseResume(id: string) {
+    const pending = stalled.get(id);
+    if (pending === undefined || server === undefined) throw new Error("没有卡住的请求");
+    stalled.delete(id);
+    opened.set(id, "");
+    server.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: pending.id,
+        result: {
+          sessionId: id,
+          meta: { id, cwd: "" },
+          config: { model: { provider: "test", model: "cheap" } },
+          warnings: [],
+          lastSeq: 0,
+        },
+      }),
+    );
+  }
+  return { controller, pool, calls, opened, failures, event, complete, crash, releaseResume };
 }
 
 describe("desktop conversation lifecycle", () => {
-  it("新建只选择工作区，首次消息才建会话；普通对话后台不释放", async () => {
+  it("新建只选择工作区，首次消息才建会话；单后台常驻不释放", async () => {
     const f = fixture();
     await f.controller.newConversation("plain");
     expect(f.pool.ensure).not.toHaveBeenCalled();
@@ -192,12 +224,16 @@ describe("desktop conversation lifecycle", () => {
     await f.controller.send({ text: "hello", attachments: [] });
     const id = f.controller.selectedId;
     expect(id).not.toBeNull();
+    const create = f.calls.find((c) => c.method === "runtime.createSession");
+    // 会话级 cwd/workspaceRoot 随会话传给后台（ADR-0051）
+    expect(create?.params).toMatchObject({ cwd: "plain", workspaceRoot: "plain" });
     expect(f.calls.filter((c) => c.method === "runtime.createSession")).toHaveLength(1);
     f.complete(id as string);
     await vi.waitFor(() => expect(f.controller.selected?.busy).toBe(false));
     await f.controller.newConversation("project");
     expect(f.opened.size).toBe(0);
-    expect(f.pool.release).not.toHaveBeenCalled();
+    // 后台只有一个且常驻：会话关闭不重启也不释放进程
+    expect(f.calls.filter((c) => c.method === "initialize")).toHaveLength(1);
   });
 
   it("草稿与已有会话都原样传递delegate，不创建外部子会话", async () => {
@@ -218,24 +254,21 @@ describe("desktop conversation lifecycle", () => {
     f.complete(id);
   });
 
-  it("打开回放后切换：空闲旧会话释放锁并退出旧项目后台", async () => {
+  it("不同项目的会话在同一个后台打开；切走的空闲会话释放锁", async () => {
     const f = fixture();
     await f.controller.open("a", "project-a");
     await f.controller.open("b", "project-b");
     expect(f.controller.selectedId).toBe("b");
     expect(f.opened.has("a")).toBe(false);
     expect(f.opened.has("b")).toBe(true);
-    expect(f.pool.release).toHaveBeenCalledWith("project-a");
-    expect(f.calls.filter((c) => c.workspace === "project-a").map((c) => c.method)).toEqual([
-      "initialize",
-      "runtime.resumeSession",
-      "session.subscribe",
-      "session.unsubscribe",
-      "session.close",
-    ]);
+    // 后台只启动一次；a 在同一个连接上 unsubscribe+close
+    expect(f.calls.filter((c) => c.method === "initialize")).toHaveLength(1);
+    expect(
+      f.calls.filter((c) => c.method === "session.close" && c.params.sessionId === "a"),
+    ).toHaveLength(1);
   });
 
-  it("运行与待确认旧会话保持打开，完成后自动释放；同项目其他会话不退出", async () => {
+  it("运行与待确认旧会话保持打开，完成后自动释放；同项目其他会话不受影响", async () => {
     const f = fixture();
     await f.controller.open("a", "project");
     await f.controller.send({ text: "run", attachments: [] });
@@ -251,45 +284,75 @@ describe("desktop conversation lifecycle", () => {
     const pending = f.controller.opened.get("a");
     if (pending === undefined) throw new Error("运行中的会话提前关闭");
     await vi.waitFor(() => expect(conversationStatus(pending)).toBe("pending"));
-    expect(f.pool.release).not.toHaveBeenCalled();
     f.complete("a");
     await vi.waitFor(() => expect(f.opened.has("a")).toBe(false));
     expect(f.opened.has("b")).toBe(true);
-    expect(f.pool.release).not.toHaveBeenCalled();
     expect(f.failures).toEqual([]);
   });
 
-  it("锁定目标打开失败不关闭旧会话；只有显式force才能接管", async () => {
+  it("锁定目标打开失败：选中留在目标会话并显示错误，显式 force 才能接管", async () => {
     const f = fixture("locked");
     await f.controller.open("old", "plain");
     await expect(f.controller.open("locked", "project")).rejects.toMatchObject({
       code: "session_locked",
     });
-    expect(f.controller.selectedId).toBe("old");
-    expect(f.opened.has("old")).toBe(true);
+    // 选中不退回旧会话：占位区按 openErrors 显示错误与「重试」（ADR-0051）
+    expect(f.controller.selectedId).toBe("locked");
+    expect(f.controller.openErrors.get("locked")?.message).toContain("正在别处使用");
+    expect(f.controller.openErrors.get("locked")?.workspace).toBe("project");
     expect(f.opened.has("locked")).toBe(false);
+    await vi.waitFor(() => expect(f.opened.has("old")).toBe(false));
     await f.controller.open("locked", "project", true);
     expect(f.controller.selectedId).toBe("locked");
-    expect(f.opened.has("old")).toBe(false);
+    expect(f.controller.openErrors.has("locked")).toBe(false);
+    expect(f.opened.has("locked")).toBe(true);
   });
 
-  it("并发切换按点击顺序执行，不遗留多个空闲项目后台", async () => {
+  it("快速连点：被取代的打开不再请求后台，最后点击的会话生效", async () => {
     const f = fixture();
-    await Promise.all([
+    const pending = [
       f.controller.open("a", "project-a"),
       f.controller.open("b", "project-b"),
-      f.controller.newConversation("plain"),
-    ]);
+      f.controller.open("c", "project-c"),
+    ];
+    await Promise.all(pending);
+    expect(f.controller.selectedId).toBe("c");
+    expect(f.opened.has("c")).toBe(true);
+    // a、b 的打开在串行队列里被 token 跳过：没有发 resumeSession
+    expect(f.calls.filter((c) => c.method === "runtime.resumeSession")).toHaveLength(1);
+    expect(f.calls.find((c) => c.method === "runtime.resumeSession")?.params.sessionId).toBe("c");
+    await f.controller.newConversation("plain");
     expect(f.controller.selectedId).toBeNull();
     expect(f.opened.size).toBe(0);
-    expect(f.pool.release.mock.calls).toEqual([["project-a"], ["project-b"]]);
+  });
+
+  it("先发出的打开晚返回时不覆盖界面：接上的会话按空闲路径关闭", async () => {
+    const f = fixture(undefined, false, undefined, new Set(["a"]));
+    const openA = f.controller.open("a", "project-a");
+    // a 的 resumeSession 真正到达后台并被扣住；这期间用户改点 b（b 排在 a 之后）
+    await vi.waitFor(() =>
+      expect(
+        f.calls.some((c) => c.method === "runtime.resumeSession" && c.params.sessionId === "a"),
+      ).toBe(true),
+    );
+    const openB = f.controller.open("b", "project-b");
+    expect(f.controller.selectedId).toBe("b");
+    // a 的迟到响应到了：a 接上后发现自己已不是选中项，按空闲路径关闭
+    f.releaseResume("a");
+    await Promise.all([openA, openB]);
+    await vi.waitFor(() => expect(f.opened.has("a")).toBe(false));
+    expect(f.opened.has("b")).toBe(true);
+    expect(f.controller.selectedId).toBe("b");
+    expect(
+      f.calls.filter((c) => c.method === "session.close" && c.params.sessionId === "a"),
+    ).toHaveLength(1);
   });
 });
 
 describe("send 接受语义与创建选项", () => {
-  it("草稿发送把显式模型/档位/预设传给 createSession，未选项省略", async () => {
+  it("草稿发送把显式模型/档位/预设与会话工作区传给 createSession，未选项省略", async () => {
     const f = fixture();
-    await f.controller.newConversation("plain");
+    await f.controller.newConversation("project-x");
     await f.controller.send(
       { text: "hi", attachments: [] },
       {
@@ -300,20 +363,31 @@ describe("send 接受语义与创建选项", () => {
     );
     const create = f.calls.find((c) => c.method === "runtime.createSession");
     expect(create?.params).toMatchObject({
+      cwd: "project-x",
+      workspaceRoot: "project-x",
       model: { provider: "test", model: "fancy" },
       reasoningEffort: "high",
       permissionPreset: "smart",
     });
     const submit = f.calls.find((c) => c.method === "session.submit");
     expect(submit?.params).toMatchObject({ text: "hi", attachments: [] });
+    // 默认模型查询带草稿工作区（项目层配置可能覆盖默认模型）
+    expect(f.calls.find((c) => c.method === "runtime.defaultModel")).toBeUndefined();
   });
 
-  it("未触碰的档位与预设不进 createSession 参数", async () => {
+  it("未触碰的档位与预设不进 createSession 参数；defaultModel 按工作区查", async () => {
     const f = fixture();
-    await f.controller.newConversation("plain");
+    await f.controller.newConversation("project-x");
     await f.controller.send({ text: "hi", attachments: [] });
     const create = f.calls.find((c) => c.method === "runtime.createSession");
-    expect(create?.params).toEqual({ model: { provider: "test", model: "cheap" } });
+    expect(create?.params).toEqual({
+      cwd: "project-x",
+      workspaceRoot: "project-x",
+      model: { provider: "test", model: "cheap" },
+    });
+    expect(f.calls.find((c) => c.method === "runtime.defaultModel")?.params).toEqual({
+      workspaceRoot: "project-x",
+    });
   });
 
   it("submit 在接受前被拒绝时抛出，会话保持未选中并按空闲路径关闭", async () => {
@@ -330,19 +404,19 @@ describe("send 接受语义与创建选项", () => {
 
 describe("后台崩溃与重启恢复", () => {
   /** a 忙（send 未 complete）所以切到 b 后仍打开；b 空闲但被选中 */
-  async function twoSessionsOnProject(f: ReturnType<typeof fixture>) {
-    await f.controller.open("a", "project");
+  async function twoSessions(f: ReturnType<typeof fixture>, wsA = "project", wsB = "project") {
+    await f.controller.open("a", wsA);
     await f.controller.send({ text: "run", attachments: [] }); // a 收到 seq 1
-    await f.controller.open("b", "project");
+    await f.controller.open("b", wsB);
     f.event("a", "message.user", { content: [{ type: "text", text: "x" }] }); // a 收到 seq 2
   }
 
   it("后台退出时会话标 dead，保留 id、视图与 lastSeq 断点，选中不变", async () => {
     const f = fixture();
-    await twoSessionsOnProject(f);
+    await twoSessions(f);
     const viewA = f.controller.opened.get("a")?.view;
-    f.crash("project");
-    f.controller.backendExited(projectKey("project"));
+    f.crash();
+    f.controller.backendExited();
     expect(f.controller.opened.get("a")?.dead).toBe(true);
     expect(f.controller.opened.get("b")?.dead).toBe(true);
     expect(f.controller.selectedId).toBe("b");
@@ -357,11 +431,11 @@ describe("后台崩溃与重启恢复", () => {
 
   it("重启后台后逐个 resumeSession 并按各自 lastSeq 续接订阅", async () => {
     const f = fixture();
-    await twoSessionsOnProject(f);
+    await twoSessions(f);
     const viewA = f.controller.opened.get("a")?.view;
     const viewB = f.controller.opened.get("b")?.view;
-    f.crash("project");
-    f.controller.backendExited(projectKey("project"));
+    f.crash();
+    f.controller.backendExited();
 
     const result = await f.controller.resumeBackend("project");
     expect(result.failed).toEqual([]);
@@ -383,19 +457,21 @@ describe("后台崩溃与重启恢复", () => {
     expect(f.controller.selectedId).toBe("b");
   });
 
-  it("单个会话恢复失败不阻塞其他会话，失败的保持 dead", async () => {
+  it("多个项目的会话在同一个后台一起恢复，单个失败不阻塞其余", async () => {
     const f = fixture(undefined, false, new Set(["a"]));
-    await twoSessionsOnProject(f);
-    f.crash("project");
-    f.controller.backendExited(projectKey("project"));
+    // a 在 project-x、b 在 project-y：单后台崩溃后都在新后台恢复
+    await twoSessions(f, "project-x", "project-y");
+    f.crash();
+    f.controller.backendExited();
 
-    const result = await f.controller.resumeBackend("project");
+    const result = await f.controller.resumeBackend("project-x");
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]).toMatchObject({ id: "a" });
     expect(result.failed[0]?.message).toContain("会话日志已损坏");
-    // a 仍是 dead 可重试；b 已正常续接
+    // a 仍是 dead 可重试；b 已正常续接（没有按工作区分后台）
     expect(f.controller.opened.get("a")?.dead).toBe(true);
     expect(f.controller.opened.get("b")?.dead).toBeUndefined();
+    expect(f.controller.opened.get("b")?.workspace).toBe("project-y");
     const subB = f.calls
       .filter((c) => c.method === "session.subscribe" && c.params.sessionId === "b")
       .at(-1);
@@ -404,10 +480,10 @@ describe("后台崩溃与重启恢复", () => {
 
   it("点开 dead 会话自动重启后台并按 lastSeq 续接", async () => {
     const f = fixture();
-    await twoSessionsOnProject(f);
+    await twoSessions(f);
     const viewA = f.controller.opened.get("a")?.view;
-    f.crash("project");
-    f.controller.backendExited(projectKey("project"));
+    f.crash();
+    f.controller.backendExited();
 
     await f.controller.open("a", "project");
     const subA = f.calls
