@@ -32,7 +32,9 @@ const roots: string[] = [];
 const sessions: RuntimeSession[] = [];
 afterEach(async () => {
   for (const session of sessions.splice(0)) await session.close();
-  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+  // Windows CI 上 rmdir 偶发 ENOTEMPTY，与 titles.test.ts 等同样重试
+  for (const root of roots.splice(0))
+    await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 });
 const done = (): FakeScript => [
   { type: "text_delta", text: "done" },
