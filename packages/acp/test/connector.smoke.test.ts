@@ -66,6 +66,14 @@ it.runIf(process.env.NOCTURNE_ACP_SMOKE === "1")("真实 ACP agent 的只读 tas
       },
       ctx,
     );
+    // 冒烟需要人工判断对方是否主动请求权限：打印结果摘要（不含凭据）
+    console.info("smoke output:", JSON.stringify(result.output));
+    console.info(
+      "transcript lines:",
+      (await fs.readFile(path.join(cwd, "external", "smoke.jsonl"), "utf8").catch(() => ""))
+        .split("\n")
+        .filter(Boolean).length,
+    );
     expect(result.status).toBe("ok");
     expect(result.modelContent).toContain("nocturne-acp-readonly-smoke");
     expect(await fs.readFile(path.join(cwd, "input.txt"), "utf8")).toBe(
