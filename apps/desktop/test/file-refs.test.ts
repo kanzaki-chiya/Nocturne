@@ -3,6 +3,7 @@ import type { UserEntry } from "@nocturne/core/protocol";
 
 import {
   completeFileRefs,
+  fileRefDeleteRange,
   fileRefToken,
   fileRefTitle,
   userText,
@@ -56,6 +57,44 @@ describe("completeFileRefs", () => {
     expect(file).toMatchObject({ insert: "@src/main.ts ", directory: false });
     expect(dir).toMatchObject({ insert: "@src/", directory: true });
     expect(spaced).toMatchObject({ insert: '@"my file.txt" ', directory: false });
+  });
+});
+
+describe("fileRefDeleteRange（U-05 整删 @引用）", () => {
+  const back = (text: string, cursor: number) => fileRefDeleteRange(text, cursor, "backward");
+  const fwd = (text: string, cursor: number) => fileRefDeleteRange(text, cursor, "forward");
+  // "check @src/a.ts tail": @ 在 6，token 结束 15，空格 15，tail 16
+  const text = "check @src/a.ts tail";
+
+  it("Backspace：光标在引用后或分隔空格后，整删并连吞一个空格", () => {
+    expect(back(text, 15)).toEqual({ start: 6, end: 16 }); // @src/a.ts|
+    expect(back(text, 16)).toEqual({ start: 6, end: 16 }); // @src/a.ts |
+  });
+
+  it("Backspace：词中、未终止裸词、非边界 @ 均不整删", () => {
+    expect(back(text, 14)).toBeUndefined(); // 词中 @src/a.t|s
+    expect(back("check @src/a.ts", 15)).toBeUndefined(); // 行尾裸词＝可能在键入
+    expect(back("check @fo", 9)).toBeUndefined(); // 正在键入的补全词
+    expect(back("a@b c", 4)).toBeUndefined(); // @ 前不是空白
+    expect(back("check @src/a.ts  x", 17)).toBeUndefined(); // 两个空格＝用户键入的分隔
+  });
+
+  it("Backspace：引号形式须收尾引号；目录引用被空格终止也算完整", () => {
+    const quoted = 'check @"my file.txt" x'; // @ 在 6，收尾引号在 19，空格 20
+    expect(back(quoted, 20)).toEqual({ start: 6, end: 21 }); // @"…"|
+    expect(back(quoted, 21)).toEqual({ start: 6, end: 21 }); // @"…" |
+    expect(back('check @"my file.txt"', 20)).toEqual({ start: 6, end: 20 }); // 行尾收尾引号即完整
+    expect(back('check @"my file.txt', 19)).toBeUndefined(); // 未收尾引号＝键入中
+    expect(back(quoted, 19)).toBeUndefined(); // 光标在引号内
+    expect(back("check @src/ x", 12)).toEqual({ start: 6, end: 12 }); // 目录+空格
+  });
+
+  it("Delete：光标在引用前整删；非边界或未完成引用不整删", () => {
+    expect(fwd(text, 6)).toEqual({ start: 6, end: 16 });
+    expect(fwd('check @"my file.txt"', 6)).toEqual({ start: 6, end: 20 });
+    expect(fwd("check @src/a.ts", 6)).toBeUndefined(); // 行尾裸词
+    expect(fwd("xa@b c", 1)).toBeUndefined(); // @ 前不是空白
+    expect(fwd(text, 7)).toBeUndefined(); // 光标在词中不在 @ 上
   });
 });
 

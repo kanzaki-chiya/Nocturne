@@ -630,4 +630,41 @@ describe("Composer @ 引用", () => {
     expect(field.value).toBe("hi @");
     expect(await screen.findByRole("listbox", { name: "文件引用补全" })).toBeTruthy();
   });
+
+  it("U-05：Backspace 整删光标前的完整 @引用，键入中的词逐字删", () => {
+    render(<Composer {...props()} />);
+    // "看 @src/main.ts 谢谢"：@ 在 2，空格在 13
+    const field = input("看 @src/main.ts 谢谢");
+    field.setSelectionRange(14, 14);
+    expect(fireEvent.keyDown(field, { key: "Backspace" })).toBe(false);
+    expect(field.value).toBe("看 谢谢");
+    expect(field.selectionStart).toBe(2);
+    // 词中位置逐字删（jsdom 不执行默认删除，值为我们的不干预＋原生语义）
+    field.setSelectionRange(10, 10);
+    fireEvent.change(field, { target: { value: "看 @src/main.ts 谢谢" } });
+    field.setSelectionRange(10, 10);
+    expect(fireEvent.keyDown(field, { key: "Backspace" })).toBe(true);
+    // 键入中的裸词不整删
+    fireEvent.change(field, { target: { value: "看 @fo" } });
+    field.setSelectionRange(6, 6);
+    expect(fireEvent.keyDown(field, { key: "Backspace" })).toBe(true);
+    expect(field.value).toBe("看 @fo");
+  });
+
+  it("U-05：Delete 整删光标后的完整 @引用；有选区与合成中不拦截", () => {
+    render(<Composer {...props()} />);
+    const field = input("看 @src/main.ts 谢谢");
+    field.setSelectionRange(2, 2);
+    expect(fireEvent.keyDown(field, { key: "Delete" })).toBe(false);
+    expect(field.value).toBe("看 谢谢");
+    // 有选区时走默认（jsdom 不做原生删除，值为不干预）
+    fireEvent.change(field, { target: { value: "看 @src/main.ts 谢谢" } });
+    field.setSelectionRange(2, 14);
+    expect(fireEvent.keyDown(field, { key: "Backspace" })).toBe(true);
+    expect(field.value).toBe("看 @src/main.ts 谢谢");
+    // 输入法组合中不拦截
+    field.setSelectionRange(14, 14);
+    expect(fireEvent.keyDown(field, { key: "Backspace", isComposing: true })).toBe(true);
+    expect(field.value).toBe("看 @src/main.ts 谢谢");
+  });
 });

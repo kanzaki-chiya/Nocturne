@@ -105,6 +105,55 @@ export function completeFileRefs(
   };
 }
 
+/**
+ * Backspace/Delete 整删 @ 引用（U-05）：光标紧跟在一个完整引用后/前时，
+ * 返回应整体删除的区间（含至多一个尾随分隔空格）；否则返回 undefined
+ * 走默认单字符删除。
+ *
+ * 「完整」的判定与 fileRefToken 同一套词法：引用必须以行首或空白起、
+ * 以 @ 开头；引号形式须有收尾引号；无引号形式必须被空白终止——否则
+ * 它只是正在键入的补全词（如 @fo），照常逐字删除。
+ */
+export function fileRefDeleteRange(
+  text: string,
+  cursor: number,
+  direction: "backward" | "forward",
+): { start: number; end: number } | undefined {
+  const isBoundary = (pos: number): boolean => pos === 0 || /\s/u.test(text[pos - 1] ?? "");
+  /** at 处 @ 引用的结束位；不完整（未收尾引号 / 裸词未被空白终止）返回 undefined。 */
+  const refEnd = (at: number): number | undefined => {
+    const rest = text.slice(at + 1);
+    if (rest.startsWith('"')) {
+      const close = rest.indexOf('"', 1);
+      return close < 0 ? undefined : at + 1 + close + 1;
+    }
+    const token = /^[^\s"]+/u.exec(rest);
+    if (token === null) return undefined;
+    const end = at + 1 + token[0].length;
+    return /\s/u.test(text[end] ?? "") ? end : undefined;
+  };
+
+  if (direction === "forward") {
+    // 光标在引用前：@ 必须在行首或空白后
+    if (text[cursor] !== "@" || !isBoundary(cursor)) return undefined;
+    const end = refEnd(cursor);
+    if (end === undefined) return undefined;
+    return { start: cursor, end: text[end] === " " ? end + 1 : end };
+  }
+
+  // 光标在引用后：引用可结束在光标处（@a| x），或光标前一个分隔空格处（@a |x）
+  for (const end of [cursor, cursor - 1]) {
+    if (end <= 0) continue;
+    if (end === cursor - 1 && text[end] !== " ") continue;
+    const at = text.slice(0, end).lastIndexOf("@");
+    if (at < 0 || !isBoundary(at)) continue;
+    if (refEnd(at) === end) {
+      return { start: at, end: text[end] === " " ? end + 1 : end };
+    }
+  }
+  return undefined;
+}
+
 /** 用户消息原文：去掉末尾文件、技能和委派快照内容块。 */
 export function userText(entry: UserEntry): string {
   const snapshots =

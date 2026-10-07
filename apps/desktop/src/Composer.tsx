@@ -23,6 +23,7 @@ import {
 import { completeSlash, parseSlash, type SlashGroup } from "./commands";
 import {
   completeFileRefs,
+  fileRefDeleteRange,
   fileRefToken,
   type FileIndexEntry,
   type FileRefCandidate,
@@ -683,6 +684,23 @@ export function Composer({
       return;
     }
     const plain = !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey;
+    if ((event.key === "Backspace" || event.key === "Delete") && plain) {
+      // U-05：光标紧挨完整 @引用 时整删；有选区走默认。输入法组合在函数开头已拦截
+      const field = event.currentTarget;
+      if (field.selectionStart === field.selectionEnd) {
+        const range = fileRefDeleteRange(
+          draftRef.current,
+          field.selectionStart,
+          event.key === "Backspace" ? "backward" : "forward",
+        );
+        if (range !== undefined) {
+          event.preventDefault();
+          pendingCaret.current = range.start;
+          updateDraft(draftRef.current.slice(0, range.start) + draftRef.current.slice(range.end));
+          return;
+        }
+      }
+    }
     if (popup !== null && flatRows.length > 0 && plain) {
       if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
         event.preventDefault();
