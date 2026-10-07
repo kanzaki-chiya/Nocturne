@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/desktop",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Nocturne 桌面端（Tauri 外壳经 RPC 驱动 nctrn 后台，ADR-0046）",
   "license": "GPL-3.0-only",
   "private": true,

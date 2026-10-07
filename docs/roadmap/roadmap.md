@@ -247,7 +247,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - **子会话 ask 冒泡**：按 [subagent.md](../architecture/subagent.md) 第 7.1 节方案 (a)，把子会话的确认请求路由到父客户端；**可展开的子代理进度**：结构化进度替代单行摘要。
 - **MCP 服务器管理**（已随 0.6.0 发布，2026-10-07）：桌面端「MCP」设置页添加、编辑、启停服务器，支持 JSON 导入与 HTTP 传输，已打开的会话在 Turn 边界热重载，见 [ADR-0047](../decisions/ADR-0047-mcp-settings.md)；MCP 工具返回图片走附件通道仍未做。
 - **技能**（已随 0.6.0 发布，2026-10-07）：兼容 Agent Skills，自动发现用户级与项目内技能目录，`/技能名` 调用，桌面端「技能」页管理，见 [ADR-0048](../decisions/ADR-0048-skills.md)。
-- **外部 agent 子代理**（[ADR-0049](../decisions/ADR-0049-external-agent-subagent.md) 已接受，待实现）：经 ACP 把子任务交给 omp、Codex 等外部 agent。
+- **外部 agent 子代理**（已随 0.7.0 发布，2026-10-07，见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)）：经 ACP 把子任务交给 omp、Codex 等外部 agent；桌面端「外部 agent」设置页、`/agents` 与 `/<名称> 任务` 点名委派。
 - **MCP 强杀清理**：评估纯 Node 看护进程，detached 启动，主进程消失后清理 MCP 进程树；沿用会话锁的"开机时间 + PID"判定规避 PID 复用。**MCP 图片与二进制内容**正常显示。
 - **分发**（已随 0.6.0 发布，2026-10-07，见 [ADR-0050](../decisions/ADR-0050-distribution.md)）：桌面端随附官方 Node 与自动更新、`pnpm release:build` 发布流水线与草稿 Release；命令行版以单文件 tgz 随 Release 发布。rc.1 → rc.2 自动更新端到端验收通过（2026-10-07）。npm 首发暂缓，见 ADR-0050 修订。
 - **补验证**：macOS 钥匙串与 Linux Secret Service 实机验证；Anthropic 格式思考强度在真实端点验证。
