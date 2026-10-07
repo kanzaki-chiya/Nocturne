@@ -226,17 +226,54 @@ const tail = (id: string): string =>
       .at(-1) ?? ""
   ).toLowerCase();
 
+/**
+ * matchModelsDev 的索引（打开会话慢的根因修复）：原实现对每个模型都
+ * `Object.keys(models)` 全扫一遍（filter + toLowerCase + tail 正则），
+ * 806 模型 × 441 条目 ≈ 35 万次逐条比较。索引按 models 对象建一次，
+ * 后续匹配均为 O(1) 查表；modelsDev 刷新整体换对象，旧索引自然失效。
+ */
+interface ModelsDevMatchIndex {
+  exact: Map<string, ModelsDevRecord | undefined>;
+  fold: Map<string, { count: number; id: string }>;
+  tail: Map<string, { count: number; id: string }>;
+}
+
+const modelsDevMatchIndexes = new WeakMap<object, ModelsDevMatchIndex>();
+
+function matchIndex(models: ModelsDevData["models"]): ModelsDevMatchIndex {
+  const hit = modelsDevMatchIndexes.get(models);
+  if (hit !== undefined) return hit;
+  const index: ModelsDevMatchIndex = { exact: new Map(), fold: new Map(), tail: new Map() };
+  for (const id of Object.keys(models)) {
+    // 经 exact 回查取值：undefined 值的 key 也参与计数，与原 filter 语义一致
+    index.exact.set(id, models[id]);
+    const folded = id.toLowerCase();
+    const foldHit = index.fold.get(folded);
+    if (foldHit === undefined) index.fold.set(folded, { count: 1, id });
+    else foldHit.count += 1;
+    const suffix = tail(id);
+    const tailHit = index.tail.get(suffix);
+    if (tailHit === undefined) index.tail.set(suffix, { count: 1, id });
+    else tailHit.count += 1;
+  }
+  modelsDevMatchIndexes.set(models, index);
+  return index;
+}
+
 export function matchModelsDev(
   models: ModelsDevData["models"],
   modelId: string,
 ): ModelsDevRecord | undefined {
-  if (Object.hasOwn(models, modelId)) return models[modelId];
-  const ids = Object.keys(models);
-  const exactCaseFold = ids.filter((id) => id.toLowerCase() === modelId.toLowerCase());
-  if (exactCaseFold.length === 1) return models[exactCaseFold[0] ?? ""];
-  if (exactCaseFold.length > 1) return undefined;
-  const suffix = ids.filter((id) => tail(id) === tail(modelId));
-  return suffix.length === 1 ? models[suffix[0] ?? ""] : undefined;
+  const index = matchIndex(models);
+  if (index.exact.has(modelId)) return index.exact.get(modelId);
+  const folded = index.fold.get(modelId.toLowerCase());
+  if (folded !== undefined) {
+    if (folded.count !== 1) return undefined;
+    return index.exact.get(folded.id);
+  }
+  const suffix = index.tail.get(tail(modelId));
+  if (suffix?.count !== 1) return undefined;
+  return index.exact.get(suffix.id);
 }
 
 export function modelOverrideFromDev(record: ModelsDevRecord): ModelOverrideShape {

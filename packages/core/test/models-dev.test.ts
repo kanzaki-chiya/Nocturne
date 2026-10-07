@@ -81,6 +81,47 @@ describe("models.dev", () => {
     expect(matchModelsDev(models, "unknown")).toBeUndefined();
   });
 
+  it("大小写多义不猜且不再试后缀；后缀多义不猜；冒号变体只看去后缀末段", () => {
+    const models = {
+      "A/Model": { reasoning: true },
+      "a/MODEL": { reasoning: false },
+      "c/unique": { context: 42 },
+      "d/unique": { context: 43 },
+    };
+    // 大小写两义 → undefined（即使后缀唯一也不回退到后缀）；精确命中的 key 本身不受影响
+    expect(matchModelsDev(models, "A/model")).toBeUndefined();
+    expect(matchModelsDev(models, "A/Model")?.reasoning).toBe(true);
+    expect(matchModelsDev(models, "a/MODEL")?.reasoning).toBe(false);
+    // 后缀两义 → undefined
+    expect(matchModelsDev(models, "x/unique")).toBeUndefined();
+    expect(matchModelsDev(models, "unique")).toBeUndefined();
+    // 冒号后缀先去掉再取末段：c/unique:free 的 tail 是 unique，单一条目时唯一命中
+    expect(matchModelsDev({ "c/unique:free": { context: 7 } }, "other/unique")?.context).toBe(7);
+    expect(matchModelsDev({ "c/unique:free": { context: 7 } }, "other/unique:paid")?.context).toBe(
+      7,
+    );
+    // 同 tail 两义（冒号变体与无后缀）→ undefined
+    expect(
+      matchModelsDev({ "c/unique:free": { context: 7 }, "d/unique": { context: 8 } }, "unique"),
+    ).toBeUndefined();
+  });
+
+  it("同一数据对象多次匹配结果一致；换新对象后用新索引", () => {
+    const first = { "a/m": { reasoning: true } };
+    expect(matchModelsDev(first, "A/M")?.reasoning).toBe(true);
+    expect(matchModelsDev(first, "A/M")?.reasoning).toBe(true);
+    expect(matchModelsDev(first, "other/m:free")?.reasoning).toBe(true);
+    // 内容相同但对象不同：各自建索引，结果一致
+    const same = { "a/m": { reasoning: true } };
+    expect(matchModelsDev(same, "A/M")?.reasoning).toBe(true);
+    // 换成新的数据对象（模拟 modelsDev 刷新整体替换）后用新的索引：
+    // 无精确命中的大小写变体落到多义 → undefined；精确命中的 key 照常返回
+    const second = { "a/m": { reasoning: true }, "A/M": { reasoning: false } };
+    expect(matchModelsDev(second, "A/m")).toBeUndefined();
+    expect(matchModelsDev(second, "A/M")?.reasoning).toBe(false);
+    // 旧对象仍走旧索引，不受影响
+    expect(matchModelsDev(first, "A/M")?.reasoning).toBe(true);
+  });
   it("刷新写缓存；失败保留较新缓存，来源标注和层序正确", async () => {
     await writeJson(path.join(home, "providers.json"), {
       version: 1,
