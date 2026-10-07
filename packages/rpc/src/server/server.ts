@@ -453,6 +453,20 @@ class Connection {
   }
 
   /**
+   * 运行时级方法的 workspaceRoot 参数（ADR-0051）：同步读方法依赖配置的
+   * 工作区层缓存，派发前先把目标工作区加载进当前配置对象；缺省返回
+   * undefined（= 后台启动目录）。无 providerConfig 的连接跳过预加载，
+   * 已打开会话的工作区在会话打开时已加载。
+   */
+  private async workspaceOf(p: Params): Promise<string | undefined> {
+    const root = optString(p, "workspaceRoot");
+    if (root !== undefined && this.providerState !== undefined) {
+      await this.providerConfig().current.forWorkspace(root);
+    }
+    return root;
+  }
+
+  /**
    * 变更入队执行，随后 reload → updateProviders → 推 `runtime.providersChanged`
    * （docs/protocols/rpc.md 3.3）。变更抛错不重载、原样抛；重载抛错则请求
    * 以重载错误失败——此时写入已生效、Runtime 仍用旧配置。
@@ -754,6 +768,11 @@ class Connection {
               }
               options.reasoningEffort = effort;
             }
+            // 会话级工作区（ADR-0051）：单后台模式下客户端按会话传 cwd
+            const sessionCwd = optString(p, "cwd");
+            if (sessionCwd !== undefined) options.cwd = sessionCwd;
+            const sessionRoot = optString(p, "workspaceRoot");
+            if (sessionRoot !== undefined) options.workspaceRoot = sessionRoot;
             return await this.register(await this.runtime().createSession(options));
           })(),
         ),
@@ -784,15 +803,24 @@ class Connection {
         });
         return { sessionId };
       },
-      "runtime.listModels": () => this.runtime().listModels(),
-      "runtime.defaultModel": () => this.runtime().defaultModel() ?? null,
+      "runtime.listModels": async (p) =>
+        this.runtime().listModels({ workspaceRoot: await this.workspaceOf(p) }),
+      "runtime.defaultModel": async (p) =>
+        this.runtime().defaultModel({ workspaceRoot: await this.workspaceOf(p) }) ?? null,
       "runtime.listRecentModels": () => this.runtime().listRecentModels(),
-      "runtime.describeSettings": () => this.runtime().describeSettings(),
+      "runtime.describeSettings": async (p) =>
+        this.runtime().describeSettings({ workspaceRoot: await this.workspaceOf(p) }),
       "runtime.updateSettings": (p) => {
         const reviewerKey = optString(p, "reviewerKey");
+        const workspaceRoot = optString(p, "workspaceRoot");
         return this.runtime().updateSettings(
           reqObject(p, "patch"),
-          reviewerKey !== undefined ? { reviewerKey } : undefined,
+          reviewerKey !== undefined || workspaceRoot !== undefined
+            ? {
+                ...(reviewerKey !== undefined ? { reviewerKey } : {}),
+                ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+              }
+            : undefined,
         );
       },
       "runtime.setDefaultModel": (p) => {
@@ -800,22 +828,34 @@ class Connection {
         if (effort !== undefined && !isReasoningEffort(effort)) {
           throw new InvalidParamsError(`reasoningEffort 不是已知档位：${effort}`);
         }
-        return this.runtime().setDefaultModel(reqString(p, "model"), effort ?? null);
+        const workspaceRoot = optString(p, "workspaceRoot");
+        return this.runtime().setDefaultModel(
+          reqString(p, "model"),
+          effort ?? null,
+          workspaceRoot !== undefined ? { workspaceRoot } : undefined,
+        );
       },
-      "runtime.describeModelRoles": () => this.runtime().describeModelRoles(),
+      "runtime.describeModelRoles": async (p) =>
+        this.runtime().describeModelRoles({ workspaceRoot: await this.workspaceOf(p) }),
       "runtime.setModelRole": (p) => {
         const role = reqString(p, "role");
         if (!(MODEL_ROLES as readonly string[]).includes(role)) {
           throw new InvalidParamsError(`role 必须是 ${MODEL_ROLES.join("/")} 之一`);
         }
-        return this.runtime().setModelRole(role as ModelRole, optString(p, "ref") ?? null);
+        const workspaceRoot = optString(p, "workspaceRoot");
+        return this.runtime().setModelRole(
+          role as ModelRole,
+          optString(p, "ref") ?? null,
+          workspaceRoot !== undefined ? { workspaceRoot } : undefined,
+        );
       },
       "runtime.getPreference": (p) => this.runtime().getPreference(reqString(p, "key")) ?? null,
       "runtime.setPreference": async (p) => {
         await this.runtime().setPreference(reqString(p, "key"), optString(p, "value"));
         return null;
       },
-      "runtime.listReviewerProviders": () => this.runtime().listReviewerProviders(),
+      "runtime.listReviewerProviders": async (p) =>
+        this.runtime().listReviewerProviders({ workspaceRoot: await this.workspaceOf(p) }),
       // 与配置变更方法走同一串行队列；完成后照常推 providersChanged。多后台客户端
       // 不能再拿这条通知去触发别处的 reloadConfig，否则成环（rpc.md 3.1）
       "runtime.reloadConfig": async () => {
@@ -917,13 +957,21 @@ class Connection {
         this.runtime().probeMcpServer(p as unknown as Parameters<Runtime["probeMcpServer"]>[0]),
       "runtime.defaultReviewer": (p) => {
         const baseURL = optString(p, "baseURL");
-        return this.runtime().defaultReviewer(reqString(p, "endpoint") as JevEndpoint, baseURL);
+        const workspaceRoot = optString(p, "workspaceRoot");
+        return this.runtime().defaultReviewer(
+          reqString(p, "endpoint") as JevEndpoint,
+          baseURL,
+          workspaceRoot !== undefined ? { workspaceRoot } : undefined,
+        );
       },
-      "runtime.listReviewerModels": (p) =>
-        this.runtime().listReviewerModels(
+      "runtime.listReviewerModels": (p) => {
+        const workspaceRoot = optString(p, "workspaceRoot");
+        return this.runtime().listReviewerModels(
           reqObject(p, "reviewer") as unknown as JevReviewerConfig,
           this.abort.signal,
-        ),
+          workspaceRoot !== undefined ? { workspaceRoot } : undefined,
+        );
+      },
 
       // 服务商配置（rpc.md 3.3）：只读方法用最近一次重载出的配置对象；
       // Core 的预设/凭据判断不在此复制，RPC 层只做形状校验与转发。
@@ -931,9 +979,11 @@ class Connection {
         this.providerConfig();
         return listProviderPresets();
       },
-      "provider.describeProviders": async () => {
+      "provider.describeProviders": async (p) => {
         const { current, workspaceRoot } = this.providerConfig();
-        const providers = await current.describeProviders(workspaceRoot);
+        const providers = await current.describeProviders(
+          optString(p, "workspaceRoot") ?? workspaceRoot,
+        );
         const setupWarning = current.providerSetupWarning;
         return {
           providers,
@@ -1000,18 +1050,22 @@ class Connection {
       },
       "provider.listModelSettings": (p) => {
         const { current, workspaceRoot } = this.providerConfig();
-        return current.listModelSettings(reqString(p, "providerId"), workspaceRoot);
+        return current.listModelSettings(
+          reqString(p, "providerId"),
+          optString(p, "workspaceRoot") ?? workspaceRoot,
+        );
       },
       "provider.saveModelSettings": async (p) => {
         const providerId = reqString(p, "providerId");
         const modelId = reqString(p, "modelId");
         const patch = reqObject(p, "patch");
+        const workspaceRoot = optString(p, "workspaceRoot");
         return await this.mutateAndReload(async (config) => {
           await config.saveModelSettings(
             providerId,
             modelId,
             patch,
-            this.providerConfig().workspaceRoot,
+            workspaceRoot ?? this.providerConfig().workspaceRoot,
           );
           return null;
         });

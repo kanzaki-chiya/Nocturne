@@ -208,21 +208,41 @@ export interface RpcMethods {
     /** 新会话 id；会话本身未打开，要用 resumeSession 打开 */
     result: { sessionId: string };
   };
-  "runtime.listModels": { params: Record<string, never>; result: ModelInfo[] };
-  "runtime.defaultModel": { params: Record<string, never>; result: ModelRef | null };
+  /**
+   * workspaceRoot（ADR-0051）：下列运行时级查询/写方法可携带 workspaceRoot，
+   * 指定按哪个工作区合并配置层；缺省为后台启动目录。旧客户端不传不受影响。
+   */
+  "runtime.listModels": {
+    params: { workspaceRoot?: string | undefined };
+    result: ModelInfo[];
+  };
+  "runtime.defaultModel": {
+    params: { workspaceRoot?: string | undefined };
+    result: ModelRef | null;
+  };
   "runtime.listRecentModels": { params: Record<string, never>; result: ModelRef[] };
-  "runtime.describeSettings": { params: Record<string, never>; result: SettingItem[] };
+  "runtime.describeSettings": {
+    params: { workspaceRoot?: string | undefined };
+    result: SettingItem[];
+  };
   "runtime.updateSettings": {
-    params: { patch: SettingsPatch; reviewerKey?: string };
+    params: { patch: SettingsPatch; reviewerKey?: string; workspaceRoot?: string | undefined };
     result: SettingItem[];
   };
   "runtime.setDefaultModel": {
-    params: { model: string; reasoningEffort: ReasoningEffort | null };
+    params: {
+      model: string;
+      reasoningEffort: ReasoningEffort | null;
+      workspaceRoot?: string | undefined;
+    };
     result: SettingItem[];
   };
-  "runtime.describeModelRoles": { params: Record<string, never>; result: ModelRoleInfo[] };
+  "runtime.describeModelRoles": {
+    params: { workspaceRoot?: string | undefined };
+    result: ModelRoleInfo[];
+  };
   "runtime.setModelRole": {
-    params: { role: ModelRole; ref: string | null };
+    params: { role: ModelRole; ref: string | null; workspaceRoot?: string | undefined };
     result: SettingItem[];
   };
   "runtime.getPreference": { params: { key: string }; result: string | null };
@@ -230,7 +250,10 @@ export interface RpcMethods {
     params: { key: string; value?: string | null };
     result: null;
   };
-  "runtime.listReviewerProviders": { params: Record<string, never>; result: ProviderOverview[] };
+  "runtime.listReviewerProviders": {
+    params: { workspaceRoot?: string | undefined };
+    result: ProviderOverview[];
+  };
   /**
    * 从磁盘重新加载配置（服务商与设置）并替换 Runtime 的注册表，随后推
    * runtime.providersChanged；用于另一个进程改了配置文件之后同步。
@@ -251,11 +274,11 @@ export interface RpcMethods {
   "mcp.probeMcpServer": { params: McpProbeInput; result: McpProbeResult };
   "runtime.reloadConfig": { params: Record<string, never>; result: null };
   "runtime.defaultReviewer": {
-    params: { endpoint: JevEndpoint; baseURL?: string };
+    params: { endpoint: JevEndpoint; baseURL?: string; workspaceRoot?: string | undefined };
     result: JevReviewerConfig;
   };
   "runtime.listReviewerModels": {
-    params: { reviewer: JevReviewerConfig };
+    params: { reviewer: JevReviewerConfig; workspaceRoot?: string | undefined };
     result: { models: string[]; warning?: string };
   };
 
@@ -263,7 +286,10 @@ export interface RpcMethods {
   // 只读描述 + 两阶段提交；写操作由服务端串行执行"变更 → 重载 →
   // runtime.providersChanged 通知"，响应在通知之后到达。
   "provider.listProviderPresets": { params: Record<string, never>; result: ProviderPreset[] };
-  "provider.describeProviders": { params: Record<string, never>; result: ProvidersDescribed };
+  "provider.describeProviders": {
+    params: { workspaceRoot?: string | undefined };
+    result: ProvidersDescribed;
+  };
   "provider.describeProviderSetup": {
     params: { presetId: string };
     result: ProviderSetupDescription;
@@ -283,11 +309,16 @@ export interface RpcMethods {
   "provider.discardProvider": { params: { draftId: string }; result: null };
   "provider.setCredential": { params: { providerId: string; key: string }; result: null };
   "provider.listModelSettings": {
-    params: { providerId: string };
+    params: { providerId: string; workspaceRoot?: string | undefined };
     result: ModelSettingsView[];
   };
   "provider.saveModelSettings": {
-    params: { providerId: string; modelId: string; patch: ModelSettingsPatch };
+    params: {
+      providerId: string;
+      modelId: string;
+      patch: ModelSettingsPatch;
+      workspaceRoot?: string | undefined;
+    };
     result: null;
   };
   "provider.refreshUpstreamLimits": {

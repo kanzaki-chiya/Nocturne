@@ -202,6 +202,10 @@ export interface RpcRuntime {
   }): Promise<void>;
   probeMcpServer(input: McpProbeInput): Promise<McpProbeResult>;
   listSessions(filter?: { cwd?: string; includeSubagents?: boolean }): Promise<SessionSummary[]>;
+  /**
+   * createSession 可携带 cwd/workspaceRoot（ADR-0051）：单后台模式下
+   * 会话按自己的工作区创建；缺省为后台启动目录。
+   */
   createSession(
     options: CreateSessionOptions,
   ): Promise<{ opened: SessionOpened; session: RpcSession }>;
@@ -210,21 +214,46 @@ export interface RpcRuntime {
     options?: { model?: string | ModelRef; force?: boolean },
   ): Promise<{ opened: SessionOpened; session: RpcSession }>;
   forkSession(id: string, options?: { targetSeq?: number }): Promise<string>;
-  listModels(): Promise<ModelInfo[]>;
-  defaultModel(): Promise<ModelRef | undefined>;
+  /**
+   * workspaceRoot（ADR-0051）：下列方法可带 `workspaceRoot` 指定按哪个工作区
+   * 合并配置层；缺省为后台启动目录。
+   */
+  listModels(input?: { workspaceRoot?: string | undefined }): Promise<ModelInfo[]>;
+  defaultModel(input?: { workspaceRoot?: string | undefined }): Promise<ModelRef | undefined>;
+  /** recent-models.json（全局偏好，无工作区维度） */
   listRecentModels(): Promise<ModelRef[]>;
-  describeSettings(): Promise<SettingItem[]>;
-  updateSettings(patch: SettingsPatch, options?: { reviewerKey: string }): Promise<SettingItem[]>;
-  setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<SettingItem[]>;
-  describeModelRoles(): Promise<ModelRoleInfo[]>;
-  setModelRole(role: ModelRole, ref: string | null): Promise<SettingItem[]>;
+  describeSettings(input?: { workspaceRoot?: string | undefined }): Promise<SettingItem[]>;
+  updateSettings(
+    patch: SettingsPatch,
+    options?: { reviewerKey?: string; workspaceRoot?: string | undefined },
+  ): Promise<SettingItem[]>;
+  setDefaultModel(
+    model: string,
+    reasoningEffort: ReasoningEffort | null,
+    options?: { workspaceRoot?: string | undefined },
+  ): Promise<SettingItem[]>;
+  describeModelRoles(input?: { workspaceRoot?: string | undefined }): Promise<ModelRoleInfo[]>;
+  setModelRole(
+    role: ModelRole,
+    ref: string | null,
+    options?: { workspaceRoot?: string | undefined },
+  ): Promise<SettingItem[]>;
   getPreference(key: string): Promise<string | undefined>;
   setPreference(key: string, value: string | undefined): Promise<void>;
-  listReviewerProviders(): Promise<ProviderOverview[]>;
+  listReviewerProviders(input?: {
+    workspaceRoot?: string | undefined;
+  }): Promise<ProviderOverview[]>;
   /** 从磁盘重新加载配置并替换注册表；完成前先收到 onProvidersChanged */
   reloadConfig(): Promise<void>;
-  defaultReviewer(endpoint: JevEndpoint, baseURL?: string): Promise<JevReviewerConfig>;
-  listReviewerModels(reviewer: JevReviewerConfig): Promise<{ models: string[]; warning?: string }>;
+  defaultReviewer(
+    endpoint: JevEndpoint,
+    baseURL?: string,
+    input?: { workspaceRoot?: string | undefined },
+  ): Promise<JevReviewerConfig>;
+  listReviewerModels(
+    reviewer: JevReviewerConfig,
+    input?: { workspaceRoot?: string | undefined },
+  ): Promise<{ models: string[]; warning?: string }>;
 }
 
 /**
@@ -234,7 +263,7 @@ export interface RpcRuntime {
  */
 export interface RpcProvider {
   listProviderPresets(): Promise<ProviderPreset[]>;
-  describeProviders(): Promise<ProvidersDescribed>;
+  describeProviders(input?: { workspaceRoot?: string | undefined }): Promise<ProvidersDescribed>;
   describeProviderSetup(presetId: string): Promise<ProviderSetupDescription>;
   /** 无系统凭据后端且为账号型登录时返回保存位置描述；否则 undefined */
   describeAccountStorage(providerId: string): Promise<AccountStorageSetup | undefined>;
@@ -244,8 +273,16 @@ export interface RpcProvider {
   commitProvider(draftId: string, manualModelId?: string): Promise<AddProviderResult>;
   discardProvider(draftId: string): Promise<void>;
   setCredential(providerId: string, key: string): Promise<void>;
-  listModelSettings(providerId: string): Promise<ModelSettingsView[]>;
-  saveModelSettings(providerId: string, modelId: string, patch: ModelSettingsPatch): Promise<void>;
+  listModelSettings(
+    providerId: string,
+    input?: { workspaceRoot?: string | undefined },
+  ): Promise<ModelSettingsView[]>;
+  saveModelSettings(
+    providerId: string,
+    modelId: string,
+    patch: ModelSettingsPatch,
+    input?: { workspaceRoot?: string | undefined },
+  ): Promise<void>;
   /** 重新获取上游模型列表与限额；返回提示文案或 undefined */
   refreshUpstreamLimits(providerId: string): Promise<string | undefined>;
   /** 刷新 models.dev 缓存；返回提示文案或 undefined */
@@ -585,38 +622,61 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     },
     forkSession: async (id, forkOptions) =>
       (await call("runtime.forkSession", { sessionId: id, ...forkOptions })).sessionId,
-    listModels: () => call("runtime.listModels", {}),
-    defaultModel: async () => (await call("runtime.defaultModel", {})) ?? undefined,
+    listModels: (input) => call("runtime.listModels", input ?? {}),
+    defaultModel: async (input) => (await call("runtime.defaultModel", input ?? {})) ?? undefined,
     listRecentModels: () => call("runtime.listRecentModels", {}),
-    describeSettings: () => call("runtime.describeSettings", {}),
+    describeSettings: (input) => call("runtime.describeSettings", input ?? {}),
     updateSettings: (patch, updateOptions) =>
       call("runtime.updateSettings", {
         patch,
-        ...(updateOptions !== undefined ? { reviewerKey: updateOptions.reviewerKey } : {}),
+        ...(updateOptions?.reviewerKey !== undefined
+          ? { reviewerKey: updateOptions.reviewerKey }
+          : {}),
+        ...(updateOptions?.workspaceRoot !== undefined
+          ? { workspaceRoot: updateOptions.workspaceRoot }
+          : {}),
       }),
-    setDefaultModel: (model, reasoningEffort) =>
-      call("runtime.setDefaultModel", { model, reasoningEffort }),
-    describeModelRoles: () => call("runtime.describeModelRoles", {}),
-    setModelRole: (role, ref) => call("runtime.setModelRole", { role, ref }),
+    setDefaultModel: (model, reasoningEffort, setOptions) =>
+      call("runtime.setDefaultModel", {
+        model,
+        reasoningEffort,
+        ...(setOptions?.workspaceRoot !== undefined
+          ? { workspaceRoot: setOptions.workspaceRoot }
+          : {}),
+      }),
+    describeModelRoles: (input) => call("runtime.describeModelRoles", input ?? {}),
+    setModelRole: (role, ref, setOptions) =>
+      call("runtime.setModelRole", {
+        role,
+        ref,
+        ...(setOptions?.workspaceRoot !== undefined
+          ? { workspaceRoot: setOptions.workspaceRoot }
+          : {}),
+      }),
     getPreference: async (key) => (await call("runtime.getPreference", { key })) ?? undefined,
     setPreference: async (key, value) => {
       await call("runtime.setPreference", { key, value: value ?? null });
     },
-    listReviewerProviders: () => call("runtime.listReviewerProviders", {}),
+    listReviewerProviders: (input) => call("runtime.listReviewerProviders", input ?? {}),
     reloadConfig: async () => {
       await call("runtime.reloadConfig", {});
     },
-    defaultReviewer: (endpoint, baseURL) =>
+    defaultReviewer: (endpoint, baseURL, input) =>
       call("runtime.defaultReviewer", {
         endpoint,
         ...(baseURL !== undefined ? { baseURL } : {}),
+        ...(input?.workspaceRoot !== undefined ? { workspaceRoot: input.workspaceRoot } : {}),
       }),
-    listReviewerModels: (reviewer) => call("runtime.listReviewerModels", { reviewer }),
+    listReviewerModels: (reviewer, input) =>
+      call("runtime.listReviewerModels", {
+        reviewer,
+        ...(input?.workspaceRoot !== undefined ? { workspaceRoot: input.workspaceRoot } : {}),
+      }),
   };
 
   const provider: RpcProvider = {
     listProviderPresets: () => call("provider.listProviderPresets", {}),
-    describeProviders: () => call("provider.describeProviders", {}),
+    describeProviders: (input) => call("provider.describeProviders", input ?? {}),
     describeProviderSetup: (presetId) => call("provider.describeProviderSetup", { presetId }),
     describeAccountStorage: async (providerId) =>
       (await call("provider.describeAccountStorage", { providerId })) ?? undefined,
@@ -632,9 +692,18 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     setCredential: async (providerId, key) => {
       await call("provider.setCredential", { providerId, key });
     },
-    listModelSettings: (providerId) => call("provider.listModelSettings", { providerId }),
-    saveModelSettings: async (providerId, modelId, patch) => {
-      await call("provider.saveModelSettings", { providerId, modelId, patch });
+    listModelSettings: (providerId, input) =>
+      call("provider.listModelSettings", {
+        providerId,
+        ...(input?.workspaceRoot !== undefined ? { workspaceRoot: input.workspaceRoot } : {}),
+      }),
+    saveModelSettings: async (providerId, modelId, patch, input) => {
+      await call("provider.saveModelSettings", {
+        providerId,
+        modelId,
+        patch,
+        ...(input?.workspaceRoot !== undefined ? { workspaceRoot: input.workspaceRoot } : {}),
+      });
     },
     refreshUpstreamLimits: async (providerId) =>
       (await call("provider.refreshUpstreamLimits", { providerId })).warning ?? undefined,

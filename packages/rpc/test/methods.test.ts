@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fsPromises from "node:fs/promises";
@@ -27,7 +27,15 @@ import {
   SESSION_NOT_MAPPED,
 } from "@nocturne/rpc/server";
 
-import { cleanupTmp, connect, MODEL, textScript, tmpDir, VISION_MODELS } from "./harness.js";
+import {
+  cleanupTmp,
+  connect,
+  connectWithConfig,
+  MODEL,
+  textScript,
+  tmpDir,
+  VISION_MODELS,
+} from "./harness.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 /** packages/core/src/index.ts：覆盖测试按源文件解析服务商配置导出块 */
@@ -107,6 +115,52 @@ describe("runtime.* 方法映射", () => {
       rpcCode: -32000,
       message: "未注入 RuntimeConfig，无法保存偏好",
     });
+    h.client.close();
+    await h.served;
+  });
+
+  it("会话级工作区：createSession 带 cwd/workspaceRoot，运行时查询按 workspaceRoot", async () => {
+    // ADR-0051：单后台下会话自带工作区；服务端派发查询前先加载目标工作区层
+    const ws2 = tmpDir("nct-rpc-ws2-");
+    mkdirSync(path.join(ws2, ".nocturne"), { recursive: true });
+    writeFileSync(
+      path.join(ws2, ".nocturne", "config.json"),
+      JSON.stringify({ model: "proj/ws2-model" }),
+    );
+    const h = await connectWithConfig({ scripts: [textScript("hi")] });
+    await h.config.setWorkspaceTrusted(ws2, true);
+    const ws2Real = await createPlatform().resolveReal(ws2);
+
+    const { opened, session } = await h.client.runtime.createSession({
+      model: MODEL,
+      cwd: ws2,
+      workspaceRoot: ws2,
+    });
+    expect(opened.meta.cwd).toBe(ws2);
+    expect(opened.meta.workspaceRoot).toBe(ws2Real);
+    await session.submit({ text: "hi" });
+    await session.close();
+
+    // 工作区级查询：服务端在派发前把 ws2 项目层加载进配置对象
+    expect(await h.client.runtime.defaultModel({ workspaceRoot: ws2 })).toEqual({
+      provider: "proj",
+      model: "ws2-model",
+    });
+    // 缺省与后台启动目录（h.ws，无项目配置）一致
+    expect(await h.client.runtime.defaultModel()).toBeUndefined();
+    expect(
+      (await h.client.runtime.listModels({ workspaceRoot: ws2 })).map(
+        (m) => `${m.ref.provider}/${m.ref.model}`,
+      ),
+    ).toContain(MODEL);
+    expect(await h.client.runtime.describeSettings({ workspaceRoot: ws2 })).toEqual(
+      h.runtimes[0]?.describeSettings({ workspaceRoot: ws2 }),
+    );
+
+    // 恢复的会话沿用日志里记录的工作区
+    const resumed = await h.client.runtime.resumeSession(session.id);
+    expect(resumed.opened.meta.workspaceRoot).toBe(ws2Real);
+    await resumed.session.close();
     h.client.close();
     await h.served;
   });
