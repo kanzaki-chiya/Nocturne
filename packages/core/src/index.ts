@@ -53,11 +53,19 @@ import {
 } from "./config/index.js";
 import { MODEL_ROLES } from "./config/index.js";
 import {
+  type SkillImportInput,
+  type SkillImportOutput,
   type SkillsDescription,
   type SkillInvocation,
   type SkillSnapshot,
 } from "./protocol/index.js";
-import { discoverSkills, renderSkill, skillCatalog } from "./skills/index.js";
+import {
+  commitSkillImport,
+  discoverSkills,
+  previewSkillImport,
+  renderSkill,
+  skillCatalog,
+} from "./skills/index.js";
 import {
   defaultJevReviewer,
   fetchJevModels,
@@ -443,6 +451,13 @@ export interface ResumeSessionOptions {
 export interface Runtime {
   describeSkills(input?: { workspaceRoot?: string | undefined }): Promise<SkillsDescription>;
   setSkillEnabled(input: { name: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
+  /**
+   * 导入技能（skills.md 第 7 节，ADR-0048 修订 U-08）：只支持本地文件夹。
+   * `mode: "preview"` 只扫描校验、不写任何东西；`mode: "commit"` 按逐项
+   * 决定写入，成功后刷新已打开会话的技能目录。目标只有用户级与当前
+   * 工作区两处（`target: "project"` 时用 `workspaceRoot ??` 当前工作区）。
+   */
+  importSkills(input: SkillImportInput): Promise<SkillImportOutput>;
   describeMcpServers(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<{ servers: McpServerOverview[]; warnings: string[] }>;
@@ -2559,6 +2574,70 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       await Promise.all([...refreshSkills].map((refresh) => refresh(false)));
       return { affectedSessions: refreshSkills.size };
     },
+    async importSkills(input) {
+      const base = z.object({
+        mode: z.enum(["preview", "commit"]),
+        target: z.enum(["user", "project"]),
+        workspaceRoot: z.string().min(1).optional(),
+      });
+      const parsed = z
+        .discriminatedUnion("mode", [
+          base.extend({
+            mode: z.literal("preview"),
+            sourceDir: z.string().min(1),
+            decisions: z.never().optional(),
+          }),
+          base.extend({
+            mode: z.literal("commit"),
+            sourceDir: z.never().optional(),
+            decisions: z
+              .array(
+                z.object({
+                  sourcePath: z.string().min(1),
+                  name: z.string().min(1).optional(),
+                  action: z.enum(["rename", "overwrite", "skip"]),
+                }),
+              )
+              .min(1),
+          }),
+        ])
+        .parse(input) as SkillImportInput;
+      const root =
+        parsed.workspaceRoot !== undefined
+          ? await platform.resolveReal(parsed.workspaceRoot)
+          : workspaceRoot;
+      const targetDir =
+        parsed.target === "user"
+          ? paths.join(nocturneHome, "skills")
+          : paths.join(root, ".nocturne/skills");
+      if (parsed.mode === "preview") {
+        const preview = await previewSkillImport(platform, {
+          sourceDir: parsed.sourceDir,
+          target: parsed.target,
+          nocturneHome,
+          workspaceRoot: root,
+          cwd: root,
+          config: config?.skillConfig(),
+        });
+        return {
+          mode: "preview",
+          targetDir: preview.targetDir,
+          targetLayer: preview.targetLayer,
+          candidates: preview.candidates,
+        };
+      }
+      const results = await commitSkillImport(platform, {
+        targetDir,
+        decisions: parsed.decisions,
+      });
+      await Promise.all([...refreshSkills].map((refresh) => refresh(true)));
+      return {
+        mode: "commit",
+        targetDir,
+        results,
+        affectedSessions: refreshSkills.size,
+      };
+    },
     async saveMcpServer(input) {
       const parsed = mcpInput(
         z.object({
@@ -3056,3 +3135,19 @@ export {
   type ProviderSetupFieldName,
   type ProviderSetupNotice,
 } from "./provider-setup.js";
+export {
+  commitSkillImport,
+  previewSkillImport,
+  rewriteSkillName,
+  SKILL_IMPORT_SIZE_LIMIT_BYTES,
+  SkillImportError,
+  type SkillImportCandidate,
+  type SkillImportCandidateView,
+  type SkillImportDecision,
+  type SkillImportDecisionView,
+  type SkillImportInput,
+  type SkillImportOutput,
+  type SkillImportPreview,
+  type SkillImportResult,
+  type SkillImportResultView,
+} from "./skills/import.js";

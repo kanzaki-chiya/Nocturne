@@ -51,6 +51,68 @@ export interface SkillsDescription {
   homeDir: string;
 }
 
+/**
+ * 导入预检的单个候选（skills.md 第 7 节）：与 Core 的 SkillImportCandidate
+ * 同形，protocol 层重述一次，RPC 方法签名引用这里。
+ */
+export interface SkillImportCandidateView {
+  name: string;
+  sourcePath: string;
+  declaredName?: string | undefined;
+  valid: boolean;
+  reason?: string | undefined;
+  skippedLinks: string[];
+  sizeBytes: number;
+  missingDescription: boolean;
+  targetConflict: boolean;
+  shadowNote?: string | undefined;
+  suggestedName?: string | undefined;
+}
+
+export interface SkillImportDecisionView {
+  sourcePath: string;
+  name?: string | undefined;
+  action: "rename" | "overwrite" | "skip";
+}
+
+export interface SkillImportResultView {
+  sourcePath: string;
+  name: string;
+  status: "imported" | "skipped";
+  reason?: string | undefined;
+  targetPath: string;
+  finalName?: string | undefined;
+  missingDescription: boolean;
+}
+
+export type SkillImportInput =
+  | {
+      mode: "preview";
+      sourceDir: string;
+      target: "user" | "project";
+      workspaceRoot?: string | undefined;
+    }
+  | {
+      mode: "commit";
+      target: "user" | "project";
+      workspaceRoot?: string | undefined;
+      decisions: SkillImportDecisionView[];
+    };
+
+export type SkillImportOutput =
+  | {
+      mode: "preview";
+      targetDir: string;
+      targetLayer: "user" | "project";
+      candidates: SkillImportCandidateView[];
+    }
+  | {
+      mode: "commit";
+      targetDir: string;
+      results: SkillImportResultView[];
+      affectedSessions: number;
+    };
+
 export interface SkillInvocation {
   name: string;
   arguments?: string | undefined;

@@ -142,11 +142,12 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 |---|---|
 | `skills.describeSkills` | `{ workspaceRoot?: string }` → `SkillsDescription`；每次重新扫描 |
 | `skills.setSkillEnabled` | `{ name: string, enabled: boolean }` → `{ affectedSessions: number }`；走配置写队列，响应之前推 `runtime.providersChanged`，当前 Turn 的快照保持不变 |
+| `skills.importSkills` | 预检 `{ mode: "preview", sourceDir, target: "user" \| "project", workspaceRoot? }` → `{ mode: "preview", targetDir, targetLayer, candidates }`；执行 `{ mode: "commit", target, workspaceRoot?, decisions: [{ sourcePath, name?, action: "rename" \| "overwrite" \| "skip" }] }` → `{ mode: "commit", targetDir, results, affectedSessions }`。commit 走配置写队列，响应之前推 `runtime.providersChanged`。字段错误报 -32005（`data.field`），参数形状错误报 -32602 |
 | `session.describeSkills` | `{ sessionId }` → `SkillsDescription`；只返回本会话快照 |
 
 `SkillsDescription` 为 `{ skills: SkillOverview[], warnings: { path, line, message, kind }[], budget: { usedTokens, limitTokens, fullCount, nameCount, disabledCount, basis }, scannedDirs: string[], homeDir: string }`；字段定义和默认模型/8000 token 兜底依据见 [skills.md](../architecture/skills.md) 第 5 节。`session.submit` 可带 `skill: { name: string, arguments?: string }`，Core 把渲染正文固定进 message.user，客户端恢复不重读文件。新字段兼容旧日志，不提升 formatVersion。
 
-技能变更通知复用 providersChanged 以刷新客户端目录；其他后台由客户端转发 reloadConfig，继承已有 echo 防环机制。
+技能变更（`setSkillEnabled`、`importSkills` 的 commit）通知复用 providersChanged 以刷新客户端目录；其他后台由客户端转发 reloadConfig，继承已有 echo 防环机制。
 
 ### 3.7 `agents.*`（ADR-0049）
 
@@ -171,7 +172,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 |---|---|---|---|
 | 客户端→服务端 | `session.interrupt` | `{ sessionId }` | 中断运行中的 Turn；无 Turn 时无操作。`submit` 请求随后以 `aborted` 返回。服务端也接受带 `id` 的请求形式（回复 `null`） |
 | 服务端→客户端 | `event` | `{ sessionId, event }` | `event` 原样是 [events.md](events.md) 的 `RuntimeEvent` 信封，不另包一层 |
-| 服务端→客户端 | `runtime.providersChanged` | `{}` | 服务商、技能或外部 agent 配置变更成功后的通知；`provider.*`、`skills.setSkillEnabled`、`agents.*` 三个写方法的响应之前到达一次，登录和显式重载同原规则（3.3–3.7） |
+| 服务端→客户端 | `runtime.providersChanged` | `{}` | 服务商、技能或外部 agent 配置变更成功后的通知；`provider.*`、`skills.*` 写方法（`setSkillEnabled`、`importSkills` 的 commit）、`agents.*` 三个写方法的响应之前到达一次，登录和显式重载同原规则（3.3–3.7） |
 | 服务端→客户端 | `login.completed` | `LoginCompleted` | 登录会话完成或失败（含取消）；绝不先于对应 `login.start`/`startDraft` 的响应到达（3.4） |
 
 ### 3.9 `shutdown`

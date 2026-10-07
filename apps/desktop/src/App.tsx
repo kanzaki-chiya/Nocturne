@@ -832,6 +832,7 @@ export function App({ host }: { host: DesktopHost }) {
                     }) as Promise<void>
                   }
                   openUrl={host.openUrl}
+                  pickFolder={() => host.pickFolder()}
                 />
               </PaneErrorBoundary>
             ) : page === "logs" ? (

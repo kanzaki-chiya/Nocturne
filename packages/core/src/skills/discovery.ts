@@ -35,7 +35,7 @@ const ignoredReasons: Record<string, string> = {
 const builtinCommands = new Set<string>(BUILTIN_SLASH_COMMANDS);
 const parseError = (line: number, message: string) => Object.assign(new Error(message), { line });
 
-function parseSkill(
+export function parseSkill(
   text: string,
   directory: string,
 ): { fields: Record<string, unknown>; body: string } {

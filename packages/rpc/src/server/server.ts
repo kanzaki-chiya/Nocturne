@@ -866,6 +866,32 @@ class Connection {
           return result;
         });
       },
+      "skills.importSkills": (p) => {
+        const mode = reqString(p, "mode");
+        if (mode === "preview") {
+          const workspaceRoot = optString(p, "workspaceRoot");
+          return this.runtime().importSkills({
+            mode: "preview",
+            sourceDir: reqString(p, "sourceDir"),
+            target: parseImportTarget(p),
+            ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+          });
+        }
+        if (mode === "commit") {
+          const workspaceRoot = optString(p, "workspaceRoot");
+          return this.enqueueConfig(async () => {
+            const result = await this.runtime().importSkills({
+              mode: "commit",
+              target: parseImportTarget(p),
+              ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+              decisions: parseImportDecisions(p),
+            });
+            this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+            return result;
+          });
+        }
+        throw new InvalidParamsError("mode 必须是 preview 或 commit");
+      },
       "session.describeSkills": (p) => this.session(p).session.describeSkills(),
       "mcp.saveMcpServer": (p) =>
         this.mutateAndReload(
@@ -1259,6 +1285,46 @@ class Connection {
       },
     };
   }
+}
+
+/** skills.importSkills 的 target：只有用户级与项目两处 */
+function parseImportTarget(p: Params): "user" | "project" {
+  const target = p.target;
+  if (target !== "user" && target !== "project") {
+    throw new InvalidParamsError("target 必须是 user 或 project");
+  }
+  return target;
+}
+
+/** skills.importSkills commit 的逐项决定：至少一项，action 逐项校验 */
+function parseImportDecisions(
+  p: Params,
+): { sourcePath: string; name?: string; action: "rename" | "overwrite" | "skip" }[] {
+  const decisions = p.decisions;
+  if (!Array.isArray(decisions) || decisions.length === 0) {
+    throw new InvalidParamsError("decisions 必须是非空数组");
+  }
+  return decisions.map((item, i) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      throw new InvalidParamsError(`decisions[${i}] 必须是对象`);
+    }
+    const record = item as Record<string, unknown>;
+    if (typeof record.sourcePath !== "string" || record.sourcePath === "") {
+      throw new InvalidParamsError(`decisions[${i}].sourcePath 必须是非空字符串`);
+    }
+    const action = record.action;
+    if (action !== "rename" && action !== "overwrite" && action !== "skip") {
+      throw new InvalidParamsError(`decisions[${i}].action 必须是 rename、overwrite 或 skip`);
+    }
+    if (record.name !== undefined && typeof record.name !== "string") {
+      throw new InvalidParamsError(`decisions[${i}].name 必须是字符串`);
+    }
+    return {
+      sourcePath: record.sourcePath,
+      ...(typeof record.name === "string" ? { name: record.name } : {}),
+      action,
+    };
+  });
 }
 
 /** provider.updateSetupProvider 的 patch 形状：逐字段校验，未提供的保留原值 */

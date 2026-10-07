@@ -293,3 +293,145 @@ it("外部 agent 分组在技能之后，冲突及停用隐藏，点名保留名
     attachments: [],
   });
 });
+
+it("导入技能：选择文件夹→预检→改名/跳过→结果与停用", async () => {
+  const preview = {
+    mode: "preview",
+    targetDir: "C:/home/skills",
+    targetLayer: "user",
+    candidates: [
+      {
+        name: "alpha",
+        sourcePath: "C:/src/alpha",
+        valid: true,
+        skippedLinks: [],
+        sizeBytes: 512,
+        missingDescription: false,
+        targetConflict: false,
+      },
+      {
+        name: "dup",
+        sourcePath: "C:/src/dup",
+        valid: true,
+        skippedLinks: ["lib"],
+        sizeBytes: 1024,
+        missingDescription: true,
+        targetConflict: true,
+        suggestedName: "dup-2",
+      },
+      {
+        name: "bad",
+        sourcePath: "C:/src/bad",
+        valid: false,
+        reason: "缺少 YAML 前言",
+        skippedLinks: [],
+        sizeBytes: 64,
+        missingDescription: false,
+        targetConflict: false,
+      },
+    ],
+  };
+  const f = fakeServer(
+    withInit({
+      "skills.describeSkills": data([]),
+      "skills.importSkills": (params: Record<string, unknown>) =>
+        params.mode === "preview"
+          ? preview
+          : {
+              mode: "commit",
+              targetDir: "C:/home/skills",
+              results: [
+                {
+                  sourcePath: "C:/src/alpha",
+                  name: "alpha",
+                  status: "imported",
+                  targetPath: "C:/home/skills/alpha",
+                  missingDescription: false,
+                },
+                {
+                  sourcePath: "C:/src/dup",
+                  name: "dup",
+                  status: "skipped",
+                  reason: "已跳过",
+                  targetPath: "",
+                  missingDescription: false,
+                },
+              ],
+              affectedSessions: 1,
+            },
+      "skills.setSkillEnabled": { affectedSessions: 1 },
+    }),
+  );
+  await f.initialize();
+  const pickFolder = vi.fn(async () => "C:/src");
+  render(
+    <SkillsPage
+      client={f.client}
+      workspaceRoot="Z:/project"
+      version={0}
+      openDirectory={vi.fn()}
+      openUrl={vi.fn()}
+      pickFolder={pickFolder}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "导入技能…" }));
+  const dialog = await screen.findByRole("dialog", { name: "导入技能" });
+  // 项目目标可选（选中了工作区）
+  expect(screen.getByRole("button", { name: "当前工作区" }).hasAttribute("disabled")).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "选择文件夹…" }));
+  expect(pickFolder).toHaveBeenCalledTimes(1);
+  // 预检渲染：候选、符号链接跳过、缺说明、冲突改名默认
+  await within(dialog).findByText("dup");
+  expect(within(dialog).getByText("缺少 YAML 前言")).toBeTruthy();
+  expect(within(dialog).getByText(/跳过 1 个符号链接/)).toBeTruthy();
+  expect(within(dialog).getByText(/缺少说明，模型看不到/)).toBeTruthy();
+  expect((within(dialog).getByLabelText("dup 的新名字") as HTMLInputElement).value).toBe("dup-2");
+  // dup 改跳过，只导入 alpha
+  fireEvent.click(within(dialog).getByRole("button", { name: "跳过" }));
+  const previewCall = f.calls.find((c) => c.method === "skills.importSkills");
+  expect(previewCall?.params).toMatchObject({
+    mode: "preview",
+    sourceDir: "C:/src",
+    target: "user",
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "导入 2 个" }));
+  await within(dialog).findByText("✓ 已导入");
+  const commit = f.calls.filter((c) => c.method === "skills.importSkills").at(-1);
+  expect(commit?.params).toMatchObject({
+    mode: "commit",
+    decisions: [
+      { sourcePath: "C:/src/alpha", action: "overwrite" },
+      { sourcePath: "C:/src/dup", action: "skip" },
+    ],
+  });
+  // 成功项可停用
+  fireEvent.click(within(dialog).getByRole("button", { name: "停用" }));
+  expect(await screen.findByRole("status")).toHaveProperty(
+    "textContent",
+    "✓ 已导入并停用 alpha · 1 个已打开的会话将在本轮结束后更新",
+  );
+  expect(f.calls.find((c) => c.method === "skills.setSkillEnabled")?.params).toMatchObject({
+    name: "alpha",
+    enabled: false,
+  });
+});
+
+it("导入技能：无工作区时项目目标置灰", async () => {
+  const f = fakeServer(withInit({ "skills.describeSkills": data([]) }));
+  await f.initialize();
+  render(
+    <SkillsPage
+      client={f.client}
+      workspaceRoot={undefined}
+      version={0}
+      openDirectory={vi.fn()}
+      openUrl={vi.fn()}
+      pickFolder={vi.fn(async () => null)}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "导入技能…" }));
+  const dialog = await screen.findByRole("dialog", { name: "导入技能" });
+  expect(
+    (within(dialog).getByRole("button", { name: "当前工作区" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+});

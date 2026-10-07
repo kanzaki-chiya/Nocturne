@@ -2,7 +2,7 @@
 
 Nocturne 是在代码仓库中工作的命令行编程助手。运行 `nctrn` 后，可以用自然语言让它阅读和搜索文件、修改代码、运行命令；它也能调用 MCP 工具、运行 Hooks，并把独立任务交给子代理。会话保存在本地，可以稍后恢复。写入、执行和外部工具调用受权限预设与规则约束。
 
-它也兼容已安装在 `.agents/skills`、`.claude/skills` 和 Nocturne 技能目录里的 Agent Skills，可用 `/技能名 参数` 调用。Windows 另有桌面版，可在「设置」里管理服务商、MCP 服务器（本地命令或远程 HTTP）和技能。
+它也兼容已安装在 `.agents/skills`、`.claude/skills` 和 Nocturne 技能目录里的 Agent Skills，可用 `/技能名 参数` 调用。Windows 另有桌面版，可在「设置」里管理服务商、MCP 服务器（本地命令或远程 HTTP）和技能（本地文件夹可直接导入）。
 
 ## 安装
 

@@ -209,7 +209,7 @@ interface NodeProbe {
 
 启停保存到 settings.json，提示已打开会话在本轮结束后更新，空闲会话立即生效。技能通知与其他后台同步走已有 providersChanged/propagateConfig；正在对话的输入框取 session.describeSkills 快照，新会话草稿取运行时查询。技能正文标签可展开日志快照，skill 工具使用普通工具行。
 
-外壳 `open_skill_directory({ path, create })` 打开绝对目录，create 只允许 `<NOCTURNE_HOME>/skills`，使用既有 opener；目录错误返回中文说明。空态提供创建并打开该目录及 agentskills.io 规范链接。技能行为主文档见 [skills.md](../architecture/skills.md)。
+外壳 `open_skill_directory({ path, create })` 打开绝对目录，create 只允许 `<NOCTURNE_HOME>/skills`，使用既有 opener；目录错误返回中文说明。空态提供创建并打开该目录及 agentskills.io 规范链接。页眉的「导入技能…」打开导入对话框（U-08）：目标二选一（用户技能默认，当前工作区只在选中工作区时可选）→ 系统文件夹对话框选来源 → `skills.importSkills` 预检列出候选（大小、符号链接跳过数、缺说明、目标同名冲突三选一改名/覆盖/跳过，他层同名只提示不拦截）→ 执行 → 结果页逐项展示并给成功项「停用」按钮。技能行为主文档见 [skills.md](../architecture/skills.md)。
 
 #### MCP
 

@@ -1,4 +1,4 @@
-import type { SkillsDescription } from "@nocturne/core";
+import type { SkillImportInput, SkillImportOutput, SkillsDescription } from "@nocturne/core";
 /**
  * RPC 客户端（ADR-0044）：类型化封装。运行时只依赖 `@nocturne/core/protocol`，
  * 对 `@nocturne/core` 只有类型导入（由 dependency-cruiser 规则强制），桌面端前端
@@ -179,6 +179,11 @@ export interface RpcRuntime {
   probeExternalAgent(input: ExternalAgentProbeInput): Promise<ExternalAgentProbeResult>;
   describeSkills(input?: { workspaceRoot?: string | undefined }): Promise<SkillsDescription>;
   setSkillEnabled(input: { name: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
+  /**
+   * 导入技能（U-08）：预检返回候选与冲突，执行时带逐项决定。
+   * 写入经 Core，客户端不直接写技能目录。
+   */
+  importSkills(input: SkillImportInput): Promise<SkillImportOutput>;
   describeMcpServers(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<{ servers: McpServerOverview[]; warnings: string[] }>;
@@ -553,6 +558,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     describeMcpServers: (input = {}) => call("mcp.describeMcpServers", input),
     describeSkills: (input = {}) => call("skills.describeSkills", input),
     setSkillEnabled: (input) => call("skills.setSkillEnabled", input),
+    importSkills: (input) => call("skills.importSkills", input),
     saveMcpServer: (input) => call("mcp.saveMcpServer", input),
     deleteMcpServer: async (input) => {
       await call("mcp.deleteMcpServer", input);

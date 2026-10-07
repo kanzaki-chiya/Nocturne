@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RpcClient } from "@nocturne/rpc/client";
 import type { SkillOverview, SkillsDescription } from "@nocturne/core/protocol";
 import { projectName } from "./session-tree";
+import { Scrim } from "./ProvidersPage";
+import type { SkillImportCommit, SkillImportPreview } from "./rpc-types";
 import "./pages.css";
 import "./mcp.css";
 import "./skills.css";
@@ -31,18 +33,22 @@ export function SkillsPage({
   version,
   openDirectory,
   openUrl,
+  pickFolder,
 }: {
   client: RpcClient | undefined;
   workspaceRoot: string | undefined;
   version: number;
   openDirectory: (path: string, create?: boolean) => Promise<void>;
   openUrl: (url: string) => Promise<void>;
+  /** 系统文件夹对话框（导入来源）；缺省时「导入技能」按钮置灰 */
+  pickFolder?: (() => Promise<string | null>) | undefined;
 }) {
   const [data, setData] = useState<SkillsDescription>();
   const [selected, setSelected] = useState<string>();
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const refreshGeneration = useRef(0);
   const refresh = useCallback(async () => {
     if (!client) return;
@@ -120,6 +126,18 @@ export function SkillsPage({
           {budget?.basis === "fallback" && (
             <span className="fine">模型上下文窗口未知，使用 8,000 token 上限</span>
           )}
+        </div>
+        <div className="acts">
+          <button
+            className="btn"
+            disabled={client === undefined || pickFolder === undefined}
+            title={pickFolder === undefined ? "当前宿主不支持选择文件夹" : undefined}
+            onClick={() => {
+              setImportOpen(true);
+            }}
+          >
+            导入技能…
+          </button>
         </div>
       </header>
       {error && (
@@ -414,6 +432,21 @@ export function SkillsPage({
           ✓ {toast}
         </div>
       )}
+      {importOpen && client !== undefined && pickFolder !== undefined && (
+        <SkillImportDialog
+          client={client}
+          workspaceRoot={workspaceRoot}
+          pickFolder={pickFolder}
+          onClose={() => {
+            setImportOpen(false);
+          }}
+          onDone={(message) => {
+            setImportOpen(false);
+            setToast(message);
+            void refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -432,4 +465,365 @@ function SkillWarnings({ warnings }: { warnings: SkillsDescription["warnings"] }
       ))}
     </details>
   ) : null;
+}
+
+/* ---------------- 导入技能（U-08） ---------------- */
+
+type ImportPhase =
+  | { kind: "pick" }
+  | { kind: "previewing" }
+  | { kind: "review" }
+  | { kind: "committing" }
+  | { kind: "done" };
+
+/**
+ * 导入技能对话框（U-08，ADR-0048 修订）：来源只支持本地文件夹（系统
+ * 对话框选择，已有 dialog 插件，不新增）。选中的文件夹本身含 SKILL.md
+ * 时作为单个技能，否则扫描下一层子目录。预检返回候选与冲突，执行时
+ * 带逐项决定；写入经 Core（skills.importSkills），客户端不直接写目录。
+ */
+function SkillImportDialog({
+  client,
+  workspaceRoot,
+  pickFolder,
+  onClose,
+  onDone,
+}: {
+  client: RpcClient;
+  workspaceRoot: string | undefined;
+  pickFolder: () => Promise<string | null>;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const [phase, setPhase] = useState<ImportPhase>({ kind: "pick" });
+  const [target, setTarget] = useState<"user" | "project">("user");
+  const [preview, setPreview] = useState<SkillImportPreview | null>(null);
+  const [actions, setActions] = useState<Record<string, "rename" | "overwrite" | "skip">>({});
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [results, setResults] = useState<SkillImportCommit["results"]>([]);
+  const [affectedSessions, setAffectedSessions] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [disabling, setDisabling] = useState<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const runPreview = async (sourceDir: string, picked: "user" | "project") => {
+    setPhase({ kind: "previewing" });
+    setError(null);
+    try {
+      const out = await client.runtime.importSkills({
+        mode: "preview",
+        sourceDir,
+        target: picked,
+        ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+      });
+      if (!mounted.current) return;
+      if (out.mode !== "preview") return;
+      setPreview(out);
+      const initialActions: Record<string, "rename" | "overwrite" | "skip"> = {};
+      const initialNames: Record<string, string> = {};
+      for (const candidate of out.candidates) {
+        if (!candidate.valid) continue;
+        if (candidate.targetConflict) {
+          initialActions[candidate.sourcePath] = "rename";
+          initialNames[candidate.sourcePath] = candidate.suggestedName ?? `${candidate.name}-2`;
+        } else {
+          initialActions[candidate.sourcePath] = "overwrite";
+        }
+      }
+      setActions(initialActions);
+      setNames(initialNames);
+      setPhase({ kind: "review" });
+    } catch (e) {
+      if (!mounted.current) return;
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase({ kind: "pick" });
+    }
+  };
+
+  const pick = async () => {
+    const dir = await pickFolder().catch((e: unknown) => {
+      setError(e instanceof Error ? e.message : String(e));
+      return null;
+    });
+    if (dir === null) return;
+    await runPreview(dir, target);
+  };
+
+  const commit = async () => {
+    if (preview === null) return;
+    const decisions = preview.candidates
+      .filter((c) => c.valid)
+      .map((c) => {
+        const action = actions[c.sourcePath] ?? "skip";
+        return {
+          sourcePath: c.sourcePath,
+          ...(action === "rename" ? { name: (names[c.sourcePath] ?? "").trim() || c.name } : {}),
+          action,
+        };
+      });
+    if (decisions.length === 0) {
+      setError("没有可导入的候选");
+      return;
+    }
+    setPhase({ kind: "committing" });
+    setError(null);
+    try {
+      const out = await client.runtime.importSkills({
+        mode: "commit",
+        target: preview.targetLayer,
+        ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+        decisions,
+      });
+      if (!mounted.current) return;
+      if (out.mode !== "commit") return;
+      setResults(out.results);
+      setAffectedSessions(out.affectedSessions);
+      setPhase({ kind: "done" });
+    } catch (e) {
+      if (!mounted.current) return;
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase({ kind: "review" });
+    }
+  };
+
+  const disable = async (name: string) => {
+    setDisabling(name);
+    try {
+      const result = await client.runtime.setSkillEnabled({ name, enabled: false });
+      if (!mounted.current) return;
+      onDone(`已导入并停用 ${name} · ${result.affectedSessions} 个已打开的会话将在本轮结束后更新`);
+    } catch (e) {
+      if (!mounted.current) return;
+      setError(e instanceof Error ? e.message : String(e));
+      setDisabling(null);
+    }
+  };
+
+  const validCount = preview?.candidates.filter((c) => c.valid).length ?? 0;
+  return (
+    <Scrim onClose={onClose}>
+      <div className="dlg" role="dialog" aria-label="导入技能">
+        <div className="dh3">
+          <b>导入技能</b>
+          <span>只支持本地文件夹；只复制文件，不执行其中任何脚本。</span>
+        </div>
+        <div className="db">
+          <div className="field">
+            <div className="lab">
+              <label>导入到</label>
+            </div>
+            <span className="seg" role="group" aria-label="导入目标">
+              <button
+                className={target === "user" ? "on" : ""}
+                onClick={() => {
+                  setTarget("user");
+                }}
+              >
+                用户技能
+              </button>
+              <button
+                className={target === "project" ? "on" : ""}
+                disabled={workspaceRoot === undefined}
+                title={workspaceRoot ?? "先在左栏选中一个工作区"}
+                onClick={() => {
+                  setTarget("project");
+                }}
+              >
+                当前工作区
+              </button>
+            </span>
+          </div>
+          {phase.kind === "pick" && (
+            <div className="fl">
+              <span>选中的文件夹本身含 SKILL.md 时作为单个技能；否则扫描其下一层子目录。</span>
+              <button className="btn primary" onClick={() => void pick()}>
+                选择文件夹…
+              </button>
+            </div>
+          )}
+          {phase.kind === "previewing" && <div className="fl">正在扫描…</div>}
+          {(phase.kind === "review" || phase.kind === "committing") && preview !== null && (
+            <>
+              <div className="fine">
+                目标 {preview.targetDir} · {validCount} 个可导入
+              </div>
+              {preview.candidates.map((candidate) => (
+                <div className="fetch" key={candidate.sourcePath}>
+                  <div className="fl">
+                    <b>{candidate.name}</b>
+                    <span className="fine">{(candidate.sizeBytes / 1024).toFixed(1)} KB</span>
+                    {!candidate.valid && <span className="bad">{candidate.reason}</span>}
+                  </div>
+                  {candidate.valid && (
+                    <>
+                      {candidate.missingDescription && (
+                        <div className="fl">
+                          <span className="bad">缺少说明，模型看不到这个技能（仍可导入）</span>
+                        </div>
+                      )}
+                      {candidate.skippedLinks.length > 0 && (
+                        <div className="fl">
+                          <span className="fine">
+                            跳过 {candidate.skippedLinks.length} 个符号链接：
+                            {candidate.skippedLinks.slice(0, 3).join("、")}
+                            {candidate.skippedLinks.length > 3 ? "…" : ""}
+                          </span>
+                        </div>
+                      )}
+                      {candidate.shadowNote !== undefined && !candidate.targetConflict && (
+                        <div className="fl">
+                          <span className="fine">{candidate.shadowNote}</span>
+                        </div>
+                      )}
+                      {candidate.targetConflict && (
+                        <div className="fl">
+                          <span className="bad">目标已存在同名技能</span>
+                          <span
+                            className="seg"
+                            role="group"
+                            aria-label={`${candidate.name} 重名处理`}
+                          >
+                            <button
+                              className={actions[candidate.sourcePath] === "rename" ? "on" : ""}
+                              onClick={() => {
+                                setActions((cur) => ({ ...cur, [candidate.sourcePath]: "rename" }));
+                              }}
+                            >
+                              改名
+                            </button>
+                            <button
+                              className={actions[candidate.sourcePath] === "overwrite" ? "on" : ""}
+                              onClick={() => {
+                                setActions((cur) => ({
+                                  ...cur,
+                                  [candidate.sourcePath]: "overwrite",
+                                }));
+                              }}
+                            >
+                              覆盖
+                            </button>
+                            <button
+                              className={actions[candidate.sourcePath] === "skip" ? "on" : ""}
+                              onClick={() => {
+                                setActions((cur) => ({ ...cur, [candidate.sourcePath]: "skip" }));
+                              }}
+                            >
+                              跳过
+                            </button>
+                          </span>
+                        </div>
+                      )}
+                      {candidate.targetConflict && actions[candidate.sourcePath] === "rename" && (
+                        <div className="field">
+                          <div className="lab">
+                            <label>新名字</label>
+                            <small>自动加后缀，同时改写 SKILL.md 的 name</small>
+                          </div>
+                          <input
+                            className="input"
+                            aria-label={`${candidate.name} 的新名字`}
+                            value={names[candidate.sourcePath] ?? ""}
+                            onChange={(e) => {
+                              setNames((cur) => ({
+                                ...cur,
+                                [candidate.sourcePath]: e.target.value,
+                              }));
+                            }}
+                          />
+                        </div>
+                      )}
+                      {!candidate.targetConflict && (
+                        <div className="fl">
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={(actions[candidate.sourcePath] ?? "overwrite") !== "skip"}
+                              onChange={(e) => {
+                                setActions((cur) => ({
+                                  ...cur,
+                                  [candidate.sourcePath]: e.target.checked ? "overwrite" : "skip",
+                                }));
+                              }}
+                            />{" "}
+                            导入
+                          </label>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+          {phase.kind === "done" && (
+            <>
+              <div className="fine">
+                {results.filter((r) => r.status === "imported").length} 个成功 · 跳过{" "}
+                {results.filter((r) => r.status === "skipped").length} 个
+                {affectedSessions > 0
+                  ? ` · ${affectedSessions} 个已打开的会话将在本轮结束后看到新技能`
+                  : ""}
+              </div>
+              {results.map((result) => (
+                <div className="fetch" key={result.sourcePath}>
+                  <div className="fl">
+                    <b>{result.finalName ?? result.name}</b>
+                    {result.status === "imported" ? (
+                      <span className="ok">✓ 已导入</span>
+                    ) : (
+                      <span className="fine">
+                        已跳过{result.reason ? `：${result.reason}` : ""}
+                      </span>
+                    )}
+                    {result.missingDescription && result.status === "imported" && (
+                      <span className="bad">缺少说明，模型看不到</span>
+                    )}
+                    {result.status === "imported" && (
+                      <button
+                        className="btn"
+                        disabled={disabling !== null}
+                        onClick={() => void disable(result.finalName ?? result.name)}
+                      >
+                        {disabling === (result.finalName ?? result.name) ? "停用中…" : "停用"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+          {error !== null && <div className="errt">{error}</div>}
+        </div>
+        <div className="df">
+          <span className="sp" />
+          {phase.kind === "done" ? (
+            <button className="btn primary" onClick={onClose}>
+              关闭
+            </button>
+          ) : (
+            <>
+              <button className="btn" onClick={onClose}>
+                取消
+              </button>
+              {(phase.kind === "review" || phase.kind === "committing") && (
+                <button
+                  className="btn primary"
+                  disabled={phase.kind === "committing" || validCount === 0}
+                  onClick={() => void commit()}
+                >
+                  {phase.kind === "committing" ? "导入中…" : `导入 ${validCount} 个`}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </Scrim>
+  );
 }

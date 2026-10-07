@@ -43,6 +43,7 @@ export const RUNTIME_METHODS: Record<
   probeExternalAgent: "agents.probeExternalAgent",
   describeSkills: "skills.describeSkills",
   setSkillEnabled: "skills.setSkillEnabled",
+  importSkills: "skills.importSkills",
   saveMcpServer: "mcp.saveMcpServer",
   deleteMcpServer: "mcp.deleteMcpServer",
   setMcpServerEnabled: "mcp.setMcpServerEnabled",

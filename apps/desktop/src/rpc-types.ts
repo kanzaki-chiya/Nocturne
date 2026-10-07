@@ -18,6 +18,15 @@ export type ModelSettingsView = Awaited<ReturnType<RpcProvider["listModelSetting
 export type ModelFieldSource = ModelSettingsView["fields"]["displayName"]["source"];
 export type ModelSettingsPatch = Parameters<RpcProvider["saveModelSettings"]>[2];
 export type SettingItem = Awaited<ReturnType<RpcRuntime["describeSettings"]>>[number];
+export type SkillImportPreview = Extract<
+  Awaited<ReturnType<RpcRuntime["importSkills"]>>,
+  { mode: "preview" }
+>;
+export type SkillImportCandidate = SkillImportPreview["candidates"][number];
+export type SkillImportCommit = Extract<
+  Awaited<ReturnType<RpcRuntime["importSkills"]>>,
+  { mode: "commit" }
+>;
 export type SettingsPatch = Parameters<RpcRuntime["updateSettings"]>[0];
 export type ModelInfo = Awaited<ReturnType<RpcRuntime["listModels"]>>[number];
 export type ModelRoleInfo = Awaited<ReturnType<RpcRuntime["describeModelRoles"]>>[number];

@@ -1,4 +1,9 @@
-import type { SkillInvocation, SkillsDescription } from "@nocturne/core";
+import type {
+  SkillImportInput,
+  SkillImportOutput,
+  SkillInvocation,
+  SkillsDescription,
+} from "@nocturne/core";
 /**
  * 方法表：每个 RPC 方法的参数与结果类型（ADR-0044 第 4 节、docs/protocols/rpc.md）。
  * 服务端按它做类型检查地实现，客户端按它生成类型化调用；对 @nocturne/core 只有类型导入。
@@ -175,6 +180,14 @@ export interface RpcMethods {
   "skills.setSkillEnabled": {
     params: { name: string; enabled: boolean };
     result: { affectedSessions: number };
+  };
+  /**
+   * 导入技能（U-08）：预检返回候选与冲突，执行时带逐项决定。
+   * 签名照 skills.* 现有风格；写入经 Core，客户端不直接写技能目录。
+   */
+  "skills.importSkills": {
+    params: SkillImportInput;
+    result: SkillImportOutput;
   };
   "session.describeSkills": { params: SessionParams; result: SkillsDescription };
   initialize: { params: InitializeParams; result: InitializeResult };
@@ -426,6 +439,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.describeExternalAgents": true,
   "skills.describeSkills": true,
   "skills.setSkillEnabled": true,
+  "skills.importSkills": true,
   "session.describeSkills": true,
   "mcp.saveMcpServer": true,
   "mcp.deleteMcpServer": true,

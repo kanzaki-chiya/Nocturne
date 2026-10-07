@@ -5,6 +5,7 @@ import {
   ExternalAgentSettingsError,
   RuntimeCommandError,
   SessionError,
+  SkillImportError,
 } from "@nocturne/core";
 
 import { RPC_ERROR, type RpcErrorObject } from "../shared/jsonrpc.js";
@@ -74,7 +75,8 @@ export function toRpcError(error: unknown): RpcErrorObject {
   if (
     error instanceof ProviderSetupError ||
     error instanceof McpSettingsError ||
-    error instanceof ExternalAgentSettingsError
+    error instanceof ExternalAgentSettingsError ||
+    error instanceof SkillImportError
   ) {
     // 字段名让客户端把错误标到对应输入框（ADR-0044 第 6 节）
     return {
