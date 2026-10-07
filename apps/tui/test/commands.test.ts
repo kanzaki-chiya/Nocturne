@@ -10,6 +10,59 @@ import { BUILTIN_SLASH_COMMANDS } from "@nocturne/core/protocol";
 import { contextLines, runSlash, type ProviderBridge } from "../src/commands.js";
 import { SLASH_COMMANDS } from "../src/slash-catalog.js";
 
+it("TUI /agents 为只读列表，保留来源、停用和重名警告", async () => {
+  const result = await runSlash(
+    "/agents",
+    fakeSession({
+      describeSkills: () => ({
+        skills: [],
+        warnings: [],
+        budget: {
+          usedTokens: 0,
+          limitTokens: 8000,
+          fullCount: 0,
+          nameCount: 0,
+          disabledCount: 0,
+          basis: "fallback",
+        },
+        scannedDirs: [],
+        homeDir: "",
+      }),
+      describeExternalAgents: async () => ({
+        agents: [
+          {
+            name: "Model",
+            command: "fake",
+            args: [],
+            enabled: true,
+            origin: "user",
+            editable: false,
+          },
+          {
+            name: "codex",
+            command: "fake",
+            args: [],
+            enabled: false,
+            origin: "app",
+            editable: true,
+          },
+        ],
+        warnings: ["配置警告"],
+      }),
+    }),
+  );
+  expect(result.kind).toBe("message");
+  if (result.kind === "message") {
+    expect(result.text).toContain("config.json");
+    expect(result.text).toContain("程序管理");
+    expect(result.text).toContain("已停用");
+    expect(result.text).toContain("与内置命令重名");
+    expect(result.text).toContain("配置警告");
+    expect(result.text).toContain("费用与额度");
+    expect(result.text).toContain("fake");
+  }
+});
+
 function fakeSession(overrides: Partial<RuntimeSession> = {}): RuntimeSession {
   return {
     id: "s1",

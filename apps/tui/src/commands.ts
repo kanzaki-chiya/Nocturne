@@ -11,7 +11,7 @@ import {
   type RuntimeSession,
 } from "@nocturne/core";
 
-import { helpLines as catalogHelpLines } from "./slash-catalog.js";
+import { helpLines as catalogHelpLines, externalAgentListLines } from "./slash-catalog.js";
 import { safeLoginError } from "./provider-login.js";
 
 export type OverlayName =
@@ -235,6 +235,14 @@ export async function runSlash(
     }
     case "/skills":
       return { kind: "message", text: skillListLines(session.describeSkills().skills).join("\n") };
+    case "/agents":
+      return {
+        kind: "message",
+        text: externalAgentListLines(
+          await session.describeExternalAgents(),
+          session.describeSkills().skills,
+        ).join("\n"),
+      };
     case "/compact": {
       try {
         await session.compact();

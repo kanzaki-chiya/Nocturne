@@ -94,6 +94,42 @@ const noticeEntry = (seq: number, message: string): ViewEntry => ({
 });
 
 describe("TUI", () => {
+  it("TUI 外部 agent 斜杠点名传delegate，空任务给用法", async () => {
+    const { runtime, session } = await makeSession();
+    const catalog = vi.spyOn(session, "describeExternalAgents").mockResolvedValue({
+      agents: [
+        { name: "Codex", command: "fake", args: [], enabled: true, origin: "app", editable: true },
+      ],
+      warnings: [],
+    });
+    const submit = vi.spyOn(session, "submit").mockResolvedValue("done");
+    const screen = render(createElement(App, { session, runtime, env: ENV, inline: false }));
+    try {
+      // 目录懒加载：输入 / 才拉取，回车走先取目录再分发的兜底路径
+      screen.stdin.write("/");
+      await vi.waitFor(() => expect(catalog).toHaveBeenCalled());
+      await pause(100);
+      screen.stdin.write("cod");
+      await pause(50);
+      screen.stdin.write("\r");
+      await pause(50);
+      screen.stdin.write("\r");
+      await waitFor(() => (screen.lastFrame() ?? "").includes("用法：/Codex 任务"));
+      expect(submit).not.toHaveBeenCalled();
+      screen.stdin.write("检查  两个空格");
+      await pause(50);
+      screen.stdin.write("\r");
+      await vi.waitFor(() =>
+        expect(submit).toHaveBeenCalledWith({
+          text: "/Codex 检查  两个空格",
+          delegate: { agent: "Codex", task: "检查  两个空格" },
+        }),
+      );
+    } finally {
+      screen.unmount();
+      await session.close();
+    }
+  });
   it("新用户消息归档已完成清单：全屏固定区与状态栏撤去，历史快照保留", async () => {
     const { runtime, session } = await makeSession(
       new FakeProvider({

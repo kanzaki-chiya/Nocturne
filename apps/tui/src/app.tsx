@@ -19,6 +19,7 @@ import {
   completeFileRefs,
   parseSkillSlash,
   type FileIndexEntry,
+  type ExternalAgentsDescription,
   type Clipboard,
   type ModelSettingsPatch,
   type ModelSettingsView,
@@ -85,7 +86,12 @@ import {
   selSegments,
   type Selection,
 } from "./selection.js";
-import { completeSlash, PRESET_NAMES, type Candidate } from "./slash-catalog.js";
+import {
+  completeSlash,
+  parseExternalAgentSlash,
+  PRESET_NAMES,
+  type Candidate,
+} from "./slash-catalog.js";
 import {
   countLaidLines,
   layoutCached,
@@ -1864,13 +1870,47 @@ function SessionApp({
       });
   };
 
+  const [externalAgentCatalog, setExternalAgentCatalog] = useState<{
+    session: RuntimeSession;
+    description: ExternalAgentsDescription;
+  }>();
+  const externalCatalogActive = input.startsWith("/");
+  useEffect(() => {
+    let active = true;
+    // 仅斜杠输入中拉取：挂载即拉会让 describe 的配置合并 fs 读与测试/真实
+    // 会话的状态更新争用事件循环；setState 推到下一 tick 同理避开 microtask
+    // 里同步 setState 与 ink 按键派发/帧提交的交错（fullscreen-ui 实测复现）
+    if (externalCatalogActive)
+      void session
+        .describeExternalAgents()
+        .then((description) => {
+          if (active)
+            setTimeout(() => setExternalAgentCatalog({ session, description }), 0);
+        })
+        .catch((error: unknown) => {
+          if (active) pushLine(`! ${errText(error)}`);
+        });
+    return () => {
+      active = false;
+    };
+  }, [
+    session,
+    view.config,
+    view.lastTurn?.turnIndex,
+    view.status,
+    externalCatalogActive,
+    pushLine,
+  ]);
+  const externalAgents =
+    externalAgentCatalog?.session === session ? externalAgentCatalog.description.agents : [];
   const completionCtx = useMemo(
     () => ({
       effortLevels: session.reasoningEffortInfo().available,
       providerIds,
       skills: session.describeSkills().skills,
+      externalAgents,
     }),
-    [session, providerIds, view.revision],
+    [session, providerIds, view.revision, externalAgents],
   );
   const completedTurn = view.lastTurn?.turnIndex ?? 0;
   const fileCompletion = completeFileRefs(
@@ -1881,7 +1921,7 @@ function SessionApp({
   const indexing =
     fileCompletion !== undefined &&
     (indexed?.session !== session || indexed.turn !== completedTurn);
-  const candidates: { label: string; insert: string; group?: "commands" | "skills" | undefined }[] =
+  const candidates: Candidate[] =
     fileCompletion?.candidates ??
     (input.startsWith("/") ? completeSlash(input, completionCtx) : []);
   const completionOpen = inputIdle && completionOn && (candidates.length > 0 || indexing);
@@ -2078,6 +2118,10 @@ function SessionApp({
         return;
       }
       if (key.return) {
+        if (selected.group === "skills" || selected.group === "agents") {
+          applyCandidate(selected, false);
+          return;
+        }
         if (fileCompletion !== undefined) {
           applyCandidate(selected, false);
           return;
@@ -2243,9 +2287,19 @@ function SessionApp({
         void session.recordInputHistory(historyText);
       }
       setHistoryIndex(undefined);
-      const skill = parseSkillSlash(pastes.expand(text), session.describeSkills().skills);
-      if (text.startsWith("/") && !skill) {
-        void runSlash(text, session, provider)
+      const expanded = pastes.expand(text);
+      const skills = session.describeSkills().skills;
+      const skill = parseSkillSlash(expanded, skills);
+      const catalogReady = externalAgentCatalog?.session === session;
+      const delegate = skill
+        ? undefined
+        : parseExternalAgentSlash(expanded, catalogReady ? externalAgents : [], skills);
+      if (delegate?.task.trim() === "") {
+        pushLine(`用法：/${delegate.agent} 任务`);
+        return;
+      }
+      const dispatchSlash = (raw: string): void => {
+        void runSlash(raw, session, provider)
           .then((r) => {
             const opens = r.kind === "overlay" || r.kind === "picker" || r.kind === "provider-page";
             if (!opens) clearInput();
@@ -2277,6 +2331,57 @@ function SessionApp({
           .catch((e: unknown) => {
             pushLine(`! ${errText(e)}`);
           });
+      };
+      const submitExpanded = (resolved: { agent: string; task: string }): void => {
+        if (submitting.current) return;
+        const attachments = images.in(text);
+        clearInput();
+        images.clear();
+        if (fullscreen) setScroll(scrollToBottom());
+        submitting.current = true;
+        setSubmitPending(true);
+        void session
+          .submit({
+            text: expanded,
+            delegate: resolved,
+            ...(attachments.length > 0 ? { attachments } : {}),
+          })
+          .catch((e: unknown) => {
+            pushLine(`! ${errText(e)}`);
+          })
+          .finally(() => {
+            submitting.current = false;
+            setSubmitPending(false);
+          });
+      };
+      if (text.startsWith("/") && !skill && !delegate) {
+        if (!catalogReady) {
+          // 目录未就绪（输入 / 后立即回车）：先拉一次再判定 agent 还是命令
+          void session
+            .describeExternalAgents()
+            .then((description) => {
+              setTimeout(
+                () =>
+                  setExternalAgentCatalog((prev) =>
+                    prev?.session === session ? prev : { session, description },
+                  ),
+                0,
+              );
+              const late = parseExternalAgentSlash(expanded, description.agents, skills);
+              if (late === undefined) dispatchSlash(text);
+              else if (late.task.trim() === "") pushLine(`用法：/${late.agent} 任务`);
+              else submitExpanded(late);
+            })
+            .catch((e: unknown) => {
+              pushLine(`! ${errText(e)}`);
+            });
+          return;
+        }
+        dispatchSlash(text);
+        return;
+      }
+      if (delegate !== undefined) {
+        submitExpanded(delegate);
         return;
       }
       if (submitting.current) return;
@@ -2289,7 +2394,7 @@ function SessionApp({
       setSubmitPending(true);
       void session
         .submit({
-          text: pastes.expand(text),
+          text: expanded,
           ...(skill ? { skill } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
         })
@@ -2303,6 +2408,8 @@ function SessionApp({
     },
     [
       session,
+      externalAgents,
+      externalAgentCatalog,
       pushLine,
       clearInput,
       requestExit,
@@ -3044,7 +3151,11 @@ function SessionApp({
             (i === 0 || shownCandidates[i - 1]?.group !== item.group)
               ? [
                   <Text key={`group-${item.group}`} dimColor>
-                    {item.group === "commands" ? "命令" : "技能"}
+                    {item.group === "commands"
+                      ? "命令"
+                      : item.group === "skills"
+                        ? "技能"
+                        : "外部 agent"}
                   </Text>,
                 ]
               : []),
