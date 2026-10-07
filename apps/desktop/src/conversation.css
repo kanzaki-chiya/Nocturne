@@ -43,17 +43,104 @@
 /* ── 用户消息（右侧气泡） ── */
 .conversation .u {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+}
+/* U-01：气泡与悬停操作行同列右对齐；76% 上限移到列容器 */
+.conversation .u-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  max-width: 76%;
   min-width: 0;
 }
 .conversation .u-bubble {
-  max-width: 76%;
   background: var(--a-sel);
   border-radius: 10px 10px 3px 10px;
   padding: 8px 12px;
   font-size: 13.5px;
   line-height: 1.6;
   overflow-wrap: anywhere;
+}
+/* 悬停/聚焦时显示的三个操作；始终占位（透明）避免悬停时布局跳动 */
+.conversation .u-actions {
+  display: flex;
+  gap: 8px;
+  padding: 2px 2px 0;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.conversation .u:hover .u-actions,
+.conversation .u:focus-within .u-actions {
+  visibility: visible;
+  opacity: 1;
+}
+.conversation .u-act {
+  border: 0;
+  background: none;
+  padding: 1px 4px;
+  font-size: 11.5px;
+  color: var(--a-muted);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.conversation .u-act:hover:not(:disabled),
+.conversation .u-act:focus-visible {
+  color: var(--a-fg);
+  background: var(--a-sel);
+}
+.conversation .u-act:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* 原位编辑框：与气泡同宽对齐；编辑中其后的旧回复变暗（发送成功才被移除） */
+.conversation .u.editing ~ * {
+  opacity: 0.35;
+}
+.conversation .u-edit {
+  align-self: stretch;
+  background: var(--a-side);
+  border: 1px solid var(--a-border);
+  border-radius: 10px;
+  padding: 8px;
+}
+.conversation .u-edit textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--a-fg);
+  background: var(--a-input);
+  border: 1px solid var(--a-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.conversation .u-edit-info {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  color: var(--a-secondary);
+}
+.conversation .u-edit-mode {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--a-fg);
+}
+.conversation .u-edit-mode label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.conversation .u-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: flex-end;
 }
 .conversation .u-text {
   white-space: pre-wrap;

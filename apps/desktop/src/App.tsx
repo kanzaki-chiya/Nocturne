@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RpcError, type RpcClient, type RpcRuntime, type RpcSession } from "@nocturne/rpc/client";
 import type {
   ExternalAgentOverview,
+  RewindMode,
   RuntimeEvent,
   SessionView,
   SkillOverview,
@@ -447,6 +448,13 @@ export function App({ host }: { host: DesktopHost }) {
     setSelectedId(conversations.selectedId);
     await refresh();
     return true;
+  };
+
+  // 重发/编辑重发（U-01）：rewind 走会话串行锁，发送后同步会话列表
+  const resubmit = async (targetSeq: number, text: string, mode: RewindMode): Promise<void> => {
+    await conversations.resubmit(targetSeq, text, mode);
+    setSelectedId(conversations.selectedId);
+    await refresh();
   };
 
   const runSlash = async (line: string): Promise<boolean> => {
@@ -896,6 +904,7 @@ export function App({ host }: { host: DesktopHost }) {
                 home={home}
                 selected={selected}
                 running={conversationStatus(active) !== "idle"}
+                onResubmit={resubmit}
                 onSubmit={(input) => submitInput(input)}
                 onInterrupt={() => {
                   conversations.interrupt();
@@ -1063,6 +1072,7 @@ interface SessionPaneProps {
   home: string | null;
   selected: SessionSummary | undefined;
   running: boolean;
+  onResubmit: (targetSeq: number, text: string, mode: RewindMode) => Promise<void>;
   onSubmit: (input: ComposerSubmit) => Promise<boolean>;
   onInterrupt: () => void;
   onSlash: (line: string) => Promise<boolean>;
@@ -1086,6 +1096,7 @@ function SessionPane({
   home,
   selected,
   running,
+  onResubmit,
   onSubmit,
   onInterrupt,
   onSlash,
@@ -1161,6 +1172,8 @@ function SessionPane({
         shellKind={controls.shell?.effective?.kind}
         subscribeEvents={subscribeEvents}
         images={images}
+        busy={running}
+        onResubmit={onResubmit}
       />
       <Composer
         key={`composer:${session.id}`}

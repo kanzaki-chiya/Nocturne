@@ -328,8 +328,43 @@ function replayHost(
           result = [];
           break;
         case "session.submit":
-          // 立即返回 = 已接受；发送方随后才看到持久事件
+          // 与真实服务端一致：先写持久 message.user 事件（视图随即出现新消息），再返回响应
+          emitEvent(backendId, id, {
+            type: "message.user",
+            payload: {
+              messageId: `u-${id}-${nextSeq}`,
+              content: [{ type: "text", text: String(request.params.text ?? "") }],
+            },
+          });
           result = "done";
+          break;
+        case "session.rewindTargets":
+          result = [
+            {
+              seq: 1,
+              firstLine: `${id} 正文`,
+              time: "2026-10-04T00:00:00Z",
+              text: `${id} 正文`,
+              hasImages: false,
+              files: [
+                { path: `Z:/qa-${id}/${id}.txt`, action: "restore", external: false },
+                { path: `Z:/qa-${id}/${id}.log`, action: "untracked", external: false },
+              ],
+              untrackedCalls: 1,
+            },
+          ];
+          break;
+        case "session.rewind":
+          // 与真实服务端一致：先写持久 session.rewound 事件，视图随即截断该目标之后的条目
+          emitEvent(backendId, id, {
+            type: "session.rewound",
+            payload: {
+              targetSeq: Number(request.params.targetSeq),
+              mode: String(request.params.mode),
+              files: [],
+            },
+          });
+          result = [];
           break;
         case "session.readAttachment":
           result = { data: "AQID", mimeType: "image/png", bytes: 3 };
@@ -388,6 +423,77 @@ it("反复切换待确认会话时只显示当前消息流和当前权限卡片�
       expect(within(card).getByText(`${id}.txt`)).toBeTruthy();
     });
   }
+});
+
+it("用户消息操作：复制、编辑并重发（仅对话）、重发与忙时置灰（U-01）", async () => {
+  const host = replayHost();
+  render(<App host={host} />);
+  const clipboard = { writeText: vi.fn(async (_text: string) => undefined) };
+  Object.defineProperty(window.navigator, "clipboard", {
+    value: clipboard,
+    configurable: true,
+  });
+  // 空闲会话 gamma：复制随时可用
+  fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  const stream = () => screen.getByRole("region", { name: "会话消息" });
+  await screen.findByRole("region", { name: "会话消息" });
+  await within(stream()).findByText("gamma 正文");
+  fireEvent.click(within(stream()).getByRole("button", { name: "复制" }));
+  await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith("gamma 正文"));
+
+  // 编辑并重发：编辑框带原文、撤回信息取自 rewindTargets，选「仅对话」→ mode=conversation
+  fireEvent.click(screen.getByRole("button", { name: "编辑并重发" }));
+  const box = await screen.findByLabelText<HTMLTextAreaElement>("编辑消息");
+  expect(box.value).toBe("gamma 正文");
+  await screen.findByText(/将撤回 0 轮回复，将还原 1 个文件：gamma\.txt/);
+  expect(screen.getByText(/另有 1 次命令改动不还原/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: "仅对话" }));
+  fireEvent.change(box, { target: { value: "改写后的正文" } });
+  const editBox = box.closest(".u-edit") as HTMLElement;
+  fireEvent.click(within(editBox).getByRole("button", { name: "发送" }));
+  await waitFor(() =>
+    expect(host.calls.some((call) => call.method === "session.submit")).toBe(true),
+  );
+  expect(host.calls.find((call) => call.method === "session.rewind")?.params).toMatchObject({
+    targetSeq: 1,
+    mode: "conversation",
+  });
+  expect(host.calls.find((call) => call.method === "session.submit")?.params).toMatchObject({
+    text: "改写后的正文",
+    attachments: [],
+  });
+
+  // 重发：在重发后出现的新消息上点「重发」→ 默认「对话和文件」回退该消息
+  fireEvent.click(await screen.findByRole("button", { name: "重发" }));
+  await waitFor(() =>
+    expect(
+      host.calls.some((call) => call.method === "session.rewind" && call.params.mode === "both"),
+    ).toBe(true),
+  );
+  const rewoundSeq = host.calls.find(
+    (call) => call.method === "session.rewind" && call.params.mode === "both",
+  )?.params.targetSeq;
+  expect(rewoundSeq).not.toBe(1); // 新消息在重写事件之后的 seq
+  expect(
+    host.calls.filter((call) => call.method === "session.submit").map((c) => c.params.text),
+  ).toEqual(["改写后的正文", "改写后的正文"]);
+
+  // 忙时（等待确认的 alpha）：编辑并重发/重发置灰并提示，复制仍可用
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await waitFor(() =>
+    expect(
+      host.calls.some(
+        (c) => c.method === "runtime.resumeSession" && c.params.sessionId === "alpha",
+      ),
+    ).toBe(true),
+  );
+  await within(stream()).findByText("alpha 正文");
+  for (const name of ["编辑并重发", "重发"]) {
+    const button = screen.getByRole("button", { name }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe("请先等待或按 Esc 中断");
+  }
+  expect((screen.getByRole("button", { name: "复制" }) as HTMLButtonElement).disabled).toBe(false);
 });
 
 it("空状态选择模型/档位/预设后，首条消息把选择传给 createSession", async () => {

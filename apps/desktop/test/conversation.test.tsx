@@ -252,6 +252,8 @@ function conversationProps(rendered: { session: RpcSession; openUrl: (url: strin
     cwd: "Z:/project",
     subscribeEvents: () => () => undefined,
     images: createAttachmentImageSource(),
+    busy: false,
+    onResubmit: vi.fn(async () => undefined),
   };
 }
 

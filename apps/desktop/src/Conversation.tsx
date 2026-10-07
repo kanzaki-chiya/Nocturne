@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -17,6 +18,8 @@ import {
   type PermissionOption,
   type PermissionReply,
   type QuestionReply,
+  type RewindMode,
+  type RewindTarget,
   type RuntimeEvent,
   type SessionView,
   type ToolEntry,
@@ -44,6 +47,10 @@ export interface ConversationProps {
   /** 本会话的事件订阅（思考时长簿记；tracker 之外的第二个订阅点） */
   subscribeEvents: (listener: (event: RuntimeEvent) => void) => () => void;
   images: AttachmentImageSource;
+  /** 非空闲（Turn 进行中 / 等待确认）时禁用重发与编辑重发（U-01） */
+  busy: boolean;
+  /** 重发一条用户消息：先 rewind(targetSeq, mode) 再 submit（Conversations.resubmit） */
+  onResubmit: (targetSeq: number, text: string, mode: RewindMode) => Promise<void>;
 }
 
 type OpenUrl = ConversationProps["openUrl"];
@@ -410,17 +417,37 @@ function UserImage({
   );
 }
 
+/**
+ * 用户消息（U-01）：悬停显示「复制」「编辑并重发」「重发」。重发与编辑重发
+ * 先 rewind 再 submit——成功前旧回复保持显示（编辑中变暗，见 .u.editing ~ *）。
+ */
 function UserMessage({
   entry,
   images,
   session,
+  cwd,
+  busy,
+  repliesAfter,
+  onResubmit,
 }: {
   entry: UserEntry;
   images: AttachmentImageSource;
   session: RpcSession;
+  cwd: string;
+  busy: boolean;
+  /** 这条消息之后将被撤回的回复轮数（助手 turn 数） */
+  repliesAfter: number;
+  onResubmit: ConversationProps["onResubmit"];
 }) {
   const bubble = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [mode, setMode] = useState<"both" | "conversation">("both");
+  const [target, setTarget] = useState<RewindTarget | undefined>();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | undefined>();
   const hasImages = (entry.attachments?.length ?? 0) > 0;
   useEffect(() => {
     const element = bubble.current;
@@ -460,35 +487,204 @@ function UserMessage({
     at = ref.end;
   });
   if (at < body.length) segments.push(body.slice(at));
+
+  const reasonText = (reason: unknown): string =>
+    reason instanceof Error ? reason.message : String(reason);
+  const copy = () => {
+    const clipboard = navigator.clipboard as Clipboard | undefined;
+    if (clipboard === undefined) {
+      setError("剪贴板不可用");
+      return;
+    }
+    void clipboard
+      .writeText(body)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => {
+          setCopied(false);
+        }, 1500);
+      })
+      .catch(() => {
+        setError("复制失败");
+      });
+  };
+  const startEdit = () => {
+    setError(undefined);
+    setPending(true);
+    void session
+      .rewindTargets()
+      .then((targets) => {
+        setTarget(targets.find((item) => item.seq === entry.seq));
+        setDraft(body);
+        setMode("both");
+        setEditing(true);
+      })
+      .catch((reason: unknown) => {
+        setError(`读取回退信息失败：${reasonText(reason)}`);
+      })
+      .finally(() => {
+        setPending(false);
+      });
+  };
+  const sendResubmit = (content: string, rewindMode: "both" | "conversation") => {
+    setError(undefined);
+    setPending(true);
+    void onResubmit(entry.seq, content, rewindMode).catch((reason: unknown) => {
+      // 回退/发送失败：编辑内容保留（编辑框仍打开时错误显示在框内）
+      setError(`重发失败：${reasonText(reason)}`);
+      setPending(false);
+    });
+  };
+  const busyTitle = busy ? "请先等待或按 Esc 中断" : undefined;
+  const restorable = target?.files.filter((file) => file.action !== "untracked") ?? [];
   return (
-    <article className="u" aria-label="用户消息">
-      <div className="u-bubble" ref={bubble}>
-        {(entry.attachments ?? []).map((attachment, index) => (
-          <UserImage
-            key={`${attachment.file}:${attachment.sha256}:${index}`}
-            attachment={attachment}
-            images={images}
-            session={session}
-            visible={visible}
-          />
-        ))}
-        {body !== "" && <div className="u-text">{segments}</div>}
-        {entry.skill && (
-          <details className="skill-message">
-            <summary>
-              技能 <b>{entry.skill.name}</b> · 已附加正文 {entry.skill.body.length.toLocaleString()}{" "}
-              字 ▸
-            </summary>
-            <pre>{entry.skill.body}</pre>
-          </details>
-        )}
-        {entry.delegate && (
-          <details className="skill-message">
-            <summary>
-              委派给外部 agent <b>{entry.delegate.agent}</b>
-            </summary>
-            <pre>{entry.delegate.task}</pre>
-          </details>
+    <article className={`u${editing ? " editing" : ""}`} aria-label="用户消息">
+      <div className="u-body">
+        {editing ? (
+          <div className="u-edit">
+            <textarea
+              aria-label="编辑消息"
+              value={draft}
+              rows={Math.min(12, Math.max(2, draft.split("\n").length + 1))}
+              onChange={(event) => {
+                setDraft(event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !pending) {
+                  event.preventDefault();
+                  setEditing(false);
+                  setError(undefined);
+                }
+              }}
+            />
+            <p className="u-edit-info">
+              将撤回 {repliesAfter} 轮回复
+              {restorable.length > 0
+                ? `，将还原 ${restorable.length} 个文件：${restorable
+                    .map((file) => displayPath(file.path, cwd))
+                    .join("、")}`
+                : ""}
+              {(target?.untrackedCalls ?? 0) > 0
+                ? `；另有 ${target?.untrackedCalls} 次命令改动不还原`
+                : ""}
+            </p>
+            {restorable.length > 0 ? (
+              <div className="u-edit-mode" role="radiogroup" aria-label="回退方式">
+                <label>
+                  <input
+                    type="radio"
+                    name={`rewind-${entry.seq}`}
+                    checked={mode === "both"}
+                    onChange={() => {
+                      setMode("both");
+                    }}
+                  />
+                  对话和文件
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name={`rewind-${entry.seq}`}
+                    checked={mode === "conversation"}
+                    onChange={() => {
+                      setMode("conversation");
+                    }}
+                  />
+                  仅对话
+                </label>
+              </div>
+            ) : null}
+            {error !== undefined ? (
+              <p className="conversation-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <div className="u-edit-actions">
+              <button
+                type="button"
+                className="btn primary"
+                disabled={pending || draft.trim() === ""}
+                onClick={() => {
+                  sendResubmit(draft, mode);
+                }}
+              >
+                {pending ? "发送中…" : "发送"}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={pending}
+                onClick={() => {
+                  setEditing(false);
+                  setError(undefined);
+                }}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="u-bubble" ref={bubble}>
+              {(entry.attachments ?? []).map((attachment, index) => (
+                <UserImage
+                  key={`${attachment.file}:${attachment.sha256}:${index}`}
+                  attachment={attachment}
+                  images={images}
+                  session={session}
+                  visible={visible}
+                />
+              ))}
+              {body !== "" && <div className="u-text">{segments}</div>}
+              {entry.skill && (
+                <details className="skill-message">
+                  <summary>
+                    技能 <b>{entry.skill.name}</b> · 已附加正文{" "}
+                    {entry.skill.body.length.toLocaleString()} 字 ▸
+                  </summary>
+                  <pre>{entry.skill.body}</pre>
+                </details>
+              )}
+              {entry.delegate && (
+                <details className="skill-message">
+                  <summary>
+                    委派给外部 agent <b>{entry.delegate.agent}</b>
+                  </summary>
+                  <pre>{entry.delegate.task}</pre>
+                </details>
+              )}
+            </div>
+            <div className="u-actions">
+              <button type="button" className="u-act" onClick={copy}>
+                {copied ? "已复制" : "复制"}
+              </button>
+              <button
+                type="button"
+                className="u-act"
+                disabled={busy || pending}
+                title={busyTitle ?? "编辑消息并重新发送"}
+                onClick={startEdit}
+              >
+                编辑并重发
+              </button>
+              <button
+                type="button"
+                className="u-act"
+                disabled={busy || pending}
+                title={busyTitle ?? "重新发送这条消息（连同之后的文件改动一起回退）"}
+                onClick={() => {
+                  sendResubmit(body, "both");
+                }}
+              >
+                重发
+              </button>
+            </div>
+            {error !== undefined ? (
+              <p className="conversation-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+          </>
         )}
       </div>
       {entry.descriptions?.map((description, index) =>
@@ -1008,6 +1204,9 @@ function EntryView({
   now,
   images,
   session,
+  busy,
+  repliesAfter,
+  onResubmit,
 }: {
   entry: ViewEntry;
   openUrl: OpenUrl;
@@ -1016,10 +1215,23 @@ function EntryView({
   now: number;
   images: AttachmentImageSource;
   session: RpcSession;
+  busy: boolean;
+  repliesAfter: number;
+  onResubmit: ConversationProps["onResubmit"];
 }) {
   switch (entry.kind) {
     case "user":
-      return <UserMessage entry={entry} images={images} session={session} />;
+      return (
+        <UserMessage
+          entry={entry}
+          images={images}
+          session={session}
+          cwd={cwd}
+          busy={busy}
+          repliesAfter={repliesAfter}
+          onResubmit={onResubmit}
+        />
+      );
     case "assistant":
       return (
         <article className="a" aria-label="助手消息">
@@ -1418,6 +1630,8 @@ function ConversationContent({
   shellKind,
   subscribeEvents,
   images,
+  busy,
+  onResubmit,
 }: ConversationProps) {
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -1425,6 +1639,25 @@ function ConversationContent({
   const previousTop = useRef(0);
   const [following, setFollowing] = useState(true);
   const { parts, now } = useReasoning(subscribeEvents);
+  // U-01：每条用户消息之后将被撤回的回复轮数（按助手 turnId 去重）
+  const repliesAfter = useMemo(() => {
+    const counts = new Map<number, number>();
+    let replies = 0;
+    const turns = new Set<string>();
+    for (let index = view.entries.length - 1; index >= 0; index -= 1) {
+      const entry = view.entries[index];
+      if (entry === undefined) continue;
+      if (entry.kind === "assistant") {
+        if (!turns.has(entry.turnId)) {
+          turns.add(entry.turnId);
+          replies += 1;
+        }
+      } else if (entry.kind === "user") {
+        counts.set(entry.seq, replies);
+      }
+    }
+    return counts;
+  }, [view.entries]);
   const scrollToBottom = () => {
     const element = scroll.current;
     if (!element) return;
@@ -1505,6 +1738,9 @@ function ConversationContent({
                 now={now}
                 images={images}
                 session={session}
+                busy={busy}
+                repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
+                onResubmit={onResubmit}
               />
             ))}
             {view.live.assistants.map((assistant) => (

@@ -2,6 +2,7 @@ import {
   createSessionView,
   type ModelRef,
   type ReasoningEffort,
+  type RewindMode,
   type SessionView,
 } from "@nocturne/core/protocol";
 import {
@@ -255,6 +256,21 @@ export class Conversations {
       this.changed();
       void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
     });
+  }
+
+  /**
+   * 重发/编辑重发（U-01）：先 rewind 回退到目标用户消息之前，再走普通 send
+   * （接受/busy/历史记录逻辑一致）。rewind 拒绝时抛出——编辑框据此保留草稿；
+   * rewind 成功后 submit 被拒同样抛出，但会话视图已被回退截断。
+   * 附件、@文件 快照与技能/委派快照不复用：重发只带消息文本。
+   */
+  async resubmit(targetSeq: number, text: string, mode: RewindMode): Promise<void> {
+    const entry = this.selected;
+    if (entry === undefined) throw new Error("请先打开会话");
+    if (entry.dead === true) throw new Error("会话所在的后台已退出，请先重启后台");
+    if (conversationStatus(entry) !== "idle") throw new Error("会话正在运行");
+    await entry.session.rewind(targetSeq, mode);
+    await this.send({ text, attachments: [] });
   }
 
   async compact(): Promise<void> {
