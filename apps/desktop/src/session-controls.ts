@@ -45,10 +45,19 @@ export function modelGroups(models: ModelInfo[], recents: ModelRef[]): ChoiceGro
       recent.push(info);
     }
   }
-  const rest = models.filter((info) => !seen.has(refKey(info.ref)));
   const groups: ChoiceGroup[] = [];
   if (recent.length > 0) groups.push({ label: "最近使用", options: recent.map(modelOption) });
-  if (rest.length > 0) groups.push({ label: "全部模型", options: rest.map(modelOption) });
+  // 其余模型按服务商分组：listModels 已按注册表顺序平铺，组序即首见顺序（U-06）
+  const byProvider = new Map<string, ModelInfo[]>();
+  for (const info of models) {
+    if (seen.has(refKey(info.ref))) continue;
+    const bucket = byProvider.get(info.ref.provider) ?? [];
+    bucket.push(info);
+    byProvider.set(info.ref.provider, bucket);
+  }
+  for (const [provider, infos] of byProvider) {
+    groups.push({ label: provider, options: infos.map(modelOption) });
+  }
   return groups;
 }
 
