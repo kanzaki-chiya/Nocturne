@@ -129,7 +129,26 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
     label: "外部 agent",
     icon: (
       <svg {...GLYPH_PROPS}>
-        <path d="M2 3h12v10H2zM4 6l2 2-2 2M8 10h4" fill="none" stroke="currentColor" />
+        <rect
+          x="2.5"
+          y="5"
+          width="11"
+          height="8.5"
+          rx="2.2"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+        />
+        <path
+          d="M8 5V2.6M6 10.9h4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+        />
+        <circle cx="8" cy="2.2" r="0.9" fill="currentColor" />
+        <circle cx="5.9" cy="8.4" r="0.95" fill="currentColor" />
+        <circle cx="10.1" cy="8.4" r="0.95" fill="currentColor" />
       </svg>
     ),
   },
