@@ -10,6 +10,12 @@ export interface ModelRef {
   model: string;
 }
 
+/** 用户点名外部 agent 的任务原文快照（ADR-0049 第 2 步）。 */
+export interface AgentDelegation {
+  agent: string;
+  task: string;
+}
+
 // ── 服务协议（ADR-0026）───────────────────────────────────
 
 /**
@@ -414,6 +420,7 @@ export type HistoryEntry =
       fileRefs?: FileRef[] | undefined;
       /** 技能调用的正文快照（skills.md 第 2 节）；旧日志无此字段 */
       skill?: SkillSnapshot | undefined;
+      delegate?: AgentDelegation | undefined;
     }
   | {
       kind: "assistant";

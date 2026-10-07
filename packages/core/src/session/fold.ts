@@ -132,6 +132,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           content: p.content,
           ...(p.fileRefs !== undefined ? { fileRefs: p.fileRefs } : {}),
           ...(p.skill !== undefined ? { skill: p.skill } : {}),
+          ...(p.delegate !== undefined ? { delegate: p.delegate } : {}),
           // ADR-0023：旧日志无 attachments 字段——有值才带上，缺省不落进历史
           ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
         });

@@ -4,6 +4,7 @@
  */
 import type { SkillSnapshot } from "./skills.js";
 import type {
+  AgentDelegation,
   ContentBlock,
   FileRef,
   FinishReason,
@@ -61,6 +62,8 @@ export interface MessageUserPayload {
   fileRefs?: FileRef[] | undefined;
   /** 技能调用随消息持久化的正文快照（skills.md 第 2 节）；普通消息缺省 */
   skill?: SkillSnapshot | undefined;
+  /** 外部委派快照；对应的明确 task 指令同时保存在 content 中。 */
+  delegate?: AgentDelegation | undefined;
 }
 
 export interface AttachmentDescribedPayload {

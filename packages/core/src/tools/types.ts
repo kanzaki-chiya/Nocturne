@@ -1,4 +1,8 @@
-import type { McpProbeResult } from "../protocol/index.js";
+import type {
+  ExternalAgentConfig,
+  ExternalAgentProbeResult,
+  McpProbeResult,
+} from "../protocol/index.js";
 /**
  * 工具契约（docs/protocols/tool-api.md）。
  * 内置工具与将来的 MCP / 插件工具走同一接口与同一执行管线（tools.md 第 1 节）。
@@ -487,6 +491,13 @@ export interface ExternalAgentOutput {
 export type ExternalAgentOutcome = ToolResult<ExternalAgentOutput>;
 
 export interface ExternalAgentConnector {
-  list(): ExternalAgentInfo[];
-  run(request: ExternalAgentRequest, ctx: ToolContext): Promise<ExternalAgentOutcome>;
+  run(
+    config: ExternalAgentConfig,
+    request: ExternalAgentRequest,
+    ctx: ToolContext,
+  ): Promise<ExternalAgentOutcome>;
+  probe(
+    config: ExternalAgentConfig,
+    input: { nocturneHome: string; timeoutMs?: number | undefined },
+  ): Promise<ExternalAgentProbeResult>;
 }

@@ -41,6 +41,16 @@ import type {
   JevReviewerConfig,
   ModelRole,
 } from "./config/index.js";
+import {
+  ExternalAgentSettingsError,
+  validateExternalAgentConfig,
+  type ExternalAgentConfig,
+  type ExternalAgentOverview,
+  type ExternalAgentProbeInput,
+  type ExternalAgentProbeResult,
+  type ExternalAgentSaveInput,
+  type ExternalAgentsDescription,
+} from "./config/index.js";
 import { MODEL_ROLES } from "./config/index.js";
 import {
   type SkillsDescription,
@@ -99,6 +109,7 @@ import {
 } from "./provider/index.js";
 import { resolveProviderAuth } from "./provider-oauth.js";
 import type {
+  AgentDelegation,
   CommandRejectCode,
   ContentBlock,
   Diagnostics,
@@ -180,6 +191,10 @@ const INTERNAL_SESSION = Symbol.for("nocturne.core.internalSession");
 /** 指令文件大小上限（context.md 6.2：每项注入内容都有上限） */
 const INSTRUCTION_FILE_LIMIT = 64 * 1024;
 const DEFAULT_PERMISSION_PRESET = "default";
+const delegateSchema = z.object({
+  agent: z.string().trim().min(1),
+  task: z.string().trim().min(1),
+});
 
 export interface RuntimeOptions {
   /** 工作区 cwd（会话内工具执行的默认目录） */
@@ -287,6 +302,8 @@ export interface SubmitInput {
     { data: Uint8Array; mimeType: ImageMimeType; label?: string | undefined }[] | undefined;
   /** 技能调用（skills.md 第 2 节）：Core 校验后把正文快照附到用户消息 */
   skill?: SkillInvocation | undefined;
+  /** 外部 agent 点名；与 skill 互斥，任务原文随 message.user 固定。 */
+  delegate?: AgentDelegation | undefined;
 }
 
 /** 本会话已登记并通过磁盘完整性校验的图片附件。 */
@@ -298,6 +315,7 @@ export interface ReadAttachmentResult {
 
 export interface RuntimeSession {
   describeSkills(): SkillsDescription;
+  describeExternalAgents(): Promise<ExternalAgentsDescription>;
   rewindTargets(): Promise<RewindTarget[]>;
   rewind(targetSeq: number, mode: RewindMode): Promise<SessionRewoundPayload["files"]>;
   readonly id: string;
@@ -434,6 +452,13 @@ export interface Runtime {
     workspaceRoot?: string | undefined;
   }): Promise<void>;
   probeMcpServer(input: McpProbeInput): Promise<McpProbeResult>;
+  describeExternalAgents(input?: {
+    workspaceRoot?: string | undefined;
+  }): Promise<ExternalAgentsDescription>;
+  saveExternalAgent(input: ExternalAgentSaveInput): Promise<ExternalAgentOverview>;
+  deleteExternalAgent(input: { name: string }): Promise<void>;
+  setExternalAgentEnabled(input: { name: string; enabled: boolean }): Promise<void>;
+  probeExternalAgent(input: ExternalAgentProbeInput): Promise<ExternalAgentProbeResult>;
   describeModelRoles(): ModelRoleInfo[];
   setModelRole(role: ModelRole, ref: string | null): Promise<SettingItem[]>;
   describeSettings(): SettingItem[];
@@ -692,6 +717,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const markProvidersDirty = new Set<() => void>();
   const reconcileMcp = new Set<() => Promise<void>>();
   const refreshSkills = new Set<(rescan: boolean) => Promise<void>>();
+  const refreshExternalAgents = new Set<() => void>();
   const sessionSkillModels = new Map<
     string,
     { workspaceRoot: string; contextWindow: () => number | undefined }
@@ -1358,11 +1384,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     installSkills();
     // 外部 agent 仅在根会话可用；恢复的子会话也不能暴露外部委派入口。
     const externalConnector = meta.parent === undefined ? options.externalAgents : undefined;
-    const hasExternalAgents = (externalConnector?.list().length ?? 0) > 0;
+    let enabledExternalAgents: ExternalAgentConfig[] = [];
+    let pendingExternalAgents = false;
 
     // 子代理（subagent.md 第 3 节）：launcher 捕获本会话装配上下文；
     // task 与内置工具同一注册表——Agent Loop 无工具名分支
-    if (subagentEnabled || hasExternalAgents) {
+    const installTask = (): void => {
+      enabledExternalAgents =
+        externalConnector === undefined
+          ? []
+          : structuredClone(
+              (config?.base.externalAgents ?? [])
+                .filter((agent) => agent.enabled)
+                .map(({ origin: _origin, path: _path, ...agent }) => agent),
+            );
+      const agentSnapshot = enabledExternalAgents;
+      const hasExternalAgents = enabledExternalAgents.length > 0;
+      tools.unregister("task");
+      if (!subagentEnabled && !hasExternalAgents) return;
       let launcher: SubagentLauncher | undefined;
       if (subagentEnabled)
         launcher = createSubagentLauncher({
@@ -1423,11 +1462,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const externalRunner =
         hasExternalAgents && externalConnector !== undefined
           ? {
-              list: () => externalConnector.list(),
+              agents: agentSnapshot,
               async run(
                 request: Pick<ExternalAgentRequest, "agent" | "task" | "timeoutMs">,
                 ctx: ToolContext,
               ) {
+                const agentConfig = agentSnapshot.find((agent) => agent.name === request.agent);
+                if (agentConfig === undefined) {
+                  const message = `外部 agent ${request.agent} 未启用`;
+                  return {
+                    status: "error" as const,
+                    modelContent: message,
+                    error: { code: "invalid_input", message },
+                  };
+                }
                 if (!subagentLimiter.tryAcquire()) {
                   const message = `子代理并发上限已满（${subagentLimits.maxConcurrent}），请稍后重试`;
                   return {
@@ -1456,6 +1504,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                     },
                   );
                   return await externalConnector.run(
+                    agentConfig,
                     {
                       ...request,
                       cwd: meta.workspaceRoot,
@@ -1496,7 +1545,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             }
           : undefined;
       tools.register(createTaskTool(launcher, externalRunner));
-    }
+    };
+    const applyExternalAgents = (): void => {
+      if (!pendingExternalAgents) return;
+      pendingExternalAgents = false;
+      installTask();
+    };
+    const refreshSessionExternalAgents = (): void => {
+      pendingExternalAgents = true;
+      if (!busy() && compactController === undefined) applyExternalAgents();
+    };
+    refreshExternalAgents.add(refreshSessionExternalAgents);
+    installTask();
 
     let controller: AbortController | undefined;
     let fileIndexPromise: Promise<FileIndexEntry[]> | undefined;
@@ -1623,6 +1683,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         scannedDirs: skillDiscovery.scannedDirs,
         homeDir: skillDiscovery.homeDir,
       }),
+      describeExternalAgents: async () =>
+        config?.describeExternalAgents({ workspaceRoot: meta.workspaceRoot }) ?? {
+          agents: [],
+          warnings: [],
+        },
       id: session.id,
       durableEvents: () => session.durableEvents(),
       async readAttachment(file) {
@@ -1787,6 +1852,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (busy() || compactController !== undefined) {
           throw new RuntimeCommandError("session_busy", "会话正忙（Turn 或压缩进行中）");
         }
+        if (input.skill !== undefined && input.delegate !== undefined)
+          throw new RuntimeCommandError("invalid_command", "skill 与 delegate 互斥");
+        if (input.delegate !== undefined && !delegateSchema.safeParse(input.delegate).success)
+          throw new RuntimeCommandError(
+            "invalid_command",
+            "delegate.agent 和 delegate.task 必须是非空字符串",
+          );
         const content: ContentBlock[] = [
           ...(input.content ?? [{ type: "text", text: input.text ?? "" }]),
         ];
@@ -1827,6 +1899,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           await applyMcp();
           await rebuildProviders();
           await applySkills();
+          applyExternalAgents();
+          let delegation: AgentDelegation | undefined;
+          if (input.delegate !== undefined) {
+            const agent = enabledExternalAgents.find(
+              (entry) => entry.name.toLowerCase() === input.delegate?.agent.toLowerCase(),
+            );
+            if (agent === undefined)
+              throw new RuntimeCommandError(
+                "invalid_command",
+                `外部 agent ${input.delegate.agent} 不存在或未启用`,
+              );
+            delegation = { agent: agent.name, task: input.delegate.task };
+          }
           // ADR-0026 §5：刷新后条目/模型可能变化——原位重解析拿到最新的
           // 协议与不可用标记（失败沿用旧解析，同一错误仍由 stream 路径报告）
           try {
@@ -1931,12 +2016,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               text: `<skill name="${escaped}">\n${body}\n</skill>`,
             });
           }
+          if (delegation !== undefined) {
+            refs.content.push({
+              type: "text",
+              text:
+                "用户明确要求委派给指定的外部 agent。请调用 task 工具，" +
+                `agent 设为 ${JSON.stringify(delegation.agent)}，将下面的任务原文作为 task 参数，不要改写；` +
+                "不要设置 preset、tools 或 outputSchema。委派入口仍遵循正常权限流程。\n任务原文：\n" +
+                delegation.task,
+            });
+          }
           const reason = await runTurn(
             deps,
             refs.content,
             [...attachments, ...refs.attachments],
             refs.fileRefs,
             skillSnapshot,
+            delegation,
           );
           if (reason === "failed") {
             throw new RuntimeCommandError("session_failed", "会话持久化失败");
@@ -1956,6 +2052,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               message: "MCP 热更新失败，请重新加载配置",
             }),
           );
+          applyExternalAgents();
           fileIndexPromise = undefined;
           activeTurnEffort = undefined;
           turnSettled = undefined;
@@ -2224,6 +2321,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               message: `技能目录更新失败：${error instanceof Error ? error.message : String(error)}`,
             }),
           );
+          applyExternalAgents();
           session.emitEphemeral("runtime.status", { status: "idle" });
           compactSettled = undefined;
           settleCompact();
@@ -2251,6 +2349,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       async close() {
         refreshSkills.delete(refreshSessionSkills);
+        refreshExternalAgents.delete(refreshSessionExternalAgents);
         sessionSkillModels.delete(session.id);
         closing = true;
         unsubscribeTitle();
@@ -2297,11 +2396,25 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     for (const mark of markProvidersDirty) mark();
     await Promise.all([...reconcileMcp].map((refresh) => refresh()));
     await Promise.all([...refreshSkills].map((refresh) => refresh(true)));
+    for (const refresh of refreshExternalAgents) refresh();
   }
   function mcpInput<T>(schema: z.ZodType<T>, input: unknown): T {
     const parsed = schema.safeParse(input);
     if (!parsed.success)
       throw new McpSettingsError(String(parsed.error.issues[0]?.path[0] ?? "config"), "字段无效");
+    return parsed.data;
+  }
+  function requireExternalAgentConfig(): RuntimeConfig {
+    if (!config) throw new ExternalAgentSettingsError("config", "未注入 RuntimeConfig");
+    return config;
+  }
+  function externalAgentInput<T>(schema: z.ZodType<T>, input: unknown): T {
+    const parsed = schema.safeParse(input);
+    if (!parsed.success)
+      throw new ExternalAgentSettingsError(
+        String(parsed.error.issues[0]?.path[0] ?? "config"),
+        "字段无效",
+      );
     return parsed.data;
   }
   const workspaceField = z.string().min(1).optional();
@@ -2311,6 +2424,98 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       requireMcpConfig().describeMcpServers(
         mcpInput(z.object({ workspaceRoot: workspaceField }), input),
       ),
+    describeExternalAgents: (input = {}) =>
+      requireExternalAgentConfig().describeExternalAgents(
+        externalAgentInput(z.object({ workspaceRoot: workspaceField }).strict(), input),
+      ),
+    async saveExternalAgent(input) {
+      const parsed = externalAgentInput(
+        z
+          .object({
+            mode: z.enum(["create", "replace"]),
+            name: z.string().min(1),
+            config: z.unknown(),
+          })
+          .strict(),
+        input,
+      );
+      const operation = settingsPending.then(async () => {
+        const entry = validateExternalAgentConfig({
+          ...(typeof parsed.config === "object" && parsed.config !== null ? parsed.config : {}),
+          name: parsed.name,
+        });
+        const result = await requireExternalAgentConfig().saveExternalAgent({
+          ...parsed,
+          config: entry,
+        });
+        await reloadMcpConfig();
+        return result;
+      });
+      settingsPending = operation.then(
+        () => undefined,
+        () => undefined,
+      );
+      return operation;
+    },
+    async deleteExternalAgent(input) {
+      const parsed = externalAgentInput(z.object({ name: z.string().min(1) }).strict(), input);
+      const operation = settingsPending.then(async () => {
+        await requireExternalAgentConfig().deleteExternalAgent(parsed);
+        await reloadMcpConfig();
+      });
+      settingsPending = operation.catch(() => undefined);
+      return operation;
+    },
+    async setExternalAgentEnabled(input) {
+      const parsed = externalAgentInput(
+        z.object({ name: z.string().min(1), enabled: z.boolean() }).strict(),
+        input,
+      );
+      const operation = settingsPending.then(async () => {
+        await requireExternalAgentConfig().setExternalAgentEnabled(parsed);
+        await reloadMcpConfig();
+      });
+      settingsPending = operation.catch(() => undefined);
+      return operation;
+    },
+    async probeExternalAgent(input) {
+      const parsed = externalAgentInput(
+        z.union([
+          z.object({ name: z.string().min(1) }).strict(),
+          z.object({ config: z.unknown() }).strict(),
+        ]),
+        input,
+      );
+      let entry: ExternalAgentConfig;
+      if ("name" in parsed) {
+        const description = await requireExternalAgentConfig().describeExternalAgents();
+        const agent = description.agents.find(
+          (candidate) => candidate.name.toLowerCase() === parsed.name.toLowerCase(),
+        );
+        if (agent === undefined)
+          throw new ExternalAgentSettingsError("name", `外部 agent ${parsed.name} 不存在`);
+        entry = validateExternalAgentConfig({
+          name: agent.name,
+          command: agent.command,
+          args: agent.args,
+          env: agent.env,
+          mode: agent.mode,
+          configOptions: agent.configOptions,
+          description: agent.description,
+          enabled: agent.enabled,
+        });
+      } else {
+        entry = validateExternalAgentConfig(parsed.config);
+      }
+      if (options.externalAgents === undefined)
+        return {
+          ok: false,
+          durationMs: 0,
+          configOptions: [],
+          error: { code: "external_agent_unavailable", message: "未注入外部 agent connector" },
+        };
+      return options.externalAgents.probe(entry, { nocturneHome });
+    },
     async describeSkills(input = {}) {
       const parsed = z.object({ workspaceRoot: z.string().min(1).optional() }).parse(input);
       const root = parsed.workspaceRoot
@@ -2667,6 +2872,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       for (const mark of markProvidersDirty) mark();
       await Promise.all([...reconcileMcp].map((refresh) => refresh()));
       await Promise.all([...refreshSkills].map((refresh) => refresh(true)));
+      for (const refresh of refreshExternalAgents) refresh();
     },
     defaultModel() {
       const model = config?.resolvedSettings(workspaceRoot).model;

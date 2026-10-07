@@ -8,7 +8,7 @@
 import { Ajv } from "ajv";
 import type { JsonSchema, SubjectRequest } from "../../protocol/index.js";
 import type {
-  ExternalAgentConnector,
+  ExternalAgentInfo,
   ExternalAgentOutcome,
   ExternalAgentRequest,
   SubagentLauncher,
@@ -45,7 +45,7 @@ const DESCRIPTION =
 
 /** Core 装配补全工作目录、附件路径和权限回调，工具只负责按输入字段分流。 */
 interface ExternalTaskRunner {
-  list: ExternalAgentConnector["list"];
+  agents: readonly ExternalAgentInfo[];
   run(
     request: Pick<ExternalAgentRequest, "agent" | "task" | "timeoutMs">,
     ctx: ToolContext,
@@ -59,7 +59,7 @@ export function createTaskTool(
   launcher?: SubagentLauncher,
   externalAgents?: ExternalTaskRunner,
 ): ToolDefinition<TaskInput> {
-  const agents = externalAgents?.list() ?? [];
+  const agents = externalAgents?.agents ?? [];
   const hasExternalAgents = agents.length > 0;
   const validateInput = (input: TaskInput): string | undefined => {
     if (input.agent !== undefined) {
@@ -70,9 +70,8 @@ export function createTaskTool(
       ) {
         return "agent 与 preset、tools、outputSchema 互斥";
       }
-      const available = externalAgents?.list() ?? [];
-      if (!available.some((agent) => agent.name === input.agent)) {
-        return `未知外部 agent：${input.agent}；可选：${available.map((agent) => agent.name).join(", ") || "无"}`;
+      if (!agents.some((agent) => agent.name === input.agent)) {
+        return `未知外部 agent：${input.agent}；可选：${agents.map((agent) => agent.name).join(", ") || "无"}`;
       }
       return undefined;
     }
@@ -117,7 +116,7 @@ export function createTaskTool(
           ? {
               agent: {
                 type: "string",
-                description: "已启用的外部 agent 名称；与 preset、tools、outputSchema 互斥",
+                description: `已启用的外部 agent 名称（${agents.map((agent) => agent.name).join("、")}）；与 preset、tools、outputSchema 互斥`,
               },
             }
           : {}),

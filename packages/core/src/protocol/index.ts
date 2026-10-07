@@ -15,3 +15,4 @@ export * from "./rewind.js";
 export * from "./provider-auth.js";
 export * from "./provider-login.js";
 export * from "./skills.js";
+export * from "./external-agents.js";

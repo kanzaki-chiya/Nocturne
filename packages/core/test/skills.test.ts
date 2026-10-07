@@ -5,7 +5,7 @@ import { afterEach, expect, it } from "vitest";
 import { createPlatform } from "../src/platform/index.js";
 import { loadConfig } from "../src/config/index.js";
 import { discoverSkills, renderSkill, skillCatalog } from "../src/skills/index.js";
-import { replaySessionView } from "../src/protocol/index.js";
+import { parseSkillSlash, replaySessionView } from "../src/protocol/index.js";
 import { createRulePolicy } from "../src/permission/index.js";
 import { createRuntime } from "../src/index.js";
 import { FakeProvider } from "../src/provider/index.js";
@@ -508,6 +508,23 @@ it("守护：默认测试运行时不读真实主目录", async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+it("agents 内置命令优先且忽略大小写；停用技能不可被斜杠调用", async () => {
+  const f = fixture();
+  f.skill(path.join(f.home, "skills"), "agents");
+  f.skill(path.join(f.home, "skills"), "manual");
+  const discovery = await f.scan();
+  const catalog = skillCatalog(discovery.skills, []);
+  expect(catalog.skills.find((skill) => skill.name === "agents")?.commandConflict).toBe(true);
+  expect(parseSkillSlash("/AGENTS task", catalog.skills)).toBeUndefined();
+  expect(parseSkillSlash("/MANUAL 原文", catalog.skills)).toEqual({
+    name: "manual",
+    arguments: "原文",
+  });
+  expect(
+    parseSkillSlash("/manual task", skillCatalog(discovery.skills, ["manual"]).skills),
+  ).toBeUndefined();
 });
 
 function item<T>(items: readonly T[], index: number): T {

@@ -21,6 +21,7 @@ import { todoItemsFromCompletion, type TodoItem } from "./todo.js";
 import { effectiveEvents, rewindNotification, firstUserText } from "./rewind.js";
 export { firstUserText } from "./rewind.js";
 import type {
+  AgentDelegation,
   ContentBlock,
   FileRef,
   FinishReason,
@@ -98,6 +99,7 @@ export interface UserEntry {
   fileRefs?: FileRef[] | undefined;
   /** 技能调用的正文快照（skills.md 第 2 节）；普通消息字段不出现 */
   skill?: SkillSnapshot | undefined;
+  delegate?: AgentDelegation | undefined;
   descriptions?: AttachmentDescribedPayload[] | undefined;
 }
 
@@ -353,6 +355,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         content: event.payload.content,
         ...(event.payload.fileRefs !== undefined ? { fileRefs: event.payload.fileRefs } : {}),
         ...(event.payload.skill !== undefined ? { skill: event.payload.skill } : {}),
+        ...(event.payload.delegate !== undefined ? { delegate: event.payload.delegate } : {}),
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
           : {}),

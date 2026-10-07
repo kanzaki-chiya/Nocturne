@@ -21,6 +21,7 @@ import {
   type ProviderError,
 } from "../provider/index.js";
 import type {
+  AgentDelegation,
   ContentBlock,
   FileRef,
   FinishReason,
@@ -84,6 +85,7 @@ export async function runTurn(
   attachments?: ImageAttachment[],
   fileRefs?: FileRef[],
   skill?: SkillSnapshot,
+  delegate?: AgentDelegation,
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -273,6 +275,7 @@ export async function runTurn(
         ...(attachments?.length ? { attachments } : {}),
         ...(fileRefs?.length ? { fileRefs } : {}),
         ...(skill ? { skill } : {}),
+        ...(delegate ? { delegate } : {}),
       },
       { turnId },
     );

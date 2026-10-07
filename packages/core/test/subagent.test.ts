@@ -17,10 +17,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createRuntime,
   createPlatform,
+  loadConfig,
   type ExternalAgentConnector,
   type ExternalAgentPermissionDecision,
   type ExternalAgentRequest,
   type Runtime,
+  type RuntimeConfig,
   type RuntimeSession,
 } from "../src/index.js";
 import {
@@ -82,9 +84,36 @@ async function makeRuntime(
   const ws = makeTmp("nct-sa-ws-");
   const sessionsDir = makeTmp("nct-sa-sessions-");
   const provider = extra.provider ?? new FakeProvider({ scripts });
+  const platform = {
+    ...createPlatform(),
+    homeDir: () => ws,
+    nocturneHome: () => sessionsDir,
+    env: () => undefined,
+  };
+  let config: RuntimeConfig | undefined;
+  if (extra.externalAgents !== undefined) {
+    writeFileSync(
+      path.join(sessionsDir, "config.json"),
+      JSON.stringify({
+        modelsDev: false,
+        skills: { sources: { agents: false, claude: false } },
+        externalAgents: [
+          {
+            name: "offline",
+            command: "offline",
+            args: [],
+            description: "离线外部代理",
+            enabled: true,
+          },
+        ],
+      }),
+    );
+    config = await loadConfig(platform, { nocturneHome: sessionsDir, env: () => undefined });
+  }
   const runtime = await createRuntime({
     cwd: ws,
     sessionsDir,
+    ...(config !== undefined ? { config, platform } : {}),
     providers: [provider],
     interactive: extra.interactive,
     permissions: { autoApproveAsk: extra.autoApproveAsk, reviewer: extra.reviewer },
@@ -1461,8 +1490,8 @@ function fakeExternalAgent(
   run?: (request: ExternalAgentRequest) => Promise<unknown>,
 ): ExternalAgentConnector {
   return {
-    list: () => [{ name: "offline", description: "离线外部代理" }],
-    async run(request) {
+    probe: async () => ({ ok: true, durationMs: 0, configOptions: [] }),
+    async run(_config, request) {
       const content = await run?.(request);
       return {
         status: "ok",
@@ -1503,7 +1532,7 @@ describe("external agent：Core task 与权限装配", () => {
     await session.close();
   });
 
-  it("未知 agent 返回 invalid_input 并列出 connector 的可用名称", async () => {
+  it("未知 agent 返回 invalid_input 并列出 Core 的已启用名称", async () => {
     const { runtime } = await makeRuntime(parentTaskScript({ task: "x", agent: "missing" }), {
       externalAgents: fakeExternalAgent(),
     });
@@ -1531,7 +1560,10 @@ describe("external agent：Core task 与权限装配", () => {
     const builtin = createTaskTool(launcher);
     expect(builtin.inputSchema.properties).not.toHaveProperty("agent");
     expect(builtin.description).not.toContain("外部 agent");
-    const exclusive = createTaskTool(undefined, fakeExternalAgent());
+    const exclusive = createTaskTool(undefined, {
+      agents: [{ name: "offline", description: "离线外部代理" }],
+      run: async () => ({ status: "ok", modelContent: "offline" }),
+    });
     expect(exclusive.inputSchema.required).toEqual(["task", "agent"]);
     expect(exclusive.inputSchema.properties).not.toHaveProperty("preset");
     expect(exclusive.description).toContain("offline（离线外部代理）");

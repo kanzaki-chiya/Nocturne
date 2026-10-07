@@ -167,6 +167,7 @@ const payloadSchemas = {
     attachments: z.array(imageAttachmentSchema).optional(),
     fileRefs: z.array(fileRefSchema).optional(),
     skill: z.object({ name: z.string(), body: z.string() }).optional(),
+    delegate: z.object({ agent: z.string(), task: z.string() }).optional(),
   }),
   "message.assistant": z.object({
     messageId: z.string(),

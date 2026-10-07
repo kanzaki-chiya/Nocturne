@@ -77,6 +77,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "context",
   "mcp",
   "skills",
+  "agents",
   "compact",
   "resume",
   "rewind",
@@ -94,9 +95,13 @@ export function parseSkillSlash(
 ): SkillInvocation | undefined {
   const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(line);
   if (!match) return undefined;
+  if (BUILTIN_SLASH_COMMANDS.includes(match[1]?.toLowerCase() ?? "")) return undefined;
   const skill = skills.find(
     (s) =>
       s.name.toLowerCase() === match[1]?.toLowerCase() &&
+      s.enabled &&
+      !s.shadowedBy &&
+      !s.commandConflict &&
       (s.invocation === "both" || s.invocation === "user"),
   );
   return skill ? { name: skill.name, arguments: match[2] ?? "" } : undefined;
