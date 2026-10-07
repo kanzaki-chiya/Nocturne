@@ -1015,8 +1015,32 @@ const TOOL_META: Record<string, { icon: string; label: string }> = {
   ask_user: { icon: "?", label: "提问" },
 };
 
-export function toolMeta(name: string): { icon: string; label: string } {
-  return TOOL_META[name] ?? { icon: "·", label: name };
+const MCP_NAME_PREFIX = "mcp__";
+
+/**
+ * MCP 工具的展示名：与权限主体、设置页一致的 `server/tool`。
+ * 结构化来源优先——subjects 里 kind 为 "mcp" 的主体 target 就是 `server/tool`；
+ * 没有 subjects（如实时工具行）时从注册名 `mcp__<server>__<tool>` 解析，去掉前缀。
+ */
+function mcpToolLabel(name: string, subjects?: ToolEntry["subjects"]): string | undefined {
+  const subject = subjects?.find((entry) => entry.kind === "mcp");
+  if (subject !== undefined) return subject.target;
+  if (!name.startsWith(MCP_NAME_PREFIX)) return undefined;
+  const rest = name.slice(MCP_NAME_PREFIX.length);
+  const sep = rest.indexOf("__");
+  if (sep > 0) return `${rest.slice(0, sep)}/${rest.slice(sep + 2)}`;
+  return rest === "" ? undefined : rest;
+}
+
+export function toolMeta(
+  name: string,
+  subjects?: ToolEntry["subjects"],
+): { icon: string; label: string } {
+  const known = TOOL_META[name];
+  if (known !== undefined) return known;
+  const mcp = mcpToolLabel(name, subjects);
+  if (mcp !== undefined) return { icon: "·", label: mcp };
+  return { icon: "·", label: name };
 }
 
 export function toolArgument(entry: ToolEntry, cwd: string): string {
@@ -1043,6 +1067,16 @@ export function toolArgument(entry: ToolEntry, cwd: string): string {
     case "web_search":
       return input === undefined ? "" : text(input.query);
     default:
+      // MCP 工具的名称列已是 server/tool；参数位展示主要输入（第一个非空
+      // 字符串入参，如搜索 query、抓取 url），拿不到就留空，不再显示一遍名字。
+      if (mcpToolLabel(entry.name ?? "", entry.subjects) !== undefined) {
+        if (input === undefined) return "";
+        return (
+          Object.values(input).find(
+            (value): value is string => typeof value === "string" && value !== "",
+          ) ?? ""
+        );
+      }
       return entry.subjects[0]?.target ?? "";
   }
 }
@@ -1174,7 +1208,7 @@ export function deniedLine(entry: ToolEntry, cwd: string): string {
     case "web_fetch":
       return `✕ 已拒绝访问 ${text(input?.url)}`;
     default:
-      return `✕ 已拒绝${toolMeta(entry.name ?? "").label} ${toolArgument(entry, cwd)}`.trim();
+      return `✕ 已拒绝${toolMeta(entry.name ?? "", entry.subjects).label} ${toolArgument(entry, cwd)}`.trim();
   }
 }
 
@@ -1412,7 +1446,7 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
 }
 
 function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
-  const meta = toolMeta(entry.name ?? "");
+  const meta = toolMeta(entry.name ?? "", entry.subjects);
   const arg = toolArgument(entry, cwd);
   const range = toolRange(entry);
   const result = toolResultText(entry);

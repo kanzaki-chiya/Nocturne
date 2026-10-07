@@ -1116,6 +1116,50 @@ describe("Conversation 工具行与拒绝", () => {
     expect(container.querySelector(".tool")).toBeNull();
   });
 
+  it("MCP 工具行显示 server/tool 与主要入参，注册名不重复出现", () => {
+    const view = createSessionView();
+    const entry = tool({
+      name: "mcp__exa__web_search_exa",
+      input: { query: "nocturne 0.7.2" },
+      subjects: [{ kind: "mcp", target: "exa/web_search_exa" }],
+    });
+    if (entry.result) entry.result.output = { count: 3 };
+    view.entries = [entry];
+    const { container } = mount(view);
+    const line = container.querySelector(".tool-line");
+    expect(line?.textContent).not.toContain("mcp__");
+    expect(line?.querySelector(".tool-name")?.textContent).toBe("exa/web_search_exa");
+    expect(line?.querySelector(".tool-arg")?.textContent).toBe("nocturne 0.7.2");
+    expect(line?.textContent?.match(/exa\/web_search_exa/g)).toHaveLength(1);
+  });
+
+  it("MCP 工具缺 subjects 时从注册名解析名字；无字符串入参则参数留空", () => {
+    const view = createSessionView();
+    const noSubjects = tool({
+      name: "mcp__exa__fetch_url",
+      input: { count: 3 },
+      subjects: [],
+    });
+    if (noSubjects.result) noSubjects.result.output = { ok: true };
+    view.entries = [
+      noSubjects,
+      tool({
+        name: "mcp__exa__web_search_exa",
+        status: "denied",
+        input: { query: "热点新闻" },
+        subjects: [{ kind: "mcp", target: "exa/web_search_exa" }],
+        result: undefined,
+      }),
+    ];
+    const { container } = mount(view);
+    const line = container.querySelector(".tool-line");
+    expect(line?.querySelector(".tool-name")?.textContent).toBe("exa/fetch_url");
+    expect(line?.querySelector(".tool-arg")).toBeNull();
+    const deny = container.querySelector(".note.deny");
+    expect(deny?.textContent).not.toContain("mcp__");
+    expect(deny?.textContent).toBe("✕ 已拒绝exa/web_search_exa 热点新闻");
+  });
+
   it("permission 与 config 子类通知不进入消息流，其他通知原样显示", () => {
     const view = createSessionView();
     view.entries = [
