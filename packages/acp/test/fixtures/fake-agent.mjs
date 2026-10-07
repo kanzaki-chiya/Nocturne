@@ -13,6 +13,42 @@ const scenario = process.argv[2] ?? "normal";
 const calls = [];
 let mode;
 let cwd;
+const configOptions = [
+  {
+    id: "model",
+    name: "Model",
+    category: "model",
+    type: "select",
+    currentValue: "small",
+    options: [
+      {
+        group: "fixture",
+        name: "Fixture",
+        options: [
+          { value: "small", name: "Small" },
+          { value: "large", name: "Large" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "effort",
+    name: "Effort",
+    type: "select",
+    currentValue: "low",
+    options: [
+      { value: "low", name: "Low" },
+      { value: "high", name: "High" },
+    ],
+  },
+];
+const writeProbe = () => {
+  if (process.env.NOCTURNE_TEST_PROBE_FILE)
+    writeFileSync(
+      process.env.NOCTURNE_TEST_PROBE_FILE,
+      JSON.stringify({ calls, cwd, configOptions }),
+    );
+};
 let capabilities;
 let pending;
 let child;
@@ -33,6 +69,11 @@ const connection = new AgentSideConnection(
     initialize(params) {
       calls.push("initialize");
       capabilities = params.clientCapabilities;
+      writeProbe();
+      if (scenario === "hangInitialize")
+        return new Promise(() => {
+          /* 模拟永不响应的握手。 */
+        });
       if (scenario === "authInitialize") throw RequestError.authRequired();
       return {
         protocolVersion: PROTOCOL_VERSION,
@@ -44,10 +85,16 @@ const connection = new AgentSideConnection(
     newSession(params) {
       calls.push("new");
       cwd = params.cwd;
+      writeProbe();
+      if (scenario === "hangNewTree")
+        return new Promise(() => {
+          /* 模拟永不响应的会话创建。 */
+        });
       if (scenario === "authNew") throw RequestError.authRequired();
       if (params.mcpServers.length) throw new Error("Unexpected MCP servers");
       return {
         sessionId: "fixture-session",
+        configOptions,
         modes: { currentModeId: "ask", availableModes: [{ id: "ask", name: "Ask" }] },
       };
     },
@@ -57,8 +104,23 @@ const connection = new AgentSideConnection(
       if (scenario === "badMode") throw RequestError.invalidParams("Unknown mode");
       return {};
     },
+    setSessionConfigOption(params) {
+      calls.push(`config:${params.configId}`);
+      const option = configOptions.find((entry) => entry.id === params.configId);
+      writeProbe();
+      if (
+        !option ||
+        scenario === "badConfig" ||
+        params.configId === process.env.NOCTURNE_TEST_REJECT_CONFIG_ID
+      )
+        throw RequestError.invalidParams("Rejected config option");
+      option.currentValue = params.value;
+      return { configOptions };
+    },
     async prompt(params) {
       calls.push("prompt");
+      writeProbe();
+      if (scenario === "probeOnly") throw new Error("Probe must never prompt");
       if (scenario === "authPrompt") throw RequestError.authRequired();
       if (scenario.startsWith("crash")) process.exit(3);
       if (scenario.startsWith("hang") || scenario.startsWith("ignoreCancel")) {
@@ -147,6 +209,7 @@ const connection = new AgentSideConnection(
         task,
         cwd,
         mode,
+        configOptions,
         calls,
         capabilities,
         permissions,

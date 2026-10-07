@@ -17,17 +17,14 @@ it.runIf(process.env.NOCTURNE_ACP_SMOKE === "1")("真实 ACP agent 的只读 tas
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-acp-smoke-"));
   try {
     await fs.writeFile(path.join(cwd, "input.txt"), "nocturne-acp-readonly-smoke\n");
-    const connector = createAcpConnector(platform, [
-      {
-        name: "smoke",
-        command,
-        args,
-        enabled: true,
-        ...(process.env.NOCTURNE_ACP_SMOKE_MODE
-          ? { mode: process.env.NOCTURNE_ACP_SMOKE_MODE }
-          : {}),
-      },
-    ]);
+    const connector = createAcpConnector(platform);
+    const config = {
+      name: "smoke",
+      command,
+      args,
+      enabled: true,
+      ...(process.env.NOCTURNE_ACP_SMOKE_MODE ? { mode: process.env.NOCTURNE_ACP_SMOKE_MODE } : {}),
+    };
     const ctx: ToolContext = {
       cwd,
       workspaceRoot: cwd,
@@ -51,6 +48,7 @@ it.runIf(process.env.NOCTURNE_ACP_SMOKE === "1")("真实 ACP agent 的只读 tas
       },
     };
     const result = await connector.run(
+      config,
       {
         agent: "smoke",
         cwd,

@@ -21,6 +21,7 @@ import type {
   ToolContext,
 } from "@nocturne/core";
 import { stripVTControlCharacters } from "node:util";
+import { probeAgent } from "./probe.js";
 import { permissionOutcome, permissionSubjects } from "./permissions.js";
 
 const CANCEL_GRACE_MS = 250;
@@ -51,23 +52,14 @@ function singleLine(text: string): string {
 
 export function createAcpConnector(
   platform: Platform,
-  agents: readonly ExternalAgentConfig[],
   diagnostics?: Diagnostics,
 ): ExternalAgentConnector {
-  const enabled = agents.filter((agent) => agent.enabled);
   return {
-    list: () => enabled.map(({ name, description }) => ({ name, description })),
-    async run(request, ctx) {
-      const config = enabled.find((agent) => agent.name === request.agent);
-      if (!config) {
-        const message = `外部 agent ${request.agent} 未启用或不存在`;
-        return {
-          status: "error",
-          modelContent: message,
-          error: { code: "invalid_input", message },
-        };
-      }
+    async run(config, request, ctx) {
       return runAgent(platform, config, request, ctx, diagnostics);
+    },
+    async probe(config, input) {
+      return probeAgent(platform, config, input);
     },
   };
 }
@@ -315,6 +307,24 @@ async function runAgent(
           modeId: config.mode,
         }),
       );
+    for (const [configId, value] of Object.entries(config.configOptions ?? {})) {
+      try {
+        await wait(
+          connection.agent.request(AGENT_METHODS.session_set_config_option, {
+            sessionId,
+            configId,
+            value,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof RequestError && error.code !== -32000)
+          throw new AcpFailure(
+            "external_agent_config_rejected",
+            `外部 agent ${config.name} 拒绝配置项 ${configId}：${error.message}`,
+          );
+        throw error;
+      }
+    }
     const response = await wait(
       connection.agent.request(AGENT_METHODS.session_prompt, {
         sessionId,

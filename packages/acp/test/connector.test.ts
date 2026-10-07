@@ -74,15 +74,16 @@ function setup(
     },
     progress,
   };
-  const connector = createAcpConnector(
-    runPlatform,
-    [config, { ...config, name: "disabled", enabled: false }],
-    {
-      record(kind, data) {
-        records.push({ kind, data });
-      },
+  const acp = createAcpConnector(runPlatform, {
+    record(kind, data) {
+      records.push({ kind, data });
     },
-  );
+  });
+  const connector = {
+    run: (request: Parameters<typeof acp.run>[1], context: ToolContext) =>
+      acp.run(config, request, context),
+    probe: (input: Parameters<typeof acp.probe>[1]) => acp.probe(config, input),
+  };
   const permission = vi.fn<
     (subjects: SubjectRequest[]) => Promise<ExternalAgentPermissionDecision>
   >(async () => ({ decision: "allow", source: "rule" }));
@@ -94,7 +95,7 @@ function setup(
     timeoutMs: 10_000,
     requestPermission: permission,
   };
-  return { connector, ctx, request, permission, progress, records };
+  return { connector, acp, config, ctx, request, permission, progress, records };
 }
 
 async function waitForPid(): Promise<{ pid: number; child?: number }> {
@@ -121,9 +122,8 @@ async function expectGone(pid: number | undefined): Promise<void> {
 }
 
 describe("ACP 单调用生命周期", () => {
-  it("启用列表、新进程、最终文本、原文审计与仅工具单行进度", async () => {
+  it("新进程、最终文本、原文审计与仅工具单行进度", async () => {
     const { connector, ctx, request, progress } = setup();
-    expect(connector.list().map((agent) => agent.name)).toEqual(["fixture"]);
     const result = await connector.run(request, ctx);
     expect(result.status).toBe("ok");
     const report = JSON.parse(result.modelContent);
@@ -210,13 +210,163 @@ describe("ACP 单调用生命周期", () => {
     await expectGone((await waitForPid()).pid);
   });
 
-  it("未知名称不启动进程", async () => {
-    const { connector, ctx, request } = setup();
-    expect(await connector.run({ ...request, agent: "disabled" }, ctx)).toMatchObject({
+  it("每次调用使用传入配置而非固化列表", async () => {
+    const { acp, config, ctx, request } = setup();
+    const result = await acp.run({ ...config, name: "changed", mode: "ask" }, request, ctx);
+    expect(result).toMatchObject({ status: "ok", output: { agent: "changed" } });
+    expect(JSON.parse(result.modelContent).mode).toBe("ask");
+  });
+
+  it("逐项设置configOptions并在prompt前生效", async () => {
+    const { connector, request, ctx } = setup("normal", {
+      mode: "ask",
+      configOptions: { model: "large", effort: "high" },
+    });
+    const result = await connector.run(request, ctx);
+    expect(result.status).toBe("ok");
+    expect(JSON.parse(result.modelContent)).toMatchObject({
+      calls: ["initialize", "new", "mode", "config:model", "config:effort", "prompt"],
+      configOptions: [
+        { id: "model", currentValue: "large" },
+        { id: "effort", currentValue: "high" },
+      ],
+    });
+  });
+
+  it("拒绝配置项时报告原始id且不发送prompt", async () => {
+    const probeFile = path.join(root, "probe.json");
+    const { connector, request, ctx } = setup("badConfig", {
+      configOptions: { "opaque.id": "opaque.value" },
+      env: { NOCTURNE_TEST_PROBE_FILE: probeFile },
+    });
+    expect(await connector.run(request, ctx)).toMatchObject({
       status: "error",
-      error: { code: "invalid_input" },
+      error: {
+        code: "external_agent_config_rejected",
+        message: expect.stringContaining("opaque.id"),
+      },
+    });
+    expect(JSON.parse(await fs.readFile(probeFile, "utf8")).calls).toEqual([
+      "initialize",
+      "new",
+      "config:opaque.id",
+    ]);
+  });
+
+  it("指定项拒绝不影响之前的设置，但阻止prompt", async () => {
+    const probeFile = path.join(root, "probe.json");
+    const { connector, request, ctx } = setup("normal", {
+      configOptions: { model: "large", effort: "high" },
+      env: { NOCTURNE_TEST_PROBE_FILE: probeFile, NOCTURNE_TEST_REJECT_CONFIG_ID: "effort" },
+    });
+    expect(await connector.run(request, ctx)).toMatchObject({
+      status: "error",
+      error: { code: "external_agent_config_rejected", message: expect.stringContaining("effort") },
+    });
+    const report = JSON.parse(await fs.readFile(probeFile, "utf8"));
+    expect(report.calls).toEqual(["initialize", "new", "config:model", "config:effort"]);
+    expect(
+      report.configOptions.find((option: { id: string }) => option.id === "model").currentValue,
+    ).toBe("large");
+  });
+
+  it("probe返回信息和扁平选项、无需认证、不发送prompt并移除临时cwd", async () => {
+    const probeFile = path.join(root, "probe.json");
+    const { connector } = setup("probeOnly", {
+      env: { NOCTURNE_TEST_PROBE_FILE: probeFile },
+      configOptions: { model: "large" },
+    });
+    const result = await connector.probe({ nocturneHome: root });
+    expect(result).toMatchObject({
+      ok: true,
+      durationMs: expect.any(Number),
+      agentInfo: { name: "fixture", version: "1.2.3" },
+      authMethods: [{ id: "login", name: "CLI login" }],
+      configOptions: [
+        {
+          id: "model",
+          currentValue: "small",
+          options: [
+            { value: "small", name: "Small" },
+            { value: "large", name: "Large" },
+          ],
+        },
+        { id: "effort", currentValue: "low" },
+      ],
+    });
+    const report = JSON.parse(await fs.readFile(probeFile, "utf8"));
+    expect(report.calls).toEqual(["initialize", "new"]);
+    expect(path.dirname(report.cwd)).toBe(root);
+    expect(await platform.fs.exists(report.cwd)).toBe(false);
+  });
+
+  it.each(["authInitialize", "authNew"])("probe %s保留认证错误", async (scenario) => {
+    const { connector } = setup(scenario);
+    expect(await connector.probe({ nocturneHome: root })).toMatchObject({
+      ok: false,
+      error: { code: "external_agent_auth_required" },
+    });
+    await expectGone((await waitForPid()).pid);
+  });
+
+  it("probe命令缺失时不启动进程", async () => {
+    const { connector } = setup("normal", { command: "nocturne-acp-command-that-does-not-exist" });
+    expect(await connector.probe({ nocturneHome: root })).toMatchObject({
+      ok: false,
+      error: { code: "external_agent_not_installed" },
     });
     expect(await platform.fs.exists(path.join(root, "pids.json"))).toBe(false);
+  });
+
+  it.each(["hangInitialize", "hangNewTree"])(
+    "probe %s有界超时并清理临时目录和树",
+    async (scenario) => {
+      const { connector } = setup(scenario);
+      expect(await connector.probe({ nocturneHome: root, timeoutMs: 2_000 })).toMatchObject({
+        ok: false,
+        error: { code: "timeout" },
+      });
+      const pids = await waitForPid();
+      await expectGone(pids.pid);
+      if (pids.child !== undefined) await expectGone(pids.child);
+      expect((await fs.readdir(root)).filter((name) => name.startsWith("acp-probe-"))).toEqual([]);
+    },
+  );
+
+  it("probe通过PATH解析不带路径的可执行命令", async () => {
+    const { connector } = setup("probeOnly", {
+      command: path.basename(process.execPath),
+      env: { PATH: path.dirname(process.execPath) },
+    });
+    expect(await connector.probe({ nocturneHome: root })).toMatchObject({ ok: true });
+  });
+
+  it.runIf(process.platform === "win32")("probe解析PATH/PATHEXT的cmd shim且超时清树", async () => {
+    const directory = path.join(root, "probe shim space");
+    await fs.mkdir(directory);
+    await fs.writeFile(
+      path.join(directory, "probe-agent.cmd"),
+      `@echo off\r\n"${process.execPath}" "${fixture}" %*\r\n`,
+    );
+    const { connector, config } = setup("normal", {
+      command: "probe-agent",
+      args: ["probeOnly"],
+    });
+    config.env = {
+      ...config.env,
+      PATH: `${directory};${process.env.PATH ?? ""}`,
+      PATHEXT: ".CMD;.EXE",
+    };
+    expect(await connector.probe({ nocturneHome: root })).toMatchObject({ ok: true });
+    await expectGone((await waitForPid()).pid);
+    config.args = ["hangNewTree"];
+    expect(await connector.probe({ nocturneHome: root, timeoutMs: 2_000 })).toMatchObject({
+      ok: false,
+      error: { code: "timeout" },
+    });
+    const pids = await waitForPid();
+    await expectGone(pids.pid);
+    await expectGone(pids.child);
   });
 
   it.each(["normalTree", "ignoreCancelTree"])(
