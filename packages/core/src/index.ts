@@ -357,8 +357,10 @@ export interface RuntimeSession {
    */
   setModel(model: string | ModelRef): Promise<void>;
   /**
-   * 切换权限预设（events.md 第 7 节）：会话空闲时生效，写入
-   * session.config_changed；未知预设名拒绝 invalid_command。
+   * 切换权限预设（events.md 第 7 节，ADR-0036 修订）：Turn 进行中、
+   * 压缩进行中都可切换，立即重建策略、从下一次权限求值起生效；
+   * 已在等待确认的权限请求保持原样。写入 session.config_changed；
+   * 未知预设名拒绝 invalid_command。
    */
   setPermissionPreset(name: string): Promise<void>;
   /**
@@ -2107,9 +2109,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       async setPermissionPreset(name) {
         name = normalizePermissionPreset(name);
         assertUsable();
-        if (busy() || compactController !== undefined) {
-          throw new RuntimeCommandError("session_busy", "会话正忙，不能切换权限预设");
-        }
+        // ADR-0036 修订：Turn/压缩进行中也可切换，下一次权限求值起按新预设；
+        // 已在等待确认的请求由 gate 持有、保持原样
         await rebuildProviders();
         if (!isPermissionPresetName(name)) {
           throw new RuntimeCommandError(

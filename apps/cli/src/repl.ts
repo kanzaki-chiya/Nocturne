@@ -588,7 +588,9 @@ export async function runRepl(
           prompt();
           return;
         }
-        if (busy) {
+        // ADR-0036 修订：/preset 忙时也可切换（下一次权限判定起生效）
+        const busyAllowed = line === "/preset" || line.startsWith("/preset ");
+        if (busy && !busyAllowed) {
           out.line("stdout", "会话忙（Turn 进行中）；Ctrl+C 可中断");
           prompt();
           return;

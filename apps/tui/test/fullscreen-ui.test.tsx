@@ -490,6 +490,48 @@ describe("全屏界面", () => {
     await session.close();
   });
 
+  it("忙时 Alt+M 与 /preset 可切换权限预设，普通输入给忙时提示（ADR-0036 修订）", async () => {
+    const runtime = await createRuntime({
+      cwd: tmp("nct-preset-ws-"),
+      sessionsDir: tmp("nct-preset-sd-"),
+      providers: [
+        new FakeProvider({
+          scripts: [
+            [
+              { type: "wait", ms: 30_000 },
+              { type: "text_delta", text: "迟到" },
+            ],
+          ],
+        }),
+      ],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await pause(80);
+    const turn = session.submit({ text: "开始" });
+    await waitFor(() => (lastFrame() ?? "").includes("思考中"));
+    // 快捷键循环
+    stdin.write("\x1bm");
+    await waitFor(() => session.state().config.permissionPreset === "auto-edit");
+    expect(lastFrame()).toContain("auto-edit");
+    // 忙时 /preset 带参直接切换（文字与回车分开发，避免补全列表抢走 Enter）
+    stdin.write("/preset smart");
+    await pause(80);
+    stdin.write("\r");
+    await waitFor(() => session.state().config.permissionPreset === "smart");
+    // 忙时普通输入不静默丢弃（回车单独发：一次性写入会被当成粘贴）
+    stdin.write("第二条");
+    await pause(80);
+    stdin.write("\r");
+    await waitFor(() => (lastFrame() ?? "").includes("会话忙"));
+    stdin.write("\x1b");
+    await turn;
+    unmount();
+    await session.close();
+  }, 10000);
+
   it("状态栏是百分比 / 大写长度，模型段只显示模型 ID", async () => {
     const { runtime, session } = await sessionWithEffort();
     const { lastFrame, unmount } = render(createElement(App, { session, runtime, env: ENV }));

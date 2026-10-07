@@ -172,6 +172,28 @@ describe("REPL 生命周期", () => {
     expect(interrupted.value).toBe(false);
   });
 
+  it("忙时 /preset 照常切换，普通输入给忙时提示（ADR-0036 修订）", async () => {
+    const { io, stdin, stdoutChunks } = makeIo();
+    const interrupted = { value: false };
+    const { session, settle } = fakeSessionWithPendingTurn(interrupted);
+    const presets: string[] = [];
+    session.setPermissionPreset = async (name: string) => {
+      presets.push(name);
+    };
+    const done = runRepl(session, fakeRuntime, io);
+    stdin.write("hi\n");
+    await tick(); // 进入 Turn（busy）
+    stdin.write("/preset bypass\n");
+    await tick();
+    expect(presets).toEqual(["bypass"]);
+    stdin.write("再一句\n");
+    await tick();
+    expect(stdoutChunks.join("")).toContain("会话忙（Turn 进行中）；Ctrl+C 可中断");
+    settle()?.resolve("done");
+    stdin.end();
+    expect(await done).toBe(0);
+  });
+
   it("权限确认五键：a/s/p/d/x 映射到 PermissionReply（cli.md 第 6 节）", async () => {
     const { io, stdin, stdoutChunks } = makeIo();
     let listener: ((ev: RuntimeEvent) => void) | undefined;

@@ -372,6 +372,65 @@ describe("公开 Runtime API", () => {
     await restored.close();
   });
 
+  it("Turn 进行中切换权限预设：下一次求值用新预设，等待中的请求保持原样（ADR-0036）", async () => {
+    const { runtime, ws } = await makeRuntime(
+      [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "w1",
+            name: "write",
+            input: { path: "a.txt", content: "first" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          {
+            type: "tool_call",
+            toolCallId: "w2",
+            name: "write",
+            input: { path: "b.txt", content: "second" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+      undefined,
+      { interactive: true },
+    );
+    const session = await runtime.createSession({
+      model: "fake/fake-model",
+      permissionPreset: "default",
+    });
+    const events = collect(session);
+    const requested = new Promise<string>((resolve) => {
+      session.subscribe((e) => {
+        if (e.type === "permission.requested") resolve(e.payload.requestId);
+      });
+    });
+    const turn = session.submit({ text: "write two files" });
+    const requestId = await requested;
+
+    // Turn 进行中（等待确认）：切换不再拒绝，落 config_changed 并立即重建策略
+    await session.setPermissionPreset("bypass");
+    expect(session.state().config.permissionPreset).toBe("bypass");
+    // 已弹出的请求保持原样：不会因为切到宽松预设而自动放行
+    expect(events.some((e) => e.type === "permission.resolved")).toBe(false);
+    await session.respondPermission(requestId, { decision: "deny" });
+
+    expect(await turn).toBe("done");
+    // 第一个请求按用户决定结算；第二个写入在新预设（bypass）下直接放行
+    expect(existsSync(path.join(ws, "a.txt"))).toBe(false);
+    expect(readFileSync(path.join(ws, "b.txt"), "utf8")).toBe("second");
+    expect(events.filter((e) => e.type === "permission.requested")).toHaveLength(1);
+    const resolved = events.filter((e) => e.type === "permission.resolved");
+    expect(resolved).toMatchObject([{ payload: { action: "deny", source: "user" } }]);
+    await session.close();
+  });
+
   it("模型字符串解析：非法形式抛 invalid_command", async () => {
     const { runtime } = await makeRuntime([]);
     await expect(runtime.createSession({ model: "nomodel" })).rejects.toMatchObject({

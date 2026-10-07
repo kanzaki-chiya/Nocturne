@@ -191,12 +191,19 @@ export function useSessionControls(
   const effort = snapshot?.effort;
   const effortNote = [
     effort?.available.length === 0 ? "该模型未声明可用思考档位" : undefined,
+    busy ? "本轮正在进行：下一个 Turn 生效" : undefined,
     effort !== undefined && effort.current !== effort.effective
       ? `本 Turn 使用 ${effort.effective}；${effort.current} 将在下一 Turn 生效`
       : undefined,
   ]
     .filter((text): text is string => text !== undefined)
     .join("；");
+  // ADR-0036 修订：忙时切换从下一次权限判定起生效；等待确认的请求仍由用户决定
+  const presetNote = busy
+    ? view.status === "waiting_permission"
+      ? "本轮正在进行：从下一次权限判定起按新预设；等待确认的权限请求仍由你决定，切换不替它放行"
+      : "本轮正在进行：从下一次权限判定起按新预设，已执行的操作不受影响"
+    : undefined;
   const modelControl: ChoiceControl = {
     value: model === undefined ? undefined : refKey(model),
     label: model?.model ?? "模型 —",
@@ -228,7 +235,7 @@ export function useSessionControls(
     value: snapshot?.preset ?? view.config.permissionPreset,
     label: snapshot?.preset ?? view.config.permissionPreset ?? "—",
     groups: [{ options: presetOptions() }],
-    ...(busy ? { disabled: "当前 Turn 结束后可切换" } : {}),
+    ...(presetNote !== undefined ? { note: presetNote } : {}),
     onSelect: (value) =>
       choose(async () => {
         await session.setPermissionPreset(value);
@@ -260,14 +267,17 @@ export function useSessionControls(
         ],
       },
     ],
-    ...(busy ? { disabled: "当前 Turn 结束后可切换" } : {}),
-    ...(shells === undefined
-      ? { note: "正在探测 Shell…" }
-      : shell?.overriddenBy !== undefined
-        ? {
-            note: `选择被 ${shell.overriddenBy === "env" ? "NOCTURNE_SHELL" : "config.json"} 覆盖，当前实际使用 ${shell.effective?.kind ?? "—"}。`,
-          }
-        : {}),
+    ...(() => {
+      const notes = [
+        busy ? "本轮正在进行：下一次命令生效" : undefined,
+        shells === undefined
+          ? "正在探测 Shell…"
+          : shell?.overriddenBy !== undefined
+            ? `选择被 ${shell.overriddenBy === "env" ? "NOCTURNE_SHELL" : "config.json"} 覆盖，当前实际使用 ${shell.effective?.kind ?? "—"}。`
+            : undefined,
+      ].filter((text): text is string => text !== undefined);
+      return notes.length > 0 ? { note: notes.join("；") } : {};
+    })(),
     onSelect: (value) =>
       choose(async () => {
         await session.setShell(value);

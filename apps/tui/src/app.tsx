@@ -1332,9 +1332,9 @@ function SessionApp({
     );
   }, [session, flash]);
 
-  /** Alt+M：与 /preset 同一条 setPermissionPreset 路径，Turn 中同样拒绝 */
+  /** Alt+M：与 /preset 同一条 setPermissionPreset 路径；
+   * ADR-0036 修订：Turn 进行中、等待确认中都可切换（请求保持原样） */
   const cyclePreset = useCallback(() => {
-    if (busy || pending !== undefined) return;
     const current = session.state().config.permissionPreset;
     const at = PRESET_NAMES.indexOf(current as (typeof PRESET_NAMES)[number]);
     const next = PRESET_NAMES[(at + 1) % PRESET_NAMES.length] ?? "default";
@@ -1347,7 +1347,7 @@ function SessionApp({
         suppressConfigNotice.current = false;
       },
     );
-  }, [busy, pending, session, flash]);
+  }, [session, flash]);
 
   /** 会话切换：冻结旧回放进 Static、换绑 session、新日志重放进 SessionView */
   const doSwitch = useCallback(
@@ -2068,7 +2068,8 @@ function SessionApp({
       return;
     }
     if (isAltM(ch, key)) {
-      if (pageOpen || dialogOpen || pending !== undefined || pendingQ !== undefined) return;
+      // ADR-0036 修订：忙时/等待确认时也允许循环切换权限预设
+      if (pageOpen || dialogOpen) return;
       cyclePreset();
       return;
     }
@@ -2380,6 +2381,12 @@ function SessionApp({
         dispatchSlash(text);
         return;
       }
+      // ADR-0036 修订：忙时输入框保持可输入——斜杠命令（/preset 等）在上面已分发；
+      // 普通输入与委托任务仍要空闲，给个提示而不是静默丢弃
+      if (busy) {
+        pushLine("! 会话忙（Turn 进行中）；Ctrl+C 可中断");
+        return;
+      }
       if (delegate !== undefined) {
         submitExpanded(delegate);
         return;
@@ -2408,6 +2415,7 @@ function SessionApp({
     },
     [
       session,
+      busy,
       externalAgents,
       externalAgentCatalog,
       pushLine,
@@ -2425,18 +2433,18 @@ function SessionApp({
     ],
   );
 
+  // ADR-0036 修订：忙时（Turn 进行中）输入框保持可输入——/preset 等命令可照常发出，
+  // 普通输入回车给忙时提示；等待权限确认/提问时仍由专用按键独占
   const composerDisabled =
     pending !== undefined
       ? "等待权限确认（a/s/p/d/x）"
       : pendingQ !== undefined
         ? "等待回答提问"
-        : busy
-          ? "会话忙，Ctrl+C 可中断"
-          : switchPending
-            ? "正在切换会话，请稍候"
-            : dialogOpen
-              ? "弹层打开中，Esc 关闭"
-              : undefined;
+        : switchPending
+          ? "正在切换会话，请稍候"
+          : dialogOpen
+            ? "弹层打开中，Esc 关闭"
+            : undefined;
 
   const resumeItems: PickItem<string>[] = (resumeList ?? []).map((s) => ({
     label: resumeLabel(s, width - 10),
