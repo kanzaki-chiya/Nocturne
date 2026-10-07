@@ -70,6 +70,7 @@ export const SESSION_METHODS: Record<
   readInputHistory: "session.readInputHistory",
   recordInputHistory: "session.recordInputHistory",
   fileIndex: "session.fileIndex",
+  resolveFiles: "session.resolveFiles",
   submit: "session.submit",
   respondPermission: "session.respondPermission",
   respondQuestion: "session.respondQuestion",

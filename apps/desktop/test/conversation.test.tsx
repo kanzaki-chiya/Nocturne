@@ -17,7 +17,7 @@ import {
 } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
-import { Conversation, type ConversationProps } from "../src/Conversation";
+import { Conversation, type ConversationProps, type FileLinkHooks } from "../src/Conversation";
 import { createAttachmentImageSource } from "../src/attachment-images";
 
 const imageData = new Uint8Array([1, 2, 3]);
@@ -155,6 +155,7 @@ function sessionFixture(id = "session-1") {
     readAttachment: vi
       .fn<RpcSession["readAttachment"]>()
       .mockRejectedValue(new Error("附件文件缺失")),
+    resolveFiles: vi.fn<RpcSession["resolveFiles"]>().mockResolvedValue([]),
     interrupt: vi.fn(),
   };
   // Conversation only consumes these RPC methods; fail visibly if its boundary grows.
@@ -259,13 +260,20 @@ function conversationProps(rendered: { session: RpcSession; openUrl: (url: strin
 
 function mount(
   view: SessionView = createSessionView(),
-  overrides: Partial<Pick<ConversationProps, "cwd" | "subscribeEvents" | "images">> = {},
+  overrides: Partial<
+    Pick<ConversationProps, "cwd" | "subscribeEvents" | "images" | "fileLinks">
+  > & { resolveFilesImpl?: RpcSession["resolveFiles"] } = {},
 ) {
   const { session, methods } = sessionFixture();
+  if (overrides.resolveFilesImpl !== undefined) {
+    methods.resolveFiles.mockImplementation(overrides.resolveFilesImpl);
+  }
   const openUrl = vi.fn();
   const rendered = { session, openUrl };
+  const { resolveFilesImpl: _ignored, ...props } = overrides;
+  void _ignored;
   return {
-    ...render(<Conversation view={view} {...conversationProps(rendered)} {...overrides} />),
+    ...render(<Conversation view={view} {...conversationProps(rendered)} {...props} />),
     session,
     methods,
     openUrl,
@@ -1419,5 +1427,107 @@ describe("长思考收起", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("回答内文件引用（U-09）", () => {
+  const hooks = (overrides: Partial<FileLinkHooks> = {}) => ({
+    opener: () => "system" as const,
+    openerLabel: () => "系统默认程序",
+    open: vi.fn(async (_path: string, _line?: number) => undefined),
+    copy: vi.fn(async (_path: string) => undefined),
+    reveal: vi.fn(async (_path: string) => undefined),
+    ...overrides,
+  });
+
+  it("存在的引用渲染成链接，不存在的保持普通代码", async () => {
+    const view = createSessionView();
+    view.entries = [assistant({ text: "改了 `src/a.ts`，`src/missing.ts` 不存在" })];
+    const table: Record<
+      string,
+      { absolutePath: string; withinWorkspace: boolean; exists: boolean }
+    > = {
+      "src/a.ts": { absolutePath: "Z:/project/src/a.ts", withinWorkspace: true, exists: true },
+      "src/missing.ts": {
+        absolutePath: "Z:/project/src/missing.ts",
+        withinWorkspace: true,
+        exists: false,
+      },
+    };
+    mount(view, {
+      fileLinks: hooks(),
+      resolveFilesImpl: async (paths: string[]) =>
+        paths.map((input) => ({
+          input,
+          absolutePath: table[input]?.absolutePath ?? `Z:/project/${input}`,
+          withinWorkspace: table[input]?.withinWorkspace ?? true,
+          exists: table[input]?.exists ?? true,
+          isDirectory: false,
+        })),
+    });
+    await screen.findByRole("button", { name: "src/a.ts" });
+    expect(screen.queryByRole("button", { name: "src/missing.ts" })).toBeNull();
+    expect(screen.getByText("src/missing.ts").tagName).toBe("CODE");
+  });
+
+  it("行号范围解析：菜单首项带行号并按设置打开", async () => {
+    const view = createSessionView();
+    view.entries = [assistant({ text: "看 `src/a.ts:12-20` 的实现" })];
+    const fileLinks = hooks({ openerLabel: () => "VS Code" });
+    mount(view, {
+      fileLinks,
+      resolveFilesImpl: async (paths: string[]) =>
+        paths.map((input) => ({
+          input,
+          absolutePath: `Z:/project/${input}`,
+          withinWorkspace: true,
+          exists: true,
+          isDirectory: false,
+        })),
+    });
+    const link = await screen.findByRole("button", { name: "src/a.ts:12-20" });
+    fireEvent.click(link);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /用 VS Code 打开/ }));
+    expect(fileLinks.open).toHaveBeenCalledWith("Z:/project/src/a.ts", 12);
+  });
+
+  it("工作区外的路径不能直接打开：菜单只有复制与显示", async () => {
+    const view = createSessionView();
+    view.entries = [assistant({ text: "系统文件 `C:/Windows/exec.exe` 别乱点" })];
+    const fileLinks = hooks();
+    mount(view, {
+      fileLinks,
+      resolveFilesImpl: async (paths: string[]) =>
+        paths.map((input) => ({
+          input,
+          absolutePath: "C:/Windows/exec.exe",
+          withinWorkspace: false,
+          exists: true,
+          isDirectory: false,
+        })),
+    });
+    const link = await screen.findByRole("button", { name: "C:/Windows/exec.exe" });
+    fireEvent.click(link);
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: /打开/ })).toBeNull();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "复制路径" }));
+    expect(fileLinks.copy).toHaveBeenCalledWith("C:/Windows/exec.exe");
+    fireEvent.click(link);
+    fireEvent.click(
+      within(await screen.findByRole("menu")).getByRole("menuitem", {
+        name: "在资源管理器中显示",
+      }),
+    );
+    expect(fileLinks.reveal).toHaveBeenCalledWith("C:/Windows/exec.exe");
+    expect(fileLinks.open).not.toHaveBeenCalled();
+  });
+
+  it("不传 fileLinks 时保持普通代码（旧行为）", () => {
+    const view = createSessionView();
+    view.entries = [assistant({ text: "改了 `src/a.ts`" })];
+    const rendered = mount(view);
+    expect(screen.getByText("src/a.ts").tagName).toBe("CODE");
+    expect(screen.queryByRole("button", { name: "src/a.ts" })).toBeNull();
+    expect(rendered.methods.resolveFiles).not.toHaveBeenCalled();
   });
 });

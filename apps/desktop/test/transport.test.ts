@@ -58,6 +58,10 @@ function fakeHost() {
       return { kind: "channel" };
     },
     openUrl: () => Promise.resolve(),
+    openPath: () => Promise.resolve(),
+    revealItem: () => Promise.resolve(),
+    detectEditors: () => Promise.resolve({ vscode: false, cursor: false }),
+    openInEditor: () => Promise.resolve(),
     pickFolder: () => Promise.resolve(null),
     pickImages: () => Promise.resolve([]),
     homeDir: () => Promise.resolve(null),

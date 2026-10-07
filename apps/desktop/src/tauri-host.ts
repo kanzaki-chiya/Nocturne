@@ -2,7 +2,11 @@ import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
+import {
+  openPath as tauriOpenPath,
+  openUrl as tauriOpenUrl,
+  revealItemInDir as tauriReveal,
+} from "@tauri-apps/plugin-opener";
 import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 
@@ -22,6 +26,22 @@ export function createTauriHost(): DesktopHost {
     async openUrl(url: string): Promise<void> {
       if (!isAllowedExternalUrl(url)) return;
       await tauriOpenUrl(url);
+    },
+    openPath: (path) => tauriOpenPath(path),
+    revealItem: (path) => tauriReveal(path),
+    async detectEditors() {
+      try {
+        return await invoke<{ vscode: boolean; cursor: boolean }>("detect_editors");
+      } catch {
+        return { vscode: false, cursor: false };
+      }
+    },
+    async openInEditor(editor, path, line) {
+      await invoke("open_in_editor", {
+        editor,
+        path,
+        ...(line !== undefined ? { line } : {}),
+      });
     },
     pickFolder: () => openDialog({ directory: true, multiple: false }),
     async pickImages() {

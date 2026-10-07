@@ -11,6 +11,8 @@ fn main() {
             "shell_log",
             "pick_images",
             "open_skill_directory",
+            "detect_editors",
+            "open_in_editor",
         ]),
     ))
     .expect("failed to run tauri-build");

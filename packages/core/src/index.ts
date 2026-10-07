@@ -141,6 +141,7 @@ import type {
 } from "./protocol/index.js";
 import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
 import { normalizePermissionPreset } from "./protocol/index.js";
+import type { FileRefResolution } from "./protocol/file-refs.js";
 import { resolveFileRefs } from "./tools/file-refs.js";
 import { buildFileIndex, type FileIndexEntry } from "./tools/file-index.js";
 import { isReasoningEffort, REASONING_EFFORT_ORDER } from "./protocol/index.js";
@@ -343,6 +344,12 @@ export interface RuntimeSession {
   recordInputHistory(text: string): Promise<void>;
   /** 工作区 @ 补全索引，首次请求建立，每个 Turn 后失效。 */
   fileIndex(): Promise<FileIndexEntry[]>;
+  /**
+   * 回答内文件引用存在性检查（U-09，方案 A）：按工作区解析路径，
+   * 只读（stat 跟随链接），不产生事件。越界路径照常返回绝对路径
+   * 与 exists，由客户端决定只给复制/显示入口。
+   */
+  resolveFiles(paths: string[]): Promise<FileRefResolution[]>;
   /** 提交一个 Turn；Turn 结束时 resolve（events.md 第 7 节） */
   submit(input: SubmitInput): Promise<TurnEndReason>;
   /** 中断运行中的 Turn；无运行中 Turn 时无操作 */
@@ -1845,6 +1852,26 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         );
         return fileIndexPromise;
       },
+      async resolveFiles(inputs) {
+        assertUsable();
+        const root = await fs.realpath(meta.workspaceRoot).catch(() => meta.workspaceRoot);
+        return Promise.all(
+          inputs.map(async (input): Promise<FileRefResolution> => {
+            const absolute = paths.isAbsolute(input)
+              ? paths.normalize(input)
+              : paths.join(root, input);
+            const withinWorkspace = paths.isWithin(root, absolute);
+            const stat = await fs.stat(absolute).catch(() => undefined);
+            return {
+              input,
+              absolutePath: absolute,
+              withinWorkspace,
+              exists: stat !== undefined,
+              isDirectory: stat?.type === "directory",
+            };
+          }),
+        );
+      },
       interrupt() {
         controller?.abort();
         // 压缩是 Turn 之外的会话级活动，interrupt 同样中止它
@@ -3060,6 +3087,7 @@ export {
 } from "./platform/index.js";
 export { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
 export { completeFileRefs, type FileCompletion, type FileIndexEntry } from "./tools/file-index.js";
+export { splitCodeRef, type FileRefResolution, type ParsedFileRef } from "./protocol/file-refs.js";
 // MCP / Hook 装配点类型（modules.md：注入方是 apps；实现位于 packages/mcp）
 export type {
   HookCallInput,

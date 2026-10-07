@@ -60,6 +60,10 @@ function realHost(ws: string, sessionsDir: string, fault?: FaultSpec) {
   const host: DesktopHost = {
     createChannel: (onMessage) => onMessage,
     openUrl: async () => undefined,
+    openPath: async () => undefined,
+    revealItem: async () => undefined,
+    detectEditors: async () => ({ vscode: false, cursor: false }),
+    openInEditor: async () => undefined,
     pickFolder: async () => null,
     pickImages: async () => [],
     homeDir: async () => "C:/Users/me",

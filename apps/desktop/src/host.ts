@@ -24,6 +24,14 @@ export interface DesktopHost {
   createChannel: (onMessage: (m: BackendMessage) => void) => unknown;
   /** 用系统浏览器打开链接（实现里先过 isAllowedExternalUrl） */
   openUrl: (url: string) => Promise<void>;
+  /** 用系统默认程序打开文件（Tauri opener 插件，不带行号） */
+  openPath: (path: string) => Promise<void>;
+  /** 在资源管理器中显示文件/目录（opener reveal） */
+  revealItem: (path: string) => Promise<void>;
+  /** 检测已安装的编辑器（VS Code、Cursor） */
+  detectEditors: () => Promise<{ vscode: boolean; cursor: boolean }>;
+  /** 用指定编辑器打开文件并跳到行号（Rust 命令经 code/cursor -g 启动） */
+  openInEditor: (editor: "vscode" | "cursor", path: string, line?: number) => Promise<void>;
   /** 系统文件夹选择对话框；取消返回 null */
   pickFolder: () => Promise<string | null>;
   /** 系统图片选择对话框；取消返回空列表 */

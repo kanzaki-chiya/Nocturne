@@ -114,6 +114,9 @@ function props(
     section?: SettingsPageSection;
     theme?: ThemePref;
     onThemeChange?: (t: ThemePref) => boolean;
+    fileOpener?: "system" | "vscode" | "cursor";
+    editors?: { vscode: boolean; cursor: boolean };
+    onFileOpenerChange?: (o: "system" | "vscode" | "cursor") => boolean;
     onConfigSaved?: () => void;
     onOpenProviders?: () => void;
     update?: {
@@ -132,6 +135,9 @@ function props(
     workspaceOverridden: false,
     ...(overrides?.update !== undefined ? { update: overrides.update } : {}),
     onThemeChange: overrides?.onThemeChange ?? (() => true),
+    fileOpener: overrides?.fileOpener ?? ("system" as const),
+    editors: overrides?.editors ?? { vscode: true, cursor: false },
+    onFileOpenerChange: overrides?.onFileOpenerChange ?? (() => true),
     onWorkspaceChange: () => Promise.resolve(undefined),
     pickFolder: () => Promise.resolve(null),
     providersVersion: 0,
@@ -338,7 +344,7 @@ describe("SettingsPage", () => {
     const view = render(<SettingsPage {...props(server.client)} />);
     await screen.findByText("默认权限预设");
     const groups = () => [...document.querySelectorAll("h5")].map((h) => h.textContent);
-    expect(groups()).toEqual(["权限", "执行", "普通对话"]);
+    expect(groups()).toEqual(["权限", "执行", "普通对话", "文件"]);
     expect(screen.getByRole("heading", { name: "常规" })).toBeTruthy();
     expect(screen.queryByText("看图模型")).toBeNull();
 
@@ -404,4 +410,31 @@ describe("SettingsPage", () => {
     expect(row("检查更新").textContent).not.toContain("下载失败");
     server.close();
   });
+});
+
+it("打开文件用：只列检测到的编辑器，选择写本机 prefs", async () => {
+  const server = fakeServer(handlers());
+  await server.initialize();
+  const onFileOpenerChange = vi.fn(() => true);
+  render(
+    <SettingsPage
+      {...props(server.client, {
+        fileOpener: "system",
+        editors: { vscode: true, cursor: false },
+        onFileOpenerChange,
+      })}
+    />,
+  );
+  await screen.findByText("默认权限预设");
+  const trigger = screen.getByRole("combobox", { name: "打开文件用" });
+  fireEvent.click(trigger);
+  expect(screen.getByRole("option", { name: /VS Code/ })).toBeTruthy();
+  expect(screen.queryByRole("option", { name: /Cursor/ })).toBeNull();
+  fireEvent.click(screen.getByRole("option", { name: /VS Code/ }));
+  expect(onFileOpenerChange).toHaveBeenCalledWith("vscode");
+  expect(await screen.findByRole("status")).toHaveProperty(
+    "textContent",
+    "✓已保存 打开文件用 = vscode",
+  );
+  server.close();
 });

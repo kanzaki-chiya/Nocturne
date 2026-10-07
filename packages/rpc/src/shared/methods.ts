@@ -27,6 +27,7 @@ import type {
   ContentBlock,
   CreateSessionOptions,
   FileIndexEntry,
+  FileRefResolution,
   ImageMimeType,
   JevEndpoint,
   JevReviewerConfig,
@@ -385,6 +386,14 @@ export interface RpcMethods {
   "session.visionInfo": { params: SessionParams; result: Ret<"visionInfo"> };
   "session.mcpServers": { params: SessionParams; result: Ret<"mcpServers"> };
   "session.fileIndex": { params: SessionParams; result: FileIndexEntry[] };
+  /**
+   * 回答内文件引用存在性检查（U-09，方案 A）：只读，按工作区解析路径；
+   * 越界路径照常返回绝对路径与 exists，由客户端决定入口。
+   */
+  "session.resolveFiles": {
+    params: SessionParams & { paths: string[] };
+    result: FileRefResolution[];
+  };
   "session.readInputHistory": { params: SessionParams; result: string[] };
   "session.recordInputHistory": { params: SessionParams & { text: string }; result: null };
   "session.close": { params: SessionParams; result: null };
@@ -489,6 +498,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.visionInfo": true,
   "session.mcpServers": true,
   "session.fileIndex": true,
+  "session.resolveFiles": true,
   "session.readInputHistory": true,
   "session.recordInputHistory": true,
   "session.close": true,

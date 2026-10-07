@@ -11,7 +11,7 @@ import type {
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
 import { BackendLogsPage, SHELL_LOG_ID, type BackendLogTarget } from "./BackendLogsPage";
 import { Composer, type ComposerSubmit, type WorkspaceChoice } from "./Composer";
-import { Conversation } from "./Conversation";
+import { Conversation, type FileLinkHooks } from "./Conversation";
 import {
   activeConversationCount,
   Conversations,
@@ -76,6 +76,51 @@ export function App({ host }: { host: DesktopHost }) {
   const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(null);
   const [home, setHome] = useState<string | null>(null);
   const [prefsVersion, setPrefsVersion] = useState(0);
+  /**
+   * 回答内文件引用的打开能力（U-09）：按"打开文件用"设置走 opener 或
+   * 编辑器。prefsVersion 驱动设置变更后重算；编辑器可用性按需探测。
+   */
+  const fileLinks: FileLinkHooks = useMemo(() => {
+    const opener = () => prefs.get().fileOpener ?? "system";
+    const openerLabel = () =>
+      opener() === "vscode" ? "VS Code" : opener() === "cursor" ? "Cursor" : "系统默认程序";
+    const clipboard = async (text: string) => {
+      await navigator.clipboard.writeText(text);
+    };
+    return {
+      opener,
+      openerLabel,
+      open: async (absolutePath, line) => {
+        const kind = opener();
+        if (kind === "system") {
+          await host.openPath(absolutePath);
+          return;
+        }
+        await host.openInEditor(kind, absolutePath, line);
+      },
+      copy: (absolutePath) => clipboard(absolutePath),
+      reveal: (absolutePath) => host.revealItem(absolutePath),
+    };
+  }, [host, prefs, prefsVersion]);
+  /** 已安装的编辑器（设置页"打开文件用"只列检测到的；失败按都没装） */
+  const [editors, setEditors] = useState<{ vscode: boolean; cursor: boolean }>({
+    vscode: false,
+    cursor: false,
+  });
+  useEffect(() => {
+    let alive = true;
+    void host
+      .detectEditors()
+      .then((result) => {
+        if (alive) setEditors(result);
+      })
+      .catch(() => {
+        if (alive) setEditors({ vscode: false, cursor: false });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [host]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [chatsExpanded, setChatsExpanded] = useState(false);
@@ -852,6 +897,13 @@ export function App({ host }: { host: DesktopHost }) {
                   section={page}
                   client={pageClient}
                   theme={p.theme ?? "system"}
+                  fileOpener={p.fileOpener ?? "system"}
+                  editors={editors}
+                  onFileOpenerChange={(opener) => {
+                    prefs.update({ fileOpener: opener === "system" ? undefined : opener });
+                    bumpPrefs();
+                    return prefs.persistent;
+                  }}
                   workspace={effectiveWorkspace}
                   defaultWorkspace={defaultWorkspace}
                   workspaceOverridden={p.plainWorkspace !== undefined}
@@ -901,6 +953,7 @@ export function App({ host }: { host: DesktopHost }) {
                 session={active.session}
                 client={active.client}
                 prefs={prefs}
+                fileLinks={fileLinks}
                 images={images}
                 plainKey={plainKey}
                 home={home}
@@ -1069,6 +1122,8 @@ interface SessionPaneProps {
   session: RpcSession;
   client: RpcClient;
   prefs: PrefsStore;
+  /** 回答内文件引用的打开能力（U-09）；App 按 host + prefs 组装 */
+  fileLinks: FileLinkHooks | undefined;
   images: AttachmentImageSource;
   plainKey: string | null;
   home: string | null;
@@ -1093,6 +1148,7 @@ function SessionPane({
   session,
   client,
   prefs,
+  fileLinks,
   images,
   plainKey,
   home,
@@ -1176,6 +1232,7 @@ function SessionPane({
         images={images}
         busy={running}
         onResubmit={onResubmit}
+        fileLinks={fileLinks}
       />
       <Composer
         key={`composer:${session.id}`}

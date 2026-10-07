@@ -12,6 +12,7 @@ import {
 import { marked, type Token, type Tokens } from "marked";
 import {
   parseFileRefs,
+  splitCodeRef,
   type PendingPermission,
   type ImageAttachment,
   type PendingQuestion,
@@ -32,6 +33,7 @@ import type { RpcSession } from "@nocturne/rpc/client";
 import type { AttachmentImageSource } from "./attachment-images";
 import { isAllowedExternalUrl } from "./external-url";
 import { fileRefTitle, userText } from "./file-refs";
+import { Menu, MenuItem } from "./Menu";
 import { displayPath } from "./paths";
 import { useReasoning, type ReasoningMap } from "./reasoning";
 import "./conversation.css";
@@ -51,9 +53,46 @@ export interface ConversationProps {
   busy: boolean;
   /** 重发一条用户消息：先 rewind(targetSeq, mode) 再 submit（Conversations.resubmit） */
   onResubmit: (targetSeq: number, text: string, mode: RewindMode) => Promise<void>;
+  /**
+   * 回答内文件引用的打开能力（U-09，方案 A）：缺省时 codespan 保持普通
+   * 行内代码。历史助手消息传入，实时流式消息不传（流式中引用不完整）。
+   */
+  fileLinks?: FileLinkHooks | undefined;
+}
+
+/** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
+export interface FileLinkHooks {
+  /** 当前"打开文件用"设置：system（opener，不带行号）/ vscode / cursor */
+  opener: () => "system" | "vscode" | "cursor";
+  /** 该设置下点击引用的默认动作标签（菜单首项） */
+  openerLabel: () => string;
+  /** 按设置为默认动作打开文件（编辑器带行号，系统默认不带） */
+  open: (absolutePath: string, line?: number) => Promise<void>;
+  /** 复制绝对路径 */
+  copy: (absolutePath: string) => Promise<void>;
+  /** 在资源管理器中显示 */
+  reveal: (absolutePath: string) => Promise<void>;
 }
 
 type OpenUrl = ConversationProps["openUrl"];
+
+/**
+ * 回答内文件引用的解析结果（U-09）：codespan 文本经 splitCodeRef 拆出行号，
+ * 路径批量 resolveFiles 后按原文查表。value 为 undefined = 普通行内代码。
+ */
+export interface ResolvedCodeRef {
+  path: string;
+  line?: number | undefined;
+  endLine?: number | undefined;
+  absolutePath: string;
+  withinWorkspace: boolean;
+  exists: boolean;
+}
+
+const FileLinksContext = createContext<{
+  lookup: (codeText: string) => ResolvedCodeRef | undefined;
+  hooks: FileLinkHooks;
+} | null>(null);
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
 const inputOf = (entry: ToolEntry): Record<string, unknown> | undefined =>
   entry.input !== null && typeof entry.input === "object"
@@ -107,7 +146,7 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
       case "del":
         return <del key={key}>{markdownNodes((token as Tokens.Del).tokens, openUrl)}</del>;
       case "codespan":
-        return <code key={key}>{(token as Tokens.Codespan).text}</code>;
+        return <CodeRef key={key} text={(token as Tokens.Codespan).text} />;
       case "code": {
         const code = token as Tokens.Code;
         return (
@@ -214,11 +253,175 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
   });
 }
 
-function Markdown({ text: markdown, openUrl }: { text: string; openUrl: OpenUrl }) {
+function Markdown({
+  text: markdown,
+  openUrl,
+  session,
+  fileLinks,
+}: {
+  text: string;
+  openUrl: OpenUrl;
+  session?: RpcSession | undefined;
+  fileLinks?: FileLinkHooks | undefined;
+}) {
+  const [refs, setRefs] = useState<Map<string, ResolvedCodeRef> | null>(null);
+  useEffect(() => {
+    if (session === undefined || fileLinks === undefined) {
+      setRefs(null);
+      return;
+    }
+    let alive = true;
+    // 收集本消息 codespan 里的候选路径，一次批量 resolveFiles
+    const paths: string[] = [];
+    const seen = new Set<string>();
+    const collect = (tokens: readonly Token[]) => {
+      for (const token of tokens) {
+        if (token.type === "codespan") {
+          const split = splitCodeRef((token as Tokens.Codespan).text);
+          if (split !== undefined && !seen.has(split.path)) {
+            seen.add(split.path);
+            paths.push(split.path);
+          }
+        }
+        const inner = (token as { tokens?: readonly Token[] }).tokens;
+        if (inner !== undefined) collect(inner);
+        if (token.type === "table") {
+          for (const row of (token as Tokens.Table).rows) {
+            for (const cell of row) collect(cell.tokens);
+          }
+        }
+        if (token.type === "list") {
+          for (const item of (token as Tokens.List).items) collect(item.tokens);
+        }
+      }
+    };
+    collect(marked.lexer(markdown, { gfm: true }));
+    if (paths.length === 0) {
+      setRefs(new Map());
+      return;
+    }
+    session
+      .resolveFiles(paths)
+      .then((resolutions) => {
+        if (!alive) return;
+        const table = new Map<string, ResolvedCodeRef>();
+        for (const resolution of resolutions) {
+          const split = splitCodeRef(resolution.input);
+          // 原文查表：CodeRef 用 codespan 全文（含行号）查，这里按路径回填
+          table.set(resolution.input, {
+            path: resolution.input,
+            ...(split?.line !== undefined ? { line: split.line } : {}),
+            ...(split?.endLine !== undefined ? { endLine: split.endLine } : {}),
+            absolutePath: resolution.absolutePath,
+            withinWorkspace: resolution.withinWorkspace,
+            exists: resolution.exists,
+          });
+        }
+        setRefs(table);
+      })
+      .catch(() => {
+        if (alive) setRefs(new Map());
+      });
+    return () => {
+      alive = false;
+    };
+  }, [session, fileLinks, markdown]);
+  const lookup = useMemo(() => {
+    if (refs === null || fileLinks === undefined) return null;
+    return {
+      hooks: fileLinks,
+      lookup: (codeText: string): ResolvedCodeRef | undefined => {
+        const split = splitCodeRef(codeText);
+        if (split === undefined) return undefined;
+        const hit = refs.get(split.path);
+        if (hit?.exists !== true) return undefined;
+        return {
+          ...hit,
+          ...(split.line !== undefined ? { line: split.line } : {}),
+          ...(split.endLine !== undefined ? { endLine: split.endLine } : {}),
+        };
+      },
+    };
+  }, [refs, fileLinks]);
   return (
     <div className="conversation-markdown">
-      {markdownNodes(marked.lexer(markdown, { gfm: true }), openUrl)}
+      <FileLinksContext.Provider value={lookup}>
+        {markdownNodes(marked.lexer(markdown, { gfm: true }), openUrl)}
+      </FileLinksContext.Provider>
     </div>
+  );
+}
+
+/**
+ * 行内代码的文件引用（U-09）：存在且在工作区内 → 链接样式，点击开菜单
+ * （默认动作用编辑器打开、复制路径、资源管理器显示）；存在但在工作区外 →
+ * 同样链接样式，但菜单只有复制路径与资源管理器显示（不直接打开可执行文件）；
+ * 不存在 → 普通行内代码。
+ */
+function CodeRef({ text }: { text: string }) {
+  const context = useContext(FileLinksContext);
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (context === null) return <code>{text}</code>;
+  const hit = context.lookup(text);
+  if (hit === undefined) return <code>{text}</code>;
+  const canOpen = hit.withinWorkspace;
+  const run = (action: () => Promise<void>) => {
+    setAnchor(null);
+    void action().catch((e: unknown) => {
+      setError(e instanceof Error ? e.message : String(e));
+    });
+  };
+  return (
+    <>
+      <button
+        type="button"
+        className="file-ref-link"
+        title={hit.absolutePath}
+        onClick={(event) => {
+          setError(null);
+          setAnchor(event.currentTarget);
+        }}
+      >
+        <code>{text}</code>
+      </button>
+      {anchor !== null && (
+        <Menu
+          anchor={anchor}
+          label={text}
+          onClose={() => {
+            setAnchor(null);
+          }}
+        >
+          {canOpen && (
+            <MenuItem
+              label={`用 ${context.hooks.openerLabel()} 打开`}
+              detail={hit.line !== undefined ? `第 ${hit.line} 行` : undefined}
+              onSelect={() => {
+                run(() => context.hooks.open(hit.absolutePath, hit.line));
+              }}
+            />
+          )}
+          <MenuItem
+            label="复制路径"
+            onSelect={() => {
+              run(() => context.hooks.copy(hit.absolutePath));
+            }}
+          />
+          <MenuItem
+            label="在资源管理器中显示"
+            onSelect={() => {
+              run(() => context.hooks.reveal(hit.absolutePath));
+            }}
+          />
+        </Menu>
+      )}
+      {error !== null && (
+        <span className="file-ref-error" role="alert">
+          {error}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -1207,6 +1410,7 @@ function EntryView({
   busy,
   repliesAfter,
   onResubmit,
+  fileLinks,
 }: {
   entry: ViewEntry;
   openUrl: OpenUrl;
@@ -1218,6 +1422,7 @@ function EntryView({
   busy: boolean;
   repliesAfter: number;
   onResubmit: ConversationProps["onResubmit"];
+  fileLinks: ConversationProps["fileLinks"];
 }) {
   switch (entry.kind) {
     case "user":
@@ -1236,7 +1441,7 @@ function EntryView({
       return (
         <article className="a" aria-label="助手消息">
           <Think messageId={entry.messageId} text={entry.reasoning} parts={parts} now={now} />
-          <Markdown text={entry.text} openUrl={openUrl} />
+          <Markdown text={entry.text} openUrl={openUrl} session={session} fileLinks={fileLinks} />
           {entry.finishReason === "aborted" ? (
             <p className="conversation-review">回复已中断</p>
           ) : null}
@@ -1632,6 +1837,7 @@ function ConversationContent({
   images,
   busy,
   onResubmit,
+  fileLinks,
 }: ConversationProps) {
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -1741,6 +1947,7 @@ function ConversationContent({
                 busy={busy}
                 repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
                 onResubmit={onResubmit}
+                fileLinks={fileLinks}
               />
             ))}
             {view.live.assistants.map((assistant) => (

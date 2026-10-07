@@ -107,17 +107,25 @@ it("importSkills 参数校验：mode/target/action 非法 → -32602", async () 
   const h = await connectWithConfig();
   try {
     await expect(
-      h.client.call("skills.importSkills", { mode: "bogus", sourceDir: "x", target: "user" }),
+      h.client.call("skills.importSkills", {
+        mode: "bogus",
+        sourceDir: "x",
+        target: "user",
+      } as never),
     ).rejects.toMatchObject({ rpcCode: -32602 });
     await expect(
-      h.client.call("skills.importSkills", { mode: "preview", sourceDir: "x", target: "vault" }),
+      h.client.call("skills.importSkills", {
+        mode: "preview",
+        sourceDir: "x",
+        target: "vault",
+      } as never),
     ).rejects.toMatchObject({ rpcCode: -32602 });
     await expect(
       h.client.call("skills.importSkills", {
         mode: "commit",
         target: "user",
         decisions: [{ sourcePath: "x", action: "merge" }],
-      }),
+      } as never),
     ).rejects.toMatchObject({ rpcCode: -32602 });
     await expect(
       h.client.call("skills.importSkills", { mode: "commit", target: "user", decisions: [] }),

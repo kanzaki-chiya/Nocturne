@@ -27,6 +27,11 @@ export interface Prefs {
   plainWorkspaces: string[];
   /** 自动检查更新（默认开；只有显式 false 才关闭） */
   autoUpdate?: boolean | undefined;
+  /**
+   * 回答内文件引用"打开文件用"（U-09）：系统默认程序 / VS Code / Cursor。
+   * 存应用数据（localStorage），不进 settings.json；缺省 system。
+   */
+  fileOpener?: "system" | "vscode" | "cursor" | undefined;
   /** 上次检查更新的时间戳 ms；自动与手动检查都计入 24h 节流 */
   lastUpdateCheck?: number | undefined;
   /** 上次检查发现的新版本；「稍后」只清本次运行，重启后若仍比当前新则继续提示 */
@@ -85,6 +90,9 @@ function parse(raw: string | null): Prefs {
   const plainWorkspaces = strings(obj.plainWorkspaces);
   if (plainWorkspaces !== undefined) prefs.plainWorkspaces = plainWorkspaces;
   if (typeof obj.autoUpdate === "boolean") prefs.autoUpdate = obj.autoUpdate;
+  if (obj.fileOpener === "system" || obj.fileOpener === "vscode" || obj.fileOpener === "cursor") {
+    prefs.fileOpener = obj.fileOpener;
+  }
   if (typeof obj.lastUpdateCheck === "number" && Number.isFinite(obj.lastUpdateCheck)) {
     prefs.lastUpdateCheck = obj.lastUpdateCheck;
   }
@@ -127,6 +135,7 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         ...(prefs.theme !== undefined ? { theme: prefs.theme } : {}),
         ...(prefs.plainWorkspace !== undefined ? { plainWorkspace: prefs.plainWorkspace } : {}),
         ...(prefs.autoUpdate !== undefined ? { autoUpdate: prefs.autoUpdate } : {}),
+        ...(prefs.fileOpener !== undefined ? { fileOpener: prefs.fileOpener } : {}),
         ...(prefs.lastUpdateCheck !== undefined ? { lastUpdateCheck: prefs.lastUpdateCheck } : {}),
         ...(prefs.pendingUpdate !== undefined ? { pendingUpdate: { ...prefs.pendingUpdate } } : {}),
       };

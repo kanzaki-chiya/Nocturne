@@ -260,6 +260,13 @@ Rust 外壳提供四个 Tauri 命令，前端用它们实现 `LineTransport`：
 - **RPC 形状**：上一条说"保存走已有的 `saveSetupProvider` replace 模式"——Core 侧确实如此（`updateSetupProvider` 读条目、合 patch、经 `saveSetupProvider` replace 落盘，凭据保留在凭据存储）。但 RPC 层新增了三个独立方法（`provider.describeSetupProvider` 预填、`provider.probeSetupProviderModels` 候选探测、`provider.updateSetupProvider` 提交），而不是复用 `prepare/commit` 草稿流程：编辑不需要草稿生命周期，`parseUpdatePatch` 逐字段校验、`mutateAndReload` 触发重载与通知。
 - **探测失败的「仍然保存」不带新清单**：与添加流程一致，但语义是"保留原模型列表"（`patch.models` 缺省），不是清空。
 
+### 2026-10-07：U-09 实现与修订的出入
+
+- **工作区外存在的文件也给链接样式**：修订说"只有能在当前工作区内解析到存在的文件时才渲染成链接样式"。实现是：工作区外**存在**的文件同样渲染链接样式，但点击菜单只有「复制路径」和「在资源管理器中显示」，没有「打开」项——否则这条路径连复制入口都没有。不存在的文件保持普通行内代码。直接打开可执行文件的风险仍被挡住（opener/`code` 都碰不到它）。
+- **存在性接口是 session 级批量只读**：`session.resolveFiles({ paths })` 按会话工作区解析（相对路径相对工作区），一次查完一整条消息的候选，不产生事件。行号解析在前端（`splitCodeRef` 从尾部剥 `:行[-行]`，Windows 盘符冒号不受影响），不进后台。
+- **编辑器打开走两个新外壳命令**：系统默认程序与资源管理器显示复用 opener 插件的 JS API（`openPath`/`revealItemInDir`，无新增插件）；VS Code/Cursor 带行号启动走新增 Rust 命令 `open_in_editor`（`code/cursor -g file:line`），是否安装走 `detect_editors`（只查 PATH 与默认安装位置，不启动进程）。capability `main` 加两条 allow；构建配置其余不变。
+- **流式实时回复不链接化**：流式中引用不完整，只对落盘历史消息解析。
+
 ### 2026-10-07：改为单后台（ADR-0051）
 
 第 1 节「一个项目一个后台，打开会话时才启动」、修订「启动即有一个后台」中「项目的后台仍按原规则启动」，以及备选方案里否决「一个后台服务所有项目」的理由，由 [ADR-0051](ADR-0051-desktop-single-backend.md) 取代：桌面端只保留以普通对话工作区为 cwd 的常驻后台，所有会话在其中创建和恢复，工作区随会话。崩溃恢复流程不变，范围扩大到全部打开的会话。

@@ -156,6 +156,16 @@ describe("session.* 方法映射", () => {
     expect(await session.shellInfo()).toMatchObject({ selected: expect.any(String) });
     expect(await session.mcpServers()).toEqual([]);
     expect((await session.fileIndex()).map((e) => e.path)).toContain("a.txt");
+    expect(await session.resolveFiles(["a.txt", "missing.txt"])).toMatchObject([
+      { input: "a.txt", withinWorkspace: true, exists: true, isDirectory: false },
+      { input: "missing.txt", withinWorkspace: true, exists: false },
+    ]);
+    await expect(
+      h.client.call("session.resolveFiles", {
+        sessionId: session.id,
+        paths: "x" as never,
+      }),
+    ).rejects.toMatchObject({ rpcCode: -32602 });
 
     expect(await session.readInputHistory()).toEqual([]);
     await session.recordInputHistory("第一条");

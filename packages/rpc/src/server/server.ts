@@ -1270,6 +1270,13 @@ class Connection {
       "session.visionInfo": (p) => this.session(p).session.visionInfo(),
       "session.mcpServers": (p) => this.session(p).session.mcpServers(),
       "session.fileIndex": (p) => this.session(p).session.fileIndex(),
+      "session.resolveFiles": (p) => {
+        const paths: unknown = p.paths;
+        if (!Array.isArray(paths) || paths.some((item: unknown) => typeof item !== "string")) {
+          throw new InvalidParamsError("paths 必须是非空字符串数组");
+        }
+        return this.session(p).session.resolveFiles(paths as string[]);
+      },
       "session.readInputHistory": (p) => this.session(p).session.readInputHistory(),
       "session.recordInputHistory": async (p) => {
         await this.session(p).session.recordInputHistory(reqString(p, "text"));

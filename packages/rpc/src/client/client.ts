@@ -24,6 +24,7 @@ import type {
   AddProviderResult,
   CreateSessionOptions,
   FileIndexEntry,
+  FileRefResolution,
   JevEndpoint,
   JevReviewerConfig,
   ModelInfo,
@@ -163,6 +164,11 @@ export interface RpcSession {
   visionInfo(): Promise<RpcResult<"session.visionInfo">>;
   mcpServers(): Promise<RpcResult<"session.mcpServers">>;
   fileIndex(): Promise<FileIndexEntry[]>;
+  /**
+   * 回答内文件引用存在性检查（U-09，方案 A）：只读，按工作区解析路径。
+   * 越界路径照常返回绝对路径与 exists，由客户端决定入口。
+   */
+  resolveFiles(paths: string[]): Promise<FileRefResolution[]>;
   readInputHistory(): Promise<string[]>;
   recordInputHistory(text: string): Promise<void>;
   close(): Promise<void>;
@@ -528,6 +534,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       describeSkills: () => call("session.describeSkills", p),
       describeExternalAgents: () => call("session.describeExternalAgents", p),
       fileIndex: () => call("session.fileIndex", p),
+      resolveFiles: (paths) => call("session.resolveFiles", { ...p, paths }),
       readInputHistory: () => call("session.readInputHistory", p),
       recordInputHistory: async (text) => {
         await call("session.recordInputHistory", { ...p, text });

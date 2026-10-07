@@ -320,6 +320,30 @@
   color: var(--a-accentAlt);
   text-underline-offset: 3px;
 }
+/* 回答内文件引用（U-09）：存在的文件才渲染成链接样式，深浅主题同色 */
+.conversation-markdown .file-ref-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--a-accentAlt);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font: inherit;
+}
+.conversation-markdown .file-ref-link > code {
+  background: var(--a-raised);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.conversation-markdown .file-ref-link:hover > code {
+  background: var(--a-selStrong);
+}
+.conversation-markdown .file-ref-error {
+  color: var(--a-error);
+  font-size: 12px;
+  margin-left: 6px;
+}
 .conversation-markdown :not(pre) > code {
   background: var(--a-raised);
   border-radius: 3px;

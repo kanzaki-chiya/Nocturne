@@ -94,11 +94,14 @@ export function SettingsPage({
   section,
   client,
   theme,
+  fileOpener,
+  editors,
   workspace,
   defaultWorkspace,
   workspaceOverridden,
   update,
   onThemeChange,
+  onFileOpenerChange,
   onWorkspaceChange,
   pickFolder,
   providersVersion,
@@ -108,6 +111,10 @@ export function SettingsPage({
   section: SettingsPageSection;
   client: RpcClient | undefined;
   theme: ThemePref;
+  /** 回答内文件引用"打开文件用"（本机 prefs，不进 Core） */
+  fileOpener: "system" | "vscode" | "cursor";
+  /** 已安装的编辑器（只列检测到的） */
+  editors: { vscode: boolean; cursor: boolean };
   /** 生效的普通对话工作区（prefs 覆盖 ?? 默认） */
   workspace: string | null;
   /** 外壳 plain_workspace 默认路径（恢复默认用） */
@@ -125,6 +132,8 @@ export function SettingsPage({
   };
   /** 只写本机 prefs；返回 false 表示写不进存储 */
   onThemeChange: (theme: ThemePref) => boolean;
+  /** 只写本机 prefs；返回 false 表示写不进存储 */
+  onFileOpenerChange: (opener: "system" | "vscode" | "cursor") => boolean;
   /** 切换普通对话工作区（null = 恢复默认）；返回错误文案或 undefined（成功） */
   onWorkspaceChange: (dir: string | null) => Promise<string | undefined>;
   pickFolder: () => Promise<string | null>;
@@ -415,6 +424,35 @@ export function SettingsPage({
               </span>
               <span className="src">本机</span>
               {errLine("workspace")}
+            </div>
+            <h5>文件</h5>
+            <div className={rowClass("fileOpener")}>
+              <span className="n">
+                打开文件用<small>回答里的文件引用点开时用哪个程序</small>
+              </span>
+              <span className="v">
+                <Dropdown
+                  label="打开文件用"
+                  value={fileOpener}
+                  options={[
+                    { value: "system", label: "系统默认程序", description: "不带行号" },
+                    ...(editors.vscode
+                      ? [{ value: "vscode", label: "VS Code", description: "带行号跳转" }]
+                      : []),
+                    ...(editors.cursor
+                      ? [{ value: "cursor", label: "Cursor", description: "带行号跳转" }]
+                      : []),
+                  ]}
+                  onChange={(value) => {
+                    if (value !== "system" && value !== "vscode" && value !== "cursor") return;
+                    const ok = onFileOpenerChange(value);
+                    setRowErr("fileOpener", ok ? null : "本机存储不可写，设置只在本次运行内生效");
+                    showToast(`已保存 打开文件用 = ${value}`);
+                  }}
+                />
+              </span>
+              <span className="src">本机</span>
+              {errLine("fileOpener")}
             </div>
           </>
         )}

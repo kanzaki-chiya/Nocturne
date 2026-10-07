@@ -3,6 +3,7 @@
 //! `@nocturne/rpc/client` 处理。
 
 mod backend;
+mod editor;
 mod images;
 mod job;
 mod lines;
@@ -54,6 +55,8 @@ pub fn run() {
         backend::shell_log,
         images::pick_images,
         workspace::open_skill_directory,
+        editor::detect_editors,
+        editor::open_in_editor,
     ];
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
