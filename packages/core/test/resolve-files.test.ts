@@ -2,7 +2,7 @@
  * 回答内文件引用（U-09）：splitCodeRef 拆分行号、session.resolveFiles
  * 按工作区解析存在性。只读，不产生事件。
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -59,7 +59,8 @@ describe("session.resolveFiles", () => {
       ]);
       expect(hit).toMatchObject({ withinWorkspace: true, exists: true, isDirectory: false });
       expect(path.normalize(hit?.absolutePath ?? "")).toBe(
-        path.normalize(path.join(ws, "src", "a.ts")),
+        // 工作区根取 realpath：Git Bash 下 TEMP 是 8.3 短路径（ADMINI~1）
+        path.normalize(path.join(realpathSync.native(ws), "src", "a.ts")),
       );
       expect(miss).toMatchObject({ withinWorkspace: true, exists: false });
       expect(outside?.withinWorkspace).toBe(false);
