@@ -2,11 +2,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import {
-  openPath as tauriOpenPath,
-  openUrl as tauriOpenUrl,
-  revealItemInDir as tauriReveal,
-} from "@tauri-apps/plugin-opener";
+import { openUrl as tauriOpenUrl, revealItemInDir as tauriReveal } from "@tauri-apps/plugin-opener";
 import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 
@@ -27,7 +23,10 @@ export function createTauriHost(): DesktopHost {
       if (!isAllowedExternalUrl(url)) return;
       await tauriOpenUrl(url);
     },
-    openPath: (path) => tauriOpenPath(path),
+    // 经外壳命令：会直接执行的文件类型改为在资源管理器中显示（editor.rs）
+    async openPath(path) {
+      await invoke("open_with_default", { path });
+    },
     revealItem: (path) => tauriReveal(path),
     async detectEditors() {
       try {

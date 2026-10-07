@@ -24,7 +24,10 @@ export interface DesktopHost {
   createChannel: (onMessage: (m: BackendMessage) => void) => unknown;
   /** 用系统浏览器打开链接（实现里先过 isAllowedExternalUrl） */
   openUrl: (url: string) => Promise<void>;
-  /** 用系统默认程序打开文件（Tauri opener 插件，不带行号） */
+  /**
+   * 用系统默认程序打开文件（Rust 命令 open_with_default，不带行号）；
+   * 脚本、可执行文件等会被直接执行的类型改为在资源管理器中显示
+   */
   openPath: (path: string) => Promise<void>;
   /** 在资源管理器中显示文件/目录（opener reveal） */
   revealItem: (path: string) => Promise<void>;

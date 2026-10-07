@@ -46,7 +46,9 @@
         }
       ]
     },
+    "opener:allow-reveal-item-in-dir",
     "allow-detect-editors",
-    "allow-open-in-editor"
+    "allow-open-in-editor",
+    "allow-open-with-default"
   ]
 }

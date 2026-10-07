@@ -57,6 +57,7 @@ pub fn run() {
         workspace::open_skill_directory,
         editor::detect_editors,
         editor::open_in_editor,
+        editor::open_with_default,
     ];
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

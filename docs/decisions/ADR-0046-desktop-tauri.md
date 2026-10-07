@@ -270,3 +270,7 @@ Rust 外壳提供四个 Tauri 命令，前端用它们实现 `LineTransport`：
 ### 2026-10-07：改为单后台（ADR-0051）
 
 第 1 节「一个项目一个后台，打开会话时才启动」、修订「启动即有一个后台」中「项目的后台仍按原规则启动」，以及备选方案里否决「一个后台服务所有项目」的理由，由 [ADR-0051](ADR-0051-desktop-single-backend.md) 取代：桌面端只保留以普通对话工作区为 cwd 的常驻后台，所有会话在其中创建和恢复，工作区随会话。崩溃恢复流程不变，范围扩大到全部打开的会话。
+
+### 2026-10-08：文件引用的系统默认打开改走外壳命令
+
+0.7.0 的 U-09 实现漏授 `opener:allow-open-path` 与 `opener:allow-reveal-item-in-dir`，点击文件引用菜单报 "not allowed by ACL"。补授权时发现「系统默认程序」直接对工作区文件调用 opener，`.bat`、`.ps1`、`.py` 等按系统默认方式打开就是执行。改为新增外壳命令 `open_with_default`：脚本与可执行类型改为在资源管理器中显示，其余交给系统默认程序；capability 只加 `opener:allow-reveal-item-in-dir` 与 `allow-open-with-default`，不授予 `opener:allow-open-path`。上一条修订中"系统默认程序复用 opener 插件的 JS API `openPath`"一句由此取代。

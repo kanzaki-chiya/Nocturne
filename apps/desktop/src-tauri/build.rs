@@ -13,6 +13,7 @@ fn main() {
             "open_skill_directory",
             "detect_editors",
             "open_in_editor",
+            "open_with_default",
         ]),
     ))
     .expect("failed to run tauri-build");
