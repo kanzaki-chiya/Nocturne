@@ -442,13 +442,37 @@
 .conversation .tool-details {
   min-width: 0;
 }
+/* 展开区与正文拉开：外层卡片（--a-side）装标题行，内层框（--a-input）
+   装命令/参数/结果 payload；两套色板下文字都读 --a-secondary/--a-text */
+.conversation .tool-details[open],
+.conversation .conversation-tool-progress,
+.conversation .conversation-tool-error {
+  background: var(--a-side);
+  border: 1px solid var(--a-border);
+  border-radius: 9px;
+}
 .conversation .tool-details[open] {
   margin-bottom: 6px;
+  padding: 3px 10px 8px;
+}
+.conversation .conversation-tool-progress,
+.conversation .conversation-tool-error {
+  padding: 0 10px 4px;
+}
+.conversation .tool-details > pre,
+.conversation .tool-details details > pre,
+.conversation .conversation-subjects,
+.conversation .conversation-tool-progress pre,
+.conversation .conversation-tool-error pre {
+  background: var(--a-input);
+  border: 1px solid var(--a-border);
+  border-radius: 7px;
+  padding: 7px 9px;
 }
 .conversation-subjects {
   font: 12px/1.6 var(--mono);
   list-style: none;
-  padding: 0;
+  padding: 7px 9px;
   margin: 6px 0;
   overflow-wrap: anywhere;
 }
