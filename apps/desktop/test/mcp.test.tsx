@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { McpPage } from "../src/McpPage";
 import { parseMcpImport } from "../src/mcp-import";
-import { fakeServer, withInit } from "./fake-server";
+import { RpcFail, fakeServer, withInit } from "./fake-server";
 
 afterEach(cleanup);
 describe("MCP JSON 导入", () => {
@@ -223,6 +223,60 @@ describe("MCP 设置页", () => {
       secrets: { Authorization: "test-token-123" },
     });
     expect(screen.getByRole("status").textContent).toContain("本轮结束后");
+    f.close();
+  });
+  it.each(["启用", "删除", "保存"])("%s失败后显示错误并重新拉取列表", async (action) => {
+    const fail = () => new RpcFail(-32000, "配置未能应用到会话");
+    const f = fakeServer(
+      withInit({
+        "mcp.describeMcpServers": {
+          servers: [
+            {
+              id: "managed",
+              origin: "app",
+              editable: true,
+              trusted: true,
+              path: "home/mcp.json",
+              transport: "stdio",
+              enabled: true,
+              command: "node",
+              args: [],
+              env: [],
+              startupTimeoutMs: 15000,
+              callTimeoutMs: 60000,
+            },
+          ],
+          warnings: [],
+        },
+        "provider.describeProviderSetup": { credential: { backend: { available: true } } },
+        "mcp.setMcpServerEnabled": fail,
+        "mcp.deleteMcpServer": fail,
+        "mcp.saveMcpServer": fail,
+      }),
+    );
+    await f.initialize();
+    render(
+      <McpPage
+        client={f.client}
+        workspaceRoot={undefined}
+        version={0}
+        onChanged={() => undefined}
+      />,
+    );
+    await screen.findByRole("heading", { name: "managed" });
+    const lists = () => f.calls.filter((call) => call.method === "mcp.describeMcpServers").length;
+    expect(lists()).toBe(1);
+    if (action === "启用") fireEvent.click(screen.getByRole("switch"));
+    else if (action === "删除") {
+      fireEvent.click(screen.getByRole("button", { name: "删除" }));
+      const buttons = screen.getAllByRole("button", { name: "删除" });
+      fireEvent.click(buttons[buttons.length - 1] as HTMLElement);
+    } else {
+      fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    }
+    await waitFor(() => expect(lists()).toBe(2));
+    expect(screen.getByText(/配置未能应用到会话/)).toBeDefined();
     f.close();
   });
 });

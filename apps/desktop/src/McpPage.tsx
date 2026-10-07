@@ -208,6 +208,7 @@ export function McpPage({
                 setSelected(id);
                 finish();
               }}
+              onSaveFailed={() => void refresh()}
             />
           ) : current ? (
             <>
@@ -228,6 +229,8 @@ export function McpPage({
                         .then(() => changed(current.enabled ? "已停用" : "已启用"))
                         .catch((e: unknown) => {
                           setError(message(e));
+                          // 失败时磁盘上的配置可能已改，列表重新拉取
+                          void refresh();
                         })
                         .finally(() => {
                           setBusy(false);
@@ -397,6 +400,8 @@ export function McpPage({
                     })
                     .catch((e: unknown) => {
                       setError(message(e));
+                      // 失败时磁盘上的配置可能已改，列表重新拉取
+                      void refresh();
                     })
                     .finally(() => {
                       setBusy(false);
@@ -455,6 +460,7 @@ function McpForm({
   workspaceRoot,
   onCancel,
   onSaved,
+  onSaveFailed,
 }: {
   client: RpcClient;
   draft: McpDraft;
@@ -463,6 +469,8 @@ function McpForm({
   workspaceRoot: string | undefined;
   onCancel: () => void;
   onSaved: (id: string) => Promise<void>;
+  /** 保存失败：磁盘上的配置可能已改，由父级重新拉取列表 */
+  onSaveFailed: () => void;
 }) {
   const [id, setId] = useState(draft.id);
   const [type, setType] = useState(draft.config.type ?? "stdio");
@@ -545,6 +553,7 @@ function McpForm({
         );
     } catch (e) {
       setError({ field: e instanceof RpcError ? e.field : undefined, message: message(e) });
+      if (save) onSaveFailed();
     } finally {
       setBusy(false);
     }
