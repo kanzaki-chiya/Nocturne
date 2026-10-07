@@ -19,6 +19,8 @@ import {
   prepareProvider,
   commitProvider,
   createRuntime,
+  probeSetupProviderModels,
+  updateSetupProvider,
   type RuntimeOptions,
 } from "../src/index.js";
 import { createPlatform, type PipeProcess, type Platform } from "../src/platform/index.js";
@@ -999,5 +1001,202 @@ describe("名称唯一性（真实分层）", () => {
       providers: { id: string }[];
     };
     expect(raw.providers.map((p) => p.id)).toEqual(["MyCorp"]);
+  });
+});
+
+// ── 编辑自定义服务商（U-07，ADR-0046 修订） ──────────────
+describe("编辑自定义服务商（U-07）", () => {
+  async function fresh() {
+    const credentials = (await createCredentialStore(platform, home, { backend: "memory" })).store;
+    const rc = await loadConfig(platform, { nocturneHome: home, env: noEnv, credentials });
+    rc.refreshModelsDev = async () => undefined;
+    return { rc, credentials };
+  }
+
+  const CUSTOM: ProviderEntryConfig = {
+    id: "corp",
+    type: "openai-compatible",
+    baseURL: "https://api.corp.test/v1",
+    displayName: "Corp AI",
+    headers: { "X-Team": "core" },
+    sessionHeader: "X-Session",
+    models: { m1: { contextWindow: 200_000 } },
+    source: "upstream",
+    fetchedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  it("describeSetupProvider 返回条目（无凭据）；config.json 条目与未知 id 返回 undefined", async () => {
+    const { rc } = await fresh();
+    await rc.saveSetupProvider(CUSTOM, { key: "sk-secret" });
+    const entry = await rc.describeSetupProvider("corp");
+    expect(entry).toMatchObject({
+      id: "corp",
+      displayName: "Corp AI",
+      baseURL: "https://api.corp.test/v1",
+      headers: { "X-Team": "core" },
+      sessionHeader: "X-Session",
+    });
+    expect(JSON.stringify(entry)).not.toContain("sk-secret");
+
+    await writeJson(path.join(home, "config.json"), {
+      providers: [{ id: "confp", type: "openai-compatible", baseURL: "https://x.test/v1" }],
+    });
+    expect(await rc.describeSetupProvider("confp")).toBeUndefined();
+    expect(await rc.describeSetupProvider("ghost")).toBeUndefined();
+  });
+
+  it("非向导条目与内置预设条目拒绝编辑", async () => {
+    const { rc } = await fresh();
+    await writeJson(path.join(home, "config.json"), {
+      providers: [{ id: "confp", type: "openai-compatible", baseURL: "https://x.test/v1" }],
+    });
+    await expect(updateSetupProvider(rc, "confp", { displayName: "x" })).rejects.toMatchObject({
+      field: "providerId",
+    });
+
+    // 内置预设写出的条目：id 与地址同 preset 一致 → 地址/协议由程序维护
+    await rc.saveSetupProvider({
+      id: "deepseek",
+      type: "openai-compatible",
+      baseURL: "https://api.deepseek.com/v1",
+      models: {},
+    });
+    await expect(updateSetupProvider(rc, "deepseek", { displayName: "x" })).rejects.toMatchObject({
+      field: "preset",
+    });
+  });
+
+  it("字段校验：openai 空地址 / 非法请求头名 / 空头值，失败时文件不动", async () => {
+    const { rc } = await fresh();
+    await rc.saveSetupProvider(CUSTOM);
+    await expect(updateSetupProvider(rc, "corp", { baseURL: " " })).rejects.toMatchObject({
+      field: "baseURL",
+    });
+    await expect(
+      updateSetupProvider(rc, "corp", { headers: { "bad name": "v" } }),
+    ).rejects.toMatchObject({ field: "headers" });
+    await expect(
+      updateSetupProvider(rc, "corp", { headers: { "X-A": " " } }),
+    ).rejects.toMatchObject({ field: "headers" });
+    const entry = await rc.describeSetupProvider("corp");
+    expect(entry?.baseURL).toBe("https://api.corp.test/v1");
+    expect(entry?.headers).toEqual({ "X-Team": "core" });
+  });
+
+  it("替换保存：字段更新、凭据保留、未提供的字段与模型列表保留原值", async () => {
+    const { rc, credentials } = await fresh();
+    await rc.saveSetupProvider(CUSTOM, { key: "sk-secret" });
+    const result = await updateSetupProvider(rc, "corp", {
+      displayName: "新名字",
+      baseURL: "https://api.corp.test/v2",
+      headers: { "X-Team": "platform" },
+      sessionHeader: "",
+    });
+    expect(result.providerId).toBe("corp");
+    const entry = await rc.describeSetupProvider("corp");
+    expect(entry).toMatchObject({
+      id: "corp",
+      displayName: "新名字",
+      type: "openai-compatible",
+      baseURL: "https://api.corp.test/v2",
+      headers: { "X-Team": "platform" },
+      source: "upstream",
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(entry?.sessionHeader).toBeUndefined();
+    // models 未提供 → 保留（连同逐模型用户编辑机制，由 saveSetupProvider 负责）
+    expect(entry?.models).toEqual(CUSTOM.models);
+    // 凭据仍在凭据存储，且不落进 providers.json
+    expect(await credentials.get("corp")).toBe("sk-secret");
+    expect(await fs.readFile(path.join(home, "providers.json"), "utf8")).not.toContain("sk-secret");
+  });
+
+  it("提供探测结果时随条目更新 models/source/fetchedAt", async () => {
+    const { rc } = await fresh();
+    await rc.saveSetupProvider(CUSTOM);
+    const result = await updateSetupProvider(rc, "corp", {
+      models: [
+        { id: "n1", contextWindow: 100, capabilities: { reasoning: "visible" } },
+        { id: "n2" },
+      ],
+    });
+    expect(result.modelCount).toBe(2);
+    const entry = await rc.describeSetupProvider("corp");
+    expect(Object.keys(entry?.models ?? {})).toEqual(["n1", "n2"]);
+    expect(entry?.models?.n1).toMatchObject({
+      contextWindow: 100,
+      capabilities: { reasoning: "visible" },
+    });
+    expect(entry?.source).toBe("upstream");
+    expect(entry?.fetchedAt).not.toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  it("displayName 空串清除显示名", async () => {
+    const { rc } = await fresh();
+    await rc.saveSetupProvider(CUSTOM);
+    await updateSetupProvider(rc, "corp", { displayName: "" });
+    expect((await rc.describeSetupProvider("corp"))?.displayName).toBeUndefined();
+  });
+
+  it("probe 用候选配置取模型：凭据解析自凭据存储，providers.json 不变", async () => {
+    const { rc } = await fresh();
+    await rc.saveSetupProvider(CUSTOM, { key: "sk-secret" });
+    const calls: { req: Record<string, unknown>; key: string | undefined }[] = [];
+    const models = await probeSetupProviderModels(
+      rc,
+      {
+        providerId: "corp",
+        type: "openai-compatible",
+        baseURL: "https://api.corp.test/v9",
+        headers: { "X-New": "1" },
+      },
+      {
+        fetchModels: async (req, key) => {
+          calls.push({ req: req as Record<string, unknown>, key });
+          return [{ id: "pm1" }];
+        },
+      },
+    );
+    expect(models).toEqual([{ id: "pm1" }]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.key).toBe("sk-secret");
+    expect(calls[0]?.req).toMatchObject({
+      id: "corp",
+      type: "openai-compatible",
+      baseURL: "https://api.corp.test/v9",
+      headers: { "X-New": "1" },
+    });
+    // 探测不落盘
+    expect((await rc.describeSetupProvider("corp"))?.baseURL).toBe("https://api.corp.test/v1");
+  });
+
+  it("probe 凭据解析顺序：apiKeyEnv 环境变量优先，缺省回落凭据存储；headers 缺省用条目值", async () => {
+    const { rc } = await fresh();
+    await rc.saveSetupProvider({ ...CUSTOM, apiKeyEnv: "CORP_KEY" }, { key: "sk-store" });
+    const seen: { key: string | undefined; headers: unknown }[] = [];
+    const fetchModels = async (req: { headers?: Record<string, string> }, key?: string) => {
+      seen.push({ key, headers: req.headers });
+      return [];
+    };
+    await probeSetupProviderModels(
+      rc,
+      { providerId: "corp", type: "openai-compatible" },
+      { fetchModels, env: (n) => (n === "CORP_KEY" ? "sk-env" : undefined) },
+    );
+    expect(seen[0]?.key).toBe("sk-env");
+    expect(seen[0]?.headers).toEqual({ "X-Team": "core" });
+    await probeSetupProviderModels(
+      rc,
+      { providerId: "corp", type: "openai-compatible" },
+      { fetchModels, env: noEnv },
+    );
+    expect(seen[1]?.key).toBe("sk-store");
+  });
+
+  it("probe 拒绝非向导条目", async () => {
+    const { rc } = await fresh();
+    await expect(
+      probeSetupProviderModels(rc, { providerId: "ghost", type: "openai-compatible" }),
+    ).rejects.toMatchObject({ field: "providerId" });
   });
 });

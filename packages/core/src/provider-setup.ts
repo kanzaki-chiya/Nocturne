@@ -25,7 +25,17 @@ import { dropPendingLogin, findPendingLogin } from "./provider-login/pending.js"
 
 /** 表单字段名；校验失败的错误带它，客户端据此标到对应输入框 */
 export type ProviderSetupFieldName =
-  "preset" | "name" | "baseURL" | "sessionHeader" | "credential" | "modelId" | "draftId";
+  | "preset"
+  | "name"
+  | "baseURL"
+  | "sessionHeader"
+  | "credential"
+  | "modelId"
+  | "draftId"
+  | "providerId"
+  | "type"
+  | "headers"
+  | "displayName";
 
 export class ProviderSetupError extends Error {
   constructor(
@@ -785,6 +795,198 @@ function summarizeModel(m: UpstreamModelEntry): PreparedModelSummary {
     ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
     ...(m.maxOutputTokens !== undefined ? { maxOutputTokens: m.maxOutputTokens } : {}),
   };
+}
+
+/* ---------------- 编辑自定义服务商（ADR-0046 修订，U-07） ---------------- */
+
+/**
+ * 编辑对话框的可改字段。服务商 id 锁定（会话、最近模型、默认模型都按它
+ * 引用）；密钥不在这里修改（仍走 setCredential）。未提供的字段保留原值。
+ */
+export interface UpdateSetupProviderPatch {
+  /** 显示名：undefined 保留，空串清除，其余写入条目 displayName */
+  displayName?: string | undefined;
+  /** undefined 保留，空串清除（仅 anthropic 允许，回落官方端点），其余替换 */
+  baseURL?: string | undefined;
+  /** 协议（适配器类型）；缺省保留 */
+  type?: "openai-compatible" | "anthropic" | undefined;
+  /** 自定义请求头：undefined 保留，空表清除，其余整表替换 */
+  headers?: Record<string, string> | undefined;
+  /** 会话标识请求头名：undefined 保留，空串清除 */
+  sessionHeader?: string | undefined;
+  /**
+   * 编辑时以候选配置新获取的模型列表（probeSetupProviderModels 的结果）；
+   * 提供时随条目更新 models/source/fetchedAt，缺省保留原清单。
+   */
+  models?: UpstreamModelEntry[] | undefined;
+}
+
+export interface UpdateSetupProviderResult {
+  providerId: string;
+  /** 保存后条目声明的模型数 */
+  modelCount: number;
+  message: string;
+}
+
+/**
+ * 内置预设写出的条目（id 与 preset.defaultName 一致且地址仍是预设地址）：
+ * 地址/协议由程序维护，编辑入口只对自定义条目开放。自定义服务商的名称由
+ * 用户起、地址必填（custom-anthropic 可留官方端点），不会与内置条目同形。
+ */
+function isPresetMaintainedEntry(entry: ProviderEntryConfig): boolean {
+  return listProviderPresets().some(
+    (preset) =>
+      preset.defaultName !== "" &&
+      preset.defaultName === entry.id &&
+      preset.baseURL === entry.baseURL,
+  );
+}
+
+const HEADER_NAME_RE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+/**
+ * 编辑自定义服务商（U-07）：只允许 providers.json 里的自定义条目；内置
+ * 预设条目与高层只读条目拒绝。保存走 saveSetupProvider 的 replace 模式
+ * （逐模型用户编辑由它自动保留）。
+ */
+export async function updateSetupProvider(
+  config: RuntimeConfig,
+  providerId: string,
+  patch: UpdateSetupProviderPatch,
+): Promise<UpdateSetupProviderResult> {
+  const entry = await config.describeSetupProvider(providerId);
+  if (entry === undefined) {
+    throw new ProviderSetupError(
+      "providerId",
+      `服务商 "${providerId}" 不是向导写入的条目，不能在程序里编辑`,
+    );
+  }
+  if (isPresetMaintainedEntry(entry)) {
+    throw new ProviderSetupError(
+      "preset",
+      `${providerId} 是内置服务商，地址与协议由程序维护，不提供编辑`,
+    );
+  }
+
+  const type = patch.type ?? entry.type ?? "openai-compatible";
+  let baseURL: string | undefined;
+  if (patch.baseURL !== undefined) {
+    const trimmed = patch.baseURL.trim();
+    baseURL = trimmed === "" ? undefined : trimmed;
+  } else {
+    baseURL = entry.baseURL;
+  }
+  if (type === "openai-compatible" && baseURL === undefined) {
+    throw new ProviderSetupError("baseURL", "服务地址不能为空");
+  }
+
+  const trimToUndefined = (value: string | undefined): string | undefined => {
+    const trimmed = value?.trim() ?? "";
+    return trimmed === "" ? undefined : trimmed;
+  };
+  const displayName =
+    patch.displayName === undefined ? entry.displayName : trimToUndefined(patch.displayName);
+  const sessionHeader =
+    patch.sessionHeader === undefined ? entry.sessionHeader : trimToUndefined(patch.sessionHeader);
+  let headers: Record<string, string> | undefined;
+  if (patch.headers === undefined) {
+    headers = entry.headers;
+  } else {
+    headers = {};
+    for (const [name, value] of Object.entries(patch.headers)) {
+      if (!HEADER_NAME_RE.test(name)) {
+        throw new ProviderSetupError("headers", `请求头名称无效：${name}`);
+      }
+      const trimmed = value.trim();
+      if (trimmed === "") {
+        throw new ProviderSetupError("headers", `请求头 ${name} 的值不能为空`);
+      }
+      headers[name] = trimmed;
+    }
+    if (Object.keys(headers).length === 0) headers = undefined;
+  }
+
+  const updated: ProviderEntryConfig = {
+    ...entry,
+    type,
+    baseURL,
+    displayName,
+    sessionHeader,
+    headers,
+  };
+  let modelCount = Object.keys(entry.models ?? {}).length;
+  if (patch.models !== undefined) {
+    const models: Record<string, ModelOverrideShape> = {};
+    for (const m of patch.models) {
+      models[m.id] = {
+        ...(m.displayName !== undefined ? { displayName: m.displayName } : {}),
+        ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
+        ...(m.maxOutputTokens !== undefined ? { maxOutputTokens: m.maxOutputTokens } : {}),
+        ...(m.pricing !== undefined ? { pricing: m.pricing } : {}),
+        ...(m.capabilities !== undefined ? { capabilities: m.capabilities } : {}),
+        ...(m.endpoints !== undefined ? { endpoints: m.endpoints } : {}),
+      };
+    }
+    updated.models = models;
+    updated.source = "upstream";
+    updated.fetchedAt = new Date().toISOString();
+    modelCount = patch.models.length;
+  }
+  await config.saveSetupProvider(updated, { mode: "replace" });
+  return {
+    providerId,
+    modelCount,
+    message: `已更新 ${providerId}${patch.models !== undefined ? `，${modelCount} 个模型` : ""}`,
+  };
+}
+
+export interface ProbeSetupProviderParams {
+  providerId: string;
+  /** 候选协议 */
+  type: "openai-compatible" | "anthropic";
+  /** 候选地址；anthropic 留空表示官方端点 */
+  baseURL?: string | undefined;
+  /** 候选自定义请求头；缺省用条目当前值 */
+  headers?: Record<string, string> | undefined;
+}
+
+/**
+ * 编辑前的模型列表探测（U-07）：用对话框里的候选配置向候候选地址发一次
+ * GET /models；凭据按条目现有解析规则取（apiKeyEnv → 环境变量 → 凭据存储），
+ * 不修改任何配置与凭据。失败原样抛给调用方，由界面决定「仍然保存」。
+ */
+export async function probeSetupProviderModels(
+  config: RuntimeConfig,
+  params: ProbeSetupProviderParams,
+  options: AddProviderOptions = {},
+): Promise<UpstreamModelEntry[]> {
+  const entry = await config.describeSetupProvider(params.providerId);
+  if (entry === undefined) {
+    throw new ProviderSetupError("providerId", `服务商 "${params.providerId}" 不是向导写入的条目`);
+  }
+  // 凭据解析顺序与适配器/refreshUpstreamLimits 一致
+  const env = options.env ?? ((name: string) => process.env[name]);
+  const envKey = entry.apiKeyEnv !== undefined ? env(entry.apiKeyEnv) : undefined;
+  const key =
+    entry.auth !== undefined && entry.auth.kind !== "apiKey"
+      ? undefined
+      : envKey !== undefined && envKey !== ""
+        ? envKey
+        : await config.credentials.get(params.providerId);
+  const request: FetchModelsRequest & { apiKeyEnv?: string | undefined } = {
+    id: params.providerId,
+    auth: entry.auth,
+    headers: params.headers ?? entry.headers,
+    type: params.type,
+    ...(params.baseURL !== undefined && params.baseURL.trim() !== ""
+      ? { baseURL: params.baseURL.trim() }
+      : {}),
+    apiKeyEnv: entry.apiKeyEnv,
+  };
+  options.signal?.throwIfAborted();
+  return options.fetchModels !== undefined
+    ? await options.fetchModels(request, key, options.signal)
+    : await fetchProviderModels(config, request, key, options.signal);
 }
 
 /** 不需要中间确认的调用者可一次提交；客户端向导使用 prepare/commit。 */

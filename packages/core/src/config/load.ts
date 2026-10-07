@@ -592,6 +592,10 @@ export async function loadConfig(
     providerSetupWarning: setup.warning,
     credentials,
     saveSetupProvider: (entry, opts) => saveSetupProvider(platform, home, credentials, entry, opts),
+    describeSetupProvider: async (providerId) => {
+      const state = await loadProviderSetup(platform, home);
+      return state.file?.providers?.find((p) => p.id === providerId);
+    },
     setCredential: async (providerId, key) => {
       await credentials.set(providerId, key);
       const now = await loadProviderSetup(platform, home);

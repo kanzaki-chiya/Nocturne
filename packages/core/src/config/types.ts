@@ -105,6 +105,11 @@ export interface UserModelEntry {
  */
 export interface ProviderEntryConfig {
   id: string;
+  /**
+   * 显示名（U-07）：会话、模型菜单等处仍按 id 引用；仅列表/详情
+   * 展示时优先用它。自定义服务商可编辑，缺省显示 id。
+   */
+  displayName?: string | undefined;
   /** 适配器类型；缺省 openai-compatible */
   type?: "openai-compatible" | "anthropic" | undefined;
   baseURL?: string | undefined;
@@ -336,6 +341,8 @@ export interface ProviderOverview {
   credentialStatus?: "valid" | "expiring" | "expired" | "missing" | undefined;
   credentialStorage?: "system" | "plaintext" | "memory" | undefined;
   id: string;
+  /** 条目声明的显示名（U-07）；未声明时界面显示 id */
+  displayName?: string | undefined;
   type: "openai-compatible" | "anthropic";
   /** baseURL 的主机名；无 baseURL（Anthropic 官方端点）时为 undefined */
   host?: string | undefined;
@@ -542,6 +549,11 @@ export interface RuntimeConfig {
     entry: ProviderEntryConfig,
     opts?: { key?: string | undefined; mode?: "create" | "replace" | undefined },
   ): Promise<void>;
+  /**
+   * 现读 providers.json 中该 id 的向导条目原文（U-07 编辑表单的预填与
+   * 更新保存使用）；条目不在向导层时返回 undefined。
+   */
+  describeSetupProvider(providerId: string): Promise<ProviderEntryConfig | undefined>;
   /** 更新密钥（经 credentials.set；缓存失效后下一次请求即用新密钥） */
   setCredential(providerId: string, key: string): Promise<void>;
   /** 添加/刷新模型列表时更新 models.dev 缓存；失败返回一行提示。 */

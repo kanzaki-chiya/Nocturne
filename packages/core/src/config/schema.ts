@@ -97,6 +97,8 @@ export const providerEntrySchema = z
       .string()
       .min(1)
       .refine((id) => !id.includes("/"), "服务商 id 不能含 /"),
+    // 显示名（U-07）：仅展示用，引用仍按 id；缺省显示 id
+    displayName: z.string().min(1).optional(),
     type: z.enum(["openai-compatible", "anthropic"]).optional(),
     baseURL: z.string().min(1).optional(),
     // v0.2：可选——缺省时凭据经凭据索引/系统后端解析（provider-setup.md 第 3 节）

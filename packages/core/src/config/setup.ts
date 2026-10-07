@@ -195,6 +195,7 @@ export function describeProviderLayers(
           }
         : {}),
       id: entry.id,
+      ...(entry.displayName !== undefined ? { displayName: entry.displayName } : {}),
       type: entry.type ?? "openai-compatible",
       host: hostOf(entry.baseURL),
       keySource,

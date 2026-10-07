@@ -267,6 +267,9 @@ findProviderConflict(id: string, workspaceRoot?: string): Promise<{ id: string; 
 setCredential(providerId: string, key: string): Promise<void>
   // 经 credentials.set 完成（缓存随之失效，下一次请求即用新密钥）；/provider key 与服务商页「换密钥」直接调用它
 removeSetupProvider(providerId: string): Promise<void>     // 删除条目并经 credentials.delete 删凭据
+describeSetupProvider(providerId: string): Promise<ProviderEntryConfig | undefined>
+  // 现读 providers.json 里的条目原文（U-07 编辑表单预填用）；非向导条目返回 undefined。
+  //   返回对象不含任何凭据字段——凭据只存在于凭据存储，条目从来不携带。
 describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>
   // /provider 与服务商页列表数据：名称、类型、主机名、鉴权描述、认证方式 authKind、凭据状态、保存位置、来源层、
   //   模型数；不含令牌。给 workspaceRoot 时并入该工作区可信项目层的条目。
@@ -288,6 +291,19 @@ saveModelSettings(providerId: string, modelId: string, patch: ModelSettingsPatch
   //   校验以"保存后的最终生效值"计算（非向导条目、清单外模型、patch 触及
   //   config 来源字段、非正整数、生效最大输出>上下文、推理否与手写档位冲突等抛
   //   config_invalid 且不写文件）；原子写 providers.json，绝不写 config.json
+
+// 编辑自定义服务商（U-07，provider-setup.ts）
+probeSetupProviderModels(config, params, options?): Promise<UpstreamModelEntry[]>
+  // params = { providerId, type, baseURL?, headers? }：按候选配置向候选地址发一次模型列表
+  //   请求；凭据按条目现有规则解析（apiKeyEnv → 环境变量 → 凭据存储），不写任何配置与凭据。
+  //   失败原样抛错，由客户端决定是否「仍然保存」。
+updateSetupProvider(config, providerId, patch): Promise<{ providerId, modelCount, message }>
+  // 只允许 providers.json 里的自定义条目：非向导条目抛 ProviderSetupError("providerId")；
+  //   id 与地址同某内置 preset 一致的条目（内置预设写出的条目）抛 ProviderSetupError("preset")——
+  //   内置服务商的地址与协议由程序维护。patch 缺省字段保留原值；字符串字段空串表示清除
+  //   （displayName / baseURL(仅 anthropic 可清) / sessionHeader），headers 整表替换；
+  //   models 提供时随条目更新清单并重写 source/fetchedAt，缺省保留原清单。
+  //   保存走 saveSetupProvider(mode "replace")：凭据与逐模型用户编辑自动保留。
 setDefaultModel(model: string, effort: ReasoningEffort | null): Promise<SettingItem[]> // 成对写入 settings.json；Runtime 同名公开接口
 recentModels(): ModelRef[]                               // recent-models.json 当前内容（新→旧）
 recordRecentModel(ref: ModelRef): Promise<void>          // Runtime 在 setModel/新建会话时调用
