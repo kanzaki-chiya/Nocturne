@@ -254,6 +254,12 @@ Rust 外壳提供四个 Tauri 命令，前端用它们实现 `LineTransport`：
 - **打开文件用的编辑器**：「设置 › 常规」新增「打开文件用」，默认「系统默认程序」（经已有的 opener 插件，不带行号）；检测到 VS Code、Cursor 时可选，选中后带行号跳转（`code -g file:line` 同类参数）。设置存应用数据，不进 `settings.json`。
 - **侧边预览（方案 B）不做**：留给后续的侧边栏面板（编辑器、终端、内置浏览器），见路线图。
 
+### 2026-10-07：U-07 实现与上一条修订的出入
+
+- **会话标识请求头也可改**：上一条只列了显示名称、Base URL、协议、自定义请求头；实现把 `sessionHeader`（上游按此请求头区分会话）也放进编辑对话框，与添加表单字段一致。它不影响鉴权（密钥仍走「换密钥」），只改上游区分会话的标记位。
+- **RPC 形状**：上一条说"保存走已有的 `saveSetupProvider` replace 模式"——Core 侧确实如此（`updateSetupProvider` 读条目、合 patch、经 `saveSetupProvider` replace 落盘，凭据保留在凭据存储）。但 RPC 层新增了三个独立方法（`provider.describeSetupProvider` 预填、`provider.probeSetupProviderModels` 候选探测、`provider.updateSetupProvider` 提交），而不是复用 `prepare/commit` 草稿流程：编辑不需要草稿生命周期，`parseUpdatePatch` 逐字段校验、`mutateAndReload` 触发重载与通知。
+- **探测失败的「仍然保存」不带新清单**：与添加流程一致，但语义是"保留原模型列表"（`patch.models` 缺省），不是清空。
+
 ### 2026-10-07：改为单后台（ADR-0051）
 
 第 1 节「一个项目一个后台，打开会话时才启动」、修订「启动即有一个后台」中「项目的后台仍按原规则启动」，以及备选方案里否决「一个后台服务所有项目」的理由，由 [ADR-0051](ADR-0051-desktop-single-backend.md) 取代：桌面端只保留以普通对话工作区为 cwd 的常驻后台，所有会话在其中创建和恢复，工作区随会话。崩溃恢复流程不变，范围扩大到全部打开的会话。
