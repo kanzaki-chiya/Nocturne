@@ -295,6 +295,16 @@ export interface RuntimePermissionsOptions {
 export interface CreateSessionOptions {
   /** "provider/model" 或 ModelRef */
   model: string | ModelRef;
+  /**
+   * 会话工作目录（ADR-0051：桌面端单后台按会话传工作区）；
+   * 缺省为 Runtime 启动目录。语义与 createRuntime 的 cwd 相同。
+   */
+  cwd?: string | undefined;
+  /**
+   * 会话工作区根；缺省取 cwd 解析后的真实路径（语义同
+   * createRuntime 的 workspaceRoot）。项目配置、权限、指令都按它加载。
+   */
+  workspaceRoot?: string | undefined;
   permissionPreset?: string | undefined;
   /**
    * 会话初始思考档位（ADR-0018）；缺省取配置的默认档位
@@ -483,17 +493,41 @@ export interface Runtime {
   deleteExternalAgent(input: { name: string }): Promise<void>;
   setExternalAgentEnabled(input: { name: string; enabled: boolean }): Promise<void>;
   probeExternalAgent(input: ExternalAgentProbeInput): Promise<ExternalAgentProbeResult>;
-  describeModelRoles(): ModelRoleInfo[];
-  setModelRole(role: ModelRole, ref: string | null): Promise<SettingItem[]>;
-  describeSettings(): SettingItem[];
-  updateSettings(patch: SettingsPatch, options?: { reviewerKey: string }): Promise<SettingItem[]>;
-  listReviewerProviders(): Promise<ProviderOverview[]>;
-  defaultReviewer(endpoint: JevEndpoint, baseURL?: string): Promise<JevReviewerConfig>;
+  /**
+   * workspaceRoot（ADR-0051）：下列方法的 `input?.workspaceRoot`/`options?.workspaceRoot`
+   * 指定按哪个工作区合并配置层；缺省为 Runtime 启动目录。指定的工作区须已加载
+   * （同工作区有会话打开，或先经 RuntimeConfig.forWorkspace 加载——RPC 服务端
+   * 在派发前自动加载），否则只看到不含项目层的合并结果。
+   */
+  describeModelRoles(input?: { workspaceRoot?: string | undefined }): ModelRoleInfo[];
+  setModelRole(
+    role: ModelRole,
+    ref: string | null,
+    options?: { workspaceRoot?: string | undefined },
+  ): Promise<SettingItem[]>;
+  describeSettings(input?: { workspaceRoot?: string | undefined }): SettingItem[];
+  updateSettings(
+    patch: SettingsPatch,
+    options?: { reviewerKey?: string; workspaceRoot?: string | undefined },
+  ): Promise<SettingItem[]>;
+  listReviewerProviders(input?: {
+    workspaceRoot?: string | undefined;
+  }): Promise<ProviderOverview[]>;
+  defaultReviewer(
+    endpoint: JevEndpoint,
+    baseURL?: string,
+    input?: { workspaceRoot?: string | undefined },
+  ): Promise<JevReviewerConfig>;
   listReviewerModels(
     reviewer: JevReviewerConfig,
     signal?: AbortSignal,
+    input?: { workspaceRoot?: string | undefined },
   ): Promise<{ models: string[]; warning?: string }>;
-  setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<SettingItem[]>;
+  setDefaultModel(
+    model: string,
+    reasoningEffort: ReasoningEffort | null,
+    options?: { workspaceRoot?: string | undefined },
+  ): Promise<SettingItem[]>;
   createSession(options: CreateSessionOptions): Promise<RuntimeSession>;
   resumeSession(id: string, options?: ResumeSessionOptions): Promise<RuntimeSession>;
   forkSession(id: string, options?: { targetSeq?: number }): Promise<string>;
@@ -502,8 +536,8 @@ export interface Runtime {
     /** 默认 false：子会话（session.created.parent 存在）不进列表 */
     includeSubagents?: boolean | undefined;
   }): Promise<SessionSummary[]>;
-  /** 当前工作区已配置 Provider 声明的模型清单（含已加载的可信项目层） */
-  listModels(): ModelInfo[];
+  /** 已配置 Provider 声明的模型清单（含已加载的可信项目层）；input.workspaceRoot 见上 */
+  listModels(input?: { workspaceRoot?: string | undefined }): ModelInfo[];
   /**
    * 用新的基础层配置重建运行时级 Provider 注册表（provider-setup.md
    * 第 6 节）；已打开会话在下一次空闲边界重建会话级注册表。不产生
@@ -511,8 +545,8 @@ export interface Runtime {
    */
   updateProviders(config: RuntimeConfig): Promise<void>;
   /** 分层合并后的默认模型（模型选择页"默认模型"标记）；无法解析时 undefined */
-  defaultModel(): ModelRef | undefined;
-  /** recent-models.json 当前内容（新→旧，最多 10 条）；无 config 时为空 */
+  defaultModel(input?: { workspaceRoot?: string | undefined }): ModelRef | undefined;
+  /** recent-models.json 当前内容（新→旧，最多 10 条）；全局偏好，无工作区维度 */
   listRecentModels(): ModelRef[];
   /** 读取机器维护的字符串偏好；未注入 RuntimeConfig 时返回 undefined。 */
   getPreference(key: string): string | undefined;
@@ -751,8 +785,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   const interactive = options.interactive === true;
 
-  const instructions =
-    options.instructions ?? (await loadInstructions(platform, workspaceRoot, cwd));
+  /**
+   * 项目指令按会话的工作区/cwd 加载（ADR-0051：一个 Runtime 服务多个工作区）；
+   * 同一 (workspaceRoot, cwd) 的会话共用缓存，options.instructions 显式注入时仍优先。
+   */
+  const instructionCache = new Map<string, Promise<InstructionSet>>();
+  function sessionInstructions(ws: string, dir: string): Promise<InstructionSet> {
+    const key = `${ws} ${dir}`;
+    let cached = instructionCache.get(key);
+    if (cached === undefined) {
+      cached = loadInstructions(platform, ws, dir).catch((e: unknown) => {
+        instructionCache.delete(key);
+        throw e;
+      });
+      instructionCache.set(key, cached);
+    }
+    return cached;
+  }
   const detectedShells = await detectShells(platform);
 
   async function wrapSession(
@@ -762,8 +811,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const meta = session.state().meta;
     const openedAt = Date.now();
 
-    // 项目层按会话记录的 workspaceRoot 加载（config.md 第 6 节）
+    // 项目层与项目指令都按会话记录的 workspaceRoot/cwd 加载（config.md 第 6 节）
     const ws = config !== undefined ? await config.forWorkspace(meta.workspaceRoot) : undefined;
+    const instructions =
+      options.instructions ?? (await sessionInstructions(meta.workspaceRoot, meta.cwd));
     const resolved = ws?.resolved;
     diagnostics.record("config.load", {
       sessionId: session.id,
@@ -889,8 +940,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const environment: EnvironmentInfo = {
       os: process.platform,
       shell: shellResolver.environmentLine(),
-      cwd,
-      workspaceRoot,
+      cwd: meta.cwd,
+      workspaceRoot: meta.workspaceRoot,
       // 取会话创建时间而非打开时间：恢复时不改写 system，保住其后整段历史的缓存
       sessionDate: meta.createdAt,
     };
@@ -2781,9 +2832,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         warn: () => undefined,
       });
     },
-    describeModelRoles() {
-      const settings = config?.describeSettings(workspaceRoot) ?? [];
-      const rolesRegistry = buildRegistry(config?.resolvedSettings(workspaceRoot).providers ?? []);
+    describeModelRoles(input) {
+      const root = input?.workspaceRoot ?? workspaceRoot;
+      const settings = config?.describeSettings(root) ?? [];
+      const rolesRegistry = buildRegistry(config?.resolvedSettings(root).providers ?? []);
       return MODEL_ROLES.map((role) => {
         const item = settings.find((s) => s.key === `modelRoles.${role}`);
         const resolved = resolveModelRole(rolesRegistry, item?.effective, role);
@@ -2798,36 +2850,41 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         };
       });
     },
-    async setModelRole(role, ref) {
+    async setModelRole(role, ref, setOptions) {
       if (!MODEL_ROLES.includes(role))
         throw new RuntimeCommandError("invalid_command", `未知模型角色：${role}`);
       if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存模型角色");
+      const root = setOptions?.workspaceRoot ?? workspaceRoot;
       if (
         ref !== null &&
         resolveModelRole(
-          buildRegistry(config.resolvedSettings(workspaceRoot).providers),
+          buildRegistry((await config.forWorkspace(root)).resolved.providers),
           ref,
           role,
         ) === undefined
       )
         throw new RuntimeCommandError("invalid_model", `模型角色 ${role} 的模型 ${ref} 不可用`);
       await config.setModelRole(role, ref);
-      return config.describeSettings(workspaceRoot);
+      return config.describeSettings(root);
     },
-    describeSettings: () =>
-      config?.describeSettings(workspaceRoot, platform.env("NOCTURNE_SHELL")) ?? [],
-    listReviewerProviders: async () => (await config?.describeProviders(workspaceRoot)) ?? [],
-    async defaultReviewer(endpoint, baseURL) {
+    describeSettings: (input) =>
+      config?.describeSettings(
+        input?.workspaceRoot ?? workspaceRoot,
+        platform.env("NOCTURNE_SHELL"),
+      ) ?? [],
+    listReviewerProviders: async (input) =>
+      (await config?.describeProviders(input?.workspaceRoot ?? workspaceRoot)) ?? [],
+    async defaultReviewer(endpoint, baseURL, input) {
       return defaultJevReviewer(
         endpoint,
-        (await config?.describeProviders(workspaceRoot)) ?? [],
+        (await config?.describeProviders(input?.workspaceRoot ?? workspaceRoot)) ?? [],
         baseURL,
       );
     },
-    async listReviewerModels(reviewer, signal) {
+    async listReviewerModels(reviewer, signal, input) {
       validateSettingsPatch({ "permission.reviewer": reviewer });
       const providers = config
-        ? (await config.forWorkspace(workspaceRoot)).resolved.providers
+        ? (await config.forWorkspace(input?.workspaceRoot ?? workspaceRoot)).resolved.providers
         : (options.providerConfigs ?? []);
       return fetchJevModels(
         resolveJevConnection(reviewer, providers, reviewerCredentials(providers), (name) =>
@@ -2842,8 +2899,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const operation = settingsPending.then(async () => {
         if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存设置");
         validateSettingsPatch(patch);
-        await config.forWorkspace(workspaceRoot);
-        const roleRegistry = buildRegistry(config.resolvedSettings(workspaceRoot).providers);
+        const root = settingsOptions?.workspaceRoot ?? workspaceRoot;
+        await config.forWorkspace(root);
+        const roleRegistry = buildRegistry(config.resolvedSettings(root).providers);
         for (const role of MODEL_ROLES) {
           const ref = patch[`modelRoles.${role}`];
           if (ref != null && resolveModelRole(roleRegistry, ref, role) === undefined)
@@ -2873,7 +2931,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           throw error;
         }
         for (const mark of markProvidersDirty) mark();
-        return config.describeSettings(workspaceRoot);
+        return config.describeSettings(root);
       });
       settingsPending = operation.then(
         () => undefined,
@@ -2881,11 +2939,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       );
       return operation;
     },
-    async setDefaultModel(model, effort) {
+    async setDefaultModel(model, effort, setOptions) {
       if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存默认模型");
-      const resolved = buildRegistry(
-        (await config.forWorkspace(workspaceRoot)).resolved.providers,
-      ).resolve(parseModelRef(model));
+      const root = setOptions?.workspaceRoot ?? workspaceRoot;
+      const resolved = buildRegistry((await config.forWorkspace(root)).resolved.providers).resolve(
+        parseModelRef(model),
+      );
       const levels = resolved.model.capabilities.reasoningEffort ?? [];
       if (effort !== null && effort !== "off" && !levels.includes(effort)) {
         throw new RuntimeCommandError(
@@ -2894,11 +2953,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         );
       }
       await config.setDefaultModel(model, effort);
-      return config.describeSettings(workspaceRoot);
+      return config.describeSettings(root);
     },
     async createSession(opts) {
+      // 会话级工作区（ADR-0051）：缺省回到 Runtime 启动目录，行为与原来一致
+      const sessionCwd = opts.cwd !== undefined ? paths.resolve(opts.cwd, ".") : cwd;
+      const sessionRoot = await platform.resolveReal(opts.workspaceRoot ?? sessionCwd);
       const defaults =
-        config !== undefined ? (await config.forWorkspace(workspaceRoot)).resolved : undefined;
+        config !== undefined ? (await config.forWorkspace(sessionRoot)).resolved : undefined;
       const preset = normalizePermissionPreset(
         opts.permissionPreset ?? defaults?.permissionPreset ?? DEFAULT_PERMISSION_PRESET,
       );
@@ -2918,8 +2980,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         );
       }
       const session = await store.create({
-        cwd,
-        workspaceRoot,
+        cwd: sessionCwd,
+        workspaceRoot: sessionRoot,
         model: parseModelRef(opts.model),
         permissionPreset: preset,
         nocturneVersion: options.version ?? NOCTURNE_VERSION,
@@ -2965,9 +3027,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await source.close();
       }
     },
-    listModels: () =>
+    listModels: (input) =>
       (config !== undefined
-        ? buildRegistry(config.resolvedSettings(workspaceRoot).providers)
+        ? buildRegistry(config.resolvedSettings(input?.workspaceRoot ?? workspaceRoot).providers)
         : registry
       )
         .providers()
@@ -2975,14 +3037,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async updateProviders(newConfig) {
       // 重建服务商注册表并按会话工作区增量更新 MCP；不动会话日志和 Hook。
       config = newConfig;
+      // 配置整体替换后项目指令缓存一并失效（ADR-0051：缓存按工作区存活至本次配置代际）
+      instructionCache.clear();
       registry = buildRegistry(newConfig.base.providers);
       for (const mark of markProvidersDirty) mark();
       await Promise.all([...reconcileMcp].map((refresh) => refresh()));
       await Promise.all([...refreshSkills].map((refresh) => refresh(true)));
       for (const refresh of refreshExternalAgents) refresh();
     },
-    defaultModel() {
-      const model = config?.resolvedSettings(workspaceRoot).model;
+    defaultModel(input) {
+      const model = config?.resolvedSettings(input?.workspaceRoot ?? workspaceRoot).model;
       if (model === undefined || model === "") return undefined;
       try {
         return parseModelRef(model);
