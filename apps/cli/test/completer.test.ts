@@ -1,10 +1,48 @@
 import { describe, expect, it } from "vitest";
 
 import { readlineCompleter } from "@nocturne/tui/slash-catalog";
+import {
+  completeSlash,
+  externalAgentListLines,
+  parseExternalAgentSlash,
+} from "@nocturne/tui/slash-catalog";
 import { skillCompletionLines } from "../src/completer.js";
 
 describe("CLI completer", () => {
   const ctx = { effortLevels: ["minimal", "low"], providerIds: ["commandcode"] };
+
+  it("外部 agent 排在技能之后，大小写碰撞禁斜杠并在列表警告", () => {
+    const skills = [{ name: "alpha", invocation: "user", description: "skill", fields: {} }];
+    const agents = [
+      { name: "Model", enabled: true },
+      { name: "ALPHA", enabled: true },
+      { name: "Codex", enabled: true, description: "external" },
+      { name: "off", enabled: false },
+    ];
+    const context = { ...ctx, skills, externalAgents: agents };
+    const hits = completeSlash("/", context);
+    expect(hits.filter((item) => item.group === "agents").map((item) => item.insert)).toEqual([
+      "/Codex ",
+    ]);
+    expect(hits.findIndex((item) => item.group === "agents")).toBeGreaterThan(
+      hits.findIndex((item) => item.group === "skills"),
+    );
+    const lines = skillCompletionLines("/", context);
+    expect(lines.indexOf("外部 agent")).toBeGreaterThan(lines.indexOf("技能"));
+    expect(parseExternalAgentSlash("/cOdEx 任务\n  保留空格", agents, skills)).toEqual({
+      agent: "Codex",
+      task: "任务\n  保留空格",
+    });
+    expect(parseExternalAgentSlash("/MODEL text", agents, skills)).toBeUndefined();
+    expect(parseExternalAgentSlash("/alpha text", agents, skills)).toBeUndefined();
+    expect(parseExternalAgentSlash("/off text", agents, skills)).toBeUndefined();
+    const listing = externalAgentListLines({ agents, warnings: ["配置警告"] }, skills).join("\n");
+    expect(listing).toContain("与内置命令重名");
+    expect(listing).toContain("与技能重名");
+    expect(listing).toContain("模型仍可调用");
+    expect(listing).toContain("配置警告");
+    expect(listing).toContain("已停用");
+  });
 
   it("技能候选显示分组、参数和说明，插入文本仍只有命令名", () => {
     const context = {

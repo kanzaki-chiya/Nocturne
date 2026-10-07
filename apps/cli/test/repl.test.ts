@@ -11,6 +11,41 @@ import type { RuntimeEvent, TurnEndReason } from "@nocturne/core/protocol";
 
 import { runRepl } from "../src/repl.js";
 
+it("REPL 外部 agent 点名传递delegate和任务原文，空任务不提交", async () => {
+  const { io, stdin, stdoutChunks } = makeIo();
+  const base = fakeSessionWithPendingTurn({ value: false }).session;
+  const submitted: unknown[] = [];
+  const session: RuntimeSession = {
+    ...base,
+    describeExternalAgents: async () => ({
+      agents: [
+        { name: "Codex", command: "fake", args: [], enabled: true, origin: "app", editable: true },
+      ],
+      warnings: [],
+    }),
+    submit: async (input) => {
+      submitted.push(input);
+      return "done";
+    },
+  };
+  const done = runRepl(session, fakeRuntime, io);
+  await tick();
+  stdin.write("/codex\n");
+  await tick();
+  expect(stdoutChunks.join("")).toContain("用法：/Codex 任务");
+  expect(submitted).toEqual([]);
+  stdin.write("/cOdEx 检查  两个空格\n");
+  await tick();
+  expect(submitted).toEqual([
+    {
+      text: "/cOdEx 检查  两个空格",
+      delegate: { agent: "Codex", task: "检查  两个空格" },
+    },
+  ]);
+  stdin.end();
+  expect(await done).toBe(0);
+});
+
 function makeIo() {
   const stdin = new PassThrough();
   const stdoutChunks: string[] = [];
@@ -40,6 +75,7 @@ function fakeSessionWithPendingTurn(interrupted: { value: boolean }) {
   let control: TurnControl | undefined;
   const session = {
     describeSkills: () => ({ skills: [] }),
+    describeExternalAgents: async () => ({ agents: [], warnings: [] }),
     id: "s1",
     subscribe: (_fn: (ev: RuntimeEvent) => void) => () => undefined,
     submit: (_input: { text: string }) =>
@@ -142,6 +178,7 @@ describe("REPL 生命周期", () => {
     const replies: { requestId: string; reply: unknown }[] = [];
     const session = {
       describeSkills: () => ({ skills: [] }),
+      describeExternalAgents: async () => ({ agents: [], warnings: [] }),
       id: "s1",
       subscribe: (fn: (ev: RuntimeEvent) => void) => {
         listener = fn;
@@ -215,6 +252,7 @@ describe("REPL /resume 会话切换", () => {
   const fakeSession = (id: string) =>
     ({
       describeSkills: () => ({ skills: [] }),
+      describeExternalAgents: async () => ({ agents: [], warnings: [] }),
       id,
       subscribe: (_fn: (ev: RuntimeEvent) => void) => () => undefined,
       submit: () => new Promise<TurnEndReason>(() => undefined),

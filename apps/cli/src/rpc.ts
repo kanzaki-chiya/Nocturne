@@ -79,7 +79,7 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
           interactive,
           permissions: { autoApproveAsk: false },
           mcp: createMcpConnector(),
-          externalAgents: createAcpConnector(platform, runtimeConfig.base.externalAgents),
+          externalAgents: createAcpConnector(platform),
           debug: {
             enabled: debugEnabled,
             file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,

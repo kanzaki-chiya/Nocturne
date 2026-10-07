@@ -6,6 +6,57 @@ import { SLASH_COMMANDS } from "@nocturne/tui/slash-catalog";
 
 import { runSlashCommand } from "../src/commands.js";
 
+it("/agents 只读列表显示来源、启停、警告，不运行探测或写配置", async () => {
+  const { lines, io } = capture();
+  const session = fakeSession({
+    describeSkills: () => ({
+      skills: [],
+      warnings: [],
+      budget: {
+        usedTokens: 0,
+        limitTokens: 8000,
+        fullCount: 0,
+        nameCount: 0,
+        disabledCount: 0,
+        basis: "fallback",
+      },
+      scannedDirs: [],
+      homeDir: "",
+    }),
+    describeExternalAgents: async () => ({
+      agents: [
+        {
+          name: "Model",
+          command: "fake",
+          args: [],
+          enabled: true,
+          origin: "user",
+          editable: false,
+        },
+        { name: "codex", command: "fake", args: [], enabled: false, origin: "app", editable: true },
+      ],
+      warnings: ["忽略项目外部 agent"],
+    }),
+  });
+  const runtime = {
+    probeExternalAgent: vi.fn(),
+    saveExternalAgent: vi.fn(),
+    deleteExternalAgent: vi.fn(),
+    setExternalAgentEnabled: vi.fn(),
+  } as unknown as Runtime;
+  expect(await runSlashCommand("/agents", session, runtime, io)).toBe("handled");
+  expect(lines.join("\n")).toContain("config.json");
+  expect(lines.join("\n")).toContain("程序管理");
+  expect(lines.join("\n")).toContain("与内置命令重名");
+  expect(lines.join("\n")).toContain("已停用");
+  expect(lines.join("\n")).toContain("忽略项目外部 agent");
+  expect(lines.join("\n")).toContain("fake");
+  expect(runtime.probeExternalAgent).not.toHaveBeenCalled();
+  expect(runtime.saveExternalAgent).not.toHaveBeenCalled();
+  expect(runtime.deleteExternalAgent).not.toHaveBeenCalled();
+  expect(runtime.setExternalAgentEnabled).not.toHaveBeenCalled();
+});
+
 function fakeSession(overrides: Partial<RuntimeSession> = {}): RuntimeSession {
   return {
     id: "s1",

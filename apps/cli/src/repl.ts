@@ -24,6 +24,7 @@ import {
   type RuntimeEvent,
 } from "@nocturne/core/protocol";
 import { completeLine, skillCompletionLines } from "./completer.js";
+import { parseExternalAgentSlash, type ExternalSlashAgent } from "@nocturne/tui/slash-catalog";
 
 import { runSlashCommand, type CommandDeps } from "./commands.js";
 import {
@@ -172,6 +173,8 @@ export async function runRepl(
     );
   };
   refreshProviders();
+  let externalAgents: readonly ExternalSlashAgent[] = (await session.describeExternalAgents())
+    .agents;
   const makeRl = (): HistoryInterface =>
     createInterface({
       input: io.stdin,
@@ -183,30 +186,39 @@ export async function runRepl(
         callback: (error: Error | null, result: [string[], string]) => void,
       ) => {
         if (line.startsWith("/provider")) refreshProviders();
-        const context = {
-          effortLevels: session.reasoningEffortInfo().available,
-          providerIds,
-          skills: session.describeSkills().skills,
-        };
-        if (completeFileRefs(line, line.length, []) === undefined) {
-          const lines = skillCompletionLines(line, context);
-          if (lines.length) {
-            callback(null, [[], line]);
-            io.stdout.write(`\n${lines.join("\n")}\n`);
-            if (!closed) rl.prompt(true);
-            return;
-          }
-          callback(null, completeLine(line, context, []));
-          return;
-        }
-        void session.fileIndex().then(
-          (entries) => {
-            callback(null, completeLine(line, context, entries));
-          },
-          () => {
-            callback(null, [[], line]);
-          },
-        );
+        void session
+          .describeExternalAgents()
+          .then((description) => {
+            externalAgents = description.agents;
+            const context = {
+              effortLevels: session.reasoningEffortInfo().available,
+              providerIds,
+              skills: session.describeSkills().skills,
+              externalAgents,
+            };
+            if (completeFileRefs(line, line.length, []) === undefined) {
+              const lines = skillCompletionLines(line, context);
+              if (lines.length) {
+                callback(null, [[], line]);
+                io.stdout.write(`\n${lines.join("\n")}\n`);
+                if (!closed) rl.prompt(true);
+                return;
+              }
+              callback(null, completeLine(line, context, []));
+              return;
+            }
+            void session.fileIndex().then(
+              (entries) => {
+                callback(null, completeLine(line, context, entries));
+              },
+              () => {
+                callback(null, [[], line]);
+              },
+            );
+          })
+          .catch((error: unknown) => {
+            callback(error instanceof Error ? error : new Error(String(error)), [[], line]);
+          });
       },
     }) as HistoryInterface;
   let rl = makeRl();
@@ -224,7 +236,18 @@ export async function runRepl(
   };
 
   const prompt = (): void => {
-    if (!closed) rl.prompt();
+    const current = session;
+    void current
+      .describeExternalAgents()
+      .then((description) => {
+        if (current !== session || closed) return;
+        externalAgents = description.agents;
+        rl.prompt();
+      })
+      .catch((error: unknown) => {
+        out.line("stderr", `! ${error instanceof Error ? error.message : String(error)}`);
+        if (!closed) rl.prompt();
+      });
   };
 
   /** 会话切换：成功则换绑 session + 重订阅事件 + 打印分隔线 */
@@ -611,7 +634,15 @@ export async function runRepl(
           return;
         }
         const skill = parseSkillSlash(line, session.describeSkills().skills);
-        if (line.startsWith("/") && !skill) {
+        const delegate = skill
+          ? undefined
+          : parseExternalAgentSlash(line, externalAgents, session.describeSkills().skills);
+        if (delegate?.task.trim() === "") {
+          out.line("stdout", `用法：/${delegate.agent} 任务`);
+          prompt();
+          return;
+        }
+        if (line.startsWith("/") && !skill && !delegate) {
           const bridge = opts.provider;
           const deps: CommandDeps = {
             ...(bridge !== undefined
@@ -690,7 +721,7 @@ export async function runRepl(
         }
         busy = true;
         activeTurn = session
-          .submit({ text: line, ...(skill ? { skill } : {}) })
+          .submit({ text: line, ...(skill ? { skill } : {}), ...(delegate ? { delegate } : {}) })
           .catch((e: unknown) => {
             out.line("stderr", `! ${e instanceof Error ? e.message : String(e)}`);
           })

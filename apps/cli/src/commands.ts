@@ -16,7 +16,7 @@ import {
   type PermissionPresetName,
 } from "@nocturne/core";
 import { providerCredentialDescription } from "@nocturne/tui/text-format";
-import { cliHelpText } from "@nocturne/tui/slash-catalog";
+import { cliHelpText, externalAgentListLines } from "@nocturne/tui/slash-catalog";
 
 import { normalizeModelRef } from "./config.js";
 
@@ -528,6 +528,15 @@ export async function runSlashCommand(
     }
     case "/skills": {
       io.print(skillListLines(session.describeSkills().skills).join("\n"));
+      return "handled";
+    }
+    case "/agents": {
+      io.print(
+        externalAgentListLines(
+          await session.describeExternalAgents(),
+          session.describeSkills().skills,
+        ).join("\n"),
+      );
       return "handled";
     }
     case "/mcp": {

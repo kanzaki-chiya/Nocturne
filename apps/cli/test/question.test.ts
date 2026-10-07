@@ -46,6 +46,7 @@ function fakeSession(interrupted?: { value: boolean }) {
   const replies: QuestionReplySeen[] = [];
   const session = {
     describeSkills: () => ({ skills: [] }),
+    describeExternalAgents: async () => ({ agents: [], warnings: [] }),
     id: "s1",
     subscribe: (fn: (ev: RuntimeEvent) => void) => {
       listener = fn;

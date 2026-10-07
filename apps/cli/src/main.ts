@@ -167,7 +167,7 @@ async function main(): Promise<number> {
         interactive: true,
         permissions: { autoApproveAsk: args.yes },
         mcp: createMcpConnector(),
-        externalAgents: createAcpConnector(platform, collected.config.runtime.base.externalAgents),
+        externalAgents: createAcpConnector(platform),
         debug: {
           enabled: debugEnabled,
           file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,
@@ -270,7 +270,7 @@ async function main(): Promise<number> {
         interactive: true,
         permissions: { autoApproveAsk: args.yes },
         mcp: createMcpConnector(),
-        externalAgents: createAcpConnector(platform, runtimeConfig.base.externalAgents),
+        externalAgents: createAcpConnector(platform),
         debug: {
           enabled: debugEnabled,
           file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,
@@ -335,7 +335,7 @@ async function main(): Promise<number> {
     interactive: !args.print,
     permissions: { autoApproveAsk: args.yes },
     mcp: createMcpConnector(),
-    externalAgents: createAcpConnector(platform, runtimeConfig.base.externalAgents),
+    externalAgents: createAcpConnector(platform),
     debug: {
       enabled: debugEnabled,
       file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,
