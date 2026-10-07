@@ -18,9 +18,11 @@ import {
   logoutProvider,
   MODEL_ROLES,
   prepareProvider,
+  probeSetupProviderModels,
   ProviderLoginError,
   startDraftProviderLogin,
   startProviderLogin,
+  updateSetupProvider,
   type AddProviderInput,
   type ContentBlock,
   type CreateSessionOptions,
@@ -39,6 +41,7 @@ import {
   type RuntimeEvent,
   type RuntimeSession,
   type SubmitInput,
+  type UpdateSetupProviderPatch,
 } from "@nocturne/core";
 
 import {
@@ -118,8 +121,20 @@ export const SENSITIVE_METHODS: Partial<Record<RpcMethodName, (p: Params) => str
     return kind === "apiKey" && typeof key === "string" ? [key] : [];
   },
   "provider.setCredential": (p) => (typeof p.key === "string" ? [p.key] : []),
+  // 自定义请求头值可能含密钥：报错文本里按秘密值遮蔽
+  "provider.updateSetupProvider": (p) => headerSecrets(p.patch),
+  "provider.probeSetupProviderModels": (p) => headerSecrets(p),
   "login.submitManual": (p) => (typeof p.text === "string" ? [p.text] : []),
 };
+
+function headerSecrets(p: unknown): string[] {
+  if (typeof p !== "object" || p === null) return [];
+  const headers = (p as { headers?: unknown }).headers;
+  if (typeof headers !== "object" || headers === null) return [];
+  return Object.values(headers as Record<string, unknown>).filter(
+    (v): v is string => typeof v === "string" && v !== "",
+  );
+}
 
 export interface RpcServerOptions {
   nocturneVersion: string;
@@ -1009,6 +1024,48 @@ class Connection {
           return null;
         });
       },
+      // 编辑自定义服务商（U-07）：条目原文只含配置形状，凭据不经此返回
+      "provider.describeSetupProvider": async (p) =>
+        (await this.providerConfig().current.describeSetupProvider(reqString(p, "providerId"))) ??
+        null,
+      "provider.probeSetupProviderModels": async (p) => {
+        const type = reqString(p, "type");
+        if (type !== "openai-compatible" && type !== "anthropic") {
+          throw new InvalidParamsError(`type 必须是 openai-compatible 或 anthropic`);
+        }
+        const headers = p.headers;
+        if (
+          headers !== undefined &&
+          (typeof headers !== "object" || headers === null || Array.isArray(headers))
+        ) {
+          throw new InvalidParamsError("headers 必须是对象");
+        }
+        if (headers !== undefined) {
+          for (const [name, value] of Object.entries(headers)) {
+            if (typeof value !== "string") {
+              throw new InvalidParamsError(`headers.${name} 必须是字符串`);
+            }
+          }
+        }
+        const models = await probeSetupProviderModels(
+          this.providerConfig().current,
+          {
+            providerId: reqString(p, "providerId"),
+            type,
+            ...(optString(p, "baseURL") !== undefined ? { baseURL: optString(p, "baseURL") } : {}),
+            ...(headers !== undefined ? { headers: headers as Record<string, string> } : {}),
+          },
+          { signal: this.abort.signal },
+        );
+        return { models };
+      },
+      "provider.updateSetupProvider": async (p) => {
+        const providerId = reqString(p, "providerId");
+        const patch = parseUpdatePatch(reqObject(p, "patch"));
+        return await this.mutateAndReload(async (config) =>
+          updateSetupProvider(config, providerId, patch),
+        );
+      },
 
       // 登录会话（rpc.md 3.4）：start 返回句柄，完成经 login.completed 通知
       "login.start": async (p) => {
@@ -1202,6 +1259,48 @@ class Connection {
       },
     };
   }
+}
+
+/** provider.updateSetupProvider 的 patch 形状：逐字段校验，未提供的保留原值 */
+function parseUpdatePatch(p: Params): UpdateSetupProviderPatch {
+  const patch: UpdateSetupProviderPatch = {};
+  for (const key of ["displayName", "baseURL", "sessionHeader"] as const) {
+    const value = p[key];
+    if (value !== undefined) {
+      if (typeof value !== "string") throw new InvalidParamsError(`patch.${key} 必须是字符串`);
+      patch[key] = value;
+    }
+  }
+  const type = p.type;
+  if (type !== undefined) {
+    if (type !== "openai-compatible" && type !== "anthropic") {
+      throw new InvalidParamsError(`patch.type 必须是 openai-compatible 或 anthropic`);
+    }
+    patch.type = type;
+  }
+  const headers = p.headers;
+  if (headers !== undefined) {
+    if (typeof headers !== "object" || headers === null || Array.isArray(headers)) {
+      throw new InvalidParamsError("patch.headers 必须是对象");
+    }
+    for (const [name, value] of Object.entries(headers)) {
+      if (typeof value !== "string") {
+        throw new InvalidParamsError(`patch.headers.${name} 必须是字符串`);
+      }
+    }
+    patch.headers = headers as Record<string, string>;
+  }
+  const models = p.models;
+  if (models !== undefined) {
+    if (!Array.isArray(models)) throw new InvalidParamsError("patch.models 必须是数组");
+    for (const m of models) {
+      if (typeof m !== "object" || m === null || typeof (m as { id?: unknown }).id !== "string") {
+        throw new InvalidParamsError("patch.models 的每一项必须带字符串 id");
+      }
+    }
+    patch.models = models as UpdateSetupProviderPatch["models"];
+  }
+  return patch;
 }
 
 /** provider.prepareProvider 的入参形状：presetId 必填，其余字段按 credential.kind 判别 */

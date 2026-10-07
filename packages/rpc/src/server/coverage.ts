@@ -103,7 +103,8 @@ export const CONFIG_NOT_MAPPED = {
   forWorkspace: "进程内合并入口；经 runtime.listModels / provider.describeProviders 获取",
   setWorkspaceTrusted: "项目信任由 nctrn trust 管理，第一版不经 RPC",
   credentials: "凭据存储对象，含明文凭据，不离开服务端进程",
-  saveSetupProvider: "底层写入接口，经 provider.prepareProvider + provider.commitProvider 使用",
+  saveSetupProvider:
+    "底层写入接口，经 provider.prepareProvider + provider.commitProvider / provider.updateSetupProvider 使用",
   findProviderConflict:
     "名称唯一性检查，provider.prepareProvider / provider.commitProvider 内部调用，冲突以 -32005 data.field=name 报告",
   recordRecentModel: "setModel / 新建会话时 Runtime 自动记录",
@@ -138,6 +139,7 @@ export const CONFIG_METHODS: Record<
   saveModelSettings: "provider.saveModelSettings",
   removeSetupProvider: "provider.removeSetupProvider",
   refreshUpstreamLimits: "provider.refreshUpstreamLimits",
+  describeSetupProvider: "provider.describeSetupProvider",
 };
 
 /** 映射到 RPC 方法的 Core 顶层服务商配置函数（覆盖测试从 index.ts 导出块校验全集） */
@@ -148,6 +150,8 @@ export const PROVIDER_FUNCTION_METHODS = {
   prepareProvider: "provider.prepareProvider",
   commitProvider: "provider.commitProvider",
   discardProvider: "provider.discardProvider",
+  probeSetupProviderModels: "provider.probeSetupProviderModels",
+  updateSetupProvider: "provider.updateSetupProvider",
   startProviderLogin: "login.start",
   startDraftProviderLogin: "login.startDraft",
   discardDraftLogin: "login.cancel",

@@ -34,9 +34,13 @@ import type {
   ModelSettingsView,
   PermissionReply,
   PrepareProviderResult,
+  ProviderEntryConfig,
   ProviderOverview,
   ProviderPreset,
   ProviderSetupDescription,
+  UpdateSetupProviderPatch,
+  UpdateSetupProviderResult,
+  UpstreamModelEntry,
   QuestionReply,
   ReasoningEffort,
   RewindMode,
@@ -238,6 +242,29 @@ export interface RpcProvider {
   /** 删除向导条目及凭据；本连接任一会话正在使用时拒绝（provider_in_use） */
   removeSetupProvider(providerId: string): Promise<void>;
   logoutProvider(providerId: string): Promise<void>;
+  /**
+   * 编辑自定义服务商（U-07）：现读 providers.json 条目原文给编辑表单预填；
+   * 条目不在向导层时为 null。
+   */
+  describeSetupProvider(providerId: string): Promise<ProviderEntryConfig | null>;
+  /**
+   * 用候选配置发一次 GET /models（不写任何东西，凭据按条目现有规则解析）；
+   * 失败抛错，由界面决定是否「仍然保存」。
+   */
+  probeSetupProviderModels(params: {
+    providerId: string;
+    type: "openai-compatible" | "anthropic";
+    baseURL?: string;
+    headers?: Record<string, string>;
+  }): Promise<{ models: UpstreamModelEntry[] }>;
+  /**
+   * 保存自定义条目编辑（id 锁定；显示名/Base URL/协议/请求头可改；
+   * patch.models 存在时同时更新模型清单）。只对 providers.json 里的自定义条目开放。
+   */
+  updateSetupProvider(
+    providerId: string,
+    patch: UpdateSetupProviderPatch,
+  ): Promise<UpdateSetupProviderResult>;
 }
 
 /**
@@ -606,6 +633,10 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     logoutProvider: async (providerId) => {
       await call("provider.logoutProvider", { providerId });
     },
+    describeSetupProvider: (providerId) => call("provider.describeSetupProvider", { providerId }),
+    probeSetupProviderModels: (params) => call("provider.probeSetupProviderModels", params),
+    updateSetupProvider: (providerId, patch) =>
+      call("provider.updateSetupProvider", { providerId, patch }),
   };
 
   const login: RpcLogin = {

@@ -409,6 +409,184 @@ describe("敏感参数", () => {
   });
 });
 
+describe("provider.* 编辑自定义服务商（U-07）", () => {
+  it("describeSetupProvider：返回 providers.json 条目（无凭据），未知 id 为 null", async () => {
+    const { baseURL } = await serveUpstream([{ id: "m1", context_length: 8000 }]);
+    const h = await connectWithConfig();
+    await addProvider(h, baseURL);
+    const entry = await h.client.provider.describeSetupProvider("e2e");
+    expect(entry).toMatchObject({ id: "e2e", type: "openai-compatible", baseURL });
+    expect(JSON.stringify(entry)).not.toContain("sk-e2e");
+    expect(await h.client.provider.describeSetupProvider("ghost")).toBeNull();
+    h.client.close();
+    await h.served;
+  });
+
+  it("probeSetupProviderModels：按候选配置请求候选地址，条目与重载计数不变", async () => {
+    const a = await serveUpstream([{ id: "m-a" }]);
+    const b = await serveUpstream([{ id: "m-b", context_length: 4096 }]);
+    const h = await connectWithConfig();
+    await addProvider(h, a.baseURL);
+    const before = h.reloadCount();
+
+    const result = await h.client.provider.probeSetupProviderModels({
+      providerId: "e2e",
+      type: "openai-compatible",
+      baseURL: b.baseURL,
+      headers: {},
+    });
+    expect(result.models.map((m) => m.id)).toEqual(["m-b"]);
+    expect(h.reloadCount()).toBe(before);
+    const raw = JSON.parse(readFileSync(path.join(h.home, "providers.json"), "utf8")) as {
+      providers: { id: string; baseURL?: string }[];
+    };
+    expect(raw.providers[0]?.baseURL).toBe(a.baseURL);
+    h.client.close();
+    await h.served;
+  });
+
+  it("probe 参数校验：type 枚举 / headers 对象与值类型 → -32602", async () => {
+    const h = await connectWithConfig();
+    await expect(
+      h.client.provider.probeSetupProviderModels({
+        providerId: "e2e",
+        type: "bogus" as "openai-compatible",
+      }),
+    ).rejects.toMatchObject({ rpcCode: -32602 });
+    await expect(
+      h.client.provider.probeSetupProviderModels({
+        providerId: "e2e",
+        type: "openai-compatible",
+        headers: "x" as unknown as Record<string, string>,
+      }),
+    ).rejects.toMatchObject({ rpcCode: -32602 });
+    await expect(
+      h.client.provider.probeSetupProviderModels({
+        providerId: "e2e",
+        type: "openai-compatible",
+        headers: { "X-A": 3 as unknown as string },
+      }),
+    ).rejects.toMatchObject({ rpcCode: -32602 });
+    h.client.close();
+    await h.served;
+  });
+
+  it("updateSetupProvider：字段校验 -32005/field；成功触发重载与通知，凭据保留", async () => {
+    const { baseURL } = await serveUpstream([{ id: "m1" }, { id: "m2" }]);
+    const h = await connectWithConfig();
+    await addProvider(h, baseURL);
+    const before = h.reloadCount();
+    let changed = 0;
+    h.client.onProvidersChanged(() => {
+      changed += 1;
+    });
+
+    await expect(
+      h.client.provider.updateSetupProvider("e2e", { baseURL: " " }),
+    ).rejects.toMatchObject({ rpcCode: -32005, field: "baseURL" });
+    await expect(
+      h.client.provider.updateSetupProvider("e2e", { headers: { "bad name": "v" } }),
+    ).rejects.toMatchObject({ rpcCode: -32005, field: "headers" });
+    await expect(
+      h.client.provider.updateSetupProvider("ghost", { displayName: "x" }),
+    ).rejects.toMatchObject({ rpcCode: -32005, field: "providerId" });
+
+    // 内置预设条目（id 与地址同 preset 一致）拒绝
+    await h.config.saveSetupProvider({
+      id: "deepseek",
+      type: "openai-compatible",
+      baseURL: "https://api.deepseek.com/v1",
+      models: {},
+    });
+    await expect(
+      h.client.provider.updateSetupProvider("deepseek", { displayName: "x" }),
+    ).rejects.toMatchObject({ rpcCode: -32005, field: "preset" });
+    expect(h.reloadCount()).toBe(before);
+    expect(changed).toBe(0);
+
+    const result = await h.client.provider.updateSetupProvider("e2e", {
+      displayName: "显示名",
+      headers: { "X-A": "1" },
+      sessionHeader: "X-S",
+    });
+    expect(result.providerId).toBe("e2e");
+    expect(changed).toBe(1);
+    expect(h.reloadCount()).toBe(before + 1);
+    expect(await h.credentials.get("e2e")).toBe("sk-e2e");
+    const entry = await h.client.provider.describeSetupProvider("e2e");
+    expect(entry).toMatchObject({
+      displayName: "显示名",
+      headers: { "X-A": "1" },
+      sessionHeader: "X-S",
+      baseURL,
+    });
+    // models 未提供 → 模型清单不变
+    expect(Object.keys(entry?.models ?? {}).length).toBe(2);
+    h.client.close();
+    await h.served;
+  });
+
+  it("probe/update 的自定义请求头值按秘密处理：底层报错含该值时只回显 [redacted]", async () => {
+    const home = tmpDir("nct-rpc-seed-home-");
+    writeFileSync(
+      path.join(home, "providers.json"),
+      JSON.stringify({
+        version: 1,
+        providers: [
+          {
+            id: "e2e",
+            type: "openai-compatible",
+            baseURL: "http://127.0.0.1:9/v1",
+            models: {},
+          },
+        ],
+      }),
+    );
+    const platform = createPlatform();
+    // get 抛错的消息里故意带入「将要作为请求头值发送的串」，模拟底层报错回显秘密
+    const throwingStore: CredentialStore = {
+      backend: () => "memory",
+      get: () => Promise.reject(new Error("store 拒绝 probe-secret-probe")),
+      set: () => Promise.resolve(),
+      setAccount: () => Promise.resolve(),
+      delete: () => Promise.resolve(),
+      has: () => false,
+    };
+    const config = await loadConfig(platform, {
+      nocturneHome: home,
+      env: () => undefined,
+      credentials: throwingStore,
+      modelsDevFetch: () => Promise.reject(new Error("离线")),
+      upstreamFetch: () => Promise.resolve([]),
+    });
+    const h = await connectWithConfig({
+      config,
+      credentials: throwingStore,
+      reloadError: new Error("重载说 probe-secret-update"),
+    });
+
+    await expect(
+      h.client.provider.probeSetupProviderModels({
+        providerId: "e2e",
+        type: "openai-compatible",
+        headers: { "X-Auth": "probe-secret-probe" },
+      }),
+    ).rejects.toMatchObject({ message: "store 拒绝 [redacted]" });
+    await expect(
+      h.client.provider.updateSetupProvider("e2e", {
+        displayName: "x",
+        headers: { "X-Auth": "probe-secret-update" },
+      }),
+    ).rejects.toMatchObject({ message: "重载说 [redacted]" });
+
+    const text = h.wire.join("\n") + JSON.stringify(h.diagnostics);
+    expect(text).not.toContain("probe-secret-probe");
+    expect(text).not.toContain("probe-secret-update");
+    h.client.close();
+    await h.served;
+  });
+});
+
 describe("runtime.reloadConfig", () => {
   it("别处改了配置文件：重载后 listModels 含新服务商，providersChanged 先于响应", async () => {
     const h = await connectWithConfig();

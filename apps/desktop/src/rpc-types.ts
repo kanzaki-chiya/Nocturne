@@ -10,6 +10,10 @@ export type ProviderPreset = Awaited<ReturnType<RpcProvider["listProviderPresets
 export type ProviderSetupDescription = Awaited<ReturnType<RpcProvider["describeProviderSetup"]>>;
 export type PrepareProviderResult = Awaited<ReturnType<RpcProvider["prepareProvider"]>>;
 export type AddProviderResult = Awaited<ReturnType<RpcProvider["commitProvider"]>>;
+export type SetupProviderEntry = NonNullable<
+  Awaited<ReturnType<RpcProvider["describeSetupProvider"]>>
+>;
+export type UpdateSetupProviderPatch = Parameters<RpcProvider["updateSetupProvider"]>[1];
 export type ModelSettingsView = Awaited<ReturnType<RpcProvider["listModelSettings"]>>[number];
 export type ModelFieldSource = ModelSettingsView["fields"]["displayName"]["source"];
 export type ModelSettingsPatch = Parameters<RpcProvider["saveModelSettings"]>[2];

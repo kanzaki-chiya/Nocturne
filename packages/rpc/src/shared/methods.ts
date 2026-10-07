@@ -33,9 +33,13 @@ import type {
   ModelSettingsView,
   PermissionReply,
   PrepareProviderResult,
+  ProviderEntryConfig,
   ProviderOverview,
   ProviderPreset,
   ProviderSetupDescription,
+  UpdateSetupProviderPatch,
+  UpdateSetupProviderResult,
+  UpstreamModelEntry,
   QuestionReply,
   ReasoningEffort,
   RewindMode,
@@ -282,6 +286,26 @@ export interface RpcMethods {
   };
   "provider.removeSetupProvider": { params: { providerId: string }; result: null };
   "provider.logoutProvider": { params: { providerId: string }; result: null };
+  // 编辑自定义服务商（U-07）：读条目原文给编辑表单预填；
+  // probe 用候选配置获取模型列表（不写任何东西）；
+  // update 走 saveSetupProvider 的 replace 模式。
+  "provider.describeSetupProvider": {
+    params: { providerId: string };
+    result: ProviderEntryConfig | null;
+  };
+  "provider.probeSetupProviderModels": {
+    params: {
+      providerId: string;
+      type: "openai-compatible" | "anthropic";
+      baseURL?: string;
+      headers?: Record<string, string>;
+    };
+    result: { models: UpstreamModelEntry[] };
+  };
+  "provider.updateSetupProvider": {
+    params: { providerId: string; patch: UpdateSetupProviderPatch };
+    result: UpdateSetupProviderResult;
+  };
 
   // 登录会话（rpc.md 3.4）：start 返回句柄，完成经 login.completed 通知；
   // 浏览器与授权码粘贴都是客户端的事
@@ -423,6 +447,9 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "provider.refreshModelsDev": true,
   "provider.removeSetupProvider": true,
   "provider.logoutProvider": true,
+  "provider.describeSetupProvider": true,
+  "provider.probeSetupProviderModels": true,
+  "provider.updateSetupProvider": true,
   "login.start": true,
   "login.startDraft": true,
   "login.submitManual": true,

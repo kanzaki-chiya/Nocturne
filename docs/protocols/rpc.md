@@ -78,7 +78,7 @@
 | 方法 | 参数 → 结果 |
 |---|---|
 | `listProviderPresets` | `{}` → `ProviderPreset[]` |
-| `describeProviders` | `{}` → `{ providers: ProviderOverview[]; setupWarning? }`；`ProviderOverview.authKind`（`"apiKey"` / `"env"` / `"account"` / `"external-file"` / `"none"`）是条目的认证方式，客户端据此决定显示「换密钥」还是「重新登录」，不再自行推断 |
+| `describeProviders` | `{}` → `{ providers: ProviderOverview[]; setupWarning? }`；`ProviderOverview.authKind`（`"apiKey"` / `"env"` / `"account"` / `"external-file"` / `"none"`）是条目的认证方式，客户端据此决定显示「换密钥」还是「重新登录」，不再自行推断；`displayName` 是条目声明的显示名（缺省显示 id） |
 | `describeProviderSetup` | `{ presetId }` → `ProviderSetupDescription` |
 | `describeAccountStorage` | `{ providerId }` → `AccountStorageSetup \| null` |
 | `prepareProvider` | `Omit<AddProviderInput,"modelId">` → `PrepareProviderResult`（只校验、暂存草稿，不落盘）；名称与已有服务商重复时报 -32005 / `field: "name"`（[provider-setup.md](../architecture/provider-setup.md)「名称唯一性」）。结果的 `models` 是获取到的上游模型摘要（`id`、`displayName?`、`reasoning?`、`imageInput?`、`contextWindow?`、`maxOutputTokens?`，与 `modelCount` 同数），供保存前预览 |
@@ -91,6 +91,9 @@
 | `refreshModelsDev` | `{}` → `{ warning: string \| null }`；**变更方法** |
 | `removeSetupProvider` | `{ providerId }` → `null`；**变更方法**；本连接任一会话正在使用时报 `provider_in_use`（同 CLI/TUI 的规则；因服务端持有会话，由服务端对本连接全部已打开会话判断） |
 | `logoutProvider` | `{ providerId }` → `null`；**变更方法** |
+| `describeSetupProvider` | `{ providerId }` → `ProviderEntryConfig \| null`；providers.json 条目原文（不含凭据），供编辑表单预填；非向导条目为 `null` |
+| `probeSetupProviderModels` | `{ providerId, type, baseURL?, headers? }` → `{ models: UpstreamModelEntry[] }`；按候选配置向候选地址发一次模型列表请求，凭据按条目现有规则解析，不写任何配置；失败原样报错，由客户端决定是否「仍然保存」 |
+| `updateSetupProvider` | `{ providerId, patch }` → `{ providerId, modelCount, message }`；**变更方法**；只允许 providers.json 里的自定义条目——非向导条目报 -32005 / `field: "providerId"`，内置预设条目报 `field: "preset"`；`patch` 缺省字段保留原值（字符串空串表示清除），`models` 提供时随条目更新清单与 `source`/`fetchedAt` |
 
 **配置对象与重载**（ADR-0044 追加记录）：
 
@@ -217,7 +220,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 - 第一版不监听端口，不鉴权：能连上传输的只有启动服务端的父进程，权限等同于运行 `nctrn` 的用户（[ADR-0044](../decisions/ADR-0044-rpc-stdio.md) 第 8 节）。
 - 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` 事件与 `respondPermission` 回复，不判断"要不要确认"。
 - 诊断记录（`diagnostics` 回调）只含连接状态、方法名与结果（成功与否、错误码），**不含任何参数与通知内容**——参数里可能有密钥明文（`provider.prepareProvider`、`provider.setCredential`）或用户输入，通知里可能有一次性密钥（`login.completed.unstoredKey`）。
-- **敏感参数**：服务端维护一张敏感方法表（`SENSITIVE_METHODS`）——`runtime.updateSettings` 的 `reviewerKey`、`provider.prepareProvider` 中 `credential.kind === "apiKey"` 的 `key`、`provider.setCredential` 的 `key`、`login.submitManual` 的 `text`。这些方法失败时，错误响应 `message` 与 `data` 里出现的秘密值一律替换为 `[redacted]`；其他方法沿用 Core 的固定文案错误（Core 错误本身不含秘密）。通知内容不进诊断，密钥只经其语义通道传递（如 `login.completed.unstoredKey` 恰好一次）。
+- **敏感参数**：服务端维护一张敏感方法表（`SENSITIVE_METHODS`）——`runtime.updateSettings` 的 `reviewerKey`、`provider.prepareProvider` 中 `credential.kind === "apiKey"` 的 `key`、`provider.setCredential` 的 `key`、`provider.updateSetupProvider` 的 `patch.headers` 各值、`provider.probeSetupProviderModels` 的 `headers` 各值、`login.submitManual` 的 `text`。这些方法失败时，错误响应 `message` 与 `data` 里出现的秘密值一律替换为 `[redacted]`；其他方法沿用 Core 的固定文案错误（Core 错误本身不含秘密）。通知内容不进诊断，密钥只经其语义通道传递（如 `login.completed.unstoredKey` 恰好一次）。
 
 ## 8. 与公开 API 保持一致
 

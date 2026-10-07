@@ -156,12 +156,14 @@ const PREPARED = {
 function pageProps(overrides?: {
   client?: RpcClient | undefined;
   currentProvider?: string;
+  currentModel?: string;
   inUse?: ReadonlySet<string>;
   openUrl?: (url: string) => void;
 }) {
   return {
     client: overrides?.client,
     currentProvider: overrides?.currentProvider,
+    currentModel: overrides?.currentModel,
     inUse: overrides?.inUse,
     openUrl: overrides?.openUrl ?? noop,
     providersVersion: 0,
@@ -675,6 +677,287 @@ describe("模型设置对话框", () => {
     fireEvent.click(button("取消"));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(server.calls.some((c) => c.method === "provider.saveModelSettings")).toBe(false);
+    server.close();
+  });
+});
+
+describe("编辑服务商（U-07）", () => {
+  /** 自定义条目：id 不与任何 preset.defaultName 相同 → 可编辑 */
+  const CUSTOM: ProviderOverview = {
+    ...PROVIDER,
+    id: "corp",
+    host: "api.corp.test",
+  };
+  const ENTRY = {
+    id: "corp",
+    type: "openai-compatible",
+    baseURL: "https://api.corp.test/v1",
+    displayName: "Corp AI",
+    headers: { "X-Team": "core" },
+    sessionHeader: "X-Session",
+    models: { m1: {}, m2: {} },
+  };
+
+  function openList(server: ReturnType<typeof fakeServer>) {
+    void server;
+    const list = screen.getByRole("navigation", { name: "服务商列表" });
+    return (text: string) =>
+      [...list.querySelectorAll("a")].find((a) => a.querySelector(".nm")?.textContent === text);
+  }
+
+  async function openEditDialog(server: ReturnType<typeof fakeServer>, entry: unknown = ENTRY) {
+    await screen.findByText("已配置");
+    const row = openList(server)("corp");
+    if (row === undefined) throw new Error("缺少 corp 行");
+    fireEvent.click(row);
+    const edit = await screen.findByRole("button", { name: "编辑" });
+    fireEvent.click(edit);
+    const dialog = await screen.findByRole("dialog", { name: "编辑 corp" });
+    await waitFor(() => {
+      expect((screen.getByLabelText("显示名称") as HTMLInputElement).value).toBe(
+        (entry as { displayName?: string } | null)?.displayName ?? "",
+      );
+    });
+    return dialog;
+  }
+
+  it("内置预设条目没有「编辑」；自定义条目有", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [PROVIDER, CUSTOM] },
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
+        "runtime.defaultModel": null,
+        "provider.listModelSettings": [],
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await screen.findByText("已配置");
+    const row = openList(server);
+    // openrouter 是内置预设条目（id === preset.defaultName）→ 只读
+    const openrouter = row("openrouter");
+    if (openrouter === undefined) throw new Error("缺少 openrouter 行");
+    fireEvent.click(openrouter);
+    await screen.findByRole("button", { name: "换密钥" });
+    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
+    // corp 是自定义条目 → 可编辑
+    const corp = row("corp");
+    if (corp === undefined) throw new Error("缺少 corp 行");
+    fireEvent.click(corp);
+    await screen.findByRole("button", { name: "编辑" });
+    server.close();
+  });
+
+  it("预填当前值；地址未变时不探测、保存不携带 models", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [CUSTOM] },
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
+        "runtime.defaultModel": null,
+        "provider.listModelSettings": [],
+        "provider.describeSetupProvider": ENTRY,
+        "provider.probeSetupProviderModels": { models: [] },
+        "provider.updateSetupProvider": {
+          providerId: "corp",
+          modelCount: 2,
+          message: "已更新 corp",
+        },
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    const dialog = await openEditDialog(server);
+
+    expect((screen.getByLabelText("服务商 ID") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("服务地址") as HTMLInputElement).value).toBe(
+      "https://api.corp.test/v1",
+    );
+    expect((screen.getByLabelText("请求头 1 名称") as HTMLInputElement).value).toBe("X-Team");
+    expect((screen.getByLabelText("请求头 1 值") as HTMLInputElement).value).toBe("core");
+    expect((screen.getByLabelText("会话标识请求头") as HTMLInputElement).value).toBe("X-Session");
+    expect(dialog.textContent).toContain("密钥在详情页「换密钥」修改");
+    expect(dialog.textContent).toContain("地址与协议未变化，模型列表保持现状");
+
+    // 改显示名后保存（地址未变 → 不需要探测）
+    fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "新名字" } });
+    fireEvent.click(button("保存"));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    const call = server.calls.find((c) => c.method === "provider.updateSetupProvider");
+    expect(call).toBeDefined();
+    expect(call?.params.providerId).toBe("corp");
+    expect(call?.params.patch).toMatchObject({
+      displayName: "新名字",
+      type: "openai-compatible",
+      baseURL: "https://api.corp.test/v1",
+      headers: { "X-Team": "core" },
+      sessionHeader: "X-Session",
+    });
+    expect(call?.params.patch).not.toHaveProperty("models");
+    expect(server.calls.some((c) => c.method === "provider.probeSetupProviderModels")).toBe(false);
+    server.close();
+  });
+
+  it("地址变化必须先探测；成功后提示在用模型是否仍在、保存携带新清单", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [CUSTOM] },
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
+        "runtime.defaultModel": { provider: "corp", model: "m1" },
+        "provider.listModelSettings": [],
+        "provider.describeSetupProvider": ENTRY,
+        "provider.probeSetupProviderModels": {
+          models: [{ id: "m1", contextWindow: 100 }, { id: "m3" }],
+        },
+        "provider.updateSetupProvider": {
+          providerId: "corp",
+          modelCount: 2,
+          message: "已更新 corp，2 个模型",
+        },
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    const dialog = await openEditDialog(server);
+
+    fireEvent.change(screen.getByLabelText("服务地址"), {
+      target: { value: "https://api.corp.test/v2" },
+    });
+    expect(dialog.textContent).toContain("保存前先按候选配置获取模型列表");
+    expect(button("保存").disabled).toBe(true);
+
+    fireEvent.click(button("获取模型"));
+    await screen.findByText("✓ 2 个模型");
+    // 默认模型 corp/m1：m1 在新清单里
+    expect(dialog.textContent).toContain("在用的 m1 仍在列表中");
+    const probe = server.calls.find((c) => c.method === "provider.probeSetupProviderModels");
+    expect(probe?.params).toMatchObject({
+      providerId: "corp",
+      type: "openai-compatible",
+      baseURL: "https://api.corp.test/v2",
+      headers: { "X-Team": "core" },
+    });
+    expect(button("保存").disabled).toBe(false);
+    fireEvent.click(button("保存"));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    const call = server.calls.find((c) => c.method === "provider.updateSetupProvider");
+    expect(call?.params.patch).toMatchObject({
+      baseURL: "https://api.corp.test/v2",
+      models: [{ id: "m1", contextWindow: 100 }, { id: "m3" }],
+    });
+    server.close();
+  });
+
+  it("在用模型不在新清单里给出警告", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [CUSTOM] },
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
+        "runtime.defaultModel": { provider: "corp", model: "m1" },
+        "provider.listModelSettings": [],
+        "provider.describeSetupProvider": ENTRY,
+        "provider.probeSetupProviderModels": { models: [{ id: "m9" }] },
+        "provider.updateSetupProvider": {
+          providerId: "corp",
+          modelCount: 1,
+          message: "已更新 corp，1 个模型",
+        },
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    const dialog = await openEditDialog(server);
+    fireEvent.change(screen.getByLabelText("服务地址"), {
+      target: { value: "https://api.corp.test/v2" },
+    });
+    fireEvent.click(button("获取模型"));
+    await screen.findByText("✓ 1 个模型");
+    expect(dialog.textContent).toContain("在用的 m1 不在新列表里");
+    server.close();
+  });
+
+  it("探测失败允许「仍然保存」（不携带 models）", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [CUSTOM] },
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
+        "runtime.defaultModel": null,
+        "provider.listModelSettings": [],
+        "provider.describeSetupProvider": ENTRY,
+        "provider.probeSetupProviderModels": new RpcFail(-32000, "连接超时"),
+        "provider.updateSetupProvider": {
+          providerId: "corp",
+          modelCount: 2,
+          message: "已更新 corp",
+        },
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await openEditDialog(server);
+    fireEvent.change(screen.getByLabelText("服务地址"), {
+      target: { value: "https://api.corp.test/v2" },
+    });
+    fireEvent.click(button("获取模型"));
+    await screen.findByText("✗ 获取失败：连接超时");
+    fireEvent.click(button("仍然保存"));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    const call = server.calls.find((c) => c.method === "provider.updateSetupProvider");
+    expect(call?.params.patch).toMatchObject({ baseURL: "https://api.corp.test/v2" });
+    expect(call?.params.patch).not.toHaveProperty("models");
+    server.close();
+  });
+
+  it("describeSetupProvider 返回 null：对话框给出错误且不渲染表单", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [CUSTOM] },
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
+        "runtime.defaultModel": null,
+        "provider.listModelSettings": [],
+        "provider.describeSetupProvider": null,
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await screen.findByText("已配置");
+    const row = openList(server)("corp");
+    if (row === undefined) throw new Error("缺少 corp 行");
+    fireEvent.click(row);
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    const dialog = await screen.findByRole("dialog", { name: "编辑 corp" });
+    await waitFor(() => {
+      expect(dialog.textContent).toContain("不是向导写入的条目");
+    });
+    expect(screen.queryByLabelText("服务地址")).toBeNull();
+    server.close();
+  });
+
+  it("服务端字段错误映射到对应输入并允许重试", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [CUSTOM] },
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
+        "runtime.defaultModel": null,
+        "provider.listModelSettings": [],
+        "provider.describeSetupProvider": ENTRY,
+        "provider.updateSetupProvider": new RpcFail(-32005, "服务地址不能为空", {
+          field: "baseURL",
+        }),
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await openEditDialog(server);
+    fireEvent.click(button("保存"));
+    await screen.findByText("服务地址不能为空");
+    // 可继续编辑重试（committing 已复位）
+    expect(button("保存").disabled).toBe(false);
     server.close();
   });
 });

@@ -15,6 +15,8 @@ import type {
   ProviderOverview,
   ProviderPreset,
   ProviderSetupDescription,
+  SetupProviderEntry,
+  UpdateSetupProviderPatch,
 } from "./rpc-types";
 import "./pages.css";
 
@@ -173,6 +175,7 @@ type Sel = { kind: "provider"; id: string } | { kind: "preset"; id: string } | n
 export function ProvidersPage({
   client,
   currentProvider: sessionProvider,
+  currentModel: sessionModel,
   inUse,
   openUrl,
   providersVersion,
@@ -182,6 +185,8 @@ export function ProvidersPage({
   client: RpcClient | undefined;
   /** 当前会话使用的 provider id（标记「当前」）；草稿态为 undefined，此时改用默认模型的服务商 */
   currentProvider: string | undefined;
+  /** 当前会话使用的模型 id（编辑对话框的「是否仍在列表」提示） */
+  currentModel?: string | undefined;
   /** 已打开会话正在使用的 provider id（删除置灰） */
   inUse?: ReadonlySet<string> | undefined;
   openUrl: (url: string) => void;
@@ -290,7 +295,9 @@ export function ProvidersPage({
               }}
             >
               <span className={`dot ${statusDot(p)}`} />
-              <span className="nm">{p.id}</span>
+              <span className="nm" title={p.displayName !== undefined ? p.id : undefined}>
+                {p.displayName ?? p.id}
+              </span>
               <span className={`r${failed(p) ? " warn" : ""}`}>
                 {p.id === currentProvider && <span className="tagc">当前</span>}
                 {failed(p) ? "已失效" : `${p.modelCount} 个模型`}
@@ -325,6 +332,21 @@ export function ProvidersPage({
                   current={selProvider.id === currentProvider}
                   inUse={inUse?.has(selProvider.id) === true}
                   defaultKey={data.defaultKey}
+                  editable={
+                    selProvider.managed &&
+                    !data.presets.some(
+                      (pr) => pr.defaultName !== "" && pr.defaultName === selProvider.id,
+                    )
+                  }
+                  inUseModel={
+                    sessionProvider !== undefined
+                      ? selProvider.id === sessionProvider
+                        ? sessionModel
+                        : undefined
+                      : data.defaultKey?.startsWith(`${selProvider.id}/`) === true
+                        ? data.defaultKey.slice(selProvider.id.length + 1)
+                        : undefined
+                  }
                   openUrl={openUrl}
                   onChanged={() => void refresh()}
                   onOpenModels={onOpenModels}
@@ -366,6 +388,8 @@ function ProviderDetail({
   current,
   inUse,
   defaultKey,
+  editable,
+  inUseModel,
   openUrl,
   onChanged,
   onOpenModels,
@@ -375,6 +399,10 @@ function ProviderDetail({
   current: boolean;
   inUse: boolean;
   defaultKey: string | null;
+  /** 向导写入的自定义条目（内置预设条目的地址/协议由程序维护，只读） */
+  editable: boolean;
+  /** 该服务商正被会话/默认模型引用的模型 id（编辑对话框的「是否仍在列表」提示） */
+  inUseModel: string | undefined;
   openUrl: (url: string) => void;
   onChanged: () => void;
   onOpenModels?: (() => void) | undefined;
@@ -385,7 +413,7 @@ function ProviderDetail({
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<null | "rekey" | "remove" | "logout">(null);
+  const [dialog, setDialog] = useState<null | "edit" | "rekey" | "remove" | "logout">(null);
   const [relogin, setRelogin] = useState<ReloginState>({ kind: "idle" });
   const [loginError, setLoginError] = useState<string | null>(null);
   const [unstored, setUnstored] = useState<NonNullable<LoginCompleted["unstoredKey"]> | null>(null);
@@ -497,6 +525,17 @@ function ProviderDetail({
           {p.overridden && <span className="tagw">被更高层覆盖</span>}
         </div>
         <span className="acts">
+          {editable && (
+            <button
+              className="btn"
+              disabled={busy !== null}
+              onClick={() => {
+                setDialog("edit");
+              }}
+            >
+              编辑
+            </button>
+          )}
           {(auth === "apiKey" || auth === "none") && p.managed && (
             <button
               className="btn"
@@ -706,6 +745,22 @@ function ProviderDetail({
           }}
         />
       )}
+      {dialog === "edit" && (
+        <ProviderEditDialog
+          client={client}
+          provider={p}
+          inUseModel={inUseModel}
+          onClose={() => {
+            setDialog(null);
+          }}
+          onSaved={(message) => {
+            setDialog(null);
+            setNotice(message);
+            onChanged();
+            void loadModels();
+          }}
+        />
+      )}
       {dialog === "rekey" && (
         <RekeyDialog
           client={client}
@@ -908,6 +963,390 @@ function ConfirmDialog({
           >
             {busy ? "处理中…" : confirmLabel}
           </button>
+        </div>
+      </div>
+    </Scrim>
+  );
+}
+
+/* ---------------- 编辑自定义服务商（U-07） ---------------- */
+
+type ProbeState =
+  | { kind: "idle" }
+  | { kind: "busy" }
+  | { kind: "ok"; models: FetchedModel[] }
+  | { kind: "err"; message: string };
+
+/**
+ * 编辑向导写入的自定义条目（U-07）：复用添加表单的样式与字段；id 锁定，
+ * 密钥仍走「换密钥」。地址或协议变化时必须先以候选配置探测模型列表；
+ * 探测失败允许「仍然保存」（不带新清单，条目保留原模型列表）。
+ */
+function ProviderEditDialog({
+  client,
+  provider: p,
+  inUseModel,
+  onClose,
+  onSaved,
+}: {
+  client: RpcClient;
+  provider: ProviderOverview;
+  inUseModel: string | undefined;
+  onClose: () => void;
+  onSaved: (message: string) => void;
+}) {
+  const [entry, setEntry] = useState<SetupProviderEntry | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [type, setType] = useState<"openai-compatible" | "anthropic">("openai-compatible");
+  const [baseURL, setBaseURL] = useState("");
+  const [headers, setHeaders] = useState<{ name: string; value: string }[]>([]);
+  const [sessionHeader, setSessionHeader] = useState("");
+  const [probe, setProbe] = useState<ProbeState>({ kind: "idle" });
+  const [listOpen, setListOpen] = useState(false);
+  const [fieldErr, setFieldErr] = useState<{ field: string; message: string } | null>(null);
+  const [commitErr, setCommitErr] = useState<string | null>(null);
+  const [committing, setCommitting] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    client.provider
+      .describeSetupProvider(p.id)
+      .then((e) => {
+        if (!alive) return;
+        if (e === null) {
+          setLoadErr(`"${p.id}" 不是向导写入的条目，不能在程序里编辑`);
+          return;
+        }
+        setEntry(e);
+        setDisplayName(e.displayName ?? "");
+        setType(e.type ?? "openai-compatible");
+        setBaseURL(e.baseURL ?? "");
+        setHeaders(Object.entries(e.headers ?? {}).map(([name, value]) => ({ name, value })));
+        setSessionHeader(e.sessionHeader ?? "");
+      })
+      .catch((e: unknown) => {
+        if (alive) setLoadErr(errText(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [client, p.id]);
+
+  const resetProbe = () => {
+    setProbe((cur) => (cur.kind === "busy" ? cur : { kind: "idle" }));
+    setListOpen(false);
+  };
+
+  const endpointChanged =
+    entry !== null &&
+    (type !== (entry.type ?? "openai-compatible") ||
+      baseURL.trim() !== (entry.baseURL ?? "").trim());
+
+  /** 头行 → headers 表；整行空白忽略，名称空但值非空视为用户错误 */
+  const buildHeaders = (): { headers: Record<string, string> } | { error: string } => {
+    const out: Record<string, string> = {};
+    for (const row of headers) {
+      const name = row.name.trim();
+      const value = row.value.trim();
+      if (name === "" && value === "") continue;
+      if (name === "") return { error: "请求头名称不能为空" };
+      if (value === "") return { error: `请求头 ${name} 的值不能为空` };
+      out[name] = value;
+    }
+    return { headers: out };
+  };
+
+  const doProbe = async () => {
+    const built = buildHeaders();
+    if ("error" in built) {
+      setFieldErr({ field: "headers", message: built.error });
+      return;
+    }
+    setFieldErr(null);
+    setProbe({ kind: "busy" });
+    try {
+      const result = await client.provider.probeSetupProviderModels({
+        providerId: p.id,
+        type,
+        baseURL: baseURL.trim(),
+        headers: built.headers,
+      });
+      if (!mounted.current) return;
+      setProbe({ kind: "ok", models: result.models });
+      setListOpen(false);
+    } catch (e) {
+      if (!mounted.current) return;
+      setProbe({ kind: "err", message: errText(e) });
+    }
+  };
+
+  const save = async (includeModels: boolean) => {
+    if (committing || entry === null) return;
+    const built = buildHeaders();
+    if ("error" in built) {
+      setFieldErr({ field: "headers", message: built.error });
+      return;
+    }
+    setFieldErr(null);
+    setCommitErr(null);
+    setCommitting(true);
+    try {
+      const patch: UpdateSetupProviderPatch = {
+        displayName,
+        type,
+        baseURL,
+        headers: built.headers,
+        sessionHeader,
+        ...(includeModels && probe.kind === "ok" ? { models: probe.models } : {}),
+      };
+      const result = await client.provider.updateSetupProvider(p.id, patch);
+      if (!mounted.current) return;
+      onSaved(result.message);
+    } catch (e) {
+      if (!mounted.current) return;
+      const fe = fieldError(e);
+      if (fe !== null) setFieldErr(fe);
+      else setCommitErr(errText(e));
+      setCommitting(false);
+    }
+  };
+
+  const canSave = entry !== null && !committing && (!endpointChanged || probe.kind === "ok");
+  const probeFailed = endpointChanged && probe.kind === "err";
+
+  return (
+    <Scrim onClose={onClose}>
+      <div className="dlg" role="dialog" aria-label={`编辑 ${p.id}`}>
+        <div className="dh3">
+          <b>编辑 {p.id}</b>
+          <span>服务商 ID 不可修改；密钥在详情页「换密钥」修改。</span>
+        </div>
+        {loadErr !== null ? (
+          <div className="errt">{loadErr}</div>
+        ) : entry === null ? (
+          <div className="db">
+            <span className="fine">读取条目…</span>
+          </div>
+        ) : (
+          <div className="db">
+            <div className="field">
+              <div className="lab">
+                <label htmlFor="edit-provider-id">服务商 ID</label>
+                <small>会话、默认模型都按它引用，不可修改</small>
+              </div>
+              <input id="edit-provider-id" className="input" value={p.id} disabled />
+            </div>
+            <div className="field">
+              <div className="lab">
+                <label htmlFor="edit-provider-name">显示名称</label>
+                <small>可选；列表与菜单里显示</small>
+              </div>
+              <input
+                id="edit-provider-name"
+                className={`input${fieldErr?.field === "displayName" ? " err" : ""}`}
+                placeholder={p.id}
+                value={displayName}
+                onChange={(e) => {
+                  setDisplayName(e.target.value);
+                }}
+              />
+              {fieldErr?.field === "displayName" && <div className="errt">{fieldErr.message}</div>}
+            </div>
+            <div className="field">
+              <div className="lab">
+                <label>协议</label>
+              </div>
+              <span className="seg" role="group" aria-label="协议">
+                <button
+                  className={type === "openai-compatible" ? "on" : ""}
+                  onClick={() => {
+                    setType("openai-compatible");
+                    resetProbe();
+                  }}
+                >
+                  OpenAI 兼容
+                </button>
+                <button
+                  className={type === "anthropic" ? "on" : ""}
+                  onClick={() => {
+                    setType("anthropic");
+                    resetProbe();
+                  }}
+                >
+                  Anthropic 兼容
+                </button>
+              </span>
+            </div>
+            <div className="field">
+              <div className="lab">
+                <label htmlFor="edit-provider-url">服务地址</label>
+                <small>{type === "anthropic" ? "留空使用官方端点" : "必填"}</small>
+              </div>
+              <input
+                id="edit-provider-url"
+                className={`input${fieldErr?.field === "baseURL" ? " err" : ""}`}
+                placeholder={type === "anthropic" ? "https://api.anthropic.com" : "https://…"}
+                value={baseURL}
+                onChange={(e) => {
+                  setBaseURL(e.target.value);
+                  resetProbe();
+                }}
+              />
+              {fieldErr?.field === "baseURL" && <div className="errt">{fieldErr.message}</div>}
+            </div>
+            <div className="field">
+              <div className="lab">
+                <label>自定义请求头</label>
+                <small>可选；每个请求都携带</small>
+              </div>
+              {headers.map((row, i) => (
+                <div className="hrow" key={i}>
+                  <input
+                    className="input"
+                    aria-label={`请求头 ${i + 1} 名称`}
+                    placeholder="名称"
+                    value={row.name}
+                    onChange={(e) => {
+                      setHeaders((cur) =>
+                        cur.map((r, j) => (j === i ? { ...r, name: e.target.value } : r)),
+                      );
+                      resetProbe();
+                    }}
+                  />
+                  <input
+                    className="input"
+                    aria-label={`请求头 ${i + 1} 值`}
+                    placeholder="值"
+                    value={row.value}
+                    onChange={(e) => {
+                      setHeaders((cur) =>
+                        cur.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)),
+                      );
+                      resetProbe();
+                    }}
+                  />
+                  <a
+                    className="lnk"
+                    onClick={() => {
+                      setHeaders((cur) => cur.filter((_, j) => j !== i));
+                      resetProbe();
+                    }}
+                  >
+                    删除
+                  </a>
+                </div>
+              ))}
+              <a
+                className="lk"
+                onClick={() => {
+                  setHeaders((cur) => [...cur, { name: "", value: "" }]);
+                }}
+              >
+                ＋ 添加请求头
+              </a>
+              {fieldErr?.field === "headers" && <div className="errt">{fieldErr.message}</div>}
+            </div>
+            <div className="field">
+              <div className="lab">
+                <label htmlFor="edit-provider-session-header">会话标识请求头</label>
+                <small>可选；上游按此请求头区分会话</small>
+              </div>
+              <input
+                id="edit-provider-session-header"
+                className={`input${fieldErr?.field === "sessionHeader" ? " err" : ""}`}
+                placeholder="例如 X-Session-Id"
+                value={sessionHeader}
+                onChange={(e) => {
+                  setSessionHeader(e.target.value);
+                }}
+              />
+              {fieldErr?.field === "sessionHeader" && (
+                <div className="errt">{fieldErr.message}</div>
+              )}
+            </div>
+            {endpointChanged ? (
+              <div className="fetch" data-testid="edit-probe">
+                {probe.kind === "idle" && (
+                  <div className="fl">
+                    <span>地址或协议已变化——保存前先按候选配置获取模型列表。</span>
+                    <button className="btn" onClick={() => void doProbe()}>
+                      获取模型
+                    </button>
+                  </div>
+                )}
+                {probe.kind === "busy" && (
+                  <div className="fl">
+                    <span>正在获取模型列表…</span>
+                  </div>
+                )}
+                {probe.kind === "ok" && (
+                  <>
+                    <div className="fl">
+                      <span className="ok">✓ {probe.models.length} 个模型</span>
+                      {inUseModel !== undefined &&
+                        (probe.models.some((m) => m.id === inUseModel) ? (
+                          <span className="fine">在用的 {inUseModel} 仍在列表中</span>
+                        ) : (
+                          <span className="bad">
+                            在用的 {inUseModel} 不在新列表里，保存后需重新选择模型
+                          </span>
+                        ))}
+                      {probe.models.length > PEEK_MODELS && (
+                        <a
+                          className="tog"
+                          onClick={() => {
+                            setListOpen((v) => !v);
+                          }}
+                        >
+                          {listOpen ? "收起" : "展开"}
+                        </a>
+                      )}
+                    </div>
+                    {probe.models.length > 0 && (
+                      <FetchedModels
+                        models={probe.models}
+                        open={listOpen || probe.models.length <= PEEK_MODELS}
+                      />
+                    )}
+                  </>
+                )}
+                {probe.kind === "err" && (
+                  <div className="fl">
+                    <span className="bad">✗ 获取失败：{probe.message}</span>
+                    <button className="btn" onClick={() => void doProbe()}>
+                      重试
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="hint">地址与协议未变化，模型列表保持现状。</div>
+            )}
+            {commitErr !== null && <div className="errt">{commitErr}</div>}
+          </div>
+        )}
+        <div className="df">
+          <span className="sp" />
+          <button className="btn" onClick={onClose} disabled={committing}>
+            取消
+          </button>
+          {probeFailed ? (
+            <button className="btn danger" disabled={committing} onClick={() => void save(false)}>
+              {committing ? "保存中…" : "仍然保存"}
+            </button>
+          ) : (
+            <button className="btn primary" disabled={!canSave} onClick={() => void save(true)}>
+              {committing ? "保存中…" : "保存"}
+            </button>
+          )}
         </div>
       </div>
     </Scrim>

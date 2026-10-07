@@ -791,6 +791,7 @@ export function App({ host }: { host: DesktopHost }) {
                 <ProvidersPage
                   client={pageClient}
                   currentProvider={active?.view.config.model?.provider}
+                  currentModel={active?.view.config.model?.model}
                   inUse={providersInUse}
                   openUrl={(url) => void host.openUrl(url)}
                   providersVersion={providersVersion}

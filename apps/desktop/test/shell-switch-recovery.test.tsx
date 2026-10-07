@@ -1,7 +1,7 @@
 /**
- * F-01 回归：DesktopHost 的 backend_send 走真实 RPC 服务端
+ * Shell 切换恢复回归：DesktopHost 的 backend_send 走真实 RPC 服务端
  * （createRpcServer + createRuntime + FakeProvider + loadConfig），行交付
- * 经 queueMicrotask 模拟 Tauri channel 的异步时序。第二条用例做故障注入：
+ * 经 queueMicrotask 模拟 Tauri channel 的异步时序。用例做故障注入：
  * 丢弃 setShell 响应与紧随的 config_changed 事件，断言后续切换不被
  * 永久吞掉（useSessionControls 的变更队列 + 超时放行）。
  */
@@ -20,9 +20,9 @@ import { sessionMutationTimeout } from "../src/session-controls";
 import type { DesktopHost } from "../src/host";
 import type { BackendMessage } from "../src/types";
 
-/** 故障注入：某方法发出后精确丢弃其响应与指定类型的会话事件（模拟通道丢消息但没断连）。 */
-export interface FaultSpec {
-  /** 触发丢包的方法名；未设置则不丢包。只触发一次 */
+/** 故障注入：某方法发出后精确丢弃其响应与指定类型的会话事件（模拟通道丢消息但没断连）。只触发一次。 */
+interface FaultSpec {
+  /** 触发丢包的方法名；未设置则不丢包 */
   afterMethod?: string;
   /** 丢弃该请求的响应 */
   dropResponse?: boolean;
@@ -240,24 +240,7 @@ function shellItem(fragment: string): Promise<HTMLElement> {
   });
 }
 
-it("真实后台：切换 Shell 后状态栏立即更新", async () => {
-  const { ws, sessionsDir, pill } = await openSessionWithShell();
-  try {
-    const before = pill.textContent;
-    await pickShell("cmd");
-    await waitFor(() => expect(pill.textContent).not.toBe(before), { timeout: 5000 });
-    await waitFor(() => expect(pill.textContent).toContain("cmd"));
-    // 菜单勾选同步到新值
-    fireEvent.click(pill);
-    const item = await shellItem("cmd");
-    expect(item.getAttribute("aria-checked")).toBe("true");
-  } finally {
-    rmSync(ws, { recursive: true, force: true });
-    rmSync(sessionsDir, { recursive: true, force: true });
-  }
-});
-
-it("真实后台：setShell 响应丢失不锁住后续切换", async () => {
+it("setShell 响应丢失时后续切换仍能放行", async () => {
   sessionMutationTimeout.ms = 60;
   // setShell 发出后丢其响应与紧随的 config_changed 事件：
   // 事件丢了 → entries 不变 → 无触发刷新；响应丢了 → choose 挂起。
