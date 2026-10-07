@@ -300,11 +300,11 @@ ADR-0036 第一轮：子会话沿用父会话的审查器实例与最近用户�
 
 ## 17. 外部 agent（ACP）
 
-[ADR-0049](../decisions/ADR-0049-external-agent-subagent.md) 定义外部委派。`RuntimeOptions.externalAgents` 注入 `ExternalAgentConnector`，由 `@nocturne/acp` 实现、CLI 装配；Core 不依赖 ACP SDK。`task.agent` 选择已启用的外部 agent，与 `preset`、`tools`、`outputSchema` 互斥。没有已启用外部 agent 时，工具 schema 与描述不出现此字段；内置子代理禁用但外部启用时仍注册 `task`，此时 `agent` 必填。嵌套子会话的 `task` 不暴露外部 agent。
+[ADR-0049](../decisions/ADR-0049-external-agent-subagent.md) 定义外部委派。`RuntimeOptions.externalAgents` 注入无状态 `ExternalAgentConnector`，由 `@nocturne/acp` 实现、CLI 装配；Core 不依赖 ACP SDK。connector 不维护名称列表，`run(config, request, ctx)` 每次接收 Core 的配置快照。Core 从程序维护层与用户配置合并结果中筛选 `enabled` 条目，重载后在空闲时立即重建 `task`，正在运行的 Turn 暂存到边界再切换；当前 Turn 的工具描述、schema 和每次外部调用配置保持一致。`task.agent` 选择已启用的外部 agent，与 `preset`、`tools`、`outputSchema` 互斥。没有已启用外部 agent 时，工具 schema 与描述不出现此字段；内置子代理禁用但外部启用时仍注册 `task`，此时 `agent` 必填。嵌套子会话的 `task` 不暴露外部 agent。
 
 入口主体为 `subagent external:<name>`，所有交互式预设默认 `ask`。执行期 connector 仅按 [ADR-0049 第 3 节](../decisions/ADR-0049-external-agent-subagent.md#3-权限入口把关加上外部请求进权限层) 映射 ACP 请求，权限层用父策略重建非交互 gate：同一审查器与只读会话 Grant，剩余 `ask` 拒绝，不产生新 Grant。回调返回决定及来源，供审计记录。只选择 `allow_once`；没有该选项也拒绝，永不选择 `allow_always`。不支持客户端文件系统或终端能力。
 
-每次调用新进程，依次 `initialize`、`session/new`（工作区根）、可选 `session/set_mode`、`session/prompt`，完成后清理整个进程树；中断先 `session/cancel`，短宽限后清理。需要认证时返回 `external_agent_auth_required`，由用户去相应命令行工具登录。外部调用与内置子代理共用 Runtime 级并发槽，不常驻、不复用会话。
+每次调用新进程，依次 `initialize`、`session/new`（工作区根）、可选 `session/set_mode`、逐项 `session/set_config_option`、`session/prompt`，完成后清理整个进程树；中断先 `session/cancel`，短宽限后清理。`configOptions` 的键和值是不透明字符串；对方拒绝某项时返回 `external_agent_config_rejected` 并指出该 id。需要认证时返回 `external_agent_auth_required`，由用户去相应命令行工具登录。外部调用与内置子代理共用 Runtime 级并发槽，不常驻、不复用会话。
 
 超时统一由 `task` 执行器控制（默认 600_000ms，超时触发 `ctx.signal`）；connector 不另设隐式默认超时。只有 `request.timeoutMs` 显式传入时，connector 才设置对应计时器。
 
@@ -313,4 +313,15 @@ ADR-0036 第一轮：子会话沿用父会话的审查器实例与最近用户�
 外部过程不创建 Nocturne 子会话或事件类型。只转发带配置名称前缀的单行工具进度，不转发回复片段；最终回复作为 `modelContent`，沿现有预算截断与落盘。`output` 为 `{ agent, agentVersion?, transcriptPath, transcriptError?: true, stopReason, permissionDecisions: { allowed, denied } }`，不填 `usage`。原始 `session/update` 与权限判定（主体、结果、来源）逐行写入父附件目录的 `external/<callId>.jsonl`；初始化或追加写入失败只记录一次 `external_agent.transcript_failed` 诊断，设置 `output.transcriptError: true`，停止后续写入，调用与权限判定继续正常进行。此时 `transcriptPath` 可能指向缺失或不完整的审计文件。
 
 **保证边界**：只拦截外部 agent 主动请求的操作，应配置其逐项询问模式；费用与额度计在对方账号上；检查点和回退不追踪外部 agent 改动的文件；外部 agent 看不到 Nocturne 的 `task`，不能嵌套。配置与默认禁用的 omp/Codex 预设见 [config.md](config.md#外部-agent-配置)。
+
+## 18. 管理、探测与用户点名
+
+Runtime 提供 `describeExternalAgents({workspaceRoot?})`、`saveExternalAgent({mode,name,config})`、`deleteExternalAgent({name})`、`setExternalAgentEnabled({name,enabled})`、`probeExternalAgent({name}|{config})`；会话提供异步 `describeExternalAgents()`。查询返回 `{agents,warnings}`，保留停用条目与来源信息；写操作只修改程序维护层并重载，手写条目只读，配置细节见 [config.md](config.md#外部-agent-配置)。
+
+探测可以使用已保存名称或未保存草稿，不依赖启用状态。connector 的 `probe(config,{nocturneHome,timeoutMs?})` 先解析命令，再 `initialize`、在 `<NOCTURNE_HOME>` 临时目录 `session/new`，读取 agent 信息、认证方式与会话可选配置项，最后关闭进程并移除临时目录；不发送 prompt、不代办登录，探测结果不持久化。
+
+客户端把 `/<agent名> 任务` 提交为 `delegate:{agent,task}`，与 `skill` 互斥。Core 在 Turn 边界校验名称对应已启用 agent（忽略大小写定位、使用配置中的规范名称），附明确的 `task` 工具指令、指定的 `agent` 和未转义改写的任务原文；`message.user.delegate` 与消息内容共同构成快照，历史折叠、在线视图、恢复与回放均读取日志，不根据当前配置重新生成。该指令不会直接调用 connector，也不会自动授权；模型发起的 `task` 仍走入口权限管线。
+
+斜杠优先级为内置命令、技能、外部 agent。命令或技能与 agent 重名时不能斜杠点名，列表显示警告，模型仍可调用。CLI/TUI 的 `/agents` 只读，桌面端管理与探测入口见 [desktop.md](../apps/desktop.md)。
+
 

@@ -51,7 +51,7 @@
 |---|---|
 | `subscribe` | `{ afterSeq? }` → `{ lastSeq }`，见第 4 节 |
 | `unsubscribe` | → `null`；服务端停止推送 |
-| `submit` | `{ text?, content?, attachments? }` → `TurnEndReason`；**请求一直挂到 Turn 结束**，与进程内 `submit()` 的 resolve 时机相同 |
+| `submit` | `{ text?, content?, attachments?, skill?, delegate? }` → `TurnEndReason`；**请求一直挂到 Turn 结束**，与进程内 `submit()` 的 resolve 时机相同 |
 | `respondPermission` / `respondQuestion` | `{ requestId, reply }` → `null` |
 | `setModel` / `setPermissionPreset` / `setReasoningEffort` / `setShell` | `{ model }` / `{ name }` / `{ level }` / `{ kind }` → `null` |
 | `compact` | → `null` |
@@ -64,6 +64,8 @@
 | `close` | → `null`；关闭这一个会话（刷盘、释放会话锁），其余会话不受影响 |
 
 `submit.attachments` 是 `[{ data: base64, mimeType, label? }]`；解码后交给 Core，大小与格式校验仍在 Core（[ADR-0023](../decisions/ADR-0023-image-input.md)）。`data` 不是合法 base64 报 `invalid_params`，不进 Runtime。
+
+`submit.delegate` 为 `{ agent: string, task: string }`，与 `skill` 互斥。RPC 保留任务原文，Core 校验 agent 已启用并生成明确的 `task.agent` 委派指令，将委派快照写入 `message.user`；它不绕过入口权限确认，也不是直接启动外部进程。见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)。
 
 `readAttachment` 对应 `RuntimeSession.readAttachment(file)`，客户端 `RpcSession.readAttachment(file)` 将标准 base64 解码为 `Uint8Array`。Core 仅接受单个文件名，拒绝路径分隔符、`..`、绝对路径与 Windows 替代数据流；文件必须出现于本会话的持久 `message.user.attachments` 或 `tool.completed.attachments`（包括回退后仍保留的原始记录）。读取当前会话附件目录中的实际文件，每次校验字节数与 sha256，不通过父会话目录兜底，也不允许链接逃逸。分叉读取复制到新 id 的附件；子会话仅授权自身日志里的引用（[sessions.md](../architecture/sessions.md)）。
 
@@ -143,16 +145,33 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 
 技能变更通知复用 providersChanged 以刷新客户端目录；其他后台由客户端转发 reloadConfig，继承已有 echo 防环机制。
 
-### 3.7 通知
+### 3.7 `agents.*`（ADR-0049）
+
+| 方法 | 参数与返回 |
+|---|---|
+| `agents.describeExternalAgents` | `{ workspaceRoot?: string }` → `ExternalAgentsDescription` |
+| `agents.saveExternalAgent` | `{ mode: "create" \| "replace", name, config }` → `ExternalAgentOverview` |
+| `agents.deleteExternalAgent` | `{ name }` → `null` |
+| `agents.setExternalAgentEnabled` | `{ name, enabled }` → `null` |
+| `agents.probeExternalAgent` | `{ name }` 或 `{ config: ExternalAgentConfig }` → `ExternalAgentProbeResult` |
+| `session.describeExternalAgents` | `{ sessionId }` → `ExternalAgentsDescription`；会话当前的外部 agent 快照 |
+
+描述结果为 `{ agents, warnings: string[] }`；条目含 `name/command/args/env?/mode?/configOptions?/description?/enabled/origin/editable/path?`。`origin` 为 `app` 或 `user`；只有 `external-agents.json` 的 app 条目可编辑，`config.json` 条目只读。创建名称跨来源不区分大小写唯一，冲突返回 `-32005`、`data.field: "name"`。项目配置的外部 agent 始终忽略；配置详情见 [config.md](../architecture/config.md#外部-agent-配置)。
+
+探测结果包含 `ok/durationMs/configOptions`，可带 `agentInfo: { name, version, title? }`、`authMethods: { id, name, description? }[]` 和 `error: { code, message }`。`configOptions` 每项含 `id/name/description?/category?/currentValue/options: { value, name }[]`。探测只解析命令并执行 ACP initialize/session-new，从不发送 prompt；草稿探测不写配置、不消耗对方模型额度。
+
+保存、删除、启停串行执行；Runtime 在写入成功后重载配置并在 Turn 边界更新已打开会话，服务端在响应之前发送**一次** `runtime.providersChanged`，失败不发通知。桌面端只经 BackendPool 现有通知传播重载其他后台，页面不再显式传播；继承已有 echo 防环机制，避免重复重载。
+
+### 3.8 通知
 
 | 方向 | 方法 | 参数 | 说明 |
 |---|---|---|---|
 | 客户端→服务端 | `session.interrupt` | `{ sessionId }` | 中断运行中的 Turn；无 Turn 时无操作。`submit` 请求随后以 `aborted` 返回。服务端也接受带 `id` 的请求形式（回复 `null`） |
 | 服务端→客户端 | `event` | `{ sessionId, event }` | `event` 原样是 [events.md](events.md) 的 `RuntimeEvent` 信封，不另包一层 |
-| 服务端→客户端 | `runtime.providersChanged` | `{}` | 服务商配置/凭据变更完成且 Runtime 已用重载后配置重建：在对应 `provider.*` 变更方法（或已保存服务商 `login.start` 成功）的响应/完成通知之前到达一次（3.3、3.4） |
+| 服务端→客户端 | `runtime.providersChanged` | `{}` | 服务商、技能或外部 agent 配置变更成功后的通知；`provider.*`、`skills.setSkillEnabled`、`agents.*` 三个写方法的响应之前到达一次，登录和显式重载同原规则（3.3–3.7） |
 | 服务端→客户端 | `login.completed` | `LoginCompleted` | 登录会话完成或失败（含取消）；绝不先于对应 `login.start`/`startDraft` 的响应到达（3.4） |
 
-### 3.8 `shutdown`
+### 3.9 `shutdown`
 
 请求，无参数。服务端完成与"传输断开"相同的清理（第 6 节）后回复 `null`，再关闭传输。
 
@@ -181,7 +200,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 | `-32002` | `SessionError` | 会话层错误码 |
 | `-32003` | `ProviderLoginError` | 登录错误码 |
 | `-32004` | RPC 层状态错误 | `not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down`、`provider_config_unavailable`（服务端未注入服务商配置）、`provider_in_use`（会话正在使用的服务商拒绝删除）、`unknown_login`（登录会话不存在或已结束） |
-| `-32005` | `ProviderSetupError`（服务商配置表单的字段错误） | `invalid_field`；`data.field` 是字段名（`preset`、`name`、`baseURL`、`credential`、`draftId`、`modelId`），客户端据此标输入框；`name` 也用于报告与已有服务商重名（`已有同名服务商 X（所在层）`） |
+| `-32005` | `ProviderSetupError` / `McpSettingsError` / `ExternalAgentSettingsError`（管理表单字段错误） | `invalid_field`；`data.field` 为对应字段名，客户端据此标输入框。外部 agent 使用 `name`、`mode`、`command`、`configOptions` 等，名称冲突同样返回 `name`（3.7） |
 
 客户端侧另有 `connection_closed`：连接断开时所有在途请求以它失败，而不是悬挂。
 

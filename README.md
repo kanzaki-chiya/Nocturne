@@ -120,6 +120,26 @@ Anthropic 协议可用另一份 Provider 条目，模型引用随之改为 `anth
 
 预设可用 `read-only`、`default`、`auto-edit`、`guarded`、`smart`、`bypass`；旧名称 `full-access` 兼容为 `guarded`。`smart` 对需要确认的操作先做安全审查，拿不准时询问；未配置审查器则按 `guarded` 并提示一次。TUI `/settings` 的「安全审查」可独立选择小模型。`bypass` 放开工作区外写入和内建风险提示，仍保留凭据保护及显式权限规则。子代理通过内置 `task` 工具使用，`explore` 适合只读探索，`general` 可以承担更广的任务。会话中可用 `/preset` 查看或切换预设。流式首事件与空闲超时可在配置的 `turn.firstEventTimeoutMs`、`turn.idleTimeoutMs` 中调整，默认分别为 30000 和 120000 毫秒。更多配置说明见[项目文档](docs/README.md)。
 
+### 外部 agent
+
+外部 agent 是独立安装、登录的编程助手，Nocturne 可以把子任务交给它执行。在桌面端「设置 › 外部 agent」中添加，或在用户 `config.json` 中配置 `externalAgents`，例如使用 omp 并指定模型：
+
+```json
+{
+  "externalAgents": [
+    {
+      "name": "omp",
+      "command": "omp",
+      "args": ["--mode", "acp", "--model", "<服务商>/<模型 ID>"],
+      "description": "使用 omp 执行独立任务",
+      "enabled": true
+    }
+  ]
+}
+```
+
+输入 `/omp 任务原文`（一般形式为 `/<名称> 任务`）可以点名委派。委派入口会请求确认，也可用权限规则放行，例如 `{ "kind": "subagent", "pattern": "external:omp", "action": "allow" }`。费用与额度计在该 agent 自己的账号上；执行期只能拦截它主动请求的操作，不能约束它直接执行、没有请求权限的操作。
+
 ## 基础用法
 
 TUI 中 Alt+V 粘贴剪贴板截图，或把图片文件拖进终端（需模型支持看图）。

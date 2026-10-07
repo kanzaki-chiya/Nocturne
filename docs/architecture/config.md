@@ -9,7 +9,7 @@
 服务商 `auth` 省略等同 `{ kind: "apiKey" }`。非 API key 鉴权只允许用户级来源：项目声明的非 API key `auth` 被忽略；用户账号条目的项目 `auth`、`baseURL`、`headers` 覆盖被忽略并告警。非 API key 条目忽略 `apiKeyEnv`，报告 `provider_auth_conflict`。`openai-siwc` 的生效地址必须精确为 `https://api.openai.com/v1`（[ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 2 节）。
 
 ```text
-内置默认 < models.dev < 向导配置 / MCP 管理 < 用户编辑 < 程序设置 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
+内置默认 < models.dev < 向导配置 / MCP 管理 / 外部 agent 管理 < 用户编辑 < 程序设置 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
 ```
 
 | 层 | 位置 / 来源 | 信任 | 说明 |
@@ -18,6 +18,7 @@
 | models.dev | 随版本快照或 `<NOCTURNE_HOME>/cache/models-dev.json` | 可信 | 只为已有模型补全推理、图片输入、上下文与最大输出；低于上游逐字段声明，不写入 `providers.json`（ADR-0025）；条目声明 `modelsDevProvider` 时另按服务商提供逐模型 `endpoints`（ADR-0031 §4，[providers.md](providers.md) 第 2 节） |
 | 向导配置 | `<NOCTURNE_HOME>/providers.json` | 可信 | `nctrn setup` 与 `/provider` 原子写服务商；旧 `model` 继续读取但不再写入，默认模型改存程序设置层（[provider-setup.md](provider-setup.md)） |
 | MCP 程序维护 | `<NOCTURNE_HOME>/mcp.json` | 可信 | 与 providers.json 同级，低于所有手写配置，逐条校验与原子串行写；详情见 [mcp.md](mcp.md) |
+| 外部 agent 程序维护 | `<NOCTURNE_HOME>/external-agents.json` | 可信 | 低于用户手写配置，逐条校验与原子串行写；仅用户级，详情见第 2 节 |
 | 用户编辑（`userModels`） | 同上 providers.json 条目的 `userModels` 字段 | 可信 | **合成层**：加载时由条目内 `userModels` 包成 `{providers:[{id,models:userModels}]}`，插在向导层与用户配置之间；只作用于 `models` 逐字段合并，不产生权限规则等其他字段（ADR-0024，见第 2 节） |
 | 程序设置 | `<NOCTURNE_HOME>/settings.json` | 可信 | 白名单设置参与合并，界面偏好只保留；低于所有手写配置（[ADR-0034](../decisions/ADR-0034-settings-layer.md)，见第 2 节） |
 | 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；**程序从不改写它** |
@@ -25,7 +26,7 @@
 | 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；API key 经环境变量或操作系统凭据后端进入。`credentials.json` 默认只存索引或密文；用户显式选择后，账号登录记录可以 `plaintext` 写入该文件（[provider-setup.md](provider-setup.md) 第 3 节） |
 | 命令行参数 | `nctrn` 参数 | 可信 | 本次启动的显式意图，优先级最高 |
 
-机器维护的运行时数据（信任列表、项目 Grant、向导配置、程序设置、凭据索引、最近模型列表、models.dev 缓存）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`mcp.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。
+机器维护的运行时数据（信任列表、项目 Grant、向导配置、MCP 与外部 agent 管理、程序设置、凭据索引、最近模型列表、models.dev 缓存）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`mcp.json`、`external-agents.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。
 
 交互输入历史由 Core 的 `RuntimeSession.readInputHistory()` / `recordInputHistory(text)` 管理，保存在 `<NOCTURNE_HOME>/history.jsonl`，**明文保存输入原文**，文件创建权限 `0600`（POSIX）；每行是 `{text, workspaceRoot, time}`。历史按会话绑定的工作区过滤，连续重复输入只记录一次，超过 1000 条保留最近 1000 条。TUI 提交前展开粘贴占位，读取后在输入框重新收起多行原文。读写故障发 `runtime.warning`，不阻断输入；CLI 与 TUI 都不直接读写此文件。
 
@@ -94,7 +95,7 @@ interface ConfigFile {
 | `permissions.rules` | 追加：高层规则排在低层之后（权限"后写优先"语义见 permissions.md 5.1） |
 | `mcp.servers` | 按服务器 id 浅合并（同 `providers`）；不同 id 并存 |
 | `hooks.*` | 按事件点追加：用户级条目在前、项目级在后，执行顺序即此顺序（hooks.md 第 2 节） |
-| `externalAgents` | 仅用户级，按顺序追加；同名警告并保留首条，项目段无条件忽略 |
+| `externalAgents` | 程序层与用户手写层按不区分大小写的名称合并，手写层整条覆盖；同层重复警告并保留首条，项目段无条件忽略 |
 
 **`userModels` 合成层**（ADR-0024 第 2 节）：providers.json 条目里的 `userModels`（模型编辑页 / `/provider model` 写入的逐模型用户编辑）不是合并结果的一部分，而是加载时被包成一个独立层——`providers: [{ id, models: userModels }]`——插在向导层（setup）与 `config.json`（user）之间参与 `models` 逐字段合并。因此用户编辑优先于上游声明、低于任何手写层；只由该层引入、其他层都不声明的模型条目在合并后被丢弃。推理为 `none` 时没有可用思考档位；冲突处理见 [providers.md](providers.md) 第 2 节。`capabilities.editTool`（`"edit" | "apply_patch"`，ADR-0035 §5）同样经该链生效：手写配置与 `userModels` 都可声明；都未声明时由内置默认表按模型 id 末段匹配（含 `gpt`/`codex`，不区分大小写 → `apply_patch`，否则 `edit`）。
 
@@ -171,7 +172,7 @@ setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise
 
 ### 外部 agent 配置
 
-仅用户手写的 `<NOCTURNE_HOME>/config.json` 接受 `externalAgents`：
+外部 agent 可以在用户手写的 `<NOCTURNE_HOME>/config.json` 的 `externalAgents` 数组中声明，也可以通过管理界面写入 `<NOCTURNE_HOME>/external-agents.json`：
 
 ```ts
 interface ExternalAgentConfig {
@@ -180,18 +181,25 @@ interface ExternalAgentConfig {
   args: string[];
   env?: Record<string, string>;
   mode?: string; // ACP session/set_mode 的不透明 id
+  configOptions?: Record<string, string>; // ACP configId → value，不透明字符串
   description?: string;
   enabled: boolean;
 }
 ```
 
-合并结果内名称唯一，重复时警告并保留第一项。项目配置中的该段无条件忽略并警告，已信任项目也不例外。配置只是命令声明，Core 与 connector 不按 agent 名称写行为分支。仅已启用条目进入 `task` 的可选列表。
+程序维护文件的形状为 `{ version: 1, agents: ExternalAgentConfig[] }`。写入先创建临时文件，再原子替换，与 `providers.json`、`mcp.json`、`settings.json` 共用配置写入队列；写盘失败不更新内存。程序文件损坏、版本不符时整份忽略并警告，单个条目无效时只忽略该条。
 
-条目校验沿 MCP 的逐条降级方式：非法名称或字段发警告并忽略该条目；用户段本身不是数组时配置加载失败。`env` 中疑似凭据不接受字面量，沿用 `${NAME}` 环境变量引用，在进程启动时展开；普通非凭据字符串保留。
+合并结果内名称不区分大小写唯一；同层重复时警告并保留首条，用户手写条目整条覆盖同名程序条目，不浅合并字段。项目配置中的该段无条件忽略并警告，已信任项目也不例外。配置只是命令声明，Core 与 connector 不按 agent 名称写行为分支。仅已启用条目进入 `task` 的可选列表。
 
-Core 公开导出 `EXTERNAL_AGENT_PRESETS` 数据表，默认全部禁用：omp 为 `omp --mode acp`；Codex 为 `npx @agentclientprotocol/codex-acp`（Windows 由进程平台层处理 `npx.cmd`）。此表供后续设置界面使用，不自动启动、探测或登录。`mode` 应选择外部工具自身的逐项询问模式；Nocturne 只能拦截它主动请求的权限。
+条目校验沿 MCP 的逐条降级方式：非法名称或字段发警告并忽略该条目；用户段本身不是数组时配置加载失败。`env` 只接受字符串（字面值或 `${NAME}`，在进程启动时展开），不支持 `{ stored: true }` 或 Nocturne 凭据库引用。外部 agent 使用自己的登录。`mode` 与 `configOptions` 都由 ACP 服务端解释；`session/new` 后逐项设置配置项，拒绝时返回 `external_agent_config_rejected` 并指明 configId。
 
-CLI 从 `RuntimeConfig.base.externalAgents` 构建 `createAcpConnector`，经 `RuntimeOptions.externalAgents` 注入。生命周期、账号费用、检查点边界与 transcript 见 [subagent.md 第 17 节](subagent.md#17-外部-agentacp)。
+Core 公开导出 `EXTERNAL_AGENT_PRESETS` 数据表，默认全部禁用：omp 为 `omp --mode acp`；Codex 为 `npx @agentclientprotocol/codex-acp`（Windows 由进程平台层处理 `npx.cmd`）。此表供设置界面填入草稿，不自动启动、探测或登录，也不强制逐项询问模式。Nocturne 只能拦截外部 agent 主动请求的权限。
+
+`RuntimeConfig` 与 `Runtime` 提供 `describeExternalAgents({ workspaceRoot? })`、`saveExternalAgent({ mode: "create" | "replace", name, config })`、`deleteExternalAgent({ name })`、`setExternalAgentEnabled({ name, enabled })`。查询返回 `{ agents, warnings }`，条目包括命令、参数、env、mode、configOptions、description、enabled 及 `origin: "app" | "user"`、`editable`、`path`。仅程序维护且未被手写条目覆盖的条目可编辑，名称创建后不可改；创建时各来源间重名拒绝，字段错误携带 `field`。程序从不改写 `config.json`。
+
+`Runtime.probeExternalAgent({ name } | { config })` 可测试已保存条目或草稿。只在用户点测试时解析 PATH、`initialize`、在 `<NOCTURNE_HOME>` 临时目录 `session/new`、返回 agentInfo、authMethods 与可选 configOptions，然后关闭进程；从不发送 prompt，探测结果不持久化。
+
+CLI 注入无状态的 `createAcpConnector(platform)`。Core 从当前合并配置维护已启用列表，每次调用把配置传给 connector；管理写入或重载配置后，已打开会话在 Turn 边界重建 `task`，在途调用保留原快照。生命周期、账号费用、检查点边界与 transcript 见 [subagent.md 第 17 节](subagent.md#17-外部-agentacp)。
 
 ## 3. 项目配置的信任模型
 
@@ -265,7 +273,7 @@ CLI:   loadConfig(platform, { cliArgs })          → RuntimeConfig
 
 ## 7. 暂不设计
 
-- 配置文件中的凭据值（`config.json` 与 `providers.json` 都不存密钥；API key 只在环境变量或系统凭据后端，账号记录的明文例外只在 `credentials.json`，见 [provider-setup.md](provider-setup.md) 第 3 节）；
+- Nocturne 服务商的内联凭据值（`config.json` 与 `providers.json` 不存服务商密钥；API key 只在环境变量或系统凭据后端，账号记录的明文例外只在 `credentials.json`，见 [provider-setup.md](provider-setup.md) 第 3 节）；外部 agent 的字符串 `env` 不接入该凭据库，见第 2 节；
 - JSONC / TOML / 其他格式（ADR-0007 记录了取舍）；
 - 通用的配置编辑命令（服务商的交互配置见 [provider-setup.md](provider-setup.md)）、Grant 的查看与撤销界面；
 - 每会话不同的用户配置 profile。

@@ -70,7 +70,7 @@ interface SessionView {
 ```ts
 type ViewEntry =
   | { kind: "user"; key: string; seq: number; turnId: string; content: ContentBlock[];
-      attachments?: ImageAttachment[]; fileRefs?: FileRef[]; skill?: { name: string; body: string }; descriptions?: AttachmentDescribedPayload[] }
+      attachments?: ImageAttachment[]; fileRefs?: FileRef[]; skill?: { name: string; body: string }; delegate?: { agent: string; task: string }; descriptions?: AttachmentDescribedPayload[] }
   | AssistantEntry
   | ToolEntry
   | NoticeEntry;

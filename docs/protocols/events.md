@@ -72,7 +72,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `session.config_changed` | — | 变化的字段：`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018）、`shell?: { kind, path }`（shell 切换，ADR-0022：折叠时在该事件位置留 `note` 历史条目给模型，见 [context.md](../architecture/context.md) 第 3 节） |
 | `session.titled` | — | `title: string`、`model: string`（provider/model）、`usage?`（标题角色用量） |
 | `turn.started` | ✓ | `turnIndex` |
-| `message.user` | ✓ | `messageId`、`content: ContentBlock[]`、`attachments?: ImageAttachment[]`、`fileRefs?: FileRef[]`（用户引用的快照元数据，见第 4 节）、`skill?: { name: string; body: string }`（渲染正文快照，末尾 content 同时含 skill 文本块） |
+| `message.user` | ✓ | `messageId`、`content: ContentBlock[]`、`attachments?: ImageAttachment[]`、`fileRefs?: FileRef[]`（用户引用的快照元数据，见第 4 节）、`skill?: { name: string; body: string }`（渲染正文快照，末尾 content 同时含 skill 文本块）、`delegate?: { agent: string; task: string }`（外部委派任务原文快照，末尾 content 同时含明确的 task 工具指令；与 skill 互斥） |
 | `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`finishReason: FinishReason \| "aborted"`、`protocol?: "openai-compatible" \| "anthropic" \| "openai-responses"`（产生该消息时的生效协议，ADR-0026 §6、ADR-0031 §1；旧日志无此字段，缺省时 `providerData` 回传只比较服务商） |
 | `tool.started` | ✓ | `callId`、`name`、`input`（规范化后）、`pinResult?: boolean`（工具结果不参与 L1 修剪）、`subjects: PermissionSubject[]`（解析后）、`permission: { action, source, rule? }`（`rule` 为命中规则的人读说明，见 [permissions.md](../architecture/permissions.md) 5.3） |
 | `permission.requested` | ✓ | `requestId`、`callId`、`subjects`、`reason`、`options`（权限层给出的选项子集：通常五项，高风险命令、编码命令或工作区外 edit 只有 `allow_once`、`deny`、`deny_stop`） |
@@ -87,6 +87,8 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 `attachment.described` 与 `session.titled` 是 ADR-0040 的兼容扩展，不提升 `formatVersion`。成功描述供投影与界面复用；描述失败时写空 `text`，记录已尝试，恢复后也不重试，界面不显示空描述。标题后台写入，与 Turn 共用会话写入队列，保持连续 seq、先落盘后发布；生命周期见 [sessions.md](../architecture/sessions.md)。角色用量只保存在各自事件，不加入 `turn.completed.usage`、主对话缓存命中率或速度。
 
 `todo_write` 不新增事件类型或 `formatVersion`：成功且已持久化的 `tool.completed` 在 `output.items` 中携带规范化后的完整清单。折叠规则与边界见 [sessions.md](../architecture/sessions.md) 和 [tool-api.md](tool-api.md)；其他状态和无效输出均不改变当前清单。
+
+`message.user.delegate` 是 ADR-0049 第 2 步的兼容可选字段，不提升 `formatVersion`。`agent` 为配置中的规范名称，`task` 保留用户任务原文。Core 只生成指令，不直接启动外部 agent 或授予权限。历史、在线视图和回放保留该字段与原消息内容，恢复时不重新查配置或改写旧委派。
 
 `tool.completed.status`：`ok`、`error`、`denied`、`cancelled`、`interrupted`（仅恢复修复产生）。
 
@@ -226,7 +228,7 @@ type QuestionAnswer = { declined: true } | {
 
 | 命令 | 前置条件 | 效果事件 | 实现阶段 |
 |---|---|---|---|
-| `submit({ text?, content?, attachments?, skill? })` | 会话空闲，否则返回 `session_busy`；`attachments` 是可选的 `{ data, mimeType, label? }[]`，由 Core 校验并落盘；文本中的 `@文件` 由 Core 读取并固定为快照 | `turn.started`、`message.user`（含 `attachments`、`fileRefs`）、…… | 图片见 ADR-0023、ADR-0040；文件引用见 ADR-0033 |
+| `submit({ text?, content?, attachments?, skill?, delegate? })` | 会话空闲，否则返回 `session_busy`；`attachments` 是可选的 `{ data, mimeType, label? }[]`，由 Core 校验并落盘；文本中的 `@文件` 由 Core 读取并固定为快照；`skill` 与 `delegate` 互斥，点名 agent 必须已启用、任务必须非空，否则 `invalid_command` 且不写 Turn 事件 | `turn.started`、`message.user`（含 `attachments`、`fileRefs` 及可选调用快照）、…… | 图片见 ADR-0023、ADR-0040；文件引用见 ADR-0033；外部点名见 ADR-0049 |
 | `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` | Phase 1 |
 | `fileIndex()` | 会话可用；首次请求建立工作区索引，每个 Turn 后失效 | 无事件，返回至多 20,000 个文件与目录候选；规则见 [tools.md](../architecture/tools.md) | ADR-0033 |
 | `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 2 起 ask 流程生效；Phase 3 起 `reply.remember` 生效，生成对应范围的 Grant（[permissions.md](../architecture/permissions.md) 5.4） |

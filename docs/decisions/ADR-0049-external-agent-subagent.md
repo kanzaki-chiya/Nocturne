@@ -138,3 +138,7 @@ Gemini CLI、Qwen Code、Google Antigravity 等命令行工具自带 ACP（Agent
 6. **界面**：桌面端「设置 › 外部 agent」页，包括列表（来源、启用开关、探测结果）、添加（可从内置预设填入）、编辑（`configOptions` 用探测得到的可选值做下拉框）、删除和测试；页面写明「费用与额度计在该 agent 自己的账号上」。TUI 和 CLI 新增只读的 `/agents` 列表，不加管理命令，同 `/mcp`。
 7. **RPC**：`agents.describeExternalAgents`、`agents.saveExternalAgent`（`mode: "create" | "replace"`；名称在各来源间不区分大小写唯一）、`agents.deleteExternalAgent`、`agents.setExternalAgentEnabled`、`agents.probeExternalAgent`。签名风格同 `mcp.*`。
 8. **内置预设不强制逐项询问模式**：例如 omp 默认 `tools.approvalMode = yolo`，在 ACP 下不会请求权限，执行期把关只能靠入口确认。维护者决定预设保持对方默认值，由用户自行选择；这条边界在第 3 节已有说明，不另加提示。
+
+### 2026-10-07：第 2 步配置变更通知
+
+- 外部 agent 的保存、删除与启停成功后，RPC 在响应之前推送一次 `runtime.providersChanged`，复用技能启停的通知机制。桌面端由 `BackendPool` 的通知处理传播配置；不再为同一次变更显式重复调用 `propagateConfig`。这与 ADR-0047 最新修订中 MCP 变更“不推通知、页面显式传播”的方式不同，避免外部 agent 变更触发双重重载。

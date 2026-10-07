@@ -25,10 +25,10 @@
 | [context.md](architecture/context.md) | 如何从会话历史构建模型上下文，token 预算与压缩 |
 | [tools.md](architecture/tools.md) | 工具注册、执行管线、结果归一化、内置工具 |
 | [permissions.md](architecture/permissions.md) | allow / ask / deny 规则模型、默认规则、审批流程 |
-| [config.md](architecture/config.md) | 分层配置、程序设置与 Runtime 设置接口、配置文件格式、项目信任模型、Grant 持久化 |
+| [config.md](architecture/config.md) | 分层配置、程序设置与 Runtime 设置接口、配置文件格式、项目信任模型、Grant 持久化、外部 agent 程序管理 |
 | [mcp.md](architecture/mcp.md) | MCP 客户端：stdio / Streamable HTTP、设置管理与探测、热更新、工具包装与结果映射、`mcp` 权限类别 |
 | [hooks.md](architecture/hooks.md) | Hooks：事件点、外部命令契约、与权限的关系、项目信任 |
-| [subagent.md](architecture/subagent.md) | Subagent（子代理）：`task` 工具契约、Launcher 注入、子会话权限收敛、ACP 外部 agent 的生命周期与审计边界 |
+| [subagent.md](architecture/subagent.md) | Subagent（子代理）：`task` 工具契约、Launcher 注入、子会话权限收敛、ACP 外部 agent 的管理、探测、斜杠点名与审计边界 |
 | [observability.md](architecture/observability.md) | 诊断日志：开关与输出位置、记录种类、脱敏规则 |
 | [providers.md](architecture/providers.md) | Provider 抽象、模型能力、流式与错误归一化 |
 | [provider-setup.md](architecture/provider-setup.md) | 服务商配置（`nctrn setup`、`/provider`；Core 数据接口 `describeProviderSetup` / `addProvider`）、向导配置层、操作系统凭据后端、模型限额以上游为准；v0.3 起向导不再选模型，模型选择收归 `/model`（v0.2/v0.3） |

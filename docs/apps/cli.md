@@ -79,7 +79,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 启动后进入 `nctrn>` 提示符循环：
 
 - 普通输入：`session.submit({ text })`，期间渲染事件流（第 5 节）。
-- `/` 开头的输入：斜杠命令（第 4 节），不进入模型上下文。
+- `/` 开头的输入：内置斜杠命令不进入模型上下文；技能与外部 agent 点名通过 `submit.skill` / `submit.delegate` 交给 Core（第 4 节）。
 - 空行忽略；Ctrl+D（EOF）退出；空闲时 Ctrl+C 退出，Turn 进行中 Ctrl+C 调用 `session.interrupt()`。退出后打印「会话 \<id\> 已保存，nctrn -c 继续」（与 TUI 同一句，TUI 在恢复主屏之后打印，见 [tui.md](tui.md)）。
 - 逐行模式用 readline 的 `completer`，候选与 TUI `/help` 共用同一张命令表（`@nocturne/tui/slash-catalog`，该模块不加载 Ink）。覆盖范围相同：命令名前缀/包含匹配；`/effort`、`/provider`、`/preset` 在命令名加空格后做参数补全。
 - 权限详情经 `@nocturne/tui/text-format` 纯文本入口复用 `truncateMiddle`，按显示列宽保留 URL 两端；该静态入口不加载 Ink。
@@ -92,6 +92,8 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 ## 4. 斜杠命令
 
 `/skills` 只读列出当前会话的技能、来源、覆盖和模型目录状态。补全在命令之后列技能，含 argument-hint 和最多 250 字符说明；内置命令优先，停用与 user-invocable false 不出现。`/技能名 参数` 通过 `submit.skill` 固定正文快照，事件输出显示技能名与附加字数，详见 [skills.md](../architecture/skills.md)。
+
+`/agents` 只读列出外部 agent、来源、启停、配置警告与斜杠重名警告，不运行探测、不提供管理子命令。补全分组顺序是内置命令、技能、外部 agent；仅已启用且无重名的 agent 出现。名称比较不区分大小写，优先级为内置命令 > 技能 > agent；冲突 agent 不可斜杠点名，但仍可由模型调用。`/agent名 任务` 通过 `submit.delegate: { agent, task }` 保留任务原文，Core 生成明确的工具委派指令，入口仍经现有权限层。费用与额度计在该 agent 自己的账号上。管理与无 prompt 探测在桌面端设置页，配置与边界见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)。
 
 `/provider login <名称>` 发起浏览器登录并接受手动粘贴，`/provider logout <名称>` 删除本地保存的登录凭据；没有服务端吊销承诺。没有系统凭据后端时，ChatGPT 登录必须在明文保存与仅本次运行中显式选择一项，不默认明文，并说明文件被拷走时 refresh token 会泄漏。`nctrn setup --cli` 使用同一流程。登录等待可取消，错误信息不含授权码或令牌，详见 [ADR-0042](../decisions/ADR-0042-provider-oauth.md) 与 [provider-setup.md](../architecture/provider-setup.md) 第 1、3 节。
 
@@ -117,6 +119,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 | `/settings preset <名称\|reset>` | 保存默认预设，`reset` 清除；可选 `read-only`、`default`、`auto-edit`、`guarded`、`smart`、`bypass` | `runtime.updateSettings()` |
 | `/new`、`/clear` | 新建空会话并切换，使用最新生效的默认模型、思考档位与权限预设；未注入配置时沿用当前会话值；旧会话仍可恢复，`/clear` 不是清屏 | CLI 注入的 `newSession` 回调 |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
+| `/agents` | 只读列出外部 agent 的来源、启停与碰撞警告，不探测、不写配置 | `session.describeExternalAgents()` |
 | `/provider` | 列出服务商与来源，不显示密钥或令牌；附鉴权描述、凭据状态与保存位置。TUI 中打开服务商页。`add` 与 `nctrn setup --cli` 共用向导；`key` / `refresh` / `remove` / `login` / `logout` 为快捷操作。`model <名> <模型>` 逐字段显示 `当前值（来源）`，来源可为 models.dev；回车保留、`-` 清除用户编辑。图片输入和推理接受 `y`/`n`/`-`，推理为否时不询问档位；编辑工具接受 `edit`/`patch`/`apply_patch`/`-`（ADR-0035 §5）；来源为手写配置的字段只读。成功后写入 `userModels`，详见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveModelSettings()` 等 + `runtime.updateProviders` |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |
 
@@ -224,8 +227,9 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 ## 9. 工程约束
 
 - **目录**：`apps/cli/`，包名 `@nocturne/cli`，`bin: { nctrn: dist/main.js }`；`tsdown` 构建 ESM。
-- **第三方运行时依赖：零**（npm registry 依赖；workspace 包 `@nocturne/mcp`、`@nocturne/tui` 除外——MCP 装配点在 CLI，`--tui` 惰性加载 TUI，见下）。参数解析用 `util.parseArgs`，行输入用 `node:readline`，颜色用 `util.styleText`。非 Node 内置的新依赖需要理由，并在本文登记。该约定按包生效：`apps/tui` 经 [ADR-0010](../decisions/ADR-0010-tui-rendering.md) 单独批准终端依赖，不影响本包。
+- **第三方运行时依赖：零**（npm registry 依赖；workspace 包 `@nocturne/mcp`、`@nocturne/acp`、`@nocturne/tui` 除外——MCP/ACP 装配点在 CLI，`--tui` 惰性加载 TUI，见下）。参数解析用 `util.parseArgs`，行输入用 `node:readline`，颜色用 `util.styleText`。非 Node 内置的新依赖需要理由，并在本文登记。该约定按包生效：`apps/tui` 经 [ADR-0010](../decisions/ADR-0010-tui-rendering.md) 单独批准终端依赖，不影响本包。
 - **MCP 装配**：`createRuntime` 时构造 `createMcpConnector(platform)`（`@nocturne/mcp`）注入 `RuntimeOptions.mcp`；`--debug*` 参数映射到 `RuntimeOptions.debug`。TUI 路径（`nctrn --tui`）由 CLI 完成装配后把 `Session` 交给 `runTui`，MCP/Hook/诊断对 TUI 透明。
+- **ACP 装配**：三个 main Runtime 创建路径及 `nctrn rpc --stdio` 均注入无状态 `createAcpConnector(platform)`；配置不固化在 connector，Core 每次运行传入当前 Turn 的条目快照，热更新机制见 [subagent.md](../architecture/subagent.md#17-外部-agentacp)。
 - **依赖方向**（dependency-cruiser 固化）：
   - 规则 `no-deep-import-from-outside-core` 的语义收紧为：`apps/` 解析到 `packages/core/src/` 的 import 只允许命中 `index.ts` 或 `protocol/index.ts`——即只有 `@nocturne/core` 包入口与 `@nocturne/core/protocol` 两个入口可用，任何内部路径（包括 `protocol/` 下的散文件）一律禁止。
   - 根 `depcheck` 脚本扫描 `packages apps`；CLI→TUI 的两种允许边及命令表零依赖约束见 [modules.md](../architecture/modules.md) 第 1 节。逐行路径只加载纯命令表，不加载 Ink。
