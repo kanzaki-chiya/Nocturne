@@ -69,7 +69,7 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 
 HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；停止时有 session id 先 DELETE，再关闭传输。使用 Node 内置 fetch，遵循入口 `configureEnvProxy()` 的全局代理。fetch 注入点逐跳检查同源重定向，跨域拒绝为 `http_redirect`；401/403 为 `auth_required`。HTTP 不自动重连，中途请求失败或连接断开记 failed，发 `mcp.server`，在途工具调用返回错误；可停用后再启用。
 
-每次配置重载都对已打开会话调用 `McpSession.reconcile(servers)`。按 id 比较规范化配置与当前 stored 值的摘要：新增/启用启动，删除/停用停止，内容变化先停再启，无变化不动。空闲立即执行；Turn 内暂存到结束边界，更新注册表供下一 Turn 使用，子会话仍持父 Turn 的工具快照。
+每次配置重载都对已打开会话调用 `McpSession.reconcile(servers)`。按 id 比较规范化配置与当前 stored 值的摘要：新增/启用启动，删除/停用停止，内容变化先停再启，无变化不动。空闲立即执行；Turn 内暂存到结束边界，更新注册表供下一 Turn 使用，子会话仍持父 Turn 的工具快照。广播逐会话隔离：配置已落盘，某个会话应用失败时只在该会话发 `runtime.warning(code="config_apply_failed")` 并记诊断 `session.config_apply_failed`，其余会话照常生效，请求本身不因此失败；技能、外部 agent 与服务商的广播同样处理。
 
 ```text
 会话打开（wrapSession，新建与恢复同样处理）

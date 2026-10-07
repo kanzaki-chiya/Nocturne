@@ -769,18 +769,57 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const store: SessionStore = createSessionStore({ platform, sessionsDir });
 
   /**
-   * 已打开会话的"providers 待重建"标记回调（updateProviders →
-   * 各会话在下一次空闲边界 rebuildProviders；close 时移除）
+   * 已打开会话挂在 Runtime 上的回调（配置广播、技能预算、分叉入口），按会话 id 索引。
+   * 会话打开的最后一步整体登记；close 与打开失败共用同一撤销步骤移除（sessions.md 第 4 节）。
    */
-  const markProvidersDirty = new Set<() => void>();
-  const reconcileMcp = new Set<() => Promise<void>>();
-  const refreshSkills = new Set<(rescan: boolean) => Promise<void>>();
-  const refreshExternalAgents = new Set<() => void>();
-  const sessionSkillModels = new Map<
-    string,
-    { workspaceRoot: string; contextWindow: () => number | undefined }
-  >();
-  const openForkers = new Map<string, (targetSeq?: number) => Promise<string>>();
+  interface OpenSessionHooks {
+    /** updateProviders 等：标记 providers 待重建，下一次空闲边界 rebuildProviders */
+    markProvidersDirty(): void;
+    reconcileMcp(): Promise<void>;
+    refreshSkills(rescan: boolean): Promise<void>;
+    refreshExternalAgents(): void;
+    skillModel: { workspaceRoot: string; contextWindow: () => number | undefined };
+    fork(targetSeq?: number): Promise<string>;
+    /** 广播到本会话失败时的提示出口 */
+    applyFailed(scope: string, error: unknown): void;
+  }
+  const openSessions = new Map<string, OpenSessionHooks>();
+  /** 每次配置广播递增；打开途中错过的广播在登记时补成待应用（下一 Turn 边界生效） */
+  let configGeneration = 0;
+  /**
+   * 向全部已打开会话广播配置变更。逐会话隔离：配置已落盘，单个会话应用失败只在该会话上
+   * 发 runtime.warning(config_apply_failed) 并记诊断，不影响其余会话与请求结果（mcp.md 第 4 节）。
+   * 返回成功应用的会话数。
+   */
+  async function broadcast(
+    scope: string,
+    apply: (hooks: OpenSessionHooks) => Promise<void> | void,
+  ): Promise<number> {
+    configGeneration++;
+    const results = await Promise.all(
+      [...openSessions.values()].map(async (hooks) => {
+        try {
+          await apply(hooks);
+          return true;
+        } catch (e) {
+          hooks.applyFailed(scope, e);
+          return false;
+        }
+      }),
+    );
+    return results.filter(Boolean).length;
+  }
+  /** 配置整体变化（重载 / updateProviders）：按原有阶段顺序逐会话隔离广播 */
+  async function applyConfigToSessions(): Promise<void> {
+    await broadcast("providers", (hooks) => {
+      hooks.markProvidersDirty();
+    });
+    await broadcast("mcp", (hooks) => hooks.reconcileMcp());
+    await broadcast("skills", (hooks) => hooks.refreshSkills(true));
+    await broadcast("externalAgents", (hooks) => {
+      hooks.refreshExternalAgents();
+    });
+  }
   let settingsPending = Promise.resolve();
 
   const interactive = options.interactive === true;
@@ -808,8 +847,29 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     session: Session,
     resume?: { modelOverride?: string | ModelRef | undefined },
   ): Promise<RuntimeSession> {
+    // 打开途中取得的 Runtime 级登记与外部资源（MCP 连接）按序登记撤销步骤；
+    // 打开失败在此逆序撤销，close 复用同一份。会话锁由调用方 session.close() 释放。
+    const teardown: (() => Promise<void> | void)[] = [];
+    const runTeardown = async (): Promise<void> => {
+      for (const step of teardown.splice(0).reverse()) await step();
+    };
+    try {
+      return await assembleSession(session, resume, teardown, runTeardown);
+    } catch (e) {
+      await runTeardown().catch(() => undefined);
+      throw e;
+    }
+  }
+
+  async function assembleSession(
+    session: Session,
+    resume: { modelOverride?: string | ModelRef | undefined } | undefined,
+    teardown: (() => Promise<void> | void)[],
+    runTeardown: () => Promise<void>,
+  ): Promise<RuntimeSession> {
     const meta = session.state().meta;
     const openedAt = Date.now();
+    const openGeneration = configGeneration;
 
     // 项目层与项目指令都按会话记录的 workspaceRoot/cwd 加载（config.md 第 6 节）
     const ws = config !== undefined ? await config.forWorkspace(meta.workspaceRoot) : undefined;
@@ -1179,11 +1239,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       pendingSkillEnable = true;
       if (!busy() && compactController === undefined) await applySkills();
     };
-    refreshSkills.add(refreshSessionSkills);
-    sessionSkillModels.set(session.id, {
-      workspaceRoot: meta.workspaceRoot,
-      contextWindow: () => model.model.contextWindow,
-    });
     const executor = createToolExecutor(tools);
 
     // MCP：RuntimeOptions.mcpServers（注入）∪ 配置层 mcpServers（项目层仅信任时并入）
@@ -1197,6 +1252,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       })),
     ].filter((s) => s.enabled !== false);
     let mcpSession: McpSession | undefined;
+    let pendingMcp = false;
+    let mcpUpdate: Promise<void> = Promise.resolve();
     if (mcpServerConfigs.length > 0 || options.mcp !== undefined) {
       if (options.mcp === undefined) {
         warnings.push(
@@ -1214,6 +1271,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             emitServer: (p) => session.emitEphemeral("mcp.server", p),
             warn: (code, message) => session.emitEphemeral("runtime.warning", { code, message }),
             diagnostics,
+          });
+          const opened = mcpSession;
+          // MCP 服务器进程树清理（mcp.md 第 5 节）；失败只警告不阻塞关闭
+          teardown.push(async () => {
+            await mcpUpdate.catch(() => undefined);
+            try {
+              await opened.close();
+            } catch (e) {
+              session.emitEphemeral("runtime.warning", {
+                code: "mcp_close_failed",
+                message: `MCP 关闭异常：${e instanceof Error ? e.message : String(e)}`,
+              });
+            }
           });
           for (const tool of mcpSession.tools()) {
             try {
@@ -1236,8 +1306,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     }
 
-    let pendingMcp = false;
-    let mcpUpdate: Promise<void> = Promise.resolve();
     const applyMcp = (): Promise<void> => {
       mcpUpdate = mcpUpdate
         .catch(() => undefined)
@@ -1270,7 +1338,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       pendingMcp = true;
       if (!busy()) await applyMcp();
     };
-    reconcileMcp.add(refreshMcp);
 
     // shell 子进程环境剥离的凭据变量（provider-setup.md 第 4 节第 2 条）：
     // 全部 Provider 条目声明的 apiKeyEnv + NOCTURNE_API_KEY /
@@ -1451,11 +1518,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     }
 
-    // 注册到 updateProviders 的广播集合；close 时移除
-    const markDirty = (): void => {
-      providersDirty = true;
-    };
-    markProvidersDirty.add(markDirty);
     installSkills();
     // 外部 agent 仅在根会话可用；恢复的子会话也不能暴露外部委派入口。
     const externalConnector = meta.parent === undefined ? options.externalAgents : undefined;
@@ -1630,7 +1692,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       pendingExternalAgents = true;
       if (!busy() && compactController === undefined) applyExternalAgents();
     };
-    refreshExternalAgents.add(refreshSessionExternalAgents);
     installTask();
 
     let controller: AbortController | undefined;
@@ -1732,7 +1793,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     });
 
-    openForkers.set(session.id, async (targetSeq) => {
+    const forkOpen = async (targetSeq?: number): Promise<string> => {
       assertUsable();
       if (busy() || compactController !== undefined)
         throw new RuntimeCommandError("session_busy", "请先等待或按 Esc 中断");
@@ -1749,7 +1810,47 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         rewinding = false;
         settle();
       }
-    });
+    };
+
+    // 最后一步：登记到 Runtime（此后不再有可能失败的步骤）。打开途中错过的配置广播
+    // 补成待应用，在下一次 Turn 边界生效
+    if (configGeneration !== openGeneration) {
+      providersDirty = true;
+      pendingMcp = true;
+      pendingSkillRescan = true;
+      pendingSkillEnable = true;
+      pendingExternalAgents = true;
+    }
+    const runtimeHooks: OpenSessionHooks = {
+      markProvidersDirty: () => {
+        providersDirty = true;
+      },
+      reconcileMcp: refreshMcp,
+      refreshSkills: refreshSessionSkills,
+      refreshExternalAgents: refreshSessionExternalAgents,
+      skillModel: {
+        workspaceRoot: meta.workspaceRoot,
+        contextWindow: () => model.model.contextWindow,
+      },
+      fork: forkOpen,
+      applyFailed: (scope, error) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        diagnostics.record("session.config_apply_failed", {
+          sessionId: session.id,
+          scope,
+          error: reason,
+        });
+        session.emitEphemeral("runtime.warning", {
+          code: "config_apply_failed",
+          message: `配置已保存，但未能应用到本会话（${scope}）：${reason}`,
+        });
+      },
+    };
+    openSessions.set(session.id, runtimeHooks);
+    const detach = (): void => {
+      if (openSessions.get(session.id) === runtimeHooks) openSessions.delete(session.id);
+    };
+    teardown.push(detach);
     const runtimeSession: RuntimeSession = {
       describeSkills: () => ({
         skills: catalog.skills,
@@ -2443,9 +2544,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return mcpSession?.status() ?? [];
       },
       async close() {
-        refreshSkills.delete(refreshSessionSkills);
-        refreshExternalAgents.delete(refreshSessionExternalAgents);
-        sessionSkillModels.delete(session.id);
+        detach();
         closing = true;
         unsubscribeTitle();
         titleController.abort();
@@ -2454,25 +2553,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         gate.cancelAll?.();
         questions.cancelAll();
         await Promise.all([turnSettled, compactSettled, titleSettled, rewindSettled]);
-        markProvidersDirty.delete(markDirty);
-        openForkers.delete(session.id);
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
         if (hookRunner !== undefined) {
           await hookRunner.run("SessionEnd", { reason: "close" }).catch(() => undefined);
         }
-        if (mcpSession !== undefined) {
-          reconcileMcp.delete(refreshMcp);
-          await mcpUpdate.catch(() => undefined);
-          // MCP 服务器进程树清理（mcp.md 第 5 节）；失败只警告不阻塞关闭
-          try {
-            await mcpSession.close();
-          } catch (e) {
-            session.emitEphemeral("runtime.warning", {
-              code: "mcp_close_failed",
-              message: `MCP 关闭异常：${e instanceof Error ? e.message : String(e)}`,
-            });
-          }
-        }
+        // 与打开失败共用的撤销步骤：Runtime 级登记、MCP 连接
+        await runTeardown();
         await session.close();
       },
     };
@@ -2488,10 +2574,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   async function reloadMcpConfig(): Promise<void> {
     config = await requireMcpConfig().reload();
     registry = buildRegistry(config.base.providers);
-    for (const mark of markProvidersDirty) mark();
-    await Promise.all([...reconcileMcp].map((refresh) => refresh()));
-    await Promise.all([...refreshSkills].map((refresh) => refresh(true)));
-    for (const refresh of refreshExternalAgents) refresh();
+    await applyConfigToSessions();
   }
   function mcpInput<T>(schema: z.ZodType<T>, input: unknown): T {
     const parsed = schema.safeParse(input);
@@ -2616,9 +2699,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const root = parsed.workspaceRoot
         ? await platform.resolveReal(parsed.workspaceRoot)
         : workspaceRoot;
-      const current = [...sessionSkillModels.values()].find((s) =>
-        paths.equals(s.workspaceRoot, root),
-      );
+      const current = [...openSessions.values()]
+        .map((hooks) => hooks.skillModel)
+        .find((s) => paths.equals(s.workspaceRoot, root));
       const window =
         current?.contextWindow() ??
         (() => {
@@ -2650,8 +2733,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         .parse(input);
       if (!config) throw new RuntimeCommandError("invalid_command", "技能开关需要配置存储");
       await config.setSkillEnabled(parsed.name, parsed.enabled);
-      await Promise.all([...refreshSkills].map((refresh) => refresh(false)));
-      return { affectedSessions: refreshSkills.size };
+      return { affectedSessions: await broadcast("skills", (hooks) => hooks.refreshSkills(false)) };
     },
     async importSkills(input) {
       const base = z.object({
@@ -2709,13 +2791,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         targetDir,
         decisions: parsed.decisions,
       });
-      await Promise.all([...refreshSkills].map((refresh) => refresh(true)));
-      return {
-        mode: "commit",
-        targetDir,
-        results,
-        affectedSessions: refreshSkills.size,
-      };
+      const affectedSessions = await broadcast("skills", (hooks) => hooks.refreshSkills(true));
+      return { mode: "commit", targetDir, results, affectedSessions };
     },
     async saveMcpServer(input) {
       const parsed = mcpInput(
@@ -2931,7 +3008,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           }
           throw error;
         }
-        for (const mark of markProvidersDirty) mark();
+        await broadcast("providers", (hooks) => {
+          hooks.markProvidersDirty();
+        });
         return config.describeSettings(root);
       });
       settingsPending = operation.then(
@@ -3015,8 +3094,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     listSessions: (filter) => store.list(filter),
     async forkSession(id, forkOptions) {
-      const open = openForkers.get(id);
-      if (open !== undefined) return open(forkOptions?.targetSeq);
+      const open = openSessions.get(id);
+      if (open !== undefined) return open.fork(forkOptions?.targetSeq);
       const source = await store.load(id);
       try {
         const target = forkOptions?.targetSeq;
@@ -3043,10 +3122,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       // 配置整体替换后项目指令缓存一并失效（ADR-0051：缓存按工作区存活至本次配置代际）
       instructionCache.clear();
       registry = buildRegistry(newConfig.base.providers);
-      for (const mark of markProvidersDirty) mark();
-      await Promise.all([...reconcileMcp].map((refresh) => refresh()));
-      await Promise.all([...refreshSkills].map((refresh) => refresh(true)));
-      for (const refresh of refreshExternalAgents) refresh();
+      await applyConfigToSessions();
     },
     defaultModel(input) {
       const model = config?.resolvedSettings(input?.workspaceRoot ?? workspaceRoot).model;
