@@ -244,3 +244,12 @@ Rust 外壳提供四个 Tauri 命令，前端用它们实现 `LineTransport`：
 1. **随附 Node**（修订第 2 节"第一版不随附 Node"）。安装包随附官方 Windows x64 Node（`scripts/node-version.json` 固定版本与官方压缩包 SHA-256，`scripts/fetch-node.mjs` 下载校验后只解出 `node.exe` 与 `LICENSE` 进 `resources/node/`，由 `bundle.resources` 装进安装目录）。查找顺序不变：`NOCTURNE_NODE` → 随附 → `PATH`，随附不再只是预留位。为消除说明页歧义，`backend_open` 成功后往该后台 stderr 缓冲写一行 `[nocturne-desktop] Node <来源>：<路径>（<版本>）`。Windows-only 发布使"安装包变大"的代价只落在桌面安装包上，npm 包不受影响。
 2. **自动更新**（修订第 5 节"不包含自动更新"）。Tauri v2 updater + process 插件：`tauri.conf.json` 开 `bundle.createUpdaterArtifacts`，`plugins.updater` 配 minisign `pubkey` 与 GitHub Release `latest.json` endpoint、Windows `installMode: "passive"`。前端更新服务（`src/updater.ts`）按启动一次 + 24 小时节流检查，`autoUpdate`/`lastUpdateCheck`/`pendingUpdate` 存进 prefs；发现新版本在窗口底部提示（不打断输入），有非空闲会话先确认中断数，下载/签名失败可重试，装完重启。自动检查失败只写外壳日志（新增 `app_note`/`shell_log` 命令与「后台日志」页的「外壳」条目），手动检查在设置 › 常规。CLI 不做在线更新检查。
 3. **NSIS 打包参数更新**（修订第 6 条）。"不打包 Node"作废：`resources` 增加 `resources/node/{node.exe,LICENSE}` 映射；`desktop:build` 链插入 `fetch-node.mjs`。`pnpm release:build`（`scripts/release-build.mjs`）是发布总入口：bundle → npm pack → 取 Node → cargo test → tauri build → 生成 `latest.json`，产物进 `release/<version>/`；GitHub `release.yml` 与 `publish-npm.yml` 复用同一入口，流程细节见 [workflow.md](../development/workflow.md) 第 8 节。
+
+### 2026-10-07：问题报告后的服务商编辑与文件引用打开
+
+维护者根据桌面端问题报告拍板：
+
+- **编辑自定义服务商（U-07）**：服务商详情的操作行加「编辑」，打开与添加同款的对话框并预填当前值。只对自定义服务商开放，内置预设的地址由程序维护，不提供编辑。服务商 ID 锁定（会话、最近模型、默认模型都按 ID 引用）；显示名称、Base URL、协议、自定义请求头可改。密钥不在这里显示也不回传，仍走「更换密钥」。Base URL 或协议变化时，保存前用新配置拉一次模型列表，结果显示在对话框里（拿到多少模型、当前会话在用的模型是否还在）；失败时允许「仍然保存」，与添加流程一致。保存走已有的 `saveSetupProvider` replace 模式；TUI 服务商页是否加同样入口另议。
+- **回答中的文件引用（U-09，方案 A）**：会话正文里形如 `路径` 或 `路径:行号[-行号]` 的引用，只有能在当前工作区内解析到存在的文件时才渲染成链接样式；不存在的保持普通行内代码。点击打开菜单：「用 <编辑器> 打开」（默认动作）、「复制路径」、「在资源管理器中显示」。存在性检查经后台公开接口完成，前端不直接读文件系统。工作区外的绝对路径只提供「复制路径」和「在资源管理器中显示」，不直接打开，避免点到可执行文件。
+- **打开文件用的编辑器**：「设置 › 常规」新增「打开文件用」，默认「系统默认程序」（经已有的 opener 插件，不带行号）；检测到 VS Code、Cursor 时可选，选中后带行号跳转（`code -g file:line` 同类参数）。设置存应用数据，不进 `settings.json`。
+- **侧边预览（方案 B）不做**：留给后续的侧边栏面板（编辑器、终端、内置浏览器），见路线图。
