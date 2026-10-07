@@ -125,3 +125,16 @@ Gemini CLI、Qwen Code、Google Antigravity 等命令行工具自带 ACP（Agent
 
 - connector 不设置隐式默认超时，默认时限由 `task` 执行器及 `ctx.signal` 管理；仅在 `request.timeoutMs` 显式传入时设置本地计时器，避免外部委派被较短的内部默认值提前中断。
 - transcript 的目录创建、文件初始化或追加失败均不影响协议调用：只记录一次 `external_agent.transcript_failed`，停止后续写入，`output` 增加可选的 `transcriptError: true`。该标记表示审计文件可能缺失或不完整，不改变任务成功与否。
+
+### 2026-10-07：第 2 步设计——程序维护层、会话配置项、探测与斜杠点名
+
+维护者确认的第 2 步范围（取代「实施顺序」第 2 条的简述）：
+
+1. **程序维护层 `<NOCTURNE_HOME>/external-agents.json`**：做法同 ADR-0047 的 `mcp.json`，供桌面端增删改和启停。层级低于 `config.json`：手写在 `config.json` 里的条目在界面上只读，标明来源。写入时先写临时文件再原子替换，走统一的配置写入队列；文件损坏时忽略整个文件并警告，单个条目无效时只忽略该条。该文件加入 permissions.md 的「Nocturne 授权数据」一组，对它的 `edit` 至少为 `ask`。项目级配置仍一律忽略。`env` 只接受字符串（字面值或 `${NAME}`），不做凭据库引用，因为外部 agent 用的是自己的登录。
+2. **connector 改为无状态**：配置由 Core 按当前合并结果在每次调用时传入，connector 不再在启动时固化 agent 列表；已启用 agent 的列表由 Core 维护。配置变更后，已打开的会话在 Turn 边界重建 `task` 工具，机制同 ADR-0047 第 4a 节。
+3. **会话配置项 `configOptions?: Record<string, string>`**：`session/new` 之后，对每一项发送 ACP 的 `session/set_config_option`。键（configId）和值都是不透明字符串，Core 和 connector 不解释其含义，也不按 agent 名分支。对方拒绝时调用失败，返回 `external_agent_config_rejected` 并说明是哪一项。`mode` 保留不变，供只实现 session modes 的 agent 使用。
+4. **探测**：「已安装」指能在 PATH 上解析到命令。用户在界面上点「测试」时才运行一次：`initialize`、`session/new`（cwd 为 `<NOCTURNE_HOME>` 下的临时目录），读取 `agentInfo`、`authMethods` 和 `configOptions`（id、名称、可选值、当前值），然后关闭进程。**探测从不发送 `session/prompt`，不消耗对方额度。**
+5. **斜杠点名**：输入 `/<agent 名> 任务` 时，`submit` 接收 `delegate: { agent, task }`。Core 生成一条明确的指令文本块，要求模型用 `task` 工具、按指定的 `agent` 原文转交任务；`message.user` 新增可选字段 `delegate?: { agent, task }`，做法同 `skill` 快照，旧版本可以照常读取。委派仍由模型发起 `task` 调用，入口权限照常询问，不引入「用户刚授权」这类新概念；不想每次确认的用户可以写规则 `subagent external:<name> → allow`。斜杠补全中「外部 agent」组排在「技能」组之后；与内置命令或技能重名时，内置命令优先，其次是技能，重名的 agent 在列表里显示警告、不能用斜杠点名，模型仍可调用。
+6. **界面**：桌面端「设置 › 外部 agent」页，包括列表（来源、启用开关、探测结果）、添加（可从内置预设填入）、编辑（`configOptions` 用探测得到的可选值做下拉框）、删除和测试；页面写明「费用与额度计在该 agent 自己的账号上」。TUI 和 CLI 新增只读的 `/agents` 列表，不加管理命令，同 `/mcp`。
+7. **RPC**：`agents.describeExternalAgents`、`agents.saveExternalAgent`（`mode: "create" | "replace"`；名称在各来源间不区分大小写唯一）、`agents.deleteExternalAgent`、`agents.setExternalAgentEnabled`、`agents.probeExternalAgent`。签名风格同 `mcp.*`。
+8. **内置预设不强制逐项询问模式**：例如 omp 默认 `tools.approvalMode = yolo`，在 ACP 下不会请求权限，执行期把关只能靠入口确认。维护者决定预设保持对方默认值，由用户自行选择；这条边界在第 3 节已有说明，不另加提示。
