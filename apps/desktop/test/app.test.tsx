@@ -932,6 +932,29 @@ it("后台退出显示 stderr 尾部与「重启后台」；重启按 afterSeq �
   expect(screen.getByRole("region", { name: "权限确认" })).toBeTruthy();
 });
 
+it("后台退出后先打开项目死会话，仍以普通对话工作区启动后台", async () => {
+  const host = replayHost();
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("alpha 正文");
+  const backend = [...host.workspaces.keys()][0];
+  if (backend === undefined) throw new Error("后台未启动");
+  expect(host.workspaces.get(backend)).toBe("Z:/plain");
+  await act(async () => {
+    host.close(backend, 1);
+  });
+  await screen.findByText(/后台已退出（退出码 1）/);
+  fireEvent.click(screen.getByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await waitFor(() =>
+    expect(host.calls.filter((call) => call.method === "initialize")).toHaveLength(2),
+  );
+  await waitFor(() =>
+    expect(host.calls.filter((call) => call.method === "runtime.resumeSession")).toHaveLength(2),
+  );
+  expect([...host.workspaces.values()]).toEqual(["Z:/plain"]);
+  expect(screen.getByRole("region", { name: "会话消息" }).textContent).toContain("alpha 正文");
+});
+
 it("点击会话立即切换选中项并显示「正在打开…」，内容到了再渲染（ADR-0051）", async () => {
   // gamma 的 resumeSession 扣住不应答，模拟慢后台
   const host = replayHost(

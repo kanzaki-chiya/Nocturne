@@ -16,7 +16,7 @@ import {
 
 /**
  * 单后台假池（ADR-0051）：ensure 第一次调用建起唯一一个 client，
- * 之后任何 workspace 都复用它；crash() 模拟进程退出，下一次 ensure 起新进程。
+ * 之后复用它；crash() 模拟进程退出，下一次 ensure 起新进程。
  * deferResume 里的会话：resumeSession 收到后不立即应答，由 releaseResume 放行，
  * 用来模拟「先发出的打开请求晚返回」。
  */
@@ -38,7 +38,7 @@ function fixture(
   let afterCrash = false;
   let nextSession = 1;
   const pool = {
-    ensure: vi.fn(async (workspace: string) => {
+    ensure: vi.fn(async () => {
       if (client !== undefined) return client;
       const [transport, serverEnd] = createMemoryTransportPair();
       server = serverEnd;
@@ -93,6 +93,7 @@ function fixture(
           request.method === "runtime.resumeSession" ||
           request.method === "runtime.createSession"
         ) {
+          const workspace = String(request.params.cwd ?? opened.get(id) ?? "project");
           opened.set(id, workspace);
           result = {
             sessionId: id,
@@ -437,7 +438,7 @@ describe("后台崩溃与重启恢复", () => {
     f.crash();
     f.controller.backendExited();
 
-    const result = await f.controller.resumeBackend("project");
+    const result = await f.controller.resumeBackend();
     expect(result.failed).toEqual([]);
     // 新后台重新握手并逐个 resumeSession（旧后台的两个 + 新后台的两个）
     expect(f.calls.filter((c) => c.method === "initialize")).toHaveLength(2);
@@ -464,7 +465,7 @@ describe("后台崩溃与重启恢复", () => {
     f.crash();
     f.controller.backendExited();
 
-    const result = await f.controller.resumeBackend("project-x");
+    const result = await f.controller.resumeBackend();
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]).toMatchObject({ id: "a" });
     expect(result.failed[0]?.message).toContain("会话日志已损坏");

@@ -17,11 +17,11 @@ import type { ComposerSubmit } from "./Composer";
 import type { SessionStatus } from "./session-tree";
 
 /**
- * 单后台（ADR-0051）：整个窗口共用一个 nctrn 后台。ensure 的 workspace
- * 只在真正启动进程时用作后台 cwd；会话的工作区随会话参数走。
+ * 单后台（ADR-0051）：整个窗口共用一个 nctrn 后台。池子自行取普通对话
+ * 工作区作为后台 cwd；会话的工作区随会话参数走。
  */
 export interface ConversationBackendPool {
-  ensure(workspace: string): Promise<RpcClient>;
+  ensure(): Promise<RpcClient>;
   get(): RpcClient | undefined;
 }
 
@@ -173,7 +173,7 @@ export class Conversations {
         if (entry === undefined || dead !== undefined) {
           const continuity =
             dead !== undefined ? { view: dead.view, afterSeq: dead.view.lastSeq } : undefined;
-          const client = await this.pool.ensure(target);
+          const client = await this.pool.ensure();
           entry = await this.attach(
             client,
             target,
@@ -231,7 +231,7 @@ export class Conversations {
         if (failedOpen !== undefined) throw new Error(failedOpen.message);
         const workspace = this.draftWorkspace ?? this.plainWorkspace();
         if (workspace === null) throw new Error("普通对话工作区尚未就绪");
-        const client = await this.pool.ensure(workspace);
+        const client = await this.pool.ensure();
         const model =
           create?.model ?? (await client.runtime.defaultModel({ workspaceRoot: workspace }));
         if (model === undefined) throw new Error("尚未配置默认模型，请先用 nctrn setup 配置服务商");
@@ -357,10 +357,10 @@ export class Conversations {
    * 单个失败不阻塞其余；失败的保持 dead 并随结果返回 id 与原因。
    * 后台本身起不来时整个调用抛错（横幅据此显示重启失败）。
    */
-  async resumeBackend(workspace: string): Promise<{ failed: { id: string; message: string }[] }> {
+  async resumeBackend(): Promise<{ failed: { id: string; message: string }[] }> {
     return this.serial(async () => {
       const dead = [...this.opened.values()].filter((entry) => entry.dead === true);
-      const client = await this.pool.ensure(workspace);
+      const client = await this.pool.ensure();
       const failed: { id: string; message: string }[] = [];
       for (const entry of dead) {
         const id = entry.session.id;

@@ -4,7 +4,7 @@ import type { DesktopHost } from "./host";
 import { DesktopError, TauriLineTransport } from "./transport";
 
 export interface BackendExited {
-  /** 后台启动时的工作区：「重启后台」时复用 */
+  /** 后台启动时的工作区（诊断用） */
   workspace: string;
   code: number | null;
   /** closed 消息携带的 stderr 尾部（缓冲随进程回收后只有这里有） */
@@ -30,18 +30,23 @@ export class BackendPool {
   private pending: Promise<RpcClient> | undefined;
   /** 新后台握手成功后通知：App 据此给 client 订阅 providersChanged */
   private readonly clientListeners = new Set<(client: RpcClient) => void>();
-  constructor(host: DesktopHost) {
+  constructor(
+    host: DesktopHost,
+    private readonly plainWorkspace: () => string | null,
+  ) {
     this.host = host;
   }
 
   /**
-   * 后台在跑就复用同一个 client；没在跑才以 workspace 为进程 cwd 启动 +
-   * 握手。workspace 只是后台进程的启动目录（缺省工作区），会话各自的
+   * 后台在跑就复用同一个 client；没在跑才以当前普通对话工作区为进程 cwd 启动 +
+   * 握手。该目录只是后台进程的启动目录（缺省工作区），会话各自的
    * cwd/workspaceRoot 由调用方经会话参数携带，与这里无关。
    */
-  ensure(workspace: string): Promise<RpcClient> {
+  ensure(): Promise<RpcClient> {
     if (this.entry !== undefined) return Promise.resolve(this.entry.client);
     if (this.pending !== undefined) return this.pending;
+    const workspace = this.plainWorkspace();
+    if (workspace === null) return Promise.reject(new Error("普通对话工作区尚未就绪"));
 
     const opening = (async (): Promise<RpcClient> => {
       const transport = await TauriLineTransport.open(this.host, workspace);

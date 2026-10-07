@@ -60,7 +60,8 @@ const CRASH_STDERR_PREVIEW = 5;
 
 export function App({ host }: { host: DesktopHost }) {
   const prefs = useMemo(() => createPrefsStore(globalThis.localStorage), []);
-  const pool = useMemo(() => new BackendPool(host), [host]);
+  const workspaceRef = useRef<string | null>(null);
+  const pool = useMemo(() => new BackendPool(host, () => workspaceRef.current), [host]);
   const images = useMemo(() => createAttachmentImageSource(), []);
   const p = prefs.get();
   useEffect(
@@ -129,8 +130,8 @@ export function App({ host }: { host: DesktopHost }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [startupError, setStartupError] = useState<StartupError | null>(null);
   /**
-   * 最近一次后台退出（单后台只有一个）：workspace 是启动它的工作区（重启
-   * 复用），stderr 是 closed 消息携带的尾部日志；restarting/restartError/
+   * 最近一次后台退出（单后台只有一个）：workspace 是启动它的工作区（诊断
+   * 用），stderr 是 closed 消息携带的尾部日志；restarting/restartError/
    * sessionErrors 是「重启后台」的进度与按会话的失败明细。
    */
   const [backendExit, setBackendExit] = useState<{
@@ -177,7 +178,6 @@ export function App({ host }: { host: DesktopHost }) {
   >(null);
   // 生效的普通对话工作区 = prefs 覆盖 ?? 外壳默认
   const effectiveWorkspace = p.plainWorkspace ?? defaultWorkspace;
-  const workspaceRef = useRef<string | null>(null);
   workspaceRef.current = effectiveWorkspace;
   const conversations = useMemo(
     () =>
@@ -210,19 +210,16 @@ export function App({ host }: { host: DesktopHost }) {
     }
   }, [pool]);
 
-  const connect = useCallback(
-    async (workspace: string): Promise<ConnectResult> => {
-      try {
-        await pool.ensure(workspace);
-        return { ok: true };
-      } catch (error) {
-        // DesktopError/RpcError/Error 的 message 直接给用户看
-        // （如 backend_script_missing 提示先 pnpm build、protocol_version_mismatch、invalid_workspace）
-        return { ok: false, message: errMessage(error) };
-      }
-    },
-    [pool],
-  );
+  const connect = useCallback(async (): Promise<ConnectResult> => {
+    try {
+      await pool.ensure();
+      return { ok: true };
+    } catch (error) {
+      // DesktopError/RpcError/Error 的 message 直接给用户看
+      // （如 backend_script_missing 提示先 pnpm build、protocol_version_mismatch、invalid_workspace）
+      return { ok: false, message: errMessage(error) };
+    }
+  }, [pool]);
 
   // 启动链：普通对话工作区（外壳创建，prefs.plainWorkspace 可覆盖）→ 常驻后台 → 会话列表。
   // plain_workspace 或 ensure 失败都显示真实错误，「重试」重走这条链。
@@ -246,7 +243,8 @@ export function App({ host }: { host: DesktopHost }) {
       prefs.update({ plainWorkspaces: [...known, ...next] });
       bumpPrefs();
     }
-    const result = await connect(override ?? fallback);
+    workspaceRef.current = override ?? fallback;
+    const result = await connect();
     if (!result.ok) {
       setStartupError({ message: result.message });
       return;
@@ -370,7 +368,7 @@ export function App({ host }: { host: DesktopHost }) {
       return { ...rest, restarting: true };
     });
     try {
-      const { failed } = await conversations.resumeBackend(backendExit.workspace);
+      const { failed } = await conversations.resumeBackend();
       await refresh();
       setBackendExit((cur) => {
         if (cur === null) return cur;
@@ -450,11 +448,6 @@ export function App({ host }: { host: DesktopHost }) {
     async (dir: string | null): Promise<string | undefined> => {
       const target = dir ?? defaultWorkspace;
       if (target === null || defaultWorkspace === null) return "默认工作区尚未就绪";
-      try {
-        await pool.ensure(target);
-      } catch (error) {
-        return errMessage(error);
-      }
       const current = prefs.get();
       const known = current.plainWorkspaces;
       const remembered = [target, defaultWorkspace].filter(
@@ -464,6 +457,11 @@ export function App({ host }: { host: DesktopHost }) {
       prefs.update({ plainWorkspaces: [...known, ...remembered] });
       bumpPrefs();
       workspaceRef.current = target;
+      try {
+        await pool.ensure();
+      } catch (error) {
+        return errMessage(error);
+      }
       await refresh();
       return undefined;
     },

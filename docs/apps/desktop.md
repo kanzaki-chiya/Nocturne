@@ -39,7 +39,7 @@ type BackendMessage =
 
 `code` 是退出码，被强杀或拿不到时为 `null`；`stderr` 是该后台内存缓冲的全部内容（≤500 行）。监督线程（`try_wait` 约 50ms 轮询）在进程退出后等待 stdout 读线程排空（最多 2 秒，防孙进程继承管道卡住），保证**所有 line 消息都在 closed 之前发出**；closed 每个后台只发一次。stdout 切行上限 64 MiB/行，超过则记一行 stderr 并强杀后台（宁可显式失败也不悄悄丢报文让请求挂死）。
 
-前端 `TauriLineTransport`（`src/transport.ts`）把这套命令实现成 `LineTransport`：`send` 经 promise 链串行保证顺序（写失败吞掉，断开会经 closed 体现）；注册 `onLine` 前到达的行被缓冲并按序交付；`closed` 在已交付完缓冲行后触发 `onClose`（只一次）；`exited` 暴露退出结果；`backend_open` 失败包装成带 `code` 的 `DesktopError`。`BackendPool`（`src/backends.ts`）管理唯一后台的连接：`ensure(workspace)` 在后台已在跑时直接返回同一个 client（传入的 workspace 只用于首次启动），并发 `ensure` 共享同一个握手 Promise，后台退出即清空条目并通知 UI。握手失败（含后台 spawn 后秒退）的 `ensure` 会等 `exited` 拿到退出码与 stderr 尾部，把它们带进抛出的错误——否则横幅只看到「连接已断开」，后台为什么没起来无从排查。
+前端 `TauriLineTransport`（`src/transport.ts`）把这套命令实现成 `LineTransport`：`send` 经 promise 链串行保证顺序（写失败吞掉，断开会经 closed 体现）；注册 `onLine` 前到达的行被缓冲并按序交付；`closed` 在已交付完缓冲行后触发 `onClose`（只一次）；`exited` 暴露退出结果；`backend_open` 失败包装成带 `code` 的 `DesktopError`。`BackendPool`（`src/backends.ts`）管理唯一后台的连接：`ensure()` 在后台已在跑时直接返回同一个 client；真正启动时通过注入的取值函数读取当前生效的普通对话工作区（`prefs.plainWorkspace ?? defaultWorkspace`）作为 cwd，与触发启动的会话所属项目无关。并发 `ensure` 共享同一个握手 Promise，后台退出即清空条目并通知 UI。切换普通对话工作区不重启正在运行的后台，下次启动才使用新目录；会话自己的工作区仍由创建参数和恢复日志决定。握手失败（含后台 spawn 后秒退）的 `ensure` 会等 `exited` 拿到退出码与 stderr 尾部，把它们带进抛出的错误——否则横幅只看到「连接已断开」，后台为什么没起来无从排查。
 
 **崩溃与恢复**：后台退出后 UI 显示「后台已退出（退出码 N）」横幅，附 `closed` 消息里 stderr 的末尾几行（可展开全部），操作是「重启后台」与「查看日志」（进入「后台日志」页）。单后台下退出影响的是全部已打开会话：`src/conversations.ts` 把它们都标为 `dead` 并各自保留 `SessionView` 与 `lastSeq`（当前会话保持选中，空闲清理跳过 dead 会话，直接打开 dead 会话也自动走恢复流程）。「重启后台」在同一个新后台里对每个 dead 会话依次 `resumeSession`（跨项目的会话由日志里的工作区元数据承接，Core 按它加载项目层与指令），并以 `afterSeq: lastSeq` 重新订阅，拿到退出期间落盘但没收到的持久事件；恢复失败的会话单独记录错误并保持 dead，不阻塞其余会话的恢复，之后重新打开时重试。
 
