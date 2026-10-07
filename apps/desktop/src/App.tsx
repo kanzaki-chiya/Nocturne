@@ -76,32 +76,6 @@ export function App({ host }: { host: DesktopHost }) {
   const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(null);
   const [home, setHome] = useState<string | null>(null);
   const [prefsVersion, setPrefsVersion] = useState(0);
-  /**
-   * 回答内文件引用的打开能力（U-09）：按"打开文件用"设置走 opener 或
-   * 编辑器。prefsVersion 驱动设置变更后重算；编辑器可用性按需探测。
-   */
-  const fileLinks: FileLinkHooks = useMemo(() => {
-    const opener = () => prefs.get().fileOpener ?? "system";
-    const openerLabel = () =>
-      opener() === "vscode" ? "VS Code" : opener() === "cursor" ? "Cursor" : "系统默认程序";
-    const clipboard = async (text: string) => {
-      await navigator.clipboard.writeText(text);
-    };
-    return {
-      opener,
-      openerLabel,
-      open: async (absolutePath, line) => {
-        const kind = opener();
-        if (kind === "system") {
-          await host.openPath(absolutePath);
-          return;
-        }
-        await host.openInEditor(kind, absolutePath, line);
-      },
-      copy: (absolutePath) => clipboard(absolutePath),
-      reveal: (absolutePath) => host.revealItem(absolutePath),
-    };
-  }, [host, prefs, prefsVersion]);
   /** 已安装的编辑器（设置页"打开文件用"只列检测到的；失败按都没装） */
   const [editors, setEditors] = useState<{ vscode: boolean; cursor: boolean }>({
     vscode: false,
@@ -121,6 +95,34 @@ export function App({ host }: { host: DesktopHost }) {
       alive = false;
     };
   }, [host]);
+  /**
+   * 回答内文件引用的打开能力（U-09）：左键按"打开文件用"设置打开，右键菜单
+   * 列出资源管理器与检测到的编辑器。prefsVersion 驱动设置变更后重算。
+   */
+  const fileLinks: FileLinkHooks = useMemo(() => {
+    const opener = () => prefs.get().fileOpener ?? "system";
+    return {
+      openerLabel: () =>
+        opener() === "vscode" ? "VS Code" : opener() === "cursor" ? "Cursor" : "系统默认程序",
+      open: async (absolutePath, line) => {
+        const kind = opener();
+        // 选中的编辑器没装（或探测失败）时退回系统默认程序
+        if (kind === "system" || !editors[kind]) {
+          await host.openPath(absolutePath);
+          return;
+        }
+        await host.openInEditor(kind, absolutePath, line);
+      },
+      editors: () => editors,
+      openInEditor: (editor, absolutePath, line) => host.openInEditor(editor, absolutePath, line),
+      // 目录交给系统（资源管理器打开）；open_with_default 对目录不拦截
+      openFolder: (absolutePath) => host.openPath(absolutePath),
+      copy: async (text) => {
+        await navigator.clipboard.writeText(text);
+      },
+      reveal: (absolutePath) => host.revealItem(absolutePath),
+    };
+  }, [host, prefs, prefsVersion, editors]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [chatsExpanded, setChatsExpanded] = useState(false);

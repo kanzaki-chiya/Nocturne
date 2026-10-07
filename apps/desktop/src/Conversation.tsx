@@ -33,7 +33,7 @@ import type { RpcSession } from "@nocturne/rpc/client";
 import type { AttachmentImageSource } from "./attachment-images";
 import { isAllowedExternalUrl } from "./external-url";
 import { fileRefTitle, userText } from "./file-refs";
-import { Menu, MenuItem } from "./Menu";
+import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { displayPath } from "./paths";
 import { useReasoning, type ReasoningMap } from "./reasoning";
 import "./conversation.css";
@@ -62,14 +62,18 @@ export interface ConversationProps {
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
 export interface FileLinkHooks {
-  /** 当前"打开文件用"设置：system（opener，不带行号）/ vscode / cursor */
-  opener: () => "system" | "vscode" | "cursor";
-  /** 该设置下点击引用的默认动作标签（菜单首项） */
+  /** 左键默认动作用的程序名（"打开文件用"设置），菜单「打开」项的说明 */
   openerLabel: () => string;
-  /** 按设置为默认动作打开文件（编辑器带行号，系统默认不带） */
+  /** 左键：按"打开文件用"设置打开（编辑器带行号，系统默认不带） */
   open: (absolutePath: string, line?: number) => Promise<void>;
-  /** 复制绝对路径 */
-  copy: (absolutePath: string) => Promise<void>;
+  /** 已检测到的编辑器：右键菜单逐个列出 */
+  editors: () => { vscode: boolean; cursor: boolean };
+  /** 用指定编辑器打开并跳到行号 */
+  openInEditor: (editor: "vscode" | "cursor", absolutePath: string, line?: number) => Promise<void>;
+  /** 目录的左键动作：交给系统（资源管理器打开） */
+  openFolder: (absolutePath: string) => Promise<void>;
+  /** 复制文本（绝对或相对路径） */
+  copy: (text: string) => Promise<void>;
   /** 在资源管理器中显示 */
   reveal: (absolutePath: string) => Promise<void>;
 }
@@ -85,8 +89,10 @@ export interface ResolvedCodeRef {
   line?: number | undefined;
   endLine?: number | undefined;
   absolutePath: string;
+  relativePath?: string | undefined;
   withinWorkspace: boolean;
   exists: boolean;
+  isDirectory: boolean;
 }
 
 const FileLinksContext = createContext<{
@@ -313,8 +319,12 @@ function Markdown({
             ...(split?.line !== undefined ? { line: split.line } : {}),
             ...(split?.endLine !== undefined ? { endLine: split.endLine } : {}),
             absolutePath: resolution.absolutePath,
+            ...(resolution.relativePath !== undefined
+              ? { relativePath: resolution.relativePath }
+              : {}),
             withinWorkspace: resolution.withinWorkspace,
             exists: resolution.exists,
+            isDirectory: resolution.isDirectory,
           });
         }
         setRefs(table);
@@ -353,9 +363,10 @@ function Markdown({
 }
 
 /**
- * 行内代码的文件引用（U-09）：存在且在工作区内 → 链接样式，点击开菜单
- * （默认动作用编辑器打开、复制路径、资源管理器显示）；存在但在工作区外 →
- * 同样链接样式，但菜单只有复制路径与资源管理器显示（不直接打开可执行文件）；
+ * 行内代码的文件引用（U-09）：存在的文件渲染成「类型图标 + 路径」链接。
+ * 工作区内：左键按"打开文件用"设置打开（目录交给系统），右键开菜单
+ * （打开、资源管理器、检测到的编辑器、复制绝对/相对路径）。工作区外：
+ * 不直接打开，左右键都开菜单且只有资源管理器与复制绝对路径。
  * 不存在 → 普通行内代码。
  */
 function CodeRef({ text }: { text: string }) {
@@ -365,25 +376,37 @@ function CodeRef({ text }: { text: string }) {
   if (context === null) return <code>{text}</code>;
   const hit = context.lookup(text);
   if (hit === undefined) return <code>{text}</code>;
+  const { hooks } = context;
   const canOpen = hit.withinWorkspace;
+  const editors = hooks.editors();
   const run = (action: () => Promise<void>) => {
     setAnchor(null);
+    setError(null);
     void action().catch((e: unknown) => {
       setError(e instanceof Error ? e.message : String(e));
     });
   };
+  const openDefault = () =>
+    hit.isDirectory ? hooks.openFolder(hit.absolutePath) : hooks.open(hit.absolutePath, hit.line);
+  const relative = hit.relativePath;
   return (
     <>
       <button
         type="button"
         className="file-ref-link"
-        title={hit.absolutePath}
+        title={`${hit.absolutePath}\n${canOpen ? "单击打开，右键更多" : "工作区外的文件：单击查看选项"}`}
         onClick={(event) => {
+          if (canOpen) run(openDefault);
+          else setAnchor(event.currentTarget);
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
           setError(null);
           setAnchor(event.currentTarget);
         }}
       >
-        <code>{text}</code>
+        <FileGlyph directory={hit.isDirectory} />
+        <span className="file-ref-text">{text}</span>
       </button>
       {anchor !== null && (
         <Menu
@@ -394,26 +417,63 @@ function CodeRef({ text }: { text: string }) {
           }}
         >
           {canOpen && (
+            <>
+              <MenuItem
+                label="打开"
+                detail={
+                  hit.isDirectory
+                    ? "资源管理器"
+                    : `${hooks.openerLabel()}${hit.line !== undefined ? ` · 第 ${hit.line} 行` : ""}`
+                }
+                onSelect={() => {
+                  run(openDefault);
+                }}
+              />
+              <MenuSeparator />
+            </>
+          )}
+          <MenuItem
+            icon={<MenuGlyph kind="folder" />}
+            label="资源管理器"
+            onSelect={() => {
+              run(() => hooks.reveal(hit.absolutePath));
+            }}
+          />
+          {canOpen && !hit.isDirectory && editors.vscode && (
             <MenuItem
-              label={`用 ${context.hooks.openerLabel()} 打开`}
-              detail={hit.line !== undefined ? `第 ${hit.line} 行` : undefined}
+              icon={<MenuGlyph kind="editor" />}
+              label="VS Code"
               onSelect={() => {
-                run(() => context.hooks.open(hit.absolutePath, hit.line));
+                run(() => hooks.openInEditor("vscode", hit.absolutePath, hit.line));
               }}
             />
           )}
+          {canOpen && !hit.isDirectory && editors.cursor && (
+            <MenuItem
+              icon={<MenuGlyph kind="editor" />}
+              label="Cursor"
+              onSelect={() => {
+                run(() => hooks.openInEditor("cursor", hit.absolutePath, hit.line));
+              }}
+            />
+          )}
+          <MenuSeparator />
           <MenuItem
-            label="复制路径"
+            icon={<MenuGlyph kind="copy" />}
+            label="复制绝对路径"
             onSelect={() => {
-              run(() => context.hooks.copy(hit.absolutePath));
+              run(() => hooks.copy(hit.absolutePath));
             }}
           />
-          <MenuItem
-            label="在资源管理器中显示"
-            onSelect={() => {
-              run(() => context.hooks.reveal(hit.absolutePath));
-            }}
-          />
+          {relative !== undefined && (
+            <MenuItem
+              icon={<MenuGlyph kind="copy" />}
+              label="复制相对路径"
+              onSelect={() => {
+                run(() => hooks.copy(relative));
+              }}
+            />
+          )}
         </Menu>
       )}
       {error !== null && (
@@ -422,6 +482,34 @@ function CodeRef({ text }: { text: string }) {
         </span>
       )}
     </>
+  );
+}
+
+/** 文件引用前的类型图标：文件 / 目录（描边，随文字色） */
+function FileGlyph({ directory }: { directory: boolean }) {
+  return (
+    <svg className="file-ref-glyph" viewBox="0 0 16 16" aria-hidden="true">
+      {directory ? (
+        <path d="M1.5 4.5v8a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-6.5a1 1 0 0 0-1-1H8L6.5 3.5h-4a1 1 0 0 0-1 1Z" />
+      ) : (
+        <path d="M4 1.5h5l3.5 3.5v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-11.5a1 1 0 0 1 1-1ZM9 1.5V5h3.5" />
+      )}
+    </svg>
+  );
+}
+
+/** 文件引用菜单的通用图标（不用编辑器商标） */
+function MenuGlyph({ kind }: { kind: "folder" | "editor" | "copy" }) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.2">
+      {kind === "folder" && (
+        <path d="M1.5 4.5v8a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-6.5a1 1 0 0 0-1-1H8L6.5 3.5h-4a1 1 0 0 0-1 1Z" />
+      )}
+      {kind === "editor" && <path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5M9 3l-2 10" />}
+      {kind === "copy" && (
+        <path d="M5.5 5.5h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM2.5 10.5v-7a1 1 0 0 1 1-1h7" />
+      )}
+    </svg>
   );
 }
 

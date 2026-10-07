@@ -1917,6 +1917,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               input,
               absolutePath: absolute,
               withinWorkspace,
+              ...(withinWorkspace ? { relativePath: paths.relative(root, absolute) } : {}),
               exists: stat !== undefined,
               isDirectory: stat?.type === "directory",
             };

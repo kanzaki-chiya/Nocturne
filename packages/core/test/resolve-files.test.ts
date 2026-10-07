@@ -63,8 +63,10 @@ describe("session.resolveFiles", () => {
         // 工作区根取 realpath：Git Bash 下 TEMP 是 8.3 短路径（ADMINI~1）
         path.normalize(path.join(realpathSync.native(ws), "src", "a.ts")),
       );
+      expect(hit?.relativePath).toBe(path.join("src", "a.ts"));
       expect(miss).toMatchObject({ withinWorkspace: true, exists: false });
       expect(outside?.withinWorkspace).toBe(false);
+      expect(outside?.relativePath).toBeUndefined();
       expect(outside?.exists).toBe(false);
     } finally {
       await session.close();

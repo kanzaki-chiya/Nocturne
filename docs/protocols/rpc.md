@@ -61,7 +61,7 @@
 | `state` | → `SessionState` 去掉 `history` 与 `unsettledCalls`（历史由持久事件折叠得到；后者是进程内 Map） |
 | `describeContext` | → `BuiltContext` 去掉发给模型的整份 `request`，只留报告与判定 |
 | `reasoningEffortInfo` / `shellInfo` / `listShells` / `visionInfo` / `mcpServers` / `fileIndex` | 只读查询，结果同进程内 |
-| `resolveFiles` | `{ paths: string[] }` → `FileRefResolution[]`（`{ input, absolutePath, withinWorkspace, exists, isDirectory }`）；只读，按会话工作区解析路径（相对路径相对工作区，绝对路径规范化后判定是否越界），`paths` 非字符串数组报 -32602。越界路径照常返回绝对路径与 exists，由客户端决定只给复制/显示入口（U-09） |
+| `resolveFiles` | `{ paths: string[] }` → `FileRefResolution[]`（`{ input, absolutePath, withinWorkspace, relativePath?, exists, isDirectory }`，`relativePath` 只在工作区内给出）；只读，按会话工作区解析路径（相对路径相对工作区，绝对路径规范化后判定是否越界），`paths` 非字符串数组报 -32602。越界路径照常返回绝对路径与 exists，由客户端决定只给复制/显示入口（U-09） |
 | `readInputHistory` / `recordInputHistory` | → `string[]`；`{ text }` → `null` |
 | `readAttachment` | `{ file }` → `{ data: base64, mimeType, bytes }`；只读取当前会话持久事件登记过的图片附件，见下文 |
 | `close` | → `null`；关闭这一个会话（刷盘、释放会话锁），其余会话不受影响 |

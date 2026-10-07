@@ -26,6 +26,8 @@ export interface FileRefResolution {
   absolutePath: string;
   /** 是否在工作区内 */
   withinWorkspace: boolean;
+  /** 相对工作区根的路径（"复制相对路径"用）；越界时缺省 */
+  relativePath?: string | undefined;
   /** 路径是否存在（文件或目录） */
   exists: boolean;
   isDirectory: boolean;

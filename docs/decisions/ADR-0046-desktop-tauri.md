@@ -274,3 +274,7 @@ Rust 外壳提供四个 Tauri 命令，前端用它们实现 `LineTransport`：
 ### 2026-10-08：文件引用的系统默认打开改走外壳命令
 
 0.7.0 的 U-09 实现漏授 `opener:allow-open-path` 与 `opener:allow-reveal-item-in-dir`，点击文件引用菜单报 "not allowed by ACL"。补授权时发现「系统默认程序」直接对工作区文件调用 opener，`.bat`、`.ps1`、`.py` 等按系统默认方式打开就是执行。改为新增外壳命令 `open_with_default`：脚本与可执行类型改为在资源管理器中显示，其余交给系统默认程序；capability 只加 `opener:allow-reveal-item-in-dir` 与 `allow-open-with-default`，不授予 `opener:allow-open-path`。上一条修订中"系统默认程序复用 opener 插件的 JS API `openPath`"一句由此取代。
+
+### 2026-10-08：文件引用改为左键打开、右键菜单
+
+修订「回答中的文件引用（U-09，方案 A）」规定点击打开菜单，每次打开都要两次点击。改为参照常见编辑器与文件管理器的习惯：工作区内的引用左键按「打开文件用」直接打开（以后有内置编辑器或预览面板时，左键改为在其中打开），右键菜单为「打开」「资源管理器」、检测到的编辑器逐个一行、「复制绝对路径」「复制相对路径」。工作区外的引用仍不提供打开，左右键都只开菜单（资源管理器、复制绝对路径）。引用样式由行内代码改为类型图标加路径。`session.resolveFiles` 结果新增可选 `relativePath`（只在工作区内给出），属兼容扩展。菜单图标使用通用图标，不使用编辑器商标。

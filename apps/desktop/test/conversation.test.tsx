@@ -1432,66 +1432,96 @@ describe("长思考收起", () => {
 
 describe("回答内文件引用（U-09）", () => {
   const hooks = (overrides: Partial<FileLinkHooks> = {}) => ({
-    opener: () => "system" as const,
     openerLabel: () => "系统默认程序",
     open: vi.fn(async (_path: string, _line?: number) => undefined),
-    copy: vi.fn(async (_path: string) => undefined),
+    editors: () => ({ vscode: true, cursor: false }),
+    openInEditor: vi.fn(
+      async (_editor: "vscode" | "cursor", _path: string, _line?: number) => undefined,
+    ),
+    openFolder: vi.fn(async (_path: string) => undefined),
+    copy: vi.fn(async (_text: string) => undefined),
     reveal: vi.fn(async (_path: string) => undefined),
     ...overrides,
   });
+  const inside = (paths: string[], isDirectory = false) =>
+    paths.map((input) => ({
+      input,
+      absolutePath: `Z:/project/${input}`,
+      withinWorkspace: true,
+      relativePath: input,
+      exists: true,
+      isDirectory,
+    }));
 
   it("存在的引用渲染成链接，不存在的保持普通代码", async () => {
     const view = createSessionView();
     view.entries = [assistant({ text: "改了 `src/a.ts`，`src/missing.ts` 不存在" })];
-    const table: Record<
-      string,
-      { absolutePath: string; withinWorkspace: boolean; exists: boolean }
-    > = {
-      "src/a.ts": { absolutePath: "Z:/project/src/a.ts", withinWorkspace: true, exists: true },
-      "src/missing.ts": {
-        absolutePath: "Z:/project/src/missing.ts",
-        withinWorkspace: true,
-        exists: false,
-      },
-    };
     mount(view, {
       fileLinks: hooks(),
       resolveFilesImpl: async (paths: string[]) =>
-        paths.map((input) => ({
-          input,
-          absolutePath: table[input]?.absolutePath ?? `Z:/project/${input}`,
-          withinWorkspace: table[input]?.withinWorkspace ?? true,
-          exists: table[input]?.exists ?? true,
-          isDirectory: false,
-        })),
+        inside(paths).map((r) => (r.input === "src/missing.ts" ? { ...r, exists: false } : r)),
     });
     await screen.findByRole("button", { name: "src/a.ts" });
     expect(screen.queryByRole("button", { name: "src/missing.ts" })).toBeNull();
     expect(screen.getByText("src/missing.ts").tagName).toBe("CODE");
   });
 
-  it("行号范围解析：菜单首项带行号并按设置打开", async () => {
+  it("左键直接按设置打开并带行号，不弹菜单", async () => {
     const view = createSessionView();
     view.entries = [assistant({ text: "看 `src/a.ts:12-20` 的实现" })];
-    const fileLinks = hooks({ openerLabel: () => "VS Code" });
-    mount(view, {
-      fileLinks,
-      resolveFilesImpl: async (paths: string[]) =>
-        paths.map((input) => ({
-          input,
-          absolutePath: `Z:/project/${input}`,
-          withinWorkspace: true,
-          exists: true,
-          isDirectory: false,
-        })),
+    const fileLinks = hooks();
+    mount(view, { fileLinks, resolveFilesImpl: async (paths: string[]) => inside(paths) });
+    fireEvent.click(await screen.findByRole("button", { name: "src/a.ts:12-20" }));
+    await waitFor(() => {
+      expect(fileLinks.open).toHaveBeenCalledWith("Z:/project/src/a.ts", 12);
     });
-    const link = await screen.findByRole("button", { name: "src/a.ts:12-20" });
-    fireEvent.click(link);
-    fireEvent.click(await screen.findByRole("menuitem", { name: /用 VS Code 打开/ }));
-    expect(fileLinks.open).toHaveBeenCalledWith("Z:/project/src/a.ts", 12);
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("工作区外的路径不能直接打开：菜单只有复制与显示", async () => {
+  it("右键菜单：打开、资源管理器、检测到的编辑器、复制绝对与相对路径", async () => {
+    const view = createSessionView();
+    view.entries = [assistant({ text: "看 `src/a.ts:12`" })];
+    const fileLinks = hooks({ openerLabel: () => "VS Code" });
+    mount(view, { fileLinks, resolveFilesImpl: async (paths: string[]) => inside(paths) });
+    const link = await screen.findByRole("button", { name: "src/a.ts:12" });
+    fireEvent.contextMenu(link);
+    let menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: /打开/ }).textContent).toContain("VS Code");
+    expect(within(menu).queryByRole("menuitem", { name: "Cursor" })).toBeNull();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "VS Code" }));
+    expect(fileLinks.openInEditor).toHaveBeenCalledWith("vscode", "Z:/project/src/a.ts", 12);
+    fireEvent.contextMenu(link);
+    menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "复制相对路径" }));
+    expect(fileLinks.copy).toHaveBeenCalledWith("src/a.ts");
+    fireEvent.contextMenu(link);
+    menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "复制绝对路径" }));
+    expect(fileLinks.copy).toHaveBeenCalledWith("Z:/project/src/a.ts");
+    fireEvent.contextMenu(link);
+    menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "资源管理器" }));
+    expect(fileLinks.reveal).toHaveBeenCalledWith("Z:/project/src/a.ts");
+    expect(fileLinks.open).not.toHaveBeenCalled();
+  });
+
+  it("目录：左键交给系统打开，菜单不列编辑器", async () => {
+    const view = createSessionView();
+    view.entries = [assistant({ text: "在 `src` 目录下" })];
+    const fileLinks = hooks();
+    mount(view, { fileLinks, resolveFilesImpl: async (paths: string[]) => inside(paths, true) });
+    const link = await screen.findByRole("button", { name: "src" });
+    fireEvent.click(link);
+    await waitFor(() => {
+      expect(fileLinks.openFolder).toHaveBeenCalledWith("Z:/project/src");
+    });
+    fireEvent.contextMenu(link);
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: "VS Code" })).toBeNull();
+    expect(fileLinks.open).not.toHaveBeenCalled();
+  });
+
+  it("工作区外的路径不能直接打开：单击开菜单，只有资源管理器与复制绝对路径", async () => {
     const view = createSessionView();
     view.entries = [assistant({ text: "系统文件 `C:/Windows/exec.exe` 别乱点" })];
     const fileLinks = hooks();
@@ -1510,16 +1540,17 @@ describe("回答内文件引用（U-09）", () => {
     fireEvent.click(link);
     const menu = await screen.findByRole("menu");
     expect(within(menu).queryByRole("menuitem", { name: /打开/ })).toBeNull();
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "复制路径" }));
+    expect(within(menu).queryByRole("menuitem", { name: "VS Code" })).toBeNull();
+    expect(within(menu).queryByRole("menuitem", { name: "复制相对路径" })).toBeNull();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "复制绝对路径" }));
     expect(fileLinks.copy).toHaveBeenCalledWith("C:/Windows/exec.exe");
     fireEvent.click(link);
     fireEvent.click(
-      within(await screen.findByRole("menu")).getByRole("menuitem", {
-        name: "在资源管理器中显示",
-      }),
+      within(await screen.findByRole("menu")).getByRole("menuitem", { name: "资源管理器" }),
     );
     expect(fileLinks.reveal).toHaveBeenCalledWith("C:/Windows/exec.exe");
     expect(fileLinks.open).not.toHaveBeenCalled();
+    expect(fileLinks.openInEditor).not.toHaveBeenCalled();
   });
 
   it("不传 fileLinks 时保持普通代码（旧行为）", () => {
