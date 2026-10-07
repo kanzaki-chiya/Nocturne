@@ -2,12 +2,19 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, expect, it, vi } from "vitest";
 import {
   BUILTIN_SLASH_COMMANDS,
+  type ExternalAgentOverview,
   type SkillOverview,
   type SkillsDescription,
 } from "@nocturne/core/protocol";
 import { SkillsPage } from "../src/SkillsPage";
 import { Composer } from "../src/Composer";
-import { completeSlash, parseSlash, COMMANDS, REDIRECTS } from "../src/commands";
+import {
+  completeSlash,
+  parseSlash,
+  COMMANDS,
+  REDIRECTS,
+  externalAgentSlashConflict,
+} from "../src/commands";
 import { fakeServer, withInit } from "./fake-server";
 
 afterEach(cleanup);
@@ -215,4 +222,74 @@ it("空态打开 Nocturne 技能目录和规范链接", async () => {
   expect(openDirectory).toHaveBeenCalledWith("C:/home/skills", true);
   fireEvent.click(screen.getByRole("button", { name: /Agent Skills 规范/ }));
   expect(openUrl).toHaveBeenCalledWith("https://agentskills.io");
+});
+
+it("外部 agent 分组在技能之后，冲突及停用隐藏，点名保留名称并提交delegate", async () => {
+  const agent: ExternalAgentOverview = {
+    name: "OMP",
+    command: "omp",
+    args: ["--mode", "acp"],
+    enabled: true,
+    origin: "app",
+    editable: true,
+  };
+  const skills = [skill()];
+  const agents = [
+    agent,
+    { ...agent, name: "ALPHA" },
+    { ...agent, name: "COMPACT" },
+    { ...agent, name: "off", enabled: false },
+  ];
+  expect(completeSlash("/", skills, agents).map((group) => group.id)).toEqual([
+    "commands",
+    "skills",
+    "external",
+  ]);
+  expect(
+    completeSlash("/", skills, agents)
+      .at(-1)
+      ?.items.map((item) => item.label),
+  ).toEqual(["/OMP"]);
+  expect(externalAgentSlashConflict("ALPHA", skills)).toContain("技能");
+  expect(externalAgentSlashConflict("COMPACT", skills)).toContain("内置命令");
+  expect(parseSlash("/omp 完整任务", "session", skills, agents)).toEqual({
+    kind: "agent",
+    delegate: { agent: "OMP", task: "完整任务" },
+  });
+  expect(parseSlash("/OMP", "session", skills, agents)).toMatchObject({
+    kind: "unknown",
+    hint: "用法：/OMP 任务",
+  });
+  expect(parseSlash("/omp 第一行\n第二行", "session", skills, agents)).toEqual({
+    kind: "agent",
+    delegate: { agent: "OMP", task: "第一行\n第二行" },
+  });
+  expect(parseSlash("/alpha 第一行\n第二行", "session", skills, agents)).toEqual({
+    kind: "skill",
+    invocation: { name: "alpha", arguments: "第一行\n第二行" },
+  });
+  expect(parseSlash("/compact", "session", skills, agents)?.kind).toBe("command");
+  expect(parseSlash("/alpha task", "session", skills, agents)?.kind).toBe("skill");
+  expect(parseSlash("/off task", "session", skills, agents)?.kind).toBe("unknown");
+  const onSubmit = vi.fn(async () => true);
+  render(
+    <Composer
+      running={false}
+      fileRefs={null}
+      onSlash={() => false}
+      externalAgents={agents}
+      skills={skills}
+      onSubmit={onSubmit}
+      onInterrupt={() => undefined}
+      pickImages={async () => []}
+    />,
+  );
+  const input = screen.getByRole("textbox", { name: "消息输入" });
+  fireEvent.change(input, { target: { value: "/omp 完整任务" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(onSubmit).toHaveBeenCalledWith({
+    text: "/omp 完整任务",
+    delegate: { agent: "OMP", task: "完整任务" },
+    attachments: [],
+  });
 });

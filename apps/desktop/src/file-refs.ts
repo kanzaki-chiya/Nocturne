@@ -105,10 +105,12 @@ export function completeFileRefs(
   };
 }
 
-/** 用户消息原文：去掉末尾 N 个文件快照内容块（N = 非图片 fileRefs 数）。 */
+/** 用户消息原文：去掉末尾文件、技能和委派快照内容块。 */
 export function userText(entry: UserEntry): string {
   const snapshots =
-    (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) + (entry.skill ? 1 : 0);
+    (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) +
+    (entry.skill ? 1 : 0) +
+    (entry.delegate ? 1 : 0);
   const content = snapshots === 0 ? entry.content : entry.content.slice(0, -snapshots);
   return content
     .filter((block) => block.type === "text")

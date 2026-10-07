@@ -482,6 +482,14 @@ function UserMessage({
             <pre>{entry.skill.body}</pre>
           </details>
         )}
+        {entry.delegate && (
+          <details className="skill-message">
+            <summary>
+              委派给外部 agent <b>{entry.delegate.agent}</b>
+            </summary>
+            <pre>{entry.delegate.task}</pre>
+          </details>
+        )}
       </div>
       {entry.descriptions?.map((description, index) =>
         description.text ? (

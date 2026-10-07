@@ -1,0 +1,81 @@
+.external-agents-page .mcp-server-row.on {
+  border-left: 0;
+}
+.external-agents-page .mcp-server-row .nm {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.external-agents-page .mcp-server-row small {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.external-agents-page fieldset {
+  display: grid;
+  gap: 17px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.external-agents-page .external-enabled {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.external-agents-page .external-enabled input {
+  width: auto;
+}
+.external-agents-page .kv code,
+.external-agents-page .kv pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.external-agents-page .kv label {
+  font-size: 11.5px;
+  color: var(--a-muted);
+}
+.external-agents-page .kv pre {
+  margin: 0;
+  font-size: 12px;
+}
+.external-agents-page .kv span,
+.external-agents-page .kv code {
+  font-size: 12.5px;
+}
+.external-agents-page .pane .t1 h3 {
+  overflow-wrap: anywhere;
+}
+.external-agents-page .external-option {
+  margin-block: 18px;
+}
+.external-agents-page .external-option .ddw,
+.external-agents-page .external-option .dd {
+  width: 100%;
+  min-width: 0;
+}
+.external-agents-page .external-option .dd-v {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.external-agents-page .external-probe {
+  margin-block: 18px;
+}
+.external-agents-page .form input:focus-visible,
+.external-agents-page .form textarea:focus-visible {
+  outline: 2px solid var(--a-accent);
+  outline-offset: 2px;
+}
+@container provider-detail (width < 650px) {
+  .external-agents-page .pane .t1 {
+    flex-wrap: wrap;
+  }
+  .external-agents-page .pane .t1 .acts {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+}

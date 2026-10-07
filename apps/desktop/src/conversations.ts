@@ -233,6 +233,7 @@ export class Conversations {
     const submission = entry.session.submit({
       text: input.text,
       ...(input.skill ? { skill: input.skill } : {}),
+      ...(input.delegate ? { delegate: input.delegate } : {}),
       attachments: input.attachments,
     });
     try {

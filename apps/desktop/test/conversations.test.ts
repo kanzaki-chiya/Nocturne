@@ -200,6 +200,24 @@ describe("desktop conversation lifecycle", () => {
     expect(f.pool.release).not.toHaveBeenCalled();
   });
 
+  it("草稿与已有会话都原样传递delegate，不创建外部子会话", async () => {
+    const f = fixture();
+    const delegate = { agent: "omp", task: "原样转交任务" };
+    await f.controller.newConversation("plain");
+    await f.controller.send({ text: "/omp 原样转交任务", delegate, attachments: [] });
+    const id = f.controller.selectedId as string;
+    expect(f.calls.find((call) => call.method === "session.submit")?.params).toMatchObject({
+      text: "/omp 原样转交任务",
+      delegate,
+    });
+    f.complete(id);
+    await vi.waitFor(() => expect(f.controller.selected?.busy).toBe(false));
+    await f.controller.send({ text: "/omp 原样转交任务", delegate, attachments: [] });
+    expect(f.calls.filter((call) => call.method === "session.submit")).toHaveLength(2);
+    expect(f.calls.filter((call) => call.method === "runtime.createSession")).toHaveLength(1);
+    f.complete(id);
+  });
+
   it("打开回放后切换：空闲旧会话释放锁并退出旧项目后台", async () => {
     const f = fixture();
     await f.controller.open("a", "project-a");

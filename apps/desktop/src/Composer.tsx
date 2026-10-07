@@ -14,8 +14,8 @@ import {
 
 import {
   parseFileRefs,
-  parseSkillSlash,
   type ImageMimeType,
+  type ExternalAgentOverview,
   type SkillOverview,
   type SkillInvocation,
 } from "@nocturne/core/protocol";
@@ -97,11 +97,13 @@ export interface FileRefSource {
 export interface ComposerSubmit {
   text: string;
   skill?: SkillInvocation;
+  delegate?: { agent: string; task: string };
   attachments: { data: Uint8Array; mimeType: ImageMimeType; label: string }[];
 }
 
 export interface ComposerProps {
   skills?: readonly SkillOverview[];
+  externalAgents?: readonly ExternalAgentOverview[];
   running: boolean;
   disabled?: boolean;
   /** false 表示未接收；resolve 表示已接收（草稿与附件才可清空） */
@@ -251,6 +253,7 @@ export function Composer({
   onManageProviders,
   placeholder,
   skills = [],
+  externalAgents = [],
 }: ComposerProps) {
   const isSession = variant === "session";
   const [draft, setDraft] = useState("");
@@ -415,9 +418,9 @@ export function Composer({
   const slashGroups = useMemo<SlashGroup[]>(
     () =>
       focused && !composing && !dismissed && token === undefined
-        ? completeSlash(draft, skills)
+        ? completeSlash(draft, skills, externalAgents)
         : [],
-    [focused, composing, dismissed, token, draft, skills],
+    [focused, composing, dismissed, token, draft, skills, externalAgents],
   );
   const popup: PopupKind | null = showRefPopup ? "refs" : slashGroups.length > 0 ? "slash" : null;
 
@@ -564,10 +567,19 @@ export function Composer({
     if (disabled || running || submittingRef.current || composingRef.current) return;
     if (text.trim() === "" && attachmentsRef.current.length === 0) return;
     const submittedRevision = revision.current;
-    const skill = parseSkillSlash(text.trimStart(), skills);
+    const parsed = parseSlash(text, variant, skills, externalAgents);
+    if (parsed?.kind === "unknown" || parsed?.kind === "redirect") {
+      setEnterHint(parsed.hint);
+      return;
+    }
+    if (parsed?.kind === "command") {
+      await runSlash(text);
+      return;
+    }
     const payload: ComposerSubmit = {
       text,
-      ...(skill ? { skill } : {}),
+      ...(parsed?.kind === "skill" ? { skill: parsed.invocation } : {}),
+      ...(parsed?.kind === "agent" ? { delegate: parsed.delegate } : {}),
       attachments: attachmentsRef.current.map((attachment) => ({
         data: attachment.data,
         mimeType: attachment.mimeType,
@@ -694,12 +706,12 @@ export function Composer({
     if (event.key === "Enter" && plain) {
       event.preventDefault();
       const line = draftRef.current;
-      const parsed = parseSlash(line, variant, skills);
+      const parsed = parseSlash(line, variant, skills, externalAgents);
       if (parsed?.kind === "command") {
         void runSlash(line);
         return;
       }
-      if (parsed?.kind === "skill") {
+      if (parsed?.kind === "skill" || parsed?.kind === "agent") {
         void submit();
         return;
       }
@@ -867,8 +879,8 @@ export function Composer({
     dir: "切换目录",
   };
   const parsedSlash = useMemo(
-    () => (composing ? null : parseSlash(draft, variant, skills)),
-    [composing, draft, variant, skills],
+    () => (composing ? null : parseSlash(draft, variant, skills, externalAgents)),
+    [composing, draft, variant, skills, externalAgents],
   );
   const slashHint = parsedSlash?.kind === "redirect" ? parsedSlash.hint : enterHint;
   const canSend = !running && (draft.trim() !== "" || attachments.length > 0);

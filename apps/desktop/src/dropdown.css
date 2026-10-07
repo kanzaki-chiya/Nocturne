@@ -153,3 +153,18 @@
   cursor: default;
   color: var(--a-faint);
 }
+.ddm .dd-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  margin-bottom: 5px;
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 6px;
+  background: var(--a-input);
+  color: var(--a-text);
+  font: inherit;
+}
+.ddm .dd-search:focus-visible {
+  outline: 2px solid var(--a-accent);
+  outline-offset: -2px;
+}

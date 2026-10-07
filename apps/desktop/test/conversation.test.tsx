@@ -122,6 +122,29 @@ it("用户技能小标签使用日志快照，展开正文，工具行显示已�
   expect(screen.getByText("已加载")).toBeTruthy();
 });
 
+it("委派标签显示日志快照而不把模型指令重复放进用户气泡", () => {
+  const view = createSessionView();
+  view.entries = [
+    {
+      kind: "user",
+      key: "delegate-user",
+      seq: 1,
+      turnId: "t",
+      content: [
+        { type: "text", text: "/omp 原始任务" },
+        { type: "text", text: "给模型的委派指令" },
+      ],
+      delegate: { agent: "omp", task: "原始任务" },
+    },
+  ];
+  const rendered = mount(view);
+  expect(screen.getByText("/omp 原始任务")).toBeDefined();
+  expect(screen.queryByText("给模型的委派指令")).toBeNull();
+  const summary = rendered.container.querySelector(".skill-message summary");
+  expect(summary?.textContent).toBe("委派给外部 agent omp");
+  expect(rendered.container.querySelector(".skill-message pre")?.textContent).toBe("原始任务");
+});
+
 function sessionFixture(id = "session-1") {
   const methods = {
     id,

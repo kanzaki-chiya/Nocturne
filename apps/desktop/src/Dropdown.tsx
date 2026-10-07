@@ -51,11 +51,13 @@ export interface DropdownProps {
   /** 列表底部说明 */
   note?: string;
   /** 整个控件禁用的原因 */
-  disabled?: string;
+  disabled?: string | undefined;
   /** 当前值不在选项里时触发器上的文字 */
   placeholder?: string;
   /** 触发器 title */
   title?: string;
+  /** 大量配置项可搜索；不改变已有下拉的交互 */
+  searchable?: boolean;
 }
 
 const MENU_GAP = 6;
@@ -76,6 +78,7 @@ export function Dropdown({
   disabled,
   placeholder = "—",
   title,
+  searchable = false,
 }: DropdownProps) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -83,11 +86,15 @@ export function Dropdown({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden" });
+  const [query, setQuery] = useState("");
 
   // 普通项在前，危险项在分隔线之后；键盘顺序与显示顺序一致
-  const ordered = [...options.filter((o) => o.risk !== true), ...options.filter((o) => o.risk)];
+  const filtered = options.filter((o) =>
+    `${o.label} ${o.value} ${o.description ?? ""}`.toLowerCase().includes(query.toLowerCase()),
+  );
+  const ordered = [...filtered.filter((o) => o.risk !== true), ...filtered.filter((o) => o.risk)];
   const firstRisk = ordered.findIndex((o) => o.risk === true);
-  const current = ordered.find((o) => o.value === value);
+  const current = options.find((o) => o.value === value);
   const enabled = (i: number) => ordered[i] !== undefined && ordered[i].disabled === undefined;
 
   const close = useCallback((refocus: boolean) => {
@@ -98,8 +105,10 @@ export function Dropdown({
 
   const openList = () => {
     if (disabled !== undefined) return;
-    const at = ordered.findIndex((o) => o.value === value);
-    setActive(at >= 0 ? at : ordered.findIndex((o) => o.disabled === undefined));
+    setQuery("");
+    const initial = [...options.filter((o) => o.risk !== true), ...options.filter((o) => o.risk)];
+    const at = initial.findIndex((o) => o.value === value);
+    setActive(at >= 0 ? at : initial.findIndex((o) => o.disabled === undefined));
     setOpen(true);
   };
 
@@ -119,7 +128,7 @@ export function Dropdown({
     return from;
   };
 
-  const keyboard = (event: KeyboardEvent<HTMLButtonElement>) => {
+  const keyboard = (event: KeyboardEvent<HTMLElement>) => {
     if (!open) {
       if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown") {
         event.preventDefault();
@@ -155,8 +164,12 @@ export function Dropdown({
         event.preventDefault();
         setActive(step(ordered.length, -1));
         return;
-      case "Enter":
       case " ":
+        if (searchable && event.currentTarget instanceof HTMLInputElement) return;
+        event.preventDefault();
+        choose(active);
+        return;
+      case "Enter":
         event.preventDefault();
         choose(active);
         return;
@@ -276,6 +289,21 @@ export function Dropdown({
       {open && (
         <div className="ddm" ref={list} style={style}>
           {heading !== undefined && <div className="ddm-h">{heading}</div>}
+          {searchable && (
+            <input
+              className="dd-search"
+              aria-controls={listId}
+              aria-activedescendant={active >= 0 ? `${id}-opt-${active}` : undefined}
+              aria-label={`搜索${label}`}
+              autoFocus
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setActive(0);
+              }}
+              onKeyDown={keyboard}
+            />
+          )}
           <div id={listId} role="listbox" aria-label={label}>
             {ordered.map((o, i) => (
               <Fragment key={o.value}>
@@ -306,6 +334,7 @@ export function Dropdown({
                 </div>
               </Fragment>
             ))}
+            {ordered.length === 0 && <p className="ddm-n">没有匹配的选项</p>}
           </div>
           {note !== undefined && <p className="ddm-n">{note}</p>}
         </div>

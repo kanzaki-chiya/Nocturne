@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RpcError, type RpcClient, type RpcRuntime, type RpcSession } from "@nocturne/rpc/client";
-import type { RuntimeEvent, SessionView, SkillOverview } from "@nocturne/core/protocol";
+import type {
+  ExternalAgentOverview,
+  RuntimeEvent,
+  SessionView,
+  SkillOverview,
+} from "@nocturne/core/protocol";
 
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
 import { BackendLogsPage, SHELL_LOG_ID, type BackendLogTarget } from "./BackendLogsPage";
@@ -17,6 +22,7 @@ import { StatusBar, type StatusPanel } from "./StatusBar";
 import { PaneErrorBoundary } from "./ErrorBoundary";
 import { ProvidersPage } from "./ProvidersPage";
 import { McpPage } from "./McpPage";
+import { ExternalAgentsPage } from "./ExternalAgentsPage";
 import { SkillsPage } from "./SkillsPage";
 import { SettingsPage } from "./SettingsPage";
 
@@ -796,6 +802,14 @@ export function App({ host }: { host: DesktopHost }) {
                   }}
                 />
               </PaneErrorBoundary>
+            ) : page === "agents" ? (
+              <PaneErrorBoundary key="agents">
+                <ExternalAgentsPage
+                  client={pageClient}
+                  workspaceRoot={effectiveWorkspace ?? undefined}
+                  version={providersVersion}
+                />
+              </PaneErrorBoundary>
             ) : page === "skills" ? (
               <PaneErrorBoundary key="skills">
                 <SkillsPage
@@ -1085,6 +1099,21 @@ function SessionPane({
   const runtime = client.runtime;
   const controls = useSessionControls(session, runtime, view, prefs, providersVersion);
   const [skills, setSkills] = useState<SkillOverview[]>([]);
+  const [externalAgents, setExternalAgents] = useState<ExternalAgentOverview[]>([]);
+  useEffect(() => {
+    let active = true;
+    void session
+      .describeExternalAgents()
+      .then((result) => {
+        if (active) setExternalAgents(result.agents);
+      })
+      .catch(() => {
+        if (active) setExternalAgents([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [session, providersVersion, view.turnCount]);
   useEffect(() => {
     let active = true;
     void session
@@ -1136,6 +1165,7 @@ function SessionPane({
       <Composer
         key={`composer:${session.id}`}
         skills={skills}
+        externalAgents={externalAgents}
         variant="session"
         running={running}
         onSubmit={onSubmit}
@@ -1206,6 +1236,22 @@ function DraftPane({
 }: DraftPaneProps) {
   const draft = useDraftControls(runtime, prefs, providersVersion);
   const [skills, setSkills] = useState<SkillOverview[]>([]);
+  const [externalAgents, setExternalAgents] = useState<ExternalAgentOverview[]>([]);
+  useEffect(() => {
+    if (!runtime) return;
+    let active = true;
+    void runtime
+      .describeExternalAgents({ workspaceRoot: workspace ?? undefined })
+      .then((result) => {
+        if (active) setExternalAgents(result.agents);
+      })
+      .catch(() => {
+        if (active) setExternalAgents([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [runtime, workspace, providersVersion]);
   useEffect(() => {
     if (!runtime) return;
     let active = true;
@@ -1262,6 +1308,7 @@ function DraftPane({
       <div className="hero-composer">
         <Composer
           skills={skills}
+          externalAgents={externalAgents}
           running={false}
           disabled={disabled}
           onSubmit={(input) => onSubmit(input, draft.createOptions())}
