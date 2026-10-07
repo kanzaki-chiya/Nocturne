@@ -6,6 +6,11 @@ import type { SkillInvocation, SkillsDescription } from "@nocturne/core";
  * 线上约定：`undefined` 以 `null` 表示（JSON 没有 undefined）；二进制用 base64 字符串。
  */
 import type {
+  ExternalAgentOverview,
+  ExternalAgentProbeInput,
+  ExternalAgentProbeResult,
+  ExternalAgentSaveInput,
+  ExternalAgentsDescription,
   McpProbeInput,
   McpProbeResult,
   McpSaveInput,
@@ -147,6 +152,18 @@ type Ret<K extends keyof RuntimeSession> = RuntimeSession[K] extends (...args: n
 
 /** 方法名 → 参数与结果 */
 export interface RpcMethods {
+  "agents.describeExternalAgents": {
+    params: { workspaceRoot?: string | undefined };
+    result: ExternalAgentsDescription;
+  };
+  "agents.saveExternalAgent": { params: ExternalAgentSaveInput; result: ExternalAgentOverview };
+  "agents.deleteExternalAgent": { params: { name: string }; result: null };
+  "agents.setExternalAgentEnabled": { params: { name: string; enabled: boolean }; result: null };
+  "agents.probeExternalAgent": {
+    params: ExternalAgentProbeInput;
+    result: ExternalAgentProbeResult;
+  };
+  "session.describeExternalAgents": { params: SessionParams; result: ExternalAgentsDescription };
   "skills.describeSkills": {
     params: { workspaceRoot?: string | undefined };
     result: SkillsDescription;
@@ -298,6 +315,7 @@ export interface RpcMethods {
   "session.submit": {
     params: SessionParams & {
       skill?: SkillInvocation;
+      delegate?: { agent: string; task: string };
       text?: string;
       content?: ContentBlock[];
       attachments?: WireAttachment[];
@@ -376,6 +394,12 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.listReviewerProviders": true,
   "runtime.reloadConfig": true,
   "mcp.describeMcpServers": true,
+  "agents.describeExternalAgents": true,
+  "agents.saveExternalAgent": true,
+  "agents.deleteExternalAgent": true,
+  "agents.setExternalAgentEnabled": true,
+  "agents.probeExternalAgent": true,
+  "session.describeExternalAgents": true,
   "skills.describeSkills": true,
   "skills.setSkillEnabled": true,
   "session.describeSkills": true,

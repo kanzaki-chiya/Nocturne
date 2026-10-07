@@ -808,6 +808,35 @@ class Connection {
         return null;
       },
       "mcp.describeMcpServers": (p) => this.runtime().describeMcpServers(p),
+      "agents.describeExternalAgents": (p) =>
+        this.runtime().describeExternalAgents({ workspaceRoot: optString(p, "workspaceRoot") }),
+      "agents.saveExternalAgent": (p) =>
+        this.enqueueConfig(async () => {
+          const result = await this.runtime().saveExternalAgent(
+            p as unknown as Parameters<Runtime["saveExternalAgent"]>[0],
+          );
+          this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+          return result;
+        }),
+      "agents.deleteExternalAgent": (p) =>
+        this.enqueueConfig(async () => {
+          await this.runtime().deleteExternalAgent({ name: reqString(p, "name") });
+          this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+          return null;
+        }),
+      "agents.setExternalAgentEnabled": (p) =>
+        this.enqueueConfig(async () => {
+          const enabled = optBool(p, "enabled");
+          if (enabled === undefined) throw new InvalidParamsError("enabled 必须是布尔值");
+          await this.runtime().setExternalAgentEnabled({ name: reqString(p, "name"), enabled });
+          this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+          return null;
+        }),
+      "agents.probeExternalAgent": (p) =>
+        this.runtime().probeExternalAgent(
+          p as unknown as Parameters<Runtime["probeExternalAgent"]>[0],
+        ),
+      "session.describeExternalAgents": (p) => this.session(p).session.describeExternalAgents(),
       "skills.describeSkills": (p) =>
         this.runtime().describeSkills({ workspaceRoot: optString(p, "workspaceRoot") }),
       "skills.setSkillEnabled": (p) => {
@@ -1071,6 +1100,13 @@ class Connection {
           input.skill = {
             name: reqString(skill, "name"),
             arguments: optString(skill, "arguments"),
+          };
+        }
+        if (p.delegate !== undefined) {
+          const delegate = reqObject(p, "delegate");
+          input.delegate = {
+            agent: reqString(delegate, "agent"),
+            task: reqString(delegate, "task"),
           };
         }
         const text = optString(p, "text");

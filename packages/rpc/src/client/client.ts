@@ -11,6 +11,11 @@ import {
   type RuntimeEvent,
 } from "@nocturne/core/protocol";
 import type {
+  ExternalAgentOverview,
+  ExternalAgentProbeInput,
+  ExternalAgentProbeResult,
+  ExternalAgentSaveInput,
+  ExternalAgentsDescription,
   McpProbeInput,
   McpProbeResult,
   McpSaveInput,
@@ -125,6 +130,7 @@ export interface Subscription {
 /** 与进程内 `RuntimeSession` 同名的方法，全部异步化；`sessionId` 已绑定 */
 export interface RpcSession {
   describeSkills(): Promise<SkillsDescription>;
+  describeExternalAgents(): Promise<ExternalAgentsDescription>;
   readonly id: string;
   /**
    * 订阅：先回放 afterSeq 之后的持久事件，再接实时事件（持久与临时都推）。
@@ -160,6 +166,13 @@ export interface RpcSession {
 
 /** 与进程内 `Runtime` 同名的方法；`undefined` 的返回在线上是 `null`，这里还原 */
 export interface RpcRuntime {
+  describeExternalAgents(input?: {
+    workspaceRoot?: string | undefined;
+  }): Promise<ExternalAgentsDescription>;
+  saveExternalAgent(input: ExternalAgentSaveInput): Promise<ExternalAgentOverview>;
+  deleteExternalAgent(input: { name: string }): Promise<void>;
+  setExternalAgentEnabled(input: { name: string; enabled: boolean }): Promise<void>;
+  probeExternalAgent(input: ExternalAgentProbeInput): Promise<ExternalAgentProbeResult>;
   describeSkills(input?: { workspaceRoot?: string | undefined }): Promise<SkillsDescription>;
   setSkillEnabled(input: { name: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
   describeMcpServers(input?: {
@@ -441,6 +454,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
         return await call("session.submit", {
           ...p,
           ...(input.skill !== undefined ? { skill: input.skill } : {}),
+          ...(input.delegate !== undefined ? { delegate: input.delegate } : {}),
           ...(input.text !== undefined ? { text: input.text } : {}),
           ...(input.content !== undefined ? { content: input.content } : {}),
           ...(attachments !== undefined ? { attachments } : {}),
@@ -480,6 +494,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       visionInfo: () => call("session.visionInfo", p),
       mcpServers: () => call("session.mcpServers", p),
       describeSkills: () => call("session.describeSkills", p),
+      describeExternalAgents: () => call("session.describeExternalAgents", p),
       fileIndex: () => call("session.fileIndex", p),
       readInputHistory: () => call("session.readInputHistory", p),
       recordInputHistory: async (text) => {
@@ -499,6 +514,15 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   };
 
   const runtime: RpcRuntime = {
+    describeExternalAgents: (input = {}) => call("agents.describeExternalAgents", input),
+    saveExternalAgent: (input) => call("agents.saveExternalAgent", input),
+    deleteExternalAgent: async (input) => {
+      await call("agents.deleteExternalAgent", input);
+    },
+    setExternalAgentEnabled: async (input) => {
+      await call("agents.setExternalAgentEnabled", input);
+    },
+    probeExternalAgent: (input) => call("agents.probeExternalAgent", input),
     describeMcpServers: (input = {}) => call("mcp.describeMcpServers", input),
     describeSkills: (input = {}) => call("skills.describeSkills", input),
     setSkillEnabled: (input) => call("skills.setSkillEnabled", input),

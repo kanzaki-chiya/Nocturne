@@ -36,6 +36,11 @@ export const RUNTIME_METHODS: Record<
   // 再调用它（配置变更方法之后也自动这样做），客户端收 runtime.providersChanged
   updateProviders: "runtime.reloadConfig",
   describeMcpServers: "mcp.describeMcpServers",
+  describeExternalAgents: "agents.describeExternalAgents",
+  saveExternalAgent: "agents.saveExternalAgent",
+  deleteExternalAgent: "agents.deleteExternalAgent",
+  setExternalAgentEnabled: "agents.setExternalAgentEnabled",
+  probeExternalAgent: "agents.probeExternalAgent",
   describeSkills: "skills.describeSkills",
   setSkillEnabled: "skills.setSkillEnabled",
   saveMcpServer: "mcp.saveMcpServer",
@@ -79,6 +84,7 @@ export const SESSION_METHODS: Record<
   describeContext: "session.describeContext",
   mcpServers: "session.mcpServers",
   describeSkills: "session.describeSkills",
+  describeExternalAgents: "session.describeExternalAgents",
   close: "session.close",
 };
 
@@ -109,6 +115,10 @@ export const CONFIG_METHODS: Record<
   RpcMethodName
 > = {
   describeMcpServers: "mcp.describeMcpServers",
+  describeExternalAgents: "agents.describeExternalAgents",
+  saveExternalAgent: "agents.saveExternalAgent",
+  deleteExternalAgent: "agents.deleteExternalAgent",
+  setExternalAgentEnabled: "agents.setExternalAgentEnabled",
   saveMcpServer: "mcp.saveMcpServer",
   deleteMcpServer: "mcp.deleteMcpServer",
   setMcpServerEnabled: "mcp.setMcpServerEnabled",
