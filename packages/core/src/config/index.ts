@@ -1,7 +1,11 @@
 /** config — 分层配置加载、校验、合并与信任/授权数据存储（config.md） */
 export * from "./types.js";
 export * from "./reviewer.js";
-export { EXTERNAL_AGENT_PRESETS } from "./external-agents.js";
+export {
+  EXTERNAL_AGENT_PRESETS,
+  ExternalAgentSettingsError,
+  validateExternalAgentConfig,
+} from "./external-agents.js";
 export * from "./errors.js";
 export { loadConfig } from "./load.js";
 export { workspaceKey } from "./grants.js";

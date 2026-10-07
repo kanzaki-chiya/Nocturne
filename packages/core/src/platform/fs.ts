@@ -35,6 +35,10 @@ export interface FileSystem {
   truncate(path: string, length: number): Promise<void>;
   /** recursive 创建；mode 仅 POSIX 生效且只作用于本次新建的目录（如 NOCTURNE_HOME 0700） */
   mkdir(path: string, options?: { mode?: number }): Promise<void>;
+  /** 排他创建随机后缀目录，供外部进程探测使用。 */
+  mkdtemp(prefix: string): Promise<string>;
+  /** 删除临时目录及其内容；不跟随目录中的符号链接。 */
+  rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
   readdir(path: string): Promise<DirEntry[]>;
   /** 跟随符号链接 */
   stat(path: string): Promise<FileStat>;
@@ -81,6 +85,8 @@ export function createNodeFileSystem(): FileSystem {
     truncate: (p, len) => fs.truncate(p, len),
     mkdir: (p, options) =>
       fs.mkdir(p, { recursive: true, mode: options?.mode }).then(() => undefined),
+    mkdtemp: (prefix) => fs.mkdtemp(prefix),
+    rm: (p, options) => fs.rm(p, options),
     async readdir(p) {
       const dirents = await fs.readdir(p, { withFileTypes: true });
       return dirents.map((d) => ({

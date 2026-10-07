@@ -142,6 +142,21 @@ describe("FileSystem", () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  it("探测临时目录互不覆盖，递归清理不跟随外部链接", async () => {
+    const first = await nfs.mkdtemp(path.join(dir, "probe-"));
+    const second = await nfs.mkdtemp(path.join(dir, "probe-"));
+    const outside = path.join(second, "keep.txt");
+    await nfs.writeFile(outside, "must survive");
+    await nfs.mkdir(path.join(first, "nested"));
+    await nfs.writeFile(path.join(first, "nested", "agent.txt"), "temporary");
+    await fs.symlink(second, path.join(first, "outside"), isWin ? "junction" : "dir");
+    await nfs.rm(first, { recursive: true, force: true });
+    expect(await nfs.exists(first)).toBe(false);
+    expect(await nfs.readTextFile(outside)).toBe("must survive");
+    await nfs.rm(second, { recursive: true, force: true });
+    expect(await nfs.exists(second)).toBe(false);
+  });
+
   it("readTextFile / stat / lstat / exists", async () => {
     expect(await nfs.readTextFile(path.join(dir, "hello.txt"))).toBe("hi\nthere\n");
     const st = await nfs.stat(path.join(dir, "hello.txt"));

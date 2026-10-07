@@ -19,6 +19,7 @@ import {
 import { modelsDevSnapshot } from "./models-dev-snapshot.js";
 import { createCredentialStore } from "./credentials.js";
 import { describeMcp, loadMcpStore, McpSettingsError } from "./mcp.js";
+import { describeExternalAgents, loadExternalAgentStore } from "./external-agents.js";
 import { loadGrantStore } from "./grants.js";
 import {
   mergeLayers,
@@ -113,6 +114,12 @@ export async function loadConfig(
     path: paths.join(home, "mcp.json"),
     file: mcpStore.fields(),
   });
+  const externalAgentStore = await loadExternalAgentStore(platform, home);
+  const externalAgentLayer = (): MergeLayer => ({
+    kind: "app",
+    path: paths.join(home, "external-agents.json"),
+    file: externalAgentStore.fields(),
+  });
 
   // 向导配置层（providers.json）：损坏/版本不符 → 忽略 + provider_setup_invalid
   const setup = await loadProviderSetup(platform, home);
@@ -188,6 +195,7 @@ export async function loadConfig(
     const layers: MergeLayer[] = [
       ...setupLayers(sFile, providersPath),
       mcpLayer(),
+      externalAgentLayer(),
       settingsLayer(),
       { kind: "user", path: userConfigPath, file: userFile },
     ];
@@ -213,6 +221,7 @@ export async function loadConfig(
   // 的警告已在 mergeLayers 内计算，不再重复）
   const loadWarnings: string[] = [...envLayer.warnings, ...cliLayer.warnings];
   loadWarnings.push(...mcpStore.warnings);
+  loadWarnings.push(...externalAgentStore.warnings);
   if (credentialsInit.warning !== undefined) loadWarnings.push(credentialsInit.warning);
   if (settings.warning !== undefined) loadWarnings.push(settings.warning);
   if (trust.warning !== undefined) loadWarnings.push(trust.warning);
@@ -220,6 +229,7 @@ export async function loadConfig(
   const baseLayers = (): MergeLayer[] => [
     ...setupLayers(setupFile, providersPath),
     mcpLayer(),
+    externalAgentLayer(),
     settingsLayer(),
     { kind: "user", path: userConfigPath, file: userFile },
     { kind: "env", file: envLayer.file },
@@ -374,6 +384,7 @@ export async function loadConfig(
     const layers: MergeLayer[] = [
       ...setupLayers(setupFile, providersPath),
       mcpLayer(),
+      externalAgentLayer(),
       settingsLayer(),
       { kind: "user", path: userConfigPath, file: userFile },
       ...(trusted && projectFile !== undefined
@@ -487,6 +498,23 @@ export async function loadConfig(
     skillConfig: () => userFile.skills ?? {},
     disabledSkills: () => settings.store.disabledSkills(),
     setSkillEnabled: (name, enabled) => settings.store.setSkillEnabled(name, enabled),
+    async describeExternalAgents(input = {}) {
+      const resolved = input.workspaceRoot
+        ? (await forWorkspace(input.workspaceRoot)).resolved
+        : base().resolved;
+      return { agents: describeExternalAgents(resolved), warnings: resolved.warnings };
+    },
+    async saveExternalAgent(input) {
+      await externalAgentStore.save(input, base().resolved);
+      const agent = describeExternalAgents(base().resolved).find(
+        (item) => item.name === input.name,
+      );
+      if (agent === undefined) throw new Error("保存后的外部 agent 不存在");
+      return agent;
+    },
+    deleteExternalAgent: ({ name }) => externalAgentStore.remove(name, base().resolved),
+    setExternalAgentEnabled: ({ name, enabled }) =>
+      externalAgentStore.enabled(name, enabled, base().resolved),
     async describeMcpServers(input = {}) {
       const resolved = input.workspaceRoot
         ? (await forWorkspace(input.workspaceRoot)).resolved

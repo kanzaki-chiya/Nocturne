@@ -506,6 +506,24 @@ describe("provider-setup 权限规则（provider-setup.md 第 4 节）", () => {
     expect(r.decision.matchedRule?.rule?.label).toBe("修改 Nocturne 授权配置");
   });
 
+  it.each(["read-only", "default", "auto-edit", "guarded", "smart", "bypass"] as const)(
+    "%s：external-agents.json 加入授权数据组，edit 至少 ask",
+    (preset) => {
+      const policy = createRulePolicy({
+        workspaceRoot: WS,
+        caseSensitive: false,
+        preset,
+        presetContext: { nocturneHome: HOME },
+      });
+      const result = policy.evaluate([
+        subject({ kind: "edit", resolved: `${HOME}\\external-agents.json` }),
+      ]);
+      expect(result.decision.action).toBe(preset === "read-only" ? "deny" : "ask");
+      if (preset !== "read-only")
+        expect(result.decision.matchedRule?.rule?.label).toBe("修改 Nocturne 授权配置");
+    },
+  );
+
   it("凭据索引内置硬拒绝：任何规则/Grant/--yes/guarded 都不能放开", () => {
     const grants: Grant[] = [
       { kind: "read", target: CRED_INDEX, createdAt: "2026-01-01T00:00:00Z" },

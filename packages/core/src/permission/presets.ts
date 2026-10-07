@@ -174,6 +174,7 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
         `${home}/grants/**`,
         `${home}/providers.json`,
         `${home}/mcp.json`,
+        `${home}/external-agents.json`,
         `${home}/settings.json`,
       ]) {
         rules.push({

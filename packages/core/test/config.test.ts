@@ -162,16 +162,28 @@ describe("外部 agent 配置（ADR-0049）", () => {
     const entries = [agent, { name: "disabled", command: "other", args: [], enabled: false }];
     await writeJson(path.join(home, "config.json"), { externalAgents: entries });
     const rc = await load();
-    expect(rc.base.externalAgents).toEqual(entries);
-    expect((await rc.forWorkspace(workspace)).resolved.externalAgents).toEqual(entries);
+    const resolved = entries.map((entry) => ({
+      ...entry,
+      origin: "user",
+      path: path.join(home, "config.json"),
+    }));
+    expect(rc.base.externalAgents).toEqual(resolved);
+    expect((await rc.forWorkspace(workspace)).resolved.externalAgents).toEqual(resolved);
     await fs.unlink(path.join(home, "config.json"));
     expect(EXTERNAL_AGENT_PRESETS).toEqual([
-      { name: "omp", command: "omp", args: ["--mode", "acp"], enabled: false },
+      {
+        name: "omp",
+        command: "omp",
+        args: ["--mode", "acp"],
+        enabled: false,
+        description: "omp ACP 子代理",
+      },
       {
         name: "codex",
         command: "npx",
         args: ["@agentclientprotocol/codex-acp"],
         enabled: false,
+        description: "Codex ACP 子代理",
       },
     ]);
   });
@@ -181,7 +193,7 @@ describe("外部 agent 配置（ADR-0049）", () => {
     (name) => {
       const file = parseConfigFile({ externalAgents: [{ ...agent, name }, agent] }, "config.json");
       const { resolved } = mergeLayers([{ kind: "user", file }]);
-      expect(resolved.externalAgents).toEqual([agent]);
+      expect(resolved.externalAgents).toEqual([{ ...agent, origin: "user", path: undefined }]);
       expect(resolved.warnings).toEqual([expect.stringContaining("external_agent_config_invalid")]);
     },
   );
@@ -198,6 +210,8 @@ describe("外部 agent 配置（ADR-0049）", () => {
     { args: [1] },
     { env: { OPTION: 1 } },
     { mode: 1 },
+    { configOptions: { model: 1 } },
+    { configOptions: { "": "value" } },
     { description: 1 },
     { enabled: "yes" },
     { enabled: undefined },
@@ -216,13 +230,18 @@ describe("外部 agent 配置（ADR-0049）", () => {
     );
   });
 
-  it("外部 agent env 与 MCP 共用凭据引用约束", () => {
-    expect(() =>
-      parseConfigFile(
-        { externalAgents: [{ ...agent, env: { API_TOKEN: "inline-secret" } }] },
-        "config.json",
-      ),
-    ).toThrow(expect.objectContaining({ code: "config_credential_rejected" }));
+  it("外部 agent env 接受字面字符串与环境引用，不接受 stored 引用", () => {
+    const literal = parseConfigFile(
+      { externalAgents: [{ ...agent, env: { API_TOKEN: "inline-value" } }] },
+      "config.json",
+    );
+    expect(literal.externalAgents?.[0]?.env).toEqual({ API_TOKEN: "inline-value" });
+    const stored = parseConfigFile(
+      { externalAgents: [{ ...agent, env: { API_TOKEN: { stored: true } } }] },
+      "config.json",
+    );
+    expect(stored.externalAgents).toEqual([]);
+    expect(stored.externalAgentWarnings).toHaveLength(1);
     const file = parseConfigFile(
       { externalAgents: [{ ...agent, env: { API_TOKEN: "${AGENT_TOKEN}" } }] },
       "config.json",
@@ -243,14 +262,16 @@ describe("外部 agent 配置（ADR-0049）", () => {
       externalAgents: [agent, { ...agent, command: "ignored", args: [], enabled: false }],
     });
     const rc = await load();
-    expect(rc.base.externalAgents).toEqual([agent]);
+    expect(rc.base.externalAgents).toEqual([
+      { ...agent, origin: "user", path: path.join(home, "config.json") },
+    ]);
     expect(rc.base.warnings.filter((w) => w.includes("external_agent_config_invalid"))).toEqual([
       expect.stringContaining("保留首条"),
     ]);
     await fs.unlink(path.join(home, "config.json"));
   });
 
-  it("只有 user 层参与 externalAgents 合并", () => {
+  it("只有 app 与 user 层参与 externalAgents 合并", () => {
     const { resolved } = mergeLayers([
       { kind: "setup", file: { externalAgents: [agent] } },
       { kind: "app", file: { externalAgents: [agent] } },
@@ -259,7 +280,7 @@ describe("外部 agent 配置（ADR-0049）", () => {
       { kind: "env", file: { externalAgents: [agent] } },
       { kind: "cli", file: { externalAgents: [agent] } },
     ]);
-    expect(resolved.externalAgents).toEqual([]);
+    expect(resolved.externalAgents).toEqual([{ ...agent, origin: "app", path: undefined }]);
     expect(resolved.warnings).toEqual([expect.stringContaining("externalAgents 配置已忽略")]);
   });
 
@@ -283,7 +304,9 @@ describe("外部 agent 配置（ADR-0049）", () => {
         const ws = await rc.forWorkspace(workspace);
         expect(ws.projectConfig.present).toBe(true);
         expect(ws.projectConfig.trusted).toBe(trusted);
-        expect(ws.resolved.externalAgents).toEqual([agent]);
+        expect(ws.resolved.externalAgents).toEqual([
+          { ...agent, origin: "user", path: path.join(home, "config.json") },
+        ]);
         expect(ws.resolved.model).toBe(trusted ? "project/model" : undefined);
         expect(trusted ? ws.resolved.rules : ws.resolved.untrustedRules).toHaveLength(1);
         expect(ws.resolved.warnings.filter((w) => w.includes("externalAgents"))).toEqual([

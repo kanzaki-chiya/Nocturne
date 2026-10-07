@@ -292,7 +292,7 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     string,
     { origin: "app" | "user" | "project"; entry: McpServerEntry }
   >();
-  const externalAgentNames = new Set<string>();
+  const externalAgentIndices = new Map<string, number>();
   const info: ModelFieldOrigins = {
     fields: new Map(),
     providers: new Map(),
@@ -303,16 +303,25 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     const { kind, file } = layer;
     out.warnings.push(...(file.mcpWarnings ?? []));
     out.warnings.push(...(file.externalAgentWarnings ?? []));
-    if (kind === "user") {
+    if (kind === "app" || kind === "user") {
+      const layerNames = new Set<string>();
       for (const entry of file.externalAgents ?? []) {
-        if (externalAgentNames.has(entry.name)) {
+        const key = entry.name.toLowerCase();
+        if (layerNames.has(key)) {
           out.warnings.push(
             `external_agent_config_invalid：${layer.path ?? "config.json"} 中外部 agent ${entry.name} 重复，已忽略（保留首条）`,
           );
           continue;
         }
-        externalAgentNames.add(entry.name);
-        out.externalAgents.push(entry);
+        layerNames.add(key);
+        const resolved = { ...entry, origin: kind, path: layer.path };
+        const index = externalAgentIndices.get(key);
+        if (index === undefined) {
+          externalAgentIndices.set(key, out.externalAgents.length);
+          out.externalAgents.push(resolved);
+        } else {
+          out.externalAgents[index] = resolved;
+        }
       }
     } else if (kind === "project" && file.externalAgents !== undefined) {
       out.warnings.push(

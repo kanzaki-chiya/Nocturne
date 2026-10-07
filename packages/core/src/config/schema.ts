@@ -16,13 +16,14 @@ import { ConfigError } from "./errors.js";
 
 const subjectKindSchema = z.enum(["read", "edit", "shell", "network", "mcp", "subagent"]);
 
-const externalAgentSchema = z.object({
+export const externalAgentSchema = z.object({
   // (?![\s\S]) 要求真实字符串末尾，不接受 $ 可匹配的末尾换行。
   name: z.string().regex(/^[a-z0-9-]+$(?![\s\S])/),
   command: z.string().min(1),
   args: z.array(z.string()),
   env: z.record(z.string(), z.string()).optional(),
   mode: z.string().min(1).optional(),
+  configOptions: z.record(z.string().min(1), z.string()).optional(),
   description: z.string().optional(),
   enabled: z.boolean(),
 });
@@ -385,8 +386,8 @@ const CREDENTIAL_NAME = /key|token|secret|password|credential|auth/i;
 
 /**
  * 凭据字段硬拒绝（config.md 第 3 节）：providers 条目的内联凭据字段、
- * MCP 与外部 agent env 的疑似凭据字面量。parseConfigFile 与 providers.json
- * 的加载共用——配置文件的任何位置都不允许出现密钥值。
+ * MCP env 的疑似凭据字面量。外部 agent env 按 ADR-0049 只校验字符串，
+ * 不解释凭据语义；外部 agent 使用自己的登录。
  */
 export function rejectCredentialKeys(raw: unknown, filePath: string): void {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return;
@@ -403,27 +404,6 @@ export function rejectCredentialKeys(raw: unknown, filePath: string): void {
           throw new ConfigError(
             "config_credential_rejected",
             `provider 条目不允许内联凭据字段 "${key}"；凭据只经环境变量进入，请改用 apiKeyEnv 指定变量名`,
-            filePath,
-          );
-        }
-      }
-    }
-  }
-  const agents = "externalAgents" in raw ? raw.externalAgents : undefined;
-  if (Array.isArray(agents)) {
-    for (const [index, agent] of (agents as unknown[]).entries()) {
-      if (typeof agent !== "object" || agent === null || Array.isArray(agent)) continue;
-      const env = "env" in agent ? agent.env : undefined;
-      if (typeof env !== "object" || env === null || Array.isArray(env)) continue;
-      for (const [key, value] of Object.entries(env)) {
-        if (
-          typeof value === "string" &&
-          (CREDENTIAL_NAME.test(key) || /^(sk-|ghp_|ntn_|Bearer\s)/i.test(value)) &&
-          !ENV_REFERENCE.test(value)
-        ) {
-          throw new ConfigError(
-            "config_credential_rejected",
-            `externalAgents.${index}.env.${key} 疑似内联凭据；请写成 "${key}": "\${${key}}" 引用环境变量`,
             filePath,
           );
         }
