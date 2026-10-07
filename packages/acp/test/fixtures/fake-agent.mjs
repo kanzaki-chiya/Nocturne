@@ -26,7 +26,7 @@ const configOptions = [
         name: "Fixture",
         options: [
           { value: "small", name: "Small" },
-          { value: "large", name: "Large" },
+          { value: "large", name: "Large", description: "provider/large" },
         ],
       },
     ],

@@ -287,8 +287,13 @@ describe("ACP 单调用生命周期", () => {
           id: "model",
           currentValue: "small",
           options: [
-            { value: "small", name: "Small" },
-            { value: "large", name: "Large" },
+            { value: "small", name: "Small", group: "Fixture" },
+            {
+              value: "large",
+              name: "Large",
+              description: "provider/large",
+              group: "Fixture",
+            },
           ],
         },
         { id: "effort", currentValue: "low" },

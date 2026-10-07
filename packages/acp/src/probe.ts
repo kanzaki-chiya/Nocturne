@@ -166,9 +166,14 @@ export async function probeAgent(
       currentValue: String(option.currentValue),
       options:
         option.type === "select"
-          ? option.options
-              .flatMap((entry) => ("group" in entry ? entry.options : [entry]))
-              .map(({ value, name }) => ({ value, name }))
+          ? option.options.flatMap((entry) =>
+              ("group" in entry ? entry.options : [entry]).map(({ value, name, description }) => ({
+                value,
+                name,
+                ...(description ? { description } : {}),
+                ...("group" in entry ? { group: entry.name } : {}),
+              })),
+            )
           : [],
     }));
     result.ok = true;

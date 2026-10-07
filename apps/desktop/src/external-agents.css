@@ -79,3 +79,8 @@
     flex-wrap: wrap;
   }
 }
+.external-agents-page .external-option-reset {
+  justify-self: start;
+  align-self: flex-start;
+  width: auto;
+}

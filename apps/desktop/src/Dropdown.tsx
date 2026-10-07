@@ -63,6 +63,8 @@ export interface DropdownProps {
 const MENU_GAP = 6;
 const MENU_MARGIN = 8;
 const MENU_MIN_WIDTH = 300;
+/** 可搜索的长列表（几百项）不铺满窗口，靠搜索与滚动定位 */
+const SEARCH_MAX_HEIGHT = 420;
 
 export function Dropdown({
   label,
@@ -194,7 +196,11 @@ export function Dropdown({
       const below = window.innerHeight - bounds.bottom - MENU_GAP - MENU_MARGIN;
       const above = bounds.top - MENU_GAP - MENU_MARGIN;
       const down = below >= height || below >= above;
-      const room = down ? below : above;
+      const room = searchable
+        ? Math.min(down ? below : above, SEARCH_MAX_HEIGHT)
+        : down
+          ? below
+          : above;
       setStyle({
         left: `${left}px`,
         width: `${width}px`,
@@ -212,7 +218,7 @@ export function Dropdown({
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [open]);
+  }, [open, searchable]);
 
   // 当前项滚到可见
   useEffect(() => {

@@ -14,6 +14,13 @@ import "./pages.css";
 import "./mcp.css";
 import "./external-agents.css";
 
+interface ProbeRecord {
+  result: ExternalAgentProbeResult;
+  at: string;
+}
+// 测试结果只在本次应用运行内保留（不持久化，同 ADR-0047 第 4 节）；放在模块级，
+// 切换设置页、保存表单后不丢失
+const probeCache = new Map<string, ProbeRecord>();
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 export { EXTERNAL_AGENT_PRESETS };
 const resultText = (result: ExternalAgentProbeResult | undefined) =>
@@ -22,6 +29,9 @@ const resultText = (result: ExternalAgentProbeResult | undefined) =>
     : result.ok
       ? `已连接${result.agentInfo ? ` · ${result.agentInfo.name} ${result.agentInfo.version}` : ""}`
       : (result.error?.message ?? "测试失败");
+// 探测只用启动参数（不发 configOptions），保存时据此判断测试结果是否仍然有效
+const launchKey = (config: ExternalAgentConfig) =>
+  JSON.stringify([config.command, config.args, config.env ?? {}]);
 function configOf(agent: ExternalAgentOverview): ExternalAgentConfig {
   return {
     name: agent.name,
@@ -60,9 +70,20 @@ export function ExternalAgentsPage({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [selected, setSelected] = useState<string>();
   const [form, setForm] = useState<{ config: ExternalAgentConfig; replace: boolean }>();
-  const [results, setResults] = useState<
-    Record<string, { result: ExternalAgentProbeResult; at: string }>
-  >({});
+  const [results, setResultsState] = useState<Record<string, ProbeRecord>>(() =>
+    Object.fromEntries(probeCache),
+  );
+  const setResults = useCallback(
+    (update: (old: Record<string, ProbeRecord>) => Record<string, ProbeRecord>) => {
+      setResultsState((old) => {
+        const next = update(old);
+        probeCache.clear();
+        for (const [key, value] of Object.entries(next)) probeCache.set(key, value);
+        return next;
+      });
+    },
+    [],
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
@@ -192,16 +213,25 @@ export function ExternalAgentsPage({
               initial={form.config}
               replace={form.replace}
               recent={results[form.config.name]?.result}
+              onProbed={(agentName, result) => {
+                setResults((old) => ({
+                  ...old,
+                  [agentName]: { result, at: new Date().toLocaleTimeString() },
+                }));
+              }}
               onCancel={() => {
                 setForm(undefined);
               }}
-              onSaved={async (name) => {
+              onSaved={async (name, tested) => {
                 await changed(`已保存 ${name}`);
                 setSelected(name);
                 setForm(undefined);
+                // 保存的正是刚测试过的草稿时保留结果；配置有改动则旧结果作废
                 setResults((old) => {
                   const { [name]: _removed, ...rest } = old;
-                  return rest;
+                  return tested
+                    ? { ...rest, [name]: { result: tested, at: new Date().toLocaleTimeString() } }
+                    : rest;
                 });
               }}
             />
@@ -311,8 +341,8 @@ export function ExternalAgentsPage({
         </div>
       </div>
       {toast && (
-        <div className="toast" role="status">
-          {toast}
+        <div className="toast3" role="status">
+          ✓ {toast}
         </div>
       )}
       {deleting && current && (
@@ -390,6 +420,7 @@ function ExternalAgentForm({
   initial,
   replace,
   recent,
+  onProbed,
   onCancel,
   onSaved,
 }: {
@@ -397,8 +428,9 @@ function ExternalAgentForm({
   initial: ExternalAgentConfig;
   replace: boolean;
   recent: ExternalAgentProbeResult | undefined;
+  onProbed: (name: string, result: ExternalAgentProbeResult) => void;
   onCancel: () => void;
-  onSaved: (name: string) => Promise<void>;
+  onSaved: (name: string, tested: ExternalAgentProbeResult | undefined) => Promise<void>;
 }) {
   const [name, setName] = useState(initial.name);
   const [command, setCommand] = useState(initial.command);
@@ -409,6 +441,7 @@ function ExternalAgentForm({
   const [env, setEnv] = useState(JSON.stringify(initial.env ?? {}, null, 2));
   const [options, setOptions] = useState(JSON.stringify(initial.configOptions ?? {}, null, 2));
   const [result, setResult] = useState(recent);
+  const [testedDraft, setTestedDraft] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const draft = (): ExternalAgentConfig => ({
@@ -452,8 +485,13 @@ function ExternalAgentForm({
           name: agentName,
           config: body,
         });
-        await onSaved(agentName);
-      } else setResult(await client.runtime.probeExternalAgent({ config }));
+        await onSaved(agentName, testedDraft === launchKey(config) ? result : undefined);
+      } else {
+        const probed = await client.runtime.probeExternalAgent({ config });
+        setResult(probed);
+        setTestedDraft(launchKey(config));
+        if (config.name !== "") onProbed(config.name, probed);
+      }
     } catch (e) {
       setError(message(e));
     } finally {
@@ -574,7 +612,13 @@ function ExternalAgentForm({
           result.configOptions.map((option) => (
             <div className="field external-option" key={option.id}>
               <span>
-                {option.name} <code>{option.id}</code>
+                {option.name}
+                {option.id.toLowerCase() !== option.name.toLowerCase() && (
+                  <>
+                    {" "}
+                    <code>{option.id}</code>
+                  </>
+                )}
               </span>
               <small>{option.description}</small>
               <Dropdown
@@ -582,7 +626,17 @@ function ExternalAgentForm({
                 label={option.name}
                 value={selectedOptions[option.id] ?? option.currentValue}
                 placeholder={selectedOptions[option.id] ?? option.currentValue}
-                options={option.options.map((item) => ({ value: item.value, label: item.name }))}
+                options={option.options.map((item) => {
+                  // 同名选项靠对方给的 description 区分；没有时显示值本身（只展示，不解析）
+                  const detail =
+                    item.description ?? (item.value !== item.name ? item.value : undefined);
+                  return {
+                    value: item.value,
+                    label: item.name,
+                    ...(detail !== undefined ? { description: detail } : {}),
+                    ...(item.group !== undefined ? { tag: item.group } : {}),
+                  };
+                })}
                 disabled={busy ? "正在处理" : undefined}
                 onChange={(value) => {
                   try {
@@ -599,12 +653,14 @@ function ExternalAgentForm({
                 }}
               />
               <small>
-                {selectedOptions[option.id] === undefined ? "使用 agent 默认值" : "已指定值"}
+                {selectedOptions[option.id] === undefined
+                  ? `使用 agent 默认值（${option.currentValue}）`
+                  : `已指定：${selectedOptions[option.id]}`}
               </small>
               {selectedOptions[option.id] !== undefined && (
                 <button
                   type="button"
-                  className="btn"
+                  className="btn external-option-reset"
                   disabled={busy}
                   onClick={() => {
                     const { [option.id]: _removed, ...rest } = selectedOptions;

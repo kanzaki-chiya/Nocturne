@@ -158,7 +158,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 
 描述结果为 `{ agents, warnings: string[] }`；条目含 `name/command/args/env?/mode?/configOptions?/description?/enabled/origin/editable/path?`。`origin` 为 `app` 或 `user`；只有 `external-agents.json` 的 app 条目可编辑，`config.json` 条目只读。创建名称跨来源不区分大小写唯一，冲突返回 `-32005`、`data.field: "name"`。项目配置的外部 agent 始终忽略；配置详情见 [config.md](../architecture/config.md#外部-agent-配置)。
 
-探测结果包含 `ok/durationMs/configOptions`，可带 `agentInfo: { name, version, title? }`、`authMethods: { id, name, description? }[]` 和 `error: { code, message }`。`configOptions` 每项含 `id/name/description?/category?/currentValue/options: { value, name }[]`。探测只解析命令并执行 ACP initialize/session-new，从不发送 prompt；草稿探测不写配置、不消耗对方模型额度。
+探测结果包含 `ok/durationMs/configOptions`，可带 `agentInfo: { name, version, title? }`、`authMethods: { id, name, description? }[]` 和 `error: { code, message }`。`configOptions` 每项含 `id/name/description?/category?/currentValue/options: { value, name, description?, group? }[]`；对方按分组返回的选项会展平，`group` 为分组名，`description` 原样转交。探测只解析命令并执行 ACP initialize/session-new，从不发送 prompt；草稿探测不写配置、不消耗对方模型额度。
 
 保存、删除、启停串行执行；Runtime 在写入成功后重载配置并在 Turn 边界更新已打开会话，服务端在响应之前发送**一次** `runtime.providersChanged`，失败不发通知。桌面端只经 BackendPool 现有通知传播重载其他后台，页面不再显式传播；继承已有 echo 防环机制，避免重复重载。
 

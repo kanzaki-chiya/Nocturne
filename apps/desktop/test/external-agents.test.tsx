@@ -140,6 +140,58 @@ describe("外部 agent 设置页", () => {
     expect(f.calls.some((call) => call.method === "runtime.reloadConfig")).toBe(false);
     f.close();
   });
+  it("同名配置选项显示对方给的说明或值，可按值搜索，测试结果保存后保留", async () => {
+    const f = fakeServer(
+      withInit({
+        "agents.describeExternalAgents": { agents: [managed], warnings: [] },
+        "skills.describeSkills": { skills: [], warnings: [] },
+        "agents.probeExternalAgent": {
+          ok: true,
+          durationMs: 1,
+          agentInfo: { name: "omp", version: "18.6.0" },
+          configOptions: [
+            {
+              id: "model",
+              name: "Model",
+              currentValue: "a/grok",
+              options: [
+                { value: "a/grok", name: "Grok 4.7", description: "a/grok" },
+                { value: "b/grok", name: "Grok 4.7" },
+              ],
+            },
+          ],
+        },
+        "agents.saveExternalAgent": managed,
+      }),
+    );
+    await f.initialize();
+    render(<ExternalAgentsPage client={f.client} workspaceRoot={undefined} version={0} />);
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
+    const model = await screen.findByRole("combobox", { name: "Model" });
+    // id 与名称只差大小写时不重复显示
+    expect(screen.queryByText("model", { selector: "code" })).toBeNull();
+    fireEvent.click(model);
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "✓Grok 4.7a/grok",
+      "Grok 4.7b/grok",
+    ]);
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索Model" }), {
+      target: { value: "b/" },
+    });
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "搜索Model" }), { key: "Enter" });
+    expect(screen.getByText("已指定：b/grok")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(f.calls.some((call) => call.method === "agents.saveExternalAgent")).toBe(true),
+    );
+    await waitFor(() =>
+      expect(screen.getAllByText(/已连接 · omp 18\.6\.0/).length).toBeGreaterThan(0),
+    );
+    f.close();
+  });
   it("toggle、replace、删除和失败保持草稿；名称锁定", async () => {
     let agents = [managed];
     let reject = true;

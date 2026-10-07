@@ -63,7 +63,8 @@ export interface ExternalAgentProbeResult {
     description?: string | undefined;
     category?: string | undefined;
     currentValue: string;
-    options: { value: string; name: string }[];
+    /** description/group 原样转交对方给的展示信息，界面用来区分同名选项 */
+    options: { value: string; name: string; description?: string; group?: string }[];
   }[];
   error?: { code: string; message: string } | undefined;
 }
