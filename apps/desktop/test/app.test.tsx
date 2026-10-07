@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
@@ -41,6 +42,34 @@ function replayHost(
     firstText: `${id} 会话`,
   }));
   const workspaces = new Map<number, string>();
+  /** 带状态的 Shell：session.setShell 改写、session.shellInfo 返回最新值（与真实后台一致） */
+  const shellState = new Map<string, { kind: string; path: string }>();
+  const shellFor = (id: string | undefined) => {
+    const key = id ?? "";
+    return shellState.get(key) ?? { kind: "pwsh", path: "C:/tools/pwsh.exe" };
+  };
+  /** 持久事件 seq：订阅回放 lastSeq=4，新事件从 5 起递增 */
+  let nextSeq = 5;
+  const emitEvent = (backendId: number, sessionId: string | undefined, event: object) => {
+    const channel = channels.get(backendId);
+    channel?.({
+      kind: "line",
+      line: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "event",
+        params: {
+          sessionId,
+          event: {
+            sessionId,
+            turnId: `turn-${sessionId}`,
+            seq: nextSeq++,
+            time: "2026-10-04T00:00:00Z",
+            ...event,
+          },
+        },
+      }),
+    });
+  };
   const notify = (backendId: number, method: string) => {
     channels.get(backendId)?.({
       kind: "line",
@@ -258,9 +287,15 @@ function replayHost(
         case "session.reasoningEffortInfo":
           result = { current: "off", effective: "off", available: ["low", "high"] };
           break;
-        case "session.shellInfo":
-          result = { effective: { kind: "pwsh" } };
+        case "session.shellInfo": {
+          const current = shellFor(id);
+          result = {
+            selected: current.kind,
+            source: "settings",
+            effective: { kind: current.kind, name: current.kind, path: current.path },
+          };
           break;
+        }
         case "session.listShells":
           result = [{ kind: "bash", name: "Bash", available: true, executable: "/bin/bash" }];
           break;
@@ -283,6 +318,16 @@ function replayHost(
         case "session.readInputHistory":
           result = [];
           break;
+        case "session.setShell": {
+          const kind = String(request.params.kind ?? "");
+          shellState.set(id ?? "", { kind, path: `C:/tools/${kind}.exe` });
+          // 真实服务端：切换生效先写持久 config_changed 事件，再返回响应
+          emitEvent(backendId, id, {
+            type: "session.config_changed",
+            payload: { shell: { kind, path: `C:/tools/${kind}.exe` } },
+          });
+          break;
+        }
         case "session.recordInputHistory":
         case "session.compact":
         case "session.respondPermission":
@@ -290,7 +335,6 @@ function replayHost(
         case "session.setModel":
         case "session.setReasoningEffort":
         case "session.setPermissionPreset":
-        case "session.setShell":
           break;
         case "session.unsubscribe":
         case "session.close":
@@ -412,6 +456,31 @@ it("会话内状态栏控件调用真实 setter", async () => {
       host.calls.some((call) => call.method === "session.setShell" && call.params.kind === "bash"),
     ).toBe(true),
   );
+});
+
+it("切换 Shell 后状态栏文字与菜单勾选立即更新（F-01）", async () => {
+  const host = replayHost();
+  render(
+    <StrictMode>
+      <App host={host} />
+    </StrictMode>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  await screen.findByRole("region", { name: "会话消息" });
+  const pill = await screen.findByRole("button", { name: "切换 Shell" });
+  await waitFor(() => expect(pill.textContent).toContain("pwsh"));
+  fireEvent.click(pill);
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: /bash · Bash/ }));
+  await waitFor(() =>
+    expect(
+      host.calls.some((call) => call.method === "session.setShell" && call.params.kind === "bash"),
+    ).toBe(true),
+  );
+  await waitFor(() => expect(pill.textContent).toContain("bash"));
+  // 菜单勾选也指向新值
+  fireEvent.click(pill);
+  const item = await screen.findByRole("menuitemradio", { name: /bash · Bash/ });
+  expect(item.getAttribute("aria-checked")).toBe("true");
 });
 
 it("/compact 走真实 RPC，移除命令只给界面提示", async () => {

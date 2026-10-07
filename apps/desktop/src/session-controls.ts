@@ -17,6 +17,13 @@ export const refKey = (ref: ModelRef): string => `${ref.provider}/${ref.model}`;
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+/**
+ * 控件变更串行队列的超时（毫秒）：上一个变更（RPC 往返 + 刷新）在此
+ * 时长内未落地视为连接异常，放行后续选择——否则一条丢失的响应会让
+ * 之后的所有切换被静默吞掉，只能重进会话恢复（F-01）。测试可缩小。
+ */
+export const sessionMutationTimeout = { ms: 15_000 };
+
 function modelOption(info: ModelInfo) {
   return {
     value: refKey(info.ref),
@@ -80,7 +87,8 @@ export function useSessionControls(
   const mounted = useRef(true);
   const current = useRef(session);
   current.current = session;
-  const mutation = useRef(false);
+  /** 控件变更串行队列：新选择排在上一个变更之后，永不静默丢弃 */
+  const mutation = useRef<Promise<void>>(Promise.resolve());
 
   const refresh = useCallback(async () => {
     const id = ++request.current;
@@ -135,21 +143,26 @@ export function useSessionControls(
     setSnapshot(null);
     setShells(undefined);
     setError(undefined);
-    mutation.current = false;
+    mutation.current = Promise.resolve();
   }, [session]);
 
   const choose = useCallback(
-    async (action: () => Promise<void>) => {
-      if (mutation.current) return;
-      mutation.current = true;
-      try {
-        await action();
-        if (current.current === session) await refresh();
-      } catch (failure) {
-        if (current.current === session) setError(message(failure));
-      } finally {
-        if (current.current === session) mutation.current = false;
-      }
+    (action: () => Promise<void>): Promise<void> => {
+      // 上一个变更超时未落地时放行——卡死的请求可能晚到，但写入幂等、
+      // 最终结果以最后一次选择为准；挂起的请求不会再锁住之后的切换
+      const next = Promise.race([
+        mutation.current,
+        new Promise<void>((resolve) => setTimeout(resolve, sessionMutationTimeout.ms)),
+      ]).then(async () => {
+        try {
+          await action();
+          if (current.current === session && mounted.current) await refresh();
+        } catch (failure) {
+          if (current.current === session && mounted.current) setError(message(failure));
+        }
+      });
+      mutation.current = next;
+      return next;
     },
     [session, refresh],
   );
@@ -184,7 +197,6 @@ export function useSessionControls(
   ]
     .filter((text): text is string => text !== undefined)
     .join("；");
-
   const modelControl: ChoiceControl = {
     value: model === undefined ? undefined : refKey(model),
     label: model?.model ?? "模型 —",
