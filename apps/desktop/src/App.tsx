@@ -984,24 +984,25 @@ export function App({ host }: { host: DesktopHost }) {
           ) : selectedId !== null ? (
             // 正在打开 / 打开失败：占位区不退回上一个会话（ADR-0051）
             <div className="center">
-              <div className="nodecard">
-                {selectedOpenError === undefined ? (
-                  <div className="lead">正在打开…</div>
-                ) : (
-                  <>
-                    <h3>打开会话失败</h3>
-                    <div className="lead">{selectedOpenError.message}</div>
-                    <div className="acts">
-                      <button
-                        className="btn primary"
-                        onClick={() => void selectSession(selectedId, selectedOpenError.workspace)}
-                      >
-                        重试
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+              {selectedOpenError === undefined ? (
+                <div className="opening" role="status">
+                  <span className="spin" aria-hidden="true" />
+                  正在打开…
+                </div>
+              ) : (
+                <div className="nodecard">
+                  <h3>打开会话失败</h3>
+                  <div className="lead">{selectedOpenError.message}</div>
+                  <div className="acts">
+                    <button
+                      className="btn primary"
+                      onClick={() => void selectSession(selectedId, selectedOpenError.workspace)}
+                    >
+                      重试
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <PaneErrorBoundary key="draft">

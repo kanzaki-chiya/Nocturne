@@ -315,6 +315,8 @@ button {
 
 .nav {
   display: grid;
+  /* 单列且可收窄：否则行内 nowrap 标题把列撑宽，左栏出现横向滚动、省略号失效 */
+  grid-template-columns: minmax(0, 1fr);
   gap: 1px;
 }
 .nav .item {
@@ -414,6 +416,7 @@ button {
   position: relative;
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 .irow .item {
   flex: 1;
@@ -811,6 +814,43 @@ button {
 }
 .nodecard .lead {
   color: var(--a-muted);
+}
+/* 打开会话占位（ADR-0051）：居中转圈；延迟出现，打开得快时不闪 */
+.opening {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--a-muted);
+  font-size: 13px;
+  opacity: 0;
+  animation: opening-in 0.15s ease-out 0.2s forwards;
+}
+.opening .spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--a-selStrong);
+  border-top-color: var(--a-accent);
+  animation: opening-spin 0.9s linear infinite;
+}
+@keyframes opening-in {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes opening-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .opening {
+    animation: none;
+    opacity: 1;
+  }
+  .opening .spin {
+    animation: none;
+  }
 }
 .probe {
   border: 1px solid var(--a-border);
