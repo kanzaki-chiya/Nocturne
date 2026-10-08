@@ -21,6 +21,7 @@ import {
   createSessionView,
   reduceSessionView,
   replaySessionView,
+  sessionUsageSoFar,
   type ToolEntry,
 } from "../src/protocol/index.js";
 import { internalSession } from "./internal-session.js";
@@ -230,6 +231,52 @@ describe("SessionView reducer", () => {
     expect(view.turnCount).toBe(1);
     assertConvergedEqual(view, durableOf(session));
     V5(view);
+    await session.close();
+  });
+
+  it("sessionUsageSoFar：进行中 Turn 每步结束即计入，不等 turn.completed", async () => {
+    const { runtime } = await makeRuntime([
+      [
+        { type: "text_delta", text: "一" },
+        { type: "usage", usage: { inputTokens: 100, outputTokens: 1, cacheReadTokens: 50 } },
+        { type: "finish", reason: "stop" },
+      ],
+      [
+        { type: "tool_call", toolCallId: "c1", name: "read", input: { path: "missing.txt" } },
+        { type: "usage", usage: { inputTokens: 1000, outputTokens: 2, cacheReadTokens: 900 } },
+        { type: "finish", reason: "tool_calls" },
+      ],
+      [
+        { type: "text_delta", text: "二" },
+        { type: "usage", usage: { inputTokens: 2000, outputTokens: 3, cacheReadTokens: 1900 } },
+        { type: "finish", reason: "stop" },
+      ],
+    ]);
+    const session = await newSession(runtime);
+    const view = replaySessionView([...session.durableEvents()]);
+    const seen: { type: string; usage: ReturnType<typeof sessionUsageSoFar> }[] = [];
+    session.subscribe((e) => {
+      reduceSessionView(view, e);
+      seen.push({ type: e.type, usage: sessionUsageSoFar(view) });
+    });
+    expect(sessionUsageSoFar(view)).toEqual({ inputTokens: 0, outputTokens: 0 });
+    expect(await session.submit({ text: "第一轮" })).toBe("done");
+    seen.length = 0;
+    expect(await session.submit({ text: "第二轮" })).toBe("done");
+
+    // 第二轮第一步写入后、Turn 结束前：上一轮累计 + 本步用量
+    const firstStep = seen.findIndex((s) => s.type === "message.assistant");
+    const completed = seen.findIndex((s) => s.type === "turn.completed");
+    expect(firstStep).toBeGreaterThanOrEqual(0);
+    expect(firstStep).toBeLessThan(completed);
+    expect(seen[firstStep]?.usage).toEqual({
+      inputTokens: 1100,
+      outputTokens: 3,
+      cacheReadTokens: 950,
+    });
+    // Turn 结束后就是 view.usage
+    expect(sessionUsageSoFar(view)).toBe(view.usage);
+    expect(view.usage).toEqual({ inputTokens: 3100, outputTokens: 6, cacheReadTokens: 2850 });
     await session.close();
   });
 

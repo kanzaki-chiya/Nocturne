@@ -7,7 +7,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { type SessionView } from "@nocturne/core/protocol";
+import { sessionUsageSoFar, type SessionView } from "@nocturne/core/protocol";
 import type { ContextSummary, RpcSession } from "@nocturne/rpc/client";
 
 import { Dropdown } from "./Dropdown";
@@ -323,7 +323,8 @@ export function StatusBar({
 
   const usage = context?.report;
   const used = usage === undefined ? null : percent(usage.estimatedTokens, usage.budgetTokens);
-  const cacheUsage = view.usage;
+  // 含进行中 Turn 已完成的步骤，每步结束即更新（view.md §8）
+  const cacheUsage = sessionUsageSoFar(view);
   const cache =
     cacheUsage.cacheReadTokens === undefined || cacheUsage.inputTokens <= 0
       ? null

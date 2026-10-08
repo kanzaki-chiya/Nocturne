@@ -281,7 +281,10 @@ ask 判定
 function createSessionView(): SessionView;
 function reduceSessionView(view: SessionView, event: RuntimeEvent): void;
 function replaySessionView(events: readonly DurableEvent[]): SessionView; // ≡ fold
+function sessionUsageSoFar(view: SessionView): Usage;
 ```
+
+`sessionUsageSoFar` 给状态栏的累计用量：`view.usage` 加上进行中 Turn 已写入的 assistant 消息用量，每步结束即更新，不等 `turn.completed`；无进行中 Turn 时就是 `view.usage`。TUI 与桌面端的缓存命中率都用它。
 
 `RuntimeEvent = DurableEvent | EphemeralEvent`（`subscribe` 的回调类型即此）。
 

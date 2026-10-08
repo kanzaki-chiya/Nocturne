@@ -229,6 +229,36 @@ describe("contextSourceLabel", () => {
 });
 
 describe("StatusBar", () => {
+  it("缓存命中率在进行中 Turn 每步结束即更新，不等 Turn 结束", () => {
+    const state = fixture();
+    const cache = () => document.querySelector(".status-cache")?.textContent;
+    const rendered = render(<StatusBar {...state} />);
+    expect(cache()).toBe("缓存 —");
+    const view = {
+      ...state.view,
+      status: "running_tool" as const,
+      currentTurn: { turnId: "t1", turnIndex: 1 },
+      entries: [
+        {
+          kind: "assistant" as const,
+          key: "a:m1",
+          turnId: "t1",
+          messageId: "m1",
+          seq: 3,
+          time: "2026-10-09T00:00:00.000Z",
+          text: "",
+          reasoning: "",
+          toolCalls: [],
+          model: { provider: "fixture", model: "one" },
+          usage: { inputTokens: 1000, outputTokens: 5, cacheReadTokens: 900 },
+          finishReason: "tool_calls" as const,
+        },
+      ],
+    };
+    rendered.rerender(<StatusBar {...state} view={view} />);
+    expect(cache()).toBe("缓存 90%");
+  });
+
   it("已有数据时刷新不插入读取行；失败保留数据并在标题显示提示", async () => {
     const state = fixture();
     const rendered = render(<StatusBar {...state} panel="context" />);

@@ -14,12 +14,11 @@ import {
   formatCacheHitRate,
   formatContextOccupancy,
   formatModelLabel,
-  sessionUsageSoFar,
 } from "../status-format.js";
 import { useTheme } from "../theme.js";
 
 import type { ModelInfo } from "@nocturne/core";
-import type { RuntimeStatus, SessionView } from "@nocturne/core/protocol";
+import { sessionUsageSoFar, type RuntimeStatus, type SessionView } from "@nocturne/core/protocol";
 
 const STATUS_TEXT: Record<RuntimeStatus, string> = {
   idle: "idle",

@@ -592,6 +592,22 @@ function pushNotice(
   });
 }
 
+/**
+ * 会话累计用量的即时值：已结束 Turn 的累计（`view.usage`，turn.completed 时累加）
+ * 加上进行中 Turn 已写入的 assistant 消息用量，客户端不必等 Turn 结束才更新。
+ * Turn 结束后以 turn.completed 的用量为准。
+ */
+export function sessionUsageSoFar(view: SessionView): Usage {
+  const turnId = view.currentTurn?.turnId;
+  if (turnId === undefined) return view.usage;
+  let usage = view.usage;
+  for (const entry of view.entries) {
+    if (entry.kind === "assistant" && entry.turnId === turnId && entry.usage !== undefined)
+      usage = addUsage(usage, entry.usage);
+  }
+  return usage;
+}
+
 function addUsage(a: Usage, b: Usage): Usage {
   const out: Usage = {
     inputTokens: a.inputTokens + b.inputTokens,
