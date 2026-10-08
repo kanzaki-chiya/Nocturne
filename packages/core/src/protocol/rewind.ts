@@ -4,8 +4,13 @@ import type { MessageUserPayload } from "./events.js";
 export function firstUserText(payload: Pick<MessageUserPayload, "content">): string | undefined {
   const block = payload.content.find((b) => b.type === "text");
   if (block?.type !== "text") return undefined;
-  const line = block.text.split("\n", 1)[0]?.trim();
-  return line === "" ? undefined : line;
+  // 第一个非空行：粘贴的长文常以空行开头，只取首行会得到空串，
+  // 桌面端会把这样的会话当成空会话隐藏（仍不跳到下一个文本块）
+  for (const raw of block.text.split("\n")) {
+    const line = raw.trim();
+    if (line !== "") return line;
+  }
+  return undefined;
 }
 
 export type RewindMode = "both" | "conversation" | "files";

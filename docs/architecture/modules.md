@@ -55,7 +55,7 @@
 
 - **负责**：事件信封与事件类型；客户端命令类型（submit、interrupt、respondPermission 等）；跨模块公共数据（消息内容块、用量、工具调用引用）；面向客户端的派生视图 reducer（`SessionView`，Phase 4，见 [view.md](../protocols/view.md)）。
 - **不负责**：任何行为、I/O、可变状态（reducer 是纯函数，状态由调用方持有）。
-- **公开接口**：`RuntimeEvent`、`ClientCommand`、`ContentBlock`、`Usage` 等类型；`createSessionView` / `reduceSessionView` / `replaySessionView`；`firstUserText`（用户消息原文首行）、`parseCompactionThreshold` 与 `estimateTokens`（共享的 token 估算）；`BUILTIN_SLASH_COMMANDS`、`parseSkillSlash` 与 `skillListLines`（技能命令名单与斜杠解析，skills.md 第 6 节）。
+- **公开接口**：`RuntimeEvent`、`ClientCommand`、`ContentBlock`、`Usage` 等类型；`createSessionView` / `reduceSessionView` / `replaySessionView`；`firstUserText`（用户消息第一个文本块的第一个非空行）、`parseCompactionThreshold` 与 `estimateTokens`（共享的 token 估算）；`BUILTIN_SLASH_COMMANDS`、`parseSkillSlash` 与 `skillListLines`（技能命令名单与斜杠解析，skills.md 第 6 节）。
 - **依赖**：无。**不能依赖**：一切。
 - 行级差异纯函数：`lineDiff(oldText, newText)` 返回多块 unified diff 与增删行数（每块三行上下文）；编辑距离超过 1000 时退回首尾裁剪单块并标记 `approximate`。`diffLines` 保留工具现有的单块输出。
 

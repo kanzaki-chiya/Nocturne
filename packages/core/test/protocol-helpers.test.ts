@@ -8,7 +8,7 @@ it("公开估算沿用 CJK 一字一个 token，其他四字一个", () => {
   expect(estimateTokens("")).toBe(0);
 });
 
-it("会话首句取第一个文本块首行，空首行不回退到下一块", () => {
+it("会话首句取第一个文本块的第一个非空行，不回退到下一块", () => {
   expect(
     firstUserText({
       content: [
@@ -20,7 +20,15 @@ it("会话首句取第一个文本块首行，空首行不回退到下一块", (
   expect(
     firstUserText({
       content: [
-        { type: "text", text: "\n其他" },
+        { type: "text", text: "\n \r\n  其他\n更多" },
+        { type: "text", text: "第二块" },
+      ],
+    }),
+  ).toBe("其他");
+  expect(
+    firstUserText({
+      content: [
+        { type: "text", text: " \n\t" },
         { type: "text", text: "第二块" },
       ],
     }),

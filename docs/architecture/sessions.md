@@ -55,7 +55,7 @@ MVP 不做快照；若将来出现加载瓶颈，再追加 `session.snapshot` �
 | `interrupt` | 中止当前 Turn；Turn 以 `aborted` 结束，会话回到 `idle` |
 | `close` | 先拒绝新操作；取消后台标题请求；若 Turn 已被接受（包括尚在提交准备阶段）或正在压缩，先发出中断并等待全部请求收束，再清理资源、释放锁。Turn 按中断语义写入 `turn.completed(reason="aborted")`（`failed` 状态下不再写入）。日志保留，可随时恢复 |
 
-新建根会话首条 `message.user` 落盘后，Runtime 在后台用 smol 角色（未配置时用当时的会话模型）请求标题，不阻塞 Turn；只取用户文字前 2000 字符，要求同语言、不超过 20 字、不带工具与思考档位。结果去引号、换行、首尾空白并截到 40 显示宽度，写入 `session.titled`。与 Turn 共用 Session 写入队列，seq、日志与发布顺序一致；失败只记诊断，不发 warning。旧会话恢复与子会话均不生成，已有标题不再请求。标题展示由 [SessionView.title](../protocols/view.md) 派生；列表读日志时 `SessionSummary.firstText` 优先取生成标题，否则取首条用户消息原文首行（[ADR-0040](../decisions/ADR-0040-model-roles.md)）。
+新建根会话首条 `message.user` 落盘后，Runtime 在后台用 smol 角色（未配置时用当时的会话模型）请求标题，不阻塞 Turn；只取用户文字前 2000 字符，要求同语言、不超过 20 字、不带工具与思考档位。结果去引号、换行、首尾空白并截到 40 显示宽度，写入 `session.titled`。与 Turn 共用 Session 写入队列，seq、日志与发布顺序一致；失败只记诊断，不发 warning。旧会话恢复与子会话均不生成，已有标题不再请求。标题展示由 [SessionView.title](../protocols/view.md) 派生；列表读日志时 `SessionSummary.firstText` 优先取生成标题，否则取首条用户消息第一个文本块的第一个非空行（[ADR-0040](../decisions/ADR-0040-model-roles.md)）。
 
 ## 4. 打开会话（恢复）的顺序
 

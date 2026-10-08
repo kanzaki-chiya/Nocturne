@@ -223,7 +223,7 @@ it("标题取首条持久化原文首行，/new 清空", async () => {
   await next.close();
 });
 
-it("标题宽度截断并随横线省略；共享首行规则与 CJK 估算", async () => {
+it("标题宽度截断并随横线省略；共享首句规则与 CJK 估算", async () => {
   expect(
     firstUserText({
       content: [
@@ -232,7 +232,8 @@ it("标题宽度截断并随横线省略；共享首行规则与 CJK 估算", as
       ],
     }),
   ).toBe("原文首行");
-  expect(firstUserText({ content: [{ type: "text", text: "\n空首行" }] })).toBeUndefined();
+  expect(firstUserText({ content: [{ type: "text", text: "\n空首行" }] })).toBe("空首行");
+  expect(firstUserText({ content: [{ type: "text", text: " \n" }] })).toBeUndefined();
   expect(firstUserText({ content: [] })).toBeUndefined();
   expect(estimateTokens("中文abcd")).toBe(3);
   const props = {
