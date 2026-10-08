@@ -1,6 +1,6 @@
 import { createSessionView } from "@nocturne/core/protocol";
 import type { ContextSummary, RpcSession } from "@nocturne/rpc/client";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -229,6 +229,37 @@ describe("contextSourceLabel", () => {
 });
 
 describe("StatusBar", () => {
+  it("已有数据时刷新不插入读取行；失败保留数据并在标题显示提示", async () => {
+    const state = fixture();
+    const rendered = render(<StatusBar {...state} panel="context" />);
+    await screen.findByText("用户消息");
+    const dialog = screen.getByRole("dialog");
+    const rowCount = dialog.querySelectorAll(".context-details > div").length;
+    const childCount = dialog.childElementCount;
+    let reject!: (reason: Error) => void;
+    state.api.describeContext.mockImplementation(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+    );
+    rendered.rerender(
+      <StatusBar {...state} view={{ ...state.view, status: "running" }} panel="context" />,
+    );
+    expect(dialog.getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByText("正在读取…")).toBeNull();
+    expect(dialog.querySelectorAll(".context-details > div")).toHaveLength(rowCount);
+    expect(dialog.childElementCount).toBe(childCount);
+    await act(async () => {
+      reject(new Error("读取失败"));
+    });
+    expect(screen.getByRole("alert").getAttribute("title")).toBe("刷新失败：读取失败");
+    expect(screen.getByRole("alert").closest(".status-popover-heading")).not.toBeNull();
+    expect(dialog.childElementCount).toBe(childCount);
+    expect(dialog.querySelectorAll(".context-details > div")).toHaveLength(rowCount);
+    expect(screen.getByText("用户消息")).toBeTruthy();
+  });
+
   it("受控 /context 面板读取 RPC 报告，Escape 通知关闭", async () => {
     const state = fixture();
     const onPanelChange = vi.fn();

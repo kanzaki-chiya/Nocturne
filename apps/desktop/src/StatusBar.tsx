@@ -523,17 +523,30 @@ export function StatusBar({
           aria-busy={loading}
         >
           <div className="status-popover-heading">
-            <b>{PANEL_TITLES[activePanel]}</b>
+            <b>
+              {PANEL_TITLES[activePanel]}
+              {context !== null && error !== null && (
+                <span
+                  className="status-error"
+                  role="alert"
+                  aria-label={`刷新失败：${error}`}
+                  title={`刷新失败：${error}`}
+                >
+                  {" "}
+                  ⚠
+                </span>
+              )}
+            </b>
             <button type="button" aria-label="关闭面板" onClick={closePanel}>
               ×
             </button>
           </div>
-          {loading && (
+          {loading && context === null && (
             <p className="status-note" role="status">
               正在读取…
             </p>
           )}
-          {error !== null && (
+          {error !== null && context === null && (
             <p className="status-error" role="alert">
               {error}
             </p>

@@ -184,6 +184,8 @@ interface NodeProbe {
 
 上下文面板取 `describeContext`，展示总量与预算、分段堆叠条和数值；对话历史从 `history.breakdown` 细分用户消息、助手回答、工具调用与结果、压缩摘要，不从可见消息重新估算。来源文本按 `contextSourceLabel` 中文化（「内置提示词」「自定义提示词」「N 个工具」「N 项」「N 条」，路径按主目录缩写）。底部提示「可以输入 /compact 压缩」。
 
+上下文面板只在尚无数据时显示「正在读取…」。已有数据的后台刷新保留旧内容，成功后直接替换；失败时保留旧内容，在标题行以警告图标与悬停说明提示原因，不额外插入提示行。`aria-busy` 表达刷新状态，不参与布局。
+
 已知限制（等 RPC 能力）：空状态的项目文件搜索需要 runtime 级 `fileIndex`（`fileIndex` 目前是 session 级，前端已用 `Composer.fileRefs` 作为数据接缝，届时只换数据源）。
 
 ### 5.5 设置区
