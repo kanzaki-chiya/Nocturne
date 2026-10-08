@@ -3,10 +3,10 @@
  * 在收敛点断言重放等价（V1），另测不变量 V2–V8。
  * 事件序列由真实 Runtime + FakeProvider 驱动（真实发出顺序），完全离线。
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createRuntime, type Runtime, type RuntimeSession } from "../src/index.js";
 import { FakeProvider, ProviderError, type FakeScript } from "../src/provider/index.js";
@@ -24,11 +24,19 @@ import {
   type ToolEntry,
 } from "../src/protocol/index.js";
 import { internalSession } from "./internal-session.js";
+import type * as platformModule from "../src/platform/platform.js";
+import { createProcessCleanup, removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
 
 const tmpRoots: string[] = [];
+const processes = createProcessCleanup();
+vi.mock("../src/platform/platform.js", async (original) => {
+  const module = await original<typeof platformModule>();
+  return { ...module, createPlatform: () => processes.platform(module.createPlatform()) };
+});
 
-afterEach(() => {
-  for (const r of tmpRoots.splice(0)) rmSync(r, { recursive: true, force: true });
+afterEach(async () => {
+  await processes.cleanup();
+  await removeTempDirs(tmpRoots.splice(0));
 });
 
 function makeTmpDir(prefix: string): string {

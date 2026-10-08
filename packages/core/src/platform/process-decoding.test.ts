@@ -1,5 +1,4 @@
-import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -7,6 +6,12 @@ import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createProcessRunner, decodeOutput } from "./process.js";
+import { createProcessCleanup, removeTempDirs } from "../../../../scripts/test/process-cleanup.mjs";
+
+const processes = createProcessCleanup();
+afterEach(async () => {
+  await processes.cleanup();
+});
 
 function decoder(label = "gbk", forced = false) {
   const stream = new PassThrough();
@@ -80,7 +85,7 @@ describe("子进程逐行输出解码", () => {
   });
 
   it.runIf(process.platform === "win32")("真实 cmd 管道中的 Node UTF-8 中文输出", async () => {
-    const runner = createProcessRunner();
+    const runner = processes.wrap(createProcessRunner());
     const proc = runner.spawnShell(
       'node -e "process.stdout.write(\'UTF8中文\\n\')" 2>&1 | findstr /n "^"',
     );
@@ -94,48 +99,10 @@ describe("子进程逐行输出解码", () => {
 
 describe("detachOutput 与流销毁收尾", () => {
   const tmpDirs: string[] = [];
-  const orphanPids: number[] = [];
 
   afterEach(async () => {
-    // 先杀孤儿再等其消失（Windows 上进程持有的 cwd 句柄会锁临时目录）；
-    // 除登记 PID 外扫描本组临时目录中的 orphan.pid，覆盖 waitFor/断言
-    // 在登记前失败的路径，不留后台进程
-    const pids = new Set(orphanPids.splice(0));
-    for (const dir of tmpDirs) {
-      const pidFile = path.join(dir, "orphan.pid");
-      if (!existsSync(pidFile)) continue;
-      const pid = Number(readFileSync(pidFile, "utf8"));
-      if (Number.isInteger(pid) && pid > 0) pids.add(pid);
-    }
-    for (const pid of pids) {
-      if (process.platform === "win32") {
-        await new Promise<void>((resolve) => {
-          const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-            stdio: "ignore",
-            windowsHide: true,
-          });
-          killer.once("exit", () => resolve());
-          killer.once("error", () => resolve());
-        });
-      } else {
-        try {
-          process.kill(pid, "SIGKILL");
-        } catch {
-          // 已退出
-        }
-      }
-      for (let i = 0; i < 50; i++) {
-        try {
-          process.kill(pid, 0);
-        } catch {
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 50));
-      }
-    }
-    for (const dir of tmpDirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
-    }
+    await processes.cleanup();
+    await removeTempDirs(tmpDirs.splice(0));
   });
 
   it("流销毁（detach）后已捕获的 UTF-8/GBK 行与截断尾巴按原规则冲刷并结束", async () => {
@@ -169,6 +136,7 @@ describe("detachOutput 与流销毁收尾", () => {
     // shell 进程退出但管道仍被孙进程持有
     const dir = mkdtempSync(path.join(tmpdir(), "nct-detach-"));
     tmpDirs.push(dir);
+    processes.watchPidFile(path.join(dir, "orphan.pid"));
     writeFileSync(path.join(dir, "orphan.js"), "setInterval(()=>{},1000);\n");
     writeFileSync(
       path.join(dir, "parent.js"),
@@ -179,7 +147,7 @@ c.unref();
 fs.writeFileSync(${JSON.stringify(path.join(dir, "orphan.pid"))},String(c.pid));
 process.stdout.write("READY\\n");`,
     );
-    const runner = createProcessRunner();
+    const runner = processes.wrap(createProcessRunner());
     const proc = runner.spawnShell(`${JSON.stringify(process.execPath)} parent.js`, { cwd: dir });
     let text = "";
     const done = (async () => {
@@ -191,7 +159,7 @@ process.stdout.write("READY\\n");`,
         timeout: 10_000,
         interval: 50,
       });
-      orphanPids.push(Number(readFileSync(pidFile, "utf8")));
+      processes.trackPid(Number(readFileSync(pidFile, "utf8")));
       // 管道仍被孙进程占用，但 wait 已在 shell exit 时结算
       const exit = await Promise.race([
         proc.wait(),

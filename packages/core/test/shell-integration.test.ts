@@ -3,7 +3,8 @@
  * 覆盖：调用形式、引号、`$` 变量、`&`/`;`/`|` 运算符、UTF-8 中文输出、
  * PowerShell 退出码语义（原生 $LASTEXITCODE / 非原生 0/1）。
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { createProcessCleanup } from "../../../scripts/test/process-cleanup.mjs";
 
 import {
   createPlatform,
@@ -13,7 +14,11 @@ import {
   type ShellDescriptor,
 } from "../src/platform/index.js";
 
-const platform = createPlatform();
+const processes = createProcessCleanup();
+const platform = processes.platform(createPlatform());
+afterEach(async () => {
+  await processes.cleanup();
+});
 const detected = await detectShells(platform);
 const byKind = (kind: string): ShellDescriptor | undefined => {
   const d = detected.find((x) => x.kind === kind && x.available);
@@ -25,7 +30,7 @@ const pwsh = byKind("pwsh");
 const powershell = byKind("powershell");
 const bash = byKind("bash");
 
-const runner = createProcessRunner();
+const runner = processes.wrap(createProcessRunner());
 const node = JSON.stringify(process.execPath);
 
 async function run(d: ShellDescriptor, command: string, timeoutMs = 30_000) {

@@ -2,8 +2,7 @@
  * write / edit / shell 工具的离线测试（tools.md 第 6 节）。
  * 写文件与 shell 命令只在临时目录中执行。
  */
-import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,68 +28,24 @@ import {
   type ExecutionScope,
   type PermissionGate,
 } from "./index.js";
+import { createProcessCleanup, removeTempDirs } from "../../../../scripts/test/process-cleanup.mjs";
 
-const platform: Platform = createPlatform();
+const processes = createProcessCleanup();
+const platform: Platform = processes.platform(createPlatform());
 const tmpRoots: string[] = [];
 
 const ORPHAN_MARKER = "ORPHAN-HOLDS-PIPE-7f3a";
 
-/** 测试派生的后台进程 pid，afterEach 统一清理，不留孤儿 */
-const orphanPids: number[] = [];
-
-/** 终止指定 PID 的进程树；已退出的进程忽略（Windows taskkill /T，POSIX 直接 SIGKILL） */
-async function killPidTree(pid: number): Promise<void> {
-  if (process.platform === "win32") {
-    await new Promise<void>((resolve) => {
-      const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      killer.once("exit", () => resolve());
-      killer.once("error", () => resolve());
-    });
-    return;
-  }
-  try {
-    process.kill(pid, "SIGKILL");
-  } catch {
-    // 已退出
-  }
-}
-
 afterEach(async () => {
-  // 先杀孤儿再等其消失：Windows 上进程持有的 cwd 句柄会锁临时目录，
-  // 必须在删目录前完成。除已登记 PID 外还扫描本次临时目录中的 orphan.pid
-  // （去重）：工具执行/断言/vi.waitFor 在 trackOrphan 之前失败时，pid 文件
-  // 已写出的孤儿同样被清理；只读自己创建的目录，不触碰其他进程
-  const pids = new Set(orphanPids.splice(0));
-  for (const root of tmpRoots) {
-    const pidFile = path.join(root, "orphan.pid");
-    if (!existsSync(pidFile)) continue;
-    const pid = Number(readFileSync(pidFile, "utf8"));
-    if (Number.isInteger(pid) && pid > 0) pids.add(pid);
-  }
-  for (const pid of pids) {
-    await killPidTree(pid);
-    for (let i = 0; i < 50; i++) {
-      try {
-        process.kill(pid, 0);
-      } catch {
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
-  for (const r of tmpRoots.splice(0)) {
-    rmSync(r, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
-  }
+  await processes.cleanup();
+  await removeTempDirs(tmpRoots.splice(0));
 });
 
 /** 读取孤儿 pid 文件并登记清理（pid 文件由测试脚本写出，不会误杀其他进程） */
 async function trackOrphan(pidFile: string): Promise<void> {
   if (await platform.fs.exists(pidFile)) {
     const pid = Number(await platform.fs.readTextFile(pidFile));
-    if (Number.isInteger(pid) && pid > 0) orphanPids.push(pid);
+    if (Number.isInteger(pid) && pid > 0) processes.trackPid(pid);
   }
 }
 
@@ -108,6 +63,7 @@ c.unref();`;
  */
 function writeOrphanScripts(ws: string, mode: "exit" | "hang" = "exit"): { pidFile: string } {
   const pidFile = path.join(ws, "orphan.pid");
+  processes.watchPidFile(pidFile);
   writeFileSync(path.join(ws, "orphan-leaf.js"), "setInterval(()=>{},1000);\n");
   if (mode === "exit") {
     writeFileSync(
@@ -536,6 +492,7 @@ describe("shell 工具", () => {
 
   it("中断：终止整个进程树（Windows 实测：taskkill /T）", async () => {
     const ws = tmpWorkspace();
+    processes.watchPidFile(path.join(ws, "grandchild.pid"));
     // 父进程派生一个孙进程并写出其 pid，然后双双挂起
     writeFileSync(
       path.join(ws, "child.js"),
@@ -558,7 +515,7 @@ setInterval(()=>{},1000);`,
       await new Promise((r) => setTimeout(r, 100));
     }
     expect(grandchildPid).toBeGreaterThan(0);
-    orphanPids.push(grandchildPid);
+    processes.trackPid(grandchildPid);
 
     ac.abort();
     const r = await exec;

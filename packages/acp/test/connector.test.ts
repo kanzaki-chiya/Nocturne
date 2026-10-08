@@ -12,26 +12,22 @@ import {
   type ToolContext,
 } from "@nocturne/core";
 import { createAcpConnector } from "../src/index.js";
+import { createProcessCleanup, removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
 
 const fixture = fileURLToPath(new URL("./fixtures/fake-agent.mjs", import.meta.url));
-const platform = createPlatform();
+const processes = createProcessCleanup();
+const platform = processes.platform(createPlatform());
 let root: string;
 let controller: AbortController;
-const children: number[] = [];
 
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-acp-"));
+  processes.watchPidFile(path.join(root, "pids.json"));
   controller = new AbortController();
 });
 afterEach(async () => {
-  for (const pid of children.splice(0)) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      /* already stopped */
-    }
-  }
-  await fs.rm(root, { recursive: true, force: true });
+  await processes.cleanup();
+  await removeTempDirs([root]);
 });
 
 function setup(
@@ -108,8 +104,8 @@ async function waitForPid(): Promise<{ pid: number; child?: number }> {
       },
     { timeout: 10_000, interval: 10 },
   );
-  children.push(pids.pid);
-  if (pids.child) children.push(pids.child);
+  processes.trackPid(pids.pid);
+  if (pids.child) processes.trackPid(pids.child);
   return pids;
 }
 
@@ -148,7 +144,7 @@ describe("ACP 单调用生命周期", () => {
       await vi.waitFor(() => expect(progress).toHaveBeenCalledTimes(8), { timeout: 1500 });
       if (source === "signal") controller.abort(new DOMException("Timeout", "TimeoutError"));
       const result = await resultPromise;
-      expect(result.error?.code).toBe("timeout");
+      expect(result.status === "error" && result.error.code).toBe("timeout");
       expect(result.modelContent).toContain("step 1");
       expect(result.modelContent).toContain("step 5");
       expect(result.modelContent).not.toContain("step 0");

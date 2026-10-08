@@ -4,19 +4,17 @@ import os from "node:os";
 import path from "node:path";
 import { createPlatform } from "./platform.js";
 import type { PipeProcess } from "./process.js";
+import { createProcessCleanup, removeTempDirs } from "../../../../scripts/test/process-cleanup.mjs";
 
-const platform = createPlatform();
-const processes: PipeProcess[] = [];
+const processes = createProcessCleanup();
+const platform = processes.platform(createPlatform());
 let root: string;
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-pipe-"));
 });
 afterEach(async () => {
-  for (const proc of processes.splice(0)) {
-    await proc.kill();
-    proc.detachOutput();
-  }
-  await fs.rm(root, { recursive: true, force: true });
+  await processes.cleanup();
+  await removeTempDirs([root]);
 });
 
 async function text(proc: PipeProcess): Promise<string> {
@@ -27,15 +25,17 @@ async function text(proc: PipeProcess): Promise<string> {
 
 describe("spawnPipe 的协议消费者边界", () => {
   it("wait 仍等 close，exited 独立于后代管道，detachOutput 有界结束读取", async () => {
+    const pidFile = path.join(root, "child.pid");
+    processes.watchPidFile(pidFile);
     const proc = platform.process.spawnPipe(process.execPath, [
       "-e",
       [
         'const {spawn}=require("node:child_process");',
         'const child=spawn(process.execPath,["-e","setInterval(()=>{},1000)"],{stdio:"inherit"});',
+        `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
         "console.log(child.pid); process.exit(3);",
       ].join(""),
     ]);
-    processes.push(proc);
     let raw = "";
     const reading = (async () => {
       for await (const chunk of proc.stdoutRaw) raw += chunk.toString("utf8");
@@ -71,7 +71,6 @@ describe("spawnPipe 的协议消费者边界", () => {
 
   it("退出后写 stdin 的异步 EPIPE 不成为未处理错误", async () => {
     const proc = platform.process.spawnPipe(process.execPath, ["-e", "process.exit(0)"]);
-    processes.push(proc);
     await proc.exited();
     expect(() => {
       proc.stdin.write("late protocol write\n");
@@ -113,7 +112,6 @@ describe("spawnPipe 的协议消费者边界", () => {
             NOCTURNE_PIPE_TEST: "do-not-expand",
           },
         });
-        processes.push(proc);
         const output = await text(proc);
         expect((await proc.wait()).code).toBe(0);
         expect(JSON.parse(output)).toEqual(values);

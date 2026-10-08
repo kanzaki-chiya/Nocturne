@@ -4,14 +4,15 @@
  * 逐次解析（切换对下一次 shell 调用生效，不在 Turn 开始快照）。
  * 全部使用隔离 NOCTURNE_HOME 与临时会话目录。
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { loadConfig, type RuntimeConfig } from "../src/config/index.js";
 import { buildContext } from "../src/context/index.js";
 import { createPlatform, type Platform } from "../src/platform/index.js";
+import type * as platformModule from "../src/platform/platform.js";
 import { createExecutionScope } from "../src/tools/index.js";
 import type { ExecutionEnvironment, TurnCallScope } from "../src/tools/index.js";
 
@@ -19,15 +20,20 @@ import { createRuntime, type Runtime, type RuntimeSession } from "../src/index.j
 import { foldEvents } from "../src/session/index.js";
 import { FakeProvider, type FakeScript } from "../src/provider/index.js";
 import type { DurableEvent, RuntimeEvent } from "../src/protocol/index.js";
+import { createProcessCleanup, removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
 
-const platform: Platform = createPlatform();
+const processes = createProcessCleanup();
+const platform: Platform = processes.platform(createPlatform());
+vi.mock("../src/platform/platform.js", async (original) => {
+  const module = await original<typeof platformModule>();
+  return { ...module, createPlatform: () => processes.platform(module.createPlatform()) };
+});
 const isWin = process.platform === "win32";
 const tmpRoots: string[] = [];
 
-afterEach(() => {
-  for (const r of tmpRoots.splice(0)) {
-    rmSync(r, { recursive: true, force: true });
-  }
+afterEach(async () => {
+  await processes.cleanup();
+  await removeTempDirs(tmpRoots.splice(0));
   Reflect.deleteProperty(process.env, "NOCTURNE_SHELL");
 });
 

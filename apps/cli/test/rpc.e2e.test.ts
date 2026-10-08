@@ -12,7 +12,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
@@ -32,6 +31,7 @@ import {
 } from "@nocturne/core/protocol";
 import { createRpcClient, RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
 import type { LineTransport } from "@nocturne/rpc/server";
+import { createProcessCleanup, removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../..");
@@ -95,7 +95,7 @@ interface Child {
 }
 
 const temps: string[] = [];
-const children: Child[] = [];
+const processes = createProcessCleanup();
 
 interface SpawnExtras {
   /** 追加/覆盖子进程环境变量 */
@@ -112,18 +112,20 @@ function spawnRpc(args: string[] = ["rpc", "--stdio"], extras: SpawnExtras = {})
   mkdirSync(home);
   mkdirSync(workspace);
   extras.seedHome?.(home);
-  const proc = spawn(process.execPath, [cli, ...args], {
-    cwd: workspace,
-    stdio: ["pipe", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      NOCTURNE_HOME: home,
-      NOCTURNE_API_KEY: "e2e-placeholder",
-      NOCTURNE_BASE_URL: baseURL,
-      NOCTURNE_MODEL: "e2e-model",
-      ...extras.env,
-    },
-  });
+  const proc = processes.trackChild(
+    spawn(process.execPath, [cli, ...args], {
+      cwd: workspace,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        NOCTURNE_HOME: home,
+        NOCTURNE_API_KEY: "e2e-placeholder",
+        NOCTURNE_BASE_URL: baseURL,
+        NOCTURNE_MODEL: "e2e-model",
+        ...extras.env,
+      },
+    }),
+  );
   let stderr = "";
   proc.stderr.on("data", (c: Buffer) => {
     stderr += c.toString();
@@ -163,18 +165,14 @@ function spawnRpc(args: string[] = ["rpc", "--stdio"], extras: SpawnExtras = {})
     transport,
     exit,
   };
-  children.push(child);
   return child;
 }
 
-afterEach(() => {
+afterEach(async () => {
   hang = false;
-  while (children.length > 0) {
-    const c = children.pop();
-    if (c !== undefined && c.proc.exitCode === null) c.proc.kill("SIGKILL");
-  }
+  await processes.cleanup();
   for (const r of hanging.splice(0)) r.destroy();
-  for (const t of temps.splice(0)) rmSync(t, { recursive: true, force: true });
+  await removeTempDirs(temps.splice(0));
 });
 
 const sessionsDirOf = (c: Child) => path.join(c.home, "sessions");

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -26,14 +26,15 @@ import {
   createToolExecutor,
   type PermissionGate,
 } from "../src/tools/index.js";
+import { createProcessCleanup, removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
 
-const platform: Platform = createPlatform();
+const processes = createProcessCleanup();
+const platform: Platform = processes.platform(createPlatform());
 const tmpRoots: string[] = [];
 
-afterEach(() => {
-  for (const r of tmpRoots.splice(0)) {
-    rmSync(r, { recursive: true, force: true });
-  }
+afterEach(async () => {
+  await processes.cleanup();
+  await removeTempDirs(tmpRoots.splice(0));
 });
 
 function makeTmpDir(prefix: string): string {

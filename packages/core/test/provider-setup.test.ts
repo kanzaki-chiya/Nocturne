@@ -4,7 +4,7 @@
  * 全部离线；后端子进程调用用桩 ProcessRunner 验证（参数不含密钥、
  * 密钥只走 stdin/stdout、envStrip 剥离 PSModulePath）。
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -25,8 +25,19 @@ import {
   type RuntimeOptions,
 } from "../src/index.js";
 import { createPlatform, type PipeProcess, type Platform } from "../src/platform/index.js";
+import type * as platformModule from "../src/platform/platform.js";
 import { resolveProviderAuth } from "../src/provider-oauth.js";
 import { FakeProvider, type FakeScript } from "../src/provider/index.js";
+import { createProcessCleanup, removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
+
+const processes = createProcessCleanup();
+vi.mock("../src/platform/platform.js", async (original) => {
+  const module = await original<typeof platformModule>();
+  return { ...module, createPlatform: () => processes.platform(module.createPlatform()) };
+});
+afterEach(async () => {
+  await processes.cleanup();
+});
 
 let root: string;
 let home: string;
@@ -43,7 +54,7 @@ beforeAll(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-setup-"));
   home = path.join(root, "home");
   await fs.mkdir(home, { recursive: true });
-  platform = createPlatform();
+  platform = processes.platform(createPlatform());
 });
 
 beforeEach(async () => {
@@ -54,7 +65,8 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  await fs.rm(root, { recursive: true, force: true });
+  await processes.cleanup();
+  await removeTempDirs([root]);
 });
 
 function load(env: (n: string) => string | undefined = noEnv) {

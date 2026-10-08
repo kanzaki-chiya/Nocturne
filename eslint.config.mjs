@@ -49,6 +49,7 @@ export default tseslint.config(
       "**/*.smoke.ts",
       "test/**/*.{ts,tsx}",
       "**/test/**/*.{ts,tsx}",
+      "**/test/**/*.d.mts",
       "**/*.config.ts",
       "**/*.config.mts",
       "**/*.config.mjs",

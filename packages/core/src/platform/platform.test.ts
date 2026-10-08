@@ -12,6 +12,12 @@ import {
   resolveRealPath,
   shellDescriptor,
 } from "./index.js";
+import { createProcessCleanup } from "../../../../scripts/test/process-cleanup.mjs";
+
+const processes = createProcessCleanup();
+afterEach(async () => {
+  await processes.cleanup();
+});
 
 const isWin = process.platform === "win32";
 const pathsSensitive = createPathOps(true);
@@ -283,7 +289,7 @@ describe("ProcessRunner 输出解码", () => {
 
   it("NOCTURNE_CONSOLE_ENCODING=gbk 时按 GBK 解码", async () => {
     process.env[ENV_KEY] = "gbk";
-    const runner = createProcessRunner();
+    const runner = processes.wrap(createProcessRunner());
     // "中文" 的 GBK 字节序列
     const proc = runner.spawn(process.execPath, [
       "-e",
@@ -295,7 +301,7 @@ describe("ProcessRunner 输出解码", () => {
 
   it("utf-8 时按 UTF-8 解码", async () => {
     process.env[ENV_KEY] = "utf-8";
-    const runner = createProcessRunner();
+    const runner = processes.wrap(createProcessRunner());
     const proc = runner.spawn(process.execPath, ["-e", 'process.stdout.write("中文")']);
     expect(await collect(proc.stdout)).toBe("中文");
     await proc.wait();
@@ -303,7 +309,7 @@ describe("ProcessRunner 输出解码", () => {
 
   // 端到端：真实 chcp 探测 + cmd echo（仅在控制台能表示中文的代码页下断言内容）
   it.runIf(isWin)("cmd 输出按探测到的控制台代码页解码", async () => {
-    const runner = createProcessRunner();
+    const runner = processes.wrap(createProcessRunner());
     const chcp = runner.spawnShell("chcp");
     const cpText = await collect(chcp.stdout);
     await chcp.wait();

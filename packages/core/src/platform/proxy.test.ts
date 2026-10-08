@@ -4,8 +4,14 @@ import { createServer, type Server } from "node:http";
 import * as http from "node:http";
 import { connect } from "node:net";
 import { promisify } from "node:util";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { configureEnvProxy } from "./proxy.js";
+import { createProcessCleanup } from "../../../../scripts/test/process-cleanup.mjs";
+
+const processes = createProcessCleanup();
+afterEach(async () => {
+  await processes.cleanup();
+});
 
 describe("configureEnvProxy", () => {
   it("leaves Node's startup proxy configuration alone", () => {
@@ -149,8 +155,8 @@ it.skipIf(!("setGlobalProxyFromEnv" in http))(
       env.HTTP_PROXY = `http://127.0.0.1:${proxyPort}`;
       const moduleUrl = new URL("./proxy.ts", import.meta.url).href;
       const run = promisify(execFile);
-      const fetchInChild = (url: string, noProxy: string) =>
-        run(
+      const fetchInChild = (url: string, noProxy: string) => {
+        const result = run(
           process.execPath,
           [
             "--input-type=module",
@@ -163,6 +169,9 @@ it.skipIf(!("setGlobalProxyFromEnv" in http))(
           ],
           { env: { ...env, NO_PROXY: noProxy }, timeout: 8000 },
         );
+        processes.trackChild(result.child);
+        return result;
+      };
 
       const proxied = await fetchInChild("http://proxy-target.invalid/via-proxy", "");
       expect(proxied.stdout.trim()).toBe("local-ok");

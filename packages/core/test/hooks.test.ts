@@ -2,7 +2,7 @@
  * HookRunner 与执行管线集成测试（hooks.md）：
  * 用 `node -e` 内联脚本做 Hook 命令，全程离线。
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -23,12 +23,15 @@ import {
   type ExecutionScope,
 } from "../src/tools/index.js";
 import { createHookRunner } from "../src/hooks/index.js";
+import { createProcessCleanup, removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
 
-const platform: Platform = createPlatform();
+const processes = createProcessCleanup();
+const platform: Platform = processes.platform(createPlatform());
 const tmpRoots: string[] = [];
 
-afterEach(() => {
-  for (const r of tmpRoots.splice(0)) rmSync(r, { recursive: true, force: true });
+afterEach(async () => {
+  await processes.cleanup();
+  await removeTempDirs(tmpRoots.splice(0));
 });
 
 function tmp(): string {

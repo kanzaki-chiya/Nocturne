@@ -10,10 +10,18 @@ import {
   type McpServerConfig,
   type ToolContext,
 } from "@nocturne/core";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { createProcessCleanup } from "../../../scripts/test/process-cleanup.mjs";
 import { createMcpConnector } from "../src/index.js";
 
-const platform = createPlatform();
+const processes = createProcessCleanup();
+const platform = processes.platform(createPlatform());
+const closers = new Set<() => Promise<void>>();
+afterEach(async () => {
+  await processes.cleanup();
+  for (const close of closers) await close();
+  closers.clear();
+});
 const cfg = (url: string): McpServerConfig => ({
   name: "http",
   origin: "app",
@@ -85,17 +93,20 @@ async function httpFixture(reflectSecret = false, failList = false) {
       res.end();
     });
   });
+  const close = async () => {
+    closers.delete(close);
+    await server.close();
+    http.closeAllConnections();
+    await new Promise<void>((resolve) => http.close(() => resolve()));
+  };
+  closers.add(close);
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
   const address = http.address();
   if (!address || typeof address === "string") throw new Error("port unavailable");
   return {
     url: `http://127.0.0.1:${address.port}`,
     requests,
-    close: async () => {
-      await server.close();
-      http.closeAllConnections();
-      await new Promise<void>((resolve) => http.close(() => resolve()));
-    },
+    close,
   };
 }
 

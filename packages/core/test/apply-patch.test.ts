@@ -3,7 +3,7 @@
  * 解析器、四级匹配、整体成败与回滚、先读后写、权限主体、
  * 换行/BOM 保留、工具可见性筛选、shell 误用拒绝。
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -22,11 +22,14 @@ import {
   type ReadStateStore,
   type ToolResult,
 } from "../src/tools/index.js";
+import { createProcessCleanup, removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
 
-const platform: Platform = createPlatform();
+const processes = createProcessCleanup();
+const platform: Platform = processes.platform(createPlatform());
 const tmpRoots: string[] = [];
-afterEach(() => {
-  for (const r of tmpRoots.splice(0)) rmSync(r, { recursive: true, force: true });
+afterEach(async () => {
+  await processes.cleanup();
+  await removeTempDirs(tmpRoots.splice(0));
 });
 const tmp = (): string => {
   const d = mkdtempSync(path.join(tmpdir(), "nct-ap-"));

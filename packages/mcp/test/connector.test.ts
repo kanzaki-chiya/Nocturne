@@ -5,7 +5,8 @@
  */
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { createProcessCleanup } from "../../../scripts/test/process-cleanup.mjs";
 
 import {
   createPlatform,
@@ -22,7 +23,11 @@ import { createMcpConnector } from "../src/index.js";
 
 const FAKE_SERVER = fileURLToPath(new URL("./fake-server.mjs", import.meta.url));
 
-const platform: Platform = createPlatform();
+const processes = createProcessCleanup();
+const platform: Platform = processes.platform(createPlatform());
+afterEach(async () => {
+  await processes.cleanup();
+});
 const cwd = process.cwd();
 
 interface Opened {
