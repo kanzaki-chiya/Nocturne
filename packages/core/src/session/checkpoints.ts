@@ -58,17 +58,18 @@ export function createCheckpointRecorder(
             message: `${path}：${before.untracked}`,
           });
         }
-        if (phase === "before" && before !== null && "sha256" in before && bytes !== undefined) {
+        if (before !== null && "sha256" in before && bytes !== undefined) {
           const dir = paths.join(sessionsDir, "checkpoints", session.id);
           try {
             await fs.mkdir(dir);
             await fs.createExclusive(paths.join(dir, before.sha256), bytes);
           } catch (e) {
             if (fsErrorCode(e) !== "EEXIST") {
-              before = { untracked: e instanceof Error ? e.message : String(e) };
+              const reason = e instanceof Error ? e.message : String(e);
+              if (phase === "before") before = { untracked: reason };
               session.emitEphemeral("runtime.warning", {
                 code: "checkpoint_untracked",
-                message: `${path}：${before.untracked}`,
+                message: `${path}：${phase === "after" ? "改动后内容未保存：" : ""}${reason}`,
               });
             }
           }

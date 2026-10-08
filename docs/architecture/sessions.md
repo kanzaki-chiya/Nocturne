@@ -155,3 +155,5 @@ interface SessionRecovery {
 ## 文件检查点
 
 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md) 的原始字节存于 `<sessionsDir>/checkpoints/<rootSessionId>/<sha256>`，按内容去重，不自动清理。不存在的文件记 null，无法追踪的路径记原因。根会话每条用户消息到下一条用户消息之前是一轮，所有层级的子代理共用这一轮的首次 before；检查点事件写入根日志，payload.sessionId 标明子会话来源。历史折叠与视图忽略检查点，恢复读取日志仍须校验它们。
+
+工具调用结束后的普通文件字节同样保存在该目录，与 before 共用 sha256 排他创建去重及 10 MB 上限；保存失败只发 `checkpoint_untracked` warning，after 事件仍记录已计算的哈希。旧会话可能只有 after 哈希，没有改动后的字节；不改变事件字段或 formatVersion。分叉仍复制整个检查点目录，还原仍只读取 before 字节。

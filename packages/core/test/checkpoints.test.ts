@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -70,6 +70,12 @@ it("每轮每路径只记最初 before，每次执行都记 after；原始字节
   expect(
     readFileSync(path.join(sessionsDir, "checkpoints", session.id, hash("old\r\n")), "utf8"),
   ).toBe("old\r\n");
+  expect(
+    readFileSync(path.join(sessionsDir, "checkpoints", session.id, hash("three")), "utf8"),
+  ).toBe("three");
+  expect(readdirSync(path.join(sessionsDir, "checkpoints", session.id)).sort()).toEqual(
+    ["old\r\n", "one", "two", "three"].map(hash).sort(),
+  );
   expect(replaySessionView(events).entries).toEqual(
     replaySessionView(events.filter((e) => e.type !== "checkpoint.file")).entries,
   );
@@ -85,6 +91,43 @@ it("每轮每路径只记最初 before，每次执行都记 after；原始字节
   expect(resumed.state().history).toEqual(state.history);
   await resumed.close();
 }, 20_000);
+
+it("before 与 after 相同字节只存一份，after 保存失败保留哈希并警告", async () => {
+  const cwd = temp();
+  const sessionsDir = temp();
+  const platform = createPlatform();
+  const session = await createSessionStore({ platform, sessionsDir }).create({
+    cwd,
+    workspaceRoot: cwd,
+    model: { provider: "fake", model: "fake-1" },
+    permissionPreset: "default",
+    nocturneVersion: "test",
+  });
+  const file = path.join(cwd, "a.txt");
+  writeFileSync(file, "same");
+  const record = createCheckpointRecorder(session, platform, sessionsDir);
+  const subjects = [{ kind: "edit" as const, target: file }];
+  await record("before", "c", subjects, session.id);
+  await record("after", "c", subjects, session.id);
+  expect(readdirSync(path.join(sessionsDir, "checkpoints", session.id))).toEqual([hash("same")]);
+  const warnings: string[] = [];
+  session.subscribe((e) => {
+    if (e.type === "runtime.warning") warnings.push(e.payload.message);
+  });
+  const original = platform.fs.createExclusive;
+  platform.fs.createExclusive = async () => {
+    throw new Error("disk full");
+  };
+  writeFileSync(file, "changed");
+  await record("after", "c", subjects, session.id);
+  platform.fs.createExclusive = original;
+  expect(session.durableEvents().at(-1)?.payload).toMatchObject({
+    phase: "after",
+    sha256: hash("changed"),
+  });
+  expect(warnings).toEqual([`${file}：改动后内容未保存：disk full`]);
+  await session.close();
+});
 
 it("不存在的文件记 null；目录、大文件、读取失败给出 checkpoint_untracked 并继续记录", async () => {
   const cwd = temp();

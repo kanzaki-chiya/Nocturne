@@ -12,6 +12,7 @@ export * from "./todo.js";
 export * from "./file-refs.js";
 export * from "./compaction.js";
 export * from "./rewind.js";
+export * from "./line-diff.js";
 export * from "./provider-auth.js";
 export * from "./provider-login.js";
 export * from "./skills.js";
