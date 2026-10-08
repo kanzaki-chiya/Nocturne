@@ -552,7 +552,16 @@ describe("后台崩溃与重启恢复", () => {
 describe("每轮文件更改查询与文件撤销", () => {
   const change = (): TurnChanges => ({
     seq: 1,
-    files: [{ path: "Z:/project/a", status: "modified", added: 1, removed: 1, external: false }],
+    files: [
+      {
+        path: "Z:/project/a",
+        status: "modified",
+        added: 1,
+        removed: 1,
+        restorable: true,
+        external: false,
+      },
+    ],
     untrackedCalls: 0,
   });
   it("打开、完成（含中断）与回退刷新；只撤销文件不提交、不删对话", async () => {

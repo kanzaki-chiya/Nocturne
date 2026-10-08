@@ -80,6 +80,7 @@ function ChangedFile({
         className="diff-h"
         aria-expanded={open}
         aria-label={`文件差异 ${label}`}
+        title={file.unavailable ?? file.path}
         onClick={() => {
           setOpen(!open);
         }}
@@ -93,16 +94,12 @@ function ChangedFile({
         </span>
         {file.status === "added" && <span className="turn-change-tag">新建</span>}
         {file.status === "deleted" && <span className="turn-change-tag">已删除</span>}
-        {file.external && !turn.reverted && <span className="turn-change-tag">已在外部修改</span>}
-        {file.unavailable ? (
-          <span className="turn-change-reason">{file.unavailable}</span>
-        ) : (
-          <Counts added={file.added ?? 0} removed={file.removed ?? 0} />
-        )}
+        {!file.unavailable && <Counts added={file.added ?? 0} removed={file.removed ?? 0} />}
       </button>
       {open &&
-        !file.unavailable &&
-        (error ? (
+        (file.unavailable ? (
+          <p className="turn-change-note">{file.unavailable}</p>
+        ) : error ? (
           <p className="conversation-error" role="alert">
             {error}
           </p>
@@ -125,10 +122,11 @@ function revertedText(turn: TurnChanges): string {
   return `已撤销 · 还原 ${restored} 个文件${deleted ? `，删除 ${deleted} 个` : ""}${failed ? `，${failed} 个失败` : ""}`;
 }
 
+const PREVIEW = 3;
+
 export function TurnChangesCard(props: Props) {
   const { turn, latest, busy, cwd, session, onRewind } = props;
-  const [expanded, setExpanded] = useState<boolean>();
-  const open = expanded ?? (latest && !turn.reverted);
+  const [showAll, setShowAll] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [target, setTarget] = useState<RewindTarget>();
   const [error, setError] = useState<string>();
@@ -143,7 +141,6 @@ export function TurnChangesCard(props: Props) {
       request.current++;
       setConfirming(false);
       setTarget(undefined);
-      if (revertedSeq !== undefined) setExpanded(false);
     }
   }, [latest, revertedSeq]);
   useEffect(
@@ -152,20 +149,7 @@ export function TurnChangesCard(props: Props) {
     },
     [],
   );
-  const canUndo =
-    latest &&
-    !turn.reverted &&
-    turn.files.some(
-      (f) =>
-        f.unavailable === undefined ||
-        [
-          "没有改动后的记录",
-          "旧会话没有保存改动后的内容",
-          "检查点内容缺失",
-          "二进制文件",
-          "文件较大，不计算差异",
-        ].includes(f.unavailable),
-    );
+  const canUndo = latest && !turn.reverted && turn.files.some((f) => f.restorable);
   const counted = turn.files.filter((f) => f.added !== undefined && f.removed !== undefined);
   const added = counted.reduce((total, f) => total + (f.added ?? 0), 0);
   const removed = counted.reduce((total, f) => total + (f.removed ?? 0), 0);
@@ -198,7 +182,6 @@ export function TurnChangesCard(props: Props) {
   }, [confirming, working]);
   const preview = async () => {
     setConfirming(true);
-    setExpanded(true);
     setTarget(undefined);
     setError(undefined);
     const token = ++request.current;
@@ -218,7 +201,6 @@ export function TurnChangesCard(props: Props) {
     try {
       await onRewind(turn.seq);
       setConfirming(false);
-      setExpanded(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -236,25 +218,15 @@ export function TurnChangesCard(props: Props) {
       aria-label={`本轮文件更改 ${turn.seq}`}
     >
       <div className="turn-changes-header">
-        <button
-          type="button"
-          className="turn-changes-toggle"
-          aria-expanded={open}
-          onClick={() => {
-            setExpanded(!open);
-          }}
-        >
-          <span className={`fold-arrow${open ? " down" : ""}`} aria-hidden="true">
-            ▶
-          </span>
-          <span className="turn-changes-title">{turn.files.length} 个文件已更改</span>
+        <div className="turn-changes-heading">
+          <span className="turn-changes-title">已编辑 {turn.files.length} 个文件</span>
           {counted.length > 0 && (
             <span className="turn-changes-counts">
-              {turn.files.some((f) => f.approximate) && <span>约</span>}
+              {turn.files.some((f) => f.approximate) && <span>约 </span>}
               <Counts added={added} removed={removed} total />
             </span>
           )}
-        </button>
+        </div>
         {turn.reverted && (
           <span className="turn-change-note" role="status">
             {revertedText(turn)}
@@ -277,10 +249,25 @@ export function TurnChangesCard(props: Props) {
           </button>
         )}
       </div>
-      <div className="turn-changes-files" hidden={!open}>
-        {turn.files.map((file) => (
+      <div className="turn-changes-files">
+        {(showAll ? turn.files : turn.files.slice(0, PREVIEW)).map((file) => (
           <ChangedFile key={file.path} {...props} file={file} />
         ))}
+        {turn.files.length > PREVIEW && (
+          <button
+            type="button"
+            className="turn-changes-more"
+            aria-expanded={showAll}
+            onClick={() => {
+              setShowAll(!showAll);
+            }}
+          >
+            <span className={`fold-arrow${showAll ? " up" : ""}`} aria-hidden="true">
+              ▶
+            </span>
+            {showAll ? "收起" : `再显示 ${turn.files.length - PREVIEW} 个文件`}
+          </button>
+        )}
         {turn.untrackedCalls > 0 && (
           <p className="turn-change-note">
             这一轮还有 {turn.untrackedCalls} 次 shell 调用，它们造成的改动不在统计里

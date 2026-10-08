@@ -227,29 +227,26 @@
 .turn-changes-header {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 10px;
+  padding: 8px 12px 6px;
 }
-.turn-changes-toggle {
+.turn-changes-heading {
   display: flex;
-  align-items: center;
   flex: 1;
-  flex-wrap: wrap;
-  gap: 8px;
-  border: 0;
-  background: none;
-  color: var(--a-secondary);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
-.turn-changes-toggle:hover {
+.turn-changes-title {
   color: var(--a-text);
+  font-weight: 650;
 }
 .turn-changes-counts {
   display: inline-flex;
   gap: 6px;
+  color: var(--a-muted);
+  font-family: var(--mono);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 .turn-changes.reverted .turn-changes-title,
@@ -259,6 +256,23 @@
 }
 .turn-changes.reverted .turn-changes-counts span {
   color: inherit;
+}
+.turn-changes-more {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 2px 0 4px;
+  padding: 3px 0;
+  border: 0;
+  background: none;
+  color: var(--a-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.turn-changes-more:hover {
+  color: var(--a-text);
 }
 .turn-changes-files {
   padding: 0 10px 6px;
@@ -271,17 +285,16 @@
   text-align: left;
 }
 .turn-change-directory,
-.turn-change-tag,
-.turn-change-reason,
 .turn-change-note {
   color: var(--a-muted);
 }
-.turn-change-tag {
-  font-size: 11px;
+.turn-change-directory {
+  color: var(--a-faint);
 }
-.turn-change-reason {
-  margin-left: auto;
-  text-align: right;
+.turn-change-tag {
+  color: var(--a-faint);
+  font-size: 10.5px;
+  font-weight: 400;
 }
 .turn-change-note {
   margin: 6px 0;
