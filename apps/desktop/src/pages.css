@@ -873,14 +873,9 @@
   gap: 8px;
 }
 .page3 .s3 .select::after {
-  content: "▶";
-  display: inline-block;
-  transition: transform 0.15s;
+  content: "▾";
   color: var(--a-faint);
   font-size: 10px;
-}
-.page3 .s3 .select[aria-expanded="true"]::after {
-  transform: rotate(90deg);
 }
 .page3 .toast3 {
   position: absolute;

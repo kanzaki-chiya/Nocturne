@@ -59,11 +59,8 @@
   background: var(--a-panel);
 }
 .dd.open .dd-a {
-  transform: rotate(90deg);
+  transform: rotate(180deg);
   color: var(--a-accent);
-}
-.ddw-pill [aria-expanded="true"] .fold-arrow {
-  transform: rotate(-90deg);
 }
 .ddm {
   position: fixed;

@@ -348,7 +348,7 @@ export function StatusBar({
     >
       {content}
       <span className="status-caret" aria-hidden="true">
-        <span className={`fold-arrow${activePanel === name ? " up" : ""}`}>▶</span>
+        {activePanel === name ? "▴" : "▾"}
       </span>
     </button>
   );
@@ -380,7 +380,7 @@ export function StatusBar({
     >
       {content}
       <span className="status-caret" aria-hidden="true">
-        <span className={`fold-arrow${openMenu === kind ? " up" : ""}`}>▶</span>
+        ▾
       </span>
     </button>
   );
@@ -412,7 +412,7 @@ export function StatusBar({
     >
       {content}
       <span className="status-caret" aria-hidden="true">
-        <span className="fold-arrow">▶</span>
+        ▾
       </span>
     </Dropdown>
   );

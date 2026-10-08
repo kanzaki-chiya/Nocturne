@@ -407,12 +407,16 @@ export function SettingsPage({
                       <span className="dd-d">
                         {shellItem.saved ? "已选 Shell" : "按探测结果选择"}
                       </span>
-                      <span
-                        className={`dd-a fold-arrow${shellMenu ? " down" : ""}`}
-                        aria-hidden="true"
-                      >
-                        ▶
-                      </span>
+                      <svg className="dd-a" viewBox="0 0 16 16" aria-hidden="true">
+                        <path
+                          d="M4 6l4 4 4-4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
                     </button>
                   )}
                 </span>
