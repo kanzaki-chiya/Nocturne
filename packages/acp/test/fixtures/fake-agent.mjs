@@ -123,6 +123,48 @@ const connection = new AgentSideConnection(
       if (scenario === "probeOnly") throw new Error("Probe must never prompt");
       if (scenario === "authPrompt") throw RequestError.authRequired();
       if (scenario.startsWith("crash")) process.exit(3);
+      if (scenario === "progress" || scenario === "progressTimeout") {
+        for (const update of [
+          {
+            sessionUpdate: "tool_call",
+            toolCallId: "noise",
+            title: "",
+            kind: "read",
+            status: "in_progress",
+          },
+          { sessionUpdate: "tool_call_update", toolCallId: "noise", status: "completed" },
+          {
+            sessionUpdate: "tool_call",
+            toolCallId: "title",
+            title: "Check\nfiles",
+            status: "in_progress",
+          },
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "title",
+            title: "Check\nfiles",
+            status: "completed",
+          },
+          { sessionUpdate: "tool_call_update", toolCallId: "title", status: "failed" },
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "title",
+            title: "Check\nfiles",
+            status: "failed",
+          },
+          ...Array.from({ length: 6 }, (_, index) => ({
+            sessionUpdate: "tool_call",
+            toolCallId: `p${index}`,
+            title: `step ${index} ${"x".repeat(400)}`,
+          })),
+        ])
+          await client.sessionUpdate({ sessionId: params.sessionId, update });
+        if (scenario === "progressTimeout")
+          return new Promise(() => {
+            /* Wait for the connector timeout. */
+          });
+        return { stopReason: "end_turn" };
+      }
       if (scenario.startsWith("hang") || scenario.startsWith("ignoreCancel")) {
         pending = Promise.withResolvers();
         if (process.env.NOCTURNE_TEST_READY_FILE)

@@ -84,14 +84,27 @@ async function runAgent(
   let interrupted: "cancelled" | "timeout" | undefined;
   let abortInput: (() => void) | undefined;
   let transcript = Promise.resolve();
+  const titles = new Map<string, { title: string; failed: boolean }>();
+  const recentProgress: string[] = [];
+  const agentName = singleLine(config.name).slice(0, 100);
+  const timeoutMessage = () =>
+    `外部 agent ${agentName} 执行超时${recentProgress.length ? `；最近进度：${recentProgress.join("；")}` : ""}。它可能已修改工作区文件，请先检查 git status`;
   const { promise: failed, reject: rejectFailure } = Promise.withResolvers<never>();
   // 有些失败可能发生在启动前，始终安装 rejection handler。
   void failed.catch(() => undefined);
   const cancellation = new AbortController();
   const onAbort = () => {
-    interrupted = "cancelled";
+    interrupted =
+      ctx.signal.reason instanceof Error && ctx.signal.reason.name === "TimeoutError"
+        ? "timeout"
+        : "cancelled";
     cancellation.abort();
-    rejectFailure(new AcpFailure("cancelled", `外部 agent ${config.name} 已中断`));
+    rejectFailure(
+      new AcpFailure(
+        interrupted,
+        interrupted === "timeout" ? timeoutMessage() : `外部 agent ${agentName} 已中断`,
+      ),
+    );
   };
   let timer: NodeJS.Timeout | undefined;
   let text = "";
@@ -129,12 +142,12 @@ async function runAgent(
     }
     ctx.signal.addEventListener("abort", onAbort, { once: true });
     if (ctx.signal.aborted) onAbort();
-    if (interrupted) throw new AcpFailure(interrupted, `外部 agent ${config.name} 已中断`);
+    if (interrupted) await failed;
     if (request.timeoutMs !== undefined) {
       timer = setTimeout(() => {
         interrupted = "timeout";
         cancellation.abort();
-        rejectFailure(new AcpFailure("timeout", `外部 agent ${config.name} 执行超时`));
+        rejectFailure(new AcpFailure("timeout", timeoutMessage()));
       }, request.timeoutMs);
       timer.unref();
     }
@@ -227,8 +240,21 @@ async function runAgent(
           update.sessionUpdate === "tool_call" ||
           update.sessionUpdate === "tool_call_update"
         ) {
-          const title = update.title ?? update.kind ?? update.status ?? "工具更新";
-          ctx.progress(`${singleLine(config.name)}：${singleLine(title).slice(0, 300)}`, "info");
+          const previous = titles.get(update.toolCallId);
+          const title =
+            update.title === undefined || update.title === null
+              ? update.status === "failed"
+                ? previous?.title
+                : undefined
+              : singleLine(update.title).slice(0, 300);
+          if (!title) return;
+          const failed = update.status === "failed";
+          if (previous?.title === title && (!failed || previous.failed)) return;
+          titles.set(update.toolCallId, { title, failed });
+          const progress = `${title}${failed ? "（失败）" : ""}`;
+          recentProgress.push(progress);
+          if (recentProgress.length > 5) recentProgress.shift();
+          ctx.progress(`${agentName}：${progress}`, "info");
         }
       })
       .onRequest(CLIENT_METHODS.session_request_permission, async ({ params }) => {

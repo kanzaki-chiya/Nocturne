@@ -141,7 +141,8 @@ export function createTaskTool(
         timeoutMs: {
           type: "integer",
           minimum: 1,
-          description: "本次调用超时上限（毫秒）",
+          description:
+            "本次调用超时上限（毫秒）；省略时使用默认值 600000（10 分钟）。实现、修改代码类任务不要设置短于默认值；只有确定很快的查询才设置更短的值。",
         },
       },
       additionalProperties: false,

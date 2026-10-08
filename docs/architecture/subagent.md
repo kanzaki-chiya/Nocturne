@@ -308,6 +308,10 @@ ADR-0036 第一轮：子会话沿用父会话的审查器实例与最近用户�
 
 超时统一由 `task` 执行器控制（默认 600_000ms，超时触发 `ctx.signal`）；connector 不另设隐式默认超时。只有 `request.timeoutMs` 显式传入时，connector 才设置对应计时器。
 
+`timeoutMs` 省略时使用默认 10 分钟；工具参数说明要求实现、修改代码类任务不要设短于默认值的超时，只有确定很快的查询才主动缩短。默认值不变。connector 的计时器或执行器的 TimeoutError 信号导致超时时，失败信息附最近至多 5 条进度标题，并提示「它可能已修改工作区文件，请先检查 git status」。标题去控制字符、压成单行并截断至 300 字符，名称至 100 字符，整条超时说明不超过 2048 字符。
+
+仅带非空 `title` 的 `tool_call` / `tool_call_update` 输出进度，不用 `status` 或 `kind` 兜底；同一调用的相同标题去重。`failed` 单独输出一次「<名称>：<标题>（失败）」，没有新标题时使用该调用先前记录的标题；没有任何标题的失败更新也不输出。原始更新仍完整进入审计日志。
+
 进程退出通过 `PipeProcess.exited()` 提前检测，异常时 `detachOutput()` 关闭本地输出，避免后代继承管道拖住调用。Windows 清树沿 MCP 的 `taskkill /T /F`，覆盖根进程仍存活时的正常关闭与取消；根已崩溃形成的孤儿后代是该机制的限制，见 [ADR 修订](../decisions/ADR-0049-external-agent-subagent.md#修订)。POSIX 清理独立进程组。
 
 外部过程不创建 Nocturne 子会话或事件类型。只转发带配置名称前缀的单行工具进度，不转发回复片段；最终回复作为 `modelContent`，沿现有预算截断与落盘。`output` 为 `{ agent, agentVersion?, transcriptPath, transcriptError?: true, stopReason, permissionDecisions: { allowed, denied } }`，不填 `usage`。原始 `session/update` 与权限判定（主体、结果、来源）逐行写入父附件目录的 `external/<callId>.jsonl`；初始化或追加写入失败只记录一次 `external_agent.transcript_failed` 诊断，设置 `output.transcriptError: true`，停止后续写入，调用与权限判定继续正常进行。此时 `transcriptPath` 可能指向缺失或不完整的审计文件。

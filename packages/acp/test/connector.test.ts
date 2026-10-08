@@ -122,6 +122,42 @@ async function expectGone(pid: number | undefined): Promise<void> {
 }
 
 describe("ACP 单调用生命周期", () => {
+  it("无 title 的更新不输出、同标题不重复，failed 使用已有标题仅输出一次", async () => {
+    const { connector, ctx, request, progress } = setup("progress");
+    expect((await connector.run(request, ctx)).status).toBe("ok");
+    expect(progress.mock.calls.slice(0, 2)).toEqual([
+      ["fixture：Check files", "info"],
+      ["fixture：Check files（失败）", "info"],
+    ]);
+    expect(progress).toHaveBeenCalledTimes(8);
+    expect(
+      progress.mock.calls.every(
+        ([line]) => !line.includes("in_progress") && !line.includes("completed"),
+      ),
+    ).toBe(true);
+  });
+
+  it.each(["timer", "signal"])(
+    "%s 超时包含最近五条进度与工作区检查提示，长度有界",
+    async (source) => {
+      const { connector, ctx, request, progress } = setup("progressTimeout");
+      const resultPromise = connector.run(
+        source === "timer" ? { ...request, timeoutMs: 2000 } : { ...request, timeoutMs: undefined },
+        ctx,
+      );
+      await vi.waitFor(() => expect(progress).toHaveBeenCalledTimes(8), { timeout: 1500 });
+      if (source === "signal") controller.abort(new DOMException("Timeout", "TimeoutError"));
+      const result = await resultPromise;
+      expect(result.error?.code).toBe("timeout");
+      expect(result.modelContent).toContain("step 1");
+      expect(result.modelContent).toContain("step 5");
+      expect(result.modelContent).not.toContain("step 0");
+      expect(result.modelContent).toContain("它可能已修改工作区文件，请先检查 git status");
+      expect(result.modelContent.length).toBeLessThan(2048);
+      expect(result.modelContent).not.toContain("\n");
+    },
+  );
+
   it("新进程、最终文本、原文审计与仅工具单行进度", async () => {
     const { connector, ctx, request, progress } = setup();
     const result = await connector.run(request, ctx);
@@ -144,10 +180,7 @@ describe("ACP 单调用生命周期", () => {
       permissionDecisions: { allowed: 0, denied: 0 },
     });
     expect(result).not.toHaveProperty("usage");
-    expect(progress.mock.calls).toEqual([
-      ["fixture：Read file", "info"],
-      ["fixture：completed", "info"],
-    ]);
+    expect(progress.mock.calls).toEqual([["fixture：Read file", "info"]]);
     const transcript = (await fs.readFile(request.transcriptPath, "utf8"))
       .trim()
       .split("\n")
@@ -570,10 +603,7 @@ describe("执行期权限与审计", () => {
         ],
       });
       expect(permission).toHaveBeenCalledTimes(2);
-      expect(progress.mock.calls).toEqual([
-        ["fixture：Read file", "info"],
-        ["fixture：completed", "info"],
-      ]);
+      expect(progress.mock.calls).toEqual([["fixture：Read file", "info"]]);
       expect(records.filter((entry) => entry.kind === "external_agent.permission")).toHaveLength(3);
       expect(records.filter((entry) => entry.kind === "external_agent.transcript_failed")).toEqual([
         {
