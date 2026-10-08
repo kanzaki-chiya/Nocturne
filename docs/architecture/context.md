@@ -50,7 +50,7 @@ Context Builder 不做 I/O，也不调用 Provider：指令文件由 `config` / 
 
 项目指令之后、环境信息之前注入有界的技能目录（`skills` section，含截断标记），其发现、快照和预算规则见 [skills.md](skills.md) 第 3 节。
 
-1. **基础系统提示**：英文的 Nocturne 身份、先读后改与验证的工作方式、工具使用约定（命令输出自动收集，勿接分页工具——shell 会对末尾接 `more`/`less` 的命令硬拒绝并回以补救说明，见 [tools.md](tools.md) 第 6 节；大量输出先重定向到文件再用 `grep` 工具搜索）、安全边界、按用户语言回复。正文以 [ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 第 9 条及附录为准；其中编辑工具一节经 [ADR-0035](../decisions/ADR-0035-apply-patch.md) 第 7 节修订——提示对编辑工具保持中性（"file-editing tools" 标题、不点名 `edit`/`write`/`apply_patch`），两种 `editTool` 能力下是同一份文本以保住缓存前缀。随版本变化，会话内不变。可由 `BuildContextInput.basePrompt` 覆盖——唯一的用户是子会话（Phase 6），它换成中文的"子代理 + `finish` 提交协议"提示，并与主提示对齐验证与安全要求（[subagent.md](subagent.md) 第 8 节）。
+1. **基础系统提示**：英文的 Nocturne 身份、先读后改与验证的工作方式、工具使用约定（命令输出自动收集，勿接分页工具——shell 会对末尾接 `more`/`less` 的命令硬拒绝并回以补救说明，见 [tools.md](tools.md) 第 6 节；大量输出先重定向到文件再用 `grep` 工具搜索）、安全边界、按用户语言回复。正文以 [ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 第 9 条及附录为准；2026-10-08 起按 ADR-0021 修订节更新了开头、先读后写、shell 超时与 task 委派几条；其中编辑工具一节经 [ADR-0035](../decisions/ADR-0035-apply-patch.md) 第 7 节修订——提示对编辑工具保持中性（"file-editing tools" 标题、不点名 `edit`/`write`/`apply_patch`），两种 `editTool` 能力下是同一份文本以保住缓存前缀。随版本变化，会话内不变。可由 `BuildContextInput.basePrompt` 覆盖——唯一的用户是子会话（Phase 6），它换成中文的"子代理 + `finish` 提交协议"提示，并与主提示对齐验证与安全要求（[subagent.md](subagent.md) 第 8 节）。
 2. **工具规格**：名称、描述、输入 schema。会话内通常不变。
 3. **项目指令**：用户级 `<NOCTURNE_HOME>/AGENTS.md`，以及从 `workspaceRoot` 到 `cwd` 路径上各级目录的 `AGENTS.md`。前言说明这些是用户和项目指令，冲突时优先于默认做法。每个文件有大小上限，超出截断并在报告中标注。
 4. **技能目录**：会话快照，详细规则见 [skills.md](skills.md) 第 3 节。

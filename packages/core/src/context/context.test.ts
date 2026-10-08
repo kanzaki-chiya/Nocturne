@@ -989,7 +989,7 @@ describe("压缩边界与有效历史（context.md 6.3/6.4）", () => {
 
   it("超过 80% 阈值且存在新边界 → 给出 prune 计划", () => {
     // 预算 8000-256-1024=6720，阈值 5376；构造 ~6000 token 的历史
-    const big = "x".repeat(22_000);
+    const big = "x".repeat(21_000);
     const history: HistoryEntry[] = [assistantEntry(2, ["c3"]), toolEntry(3, big)];
     const events = [
       ev(1, "session.created", {}),

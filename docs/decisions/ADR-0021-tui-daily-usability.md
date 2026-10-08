@@ -209,3 +209,4 @@ running commands, investigating bugs, and answering questions about the codebase
 ## 修订
 
 - 2026-10-01：基础系统提示的编辑工具一节按 [ADR-0035](ADR-0035-apply-patch.md) 第 7 节修订——附录中的「Tools」清单与「Prefer edit … write …」一条不再逐字生效；编辑工具以「file-editing tools」中性表述描述、不点名 `edit`/`write`/`apply_patch`，具体工具集随模型 `capabilities.editTool` 动态暴露。本 ADR 正文与附录其余部分保持不变。
+- 2026-10-08：基础系统提示随功能更新再修订一次，附录对应条目不再逐字生效，以 `packages/core/src/context/build.ts` 的 `BASE_SYSTEM_PROMPT` 为准：开头不再说「works in the user's terminal」（另有桌面端），改为不点名客户端的「works in the user's workspace on their computer」；先读后写一条改为「文件变化时错误里会尽量附上变更，可据此重试，没附上再重新读取」（[tools.md](../architecture/tools.md) 第 6 节）；shell 一条补充按命令性质设超时（可能卡住的短、全量测试/构建/安装给足）；task 一条改正与工具说明的矛盾——子会话无法请求确认，需要确认的写文件、执行命令会被拒绝，由子代理汇报、主代理执行——并说明 task 列出外部 agent 时可承担较大且验收明确的修改，完成后自行检查 `git status` 与结果；新增「几步能完成的事不委派，委派适合可并行的独立工作」。文本与模型能力、是否配置外部 agent 无关，会话内不变，不破坏缓存前缀。本 ADR 正文与附录其余部分保持不变。
