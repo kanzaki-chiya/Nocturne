@@ -421,23 +421,80 @@ describe("shell 工具", () => {
     }
   });
 
-  it("模型可见说明引导按预计耗时设置短超时并根据输出定位问题", () => {
+  it("模型可见说明分两种情况：可能卡住设短超时，已知耗时长直接设足", () => {
     expect(shellTool.description).toContain("timeout 30 python3 test.py");
     expect(shellTool.description).toContain("PowerShell/cmd 用对应写法");
-    expect(shellTool.description).toContain("运行自己写的测试或脚本");
-    expect(shellTool.description).toContain("先用较短的超时");
-    expect(shellTool.description).toContain("根据已输出的内容定位问题");
-    expect(shellTool.description).toContain("不要为了保险把 timeoutMs 设得很长");
+    expect(shellTool.description).toContain("可能卡住的命令");
+    expect(shellTool.description).toContain("按预计耗时设较短的超时");
+    expect(shellTool.description).toContain("超时后根据已有输出定位");
+    expect(shellTool.description).toContain("已知耗时长的命令");
+    expect(shellTool.description).toContain("按预计耗时直接设足");
+    expect(shellTool.description).toContain("宁可宽一些，一次跑完");
+    expect(shellTool.description).not.toContain("不要为了保险");
     expect(shellTool.inputSchema).toMatchObject({
       properties: {
         timeoutMs: {
-          maximum: 600_000,
-          description: expect.stringMatching(
-            /默认 120000，上限 600000.*按预计耗时.*较短的超时.*已输出的内容.*不要为了保险/,
-          ),
+          maximum: 1_800_000,
+          description: expect.stringMatching(/默认 120000，上限 1800000/),
         },
       },
     });
+    const schema = shellTool.inputSchema as {
+      properties: { timeoutMs: { description: string } };
+    };
+    expect(schema.properties.timeoutMs.description).toContain("可能卡住的命令");
+    expect(schema.properties.timeoutMs.description).toContain("已知耗时长的命令");
+    expect(schema.properties.timeoutMs.description).not.toContain("不要为了保险");
+    expect(shellTool.traits?.timeoutMs).toBe(1_800_000 + 30_000);
+  });
+
+  it("timeoutMs 超过新上限时被夹到 1800000（直接调用，不等待 30 分钟）", async () => {
+    const ws = tmpWorkspace();
+    const workspaceRoot = await platform.resolveReal(ws);
+    let seenTimeoutMs: number | undefined;
+    const fakeProcess = {
+      spawnShell: (_command: string, options?: { timeoutMs?: number }) => {
+        seenTimeoutMs = options?.timeoutMs;
+        const empty: AsyncIterable<string> = {
+          [Symbol.asyncIterator]() {
+            return { next: async () => ({ done: true as const, value: "" }) };
+          },
+        };
+        return {
+          pid: 12345,
+          stdout: empty,
+          stderr: empty,
+          wait: async () => ({ code: null, signal: null, timedOut: true, killed: true }),
+          kill: async () => undefined,
+          detachOutput: () => undefined,
+        };
+      },
+    };
+    const scope = {
+      cwd: ws,
+      workspaceRoot,
+      paths: platform.paths,
+      sessionId: "s1",
+      turnId: "turn-1",
+      callId: "c-clamp",
+      signal: new AbortController().signal,
+      subjects: [{ kind: "shell", target: "echo hi", resolved: "echo hi" }],
+      permissions: { check: () => "allow" as const },
+      fs: platform.fs,
+      process: fakeProcess,
+      readState: createReadStateStore(platform.paths),
+      progress: () => undefined,
+    };
+    const r = await shellTool.execute(
+      { command: "echo hi", timeoutMs: 5_000_000 },
+      scope as unknown as Parameters<typeof shellTool.execute>[1],
+    );
+    expect(seenTimeoutMs).toBe(1_800_000);
+    expect(r.status).toBe("error");
+    expect(r.status === "error" && r.error.code).toBe("timeout");
+    expect(
+      r.status === "error" && (r.output as { timeoutMs?: number } | undefined)?.timeoutMs,
+    ).toBe(1_800_000);
   });
 
   it("合并 stdout/stderr 输出并返回退出码", async () => {
@@ -693,6 +750,7 @@ interface ShellOut {
   timedOut: boolean;
   killed: boolean;
   durationMs: number;
+  timeoutMs?: number;
   outputDetached?: boolean;
 }
 

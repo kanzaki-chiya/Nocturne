@@ -1204,6 +1204,29 @@ function hasStaleDiff(entry: ToolEntry): boolean {
   return (entry.result?.modelContent ?? "").includes("@@");
 }
 
+/** 超时行尾摘要：优先用 output.timeoutMs 换算秒数，不解析中文文案；缺失时回退通用文案。 */
+function timeoutSummary(entry: ToolEntry): string {
+  const output = entry.result?.output;
+  const ms =
+    output !== null &&
+    typeof output === "object" &&
+    "timeoutMs" in output &&
+    typeof (output as { timeoutMs?: unknown }).timeoutMs === "number"
+      ? (output as { timeoutMs: number }).timeoutMs
+      : undefined;
+  if (ms !== undefined && Number.isFinite(ms) && ms > 0) {
+    return `超时（${Math.round(ms / 1000)} 秒）`;
+  }
+  return "超时";
+}
+
+/** 超时展开区：取 modelContent 中实际输出的最后 40 行，不重复摘要那一句。 */
+function timeoutBody(modelContent: string): string {
+  const index = modelContent.indexOf("\n");
+  const body = index === -1 ? "" : modelContent.slice(index + 1);
+  return body.split("\n").slice(-40).join("\n");
+}
+
 /** 简述只取 Core 的第一句；扩展名与小数中的 "." 不算句末。 */
 function toolErrorSummary(entry: ToolEntry, cwd: string): string {
   const error = entry.result?.error;
@@ -1211,6 +1234,7 @@ function toolErrorSummary(entry: ToolEntry, cwd: string): string {
   if (error?.code === "stale_file") {
     return hasStaleDiff(entry) ? "文件已变化，已附上变更" : "文件已变化，需重新读取";
   }
+  if (error?.code === "timeout") return timeoutSummary(entry);
   const message = error?.message.trim() ?? "";
   const end = /[。！？!?]|\.(?=\s|$)|\r?\n/u.exec(message);
   const first = end === null ? message : message.slice(0, end.index + end[0].trim().length);
@@ -1495,6 +1519,7 @@ function LiveOutput({ text }: { text: string }) {
 
 function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
   const result = entry.result;
+  const isTimeout = result?.error?.code === "timeout";
   return (
     <>
       {entry.subjects.length ? (
@@ -1524,7 +1549,11 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
         </p>
       ) : null}
       {result?.error !== undefined ? (
-        <pre className="conversation-tool-output">{result.error.message}</pre>
+        isTimeout ? (
+          <pre className="conversation-tool-output">{timeoutBody(result.modelContent)}</pre>
+        ) : (
+          <pre className="conversation-tool-output">{result.error.message}</pre>
+        )
       ) : result?.modelContent ? (
         <pre className="conversation-tool-output">{result.modelContent}</pre>
       ) : null}

@@ -1334,6 +1334,37 @@ describe("Conversation 工具行与拒绝", () => {
     expect(details?.querySelector(".conversation-tool-output")?.textContent).toBe(message);
   });
 
+  it("超时行尾显示秒数（用结构化字段），展开显示最后40行且不重复摘要", () => {
+    const lines = Array.from({ length: 50 }, (_, index) => `line${index + 1}`);
+    const entry = failedTool("timeout", "命令超过 999ms 超时");
+    entry.name = "shell";
+    if (!entry.result) throw new Error("fixture 缺少结果");
+    entry.result.output = {
+      exitCode: null,
+      signal: null,
+      timedOut: true,
+      killed: true,
+      durationMs: 180_000,
+      timeoutMs: 180_000,
+    };
+    entry.result.modelContent = `命令超过 180000ms 超时，进程树已终止\n${lines.join("\n")}`;
+    const view = createSessionView();
+    view.entries = [entry];
+    const { container } = mount(view);
+    const article = screen.getByRole("article", { name: "工具 shell" });
+    // 用 output.timeoutMs 换算，不解析 message 里的 999ms
+    expect(article.querySelector(".tool-res.err")?.textContent).toBe("超时（180 秒）");
+    const details = container.querySelector<HTMLDetailsElement>(".tool-details");
+    fireEvent.click(within(article).getByText("超时（180 秒）"));
+    expect(details?.open).toBe(true);
+    const text = details?.querySelector(".conversation-tool-output")?.textContent ?? "";
+    expect(text).not.toContain("命令超过");
+    const outLines = text.split("\n");
+    expect(outLines).toHaveLength(40);
+    expect(outLines[0]).toBe("line11");
+    expect(outLines[39]).toBe("line50");
+  });
+
   it("被拒绝的工具只显示一行红色说明，feedback 进 title", () => {
     const view = createSessionView();
     const entry = tool({ status: "denied", result: undefined });

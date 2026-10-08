@@ -15,7 +15,7 @@ import type { ToolDefinition, ToolScope } from "../types.js";
 
 interface ShellInput {
   command: string;
-  /** 超时（毫秒），默认 120s，上限 10min */
+  /** 超时（毫秒），默认 120s，上限 30min */
   timeoutMs?: number;
   /** 工作目录（默认会话 cwd）；解析后必须位于工作区内 */
   cwd?: string;
@@ -27,12 +27,14 @@ interface ShellOutput {
   timedOut: boolean;
   killed: boolean;
   durationMs: number;
+  /** 超时结算时的上限毫秒数（timeout 错误下必有，供客户端换算秒数） */
+  timeoutMs?: number;
   /** 命令已退出但输出管道仍被后台进程占用，读取端已分离时为 true */
   outputDetached?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
-const MAX_TIMEOUT_MS = 600_000;
+const MAX_TIMEOUT_MS = 1_800_000;
 /**
  * 输出管道自然收尾的宽限：仅覆盖子进程 exit 到 stdio 关闭的正常间隙，
  * 正常退出时流已结束、立即返回；到期仍被占用说明有后台进程继承了管道。
@@ -113,7 +115,7 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
   name: "shell",
   // ADR-0022：描述保持中性、稳定——具体种类与语法见环境信息 Shell 行
   description:
-    "经当前会话选定的 shell 执行非交互式命令（种类与语法见环境信息）。合并 stdout/stderr 输出并截断，返回退出码。超时或中断会尝试终止进程树中仍可达的后代；detached 方式脱离进程树的后台进程可能仍在运行。运行自己写的测试或脚本、或可能卡住的命令时，按预计耗时在命令中加超时（如 timeout 30 python3 test.py；PowerShell/cmd 用对应写法），或设置 timeoutMs。没有把握时先用较短的超时，超时后根据已输出的内容定位问题，不要为了保险把 timeoutMs 设得很长。",
+    "经当前会话选定的 shell 执行非交互式命令（种类与语法见环境信息）。合并 stdout/stderr 输出并截断，返回退出码。超时或中断会尝试终止进程树中仍可达的后代；detached 方式脱离进程树的后台进程可能仍在运行。可能卡住的命令（自己写的脚本、交互式可能等待输入的程序、网络请求）：按预计耗时设较短的超时，或在命令里加 timeout（如 timeout 30 python3 test.py；PowerShell/cmd 用对应写法），超时后根据已有输出定位；已知耗时长的命令（全量测试、构建、安装依赖、大型编译）：按预计耗时直接设足，宁可宽一些，一次跑完。",
   inputSchema: {
     type: "object",
     required: ["command"],
@@ -123,7 +125,7 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
         type: "integer",
         minimum: 1,
         maximum: MAX_TIMEOUT_MS,
-        description: `超时毫秒数，默认 ${DEFAULT_TIMEOUT_MS}，上限 ${MAX_TIMEOUT_MS}。运行自己写的测试或脚本、或可能卡住的命令时按预计耗时设置；没有把握时先用较短的超时，超时后根据已输出的内容定位问题，不要为了保险设得很长。`,
+        description: `超时毫秒数，默认 ${DEFAULT_TIMEOUT_MS}，上限 ${MAX_TIMEOUT_MS}。可能卡住的命令按预计耗时设较短的超时，或在命令里加 timeout，超时后根据已有输出定位；已知耗时长的命令按预计耗时直接设足，宁可宽一些，一次跑完。`,
       },
       cwd: { type: "string", description: "工作目录（须位于工作区内），默认会话 cwd" },
     },
@@ -261,6 +263,7 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
       : captured;
 
     if (exit.timedOut) {
+      output.timeoutMs = timeoutMs;
       return {
         status: "error",
         modelContent: `命令超过 ${timeoutMs}ms 超时，进程树已终止\n${body}`,

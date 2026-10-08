@@ -159,7 +159,7 @@ type RawImageAttachment = {
 | `permission_denied` | 规则或用户拒绝 |
 | `hook_denied` | `PreToolUse` Hook 拒绝（Phase 5，见 [hooks.md](../architecture/hooks.md)） |
 | `cancelled` | 被中断 |
-| `timeout` | 超时 |
+| `timeout` | 超时；shell 超时时 `output.timeoutMs` 为本次上限毫秒数，供客户端换算秒数 |
 | `tool_failed` | 工具抛出非预期异常 |
 | `resource_unavailable` | 执行器无法解析权限主体（例如无权访问父目录） |
 | `resource_changed` | 修改类工具发现目标路径的解析结果与批准时不同（工具返回，名称统一） |
