@@ -6,7 +6,11 @@
 import { styleText } from "node:util";
 import { truncateMiddle } from "@nocturne/tui/text-format";
 
-import { todoItemsFromCompletion, todoSnapshotLines } from "@nocturne/core/protocol";
+import {
+  compactedNoticeText,
+  todoItemsFromCompletion,
+  todoSnapshotLines,
+} from "@nocturne/core/protocol";
 import type {
   QuestionAnswer,
   QuestionItem,
@@ -197,8 +201,7 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
       return [aux(`└ 权限：${p.action}（${detail}）${remembered}`)];
     }
     case "context.compacted": {
-      const p = ev.payload;
-      return [aux(`◇ 上下文已压缩（${p.kind}，至 seq ${p.throughSeq}）`)];
+      return [aux(`◇ ${compactedNoticeText(ev.payload.kind)}`)];
     }
     case "session.config_changed": {
       const p = ev.payload;

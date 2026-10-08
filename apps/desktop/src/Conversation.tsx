@@ -1990,7 +1990,7 @@ function EntryView({
       return <ToolEntryView entry={entry} cwd={cwd} preparing={preparing} />;
     case "notice": {
       if (entry.subtype === "permission" || entry.subtype === "config") return null;
-      let message = entry.subtype === "compacted" ? "上下文已压缩" : entry.message;
+      let message = entry.message;
       if (entry.subtype === "turn_end") {
         const reason = (entry.payload as { reason?: TurnEndReason } | null)?.reason;
         if (reason) message = message.replace(`Turn 结束（${reason}）`, TURN_END_LABELS[reason]);

@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   createSessionView,
+  reduceSessionView,
   type AssistantEntry,
   type ImageAttachment,
   type PendingPermission,
@@ -1765,21 +1766,21 @@ describe("Conversation 工具行与拒绝", () => {
     expect(screen.getByText(message)).toBeTruthy();
   });
 
-  it("压缩回执只显示上下文已压缩，不泄漏摘要种类、序号或 payload", () => {
+  it.each<["prune" | "summary", string]>([
+    ["prune", "已省略较早的工具输出"],
+    ["summary", "上下文已压缩为摘要"],
+  ])("压缩回执按种类（%s）显示文案，不泄漏种类、序号或 payload", (kind, text) => {
     const view = createSessionView();
-    view.entries = [
-      {
-        kind: "notice",
-        key: "compacted-1",
-        seq: 42,
-        subtype: "compacted",
-        message: "上下文已压缩（summary，至 seq 41）",
-        payload: { kind: "summary", throughSeq: 41, summary: "不应显示的摘要正文" },
-      },
-    ];
+    reduceSessionView(view, {
+      type: "context.compacted",
+      seq: 42,
+      time: "2026-01-01T00:00:00.000Z",
+      sessionId: "s",
+      payload: { kind, throughSeq: 41, summary: "不应显示的摘要正文" },
+    } as RuntimeEvent);
     const { container } = mount(view);
-    expect(screen.getByText("上下文已压缩").textContent).toBe("上下文已压缩");
-    expect(container.textContent).not.toMatch(/summary|seq|41|42|不应显示的摘要正文/);
+    expect(container.querySelector(".note")?.textContent).toBe(text);
+    expect(container.textContent).not.toMatch(/summary|prune|seq|41|42|不应显示的摘要正文/);
   });
 
   it("用户消息里的 @ 引用渲染成带说明的 chip，历史图片等待进入可视区", () => {

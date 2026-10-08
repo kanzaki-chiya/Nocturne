@@ -7,6 +7,7 @@ import type { SkillSnapshot } from "./skills.js";
  */
 import type {
   AttachmentDescribedPayload,
+  ContextCompactedPayload,
   DurableEvent,
   EphemeralEvent,
   PermissionResolvedPayload,
@@ -493,13 +494,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
     }
     case "context.compacted": {
       const p = event.payload;
-      pushNotice(
-        view,
-        event.seq,
-        "compacted",
-        `上下文已压缩（${p.kind}，至 seq ${p.throughSeq}）`,
-        p,
-      );
+      pushNotice(view, event.seq, "compacted", compactedNoticeText(p.kind), p);
       break;
     }
     case "turn.completed": {
@@ -536,6 +531,15 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
       break;
     }
   }
+}
+
+/**
+ * 压缩回执文案：自动压缩多数是修剪（较早的工具输出换成占位），不是摘要，
+ * 两种分开写；kind 与 throughSeq 只留在 notice.payload 上，不进文案。
+ * CLI 渲染行与 TUI/桌面端的 notice 都用这一份。
+ */
+export function compactedNoticeText(kind: ContextCompactedPayload["kind"]): string {
+  return kind === "prune" ? "已省略较早的工具输出" : "上下文已压缩为摘要";
 }
 
 function promoteTool(

@@ -191,7 +191,7 @@ interface SessionNotice {
 | `permission.resolved` | `requestId` 匹配则清 `pendingPermission`、`pendingByCallId`；`callId` 的 entries 条目更新 `resolution`（`deny` 时 `status` 仍等 `tool.completed` 落定）；追加 `permission` notice 条目（`source: "reviewer"` 时不追加：结论已由该工具条目的 `review` 展示）。归约器内部维护 `Map<callId, resolved>`，供晚到的 `started`/`completed` 回填 |
 | `tool.started` | 同 `callId` 的 `live.tools` 项移除并晋升（`inputText` 丢弃）；`entries` 中已有条目（requested 建的 awaiting）则更新为 `running` 并填 `input`/`subjects`/`permission`/`turnId`/`name`；否则新建 `running` 条目 |
 | `tool.completed` | 同 `callId` 的 `live.tools` 项丢弃（未执行即终态）；`entries` 条目不存在则新建（`denied`/`cancelled` 路径无 `started`）；`status` 取 `payload.status`，填 `result`/`seq`（若尚无）/`turnId`/`name`；清 `liveOutput`；同 `callId` 的 `pendingQuestion` 清除（ADR-0032） |
-| `context.compacted` | 追加 `compacted` notice 条目 |
+| `context.compacted` | 追加 `compacted` notice 条目；`message` 按 `kind` 取 `compactedNoticeText`（prune「已省略较早的工具输出」、summary「上下文已压缩为摘要」），不含 kind 与 throughSeq，payload 原样保留 |
 | `turn.completed` | `currentTurn` 匹配则清除；`lastTurn`（含 `recovered`）/`turnCount`/`usage` 更新；`status=idle`；`retry`、`pendingPermission`、`pendingQuestion` 清空；**清空整个 `live`**（管线串行、同一时刻至多一个 Turn；`LiveTool.turnId` 可为空，按 turnId 筛选会留下无持久落点的孤儿，破坏 V8）；`reason!=="done"` 时追加 `turn_end` notice 条目（`recovered:true` 时文案区分"本次失败/中断"与"上次进程退出"） |
 
 顺序约束：视图**不要求**事件全序——`resolved` 可在 `requested` 前（规则拒绝直接产生 `resolved`）、`completed` 可在 `started` 前、`requested` 可在 `input.delta` 前（Provider 不流式参数时）。所有关联都通过 `callId`/`messageId`/`requestId` 键查找。

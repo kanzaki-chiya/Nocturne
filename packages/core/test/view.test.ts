@@ -131,6 +131,24 @@ const V5 = (view: SessionView) =>
   );
 
 describe("SessionView reducer", () => {
+  it.each<["prune" | "summary", string]>([
+    ["prune", "已省略较早的工具输出"],
+    ["summary", "上下文已压缩为摘要"],
+  ])("context.compacted(%s) 回执按种类写文案，payload 原样保留", (kind, text) => {
+    const payload = { kind, throughSeq: 7 };
+    const view = createSessionView();
+    reduceSessionView(view, {
+      type: "context.compacted",
+      sessionId: "s",
+      seq: 8,
+      time: "2026-10-08T01:02:03.000Z",
+      payload,
+    } as DurableEvent);
+    const notice = view.entries.find((entry) => entry.kind === "notice");
+    expect(notice?.kind === "notice" && notice.message).toBe(text);
+    expect(notice?.kind === "notice" && notice.payload).toEqual(payload);
+  });
+
   it("助手条目时间来自持久事件，实时归约与重放确定一致", () => {
     const event: DurableEvent = {
       type: "message.assistant",
@@ -456,7 +474,7 @@ describe("SessionView reducer", () => {
     const cfg = view.entries.find((e) => e.kind === "notice" && e.subtype === "config");
     const compacted = view.entries.find((e) => e.kind === "notice" && e.subtype === "compacted");
     expect(cfg).toBeDefined();
-    expect(compacted?.kind === "notice" && compacted.message).toContain("压缩");
+    expect(compacted?.kind === "notice" && compacted.message).toBe("上下文已压缩为摘要");
     assertConvergedEqual(view, durableOf(session));
     V5(view);
     await session.close();

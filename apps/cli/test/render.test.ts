@@ -144,8 +144,14 @@ describe("事件渲染（cli.md 第 5 节）", () => {
       durable("context.compacted", { kind: "summary", throughSeq: 42 }),
       "interactive",
     );
-    expect(c[0]?.text).toContain("summary");
-    expect(c[0]?.text).toContain("42");
+    expect(c[0]?.text).toContain("◇ 上下文已压缩为摘要");
+    expect(c[0]?.text).not.toMatch(/summary|42/);
+    const pruned = renderEvent(
+      durable("context.compacted", { kind: "prune", throughSeq: 42 }),
+      "interactive",
+    );
+    expect(pruned[0]?.text).toContain("◇ 已省略较早的工具输出");
+    expect(pruned[0]?.text).not.toMatch(/prune|42/);
 
     const retry = renderEvent(
       ephemeral("provider.retry", {
