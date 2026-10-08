@@ -651,7 +651,7 @@ function Think({
       >
         <span className="think-label">{open ? openLabel : label}</span>
         <span className="think-tw" aria-hidden="true">
-          {open ? "▴" : "▾"}
+          <span className={`fold-arrow${open ? " up" : ""}`}>▶</span>
         </span>
       </button>
       {open && (
@@ -660,7 +660,10 @@ function Think({
           {tall && (
             <div className="think-end">
               <button type="button" onClick={collapse}>
-                ▴ 收起思考
+                <span className="fold-arrow up" aria-hidden="true">
+                  ▶
+                </span>{" "}
+                收起思考
               </button>
             </div>
           )}
@@ -963,7 +966,7 @@ function UserMessage({
                 <details className="skill-message">
                   <summary>
                     技能 <b>{entry.skill.name}</b> · 已附加正文{" "}
-                    {entry.skill.body.length.toLocaleString()} 字 ▸
+                    {entry.skill.body.length.toLocaleString()} 字
                   </summary>
                   <pre>{entry.skill.body}</pre>
                 </details>
@@ -1524,58 +1527,92 @@ function LiveOutput({ text }: { text: string }) {
 }
 
 function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const result = entry.result;
   const isTimeout = result?.error?.code === "timeout";
+  const input = inputOf(entry);
+  const output = result?.output;
+  const value =
+    output !== null && typeof output === "object" ? (output as Record<string, unknown>) : undefined;
+  const command = typeof input?.command === "string" ? input.command : undefined;
+  const hasDetails = detailRows(entry.input).length > 0 || detailRows(output).length > 0;
+  const body =
+    result?.error !== undefined
+      ? isTimeout
+        ? timeoutBody(result.modelContent)
+        : result.error.message
+      : entry.status === "running"
+        ? entry.liveOutput
+        : (result?.modelContent ?? "");
+  const hasDiff = fileDiffs(entry, cwd).length > 0;
   return (
     <>
-      {entry.subjects.length ? (
-        <ul className="conversation-subjects">
-          {entry.subjects.map((subject, index) => (
-            <li key={index}>
-              {subject.kind}: {displayPath(subject.target, cwd)}
+      {!hasDiff &&
+        (command !== undefined ? (
+          <div className="tool-payload tool-shell">
+            <pre className="tool-command">
+              <span>$ </span>
+              {command}
+            </pre>
+            {entry.status === "running" ? (
+              <LiveOutput text={body} />
+            ) : (
+              <pre className="conversation-tool-output">{body}</pre>
+            )}
+          </div>
+        ) : body !== "" ? (
+          entry.status === "running" ? (
+            <LiveOutput text={body} />
+          ) : (
+            <pre className="tool-payload conversation-tool-output">
+              {result?.error ? body : displayResultPaths(body, cwd)}
+            </pre>
+          )
+        ) : null)}
+      <div className="tool-info">
+        {command !== undefined && typeof value?.exitCode === "number" && (
+          <span>退出码 {value.exitCode}</span>
+        )}
+        {command !== undefined && typeof input?.cwd === "string" && (
+          <span>目录 {displayPath(input.cwd, cwd)}</span>
+        )}
+        {typeof value?.replaced === "number" && <span>{value.replaced} 处替换</span>}
+        {entry.review && <span title={entry.review.reason}>安全审查 · {entry.review.verdict}</span>}
+        {entry.subjects.map((subject, index) =>
+          (subject.resolved && subject.resolved !== subject.target) || subject.detail ? (
+            <span key={index}>
               {subject.resolved && subject.resolved !== subject.target
-                ? ` → ${displayPath(subject.resolved, cwd)}`
+                ? `实际路径 → ${displayPath(subject.resolved, cwd)}`
                 : ""}
-              {subject.detail ? <pre>{subject.detail}</pre> : null}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {entry.input !== undefined ? (
-        <details>
-          <summary>调用参数</summary>
-          <pre>
-            {typeof entry.input === "string" ? entry.input : JSON.stringify(entry.input, null, 2)}
-          </pre>
-        </details>
-      ) : null}
-      {entry.review ? (
-        <p className="conversation-review">
-          安全审查 · {entry.review.verdict} · {entry.review.reason}
-        </p>
-      ) : null}
-      {result?.error !== undefined ? (
-        isTimeout ? (
-          <pre className="conversation-tool-output">{timeoutBody(result.modelContent)}</pre>
-        ) : (
-          <pre className="conversation-tool-output">{result.error.message}</pre>
-        )
-      ) : result?.modelContent ? (
-        <pre className="conversation-tool-output">{result.modelContent}</pre>
-      ) : null}
-      {result?.output !== undefined ? (
-        <details>
-          <summary>完整结果</summary>
-          <pre className="conversation-tool-output">
-            {typeof result.output === "string"
-              ? result.output
-              : JSON.stringify(result.output, null, 2)}
-          </pre>
-        </details>
-      ) : null}
+              {subject.detail ? ` ${subject.detail}` : ""}
+            </span>
+          ) : null,
+        )}
+        {hasDetails && (
+          <button
+            type="button"
+            className="tool-detail-toggle"
+            aria-expanded={detailsOpen}
+            onClick={() => {
+              setDetailsOpen((current) => !current);
+            }}
+          >
+            <span className={`fold-arrow${detailsOpen ? " down" : ""}`} aria-hidden="true">
+              ▶
+            </span>{" "}
+            详情
+          </button>
+        )}
+      </div>
+      {detailsOpen && hasDetails && (
+        <div className="tool-payload tool-fields">
+          <DetailGroup label="参数" value={entry.input} cwd={cwd} />
+          <DetailGroup label="结果" value={output} cwd={cwd} />
+        </div>
+      )}
       {result?.truncated ? (
         <p className="conversation-review">
-          输出已截断{result.spillPath ? ` · 完整输出：${result.spillPath}` : ""}
+          输出已截断{result.spillPath ? ` · 完整输出：${displayPath(result.spillPath, cwd)}` : ""}
         </p>
       ) : null}
       {(result?.attachments ?? []).map((attachment, index) => (
@@ -1586,13 +1623,55 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
       ))}
       {entry.descriptions?.map((description, index) =>
         description.text ? (
-          <details key={index}>
-            <summary>图片说明 · {description.model}</summary>
-            <pre>{description.text}</pre>
-          </details>
+          <p key={index} className="conversation-review">
+            图片说明 · {description.model} · {description.text}
+          </p>
         ) : null,
       )}
     </>
+  );
+}
+
+function detailRows(value: unknown): [string, unknown][] {
+  if (value === undefined || value === null || value === "") return [];
+  if (typeof value === "object" && !Array.isArray(value)) return Object.entries(value);
+  return [["", value]];
+}
+
+function displayResultPaths(value: string, cwd: string): string {
+  if (cwd === "") return value;
+  const prefix = cwd
+    .replaceAll("\\", "/")
+    .replace(/\/+$/, "")
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replaceAll("/", "[\\\\/]");
+  return value.replace(
+    new RegExp(`${prefix}[\\\\/][^\\r\\n\"'\\x60<>，。！？；：（）]*`, "gi"),
+    (path) => displayPath(path, cwd),
+  );
+}
+
+function DetailGroup({ label, value, cwd }: { label: string; value: unknown; cwd: string }) {
+  const rows = detailRows(value);
+  if (rows.length === 0) return null;
+  return (
+    <section aria-label={label}>
+      <h4>{label}</h4>
+      <dl>
+        {rows.map(([key, item]) => (
+          <div key={key}>
+            <dt>{key}</dt>
+            <dd>
+              {typeof item === "string"
+                ? /^(?:[A-Za-z]:[\\/]|\/|\\\\|\.\/)/.test(item)
+                  ? displayPath(item, cwd)
+                  : item
+                : JSON.stringify(item, null, 2)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 
@@ -1647,6 +1726,9 @@ function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
               setOpen((current) => !current);
             }}
           >
+            <span className={`fold-arrow${open ? " down" : ""}`} aria-hidden="true">
+              ▶
+            </span>
             <span className="ic" aria-hidden="true">
               {meta.icon}
             </span>
@@ -1678,13 +1760,7 @@ function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
               </span>
             )}
           </summary>
-          {open ? (
-            running && entry.liveOutput !== "" ? (
-              <LiveOutput text={entry.liveOutput} />
-            ) : (
-              <ToolDetails entry={entry} cwd={cwd} />
-            )
-          ) : null}
+          {open ? <ToolDetails entry={entry} cwd={cwd} /> : null}
         </details>
       )}
     </article>

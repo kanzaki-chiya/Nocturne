@@ -117,7 +117,10 @@ export function ModelRecoveryCard({
               setMenuOpen((open) => !open);
             }}
           >
-            {chosen === undefined ? "选择模型" : `${chosen.ref.provider} · ${chosen.ref.model}`} ▾
+            {chosen === undefined ? "选择模型" : `${chosen.ref.provider} · ${chosen.ref.model}`}{" "}
+            <span className={`fold-arrow${menuOpen ? " down" : ""}`} aria-hidden="true">
+              ▶
+            </span>
           </button>
           {menuOpen && (
             <ChoiceMenu

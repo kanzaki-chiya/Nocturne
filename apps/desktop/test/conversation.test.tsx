@@ -115,7 +115,7 @@ it("用户技能小标签使用日志快照，展开正文，工具行显示已�
   const rendered = mount(view);
   expect(screen.getByText("/alpha file")).toBeTruthy();
   const summary = rendered.container.querySelector(".skill-message summary");
-  expect(summary?.textContent).toBe("技能 alpha · 已附加正文 4 字 ▸");
+  expect(summary?.textContent).toBe("技能 alpha · 已附加正文 4 字");
   if (!summary) throw new Error("缺少技能标签");
   fireEvent.click(summary);
   expect(rendered.container.querySelector(".skill-message pre")?.textContent).toBe("快照正文");
@@ -865,6 +865,69 @@ describe("Conversation 渲染与滚动", () => {
     expect(container.querySelector(".diff-row-add .diff-mark")?.textContent).toBe("+");
     expect(container.querySelector(".diff-row-delete .diff-mark")?.textContent).toBe("−");
     expect(container.querySelector(".diff-add-row, .diff-delete")).toBeNull();
+  });
+
+  it("edit 展开只显示 diff、元信息与默认收起的详情", () => {
+    const view = createSessionView();
+    const entry = tool({ subjects: [{ kind: "edit", target: "file.ts" }] });
+    if (!entry.result) throw new Error("fixture 缺少结果");
+    entry.result.modelContent = "Success. Updated the following files: M Z:/project/file.ts";
+    entry.result.output = { ...(entry.result.output as object), replaced: 2 };
+    view.entries = [entry];
+    const { container } = mount(view);
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    expect(container.querySelector(".diff-body")).not.toBeNull();
+    expect(container.querySelector(".conversation-subjects")).toBeNull();
+    expect(container.textContent).not.toContain("Success.");
+    expect(screen.getByText("2 处替换")).toBeTruthy();
+    const toggle = screen.getByRole("button", { name: "详情" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("region", { name: "参数" })).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByRole("region", { name: "参数" }).textContent).toContain("old_string");
+    expect(screen.getByRole("region", { name: "结果" }).textContent).toContain("replaced");
+  });
+
+  it.each([undefined, "Z:/project/src"])(
+    "shell 主体显示完整命令、输出与退出码，目录仅来自 cwd（%s）",
+    (cwd) => {
+      const view = createSessionView();
+      const entry = tool({
+        name: "shell",
+        input: { command: "echo first\necho second", ...(cwd ? { cwd } : {}) },
+      });
+      if (!entry.result) throw new Error("fixture 缺少结果");
+      entry.result.output = { exitCode: 0 };
+      entry.result.modelContent = "first\nsecond";
+      view.entries = [entry];
+      const { container } = mount(view);
+      fireEvent.click(screen.getByLabelText("工具详细信息"));
+      expect(container.querySelector(".tool-command")?.textContent).toBe(
+        "$ echo first\necho second",
+      );
+      expect(container.querySelector(".conversation-tool-output")?.textContent).toBe(
+        "first\nsecond",
+      );
+      expect(screen.getByText("退出码 0")).toBeTruthy();
+      expect(container.querySelector(".tool-info")?.textContent.includes("目录")).toBe(
+        cwd !== undefined,
+      );
+    },
+  );
+
+  it("参数与结果为空不显示详情，普通结果路径相对化", () => {
+    const view = createSessionView();
+    const entry = tool({ name: "custom", input: {} });
+    if (!entry.result) throw new Error("fixture 缺少结果");
+    entry.result.output = {};
+    entry.result.modelContent = "结果：Z:/project/src/file.ts";
+    view.entries = [entry];
+    const { container } = mount(view);
+    fireEvent.click(screen.getByLabelText("工具详细信息"));
+    expect(screen.queryByRole("button", { name: "详情" })).toBeNull();
+    expect(container.querySelector(".conversation-tool-output")?.textContent).toBe(
+      "结果：src/file.ts",
+    );
   });
 
   it("读取工具默认只有单行摘要，完整输出和主体说明在折叠详情中", () => {
@@ -1766,7 +1829,8 @@ describe("长思考收起", () => {
       });
       const header = screen.getByRole("button", { name: "思考了 72s" });
       fireEvent.click(header);
-      expect(header.textContent).toBe("思考 · 1 分 12 秒▴");
+      expect(header.textContent).toBe("思考 · 1 分 12 秒▶");
+      expect(header.querySelector(".fold-arrow.up")).not.toBeNull();
       expect(header.getAttribute("title")).toBe("收起思考");
     } finally {
       vi.useRealTimers();

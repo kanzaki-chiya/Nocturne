@@ -84,7 +84,9 @@ function ChangedFile({
           setOpen(!open);
         }}
       >
-        <span aria-hidden="true">{open ? "▼" : "▶"}</span>
+        <span className={`fold-arrow${open ? " down" : ""}`} aria-hidden="true">
+          ▶
+        </span>
         <span className="turn-change-path" title={file.path}>
           <span className="turn-change-directory">{label.slice(0, slash + 1)}</span>
           {label.slice(slash + 1)}
@@ -242,7 +244,9 @@ export function TurnChangesCard(props: Props) {
             setExpanded(!open);
           }}
         >
-          <span aria-hidden="true">{open ? "▼" : "▶"}</span>
+          <span className={`fold-arrow${open ? " down" : ""}`} aria-hidden="true">
+            ▶
+          </span>
           <span className="turn-changes-title">{turn.files.length} 个文件已更改</span>
           {counted.length > 0 && (
             <span className="turn-changes-counts">

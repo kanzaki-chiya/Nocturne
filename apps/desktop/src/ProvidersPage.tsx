@@ -1962,7 +1962,10 @@ function PresetForm({
                       setListOpen((v) => !v);
                     }}
                   >
-                    {listOpen ? "收起 ▴" : "展开全部 ▾"}
+                    {listOpen ? "收起" : "展开全部"}{" "}
+                    <span className={`fold-arrow${listOpen ? " up" : ""}`} aria-hidden="true">
+                      ▶
+                    </span>
                   </button>
                 )}
               </>

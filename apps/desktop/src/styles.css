@@ -521,6 +521,37 @@ button {
   color: var(--a-muted);
   flex: none;
 }
+.fold-arrow {
+  display: inline-block;
+  flex: none;
+  font-size: 10px;
+  width: 1em;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 0.15s;
+}
+.fold-arrow.down {
+  transform: rotate(90deg);
+}
+.fold-arrow.up {
+  transform: rotate(-90deg);
+}
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+details > summary:not(.tool-line)::before {
+  content: "▶";
+  display: inline-block;
+  font-size: 10px;
+  margin-right: 6px;
+  transition: transform 0.15s;
+}
+details[open] > summary:not(.tool-line)::before {
+  transform: rotate(90deg);
+}
 .gh .tw {
   width: 12px;
   color: var(--a-faint);

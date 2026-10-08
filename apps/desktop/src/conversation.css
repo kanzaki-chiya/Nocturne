@@ -523,6 +523,7 @@
   overflow-wrap: anywhere;
 }
 .conversation .tool-line {
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -639,18 +640,61 @@
   padding: 3px 10px 8px;
 }
 .conversation .tool-details > pre,
-.conversation .tool-details details > pre,
-.conversation .conversation-subjects {
+.conversation .tool-payload {
   background: var(--a-input);
   border: 1px solid var(--a-border);
   border-radius: 7px;
   padding: 7px 9px;
 }
-.conversation-subjects {
-  font: 12px/1.6 var(--mono);
-  list-style: none;
-  padding: 7px 9px;
+.conversation .tool-shell .tool-command {
+  margin: 0;
+  padding-bottom: 7px;
+  border-bottom: 1px dashed var(--a-borderStrong);
+}
+.tool-command span {
+  color: var(--a-faint);
+}
+.tool-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   margin: 6px 0;
+  padding: 0 9px;
+  font-size: 11px;
+  color: var(--a-muted);
+}
+.tool-detail-toggle {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.tool-fields {
+  font: 12px/1.6 var(--mono);
+}
+.tool-fields h4 {
+  color: var(--a-muted);
+  margin: 4px 0;
+  font: inherit;
+}
+.tool-fields dl {
+  margin: 0;
+}
+.tool-fields dl > div {
+  display: grid;
+  grid-template-columns: minmax(70px, 25%) minmax(0, 1fr);
+  gap: 10px;
+}
+.tool-fields dt {
+  color: var(--a-faint);
+  overflow-wrap: anywhere;
+}
+.tool-fields dd {
+  margin: 0;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .conversation-tool-output {

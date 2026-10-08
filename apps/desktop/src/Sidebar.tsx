@@ -385,7 +385,9 @@ export function Sidebar(props: SidebarProps) {
               projectMenu(e, project);
             }}
           >
-            <span className="tw">{collapsed ? "▸" : "▾"}</span>
+            <span className={`tw fold-arrow${collapsed ? "" : " down"}`} aria-hidden="true">
+              ▶
+            </span>
             <FoldIcon open={!collapsed} />
             <span className="gname">{project.name}</span>
             <span className="gh-right">
@@ -575,7 +577,9 @@ export function Sidebar(props: SidebarProps) {
                 }}
               >
                 <span>排序</span>
-                <span className="arr">▸</span>
+                <span className="arr fold-arrow" aria-hidden="true">
+                  ▶
+                </span>
                 <div className="ctxmenu sub">
                   {(
                     [
@@ -614,7 +618,9 @@ export function Sidebar(props: SidebarProps) {
                 }}
               >
                 <span>已移除的项目…</span>
-                <span className="arr">▸</span>
+                <span className="arr fold-arrow" aria-hidden="true">
+                  ▶
+                </span>
                 <div className="ctxmenu sub">
                   {props.hiddenProjects.length === 0 ? (
                     <button disabled>（没有已移除的项目）</button>

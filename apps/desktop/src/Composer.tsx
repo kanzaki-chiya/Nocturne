@@ -79,7 +79,7 @@ export interface WorkspaceChoice {
   label: string;
   kind: "plain" | "project";
   title?: string;
-  /** 会话内目录不可切换（无菜单、无 ▾） */
+  /** 会话内目录不可切换（无菜单、无折叠箭头） */
   readOnly: boolean;
   /** 当前目录的项目 key；普通对话为 null */
   currentKey: string | null;
@@ -1183,7 +1183,7 @@ export function Composer({
                   <span className="pd" aria-hidden="true" />
                   {controls.model.label}
                   <span className="caret" aria-hidden="true">
-                    ▾
+                    <span className={`fold-arrow${openMenu === "model" ? " down" : ""}`}>▶</span>
                   </span>
                 </>,
               )}
@@ -1195,7 +1195,7 @@ export function Composer({
                 <>
                   {controls.effort.label}
                   <span className="caret" aria-hidden="true">
-                    ▾
+                    <span className={`fold-arrow${openMenu === "effort" ? " down" : ""}`}>▶</span>
                   </span>
                 </>,
               )}
@@ -1223,7 +1223,7 @@ export function Composer({
               <b>{workspace.label}</b>
               {!workspace.readOnly && (
                 <span className="caret" aria-hidden="true">
-                  ▾
+                  <span className={`fold-arrow${openMenu === "dir" ? " down" : ""}`}>▶</span>
                 </span>
               )}
             </button>
@@ -1234,7 +1234,7 @@ export function Composer({
                 <IconShield />
                 <b>{controls.preset.label}</b>
                 <span className="caret" aria-hidden="true">
-                  ▾
+                  <span className={`fold-arrow${openMenu === "preset" ? " down" : ""}`}>▶</span>
                 </span>
               </>,
             )}
