@@ -1295,6 +1295,14 @@ class Connection {
         return null;
       },
       "session.rewindTargets": (p) => this.session(p).session.rewindTargets(),
+      "session.turnChanges": (p) => this.session(p).session.turnChanges(),
+      "session.turnChangeDiff": (p) => {
+        const seq = reqInt(p, "seq");
+        const path = reqString(p, "path");
+        if (!Number.isSafeInteger(seq) || seq < 1 || !path.trim())
+          throw new InvalidParamsError("seq 必须是正整数，path 不能为空");
+        return this.session(p).session.turnChangeDiff(seq, path);
+      },
       "session.rewind": (p) => {
         const mode = reqString(p, "mode");
         return this.session(p).session.rewind(reqInt(p, "targetSeq"), mode as RewindMode);

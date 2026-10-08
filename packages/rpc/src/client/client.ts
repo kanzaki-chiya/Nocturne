@@ -155,6 +155,8 @@ export interface RpcSession {
   setShell(kind: string): Promise<void>;
   compact(): Promise<void>;
   rewindTargets(): Promise<RewindTarget[]>;
+  turnChanges(): Promise<RpcResult<"session.turnChanges">>;
+  turnChangeDiff(seq: number, path: string): Promise<RpcResult<"session.turnChangeDiff">>;
   rewind(targetSeq: number, mode: RewindMode): Promise<SessionRewoundPayload["files"]>;
   state(): Promise<SessionStateSummary>;
   describeContext(): Promise<ContextSummary>;
@@ -560,6 +562,8 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
         await call("session.compact", p);
       },
       rewindTargets: () => call("session.rewindTargets", p),
+      turnChanges: () => call("session.turnChanges", p),
+      turnChangeDiff: (seq, path) => call("session.turnChangeDiff", { ...p, seq, path }),
       rewind: (targetSeq, mode) => call("session.rewind", { ...p, targetSeq, mode }),
       state: () => call("session.state", p),
       describeContext: () => call("session.describeContext", p),

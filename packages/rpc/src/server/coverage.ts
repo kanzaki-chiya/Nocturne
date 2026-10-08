@@ -63,6 +63,8 @@ export const SESSION_METHODS: Record<
   RpcMethodName
 > = {
   rewindTargets: "session.rewindTargets",
+  turnChanges: "session.turnChanges",
+  turnChangeDiff: "session.turnChangeDiff",
   rewind: "session.rewind",
   state: "session.state",
   subscribe: "session.subscribe",

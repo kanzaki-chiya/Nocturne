@@ -191,6 +191,11 @@ export interface RpcMethods {
     result: SkillImportOutput;
   };
   "session.describeSkills": { params: SessionParams; result: SkillsDescription };
+  "session.turnChanges": { params: SessionParams; result: Ret<"turnChanges"> };
+  "session.turnChangeDiff": {
+    params: SessionParams & { seq: number; path: string };
+    result: Ret<"turnChangeDiff">;
+  };
   initialize: { params: InitializeParams; result: InitializeResult };
   shutdown: { params: Record<string, never>; result: null };
 
@@ -520,6 +525,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.setShell": true,
   "session.compact": true,
   "session.rewindTargets": true,
+  "session.turnChanges": true,
+  "session.turnChangeDiff": true,
   "session.rewind": true,
   "session.state": true,
   "session.describeContext": true,

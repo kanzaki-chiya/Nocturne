@@ -79,6 +79,7 @@ import { createHookRunner } from "./hooks/index.js";
 import { appendInputHistory, readInputHistory } from "./input-history.js";
 import { createCheckpointRecorder } from "./session/checkpoints.js";
 import { rewindTargets, restoreCheckpointFiles } from "./session/rewind.js";
+import { createTurnChanges } from "./session/turn-changes.js";
 import {
   createRulePolicy,
   createModelSecurityReviewer,
@@ -138,6 +139,8 @@ import type {
   RewindMode,
   SessionRewoundPayload,
   TurnEndReason,
+  TurnChanges,
+  TurnChangeDiff,
 } from "./protocol/index.js";
 import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
 import { normalizePermissionPreset } from "./protocol/index.js";
@@ -336,6 +339,8 @@ export interface RuntimeSession {
   describeSkills(): SkillsDescription;
   describeExternalAgents(): Promise<ExternalAgentsDescription>;
   rewindTargets(): Promise<RewindTarget[]>;
+  turnChanges(): Promise<TurnChanges[]>;
+  turnChangeDiff(seq: number, path: string): Promise<TurnChangeDiff>;
   rewind(targetSeq: number, mode: RewindMode): Promise<SessionRewoundPayload["files"]>;
   readonly id: string;
   state(): SessionState;
@@ -1700,6 +1705,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     let closing = false;
     let rewinding = false;
     let rewindSettled: Promise<void> | undefined;
+    const changes = createTurnChanges(session, platform, sessionsDir);
     // 进行中 Turn 的档位快照（ADR-0018 §3）：submit 时对持久化意图
     // 就近降档一次，reasoningEffortInfo().effective 据此报告；
     // Turn 中切档只改 current，effective 维持快照至 Turn 结束
@@ -1936,6 +1942,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (busy() || compactController !== undefined)
           throw new RuntimeCommandError("session_busy", "请先等待或按 Esc 中断");
         return rewindTargets(session, platform, sessionsDir);
+      },
+      turnChanges() {
+        assertUsable();
+        return changes.changes();
+      },
+      async turnChangeDiff(seq, path) {
+        assertUsable();
+        const result = await changes.diff(seq, path);
+        if (!result) throw new RuntimeCommandError("invalid_command", "这一轮没有可用的文件差异");
+        return result;
       },
       async rewind(targetSeq, mode) {
         assertUsable();

@@ -11,6 +11,14 @@ import {
 } from "../protocol/index.js";
 import type { Session } from "./types.js";
 
+export function isUntrackedCall(event: DurableEvent): boolean {
+  return (
+    event.type === "tool.started" &&
+    event.payload.mutates === true &&
+    !event.payload.subjects.some((s) => s.kind === "edit")
+  );
+}
+
 export function rewindCheckpoints(
   events: readonly DurableEvent[],
   targetSeq: number,
@@ -85,13 +93,7 @@ export async function rewindTargets(
         .join("\n"),
       hasImages: (event.payload.attachments?.length ?? 0) > 0,
       files,
-      untrackedCalls: events.filter(
-        (e) =>
-          e.seq > event.seq &&
-          e.type === "tool.started" &&
-          e.payload.mutates === true &&
-          !e.payload.subjects.some((s) => s.kind === "edit"),
-      ).length,
+      untrackedCalls: events.filter((e) => e.seq > event.seq && isUntrackedCall(e)).length,
     });
   }
   return targets;

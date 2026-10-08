@@ -269,3 +269,5 @@ type QuestionAnswer = { declined: true } | {
 `session.rewound` 持久记录 `targetSeq`、`mode: both|conversation|files`、`files: { path, result: restored|deleted|skipped|failed, reason? }[]`。含对话时历史及视图截到目标用户消息之前，单独回退对话或文件时按 ADR 插入 note。`tool.started.mutates?` 保存执行时的工具声明，用于准确重放未追踪调用数。
 
 `checkpoint.file` 是持久化事实，字段为 `callId`、绝对 `path`、`phase`，子代理改动另带来源 `sessionId`。`before` 阶段包含 `before: { sha256, size } | null | { untracked: string }`；`after` 阶段包含 `sha256: string | null`。同一轮每路径只保留第一次 before，每次调用结束（包括失败）均记录 after。它不进入模型历史或 SessionView。读取失败、目录、大于 10MB 的文件发临时 `runtime.warning(code="checkpoint_untracked")`，不阻止工具执行。格式版本保持 1；旧实现遇到新持久事件按既有规则拒绝。设计见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
+
+after 阶段同样保存字节（与 before 同目录、按 sha256 去重），事件字段不变；只读汇总接口见 [sessions.md「每轮文件改动」](../architecture/sessions.md#每轮文件改动)。
