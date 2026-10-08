@@ -555,6 +555,13 @@
 .conversation .tool-details > summary.tool-line:hover {
   color: var(--a-secondary);
 }
+/* 接收参数中：箭头占位但不可点 */
+.conversation .tool-details > summary.tool-line[aria-disabled="true"] {
+  cursor: default;
+}
+.conversation .tool-details > summary.tool-line[aria-disabled="true"] .fold-arrow {
+  opacity: 0.35;
+}
 .conversation .tool .ic {
   flex: none;
   width: 16px;
@@ -578,6 +585,13 @@
   text-overflow: ellipsis;
   font-family: var(--mono);
   font-size: 11.5px;
+}
+.conversation .tool-dir {
+  color: var(--a-faint);
+}
+.conversation .tool-counts {
+  display: inline-flex;
+  gap: 6px;
 }
 .conversation .tool-range {
   flex: none;
@@ -641,16 +655,15 @@
 .conversation .tool-details {
   min-width: 0;
 }
-/* 展开区与正文拉开：外层卡片（--a-side）装标题行，内层框（--a-input）
-   装命令/参数/结果 payload；两套色板下文字都读 --a-secondary/--a-text */
-.conversation .tool-details[open] {
-  background: var(--a-side);
+/* 展开不改行头：行头不加框、不加内边距，展开内容缩进到图标列下方；
+   diff 与命令/参数/结果 payload 各自是带框区域（--a-panel / --a-input） */
+.conversation .tool-body {
+  margin: 2px 0 8px 17px;
+}
+.conversation .tool-diff {
   border: 1px solid var(--a-border);
   border-radius: 9px;
-}
-.conversation .tool-details[open] {
-  margin-bottom: 6px;
-  padding: 3px 10px 8px;
+  overflow: hidden;
 }
 .conversation .tool-details > pre,
 .conversation .tool-payload {
@@ -724,13 +737,7 @@
   overflow-wrap: anywhere;
 }
 
-/* ── diff 卡片 ── */
-.conversation .diff {
-  border: 1px solid var(--a-border);
-  border-radius: 9px;
-  overflow: hidden;
-  margin: 6px 0;
-}
+/* ── diff（本轮改动卡片的文件行 .diff-h 与工具行展开的 diff 正文共用） ── */
 .conversation .diff-h {
   width: 100%;
   border: none;
@@ -744,16 +751,6 @@
   background: var(--a-side);
   font-size: 12px;
 }
-.conversation .diff-path {
-  flex: 1;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--a-text);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .conversation .diff-add {
   color: var(--a-success);
   font-family: var(--mono);
@@ -766,23 +763,10 @@
   font-size: 11px;
   white-space: nowrap;
 }
-.conversation .diff-toggle {
-  margin-left: auto;
-  background: none;
-  border: none;
-  font: inherit;
-  font-size: 10px;
-  color: var(--a-muted);
-  cursor: pointer;
-  padding: 0;
-}
 .conversation .diff-h:focus-visible,
 .conversation .tool-line:focus-visible {
   outline: 2px solid var(--a-secondary);
   outline-offset: 2px;
-}
-.conversation .diff-toggle:hover {
-  color: var(--a-text);
 }
 .conversation .diff-body {
   overflow-x: auto;

@@ -16,6 +16,7 @@ import {
   splitCodeRef,
   type PendingPermission,
   type ImageAttachment,
+  type LiveTool,
   type PendingQuestion,
   type PermissionOption,
   type PermissionReply,
@@ -1081,40 +1082,50 @@ export function toolMeta(
 }
 
 export function toolArgument(entry: ToolEntry, cwd: string): string {
+  return toolArgumentValue(entry, cwd).text;
+}
+
+/** 参数位原文；path 为真时行头按「文件名 + 淡色目录」拆开显示。 */
+function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path: boolean } {
+  const plain = (value: string) => ({ text: value, path: false });
   const input = inputOf(entry);
   switch (entry.name) {
     case "skill":
-      return input === undefined ? "" : text(input.name);
+      return plain(input === undefined ? "" : text(input.name));
     case "read":
     case "edit":
     case "write":
-      return input === undefined ? "" : displayPath(text(input.path), cwd);
+      return { text: input === undefined ? "" : displayPath(text(input.path), cwd), path: true };
     case "grep": {
       const path = input === undefined ? "" : text(input.path);
-      return `"${input === undefined ? "" : text(input.pattern)}"${path === "" ? "" : ` · ${displayPath(path, cwd)}`}`;
+      return plain(
+        `"${input === undefined ? "" : text(input.pattern)}"${path === "" ? "" : ` · ${displayPath(path, cwd)}`}`,
+      );
     }
     case "glob": {
       const path = input === undefined ? "" : text(input.path);
-      return `${input === undefined ? "" : text(input.pattern)}${path === "" ? "" : ` · ${displayPath(path, cwd)}`}`;
+      return plain(
+        `${input === undefined ? "" : text(input.pattern)}${path === "" ? "" : ` · ${displayPath(path, cwd)}`}`,
+      );
     }
     case "shell":
-      return input === undefined ? "" : text(input.command).replace(/\s+/g, " ");
+      return plain(input === undefined ? "" : text(input.command).replace(/\s+/g, " "));
     case "web_fetch":
-      return input === undefined ? "" : text(input.url);
+      return plain(input === undefined ? "" : text(input.url));
     case "web_search":
-      return input === undefined ? "" : text(input.query);
+      return plain(input === undefined ? "" : text(input.query));
     default:
       // MCP 工具的名称列已是 server/tool；参数位展示主要输入（第一个非空
       // 字符串入参，如搜索 query、抓取 url），拿不到就留空，不再显示一遍名字。
       if (mcpToolLabel(entry.name ?? "", entry.subjects) !== undefined) {
-        if (input === undefined) return "";
-        return (
+        if (input === undefined) return plain("");
+        return plain(
           Object.values(input).find(
             (value): value is string => typeof value === "string" && value !== "",
-          ) ?? ""
+          ) ?? "",
         );
       }
-      return entry.subjects[0]?.target ?? "";
+      return plain(entry.subjects[0]?.target ?? "");
   }
 }
 
@@ -1288,7 +1299,10 @@ export function deniedLine(entry: ToolEntry, cwd: string): string {
 }
 
 interface FileDiff {
+  /** 稳定 key：展示路径（含改名目标） */
   label: string;
+  path: string;
+  movedTo?: string;
   diff?: string;
 }
 
@@ -1310,13 +1324,16 @@ function fileDiffs(entry: ToolEntry, cwd: string): FileDiff[] {
         typeof value.path !== "string"
       )
         return [];
+      const path = displayPath(value.path, cwd);
       const movedTo =
         "movedTo" in value && typeof value.movedTo === "string"
-          ? ` → ${displayPath(value.movedTo, cwd)}`
-          : "";
+          ? displayPath(value.movedTo, cwd)
+          : undefined;
       return [
         {
-          label: `${displayPath(value.path, cwd)}${movedTo}`,
+          label: movedTo === undefined ? path : `${path} → ${movedTo}`,
+          path,
+          ...(movedTo === undefined ? {} : { movedTo }),
           ...("diff" in value && typeof value.diff === "string" && value.diff
             ? { diff: value.diff }
             : {}),
@@ -1329,7 +1346,7 @@ function fileDiffs(entry: ToolEntry, cwd: string): FileDiff[] {
       ? displayPath(output.path, cwd)
       : (entry.name ?? "文件");
   if ("diff" in output && typeof output.diff === "string" && output.diff)
-    return [{ label, diff: output.diff }];
+    return [{ label, path: label, diff: output.diff }];
   const content =
     entry.input && typeof entry.input === "object" && "content" in entry.input
       ? entry.input.content
@@ -1338,6 +1355,7 @@ function fileDiffs(entry: ToolEntry, cwd: string): FileDiff[] {
     return [
       {
         label,
+        path: label,
         diff: content
           .replace(/\r\n?/g, "\n")
           .replace(/\n$/, "")
@@ -1435,56 +1453,91 @@ function DiffBody({ diff }: { diff: string }) {
   );
 }
 
+/** 参数位：路径类参数拆成「文件名 + 淡色目录」，其余整段放在 name。 */
+interface ArgParts {
+  name: string;
+  dir: string;
+  title: string;
+}
+
+function pathParts(path: string, suffix = ""): ArgParts {
+  const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  const name = slash < 0 ? path : path.slice(slash + 1);
+  if (slash < 0 || name === "") {
+    return { name: `${path}${suffix}`, dir: "", title: `${path}${suffix}` };
+  }
+  return { name: `${name}${suffix}`, dir: path.slice(0, slash), title: `${path}${suffix}` };
+}
+
 /**
- * ok 结果的每个改动文件：默认折叠的一行（图标 + 动作 + 路径 + 变更计数），
- * 点击展开 diff 正文。计数没有删除时只写 +N；没有 diff 的文件只显示路径。
- * 图标与动作来自工具声明（toolMeta），不按工具名另写分支。
+ * 工具行头：接收参数、执行中、完成三个阶段共用同一结构
+ * （箭头 · 图标 · 名称 · 参数位 · 可选附加 · 行尾状态），只有行尾在变。
+ * 接收参数阶段箭头占位但不可点。
  */
-function FileDiff({
-  label,
-  diff,
-  icon,
-  action,
+function ToolLine({
   open,
+  disabled,
+  icon,
+  label,
+  arg,
+  argClassName,
+  extras,
+  status,
   onToggle,
-  children,
 }: {
-  label: string;
-  diff: string | undefined;
-  icon: string;
-  action: string;
   open: boolean;
+  disabled: boolean;
+  icon: string;
+  label: string;
+  arg: ArgParts;
+  argClassName?: string | undefined;
+  extras?: ReactNode;
+  status: ReactNode;
   onToggle: () => void;
-  children: ReactNode;
 }) {
+  return (
+    <summary
+      className="tool-line"
+      aria-label="工具详细信息"
+      aria-expanded={open}
+      aria-disabled={disabled || undefined}
+      onClick={(event) => {
+        event.preventDefault();
+        if (!disabled) onToggle();
+      }}
+    >
+      <span className={`fold-arrow${open ? " down" : ""}`} aria-hidden="true">
+        ▶
+      </span>
+      <span className="ic" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="tool-name">{label}</span>
+      <span
+        className={`tool-arg${argClassName ? ` ${argClassName}` : ""}`}
+        title={arg.title || undefined}
+      >
+        {arg.name}
+        {arg.dir !== "" && (
+          <>
+            {" "}
+            <span className="tool-dir">{arg.dir}</span>
+          </>
+        )}
+      </span>
+      {extras}
+      {status}
+    </summary>
+  );
+}
+
+function DiffCounts({ diff }: { diff: string | undefined }) {
   const counts = diff === undefined ? undefined : diffCounts(diff);
   return (
-    <div className="diff">
-      <button
-        type="button"
-        className="diff-h"
-        aria-label={open ? "收起" : "展开"}
-        aria-expanded={open}
-        onClick={onToggle}
-      >
-        <span className="diff-ic" aria-hidden="true">
-          {icon}
-        </span>
-        <span className="diff-action">{action}</span>
-        <span className="diff-path">{label}</span>
-        {counts === undefined ? null : <span className="diff-add">+{counts.add}</span>}
-        {counts !== undefined && counts.del > 0 ? (
-          <span className="diff-del">−{counts.del}</span>
-        ) : null}
-        <span className="diff-toggle">{open ? "收起" : "展开"}</span>
-      </button>
-      {open ? (
-        <>
-          {diff !== undefined ? <DiffBody diff={diff} /> : null}
-          {children}
-        </>
-      ) : null}
-    </div>
+    <span className="tool-res tool-counts">
+      {counts !== undefined && <span className="diff-add">+{counts.add}</span>}
+      {counts !== undefined && counts.del > 0 && <span className="diff-del">−{counts.del}</span>}
+    </span>
   );
 }
 
@@ -1679,10 +1732,20 @@ function DetailGroup({ label, value, cwd }: { label: string; value: unknown; cwd
 }
 
 /**
- * 工具行：默认收起，点击展开。运行中行内是实时输出（粘底跟随），
- * 完成后展开是已有参数/完整结果，或该工具改动的逐文件折叠行。
+ * 工具行：默认收起，点击展开。接收参数（preparing）、执行中、完成都渲染这一个组件，
+ * 行头结构不变；运行中展开是实时输出（粘底跟随），完成后展开是完整结果与详情。
+ * 结果带文件 diff（fileDiffs 非空）时每个文件一行，收起时行尾是 +N −M，展开才出现 diff 框。
+ * 第一行固定 key "row"，从接收参数到完成始终是同一个 DOM 节点。
  */
-function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
+function ToolRow({
+  entry,
+  cwd,
+  preparing = false,
+}: {
+  entry: ToolEntry;
+  cwd: string;
+  preparing?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [fileOpen, setFileOpen] = useState<Record<string, boolean>>({});
   const meta = toolMeta(entry.name ?? "", entry.subjects);
@@ -1692,98 +1755,150 @@ function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
     output: entry.result?.output,
   });
   const summary = todos === undefined ? undefined : todoSummary(todos);
-  const arg = summary?.text ?? toolArgument(entry, cwd);
+  const argument = toolArgumentValue(entry, cwd);
+  const arg: ArgParts =
+    summary !== undefined
+      ? { name: summary.text, dir: "", title: summary.text }
+      : preparing && inputOf(entry) === undefined
+        ? { name: "", dir: "", title: "" }
+        : argument.path
+          ? pathParts(argument.text)
+          : { name: argument.text, dir: "", title: argument.text };
   const range = toolRange(entry);
-  const running = entry.status === "running";
+  const running = !preparing && entry.status === "running";
   const seconds = useRunningSeconds(running);
   const result = toolResultText(entry);
   const error = entry.result?.error;
   const preview = running ? lastOutputLine(entry.liveOutput) : "";
   const diffs = entry.status === "ok" ? fileDiffs(entry, cwd) : [];
+  const status = preparing ? (
+    <span className="tool-res">接收参数中</span>
+  ) : (
+    <>
+      {running && <span className="tool-spin" aria-hidden="true" />}
+      {seconds !== undefined && <span className="tool-secs">{seconds} 秒</span>}
+      {!running && todos === undefined && (
+        <span
+          className={`tool-res${
+            error !== undefined
+              ? isRecoverableToolErrorCode(error.code)
+                ? " recoverable"
+                : " err"
+              : ""
+          }`}
+        >
+          {error === undefined ? result.text : toolErrorSummary(entry, cwd)}
+        </span>
+      )}
+    </>
+  );
+  const extras = (
+    <>
+      {todos !== undefined && todos.length > 0 && <TodoProgress items={todos} />}
+      {range !== undefined && <span className="tool-range">{range}</span>}
+      {preview !== "" && (
+        <span className="tool-live" title={entry.liveOutput}>
+          {preview}
+        </span>
+      )}
+    </>
+  );
+  const rows: (FileDiff | undefined)[] = diffs.length > 0 ? diffs : [undefined];
   return (
     <article
-      className={`tool${running ? " running" : ""}`}
+      className={`tool${running ? " running" : ""}${preparing ? " preparing" : ""}`}
       aria-label={`工具 ${entry.name ?? entry.callId}`}
     >
-      {diffs.length > 0 ? (
-        diffs.map((file) => (
-          <FileDiff
-            key={file.label}
-            label={file.label}
-            diff={file.diff}
-            icon={meta.icon}
-            action={meta.label}
-            open={fileOpen[file.label] ?? open}
-            onToggle={() => {
-              setFileOpen((current) => ({
-                ...current,
-                [file.label]: !(current[file.label] ?? open),
-              }));
-            }}
+      {rows.map((file, index) => {
+        const isOpen = file === undefined ? open : (fileOpen[file.label] ?? open);
+        return (
+          <details
+            key={index === 0 ? "row" : `file:${file?.label ?? index}`}
+            className="tool-details"
+            open={isOpen}
           >
-            <ToolDetails entry={entry} cwd={cwd} />
-          </FileDiff>
-        ))
-      ) : (
-        <details className="tool-details" open={open}>
-          <summary
-            className="tool-line"
-            aria-label="工具详细信息"
-            aria-expanded={open}
-            onClick={(event) => {
-              event.preventDefault();
-              setOpen((current) => !current);
-            }}
-          >
-            <span className={`fold-arrow${open ? " down" : ""}`} aria-hidden="true">
-              ▶
-            </span>
-            <span className="ic" aria-hidden="true">
-              {meta.icon}
-            </span>
-            <span className="tool-name">{meta.label}</span>
-            {arg !== "" && (
-              <span className={`tool-arg${summary?.complete ? " todo-complete" : ""}`} title={arg}>
-                {arg}
-              </span>
-            )}
-            {todos !== undefined && todos.length > 0 && <TodoProgress items={todos} />}
-            {range !== undefined && <span className="tool-range">{range}</span>}
-            {preview !== "" && (
-              <span className="tool-live" title={entry.liveOutput}>
-                {preview}
-              </span>
-            )}
-            {running && <span className="tool-spin" aria-hidden="true" />}
-            {seconds !== undefined && <span className="tool-secs">{seconds} 秒</span>}
-            {!running && todos === undefined && (
-              <span
-                className={`tool-res${
-                  error !== undefined
-                    ? isRecoverableToolErrorCode(error.code)
-                      ? " recoverable"
-                      : " err"
-                    : ""
-                }`}
-              >
-                {error === undefined ? result.text : toolErrorSummary(entry, cwd)}
-              </span>
-            )}
-          </summary>
-          {open ? (
-            todos === undefined ? (
-              <ToolDetails entry={entry} cwd={cwd} />
-            ) : (
-              <TodoList items={todos} />
-            )
-          ) : null}
-        </details>
-      )}
+            <ToolLine
+              open={isOpen}
+              disabled={preparing}
+              icon={meta.icon}
+              label={meta.label}
+              arg={
+                file === undefined
+                  ? arg
+                  : pathParts(file.path, file.movedTo === undefined ? "" : ` → ${file.movedTo}`)
+              }
+              argClassName={file === undefined && summary?.complete ? "todo-complete" : undefined}
+              extras={file === undefined ? extras : null}
+              status={file === undefined ? status : <DiffCounts diff={file.diff} />}
+              onToggle={() => {
+                if (file === undefined) {
+                  setOpen((current) => !current);
+                  return;
+                }
+                setFileOpen((current) => ({
+                  ...current,
+                  [file.label]: !(current[file.label] ?? open),
+                }));
+              }}
+            />
+            {isOpen ? (
+              todos !== undefined ? (
+                <TodoList items={todos} />
+              ) : (
+                <div className="tool-body">
+                  {file?.diff !== undefined ? (
+                    <div className="tool-diff">
+                      <DiffBody diff={file.diff} />
+                    </div>
+                  ) : null}
+                  <ToolDetails entry={entry} cwd={cwd} />
+                </div>
+              )
+            ) : null}
+          </details>
+        );
+      })}
     </article>
   );
 }
 
-function ToolEntryView({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
+/**
+ * 参数仍在流式接收的工具调用：合成只含 name/input 的 ToolEntry，交给 ToolRow 渲染。
+ * inputText 能整体解析为 JSON 才作为 input；半截 JSON 不进参数位，也不进 title。
+ */
+function preparingEntry(tool: LiveTool): ToolEntry {
+  let input: unknown;
+  try {
+    input = JSON.parse(tool.inputText);
+  } catch {
+    input = undefined;
+  }
+  return {
+    kind: "tool",
+    key: `t:${tool.callId}`,
+    turnId: tool.turnId ?? "",
+    callId: tool.callId,
+    name: tool.name,
+    seq: 0,
+    status: "running",
+    input,
+    subjects: [],
+    permission: undefined,
+    resolution: undefined,
+    liveOutput: "",
+    result: undefined,
+  };
+}
+
+function ToolEntryView({
+  entry,
+  cwd,
+  preparing = false,
+}: {
+  entry: ToolEntry;
+  cwd: string;
+  preparing?: boolean;
+}) {
   if (entry.status === "denied") {
     return (
       <div
@@ -1795,7 +1910,7 @@ function ToolEntryView({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
       </div>
     );
   }
-  return <ToolRow entry={entry} cwd={cwd} />;
+  return <ToolRow entry={entry} cwd={cwd} preparing={preparing} />;
 }
 
 const TURN_END_LABELS: Record<TurnEndReason, string> = {
@@ -1821,6 +1936,7 @@ function EntryView({
   fileLinks,
   showReplyActions,
   changesCard,
+  preparing = false,
 }: {
   entry: ViewEntry;
   openUrl: OpenUrl;
@@ -1835,6 +1951,8 @@ function EntryView({
   fileLinks: ConversationProps["fileLinks"];
   showReplyActions: boolean;
   changesCard: ReactNode;
+  /** 实时工具行（参数尚在流式接收）以合成 ToolEntry 走同一条渲染路径 */
+  preparing?: boolean;
 }) {
   switch (entry.kind) {
     case "user":
@@ -1869,7 +1987,7 @@ function EntryView({
         </article>
       );
     case "tool":
-      return <ToolEntryView entry={entry} cwd={cwd} />;
+      return <ToolEntryView entry={entry} cwd={cwd} preparing={preparing} />;
     case "notice": {
       if (entry.subtype === "permission" || entry.subtype === "config") return null;
       let message = entry.subtype === "compacted" ? "上下文已压缩" : entry.message;
@@ -2315,6 +2433,7 @@ function ConversationContent({
     replies.set(key, entry.key);
   }
   const replyActionKeys = new Set(replies.values());
+  const entryKeys = new Set(view.entries.map((entry) => entry.key));
   // U-01：每条用户消息之后将被撤回的回复轮数（按助手 turnId 去重）
   const repliesAfter = useMemo(() => {
     const counts = new Map<number, number>();
@@ -2404,64 +2523,73 @@ function ConversationContent({
             {!view.entries.length && !view.live.assistants.length && !view.live.tools.length ? (
               <div className="conversation-empty">发送消息，开始这个会话。</div>
             ) : null}
-            {view.entries.map((entry) => (
-              <Fragment key={entry.key}>
-                <EntryView
-                  entry={entry}
-                  openUrl={openUrl}
-                  cwd={cwd}
-                  parts={parts}
-                  now={now}
-                  images={images}
-                  session={session}
-                  busy={busy}
-                  repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
-                  onResubmit={onResubmit}
-                  fileLinks={fileLinks}
-                  showReplyActions={replyActionKeys.has(entry.key)}
-                  changesCard={
-                    entry.kind === "assistant" ? renderChanges(changesByKey.get(entry.key)) : null
-                  }
-                />
-                {entry.kind !== "assistant" && renderChanges(changesByKey.get(entry.key))}
-              </Fragment>
-            ))}
-            {view.live.assistants.map((assistant) => (
-              <article
-                className="a"
-                key={`assistant:${assistant.messageId}`}
-                aria-label="助手实时回复"
-              >
-                <Think
-                  messageId={assistant.messageId}
-                  text={assistant.reasoning}
-                  parts={parts}
-                  now={now}
-                />
-                <Markdown text={assistant.text} openUrl={openUrl} />
-              </article>
-            ))}
-            {view.live.tools.map((tool) => {
-              const meta = toolMeta(tool.name);
-              return (
+            {[
+              ...view.entries.map((entry) => (
+                <Fragment key={entry.key}>
+                  <EntryView
+                    entry={entry}
+                    openUrl={openUrl}
+                    cwd={cwd}
+                    parts={parts}
+                    now={now}
+                    images={images}
+                    session={session}
+                    busy={busy}
+                    repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
+                    onResubmit={onResubmit}
+                    fileLinks={fileLinks}
+                    showReplyActions={replyActionKeys.has(entry.key)}
+                    changesCard={
+                      entry.kind === "assistant" ? renderChanges(changesByKey.get(entry.key)) : null
+                    }
+                  />
+                  {entry.kind !== "assistant" && renderChanges(changesByKey.get(entry.key))}
+                </Fragment>
+              )),
+              ...view.live.assistants.map((assistant) => (
                 <article
-                  className="tool"
-                  key={`tool:${tool.callId}`}
-                  aria-label={`工具 ${tool.name} 实时参数`}
+                  className="a"
+                  key={`assistant:${assistant.messageId}`}
+                  aria-label="助手实时回复"
                 >
-                  <div className="tool-line">
-                    <span className="ic" aria-hidden="true">
-                      {meta.icon}
-                    </span>
-                    <span className="tool-name">{meta.label}</span>
-                    <span className="tool-arg" title={tool.inputText}>
-                      {tool.inputText}
-                    </span>
-                    <span className="tool-res">接收参数中</span>
-                  </div>
+                  <Think
+                    messageId={assistant.messageId}
+                    text={assistant.reasoning}
+                    parts={parts}
+                    now={now}
+                  />
+                  <Markdown text={assistant.text} openUrl={openUrl} />
                 </article>
-              );
-            })}
+              )),
+              // 实时工具行与正式条目同在这一个数组、同用 key t:<callId>、同一组件树：
+              // reducer 提升条目时 React 只移动节点，不卸载重挂。
+              ...view.live.tools
+                .filter((tool) => !entryKeys.has(`t:${tool.callId}`))
+                .map((tool) => {
+                  const entry = preparingEntry(tool);
+                  return (
+                    <Fragment key={entry.key}>
+                      <EntryView
+                        entry={entry}
+                        openUrl={openUrl}
+                        cwd={cwd}
+                        parts={parts}
+                        now={now}
+                        images={images}
+                        session={session}
+                        busy={busy}
+                        repliesAfter={0}
+                        onResubmit={onResubmit}
+                        fileLinks={fileLinks}
+                        showReplyActions={false}
+                        changesCard={null}
+                        preparing
+                      />
+                      {null}
+                    </Fragment>
+                  );
+                }),
+            ]}
             {view.notices.map((notice, index) => (
               <div
                 key={index}

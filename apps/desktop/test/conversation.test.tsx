@@ -784,16 +784,16 @@ describe("Conversation 渲染与滚动", () => {
     // config 子类不进消息流
     expect(screen.queryByText("模型已切换")).toBeNull();
     expect(screen.getByRole("alert").textContent).toContain("响应较慢");
-    const card = container.querySelector(".diff");
+    const card = container.querySelector("article.tool");
     expect(card?.textContent).toContain("file.ts");
     expect(card?.textContent).toContain("+1");
     expect(card?.textContent).toContain("−1");
     expect({
-      action: card?.querySelector(".diff-action")?.textContent,
-      path: card?.querySelector(".diff-path")?.textContent,
-      added: card?.querySelector(".diff-add")?.textContent,
-      deleted: card?.querySelector(".diff-del")?.textContent,
-      expanded: card?.querySelector("button")?.getAttribute("aria-expanded"),
+      action: card?.querySelector(".tool-name")?.textContent,
+      path: card?.querySelector(".tool-arg")?.textContent,
+      added: card?.querySelector(".tool-counts .diff-add")?.textContent,
+      deleted: card?.querySelector(".tool-counts .diff-del")?.textContent,
+      expanded: card?.querySelector(".tool-line")?.getAttribute("aria-expanded"),
       diffRows: card?.querySelectorAll(".diff-row").length,
     }).toMatchInlineSnapshot(`
       {
@@ -806,7 +806,7 @@ describe("Conversation 渲染与滚动", () => {
       }
     `);
     expect(container.querySelector(".diff-body")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    fireEvent.click(screen.getByLabelText("工具详细信息"));
     expect(container.querySelector(".diff-row.diff-row-add code")?.textContent).toBe("new");
     expect(container.querySelector(".diff-row.diff-row-delete code")?.textContent).toBe("old");
     expect(container.querySelector(".diff-row.diff-row-delete .diff-num")?.textContent).toBe("1");
@@ -841,7 +841,7 @@ describe("Conversation 渲染与滚动", () => {
     };
     view.entries = [entry];
     const { container } = mount(view);
-    const cards = container.querySelectorAll(".diff");
+    const cards = container.querySelectorAll(".tool-details");
     expect(cards).toHaveLength(2);
     expect(cards[0]?.textContent).toContain("a.ts");
     expect(cards[0]?.textContent).toContain("+1");
@@ -876,7 +876,7 @@ describe("Conversation 渲染与滚动", () => {
     };
     view.entries = [entry];
     const { container } = mount(view);
-    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    fireEvent.click(screen.getByLabelText("工具详细信息"));
     expect(
       Array.from(container.querySelectorAll(".diff-row code"), (node) => node.textContent),
     ).toEqual(["  old", "  new", "  keep", "-negative", "+positive", "\told", "\tnew"]);
@@ -887,13 +887,13 @@ describe("Conversation 渲染与滚动", () => {
     expect(container.querySelector(".diff-body")?.textContent).not.toMatch(
       /@@|No newline|diff --git|index abc|a\/file.ts|b\/file.ts/,
     );
-    expect(container.querySelector(".diff-h .diff-add")?.textContent).toBe("+3");
-    expect(container.querySelector(".diff-h .diff-del")?.textContent).toBe("−3");
+    expect(container.querySelector(".tool-counts .diff-add")?.textContent).toBe("+3");
+    expect(container.querySelector(".tool-counts .diff-del")?.textContent).toBe("−3");
     const rows = container.querySelectorAll(".diff-row:not(.diff-sep)");
     expect(container.querySelectorAll(".diff-row-add")).toHaveLength(3);
     expect(container.querySelectorAll(".diff-row-delete")).toHaveLength(3);
     const countClasses = Array.from(
-      container.querySelectorAll(".diff-h .diff-add, .diff-h .diff-del"),
+      container.querySelectorAll(".tool-counts .diff-add, .tool-counts .diff-del"),
       (node) => Array.from(node.classList),
     ).flat();
     expect(countClasses).toEqual(["diff-add", "diff-del"]);
@@ -920,7 +920,7 @@ describe("Conversation 渲染与滚动", () => {
     entry.result.output = { ...(entry.result.output as object), replaced: 2 };
     view.entries = [entry];
     const { container } = mount(view);
-    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    fireEvent.click(screen.getByLabelText("工具详细信息"));
     expect(container.querySelector(".diff-body")).not.toBeNull();
     expect(container.querySelector(".conversation-subjects")).toBeNull();
     expect(container.textContent).not.toContain("Success.");
@@ -1023,7 +1023,9 @@ describe("Conversation 渲染与滚动", () => {
     const rendered = mount(view);
     expect(screen.queryByLabelText("工具实时输出")).toBeNull();
     expect(rendered.container.querySelector(".tool-live")?.textContent).toBe("第一行");
-    expect(screen.getByText('{"command":')).toBeTruthy();
+    const liveRow = screen.getByRole("article", { name: "工具 shell" });
+    expect(liveRow.querySelector(".tool-arg")?.textContent).toBe("");
+    expect(liveRow.textContent).not.toContain('{"command":');
     const assistant = view.live.assistants[0];
     const liveTool = view.live.tools[0];
     if (assistant === undefined || liveTool === undefined) throw new Error("缺少流式条目");
@@ -1032,7 +1034,8 @@ describe("Conversation 渲染与滚动", () => {
     view.revision += 1;
     rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     expect(screen.getByText("回复", { selector: "strong" })).toBeTruthy();
-    expect(screen.getByText('{"command":"pwd"}')).toBeTruthy();
+    expect(liveRow.querySelector(".tool-arg")?.textContent).toBe("pwd");
+    expect(liveRow.textContent).not.toContain('{"command"');
   });
 
   it("实时工具默认收起显示最后非空行和秒数，点击展开滚底，完成保持用户选择", () => {
@@ -1091,7 +1094,7 @@ describe("Conversation 渲染与滚动", () => {
     view.revision += 1;
     rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     expect(rendered.container.querySelector(".diff-body")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    fireEvent.click(screen.getByLabelText("工具详细信息"));
     expect(rendered.container.querySelector(".diff-body")).not.toBeNull();
     cleanup();
     const running = tool({ status: "running", result: undefined, liveOutput: "编辑中" });
@@ -1114,7 +1117,7 @@ describe("Conversation 渲染与滚动", () => {
     const rendered = mount(view);
     expect(rendered.container.querySelector(".diff-add")?.textContent).toBe("+2");
     expect(rendered.container.querySelector(".diff-del, .diff-body")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    fireEvent.click(screen.getByLabelText("工具详细信息"));
     view.revision += 1;
     rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     expect(rendered.container.querySelectorAll(".diff-row-add")).toHaveLength(2);
@@ -1132,16 +1135,16 @@ describe("Conversation 渲染与滚动", () => {
     view.entries = [entry];
     const rendered = mount(view);
     expect(rendered.container.querySelectorAll(".diff-body")).toHaveLength(0);
-    const first = rendered.container.querySelector(".diff-h");
+    const first = rendered.container.querySelector(".tool-line");
     if (!first) throw new Error("缺少文件行");
     fireEvent.click(first);
     entry.result.output = { files: [...files].reverse() };
     view.revision += 1;
     rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
-    const cards = rendered.container.querySelectorAll(".diff");
-    expect(cards[0]?.querySelector(".diff-path")?.textContent).toBe("b.ts");
+    const cards = rendered.container.querySelectorAll(".tool-details");
+    expect(cards[0]?.querySelector(".tool-arg")?.textContent).toBe("b.ts");
     expect(cards[0]?.querySelector(".diff-body")).toBeNull();
-    expect(cards[1]?.querySelector(".diff-path")?.textContent).toBe("a.ts");
+    expect(cards[1]?.querySelector(".tool-arg")?.textContent).toBe("a.ts");
     expect(cards[1]?.querySelector(".diff-body")).not.toBeNull();
   });
 
@@ -1327,6 +1330,167 @@ describe("Markdown 换行", () => {
   });
 });
 
+describe("Conversation 工具行三个阶段同一结构", () => {
+  const HEAD = ["fold-arrow", "ic", "tool-name", "tool-arg"];
+  const headClasses = (line: Element | null) =>
+    Array.from(line?.children ?? [], (node) => node.className.split(" ")[0]).slice(0, 4);
+  const editPath = "Z:/project/apps/desktop/src/Conversation.tsx";
+  const editInput = { path: editPath, old_string: "old", new_string: "new" };
+
+  it("同一个 edit 从接收参数到完成：箭头始终在、行头类名不变、半截 JSON 不上屏、行节点不重挂", () => {
+    vi.useFakeTimers();
+    try {
+      const view = createSessionView();
+      const live = {
+        kind: "tool" as const,
+        callId: "call-1",
+        name: "edit",
+        turnId: "turn-1",
+        inputText: '{"path":"Z:/project/apps/desk',
+      };
+      view.live.tools = [live];
+      const rendered = mount(view);
+      const rerender = () => {
+        view.revision += 1;
+        rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+      };
+      const node = rendered.container.querySelector(".tool-line");
+      if (node === null) throw new Error("缺少工具行");
+
+      // 1. 接收参数，半截 JSON：箭头占位且禁用，参数位为空元素，原始片段不出现在文本或 title 里
+      expect(headClasses(node)).toEqual(HEAD);
+      expect(node.getAttribute("aria-disabled")).toBe("true");
+      expect(node.querySelector(".tool-arg")?.textContent).toBe("");
+      expect(node.querySelector(".tool-res")?.textContent).toBe("接收参数中");
+      expect(rendered.container.textContent).not.toContain('{"path"');
+      expect(rendered.container.querySelector("[title*='{']")).toBeNull();
+      fireEvent.click(node);
+      expect(node.getAttribute("aria-expanded")).toBe("false");
+
+      // 2. 接收参数，完整 JSON：参数位是文件名 + 淡色目录
+      live.inputText = JSON.stringify(editInput);
+      rerender();
+      expect(rendered.container.querySelector(".tool-line")).toBe(node);
+      expect(headClasses(node)).toEqual(HEAD);
+      expect(node.querySelector(".tool-arg")?.firstChild?.textContent).toBe("Conversation.tsx");
+      expect(node.querySelector(".tool-arg .tool-dir")?.textContent).toBe("apps/desktop/src");
+      expect(node.querySelector(".tool-arg")?.getAttribute("title")).toBe(
+        "apps/desktop/src/Conversation.tsx",
+      );
+      expect(node.querySelector(".tool-res")?.textContent).toBe("接收参数中");
+
+      // 3. 执行中：reducer 把实时行提升为正式条目（同 key t:<callId>），同一节点
+      const entry = tool({
+        key: "t:call-1",
+        status: "running",
+        input: editInput,
+        result: undefined,
+      });
+      view.live.tools = [];
+      view.entries = [entry];
+      rerender();
+      expect(rendered.container.querySelector(".tool-line")).toBe(node);
+      expect(headClasses(node)).toEqual(HEAD);
+      expect(node.getAttribute("aria-disabled")).toBeNull();
+      expect(node.querySelector(".tool-spin")).not.toBeNull();
+      expect(node.querySelector(".tool-arg")?.firstChild?.textContent).toBe("Conversation.tsx");
+
+      // 4. 完成：仍是同一行，行尾换成 +N −M，没有 diff 外框
+      entry.status = "ok";
+      const result = tool().result;
+      if (!result) throw new Error("fixture 缺少结果");
+      entry.result = {
+        ...result,
+        output: { path: editPath, diff: "@@ -1,2 +1,2 @@\n-old\n+new\n keep" },
+      };
+      rerender();
+      expect(rendered.container.querySelector(".tool-line")).toBe(node);
+      expect(headClasses(node)).toEqual(HEAD);
+      expect(node.querySelector(".tool-arg")?.firstChild?.textContent).toBe("Conversation.tsx");
+      expect(node.querySelector(".tool-arg .tool-dir")?.textContent).toBe("apps/desktop/src");
+      expect(node.querySelector(".tool-spin, .tool-secs")).toBeNull();
+      expect(node.querySelector(".tool-counts")?.textContent).toBe("+1−1");
+      expect(rendered.container.querySelectorAll(".tool-line")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("完成的 edit 收起时是无框普通行，点开出现 diff 区域和详情", () => {
+    const view = createSessionView();
+    view.entries = [tool({ input: editInput })];
+    const { container } = mount(view);
+    const line = container.querySelector(".tool-line");
+    if (line === null) throw new Error("缺少工具行");
+    expect(container.querySelector(".diff, .diff-h")).toBeNull();
+    expect(headClasses(line)).toEqual(HEAD);
+    expect(line.querySelector(".tool-counts .diff-add")?.textContent).toBe("+1");
+    expect(line.querySelector(".tool-counts .diff-del")?.textContent).toBe("−1");
+    expect(container.querySelector(".tool-diff")).toBeNull();
+    expect(screen.queryByRole("button", { name: "详情" })).toBeNull();
+    fireEvent.click(line);
+    expect(container.querySelector(".tool-body .tool-diff .diff-body")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "详情" })).toBeTruthy();
+  });
+
+  it("apply_patch 两个文件各占一行，各自展开互不影响", () => {
+    const view = createSessionView();
+    const entry = tool({ name: "apply_patch", input: { patch: "*** Begin Patch" } });
+    if (!entry.result) throw new Error("fixture 缺少结果");
+    entry.result.output = {
+      files: [
+        { path: "Z:/project/src/a.ts", diff: "@@ -1 +1 @@\n-a\n+b" },
+        { path: "Z:/project/lib/b.ts", diff: "@@ -1 +1,2 @@\n x\n+y\n+z" },
+      ],
+    };
+    view.entries = [entry];
+    const { container } = mount(view);
+    const rows = container.querySelectorAll(".tool-details");
+    expect(rows).toHaveLength(2);
+    const [first, second] = Array.from(rows) as HTMLDetailsElement[];
+    if (!first || !second) throw new Error("缺少文件行");
+    for (const row of [first, second]) {
+      expect(headClasses(row.querySelector(".tool-line"))).toEqual(HEAD);
+    }
+    expect(first.querySelector(".tool-arg")?.firstChild?.textContent).toBe("a.ts");
+    expect(first.querySelector(".tool-dir")?.textContent).toBe("src");
+    expect(first.querySelector(".tool-counts")?.textContent).toBe("+1−1");
+    expect(second.querySelector(".tool-arg")?.firstChild?.textContent).toBe("b.ts");
+    expect(second.querySelector(".tool-counts")?.textContent).toBe("+2");
+    fireEvent.click(second.querySelector(".tool-line") as Element);
+    expect(second.open).toBe(true);
+    expect(first.open).toBe(false);
+    expect(second.querySelector(".tool-diff .diff-body")).not.toBeNull();
+    expect(first.querySelector(".diff-body")).toBeNull();
+    fireEvent.click(first.querySelector(".tool-line") as Element);
+    fireEvent.click(second.querySelector(".tool-line") as Element);
+    expect(first.open).toBe(true);
+    expect(second.open).toBe(false);
+  });
+
+  it.each<[string, Record<string, unknown>, Record<string, unknown>, string]>([
+    ["shell", { command: "pnpm test" }, { exitCode: 0 }, "测试通过"],
+    ["read", { path: "src/a.ts" }, { path: "src/a.ts", offset: 1, returnedLines: 2 }, "a\nb"],
+  ])("%s 完成后也有箭头且能展开", (name, input, output, modelContent) => {
+    const view = createSessionView();
+    const entry = tool({ name, input });
+    if (!entry.result) throw new Error("fixture 缺少结果");
+    entry.result.output = output;
+    entry.result.modelContent = modelContent;
+    view.entries = [entry];
+    const { container } = mount(view);
+    const line = container.querySelector(".tool-line");
+    if (line === null) throw new Error("缺少工具行");
+    expect(headClasses(line)).toEqual(HEAD);
+    expect(line.closest("details")?.open).toBe(false);
+    fireEvent.click(line);
+    expect(line.closest("details")?.open).toBe(true);
+    expect(container.querySelector(".tool-body .conversation-tool-output")?.textContent).toBe(
+      modelContent,
+    );
+  });
+});
+
 describe("Conversation 工具行与拒绝", () => {
   it("工作区内路径相对化、区外绝对化；10 秒以上才显示时长", () => {
     const view = createSessionView();
@@ -1344,10 +1508,15 @@ describe("Conversation 工具行与拒绝", () => {
     if (outside.result) outside.result.output = { path: "Z:/other/x.ts", replaced: 1 };
     view.entries = [inside, outside];
     const { container } = mount(view);
-    const args = Array.from(container.querySelectorAll(".tool-arg")).map(
-      (node) => node.textContent,
-    );
-    expect(args).toEqual(["src/a.ts", "Z:/other/x.ts"]);
+    const args = Array.from(container.querySelectorAll(".tool-arg")).map((node) => [
+      node.firstChild?.textContent,
+      node.querySelector(".tool-dir")?.textContent,
+      node.getAttribute("title"),
+    ]);
+    expect(args).toEqual([
+      ["a.ts", "src", "src/a.ts"],
+      ["x.ts", "Z:/other", "Z:/other/x.ts"],
+    ]);
     const rows = screen.getAllByRole("article", { name: /工具 edit/ });
     expect(rows[0]?.textContent).toContain("2 处");
     expect(rows[0]?.textContent).toContain("12 秒");
@@ -1523,7 +1692,7 @@ describe("Conversation 工具行与拒绝", () => {
     const { container } = mount(view);
     const line = container.querySelector(".tool-line");
     expect(line?.querySelector(".tool-name")?.textContent).toBe("exa/fetch_url");
-    expect(line?.querySelector(".tool-arg")).toBeNull();
+    expect(line?.querySelector(".tool-arg")?.textContent).toBe("");
     const deny = container.querySelector(".note.deny");
     expect(deny?.textContent).not.toContain("mcp__");
     expect(deny?.textContent).toBe("✕ 已拒绝exa/web_search_exa 热点新闻");
