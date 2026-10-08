@@ -495,6 +495,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.conversation .tool-res.recoverable {
+  color: var(--a-faint);
+  flex: 0 1 50%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .conversation .tool-live {
   flex: 1;
   min-width: 0;

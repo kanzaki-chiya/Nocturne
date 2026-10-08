@@ -1192,11 +1192,25 @@ export function toolResultText(entry: ToolEntry): { text: string; error?: boolea
   return { text: duration === undefined ? base : `${base} · ${duration}` };
 }
 
+/** 可恢复的守卫错误：保护机制在起作用，模型重新读取就能继续，行尾用中性淡色，不标红。 */
+export const RECOVERABLE_TOOL_ERRORS: ReadonlySet<string> = new Set(["not_read", "stale_file"]);
+
+function isRecoverableToolErrorCode(code: string | undefined): boolean {
+  return code !== undefined && RECOVERABLE_TOOL_ERRORS.has(code);
+}
+
+/** 可恢复的守卫错误是否附带了 diff（Item2 在 modelContent 里放入统一 diff，头部含 @@）。 */
+function hasStaleDiff(entry: ToolEntry): boolean {
+  return (entry.result?.modelContent ?? "").includes("@@");
+}
+
 /** 简述只取 Core 的第一句；扩展名与小数中的 "." 不算句末。 */
 function toolErrorSummary(entry: ToolEntry, cwd: string): string {
   const error = entry.result?.error;
-  if (error?.code === "not_read") return "文件需要先读取";
-  if (error?.code === "stale_file") return "文件在读取后被修改过";
+  if (error?.code === "not_read") return "需先读取文件";
+  if (error?.code === "stale_file") {
+    return hasStaleDiff(entry) ? "文件已变化，已附上变更" : "文件已变化，需重新读取";
+  }
   const message = error?.message.trim() ?? "";
   const end = /[。！？!?]|\.(?=\s|$)|\r?\n/u.exec(message);
   const first = end === null ? message : message.slice(0, end.index + end[0].trim().length);
@@ -1616,7 +1630,15 @@ function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
             {running && <span className="tool-spin" aria-hidden="true" />}
             {seconds !== undefined && <span className="tool-secs">{seconds} 秒</span>}
             {!running && (
-              <span className={`tool-res${error !== undefined ? " err" : ""}`}>
+              <span
+                className={`tool-res${
+                  error !== undefined
+                    ? isRecoverableToolErrorCode(error.code)
+                      ? " recoverable"
+                      : " err"
+                    : ""
+                }`}
+              >
                 {error === undefined ? result.text : toolErrorSummary(entry, cwd)}
               </span>
             )}

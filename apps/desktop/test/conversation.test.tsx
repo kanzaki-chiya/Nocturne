@@ -1247,9 +1247,9 @@ describe("Conversation 工具行与拒绝", () => {
   });
 
   it.each<[string, string]>([
-    ["not_read", "文件需要先读取"],
-    ["stale_file", "文件在读取后被修改过"],
-  ])("失败 %s 行尾显示红色简述，原文点击展开且无独立错误框", (code, brief) => {
+    ["not_read", "需先读取文件"],
+    ["stale_file", "文件已变化，需重新读取"],
+  ])("可恢复守卫错误 %s 行尾淡色显示、无失败字样，原文点击展开", (code, brief) => {
     const message = "拒绝修改文件：Z:/project/src/a.ts。请先读取文件后重试";
     const view = createSessionView();
     view.entries = [failedTool(code, message)];
@@ -1257,7 +1257,9 @@ describe("Conversation 工具行与拒绝", () => {
     const article = screen.getByRole("article", { name: "工具 edit" });
     const details = container.querySelector<HTMLDetailsElement>(".tool-details");
     expect(container.querySelector(".conversation-tool-error")).toBeNull();
-    expect(article.querySelector(".tool-res.err")?.textContent).toBe(brief);
+    expect(article.querySelector(".tool-res.err")).toBeNull();
+    expect(article.querySelector(".tool-res.recoverable")?.textContent).toBe(brief);
+    expect(article.textContent).not.toContain("失败");
     expect(details?.querySelector(".conversation-error")).toBeNull();
     expect(details?.open).toBe(false);
     expect(article.textContent).not.toContain(code);
@@ -1272,6 +1274,23 @@ describe("Conversation 工具行与拒绝", () => {
     expect(details?.querySelector(".conversation-tool-output")?.textContent).toBe(message);
     fireEvent.click(within(article).getByText(brief));
     expect(details?.open).toBe(false);
+  });
+
+  it("stale_file 附带 diff 时行尾显示已附上变更（淡色）", () => {
+    const message = "文件自上次读取后已被外部修改";
+    const modelContent = `${message}\n@@ -1,2 +1,2 @@\n-old\n+new`;
+    const entry = failedTool("stale_file", message);
+    if (!entry.result) throw new Error("fixture 缺少结果");
+    entry.result.modelContent = modelContent;
+    const view = createSessionView();
+    view.entries = [entry];
+    const { container } = mount(view);
+    const article = screen.getByRole("article", { name: "工具 edit" });
+    expect(article.querySelector(".tool-res.err")).toBeNull();
+    expect(article.querySelector(".tool-res.recoverable")?.textContent).toBe(
+      "文件已变化，已附上变更",
+    );
+    expect(container.querySelector(".conversation-tool-error")).toBeNull();
   });
 
   it.each<[string, string, string]>([
