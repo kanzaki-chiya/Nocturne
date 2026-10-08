@@ -84,6 +84,7 @@ function Preview({
             seq: 2,
             turnId: "theme-turn",
             messageId: "theme-answer",
+            time: "2026-10-08T02:00:00.000Z",
             text: "# 主题预览\n\n```ts\nconst color = 'iris'\n```\n- 列表项",
             reasoning: "",
             toolCalls: [],

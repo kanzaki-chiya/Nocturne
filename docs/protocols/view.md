@@ -81,6 +81,7 @@ interface AssistantEntry {
   turnId: string;
   messageId: string;
   seq: number;                  // message.assistant 的 seq
+  time: string;                 // message.assistant 事件时间（ISO 8601），不读当前时钟
   text: string;                 // content 中 text 块拼接
   reasoning: string;            // content 中 reasoning 块拼接
   toolCalls: ToolCallRef[];

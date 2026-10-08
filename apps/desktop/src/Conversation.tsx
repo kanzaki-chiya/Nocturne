@@ -37,6 +37,7 @@ import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { displayPath } from "./paths";
 import { useReasoning, type ReasoningMap } from "./reasoning";
 import { useStickyOutput } from "./useStickyOutput";
+import { useCopyText } from "./useCopyText";
 import "./conversation.css";
 
 export interface ConversationProps {
@@ -80,6 +81,38 @@ export interface FileLinkHooks {
 }
 
 type OpenUrl = ConversationProps["openUrl"];
+
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const { copy, copied, error } = useCopyText();
+  return (
+    <>
+      <button
+        type="button"
+        className="u-act"
+        aria-label={label}
+        onClick={() => {
+          void copy(text);
+        }}
+      >
+        {copied ? "已复制" : "复制"}
+      </button>
+      {error !== undefined && (
+        <span className="conversation-error" role="alert">
+          {error}
+        </span>
+      )}
+    </>
+  );
+}
+
+function replyTime(time: string): string {
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  return date.toDateString() === now.toDateString()
+    ? `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+    : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
 /**
  * 回答内文件引用的解析结果（U-09）：codespan 文本经 splitCodeRef 拆出行号，
@@ -165,7 +198,10 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
         const code = token as Tokens.Code;
         return (
           <div key={key} className="conversation-code">
-            {code.lang ? <div className="conversation-code-language">{code.lang}</div> : null}
+            <div className="conversation-code-language">
+              <span>{code.lang}</span>
+              <CopyButton text={code.text} label="复制代码" />
+            </div>
             <pre>
               <code>{code.text}</code>
             </pre>
@@ -740,13 +776,13 @@ function UserMessage({
 }) {
   const bubble = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [mode, setMode] = useState<"both" | "conversation">("both");
   const [target, setTarget] = useState<RewindTarget | undefined>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const { copy, copied } = useCopyText(setError);
   const hasImages = (entry.attachments?.length ?? 0) > 0;
   useEffect(() => {
     const element = bubble.current;
@@ -789,24 +825,6 @@ function UserMessage({
 
   const reasonText = (reason: unknown): string =>
     reason instanceof Error ? reason.message : String(reason);
-  const copy = () => {
-    const clipboard = navigator.clipboard as Clipboard | undefined;
-    if (clipboard === undefined) {
-      setError("剪贴板不可用");
-      return;
-    }
-    void clipboard
-      .writeText(body)
-      .then(() => {
-        setCopied(true);
-        setTimeout(() => {
-          setCopied(false);
-        }, 1500);
-      })
-      .catch(() => {
-        setError("复制失败");
-      });
-  };
   const startEdit = () => {
     setError(undefined);
     setPending(true);
@@ -954,7 +972,13 @@ function UserMessage({
               )}
             </div>
             <div className="u-actions">
-              <button type="button" className="u-act" onClick={copy}>
+              <button
+                type="button"
+                className="u-act"
+                onClick={() => {
+                  void copy(body);
+                }}
+              >
                 {copied ? "已复制" : "复制"}
               </button>
               <button
@@ -1646,6 +1670,7 @@ function EntryView({
   repliesAfter,
   onResubmit,
   fileLinks,
+  replyText,
 }: {
   entry: ViewEntry;
   openUrl: OpenUrl;
@@ -1658,6 +1683,7 @@ function EntryView({
   repliesAfter: number;
   onResubmit: ConversationProps["onResubmit"];
   fileLinks: ConversationProps["fileLinks"];
+  replyText: string | undefined;
 }) {
   switch (entry.kind) {
     case "user":
@@ -1680,6 +1706,14 @@ function EntryView({
           {entry.finishReason === "aborted" ? (
             <p className="conversation-review">回复已中断</p>
           ) : null}
+          {replyText !== undefined && (
+            <div className="assistant-actions" role="group" aria-label="回复操作">
+              <CopyButton text={replyText} label="复制本轮回复" />
+              <time dateTime={entry.time} title={entry.time}>
+                {replyTime(entry.time)}
+              </time>
+            </div>
+          )}
         </article>
       );
     case "tool":
@@ -2080,6 +2114,22 @@ function ConversationContent({
   const previousTop = useRef(0);
   const [following, setFollowing] = useState(true);
   const { parts, now } = useReasoning(subscribeEvents);
+  const replies = new Map<string, { key: string; texts: string[] }>();
+  for (const entry of view.entries) {
+    if (
+      entry.kind !== "assistant" ||
+      entry.text === "" ||
+      entry.turnId === view.currentTurn?.turnId
+    )
+      continue;
+    const reply = replies.get(entry.turnId) ?? { key: entry.key, texts: [] };
+    reply.key = entry.key;
+    reply.texts.push(entry.text);
+    replies.set(entry.turnId, reply);
+  }
+  const replyTextByKey = new Map(
+    [...replies.values()].map((reply) => [reply.key, reply.texts.join("\n\n")]),
+  );
   // U-01：每条用户消息之后将被撤回的回复轮数（按助手 turnId 去重）
   const repliesAfter = useMemo(() => {
     const counts = new Map<number, number>();
@@ -2183,6 +2233,7 @@ function ConversationContent({
                 repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
                 onResubmit={onResubmit}
                 fileLinks={fileLinks}
+                replyText={replyTextByKey.get(entry.key)}
               />
             ))}
             {view.live.assistants.map((assistant) => (

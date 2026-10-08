@@ -199,6 +199,7 @@ function assistant(overrides: Partial<AssistantEntry> = {}): AssistantEntry {
     seq: 2,
     turnId: "turn-1",
     messageId: "message-1",
+    time: "2026-10-08T02:00:00.000Z",
     text: "**完成**",
     reasoning: "先检查文件",
     toolCalls: [],
@@ -282,7 +283,66 @@ function mount(
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+describe("回复与代码复制", () => {
+  function clipboard() {
+    const writeText = vi.fn(async (_text: string) => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    return writeText;
+  }
+
+  it("两段文字夹工具调用，只在最后一段显示操作栏并复制 Markdown 原文", async () => {
+    const writeText = clipboard();
+    const view = createSessionView();
+    view.entries = [
+      assistant({ text: "**第一段**", finishReason: "tool_calls" }),
+      tool(),
+      assistant({ key: "a2", messageId: "m2", text: "第二段 `原文`" }),
+    ];
+    mount(view);
+    expect(screen.getAllByRole("group", { name: "回复操作" })).toHaveLength(1);
+    const copy = screen.getByRole("button", { name: "复制本轮回复" });
+    fireEvent.click(copy);
+    await waitFor(() => expect(copy.textContent).toBe("已复制"));
+    expect(writeText).toHaveBeenCalledWith("**第一段**\n\n第二段 `原文`");
+    expect(copy.closest("article")?.textContent).toContain("第二段");
+  });
+
+  it("当前轮生成中不显示操作栏，中断后复制已有部分", async () => {
+    const writeText = clipboard();
+    const view = createSessionView();
+    view.entries = [assistant({ text: "部分回答", finishReason: "aborted" })];
+    view.currentTurn = { turnId: "turn-1", turnIndex: 1 };
+    const rendered = mount(view);
+    expect(screen.queryByRole("group", { name: "回复操作" })).toBeNull();
+    view.currentTurn = undefined;
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    fireEvent.click(screen.getByRole("button", { name: "复制本轮回复" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("部分回答"));
+  });
+
+  it.each(["ts", ""])("代码块复制原文（语言 %s）", async (language) => {
+    const writeText = clipboard();
+    const code = "  const value = '<tag>';\n\n// 原文";
+    const view = createSessionView();
+    view.entries = [assistant({ text: `\`\`\`${language}\n${code}\n\`\`\`` })];
+    mount(view);
+    fireEvent.click(screen.getByRole("button", { name: "复制代码" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(code));
+  });
+
+  it("复制失败提示沿用用户消息文案", async () => {
+    const writeText = clipboard();
+    writeText.mockRejectedValueOnce(new Error("denied"));
+    const view = createSessionView();
+    view.entries = [assistant()];
+    mount(view);
+    fireEvent.click(screen.getByRole("button", { name: "复制本轮回复" }));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "复制失败");
+  });
 });
 
 describe("Conversation 历史图片", () => {

@@ -576,6 +576,7 @@ describe("TUI", () => {
         turnId: "t2",
         messageId: "m1",
         seq: 1,
+        time: "2026-10-08T02:00:00.000Z",
         text: "",
         reasoning: "",
         toolCalls: [],

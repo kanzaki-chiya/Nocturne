@@ -109,6 +109,7 @@ export interface AssistantEntry {
   turnId: string;
   messageId: string;
   seq: number;
+  time: string;
   text: string;
   reasoning: string;
   toolCalls: ToolCallRef[];
@@ -383,6 +384,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         turnId: turnId ?? "",
         messageId: p.messageId,
         seq: event.seq,
+        time: event.time,
         text: p.content
           .filter((c): c is Extract<ContentBlock, { type: "text" }> => c.type === "text")
           .map((c) => c.text)

@@ -208,6 +208,14 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.assistant-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+  color: var(--a-muted);
+  font-size: 11.5px;
+}
 /* 思考块（desktop-v4.html F/G 屏）：展开后标题行吸顶，块滚出视野时随块离开 */
 .conversation .think {
   margin-bottom: 4px;
@@ -385,6 +393,9 @@
   overflow: hidden;
 }
 .conversation-code-language {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 5px 12px;
   border-bottom: 1px solid var(--a-border);
   font: 11px/1.5 var(--mono);

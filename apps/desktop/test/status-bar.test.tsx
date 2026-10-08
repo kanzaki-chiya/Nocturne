@@ -244,7 +244,7 @@ describe("StatusBar", () => {
         }),
     );
     rendered.rerender(
-      <StatusBar {...state} view={{ ...state.view, status: "running" }} panel="context" />,
+      <StatusBar {...state} view={{ ...state.view, status: "thinking" }} panel="context" />,
     );
     expect(dialog.getAttribute("aria-busy")).toBe("true");
     expect(screen.queryByText("正在读取…")).toBeNull();

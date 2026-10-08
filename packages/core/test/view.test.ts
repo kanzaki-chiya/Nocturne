@@ -123,6 +123,27 @@ const V5 = (view: SessionView) =>
   );
 
 describe("SessionView reducer", () => {
+  it("助手条目时间来自持久事件，实时归约与重放确定一致", () => {
+    const event: DurableEvent = {
+      type: "message.assistant",
+      sessionId: "s",
+      turnId: "t",
+      seq: 1,
+      time: "2026-10-08T01:02:03.000Z",
+      payload: {
+        messageId: "m",
+        content: [{ type: "text", text: "答" }],
+        toolCalls: [],
+        model: { provider: "fake", model: "m" },
+        finishReason: "stop",
+      },
+    };
+    const view = createSessionView();
+    reduceSessionView(view, event);
+    expect(view.entries[0]).toMatchObject({ kind: "assistant", time: event.time });
+    expect(replaySessionView([event]).entries).toEqual(view.entries);
+  });
+
   it("info 进度在 TUI 视图中逐条分行，stdout 半行继续拼接", () => {
     const view = createSessionView();
     reduceSessionView(view, {
