@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/mcp",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Nocturne MCP stdio client（mcp.md / ADR-0011）：把 MCP 服务器工具包装成 ToolDefinition",
   "license": "GPL-3.0-only",
   "private": true,
