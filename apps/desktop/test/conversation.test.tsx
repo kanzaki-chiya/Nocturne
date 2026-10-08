@@ -335,7 +335,7 @@ describe("回复与代码复制", () => {
     return writeText;
   }
 
-  it("两段文字夹工具调用，只在最后一段显示操作栏并复制 Markdown 原文", async () => {
+  it("两段文字夹工具调用，只在最后一段显示操作栏并只复制该段 Markdown 原文", async () => {
     const writeText = clipboard();
     const view = createSessionView();
     view.entries = [
@@ -345,23 +345,27 @@ describe("回复与代码复制", () => {
     ];
     mount(view);
     expect(screen.getAllByRole("group", { name: "回复操作" })).toHaveLength(1);
-    const copy = screen.getByRole("button", { name: "复制本轮回复" });
+    const copy = screen.getByRole("button", { name: "复制回复" });
     fireEvent.click(copy);
     await waitFor(() => expect(copy.textContent).toBe("已复制"));
-    expect(writeText).toHaveBeenCalledWith("**第一段**\n\n第二段 `原文`");
+    expect(writeText).toHaveBeenCalledWith("第二段 `原文`");
     expect(copy.closest("article")?.textContent).toContain("第二段");
   });
 
   it("当前轮生成中不显示操作栏，中断后复制已有部分", async () => {
     const writeText = clipboard();
     const view = createSessionView();
-    view.entries = [assistant({ text: "部分回答", finishReason: "aborted" })];
+    view.entries = [
+      assistant({ text: "先检查", finishReason: "tool_calls" }),
+      tool(),
+      assistant({ key: "a2", messageId: "m2", text: "部分回答", finishReason: "aborted" }),
+    ];
     view.currentTurn = { turnId: "turn-1", turnIndex: 1 };
     const rendered = mount(view);
     expect(screen.queryByRole("group", { name: "回复操作" })).toBeNull();
     view.currentTurn = undefined;
     rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
-    fireEvent.click(screen.getByRole("button", { name: "复制本轮回复" }));
+    fireEvent.click(screen.getByRole("button", { name: "复制回复" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("部分回答"));
   });
 
@@ -381,7 +385,7 @@ describe("回复与代码复制", () => {
     const view = createSessionView();
     view.entries = [assistant()];
     mount(view);
-    fireEvent.click(screen.getByRole("button", { name: "复制本轮回复" }));
+    fireEvent.click(screen.getByRole("button", { name: "复制回复" }));
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "复制失败");
   });
 });

@@ -1819,7 +1819,7 @@ function EntryView({
   repliesAfter,
   onResubmit,
   fileLinks,
-  replyText,
+  showReplyActions,
   changesCard,
 }: {
   entry: ViewEntry;
@@ -1833,7 +1833,7 @@ function EntryView({
   repliesAfter: number;
   onResubmit: ConversationProps["onResubmit"];
   fileLinks: ConversationProps["fileLinks"];
-  replyText: string | undefined;
+  showReplyActions: boolean;
   changesCard: ReactNode;
 }) {
   switch (entry.kind) {
@@ -1858,9 +1858,9 @@ function EntryView({
             <p className="conversation-review">回复已中断</p>
           ) : null}
           {changesCard}
-          {replyText !== undefined && (
+          {showReplyActions && (
             <div className="assistant-actions" role="group" aria-label="回复操作">
-              <CopyButton text={replyText} label="复制本轮回复" />
+              <CopyButton text={entry.text} label="复制回复" />
               <time dateTime={entry.time} title={entry.time}>
                 {replyTime(entry.time)}
               </time>
@@ -2300,7 +2300,7 @@ function ConversationContent({
         renderDiff={(diff) => <DiffBody diff={diff} />}
       />
     ) : null;
-  const replies = new Map<string, { key: string; texts: string[] }>();
+  const replies = new Map<string, string>();
   let userSeq: number | undefined;
   for (const entry of view.entries) {
     if (entry.kind === "user") userSeq = entry.seq;
@@ -2312,14 +2312,9 @@ function ConversationContent({
     )
       continue;
     const key = userSeq === undefined ? entry.turnId : String(userSeq);
-    const reply = replies.get(key) ?? { key: entry.key, texts: [] };
-    reply.key = entry.key;
-    reply.texts.push(entry.text);
-    replies.set(key, reply);
+    replies.set(key, entry.key);
   }
-  const replyTextByKey = new Map(
-    [...replies.values()].map((reply) => [reply.key, reply.texts.join("\n\n")]),
-  );
+  const replyActionKeys = new Set(replies.values());
   // U-01：每条用户消息之后将被撤回的回复轮数（按助手 turnId 去重）
   const repliesAfter = useMemo(() => {
     const counts = new Map<number, number>();
@@ -2423,7 +2418,7 @@ function ConversationContent({
                   repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
                   onResubmit={onResubmit}
                   fileLinks={fileLinks}
-                  replyText={replyTextByKey.get(entry.key)}
+                  showReplyActions={replyActionKeys.has(entry.key)}
                   changesCard={
                     entry.kind === "assistant" ? renderChanges(changesByKey.get(entry.key)) : null
                   }
