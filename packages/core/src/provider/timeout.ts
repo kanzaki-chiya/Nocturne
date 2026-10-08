@@ -15,6 +15,7 @@ export async function* timedStream(
   let first = true;
   try {
     for (;;) {
+      if (signal.aborted) throw abortError();
       const ms = first ? firstEventTimeoutMs : idleTimeoutMs;
       const event = await new Promise<IteratorResult<ModelStreamEvent>>((resolve, reject) => {
         const cleanup = () => {

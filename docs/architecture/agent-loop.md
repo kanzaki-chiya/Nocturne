@@ -92,6 +92,7 @@ finish(reason, error?):
 ### 3.3 中断如何传播
 
 每个 Turn 持有一个 `AbortController`，其 `signal` 传给：Provider 流、Tool Executor、每个工具的 `ToolContext`、等待中的权限请求、等待中的提问（ADR-0032）、压缩用的摘要请求。
+Provider 流每次等待前都检查是否已中止，因此中断落在两次读取之间也能送达，不再调用下一次读取，并照常执行流清理。
 
 | 中断发生时 | 处理 |
 |---|---|
