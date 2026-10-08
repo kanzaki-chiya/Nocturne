@@ -9,6 +9,7 @@ import {
 import type { RpcSession } from "@nocturne/rpc/client";
 import { Conversation, type ConversationProps } from "../src/Conversation";
 import { createAttachmentImageSource } from "../src/attachment-images";
+import { TurnChangesCard } from "../src/TurnChangesCard";
 
 afterEach(cleanup);
 const reply = (seq: number, turn: string): AssistantEntry => ({
@@ -323,4 +324,78 @@ it("无助手文字时卡片落在最后条目之后；全 unavailable 无合计
   expect(card.previousElementSibling?.classList.contains("u")).toBe(true);
   expect(card.querySelector(".turn-changes-counts")).toBeNull();
   expect(screen.queryByRole("button", { name: "↶ 撤销" })).toBeNull();
+});
+
+it("有文件时 shell 说明不带「还有」", () => {
+  fixture();
+  const card = screen.getByRole("region", { name: "本轮文件更改 8" });
+  expect(
+    within(card).getByText("这一轮有 1 次 shell 调用，它们造成的改动不在统计里"),
+  ).toBeDefined();
+  expect(card.textContent).not.toContain("还有");
+});
+
+it("0 个文件只留 shell 说明一行，没有标题、合计和撤销；已撤销也不显示结果", () => {
+  const h = fixture();
+  h.latest.files = [];
+  h.latest.untrackedCalls = 2;
+  h.rendered.rerender(<Conversation {...h.props} />);
+  expect(screen.queryByRole("region", { name: "本轮文件更改 8" })).toBeNull();
+  expect(screen.queryByText(/已编辑 0 个文件/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "↶ 撤销" })).toBeNull();
+  const note = screen.getByText("这一轮有 2 次 shell 调用，它们造成的改动不在统计里");
+  expect(note.closest(".turn-changes")).toBeNull();
+  h.latest.reverted = { seq: 20, files: [] };
+  h.rendered.rerender(<Conversation {...h.props} />);
+  expect(screen.queryByText(/已撤销/)).toBeNull();
+  expect(screen.getByText("这一轮有 2 次 shell 调用，它们造成的改动不在统计里")).toBeDefined();
+});
+
+it("0 个文件且没有 shell 调用时卡片不渲染任何内容", () => {
+  const h = fixture();
+  cleanup();
+  const { container } = render(
+    <TurnChangesCard
+      turn={{ seq: 8, files: [], untrackedCalls: 0 }}
+      latest
+      busy={false}
+      cwd="Z:/project"
+      session={h.props.session}
+      onRewind={vi.fn()}
+      loadDiff={vi.fn()}
+      renderDiff={() => null}
+    />,
+  );
+  expect(container.innerHTML).toBe("");
+});
+
+it("合计没有删除时只写 +N，不写 −0；有删除时仍写 −r", () => {
+  const h = fixture();
+  h.latest.files = [
+    {
+      path: "Z:/project/a.ts",
+      status: "added",
+      added: 4,
+      removed: 0,
+      restorable: true,
+      external: false,
+    },
+    {
+      path: "Z:/project/b.ts",
+      status: "added",
+      added: 3,
+      removed: 0,
+      restorable: true,
+      external: false,
+    },
+  ];
+  h.rendered.rerender(<Conversation {...h.props} />);
+  const counts = screen
+    .getByRole("region", { name: "本轮文件更改 8" })
+    .querySelector(".turn-changes-counts");
+  expect(counts?.textContent).toBe("+7");
+  const first = screen
+    .getByRole("region", { name: "本轮文件更改 2" })
+    .querySelector(".turn-changes-counts");
+  expect(first?.textContent).toBe("+1−1");
 });

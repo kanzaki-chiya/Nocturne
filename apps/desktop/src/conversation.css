@@ -301,6 +301,13 @@
   font-size: 11.5px;
   line-height: 1.6;
 }
+.turn-changes-shell-only {
+  margin-top: 8px;
+}
+.turn-changes-shell-only .turn-change-note {
+  margin: 0;
+  color: var(--a-faint);
+}
 .turn-changes-confirm {
   border-top: 1px solid var(--a-border);
   padding: 10px;

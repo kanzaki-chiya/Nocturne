@@ -19,19 +19,11 @@ interface Props {
   renderDiff: (diff: string) => ReactNode;
 }
 
-function Counts({
-  added,
-  removed,
-  total = false,
-}: {
-  added: number;
-  removed: number;
-  total?: boolean;
-}) {
+function Counts({ added, removed }: { added: number; removed: number }) {
   return (
     <>
       <span className="diff-add">+{added}</span>
-      {(total || removed > 0) && <span className="diff-del">−{removed}</span>}
+      {removed > 0 && <span className="diff-del">−{removed}</span>}
     </>
   );
 }
@@ -211,6 +203,15 @@ export function TurnChangesCard(props: Props) {
     .filter((f) => f.external)
     .map((f) => displayPath(f.path, cwd).split(/[\\/]/).at(-1))
     .join("、");
+  const shellNote = (
+    <p className="turn-change-note">
+      这一轮有 {turn.untrackedCalls} 次 shell 调用，它们造成的改动不在统计里
+    </p>
+  );
+  if (turn.files.length === 0) {
+    if (turn.untrackedCalls === 0) return null;
+    return <div className="turn-changes-shell-only">{shellNote}</div>;
+  }
   return (
     <section
       ref={container}
@@ -223,7 +224,7 @@ export function TurnChangesCard(props: Props) {
           {counted.length > 0 && (
             <span className="turn-changes-counts">
               {turn.files.some((f) => f.approximate) && <span>约 </span>}
-              <Counts added={added} removed={removed} total />
+              <Counts added={added} removed={removed} />
             </span>
           )}
         </div>
@@ -268,11 +269,7 @@ export function TurnChangesCard(props: Props) {
             {showAll ? "收起" : `再显示 ${turn.files.length - PREVIEW} 个文件`}
           </button>
         )}
-        {turn.untrackedCalls > 0 && (
-          <p className="turn-change-note">
-            这一轮还有 {turn.untrackedCalls} 次 shell 调用，它们造成的改动不在统计里
-          </p>
-        )}
+        {turn.untrackedCalls > 0 && shellNote}
       </div>
       {confirming && (
         <div className="turn-changes-confirm" role="group" aria-label="确认撤销文件改动">
