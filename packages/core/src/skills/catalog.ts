@@ -2,7 +2,7 @@
  * 技能目录构建与正文渲染（skills.md 第 2、3 节）：Core 内部运行时逻辑，
  * 客户端只经 protocol 拿类型、parseSkillSlash 与 skillListLines。
  */
-import { estimateTokens } from "../protocol/index.js";
+import { estimateTokens, estimateTokenUnits } from "../protocol/index.js";
 import type { SkillInvocation, SkillOverview, SkillsBudget } from "../protocol/index.js";
 
 export function skillCatalog(
@@ -46,6 +46,7 @@ export function skillCatalog(
   let text = "";
   let namesOnly = false;
   let truncated = false;
+  let units = estimateTokenUnits(header);
   for (const [i, skill] of available.entries()) {
     const description = Array.from(skill.description).slice(0, 250).join("");
     const short = description.length < skill.description.length;
@@ -54,22 +55,28 @@ export function skillCatalog(
     // Reserve the omission notice so the final paragraph never exceeds its budget.
     const suffix =
       i + 1 < available.length ? `\n另有 ${available.length - i - 1} 个技能未列出` : "";
-    const fits = (line: string) =>
-      estimateTokens(header + [...lines, line].join("\n") + suffix) <= limitTokens;
-    if (!namesOnly && fits(fullLine)) {
+    const separator = lines.length === 0 ? 0 : 1;
+    const suffixUnits = estimateTokenUnits(suffix);
+    const fits = (lineUnits: number) =>
+      Math.ceil((units + separator + lineUnits + suffixUnits) / 4) <= limitTokens;
+    const fullUnits = estimateTokenUnits(fullLine);
+    const nameUnits = estimateTokenUnits(nameLine);
+    if (!namesOnly && fits(fullUnits)) {
       lines.push(fullLine);
+      units += separator + fullUnits;
       skill.catalogStatus = "full";
       skill.displayedDescriptionLength = description.length;
       truncated ||= short;
     } else {
       namesOnly = true;
       truncated = true;
-      if (fits(nameLine)) {
+      if (fits(nameUnits)) {
         lines.push(nameLine);
+        units += separator + nameUnits;
         skill.catalogStatus = "name";
       } else {
         const notice = `另有 ${available.length - i} 个技能未列出`;
-        if (estimateTokens(header + [...lines, notice].join("\n")) <= limitTokens)
+        if (Math.ceil((units + separator + estimateTokenUnits(notice)) / 4) <= limitTokens)
           lines.push(notice);
         break;
       }

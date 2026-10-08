@@ -79,6 +79,8 @@ Builder 在请求的 `cachePrefix` 中标出"可缓存前缀"的边界：全部 
 
 所有字符估算统一为：CJK 统一表意文字、假名、谚文、全角标点按 1 字 1 token，其余按 4 字符 1 token；适用于纯估算、锚点后的增量、保留区边界和 `/context`。各 section 仍展示本地估算，总用量在有效时采用上游锚点。估算用于预算和压缩判定，不是计费用量。
 
+protocol.estimateTokenUnits 返回未取整的四分之一 token 单位；estimateTokens 统一 ceil(units / 4)。技能目录按单位增量累计、最后取整，避免逐项重扫整段文本，输出与预算保持相同。
+
 图片附件按**每张固定 1600 token** 计入估算（`IMAGE_TOKEN_ESTIMATE`），与实际分辨率、base64 长度无关——base64 长度绝不进入字符/token 估算；`report.images` 仅在 count>0 时给出 `{ count, estimatedTokens }`（`/context` 显示为 `images` 行），占位文字按普通字符计入。
 
 ## 6. 压缩

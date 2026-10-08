@@ -61,7 +61,7 @@ import {
 } from "./protocol/index.js";
 import {
   commitSkillImport,
-  discoverSkills,
+  createSkillDiscoveryCache,
   previewSkillImport,
   renderSkill,
   skillCatalog,
@@ -856,6 +856,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     return cached;
   }
   const detectedShells = await detectShells(platform);
+  const skillCache = createSkillDiscoveryCache(platform);
 
   type ShellResolution = ReturnType<ReturnType<typeof createShellResolver>["current"]>;
   const shellSwitched = (before: ShellResolution, after: ShellResolution): boolean =>
@@ -967,7 +968,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       warnings: resolved?.warnings.length ?? 0,
     });
     const warnings: string[] = [...(resolved?.warnings ?? [])];
-    let skillDiscovery = await discoverSkills(platform, {
+    let skillDiscovery = await skillCache.discover({
       nocturneHome,
       workspaceRoot: meta.workspaceRoot,
       cwd: meta.cwd,
@@ -1305,7 +1306,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const applySkills = async () => {
       if (!pendingSkillRescan && !pendingSkillEnable) return;
       if (pendingSkillRescan)
-        skillDiscovery = await discoverSkills(platform, {
+        skillDiscovery = await skillCache.discover({
           nocturneHome,
           workspaceRoot: meta.workspaceRoot,
           cwd: meta.cwd,
@@ -2779,7 +2780,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             return undefined;
           }
         })();
-      const discovery = await discoverSkills(platform, {
+      const discovery = await skillCache.discover({
         nocturneHome,
         workspaceRoot: root,
         cwd: root,

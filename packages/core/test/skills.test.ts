@@ -1,10 +1,16 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createPlatform } from "../src/platform/index.js";
 import { loadConfig } from "../src/config/index.js";
-import { discoverSkills, renderSkill, skillCatalog } from "../src/skills/index.js";
+import {
+  discoverSkills,
+  renderSkill,
+  skillCatalog,
+  createSkillDiscoveryCache,
+} from "../src/skills/index.js";
+import { referenceCatalog } from "./fixtures/skill-catalog-reference.js";
 import { parseSkillSlash, replaySessionView } from "../src/protocol/index.js";
 import { createRulePolicy } from "../src/permission/index.js";
 import { createRuntime } from "../src/index.js";
@@ -61,6 +67,79 @@ it("用户优先、名字忽略大小写、只扫一层，并保存未知和忽�
   expect(item(result.skills, 0).ignored).toHaveLength(3);
   expect(item(result.skills, 1).shadowedBy).toBe(item(result.skills, 0).entryPath);
   expect(result.warnings).toEqual([expect.objectContaining({ kind: "name", line: 2 })]);
+});
+
+it("300 个混合技能新旧目录逐字一致（窗口、禁用、覆盖、长描述与各调用状态）", async () => {
+  const f = fixture();
+  f.skill(path.join(f.home, "skills"), "seed");
+  const seed = item((await f.scan()).skills, 0);
+  const skills = Array.from({ length: 300 }, (_, i) => ({
+    ...seed,
+    name: `s-${i}`,
+    layer: i % 3 === 0 ? ("project" as const) : ("user" as const),
+    description:
+      i % 2
+        ? `English description ${i} ${"text ".repeat(i % 70)}`
+        : `中文 カタカナ 한글 全角！？🙂 ${i} ${"中英 mixed ".repeat(i % 80)}`,
+    shadowedBy: i % 11 === 0 ? "other" : undefined,
+    missingDescription: i % 13 === 0,
+    commandConflict: i % 17 === 0,
+    fields: { "disable-model-invocation": i % 19 === 0, "user-invocable": i % 23 !== 0 },
+  }));
+  for (const window of [undefined, 1, 100, 2000, 20000, 128000, 1000000]) {
+    for (const disabled of [
+      [],
+      ["s-1", "S-7", "s-12"],
+      skills.filter((_, i) => i % 4 === 0).map((s) => s.name),
+    ]) {
+      const actual = skillCatalog(skills, disabled, window, "session-model");
+      const expected = referenceCatalog(skills, disabled, window, "session-model");
+      expect(actual.text).toBe(expected.text);
+      expect(actual.budget).toEqual(expected.budget);
+      expect(actual.truncated).toBe(expected.truncated);
+      expect(actual.skills.map((s) => [s.catalogStatus, s.displayedDescriptionLength])).toEqual(
+        expected.skills.map((s) => [s.catalogStatus, s.displayedDescriptionLength]),
+      );
+    }
+  }
+});
+
+it("发现缓存命中不读 SKILL.md；正文修改、目录新增删除和缺失文件新增均失效", async () => {
+  const f = fixture();
+  const base = path.join(f.home, "skills");
+  const a = f.skill(base, "a");
+  const read = vi.spyOn(f.platform.fs, "readTextFile");
+  const cache = createSkillDiscoveryCache(f.platform);
+  const input = { nocturneHome: f.home, workspaceRoot: f.workspace, cwd: f.workspace };
+  const first = await cache.discover(input);
+  expect(first.skills.map((s) => s.name)).toEqual(["a"]);
+  read.mockClear();
+  first.skills[0]?.otherEntries.push("should-not-leak");
+  const second = await cache.discover(input);
+  expect(read).not.toHaveBeenCalled();
+  expect(second.skills[0]?.otherEntries).toEqual([]);
+  writeFileSync(
+    path.join(a, "SKILL.md"),
+    "---\ndescription: changed longer description\n---\nnew body",
+  );
+  expect((await cache.discover(input)).skills[0]?.description).toBe("changed longer description");
+  expect(read).toHaveBeenCalledOnce();
+  read.mockClear();
+  f.skill(base, "b");
+  expect((await cache.discover(input)).skills.map((s) => s.name)).toEqual(["a", "b"]);
+  expect(read).toHaveBeenCalledTimes(2);
+  read.mockClear();
+  rmSync(path.join(base, "b"), { recursive: true });
+  expect((await cache.discover(input)).skills.map((s) => s.name)).toEqual(["a"]);
+  expect(read).toHaveBeenCalledOnce();
+  read.mockClear();
+  mkdirSync(path.join(base, "empty"));
+  await cache.discover(input);
+  read.mockClear();
+  f.skill(base, "empty");
+  expect((await cache.discover(input)).skills.map((s) => s.name)).toEqual(["a", "empty"]);
+  expect(read).toHaveBeenCalledTimes(2);
+  read.mockRestore();
 });
 
 it("目录 junction/符号链接按真实路径去重，保留最高优先级入口", async (ctx) => {

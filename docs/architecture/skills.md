@@ -6,6 +6,8 @@
 
 Runtime 在打开会话时读取一份技能快照。按以下顺序搜索，每个根目录只扫描下一层包含 `SKILL.md` 的子目录：
 
+发现结果在单 Runtime 内按现有扫描参数（用户主目录、nocturneHome、workspaceRoot、cwd、来源开关与 extraDirs 顺序）缓存；当前发现规则不使用信任状态。复用前对全部来源目录、技能入口/真实目录与 SKILL.md（含缺失路径及失败条目）做 stat，mtime/size/type 未变才复用，不重复读正文；任一变化重新扫描，目录 mtime 检出新增删除，缺失路径变为存在也失效。配置、导入与启停仍走既有刷新路径与扫描验证，目录输出与预算规则不变。
+
 1. 用户：`<NOCTURNE_HOME>/skills`、`~/.agents/skills`、`~/.claude/skills`、`skills.extraDirs`（配置中的顺序）。
 2. 项目：从 `cwd` 上溯到 `workspaceRoot`，每一级依次搜索 `.nocturne/skills`、`.agents/skills`、`.claude/skills`。
 

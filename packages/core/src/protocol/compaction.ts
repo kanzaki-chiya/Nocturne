@@ -3,6 +3,11 @@ export type CompactionThreshold = string | number;
 
 /** CJK 约 1 字 / token，其余字符约 4 字 / token。 */
 export function estimateTokens(text: string): number {
+  return Math.ceil(estimateTokenUnits(text) / 4);
+}
+
+/** 未取整的四分之一 token 单位，供增量累计后统一取整。 */
+export function estimateTokenUnits(text: string): number {
   let units = 0;
   for (const char of text) {
     units +=
@@ -12,7 +17,7 @@ export function estimateTokens(text: string): number {
         ? 4
         : 1;
   }
-  return Math.ceil(units / 4);
+  return units;
 }
 
 export function parseCompactionThreshold(input: CompactionThreshold): {
