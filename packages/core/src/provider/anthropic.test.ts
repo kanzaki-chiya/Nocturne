@@ -2,7 +2,7 @@
  * anthropic 适配器契约测试（离线）：stub fetch 注入 Anthropic Messages SSE，
  * 验证请求转换、流式归一化、签名回传、错误映射与中止。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createAnthropicProvider, type AnthropicConfig } from "./adapters/anthropic.js";
 import { ProviderError } from "./errors.js";
@@ -81,6 +81,22 @@ const msgEnd = (reason: string, outputTokens = 5) => [
 ];
 
 describe("anthropic 适配器", () => {
+  it("缺省 baseURL 固定为官方地址，不读取宿主 ANTHROPIC_BASE_URL", async () => {
+    vi.stubEnv("ANTHROPIC_BASE_URL", "https://example.invalid");
+    try {
+      const capture: { url?: string } = {};
+      const p = createAnthropicProvider(
+        config({ baseURL: undefined }),
+        envWithKey,
+        sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+      );
+      await collect(p, request());
+      expect(capture.url).toBe("https://api.anthropic.com/v1/messages");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("缺少凭据环境变量 → auth ProviderError（无网络）", async () => {
     const p = createAnthropicProvider(config(), () => undefined);
     await expect(collect(p, request())).rejects.toMatchObject({

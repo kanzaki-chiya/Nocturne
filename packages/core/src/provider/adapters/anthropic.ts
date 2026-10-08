@@ -43,13 +43,15 @@ import {
 
 /** Messages API 的 cache_control 断点（默认 5 分钟有效） */
 const EPHEMERAL_CACHE = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
+// @ai-sdk/anthropic 4.0.58 的 ANTHROPIC_API_VERSIONED_URL 默认值；显式传入以隔离 SDK 环境变量。
+const DEFAULT_BASE_URL = "https://api.anthropic.com/v1";
 
 export interface AnthropicConfig {
   /** Provider id（providerOptions 的 SDK 命名空间固定为 "anthropic"，与 id 无关） */
   id: string;
   /** 适配器类型标识（providerConfigs 联合的分辨字段） */
   type: "anthropic";
-  /** 缺省用 SDK 内置的 api.anthropic.com */
+  /** 缺省固定为官方地址，不读取 SDK 的地址环境变量。 */
   baseURL?: string | undefined;
   /**
    * 环境变量名（v0.1 方式保留）。可选：省略时凭据经 credentials 解析
@@ -121,7 +123,7 @@ export function createAnthropicProvider(
     createAnthropic({
       // SDK 在调用 fetch 前校验 apiKey；真实凭据仍由 wrappedFetch 按请求覆盖。
       apiKey: "resolved-by-fetch",
-      ...(config.baseURL !== undefined ? { baseURL: config.baseURL } : {}),
+      baseURL: config.baseURL ?? DEFAULT_BASE_URL,
       // ADR-0031 §2：User-Agent 以 nocturne/<version> 开头（条目 headers
       // 里用户写的 UA 优先）；SDK 追加的 ai-sdk/... 后缀保留
       headers: withUserAgent(config.headers, config.userAgent),

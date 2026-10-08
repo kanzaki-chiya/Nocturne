@@ -4,21 +4,11 @@
  * 生效协议走 /chat/completions、/messages 或 /responses，并携带协议对应
  * 的鉴权头；不可用模型照常列出但发请求前以说明拒绝（不发 HTTP）。
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createEntryProvider, type EntryProviderConfig } from "./entry.js";
 import { ProviderError } from "./errors.js";
 import type { ModelRequest, ModelStreamEvent } from "./types.js";
-
-// anthropic 条目缺省 baseURL 时，@ai-sdk/anthropic 直接读 process.env
-// .ANTHROPIC_BASE_URL（不经过注入的 env reader）——用例断言的是官方默认
-// 地址，因此本文件统一隔离该变量，不受宿主 shell 环境影响。
-beforeEach(() => {
-  vi.stubEnv("ANTHROPIC_BASE_URL", undefined);
-});
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
 
 const envWithKey = (name: string) => (name === "TEST_KEY" ? "sk-test" : undefined);
 

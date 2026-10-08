@@ -88,6 +88,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 - 无论底层如何实现，适配器都必须通过同一组契约测试（[provider-api.md](../protocols/provider-api.md) 第 4 节的流式契约）；遇到具体限制时按 ADR-0005 替换传输实现，不改 Core 接口。
 
 各协议的主要差异与处理位置：
+Anthropic 条目的默认地址固定为官方 `https://api.anthropic.com/v1`，不读 `ANTHROPIC_BASE_URL` 等 SDK 环境变量；要改地址，在条目里写 `baseURL`。凭据仍由 Nocturne 的凭据解析器按配置读取。
 
 | 差异 | 例子 | 处理 |
 |---|---|---|
