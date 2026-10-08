@@ -146,9 +146,7 @@ describe("中断", () => {
                 .join("\n");
             }
           }
-          return text.includes("慢")
-            ? [{ type: "wait", ms: 60_000 }]
-            : textScript("好了");
+          return text.includes("慢") ? [{ type: "wait", ms: 60_000 }] : textScript("好了");
         },
       }),
     });

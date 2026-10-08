@@ -112,8 +112,7 @@ export function createProcessCleanup() {
     // Track both shapes: without an exit signal a long-gone process looks
     // alive to cleanup, whose PID fallback then taskkills whatever process
     // recycled the PID meanwhile (seen under package concurrency).
-    if (typeof proc.exited === "function")
-      void proc.exited().then(markExited, markExited);
+    if (typeof proc.exited === "function") void proc.exited().then(markExited, markExited);
     else if (typeof proc.wait === "function") {
       try {
         const waited = proc.wait();
