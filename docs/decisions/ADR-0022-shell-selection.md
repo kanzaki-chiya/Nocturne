@@ -110,3 +110,5 @@ shell 工具支持以下种类，每种有自己固定的调用方式、输出�
 ## 修订
 
 - 2026-10-01：[ADR-0034](ADR-0034-settings-layer.md) 将 `settings.json` 的白名单字段纳入通用配置合并链，shell 不再由选择器单独合成；原有优先级、声明边界与切换行为保持，当前合并规则见 [config.md](../architecture/config.md) 第 2 节。
+
+- 2026-10-08：增加无需会话的 Runtime.listShells / setShellSetting，复用会话入口的可用性校验与设置写入。单 Runtime 内已打开会话的 live getter 立即看到新设置，运行时级入口对各会话实际生效变化写 session.config_changed.shell；环境或手写配置覆盖时照常保存，返回设置项表达来源。跨进程仍须重载或重启，环境前缀保持稳定。

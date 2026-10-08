@@ -14,6 +14,19 @@ type EffortInfo = Awaited<ReturnType<RpcSession["reasoningEffortInfo"]>>;
 type SettingItem = Awaited<ReturnType<RpcRuntime["describeSettings"]>>[number];
 
 export const refKey = (ref: ModelRef): string => `${ref.provider}/${ref.model}`;
+export function shellGroups(shells: readonly ShellEntry[], effective: string): ChoiceGroup[] {
+  return [
+    { options: [{ value: "auto", label: "自动", detail: `按探测结果选择，当前为 ${effective}` }] },
+    {
+      options: shells.map((item) => ({
+        value: item.kind,
+        label: item.kind,
+        detail: item.executable ?? item.name,
+        ...(item.available ? {} : { disabled: "未安装" }),
+      })),
+    },
+  ];
+}
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
@@ -263,21 +276,7 @@ export function useSessionControls(
   const shellControl: ChoiceControl = {
     value: shell?.selected,
     label: shell?.effective?.kind ?? shell?.selected ?? "—",
-    groups: [
-      {
-        options: [
-          { value: "auto", label: "auto", detail: "自动选择" },
-          ...(shells ?? []).map((item) => ({
-            value: item.kind,
-            label: `${item.kind} · ${item.name}`,
-            ...(item.executable !== undefined && item.executable !== ""
-              ? { detail: item.executable }
-              : {}),
-            ...(item.available ? {} : { disabled: "未安装" }),
-          })),
-        ],
-      },
-    ],
+    groups: shellGroups(shells ?? [], shell?.effective?.kind ?? "—"),
     ...(() => {
       const notes = [
         busy ? "本轮正在进行：下一次命令生效" : undefined,

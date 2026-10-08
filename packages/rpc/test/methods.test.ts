@@ -57,6 +57,24 @@ const PNG_2x3 = new Uint8Array([
 ]);
 
 describe("runtime.* 方法映射", () => {
+  it("运行时 Shell RPC 往返与参数校验", async () => {
+    const h = await connectWithConfig();
+    const shells = await h.client.runtime.listShells({ workspaceRoot: h.ws });
+    expect(shells).toHaveLength(5);
+    const target = shells.find((item) => item.available)?.kind;
+    expect(target).toBeDefined();
+    const items = await h.client.runtime.setShellSetting(target as string);
+    expect(items.find((item) => item.key === "shell")?.saved).toBe(target);
+    await h.client.runtime.setShellSetting("auto");
+    await expect(
+      h.client.call("runtime.setShellSetting", { kind: 1 as never }),
+    ).rejects.toMatchObject({ rpcCode: -32602 });
+    await expect(
+      h.client.call("runtime.listShells", { workspaceRoot: 1 as never }),
+    ).rejects.toMatchObject({ rpcCode: -32602 });
+    h.client.close();
+    await h.served;
+  });
   it("createSession / listSessions / resumeSession / forkSession", async () => {
     const h = await connect({ scripts: [textScript("hello")] });
     const { opened, session } = await h.client.runtime.createSession({ model: MODEL });

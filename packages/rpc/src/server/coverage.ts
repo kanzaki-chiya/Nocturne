@@ -18,6 +18,8 @@ export const RUNTIME_METHODS: Record<
   describeModelRoles: "runtime.describeModelRoles",
   setModelRole: "runtime.setModelRole",
   describeSettings: "runtime.describeSettings",
+  listShells: "runtime.listShells",
+  setShellSetting: "runtime.setShellSetting",
   updateSettings: "runtime.updateSettings",
   listReviewerProviders: "runtime.listReviewerProviders",
   defaultReviewer: "runtime.defaultReviewer",

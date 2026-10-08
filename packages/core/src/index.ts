@@ -511,6 +511,11 @@ export interface Runtime {
     options?: { workspaceRoot?: string | undefined },
   ): Promise<SettingItem[]>;
   describeSettings(input?: { workspaceRoot?: string | undefined }): SettingItem[];
+  listShells(input?: { workspaceRoot?: string | undefined }): Promise<readonly DetectedShell[]>;
+  setShellSetting(
+    kind: string,
+    input?: { workspaceRoot?: string | undefined },
+  ): Promise<SettingItem[]>;
   updateSettings(
     patch: SettingsPatch,
     options?: { reviewerKey?: string; workspaceRoot?: string | undefined },
@@ -778,6 +783,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
    * 会话打开的最后一步整体登记；close 与打开失败共用同一撤销步骤移除（sessions.md 第 4 节）。
    */
   interface OpenSessionHooks {
+    shellCurrent(): ReturnType<ReturnType<typeof createShellResolver>["current"]>;
+    shellChanged(
+      before: ReturnType<ReturnType<typeof createShellResolver>["current"]>,
+    ): Promise<void>;
     /** updateProviders 等：标记 providers 待重建，下一次空闲边界 rebuildProviders */
     markProvidersDirty(): void;
     reconcileMcp(): Promise<void>;
@@ -847,6 +856,74 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     return cached;
   }
   const detectedShells = await detectShells(platform);
+
+  type ShellResolution = ReturnType<ReturnType<typeof createShellResolver>["current"]>;
+  const shellSwitched = (before: ShellResolution, after: ShellResolution): boolean =>
+    after.descriptor !== undefined &&
+    after.overriddenBy === undefined &&
+    (after.descriptor.kind !== before.descriptor?.kind ||
+      after.descriptor.executable !== before.descriptor.executable);
+
+  async function changeShell(
+    resolver: ReturnType<typeof createShellResolver>,
+    kind: string,
+    write: (kind: ShellSpec["kind"]) => Promise<void>,
+  ): Promise<{ before: ShellResolution; after: ShellResolution; switched: boolean }> {
+    const normalized = kind.trim().toLowerCase();
+    if (normalized !== "auto" && !isShellKind(normalized))
+      throw new RuntimeCommandError(
+        "invalid_command",
+        `未知 shell：${kind}（可选：auto | pwsh | powershell | bash | cmd | sh）`,
+      );
+    const probe = resolver.probe(normalized);
+    if (probe.descriptor === undefined)
+      throw new RuntimeCommandError(
+        "invalid_command",
+        probe.error ?? `所选 shell ${normalized} 不可用`,
+      );
+    const before = resolver.current();
+    await write(normalized);
+    const after = resolver.current();
+    return { before, after, switched: shellSwitched(before, after) };
+  }
+
+  async function runtimeShellResolver(root: string) {
+    await config?.forWorkspace(root);
+    const envValue = platform.env("NOCTURNE_SHELL");
+    const current = config?.resolvedSettings(root, envValue);
+    const settingsConfig = config;
+    const paths = new Map<string, boolean>();
+    const envSpec = envValue === undefined ? undefined : parseShellSpec(envValue);
+    for (const p of [current?.shellPath, envSpec && "path" in envSpec ? envSpec.path : undefined]) {
+      if (p !== undefined) paths.set(p, await platform.fs.exists(p));
+    }
+    return createShellResolver({
+      platform: process.platform,
+      envValue,
+      detected: detectedShells,
+      resolved: settingsConfig
+        ? () => {
+            const settings = settingsConfig.resolvedSettings(root, envValue);
+            const source = settingsConfig
+              .describeSettings(root, envValue)
+              .find((item) => item.key === "shell")?.source;
+            return {
+              spec: specFromConfigFields(settings.shell, settings.shellPath),
+              source:
+                source === "env"
+                  ? "env"
+                  : source === "settings"
+                    ? "settings"
+                    : source === "default" || source === undefined
+                      ? "auto"
+                      : "config",
+            };
+          }
+        : undefined,
+      settings: () => undefined,
+      pathExists: (p) => paths.get(p) === true,
+    });
+  }
 
   async function wrapSession(
     session: Session,
@@ -1826,6 +1903,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       pendingExternalAgents = true;
     }
     const runtimeHooks: OpenSessionHooks = {
+      shellCurrent: () => shellResolver.current(),
+      shellChanged: async (before) => {
+        const after = shellResolver.current();
+        if (shellSwitched(before, after) && after.descriptor !== undefined) {
+          await session.emit("session.config_changed", {
+            shell: { kind: after.descriptor.kind, path: after.descriptor.executable },
+          });
+        }
+      },
       markProvidersDirty: () => {
         providersDirty = true;
       },
@@ -2369,43 +2455,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       async setShell(kind) {
         assertUsable();
-        // ADR-0022 第 4 节：Turn 进行中也可切换，下一次 shell 调用起生效
-        const normalized = kind.trim().toLowerCase();
-        if (normalized !== "auto" && !isShellKind(normalized)) {
-          throw new RuntimeCommandError(
-            "invalid_command",
-            `未知 shell：${kind}（可选：auto | pwsh | powershell | bash | cmd | sh）`,
-          );
-        }
-        // 先验证目标可执行（含 auto 能解出可用 shell），再动 settings/内存：
-        // 不可用的选择不落盘、不发事件、不改变生效 shell
-        const probe = shellResolver.probe(normalized);
-        if (probe.descriptor === undefined) {
-          throw new RuntimeCommandError(
-            "invalid_command",
-            probe.error ?? `所选 shell ${normalized} 不可用`,
-          );
-        }
-        const before = shellResolver.current();
-        if (config !== undefined) {
-          // settings.json 原子写（ADR-0022 第 3 节）；写后 live getter 立即生效
-          await config.setShellSetting(normalized);
-          memoryShellSpec = undefined;
-        } else {
-          // 无配置层的嵌入用法：仅本会话内存生效
-          memoryShellSpec = normalized === "auto" ? { kind: "auto" } : { kind: normalized };
-        }
-        const after = shellResolver.current();
-        // 只在实际生效变化且未被 env/config 覆盖时记历史（ADR-0022 第 4 节）
-        const d = after.descriptor;
-        const switched =
-          d !== undefined &&
-          (d.kind !== before.descriptor?.kind || d.executable !== before.descriptor.executable);
-        if (switched && after.overriddenBy === undefined) {
-          await session.emit("session.config_changed", {
-            shell: { kind: d.kind, path: d.executable },
-          });
-        }
+        const { before, after } = await changeShell(shellResolver, kind, async (normalized) => {
+          if (config !== undefined) {
+            await config.setShellSetting(normalized ?? "auto");
+            memoryShellSpec = undefined;
+          } else {
+            memoryShellSpec = { kind: normalized };
+          }
+        });
+        await runtimeHooks.shellChanged(before);
         if (after.overriddenBy !== undefined) {
           session.emitEphemeral("runtime.warning", {
             code: "shell_overridden",
@@ -2964,6 +3022,22 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         input?.workspaceRoot ?? workspaceRoot,
         platform.env("NOCTURNE_SHELL"),
       ) ?? [],
+    async listShells(input) {
+      return (await runtimeShellResolver(input?.workspaceRoot ?? workspaceRoot)).list();
+    },
+    async setShellSetting(kind, input) {
+      if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存 Shell");
+      const settingsConfig = config;
+      const root = input?.workspaceRoot ?? workspaceRoot;
+      const resolver = await runtimeShellResolver(root);
+      const before = [...openSessions.values()].map((hooks) => ({
+        hooks,
+        shell: hooks.shellCurrent(),
+      }));
+      await changeShell(resolver, kind, (value) => settingsConfig.setShellSetting(value ?? "auto"));
+      await Promise.all(before.map(({ hooks, shell }) => hooks.shellChanged(shell)));
+      return config.describeSettings(root, platform.env("NOCTURNE_SHELL"));
+    },
     listReviewerProviders: async (input) =>
       (await config?.describeProviders(input?.workspaceRoot ?? workspaceRoot)) ?? [],
     async defaultReviewer(endpoint, baseURL, input) {

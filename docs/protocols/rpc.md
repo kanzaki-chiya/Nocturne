@@ -37,6 +37,8 @@
 | `forkSession` | `{ sessionId, targetSeq? }` → `{ sessionId }`（新会话未打开，用 `resumeSession` 打开） |
 | `listModels` / `defaultModel` / `listRecentModels` | 模型列表 / `ModelRef \| null` / `ModelRef[]`；前两者可带 `workspaceRoot` |
 | `describeSettings` / `updateSettings` | `SettingItem[]`；均可带 `workspaceRoot`，`updateSettings { patch, reviewerKey? }` |
+| `listShells` | `{ workspaceRoot? }` → 全部已知种类的 DetectedShell[]（含不可用项） |
+| `setShellSetting` | `{ kind, workspaceRoot? }` → `SettingItem[]`；先验证可用性再写设置，覆盖来源随结果返回，已有会话按实际变化记配置事件 |
 | `setDefaultModel` | `{ model, reasoningEffort, workspaceRoot? }` → `SettingItem[]` |
 | `describeModelRoles` / `setModelRole` | `ModelRoleInfo[]`；`setModelRole { role, ref }` → `SettingItem[]`；均可带 `workspaceRoot` |
 | `getPreference` / `setPreference` | `{ key }` → `string \| null`；`{ key, value? }` → `null` |

@@ -104,6 +104,11 @@ function handlers(extra: Record<string, unknown> = {}) {
     "runtime.listModels": MODELS,
     "runtime.listReviewerProviders": [{ id: "openrouter" }],
     "runtime.getPreference": null,
+    "runtime.listShells": [
+      { kind: "pwsh", name: "PowerShell 7", available: true, executable: "C:/pwsh.exe" },
+      { kind: "bash", name: "Git Bash", available: true, executable: "C:/bash.exe" },
+      { kind: "sh", name: "sh", available: false },
+    ],
     ...extra,
   });
 }
@@ -156,6 +161,62 @@ function row(label: string): HTMLElement {
 afterEach(cleanup);
 
 describe("SettingsPage", () => {
+  it("Shell 下拉复用探测选项，不可用置灰；保存刷新，失败保持值并显示原文", async () => {
+    let fail = false;
+    const server = fakeServer(
+      handlers({
+        "runtime.setShellSetting": (p: Record<string, unknown>) =>
+          fail
+            ? new RpcFail(-32000, "目标不可用")
+            : ITEMS.map((item) =>
+                item.key === "shell"
+                  ? { ...item, saved: p.kind, effective: p.kind, source: "settings" }
+                  : item,
+              ),
+      }),
+    );
+    await server.initialize();
+    render(<SettingsPage {...props(server.client)} />);
+    const trigger = await screen.findByRole("button", { name: "Shell" });
+    fireEvent.click(trigger);
+    const automatic = await screen.findByRole("menuitemradio", { name: /自动/ });
+    expect(automatic.textContent).toContain("当前为 pwsh");
+    expect(screen.getByRole<HTMLButtonElement>("menuitemradio", { name: /^sh/ }).disabled).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /bash/ }));
+    await waitFor(() => expect(trigger.textContent).toContain("bash"));
+    fail = true;
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /pwsh/ }));
+    await screen.findByText("目标不可用");
+    expect(trigger.textContent).toContain("bash");
+    expect(
+      server.calls.filter((r) => r.method === "runtime.setShellSetting").map((r) => r.params),
+    ).toEqual([{ kind: "bash" }, { kind: "pwsh" }]);
+    server.client.close();
+  });
+
+  it.each(["env", "user", "project"] as const)("Shell 被 %s 覆盖保持只读无下拉", async (source) => {
+    const server = fakeServer(
+      handlers({
+        "runtime.describeSettings": ITEMS.map((item) =>
+          item.key === "shell" ? { ...item, source } : item,
+        ),
+      }),
+    );
+    await server.initialize();
+    render(<SettingsPage {...props(server.client)} />);
+    await screen.findByText(
+      source === "env"
+        ? "由环境变量 NOCTURNE_SHELL 指定"
+        : source === "user"
+          ? "由config.json指定"
+          : "由项目配置指定",
+    );
+    expect(screen.queryByRole("button", { name: "Shell" })).toBeNull();
+    server.client.close();
+  });
   it("单值项立即保存并提示；失败回滚并在该行写红字", async () => {
     let fail = false;
     const server = fakeServer(

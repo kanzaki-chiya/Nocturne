@@ -10,7 +10,8 @@ import type { RpcClient } from "@nocturne/rpc/client";
 import { presetOptions } from "./choice-info";
 import { Dropdown } from "./Dropdown";
 import { Scrim } from "./ProvidersPage";
-import { refKey } from "./session-controls";
+import { refKey, shellGroups } from "./session-controls";
+import { ChoiceMenu } from "./Menu";
 import type {
   JevEndpoint,
   JevReviewerConfig,
@@ -155,6 +156,12 @@ export function SettingsPage({
     null | "defaultModel" | "reviewer" | "threshold" | { role: RoleKey }
   >(null);
   const [wsBusy, setWsBusy] = useState(false);
+  const [shells, setShells] = useState<
+    Awaited<ReturnType<NonNullable<typeof client>["runtime"]["listShells"]>>
+  >([]);
+  const [shellMenu, setShellMenu] = useState(false);
+  const [shellBusy, setShellBusy] = useState(false);
+  const shellTrigger = useRef<HTMLButtonElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
   const refresh = useCallback(async () => {
@@ -352,23 +359,97 @@ export function SettingsPage({
 
             <h5>执行</h5>
             {shellItem !== undefined && (
-              <div className="s3">
+              <div className={rowClass("shell")}>
                 <span className="n">
-                  Shell<small>会话内在状态栏切换</small>
+                  Shell<small>所有会话下一次调用起生效</small>
                 </span>
                 <span className="v">
-                  <span className="t">{shellItem.effective ?? "自动"}</span>
-                  {(shellItem.source === "env" ||
-                    shellItem.source === "user" ||
-                    shellItem.source === "project") && (
-                    <span className="ro">
-                      {shellItem.source === "env"
-                        ? "由环境变量 NOCTURNE_SHELL 指定"
-                        : `由${LAYER_TEXT[shellItem.source]}指定`}
-                    </span>
+                  {shellItem.source === "env" ||
+                  shellItem.source === "user" ||
+                  shellItem.source === "project" ? (
+                    <>
+                      <span className="t">{shellItem.effective ?? "自动"}</span>
+                      <span className="ro">
+                        {shellItem.source === "env"
+                          ? "由环境变量 NOCTURNE_SHELL 指定"
+                          : `由${LAYER_TEXT[shellItem.source]}指定`}
+                      </span>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      ref={shellTrigger}
+                      className={`dd${shellMenu ? " open" : ""}`}
+                      aria-label="Shell"
+                      aria-haspopup="menu"
+                      aria-expanded={shellMenu}
+                      disabled={shellBusy}
+                      onClick={() => {
+                        if (shellMenu) {
+                          setShellMenu(false);
+                          return;
+                        }
+                        setRowErr("shell", null);
+                        void client?.runtime
+                          .listShells()
+                          .then((detected) => {
+                            setShells(detected);
+                            setShellMenu(true);
+                          })
+                          .catch((e: unknown) => {
+                            setRowErr("shell", errText(e));
+                          });
+                      }}
+                    >
+                      <span className="dd-v">
+                        {shellItem.saved ?? shellItem.effective ?? "自动"}
+                      </span>
+                      <span className="dd-d">
+                        {shellItem.saved ? "已选 Shell" : "按探测结果选择"}
+                      </span>
+                      <span
+                        className={`dd-a fold-arrow${shellMenu ? " down" : ""}`}
+                        aria-hidden="true"
+                      >
+                        ▶
+                      </span>
+                    </button>
                   )}
                 </span>
                 {src(shellItem)}
+                {errLine("shell")}
+                {shellMenu && (
+                  <ChoiceMenu
+                    anchor={shellTrigger.current}
+                    label="Shell"
+                    control={{
+                      value: shellItem.saved ?? "auto",
+                      groups: shellGroups(
+                        shells,
+                        shellItem.effective === "auto" || shellItem.effective === undefined
+                          ? (shells.find((item) => item.available && item.kind !== "powershell")
+                              ?.kind ?? "—")
+                          : shellItem.effective,
+                      ),
+                      onSelect: async (value) => {
+                        if (!client) return;
+                        setShellBusy(true);
+                        setRowErr("shell", null);
+                        try {
+                          setItems(await client.runtime.setShellSetting(value));
+                          onConfigSaved?.();
+                        } catch (e) {
+                          setRowErr("shell", errText(e));
+                        } finally {
+                          setShellBusy(false);
+                        }
+                      },
+                    }}
+                    onClose={() => {
+                      setShellMenu(false);
+                    }}
+                  />
+                )}
               </div>
             )}
             <div className={rowClass("compaction.threshold")}>

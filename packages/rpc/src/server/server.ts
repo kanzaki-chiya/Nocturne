@@ -814,6 +814,12 @@ class Connection {
       "runtime.listRecentModels": () => this.runtime().listRecentModels(),
       "runtime.describeSettings": async (p) =>
         this.runtime().describeSettings({ workspaceRoot: await this.workspaceOf(p) }),
+      "runtime.listShells": async (p) =>
+        this.runtime().listShells({ workspaceRoot: await this.workspaceOf(p) }),
+      "runtime.setShellSetting": async (p) =>
+        this.runtime().setShellSetting(reqString(p, "kind"), {
+          workspaceRoot: await this.workspaceOf(p),
+        }),
       "runtime.updateSettings": async (p) => {
         const reviewerKey = optString(p, "reviewerKey");
         const workspaceRoot = await this.workspaceOf(p);

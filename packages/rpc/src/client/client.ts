@@ -225,6 +225,13 @@ export interface RpcRuntime {
   /** recent-models.json（全局偏好，无工作区维度） */
   listRecentModels(): Promise<ModelRef[]>;
   describeSettings(input?: { workspaceRoot?: string | undefined }): Promise<SettingItem[]>;
+  listShells(input?: {
+    workspaceRoot?: string | undefined;
+  }): Promise<RpcResult<"runtime.listShells">>;
+  setShellSetting(
+    kind: string,
+    input?: { workspaceRoot?: string | undefined },
+  ): Promise<SettingItem[]>;
   updateSettings(
     patch: SettingsPatch,
     options?: { reviewerKey?: string; workspaceRoot?: string | undefined },
@@ -630,6 +637,8 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     defaultModel: async (input) => (await call("runtime.defaultModel", input ?? {})) ?? undefined,
     listRecentModels: () => call("runtime.listRecentModels", {}),
     describeSettings: (input) => call("runtime.describeSettings", input ?? {}),
+    listShells: (input) => call("runtime.listShells", input ?? {}),
+    setShellSetting: (kind, input) => call("runtime.setShellSetting", { kind, ...input }),
     updateSettings: (patch, updateOptions) =>
       call("runtime.updateSettings", {
         patch,

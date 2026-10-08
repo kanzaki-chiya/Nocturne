@@ -254,7 +254,7 @@ interface NodeProbe {
 | --- | --- | --- | --- |
 | 常规 | 权限 | 默认权限预设 | 下拉（`Dropdown`），首项「跟随默认」标出当前生效值；改完立即 `updateSettings`，提示「已保存 默认权限预设 = X」 |
 | 常规 | 权限 | 安全审查 | 对话框：关闭 / Jev / 小模型；Jev 首次启用先显示数据外发说明（偏好 `jevDisclosureAccepted`），沿用其他服务商的凭据时用下拉选服务商，单独密钥用 password 输入、经 `reviewerKey` 提交、保存后清空 |
-| 常规 | 执行 | Shell | 只读，写明由谁指定；会话内在状态栏切换 |
+| 常规 | 执行 | Shell | 可选下拉（ChoiceMenu，触发器沿用 Dropdown 外观），打开时 runtime.listShells；自动项后分隔线、列全部种类，未检测到的置灰并说明原因；runtime.setShellSetting 返回值刷新整页，失败行下显示原文且值不变。被 env/user/project 覆盖时只读并写明来源；所有会话下一次调用起生效 |
 | 常规 | 执行 | 压缩阈值 | 对话框，百分比或 token 数，留空恢复默认 |
 | 常规 | 普通对话 | 工作区 | 「更改…」选目录、「恢复默认」；只写 prefs |
 | 常规 | 更新 | 自动检查更新 | 拨动开关（`mcp-switch`），只写 `prefs.autoUpdate`（缺省开；显式关才存 `false`） |

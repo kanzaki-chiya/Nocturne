@@ -230,6 +230,14 @@ export interface RpcMethods {
     params: { workspaceRoot?: string | undefined };
     result: SettingItem[];
   };
+  "runtime.listShells": {
+    params: { workspaceRoot?: string | undefined };
+    result: Ret<"listShells">;
+  };
+  "runtime.setShellSetting": {
+    params: { kind: string; workspaceRoot?: string | undefined };
+    result: SettingItem[];
+  };
   "runtime.updateSettings": {
     params: { patch: SettingsPatch; reviewerKey?: string; workspaceRoot?: string | undefined };
     result: SettingItem[];
@@ -467,6 +475,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.defaultModel": true,
   "runtime.listRecentModels": true,
   "runtime.describeSettings": true,
+  "runtime.listShells": true,
+  "runtime.setShellSetting": true,
   "runtime.updateSettings": true,
   "runtime.setDefaultModel": true,
   "runtime.describeModelRoles": true,

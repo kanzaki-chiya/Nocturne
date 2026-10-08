@@ -90,6 +90,62 @@ function otherAvailable(session: RuntimeSession): string | undefined {
 }
 
 describe("RuntimeSession shell API（ADR-0022 第 2、4 节）", () => {
+  it("运行时设置可用 Shell 写盘、已打开会话立即生效并写变化事件，auto 清除", async () => {
+    const { runtime, home } = await makeRuntime({ withConfig: true });
+    const session = await makeSession(runtime);
+    const second = await makeSession(runtime);
+    const events = collect(session);
+    const secondEvents = collect(second);
+    const target = otherAvailable(session);
+    expect(target).toBeDefined();
+    const items = await runtime.setShellSetting(target as string);
+    expect(items.find((item) => item.key === "shell")).toMatchObject({
+      effective: target,
+      source: "settings",
+      saved: target,
+    });
+    expect(
+      JSON.parse(readFileSync(path.join(home as string, "settings.json"), "utf8")),
+    ).toMatchObject({ shell: target });
+    expect(session.shellInfo().effective?.kind).toBe(target);
+    expect(second.shellInfo().effective?.kind).toBe(target);
+    expect(events.filter((e) => e.type === "session.config_changed")).toHaveLength(1);
+    expect(secondEvents.filter((e) => e.type === "session.config_changed")).toHaveLength(1);
+    await runtime.setShellSetting("auto");
+    expect(
+      JSON.parse(readFileSync(path.join(home as string, "settings.json"), "utf8")),
+    ).not.toHaveProperty("shell");
+    await second.close();
+    await session.close();
+  });
+
+  it("运行时拒绝不可用 Shell 不改变文件", async () => {
+    const { runtime, home } = await makeRuntime({ withConfig: true });
+    await runtime.setShellSetting("auto");
+    const before = readFileSync(path.join(home as string, "settings.json"), "utf8");
+    const missing = (await runtime.listShells()).find((item) => !item.available)?.kind;
+    expect(missing).toBeDefined();
+    await expect(runtime.setShellSetting(missing as string)).rejects.toMatchObject({
+      code: "invalid_command",
+    });
+    expect(readFileSync(path.join(home as string, "settings.json"), "utf8")).toBe(before);
+  });
+
+  it("运行时 env 覆盖返回来源，已打开会话生效不变、无变化事件", async () => {
+    process.env["NOCTURNE_SHELL"] = isWin ? "cmd" : "sh";
+    const { runtime } = await makeRuntime({ withConfig: true });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    const result = await runtime.setShellSetting("auto");
+    expect(result.find((item) => item.key === "shell")).toMatchObject({
+      source: "env",
+      effective: isWin ? "cmd" : "sh",
+    });
+    expect(session.shellInfo().effective?.kind).toBe(isWin ? "cmd" : "sh");
+    expect(events.filter((e) => e.type === "session.config_changed")).toHaveLength(0);
+    await session.close();
+  });
+
   it("shellInfo/listShells：auto 生效，五种壳全部列出（含不可用）", async () => {
     const { runtime } = await makeRuntime();
     const session = await makeSession(runtime);

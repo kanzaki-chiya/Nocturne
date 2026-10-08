@@ -107,6 +107,8 @@ models.dev 数据在启动时从缓存或内置快照读取，启动不联网；
 
 Shell 也走通用合并，`session.setShell` 仍先探测可执行文件，再写 `shell`/`shellPath`；`auto` 清除保存值。保留 ADR-0022 的声明边界：手写层之间逐字段覆盖；手写配置覆盖程序 shell 设置、环境变量覆盖配置时，替换整份 shell 声明，不继承低层路径。自动选择与非法环境变量降级见 [tools.md](tools.md) 第 6 节。
 
+运行时级 `listShells({ workspaceRoot? })` 与 `setShellSetting(kind, { workspaceRoot? })` 无需打开会话，共用会话版的探测、写入与变化计算；后者返回最新 SettingItem[]（含覆盖来源）。已打开会话通过 live getter 从下一次调用起使用新值，实际生效变化时逐会话写 session.config_changed.shell，环境前缀不改。
+
 公开 Runtime 设置接口：
 
 ```ts
