@@ -9,7 +9,7 @@ import {
   type TurnChanges,
   type TurnChangeDiff,
 } from "../protocol/index.js";
-import { isUntrackedCall } from "./rewind.js";
+import { isUntrackedCall, lastFileStates } from "./rewind.js";
 import type { Session } from "./types.js";
 
 interface Snapshot {
@@ -39,15 +39,13 @@ export function createTurnChanges(session: Session, platform: Platform, sessions
         .map((e) => e.seq),
     );
     const rounds = new Map<number, { files: Map<string, Snapshot>; untrackedCalls: number }>();
-    const lastAfter = new Map<string, string | null>();
+    const lastAfter = lastFileStates(events, platform);
     let seq = 0;
     for (const e of events) {
       if (e.type === "message.user") {
         seq = e.seq;
         if (active.has(seq)) rounds.set(seq, { files: new Map(), untrackedCalls: 0 });
       }
-      if (e.type === "checkpoint.file" && e.payload.phase === "after")
-        lastAfter.set(canonical(e.payload.path), e.payload.sha256);
       const round = rounds.get(seq);
       if (!round) continue;
       if (isUntrackedCall(e)) round.untrackedCalls++;

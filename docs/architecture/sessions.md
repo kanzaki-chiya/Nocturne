@@ -150,7 +150,7 @@ interface SessionRecovery {
 
 轮以原始日志里最近的 `message.user` 为界，检查点和未追踪调用始终归原轮；只返回 effectiveEvents 中仍有效的用户消息轮，按 seq 升序，空轮省略。路径经 canonicalize 合并，每轮每路径取首次 before 和最后 after；同字节或两端均不存在省略，其余标 added / modified / deleted。未追踪 before 标 modified 并保留原因；无 after 为「没有改动后的记录」。before 缺失或快照校验失败为「检查点内容缺失」；打开时已有的 after 哈希缺字节按旧会话兼容显示「旧会话没有保存改动后的内容」，本次打开后保存失败为「检查点内容缺失」（旧日志不含保存版本，无法精确辨别恢复前的保存失败）。任一侧超过 1 MB 或含 NUL 时分别显示「文件较大，不计算差异」「二进制文件」，不提供计数。UTF-8 解码并去 BOM 后用 protocol 的 lineDiff 计算净增删数；编辑距离超过 1000 时标 approximate。
 
-每个 RuntimeSession 按 `(seq, canonical path, before, after sha)` 缓存计算结果和 diff；external 每次重新读磁盘哈希，与整个原始日志该路径最后 after 比较，后续工具改动不会误报外部修改。未追踪调用复用 rewind 的 mutates 为真且无 edit 主体的规则，限本轮。最后一条 `session.rewound(mode="files")` 满足 `targetSeq <= 本轮 seq < 回退事件 seq` 时带 reverted（回退事件 seq 与逐文件结果）。只回退对话去掉的轮不重新归属。
+每个 RuntimeSession 按 `(seq, canonical path, before, after sha)` 缓存计算结果和 diff；external 每次重新读磁盘哈希，与原始日志顺序中该路径最后一次 Nocturne 实际写入状态比较，后续工具改动不会误报外部修改。文件回退后，以回退写回的内容为基准（restored 取回退前日志对应 before 的 sha，deleted 取 null，skipped/failed 保持原值；仅对话回退不影响文件基准）；turnChanges 与 rewindTargets 共用计算。未追踪调用复用 rewind 的 mutates 为真且无 edit 主体的规则，限本轮。最后一条 `session.rewound(mode="files")` 满足 `targetSeq <= 本轮 seq < 回退事件 seq` 时带 reverted（回退事件 seq 与逐文件结果）。只回退对话去掉的轮不重新归属。
 
 turnChangeDiff 仅允许有可用差异的返回轮与路径；非法轮、无该路径或 unavailable 均报 invalid_command。缺失内容只降级显示，不尝试从当前工作区重建历史差异。
 

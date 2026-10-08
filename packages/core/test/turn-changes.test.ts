@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createRuntime, FakeProvider, createPlatform } from "../src/index.js";
 import { createCheckpointRecorder } from "../src/session/checkpoints.js";
 import { createTurnChanges } from "../src/session/turn-changes.js";
+import { lastFileStates } from "../src/session/rewind.js";
 import { internalSession } from "./internal-session.js";
 
 const roots: string[] = [];
@@ -12,10 +13,12 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 async function setup() {
-  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "nct-changes-")));
+  const platform = createPlatform();
+  const root = await platform.resolveReal(
+    realpathSync(mkdtempSync(path.join(tmpdir(), "nct-changes-"))),
+  );
   roots.push(root);
   const sessionsDir = path.join(root, "sessions");
-  const platform = createPlatform();
   const runtime = await createRuntime({
     cwd: root,
     sessionsDir,
@@ -92,6 +95,92 @@ it("同轮两次编辑取净值；两轮归属与后续工具改动不误报 ext
     expect(await h.session.turnChangeDiff(first.seq, path.join(h.root, "a"))).toEqual({
       diff: "@@ -1,1 +1,1 @@\n-old\n+final",
     });
+  } finally {
+    await h.session.close();
+  }
+});
+
+it.each(["files", "both"] as const)(
+  "两轮同文件，%s 回退第二轮后两处不误报；外部再修改均报告",
+  async (mode) => {
+    const h = await setup();
+    try {
+      writeFileSync(path.join(h.root, "a"), "before\n");
+      const first = await h.user();
+      await h.edit("a", "first\n");
+      const second = await h.user();
+      await h.edit("a", "second\n");
+      expect(await h.session.rewind(second.seq, mode)).toEqual([
+        { path: path.join(h.root, "a"), result: "restored" },
+      ]);
+      const change = (await h.session.turnChanges()).find((t) => t.seq === first.seq);
+      const target = (await h.session.rewindTargets()).find((t) => t.seq === first.seq);
+      expect(change?.files[0]?.external).toBe(false);
+      expect(target?.files[0]?.external).toBe(false);
+      writeFileSync(path.join(h.root, "a"), "outside\n");
+      expect(
+        (await h.session.turnChanges()).find((t) => t.seq === first.seq)?.files[0]?.external,
+      ).toBe(true);
+      expect(
+        (await h.session.rewindTargets()).find((t) => t.seq === first.seq)?.files[0]?.external,
+      ).toBe(true);
+    } finally {
+      await h.session.close();
+    }
+  },
+);
+
+it.each(["skipped", "failed"] as const)("回退结果 %s 保留原基准，两处规则一致", async (result) => {
+  const h = await setup();
+  try {
+    writeFileSync(path.join(h.root, "a"), "before\n");
+    const first = await h.user();
+    await h.edit("a", "first\n");
+    const second = await h.user();
+    await h.edit("a", "second\n");
+    const before = lastFileStates(h.session.durableEvents(), h.platform);
+    await h.s.emit("session.rewound", {
+      targetSeq: second.seq,
+      mode: "files",
+      files: [{ path: path.join(h.root, "a"), result }],
+    });
+    expect(lastFileStates(h.session.durableEvents(), h.platform)).toEqual(before);
+    expect(
+      (await h.session.turnChanges()).find((t) => t.seq === first.seq)?.files[0]?.external,
+    ).toBe(false);
+    expect(
+      (await h.session.rewindTargets()).find((t) => t.seq === first.seq)?.files[0]?.external,
+    ).toBe(false);
+  } finally {
+    await h.session.close();
+  }
+});
+
+it("回退 deleted 后文件不存在时不误报；仅对话回退不改变文件基准", async () => {
+  const h = await setup();
+  try {
+    const first = await h.user();
+    await h.edit("a", "new\n");
+    const states = lastFileStates(h.session.durableEvents(), h.platform);
+    await h.s.emit("session.rewound", { targetSeq: first.seq, mode: "conversation", files: [] });
+    expect(lastFileStates(h.session.durableEvents(), h.platform)).toEqual(states);
+    const second = await h.user();
+    await h.edit("b", "new\n");
+    const results = await h.session.rewind(second.seq, "files");
+    expect(results).toEqual([{ path: path.join(h.root, "b"), result: "deleted" }]);
+    expect(
+      (await h.session.turnChanges()).find((t) => t.seq === second.seq)?.files[0]?.external,
+    ).toBe(false);
+    expect(
+      (await h.session.rewindTargets())
+        .find((t) => t.seq === second.seq)
+        ?.files.every((f) => !f.external),
+    ).toBe(true);
+    expect(
+      lastFileStates(h.session.durableEvents(), h.platform).get(
+        h.platform.paths.canonicalize(path.join(h.root, "b")),
+      ),
+    ).toBeNull();
   } finally {
     await h.session.close();
   }

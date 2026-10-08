@@ -37,16 +37,46 @@ export function rewindCheckpoints(
   return { before, after };
 }
 
+/** 日志顺序中的最后一次实际写入状态，包含文件回退的成功结果。 */
+export function lastFileStates(
+  events: readonly DurableEvent[],
+  platform: Platform,
+): Map<string, string | null> {
+  const states = new Map<string, string | null>();
+  for (const [index, event] of events.entries()) {
+    if (event.type === "checkpoint.file" && event.payload.phase === "after") {
+      states.set(platform.paths.canonicalize(event.payload.path), event.payload.sha256);
+    } else if (event.type === "session.rewound" && event.payload.mode !== "conversation") {
+      const { before } = rewindCheckpoints(
+        events.slice(0, index),
+        event.payload.targetSeq,
+        platform,
+      );
+      for (const file of event.payload.files) {
+        const key = platform.paths.canonicalize(file.path);
+        if (file.result === "deleted") states.set(key, null);
+        else if (file.result === "restored") {
+          const snapshot = before.get(key)?.before;
+          if (snapshot === null) states.set(key, null);
+          else if (snapshot && "sha256" in snapshot) states.set(key, snapshot.sha256);
+        }
+      }
+    }
+  }
+  return states;
+}
+
 export async function rewindTargets(
   session: Session,
   platform: Platform,
   sessionsDir: string,
 ): Promise<RewindTarget[]> {
   const events = session.durableEvents();
+  const baseline = lastFileStates(events, platform);
   const targets: RewindTarget[] = [];
   for (const event of effectiveEvents(events).toReversed()) {
     if (event.type !== "message.user") continue;
-    const { before, after } = rewindCheckpoints(events, event.seq, platform);
+    const { before } = rewindCheckpoints(events, event.seq, platform);
     const files: RewindFile[] = [];
     for (const [key, snapshot] of before) {
       let reason =
@@ -75,7 +105,7 @@ export async function rewindTargets(
         action:
           reason !== undefined ? "untracked" : snapshot.before === null ? "delete" : "restore",
         reason,
-        external: after.has(key) && current !== after.get(key),
+        external: baseline.has(key) && current !== baseline.get(key),
       });
     }
     targets.push({
