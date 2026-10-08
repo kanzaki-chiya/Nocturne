@@ -1335,47 +1335,135 @@ export function diffCounts(diff: string): { add: number; del: number } {
   return { add, del };
 }
 
-function DiffCard({ label, diff }: { label: string; diff: string }) {
-  const [open, setOpen] = useState(true);
-  const { add, del } = diffCounts(diff);
+/** 展开的 diff 正文；折叠行的「展开」与这里的正文共用同一份按行渲染。 */
+function DiffBody({ diff }: { diff: string }) {
   return (
-    <div className="diff">
-      <div className="diff-h">
-        <span className="diff-path">{label}</span>
-        <span className="diff-add">+{add}</span>
-        <span className="diff-del">−{del}</span>
-        <button
-          type="button"
-          className="diff-toggle"
-          onClick={() => {
-            setOpen((current) => !current);
-          }}
-        >
-          {open ? "收起" : "展开"}
-        </button>
-      </div>
-      {open && (
-        <div className="diff-body" aria-label="文件差异">
-          {diffRows(diff).map((row, index) =>
-            row.kind === "sep" ? (
-              <div key={index} className="diff-row diff-sep" aria-hidden="true">
-                ⋯
-              </div>
-            ) : (
-              <div key={index} className={`diff-row diff-row-${row.kind}`}>
-                <span className="diff-num" aria-hidden="true">
-                  {row.num ?? ""}
-                </span>
-                <span className="diff-mark" aria-hidden="true">
-                  {row.mark}
-                </span>
-                <code>{row.code === "" ? " " : row.code}</code>
-              </div>
-            ),
-          )}
-        </div>
+    <div className="diff-body" aria-label="文件差异">
+      {diffRows(diff).map((row, index) =>
+        row.kind === "sep" ? (
+          <div key={index} className="diff-row diff-sep" aria-hidden="true">
+            ⋯
+          </div>
+        ) : (
+          <div key={index} className={`diff-row diff-row-${row.kind}`}>
+            <span className="diff-num" aria-hidden="true">
+              {row.num ?? ""}
+            </span>
+            <span className="diff-mark" aria-hidden="true">
+              {row.mark}
+            </span>
+            <code>{row.code === "" ? " " : row.code}</code>
+          </div>
+        ),
       )}
     </div>
+  );
+}
+
+/**
+ * ok 结果的每个改动文件：默认折叠的一行（图标 + 动作 + 路径 + 变更计数），
+ * 点击展开 diff 正文。计数没有删除时只写 +N；没有 diff 的文件只显示路径。
+ * 图标与动作来自工具声明（toolMeta），不按工具名另写分支。
+ */
+function FileDiff({
+  label,
+  diff,
+  icon,
+  action,
+  open,
+  onToggle,
+  children,
+}: {
+  label: string;
+  diff: string | undefined;
+  icon: string;
+  action: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  const counts = diff === undefined ? undefined : diffCounts(diff);
+  return (
+    <div className="diff">
+      <button
+        type="button"
+        className="diff-h"
+        aria-label={open ? "收起" : "展开"}
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <span className="diff-ic" aria-hidden="true">
+          {icon}
+        </span>
+        <span className="diff-action">{action}</span>
+        <span className="diff-path">{label}</span>
+        {counts === undefined ? null : <span className="diff-add">+{counts.add}</span>}
+        {counts !== undefined && counts.del > 0 ? (
+          <span className="diff-del">−{counts.del}</span>
+        ) : null}
+        <span className="diff-toggle">{open ? "收起" : "展开"}</span>
+      </button>
+      {open ? (
+        <>
+          {diff !== undefined ? <DiffBody diff={diff} /> : null}
+          {children}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** 行中淡色预览：liveOutput 的最后一行非空内容（超长由 CSS 截断）。 */
+function lastOutputLine(liveOutput: string): string {
+  const lines = liveOutput.replace(/\r\n?/g, "\n").split("\n");
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = (lines[index] ?? "").trimEnd();
+    if (line.trim() !== "") return line;
+  }
+  return "";
+}
+
+/**
+ * 运行中秒数：前端首次看到这条工具 running 时开始计时，只改前端展示，不动协议。
+ * 组件实例随 `entry.key` 稳定，用户的展开选择不会被 status 变化重置。
+ */
+function useRunningSeconds(running: boolean): number | undefined {
+  const startedAt = useRef<number | null>(null);
+  if (running && startedAt.current === null) startedAt.current = Date.now();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [running]);
+  if (!running || startedAt.current === null) return undefined;
+  return Math.max(0, Math.floor((now - startedAt.current) / 1000));
+}
+
+/** 运行中的实时输出：内容更新与展开时都滚到底部。 */
+function LiveOutput({ text }: { text: string }) {
+  const output = useRef<HTMLPreElement>(null);
+  useLayoutEffect(() => {
+    const element = output.current;
+    if (element === null) return;
+    const toBottom = () => {
+      element.scrollTop = element.scrollHeight;
+    };
+    toBottom();
+    const details = element.closest("details");
+    details?.addEventListener("toggle", toBottom);
+    return () => {
+      details?.removeEventListener("toggle", toBottom);
+    };
+  }, [text]);
+  return (
+    <pre ref={output} className="conversation-tool-output" aria-label="工具实时输出">
+      {text}
+    </pre>
   );
 }
 
@@ -1409,7 +1497,9 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
           安全审查 · {entry.review.verdict} · {entry.review.reason}
         </p>
       ) : null}
-      {result?.modelContent && result.error === undefined ? (
+      {result?.error !== undefined ? (
+        <pre className="conversation-tool-output">{result.error.message}</pre>
+      ) : result?.modelContent ? (
         <pre className="conversation-tool-output">{result.modelContent}</pre>
       ) : null}
       {result?.output !== undefined ? (
@@ -1445,43 +1535,89 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
   );
 }
 
+/**
+ * 工具行：默认收起，点击展开。运行中行内是实时输出（自动滚底），
+ * 完成后展开是已有参数/完整结果，或该工具改动的逐文件折叠行。
+ */
 function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
+  const [open, setOpen] = useState(false);
+  const [fileOpen, setFileOpen] = useState<Record<string, boolean>>({});
   const meta = toolMeta(entry.name ?? "", entry.subjects);
   const arg = toolArgument(entry, cwd);
   const range = toolRange(entry);
+  const running = entry.status === "running";
+  const seconds = useRunningSeconds(running);
   const result = toolResultText(entry);
+  const error = entry.result?.error;
+  const preview = running ? lastOutputLine(entry.liveOutput) : "";
+  const diffs = entry.status === "ok" ? fileDiffs(entry, cwd) : [];
   return (
-    <article className="tool" aria-label={`工具 ${entry.name ?? entry.callId}`}>
-      <details className="tool-details">
-        <summary className="tool-line" aria-label="工具详细信息">
-          <span className="ic" aria-hidden="true">
-            {meta.icon}
-          </span>
-          <span className="tool-name">{meta.label}</span>
-          {arg !== "" && (
-            <span className="tool-arg" title={arg}>
-              {arg}
+    <article
+      className={`tool${running ? " running" : ""}`}
+      aria-label={`工具 ${entry.name ?? entry.callId}`}
+    >
+      {diffs.length > 0 ? (
+        diffs.map((file) => (
+          <FileDiff
+            key={file.label}
+            label={file.label}
+            diff={file.diff}
+            icon={meta.icon}
+            action={meta.label}
+            open={fileOpen[file.label] ?? open}
+            onToggle={() => {
+              setFileOpen((current) => ({
+                ...current,
+                [file.label]: !(current[file.label] ?? open),
+              }));
+            }}
+          >
+            <ToolDetails entry={entry} cwd={cwd} />
+          </FileDiff>
+        ))
+      ) : (
+        <details className="tool-details" open={open}>
+          <summary
+            className="tool-line"
+            aria-label="工具详细信息"
+            aria-expanded={open}
+            onClick={(event) => {
+              event.preventDefault();
+              setOpen((current) => !current);
+            }}
+          >
+            <span className="ic" aria-hidden="true">
+              {meta.icon}
             </span>
-          )}
-          {range !== undefined && <span className="tool-range">{range}</span>}
-          <span className={`tool-res${result.error === true ? " err" : ""}`}>{result.text}</span>
-        </summary>
-        <ToolDetails entry={entry} cwd={cwd} />
-      </details>
-      {entry.liveOutput ? (
-        <details className="conversation-tool-progress" open>
-          <summary>实时输出</summary>
-          <pre className="conversation-tool-output" aria-label="工具实时输出">
-            {entry.liveOutput}
-          </pre>
+            <span className="tool-name">{meta.label}</span>
+            {arg !== "" && (
+              <span className="tool-arg" title={arg}>
+                {arg}
+              </span>
+            )}
+            {range !== undefined && <span className="tool-range">{range}</span>}
+            {preview !== "" && (
+              <span className="tool-live" title={entry.liveOutput}>
+                {preview}
+              </span>
+            )}
+            {running && <span className="tool-spin" aria-hidden="true" />}
+            {seconds !== undefined && <span className="tool-secs">{seconds} 秒</span>}
+            {!running && (
+              <span className={`tool-res${error !== undefined ? " err" : ""}`}>
+                {error === undefined ? result.text : toolErrorSummary(entry, cwd)}
+              </span>
+            )}
+          </summary>
+          {open ? (
+            running && entry.liveOutput !== "" ? (
+              <LiveOutput text={entry.liveOutput} />
+            ) : (
+              <ToolDetails entry={entry} cwd={cwd} />
+            )
+          ) : null}
         </details>
-      ) : null}
-      {entry.result?.error ? (
-        <details className="conversation-tool-error">
-          <summary>{toolErrorSummary(entry, cwd)}</summary>
-          <pre className="conversation-tool-output">{entry.result.error.message}</pre>
-        </details>
-      ) : null}
+      )}
     </article>
   );
 }
@@ -1496,24 +1632,6 @@ function ToolEntryView({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
       >
         {deniedLine(entry, cwd)}
       </div>
-    );
-  }
-  const diffs = fileDiffs(entry, cwd);
-  if (diffs.length > 0 && entry.status === "ok") {
-    return (
-      <>
-        {diffs.map((file, index) =>
-          file.diff !== undefined ? (
-            <DiffCard key={index} label={file.label} diff={file.diff} />
-          ) : (
-            <div key={index} className="diff">
-              <div className="diff-h">
-                <span className="diff-path">{file.label}</span>
-              </div>
-            </div>
-          ),
-        )}
-      </>
     );
   }
   return <ToolRow entry={entry} cwd={cwd} />;

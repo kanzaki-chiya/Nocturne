@@ -387,6 +387,8 @@ describe("Conversation 历史图片", () => {
     const view = createSessionView();
     view.entries = [entry];
     const rendered = mount(view, { images });
+    expect(rendered.container.querySelector(".u-img-chip")).toBeNull();
+    fireEvent.click(screen.getByLabelText("工具详细信息"));
     expect(rendered.container.querySelector(".u-img-chip")?.textContent).toBe("历史截图");
     expect(screen.queryByRole("img")).toBeNull();
     expect(visibilityObservers).toHaveLength(0);
@@ -681,7 +683,23 @@ describe("Conversation 渲染与滚动", () => {
     expect(card?.textContent).toContain("file.ts");
     expect(card?.textContent).toContain("+1");
     expect(card?.textContent).toContain("−1");
-    fireEvent.click(screen.getByRole("button", { name: "收起" }));
+    expect({
+      action: card?.querySelector(".diff-action")?.textContent,
+      path: card?.querySelector(".diff-path")?.textContent,
+      added: card?.querySelector(".diff-add")?.textContent,
+      deleted: card?.querySelector(".diff-del")?.textContent,
+      expanded: card?.querySelector("button")?.getAttribute("aria-expanded"),
+      diffRows: card?.querySelectorAll(".diff-row").length,
+    }).toMatchInlineSnapshot(`
+      {
+        "action": "编辑",
+        "added": "+1",
+        "deleted": "−1",
+        "diffRows": 0,
+        "expanded": "false",
+        "path": "file.ts",
+      }
+    `);
     expect(container.querySelector(".diff-body")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "展开" }));
     expect(container.querySelector(".diff-row.diff-row-add code")?.textContent).toBe("new");
@@ -723,6 +741,8 @@ describe("Conversation 渲染与滚动", () => {
     expect(cards[0]?.textContent).toContain("a.ts");
     expect(cards[0]?.textContent).toContain("+1");
     expect(cards[1]?.textContent).toContain("old.ts → new.ts");
+    expect(cards[1]?.querySelector(".diff-add, .diff-del")).toBeNull();
+    expect(container.querySelector(".diff-body")).toBeNull();
   });
 
   it("diff 只剥一个标记，保留第二字符和缩进，不把 hunk 与换行元信息当正文", () => {
@@ -751,6 +771,7 @@ describe("Conversation 渲染与滚动", () => {
     };
     view.entries = [entry];
     const { container } = mount(view);
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
     expect(
       Array.from(container.querySelectorAll(".diff-row code"), (node) => node.textContent),
     ).toEqual(["  old", "  new", "  keep", "-negative", "+positive", "\told", "\tnew"]);
@@ -804,7 +825,7 @@ describe("Conversation 渲染与滚动", () => {
     expect(summary.textContent).toContain("large.ts");
     expect(summary.textContent).not.toContain("源文件行");
     expect(summary.closest("details")?.open).toBe(false);
-    expect(within(article).getByText("读取源文件").closest("details")?.open).toBe(false);
+    expect(within(article).queryByText("读取源文件")).toBeNull();
     fireEvent.click(summary);
     expect(summary.closest("details")?.open).toBe(true);
     expect(article.textContent).toContain("源文件行");
@@ -832,7 +853,8 @@ describe("Conversation 渲染与滚动", () => {
     ];
     view.entries = [tool({ status: "running", result: undefined, liveOutput: "第一行" })];
     const rendered = mount(view);
-    expect(screen.getByLabelText("工具实时输出").textContent).toBe("第一行");
+    expect(screen.queryByLabelText("工具实时输出")).toBeNull();
+    expect(rendered.container.querySelector(".tool-live")?.textContent).toBe("第一行");
     expect(screen.getByText('{"command":')).toBeTruthy();
     const assistant = view.live.assistants[0];
     const liveTool = view.live.tools[0];
@@ -843,6 +865,134 @@ describe("Conversation 渲染与滚动", () => {
     rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     expect(screen.getByText("回复", { selector: "strong" })).toBeTruthy();
     expect(screen.getByText('{"command":"pwd"}')).toBeTruthy();
+  });
+
+  it("实时工具默认收起显示最后非空行和秒数，点击展开滚底，完成保持用户选择", () => {
+    vi.useFakeTimers();
+    try {
+      const view = createSessionView();
+      const entry = tool({
+        name: "shell",
+        status: "running",
+        result: undefined,
+        liveOutput: "第一行\n最后一行\n  \n",
+      });
+      view.entries = [entry];
+      const rendered = mount(view);
+      const summary = screen.getByLabelText("工具详细信息");
+      expect(summary.getAttribute("aria-expanded")).toBe("false");
+      expect(rendered.container.querySelector(".tool-live")?.textContent).toBe("最后一行");
+      expect(rendered.container.querySelector(".tool-spin")).not.toBeNull();
+      expect(screen.queryByLabelText("工具实时输出")).toBeNull();
+      expect(rendered.container.querySelector(".conversation-tool-progress")).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(rendered.container.querySelector(".tool-secs")?.textContent).toBe("2 秒");
+      fireEvent.click(summary);
+      const output = screen.getByLabelText("工具实时输出");
+      Object.defineProperty(output, "scrollHeight", { value: 250, configurable: true });
+      entry.liveOutput += "新输出";
+      view.revision += 1;
+      rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+      expect(output.scrollTop).toBe(250);
+      entry.status = "ok";
+      const result = tool().result;
+      if (!result) throw new Error("fixture 缺少结果");
+      entry.result = { ...result, output: { exitCode: 0 }, modelContent: "完整执行结果" };
+      view.revision += 1;
+      rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+      expect(summary.closest("details")?.open).toBe(true);
+      expect(screen.getByText("完整执行结果")).toBeTruthy();
+      expect(screen.queryByLabelText("工具实时输出")).toBeNull();
+      expect(rendered.container.querySelector(".tool-spin, .tool-secs")).toBeNull();
+      fireEvent.click(summary);
+      expect(summary.closest("details")?.open).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("未点击的实时工具完成后仍收起，编辑完成继承运行时展开选择", () => {
+    const view = createSessionView();
+    const entry = tool({ status: "running", result: undefined, liveOutput: "处理中" });
+    view.entries = [entry];
+    const rendered = mount(view);
+    entry.status = "ok";
+    entry.result = tool().result;
+    view.revision += 1;
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    expect(rendered.container.querySelector(".diff-body")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    expect(rendered.container.querySelector(".diff-body")).not.toBeNull();
+    cleanup();
+    const running = tool({ status: "running", result: undefined, liveOutput: "编辑中" });
+    view.entries = [running];
+    const opened = mount(view);
+    fireEvent.click(screen.getByLabelText("工具详细信息"));
+    running.status = "ok";
+    running.result = tool().result;
+    view.revision += 1;
+    opened.rerender(<Conversation view={view} {...conversationProps(opened)} />);
+    expect(opened.container.querySelector(".diff-body")).not.toBeNull();
+  });
+
+  it("写入只显示新增计数，展开选择在重新渲染后保留", () => {
+    const view = createSessionView();
+    const entry = tool({ name: "write", input: { path: "new.ts", content: "a\nb\n" } });
+    if (!entry.result) throw new Error("fixture 缺少结果");
+    entry.result.output = { created: true, path: "new.ts" };
+    view.entries = [entry];
+    const rendered = mount(view);
+    expect(rendered.container.querySelector(".diff-add")?.textContent).toBe("+2");
+    expect(rendered.container.querySelector(".diff-del, .diff-body")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    view.revision += 1;
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    expect(rendered.container.querySelectorAll(".diff-row-add")).toHaveLength(2);
+  });
+
+  it("多文件各自收起，路径 key 在结果重排后保持展开选择", () => {
+    const view = createSessionView();
+    const entry = tool();
+    if (!entry.result) throw new Error("fixture 缺少结果");
+    const files = [
+      { path: "a.ts", diff: "@@ -1 +1 @@\n-a\n+b" },
+      { path: "b.ts", diff: "@@ -1 +1 @@\n-c\n+d" },
+    ];
+    entry.result.output = { files };
+    view.entries = [entry];
+    const rendered = mount(view);
+    expect(rendered.container.querySelectorAll(".diff-body")).toHaveLength(0);
+    const first = rendered.container.querySelector(".diff-h");
+    if (!first) throw new Error("缺少文件行");
+    fireEvent.click(first);
+    entry.result.output = { files: [...files].reverse() };
+    view.revision += 1;
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    const cards = rendered.container.querySelectorAll(".diff");
+    expect(cards[0]?.querySelector(".diff-path")?.textContent).toBe("b.ts");
+    expect(cards[0]?.querySelector(".diff-body")).toBeNull();
+    expect(cards[1]?.querySelector(".diff-path")?.textContent).toBe("a.ts");
+    expect(cards[1]?.querySelector(".diff-body")).not.toBeNull();
+  });
+
+  it("运行工具出错后不自动展开，也不收起用户已展开的详情", () => {
+    const view = createSessionView();
+    const entry = tool({ status: "running", result: undefined, liveOutput: "处理中" });
+    view.entries = [entry];
+    const rendered = mount(view);
+    entry.status = "error";
+    entry.result = failedTool("not_read", "请读取文件").result;
+    view.revision += 1;
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    const summary = screen.getByLabelText("工具详细信息");
+    expect(summary.closest("details")?.open).toBe(false);
+    fireEvent.click(summary);
+    view.revision += 1;
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    expect(summary.closest("details")?.open).toBe(true);
+    expect(screen.getByText("请读取文件")).toBeTruthy();
   });
 
   it("用户上翻后增量不会拉回；回到底部继续跟随，切会话重置", () => {
@@ -1039,15 +1189,15 @@ describe("Conversation 工具行与拒绝", () => {
   it.each<[string, string]>([
     ["not_read", "文件需要先读取"],
     ["stale_file", "文件在读取后被修改过"],
-  ])("失败 %s 使用灰色简述，完整原文默认折叠且不展示错误码", (code, brief) => {
+  ])("失败 %s 行尾显示红色简述，原文点击展开且无独立错误框", (code, brief) => {
     const message = "拒绝修改文件：Z:/project/src/a.ts。请先读取文件后重试";
     const view = createSessionView();
     view.entries = [failedTool(code, message)];
     const { container } = mount(view);
     const article = screen.getByRole("article", { name: "工具 edit" });
-    const details = container.querySelector<HTMLDetailsElement>(".conversation-tool-error");
-    expect(article.querySelector(".tool-res.err")?.textContent).toBe("失败");
-    expect(details?.querySelector("summary")?.textContent).toBe(brief);
+    const details = container.querySelector<HTMLDetailsElement>(".tool-details");
+    expect(container.querySelector(".conversation-tool-error")).toBeNull();
+    expect(article.querySelector(".tool-res.err")?.textContent).toBe(brief);
     expect(details?.querySelector(".conversation-error")).toBeNull();
     expect(details?.open).toBe(false);
     expect(article.textContent).not.toContain(code);
@@ -1059,7 +1209,7 @@ describe("Conversation 工具行与拒绝", () => {
     expect(article.querySelector(".tool-details .conversation-tool-output")).toBeNull();
     fireEvent.click(within(article).getByText(brief));
     expect(details?.open).toBe(true);
-    expect(details?.querySelector("pre")?.textContent).toBe(message);
+    expect(details?.querySelector(".conversation-tool-output")?.textContent).toBe(message);
     fireEvent.click(within(article).getByText(brief));
     expect(details?.open).toBe(false);
   });
@@ -1090,8 +1240,9 @@ describe("Conversation 工具行与拒绝", () => {
     const view = createSessionView();
     view.entries = [failedTool("unknown_plugin_error", message)];
     const { container } = mount(view, { cwd });
-    const details = container.querySelector<HTMLDetailsElement>(".conversation-tool-error");
-    expect(details?.querySelector("summary")?.textContent).toBe(brief);
+    const details = container.querySelector<HTMLDetailsElement>(".tool-details");
+    expect(container.querySelector(".conversation-tool-error")).toBeNull();
+    expect(details?.querySelector(".tool-res.err")?.textContent).toBe(brief);
     expect(details?.open).toBe(false);
     expect(container.textContent).not.toContain("unknown_plugin_error");
     expect(
@@ -1099,9 +1250,9 @@ describe("Conversation 工具行与拒绝", () => {
         " ",
       ),
     ).not.toContain("unknown_plugin_error");
-    fireEvent.click(screen.getByText(brief, { selector: "summary" }));
+    fireEvent.click(screen.getByText(brief, { selector: ".tool-res" }));
     expect(details?.open).toBe(true);
-    expect(details?.querySelector("pre")?.textContent).toBe(message);
+    expect(details?.querySelector(".conversation-tool-output")?.textContent).toBe(message);
   });
 
   it("被拒绝的工具只显示一行红色说明，feedback 进 title", () => {

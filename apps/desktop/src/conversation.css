@@ -479,15 +479,50 @@
 }
 .conversation .tool-res.err {
   color: var(--a-error);
+  flex: 0 1 50%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conversation .tool-live {
+  flex: 1;
+  min-width: 0;
+  color: var(--a-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conversation .tool-line:has(.tool-live) .tool-arg {
+  flex: 0 1 35%;
+}
+.conversation .tool-secs {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.conversation .tool-spin {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--a-borderStrong);
+  border-top-color: var(--a-secondary);
+  border-radius: 50%;
+  animation: tool-spin 1s linear infinite;
+}
+@keyframes tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .conversation .tool-spin {
+    animation: none;
+  }
 }
 .conversation .tool-details {
   min-width: 0;
 }
 /* 展开区与正文拉开：外层卡片（--a-side）装标题行，内层框（--a-input）
    装命令/参数/结果 payload；两套色板下文字都读 --a-secondary/--a-text */
-.conversation .tool-details[open],
-.conversation .conversation-tool-progress,
-.conversation .conversation-tool-error {
+.conversation .tool-details[open] {
   background: var(--a-side);
   border: 1px solid var(--a-border);
   border-radius: 9px;
@@ -496,15 +531,9 @@
   margin-bottom: 6px;
   padding: 3px 10px 8px;
 }
-.conversation .conversation-tool-progress,
-.conversation .conversation-tool-error {
-  padding: 0 10px 4px;
-}
 .conversation .tool-details > pre,
 .conversation .tool-details details > pre,
-.conversation .conversation-subjects,
-.conversation .conversation-tool-progress pre,
-.conversation .conversation-tool-error pre {
+.conversation .conversation-subjects {
   background: var(--a-input);
   border: 1px solid var(--a-border);
   border-radius: 7px;
@@ -530,14 +559,6 @@
   color: var(--a-error);
   overflow-wrap: anywhere;
 }
-.conversation-tool-error {
-  color: var(--a-muted);
-  font-size: 12px;
-  margin: 4px 0 0 23px;
-}
-.conversation-tool-error > summary {
-  cursor: pointer;
-}
 
 /* ── diff 卡片 ── */
 .conversation .diff {
@@ -547,6 +568,11 @@
   margin: 6px 0;
 }
 .conversation .diff-h {
+  width: 100%;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--a-secondary);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -555,6 +581,7 @@
   font-size: 12px;
 }
 .conversation .diff-path {
+  flex: 1;
   font-family: var(--mono);
   font-size: 11.5px;
   color: var(--a-text);
@@ -584,6 +611,11 @@
   color: var(--a-muted);
   cursor: pointer;
   padding: 0;
+}
+.conversation .diff-h:focus-visible,
+.conversation .tool-line:focus-visible {
+  outline: 2px solid var(--a-secondary);
+  outline-offset: 2px;
 }
 .conversation .diff-toggle:hover {
   color: var(--a-text);
