@@ -156,6 +156,8 @@ function finishTool(
     inputSchema:
       outputSchema !== undefined
         ? {
+            // 外层沿用 outputSchema 的方言，嵌套的 2020-12 关键字才按其语义校验
+            ...(typeof outputSchema.$schema === "string" ? { $schema: outputSchema.$schema } : {}),
             type: "object",
             required: ["result"],
             properties: { result: outputSchema },

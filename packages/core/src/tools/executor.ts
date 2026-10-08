@@ -5,7 +5,7 @@
  *   → 8 归一化 → 9 tool.completed
  * 无论在哪一步结束，都恰好产生一个 tool.completed。
  */
-import { Ajv, type ValidateFunction } from "ajv";
+import type { ValidateFunction } from "ajv";
 
 import type {
   ImageAttachment,
@@ -14,6 +14,7 @@ import type {
   ToolCallRef,
 } from "../protocol/index.js";
 import { applyBudget } from "./budget.js";
+import { createSchemaCompiler } from "./schema.js";
 import { writeSpill } from "./spill.js";
 import type {
   AskUserRequest,
@@ -27,13 +28,25 @@ import type {
 
 const PATH_KINDS = new Set(["read", "edit"]);
 
-const ajv = new Ajv({ allErrors: true, useDefaults: true, strict: false });
-const validators = new WeakMap<ToolDefinition, ValidateFunction>();
+const schemas = createSchemaCompiler({ allErrors: true, useDefaults: true, strict: false });
+/** null 表示 inputSchema 无法编译：跳过本地校验，由工具自身（MCP 服务端）校验 */
+const validators = new WeakMap<ToolDefinition, ValidateFunction | null>();
 
-function validatorFor(tool: ToolDefinition): ValidateFunction {
+function validatorFor(
+  tool: ToolDefinition,
+  scope: Pick<ExecutionScope, "diagnostics">,
+): ValidateFunction | null {
   let v = validators.get(tool);
   if (v === undefined) {
-    v = ajv.compile(tool.inputSchema);
+    try {
+      v = schemas.compile(tool.inputSchema);
+    } catch (e) {
+      v = null;
+      scope.diagnostics?.record("tool.schema_unsupported", {
+        name: tool.name,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
     validators.set(tool, v);
   }
   return v;
@@ -204,10 +217,9 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         );
       }
       let input: unknown = structuredClone(call.input);
-      if (!validatorFor(tool)(input)) {
-        const detail = ajv.errorsText(validatorFor(tool).errors, {
-          separator: "; ",
-        });
+      const validate = validatorFor(tool, scope);
+      if (validate !== null && !validate(input)) {
+        const detail = schemas.errorsText(validate.errors);
         return finish(
           "error",
           errorResult("invalid_input", `工具 "${call.name}" 输入不符合 schema：${detail}`),
@@ -239,8 +251,8 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         }
         if (hookOut?.updatedInput !== undefined) {
           const updated = structuredClone(hookOut.updatedInput);
-          if (!validatorFor(tool)(updated)) {
-            const detail = ajv.errorsText(validatorFor(tool).errors, { separator: "; " });
+          if (validate !== null && !validate(updated)) {
+            const detail = schemas.errorsText(validate.errors);
             return finish(
               "error",
               errorResult(

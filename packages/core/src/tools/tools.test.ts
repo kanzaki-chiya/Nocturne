@@ -265,6 +265,63 @@ describe("Executor 管线", () => {
     });
   });
 
+  it("inputSchema 声明 2020-12 / 2019-09 / draft-04 方言时照常校验", async () => {
+    const h = await makeHarness(tmpWorkspace());
+    const registry = createToolRegistry();
+    const dialects = {
+      d2020: "https://json-schema.org/draft/2020-12/schema",
+      d2019: "https://json-schema.org/draft/2019-09/schema",
+      d04: "http://json-schema.org/draft-04/schema#",
+    };
+    for (const [name, uri] of Object.entries(dialects)) {
+      registry.register({
+        name,
+        description: "x",
+        inputSchema: {
+          $schema: uri,
+          type: "object",
+          required: ["q"],
+          properties: { q: { type: "string" } },
+        },
+        traits: { mutates: false, concurrencySafe: true, timeoutMs: 1000 },
+        permissionSubjects: () => [],
+        execute: () => Promise.resolve({ status: "ok" as const, modelContent: "done" }),
+      });
+    }
+    const executor = createToolExecutor(registry);
+    for (const name of Object.keys(dialects)) {
+      expect((await executor.execute(call(name, { q: "a" }, `${name}-ok`), h.scope)).status).toBe(
+        "ok",
+      );
+      expect((await executor.execute(call(name, { q: 1 }, `${name}-bad`), h.scope)).status).toBe(
+        "error",
+      );
+      expect(completedOf(h).at(-1)?.payload.error).toMatchObject({ code: "invalid_input" });
+    }
+  });
+
+  it("inputSchema 无法编译时跳过本地校验并记诊断，调用照常执行", async () => {
+    const h = await makeHarness(tmpWorkspace());
+    const records: { kind: string; data: unknown }[] = [];
+    h.scope.diagnostics = {
+      record: (kind: string, data: unknown) => records.push({ kind, data }),
+    } as unknown as NonNullable<typeof h.scope.diagnostics>;
+    const registry = createToolRegistry();
+    registry.register({
+      name: "broken",
+      description: "x",
+      inputSchema: { type: "object", properties: { a: { $ref: "#/$defs/missing" } } },
+      traits: { mutates: false, concurrencySafe: true, timeoutMs: 1000 },
+      permissionSubjects: () => [],
+      execute: () => Promise.resolve({ status: "ok" as const, modelContent: "done" }),
+    });
+    const executor = createToolExecutor(registry);
+    expect((await executor.execute(call("broken", { a: 1 }), h.scope)).status).toBe("ok");
+    expect((await executor.execute(call("broken", { a: 2 }, "c2"), h.scope)).status).toBe("ok");
+    expect(completedOf(h)).toHaveLength(2);
+    expect(records.filter((r) => r.kind === "tool.schema_unsupported")).toHaveLength(1);
+  });
+
   it("任意工具的 edit 主体在执行前后记录检查点，失败后仍记录改动状态", async () => {
     const ws = tmpWorkspace();
     await writeWs(ws, "a.txt", "before");

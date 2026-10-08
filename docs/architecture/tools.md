@@ -29,8 +29,11 @@ tools/
 execute(call, ctx):
   1. 查找      registry.get(call.name)
                不存在 → 结果 error(code="unknown_tool")，列出可用工具名，交给模型自我修正
-  2. 校验      按 inputSchema 校验并规范化输入
+  2. 校验      按 inputSchema 校验并规范化输入（方言按根 $schema：2020-12、2019-09，
+               其余按 draft-07，未识别的 $schema 忽略后按 draft-07 编译）
                失败 → error(code="invalid_input")，附带校验信息
+               schema 本身无法编译 → 该工具跳过本地校验（诊断 tool.schema_unsupported
+               记一次），由工具自身校验；不因此结束 Turn
   2.5 PreToolUse Hook   见 hooks.md 第 3 节：deny → permission.resolved(source:"hook")
                         + error(code="hook_denied")；ask 记入第 5 步的合并（强制确认，
                         不经 Grant/--yes 提升）；updatedInput 替换输入并重新走第 2 步校验；

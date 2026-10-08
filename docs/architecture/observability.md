@@ -49,6 +49,7 @@
 | `context.attachment_missing` | agent | 历史引用了但 `AttachmentStore` 读不回字节的图片附件：turnId、file、sha256（ADR-0023） |
 | `tool.permission` | tools/gate | callId、工具名、subjects、action、source、命中规则描述、耗时 |
 | `tool.exec` | tools/executor | callId、工具名、status、耗时、是否截断/落盘 |
+| `tool.schema_unsupported` | tools/executor | 工具 inputSchema 无法编译，跳过本地校验：name、error；每个工具定义只记一次 |
 | `tool.attachment_failed` | tools/executor | 工具结果图片附件落盘失败：callId、name、error；成功的图片照常引用，该次调用仍恰好一个 `tool.completed`（ADR-0023） |
 | `hook.run` / `hook.done` | hooks | 点位、command、退出码、耗时、效果摘要（deny/allow/feedback 长度等）、stderr 尾部 |
 | `mcp.event` | mcp | server、state、toolCount、error |

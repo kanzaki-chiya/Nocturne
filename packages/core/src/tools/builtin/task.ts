@@ -5,7 +5,7 @@
  * Agent Loop 不知道它的存在。子会话的装配由注入的 SubagentLauncher
  * 完成（tools 不 import agent；接口在本模块，实现在 agent/subagent.ts）。
  */
-import { Ajv } from "ajv";
+import { createSchemaCompiler } from "../schema.js";
 import type { JsonSchema, SubjectRequest } from "../../protocol/index.js";
 import type {
   ExternalAgentInfo,
@@ -32,7 +32,7 @@ interface TaskInput {
   timeoutMs?: number;
 }
 
-const ajv = new Ajv({ strict: false });
+const schemas = createSchemaCompiler({ strict: false });
 
 const DESCRIPTION =
   "在独立的子会话中运行一个受控子代理来完成给定任务，返回子代理提交的结果。" +
@@ -81,7 +81,7 @@ export function createTaskTool(
     }
     if (input.outputSchema !== undefined) {
       try {
-        ajv.compile(input.outputSchema);
+        schemas.compile(input.outputSchema);
       } catch (e) {
         return `outputSchema 无法编译：${e instanceof Error ? e.message : String(e)}`;
       }
