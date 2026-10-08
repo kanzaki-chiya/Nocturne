@@ -1,6 +1,19 @@
 import { createServer, type Server } from "node:http";
 import { ProviderLoginError } from "./errors.js";
 
+/** fetch 规范（也即浏览器）拒绝连接的危险端口（WHATWG bad port 列表）。 */
+const BLOCKED_WEB_PORTS = new Set<number>([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103,
+  104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512,
+  513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995,
+  1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669,
+  6679, 6697, 10080,
+]);
+
+export function isBlockedWebPort(port: number): boolean {
+  return BLOCKED_WEB_PORTS.has(port);
+}
+
 interface LoopbackOptions {
   state: string;
   path: string;
@@ -70,14 +83,24 @@ export async function openLoginLoopback(options: LoopbackOptions) {
     });
   }
 
+  async function listenSafePort(server: Server): Promise<number> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await listen(server, "127.0.0.1", 0);
+      const address = server.address();
+      if (!address || typeof address === "string") throw new ProviderLoginError("callback");
+      if (!isBlockedWebPort(address.port)) return address.port;
+      // 禁用端口无法在浏览器（或 fetch）中打开；释放后由系统分配下一个端口。
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    throw new ProviderLoginError("callback");
+  }
+
   try {
     const ipv4 = makeServer();
-    await listen(ipv4, "127.0.0.1", 0);
-    const address = ipv4.address();
-    if (!address || typeof address === "string") throw new ProviderLoginError("callback");
-    if (options.dualStack) await listen(makeServer(), "::1", address.port);
+    const port = await listenSafePort(ipv4);
+    if (options.dualStack) await listen(makeServer(), "::1", port);
     return {
-      callbackUrl: `http://${options.dualStack ? "localhost" : "127.0.0.1"}:${address.port}${options.path}`,
+      callbackUrl: `http://${options.dualStack ? "localhost" : "127.0.0.1"}:${port}${options.path}`,
       close,
     };
   } catch {

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CredentialStore, ProviderEntryConfig, RuntimeConfig } from "./config/index.js";
 import { logoutProvider, ProviderLoginError, startProviderLogin } from "./provider-login.js";
 import { createOpenRouterLogin } from "./provider-login/openrouter.js";
+import { isBlockedWebPort, openLoginLoopback } from "./provider-login/loopback.js";
 import { createLoginLifecycle, createLoginSecrets } from "./provider-login/session.js";
 import type { LoginSession } from "./protocol/index.js";
 
@@ -115,10 +116,21 @@ beforeEach(async () => {
       else respond();
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("test server did not listen");
-  origin = `http://127.0.0.1:${address.port}`;
+  // 本机动态端口范围可能从 1024 起，listen(0) 会取到浏览器与 fetch 拒绝连接的
+  // 禁用端口；取到就换一个，否则用到它的用例会以 "bad port" 偶发失败。
+  let port: number | undefined;
+  for (let attempt = 0; attempt < 20 && port === undefined; attempt += 1) {
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("test server did not listen");
+    if (isBlockedWebPort(address.port)) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    } else {
+      port = address.port;
+    }
+  }
+  if (port === undefined) throw new Error("test server did not listen");
+  origin = `http://127.0.0.1:${port}`;
 });
 
 afterEach(async () => {
@@ -443,5 +455,26 @@ describe("共享登录生命周期", () => {
     expect(one.verifier).not.toBe(two.verifier);
     expect(one.state).not.toBe(one.nonce);
     expect(one.challenge).toBe(createHash("sha256").update(one.verifier).digest("base64url"));
+  });
+});
+
+describe("回调回环的端口选择", () => {
+  it("回调端口避开浏览器与 fetch 的禁用端口表", async () => {
+    expect(isBlockedWebPort(1720)).toBe(true);
+    expect(isBlockedWebPort(6697)).toBe(true);
+    expect(isBlockedWebPort(4433)).toBe(false);
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const loopback = await openLoginLoopback({
+        state: "probe",
+        path: "/callback",
+        dualStack: true,
+        accept: () => false,
+      });
+      try {
+        expect(isBlockedWebPort(Number(new URL(loopback.callbackUrl).port))).toBe(false);
+      } finally {
+        loopback.close();
+      }
+    }
   });
 });
