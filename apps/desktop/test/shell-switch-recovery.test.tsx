@@ -208,6 +208,11 @@ async function openSessionWithShell(fault?: FaultSpec, settleMs = 0) {
   return { ws, sessionsDir, pill };
 }
 
+/** Shell 菜单选项的主标签（自动行说明含当前种类名，不能用整行子串匹配种类行）。 */
+function optionLabel(node: Element): string {
+  return node.querySelector(".menu-label")?.textContent ?? "";
+}
+
 /** 开 Shell 菜单并点击包含 fragment 的可选项（重试一次点击，应对并发渲染延迟）。 */
 async function pickShell(fragment: string) {
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -220,7 +225,7 @@ async function pickShell(fragment: string) {
         () => {
           target = screen
             .getAllByRole("menuitemradio")
-            .find((item) => item.textContent?.includes(fragment));
+            .find((item) => optionLabel(item).startsWith(fragment));
           expect(target).toBeDefined();
         },
         { timeout: 3000 },
@@ -238,7 +243,7 @@ function shellItem(fragment: string): Promise<HTMLElement> {
   return waitFor(() => {
     const item = screen
       .getAllByRole("menuitemradio")
-      .find((node) => node.textContent?.includes(fragment));
+      .find((node) => optionLabel(node).startsWith(fragment));
     expect(item).toBeDefined();
     return item as HTMLElement;
   });

@@ -631,9 +631,9 @@ it("会话内状态栏控件调用真实 setter", async () => {
       ),
     ).toBe(true),
   );
-  // 状态栏 Shell（菜单打开时探测列表）
+  // 状态栏 Shell（菜单打开时探测列表；选项文案与设置页共用 shellGroups：自动行 + 分隔线 + 各类一行）
   fireEvent.click(screen.getByRole("button", { name: "切换 Shell" }));
-  fireEvent.click(await screen.findByRole("menuitemradio", { name: /bash · Bash/ }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "bash/bin/bash" }));
   await waitFor(() =>
     expect(
       host.calls.some((call) => call.method === "session.setShell" && call.params.kind === "bash"),
@@ -653,16 +653,16 @@ it("切换 Shell 后状态栏文字与菜单勾选立即更新（F-01）", async
   const pill = await screen.findByRole("button", { name: "切换 Shell" });
   await waitFor(() => expect(pill.textContent).toContain("pwsh"));
   fireEvent.click(pill);
-  fireEvent.click(await screen.findByRole("menuitemradio", { name: /bash · Bash/ }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "bash/bin/bash" }));
   await waitFor(() =>
     expect(
       host.calls.some((call) => call.method === "session.setShell" && call.params.kind === "bash"),
     ).toBe(true),
   );
   await waitFor(() => expect(pill.textContent).toContain("bash"));
-  // 菜单勾选也指向新值
+  // 菜单勾选也指向新值（自动行说明含当前种类名，按整名匹配种类行）
   fireEvent.click(pill);
-  const item = await screen.findByRole("menuitemradio", { name: /bash · Bash/ });
+  const item = await screen.findByRole("menuitemradio", { name: "bash/bin/bash" });
   expect(item.getAttribute("aria-checked")).toBe("true");
 });
 
