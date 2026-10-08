@@ -63,3 +63,13 @@ pricing?: {
 - **只用 `turn.completed.usage`**：不分模型，一个 Turn 内切换模型或角色请求时归类错误。否决。
 - **复用 `modelsDevProvider` 取价**：它同时驱动协议推断，给内置预设加它会改变请求协议。否决，改用只管价格的 `modelsDevPricing`。
 - **在模型设置对话框里编辑价格**：价格多为上游声明，手写需求少；先放配置文件，有需要再加。
+
+## 修订
+
+### 2026-10-09：摘要请求补记用量
+
+核对实现时发现，L2 摘要请求（自动压缩与手动 `/compact`）的用量没有进入任何持久事件：`runSummaryCall` 只收集文本，`context.compacted` 只有 `kind`、`throughSeq`、`summary`。第 2 节「压缩等角色请求若事件带用量也计入」因此落空，统计会漏掉全部摘要费用，也无法用 `cacheReadTokens` 检查摘要请求是否命中提示缓存。
+
+- `context.compacted(kind="summary")` 增加可选字段 `usage?: Usage` 与 `model?: ModelRef`，由自动压缩与 `/compact` 两条路径写入本次摘要请求的用量和模型；`prune` 不调用模型，不写。兼容新增，旧日志没有这两个字段时按缺失处理。
+- 摘要请求失败、超时或被中断时仍不写压缩事件（context.md §6.6 不变），这部分用量不计入，作为已知缺口写进 usage.md。
+- 用量统计把带 `usage` 的 `context.compacted` 计入对应模型。
