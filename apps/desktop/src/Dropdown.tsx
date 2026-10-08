@@ -184,7 +184,12 @@ export function Dropdown({
       setStyle({ visibility: "hidden" });
       return;
     }
-    const place = () => {
+    const place = (event?: Event) => {
+      if (event?.type === "scroll") {
+        const target = event.target;
+        if (target instanceof Node && list.current?.contains(target)) return;
+        if (target instanceof Element && !target.contains(trigger.current)) return;
+      }
       const bounds = trigger.current?.getBoundingClientRect();
       if (bounds === undefined) return;
       const height = list.current?.offsetHeight ?? 0;
@@ -207,7 +212,7 @@ export function Dropdown({
         ...(down
           ? { top: `${bounds.bottom + MENU_GAP}px` }
           : { bottom: `${window.innerHeight - bounds.top + MENU_GAP}px` }),
-        ...(height > room ? { maxHeight: `${Math.max(120, room)}px` } : {}),
+        ...(searchable || height > room ? { maxHeight: `${Math.max(120, room)}px` } : {}),
         visibility: "visible",
       });
     };

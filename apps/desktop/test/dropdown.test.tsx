@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Dropdown, type DropdownOption } from "../src/Dropdown";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const OPTIONS: DropdownOption[] = [
   { value: "bypass", label: "bypass", tag: "全部放行", risk: true },
@@ -41,6 +44,41 @@ function activeOption(trigger: HTMLElement): HTMLElement | null {
 }
 
 describe("Dropdown", () => {
+  it("可搜索列表内部滚动不重新定位；页面滚动更新位置且始终限高", () => {
+    render(
+      <Dropdown label="模型" value="default" options={OPTIONS} onChange={vi.fn()} searchable />,
+    );
+    const trigger = screen.getByRole("combobox");
+    let top = 100;
+    const bounds = vi.spyOn(trigger, "getBoundingClientRect").mockImplementation(() => ({
+      top,
+      bottom: top + 30,
+      left: 50,
+      right: 350,
+      width: 300,
+      height: 30,
+      x: 50,
+      y: top,
+      toJSON: () => ({}),
+    }));
+    fireEvent.click(trigger);
+    const list = screen.getByRole("listbox").parentElement;
+    if (!list) throw new Error("缺少列表滚动容器");
+    expect(list.style.maxHeight).toBe("420px");
+    expect(list.style.top).toBe("136px");
+    Object.defineProperty(list, "offsetHeight", { value: 420 });
+    bounds.mockClear();
+    fireEvent.scroll(list);
+    fireEvent.scroll(screen.getAllByRole("option")[0] as HTMLElement);
+    expect(bounds).not.toHaveBeenCalled();
+    expect(list.style.maxHeight).toBe("420px");
+    top = 80;
+    fireEvent.scroll(window);
+    expect(bounds).toHaveBeenCalledOnce();
+    expect(list.style.top).toBe("116px");
+    expect(list.style.maxHeight).toBe("420px");
+  });
+
   it("触发器显示当前值与说明；打开后 listbox/option 关系完整，危险项排在最后", () => {
     render(<Harness onChange={vi.fn()} />);
     const trigger = screen.getByRole("combobox", { name: "默认权限预设" });

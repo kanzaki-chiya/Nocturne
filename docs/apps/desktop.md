@@ -257,6 +257,8 @@ interface NodeProbe {
 
 **下拉**（`src/Dropdown.tsx`，desktop-v4.html A 屏）：设置页的下拉与状态栏的思考档位、权限预设菜单共用这一个组件，不用原生 `select`。触发器是 `role="combobox"`（`aria-haspopup="listbox"`、`aria-expanded`、打开时 `aria-controls` 指向 `role="listbox"`），焦点始终留在触发器，当前项用 `aria-activedescendant` 指示，选项是 `role="option"`（`aria-selected`，不可选的 `aria-disabled` 并悬停说明原因）。键盘：Tab 聚焦；Enter / 空格 / ↓ 打开；↑↓ 移动并跳过不可选项，Home / End 到首尾；Enter / 空格选择并关闭；Esc 关闭、焦点留在触发器且不冒泡给外层；Tab 关闭。点外部关闭。列表 `position: fixed`，优先向下，下方放不下且上方更宽裕时向上（状态栏在底部），放不下时限高滚动，最小宽 300px。每个选项是「名称 + 中文名 + 一行说明」，危险项（`bypass`）排在分隔线之后并用警告色。权限预设与思考档位的中文名和说明只在 `src/choice-info.ts` 维护一份。输入框卡片与托盘里的 chip 菜单仍用 `ChoiceMenu`。
 
+可搜索下拉始终设置可用空间与 420px 中较小的高度上限；列表自身或其内部选项滚动不重新定位，页面或触发器祖先容器滚动时重新跟随触发器，仍保留限高。`Menu` 不监听 scroll，没有此类滚动后移除限高的问题。
+
 已知限制：RPC 请求不能真正中止，「取消获取」只在前端丢弃结果。
 
 ### 5.7 后台日志页
