@@ -282,3 +282,7 @@ Rust 外壳提供四个 Tauri 命令，前端用它们实现 `LineTransport`：
 ### 2026-10-08：常规设置支持 Shell 选择
 
 Shell 行不再仅只读：无会话时也经运行时级 listShells / setShellSetting 探测与保存，菜单数据与状态栏共用；被环境变量或手写配置覆盖时保持只读。已打开会话下一次调用起生效，具体规则见 [config.md](../architecture/config.md)。
+
+### 2026-10-08：压缩回执按种类区分
+
+修订中「压缩回执只显示『上下文已压缩』」改为按 `context.compacted` 的种类显示：修剪为「已省略较早的工具输出」，摘要为「上下文已压缩为摘要」。自动压缩多数时候只是修剪，统一写「已压缩」会让人误以为生成了摘要。文案只在 Core 定义（`compactedNoticeText`），桌面端直接显示 notice 原文，仍不显示种类、序号或 payload。
