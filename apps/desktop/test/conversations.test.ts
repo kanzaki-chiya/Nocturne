@@ -4,7 +4,7 @@ import {
   type RpcClient,
   type LineTransport,
 } from "@nocturne/rpc/client";
-import { createSessionView } from "@nocturne/core/protocol";
+import { createSessionView, type TurnChanges } from "@nocturne/core/protocol";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -34,6 +34,8 @@ function fixture(
   const turns = new Map<string, unknown>();
   const seqs = new Map<string, number>();
   const stalled = new Map<string, { id: unknown }>();
+  let changes: TurnChanges[] = [];
+  let changesError = false;
   /** crash 后为 true：failResume 只在重建的新后台生效 */
   let afterCrash = false;
   let nextSession = 1;
@@ -104,6 +106,30 @@ function fixture(
           };
         }
         if (request.method === "session.subscribe") result = { lastSeq: 0 };
+        if (request.method === "session.turnChanges") {
+          if (changesError) {
+            serverEnd.send(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: request.id,
+                error: { code: -32000, message: "查询失败" },
+              }),
+            );
+            return;
+          }
+          result = changes;
+        }
+        if (request.method === "session.turnChangeDiff") result = { diff: "+new" };
+        if (request.method === "session.rewind") {
+          const files = [{ path: "Z:/project/a", result: "restored" as const }];
+          event(id, "session.rewound", {
+            targetSeq: request.params.targetSeq,
+            mode: request.params.mode,
+            files,
+          });
+          changes = changes.map((t) => ({ ...t, reverted: { seq: seqs.get(id) ?? 0, files } }));
+          result = files;
+        }
         if (request.method === "session.readAttachment") {
           result = { data: "AQID", mimeType: "image/png", bytes: 3 };
         }
@@ -171,7 +197,16 @@ function fixture(
         method: "event",
         params: {
           sessionId: id,
-          event: { sessionId: id, seq, time: "2026-01-01T00:00:00Z", type, payload },
+          event: {
+            sessionId: id,
+            seq,
+            time: "2026-01-01T00:00:00Z",
+            type,
+            payload,
+            ...(type === "turn.started" || type === "turn.completed"
+              ? { turnId: "test-turn" }
+              : {}),
+          },
         },
       }),
     );
@@ -213,7 +248,23 @@ function fixture(
       }),
     );
   }
-  return { controller, pool, calls, opened, failures, event, complete, crash, releaseResume };
+  return {
+    controller,
+    pool,
+    calls,
+    opened,
+    failures,
+    event,
+    complete,
+    crash,
+    releaseResume,
+    setChanges: (value: TurnChanges[]) => {
+      changes = value;
+    },
+    failChanges: () => {
+      changesError = true;
+    },
+  };
 }
 
 describe("desktop conversation lifecycle", () => {
@@ -495,6 +546,92 @@ describe("后台崩溃与重启恢复", () => {
     expect(f.controller.opened.get("a")?.dead).toBeUndefined();
     // b 仍是 dead，等「重启后台」或点开时再恢复
     expect(f.controller.opened.get("b")?.dead).toBe(true);
+  });
+});
+
+describe("每轮文件更改查询与文件撤销", () => {
+  const change = (): TurnChanges => ({
+    seq: 1,
+    files: [{ path: "Z:/project/a", status: "modified", added: 1, removed: 1, external: false }],
+    untrackedCalls: 0,
+  });
+  it("打开、完成（含中断）与回退刷新；只撤销文件不提交、不删对话", async () => {
+    const f = fixture();
+    f.setChanges([change()]);
+    await f.controller.open("a", "project");
+    const entry = f.controller.selected;
+    if (!entry) throw new Error("缺会话");
+    expect(entry.turnChanges.get(1)).toEqual(change());
+    expect(f.calls.filter((c) => c.method === "session.turnChanges")).toHaveLength(1);
+    await f.controller.send({ text: "hello", attachments: [] });
+    f.event("a", "turn.started", { turnIndex: 1 });
+    expect(f.calls.filter((c) => c.method === "session.turnChanges")).toHaveLength(1);
+    await expect(f.controller.rewindFiles(1)).rejects.toThrow("会话正在运行");
+    f.event("a", "turn.completed", {
+      reason: "aborted",
+      steps: 1,
+      usage: { inputTokens: 0, outputTokens: 0 },
+    });
+    f.complete("a");
+    await vi.waitFor(() => expect(entry.busy).toBe(false));
+    const before = f.calls.filter((c) => c.method === "session.turnChanges").length;
+    const userEntries = entry.view.entries.filter((e) => e.kind === "user");
+    await f.controller.rewindFiles(1);
+    expect(f.calls.find((c) => c.method === "session.rewind")?.params).toMatchObject({
+      targetSeq: 1,
+      mode: "files",
+    });
+    expect(f.calls.filter((c) => c.method === "session.submit")).toHaveLength(1);
+    expect(entry.view.entries.filter((e) => e.kind === "user")).toEqual(userEntries);
+    expect(entry.turnChanges.get(1)?.reverted).toBeDefined();
+    expect(f.calls.filter((c) => c.method === "session.turnChanges")).toHaveLength(before + 1);
+  });
+  it("懒加载 diff 命中缓存；计数变化清缓存，external 单独变化不清", async () => {
+    const f = fixture();
+    const turn = change();
+    f.setChanges([turn]);
+    await f.controller.open("a", "project");
+    const entry = f.controller.selected;
+    if (!entry) throw new Error("缺会话");
+    await f.controller.turnChangeDiff(entry, 1, "Z:/project/a");
+    await f.controller.turnChangeDiff(entry, 1, "Z:/project/a");
+    expect(f.calls.filter((c) => c.method === "session.turnChangeDiff")).toHaveLength(1);
+    f.setChanges([{ ...turn, files: turn.files.map((file) => ({ ...file, external: true })) }]);
+    f.event("a", "turn.completed", {
+      reason: "done",
+      steps: 1,
+      usage: { inputTokens: 0, outputTokens: 0 },
+    });
+    await vi.waitFor(() => expect(entry.turnChanges.get(1)?.files[0]?.external).toBe(true));
+    expect(entry.changeDiffs.size).toBe(1);
+    f.setChanges([{ ...turn, files: turn.files.map((file) => ({ ...file, added: 2 })) }]);
+    f.event("a", "turn.completed", {
+      reason: "done",
+      steps: 1,
+      usage: { inputTokens: 0, outputTokens: 0 },
+    });
+    await vi.waitFor(() => expect(entry.changeDiffs.size).toBe(0));
+    await f.controller.turnChangeDiff(entry, 1, "Z:/project/a");
+    expect(f.calls.filter((c) => c.method === "session.turnChangeDiff")).toHaveLength(2);
+  });
+  it("查询失败清卡片，只写诊断不打断对话", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const f = fixture();
+      f.setChanges([change()]);
+      await f.controller.open("a", "project");
+      f.failChanges();
+      f.event("a", "turn.completed", {
+        reason: "aborted",
+        steps: 1,
+        usage: { inputTokens: 0, outputTokens: 0 },
+      });
+      await vi.waitFor(() => expect(f.controller.selected?.turnChanges.size).toBe(0));
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(f.failures).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

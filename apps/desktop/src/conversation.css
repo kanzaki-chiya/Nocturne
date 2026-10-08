@@ -216,6 +216,95 @@
   color: var(--a-muted);
   font-size: 11.5px;
 }
+.turn-changes {
+  margin-top: 10px;
+  border: 1px solid var(--a-border);
+  border-radius: 8px;
+  background: var(--a-side);
+  font-size: 12px;
+  min-width: 0;
+}
+.turn-changes-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+}
+.turn-changes-toggle {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+  border: 0;
+  background: none;
+  color: var(--a-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.turn-changes-toggle:hover {
+  color: var(--a-text);
+}
+.turn-changes-counts {
+  display: inline-flex;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.turn-changes.reverted .turn-changes-title,
+.turn-changes.reverted .turn-changes-counts {
+  color: var(--a-muted);
+  text-decoration: line-through;
+}
+.turn-changes.reverted .turn-changes-counts span {
+  color: inherit;
+}
+.turn-changes-files {
+  padding: 0 10px 6px;
+}
+.turn-change-path {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  text-align: left;
+}
+.turn-change-directory,
+.turn-change-tag,
+.turn-change-reason,
+.turn-change-note {
+  color: var(--a-muted);
+}
+.turn-change-tag {
+  font-size: 11px;
+}
+.turn-change-reason {
+  margin-left: auto;
+  text-align: right;
+}
+.turn-change-note {
+  margin: 6px 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.turn-changes-confirm {
+  border-top: 1px solid var(--a-border);
+  padding: 10px;
+}
+.turn-change-preview {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.turn-changes .diff-h {
+  flex-wrap: wrap;
+}
+.turn-changes .diff-body {
+  margin: 4px 0 8px;
+}
 /* 思考块（desktop-v4.html F/G 屏）：展开后标题行吸顶，块滚出视野时随块离开 */
 .conversation .think {
   margin-bottom: 4px;

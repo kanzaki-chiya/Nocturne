@@ -377,6 +377,7 @@ function replayHost(
           result = [{ path: "src/main.ts", kind: "file" }];
           break;
         case "session.mcpServers":
+        case "session.turnChanges":
           result = [];
           break;
         case "session.submit":

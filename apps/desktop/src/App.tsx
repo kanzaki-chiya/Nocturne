@@ -7,6 +7,8 @@ import type {
   RuntimeEvent,
   SessionView,
   SkillOverview,
+  TurnChanges,
+  TurnChangeDiff,
 } from "@nocturne/core/protocol";
 
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
@@ -976,6 +978,9 @@ export function App({ host }: { host: DesktopHost }) {
                 selected={selected}
                 running={conversationStatus(active) !== "idle"}
                 onResubmit={resubmit}
+                turnChanges={active.turnChanges}
+                onRewindFiles={(seq) => conversations.rewindFiles(seq)}
+                loadChangeDiff={(seq, path) => conversations.turnChangeDiff(active, seq, path)}
                 onSubmit={(input) => submitInput(input)}
                 onInterrupt={() => {
                   conversations.interrupt();
@@ -1191,6 +1196,9 @@ interface SessionPaneProps {
   selected: SessionSummary | undefined;
   running: boolean;
   onResubmit: (targetSeq: number, text: string, mode: RewindMode) => Promise<void>;
+  turnChanges: ReadonlyMap<number, TurnChanges>;
+  onRewindFiles: (seq: number) => Promise<void>;
+  loadChangeDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
   onSubmit: (input: ComposerSubmit) => Promise<boolean>;
   onInterrupt: () => void;
   onSlash: (line: string) => Promise<boolean>;
@@ -1216,6 +1224,9 @@ function SessionPane({
   selected,
   running,
   onResubmit,
+  turnChanges,
+  onRewindFiles,
+  loadChangeDiff,
   onSubmit,
   onInterrupt,
   onSlash,
@@ -1293,6 +1304,9 @@ function SessionPane({
         images={images}
         busy={running}
         onResubmit={onResubmit}
+        turnChanges={turnChanges}
+        onRewindFiles={onRewindFiles}
+        loadChangeDiff={loadChangeDiff}
         fileLinks={fileLinks}
       />
       <Composer

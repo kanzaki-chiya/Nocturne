@@ -4,6 +4,8 @@ import {
   type ReasoningEffort,
   type RewindMode,
   type SessionView,
+  type TurnChanges,
+  type TurnChangeDiff,
 } from "@nocturne/core/protocol";
 import {
   RpcError,
@@ -33,6 +35,8 @@ export interface OpenConversation {
   view: SessionView;
   warnings: string[];
   busy: boolean;
+  turnChanges: Map<number, TurnChanges>;
+  changeDiffs: Map<string, Promise<TurnChangeDiff>>;
   tracker?: SessionViewTracker;
   /**
    * 所在后台已退出（崩溃或被强杀）：会话保留在 opened 里等「重启后台」恢复，
@@ -142,15 +146,19 @@ export class Conversations {
       view: continuity?.view ?? createSessionView(),
       warnings: result.opened.warnings,
       busy: false,
+      turnChanges: new Map(),
+      changeDiffs: new Map(),
       listeners: new Set(),
     };
     this.opened.set(entry.session.id, entry);
+    let replaying = true;
     try {
       entry.tracker = await trackSessionView(
         entry.session,
-        () => {
+        (_view, event) => {
           for (const listener of entry.listeners) listener();
           this.changed();
+          if (!replaying && event.type === "turn.completed") void this.refreshTurnChanges(entry);
           // 非当前会话完成后释放锁；submit/compact 的 promise 收束前仍保持 busy。
           void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
         },
@@ -159,12 +167,64 @@ export class Conversations {
           ...(continuity !== undefined ? { afterSeq: continuity.afterSeq } : {}),
         },
       );
+      replaying = false;
+      await this.refreshTurnChanges(entry);
       return entry;
     } catch (error) {
       this.opened.delete(entry.session.id);
       await entry.session.close();
       throw error;
     }
+  }
+
+  private async refreshTurnChanges(entry: OpenConversation): Promise<void> {
+    if (entry.dead === true || entry.view.currentTurn !== undefined) return;
+    const boundary = entry.view.lastSeq;
+    try {
+      const changes = await entry.session.turnChanges();
+      if (
+        this.opened.get(entry.session.id) !== entry ||
+        conversationStatus(entry) === "pending" ||
+        entry.view.lastSeq !== boundary
+      )
+        return;
+      const next = new Map(changes.map((turn) => [turn.seq, turn]));
+      for (const [seq, turn] of entry.turnChanges) {
+        for (const file of turn.files) {
+          const updated = next.get(seq)?.files.find((f) => f.path === file.path);
+          if (
+            !updated ||
+            JSON.stringify([file.added, file.removed, file.approximate, file.unavailable]) !==
+              JSON.stringify([
+                updated.added,
+                updated.removed,
+                updated.approximate,
+                updated.unavailable,
+              ])
+          )
+            entry.changeDiffs.delete(JSON.stringify([seq, file.path]));
+        }
+      }
+      entry.turnChanges = next;
+    } catch (error) {
+      entry.turnChanges = new Map();
+      entry.changeDiffs.clear();
+      console.warn("[turnChanges] 查询失败", error);
+    }
+    this.changed();
+  }
+
+  turnChangeDiff(entry: OpenConversation, seq: number, path: string): Promise<TurnChangeDiff> {
+    const key = JSON.stringify([seq, path]);
+    let pending = entry.changeDiffs.get(key);
+    if (!pending) {
+      pending = entry.session.turnChangeDiff(seq, path);
+      entry.changeDiffs.set(key, pending);
+      void pending.catch(() => {
+        if (entry.changeDiffs.get(key) === pending) entry.changeDiffs.delete(key);
+      });
+    }
+    return pending;
   }
 
   /**
@@ -337,10 +397,31 @@ export class Conversations {
   async resubmit(targetSeq: number, text: string, mode: RewindMode): Promise<void> {
     const entry = this.selected;
     if (entry === undefined) throw new Error("请先打开会话");
-    if (entry.dead === true) throw new Error("会话所在的后台已退出，请先重启后台");
-    if (conversationStatus(entry) !== "idle") throw new Error("会话正在运行");
-    await entry.session.rewind(targetSeq, mode);
+    await this.rewindEntry(entry, targetSeq, mode);
     await this.send({ text, attachments: [] });
+  }
+
+  /** Files-only rewind shares the serialized busy boundary, never the submit path. */
+  rewindFiles(targetSeq: number): Promise<void> {
+    const entry = this.selected;
+    if (entry === undefined) return Promise.reject(new Error("请先打开会话"));
+    return this.rewindEntry(entry, targetSeq, "files");
+  }
+
+  private rewindEntry(entry: OpenConversation, targetSeq: number, mode: RewindMode): Promise<void> {
+    return this.serial(async () => {
+      if (entry.dead === true) throw new Error("会话所在的后台已退出，请先重启后台");
+      if (conversationStatus(entry) !== "idle") throw new Error("会话正在运行");
+      entry.busy = true;
+      this.changed();
+      try {
+        await entry.session.rewind(targetSeq, mode);
+        await this.refreshTurnChanges(entry);
+      } finally {
+        entry.busy = false;
+        this.changed();
+      }
+    });
   }
 
   async compact(): Promise<void> {

@@ -27,6 +27,8 @@ import {
   type TurnEndReason,
   type UserEntry,
   type ViewEntry,
+  type TurnChanges,
+  type TurnChangeDiff,
 } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
@@ -35,6 +37,7 @@ import { isAllowedExternalUrl } from "./external-url";
 import { fileRefTitle, userText } from "./file-refs";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { displayPath } from "./paths";
+import { TurnChangesCard } from "./TurnChangesCard";
 import { useReasoning, type ReasoningMap } from "./reasoning";
 import { useStickyOutput } from "./useStickyOutput";
 import { useCopyText } from "./useCopyText";
@@ -55,6 +58,9 @@ export interface ConversationProps {
   busy: boolean;
   /** 重发一条用户消息：先 rewind(targetSeq, mode) 再 submit（Conversations.resubmit） */
   onResubmit: (targetSeq: number, text: string, mode: RewindMode) => Promise<void>;
+  turnChanges?: ReadonlyMap<number, TurnChanges>;
+  onRewindFiles?: (seq: number) => Promise<void>;
+  loadChangeDiff?: (seq: number, path: string) => Promise<TurnChangeDiff>;
   /**
    * 回答内文件引用的打开能力（U-09，方案 A）：缺省时 codespan 保持普通
    * 行内代码。历史助手消息传入，实时流式消息不传（流式中引用不完整）。
@@ -1722,6 +1728,7 @@ function EntryView({
   onResubmit,
   fileLinks,
   replyText,
+  changesCard,
 }: {
   entry: ViewEntry;
   openUrl: OpenUrl;
@@ -1735,6 +1742,7 @@ function EntryView({
   onResubmit: ConversationProps["onResubmit"];
   fileLinks: ConversationProps["fileLinks"];
   replyText: string | undefined;
+  changesCard: ReactNode;
 }) {
   switch (entry.kind) {
     case "user":
@@ -1757,6 +1765,7 @@ function EntryView({
           {entry.finishReason === "aborted" ? (
             <p className="conversation-review">回复已中断</p>
           ) : null}
+          {changesCard}
           {replyText !== undefined && (
             <div className="assistant-actions" role="group" aria-label="回复操作">
               <CopyButton text={replyText} label="复制本轮回复" />
@@ -2158,6 +2167,9 @@ function ConversationContent({
   busy,
   onResubmit,
   fileLinks,
+  turnChanges,
+  onRewindFiles,
+  loadChangeDiff,
 }: ConversationProps) {
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -2165,18 +2177,53 @@ function ConversationContent({
   const previousTop = useRef(0);
   const [following, setFollowing] = useState(true);
   const { parts, now } = useReasoning(subscribeEvents);
-  const replies = new Map<string, { key: string; texts: string[] }>();
-  for (const entry of view.entries) {
+  const users = view.entries.filter((e) => e.kind === "user");
+  const lastSeq = users.at(-1)?.seq;
+  const changesByKey = new Map<string, TurnChanges>();
+  for (const [index, user] of users.entries()) {
+    const turn = turnChanges?.get(user.seq);
     if (
-      entry.kind !== "assistant" ||
-      entry.text === "" ||
-      entry.turnId === view.currentTurn?.turnId
+      !turn ||
+      (!turn.files.length && !turn.untrackedCalls) ||
+      (user.seq === lastSeq && view.currentTurn !== undefined)
     )
       continue;
-    const reply = replies.get(entry.turnId) ?? { key: entry.key, texts: [] };
+    const nextSeq = users[index + 1]?.seq ?? Infinity;
+    const entries = view.entries.filter((e) => e.seq >= user.seq && e.seq < nextSeq);
+    const anchor =
+      entries.findLast((e) => e.kind === "assistant" && e.text.trim() !== "") ?? entries.at(-1);
+    if (anchor) changesByKey.set(anchor.key, turn);
+  }
+  const renderChanges = (turn: TurnChanges | undefined) =>
+    turn && onRewindFiles && loadChangeDiff ? (
+      <TurnChangesCard
+        key={turn.seq}
+        turn={turn}
+        latest={turn.seq === lastSeq}
+        busy={busy}
+        cwd={cwd}
+        session={session}
+        onRewind={onRewindFiles}
+        loadDiff={loadChangeDiff}
+        renderDiff={(diff) => <DiffBody diff={diff} />}
+      />
+    ) : null;
+  const replies = new Map<string, { key: string; texts: string[] }>();
+  let userSeq: number | undefined;
+  for (const entry of view.entries) {
+    if (entry.kind === "user") userSeq = entry.seq;
+    if (
+      entry.kind !== "assistant" ||
+      entry.text.trim() === "" ||
+      entry.turnId === view.currentTurn?.turnId ||
+      (userSeq !== undefined && userSeq === lastSeq && view.currentTurn !== undefined)
+    )
+      continue;
+    const key = userSeq === undefined ? entry.turnId : String(userSeq);
+    const reply = replies.get(key) ?? { key: entry.key, texts: [] };
     reply.key = entry.key;
     reply.texts.push(entry.text);
-    replies.set(entry.turnId, reply);
+    replies.set(key, reply);
   }
   const replyTextByKey = new Map(
     [...replies.values()].map((reply) => [reply.key, reply.texts.join("\n\n")]),
@@ -2271,21 +2318,26 @@ function ConversationContent({
               <div className="conversation-empty">发送消息，开始这个会话。</div>
             ) : null}
             {view.entries.map((entry) => (
-              <EntryView
-                key={entry.key}
-                entry={entry}
-                openUrl={openUrl}
-                cwd={cwd}
-                parts={parts}
-                now={now}
-                images={images}
-                session={session}
-                busy={busy}
-                repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
-                onResubmit={onResubmit}
-                fileLinks={fileLinks}
-                replyText={replyTextByKey.get(entry.key)}
-              />
+              <Fragment key={entry.key}>
+                <EntryView
+                  entry={entry}
+                  openUrl={openUrl}
+                  cwd={cwd}
+                  parts={parts}
+                  now={now}
+                  images={images}
+                  session={session}
+                  busy={busy}
+                  repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
+                  onResubmit={onResubmit}
+                  fileLinks={fileLinks}
+                  replyText={replyTextByKey.get(entry.key)}
+                  changesCard={
+                    entry.kind === "assistant" ? renderChanges(changesByKey.get(entry.key)) : null
+                  }
+                />
+                {entry.kind !== "assistant" && renderChanges(changesByKey.get(entry.key))}
+              </Fragment>
             ))}
             {view.live.assistants.map((assistant) => (
               <article
