@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/core",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Nocturne runtime: sessions, agent loop, context, tools, permissions, providers",
   "license": "GPL-3.0-only",
   "private": true,
