@@ -37,7 +37,7 @@ import {
 } from "./session-switch.js";
 import { createSetupPrompts, runProviderSetupWizard, SetupAbort } from "./setup.js";
 
-const VERSION = "0.7.5";
+const VERSION = "0.7.6";
 
 async function readStdin(stream: NodeJS.ReadableStream): Promise<string> {
   const chunks: Buffer[] = [];

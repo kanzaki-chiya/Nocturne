@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/cli",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "nctrn — Nocturne CLI client",
   "license": "GPL-3.0-only",
   "private": true,
