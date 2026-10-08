@@ -3,10 +3,18 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { FakeScript } from "@nocturne/core";
+import { FakeProvider, type FakeScript } from "@nocturne/core";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
 
-import { cleanupTmp, connect, MODEL, textScript, until, type Harness } from "./harness.js";
+import {
+  cleanupTmp,
+  connect,
+  MODEL,
+  textScript,
+  until,
+  VISION_MODELS,
+  type Harness,
+} from "./harness.js";
 
 afterEach(cleanupTmp);
 
@@ -122,7 +130,28 @@ describe("提问往返（ask_user）", () => {
 
 describe("中断", () => {
   it("interrupt 通知中断运行中的 Turn，submit 随后以 aborted 返回；Turn 进行中再 submit 报 session_busy", async () => {
-    const h = await connect({ scripts: [[{ type: "wait", ms: 60_000 }], textScript("好了")] });
+    // 脚本按内容匹配而非消费顺序：中断可能落在首个模型请求之前（此时首个 Turn
+    // 不消费任何脚本），若按顺序消费，下一次 submit 会吃到本应 60s 等待的脚本并超时。
+    const h = await connect({
+      provider: new FakeProvider({
+        models: VISION_MODELS,
+        handler: (request) => {
+          // 只按最后一条 user 消息判定：上下文里会保留历史消息（如首轮的"慢"）。
+          let text = "";
+          for (const message of request.messages) {
+            if (message.role === "user") {
+              text = message.content
+                .filter((block) => block.type === "text")
+                .map((block) => block.text)
+                .join("\n");
+            }
+          }
+          return text.includes("慢")
+            ? [{ type: "wait", ms: 60_000 }]
+            : textScript("好了");
+        },
+      }),
+    });
     const { session, events } = await open(h);
     let phase = "submit";
     const watchdog = setTimeout(() => {
