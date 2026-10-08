@@ -1,6 +1,6 @@
 {
   "name": "nctrn",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Nocturne — 开源编程 agent 运行时的单文件命令行入口（nctrn）",
   "license": "GPL-3.0-only",
   "type": "module",
