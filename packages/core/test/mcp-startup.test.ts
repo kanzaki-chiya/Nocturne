@@ -9,6 +9,8 @@ import {
   type McpSession,
   type ToolDefinition,
   type RuntimeEvent,
+  createSessionView,
+  reduceSessionView,
 } from "../src/index.js";
 
 const roots: string[] = [];
@@ -162,6 +164,13 @@ it("启动失败解除首 Turn 等待，不注册工具，警告保持", async (
   expect(await first).toBe("done");
   expect(f.provider.requests[0]?.tools.some((t) => t.name === tool.name)).toBe(false);
   expect(warnings).toHaveLength(1);
+  const warning = warnings[0];
+  expect(warning?.type === "runtime.warning" && warning.payload.code).toBe("mcp_server_failed");
+  const view = createSessionView();
+  for (const event of warnings) reduceSessionView(view, event);
+  expect(view.notices).toEqual([
+    { level: "warning", code: "mcp_server_failed", message: "slow failed" },
+  ]);
   await session.close();
 });
 

@@ -789,6 +789,28 @@ it("审查持久重放保留工具理由与待确认理由，started 不覆盖�
   expect(toolEntries(replay)[0]).toMatchObject({ status: "running", review });
 });
 
+it("mcp.server 的 starting、ready、failed 都不产生 notice", () => {
+  const view = createSessionView();
+  const states = ["starting", "ready", "failed"] as const;
+  for (const state of states) {
+    reduceSessionView(view, {
+      type: "mcp.server",
+      sessionId: "s",
+      runId: "r",
+      eseq: states.indexOf(state) + 1,
+      afterSeq: 0,
+      time: "t",
+      payload: {
+        name: "exa",
+        state,
+        toolCount: 2,
+        ...(state === "failed" ? { error: "连接失败" } : {}),
+      },
+    });
+  }
+  expect(view.notices).toEqual([]);
+});
+
 it("审查器结算不再追加权限提示，用户结算照常追加", () => {
   const resolved = (callId: string, source: "reviewer" | "user"): DurableEvent => ({
     type: "permission.resolved",

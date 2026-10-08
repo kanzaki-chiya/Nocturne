@@ -616,17 +616,6 @@ function reduceEphemeral(view: SessionView, event: EphemeralEvent): void {
       view.status = "retrying";
       break;
     }
-    case "mcp.server": {
-      const p = event.payload;
-      const tools = p.toolCount !== undefined ? `（${p.toolCount} 个工具）` : "";
-      const err = p.error !== undefined ? `：${p.error}` : "";
-      view.notices.push({
-        level: p.state === "failed" || p.state === "crashed" ? "warning" : "info",
-        code: "mcp.server",
-        message: `MCP 服务器 ${p.name} → ${p.state}${tools}${err}`,
-      });
-      break;
-    }
     case "runtime.warning": {
       view.notices.push({
         level: "warning",
