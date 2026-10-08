@@ -148,6 +148,8 @@ interface NodeProbe {
 
 权限和提问请求显示在消息流底部；仅调用 `respondPermission` / `respondQuestion` 回传选择，权限判定仍在 Core。权限卡片按钮严格按 Core 给出的 `options` 顺序渲染（`allow_once 允许一次`、`allow_session 本会话允许`、`allow_project 本项目允许`、`deny 拒绝`、`deny_stop 拒绝并停止`），不自行增删选项；标题是「需要确认 · <操作>」（操作来自首个 subject kind：shell 执行命令 / edit 修改文件 / read 读取文件 / network 访问网络 / mcp 调用 MCP 工具 / subagent 启动子任务），右侧短理由来自审查结论（「审查器拿不准，交给你决定」「审查器建议拒绝」「审查器认为可以执行」，无审查为「按权限规则需要确认」），原始 reason 放 title。subject 逐行等宽显示（shell 前缀「<shell kind> ›」，路径按 `displayPath` 相对化）。键盘：卡片挂载即获得焦点，数字键 1–N 直选第 N 项（焦点在可编辑字段时数字键不触发）；Esc 立即拒绝（capture 阶段拦截并 preventDefault，焦点在输入框时也生效且不触发输入框的中断）——只有当目标在卡片内部（反馈 textarea 自己处理 Esc 退回选项）或输入框的补全/菜单弹层开着时让位。提问支持单选、多选、自由文本和明确拒答。
 
+工具实时输出区域使用 `useStickyOutput` 粘底跟随：更新前距底部不超过 24px 时继续滚底，上翻离开底部后保留位置，滚回底部附近恢复跟随；展开时滚到底部。Shell 与外部 agent 等工具共用此区域。消息主滚动区保留独立的「回到最新消息」与长思考收起定位逻辑。
+
 ### 5.3 桌面斜杠命令
 
 命令表独立维护在 `src/commands.ts`，不导入 TUI。界面上已有对应操作的旧命令不再作为命令：输入它们只在输入框上方显示「去哪里操作」的提示（`role="status"`），Enter 不发送也不执行；未知 `/xxx` 提示「未知命令 /xxx；输入 / 查看可用命令」。

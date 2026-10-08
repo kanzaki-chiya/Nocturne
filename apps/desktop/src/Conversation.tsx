@@ -36,6 +36,7 @@ import { fileRefTitle, userText } from "./file-refs";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { displayPath } from "./paths";
 import { useReasoning, type ReasoningMap } from "./reasoning";
+import { useStickyOutput } from "./useStickyOutput";
 import "./conversation.css";
 
 export interface ConversationProps {
@@ -1444,22 +1445,9 @@ function useRunningSeconds(running: boolean): number | undefined {
   return Math.max(0, Math.floor((now - startedAt.current) / 1000));
 }
 
-/** 运行中的实时输出：内容更新与展开时都滚到底部。 */
+/** 运行中的实时输出：粘底跟随，上翻时保留阅读位置。 */
 function LiveOutput({ text }: { text: string }) {
-  const output = useRef<HTMLPreElement>(null);
-  useLayoutEffect(() => {
-    const element = output.current;
-    if (element === null) return;
-    const toBottom = () => {
-      element.scrollTop = element.scrollHeight;
-    };
-    toBottom();
-    const details = element.closest("details");
-    details?.addEventListener("toggle", toBottom);
-    return () => {
-      details?.removeEventListener("toggle", toBottom);
-    };
-  }, [text]);
+  const output = useStickyOutput(text);
   return (
     <pre ref={output} className="conversation-tool-output" aria-label="工具实时输出">
       {text}
@@ -1536,7 +1524,7 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
 }
 
 /**
- * 工具行：默认收起，点击展开。运行中行内是实时输出（自动滚底），
+ * 工具行：默认收起，点击展开。运行中行内是实时输出（粘底跟随），
  * 完成后展开是已有参数/完整结果，或该工具改动的逐文件折叠行。
  */
 function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
