@@ -77,7 +77,7 @@ describe("/theme", () => {
       const lightAt = first.indexOf("One Half Light");
       if (width < 90) expect(lightAt).toBeGreaterThan(darkAt + 100);
       screen.stdin.write("\x1b[B");
-      await waitFor(() => (screen.lastFrame() ?? "").includes(ascii ? "> light" : "› light"));
+      await waitFor(() => (screen.lastFrame() ?? "").includes(ascii ? "> 月之亮面" : "› 月之亮面"));
       screen.unmount();
     }
   }, 15000);
@@ -96,9 +96,9 @@ describe("/theme", () => {
     });
     const screen = render(createElement(ThemeApp, { session, runtime, env: ENV }));
     await openTheme(screen);
-    expect(screen.lastFrame()).toContain("› dark  当前");
+    expect(screen.lastFrame()).toContain("› 月之暗面  当前");
     screen.stdin.write("\x1b[B");
-    await waitFor(() => (screen.lastFrame() ?? "").includes("› light"));
+    await waitFor(() => (screen.lastFrame() ?? "").includes("› 月之亮面"));
     screen.stdin.write("\r");
     await waitFor(
       () => write.mock.calls.length === 1 && !(screen.lastFrame() ?? "").includes("选择主题"),
@@ -110,9 +110,9 @@ describe("/theme", () => {
     screen.unmount();
     const restarted = render(createElement(ThemeApp, { session, runtime, env: ENV }));
     await openTheme(restarted);
-    await waitFor(() => (restarted.lastFrame() ?? "").includes("› light  当前"));
+    await waitFor(() => (restarted.lastFrame() ?? "").includes("› 月之亮面  当前"));
     restarted.stdin.write("\x1b[A");
-    await waitFor(() => (restarted.lastFrame() ?? "").includes("› dark"));
+    await waitFor(() => (restarted.lastFrame() ?? "").includes("› 月之暗面"));
     restarted.stdin.write("\x1b");
     await waitFor(() => !(restarted.lastFrame() ?? "").includes("选择主题"));
     expect(write).toHaveBeenCalledTimes(1);
@@ -130,14 +130,14 @@ describe("/theme", () => {
     const screen = render(createElement(ThemeApp, { session, runtime, env: ENV }));
     await openTheme(screen);
     screen.stdin.write("\x1b[B");
-    await waitFor(() => (screen.lastFrame() ?? "").includes("› light"));
+    await waitFor(() => (screen.lastFrame() ?? "").includes("› 月之亮面"));
     screen.stdin.write("\r");
     await waitFor(() => (screen.lastFrame() ?? "").includes("未注入 RuntimeConfig"));
-    expect(screen.lastFrame()).toContain("› light");
+    expect(screen.lastFrame()).toContain("› 月之亮面");
     screen.stdin.write("\x1b");
     await waitFor(() => !(screen.lastFrame() ?? "").includes("选择主题"));
     await openTheme(screen);
-    await waitFor(() => (screen.lastFrame() ?? "").includes("› dark  当前"));
+    await waitFor(() => (screen.lastFrame() ?? "").includes("› 月之暗面  当前"));
     screen.unmount();
     await session.close();
   }, 20000);
@@ -154,11 +154,11 @@ describe("/theme", () => {
     const screen = render(createElement(ThemeApp, { session, runtime, env: ENV }));
     await openTheme(screen);
     screen.stdin.write("\x1b[B");
-    await waitFor(() => (screen.lastFrame() ?? "").includes("› light"));
+    await waitFor(() => (screen.lastFrame() ?? "").includes("› 月之亮面"));
     screen.stdin.write("\r");
     await waitFor(() => (screen.lastFrame() ?? "").includes("保存失败：磁盘不可写"));
     expect(write).toHaveBeenCalledWith("theme", "light");
-    expect(screen.lastFrame()).toContain("› light");
+    expect(screen.lastFrame()).toContain("› 月之亮面");
     screen.unmount();
     await session.close();
   }, 15000);
@@ -176,7 +176,7 @@ describe("/theme", () => {
       createElement(ThemeApp, { session, runtime, env: { ascii: true, animated: false } }),
     );
     await openTheme(screen);
-    await waitFor(() => (screen.lastFrame() ?? "").includes("> dark  当前"));
+    await waitFor(() => (screen.lastFrame() ?? "").includes("> 月之暗面  当前"));
     expect(screen.lastFrame()).toContain("Campbell");
     expect(screen.lastFrame()).toContain("One Half Light");
     screen.unmount();

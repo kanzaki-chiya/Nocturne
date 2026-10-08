@@ -19,7 +19,7 @@ export interface Prefs {
   projectSort: ProjectSort;
   /** 上次选用的思考档位（新会话草稿的默认档位） */
   lastEffort?: string | undefined;
-  /** 主题：跟随系统 / 浅色 / 深色（桌面端本机设置，不进 Core） */
+  /** 主题：跟随系统 / 月之亮面（浅色） / 月之暗面（深色）；取值仍是 system/light/dark（桌面端本机设置，不进 Core） */
   theme?: "system" | "light" | "dark" | undefined;
   /** 用户选过的普通对话工作区；undefined 用外壳 plain_workspace 的默认路径 */
   plainWorkspace?: string | undefined;

@@ -326,14 +326,27 @@ describe("SettingsPage", () => {
     await server.initialize();
     const onThemeChange = vi.fn(() => true);
     render(<SettingsPage {...props(server.client, { section: "appearance", onThemeChange })} />);
-    const dark = await screen.findByRole("radio", { name: "深色" });
+    const dark = await screen.findByRole("radio", { name: /月之暗面/ });
     expect(screen.getByRole("radio", { name: "跟随系统" }).getAttribute("aria-checked")).toBe(
       "true",
     );
     fireEvent.click(dark);
     expect(onThemeChange).toHaveBeenCalledWith("dark");
-    expect((await screen.findByRole("status")).textContent).toBe("✓已保存 主题 = 深色");
+    expect((await screen.findByRole("status")).textContent).toBe("✓已保存 主题 = 月之暗面");
     expect(server.calls.some((c) => c.method === "runtime.updateSettings")).toBe(false);
+    server.close();
+  });
+
+  it("主题卡片同时显示新名与浅色/深色小字", async () => {
+    const server = fakeServer(handlers());
+    await server.initialize();
+    render(<SettingsPage {...props(server.client, { section: "appearance" })} />);
+    const light = await screen.findByRole("radio", { name: /月之亮面/ });
+    const dark = await screen.findByRole("radio", { name: /月之暗面/ });
+    expect(light.textContent).toContain("月之亮面");
+    expect(light.querySelector(".tsub")?.textContent).toBe("浅色");
+    expect(dark.textContent).toContain("月之暗面");
+    expect(dark.querySelector(".tsub")?.textContent).toBe("深色");
     server.close();
   });
 

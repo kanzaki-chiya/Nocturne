@@ -35,10 +35,10 @@ const SECTION_HEAD: Record<SettingsPageSection, { title: string; sub: string }> 
   appearance: { title: "外观", sub: "只影响这台电脑上的桌面端" },
 };
 
-const THEMES: { value: ThemePref; label: string; cls: string }[] = [
+const THEMES: { value: ThemePref; label: string; sub?: string; cls: string }[] = [
   { value: "system", label: "跟随系统", cls: "sys" },
-  { value: "light", label: "浅色", cls: "" },
-  { value: "dark", label: "深色", cls: "dk" },
+  { value: "light", label: "月之亮面", sub: "浅色", cls: "" },
+  { value: "dark", label: "月之暗面", sub: "深色", cls: "dk" },
 ];
 
 function errText(e: unknown): string {
@@ -562,7 +562,7 @@ export function SettingsPage({
             <h5>主题</h5>
             <div className={`${rowClass("theme")} s3-themes`}>
               <div className="themes" role="radiogroup" aria-label="主题">
-                {THEMES.map(({ value, label, cls }) => (
+                {THEMES.map(({ value, label, sub, cls }) => (
                   <button
                     key={value}
                     type="button"
@@ -580,7 +580,8 @@ export function SettingsPage({
                       <i />
                       <i />
                     </span>
-                    {label}
+                    <span className="tlabel">{label}</span>
+                    {sub !== undefined && <small className="tsub">{sub}</small>}
                   </button>
                 ))}
               </div>

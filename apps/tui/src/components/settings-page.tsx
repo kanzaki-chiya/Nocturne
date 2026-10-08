@@ -15,7 +15,7 @@ import type {
   SettingsPatch,
 } from "@nocturne/core";
 
-import { useTheme, type ThemeId } from "../theme.js";
+import { useTheme, THEME_LABELS, type ThemeId } from "../theme.js";
 import { DialogFrame } from "./dialog/dialog-frame.js";
 import type { DialogMouseFrame } from "./dialog/mouse.js";
 import { CompactionThresholdDialog } from "./compaction-threshold-dialog.js";
@@ -208,7 +208,7 @@ export function SettingsPage({
     legacyReviewer(item("permission.reviewer")?.effective);
   const model = item("defaultModel")?.effective;
   const effort = item("reasoningEffort")?.effective ?? "off";
-  const themeLabel = palette.id === "dark" ? "深色" : "浅色";
+  const themeLabel = THEME_LABELS[palette.id];
 
   const rows: ShellRow[] = [
     {

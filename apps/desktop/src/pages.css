@@ -1083,6 +1083,14 @@
 .tcard.sys .pv i:last-child {
   background: linear-gradient(90deg, #0d0f13 34%, #121419 34%);
 }
+.tcard .tlabel {
+  display: block;
+}
+.tcard .tsub {
+  display: block;
+  font-size: 11px;
+  color: var(--a-faint);
+}
 
 /* 模型页尾的链接行 */
 .sets-foot {

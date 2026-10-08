@@ -2,6 +2,12 @@
 import { createContext, useContext } from "react";
 
 export type ThemeId = "dark" | "light";
+
+/** 主题显示名（致敬两面；偏好取值仍是 dark/light） */
+export const THEME_LABELS: Record<ThemeId, string> = {
+  dark: "月之暗面",
+  light: "月之亮面",
+};
 export interface ThemePalette {
   id: ThemeId;
   text: string; // 正文、状态栏主要信息

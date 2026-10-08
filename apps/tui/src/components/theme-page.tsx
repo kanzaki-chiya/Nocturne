@@ -4,7 +4,14 @@ import { useState } from "react";
 import { createSessionView, type PendingPermission, type ToolEntry } from "@nocturne/core/protocol";
 
 import { glyphs, useTuiEnv } from "../env.js";
-import { palettes, ThemeContext, useTheme, type ThemeId, type ThemePalette } from "../theme.js";
+import {
+  palettes,
+  ThemeContext,
+  THEME_LABELS,
+  useTheme,
+  type ThemeId,
+  type ThemePalette,
+} from "../theme.js";
 import { PageFooter, PageHeader } from "./page/page-shell.js";
 import { PermissionDialog } from "./permission-dialog.js";
 import { StatusBar } from "./status-bar.js";
@@ -188,7 +195,7 @@ export function ThemePage({
           color={selected === id ? current.selected : current.secondary}
           {...(selected === id ? { backgroundColor: current.selectionBg } : {})}
         >
-          {selected === id ? glyphs(env).prompt : " "} {id}
+          {selected === id ? glyphs(env).prompt : " "} {THEME_LABELS[id]}
           {id === current.id ? "  当前" : ""}
         </Text>
       ))}
