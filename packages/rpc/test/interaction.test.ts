@@ -124,20 +124,52 @@ describe("中断", () => {
   it("interrupt 通知中断运行中的 Turn，submit 随后以 aborted 返回；Turn 进行中再 submit 报 session_busy", async () => {
     const h = await connect({ scripts: [[{ type: "wait", ms: 60_000 }], textScript("好了")] });
     const { session, events } = await open(h);
-    const turn = session.submit({ text: "慢" });
-    await until(() => events.some((e) => e.type === "turn.started"), "Turn 开始");
-    await expect(session.submit({ text: "再来" })).rejects.toMatchObject({
-      code: "session_busy",
-      message: "会话正忙（Turn 或压缩进行中）",
-    });
-    session.interrupt();
-    expect(await turn).toBe("aborted");
-    const completed = events.find((e) => e.type === "turn.completed");
-    expect(completed?.type === "turn.completed" && completed.payload.reason).toBe("aborted");
-    // 中断后会话空闲，可继续提交
-    expect(await session.submit({ text: "好了" })).toBe("done");
-    h.client.close();
-    await h.served;
+    let phase = "submit";
+    const watchdog = setTimeout(() => {
+      console.error(
+        "[interrupt watchdog]",
+        JSON.stringify({
+          pid: process.pid,
+          phase,
+          events: events.map((event) => ({
+            type: event.type,
+            seq: "seq" in event ? event.seq : null,
+          })),
+          diagnostics: h.diagnostics,
+          provider: {
+            requests: h.provider.requests.length,
+            roleRequests: h.provider.roleRequests.length,
+            ...h.provider.waitState,
+          },
+          openTurn: h.coreSession(session.id)?.state().openTurn ?? null,
+          interruptReceived: h.diagnostics.some(
+            (record) => record.kind === "notification" && record.method === "session.interrupt",
+          ),
+        }),
+      );
+    }, 20_000);
+    try {
+      const turn = session.submit({ text: "慢" });
+      await until(() => events.some((e) => e.type === "turn.started"), "Turn 开始");
+      await expect(session.submit({ text: "再来" })).rejects.toMatchObject({
+        code: "session_busy",
+        message: "会话正忙（Turn 或压缩进行中）",
+      });
+      phase = "interrupt";
+      session.interrupt();
+      phase = "await aborted";
+      expect(await turn).toBe("aborted");
+      const completed = events.find((e) => e.type === "turn.completed");
+      expect(completed?.type === "turn.completed" && completed.payload.reason).toBe("aborted");
+      // 中断后会话空闲，可继续提交
+      phase = "second submit";
+      expect(await session.submit({ text: "好了" })).toBe("done");
+      h.client.close();
+      phase = "server cleanup";
+      await h.served;
+    } finally {
+      clearTimeout(watchdog);
+    }
   });
 
   it("interrupt 也可以请求形式发送，无运行中的 Turn 时无操作", async () => {

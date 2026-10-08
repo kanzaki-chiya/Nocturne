@@ -75,6 +75,7 @@ export interface Harness {
   runtimes: Runtime[];
   /** 服务端 Runtime 里打开过的进程内会话（同一份持久事件的"进程内"一侧） */
   durable(sessionId: string): readonly DurableEvent[];
+  coreSession(sessionId: string): RuntimeSession | undefined;
   diagnostics: RpcDiagnostic[];
   /** serve() 的 promise：断开或 shutdown 清理完成后 resolve */
   served: Promise<void>;
@@ -152,6 +153,7 @@ export async function connect(options: HarnessOptions = {}): Promise<Harness> {
     inits,
     runtimes,
     durable: (sessionId) => opened.get(sessionId)?.durableEvents() ?? [],
+    coreSession: (sessionId) => opened.get(sessionId),
     diagnostics,
     served,
     disposed: () => disposed,
@@ -308,6 +310,7 @@ export async function connectWithConfig(
     inits,
     runtimes,
     durable: (sessionId) => opened.get(sessionId)?.durableEvents() ?? [],
+    coreSession: (sessionId) => opened.get(sessionId),
     diagnostics,
     served,
     disposed: () => disposed,

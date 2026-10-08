@@ -108,6 +108,8 @@ Responses 组装请求时只回传带非空 `providerData.openai.itemId` 的推�
 
 ## 5. 不属于 Provider 的事
 
+离线测试替身 `FakeProvider.waitState` 提供只读的当前 wait 数量与收到 abort 的累计次数，供测试看门狗诊断；不记录请求正文，不改变脚本或中断行为。
+
 - **重试**：Provider 只报告错误是否可重试；是否重试、重试几次、何时停止，由 Agent Loop 决定（它知道是否已经输出过内容），见 [agent-loop.md](agent-loop.md)。
 - **上下文裁剪**：由 Context Builder 完成；Provider 收到的请求应当已经装得进窗口。
 - **工具执行**：Provider 只报告模型想调用什么。

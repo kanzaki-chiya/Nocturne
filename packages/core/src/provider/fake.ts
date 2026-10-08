@@ -43,6 +43,13 @@ export class FakeProvider implements Provider {
   private readonly modelInfos: ModelInfo[];
   private readonly source: FakeScript[] | FakeHandler;
   private callCount = 0;
+  private waiting = 0;
+  private waitAbortCount = 0;
+
+  /** 测试看门狗用的只读快照，不包含请求内容。 */
+  get waitState(): Readonly<{ waiting: number; aborts: number }> {
+    return { waiting: this.waiting, aborts: this.waitAbortCount };
+  }
 
   constructor(options: {
     id?: string | undefined;
@@ -99,17 +106,23 @@ export class FakeProvider implements Provider {
         throw ev.error;
       }
       if (ev.type === "wait") {
-        await new Promise<void>((resolve, reject) => {
-          const timer = ev.ms === undefined ? undefined : setTimeout(resolve, ev.ms);
-          signal.addEventListener(
-            "abort",
-            () => {
-              if (timer !== undefined) clearTimeout(timer);
-              reject(abortError());
-            },
-            { once: true },
-          );
-        });
+        this.waiting += 1;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const timer = ev.ms === undefined ? undefined : setTimeout(resolve, ev.ms);
+            signal.addEventListener(
+              "abort",
+              () => {
+                this.waitAbortCount += 1;
+                if (timer !== undefined) clearTimeout(timer);
+                reject(abortError());
+              },
+              { once: true },
+            );
+          });
+        } finally {
+          this.waiting -= 1;
+        }
         continue;
       }
       if (ev.type === "finish") sawFinish = true;
