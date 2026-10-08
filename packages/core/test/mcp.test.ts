@@ -65,6 +65,7 @@ function stubConnector(tools: ToolDefinition[]): Stub {
       open: (scope) => {
         state.scope = scope;
         return Promise.resolve({
+          startup: async () => undefined,
           reconcile: async () => undefined,
           tools: () => tools,
           status: (): McpServerStatus[] => [

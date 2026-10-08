@@ -5,7 +5,7 @@
  */
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createProcessCleanup } from "../../../scripts/test/process-cleanup.mjs";
 
 import {
@@ -57,6 +57,8 @@ async function openFake(extra?: Record<string, unknown>): Promise<Opened> {
     warn: (code, message) => warnings.push({ code, message }),
   };
   const session = await createMcpConnector().open(scope);
+  await session.startup();
+  session.applyPendingTools();
   return { session, servers, warnings };
 }
 
@@ -73,6 +75,108 @@ async function call(tool: ToolDefinition, input: Record<string, unknown>): Promi
 }
 
 describe("MCP 连接器（假 stdio 服务器）", () => {
+  it("open 在受控慢启动前返回 starting；等待可中断，工具就绪仍暂存直到边界", async () => {
+    let release!: () => void;
+    const held = new Promise<string>((resolve) => {
+      release = () => {
+        resolve("value");
+      };
+    });
+    const session = await createMcpConnector().open({
+      servers: [
+        {
+          name: "slow",
+          origin: "user",
+          command: process.execPath,
+          args: [FAKE_SERVER],
+          env: { GATE: { stored: true } },
+        },
+      ],
+      cwd,
+      workspaceRoot: cwd,
+      sessionId: "slow",
+      platform,
+      credentials: { get: () => held },
+      emitServer: () => undefined,
+      warn: () => undefined,
+    });
+    try {
+      expect(session.status()[0]?.state).toBe("starting");
+      expect(session.tools()).toEqual([]);
+      const ac = new AbortController();
+      const waiting = session.startup(ac.signal);
+      ac.abort();
+      await waiting;
+      expect(session.status()[0]?.state).toBe("starting");
+      release();
+      await session.startup();
+      expect(session.status()[0]?.state).toBe("ready");
+      expect(session.tools()).toEqual([]);
+      expect(session.applyPendingTools().add.length).toBeGreaterThan(0);
+    } finally {
+      release();
+      await session.close();
+    }
+  });
+
+  it("启动中关闭后不再 spawn，取消已启动的连接并清理进程", async () => {
+    let release!: () => void;
+    const gate = new Promise<string>((resolve) => {
+      release = () => {
+        resolve("value");
+      };
+    });
+    const spawn = vi.spyOn(platform.process, "spawnPipe");
+    try {
+      const session = await createMcpConnector().open({
+        servers: [
+          {
+            name: "slow",
+            origin: "user",
+            command: process.execPath,
+            args: [FAKE_SERVER],
+            env: { GATE: { stored: true } },
+          },
+        ],
+        cwd,
+        workspaceRoot: cwd,
+        sessionId: "close",
+        platform,
+        credentials: { get: () => gate },
+        emitServer: () => undefined,
+        warn: () => undefined,
+      });
+      await session.close();
+      release();
+      await session.startup();
+      expect(spawn).not.toHaveBeenCalled();
+      const connecting = await createMcpConnector().open({
+        servers: [
+          {
+            name: "slow",
+            origin: "user",
+            command: process.execPath,
+            args: ["-e", "setInterval(()=>{},1000)"],
+            startupTimeoutMs: 3000,
+          },
+        ],
+        cwd,
+        workspaceRoot: cwd,
+        sessionId: "kill",
+        platform,
+        emitServer: () => undefined,
+        warn: () => undefined,
+      });
+      await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce());
+      await connecting.close();
+      await connecting.startup();
+      expect(connecting.status().map((server) => server.state)).toEqual(["stopped"]);
+    } finally {
+      release();
+      spawn.mockRestore();
+    }
+  });
+
   it("启动服务器并列出工具，echo 正常调用往返", async () => {
     const { session, servers } = await openFake();
     try {
@@ -189,6 +293,7 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
       warn: (code, message) => warnings.push({ code, message }),
     });
     try {
+      await session.startup();
       const st = session.status()[0];
       expect(st?.state).toBe("failed");
       expect(st?.error).toBeDefined();

@@ -38,7 +38,8 @@
 | kind | 模块 | 内容 |
 |---|---|---|
 | `config.load` | config | 各来源路径、信任状态、警告数（不记文件全文） |
-| `session.open` | index | sessionId、cwd、workspaceRoot、resumed、加载耗时 |
+| `session.open` | index | sessionId、cwd、workspaceRoot、resumed、加载耗时、mcpStarting（仍在初始启动的数量） |
+| `mcp.startup_wait` | index / 主 Turn 首次请求前 | sessionId、durationMs、aborted；不记录工具或请求内容 |
 | `provider.request` | agent | 完整 `ModelRequest`（messages、tools、参数），外加生效协议与接口路径（`protocol`/`endpoint`，ADR-0026 §7）。请求头由 Provider 适配器构造、不含在 `ModelRequest` 里，天然不会进来；消息的 `images` 元素被替换为 `{ mimeType, bytes, sha256 }` 摘要，base64 不落盘（ADR-0023，`agent/redact.ts`） |
 | `provider.result` | agent | finishReason、usage（token 明细）、耗时、text/toolCalls 概要 |
 | `provider.error` | agent | ProviderError kind、message、retryable、attempt |

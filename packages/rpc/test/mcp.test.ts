@@ -10,6 +10,7 @@ it("mcp 五个方法往返、字段错误与凭据不进入响应", async () => 
         return { ok: true, durationMs: 1, tools: [{ name: "echo" }], stderrTail: [] };
       },
       open: async () => ({
+        startup: async () => undefined,
         tools: () => [],
         status: () => [],
         reconcile: async () => undefined,

@@ -34,6 +34,8 @@ export const DEFAULT_TURN_CONFIG: TurnConfig = {
 export type IdFactory = (kind: "turn" | "message" | "call") => string;
 
 export interface TurnDeps {
+  /** Turn 开始后、首个请求前的工具边界准备；子会话和压缩不使用。 */
+  prepareTools?: ((signal: AbortSignal) => Promise<void>) | undefined;
   skills?: { text: string; truncated: boolean } | undefined;
   compactionThreshold?: string | number | undefined;
   session: Session;

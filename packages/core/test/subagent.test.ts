@@ -1175,6 +1175,7 @@ describe("subagent：MCP 复用", () => {
         open: async () => {
           opens += 1;
           return {
+            startup: async () => undefined,
             reconcile: async () => undefined,
             tools: () => [pingTool],
             status: () => [],

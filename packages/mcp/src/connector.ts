@@ -20,6 +20,7 @@ import type {
   McpOpenScope,
   McpServerConfig,
   McpServerStatus,
+  McpSession,
   McpToolDiff,
   McpProbeResult,
   McpValue,
@@ -59,6 +60,7 @@ interface Server {
   refreshing?: Promise<void> | undefined;
   restarting?: Promise<boolean> | undefined;
   closed: boolean;
+  controller?: AbortController | undefined;
   fingerprint?: string | undefined;
   code?: NonNullable<McpProbeResult["error"]>["code"] | undefined;
   httpStatus?: number | undefined;
@@ -143,6 +145,7 @@ function fingerprint(cfg: McpServerConfig, values: Record<string, string> | unde
 
 async function stopServer(st: Server): Promise<void> {
   st.closed = true;
+  st.controller?.abort();
   const runtime = st.runtime;
   st.runtime = undefined;
   if (!runtime) return;
@@ -184,6 +187,22 @@ function isAborted(signal: AbortSignal): boolean {
   return signal.aborted;
 }
 
+async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw new Error("MCP 启动已取消");
+  let abort!: () => void;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => {
+      reject(new Error("MCP 启动已取消"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try {
+    return await Promise.race([promise, cancelled]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
+
 function toolError(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -214,6 +233,9 @@ async function fetchToolDefs(
 
 /** 启动/重连一台服务器：spawn → initialize → tools/list；失败写 st.error 并抛出 */
 async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
+  const started = Date.now();
+  const controller = new AbortController();
+  st.controller = controller;
   const startupMs = Math.min(st.cfg.startupTimeoutMs ?? DEFAULT_STARTUP_MS, MAX_STARTUP_MS);
   const cwd =
     st.cfg.cwd !== undefined
@@ -221,7 +243,21 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
         ? st.cfg.cwd
         : scope.platform.paths.resolve(scope.workspaceRoot, st.cfg.cwd)
       : scope.cwd;
-  const values = await expandEnv(st.cfg.type === "http" ? st.cfg.headers : st.cfg.env, scope, st);
+  let values: Record<string, string> | undefined;
+  try {
+    values = await abortable(
+      timeout(
+        expandEnv(st.cfg.type === "http" ? st.cfg.headers : st.cfg.env, scope, st),
+        startupMs,
+        `MCP 服务器 ${st.cfg.name} 启动`,
+      ),
+      controller.signal,
+    );
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("超时")) st.code = "startup_timeout";
+    throw e;
+  }
+  if (st.closed || controller.signal.aborted) throw new Error("MCP 启动已取消");
   st.fingerprint = fingerprint(st.cfg, values);
   let proc: PipeProcess | undefined;
   let transport: StdioPipeTransport | StreamableHTTPClientTransport;
@@ -309,13 +345,15 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
   try {
     await timeout(
       (async () => {
-        await client.connect(transport as Transport);
-        st.staged = await fetchToolDefs(scope, st);
+        await client.connect(transport as Transport, { signal: controller.signal });
+        const defs = await fetchToolDefs(scope, st);
+        if (!st.closed) st.staged = defs;
       })(),
-      startupMs,
+      Math.max(1, startupMs - (Date.now() - started)),
       `MCP 服务器 ${st.cfg.name} 启动`,
     );
   } catch (e) {
+    const cancelled = isAborted(controller.signal);
     if (e instanceof Error && e.message.includes("超时")) st.code = "startup_timeout";
     else if (st.cfg.type !== "http") {
       st.code =
@@ -324,6 +362,7 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
           : "initialize_failed";
     }
     await stopServer(st);
+    if (!cancelled) st.closed = false;
     throw e;
   }
 }
@@ -568,7 +607,7 @@ function statusOf(st: Server): McpServerStatus {
   return {
     name: st.cfg.name,
     state: st.state,
-    toolCount: st.tools.size,
+    toolCount: st.staged?.size ?? st.tools.size,
     error: st.error,
     restarts: st.restarts,
   };
@@ -623,7 +662,7 @@ export function createMcpConnector(): McpConnector {
         };
       }
     },
-    async open(scope) {
+    open(scope) {
       const removed: string[] = [];
       const servers: Server[] = scope.servers
         .filter((cfg) => cfg.enabled !== false)
@@ -636,7 +675,7 @@ export function createMcpConnector(): McpConnector {
           secrets: [],
         }));
       // 并行启动；单服务器失败只影响自身（降级为无该服务器工具）
-      await Promise.all(
+      const initialStartup = Promise.all(
         servers.map(async (st) => {
           scope.emitServer({ name: st.cfg.name, state: "starting" });
           scope.diagnostics?.record("mcp.event", {
@@ -645,20 +684,20 @@ export function createMcpConnector(): McpConnector {
           });
           try {
             await connectServer(scope, st);
-            st.tools = st.staged ?? new Map<string, ToolDefinition>();
-            st.staged = undefined;
+            if (st.closed) return;
             st.state = "ready";
             scope.emitServer({
               name: st.cfg.name,
               state: "ready",
-              toolCount: st.tools.size,
+              toolCount: st.staged?.size ?? 0,
             });
             scope.diagnostics?.record("mcp.event", {
               server: st.cfg.name,
               state: "ready",
-              toolCount: st.tools.size,
+              toolCount: st.staged?.size ?? 0,
             });
           } catch (e) {
+            if (st.closed && st.controller?.signal.aborted) return;
             st.state = "failed";
             st.error =
               st.code === "mcp_secret_missing"
@@ -678,8 +717,24 @@ export function createMcpConnector(): McpConnector {
         }),
       );
 
-      return {
-        async reconcile(configs) {
+      return Promise.resolve<McpSession>({
+        async startup(signal?: AbortSignal) {
+          if (signal?.aborted) return;
+          let aborted: (() => void) | undefined;
+          const cancel = new Promise<void>((resolve) => {
+            aborted = () => {
+              resolve();
+            };
+            signal?.addEventListener("abort", aborted, { once: true });
+          });
+          try {
+            await Promise.race([initialStartup, cancel]);
+          } finally {
+            if (aborted) signal?.removeEventListener("abort", aborted);
+          }
+        },
+        async reconcile(configs: readonly McpServerConfig[]) {
+          await initialStartup;
           const wanted = new Map(
             configs.filter((cfg) => cfg.enabled !== false).map((cfg) => [cfg.name, cfg]),
           );
@@ -772,7 +827,7 @@ export function createMcpConnector(): McpConnector {
             }),
           );
         },
-      };
+      });
     },
   };
 }

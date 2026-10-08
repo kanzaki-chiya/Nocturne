@@ -709,6 +709,7 @@ describe("runtime：updateProviders 与警告（provider-setup.md 第 6 节）",
         open: async () => {
           mcpOpens++;
           return {
+            startup: async () => undefined,
             reconcile: async () => undefined,
             tools: () => [],
             status: () => [],

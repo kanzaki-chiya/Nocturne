@@ -33,6 +33,7 @@ async function setup() {
 
 function fakeMcpSession(overrides: Partial<McpSession> = {}): McpSession {
   return {
+    startup: async () => undefined,
     tools: () => [],
     status: () => [],
     reconcile: async () => undefined,

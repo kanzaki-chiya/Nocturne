@@ -36,3 +36,7 @@ Phase 5 要把 MCP 工具接入 Runtime。需要回答三个问题：客户端�
 - Core 公开导出需要增补 `ToolDefinition`/`ToolResult`/`ToolContext`/`ToolTraits`/`McpConnector`/`McpServerConfig` 等类型（纯类型导出，兼容变更）。
 - platform 新增 `spawnPipe` 能力，后续 hooks 也复用它。
 - 远程传输（Streamable HTTP）与凭据管理在本阶段范围之外，见 mcp.md 第 2、9 节。
+
+## 修订
+
+- 2026-10-08：会话打开不等待 MCP 启动。原先会话打开（新建与恢复）要等全部 MCP 服务器启动完成，最多等 startupTimeoutMs。远程 HTTP 服务器每次打开都要重新做 TLS 握手、initialize 和 tools/list，实测约 1 秒，桌面端每次切到空闲会话都要多等这么久。改为：会话打开立即返回，MCP 服务器照常并行启动 mcp.server 事件与 /mcp 可见；服务器启动完成后工具先暂存，下一个 Turn开始时并入注册表，复用 tools/list_changed 的暂存与切换路径，Turn 内工具集与上下文前缀保持稳定的规则不变；Turn 开始构建请求前，如果还有服务器处于 starting，等待它们结束（从开始启动算起最多 startupTimeoutMs，超时记 failed），保证模型第一轮看到完整工具集，等待期间可以中断；失败与超时的处理不变（工具不注册，发 runtime.warning，会话继续）；会话关闭时取消仍在启动的连接并沿用现有进程树清理。不采用多个会话共享连接：stdio 服务器的进程按会话隔离，作用域由会话的 workspaceRoot 与信任状态决定（mcp.md 第 4 节），共享需另行设计。

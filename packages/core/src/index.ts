@@ -1377,11 +1377,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               });
             }
           }
-          for (const s of mcpSession.status()) {
-            if (s.state === "failed") {
-              warnings.push(`MCP 服务器 ${s.name} 启动失败：${s.error ?? "未知错误"}`);
-            }
-          }
         } catch (e) {
           warnings.push(`MCP 装配失败：${e instanceof Error ? e.message : String(e)}`);
         }
@@ -1392,15 +1387,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       mcpUpdate = mcpUpdate
         .catch(() => undefined)
         .then(async () => {
-          if (!pendingMcp || mcpSession === undefined) return;
-          pendingMcp = false;
-          const next = config
-            ? (await config.forWorkspace(meta.workspaceRoot)).resolved.mcpServers
-            : [];
-          await mcpSession.reconcile([
-            ...(options.mcpServers ?? []),
-            ...next.map((s) => ({ ...s.entry, name: s.name, origin: s.origin, dir: s.dir })),
-          ]);
+          if (mcpSession === undefined) return;
+          if (pendingMcp) {
+            pendingMcp = false;
+            const next = config
+              ? (await config.forWorkspace(meta.workspaceRoot)).resolved.mcpServers
+              : [];
+            await mcpSession.reconcile([
+              ...(options.mcpServers ?? []),
+              ...next.map((s) => ({ ...s.entry, name: s.name, origin: s.origin, dir: s.dir })),
+            ]);
+          }
           const diff = mcpSession.applyPendingTools();
           for (const name of diff.remove) tools.unregister(name);
           for (const tool of diff.add) {
@@ -1814,6 +1811,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       cwd: meta.cwd,
       workspaceRoot: meta.workspaceRoot,
       resumed: resume !== undefined,
+      mcpStarting: mcpSession?.status().filter((s) => s.state === "starting").length ?? 0,
       durationMs: Date.now() - openedAt,
     });
 
@@ -2169,21 +2167,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             "invalid_command",
             "技能 name 必须是非空字符串，arguments 必须是字符串",
           );
-        // Turn 边界：应用暂存的 MCP 工具集变化（list_changed / 重连刷新）
-        if (mcpSession !== undefined) {
-          const diff = mcpSession.applyPendingTools();
-          for (const name of diff.remove) tools.unregister(name);
-          for (const tool of diff.add) {
-            try {
-              tools.register(tool);
-            } catch (e) {
-              session.emitEphemeral("runtime.warning", {
-                code: "mcp_tool_conflict",
-                message: `MCP 工具 ${tool.name} 注册失败：${e instanceof Error ? e.message : String(e)}`,
-              });
-            }
-          }
-        }
         const ac = new AbortController();
         controller = ac;
         let settleTurn!: () => void;
@@ -2221,6 +2204,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             throw new RuntimeCommandError("invalid_model", model.model.unavailable.reason);
           }
           const deps: TurnDeps = {
+            prepareTools: async (signal) => {
+              if (mcpSession?.status().some((s) => s.state === "starting")) {
+                const started = Date.now();
+                await mcpSession.startup(signal);
+                diagnostics.record("mcp.startup_wait", {
+                  sessionId: session.id,
+                  durationMs: Date.now() - started,
+                  aborted: signal.aborted,
+                });
+              }
+              if (!signal.aborted) await applyMcp();
+            },
             skills: catalog,
             visionModel: () =>
               resolveModelRole(

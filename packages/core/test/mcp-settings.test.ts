@@ -59,6 +59,7 @@ describe("MCP schema、层与凭据事务", () => {
           };
         },
         open: async () => ({
+          startup: async () => undefined,
           tools: () => [],
           status: () => [],
           reconcile: async () => undefined,
@@ -229,6 +230,7 @@ describe("MCP schema、层与凭据事务", () => {
       mcp: {
         probe,
         open: async () => ({
+          startup: async () => undefined,
           tools: () => [],
           status: () => [],
           reconcile: async () => undefined,
@@ -275,6 +277,7 @@ describe("MCP schema、层与凭据事务", () => {
       mcp: {
         probe: async () => ({ ok: true, durationMs: 0, tools: [] }),
         open: async () => ({
+          startup: async () => undefined,
           tools: () => [],
           status: () => [],
           reconcile,

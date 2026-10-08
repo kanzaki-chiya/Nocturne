@@ -307,6 +307,8 @@ export interface McpToolDiff {
  * 在 Turn 边界由 Runtime 调用并应用到会话注册表。
  */
 export interface McpSession {
+  /** 等待初始启动结束；中止只停止等待，不取消后台连接。 */
+  startup(signal?: AbortSignal): Promise<void>;
   reconcile(servers: readonly McpServerConfig[]): Promise<void>;
   tools(): readonly ToolDefinition[];
   status(): McpServerStatus[];

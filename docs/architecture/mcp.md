@@ -73,10 +73,12 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 
 ```text
 会话打开（wrapSession，新建与恢复同样处理）
-  → 按 resolved.mcpServers 并行启动全部 enabled 服务器（不超过各自的 startupTimeoutMs）
-    ├── spawn（platform.spawnPipe）→ initialize 握手 → tools/list → 注册工具
-    └── 失败/超时 → 服务器记 failed，发临时事件 mcp.server + runtime.warning，会话照常打开
+  → open() 立即返回 McpSession，各服务器 starting，后台并行启动（不超过各自 startupTimeoutMs）
+    ├── spawn（platform.spawnPipe）→ initialize 握手 → tools/list → staged 暂存工具
+    └── 失败/超时 → 服务器记 failed，发临时事件 mcp.server + runtime.warning，不写打开时 warnings
 会话运行中
+  ├── 主 Turn 已开始、首次请求前 startup(signal) 等待初始启动结束，可中断
+  │   → 复用 applyMcp / applyPendingTools，将暂存工具并入注册表
   ├── tools/call 经执行管线（第 5、6 节）
   ├── tools/list_changed 通知 → 重新 tools/list 并**暂存**，下一个 Turn 边界才切换
   │   注册表（Turn 内工具集与上下文前缀保持稳定，不打断进行中的请求，也保住
@@ -87,7 +89,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 ```
 
 - **作用域是会话**：服务器集合由会话的 `workspaceRoot` 与信任状态决定（不同会话的项目配置可以不同），进程随会话关闭终止。同一 Runtime 下两个会话各自持有自己的服务器进程，不共享。
-- **并行启动、限时等待**：会话打开不被单个慢服务器无限阻塞；超时服务器记 `failed`，其工具不注册（模型看不到），会话继续。`mcp.server` 事件与 `/mcp` 命令给出失败原因（第 7 节）。
+- **并行启动、不阻塞打开**：McpSession.startup(signal?: AbortSignal): Promise<void> 等待所有初始启动结束，每台从开始启动算起限时 startupTimeoutMs，不从调用等待算起；中止仅停止等待，后台继续。成功工具走 staged / applyPendingTools 暂存切换路径；超时服务器记 failed、不注册工具，mcp.server 与 runtime.warning 照常发出，/mcp 可见。主 Turn 持久化用户消息后、首次请求前等待与切换；子代理与压缩不等待。关闭取消仍在启动的连接并沿用进程树清理，不等待后台启动超时。
 - **崩溃与重连**：进程在会话中途退出 → 状态 `crashed`，发 `mcp.server` + `runtime.warning(code="mcp_server_crashed")`；在途 `tools/call` 以 `mcp_unavailable` 失败。**惰性重连**：对崩溃服务器的下一次调用触发一次重连尝试（重新 spawn + initialize + tools/list），成功后恢复；每个会话每台服务器至多重连 3 次，超过后记 `failed` 不再尝试——避免反复拉起一个必崩的进程。
 - **Runtime 关闭清理**：`session.close()` 关闭本会话全部 MCP 连接（含 `failed`/`crashed` 状态的残留进程）。**已知限制（Windows、POSIX 均适用）**：Nocturne 主进程被强杀时，无法执行主动清理；MCP 服务器的 stdin 管道会关闭。若服务器响应 EOF 自行退出，就不会残留；若服务器忽略 EOF 并继续运行，就可能成为孤儿进程。Windows 当前没有用 Job Object 绑定生命周期；POSIX 虽用独立进程组，但主进程强杀后也不会自动向该组发信号。手动清理前先核对服务器命令行及 PID：Windows 使用 `taskkill /PID <PID> /T /F`；POSIX 使用 `kill -TERM <PID>`，必要时逐一清理其子进程。真实 `nctrn` 进程与假 MCP 服务器的强杀验收见 `apps/cli/test/mcp-parent-kill.accept.mjs`；后续方案见 [roadmap](../roadmap/roadmap.md)。
 - **子会话复用（Phase 6）**：Subagent 子会话的工具集直接取父会话 `mcpSession.tools()` 的快照——同一连接、同一批服务器进程，**不为子会话启动新的 MCP 服务器**，也不做第二次 initialize（[subagent.md](subagent.md) 第 10 节）。

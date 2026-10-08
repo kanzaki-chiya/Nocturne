@@ -301,6 +301,7 @@ export async function runTurn(
       });
     }
 
+    await deps.prepareTools?.(signal);
     // ── Step 循环 ──
     for (;;) {
       if (aborted(signal)) return await finish("aborted");

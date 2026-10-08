@@ -143,6 +143,8 @@ describe("Streamable HTTP 和探测", () => {
       },
     });
     try {
+      await session.startup();
+      session.applyPendingTools();
       const tool = session.tools()[0];
       expect(tool).toBeDefined();
       expect(
@@ -225,6 +227,8 @@ describe("Streamable HTTP 和探测", () => {
     const fixture = await httpFixture();
     const session = await createMcpConnector().open(scope(cfg(`${fixture.url}/same`)));
     try {
+      await session.startup();
+      session.applyPendingTools();
       expect(session.status()[0]?.state).toBe("ready");
       const tool = session.tools()[0];
       expect(tool).toBeDefined();
@@ -291,6 +295,8 @@ describe("Streamable HTTP 和探测", () => {
       credentials: { get: async () => key },
     });
     try {
+      await session.startup();
+      session.applyPendingTools();
       const count = fixture.requests.length;
       await session.reconcile([server]);
       expect(fixture.requests).toHaveLength(count);
