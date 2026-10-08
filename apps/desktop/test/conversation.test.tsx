@@ -122,6 +122,47 @@ it("用户技能小标签使用日志快照，展开正文，工具行显示已�
   expect(screen.getByText("已加载")).toBeTruthy();
 });
 
+it("任务清单成功工具行显示快照、进度与全部完成或清空，不显示 JSON", () => {
+  const view = createSessionView();
+  const entry = tool({ name: "todo_write", input: { items: [] } });
+  if (!entry.result) throw new Error("fixture 缺少结果");
+  entry.result.output = {
+    items: [
+      { text: "第一项", status: "completed" },
+      { text: "正在做", status: "in_progress" },
+      { text: "待办", status: "pending" },
+    ],
+  };
+  view.entries = [entry];
+  const rendered = mount(view);
+  expect(screen.getByText("任务清单")).toBeTruthy();
+  expect(screen.getByText("1/3 · 正在：正在做")).toBeTruthy();
+  expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("1");
+  fireEvent.click(screen.getByLabelText("工具详细信息"));
+  expect(screen.getAllByRole("listitem")).toHaveLength(3);
+  expect(rendered.container.querySelector(".todo-in_progress .todo-text")?.textContent).toBe(
+    "正在做",
+  );
+  expect(screen.queryByRole("button", { name: "详情" })).toBeNull();
+  entry.result.output = { items: [{ text: "第一项", status: "completed" }] };
+  view.revision++;
+  rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+  expect(screen.getByText("1/1 · 全部完成").className).toContain("todo-complete");
+  entry.result.output = { items: [] };
+  view.revision++;
+  rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+  expect(screen.getByText("清空任务清单")).toBeTruthy();
+});
+
+it("失败的任务清单工具沿用普通错误与详情", () => {
+  const view = createSessionView();
+  view.entries = [{ ...failedTool("invalid_input", "清单无效"), name: "todo_write" }];
+  mount(view);
+  fireEvent.click(screen.getByLabelText("工具详细信息"));
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(screen.getByRole("button", { name: "详情" })).toBeTruthy();
+});
+
 it("委派标签显示日志快照而不把模型指令重复放进用户气泡", () => {
   const view = createSessionView();
   view.entries = [

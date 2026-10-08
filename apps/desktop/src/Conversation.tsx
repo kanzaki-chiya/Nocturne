@@ -12,6 +12,7 @@ import {
 import { marked, type Token, type Tokens } from "marked";
 import {
   parseFileRefs,
+  todoItemsFromCompletion,
   splitCodeRef,
   type PendingPermission,
   type ImageAttachment,
@@ -38,6 +39,7 @@ import { fileRefTitle, userText } from "./file-refs";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { displayPath } from "./paths";
 import { TurnChangesCard } from "./TurnChangesCard";
+import { TodoList, TodoProgress, todoSummary } from "./TodoList";
 import { useReasoning, type ReasoningMap } from "./reasoning";
 import { useStickyOutput } from "./useStickyOutput";
 import { useCopyText } from "./useCopyText";
@@ -1034,6 +1036,7 @@ function UserMessage({
 // ── 工具行 ──
 
 const TOOL_META: Record<string, { icon: string; label: string }> = {
+  todo_write: { icon: "✓", label: "任务清单" },
   skill: { icon: "S", label: "技能" },
   read: { icon: "R", label: "读取" },
   grep: { icon: "S", label: "搜索" },
@@ -1683,7 +1686,13 @@ function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
   const [open, setOpen] = useState(false);
   const [fileOpen, setFileOpen] = useState<Record<string, boolean>>({});
   const meta = toolMeta(entry.name ?? "", entry.subjects);
-  const arg = toolArgument(entry, cwd);
+  const todos = todoItemsFromCompletion({
+    name: entry.name ?? "",
+    status: entry.status,
+    output: entry.result?.output,
+  });
+  const summary = todos === undefined ? undefined : todoSummary(todos);
+  const arg = summary?.text ?? toolArgument(entry, cwd);
   const range = toolRange(entry);
   const running = entry.status === "running";
   const seconds = useRunningSeconds(running);
@@ -1734,10 +1743,11 @@ function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
             </span>
             <span className="tool-name">{meta.label}</span>
             {arg !== "" && (
-              <span className="tool-arg" title={arg}>
+              <span className={`tool-arg${summary?.complete ? " todo-complete" : ""}`} title={arg}>
                 {arg}
               </span>
             )}
+            {todos !== undefined && todos.length > 0 && <TodoProgress items={todos} />}
             {range !== undefined && <span className="tool-range">{range}</span>}
             {preview !== "" && (
               <span className="tool-live" title={entry.liveOutput}>
@@ -1746,7 +1756,7 @@ function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
             )}
             {running && <span className="tool-spin" aria-hidden="true" />}
             {seconds !== undefined && <span className="tool-secs">{seconds} 秒</span>}
-            {!running && (
+            {!running && todos === undefined && (
               <span
                 className={`tool-res${
                   error !== undefined
@@ -1760,7 +1770,13 @@ function ToolRow({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
               </span>
             )}
           </summary>
-          {open ? <ToolDetails entry={entry} cwd={cwd} /> : null}
+          {open ? (
+            todos === undefined ? (
+              <ToolDetails entry={entry} cwd={cwd} />
+            ) : (
+              <TodoList items={todos} />
+            )
+          ) : null}
         </details>
       )}
     </article>

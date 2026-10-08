@@ -18,6 +18,7 @@ import {
   type ExternalAgentOverview,
   type SkillOverview,
   type SkillInvocation,
+  type TodoItem,
 } from "@nocturne/core/protocol";
 
 import { completeSlash, parseSlash, type SlashGroup } from "./commands";
@@ -36,6 +37,8 @@ import {
   type PickedImage,
 } from "./picked-images";
 import "./composer.css";
+import type { PrefsStore } from "./prefs";
+import { TodoPanel } from "./TodoList";
 
 export interface ChoiceOption {
   value: string;
@@ -103,6 +106,8 @@ export interface ComposerSubmit {
 }
 
 export interface ComposerProps {
+  todos?: readonly TodoItem[];
+  prefs?: PrefsStore;
   skills?: readonly SkillOverview[];
   externalAgents?: readonly ExternalAgentOverview[];
   running: boolean;
@@ -255,6 +260,8 @@ export function Composer({
   placeholder,
   skills = [],
   externalAgents = [],
+  todos = [],
+  prefs,
 }: ComposerProps) {
   const isSession = variant === "session";
   const [draft, setDraft] = useState("");
@@ -1132,6 +1139,7 @@ export function Composer({
             )}
           </div>
         )}
+        {isSession && <TodoPanel items={todos} prefs={prefs} />}
         <div
           className={`cbox${dragOver ? " drop" : ""}`}
           onDragOver={(event) => {

@@ -27,6 +27,8 @@ export interface Prefs {
   plainWorkspaces: string[];
   /** 自动检查更新（默认开；只有显式 false 才关闭） */
   autoUpdate?: boolean | undefined;
+  /** 常驻任务清单折叠状态；缺省展开，全局一份 */
+  todosCollapsed?: boolean | undefined;
   /**
    * 回答内文件引用"打开文件用"（U-09）：系统默认程序 / VS Code / Cursor。
    * 存应用数据（localStorage），不进 settings.json；缺省 system。
@@ -90,6 +92,7 @@ function parse(raw: string | null): Prefs {
   const plainWorkspaces = strings(obj.plainWorkspaces);
   if (plainWorkspaces !== undefined) prefs.plainWorkspaces = plainWorkspaces;
   if (typeof obj.autoUpdate === "boolean") prefs.autoUpdate = obj.autoUpdate;
+  if (typeof obj.todosCollapsed === "boolean") prefs.todosCollapsed = obj.todosCollapsed;
   if (obj.fileOpener === "system" || obj.fileOpener === "vscode" || obj.fileOpener === "cursor") {
     prefs.fileOpener = obj.fileOpener;
   }
@@ -135,6 +138,7 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         ...(prefs.theme !== undefined ? { theme: prefs.theme } : {}),
         ...(prefs.plainWorkspace !== undefined ? { plainWorkspace: prefs.plainWorkspace } : {}),
         ...(prefs.autoUpdate !== undefined ? { autoUpdate: prefs.autoUpdate } : {}),
+        ...(prefs.todosCollapsed !== undefined ? { todosCollapsed: prefs.todosCollapsed } : {}),
         ...(prefs.fileOpener !== undefined ? { fileOpener: prefs.fileOpener } : {}),
         ...(prefs.lastUpdateCheck !== undefined ? { lastUpdateCheck: prefs.lastUpdateCheck } : {}),
         ...(prefs.pendingUpdate !== undefined ? { pendingUpdate: { ...prefs.pendingUpdate } } : {}),

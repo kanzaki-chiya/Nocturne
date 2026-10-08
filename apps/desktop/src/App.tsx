@@ -1314,6 +1314,8 @@ function SessionPane({
         skills={skills}
         externalAgents={externalAgents}
         variant="session"
+        todos={view.todos}
+        prefs={prefs}
         running={running}
         onSubmit={onSubmit}
         onInterrupt={onInterrupt}
