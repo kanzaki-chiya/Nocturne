@@ -133,6 +133,49 @@ describe("先读后写内容哈希", () => {
     expect(await platform.fs.readTextFile(file)).toBe("a\nB\nc\nd\n");
   });
 
+  it("带 BOM 的文件只改 mtime → edit 成功，不误报 stale_file", async () => {
+    const ws = tmpWorkspace();
+    const file = path.join(ws, "bom.ts");
+    writeFileSync(file, "﻿alpha\nbeta\n");
+    const h = await makeHarness(ws);
+    expect((await readViaTool(h, "bom.ts")).status).toBe("ok");
+    touchMtimeOnly(file);
+    const r = await h.executor.execute(
+      call("edit", { path: "bom.ts", old: "beta", new: "gamma" }),
+      h.scope,
+    );
+    expect(r.status).toBe("ok");
+    expect(await platform.fs.readTextFile(file)).toBe("﻿alpha\ngamma\n");
+  });
+
+  it("差异超过 4000 字符 → 不附 diff、不刷新记录，重试仍拒绝，read 后才通过", async () => {
+    const ws = tmpWorkspace();
+    const file = path.join(ws, "a.ts");
+    const before = Array.from({ length: 200 }, (_, i) => `line-${i}-${"a".repeat(20)}`).join("\n");
+    writeFileSync(file, `${before}\n`);
+    const h = await makeHarness(ws);
+    expect((await readViaTool(h, "a.ts")).status).toBe("ok");
+    writeFileSync(file, `${before.replaceAll("a", "b")}\n`);
+    const first = await h.executor.execute(
+      call("edit", { path: "a.ts", old: "line-0-", new: "LINE-0-" }),
+      h.scope,
+    );
+    expect(first.status).toBe("error");
+    expect(first.result.status === "error" && first.result.error.code).toBe("stale_file");
+    expect(first.result.modelContent).not.toContain("@@");
+    const retry = await h.executor.execute(
+      call("edit", { path: "a.ts", old: "line-0-", new: "LINE-0-" }, "c2"),
+      h.scope,
+    );
+    expect(retry.status).toBe("error");
+    expect((await readViaTool(h, "a.ts")).status).toBe("ok");
+    const third = await h.executor.execute(
+      call("edit", { path: "a.ts", old: "line-0-", new: "LINE-0-" }, "c3"),
+      h.scope,
+    );
+    expect(third.status).toBe("ok");
+  });
+
   it("文件超过 64KB → stale_file 不含 diff，重试仍拒绝，read 后才通过", async () => {
     const ws = tmpWorkspace();
     const file = path.join(ws, "big.ts");

@@ -13,12 +13,17 @@ import type { ReadStateRecord, ReadStateStore } from "./types.js";
 export const READ_STATE_MAX_TEXT_BYTES = 64 * 1024;
 /** 每会话最多保留的文本份数，超过按最久未用淘汰 */
 export const READ_STATE_MAX_TEXTS = 50;
-/** stale_file 附带 diff 的字符上限，超过截断并注明 */
+/** stale_file 附带 diff 的字符上限，超过则不附 diff、要求重新 read */
 export const STALE_DIFF_MAX_CHARS = 4000;
 
-/** 文本内容的 sha256 十六进制（utf8 编码） */
+/** 去掉开头的 BOM：read 用 TextDecoder 解码会去掉，fs.readTextFile 不去，两边统一后再比较 */
+export function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+/** 文本内容的 sha256 十六进制（utf8 编码，忽略开头的 BOM） */
 export function hashText(text: string): string {
-  return createHash("sha256").update(text, "utf8").digest("hex");
+  return createHash("sha256").update(stripBom(text), "utf8").digest("hex");
 }
 
 /** 文本按 utf8 是否 ≤64KB */

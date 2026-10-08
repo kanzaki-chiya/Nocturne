@@ -104,8 +104,8 @@ execute(call, ctx):
 
 "先读后写"与过期检测防止模型基于过时内容覆盖文件，是低成本、高收益的保护。`read` 与用户 `@文件` 在记录已读状态时同时保存内容哈希（sha256）与条件原文：完整读取且文件 ≤64KB 时保留原文（每会话最多 50 份，按最久未用淘汰，其余只留哈希）；部分读取、大文件只留哈希。状态保存在运行时内存中，会话恢复后需要重新读取或重新引用。判定细则（`edit`、`write`、`apply_patch` 共用 `guardWritable` 同一判定）：
 
-- 写入工具以 `ctx.subjects` 中已批准的**解析后路径**为准；写入前重新 `stat`/`realpath`：解析结果与批准时不一致 → `resource_changed`；已存在文件在 `readState` 中无记录 → `error(code="not_read")`；记录的 `mtimeMs`/`size` 与当前一致 → 通过；不一致时比较内容哈希：相同 → 放行并用当前 `stat` 刷新记录（`prettier --write`、`eslint --fix`、`git checkout` 等只改 `mtime` 的情况不再误报）；不同 → `error(code="stale_file")`。
-- `stale_file` 时若有旧文本，`modelContent` 附上「读取时 → 当前」的统一行级 diff（复用 `diffLines`，超 4000 字符截断并注明），`error.message` 保持简短、`code` 仍是 `stale_file`，diff 只放在 `modelContent`；附带 diff 后用当前内容刷新记录，模型可据此直接重试。无旧文本（大文件、被淘汰、部分读取）时保持原提示、要求重新 `read`，不刷新记录；部分读取按无旧文本处理，不拿部分内容做 diff。
+- 写入工具以 `ctx.subjects` 中已批准的**解析后路径**为准；写入前重新 `stat`/`realpath`：解析结果与批准时不一致 → `resource_changed`；已存在文件在 `readState` 中无记录 → `error(code="not_read")`；记录的 `mtimeMs`/`size` 与当前一致 → 通过；不一致时比较内容哈希：相同 → 放行并用当前 `stat` 刷新记录（哈希忽略开头的 BOM，`read` 解码会去掉 BOM）（`prettier --write`、`eslint --fix`、`git checkout` 等只改 `mtime` 的情况不再误报）；不同 → `error(code="stale_file")`。
+- `stale_file` 时若有旧文本，`modelContent` 附上「读取时 → 当前」的统一行级 diff（复用 `diffLines`），`error.message` 保持简短、`code` 仍是 `stale_file`，diff 只放在 `modelContent`；附带 diff 后用当前内容刷新记录，模型可据此直接重试。无旧文本（大文件、被淘汰、部分读取）或 diff 超过 4000 字符时不附 diff，保持原提示、要求重新 `read`，不刷新记录（模型没看到的改动不能当作已读）；部分读取按无旧文本处理，不拿部分内容做 diff。
 - `write` 创建尚不存在的文件不要求先读；写入瞬间文件恰好出现（竞态）按已存在文件处理，即要求先读。
 - `edit` 未命中仍返回 `no_match`，仅在路径和先读状态检查通过后，用已读的目标文本有界地诊断换行符、缩进、空白差异，或给出一处至多 5 行、带实际行号的相近片段；没有可信候选或文本过大时给简短提示。诊断只供模型修正精确的 `old`，绝不用于自动替换。
 - `edit` 与 `write` 创建/覆盖在有变化时于 `output.diff` 携带行级 unified 风格差异，头部为 `@@ -旧起始行,旧行数 +新起始行,新行数 @@`，路径由 `output.path` 提供；行尾 CRLF/LF 与末尾换行变化按变更行表达。`modelContent` 是简短摘要，不含完整 diff；结构化 `output` 超过 100,000 字符时仍按第 4 节的预算省略。

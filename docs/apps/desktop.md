@@ -130,7 +130,7 @@ interface NodeProbe {
 
 增删 diff 行与标题计数使用独立的样式类；增删正文均使用默认文字颜色和相同字号，行号、标记与正文对齐，仅背景和标记列区分增删。结束回执不展示英文原因标识，中断显示「已中断」。「回到最新消息」位于消息滚动区下方的独立操作行，不覆盖正文。
 
-失败工具行尾直接显示错误摘要，不再另起错误框：`not_read`（「需先读取文件」）、`stale_file`（无 diff 时「文件已变化，需重新读取」，`modelContent` 含 `@@` 时「文件已变化，已附上变更」）属于可恢复的守卫错误（`Conversation.tsx` 的 `RECOVERABLE_TOOL_ERRORS`，按 `error.code` 判断），用中性淡色（`tool-res recoverable`，复用次要文字颜色），不用 `--a-error`、不显示「失败」字样，展开区照常显示完整原文；超时行尾按 `error.code` 与 `output.timeoutMs` 显示「超时（N 秒）」（不解析中文文案），展开区显示 `modelContent` 中实际输出的最后 40 行，不重复摘要句；其他错误（命令失败、权限拒绝等）仍以红色（`tool-res err`）显示，取 Core message 第一句（不把扩展名或小数中的句点当句末），工作区内路径相对化，不显示错误码。点击工具行后在展开区显示完整原文，避免重复展示 modelContent。
+失败工具行尾直接显示错误摘要，不再另起错误框：`not_read`（「需先读取文件」）、`stale_file`（无 diff 时「文件已变化，需重新读取」，`modelContent` 含以 `@@ -` 开头的 hunk 行时「文件已变化，已附上变更」）属于可恢复的守卫错误（`Conversation.tsx` 的 `RECOVERABLE_TOOL_ERRORS`，按 `error.code` 判断），用中性淡色（`tool-res recoverable`，复用次要文字颜色），不用 `--a-error`、不显示「失败」字样，展开区照常显示完整原文；超时行尾按 `error.code` 与 `output.timeoutMs` 显示「超时（N 秒）」（不解析中文文案），展开区显示 `modelContent` 中实际输出的最后 40 行，不重复摘要句；其他错误（命令失败、权限拒绝等）仍以红色（`tool-res err`）显示，取 Core message 第一句（不把扩展名或小数中的句点当句末），工作区内路径相对化，不显示错误码。点击工具行后在展开区显示完整原文，避免重复展示 modelContent。
 
 用户气泡里的图片附件经 `AttachmentImageSource`（`src/attachment-images.ts`）按 sha256 缓存为 blob URL；发送成功登记原始字节，缓存未命中时仅在气泡进入可视区后调用 `session.readAttachment`。缩略图保持比例，最大 160px，沿用输入框预览的圆角、边框与底色。加载中显示占位，读取或显示失败时退回文件名 chip，title 给出失败原因；工具结果中的图片仍只显示 chip，不加载缩略图。
 

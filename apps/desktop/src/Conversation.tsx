@@ -1199,9 +1199,9 @@ function isRecoverableToolErrorCode(code: string | undefined): boolean {
   return code !== undefined && RECOVERABLE_TOOL_ERRORS.has(code);
 }
 
-/** 可恢复的守卫错误是否附带了 diff（Item2 在 modelContent 里放入统一 diff，头部含 @@）。 */
+/** stale_file 是否附带了 diff：Core 把行级 diff 放进 modelContent，hunk 行以「@@ -」开头。 */
 function hasStaleDiff(entry: ToolEntry): boolean {
-  return (entry.result?.modelContent ?? "").includes("@@");
+  return /^@@ -\d/m.test(entry.result?.modelContent ?? "");
 }
 
 /** 超时行尾摘要：优先用 output.timeoutMs 换算秒数，不解析中文文案；缺失时回退通用文案。 */

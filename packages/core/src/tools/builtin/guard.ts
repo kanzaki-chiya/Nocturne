@@ -2,13 +2,13 @@
  * write/edit 共享的"先读后写"守卫（tools.md 第 6 节）。
  * 判定顺序：重新解析路径（resource_changed）→ 存在性与类型
  * → 已读记录（not_read）→ mtime/size 一致（放行）→ 内容哈希一致
- * （放行并刷新 stat）→ 哈希不一致（stale_file；有旧文本时附 diff
- * 并用当前内容刷新记录，无旧文本时要求重新 read）。
+ * （放行并刷新 stat）→ 哈希不一致（stale_file；有旧文本且 diff 不超过
+ * 上限时附 diff 并用当前内容刷新记录，否则要求重新 read、不刷新）。
  * edit、write、apply_patch 共用同一判定，不各写一份。
  */
 import { resolveRealPath } from "../../platform/index.js";
 import type { ToolContext } from "../types.js";
-import { hashText, isSmallText, STALE_DIFF_MAX_CHARS } from "../readstate.js";
+import { hashText, isSmallText, STALE_DIFF_MAX_CHARS, stripBom } from "../readstate.js";
 import { diffLines } from "./diff.js";
 
 export interface GuardOk {
@@ -28,11 +28,6 @@ export function toolError(code: string, message: string): GuardError {
 
 export function isGuardError(v: GuardOk | GuardError | undefined): v is GuardError {
   return v !== undefined && "status" in v;
-}
-
-function truncateDiff(diff: string): string {
-  if (diff.length <= STALE_DIFF_MAX_CHARS) return diff;
-  return `${diff.slice(0, STALE_DIFF_MAX_CHARS)}\n…[差异过长，已截断，共 ${diff.length} 字符]…`;
 }
 
 /**
@@ -90,8 +85,13 @@ export async function guardWritable(
     });
     return { stat, oldText: currentText };
   }
-  if (record.text !== undefined) {
-    const diff = truncateDiff(diffLines(record.text, currentText, resolved));
+  const diff =
+    record.text !== undefined
+      ? diffLines(stripBom(record.text), stripBom(currentText), resolved)
+      : undefined;
+  // 差异过长（或只差行尾、diff 为空）时不附 diff、不刷新记录：
+  // 模型没看到的改动不能被当作已读而覆盖
+  if (diff !== undefined && diff !== "" && diff.length <= STALE_DIFF_MAX_CHARS) {
     const message = `文件自上次读取后已被外部修改：${resolved}`;
     ctx.readState.record(resolved, {
       mtimeMs: stat.mtimeMs,
