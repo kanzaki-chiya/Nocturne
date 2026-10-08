@@ -3,8 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import {
+  createCredentialStore,
+  createPlatform,
   createRuntime,
   FakeProvider,
+  loadConfig,
   type McpConnector,
   type McpSession,
   type ToolDefinition,
@@ -198,5 +201,82 @@ it("Turn 进行中才就绪的工具保持暂存，本轮请求不变、下一 T
   expect(f.provider.requests[0]?.tools.some((t) => t.name === tool.name)).toBe(false);
   await session.submit({ text: "next" });
   expect(f.provider.requests[1]?.tools.some((t) => t.name === tool.name)).toBe(true);
+  await session.close();
+});
+
+it("重配挂起时中断立即结束 Turn，后台完成后下一 Turn 应用新工具", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "nct-mcp-reconcile-"));
+  roots.push(home);
+  const platform = createPlatform();
+  const credentials = (await createCredentialStore(platform, home, { backend: "memory" })).store;
+  const config = await loadConfig(platform, {
+    nocturneHome: home,
+    credentials,
+    env: () => undefined,
+  });
+  const entered = deferred<undefined>();
+  const hold = deferred<undefined>();
+  let staged = false;
+  let applied = false;
+  const fresh: ToolDefinition = {
+    name: "mcp__fresh__echo",
+    description: "fresh echo",
+    inputSchema: { type: "object" },
+    traits: { mutates: false, concurrencySafe: true, timeoutMs: 1000 },
+    permissionSubjects: () => [{ kind: "mcp", target: "fresh/echo" }],
+    execute: async () => ({ status: "ok", modelContent: "ok" }),
+  };
+  const provider = new FakeProvider({
+    handler: () => [
+      { type: "text_delta", text: "done" },
+      { type: "finish", reason: "stop" },
+    ],
+  });
+  const connector: McpConnector = {
+    probe: async () => ({ ok: true, durationMs: 0, tools: [] }),
+    open: async () => ({
+      startup: async () => undefined,
+      tools: () => (applied ? [fresh] : []),
+      status: () => [{ name: "fresh", state: "ready", toolCount: applied ? 1 : 0, restarts: 0 }],
+      reconcile: async () => {
+        entered.resolve();
+        await hold.promise;
+        staged = true;
+      },
+      applyPendingTools: () => {
+        const add = staged && !applied ? [fresh] : [];
+        applied ||= staged;
+        staged = false;
+        return { add, remove: [] };
+      },
+      close: async () => undefined,
+    }),
+  };
+  const runtime = await createRuntime({
+    cwd: home,
+    config,
+    providers: [provider],
+    mcp: connector,
+  });
+  const session = await runtime.createSession({ model: "fake/fake-1" });
+  const events: RuntimeEvent[] = [];
+  session.subscribe((event) => events.push(event));
+  // 空闲保存：refreshMcp 立即开始 reconcile，并卡在 hold 上。
+  const saved = runtime.saveMcpServer({ mode: "create", id: "fresh", config: { command: "node" } });
+  void saved.catch(() => undefined);
+  await entered.promise;
+  const turn = session.submit({ text: "first" });
+  session.interrupt();
+  // 中断只放弃等待：Turn 立即以 aborted 结束，且没有发出模型请求。
+  expect(await turn).toBe("aborted");
+  expect(
+    events.some((event) => event.type === "turn.completed" && event.payload.reason === "aborted"),
+  ).toBe(true);
+  expect(provider.requests).toHaveLength(0);
+  // 放行后台 reconcile：完成后下一 Turn 应该能用到新工具。
+  hold.resolve();
+  await saved;
+  expect(await session.submit({ text: "second" })).toBe("done");
+  expect(provider.requests.at(-1)?.tools.some((t) => t.name === fresh.name)).toBe(true);
   await session.close();
 });

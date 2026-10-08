@@ -1418,6 +1418,35 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       pendingMcp = true;
       if (!busy()) await applyMcp();
     };
+    /**
+     * 等待 MCP 更新链（applyMcp 串行队列）结束；收到中止立即放弃等待。
+     * 不取消后台 reconcile：它继续跑完，结果在下一次 Turn 边界照常应用（mcp.md 第 4 节）。
+     * 未中止时语义不变：失败仍拒绝并向调用侧传播。
+     */
+    const awaitMcpIdle = (signal: AbortSignal): Promise<void> => {
+      const work = applyMcp();
+      if (signal.aborted) {
+        void work.catch(() => undefined);
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve, reject) => {
+        const onAbort = (): void => {
+          void work.catch(() => undefined);
+          resolve();
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        work.then(
+          () => {
+            signal.removeEventListener("abort", onAbort);
+            resolve();
+          },
+          (error: unknown) => {
+            signal.removeEventListener("abort", onAbort);
+            reject(error);
+          },
+        );
+      });
+    };
 
     // shell 子进程环境剥离的凭据变量（provider-setup.md 第 4 节第 2 条）：
     // 全部 Provider 条目声明的 apiKeyEnv + NOCTURNE_API_KEY /
@@ -2177,7 +2206,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         // 空闲边界：controller 先置位（busy 语义立即生效），再重建
         // updateProviders 标记的会话级注册表（provider-setup.md 第 6 节）
         try {
-          await applyMcp();
+          await awaitMcpIdle(ac.signal);
           await rebuildProviders();
           await applySkills();
           applyExternalAgents();
@@ -2215,7 +2244,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                   aborted: signal.aborted,
                 });
               }
-              if (!signal.aborted) await applyMcp();
+              if (!signal.aborted) await awaitMcpIdle(signal);
             },
             skills: catalog,
             visionModel: () =>
@@ -2339,12 +2368,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               message: `技能目录更新失败：${error instanceof Error ? error.message : String(error)}`,
             }),
           );
-          await applyMcp().catch(() =>
+          const mcpFlush = applyMcp().catch(() =>
             session.emitEphemeral("runtime.warning", {
               code: "mcp_server_failed",
               message: "MCP 热更新失败，请重新加载配置",
             }),
           );
+          // 已中止的 Turn 不等重配收尾：后台 reconcile 继续跑，结果下一 Turn 应用；
+          // 失败告警仍挂在同一 Promise 上照常发出。
+          if (ac.signal.aborted) void mcpFlush;
+          else await mcpFlush;
           applyExternalAgents();
           fileIndexPromise = undefined;
           activeTurnEffort = undefined;
