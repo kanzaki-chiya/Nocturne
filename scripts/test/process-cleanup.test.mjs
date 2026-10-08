@@ -53,3 +53,35 @@ it("一个登记句柄清理失败也继续清理其他句柄，最后报告错�
   expect(second.kill).toHaveBeenCalledOnce();
   expect(second.detachOutput).toHaveBeenCalledOnce();
 });
+
+it("句柄给出 wait() 退出信号后，清理不再对已退出进程的 PID 做兜底强杀", async () => {
+  const child = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  let release;
+  const waited = new Promise((resolve) => {
+    release = resolve;
+  });
+  processes.track({
+    pid: child.pid,
+    // 模拟「进程已自行退出、kill() 无操作」：清理跳过 PID 兜底强杀（PID 可能已被复用）。
+    kill: async () => {
+      release();
+    },
+    wait: () => waited,
+    detachOutput: vi.fn(),
+  });
+  await processes.cleanup();
+  try {
+    expect(() => process.kill(child.pid, 0)).not.toThrow();
+  } finally {
+    child.kill();
+  }
+  await vi.waitFor(
+    () => {
+      expect(() => process.kill(child.pid, 0)).toThrow();
+    },
+    { timeout: 2000 },
+  );
+});
