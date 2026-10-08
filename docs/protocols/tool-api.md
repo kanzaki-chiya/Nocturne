@@ -142,7 +142,7 @@ type RawImageAttachment = {
 ```
 
 - `modelContent`：交给模型的文本。执行器会按 `maxModelChars` 截断并标注。
-- `output`：结构化结果，供客户端渲染（例如 `edit` 返回 diff，`shell` 返回退出码）。有独立大小上限；不发送给模型。
+- `output`：结构化结果，供客户端渲染（例如 `edit` 返回 diff，`shell` 返回退出码）。有独立大小上限；不发送给模型。写文件类工具的结果约定为两种形状之一：`{ path: string, diff: string }`，或 `{ files: [{ path: string, diff: string }] }`（可另带其他字段）；检查点字节缺失时按这个形状估算行数（[sessions.md](../architecture/sessions.md#每轮文件改动)）。
 - `edit` 成功时的 `output` 为 `{ path, replaced, diff }`；`write` 为 `{ path, created, lines, diff? }`，新建与覆盖只要有变化均提供 diff。`diff` 仍是字符串，头部 `@@ -旧起始行,旧行数 +新起始行,新行数 @@`，后续源码行以空格、`-`、`+` 标记；行尾差异用 `\ CRLF` / `\ CR` / `\ No newline at end of file` 标记。路径由 `path` 提供，不嵌入头部。旧日志的 `@@ 路径 @@` 或无头部结果仍可展示，但无可推定的行号。客户端按 `+`/`-` 源码行计算新增/删除数，不计上下文或行尾标记。
 - `edit` 的 `old` 未命中返回 `no_match`，提示写入 `error.message` / `modelContent`；只基于通过路径、权限及先读状态检查的目标文本生成有界建议，不改变文件。`not_unique`、`not_read`、`resource_changed` 等语义保持不变。`stale_file` 在有旧文本且 diff 不超过 4000 字符时于 `modelContent` 附带读取时到当前的 diff 并已刷新记录，可直接重试；无旧文本或 diff 过长时需重新 `read`。
 - `apply_patch`（[ADR-0035](../decisions/ADR-0035-apply-patch.md)）的输入仅 `{ input: string }`（补丁原文；语法见 [tools.md](../architecture/tools.md) 第 6 节）。成功的 `output` 为 `{ files: [{ path, op, movedTo?, diff? }] }`——按补丁操作顺序逐文件给出 `op`（`add`/`update`/`delete`/`move`）、改名时的 `movedTo` 与该文件的行级 `diff`（格式同上）；`modelContent` 为逐文件摘要。`permissionSubjects` 为每个涉及路径各产出一个 `edit` 主体（Move 含源与目标）。解析错误、目标冲突或先读检查失败时**不写任何文件**，返回 `error`（`invalid_input`/`not_read`/`stale_file` 等）；写盘中途失败回滚已写文件后同样以 `error` 结算。

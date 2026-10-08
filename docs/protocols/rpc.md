@@ -60,7 +60,7 @@
 | `setModel` / `setPermissionPreset` / `setReasoningEffort` / `setShell` | `{ model }` / `{ name }` / `{ level }` / `{ kind }` → `null` |
 | `compact` | → `null` |
 | `rewindTargets` / `rewind` | → `RewindTarget[]`；`rewind { targetSeq, mode }` → 文件回退汇总 |
-| `turnChanges` | → `TurnChanges[]`；只读，忙时也可调用，轮划分与不可用原因见 [sessions.md](../architecture/sessions.md#每轮文件改动) |
+| `turnChanges` | → `TurnChanges[]`；只读，忙时也可调用，轮划分与不可用原因见 [sessions.md](../architecture/sessions.md#每轮文件改动)。`TurnChangeFile.restorable` 表示撤销时该文件能否被还原或删除（与 rewind 的 `action !== "untracked"` 同口径） |
 | `turnChangeDiff` | `{ seq, path }` → `TurnChangeDiff`（`{ diff, approximate? }`）；seq 为正整数、path 非空字符串，形状错误 invalid_params；无可用历史差异 invalid_command |
 | `state` | → `SessionState` 去掉 `history` 与 `unsettledCalls`（历史由持久事件折叠得到；后者是进程内 Map） |
 | `describeContext` | → `BuiltContext` 去掉发给模型的整份 `request`，只留报告与判定 |

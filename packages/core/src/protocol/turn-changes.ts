@@ -8,6 +8,8 @@ export interface TurnChangeFile {
   removed?: number;
   approximate?: boolean;
   unavailable?: string;
+  /** 撤销时这个文件能否被还原或删除（口径同 rewind 的 action !== "untracked"） */
+  restorable: boolean;
   external: boolean;
 }
 export interface TurnChanges {

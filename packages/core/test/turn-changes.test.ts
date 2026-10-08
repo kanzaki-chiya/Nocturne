@@ -60,6 +60,7 @@ it("同轮两次编辑取净值；两轮归属与后续工具改动不误报 ext
             status: "modified",
             added: 1,
             removed: 1,
+            restorable: true,
             external: false,
           },
         ],
@@ -73,9 +74,17 @@ it("同轮两次编辑取净值；两轮归属与后续工具改动不误报 ext
             status: "modified",
             added: 1,
             removed: 1,
+            restorable: true,
             external: false,
           },
-          { path: path.join(h.root, "b"), status: "added", added: 1, removed: 0, external: false },
+          {
+            path: path.join(h.root, "b"),
+            status: "added",
+            added: 1,
+            removed: 0,
+            restorable: true,
+            external: false,
+          },
         ],
         untrackedCalls: 0,
       },
@@ -279,13 +288,15 @@ it("二进制、大于 1MB、未追踪、缺 after 和缺内容降级，非法 d
     )
       throw new Error("no after");
     unlinkSync(path.join(h.sessionsDir, "checkpoints", h.session.id, after.payload.sha256));
-    expect((await h.session.turnChanges())[0]?.files.map((f) => f.unavailable)).toEqual([
+    const files = (await h.session.turnChanges())[0]?.files ?? [];
+    expect(files.map((f) => f.unavailable)).toEqual([
       "二进制文件",
       "文件较大，不计算差异",
       "不是普通文件",
       "没有改动后的记录",
       "检查点内容缺失",
     ]);
+    expect(files.map((f) => f.restorable)).toEqual([true, true, false, true, true]);
     for (const [seq, name] of [
       [999, "binary"],
       [u.seq, "unknown"],
@@ -304,6 +315,165 @@ it("二进制、大于 1MB、未追踪、缺 after 和缺内容降级，非法 d
     } finally {
       await resumed.close();
     }
+  } finally {
+    await h.session.close();
+  }
+});
+
+async function complete(h: Awaited<ReturnType<typeof setup>>, name: string, output: unknown) {
+  const id = `call-${name}-${h.session.durableEvents().length}`;
+  await h.s.emit("tool.completed", {
+    callId: id,
+    name,
+    status: "ok",
+    modelContent: "ok",
+    output,
+  });
+}
+
+it("after 字节缺失时退回本轮一次 edit 的 diff，标 approximate", async () => {
+  const h = await setup();
+  try {
+    const u = await h.user();
+    await h.edit("a", "new\n");
+    const target = path.join(h.root, "a");
+    const diff = "@@ -0,0 +1,1 @@\n+new";
+    await complete(h, "edit", { path: target, replaced: 1, diff });
+    const after = h.session.durableEvents().findLast((e) => e.type === "checkpoint.file");
+    if (
+      after?.type !== "checkpoint.file" ||
+      after.payload.phase !== "after" ||
+      !after.payload.sha256
+    )
+      throw new Error("no after");
+    unlinkSync(path.join(h.sessionsDir, "checkpoints", h.session.id, after.payload.sha256));
+    const file = (await h.session.turnChanges())[0]?.files[0];
+    expect(file).toEqual({
+      path: target,
+      status: "added",
+      added: 1,
+      removed: 0,
+      approximate: true,
+      restorable: true,
+      external: false,
+    });
+    expect(await h.session.turnChangeDiff(u.seq, target)).toEqual({ diff, approximate: true });
+  } finally {
+    await h.session.close();
+  }
+});
+
+it("同一文件本轮两次 edit：diff 按顺序拼接、行数相加", async () => {
+  const h = await setup();
+  try {
+    const u = await h.user();
+    await h.s.emit("checkpoint.file", {
+      callId: "missing-after",
+      path: path.join(h.root, "a"),
+      phase: "before",
+      before: null,
+    });
+    const target = path.join(h.root, "a");
+    const first = "@@ -0,0 +1,1 @@\n+one";
+    const second = "@@ -1,1 +1,2 @@\n one\n+two";
+    await complete(h, "edit", { path: target, diff: first });
+    await complete(h, "edit", { path: target, diff: second });
+    const file = (await h.session.turnChanges())[0]?.files[0];
+    expect(file).toMatchObject({
+      path: target,
+      added: 2,
+      removed: 0,
+      approximate: true,
+      restorable: true,
+    });
+    expect(file?.unavailable).toBeUndefined();
+    expect(await h.session.turnChangeDiff(u.seq, target)).toEqual({
+      diff: `${first}\n${second}`,
+      approximate: true,
+    });
+  } finally {
+    await h.session.close();
+  }
+});
+
+it("output.files[] 形状按路径分别归属", async () => {
+  const h = await setup();
+  try {
+    const u = await h.user();
+    const a = path.join(h.root, "a");
+    const b = path.join(h.root, "b");
+    for (const target of [a, b]) {
+      await h.s.emit("checkpoint.file", {
+        callId: target,
+        path: target,
+        phase: "before",
+        before: null,
+      });
+    }
+    await complete(h, "apply_patch", {
+      files: [
+        { path: a, op: "add", diff: "@@ -0,0 +1,1 @@\n+aaa" },
+        { path: b, op: "update", diff: "@@ -1,1 +1,1 @@\n-old\n+bbb" },
+        { path: path.join(h.root, "other"), op: "add", diff: "@@ -0,0 +1,1 @@\n+nope" },
+      ],
+    });
+    const files = (await h.session.turnChanges())[0]?.files ?? [];
+    expect(files.map((f) => [path.basename(f.path), f.added, f.removed, f.approximate])).toEqual([
+      ["a", 1, 0, true],
+      ["b", 1, 1, true],
+    ]);
+    expect(await h.session.turnChangeDiff(u.seq, b)).toEqual({
+      diff: "@@ -1,1 +1,1 @@\n-old\n+bbb",
+      approximate: true,
+    });
+  } finally {
+    await h.session.close();
+  }
+});
+
+it("退回也没有 diff 时仍是 unavailable", async () => {
+  const h = await setup();
+  try {
+    await h.user();
+    await h.s.emit("checkpoint.file", {
+      callId: "no-diff",
+      path: path.join(h.root, "a"),
+      phase: "before",
+      before: null,
+    });
+    await complete(h, "edit", { path: path.join(h.root, "a"), replaced: 0 });
+    const file = (await h.session.turnChanges())[0]?.files[0];
+    expect(file?.unavailable).toBe("没有改动后的记录");
+    expect(file?.approximate).toBeUndefined();
+    expect(file?.restorable).toBe(true);
+  } finally {
+    await h.session.close();
+  }
+});
+
+it("after 字节存在时不走退回，结果与精确计算相同", async () => {
+  const h = await setup();
+  try {
+    writeFileSync(path.join(h.root, "a"), "old\n");
+    const u = await h.user();
+    await h.edit("a", "new\n");
+    const target = path.join(h.root, "a");
+    await complete(h, "edit", {
+      path: target,
+      diff: "@@ -1,1 +1,3 @@\n-old\n+counted\n+twice",
+    });
+    const file = (await h.session.turnChanges())[0]?.files[0];
+    expect(file).toEqual({
+      path: target,
+      status: "modified",
+      added: 1,
+      removed: 1,
+      restorable: true,
+      external: false,
+    });
+    expect(await h.session.turnChangeDiff(u.seq, target)).toEqual({
+      diff: "@@ -1,1 +1,1 @@\n-old\n+new",
+    });
   } finally {
     await h.session.close();
   }
