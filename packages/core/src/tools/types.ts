@@ -124,9 +124,18 @@ export interface ToolScope {
 }
 
 /** "先读后写"所需的已读记录（tools.md 第 6 节；read 与用户 @文件 文本引用记录） */
+export interface ReadStateRecord {
+  mtimeMs: number;
+  size: number;
+  /** 文件内容的 sha256 十六进制（文本按 utf8 哈希） */
+  hash: string;
+  /** 完整读取且 ≤64KB 时保留的原文；部分读取、大文件或被淘汰时缺省 */
+  text?: string | undefined;
+}
+
 export interface ReadStateStore {
-  record(path: string, stat: { mtimeMs: number; size: number }): void;
-  get(path: string): { mtimeMs: number; size: number } | undefined;
+  record(path: string, stat: ReadStateRecord): void;
+  get(path: string): ReadStateRecord | undefined;
 }
 
 /** 执行时可用的能力（tool-api.md 第 2 节） */

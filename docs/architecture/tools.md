@@ -88,7 +88,7 @@ execute(call, ctx):
 
 | 工具 | 作用 | 副作用 | 关键约定 |
 |---|---|---|---|
-| `read` | 读取文本文件与 PNG、JPEG、GIF、WebP 图片，支持起始行与行数 | 无 | 带行号输出；记录"已读状态"（路径、修改时间）；图片约定见下 |
+| `read` | 读取文本文件与 PNG、JPEG、GIF、WebP 图片，支持起始行与行数 | 无 | 带行号输出；记录"已读状态"（路径、修改时间、内容哈希，完整且 ≤64KB 时附原文）；图片约定见下 |
 | `web_fetch` | 抓取公开网页、文档与图片 | 无 | 按主机申请 network 权限；HTML 转 Markdown；请求与结果约定见下 |
 | `write` | 创建或整体覆盖文件 | 写文件 | 覆盖已存在的文件前必须在本会话读过它，且文件自读取后未被外部修改；`output` 携带 `path`、`created`、`lines`，有变化时附 `diff`（含新建） |
 | `edit` | 精确字符串替换 | 写文件 | `old` 必须在文件中唯一出现（或显式 `replaceAll`）；同样要求先读且未过期；未命中只诊断、不写入；`output` 返回 unified 风格 `diff` 供客户端显示 |
@@ -102,9 +102,10 @@ execute(call, ctx):
 
 另有只在**子会话**注册表中出现的 `finish` 工具：子代理用它提交结果结束 Turn（[subagent.md](subagent.md) 第 2 节）；它不是内置工具表的成员。
 
-"先读后写"与过期检测防止模型基于过时内容覆盖文件，是低成本、高收益的保护。`read` 与用户 `@文件` 附带的完整或部分文本都记录已读状态；状态保存在运行时内存中，会话恢复后需要重新读取或重新引用。判定细则：
+"先读后写"与过期检测防止模型基于过时内容覆盖文件，是低成本、高收益的保护。`read` 与用户 `@文件` 在记录已读状态时同时保存内容哈希（sha256）与条件原文：完整读取且文件 ≤64KB 时保留原文（每会话最多 50 份，按最久未用淘汰，其余只留哈希）；部分读取、大文件只留哈希。状态保存在运行时内存中，会话恢复后需要重新读取或重新引用。判定细则（`edit`、`write`、`apply_patch` 共用 `guardWritable` 同一判定）：
 
-- 写入工具以 `ctx.subjects` 中已批准的**解析后路径**为准；写入前重新 `stat`/`realpath`：解析结果与批准时不一致 → `resource_changed`；已存在文件在 `readState` 中无记录 → `error(code="not_read")`；记录的 `mtimeMs`/`size` 与当前不一致 → `error(code="stale_file")`（要求重新 `read`）。
+- 写入工具以 `ctx.subjects` 中已批准的**解析后路径**为准；写入前重新 `stat`/`realpath`：解析结果与批准时不一致 → `resource_changed`；已存在文件在 `readState` 中无记录 → `error(code="not_read")`；记录的 `mtimeMs`/`size` 与当前一致 → 通过；不一致时比较内容哈希：相同 → 放行并用当前 `stat` 刷新记录（`prettier --write`、`eslint --fix`、`git checkout` 等只改 `mtime` 的情况不再误报）；不同 → `error(code="stale_file")`。
+- `stale_file` 时若有旧文本，`modelContent` 附上「读取时 → 当前」的统一行级 diff（复用 `diffLines`，超 4000 字符截断并注明），`error.message` 保持简短、`code` 仍是 `stale_file`，diff 只放在 `modelContent`；附带 diff 后用当前内容刷新记录，模型可据此直接重试。无旧文本（大文件、被淘汰、部分读取）时保持原提示、要求重新 `read`，不刷新记录；部分读取按无旧文本处理，不拿部分内容做 diff。
 - `write` 创建尚不存在的文件不要求先读；写入瞬间文件恰好出现（竞态）按已存在文件处理，即要求先读。
 - `edit` 未命中仍返回 `no_match`，仅在路径和先读状态检查通过后，用已读的目标文本有界地诊断换行符、缩进、空白差异，或给出一处至多 5 行、带实际行号的相近片段；没有可信候选或文本过大时给简短提示。诊断只供模型修正精确的 `old`，绝不用于自动替换。
 - `edit` 与 `write` 创建/覆盖在有变化时于 `output.diff` 携带行级 unified 风格差异，头部为 `@@ -旧起始行,旧行数 +新起始行,新行数 @@`，路径由 `output.path` 提供；行尾 CRLF/LF 与末尾换行变化按变更行表达。`modelContent` 是简短摘要，不含完整 diff；结构化 `output` 超过 100,000 字符时仍按第 4 节的预算省略。

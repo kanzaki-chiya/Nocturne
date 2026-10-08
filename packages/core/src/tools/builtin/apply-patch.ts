@@ -21,6 +21,7 @@
 import { resolveRealPath } from "../../platform/index.js";
 import type { SubjectRequest } from "../../protocol/index.js";
 import type { ToolDefinition, ToolScope } from "../types.js";
+import { hashText, isSmallText } from "../readstate.js";
 import { diffLines } from "./diff.js";
 import { diagnoseNoMatch } from "./edit-diagnostic.js";
 import { guardWritable, isGuardError, toolError, type GuardError } from "./guard.js";
@@ -654,10 +655,15 @@ export const applyPatchTool: ToolDefinition<ApplyPatchInput, ApplyPatchOutput> =
 
     // 全部成功：记录最终仍为文件的路径的新 stat（供本会话后续先读检查）
     for (const c of commits) {
-      if (c.action !== "write") continue;
+      if (c.action !== "write" || c.text === undefined) continue;
       const stat = await ctx.fs.stat(c.path).catch(() => undefined);
       if (stat !== undefined) {
-        ctx.readState.record(c.path, { mtimeMs: stat.mtimeMs, size: stat.size });
+        ctx.readState.record(c.path, {
+          mtimeMs: stat.mtimeMs,
+          size: stat.size,
+          hash: hashText(c.text),
+          ...(isSmallText(c.text) ? { text: c.text } : {}),
+        });
       }
     }
 

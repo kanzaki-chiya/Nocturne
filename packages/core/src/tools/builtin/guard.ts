@@ -1,10 +1,15 @@
 /**
  * write/edit 共享的"先读后写"守卫（tools.md 第 6 节）。
  * 判定顺序：重新解析路径（resource_changed）→ 存在性与类型
- * → 已读记录（not_read）→ mtime/size 一致性（stale_file）。
+ * → 已读记录（not_read）→ mtime/size 一致（放行）→ 内容哈希一致
+ * （放行并刷新 stat）→ 哈希不一致（stale_file；有旧文本时附 diff
+ * 并用当前内容刷新记录，无旧文本时要求重新 read）。
+ * edit、write、apply_patch 共用同一判定，不各写一份。
  */
 import { resolveRealPath } from "../../platform/index.js";
 import type { ToolContext } from "../types.js";
+import { hashText, isSmallText, STALE_DIFF_MAX_CHARS } from "../readstate.js";
+import { diffLines } from "./diff.js";
 
 export interface GuardOk {
   stat: { mtimeMs: number; size: number };
@@ -23,6 +28,11 @@ export function toolError(code: string, message: string): GuardError {
 
 export function isGuardError(v: GuardOk | GuardError | undefined): v is GuardError {
   return v !== undefined && "status" in v;
+}
+
+function truncateDiff(diff: string): string {
+  if (diff.length <= STALE_DIFF_MAX_CHARS) return diff;
+  return `${diff.slice(0, STALE_DIFF_MAX_CHARS)}\n…[差异过长，已截断，共 ${diff.length} 字符]…`;
 }
 
 /**
@@ -57,17 +67,42 @@ export async function guardWritable(
   if (record === undefined) {
     return toolError("not_read", `拒绝覆盖未读取的文件：${resolved}。请先用 read 读取该文件`);
   }
-  if (record.mtimeMs !== stat.mtimeMs || record.size !== stat.size) {
-    return toolError(
-      "stale_file",
-      `文件自上次读取后已被外部修改：${resolved}。请重新 read 后再写入`,
-    );
+  if (record.mtimeMs === stat.mtimeMs && record.size === stat.size) {
+    const oldText = await ctx.fs.readTextFile(resolved).catch(() => undefined);
+    if (oldText === undefined) {
+      return toolError("read_failed", `无法读取文件：${resolved}`);
+    }
+    return { stat, oldText };
   }
-  const oldText = await ctx.fs.readTextFile(resolved).catch(() => undefined);
-  if (oldText === undefined) {
+  // mtime/size 不一致：比较内容哈希（prettier --write、eslint --fix、
+  // git checkout 等只改 mtime 的情况直接放行）
+  const currentText = await ctx.fs.readTextFile(resolved).catch(() => undefined);
+  if (currentText === undefined) {
     return toolError("read_failed", `无法读取文件：${resolved}`);
   }
-  return { stat, oldText };
+  const currentHash = hashText(currentText);
+  if (currentHash === record.hash) {
+    ctx.readState.record(resolved, {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      hash: currentHash,
+      ...(record.text !== undefined ? { text: record.text } : {}),
+    });
+    return { stat, oldText: currentText };
+  }
+  if (record.text !== undefined) {
+    const diff = truncateDiff(diffLines(record.text, currentText, resolved));
+    const message = `文件自上次读取后已被外部修改：${resolved}`;
+    ctx.readState.record(resolved, {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      hash: currentHash,
+      ...(isSmallText(currentText) ? { text: currentText } : {}),
+    });
+    const modelContent = `${message}。已附上读取时到当前的差异，可据此直接重试\n${diff}`;
+    return { status: "error", modelContent, error: { code: "stale_file", message } };
+  }
+  return toolError("stale_file", `文件自上次读取后已被外部修改：${resolved}。请重新 read 后再写入`);
 }
 
 export function countLines(text: string): number {

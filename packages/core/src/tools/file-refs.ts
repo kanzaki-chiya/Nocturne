@@ -9,6 +9,7 @@ import {
 import type { AttachmentStore } from "./attachments.js";
 import { GitignoreChain } from "./builtin/gitignore.js";
 import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./image.js";
+import { hashText } from "./readstate.js";
 import type { ReadStateStore } from "./types.js";
 import { isBinary } from "./text.js";
 
@@ -240,7 +241,14 @@ export async function resolveFileRefs(
         chars: lines.slice(0, count).join("\n").length,
         truncated: count < lines.length,
       });
-      options.readState.record(real, { mtimeMs: stat.mtimeMs, size: stat.size });
+      // 完整引用且 ≤64KB 才留原文；截断引用按部分读取处理，只留哈希
+      const fullRef = count === lines.length;
+      options.readState.record(real, {
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+        hash: hashText(raw),
+        ...(fullRef && bytes.length <= 64 * 1024 ? { text: raw } : {}),
+      });
     }
   }
   return { content: [...content, ...blocks], attachments, fileRefs, warnings };

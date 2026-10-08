@@ -180,3 +180,7 @@ GPT 模型有时会在 `shell` 里执行 `apply_patch <<'EOF' …`（Codex 在 s
 ### 2026-10-01：`@@` 上下文按「包含」定位
 
 第 2 节写的是「有 `@@ <上下文>` 时先找到那一行」，Codex 的做法是把上下文当作整行、按同样四级比较。实现改为找**包含**该上下文的行（同样按四级降级：逐字包含 → 忽略行尾空白 → 忽略首尾空白 → 标点归一后包含）。原因：GPT 常把上下文写成简写（如 `@@ class Foo`，而实际行为 `class Foo extends Bar {`），整行匹配会让这类补丁无谓失败；`@@` 只决定从哪里开始找，hunk 本身的行仍按四级逐行匹配。代价是上下文更容易命中较早的某一行，此后 hunk 若在别处也有相同内容，可能落到非预期的位置；整行匹配同样有这个风险，只是概率更低。结果里的逐文件 diff 带行号，可以看出落点。当前行为见 [tools.md](../architecture/tools.md) 第 6 节。
+
+### 2026-10-08：先读过期按内容哈希判定、附带 diff
+
+第 3 节写的是「未被外部修改，否则报 `stale_file`」，实现细化为 `guardWritable` 的统一判定：`mtimeMs`/`size` 一致直接通过，不一致时比较内容哈希（sha256）——`prettier --write`、`eslint --fix`、`git checkout` 等只改 `mtime` 的情况放行并刷新记录，不再误报；哈希不同才报 `stale_file`。`stale_file` 在有旧文本（完整读取且 ≤64KB、未被 50 份 LRU 淘汰）时于 `modelContent` 附带「读取时 → 当前」的统一 diff（超 4000 字符截断并注明）并用当前内容刷新记录，可直接重试；无旧文本（大文件、被淘汰、部分读取）时要求重新 `read`，不刷新。`edit`、`write`、`apply_patch` 共用同一判定。当前行为见 [tools.md](../architecture/tools.md) 第 6 节。

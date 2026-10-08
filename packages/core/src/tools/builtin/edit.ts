@@ -5,6 +5,7 @@
  */
 import type { SubjectRequest } from "../../protocol/index.js";
 import type { ToolDefinition, ToolScope } from "../types.js";
+import { hashText, isSmallText } from "../readstate.js";
 import { diffLines } from "./diff.js";
 import { diagnoseNoMatch } from "./edit-diagnostic.js";
 import { countLines, guardWritable, isGuardError, toolError } from "./guard.js";
@@ -99,7 +100,12 @@ export const editTool: ToolDefinition<EditInput, EditOutput> = {
       return toolError("write_failed", `写入失败：${e instanceof Error ? e.message : String(e)}`);
     }
     const stat = await ctx.fs.stat(resolved);
-    ctx.readState.record(resolved, { mtimeMs: stat.mtimeMs, size: stat.size });
+    ctx.readState.record(resolved, {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      hash: hashText(newText),
+      ...(isSmallText(newText) ? { text: newText } : {}),
+    });
 
     return {
       status: "ok",

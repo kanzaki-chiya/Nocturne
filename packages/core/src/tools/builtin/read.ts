@@ -5,6 +5,7 @@
  */
 import type { ImageMimeType, SubjectRequest } from "../../protocol/index.js";
 import { isBinary } from "../text.js";
+import { hashText } from "../readstate.js";
 import {
   IMAGE_MAX_BYTES,
   IMAGE_MAX_EDGE,
@@ -170,8 +171,15 @@ export const readTool: ToolDefinition<ReadInput, ReadOutput> = {
       numbered.push(`…（其后还有 ${remaining} 行，用 offset 继续读取）`);
     }
 
-    // 记录"已读状态"（Phase 2 的 write/edit 据此做先读检查与过期检测）
-    ctx.readState.record(target, { mtimeMs: stat.mtimeMs, size: stat.size });
+    // 记录"已读状态"（write/edit 据此做先读检查与过期检测）：
+    // 内容哈希必存；完整读取且 ≤64KB 才留原文（部分读取按无旧文本处理）
+    const full = start === 0 && end === lines.length;
+    ctx.readState.record(target, {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      hash: hashText(text),
+      ...(full && bytes.length <= 64 * 1024 ? { text } : {}),
+    });
 
     return {
       status: "ok",

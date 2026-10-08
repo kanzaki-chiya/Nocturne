@@ -4,6 +4,7 @@
  * 换行/BOM 保留、工具可见性筛选、shell 误用拒绝。
  */
 import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -48,7 +49,13 @@ const readBack = (ws: string, rel: string): string => readFileSync(path.join(ws,
 async function markRead(readState: ReadStateStore, p: string): Promise<void> {
   const resolved = await platform.resolveReal(p);
   const stat = statSync(resolved);
-  readState.record(resolved, { mtimeMs: stat.mtimeMs, size: stat.size });
+  const content = readFileSync(resolved, "utf8");
+  readState.record(resolved, {
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+    hash: createHash("sha256").update(content, "utf8").digest("hex"),
+    ...(Buffer.byteLength(content, "utf8") <= 64 * 1024 ? { text: content } : {}),
+  });
 }
 
 interface PatchFileOut {
@@ -505,7 +512,9 @@ describe("先读后写与整体成败（ADR-0035 §3）", () => {
     const resolved = await platform.resolveReal(f);
     const rec = h.readState.get(resolved);
     const stat = statSync(resolved);
-    expect(rec).toEqual({ mtimeMs: stat.mtimeMs, size: stat.size });
+    expect(rec?.mtimeMs).toBe(stat.mtimeMs);
+    expect(rec?.size).toBe(stat.size);
+    expect(rec?.hash).toMatch(/^[a-f0-9]{64}$/);
     // 同一 readState 下 Delete 视为已读（写回登记的 stat 记录）
     const del = await execPatch(h, "*** Begin Patch\n*** Delete File: f.txt\n*** End Patch");
     expect(del.status).toBe("ok");

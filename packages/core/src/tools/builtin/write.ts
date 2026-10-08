@@ -5,6 +5,7 @@
  */
 import type { SubjectRequest } from "../../protocol/index.js";
 import type { ToolDefinition, ToolScope } from "../types.js";
+import { hashText, isSmallText } from "../readstate.js";
 import { diffLines } from "./diff.js";
 import { countLines, guardWritable, isGuardError, toolError } from "./guard.js";
 
@@ -66,7 +67,12 @@ export const writeTool: ToolDefinition<WriteInput, WriteOutput> = {
 
     // 写入后记录新状态，使本会话内的后续编辑通过先读检查
     const stat = await ctx.fs.stat(resolved);
-    ctx.readState.record(resolved, { mtimeMs: stat.mtimeMs, size: stat.size });
+    ctx.readState.record(resolved, {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      hash: hashText(input.content),
+      ...(isSmallText(input.content) ? { text: input.content } : {}),
+    });
 
     const lines = countLines(input.content);
     const created = oldText === undefined;
