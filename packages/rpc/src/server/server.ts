@@ -759,6 +759,15 @@ class Connection {
           ...(includeSubagents !== undefined ? { includeSubagents } : {}),
         });
       },
+      "runtime.usageStats": (p) => {
+        const days = p.days;
+        if (
+          days !== undefined &&
+          (typeof days !== "number" || !Number.isInteger(days) || days <= 0)
+        )
+          throw new InvalidParamsError("days 必须是正整数");
+        return this.runtime().usageStats(days === undefined ? {} : { days });
+      },
       "runtime.createSession": (p) =>
         this.track(
           (async () => {

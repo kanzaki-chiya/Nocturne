@@ -29,6 +29,7 @@ export const RUNTIME_METHODS: Record<
   resumeSession: "runtime.resumeSession",
   forkSession: "runtime.forkSession",
   listSessions: "runtime.listSessions",
+  usageStats: "runtime.usageStats",
   listModels: "runtime.listModels",
   defaultModel: "runtime.defaultModel",
   listRecentModels: "runtime.listRecentModels",

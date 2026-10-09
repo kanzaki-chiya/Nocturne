@@ -77,6 +77,8 @@ import { defaultEditToolForModel } from "./config/edit-tool.js";
 import { createDiagnostics } from "./diagnostics/index.js";
 import { createHookRunner } from "./hooks/index.js";
 import { appendInputHistory, readInputHistory } from "./input-history.js";
+import { createUsageStats } from "./usage/index.js";
+import type { UsageStats } from "./protocol/index.js";
 import { createCheckpointRecorder } from "./session/checkpoints.js";
 import { rewindTargets, restoreCheckpointFiles } from "./session/rewind.js";
 import { createTurnChanges } from "./session/turn-changes.js";
@@ -548,6 +550,7 @@ export interface Runtime {
   }): Promise<SessionSummary[]>;
   /** 已配置 Provider 声明的模型清单（含已加载的可信项目层）；input.workspaceRoot 见上 */
   listModels(input?: { workspaceRoot?: string | undefined }): ModelInfo[];
+  usageStats(input: { days?: number }): Promise<UsageStats>;
   /**
    * 用新的基础层配置重建运行时级 Provider 注册表（provider-setup.md
    * 第 6 节）；已打开会话在下一次空闲边界重建会话级注册表。不产生
@@ -777,6 +780,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const subagentLimiter = createSubagentLimiter(subagentLimits.maxConcurrent);
 
   const store: SessionStore = createSessionStore({ platform, sessionsDir });
+  const usageStats = createUsageStats({
+    platform,
+    sessionsDir,
+    pricing: (ref) => {
+      try {
+        return registry.resolve(ref).model;
+      } catch {
+        return undefined;
+      }
+    },
+  });
 
   /**
    * 已打开会话挂在 Runtime 上的回调（配置广播、技能预算、分叉入口），按会话 id 索引。
@@ -3215,6 +3229,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     },
     listSessions: (filter) => store.list(filter),
+    usageStats,
     async forkSession(id, forkOptions) {
       const open = openSessions.get(id);
       if (open !== undefined) return open.fork(forkOptions?.targetSeq);

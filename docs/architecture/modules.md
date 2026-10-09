@@ -51,6 +51,10 @@
 
 ## 3. Core 模块
 
+### usage
+
+只读跨会话统计模块，由 core/index 装配；依赖 protocol、platform 与 skill 工具名常量，不编排请求、不判权限。结果与费用纯函数在 protocol，口径、缓存与缺口见 [usage.md](usage.md)。
+
 ### protocol
 
 - **负责**：事件信封与事件类型；客户端命令类型（submit、interrupt、respondPermission 等）；跨模块公共数据（消息内容块、用量、工具调用引用）；面向客户端的派生视图 reducer（`SessionView`，Phase 4，见 [view.md](../protocols/view.md)）。

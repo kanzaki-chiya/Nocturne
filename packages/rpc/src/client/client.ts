@@ -9,6 +9,7 @@ import {
   reduceSessionView,
   type SessionView,
   type RuntimeEvent,
+  type UsageStats,
 } from "@nocturne/core/protocol";
 import type {
   ExternalAgentOverview,
@@ -204,6 +205,7 @@ export interface RpcRuntime {
   }): Promise<void>;
   probeMcpServer(input: McpProbeInput): Promise<McpProbeResult>;
   listSessions(filter?: { cwd?: string; includeSubagents?: boolean }): Promise<SessionSummary[]>;
+  usageStats(input: { days?: number }): Promise<UsageStats>;
   /**
    * createSession 可携带 cwd/workspaceRoot（ADR-0051）：单后台模式下
    * 会话按自己的工作区创建；缺省为后台启动目录。
@@ -623,6 +625,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     },
     probeMcpServer: (input) => call("mcp.probeMcpServer", input),
     listSessions: (filter) => call("runtime.listSessions", filter ?? {}),
+    usageStats: (input) => call("runtime.usageStats", input),
     createSession: async (createOptions) => {
       const opened = await call("runtime.createSession", createOptions);
       return { opened, session: session(opened.sessionId) };

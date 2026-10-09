@@ -2,6 +2,8 @@ import { renderSkill } from "../../skills/index.js";
 import type { SkillInvocation, SkillOverview } from "../../protocol/index.js";
 import type { ToolDefinition } from "../types.js";
 
+export const SKILL_TOOL_NAME = "skill";
+
 function distance(a: string, b: string): number {
   let row = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 0; i < a.length; i++) {
@@ -25,7 +27,7 @@ export function createSkillTool(
   loaded = new Map<string, string>(),
 ): ToolDefinition {
   return {
-    name: "skill",
+    name: SKILL_TOOL_NAME,
     description:
       "加载可用技能的正文、目录路径与支持文件。输入技能名，可选 arguments 参数。技能不会预先放行工具或执行命令。",
     inputSchema: {

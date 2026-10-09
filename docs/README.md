@@ -22,6 +22,7 @@
 | [modules.md](architecture/modules.md) | 每个模块负责什么、不负责什么、公开接口、依赖方向 |
 | [agent-loop.md](architecture/agent-loop.md) | 一次 Turn 如何开始、执行工具、处理错误与中断、结束 |
 | [sessions.md](architecture/sessions.md) | 会话的持久化、生命周期、恢复与崩溃处理 |
+| [usage.md](architecture/usage.md) | 跨会话用量、费用估算、事件口径与只读缓存 |
 | [context.md](architecture/context.md) | 如何从会话历史构建模型上下文，token 预算与压缩 |
 | [tools.md](architecture/tools.md) | 工具注册、执行管线、结果归一化、内置工具 |
 | [permissions.md](architecture/permissions.md) | allow / ask / deny 规则模型、默认规则、审批流程 |

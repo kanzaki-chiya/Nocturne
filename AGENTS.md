@@ -17,6 +17,7 @@
 |---|---|
 | Agent Loop、Turn 流程、中断、重试 | [architecture/agent-loop.md](docs/architecture/agent-loop.md) |
 | 会话、持久化、恢复 | [architecture/sessions.md](docs/architecture/sessions.md) |
+| 用量统计、费用估算 | [architecture/usage.md](docs/architecture/usage.md) |
 | 事件类型或字段 | [protocols/events.md](docs/protocols/events.md) |
 | 会话派生视图、重放、客户端共享状态 | [protocols/view.md](docs/protocols/view.md) |
 | 上下文构建、压缩、提示词组装 | [architecture/context.md](docs/architecture/context.md) |

@@ -58,6 +58,7 @@ import type {
   SettingItem,
   SettingsPatch,
   TurnEndReason,
+  UsageStats,
 } from "@nocturne/core";
 
 export interface InitializeParams {
@@ -203,6 +204,7 @@ export interface RpcMethods {
     params: { cwd?: string; includeSubagents?: boolean };
     result: SessionSummary[];
   };
+  "runtime.usageStats": { params: { days?: number }; result: UsageStats };
   "runtime.createSession": { params: CreateSessionOptions; result: SessionOpened };
   "runtime.resumeSession": {
     params: { sessionId: string; model?: string | ModelRef; force?: boolean };
@@ -468,6 +470,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   initialize: true,
   shutdown: true,
   "runtime.listSessions": true,
+  "runtime.usageStats": true,
   "runtime.createSession": true,
   "runtime.resumeSession": true,
   "runtime.forkSession": true,

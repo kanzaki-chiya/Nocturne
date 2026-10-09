@@ -1,0 +1,261 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { createRuntime, createPlatform } from "../src/index.js";
+import { FakeProvider, type FakeScript } from "../src/provider/index.js";
+import { estimateCost, type DurableEvent, type Usage } from "../src/protocol/index.js";
+import { createUsageStats } from "../src/usage/index.js";
+
+const usage: Usage = {
+  inputTokens: 1_000_000,
+  outputTokens: 100_000,
+  cacheReadTokens: 800_000,
+  cacheWriteTokens: 100_000,
+};
+
+describe("estimateCost", () => {
+  it("separates cached read/write, uncached input and output", () => {
+    expect(estimateCost(usage, { input: 2, output: 8, cacheRead: 0.25, cacheWrite: 3 })).toEqual({
+      input: 0.2,
+      cacheRead: 0.2,
+      cacheWrite: 0.3,
+      output: 0.8,
+      total: 1.5,
+    });
+  });
+  it("falls back to input price for missing cache prices", () => {
+    expect(estimateCost(usage, { input: 2, output: 8 })?.total).toBe(2.8);
+  });
+  it("selects highest eligible tier and inherits missing fields", () => {
+    expect(
+      estimateCost(usage, {
+        input: 2,
+        output: 8,
+        tiers: [
+          { aboveInputTokens: 1_000_001, input: 100 },
+          { aboveInputTokens: 500_000, input: 4 },
+          { aboveInputTokens: 100_000, output: 99 },
+        ],
+      })?.total,
+    ).toBe(4.8);
+  });
+  it("does not invent undeclared prices", () => {
+    expect(estimateCost(usage, undefined)).toBeUndefined();
+  });
+});
+
+describe("Runtime.usageStats", () => {
+  it("aggregates two real sessions, subagent turns and tools/skills without turn double counting", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-usage-"));
+    const sessionsDir = path.join(root, "sessions");
+    const provider = new FakeProvider({
+      handler: (req) => {
+        const u: FakeScript = [
+          { type: "usage", usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 80 } },
+        ];
+        if (req.purpose === "title")
+          return [
+            { type: "text_delta", text: "测试" },
+            { type: "finish", reason: "stop" },
+          ];
+        if (req.tools.some((t) => t.name === "finish"))
+          return [
+            ...u,
+            {
+              type: "tool_call",
+              toolCallId: "finish",
+              name: "finish",
+              input: { result: "调查完成" },
+            },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        const task = req.messages.some(
+          (m) => m.role === "user" && JSON.stringify(m.content).includes("派生"),
+        );
+        if (task && !req.messages.some((m) => m.role === "tool"))
+          return [
+            ...u,
+            {
+              type: "tool_call",
+              toolCallId: "task",
+              name: "task",
+              input: { task: "调查", preset: "explore" },
+            },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        return [...u, { type: "text_delta", text: "完成" }, { type: "finish", reason: "stop" }];
+      },
+    });
+    const runtime = await createRuntime({
+      cwd: root,
+      sessionsDir,
+      providers: [provider],
+      modelOverrides: { fake: { "fake-model": { pricing: { input: 2, output: 8 } } } },
+    });
+    const a = await runtime.createSession({ model: "fake/fake-model" });
+    const b = await runtime.createSession({ model: "fake/fake-model" });
+    try {
+      await a.submit({ text: "派生" });
+      await b.submit({ text: "普通" });
+      await a.close();
+      await b.close();
+      // Additional persistent skill events exercise both entry paths without needing user skill directories.
+      const file = path.join(sessionsDir, `${b.id}.jsonl`);
+      const events = (await fs.readFile(file, "utf8"))
+        .trimEnd()
+        .split("\n")
+        .map((l) => JSON.parse(l) as DurableEvent);
+      const base = { sessionId: b.id, time: new Date().toISOString() };
+      await fs.appendFile(
+        file,
+        [
+          {
+            ...base,
+            seq: events.length + 1,
+            type: "message.user",
+            turnId: "skill-turn",
+            payload: {
+              messageId: "skill-user",
+              content: [],
+              skill: { name: "example", body: "正文" },
+            },
+          },
+          {
+            ...base,
+            seq: events.length + 2,
+            type: "tool.started",
+            turnId: "skill-turn",
+            payload: {
+              callId: "skill",
+              name: "skill",
+              input: { name: "example" },
+              subjects: [],
+              permission: { action: "allow", source: "rule" },
+            },
+          },
+        ]
+          .map((e) => JSON.stringify(e) + "\n")
+          .join(""),
+      );
+      const stats = await runtime.usageStats({});
+      expect(stats.sessions).toBe(3);
+      expect(stats.turns).toBe(3);
+      expect(stats.subagentTurns).toBe(1);
+      expect(stats.totals.inputTokens).toBe(400);
+      expect(stats.totals.outputTokens).toBe(80);
+      expect(stats.models[0]).toMatchObject({
+        model: { provider: "fake", model: "fake-model" },
+        turns: 3,
+        inputTokens: 400,
+      });
+      expect(stats.tools).toEqual(
+        expect.arrayContaining([
+          { name: "task", count: 1 },
+          { name: "finish", count: 1 },
+          { name: "skill", count: 1 },
+        ]),
+      );
+      expect(stats.skills).toEqual([{ name: "example", count: 2 }]);
+      expect(stats.skippedFiles).toBe(0);
+    } finally {
+      await a.close();
+      await b.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("groups local midnight, includes rewound usage, skips corrupt logs and caches unchanged files", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-usage-cache-"));
+    const platform = createPlatform();
+    const read = vi.spyOn(platform.fs, "readTextFile");
+    const time = new Date(2026, 9, 8, 23, 59).toISOString();
+    const next = new Date(2026, 9, 9, 0, 1).toISOString();
+    const base = { sessionId: "s", time };
+    const model = { provider: "p", model: "m" };
+    const events = [
+      {
+        ...base,
+        seq: 1,
+        type: "session.created",
+        payload: {
+          formatVersion: 1,
+          nocturneVersion: "test",
+          cwd: root,
+          workspaceRoot: root,
+          model,
+          permissionPreset: "default",
+        },
+      },
+      { ...base, seq: 2, type: "turn.started", turnId: "t", payload: { turnIndex: 1 } },
+      {
+        ...base,
+        seq: 3,
+        type: "message.assistant",
+        turnId: "t",
+        payload: {
+          messageId: "a",
+          model,
+          usage: { inputTokens: 100, outputTokens: 20 },
+          content: [],
+          toolCalls: [],
+          finishReason: "stop",
+        },
+      },
+      {
+        ...base,
+        time: next,
+        seq: 4,
+        type: "turn.completed",
+        turnId: "t",
+        payload: { reason: "done", steps: 1, usage: { inputTokens: 100, outputTokens: 20 } },
+      },
+      {
+        ...base,
+        time: next,
+        seq: 5,
+        type: "context.compacted",
+        payload: {
+          kind: "summary",
+          throughSeq: 4,
+          summary: "摘要",
+          model,
+          usage: { inputTokens: 50, outputTokens: 10 },
+        },
+      },
+    ];
+    try {
+      await fs.writeFile(
+        path.join(root, "s.jsonl"),
+        events.map((e) => JSON.stringify(e) + "\n").join(""),
+      );
+      await fs.writeFile(path.join(root, "broken.jsonl"), "bad\n");
+      const stats = createUsageStats({ platform, sessionsDir: root, pricing: () => undefined });
+      const first = await stats({});
+      expect(first.daily).toEqual([
+        { date: "2026-10-08", tokens: 120, cost: 0, turns: 1 },
+        { date: "2026-10-09", tokens: 60, cost: 0, turns: 0 },
+      ]);
+      expect(first.longestTurn?.durationMs).toBe(120_000);
+      expect(first.skippedFiles).toBe(1);
+      expect(first.unpricedModels).toEqual([model]);
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(await stats({})).toEqual(first);
+      expect(read).toHaveBeenCalledTimes(2);
+      await fs.appendFile(
+        path.join(root, "s.jsonl"),
+        JSON.stringify({
+          ...base,
+          seq: 6,
+          type: "session.titled",
+          payload: { title: "标题", model: "p/m", usage: { inputTokens: 1, outputTokens: 1 } },
+        }) + "\n",
+      );
+      expect((await stats({})).totals.inputTokens).toBe(151);
+      expect(read).toHaveBeenCalledTimes(3);
+    } finally {
+      read.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});

@@ -35,6 +35,7 @@
 | `createSession` | `CreateSessionOptions` → `SessionOpened`；ADR-0051 新增可选 `cwd` 与 `workspaceRoot`，按该目录加载项目层并把两个值写入 `session.created`。`cwd` 缺省沿用 Runtime 的 cwd；工作区根依次取显式 `workspaceRoot`、显式 `cwd` 的真实路径、Runtime 的 workspaceRoot；恢复会话沿用日志记录的工作区，不带参数 |
 | `resumeSession` | `{ sessionId, model?, force? }` → `SessionOpened` |
 | `forkSession` | `{ sessionId, targetSeq? }` → `{ sessionId }`（新会话未打开，用 `resumeSession` 打开） |
+| `usageStats` | `{ days?: number }`（正整数，缺省全部）→ protocol 的 `UsageStats`；只读，不打开会话或取锁，见 [usage.md](../architecture/usage.md) |
 | `listModels` / `defaultModel` / `listRecentModels` | 模型列表 / `ModelRef \| null` / `ModelRef[]`；前两者可带 `workspaceRoot` |
 | `describeSettings` / `updateSettings` | `SettingItem[]`；均可带 `workspaceRoot`，`updateSettings { patch, reviewerKey? }` |
 | `listShells` | `{ workspaceRoot? }` → 全部已知种类的 DetectedShell[]（含不可用项） |
