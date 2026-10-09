@@ -128,6 +128,84 @@ describe("ADR-0053 pricing", () => {
     }
   });
 
+  it("falls back to modelsDevProvider pricing and prefers the layered modelsDevPricing key", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-pricing-fallback-"));
+    try {
+      await fs.mkdir(path.join(home, "cache"));
+      await fs.writeFile(
+        path.join(home, "cache", "models-dev.json"),
+        JSON.stringify({
+          fetchedAt: "2099-01-01T00:00:00Z",
+          models: {},
+          providers: {
+            openai: { npm: "@ai-sdk/openai", models: { m: { cost: { input: 1 } } } },
+            anthropic: { npm: "@ai-sdk/anthropic", models: { m: { cost: { input: 2 } } } },
+          },
+        }),
+      );
+      const entry = {
+        id: "p",
+        baseURL: "https://example.test",
+        modelsDevProvider: "openai",
+        models: { m: {} },
+      };
+      const save = async (provider: typeof entry & { modelsDevPricing?: string }) =>
+        fs.writeFile(
+          path.join(home, "providers.json"),
+          JSON.stringify({ version: 1, providers: [provider] }),
+        );
+      const resolve = async () => {
+        const config = await loadConfig(createPlatform(), {
+          nocturneHome: home,
+          env: () => undefined,
+        });
+        const configured = config.base.providers[0];
+        if (!configured) throw new Error("missing provider fixture");
+        const model = configured.models?.m;
+        const provider = createEntryProvider({
+          id: configured.id,
+          baseURL: configured.baseURL,
+          models: {
+            m: {
+              pricing: model?.pricing,
+              pricingSource: model?.pricingSource,
+              endpoints: model?.endpoints,
+            },
+          },
+        });
+        return createProviderRegistry([provider]).resolve({ provider: configured.id, model: "m" })
+          .model;
+      };
+      await save(entry);
+      expect(await resolve()).toMatchObject({ pricing: { input: 1 }, pricingSource: "models.dev" });
+      await save({ ...entry, modelsDevPricing: "anthropic" });
+      expect(await resolve()).toMatchObject({ pricing: { input: 2 }, pricingSource: "models.dev" });
+      await fs.writeFile(
+        path.join(home, "config.json"),
+        JSON.stringify({
+          providers: [
+            {
+              id: "p",
+              baseURL: entry.baseURL,
+              modelsDevProvider: "anthropic",
+              modelsDevPricing: "openai",
+            },
+          ],
+        }),
+      );
+      expect(await resolve()).toMatchObject({ pricing: { input: 1 }, pricingSource: "models.dev" });
+      await fs.writeFile(
+        path.join(home, "config.json"),
+        JSON.stringify({
+          providers: [{ id: "p", baseURL: entry.baseURL, modelsDevProvider: "openai" }],
+        }),
+      );
+      expect(await resolve()).toMatchObject({ pricing: { input: 2 }, pricingSource: "models.dev" });
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
   it("OpenRouter maps cache prices per token including free cache writes", async () => {
     vi.stubGlobal(
       "fetch",

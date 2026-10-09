@@ -74,7 +74,7 @@ export async function runSlash(
       const ref = view.config.model;
       const pricing = costContext.runtime
         .listModels()
-        .find((m) => m.ref.provider === ref?.provider && m.ref.model === ref?.model)?.pricing;
+        .find((m) => m.ref.provider === ref?.provider && m.ref.model === ref.model)?.pricing;
       return {
         kind: "message",
         text: costLines(view, pricing, await costContext.runtime.usageStats({ days: 30 })).join(

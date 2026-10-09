@@ -324,7 +324,7 @@ runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最�
 
 ## 7. 模型限额以上游声明为准
 
-价格按手写配置 > 上游清单 > models.dev 取整个对象。内置预设的 `modelsDevPricing` 随 `modelsDevProvider` 的保存路径写入 providers.json，但只用于取价；预设更新不改变已保存条目。OpenRouter 的 `input_cache_read` / `input_cache_write` 与输入输出价一样从每 token USD 换算为每百万 token，保存为 `cacheRead` / `cacheWrite`（包括零价）。models.dev 分档 `tier.size` 映射为 `aboveInputTokens`；价格来源标记进入 ModelInfo。详见 [ADR-0053](../decisions/ADR-0053-usage-and-cost.md)。
+价格按手写配置 > 上游清单 > models.dev 取整个对象。内置预设的 `modelsDevPricing` 随 `modelsDevProvider` 的保存路径写入 providers.json，但只用于取价；缺省时回退到该条目已有的 `modelsDevProvider`，不改变协议推断。预设更新不改变已保存条目。OpenRouter 的 `input_cache_read` / `input_cache_write` 与输入输出价一样从每 token USD 换算为每百万 token，保存为 `cacheRead` / `cacheWrite`（包括零价）。models.dev 分档 `tier.size` 映射为 `aboveInputTokens`；价格来源标记进入 ModelInfo。详见 [ADR-0053](../decisions/ADR-0053-usage-and-cost.md)。
 
 上下文窗口与最大输出长度是服务方的事实，应当由上游声明，而不是由 Nocturne 猜。v0.1 对目录外模型一律套用 `contextWindow` 128000、`maxOutputTokens` 4096，在实测中两头都错：commandcode 网关对 `deepseek/deepseek-v4.1-flash` 声明 `context_length` 为 1000000（按 128000 计算会过早触发压缩）；OpenRouter 对同一模型声明 `top_provider.max_completion_tokens` 为 393216（按 4096 截断会让一次大文件写入被切断）。
 

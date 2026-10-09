@@ -6,9 +6,9 @@ import "./usage.css";
 type Range = "7" | "30" | "all";
 export const formatUsageTokens = (n: number): string =>
   n >= 100_000_000
-    ? `${(n / 100_000_000).toFixed(2)} 亿`
+    ? `${Number((n / 100_000_000).toFixed(2))} 亿`
     : n >= 10_000
-      ? `${(n / 10_000).toFixed(1)} 万`
+      ? `${Number((n / 10_000).toFixed(1))} 万`
       : n.toLocaleString("en-US");
 export const formatUsageCost = (n: number): string =>
   `$${n >= 100 ? Math.round(n).toLocaleString("en-US") : n.toFixed(2)}`;
@@ -47,10 +47,17 @@ function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
   const describe = (d: DailyUsageStats) =>
     `${d.date} · ${formatUsageTokens(d.tokens)} tokens · 约 ${formatUsageCost(d.cost)} · ${d.turns} Turn`;
   const selected = hover ?? pinned;
-  const months = Array.from({ length: 12 }, (_, i) => {
-    const date = new Date(first.getFullYear(), first.getMonth() + i, 1);
-    return `${date.getMonth() + 1} 月`;
-  });
+  const columns = Math.ceil((first.getDay() + cells.length) / 7);
+  const months = cells.flatMap(({ day }, i) =>
+    i === 0 || day.date.slice(0, 7) !== cells[i - 1]?.day.date.slice(0, 7)
+      ? [
+          {
+            label: `${Number(day.date.slice(5, 7))} 月`,
+            column: Math.floor((first.getDay() + i) / 7) + 1,
+          },
+        ]
+      : [],
+  );
   return (
     <section className="usage-section" aria-label="每日活跃">
       <div className="usage-section-head">
@@ -77,9 +84,20 @@ function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
         </div>
       </div>
       <div className="usage-heat-scroll">
-        <div className="usage-months">
+        <div
+          className="usage-months"
+          style={{ gridTemplateColumns: `repeat(${columns}, minmax(9px, 1fr))` }}
+        >
           {months.map((m, i) => (
-            <span key={i}>{m}</span>
+            <span
+              key={i}
+              style={{
+                gridColumn: m.column,
+                justifySelf: i === months.length - 1 ? "end" : undefined,
+              }}
+            >
+              {m.label}
+            </span>
           ))}
         </div>
         <div className="usage-heat-wrap">

@@ -71,7 +71,9 @@ describe("desktop usage", () => {
   it("renders overview and requests the newly selected range without polling", async () => {
     const { server } = await mount();
     const overview = document.querySelector(".usage-overview");
-    expect(overview?.textContent).toContain("12.0 万");
+    expect(overview?.textContent).toContain("12 万");
+    expect(document.querySelector(".usage-composition")?.textContent).not.toContain(".0 万");
+    expect(screen.getByRole("table").textContent).not.toContain(".0 万");
     expect(overview?.textContent).toContain("80.0%");
     expect(overview?.textContent).toContain("$10.00");
     expect(overview?.textContent).toContain("30 Turns · 子代理 4");
@@ -109,17 +111,22 @@ describe("desktop usage", () => {
     await mount();
     const grid = screen.getByLabelText("近一年每日用量");
     expect(within(grid).getAllByRole("button")).toHaveLength(365);
+    expect(within(grid).getAllByRole("button").at(-1)?.getAttribute("aria-label")).toContain(today);
+    expect(grid.lastElementChild?.getAttribute("aria-label")).toContain(today);
+    expect(document.querySelector(".usage-months")?.lastElementChild?.textContent).toBe(
+      `${now.getMonth() + 1} 月`,
+    );
     expect(grid.querySelectorAll(".usage-outside")).toHaveLength(335);
     const cell = within(grid).getByRole("button", {
-      name: `${today} · 12.0 万 tokens · 约 $10.00 · 30 Turn`,
+      name: `${today} · 12 万 tokens · 约 $10.00 · 30 Turn`,
     });
     expect(cell.title).toContain("约 $10.00");
     fireEvent.mouseEnter(cell);
-    expect(screen.getByText(`${today} · 12.0 万 tokens · 约 $10.00 · 30 Turn`)).toBeTruthy();
+    expect(screen.getByText(`${today} · 12 万 tokens · 约 $10.00 · 30 Turn`)).toBeTruthy();
     fireEvent.click(cell);
     fireEvent.mouseLeave(cell);
     expect(cell.getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByText(`${today} · 12.0 万 tokens · 约 $10.00 · 30 Turn`)).toBeTruthy();
+    expect(screen.getByText(`${today} · 12 万 tokens · 约 $10.00 · 30 Turn`)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "费用" }));
     expect(cell.className).toContain("usage-level-4");
   });
@@ -176,7 +183,10 @@ describe("desktop usage", () => {
     );
   });
   it("formats Chinese token units and estimated dollar amounts", () => {
-    expect(formatUsageTokens(100_000_000)).toBe("1.00 亿");
+    expect(formatUsageTokens(100_000_000)).toBe("1 亿");
+    expect(formatUsageTokens(8_800_000)).toBe("880 万");
+    expect(formatUsageTokens(115_000)).toBe("11.5 万");
+    expect(formatUsageTokens(115_000_000)).toBe("1.15 亿");
     expect(formatUsageCost(123.45)).toBe("$123");
     expect(formatUsageCost(1.2)).toBe("$1.20");
   });

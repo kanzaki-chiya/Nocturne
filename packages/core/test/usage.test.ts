@@ -165,6 +165,112 @@ describe("Runtime.usageStats", () => {
     }
   });
 
+  it("deduplicates real full, targeted and nested forks, including after source deletion", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-usage-fork-"));
+    const sessionsDir = path.join(root, "sessions");
+    const skillName = "usage-fork-fixture";
+    const skillDir = path.join(root, ".claude", "skills", skillName);
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, "SKILL.md"),
+      "---\ndescription: usage fixture\n---\nFixture skill",
+    );
+    const provider = new FakeProvider({
+      strictModels: false,
+      handler: (_req, index) => [
+        { type: "usage", usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 80 } },
+        ...(index % 2 === 0
+          ? [
+              {
+                type: "tool_call" as const,
+                toolCallId: `skill-${index}`,
+                name: "skill",
+                input: { name: skillName },
+              },
+              { type: "finish" as const, reason: "tool_calls" as const },
+            ]
+          : [
+              { type: "text_delta" as const, text: "完成" },
+              { type: "finish" as const, reason: "stop" as const },
+            ]),
+      ],
+    });
+    const runtime = await createRuntime({
+      cwd: await fs.realpath(root),
+      sessionsDir,
+      providers: [provider],
+    });
+    const source = await runtime.createSession({ model: "fake/fake-1" });
+    const opened = [source];
+    try {
+      await source.submit({ text: "source first", skill: { name: skillName } });
+      await source.submit({ text: "source second", skill: { name: skillName } });
+      const targetSeq = source.durableEvents().filter((e) => e.type === "message.user")[1]?.seq;
+      if (targetSeq === undefined) throw new Error("missing fork target");
+      await source.setModel("fake/other");
+      await source.close();
+      const baseline = await runtime.usageStats({});
+      expect(baseline).toMatchObject({ sessions: 1, turns: 2, skippedFiles: 0 });
+      expect(baseline.totals).toMatchObject({
+        inputTokens: 400,
+        outputTokens: 80,
+        cacheReadTokens: 320,
+      });
+      expect(baseline.tools).toEqual([{ name: "skill", count: 2 }]);
+      expect(baseline.skills).toEqual([{ name: skillName, count: 4 }]);
+      const fullId = await runtime.forkSession(source.id);
+      const targetId = await runtime.forkSession(source.id, { targetSeq });
+      const copied = await runtime.usageStats({});
+      expect(copied).toEqual({ ...baseline, sessions: 3 });
+      const full = await runtime.resumeSession(fullId);
+      const targeted = await runtime.resumeSession(targetId);
+      opened.push(full, targeted);
+      await full.submit({ text: "full fork", skill: { name: skillName } });
+      await targeted.submit({ text: "targeted fork", skill: { name: skillName } });
+      await full.close();
+      await targeted.close();
+      const nestedId = await runtime.forkSession(fullId);
+      const beforeNested = await runtime.usageStats({});
+      expect(beforeNested).toMatchObject({ sessions: 4, turns: 4 });
+      expect(beforeNested.totals.inputTokens).toBe(800);
+      const nested = await runtime.resumeSession(nestedId);
+      opened.push(nested);
+      await nested.submit({ text: "nested fork", skill: { name: skillName } });
+      await nested.close();
+      const result = await runtime.usageStats({});
+      expect(result).toMatchObject({ sessions: 4, turns: 5, subagentTurns: 0, skippedFiles: 0 });
+      expect(result.totals).toMatchObject({
+        inputTokens: 1000,
+        outputTokens: 200,
+        cacheReadTokens: 800,
+      });
+      expect(result.tools).toEqual([{ name: "skill", count: 5 }]);
+      expect(result.skills).toEqual([{ name: skillName, count: 10 }]);
+      expect(result.daily.reduce((sum, d) => sum + d.tokens, 0)).toBe(1200);
+      expect(result.daily.reduce((sum, d) => sum + d.turns, 0)).toBe(5);
+      expect(result.models.find((m) => m.model.model === "other")?.turns).toBe(3);
+      await fs.unlink(path.join(sessionsDir, `${source.id}.jsonl`));
+      const withoutSource = await runtime.usageStats({});
+      expect(withoutSource).toMatchObject({ sessions: 3, turns: 3, skippedFiles: 0 });
+      expect(withoutSource.totals).toMatchObject({
+        inputTokens: 600,
+        outputTokens: 120,
+        cacheReadTokens: 480,
+      });
+      expect(withoutSource.tools).toEqual([{ name: "skill", count: 3 }]);
+      expect(withoutSource.skills).toEqual([{ name: skillName, count: 6 }]);
+      expect(withoutSource.daily.reduce((sum, d) => sum + d.tokens, 0)).toBe(720);
+      expect(withoutSource.daily.reduce((sum, d) => sum + d.turns, 0)).toBe(3);
+      expect(withoutSource.models.map((m) => m.model.model)).toEqual(["other"]);
+      expect(["full fork", "targeted fork", "nested fork"]).toContain(
+        withoutSource.longestTurn?.sessionTitle,
+      );
+    } finally {
+      for (const session of opened) await session.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("groups local midnight, includes rewound usage, skips corrupt logs and caches unchanged files", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-usage-cache-"));
     const platform = createPlatform();
@@ -223,6 +329,12 @@ describe("Runtime.usageStats", () => {
           usage: { inputTokens: 50, outputTokens: 10 },
         },
       },
+      {
+        ...base,
+        seq: 6,
+        type: "session.rewound",
+        payload: { targetSeq: 2, mode: "conversation", files: [] },
+      },
     ];
     try {
       await fs.writeFile(
@@ -246,7 +358,7 @@ describe("Runtime.usageStats", () => {
         path.join(root, "s.jsonl"),
         JSON.stringify({
           ...base,
-          seq: 6,
+          seq: 7,
           type: "session.titled",
           payload: { title: "标题", model: "p/m", usage: { inputTokens: 1, outputTokens: 1 } },
         }) + "\n",

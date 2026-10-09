@@ -61,6 +61,7 @@ describe("服务商预设", () => {
       auth: { kind: "openai-siwc" },
       login: "openai-siwc",
       modelsDevProvider: "openai",
+      modelsDevPricing: "openai",
       fetchableModels: true,
     });
   });

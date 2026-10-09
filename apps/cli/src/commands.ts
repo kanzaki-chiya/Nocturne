@@ -133,7 +133,7 @@ export async function runSlashCommand(
         const ref = view.config.model;
         const pricing = runtime
           .listModels()
-          .find((m) => m.ref.provider === ref?.provider && m.ref.model === ref?.model)?.pricing;
+          .find((m) => m.ref.provider === ref?.provider && m.ref.model === ref.model)?.pricing;
         io.print(costLines(view, pricing, await runtime.usageStats({ days: 30 })).join("\n"));
       } catch (e) {
         io.print(`! ${errorText(e)}`);

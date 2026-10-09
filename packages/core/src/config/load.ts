@@ -154,7 +154,7 @@ export async function loadConfig(
     for (const [id, ids] of entries) {
       const models: NonNullable<ProviderEntryConfig["models"]> = {};
       const providerKey = devProviderKey.get(id);
-      const priceModels = modelsDev.providers?.[devPricingKey.get(id) ?? ""]?.models;
+      const priceModels = modelsDev.providers?.[devPricingKey.get(id) ?? providerKey ?? ""]?.models;
       for (const modelId of ids) {
         const record = matchModelsDev(modelsDev.models, modelId);
         // models.dev 服务商层的 endpoints 声明（ADR-0031 §4）：与

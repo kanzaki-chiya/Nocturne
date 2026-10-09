@@ -101,7 +101,7 @@ interface ConfigFile {
 
 models.dev 数据在启动时从缓存或内置快照读取，启动不联网；添加服务商或刷新模型列表时才 GET 更新，10 秒超时，失败沿用本地数据并提示。`config.json` 的 `modelsDev: false` 关闭联网并只使用内置快照。缓存比快照新时优先使用缓存。匹配规则与字段映射见 [providers.md](providers.md) 第 2 节。
 
-`pricing` 作为整体值替换（包括缓存读写价与分档，不逐字段合并）；手写配置 > 上游清单 > models.dev。服务商可声明 `modelsDevPricing: string`，只从指定 models.dev 服务商键取价，不参与 `modelsDevProvider` 的协议推断；形状与来源标记见 [provider-api.md](../protocols/provider-api.md#2-模型与能力)，估算决定见 [ADR-0053](../decisions/ADR-0053-usage-and-cost.md)。
+`pricing` 作为整体值替换（包括缓存读写价与分档，不逐字段合并）；手写配置 > 上游清单 > models.dev。服务商可声明 `modelsDevPricing: string`，只从指定 models.dev 服务商键取价，缺省时回退到该条目已有的 `modelsDevProvider`；两个键分别按层覆盖，最后取 `modelsDevPricing ?? modelsDevProvider`，取价不改变既有协议推断路径。形状与来源标记见 [provider-api.md](../protocols/provider-api.md#2-模型与能力)，估算决定见 [ADR-0053](../decisions/ADR-0053-usage-and-cost.md)。
 
 **程序设置层 `settings.json`**（[ADR-0034](../decisions/ADR-0034-settings-layer.md)）：白名单为 `modelRoles`、`model`、`reasoningEffort`、`permissions.preset`、`permission.reviewer`、`compaction.threshold`、`shell`、`shellPath`，与 `config.json` 共用 schema，按第 1 节的顺序参与通用合并。损坏文件忽略并警告；无效字段逐个忽略并警告，其余合法字段继续生效，不阻塞启动。白名单外字段（包括 `permissions`、`compaction` 中的未知成员）原样保留，但不参与合并；`theme` 等界面偏好仍由客户端解释。写入采用临时文件 + rename，成功后才更新内存，失败保留旧值，同进程并发写入串行执行，避免设置与偏好互相覆盖。
 

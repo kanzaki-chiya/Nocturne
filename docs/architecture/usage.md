@@ -13,7 +13,9 @@
 | context.compacted | 有模型与用量时计入摘要请求；旧日志与 prune 不贡献用量 |
 | turn.completed | 不计入用量，避免重复；只计算对应 started 到 completed 的时长 |
 
-回退只截断派生历史，不撤销实际消耗；扫描原始日志，回退前的事件仍计入。Turn 数按 started 统计，按开始事件的本地日期归类；各模型 Turn 数按该 Turn 开始时的模型归类。会话数为范围内有请求、Turn 或工具/技能使用的日志数。最长 Turn 仅取有完成事件的 Turn，使用日志标题或首条用户消息首行。
+回退只截断派生历史，不撤销实际消耗；扫描原始日志，回退前的事件仍计入。Turn 数按 started 统计，按开始事件的本地日期归类；各模型 Turn 数按该 Turn 开始时的模型归类。会话数为范围内有请求、Turn 或工具/技能使用的日志数，加上范围内创建的分叉会话（即使尚无新 Turn）。最长 Turn 仅取有完成事件的 Turn，使用日志标题或首条用户消息首行。
+
+分叉日志首行有 `forkedFrom` 时，只统计信封 `sessionId` 等于本日志自身 id 的事件；复制的历史不计入用量、Turn、最长 Turn、工具、技能或逐日序列，分叉的分叉同样适用。复制的模型配置仅用于确定分叉新 Turn 的模型。来源会话删除后，复制部分不再计入，与已删除会话不计的口径一致；没有 `forkedFrom` 的日志不增加 sessionId 过滤。
 
 工具次数按 tool.started.name；技能次数为 message.user.skill.name，加上 skill 工具 started.input.name，工具识别使用工具模块导出的常量，仅发生在只读统计模块。
 
@@ -35,6 +37,6 @@ Runtime 内存按文件路径、大小、mtimeMs 缓存逐文件用量聚合（�
 - 空模型步骤没有 message.assistant，用量只在 turn.completed 中，接受漏计。
 - 摘要失败、超时、中断不写事件；旧日志摘要没有用量，均无法补算。
 - 删除的会话不在目录中；外部 agent 账号费用不进入 Nocturne 日志。
-- fork 复制的历史在独立日志中重复出现，目前按全部日志统计，可能重复归类。
+- 既没有 modelsDevPricing 也没有 modelsDevProvider 的旧条目（例如早期写入的 deepseek、grok）需在 providers.json 里补 modelsDevPricing 或手写 pricing。
 - 当前会话视图仍累计 turn.completed.usage，不含角色请求，与跨会话统计口径不同。
 - 并发写日志时观察到不完整尾行会暂时跳过该文件，下一次刷新元数据变化后重读。

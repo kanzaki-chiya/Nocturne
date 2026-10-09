@@ -33,6 +33,7 @@ interface NamedRecord {
 interface FileAggregate {
   title: string;
   child: boolean;
+  forkTime?: number | undefined;
   requests: RequestRecord[];
   turns: TurnRecord[];
   tools: NamedRecord[];
@@ -65,6 +66,7 @@ function parse(text: string): FileAggregate {
   };
   const starts = new Map<string, TurnRecord>();
   let current: ModelRef | undefined;
+  let forkId: string | undefined;
   let seq = 0;
   if (!text.endsWith("\n")) throw new Error("unterminated log");
   for (const line of text.trimEnd().split("\n")) {
@@ -73,6 +75,15 @@ function parse(text: string): FileAggregate {
     const time = Date.parse(e.time);
     if (!Number.isFinite(time)) throw new Error("invalid time");
     if (seq === 1 && e.type !== "session.created") throw new Error("missing session.created");
+    if (seq === 1 && e.type === "session.created" && e.payload.forkedFrom) {
+      forkId = e.sessionId;
+      result.forkTime = time;
+    }
+    if (forkId !== undefined && e.sessionId !== forkId) {
+      // 继承的模型配置仍决定分叉的新 Turn；复制的消耗与活动不计入。
+      if (e.type === "session.config_changed") current = e.payload.model ?? current;
+      continue;
+    }
     switch (e.type) {
       case "session.created":
         current = e.payload.model;
@@ -179,6 +190,12 @@ export function createUsageStats(deps: {
     const tools = new Map<string, number>();
     const skills = new Map<string, number>();
     const live = new Set<string>();
+    const priceTable = new Map<string, ReturnType<typeof deps.pricing>>();
+    const pricingFor = (ref: ModelRef) => {
+      const key = modelKey(ref);
+      if (!priceTable.has(key)) priceTable.set(key, deps.pricing(ref));
+      return priceTable.get(key);
+    };
     const day = (time: number) => {
       const date = dateKey(time);
       let d = days.get(date);
@@ -192,7 +209,7 @@ export function createUsageStats(deps: {
       const key = modelKey(ref);
       let m = models.get(key);
       if (!m) {
-        m = { ...empty(), model: ref, turns: 0, cacheHitRate: 0, ...deps.pricing(ref) };
+        m = { ...empty(), model: ref, turns: 0, cacheHitRate: 0, ...pricingFor(ref) };
         models.set(key, m);
       }
       return m;
@@ -227,9 +244,9 @@ export function createUsageStats(deps: {
         stats.skippedFiles++;
         continue;
       }
-      let included = false;
+      let included = aggregate.forkTime !== undefined && aggregate.forkTime >= cutoff;
       for (const r of aggregate.requests) {
-        const prices = deps.pricing(r.model)?.pricing;
+        const prices = pricingFor(r.model)?.pricing;
         const cost = estimateCost(r.usage, prices);
         const d = day(r.time);
         d.tokens += r.usage.inputTokens + r.usage.outputTokens;

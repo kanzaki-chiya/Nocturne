@@ -73,3 +73,9 @@ pricing?: {
 - `context.compacted(kind="summary")` 增加可选字段 `usage?: Usage` 与 `model?: ModelRef`，由自动压缩与 `/compact` 两条路径写入本次摘要请求的用量和模型；`prune` 不调用模型，不写。兼容新增，旧日志没有这两个字段时按缺失处理。
 - 摘要请求失败、超时或被中断时仍不写压缩事件（context.md §6.6 不变），这部分用量不计入，作为已知缺口写进 usage.md。
 - 用量统计把带 `usage` 的 `context.compacted` 计入对应模型。
+
+### 2026-10-09：取价键回退与分叉去重
+
+- 服务商条目没有 `modelsDevPricing` 时，取价改用该条目已有的 `modelsDevProvider`。后者本来就驱动协议推断，用它取价不改变请求行为；本节「否决复用
+`modelsDevProvider`」针对的是为取价给预设新增它。已保存的旧条目因此不必重写即可计价。
+- 分叉（ADR-0041）复制来源会话的全部事件，统计时分叉日志里信封 `sessionId` 不是本会话的事件属于复制的历史，不计入；来源会话删除后这段历史随之不计。

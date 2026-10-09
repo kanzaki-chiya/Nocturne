@@ -116,12 +116,15 @@
   padding: 4px 2px;
 }
 .usage-months {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  gap: 3px;
   min-width: 648px;
   margin: 0 0 8px 24px;
   color: var(--a-muted);
   font-size: 11px;
+}
+.usage-months span {
+  white-space: nowrap;
 }
 .usage-heat-wrap {
   display: flex;
