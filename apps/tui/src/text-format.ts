@@ -35,7 +35,13 @@ export function costLines(
     "",
     "近 30 天 · 本机全部会话（含子代理）",
     ...[...stats.models]
-      .sort((a, b) => b.cost.total - a.cost.total)
+      // 与桌面用量页一致：未计价排在已计价之后，同费用按输入
+      .sort(
+        (a, b) =>
+          Number(!a.pricing) - Number(!b.pricing) ||
+          b.cost.total - a.cost.total ||
+          b.inputTokens - a.inputTokens,
+      )
       .map(
         (m) =>
           `  ${m.model.provider}/${m.model.model} · ${tokens(m.inputTokens + m.outputTokens)} tokens · ${m.pricing ? `${money(m.cost.total)}${vendorTag(m.pricingSource)}` : "未计价"}`,
