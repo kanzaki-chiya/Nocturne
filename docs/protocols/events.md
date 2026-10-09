@@ -80,7 +80,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `permission.reviewed` | ✓ | `callId`、`requestId?`、`backend`、`model?: ModelRef`、`verdict: "allow" \| "block" \| "unsure"`、`reason`、`durationMs`、`cached`、`usage?: Usage`（审查来源用量；缓存不重复收费） |
 | `tool.completed` | ✓ | `callId`、`name`、`status`、`modelContent`、`output?`、`error?`、`truncated?`、`spillPath?`（超预算输出的落盘文件绝对路径，见 [tools.md](../architecture/tools.md) 第 4 节）、`attachments?: ImageAttachment[]`（v0.5 新增：工具结果图片的附件引用，字节已落盘，见 [tools.md](../architecture/tools.md) 第 4 节）、`durationMs?` |
 
-| `context.compacted` | ✓ 或 — | `kind: "prune" \| "summary"`、`throughSeq`、`summary?`（规则见 [context.md](../architecture/context.md) 第 6 节） |
+| `context.compacted` | ✓ 或 — | `kind: "prune" \| "summary"`、`throughSeq`、`summary?`、`usage?: Usage`、`model?: ModelRef`（摘要请求成功时记录用量与模型；prune 不写，旧日志兼容；规则见 [context.md](../architecture/context.md) 第 6 节） |
 | `turn.completed` | ✓ | `reason`、`steps`、`usage`、`error?`、`recovered?` |
 | `attachment.described` | ✓ | `attachmentRef: { seq, index }`（`message.user` 或 `tool.completed` 的 seq、从 0 开始的附件序号）、`model: string`（provider/model）、`text`、`usage?` |
 

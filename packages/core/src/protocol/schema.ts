@@ -237,6 +237,8 @@ const payloadSchemas = {
     kind: z.enum(["prune", "summary"]),
     throughSeq: z.number().int(),
     summary: z.string().optional(),
+    usage: usageSchema.optional(),
+    model: modelRefSchema.optional(),
   }),
   "turn.completed": z.object({
     reason: z.enum(["done", "truncated", "refused", "aborted", "max_steps", "error"]),

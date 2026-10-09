@@ -2585,7 +2585,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           }
           const request = { ...plan.summaryRequest, sessionId: session.id };
           // context.md 6.6：摘要请求只尝试一轮，不嵌套压缩
-          const summary = await runSummaryCall(
+          const summaryResult = await runSummaryCall(
             model,
             request,
             ac.signal,
@@ -2594,7 +2594,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           );
           await session.emit(
             "context.compacted",
-            { kind: "summary", throughSeq: plan.throughSeq, summary },
+            {
+              kind: "summary",
+              throughSeq: plan.throughSeq,
+              ...summaryResult,
+              model: model.model.ref,
+            },
             {},
           );
         } catch (e) {

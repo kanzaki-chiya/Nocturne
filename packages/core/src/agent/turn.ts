@@ -243,9 +243,9 @@ export async function runTurn(
       // ADR-0031 §3：摘要请求同属本会话，同样携带会话 ID
       sessionId: deps.rootSessionId ?? session.id,
     };
-    let summary: string;
+    let result: Awaited<ReturnType<typeof runSummaryCall>>;
     try {
-      summary = await runSummaryCall(
+      result = await runSummaryCall(
         deps.model,
         request,
         signal,
@@ -258,7 +258,7 @@ export async function runTurn(
     if (aborted(signal)) return false;
     await session.emit(
       "context.compacted",
-      { kind: "summary", throughSeq: plan.throughSeq, summary },
+      { kind: "summary", throughSeq: plan.throughSeq, ...result, model: deps.model.model.ref },
       { turnId },
     );
     return true;

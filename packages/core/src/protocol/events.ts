@@ -165,6 +165,8 @@ export interface ContextCompactedPayload {
   kind: "prune" | "summary";
   throughSeq: number;
   summary?: string | undefined;
+  usage?: Usage | undefined;
+  model?: ModelRef | undefined;
 }
 
 export type TurnEndReason = "done" | "truncated" | "refused" | "aborted" | "max_steps" | "error";

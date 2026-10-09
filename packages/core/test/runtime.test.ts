@@ -1021,6 +1021,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
         // 摘要调用沿用工具声明，但指令要求不调用。
         [
           { type: "text_delta", text: "自动摘要：读取了大文件 big.txt" },
+          { type: "usage", usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 80 } },
           { type: "finish", reason: "stop" },
         ],
         [
@@ -1043,6 +1044,10 @@ describe("上下文与运行时命令（Phase 2）", () => {
     ]);
     // 摘要请求是第 4 次模型调用：沿用主请求工具声明、输出受限。
     const summaryReq = provider.requests[3];
+    expect(compacted[1]?.payload).toMatchObject({
+      model: { provider: "fake", model: "fake-model" },
+      usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 80 },
+    });
     expect(summaryReq?.tools).toEqual(provider.requests[2]?.tools);
     expect(summaryReq?.maxOutputTokens).toBeLessThanOrEqual(4_000);
     // 最终请求：摘要覆盖到 tool.completed，且进行中 Turn 的用户输入被重新注入
@@ -1302,6 +1307,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
         // compact 的摘要调用
         [
           { type: "text_delta", text: "摘要：用户要求打招呼，已回复。" },
+          { type: "usage", usage: { inputTokens: 120, outputTokens: 30, cacheReadTokens: 90 } },
           { type: "finish", reason: "stop" },
         ],
         [
@@ -1319,6 +1325,10 @@ describe("上下文与运行时命令（Phase 2）", () => {
     const compacted = events.find((e) => e.type === "context.compacted");
     expect(compacted?.type === "context.compacted" && compacted.payload.kind).toBe("summary");
     expect(compacted?.type === "context.compacted" && compacted.payload.summary).toContain("摘要");
+    expect(compacted?.payload).toMatchObject({
+      model: { provider: "fake", model: "fake-model" },
+      usage: { inputTokens: 120, outputTokens: 30, cacheReadTokens: 90 },
+    });
     // 摘要请求沿用主请求投影。
     const summaryReq = provider.requests[1];
     expect(summaryReq?.tools).toEqual(provider.requests[0]?.tools);

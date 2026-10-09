@@ -98,6 +98,8 @@ protocol.estimateTokenUnits 返回未取整的四分之一 token 单位；estima
 
 ### 6.2 职责划分
 
+自动摘要和手动 `/compact` 成功后均在 `context.compacted` 保存请求的 `usage` 与 `model`，仅供跨会话统计读取，不改变状态折叠或会话视图的 Turn 用量累计（[ADR-0053](../decisions/ADR-0053-usage-and-cost.md#修订)）。
+
 ```text
 Context Builder（纯计算）  → CompactionPlan { kind, throughSeq, summaryRequest? }
 Agent Loop                 → prune：直接写入事件
@@ -141,6 +143,8 @@ Agent Loop                 → prune：直接写入事件
 - prune 的呈现：最新摘要之后、`throughSeq` 及之前的工具结果替换为占位说明（保留工具名与参数摘要，标注"输出已省略"）；参数摘要来自 `tool.started.input` 折叠进历史条目的 `inputSummary` 字段（`HistoryEntry` 的兼容新增可选字段，见 [events.md](../protocols/events.md) 第 8 节）。
 
 ### 6.6 摘要请求本身的约束与失败处理
+
+摘要流的中性 `usage` 事件与正文一起返回，只有成功的摘要写入用量；失败、超时或中断仍不写任何压缩事件。
 
 - **沿用主请求前缀**：摘要请求直接复用主请求的全部 system、工具声明，以及投影中直到边界的消息，包含上一个摘要、修剪占位与当前模型的图片投影；末尾追加一条 user 消息，要求不调用工具，并按目标、已完成、关键文件与工具结果、未决事项和下一步输出摘要。`cachePrefix` 覆盖全部 system 与边界内消息，末尾摘要指令不缓存；不携带 `reasoningEffort`。
 - **摘要请求必须装得进窗口**：沿用前缀装不下时，退回独立 system + 文本转录 + 空工具集；转录沿用修剪规则。仍装不下则把边界提前到更早的闭合边界；不存在任何可行边界时不给出计划。自动压缩与 `/compact` 共用该路径。
