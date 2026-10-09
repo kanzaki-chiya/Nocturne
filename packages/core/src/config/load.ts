@@ -15,6 +15,7 @@ import {
   modelOverrideFromDev,
   readModelsDev,
   refreshModelsDev,
+  type ModelsDevData,
 } from "./models-dev.js";
 import { modelsDevSnapshot } from "./models-dev-snapshot.js";
 import { createCredentialStore } from "./credentials.js";
@@ -127,13 +128,14 @@ export async function loadConfig(
 
   // 用户配置：损坏即快速失败（config.md 第 2 节）
   const userFile: ConfigFile = (await loadConfigFile(fs, userConfigPath)) ?? {};
-  let modelsDev =
+  let modelsDev: ModelsDevData =
     userFile.modelsDev === false ? modelsDevSnapshot : await readModelsDev(platform, home);
 
   function mergeWithModelsDev(layers: MergeLayer[]): MergeResult {
     const entries = new Map<string, Set<string>>();
     // 条目的 modelsDevProvider 声明（ADR-0031 §4）：高层覆盖低层
     const devProviderKey = new Map<string, string>();
+    const devPricingKey = new Map<string, string>();
     for (const layer of layers) {
       if (layer.kind === "userModels") continue;
       for (const provider of layer.file.providers ?? []) {
@@ -143,12 +145,16 @@ export async function loadConfig(
         if (provider.modelsDevProvider !== undefined) {
           devProviderKey.set(provider.id, provider.modelsDevProvider);
         }
+        if (provider.modelsDevPricing !== undefined) {
+          devPricingKey.set(provider.id, provider.modelsDevPricing);
+        }
       }
     }
     const providers: ProviderEntryConfig[] = [];
     for (const [id, ids] of entries) {
       const models: NonNullable<ProviderEntryConfig["models"]> = {};
       const providerKey = devProviderKey.get(id);
+      const priceModels = modelsDev.providers?.[devPricingKey.get(id) ?? ""]?.models;
       for (const modelId of ids) {
         const record = matchModelsDev(modelsDev.models, modelId);
         // models.dev 服务商层的 endpoints 声明（ADR-0031 §4）：与
@@ -160,8 +166,12 @@ export async function loadConfig(
         const override = {
           ...(record !== undefined ? modelOverrideFromDev(record) : {}),
           ...(endpoints !== undefined ? { endpoints } : {}),
+          ...(priceModels !== undefined && matchModelsDev(priceModels, modelId)?.cost !== undefined
+            ? { pricing: matchModelsDev(priceModels, modelId)?.cost }
+            : {}),
         };
-        if (record !== undefined || endpoints !== undefined) models[modelId] = override;
+        if (record !== undefined || endpoints !== undefined || override.pricing !== undefined)
+          models[modelId] = override;
       }
       if (Object.keys(models).length > 0) providers.push({ id, models });
     }

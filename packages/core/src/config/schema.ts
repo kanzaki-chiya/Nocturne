@@ -56,16 +56,24 @@ const capabilitiesSchema = z.object({
   editTool: z.enum(["edit", "apply_patch"]).optional(),
 });
 
+const tokenPricesSchema = z.object({
+  input: z.number().nonnegative().optional(),
+  output: z.number().nonnegative().optional(),
+  cacheRead: z.number().nonnegative().optional(),
+  cacheWrite: z.number().nonnegative().optional(),
+});
+
 /** 模型条目 schema（config.json 与 providers.json 共用） */
 export const modelOverrideSchema = z.object({
   displayName: z.string().optional(),
   contextWindow: z.number().int().positive().optional(),
   maxOutputTokens: z.number().int().positive().optional(),
   capabilities: capabilitiesSchema.optional(),
-  pricing: z
-    .object({
-      input: z.number().nonnegative().optional(),
-      output: z.number().nonnegative().optional(),
+  pricing: tokenPricesSchema
+    .extend({
+      tiers: z
+        .array(tokenPricesSchema.extend({ aboveInputTokens: z.number().int().nonnegative() }))
+        .optional(),
     })
     .optional(),
   // ADR-0026 第 2 节：手写协议指定（最高优先级）与上游/手写接口声明
@@ -117,6 +125,7 @@ export const providerEntrySchema = z
       .optional(),
     // models.dev 服务商键（ADR-0031 §4）：启用按服务商的接口声明参与合并
     modelsDevProvider: z.string().min(1).optional(),
+    modelsDevPricing: z.string().min(1).optional(),
     // 思考兼容开关（ADR-0018）：format 由预设写死；levels/source 仅为旧文件读取；
     // budgets 覆盖 anthropic 档位预算表（正整数 token 数）
     thinking: z

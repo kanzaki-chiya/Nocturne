@@ -44,6 +44,7 @@ export interface ProviderPreset {
    * 启用 models.dev 服务商层的逐模型接口声明参与合并。
    */
   modelsDevProvider?: string | undefined;
+  modelsDevPricing?: string | undefined;
 }
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
@@ -56,6 +57,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     auth: { kind: "openai-siwc" },
     login: "openai-siwc",
     modelsDevProvider: "openai",
+    modelsDevPricing: "openai",
     fetchableModels: true,
   },
   {
@@ -68,6 +70,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     modelHeader: "x-grok-model-override",
     auth: { kind: "xai-oauth2" },
     login: "xai-oauth2",
+    modelsDevPricing: "xai",
     fetchableModels: true,
   },
   {
@@ -75,6 +78,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     label: "Grok CLI",
     type: "openai-compatible",
     defaultName: "grok-cli",
+    modelsDevPricing: "xai",
     baseURL: "https://cli-chat-proxy.grok.com/v1",
     headers: { ...GROK_PROXY_HEADERS },
     modelHeader: "x-grok-model-override",
@@ -91,6 +95,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     label: "DeepSeek",
     type: "openai-compatible",
     defaultName: "deepseek",
+    modelsDevPricing: "deepseek",
     baseURL: "https://api.deepseek.com/v1",
     defaultKeyEnv: "DEEPSEEK_API_KEY",
     fetchableModels: true,
@@ -102,6 +107,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     label: "OpenRouter",
     type: "openai-compatible",
     defaultName: "openrouter",
+    modelsDevPricing: "openrouter",
     baseURL: "https://openrouter.ai/api/v1",
     defaultKeyEnv: "OPENROUTER_API_KEY",
     fetchableModels: true,
@@ -113,6 +119,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     label: "Anthropic",
     type: "anthropic",
     defaultName: "anthropic",
+    modelsDevPricing: "anthropic",
     defaultKeyEnv: "ANTHROPIC_API_KEY",
     fetchableModels: true,
     keyHint: "https://console.anthropic.com/settings/keys",
@@ -129,6 +136,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     fetchableModels: true,
     sessionHeader: "x-opencode-session",
     modelsDevProvider: "opencode",
+    modelsDevPricing: "opencode",
     keyHint: "https://opencode.ai/auth",
   },
   {
@@ -142,6 +150,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     fetchableModels: true,
     sessionHeader: "x-opencode-session",
     modelsDevProvider: "opencode-go",
+    modelsDevPricing: "opencode-go",
     keyHint: "https://opencode.ai/auth",
   },
   {
@@ -278,7 +287,7 @@ const perTokenPrice = (v: unknown): number | undefined => {
   const s = str(v);
   if (s === undefined) return undefined;
   const n = Number(s);
-  return Number.isFinite(n) && n > 0 ? n * 1_000_000 : undefined;
+  return Number.isFinite(n) && n >= 0 ? n * 1_000_000 : undefined;
 };
 
 /** 单个上游模型条目 → UpstreamModelInfo；只映射明确声明的字段 */
@@ -304,14 +313,28 @@ function mapUpstreamModel(raw: RawModel): UpstreamModelInfo | undefined {
 
   const pricing =
     typeof raw.pricing === "object" && raw.pricing !== null
-      ? (raw.pricing as { prompt?: unknown; completion?: unknown })
+      ? (raw.pricing as {
+          prompt?: unknown;
+          completion?: unknown;
+          input_cache_read?: unknown;
+          input_cache_write?: unknown;
+        })
       : undefined;
   const inputPrice = perTokenPrice(pricing?.prompt);
   const outputPrice = perTokenPrice(pricing?.completion);
-  if (inputPrice !== undefined || outputPrice !== undefined) {
+  const cacheRead = perTokenPrice(pricing?.input_cache_read);
+  const cacheWrite = perTokenPrice(pricing?.input_cache_write);
+  if (
+    inputPrice !== undefined ||
+    outputPrice !== undefined ||
+    cacheRead !== undefined ||
+    cacheWrite !== undefined
+  ) {
     out.pricing = {
       ...(inputPrice !== undefined ? { input: inputPrice } : {}),
       ...(outputPrice !== undefined ? { output: outputPrice } : {}),
+      ...(cacheRead !== undefined ? { cacheRead } : {}),
+      ...(cacheWrite !== undefined ? { cacheWrite } : {}),
     };
   }
 

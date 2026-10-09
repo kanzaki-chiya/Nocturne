@@ -3,12 +3,14 @@ import type { Platform } from "../platform/index.js";
 import { writeJsonAtomic } from "./files.js";
 import { modelsDevSnapshot } from "./models-dev-snapshot.js";
 import type { ModelOverrideShape } from "./types.js";
+import type { ModelPricing } from "../protocol/index.js";
 
 export interface ModelsDevRecord {
   reasoning?: boolean;
   input?: readonly string[];
   context?: number;
   output?: number;
+  cost?: ModelPricing | undefined;
 }
 
 /**
@@ -18,14 +20,50 @@ export interface ModelsDevRecord {
  */
 export interface ModelsDevProviderData {
   npm?: string | undefined;
-  models?: Record<string, { npm?: string | undefined }> | undefined;
+  models?:
+    Record<string, { npm?: string | undefined; cost?: ModelPricing | undefined }> | undefined;
 }
 
 /**
  * models.dev 服务商键白名单（ADR-0031 §4）：快照与缓存只收录内置预设
  * 引用的键；新增内置预设的 modelsDevProvider 时同步加入。
  */
-export const MODELS_DEV_PROVIDER_KEYS = ["opencode", "opencode-go"] as const;
+export const MODELS_DEV_PROVIDER_KEYS = [
+  "opencode",
+  "opencode-go",
+  "deepseek",
+  "xai",
+  "anthropic",
+  "openai",
+  "openrouter",
+] as const;
+
+/** api.json cost 的严格白名单映射，不保留服务商其他字段。 */
+export function trimModelsDevCost(raw: unknown): ModelPricing | undefined {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const value = raw as Record<string, unknown>;
+  const prices: ModelPricing = {};
+  for (const [from, to] of [
+    ["input", "input"],
+    ["output", "output"],
+    ["cache_read", "cacheRead"],
+    ["cache_write", "cacheWrite"],
+  ] as const) {
+    const n = value[from];
+    if (typeof n === "number" && Number.isFinite(n) && n >= 0) prices[to] = n;
+  }
+  if (Array.isArray(value.tiers)) {
+    prices.tiers = value.tiers.flatMap((rawTier: unknown) => {
+      if (rawTier === null || typeof rawTier !== "object" || Array.isArray(rawTier)) return [];
+      const tier = rawTier as Record<string, unknown>;
+      const size = (tier.tier as { size?: unknown } | undefined)?.size;
+      if (typeof size !== "number" || !Number.isInteger(size) || size < 0) return [];
+      const { tiers: _nested, ...fields } = trimModelsDevCost({ ...tier, tiers: undefined }) ?? {};
+      return [{ aboveInputTokens: size, ...fields }];
+    });
+  }
+  return Object.keys(prices).length > 0 ? prices : undefined;
+}
 
 export interface ModelsDevData {
   fetchedAt: string;
@@ -78,13 +116,17 @@ export function trimModelsDevProviders(
       provider.models !== null && typeof provider.models === "object"
         ? (provider.models as Record<string, unknown>)
         : {};
-    const modelMap: Record<string, { npm?: string | undefined }> = {};
+    const modelMap: NonNullable<ModelsDevProviderData["models"]> = {};
     for (const [modelId, mv] of Object.entries(models)) {
       const npm =
         mv !== null && typeof mv === "object" && !Array.isArray(mv)
           ? (mv as { provider?: { npm?: unknown } }).provider?.npm
           : undefined;
-      modelMap[modelId] = typeof npm === "string" && npm !== "" ? { npm } : {};
+      const cost = trimModelsDevCost((mv as { cost?: unknown } | null)?.cost);
+      modelMap[modelId] = {
+        ...(typeof npm === "string" && npm !== "" ? { npm } : {}),
+        ...(cost !== undefined ? { cost } : {}),
+      };
     }
     providers[key] = {
       ...(typeof provider.npm === "string" ? { npm: provider.npm } : {}),

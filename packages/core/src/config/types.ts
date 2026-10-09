@@ -21,6 +21,8 @@ import type {
   McpSaveInput,
   ModelProtocol,
   ModelRef,
+  ModelPricing,
+  PricingSource,
   PermissionPresetName,
   PermissionRule,
   ProviderAuth,
@@ -65,7 +67,9 @@ export interface ModelOverrideShape {
    * 上游声明的按量价格（USD / 每百万 token，provider-api.md 第 2 节）。
    * 只在上游或配置明确声明时存在；界面未声明时留空。
    */
-  pricing?: { input?: number | undefined; output?: number | undefined } | undefined;
+  pricing?: ModelPricing | undefined;
+  /** 由配置分层装配产生，不接受配置文件直接声明。 */
+  pricingSource?: PricingSource | undefined;
   /**
    * 手写协议指定（ADR-0026 第 2 节，最高优先级）：声明后不再按
    * endpoints 推导或条目 type 回落。
@@ -136,6 +140,8 @@ export interface ProviderEntryConfig {
    * 的条目不受影响。
    */
   modelsDevProvider?: string | undefined;
+  /** 仅取价，不参与协议推断（ADR-0053）。 */
+  modelsDevPricing?: string | undefined;
   /**
    * 思考参数格式由预设填写；budgets 覆盖 Anthropic 默认预算。
    * levels/source 仅为旧配置兼容读取，运行时忽略并在写回时清除。
@@ -366,7 +372,7 @@ export interface UpstreamModelEntry {
   displayName?: string | undefined;
   contextWindow?: number | undefined;
   maxOutputTokens?: number | undefined;
-  pricing?: { input?: number | undefined; output?: number | undefined } | undefined;
+  pricing?: ModelPricing | undefined;
   capabilities?:
     | {
         reasoning?: "none" | "hidden" | "visible" | undefined;

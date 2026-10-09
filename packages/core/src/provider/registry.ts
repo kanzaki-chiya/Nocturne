@@ -40,6 +40,8 @@ export function applyModelOverride(
     contextWindow: override.contextWindow ?? base.contextWindow,
     maxOutputTokens: override.maxOutputTokens ?? base.maxOutputTokens,
     pricing: override.pricing ?? base.pricing,
+    pricingSource:
+      override.pricing !== undefined ? (override.pricingSource ?? "config") : base.pricingSource,
     protocol: override.protocol ?? base.protocol,
     endpoints: override.endpoints ?? base.endpoints,
     ...(base.unavailable !== undefined ? { unavailable: base.unavailable } : {}),

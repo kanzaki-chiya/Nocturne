@@ -9,6 +9,8 @@ import type {
   ImageMimeType,
   ModelProtocol,
   ModelRef,
+  ModelPricing,
+  PricingSource,
   ReasoningEffortLevel,
   ToolCallRef,
   ToolSpec,
@@ -51,7 +53,8 @@ export interface ModelInfo {
    */
   maxOutputTokens?: number | undefined;
   /** 每百万 token 的 USD 价格（上游声明换算；provider-setup.md 第 7 节） */
-  pricing?: { input?: number | undefined; output?: number | undefined } | undefined;
+  pricing?: ModelPricing | undefined;
+  pricingSource?: PricingSource | undefined;
   capabilities: ModelCapabilities;
   /**
    * 生效协议（ADR-0026 §1）：该模型请求实际使用的服务协议；
@@ -264,7 +267,7 @@ export interface UpstreamModelInfo {
   displayName?: string | undefined;
   contextWindow?: number | undefined;
   maxOutputTokens?: number | undefined;
-  pricing?: { input?: number | undefined; output?: number | undefined } | undefined;
+  pricing?: ModelPricing | undefined;
   /** 仅含上游明确声明的能力位（reasoning / imageInput） */
   capabilities?:
     | { reasoning?: "none" | "hidden" | "visible" | undefined; imageInput?: boolean | undefined }

@@ -2,7 +2,36 @@ import { writeFile } from "node:fs/promises";
 
 // ADR-0031 §4：内置预设引用的 models.dev 服务商键（与
 // packages/core/src/config/models-dev.ts 的 MODELS_DEV_PROVIDER_KEYS 保持一致）
-const PROVIDER_KEYS = ["opencode", "opencode-go"];
+const PROVIDER_KEYS = [
+  "opencode",
+  "opencode-go",
+  "deepseek",
+  "xai",
+  "anthropic",
+  "openai",
+  "openrouter",
+];
+
+function trimCost(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const result = {};
+  for (const [from, to] of [
+    ["input", "input"],
+    ["output", "output"],
+    ["cache_read", "cacheRead"],
+    ["cache_write", "cacheWrite"],
+  ]) {
+    if (typeof value[from] === "number" && Number.isFinite(value[from]) && value[from] >= 0)
+      result[to] = value[from];
+  }
+  if (Array.isArray(value.tiers))
+    result.tiers = value.tiers.flatMap((t) => {
+      const size = t?.tier?.size;
+      if (!Number.isInteger(size) || size < 0) return [];
+      return [{ aboveInputTokens: size, ...trimCost({ ...t, tiers: undefined }) }];
+    });
+  return Object.keys(result).length ? result : undefined;
+}
 
 const [response, apiResponse] = await Promise.all([
   fetch("https://models.dev/models.json", { signal: AbortSignal.timeout(10_000) }),
@@ -43,7 +72,11 @@ if (apiResponse.ok) {
     };
     for (const [modelId, mv] of Object.entries(p.models ?? {})) {
       const npm = mv !== null && typeof mv === "object" ? mv.provider?.npm : undefined;
-      entry.models[modelId] = typeof npm === "string" && npm !== "" ? { npm } : {};
+      const cost = trimCost(mv?.cost);
+      entry.models[modelId] = {
+        ...(typeof npm === "string" && npm !== "" ? { npm } : {}),
+        ...(cost !== undefined ? { cost } : {}),
+      };
     }
     providers[key] = entry;
   }

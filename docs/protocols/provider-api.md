@@ -33,10 +33,12 @@ interface ModelInfo {
   contextWindow: number          // 输入 + 输出共享的窗口大小
   maxOutputTokens?: number       // v0.2 改为可选：未知表示上游未声明（ADR-0016）
   capabilities: ModelCapabilities
-  /** v0.2 新增：上游声明的按量价格（USD / 每百万 token）。
-      只在上游或配置明确声明时存在；模型选择页依此渲染价格列，
-      未声明时界面留空而不是显示估算值（provider-setup.md 第 7 节） */
-  pricing?: { input?: number; output?: number }
+  /** USD / 每百万 token；配置 > 上游 > models.dev；整体替换 */
+  pricing?: {
+    input?: number; output?: number; cacheRead?: number; cacheWrite?: number;
+    tiers?: { aboveInputTokens: number; input?: number; output?: number; cacheRead?: number; cacheWrite?: number }[];
+  }
+  pricingSource?: "config" | "upstream" | "models.dev"
   /** 生效协议（ADR-0026 §2）：写入请求时作为本模型要走的协议
       （手写/编辑声明 > endpoints 推导 > 条目 type）；openai-responses 见 ADR-0031 §1 */
   protocol?: "openai-compatible" | "anthropic" | "openai-responses"

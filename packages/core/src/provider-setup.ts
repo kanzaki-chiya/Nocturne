@@ -731,6 +731,9 @@ export async function prepareProvider(
             ...(preset.modelsDevProvider !== undefined
               ? { modelsDevProvider: preset.modelsDevProvider }
               : {}),
+            ...(preset.modelsDevPricing !== undefined
+              ? { modelsDevPricing: preset.modelsDevPricing }
+              : {}),
             models,
             ...(Object.keys(thinking).length > 0 ? { thinking } : {}),
             ...(modelCount > 0

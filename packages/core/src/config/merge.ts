@@ -121,6 +121,7 @@ function mergeModelEntry(
     const v = upper[f] ?? lower?.[f];
     if (v !== undefined) (out as Record<string, unknown>)[f] = v;
   }
+  out.pricingSource = upper.pricing !== undefined ? upper.pricingSource : lower?.pricingSource;
   const caps: ModelCaps = {};
   let hasCaps = false;
   for (const f of CAP_FIELDS) {
@@ -189,6 +190,30 @@ function mergeProviders(
       ? restrictProjectProviderAuth(entries, [...into.values()], warn)
       : entries;
   for (const entry of safeEntries) {
+    const pricedEntry = {
+      ...entry,
+      models:
+        entry.models === undefined
+          ? undefined
+          : Object.fromEntries(
+              Object.entries(entry.models).map(([id, model]) => [
+                id,
+                {
+                  ...model,
+                  ...(model.pricing !== undefined
+                    ? {
+                        pricingSource:
+                          layer.kind === "modelsDev"
+                            ? ("models.dev" as const)
+                            : layer.kind === "setup" && entry.source === "upstream"
+                              ? ("upstream" as const)
+                              : ("config" as const),
+                      }
+                    : {}),
+                },
+              ]),
+            ),
+    };
     info.providers.set(entry.id, {
       kind: layer.kind,
       ...(layer.path !== undefined ? { path: layer.path } : {}),
@@ -200,13 +225,12 @@ function mergeProviders(
     const existing = into.get(entry.id);
     if (existing === undefined) {
       into.set(entry.id, {
-        ...entry,
-        models: entry.models !== undefined ? { ...entry.models } : undefined,
+        ...pricedEntry,
       });
       continue;
     }
     const models = { ...existing.models };
-    for (const [modelId, model] of Object.entries(entry.models ?? {})) {
+    for (const [modelId, model] of Object.entries(pricedEntry.models ?? {})) {
       models[modelId] = mergeModelEntry(models[modelId], model);
     }
     into.set(entry.id, {
