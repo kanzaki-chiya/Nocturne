@@ -40,7 +40,7 @@ Agent Core 中不允许出现 `if provider === "openai"` 之类的分支。某�
 
 ## 3. 配置形态（示意）
 
-价格见 [ADR-0053](../decisions/ADR-0053-usage-and-cost.md)：`modelsDevPricing` 只取服务商价格，不改变上述 ADR-0031 协议推断路径；扁平能力表仍不取价格。
+价格见 [ADR-0053](../decisions/ADR-0053-usage-and-cost.md)：`modelsDevPricing` 只取服务商价格，不改变上述 ADR-0031 协议推断路径；扁平能力表本身不带价格，只在最后一级「厂商价」兜底时用同一匹配规则给出规范 ID（`<厂商>/<模型>`），再到该厂商服务商或 OpenRouter 下取价。
 
 ```jsonc
 {

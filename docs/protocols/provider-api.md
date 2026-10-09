@@ -33,12 +33,13 @@ interface ModelInfo {
   contextWindow: number          // 输入 + 输出共享的窗口大小
   maxOutputTokens?: number       // v0.2 改为可选：未知表示上游未声明（ADR-0016）
   capabilities: ModelCapabilities
-  /** USD / 每百万 token；配置 > 上游 > models.dev；整体替换 */
+  /** USD / 每百万 token；配置 > 上游 > models.dev 服务商键 > 厂商价；整体替换 */
   pricing?: {
     input?: number; output?: number; cacheRead?: number; cacheWrite?: number;
     tiers?: { aboveInputTokens: number; input?: number; output?: number; cacheRead?: number; cacheWrite?: number }[];
   }
-  pricingSource?: "config" | "upstream" | "models.dev"
+  /** vendor：按模型厂商官方 API 价兜底（ADR-0053 修订），不代表代理或中转服务的实际收费 */
+  pricingSource?: "config" | "upstream" | "models.dev" | "vendor"
   /** 生效协议（ADR-0026 §2）：写入请求时作为本模型要走的协议
       （手写/编辑声明 > endpoints 推导 > 条目 type）；openai-responses 见 ADR-0031 §1 */
   protocol?: "openai-compatible" | "anthropic" | "openai-responses"

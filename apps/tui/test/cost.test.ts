@@ -18,7 +18,20 @@ it("TUI /cost shows current session and 30-day model totals", async () => {
     turns: 4,
     subagentTurns: 1,
     daily: [],
-    models: [],
+    models: [
+      {
+        model: { provider: "ocx", model: "xai/grok-4.7" },
+        turns: 1,
+        inputTokens: 1000,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        outputTokens: 100,
+        cacheHitRate: 0,
+        pricing: { input: 2, output: 6 },
+        pricingSource: "vendor",
+        cost: { input: 0.002, cacheRead: 0, cacheWrite: 0, output: 0.0006, total: 0.0026 },
+      },
+    ],
     tools: [],
     skills: [],
     unpricedModels: [],
@@ -38,5 +51,9 @@ it("TUI /cost shows current session and 30-day model totals", async () => {
   expect(result.text).toContain("近 30 天");
   expect(result.text).toContain("合计 6,000 tokens · $5.00");
   expect(result.text).toContain("设置 › 用量");
+  expect(result.text).toContain("ocx/xai/grok-4.7 · 1,100 tokens · $0.00（厂商价）");
+  expect(result.text).toContain(
+    "厂商价：按模型厂商官方 API 价估算，不代表代理或中转服务的实际收费",
+  );
   expect(usageStats).toHaveBeenCalledWith({ days: 30 });
 });

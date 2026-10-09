@@ -60,4 +60,19 @@ it("CLI /cost shows current session and 30-day totals without model calls", asyn
   expect(text).toContain("近 30 天");
   expect(text).toContain("合计 6,000 tokens · $5.00");
   expect(usageStats).toHaveBeenCalledWith({ days: 30 });
+
+  const vendorRuntime = {
+    usageStats,
+    listModels: () => [
+      {
+        ref: { provider: "p", model: "m" },
+        pricing: { input: 2, output: 8 },
+        pricingSource: "vendor",
+      },
+    ],
+  } as unknown as Runtime;
+  expect(await runSlashCommand("/cost", session, vendorRuntime, { print })).toBe("handled");
+  const vendorText = print.mock.calls[1]?.[0] as string;
+  expect(vendorText).toContain("预估费用 $0.00（厂商价）");
+  expect(vendorText).toContain("不代表代理或中转服务的实际收费");
 });

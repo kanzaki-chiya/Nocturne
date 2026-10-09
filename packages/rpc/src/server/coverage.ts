@@ -116,6 +116,7 @@ export const CONFIG_NOT_MAPPED = {
     "名称唯一性检查，provider.prepareProvider / provider.commitProvider 内部调用，冲突以 -32005 data.field=name 报告",
   recordRecentModel: "setModel / 新建会话时 Runtime 自动记录",
   providerSetupWarning: "随 provider.describeProviders 的 setupWarning 返回",
+  vendorPricing: "厂商价兜底，runtime.usageStats 内部使用",
 } as const satisfies Partial<Record<keyof RuntimeConfig, string>>;
 
 export const CONFIG_METHODS: Record<

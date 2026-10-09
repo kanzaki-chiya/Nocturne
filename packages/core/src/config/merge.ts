@@ -204,7 +204,7 @@ function mergeProviders(
                     ? {
                         pricingSource:
                           layer.kind === "modelsDev"
-                            ? ("models.dev" as const)
+                            ? (model.pricingSource ?? ("models.dev" as const))
                             : layer.kind === "setup" && entry.source === "upstream"
                               ? ("upstream" as const)
                               : ("config" as const),

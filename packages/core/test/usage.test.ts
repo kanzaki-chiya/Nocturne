@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { createRuntime, createPlatform } from "../src/index.js";
+import { createRuntime, createPlatform, loadConfig } from "../src/index.js";
 import { FakeProvider, type FakeScript } from "../src/provider/index.js";
 import { estimateCost, type DurableEvent, type Usage } from "../src/protocol/index.js";
 import { createUsageStats } from "../src/usage/index.js";
@@ -268,6 +268,80 @@ describe("Runtime.usageStats", () => {
     } finally {
       for (const session of opened) await session.close();
       await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("prices providers no longer in config by vendor list price", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-usage-vendor-"));
+    const sessionsDir = path.join(home, "sessions");
+    try {
+      await fs.mkdir(path.join(home, "cache"));
+      await fs.mkdir(sessionsDir);
+      await fs.writeFile(
+        path.join(home, "cache", "models-dev.json"),
+        JSON.stringify({
+          fetchedAt: "2099-01-01T00:00:00Z",
+          models: { "xai/grok-4.7": {} },
+          providers: { xai: { models: { "grok-4.7": { cost: { input: 2, output: 8 } } } } },
+        }),
+      );
+      const config = await loadConfig(createPlatform(), {
+        nocturneHome: home,
+        env: () => undefined,
+      });
+      const base = { sessionId: "s", time: new Date().toISOString() };
+      const lines = [
+        { provider: "removed", model: "grok-4.7" },
+        { provider: "removed", model: "devin/swe-2-max" },
+      ].map((model, i) => ({
+        ...base,
+        seq: i + 2,
+        type: "message.assistant",
+        payload: {
+          messageId: `a${i}`,
+          model,
+          usage: { inputTokens: 1_000_000, outputTokens: 100_000 },
+          content: [],
+          toolCalls: [],
+          finishReason: "stop",
+        },
+      }));
+      await fs.writeFile(
+        path.join(sessionsDir, "s.jsonl"),
+        [
+          {
+            ...base,
+            seq: 1,
+            type: "session.created",
+            payload: {
+              formatVersion: 1,
+              nocturneVersion: "test",
+              cwd: home,
+              workspaceRoot: home,
+              model: { provider: "removed", model: "grok-4.7" },
+              permissionPreset: "default",
+            },
+          },
+          ...lines,
+        ]
+          .map((e) => JSON.stringify(e) + "\n")
+          .join(""),
+      );
+      const runtime = await createRuntime({
+        cwd: home,
+        sessionsDir,
+        config,
+        providers: [new FakeProvider({ scripts: [] })],
+      });
+      const stats = await runtime.usageStats({});
+      expect(stats.models.find((m) => m.model.model === "grok-4.7")).toMatchObject({
+        pricing: { input: 2, output: 8 },
+        pricingSource: "vendor",
+        cost: { total: 2.8 },
+      });
+      expect(stats.unpricedModels).toEqual([{ provider: "removed", model: "devin/swe-2-max" }]);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
     }
   });
 

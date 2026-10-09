@@ -42,6 +42,16 @@ const stats: UsageStats = {
     },
     {
       ...totals,
+      inputTokens: 1_000,
+      cost: { ...cost, total: 0.01 },
+      model: { provider: "ocx", model: "xai/grok-4.7" },
+      turns: 1,
+      cacheHitRate: 0,
+      pricing: { input: 2, output: 6 },
+      pricingSource: "vendor",
+    },
+    {
+      ...totals,
       cost: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 },
       model: { provider: "p", model: "unpriced" },
       turns: 0,
@@ -104,6 +114,14 @@ describe("desktop usage", () => {
       .getByRole("rowheader", { name: /unpriced/ })
       .closest("tr");
     expect(unpriced?.textContent?.match(/—/g)).toHaveLength(4);
+    const vendor = within(table).getByRole("rowheader", { name: /grok-4\.7/ });
+    expect(vendor.textContent).toContain("厂商价");
+    expect(vendor.querySelector(".usage-price-source")?.getAttribute("title")).toContain(
+      "不代表代理或中转服务的实际收费",
+    );
+    expect(document.querySelector(".usage-table-note")?.textContent).toContain(
+      "来源为「厂商价」的模型按模型厂商官方 API 价估算",
+    );
     expect(screen.getByText(/在配置文件的模型条目里写 pricing/).tagName).toBe("P");
     expect(screen.queryByRole("link", { name: /pricing/ })).toBeNull();
   });

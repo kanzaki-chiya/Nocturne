@@ -4,137 +4,24 @@ import { writeJsonAtomic } from "./files.js";
 import { modelsDevSnapshot } from "./models-dev-snapshot.js";
 import type { ModelOverrideShape } from "./types.js";
 import type { ModelPricing } from "../protocol/index.js";
+import {
+  splitCanonicalId,
+  trimModelsDev,
+  trimModelsDevProviders,
+  type ModelsDevData,
+  type ModelsDevRecord,
+} from "./models-dev-trim.js";
 
-export interface ModelsDevRecord {
-  reasoning?: boolean;
-  input?: readonly string[];
-  context?: number;
-  output?: number;
-  cost?: ModelPricing | undefined;
-}
-
-/**
- * 按服务商键保存的接口声明（ADR-0031 §4）：服务商级 npm 原文 +
- * 逐模型 npm 原文（逐模型缺省时继承服务商级）。models 中每个条目
- * 记录该模型在服务商表内的存在性（npm 缺省 → {}）。
- */
-export interface ModelsDevProviderData {
-  npm?: string | undefined;
-  models?:
-    Record<string, { npm?: string | undefined; cost?: ModelPricing | undefined }> | undefined;
-}
-
-/**
- * models.dev 服务商键白名单（ADR-0031 §4）：快照与缓存只收录内置预设
- * 引用的键；新增内置预设的 modelsDevProvider 时同步加入。
- */
-export const MODELS_DEV_PROVIDER_KEYS = [
-  "opencode",
-  "opencode-go",
-  "deepseek",
-  "xai",
-  "anthropic",
-  "openai",
-  "openrouter",
-] as const;
-
-/** api.json cost 的严格白名单映射，不保留服务商其他字段。 */
-export function trimModelsDevCost(raw: unknown): ModelPricing | undefined {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const value = raw as Record<string, unknown>;
-  const prices: ModelPricing = {};
-  for (const [from, to] of [
-    ["input", "input"],
-    ["output", "output"],
-    ["cache_read", "cacheRead"],
-    ["cache_write", "cacheWrite"],
-  ] as const) {
-    const n = value[from];
-    if (typeof n === "number" && Number.isFinite(n) && n >= 0) prices[to] = n;
-  }
-  if (Array.isArray(value.tiers)) {
-    prices.tiers = value.tiers.flatMap((rawTier: unknown) => {
-      if (rawTier === null || typeof rawTier !== "object" || Array.isArray(rawTier)) return [];
-      const tier = rawTier as Record<string, unknown>;
-      const size = (tier.tier as { size?: unknown } | undefined)?.size;
-      if (typeof size !== "number" || !Number.isInteger(size) || size < 0) return [];
-      const { tiers: _nested, ...fields } = trimModelsDevCost({ ...tier, tiers: undefined }) ?? {};
-      return [{ aboveInputTokens: size, ...fields }];
-    });
-  }
-  return Object.keys(prices).length > 0 ? prices : undefined;
-}
-
-export interface ModelsDevData {
-  fetchedAt: string;
-  models: Record<string, ModelsDevRecord>;
-  providers?: Record<string, ModelsDevProviderData> | undefined;
-}
-
-export function trimModelsDev(raw: unknown, fetchedAt = new Date().toISOString()): ModelsDevData {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error("models.dev 返回值不是模型表");
-  }
-  const models: ModelsDevData["models"] = {};
-  for (const [id, value] of Object.entries(raw)) {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) continue;
-    const model = value as Record<string, unknown>;
-    const modalities = model.modalities as Record<string, unknown> | undefined;
-    const limit = model.limit as Record<string, unknown> | undefined;
-    models[id] = {
-      ...(typeof model.reasoning === "boolean" ? { reasoning: model.reasoning } : {}),
-      ...(Array.isArray(modalities?.input)
-        ? { input: modalities.input.filter((x): x is string => typeof x === "string") }
-        : {}),
-      ...(Number.isInteger(limit?.context) && (limit?.context as number) > 0
-        ? { context: limit?.context as number }
-        : {}),
-      ...(Number.isInteger(limit?.output) && (limit?.output as number) > 0
-        ? { output: limit?.output as number }
-        : {}),
-    };
-  }
-  return { fetchedAt, models };
-}
-
-/**
- * api.json 的服务商级数据裁剪（ADR-0031 §4）：只收录
- * MODELS_DEV_PROVIDER_KEYS 白名单键；保存服务商级 npm 与逐模型
- * provider.npm 原文（模型条目必存在，npm 缺省为 {}）。
- */
-export function trimModelsDevProviders(
-  raw: unknown,
-): Record<string, ModelsDevProviderData> | undefined {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const table = raw as Record<string, unknown>;
-  const providers: Record<string, ModelsDevProviderData> = {};
-  for (const key of MODELS_DEV_PROVIDER_KEYS) {
-    const value = table[key];
-    if (value === null || typeof value !== "object" || Array.isArray(value)) continue;
-    const provider = value as Record<string, unknown>;
-    const models =
-      provider.models !== null && typeof provider.models === "object"
-        ? (provider.models as Record<string, unknown>)
-        : {};
-    const modelMap: NonNullable<ModelsDevProviderData["models"]> = {};
-    for (const [modelId, mv] of Object.entries(models)) {
-      const npm =
-        mv !== null && typeof mv === "object" && !Array.isArray(mv)
-          ? (mv as { provider?: { npm?: unknown } }).provider?.npm
-          : undefined;
-      const cost = trimModelsDevCost((mv as { cost?: unknown } | null)?.cost);
-      modelMap[modelId] = {
-        ...(typeof npm === "string" && npm !== "" ? { npm } : {}),
-        ...(cost !== undefined ? { cost } : {}),
-      };
-    }
-    providers[key] = {
-      ...(typeof provider.npm === "string" ? { npm: provider.npm } : {}),
-      models: modelMap,
-    };
-  }
-  return Object.keys(providers).length > 0 ? providers : undefined;
-}
+export {
+  MODELS_DEV_PROVIDER_KEYS,
+  modelsDevVendorKeys,
+  trimModelsDev,
+  trimModelsDevCost,
+  trimModelsDevProviders,
+  type ModelsDevData,
+  type ModelsDevProviderData,
+  type ModelsDevRecord,
+} from "./models-dev-trim.js";
 
 /** npm 包名 → 服务接口声明（ADR-0031 §4 映射表；npm:<pkg> 由推导标为不可用） */
 export function npmToEndpoints(npm: string): string[] {
@@ -239,7 +126,7 @@ export async function refreshModelsDev(
     const trimmed = trimModelsDev(await response.json());
     const providers =
       apiResponse?.ok === true
-        ? trimModelsDevProviders(await apiResponse.json().catch(() => undefined))
+        ? trimModelsDevProviders(await apiResponse.json().catch(() => undefined), trimmed.models)
         : undefined;
     const data: ModelsDevData = {
       ...trimmed,
@@ -302,20 +189,46 @@ function matchIndex(models: ModelsDevData["models"]): ModelsDevMatchIndex {
   return index;
 }
 
+/** 匹配规则（精确 → 忽略大小写唯一 → 末段唯一）命中的表内 ID。 */
+export function matchModelsDevId(
+  models: Readonly<Record<string, unknown>>,
+  modelId: string,
+): string | undefined {
+  const index = matchIndex(models as ModelsDevData["models"]);
+  if (index.exact.has(modelId)) return modelId;
+  const folded = index.fold.get(modelId.toLowerCase());
+  if (folded !== undefined) return folded.count === 1 ? folded.id : undefined;
+  const suffix = index.tail.get(tail(modelId));
+  return suffix?.count === 1 ? suffix.id : undefined;
+}
+
 export function matchModelsDev(
   models: ModelsDevData["models"],
   modelId: string,
 ): ModelsDevRecord | undefined {
-  const index = matchIndex(models);
-  if (index.exact.has(modelId)) return index.exact.get(modelId);
-  const folded = index.fold.get(modelId.toLowerCase());
-  if (folded !== undefined) {
-    if (folded.count !== 1) return undefined;
-    return index.exact.get(folded.id);
-  }
-  const suffix = index.tail.get(tail(modelId));
-  if (suffix?.count !== 1) return undefined;
-  return index.exact.get(suffix.id);
+  const id = matchModelsDevId(models, modelId);
+  return id === undefined ? undefined : models[id];
+}
+
+/**
+ * 厂商价（ADR-0053 修订）：按匹配规则在扁平表找到规范 ID
+ * `<厂商>/<模型>`，取该厂商服务商下同名模型的 cost；厂商未列出时取
+ * OpenRouter 下同一规范 ID 的 cost；都没有返回 undefined。
+ */
+export function vendorPricing(data: ModelsDevData, modelId: string): ModelPricing | undefined {
+  const canonical = matchModelsDevId(data.models, modelId);
+  const parts = canonical === undefined ? undefined : splitCanonicalId(canonical);
+  if (canonical === undefined || parts === undefined) return undefined;
+  const vendorModels = data.providers?.[parts.vendor]?.models;
+  const own =
+    vendorModels !== undefined && Object.hasOwn(vendorModels, parts.model)
+      ? vendorModels[parts.model]?.cost
+      : undefined;
+  if (own !== undefined) return own;
+  const router = data.providers?.openrouter?.models;
+  return router !== undefined && Object.hasOwn(router, canonical)
+    ? router[canonical]?.cost
+    : undefined;
 }
 
 export function modelOverrideFromDev(record: ModelsDevRecord): ModelOverrideShape {

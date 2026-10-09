@@ -72,14 +72,12 @@ export async function runSlash(
       if (!costContext) return { kind: "message", text: "! 当前环境不支持 /cost" };
       const view = costContext.view ?? replaySessionView(session.durableEvents());
       const ref = view.config.model;
-      const pricing = costContext.runtime
+      const price = costContext.runtime
         .listModels()
-        .find((m) => m.ref.provider === ref?.provider && m.ref.model === ref.model)?.pricing;
+        .find((m) => m.ref.provider === ref?.provider && m.ref.model === ref.model);
       return {
         kind: "message",
-        text: costLines(view, pricing, await costContext.runtime.usageStats({ days: 30 })).join(
-          "\n",
-        ),
+        text: costLines(view, price, await costContext.runtime.usageStats({ days: 30 })).join("\n"),
       };
     }
     case "/help":

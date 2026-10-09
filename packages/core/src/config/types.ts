@@ -565,6 +565,11 @@ export interface RuntimeConfig {
   /** 添加/刷新模型列表时更新 models.dev 缓存；失败返回一行提示。 */
   refreshModelsDev(): Promise<string | undefined>;
   /**
+   * 按模型 ID 取厂商价（ADR-0053 修订），供统计里已不在当前配置中的服务商使用；
+   * 规则同配置装配的最后一级兜底。
+   */
+  vendorPricing?(modelId: string): ModelPricing | undefined;
+  /**
    * 模型设置编辑（ADR-0024）：按字段返回生效值/来源/可编辑标记的清单
    * （只含合并结果清单内的模型）。workspaceRoot 决定项目层是否参与。
    */

@@ -131,10 +131,10 @@ export async function runSlashCommand(
       try {
         const view = replaySessionView(session.durableEvents());
         const ref = view.config.model;
-        const pricing = runtime
+        const price = runtime
           .listModels()
-          .find((m) => m.ref.provider === ref?.provider && m.ref.model === ref.model)?.pricing;
-        io.print(costLines(view, pricing, await runtime.usageStats({ days: 30 })).join("\n"));
+          .find((m) => m.ref.provider === ref?.provider && m.ref.model === ref.model);
+        io.print(costLines(view, price, await runtime.usageStats({ days: 30 })).join("\n"));
       } catch (e) {
         io.print(`! ${errorText(e)}`);
       }

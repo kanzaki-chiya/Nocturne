@@ -783,12 +783,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const usageStats = createUsageStats({
     platform,
     sessionsDir,
+    // 注册表给不出价格（服务商已删除或改名、模型不在清单）时按模型厂商兜底（ADR-0053 修订）
     pricing: (ref) => {
+      let model: ReturnType<ProviderRegistry["resolve"]>["model"] | undefined;
       try {
-        return registry.resolve(ref).model;
+        model = registry.resolve(ref).model;
       } catch {
-        return undefined;
+        model = undefined;
       }
+      if (model?.pricing !== undefined) return model;
+      const vendor = config?.vendorPricing?.(ref.model);
+      return vendor !== undefined ? { pricing: vendor, pricingSource: "vendor" as const } : model;
     },
   });
 

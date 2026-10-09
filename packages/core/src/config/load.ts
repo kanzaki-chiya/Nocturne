@@ -15,6 +15,7 @@ import {
   modelOverrideFromDev,
   readModelsDev,
   refreshModelsDev,
+  vendorPricing,
   type ModelsDevData,
 } from "./models-dev.js";
 import { modelsDevSnapshot } from "./models-dev-snapshot.js";
@@ -163,12 +164,15 @@ export async function loadConfig(
           providerKey !== undefined
             ? devProviderEndpoints(modelsDev, providerKey, modelId)
             : undefined;
+        // 取价：models.dev 服务商键 > 按模型厂商兜底（ADR-0053 修订）
+        const keyed =
+          priceModels !== undefined ? matchModelsDev(priceModels, modelId)?.cost : undefined;
+        const vendor = keyed === undefined ? vendorPricing(modelsDev, modelId) : undefined;
         const override = {
           ...(record !== undefined ? modelOverrideFromDev(record) : {}),
           ...(endpoints !== undefined ? { endpoints } : {}),
-          ...(priceModels !== undefined && matchModelsDev(priceModels, modelId)?.cost !== undefined
-            ? { pricing: matchModelsDev(priceModels, modelId)?.cost }
-            : {}),
+          ...(keyed !== undefined ? { pricing: keyed } : {}),
+          ...(vendor !== undefined ? { pricing: vendor, pricingSource: "vendor" as const } : {}),
         };
         if (record !== undefined || endpoints !== undefined || override.pricing !== undefined)
           models[modelId] = override;
@@ -619,6 +623,7 @@ export async function loadConfig(
       modelsDev = result.data;
       return result.warning;
     },
+    vendorPricing: (modelId) => vendorPricing(modelsDev, modelId),
     // ADR-0024 第 3 节：来源按"实际参与合并的层"计算；trustedSet 与
     // projectFileIfTrusted 复用 forWorkspace 同一口径
     listModelSettings: async (providerId, workspaceRoot) => {

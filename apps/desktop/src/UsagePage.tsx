@@ -22,7 +22,8 @@ const prices = (p: ModelPricing | undefined) =>
         `${p.cacheRead === undefined ? "—" : `$${p.cacheRead}`} / ${p.cacheWrite === undefined ? "—" : `$${p.cacheWrite}`}`,
         p.output === undefined ? "—" : `$${p.output}`,
       ];
-const SOURCE = { config: "配置", upstream: "上游", "models.dev": "models.dev" };
+const SOURCE = { config: "配置", upstream: "上游", "models.dev": "models.dev", vendor: "厂商价" };
+const VENDOR_NOTE = "按模型厂商官方 API 价估算，不代表代理或中转服务的实际收费";
 
 function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
   const [mode, setMode] = useState<"tokens" | "cost">("tokens");
@@ -398,7 +399,10 @@ export function UsageView({
                             <span>{m.model.model}</span>
                             <small>{m.model.provider}</small>
                             {m.pricingSource && (
-                              <small className="usage-price-source">
+                              <small
+                                className="usage-price-source"
+                                title={m.pricingSource === "vendor" ? VENDOR_NOTE : undefined}
+                              >
                                 {SOURCE[m.pricingSource]}
                                 {m.pricing?.tiers?.length ? " · 分档" : ""}
                               </small>
@@ -421,6 +425,8 @@ export function UsageView({
               {!models.length && <p className="usage-empty">这个时间范围内还没有模型用量</p>}
               <p className="usage-table-note">
                 单价为 USD / 每百万 token；缓存列为读取 / 写入，缺失缓存价按输入价估算。
+                {models.some((m) => m.pricingSource === "vendor") &&
+                  `来源为「厂商价」的模型${VENDOR_NOTE}。`}
               </p>
               {stats.unpricedModels.length > 0 && (
                 <p className="usage-notice">

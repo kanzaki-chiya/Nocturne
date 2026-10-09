@@ -28,7 +28,7 @@ max(0, 输入 − 缓存读 − 缓存写) × 输入价
 + 缓存读 × 缓存读价 + 缓存写 × 缓存写价 + 输出 × 输出价
 ```
 
-按单次输入选择 aboveInputTokens 不超过输入的最高档；档位缺字段回落基础价，缓存价缺失回落输入价。对象存在但未声明的输入/输出价按零处理；整个价格对象缺失时不计费用、列入未计价模型。价格使用统计时当前运行时注册表，来源保留 config / upstream / models.dev。订阅服务并不按此计费，以服务商账单为准。
+按单次输入选择 aboveInputTokens 不超过输入的最高档；档位缺字段回落基础价，缓存价缺失回落输入价。对象存在但未声明的输入/输出价按零处理；整个价格对象缺失时不计费用、列入未计价模型。价格使用统计时当前运行时注册表，来源保留 config / upstream / models.dev / vendor。注册表给不出价格时（会话所用服务商已删除或改名，或模型不在当前清单），按模型 ID 走厂商价规则（[config.md](config.md) 价格一段），来源同为 vendor。厂商价按模型厂商官方 API 价估算，不代表代理或中转服务的实际收费；桌面用量页与 `/cost` 把来源显示为「厂商价」并写明这一点。订阅服务并不按此计费，以服务商账单为准。
 
 Runtime 内存按文件路径、大小、mtimeMs 缓存逐文件用量聚合（不是费用），只重读变化文件；删除文件时移除缓存。损坏或读取失败的文件整份跳过并计数，含未终止尾行；缓存失败文件直到元数据变化，不修复日志。
 
@@ -37,6 +37,7 @@ Runtime 内存按文件路径、大小、mtimeMs 缓存逐文件用量聚合（�
 - 空模型步骤没有 message.assistant，用量只在 turn.completed 中，接受漏计。
 - 摘要失败、超时、中断不写事件；旧日志摘要没有用量，均无法补算。
 - 删除的会话不在目录中；外部 agent 账号费用不进入 Nocturne 日志。
-- 既没有 modelsDevPricing 也没有 modelsDevProvider 的旧条目（例如早期写入的 deepseek、grok）需在 providers.json 里补 modelsDevPricing 或手写 pricing。
+- 既没有 modelsDevPricing 也没有 modelsDevProvider 的旧条目（例如早期写入的 grok）与本机代理按厂商价估算；厂商价与实际代理收费不同，需要准确价时在 providers.json 里补 modelsDevPricing 或手写 pricing。
+- models.dev 确实没有价格的模型（例如 devin/swe-2-max），以及扁平表匹配不到唯一规范 ID 的模型（带档位后缀的变体名、末段在多个厂商下重名）仍不计价。
 - 当前会话视图仍累计 turn.completed.usage，不含角色请求，与跨会话统计口径不同。
 - 并发写日志时观察到不完整尾行会暂时跳过该文件，下一次刷新元数据变化后重读。
