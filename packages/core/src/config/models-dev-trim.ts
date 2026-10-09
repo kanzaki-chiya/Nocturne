@@ -126,7 +126,8 @@ export function modelsDevVendorKeys(
  * api.json 的服务商级数据裁剪：白名单键（MODELS_DEV_PROVIDER_KEYS）
  * 保存服务商级 npm 与逐模型 provider.npm 原文、cost（模型条目必存在，
  * npm 缺省为 {}）。给出扁平表时另收录 modelsDevVendorKeys 推出的厂商
- * 服务商，只保留扁平表里该厂商有、且带 cost 的模型，只保留 cost。
+ * 服务商的全部带 cost 模型，只保留 cost（扁平表未收录的变体，例如
+ * 训练授权档，靠它兜底匹配）。
  */
 export function trimModelsDevProviders(
   raw: unknown,
@@ -164,13 +165,10 @@ export function trimModelsDevProviders(
   if (flatModels !== undefined) {
     for (const vendor of modelsDevVendorKeys(flatModels, table)) {
       if (whitelist.has(vendor) || Array.isArray(table[vendor])) continue;
-      const listed = modelsOf(table[vendor]);
       const modelMap: NonNullable<ModelsDevProviderData["models"]> = {};
-      for (const id of Object.keys(flatModels)) {
-        const parts = splitCanonicalId(id);
-        if (parts?.vendor !== vendor || !Object.hasOwn(listed, parts.model)) continue;
-        const cost = trimModelsDevCost((listed[parts.model] as { cost?: unknown } | null)?.cost);
-        if (cost !== undefined) modelMap[parts.model] = { cost };
+      for (const [modelId, mv] of Object.entries(modelsOf(table[vendor]))) {
+        const cost = trimModelsDevCost((mv as { cost?: unknown } | null)?.cost);
+        if (cost !== undefined) modelMap[modelId] = { cost };
       }
       if (Object.keys(modelMap).length > 0) providers[vendor] = { models: modelMap };
     }

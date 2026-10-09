@@ -57,7 +57,7 @@ describe("ADR-0053 pricing", () => {
     });
   });
 
-  it("snapshot trim adds derived vendor providers with flat-table models and cost only", () => {
+  it("snapshot trim adds derived vendor providers with all priced models and cost only", () => {
     const providers = trimModelsDevProviders(
       {
         openai: { npm: "@ai-sdk/openai", models: { m: { provider: { npm: "x" } } } },
@@ -81,10 +81,12 @@ describe("ADR-0053 pricing", () => {
     );
     expect(Object.keys(providers ?? {}).sort()).toEqual(["alibaba", "openai"]);
     expect(providers?.openai).toEqual({ npm: "@ai-sdk/openai", models: { m: { npm: "x" } } });
-    expect(providers?.alibaba).toEqual({ models: { "qwen3.8-flash": { cost: { input: 0.05 } } } });
+    expect(providers?.alibaba).toEqual({
+      models: { "qwen3.8-flash": { cost: { input: 0.05 } }, "not-in-flat": { cost: { input: 9 } } },
+    });
   });
 
-  it("vendor price matches with or without vendor prefix, any case, then falls back to OpenRouter", () => {
+  it("vendor price matches with or without vendor prefix, any case, vendor-only variants, then falls back to OpenRouter", () => {
     const data = {
       fetchedAt: "2099-01-01T00:00:00Z",
       models: {
@@ -92,8 +94,15 @@ describe("ADR-0053 pricing", () => {
         "deepseek/deepseek-v4.1-flash": {},
         "alibaba/qwen3.8-flash": {},
         "devin/swe-2-max": {},
+        "meta/muse-spark-1.3": {},
       },
       providers: {
+        meta: {
+          models: {
+            "muse-spark-1.3": { cost: { input: 1.25 } },
+            "muse-spark-1.3-contributor": { cost: { input: 0.1 } },
+          },
+        },
         xai: { models: { "grok-4.7": { cost: { input: 3 } } } },
         deepseek: { models: { "deepseek-v4-flash": { cost: { input: 0.2 } } } },
         alibaba: { models: { "qwen3.8-flash": { cost: { input: 0.05 } } } },
@@ -110,6 +119,9 @@ describe("ADR-0053 pricing", () => {
     expect(vendorPricing(data, "Qwen/Qwen3.8-Flash")).toEqual({ input: 0.05 });
     expect(vendorPricing(data, "deepseek/deepseek-v4.1-flash")).toEqual({ input: 0.1 });
     expect(vendorPricing(data, "devin/swe-2-max")).toBeUndefined();
+    // 扁平表未收录的变体：同一匹配规则在厂商服务商的模型里找
+    expect(vendorPricing(data, "muse-spark-1.3-contributor")).toEqual({ input: 0.1 });
+    expect(vendorPricing(data, "opencode/Muse-Spark-1.3-Contributor")).toEqual({ input: 0.1 });
     expect(vendorPricing(data, "unknown-model")).toBeUndefined();
   });
 

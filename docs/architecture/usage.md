@@ -38,6 +38,6 @@ Runtime 内存按文件路径、大小、mtimeMs 缓存逐文件用量聚合（�
 - 摘要失败、超时、中断不写事件；旧日志摘要没有用量，均无法补算。
 - 删除的会话不在目录中；外部 agent 账号费用不进入 Nocturne 日志。
 - 既没有 modelsDevPricing 也没有 modelsDevProvider 的旧条目（例如早期写入的 grok）与本机代理按厂商价估算；厂商价与实际代理收费不同，需要准确价时在 providers.json 里补 modelsDevPricing 或手写 pricing。
-- models.dev 确实没有价格的模型（例如 devin/swe-2-max），以及扁平表匹配不到唯一规范 ID 的模型（带档位后缀的变体名、末段在多个厂商下重名）仍不计价。
+- models.dev 确实没有价格的模型（例如 devin/swe-2-max），以及扁平表和厂商服务商里都匹配不到唯一规范 ID 的模型（带档位后缀的变体名、末段在多个厂商下重名）仍不计价。
 - 当前会话视图仍累计 turn.completed.usage，不含角色请求，与跨会话统计口径不同。
 - 并发写日志时观察到不完整尾行会暂时跳过该文件，下一次刷新元数据变化后重读。

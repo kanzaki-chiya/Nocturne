@@ -5,6 +5,7 @@ import { modelsDevSnapshot } from "./models-dev-snapshot.js";
 import type { ModelOverrideShape } from "./types.js";
 import type { ModelPricing } from "../protocol/index.js";
 import {
+  modelsDevVendorKeys,
   splitCanonicalId,
   trimModelsDev,
   trimModelsDevProviders,
@@ -210,13 +211,31 @@ export function matchModelsDev(
   return id === undefined ? undefined : models[id];
 }
 
+const vendorCatalogs = new WeakMap<ModelsDevData, ModelsDevData["models"]>();
+
+/** 厂商服务商（扁平表规范 ID 前缀中有同名服务商的）下全部模型，键为 `<厂商>/<模型>`。 */
+function vendorCatalog(data: ModelsDevData): ModelsDevData["models"] {
+  const hit = vendorCatalogs.get(data);
+  if (hit !== undefined) return hit;
+  const catalog: ModelsDevData["models"] = {};
+  const providers = data.providers ?? {};
+  for (const vendor of modelsDevVendorKeys(data.models, providers)) {
+    for (const model of Object.keys(providers[vendor]?.models ?? {}))
+      catalog[`${vendor}/${model}`] = {};
+  }
+  vendorCatalogs.set(data, catalog);
+  return catalog;
+}
+
 /**
  * 厂商价（ADR-0053 修订）：按匹配规则在扁平表找到规范 ID
- * `<厂商>/<模型>`，取该厂商服务商下同名模型的 cost；厂商未列出时取
- * OpenRouter 下同一规范 ID 的 cost；都没有返回 undefined。
+ * `<厂商>/<模型>`，扁平表没有时用同一规则在厂商服务商的模型里找；取该
+ * 厂商服务商下同名模型的 cost；厂商未列出时取 OpenRouter 下同一规范
+ * ID 的 cost；都没有返回 undefined。
  */
 export function vendorPricing(data: ModelsDevData, modelId: string): ModelPricing | undefined {
-  const canonical = matchModelsDevId(data.models, modelId);
+  const canonical =
+    matchModelsDevId(data.models, modelId) ?? matchModelsDevId(vendorCatalog(data), modelId);
   const parts = canonical === undefined ? undefined : splitCanonicalId(canonical);
   if (canonical === undefined || parts === undefined) return undefined;
   const vendorModels = data.providers?.[parts.vendor]?.models;
