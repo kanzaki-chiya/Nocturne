@@ -137,6 +137,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "preset",
   "shell",
   "context",
+  "cost",
   "mcp",
   "skills",
   "agents",

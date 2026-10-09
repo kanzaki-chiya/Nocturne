@@ -9,7 +9,10 @@ import {
   normalizeModelRef,
   type RuntimeConfig,
   type RuntimeSession,
+  type Runtime,
 } from "@nocturne/core";
+import { replaySessionView, type SessionView } from "@nocturne/core/protocol";
+import { costLines } from "./text-format.js";
 
 import { helpLines as catalogHelpLines, externalAgentListLines } from "./slash-catalog.js";
 import { safeLoginError } from "./provider-login.js";
@@ -59,10 +62,26 @@ export async function runSlash(
   line: string,
   session: RuntimeSession,
   provider?: ProviderBridge,
+  costContext?: { runtime: Runtime; view?: SessionView | undefined },
 ): Promise<SlashResult> {
   const [cmd, ...rest] = line.trim().split(/\s+/);
   const arg = rest.join(" ").trim();
   switch (cmd) {
+    case "/cost": {
+      if (arg) return { kind: "message", text: "用法：/cost" };
+      if (!costContext) return { kind: "message", text: "! 当前环境不支持 /cost" };
+      const view = costContext.view ?? replaySessionView(session.durableEvents());
+      const ref = view.config.model;
+      const pricing = costContext.runtime
+        .listModels()
+        .find((m) => m.ref.provider === ref?.provider && m.ref.model === ref?.model)?.pricing;
+      return {
+        kind: "message",
+        text: costLines(view, pricing, await costContext.runtime.usageStats({ days: 30 })).join(
+          "\n",
+        ),
+      };
+    }
     case "/help":
       return { kind: "overlay", name: "help" };
     case "/settings":

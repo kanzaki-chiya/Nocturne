@@ -2133,7 +2133,7 @@ function SessionApp({
         updateInput("", 0);
         setCompletionOn(true);
         if (fullscreen) setScroll(scrollToBottom());
-        void runSlash(text, session, provider)
+        void runSlash(text, session, provider, { runtime, view })
           .then((r) => {
             const opens = r.kind === "overlay" || r.kind === "picker" || r.kind === "provider-page";
             if (!opens) clearInput();
@@ -2302,7 +2302,7 @@ function SessionApp({
         return;
       }
       const dispatchSlash = (raw: string): void => {
-        void runSlash(raw, session, provider)
+        void runSlash(raw, session, provider, { runtime, view })
           .then((r) => {
             const opens = r.kind === "overlay" || r.kind === "picker" || r.kind === "provider-page";
             if (!opens) clearInput();

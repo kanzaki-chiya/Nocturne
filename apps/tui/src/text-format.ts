@@ -1,5 +1,42 @@
 /** 逐行 CLI 可静态加载的纯文本入口，不导入 React 或 Ink。 */
+import {
+  estimateCost,
+  sessionUsageSoFar,
+  type ModelPricing,
+  type SessionView,
+  type UsageStats,
+} from "@nocturne/core/protocol";
 export { stripControls, truncateMiddle } from "./format.js";
+
+export function costLines(
+  view: SessionView,
+  pricing: ModelPricing | undefined,
+  stats: UsageStats,
+): string[] {
+  const usage = sessionUsageSoFar(view);
+  const ref = view.config.model;
+  const money = (n: number) => `$${n >= 100 ? Math.round(n) : n.toFixed(2)}`;
+  const tokens = (n: number) => n.toLocaleString("en-US");
+  const cost = estimateCost(usage, pricing);
+  return [
+    "当前会话",
+    `  ${ref ? `${ref.provider}/${ref.model}` : "—"} · ${view.turnCount} Turns`,
+    `  输入 ${tokens(usage.inputTokens)} · 缓存读取 ${tokens(usage.cacheReadTokens ?? 0)} · 命中率 ${usage.inputTokens ? (((usage.cacheReadTokens ?? 0) / usage.inputTokens) * 100).toFixed(1) : "0.0"}%`,
+    `  输出 ${tokens(usage.outputTokens)} · 预估费用 ${cost ? money(cost.total) : "未计价"}`,
+    "",
+    "近 30 天 · 本机全部会话（含子代理）",
+    ...[...stats.models]
+      .sort((a, b) => b.cost.total - a.cost.total)
+      .map(
+        (m) =>
+          `  ${m.model.provider}/${m.model.model} · ${tokens(m.inputTokens + m.outputTokens)} tokens · ${m.pricing ? money(m.cost.total) : "未计价"}`,
+      ),
+    `  合计 ${tokens(stats.totals.inputTokens + stats.totals.outputTokens)} tokens · ${money(stats.totals.cost.total)} · ${stats.sessions} 会话 / ${stats.turns} Turns`,
+    ...(stats.skippedFiles ? [`  跳过 ${stats.skippedFiles} 个损坏或无法读取的日志`] : []),
+    "",
+    "费用按模型声明价格估算，以服务商账单为准。完整统计见桌面端 设置 › 用量",
+  ];
+}
 
 export function providerCredentialDescription(p: {
   auth?: string | undefined;

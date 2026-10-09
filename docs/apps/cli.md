@@ -110,6 +110,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 | `/shell` | 编号列表：当前生效 shell 与来源层、`auto` 加五种 shell 的探测结果（未安装标注「（未安装）」、`← 当前` 标注生效层声明值）；settings 层被 env/config 覆盖时给出提示 | `session.shellInfo()`、`session.listShells()` |
 | `/shell <种类\|编号>` | 会话内切换 shell（`auto` 清除选择回自动）；写入 `settings.json`，下一次 shell 调用生效；目标未安装时拒绝并列出可选项（`invalid_command`，不写 `settings.json`）；被 `NOCTURNE_SHELL`/`config.json` 覆盖时提示已写入但不生效 | `session.setShell(kind)` → `session.config_changed`（`shell`） |
 | `/context` | 显示若现在构建请求，上下文由什么组成 | `session.describeContext()` → `{ report: ContextReport; overBudget: boolean }`（见下） |
+| `/cost` | 只读显示当前会话与近 30 天全部本机会话（含子代理）的模型用量、缓存命中率与预估费用；未声明价格显示「未计价」，完整统计见桌面设置 › 用量 | `sessionUsageSoFar(replaySessionView(...))`、`runtime.usageStats({ days: 30 })` |
 | `/compact` | 手动触发 L2 摘要压缩 | `session.compact()` → `context.compacted(kind="summary")` |
 | `/rewind` | 编号选择轮次、操作和预览确认；空行或默认 `N` 取消 | `session.rewindTargets()`、`session.rewind()` |
 | `/fork` | 从当前位置分叉，复制会话后切换 | `runtime.forkSession()` + `/resume` 的打开逻辑 |

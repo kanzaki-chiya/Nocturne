@@ -15,7 +15,8 @@ import {
   skillListLines,
   type PermissionPresetName,
 } from "@nocturne/core";
-import { providerCredentialDescription } from "@nocturne/tui/text-format";
+import { providerCredentialDescription, costLines } from "@nocturne/tui/text-format";
+import { replaySessionView } from "@nocturne/core/protocol";
 import { cliHelpText, externalAgentListLines } from "@nocturne/tui/slash-catalog";
 
 import { normalizeModelRef } from "./config.js";
@@ -122,6 +123,23 @@ export async function runSlashCommand(
 ): Promise<CommandOutcome> {
   const [cmd, ...rest] = line.trim().split(/\s+/);
   switch (cmd) {
+    case "/cost": {
+      if (rest.length) {
+        io.print("用法：/cost");
+        return "handled";
+      }
+      try {
+        const view = replaySessionView(session.durableEvents());
+        const ref = view.config.model;
+        const pricing = runtime
+          .listModels()
+          .find((m) => m.ref.provider === ref?.provider && m.ref.model === ref?.model)?.pricing;
+        io.print(costLines(view, pricing, await runtime.usageStats({ days: 30 })).join("\n"));
+      } catch (e) {
+        io.print(`! ${errorText(e)}`);
+      }
+      return "handled";
+    }
     case "/help":
       io.print(SLASH_HELP);
       return "handled";

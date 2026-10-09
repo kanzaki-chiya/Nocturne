@@ -109,6 +109,8 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 ## 4. 渲染模型
 
+`/cost`（「查看用量与预估费用」）以对话区条目显示：上半为当前 SessionView 的模型、Turn 数、输入/缓存读取与命中率、输出及按当前模型价格估算的费用；下半为近 30 天全部本机会话（含子代理）按模型的 tokens、费用与合计。只读调用 `runtime.usageStats({ days: 30 })`，不发模型请求；末尾注明估算口径并指向桌面「设置 › 用量」。会话视图用量不含角色请求，跨模型历史在当前会话部分按当前模型价格估算（[usage.md](../architecture/usage.md)）。
+
 深浅配色遵循 [ADR-0029](../decisions/ADR-0029-tui-themes.md)：仅发布 iris 主色的 `dark`（显示名「月之暗面」，适配深色终端背景）和 `light`（显示名「月之亮面」，适配浅色终端背景），偏好取值仍是 `dark`/`light`。TUI 在第一次渲染前从 Runtime 偏好读取 `theme`，缺失或无效值回退 `dark`；语义角色经 React context 供组件和行排版使用。`/theme` 打开仅含两套主题的选择页，初始高亮当前主题；↑/↓ 移动时下方示例立即用候选主题重绘，并在 Campbell 深底与 One Half Light 浅底上对照，窄屏改为上下排列。Enter 写入偏好并立即应用；失败时保留原主题、停留选择页并提示原因；Esc 取消预览，不写设置。全屏已布局的对话行按新主题重新布局，`--inline` 已写入滚动历史的内容不重新着色。状态栏以中性色为主，Markdown 标题、代码和引用用灰度与粗细区分；选区使用主题底色，边框使用边框角色。全屏和 `--inline` 均保留终端原有背景，只给 diff、代码块、浮层与对话框设置局部底色。精确色值以支持真彩色的 Windows Terminal 为准，其他终端由 chalk 降级；`NO_COLOR`、`TERM=dumb`、ASCII 仍靠文字和符号表达状态。
 
 - Ink + React 沿用 [ADR-0010](../decisions/ADR-0010-tui-rendering.md)。主界面使用 `incrementalRendering: true` + 备用屏幕，帧高 `rows - 1`；对话区只布局可见行窗口（`viewport.ts`），已完成条目的行布局按「条目 key + 宽度 + 主题 ID」缓存（`lines.ts`），宽度变化整段重排并清除选区。

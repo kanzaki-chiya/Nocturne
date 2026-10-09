@@ -34,6 +34,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     args: "shell",
   },
   { name: "/context", summary: "查看上下文", cli: "显示上下文组成" },
+  { name: "/cost", summary: "查看用量与预估费用" },
   { name: "/mcp", summary: "MCP 状态", cli: "显示本会话 MCP 服务器状态" },
   { name: "/skills", summary: "查看技能目录", cli: "列出当前会话的技能、来源和模型目录状态" },
   { name: "/agents", summary: "查看外部 agent", cli: "只读列出外部 agent、来源、启停与斜杠冲突" },
