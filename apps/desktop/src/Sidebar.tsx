@@ -4,7 +4,15 @@ import type { PinnedRow, ProjectNode, SessionRow, SessionTree } from "./session-
 
 /** 设置区的导航项（ADR-0046 2026-10-05 修订第 1 条；logs = 后台日志页） */
 export type SettingsSection =
-  "general" | "models" | "providers" | "mcp" | "skills" | "agents" | "appearance" | "logs";
+  | "general"
+  | "models"
+  | "providers"
+  | "mcp"
+  | "skills"
+  | "agents"
+  | "appearance"
+  | "usage"
+  | "logs";
 
 export interface SidebarProps {
   tree: SessionTree;
@@ -160,6 +168,21 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
         <circle cx="8" cy="8" r="2.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
         <path
           d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
+  {
+    key: "usage",
+    label: "用量",
+    icon: (
+      <svg {...GLYPH_PROPS}>
+        <path
+          d="M2.5 13.5h11M4.5 10.5v-4M8 10.5v-8M11.5 10.5v-6"
+          fill="none"
           stroke="currentColor"
           strokeWidth="1.3"
           strokeLinecap="round"

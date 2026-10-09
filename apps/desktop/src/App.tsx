@@ -30,6 +30,7 @@ import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
 import { SkillsPage } from "./SkillsPage";
 import { SettingsPage } from "./SettingsPage";
+import { UsagePage } from "./UsagePage";
 
 import { BackendPool } from "./backends";
 import type { DesktopHost } from "./host";
@@ -897,6 +898,10 @@ export function App({ host }: { host: DesktopHost }) {
                   openUrl={host.openUrl}
                   pickFolder={() => host.pickFolder()}
                 />
+              </PaneErrorBoundary>
+            ) : page === "usage" ? (
+              <PaneErrorBoundary key="usage">
+                <UsagePage client={pageClient} />
               </PaneErrorBoundary>
             ) : page === "logs" ? (
               <PaneErrorBoundary key="logs">
