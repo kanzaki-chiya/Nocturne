@@ -42,20 +42,20 @@ const stats: UsageStats = {
     },
     {
       ...totals,
+      cost: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 },
+      model: { provider: "p", model: "unpriced" },
+      turns: 0,
+      cacheHitRate: 0,
+    },
+    {
+      ...totals,
       inputTokens: 1_000,
-      cost: { ...cost, total: 0.01 },
+      cost: { ...cost, total: 0 },
       model: { provider: "ocx", model: "xai/grok-4.7" },
       turns: 1,
       cacheHitRate: 0,
       pricing: { input: 2, output: 6 },
       pricingSource: "vendor",
-    },
-    {
-      ...totals,
-      cost: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 },
-      model: { provider: "p", model: "unpriced" },
-      turns: 0,
-      cacheHitRate: 0,
     },
   ],
   tools: [{ name: "read", count: 30 }],
@@ -108,6 +108,8 @@ describe("desktop usage", () => {
     await mount();
     const table = screen.getByRole("table");
     expect(within(table).getAllByRole("row")[1]?.textContent).toContain("expensive");
+    // 未计价排在已计价（含 $0）之后，即使输入更多
+    expect(within(table).getAllByRole("row").at(-1)?.textContent).toContain("unpriced");
     fireEvent.click(screen.getByRole("button", { name: "按输入" }));
     expect(within(table).getAllByRole("row")[1]?.textContent).toContain("large-input");
     const unpriced = within(table)

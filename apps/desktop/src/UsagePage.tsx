@@ -207,8 +207,12 @@ export function UsageView({
   const [sort, setSort] = useState<"cost" | "input">("cost");
   const models = useMemo(
     () =>
-      [...(stats?.models ?? [])].sort((a, b) =>
-        sort === "cost" ? b.cost.total - a.cost.total : b.inputTokens - a.inputTokens,
+      // 按费用：未计价排在已计价之后；同费用（含都未计价）按输入
+      [...(stats?.models ?? [])].sort(
+        (a, b) =>
+          (sort === "cost"
+            ? Number(!a.pricing) - Number(!b.pricing) || b.cost.total - a.cost.total
+            : 0) || b.inputTokens - a.inputTokens,
       ),
     [stats, sort],
   );
