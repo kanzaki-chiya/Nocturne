@@ -1,7 +1,7 @@
 {
   "name": "nocturne",
   "private": true,
-  "version": "0.7.6",
+  "version": "0.8.0",
   "description": "Nocturne — open-source coding agent runtime",
   "license": "GPL-3.0-only",
   "packageManager": "pnpm@11.24.0",
