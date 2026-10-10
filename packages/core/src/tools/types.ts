@@ -274,7 +274,10 @@ export interface McpServerStatus {
   toolCount: number;
   /** failed / crashed 的人读原因 */
   error?: string | undefined;
-  /** 已发生的惰性重连次数 */
+  /**
+   * 惰性重连计数。stdio：会话内已发生的重连次数（达到上限后不再尝试）；
+   * HTTP：连续重连失败次数（成功即清零，不设上限，失败后进入冷却）。
+   */
   restarts: number;
 }
 
@@ -309,6 +312,14 @@ export interface McpToolDiff {
 export interface McpSession {
   /** 等待初始启动结束；中止只停止等待，不取消后台连接。 */
   startup(signal?: AbortSignal): Promise<void>;
+  /**
+   * Turn 边界准备（可选）：Runtime 在每个 Turn 开始、`applyPendingTools()` 之前
+   * 调用一次，用于对"失败且已过冷却"的服务器发起一次恢复尝试（HTTP 惰性重连）。
+   * 实现最多等待一段固定时间（3 秒），超时后转入后台；工具集仍只在
+   * `applyPendingTools()` 时切换，Turn 内 `specs()` 保持稳定（mcp.md 第 4、5 节）。
+   * 空闲 `reconcile` 不调用它。未实现时行为与本钩子不存在时一致。
+   */
+  prepareTurn?(signal?: AbortSignal): Promise<void>;
   reconcile(servers: readonly McpServerConfig[]): Promise<void>;
   tools(): readonly ToolDefinition[];
   status(): McpServerStatus[];

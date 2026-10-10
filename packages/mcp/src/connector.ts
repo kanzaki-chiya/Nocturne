@@ -1,14 +1,17 @@
 /**
  * MCP 连接器（mcp.md 第 3–5 节）：会话级生命周期。
  * - open() 并行启动全部服务器；单服务器失败降级为 failed，不阻塞会话；
- * - 崩溃惰性重连（每会话每服务器至多 MAX_RESTARTS 次）；
+ * - stdio 崩溃惰性重连至多 MAX_RESTARTS 次；HTTP 失败后冷却重连；
  * - tools/list_changed 与重连刷新的工具集先暂存，applyPendingTools()
  *   在 Turn 边界统一应用（mcp.md 第 5 节）；
  * - close() 终止全部服务器进程树。
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { createHash } from "node:crypto";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  StreamableHTTPClientTransport,
+  StreamableHTTPError,
+} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   ToolListChangedNotificationSchema,
@@ -39,7 +42,12 @@ const DEFAULT_STARTUP_MS = 15_000;
 const MAX_STARTUP_MS = 60_000;
 const DEFAULT_CALL_MS = 60_000;
 const MAX_CALL_MS = 600_000;
+/** stdio 惰性重连上限（超过后记 failed 不再尝试，mcp.md 第 4 节） */
 const MAX_RESTARTS = 3;
+/** HTTP 重连失败后的冷却时长：冷却期内不再发起连接尝试 */
+const HTTP_RETRY_COOLDOWN_MS = 30_000;
+/** Turn 边界恢复尝试的最长等待：超时后转入后台，结果下一次 Turn 边界应用 */
+const TURN_RECONNECT_WAIT_MS = 3_000;
 
 interface ServerRuntime {
   proc?: PipeProcess | undefined;
@@ -67,6 +75,15 @@ interface Server {
   stderrTail?: string[] | undefined;
   secrets: string[];
   listed?: McpProbeResult["tools"] | undefined;
+  /**
+   * 连接尝试代号：每次 connectServer 开始时自增。在途尝试发布 ready/failed
+   * 前必须复核代号与 closed，避免被关闭或重配取代的尝试"复活"旧连接。
+   */
+  run: number;
+  /** 已就本次故障发出过 mcp_server_failed：同一故障期内只警告一次 */
+  announced?: boolean | undefined;
+  /** HTTP：冷却结束时间戳（Date.now 毫秒）；undefined 表示无冷却 */
+  retryAt?: number | undefined;
 }
 
 function err(code: string, message: string): ToolResult {
@@ -143,15 +160,15 @@ function fingerprint(cfg: McpServerConfig, values: Record<string, string> | unde
   return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
 }
 
-async function stopServer(st: Server): Promise<void> {
-  st.closed = true;
-  st.controller?.abort();
-  const runtime = st.runtime;
-  st.runtime = undefined;
-  if (!runtime) return;
+/**
+ * 关闭一个运行时（传输 + 客户端 + stdio 进程），不改变服务器条目的状态。
+ * HTTP 有会话时先 DELETE（best-effort）；围绕 DELETE 保存/恢复 httpStatus 与
+ * code，避免清理请求的状态码污染调用失败分类（并发下为 best-effort）。
+ */
+async function closeRuntime(st: Server, runtime: ServerRuntime): Promise<void> {
+  const status = st.httpStatus;
+  const code = st.code;
   if (runtime.transport instanceof StreamableHTTPClientTransport && runtime.transport.sessionId) {
-    const status = st.httpStatus;
-    const code = st.code;
     await timeout(runtime.transport.terminateSession(), 2000, "MCP 结束会话").catch(
       () => undefined,
     );
@@ -167,6 +184,155 @@ async function stopServer(st: Server): Promise<void> {
       .filter(Boolean)
       .slice(-20)
       .map((line) => line.slice(0, 300));
+  }
+}
+
+async function stopServer(st: Server): Promise<void> {
+  st.closed = true;
+  st.run += 1;
+  st.controller?.abort();
+  const runtime = st.runtime;
+  st.runtime = undefined;
+  if (runtime === undefined) return;
+  await closeRuntime(st, runtime);
+}
+
+/**
+ * 丢弃本次尝试创建的运行时：既不标记服务器 closed，也不发布任何状态，
+ * 用于在途重连已被关闭/重配取代的场景（不得复活旧连接）。
+ */
+async function discardRuntime(st: Server, runtime: ServerRuntime): Promise<void> {
+  if (st.runtime === runtime) st.runtime = undefined;
+  await closeRuntime(st, runtime);
+}
+
+function requireClient(st: Server): Client {
+  const client = st.runtime?.client;
+  if (client === undefined) throw new Error(`MCP 服务器 ${st.cfg.name} 重连后客户端缺失`);
+  return client;
+}
+
+/**
+ * 从 Node fetch 的失败链上取错误码：`TypeError("fetch failed")` 的 cause 可能是
+ * 单个错误（带 code）或多个地址的 AggregateError（errors[]，可能再嵌套 cause）。
+ */
+function fetchFailureCode(e: unknown, depth = 0): string | undefined {
+  if (depth > 4 || e === null || typeof e !== "object") return undefined;
+  if ("code" in e && typeof e.code === "string") return e.code;
+  if ("errors" in e && Array.isArray(e.errors) && e.errors.length > 0) {
+    const codes = (e.errors as unknown[]).map((item) => fetchFailureCode(item, depth + 1));
+    // 多地址连接只有全部失败原因都明确发生在发出请求前，才允许重试。
+    if (codes.every((code) => code !== undefined && RETRYABLE_CONNECT_CODES[code])) return codes[0];
+    return undefined;
+  }
+  if ("cause" in e) return fetchFailureCode(e.cause, depth + 1);
+  return undefined;
+}
+
+/**
+ * 连接阶段失败（请求根本没有发出）的 Node/undici 错误码白名单。
+ * 只收连接建立阶段的失败：这些情况下服务器不可能执行本次 tools/call，
+ * 立即重连并重试不会产生重复副作用。刻意不含 ECONNRESET/超时/HTTP 状态码：
+ * 那些可能发生在请求已送达之后，重试会重复执行（mcp.md 第 4 节）。
+ */
+const RETRYABLE_CONNECT_CODES: Record<string, true> = {
+  ECONNREFUSED: true,
+  ENOTFOUND: true,
+  EAI_AGAIN: true,
+  EHOSTUNREACH: true,
+  ENETUNREACH: true,
+};
+
+/**
+ * 判定一次 HTTP tools/call 失败是否可以"立即重连并重试一次"。只有两类明确安全：
+ *
+ * 1. **会话已失效**：SDK 抛 `StreamableHTTPError(404)`，且本次 POST 确实带了
+ *    `mcp-session-id`（`sessionIdAtCall`）。这是服务器清理了旧会话的确定信号，
+ *    请求在服务器侧被拒绝、工具不会执行。
+ *    SDK 后台 SSE GET 的错误走 transport.onerror，不会成为 callTool 的
+ *    rejection；这里判断调用自身抛出的错误，不依据共享的最近 HTTP 状态码。
+ *    - 404 但没有会话 id（例如 initialize 阶段）不算会话失效，不重试。
+ * 2. **连接阶段失败**：错误链上的 cause 是连接建立阶段的错误码（见
+ *    `RETRYABLE_CONNECT_CODES`），说明请求没有发出，重试不会重复执行工具。
+ *
+ * 其余（超时、连接被重置、HTTP 4xx/5xx、内容类型错误等）一律不重试：服务器可能
+ * 已经执行了本次调用。不按服务器名、工具名或 URL 分支。
+ */
+export function shouldRetryHttpCall(e: unknown, sessionIdAtCall: string | undefined): boolean {
+  if (e instanceof StreamableHTTPError && e.code === 404 && sessionIdAtCall !== undefined) {
+    return true;
+  }
+  const code = fetchFailureCode(e);
+  return code !== undefined && RETRYABLE_CONNECT_CODES[code] === true;
+}
+
+/**
+ * HTTP 调用失败的分类原因（写入 `st.error` 与工具结果）。顺序：会话失效 →
+ * HTTP 状态码 → 连接阶段错误码 → 超时 → 最近一次 HTTP 状态码 → 原始错误摘要。
+ * 导出仅为单元测试覆盖各分支。
+ */
+export function httpFailureReason(
+  e: unknown,
+  httpStatus: number | undefined,
+  sessionIdAtCall?: string,
+): string {
+  if (e instanceof StreamableHTTPError && e.code !== undefined && e.code > 0) {
+    return e.code === 404 && sessionIdAtCall !== undefined
+      ? "会话已失效（HTTP 404）"
+      : `HTTP ${e.code}`;
+  }
+  const code = fetchFailureCode(e);
+  if (code !== undefined) {
+    switch (code) {
+      case "ECONNREFUSED":
+        return "连接被拒绝（ECONNREFUSED）";
+      case "ENOTFOUND":
+      case "EAI_AGAIN":
+        return `域名解析失败（${code}）`;
+      case "EHOSTUNREACH":
+      case "ENETUNREACH":
+        return `网络不可达（${code}）`;
+      case "ECONNRESET":
+        return "连接被重置（ECONNRESET）";
+      case "UND_ERR_SOCKET":
+        return "连接中断（UND_ERR_SOCKET）";
+      case "UND_ERR_CONNECT_TIMEOUT":
+        return "请求超时（连接超时）";
+      case "UND_ERR_HEADERS_TIMEOUT":
+      case "UND_ERR_BODY_TIMEOUT":
+        return "请求超时";
+      default:
+        return `网络错误（${code}）`;
+    }
+  }
+  if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
+    return "请求超时";
+  }
+  if (e instanceof Error && /超时|timeout/i.test(e.message)) return "请求超时";
+  if (httpStatus !== undefined && httpStatus >= 400) return `HTTP ${httpStatus}`;
+  return `请求失败：${toolError(e).slice(0, 200)}`;
+}
+
+/**
+ * 把 HTTP 服务器标记为 failed：只在**首次进入** failed 时发一次 `mcp.server`、
+ * 诊断 `mcp.event`（原始错误 + httpStatus）与 `mcp_server_failed` 警告；已是
+ * failed 时只更新原因文本（下一次调用照常触发重连）。
+ */
+function markHttpFailed(scope: McpOpenScope, st: Server, reason: string, raw: unknown): void {
+  if (st.closed || st.state === "stopped") return;
+  st.error = safeText(st, reason);
+  if (st.state === "failed") return;
+  st.state = "failed";
+  scope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
+  scope.diagnostics?.record("mcp.event", {
+    server: st.cfg.name,
+    state: "failed",
+    error: safeText(st, diagnosticError(raw)),
+    httpStatus: httpStatusOf(raw, st),
+  });
+  if (st.announced !== true) {
+    st.announced = true;
+    scope.warn("mcp_server_failed", `MCP 服务器 ${st.cfg.name} 连接失败：${st.error}`);
   }
 }
 
@@ -187,6 +353,10 @@ function isAborted(signal: AbortSignal): boolean {
   return signal.aborted;
 }
 
+function isCurrentAttempt(st: Server, run: number): boolean {
+  return !st.closed && st.run === run;
+}
+
 async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) throw new Error("MCP 启动已取消");
   let abort!: () => void;
@@ -205,6 +375,17 @@ async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T
 
 function toolError(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+function diagnosticError(e: unknown): string {
+  const code = fetchFailureCode(e);
+  return code === undefined ? toolError(e) : `${toolError(e)} (${code})`;
+}
+
+function httpStatusOf(e: unknown, st: Server): number | undefined {
+  return e instanceof StreamableHTTPError && e.code !== undefined && e.code > 0
+    ? e.code
+    : st.httpStatus;
 }
 
 async function fetchToolDefs(
@@ -231,8 +412,12 @@ async function fetchToolDefs(
   return defs;
 }
 
-/** 启动/重连一台服务器：spawn → initialize → tools/list；失败写 st.error 并抛出 */
-async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
+/**
+ * 启动/重连一台服务器：spawn → initialize → tools/list；失败写 st.error 并抛出。
+ * `run` 是本次尝试的代号：每个发布点都复核 `st.run === run && !st.closed`，
+ * 被关闭/重配取代的在途尝试不发布状态、不复活连接（mcp.md 第 4 节）。
+ */
+async function connectServer(scope: McpOpenScope, st: Server, run: number): Promise<ServerRuntime> {
   const started = Date.now();
   const controller = new AbortController();
   st.controller = controller;
@@ -257,8 +442,11 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
     if (e instanceof Error && e.message.includes("超时")) st.code = "startup_timeout";
     throw e;
   }
-  if (st.closed || controller.signal.aborted) throw new Error("MCP 启动已取消");
+  if (st.closed || st.run !== run || controller.signal.aborted) throw new Error("MCP 启动已取消");
   st.fingerprint = fingerprint(st.cfg, values);
+  st.httpStatus = undefined;
+  st.code = undefined;
+  if (st.cfg.type === "http") st.secrets.push(...Object.values(values ?? {}));
   let proc: PipeProcess | undefined;
   let transport: StdioPipeTransport | StreamableHTTPClientTransport;
   if (st.cfg.type === "http") {
@@ -275,7 +463,15 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
         let url = new URL(input);
         const request = { ...init, redirect: "manual" as const };
         for (let hop = 0; hop < 20; hop++) {
-          const response = await globalThis.fetch(url, request);
+          let response: Response;
+          try {
+            response = await globalThis.fetch(url, request);
+          } catch (e) {
+            // 连接阶段失败（DNS/拒绝/连接超时）：本跳没有 HTTP 状态码，
+            // 清掉上一次请求留下的状态码，避免误导失败分类（并发下 best-effort）
+            st.httpStatus = undefined;
+            throw e;
+          }
           st.httpStatus = response.status;
           if ([301, 302, 303, 307, 308].includes(response.status)) {
             const location = response.headers.get("location");
@@ -323,18 +519,30 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
   }
   const client = new Client({ name: CLIENT_NAME, version: CLIENT_VERSION }, { capabilities: {} });
   const runtime: ServerRuntime = { proc, transport, client };
+  if (!isCurrentAttempt(st, run)) {
+    // 尝试已被关闭/重配取代：丢弃刚建的运行时，不发布任何状态
+    await closeRuntime(st, runtime);
+    throw new Error("MCP 启动已取消");
+  }
   st.runtime = runtime;
   // 已 ready 的进程退出/管道关闭才视为崩溃；st.runtime 换防后旧 runtime 的 close 不生效。
   // 连接阶段的关闭交给下方 catch 统一报一次启动失败，不再另报崩溃（mcp.md 第 4 节）
+  // HTTP 的传输关闭不是进程崩溃：记 failed（下一次调用惰性重连），不发
+  // mcp_server_crashed；stdio 保持 crashed + 警告不变（mcp.md 第 4 节）。
   transport.onclose = () => {
     if (st.runtime !== runtime || st.closed || st.state !== "ready") return;
-    st.state = st.cfg.type === "http" ? "failed" : "crashed";
+    if (st.cfg.type === "http") {
+      markHttpFailed(scope, st, "HTTP 连接已断开", "HTTP transport closed");
+      return;
+    }
+    st.state = "crashed";
     st.error = "进程已退出或管道已关闭";
     scope.emitServer({ name: st.cfg.name, state: st.state, error: st.error });
     scope.diagnostics?.record("mcp.event", {
       server: st.cfg.name,
-      state: "crashed",
+      state: st.state,
       error: st.error,
+      httpStatus: st.httpStatus,
     });
     scope.warn("mcp_server_crashed", `MCP 服务器 ${st.cfg.name} 连接断开`);
   };
@@ -348,7 +556,7 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
       (async () => {
         await client.connect(transport as Transport, { signal: controller.signal });
         const defs = await fetchToolDefs(scope, st);
-        if (!st.closed) st.staged = defs;
+        if (!st.closed && st.run === run) st.staged = defs;
       })(),
       Math.max(1, startupMs - (Date.now() - started)),
       `MCP 服务器 ${st.cfg.name} 启动`,
@@ -362,10 +570,12 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
           ? "spawn_failed"
           : "initialize_failed";
     }
-    await stopServer(st);
-    if (!cancelled) st.closed = false;
+    controller.abort();
+    await discardRuntime(st, runtime);
+    if (cancelled && st.run === run) st.closed = true;
     throw e;
   }
+  return runtime;
 }
 
 /** tools/list_changed：重新拉取并暂存，注册表在 Turn 边界再切换 */
@@ -382,66 +592,122 @@ async function refreshTools(scope: McpOpenScope, st: Server): Promise<void> {
   }
 }
 
-/** 惰性重连：崩溃/失败后的下一次调用触发；每会话至多 MAX_RESTARTS 次 */
+/**
+ * 惰性重连：失败/崩溃后的下一次调用触发，或由 Turn 边界钩子 prepareTurn 触发。
+ * - stdio：每会话至多 MAX_RESTARTS 次（超过记 failed 不再尝试）；
+ * - HTTP：不设上限，连续失败计数在成功时清零，失败后进入 30 秒冷却
+ *   （冷却期内直接拒绝，不发事件、不警告）；
+ * - 并发的重连请求共享同一个 `st.restarting` 尝试（mcp.md 第 4 节）；
+ * - 成功是静默的：只发 starting → ready，不警告；失败进入 failed 时警告一次。
+ */
 async function ensureClient(scope: McpOpenScope, st: Server): Promise<Client> {
   if (st.state === "ready" && st.runtime !== undefined) return st.runtime.client;
-  if (st.cfg.type === "http") throw new Error("HTTP 连接不可用，请停用后重新启用服务器");
   if (st.closed || st.state === "stopped") {
     throw new Error(`MCP 服务器 ${st.cfg.name} 已关闭`);
   }
-  if (st.restarts >= MAX_RESTARTS) {
+  if (st.restarting !== undefined) {
+    // 已有在途尝试：加入等待，不再发起第二次连接
+    if (await st.restarting) return requireClient(st);
+    throw new Error(`MCP 服务器 ${st.cfg.name} 不可用：${st.error ?? "重连失败"}`);
+  }
+  if (st.cfg.type !== "http" && st.restarts >= MAX_RESTARTS) {
     throw new Error(
       `MCP 服务器 ${st.cfg.name} 不可用（${st.error ?? "未知原因"}；已重连 ${st.restarts} 次达到上限）`,
     );
   }
-  st.restarting ??= (async () => {
-    st.restarts += 1;
+  const now = Date.now();
+  if (st.cfg.type === "http" && st.retryAt !== undefined && now < st.retryAt) {
+    // 冷却拒绝：不发事件、不警告（mcp.md 第 4 节）
+    throw new Error(
+      `MCP 服务器 ${st.cfg.name} 暂不可用（${st.error ?? "连接失败"}；重连冷却中，约 ${Math.ceil(
+        (st.retryAt - now) / 1000,
+      )} 秒后可重试）`,
+    );
+  }
+  const run = ++st.run;
+  const attempt = (async (): Promise<boolean> => {
     st.state = "starting";
+    st.announced = false;
+    if (st.cfg.type !== "http") st.restarts += 1;
     scope.emitServer({ name: st.cfg.name, state: "starting" });
     scope.diagnostics?.record("mcp.event", { server: st.cfg.name, state: "starting" });
     try {
-      await connectServer(scope, st);
+      st.controller?.abort();
+      const old = st.runtime;
+      st.runtime = undefined;
+      if (old) await closeRuntime(st, old);
+      if (!isCurrentAttempt(st, run)) return false;
+      const runtime = await connectServer(scope, st, run);
+      if (!isCurrentAttempt(st, run)) {
+        // 在途重连被关闭/重配取代：丢弃本次运行时，不复活旧连接
+        await discardRuntime(st, runtime);
+        return false;
+      }
       // 重连拉到的工具集同样按 Turn 边界生效（mcp.md 第 5 节）：
       // st.tools 保持旧集，staged 在 applyPendingTools() 时切换
       st.state = "ready";
       st.error = undefined;
-      scope.emitServer({
-        name: st.cfg.name,
-        state: "ready",
-        toolCount: st.staged?.size ?? st.tools.size,
-      });
+      st.code = undefined;
+      st.announced = false;
+      if (st.cfg.type === "http") {
+        // 连续重连失败计数成功清零，冷却解除
+        st.restarts = 0;
+        st.retryAt = undefined;
+      }
+      const toolCount = st.staged?.size ?? st.tools.size;
+      scope.emitServer({ name: st.cfg.name, state: "ready", toolCount });
       scope.diagnostics?.record("mcp.event", {
         server: st.cfg.name,
         state: "ready",
-        toolCount: st.staged?.size ?? st.tools.size,
+        toolCount,
       });
       return true;
     } catch (e) {
+      if (st.run !== run || st.closed) return false;
+      const reason =
+        st.cfg.type === "http" ? httpFailureReason(e, st.httpStatus) : safeText(st, toolError(e));
       st.state = "failed";
-      st.error = safeText(st, toolError(e));
+      st.error = safeText(st, reason);
+      if (st.cfg.type === "http") {
+        st.restarts += 1;
+        st.retryAt = Date.now() + HTTP_RETRY_COOLDOWN_MS;
+      }
       scope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
       scope.diagnostics?.record("mcp.event", {
         server: st.cfg.name,
         state: "failed",
-        error: st.error,
+        error: safeText(st, diagnosticError(e)),
+        httpStatus: httpStatusOf(e, st),
       });
+      st.announced = true;
       scope.warn("mcp_server_failed", `MCP 服务器 ${st.cfg.name} 重连失败：${st.error}`);
       return false;
     }
   })();
+  st.restarting = attempt;
   try {
-    if (!(await st.restarting)) {
+    if (!(await attempt)) {
       throw new Error(`MCP 服务器 ${st.cfg.name} 不可用：${st.error ?? "重连失败"}`);
     }
-    return (
-      st.runtime?.client ??
-      (() => {
-        throw new Error("重连后客户端缺失");
-      })()
-    );
+    return requireClient(st);
   } finally {
-    st.restarting = undefined;
+    if (st.restarting === attempt) st.restarting = undefined;
   }
+}
+
+/**
+ * 会话失效等场景的强制重建：先丢弃当前运行时（旧会话已不可用），再走一次
+ * 重连。不发布 failed，因此成功时调用方只看到 starting → ready。
+ * 并发旧调用晚到时仍遵守刚失败的重连所建立的冷却，不能连续发起尝试。
+ */
+async function forceReconnect(
+  scope: McpOpenScope,
+  st: Server,
+  failedClient: Client,
+): Promise<Client> {
+  // 另一并发调用已经在恢复（或恢复完毕）时，共用其结果，不销毁新连接。
+  if (st.runtime?.client === failedClient && st.restarting === undefined) st.state = "failed";
+  return await ensureClient(scope, st);
 }
 
 /** content[] → modelContent + output 元数据（mcp.md 第 6 节结果映射） */
@@ -559,47 +825,123 @@ function wrapTool(
       const timeoutSignal = AbortSignal.timeout(callMs);
       const combined = AbortSignal.any([ctx.signal, timeoutSignal]);
       const startedAt = Date.now();
-      try {
-        const res = await client.callTool(
-          { name: remote, arguments: _input as Record<string, unknown> },
-          undefined,
-          { signal: combined, timeout: callMs },
-        );
+
+      const recordCallFailure = (raw: unknown, retried = false): void => {
         scope.diagnostics?.record("mcp.call", {
           server: st.cfg.name,
           tool: safeText(st, remote),
           callId: ctx.callId,
           durationMs: Date.now() - startedAt,
-          isError: isErrorResult(res),
+          error: safeText(st, diagnosticError(raw)),
+          httpStatus: httpStatusOf(raw, st),
+          ...(retried ? { retried: true } : {}),
         });
-        const mapped = mapContent(res);
-        const text = safeText(st, mapped.text);
-        const output = safeOutput(st, mapped.output) as Record<string, unknown>;
-        if (isErrorResult(res)) {
-          return {
-            status: "error",
-            modelContent: text === "" ? "MCP 工具返回 isError（无文本）" : text,
-            output,
-            error: { code: "tool_error", message: text.slice(0, 300) || "isError" },
-          };
+      };
+
+      // 单次调用尝试：成功返回结果；失败把原始错误与本次调用所用会话 id 交回
+      //（会话 id 必须是"本次 call"的，不能用重连后的值，见 shouldRetryHttpCall）。
+      const attemptCall = async (): Promise<
+        | { ok: true; result: ToolResult }
+        | { ok: false; error: unknown; sessionIdAtCall: string | undefined }
+      > => {
+        const transport = st.runtime?.transport;
+        const sessionIdAtCall =
+          transport instanceof StreamableHTTPClientTransport ? transport.sessionId : undefined;
+        try {
+          const res = await client.callTool(
+            { name: remote, arguments: _input as Record<string, unknown> },
+            undefined,
+            { signal: combined, timeout: callMs },
+          );
+          scope.diagnostics?.record("mcp.call", {
+            server: st.cfg.name,
+            tool: safeText(st, remote),
+            callId: ctx.callId,
+            durationMs: Date.now() - startedAt,
+            isError: isErrorResult(res),
+            httpStatus: st.httpStatus,
+          });
+          const mapped = mapContent(res);
+          const text = safeText(st, mapped.text);
+          const output = safeOutput(st, mapped.output) as Record<string, unknown>;
+          if (isErrorResult(res)) {
+            return {
+              ok: true,
+              result: {
+                status: "error",
+                modelContent: text === "" ? "MCP 工具返回 isError（无文本）" : text,
+                output,
+                error: { code: "tool_error", message: text.slice(0, 300) || "isError" },
+              },
+            };
+          }
+          return { ok: true, result: { status: "ok", modelContent: text, output } };
+        } catch (error) {
+          return { ok: false, error, sessionIdAtCall };
         }
-        return { status: "ok", modelContent: text, output };
-      } catch (e) {
-        if (isAborted(ctx.signal)) return err("cancelled", "调用已被中断");
-        if (timeoutSignal.aborted) {
-          return err("timeout", safeText(st, `MCP 工具 ${remote} 超过 ${callMs}ms 超时`));
-        }
-        if (st.cfg.type === "http") {
-          st.state = "failed";
-          st.error = "HTTP 请求失败，请检查连接和请求头";
-          scope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
-          return err("mcp_unavailable", st.error);
-        }
+      };
+
+      const first = await attemptCall();
+      if (first.ok) return first.result;
+      if (isAborted(ctx.signal)) return err("cancelled", "调用已被中断");
+      // 旧 Client 的其他在途调用会在重连清理时以 Connection closed 结束。
+      // 它们不能把新连接/连接尝试记为 failed，也不能再触发一次恢复。
+      if (
+        st.cfg.type === "http" &&
+        st.runtime?.client !== client &&
+        !shouldRetryHttpCall(first.error, first.sessionIdAtCall)
+      ) {
+        recordCallFailure(first.error);
+        return err("mcp_unavailable", safeText(st, toolError(first.error)));
+      }
+      if (isAborted(timeoutSignal)) {
+        if (st.cfg.type === "http") markHttpFailed(scope, st, "请求超时", first.error);
+        recordCallFailure(first.error);
+        return err("timeout", safeText(st, `MCP 工具 ${remote} 超过 ${callMs}ms 超时`));
+      }
+
+      if (st.cfg.type !== "http") {
         if (st.state !== "ready") {
           return err("mcp_server_crashed", `MCP 服务器 ${st.cfg.name} 连接中断`);
         }
-        return err("tool_error", safeText(st, `MCP 工具 ${remote} 调用失败：${toolError(e)}`));
+        recordCallFailure(first.error);
+        return err(
+          "tool_error",
+          safeText(st, `MCP 工具 ${remote} 调用失败：${toolError(first.error)}`),
+        );
       }
+
+      // HTTP：只有明确安全的失败才立即重连并重试一次；其余本次返回错误，
+      // 下一次调用触发惰性重连（mcp.md 第 4 节）。
+      if (shouldRetryHttpCall(first.error, first.sessionIdAtCall)) {
+        recordCallFailure(first.error);
+        try {
+          client = await forceReconnect(scope, st, client);
+        } catch (reconnectError) {
+          return err("mcp_unavailable", safeText(st, toolError(reconnectError)));
+        }
+        const second = await attemptCall();
+        if (second.ok) return second.result;
+        if (isAborted(ctx.signal)) return err("cancelled", "调用已被中断");
+        if (st.runtime?.client !== client) {
+          recordCallFailure(second.error, true);
+          return err("mcp_unavailable", safeText(st, toolError(second.error)));
+        }
+        if (isAborted(timeoutSignal)) {
+          markHttpFailed(scope, st, "请求超时", second.error);
+          recordCallFailure(second.error, true);
+          return err("timeout", safeText(st, `MCP 工具 ${remote} 超过 ${callMs}ms 超时`));
+        }
+        const reason = httpFailureReason(second.error, st.httpStatus, second.sessionIdAtCall);
+        markHttpFailed(scope, st, reason, second.error);
+        recordCallFailure(second.error, true);
+        return err("mcp_unavailable", safeText(st, reason));
+      }
+
+      const reason = httpFailureReason(first.error, st.httpStatus, first.sessionIdAtCall);
+      markHttpFailed(scope, st, reason, first.error);
+      recordCallFailure(first.error);
+      return err("mcp_unavailable", safeText(st, reason));
     },
   };
 }
@@ -627,9 +969,10 @@ export function createMcpConnector(): McpConnector {
         tools: new Map(),
         closed: false,
         secrets: [],
+        run: 0,
       };
       try {
-        await connectServer(scope, st);
+        await connectServer(scope, st, ++st.run);
         const info = st.runtime?.client.getServerVersion();
         const tools = st.listed ?? [];
         await stopServer(st);
@@ -674,6 +1017,7 @@ export function createMcpConnector(): McpConnector {
           tools: new Map(),
           closed: false,
           secrets: [],
+          run: 0,
         }));
       // 并行启动；单服务器失败只影响自身（降级为无该服务器工具）
       const initialStartup = Promise.all(
@@ -684,9 +1028,11 @@ export function createMcpConnector(): McpConnector {
             state: "starting",
           });
           try {
-            await connectServer(scope, st);
+            await connectServer(scope, st, ++st.run);
             if (st.closed) return;
             st.state = "ready";
+            st.error = undefined;
+            st.announced = false;
             scope.emitServer({
               name: st.cfg.name,
               state: "ready",
@@ -703,17 +1049,27 @@ export function createMcpConnector(): McpConnector {
             st.error =
               st.code === "mcp_secret_missing"
                 ? safeText(st, toolError(e))
-                : "连接失败，请检查服务器配置、连接和凭据";
+                : st.cfg.type === "http"
+                  ? safeText(st, httpFailureReason(e, st.httpStatus))
+                  : "连接失败，请检查服务器配置、连接和凭据";
+            if (st.cfg.type === "http") {
+              st.restarts += 1;
+              st.retryAt = Date.now() + HTTP_RETRY_COOLDOWN_MS;
+            }
             scope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
             scope.diagnostics?.record("mcp.event", {
               server: st.cfg.name,
               state: "failed",
-              error: st.error,
+              error: safeText(st, diagnosticError(e)),
+              httpStatus: httpStatusOf(e, st),
             });
-            scope.warn(
-              st.code === "mcp_secret_missing" ? "mcp_secret_missing" : "mcp_server_failed",
-              `MCP 服务器 ${st.cfg.name} 启动失败：${st.error}`,
-            );
+            if (st.announced !== true) {
+              st.announced = true;
+              scope.warn(
+                st.code === "mcp_secret_missing" ? "mcp_secret_missing" : "mcp_server_failed",
+                `MCP 服务器 ${st.cfg.name} 启动失败：${st.error}`,
+              );
+            }
           }
         }),
       );
@@ -754,6 +1110,7 @@ export function createMcpConnector(): McpConnector {
               tools: new Map(),
               closed: false,
               secrets: [],
+              run: 0,
             };
             const values = await expandEnv(
               cfg.type === "http" ? cfg.headers : cfg.env,
@@ -772,18 +1129,29 @@ export function createMcpConnector(): McpConnector {
             st.closed = false;
             st.fingerprint = digest;
             st.state = "starting";
+            // 新配置是新故障期：清掉冷却与失败计数/警告标记
+            st.retryAt = undefined;
+            st.restarts = 0;
+            st.announced = false;
             scope.emitServer({ name: cfg.name, state: "starting" });
             try {
-              await connectServer(scope, st);
+              await connectServer(scope, st, ++st.run);
               st.state = "ready";
               st.error = undefined;
-            } catch {
+            } catch (e) {
               st.state = "failed";
               st.error =
                 st.code === "mcp_secret_missing"
                   ? (st.error ?? `MCP 服务器 ${cfg.name} 缺少凭据`)
-                  : "连接失败，请检查配置和凭据";
+                  : cfg.type === "http"
+                    ? safeText(st, httpFailureReason(e, st.httpStatus))
+                    : "连接失败，请检查配置和凭据";
+              if (cfg.type === "http") {
+                st.restarts += 1;
+                st.retryAt = Date.now() + HTTP_RETRY_COOLDOWN_MS;
+              }
               st.staged = new Map();
+              st.announced = true;
               scope.warn(
                 st.code === "mcp_secret_missing" ? st.code : "mcp_server_failed",
                 `MCP 服务器 ${cfg.name} 启动失败：${st.error}`,
@@ -799,6 +1167,49 @@ export function createMcpConnector(): McpConnector {
         },
         tools() {
           return servers.flatMap((st) => [...st.tools.values()]);
+        },
+        /**
+         * Turn 边界恢复（mcp.md 第 4 节）：对 failed 且已过冷却的 HTTP 服务器
+         * 并行发起一次重连，最多等 TURN_RECONNECT_WAIT_MS；超时后转入后台继续，
+         * 工具仍只在 applyPendingTools() 时切换（本次边界内完成的才本次生效）。
+         * 空闲 reconcile 不经过这里，因此不会触发 Turn 外的重试。
+         */
+        async prepareTurn(signal?: AbortSignal) {
+          if (signal?.aborted) return;
+          const now = Date.now();
+          const targets = servers.filter(
+            (st) =>
+              st.cfg.type === "http" &&
+              st.state === "failed" &&
+              !st.closed &&
+              (st.retryAt === undefined || st.retryAt <= now),
+          );
+          if (targets.length === 0) return;
+          // 并发共享同一次尝试（st.restarting）；失败已由 ensureClient 记 failed/冷却
+          const attempts = Promise.all(
+            targets.map((st) => ensureClient(scope, st).catch(() => undefined)),
+          ).then(() => undefined);
+          void attempts.catch(() => undefined);
+          let timer: NodeJS.Timeout | undefined;
+          const waited = new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, TURN_RECONNECT_WAIT_MS);
+            timer.unref();
+          });
+          let onAbort: (() => void) | undefined;
+          const aborted = new Promise<void>((resolve) => {
+            if (signal === undefined) return;
+            onAbort = () => {
+              resolve();
+            };
+            if (signal.aborted) resolve();
+            else signal.addEventListener("abort", onAbort, { once: true });
+          });
+          try {
+            await Promise.race([attempts, waited, aborted]);
+          } finally {
+            clearTimeout(timer);
+            if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+          }
         },
         status() {
           return servers.map(statusOf);

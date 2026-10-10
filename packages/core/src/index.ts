@@ -2263,6 +2263,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                   aborted: signal.aborted,
                 });
               }
+              // Turn 边界恢复尝试（mcp.md 第 4 节）：对 failed 且已过冷却的 HTTP
+              // 服务器并行重连一次，最多等 3 秒，超时后台继续；工具仍由随后的
+              // awaitMcpIdle → applyPendingTools 在本次边界统一切换。
+              if (!signal.aborted) await mcpSession?.prepareTurn?.(signal);
               if (!signal.aborted) await awaitMcpIdle(signal);
             },
             skills: catalog,

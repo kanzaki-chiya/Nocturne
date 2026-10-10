@@ -20,7 +20,7 @@ MVP 中会话同一时间只有一个 Turn。Turn 进行中再次 `submit` 会�
 runTurn(session, input, signal):
   emit turn.started, message.user(input)
   hooks?.run("TurnStart", { text: input })          # Phase 5，可选；block → return finish("error", hook_blocked)
-  prepareTools?.(signal)                          # 可选工具边界准备；运行时在此等待初始 MCP 并切换暂存工具，子会话和压缩不注入
+  prepareTools?.(signal)                          # 可选工具边界准备；运行时在此等待初始 MCP、调用 prepareTurn 恢复并切换暂存工具（见 mcp.md §4），子会话和压缩不注入
   step = 0
 
   loop:

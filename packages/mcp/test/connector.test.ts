@@ -256,6 +256,27 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
     }
   });
 
+  it("stdio 每会话只允许重连三次，成功不清零，第四次不再 spawn", async () => {
+    const { session } = await openFake();
+    const spawn = vi.spyOn(platform.process, "spawnPipe");
+    try {
+      for (let i = 1; i <= 3; i++) {
+        await call(getTool(session, "mcp__fake__crash"), {});
+        expect((await call(getTool(session, "mcp__fake__echo"), {})).status).toBe("ok");
+        expect(session.status()[0]?.restarts).toBe(i);
+      }
+      await call(getTool(session, "mcp__fake__crash"), {});
+      const before = spawn.mock.calls.length;
+      const result = await call(getTool(session, "mcp__fake__echo"), {});
+      expect(result.status === "error" && result.error?.code).toBe("mcp_unavailable");
+      expect(result.modelContent).toContain("达到上限");
+      expect(spawn.mock.calls).toHaveLength(before);
+    } finally {
+      spawn.mockRestore();
+      await session.close();
+    }
+  }, 15_000);
+
   it("子进程只拿到白名单环境（NOCTURNE_* / API Key 不可见），显式 env 叠加生效", async () => {
     process.env.NOCTURNE_TEST_SECRET = "should-not-leak";
     process.env.NOCTURNE_TEST_VISIBLE = "visible-value";

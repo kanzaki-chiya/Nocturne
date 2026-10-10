@@ -36,7 +36,10 @@ const tool: ToolDefinition = {
   execute: async () => ({ status: "ok", modelContent: "ok" }),
 };
 
-async function fixture(handler?: ConstructorParameters<typeof FakeProvider>[0]["handler"]) {
+async function fixture(
+  handler?: ConstructorParameters<typeof FakeProvider>[0]["handler"],
+  recover = false,
+) {
   const root = await mkdtemp(path.join(tmpdir(), "nct-mcp-startup-"));
   roots.push(root);
   const gate = deferred<boolean>();
@@ -44,6 +47,7 @@ async function fixture(handler?: ConstructorParameters<typeof FakeProvider>[0]["
   let state: "starting" | "ready" | "failed" = "starting";
   let staged = false;
   let applied = false;
+  let prepareCalls = 0;
   let scope: Parameters<McpConnector["open"]>[0] | undefined;
   const provider = new FakeProvider({
     handler,
@@ -85,6 +89,15 @@ async function fixture(handler?: ConstructorParameters<typeof FakeProvider>[0]["
           }
         },
         status: () => [{ name: "slow", state, toolCount: 0, restarts: 0 }],
+        ...(recover
+          ? {
+              prepareTurn: async () => {
+                prepareCalls++;
+                state = "ready";
+                staged = true;
+              },
+            }
+          : {}),
         tools: () => (applied ? [tool] : []),
         reconcile: async () => undefined,
         applyPendingTools: () => {
@@ -109,6 +122,7 @@ async function fixture(handler?: ConstructorParameters<typeof FakeProvider>[0]["
     provider,
     gate,
     waited,
+    prepareCalls: () => prepareCalls,
     scope: () => scope,
     stage: () => {
       state = "ready";
@@ -175,6 +189,21 @@ it("启动失败解除首 Turn 等待，不注册工具，警告保持", async (
     { level: "warning", code: "mcp_server_failed", message: "slow failed" },
   ]);
   await session.close();
+});
+
+it("每个主 Turn 调用 prepareTurn，恢复工具在首次请求前应用", async () => {
+  const f = await fixture(undefined, true);
+  const session = await f.runtime.createSession({ model: "fake/fake-1" });
+  f.gate.resolve(false);
+  try {
+    expect(await session.submit({ text: "first" })).toBe("done");
+    expect(f.prepareCalls()).toBe(1);
+    expect(f.provider.requests[0]?.tools.some((t) => t.name === tool.name)).toBe(true);
+    expect(await session.submit({ text: "second" })).toBe("done");
+    expect(f.prepareCalls()).toBe(2);
+  } finally {
+    await session.close();
+  }
 });
 
 it("Turn 进行中才就绪的工具保持暂存，本轮请求不变、下一 Turn 出现", async () => {

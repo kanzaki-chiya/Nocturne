@@ -223,7 +223,7 @@ describe("Streamable HTTP 和探测", () => {
       await fixture.close();
     }
   });
-  it("同源重定向跟随，网络断开不自动重连", async () => {
+  it("同源重定向跟随，网络断开重连失败后冷却", async () => {
     const fixture = await httpFixture();
     const session = await createMcpConnector().open(scope(cfg(`${fixture.url}/same`)));
     try {

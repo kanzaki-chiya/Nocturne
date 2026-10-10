@@ -15,7 +15,7 @@ Nocturne 作为 MCP **客户端**接入外部 MCP 服务器：把服务器提供
 | 传输 | 本阶段 | 理由 |
 |---|---|---|
 | **stdio**（子进程 + 换行分隔 JSON-RPC） | **做** | Coding Agent 场景的绝对主流形态（`npx`/`uvx`/本地脚本）；进程生命周期由 platform 统一管理，崩溃清理、进程树终止与 `shell` 工具同一套保证 |
-| Streamable HTTP（远程服务器） | **做** | SDK 1.30.0 的 `StreamableHTTPClientTransport`，支持静态请求头和凭据库引用；不做 OAuth、旧版 SSE 和自动重连（ADR-0047） |
+| Streamable HTTP（远程服务器） | **做** | SDK 1.30.0 的 `StreamableHTTPClientTransport`，支持静态请求头、凭据库引用和失败后自动重连；不做 OAuth 和旧版 SSE（ADR-0047） |
 | SSE（旧版 HTTP+SSE） | 不做 | 已被 Streamable HTTP 取代，不为已废弃传输投入 |
 
 stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行 `spawn`，进程管理绕过 platform）：`packages/mcp` 实现一个符合 SDK `Transport` 接口的自定义传输，底层走 platform 新增的 `spawnPipe` 能力（第 8 节），从而获得与 `shell` 一致的进程树终止（Windows `taskkill /T /F`、POSIX 进程组）与 `windowsHide` 行为。
@@ -67,7 +67,7 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 
 ## 4. 服务器生命周期
 
-HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；停止时有 session id 先 DELETE，再关闭传输。使用 Node 内置 fetch，遵循入口 `configureEnvProxy()` 的全局代理。fetch 注入点逐跳检查同源重定向，跨域拒绝为 `http_redirect`；401/403 为 `auth_required`。HTTP 不自动重连，中途请求失败或连接断开记 failed，发 `mcp.server`，在途工具调用返回错误；可停用后再启用。
+HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；停止时有 session id 先 DELETE，再关闭传输。使用 Node 内置 fetch，遵循入口 `configureEnvProxy()` 的全局代理。fetch 注入点逐跳检查同源重定向，跨域拒绝为 `http_redirect`；401/403 为 `auth_required`。HTTP 失败后自动重连，详见下方「崩溃与重连」。会话失效后重连且调用成功只发 `starting` → `ready`，不发警告；转为 `failed` 时发一次 `mcp_server_failed`，冷却期拒绝的调用不重复发警告。失败原因分类显示（如会话已失效、连接被拒绝、请求超时、HTTP 502）；诊断记录保留脱敏原始错误与 HTTP 状态码，不记录请求头或凭据。
 
 每次配置重载都对已打开会话调用 `McpSession.reconcile(servers)`。按 id 比较规范化配置与当前 stored 值的摘要：新增/启用启动，删除/停用停止，内容变化先停再启，无变化不动。空闲立即执行；Turn 内暂存到结束边界，更新注册表供下一 Turn 使用，子会话仍持父 Turn 的工具快照。广播逐会话隔离：配置已落盘，某个会话应用失败时只在该会话发 `runtime.warning(code="config_apply_failed")` 并记诊断 `session.config_apply_failed`，其余会话照常生效，请求本身不因此失败；技能、外部 agent 与服务商的广播同样处理。
 
@@ -91,6 +91,9 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 - **作用域是会话**：服务器集合由会话的 `workspaceRoot` 与信任状态决定（不同会话的项目配置可以不同），进程随会话关闭终止。同一 Runtime 下两个会话各自持有自己的服务器进程，不共享。
 - **并行启动、不阻塞打开**：McpSession.startup(signal?: AbortSignal): Promise<void> 等待所有初始启动结束，每台从开始启动算起限时 startupTimeoutMs，不从调用等待算起；中止仅停止等待，后台继续。成功工具走 staged / applyPendingTools 暂存切换路径；超时服务器记 failed、不注册工具，mcp.server 与 runtime.warning 照常发出，/mcp 可见。主 Turn 持久化用户消息后、首次请求前等待与切换；子代理与压缩不等待。关闭取消仍在启动的连接并沿用进程树清理，不等待后台启动超时。重配（`reconcile`）的等待同样可中断：Turn 开始前对 `applyMcp` 的等待（含 `prepareTools`）收到中断即放弃，Turn 以 `aborted` 结束；后台 reconcile 继续跑完，结果在下一次 Turn 边界照常应用。
 - **崩溃与重连**：进程在会话中途退出 → 状态 `crashed`，发 `mcp.server` + `runtime.warning(code="mcp_server_crashed")`；在途 `tools/call` 以 `mcp_unavailable` 失败。只有已 `ready` 的服务器断开才算崩溃：连接阶段（含重连）的关闭不算崩溃，只报一次启动失败（`failed` + `mcp_server_failed`）。**惰性重连**：对崩溃服务器的下一次调用触发一次重连尝试（重新 spawn + initialize + tools/list），成功后恢复；每个会话每台服务器至多重连 3 次，超过后记 `failed` 不再尝试——避免反复拉起一个必崩的进程。
+  - 上述崩溃与 3 次上限仅适用于 **stdio**。HTTP 的 `failed` 服务器在下一次调用时惰性重连：新建传输、不带旧 session id、重新 initialize 与 tools/list。并发调用共用一个重连 promise；次数按连续连接失败计，成功清零，不设永久上限。连接失败后冷却 **30 秒**，冷却内立即返回 `mcp_unavailable` 并说明剩余时间；冷却结束后的下一次调用再尝试。
+  - 本次调用内只对带 session id 的 HTTP 404，或明确请求尚未发出的连接阶段错误（Node fetch 错误链中的 `ECONNREFUSED`、`ENOTFOUND`、`EAI_AGAIN`、`EHOSTUNREACH`、`ENETUNREACH`）立即重连并重试一次。多地址 AggregateError 只有所有子错误均为连接阶段错误才安全重试。请求发出后超时、reset、HTTP 500 等不重试，记 `failed`，下次调用重连，避免重复副作用。
+  - 每个主 Turn 开始、`applyPendingTools()` 之前，`McpSession.prepareTurn(signal)` 对过冷却的失败 HTTP 服务器并行重连，最多等 **3 秒**；及时成功的工具本 Turn 生效，超时则后台继续、下一个 Turn 边界生效。首 Turn 的初始启动等待不变；stdio 不受影响；子会话与压缩不触发恢复等待。
 - **Runtime 关闭清理**：`session.close()` 关闭本会话全部 MCP 连接（含 `failed`/`crashed` 状态的残留进程）。**已知限制（Windows、POSIX 均适用）**：Nocturne 主进程被强杀时，无法执行主动清理；MCP 服务器的 stdin 管道会关闭。若服务器响应 EOF 自行退出，就不会残留；若服务器忽略 EOF 并继续运行，就可能成为孤儿进程。Windows 当前没有用 Job Object 绑定生命周期；POSIX 虽用独立进程组，但主进程强杀后也不会自动向该组发信号。手动清理前先核对服务器命令行及 PID：Windows 使用 `taskkill /PID <PID> /T /F`；POSIX 使用 `kill -TERM <PID>`，必要时逐一清理其子进程。真实 `nctrn` 进程与假 MCP 服务器的强杀验收见 `apps/cli/test/mcp-parent-kill.accept.mjs`；后续方案见 [roadmap](../roadmap/roadmap.md)。
 - **子会话复用（Phase 6）**：Subagent 子会话的工具集直接取父会话 `mcpSession.tools()` 的快照——同一连接、同一批服务器进程，**不为子会话启动新的 MCP 服务器**，也不做第二次 initialize（[subagent.md](subagent.md) 第 10 节）。
 - 服务器主动发来的请求（`sampling/createMessage`、`elicitation/create`、`roots/list` 等）：我们不声明对应 capability，一律回 JSON-RPC `method_not_found`；`ping` 由 SDK 自动应答。
@@ -135,7 +138,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 | `content[].type = "audio"` | 占位 `[audio <mimeType>, <N> bytes]` |
 | `structuredContent` | 进 `ToolResult.output.structured`（受 `output` 独立上限约束） |
 | `isError: true` | `status: "error"`，`error.code = "mcp_error"`，`modelContent` 为拼接出的错误文本 |
-| 传输错误 / 服务器不可用 | `error.code = "mcp_unavailable"`（崩溃、连接断开、重连失败） |
+| 传输错误 / 服务器不可用 | `error.code = "mcp_unavailable"`（崩溃、连接断开、重连失败或 HTTP 重连冷却中；冷却时说明剩余时间） |
 | 服务器返回 JSON-RPC error | `error.code = "mcp_error"`，message 带服务器给的 message |
 
 其余约定：
@@ -172,7 +175,7 @@ apps/cli:  createPlatform() → createMcpConnector(platform)（@nocturne/mcp）
            → createRuntime({ ..., mcp: connector })
 core:      wrapSession 中 options.mcp 存在时（空集合也建会话以支持热添加）
            → connector.open({ servers, cwd, workspaceRoot, sessionId, events, diagnostics })
-           → McpSession { tools(), status(), reconcile(), applyPendingTools(), close() }
+           → McpSession { startup(), prepareTurn?(), tools(), status(), reconcile(), applyPendingTools(), close() }
            → 会话注册表 = 内置 ∪ mcpSession.tools()
            → session.mcpServers() 查询；close() 时连接全部关闭
 ```

@@ -52,8 +52,8 @@
 | `tool.schema_unsupported` | tools/executor | 工具 inputSchema 无法编译，跳过本地校验：name、error；每个工具定义只记一次 |
 | `tool.attachment_failed` | tools/executor | 工具结果图片附件落盘失败：callId、name、error；成功的图片照常引用，该次调用仍恰好一个 `tool.completed`（ADR-0023） |
 | `hook.run` / `hook.done` | hooks | 点位、command、退出码、耗时、效果摘要（deny/allow/feedback 长度等）、stderr 尾部 |
-| `mcp.event` | mcp | server、state、toolCount、error |
-| `mcp.call` | mcp | server、tool、耗时、isError、结果大小 |
+| `mcp.event` | mcp | server、state、toolCount、脱敏原始 error、httpStatus（HTTP） |
+| `mcp.call` | mcp | server、tool、耗时、isError、结果大小；失败附脱敏原始 error 与 httpStatus（HTTP），重试失败附 retried |
 | `subagent.launch` / `subagent.attempt` / `subagent.done` | agent（subagent） | Phase 6：子 sessionId、`parentSessionId`/`parentCallId`、preset/tools、depth、turnIndex、status、usage、耗时（[subagent.md](subagent.md) 第 13 节） |
 | `external_agent.transcript_failed` | acp | 外部审计文件初始化或追加失败；每次调用最多一次。调用继续，结果携带 `transcriptError: true`，详细语义见 [subagent.md 第 17 节](subagent.md#17-外部-agentacp) |
 
