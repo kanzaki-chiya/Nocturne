@@ -294,6 +294,8 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
                 skills: skillSnapshot ? () => skillSnapshot : undefined,
                 depth: deps.depth + 1,
               }),
+              undefined,
+              deps.limits.timeoutMs,
             ),
           );
         }

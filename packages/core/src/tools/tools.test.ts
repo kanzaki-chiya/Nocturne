@@ -18,12 +18,15 @@ import {
   createBuiltinRegistry,
   createPolicyGate,
   createReadStateStore,
+  createTaskTool,
   createToolExecutor,
   createToolRegistry,
   readTool,
   type ExecutionScope,
   type GateOutcome,
   type PermissionGate,
+  type SubagentLauncher,
+  type ToolContext,
   type ToolDefinition,
 } from "./index.js";
 
@@ -388,6 +391,215 @@ describe("Executor 管线", () => {
     const r = await h.executor.execute(call("read", { path: "a.txt" }), h.scope);
     expect(r.status).toBe("denied");
     expect(r.stopTurn).toBe(true);
+  });
+});
+
+describe("执行器超时", () => {
+  const allowAll: PermissionGate = {
+    check: (subjects) =>
+      Promise.resolve({
+        subjects,
+        decision: { action: "allow", source: "rule", reason: "test" },
+      }),
+    checkLexical: () => "allow",
+  };
+
+  /** 等 ctx.signal 中止并记录耗时的探针工具（中止后抛错走执行器结算） */
+  const abortProbe = (
+    traits: ToolDefinition["traits"],
+    properties?: Record<string, unknown>,
+  ): { tool: ToolDefinition; elapsed: () => number } => {
+    let ms = -1;
+    return {
+      elapsed: () => ms,
+      tool: {
+        name: "probe",
+        description: "x",
+        inputSchema: {
+          type: "object",
+          ...(properties !== undefined ? { properties } : {}),
+        },
+        traits,
+        permissionSubjects: () => [],
+        execute(_input, ctx) {
+          const start = Date.now();
+          return new Promise((_resolve, reject) => {
+            ctx.signal.addEventListener("abort", () => {
+              ms = Date.now() - start;
+              reject(new Error("aborted"));
+            });
+          });
+        },
+      },
+    };
+  };
+
+  const timeoutInput = { timeoutMs: { type: "integer", minimum: 1 } };
+  const errorPayload = (h: Harness): { code?: string; message?: string } =>
+    (completedOf(h)[0]?.payload.error ?? {}) as { code?: string; message?: string };
+
+  it("声明 timeoutMs 输入且 maxTimeoutMs 更大时，输入值大于默认值可生效", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    const probe = abortProbe(
+      { mutates: false, concurrencySafe: true, timeoutMs: 120, maxTimeoutMs: 5_000 },
+      timeoutInput,
+    );
+    const registry = createToolRegistry();
+    registry.register(probe.tool);
+    const r = await createToolExecutor(registry).execute(
+      call("probe", { timeoutMs: 300 }),
+      h.scope,
+    );
+    expect(r.status).toBe("error");
+    // 中止在输入 300ms + 执行器余量处，而非默认 120ms 处
+    expect(probe.elapsed()).toBeGreaterThanOrEqual(1_200);
+    expect(errorPayload(h).code).toBe("timeout");
+    expect(errorPayload(h).message).toContain("300ms");
+  });
+
+  it("输入值超过 maxTimeoutMs 时按上限封顶", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    const probe = abortProbe(
+      { mutates: false, concurrencySafe: true, timeoutMs: 80, maxTimeoutMs: 300 },
+      timeoutInput,
+    );
+    const registry = createToolRegistry();
+    registry.register(probe.tool);
+    const r = await createToolExecutor(registry).execute(
+      call("probe", { timeoutMs: 60_000 }),
+      h.scope,
+    );
+    expect(r.status).toBe("error");
+    // 生效值被夹到 300ms（+余量 ~1300ms），不会真等 60s
+    expect(probe.elapsed()).toBeGreaterThanOrEqual(1_200);
+    expect(probe.elapsed()).toBeLessThan(10_000);
+    expect(errorPayload(h).code).toBe("timeout");
+    expect(errorPayload(h).message).toContain("300ms");
+  });
+
+  it("inputSchema 未声明 timeoutMs 的工具不受该输入影响", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    const probe = abortProbe({
+      mutates: false,
+      concurrencySafe: true,
+      timeoutMs: 150,
+      maxTimeoutMs: 5_000,
+    });
+    const registry = createToolRegistry();
+    registry.register(probe.tool);
+    const r = await createToolExecutor(registry).execute(call("probe", { timeoutMs: 10 }), h.scope);
+    expect(r.status).toBe("error");
+    // 输入被忽略，生效的仍是默认 150ms（而非 10ms）
+    expect(probe.elapsed()).toBeGreaterThanOrEqual(1_050);
+    expect(errorPayload(h).code).toBe("timeout");
+    expect(errorPayload(h).message).toContain("150ms");
+  });
+
+  it("未声明 maxTimeoutMs 的工具不受 timeoutMs 输入影响", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    const probe = abortProbe(
+      { mutates: false, concurrencySafe: true, timeoutMs: 150 },
+      timeoutInput,
+    );
+    const registry = createToolRegistry();
+    registry.register(probe.tool);
+    const r = await createToolExecutor(registry).execute(call("probe", { timeoutMs: 10 }), h.scope);
+    expect(r.status).toBe("error");
+    expect(probe.elapsed()).toBeGreaterThanOrEqual(1_050);
+    expect(errorPayload(h).code).toBe("timeout");
+    expect(errorPayload(h).message).toContain("150ms");
+  });
+
+  it("task：内置子代理路径输入 timeoutMs 大于 traits 默认值时不在默认值处中止", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    let forwarded: number | undefined;
+    let ms = -1;
+    const launcher: SubagentLauncher = {
+      launch(request, ctx) {
+        forwarded = request.timeoutMs;
+        const start = Date.now();
+        return new Promise((resolve) => {
+          ctx.signal.addEventListener("abort", () => {
+            ms = Date.now() - start;
+            resolve({ status: "error", error: { code: "timeout", message: "子代理超时" } });
+          });
+        });
+      },
+    };
+    const task = createTaskTool(launcher);
+    const registry = createToolRegistry();
+    registry.register({ ...task, traits: { ...task.traits, timeoutMs: 100 } });
+    const r = await createToolExecutor(registry).execute(
+      call("task", { task: "x", timeoutMs: 800 }),
+      h.scope,
+    );
+    expect(forwarded).toBe(800);
+    // 中止在 800+余量 处，而非 traits.timeoutMs=100 处
+    expect(ms).toBeGreaterThanOrEqual(1_600);
+    expect(r.status).toBe("error");
+    expect(errorPayload(h).code).toBe("timeout");
+  });
+
+  it("task：外部 agent 路径输入 timeoutMs 大于 traits 默认值时不在默认值处中止", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    let forwarded: number | undefined;
+    let ms = -1;
+    const external = {
+      agents: [{ name: "offline", description: "x" }],
+      run(
+        request: { agent: string; task: string; timeoutMs?: number },
+        ctx: ToolContext,
+      ): Promise<{
+        status: "error";
+        modelContent: string;
+        error: { code: string; message: string };
+      }> {
+        forwarded = request.timeoutMs;
+        const start = Date.now();
+        return new Promise((resolve) => {
+          ctx.signal.addEventListener("abort", () => {
+            ms = Date.now() - start;
+            resolve({
+              status: "error",
+              modelContent: "外部 agent 超时",
+              error: { code: "timeout", message: "外部 agent 超时" },
+            });
+          });
+        });
+      },
+    };
+    const task = createTaskTool(undefined, external);
+    const registry = createToolRegistry();
+    registry.register({ ...task, traits: { ...task.traits, timeoutMs: 100 } });
+    const r = await createToolExecutor(registry).execute(
+      call("task", { task: "x", agent: "offline", timeoutMs: 800 }),
+      h.scope,
+    );
+    expect(forwarded).toBe(800);
+    expect(ms).toBeGreaterThanOrEqual(1_600);
+    expect(r.status).toBe("error");
+    expect(errorPayload(h).code).toBe("timeout");
+  });
+
+  it("task：输入 timeoutMs 超过 maxTimeoutMs 时封顶后转发给 launcher", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    let forwarded: number | undefined;
+    const launcher: SubagentLauncher = {
+      launch(request) {
+        forwarded = request.timeoutMs;
+        return Promise.resolve({
+          status: "error",
+          error: { code: "x", message: "x" },
+        });
+      },
+    };
+    const registry = createToolRegistry();
+    registry.register(createTaskTool(launcher));
+    await createToolExecutor(registry).execute(
+      call("task", { task: "x", timeoutMs: 9_000_000 }),
+      h.scope,
+    );
+    expect(forwarded).toBe(3_600_000);
   });
 });
 

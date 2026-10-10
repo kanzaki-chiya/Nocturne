@@ -85,6 +85,31 @@ function aborted(signal: AbortSignal): boolean {
   return signal.aborted;
 }
 
+/**
+ * 执行器兜底计时器在生效超时上再加的小余量：让工具自带的超时
+ * （task 的 launcher/connector、shell 的 spawn、MCP 的 callTool）先触发、
+ * 给出更具体的超时说明；工具不响应 signal 时才轮到执行器结算。
+ */
+const EXECUTOR_TIMEOUT_GRACE_MS = 1_000;
+
+/**
+ * 读取输入里的超时覆盖（tool-api.md 第 1 节）：声明 traits.maxTimeoutMs
+ * 即「可由输入覆盖」；输入字段固定为 inputSchema 里声明的 timeoutMs，
+ * 值为正整数时取 min(输入值, maxTimeoutMs)，否则由 traits.timeoutMs 兜底。
+ * 未声明 maxTimeoutMs 的工具（shell、MCP 包装等）不受输入影响——
+ * 它们的超时由工具自己的计时器实现，执行器只留兜底。
+ */
+function timeoutMsOverrideOf(tool: ToolDefinition, input: unknown): number | undefined {
+  if (tool.traits.maxTimeoutMs === undefined) return undefined;
+  const properties = (tool.inputSchema as { properties?: Record<string, unknown> }).properties;
+  if (properties?.timeoutMs === undefined) return undefined;
+  const requested = (input as { timeoutMs?: unknown }).timeoutMs;
+  if (typeof requested !== "number" || !Number.isInteger(requested) || requested <= 0) {
+    return undefined;
+  }
+  return Math.min(requested, tool.traits.maxTimeoutMs);
+}
+
 export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
   return {
     async execute(call: ToolCallRef, scope: ExecutionScope): Promise<ToolExecution> {
@@ -397,11 +422,10 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       );
 
       // 7. 执行（AbortSignal 传播到工具；超时并入口径）
-      const timeoutMs = Math.min(
-        tool.traits.timeoutMs,
-        tool.traits.maxTimeoutMs ?? tool.traits.timeoutMs,
-      );
-      const timeoutSignal = AbortSignal.timeout(timeoutMs);
+      // 生效超时：可由输入覆盖时取输入值（封顶 maxTimeoutMs），否则取声明默认值；
+      // 兜底计时器在生效值外加余量，让工具自带的超时先触发。
+      const timeoutMs = timeoutMsOverrideOf(tool, input) ?? tool.traits.timeoutMs;
+      const timeoutSignal = AbortSignal.timeout(timeoutMs + EXECUTOR_TIMEOUT_GRACE_MS);
       const combined = AbortSignal.any([scope.signal, timeoutSignal]);
       // ADR-0032：提问通道注入（与 gate 同手法）——工具只见 askUser 能力；
       // 缺省该字段时声明 needsUser 的工具按 not_interactive 结算

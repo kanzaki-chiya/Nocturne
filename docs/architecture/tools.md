@@ -50,6 +50,11 @@ execute(call, ctx):
                       先经 Hook 与 smart 审查，仍 ask 时发出 permission.requested，等待客户端回复（可被中断）
   6. 开始      emit tool.started（含解析后的 subjects 与权限决定），写入成功后才继续
   7. 执行      tool.execute(input, ctx)，ctx.subjects = 已批准的解析结果，携带 AbortSignal 与超时
+               生效超时：工具同时声明 maxTimeoutMs 与 inputSchema 的 timeoutMs 时，输入正
+               整数覆盖默认值（封顶 maxTimeoutMs）；其余情况用 traits.timeoutMs
+               （tool-api.md 第 1 节）。执行器计时器只是兜底，取生效值 + 1s 余量，
+               让工具自带计时器（launcher、connector、spawn、callTool）先触发、
+               给出更具体的超时说明；工具不响应 signal 时才轮到执行器结算
                工具抛出的异常 → error(code="tool_failed")；超时 → error(code="timeout")
   7.5 PostToolUse Hook  见 hooks.md：feedback 追加进 modelContent（参与第 8 步预算）
   8. 归一化    按结果预算截断模型可见内容；保留结构化输出供客户端渲染
@@ -80,7 +85,7 @@ execute(call, ctx):
 
 ## 5. 超时、中断与并发
 
-- 每个工具声明默认超时；`shell` 允许调用方在上限内指定超时。
+- 每个工具声明默认超时；同时声明 `maxTimeoutMs` 并在 `inputSchema` 中声明整数 `timeoutMs` 的工具（`shell`、`task`）允许调用方在上限内指定超时，读取规则见第 2 节第 7 步；未声明的工具不受该输入影响。
 - 中断信号来自 Turn 的 `AbortController`。工具应尽快停止；超过宽限期后执行器放弃等待并记为 `cancelled`。`shell` 尝试终止整个进程树（Windows 与 POSIX 的实现不同，由 `platform` 负责）；Nocturne 自身异常退出时子进程是否随之结束不作保证，见 [sessions.md](sessions.md) 第 6 节。
 - **各平台进程树终止**：Windows 用 `taskkill /pid <pid> /T /F` 终止整棵树；POSIX 在 `spawn` 时以 `detached: true` 使子进程成为进程组组长，用 `kill(-pid, SIGKILL)` 整组终止。正常中断与主进程被强杀是不同场景；后者对 MCP 服务器的已知限制见 [mcp.md](mcp.md) 第 4 节。
 - 工具声明 `concurrencySafe`。MVP 串行执行所有调用；以后可以并行执行连续的 `concurrencySafe` 调用，不需要修改工具。

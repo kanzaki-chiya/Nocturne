@@ -775,7 +775,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     maxConcurrent: options.subagent?.maxConcurrent ?? 4,
     maxStepsPerTurn: options.subagent?.maxStepsPerTurn ?? 50,
     maxAttempts: options.subagent?.maxAttempts ?? 3,
-    timeoutMs: options.subagent?.timeoutMs ?? 600_000,
+    // 默认 600_000，上限 3_600_000（subagent.md 第 3 节）；同时是 task 的
+    // traits.timeoutMs——执行器兜底与 launcher 计时器共用同一个值
+    timeoutMs: Math.min(Math.max(options.subagent?.timeoutMs ?? 600_000, 1), 3_600_000),
   };
   const subagentLimiter = createSubagentLimiter(subagentLimits.maxConcurrent);
 
@@ -1807,7 +1809,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               },
             }
           : undefined;
-      tools.register(createTaskTool(launcher, externalRunner));
+      tools.register(createTaskTool(launcher, externalRunner, subagentLimits.timeoutMs));
     };
     const applyExternalAgents = (): void => {
       if (!pendingExternalAgents) return;

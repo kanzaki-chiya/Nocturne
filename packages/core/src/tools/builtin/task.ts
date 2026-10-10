@@ -32,6 +32,10 @@ interface TaskInput {
   timeoutMs?: number;
 }
 
+/** task 默认/上限超时（subagent.md 第 1 节）；默认值可被 RuntimeOptions.subagent.timeoutMs 覆盖 */
+const TASK_DEFAULT_TIMEOUT_MS = 600_000;
+const TASK_MAX_TIMEOUT_MS = 3_600_000;
+
 const schemas = createSchemaCompiler({ strict: false });
 
 const DESCRIPTION =
@@ -58,6 +62,7 @@ interface ExternalTaskRunner {
 export function createTaskTool(
   launcher?: SubagentLauncher,
   externalAgents?: ExternalTaskRunner,
+  defaultTimeoutMs: number = TASK_DEFAULT_TIMEOUT_MS,
 ): ToolDefinition<TaskInput> {
   const agents = externalAgents?.agents ?? [];
   const hasExternalAgents = agents.length > 0;
@@ -93,6 +98,8 @@ export function createTaskTool(
     modelContent: message,
     error: { code: "invalid_input", message },
   });
+  /** 实际生效的默认超时（装配可经 RuntimeOptions.subagent.timeoutMs 覆盖），不超过上限 */
+  const effectiveDefaultTimeoutMs = Math.min(defaultTimeoutMs, TASK_MAX_TIMEOUT_MS);
 
   return {
     name: "task",
@@ -141,8 +148,7 @@ export function createTaskTool(
         timeoutMs: {
           type: "integer",
           minimum: 1,
-          description:
-            "本次调用超时上限（毫秒）；省略时使用默认值 600000（10 分钟）。实现、修改代码类任务不要设置短于默认值；只有确定很快的查询才设置更短的值。",
+          description: `本次调用超时上限（毫秒）；省略即默认 ${effectiveDefaultTimeoutMs}；实现、修改代码、审查、调研类任务都不要设短于默认值的超时，只有确定很快的查询才缩短；上限 ${TASK_MAX_TIMEOUT_MS}。`,
         },
       },
       additionalProperties: false,
@@ -152,8 +158,8 @@ export function createTaskTool(
     traits: {
       mutates: true,
       concurrencySafe: false,
-      timeoutMs: 600_000,
-      maxTimeoutMs: 3_600_000,
+      timeoutMs: effectiveDefaultTimeoutMs,
+      maxTimeoutMs: TASK_MAX_TIMEOUT_MS,
       maxModelChars: 30_000,
     },
     validateInput,
@@ -171,12 +177,16 @@ export function createTaskTool(
     async execute(input: TaskInput, ctx: ToolContext): Promise<ToolResult> {
       const invalidReason = validateInput(input);
       if (invalidReason !== undefined) return invalid(invalidReason);
+      // 输入的超时上限封顶 maxTimeoutMs 后再交给下层计时器，使
+      // launcher/connector 自己的计时器与执行器的兜底一致（都先触发于生效值）
+      const timeoutMs =
+        input.timeoutMs === undefined ? undefined : Math.min(input.timeoutMs, TASK_MAX_TIMEOUT_MS);
       if (input.agent !== undefined && externalAgents !== undefined) {
         return externalAgents.run(
           {
             agent: input.agent,
             task: input.task,
-            ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+            ...(timeoutMs !== undefined ? { timeoutMs } : {}),
           },
           ctx,
         );
@@ -188,7 +198,7 @@ export function createTaskTool(
           ...(input.preset !== undefined ? { preset: input.preset } : {}),
           ...(input.tools !== undefined ? { tools: input.tools } : {}),
           ...(input.outputSchema !== undefined ? { outputSchema: input.outputSchema } : {}),
-          ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+          ...(timeoutMs !== undefined ? { timeoutMs } : {}),
         },
         ctx,
       );
