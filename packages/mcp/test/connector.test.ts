@@ -3,6 +3,7 @@
  * 正常调用 / isError / 超时 / 崩溃与惰性重连 / list_changed 暂存 /
  * 环境白名单。
  */
+import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -298,6 +299,81 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
       expect(st?.state).toBe("failed");
       expect(st?.error).toBeDefined();
       expect(warnings.some((w) => w.code === "mcp_server_failed")).toBe(true);
+    } finally {
+      await session.close();
+    }
+  });
+});
+
+/** 取一个当前没有监听的本机端口：先占用再释放 */
+async function unusedPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (address === null || typeof address === "string") throw new Error("未取得端口");
+  return address.port;
+}
+
+async function openWith(cfg: McpServerConfig): Promise<Opened> {
+  const servers: McpServerPayload[] = [];
+  const warnings: { code: string; message: string }[] = [];
+  const session = await createMcpConnector().open({
+    servers: [cfg],
+    cwd,
+    workspaceRoot: cwd,
+    sessionId: "connect-close",
+    platform,
+    emitServer: (p) => servers.push(p),
+    warn: (code, message) => warnings.push({ code, message }),
+  });
+  await session.startup();
+  return { session, servers, warnings };
+}
+
+describe("连接阶段的关闭只报一次启动失败", () => {
+  it("HTTP 端口无监听：只有一条 mcp_server_failed，最终 failed，无 mcp_server_crashed", async () => {
+    const port = await unusedPort();
+    const { session, servers, warnings } = await openWith({
+      name: "offline",
+      origin: "user",
+      type: "http",
+      url: `http://127.0.0.1:${port}/mcp`,
+      startupTimeoutMs: 5_000,
+    });
+    try {
+      expect(warnings.map((w) => w.code)).toEqual(["mcp_server_failed"]);
+      expect(servers.map((s) => s.state)).toEqual(["starting", "failed"]);
+      expect(session.status()[0]?.state).toBe("failed");
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("stdio 进程启动阶段退出：只有一条 mcp_server_failed，无 mcp_server_crashed", async () => {
+    const { session, servers, warnings } = await openWith({
+      name: "early-exit",
+      origin: "user",
+      command: process.execPath,
+      args: ["-e", "process.exit(1)"],
+      startupTimeoutMs: 5_000,
+    });
+    try {
+      expect(warnings.map((w) => w.code)).toEqual(["mcp_server_failed"]);
+      expect(servers.map((s) => s.state)).toEqual(["starting", "failed"]);
+      expect(session.status()[0]?.state).toBe("failed");
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("已 ready 的服务器断开照常报 mcp_server_crashed", async () => {
+    const { session, servers, warnings } = await openFake();
+    try {
+      await call(getTool(session, "mcp__fake__crash"), {});
+      await vi.waitFor(() => expect(session.status()[0]?.state).toBe("crashed"));
+      expect(warnings.map((w) => w.code)).toEqual(["mcp_server_crashed"]);
+      expect(servers.map((s) => s.state)).toEqual(["starting", "ready", "crashed"]);
     } finally {
       await session.close();
     }

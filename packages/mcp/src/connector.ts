@@ -324,9 +324,10 @@ async function connectServer(scope: McpOpenScope, st: Server): Promise<void> {
   const client = new Client({ name: CLIENT_NAME, version: CLIENT_VERSION }, { capabilities: {} });
   const runtime: ServerRuntime = { proc, transport, client };
   st.runtime = runtime;
-  // 进程退出/管道关闭即视为崩溃；st.runtime 换防后旧 runtime 的 close 不生效
+  // 已 ready 的进程退出/管道关闭才视为崩溃；st.runtime 换防后旧 runtime 的 close 不生效。
+  // 连接阶段的关闭交给下方 catch 统一报一次启动失败，不再另报崩溃（mcp.md 第 4 节）
   transport.onclose = () => {
-    if (st.runtime !== runtime || st.closed) return;
+    if (st.runtime !== runtime || st.closed || st.state !== "ready") return;
     st.state = st.cfg.type === "http" ? "failed" : "crashed";
     st.error = "进程已退出或管道已关闭";
     scope.emitServer({ name: st.cfg.name, state: st.state, error: st.error });
