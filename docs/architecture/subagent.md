@@ -56,7 +56,7 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 | `invalid_input` | `outputSchema` 无法编译、`tools` 含未知名、`preset` 与 `tools` 同给 |
 | `subagent_unavailable` | 运行时未启用本特性（正常装配下工具不注册，此为防御分支） |
 
-`cancelled`/`timeout` 由执行器统一结算（中断与超时信号语义不变）；`permission_denied`/`hook_denied` 由父侧权限管线产生——`task` 调用本身与其他工具一样先过主体声明与权限求值。
+`cancelled`/`timeout` 由执行器或 launcher 按中止信号来源结算（第 4 节：父会话中断 → `cancelled`，本次 task 超时 → `timeout`）；`permission_denied`/`hook_denied` 由父侧权限管线产生——`task` 调用本身与其他工具一样先过主体声明与权限求值。
 
 ## 2. 结束协议（`finish` 工具与催促）
 
@@ -128,11 +128,11 @@ launch(request, ctx)
   → 返回 SubagentOutcome
 ```
 
-**中断传播**：子 Turn 的 signal 是 `AbortSignal.any([ctx.signal, 父会话 failedSignal, 子会话 failedSignal])`——父会话中断/工具超时/任一侧持久化失败都会取消子会话。launcher 等到子 Turn 实际收束（子日志写下 `turn.completed(reason="aborted")`）后才返回，保证子日志自洽；父侧这次 `task` 调用随后由执行器按 `cancelled`/`timeout` 结算。
+**中断传播**：子 Turn 的 signal 是 `AbortSignal.any([ctx.signal, launcher 超时计时器, 父会话 failedSignal, 子会话 failedSignal])`——父会话中断/本次调用超时/任一侧持久化失败都会取消子会话。launcher 等到子 Turn 实际收束（子日志写下 `turn.completed(reason="aborted")`）后才返回，保证子日志自洽。
 
 **恰好一个 `tool.completed`**：`launch` 只被 `task.execute` 调用一次、只返回一次；无论子会话内部经历了多少轮/多少工具，父日志中这次调用的事件序列与普通工具完全一致（`tool.started` → `tool.completed`；期间的子会话进度以 `tool.progress` 临时事件呈现，见第 12 节）。子会话的所有事实都写在子日志里，父日志不记录子会话内部事件。
 
-**出错、超时、超步数**：子 Turn 的 `turn.completed` reason 映射为结果——`done` 且有 `finish` → `ok`；`done` 无 `finish` → 进入催促；`error`/`max_steps`/`truncated`/`refused` → `subagent_turn_failed`；信号中止 → 执行器结算 `cancelled`/`timeout`（不占用 `subagent_*` 错误码）。子会话创建失败、`close` 抛错等内部异常 → `tool_failed`（执行器既有兜底）。
+**出错、超时、超步数**：子 Turn 的 `turn.completed` reason 映射为结果——`done` 且有 `finish` → `ok`；`done` 无 `finish` → 进入催促；`error`/`max_steps`/`truncated`/`refused` → `subagent_turn_failed`；`aborted` 按中止信号来源结算：父会话中断（`ctx.signal` 非超时中止）→ `cancelled`，本次 task 超时（launcher 自己的计时器，或经 `ctx.signal` 传入的执行器超时信号，reason 为 `TimeoutError`）→ `timeout` 并附「超过 Nms 未完成 + 可能已修改工作区请先检查 git status + 只读审查/调研任务也不要设短于默认值的超时」提示，父/子日志 `failedSignal` 中止 → `subagent_turn_failed`。`timeout`/`cancelled` 与 `subagent_turn_failed` 一样附 `tailTextOf`/`statsOf`（子会话路径、已完成步数、最后一段文字）。子会话创建失败、`close` 抛错等内部异常 → `tool_failed`（执行器既有兜底）。
 
 ## 5. 会话与持久化
 

@@ -220,6 +220,11 @@ function tailTextOf(session: Session): string | undefined {
   return undefined;
 }
 
+/** 执行器的超时经 AbortSignal.any 传入 ctx.signal 后 reason 仍是 TimeoutError（与 ACP connector 同一判定） */
+function timeoutAbort(signal: AbortSignal): boolean {
+  return signal.aborted && signal.reason instanceof Error && signal.reason.name === "TimeoutError";
+}
+
 function usageOf(session: Session): Usage | undefined {
   const usage = session.state().usage;
   return usage.inputTokens > 0 || usage.outputTokens > 0 ? usage : undefined;
@@ -403,9 +408,12 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         // 催促循环：done 且无 finish → 再开一轮催促；最后一轮 toolChoice 强制
         const maxAttempts = deps.limits.maxAttempts;
         const timeoutMs = request.timeoutMs ?? deps.limits.timeoutMs;
+        // launcher 自己的超时计时器单独持有：Turn 以 aborted 结束时按
+        // signal.aborted 区分「本次超时」与「父会话中断」（subagent.md 第 4 节）
+        const launchTimeoutSignal = AbortSignal.timeout(timeoutMs);
         const childSignal = AbortSignal.any([
           ctx.signal,
-          AbortSignal.timeout(timeoutMs),
+          launchTimeoutSignal,
           deps.parentFailedSignal,
           child.failedSignal,
         ]);
@@ -456,7 +464,31 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             return { status: "ok", resultText: submitted.text, stats };
           }
           if (reason !== "done") {
-            // error/max_steps/truncated/refused/failed：失败信号，不进催促循环
+            if (reason === "aborted") {
+              // 按中止信号来源结算（subagent.md 第 4 节）：本次 task 超时——
+              // launcher 自己的计时器或经 ctx.signal 传入的执行器超时——
+              // 结算 timeout；父会话中断 → cancelled；父/子日志
+              // failedSignal → subagent_turn_failed
+              if (launchTimeoutSignal.aborted || timeoutAbort(ctx.signal)) {
+                return error(
+                  "timeout",
+                  `子代理超过 ${timeoutMs}ms 未完成。它可能已修改工作区文件，请先检查 git status；` +
+                    `只读审查或调研任务也不要设短于默认值 ${deps.limits.timeoutMs}ms 的超时`,
+                  tailTextOf(child),
+                  statsOf(child, attempt),
+                );
+              }
+              if (ctx.signal.aborted) {
+                return error(
+                  "cancelled",
+                  "子会话已被父会话中断",
+                  tailTextOf(child),
+                  statsOf(child, attempt),
+                );
+              }
+            }
+            // error/max_steps/truncated/refused/failed 与 failedSignal 中止：
+            // 失败信号，不进催促循环
             return error(
               "subagent_turn_failed",
               `子会话 Turn 以 ${reason} 结束`,

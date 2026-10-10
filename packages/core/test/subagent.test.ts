@@ -536,6 +536,9 @@ describe("subagent：中断、超时与失败", () => {
     expect(taskCalls[0]?.type === "tool.completed" && taskCalls[0].payload.status).toBe(
       "cancelled",
     );
+    expect(taskCalls[0]?.type === "tool.completed" && taskCalls[0].payload.error?.code).toBe(
+      "cancelled",
+    );
     await session.close();
   });
 
@@ -697,12 +700,15 @@ describe("subagent：中断、超时与失败", () => {
     await session.close();
   });
 
-  it("子会话超时 → task 结算为 error（父侧信号未触发）", async () => {
+  it("子会话超时 → task 结算为 timeout：文案含超时建议，附日志路径/步数/尾部文本", async () => {
     const provider = new FakeProvider({
-      handler: async (req) => {
+      handler: (req) => {
         if (isChildRequest(req)) {
-          await sleep(400);
-          return doneScript();
+          // 先吐一段尾部文本再挂起：launcher 的 120ms 计时器把它掐掉
+          return [
+            { type: "text_delta", text: "写到一半的中间结论" },
+            { type: "wait", ms: 400 },
+          ];
         }
         return req.messages.some((m) => m.role === "tool")
           ? doneScript()
@@ -725,7 +731,23 @@ describe("subagent：中断、超时与失败", () => {
     const events = collect(session);
     await session.submit({ text: "go" });
     const completed = taskCompleted(events);
-    expect(completed?.type === "tool.completed" && completed.payload.status).toBe("error");
+    const err = completed?.type === "tool.completed" ? completed.payload.error : undefined;
+    expect(err?.code).toBe("timeout");
+    expect(err?.message).toContain("超过 120ms 未完成");
+    expect(err?.message).toContain("git status");
+    expect(err?.message).toContain("不要设短于默认值");
+    // 子会话路径/已完成步数走 stats output；尾部文本经 modelContent 附给父模型
+    const output =
+      completed?.type === "tool.completed"
+        ? (completed.payload.output as
+            { childSessionId?: string; childLogPath?: string; steps?: number } | undefined)
+        : undefined;
+    expect(output?.childSessionId).toBeTruthy();
+    expect(output?.childLogPath).toBeTruthy();
+    expect(output?.steps).toBe(0);
+    expect(completed?.type === "tool.completed" && completed.payload.modelContent).toContain(
+      "写到一半的中间结论",
+    );
     await session.close();
   });
 });
