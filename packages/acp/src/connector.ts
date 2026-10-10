@@ -25,7 +25,7 @@ import { probeAgent } from "./probe.js";
 import { permissionOutcome, permissionSubjects } from "./permissions.js";
 
 const CANCEL_GRACE_MS = 250;
-const CLIENT_VERSION = "0.8.0";
+const CLIENT_VERSION = "0.8.1";
 
 class AcpFailure extends Error {
   constructor(

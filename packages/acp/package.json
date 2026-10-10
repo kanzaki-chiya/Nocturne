@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/acp",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Nocturne ACP external agent connector（ADR-0049）",
   "license": "GPL-3.0-only",
   "private": true,
