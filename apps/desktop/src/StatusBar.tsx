@@ -11,6 +11,7 @@ import { sessionUsageSoFar, type SessionView } from "@nocturne/core/protocol";
 import type { ContextSummary, RpcSession } from "@nocturne/rpc/client";
 
 import { Dropdown } from "./Dropdown";
+import { unavailableMcpServers, type UnavailableMcpServer } from "./mcp-status";
 import { abbreviateHome } from "./paths";
 import { ChoiceMenu } from "./Menu";
 import type { SessionControls } from "./session-controls";
@@ -28,6 +29,8 @@ export interface StatusBarProps {
   home?: string | null;
   /** 模型菜单底部「管理服务商…」：进入设置 › 服务商 */
   onManageProviders?: () => void;
+  /** MCP 未连接标记的点击：进入设置 › MCP */
+  onManageMcp?: () => void;
 }
 
 type Report = ContextSummary["report"];
@@ -205,6 +208,74 @@ export function ContextPanel({
 
 type StatusMenu = "model" | "shell";
 
+const MCP_STATE_TEXT: Record<UnavailableMcpServer["state"], string> = {
+  starting: "启动中",
+  ready: "已连接",
+  failed: "启动失败",
+  crashed: "连接断开",
+};
+
+/** MCP 未连接标记：只在有 failed / crashed 服务器时出现；悬停或聚焦列出原因，点击进入设置 › MCP */
+function McpBadge({
+  servers,
+  onOpen,
+}: {
+  servers: UnavailableMcpServer[];
+  onOpen: (() => void) | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const tipId = useId();
+  if (servers.length === 0) return null;
+  return (
+    <span
+      className="status-mcp"
+      onMouseEnter={() => {
+        setOpen(true);
+      }}
+      onMouseLeave={() => {
+        setOpen(false);
+      }}
+    >
+      <button
+        type="button"
+        className="status-pill status-mcp-trigger"
+        aria-label={`MCP 未连接 ${servers.length}，打开 MCP 设置`}
+        aria-describedby={open ? tipId : undefined}
+        onFocus={() => {
+          setOpen(true);
+        }}
+        onBlur={() => {
+          setOpen(false);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setOpen(false);
+        }}
+        onClick={() => {
+          setOpen(false);
+          onOpen?.();
+        }}
+      >
+        <span className="status-mcp-dot" aria-hidden="true" />
+        MCP 未连接 <b className="mono">{servers.length}</b>
+      </button>
+      {open && (
+        <div id={tipId} role="tooltip" className="status-popover status-mcp-tip">
+          {servers.map((server) => (
+            <div key={server.name} className="status-mcp-row">
+              <b>{server.name}</b>
+              <span className="status-mcp-state">{MCP_STATE_TEXT[server.state]}</span>
+              {server.error !== undefined && (
+                <span className="status-mcp-error">{server.error}</span>
+              )}
+            </div>
+          ))}
+          <span className="status-note">点击打开 设置 › MCP</span>
+        </div>
+      )}
+    </span>
+  );
+}
+
 export function StatusBar({
   session,
   view,
@@ -213,6 +284,7 @@ export function StatusBar({
   onPanelChange,
   home,
   onManageProviders,
+  onManageMcp,
 }: StatusBarProps) {
   const [localPanel, setLocalPanel] = useState<StatusPanel | null>(null);
   const activePanel = panel === undefined ? localPanel : panel;
@@ -488,6 +560,7 @@ export function StatusBar({
         )}
       </div>
       <div className="status-right">
+        <McpBadge servers={unavailableMcpServers(view)} onOpen={onManageMcp} />
         {trigger(
           "context",
           "上下文用量",

@@ -117,7 +117,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `provider.retry` | ✓ | `attempt`、`maxAttempts`、`delayMs`、`error: { kind, message }` |
 | `runtime.warning` | ✓ 或 — | `code`、`message`（Phase 5 增补的 `code`：`project_config_untrusted`（含被忽略的 `mcp`/`hooks` 段）、`mcp_server_failed`、`mcp_server_crashed`、`mcp_tool_conflict`、`mcp_env_missing`、`hook_failed`、`debug_sink_failed`、`grant_persist_failed` 等；v0.2 增补 `model_capabilities_defaulted`、`provider_setup_invalid`，见 [provider-setup.md](../architecture/provider-setup.md)；ADR-0022 增补 `shell_env_invalid`（非法 `NOCTURNE_SHELL` 回退自动）、`shell_overridden`（settings 层的 shell 选择被 env/config 覆盖）；ADR-0025 增补 `provider_thinking_levels_ignored`（旧向导配置的服务商级 `thinking.levels` 已忽略，需逐模型设置）；`config_apply_failed`（配置已保存，但未能应用到该会话，见 [mcp.md](../architecture/mcp.md) 第 4 节）） |
 | `runtime.error` | ✓ 或 — | `code`、`message`（例如日志写入失败导致会话进入 `failed` 状态） |
-| `mcp.server` | — | `server`、`state: "starting" \| "ready" \| "failed" \| "crashed" \| "stopped"`、`toolCount?`、`error?`（Phase 5，MCP 服务器生命周期状态转移，见 [mcp.md](../architecture/mcp.md) 第 7 节） |
+| `mcp.server` | — | `server`、`state: "starting" \| "ready" \| "failed" \| "crashed" \| "stopped"`、`toolCount?`、`error?`（Phase 5，MCP 服务器生命周期状态转移，见 [mcp.md](../architecture/mcp.md) 第 7 节；归约进 `SessionView.mcpServers`，见 [view.md](view.md) §4） |
 
 临时事件的信息要么包含在随后的持久化事件中（增量 → 完整消息），要么是可丢弃的状态提示。客户端丢失临时事件不影响正确性。
 

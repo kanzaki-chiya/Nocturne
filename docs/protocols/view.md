@@ -58,6 +58,8 @@ interface SessionView {
   };
   /** 运行时诊断：只由临时事件产生，不可重放（§4） */
   notices: SessionNotice[];
+  /** MCP 服务器连接状态：只由临时事件 mcp.server 归约，键为服务器名，不可重放（§4） */
+  mcpServers: Record<string, McpServerViewState>;
   /** 最后一个被归约的持久事件 seq（客户端对齐/诊断用） */
   lastSeq: number;
 }
@@ -198,7 +200,7 @@ interface SessionNotice {
 
 ## 4. 临时事件归约
 
-临时事件只写瞬态字段（`status`/`retry`/`live`/`notices`/`liveOutput`），**不创建 `entries` 条目**——这是重放等价（§6）成立的前提：
+临时事件只写瞬态字段（`status`/`retry`/`live`/`notices`/`mcpServers`/`liveOutput`），**不创建 `entries` 条目**——这是重放等价（§6）成立的前提：
 
 | 事件 | 归约 |
 |---|---|
@@ -211,7 +213,17 @@ interface SessionNotice {
 | `tool.progress` | `callId` 的 entries 条目存在时，`stdout`/`stderr` 原样拼接到 `liveOutput`，允许半行；`info` 作为独立一行拼接并在视图中补换行；无条目则忽略——`progress` 不建占位，避免无支撑的幽灵工具行 |
 | `question.requested` | `pendingQuestion = { requestId, callId, questions }`（ADR-0032）；不建 entries/live 条目 |
 
-`mcp.server` 不归约（失败与崩溃经 `runtime.warning` 进入 notices）。
+| `mcp.server` | `state === "stopped"`（服务器被移除、停用或会话关闭）时删除 `mcpServers[name]`；否则 `mcpServers[name] = { state, toolCount?, error? }`，整体覆盖，同名以最新事件为准（恢复 `ready` 不残留旧 `error`） |
+
+```ts
+interface McpServerViewState {
+  state: "starting" | "ready" | "failed" | "crashed";
+  toolCount?: number;
+  error?: string;
+}
+```
+
+`mcpServers` 与 `notices` 同类：本次打开的运行态，不进持久日志，重放得到空对象。失败与崩溃另经 `runtime.warning` 进入 `notices`，供 TUI/CLI 输出；客户端按 `mcpServers` 展示当前状态（桌面端状态栏，见 [desktop.md](../apps/desktop.md) 5.4）。
 
 Phase 6 的 Subagent **不需要视图扩展**：`task` 在父会话是普通工具条目，子会话内部进度经 `tool.progress`（`stream:"info"`）一行式进入 `liveOutput`（[subagent.md](../architecture/subagent.md) 第 12 节）；子会话自身的事件写在子日志，不进父会话的事件流，V1 重放等价不受影响。
 
@@ -245,13 +257,13 @@ ask 判定
 
 **收敛点**：`currentTurn === undefined && pendingPermission === undefined && pendingQuestion === undefined && live` 为空。
 
-> **不变量 V1（重放等价）**：对任意合法事件序列 E（持久事件 + 任意交织的临时事件），在收敛点上，`reduce(E)` 与 `reduce(E.durable)` 在除 `revision`、`notices` 外的全部字段相等。
+> **不变量 V1（重放等价）**：对任意合法事件序列 E（持久事件 + 任意交织的临时事件），在收敛点上，`reduce(E)` 与 `reduce(E.durable)` 在除 `revision`、`notices`、`mcpServers` 外的全部字段相等。
 
 支撑 V1 的三条构造规则：
 
 1. `entries` 条目只能由持久事件创建/更新（§3）——`permission.reviewed`/`requested`/`resolved`/`tool.started`/`completed` 都是持久事件，两条路径产生**相同顺序相同内容**的条目；
 2. 临时事件只写瞬态区（§4），且每个瞬态字段都有归零/晋升规则：`live` 条目在持久落点到达时转入 entries（流式字段丢弃），`liveOutput` 在 `completed` 时清空，`retry` 离开 `retrying` 时清空，`status` 在 `turn.completed` 归 `idle`；
-3. `revision`、`notices` 被显式排除：`revision` 随临时事件计数，两路径必然不同；`notices` 只由临时事件产生，重放缺失是设计行为（CLI 的对应输出同样不进日志）。
+3. `revision`、`notices`、`mcpServers` 被显式排除：`revision` 随临时事件计数，两路径必然不同；`notices` 与 `mcpServers` 只由临时事件产生，重放缺失是设计行为（CLI 的对应输出同样不进日志）。
 
 重放等价允许客户端用**同一 reducer** 处理两条路径：
 
@@ -264,7 +276,7 @@ ask 判定
 
 | # | 不变量 | 验证方式 |
 |---|---|---|
-| V1 | 收敛点重放等价（§6；排除 `revision`、`notices`） | 场景矩阵 × {live 序列, 仅持久序列} 深比较 |
+| V1 | 收敛点重放等价（§6；排除 `revision`、`notices`、`mcpServers`） | 场景矩阵 × {live 序列, 仅持久序列} 深比较 |
 | V2 | 每个 `toolCalls[].callId` 恰有一条 `tool` 条目；`tool.completed` 落定且只落定一次 | 场景断言 |
 | V3 | `pendingPermission` 至多一个，且其 `requestId` 未被 `resolved`；`pendingQuestion` 至多一个，且其 `callId` 无对应 `tool.completed` | 场景断言 |
 | V4 | `entries` 顺序 = 首个支撑持久事件的 `seq` 升序；条目 `seq` 单调不降 | 场景断言 |

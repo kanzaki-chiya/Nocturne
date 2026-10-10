@@ -13,6 +13,7 @@ import { FakeProvider, ProviderError, type FakeScript } from "../src/provider/in
 import type {
   DurableEvent,
   EphemeralEvent,
+  McpServerPayload,
   PermissionRequestedPayload,
   RuntimeEvent,
   SessionView,
@@ -75,11 +76,11 @@ function liveView(events: RuntimeEvent[]): SessionView {
   return view;
 }
 
-/** 收敛点重放等价（V1）：排除 revision 与 notices（view.md §6） */
+/** 收敛点重放等价（V1）：排除 revision、notices 与 mcpServers（view.md §6） */
 function assertConvergedEqual(view: SessionView, durable: readonly DurableEvent[]): void {
   const replay = replaySessionView(durable);
   const strip = (v: SessionView) => {
-    const { revision: _r, notices: _n, ...rest } = v;
+    const { revision: _r, notices: _n, mcpServers: _m, ...rest } = v;
     return rest;
   };
   expect(strip(view)).toEqual(strip(replay));
@@ -890,4 +891,41 @@ it("审查器结算不再追加权限提示，用户结算照常追加", () => {
     expect(notices).toHaveLength(1);
     expect(notices[0]?.kind === "notice" && notices[0].message).toContain("user");
   }
+});
+
+function mcpEvent(eseq: number, payload: McpServerPayload): RuntimeEvent {
+  return { type: "mcp.server", sessionId: "s", runId: "r", eseq, afterSeq: 0, time: "t", payload };
+}
+
+it("mcp.server 归约进 mcpServers：同名以最新事件为准，stopped 移除", () => {
+  const view = createSessionView();
+  reduceSessionView(view, mcpEvent(1, { name: "exa", state: "starting" }));
+  reduceSessionView(view, mcpEvent(2, { name: "neo", state: "starting" }));
+  reduceSessionView(view, mcpEvent(3, { name: "neo", state: "failed", error: "连接失败" }));
+  reduceSessionView(view, mcpEvent(4, { name: "exa", state: "ready", toolCount: 2 }));
+  expect(view.mcpServers).toEqual({
+    exa: { state: "ready", toolCount: 2 },
+    neo: { state: "failed", error: "连接失败" },
+  });
+  // 恢复为 ready 时不残留旧的错误原因
+  reduceSessionView(view, mcpEvent(5, { name: "neo", state: "ready", toolCount: 1 }));
+  expect(view.mcpServers.neo).toEqual({ state: "ready", toolCount: 1 });
+  reduceSessionView(view, mcpEvent(6, { name: "exa", state: "stopped" }));
+  expect(Object.keys(view.mcpServers)).toEqual(["neo"]);
+});
+
+it("mcpServers 是临时状态：持久重放不产生，不参与重放等价", () => {
+  const durable: DurableEvent[] = [
+    {
+      type: "permission.resolved",
+      sessionId: "s",
+      seq: 1,
+      time: "t",
+      payload: { callId: "c", action: "allow", source: "user" },
+    },
+  ];
+  const view = liveView([mcpEvent(1, { name: "neo", state: "failed", error: "x" }), ...durable]);
+  expect(view.mcpServers).toEqual({ neo: { state: "failed", error: "x" } });
+  expect(replaySessionView(durable).mcpServers).toEqual({});
+  assertConvergedEqual(view, durable);
 });

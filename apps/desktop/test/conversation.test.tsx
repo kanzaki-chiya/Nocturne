@@ -2185,3 +2185,23 @@ describe("回答内文件引用（U-09）", () => {
     expect(rendered.methods.resolveFiles).not.toHaveBeenCalled();
   });
 });
+
+describe("会话区提示", () => {
+  it("MCP 连接状态类提示不进消息流，其他提示照常渲染", () => {
+    const view = createSessionView();
+    view.notices = [
+      { level: "warning", code: "mcp_server_crashed", message: "MCP 服务器 neo 连接断开" },
+      { level: "warning", code: "mcp_server_failed", message: "MCP 服务器 neo 启动失败" },
+      { level: "warning", code: "mcp_secret_missing", message: "MCP 服务器 neo 缺少凭据" },
+      { level: "warning", code: "mcp_env_missing", message: "MCP 服务器 neo 环境变量未定义" },
+      { level: "warning", code: "mcp_tool_conflict", message: "MCP 工具名冲突" },
+      { level: "warning", code: "mcp_tools_changed", message: "MCP 工具列表已更新" },
+      { level: "warning", code: "provider_warning", message: "响应较慢" },
+    ];
+    const { container } = mount(view);
+    const shown = [...container.querySelectorAll(".conversation-notice")].map(
+      (node) => node.textContent,
+    );
+    expect(shown).toEqual(["MCP 工具名冲突", "MCP 工具列表已更新", "响应较慢"]);
+  });
+});

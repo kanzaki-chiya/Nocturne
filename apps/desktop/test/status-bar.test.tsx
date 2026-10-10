@@ -392,3 +392,65 @@ describe("StatusBar", () => {
     expect(await screen.findByText(/Turn 3/)).toBeTruthy();
   });
 });
+
+describe("MCP 未连接标记", () => {
+  it("有 failed 服务器时出现，悬停列出名称与错误原因，点击打开 MCP 设置；ready 后消失", () => {
+    const state = fixture();
+    const onManageMcp = vi.fn();
+    const rendered = render(<StatusBar {...state} onManageMcp={onManageMcp} />);
+    expect(screen.queryByRole("button", { name: /MCP 未连接/ })).toBeNull();
+
+    const failed = {
+      ...state.view,
+      mcpServers: {
+        exa: { state: "ready" as const, toolCount: 2 },
+        "browseros-neo": {
+          state: "failed" as const,
+          error: "连接失败，请检查服务器配置、连接和凭据",
+        },
+      },
+    };
+    rendered.rerender(<StatusBar {...state} view={failed} onManageMcp={onManageMcp} />);
+    const badge = screen.getByRole("button", { name: /MCP 未连接 1/ });
+    expect(badge.textContent).toBe("MCP 未连接 1");
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    fireEvent.mouseEnter(badge);
+    const tip = screen.getByRole("tooltip");
+    expect(tip.textContent).toContain("browseros-neo");
+    expect(tip.textContent).toContain("启动失败");
+    expect(tip.textContent).toContain("连接失败，请检查服务器配置、连接和凭据");
+    expect(tip.textContent).not.toContain("exa");
+    expect(badge.getAttribute("aria-describedby")).toBe(tip.id);
+    fireEvent.mouseLeave(badge);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    fireEvent.focus(badge);
+    expect(screen.getByRole("tooltip").textContent).toContain("browseros-neo");
+    fireEvent.click(badge);
+    expect(onManageMcp).toHaveBeenCalledOnce();
+
+    const recovered = {
+      ...state.view,
+      mcpServers: { "browseros-neo": { state: "ready" as const, toolCount: 3 } },
+    };
+    rendered.rerender(<StatusBar {...state} view={recovered} onManageMcp={onManageMcp} />);
+    expect(screen.queryByRole("button", { name: /MCP 未连接/ })).toBeNull();
+  });
+
+  it("crashed 计入；移除后标记消失", () => {
+    const state = fixture();
+    const view = {
+      ...state.view,
+      mcpServers: {
+        a: { state: "crashed" as const, error: "进程已退出或管道已关闭" },
+        b: { state: "failed" as const },
+      },
+    };
+    const rendered = render(<StatusBar {...state} view={view} />);
+    fireEvent.focus(screen.getByRole("button", { name: /MCP 未连接 2/ }));
+    expect(screen.getByRole("tooltip").textContent).toContain("连接断开");
+    rendered.rerender(<StatusBar {...state} view={{ ...state.view, mcpServers: {} }} />);
+    expect(screen.queryByRole("button", { name: /MCP 未连接/ })).toBeNull();
+  });
+});

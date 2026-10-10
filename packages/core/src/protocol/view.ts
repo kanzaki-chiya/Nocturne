@@ -84,7 +84,18 @@ export interface SessionView {
   live: { assistants: LiveAssistant[]; tools: LiveTool[] };
   /** 只由临时事件产生（不可重放） */
   notices: SessionNotice[];
+  /**
+   * MCP 服务器连接状态：由临时事件 mcp.server 归约，键为服务器名，
+   * 同名以最新事件为准；stopped 表示已移除或停用，删除该键（不可重放）
+   */
+  mcpServers: Record<string, McpServerViewState>;
   lastSeq: number;
+}
+
+export interface McpServerViewState {
+  state: "starting" | "ready" | "failed" | "crashed";
+  toolCount?: number;
+  error?: string;
 }
 
 export type ViewEntry = UserEntry | AssistantEntry | ToolEntry | NoticeEntry;
@@ -247,6 +258,7 @@ export function createSessionView(): SessionView {
     entries: [],
     live: { assistants: [], tools: [] },
     notices: [],
+    mcpServers: {},
     lastSeq: 0,
   };
 }
@@ -692,6 +704,22 @@ function reduceEphemeral(view: SessionView, event: EphemeralEvent): void {
           entry.liveOutput += chunk;
         }
       }
+      break;
+    }
+    case "mcp.server": {
+      const { name, state, toolCount, error } = event.payload;
+      if (state === "stopped") {
+        // 重建对象而非 delete（no-dynamic-delete）
+        view.mcpServers = Object.fromEntries(
+          Object.entries(view.mcpServers).filter(([key]) => key !== name),
+        );
+        break;
+      }
+      view.mcpServers[name] = {
+        state,
+        ...(toolCount !== undefined ? { toolCount } : {}),
+        ...(error !== undefined ? { error } : {}),
+      };
       break;
     }
     case "question.requested": {

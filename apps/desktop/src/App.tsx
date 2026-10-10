@@ -1060,6 +1060,9 @@ export function App({ host }: { host: DesktopHost }) {
                 onManageProviders={() => {
                   setPage("providers");
                 }}
+                onManageMcp={() => {
+                  setPage("mcp");
+                }}
               />
             </PaneErrorBoundary>
           ) : selectedId !== null ? (
@@ -1273,6 +1276,8 @@ interface SessionPaneProps {
   panel: StatusPanel | null;
   onPanelChange: (panel: StatusPanel | null) => void;
   onManageProviders: () => void;
+  /** 状态栏「MCP 未连接」标记：进入设置 › MCP */
+  onManageMcp: () => void;
   /** 服务商配置变更计数：状态栏的模型/档位/预设数据随之重取 */
   providersVersion: number;
 }
@@ -1302,6 +1307,7 @@ function SessionPane({
   onPanelChange,
   providersVersion,
   onManageProviders,
+  onManageMcp,
 }: SessionPaneProps) {
   const runtime = client.runtime;
   const controls = useSessionControls(session, runtime, view, prefs, providersVersion, workspace);
@@ -1401,6 +1407,7 @@ function SessionPane({
         onPanelChange={onPanelChange}
         home={home}
         onManageProviders={onManageProviders}
+        onManageMcp={onManageMcp}
       />
     </>
   );

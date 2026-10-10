@@ -42,6 +42,7 @@ import { displayPath } from "./paths";
 import { TurnChangesCard } from "./TurnChangesCard";
 import { TodoList, TodoProgress, todoSummary } from "./TodoList";
 import { useReasoning, type ReasoningMap } from "./reasoning";
+import { MCP_STATE_NOTICE_CODES } from "./mcp-status";
 import { useStickyOutput } from "./useStickyOutput";
 import { useCopyText } from "./useCopyText";
 import "./conversation.css";
@@ -2590,16 +2591,18 @@ function ConversationContent({
                   );
                 }),
             ]}
-            {view.notices.map((notice, index) => (
-              <div
-                key={index}
-                className={`conversation-notice conversation-notice-${notice.level}`}
-                role={notice.level === "info" ? "status" : "alert"}
-                title={notice.code}
-              >
-                {notice.message}
-              </div>
-            ))}
+            {view.notices.map((notice, index) =>
+              MCP_STATE_NOTICE_CODES.has(notice.code) ? null : (
+                <div
+                  key={index}
+                  className={`conversation-notice conversation-notice-${notice.level}`}
+                  role={notice.level === "info" ? "status" : "alert"}
+                  title={notice.code}
+                >
+                  {notice.message}
+                </div>
+              ),
+            )}
           </div>
         </ThinkScrollContext.Provider>
       </div>

@@ -12,6 +12,7 @@ import { createProcessCleanup } from "../../../scripts/test/process-cleanup.mjs"
 import {
   createPlatform,
   type McpOpenScope,
+  type McpServerConfig,
   type McpServerPayload,
   type McpSession,
   type Platform,

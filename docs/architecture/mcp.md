@@ -158,7 +158,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 **状态可见性**：
 
 - 临时事件 `mcp.server`：`{ server, state: "starting"|"ready"|"failed"|"crashed"|"stopped", toolCount?, error? }`，在状态转移时发出。选**临时**而非持久事件：服务器进程是本次打开的运行态，恢复时重新拉起，写进日志只会让旧版本 Runtime 拒绝恢复（events.md 第 8 节）。
-- 失败同时发 `runtime.warning`（`mcp_server_failed` / `mcp_server_crashed` / `mcp_tool_conflict` / `mcp_env_missing`），客户端走既有警告渲染。
+- 失败同时发 `runtime.warning`（`mcp_server_failed` / `mcp_server_crashed` / `mcp_tool_conflict` / `mcp_env_missing`），TUI/CLI 走既有警告渲染；`mcp.server` 另归约进 `SessionView.mcpServers`，桌面端据此在状态栏显示「MCP 未连接」，不在消息流显示这几类状态警告（[view.md](../protocols/view.md) §4、[desktop.md](../apps/desktop.md) 5.2/5.4）。
 - `session.mcpServers(): McpServerStatus[]`（只读查询，不产事件）：供 `/mcp` 命令列出每台服务器的状态、工具数与失败原因（[apps/cli.md](../apps/cli.md)）。
 - **部分失败降级**：启动失败的服务器不阻塞会话——其工具不存在，模型调用到不存在的工具名时得到 `unknown_tool`（列出可用工具名，与工具名漂移的既有自愈路径一致）。
 - **恢复兼容**：历史中含 `mcp__*` 调用、本次打开时该服务器未配置或启动失败——历史回放不受影响（`tool.completed` 是按 `callId` 配对的消息记录，发给 Provider 的请求不校验历史工具名是否仍在 `specs()` 中；openai-compatible 与 anthropic 两个适配器都要在验收中验证这一点，见 roadmap Phase 5）。
