@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createPrefsStore, PREFS_KEY } from "../src/prefs";
+import { createPrefsStore, migrateLegacyProjectOrder, PREFS_KEY } from "../src/prefs";
 
 function memoryStorage(initial?: Record<string, string>): Storage & { data: Map<string, string> } {
   const data = new Map(Object.entries(initial ?? {}));
@@ -31,7 +31,7 @@ describe("prefs store", () => {
       pinned: ["s1"],
       projects: ["Z:\\a"],
       hidden: [],
-      projectSort: "activity",
+      projectSort: "manual",
       plainWorkspaces: [],
     });
     expect(store2.persistent).toBe(true);
@@ -43,7 +43,7 @@ describe("prefs store", () => {
       pinned: [],
       projects: [],
       hidden: [],
-      projectSort: "activity",
+      projectSort: "manual",
       plainWorkspaces: [],
     });
   });
@@ -62,7 +62,7 @@ describe("prefs store", () => {
       pinned: [],
       projects: ["Z:\\ok"],
       hidden: [],
-      projectSort: "activity",
+      projectSort: "manual",
       plainWorkspaces: [],
     });
   });
@@ -75,7 +75,53 @@ describe("prefs store", () => {
     const bad = createPrefsStore(
       memoryStorage({ [PREFS_KEY]: JSON.stringify({ projectSort: "size" }) }),
     );
-    expect(bad.get().projectSort).toBe("activity");
+    expect(bad.get().projectSort).toBe("manual");
+  });
+
+  it("projectOrder 读写往返；缺字段为 undefined，类型不对回退空数组", () => {
+    const storage = memoryStorage();
+    const store = createPrefsStore(storage);
+    expect(store.get().projectOrder).toBeUndefined();
+    store.update({ projectSort: "activity", projectOrder: ["z:\\b", "z:\\a"] });
+    const again = createPrefsStore(storage).get();
+    expect(again.projectOrder).toEqual(["z:\\b", "z:\\a"]);
+    expect(again.projectSort).toBe("activity");
+    for (const bad of ["nope", [1, "x"], null]) {
+      const store2 = createPrefsStore(
+        memoryStorage({ [PREFS_KEY]: JSON.stringify({ projectOrder: bad }) }),
+      );
+      expect(store2.get().projectOrder).toEqual([]);
+    }
+  });
+
+  it("旧数据（无 projectOrder）迁移：activity 改 manual、name 保留，顺序取升级前最近活动顺序", () => {
+    const legacy = createPrefsStore(
+      memoryStorage({
+        [PREFS_KEY]: JSON.stringify({ pinned: [], projects: [], projectSort: "activity" }),
+      }),
+    ).get();
+    expect(legacy.projectSort).toBe("activity");
+    expect(migrateLegacyProjectOrder(legacy, ["z:\\b", "z:\\a"])).toEqual({
+      projectSort: "manual",
+      projectOrder: ["z:\\b", "z:\\a"],
+    });
+    expect(migrateLegacyProjectOrder({ projectSort: "name" }, ["z:\\a"])).toEqual({
+      projectSort: "name",
+      projectOrder: ["z:\\a"],
+    });
+  });
+
+  it("已有 projectOrder 时不迁移，用户选的「最近活动」保留", () => {
+    const store = createPrefsStore(
+      memoryStorage({
+        [PREFS_KEY]: JSON.stringify({ projectSort: "activity", projectOrder: ["z:\\a"] }),
+      }),
+    );
+    const prefs = store.get();
+    expect(prefs.projectSort).toBe("activity");
+    expect(migrateLegacyProjectOrder(prefs, ["z:\\x"])).toBeNull();
+    // 空数组也算已有字段
+    expect(migrateLegacyProjectOrder({ projectSort: "activity", projectOrder: [] }, [])).toBeNull();
   });
 
   it("lastEffort 读写往返；非字符串字段按未设置处理", () => {
@@ -108,7 +154,7 @@ describe("prefs store", () => {
       pinned: ["s1"],
       projects: ["Z:\\a"],
       hidden: [],
-      projectSort: "activity",
+      projectSort: "manual",
       plainWorkspaces: [],
     });
   });

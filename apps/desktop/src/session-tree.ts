@@ -86,14 +86,24 @@ export interface SessionTree {
   pinned: PinnedRow[];
   chats: ChatsSection;
   projects: ProjectNode[];
+  /**
+   * 可见但还不在 projectOrder 里的项目键（按手动模式规则排好的顺序）。
+   * 纯函数不写 prefs：由 App 把它们插到 projectOrder 前面并保存（任何排序模式都返回）。
+   */
+  newProjectKeys: string[];
 }
+
+/** 项目排序：手动（默认）/ 名称 / 最近活动 */
+export type ProjectSort = "manual" | "name" | "activity";
 
 export interface TreePrefs {
   pinned: readonly string[];
   projects: readonly string[];
   hidden: readonly string[];
-  /** 项目排序（默认最近活动） */
-  projectSort?: "activity" | "name";
+  /** 项目排序（缺省按手动） */
+  projectSort?: ProjectSort;
+  /** 手动排序的项目键顺序；缺省按空数组处理（全部视为新项目） */
+  projectOrder?: readonly string[] | undefined;
 }
 
 export interface TreeOptions {
@@ -138,8 +148,9 @@ function toRow(session: SessionSummary, now: number, status: SessionStatus): Ses
  * - 空会话（firstText 缺省/空白且未锁定）一律过滤；
  * - cwd == plainWorkspace 的会话进 chats（不进 projects），手动项目里同路径的也不显示为项目；
  * - projects = 其余会话 cwd 的 key ∪ 手动项目 − hidden；
- *   排序：默认最近活动（有会话的按最新 mtimeMs 降序，其后是无会话的手动项目按添加顺序），
- *   projectSort 为 name 时按名称排序（大小写不敏感、数字按数值比）。
+ *   排序：manual（缺省）按 projectOrder，不在其中的新项目排最上面（无会话的在前，
+ *   其余按最早会话 createdAt 降序）；activity 有会话的按最新 mtimeMs 降序，其后是
+ *   无会话的手动项目按添加顺序；name 按名称（大小写不敏感、数字按数值比）。
  */
 export function buildSessionTree(
   sessions: SessionSummary[],
@@ -205,22 +216,55 @@ export function buildSessionTree(
     });
   }
 
-  const withSessions: { key: string; latest: number }[] = [];
-  const manualEmpty: string[] = [];
+  const visibleKeys: string[] = [];
   for (const [key, group] of groups) {
     if (hidden.has(key)) continue;
-    if (group.sessions.length === 0) {
-      if (manualOrder.includes(key)) manualEmpty.push(key);
-      continue;
-    }
-    const latest = Math.max(...group.sessions.map((s) => s.mtimeMs));
-    withSessions.push({ key, latest });
+    if (group.sessions.length === 0 && !manualOrder.includes(key)) continue;
+    visibleKeys.push(key);
   }
-  withSessions.sort((a, b) => b.latest - a.latest);
-  manualEmpty.sort((a, b) => manualOrder.indexOf(a) - manualOrder.indexOf(b));
+
+  // 新项目（不在 projectOrder 里）：无会话的在前（后添加的在前），其余按最早会话 createdAt 降序
+  const orderIndex = new Map((prefs.projectOrder ?? []).map((key, i) => [key, i]));
+  const earliest = (key: string): string => {
+    const created = (groups.get(key)?.sessions ?? []).map((s) => s.createdAt);
+    return created.reduce((min, c) => (c < min ? c : min), created[0] ?? "");
+  };
+  const newProjectKeys = visibleKeys
+    .filter((key) => !orderIndex.has(key))
+    .sort((a, b) => {
+      const ea = groups.get(a)?.sessions.length === 0;
+      const eb = groups.get(b)?.sessions.length === 0;
+      if (ea !== eb) return ea ? -1 : 1;
+      if (ea) return manualOrder.indexOf(b) - manualOrder.indexOf(a);
+      const ca = earliest(a);
+      const cb = earliest(b);
+      return ca === cb ? 0 : ca < cb ? 1 : -1;
+    });
+
+  let order: string[];
+  if (prefs.projectSort === "activity") {
+    const withSessions: { key: string; latest: number }[] = [];
+    const manualEmpty: string[] = [];
+    for (const key of visibleKeys) {
+      const group = groups.get(key);
+      if (group === undefined) continue;
+      if (group.sessions.length === 0) {
+        manualEmpty.push(key);
+        continue;
+      }
+      withSessions.push({ key, latest: Math.max(...group.sessions.map((s) => s.mtimeMs)) });
+    }
+    withSessions.sort((a, b) => b.latest - a.latest);
+    manualEmpty.sort((a, b) => manualOrder.indexOf(a) - manualOrder.indexOf(b));
+    order = [...withSessions.map((w) => w.key), ...manualEmpty];
+  } else {
+    const known = visibleKeys
+      .filter((key) => orderIndex.has(key))
+      .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+    order = [...newProjectKeys, ...known];
+  }
 
   const projects: ProjectNode[] = [];
-  const order = [...withSessions.map((w) => w.key), ...manualEmpty];
   for (const key of order) {
     const group = groups.get(key);
     if (group === undefined) continue;
@@ -240,12 +284,41 @@ export function buildSessionTree(
     });
   }
 
-  // 名称排序时对全部项目（含无会话的手动项目）统一排序；最近活动排序保持原有顺序
+  // 名称排序时对全部项目（含无会话的手动项目）统一排序
   if (prefs.projectSort === "name") {
     projects.sort((a, b) =>
       a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }),
     );
   }
 
-  return { pinned, chats, projects };
+  return { pinned, chats, projects, newProjectKeys };
+}
+
+/**
+ * 把可见列表里的 key 移到可见位置 toIndex（移动前的插入下标，0..visible.length），
+ * 换算回完整的 projectOrder：落在某个可见项之前就插到它在完整数组里的位置之前，
+ * 落在末尾就插到最后一个可见项之后；隐藏项目之间及相对其他项的位置不变。
+ * 不在 order 里的可见键先按显示顺序补到最前面。
+ */
+export function moveProjectKey(
+  order: readonly string[],
+  visible: readonly string[],
+  key: string,
+  toIndex: number,
+): string[] {
+  const missing = visible.filter((k) => !order.includes(k));
+  const full = [...missing, ...order].filter((k) => k !== key);
+  const from = visible.indexOf(key);
+  const rest = visible.filter((k) => k !== key);
+  let target = Math.max(0, Math.min(toIndex, visible.length));
+  if (from >= 0 && from < target) target -= 1;
+  if (rest.length === 0) return [key, ...full];
+  const anchor = rest[target];
+  if (anchor !== undefined) {
+    full.splice(full.indexOf(anchor), 0, key);
+  } else {
+    const last = rest[rest.length - 1] ?? "";
+    full.splice(full.indexOf(last) + 1, 0, key);
+  }
+  return full;
 }

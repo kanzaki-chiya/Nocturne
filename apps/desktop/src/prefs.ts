@@ -4,9 +4,11 @@
  * 只是 persistent 变 false（docs/apps/desktop.md）。
  */
 
-export const PREFS_KEY = "nocturne.desktop.prefs.v1";
+import type { ProjectSort } from "./session-tree";
 
-export type ProjectSort = "activity" | "name";
+export type { ProjectSort };
+
+export const PREFS_KEY = "nocturne.desktop.prefs.v1";
 
 export interface Prefs {
   /** 置顶会话 id（数组顺序即显示顺序） */
@@ -15,8 +17,13 @@ export interface Prefs {
   projects: string[];
   /** 从列表移除（隐藏）的项目路径 */
   hidden: string[];
-  /** 项目排序：最近活动 / 名称 */
+  /** 项目排序：手动（缺省）/ 名称 / 最近活动 */
   projectSort: ProjectSort;
+  /**
+   * 手动排序的项目归并键顺序，覆盖所有已知项目（含会话 cwd 推出的）。
+   * undefined = 旧数据还没有这个字段，App 拿到会话列表后经 migrateLegacyProjectOrder 初始化一次。
+   */
+  projectOrder?: string[] | undefined;
   /** 上次选用的思考档位（新会话草稿的默认档位） */
   lastEffort?: string | undefined;
   /** 主题：跟随系统 / 月之亮面（浅色） / 月之暗面（深色）；取值仍是 system/light/dark（桌面端本机设置，不进 Core） */
@@ -44,7 +51,7 @@ const DEFAULTS: Prefs = {
   pinned: [],
   projects: [],
   hidden: [],
-  projectSort: "activity",
+  projectSort: "manual",
   plainWorkspaces: [],
 };
 
@@ -79,9 +86,15 @@ function parse(raw: string | null): Prefs {
   if (pinned !== undefined) prefs.pinned = pinned;
   if (projects !== undefined) prefs.projects = projects;
   if (hidden !== undefined) prefs.hidden = hidden;
-  if (obj.projectSort === "activity" || obj.projectSort === "name") {
+  if (
+    obj.projectSort === "manual" ||
+    obj.projectSort === "activity" ||
+    obj.projectSort === "name"
+  ) {
     prefs.projectSort = obj.projectSort;
   }
+  // 有这个字段就不是旧数据：类型不对按空数组（不再触发迁移），缺字段保持 undefined
+  if ("projectOrder" in obj) prefs.projectOrder = strings(obj.projectOrder) ?? [];
   if (typeof obj.lastEffort === "string") prefs.lastEffort = obj.lastEffort;
   if (obj.theme === "system" || obj.theme === "light" || obj.theme === "dark") {
     prefs.theme = obj.theme;
@@ -115,6 +128,22 @@ function parse(raw: string | null): Prefs {
   return prefs;
 }
 
+/**
+ * 旧数据迁移（没有 projectOrder 字段）：以前每次都会写入 projectSort "activity"，
+ * 分不清是不是用户选的，所以 "activity" 改成 "manual"、"name" 保留；projectOrder 用升级前
+ * 「最近活动」规则下的显示顺序初始化，升级后第一次打开项目位置不变。已有 projectOrder 返回 null。
+ */
+export function migrateLegacyProjectOrder(
+  prefs: Pick<Prefs, "projectSort" | "projectOrder">,
+  activityOrder: readonly string[],
+): Pick<Prefs, "projectSort" | "projectOrder"> | null {
+  if (prefs.projectOrder !== undefined) return null;
+  return {
+    projectSort: prefs.projectSort === "activity" ? "manual" : prefs.projectSort,
+    projectOrder: [...activityOrder],
+  };
+}
+
 export function createPrefsStore(storage: Storage | undefined): PrefsStore {
   let prefs: Prefs = { ...DEFAULTS };
   let persistent = storage !== undefined;
@@ -133,6 +162,7 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         projects: [...prefs.projects],
         hidden: [...prefs.hidden],
         projectSort: prefs.projectSort,
+        ...(prefs.projectOrder !== undefined ? { projectOrder: [...prefs.projectOrder] } : {}),
         plainWorkspaces: [...prefs.plainWorkspaces],
         ...(prefs.lastEffort !== undefined ? { lastEffort: prefs.lastEffort } : {}),
         ...(prefs.theme !== undefined ? { theme: prefs.theme } : {}),

@@ -1219,6 +1219,64 @@ it("崩溃恢复：模型不可用的会话不阻塞其余会话，点开是换�
   await waitFor(() => expect(screen.queryByText(/后台已退出/)).toBeNull());
 });
 
+// ── 项目手动排序 ──────────────────────────────────────────────
+
+const projectNames = () =>
+  [...document.querySelectorAll(".side .gname")].map((el) => el.textContent ?? "");
+const storedPrefs = () =>
+  JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}") as {
+    projectSort?: string;
+    projectOrder?: string[];
+  };
+
+it("「＋」打开新项目后排在项目列表第一位", async () => {
+  const host = replayHost();
+  host.pickFolder = async () => "Z:/fresh";
+  render(<App host={host} />);
+  await waitFor(() => expect(projectNames()).toEqual(["qa-alpha", "qa-beta", "qa-gamma"]));
+  // 首次拿到会话列表即初始化手动顺序（新数据缺省就是手动）
+  await waitFor(() => expect(storedPrefs().projectOrder).toHaveLength(3));
+  expect(storedPrefs().projectSort).toBe("manual");
+
+  fireEvent.click(screen.getByTitle("打开项目…"));
+  await waitFor(() => expect(projectNames()).toEqual(["fresh", "qa-alpha", "qa-beta", "qa-gamma"]));
+  expect(storedPrefs().projectOrder?.[0]).toBe("z:\\fresh");
+});
+
+it("「＋」打开一个已可见的项目不移动它的位置", async () => {
+  const host = replayHost();
+  host.pickFolder = async () => "Z:/qa-gamma";
+  render(<App host={host} />);
+  await waitFor(() => expect(projectNames()).toEqual(["qa-alpha", "qa-beta", "qa-gamma"]));
+  await waitFor(() => expect(storedPrefs().projectOrder).toHaveLength(3));
+  const lists = () => host.calls.filter((c) => c.method === "runtime.listSessions").length;
+  const before = lists();
+
+  fireEvent.click(screen.getByTitle("打开项目…"));
+  await waitFor(() => expect(lists()).toBe(before + 1));
+  expect(projectNames()).toEqual(["qa-alpha", "qa-beta", "qa-gamma"]);
+  expect(storedPrefs().projectOrder).toEqual(["z:\\qa-alpha", "z:\\qa-beta", "z:\\qa-gamma"]);
+});
+
+it("旧数据（projectSort activity、无 projectOrder）迁移为手动并保持升级前的顺序", async () => {
+  localStorage.setItem(
+    "nocturne.desktop.prefs.v1",
+    JSON.stringify({ pinned: [], projects: ["Z:/manual"], hidden: [], projectSort: "activity" }),
+  );
+  const host = replayHost();
+  render(<App host={host} />);
+  await waitFor(() =>
+    expect(storedPrefs().projectOrder).toEqual([
+      "z:\\qa-alpha",
+      "z:\\qa-beta",
+      "z:\\qa-gamma",
+      "z:\\manual",
+    ]),
+  );
+  expect(storedPrefs().projectSort).toBe("manual");
+  expect(projectNames()).toEqual(["qa-alpha", "qa-beta", "qa-gamma", "manual"]);
+});
+
 it("一次切换只刷新一次会话列表", async () => {
   const host = replayHost();
   render(<App host={host} />);

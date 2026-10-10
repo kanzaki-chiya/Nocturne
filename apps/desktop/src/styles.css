@@ -1071,3 +1071,28 @@ details[open] > summary:not(.tool-line)::before {
   white-space: pre-wrap;
   font: 12.5px/1.8 var(--mono);
 }
+
+/* 手动排序拖动：被拖的项目组变淡，插入位置画一条主色指示线 */
+.grp {
+  position: relative;
+}
+.grp.dragging {
+  opacity: 0.5;
+}
+.grp.drop-before::before,
+.grp.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--a-accent);
+  pointer-events: none;
+}
+.grp.drop-before::before {
+  top: -1px;
+}
+.grp.drop-after::after {
+  bottom: -1px;
+}

@@ -6,7 +6,12 @@ import type { SessionTree } from "../src/session-tree";
 
 const noop = () => undefined;
 
-const emptyTree: SessionTree = { pinned: [], chats: { rows: [], moreCount: 0 }, projects: [] };
+const emptyTree: SessionTree = {
+  pinned: [],
+  chats: { rows: [], moreCount: 0 },
+  projects: [],
+  newProjectKeys: [],
+};
 
 function props(overrides?: Partial<SidebarProps>): SidebarProps {
   return {
@@ -23,6 +28,7 @@ function props(overrides?: Partial<SidebarProps>): SidebarProps {
     projectSort: "activity",
     hiddenProjects: [],
     onSetSort: noop,
+    onMoveProject: noop,
     onPin: noop,
     onUnpin: noop,
     onHideProject: noop,
@@ -50,6 +56,7 @@ describe("Sidebar", () => {
         moreCount: 3,
       },
       projects: [],
+      newProjectKeys: [],
     };
     render(<Sidebar {...props({ tree })} />);
     expect(screen.getByText("对话")).toBeTruthy();
@@ -64,7 +71,14 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByTitle("项目菜单"));
     expect(screen.getByText("排序")).toBeTruthy();
     expect(screen.getByText("已移除的项目…")).toBeTruthy();
+    const items = [...document.querySelectorAll(".ctxmenu.sub")][0]?.querySelectorAll("button");
+    expect([...(items ?? [])].map((b) => b.textContent?.replace("✓", ""))).toEqual([
+      "手动",
+      "名称",
+      "最近活动",
+    ]);
     expect(screen.getByText("名称").querySelector(".ck")?.textContent).toBe("✓");
+    expect(screen.getByText("手动").querySelector(".ck")?.textContent).toBe("");
     expect(screen.getByText("最近活动").querySelector(".ck")?.textContent).toBe("");
     fireEvent.click(screen.getByText("最近活动"));
     expect(onSetSort).toHaveBeenCalledWith("activity");
@@ -112,6 +126,7 @@ describe("Sidebar", () => {
         manual: false,
       },
     ],
+    newProjectKeys: [],
   };
 
   it("会话行「…」与右键打开同一个置顶菜单（F-02）", () => {
@@ -154,5 +169,104 @@ describe("Sidebar", () => {
     expect(onHideProject).toHaveBeenCalledWith("Z:/proj");
     fireEvent.contextMenu(screen.getByText("proj"));
     expect(screen.getByText("从列表移除")).toBeTruthy();
+  });
+
+  const projectNode = (name: string) => ({
+    key: `z:/${name}`,
+    name,
+    path: `Z:/${name}`,
+    count: 0,
+    sessions: [],
+    moreCount: 0,
+    manual: true,
+  });
+  /** jsdom 的拖放事件没有 dataTransfer，给一个最小替身 */
+  const dataTransfer = () => ({ setData: vi.fn(), effectAllowed: "", dropEffect: "" });
+  const threeProjects: SessionTree = {
+    ...emptyTree,
+    projects: [projectNode("a"), projectNode("b"), projectNode("c")],
+  };
+
+  it("排序菜单在手动模式勾选「手动」", () => {
+    render(<Sidebar {...props({ projectSort: "manual" })} />);
+    fireEvent.click(screen.getByTitle("项目菜单"));
+    expect(screen.getByText("手动").querySelector(".ck")?.textContent).toBe("✓");
+    expect(screen.getByText("名称").querySelector(".ck")?.textContent).toBe("");
+  });
+
+  it("手动模式右键项目「上移」「下移」回调插入位置，首项、末项对应项置灰", () => {
+    const onMoveProject = vi.fn();
+    render(<Sidebar {...props({ tree: threeProjects, projectSort: "manual", onMoveProject })} />);
+    const button = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement;
+
+    fireEvent.contextMenu(screen.getByText("a"));
+    expect(button("上移").disabled).toBe(true);
+    expect(button("下移").disabled).toBe(false);
+    fireEvent.click(button("下移"));
+    expect(onMoveProject).toHaveBeenLastCalledWith("z:/a", 2);
+
+    fireEvent.contextMenu(screen.getByText("c"));
+    expect(button("下移").disabled).toBe(true);
+    fireEvent.click(button("上移"));
+    expect(onMoveProject).toHaveBeenLastCalledWith("z:/c", 1);
+
+    fireEvent.contextMenu(screen.getByText("b"));
+    expect(button("上移").disabled).toBe(false);
+    expect(button("下移").disabled).toBe(false);
+    expect(screen.getByText("从列表移除")).toBeTruthy();
+  });
+
+  it("名称、最近活动模式不显示上移下移，项目标题不可拖动", () => {
+    for (const projectSort of ["name", "activity"] as const) {
+      const { container } = render(<Sidebar {...props({ tree: threeProjects, projectSort })} />);
+      fireEvent.contextMenu(screen.getByText("a"));
+      expect(screen.getByText("从列表移除")).toBeTruthy();
+      expect(screen.queryByText("上移")).toBeNull();
+      expect(screen.queryByText("下移")).toBeNull();
+      expect(container.querySelector('.gh[draggable="true"]')).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("手动模式拖动项目标题：dragstart → dragover 显示指示线 → drop 回调新位置", () => {
+    const onMoveProject = vi.fn();
+    const onToggleCollapse = vi.fn();
+    const { container } = render(
+      <Sidebar
+        {...props({ tree: threeProjects, projectSort: "manual", onMoveProject, onToggleCollapse })}
+      />,
+    );
+    const groups = [...container.querySelectorAll(".grp")];
+    const header = groups[0]?.querySelector(".gh");
+    if (header === null || header === undefined) throw new Error("缺少项目标题");
+    expect(header.getAttribute("draggable")).toBe("true");
+    fireEvent.dragStart(header, { dataTransfer: dataTransfer() });
+    // jsdom 的 rect 全为 0：clientY 0 落在下半区 → 插到 c 后面（可见下标 3）
+    const target = groups[2];
+    if (target === undefined) throw new Error("缺少目标项目");
+    fireEvent.dragOver(target, { clientY: 0, dataTransfer: dataTransfer() });
+    expect(target.classList.contains("drop-after")).toBe(true);
+    fireEvent.drop(target, { clientY: 0, dataTransfer: dataTransfer() });
+    expect(onMoveProject).toHaveBeenCalledWith("z:/a", 3);
+    expect(container.querySelector(".drop-after, .drop-before, .dragging")).toBeNull();
+    expect(onToggleCollapse).not.toHaveBeenCalled();
+  });
+
+  it("拖到原位置不回调", () => {
+    const onMoveProject = vi.fn();
+    const { container } = render(
+      <Sidebar {...props({ tree: threeProjects, projectSort: "manual", onMoveProject })} />,
+    );
+    const groups = [...container.querySelectorAll(".grp")];
+    const header = groups[0]?.querySelector(".gh");
+    if (header === null || header === undefined) throw new Error("缺少项目标题");
+    fireEvent.dragStart(header, { dataTransfer: dataTransfer() });
+    // 落在 a 自己的下半区 → 插入下标 1，等于原位
+    const self = groups[0];
+    if (self === undefined) throw new Error("缺少项目");
+    fireEvent.dragOver(self, { clientY: 0, dataTransfer: dataTransfer() });
+    expect(container.querySelector(".drop-after, .drop-before")).toBeNull();
+    fireEvent.drop(self, { clientY: 0, dataTransfer: dataTransfer() });
+    expect(onMoveProject).not.toHaveBeenCalled();
   });
 });

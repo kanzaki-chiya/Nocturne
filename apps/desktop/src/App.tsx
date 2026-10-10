@@ -36,9 +36,16 @@ import { BackendPool } from "./backends";
 import type { DesktopHost } from "./host";
 import { NodeHelp } from "./NodeHelp";
 import { abbreviateHome, middleTruncate } from "./paths";
-import { createPrefsStore, type PrefsStore } from "./prefs";
+import { createPrefsStore, migrateLegacyProjectOrder, type PrefsStore } from "./prefs";
 import { useDraftControls, useSessionControls } from "./session-controls";
-import { buildSessionTree, projectKey, projectName, type SessionSummary } from "./session-tree";
+import {
+  buildSessionTree,
+  moveProjectKey,
+  projectKey,
+  projectName,
+  type SessionSummary,
+  type SessionTree,
+} from "./session-tree";
 import { Sidebar, type SettingsSection } from "./Sidebar";
 import type { NodeProbe } from "./types";
 import { createUpdateService, describeUpdateError, type UpdateNotice } from "./updater";
@@ -78,6 +85,10 @@ export function App({ host }: { host: DesktopHost }) {
 
   const [phase, setPhase] = useState<Phase>({ kind: "probing" });
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  /** 已成功拿到过会话列表：项目顺序的迁移与新键写回都要等它 */
+  const [listed, setListed] = useState(false);
+  /** 最近一次渲染的会话树（「打开项目」判断项目是否已可见） */
+  const treeRef = useRef<SessionTree | null>(null);
   /** 外壳 plain_workspace 的默认路径（恢复默认用）；生效路径另看 prefs.plainWorkspace */
   const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(null);
   const [home, setHome] = useState<string | null>(null);
@@ -214,6 +225,7 @@ export function App({ host }: { host: DesktopHost }) {
     try {
       const list = await client.runtime.listSessions();
       setSessions(list);
+      setListed(true);
       setStartupError(null);
     } catch (error) {
       setStartupError({ message: errMessage(error) });
@@ -406,15 +418,21 @@ export function App({ host }: { host: DesktopHost }) {
     };
   }, [refresh]);
 
-  // 「打开项目」只更新 prefs 并刷新列表，不启动后台（项目后台在打开会话时才启动）
+  // 「打开项目」只更新 prefs 并刷新列表，不启动后台（项目后台在打开会话时才启动）。
+  // 不在列表里或已隐藏的项目移到 projectOrder 最前面；已经可见的不移动。
   const openProject = useCallback(async () => {
     const dir = await host.pickFolder();
     if (dir === null) return;
     const key = projectKey(dir);
     const current = prefs.get();
+    const visible = treeRef.current?.projects.some((project) => project.key === key) === true;
+    const order = current.projectOrder;
     prefs.update({
       projects: current.projects.includes(dir) ? current.projects : [...current.projects, dir],
       hidden: current.hidden.filter((k) => projectKey(k) !== key),
+      ...(!visible && order !== undefined
+        ? { projectOrder: [key, ...order.filter((k) => k !== key)] }
+        : {}),
     });
     bumpPrefs();
     await refresh();
@@ -525,30 +543,31 @@ export function App({ host }: { host: DesktopHost }) {
     return true;
   };
 
+  const treeSessions = useMemo(
+    () =>
+      sessions.map((summary) => {
+        const entry = conversations.opened.get(summary.id);
+        return entry === undefined
+          ? summary
+          : { ...summary, locked: false, firstText: entry.view.title ?? summary.firstText };
+      }),
+    [sessions, conversationVersion],
+  );
   const tree = useMemo(
     () =>
-      buildSessionTree(
-        sessions.map((summary) => {
-          const entry = conversations.opened.get(summary.id);
-          return entry === undefined
-            ? summary
-            : { ...summary, locked: false, firstText: entry.view.title ?? summary.firstText };
-        }),
-        p,
-        {
-          plainWorkspace: effectiveWorkspace,
-          plainWorkspaces: p.plainWorkspaces,
-          chatsExpanded,
-          expanded,
-          collapsed,
-          statuses: Object.fromEntries(
-            [...conversations.opened].map(([id, entry]) => [id, conversationStatus(entry)]),
-          ),
-        },
-      ),
+      buildSessionTree(treeSessions, p, {
+        plainWorkspace: effectiveWorkspace,
+        plainWorkspaces: p.plainWorkspaces,
+        chatsExpanded,
+        expanded,
+        collapsed,
+        statuses: Object.fromEntries(
+          [...conversations.opened].map(([id, entry]) => [id, conversationStatus(entry)]),
+        ),
+      }),
     // prefs 快照经 prefsVersion 驱动重算
     [
-      sessions,
+      treeSessions,
       prefsVersion,
       effectiveWorkspace,
       chatsExpanded,
@@ -557,6 +576,40 @@ export function App({ host }: { host: DesktopHost }) {
       conversationVersion,
     ],
   );
+  treeRef.current = tree;
+
+  // 项目手动顺序：拿到会话列表后，旧数据（无 projectOrder）按升级前「最近活动」的显示顺序
+  // 初始化一次（隐藏项目也排进去，恢复时回原位）；之后每次列表变化把新出现的项目键按显示
+  // 顺序插到最前面并保存，此后它们固定在原位
+  useEffect(() => {
+    if (!listed) return;
+    const current = prefs.get();
+    if (current.projectOrder === undefined) {
+      const legacy = buildSessionTree(
+        treeSessions,
+        { ...current, hidden: [], projectSort: "activity" },
+        {
+          plainWorkspace: effectiveWorkspace,
+          plainWorkspaces: current.plainWorkspaces,
+          expanded: new Set(),
+          collapsed: new Set(),
+        },
+      );
+      const patch = migrateLegacyProjectOrder(
+        current,
+        legacy.projects.map((project) => project.key),
+      );
+      if (patch !== null) {
+        prefs.update(patch);
+        bumpPrefs();
+      }
+      return;
+    }
+    if (tree.newProjectKeys.length > 0) {
+      prefs.update({ projectOrder: [...tree.newProjectKeys, ...current.projectOrder] });
+      bumpPrefs();
+    }
+  }, [listed, tree, treeSessions, effectiveWorkspace, prefs, bumpPrefs]);
 
   const pinnedIds = new Set(p.pinned);
 
@@ -729,6 +782,14 @@ export function App({ host }: { host: DesktopHost }) {
         hiddenProjects={p.hidden.map((path) => ({ path, name: projectName(path) }))}
         onSetSort={(sort) => {
           prefs.update({ projectSort: sort });
+          bumpPrefs();
+        }}
+        onMoveProject={(key, toIndex) => {
+          const cur = prefs.get();
+          const visible = tree.projects.map((project) => project.key);
+          prefs.update({
+            projectOrder: moveProjectKey(cur.projectOrder ?? [], visible, key, toIndex),
+          });
           bumpPrefs();
         }}
         onPin={(id) => {

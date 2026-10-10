@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { PinnedRow, ProjectNode, SessionRow, SessionTree } from "./session-tree";
+import type { PinnedRow, ProjectNode, ProjectSort, SessionRow, SessionTree } from "./session-tree";
 
 /** 设置区的导航项（ADR-0046 2026-10-05 修订第 1 条；logs = 后台日志页） */
 export type SettingsSection =
@@ -21,15 +21,17 @@ export interface SidebarProps {
   collapsed: ReadonlySet<string>;
   expanded: ReadonlySet<string>;
   chatsExpanded: boolean;
-  /** 项目排序（菜单「排序」选择） */
-  projectSort: "activity" | "name";
+  /** 项目排序（菜单「排序」选择）；只有 manual 能拖动、上移下移 */
+  projectSort: ProjectSort;
   /** 已移除（隐藏）的项目路径，菜单里逐个恢复 */
   hiddenProjects: readonly { path: string; name: string }[];
   onSelectSession: (id: string) => void;
   onToggleCollapse: (key: string) => void;
   onToggleExpand: (key: string) => void;
   onToggleChats: () => void;
-  onSetSort: (sort: "activity" | "name") => void;
+  onSetSort: (sort: ProjectSort) => void;
+  /** 手动模式调整顺序：把 key 移到可见列表的插入位置 toIndex（移动前的下标，0..n） */
+  onMoveProject: (key: string, toIndex: number) => void;
   onPin: (id: string) => void;
   onUnpin: (id: string) => void;
   onHideProject: (path: string) => void;
@@ -220,7 +222,7 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
 
 type MenuState =
   | { kind: "session"; x: number; y: number; id: string; pinned: boolean }
-  | { kind: "project"; x: number; y: number; key: string; path: string }
+  | { kind: "project"; x: number; y: number; key: string; path: string; index: number }
   | { kind: "projects"; x: number; y: number };
 
 function dotClass(row: SessionRow): string {
@@ -300,6 +302,9 @@ function RowButton({
 export function Sidebar(props: SidebarProps) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [subOpen, setSubOpen] = useState<"sort" | "removed" | null>(null);
+  /** 拖动中的项目 key 与插入位置（可见列表下标 0..n）；只在手动模式出现 */
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -361,10 +366,31 @@ export function Sidebar(props: SidebarProps) {
     setMenu({ kind: "session", x: e.clientX, y: e.clientY, id, pinned: props.pinnedIds.has(id) });
   };
 
-  const projectMenu = (e: React.MouseEvent, project: ProjectNode) => {
+  const manual = props.projectSort === "manual";
+  const projects = props.tree.projects;
+
+  const projectMenu = (e: React.MouseEvent, project: ProjectNode, index: number) => {
     e.preventDefault();
-    setMenu({ kind: "project", x: e.clientX, y: e.clientY, key: project.key, path: project.path });
+    setMenu({
+      kind: "project",
+      x: e.clientX,
+      y: e.clientY,
+      key: project.key,
+      path: project.path,
+      index,
+    });
   };
+
+  const endDrag = () => {
+    setDragKey(null);
+    setDropIndex(null);
+  };
+  // 插入位置等于原位置或其后一位时不算移动，不显示指示线
+  const from = dragKey === null ? -1 : projects.findIndex((p) => p.key === dragKey);
+  const effectiveDrop =
+    dropIndex !== null && from >= 0 && dropIndex !== from && dropIndex !== from + 1
+      ? dropIndex
+      : null;
 
   const renderRow = (row: SessionRow, pinned?: PinnedRow) => (
     <RowButton
@@ -392,20 +418,56 @@ export function Sidebar(props: SidebarProps) {
     />
   );
 
-  const renderProject = (project: ProjectNode) => {
+  const renderProject = (project: ProjectNode, index: number) => {
     const collapsed = props.collapsed.has(project.key);
     const expanded = props.expanded.has(project.key);
+    let cls = "grp";
+    if (dragKey === project.key) cls += " dragging";
+    if (effectiveDrop === index) cls += " drop-before";
+    if (effectiveDrop === projects.length && index === projects.length - 1) cls += " drop-after";
     return (
-      <div className="grp" key={project.key}>
+      <div
+        className={cls}
+        key={project.key}
+        // 落点按整个项目组（标题 + 会话）计算：上半区插在它前面，下半区插在它后面
+        onDragOver={(e) => {
+          if (dragKey === null) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          const rect = e.currentTarget.getBoundingClientRect();
+          setDropIndex(e.clientY < rect.top + rect.height / 2 ? index : index + 1);
+        }}
+        onDrop={(e) => {
+          if (dragKey === null) return;
+          e.preventDefault();
+          if (effectiveDrop !== null) props.onMoveProject(dragKey, effectiveDrop);
+          endDrag();
+        }}
+      >
         {/* .gh 是容器 div：按钮不能嵌套按钮（悬停的「＋」是兄弟元素） */}
-        <div className="gh">
+        <div
+          className="gh"
+          // HTML5 拖放：浏览器自带拖动阈值，单击标题仍是折叠/展开
+          draggable={manual}
+          onDragStart={
+            manual
+              ? (e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", project.key);
+                  setMenu(null);
+                  setDragKey(project.key);
+                }
+              : undefined
+          }
+          onDragEnd={manual ? endDrag : undefined}
+        >
           <button
             className="gh-toggle"
             onClick={() => {
               props.onToggleCollapse(project.key);
             }}
             onContextMenu={(e) => {
-              projectMenu(e, project);
+              projectMenu(e, project, index);
             }}
           >
             <span className={`tw fold-arrow${collapsed ? "" : " down"}`} aria-hidden="true">
@@ -431,6 +493,7 @@ export function Sidebar(props: SidebarProps) {
                 y: rect.bottom + 4,
                 key: project.key,
                 path: project.path,
+                index,
               });
             }}
           >
@@ -551,7 +614,7 @@ export function Sidebar(props: SidebarProps) {
             </button>
           </span>
         </div>
-        {props.tree.projects.map(renderProject)}
+        {projects.map(renderProject)}
       </div>
       {menu !== null && (
         <div className="ctxmenu" ref={menuRef} style={{ left: menu.x, top: menu.y }}>
@@ -568,15 +631,41 @@ export function Sidebar(props: SidebarProps) {
             </button>
           )}
           {menu.kind === "project" && (
-            <button
-              autoFocus
-              onClick={() => {
-                props.onHideProject(menu.path);
-                setMenu(null);
-              }}
-            >
-              从列表移除
-            </button>
+            <>
+              {manual && (
+                <>
+                  <button
+                    autoFocus={menu.index > 0}
+                    disabled={menu.index <= 0}
+                    onClick={() => {
+                      props.onMoveProject(menu.key, menu.index - 1);
+                      setMenu(null);
+                    }}
+                  >
+                    上移
+                  </button>
+                  <button
+                    autoFocus={menu.index === 0 && projects.length > 1}
+                    disabled={menu.index >= projects.length - 1}
+                    onClick={() => {
+                      props.onMoveProject(menu.key, menu.index + 2);
+                      setMenu(null);
+                    }}
+                  >
+                    下移
+                  </button>
+                </>
+              )}
+              <button
+                autoFocus={!manual || projects.length <= 1}
+                onClick={() => {
+                  props.onHideProject(menu.path);
+                  setMenu(null);
+                }}
+              >
+                从列表移除
+              </button>
+            </>
           )}
           {menu.kind === "projects" && (
             <>
@@ -606,8 +695,9 @@ export function Sidebar(props: SidebarProps) {
                 <div className="ctxmenu sub">
                   {(
                     [
-                      ["activity", "最近活动"],
+                      ["manual", "手动"],
                       ["name", "名称"],
+                      ["activity", "最近活动"],
                     ] as const
                   ).map(([value, label]) => (
                     <button
