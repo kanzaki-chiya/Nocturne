@@ -37,7 +37,7 @@ import { mcpToolName } from "./names.js";
 import { StdioPipeTransport } from "./transport.js";
 
 const CLIENT_NAME = "nocturne";
-const CLIENT_VERSION = "0.8.1";
+const CLIENT_VERSION = "0.8.2";
 const DEFAULT_STARTUP_MS = 15_000;
 const MAX_STARTUP_MS = 60_000;
 const DEFAULT_CALL_MS = 60_000;
