@@ -37,6 +37,7 @@ import type {
   RuntimeConfig,
   SettingItem,
   SettingsPatch,
+  ToggleImpact,
   JevEndpoint,
   JevReviewerConfig,
   ModelRole,
@@ -106,11 +107,13 @@ import {
   clampReasoningEffort,
   createEntryProvider,
   externalAuthPath,
+  applyDisabled,
   createProviderRegistry,
   nocturneUserAgent,
   UnknownModelError,
   type AuthResolver,
   type CredentialResolver,
+  type DisabledModels,
   type ModelInfo,
   type ModelOverride,
   type Provider,
@@ -122,6 +125,7 @@ import { resolveProviderAuth } from "./provider-oauth.js";
 import type {
   AgentDelegation,
   CommandRejectCode,
+  CommandErrorDetail,
   ContentBlock,
   Diagnostics,
   Grant,
@@ -189,10 +193,17 @@ import { NOCTURNE_VERSION } from "./protocol/version.js";
 /** 命令被拒绝时抛出的错误；code 即 events.md 第 7 节的拒绝原因码 */
 export class RuntimeCommandError extends Error {
   readonly code: CommandRejectCode;
-  constructor(code: CommandRejectCode, message: string) {
+  /**
+   * 结构化补充（ADR-0054 §3）：如 invalid_model 携带
+   * `{ disabled: "provider" | "model", model: { provider, model } }`，
+   * 让客户端区分「已停用」与「已删除」。经 RPC 原样并入 error.data。
+   */
+  readonly detail?: CommandErrorDetail | undefined;
+  constructor(code: CommandRejectCode, message: string, detail?: CommandErrorDetail) {
     super(message);
     this.name = "RuntimeCommandError";
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -501,6 +512,19 @@ export interface Runtime {
   setExternalAgentEnabled(input: { name: string; enabled: boolean }): Promise<void>;
   probeExternalAgent(input: ExternalAgentProbeInput): Promise<ExternalAgentProbeResult>;
   /**
+   * 启停服务商（ADR-0054 §3）：写 settings.json 的 disabledProviders（专用读写，
+   * 用户级；项目配置不能启停）。停用的服务商不从注册表移除，其模型在下一次
+   * 解析起带 unavailable + disabled；已打开会话在下一空闲边界重解析。
+   */
+  setProviderEnabled(input: { provider: string; enabled: boolean }): Promise<void>;
+  /** 批量启停某服务商下的模型（ADR-0054 §3，供「全部启用 / 停用」） */
+  setModelsEnabled(input: { provider: string; models: string[]; enabled: boolean }): Promise<void>;
+  /**
+   * 停用前的影响面（ADR-0054 §3）：受影响的已打开会话数、默认模型是否
+   * 落入停用集合、受影响的模型角色。`models` 省略时按整个服务商计算。
+   */
+  describeToggleImpact(input: { provider: string; models?: string[] | undefined }): ToggleImpact;
+  /**
    * workspaceRoot（ADR-0051）：下列方法的 `input?.workspaceRoot`/`options?.workspaceRoot`
    * 指定按哪个工作区合并配置层；缺省为 Runtime 启动目录。指定的工作区须已加载
    * （同工作区有会话打开，或先经 RuntimeConfig.forWorkspace 加载——RPC 服务端
@@ -549,7 +573,11 @@ export interface Runtime {
     includeSubagents?: boolean | undefined;
   }): Promise<SessionSummary[]>;
   /** 已配置 Provider 声明的模型清单（含已加载的可信项目层）；input.workspaceRoot 见上 */
-  listModels(input?: { workspaceRoot?: string | undefined }): ModelInfo[];
+  listModels(input?: {
+    workspaceRoot?: string | undefined;
+    /** ADR-0054 §3：true 时包含停用模型（带 disabled），供服务商页使用；默认过滤 */
+    includeDisabled?: boolean | undefined;
+  }): ModelInfo[];
   usageStats(input: { days?: number }): Promise<UsageStats>;
   /**
    * 用新的基础层配置重建运行时级 Provider 注册表（provider-setup.md
@@ -603,6 +631,35 @@ function parseModelRef(model: string | ModelRef): ModelRef {
     );
   }
   return { provider: model.slice(0, i), model: model.slice(i + 1) };
+}
+
+/**
+ * ADR-0054 §3：停用导致的 invalid_model 携带结构化 `disabled` 与模型引用，
+ * 让客户端区分「已停用」（可重新启用）与「已删除」。非停用原因时为普通错误。
+ */
+function invalidModelError(message: string, model?: ModelInfo): RuntimeCommandError {
+  return new RuntimeCommandError(
+    "invalid_model",
+    message,
+    model?.disabled !== undefined
+      ? {
+          disabled: model.disabled,
+          model: { provider: model.ref.provider, model: model.ref.model },
+          ...(model.providerDisabled === true ? { providerDisabled: true as const } : {}),
+        }
+      : undefined,
+  );
+}
+
+/**
+ * 恢复会话时会话模型已停用（ADR-0054 §3）：与「未知模型」走同一条路——
+ * 没有替代模型时以 invalid_model 拒绝，有替代模型时先写 session.config_changed。
+ */
+class DisabledSessionModelError extends Error {
+  constructor(readonly model: ModelInfo) {
+    super(model.unavailable?.reason ?? "会话模型已停用");
+    this.name = "DisabledSessionModelError";
+  }
 }
 
 /**
@@ -709,6 +766,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   }
 
   /**
+   * 当前用户级停用集合（ADR-0054 §3）：读 settings.json 的专用字段。
+   * 停用的服务商不从注册表移除——resolve() 会盖章 unavailable + disabled。
+   */
+  function disabledSet(): DisabledModels {
+    return {
+      providers: new Set(config?.disabledProviders() ?? []),
+      models: new Set(config?.disabledModels() ?? []),
+    };
+  }
+
+  /**
    * Provider 构造：显式注入 + keepProviders + options.providerConfigs +
    * （有 config 时）合并后的条目。
    * keepProviders：updateProviders 重建时仍被会话引用的旧实例
@@ -760,6 +828,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       [...byId.values()],
       options.modelOverrides,
       defaultEditToolForModel,
+      disabledSet(),
     );
   }
 
@@ -810,6 +879,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ): Promise<void>;
     /** updateProviders 等：标记 providers 待重建，下一次空闲边界 rebuildProviders */
     markProvidersDirty(): void;
+    /** 当前会话模型引用（ADR-0054 describeToggleImpact 的影响面计算） */
+    currentModel(): ModelRef;
     reconcileMcp(): Promise<void>;
     refreshSkills(rescan: boolean): Promise<void>;
     refreshExternalAgents(): void;
@@ -1226,15 +1297,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           });
         } else {
           const ref = selected.model;
-          modelReviewer = {
-            backend: "model",
-            model: ref,
-            review: (input, signal) =>
-              createModelSecurityReviewer(sessionRegistry.resolve(ref), session.id).review(
-                input,
-                signal,
-              ),
-          };
+          // ADR-0054 §3：审查小模型同样尊重 unavailable——停用/不可用时按未配置处理
+          const resolvedReviewer = sessionRegistry.resolve(ref);
+          modelReviewer =
+            resolvedReviewer.model.unavailable !== undefined
+              ? undefined
+              : {
+                  backend: "model",
+                  model: ref,
+                  review: (input, signal) =>
+                    createModelSecurityReviewer(resolvedReviewer, session.id).review(input, signal),
+                };
         }
       }
       return modelReviewer;
@@ -1531,14 +1604,25 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
 
     const resolveSessionModel = (ref: ModelRef): ResolvedModel => sessionRegistry.resolve(ref);
-    for (const role of MODEL_ROLES) {
-      const ref = resolved?.modelRoles?.[role];
-      if (ref !== undefined && resolveModelRole(sessionRegistry, ref, role) === undefined) {
-        const message = `模型角色 ${role} 的模型 ${ref} 不可用，按未配置处理`;
-        warnings.push(message);
-        session.emitEphemeral("runtime.warning", { code: "model_role_unavailable", message });
+    const unavailableRoles = new Set<string>();
+    const warnUnavailableRoles = (
+      roles: Partial<Record<ModelRole, string | undefined>> | undefined,
+    ): void => {
+      for (const role of MODEL_ROLES) {
+        const ref = roles?.[role];
+        const key = `${role}/${ref}`;
+        if (ref !== undefined && resolveModelRole(sessionRegistry, ref, role) === undefined) {
+          if (unavailableRoles.has(key)) continue;
+          unavailableRoles.add(key);
+          const message = `模型角色 ${role} 的模型 ${ref} 不可用，按未配置处理`;
+          warnings.push(message);
+          session.emitEphemeral("runtime.warning", { code: "model_role_unavailable", message });
+        } else {
+          unavailableRoles.delete(key);
+        }
       }
-    }
+    };
+    warnUnavailableRoles(resolved?.modelRoles);
     let model: ResolvedModel;
     let providersDirty = false;
     /**
@@ -1562,6 +1646,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       // 配置里消失时旧实例继续供本会话使用（不重启会话、不换锁）
       const inUse = model.provider;
       sessionRegistry = buildRegistry(entries, [inUse]);
+      warnUnavailableRoles(wsNew?.resolved.modelRoles ?? config.base.modelRoles);
       if (!entries.some((e) => e.id === inUse.id)) {
         session.emitEphemeral("runtime.warning", {
           code: "provider_in_use",
@@ -1609,16 +1694,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     };
     try {
       model = resolveSessionModel(session.state().config.model);
-      // ADR-0026 §5：新建会话选到不可用模型即拒绝；恢复会话允许打开
-      // （不可用由下一轮 submit 在发请求前以同一说明结束）
+      // ADR-0054 §3：恢复会话时会话模型已停用与「未知模型」同路——没有替代
+      // 模型时以 invalid_model 拒绝，带替代模型时先写 config_changed 再打开。
+      if (resume !== undefined && model.model.disabled !== undefined) {
+        throw new DisabledSessionModelError(model.model);
+      }
+      // ADR-0026 §5：新建会话选到不可用模型即拒绝；恢复会话对协议不可识别
+      // 的模型允许打开（不可用由下一轮 submit 在发请求前以同一说明结束）。
       if (resume === undefined && model.model.unavailable !== undefined) {
-        throw new RuntimeCommandError("invalid_model", model.model.unavailable.reason);
+        throw invalidModelError(model.model.unavailable.reason, model.model);
       }
       warnIfCapabilitiesDefaulted(model.model);
       warnIfEffortClamped(model.model);
     } catch (e) {
       // 会话记录的模型无法解析：携带替代模型时先写 config_changed 再开放（sessions.md 4.2）
-      if (e instanceof UnknownModelError && resume?.modelOverride !== undefined) {
+      if (
+        (e instanceof UnknownModelError || e instanceof DisabledSessionModelError) &&
+        resume?.modelOverride !== undefined
+      ) {
         const ref = parseModelRef(resume.modelOverride);
         let replacement: ResolvedModel;
         try {
@@ -1629,13 +1722,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             `替代模型同样无法解析：${inner instanceof Error ? inner.message : String(inner)}`,
           );
         }
-        // 替代模型是显式选择：不可用同样拒绝（ADR-0026 §5）
+        // 替代模型是显式选择：不可用（含已停用）同样拒绝（ADR-0026 §5、ADR-0054）
         if (replacement.model.unavailable !== undefined) {
-          throw new RuntimeCommandError("invalid_model", replacement.model.unavailable.reason);
+          throw invalidModelError(replacement.model.unavailable.reason, replacement.model);
         }
         await session.emit("session.config_changed", { model: ref });
         model = replacement;
         warnIfCapabilitiesDefaulted(replacement.model);
+      } else if (e instanceof DisabledSessionModelError) {
+        throw invalidModelError(
+          resume !== undefined ? `${e.message}；恢复时可指定替代模型` : e.message,
+          e.model,
+        );
       } else if (e instanceof UnknownModelError) {
         throw new RuntimeCommandError(
           "invalid_model",
@@ -1964,6 +2062,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       markProvidersDirty: () => {
         providersDirty = true;
       },
+      currentModel: () => model.model.ref,
       reconcileMcp: refreshMcp,
       refreshSkills: refreshSessionSkills,
       refreshExternalAgents: refreshSessionExternalAgents,
@@ -2252,7 +2351,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           }
           // 会话中的模型变为不可用时，本轮在发请求前以说明结束，不发 HTTP
           if (model.model.unavailable !== undefined) {
-            throw new RuntimeCommandError("invalid_model", model.model.unavailable.reason);
+            throw invalidModelError(model.model.unavailable.reason, model.model);
           }
           const deps: TurnDeps = {
             prepareTools: async (signal) => {
@@ -2441,7 +2540,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         // ADR-0026 §5：不可用模型选中即拒绝（模型页照常列出但不可请求）
         if (resolved.model.unavailable !== undefined) {
-          throw new RuntimeCommandError("invalid_model", resolved.model.unavailable.reason);
+          throw invalidModelError(resolved.model.unavailable.reason, resolved.model);
         }
         await session.emit("session.config_changed", { model: ref });
         model = resolved;
@@ -2493,11 +2592,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return shellResolver.list();
       },
       visionInfo() {
-        const vision = resolveModelRole(
-          sessionRegistry,
-          config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.vision,
-          "vision",
-        );
+        // ADR-0054：与提交走同一个重建入口的同步版本——会话级注册表只在空闲边界
+        // 重建（rebuildProviders），热停用后到下一次提交前是旧的。这里按重建相同的
+        // 组成（当前合并层条目 + 在用实例保留 + 最新停用集合）现场重建再解析，
+        // 停用后立刻反映；listModels/defaultModel 同为每次现算（读同一来源）。
+        const root = session.state().meta.workspaceRoot;
+        const resolved = config?.resolvedSettings(root);
+        const fresh = buildRegistry(resolved?.providers ?? [], [model.provider]);
+        const vision = resolveModelRole(fresh, resolved?.modelRoles?.vision, "vision");
         return {
           imageInput: model.model.capabilities.imageInput,
           available: vision !== undefined,
@@ -2582,6 +2684,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         session.emitEphemeral("runtime.status", { status: "compacting" });
         try {
           await rebuildProviders();
+          // ADR-0054：会话模型被停用时压缩同样不可用（与 submit 同一说明，不发 HTTP）
+          try {
+            model = resolveSessionModel(session.state().config.model);
+          } catch {
+            // 保留旧解析；解析失败由下方 unavailable 检查或请求路径报告
+          }
+          if (model.model.unavailable !== undefined) {
+            throw invalidModelError(model.model.unavailable.reason, model.model);
+          }
           const events = session.durableEvents();
           const history = session.state().history;
           const attachmentData = new Map<string, string>();
@@ -3076,11 +3187,25 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       await config.setModelRole(role, ref);
       return config.describeSettings(root);
     },
-    describeSettings: (input) =>
-      config?.describeSettings(
-        input?.workspaceRoot ?? workspaceRoot,
-        platform.env("NOCTURNE_SHELL"),
-      ) ?? [],
+    describeSettings: (input) => {
+      const root = input?.workspaceRoot ?? workspaceRoot;
+      const settings = config?.describeSettings(root, platform.env("NOCTURNE_SHELL")) ?? [];
+      const models =
+        config !== undefined ? buildRegistry(config.resolvedSettings(root).providers) : registry;
+      return settings.map((item) => {
+        if (
+          item.effective === undefined ||
+          (item.key !== "defaultModel" && !item.key.startsWith("modelRoles."))
+        )
+          return item;
+        try {
+          const disabled = models.resolve(parseModelRef(item.effective)).model.disabled;
+          return disabled === undefined ? item : { ...item, disabled };
+        } catch {
+          return item;
+        }
+      });
+    },
     async listShells(input) {
       return (await runtimeShellResolver(input?.workspaceRoot ?? workspaceRoot)).list();
     },
@@ -3172,6 +3297,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const resolved = buildRegistry((await config.forWorkspace(root)).resolved.providers).resolve(
         parseModelRef(model),
       );
+      // ADR-0054 §3：默认模型不能指向已停用模型（停用后按未设置处理，不再新设）
+      if (resolved.model.unavailable !== undefined) {
+        throw invalidModelError(resolved.model.unavailable.reason, resolved.model);
+      }
       const levels = resolved.model.capabilities.reasoningEffort ?? [];
       if (effort !== null && effort !== "off" && !levels.includes(effort)) {
         throw new RuntimeCommandError(
@@ -3257,13 +3386,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await source.close();
       }
     },
-    listModels: (input) =>
-      (config !== undefined
-        ? buildRegistry(config.resolvedSettings(input?.workspaceRoot ?? workspaceRoot).providers)
-        : registry
+    listModels: (input) => {
+      const disabled = disabledSet();
+      const models = (
+        config !== undefined
+          ? buildRegistry(config.resolvedSettings(input?.workspaceRoot ?? workspaceRoot).providers)
+          : registry
       )
         .providers()
-        .flatMap((p) => p.models()),
+        .flatMap((p) => p.models())
+        .map((model) => applyDisabled(model, disabled));
+      // ADR-0054 §3：默认不返回停用模型（含服务商停用）；服务商页用 includeDisabled
+      return input?.includeDisabled === true
+        ? models
+        : models.filter((model) => model.disabled === undefined);
+    },
     async updateProviders(newConfig) {
       // 重建服务商注册表并按会话工作区增量更新 MCP；不动会话日志和 Hook。
       config = newConfig;
@@ -3272,13 +3409,100 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       registry = buildRegistry(newConfig.base.providers);
       await applyConfigToSessions();
     },
+    async setProviderEnabled(input) {
+      if (config === undefined)
+        throw new RuntimeCommandError("invalid_command", "服务商开关需要配置存储");
+      const parsed = z
+        .object({ provider: z.string().trim().min(1), enabled: z.boolean() })
+        .strict()
+        .parse(input);
+      await config.setProviderEnabled(parsed.provider, parsed.enabled);
+      // 写盘成功后重建运行时级注册表；已打开会话在下一空闲边界重解析（不沿用旧实例）
+      registry = buildRegistry(config.base.providers);
+      await broadcast("providers", (hooks) => {
+        hooks.markProvidersDirty();
+      });
+    },
+    async setModelsEnabled(input) {
+      if (config === undefined)
+        throw new RuntimeCommandError("invalid_command", "模型开关需要配置存储");
+      const parsed = z
+        .object({
+          provider: z.string().trim().min(1),
+          models: z.array(z.string().trim().min(1)).min(1),
+          enabled: z.boolean(),
+        })
+        .strict()
+        .parse(input);
+      await config.setModelsEnabled(parsed.provider, parsed.models, parsed.enabled);
+      registry = buildRegistry(config.base.providers);
+      await broadcast("providers", (hooks) => {
+        hooks.markProvidersDirty();
+      });
+    },
+    describeToggleImpact(input) {
+      const provider = z.string().trim().min(1).parse(input.provider);
+      const models = input.models;
+      const hit = (ref: ModelRef): boolean =>
+        models === undefined || models.length === 0
+          ? ref.provider === provider
+          : ref.provider === provider && models.includes(ref.model);
+      let affectedSessions = 0;
+      for (const hooks of openSessions.values()) {
+        if (hit(hooks.currentModel())) affectedSessions++;
+      }
+      const roots = new Set([
+        workspaceRoot,
+        ...[...openSessions.values()].map((hooks) => hooks.skillModel.workspaceRoot),
+      ]);
+      const settings = [...roots].map((root) => config?.resolvedSettings(root));
+      let defaultModel = false;
+      const roles = new Set<ModelRole>();
+      for (const item of settings) {
+        if (item?.model !== undefined && item.model !== "") {
+          try {
+            defaultModel ||= hit(parseModelRef(item.model));
+          } catch {
+            // 非法引用：不影响判定
+          }
+        }
+        for (const role of MODEL_ROLES) {
+          const ref = item?.modelRoles?.[role];
+          if (ref === undefined) continue;
+          try {
+            if (hit(parseModelRef(ref))) roles.add(role);
+          } catch {
+            // 非法引用：不影响判定
+          }
+        }
+      }
+      return {
+        affectedSessions,
+        defaultModel,
+        roles: MODEL_ROLES.filter((role) => roles.has(role)),
+      };
+    },
     defaultModel(input) {
-      const model = config?.resolvedSettings(input?.workspaceRoot ?? workspaceRoot).model;
+      const root = input?.workspaceRoot ?? workspaceRoot;
+      const model = config?.resolvedSettings(root).model;
       if (model === undefined || model === "") return undefined;
+      let ref: ModelRef;
       try {
-        return parseModelRef(model);
+        ref = parseModelRef(model);
       } catch {
         return undefined;
+      }
+      // ADR-0054 §3：停用即不可用——经注册表解析拿 disabled 盖章后按未设置处理
+      // （设置值本身保留，重新启用立即恢复；不另设停用集合判定）。
+      try {
+        const resolved = (
+          config !== undefined ? buildRegistry(config.resolvedSettings(root).providers) : registry
+        ).resolve(ref);
+        return resolved.model.disabled !== undefined ? undefined : ref;
+      } catch {
+        // 服务商未声明（手写配置指向不存在的条目）：保持原行为照常返回引用，
+        // 不可用由使用处（createSession/setModel）拦截。
+        return ref;
       }
     },
     listRecentModels: () => config?.recentModels() ?? [],

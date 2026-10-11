@@ -19,6 +19,13 @@ type SettingsData = Record<string, unknown>;
 export interface SettingsStore {
   disabledSkills(): string[];
   setSkillEnabled(name: string, enabled: boolean): Promise<void>;
+  /** ADR-0054：settings.json 顶层的服务商/模型停用集合（用户级专用读写） */
+  disabledProviders(): string[];
+  disabledModels(): string[];
+  setProviderEnabled(provider: string, enabled: boolean): Promise<void>;
+  setModelsEnabled(provider: string, models: readonly string[], enabled: boolean): Promise<void>;
+  /** 删除向导服务商时清除其在两个停用列表里的条目（ADR-0054 §2） */
+  clearProviderToggles(provider: string): Promise<void>;
   fields(): ConfigFile;
   update(patch: SettingsPatch): Promise<void>;
   setDefaultModel(model: string, effort: ReasoningEffort | null): Promise<void>;
@@ -42,7 +49,16 @@ const reservedFields = new Set([
   "shell",
   "shellPath",
   "compaction",
+  "disabledProviders",
+  "disabledModels",
 ]);
+
+/** settings.json 顶层的字符串数组字段（缺失或类型不符时为空） */
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
 
 export function validateSettingsPatch(input: unknown): asserts input is SettingsPatch {
   if (
@@ -243,6 +259,45 @@ export async function loadSettingsStore(
             : [];
           if (!enabled) disabled.push(name);
           next.skills = { ...skills, disabled };
+        });
+      },
+      disabledProviders: () => stringList(data.disabledProviders),
+      disabledModels: () => stringList(data.disabledModels),
+      async setProviderEnabled(provider, enabled) {
+        if (typeof provider !== "string" || !provider.trim() || typeof enabled !== "boolean")
+          throw new TypeError("无效的服务商开关");
+        const id = provider.trim();
+        await write((next) => {
+          const kept = stringList(next.disabledProviders).filter((item) => item !== id);
+          next.disabledProviders = enabled ? kept : [...kept, id];
+        });
+      },
+      async setModelsEnabled(provider, models, enabled) {
+        const list: unknown = models;
+        if (
+          typeof provider !== "string" ||
+          !provider.trim() ||
+          !Array.isArray(list) ||
+          list.some((model: unknown) => typeof model !== "string" || model.trim() === "") ||
+          typeof enabled !== "boolean"
+        )
+          throw new TypeError("无效的模型开关");
+        const keys = new Set(
+          (list as string[]).map((model) => `${provider.trim()}/${model.trim()}`),
+        );
+        await write((next) => {
+          const kept = stringList(next.disabledModels).filter((item) => !keys.has(item));
+          next.disabledModels = enabled ? kept : [...kept, ...keys];
+        });
+      },
+      async clearProviderToggles(provider) {
+        const id = provider.trim();
+        const prefix = `${id}/`;
+        await write((next) => {
+          next.disabledProviders = stringList(next.disabledProviders).filter((item) => item !== id);
+          next.disabledModels = stringList(next.disabledModels).filter(
+            (item) => !item.startsWith(prefix),
+          );
         });
       },
       fields: () => configFields(data),

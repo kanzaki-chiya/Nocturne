@@ -50,7 +50,7 @@ API Key（掩码输入；直接回车表示改用环境变量）：********
 | `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成；等价于服务商页「换密钥」 |
 | `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置并更新 models.dev 缓存；models.dev 失败只提示，不中断刷新 |
 | `/provider model <name> <模型>` | 编辑该模型的八个设置（显示名 / 上下文长度 / 最大输出 / 推理 / 图片输入 / 思考档位 / 协议 / 编辑工具），写入条目 `userModels.<模型>`。推理为「跟随 / 是 / 否」，CLI 输入 `-`/`y`/`n`，选否时不询问档位；协议为「跟随 / Chat Completions / Messages / Responses」，CLI 输入 `-`/`chat`/`messages`/`responses`，选「跟随」清除用户编辑（ADR-0026 第 7 节、ADR-0031 §1）；编辑工具为「跟随 / edit / apply_patch」，CLI 输入 `edit`/`patch`（或 `apply_patch`）/`-`（ADR-0035 §5）；来源含「models.dev」「按接口声明推导」「服务商类型」。手写配置来源的字段只显示不提问；只能编辑清单内模型，程序不改写 `config.json` |
-| `/provider remove <name>` | 删除向导写入的条目及其凭据；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改；等价于「删除」 |
+| `/provider remove <name>` | 删除向导写入的条目及其凭据，并一并清除它在 `settings.json` 停用集合里的条目（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)），之后同名重新添加从全部启用开始；清理写盘失败时服务商已删除、旧条目残留，以 `config_unavailable` 显式报错（重新添加时提交路径会再清理一次）；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改；等价于「删除」 |
 | `/provider login <name>` | 重新走该条目的浏览器登录；不支持登录的条目提示原因。等待可取消，错误不含授权码或令牌 |
 | `/provider logout <name>` | 删除本地保存的登录凭据。官方没有吊销接口，界面不声称已在服务端注销 |
 
@@ -236,7 +236,9 @@ prepareProvider(config, input: AddProviderInput, options?: AddProviderOptions): 
   //   draftId 不透明，绑定 config，15 分钟过期自动清理。
   // notices 包含模型列表成功/失败的步骤与说明；steps 为已完成步骤摘要，均不包含密钥。
 commitProvider(config, draftId, { manualModelId? }): Promise<AddProviderResult>
-  // 再查一次名称唯一性 → 校验模型 ID → 删除同 id 孤立凭据 → 写入凭据和条目（saveSetupProvider mode "create"）
+  // 再查一次名称唯一性 → 幂等清理同名停用条目（ADR-0054 §2：删除时清理失败残留的旧条目在此清除，
+  //   同名重新添加恒从全部启用开始；清理失败直接中止，不写任何东西）→ 校验模型 ID → 删除同 id 孤立凭据
+  //   → 写入凭据和条目（saveSetupProvider mode "create"）
   //   → 消费 loginId → 刷新 models.dev。
   // needsManualModel 时缺模型 ID 抛 ProviderSetupError("modelId")；草稿不存在、过期或重复提交抛 draftId 字段错误。
   // 返回 { providerId, modelCount, notices, message }；此处 notices 只有保存阶段的 models.dev 警告。
@@ -266,19 +268,30 @@ findProviderConflict(id: string, workspaceRoot?: string): Promise<{ id: string; 
   // 名称唯一性检查：在合并层里不分大小写找同名条目，返回原拼写与最高所在层的显示名
 setCredential(providerId: string, key: string): Promise<void>
   // 经 credentials.set 完成（缓存随之失效，下一次请求即用新密钥）；/provider key 与服务商页「换密钥」直接调用它
-removeSetupProvider(providerId: string): Promise<void>     // 删除条目并经 credentials.delete 删凭据
+removeSetupProvider(providerId: string): Promise<void>     // 删除条目并经 credentials.delete 删凭据；
+  // ADR-0054 §2：随后清理它在 disabledProviders/disabledModels 里的条目。清理是第二次写盘，
+  //   失败时服务商已删除、旧条目残留——抛 ConfigError("config_unavailable") 显式说明
+  //   （向导提交时会幂等清理，同名重新添加仍从全部启用开始）
+clearProviderToggles(providerId: string): Promise<void>     // ADR-0054 §2：幂等清理某服务商的停用条目（提交时调用）
 describeSetupProvider(providerId: string): Promise<ProviderEntryConfig | undefined>
   // 现读 providers.json 里的条目原文（U-07 编辑表单预填用）；非向导条目返回 undefined。
   //   返回对象不含任何凭据字段——凭据只存在于凭据存储，条目从来不携带。
 describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>
   // /provider 与服务商页列表数据：名称、类型、主机名、鉴权描述、认证方式 authKind、凭据状态、保存位置、来源层、
   //   模型数；不含令牌。给 workspaceRoot 时并入该工作区可信项目层的条目。
+  // ADR-0054：每条另带 enabled（服务商是否启用，缺省按启用）与 enabledModelCount
+  //（已启用模型数，服务商停用时为 0，缺省用声明总数）。
   // authKind："apiKey"（凭据存储里的密钥）/ "env"（环境变量）/ "account"（ChatGPT、Grok 账号登录）/
   //   "external-file"（外部登录文件）/ "none"（尚无凭据）；客户端据此选择「换密钥」或「重新登录」。
   // 账号凭据状态：每次从磁盘读最新记录（不用进程内缓存），只看本地记录，不发网络请求——
   //   有刷新令牌即为 valid，访问令牌是否过期都一样（下一次请求自动续期）；没有刷新令牌时按访问令牌到期时间
   //   给 valid / expiring（5 分钟内到期）/ expired。刷新令牌被服务端拒绝（invalid_grant 等终止性失败）时，
   //   续期路径在刷新锁内删除该凭据记录，下一次 describeProviders 因此显示 missing（缺少，需要重新登录）。
+disabledProviders(): string[] / disabledModels(): string[]  // settings.json 的停用集合（ADR-0054；用户级专用读写）
+setProviderEnabled(provider: string, enabled: boolean): Promise<void>
+  // 写 settings.json 的 disabledProviders；停用保留其 disabledModels 条目，重新启用后逐个设置恢复
+setModelsEnabled(provider: string, models: readonly string[], enabled: boolean): Promise<void>
+  // 批量写 disabledModels（models 为模型 id）；「全部启用 / 停用」用它
 refreshUpstreamLimits(providerId: string): Promise<string | undefined> // 刷新上游及 models.dev；失败仅返回提示
 refreshModelsDev(): Promise<string | undefined>          // 显式更新 models.dev 缓存；失败返回提示
 listModelSettings(providerId: string, workspaceRoot?: string): Promise<ModelSettingsView[]>

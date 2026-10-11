@@ -249,6 +249,8 @@ type QuestionAnswer = { declined: true } | {
 
 会话处于 `failed` 状态时，除 `close` 外的命令都返回 `session_failed`。
 
+`invalid_model` 在模型**不可用**时（协议不可识别，或[已停用](../decisions/ADR-0054-provider-model-toggle.md)）返回结构化补充 `CommandErrorDetail`：`{ disabled?: "provider" | "model", model?: ModelRef, providerDisabled?: boolean }`。双重停用（模型被逐个停用、其服务商也被停用）时 `disabled` 记 `"model"` 并带 `providerDisabled: true`，客户端一键重新启用需同时恢复两者。进程内是 `RuntimeCommandError.detail`，RPC 序列化进 `error.data`（见 [rpc.md](rpc.md) 第 5 节），客户端据此区分「已停用」（可重新启用）与「已删除」。
+
 ## 8. 演进与未知内容
 
 **读取方分两类，规则不同：**

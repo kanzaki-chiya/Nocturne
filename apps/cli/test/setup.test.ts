@@ -68,6 +68,8 @@ it.each(["deepseek", "grok-cli"])(
         saved.push(entry);
       },
       refreshModelsDev: async () => undefined,
+      // ADR-0054：commitProvider 提交时幂等清理同名停用条目，桩需提供该方法
+      clearProviderToggles: async (_id: string) => undefined,
     } as unknown as RuntimeConfig;
     const flow = runProviderSetupFlow(
       io,

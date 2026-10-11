@@ -68,7 +68,12 @@ export function toRpcError(error: unknown): RpcErrorObject {
     ...(name !== undefined ? { name } : {}),
   };
   if (error instanceof RuntimeCommandError) {
-    return { code: RPC_ERROR.commandRejected, message, data };
+    // detail（ADR-0054）：invalid_model 的 disabled + 模型引用随 error.data 返回
+    return {
+      code: RPC_ERROR.commandRejected,
+      message,
+      data: { ...data, ...(error.detail ?? {}) },
+    };
   }
   if (error instanceof SessionError) return { code: RPC_ERROR.sessionError, message, data };
   if (error instanceof ProviderLoginError) return { code: RPC_ERROR.loginError, message, data };

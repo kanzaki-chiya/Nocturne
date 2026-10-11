@@ -69,8 +69,23 @@ export interface ModelInfo {
   /**
    * 不可用模型（ADR-0026 §5）：上游声明的接口无一可识别
    * （如只有 /responses）；该模型继续在清单中展示，但不可发请求。
+   * ADR-0054 起「用户停用」同样落到这里；来源由 disabled 区分。
    */
   unavailable?: { reason: string } | undefined;
+  /**
+   * 不可用的来源（ADR-0054 §3）：`"provider"` = 其服务商被停用，
+   * `"model"` = 该模型被逐个停用。仅当停用导致 unavailable 时存在，
+   * 供客户端区分「已停用」（可重新启用）与「协议不可识别」。
+   * 两者同时命中记 `"model"`（个别停用优先，服务商页据此保留逐个开关状态）；
+   * 此时服务商同样停用，`providerDisabled` 为 true（一键重新启用需同时恢复两者）。
+   */
+  disabled?: "provider" | "model" | undefined;
+  /**
+   * 双重停用标记（ADR-0054 §3）：仅 `disabled === "model"` 且其服务商
+   * 也被停用时为 true。客户端一键「重新启用」时同时恢复服务商与模型；
+   * TUI 提示同时给出两条命令。单重停用时不存在。
+   */
+  providerDisabled?: boolean | undefined;
 }
 
 // ── 请求（provider-api.md 第 3 节） ────────────────────────

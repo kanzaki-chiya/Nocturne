@@ -81,6 +81,35 @@ async function visionSetup(
   };
 }
 
+it("vision 角色热停用不发图片描述请求，重新启用恢复描述并发角色警告（ADR-0054）", async () => {
+  const { runtime, provider, session } = await visionSetup();
+  const events: RuntimeEvent[] = [];
+  session.subscribe((e) => events.push(e));
+  await runtime.setModelsEnabled({ provider: "fake", models: ["vision"], enabled: false });
+  await session.submit({ text: "检查报错", attachments: [image] });
+  expect(visionRequests(provider)).toHaveLength(0);
+  expect(session.durableEvents().some((e) => e.type === "attachment.described")).toBe(false);
+  expect(
+    events.some((e) => e.type === "runtime.warning" && e.payload.code === "model_role_unavailable"),
+  ).toBe(true);
+  expect(session.visionInfo().available).toBe(false);
+  await runtime.setModelsEnabled({ provider: "fake", models: ["vision"], enabled: true });
+  await session.submit({ text: "再看" });
+  expect(visionRequests(provider)).toHaveLength(1);
+  await session.close();
+});
+
+it("visionInfo 热停用后立刻不可用，重新启用立刻恢复（不等下一次提交）", async () => {
+  const { runtime, session } = await visionSetup();
+  expect(session.visionInfo()).toMatchObject({ available: true, model: "fake/vision" });
+  await runtime.setModelsEnabled({ provider: "fake", models: ["vision"], enabled: false });
+  // 未提交：visionInfo 已反映停用（与提交同一重建入口现算）
+  expect(session.visionInfo()).toMatchObject({ available: false, model: undefined });
+  await runtime.setModelsEnabled({ provider: "fake", models: ["vision"], enabled: true });
+  expect(session.visionInfo()).toMatchObject({ available: true, model: "fake/vision" });
+  await session.close();
+});
+
 it("用户图片描述一次：请求约束、文字投影、重放恢复与独立用量", async () => {
   const { runtime, provider, session } = await visionSetup();
   expect(session.visionInfo()).toEqual({

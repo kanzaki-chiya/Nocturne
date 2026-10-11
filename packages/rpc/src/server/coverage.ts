@@ -46,6 +46,9 @@ export const RUNTIME_METHODS: Record<
   probeExternalAgent: "agents.probeExternalAgent",
   describeSkills: "skills.describeSkills",
   setSkillEnabled: "skills.setSkillEnabled",
+  setProviderEnabled: "provider.setProviderEnabled",
+  setModelsEnabled: "provider.setModelsEnabled",
+  describeToggleImpact: "provider.describeToggleImpact",
   importSkills: "skills.importSkills",
   saveMcpServer: "mcp.saveMcpServer",
   deleteMcpServer: "mcp.deleteMcpServer",
@@ -100,6 +103,10 @@ export const CONFIG_NOT_MAPPED = {
   skillConfig: "用户级技能来源设置由 skills.describeSkills 使用",
   disabledSkills: "技能开关由 skills.describeSkills 返回",
   setSkillEnabled: "Runtime 统一写入并更新会话，映射 skills.setSkillEnabled",
+  disabledProviders: "停用集合；provider.describeProviders 的 enabled/enabledModelCount 反映它",
+  disabledModels: "停用集合；provider.describeProviders 的 enabledModelCount 反映它",
+  setProviderEnabled: "Runtime 统一写入并重建注册表，映射 provider.setProviderEnabled",
+  setModelsEnabled: "Runtime 统一写入并重建注册表，映射 provider.setModelsEnabled",
   reload: "进程内重新加载，由 runtime.reloadConfig 映射",
   nocturneHome: "本机路径，客户端不需要",
   attachmentsDir: "本机路径，客户端不需要",
@@ -110,6 +117,8 @@ export const CONFIG_NOT_MAPPED = {
   forWorkspace: "进程内合并入口；经 runtime.listModels / provider.describeProviders 获取",
   setWorkspaceTrusted: "项目信任由 nctrn trust 管理，第一版不经 RPC",
   credentials: "凭据存储对象，含明文凭据，不离开服务端进程",
+  clearProviderToggles:
+    "停用条目幂等清理；删除时由 removeSetupProvider 内部调用，提交时由 commitProvider 内部调用",
   saveSetupProvider:
     "底层写入接口，经 provider.prepareProvider + provider.commitProvider / provider.updateSetupProvider 使用",
   findProviderConflict:

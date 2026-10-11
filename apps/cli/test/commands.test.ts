@@ -402,6 +402,8 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
               origin: "setup" as const,
               overridden: false,
               modelCount: 2,
+              enabled: true,
+              enabledModelCount: 2,
               managed: true,
             },
             {
@@ -413,6 +415,8 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
               origin: "user" as const,
               overridden: false,
               modelCount: 0,
+              enabled: true,
+              enabledModelCount: 0,
               managed: false,
             },
           ],

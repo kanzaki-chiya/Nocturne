@@ -816,8 +816,13 @@ class Connection {
         });
         return { sessionId };
       },
-      "runtime.listModels": async (p) =>
-        this.runtime().listModels({ workspaceRoot: await this.workspaceOf(p) }),
+      "runtime.listModels": async (p) => {
+        const includeDisabled = optBool(p, "includeDisabled");
+        return this.runtime().listModels({
+          workspaceRoot: await this.workspaceOf(p),
+          ...(includeDisabled !== undefined ? { includeDisabled } : {}),
+        });
+      },
       "runtime.defaultModel": async (p) =>
         this.runtime().defaultModel({ workspaceRoot: await this.workspaceOf(p) }) ?? null,
       "runtime.listRecentModels": () => this.runtime().listRecentModels(),
@@ -1164,6 +1169,50 @@ class Connection {
         return await this.mutateAndReload(async (config) =>
           updateSetupProvider(config, providerId, patch),
         );
+      },
+      // 服务商/模型启停（ADR-0054 §3）：写 settings.json 专用字段，不重载配置
+      // （写入落在当前配置对象的 settings store，registry 随 providersChanged 重建）
+      "provider.setProviderEnabled": (p) => {
+        const enabled = optBool(p, "enabled");
+        if (enabled === undefined) throw new InvalidParamsError("enabled 必须是布尔值");
+        return this.enqueueConfig(async () => {
+          await this.runtime().setProviderEnabled({ provider: reqString(p, "provider"), enabled });
+          this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+          return null;
+        });
+      },
+      "provider.setModelsEnabled": (p) => {
+        const enabled = optBool(p, "enabled");
+        if (enabled === undefined) throw new InvalidParamsError("enabled 必须是布尔值");
+        const models = p.models;
+        if (
+          !Array.isArray(models) ||
+          models.length === 0 ||
+          models.some((model) => typeof model !== "string" || model.trim() === "")
+        )
+          throw new InvalidParamsError("models 必须是非空字符串数组");
+        return this.enqueueConfig(async () => {
+          await this.runtime().setModelsEnabled({
+            provider: reqString(p, "provider"),
+            models: models as string[],
+            enabled,
+          });
+          this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+          return null;
+        });
+      },
+      "provider.describeToggleImpact": (p) => {
+        const models = p.models;
+        if (
+          models !== undefined &&
+          (!Array.isArray(models) ||
+            models.some((model) => typeof model !== "string" || model.trim() === ""))
+        )
+          throw new InvalidParamsError("models 必须是字符串数组");
+        return this.runtime().describeToggleImpact({
+          provider: reqString(p, "provider"),
+          ...(models !== undefined ? { models: models as string[] } : {}),
+        });
       },
 
       // 登录会话（rpc.md 3.4）：start 返回句柄，完成经 login.completed 通知

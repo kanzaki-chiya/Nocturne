@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createPlatform } from "@nocturne/core";
+import { createPlatform, createRuntime } from "@nocturne/core";
+import { parseArgs } from "../src/args.js";
 
 import type { CliArgs } from "../src/args.js";
 import { collectConfig, configProblemsReport, normalizeModelRef } from "../src/config.js";
@@ -39,6 +40,47 @@ afterEach(() => {
 });
 
 describe("Provider 配置收集（cli.md 第 8 节）", () => {
+  it.each(["provider", "model"])(
+    "--model 指向停用 %s 时以 invalid_model 拒绝且不发 HTTP（ADR-0054）",
+    async (source) => {
+      writeFileSync(
+        path.join(home, "settings.json"),
+        JSON.stringify(
+          source === "provider"
+            ? { disabledProviders: ["openai-compatible"] }
+            : { disabledModels: ["openai-compatible/m1"] },
+        ),
+      );
+      const args = parseArgs(["--print", "--model", "m1", "hello"]);
+      const result = await collectConfig(
+        args,
+        platform,
+        envOf({
+          NOCTURNE_HOME: home,
+          NOCTURNE_BASE_URL: "https://example.invalid/v1",
+          NOCTURNE_API_KEY: "test-placeholder",
+        }),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.config.model).toBe("openai-compatible/m1");
+      const fetch = vi.fn<typeof globalThis.fetch>();
+      vi.stubGlobal("fetch", fetch);
+      try {
+        const runtime = await createRuntime({ cwd: home, config: result.config.runtime });
+        const model = result.config.model;
+        if (model === undefined) throw new Error("缺少模型");
+        await expect(runtime.createSession({ model })).rejects.toMatchObject({
+          code: "invalid_model",
+          detail: { disabled: source, model: { provider: "openai-compatible", model: "m1" } },
+        });
+        expect(fetch).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
   it("openai-compatible：env 齐全 → 组装配置", async () => {
     const r = await collectConfig(
       base,

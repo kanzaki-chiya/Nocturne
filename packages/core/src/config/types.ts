@@ -364,6 +364,26 @@ export interface ProviderOverview {
   modelCount: number;
   /** 条目可由向导管理（写入 providers.json）；其他层的条目只读 */
   managed: boolean;
+  /**
+   * ADR-0054 §3：服务商是否启用。Core 恒提供实际值；可选是为兼容旧数据——
+   * 缺省按启用处理（`=== false` 才算停用），旧客户端/旧测试的字面量可不写。
+   */
+  enabled?: boolean | undefined;
+  /**
+   * ADR-0054 §3：已启用模型数（服务商停用或模型被逐个停用时相应减少；
+   * 服务商停用为 0）。Core 恒提供；缺省时客户端用声明总数代替。
+   */
+  enabledModelCount?: number | undefined;
+}
+
+/** `describeToggleImpact` 的结果（ADR-0054 §3）：停用前的确认数据 */
+export interface ToggleImpact {
+  /** 当前模型落入停用集合的已打开会话数（不含未受影响的会话） */
+  affectedSessions: number;
+  /** 默认模型是否落入停用集合（停用后按未设置处理） */
+  defaultModel: boolean;
+  /** 指向停用集合中模型的模型角色 */
+  roles: ModelRole[];
 }
 
 /** 上游模型信息（provider-setup.md 第 7 节字段映射的产物；纯数据） */
@@ -478,6 +498,8 @@ export type ModelSettingsPatch = {
 };
 
 export interface SettingItem {
+  /** 模型设置值的停用来源，由 Runtime 经注册表解析派生。 */
+  disabled?: "provider" | "model" | undefined;
   reviewer?: {
     effective: SecurityReviewerConfig | undefined;
     saved: SecurityReviewerConfig | undefined;
@@ -515,6 +537,18 @@ export interface RuntimeConfig {
   skillConfig(): SkillsConfig;
   disabledSkills(): string[];
   setSkillEnabled(name: string, enabled: boolean): Promise<void>;
+  /**
+   * ADR-0054：settings.json 顶层的停用集合（用户级专用读写，与技能启停同一
+   * 文件同一写队列，不进入 ADR-0034 的白名单通用合并）。指向不存在服务商/
+   * 模型的条目无害。disabledProviders 区分大小写；disabledModels 用
+   * `"<provider>/<model>"`。
+   */
+  disabledProviders(): string[];
+  disabledModels(): string[];
+  /** 启停一个服务商：停用时保留其 disabledModels 条目，重新启用后逐个模型设置仍生效 */
+  setProviderEnabled(provider: string, enabled: boolean): Promise<void>;
+  /** 批量启停某服务商下的模型（models 为模型 id，不带 provider 前缀） */
+  setModelsEnabled(provider: string, models: readonly string[], enabled: boolean): Promise<void>;
   reload(): Promise<RuntimeConfig>;
   describeExternalAgents(input?: {
     workspaceRoot?: string | undefined;
@@ -587,8 +621,15 @@ export interface RuntimeConfig {
   /**
    * 删除向导写入的条目及其凭据。条目不在 providers.json（由更高层
    * 定义或不存在）时抛 ConfigError("config_invalid")，由调用方提示。
+   * ADR-0054 §2：成功后调用方还需清理该服务商的停用条目（见 clearProviderToggles）。
    */
   removeSetupProvider(providerId: string): Promise<void>;
+  /**
+   * ADR-0054 §2：幂等清理某服务商在 disabledProviders/disabledModels 里的条目。
+   * 删除服务商的清理失败时由 removeSetupProvider 显式报错；向导提交
+   * （commitProvider）时调用，保证同名重新添加从全部启用开始。
+   */
+  clearProviderToggles(providerId: string): Promise<void>;
   /**
    * 新建服务商的名称冲突检查（provider-setup.md「名称唯一性」）：合并各层（向导层现读、
    * 项目层按 workspaceRoot 且可信时参与）中有同名条目（不区分大小写）时返回原名与层标签。

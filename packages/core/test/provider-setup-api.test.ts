@@ -73,6 +73,7 @@ function makeConfig(backend: Backend) {
     },
     findProviderConflict: (id: string) => Promise.resolve(conflict(id)),
     refreshModelsDev: vi.fn(async (): Promise<string | undefined> => undefined),
+    clearProviderToggles: vi.fn(async (_providerId: string): Promise<void> => undefined),
   } as unknown as RuntimeConfig;
   return { config, saved, stored, existing };
 }
@@ -873,5 +874,12 @@ describe("名称唯一性", () => {
     await commitProvider(config, draft.draftId);
     expect(saved[0]?.entry.apiKeyEnv).toBe("TEST_KEY");
     expect(stored.has("deepseek")).toBe(false);
+  });
+
+  it("提交时幂等清理同名停用条目：残留旧条目不继承（ADR-0054 §2）", async () => {
+    const { config } = makeConfig("memory");
+    const draft = await prepareProvider(config, input, { fetchModels: async () => [{ id: "m" }] });
+    await commitProvider(config, draft.draftId);
+    expect(config.clearProviderToggles).toHaveBeenCalledWith("deepseek");
   });
 });

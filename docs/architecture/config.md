@@ -105,6 +105,8 @@ models.dev 数据在启动时从缓存或内置快照读取，启动不联网；
 
 **程序设置层 `settings.json`**（[ADR-0034](../decisions/ADR-0034-settings-layer.md)）：白名单为 `modelRoles`、`model`、`reasoningEffort`、`permissions.preset`、`permission.reviewer`、`compaction.threshold`、`shell`、`shellPath`，与 `config.json` 共用 schema，按第 1 节的顺序参与通用合并。损坏文件忽略并警告；无效字段逐个忽略并警告，其余合法字段继续生效，不阻塞启动。白名单外字段（包括 `permissions`、`compaction` 中的未知成员）原样保留，但不参与合并；`theme` 等界面偏好仍由客户端解释。写入采用临时文件 + rename，成功后才更新内存，失败保留旧值，同进程并发写入串行执行，避免设置与偏好互相覆盖。
 
+顶层 `disabledProviders: string[]` 与 `disabledModels: string[]`（`"<服务商 id>/<模型 id>"`）是服务商与模型启停的专用字段（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)）：与 `skills.disabled` 同一文件、同一写队列，由专用接口读写，**不进入**上面的白名单通用合并；只有用户级，项目配置不能启停。停用集合经注册表解析盖章为 `ModelInfo.unavailable` + `disabled`，详见 [providers.md](providers.md) 与 [provider-setup.md](provider-setup.md) 第 6 节。
+
 **压缩阈值**（[ADR-0037](../decisions/ADR-0037-compaction-retention.md)）：`compaction.threshold` 支持 `"90%"`（须在 `(0,100%]`）、正整数 token（如 `200000`）或简写字符串（`"200k"`、`"1.5m"`，解析后须为正整数）。默认 `"90%"`；绝对值超过当前可用输入预算时按预算处理。`config.json`、`settings.json` 与可信项目配置按通用分层高层覆盖低层，不可信项目忽略。保存值不随模型窗口改写；`100%` 或达到预算的绝对值关闭预防性修剪与摘要。触发与保留区见 [context.md](context.md) §6。
 
 Shell 也走通用合并，`session.setShell` 仍先探测可执行文件，再写 `shell`/`shellPath`；`auto` 清除保存值。保留 ADR-0022 的声明边界：手写层之间逐字段覆盖；手写配置覆盖程序 shell 设置、环境变量覆盖配置时，替换整份 shell 声明，不继承低层路径。自动选择与非法环境变量降级见 [tools.md](tools.md) 第 6 节。
@@ -122,7 +124,12 @@ listReviewerProviders(): Promise<ProviderOverview[]>
 defaultReviewer(endpoint: JevEndpoint, baseURL?: string): Promise<JevReviewerConfig>
 listReviewerModels(reviewer: JevReviewerConfig, signal?: AbortSignal): Promise<{ models: string[]; warning?: string }>
 setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<SettingItem[]>
+setProviderEnabled({ provider, enabled }): Promise<void>
+setModelsEnabled({ provider, models, enabled }): Promise<void>
+describeToggleImpact({ provider, models? }): ToggleImpact
 ```
+
+`setProviderEnabled` / `setModelsEnabled` / `describeToggleImpact` 是服务商与模型启停（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)）：前两者写 `settings.json` 的 `disabledProviders` / `disabledModels`（专用读写，用户级），写盘成功后重建 Provider 注册表并让已打开会话在下一空闲边界重解析；`describeToggleImpact` 只读，返回受影响的打开会话数、默认模型是否命中与受影响的模型角色，供客户端在停用前确认。默认模型指向停用模型时 `defaultModel()` 返回 `undefined`；角色按 ADR-0040 的「不可用按未配置」路径处理。
 
 `SettingItem` 给出默认预设、安全审查模型、默认模型、默认档位、shell、压缩阈值和三个模型角色的生效值、来源、保存值与覆盖标记；默认模型与默认档位只读。`SettingsPatch` 接受 `permissions.preset`、`permission.reviewer` 、`compaction.threshold` 与 `modelRoles.*`，`null` 清除；默认档位不能单独修改，只随默认模型经 `setDefaultModel` 成对保存（ADR-0034 修订），`setDefaultModel` 按该模型的可用档位校验，不支持时以 `invalid_command` 拒绝并列出可选值。`setDefaultModel` 在一次原子写入中保存模型和档位，`null` 清除档位；不再写 `providers.json`，其中旧 `model` 仍按向导层读取。完整类型见 ADR-0034 第 3 节。未注入 `RuntimeConfig` 时读取返回空数组，写入 Promise 拒绝。
 

@@ -36,8 +36,8 @@
 | `resumeSession` | `{ sessionId, model?, force? }` → `SessionOpened` |
 | `forkSession` | `{ sessionId, targetSeq? }` → `{ sessionId }`（新会话未打开，用 `resumeSession` 打开） |
 | `usageStats` | `{ days?: number }`（正整数，缺省全部）→ protocol 的 `UsageStats`（含按模型的 `requests`、`latency`、`performance`、`cacheSavings`、首末使用时间，范围内逐日的 `requests` 与 `models` 拆分，以及 `performanceGranularity`）；只读，不打开会话或取锁，见 [usage.md](../architecture/usage.md) |
-| `listModels` / `defaultModel` / `listRecentModels` | 模型列表 / `ModelRef \| null` / `ModelRef[]`；前两者可带 `workspaceRoot` |
-| `describeSettings` / `updateSettings` | `SettingItem[]`；均可带 `workspaceRoot`，`updateSettings { patch, reviewerKey? }` |
+| `listModels` / `defaultModel` / `listRecentModels` | 模型列表 / `ModelRef \| null` / `ModelRef[]`；前两者可带 `workspaceRoot`；`listModels` 另可带 `includeDisabled`（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)：true 时含停用模型并带 `disabled`，默认滤除；停用模型也带 `unavailable`） |
+| `describeSettings` / `updateSettings` | `SettingItem[]`；均可带 `workspaceRoot`，`updateSettings { patch, reviewerKey? }`；`describeSettings` 的模型设置项可带 `disabled: "provider" \| "model"`，由注册表解析派生，供设置值显示停用状态，模型选择列表仍用默认 `listModels()` |
 | `listShells` | `{ workspaceRoot? }` → 全部已知种类的 DetectedShell[]（含不可用项） |
 | `setShellSetting` | `{ kind, workspaceRoot? }` → `SettingItem[]`；先验证可用性再写设置，覆盖来源随结果返回，已有会话按实际变化记配置事件 |
 | `setDefaultModel` | `{ model, reasoningEffort, workspaceRoot? }` → `SettingItem[]` |
@@ -102,6 +102,9 @@
 | `describeSetupProvider` | `{ providerId }` → `ProviderEntryConfig \| null`；providers.json 条目原文（不含凭据），供编辑表单预填；非向导条目为 `null` |
 | `probeSetupProviderModels` | `{ providerId, type, baseURL?, headers? }` → `{ models: UpstreamModelEntry[] }`；按候选配置向候选地址发一次模型列表请求，凭据按条目现有规则解析，不写任何配置；失败原样报错，由客户端决定是否「仍然保存」 |
 | `updateSetupProvider` | `{ providerId, patch }` → `{ providerId, modelCount, message }`；**变更方法**；只允许 providers.json 里的自定义条目——非向导条目报 -32005 / `field: "providerId"`，内置预设条目报 `field: "preset"`；`patch` 缺省字段保留原值（字符串空串表示清除），`models` 提供时随条目更新清单与 `source`/`fetchedAt` |
+| `setProviderEnabled` | `{ provider, enabled }` → `null`；**变更方法**（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)）：写 settings.json 的 `disabledProviders`，不重载配置，响应之前推一次 `runtime.providersChanged`；停用保留该服务商的逐个模型设置，重新启用即恢复 |
+| `setModelsEnabled` | `{ provider, models: string[], enabled }` → `null`；**变更方法**：批量写 `disabledModels`（`models` 为模型 id，非空），供「全部启用 / 停用」；同样推 `runtime.providersChanged` |
+| `describeToggleImpact` | `{ provider, models? }` → `ToggleImpact`（`{ affectedSessions, defaultModel, roles }`）；只读，`models` 省略时按整个服务商计算，供客户端停用前确认 |
 
 **配置对象与重载**（ADR-0044 追加记录）：
 
@@ -208,7 +211,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 | `-32602` | 参数缺失或类型错误（在进入 Runtime 之前校验） | `invalid_params` |
 | `-32603` | RPC 层内部错误 | `internal_error` |
 | `-32000` | 其他 Core 错误（原样透传 `message`） | 原 `error.code`（如有） |
-| `-32001` | `RuntimeCommandError`（命令被拒绝，原因码见 [events.md](events.md) 第 7 节） | `session_busy`、`unknown_request`、`invalid_reply`、`invalid_command` |
+| `-32001` | `RuntimeCommandError`（命令被拒绝，原因码见 [events.md](events.md) 第 7 节） | `session_busy`、`unknown_request`、`invalid_reply`、`invalid_command`、`invalid_model`（因模型不可用，如已停用；此时 `data` 另带 `disabled: "provider" \| "model"` 与 `model: { provider, model }`，双重停用时另带 `providerDisabled: true`（`disabled` 记 `"model"`，一键重新启用需同时恢复两者），见 [ADR-0054](../decisions/ADR-0054-provider-model-toggle.md) §3，客户端据此区分「已停用」与「已删除」） |
 | `-32002` | `SessionError` | 会话层错误码 |
 | `-32003` | `ProviderLoginError` | 登录错误码 |
 | `-32004` | RPC 层状态错误 | `not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down`、`provider_config_unavailable`（服务端未注入服务商配置）、`provider_in_use`（会话正在使用的服务商拒绝删除）、`unknown_login`（登录会话不存在或已结束） |

@@ -26,7 +26,57 @@ export class UnknownModelError extends Error {
  * unavailable 是派生结果（ADR-0026 §5），不是可声明字段——覆盖
  * protocol/endpoints 后由装配层重新推导。
  */
-export type ModelOverride = Partial<Omit<ModelInfo, "ref" | "unavailable">>;
+export type ModelOverride = Partial<
+  Omit<ModelInfo, "ref" | "unavailable" | "disabled" | "providerDisabled">
+>;
+
+/**
+ * 用户级停用集合（ADR-0054 §3）：providers 是服务商 id（区分大小写），
+ * models 是 `"<provider>/<model>"`。构建注册表时传入，resolve() 据此盖
+ * `unavailable` + `disabled`；停用的服务商不从注册表移除（不沿用旧解析）。
+ */
+export interface DisabledModels {
+  providers: ReadonlySet<string>;
+  models: ReadonlySet<string>;
+}
+
+const DISABLED_ENABLE_HINT = "可在 设置 › 服务商 或 /provider 重新启用";
+
+/** 停用导致不可用时的原因文案（ADR-0054 §3） */
+export function disabledReason(ref: ModelRef, source: "provider" | "model"): string {
+  return source === "provider"
+    ? `服务商 ${ref.provider} 已停用（${DISABLED_ENABLE_HINT}）`
+    : `模型 ${ref.provider}/${ref.model} 已停用（${DISABLED_ENABLE_HINT}）`;
+}
+
+/**
+ * 给解析结果盖上停用标记：停用的服务商覆盖其下全部模型；逐个停用的模型
+ * 独立命中。个别停用优先于服务商停用（disabled="model"）——服务商停用时
+ * 客户端仍能从该来源还原逐个设置（ADR-0054 §3、§4「开关保留状态」）。
+ * 双重命中时另带 providerDisabled（ADR-0054 §3：一键重新启用需同时恢复两者）。
+ * 已由协议推导标 unavailable 的模型在停用时改写为停用原因
+ * （重新启用才是可操作的动作）。未停用时原样返回。
+ */
+export function applyDisabled(model: ModelInfo, disabled: DisabledModels | undefined): ModelInfo {
+  if (disabled === undefined) return model;
+  const modelOff = disabled.models.has(`${model.ref.provider}/${model.ref.model}`);
+  const providerOff = disabled.providers.has(model.ref.provider);
+  const source = modelOff ? ("model" as const) : providerOff ? ("provider" as const) : undefined;
+  if (source === undefined) {
+    // 未停用：同时剥掉可能残留的旧盖章（provider.models() 的条目可能带着
+    // 构造时的 disabled，listModels / resolve 每次都以当前集合重算）。
+    if (model.disabled === undefined && model.providerDisabled === undefined) return model;
+    const { disabled: _dropped, providerDisabled: _alsoDropped, ...rest } = model;
+    return rest;
+  }
+  const { providerDisabled: _stale, ...rest } = model;
+  return {
+    ...rest,
+    unavailable: { reason: disabledReason(model.ref, source) },
+    disabled: source,
+    ...(modelOff && providerOff ? { providerDisabled: true as const } : {}),
+  };
+}
 
 /** 在既有 ModelInfo 上应用用户覆盖 */
 export function applyModelOverride(
@@ -104,6 +154,7 @@ export function createProviderRegistry(
   providers: Provider[],
   modelOverrides: Record<string, Record<string, ModelOverride>> = {},
   editToolDefault?: EditToolDefault,
+  disabled?: DisabledModels,
 ): ProviderRegistry {
   const byId = new Map<string, Provider>();
   for (const p of providers) {
@@ -129,7 +180,8 @@ export function createProviderRegistry(
       const model = isModelProtocol(provider.type)
         ? withEffectiveProtocol(merged2, provider.type)
         : merged2;
-      return { provider, model };
+      // ADR-0054 §3：停用在此盖章——停用的服务商照常解析出实例，但结果不可用。
+      return { provider, model: applyDisabled(model, disabled) };
     },
     providers: () => [...byId.values()],
   };

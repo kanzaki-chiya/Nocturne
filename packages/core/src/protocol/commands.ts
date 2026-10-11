@@ -51,3 +51,20 @@ export type CommandRejectCode =
   | "compaction_in_progress"
   | "compaction_interrupted"
   | "compaction_failed";
+
+/**
+ * 命令拒绝的结构化补充（ADR-0054 §3）：`invalid_model` 因模型不可用时携带
+ * 停用来源与模型引用，让客户端区分「已停用」（可重新启用）与「已删除」。
+ * 进程内以 RuntimeCommandError.detail 提供；RPC 序列化进 error.data。
+ */
+export interface CommandErrorDetail {
+  /** 停用来源：服务商整体停用 / 该模型被逐个停用 */
+  disabled?: "provider" | "model" | undefined;
+  /** 不可用的模型引用 */
+  model?: ModelRef | undefined;
+  /**
+   * 双重停用（ADR-0054 §3）：`disabled === "model"` 且其服务商也被停用时为 true。
+   * 客户端一键「重新启用」需同时恢复服务商与模型；TUI 同时给出两条命令。
+   */
+  providerDisabled?: boolean | undefined;
+}

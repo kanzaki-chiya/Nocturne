@@ -46,8 +46,17 @@ interface ModelInfo {
   /** 上游声明的服务接口原文（supported_endpoints；ADR-0026 §2） */
   endpoints?: string[]
   /** 生效协议为 "unavailable" 时的说明（ADR-0026 §5）：模型照常列出，
-      选择或请求时以此原因拒绝，不发 HTTP 请求 */
+      选择或请求时以此原因拒绝，不发 HTTP 请求。ADR-0054 起「用户停用」
+      同样落到这里；来源由 disabled 区分 */
   unavailable?: { reason: string }
+  /** 不可用的来源（ADR-0054 §3）："provider" = 其服务商被停用，
+      "model" = 该模型被逐个停用；仅停用导致 unavailable 时存在。
+      两者同时命中记 "model"（个别停用优先），服务商停用时客户端据此
+      仍能还原逐个设置（ADR-0054 §4「开关保留状态」）；
+      双重命中时另带 providerDisabled（§3：一键重新启用需同时恢复两者） */
+  disabled?: "provider" | "model"
+  /** 双重停用：disabled === "model" 且其服务商也被停用时为 true */
+  providerDisabled?: boolean
 }
 
 interface ModelCapabilities {

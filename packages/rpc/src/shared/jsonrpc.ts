@@ -33,6 +33,14 @@ export interface RpcErrorData {
   name?: string;
   /** ProviderSetupError 的字段名（preset/name/credential/draftId/modelId），客户端据此标输入框 */
   field?: string;
+  /** RuntimeCommandError.detail（ADR-0054）：invalid_model 的停用来源与模型引用 */
+  disabled?: "provider" | "model" | undefined;
+  model?: { provider: string; model: string } | undefined;
+  /**
+   * 双重停用（ADR-0054 §3）：disabled === "model" 且其服务商也被停用时为 true；
+   * 客户端一键重新启用需同时恢复两者
+   */
+  providerDisabled?: boolean | undefined;
 }
 
 export interface RpcErrorObject {

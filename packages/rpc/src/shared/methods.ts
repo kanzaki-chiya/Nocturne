@@ -57,6 +57,7 @@ import type {
   SessionSummary,
   SettingItem,
   SettingsPatch,
+  ToggleImpact,
   TurnEndReason,
   UsageStats,
 } from "@nocturne/core";
@@ -220,7 +221,7 @@ export interface RpcMethods {
    * 指定按哪个工作区合并配置层；缺省为后台启动目录。旧客户端不传不受影响。
    */
   "runtime.listModels": {
-    params: { workspaceRoot?: string | undefined };
+    params: { workspaceRoot?: string | undefined; includeDisabled?: boolean | undefined };
     result: ModelInfo[];
   };
   "runtime.defaultModel": {
@@ -365,6 +366,20 @@ export interface RpcMethods {
   "provider.updateSetupProvider": {
     params: { providerId: string; patch: UpdateSetupProviderPatch };
     result: UpdateSetupProviderResult;
+  };
+  // 服务商/模型启停（ADR-0054）：写 settings.json 的专用字段；变更方法在
+  // 响应之前推 runtime.providersChanged。describeToggleImpact 只读。
+  "provider.setProviderEnabled": {
+    params: { provider: string; enabled: boolean };
+    result: null;
+  };
+  "provider.setModelsEnabled": {
+    params: { provider: string; models: string[]; enabled: boolean };
+    result: null;
+  };
+  "provider.describeToggleImpact": {
+    params: { provider: string; models?: string[] };
+    result: ToggleImpact;
   };
 
   // 登录会话（rpc.md 3.4）：start 返回句柄，完成经 login.completed 通知；
@@ -522,6 +537,9 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "provider.describeSetupProvider": true,
   "provider.probeSetupProviderModels": true,
   "provider.updateSetupProvider": true,
+  "provider.setProviderEnabled": true,
+  "provider.setModelsEnabled": true,
+  "provider.describeToggleImpact": true,
   "login.start": true,
   "login.startDraft": true,
   "login.submitManual": true,

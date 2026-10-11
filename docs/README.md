@@ -32,7 +32,7 @@
 | [subagent.md](architecture/subagent.md) | Subagent（子代理）：`task` 工具契约、Launcher 注入、子会话权限收敛、ACP 外部 agent 的管理、探测、斜杠点名与审计边界 |
 | [observability.md](architecture/observability.md) | 诊断日志：开关与输出位置、记录种类、脱敏规则 |
 | [providers.md](architecture/providers.md) | Provider 抽象、模型能力、流式与错误归一化 |
-| [provider-setup.md](architecture/provider-setup.md) | 服务商配置（`nctrn setup`、`/provider`；Core 数据接口 `describeProviderSetup` / `addProvider`）、向导配置层、操作系统凭据后端、模型限额以上游为准；v0.3 起向导不再选模型，模型选择收归 `/model`（v0.2/v0.3） |
+| [provider-setup.md](architecture/provider-setup.md) | 服务商配置（`nctrn setup`、`/provider`；Core 数据接口 `describeProviderSetup` / `addProvider`）、向导配置层、操作系统凭据后端、模型限额以上游为准；v0.3 起向导不再选模型，模型选择收归 `/model`（v0.2/v0.3）；服务商与模型启停（`setProviderEnabled` / `setModelsEnabled` / `describeToggleImpact`，ADR-0054） |
 | [pitfalls.md](architecture/pitfalls.md) | 最容易犯的架构错误、早期症状与规避方式 |
 
 ## Apps（客户端）
@@ -83,6 +83,8 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 设置层与 `/settings` 页方案见 [ADR-0034](decisions/ADR-0034-settings-layer.md)。
 
 当前 TUI 交互规格见 [apps/tui.md](apps/tui.md)；v0.4 的普通屏幕与临时切屏方案见 [ADR-0021](decisions/ADR-0021-tui-daily-usability.md)，它部分取代已接受的 [ADR-0020](decisions/ADR-0020-tui-fullscreen-rendering.md)。
+
+服务商与模型启停（停用即不可用、记在 settings.json、注册表盖不可用标记）见 [ADR-0054](decisions/ADR-0054-provider-model-toggle.md)。
 
 ## Roadmap
 

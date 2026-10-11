@@ -53,6 +53,7 @@ import type {
   SettingItem,
   SettingsPatch,
   SubmitInput,
+  ToggleImpact,
   TurnEndReason,
 } from "@nocturne/core";
 
@@ -92,14 +93,35 @@ export class RpcError extends Error {
   readonly errorName: string | undefined;
   /** ProviderSetupError 的表单字段名（-32005，data.field）；客户端据此标输入框 */
   readonly field: string | undefined;
+  /** ADR-0054：invalid_model 的停用来源（data.disabled），供「重新启用」入口判断 */
+  readonly disabled: "provider" | "model" | undefined;
+  /** ADR-0054：不可用的模型引用（data.model） */
+  readonly model: ModelRef | undefined;
+  /**
+   * ADR-0054 §3 双重停用（data.providerDisabled）：disabled === "model" 且其服务商
+   * 也被停用时为 true；一键重新启用需同时恢复服务商与模型
+   */
+  readonly providerDisabled: boolean | undefined;
 
-  constructor(code: string, message: string, rpcCode = 0, errorName?: string, field?: string) {
+  constructor(
+    code: string,
+    message: string,
+    rpcCode = 0,
+    errorName?: string,
+    field?: string,
+    disabled?: "provider" | "model",
+    model?: ModelRef,
+    providerDisabled?: boolean,
+  ) {
     super(message);
     this.name = "RpcError";
     this.code = code;
     this.rpcCode = rpcCode;
     this.errorName = errorName;
     this.field = field;
+    this.disabled = disabled;
+    this.model = model;
+    this.providerDisabled = providerDisabled;
   }
 
   static fromObject(error: RpcErrorObject): RpcError {
@@ -109,6 +131,9 @@ export class RpcError extends Error {
       error.code,
       error.data?.name,
       error.data?.field,
+      error.data?.disabled,
+      error.data?.model,
+      error.data?.providerDisabled,
     );
   }
 }
@@ -222,7 +247,10 @@ export interface RpcRuntime {
    * workspaceRoot（ADR-0051）：下列方法可带 `workspaceRoot` 指定按哪个工作区
    * 合并配置层；缺省为后台启动目录。
    */
-  listModels(input?: { workspaceRoot?: string | undefined }): Promise<ModelInfo[]>;
+  listModels(input?: {
+    workspaceRoot?: string | undefined;
+    includeDisabled?: boolean | undefined;
+  }): Promise<ModelInfo[]>;
   defaultModel(input?: { workspaceRoot?: string | undefined }): Promise<ModelRef | undefined>;
   /** recent-models.json（全局偏好，无工作区维度） */
   listRecentModels(): Promise<ModelRef[]>;
@@ -300,6 +328,15 @@ export interface RpcProvider {
   refreshModelsDev(): Promise<string | undefined>;
   /** 删除向导条目及凭据；本连接任一会话正在使用时拒绝（provider_in_use） */
   removeSetupProvider(providerId: string): Promise<void>;
+  /**
+   * 启停服务商（ADR-0054）：写 settings.json 的 disabledProviders；响应之前
+   * 先收到 onProvidersChanged，listModels/describeProviders 读到的已是新值。
+   */
+  setProviderEnabled(provider: string, enabled: boolean): Promise<void>;
+  /** 批量启停某服务商下的模型（models 为模型 id） */
+  setModelsEnabled(provider: string, models: string[], enabled: boolean): Promise<void>;
+  /** 停用前的影响面：受影响的打开会话数、默认模型、模型角色（models 省略 = 整个服务商） */
+  describeToggleImpact(provider: string, models?: string[]): Promise<ToggleImpact>;
   logoutProvider(providerId: string): Promise<void>;
   /**
    * 编辑自定义服务商（U-07）：现读 providers.json 条目原文给编辑表单预填；
@@ -728,6 +765,17 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     removeSetupProvider: async (providerId) => {
       await call("provider.removeSetupProvider", { providerId });
     },
+    setProviderEnabled: async (provider, enabled) => {
+      await call("provider.setProviderEnabled", { provider, enabled });
+    },
+    setModelsEnabled: async (provider, models, enabled) => {
+      await call("provider.setModelsEnabled", { provider, models, enabled });
+    },
+    describeToggleImpact: (provider, models) =>
+      call("provider.describeToggleImpact", {
+        provider,
+        ...(models !== undefined ? { models } : {}),
+      }),
     logoutProvider: async (providerId) => {
       await call("provider.logoutProvider", { providerId });
     },

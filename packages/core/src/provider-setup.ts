@@ -673,6 +673,17 @@ export async function prepareProvider(
       const modelsToSave = needsManualModel ? [{ id }] : upstreamModels;
       // 写入前再查一次：准备之后可能有别的配置对象或进程保存了同名条目。
       await assertNameFree(config, providerId, options.workspaceRoot);
+      // ADR-0054 §2：提交时幂等清理同名停用条目——删除时清理失败残留的旧条目
+      // 在这里清除，同名重新添加恒从全部启用开始。先于一切写入执行：
+      // 失败时直接中止，不留半截条目或孤立凭据。
+      try {
+        await config.clearProviderToggles(providerId);
+      } catch (e) {
+        throw new Error(
+          `清理同名服务商 "${providerId}" 的旧停用条目失败（settings.json 写入失败）：${e instanceof Error ? e.message : String(e)}`,
+          { cause: e },
+        );
+      }
       // 同 id 的孤立凭据（条目已手工删掉而凭据残留）先清掉，新条目不继承旧密钥或旧账号。
       if (config.credentials.has(providerId)) {
         try {

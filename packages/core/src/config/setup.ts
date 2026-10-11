@@ -148,7 +148,13 @@ export function describeProviderLayers(
   layers: DescribeLayers,
   credentials: CredentialStore,
   env: (name: string) => string | undefined,
+  disabled: { providers: readonly string[]; models: readonly string[] } = {
+    providers: [],
+    models: [],
+  },
 ): ProviderOverview[] {
+  const disabledProviders = new Set(disabled.providers);
+  const disabledModels = new Set(disabled.models);
   const byId = new Map<string, { entry: ProviderEntryConfig; layer: LayerName }>();
   const setupIds = new Set<string>();
   for (const layer of LAYER_ORDER) {
@@ -166,7 +172,13 @@ export function describeProviderLayers(
       : credentials.has(entry.id)
         ? ("credential" as const)
         : ("missing" as const);
+    const modelIds = Object.keys(entry.models ?? {});
+    const enabled = !disabledProviders.has(entry.id);
     return {
+      enabled,
+      enabledModelCount: enabled
+        ? modelIds.filter((id) => !disabledModels.has(`${entry.id}/${id}`)).length
+        : 0,
       authKind:
         kind === "external-file"
           ? ("external-file" as const)

@@ -512,6 +512,11 @@ export async function loadConfig(
     skillConfig: () => userFile.skills ?? {},
     disabledSkills: () => settings.store.disabledSkills(),
     setSkillEnabled: (name, enabled) => settings.store.setSkillEnabled(name, enabled),
+    disabledProviders: () => settings.store.disabledProviders(),
+    disabledModels: () => settings.store.disabledModels(),
+    setProviderEnabled: (provider, enabled) => settings.store.setProviderEnabled(provider, enabled),
+    setModelsEnabled: (provider, models, enabled) =>
+      settings.store.setModelsEnabled(provider, models, enabled),
     async describeExternalAgents(input = {}) {
       const resolved = input.workspaceRoot
         ? (await forWorkspace(input.workspaceRoot)).resolved
@@ -651,15 +656,34 @@ export async function loadConfig(
         mergeFor,
         options,
       ),
-    removeSetupProvider: (providerId) =>
-      removeSetupProvider(platform, home, credentials, providerId),
+    removeSetupProvider: async (providerId) => {
+      await removeSetupProvider(platform, home, credentials, providerId);
+      // ADR-0054 §2：删除向导服务商时一并清除它的停用条目；同名重新添加从全部启用开始。
+      // 清理是第二次写盘：失败时服务商已删除，旧停用条目残留——显式报错，
+      // 由调用方提示（向导提交时会幂等清理，重新添加仍从全部启用开始）。
+      try {
+        await settings.store.clearProviderToggles(providerId);
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        throw new ConfigError(
+          "config_unavailable",
+          `服务商 "${providerId}" 已删除，但它的停用条目未能从 settings.json 清理（${reason}）；` +
+            `同名重新添加时会自动清理旧条目，也可手动删除 settings.json 里的 disabledProviders/disabledModels`,
+        );
+      }
+    },
+    /** ADR-0054 §2：向导提交（commitProvider）时幂等清理同名停用条目 */
+    clearProviderToggles: (providerId) => settings.store.clearProviderToggles(providerId),
     async findProviderConflict(id: string, workspaceRoot?: string) {
       const { layers } = await describeLayersFor(workspaceRoot);
       return findLayerConflict(layers, id);
     },
     async describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]> {
       const { setupNow, layers } = await describeLayersFor(workspaceRoot);
-      const overview = describeProviderLayers(layers, credentials, env);
+      const overview = describeProviderLayers(layers, credentials, env, {
+        providers: settings.store.disabledProviders(),
+        models: settings.store.disabledModels(),
+      });
       // 凭据内容只用于计算状态，绝不返回给客户端。
       const effective = (await mergeFor(setupNow.file ?? { version: 1 }, workspaceRoot)).resolved
         .providers;
