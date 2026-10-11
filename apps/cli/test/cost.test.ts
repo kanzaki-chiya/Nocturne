@@ -42,6 +42,7 @@ it("CLI /cost shows current session and 30-day totals without model calls", asyn
     turns: 4,
     subagentTurns: 1,
     daily: [],
+    performanceGranularity: "day",
     models: [],
     tools: [],
     skills: [],

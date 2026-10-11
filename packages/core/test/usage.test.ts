@@ -419,8 +419,22 @@ describe("Runtime.usageStats", () => {
       const stats = createUsageStats({ platform, sessionsDir: root, pricing: () => undefined });
       const first = await stats({});
       expect(first.daily).toEqual([
-        { date: "2026-10-08", tokens: 120, cost: 0, turns: 1 },
-        { date: "2026-10-09", tokens: 60, cost: 0, turns: 0 },
+        {
+          date: "2026-10-08",
+          tokens: 120,
+          cost: 0,
+          turns: 1,
+          requests: 1,
+          models: [{ model, tokens: 120, requests: 1 }],
+        },
+        {
+          date: "2026-10-09",
+          tokens: 60,
+          cost: 0,
+          turns: 0,
+          requests: 1,
+          models: [{ model, tokens: 60, requests: 1 }],
+        },
       ]);
       expect(first.longestTurn?.durationMs).toBe(120_000);
       expect(first.skippedFiles).toBe(1);
@@ -443,5 +457,261 @@ describe("Runtime.usageStats", () => {
       read.mockRestore();
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("usageStats 延迟、性能序列与逐日按模型用量", () => {
+  const NOW = new Date(2026, 9, 11, 16, 30).getTime(); // 周日 16:30（本地）
+  const m1 = { provider: "p", model: "fast" };
+  const m2 = { provider: "p", model: "old" };
+  interface Msg {
+    at: Date;
+    model: { provider: string; model: string };
+    usage?: Usage;
+    timing?: { ttftMs?: number; durationMs: number };
+    sessionId?: string;
+  }
+  function log(id: string, messages: Msg[], forkedFrom?: string): string {
+    const first = messages[0]?.at ?? new Date(NOW);
+    const lines: object[] = [
+      {
+        sessionId: id,
+        seq: 1,
+        time: first.toISOString(),
+        type: "session.created",
+        payload: {
+          formatVersion: 1,
+          nocturneVersion: "test",
+          cwd: "/w",
+          workspaceRoot: "/w",
+          model: m1,
+          permissionPreset: "default",
+          ...(forkedFrom !== undefined ? { forkedFrom: { sessionId: forkedFrom, seq: 1 } } : {}),
+        },
+      },
+    ];
+    messages.forEach((m, i) =>
+      lines.push({
+        sessionId: m.sessionId ?? id,
+        seq: i + 2,
+        time: m.at.toISOString(),
+        type: "message.assistant",
+        turnId: "t",
+        payload: {
+          messageId: `a${i}`,
+          model: m.model,
+          content: [{ type: "text", text: "x" }],
+          toolCalls: [],
+          ...(m.usage !== undefined ? { usage: m.usage } : {}),
+          ...(m.timing !== undefined ? { timing: m.timing } : {}),
+          finishReason: "stop",
+        },
+      }),
+    );
+    return lines.map((l) => JSON.stringify(l) + "\n").join("");
+  }
+  async function withLogs(
+    files: Record<string, string>,
+    run: (stats: ReturnType<typeof createUsageStats>, reads: () => number) => Promise<void>,
+    pricing: Parameters<typeof createUsageStats>[0]["pricing"] = () => undefined,
+  ): Promise<void> {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-usage-latency-"));
+    const platform = createPlatform();
+    const spy = vi.spyOn(platform.fs, "readTextFile");
+    try {
+      for (const [name, text] of Object.entries(files))
+        await fs.writeFile(path.join(root, `${name}.jsonl`), text);
+      await run(
+        createUsageStats({ platform, sessionsDir: root, pricing, now: () => NOW }),
+        () => spy.mock.calls.length,
+      );
+    } finally {
+      spy.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }
+  const at = (d: number, h: number, min = 0) => new Date(2026, 9, d, h, min);
+  const u = (outputTokens: number, inputTokens = 1000): Usage => ({ inputTokens, outputTokens });
+
+  it("平均耗时、平均 TTFT、按合计算的 Tokens/s 与 500ms 门槛；旧日志只进用量", async () => {
+    const text = log("s", [
+      { at: at(11, 9), model: m1, usage: u(200), timing: { ttftMs: 1000, durationMs: 3000 } },
+      { at: at(11, 9, 30), model: m1, usage: u(400), timing: { ttftMs: 500, durationMs: 4500 } },
+      // 生成 400ms：不进 Tokens/s，但计入耗时与 TTFT
+      { at: at(11, 10), model: m1, usage: u(50), timing: { ttftMs: 100, durationMs: 500 } },
+      // 没有内容事件：只有总耗时
+      { at: at(11, 11), model: m1, usage: u(10), timing: { durationMs: 800 } },
+      { at: at(11, 12), model: m1, usage: u(999) },
+      { at: at(11, 12), model: m2, usage: u(30) },
+    ]);
+    await withLogs({ s: text }, async (stats) => {
+      const result = await stats({ days: 7 });
+      const fast = result.models.find((m) => m.model.model === "fast");
+      const old = result.models.find((m) => m.model.model === "old");
+      expect(fast?.requests).toBe(5);
+      expect(fast?.outputTokens).toBe(1659);
+      expect(fast?.latency).toEqual({
+        samples: 4,
+        avgDurationMs: 2200,
+        avgTtftMs: 1600 / 3,
+        tokensPerSecond: 100, // (200 + 400) ÷ (2s + 4s)，不是逐条平均
+        speedSamples: 2,
+      });
+      expect(old?.latency).toBeUndefined();
+      expect(old?.performance).toEqual([]);
+      expect(old?.requests).toBe(1);
+      expect(fast?.firstUsedAt).toBe(at(11, 9).toISOString());
+      expect(fast?.lastUsedAt).toBe(at(11, 12).toISOString());
+    });
+  });
+
+  it("缓存节省按 estimateCost 口径；未计价模型省略", async () => {
+    const text = log("s", [
+      {
+        at: at(11, 9),
+        model: m1,
+        usage: { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 800_000 },
+      },
+      { at: at(11, 9), model: m2, usage: u(1) },
+    ]);
+    await withLogs(
+      { s: text },
+      async (stats) => {
+        const result = await stats({ days: 7 });
+        // 全按输入价 $2；实际 0.2M × $2 + 0.8M × $0.2 = $0.56
+        expect(result.models.find((m) => m.model.model === "fast")?.cacheSavings).toBeCloseTo(0.72);
+        expect(result.models.find((m) => m.model.model === "old")?.cacheSavings).toBeUndefined();
+      },
+      (ref) =>
+        ref.model === "fast"
+          ? { pricing: { input: 2, output: 8, cacheRead: 0.2 }, pricingSource: "config" }
+          : undefined,
+    );
+  });
+
+  it("分桶粒度：7 天按小时，8 与 31 天按日，32 天与全部按周", async () => {
+    await withLogs({}, async (stats) => {
+      expect((await stats({ days: 7 })).performanceGranularity).toBe("hour");
+      expect((await stats({ days: 8 })).performanceGranularity).toBe("day");
+      expect((await stats({ days: 31 })).performanceGranularity).toBe("day");
+      expect((await stats({ days: 32 })).performanceGranularity).toBe("week");
+      expect((await stats({})).performanceGranularity).toBe("week");
+    });
+  });
+
+  it("按小时 / 按日分桶只列有计时的桶，桶内 Tokens/s 按合计算", async () => {
+    const text = log("s", [
+      { at: at(10, 14, 5), model: m1, usage: u(100), timing: { ttftMs: 200, durationMs: 1200 } },
+      { at: at(10, 14, 50), model: m1, usage: u(300), timing: { ttftMs: 400, durationMs: 3400 } },
+      { at: at(10, 16), model: m1, usage: u(9) },
+      { at: at(11, 9), model: m1, usage: u(50), timing: { ttftMs: 600, durationMs: 1100 } },
+    ]);
+    await withLogs({ s: text }, async (stats) => {
+      const hourly = (await stats({ days: 7 })).models[0]?.performance;
+      expect(hourly).toEqual([
+        { start: at(10, 14).toISOString(), samples: 2, tokensPerSecond: 100, avgTtftMs: 300 },
+        { start: at(11, 9).toISOString(), samples: 1, tokensPerSecond: 100, avgTtftMs: 600 },
+      ]);
+      const daily = (await stats({ days: 30 })).models[0]?.performance;
+      expect(daily?.map((p) => [p.start, p.samples])).toEqual([
+        [at(10, 0).toISOString(), 2],
+        [at(11, 0).toISOString(), 1],
+      ]);
+    });
+  });
+
+  it("周桶从周一起算；只有计时没有 usage 的消息不算请求", async () => {
+    const weekly = log("s", [
+      {
+        at: new Date(2026, 8, 16, 10),
+        model: m1,
+        usage: u(1),
+        timing: { ttftMs: 100, durationMs: 900 },
+      },
+      { at: new Date(2026, 8, 20, 23), model: m1, timing: { ttftMs: 300, durationMs: 900 } },
+      { at: new Date(2026, 8, 21, 0, 1), model: m1, timing: { ttftMs: 500, durationMs: 900 } },
+    ]);
+    await withLogs({ s: weekly }, async (stats) => {
+      const fast = (await stats({})).models[0];
+      expect(fast?.requests).toBe(1);
+      expect(fast?.performance.map((p) => [p.start, p.samples, p.avgTtftMs])).toEqual([
+        [new Date(2026, 8, 14).toISOString(), 2, 200],
+        [new Date(2026, 8, 21).toISOString(), 1, 500],
+      ]);
+      // 生成 800ms、输出 1 token 的样本进 Tokens/s；没有 usage 的不进
+      expect(fast?.performance[0]?.tokensPerSecond).toBe(1 / 0.8);
+      expect(fast?.performance[1]?.tokensPerSecond).toBeUndefined();
+    });
+  });
+
+  it("超过 168 个周桶时只保留最近 168 个", async () => {
+    const many = log(
+      "many",
+      Array.from({ length: 170 }, (_, i) => ({
+        at: new Date(2026, 9, 7 - (169 - i) * 7, 12),
+        model: m1,
+        usage: u(10),
+        timing: { ttftMs: 100, durationMs: 900 },
+      })),
+    );
+    await withLogs({ many }, async (stats) => {
+      const perf = (await stats({})).models[0]?.performance ?? [];
+      expect(perf).toHaveLength(168);
+      expect(perf.at(-1)?.start).toBe(new Date(2026, 9, 5).toISOString());
+      expect(perf[0]?.start).toBe(new Date(2026, 9, 5 - 167 * 7).toISOString());
+    });
+  });
+
+  it("逐日按模型拆分之和等于当天合计，范围外日期不拆分", async () => {
+    const text = log("s", [
+      { at: at(1, 10), model: m1, usage: u(100) },
+      { at: at(10, 9), model: m1, usage: u(100) },
+      { at: at(10, 10), model: m2, usage: u(500, 2000) },
+      { at: at(10, 11), model: m1, usage: u(20) },
+    ]);
+    await withLogs({ s: text }, async (stats) => {
+      const result = await stats({ days: 7 });
+      const outside = result.daily.find((d) => d.date === "2026-10-01");
+      expect(outside).toEqual({ date: "2026-10-01", tokens: 1100, cost: 0, turns: 0 });
+      const day = result.daily.find((d) => d.date === "2026-10-10");
+      expect(day?.requests).toBe(3);
+      expect(day?.models).toEqual([
+        { model: m2, tokens: 2500, requests: 1 },
+        { model: m1, tokens: 2120, requests: 2 },
+      ]);
+      expect(day?.models?.reduce((n, m) => n + m.tokens, 0)).toBe(day?.tokens);
+    });
+  });
+
+  it("分叉日志复制的计时不计入；缓存命中后新字段不丢", async () => {
+    const source = log("src", [
+      { at: at(10, 9), model: m1, usage: u(100), timing: { ttftMs: 100, durationMs: 1100 } },
+    ]);
+    const fork = log(
+      "fork",
+      [
+        {
+          at: at(10, 9),
+          model: m1,
+          usage: u(100),
+          timing: { ttftMs: 100, durationMs: 1100 },
+          sessionId: "src",
+        },
+        { at: at(11, 9), model: m1, usage: u(300), timing: { ttftMs: 1000, durationMs: 4000 } },
+      ],
+      "src",
+    );
+    await withLogs({ src: source, fork }, async (stats, reads) => {
+      const first = await stats({ days: 7 });
+      const fast = first.models[0];
+      expect(fast?.requests).toBe(2);
+      expect(fast?.latency?.samples).toBe(2);
+      expect(fast?.performance.map((p) => p.samples)).toEqual([1, 1]);
+      expect(reads()).toBe(2);
+      const again = await stats({ days: 7 });
+      expect(reads()).toBe(2);
+      expect(again).toEqual(first);
+      expect(again.models[0]?.latency?.tokensPerSecond).toBe(400 / 4);
+    });
   });
 });

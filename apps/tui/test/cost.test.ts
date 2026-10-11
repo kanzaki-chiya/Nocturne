@@ -18,6 +18,7 @@ it("TUI /cost shows current session and 30-day model totals", async () => {
     turns: 4,
     subagentTurns: 1,
     daily: [],
+    performanceGranularity: "day",
     models: [
       {
         model: { provider: "p", model: "unpriced" },
@@ -27,6 +28,8 @@ it("TUI /cost shows current session and 30-day model totals", async () => {
         cacheWriteTokens: 0,
         outputTokens: 0,
         cacheHitRate: 0,
+        requests: 1,
+        performance: [],
         cost: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 },
       },
       {
@@ -37,6 +40,8 @@ it("TUI /cost shows current session and 30-day model totals", async () => {
         cacheWriteTokens: 0,
         outputTokens: 100,
         cacheHitRate: 0,
+        requests: 1,
+        performance: [],
         pricing: { input: 2, output: 6 },
         pricingSource: "vendor",
         cost: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 },

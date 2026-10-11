@@ -2,6 +2,14 @@ import {
   decodeDurableEvent,
   estimateCost,
   firstUserText,
+  generationMs,
+  performanceGranularity,
+  MIN_GENERATION_MS,
+  PERFORMANCE_MAX_BUCKETS,
+  type AssistantTiming,
+  type DailyModelUsage,
+  type PerformanceGranularity,
+  type PerformancePoint,
   type ModelRef,
   type Usage,
   type UsageStats,
@@ -20,6 +28,13 @@ interface RequestRecord {
   usage: Usage;
   turnId?: string | undefined;
 }
+/** 带 timing 的 message.assistant（不要求有 usage） */
+interface TimingRecord {
+  time: number;
+  model: ModelRef;
+  timing: AssistantTiming;
+  outputTokens?: number | undefined;
+}
 interface TurnRecord {
   time: number;
   durationMs?: number | undefined;
@@ -35,6 +50,7 @@ interface FileAggregate {
   child: boolean;
   forkTime?: number | undefined;
   requests: RequestRecord[];
+  timings: TimingRecord[];
   turns: TurnRecord[];
   tools: NamedRecord[];
   skills: NamedRecord[];
@@ -43,6 +59,54 @@ const dateKey = (time: number): string => {
   const d = new Date(time);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
+/** 本地时间的桶起点（毫秒）：小时、自然日或周一 0 点 */
+export function bucketStart(time: number, granularity: PerformanceGranularity): number {
+  const d = new Date(time);
+  if (granularity === "hour") {
+    d.setMinutes(0, 0, 0);
+    return d.getTime();
+  }
+  d.setHours(0, 0, 0, 0);
+  if (granularity === "week") d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d.getTime();
+}
+/** 延迟与速度的累加器：Tokens/s 按合计相除，不对逐条速度求平均 */
+interface LatencyAccumulator {
+  samples: number;
+  durationMs: number;
+  ttftSamples: number;
+  ttftMs: number;
+  speedSamples: number;
+  outputTokens: number;
+  generationMs: number;
+}
+const latencyAccumulator = (): LatencyAccumulator => ({
+  samples: 0,
+  durationMs: 0,
+  ttftSamples: 0,
+  ttftMs: 0,
+  speedSamples: 0,
+  outputTokens: 0,
+  generationMs: 0,
+});
+function addTiming(acc: LatencyAccumulator, r: TimingRecord): void {
+  acc.samples++;
+  acc.durationMs += r.timing.durationMs;
+  if (r.timing.ttftMs !== undefined) {
+    acc.ttftSamples++;
+    acc.ttftMs += r.timing.ttftMs;
+  }
+  const generation = generationMs(r.timing);
+  if (r.outputTokens !== undefined && generation !== undefined && generation >= MIN_GENERATION_MS) {
+    acc.speedSamples++;
+    acc.outputTokens += r.outputTokens;
+    acc.generationMs += generation;
+  }
+}
+const tokensPerSecond = (acc: LatencyAccumulator) =>
+  acc.speedSamples > 0 ? acc.outputTokens / (acc.generationMs / 1000) : undefined;
+const avgTtft = (acc: LatencyAccumulator) =>
+  acc.ttftSamples > 0 ? acc.ttftMs / acc.ttftSamples : undefined;
 const modelKey = (model: ModelRef): string => `${model.provider}/${model.model}`;
 const modelRef = (value: string): ModelRef => {
   const slash = value.indexOf("/");
@@ -60,6 +124,7 @@ function parse(text: string): FileAggregate {
     title: "",
     child: false,
     requests: [],
+    timings: [],
     turns: [],
     tools: [],
     skills: [],
@@ -111,6 +176,21 @@ function parse(text: string): FileAggregate {
           });
         break;
       case "message.assistant":
+        if (e.payload.timing)
+          result.timings.push({
+            time,
+            model: e.payload.model,
+            timing: e.payload.timing,
+            outputTokens: e.payload.usage?.outputTokens,
+          });
+        if (e.payload.usage)
+          result.requests.push({
+            time,
+            usage: e.payload.usage,
+            model: e.payload.model,
+            turnId: e.turnId,
+          });
+        break;
       case "context.compacted":
         if (e.payload.usage && e.payload.model)
           result.requests.push({
@@ -161,6 +241,8 @@ export function createUsageStats(deps: {
     model: ModelRef,
   ) =>
     { pricing?: ModelPricing | undefined; pricingSource?: PricingSource | undefined } | undefined;
+  /** 墙钟（毫秒），决定 days 的起点；测试注入 */
+  now?: (() => number) | undefined;
 }) {
   const cache = new Map<
     string,
@@ -169,7 +251,7 @@ export function createUsageStats(deps: {
   return async (input: { days?: number } = {}): Promise<UsageStats> => {
     if (input.days !== undefined && (!Number.isInteger(input.days) || input.days <= 0))
       throw new Error("days 必须是正整数");
-    const since = new Date();
+    const since = new Date(deps.now?.() ?? Date.now());
     since.setHours(0, 0, 0, 0);
     if (input.days !== undefined) since.setDate(since.getDate() - input.days + 1);
     const cutoff = input.days === undefined ? -Infinity : since.getTime();
@@ -180,12 +262,43 @@ export function createUsageStats(deps: {
       subagentTurns: 0,
       daily: [],
       models: [],
+      performanceGranularity: performanceGranularity(input.days),
       tools: [],
       skills: [],
       unpricedModels: [],
       skippedFiles: 0,
     };
+    const granularity = stats.performanceGranularity;
     const models = new Map<string, ModelUsageStats>();
+    /** 每个模型的延迟、性能桶、缓存节省与首末时间；结束时折叠进 ModelUsageStats */
+    const extra = new Map<
+      string,
+      {
+        latency: LatencyAccumulator;
+        buckets: Map<number, LatencyAccumulator>;
+        fullInputCost: number;
+        actualInputCost: number;
+        first: number;
+        last: number;
+      }
+    >();
+    const extraFor = (ref: ModelRef) => {
+      const key = modelKey(ref);
+      let x = extra.get(key);
+      if (!x) {
+        x = {
+          latency: latencyAccumulator(),
+          buckets: new Map(),
+          fullInputCost: 0,
+          actualInputCost: 0,
+          first: Infinity,
+          last: -Infinity,
+        };
+        extra.set(key, x);
+      }
+      return x;
+    };
+    const dailyModels = new Map<string, Map<string, DailyModelUsage>>();
     const days = new Map<string, DailyUsageStats>();
     const tools = new Map<string, number>();
     const skills = new Map<string, number>();
@@ -209,7 +322,15 @@ export function createUsageStats(deps: {
       const key = modelKey(ref);
       let m = models.get(key);
       if (!m) {
-        m = { ...empty(), model: ref, turns: 0, cacheHitRate: 0, ...pricingFor(ref) };
+        m = {
+          ...empty(),
+          model: ref,
+          turns: 0,
+          requests: 0,
+          cacheHitRate: 0,
+          performance: [],
+          ...pricingFor(ref),
+        };
         models.set(key, m);
       }
       return m;
@@ -254,6 +375,24 @@ export function createUsageStats(deps: {
         if (r.time < cutoff) continue;
         included = true;
         const m = model(r.model);
+        m.requests++;
+        d.requests = (d.requests ?? 0) + 1;
+        const key = modelKey(r.model);
+        let perDay = dailyModels.get(d.date);
+        if (!perDay) dailyModels.set(d.date, (perDay = new Map<string, DailyModelUsage>()));
+        let dm = perDay.get(key);
+        if (!dm) perDay.set(key, (dm = { model: r.model, tokens: 0, requests: 0 }));
+        dm.tokens += r.usage.inputTokens + r.usage.outputTokens;
+        dm.requests++;
+        const x = extraFor(r.model);
+        x.first = Math.min(x.first, r.time);
+        x.last = Math.max(x.last, r.time);
+        if (cost && prices) {
+          // 缓存节省：全部输入按输入价（同一档位规则）对比实际输入侧费用
+          const full = estimateCost({ inputTokens: r.usage.inputTokens, outputTokens: 0 }, prices);
+          x.fullInputCost += full?.input ?? 0;
+          x.actualInputCost += cost.input + cost.cacheRead + cost.cacheWrite;
+        }
         for (const total of [m, stats.totals]) {
           total.inputTokens += r.usage.inputTokens;
           total.outputTokens += r.usage.outputTokens;
@@ -263,6 +402,15 @@ export function createUsageStats(deps: {
             for (const key of ["input", "cacheRead", "cacheWrite", "output", "total"] as const)
               total.cost[key] += cost[key];
         }
+      }
+      for (const r of aggregate.timings) {
+        if (r.time < cutoff) continue;
+        const x = extraFor(r.model);
+        addTiming(x.latency, r);
+        const start = bucketStart(r.time, granularity);
+        let bucket = x.buckets.get(start);
+        if (!bucket) x.buckets.set(start, (bucket = latencyAccumulator()));
+        addTiming(bucket, r);
       }
       for (const t of aggregate.turns) {
         day(t.time).turns++;
@@ -295,6 +443,42 @@ export function createUsageStats(deps: {
     for (const m of stats.models) {
       m.cacheHitRate = m.inputTokens ? (m.cacheReadTokens ?? 0) / m.inputTokens : 0;
       if (!m.pricing) stats.unpricedModels.push(m.model);
+      const x = extra.get(modelKey(m.model));
+      if (!x) continue;
+      if (x.fullInputCost > 0)
+        m.cacheSavings = (x.fullInputCost - x.actualInputCost) / x.fullInputCost;
+      if (Number.isFinite(x.first)) {
+        m.firstUsedAt = new Date(x.first).toISOString();
+        m.lastUsedAt = new Date(x.last).toISOString();
+      }
+      const l = x.latency;
+      const tps = tokensPerSecond(l);
+      const ttft = avgTtft(l);
+      if (l.samples > 0)
+        m.latency = {
+          samples: l.samples,
+          avgDurationMs: l.durationMs / l.samples,
+          ...(ttft !== undefined ? { avgTtftMs: ttft } : {}),
+          ...(tps !== undefined ? { tokensPerSecond: tps } : {}),
+          speedSamples: l.speedSamples,
+        };
+      m.performance = [...x.buckets]
+        .sort(([a], [b]) => a - b)
+        .slice(-PERFORMANCE_MAX_BUCKETS)
+        .map(([start, b]): PerformancePoint => {
+          const bucketTps = tokensPerSecond(b);
+          const bucketTtft = avgTtft(b);
+          return {
+            start: new Date(start).toISOString(),
+            samples: b.samples,
+            ...(bucketTps !== undefined ? { tokensPerSecond: bucketTps } : {}),
+            ...(bucketTtft !== undefined ? { avgTtftMs: bucketTtft } : {}),
+          };
+        });
+    }
+    for (const [date, perDay] of dailyModels) {
+      const d = days.get(date);
+      if (d) d.models = [...perDay.values()].sort((a, b) => b.tokens - a.tokens);
     }
     stats.daily = [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
     const counts = (map: Map<string, number>) =>
