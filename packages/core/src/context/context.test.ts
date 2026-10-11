@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DurableEvent, HistoryEntry, ImageAttachment } from "../protocol/index.js";
+import { formatTodoBlock } from "../protocol/index.js";
 import type { ModelInfo, ModelMessage } from "../provider/index.js";
 import {
   attachmentsToLoad,
@@ -55,14 +56,15 @@ describe("buildContext", () => {
     const todos = [{ text: "当前任务", status: "in_progress" as const }];
     const plain = buildContext(baseInput({ history: [] }));
     const built = buildContext(baseInput({ history: [], todos }));
-    // ADR-0028 修订：清单不进 system（保持缓存前缀稳定），作为末尾 user 消息附上
+    // ADR-0028 2026-10-11 修订：只追加，缺失时在最前独立注入，全部可缓存
     expect(built.request.system).toEqual(plain.request.system);
-    const last = built.request.messages.at(-1);
-    expect(last?.role).toBe("user");
-    expect(last?.role === "user" ? last.content.at(-1) : undefined).toMatchObject({
+    expect(built.request.messages).toHaveLength(1);
+    const first = built.request.messages[0];
+    expect(first?.role).toBe("user");
+    expect(first?.role === "user" ? first.content.at(0) : undefined).toMatchObject({
       text: expect.stringContaining('"当前任务"'),
     });
-    expect(built.request.cachePrefix?.messages).toBe(built.request.messages.length - 1);
+    expect(built.request.cachePrefix?.messages).toBe(built.request.messages.length);
     expect(plain.request.cachePrefix?.messages).toBe(plain.request.messages.length);
     expect(built.report.sections.find((s) => s.name === "todos")?.estimatedTokens).toBeGreaterThan(
       0,
@@ -72,9 +74,9 @@ describe("buildContext", () => {
       buildContext(baseInput({ todos: [] })).report.sections.some((s) => s.name === "todos"),
     ).toBe(false);
   });
-  it("任务清单：末尾是 user 消息时并入该条（不产生连续 user），末尾是工具结果时并入该工具结果", () => {
+  it("任务清单：只追加不回改，缺失时在最前独立注入，pending 原样保留", () => {
     const todos = [{ text: "当前任务", status: "in_progress" as const }];
-    const userTail = buildContext(
+    const userOnly = buildContext(
       baseInput({
         history: [
           {
@@ -88,13 +90,14 @@ describe("buildContext", () => {
         todos,
       }),
     ).request;
-    expect(userTail.messages).toHaveLength(1);
-    const merged = userTail.messages[0];
-    expect(merged?.role === "user" ? merged.content.map((c) => c.type) : []).toEqual([
-      "text",
-      "text",
-    ]);
-    expect(userTail.cachePrefix?.messages).toBe(0);
+    // 历史里没有清单文本 → 在最前独立注入，不并入末尾 user
+    expect(userOnly.messages).toHaveLength(2);
+    expect(userOnly.messages[0]?.role).toBe("user");
+    expect(
+      userOnly.messages[0]?.role === "user" ? userOnly.messages[0].content[0]?.text : "",
+    ).toContain('"当前任务"');
+    expect(userOnly.messages[1]?.role).toBe("user");
+    expect(userOnly.cachePrefix?.messages).toBe(2);
 
     const pending: ModelMessage = {
       role: "tool",
@@ -103,7 +106,7 @@ describe("buildContext", () => {
       content: "结果",
       isError: false,
     };
-    const toolTail = buildContext(
+    const withPending = buildContext(
       baseInput({
         history: [
           {
@@ -118,11 +121,14 @@ describe("buildContext", () => {
         todos,
       }),
     ).request;
-    // ADR-0028 修订：不另起 user 消息，推理模型不会把每一步当成新一轮
-    expect(toolTail.messages.map((m) => m.role)).toEqual(["user", "tool"]);
-    const tail = toolTail.messages[1];
-    expect(tail?.role === "tool" ? tail.content : "").toMatch(/^结果\n\n当前会话任务清单/);
-    expect(toolTail.cachePrefix?.messages).toBe(1);
+    // 注入在最前，pending 工具结果原样保留在末尾
+    expect(withPending.messages.map((m) => m.role)).toEqual(["user", "user", "tool"]);
+    expect(
+      withPending.messages[0]?.role === "user" ? withPending.messages[0].content[0]?.text : "",
+    ).toContain('"当前任务"');
+    const tail = withPending.messages[2];
+    expect(tail?.role === "tool" ? tail.content : "").toBe("结果");
+    expect(withPending.cachePrefix?.messages).toBe(3);
     expect(pending.content).toBe("结果");
   });
   it("组装顺序：system → tools → instructions → environment → history", () => {
@@ -775,6 +781,9 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
         todos: [{ text: "todo", status: "pending" }],
       }),
     ).request;
+    // 2026-10-11 修订：清单在摘要处独立注入，不进摘要输入
+    expect(main.messages[1]?.role).toBe("user");
+    expect(JSON.stringify(main.messages[1])).toContain("todo");
     const summary = buildSummaryRequest({
       history,
       model: info,
@@ -783,8 +792,16 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
     });
     expect(JSON.stringify(summary.system)).toBe(JSON.stringify(main.system));
     expect(JSON.stringify(summary.tools)).toBe(JSON.stringify(main.tools));
+    const mainBase = main.messages.filter(
+      (m) =>
+        !(
+          m.role === "user" &&
+          m.content.length === 1 &&
+          m.content[0]?.text.startsWith("当前会话任务清单（由 Runtime 附加") === true
+        ),
+    );
     expect(JSON.stringify(summary.messages.slice(0, -1))).toBe(
-      JSON.stringify(main.messages.slice(0, 3)),
+      JSON.stringify(mainBase.slice(0, 3)),
     );
     expect(summary.cachePrefix).toEqual({ systemBlocks: main.system.length, messages: 3 });
     expect(summary.reasoningEffort).toBeUndefined();
@@ -1581,7 +1598,7 @@ describe("history 细分（ADR-0046 第 5 节）", () => {
     expectSumsToTotal(s);
   });
 
-  it("末尾任务清单不计入任何一类（归 todos section），发给模型的内容不变", () => {
+  it("清单缺失时独立注入一节（历史细分不含它），清单在工具结果里时计入 tool", () => {
     const history = [userEntry(1, "问题")];
     const built = buildContext(
       baseInput({ history, todos: [{ text: "当前任务", status: "in_progress" }] }),
@@ -1590,10 +1607,50 @@ describe("history 细分（ADR-0046 第 5 节）", () => {
     expect(s.breakdown?.user.chars).toBe("问题".length);
     expect(s.breakdown?.user.estimatedTokens).toBe(estimateTokens("问题"));
     expectSumsToTotal(s);
-    // 清单并入末尾 user 消息且计入 todos section，与历史细分互不重叠
-    const last = built.request.messages.at(-1);
-    expect(last?.role === "user" ? last.content : []).toHaveLength(2);
+    // 清单在最前独立注入且计入 todos section，与历史细分互不重叠
+    expect(built.request.messages).toHaveLength(2);
+    const first = built.request.messages[0];
+    expect(first?.role).toBe("user");
+    expect(first?.role === "user" ? first.content[0]?.text : "").toContain("当前任务");
+    const second = built.request.messages[1];
+    expect(second?.role === "user" ? second.content : []).toHaveLength(1);
     expect(built.report.sections.some((sec) => sec.name === "todos")).toBe(true);
+
+    // 清单已在 todo_write 结果里时不再注入，不另立 section，计入 tool
+    const todos = [{ text: "t1", status: "in_progress" as const }];
+    const block = formatTodoBlock(todos);
+    const withTool = buildContext(
+      baseInput({
+        history: [
+          userEntry(1, "q"),
+          {
+            kind: "assistant",
+            seq: 2,
+            turnId: "t",
+            messageId: "a2",
+            model: { provider: "test", model: "m1" },
+            content: [{ type: "text", text: "ok" }],
+            toolCalls: [{ callId: "c1", name: "todo_write", input: { items: todos } }],
+            usage: undefined,
+            finishReason: "tool_calls",
+          },
+          {
+            kind: "tool",
+            seq: 3,
+            turnId: "t",
+            callId: "c1",
+            name: "todo_write",
+            status: "ok",
+            modelContent: `任务清单已更新：1 项。\n\n${block}`,
+            pinResult: true,
+          },
+        ],
+        todos,
+      }),
+    );
+    expect(withTool.report.sections.some((sec) => sec.name === "todos")).toBe(false);
+    expect(JSON.stringify(withTool.request.messages)).toContain("t1");
+    expect(withTool.request.cachePrefix?.messages).toBe(withTool.request.messages.length);
   });
 
   it("估算模式与正式请求（attachmentData 提供）同样给出 breakdown；图片不计入任何一类", () => {
@@ -1630,5 +1687,185 @@ describe("history 细分（ADR-0046 第 5 节）", () => {
     // 图片按每张 1600 token 单列 report.images，细分只含消息文字
     expect(project.breakdown?.user.chars).toBe("看看这张图".length);
     expect(project.breakdown?.user.estimatedTokens).toBe(estimateTokens("看看这张图"));
+  });
+});
+
+describe("ADR-0028 2026-10-11 只追加（前缀缓存）", () => {
+  const todoUser = (seq: number, text: string): HistoryEntry => ({
+    kind: "user",
+    seq,
+    turnId: "t",
+    messageId: `u${seq}`,
+    content: [{ type: "text", text }],
+  });
+  const todoAssistantCall = (seq: number, callId: string): HistoryEntry => ({
+    kind: "assistant",
+    seq,
+    turnId: "t",
+    messageId: `a${seq}`,
+    model: { provider: "test", model: "m1" },
+    content: [{ type: "text", text: "ok" }],
+    toolCalls: [{ callId, name: "todo_write", input: { items: [] } }],
+    usage: undefined,
+    finishReason: "tool_calls",
+  });
+  const todoTool = (
+    seq: number,
+    callId: string,
+    todos: { text: string; status: "in_progress" }[],
+  ): HistoryEntry => ({
+    kind: "tool",
+    seq,
+    turnId: "t",
+    callId,
+    name: "todo_write",
+    status: "ok",
+    modelContent: `任务清单已更新：${todos.length} 项。\n\n${formatTodoBlock(todos)}`,
+    pinResult: true,
+  });
+
+  it("带清单连续三步：前一步是后一步的前缀，cachePrefix 覆盖全部", () => {
+    const todos = [{ text: "A", status: "in_progress" as const }];
+    const h1: HistoryEntry[] = [
+      todoUser(1, "q1"),
+      todoAssistantCall(2, "c1"),
+      todoTool(3, "c1", todos),
+    ];
+    const b1 = buildContext(baseInput({ history: h1, todos }));
+    const h2: HistoryEntry[] = [
+      ...h1,
+      todoUser(4, "q2"),
+      {
+        kind: "assistant",
+        seq: 5,
+        turnId: "t",
+        messageId: "a5",
+        model: { provider: "test", model: "m1" },
+        content: [{ type: "text", text: "r2" }],
+        toolCalls: [],
+        usage: undefined,
+        finishReason: "stop",
+      },
+    ];
+    const b2 = buildContext(baseInput({ history: h2, todos }));
+    const h3: HistoryEntry[] = [
+      ...h2,
+      todoUser(6, "q3"),
+      {
+        kind: "assistant",
+        seq: 7,
+        turnId: "t",
+        messageId: "a7",
+        model: { provider: "test", model: "m1" },
+        content: [{ type: "text", text: "r3" }],
+        toolCalls: [],
+        usage: undefined,
+        finishReason: "stop",
+      },
+    ];
+    const b3 = buildContext(baseInput({ history: h3, todos }));
+    for (const [prev, next] of [
+      [b1, b2],
+      [b2, b3],
+    ] as const) {
+      expect(next.request.messages.length).toBeGreaterThan(prev.request.messages.length);
+      expect(next.request.messages.slice(0, prev.request.messages.length)).toEqual(
+        prev.request.messages,
+      );
+      expect(prev.request.cachePrefix?.messages).toBe(prev.request.messages.length);
+    }
+    expect(b3.request.cachePrefix?.messages).toBe(b3.request.messages.length);
+    // 清单在工具结果里，不另立 todos section
+    expect(b1.report.sections.some((s) => s.name === "todos")).toBe(false);
+  });
+
+  it("todo_write 结果 pinResult，L1 修剪后仍在", () => {
+    const todos = [{ text: "A", status: "in_progress" as const }];
+    const history: HistoryEntry[] = [
+      todoUser(1, "q1"),
+      todoAssistantCall(2, "c1"),
+      todoTool(3, "c1", todos),
+      {
+        kind: "compaction",
+        seq: 4,
+        turnId: undefined,
+        compactKind: "prune",
+        throughSeq: 3,
+        summary: undefined,
+      },
+    ];
+    const built = buildContext(baseInput({ history, todos }));
+    expect(JSON.stringify(built.request.messages)).toContain("A");
+    expect(JSON.stringify(built.request.messages)).not.toContain("输出已省略] 工具 todo_write");
+    expect(built.report.sections.some((s) => s.name === "todos")).toBe(false);
+  });
+
+  it("L2 覆盖 todo_write 后清单在摘要处出现一次，随后几步位置不变", () => {
+    const todos = [{ text: "A", status: "in_progress" as const }];
+    const base: HistoryEntry[] = [
+      todoUser(1, "q1"),
+      todoAssistantCall(2, "c1"),
+      todoTool(3, "c1", todos),
+      {
+        kind: "compaction",
+        seq: 4,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 3,
+        summary: "进展",
+      },
+      todoUser(5, "q2"),
+    ];
+    const b1 = buildContext(baseInput({ history: base, todos }));
+    // 摘要之后紧跟独立清单消息，且只出现一次
+    expect(b1.request.messages[0]?.role).toBe("user");
+    expect(b1.request.messages[1]?.role).toBe("user");
+    expect(JSON.stringify(b1.request.messages[1])).toContain("A");
+    expect(
+      b1.request.messages.filter((m) => JSON.stringify(m).includes("当前会话任务清单")).length,
+    ).toBe(1);
+    expect(b1.report.sections.some((s) => s.name === "todos")).toBe(true);
+
+    const extended: HistoryEntry[] = [
+      ...base,
+      {
+        kind: "assistant",
+        seq: 6,
+        turnId: "t",
+        messageId: "a6",
+        model: { provider: "test", model: "m1" },
+        content: [{ type: "text", text: "r2" }],
+        toolCalls: [],
+        usage: undefined,
+        finishReason: "stop",
+      },
+      todoUser(7, "q3"),
+    ];
+    const b2 = buildContext(baseInput({ history: extended, todos }));
+    expect(JSON.stringify(b2.request.messages[1])).toContain("A");
+    expect(b2.request.messages[1]).toEqual(b1.request.messages[1]);
+    expect(b2.request.messages.slice(0, 2)).toEqual(b1.request.messages.slice(0, 2));
+  });
+
+  it("归档后不再注入，历史结果照常保留", () => {
+    const oldTodos = [{ text: "A", status: "in_progress" as const }];
+    const history: HistoryEntry[] = [
+      todoUser(1, "q1"),
+      todoAssistantCall(2, "c1"),
+      todoTool(3, "c1", oldTodos),
+      todoUser(4, "q2"),
+    ];
+    const built = buildContext(baseInput({ history, todos: [] }));
+    expect(built.report.sections.some((s) => s.name === "todos")).toBe(false);
+    // 历史里的旧结果保留，但没有为当前（空）清单新增的独立消息
+    expect(JSON.stringify(built.request.messages)).toContain("A");
+    expect(
+      built.request.messages.filter(
+        (m) =>
+          m.role === "user" &&
+          m.content.length === 1 &&
+          m.content[0]?.text.startsWith("当前会话任务清单（由 Runtime 附加") === true,
+      ).length,
+    ).toBe(0);
   });
 });

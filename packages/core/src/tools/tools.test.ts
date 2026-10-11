@@ -158,10 +158,15 @@ describe("Executor 管线", () => {
   it("todo_write 校验边界并输出规范化的完整快照", async () => {
     const h = await makeHarness(tmpWorkspace());
     const valid = { items: [{ text: "  做事  ", status: "in_progress" }] };
-    expect((await h.executor.execute(call("todo_write", valid), h.scope)).status).toBe("ok");
+    const first = await h.executor.execute(call("todo_write", valid), h.scope);
+    expect(first.status).toBe("ok");
     expect(completedOf(h)[0]?.payload.output).toEqual({
       items: [{ text: "做事", status: "in_progress" }],
     });
+    // 2026-10-11 修订：结果含完整清单块（确认文字 + 同格式边界），traits pinResult
+    expect(String(completedOf(h)[0]?.payload.modelContent)).toContain("任务清单已更新：1 项。");
+    expect(String(completedOf(h)[0]?.payload.modelContent)).toContain("当前会话任务清单");
+    expect(String(completedOf(h)[0]?.payload.modelContent)).toContain('"做事"');
     expect(h.events.map((e) => e.type)).toEqual(["tool.started", "tool.completed"]);
     expect(
       (await h.executor.execute(call("todo_write", { items: [] }, "clear"), h.scope)).status,

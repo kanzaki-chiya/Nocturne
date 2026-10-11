@@ -1,4 +1,4 @@
-import { parseTodoItems, type TodoItem } from "../../protocol/index.js";
+import { formatTodoBlock, parseTodoItems, type TodoItem } from "../../protocol/index.js";
 import type { ToolDefinition } from "../types.js";
 
 export const todoWriteTool: ToolDefinition<{ items: TodoItem[] }, { items: TodoItem[] }> = {
@@ -25,7 +25,7 @@ export const todoWriteTool: ToolDefinition<{ items: TodoItem[] }, { items: TodoI
     },
     additionalProperties: false,
   },
-  traits: { mutates: false, concurrencySafe: false, timeoutMs: 5_000 },
+  traits: { mutates: false, concurrencySafe: false, timeoutMs: 5_000, pinResult: true },
   validateInput(input) {
     return parseTodoItems(input.items) === undefined
       ? "任务清单无效：最多 20 项，每项文本须为单行、非空且不超过 200 字符"
@@ -35,9 +35,11 @@ export const todoWriteTool: ToolDefinition<{ items: TodoItem[] }, { items: TodoI
   execute(input) {
     const items = parseTodoItems(input.items);
     if (items === undefined) throw new Error("validated todo input became invalid");
+    const confirmation = `任务清单已更新：${items.length} 项。`;
     return Promise.resolve({
       status: "ok",
-      modelContent: `任务清单已更新：${items.length} 项。`,
+      modelContent:
+        items.length === 0 ? confirmation : `${confirmation}\n\n${formatTodoBlock(items)}`,
       output: { items },
     } as const);
   },
