@@ -134,6 +134,27 @@ describe("decodeDurableEvent", () => {
     }
   });
 
+  it("message.assistant.timing 可选往返；旧日志没有该字段照常解码", () => {
+    const base = {
+      messageId: "m1",
+      model: { provider: "fake", model: "fake-1" },
+      content: [{ type: "text" as const, text: "hello" }],
+      toolCalls: [],
+      finishReason: "stop" as const,
+    };
+    for (const timing of [{ ttftMs: 120, durationMs: 900 }, { durationMs: 40 }, undefined]) {
+      const event = makeEvent({
+        type: "message.assistant",
+        turnId: "t1",
+        payload: {
+          ...base,
+          ...(timing !== undefined ? { timing } : {}),
+        } satisfies MessageAssistantPayload,
+      });
+      expect(decodeDurableEvent(encodeDurableEvent(event))).toEqual(event);
+    }
+  });
+
   it("非法 JSON → invalid_json", () => {
     expect(() => decodeDurableEvent("{not json")).toThrowError(EventParseError);
     try {

@@ -43,7 +43,7 @@ runTurn(session, input, signal):
       text / reasoning 增量 → emit message.assistant.delta（临时）
       tool_call             → 分配 callId，记录 providerCallId
       usage / finish        → 记录
-    emit message.assistant(messageId, content, toolCalls, usage, finishReason)
+    emit message.assistant(messageId, content, toolCalls, usage, timing, finishReason)
 
     # 3. 按结束原因决定去向（在执行任何工具之前）
     switch result.finishReason:
@@ -127,6 +127,7 @@ Provider 流每次等待前都检查是否已中止，因此中断落在两次�
 - Provider 失败或用户中断时，若没有任何 assistant 内容和工具调用，不写入空的 `message.assistant`；Turn 仍以对应原因结束。已有部分输出时照常保存。
 - 仅当 `ProviderError.retryable` 为真时重试；指数退避，优先遵守 `retryAfterMs`；次数上限可配置（默认 4 次）。每次重试发出临时事件 `provider.retry`。
 - 公共流包装分别限制首个事件等待和事件间空闲（默认 30 秒、300 秒；`turn.firstEventTimeoutMs` / `turn.idleTimeoutMs` 可调）。适配器在上游开始响应时发出的 `heartbeat` 也满足首事件等待并重置空闲计时，但不转发、不算输出。超时视为 `ProviderError(kind="timeout", retryable=true)`；已有输出时遵守上条规则，不重发。普通 Step、自动与手动摘要共用这一限制，见 [ADR-0014](../decisions/ADR-0014-stream-timeout-empty-response.md)。
+- 每次尝试单独计时：`timing` 只取产生该消息的那次尝试（TTFT 与总耗时，口径见 [events.md](../protocols/events.md) 第 4 节 `AssistantTiming`），失败重试的尝试不计入。
 - `stop` 但没有文本与工具调用时，Agent Loop 在持久化 assistant 消息前按可重试的空响应处理；受同一重试上限约束，用尽后以 `error.code="provider_empty_response"` 结束。该判断不改变 Provider 的公共事件与错误类型，因此没有新的 Provider kind；错误语义变化见同一 ADR。
 - `context_overflow` 不重试同一请求，而是要求 Context Builder 给出压缩计划（`mustCompact`）并重建后重试一次；可尝试的计划按 prune → summary 顺序，每类每 Turn 至多一次，都已尝试后仍溢出则以 `error(code="compaction_failed")` 结束。
 

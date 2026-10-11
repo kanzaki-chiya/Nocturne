@@ -40,6 +40,11 @@ const usageSchema = z.object({
   reasoningTokens: z.number().optional(),
 });
 
+const assistantTimingSchema = z.object({
+  ttftMs: z.number().nonnegative().optional(),
+  durationMs: z.number().nonnegative(),
+});
+
 const permissionSubjectSchema = z.object({
   kind: z.enum(["read", "edit", "shell", "network", "mcp", "subagent"]),
   target: z.string(),
@@ -179,6 +184,8 @@ const payloadSchemas = {
     content: z.array(contentBlockSchema),
     toolCalls: z.array(toolCallRefSchema),
     usage: usageSchema.optional(),
+    // 请求计时（ADR-0053 修订 2026-10-11）：可选，旧日志没有
+    timing: assistantTimingSchema.optional(),
     finishReason: z.union([finishReasonSchema, z.literal("aborted")]),
   }),
   "tool.started": z.object({

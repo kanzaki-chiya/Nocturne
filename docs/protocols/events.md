@@ -73,7 +73,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `session.titled` | — | `title: string`、`model: string`（provider/model）、`usage?`（标题角色用量） |
 | `turn.started` | ✓ | `turnIndex` |
 | `message.user` | ✓ | `messageId`、`content: ContentBlock[]`、`attachments?: ImageAttachment[]`、`fileRefs?: FileRef[]`（用户引用的快照元数据，见第 4 节）、`skill?: { name: string; body: string }`（渲染正文快照，末尾 content 同时含 skill 文本块）、`delegate?: { agent: string; task: string }`（外部委派任务原文快照，末尾 content 同时含明确的 task 工具指令；与 skill 互斥） |
-| `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`finishReason: FinishReason \| "aborted"`、`protocol?: "openai-compatible" \| "anthropic" \| "openai-responses"`（产生该消息时的生效协议，ADR-0026 §6、ADR-0031 §1；旧日志无此字段，缺省时 `providerData` 回传只比较服务商） |
+| `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`timing?: AssistantTiming`（请求计时，见第 4 节；旧日志无此字段）、`finishReason: FinishReason \| "aborted"`、`protocol?: "openai-compatible" \| "anthropic" \| "openai-responses"`（产生该消息时的生效协议，ADR-0026 §6、ADR-0031 §1；旧日志无此字段，缺省时 `providerData` 回传只比较服务商） |
 | `tool.started` | ✓ | `callId`、`name`、`input`（规范化后）、`pinResult?: boolean`（工具结果不参与 L1 修剪）、`subjects: PermissionSubject[]`（解析后）、`permission: { action, source, rule? }`（`rule` 为命中规则的人读说明，见 [permissions.md](../architecture/permissions.md) 5.3） |
 | `permission.requested` | ✓ | `requestId`、`callId`、`subjects`、`reason`、`options`（权限层给出的选项子集：通常五项，高风险命令、编码命令或工作区外 edit 只有 `allow_once`、`deny`、`deny_stop`） |
 | `permission.resolved` | ✓ | `requestId?`、`callId`、`action: "allow" \| "deny"`、`source: "user" \| "rule" \| "grant" \| "non_interactive" \| "cancelled" \| "hook" \| "reviewer"`、`rule?`、`remember?`、`feedback?` |
@@ -148,6 +148,12 @@ type Usage = {
   reasoningTokens?: number
 }
 
+/** message.assistant 的请求计时（ADR-0053 修订 2026-10-11）；毫秒，单调时钟 */
+type AssistantTiming = {
+  ttftMs?: number           // 起点到首个内容事件；整条消息没有内容事件时省略
+  durationMs: number        // 起点到消息收束（finish 或 aborted）
+}
+
 /** 解析后的权限主体，见 permissions.md */
 type PermissionSubject = {
   kind: "read" | "edit" | "shell" | "network" | "mcp" | "subagent"   // subagent：Phase 6
@@ -203,6 +209,8 @@ type QuestionAnswer = { declined: true } | {
 ```
 
 `inputTokens` 统一为包含口径：服务商分开报告未缓存输入与缓存读写时（如 Anthropic 原生 usage），由 Provider 适配器相加后写入；已是包含口径的来源（AI SDK 的 `LanguageModelUsage`，其 Anthropic provider 已完成相加）直接透传。Core 与客户端据此计算缓存命中率（`cacheReadTokens / inputTokens`）和上下文估算（[context.md](../architecture/context.md) 第 5 节），不再按服务商区分口径。
+
+`AssistantTiming` 的起点是产生这条消息的那次尝试把请求交给 Provider 的时刻（Agent Loop 调用流式计时包装之前）；重试时失败的尝试不计入。内容事件指正文、推理（非空增量或整块）与工具调用（含参数增量），`usage`、`finish` 不算，`heartbeat` 在计时包装内消费、也不算（ADR-0014 修订）。输出后失败保存的部分消息与中断消息同样记录到收束时刻。计时在 Agent Loop 里用单调时钟（`TurnDeps.now`，缺省 `performance.now()`）取差值，各协议同一口径；标题、图片描述、权限审查与摘要请求不计时。读取方必须按字段缺省处理旧日志。
 
 `providerData` 只能回传给 `provider` 字段所示的 Provider，且要求同一协议（ADR-0026 §6），见 [context.md](../architecture/context.md) 第 7 节。
 

@@ -182,6 +182,7 @@ export async function runTurn(
         content: acc.content,
         toolCalls: acc.toolCalls,
         usage: acc.usage,
+        ...(acc.timing !== undefined ? { timing: acc.timing } : {}),
         finishReason,
       },
       { turnId },

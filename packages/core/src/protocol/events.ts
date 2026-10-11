@@ -5,6 +5,7 @@
 import type { SkillSnapshot } from "./skills.js";
 import type {
   AgentDelegation,
+  AssistantTiming,
   ContentBlock,
   FileRef,
   FinishReason,
@@ -92,6 +93,8 @@ export interface MessageAssistantPayload {
   content: ContentBlock[];
   toolCalls: ToolCallRef[];
   usage?: Usage | undefined;
+  /** 请求计时（ADR-0053 修订 2026-10-11）；旧日志没有，读取方按缺省处理 */
+  timing?: AssistantTiming | undefined;
   finishReason: FinishReason | "aborted";
 }
 

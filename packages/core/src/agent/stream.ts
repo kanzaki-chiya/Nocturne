@@ -7,10 +7,16 @@ import {
   PROTOCOL_ENDPOINTS,
   type ContentBlock,
   type FinishReason,
+  type AssistantTiming,
   type ToolCallRef,
   type Usage,
 } from "../protocol/index.js";
-import { isProviderError, timedStream, type ModelRequest } from "../provider/index.js";
+import {
+  isProviderError,
+  timedStream,
+  type ModelOutputEvent,
+  type ModelRequest,
+} from "../provider/index.js";
 import { redactRequestImages } from "./redact.js";
 import type { TurnDeps } from "./types.js";
 
@@ -25,6 +31,8 @@ export interface StreamAccumulation {
   content: ContentBlock[];
   toolCalls: ToolCallRef[];
   usage: Usage | undefined;
+  /** 本次尝试的计时，在流收束（finish / aborted / failed）时填写 */
+  timing?: AssistantTiming | undefined;
 }
 
 export type StreamOutcome =
@@ -55,6 +63,21 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** 计 TTFT 的内容事件：正文、推理或工具调用（含增量）；usage / finish 不算 */
+function isContentEvent(ev: ModelOutputEvent): boolean {
+  switch (ev.type) {
+    case "text_delta":
+    case "reasoning_delta":
+      return ev.text !== "";
+    case "reasoning_block":
+    case "tool_call_delta":
+    case "tool_call":
+      return true;
+    default:
+      return false;
+  }
+}
+
 /** 追加 delta 到有序内容块：与末尾同类块合并，否则开新块 */
 function appendDelta(blocks: ContentBlock[], type: "text" | "reasoning", delta: string): void {
   const last = blocks.at(-1);
@@ -75,6 +98,7 @@ export async function consumeStream(
   const { session, config, signal } = deps;
   const { provider } = deps.model;
   const maxAttempts = config.retryLimit + 1;
+  const now = deps.now ?? (() => performance.now());
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const acc: StreamAccumulation = {
@@ -102,6 +126,17 @@ export async function consumeStream(
       request: redactRequestImages(request),
     });
     const requestStart = Date.now();
+    // 计时只看本次尝试：起点为请求交给 Provider 的时刻，首个内容事件定 TTFT。
+    // heartbeat 已在 timedStream 内消费，不会到这里。
+    const started = now();
+    let firstContent: number | undefined;
+    const settle = (): StreamAccumulation => {
+      acc.timing = {
+        ...(firstContent !== undefined ? { ttftMs: Math.round(firstContent - started) } : {}),
+        durationMs: Math.round(now() - started),
+      };
+      return acc;
+    };
 
     try {
       for await (const ev of timedStream(
@@ -112,6 +147,7 @@ export async function consumeStream(
         config.idleTimeoutMs,
       )) {
         producedOutput = true;
+        if (firstContent === undefined && isContentEvent(ev)) firstContent = now();
         switch (ev.type) {
           case "text_delta": {
             appendDelta(acc.content, "text", ev.text);
@@ -209,16 +245,16 @@ export async function consumeStream(
               contentChars: acc.content.reduce((a, b) => a + b.text.length, 0),
               durationMs: Date.now() - requestStart,
             });
-            return { kind: "finished", finishReason: ev.reason, acc };
+            return { kind: "finished", finishReason: ev.reason, acc: settle() };
           }
         }
-        if (signal.aborted) return { kind: "aborted", acc };
+        if (signal.aborted) return { kind: "aborted", acc: settle() };
       }
       // 流结束但没有 finish：违反 Provider 契约，按意外结束处理
       return {
         kind: "failed",
         error: new Error("Provider 流在没有 finish 的情况下结束"),
-        acc,
+        acc: settle(),
       };
     } catch (e) {
       deps.execEnv.diagnostics?.record("provider.error", {
@@ -236,7 +272,7 @@ export async function consumeStream(
         durationMs: Date.now() - requestStart,
       });
       if (signal.aborted || isAbortError(e)) {
-        return { kind: "aborted", acc };
+        return { kind: "aborted", acc: settle() };
       }
       if (
         (e instanceof EmptyResponseError ||
@@ -264,7 +300,7 @@ export async function consumeStream(
         await sleep(delayMs, signal);
         continue;
       }
-      return { kind: "failed", error: e, acc };
+      return { kind: "failed", error: e, acc: settle() };
     }
   }
   // 不可达：循环内必然返回

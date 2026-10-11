@@ -220,6 +220,17 @@ export interface Usage {
   reasoningTokens?: number | undefined;
 }
 
+/**
+ * 一次模型请求的计时（events.md message.assistant；单调时钟，毫秒）。
+ * 起点为产生该消息的那次尝试把请求交给 Provider 的时刻；失败重试的尝试不计入。
+ */
+export interface AssistantTiming {
+  /** 起点到首个内容事件（正文、推理或工具调用增量）；heartbeat 不算；没有内容事件时省略 */
+  ttftMs?: number | undefined;
+  /** 起点到消息收束（finish 或 aborted） */
+  durationMs: number;
+}
+
 export type SubjectKind = "read" | "edit" | "shell" | "network" | "mcp" | "subagent";
 
 /**

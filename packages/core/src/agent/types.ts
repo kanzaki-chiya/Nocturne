@@ -52,6 +52,11 @@ export interface TurnDeps {
   signal: AbortSignal;
   newId?: IdFactory | undefined;
   /**
+   * 单调时钟（毫秒），用于 message.assistant.timing；缺省 performance.now。
+   * 只做差值，不当墙钟用；测试注入假时钟。
+   */
+  now?: (() => number) | undefined;
+  /**
    * Phase 6 注入点（agent-loop.md 3.9，subagent.md 第 9 节）；缺省时行为不变：
    * - basePrompt：覆盖基础系统提示段
    * - shouldFinish：每个工具调用结算后检查，返回 true 即 finish("done")

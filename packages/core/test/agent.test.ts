@@ -13,6 +13,7 @@ import {
   ProviderError,
   type FakeHandler,
   type FakeScript,
+  type FakeScriptEvent,
   type ModelRequest,
   type ResolvedModel,
 } from "../src/provider/index.js";
@@ -669,6 +670,121 @@ describe("runTurn", () => {
     expect(completed).toHaveLength(2);
     const statuses = completed.map((e) => (e.type === "tool.completed" ? e.payload.status : ""));
     expect(statuses.sort()).toEqual(["cancelled", "denied"]);
+  });
+});
+
+/** 事件带 at 时，Provider 在交出该事件前把假时钟拨到 at（毫秒） */
+class ClockedProvider extends FakeProvider {
+  constructor(
+    scripts: FakeScript[],
+    private readonly clock: { t: number },
+  ) {
+    super({ scripts });
+  }
+  override async *stream(request: ModelRequest, signal: AbortSignal) {
+    for await (const ev of super.stream(request, signal)) {
+      const at = (ev as { at?: number }).at;
+      if (at !== undefined) this.clock.t = at;
+      yield ev;
+    }
+  }
+}
+const at = (ms: number, ev: FakeScriptEvent): FakeScriptEvent => Object.assign(ev, { at: ms });
+
+describe("message.assistant 计时（ADR-0053 修订 2026-10-11）", () => {
+  async function timed(scripts: FakeScript[], signal?: AbortSignal) {
+    const clock = { t: 0 };
+    const h = await makeHarness({
+      provider: new ClockedProvider(scripts, clock),
+      ...(signal !== undefined ? { signal } : {}),
+    });
+    h.deps.now = () => clock.t;
+    const assistants = () =>
+      h.events.flatMap((e) => (e.type === "message.assistant" ? [e.payload] : []));
+    return { h, clock, assistants };
+  }
+
+  it("ttftMs 为首个内容事件，durationMs 到 finish；heartbeat 不算首字", async () => {
+    const { h, assistants } = await timed([
+      [
+        at(400, { type: "heartbeat" }),
+        at(1200, { type: "reasoning_delta", text: "想" }),
+        at(1500, { type: "text_delta", text: "ok" }),
+        at(1800, { type: "usage", usage: { inputTokens: 10, outputTokens: 5 } }),
+        at(2000, { type: "finish", reason: "stop" }),
+      ],
+    ]);
+    expect(await runTurn(h.deps, prompt())).toBe("done");
+    expect(assistants()[0]?.timing).toEqual({ ttftMs: 1200, durationMs: 2000 });
+  });
+
+  it("工具调用增量也算内容事件", async () => {
+    const { h, assistants } = await timed([
+      [
+        at(300, { type: "tool_call_delta", toolCallId: "p1", name: "todo", argsDelta: "{" }),
+        at(900, { type: "tool_call", toolCallId: "p1", name: "todo", input: { todos: [] } }),
+        at(1000, { type: "finish", reason: "tool_calls" }),
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "finish", reason: "stop" },
+      ],
+    ]);
+    await runTurn(h.deps, prompt());
+    expect(assistants()[0]?.timing).toEqual({ ttftMs: 300, durationMs: 1000 });
+  });
+
+  it("重试后只计成功的那次尝试", async () => {
+    const { h, assistants } = await timed([
+      [
+        at(500, { type: "heartbeat" }),
+        { type: "throw", error: new ProviderError({ kind: "network", message: "net down" }) },
+      ],
+      [at(800, { type: "text_delta", text: "done" }), at(1500, { type: "finish", reason: "stop" })],
+    ]);
+    expect(await runTurn(h.deps, prompt())).toBe("done");
+    expect(h.provider.requests).toHaveLength(2);
+    // 第二次尝试从 500 开始：ttft 800-500，耗时 1500-500
+    expect(assistants()).toHaveLength(1);
+    expect(assistants()[0]?.timing).toEqual({ ttftMs: 300, durationMs: 1000 });
+  });
+
+  it("没有内容事件时省略 ttftMs", async () => {
+    const { h, assistants } = await timed([
+      [at(100, { type: "text_delta", text: "" }), at(700, { type: "finish", reason: "length" })],
+    ]);
+    expect(await runTurn(h.deps, prompt())).toBe("truncated");
+    expect(assistants()[0]?.timing).toEqual({ durationMs: 700 });
+  });
+
+  it("aborted 的消息也有 durationMs", async () => {
+    const ac = new AbortController();
+    const { h, clock, assistants } = await timed(
+      [[at(100, { type: "text_delta", text: "chunk" }), { type: "wait" }]],
+      ac.signal,
+    );
+    h.session.subscribe((e) => {
+      if (e.type === "message.assistant.delta") {
+        clock.t = 450;
+        ac.abort();
+      }
+    });
+    expect(await runTurn(h.deps, prompt())).toBe("aborted");
+    expect(assistants()[0]).toMatchObject({
+      finishReason: "aborted",
+      timing: { ttftMs: 100, durationMs: 450 },
+    });
+  });
+
+  it("输出后失败保存的部分消息按该次尝试计时", async () => {
+    const { h, assistants } = await timed([
+      [
+        at(200, { type: "text_delta", text: "partial" }),
+        { type: "throw", error: new ProviderError({ kind: "network", message: "boom" }) },
+      ],
+    ]);
+    expect(await runTurn(h.deps, prompt())).toBe("error");
+    expect(assistants()[0]?.timing).toEqual({ ttftMs: 200, durationMs: 200 });
   });
 });
 

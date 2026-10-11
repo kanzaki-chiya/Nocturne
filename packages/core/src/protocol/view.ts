@@ -23,6 +23,7 @@ import { effectiveEvents, rewindNotification, firstUserText } from "./rewind.js"
 export { firstUserText } from "./rewind.js";
 import type {
   AgentDelegation,
+  AssistantTiming,
   ContentBlock,
   FileRef,
   FinishReason,
@@ -127,6 +128,8 @@ export interface AssistantEntry {
   toolCalls: ToolCallRef[];
   model: ModelRef;
   usage: Usage | undefined;
+  /** 请求计时；旧日志没有 */
+  timing?: AssistantTiming | undefined;
   finishReason: FinishReason | "aborted";
 }
 
@@ -409,6 +412,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         toolCalls: p.toolCalls,
         model: p.model,
         usage: p.usage,
+        ...(p.timing !== undefined ? { timing: p.timing } : {}),
         finishReason: p.finishReason,
       });
       break;
