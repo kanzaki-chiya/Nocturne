@@ -27,14 +27,12 @@ export const formatUsageCost = (n: number): string =>
   `$${n >= 100 ? Math.round(n).toLocaleString("en-US") : n.toFixed(2)}`;
 const dateKey = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const prices = (p: ModelPricing | undefined) =>
-  p === undefined
-    ? ["—", "—", "—"]
-    : [
-        p.input === undefined ? "—" : `$${p.input}`,
-        `${p.cacheRead === undefined ? "—" : `$${p.cacheRead}`} / ${p.cacheWrite === undefined ? "—" : `$${p.cacheWrite}`}`,
-        p.output === undefined ? "—" : `$${p.output}`,
-      ];
+const price = (v: number | undefined) => (v === undefined ? "—" : `$${v}`);
+/** 表格里的输入 / 输出单价；缓存单价在展开区（priceLine） */
+const prices = (p: ModelPricing | undefined) => [price(p?.input), price(p?.output)];
+/** 展开区的完整单价行；分档模型显示基础档 */
+export const priceLine = (p: ModelPricing | undefined): string =>
+  `单价 输入 ${price(p?.input)} · 缓存读 ${price(p?.cacheRead)} / 写 ${price(p?.cacheWrite)} · 输出 ${price(p?.output)}（USD / 每百万 token）${p?.tiers?.length ? " · 分档" : ""}`;
 const SOURCE = { config: "配置", upstream: "上游", "models.dev": "models.dev", vendor: "厂商价" };
 const VENDOR_NOTE = "按模型厂商官方 API 价估算，不代表代理或中转服务的实际收费";
 
@@ -209,7 +207,7 @@ export function relativeTime(iso: string, now: number = Date.now()): string {
   return `${Math.round(hours / 24)} 天前`;
 }
 const percentText = (v: number) => `${(v * 100).toFixed(1)}%`;
-const MODEL_COLUMNS = 12;
+const MODEL_COLUMNS = 11;
 
 function ModelDetail({
   model: m,
@@ -279,6 +277,7 @@ function ModelDetail({
               <dd>{formatTokens(m.outputTokens)}</dd>
             </div>
           </dl>
+          <p className="usage-basis usage-prices">{priceLine(m.pricing)}</p>
         </div>
         {m.firstUsedAt !== undefined && m.lastUsedAt !== undefined && (
           <div className="usage-seen">
@@ -513,7 +512,6 @@ export function UsageView({
                       <th>TTFT</th>
                       <th>近期速度</th>
                       <th>输入单价</th>
-                      <th>缓存读 / 写</th>
                       <th>输出单价</th>
                     </tr>
                   </thead>
@@ -606,7 +604,7 @@ export function UsageView({
               {!models.length && <p className="usage-empty">这个时间范围内还没有模型用量</p>}
               <p className="usage-table-note">
                 Tokens/s 和 TTFT 只统计带计时的请求；旧版本的记录没有计时，显示「—」。单价为 USD /
-                每百万 token；缓存列为读取 / 写入，缺失缓存价按输入价估算。
+                每百万 token，缓存单价见展开详情，缺失缓存价按输入价估算。
                 {models.some((m) => m.pricingSource === "vendor") &&
                   `来源为「厂商价」的模型${VENDOR_NOTE}。`}
               </p>

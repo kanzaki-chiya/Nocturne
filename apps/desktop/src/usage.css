@@ -671,6 +671,7 @@
 
 /* ── 展开区性能图 ── */
 .usage-chart-card {
+  align-self: start;
   min-width: 0;
   background: var(--a-panel);
   border: 1px solid var(--a-border);
@@ -718,9 +719,10 @@
   height: auto;
   overflow: visible;
 }
+/* viewBox 宽度等于图区像素宽度（UsageCharts usePixelWidth），字号、线宽按屏幕像素 */
 .usage-chart text {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
   fill: var(--a-faint);
 }
 .usage-chart .grid {

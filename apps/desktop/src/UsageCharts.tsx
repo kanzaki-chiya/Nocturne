@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useLayoutEffect, useState } from "react";
 import type {
   DailyUsageStats,
   ModelRef,
@@ -231,8 +231,48 @@ export function bucketFullTime(start: Date, granularity: PerformanceGranularity)
   const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
   return `${isoDate(start)} 至 ${isoDate(end)}`;
 }
-const niceMax = (v: number, step: number) => Math.max(step, Math.ceil(v / step) * step);
-const trimZero = (s: string) => s.replace(/\.0$/, "");
+/**
+ * 四等分坐标轴的「好看」步长：数据最大值留 10% 余量后除以 4，取不小于它的
+ * 1 / 2 / 2.5 / 5 × 10ⁿ 中最小的一个。count 轴刻度必须是整数（步长小于 10 时不用 2.5）；
+ * seconds 轴允许小数，但小于 1 秒的步长不用 2.5，避免 0.25 / 0.75 这样的刻度。
+ */
+export function niceAxis(
+  dataMax: number,
+  kind: "count" | "seconds",
+): { step: number; max: number } {
+  const raw = (Math.max(0, dataMax) * 1.1) / 4;
+  if (!(raw > 0)) return kind === "count" ? { step: 1, max: 4 } : { step: 0.5, max: 2 };
+  const magnitude = 10 ** Math.floor(Math.log10(raw));
+  const allow25 = kind === "count" ? magnitude >= 10 : magnitude >= 1;
+  const multipliers = allow25 ? [1, 2, 2.5, 5, 10] : [1, 2, 5, 10];
+  let step = Number(
+    ((multipliers.find((m) => m * magnitude >= raw) ?? 10) * magnitude).toPrecision(12),
+  );
+  if (kind === "count") step = Math.max(1, step);
+  return { step, max: Number((step * 4).toPrecision(12)) };
+}
+const axisLabel = (v: number, kind: "count" | "seconds") =>
+  kind === "count" ? String(Math.round(v)) : `${Number(v.toFixed(3))}s`;
+
+/** 图区实际像素宽度：viewBox 用它作宽，字号与线宽不随容器缩放 */
+function usePixelWidth(element: HTMLElement | null, fallback: number): number {
+  const [width, setWidth] = useState(fallback);
+  useLayoutEffect(() => {
+    if (element === null) return;
+    const measure = () => {
+      const w = Math.round(element.getBoundingClientRect().width);
+      if (w > 0) setWidth(w);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, [element]);
+  return width;
+}
 
 /** 双轴折线：左轴 Tokens/s（强调色实线 + 淡填充），右轴 TTFT（中性色虚线，秒） */
 export function PerformanceChart({
@@ -244,18 +284,20 @@ export function PerformanceChart({
 }) {
   const [active, setActive] = useState<number | undefined>();
   const title = CHART_TITLES[granularity];
-  const W = 640;
-  const H = 230;
-  const L = 40;
-  const R = 40;
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
+  const W = usePixelWidth(box, 640);
+  const H = 220;
+  const L = 44;
+  const R = 44;
   const T = 10;
   const B = 30;
   const pw = W - L - R;
   const ph = H - T - B;
   const n = points.length;
-  // 步长取 20 与 2，四等分刻度落在整数与 0.5 秒上
-  const yMax = niceMax(Math.max(0, ...points.map((p) => p.tokensPerSecond ?? 0)) * 1.1, 20);
-  const tMax = niceMax((Math.max(0, ...points.map((p) => p.avgTtftMs ?? 0)) / 1000) * 1.15, 2);
+  const yAxis = niceAxis(Math.max(0, ...points.map((p) => p.tokensPerSecond ?? 0)), "count");
+  const tAxis = niceAxis(Math.max(0, ...points.map((p) => p.avgTtftMs ?? 0)) / 1000, "seconds");
+  const yMax = yAxis.max;
+  const tMax = tAxis.max;
   const x = (i: number) => (n === 1 ? L + pw / 2 : L + 12 + (i * (pw - 24)) / (n - 1));
   const y1 = (v: number) => T + ph - (v / yMax) * ph;
   const y2 = (ms: number) => T + ph - (ms / 1000 / tMax) * ph;
@@ -268,7 +310,8 @@ export function PerformanceChart({
   const line = (pts: readonly (readonly [number, number])[]) =>
     pts.map((p) => p.join(",")).join(" ");
   const dense = n > 40;
-  const every = Math.max(1, Math.ceil(n / 6));
+  // 约 6 个 x 轴标签；图区窄时每个标签至少留 96px，避免「10/10 9时」挤在一起
+  const every = Math.max(1, Math.ceil(n / Math.max(1, Math.min(6, Math.floor(pw / 96)))));
   const colW = n <= 1 ? pw : (pw - 24) / (n - 1);
   const hovered = active === undefined ? undefined : points[active];
   return (
@@ -289,18 +332,25 @@ export function PerformanceChart({
       {n === 0 ? (
         <div className="usage-chart-empty">这个范围内没有带计时的请求（旧版本记录不含计时）</div>
       ) : (
-        <div className="usage-chart">
-          <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title}>
+        <div className="usage-chart" ref={setBox}>
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            width={W}
+            height={H}
+            data-width={W}
+            role="img"
+            aria-label={title}
+          >
             {[0, 1, 2, 3, 4].map((i) => {
               const y = T + ph - (i / 4) * ph;
               return (
                 <g key={i}>
                   <line className="grid" x1={L} x2={W - R} y1={y} y2={y} />
-                  <text x={L - 8} y={y + 3} textAnchor="end">
-                    {Math.round((yMax * i) / 4)}
+                  <text x={L - 8} y={y + 4} textAnchor="end">
+                    {axisLabel(yAxis.step * i, "count")}
                   </text>
-                  <text x={W - R + 8} y={y + 3} textAnchor="start">
-                    {trimZero(((tMax * i) / 4).toFixed(1))}s
+                  <text x={W - R + 8} y={y + 4} textAnchor="start">
+                    {axisLabel(tAxis.step * i, "seconds")}
                   </text>
                 </g>
               );

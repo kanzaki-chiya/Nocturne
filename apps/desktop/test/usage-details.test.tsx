@@ -1,13 +1,14 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ModelUsageStats, PerformancePoint, UsageStats } from "@nocturne/core/protocol";
-import { UsageView } from "../src/UsagePage";
+import { UsageView, priceLine } from "../src/UsagePage";
 import {
   CATEGORY_COLORS,
   DailyBars,
   OTHER_COLOR,
   PerformanceChart,
   modelPalette,
+  niceAxis,
 } from "../src/UsageCharts";
 
 afterEach(cleanup);
@@ -47,6 +48,7 @@ const point = (start: Date, tokensPerSecond?: number, avgTtftMs?: number): Perfo
 });
 
 const timed = model("timed", 900_000, {
+  pricing: { input: 2, output: 8, cacheRead: 0.2 },
   outputTokens: 40_000,
   cacheReadTokens: 600_000,
   cacheWriteTokens: 10_000,
@@ -226,7 +228,24 @@ describe("模型行展开", () => {
     const headers = [...document.querySelectorAll(".usage-table thead th")].map(
       (e) => e.textContent,
     );
-    expect(headers.slice(6, 9)).toEqual(["Tokens/s", "TTFT", "近期速度"]);
+    expect(headers).toEqual([
+      "模型 / 服务商",
+      "Turns",
+      "输入",
+      "输出",
+      "缓存命中",
+      "预估费用",
+      "Tokens/s",
+      "TTFT",
+      "近期速度",
+      "输入单价",
+      "输出单价",
+    ]);
+    expect(row(/timed/).children).toHaveLength(11);
+    expect([...row(/timed/).querySelectorAll("td")].slice(-2).map((e) => e.textContent)).toEqual([
+      "$2",
+      "$8",
+    ]);
     const cells = (tr: HTMLElement) => [...tr.querySelectorAll("td")].slice(5, 8);
     const [tps, ttft, spark] = cells(row(/timed/));
     expect(tps?.textContent).toBe("61.3");
@@ -263,6 +282,10 @@ describe("模型行展开", () => {
       输出: "4 万",
     });
     expect(detail.querySelector(".usage-basis")?.textContent).toBe("基于 12 次请求");
+    expect(detail.querySelector(".usage-prices")?.textContent).toBe(
+      "单价 输入 $2 · 缓存读 $0.2 / 写 — · 输出 $8（USD / 每百万 token）",
+    );
+    expect(detail.closest("td")?.colSpan).toBe(11);
     const seen = detail.querySelector(".usage-seen");
     expect(seen?.textContent).toBe("首次使用 3 天前 · 最近使用 2 小时前");
     expect(seen?.querySelector("span")?.getAttribute("title")).toMatch(
@@ -279,7 +302,70 @@ describe("模型行展开", () => {
   });
 });
 
+/** jsdom 没有布局：模拟图区像素宽度 */
+function withChartWidth(width: number, run: () => void) {
+  const rect = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    return this.classList.contains("usage-chart")
+      ? ({ width, height: 220 } as DOMRect)
+      : rect.call(this);
+  };
+  try {
+    run();
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = rect;
+  }
+}
+
 describe("性能图", () => {
+  it("刻度取 1 / 2 / 2.5 / 5 × 10ⁿ 步长，留余量，Tokens/s 为整数", () => {
+    expect(niceAxis(304, "count")).toEqual({ step: 100, max: 400 });
+    expect(niceAxis(6.1, "seconds")).toEqual({ step: 2, max: 8 });
+    expect(niceAxis(300, "count")).toEqual({ step: 100, max: 400 });
+    expect(niceAxis(80, "count")).toEqual({ step: 25, max: 100 });
+    expect(niceAxis(30, "count")).toEqual({ step: 10, max: 40 });
+    expect(niceAxis(7, "count")).toEqual({ step: 2, max: 8 });
+    expect(niceAxis(0.4, "count")).toEqual({ step: 1, max: 4 });
+    expect(niceAxis(1.6, "seconds")).toEqual({ step: 0.5, max: 2 });
+    expect(niceAxis(0.3, "seconds")).toEqual({ step: 0.1, max: 0.4 });
+    expect(niceAxis(0, "seconds")).toEqual({ step: 0.5, max: 2 });
+    for (const v of [1, 3, 13, 57, 99, 340, 1234])
+      expect(Number.isInteger(niceAxis(v, "count").step)).toBe(true);
+  });
+
+  it("坐标轴标签：左轴整数，右轴秒且不带多余小数", () => {
+    const { rerender } = render(
+      <PerformanceChart points={[point(new Date(2026, 9, 11, 9), 304, 6100)]} granularity="hour" />,
+    );
+    const labels = () =>
+      [...document.querySelectorAll(".usage-chart svg > g > text")].map((e) => e.textContent);
+    expect(labels()).toEqual(["0", "0s", "100", "2s", "200", "4s", "300", "6s", "400", "8s"]);
+    expect(document.querySelectorAll(".usage-chart-xlabel")).toHaveLength(1);
+    expect(document.querySelector(".usage-chart-xlabel")?.textContent).toBe("10/11 9时");
+    const svg = document.querySelector<SVGSVGElement>(".usage-chart svg");
+    const width = Number(svg?.getAttribute("width"));
+    // 单点放在横向正中
+    expect(Number(document.querySelector(".usage-chart-points .pt")?.getAttribute("cx"))).toBe(
+      44 + (width - 88) / 2,
+    );
+    rerender(
+      <PerformanceChart points={[point(new Date(2026, 9, 11, 9), 40, 1600)]} granularity="hour" />,
+    );
+    expect(labels()).toEqual(["0", "0s", "20", "0.5s", "40", "1s", "60", "1.5s", "80", "2s"]);
+  });
+
+  it("viewBox 宽度等于图区像素宽度", () => {
+    withChartWidth(1260, () => {
+      render(
+        <PerformanceChart points={[point(new Date(2026, 9, 9), 50, 900)]} granularity="day" />,
+      );
+      const svg = document.querySelector(".usage-chart svg");
+      expect(svg?.getAttribute("viewBox")).toBe("0 0 1260 220");
+      expect(svg?.getAttribute("width")).toBe("1260");
+      expect(svg?.getAttribute("height")).toBe("220");
+    });
+  });
+
   const hours = (n: number) =>
     Array.from({ length: n }, (_, i) => point(new Date(2026, 9, 9, i), 40 + i, 800 + i * 10));
 
@@ -298,20 +384,29 @@ describe("性能图", () => {
     expect(document.querySelectorAll(".usage-chart-points circle")).toHaveLength(2);
   });
 
+  it("图区窄时 x 轴标签按每个至少 96px 减少", () => {
+    withChartWidth(444, () => {
+      render(<PerformanceChart points={hours(12)} granularity="hour" />);
+      expect(document.querySelectorAll(".usage-chart-xlabel")).toHaveLength(3);
+    });
+  });
+
   it("多个点画两条线与点；超过 40 个点不画点；x 轴约 6 个标签", () => {
-    const rendered = render(<PerformanceChart points={hours(12)} granularity="hour" />);
-    expect(document.querySelector("polyline.tps")).not.toBeNull();
-    expect(document.querySelector("polyline.ttft")).not.toBeNull();
-    expect(document.querySelectorAll(".usage-chart-points circle.pt")).toHaveLength(12);
-    expect(document.querySelectorAll(".usage-chart-xlabel")).toHaveLength(6);
-    rendered.rerender(<PerformanceChart points={hours(41)} granularity="hour" />);
-    expect(document.querySelectorAll(".usage-chart-points")).toHaveLength(0);
-    expect(document.querySelector("polyline.tps")).not.toBeNull();
-    const labels = document.querySelectorAll(".usage-chart-xlabel").length;
-    expect(labels).toBeGreaterThanOrEqual(5);
-    expect(labels).toBeLessThanOrEqual(7);
-    rendered.rerender(<PerformanceChart points={hours(40)} granularity="hour" />);
-    expect(document.querySelectorAll(".usage-chart-points")).toHaveLength(40);
+    withChartWidth(1260, () => {
+      const rendered = render(<PerformanceChart points={hours(12)} granularity="hour" />);
+      expect(document.querySelector("polyline.tps")).not.toBeNull();
+      expect(document.querySelector("polyline.ttft")).not.toBeNull();
+      expect(document.querySelectorAll(".usage-chart-points circle.pt")).toHaveLength(12);
+      expect(document.querySelectorAll(".usage-chart-xlabel")).toHaveLength(6);
+      rendered.rerender(<PerformanceChart points={hours(41)} granularity="hour" />);
+      expect(document.querySelectorAll(".usage-chart-points")).toHaveLength(0);
+      expect(document.querySelector("polyline.tps")).not.toBeNull();
+      const labels = document.querySelectorAll(".usage-chart-xlabel").length;
+      expect(labels).toBeGreaterThanOrEqual(5);
+      expect(labels).toBeLessThanOrEqual(7);
+      rendered.rerender(<PerformanceChart points={hours(40)} granularity="hour" />);
+      expect(document.querySelectorAll(".usage-chart-points")).toHaveLength(40);
+    });
   });
 
   it("三种粒度的标题、x 轴标签与提示时间", () => {
@@ -348,5 +443,22 @@ describe("性能图", () => {
     expect(document.querySelector(".usage-chart-hover line.cursor")).not.toBeNull();
     fireEvent.blur(must(hits[1]));
     expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+});
+
+describe("展开区单价行", () => {
+  it("缺失显示「—」，分档模型显示基础档并注明分档", () => {
+    expect(priceLine(undefined)).toBe(
+      "单价 输入 — · 缓存读 — / 写 — · 输出 —（USD / 每百万 token）",
+    );
+    expect(
+      priceLine({
+        input: 1.25,
+        output: 10,
+        cacheRead: 0.125,
+        cacheWrite: 1.5,
+        tiers: [{ aboveInputTokens: 200_000, input: 2.5, output: 15 }],
+      }),
+    ).toBe("单价 输入 $1.25 · 缓存读 $0.125 / 写 $1.5 · 输出 $10（USD / 每百万 token） · 分档");
   });
 });
