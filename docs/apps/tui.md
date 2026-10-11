@@ -197,7 +197,7 @@ deepseek/deepseek-chat
 
 **列表列**：`服务商/模型 id`、推理标记、图片输入标记、上下文长度（`1m`、`262k` 式缩写）、价格（`$输入/输出`，每百万 token）。**只显示上游或配置明确声明的值，未声明的留空或 `?`，不编造数据**。不做智能分、不做角色分配。首字延迟、吞吐两列本轮不做（下一步做本机实测），但布局预留列位。
 
-**数据来源**：模型集合 = 各已配置服务商 `providers.json`/`config.json` 条目中的 `models`（向导与 `/provider refresh` 写入的上游列表），字段映射见 [provider-setup.md](../architecture/provider-setup.md) 第 7 节；「最近使用」= `runtime.listRecentModels()`（recent-models.json，provider-setup.md 第 2 节）；「当前会话」= `session.getModel()`；「默认模型」= `runtime.defaultModel()`。
+**数据来源**：模型集合 = 各已配置服务商 `providers.json`/`config.json` 条目中的 `models`（向导与 `/provider refresh` 写入的上游列表），字段映射见 [provider-setup.md](../architecture/provider-setup.md) 第 7 节；「最近使用」= `runtime.listRecentModels()`（recent-models.json，provider-setup.md 第 2 节）；「当前会话」= `session.getModel()`；「默认模型」= `runtime.defaultModel()`。模型集合经 `runtime.listModels()`（默认滤除停用模型，ADR-0054）；「最近使用」里指向不在集合中的引用（已停用）同时被排除，所以两个范围都不出现停用模型。会话模型被停用后提交失败时，错误行给出原因并建议 `/model` 换模型或 `/provider enable <名>`（`RuntimeCommandError.detail.disabled`，ADR-0054 §3）。
 
 **窄终端**：宽度 < 72 列时左栏折叠为一行 `‹ 范围 ›`，`Tab` 或 `←`/`→` 循环切换（最近使用 → 全部模型 → 各服务商）；< 40 列沿用第 5 节的降级规则。列宽与截断按 string-width 计算（中文占 2 列）。设置页的「模型角色」入口复用同一页面，页头面包屑为 `设置 › <角色>`。
 
@@ -226,10 +226,10 @@ deepseek/deepseek-chat
 ─────────────────┴────────────────────────────────────────────────
 已保存 command，12 个模型                          ← 结果行（操作完成后出现）
 deepseek  api.deepseek.com · openai-compatible · 12 个模型 · 当前会话在用
-↑↓ 移动  Enter 操作  Delete 删除  Tab 切换栏  Esc 返回
+↑↓ 移动  Enter 操作  Space 启停  Delete 删除  Tab 切换栏  Esc 返回
 ```
 
-右栏每行：状态点（`●` 已配置 / `○` 未配置）、名称、状态（有效 / 即将过期 / 已失效 / 缺少凭据 / 未配置）、认证方式，尾部是「当前」「只读」与模型数。说明区第一行是结果或错误提示，其后是选中条目的主机、类型、模型数与是否被当前会话使用。
+右栏每行：状态点（`●` 已配置 / `○` 未配置）、名称、状态（有效 / 即将过期 / 已失效 / 缺少凭据 / 未配置 / 已停用）、认证方式，尾部是「当前」「只读」与模型数。模型数取 Core 的 `enabledModelCount` / `modelCount`（ADR-0054 §5）：服务商停用或部分模型被逐个停用时写 `N / 总数`，全部启用时写 `N 个模型`；停用行用 `○`、名称变淡。说明区第一行是结果或错误提示，其后是选中条目的主机、类型、模型数与是否被当前会话使用；停用条目首行加「已停用」，说明行提示 `Space` 重新启用。
 
 ```text
 服务商  1 已配置
@@ -241,7 +241,7 @@ deepseek  api.deepseek.com · openai-compatible · 12 个模型 · 当前会话�
                   │  [ 取消 ]                          │
                   │  ↑↓/Tab 移动 · Enter 执行 · Esc 关闭│
                   └────────────────────────────────────┘
-↑↓ 移动  Enter 操作  Delete 删除  Tab 切换栏  Esc 返回
+↑↓ 移动  Enter 操作  Space 启停  Delete 删除  Tab 切换栏  Esc 返回
 ```
 
 **列表** = 内置预设行 + 未被预设覆盖的已配置条目（`providers.json` 自定义条目、`config.json`/项目层手写条目按追加行展示）。预设顺序以 Core `listProviderPresets()` 为准，含 DeepSeek、OpenRouter、Anthropic、OpenCode Zen、OpenCode Go、ChatGPT、Grok、Grok CLI 与两个自定义预设：
@@ -250,7 +250,8 @@ deepseek  api.deepseek.com · openai-compatible · 12 个模型 · 当前会话�
 - 手写配置层的条目（`origin` ≠ `setup`）标注来源层并**只读**：Enter 后提示去哪个文件修改（`config.json` 层 → `<NOCTURNE_HOME>/config.json`；项目层 → `<工作区>/.nocturne/config.json`；env/cli 层 → 对应环境变量或命令行参数）。
 - 当前会话正在使用的服务商加注「当前」标记；操作对话框的「删除」灰显且不可聚焦，下方说明「当前会话正在使用，先用 /model 切换」。
 - 直接打字进入过滤（对 id/标签/主机名做子串匹配），`Backspace` 删字符；`Esc` 先清过滤，过滤已空时再按关闭页面（首次配置流程中为"完成"语义）；`↑`/`↓`/`PageUp`/`PageDown`/`Home`/`End` 移动，`Tab` 在左栏与列表间切换；列表超出可视高度时右侧出滚动条。
-- `Delete` 直接进入选中服务商的删除确认，过滤非空时也一样；不删除过滤字符。未配置或只读条目给出不可删除原因，当前会话使用的条目提示「先用 /model 切换」。底部统一为 `↑/↓ 选择 • Enter 操作 • Delete 删除 • Esc 返回`，不重复列出操作名。
+- `Delete` 直接进入选中服务商的删除确认，过滤非空时也一样；不删除过滤字符。未配置或只读条目给出不可删除原因，当前会话使用的条目提示「先用 /model 切换」。底部统一为 `↑/↓ 选择 • Enter 操作 • Space 启停 • Delete 删除 • Esc 返回`，不重复列出操作名。
+- `Space` 启停选中的**已配置**服务商（ADR-0054 §5）：停用后该服务商全部模型不可用（下一次提交以 `invalid_model` 拒绝），条目改用 `○`、「已停用」与 `0 / 总数`，配置与凭据保留，再按 `Space` 立即恢复；手写在 `config.json`/项目层的条目同样可停用（只读限制只针对编辑，不针对启停）。停用前若 Core `describeToggleImpact` 报出受影响的打开会话数、默认模型或模型角色（非空），先在页内确认行列出这些项并等 `y` / `n`（影响未使用时直接切换）；未配置预设不能启停。
 
 **未配置预设 `Enter` → 配置对话框**：标题为「配置 <预设名>」，覆盖列表居中，首次配置的「第 1 步，共 2 步」标记仍留在下层页头。步骤由 Core `describeProviderSetup` 的描述决定，按 `provider-setup-flow` 逐项提问，先 `prepareProvider` 获取列表并显示 notices，需要时填写「模型 ID」，再在「保存配置」确认后交给 `commitProvider`（[provider-setup.md](../architecture/provider-setup.md) 第 6 节），不含选模型步骤。已完成步骤在上部折叠为一行摘要（`名称 x • 地址 y • 密钥已保存`）；当前步骤显示提问、输入框与灰色说明。底部 `[ 取消 ] [ 下一步 ]`，最后一步 `[ 取消 ] [ 保存 ]`。Tab/↑↓ 移动焦点，Enter 提交输入或激活按钮，Esc 取消；输入已改动时用 ConfirmDiscard 确认放弃。输入光标按对话框整数偏移显式定位，与输入文字对齐：
 
@@ -271,7 +272,9 @@ deepseek  api.deepseek.com · openai-compatible · 12 个模型 · 当前会话�
 | 重新登录 | 打开登录等待页；无系统后端时先选择明文或仅本次运行 | `/provider login <名>` |
 | 退出登录 | 删除本地登录凭据，不声称服务端已注销 | `/provider logout <名>` |
 
-**模型列表与编辑对话框**（[ADR-0030](../decisions/ADR-0030-dialog-settings-pages.md)，字段契约沿用 ADR-0024 第 5 节）：「编辑模型」把内容区换成**模型列表**——页头面包屑 `服务商 › <名> › 模型`，后接灰色模型数，下一行与服务商页一致的 `过滤: <query>`；行显示模型 id、`上下文/最大输出` 缩写与 `R`（推理）/`I`（图片输入）能力标记，不可用模型行尾加灰色「协议不支持」，按模型 id 排序、按显示宽度对齐。`Enter` 打开覆盖列表的**模型编辑对话框**，下层保留选中项与过滤但不收输入。关闭对话框回模型列表，再 Esc 返回服务商列表。模型列表底部提示为 `↑/↓ 选择 • Enter 编辑 • Esc 返回 • Ctrl+C 退出`，服务商页不再追加提示行。只读服务商直接进模型列表的**只读查看**，显示定义位置，底部提示改为 `只读 • Esc 返回 • Ctrl+C 退出`；对话框所有字段灰显不可聚焦，仅保留「返回」。
+**启停命令**（ADR-0054 §5）：`/provider enable <名>` / `/provider disable <名>` 启停整个服务商，`/provider model <名> <模型> on|off` 启停单个模型；页内 `Space`、模型页 `Space`/`a`/`n` 与这三条命令共用同一套 Core 语义（读 `ProviderOverview.enabled` / `ModelInfo.disabled` / `describeToggleImpact`，写 `setProviderEnabled` / `setModelsEnabled`）。这两条子命令在 TUI 补全里标记为 TUI 专属（逐行 CLI 未实现），`/help` 同步列出。
+
+**模型列表与编辑对话框**（[ADR-0030](../decisions/ADR-0030-dialog-settings-pages.md)，字段契约沿用 ADR-0024 第 5 节）：「编辑模型」把内容区换成**模型列表**——页头面包屑 `服务商 › <名> › 模型`，后接灰色模型数，下一行与服务商页一致的 `过滤: <query>`；行显示模型 id、`上下文/最大输出` 缩写与 `R`（推理）/`I`（图片输入）能力标记，不可用模型行尾加灰色「协议不支持」，按模型 id 排序、按显示宽度对齐；有启停数据时行首显示 `[x]`（启用）/ `[ ]`（停用），页头写 `已启用 N / 总数`。`Enter` 打开覆盖列表的**模型编辑对话框**，下层保留选中项与过滤但不收输入。关闭对话框回模型列表，再 Esc 返回服务商列表。模型列表底部提示为 `↑/↓ 选择 • Space 启停 • a 全开 • n 全停 • / 搜索 • Enter 编辑 • Esc 返回 • Ctrl+C 退出`，服务商页不再追加提示行。搜索是**显式模式**（ADR-0054 §5 效果图）：默认键位下 `a`/`n` 是批量键，输入过滤须先按 `/` 进搜索行（提示改为 `搜索: <query>`，`Enter` 应用、`Esc` 清除），搜索模式里所有可打印字符（含 `a`/`n`）都写进搜索词，因此过滤词可包含 `a`/`n`。`Space` 切换焦点模型的逐个停用（当前停用则重新启用），`a` 全部启用、`n` 全部停用——有搜索词时 `a`/`n` 只作用于筛选结果；停用正被会话、默认模型或角色使用的模型时，该页底部先出现 `y 确认 / n 取消` 确认行（无一受影响则直接切换）。服务商整体停用时模型开关**保留逐个设置**（`[x]`/`[ ]` 只反映 Core `disabled==="model"`），整行变淡、页头改为 `服务商已停用 · 逐个设置保留 N / 总数`，按 `Space`/`a`/`n` 拒绝并提示先启用服务商。手写服务商（`managed: false`）同样进模型列表并可启停：启停只写用户 settings.json，不改 providers.json/config.json（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md) §2），所以编辑字段只读、开关可用——模型编辑对话框所有字段灰显不可聚焦、仅保留「返回」，列表顶部显示定义位置，底栏文案保持一致（`只读 •` 前缀 + 完整按键提示，含 `Space 启停 • a 全开 • n 全停`）。
 
 **模型编辑对话框**：标题 `服务商 <名> / 模型 <模型>`，字段名按显示宽度对齐，通常标签列 12 列，窄屏缩为 4 列；输入框与分段按钮的 `[` 从同一列开始。来源在对应控件下一行缩进两列，长路径从左侧截断以保留文件名；极窄屏仅显示当前字段时省去来源行。来源文案包括上游 / models.dev / 用户编辑 / 由 <文件> 决定 / 内置 / 默认 / 按推理能力推导 / 按接口声明推导 / 服务商类型。无用户编辑时文本框显示「跟随」占位，分段控件选「跟随」，来源行说明生效值。手写层字段灰显并标记 `[只读]`。推理为「否」时不显示思考档位，焦点行以 `>` 标示；协议不可用时标题下方显示原因（ADR-0026 §5）。八个字段：
 
@@ -295,10 +298,10 @@ deepseek  api.deepseek.com · openai-compatible · 12 个模型 · 当前会话�
 ## 9. 工程约束
 
 - `apps/tui` 只允许依赖 `@nocturne/core`、`@nocturne/core/protocol` 两个入口及批准的终端依赖（ink、react、string-width、marked；`ink-testing-library` 为 devDependency）。CLI 可惰性加载 `@nocturne/tui`，或静态引用 `@nocturne/tui/slash-catalog`、`@nocturne/tui/text-format`、`@nocturne/tui/provider-setup-flow`、`@nocturne/tui/provider-prompts` 与 `@nocturne/tui/provider-login`。命令表不得 import 任何模块；纯文本入口复用 `truncateMiddle` 与控制字符过滤，仅依赖纯格式化函数、协议类型与 string-width，不加载 Ink。依赖方向见 [modules.md](../architecture/modules.md) 第 1 节。
-- 目录：`src/index.ts`（`runTui`：全屏/普通屏幕装配、鼠标上报开闭、退出导出）、`src/app.tsx`（界面状态与布局）、`src/lines.ts`（`SessionView` → 内容行块，按条目 key + 宽度 + 主题 ID 缓存布局）、`src/viewport.ts`（可见窗口选择）、`src/scroll.ts`（翻阅状态）、`src/mouse.ts`（SGR 鼠标序列解析与 stdin 包装）、`src/selection.ts`（选区坐标与高亮/复制文本）、`src/clipboard.ts`（系统剪贴板 + OSC 52，只用 Node 内置模块）、`src/cursor.ts`（硬件光标补位与帧外写出通道）、`src/output-layer.ts`（全屏帧差异写出与滚动区域平移）、`src/frame.ts`（活动区高度预算）、`src/alt-screen.ts`（`--inline` 与首配流程的临时备用屏）、`src/markdown.ts`（助手文本排版）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。
-- 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎区/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/四个对话框/模型编辑子视图/键鼠/Esc/Ctrl+C。交互等待帧变化并等提交后的输入订阅接上，不用固定延时猜测就绪。
+- 目录：`src/index.ts`（`runTui`：全屏/普通屏幕装配、鼠标上报开闭、退出导出）、`src/app.tsx`（界面状态与布局）、`src/lines.ts`（`SessionView` → 内容行块，按条目 key + 宽度 + 主题 ID 缓存布局）、`src/viewport.ts`（可见窗口选择）、`src/scroll.ts`（翻阅状态）、`src/mouse.ts`（SGR 鼠标序列解析与 stdin 包装）、`src/selection.ts`（选区坐标与高亮/复制文本）、`src/clipboard.ts`（系统剪贴板 + OSC 52，只用 Node 内置模块）、`src/cursor.ts`（硬件光标补位与帧外写出通道）、`src/output-layer.ts`（全屏帧差异写出与滚动区域平移）、`src/frame.ts`（活动区高度预算）、`src/alt-screen.ts`（`--inline` 与首配流程的临时备用屏）、`src/markdown.ts`（助手文本排版）、`src/slash-catalog.ts`（`/help` 与补全共用的命令表，CLI 经子路径引用，不加载 Ink）、`src/commands.ts`、`src/session-view.ts`、`src/env.ts`、`src/theme.ts`、`src/format.ts`、`src/toggle-format.ts`（启停影响面文案与角色名，不加载 Ink）、`src/components/`（StatusBar、Composer、ProviderPage、ModelPicker、WizardView 等）。
+- 测试：reducer 不变量在 `packages/core` 测（view.md §8）；TUI 组件用 `ink-testing-library` 断言渲染帧（含 40 列窄终端帧与欢迎区/状态栏降级）；交互路径用注入假 Session 的集成测试（offline）；服务商页覆盖列表/过滤/四个对话框/模型编辑子视图/键鼠/Esc/Ctrl+C；启停（ADR-0054）覆盖服务商页 `Space`/`○` 已停用/`N / 总数`/`y`-`n` 确认与模型页 `[x]`/`[ ]`/`Space`/`a`/`n`、显式搜索模式（`/` 进搜索，`a`/`n` 作搜索字符，`Enter` 应用）以及服务商停用时保留逐个开关状态。交互等待帧变化并等提交后的输入订阅接上，不用固定延时猜测就绪。
 - **显示宽度**：按 `string-width` 预算中文和动态文本，框内动态文本经 `format.ts` 的 `boxSafe()` 处理；窄屏时截断摘要和列表字段，边框保留安全余量。
-- `runTui` 只消费 Core 公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`、`readInputHistory`/`recordInputHistory`、`rewindTargets`/`rewind`、`fileIndex()`（文件补全索引）、`mcpServers()`（`/mcp` 面板），以及 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`/`runtime.getPreference`/`runtime.forkSession`；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
+- `runTui` 只消费 Core 公开 API：`subscribe`/`durableEvents`/`submit`/`interrupt`/`respondPermission`/`setModel`/`setPermissionPreset`/`compact`/`close`/`state`/`warnings`/`recovery`/`reasoningEffortInfo`/`describeContext`、`readInputHistory`/`recordInputHistory`、`rewindTargets`/`rewind`、`fileIndex()`（文件补全索引）、`mcpServers()`（`/mcp` 面板），以及 `runtime.listModels`/`runtime.listSessions`/`runtime.listRecentModels`/`runtime.defaultModel`/`runtime.updateProviders`/`runtime.getPreference`/`runtime.forkSession`/`runtime.setProviderEnabled`/`runtime.setModelsEnabled`/`runtime.describeToggleImpact`，以及 `runtime.listModels({ includeDisabled: true })`（仅服务商页读 disabled 用，ADR-0054 §3）；会话切换通过 CLI 注入的 `switchSession` 回调（§6），不直接调 `resumeSession`。
 
 ## 10. 需要的 Core API 变更
 
@@ -315,6 +318,8 @@ v0.3 增补（ADR-0019）：
 **不上移**：配置收集（`collectSessionConfig`）与会话打开组合（`openSession`）留在 CLI——它们携带 CLI 参数结构与"跨目录确认"这类客户端交互，进 Core 会违反"Core 不依赖客户端"的边界。CLI 单入口保证启动语义只有一份实现，TUI 从 CLI 手里接过已打开的 `Session`（或 setup 完成后的打开回调），不存在漂移面。
 
 ADR-0041 增补 `session.rewindTargets()`、`session.rewind()` 和 `runtime.forkSession()`；`checkpoint.file` 不显示，`session.rewound` 显示回退通知。权限判定仍只在权限层；用户发起的文件还原按 ADR-0041 绕过工具权限流程。
+
+v0.4 增补（ADR-0054）：服务商与模型启停读 `ProviderOverview.enabled`/`enabledModelCount` 与 `ModelInfo.disabled`（`runtime.listModels({ includeDisabled: true })` 仅供服务商页与它的启停桥，默认滤除停用），写 `runtime.setProviderEnabled`/`runtime.setModelsEnabled`，停用前确认用 `runtime.describeToggleImpact`；`invalid_model` 的 `RuntimeCommandError.detail.disabled`/`model` 供提交失败时补出换模型 / 重新启用提示。停用判定只在 Core（`unavailable` + `disabled`），TUI 只按这些字段显示与转发，不另做判断。
 
 ## 11. 鼠标、折叠与 `/settings` 设置页
 

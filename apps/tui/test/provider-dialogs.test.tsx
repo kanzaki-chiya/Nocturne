@@ -23,6 +23,8 @@ const entry = (id: string, managed = true): ProviderOverview => ({
   origin: "setup",
   overridden: false,
   modelCount: 1,
+  enabled: true,
+  enabledModelCount: 1,
   managed,
 });
 // Core 按预设 id 解析描述，向导测试必须用真实预设（DeepSeek：地址写死、API Key 与环境变量两步）

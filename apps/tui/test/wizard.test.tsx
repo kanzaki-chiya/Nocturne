@@ -45,6 +45,8 @@ function makeConfig(backend: "none" | "dpapi") {
       },
     ),
     refreshModelsDev: vi.fn(async () => undefined),
+    // ADR-0054：commitProvider 提交时幂等清理同名停用条目，桩需提供该方法
+    clearProviderToggles: vi.fn(async (_id: string) => undefined),
     setCredential: vi.fn(async (providerId: string, key: string) => {
       creds.push({ providerId, key });
     }),

@@ -200,6 +200,19 @@ describe("补全", () => {
     ]);
   });
 
+  it("服务商启停子命令只在 TUI 补全，逐行 CLI 不出现（ADR-0054 §5）", () => {
+    const tui = completeSlash("/provider ", ctx).map((h) => h.insert);
+    expect(tui).toContain("/provider enable");
+    expect(tui).toContain("/provider disable");
+    const cli = readlineCompleter("/provider ", ctx)[0];
+    expect(cli).not.toContain("/provider enable");
+    expect(cli).not.toContain("/provider disable");
+    expect(completeSlash("/provider model deepseek m1 ", ctx).map((h) => h.insert)).toEqual([
+      "/provider model deepseek m1 on",
+      "/provider model deepseek m1 off",
+    ]);
+  });
+
   it("readline completer 覆盖同一范围", () => {
     const [matches, prefix] = readlineCompleter("/effort ", ctx);
     expect(prefix).toBe("/effort ");

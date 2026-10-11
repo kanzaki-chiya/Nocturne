@@ -2,12 +2,18 @@
  * TUI 斜杠命令 /shell（ADR-0022 第 4 节）：无参打开选择页 overlay，
  * 带种类名直接切换；被 env/config 覆盖时给出提示；未切换时兜底消息。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import type { RuntimeConfig, RuntimeSession, SessionShellInfo } from "@nocturne/core";
+import {
+  RuntimeCommandError,
+  type Runtime,
+  type RuntimeConfig,
+  type RuntimeSession,
+  type SessionShellInfo,
+} from "@nocturne/core";
 import { BUILTIN_SLASH_COMMANDS } from "@nocturne/core/protocol";
 
-import { contextLines, runSlash, type ProviderBridge } from "../src/commands.js";
+import { contextLines, modelErrorText, runSlash, type ProviderBridge } from "../src/commands.js";
 import { SLASH_COMMANDS } from "../src/slash-catalog.js";
 
 it("TUI /agents 为只读列表，保留来源、停用和重名警告", async () => {
@@ -186,7 +192,7 @@ describe("TUI /provider model（ADR-0024 第 5 节）", () => {
     const r = await runSlash("/provider model", fakeSession(), provider);
     expect(r).toEqual({
       kind: "message",
-      text: "用法：/provider model <服务商> [<模型>]",
+      text: "用法：/provider model <服务商> [<模型>] [on|off]",
     });
   });
 
@@ -198,6 +204,111 @@ describe("TUI /provider model（ADR-0024 第 5 节）", () => {
       expect(r.text).toContain("model <名称>");
       expect(r.text).not.toContain("image");
     }
+  });
+});
+
+describe("TUI /provider 启停（ADR-0054 §5）", () => {
+  const provider = {
+    config: {} as unknown as RuntimeConfig,
+    reloadConfig: async () => ({}) as unknown as RuntimeConfig,
+    updateProviders: () => undefined,
+  } satisfies ProviderBridge;
+
+  const runtime = (): Runtime =>
+    ({
+      setProviderEnabled: vi.fn(async () => undefined),
+      setModelsEnabled: vi.fn(async () => undefined),
+    }) as unknown as Runtime;
+
+  it("/provider disable <名称> 写停用；enable 写启用", async () => {
+    const rt = runtime();
+    const off = await runSlash("/provider disable corp", fakeSession(), provider, { runtime: rt });
+    expect(rt.setProviderEnabled).toHaveBeenCalledWith({ provider: "corp", enabled: false });
+    expect(off).toEqual({ kind: "message", text: "已停用 corp" });
+
+    const on = await runSlash("/provider enable corp", fakeSession(), provider, { runtime: rt });
+    expect(rt.setProviderEnabled).toHaveBeenLastCalledWith({ provider: "corp", enabled: true });
+    expect(on).toEqual({ kind: "message", text: "已启用 corp" });
+  });
+
+  it("/provider model <名称> <模型> on|off 启停单个模型", async () => {
+    const rt = runtime();
+    const off = await runSlash("/provider model corp m1 off", fakeSession(), provider, {
+      runtime: rt,
+    });
+    expect(rt.setModelsEnabled).toHaveBeenCalledWith({
+      provider: "corp",
+      models: ["m1"],
+      enabled: false,
+    });
+    expect(off).toEqual({ kind: "message", text: "已停用 corp/m1" });
+
+    const on = await runSlash("/provider model corp m1 on", fakeSession(), provider, {
+      runtime: rt,
+    });
+    expect(rt.setModelsEnabled).toHaveBeenLastCalledWith({
+      provider: "corp",
+      models: ["m1"],
+      enabled: true,
+    });
+    expect(on).toEqual({ kind: "message", text: "已启用 corp/m1" });
+  });
+
+  it("不带 on|off 仍直达编辑页；第三参数非法 → 用法提示", async () => {
+    const direct = await runSlash("/provider model corp m1", fakeSession(), provider, {
+      runtime: runtime(),
+    });
+    expect(direct).toEqual({
+      kind: "provider-page",
+      modelTarget: { providerId: "corp", modelId: "m1" },
+    });
+
+    const bad = await runSlash("/provider model corp m1 bogus", fakeSession(), provider, {
+      runtime: runtime(),
+    });
+    expect(bad).toEqual({ kind: "message", text: "用法：/provider model <服务商> <模型> on|off" });
+  });
+
+  it("缺名称 → 用法提示", async () => {
+    const r = await runSlash("/provider disable", fakeSession(), provider, { runtime: runtime() });
+    expect(r).toEqual({ kind: "message", text: "用法：/provider disable <名称>" });
+  });
+});
+
+describe("modelErrorText（ADR-0054 §3/§5）", () => {
+  it("停用型 invalid_model 追加换模型/重新启用；其余原样", () => {
+    const disabled = new RuntimeCommandError("invalid_model", "模型 m1 已停用", {
+      disabled: "model",
+      model: { provider: "corp", model: "m1" },
+    });
+    expect(modelErrorText(disabled)).toContain("模型 m1 已停用");
+    expect(modelErrorText(disabled)).toContain("/model 换模型");
+    expect(modelErrorText(disabled)).toContain("/provider model corp m1 on");
+    expect(
+      modelErrorText(
+        new RuntimeCommandError("invalid_model", "服务商已停用", {
+          disabled: "provider",
+          model: { provider: "corp", model: "m1" },
+        }),
+      ),
+    ).toContain("/provider enable corp");
+
+    expect(modelErrorText(new RuntimeCommandError("invalid_model", "未知模型 x"))).toBe(
+      "未知模型 x",
+    );
+    expect(modelErrorText(new Error("boom"))).toBe("boom");
+  });
+
+  it("双重停用同时给出模型与服务商两条重新启用命令", () => {
+    const text = modelErrorText(
+      new RuntimeCommandError("invalid_model", "模型 corp/m1 已停用", {
+        disabled: "model",
+        model: { provider: "corp", model: "m1" },
+        providerDisabled: true,
+      }),
+    );
+    expect(text).toContain("/provider model corp m1 on");
+    expect(text).toContain("/provider enable corp");
   });
 });
 

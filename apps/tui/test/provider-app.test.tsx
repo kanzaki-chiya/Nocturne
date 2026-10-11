@@ -35,6 +35,8 @@ async function mount(inline: boolean) {
         managed: true,
         overridden: false,
         modelCount: 1,
+        enabled: true,
+        enabledModelCount: 1,
       },
     ],
   } as unknown as RuntimeConfig;

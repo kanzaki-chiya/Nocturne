@@ -7,6 +7,7 @@ import {
   logoutProvider,
   skillListLines,
   normalizeModelRef,
+  RuntimeCommandError,
   type RuntimeConfig,
   type RuntimeSession,
   type Runtime,
@@ -131,10 +132,32 @@ export async function runSlash(
           if (name === "") return { kind: "message", text: "用法：/provider key <名称>" };
           return { kind: "provider-wizard", start: { kind: "key", providerId: name } };
         case "model": {
-          // /provider model <服务商> [<模型>]：直达模型列表/编辑页（ADR-0024 第 5 节）
-          const [pid, mid] = [subRest[0], subRest[1]];
+          // /provider model <服务商> [<模型>]：直达模型列表/编辑页（ADR-0024 第 5 节）；
+          // /provider model <服务商> <模型> on|off：启停单个模型（ADR-0054 §5）
+          const pid = subRest[0];
+          const mid = subRest[1];
+          const mode = subRest[2];
           if (pid === undefined) {
-            return { kind: "message", text: "用法：/provider model <服务商> [<模型>]" };
+            return { kind: "message", text: "用法：/provider model <服务商> [<模型>] [on|off]" };
+          }
+          if (mode !== undefined) {
+            if (mid === undefined || (mode !== "on" && mode !== "off")) {
+              return { kind: "message", text: "用法：/provider model <服务商> <模型> on|off" };
+            }
+            const rt = costContext?.runtime;
+            if (rt === undefined) {
+              return { kind: "message", text: "! 当前环境不支持 /provider 启停" };
+            }
+            try {
+              await rt.setModelsEnabled({ provider: pid, models: [mid], enabled: mode === "on" });
+              await provider.updateProviders(await provider.reloadConfig());
+              return {
+                kind: "message",
+                text: `${mode === "on" ? "已启用" : "已停用"} ${pid}/${mid}`,
+              };
+            } catch (e) {
+              return { kind: "message", text: `! ${errText(e)}` };
+            }
           }
           return {
             kind: "provider-page",
@@ -160,10 +183,31 @@ export async function runSlash(
         case "remove":
           if (name === "") return { kind: "message", text: "用法：/provider remove <名称>" };
           return { kind: "provider-remove", providerId: name };
+        case "enable":
+        case "disable": {
+          // ADR-0054 §5：启用/停用整个服务商（TUI 命令；页内交互见 ProviderPage）
+          if (name === "") {
+            return { kind: "message", text: `用法：/provider ${sub} <名称>` };
+          }
+          const rt = costContext?.runtime;
+          if (rt === undefined) {
+            return { kind: "message", text: "! 当前环境不支持 /provider 启停" };
+          }
+          try {
+            await rt.setProviderEnabled({ provider: name, enabled: sub === "enable" });
+            await provider.updateProviders(await provider.reloadConfig());
+            return {
+              kind: "message",
+              text: `${sub === "enable" ? "已启用" : "已停用"} ${name}`,
+            };
+          } catch (e) {
+            return { kind: "message", text: `! ${errText(e)}` };
+          }
+        }
         default:
           return {
             kind: "message",
-            text: `未知子命令 ${sub}；可用：add | login <名称> | logout <名称> | key <名称> | model <名称> [<模型>] | refresh <名称> | remove <名称>`,
+            text: `未知子命令 ${sub}；可用：add | login <名称> | logout <名称> | key <名称> | model <名称> [<模型>] [on|off] | refresh <名称> | remove <名称> | enable <名称> | disable <名称>`,
           };
       }
     }
@@ -175,7 +219,7 @@ export async function runSlash(
         await session.setModel(norm.ref);
         return { kind: "none" };
       } catch (e) {
-        return { kind: "message", text: `! ${errText(e)}` };
+        return { kind: "message", text: `! ${modelErrorText(e)}` };
       }
     }
     case "/effort": {
@@ -278,6 +322,34 @@ export async function runSlash(
 
 export function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * 模型不可用的提示（ADR-0054 §3/§5）：Core 以 invalid_model 拒绝时在 detail 里
+ * 带上停用来源与模型引用；客户端据此补一句换模型 / 重新启用的去处，
+ * 不自行判断谁被停用。
+ */
+export function modelErrorText(e: unknown): string {
+  const base = errText(e);
+  if (
+    e instanceof RuntimeCommandError &&
+    e.code === "invalid_model" &&
+    e.detail?.disabled !== undefined
+  ) {
+    const ref = e.detail.model;
+    if (e.detail.disabled === "model" && e.detail.providerDisabled === true) {
+      return (
+        `${base}；用 /model 换模型，或用 /provider model ${ref?.provider ?? "<名称>"} ` +
+        `${ref?.model ?? "<模型>"} on 与 /provider enable ${ref?.provider ?? "<名称>"} 重新启用`
+      );
+    }
+    const command =
+      e.detail.disabled === "model"
+        ? `/provider model ${ref?.provider ?? "<名称>"} ${ref?.model ?? "<模型>"} on`
+        : `/provider enable ${ref?.provider ?? "<名称>"}`;
+    return `${base}；用 /model 换模型，或用 ${command} 重新启用`;
+  }
+  return base;
 }
 
 export function helpLines(): string[] {

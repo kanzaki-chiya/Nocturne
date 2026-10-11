@@ -17,9 +17,11 @@ import {
   type ModelSettingsPatch,
   type ModelSettingsView,
   type ReasoningEffortLevel,
+  type ToggleImpact,
 } from "@nocturne/core";
 
 import { padToWidth, truncateLine } from "../format.js";
+import { hasToggleImpact, toggleConfirmText } from "../toggle-format.js";
 import { useTheme } from "../theme.js";
 import { InputCursor } from "./input-cursor.js";
 import { Buttons } from "./dialog/buttons.js";
@@ -51,7 +53,7 @@ function flagsText(view: ModelSettingsView): string {
   return `${r}${i}`;
 }
 
-/** 模型列表子视图（可过滤；Enter 进编辑；Esc 返回服务商列表） */
+/** 模型列表子视图（可过滤；Space/a/n 启停；Enter 进编辑；Esc 返回服务商列表，ADR-0054 §5） */
 export function ModelListPane({
   providerId,
   views,
@@ -62,6 +64,7 @@ export function ModelListPane({
   height,
   onOpen,
   onBack,
+  toggle,
 }: {
   providerId: string;
   /** undefined = 加载中 */
@@ -75,36 +78,148 @@ export function ModelListPane({
   height: number;
   onOpen: (modelId: string) => void;
   onBack: () => void;
+  /**
+   * 启停桥（ADR-0054 §5）：disabled 来自 Core（includeDisabled 的 disabled==="model"），
+   * providerEnabled 来自 ProviderOverview.enabled；TUI 不自行判断停用。
+   * 缺省时不显示 `[x]`/`[ ]`，保持旧行为（只读查看/测试）。
+   */
+  toggle?:
+    | {
+        providerEnabled: boolean;
+        disabled: ReadonlySet<string>;
+        impact: (modelIds: readonly string[]) => ToggleImpact;
+        setEnabled: (modelIds: readonly string[], enabled: boolean) => void;
+      }
+    | undefined;
 }): React.JSX.Element {
   const theme = useTheme();
   const [cursor, setCursor] = useState(0);
   const [query, setQuery] = useState("");
+  /** 显式搜索模式（ADR-0054 §5 效果图 `/ 搜索`）：默认 a/n 是批量键，输入过滤需先 `/` */
+  const [searching, setSearching] = useState(false);
+  const [pending, setPending] = useState<{ ids: string[]; text: string } | undefined>(undefined);
+  const [status, setStatus] = useState<string | undefined>(undefined);
   // 镜像 ref：一次 'data' 突发里的多个按键可能在 React 提交前到达，
   // handler 读写同步更新的 ref，不用渲染闭包里的旧状态。
   const cursorRef = useRef(0);
   const queryRef = useRef("");
+  const searchingRef = useRef(false);
+  const pendingRef = useRef<{ ids: string[]; text: string } | undefined>(undefined);
+  const setPendingNow = (v: { ids: string[]; text: string } | undefined): void => {
+    pendingRef.current = v;
+    setPending(v);
+  };
   const list = views ?? [];
   const filtered =
     query === "" ? list : list.filter((v) => v.modelId.toLowerCase().includes(query.toLowerCase()));
   const cur = Math.min(cursor, Math.max(0, filtered.length - 1));
   const hintLines = (readonlyHint !== undefined ? 1 : 0) + (error !== undefined ? 1 : 0);
-  // 面包屑 1 行 + 提示行 + 过滤行 + 底部按键提示行
-  const listH = Math.max(1, height - 3 - hintLines);
+  const statusLines = (pending !== undefined ? 1 : 0) + (status !== undefined ? 1 : 0);
+  // 面包屑 1 行 + 提示行 + 过滤行 + 底部按键提示行（+ 启停状态/确认行）
+  const listH = Math.max(1, height - 3 - hintLines - statusLines);
   const start = Math.min(
     Math.max(0, cur - Math.floor(listH / 2)),
     Math.max(0, filtered.length - listH),
   );
   const visible = filtered.slice(start, start + listH);
+  /** 服务商是否停用（来自 Core 的 ProviderOverview.enabled；TUI 不自行判断） */
+  const providerOff = toggle?.providerEnabled === false;
+  /** 逐个停用状态：只用 Core 的 disabled==="model" 集合——服务商停用时也保留个别设置 */
+  const isOff = (modelId: string): boolean => toggle?.disabled.has(modelId) === true;
+  const individuallyEnabled = list.filter((v) => !isOff(v.modelId)).length;
+  /** 启停入口：停用时影响面非空先在页内确认（y/n），否则直接切换 */
+  const requestToggle = (ids: readonly string[], enabled: boolean): void => {
+    if (toggle === undefined || ids.length === 0) return;
+    if (enabled) {
+      setStatus(undefined);
+      toggle.setEnabled(ids, true);
+      return;
+    }
+    const impact = toggle.impact(ids);
+    if (hasToggleImpact(impact)) {
+      setPendingNow({ ids: [...ids], text: toggleConfirmText(`这 ${ids.length} 个模型`, impact) });
+    } else {
+      setStatus(undefined);
+      toggle.setEnabled(ids, false);
+    }
+  };
 
   useInput(
     (ch, key) => {
       // 编辑对话框打开时本列表只剩背景：isActive=false 的退订落后于帧提交，
       // 旧订阅仍可能被分发到（ADR-0030 §4：下层页面收不到任何按键）。
       if (!active) return;
+      // 停用确认（ADR-0054 §5）：y 执行、n/Esc 取消，其余按键吞掉。
+      if (pendingRef.current !== undefined) {
+        const p = pendingRef.current;
+        if (ch === "y" || ch === "Y") {
+          setPendingNow(undefined);
+          toggle?.setEnabled(p.ids, false);
+        } else if (ch === "n" || ch === "N" || key.escape) {
+          setPendingNow(undefined);
+          setStatus("已取消");
+        }
+        return;
+      }
+      const filteredNow =
+        queryRef.current === ""
+          ? list
+          : list.filter((v) => v.modelId.toLowerCase().includes(queryRef.current.toLowerCase()));
+      const moveCursor = (delta: number): void => {
+        cursorRef.current =
+          (cursorRef.current + delta + Math.max(1, filteredNow.length)) %
+          Math.max(1, filteredNow.length);
+        setCursor(cursorRef.current);
+      };
+      if (key.upArrow) {
+        moveCursor(-1);
+        return;
+      }
+      if (key.downArrow) {
+        moveCursor(1);
+        return;
+      }
+
+      // 搜索模式：a/n 等所有可打印字符都进搜索词（ADR-0054 §5 效果图 `/ 搜索`）。
+      if (searchingRef.current) {
+        if (key.return) {
+          searchingRef.current = false;
+          setSearching(false);
+          return;
+        }
+        if (key.escape) {
+          searchingRef.current = false;
+          setSearching(false);
+          queryRef.current = "";
+          setQuery("");
+          cursorRef.current = 0;
+          setCursor(0);
+          setStatus(undefined);
+          return;
+        }
+        if (key.backspace || key.delete) {
+          if (queryRef.current !== "") {
+            queryRef.current = queryRef.current.slice(0, -1);
+            setQuery(queryRef.current);
+            cursorRef.current = 0;
+            setCursor(0);
+          }
+          return;
+        }
+        if (ch !== "" && !key.ctrl && !key.meta) {
+          queryRef.current += ch;
+          setQuery(queryRef.current);
+          cursorRef.current = 0;
+          setCursor(0);
+        }
+        return;
+      }
+
       if (key.escape) {
         if (queryRef.current !== "") {
           queryRef.current = "";
           setQuery("");
+          setStatus(undefined);
           cursorRef.current = 0;
           setCursor(0);
           return;
@@ -113,40 +228,50 @@ export function ModelListPane({
         return;
       }
       if (views === undefined) return;
-      const filteredNow =
-        queryRef.current === ""
-          ? list
-          : list.filter((v) => v.modelId.toLowerCase().includes(queryRef.current.toLowerCase()));
-      if (key.upArrow) {
-        cursorRef.current =
-          (cursorRef.current + filteredNow.length - 1) % Math.max(1, filteredNow.length);
-        setCursor(cursorRef.current);
-        return;
-      }
-      if (key.downArrow) {
-        cursorRef.current = (cursorRef.current + 1) % Math.max(1, filteredNow.length);
-        setCursor(cursorRef.current);
-        return;
-      }
       if (key.return) {
         const v = filteredNow[Math.min(cursorRef.current, Math.max(0, filteredNow.length - 1))];
         if (v !== undefined) onOpen(v.modelId);
         return;
       }
-      if (key.backspace || key.delete) {
-        if (queryRef.current !== "") {
-          queryRef.current = queryRef.current.slice(0, -1);
+      // 默认键位：a/n 是批量停用/启用（有搜索词时只作用于筛选结果），
+      // 输入过滤必须先按 `/` 进搜索模式（ADR-0054 §5）。整段粘贴（ch 多字符）
+      // 里以 `/` 开头时，其后的内容直接作为搜索词。
+      if (ch.startsWith("/") && !key.ctrl && !key.meta) {
+        searchingRef.current = true;
+        setSearching(true);
+        setStatus(undefined);
+        const rest = ch.slice(1);
+        if (rest !== "") {
+          queryRef.current += rest;
           setQuery(queryRef.current);
           cursorRef.current = 0;
           setCursor(0);
         }
         return;
       }
-      if (ch !== "" && !key.ctrl && !key.meta) {
-        queryRef.current += ch;
-        setQuery(queryRef.current);
-        cursorRef.current = 0;
-        setCursor(0);
+      if (toggle !== undefined && !key.ctrl && !key.meta) {
+        const focused =
+          filteredNow[Math.min(cursorRef.current, Math.max(0, filteredNow.length - 1))];
+        if (ch === " ") {
+          if (!toggle.providerEnabled) {
+            setStatus(`${providerId} 已停用，先启用服务商`);
+            return;
+          }
+          // 目前启用 → 停用；目前逐个停用 → 重新启用
+          if (focused !== undefined) requestToggle([focused.modelId], isOff(focused.modelId));
+          return;
+        }
+        if (ch === "a" || ch === "A" || ch === "n" || ch === "N") {
+          if (!toggle.providerEnabled) {
+            setStatus(`${providerId} 已停用，先启用服务商`);
+            return;
+          }
+          requestToggle(
+            filteredNow.map((v) => v.modelId),
+            ch === "a" || ch === "A",
+          );
+          return;
+        }
       }
     },
     { isActive: active },
@@ -155,7 +280,13 @@ export function ModelListPane({
   return (
     <Box flexDirection="column" height={height}>
       <Text color={theme.muted} wrap="truncate">
-        {`服务商 ${providerId} › 模型（${views === undefined ? "…" : list.length}）`}
+        {`服务商 ${providerId} › 模型（${views === undefined ? "…" : list.length}）${
+          toggle !== undefined && views !== undefined
+            ? providerOff
+              ? `  服务商已停用 · 逐个设置保留 ${individuallyEnabled} / ${list.length}`
+              : `  已启用 ${individuallyEnabled} / ${list.length}`
+            : ""
+        }`}
       </Text>
       {readonlyHint !== undefined ? (
         <Text color={theme.warning} wrap="truncate">
@@ -168,11 +299,15 @@ export function ModelListPane({
         </Text>
       ) : null}
       <Text wrap="truncate">
-        <Text color={theme.muted}>{"过滤: "}</Text>
-        {query}
-        <Text color={theme.selected} backgroundColor={theme.selectionBg}>
-          {" "}
+        <Text color={searching ? theme.accent : theme.muted}>
+          {searching ? "搜索: " : "过滤: "}
         </Text>
+        {query}
+        {searching ? (
+          <Text color={theme.selected} backgroundColor={theme.selectionBg}>
+            {" "}
+          </Text>
+        ) : null}
       </Text>
       {views === undefined ? (
         <Text color={theme.muted}>正在读取模型设置…</Text>
@@ -182,14 +317,20 @@ export function ModelListPane({
         visible.map((v, i) => {
           const idx = start + i;
           const focused = idx === cur;
+          const boxed = toggle !== undefined;
+          // 勾选状态只反映逐个设置（Core 的 disabled==="model"）；服务商停用
+          // 只让整行变淡，开关状态保留（ADR-0054 §5、§4）。
+          const off = boxed && isOff(v.modelId);
+          const dim = boxed && (providerOff || off);
           const row =
-            `${focused ? "›" : " "} ${padToWidth(v.modelId, 28)} ` +
+            `${focused ? "›" : " "} ${boxed ? `${off ? "[ ]" : "[x]"} ` : ""}` +
+            `${padToWidth(v.modelId, 28)} ` +
             `${padToWidth(contextText(v.fields.contextWindow.value) + "/" + contextText(v.fields.maxOutputTokens.value), 9)} ` +
             flagsText(v);
           return (
             <Text key={v.modelId} wrap="truncate">
               <Text
-                color={focused ? theme.selected : theme.success}
+                color={focused ? theme.selected : dim ? theme.muted : theme.success}
                 {...(focused ? { backgroundColor: theme.selectionBg } : {})}
               >
                 {truncateLine(row, width - 2)}
@@ -200,10 +341,24 @@ export function ModelListPane({
           );
         })
       )}
+      {pending !== undefined ? (
+        <Text color={theme.warning} wrap="truncate">
+          {pending.text}
+        </Text>
+      ) : null}
+      {status !== undefined ? (
+        <Text color={theme.muted} wrap="truncate">
+          {status}
+        </Text>
+      ) : null}
       <Text color={theme.muted} wrap="truncate">
-        {readonlyHint !== undefined
-          ? " 只读 • Esc 返回 • Ctrl+C 退出"
-          : " ↑/↓ 选择 • Enter 编辑 • Esc 返回 • Ctrl+C 退出"}
+        {searching
+          ? "输入搜索词 • Enter 应用 • Esc 清除 • Ctrl+C 退出"
+          : toggle !== undefined
+            ? `${readonlyHint !== undefined ? "只读 • " : ""}↑/↓ 选择 • Space 启停 • a 全开 • n 全停 • / 搜索 • Enter 编辑 • Esc 返回 • Ctrl+C 退出`
+            : readonlyHint !== undefined
+              ? " 只读 • / 搜索 • Esc 返回 • Ctrl+C 退出"
+              : " ↑/↓ 选择 • / 搜索 • Enter 编辑 • Esc 返回 • Ctrl+C 退出"}
       </Text>
     </Box>
   );

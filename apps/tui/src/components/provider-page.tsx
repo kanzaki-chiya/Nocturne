@@ -20,17 +20,20 @@ import type {
   ModelSettingsView,
   ProviderOverview,
   ProviderPreset,
+  ToggleImpact,
 } from "@nocturne/core";
 
 import { useTuiEnv } from "../env.js";
 import { useTheme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
 import { providerCredentialDescription } from "../text-format.js";
+import { hasToggleImpact, toggleConfirmText } from "../toggle-format.js";
 import { ProviderDialog } from "./provider-dialog.js";
 import { ModelEditPane, ModelListPane } from "./model-settings-view.js";
 import type { DialogMouseFrame } from "./dialog/mouse.js";
 import {
   PageShell,
+  type HintPairs,
   type ShellGroup,
   type ShellNotice,
   type ShellRow,
@@ -90,6 +93,19 @@ function entryOf(row: ProviderRow): ProviderOverview | undefined {
   return row.kind === "preset" ? row.configured : row.overview;
 }
 
+/**
+ * 模型数文案（ADR-0054 §5）：服务商停用时 `0 / 总数`，部分模型被逐个停用时
+ * `已启用 / 总数`，全部启用时沿用旧的 `N 个模型`。计数一律取自 Core
+ * `ProviderOverview.enabledModelCount`，TUI 不自行推算。
+ */
+function providerCountText(p: ProviderOverview): string {
+  const total = p.modelCount;
+  const on = p.enabledModelCount ?? total;
+  if (p.enabled === false) return `${on} / ${total}`;
+  if (on < total) return `${on} / ${total}`;
+  return `${total} 个模型`;
+}
+
 /** 服务商页右栏的一行（ADR-0045 第 3 节）：状态点、名称、状态、认证方式 + 当前/模型数 */
 function shellRow(
   row: ProviderRow,
@@ -115,26 +131,34 @@ function shellRow(
       search: label,
     };
   }
-  const status =
-    p.credentialStatus !== undefined
+  const enabled = p.enabled !== false;
+  const status = !enabled
+    ? "已停用"
+    : p.credentialStatus !== undefined
       ? STATUS_TEXT[p.credentialStatus]
       : p.keySource === "missing"
         ? STATUS_TEXT.missing
         : "已配置";
-  const statusTone =
-    p.credentialStatus === undefined || p.credentialStatus === "valid" ? "success" : "warning";
+  const statusTone = !enabled
+    ? "muted"
+    : p.credentialStatus === undefined || p.credentialStatus === "valid"
+      ? "success"
+      : "warning";
   const auth = [p.auth ?? keySourceText(p)].join("");
   const trail: { text: string; tone: "accent" | "muted" | "warning" }[] = [];
   if (p.id === currentId) trail.push({ text: "当前", tone: "accent" });
   if (p.overridden) trail.push({ text: "被 config.json 覆盖", tone: "warning" });
   if (!p.managed) trail.push({ text: "只读", tone: "muted" });
-  trail.push({ text: `${p.modelCount} 个模型`, tone: "muted" });
+  trail.push({ text: providerCountText(p), tone: "muted" });
   return {
     id,
     group: "configured",
     cells: [
       {
-        spans: [{ text: dots.on, tone: statusTone }, { text: ` ${p.id}` }],
+        spans: [
+          { text: enabled ? dots.on : dots.off, tone: statusTone },
+          { text: ` ${p.id}`, tone: enabled ? undefined : "muted" },
+        ],
       },
       { text: status, tone: statusTone },
       { text: auth, tone: "muted" },
@@ -147,6 +171,24 @@ function shellRow(
 /** 交给父级执行的操作（删除在页内确认后走 onConfirmRemove；「编辑模型」为页内子视图） */
 export type ProviderOp = "key" | "refresh" | "login" | "logout";
 
+/**
+ * 启停桥（ADR-0054 §5）：读只认 Core 的 ProviderOverview.enabled /
+ * ModelInfo.disabled / describeToggleImpact，写走 Runtime 的
+ * setProviderEnabled / setModelsEnabled；TUI 不自行判断谁被停用、谁在用。
+ */
+export interface ProviderToggleBridge {
+  /** 该服务商下被逐个停用的模型 id（Core includeDisabled 结果里 disabled==="model"） */
+  disabledModels: (providerId: string) => readonly string[];
+  /** 停用影响面（Core describeToggleImpact；models 省略 = 整个服务商） */
+  impact: (providerId: string, models?: readonly string[]) => ToggleImpact;
+  setProviderEnabled: (providerId: string, enabled: boolean) => Promise<void>;
+  setModelsEnabled: (
+    providerId: string,
+    models: readonly string[],
+    enabled: boolean,
+  ) => Promise<void>;
+}
+
 export function ProviderPage({
   presets,
   entries,
@@ -158,6 +200,7 @@ export function ProviderPage({
   onConfirmRemove,
   onListModels,
   onSaveModel,
+  toggle,
   onMouseFrame,
   initialModelTarget,
   onClose,
@@ -206,6 +249,8 @@ export function ProviderPage({
         patch: ModelSettingsPatch,
       ) => Promise<string | undefined>)
     | undefined;
+  /** 启停桥（ADR-0054 §5）；缺省时不响应 Space，也不显示模型开关 */
+  toggle?: ProviderToggleBridge | undefined;
   /** /provider model 直达目标：打开页后直接进入模型列表（含模型 id 时进编辑页） */
   initialModelTarget?: { providerId: string; modelId?: string | undefined } | undefined;
   onMouseFrame?: ((frame: DialogMouseFrame | undefined) => void) | undefined;
@@ -242,11 +287,20 @@ export function ProviderPage({
   >(undefined);
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
+  // 停用确认（ADR-0054 §5）：正被使用时先页内确认，y 执行 / n 取消
+  const [pendingToggle, setPendingToggle] = useState<
+    { providerId: string; impact: ToggleImpact } | undefined
+  >(undefined);
   // 镜像 ref：一次 'data' 突发里的多个按键可能在 React 提交前到达，
   // handler 读写同步更新的 ref，不用渲染闭包里的旧状态（子视图门控同理）。
   const actionRef = useRef(action);
   const confirmRemoveRef = useRef(confirmRemove);
   const subViewRef = useRef(subView);
+  const pendingToggleRef = useRef(pendingToggle);
+  const setPendingToggleNow = (v: typeof pendingToggle): void => {
+    pendingToggleRef.current = v;
+    setPendingToggle(v);
+  };
   const setSubViewNow = (v: typeof subView): void => {
     subViewRef.current = v;
     setSubView(v);
@@ -334,6 +388,35 @@ export function ProviderPage({
     setConfirmRemoveNow(entry.id);
   };
 
+  /** 启停执行（ADR-0054 §5）：写盘与注册表重建都在 Core，成功后父级 reload 刷新计数 */
+  const applyToggle = (providerId: string, enabled: boolean): void => {
+    if (toggle === undefined) return;
+    setPendingToggleNow(undefined);
+    void toggle.setProviderEnabled(providerId, enabled).then(
+      () => {
+        setLocalNotice(enabled ? `已启用 ${providerId}` : `已停用 ${providerId}`);
+      },
+      (e: unknown) => {
+        setLocalNotice(`! ${e instanceof Error ? e.message : String(e)}`);
+      },
+    );
+  };
+
+  /** 服务商 Space 入口：启用直接执行；停用且影响面非空时先页内确认 */
+  const requestProviderToggle = (entry: ProviderOverview): void => {
+    if (toggle === undefined) {
+      setLocalNotice("当前环境不支持启停");
+      return;
+    }
+    if (entry.enabled === false) {
+      applyToggle(entry.id, true);
+      return;
+    }
+    const impact = toggle.impact(entry.id);
+    if (hasToggleImpact(impact)) setPendingToggleNow({ providerId: entry.id, impact });
+    else applyToggle(entry.id, false);
+  };
+
   // 布局（ADR-0045）：首次配置保留像素 Logo（高度 ≥30 且宽度 ≥64），其余全交给 PageShell。
   const showLogo = stepLabel !== undefined && width >= 64 && (termRows ?? height) >= 30;
   const logoH = showLogo ? 5 : 0;
@@ -406,6 +489,27 @@ export function ProviderPage({
           setSubViewNow(undefined);
           setModelsData(undefined);
         }}
+        toggle={
+          toggle !== undefined && modelsEntry !== undefined
+            ? {
+                providerEnabled: modelsEntry.enabled !== false,
+                disabled: new Set(toggle.disabledModels(subView.providerId)),
+                impact: (ids) => toggle.impact(subView.providerId, ids),
+                setEnabled: (ids, enabled) => {
+                  void toggle.setModelsEnabled(subView.providerId, ids, enabled).then(
+                    () => {
+                      setLocalNotice(
+                        enabled ? `已启用 ${ids.length} 个模型` : `已停用 ${ids.length} 个模型`,
+                      );
+                    },
+                    (e: unknown) => {
+                      setLocalNotice(`! ${e instanceof Error ? e.message : String(e)}`);
+                    },
+                  );
+                },
+              }
+            : undefined
+        }
       />
     ) : subView?.kind === "edit" && editView !== undefined ? (
       <ModelListPane
@@ -423,9 +527,32 @@ export function ProviderPage({
   const noticeTone: ShellNotice["tone"] =
     noticeLine?.startsWith("!") === true ? "warning" : "accent";
   const shellNotice =
-    busyText !== undefined || noticeLine !== undefined
-      ? { text: busyText ?? noticeLine ?? "", tone: noticeTone }
-      : undefined;
+    pendingToggle !== undefined
+      ? {
+          text: toggleConfirmText(`「${pendingToggle.providerId}」`, pendingToggle.impact),
+          tone: "warning" as const,
+        }
+      : busyText !== undefined || noticeLine !== undefined
+        ? { text: busyText ?? noticeLine ?? "", tone: noticeTone }
+        : undefined;
+  const listHints: HintPairs = [
+    ["↑↓", "移动"],
+    ["Enter", "操作"],
+    ...(toggle !== undefined ? ([["Space", "启用/停用"]] as HintPairs) : []),
+    ["Delete", "删除"],
+    ["Tab", width < 72 ? "切换分组" : "切换栏"],
+    ["Esc", "返回"],
+  ];
+  const sideHints: HintPairs = [
+    ["↑↓", "移动"],
+    ["Enter", "跳转"],
+    ["Tab", width < 72 ? "切换分组" : "切换栏"],
+    ["Esc", "返回"],
+  ];
+  const confirmHints: HintPairs = [
+    ["y", "确认停用"],
+    ["n", "取消"],
+  ];
   const describe = (row: ShellRow | undefined): ShellSpan[][] => {
     const source = rowOf(row?.id);
     if (source === undefined) return [];
@@ -441,18 +568,23 @@ export function ProviderPage({
       ];
     }
     const credential = providerCredentialDescription(p) || keySourceText(p);
+    const off = p.enabled === false;
     return [
       [
         { text: p.id, tone: "secondary" },
         {
-          text: `  ${p.host ?? p.type} · ${p.type} · ${p.modelCount} 个模型${p.id === currentProviderId ? " · 当前会话在用" : ""}`,
+          text: `  ${off ? "已停用 · " : ""}${p.host ?? p.type} · ${p.type} · ${providerCountText(p)}${p.id === currentProviderId ? " · 当前会话在用" : ""}`,
           tone: "muted",
         },
       ],
       [
         {
-          text: p.managed ? `认证：${credential}` : onReadonlyHint(p),
-          tone: p.managed ? "muted" : "warning",
+          text: off
+            ? "已停用；按 Space 重新启用"
+            : p.managed
+              ? `认证：${credential}`
+              : onReadonlyHint(p),
+          tone: off ? "warning" : p.managed ? "muted" : "warning",
         },
       ],
     ];
@@ -483,20 +615,7 @@ export function ProviderPage({
           describe={describe}
           notice={shellNotice}
           hints={({ focus }) =>
-            focus === "side"
-              ? [
-                  ["↑↓", "移动"],
-                  ["Enter", "跳转"],
-                  ["Tab", width < 72 ? "切换分组" : "切换栏"],
-                  ["Esc", "返回"],
-                ]
-              : [
-                  ["↑↓", "移动"],
-                  ["Enter", "操作"],
-                  ["Delete", "删除"],
-                  ["Tab", width < 72 ? "切换分组" : "切换栏"],
-                  ["Esc", "返回"],
-                ]
+            focus === "side" ? sideHints : pendingToggle !== undefined ? confirmHints : listHints
           }
           emptyText="（无匹配）"
           width={width}
@@ -519,7 +638,26 @@ export function ProviderPage({
             if (row !== undefined) openRow(row);
           }}
           onKey={(_input, key, ctx) => {
-            if (!key.delete || ctx.focus !== "list") return false;
+            // 停用确认（ADR-0054 §5）：y 执行、n/Esc 取消，其余按键吞掉。
+            if (pendingToggleRef.current !== undefined) {
+              if (_input === "y" || _input === "Y") {
+                applyToggle(pendingToggleRef.current.providerId, false);
+              } else if (_input === "n" || _input === "N" || key.escape) {
+                setPendingToggleNow(undefined);
+                setLocalNotice("已取消");
+              }
+              return true;
+            }
+            if (ctx.focus !== "list") return false;
+            // Space 启停选中服务商（ADR-0054 §5）：未配置预设不能启停。
+            if (_input === " ") {
+              const row = rowOf(ctx.rowId);
+              const entry = row !== undefined ? entryOf(row) : undefined;
+              if (row === undefined || entry === undefined) return true;
+              requestProviderToggle(entry);
+              return true;
+            }
+            if (!key.delete) return false;
             // Delete = 删除入口（ADR-0030 §6），不再删除过滤字符。
             // 未配置预设 / 当前会话在用 / 只读条目都给原因并停在这里，不开确认框。
             const row = rowOf(ctx.rowId);

@@ -67,6 +67,8 @@ const PROVIDERS: ProviderOverview[] = [
     origin: "setup",
     overridden: false,
     modelCount: 1,
+    enabled: true,
+    enabledModelCount: 1,
     managed: true,
   },
   {
@@ -79,6 +81,8 @@ const PROVIDERS: ProviderOverview[] = [
     origin: "user",
     overridden: false,
     modelCount: 2,
+    enabled: true,
+    enabledModelCount: 2,
     managed: false,
   },
   {
@@ -89,6 +93,8 @@ const PROVIDERS: ProviderOverview[] = [
     origin: "setup",
     overridden: false,
     modelCount: 1,
+    enabled: true,
+    enabledModelCount: 1,
     managed: true,
   },
 ];
@@ -216,6 +222,16 @@ describe("模型选择页", () => {
     expect(frame).toContain("openrouter/llama-4");
     // 底部按键提示
     expect(frame).toContain("Esc");
+    unmount();
+  });
+
+  it("停用模型（不在 models 列表）与其最近使用引用都不列出（ADR-0054 §5）", async () => {
+    const { lastFrame, unmount } = renderPicker({
+      models: MODELS.filter((m) => m.ref.model !== "llama-4"),
+      recents: [{ provider: "openrouter", model: "llama-4" }],
+    });
+    await pause();
+    expect(lastFrame() ?? "").not.toContain("llama-4");
     unmount();
   });
 
@@ -399,6 +415,8 @@ describe("模型选择页", () => {
           origin: "setup",
           overridden: false,
           modelCount: 2,
+          enabled: true,
+          enabledModelCount: 2,
           managed: true,
         },
       ],
@@ -433,6 +451,8 @@ describe("模型选择页", () => {
           origin: "setup",
           overridden: false,
           modelCount: 1,
+          enabled: true,
+          enabledModelCount: 1,
           managed: true,
         },
       ],

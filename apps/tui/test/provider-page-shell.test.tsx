@@ -17,6 +17,8 @@ const entry = (id: string, over: Partial<ProviderOverview> = {}): ProviderOvervi
   origin: "setup",
   overridden: false,
   modelCount: 3,
+  enabled: true,
+  enabledModelCount: 3,
   managed: true,
   auth: "API key",
   credentialStatus: "valid",

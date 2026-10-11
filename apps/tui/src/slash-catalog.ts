@@ -62,13 +62,20 @@ export const PRESET_NAMES = [
 /** 与 platform SHELL_KINDS 一致（本文件不许 import，depcheck 固化）；补全只列名字，可用性以 /shell 为准 */
 const SHELL_KIND_NAMES = ["pwsh", "powershell", "bash", "cmd", "sh"] as const;
 
-export const PROVIDER_SUBCOMMANDS: readonly { name: string; summary: string }[] = [
+export const PROVIDER_SUBCOMMANDS: readonly {
+  name: string;
+  summary: string;
+  /** 只在 TUI 展示（逐行 CLI 未实现，ADR-0054 §5） */
+  tuiOnly?: boolean | undefined;
+}[] = [
   { name: "login", summary: "登录服务商账号" },
   { name: "logout", summary: "退出服务商登录" },
   { name: "add", summary: "添加服务商" },
   { name: "key", summary: "更新密钥" },
   { name: "refresh", summary: "刷新模型列表" },
-  { name: "model", summary: "编辑模型设置" },
+  { name: "model", summary: "编辑模型设置或 on|off 启停" },
+  { name: "enable", summary: "启用服务商", tuiOnly: true },
+  { name: "disable", summary: "停用服务商", tuiOnly: true },
   { name: "remove", summary: "删除服务商" },
 ];
 
@@ -165,6 +172,11 @@ export function helpLines(): string[] {
     const extra = cmd.name === "/exit" ? ", /quit" : "";
     lines.push(`  ${cmd.name}${extra}`.padEnd(18) + cmd.summary);
   }
+  // ADR-0054 §5：服务商/模型启停只在 TUI 实现（逐行 CLI 未实现，见 tuiOnly 子命令）
+  lines.push(
+    "  服务商启停：/provider enable|disable <名称>；/provider model <名称> <模型> on|off，",
+  );
+  lines.push("  或打开 /provider 页用 Space、模型页用 Space/a/n（停用前页内 y/n 确认）。");
   lines.push("快捷键：Ctrl+O 展开/收起思考；Shift+Tab 思考档位；Alt+M 权限预设；Ctrl+J 换行；");
   lines.push("Esc 中断；空闲且输入为空时 600ms 内双按 Esc 打开回退列表。");
   lines.push("Ctrl+C 中断（空闲时退出）；Ctrl+D 退出。输入历史按工作区保存为明文 history.jsonl。");
@@ -218,6 +230,7 @@ function labeled(
 function argItems(
   command: SlashCommand,
   ctx: CompletionContext,
+  tui: boolean,
 ): { key: string; label: string; insert: string }[] {
   const prefix = `${command.name} `;
   if (command.args === "effort") {
@@ -231,7 +244,7 @@ function argItems(
     // ADR-0022：auto 在前；可用性以选择页（/shell）为准，补全只列名字
     return ["auto", ...SHELL_KIND_NAMES].map((name) => labeled(name, name, `${prefix}${name}`));
   }
-  const subs = PROVIDER_SUBCOMMANDS.map((sub) =>
+  const subs = PROVIDER_SUBCOMMANDS.filter((sub) => tui || sub.tuiOnly !== true).map((sub) =>
     labeled(sub.name, `${sub.name}  ${sub.summary}`, `${prefix}${sub.name}`),
   );
   const providers = ctx.providerIds.map((id) => labeled(id, `${id}  已配置`, `${prefix}${id}`));
@@ -293,7 +306,21 @@ export function completeSlash(line: string, ctx: CompletionContext, tui = true):
   const query = rest.includes(" ") ? (rest.split(/\s+/).at(-1) ?? "") : rest.trimStart();
   if (command.args === "provider" && rest.includes(" ")) {
     const token = rest.slice(0, rest.lastIndexOf(" ")).trim();
-    const sub = PROVIDER_SUBCOMMANDS.find((item) => item.name === token);
+    if (tui && /^model\s+\S+\s+\S+$/.test(token)) {
+      return rank(
+        query,
+        ["on", "off"].map((value) =>
+          labeled(
+            value,
+            value === "on" ? "on  启用模型" : "off  停用模型",
+            `${command.name} ${token} ${value}`,
+          ),
+        ),
+      );
+    }
+    const sub = PROVIDER_SUBCOMMANDS.find(
+      (item) => item.name === token && (tui || item.tuiOnly !== true),
+    );
     if (sub !== undefined) {
       return rank(
         query,
@@ -303,7 +330,7 @@ export function completeSlash(line: string, ctx: CompletionContext, tui = true):
       );
     }
   }
-  return rank(query, argItems(command, ctx));
+  return rank(query, argItems(command, ctx, tui));
 }
 
 /**

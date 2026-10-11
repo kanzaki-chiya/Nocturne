@@ -887,6 +887,8 @@ describe("TUI", () => {
               origin: "user" as const,
               overridden: false,
               modelCount: 1,
+              enabled: true,
+              enabledModelCount: 1,
               managed: false,
             },
           ]),

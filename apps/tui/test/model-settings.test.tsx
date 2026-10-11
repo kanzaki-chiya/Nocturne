@@ -118,6 +118,8 @@ const entry = (over?: Partial<ProviderOverview>): ProviderOverview => ({
   origin: "setup",
   overridden: false,
   modelCount: 2,
+  enabled: true,
+  enabledModelCount: 2,
   managed: true,
   ...over,
 });
@@ -399,7 +401,7 @@ describe("模型设置编辑页（ADR-0024）", () => {
     await waitFor(
       () => (lastFrame() ?? "").includes("m1") && (lastFrame() ?? "").includes("请编辑该处配置"),
     );
-    expect(lastFrame()).toContain("只读 • Esc 返回");
+    expect(lastFrame()).toContain("只读 • / 搜索 • Esc 返回");
     stdin.write(ENTER); // 进编辑页（只读）
     await waitFor(() => (lastFrame() ?? "").includes("服务商 up / 模型 m1"));
     const frame = lastFrame() ?? "";
@@ -478,7 +480,7 @@ describe("模型设置编辑页（ADR-0024）", () => {
     );
     await waitFor(() => (lastFrame() ?? "").includes("服务商 up › 模型（2）"));
     expect(lastFrame()).toContain("过滤:");
-    expect(lastFrame()).toContain("↑/↓ 选择 • Enter 编辑 • Esc 返回");
+    expect(lastFrame()).toContain("↑/↓ 选择 • / 搜索 • Enter 编辑 • Esc 返回");
     await flushInput();
     stdin.write(ENTER);
     await waitFor(() => (lastFrame() ?? "").includes("服务商 up / 模型 m1"));
@@ -563,7 +565,7 @@ describe("模型设置编辑页（ADR-0024）", () => {
     );
     await waitFor(() => (lastFrame() ?? "").includes("服务商 up › 模型（2）"));
     expect(lastFrame()).not.toContain("Esc 返回上一级");
-    expect(lastFrame()).toContain("↑/↓ 选择 • Enter 编辑 • Esc 返回 • Ctrl+C 退出");
+    expect(lastFrame()).toContain("↑/↓ 选择 • / 搜索 • Enter 编辑 • Esc 返回 • Ctrl+C 退出");
     await flushInput();
     stdin.write(ENTER);
     await waitFor(() => (lastFrame() ?? "").includes("服务商 up / 模型 m1"));

@@ -45,6 +45,7 @@ import {
   contextLines,
   errText,
   helpLines,
+  modelErrorText,
   runSlash,
   sessionNotes,
   type OverlayName,
@@ -112,7 +113,11 @@ import { Panel } from "./components/panel.js";
 import { PermissionDialog, permissionDialogRows } from "./components/permission-dialog.js";
 import { PickList, type PickItem } from "./components/pick-list.js";
 import { QuestionDialog, questionDialogRows } from "./components/question-dialog.js";
-import { ProviderPage, type ProviderOp } from "./components/provider-page.js";
+import {
+  ProviderPage,
+  type ProviderOp,
+  type ProviderToggleBridge,
+} from "./components/provider-page.js";
 import { StatusBar, type EffortSegment, type StatusHighlight } from "./components/status-bar.js";
 import { ThemePage } from "./components/theme-page.js";
 import { SettingsPage } from "./components/settings-page.js";
@@ -242,7 +247,10 @@ export interface AppProps {
  * describeProviders 数据、内嵌向导、四个操作（key/refresh/thinking/remove）、
  * 只读提示与结果行。业务逻辑全部走 Core 公开 API（provider-setup.md 第 6 节）。
  */
-function useProviderOps(provider: ProviderBridge | undefined): {
+function useProviderOps(
+  provider: ProviderBridge | undefined,
+  runtime: Runtime,
+): {
   entries: readonly ProviderOverview[];
   presets: readonly ProviderPreset[];
   wizard: ReturnType<typeof useProviderWizard>;
@@ -259,6 +267,8 @@ function useProviderOps(provider: ProviderBridge | undefined): {
     modelId: string,
     patch: ModelSettingsPatch,
   ) => Promise<string | undefined>;
+  /** 启停桥（ADR-0054 §5）：读 Core 的 disabled/enabled，写经 Runtime 开关接口 */
+  toggle: ProviderToggleBridge | undefined;
 } {
   const [entries, setEntries] = useState<readonly ProviderOverview[]>([]);
   const [notice, setNotice] = useState<string | undefined>(undefined);
@@ -408,6 +418,34 @@ function useProviderOps(provider: ProviderBridge | undefined): {
     [provider, reload],
   );
 
+  // 启停桥（ADR-0054 §5/A）：读只认 Core（ProviderOverview.enabled /
+  // ModelInfo.disabled / describeToggleImpact），写走 Runtime 的开关接口，
+  // 成功后 reload 刷新 describeProviders 的计数与列表。
+  const toggle = useMemo<ProviderToggleBridge | undefined>(() => {
+    if (provider === undefined) return undefined;
+    const ws = provider.workspaceRoot;
+    return {
+      disabledModels: (providerId) =>
+        runtime
+          .listModels({ includeDisabled: true, ...(ws !== undefined ? { workspaceRoot: ws } : {}) })
+          .filter((m) => m.ref.provider === providerId && m.disabled === "model")
+          .map((m) => m.ref.model),
+      impact: (providerId, models) =>
+        runtime.describeToggleImpact({
+          provider: providerId,
+          ...(models !== undefined ? { models: [...models] } : {}),
+        }),
+      setProviderEnabled: async (providerId, enabled) => {
+        await runtime.setProviderEnabled({ provider: providerId, enabled });
+        await reload();
+      },
+      setModelsEnabled: async (providerId, models, enabled) => {
+        await runtime.setModelsEnabled({ provider: providerId, models: [...models], enabled });
+        await reload();
+      },
+    };
+  }, [provider, runtime, reload]);
+
   return {
     entries,
     presets,
@@ -421,6 +459,7 @@ function useProviderOps(provider: ProviderBridge | undefined): {
     readonlyHint,
     listModels,
     saveModel,
+    toggle,
   };
 }
 
@@ -477,7 +516,7 @@ function SetupFlow({
   }, [stdout]);
   const frame = frameBudget(rows, 0);
 
-  const ops = useProviderOps(provider);
+  const ops = useProviderOps(provider, runtime);
   const [page, setPage] = useState<"provider" | "model">(setup.step === 2 ? "model" : "provider");
   const [ready, setReady] = useState(false);
   const readyCommitted = useRef(false);
@@ -584,6 +623,7 @@ function SetupFlow({
         }}
         onListModels={ops.listModels}
         onSaveModel={ops.saveModel}
+        toggle={ops.toggle}
         onClose={finishStep1}
         notice={ops.notice}
         busyText={ops.busyText}
@@ -927,7 +967,7 @@ function SessionApp({
   }>({ dragging: false, edge: 0, timer: undefined });
 
   // 服务商页数据与操作（与 SetupFlow 共用一套编排）
-  const ops = useProviderOps(provider);
+  const ops = useProviderOps(provider, runtime);
 
   // /provider 向导（add/key）：主屏弹层 + 全屏页内嵌共用一份状态机
   const wizard = useProviderWizard(provider?.config);
@@ -2350,7 +2390,7 @@ function SessionApp({
             ...(attachments.length > 0 ? { attachments } : {}),
           })
           .catch((e: unknown) => {
-            pushLine(`! ${errText(e)}`);
+            pushLine(`! ${modelErrorText(e)}`);
           })
           .finally(() => {
             submitting.current = false;
@@ -2406,7 +2446,7 @@ function SessionApp({
           ...(attachments.length > 0 ? { attachments } : {}),
         })
         .catch((e: unknown) => {
-          pushLine(`! ${errText(e)}`);
+          pushLine(`! ${modelErrorText(e)}`);
         })
         .finally(() => {
           submitting.current = false;
@@ -2614,6 +2654,7 @@ function SessionApp({
         }}
         onListModels={ops.listModels}
         onSaveModel={ops.saveModel}
+        toggle={ops.toggle}
         initialModelTarget={providerPageTarget}
         onMouseFrame={fullscreen ? reportDialogMouse : undefined}
         onClose={() => {
