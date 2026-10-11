@@ -69,13 +69,21 @@ function refText(ref: string): string {
   return at < 0 ? ref : `${ref.slice(0, at)} · ${ref.slice(at + 1)}`;
 }
 
-/** 模型名与档位优先展示，服务商单独一行允许省略。 */
-function ModelValue({ value, effort }: { value: string; effort?: string | undefined }) {
+/** 模型名与档位优先展示，服务商单独一行允许省略。off = 指向已停用模型（ADR-0054）。 */
+function ModelValue({
+  value,
+  effort,
+  off = false,
+}: {
+  value: string;
+  effort?: string | undefined;
+  off?: boolean;
+}) {
   const at = value.indexOf("/");
   const provider = at < 0 ? "" : value.slice(0, at);
   const model = at < 0 ? value : value.slice(at + 1);
   return (
-    <span className="model-value" title={refText(value)}>
+    <span className={`model-value${off ? " off" : ""}`} title={refText(value)}>
       <span className="model-primary">
         {model}
         {effort !== undefined ? ` · ${effort}` : ""}
@@ -230,6 +238,10 @@ export function SettingsPage({
   };
 
   const item = (key: SettingItem["key"]) => items?.find((x) => x.key === key);
+  /** ADR-0054：设置值指向停用模型（默认模型与模型角色都按未设置处理） */
+  const modelOff = (value: string | undefined) =>
+    value !== undefined &&
+    items?.some((it) => it.effective === value && it.disabled !== undefined) === true;
   const defaultModelItem = item("defaultModel");
   const effortItem = item("reasoningEffort");
   const presetItem = item("permissions.preset");
@@ -587,7 +599,11 @@ export function SettingsPage({
                 {defaultModelItem?.effective === undefined ? (
                   <span className="ro">未设置</span>
                 ) : (
-                  <ModelValue value={defaultModelItem.effective} effort={effortItem?.effective} />
+                  <ModelValue
+                    value={defaultModelItem.effective}
+                    effort={effortItem?.effective}
+                    off={modelOff(defaultModelItem.effective)}
+                  />
                 )}
                 <button
                   className="btn"
@@ -599,6 +615,9 @@ export function SettingsPage({
                 </button>
               </span>
               {src(defaultModelItem)}
+              {modelOff(defaultModelItem?.effective) && (
+                <span className="warnl">已停用，按未设置处理：新会话需要先选模型</span>
+              )}
               {errLine("defaultModel")}
             </div>
 
@@ -616,7 +635,7 @@ export function SettingsPage({
                     {it?.effective === undefined ? (
                       <span className="ro">{unset}</span>
                     ) : (
-                      <ModelValue value={it.effective} />
+                      <ModelValue value={it.effective} off={modelOff(it.effective)} />
                     )}
                     <button
                       className="btn"
@@ -628,6 +647,7 @@ export function SettingsPage({
                     </button>
                   </span>
                   {src(it)}
+                  {modelOff(it?.effective) && <span className="warnl">已停用，按未设置处理</span>}
                   {errLine(key)}
                 </div>
               );

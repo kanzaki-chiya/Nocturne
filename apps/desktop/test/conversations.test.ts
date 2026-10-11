@@ -25,6 +25,8 @@ function fixture(
   rejectSubmit = false,
   failResume?: ReadonlySet<string>,
   deferResume?: ReadonlySet<string>,
+  /** rejectSubmit 时替换默认的错误（message + data 覆盖） */
+  submitError?: { message: string; data?: Record<string, unknown> },
 ) {
   let client: RpcClient | undefined;
   let server: LineTransport | undefined;
@@ -142,8 +144,8 @@ function fixture(
                 id: request.id,
                 error: {
                   code: -32003,
-                  message: "图片格式或尺寸不符合要求",
-                  data: { code: "invalid_command" },
+                  message: submitError?.message ?? "图片格式或尺寸不符合要求",
+                  data: { code: "invalid_command", ...(submitError?.data ?? {}) },
                 },
               }),
             );
@@ -451,6 +453,46 @@ describe("send 接受语义与创建选项", () => {
     expect(f.controller.selectedId).toBeNull();
     await vi.waitFor(() => expect(f.opened.size).toBe(0));
     expect(f.calls.some((c) => c.method === "session.close")).toBe(true);
+  });
+
+  it("已打开的会话提交被 invalid_model 拒绝：记入 openErrors 供换模型卡片（ADR-0054）", async () => {
+    const f = fixture(undefined, true, undefined, undefined, {
+      message: "服务商 test 已停用（可在 设置 › 服务商 或 /provider 重新启用）",
+      data: {
+        code: "invalid_model",
+        disabled: "provider",
+        model: { provider: "test", model: "cheap" },
+      },
+    });
+    await f.controller.open("a", "project");
+    await expect(f.controller.send({ text: "hi", attachments: [] })).rejects.toThrow(
+      "服务商 test 已停用",
+    );
+    expect(f.controller.openErrors.get("a")).toMatchObject({
+      code: "invalid_model",
+      disabled: "provider",
+      disabledModel: { provider: "test", model: "cheap" },
+    });
+    // 不落全局错误条；会话仍打开且仍选中（主区由卡片替换，会话不关闭）
+    expect(f.failures).toEqual([]);
+    expect(f.controller.selectedId).toBe("a");
+    expect(f.controller.opened.get("a")).toBeDefined();
+
+    // 「用这个模型继续」对已打开会话走 setModel，不重新 resume
+    await f.controller.open("a", "project", false, { provider: "test", model: "fancy" });
+    expect(f.calls.filter((c) => c.method === "runtime.resumeSession")).toHaveLength(1);
+    expect(f.calls.find((c) => c.method === "session.setModel")?.params).toMatchObject({
+      model: { provider: "test", model: "fancy" },
+    });
+    expect(f.controller.openErrors.get("a")).toBeUndefined();
+
+    // 重新启用后回到会话：只对已打开的会话清记录
+    f.controller.openErrors.set("a", { message: "x", workspace: "project" });
+    f.controller.acknowledgeReenabled("a");
+    expect(f.controller.openErrors.get("a")).toBeUndefined();
+    f.controller.openErrors.set("zz", { message: "x", workspace: "project" });
+    f.controller.acknowledgeReenabled("zz");
+    expect(f.controller.openErrors.get("zz")).toBeDefined();
   });
 });
 

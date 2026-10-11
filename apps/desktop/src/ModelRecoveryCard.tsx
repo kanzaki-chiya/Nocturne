@@ -5,6 +5,7 @@
  * 分组与禁用规则复用状态栏模型菜单（modelGroups + ChoiceMenu）。
  * 选好后由调用方带 model 重新 resumeSession；Core 先写 config_changed 再开放，
  * 以后再打开这个会话不会再进这张卡片（sessions.md 4.2）。
+ * ADR-0054 §4：错误带结构化 disabled 时换成「已停用」文案，并给「重新启用」按钮。
  */
 import { useEffect, useRef, useState } from "react";
 import type { ModelRef } from "@nocturne/core/protocol";
@@ -39,9 +40,12 @@ export function ModelRecoveryCard({
   workspace,
   error,
   attempted,
+  disabled,
+  disabledModel,
   providersVersion,
   onContinue,
   onOpenProviders,
+  onReenable,
 }: {
   runtime: RpcRuntime | undefined;
   /** 会话的工作区：模型清单按它合并项目层 */
@@ -50,10 +54,16 @@ export function ModelRecoveryCard({
   error: string;
   /** 上一次携带的替代模型（换模型后仍失败时沿用） */
   attempted?: ModelRef | string | undefined;
+  /** 停用来源（ADR-0054）：provider 整体停用或该模型逐个停用 */
+  disabled?: "provider" | "model" | undefined;
+  /** 被停用的模型引用（Core 错误里的结构化字段） */
+  disabledModel?: ModelRef | undefined;
   /** 服务商配置变更计数：从服务商页配好回来时重新拉清单 */
   providersVersion: number;
   onContinue: (model: ModelRef) => void;
   onOpenProviders: () => void;
+  /** 重新启用被停用的服务商或模型；未提供时不显示该按钮 */
+  onReenable?: (() => void) | undefined;
 }) {
   const [data, setData] = useState<{ models: ModelInfo[]; recents: ModelRef[] } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -95,12 +105,25 @@ export function ModelRecoveryCard({
   const models = data?.models ?? [];
   const chosen = models.find((info) => refKey(info.ref) === picked);
   const empty = data !== null && models.length === 0;
+  const disabledRef = disabledModel === undefined ? undefined : refKey(disabledModel);
+  const reenableLabel = `重新启用 ${
+    disabled === "provider" ? (disabledModel?.provider ?? "") : (disabledRef ?? "")
+  }`.trim();
 
   return (
     <div className="nodecard">
-      <h3>这个会话用的模型已不可用</h3>
+      <h3>{disabled === undefined ? "这个会话用的模型已不可用" : "这个会话用的模型已停用"}</h3>
       <div className="lead">
-        会话原来用的模型已不在当前配置里（可能删掉或改名了服务商）。选一个模型继续，之后的对话改用它；之前的记录不变。
+        {disabled === undefined ? (
+          "会话原来用的模型已不在当前配置里（可能删掉或改名了服务商）。选一个模型继续，之后的对话改用它；之前的记录不变。"
+        ) : (
+          <>
+            <span className="mono">{disabledRef ?? "这个模型"}</span>
+            {
+              " 已在 设置 › 服务商 停用。选一个模型继续，之后的对话改用它，之前的记录不变；也可以重新启用原来的模型。"
+            }
+          </>
+        )}
       </div>
       {data === null && loadError === null && <div className="fine">正在读取可用模型…</div>}
       {loadError !== null && <div className="fine">读取模型清单失败：{loadError}</div>}
@@ -137,7 +160,6 @@ export function ModelRecoveryCard({
           )}
         </div>
       )}
-      <div className="fine">{error}</div>
       <div className="acts">
         {data !== null && !empty && (
           <button
@@ -150,10 +172,17 @@ export function ModelRecoveryCard({
             用这个模型继续
           </button>
         )}
-        <button className="btn" onClick={onOpenProviders}>
-          去配置服务商
-        </button>
+        {disabledModel !== undefined && onReenable !== undefined ? (
+          <button className="btn" onClick={onReenable}>
+            {reenableLabel}
+          </button>
+        ) : (
+          <button className="btn" onClick={onOpenProviders}>
+            去配置服务商
+          </button>
+        )}
       </div>
+      <div className="fine">{error}</div>
     </div>
   );
 }

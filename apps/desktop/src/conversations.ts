@@ -76,12 +76,21 @@ export interface CreateSessionChoice {
  * 打开失败的记录。code 取 RPC 错误的 data.code（RpcError.code），界面按它
  * 分支，不匹配文案：invalid_model 进「换模型」卡片，其余是「打开会话失败 + 重试」。
  * model 是这次打开携带的替代模型（换模型后仍失败时卡片沿用这个选择）。
+ * disabled/disabledModel 来自 Core 的结构化错误（ADR-0054）：区分「已停用」
+ * 与「已删除」，卡片据此给「重新启用」入口。
  */
 export interface OpenError {
   message: string;
   workspace: string;
   code?: string;
   model?: ModelRef | string;
+  disabled?: "provider" | "model";
+  disabledModel?: ModelRef;
+  /**
+   * ADR-0054 §3 双重停用：disabled === "model" 且其服务商也被停用时为 true；
+   * 一键「重新启用」需同时恢复服务商与模型（只读 Core 错误字段，不另判停用）。
+   */
+  providerDisabled?: boolean;
 }
 
 function openError(error: unknown, workspace: string, model?: ModelRef | string): OpenError {
@@ -90,6 +99,15 @@ function openError(error: unknown, workspace: string, model?: ModelRef | string)
     workspace,
     ...(error instanceof RpcError ? { code: error.code } : {}),
     ...(model !== undefined ? { model } : {}),
+    ...(error instanceof RpcError && error.disabled !== undefined
+      ? { disabled: error.disabled }
+      : {}),
+    ...(error instanceof RpcError && error.model !== undefined
+      ? { disabledModel: error.model }
+      : {}),
+    ...(error instanceof RpcError && error.providerDisabled === true
+      ? { providerDisabled: true as const }
+      : {}),
   };
 }
 
@@ -268,6 +286,11 @@ export class Conversations {
             continuity,
           );
         }
+        // 已打开的会话（如提交被 invalid_model 拒绝后换模型）：直接 setModel，
+        // 不重新 resume（ADR-0054 §4 的「重新启用 / 换模型继续」两条路共用）
+        if (dead === undefined && model !== undefined) {
+          await entry.session.setModel(model);
+        }
         this.openErrors.delete(id);
         // 打开期间被更新的点击取代：接上的会话不再被选中，按空闲路径关掉不留锁
         if (entry.session.id !== this.selectedId) {
@@ -372,6 +395,10 @@ export class Conversations {
     } catch (error) {
       // submit 在接受前拒绝（如附件校验失败）：会话保持空闲，普通关闭路径清理
       entry.busy = false;
+      // 会话模型被停用（ADR-0054 §4）：提交前即被拒，记进 openErrors 让主区显示「换模型」卡片
+      if (error instanceof RpcError && error.code === "invalid_model") {
+        this.openErrors.set(entry.session.id, openError(error, entry.workspace));
+      }
       this.changed();
       void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
       throw error;
@@ -381,11 +408,31 @@ export class Conversations {
     this.draftWorkspace = null;
     this.changed();
     // 接受后归还输入框控制；Turn 完成由订阅更新，切换不会等整轮输出。
-    void submission.catch(this.failed).finally(() => {
-      entry.busy = false;
-      this.changed();
-      void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
-    });
+    void submission
+      .catch((error: unknown) => {
+        // 运行中模型的停用（如压缩路径）同样给「换模型」卡片，不落全局错误条
+        if (error instanceof RpcError && error.code === "invalid_model") {
+          this.openErrors.set(entry.session.id, openError(error, entry.workspace));
+          this.changed();
+          return;
+        }
+        this.failed(error);
+      })
+      .finally(() => {
+        entry.busy = false;
+        this.changed();
+        void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
+      });
+  }
+
+  /**
+   * 重新启用后回到会话（ADR-0054 §4）：已打开的会话直接回到对话，未打开的
+   * 仍留在「换模型」卡片，由用户选模型重新打开。
+   */
+  acknowledgeReenabled(id: string): void {
+    const entry = this.opened.get(id);
+    if (entry === undefined || entry.dead === true) return;
+    if (this.openErrors.delete(id)) this.changed();
   }
 
   /**

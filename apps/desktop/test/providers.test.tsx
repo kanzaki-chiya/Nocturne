@@ -24,6 +24,8 @@ const PROVIDER: ProviderOverview = {
   origin: "setup",
   overridden: false,
   modelCount: 2,
+  enabled: true,
+  enabledModelCount: 2,
   managed: true,
 };
 
@@ -39,6 +41,8 @@ const EXPIRED: ProviderOverview = {
   origin: "setup",
   overridden: false,
   modelCount: 1,
+  enabled: true,
+  enabledModelCount: 1,
   managed: true,
 };
 

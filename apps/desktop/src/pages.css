@@ -228,7 +228,7 @@
 }
 .page3 .mr {
   display: grid;
-  grid-template-columns: minmax(12ch, 1fr) 36px 88px 70px 32px;
+  grid-template-columns: 30px minmax(12ch, 1fr) 36px 88px 70px 32px;
   gap: 12px;
   align-items: center;
   padding: 7px 14px;
@@ -304,6 +304,40 @@
   font: 11px/16px var(--sans);
   color: var(--a-accent);
   flex: none;
+}
+/* 停用（ADR-0054）：模型行的开关列、停用行变淡、列表停用标签 */
+.page3 .mr .tog {
+  display: flex;
+  align-items: center;
+}
+.page3 .mr .tog .mcp-switch::before {
+  margin-right: 0;
+}
+.page3 .mr.off .m,
+.page3 .mr.off .num {
+  color: var(--a-faint);
+}
+.page3 .mr.off .cap b {
+  color: var(--a-faint);
+}
+.page3 .tagm {
+  font-size: 11px;
+  color: var(--a-muted);
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 4px;
+  padding: 0 5px;
+  line-height: 17px;
+}
+.page3 .plist a .nm.off {
+  color: var(--a-faint);
+}
+.page3 .cflist {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--a-secondary);
+  font-size: 12px;
+  display: grid;
+  gap: 3px;
 }
 .page3 .fine {
   font-size: 12px;
@@ -1107,6 +1141,13 @@
 .page3 .lk:hover {
   text-decoration: underline;
 }
+.page3 .lk:disabled {
+  color: var(--a-faint);
+  cursor: default;
+}
+.page3 .lk:disabled:hover {
+  text-decoration: none;
+}
 .page3 .lk:focus-visible {
   outline: 2px solid var(--a-accent);
   outline-offset: 2px;
@@ -1193,6 +1234,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 停用模型（ADR-0054）：值加删除线，下方用警告色写「已停用，按未设置处理」 */
+.page3 .model-value.off .model-primary {
+  text-decoration: line-through;
+  color: var(--a-faint);
+}
+.page3 .model-value.off .model-provider {
+  color: var(--a-faint);
+}
+.page3 .s3 .warnl {
+  grid-column: 2 / 4;
+  font-size: 12px;
+  color: var(--a-warning);
+  margin-top: -4px;
+}
 @container settings-content (width < 900px) {
   .page3 .cols3 {
     grid-template-columns: 200px minmax(0, 1fr);
@@ -1206,7 +1261,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .page3 .mr {
-    grid-template-columns: minmax(12ch, 1fr) 36px 88px 32px;
+    grid-template-columns: 30px minmax(12ch, 1fr) 36px 88px 32px;
     gap: 8px;
     padding-inline: 10px;
   }
@@ -1219,7 +1274,7 @@
 }
 @container provider-detail (width < 400px) {
   .page3 .mr {
-    grid-template-columns: minmax(12ch, 1fr) 36px 32px;
+    grid-template-columns: 30px minmax(12ch, 1fr) 36px 32px;
   }
   .page3 .fr {
     grid-template-columns: minmax(12ch, 1fr) 36px;

@@ -14,6 +14,8 @@ export type SetupProviderEntry = NonNullable<
   Awaited<ReturnType<RpcProvider["describeSetupProvider"]>>
 >;
 export type UpdateSetupProviderPatch = Parameters<RpcProvider["updateSetupProvider"]>[1];
+/** 停用前的影响面（ADR-0054）：打开的会话数、默认模型、模型角色 */
+export type ToggleImpact = Awaited<ReturnType<RpcProvider["describeToggleImpact"]>>;
 export type ModelSettingsView = Awaited<ReturnType<RpcProvider["listModelSettings"]>>[number];
 export type ModelFieldSource = ModelSettingsView["fields"]["displayName"]["source"];
 export type ModelSettingsPatch = Parameters<RpcProvider["saveModelSettings"]>[2];

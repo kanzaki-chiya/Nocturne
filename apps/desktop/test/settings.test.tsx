@@ -486,6 +486,41 @@ describe("SettingsPage", () => {
   });
 });
 
+it("默认模型与角色指向停用模型时加删除线并注明按未设置处理（ADR-0054）", async () => {
+  const server = fakeServer(
+    handlers({
+      "runtime.listModels": () => MODELS,
+      "runtime.describeSettings": ITEMS.map((item) =>
+        item.key === "modelRoles.task"
+          ? {
+              ...item,
+              effective: "openrouter/tiny",
+              saved: "openrouter/tiny",
+              source: "settings",
+              disabled: "model",
+            }
+          : item.key === "defaultModel"
+            ? { ...item, disabled: "provider" }
+            : item,
+      ),
+    }),
+  );
+  await server.initialize();
+  render(<SettingsPage {...props(server.client, { section: "models" })} />);
+  await screen.findByText("默认模型与档位");
+
+  const defaultRow = row("默认模型与档位");
+  expect(defaultRow.querySelector(".model-value.off")).toBeTruthy();
+  expect(defaultRow.textContent).toContain("已停用，按未设置处理：新会话需要先选模型");
+
+  const taskRow = row("子代理模型");
+  expect(taskRow.querySelector(".model-value.off")).toBeTruthy();
+  expect(taskRow.textContent).toContain("已停用，按未设置处理");
+  // 未停用的角色值与默认文案保持不变
+  expect(row("看图模型").querySelector(".model-value.off")).toBeNull();
+  server.close();
+});
+
 it("打开文件用：只列检测到的编辑器，选择写本机 prefs", async () => {
   const server = fakeServer(handlers());
   await server.initialize();

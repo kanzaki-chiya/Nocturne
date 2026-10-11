@@ -23,7 +23,7 @@ function replayHost(
   rpcError?: (request: {
     method: string;
     params: Record<string, unknown>;
-  }) => { code: string; message: string } | undefined,
+  }) => { code: string; message: string; data?: Record<string, unknown> | undefined } | undefined,
 ) {
   const channels = new Map<number, (message: BackendMessage) => void>();
   /** 被 deferRpc 扣下的请求：respond 把结果发回客户端 */
@@ -201,7 +201,7 @@ function replayHost(
             error: {
               code: -32001,
               message: rejected.message,
-              data: { code: rejected.code, name: "RuntimeCommandError" },
+              data: { code: rejected.code, name: "RuntimeCommandError", ...(rejected.data ?? {}) },
             },
           }),
         });
@@ -442,6 +442,8 @@ function replayHost(
         case "session.setModel":
         case "session.setReasoningEffort":
         case "session.setPermissionPreset":
+        case "provider.setProviderEnabled":
+        case "provider.setModelsEnabled":
           break;
         case "session.unsubscribe":
         case "session.close":
@@ -1101,6 +1103,106 @@ it("会话模型已不可用：显示换模型卡片（无「重试」），选�
   expect(resumes).toHaveLength(2);
   expect(resumes[1]?.params.model).toEqual({ provider: "test", model: "fancy" });
   expect(screen.queryByText("这个会话用的模型已不可用")).toBeNull();
+});
+
+it("会话模型已停用：卡片换文案并给「重新启用」，重新启用后不再说已删除（ADR-0054）", async () => {
+  const host = replayHost([], undefined, undefined, (request) =>
+    request.method === "runtime.resumeSession" && request.params.sessionId === "gamma"
+      ? {
+          code: "invalid_model",
+          message: "服务商 test 已停用（可在 设置 › 服务商 或 /provider 重新启用）",
+          data: { disabled: "provider", model: { provider: "test", model: "cheap" } },
+        }
+      : undefined,
+  );
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
+
+  await screen.findByText("这个会话用的模型已停用");
+  expect(screen.queryByText("这个会话用的模型已不可用")).toBeNull();
+  expect(screen.getByText(/test\/cheap/)).toBeTruthy();
+  // 停用可恢复：次按钮是「重新启用 <服务商>」，不再只是「去配置服务商」
+  expect(screen.queryByRole("button", { name: "去配置服务商" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "重新启用 test" }));
+  await waitFor(() =>
+    expect(
+      host.calls.some(
+        (call) =>
+          call.method === "provider.setProviderEnabled" &&
+          call.params.provider === "test" &&
+          call.params.enabled === true,
+      ),
+    ).toBe(true),
+  );
+});
+
+it("双重停用：点一次「重新启用」同时恢复模型与服务商；单模型停用只调模型接口（ADR-0054）", async () => {
+  const host = replayHost([], undefined, undefined, (request) =>
+    request.method === "runtime.resumeSession" && request.params.sessionId === "gamma"
+      ? {
+          code: "invalid_model",
+          message: "模型 test/cheap 已停用（可在 设置 › 服务商 或 /provider 重新启用）",
+          data: {
+            disabled: "model",
+            model: { provider: "test", model: "cheap" },
+            providerDisabled: true,
+          },
+        }
+      : undefined,
+  );
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
+
+  await screen.findByText("这个会话用的模型已停用");
+  fireEvent.click(screen.getByRole("button", { name: "重新启用 test/cheap" }));
+  await waitFor(() =>
+    expect(
+      host.calls.some(
+        (call) =>
+          call.method === "provider.setModelsEnabled" &&
+          call.params.provider === "test" &&
+          call.params.enabled === true,
+      ),
+    ).toBe(true),
+  );
+  await waitFor(() =>
+    expect(
+      host.calls.some(
+        (call) =>
+          call.method === "provider.setProviderEnabled" &&
+          call.params.provider === "test" &&
+          call.params.enabled === true,
+      ),
+    ).toBe(true),
+  );
+});
+
+it("单模型停用：重新启用只调模型接口，不碰服务商开关（ADR-0054）", async () => {
+  const host = replayHost([], undefined, undefined, (request) =>
+    request.method === "runtime.resumeSession" && request.params.sessionId === "gamma"
+      ? {
+          code: "invalid_model",
+          message: "模型 test/cheap 已停用（可在 设置 › 服务商 或 /provider 重新启用）",
+          data: { disabled: "model", model: { provider: "test", model: "cheap" } },
+        }
+      : undefined,
+  );
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
+
+  await screen.findByText("这个会话用的模型已停用");
+  fireEvent.click(screen.getByRole("button", { name: "重新启用 test/cheap" }));
+  await waitFor(() =>
+    expect(
+      host.calls.some(
+        (call) =>
+          call.method === "provider.setModelsEnabled" &&
+          call.params.provider === "test" &&
+          call.params.enabled === true,
+      ),
+    ).toBe(true),
+  );
+  expect(host.calls.some((call) => call.method === "provider.setProviderEnabled")).toBe(false);
 });
 
 it("打开时其他错误码仍是「打开会话失败 + 重试」", async () => {

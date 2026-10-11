@@ -10,15 +10,18 @@ import { RpcError } from "@nocturne/rpc/client";
 import { refKey } from "./session-controls";
 import type {
   AccountStorageSetup,
+  ModelRoleInfo,
   ModelSettingsView,
   PrepareProviderResult,
   ProviderOverview,
   ProviderPreset,
   ProviderSetupDescription,
   SetupProviderEntry,
+  ToggleImpact,
   UpdateSetupProviderPatch,
 } from "./rpc-types";
 import "./pages.css";
+import "./mcp.css";
 
 /* ---------------- 小工具 ---------------- */
 
@@ -102,6 +105,30 @@ function originText(p: ProviderOverview): string {
 }
 function typeText(t: ProviderOverview["type"]): string {
   return t === "openai-compatible" ? "OpenAI 兼容" : "Anthropic 兼容";
+}
+
+/** 模型角色中文名（describeToggleImpact 的停用确认列表） */
+const ROLE_LABELS: Record<ModelRoleInfo["role"], string> = {
+  task: "子代理模型",
+  vision: "看图模型",
+  smol: "轻量模型",
+};
+
+/** 停用确认的受影响项（ADR-0054 §4：列出会话数、默认模型与角色） */
+function impactLines(impact: ToggleImpact, subject: string): string[] {
+  const lines: string[] = [];
+  if (impact.affectedSessions > 0) {
+    lines.push(
+      `${impact.affectedSessions} 个打开的会话正在用 ${subject}，下一轮发送时需要先换模型`,
+    );
+  }
+  if (impact.defaultModel) {
+    lines.push(`默认模型是 ${subject}，改为按未设置处理：新会话需要先选模型`);
+  }
+  for (const role of impact.roles) {
+    lines.push(`${ROLE_LABELS[role]}是 ${subject}，改为按未设置处理`);
+  }
+  return lines;
 }
 
 /** Core 的提问行面向终端（结尾冒号、「回车跳过」）：表单只取标签部分 */
@@ -286,24 +313,40 @@ export function ProvidersPage({
         <nav className="plist" aria-label="服务商列表">
           <h5>已配置</h5>
           {configured.length === 0 && <span className="fine pad">暂无</span>}
-          {configured.map((p) => (
-            <a
-              key={p.id}
-              className={sel?.kind === "provider" && sel.id === p.id ? "on" : undefined}
-              onClick={() => {
-                setSel({ kind: "provider", id: p.id });
-              }}
-            >
-              <span className={`dot ${statusDot(p)}`} />
-              <span className="nm" title={p.displayName !== undefined ? p.id : undefined}>
-                {p.displayName ?? p.id}
-              </span>
-              <span className={`r${failed(p) ? " warn" : ""}`}>
-                {p.id === currentProvider && <span className="tagc">当前</span>}
-                {failed(p) ? "已失效" : `${p.modelCount} 个模型`}
-              </span>
-            </a>
-          ))}
+          {configured.map((p) => {
+            const off = p.enabled === false;
+            const total = p.modelCount;
+            const on = p.enabledModelCount ?? total;
+            return (
+              <a
+                key={p.id}
+                className={sel?.kind === "provider" && sel.id === p.id ? "on" : undefined}
+                onClick={() => {
+                  setSel({ kind: "provider", id: p.id });
+                }}
+              >
+                <span className={`dot ${off ? "off" : statusDot(p)}`} />
+                <span
+                  className={`nm${off ? " off" : ""}`}
+                  title={p.displayName !== undefined ? p.id : undefined}
+                >
+                  {p.displayName ?? p.id}
+                </span>
+                <span className={`r${failed(p) ? " warn" : ""}`}>
+                  {p.id === currentProvider && <span className="tagc">当前</span>}
+                  {failed(p) ? (
+                    "已失效"
+                  ) : off ? (
+                    <span className="tagm">已停用</span>
+                  ) : on < total ? (
+                    `${on} / ${total}`
+                  ) : (
+                    `${total} 个模型`
+                  )}
+                </span>
+              </a>
+            );
+          })}
           <h5>可添加</h5>
           {available.map((p) => (
             <a
@@ -419,12 +462,32 @@ function ProviderDetail({
   const [unstored, setUnstored] = useState<NonNullable<LoginCompleted["unstoredKey"]> | null>(null);
   /** 删除被服务端以 provider_in_use 拒绝后置灰 */
   const [refusedInUse, setRefusedInUse] = useState(false);
+  /** ADR-0054：模型级停用来源（listModels 只读 Core 字段，不自行推断） */
+  const [disabledByModel, setDisabledByModel] = useState<
+    Readonly<Record<string, "provider" | "model">>
+  >({});
+  /** 停用确认：对象正被打开会话 / 默认模型 / 模型角色使用时先弹页内确认 */
+  const [confirm, setConfirm] = useState<{
+    target: { kind: "provider" } | { kind: "models"; ids: string[] };
+    impact: ToggleImpact;
+  } | null>(null);
 
   const loadModels = useCallback(async () => {
     try {
       setModels(await client.provider.listModelSettings(p.id));
     } catch {
       setModels([]);
+    }
+    try {
+      // 服务商页是唯一带 includeDisabled 的模型清单；其余列表默认滤除停用模型
+      const all = await client.runtime.listModels({ includeDisabled: true });
+      const disabled: Record<string, "provider" | "model"> = {};
+      for (const m of all) {
+        if (m.ref.provider === p.id && m.disabled !== undefined) disabled[m.ref.model] = m.disabled;
+      }
+      setDisabledByModel(disabled);
+    } catch {
+      setDisabledByModel({});
     }
   }, [client, p.id]);
   useEffect(() => {
@@ -507,6 +570,38 @@ function ProviderDetail({
     }
   };
 
+  const applyProviderEnabled = (enabled: boolean) =>
+    run("toggle", async () => {
+      await client.provider.setProviderEnabled(p.id, enabled);
+      return enabled ? `已启用 ${p.id}` : `已停用 ${p.id}`;
+    });
+  const applyModelsEnabled = (ids: string[], enabled: boolean) =>
+    run("toggle", async () => {
+      await client.provider.setModelsEnabled(p.id, ids, enabled);
+      return enabled ? `已启用 ${ids.length} 个模型` : `已停用 ${ids.length} 个模型`;
+    });
+
+  /** 停用：影响面非空（正被会话 / 默认模型 / 角色使用）先弹页内确认，否则直接切换 */
+  const disable = async (target: { kind: "provider" } | { kind: "models"; ids: string[] }) => {
+    try {
+      const impact = await client.provider.describeToggleImpact(
+        p.id,
+        target.kind === "models" ? target.ids : undefined,
+      );
+      if (impact.affectedSessions === 0 && !impact.defaultModel && impact.roles.length === 0) {
+        if (target.kind === "provider") await applyProviderEnabled(false);
+        else await applyModelsEnabled(target.ids, false);
+        return;
+      }
+      setConfirm({ target, impact });
+    } catch (e) {
+      setActionError(errText(e));
+    }
+  };
+
+  const toggleModel = (modelId: string, enabled: boolean) =>
+    enabled ? applyModelsEnabled([modelId], true) : disable({ kind: "models", ids: [modelId] });
+
   const deleteBlocked = !p.managed
     ? `此条目由 ${originText(p)} 定义，只读；请修改对应配置文件`
     : inUse || refusedInUse
@@ -514,6 +609,9 @@ function ProviderDetail({
       : null;
   const auth = p.authKind;
   const showRelogin = auth === "account" && failed(p);
+  const off = p.enabled === false;
+  const total = p.modelCount;
+  const onCount = p.enabledModelCount ?? total;
 
   return (
     <>
@@ -525,6 +623,20 @@ function ProviderDetail({
           {p.overridden && <span className="tagw">被更高层覆盖</span>}
         </div>
         <span className="acts">
+          <button
+            role="switch"
+            aria-checked={!off}
+            className={`mcp-switch ${off ? "" : "on"}`}
+            aria-label={`启用服务商 ${p.id}`}
+            disabled={busy !== null}
+            onClick={() => {
+              if (off) void applyProviderEnabled(true);
+              else void disable({ kind: "provider" });
+            }}
+          >
+            {off ? "已停用" : "已启用"}
+          </button>
+          <span className="mcp-action-divider" aria-hidden="true" />
           {editable && (
             <button
               className="btn"
@@ -624,6 +736,21 @@ function ProviderDetail({
       {loginError !== null && <div className="errt">{loginError}</div>}
       {unstored !== null && <UnstoredKey value={unstored} />}
 
+      {off && (
+        <div className="pbanner">
+          已停用
+          <span>
+            这个服务商的模型不会出现在任何模型菜单里；用它的会话需要先换模型才能继续。配置和密钥都保留。
+          </span>
+          <button
+            className="btn"
+            disabled={busy !== null}
+            onClick={() => void applyProviderEnabled(true)}
+          >
+            重新启用
+          </button>
+        </div>
+      )}
       <dl className="kv">
         <div>
           <dt>类型</dt>
@@ -662,9 +789,13 @@ function ProviderDetail({
         <small>
           {models === null
             ? "…"
-            : q === ""
-              ? `${models.length} 个`
-              : `${filtered.length} / ${models.length}`}
+            : q !== ""
+              ? `${filtered.length} / ${models.length}`
+              : off
+                ? `服务商已停用 · 逐个设置保留 ${models.filter((m) => disabledByModel[m.modelId] !== "model").length} / ${total}`
+                : onCount < total
+                  ? `已启用 ${onCount} / ${total}`
+                  : `${models.length} 个`}
         </small>
         <input
           className="search"
@@ -675,9 +806,40 @@ function ProviderDetail({
           }}
           aria-label="搜索模型"
         />
+        <button
+          className="lk"
+          disabled={
+            off || busy !== null || !filtered.some((m) => disabledByModel[m.modelId] === "model")
+          }
+          onClick={() =>
+            void applyModelsEnabled(
+              filtered.filter((m) => disabledByModel[m.modelId] === "model").map((m) => m.modelId),
+              true,
+            )
+          }
+        >
+          {q === "" ? "全部启用" : "启用筛选结果"}
+        </button>
+        <button
+          className="lk"
+          disabled={
+            off || busy !== null || !filtered.some((m) => disabledByModel[m.modelId] !== "model")
+          }
+          onClick={() =>
+            void disable({
+              kind: "models",
+              ids: filtered
+                .filter((m) => disabledByModel[m.modelId] !== "model")
+                .map((m) => m.modelId),
+            })
+          }
+        >
+          {q === "" ? "全部停用" : "停用筛选结果"}
+        </button>
       </div>
       <div className="mt">
         <div className="mr h">
+          <span>启用</span>
           <span>模型</span>
           <span>能力</span>
           <span className="num model-context">上下文</span>
@@ -687,14 +849,29 @@ function ProviderDetail({
         {filtered.map((m) => {
           const c = caps(m);
           const name = m.fields.displayName.value ?? m.modelId;
+          // 个别停用（disabled="model"）决定开关状态；服务商停用只让开关不可点，
+          // 逐个设置保留（ADR-0054 §4、效果图）。
+          const individuallyOff = disabledByModel[m.modelId] === "model";
+          const rowOff = off || disabledByModel[m.modelId] !== undefined;
           return (
-            <div className="mr" key={m.modelId}>
+            <div className={`mr${rowOff ? " off" : ""}`} key={m.modelId}>
+              <span className="tog">
+                <button
+                  role="switch"
+                  aria-checked={!individuallyOff}
+                  aria-label={`启用 ${m.modelId}`}
+                  className={`mcp-switch ${individuallyOff ? "" : "on"}`}
+                  disabled={off || busy !== null}
+                  onClick={() => void toggleModel(m.modelId, individuallyOff)}
+                />
+              </span>
               <span className="m">
                 <span title={m.modelId}>{name}</span>
                 {defaultKey === `${p.id}/${m.modelId}` && <span className="dflt">默认</span>}
                 {Object.values(m.fields).some((f) => f.userValue !== undefined) && (
                   <span className="edited">已编辑</span>
                 )}
+                {rowOff && <span className="tagm">已停用</span>}
               </span>
               <span className="cap">
                 {c.r && <b title="推理">R</b>}
@@ -722,12 +899,53 @@ function ProviderDetail({
         )}
       </div>
       <span className="fine">
-        R 推理 · I 图片输入。默认模型在「
+        R 推理 · I
+        图片输入。停用的模型不会出现在模型菜单里，刷新模型列表后仍保持停用；新出现的模型默认启用。默认模型在「
         <button type="button" className="lk" onClick={onOpenModels}>
           模型
         </button>
         」页修改。
       </span>
+
+      {confirm !== null && (
+        <ConfirmDialog
+          title={
+            confirm.target.kind === "provider"
+              ? `停用 ${p.id}？`
+              : `停用 ${confirm.target.ids.length} 个模型？`
+          }
+          body={
+            confirm.target.kind === "provider"
+              ? `停用后 ${p.id} 的 ${total} 个模型都不能再用，下面这些地方会受影响：`
+              : "停用后这些模型不能再用，下面这些地方会受影响："
+          }
+          extra={
+            <ul className="cflist">
+              {impactLines(
+                confirm.impact,
+                confirm.target.kind === "provider"
+                  ? `${p.id} 的模型`
+                  : confirm.target.ids.length === 1
+                    ? `${p.id}/${confirm.target.ids[0] ?? ""}`
+                    : "选中的模型",
+              ).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          }
+          note="配置和密钥都会保留，重新启用后恢复。"
+          confirmLabel="停用"
+          onClose={() => {
+            setConfirm(null);
+          }}
+          onConfirm={async () => {
+            const target = confirm.target;
+            if (target.kind === "provider") await applyProviderEnabled(false);
+            else await applyModelsEnabled(target.ids, false);
+            setConfirm(null);
+          }}
+        />
+      )}
 
       {editModel !== null && (
         <ModelSettingsDialog
@@ -928,6 +1146,8 @@ function ConfirmDialog({
   body,
   confirmLabel,
   danger = false,
+  extra,
+  note,
   onClose,
   onConfirm,
 }: {
@@ -935,6 +1155,10 @@ function ConfirmDialog({
   body: string;
   confirmLabel: string;
   danger?: boolean;
+  /** 正文下的补充内容（如停用确认的受影响列表） */
+  extra?: ReactNode;
+  /** 列表后的说明（配置保留等） */
+  note?: string;
   onClose: () => void;
   onConfirm: () => Promise<void>;
 }) {
@@ -945,6 +1169,8 @@ function ConfirmDialog({
         <div className="dh3">
           <b>{title}</b>
           <span>{body}</span>
+          {extra}
+          {note !== undefined && <span>{note}</span>}
         </div>
         <div className="df">
           <span className="sp" />

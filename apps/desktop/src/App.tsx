@@ -456,6 +456,39 @@ export function App({ host }: { host: DesktopHost }) {
     }
   };
 
+  /**
+   * ADR-0054 §4：重新启用被停用的服务商或模型，然后回到会话（已打开的会话
+   * 直接回到对话；未打开的仍留在卡片里由用户选模型）。
+   * 双重停用（disabled === "model" + providerDisabled）时同时恢复两者，
+   * 点一次即可用；单重停用只写对应的一项（读 Core 错误字段，不另判停用）。
+   */
+  const reenableModel = async (
+    id: string,
+    info: {
+      disabled?: "provider" | "model" | undefined;
+      disabledModel?: ModelRef | undefined;
+      providerDisabled?: boolean | undefined;
+    },
+  ) => {
+    const client = pool.get();
+    if (client === undefined || info.disabledModel === undefined) return;
+    const ref = info.disabledModel;
+    try {
+      if (info.disabled === "model") {
+        await client.provider.setModelsEnabled(ref.provider, [ref.model], true);
+        if (info.providerDisabled === true) {
+          await client.provider.setProviderEnabled(ref.provider, true);
+        }
+      } else {
+        await client.provider.setProviderEnabled(ref.provider, true);
+      }
+      conversations.acknowledgeReenabled(id);
+      await refresh();
+    } catch (error) {
+      setStartupError({ message: errMessage(error) });
+    }
+  };
+
   const newSession = async (workspace?: string) => {
     const target = workspace ?? effectiveWorkspace;
     if (target === null) return;
@@ -1080,6 +1113,8 @@ export function App({ host }: { host: DesktopHost }) {
                   workspace={selectedOpenError.workspace}
                   error={selectedOpenError.message}
                   attempted={selectedOpenError.model}
+                  disabled={selectedOpenError.disabled}
+                  disabledModel={selectedOpenError.disabledModel}
                   providersVersion={providersVersion}
                   onContinue={(model) =>
                     void selectSession(selectedId, selectedOpenError.workspace, false, model)
@@ -1087,6 +1122,13 @@ export function App({ host }: { host: DesktopHost }) {
                   onOpenProviders={() => {
                     setPage("providers");
                   }}
+                  onReenable={
+                    selectedOpenError.disabled === undefined
+                      ? undefined
+                      : () => {
+                          void reenableModel(selectedId, selectedOpenError);
+                        }
+                  }
                 />
               ) : (
                 <div className="nodecard">
