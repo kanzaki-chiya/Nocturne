@@ -110,6 +110,8 @@ export interface ProcessRunner {
  * "minimal" 模式的子进程环境白名单（mcp.md 第 2 节，参照 MCP SDK 的
  * getDefaultEnvironment()）：只含运行进程所必需的定位/临时/语言变量，
  * 不含任何凭据形变量。POSIX 追加 LC_* / XDG_* 前缀。
+ * 代理变量是网络环境而非凭据，原样传递（含地址里的用户名和密码）；
+ * 条目 env 显式设置的同名变量仍优先覆盖（现有覆盖规则不变）。
  */
 const MINIMAL_ENV_POSIX = new Set([
   "PATH",
@@ -122,6 +124,14 @@ const MINIMAL_ENV_POSIX = new Set([
   "LANG",
   "LC_ALL",
   "TZ",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
 ]);
 
 const MINIMAL_ENV_WIN32 = new Set([
@@ -160,6 +170,10 @@ const MINIMAL_ENV_WIN32 = new Set([
   "PROCESSOR_REVISION",
   "PSMODULEPATH",
   "SESSIONNAME",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
 ]);
 
 function minimalEnvironment(): Record<string, string> {

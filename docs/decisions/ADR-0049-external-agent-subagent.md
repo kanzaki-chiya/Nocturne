@@ -142,3 +142,9 @@ Gemini CLI、Qwen Code、Google Antigravity 等命令行工具自带 ACP（Agent
 ### 2026-10-07：第 2 步配置变更通知
 
 - 外部 agent 的保存、删除与启停成功后，RPC 在响应之前推送一次 `runtime.providersChanged`，复用技能启停的通知机制。桌面端由 `BackendPool` 的通知处理传播配置；不再为同一次变更显式重复调用 `propagateConfig`。这与 ADR-0047 最新修订中 MCP 变更“不推通知、页面显式传播”的方式不同，避免外部 agent 变更触发双重重载。
+
+### 2026-10-11：精简环境放行代理变量
+
+- 现象：外部 agent（ACP）与 MCP 服务器用 `envMode: "minimal"` 启动，白名单里没有代理变量。经由代理访问模型的场景连不上或超时，例如经 omp 调用的 MuseSpark，以及用户在外网经代理访问内网模型。
+- 决定：精简环境白名单加入 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`（POSIX 大小写两种写法都放行，Windows 按不区分大小写处理）。值原样传递，地址里带用户名和密码的情况也照传；条目 `env` 显式设置的同名变量仍优先覆盖。代理是网络环境而非凭据。
+- 这一规则同样适用于 MCP 服务器，主文档是 [mcp.md 第 2 节](../architecture/mcp.md#2-传输)，这里只写摘要并链接。

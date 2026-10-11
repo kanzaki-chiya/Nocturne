@@ -119,3 +119,91 @@ describe("spawnPipe 的协议消费者边界", () => {
     },
   );
 });
+
+describe("spawnPipe minimal 代理变量", () => {
+  async function withHostEnv(vars: Record<string, string | undefined>, fn: () => Promise<void>) {
+    const saved = new Map<string, string | undefined>();
+    for (const key of Object.keys(vars)) saved.set(key, process.env[key]);
+    try {
+      for (const [key, value] of Object.entries(vars)) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await fn();
+    } finally {
+      for (const [key, value] of saved) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
+  async function childEnv(
+    names: string[],
+    options?: { env?: Record<string, string> },
+  ): Promise<Record<string, string | null>> {
+    const script = `console.log(JSON.stringify(Object.fromEntries(${JSON.stringify(names)}.map((k) => [k, process.env[k] ?? null]))))`;
+    const proc = platform.process.spawnPipe(process.execPath, ["-e", script], {
+      envMode: "minimal",
+      ...options,
+    });
+    const output = await text(proc);
+    expect((await proc.wait()).code).toBe(0);
+    return JSON.parse(output) as Record<string, string | null>;
+  }
+
+  it("minimal 透传宿主代理变量（含用户名密码），仍隔离 *_KEY", async () => {
+    await withHostEnv(
+      {
+        HTTPS_PROXY: "http://user:pass@proxy.test:8080",
+        HTTP_PROXY: "http://proxy.test:8080",
+        ALL_PROXY: "socks5://proxy.test:1080",
+        NO_PROXY: "localhost,127.0.0.1",
+        NOCTURNE_TEST_FAKE_KEY: "secret",
+      },
+      async () => {
+        const env = await childEnv([
+          "HTTPS_PROXY",
+          "HTTP_PROXY",
+          "ALL_PROXY",
+          "NO_PROXY",
+          "NOCTURNE_TEST_FAKE_KEY",
+        ]);
+        expect(env.HTTPS_PROXY).toBe("http://user:pass@proxy.test:8080");
+        expect(env.HTTP_PROXY).toBe("http://proxy.test:8080");
+        expect(env.ALL_PROXY).toBe("socks5://proxy.test:1080");
+        expect(env.NO_PROXY).toBe("localhost,127.0.0.1");
+        expect(env.NOCTURNE_TEST_FAKE_KEY).toBeNull();
+      },
+    );
+  });
+
+  it("env 显式同名变量覆盖宿主值", async () => {
+    await withHostEnv({ HTTPS_PROXY: "http://host.test:8080" }, async () => {
+      const env = await childEnv(["HTTPS_PROXY"], {
+        env: { HTTPS_PROXY: "http://override.test:9090" },
+      });
+      expect(env.HTTPS_PROXY).toBe("http://override.test:9090");
+    });
+  });
+
+  it.runIf(process.platform !== "win32")("POSIX 小写代理变量同样透传", async () => {
+    await withHostEnv(
+      {
+        http_proxy: "http://proxy.test:8080",
+        https_proxy: "http://proxy.test:8443",
+        all_proxy: "socks5://proxy.test:1080",
+        no_proxy: "localhost",
+      },
+      async () => {
+        const env = await childEnv(["http_proxy", "https_proxy", "all_proxy", "no_proxy"]);
+        expect(env.http_proxy).toBe("http://proxy.test:8080");
+        expect(env.https_proxy).toBe("http://proxy.test:8443");
+        expect(env.all_proxy).toBe("socks5://proxy.test:1080");
+        expect(env.no_proxy).toBe("localhost");
+      },
+    );
+  });
+});

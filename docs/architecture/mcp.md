@@ -51,7 +51,7 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 | `args` | 参数数组，原样传递 |
 | `env` | 显式传给该服务器的变量，叠加在**白名单默认环境**之上（见下）。值中的 `${NAME}` 启动时从 Nocturne 进程环境展开；引用的变量不存在时展开为空字符串并记警告（`mcp_env_missing`）。**禁止内联凭据**：与 `providers` 条目同规则，env 值只应引用环境变量名（`${NAME}` 形式），出现疑似凭据字面量的字段按 `config_credential_rejected` 拒绝该层文件——见 config.md 第 2 节的既有约定扩展 |
 
-**子进程环境 = 白名单 + `env` 覆盖**：MCP 服务器默认**不继承** Nocturne 的完整进程环境——第三方服务器（`npx` 拉起的包等）不该默认拿到 `NOCTURNE_API_KEY`、`ANTHROPIC_API_KEY` 这类 Provider 凭据。白名单参照 SDK `getDefaultEnvironment()` 的平台基线：`PATH`、`HOME`/`USERPROFILE`、`APPDATA`、`SystemRoot`/`SYSTEMDRIVE`、`TEMP`/`TMP`、`ComSpec`、`TERM`、`LANG`/`LC_*`、`NODE_*` 之外不含任何 `*_KEY`/`*_TOKEN`/`*_SECRET` 形变量；用户要传更多变量必须经 `env` 显式声明（值可用 `${NAME}` 引用宿主环境）。这与 Hook 不同：Hook 是用户自己写的本地脚本，继承完整环境（hooks.md 第 2 节）。
+**子进程环境 = 白名单 + `env` 覆盖**：MCP 服务器默认**不继承** Nocturne 的完整进程环境——第三方服务器（`npx` 拉起的包等）不该默认拿到 `NOCTURNE_API_KEY`、`ANTHROPIC_API_KEY` 这类 Provider 凭据。白名单参照 SDK `getDefaultEnvironment()` 的平台基线：`PATH`、`HOME`/`USERPROFILE`、`APPDATA`、`SystemRoot`/`SYSTEMDRIVE`、`TEMP`/`TMP`、`ComSpec`、`TERM`、`LANG`/`LC_*`、`NODE_*`，以及代理变量 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`（POSIX 大小写两种写法都放行，Windows 按不区分大小写处理），之外不含任何 `*_KEY`/`*_TOKEN`/`*_SECRET` 形变量；用户要传更多变量必须经 `env` 显式声明（值可用 `${NAME}` 引用宿主环境）。代理是网络环境而非凭据：值原样传递，地址里带用户名和密码的情况也照传；条目 `env` 显式设置的同名变量仍优先覆盖宿主值。这与 Hook 不同：Hook 是用户自己写的本地脚本，继承完整环境（hooks.md 第 2 节）。
 | `cwd` | 服务器工作目录；缺省会话 `cwd`。相对路径按 `workspaceRoot` 解析 |
 | `enabled` | 缺省 `true`；`false` 时跳过该服务器（保留配置便于切换） |
 | `startupTimeoutMs` | spawn + initialize + tools/list 的超时，默认 15000 |
