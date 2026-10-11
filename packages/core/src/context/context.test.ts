@@ -160,6 +160,20 @@ describe("buildContext", () => {
     expect(names).toEqual(["system", "tools", "instructions", "environment", "history"]);
   });
 
+  it("系统提示词包含回合结束前检查最后一段规则，子会话覆盖 basePrompt 时不包含", () => {
+    const main = buildContext(baseInput());
+    expect(main.request.system[0]?.text).toContain("check your last paragraph");
+
+    // 子会话通过 basePrompt 注入子代理提示（subagent.md 第 8 节），不包含主会话的结束检查规则
+    const child = buildContext(
+      baseInput({
+        basePrompt:
+          "你是一个子代理，由父代理派生来完成一项独立任务。\n完成后必须调用 finish 工具提交结果。",
+      }),
+    );
+    expect(child.request.system[0]?.text).not.toContain("check your last paragraph");
+  });
+
   it("assistant + tool 条目转为成对消息", () => {
     const history: HistoryEntry[] = [
       {
