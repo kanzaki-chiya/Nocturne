@@ -58,8 +58,15 @@ export interface RulePolicyOptions {
   externalCredentialPaths?:
     | { lexical?: readonly string[] | undefined; resolved?: readonly string[] | undefined }
     | undefined;
-  /** Grant 集合：session 数组由 gate 就地追加（policy 读取活引用），project 为只读快照 */
-  grants?: { session?: Grant[]; project?: readonly Grant[] } | undefined;
+  /** Grant 集合：每次判定时实时读取（传数组、store 或 getter，不传快照） */
+  grants?:
+    | {
+        session?:
+          readonly Grant[] | { list(): readonly Grant[] } | (() => readonly Grant[]) | undefined;
+        project?:
+          readonly Grant[] | { list(): readonly Grant[] } | (() => readonly Grant[]) | undefined;
+      }
+    | undefined;
   /**
    * 命令行允许（permissions.md 5.3）：最终判定为 ask 的调用提升为 allow。
    * 不覆盖 deny，不绕过校验与工具边界。
@@ -153,8 +160,15 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     ...numberByOrigin(options.rules ?? []),
   ];
   const untrusted = numberByOrigin(options.untrustedRules ?? []);
-  const sessionGrants = options.grants?.session;
-  const projectGrants = options.grants?.project ?? [];
+  const grantsOpt = options.grants;
+  function resolveGrants(
+    source: readonly Grant[] | { list(): readonly Grant[] } | (() => readonly Grant[]) | undefined,
+  ): readonly Grant[] {
+    if (source === undefined) return [];
+    if (typeof source === "function") return source();
+    if (typeof source === "object" && "list" in source) return source.list();
+    return source;
+  }
 
   // 内置硬拒绝路径集（词法 + 真实路径两组，规范化后比对）
   const protectedLexical = new Set(
@@ -342,8 +356,10 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     }
 
     if (action === "ask" && skipApprovals !== true) {
+      const sessionGrants = resolveGrants(grantsOpt?.session);
+      const projectGrants = resolveGrants(grantsOpt?.project);
       const sessionHit =
-        sessionGrants !== undefined ? matchGrant(sessionGrants, s, caseSensitive) : undefined;
+        grantsOpt?.session !== undefined ? matchGrant(sessionGrants, s, caseSensitive) : undefined;
       const projectHit =
         sessionHit === undefined ? matchGrant(projectGrants, s, caseSensitive) : undefined;
       const grant = sessionHit ?? projectHit;

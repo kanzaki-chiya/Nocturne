@@ -1188,7 +1188,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
     // 权限策略：预设 + 分层规则 + Grant 集合；setPermissionPreset 重建
     const sessionGrants: Grant[] = [];
-    const projectGrants = ws?.grants.list() ?? [];
     const autoApproveAsk = options.permissions?.autoApproveAsk === true;
     // 凭据索引的内置硬拒绝（provider-setup.md 第 4 节）：词法路径与
     // realpath 后的真实路径都进集合（junction/符号链接不能绕过）
@@ -1230,7 +1229,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           resolved: [credentialsIndexResolved],
         },
         externalCredentialPaths: { lexical: externalPaths, resolved: externalResolved },
-        grants: { session: sessionGrants, project: projectGrants },
+        grants: {
+          session: sessionGrants,
+          ...(ws?.grants !== undefined ? { project: ws.grants } : {}),
+        },
         autoApproveAsk,
       });
     let policy = buildPolicy(session.state().config.permissionPreset);

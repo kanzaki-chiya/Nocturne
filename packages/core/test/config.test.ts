@@ -18,6 +18,7 @@ import {
 import type { Grant } from "../src/protocol/index.js";
 import { parseConfigFile } from "../src/config/schema.js";
 import { mergeLayers } from "../src/config/merge.js";
+import { createPolicyGate, createRulePolicy } from "../src/permission/index.js";
 
 let root: string;
 let home: string;
@@ -446,6 +447,174 @@ describe("Grant 持久化", () => {
     const ws = await rc.forWorkspace(workspace);
     expect(ws.grants.list()).toEqual([]);
     expect(ws.resolved.warnings.some((w) => w.includes("授权文件"))).toBe(true);
+    await fs.rm(rc.grantsDir, { recursive: true, force: true });
+  });
+
+  it("subagent 授权写入后重新加载仍然生效（含其他合法条目）", async () => {
+    await fs.rm(path.join(home, "grants"), { recursive: true, force: true });
+    const rc = await load();
+    const ws = await rc.forWorkspace(workspace);
+    const subagent: Grant = {
+      kind: "subagent",
+      target: "external:omp",
+      createdAt: "2026-10-11T00:00:00Z",
+    };
+    const shell: Grant = {
+      kind: "shell",
+      target: "git status",
+      createdAt: "2026-10-11T00:00:00Z",
+    };
+    await ws.grants.add(subagent);
+    await ws.grants.add(shell);
+    expect(ws.grants.list()).toEqual([subagent, shell]);
+
+    const rc2 = await load();
+    const ws2 = await rc2.forWorkspace(workspace);
+    expect(ws2.grants.list()).toEqual([subagent, shell]);
+    await fs.rm(rc.grantsDir, { recursive: true, force: true });
+  });
+
+  it("同一会话选 allow_project 后同目标直接放行，不发 permission.requested", async () => {
+    await fs.rm(path.join(home, "grants"), { recursive: true, force: true });
+    const rc = await load();
+    const ws = await rc.forWorkspace(workspace);
+    const policy = createRulePolicy({
+      workspaceRoot: await platform.resolveReal(workspace),
+      caseSensitive: platform.caseSensitivePaths,
+      preset: "default",
+      grants: { session: [], project: ws.grants },
+    });
+    const events: { type: string; payload: { requestId?: string } }[] = [];
+    const gate = createPolicyGate(policy, {
+      interactive: true,
+      grants: { session: [], project: ws.grants },
+      caseSensitive: platform.caseSensitivePaths,
+      newRequestId: (callId) => `req-${callId}`,
+    });
+    const turn = {
+      turnId: "t1",
+      events: {
+        emit: (type: string, payload: unknown) => {
+          events.push({ type, payload: payload as { requestId?: string } });
+          return Promise.resolve();
+        },
+        emitEphemeral: () => undefined,
+      },
+    } as never;
+    const subject = [{ kind: "subagent" as const, target: "external:omp" }];
+    const signal = new AbortController().signal;
+    const first = gate.check(subject, "c1", signal, turn);
+    await gate.respond?.("req-c1", { decision: "allow", remember: "project" });
+    const firstOutcome = await first;
+    expect(firstOutcome.decision.action).toBe("allow");
+    expect(events.filter((e) => e.type === "permission.requested")).toHaveLength(1);
+
+    const second = await gate.check(subject, "c2", signal, turn);
+    expect(second.decision.action).toBe("allow");
+    expect(second.decision.source).toBe("grant");
+    expect(events.filter((e) => e.type === "permission.requested")).toHaveLength(1);
+
+    // 新会话重新加载同样放行
+    const rc2 = await load();
+    const ws2 = await rc2.forWorkspace(workspace);
+    expect(ws2.grants.list()).toEqual([
+      { kind: "subagent", target: "external:omp", createdAt: expect.any(String) },
+    ]);
+    const policy2 = createRulePolicy({
+      workspaceRoot: await platform.resolveReal(workspace),
+      caseSensitive: platform.caseSensitivePaths,
+      preset: "default",
+      grants: { project: ws2.grants },
+    });
+    const again = policy2.evaluate(subject);
+    expect(again.decision.action).toBe("allow");
+    expect(again.decision.source).toBe("grant");
+    await fs.rm(rc.grantsDir, { recursive: true, force: true });
+  });
+
+  it("混有未知 kind 条目时其余照常生效并警告一次", async () => {
+    await fs.rm(path.join(home, "grants"), { recursive: true, force: true });
+    const rc = await load();
+    const canonical = platform.paths.canonicalize(await platform.resolveReal(workspace));
+    const p = path.join(rc.grantsDir, `${workspaceKey(canonical)}.json`);
+    const goodShell: Grant = {
+      kind: "shell",
+      target: "git status",
+      createdAt: "2026-10-11T00:00:00Z",
+    };
+    const goodEdit: Grant = {
+      kind: "edit",
+      target: "Z:/ws/a.txt",
+      createdAt: "2026-10-11T00:00:00Z",
+    };
+    await fs.mkdir(rc.grantsDir, { recursive: true });
+    await fs.writeFile(
+      p,
+      JSON.stringify({
+        version: 1,
+        workspaceRoot: await platform.resolveReal(workspace),
+        grants: [
+          goodShell,
+          { kind: "unknown", target: "x", createdAt: "2026-10-11T00:00:00Z" },
+          goodEdit,
+        ],
+      }),
+    );
+    const ws = await rc.forWorkspace(workspace);
+    expect(ws.grants.list()).toEqual([goodShell, goodEdit]);
+    expect(ws.resolved.warnings.filter((w) => w.includes("授权文件"))).toHaveLength(1);
+    await fs.rm(rc.grantsDir, { recursive: true, force: true });
+  });
+
+  it("损坏文件 add 前先备份，原内容不被覆盖", async () => {
+    await fs.rm(path.join(home, "grants"), { recursive: true, force: true });
+    const rc = await load();
+    const canonical = platform.paths.canonicalize(await platform.resolveReal(workspace));
+    const p = path.join(rc.grantsDir, `${workspaceKey(canonical)}.json`);
+    await fs.mkdir(rc.grantsDir, { recursive: true });
+    await fs.writeFile(p, "broken-original");
+    const ws = await rc.forWorkspace(workspace);
+    expect(ws.grants.list()).toEqual([]);
+
+    const grant: Grant = {
+      kind: "subagent",
+      target: "external:omp",
+      createdAt: "2026-10-11T00:00:00Z",
+    };
+    await ws.grants.add(grant);
+    const entries = await fs.readdir(rc.grantsDir);
+    const backups = entries.filter((n) => n.includes(".corrupt-") && n.endsWith(".json"));
+    expect(backups).toHaveLength(1);
+    const backupName = backups[0];
+    if (backupName === undefined) throw new Error("expected corrupt backup");
+    const backupContent = await fs.readFile(path.join(rc.grantsDir, backupName), "utf8");
+    expect(backupContent).toBe("broken-original");
+    const current = JSON.parse(await fs.readFile(p, "utf8")) as {
+      version: number;
+      grants: Grant[];
+    };
+    expect(current.grants).toEqual([grant]);
+    await fs.rm(rc.grantsDir, { recursive: true, force: true });
+  });
+
+  it("重复 add 同 kind+target 不追加也不重写文件", async () => {
+    await fs.rm(path.join(home, "grants"), { recursive: true, force: true });
+    const rc = await load();
+    const ws = await rc.forWorkspace(workspace);
+    const grant: Grant = {
+      kind: "subagent",
+      target: "external:omp",
+      createdAt: "2026-10-11T00:00:00Z",
+    };
+    await ws.grants.add(grant);
+    const canonical = platform.paths.canonicalize(await platform.resolveReal(workspace));
+    const p = path.join(rc.grantsDir, `${workspaceKey(canonical)}.json`);
+    const before = await fs.readFile(p, "utf8");
+    const beforeStat = await fs.stat(p);
+    await ws.grants.add({ ...grant, createdAt: "2026-10-12T00:00:00Z" });
+    expect(ws.grants.list()).toEqual([grant]);
+    expect(await fs.readFile(p, "utf8")).toBe(before);
+    expect((await fs.stat(p)).mtimeMs).toBe(beforeStat.mtimeMs);
     await fs.rm(rc.grantsDir, { recursive: true, force: true });
   });
 });

@@ -10,11 +10,10 @@ import {
   REASONING_EFFORT_ORDER,
   PERMISSION_PRESET_NAMES,
   parseCompactionThreshold,
+  subjectKindSchema,
 } from "../protocol/index.js";
 import type { ConfigFile, ExternalAgentConfig, McpServerEntry } from "./types.js";
 import { ConfigError } from "./errors.js";
-
-const subjectKindSchema = z.enum(["read", "edit", "shell", "network", "mcp", "subagent"]);
 
 export const externalAgentSchema = z.object({
   // (?![\s\S]) 要求真实字符串末尾，不接受 $ 可匹配的末尾换行。

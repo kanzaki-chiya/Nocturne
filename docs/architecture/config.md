@@ -227,15 +227,7 @@ CLI 注入无状态的 `createAcpConnector(platform)`。Core 从当前合并配�
 
 ## 4. Grant 的持久化
 
-用户在权限确认中选择"在此项目中始终允许"时，生成的是**项目级 Grant**——它不是配置，而是运行期积累的授权记录，因此不写入 `config.json`：
-
-- 位置：`<NOCTURNE_HOME>/grants/<workspaceKey>.json`。`workspaceKey` = 工作区真实路径的规范化形式（含盘符），经非字母数字字符替换为 `_` 后截取，前缀带短散列防冲突；文件内同时记录 `workspaceRoot` 原文用于校验与诊断。
-- 内容：`{ version, workspaceRoot, grants: Grant[] }`；Grant 的形状与匹配语义见 [permissions.md](permissions.md) 第 5.4 节。
-- 写入：整文件原子替换（临时文件 + rename）。
-- 损坏或版本不符的 Grant 文件：忽略并警告，不阻塞会话；丢失授权的后果只是重新询问。
-- 会话级 Grant 不落盘，随会话关闭失效（sessions.md 第 6 节的"不可恢复"表）。
-
-Grant 文件的读写由 `config` 完成（它是"按工作区存放的用户数据"的拥有者），权限层只面对内存中的 Grant 集合——保持权限层零 I/O。
+项目 Grant 是运行期积累的授权记录（不是配置，不写入 `config.json`），按工作区存放在 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`，形状、匹配、坏条目跳过与损坏备份规则见 [permissions.md](permissions.md) 第 5.4 节。
 
 ## 5. 环境变量层
 

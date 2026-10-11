@@ -45,8 +45,11 @@ const assistantTimingSchema = z.object({
   durationMs: z.number().nonnegative(),
 });
 
+/** 权限主体的 kind（含 subagent；Grant 与规则共用，config 不再维护第二份枚举） */
+export const subjectKindSchema = z.enum(["read", "edit", "shell", "network", "mcp", "subagent"]);
+
 const permissionSubjectSchema = z.object({
-  kind: z.enum(["read", "edit", "shell", "network", "mcp", "subagent"]),
+  kind: subjectKindSchema,
   target: z.string(),
   detail: z.string().optional(),
   resolved: z.string().optional(),
