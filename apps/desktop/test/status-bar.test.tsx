@@ -1,4 +1,9 @@
-import { createSessionView } from "@nocturne/core/protocol";
+import {
+  createSessionView,
+  type AssistantEntry,
+  type AssistantTiming,
+  type Usage,
+} from "@nocturne/core/protocol";
 import type { ContextSummary, RpcSession } from "@nocturne/rpc/client";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +19,11 @@ import { presetOptions } from "../src/choice-info";
 import type { SessionControls } from "../src/session-controls";
 
 afterEach(cleanup);
+
+function must<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("缺少元素");
+  return value;
+}
 
 const context: ContextSummary = {
   report: {
@@ -452,5 +462,210 @@ describe("MCP 未连接标记", () => {
     expect(screen.getByRole("tooltip").textContent).toContain("连接断开");
     rendered.rerender(<StatusBar {...state} view={{ ...state.view, mcpServers: {} }} />);
     expect(screen.queryByRole("button", { name: /MCP 未连接/ })).toBeNull();
+  });
+});
+
+describe("状态栏速度段", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const live = (messageId: string, text: string) => ({
+    kind: "assistant" as const,
+    messageId,
+    turnId: "t1",
+    text,
+    reasoning: "",
+  });
+  const done = (
+    messageId: string,
+    extra: { usage: Usage; timing?: AssistantTiming },
+  ): AssistantEntry => ({
+    kind: "assistant" as const,
+    key: `a:${messageId}`,
+    turnId: "t1",
+    messageId,
+    seq: 3,
+    time: "2026-10-11T00:00:00.000Z",
+    text: "x",
+    reasoning: "",
+    toolCalls: [],
+    model: { provider: "fixture", model: "one" },
+    finishReason: "stop" as const,
+    ...extra,
+  });
+  const speed = () => document.querySelector(".status-speed");
+
+  it("流式期间显示 ~N tok/s 与估算中提示，结束后按计时换算并给出明细", () => {
+    vi.useFakeTimers({ now: 0, toFake: ["Date", "setInterval", "clearInterval"] });
+    const state = fixture();
+    const base = state.view;
+    const rendered = render(<StatusBar {...state} />);
+    expect(speed()).toBeNull();
+    rendered.rerender(
+      <StatusBar
+        {...state}
+        view={{ ...base, live: { assistants: [live("m1", "a")], tools: [] } }}
+      />,
+    );
+    // 首个增量后不足 0.5 秒不显示
+    expect(speed()).toBeNull();
+    const text = "word ".repeat(400);
+    act(() => {
+      vi.setSystemTime(2000);
+    });
+    rendered.rerender(
+      <StatusBar
+        {...state}
+        view={{ ...base, live: { assistants: [live("m1", text)], tools: [] } }}
+      />,
+    );
+    expect(speed()?.textContent).toMatch(/^~\d+ tok\/s$/);
+    expect(speed()?.querySelector(".status-speed-live")).not.toBeNull();
+    fireEvent.mouseEnter(must(speed()));
+    const tip = screen.getByRole("tooltip");
+    expect(tip.textContent).toContain("估算中");
+    expect(tip.textContent).toContain("已用 2.0s");
+    fireEvent.mouseLeave(must(speed()));
+
+    act(() => {
+      vi.setSystemTime(5000);
+    });
+    rendered.rerender(
+      <StatusBar
+        {...state}
+        view={{
+          ...base,
+          entries: [
+            done("m1", {
+              usage: { inputTokens: 10, outputTokens: 300, reasoningTokens: 100 },
+              timing: { ttftMs: 1000, durationMs: 4000 },
+            }),
+          ],
+        }}
+      />,
+    );
+    // 300 ÷ (4.0 − 1.0) 秒
+    expect(speed()?.textContent).toBe("100 tok/s");
+    expect(speed()?.querySelector(".status-speed-live")).toBeNull();
+    fireEvent.focus(must(speed()));
+    const detail = screen.getByRole("tooltip").textContent;
+    for (const part of [
+      "输出300 tokens",
+      "其中推理100 tokens",
+      "TTFT1.0s",
+      "生成用时3.0s",
+      "请求总耗时4.0s",
+      "上一步 · 速度 = 输出 ÷ 生成用时",
+    ])
+      expect(detail).toContain(part);
+    fireEvent.keyDown(must(speed()), { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("没有计时时退回客户端测得的用时；不足 0.5 秒不显示", () => {
+    vi.useFakeTimers({ now: 0, toFake: ["Date", "setInterval", "clearInterval"] });
+    const state = fixture();
+    const base = state.view;
+    const rendered = render(<StatusBar {...state} />);
+    rendered.rerender(
+      <StatusBar
+        {...state}
+        view={{ ...base, live: { assistants: [live("m1", "a")], tools: [] } }}
+      />,
+    );
+    act(() => {
+      vi.setSystemTime(2000);
+    });
+    rendered.rerender(
+      <StatusBar
+        {...state}
+        view={{ ...base, entries: [done("m1", { usage: { inputTokens: 1, outputTokens: 50 } })] }}
+      />,
+    );
+    expect(speed()?.textContent).toBe("25 tok/s");
+
+    rendered.rerender(
+      <StatusBar
+        {...state}
+        view={{ ...base, live: { assistants: [live("m2", "b")], tools: [] } }}
+      />,
+    );
+    act(() => {
+      vi.setSystemTime(2300);
+    });
+    rendered.rerender(
+      <StatusBar
+        {...state}
+        view={{
+          ...base,
+          entries: [
+            done("m2", {
+              usage: { inputTokens: 1, outputTokens: 50 },
+              timing: { ttftMs: 100, durationMs: 400 },
+            }),
+          ],
+        }}
+      />,
+    );
+    expect(speed()).toBeNull();
+  });
+
+  it("切换会话后隐藏，直到新会话首次生成；打开时已在流式的消息不计", () => {
+    vi.useFakeTimers({ now: 0, toFake: ["Date", "setInterval", "clearInterval"] });
+    const state = fixture();
+    const base = state.view;
+    const rendered = render(<StatusBar {...state} />);
+    rendered.rerender(
+      <StatusBar
+        {...state}
+        view={{ ...base, live: { assistants: [live("m1", "a")], tools: [] } }}
+      />,
+    );
+    act(() => {
+      vi.setSystemTime(2000);
+    });
+    rendered.rerender(
+      <StatusBar
+        {...state}
+        view={{ ...base, entries: [done("m1", { usage: { inputTokens: 1, outputTokens: 50 } })] }}
+      />,
+    );
+    expect(speed()).not.toBeNull();
+
+    const other = { ...state.api, id: "session-two" } as unknown as RpcSession;
+    const midway = { ...base, live: { assistants: [live("x1", "already")], tools: [] } };
+    rendered.rerender(<StatusBar {...state} session={other} view={midway} />);
+    expect(speed()).toBeNull();
+    act(() => {
+      vi.setSystemTime(4000);
+    });
+    rendered.rerender(
+      <StatusBar
+        {...state}
+        session={other}
+        view={{ ...base, live: { assistants: [live("x1", "already more text")], tools: [] } }}
+      />,
+    );
+    expect(speed()).toBeNull();
+
+    rendered.rerender(
+      <StatusBar
+        {...state}
+        session={other}
+        view={{ ...base, live: { assistants: [live("x2", "new")], tools: [] } }}
+      />,
+    );
+    act(() => {
+      vi.setSystemTime(5000);
+    });
+    rendered.rerender(
+      <StatusBar
+        {...state}
+        session={other}
+        view={{ ...base, live: { assistants: [live("x2", "new text")], tools: [] } }}
+      />,
+    );
+    expect(speed()?.textContent).toMatch(/^~\d+ tok\/s$/);
   });
 });

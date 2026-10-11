@@ -15,6 +15,13 @@ import { unavailableMcpServers, type UnavailableMcpServer } from "./mcp-status";
 import { abbreviateHome } from "./paths";
 import { ChoiceMenu } from "./Menu";
 import type { SessionControls } from "./session-controls";
+import {
+  describeStepSpeed,
+  formatSeconds,
+  trackStepSpeed,
+  type SpeedDisplay,
+  type StepSpeed,
+} from "./speed";
 import "./status-bar.css";
 
 export type StatusPanel = "context";
@@ -276,6 +283,122 @@ function McpBadge({
   );
 }
 
+/**
+ * 速度状态随会话重置；打开会话时已在流式的消息不追踪（没有它的首个增量时刻）。
+ * view 是原地更新的可变对象，状态在渲染时按视图推进，流式期间每秒重渲一次。
+ */
+function useStepSpeed(session: RpcSession, view: SessionView): SpeedDisplay | undefined {
+  const ref = useRef<
+    { session: RpcSession; ignore: Set<string>; state?: StepSpeed | undefined } | undefined
+  >(undefined);
+  if (ref.current?.session !== session)
+    ref.current = {
+      session,
+      ignore: new Set(view.live.assistants.map((a) => a.messageId)),
+    };
+  const current = ref.current;
+  const now = Date.now();
+  current.state = trackStepSpeed(current.state, view, now, current.ignore);
+  const live = current.state !== undefined && current.state.ended === undefined;
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!live) return;
+    const timer = setInterval(() => {
+      tick((n) => n + 1);
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [live, session]);
+  return describeStepSpeed(current.state, now);
+}
+
+const tokens = (n: number) => `${number.format(n)} tokens`;
+
+/** 速度段：悬停或聚焦弹出这一步的明细，弹出方式与 MCP 未连接标记一致 */
+function SpeedBadge({ speed }: { speed: SpeedDisplay | undefined }) {
+  const [open, setOpen] = useState(false);
+  const tipId = useId();
+  if (speed === undefined) return null;
+  const d = speed.detail;
+  const rows: [string, string][] =
+    d === undefined
+      ? []
+      : [
+          ...(d.outputTokens !== undefined
+            ? [["输出", tokens(d.outputTokens)] as [string, string]]
+            : []),
+          ...(d.reasoningTokens !== undefined
+            ? [["其中推理", tokens(d.reasoningTokens)] as [string, string]]
+            : []),
+          ...(d.ttftMs !== undefined
+            ? [["TTFT", formatSeconds(d.ttftMs)] as [string, string]]
+            : []),
+          ...(d.generationMs !== undefined
+            ? [["生成用时", formatSeconds(d.generationMs)] as [string, string]]
+            : []),
+          ...(d.durationMs !== undefined
+            ? [["请求总耗时", formatSeconds(d.durationMs)] as [string, string]]
+            : []),
+        ];
+  return (
+    <span
+      className={`status-speed${speed.estimated ? " status-speed-est" : ""}`}
+      tabIndex={0}
+      aria-label={
+        speed.live
+          ? `生成速度约 ${speed.label.replace(/^~/, "")}，估算中`
+          : `上一步生成速度 ${speed.label}`
+      }
+      aria-describedby={open ? tipId : undefined}
+      onMouseEnter={() => {
+        setOpen(true);
+      }}
+      onMouseLeave={() => {
+        setOpen(false);
+      }}
+      onFocus={() => {
+        setOpen(true);
+      }}
+      onBlur={() => {
+        setOpen(false);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") setOpen(false);
+      }}
+    >
+      {speed.live && <span className="status-speed-live" aria-hidden="true" />}
+      <span className="mono">{speed.label}</span>
+      {open && (
+        <span id={tipId} role="tooltip" className="status-popover status-speed-tip">
+          {speed.live ? (
+            <dl>
+              <div>
+                <dt>估算中</dt>
+                <dd>已用 {formatSeconds(speed.elapsedMs ?? 0)}</dd>
+              </div>
+            </dl>
+          ) : (
+            <>
+              {rows.length > 0 && (
+                <dl>
+                  {rows.map(([label, value]) => (
+                    <div key={label}>
+                      <dt>{label}</dt>
+                      <dd>{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              <span className="status-note">上一步 · 速度 = 输出 ÷ 生成用时</span>
+            </>
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function StatusBar({
   session,
   view,
@@ -286,6 +409,7 @@ export function StatusBar({
   onManageProviders,
   onManageMcp,
 }: StatusBarProps) {
+  const speed = useStepSpeed(session, view);
   const [localPanel, setLocalPanel] = useState<StatusPanel | null>(null);
   const activePanel = panel === undefined ? localPanel : panel;
   const [openMenu, setOpenMenu] = useState<StatusMenu | null>(null);
@@ -579,6 +703,7 @@ export function StatusBar({
         <span className="status-cache" title="会话累计缓存读取 token / 输入 token">
           缓存 <span className="mono">{cache === null ? "—" : `${cache}%`}</span>
         </span>
+        <SpeedBadge speed={speed} />
         <span className={`status-turn${busy ? " status-turn-busy" : ""}`}>
           ● {STATUS_TEXT[view.status]}
           {view.currentTurn ? ` · Turn ${view.currentTurn.turnIndex}` : ""}

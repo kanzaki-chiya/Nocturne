@@ -27,6 +27,12 @@
   --a-add: rgba(132, 196, 154, 0.12);
   --a-del: rgba(229, 143, 144, 0.12);
   --a-warnBg: rgba(229, 189, 119, 0.08);
+  /* 用量页模型分类色：与强调色同一色调体系，不用纯红纯绿 */
+  --a-cat1: #a6a4e8;
+  --a-cat2: #83c4c8;
+  --a-cat3: #e5bd77;
+  --a-cat4: #d99ac9;
+  --a-cat5: #8fa6c9;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
@@ -53,6 +59,11 @@
     --a-add: rgba(40, 112, 68, 0.08);
     --a-del: rgba(173, 51, 64, 0.08);
     --a-warnBg: rgba(134, 91, 20, 0.06);
+    --a-cat1: #6255aa;
+    --a-cat2: #24727a;
+    --a-cat3: #9a6a1c;
+    --a-cat4: #a54d8f;
+    --a-cat5: #4f6585;
     color-scheme: light;
   }
 }
@@ -81,6 +92,11 @@
   --a-add: rgba(40, 112, 68, 0.08);
   --a-del: rgba(173, 51, 64, 0.08);
   --a-warnBg: rgba(134, 91, 20, 0.06);
+  --a-cat1: #6255aa;
+  --a-cat2: #24727a;
+  --a-cat3: #9a6a1c;
+  --a-cat4: #a54d8f;
+  --a-cat5: #4f6585;
   color-scheme: light;
 }
 :root[data-theme="dark"] {
@@ -106,6 +122,12 @@
   --a-add: rgba(132, 196, 154, 0.12);
   --a-del: rgba(229, 143, 144, 0.12);
   --a-warnBg: rgba(229, 189, 119, 0.08);
+  /* 用量页模型分类色：与强调色同一色调体系，不用纯红纯绿 */
+  --a-cat1: #a6a4e8;
+  --a-cat2: #83c4c8;
+  --a-cat3: #e5bd77;
+  --a-cat4: #d99ac9;
+  --a-cat5: #8fa6c9;
   color-scheme: dark;
 }
 

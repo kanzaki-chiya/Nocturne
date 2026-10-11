@@ -1,15 +1,28 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { RpcClient } from "@nocturne/rpc/client";
-import type { DailyUsageStats, ModelPricing, UsageStats } from "@nocturne/core/protocol";
+import type {
+  DailyUsageStats,
+  ModelPricing,
+  ModelUsageStats,
+  PerformanceGranularity,
+  UsageStats,
+} from "@nocturne/core/protocol";
+import {
+  DailyBars,
+  OTHER_COLOR,
+  PerformanceChart,
+  Sparkline,
+  formatDateTime,
+  formatLatency,
+  formatTokens,
+  formatTokensPerSecond,
+  modelPalette,
+  usageModelKey,
+} from "./UsageCharts";
 import "./usage.css";
 
 type Range = "7" | "30" | "all";
-export const formatUsageTokens = (n: number): string =>
-  n >= 100_000_000
-    ? `${Number((n / 100_000_000).toFixed(2))} 亿`
-    : n >= 10_000
-      ? `${Number((n / 10_000).toFixed(1))} 万`
-      : n.toLocaleString("en-US");
+export const formatUsageTokens = formatTokens;
 export const formatUsageCost = (n: number): string =>
   `$${n >= 100 ? Math.round(n).toLocaleString("en-US") : n.toFixed(2)}`;
 const dateKey = (d: Date): string =>
@@ -188,6 +201,101 @@ function Ranking({
   );
 }
 
+/** 首次 / 最近使用的相对时间 */
+export function relativeTime(iso: string, now: number = Date.now()): string {
+  const hours = (now - Date.parse(iso)) / 3_600_000;
+  if (hours < 1) return "不到 1 小时前";
+  if (hours < 24) return `${Math.round(hours)} 小时前`;
+  return `${Math.round(hours / 24)} 天前`;
+}
+const percentText = (v: number) => `${(v * 100).toFixed(1)}%`;
+const MODEL_COLUMNS = 12;
+
+function ModelDetail({
+  model: m,
+  granularity,
+}: {
+  model: ModelUsageStats;
+  granularity: PerformanceGranularity;
+}) {
+  const read = m.cacheReadTokens ?? 0;
+  const write = m.cacheWriteTokens ?? 0;
+  const latency = m.latency;
+  return (
+    <div className="usage-detail">
+      <div className="usage-metrics">
+        <div>
+          <h5>效率</h5>
+          <dl>
+            <div>
+              <dt>缓存命中率</dt>
+              <dd>{percentText(m.cacheHitRate)}</dd>
+            </div>
+            <div>
+              <dt>缓存节省</dt>
+              <dd>{m.cacheSavings === undefined ? "—" : percentText(m.cacheSavings)}</dd>
+            </div>
+          </dl>
+        </div>
+        <div>
+          <h5>延迟</h5>
+          <dl>
+            <div>
+              <dt>平均耗时</dt>
+              <dd>{formatLatency(latency?.avgDurationMs)}</dd>
+            </div>
+            <div>
+              <dt>平均 TTFT</dt>
+              <dd>{formatLatency(latency?.avgTtftMs)}</dd>
+            </div>
+            <div>
+              <dt>Tokens/s</dt>
+              <dd>{formatTokensPerSecond(latency?.tokensPerSecond)}</dd>
+            </div>
+          </dl>
+          <p className="usage-basis">
+            {latency === undefined
+              ? "没有带计时的请求"
+              : `基于 ${latency.samples.toLocaleString("en-US")} 次请求`}
+          </p>
+        </div>
+        <div>
+          <h5>Tokens</h5>
+          <dl>
+            <div>
+              <dt>未缓存输入</dt>
+              <dd>{formatTokens(Math.max(0, m.inputTokens - read - write))}</dd>
+            </div>
+            <div>
+              <dt>缓存读</dt>
+              <dd>{formatTokens(read)}</dd>
+            </div>
+            <div>
+              <dt>缓存写</dt>
+              <dd>{formatTokens(write)}</dd>
+            </div>
+            <div>
+              <dt>输出</dt>
+              <dd>{formatTokens(m.outputTokens)}</dd>
+            </div>
+          </dl>
+        </div>
+        {m.firstUsedAt !== undefined && m.lastUsedAt !== undefined && (
+          <div className="usage-seen">
+            首次使用{" "}
+            <span title={formatDateTime(new Date(m.firstUsedAt))}>
+              {relativeTime(m.firstUsedAt)}
+            </span>{" "}
+            · 最近使用{" "}
+            <span title={formatDateTime(new Date(m.lastUsedAt))}>{relativeTime(m.lastUsedAt)}</span>
+          </div>
+        )}
+      </div>
+      <PerformanceChart points={m.performance} granularity={granularity} />
+    </div>
+  );
+}
+
 /** 测试与静态视觉检查复用实际页面，不启动后台。 */
 export function UsageView({
   stats,
@@ -205,6 +313,17 @@ export function UsageView({
   onRefresh: () => void;
 }) {
   const [sort, setSort] = useState<"cost" | "input">("cost");
+  // 展开状态按模型键保存，切换范围时保留
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const palette = useMemo(() => modelPalette(stats?.models ?? []), [stats]);
+  const toggle = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
   const models = useMemo(
     () =>
       // 按费用：未计价排在已计价之后；同费用（含都未计价）按输入
@@ -355,6 +474,7 @@ export function UsageView({
               <Ranking title="常用工具" entries={stats.tools} />
               <Ranking title="常用技能" entries={stats.skills} />
             </div>
+            {range === "7" && <DailyBars daily={stats.daily} palette={palette} />}
             <section className="usage-section" aria-label="按模型">
               <div className="usage-section-head">
                 <h4>
@@ -389,6 +509,9 @@ export function UsageView({
                       <th>输出</th>
                       <th>缓存命中</th>
                       <th>预估费用</th>
+                      <th>Tokens/s</th>
+                      <th>TTFT</th>
+                      <th>近期速度</th>
                       <th>输入单价</th>
                       <th>缓存读 / 写</th>
                       <th>输出单价</th>
@@ -397,38 +520,93 @@ export function UsageView({
                   <tbody>
                     {models.map((m) => {
                       const p = prices(m.pricing);
-                      return (
-                        <tr key={`${m.model.provider}/${m.model.model}`}>
+                      const key = usageModelKey(m.model);
+                      const open = expanded.has(key);
+                      const onKey = (event: KeyboardEvent<HTMLTableRowElement>) => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        toggle(key);
+                      };
+                      return [
+                        <tr
+                          key={key}
+                          className="usage-model-row"
+                          tabIndex={0}
+                          aria-expanded={open}
+                          onClick={() => {
+                            toggle(key);
+                          }}
+                          onKeyDown={onKey}
+                        >
                           <th scope="row">
-                            <span>{m.model.model}</span>
-                            <small>{m.model.provider}</small>
-                            {m.pricingSource && (
-                              <small
-                                className="usage-price-source"
-                                title={m.pricingSource === "vendor" ? VENDOR_NOTE : undefined}
+                            <div className="usage-row-name">
+                              <svg
+                                className="usage-chev"
+                                width="8"
+                                height="10"
+                                viewBox="0 0 8 10"
+                                aria-hidden="true"
                               >
-                                {SOURCE[m.pricingSource]}
-                                {m.pricing?.tiers?.length ? " · 分档" : ""}
-                              </small>
-                            )}
+                                <path d="M1.5 1 L6 5 L1.5 9" />
+                              </svg>
+                              <i
+                                className="usage-swatch"
+                                data-color={palette.get(key) ?? OTHER_COLOR}
+                                style={{ background: palette.get(key) ?? OTHER_COLOR }}
+                                aria-hidden="true"
+                              />
+                              <div>
+                                <span>{m.model.model}</span>
+                                <small>{m.model.provider}</small>
+                                {m.pricingSource && (
+                                  <small
+                                    className="usage-price-source"
+                                    title={m.pricingSource === "vendor" ? VENDOR_NOTE : undefined}
+                                  >
+                                    {SOURCE[m.pricingSource]}
+                                    {m.pricing?.tiers?.length ? " · 分档" : ""}
+                                  </small>
+                                )}
+                              </div>
+                            </div>
                           </th>
                           <td>{m.turns}</td>
                           <td>{formatUsageTokens(m.inputTokens)}</td>
                           <td>{formatUsageTokens(m.outputTokens)}</td>
                           <td>{(m.cacheHitRate * 100).toFixed(1)}%</td>
                           <td>{m.pricing ? formatUsageCost(m.cost.total) : "—"}</td>
+                          <td
+                            className={m.latency?.tokensPerSecond === undefined ? "dim" : undefined}
+                          >
+                            {formatTokensPerSecond(m.latency?.tokensPerSecond)}
+                          </td>
+                          <td className={m.latency?.avgTtftMs === undefined ? "dim" : undefined}>
+                            {formatLatency(m.latency?.avgTtftMs)}
+                          </td>
+                          <td className="usage-spark-cell">
+                            <Sparkline points={m.performance} />
+                          </td>
                           {p.map((v, i) => (
                             <td key={i}>{v}</td>
                           ))}
-                        </tr>
-                      );
+                        </tr>,
+                        open && (
+                          <tr key={`${key}-detail`} className="usage-model-detail">
+                            <td colSpan={MODEL_COLUMNS}>
+                              <ModelDetail model={m} granularity={stats.performanceGranularity} />
+                            </td>
+                          </tr>
+                        ),
+                      ];
                     })}
                   </tbody>
                 </table>
               </div>
               {!models.length && <p className="usage-empty">这个时间范围内还没有模型用量</p>}
               <p className="usage-table-note">
-                单价为 USD / 每百万 token；缓存列为读取 / 写入，缺失缓存价按输入价估算。
+                Tokens/s 和 TTFT 只统计带计时的请求；旧版本的记录没有计时，显示「—」。单价为 USD /
+                每百万 token；缓存列为读取 / 写入，缺失缓存价按输入价估算。
                 {models.some((m) => m.pricingSource === "vendor") &&
                   `来源为「厂商价」的模型${VENDOR_NOTE}。`}
               </p>

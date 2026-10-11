@@ -95,6 +95,83 @@
 .status-turn-busy {
   color: var(--a-warning);
 }
+/* 速度段（ADR-0053 修订 2026-10-11）：弱化文字 + 等宽数字，流式期间前面一个跳动的强调色小点 */
+.status-speed {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  margin: 0 -6px;
+  border-radius: 5px;
+  cursor: default;
+  white-space: nowrap;
+}
+.status-speed:hover,
+.status-speed:focus-visible {
+  background: var(--a-raised);
+}
+.status-speed:focus-visible {
+  outline: 2px solid var(--a-accent);
+  outline-offset: 1px;
+}
+.status-speed .mono {
+  color: var(--a-secondary);
+}
+.status-speed-est .mono {
+  color: var(--a-muted);
+}
+.status-speed-live {
+  flex: 0 0 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--a-accent);
+  animation: status-speed-pulse 1.2s ease-in-out infinite;
+}
+@keyframes status-speed-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-speed-live {
+    animation: none;
+  }
+}
+.status-speed .status-speed-tip {
+  left: auto;
+  right: 0;
+  width: max-content;
+  min-width: 220px;
+  max-width: min(320px, 80vw);
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.status-speed-tip dl {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+.status-speed-tip dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+.status-speed-tip dt {
+  color: var(--a-muted);
+}
+.status-speed-tip dd {
+  margin: 0;
+  color: var(--a-text);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.status-speed-tip .status-note {
+  color: var(--a-faint);
+  font-size: 11px;
+}
 .status-mcp {
   position: relative;
   display: inline-flex;
@@ -358,6 +435,12 @@
  * 窄窗口让位顺序（ADR-0046 2026-10-05 修订第 4 条）：累计缓存命中 → 上下文进度条
  * → Shell → 模型名前的服务商前缀；模型名本身最后才省略。阈值按主区宽度。
  */
+/* 窄宽度时速度段最先隐藏（先于累计缓存命中） */
+@container (max-width: 980px) {
+  .status-speed {
+    display: none;
+  }
+}
 @container (max-width: 900px) {
   .status-cache {
     display: none;
