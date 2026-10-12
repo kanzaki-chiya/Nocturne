@@ -56,7 +56,7 @@ import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { copyText } from "./clipboard.js";
 import { composerWindow } from "./cursor.js";
 import { checkImage, createImageStore, droppedImage } from "./images.js";
-import { splitMarkdownBlocks } from "./markdown.js";
+import { renderAssistant, splitMarkdownBlocks, takeMarkdownBlocks } from "./markdown.js";
 import type { MouseSource } from "./mouse.js";
 import { createClickTracker } from "./click.js";
 import type { DialogMouseFrame } from "./components/dialog/mouse.js";
@@ -162,21 +162,22 @@ export function splitCompletedPrefix(entries: readonly ViewEntry[]): {
 export const splitTextBlocks = splitMarkdownBlocks;
 
 /**
- * 持久化助手条目 → 写入回滚区的块条目。只在落盘后写入，
- * 按字符位置记账（written），重绘时不重复追加。
+ * 持久化助手条目 → 写入回滚区的块条目。流式期间已写入的前缀按字符位置
+ * 记账（written），这里只切剩余部分；键含尝试序号与绝对偏移，晋升后不重发。
  */
 function assistantBlocks(
   entry: Extract<ViewEntry, { kind: "assistant" }>,
   written: Map<string, number>,
+  attempt: number,
 ): TranscriptItem[] {
   const from = Math.min(written.get(entry.messageId) ?? 0, entry.text.length);
   const { blocks } = splitMarkdownBlocks(entry.text.slice(from), true);
   written.set(entry.messageId, entry.text.length);
-  // 空消息补一行占位；中断消息补"（中断）"标记行
+  // 空消息补一行占位；流式已写满时仅中断消息还要补"（中断）"标记行
   if (blocks.length === 0 && (from === 0 || entry.finishReason === "aborted")) blocks.push("");
   let at = from;
   return blocks.map((text, i) => {
-    const key = `${entry.key}:@${at}`;
+    const key = `${entry.key}:try${attempt}:@${at}`;
     const bodyContinued = at > 0;
     at += text.length;
     return {
@@ -882,7 +883,33 @@ function SessionApp({
   const staticKeys = useRef(new Set<string>());
   /** 每条助手消息已写入回滚区的前缀长度（字符数），会话内跨流式/持久化保持；切换会话清零。 */
   const staticWritten = useRef(new Map<string, number>());
+  /** 同一 messageId 重发时递增键前缀，已作废的 Static 块保留而不与新块冲突。 */
+  const staticAttempts = useRef(new Map<string, number>());
   const sessionEpoch = useRef(0);
+  useEffect(() => {
+    if (fullscreen) return;
+    return session.subscribe((event) => {
+      if (event.type !== "provider.retry" || event.payload.discarded === undefined) return;
+      const { messageId } = event.payload.discarded;
+      const { attempt, maxAttempts } = event.payload;
+      if ((staticWritten.current.get(messageId) ?? 0) > 0) {
+        const key = `${sessionEpoch.current}:discarded:${messageId}:${attempt}`;
+        staticQueue.current.push({
+          kind: "header",
+          key,
+          lines: [
+            {
+              key,
+              text: `! 响应流中断，以上部分输出已作废，正在重试（${attempt}/${maxAttempts}）`,
+              dim: true,
+            },
+          ],
+        });
+      }
+      staticWritten.current.delete(messageId);
+      staticAttempts.current.set(messageId, attempt);
+    });
+  }, [session, fullscreen]);
   /** /resume 弹层的会话清单（打开弹层时拉取） */
   const [resumeList, setResumeList] = useState<readonly SessionSummary[] | undefined>(undefined);
   /** /resume 跨目录确认（foreign → 用户确认后带 allowForeign 重试） */
@@ -1436,6 +1463,7 @@ function SessionApp({
           } else {
             staticQueue.current.push(sep);
             staticWritten.current.clear();
+            staticAttempts.current.clear();
           }
           switched = true;
           pastes.reset(inputRef.current);
@@ -1571,6 +1599,7 @@ function SessionApp({
           staticQueue.current.push(sep);
           sessionEpoch.current++;
           staticWritten.current.clear();
+          staticAttempts.current.clear();
         }
         switched = true;
         setSession(res.session);
@@ -2821,8 +2850,33 @@ function SessionApp({
         }),
       ),
     ];
+    const completedLive = new Map<string, string>();
+    for (const assistant of view.live.assistants) {
+      const step = takeMarkdownBlocks(
+        assistant.text,
+        staticWritten.current.get(assistant.messageId) ?? 0,
+        false,
+      );
+      completedLive.set(assistant.messageId, step.tail);
+      const attempt = staticAttempts.current.get(assistant.messageId) ?? 0;
+      for (const part of step.parts) {
+        const key = `a:${assistant.messageId}:try${attempt}:@${part.offset}`;
+        staticEntries.push({
+          kind: "header",
+          key,
+          lines: renderAssistant(part.text, width, key, env.ascii, theme, part.offset > 0),
+        });
+      }
+      staticWritten.current.set(assistant.messageId, step.written);
+    }
     const staticBlocks = staticEntries.flatMap<TranscriptItem>((entry) =>
-      entry.kind === "assistant" ? assistantBlocks(entry, staticWritten.current) : [entry],
+      entry.kind === "assistant"
+        ? assistantBlocks(
+            entry,
+            staticWritten.current,
+            staticAttempts.current.get(entry.messageId) ?? 0,
+          )
+        : [entry],
     );
     for (const entry of staticBlocks) {
       const id = `${sessionEpoch.current}:${entry.key}`;
@@ -2831,6 +2885,16 @@ function SessionApp({
       staticQueue.current.push({ ...entry, key: id });
     }
     const { tail } = splitCompletedPrefix(view.entries);
+    const activityView: SessionView = {
+      ...view,
+      live: {
+        ...view.live,
+        assistants: view.live.assistants.map((a) => ({
+          ...a,
+          text: completedLive.get(a.messageId) ?? a.text,
+        })),
+      },
+    };
     const clientRows = (line: ClientLine): LaidLine[] => [
       { key: `client:${line.id}`, text: line.text, dim: true },
     ];
@@ -2845,7 +2909,7 @@ function SessionApp({
         ],
         clientRows,
       ).flat(),
-      ...layoutLive(view, width, env.ascii, reasoning, reasoningNow, false, theme, {
+      ...layoutLive(activityView, width, env.ascii, reasoning, reasoningNow, false, theme, {
         written: staticWritten.current,
       }),
       ...pendingLines.filter((line) => line.after >= view.entries.length).flatMap(clientRows),

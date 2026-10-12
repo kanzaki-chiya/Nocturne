@@ -110,8 +110,15 @@ async function waitFor(check: () => boolean): Promise<void> {
 }
 
 describe("退出保留回滚区", () => {
-  it("流式内容落盘后完整写入回滚区，退出不清屏", async () => {
-    const { runtime, session } = await openSession();
+  it("流式完成块晋升后仍追加后续内容，退出不清屏", async () => {
+    const { runtime, session } = await openSession([
+      [
+        { type: "text_delta", text: "第一段\n\n" },
+        { type: "wait", ms: 1000 },
+        { type: "text_delta", text: "第二段" },
+        { type: "finish", reason: "stop" },
+      ],
+    ]);
     const io = ttyPair();
     const done = runTui({ session }, runtime, {
       stdin: io.stdin,
@@ -121,7 +128,14 @@ describe("退出保留回滚区", () => {
       patchConsole: false,
     });
     await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
-    await session.submit({ text: "测试分段" });
+    const turn = session.submit({ text: "测试分段" });
+    await waitFor(() => io.stdoutChunks.join("").includes("第一段"));
+    expect(session.durableEvents().some((e) => e.type === "message.assistant")).toBe(false);
+    expect(io.stdoutChunks.join("")).not.toContain("第二段");
+    const afterBlock = io.stdoutChunks.length;
+    await turn;
+    await waitFor(() => io.stdoutChunks.slice(afterBlock).join("").includes("第二段"));
+    expect(io.stdoutChunks.slice(afterBlock).join("")).not.toContain("第一段");
     const output = io.stdoutChunks.join("");
     expect(output).toContain("第一段");
     expect(output).toContain("第二段");

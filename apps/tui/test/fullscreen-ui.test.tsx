@@ -305,14 +305,61 @@ describe("全屏界面", () => {
     await session.close();
   });
 
-  it("inline：落盘后完成块进入回滚区，长回复只留活动区末尾", async () => {
+  it("inline：空行完成块进入回滚区，长未完结块只留活动区末尾", async () => {
     const { runtime, session } = await sessionWithEffort();
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV, inline: true }),
     );
     expect(splitTextBlocks("甲\n\n乙", false)).toEqual({ blocks: ["甲\n\n"], tail: "乙" });
-    await session.submit({ text: "长回答" });
+    await pause(80);
+    const raw = internalSession(session);
+    await raw.emit("turn.started", { turnIndex: 1 }, { turnId: "turn" });
+    raw.emitEphemeral(
+      "message.assistant.delta",
+      {
+        messageId: "m",
+        kind: "text",
+        delta: "完成块\n\n",
+      },
+      { turnId: "turn" },
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("完成块"));
+    const tail = `长尾首行\n${"未完结行\n".repeat(40)}长尾末行`;
+    raw.emitEphemeral(
+      "message.assistant.delta",
+      {
+        messageId: "m",
+        kind: "text",
+        delta: tail,
+      },
+      { turnId: "turn" },
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("长尾末行"));
+    expect(lastFrame()).toContain("完成块");
+    expect(lastFrame()).not.toContain("长尾首行");
+    expect(session.durableEvents().some((e) => e.type === "message.assistant")).toBe(false);
+    await raw.emit(
+      "message.assistant",
+      {
+        messageId: "m",
+        model: { provider: "fake", model: "fake-model" },
+        content: [{ type: "text", text: `完成块\n\n${tail}\n\n完毕` }],
+        toolCalls: [],
+        finishReason: "stop",
+      },
+      { turnId: "turn" },
+    );
+    await raw.emit(
+      "turn.completed",
+      {
+        reason: "done",
+        steps: 1,
+        usage: { inputTokens: 0, outputTokens: 0 },
+      },
+      { turnId: "turn" },
+    );
     await waitFor(() => (lastFrame() ?? "").includes("完毕"));
+    expect(occurrences(lastFrame() ?? "", "完成块")).toBe(1);
     stdin.write("\x1b[5~");
     await pause(40);
     expect(lastFrame()).not.toContain("已向上翻阅");
@@ -320,7 +367,7 @@ describe("全屏界面", () => {
     await session.close();
   });
 
-  it.each([false, true])(
+  it.each([false])(
     "inline=%s：断流撤回完整 Markdown 块和工具增量，落盘后只保留新回复",
     async (inline) => {
       const { runtime, session } = await sessionWithEffort();
@@ -402,6 +449,93 @@ describe("全屏界面", () => {
       await session.close();
     },
   );
+
+  it.each([true, false])("inline：断流前已写入块=%s，重试块不冲突且不重复", async (written) => {
+    const { runtime, session } = await sessionWithEffort();
+    const { lastFrame, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, inline: true }),
+    );
+    await pause(80);
+    const raw = internalSession(session);
+    await raw.emit("turn.started", { turnIndex: 1 }, { turnId: "turn" });
+    raw.emitEphemeral(
+      "message.assistant.delta",
+      {
+        messageId: "m",
+        kind: "text",
+        delta: `${written ? "作废块\n\n" : ""}旧尾部`,
+      },
+      { turnId: "turn" },
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("旧尾部"));
+    raw.emitEphemeral(
+      "provider.retry",
+      {
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 1,
+        error: { kind: "network", message: "broken" },
+        discarded: { messageId: "m", callIds: [] },
+      },
+      { turnId: "turn" },
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("响应流中断，已丢弃部分输出"));
+    const hint = "! 响应流中断，以上部分输出已作废，正在重试（1/3）";
+    expect(lastFrame()).not.toContain("旧尾部");
+    if (written) {
+      expect(lastFrame()).toContain("作废块");
+      expect(lastFrame()).toContain(hint);
+    } else {
+      expect(lastFrame()).not.toContain("以上部分输出已作废");
+    }
+    // 同一 messageId、同样从偏移 0 写完整块；旧键不能吞掉新尝试。
+    const reply = "新回复完整块\n\n新回复尾部";
+    raw.emitEphemeral(
+      "message.assistant.delta",
+      {
+        messageId: "m",
+        kind: "text",
+        delta: reply,
+      },
+      { turnId: "turn" },
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("新回复完整块"));
+    await raw.emit(
+      "message.assistant",
+      {
+        messageId: "m",
+        model: { provider: "fake", model: "fake-model" },
+        content: [{ type: "text", text: reply }],
+        toolCalls: [],
+        finishReason: "stop",
+      },
+      { turnId: "turn" },
+    );
+    await raw.emit(
+      "turn.completed",
+      {
+        reason: "done",
+        steps: 1,
+        usage: { inputTokens: 0, outputTokens: 0 },
+      },
+      { turnId: "turn" },
+    );
+    await waitFor(() => !(lastFrame() ?? "").includes("已丢弃部分输出"));
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("旧尾部");
+    expect(occurrences(frame, "新回复完整块")).toBe(1);
+    expect(occurrences(frame, "新回复尾部")).toBe(1);
+    if (written) {
+      expect(occurrences(frame, "作废块")).toBe(1);
+      expect(occurrences(frame, hint)).toBe(1);
+      expect(frame.indexOf("作废块")).toBeLessThan(frame.indexOf(hint));
+      expect(frame.indexOf(hint)).toBeLessThan(frame.indexOf("新回复完整块"));
+    } else {
+      expect(frame).not.toContain("作废");
+    }
+    unmount();
+    await session.close();
+  });
 
   it("全屏：PgUp 翻阅出提示，Ctrl+End 回到底部提示消失", async () => {
     const { runtime, session } = await sessionWithEffort();
