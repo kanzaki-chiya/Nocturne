@@ -327,6 +327,52 @@ export async function loadConfig(
           merged.resolved.shellPath ?? merged.resolved.shell ?? "auto",
           saved.shellPath ?? saved.shell,
         ],
+        [
+          "notifications.enabled",
+          "notifications.enabled",
+          String(merged.resolved.notifications?.enabled ?? true),
+          saved.notifications?.enabled === undefined
+            ? undefined
+            : String(saved.notifications.enabled),
+        ],
+        [
+          "notifications.events.attention",
+          "notifications.events.attention",
+          String(merged.resolved.notifications?.events.attention ?? true),
+          saved.notifications?.events?.attention === undefined
+            ? undefined
+            : String(saved.notifications.events.attention),
+        ],
+        [
+          "notifications.events.error",
+          "notifications.events.error",
+          String(merged.resolved.notifications?.events.error ?? true),
+          saved.notifications?.events?.error === undefined
+            ? undefined
+            : String(saved.notifications.events.error),
+        ],
+        [
+          "notifications.events.done",
+          "notifications.events.done",
+          String(merged.resolved.notifications?.events.done ?? true),
+          saved.notifications?.events?.done === undefined
+            ? undefined
+            : String(saved.notifications.events.done),
+        ],
+        [
+          "notifications.doneAfterSeconds",
+          "notifications.doneAfterSeconds",
+          String(merged.resolved.notifications?.doneAfterSeconds ?? 60),
+          saved.notifications?.doneAfterSeconds === undefined
+            ? undefined
+            : String(saved.notifications.doneAfterSeconds),
+        ],
+        [
+          "notifications.sound",
+          "notifications.sound",
+          String(merged.resolved.notifications?.sound ?? true),
+          saved.notifications?.sound === undefined ? undefined : String(saved.notifications.sound),
+        ],
       ] as const
     ).map(([key, field, effective, value]) => {
       const origin =

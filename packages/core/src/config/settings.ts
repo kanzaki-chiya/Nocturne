@@ -49,6 +49,7 @@ const reservedFields = new Set([
   "shell",
   "shellPath",
   "compaction",
+  "notifications",
   "disabledProviders",
   "disabledModels",
 ]);
@@ -61,6 +62,14 @@ function stringList(value: unknown): string[] {
 }
 
 export function validateSettingsPatch(input: unknown): asserts input is SettingsPatch {
+  const NOTIFY_KEYS = [
+    "notifications.enabled",
+    "notifications.events.attention",
+    "notifications.events.error",
+    "notifications.events.done",
+    "notifications.doneAfterSeconds",
+    "notifications.sound",
+  ];
   if (
     typeof input !== "object" ||
     input === null ||
@@ -70,15 +79,19 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
         key !== "permissions.preset" &&
         key !== "permission.reviewer" &&
         !MODEL_ROLES.some((role) => key === `modelRoles.${role}`) &&
-        key !== "compaction.threshold",
+        key !== "compaction.threshold" &&
+        !NOTIFY_KEYS.includes(key),
     )
   ) {
     throw new TypeError(
-      "仅支持 permissions.preset、permission.reviewer、compaction.threshold 与 modelRoles.*；默认档位随默认模型经 setDefaultModel 保存",
+      "仅支持 permissions.preset、permission.reviewer、compaction.threshold、modelRoles.* 与 notifications.*；默认档位随默认模型经 setDefaultModel 保存",
     );
   }
   const patch = input as SettingsPatch;
   const preset = patch["permissions.preset"];
+  const attention = patch["notifications.events.attention"];
+  const error = patch["notifications.events.error"];
+  const done = patch["notifications.events.done"];
   parseConfigFile(
     {
       modelRoles: Object.fromEntries(
@@ -93,6 +106,35 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
       ...(preset !== null && preset !== undefined ? { permissions: { preset } } : {}),
       ...(patch["permission.reviewer"] != null
         ? { permission: { reviewer: patch["permission.reviewer"] } }
+        : {}),
+      ...(patch["notifications.enabled"] != null ||
+      attention != null ||
+      error != null ||
+      done != null ||
+      patch["notifications.doneAfterSeconds"] != null ||
+      patch["notifications.sound"] != null
+        ? {
+            notifications: {
+              ...(patch["notifications.enabled"] != null
+                ? { enabled: patch["notifications.enabled"] }
+                : {}),
+              ...(attention != null || error != null || done != null
+                ? {
+                    events: {
+                      ...(attention != null ? { attention } : {}),
+                      ...(error != null ? { error } : {}),
+                      ...(done != null ? { done } : {}),
+                    },
+                  }
+                : {}),
+              ...(patch["notifications.doneAfterSeconds"] != null
+                ? { doneAfterSeconds: patch["notifications.doneAfterSeconds"] }
+                : {}),
+              ...(patch["notifications.sound"] != null
+                ? { sound: patch["notifications.sound"] }
+                : {}),
+            },
+          }
         : {}),
     },
     "settings.json",
@@ -123,6 +165,49 @@ function configFields(data: SettingsData, warn?: (message: string) => void): Con
       result = { ...result, ...parseConfigFile({ [key]: value }, "settings.json") };
     } catch {
       warn?.(`settings.json 的 ${key} 无效，已忽略`);
+    }
+  }
+  if (Object.hasOwn(data, "notifications")) {
+    const notification = data.notifications;
+    if (typeof notification !== "object" || notification === null || Array.isArray(notification)) {
+      warn?.("settings.json 的 notifications 无效，已忽略");
+    } else {
+      const fields = notification as Record<string, unknown>;
+      for (const key of ["enabled", "doneAfterSeconds", "sound"] as const) {
+        if (!Object.hasOwn(fields, key)) continue;
+        try {
+          const parsed = parseConfigFile(
+            { notifications: { [key]: fields[key] } },
+            "settings.json",
+          );
+          result.notifications = { ...result.notifications, ...parsed.notifications };
+        } catch {
+          warn?.(`settings.json 的 notifications.${key} 无效，已忽略`);
+        }
+      }
+      if (Object.hasOwn(fields, "events")) {
+        const events = fields.events;
+        if (typeof events !== "object" || events === null || Array.isArray(events)) {
+          warn?.("settings.json 的 notifications.events 无效，已忽略");
+        } else {
+          const eventFields = events as Record<string, unknown>;
+          for (const key of ["attention", "error", "done"] as const) {
+            if (!Object.hasOwn(eventFields, key)) continue;
+            try {
+              const parsed = parseConfigFile(
+                { notifications: { events: { [key]: eventFields[key] } } },
+                "settings.json",
+              );
+              result.notifications = {
+                ...result.notifications,
+                events: { ...result.notifications?.events, ...parsed.notifications?.events },
+              };
+            } catch {
+              warn?.(`settings.json 的 notifications.events.${key} 无效，已忽略`);
+            }
+          }
+        }
+      }
     }
   }
   if (
@@ -347,6 +432,47 @@ export async function loadSettingsStore(
             if (preset === null) delete permissions.preset;
             else permissions.preset = preset;
             next.permissions = permissions;
+          }
+          const notifyEnabled = patch["notifications.enabled"];
+          const notifyAttention = patch["notifications.events.attention"];
+          const notifyError = patch["notifications.events.error"];
+          const notifyDone = patch["notifications.events.done"];
+          const notifyAfter = patch["notifications.doneAfterSeconds"];
+          const notifySound = patch["notifications.sound"];
+          if (
+            notifyEnabled !== undefined ||
+            notifyAttention !== undefined ||
+            notifyError !== undefined ||
+            notifyDone !== undefined ||
+            notifyAfter !== undefined ||
+            notifySound !== undefined
+          ) {
+            const raw = next.notifications;
+            const notifications: Record<string, unknown> =
+              typeof raw === "object" && raw !== null && !Array.isArray(raw)
+                ? { ...(raw as Record<string, unknown>) }
+                : {};
+            const rawEvents = notifications.events;
+            const events: Record<string, unknown> =
+              typeof rawEvents === "object" && rawEvents !== null && !Array.isArray(rawEvents)
+                ? { ...(rawEvents as Record<string, unknown>) }
+                : {};
+            if (notifyEnabled === null) delete notifications.enabled;
+            else if (notifyEnabled !== undefined) notifications.enabled = notifyEnabled;
+            if (notifyAttention === null) delete events.attention;
+            else if (notifyAttention !== undefined) events.attention = notifyAttention;
+            if (notifyError === null) delete events.error;
+            else if (notifyError !== undefined) events.error = notifyError;
+            if (notifyDone === null) delete events.done;
+            else if (notifyDone !== undefined) events.done = notifyDone;
+            if (Object.keys(events).length > 0) notifications.events = events;
+            else delete notifications.events;
+            if (notifyAfter === null) delete notifications.doneAfterSeconds;
+            else if (notifyAfter !== undefined) notifications.doneAfterSeconds = notifyAfter;
+            if (notifySound === null) delete notifications.sound;
+            else if (notifySound !== undefined) notifications.sound = notifySound;
+            if (Object.keys(notifications).length > 0) next.notifications = notifications;
+            else delete next.notifications;
           }
         });
       },

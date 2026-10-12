@@ -88,6 +88,8 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 流式输出中途失败时丢弃部分输出并重发的规则与客户端撤回行为见 [ADR-0055](decisions/ADR-0055-retry-after-partial-stream.md)。
 
+会话通知（三类事件、没在看才提醒、settings.json 通知偏好、判定放客户端）见 [ADR-0056](decisions/ADR-0056-session-notifications.md)。
+
 ## Roadmap
 
 [roadmap/roadmap.md](roadmap/roadmap.md)：阶段划分与验收标准。

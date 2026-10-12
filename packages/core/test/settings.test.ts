@@ -472,6 +472,130 @@ describe("ADR-0034 设置层", () => {
     await expect(runtime.updateSettings({ "permissions.preset": null })).rejects.toThrow("未注入");
     await expect(runtime.setDefaultModel("fake/m", null)).rejects.toThrow("未注入");
   });
+  it("通知偏好：缺省全开、逐字段合并、无效逐个忽略、补丁读写与 null 清除", async () => {
+    const defaults = await load();
+    expect(
+      defaults.describeSettings().filter((item) => item.key.startsWith("notifications.")),
+    ).toMatchObject([
+      { key: "notifications.enabled", effective: "true", source: "default", saved: undefined },
+      { key: "notifications.events.attention", effective: "true", source: "default" },
+      { key: "notifications.events.error", effective: "true", source: "default" },
+      { key: "notifications.events.done", effective: "true", source: "default" },
+      { key: "notifications.doneAfterSeconds", effective: "60", source: "default" },
+      { key: "notifications.sound", effective: "true", source: "default" },
+    ]);
+    expect(defaults.base.notifications).toEqual({
+      enabled: true,
+      events: { attention: true, error: true, done: true },
+      doneAfterSeconds: 60,
+      sound: true,
+    });
+    await json("settings.json", {
+      notifications: {
+        enabled: "yes",
+        events: { attention: false },
+        doneAfterSeconds: -5,
+        sound: "loud",
+      },
+      theme: "dark",
+    });
+    const loaded = await load();
+    expect(loaded.base.notifications).toEqual({
+      enabled: true,
+      events: { attention: false, error: true, done: true },
+      doneAfterSeconds: 60,
+      sound: true,
+    });
+    for (const key of ["enabled", "doneAfterSeconds", "sound"]) {
+      expect(loaded.base.warnings.join("\n")).toContain(`notifications.${key}`);
+    }
+    expect(loaded.getPreference("theme")).toBe("dark");
+    await json("settings.json", {
+      notifications: { enabled: false, events: { done: false }, doneAfterSeconds: 30 },
+    });
+    await json("config.json", { notifications: { events: { error: false }, sound: false } });
+    await mkdir(path.join(workspace, ".nocturne")).catch(() => undefined);
+    await writeFile(
+      path.join(workspace, ".nocturne", "config.json"),
+      JSON.stringify({ notifications: { doneAfterSeconds: 300 } }),
+    );
+    const layered = await load();
+    await layered.forWorkspace(workspace);
+    expect(layered.resolvedSettings(workspace).notifications).toEqual({
+      enabled: false,
+      events: { attention: true, error: false, done: false },
+      doneAfterSeconds: 30,
+      sound: false,
+    });
+    expect(
+      layered.describeSettings(workspace).find((item) => item.key === "notifications.sound"),
+    ).toMatchObject({ effective: "false", saved: undefined, source: "user", overridden: false });
+    await layered.setWorkspaceTrusted(workspace, true);
+    await layered.forWorkspace(workspace);
+    expect(layered.resolvedSettings(workspace).notifications?.doneAfterSeconds).toBe(300);
+    expect(
+      layered.describeSettings(workspace).find((item) => item.key === "notifications.enabled"),
+    ).toMatchObject({ effective: "false", saved: "false", source: "settings", overridden: false });
+    const before = await readSettings();
+    await expect(
+      layered.updateSettings({ "notifications.doneAfterSeconds": 1.5 }),
+    ).rejects.toThrow();
+    await expect(
+      layered.updateSettings({ "notifications.enabled": "yes" } as never),
+    ).rejects.toThrow();
+    expect(await readSettings()).toEqual(before);
+    await layered.updateSettings({
+      "notifications.events.attention": true,
+      "notifications.doneAfterSeconds": 180,
+      "notifications.sound": false,
+    });
+    expect(await readSettings()).toMatchObject({
+      notifications: {
+        enabled: false,
+        events: { done: false, attention: true },
+        doneAfterSeconds: 180,
+        sound: false,
+      },
+    });
+    await layered.updateSettings({ "notifications.events.done": null });
+    expect((await readSettings()).notifications).toMatchObject({
+      events: { attention: true },
+    });
+    await layered.updateSettings({
+      "notifications.enabled": null,
+      "notifications.events.attention": null,
+      "notifications.doneAfterSeconds": null,
+      "notifications.sound": null,
+    });
+    expect((await readSettings()).notifications ?? {}).toEqual({});
+  });
+  it("通知事件无效字段单独忽略、容器无效不影响其他字段、未知字段写回保留", async () => {
+    await json("settings.json", {
+      notifications: {
+        enabled: false,
+        events: { attention: "yes", error: false, done: 1, future: true },
+        sound: false,
+        future: "keep",
+      },
+    });
+    const config = await load();
+    expect(config.base.notifications).toMatchObject({
+      enabled: false,
+      events: { attention: true, error: false, done: true },
+      sound: false,
+    });
+    expect(config.base.warnings.join("\n")).toContain("notifications.events.attention");
+    expect(config.base.warnings.join("\n")).toContain("notifications.events.done");
+    await config.updateSettings({ "notifications.enabled": null });
+    expect((await readSettings()).notifications).toMatchObject({
+      events: { future: true },
+      future: "keep",
+    });
+    await json("settings.json", { notifications: { events: [], enabled: false } });
+    const malformed = await load();
+    expect(malformed.base.notifications?.enabled).toBe(false);
+    expect(malformed.base.warnings.join("\n")).toContain("notifications.events");
+  });
   it.each(PERMISSION_PRESET_NAMES)("%s 对 settings edit 至少 ask（read-only deny）", (preset) => {
     const policy = createRulePolicy({
       workspaceRoot: root,

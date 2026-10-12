@@ -74,7 +74,13 @@ export interface MergeResult {
       | "permissions.preset"
       | "compaction.threshold"
       | "permission.reviewer"
-      | `modelRoles.${ModelRole}`,
+      | `modelRoles.${ModelRole}`
+      | "notifications.enabled"
+      | "notifications.events.attention"
+      | "notifications.events.error"
+      | "notifications.events.done"
+      | "notifications.doneAfterSeconds"
+      | "notifications.sound",
       LayerKind
     >
   >;
@@ -310,6 +316,12 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     mcpServers: [],
     externalAgents: [],
     warnings: [],
+    notifications: {
+      enabled: true,
+      events: { attention: true, error: true, done: true },
+      doneAfterSeconds: 60,
+      sound: true,
+    },
   };
   const providers = new Map<string, ProviderEntryConfig>();
   const mcpServers = new Map<
@@ -382,6 +394,41 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     if (file.compaction?.threshold !== undefined) {
       out.compactionThreshold = file.compaction.threshold;
       origins["compaction.threshold"] = kind;
+    }
+    const notify = file.notifications;
+    if (notify !== undefined) {
+      const current = out.notifications ?? {
+        enabled: true,
+        events: { attention: true, error: true, done: true },
+        doneAfterSeconds: 60,
+        sound: true,
+      };
+      const events = { ...current.events };
+      if (notify.enabled !== undefined) {
+        current.enabled = notify.enabled;
+        origins["notifications.enabled"] = kind;
+      }
+      if (notify.events?.attention !== undefined) {
+        events.attention = notify.events.attention;
+        origins["notifications.events.attention"] = kind;
+      }
+      if (notify.events?.error !== undefined) {
+        events.error = notify.events.error;
+        origins["notifications.events.error"] = kind;
+      }
+      if (notify.events?.done !== undefined) {
+        events.done = notify.events.done;
+        origins["notifications.events.done"] = kind;
+      }
+      if (notify.doneAfterSeconds !== undefined) {
+        current.doneAfterSeconds = notify.doneAfterSeconds;
+        origins["notifications.doneAfterSeconds"] = kind;
+      }
+      if (notify.sound !== undefined) {
+        current.sound = notify.sound;
+        origins["notifications.sound"] = kind;
+      }
+      out.notifications = { ...current, events };
     }
     if (file.reasoningEffort !== undefined) out.reasoningEffort = file.reasoningEffort;
     // ADR-0034：所有 shell 声明均在配置合并链里处理。

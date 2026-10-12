@@ -268,6 +268,20 @@ const configFileSchema = z.object({
     })
     .optional(),
   modelsDev: z.literal(false).optional(),
+  notifications: z
+    .object({
+      enabled: z.boolean().optional(),
+      events: z
+        .object({
+          attention: z.boolean().optional(),
+          error: z.boolean().optional(),
+          done: z.boolean().optional(),
+        })
+        .optional(),
+      doneAfterSeconds: z.number().int().nonnegative().optional(),
+      sound: z.boolean().optional(),
+    })
+    .optional(),
   model: z.string().min(1).optional(),
   modelRoles: z
     .object({

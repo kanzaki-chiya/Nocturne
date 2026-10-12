@@ -192,6 +192,21 @@ export interface JevReviewerConfig {
 export type SecurityReviewerConfig =
   { backend: "model"; model: ModelRef } | { backend: "off" } | JevReviewerConfig;
 
+/** 通知偏好（ADR-0056）：settings.json 白名单段；与 config.json 共用 schema 逐字段合并 */
+export interface NotificationsConfig {
+  enabled?: boolean | undefined;
+  events?:
+    | {
+        attention?: boolean | undefined;
+        error?: boolean | undefined;
+        done?: boolean | undefined;
+      }
+    | undefined;
+  /** 完成提醒阈值（秒）：非负整数；缺省 60 */
+  doneAfterSeconds?: number | undefined;
+  sound?: boolean | undefined;
+}
+
 /** 各层配置字段共用的 schema（config.md 第 2 节）；程序从不改写 config.json */
 export interface ConfigFile {
   skills?: SkillsConfig | undefined;
@@ -200,6 +215,7 @@ export interface ConfigFile {
   /** 只接受用户级声明；重复 name 保留首条并警告。 */
   externalAgents?: ExternalAgentConfig[] | undefined;
   compaction?: { threshold?: string | number | undefined } | undefined;
+  notifications?: NotificationsConfig | undefined;
   /** false 时只使用本地 models.dev 数据，不联网刷新 */
   modelsDev?: false | undefined;
   model?: string | undefined;
@@ -237,6 +253,10 @@ export interface ConfigFile {
 export interface ResolvedConfig {
   modelRoles?: Partial<Record<ModelRole, string | undefined>> | undefined;
   compactionThreshold?: string | number | undefined;
+  /** 通知偏好（ADR-0056）：六个字段逐层合并，未声明时取缺省 */
+  notifications?: Required<{ enabled: boolean; doneAfterSeconds: number; sound: boolean }> & {
+    events: Required<{ attention: boolean; error: boolean; done: boolean }>;
+  };
   providerThinkingWarnings?: string[] | undefined;
   /** Runtime 以 provider_auth_conflict 发出的鉴权配置警告。 */
   providerAuthWarnings?: string[] | undefined;
@@ -511,7 +531,13 @@ export interface SettingItem {
     | "shell"
     | "defaultModel"
     | `modelRoles.${ModelRole}`
-    | "compaction.threshold";
+    | "compaction.threshold"
+    | "notifications.enabled"
+    | "notifications.events.attention"
+    | "notifications.events.error"
+    | "notifications.events.done"
+    | "notifications.doneAfterSeconds"
+    | "notifications.sound";
   effective: string | undefined;
   source: "default" | "setup" | "settings" | "user" | "project" | "env" | "cli";
   saved: string | undefined;
@@ -527,6 +553,12 @@ export type SettingsPatch = Partial<{
   "compaction.threshold": string | number | null;
   "permissions.preset": PermissionPresetName | null;
   "permission.reviewer": SecurityReviewerConfig | null;
+  "notifications.enabled": boolean | null;
+  "notifications.events.attention": boolean | null;
+  "notifications.events.error": boolean | null;
+  "notifications.events.done": boolean | null;
+  "notifications.doneAfterSeconds": number | null;
+  "notifications.sound": boolean | null;
 }>;
 
 /**
