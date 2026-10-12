@@ -24,6 +24,7 @@
  */
 import { useApp, useStdin, useStdout } from "ink";
 import { useCallback, useEffect, useRef } from "react";
+import { FOCUS_ENABLE } from "./mouse.js";
 
 export const ENTER_ALT = "\x1b[?1049h\x1b[2J\x1b[H";
 export const EXIT_ALT = "\x1b[?1049l";
@@ -155,7 +156,7 @@ export function useAltScreen(enabled = true): AltScreen {
         // resume，否则 resume 的 stdin.setRawMode 报 EPIPE）
         await s.resume();
         stdin.read(0);
-        stdout.write(EXIT_ALT);
+        stdout.write(EXIT_ALT + FOCUS_ENABLE);
         inAltRef.current = false;
         openRef.current = false;
         // 回到主屏后提交页面关闭状态，并等 Ink 把主界面帧真正 flush 进

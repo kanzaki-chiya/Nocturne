@@ -28,7 +28,15 @@ export function ThemeApp(props: AppProps): React.JSX.Element {
     createElement(App, { ...props, onThemeChange: setId }),
   );
 }
-import { MOUSE_DISABLE, MOUSE_ENABLE, wrapMouseStdin, type MouseSource } from "./mouse.js";
+import {
+  FOCUS_DISABLE,
+  FOCUS_ENABLE,
+  MOUSE_DISABLE,
+  MOUSE_ENABLE,
+  wrapMouseStdin,
+  type FocusSource,
+  type MouseSource,
+} from "./mouse.js";
 import { captureConsole } from "./console-capture.js";
 
 /** 复位全部文字属性：退出路径统一收尾，保证不把颜色留给后续的 shell */
@@ -47,6 +55,8 @@ export interface TuiOptions {
   inline?: boolean | undefined;
   /** 测试注入：自定义鼠标事件源（缺省时包装 stdin 解析 SGR 序列） */
   mouse?: MouseSource | undefined;
+  /** 测试注入：终端焦点源（缺省时来自 stdin 包装的焦点回送 CSI I/O） */
+  focus?: FocusSource | undefined;
   /** 测试注入：系统剪贴板 spawn */
   copySpawn?: typeof spawn | undefined;
   /** 测试注入：图片剪贴板读取器及平台标识 */
@@ -107,72 +117,104 @@ export async function runTui(
     // 先复位 SGR：ConPTY 下漏出的颜色会被 shell 当成默认色，整个标签页一直带色
     stdout.write(`${SGR_RESET}${sessionSavedLine(sessionId)}\n`);
   };
-  // 全屏：stdin 进 Ink 前先摘除 SGR 鼠标序列（跨块截断由包装层拼接）
-  let mouseSource = options.mouse;
-  let mouseStdin: ReturnType<typeof wrapMouseStdin> | undefined;
-  let stdinForInk = stdin;
-  if (!inline) {
-    mouseStdin = wrapMouseStdin(stdin);
-    stdinForInk = mouseStdin.stdin;
-    mouseSource ??= mouseStdin.mouse;
-  }
+  // stdin 预处理：进 Ink 前摘除 SGR 鼠标序列与焦点回送（?1004 的 CSI I/O），
+  // 跨块截断由包装层拼接。全屏与 --inline 都一样走这一层——焦点报告两者都开。
+  const mouseStdin = wrapMouseStdin(stdin);
+  const stdinForInk = mouseStdin.stdin;
+  const mouseSource = options.mouse ?? mouseStdin.mouse;
+  const focusSource = options.focus ?? mouseStdin.focus;
   // 全屏退出时把对话按当前宽度铺成纯文本行打回主屏（App 填实现）
   const transcriptOut: { current?: (() => string[]) | undefined } = {};
   // 全屏从 Ink 标准 log-update 取得整帧，自有输出层做终端差异写出；inline 保持原路径。
   // 鼠标上报与备用屏切换绑在同一笔写出：进备用屏后开、回主屏前关。
+  // 焦点报告亦随进出：全屏页切换的 ?1049l 复位点（alt-screen.ts）与 unmount 终帧
+  // 同走 beforeExitAlt——?1004l 与回主屏原子同笔，异常/页面路径同样关闭。
+  const beforeExitFocus = `${SGR_RESET}${MOUSE_DISABLE}${FOCUS_DISABLE}`;
   const cursorOut = createCursorStream(
     stdout,
     inline
-      ? {}
-      : { fullscreen: true, afterEnterAlt: MOUSE_ENABLE, beforeExitAlt: SGR_RESET + MOUSE_DISABLE },
+      ? { afterEnterAlt: FOCUS_ENABLE, beforeExitAlt: FOCUS_DISABLE }
+      : {
+          fullscreen: true,
+          afterEnterAlt: MOUSE_ENABLE + FOCUS_ENABLE,
+          beforeExitAlt: beforeExitFocus,
+        },
   );
   // Windows Terminal: suspendTerminal 的 pauseInput 不应撤销控制台读请求。
   const unref = stdin.unref.bind(stdin);
   stdin.unref = () => stdin;
+  // 焦点报告（ADR-0056 §3）：启动即开（终端不支持时收不到回送，按「没在看」处理），
+  // 所有退出路径关闭（见 disableFocus 的各调用点）。序列是终端级的，对主屏同样安全。
+  stdout.write(FOCUS_ENABLE);
+  let focusOn = true;
+  const disableFocus = (): void => {
+    if (!focusOn) return;
+    focusOn = false;
+    try {
+      stdout.write(FOCUS_DISABLE);
+    } catch {
+      /* 进程退出路径忽略 */
+    }
+  };
   // 全屏：console 输出（含 Node 进程警告）改为对话区提示行，不用 Ink 的 patchConsole
   //（它把文字写在帧上方，备用屏里会压进输入行）；inline 仍由 Ink 写进回滚区
   const patchConsole = options.patchConsole ?? true;
   const captured = !inline && patchConsole ? captureConsole() : undefined;
-  const app = render(
-    createElement(
-      CursorClaimsContext.Provider,
-      { value: cursorOut.claims },
-      createElement(ThemeApp, {
-        session: "session" in entry ? entry.session : undefined,
-        setup: "setup" in entry ? entry.setup : options.setup,
-        runtime,
-        env: detectTuiEnv(),
-        switchSession: options.switchSession,
-        newSession: options.newSession,
-        provider: options.provider,
-        inline,
-        mouse: mouseSource,
-        writeOob: cursorOut.writeOob,
-        onOutputLayout: cursorOut.setLayout,
-        copySpawn: options.copySpawn,
-        clipboard: options.clipboard,
-        clipboardPlatform: options.clipboardPlatform,
-        transcriptOut,
-        onSessionId: (id: string) => {
-          sessionId = id;
-        },
-        onExitResult: (code: number, message?: string) => {
-          exitCode = code;
-          exitMessage = message;
-        },
-        consoleLines: captured?.lines,
-      }),
-    ),
-    {
-      stdout: cursorOut.stream,
-      stdin: stdinForInk,
-      stderr,
-      exitOnCtrlC: false,
-      incrementalRendering: inline,
-      alternateScreen: !inline,
-      patchConsole: inline && patchConsole,
-    },
-  );
+  const cleanup = (): void => {
+    disableFocus();
+    cursorOut.stop();
+    captured?.restore();
+    mouseStdin.dispose();
+    stdin.unref = unref;
+    unref();
+  };
+  let app: ReturnType<typeof render>;
+  try {
+    app = render(
+      createElement(
+        CursorClaimsContext.Provider,
+        { value: cursorOut.claims },
+        createElement(ThemeApp, {
+          session: "session" in entry ? entry.session : undefined,
+          setup: "setup" in entry ? entry.setup : options.setup,
+          runtime,
+          env: detectTuiEnv(),
+          switchSession: options.switchSession,
+          newSession: options.newSession,
+          provider: options.provider,
+          inline,
+          mouse: mouseSource,
+          focus: focusSource,
+          writeOob: cursorOut.writeOob,
+          onOutputLayout: cursorOut.setLayout,
+          copySpawn: options.copySpawn,
+          clipboard: options.clipboard,
+          clipboardPlatform: options.clipboardPlatform,
+          transcriptOut,
+          onSessionId: (id: string) => {
+            sessionId = id;
+          },
+          onExitResult: (code: number, message?: string) => {
+            exitCode = code;
+            exitMessage = message;
+          },
+          consoleLines: captured?.lines,
+        }),
+      ),
+      {
+        stdout: cursorOut.stream,
+        stdin: stdinForInk,
+        stderr,
+        exitOnCtrlC: false,
+        incrementalRendering: inline,
+        alternateScreen: !inline,
+        patchConsole: inline && patchConsole,
+      },
+    );
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
   const exitProcess = options.exitProcess ?? ((code: number) => process.exit(code));
   const onCrash = (err: unknown): void => {
     try {
@@ -180,6 +222,7 @@ export async function runTui(
     } catch {
       /* 已经在卸载 */
     }
+    disableFocus();
     announce();
     const text = err instanceof Error ? (err.stack ?? err.message) : String(err);
     stderr.write(`${text}\n`);
@@ -188,24 +231,21 @@ export async function runTui(
   };
   process.on("uncaughtException", onCrash);
   process.on("unhandledRejection", onCrash);
-  // 兜底：无论哪条路径离开进程，鼠标上报都关一遍（序列对主屏同样安全）
-  if (!inline) {
-    process.once("exit", () => {
-      try {
-        stdout.write(MOUSE_DISABLE + SGR_RESET);
-      } catch {
-        /* 进程退出路径忽略 */
-      }
-    });
-  }
+  // 兜底：无论哪条路径离开进程，鼠标上报（仅全屏开启）与焦点报告都关一遍
+  //（序列对主屏同样安全）
+  const onProcessExit = (): void => {
+    try {
+      stdout.write((inline ? "" : MOUSE_DISABLE) + FOCUS_DISABLE + SGR_RESET);
+    } catch {
+      /* 进程退出路径忽略 */
+    }
+  };
+  process.once("exit", onProcessExit);
   try {
     await app.waitUntilExit();
   } finally {
-    cursorOut.stop();
-    captured?.restore();
-    mouseStdin?.dispose();
-    stdin.unref = unref;
-    unref();
+    cleanup();
+    process.off("exit", onProcessExit);
     process.off("uncaughtException", onCrash);
     process.off("unhandledRejection", onCrash);
   }

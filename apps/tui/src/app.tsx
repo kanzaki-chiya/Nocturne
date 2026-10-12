@@ -57,7 +57,7 @@ import { copyText } from "./clipboard.js";
 import { composerWindow } from "./cursor.js";
 import { checkImage, createImageStore, droppedImage } from "./images.js";
 import { renderAssistant, splitMarkdownBlocks, takeMarkdownBlocks } from "./markdown.js";
-import type { MouseSource } from "./mouse.js";
+import type { FocusSource, MouseSource } from "./mouse.js";
 import { createClickTracker } from "./click.js";
 import type { DialogMouseFrame } from "./components/dialog/mouse.js";
 import { createPasteStore } from "./paste.js";
@@ -131,6 +131,7 @@ import { useSessionView } from "./session-view.js";
 import { useGenerationSpeed } from "./speed.js";
 import stringWidth from "string-width";
 import { useReasoning } from "./reasoning.js";
+import { useNotifyBell } from "./notify.js";
 import { useTheme, type ThemeId } from "./theme.js";
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 import type { ConsoleLines } from "./console-capture.js";
@@ -225,6 +226,8 @@ export interface AppProps {
   inline?: boolean | undefined;
   /** 全屏模式的鼠标事件源（runTui 的 stdin 包装提供；测试可注入假源） */
   mouse?: MouseSource | undefined;
+  /** 终端焦点态（ADR-0056 §3；runTui 的 stdin 包装记录焦点回送，测试可注入） */
+  focus?: FocusSource | undefined;
   /** Ink 帧外写出通道（OSC 52 序列经 cursor.ts 代理直落 stdout） */
   writeOob?: ((data: string) => boolean) | undefined;
   /** 全屏输出层取得当前视口边界与页面身份。 */
@@ -686,6 +689,7 @@ export function App({
   setup,
   inline,
   mouse,
+  focus,
   writeOob,
   onOutputLayout,
   copySpawn,
@@ -741,6 +745,7 @@ export function App({
       provider={provider}
       inline={inline === true}
       mouse={mouse}
+      focus={focus}
       writeOob={writeOob}
       onOutputLayout={onOutputLayout}
       copySpawn={copySpawn}
@@ -763,6 +768,7 @@ function SessionApp({
   provider,
   inline = false,
   mouse,
+  focus,
   writeOob,
   onOutputLayout,
   copySpawn,
@@ -782,6 +788,7 @@ function SessionApp({
   /** 普通屏幕（行内）模式；缺省 false = 全屏 */
   inline?: boolean | undefined;
   mouse?: MouseSource | undefined;
+  focus?: FocusSource | undefined;
   writeOob?: ((data: string) => boolean) | undefined;
   onOutputLayout?: ((conversation: number, page: string) => void) | undefined;
   copySpawn?: typeof spawn | undefined;
@@ -814,6 +821,8 @@ function SessionApp({
   // /resume 切换：session 变为新会话（useSessionView 自动重放新日志）
   const [session, setSession] = useState(initialSession);
   const view = useSessionView(session);
+  // 通知响铃（ADR-0056 §3）：终端没在看时三类事件各响一次 BEL（帧外写出）
+  useNotifyBell({ session, runtime, focus, writeOob });
   const { parts: reasoning, now: reasoningNow } = useReasoning(session);
   const speed = useGenerationSpeed(session);
   const title = view.title;

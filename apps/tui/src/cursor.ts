@@ -201,8 +201,9 @@ export function createCursorStream(
       return (stdout.write as (...a: unknown[]) => boolean)(chunk, ...rest);
     }
     if (text.includes("\x1b[?1049h") || text.includes("\x1b[?1049l")) {
-      // 退出备用屏前先关鼠标上报；进入后开上报。注入只发生在携带
-      // ?1049h/l 的那一笔写出里，顺序与备用屏切换原子绑定。
+      // 退出备用屏前先关上报序列（鼠标 + 焦点报告 ?1004l，由调用方经 beforeExitAlt
+      // 传入）；进入后开上报。注入只发生在携带 ?1049h/l 的那一笔写出里，
+      // 顺序与备用屏切换原子绑定。
       const injectPre = text.includes("\x1b[?1049l") ? (options.beforeExitAlt ?? "") : "";
       const injectPost = text.includes("\x1b[?1049h") ? (options.afterEnterAlt ?? "") : "";
       const out = (moved ? HIDE + RESTORE : "") + injectPre + text + injectPost;

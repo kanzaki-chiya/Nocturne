@@ -51,6 +51,7 @@ function mouseController() {
   };
   const parser = createMouseParser({
     onFlushText: vi.fn(),
+    onFocus: vi.fn(),
     onEvent: (event) => {
       if (!frame) return;
       if (event.type === "wheel") frame.wheel(event);
@@ -249,6 +250,7 @@ describe("dialog mouse app routing", () => {
     };
     const parser = createMouseParser({
       onFlushText: vi.fn(),
+      onFocus: vi.fn(),
       onEvent: (event) => {
         for (const fn of listeners) fn(event);
       },

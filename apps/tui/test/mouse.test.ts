@@ -9,6 +9,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createMouseParser,
+  FOCUS_DISABLE,
+  FOCUS_ENABLE,
   MOUSE_DISABLE,
   MOUSE_ENABLE,
   wrapMouseStdin,
@@ -18,11 +20,13 @@ import {
 function parser() {
   const events: MouseEvent[] = [];
   const flushed: string[] = [];
+  const focus: boolean[] = [];
   const p = createMouseParser({
     onEvent: (ev) => events.push(ev),
+    onFocus: (value) => focus.push(value),
     onFlushText: (t) => flushed.push(t),
   });
-  return { p, events, flushed };
+  return { p, events, flushed, focus };
 }
 
 describe("SGR 鼠标解析", () => {
@@ -78,7 +82,7 @@ describe("SGR 鼠标解析", () => {
     // 前一块的 "\x1b" 与 "\x1b[" 拼接后仍不是鼠标序列：ESC 即刻放行，
     // 仅剩 "\x1b[" 挂起等超时
     expect(p.feed("\x1b[")).toBe("\x1b");
-    await new Promise((r) => setTimeout(r, 60));
+    await new Promise((r) => setTimeout(r, 300));
     expect(flushed).toEqual(["\x1b["]);
     expect(events).toEqual([]);
     p.dispose();
@@ -87,6 +91,75 @@ describe("SGR 鼠标解析", () => {
   it("开/关序列的字节与顺序", () => {
     expect(MOUSE_ENABLE).toBe("\x1b[?1000h\x1b[?1002h\x1b[?1006h");
     expect(MOUSE_DISABLE).toBe("\x1b[?1006l\x1b[?1002l\x1b[?1000l");
+    expect(FOCUS_ENABLE).toBe("\x1b[?1004h");
+    expect(FOCUS_DISABLE).toBe("\x1b[?1004l");
+  });
+});
+
+describe("焦点回送解析（CSI I / CSI O）", () => {
+  it("完整序列只记焦点态，不进按键流；与按键混排照常摘除", () => {
+    const { p, focus } = parser();
+    expect(p.feed("\x1b[I\x1b[O")).toBe("");
+    expect(focus).toEqual([true, false]);
+    expect(p.feed("a\x1b[Ib\x1b[Oc")).toBe("abc");
+    expect(focus).toEqual([true, false, true, false]);
+    p.dispose();
+  });
+
+  it("跨数据块截断：ESC / ESC[ / 序列头依次拼回", () => {
+    const { p, focus } = parser();
+    expect(p.feed("\x1b")).toBe("");
+    expect(p.feed("[")).toBe("");
+    expect(p.feed("I")).toBe("");
+    expect(focus).toEqual([true]);
+    expect(p.feed("\x1b[")).toBe("");
+    expect(p.feed("O")).toBe("");
+    expect(focus).toEqual([true, false]);
+    p.dispose();
+  });
+
+  it("与 Esc、Alt+键混排：歧义尾巴到时限原样放行，不算焦点回送", () => {
+    vi.useFakeTimers();
+    const { p, focus, flushed } = parser();
+    try {
+      // Alt+M = ESC m：非 CSI 即刻交给 Ink，不与焦点回送混淆
+      expect(p.feed("m")).toBe("m");
+      expect(flushed).toEqual([]);
+      // Esc 键（单独 ESC）之后再按 [：同样超时放行
+      expect(p.feed("[")).toBe("");
+      vi.advanceTimersByTime(300);
+      expect(flushed).toEqual(["["]);
+      expect(focus).toEqual([]);
+    } finally {
+      p.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("与鼠标序列相邻：鼠标照常解析、焦点照常摘除", () => {
+    const { p, events, focus } = parser();
+    const out = p.feed("[<0;10;20M[Ix[<64;5;5M[O");
+    expect(out).toBe("x");
+    expect(events).toHaveLength(2);
+    expect(focus).toEqual([true, false]);
+    p.dispose();
+  });
+  it("CSI 前缀延迟续块不按裸 Esc 的短超时放行", () => {
+    vi.useFakeTimers();
+    const { p, focus, flushed } = parser();
+    try {
+      expect(p.feed("\x1b[")).toBe("");
+      vi.advanceTimersByTime(100);
+      expect(flushed).toEqual([]);
+      expect(p.feed("O")).toBe("");
+      expect(focus).toEqual([false]);
+      expect(p.feed("\x1b")).toBe("");
+      vi.advanceTimersByTime(30);
+      expect(flushed).toEqual(["\x1b"]);
+    } finally {
+      p.dispose();
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -125,6 +198,20 @@ describe("wrapMouseStdin", () => {
     real.emit("data", "ab\x1b[<64;5;5Mcd");
     expect(got.join("")).toBe("abcd");
     expect(events).toEqual([{ type: "wheel", dir: "up", x: 5, y: 5 }]);
+    w.dispose();
+  });
+
+  it("焦点回送只更新焦点态：初始 false（从未回送按没在看）", () => {
+    const real = fakeReal();
+    const w = wrapMouseStdin(real);
+    const got: string[] = [];
+    w.stdin.on("data", (d) => got.push(String(d)));
+    expect(w.focus.focused()).toBe(false);
+    real.emit("data", "\x1b[Ox\x1b[I");
+    expect(got.join("")).toBe("x");
+    expect(w.focus.focused()).toBe(true);
+    real.emit("data", "\x1b[O");
+    expect(w.focus.focused()).toBe(false);
     w.dispose();
   });
 

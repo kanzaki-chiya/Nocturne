@@ -1,19 +1,26 @@
 /**
- * 鼠标上报解析与 stdin 包装（ADR-0021 第 1 条）：全屏模式开启
- * `?1000h`（按下/松开）+ `?1002h`（按住拖动）+ `?1006h`（SGR 编码）。
- * 终端把鼠标事件写成 `ESC [ < b ; x ; y M`（按下/拖动/滚轮）与
- * `ESC [ < b ; x ; y m`（松开）混在 stdin 按键流里。这些字节必须在进入
- * Ink 之前摘除——漏过去会被当成按键写进输入框。
+ * stdin 预处理与包装（ADR-0021 第 1 条、ADR-0056 §3）：全屏模式开启
+ * `?1000h`（按下/松开）+ `?1002h`（按住拖动）+ `?1006h`（SGR 编码），
+ * 全屏与 `--inline` 都开启 `?1004h`（焦点报告）。终端把这些序列混在
+ * stdin 按键流里回送——鼠标 `ESC [ < b ; x ; y M`（按下/拖动/滚轮）与
+ * `ESC [ < b ; x ; y m`（松开），焦点 `ESC [ I`（聚焦）与 `ESC [ O`（失焦）。
+ * 这些字节必须在进入 Ink 之前摘除——漏过去会被当成按键写进输入框。
  *
  * 序列可能跨数据块截断（`ESC[<0;` | `35;2M`）。解析器把可能是 SGR 鼠标
- * 前缀的尾巴缓存起来等下一块拼接；只含 ESC / ESC[ 的歧义尾巴按短定时器
- * 放行（Esc 键本身也是单独的 ESC，不能无限挂起）。
+ * 或焦点回送前缀的尾巴缓存起来等下一块拼接；只含 ESC / ESC[ 的歧义尾巴
+ * 按短定时器放行（Esc 键本身也是单独的 ESC，不能无限挂起）。
  */
 import { PassThrough } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 
 export const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
 export const MOUSE_DISABLE = "\x1b[?1006l\x1b[?1002l\x1b[?1000l";
+
+/** 焦点报告（ADR-0056 §3）：终端聚焦时回送 CSI I、失焦回送 CSI O。 */
+export const FOCUS_ENABLE = "\x1b[?1004h";
+export const FOCUS_DISABLE = "\x1b[?1004l";
+const FOCUS_IN = "\x1b[I";
+const FOCUS_OUT = "\x1b[O";
 
 /** 坐标为 SGR 原始值：1 基（x=列、y=行）。button：0 左、1 中、2 右。 */
 export type MouseEvent =
@@ -28,6 +35,7 @@ const SGR_FULL = /^\x1b\[<([0-9]+);([0-9]+);([0-9]+)([Mm])/;
 const SGR_PARTIAL = /^\x1b\[<[0-9;]*$/;
 
 const AMBIGUOUS_FLUSH_MS = 25;
+const CSI_FLUSH_MS = 250;
 
 function decodeButton(b: number, release: boolean): MouseEvent | undefined {
   if (b & 64) {
@@ -46,13 +54,15 @@ function decodeButton(b: number, release: boolean): MouseEvent | undefined {
 
 export interface MouseParserHandlers {
   onEvent: (ev: MouseEvent) => void;
+  /** 焦点回送 CSI I / CSI O：true 聚焦、false 失焦 */
+  onFocus: (focused: boolean) => void;
   /** 歧义尾巴（裸 ESC / ESC[）到时限仍拼不成序列 → 当普通输入放行 */
   onFlushText: (text: string) => void;
 }
 
 /**
- * SGR 鼠标序列摘除器。feed 返回应交给 Ink 的按键字节（已去掉鼠标序列）；
- * 未决尾巴保留在内部。歧义尾巴超时经 onFlushText 放行。
+ * SGR 鼠标与焦点回送摘除器。feed 返回应交给 Ink 的按键字节（已去掉这些
+ * 序列）；未决尾巴保留在内部。歧义尾巴超时经 onFlushText 放行。
  */
 export function createMouseParser(handlers: MouseParserHandlers): {
   feed: (text: string) => string;
@@ -88,16 +98,31 @@ export function createMouseParser(handlers: MouseParserHandlers): {
       }
       out += buf.slice(i, esc);
       const rest = buf.slice(esc);
-      if (rest.length < SGR_PREFIX.length) {
-        // 尾巴是 "\x1b" 或 "\x1b["：可能是鼠标/其他 CSI 序列被截断，
+      if (rest === "\x1b" || rest === "\x1b[") {
+        // 尾巴是 "\x1b" 或 "\x1b["：可能是鼠标/焦点/其他 CSI 序列被截断，
         // 也可能是单独的 Esc 键——挂起但设短时限放行
         pending = rest;
-        flushTimer = setTimeout(() => {
-          flushTimer = undefined;
-          const text = flushPending();
-          if (text !== "") handlers.onFlushText(text);
-        }, AMBIGUOUS_FLUSH_MS);
+        flushTimer = setTimeout(
+          () => {
+            flushTimer = undefined;
+            const text = flushPending();
+            if (text !== "") handlers.onFlushText(text);
+          },
+          rest === "\x1b[" ? CSI_FLUSH_MS : AMBIGUOUS_FLUSH_MS,
+        );
         return out;
+      }
+      // 焦点回送（CSI I / CSI O）长度与鼠标前缀相同，且同样可能被截断；
+      // 必须在「非鼠标转义原样放行」之前摘除，否则 ESC 会漏成按键
+      if (rest.startsWith(FOCUS_IN)) {
+        handlers.onFocus(true);
+        i = esc + FOCUS_IN.length;
+        continue;
+      }
+      if (rest.startsWith(FOCUS_OUT)) {
+        handlers.onFocus(false);
+        i = esc + FOCUS_OUT.length;
+        continue;
       }
       if (!rest.startsWith(SGR_PREFIX)) {
         // 非鼠标转义（方向键、粘贴括号等）：ESC 原样放行，后续字符正常扫描
@@ -140,25 +165,36 @@ export interface MouseSource {
   subscribe: (fn: (ev: MouseEvent) => void) => () => void;
 }
 
+/** 终端焦点态（ADR-0056 §3）：来自 CSI I / CSI O 回送。 */
+export interface FocusSource {
+  /** 终端当前是否聚焦；从未收到过回送时 false（按「没在看」处理）。 */
+  focused: () => boolean;
+}
+
 /**
- * 包装真实 stdin：我们自己以 flowing 模式读真实流，摘掉鼠标序列后把按键
- * 字节推进 PassThrough 交给 Ink。Ink 需要的 TTY 接口（isTTY、setRawMode、
- * ref/unref）经代理转发回真实流；read(0)（Windows 控制台读请求兜底）也
- * 转发真实流，无参 read() 落到 PassThrough。
+ * 包装真实 stdin：我们自己以 flowing 模式读真实流，摘掉鼠标序列与焦点
+ * 回送后把按键字节推进 PassThrough 交给 Ink。Ink 需要的 TTY 接口（isTTY、
+ * setRawMode、ref/unref）经代理转发回真实流；read(0)（Windows 控制台读
+ * 请求兜底）也转发真实流，无参 read() 落到 PassThrough。
  */
 export function wrapMouseStdin(real: NodeJS.ReadStream): {
   stdin: NodeJS.ReadStream;
   mouse: MouseSource;
+  focus: FocusSource;
   dispose: () => void;
 } {
   const inner = new PassThrough();
   const listeners = new Set<(ev: MouseEvent) => void>();
+  let focused = false;
   const dec = new StringDecoder("utf8");
   real.setEncoding("utf8");
 
   const parser = createMouseParser({
     onEvent: (ev) => {
       for (const fn of listeners) fn(ev);
+    },
+    onFocus: (value) => {
+      focused = value;
     },
     onFlushText: (text) => {
       inner.write(text);
@@ -216,6 +252,9 @@ export function wrapMouseStdin(real: NodeJS.ReadStream): {
           listeners.delete(fn);
         };
       },
+    },
+    focus: {
+      focused: () => focused,
     },
     dispose() {
       real.off("data", onData);

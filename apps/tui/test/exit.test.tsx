@@ -110,6 +110,29 @@ async function waitFor(check: () => boolean): Promise<void> {
 }
 
 describe("退出保留回滚区", () => {
+  it("启动渲染失败仍关闭焦点报告并恢复 stdin", async () => {
+    const { runtime, session } = await openSession();
+    const io = ttyPair();
+    const unref = io.stdin.unref;
+    io.stdout.on = (() => {
+      throw new Error("render startup failed");
+    }) as typeof io.stdout.on;
+    await expect(
+      runTui({ session }, runtime, {
+        stdin: io.stdin,
+        stdout: io.stdout,
+        stderr: io.stderr,
+        inline: true,
+        patchConsole: false,
+      }),
+    ).rejects.toThrow("render startup failed");
+    expect(io.stdoutChunks.join("")).toContain("\x1b[?1004h");
+    expect(io.stdoutChunks.at(-1)).toContain("\x1b[?1004l");
+    expect(io.stdin.listenerCount("data")).toBe(0);
+    expect(io.stdin.unref).not.toBeUndefined();
+    io.stdin.unref = unref;
+    await session.close();
+  });
   it("流式完成块晋升后仍追加后续内容，退出不清屏", async () => {
     const { runtime, session } = await openSession([
       [
@@ -174,6 +197,7 @@ describe("退出保留回滚区", () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
       io.stdin.write("\x1b");
       await waitFor(() => io.stdoutChunks.join("").split("\x1b[?1049l").length - 1 === i);
+      expect(io.stdoutChunks.join("")).toContain("\x1b[?1004l\x1b[?1049l\x1b[?1004h");
     }
     io.stdin.write("\x04");
     await done;
@@ -198,6 +222,9 @@ describe("退出保留回滚区", () => {
     });
     await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     io.stdin.write("/exit");
+    // 与真实按键同序：等第一次输入被处理后再敲回车。同一 tick 内连续写两次会被
+    // Ink 的 read() 合成一个输入事件（"/exit\r"），识别不出「输入 + 回车」。
+    await waitFor(() => io.stdoutChunks.join("").includes("/exit"));
     io.stdin.write("\r");
     await done;
     preservedBeforeMessage(io.stdoutChunks, session.id);

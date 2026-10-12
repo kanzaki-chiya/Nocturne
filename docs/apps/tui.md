@@ -62,6 +62,12 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 `--inline` 流式期间已完成的 Markdown 块照常写进回滚区，未完成的尾部留在活动区，按字符位置记账。断流重发时 Core view 清掉被丢弃的 live 内容；回滚区里已写出的部分无法撤回，仅当该消息已有块写入时追加一行弱化提示「! 响应流中断，以上部分输出已作废，正在重试（N/M）」，清掉该消息的前缀记账，重试后的内容另起写入。块键含尝试序号和绝对偏移，避免作废块与新块冲突；落盘时只写未写过的剩余部分。全屏仍在可重绘视口撤回旧内容，见 [ADR-0055](../decisions/ADR-0055-retry-after-partial-stream.md)。
 
+### 通知响铃（终端失焦时）
+
+启动时开启终端焦点报告（DECSET `?1004`，全屏与 `--inline` 都开）：终端聚焦/失焦回送的 `CSI I` / `CSI O` 与鼠标序列同层在进入 Ink 之前摘除并记录焦点态。跨数据块截断拼接：裸 Esc 等待 25ms，已收到 `ESC [` 的 CSI 前缀等待 250ms，非 CSI 的 Alt+键立即放行；超过歧义等待时限的残片按普通输入处理，避免把 Esc 永久挂起。退出备用屏的复位点经输出层 `beforeExitAlt` 把 `?1004l` 与 `?1049l` 原子同笔写出（先关焦点报告再回主屏）；进入备用屏重新开启，inline 临时页面正常返回主屏后也重新开启。正常退出、启动渲染失败、未捕获异常、进程退出兜底都关闭报告；终端不支持、从未回送过时按「没在看」处理。
+
+只在没在看时提醒：需要确认（`permission.requested` / `question.requested`）、出错停止（`turn.completed` 且 `reason === "error"`）、完成（其余非中断结束且用时 ≥ `notifications.doneAfterSeconds`，等于阈值也提醒；`truncated` / `refused` / `max_steps` 等都算完成一类）各响一次终端响铃（BEL `\x07`，走帧外写出通道，不打乱全屏同步帧）；用户中断（`aborted`）与恢复补写（`recovered`）不响。判定在 `src/notify.ts`（与桌面端同规则、各自实现一份，不进 Core 的 Agent Loop），只对本次运行实时到达的事件生效（`session.subscribe` 只收实时事件，回放不经过它；打开历史会话、恢复会话读到的事件不响），恢复会话中途接手的进行中 Turn 按日志里未闭合的 `turn.started` 计时——拿不到起点（没有对应 `turn.started`）的完成不响；子会话是非交互的，权限/提问请求不会出现在父会话事件里（父侧只见 `task` 工具调用的确认），不做父事件去重。设置每次判定时经 `Runtime.describeSettings()` 重读，写在 [settings.json](../architecture/config.md) 里的改动保存后立即生效。`notifications.sound` 不影响 TUI（铃响由终端 `bellStyle` 决定）；不做 OSC 9 与系统通知。
+
 ### 助手标记与思考展开
 
 助手每条消息的正文首行以主题主色、不加粗的 `● ` 开头，符号位于第 0 列；后续行与折行续行缩进 2 列。ASCII 用 `o `，NO_COLOR 保留标记。代码块、表格、列表按少 2 列的正文宽度排版；全屏、`--inline` 与退出导出的纯文本均一致。用户仍用 `›`，思考、工具和通知不加助手标记。

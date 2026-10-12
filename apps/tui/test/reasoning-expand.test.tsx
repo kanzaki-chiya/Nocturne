@@ -159,11 +159,18 @@ it("没有思考时只提示；inline 完整记录进出临时备用屏", async 
   stdin.pause = () => stdin;
   stdin.ref = () => stdin;
   stdin.unref = () => stdin;
-  const input: string[] = [];
-  stdin.read = () => input.shift() ?? null;
+  // runTui 在 inline 下同样先经 stdin 包装（摘除鼠标/焦点序列）：假流按数据
+  // 事件投喂，read() 只兜住 read(0) 之外的旁路读
+  let pending: string | null = null;
+  stdin.read = () => {
+    const text = pending;
+    pending = null;
+    return text;
+  };
   stdin.send = (text) => {
-    input.push(text);
+    pending = text;
     stdin.emit("readable");
+    stdin.emit("data", text);
   };
   const done = runTui({ session }, runtime, {
     stdin,
