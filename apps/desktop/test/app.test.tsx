@@ -107,6 +107,7 @@ function replayHost(
     calls: RpcCall[];
     workspaces: Map<number, string>;
     notify: typeof notify;
+    emitEvent: typeof emitEvent;
     close: typeof close;
     stderrReads: number[];
     shellLog: string[];
@@ -117,6 +118,7 @@ function replayHost(
     models,
     workspaces,
     notify,
+    emitEvent,
     close,
     stderrReads,
     shellLog,
@@ -592,6 +594,49 @@ it("空状态不触碰控件时 createSession 只带解析出的默认模型", a
     workspaceRoot: "Z:/plain",
     model: { provider: "test", model: "cheap" },
   });
+});
+
+it("提问替代输入框，完成后恢复同一草稿输入节点", async () => {
+  const host = replayHost();
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  await screen.findByRole("region", { name: "会话消息" });
+  const field = await screen.findByLabelText<HTMLTextAreaElement>("消息输入");
+  fireEvent.change(field, { target: { value: "提问前的草稿" } });
+  const backendId = host.calls.find(
+    (c) => c.method === "runtime.resumeSession" && c.params.sessionId === "gamma",
+  )?.backendId;
+  if (backendId === undefined) throw new Error("缺少后台");
+  act(() =>
+    host.emitEvent(backendId, "gamma", {
+      type: "question.requested",
+      seq: undefined,
+      payload: { requestId: "q", callId: "q-call", questions: [{ question: "说明" }] },
+    }),
+  );
+  await screen.findByRole("region", { name: "提问" });
+  expect(field.closest(".composer")).toHaveProperty("hidden", true);
+  expect(document.querySelector(".conversation-requests .qcard")).toBeNull();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "答复" } });
+  fireEvent.click(screen.getByRole("button", { name: "提交" }));
+  await waitFor(() =>
+    expect(host.calls.some((c) => c.method === "session.respondQuestion")).toBe(true),
+  );
+  act(() =>
+    host.emitEvent(backendId, "gamma", {
+      type: "tool.completed",
+      payload: {
+        callId: "q-call",
+        name: "ask_user",
+        status: "ok",
+        modelContent: "回答已接收",
+        durationMs: 10,
+      },
+    }),
+  );
+  await waitFor(() => expect(field.closest(".composer")).toHaveProperty("hidden", false));
+  expect(screen.getByLabelText("消息输入")).toBe(field);
+  expect(field.value).toBe("提问前的草稿");
 });
 
 it("会话内状态栏控件调用真实 setter", async () => {

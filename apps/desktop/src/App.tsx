@@ -14,7 +14,7 @@ import type {
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
 import { BackendLogsPage, SHELL_LOG_ID, type BackendLogTarget } from "./BackendLogsPage";
 import { Composer, type ComposerSubmit, type WorkspaceChoice } from "./Composer";
-import { Conversation, type FileLinkHooks } from "./Conversation";
+import { Conversation, QuestionCard, type FileLinkHooks } from "./Conversation";
 import {
   activeConversationCount,
   Conversations,
@@ -1423,8 +1423,18 @@ function SessionPane({
         loadChangeDiff={loadChangeDiff}
         fileLinks={fileLinks}
       />
+      {view.pendingQuestion ? (
+        <div className="question-dock">
+          <QuestionCard
+            key={view.pendingQuestion.requestId}
+            pending={view.pendingQuestion}
+            session={session}
+          />
+        </div>
+      ) : null}
       <Composer
         key={`composer:${session.id}`}
+        hidden={view.pendingQuestion !== undefined}
         skills={skills}
         externalAgents={externalAgents}
         variant="session"

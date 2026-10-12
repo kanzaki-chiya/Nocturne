@@ -1742,10 +1742,12 @@ function ToolRow({
   entry,
   cwd,
   preparing = false,
+  waiting = false,
 }: {
   entry: ToolEntry;
   cwd: string;
   preparing?: boolean;
+  waiting?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [fileOpen, setFileOpen] = useState<Record<string, boolean>>({});
@@ -1767,17 +1769,24 @@ function ToolRow({
           : { name: argument.text, dir: "", title: argument.text };
   const range = toolRange(entry);
   const running = !preparing && entry.status === "running";
-  const seconds = useRunningSeconds(running);
+  const seconds = useRunningSeconds(running && !waiting);
   const result = toolResultText(entry);
   const error = entry.result?.error;
   const preview = running ? lastOutputLine(entry.liveOutput) : "";
   const diffs = entry.status === "ok" ? fileDiffs(entry, cwd) : [];
+  const asked = running && waiting;
   const status = preparing ? (
     <span className="tool-res">接收参数中</span>
   ) : (
     <>
-      {running && <span className="tool-spin" aria-hidden="true" />}
-      {seconds !== undefined && <span className="tool-secs">{seconds} 秒</span>}
+      {running && !asked && <span className="tool-spin" aria-hidden="true" />}
+      {asked && (
+        <span className="tool-res tool-wait">
+          <span aria-hidden="true" />
+          等待你回答
+        </span>
+      )}
+      {seconds !== undefined && !asked && <span className="tool-secs">{seconds} 秒</span>}
       {!running && todos === undefined && (
         <span
           className={`tool-res${
@@ -1895,10 +1904,13 @@ function ToolEntryView({
   entry,
   cwd,
   preparing = false,
+  waiting = false,
 }: {
   entry: ToolEntry;
   cwd: string;
   preparing?: boolean;
+  /** 提问等待回答中：行尾用等待圆点，不计秒 */
+  waiting?: boolean;
 }) {
   if (entry.status === "denied") {
     return (
@@ -1911,7 +1923,7 @@ function ToolEntryView({
       </div>
     );
   }
-  return <ToolRow entry={entry} cwd={cwd} preparing={preparing} />;
+  return <ToolRow entry={entry} cwd={cwd} preparing={preparing} waiting={waiting} />;
 }
 
 const TURN_END_LABELS: Record<TurnEndReason, string> = {
@@ -1938,6 +1950,7 @@ function EntryView({
   showReplyActions,
   changesCard,
   preparing = false,
+  waitingCallId,
 }: {
   entry: ViewEntry;
   openUrl: OpenUrl;
@@ -1954,6 +1967,8 @@ function EntryView({
   changesCard: ReactNode;
   /** 实时工具行（参数尚在流式接收）以合成 ToolEntry 走同一条渲染路径 */
   preparing?: boolean;
+  /** 与待回答提问同 callId 的工具行：行尾等待圆点，不计秒 */
+  waitingCallId?: string | undefined;
 }) {
   switch (entry.kind) {
     case "user":
@@ -1988,7 +2003,14 @@ function EntryView({
         </article>
       );
     case "tool":
-      return <ToolEntryView entry={entry} cwd={cwd} preparing={preparing} />;
+      return (
+        <ToolEntryView
+          entry={entry}
+          cwd={cwd}
+          preparing={preparing}
+          waiting={entry.callId === waitingCallId}
+        />
+      );
     case "notice": {
       if (entry.subtype === "permission" || entry.subtype === "config") return null;
       let message = entry.message;
@@ -2253,109 +2275,427 @@ function PermissionCard({
 
 interface AnswerDraft {
   selected: string[];
+  /** 选项题的「其他」输入：null = 未启用（该行是按钮），字符串 = 已就地变成输入框 */
+  other: string | null;
+  /** 自由文本题的输入（options 为空时） */
   text: string;
   declined: boolean;
 }
 
-function QuestionCard({ pending, session }: { pending: PendingQuestion; session: RpcSession }) {
+const OTHER_TEXT_LIMIT = 2000;
+const SINGLE_AUTO_NEXT_MS = 200;
+
+export function QuestionCard({
+  pending,
+  session,
+}: {
+  pending: PendingQuestion;
+  session: RpcSession;
+}) {
+  const questions = pending.questions;
   const [drafts, setDrafts] = useState<AnswerDraft[]>(() =>
-    pending.questions.map(() => ({ selected: [], text: "", declined: false })),
+    questions.map(() => ({ selected: [], other: null, text: "", declined: false })),
   );
+  const [cur, setCur] = useState(0);
   const { reply, busy, error } = useReply((value: QuestionReply) =>
     session.respondQuestion(pending.requestId, value),
   );
-  const update = (index: number, patch: Partial<AnswerDraft>) => {
-    setDrafts((current) =>
-      current.map((draft, itemIndex) => (itemIndex === index ? { ...draft, ...patch } : draft)),
+  const cardRef = useRef<HTMLElement>(null);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  const index = Math.min(cur, Math.max(questions.length - 1, 0));
+  const question = questions[index];
+  const draft = drafts[index];
+  const last = index === questions.length - 1;
+  const isAnswered = (item: AnswerDraft): boolean =>
+    item.declined ||
+    item.selected.length > 0 ||
+    (item.other ?? "").trim() !== "" ||
+    item.text.trim() !== "";
+  const allAnswered =
+    questions.length > 0 &&
+    questions.every((item, itemIndex) => {
+      const itemDraft = drafts[itemIndex];
+      return itemDraft !== undefined && isAnswered(itemDraft);
+    });
+
+  // 窗口级快捷键经 ref 读最新状态（PermissionCard 同一手法，避免闭包过期）
+  const stateRef = useRef({ index, last, busy });
+  stateRef.current = { index, last, busy };
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+  const questionsRef = useRef(questions);
+  questionsRef.current = questions;
+  const allRef = useRef(allAnswered);
+  allRef.current = allAnswered;
+  const replyRef = useRef(reply);
+  replyRef.current = reply;
+  const chooseRef = useRef<(option: number) => void>(() => undefined);
+  const nextRef = useRef<() => void>(() => undefined);
+
+  const go = (next: number): void => {
+    clearTimeout(timer.current);
+    timer.current = undefined;
+    setCur(next);
+  };
+
+  const choose = (option: number): void => {
+    const at = stateRef.current.index;
+    if (stateRef.current.busy) return;
+    const current = draftsRef.current[at];
+    const currentQuestion = questionsRef.current[at];
+    if (current === undefined || currentQuestion === undefined) return;
+    if ((currentQuestion.options?.length ?? 0) === 0) return;
+    const count = currentQuestion.options?.length ?? 0;
+    if (option < 0 || option > count) return;
+    clearTimeout(timer.current);
+    timer.current = undefined;
+    if (option === count) {
+      // 「其他」行：点一次就地变成输入框；单选同时清掉已选
+      if (current.other !== null) return;
+      const multi = currentQuestion.multiSelect === true;
+      setDrafts((prev) =>
+        prev.map((item, itemIndex) =>
+          itemIndex === at
+            ? { ...item, declined: false, other: "", ...(multi ? {} : { selected: [] }) }
+            : item,
+        ),
+      );
+      return;
+    }
+    const label = currentQuestion.options?.[option]?.label;
+    if (label === undefined) return;
+    if (currentQuestion.multiSelect === true) {
+      setDrafts((prev) =>
+        prev.map((item, itemIndex) => {
+          if (itemIndex !== at) return item;
+          const on = item.selected.includes(label);
+          return {
+            ...item,
+            declined: false,
+            selected: on
+              ? item.selected.filter((entry) => entry !== label)
+              : [...item.selected, label],
+          };
+        }),
+      );
+      return;
+    }
+    setDrafts((prev) =>
+      prev.map((item, itemIndex) =>
+        itemIndex === at ? { ...item, declined: false, selected: [label], other: null } : item,
+      ),
+    );
+    // 单选选中即 200ms 后自动下一题；末题停留等提交
+    if (at < questionsRef.current.length - 1) {
+      const target = at + 1;
+      timer.current = window.setTimeout(() => {
+        timer.current = undefined;
+        setCur(target);
+      }, SINGLE_AUTO_NEXT_MS);
+    }
+  };
+  chooseRef.current = choose;
+
+  const handleNext = (): void => {
+    if (stateRef.current.busy) return;
+    const list = questionsRef.current;
+    const current = draftsRef.current;
+    if (stateRef.current.index < list.length - 1) {
+      go(stateRef.current.index + 1);
+      return;
+    }
+    if (!allRef.current) return;
+    const answers: QuestionReply["answers"] = current.map((item, itemIndex) => {
+      if (item.declined) return { declined: true as const };
+      const itemQuestion = list[itemIndex];
+      const extra =
+        itemQuestion !== undefined && (itemQuestion.options?.length ?? 0) > 0
+          ? (item.other ?? "").trim()
+          : item.text.trim();
+      return { selected: item.selected, ...(extra !== "" ? { text: extra } : {}) };
+    });
+    void replyRef.current({ answers });
+  };
+  nextRef.current = handleNext;
+
+  const toggleDecline = (): void => {
+    const at = stateRef.current.index;
+    if (stateRef.current.busy) return;
+    if (draftsRef.current[at] === undefined) return;
+    clearTimeout(timer.current);
+    timer.current = undefined;
+    const declining = !draftsRef.current[at].declined;
+    if (!declining) {
+      setDrafts((prev) =>
+        prev.map((item, itemIndex) => (itemIndex === at ? { ...item, declined: false } : item)),
+      );
+      return;
+    }
+    setDrafts((prev) =>
+      prev.map((item, itemIndex) =>
+        itemIndex === at ? { ...item, declined: true, selected: [], other: null, text: "" } : item,
+      ),
     );
   };
+
+  // 挂载拿走焦点（PermissionCard 同样）：数字键立刻可用。
+  // 自由文本题与已展开的「其他」输入框用 autoFocus 接管；切回选项题时回到卡片。
+  useEffect(() => {
+    const current = draftsRef.current[stateRef.current.index];
+    const currentQuestion = questionsRef.current[stateRef.current.index];
+    if (current === undefined || currentQuestion === undefined) return;
+    const input = cardRef.current?.querySelector<HTMLInputElement>("input");
+    if (input) input.focus();
+    else cardRef.current?.focus();
+  }, [index]);
+
+  // 数字键直选、Enter 下一题/提交：可编辑目标里数字键留给输入；IME 组合中不触发；
+  // Esc 不处理，留给全局（输入框中断）。设置区盖住时（inert）不响应。
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.isComposing) return;
+      // eslint-disable-next-line @typescript-eslint/no-deprecated -- 旧 IME 用 keyCode 229 标记组合中
+      if ((event as KeyboardEvent & { keyCode?: number }).keyCode === 229) return;
+      if (cardRef.current?.closest("[inert]") != null) return;
+      if (document.querySelector('[role="menu"], .composer-popup') !== null) return;
+      if (stateRef.current.busy) return;
+      const at = stateRef.current.index;
+      const currentQuestion = questionsRef.current[at];
+      if (currentQuestion === undefined) return;
+      const target = event.target;
+      const editable =
+        target instanceof HTMLElement &&
+        (target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.isContentEditable);
+      const inside = target instanceof Node && (cardRef.current?.contains(target) ?? false);
+      if (/^[1-9]$/.test(event.key)) {
+        if (editable) return;
+        const count = (currentQuestion.options?.length ?? 0) + 1;
+        if ((currentQuestion.options?.length ?? 0) === 0) return;
+        const option = Number(event.key) - 1;
+        if (option >= count) return;
+        event.preventDefault();
+        chooseRef.current(option);
+        return;
+      }
+      if (event.key === "Enter") {
+        // 卡片外的可编辑区（状态栏搜索等）的 Enter 不抢
+        if (editable && !inside) return;
+        event.preventDefault();
+        nextRef.current();
+      }
+      if (event.key === "Escape" && editable && inside) {
+        event.preventDefault();
+        cardRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", onKey, { capture: true });
+    };
+  }, []);
+
+  if (question === undefined || draft === undefined) return null;
+  const multi = question.multiSelect === true;
+  const options = question.options ?? [];
+  const otherOn = draft.other !== null;
+  const total = options.length + 1;
   return (
-    <section className="ask" aria-label="提问" aria-busy={busy}>
-      <div className="ask-t">提问</div>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          const answers = drafts.map((draft) =>
-            draft.declined
-              ? { declined: true as const }
-              : {
-                  selected: draft.selected,
-                  ...(draft.text.trim() ? { text: draft.text.trim() } : {}),
-                },
-          );
-          void reply({ answers });
-        }}
-      >
-        {pending.questions.map((question, index) => {
-          const draft = drafts[index];
-          if (!draft) return null;
-          return (
-            <fieldset key={index} disabled={busy}>
-              <legend>
-                {question.header ? `${question.header} · ` : ""}
-                {question.question}
-              </legend>
-              {question.multiSelect ? <p className="conversation-review">可多选</p> : null}
-              {question.options?.map((option) => (
-                <label className="conversation-question-option" key={option.label}>
-                  <input
-                    type={question.multiSelect ? "checkbox" : "radio"}
-                    name={`question-${pending.requestId}-${index}`}
-                    checked={draft.selected.includes(option.label)}
-                    onChange={() => {
-                      update(index, {
-                        declined: false,
-                        selected: question.multiSelect
-                          ? draft.selected.includes(option.label)
-                            ? draft.selected.filter((label) => label !== option.label)
-                            : [...draft.selected, option.label]
-                          : [option.label],
-                        ...(question.multiSelect ? {} : { text: "" }),
-                      });
-                    }}
-                  />
-                  <span>
-                    {option.label}
+    <section className="qcard" aria-label="提问" aria-busy={busy} tabIndex={-1} ref={cardRef}>
+      <div className="qhead">
+        <span className="qmark" aria-hidden="true">
+          ?
+        </span>
+        <span className="qlabel">
+          需要你回答{questions.length > 1 ? ` · ${index + 1}/${questions.length}` : ""}
+        </span>
+        {questions.length > 1 ? (
+          <div className="tabs" role="tablist" aria-label="问题列表">
+            {questions.map((item, itemIndex) => {
+              const itemDraft = drafts[itemIndex];
+              const mark =
+                itemDraft === undefined ? null : itemDraft.declined ? (
+                  <span className="skip" aria-label="已拒绝回答">
+                    —
+                  </span>
+                ) : itemDraft.selected.length > 0 ||
+                  (itemDraft.other ?? "").trim() !== "" ||
+                  itemDraft.text.trim() !== "" ? (
+                  <span className="ok" aria-label="已回答">
+                    ✓
+                  </span>
+                ) : null;
+              return (
+                <button
+                  key={itemIndex}
+                  type="button"
+                  className="tab"
+                  role="tab"
+                  aria-selected={itemIndex === index}
+                  disabled={busy}
+                  onClick={() => {
+                    go(itemIndex);
+                  }}
+                >
+                  {item.header ?? `第${itemIndex + 1}题`}
+                  {mark}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+      <div className="qbody">
+        <p className="qtext">{question.question}</p>
+        {multi && options.length > 0 ? <p className="qsub">可多选</p> : null}
+        {options.length === 0 ? (
+          <input
+            className="free"
+            autoFocus
+            aria-label={`${question.question} · 回答`}
+            placeholder="输入回答，Enter 提交"
+            value={draft.text}
+            disabled={busy}
+            onChange={(event) => {
+              const value = Array.from(event.target.value).slice(0, OTHER_TEXT_LIMIT).join("");
+              setDrafts((prev) =>
+                prev.map((item, itemIndex) =>
+                  itemIndex === index ? { ...item, text: value, declined: false } : item,
+                ),
+              );
+            }}
+          />
+        ) : (
+          <div className={`opts${multi ? " multi" : ""}`} role={multi ? "group" : "radiogroup"}>
+            {options.map((option, optionIndex) => {
+              const on = draft.selected.includes(option.label);
+              const recommended = option.label.endsWith("（推荐）");
+              const display = recommended ? option.label.slice(0, -4) : option.label;
+              return (
+                <button
+                  key={option.label}
+                  type="button"
+                  className="opt"
+                  role={multi ? "checkbox" : "radio"}
+                  aria-checked={on}
+                  disabled={busy}
+                  onClick={() => {
+                    choose(optionIndex);
+                  }}
+                >
+                  <span className="key" aria-hidden="true">
+                    {optionIndex + 1}
+                  </span>
+                  <span className="lab">
+                    <span>
+                      {display}
+                      {recommended ? <span className="rec">推荐</span> : null}
+                    </span>
                     {option.description ? <small>{option.description}</small> : null}
                   </span>
-                </label>
-              ))}
-              <label>
-                {question.options?.length ? "其他（自己输入）" : "回答"}
-                <textarea
-                  aria-label={`${question.question} · ${question.options?.length ? "其他" : "回答"}`}
-                  value={draft.text}
-                  onChange={(event) => {
-                    update(index, {
-                      text: Array.from(event.target.value).slice(0, 2000).join(""),
-                      declined: false,
-                      ...(question.multiSelect ? {} : { selected: [] }),
-                    });
-                  }}
-                />
-              </label>
-              <label className="conversation-question-option">
-                <input
-                  type="checkbox"
-                  checked={draft.declined}
-                  onChange={(event) => {
-                    update(index, { declined: event.target.checked, selected: [], text: "" });
-                  }}
-                />
-                拒绝回答
-              </label>
-            </fieldset>
-          );
-        })}
-        <div className="ask-actions">
-          <button className="btn primary" type="submit" disabled={busy}>
-            提交回答
+                  <span className="tick" aria-hidden="true">
+                    ✓
+                  </span>
+                </button>
+              );
+            })}
+            {otherOn ? (
+              <div className="opt" role={multi ? "checkbox" : "radio"} aria-checked="true">
+                <span className="key" aria-hidden="true">
+                  {total}
+                </span>
+                <span className="lab">
+                  <input
+                    className="other-in"
+                    autoFocus
+                    aria-label={`${question.question} · 其他`}
+                    placeholder="自己输入…"
+                    value={draft.other ?? ""}
+                    disabled={busy}
+                    onChange={(event) => {
+                      const value = Array.from(event.target.value)
+                        .slice(0, OTHER_TEXT_LIMIT)
+                        .join("");
+                      setDrafts((prev) =>
+                        prev.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, other: value, declined: false } : item,
+                        ),
+                      );
+                    }}
+                  />
+                </span>
+                <span className="tick" aria-hidden="true">
+                  ✓
+                </span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="opt"
+                role={multi ? "checkbox" : "radio"}
+                aria-checked="false"
+                disabled={busy}
+                onClick={() => {
+                  choose(options.length);
+                }}
+              >
+                <span className="key" aria-hidden="true">
+                  {total}
+                </span>
+                <span className="lab">
+                  <span className="other-placeholder">其他…</span>
+                </span>
+                <span className="tick" aria-hidden="true">
+                  ✓
+                </span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="qfoot">
+        <button type="button" className="link" disabled={busy} onClick={toggleDecline}>
+          {draft.declined ? "已拒绝回答 · 撤销" : "拒绝回答"}
+        </button>
+        <span className="hint">
+          {options.length > 0 ? (
+            <>
+              <kbd>1</kbd>–<kbd>{total}</kbd> 选择 ·{" "}
+            </>
+          ) : null}
+          <kbd>Enter</kbd> {last ? "提交" : "下一题"}
+        </span>
+        <span className="sp" />
+        {index > 0 ? (
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={() => {
+              go(index - 1);
+            }}
+          >
+            上一题
           </button>
-        </div>
-      </form>
+        ) : null}
+        <button
+          type="button"
+          className="btn primary"
+          disabled={busy || (last && !allAnswered)}
+          onClick={handleNext}
+        >
+          {last ? "提交" : "下一题"}
+        </button>
+      </div>
       {busy ? (
         <p className="conversation-review" role="status">
-          等待后台确认回答…
+          正在发送回答…
         </p>
       ) : null}
       {error ? (
@@ -2536,6 +2876,7 @@ function ConversationContent({
                     images={images}
                     session={session}
                     busy={busy}
+                    waitingCallId={view.pendingQuestion?.callId}
                     repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
                     onResubmit={onResubmit}
                     fileLinks={fileLinks}
@@ -2621,24 +2962,15 @@ function ConversationContent({
           </button>
         </div>
       ) : null}
-      {view.pendingPermission || view.pendingQuestion ? (
+      {view.pendingPermission ? (
         <div className="conversation-requests">
-          {view.pendingPermission ? (
-            <PermissionCard
-              key={`permission:${view.pendingPermission.requestId}`}
-              pending={view.pendingPermission}
-              session={session}
-              cwd={cwd}
-              {...(shellKind !== undefined ? { shellKind } : {})}
-            />
-          ) : null}
-          {view.pendingQuestion ? (
-            <QuestionCard
-              key={`question:${view.pendingQuestion.requestId}`}
-              pending={view.pendingQuestion}
-              session={session}
-            />
-          ) : null}
+          <PermissionCard
+            key={`permission:${view.pendingPermission.requestId}`}
+            pending={view.pendingPermission}
+            session={session}
+            cwd={cwd}
+            {...(shellKind !== undefined ? { shellKind } : {})}
+          />
         </div>
       ) : null}
     </div>

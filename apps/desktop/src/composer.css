@@ -5,6 +5,10 @@
   background: var(--a-bg);
 }
 
+.composer[hidden] {
+  display: none;
+}
+
 .composer .cw {
   position: relative;
 }

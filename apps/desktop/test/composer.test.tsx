@@ -113,6 +113,35 @@ afterAll(() => {
 afterEach(cleanup);
 
 describe("Composer 文本与历史", () => {
+  it("隐藏而不卸载，恢复后保留草稿、附件和历史位置", async () => {
+    const properties = props({
+      variant: "session",
+      readInputHistory: async () => ["历史一", "历史二"],
+      pickImages: async () => [{ name: "draft.png", data: new Uint8Array([9, 8, 7]) }],
+    });
+    const rendered = render(<Composer {...properties} />);
+    await act(async () => undefined);
+    const field = input("提问前草稿");
+    fireEvent.click(screen.getByRole("button", { name: "添加图片或引用文件" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /添加图片/ }));
+    await screen.findByText("draft.png");
+    const image = rendered.container.querySelector(".thumb2 img");
+    rendered.rerender(<Composer {...properties} hidden />);
+    expect(rendered.container.querySelector(".composer")).toHaveProperty("hidden", true);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    rendered.rerender(<Composer {...properties} />);
+    expect(screen.getByRole("textbox")).toBe(field);
+    expect(field.value).toBe("提问前草稿");
+    expect(screen.getByText("draft.png")).toBeTruthy();
+    expect(rendered.container.querySelector(".thumb2 img")).toBe(image);
+    input("");
+    fireEvent.keyDown(field, { key: "ArrowUp" });
+    await waitFor(() => expect(field.value).toBe("历史二"));
+    rendered.rerender(<Composer {...properties} hidden />);
+    rendered.rerender(<Composer {...properties} />);
+    fireEvent.keyDown(field, { key: "ArrowUp" });
+    expect(field.value).toBe("历史一");
+  });
   it("Enter 发送原文，Shift+Enter 留给浏览器换行，不吞掉边缘空白", async () => {
     const onSubmit = vi.fn(async () => true);
     render(<Composer {...props({ onSubmit })} />);

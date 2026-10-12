@@ -106,6 +106,7 @@ export interface ComposerSubmit {
 }
 
 export interface ComposerProps {
+  hidden?: boolean;
   todos?: readonly TodoItem[];
   prefs?: PrefsStore;
   skills?: readonly SkillOverview[];
@@ -239,6 +240,7 @@ interface PopupRow {
 }
 
 export function Composer({
+  hidden = false,
   running,
   disabled = false,
   onSubmit,
@@ -276,6 +278,16 @@ export function Composer({
   const [error, setError] = useState<string | null>(null);
   const [enterHint, setEnterHint] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuKind | null>(null);
+  const wasHidden = useRef(hidden);
+  useEffect(() => {
+    if (hidden) {
+      setMenu(null);
+      setDismissed(true);
+    } else if (wasHidden.current) {
+      textarea.current?.focus();
+    }
+    wasHidden.current = hidden;
+  }, [hidden]);
   const [dragOver, setDragOver] = useState(false);
   const [vision, setVision] = useState<string | undefined>(undefined);
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -1056,7 +1068,7 @@ export function Composer({
   );
 
   return (
-    <div className={`composer${isSession ? " session" : ""}`}>
+    <div className={`composer${isSession ? " session" : ""}`} hidden={hidden}>
       <div className="cw">
         {slashHint !== null && (
           <div className="composer-redirect" role="status">

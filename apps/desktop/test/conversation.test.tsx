@@ -18,7 +18,12 @@ import {
 } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
-import { Conversation, type ConversationProps, type FileLinkHooks } from "../src/Conversation";
+import {
+  Conversation,
+  QuestionCard,
+  type ConversationProps,
+  type FileLinkHooks,
+} from "../src/Conversation";
 import { createAttachmentImageSource } from "../src/attachment-images";
 
 const imageData = new Uint8Array([1, 2, 3]);
@@ -316,7 +321,18 @@ function mount(
   const { resolveFilesImpl: _ignored, ...props } = overrides;
   void _ignored;
   return {
-    ...render(<Conversation view={view} {...conversationProps(rendered)} {...props} />),
+    ...render(
+      <>
+        <Conversation view={view} {...conversationProps(rendered)} {...props} />
+        {view.pendingQuestion ? (
+          <QuestionCard
+            key={view.pendingQuestion.requestId}
+            pending={view.pendingQuestion}
+            session={session}
+          />
+        ) : null}
+      </>,
+    ),
     session,
     methods,
     openUrl,
@@ -655,20 +671,89 @@ describe("Conversation 权限卡片", () => {
 });
 
 describe("Conversation 提问卡片", () => {
+  it("一次一题，数字键单选自动前进，页签标记与推荐原 label，Enter 提交", async () => {
+    const view = createSessionView();
+    view.pendingQuestion = question({
+      questions: [
+        { header: "方案", question: "选方案", options: [{ label: "A（推荐）" }, { label: "B" }] },
+        { header: "文字", question: "写说明" },
+      ],
+    });
+    const { methods } = mount(view);
+    expect(screen.queryByText("写说明")).toBeNull();
+    expect(screen.getByText("推荐").className).toBe("rec");
+    fireEvent.keyDown(window, { key: "1" });
+    await screen.findByRole("textbox", { name: "写说明 · 回答" });
+    expect(screen.getByRole("tab", { name: /方案/ }).textContent).toContain("✓");
+    expect(screen.getByRole("button", { name: "提交" })).toHaveProperty("disabled", true);
+    const field = screen.getByRole("textbox");
+    fireEvent.keyDown(field, { key: "2" });
+    fireEvent.change(field, { target: { value: "说明2" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() =>
+      expect(methods.respondQuestion).toHaveBeenCalledWith("question-1", {
+        answers: [{ selected: ["A（推荐）"] }, { selected: [], text: "说明2" }],
+      }),
+    );
+    expect(screen.getByText("正在发送回答…")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "提交" })).toHaveProperty("disabled", true);
+  });
+
+  it("其他就地展开且单选互斥，页签可回看，拒答可撤销", () => {
+    const view = createSessionView();
+    view.pendingQuestion = question();
+    mount(view);
+    fireEvent.click(screen.getByRole("radio", { name: /其他/ }));
+    const other = screen.getByRole("textbox");
+    expect(document.activeElement).toBe(other);
+    fireEvent.change(other, { target: { value: "别的" } });
+    fireEvent.keyDown(other, { key: "1" });
+    expect(screen.getByRole("radio", { name: /SQLite/ }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    fireEvent.click(screen.getByRole("radio", { name: /SQLite/ }));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "拒绝回答" }));
+    expect(screen.getByRole("tab", { name: /存储/ }).textContent).toContain("—");
+    fireEvent.click(screen.getByRole("button", { name: "已拒绝回答 · 撤销" }));
+    expect(screen.getByRole("tab", { name: /存储/ }).textContent).not.toContain("—");
+    fireEvent.click(screen.getByRole("tab", { name: "第2题" }));
+    expect(screen.getByText("选择功能")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "存储" }));
+    expect(screen.getByText("选择数据库")).toBeTruthy();
+  });
+
+  it("等待工具按 callId 显示等待你回答而没有转圈秒数，完成后恢复", () => {
+    const view = createSessionView();
+    view.pendingQuestion = question();
+    view.entries = [
+      tool({ callId: "ask-1", name: "custom_question", status: "running", result: undefined }),
+    ];
+    const rendered = mount(view);
+    expect(screen.getByText("等待你回答")).toBeTruthy();
+    expect(rendered.container.querySelector(".tool-spin, .tool-secs")).toBeNull();
+    view.pendingQuestion = undefined;
+    view.entries = [tool({ callId: "ask-1", name: "custom_question" })];
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    expect(screen.queryByText("等待你回答")).toBeNull();
+  });
   it("按题目顺序回传单选、多选+其他、自由文本，没有权限操作", async () => {
     const view = createSessionView();
     view.pendingQuestion = question();
     const { methods } = mount(view);
     fireEvent.click(screen.getByRole("radio", { name: /SQLite/ }));
+    fireEvent.click(screen.getByRole("button", { name: "下一题" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "缓存" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "搜索" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /其他/ }));
     fireEvent.change(screen.getByRole("textbox", { name: "选择功能 · 其他" }), {
       target: { value: "  导出  " },
     });
+    fireEvent.click(screen.getByRole("button", { name: "下一题" }));
     fireEvent.change(screen.getByRole("textbox", { name: "补充说明 · 回答" }), {
       target: { value: "  必须离线  " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
     await waitFor(() =>
       expect(methods.respondQuestion).toHaveBeenCalledWith("question-1", {
         answers: [
@@ -688,30 +773,33 @@ describe("Conversation 提问卡片", () => {
     view.pendingQuestion = question();
     const { methods } = mount(view);
     fireEvent.click(screen.getByRole("radio", { name: /SQLite/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /其他/ }));
     fireEvent.change(screen.getByRole("textbox", { name: "选择数据库 · 其他" }), {
       target: { value: "自建" },
     });
-    const groups = screen.getAllByRole("group");
-    const group = groups[1];
-    if (group === undefined) throw new Error("缺少第二个问题");
-    fireEvent.click(within(group).getByRole("checkbox", { name: "缓存" }));
-    fireEvent.click(within(group).getByRole("checkbox", { name: "拒绝回答" }));
-    fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一题" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "缓存" }));
+    fireEvent.click(screen.getByRole("button", { name: "拒绝回答" }));
+    expect(screen.getByRole("button", { name: "已拒绝回答 · 撤销" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "下一题" }));
+    expect(screen.getByRole("button", { name: "提交" })).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("button", { name: "拒绝回答" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
     await waitFor(() =>
       expect(methods.respondQuestion).toHaveBeenCalledWith("question-1", {
-        answers: [{ selected: [], text: "自建" }, { declined: true }, { selected: [] }],
+        answers: [{ selected: [], text: "自建" }, { declined: true }, { declined: true }],
       }),
     );
   });
 
-  it("自由文本按 Unicode 字符限制为 2000；不在前端拒绝空答案", async () => {
+  it("自由文本按 Unicode 字符限制为 2000；空答案禁用提交", async () => {
     const view = createSessionView();
     view.pendingQuestion = question({ questions: [{ question: "说明" }] });
     const { methods } = mount(view);
     fireEvent.change(screen.getByRole("textbox", { name: "说明 · 回答" }), {
       target: { value: "😀".repeat(2001) },
     });
-    fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
     await waitFor(() =>
       expect(methods.respondQuestion).toHaveBeenCalledWith("question-1", {
         answers: [{ selected: [], text: "😀".repeat(2000) }],
@@ -725,7 +813,7 @@ describe("Conversation 提问卡片", () => {
     const rendered = mount(view);
     rendered.methods.respondQuestion.mockRejectedValueOnce(new Error("invalid_reply"));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "旧答案" } });
-    fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
     expect(await screen.findByRole("alert")).toHaveProperty(
       "textContent",
       "发送失败：invalid_reply",
@@ -734,12 +822,20 @@ describe("Conversation 提问卡片", () => {
       requestId: "question-new",
       questions: [{ question: "说明" }],
     });
-    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    rendered.rerender(
+      <QuestionCard
+        key={view.pendingQuestion.requestId}
+        pending={view.pendingQuestion}
+        session={rendered.session}
+      />,
+    );
     expect(screen.getByRole("textbox")).toHaveProperty("value", "");
-    fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
+    expect(screen.getByRole("button", { name: "提交" })).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("button", { name: "拒绝回答" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
     await waitFor(() =>
       expect(rendered.methods.respondQuestion).toHaveBeenLastCalledWith("question-new", {
-        answers: [{ selected: [] }],
+        answers: [{ declined: true }],
       }),
     );
   });
