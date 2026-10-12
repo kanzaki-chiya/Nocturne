@@ -154,7 +154,7 @@ function formatAnswers(questions: QuestionItem[], answers: AskUserOutput["answer
 export const askUserTool: ToolDefinition<{ questions: unknown }, AskUserOutput> = {
   name: "ask_user",
   description:
-    "需要用户拍板时暂停并提问，用户回答后继续。用户拒绝回答后，不要就同一问题再次调用本工具。仅在确实需要用户决定、且无法通过读代码、查文档或合理默认解决时使用；不要用来请求执行许可（权限由权限层处理），也不要用来确认可以直接做的事。一次调用 1–4 题；每题可提供 2–6 个选项（界面会自动附加「其他」供自由输入及「拒绝回答」，不要自行添加），推荐选项放在第一位并在 label 末尾标「（推荐）」；options 省略即为自由文本回答。非交互环境调用会返回 not_interactive，此时自行采用最合理的默认继续。",
+    "需要用户拍板时暂停并提问，用户回答后继续。用户拒绝回答后，不要就同一问题再次调用本工具。仅在确实需要用户决定、且无法通过读代码、查文档或合理默认解决时使用；不要用来请求执行许可（权限由权限层处理），也不要用来确认可以直接做的事。一次调用 1–4 题；每题可提供 2–6 个选项（界面会自动附加「其他」供自由输入及「拒绝回答」，不要自行添加），只有确实有推荐（例如技术方案取舍）时，才把推荐项放第一位并在 label 末尾标「（推荐）」；询问用户本人意图、偏好的题不要标推荐；options 省略即为自由文本回答。非交互环境调用会返回 not_interactive，此时自行采用最合理的默认继续。",
   inputSchema: {
     type: "object",
     required: ["questions"],
