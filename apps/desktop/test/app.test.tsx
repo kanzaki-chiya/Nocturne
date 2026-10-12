@@ -24,6 +24,8 @@ function replayHost(
     method: string;
     params: Record<string, unknown>;
   }) => { code: string; message: string; data?: Record<string, unknown> | undefined } | undefined,
+  /** 订阅回放时追加的持久事件（默认没有；用来验证重放不提醒，ADR-0056） */
+  seedReplay?: (sessionId: string) => object[],
 ) {
   const channels = new Map<number, (message: BackendMessage) => void>();
   /** 被 deferRpc 扣下的请求：respond 把结果发回客户端 */
@@ -86,7 +88,8 @@ function replayHost(
       }),
     });
   };
-  const notify = (backendId: number, method: string) => {
+  /** 外壳推一条 JSON-RPC 通知（providersChanged 等）给客户端 */
+  const pushNotify = (backendId: number, method: string) => {
     channels.get(backendId)?.({
       kind: "line",
       line: JSON.stringify({ jsonrpc: "2.0", method, params: {} }),
@@ -103,26 +106,40 @@ function replayHost(
   };
   /** 外壳日志缓冲（app_note 写入、shell_log 读出） */
   const shellLog: string[] = [];
+  /** 通知外壳调用：notify 的参数、被撤掉的会话、任务栏闪烁次数（ADR-0056） */
+  const notifications: { sessionId: string; title: string; body: string; sound: boolean }[] = [];
+  const dismissed: string[] = [];
+  const attention = { count: 0 };
+  /** 通知被点击的模拟入口：外壳 emit("notify-activated") 的等价物 */
+  let activated: ((sessionId: string) => void) | null = null;
   const host: DesktopHost & {
     calls: RpcCall[];
     workspaces: Map<number, string>;
-    notify: typeof notify;
+    providerNotify: typeof pushNotify;
     emitEvent: typeof emitEvent;
     close: typeof close;
     stderrReads: number[];
     shellLog: string[];
     deferred: typeof deferred;
     models: typeof models;
+    notifications: typeof notifications;
+    dismissed: string[];
+    attention: typeof attention;
+    activateNotification: (sessionId: string) => void;
   } = {
     calls,
     models,
     workspaces,
-    notify,
+    providerNotify: pushNotify,
     emitEvent,
     close,
     stderrReads,
     shellLog,
     deferred,
+    notifications,
+    dismissed,
+    attention,
+    activateNotification: (sessionId) => activated?.(sessionId),
     createChannel: (onMessage) => onMessage,
     openUrl: async () => undefined,
     openPath: async () => undefined,
@@ -137,6 +154,22 @@ function replayHost(
     relaunch: async () => undefined,
     note: (line) => {
       shellLog.push(line);
+    },
+    notify: async (input) => {
+      notifications.push(input);
+      return { shown: true };
+    },
+    dismissNotification: async (sessionId) => {
+      dismissed.push(sessionId);
+    },
+    requestAttention: async () => {
+      attention.count += 1;
+    },
+    onNotificationActivated: (handler) => {
+      activated = handler;
+      return () => {
+        activated = null;
+      };
     },
     invoke: async (command, args) => {
       if (command === "node_probe") return { ok: true };
@@ -247,7 +280,7 @@ function replayHost(
           ];
           break;
         case "runtime.reloadConfig":
-          notify(backendId, "runtime.providersChanged");
+          pushNotify(backendId, "runtime.providersChanged");
           break;
         case "runtime.describeSettings":
           result = [
@@ -307,6 +340,7 @@ function replayHost(
                     },
                   },
                 ]),
+            ...(id === undefined ? [] : (seedReplay?.(id) ?? [])),
           ];
           events.forEach((event, index) =>
             channel({
@@ -898,7 +932,7 @@ it("单后台没有跨后台协调：配置变更不发 reloadConfig，providers
 
   // 后台自己的 providersChanged 通知到达 → 会话列表刷新一次，仍无 reloadConfig
   const before = lists();
-  host.notify(backend, "runtime.providersChanged");
+  host.providerNotify(backend, "runtime.providersChanged");
   await waitFor(() => expect(lists()).toBe(before + 1));
   expect(reloads()).toBe(0);
 });
@@ -1541,4 +1575,139 @@ it("没有运行中的会话时直接下载安装；失败把原因留在提示�
     pendingUpdate?: { version?: string };
   };
   expect(stored.pendingUpdate?.version).toBe("9.9.9");
+});
+
+/** 后台会话的一条实时 turn.completed（time 用给定时刻，算用时） */
+const turnError = (at: string, message = "服务商响应流中途断开，已重试 4 次仍失败") => ({
+  type: "turn.completed",
+  time: at,
+  payload: {
+    reason: "error",
+    steps: 4,
+    usage: { inputTokens: 1, outputTokens: 1 },
+    error: { code: "stream_aborted", message },
+  },
+});
+
+it("后台会话出错时发系统通知 + 任务栏闪烁 + 侧栏留痕；点通知切回该会话并撤掉（ADR-0056）", async () => {
+  const host = replayHost();
+  render(<App host={host} />);
+  // 打开 alpha（订阅上）再切到 gamma：alpha 成为后台会话，仍然收事件
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await screen.findByRole("region", { name: "会话消息" });
+  fireEvent.click(screen.getByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "会话消息" })).getByText("gamma 正文"),
+    ).toBeTruthy(),
+  );
+  const backendId = host.calls.find(
+    (c) => c.method === "runtime.resumeSession" && c.params.sessionId === "alpha",
+  )?.backendId;
+  if (backendId === undefined) throw new Error("缺少 alpha 的后台");
+  // 窗口失焦（用户去看别的东西了）后 alpha 出错
+  act(() => {
+    fireEvent(window, new Event("blur"));
+    host.emitEvent(backendId, "alpha", turnError("2026-10-04T00:26:00Z"));
+  });
+  await waitFor(() => expect(host.notifications).toHaveLength(1));
+  expect(host.notifications[0]).toEqual({
+    sessionId: "alpha",
+    title: "alpha 正文",
+    body: "出错停止 · 用时 26 分钟：服务商响应流中途断开，已重试 4 次仍失败",
+    sound: true,
+  });
+  expect(host.attention.count).toBe(1);
+  // 侧栏留痕：alpha 行出错标签；当前会话 gamma 不受影响
+  const errRow = screen.getByText("出错").closest(".item");
+  if (!(errRow instanceof HTMLElement)) throw new Error("缺少出错标签所在行");
+  expect(errRow.textContent).toContain("alpha 会话");
+  // 点通知：切到 alpha、撤掉通知、清掉留痕
+  act(() => host.activateNotification("alpha"));
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "会话消息" })).getByText("alpha 正文"),
+    ).toBeTruthy(),
+  );
+  await waitFor(() => expect(screen.queryByText("出错")).toBeNull());
+  expect(host.dismissed).toContain("alpha");
+});
+
+it("前台正看着的会话出错不发通知；重放读到的 turn.completed 也不发（ADR-0056）", async () => {
+  // 回放里带一条 turn.completed(error)：打开 alpha 时它就是历史，不提醒也不留痕
+  const host = replayHost(undefined, undefined, undefined, undefined, (id) =>
+    id === "alpha" ? [turnError("2026-10-04T00:26:00Z")] : [],
+  );
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await screen.findByRole("region", { name: "会话消息" });
+  expect(host.notifications).toHaveLength(0);
+  expect(screen.queryByText("出错")).toBeNull();
+
+  // 在看（有焦点 + 正显示 alpha）时来的实时错误同样不提醒
+  const backendId = host.calls.find(
+    (c) => c.method === "runtime.resumeSession" && c.params.sessionId === "alpha",
+  )?.backendId;
+  if (backendId === undefined) throw new Error("缺少 alpha 的后台");
+  act(() => {
+    fireEvent(window, new Event("focus"));
+    host.emitEvent(backendId, "alpha", turnError("2026-10-04T01:00:00Z"));
+  });
+  await waitFor(() =>
+    expect(host.calls.filter((c) => c.method === "session.subscribe").length).toBeGreaterThan(0),
+  );
+  expect(host.notifications).toHaveLength(0);
+  expect(screen.queryByText("出错")).toBeNull();
+});
+
+it("后台会话正常跑完只给标签、不打扰；切到该会话后标签消失（ADR-0056）", async () => {
+  const host = replayHost();
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await screen.findByRole("region", { name: "会话消息" });
+  fireEvent.click(screen.getByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  const backendId = host.calls.find(
+    (c) => c.method === "runtime.resumeSession" && c.params.sessionId === "alpha",
+  )?.backendId;
+  if (backendId === undefined) throw new Error("缺少 alpha 的后台");
+  act(() => {
+    fireEvent(window, new Event("blur"));
+    host.emitEvent(backendId, "alpha", {
+      type: "turn.completed",
+      time: "2026-10-04T00:00:10Z",
+      payload: { reason: "done", steps: 12, usage: { inputTokens: 1, outputTokens: 1 } },
+    });
+  });
+  // 10 秒不到缺省阈值 60 秒：不通知，但侧栏照样留痕
+  await waitFor(() => expect(screen.getByText("已完成")).toBeTruthy());
+  expect(host.notifications).toHaveLength(0);
+  const doneRow = screen.getByText("已完成").closest(".item");
+  if (!(doneRow instanceof HTMLElement)) throw new Error("缺少已完成标签所在行");
+  expect(doneRow.textContent).toContain("alpha 会话");
+  fireEvent.click(doneRow);
+  await waitFor(() => expect(screen.queryByText("已完成")).toBeNull());
+});
+
+it("设置页盖住会话时仍通知；设置页获焦不撤销，返回会话才撤销", async () => {
+  const host = replayHost();
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await screen.findByRole("region", { name: "会话消息" });
+  fireEvent.click(screen.getByRole("button", { name: "设置" }));
+  await screen.findByRole("navigation", { name: "设置" });
+  const backendId = host.calls.find(
+    (c) => c.method === "runtime.resumeSession" && c.params.sessionId === "alpha",
+  )?.backendId;
+  if (backendId === undefined) throw new Error("缺少 alpha 的后台");
+  host.dismissed.length = 0;
+  act(() => {
+    fireEvent(window, new Event("focus"));
+    host.emitEvent(backendId, "alpha", turnError("2026-10-04T00:26:00Z"));
+  });
+  await waitFor(() => expect(host.notifications).toHaveLength(1));
+  act(() => fireEvent(window, new Event("focus")));
+  expect(host.dismissed).not.toContain("alpha");
+  act(() => host.activateNotification("alpha"));
+  await waitFor(() => expect(host.dismissed).toContain("alpha"));
+  expect(screen.queryByRole("navigation", { name: "设置" })).toBeNull();
 });

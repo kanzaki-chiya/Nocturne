@@ -124,6 +124,9 @@ function props(
     onFileOpenerChange?: (o: "system" | "vscode" | "cursor") => boolean;
     onConfigSaved?: () => void;
     onOpenProviders?: () => void;
+    notifications?: {
+      sendTest: () => Promise<{ shown: boolean; reason?: "disabled" | "unsupported" | "error" }>;
+    };
     update?: {
       autoUpdate: boolean;
       onAutoUpdateChange: (enabled: boolean) => boolean;
@@ -146,6 +149,7 @@ function props(
     onWorkspaceChange: () => Promise.resolve(undefined),
     pickFolder: () => Promise.resolve(null),
     providersVersion: 0,
+    notifications: overrides?.notifications ?? { sendTest: () => Promise.resolve({ shown: true }) },
     onConfigSaved: overrides?.onConfigSaved ?? noop,
     onOpenProviders: overrides?.onOpenProviders ?? noop,
   };
@@ -418,7 +422,7 @@ describe("SettingsPage", () => {
     const view = render(<SettingsPage {...props(server.client)} />);
     await screen.findByText("默认权限预设");
     const groups = () => [...document.querySelectorAll("h5")].map((h) => h.textContent);
-    expect(groups()).toEqual(["权限", "执行", "普通对话", "文件"]);
+    expect(groups()).toEqual(["权限", "执行", "普通对话", "文件", "通知"]);
     expect(screen.getByRole("heading", { name: "常规" })).toBeTruthy();
     expect(screen.queryByText("看图模型")).toBeNull();
 
@@ -483,6 +487,199 @@ describe("SettingsPage", () => {
     });
     expect(row("检查更新").textContent).not.toContain("下载失败");
     server.close();
+  });
+
+  it("通知一节：总开关关闭时下各项变灰禁用；「完成」未勾时阈值行变灰", async () => {
+    const NOTIFY_ITEMS: SettingItem[] = [
+      ...ITEMS,
+      {
+        key: "notifications.enabled",
+        effective: "true",
+        source: "settings",
+        saved: "true",
+        overridden: false,
+      },
+      {
+        key: "notifications.events.attention",
+        effective: "true",
+        source: "settings",
+        saved: "true",
+        overridden: false,
+      },
+      {
+        key: "notifications.events.error",
+        effective: "true",
+        source: "settings",
+        saved: "true",
+        overridden: false,
+      },
+      {
+        key: "notifications.events.done",
+        effective: "false",
+        source: "settings",
+        saved: "false",
+        overridden: false,
+      },
+      {
+        key: "notifications.doneAfterSeconds",
+        effective: "60",
+        source: "default",
+        saved: undefined,
+        overridden: false,
+      },
+      {
+        key: "notifications.sound",
+        effective: "true",
+        source: "default",
+        saved: undefined,
+        overridden: false,
+      },
+    ];
+    const server = fakeServer(handlers({ "runtime.describeSettings": NOTIFY_ITEMS }));
+    await server.initialize();
+    render(<SettingsPage {...props(server.client)} />);
+    await screen.findByRole("switch", { name: "通知" });
+    // 「完成」未勾：阈值行变灰（disabled 带原因），事件行本身可用（总开关开着）
+    expect(screen.getByRole("checkbox", { name: "需要确认" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("combobox", { name: "完成提醒的阈值" }).getAttribute("title")).toBe(
+      "未勾选「完成」",
+    );
+    server.close();
+  });
+
+  it("通知一节：总开关关闭整节变灰；保存失败回滚并在行下写红字", async () => {
+    const OFF_ITEMS: SettingItem[] = [
+      ...ITEMS,
+      {
+        key: "notifications.enabled",
+        effective: "false",
+        source: "settings",
+        saved: "false",
+        overridden: false,
+      },
+      {
+        key: "notifications.events.attention",
+        effective: "true",
+        source: "settings",
+        saved: "true",
+        overridden: false,
+      },
+      {
+        key: "notifications.events.error",
+        effective: "true",
+        source: "settings",
+        saved: "true",
+        overridden: false,
+      },
+      {
+        key: "notifications.events.done",
+        effective: "true",
+        source: "settings",
+        saved: "true",
+        overridden: false,
+      },
+      {
+        key: "notifications.doneAfterSeconds",
+        effective: "60",
+        source: "default",
+        saved: undefined,
+        overridden: false,
+      },
+      {
+        key: "notifications.sound",
+        effective: "true",
+        source: "default",
+        saved: undefined,
+        overridden: false,
+      },
+    ];
+    const server = fakeServer(
+      handlers({
+        "runtime.describeSettings": OFF_ITEMS,
+        "runtime.updateSettings": () => new RpcFail(-32000, "磁盘只读"),
+      }),
+    );
+    await server.initialize();
+    render(<SettingsPage {...props(server.client)} />);
+    const master = await screen.findByRole("switch", { name: "通知" });
+    expect(master.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText("已关闭")).toBeTruthy();
+    // 总开关关闭：三事件复选、阈值、提示音、测试按钮全禁用
+    expect(screen.getByRole("checkbox", { name: "需要确认" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "发送测试通知" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    // 打开总开关后保存失败：值回到原样并在行下写红字
+    fireEvent.click(master);
+    await screen.findByText(/保存失败：磁盘只读/);
+    expect(screen.getByRole("switch", { name: "通知" }).getAttribute("aria-checked")).toBe("false");
+    server.close();
+  });
+
+  it("通知一节：阈值保存值不在档位里时显示「N 秒」并保留；测试通知被系统拒绝时提示去系统设置", async () => {
+    const CUSTOM_ITEMS: SettingItem[] = [
+      ...ITEMS,
+      {
+        key: "notifications.enabled",
+        effective: "true",
+        source: "settings",
+        saved: "true",
+        overridden: false,
+      },
+      {
+        key: "notifications.events.attention",
+        effective: "true",
+        source: "settings",
+        saved: "true",
+        overridden: false,
+      },
+      {
+        key: "notifications.events.error",
+        effective: "true",
+        source: "settings",
+        saved: "true",
+        overridden: false,
+      },
+      {
+        key: "notifications.events.done",
+        effective: "true",
+        source: "settings",
+        saved: "true",
+        overridden: false,
+      },
+      {
+        key: "notifications.doneAfterSeconds",
+        effective: "45",
+        source: "settings",
+        saved: "45",
+        overridden: false,
+      },
+      {
+        key: "notifications.sound",
+        effective: "true",
+        source: "default",
+        saved: undefined,
+        overridden: false,
+      },
+    ];
+    const server = fakeServer(handlers({ "runtime.describeSettings": CUSTOM_ITEMS }));
+    await server.initialize();
+    const view = render(<SettingsPage {...props(server.client)} />);
+    await screen.findByRole("switch", { name: "通知" });
+    // 45 秒不在档位里：触发器显示「45 秒」
+    expect(screen.getByRole("combobox", { name: "完成提醒的阈值" }).textContent).toContain("45 秒");
+    view.unmount();
+    cleanup();
+    server.close();
+    const server2 = fakeServer(handlers({ "runtime.describeSettings": ITEMS }));
+    await server2.initialize();
+    const sendTest = vi.fn(() => Promise.resolve({ shown: false, reason: "disabled" as const }));
+    render(<SettingsPage {...props(server2.client, { notifications: { sendTest } })} />);
+    await screen.findByRole("button", { name: "发送测试通知" });
+    fireEvent.click(screen.getByRole("button", { name: "发送测试通知" }));
+    await screen.findByText("Windows 已关闭 Nocturne 的通知，请到 系统 › 通知 打开");
+    expect(sendTest).toHaveBeenCalledTimes(1);
+    server2.close();
   });
 });
 

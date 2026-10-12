@@ -3,6 +3,7 @@ import {
   type ModelRef,
   type ReasoningEffort,
   type RewindMode,
+  type RuntimeEvent,
   type SessionView,
   type TurnChanges,
   type TurnChangeDiff,
@@ -134,6 +135,15 @@ export class Conversations {
     private readonly plainWorkspace: () => string | null,
     private readonly changed: () => void,
     private readonly failed: (error: unknown) => void,
+    /**
+     * 会话事件（ADR-0056）：`live` 为 false 的是订阅起始时间之前的旧回放
+     * （重放、打开历史会话），`live` 为 true 的是本次运行实时到达的事件——
+     * 含订阅响应返回后的全部事件与回放窗口期内新产生的 durable
+     * （event.time >= 订阅起始，恢复补写 recovered:true 也透出 live=true，
+     * 由 decideNotification/sessionMarkFor 按 recovered 挡掉）。通知判定据此
+     * 只认本次运行实时到达的事件。
+     */
+    private readonly onEvent?: (sessionId: string, event: RuntimeEvent, live: boolean) => void,
   ) {}
 
   get selected(): OpenConversation | undefined {
@@ -169,15 +179,33 @@ export class Conversations {
       listeners: new Set(),
     };
     this.opened.set(entry.session.id, entry);
-    let replaying = true;
+    // 订阅时间边界：trackSessionView 响应返回前到达的分两种——旧回放（live=false）
+    // 与回放期间的新事件（live=true）。服务端语义是先挂监听+缓冲再推回放，
+    // 响应返回前无法靠「是否返回」区分两者，只能看事件时间：durable 的 time 是
+    // 后端写入时生成（与本机同一时钟），早于订阅起始的是旧回放，起始时刻及之后
+    // （含同 ms，取 >=）是回放窗口期内新产生的 permission.requested/turn.completed。
+    // ephemeral（runtime.status/question）从不回放，订阅期间到达天然实时。
+    // 恢复补写的 turn.completed（recovered:true）时间也是新的，按 live=true 透出，
+    // 由 App 侧 decideNotification/sessionMarkFor 按 recovered 挡掉（不提醒不留痕）。
+    // time 缺失或非法按回放处理（宁可漏提醒，不误报）。无需变协议。
+    const subscribeStart = Date.now();
+    let subscribed = false;
+    const isLive = (event: RuntimeEvent): boolean => {
+      if (subscribed) return true;
+      if (!("seq" in event)) return true;
+      const at = Date.parse(event.time);
+      if (Number.isNaN(at)) return false;
+      return at >= subscribeStart;
+    };
     try {
       entry.tracker = await trackSessionView(
         entry.session,
         (_view, event) => {
           for (const listener of entry.listeners) listener();
           this.changed();
-          if (!replaying && event.type === "turn.completed") void this.refreshTurnChanges(entry);
-          // 非当前会话完成后释放锁；submit/compact 的 promise 收束前仍保持 busy。
+          const live = isLive(event);
+          if (live && event.type === "turn.completed") void this.refreshTurnChanges(entry);
+          this.onEvent?.(entry.session.id, event, live);
           void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
         },
         {
@@ -185,7 +213,7 @@ export class Conversations {
           ...(continuity !== undefined ? { afterSeq: continuity.afterSeq } : {}),
         },
       );
-      replaying = false;
+      subscribed = true;
       await this.refreshTurnChanges(entry);
       return entry;
     } catch (error) {

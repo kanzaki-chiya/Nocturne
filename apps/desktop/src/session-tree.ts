@@ -49,12 +49,20 @@ export function formatRelative(mtimeMs: number, now: number): string {
 
 export type SessionStatus = "idle" | "running" | "pending";
 
+/**
+ * 侧栏留痕（ADR-0056）：本次运行里会话「没被看到」时出错或完成留下的标记，
+ * 打开会话即清除；只在内存里，不持久化。
+ */
+export type SessionMark = "error" | "done";
+
 export interface SessionRow {
   id: string;
   title: string;
   meta: string;
   locked: boolean;
   status: SessionStatus;
+  /** 出错 / 已完成标记；没有时缺省 */
+  mark?: SessionMark | undefined;
 }
 
 export interface PinnedRow extends SessionRow {
@@ -121,6 +129,8 @@ export interface TreeOptions {
   /** 每区默认显示条数 */
   limit?: number;
   statuses?: Readonly<Record<string, SessionStatus>>;
+  /** 出错 / 已完成留痕（会话 id → 标记，ADR-0056） */
+  marks?: Readonly<Record<string, SessionMark>>;
 }
 
 const DEFAULT_LIMIT = 5;
@@ -131,7 +141,12 @@ function isVisible(session: SessionSummary): boolean {
   return hasText || session.locked === true;
 }
 
-function toRow(session: SessionSummary, now: number, status: SessionStatus): SessionRow {
+function toRow(
+  session: SessionSummary,
+  now: number,
+  status: SessionStatus,
+  mark?: SessionMark,
+): SessionRow {
   let meta = status === "pending" ? "待确认" : formatRelative(session.mtimeMs, now);
   if (session.locked === true) meta = `🔒 ${meta}`;
   return {
@@ -140,6 +155,7 @@ function toRow(session: SessionSummary, now: number, status: SessionStatus): Ses
     meta,
     locked: session.locked === true,
     status,
+    ...(mark !== undefined ? { mark } : {}),
   };
 }
 
@@ -175,7 +191,9 @@ export function buildSessionTree(
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const chatsShown = options.chatsExpanded ? chatRows : chatRows.slice(0, limit);
   const chats: ChatsSection = {
-    rows: chatsShown.map((s) => toRow(s, now, options.statuses?.[s.id] ?? "idle")),
+    rows: chatsShown.map((s) =>
+      toRow(s, now, options.statuses?.[s.id] ?? "idle", options.marks?.[s.id]),
+    ),
     moreCount: options.chatsExpanded ? 0 : chatRows.length - chatsShown.length,
   };
 
@@ -211,7 +229,7 @@ export function buildSessionTree(
     if (session === undefined) continue;
     const isChat = chatKeys.has(projectKey(session.cwd));
     pinned.push({
-      ...toRow(session, now, options.statuses?.[session.id] ?? "idle"),
+      ...toRow(session, now, options.statuses?.[session.id] ?? "idle", options.marks?.[session.id]),
       project: isChat ? "对话" : projectName(session.cwd),
     });
   }
@@ -278,7 +296,9 @@ export function buildSessionTree(
       name: projectName(group.path),
       path: group.path,
       count: group.sessions.length,
-      sessions: shown.map((s) => toRow(s, now, options.statuses?.[s.id] ?? "idle")),
+      sessions: shown.map((s) =>
+        toRow(s, now, options.statuses?.[s.id] ?? "idle", options.marks?.[s.id]),
+      ),
       moreCount: expanded ? 0 : unpinned.length - shown.length,
       manual: manualOrder.includes(key),
     });

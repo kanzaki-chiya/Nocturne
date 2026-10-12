@@ -4,7 +4,7 @@ import {
   type RpcClient,
   type LineTransport,
 } from "@nocturne/rpc/client";
-import { createSessionView, type TurnChanges } from "@nocturne/core/protocol";
+import { createSessionView, type RuntimeEvent, type TurnChanges } from "@nocturne/core/protocol";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -27,6 +27,10 @@ function fixture(
   deferResume?: ReadonlySet<string>,
   /** rejectSubmit 时替换默认的错误（message + data 覆盖） */
   submitError?: { message: string; data?: Record<string, unknown> },
+  /** 会话事件回调（订阅 live 边界测试用：记录 sessionId/event/live） */
+  onEvent?: (sessionId: string, event: RuntimeEvent, live: boolean) => void,
+  /** 扣住 session.subscribe 的响应：用来制造「回放期间到达」的事件 */
+  deferSubscribe?: ReadonlySet<string>,
 ) {
   let client: RpcClient | undefined;
   let server: LineTransport | undefined;
@@ -36,6 +40,8 @@ function fixture(
   const turns = new Map<string, unknown>();
   const seqs = new Map<string, number>();
   const stalled = new Map<string, { id: unknown }>();
+  /** 被扣住的 session.subscribe 响应（releaseSubscribe 放行） */
+  const stalledSub = new Map<string, { id: unknown }>();
   let changes: TurnChanges[] = [];
   let changesError = false;
   /** crash 后为 true：failResume 只在重建的新后台生效 */
@@ -106,6 +112,10 @@ function fixture(
             warnings: [],
             lastSeq: 0,
           };
+        }
+        if (request.method === "session.subscribe" && deferSubscribe?.has(id) === true) {
+          stalledSub.set(id, { id: request.id });
+          return;
         }
         if (request.method === "session.subscribe") result = { lastSeq: 0 };
         if (request.method === "session.turnChanges") {
@@ -188,8 +198,9 @@ function fixture(
     () => "plain",
     () => undefined,
     (e) => failures.push(e),
+    onEvent,
   );
-  function event(id: string, type: string, payload: unknown) {
+  function event(id: string, type: string, payload: unknown, time = "2026-01-01T00:00:00Z") {
     if (!opened.has(id)) throw new Error("会话未打开");
     const seq = (seqs.get(id) ?? 0) + 1;
     seqs.set(id, seq);
@@ -202,12 +213,37 @@ function fixture(
           event: {
             sessionId: id,
             seq,
-            time: "2026-01-01T00:00:00Z",
+            time,
             type,
             payload,
             ...(type === "turn.started" || type === "turn.completed"
               ? { turnId: "test-turn" }
               : {}),
+          },
+        },
+      }),
+    );
+  }
+  /**
+   * 发一条易失事件（runtime.status/question.requested）：不占 seq、不进回放；
+   * 订阅期间到达即实时（live=true），与服务端语义一致。
+   */
+  function emitEphemeral(id: string, type: string, payload: unknown) {
+    if (!opened.has(id)) throw new Error("会话未打开");
+    server?.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "event",
+        params: {
+          sessionId: id,
+          event: {
+            sessionId: id,
+            runId: "run-test",
+            eseq: 1,
+            afterSeq: seqs.get(id) ?? 0,
+            time: "2026-01-01T00:00:00Z",
+            type,
+            payload,
           },
         },
       }),
@@ -250,6 +286,13 @@ function fixture(
       }),
     );
   }
+  /** 放行被 deferSubscribe 卡住的 session.subscribe（回放结束、转实时） */
+  function releaseSubscribe(id: string) {
+    const pending = stalledSub.get(id);
+    if (pending === undefined || server === undefined) throw new Error("没有卡住的订阅");
+    stalledSub.delete(id);
+    server.send(JSON.stringify({ jsonrpc: "2.0", id: pending.id, result: { lastSeq: 0 } }));
+  }
   return {
     controller,
     pool,
@@ -257,9 +300,11 @@ function fixture(
     opened,
     failures,
     event,
+    emitEphemeral,
     complete,
     crash,
     releaseResume,
+    releaseSubscribe,
     setChanges: (value: TurnChanges[]) => {
       changes = value;
     },
@@ -400,6 +445,92 @@ describe("desktop conversation lifecycle", () => {
     expect(
       f.calls.filter((c) => c.method === "session.close" && c.params.sessionId === "a"),
     ).toHaveLength(1);
+  });
+
+  it("订阅边界：旧回放按时间判 live=false，回放期间的新 durable 判 live=true", async () => {
+    const seen: { type: string; time: string; live: boolean }[] = [];
+    const onEvent = (_id: string, event: RuntimeEvent, live: boolean) => {
+      seen.push({ type: event.type, time: event.time, live });
+    };
+    // deferSubscribe 扣住 session.subscribe 的响应：回放窗口期内到达的事件先缓冲，
+    // 与服务端「先挂监听+缓冲再回放」语义一致；新旧按 event.time 与订阅起始区分
+    const f = fixture(undefined, false, undefined, undefined, undefined, onEvent, new Set(["a"]));
+    const opening = f.controller.open("a", "project-a");
+    await vi.waitFor(() =>
+      expect(
+        f.calls.some((c) => c.method === "session.subscribe" && c.params.sessionId === "a"),
+      ).toBe(true),
+    );
+    // 旧回放：time 远早于订阅起始 → live=false
+    f.event("a", "message.user", { messageId: "replay-1", content: [] });
+    // 回放窗口期内新产生的 permission.requested/turn.completed：time 取订阅起始
+    // 时刻及之后 → live=true（同 ms 取 >=，默认实时）
+    const fresh = new Date().toISOString();
+    f.event(
+      "a",
+      "permission.requested",
+      { requestId: "r", callId: "c", subjects: [], reason: "", options: [] },
+      fresh,
+    );
+    f.event(
+      "a",
+      "turn.completed",
+      { reason: "done", steps: 1, usage: { inputTokens: 1, outputTokens: 1 } },
+      fresh,
+    );
+    // 回放期间到达的易失事件：不进回放，算实时（question.requested 可视实时）
+    f.emitEphemeral("a", "runtime.status", { status: "thinking" });
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(4));
+    expect(seen.find((s) => s.type === "message.user")?.live).toBe(false);
+    expect(seen.find((s) => s.type === "permission.requested")?.live).toBe(true);
+    expect(seen.find((s) => s.type === "turn.completed")?.live).toBe(true);
+    expect(seen.find((s) => s.type === "runtime.status")?.live).toBe(true);
+    // 放行订阅响应：转实时，此后持久事件也是实时
+    f.releaseSubscribe("a");
+    await opening;
+    f.event("a", "turn.started", { turnIndex: 1 }, new Date().toISOString());
+    await vi.waitFor(() => expect(seen.some((s) => s.type === "turn.started")).toBe(true));
+    expect(seen.filter((s) => s.type === "turn.started").every((s) => s.live)).toBe(true);
+  });
+
+  it("订阅期间的易失事件是实时（live=true）：question.requested 可视实时", async () => {
+    const seen: { type: string; live: boolean }[] = [];
+    const f = fixture(undefined, false, undefined, undefined, undefined, (id, event, live) => {
+      seen.push({ type: event.type, live });
+    });
+    await f.controller.open("a", "project-a");
+    f.emitEphemeral("a", "question.requested", {
+      requestId: "q",
+      callId: "c",
+      questions: [{ question: "继续吗" }],
+    });
+    await vi.waitFor(() => expect(seen.some((s) => s.type === "question.requested")).toBe(true));
+    expect(seen.filter((s) => s.type === "question.requested").every((s) => s.live)).toBe(true);
+  });
+
+  it("恢复补写的 turn.completed 时间是新的故 live=true，但下游按 recovered 挡掉", async () => {
+    const seen: { type: string; live: boolean }[] = [];
+    const f = fixture(undefined, false, undefined, undefined, undefined, (id, event, live) => {
+      seen.push({ type: event.type, live });
+    });
+    await f.controller.open("a", "project-a");
+    // 打开历史会话后到达的恢复补写（recovered:true）：time 是打开时新写的，
+    // 故 live=true 透出；App 侧 decideNotification/sessionMarkFor 按 recovered
+    // 挡掉，不提醒不留痕（见 notify.test.ts「恢复补写的 turn.completed 不提醒」）
+    f.event(
+      "a",
+      "turn.completed",
+      {
+        reason: "error",
+        steps: 0,
+        usage: { inputTokens: 0, outputTokens: 0 },
+        error: { code: "process_exited", message: "进程在 Turn 结束前退出" },
+        recovered: true,
+      },
+      new Date().toISOString(),
+    );
+    await vi.waitFor(() => expect(seen.some((s) => s.type === "turn.completed")).toBe(true));
+    expect(seen.filter((s) => s.type === "turn.completed").every((s) => s.live)).toBe(true);
   });
 });
 

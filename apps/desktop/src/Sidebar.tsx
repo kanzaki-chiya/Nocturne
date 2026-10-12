@@ -228,7 +228,24 @@ type MenuState =
 function dotClass(row: SessionRow): string {
   if (row.status === "running") return "dot run";
   if (row.status === "pending") return "dot warn";
+  if (row.mark === "error") return "dot err";
+  if (row.mark === "done") return "dot ok";
   return "dot";
+}
+
+/**
+ * 会话行右侧的短标签（ADR-0056）：待确认来自会话状态（请求被处理即消失），
+ * 出错 / 已完成是本次运行里「你没看到就结束了」的留痕，打开会话即清除。
+ * 运行中（running/pending）不显示旧留痕：新 Turn 开始时 App 已清掉它，
+ * 这里再挡一道——事件竞态下旧标签也不会盖住进行态。
+ * 没有标签时按原来的 meta（相对时间）显示。
+ */
+function rowTag(row: SessionRow): { text: string; cls: string } | null {
+  if (row.status === "pending") return { text: "待确认", cls: "need" };
+  if (row.status === "running") return null;
+  if (row.mark === "error") return { text: "出错", cls: "err" };
+  if (row.mark === "done") return { text: "已完成", cls: "done" };
+  return null;
 }
 
 const FOLD_OPEN = "M1.5 4.5v8h11l2-5.5H4l-2 5.5M1.5 4.5V3h4l1.5 1.5h5.5V7";
@@ -264,6 +281,7 @@ function RowButton({
   /** 「…」按钮点击：在同一行右侧锚点打开右键同款菜单 */
   onMenu: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
+  const tag = rowTag(row);
   return (
     /* .irow 是容器 div：按钮不能嵌套按钮（悬停的「…」是兄弟元素） */
     <div className="irow">
@@ -274,13 +292,11 @@ function RowButton({
       >
         <span className={dotClass(row)} />
         <span className="t">{row.title}</span>
-        {pinned !== undefined ? (
-          <>
-            <span className="proj">{pinned.project}</span>
-            {row.status === "pending" && <span className="meta pend">待确认</span>}
-          </>
+        {pinned !== undefined && <span className="proj">{pinned.project}</span>}
+        {tag !== null ? (
+          <span className={`tag ${tag.cls}`}>{tag.text}</span>
         ) : (
-          <span className={`meta${row.status === "pending" ? " pend" : ""}`}>{row.meta}</span>
+          pinned === undefined && <span className="meta">{row.meta}</span>
         )}
       </button>
       <button

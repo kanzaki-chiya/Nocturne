@@ -69,6 +69,10 @@ function fakeHost() {
     checkUpdate: () => Promise.resolve(null),
     relaunch: () => Promise.resolve(),
     note: () => undefined,
+    notify: () => Promise.resolve({ shown: true }),
+    dismissNotification: () => Promise.resolve(),
+    requestAttention: () => Promise.resolve(),
+    onNotificationActivated: () => () => undefined,
   };
 
   return {

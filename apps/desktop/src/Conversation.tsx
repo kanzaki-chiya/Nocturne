@@ -38,6 +38,7 @@ import type { AttachmentImageSource } from "./attachment-images";
 import { isAllowedExternalUrl } from "./external-url";
 import { fileRefTitle, userText } from "./file-refs";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
+import { operationForSubjectKind } from "./notify";
 import { displayPath } from "./paths";
 import { TurnChangesCard } from "./TurnChangesCard";
 import { TodoList, TodoProgress, todoSummary } from "./TodoList";
@@ -2041,22 +2042,7 @@ const permissionReplies: Record<PermissionOption, PermissionReply> = {
 };
 
 function permissionOperation(pending: PendingPermission): string {
-  switch (pending.subjects[0]?.kind) {
-    case "shell":
-      return "执行命令";
-    case "edit":
-      return "修改文件";
-    case "read":
-      return "读取文件";
-    case "network":
-      return "访问网络";
-    case "mcp":
-      return "调用 MCP 工具";
-    case "subagent":
-      return "启动子任务";
-    default:
-      return pending.toolName ?? "操作";
-  }
+  return operationForSubjectKind(pending.subjects[0]?.kind, pending.toolName ?? "操作");
 }
 
 function permissionWhy(pending: PendingPermission): string {

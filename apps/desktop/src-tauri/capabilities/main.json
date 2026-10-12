@@ -49,6 +49,11 @@
     "opener:allow-reveal-item-in-dir",
     "allow-detect-editors",
     "allow-open-in-editor",
-    "allow-open-with-default"
+    "allow-open-with-default",
+    "allow-notify-show",
+    "allow-notify-dismiss",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-request-user-attention"
   ]
 }

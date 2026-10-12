@@ -71,6 +71,10 @@ function realHost(ws: string, sessionsDir: string, fault?: FaultSpec) {
     checkUpdate: async () => null,
     relaunch: async () => undefined,
     note: () => undefined,
+    notify: async () => ({ shown: true }),
+    dismissNotification: async () => undefined,
+    requestAttention: async () => undefined,
+    onNotificationActivated: () => () => undefined,
     invoke: async (command, args) => {
       if (command === "node_probe") return { ok: true };
       if (command === "plain_workspace") return ws;

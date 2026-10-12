@@ -402,6 +402,27 @@ button {
 .nav .item .meta.pend {
   color: var(--a-warning);
 }
+/* 会话行留痕标签（ADR-0056）：待确认 / 出错 / 已完成；底色用同一主题变量的半透明 */
+.nav .item .tag {
+  margin-left: auto;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 9px;
+  flex: none;
+}
+.nav .item .tag.need {
+  color: var(--a-warning);
+  background: color-mix(in srgb, var(--a-warning) 14%, transparent);
+}
+.nav .item .tag.err {
+  color: var(--a-error);
+  background: color-mix(in srgb, var(--a-error) 14%, transparent);
+}
+.nav .item .tag.done {
+  color: var(--a-success);
+  background: color-mix(in srgb, var(--a-success) 14%, transparent);
+}
 .nav.sub .item {
   padding-left: 26px;
 }
@@ -472,6 +493,8 @@ button {
 }
 .irow:hover .meta,
 .irow:focus-within .meta,
+.irow:hover .tag,
+.irow:focus-within .tag,
 .irow:hover .proj,
 .irow:focus-within .proj {
   visibility: hidden;
@@ -492,11 +515,15 @@ button {
   background: var(--a-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-accent) 25%, transparent);
 }
-.dot.ok {
+.dot.ok,
+.dot.done {
   background: var(--a-success);
 }
 .dot.warn {
   background: var(--a-warning);
+}
+.dot.err {
+  background: var(--a-error);
 }
 .dot.off {
   background: transparent;

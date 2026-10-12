@@ -14,6 +14,8 @@ fn main() {
             "detect_editors",
             "open_in_editor",
             "open_with_default",
+            "notify_show",
+            "notify_dismiss",
         ]),
     ))
     .expect("failed to run tauri-build");

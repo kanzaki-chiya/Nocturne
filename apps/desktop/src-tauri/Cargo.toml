@@ -27,5 +27,14 @@ windows-sys = { version = "=0.61.2", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_JobObjects",
+    "Win32_System_Registry",
     "Win32_System_Threading",
+] }
+# WinRT toast（ADR-0056）：tauri-winrt-notification 0.8.1 的公开 API 设不了
+# tag/group，也就无法「同会话替换、切走撤销」，所以直接经 windows 的
+# UI_Notifications 绑定自实现；只用到通知与 XML 文档两组 API。
+windows = { version = "=0.62.2", features = [
+    "Data_Xml_Dom",
+    "Foundation",
+    "UI_Notifications",
 ] }

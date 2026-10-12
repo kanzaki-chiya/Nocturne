@@ -1,3 +1,4 @@
+import type { NotifyResult } from "./notify";
 import type { PickedImage } from "./picked-images";
 import type { BackendMessage } from "./types";
 
@@ -52,4 +53,24 @@ export interface DesktopHost {
    * 内部 fire-and-forget：写失败不抛错。
    */
   note: (line: string) => void;
+  /**
+   * 发一条 Windows 系统通知（外壳自实现的 WinRT toast，ADR-0056）。
+   * 同一会话的新通知替换旧的（tag/group = sessionId）；非 Windows 或系统
+   * 关掉了本应用的通知时返回 `{ shown: false }`，不抛错。
+   */
+  notify: (input: {
+    sessionId: string;
+    title: string;
+    body: string;
+    sound: boolean;
+  }) => Promise<NotifyResult>;
+  /** 撤掉某个会话的通知（用户切到该会话时）；没有也返回成功 */
+  dismissNotification: (sessionId: string) => Promise<void>;
+  /**
+   * 任务栏闪烁（窗口失焦时提醒）：Windows 上一直闪到窗口获得焦点。
+   * 非 Windows / 失败静默。
+   */
+  requestAttention: () => Promise<void>;
+  /** 通知被点击（外壳在 toast 激活时空调用）：回调会话 id；返回取消订阅 */
+  onNotificationActivated: (handler: (sessionId: string) => void) => () => void;
 }

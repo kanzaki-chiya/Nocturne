@@ -35,6 +35,7 @@ import { UsagePage } from "./UsagePage";
 import { BackendPool } from "./backends";
 import type { DesktopHost } from "./host";
 import { NodeHelp } from "./NodeHelp";
+import { decideNotification, NOTIFY_DEFAULTS, notifyPrefsFrom, sessionMarkFor } from "./notify";
 import { abbreviateHome, middleTruncate } from "./paths";
 import { createPrefsStore, migrateLegacyProjectOrder, type PrefsStore } from "./prefs";
 import { useDraftControls, useSessionControls } from "./session-controls";
@@ -43,6 +44,7 @@ import {
   moveProjectKey,
   projectKey,
   projectName,
+  type SessionMark,
   type SessionSummary,
   type SessionTree,
 } from "./session-tree";
@@ -200,6 +202,45 @@ export function App({ host }: { host: DesktopHost }) {
   // 生效的普通对话工作区 = prefs 覆盖 ?? 外壳默认
   const effectiveWorkspace = p.plainWorkspace ?? defaultWorkspace;
   workspaceRef.current = effectiveWorkspace;
+  // ── 通知（ADR-0056）：判定规则在 src/notify.ts，这里只备实时输入与外壳调用 ──
+  /**
+   * 判定用的实时输入：事件回调里读（闭包快照会过期）。focused 与 selectedId
+   * 是「在看」的两个条件，prefs 是 settings.json 的生效值，turnStarts 记
+   * 每个会话当前 Turn 的开始时间（事件只有完成时刻，用时靠它相减）。
+   */
+  const notifyState = useRef({
+    focused: true,
+    selectedId: null as string | null,
+    /** 设置区当前导航；非 null 时会话区被盖住，不算「在看」任何会话 */
+    page: null as SettingsSection | null,
+    prefs: NOTIFY_DEFAULTS,
+    /** 会话标题来源（treeSessions：会话标题 ?? 首条用户消息首行） */
+    sessions: [] as SessionSummary[],
+    turnStarts: new Map<string, number>(),
+  });
+  notifyState.current.selectedId = selectedId;
+  notifyState.current.page = page;
+  /** 侧栏留痕：本次运行里「没看到」的出错 / 已完成，打开会话即清除（不持久化） */
+  const [sessionMarks, setSessionMarks] = useState<Record<string, SessionMark>>({});
+
+  /** 用户已经看到这个会话：撤掉它的系统通知，并清掉侧栏留痕 */
+  const markSeen = useCallback(
+    (id: string | null) => {
+      if (id === null) return;
+      void host.dismissNotification(id);
+      setSessionMarks((cur) => {
+        if (!(id in cur)) return cur;
+        const { [id]: _seen, ...rest } = cur;
+        return rest;
+      });
+    },
+    [host],
+  );
+
+  // Conversations 只建一次：事件回调经 ref 读最新实现，避免闭包停在首帧
+  const onSessionEventRef = useRef<(sessionId: string, event: RuntimeEvent, live: boolean) => void>(
+    () => undefined,
+  );
   const conversations = useMemo(
     () =>
       new Conversations(
@@ -211,9 +252,66 @@ export function App({ host }: { host: DesktopHost }) {
         (error) => {
           setStartupError({ message: errMessage(error) });
         },
+        (sessionId, event, live) => {
+          onSessionEventRef.current(sessionId, event, live);
+        },
       ),
     [pool],
   );
+  /**
+   * 会话事件 → 通知判定：只对本次运行实时到达的事件（live）判，重放与恢复不算；
+   * 在看（窗口有焦点且正显示该会话）时不提醒。留痕另算，与通知开关无关。
+   * 标题与侧栏一致：已打开会话的生成标题优先，否则首条用户消息首行，
+   * 再没有回退 Nocturne（notify.ts sessionTitle）。
+   */
+  const onSessionEvent = useCallback(
+    (sessionId: string, event: RuntimeEvent, live: boolean) => {
+      const state = notifyState.current;
+      if (event.type === "turn.started") {
+        const started = Date.parse(event.time);
+        if (!Number.isNaN(started)) state.turnStarts.set(sessionId, started);
+        // 新 Turn 开始：旧的出错 / 已完成留痕已过时，直接清掉（跑起来后也不再显示旧标签）
+        if (live) {
+          setSessionMarks((cur) => {
+            if (!(sessionId in cur)) return cur;
+            const { [sessionId]: _stale, ...rest } = cur;
+            return rest;
+          });
+        }
+        return;
+      }
+      // 在看 = 窗口有焦点 + 正显示该会话 + 没被设置区盖住（page === null）
+      const watching = state.focused && state.page === null && state.selectedId === sessionId;
+      if (live && !watching) {
+        const mark = sessionMarkFor(event);
+        if (mark !== null) {
+          setSessionMarks((cur) => (cur[sessionId] === mark ? cur : { ...cur, [sessionId]: mark }));
+        }
+      }
+      const summary = state.sessions.find((s) => s.id === sessionId);
+      const decision = decideNotification({
+        event,
+        prefs: state.prefs,
+        live,
+        watching,
+        session: {
+          title: conversations.opened.get(sessionId)?.view.title,
+          firstText: summary?.firstText,
+        },
+        turnStartedAt: state.turnStarts.get(sessionId),
+      });
+      if (decision === null) return;
+      void host.notify({
+        sessionId,
+        title: decision.title,
+        body: decision.body,
+        sound: state.prefs.sound,
+      });
+      void host.requestAttention();
+    },
+    [host, conversations],
+  );
+  onSessionEventRef.current = onSessionEvent;
 
   const bumpPrefs = useCallback(() => {
     setPrefsVersion((v) => v + 1);
@@ -444,6 +542,8 @@ export function App({ host }: { host: DesktopHost }) {
     setSelectedId(id);
     setPanel(null);
     setLockedSession(null);
+    // 用户看到这个会话了：撤掉它的系统通知与侧栏留痕（ADR-0056）
+    markSeen(id);
     try {
       await conversations.open(id, workspace, force, model);
       setSelectedId(conversations.selectedId);
@@ -455,6 +555,63 @@ export function App({ host }: { host: DesktopHost }) {
       // 其他失败：openErrors 已按错误码记录，占位区显示「换模型」卡片或错误与「重试」
     }
   };
+  // 通知被点击时要切到那个会话：经 ref 读最新的列表与选择函数（监听只注册一次）
+  const sessionsRef = useRef<SessionSummary[]>(sessions);
+  sessionsRef.current = sessions;
+  const selectSessionRef = useRef<typeof selectSession | null>(null);
+  selectSessionRef.current = selectSession;
+
+  // 外壳在通知被点击（toast 激活）时调用：把窗口带到前台后切到对应会话
+  useEffect(
+    () =>
+      host.onNotificationActivated((sessionId) => {
+        const summary = sessionsRef.current.find((s) => s.id === sessionId);
+        if (summary === undefined) return;
+        setPage(null);
+        void selectSessionRef.current?.(summary.id, summary.cwd);
+      }),
+    [host],
+  );
+
+  // 窗口焦点是「在看」的一半（ADR-0056）：失焦才提醒；重新获得焦点时把当前
+  // 会话的通知与留痕一并清掉（重新获得焦点前的事件都已经提醒过了）
+  useEffect(() => {
+    notifyState.current.focused = document.hasFocus();
+    const onFocus = () => {
+      notifyState.current.focused = true;
+      if (notifyState.current.page === null) markSeen(notifyState.current.selectedId);
+    };
+    const onBlur = () => {
+      notifyState.current.focused = false;
+    };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [markSeen]);
+
+  useEffect(() => {
+    if (page === null && notifyState.current.focused) markSeen(selectedId);
+  }, [page, selectedId, markSeen]);
+
+  /**
+   * 通知设置的生效值：连上后台后取一次，设置页保存后再取（保存经 onConfigSaved）。
+   * 读不到就按 Core 缺省（全开、阈值 60 秒）——宁可多提醒也不要静默不提醒。
+   */
+  const refreshNotifyPrefs = useCallback(async () => {
+    const client = pool.get();
+    if (client === undefined) return;
+    try {
+      notifyState.current.prefs = notifyPrefsFrom(await client.runtime.describeSettings());
+    } catch {
+      notifyState.current.prefs = NOTIFY_DEFAULTS;
+    }
+  }, [pool]);
+  useEffect(() => {
+    void refreshNotifyPrefs();
+  }, [refreshNotifyPrefs, listed]);
 
   /**
    * ADR-0054 §4：重新启用被停用的服务商或模型，然后回到会话（已打开的会话
@@ -597,6 +754,7 @@ export function App({ host }: { host: DesktopHost }) {
         statuses: Object.fromEntries(
           [...conversations.opened].map(([id, entry]) => [id, conversationStatus(entry)]),
         ),
+        marks: sessionMarks,
       }),
     // prefs 快照经 prefsVersion 驱动重算
     [
@@ -607,9 +765,11 @@ export function App({ host }: { host: DesktopHost }) {
       expanded,
       collapsed,
       conversationVersion,
+      sessionMarks,
     ],
   );
   treeRef.current = tree;
+  notifyState.current.sessions = treeSessions;
 
   // 项目手动顺序：拿到会话列表后，旧数据（无 projectOrder）按升级前「最近活动」的显示顺序
   // 初始化一次（隐藏项目也排进去，恢复时回原位）；之后每次列表变化把新出现的项目键按显示
@@ -1048,9 +1208,20 @@ export function App({ host }: { host: DesktopHost }) {
                   providersVersion={providersVersion}
                   onConfigSaved={() => {
                     void refresh();
+                    // 通知开关就写在这份设置里：保存后立刻按新值判定（ADR-0056）
+                    void refreshNotifyPrefs();
                   }}
                   onOpenProviders={() => {
                     setPage("providers");
+                  }}
+                  notifications={{
+                    sendTest: (sound) =>
+                      host.notify({
+                        sessionId: "test",
+                        title: "Nocturne",
+                        body: "这是一条测试通知",
+                        sound,
+                      }),
                   }}
                 />
               </PaneErrorBoundary>

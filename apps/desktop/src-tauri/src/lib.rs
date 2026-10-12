@@ -8,6 +8,7 @@ mod images;
 mod job;
 mod lines;
 mod node;
+mod notify;
 mod workspace;
 
 use backend::{close_backend, AppState};
@@ -58,6 +59,8 @@ pub fn run() {
         editor::detect_editors,
         editor::open_in_editor,
         editor::open_with_default,
+        notify::notify_show,
+        notify::notify_dismiss,
     ];
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -81,6 +84,8 @@ pub fn run() {
             #[cfg(windows)]
             state.init_job();
             app.manage(state);
+            // 通知：持有每个会话当前那条 toast，点击回调才有效（ADR-0056）
+            app.manage(notify::NotifyState::default());
             Ok(())
         })
         .on_page_load(|webview, payload| {

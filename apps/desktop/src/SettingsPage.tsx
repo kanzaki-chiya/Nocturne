@@ -9,6 +9,12 @@ import type { PermissionPresetName, ReasoningEffort } from "@nocturne/core/proto
 import type { RpcClient } from "@nocturne/rpc/client";
 import { presetOptions } from "./choice-info";
 import { Dropdown } from "./Dropdown";
+import {
+  DONE_THRESHOLD_CHOICES,
+  NOTIFY_DEFAULTS,
+  thresholdLabel,
+  type NotifyResult,
+} from "./notify";
 import { Scrim } from "./ProvidersPage";
 import { refKey, shellGroups } from "./session-controls";
 import { ChoiceMenu } from "./Menu";
@@ -45,6 +51,15 @@ const THEMES: { value: ThemePref; label: string; sub?: string; cls: string }[] =
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
+
+/** 通知一节的键（ADR-0056）：「提醒哪些事」三项在界面里同处一行 */
+const NOTIFY_EVENT_KEYS = [
+  "notifications.events.attention",
+  "notifications.events.error",
+  "notifications.events.done",
+] as const;
+const NOTIFY_THRESHOLD_KEYS = ["notifications.doneAfterSeconds"] as const;
+const NOTIFY_TEST_KEY = "notifications.test";
 
 const LAYER_TEXT: Record<SettingItem["source"], string> = {
   default: "默认",
@@ -114,6 +129,7 @@ export function SettingsPage({
   onWorkspaceChange,
   pickFolder,
   providersVersion,
+  notifications,
   onConfigSaved,
   onOpenProviders,
 }: {
@@ -147,6 +163,11 @@ export function SettingsPage({
   onWorkspaceChange: (dir: string | null) => Promise<string | undefined>;
   pickFolder: () => Promise<string | null>;
   providersVersion: number;
+  /**
+   * 通知（ADR-0056）：「发送测试通知」走外壳同一个命令发一条测试通知；
+   * 返回 shown=false + reason="disabled" 表示 Windows 关掉了本应用的通知权限。
+   */
+  notifications: { sendTest: (sound: boolean) => Promise<NotifyResult> };
   /** 写设置成功后调用：桌面端据此刷新会话列表 */
   onConfigSaved?: () => void;
   /** 「模型」页尾的链接：进入设置 › 服务商 */
@@ -169,6 +190,8 @@ export function SettingsPage({
   >([]);
   const [shellMenu, setShellMenu] = useState(false);
   const [shellBusy, setShellBusy] = useState(false);
+  /** 「发送测试通知」：busy 防重复点；blocked = Windows 关掉了本应用的通知权限 */
+  const [notifyTest, setNotifyTest] = useState<null | { busy: boolean; blocked: boolean }>(null);
   const shellTrigger = useRef<HTMLButtonElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -264,6 +287,65 @@ export function SettingsPage({
   const errLine = (key: string) =>
     rowError[key] !== undefined ? <span className="errl">{rowError[key]}</span> : null;
   const rowClass = (key: string) => `s3${rowError[key] !== undefined ? " bad" : ""}`;
+  /** 变灰的行（总开关关闭、或该行依赖的项没勾）：禁用态由控件各自的 disabled 表达 */
+  const rowClassDim = (dim: boolean, keys: readonly string[]) =>
+    `s3${dim ? " dimmed" : ""}${keys.some((key) => rowError[key] !== undefined) ? " bad" : ""}`;
+
+  // ── 通知（ADR-0056）：生效值读自 describeSettings，逐项保存 ──
+  const notifyEnabled = item("notifications.enabled")?.effective !== "false";
+  const notifyEvents = {
+    attention: item("notifications.events.attention")?.effective !== "false",
+    error: item("notifications.events.error")?.effective !== "false",
+    done: item("notifications.events.done")?.effective !== "false",
+  };
+  const notifySound = item("notifications.sound")?.effective !== "false";
+  /** 「提醒哪些事」三个开关同处一行，共用右侧来源列：显示被覆盖的一项，否则第一项 */
+  const notifyEventsSrc = () => {
+    const list = NOTIFY_EVENT_KEYS.map((key) => item(key));
+    return src(list.find((entry) => entry?.overridden === true) ?? list[0]);
+  };
+  /** 阈值下拉：保存值不在档位里时单列一项「N 秒」并保留（不悄悄改成别的值） */
+  const notifyThreshold = (() => {
+    const entry = item("notifications.doneAfterSeconds");
+    const raw = Number(entry?.saved ?? entry?.effective ?? NOTIFY_DEFAULTS.doneAfterSeconds);
+    const seconds = Number.isFinite(raw) && raw >= 0 ? raw : NOTIFY_DEFAULTS.doneAfterSeconds;
+    const options = DONE_THRESHOLD_CHOICES.map((choice) => ({
+      value: String(choice.seconds),
+      label: choice.label,
+      description: `用时不到 ${choice.label}的回合不提醒`,
+    }));
+    if (!DONE_THRESHOLD_CHOICES.some((choice) => choice.seconds === seconds)) {
+      options.push({
+        value: String(seconds),
+        label: thresholdLabel(seconds),
+        description: "已保存的值，不在常用档位里",
+      });
+    }
+    return { seconds, options };
+  })();
+
+  /** 「发送测试通知」：走外壳同一个通知命令，发一条「这是一条测试通知」 */
+  const runNotifyTest = async () => {
+    setNotifyTest({ busy: true, blocked: false });
+    setRowErr(NOTIFY_TEST_KEY, null);
+    try {
+      const result: NotifyResult = await notifications.sendTest(notifySound);
+      if (result.shown) {
+        setNotifyTest(null);
+        showToast("已发送测试通知");
+        return;
+      }
+      if (result.reason === "disabled") {
+        setNotifyTest({ busy: false, blocked: true });
+        return;
+      }
+      setNotifyTest(null);
+      setRowErr(NOTIFY_TEST_KEY, `发送失败：${result.detail ?? result.reason ?? "未知原因"}`);
+    } catch (error) {
+      setNotifyTest(null);
+      setRowErr(NOTIFY_TEST_KEY, `发送失败：${errText(error)}`);
+    }
+  };
 
   const changeWorkspace = async (dir: string | null) => {
     setWsBusy(true);
@@ -586,6 +668,163 @@ export function SettingsPage({
               </span>
               <span className="src" />
               {errLine("updateCheck")}
+            </div>
+          </>
+        )}
+
+        {section === "general" && items !== null && (
+          <>
+            <h5>通知</h5>
+            <div className={rowClass("notifications.enabled")}>
+              <span className="n">
+                通知<small>窗口在前台且正看着该会话时不提醒</small>
+              </span>
+              <span className="v sans">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={notifyEnabled}
+                  aria-label="通知"
+                  className={`mcp-switch${notifyEnabled ? " on" : ""}`}
+                  onClick={() => {
+                    void save("notifications.enabled", "通知", {
+                      "notifications.enabled": !notifyEnabled,
+                    });
+                  }}
+                />
+                <span className="hint">{notifyEnabled ? "已开启" : "已关闭"}</span>
+              </span>
+              {src(item("notifications.enabled"))}
+              {errLine("notifications.enabled")}
+            </div>
+            <div className={rowClassDim(!notifyEnabled, NOTIFY_EVENT_KEYS)}>
+              <span className="n">
+                提醒哪些事<small>任一会话，含后台会话</small>
+              </span>
+              <span className="v sans">
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={notifyEvents.attention}
+                  aria-label="需要确认"
+                  className="chk"
+                  disabled={!notifyEnabled}
+                  onClick={() => {
+                    void save("notifications.events.attention", "需要确认", {
+                      "notifications.events.attention": !notifyEvents.attention,
+                    });
+                  }}
+                >
+                  <span className="box" />
+                  需要确认（权限、提问）
+                </button>
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={notifyEvents.error}
+                  aria-label="出错停止"
+                  className="chk"
+                  disabled={!notifyEnabled}
+                  onClick={() => {
+                    void save("notifications.events.error", "出错停止", {
+                      "notifications.events.error": !notifyEvents.error,
+                    });
+                  }}
+                >
+                  <span className="box" />
+                  出错停止
+                </button>
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={notifyEvents.done}
+                  aria-label="完成"
+                  className="chk"
+                  disabled={!notifyEnabled}
+                  onClick={() => {
+                    void save("notifications.events.done", "完成", {
+                      "notifications.events.done": !notifyEvents.done,
+                    });
+                  }}
+                >
+                  <span className="box" />
+                  完成
+                </button>
+              </span>
+              {notifyEventsSrc()}
+              {errLine("notifications.events.attention")}
+              {errLine("notifications.events.error")}
+              {errLine("notifications.events.done")}
+            </div>
+            <div
+              className={rowClassDim(!notifyEnabled || !notifyEvents.done, NOTIFY_THRESHOLD_KEYS)}
+            >
+              <span className="n">
+                完成提醒的阈值<small>用时不到这么久的回合不提醒</small>
+              </span>
+              <span className="v sans">
+                <Dropdown
+                  label="完成提醒的阈值"
+                  value={String(notifyThreshold.seconds)}
+                  options={notifyThreshold.options}
+                  disabled={
+                    !notifyEnabled
+                      ? "通知已关闭"
+                      : !notifyEvents.done
+                        ? "未勾选「完成」"
+                        : undefined
+                  }
+                  onChange={(value) => {
+                    void save("notifications.doneAfterSeconds", "完成提醒的阈值", {
+                      "notifications.doneAfterSeconds": Number(value),
+                    });
+                  }}
+                />
+              </span>
+              {src(item("notifications.doneAfterSeconds"))}
+              {errLine("notifications.doneAfterSeconds")}
+            </div>
+            <div className={rowClassDim(!notifyEnabled, ["notifications.sound"])}>
+              <span className="n">
+                提示音<small>只管桌面端；TUI 响铃的声音按终端自己的设置</small>
+              </span>
+              <span className="v sans">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={notifySound}
+                  aria-label="提示音"
+                  className={`mcp-switch${notifySound ? " on" : ""}`}
+                  disabled={!notifyEnabled}
+                  onClick={() => {
+                    void save("notifications.sound", "提示音", {
+                      "notifications.sound": !notifySound,
+                    });
+                  }}
+                />
+              </span>
+              {src(item("notifications.sound"))}
+              {errLine("notifications.sound")}
+            </div>
+            <div className={rowClassDim(!notifyEnabled, ["notifications.test"])}>
+              <span className="n">试一下</span>
+              <span className="v sans">
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={!notifyEnabled || notifyTest?.busy === true}
+                  onClick={() => void runNotifyTest()}
+                >
+                  {notifyTest?.busy === true ? "发送中…" : "发送测试通知"}
+                </button>
+                {notifyTest?.blocked === true && (
+                  <span className="hint warnt">
+                    Windows 已关闭 Nocturne 的通知，请到 系统 › 通知 打开
+                  </span>
+                )}
+              </span>
+              <span className="src" />
+              {errLine("notifications.test")}
             </div>
           </>
         )}

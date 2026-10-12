@@ -1,6 +1,8 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
+import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl as tauriOpenUrl, revealItemInDir as tauriReveal } from "@tauri-apps/plugin-opener";
 import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
@@ -8,6 +10,7 @@ import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 
 import { isAllowedExternalUrl } from "./external-url";
 import type { DesktopHost } from "./host";
+import type { NotifyResult } from "./notify";
 import { decodePickedImages } from "./picked-images";
 import type { BackendMessage } from "./types";
 
@@ -80,6 +83,41 @@ export function createTauriHost(): DesktopHost {
     relaunch: () => tauriRelaunch(),
     note(line) {
       void invoke("app_note", { line }).catch(() => undefined);
+    },
+    // 外壳 WinRT toast：同一会话同 tag/group，新的替换旧的；失败降级成一条外壳日志
+    async notify({ sessionId, title, body, sound }) {
+      try {
+        return await invoke<NotifyResult>("notify_show", { sessionId, title, body, sound });
+      } catch (error) {
+        return { shown: false, reason: "error", detail: String(error) };
+      }
+    },
+    async dismissNotification(sessionId) {
+      try {
+        await invoke("notify_dismiss", { sessionId });
+      } catch {
+        // 撤通知失败无关紧要：窗口已切到该会话，历史里的旧通知会自然过期
+      }
+    },
+    // 任务栏闪烁：Informational（只闪任务栏按钮，不闪整个窗口）——通知不是紧急
+    // 错误，只是「回来看一眼」；Windows 上闪到窗口获得焦点为止
+    async requestAttention() {
+      try {
+        await getCurrentWindow().requestUserAttention(UserAttentionType.Informational);
+      } catch {
+        // 非 Windows 或窗口已关闭：静默
+      }
+    },
+    onNotificationActivated(handler) {
+      let stop: (() => void) | undefined;
+      void listen<string>("notify-activated", (event) => {
+        handler(event.payload);
+      }).then((unlisten) => {
+        stop = unlisten;
+      });
+      return () => {
+        stop?.();
+      };
     },
   };
 }
