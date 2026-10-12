@@ -305,7 +305,7 @@ describe("全屏界面", () => {
     await session.close();
   });
 
-  it("inline：空行完成块进入回滚区，长未完结块只留活动区末尾", async () => {
+  it("inline：落盘后完成块进入回滚区，长回复只留活动区末尾", async () => {
     const { runtime, session } = await sessionWithEffort();
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV, inline: true }),
@@ -319,6 +319,89 @@ describe("全屏界面", () => {
     unmount();
     await session.close();
   });
+
+  it.each([false, true])(
+    "inline=%s：断流撤回完整 Markdown 块和工具增量，落盘后只保留新回复",
+    async (inline) => {
+      const { runtime, session } = await sessionWithEffort();
+      const { lastFrame, unmount } = render(
+        createElement(App, { session, runtime, env: ENV, inline }),
+      );
+      await pause(80);
+      const raw = internalSession(session);
+      await raw.emit("turn.started", { turnIndex: 1 }, { turnId: "turn" });
+      raw.emitEphemeral(
+        "message.assistant.delta",
+        {
+          messageId: "m",
+          kind: "text",
+          delta: "作废完整段落\n\n作废尾段",
+        },
+        { turnId: "turn" },
+      );
+      raw.emitEphemeral(
+        "tool.input.delta",
+        {
+          callId: "c",
+          name: "old_tool",
+          delta: '{"path":"old',
+        },
+        { turnId: "turn" },
+      );
+      await waitFor(() => (lastFrame() ?? "").includes("作废完整段落"));
+      raw.emitEphemeral(
+        "provider.retry",
+        {
+          attempt: 1,
+          maxAttempts: 3,
+          delayMs: 1,
+          error: { kind: "network", message: "broken" },
+          discarded: { messageId: "m", callIds: ["c"] },
+        },
+        { turnId: "turn" },
+      );
+      await waitFor(() => (lastFrame() ?? "").includes("响应流中断，已丢弃部分输出"));
+      expect(lastFrame()).not.toContain("作废完整段落");
+      expect(lastFrame()).not.toContain("作废尾段");
+      expect(lastFrame()).not.toContain("old_tool");
+      raw.emitEphemeral(
+        "message.assistant.delta",
+        {
+          messageId: "m",
+          kind: "text",
+          delta: "正确完整段落\n\n正确尾段",
+        },
+        { turnId: "turn" },
+      );
+      await raw.emit(
+        "message.assistant",
+        {
+          messageId: "m",
+          model: { provider: "fake", model: "fake-model" },
+          content: [{ type: "text", text: "正确完整段落\n\n正确尾段" }],
+          toolCalls: [],
+          finishReason: "stop",
+        },
+        { turnId: "turn" },
+      );
+      await raw.emit(
+        "turn.completed",
+        {
+          reason: "done",
+          steps: 1,
+          usage: { inputTokens: 0, outputTokens: 0 },
+        },
+        { turnId: "turn" },
+      );
+      await waitFor(() => (lastFrame() ?? "").includes("正确尾段"));
+      const frame = lastFrame() ?? "";
+      expect(frame).not.toContain("作废");
+      expect(occurrences(frame, "正确完整段落")).toBe(1);
+      expect(occurrences(frame, "正确尾段")).toBe(1);
+      unmount();
+      await session.close();
+    },
+  );
 
   it("全屏：PgUp 翻阅出提示，Ctrl+End 回到底部提示消失", async () => {
     const { runtime, session } = await sessionWithEffort();
@@ -410,7 +493,7 @@ describe("全屏界面", () => {
     await pause(80);
     const turn = s1.submit({ text: "问" });
     await waitFor(() => (lastFrame() ?? "").includes("第一步"));
-    // 流式中途 Ctrl+C 中断：已写入部分只出现一次，未发出的部分不补写
+    // 流式中途 Ctrl+C 中断：部分内容落盘后只写一次，未发出的部分不补写
     stdin.write("\x03");
     await turn;
     await waitFor(() => (lastFrame() ?? "").includes("（中断）"));

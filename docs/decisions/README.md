@@ -60,6 +60,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0052](ADR-0052-remote-web-client.md) | 远程网页客户端：同一后台服务多个客户端、局域网 WebSocket 监听、扫码配对与设备令牌、复用桌面前端的手机网页 | 提议 |
 | [ADR-0053](ADR-0053-usage-and-cost.md) | 用量统计与费用估算：pricing 增加缓存读写与分档、models.dev 取价、Runtime.usageStats、桌面用量页与 /cost | 已接受 |
 | [ADR-0054](ADR-0054-provider-model-toggle.md) | 服务商与模型启停：停用即不可用、记在 settings.json、注册表盖不可用标记、桌面开关与 TUI 命令 | 已接受 |
+| [ADR-0055](ADR-0055-retry-after-partial-stream.md) | 流式输出中途失败时丢弃部分输出并重发 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 

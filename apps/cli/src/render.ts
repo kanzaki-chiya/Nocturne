@@ -216,6 +216,15 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
     }
     case "provider.retry": {
       const p = ev.payload;
+      // discarded 只在"本次尝试已有输出、被丢弃"时出现（ADR-0055）：
+      // 已打印到终端的增量收不回来，另起一行说明上面的部分输出已作废。
+      if (p.discarded !== undefined) {
+        return [
+          aux(
+            `! 响应流中断，已丢弃上面的部分输出，${p.delayMs}ms 后第 ${p.attempt}/${p.maxAttempts} 次重试`,
+          ),
+        ];
+      }
       return [
         aux(
           `! Provider 错误（${p.error.kind}），${p.delayMs}ms 后第 ${p.attempt}/${p.maxAttempts} 次重试`,

@@ -123,10 +123,10 @@ Provider 流每次等待前都检查是否已中止，因此中断落在两次�
 
 ### 3.5 重试
 
-- 只有在**本次请求尚未产生任何输出事件**时才重试，避免重复的文本和工具调用。已经开始流式输出后失败，已收到的文本按中断同样的方式保存，Turn 以 `error` 结束。
+- 可重试的 Provider 错误在尚未输出或已经开始流式输出后都可重发：丢弃本次尝试的全部累积，以同一 messageId 从空开始；已有输出时 `provider.retry.discarded` 通知客户端清掉对应 live 条目。消息尚未持久化、工具尚未执行，因此不会重复落盘或执行（[ADR-0055](../decisions/ADR-0055-retry-after-partial-stream.md)）。重试用尽或不可重试时才保存最后一次尝试的部分输出，Turn 以 `error` 结束；最后一次 network / timeout 失败已有输出时提示实际重试次数与发送「继续」，不再提示地址配置有误。
 - Provider 失败或用户中断时，若没有任何 assistant 内容和工具调用，不写入空的 `message.assistant`；Turn 仍以对应原因结束。已有部分输出时照常保存。
 - 仅当 `ProviderError.retryable` 为真时重试；指数退避，优先遵守 `retryAfterMs`；次数上限可配置（默认 4 次）。每次重试发出临时事件 `provider.retry`。
-- 公共流包装分别限制首个事件等待和事件间空闲（默认 30 秒、300 秒；`turn.firstEventTimeoutMs` / `turn.idleTimeoutMs` 可调）。适配器在上游开始响应时发出的 `heartbeat` 也满足首事件等待并重置空闲计时，但不转发、不算输出。超时视为 `ProviderError(kind="timeout", retryable=true)`；已有输出时遵守上条规则，不重发。普通 Step、自动与手动摘要共用这一限制，见 [ADR-0014](../decisions/ADR-0014-stream-timeout-empty-response.md)。
+- 公共流包装分别限制首个事件等待和事件间空闲（默认 30 秒、300 秒；`turn.firstEventTimeoutMs` / `turn.idleTimeoutMs` 可调）。适配器在上游开始响应时发出的 `heartbeat` 也满足首事件等待并重置空闲计时，但不转发、不算输出。超时视为 `ProviderError(kind="timeout", retryable=true)`；普通 Step 已有输出时也按上述规则丢弃并重发。普通 Step、自动与手动摘要共用这一计时限制，见 [ADR-0014](../decisions/ADR-0014-stream-timeout-empty-response.md) 及其 [ADR-0055 修订](../decisions/ADR-0055-retry-after-partial-stream.md)。
 - 每次尝试单独计时：`timing` 只取产生该消息的那次尝试（TTFT 与总耗时，口径见 [events.md](../protocols/events.md) 第 4 节 `AssistantTiming`），失败重试的尝试不计入。
 - `stop` 但没有文本与工具调用时，Agent Loop 在持久化 assistant 消息前按可重试的空响应处理；受同一重试上限约束，用尽后以 `error.code="provider_empty_response"` 结束。该判断不改变 Provider 的公共事件与错误类型，因此没有新的 Provider kind；错误语义变化见同一 ADR。
 - `context_overflow` 不重试同一请求，而是要求 Context Builder 给出压缩计划（`mustCompact`）并重建后重试一次；可尝试的计划按 prune → summary 顺序，每类每 Turn 至多一次，都已尝试后仍溢出则以 `error(code="compaction_failed")` 结束。

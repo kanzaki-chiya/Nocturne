@@ -42,7 +42,7 @@
 | `mcp.startup_wait` | index / 主 Turn 首次请求前 | sessionId、durationMs、aborted；不记录工具或请求内容 |
 | `provider.request` | agent | 完整 `ModelRequest`（messages、tools、参数），外加生效协议与接口路径（`protocol`/`endpoint`，ADR-0026 §7）。请求头由 Provider 适配器构造、不含在 `ModelRequest` 里，天然不会进来；消息的 `images` 元素被替换为 `{ mimeType, bytes, sha256 }` 摘要，base64 不落盘（ADR-0023，`agent/redact.ts`） |
 | `provider.result` | agent | finishReason、usage（token 明细）、耗时、text/toolCalls 概要 |
-| `provider.error` | agent | ProviderError kind、message、retryable、attempt |
+| `provider.error` | agent | ProviderError kind、message、retryable、attempt、producedOutput（本次尝试是否已产生输出事件） |
 | `provider.sdk_warning` | provider | AI SDK 的调用警告（provider、model、warnings 原文）；适配器装配时设置 `AI_SDK_LOG_WARNINGS`，SDK 不再经 `process.emitWarning` 打到 stderr；用户已自行设置该全局时不覆盖 |
 | `provider.reasoning_dropped` | provider | Responses 丢弃缺少 OpenAI 条目标识的推理块：仅 count 与 reason，不记录正文 |
 | `context.build` | context | 各段落名与字符/token 数、estimatedTokens、预算、是否裁剪/压缩（进 `context.section` 明细） |

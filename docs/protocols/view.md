@@ -202,10 +202,12 @@ interface SessionNotice {
 
 临时事件只写瞬态字段（`status`/`retry`/`live`/`notices`/`mcpServers`/`liveOutput`），**不创建 `entries` 条目**——这是重放等价（§6）成立的前提：
 
+断流重发时 `provider.retry.discarded` 使被丢弃尝试的 live 条目立即撤回（[ADR-0055](../decisions/ADR-0055-retry-after-partial-stream.md)）。漏掉该临时事件时，同 messageId 的下一次增量可能暂时接到旧文字后；持久化 `message.assistant` 到达仍会移除该 live assistant，并以完整 `content` 创建持久条目，不会把混合增量写进历史。未落盘的孤儿工具增量在 Turn 收尾清空。
+
 | 事件 | 归约 |
 |---|---|
 | `runtime.status` | `status = payload.status`；`status !== "retrying"` 时清 `retry` |
-| `provider.retry` | `retry = payload`；`status = "retrying"` |
+| `provider.retry` | `retry = payload`；`status = "retrying"`；带 `discarded` 时从 `live.assistants` 移除同 messageId 条目，从 `live.tools` 移除 callIds 指定条目；不带时保留 live |
 | `runtime.warning` | 追加 `SessionNotice`（level=warning） |
 | `runtime.error` | 追加 `SessionNotice`（level=error）；`code === "session_failed"` 时 `status = "failed"` |
 | `message.assistant.delta` | 按 `messageId` 查找/新建 `live.assistants` 项；`kind` 分流追加 `text`/`reasoning` |

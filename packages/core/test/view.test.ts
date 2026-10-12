@@ -133,6 +133,73 @@ const V5 = (view: SessionView) =>
   );
 
 describe("SessionView reducer", () => {
+  it.each([true, false])("provider.retry discarded=%s：只移除指定的 live 条目", (discard) => {
+    const view = createSessionView();
+    const envelope = { sessionId: "s", runId: "r", eseq: 1, afterSeq: 0, time: "t" };
+    for (const messageId of ["m", "other"]) {
+      reduceSessionView(view, {
+        ...envelope,
+        type: "message.assistant.delta",
+        payload: { messageId, kind: "text", delta: "partial" },
+      });
+    }
+    for (const callId of ["c", "other-call"]) {
+      reduceSessionView(view, {
+        ...envelope,
+        type: "tool.input.delta",
+        payload: { callId, name: "read", delta: "{" },
+      });
+    }
+    reduceSessionView(view, {
+      ...envelope,
+      type: "provider.retry",
+      payload: {
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 1,
+        error: { kind: "network", message: "broken" },
+        ...(discard ? { discarded: { messageId: "m", callIds: ["c"] } } : {}),
+      },
+    });
+    expect(view.status).toBe("retrying");
+    expect(view.retry?.attempt).toBe(1);
+    expect(view.live.assistants.map((a) => a.messageId)).toEqual(
+      discard ? ["other"] : ["m", "other"],
+    );
+    expect(view.live.tools.map((t) => t.callId)).toEqual(
+      discard ? ["other-call"] : ["c", "other-call"],
+    );
+    expect(view.entries).toEqual([]);
+  });
+
+  it("漏掉 discarded 重试事件时，持久化完整消息仍清掉同一 messageId 的旧 live 内容", () => {
+    const view = createSessionView();
+    const envelope = { sessionId: "s", runId: "r", eseq: 1, afterSeq: 0, time: "t" };
+    for (const delta of ["old", "new"]) {
+      reduceSessionView(view, {
+        ...envelope,
+        type: "message.assistant.delta",
+        payload: { messageId: "m", kind: "text", delta },
+      });
+    }
+    expect(view.live.assistants[0]?.text).toBe("oldnew");
+    reduceSessionView(view, {
+      sessionId: "s",
+      seq: 1,
+      time: "t",
+      type: "message.assistant",
+      payload: {
+        messageId: "m",
+        model: { provider: "fake", model: "fake-model" },
+        content: [{ type: "text", text: "new" }],
+        toolCalls: [],
+        finishReason: "stop",
+      },
+    });
+    expect(view.live.assistants).toEqual([]);
+    expect(view.entries[0]).toMatchObject({ kind: "assistant", messageId: "m", text: "new" });
+  });
+
   it.each<["prune" | "summary", string]>([
     ["prune", "已省略较早的工具输出"],
     ["summary", "上下文已压缩为摘要"],

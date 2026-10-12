@@ -51,13 +51,20 @@ function isPersistenceFailure(e: unknown): boolean {
 export function providerFailureHint(
   e: ProviderError,
   providerId: string,
-  sent?: { reasoningEffort?: string | undefined },
+  sent?: {
+    reasoningEffort?: string | undefined;
+    producedOutput?: boolean;
+    retries?: number;
+  },
 ): string {
   switch (e.kind) {
     case "auth":
       return `密钥可能无效：${e.message}（可用 /provider key ${providerId} 更新密钥）`;
     case "network":
     case "timeout":
+      if (sent?.producedOutput === true) {
+        return `服务商响应流中途断开，已重试 ${sent.retries ?? 0} 次仍失败：${e.message}。可发送「继续」接着做`;
+      }
       return `服务地址不通：${e.message}（可运行 nctrn setup 检查或更新服务商配置）`;
     case "invalid_request":
       // ADR-0018 第 5 节：请求带思考参数时的 400 给档位定向提示
@@ -469,6 +476,8 @@ export async function runTurn(
           message: isProviderError(e)
             ? providerFailureHint(e, deps.model.model.ref.provider, {
                 reasoningEffort: sentEffort,
+                producedOutput: outcome.producedOutput,
+                retries: outcome.retries,
               })
             : e instanceof Error
               ? e.message

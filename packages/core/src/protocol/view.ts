@@ -650,6 +650,13 @@ function reduceEphemeral(view: SessionView, event: EphemeralEvent): void {
     case "provider.retry": {
       view.retry = event.payload;
       view.status = "retrying";
+      const discarded = event.payload.discarded;
+      if (discarded !== undefined) {
+        view.live.assistants = view.live.assistants.filter(
+          (a) => a.messageId !== discarded.messageId,
+        );
+        view.live.tools = view.live.tools.filter((t) => !discarded.callIds.includes(t.callId));
+      }
       break;
     }
     case "runtime.warning": {

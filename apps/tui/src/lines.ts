@@ -512,7 +512,9 @@ export function layoutLive(
     lines.push({
       key: "retry",
       text: paint(
-        `重试 ${view.retry.attempt}/${view.retry.maxAttempts}：${view.retry.error.message}`,
+        view.retry.discarded !== undefined
+          ? `响应流中断，已丢弃部分输出，第 ${view.retry.attempt}/${view.retry.maxAttempts} 次重试`
+          : `重试 ${view.retry.attempt}/${view.retry.maxAttempts}：${view.retry.error.message}`,
         width,
       ),
       color: theme.warning,

@@ -300,6 +300,32 @@ describe("写出器：整行与流式片段的换行（cli.md 第 5 节）", () 
     expect(joined("stdout").endsWith("\n")).toBe(true);
   });
 
+  it.each(["interactive", "print"] as const)("%s：断流丢弃提示独立成行", (mode) => {
+    const { writer, joined } = capture();
+    writer.write(
+      renderEvent(
+        ephemeral("message.assistant.delta", {
+          messageId: "m",
+          kind: "text",
+          delta: "作废文字",
+        }),
+        mode,
+      ),
+    );
+    const event = ephemeral("provider.retry", {
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 100,
+      error: { kind: "network", message: "broken" },
+      discarded: { messageId: "m", callIds: [] },
+    });
+    writer.write(renderEvent(event, mode));
+    const line = "! 响应流中断，已丢弃上面的部分输出，100ms 后第 1/3 次重试\n";
+    expect(joined(mode === "interactive" ? "stdout" : "stderr")).toBe(
+      mode === "interactive" ? `作废文字\n${line}` : line,
+    );
+  });
+
   it("非交互模式：stdout 保持纯模型文本，状态行在 stderr 各占一行", () => {
     const { writer, joined } = capture();
     writer.write(

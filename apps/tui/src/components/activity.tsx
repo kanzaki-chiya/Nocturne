@@ -63,7 +63,9 @@ export function Activity({
       {view.retry !== undefined ? (
         <Text color={theme.warning} wrap="truncate">
           {truncateLine(
-            `重试 ${view.retry.attempt}/${view.retry.maxAttempts}：${view.retry.error.message}（${view.retry.delayMs}ms 后重试）`,
+            view.retry.discarded !== undefined
+              ? `响应流中断，已丢弃部分输出，第 ${view.retry.attempt}/${view.retry.maxAttempts} 次重试`
+              : `重试 ${view.retry.attempt}/${view.retry.maxAttempts}：${view.retry.error.message}（${view.retry.delayMs}ms 后重试）`,
             width,
             g.ellipsis,
           )}

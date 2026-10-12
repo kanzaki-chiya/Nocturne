@@ -1,7 +1,7 @@
 /**
  * 单个 Step 的 Provider 流消费与重试（agent-loop.md 3.5）。
- * 只有在本次请求尚未产生任何输出事件时才允许重试；
- * 已开始输出后失败，把已收到的部分内容交给调用方保存。
+ * 可重试错误丢弃本次尝试的输出后重发；
+ * 重试用尽或不可重试时，把最后收到的部分内容交给调用方保存。
  */
 import {
   PROTOCOL_ENDPOINTS,
@@ -43,20 +43,32 @@ export type StreamOutcome =
     }
   /** 流被中断：已收到的部分内容在 acc 中，由调用方按 finishReason="aborted" 保存 */
   | { kind: "aborted"; acc: StreamAccumulation }
-  | { kind: "failed"; error: unknown; acc: StreamAccumulation };
+  | {
+      kind: "failed";
+      error: unknown;
+      acc: StreamAccumulation;
+      producedOutput: boolean;
+      retries: number;
+    };
 
 function isAbortError(e: unknown): boolean {
   return e instanceof Error && e.name === "AbortError";
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
+function sleep(ms: number, signal: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
+    if (signal.aborted) {
+      resolve(true);
+      return;
+    }
+    const timer = setTimeout(() => {
+      resolve(signal.aborted);
+    }, ms);
     signal.addEventListener(
       "abort",
       () => {
         clearTimeout(timer);
-        resolve();
+        resolve(true);
       },
       { once: true },
     );
@@ -255,6 +267,8 @@ export async function consumeStream(
         kind: "failed",
         error: new Error("Provider 流在没有 finish 的情况下结束"),
         acc: settle(),
+        producedOutput,
+        retries: attempt - 1,
       };
     } catch (e) {
       deps.execEnv.diagnostics?.record("provider.error", {
@@ -269,17 +283,17 @@ export async function consumeStream(
               : "unknown",
         message: e instanceof Error ? e.message : String(e),
         retryable: e instanceof EmptyResponseError || (isProviderError(e) && e.retryable),
+        producedOutput,
         durationMs: Date.now() - requestStart,
       });
       if (signal.aborted || isAbortError(e)) {
         return { kind: "aborted", acc: settle() };
       }
       if (
-        (e instanceof EmptyResponseError ||
-          (isProviderError(e) && e.retryable && !producedOutput)) &&
+        (e instanceof EmptyResponseError || (isProviderError(e) && e.retryable)) &&
         attempt < maxAttempts
       ) {
-        // 可重试 Provider 错误尚未输出，或已收到空 stop：重发整个请求。
+        // 本次累积尚未持久化、工具尚未执行；丢弃后重发整个请求。
         const delayMs =
           (isProviderError(e) ? e.retryAfterMs : undefined) ??
           config.retryBaseDelayMs * 2 ** (attempt - 1);
@@ -289,6 +303,9 @@ export async function consumeStream(
             attempt,
             maxAttempts,
             delayMs,
+            ...(producedOutput && !(e instanceof EmptyResponseError)
+              ? { discarded: { messageId, callIds: [...pending.values()].map((p) => p.callId) } }
+              : {}),
             error: {
               kind: e instanceof EmptyResponseError ? "empty_response" : e.kind,
               message: e.message,
@@ -297,10 +314,12 @@ export async function consumeStream(
           { turnId },
         );
         session.emitEphemeral("runtime.status", { status: "retrying" }, { turnId });
-        await sleep(delayMs, signal);
+        if (await sleep(delayMs, signal)) {
+          return { kind: "aborted", acc: { content: [], toolCalls: [], usage: undefined } };
+        }
         continue;
       }
-      return { kind: "failed", error: e, acc: settle() };
+      return { kind: "failed", error: e, acc: settle(), producedOutput, retries: attempt - 1 };
     }
   }
   // 不可达：循环内必然返回
@@ -308,5 +327,7 @@ export async function consumeStream(
     kind: "failed",
     error: new Error("retry loop exhausted"),
     acc: { content: [], toolCalls: [], usage: undefined },
+    producedOutput: false,
+    retries: config.retryLimit,
   };
 }

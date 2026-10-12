@@ -56,7 +56,7 @@ import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { copyText } from "./clipboard.js";
 import { composerWindow } from "./cursor.js";
 import { checkImage, createImageStore, droppedImage } from "./images.js";
-import { renderAssistant, splitMarkdownBlocks, takeMarkdownBlocks } from "./markdown.js";
+import { splitMarkdownBlocks } from "./markdown.js";
 import type { MouseSource } from "./mouse.js";
 import { createClickTracker } from "./click.js";
 import type { DialogMouseFrame } from "./components/dialog/mouse.js";
@@ -162,8 +162,8 @@ export function splitCompletedPrefix(entries: readonly ViewEntry[]): {
 export const splitTextBlocks = splitMarkdownBlocks;
 
 /**
- * 持久化助手条目 → 写入回滚区的块条目。流式期间已写入的前缀按字符位置
- * 记账（written），这里只切剩余部分；块键用绝对偏移，流式块晋升后不重发。
+ * 持久化助手条目 → 写入回滚区的块条目。只在落盘后写入，
+ * 按字符位置记账（written），重绘时不重复追加。
  */
 function assistantBlocks(
   entry: Extract<ViewEntry, { kind: "assistant" }>,
@@ -172,7 +172,7 @@ function assistantBlocks(
   const from = Math.min(written.get(entry.messageId) ?? 0, entry.text.length);
   const { blocks } = splitMarkdownBlocks(entry.text.slice(from), true);
   written.set(entry.messageId, entry.text.length);
-  // 空消息补一行占位；流式已写满时仅中断消息还要补"（中断）"标记行
+  // 空消息补一行占位；中断消息补"（中断）"标记行
   if (blocks.length === 0 && (from === 0 || entry.finishReason === "aborted")) blocks.push("");
   let at = from;
   return blocks.map((text, i) => {
@@ -2821,24 +2821,6 @@ function SessionApp({
         }),
       ),
     ];
-    const completedLive = new Map<string, string>();
-    for (const assistant of view.live.assistants) {
-      const step = takeMarkdownBlocks(
-        assistant.text,
-        staticWritten.current.get(assistant.messageId) ?? 0,
-        false,
-      );
-      completedLive.set(assistant.messageId, step.tail);
-      for (const part of step.parts) {
-        const key = `a:${assistant.messageId}:@${part.offset}`;
-        staticEntries.push({
-          kind: "header",
-          key,
-          lines: renderAssistant(part.text, width, key, env.ascii, theme, part.offset > 0),
-        });
-      }
-      staticWritten.current.set(assistant.messageId, step.written);
-    }
     const staticBlocks = staticEntries.flatMap<TranscriptItem>((entry) =>
       entry.kind === "assistant" ? assistantBlocks(entry, staticWritten.current) : [entry],
     );
@@ -2849,16 +2831,6 @@ function SessionApp({
       staticQueue.current.push({ ...entry, key: id });
     }
     const { tail } = splitCompletedPrefix(view.entries);
-    const activityView: SessionView = {
-      ...view,
-      live: {
-        ...view.live,
-        assistants: view.live.assistants.map((a) => ({
-          ...a,
-          text: completedLive.get(a.messageId) ?? a.text,
-        })),
-      },
-    };
     const clientRows = (line: ClientLine): LaidLine[] => [
       { key: `client:${line.id}`, text: line.text, dim: true },
     ];
@@ -2873,7 +2845,7 @@ function SessionApp({
         ],
         clientRows,
       ).flat(),
-      ...layoutLive(activityView, width, env.ascii, reasoning, reasoningNow, false, theme, {
+      ...layoutLive(view, width, env.ascii, reasoning, reasoningNow, false, theme, {
         written: staticWritten.current,
       }),
       ...pendingLines.filter((line) => line.after >= view.entries.length).flatMap(clientRows),

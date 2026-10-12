@@ -225,6 +225,7 @@ export interface ProviderRetryPayload {
   maxAttempts: number;
   delayMs: number;
   error: { kind: string; message: string };
+  discarded?: { messageId: string; callIds: string[] };
 }
 
 export interface RuntimeWarningPayload {

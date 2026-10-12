@@ -152,7 +152,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 | `permission.resolved` | `└ 权限：<allow\|deny>（<source>：<rule\|reason>）` 一行——命中规则时展示 `rule`（如"用户配置第 3 条 {…}"），无规则时展示原因；`source: "reviewer"` 时不输出（结论已在「审查：」行）|
 | `context.compacted` | 按 `kind`：prune 为 `◇ 已省略较早的工具输出`，summary 为 `◇ 上下文已压缩为摘要`（不显示 kind 与 throughSeq） |
 | `session.config_changed` | `◇ 模型已切换为 <provider>/<model>`；`reasoningEffort` 变化时 `◇ 思考档位已切换为 <档位>`；`shell` 变化时 `◇ shell 已切换为 <kind>（<path>）` |
-| `provider.retry` | `! Provider 错误（<kind>），<delayMs>ms 后第 <n>/<max> 次重试` |
+| `provider.retry` | 默认 `! Provider 错误（<kind>），<delayMs>ms 后第 <n>/<max> 次重试`；带 `discarded` 时另起一行 `! 响应流中断，已丢弃上面的部分输出，<delayMs>ms 后第 <n>/<max> 次重试`（已打印的增量无法撤回，ADR-0055） |
 | `runtime.warning` / `runtime.error` | `! <code>: <message>` |
 | `mcp.server` | `ready` 以外状态的转移打印一行 `! MCP <server>：<state>（<error?，含工具数>）`；`starting`/`ready` 不打扰（Phase 5） |
 | `runtime.status` | 不逐条渲染；`compacting` 时显示一行"压缩中" |

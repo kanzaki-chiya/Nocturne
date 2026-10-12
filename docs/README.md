@@ -86,6 +86,8 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 服务商与模型启停（停用即不可用、记在 settings.json、注册表盖不可用标记）见 [ADR-0054](decisions/ADR-0054-provider-model-toggle.md)。
 
+流式输出中途失败时丢弃部分输出并重发的规则与客户端撤回行为见 [ADR-0055](decisions/ADR-0055-retry-after-partial-stream.md)。
+
 ## Roadmap
 
 [roadmap/roadmap.md](roadmap/roadmap.md)：阶段划分与验收标准。

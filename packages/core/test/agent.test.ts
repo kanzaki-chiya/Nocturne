@@ -186,7 +186,7 @@ describe("runTurn", () => {
     );
   });
 
-  it("首事件超时后重试成功；空闲超时在已有输出后保存部分内容且不重试", async () => {
+  it("首事件超时和已有输出后的空闲超时均可重试成功", async () => {
     const first = await makeHarness({
       scripts: [
         [{ type: "wait" }],
@@ -202,13 +202,24 @@ describe("runTurn", () => {
     expect(first.events.filter((e) => e.type === "provider.retry")).toHaveLength(1);
 
     const idle = await makeHarness({
-      scripts: [[{ type: "text_delta", text: "partial" }, { type: "wait" }]],
+      scripts: [
+        [{ type: "text_delta", text: "partial" }, { type: "wait" }],
+        [
+          { type: "text_delta", text: "recovered" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
       config: { firstEventTimeoutMs: 20, idleTimeoutMs: 20 },
     });
-    expect(await runTurn(idle.deps, prompt())).toBe("error");
-    expect(idle.provider.requests).toHaveLength(1);
-    const end = idle.events.find((e) => e.type === "turn.completed");
-    expect(end?.type === "turn.completed" && end.payload.error?.code).toBe("provider_timeout");
+    expect(await runTurn(idle.deps, prompt())).toBe("done");
+    expect(idle.provider.requests).toHaveLength(2);
+    expect(idle.events.find((e) => e.type === "provider.retry")?.payload).toMatchObject({
+      error: { kind: "timeout" },
+      discarded: { callIds: [] },
+    });
+    expect(
+      idle.session.durableEvents().find((e) => e.type === "message.assistant")?.payload.content,
+    ).toEqual([{ type: "text", text: "recovered" }]);
   });
 
   it("首事件超时重试用尽，以 provider_timeout 结束", async () => {
@@ -367,25 +378,186 @@ describe("runTurn", () => {
     expect(h.events.some((e) => e.type === "provider.retry")).toBe(true);
   });
 
-  it("产生输出后的 Provider 错误不重试，部分内容保存后 error", async () => {
+  it("文字和推理输出后断流：丢弃首轮输出，以同一 messageId 重试成功", async () => {
+    const records: { kind: string; data: Record<string, unknown> }[] = [];
     const h = await makeHarness({
+      diagnostics: { record: (kind, data) => records.push({ kind, data: data ?? {} }) },
       scripts: [
         [
           { type: "text_delta", text: "partial output" },
+          { type: "reasoning_delta", text: "partial reasoning" },
           {
             type: "throw",
             error: new ProviderError({ kind: "network", message: "boom" }),
           },
         ],
+        [
+          { type: "reasoning_delta", text: "new reasoning" },
+          { type: "text_delta", text: "new output" },
+          { type: "finish", reason: "stop" },
+        ],
       ],
     });
     const reason = await runTurn(h.deps, prompt());
-    expect(reason).toBe("error");
-    expect(h.provider.requests).toHaveLength(1); // 未重试
+    expect(reason).toBe("done");
+    expect(h.provider.requests).toHaveLength(2);
+    const assistants = h.session.durableEvents().filter((e) => e.type === "message.assistant");
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0]?.payload.content).toEqual([
+      { type: "reasoning", text: "new reasoning" },
+      { type: "text", text: "new output" },
+    ]);
+    const retry = h.events.find((e) => e.type === "provider.retry");
+    expect(retry?.payload.discarded).toEqual({
+      messageId: assistants[0]?.payload.messageId,
+      callIds: [],
+    });
+    expect(
+      new Set(
+        h.events
+          .filter((e) => e.type === "message.assistant.delta")
+          .map((e) => e.payload.messageId),
+      ).size,
+    ).toBe(1);
+    expect(records.find((r) => r.kind === "provider.error")?.data.producedOutput).toBe(true);
+    await h.session.close();
+  });
+
+  it("半个工具调用断流后丢弃 callId，只执行重试后的调用一次", async () => {
+    const h = await makeHarness({
+      scripts: [
+        [
+          { type: "tool_call_delta", toolCallId: "p1", name: "read", argsDelta: '{"path":"old' },
+          { type: "throw", error: new ProviderError({ kind: "network", message: "broken" }) },
+        ],
+        [
+          {
+            type: "tool_call_delta",
+            toolCallId: "p1",
+            name: "read",
+            argsDelta: '{"path":"note.txt"}',
+          },
+          { type: "tool_call", toolCallId: "p1", name: "read" },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    await platform.fs.writeFile(path.join(h.ws, "note.txt"), "second attempt");
+    expect(await runTurn(h.deps, prompt())).toBe("done");
+    const deltas = h.events.filter((e) => e.type === "tool.input.delta");
+    const retry = h.events.find((e) => e.type === "provider.retry");
     const assistant = h.events.find((e) => e.type === "message.assistant");
-    expect(assistant?.type === "message.assistant" && assistant.payload.finishReason).toBe(
-      "aborted",
-    );
+    expect(retry?.payload.discarded).toEqual({
+      messageId: assistant?.payload.messageId,
+      callIds: [deltas[0]?.payload.callId],
+    });
+    expect(deltas[0]?.payload.callId).not.toBe(deltas[1]?.payload.callId);
+    const started = h.events.filter((e) => e.type === "tool.started");
+    expect(started).toHaveLength(1);
+    expect(started[0]?.payload.callId).toBe(deltas[1]?.payload.callId);
+    expect(started[0]?.payload.input).toMatchObject({ path: "note.txt" });
+    const completed = h.events.filter((e) => e.type === "tool.completed");
+    expect(completed).toHaveLength(1);
+    expect(completed[0]?.payload.modelContent).toContain("second attempt");
+    await h.session.close();
+  });
+
+  it("丢弃输出后的退避期间中断，不再发送请求或保存作废输出", async () => {
+    const ac = new AbortController();
+    const h = await makeHarness({
+      signal: ac.signal,
+      config: { retryBaseDelayMs: 1000 },
+      scripts: [
+        [
+          { type: "text_delta", text: "discarded" },
+          { type: "throw", error: new ProviderError({ kind: "network", message: "broken" }) },
+        ],
+      ],
+    });
+    h.session.subscribe((e) => {
+      if (e.type === "provider.retry") ac.abort();
+    });
+    expect(await runTurn(h.deps, prompt())).toBe("aborted");
+    expect(h.provider.requests).toHaveLength(1);
+    expect(h.events.some((e) => e.type === "message.assistant")).toBe(false);
+    await h.session.close();
+  });
+
+  it("输出后 AbortError 不重试，保留中断内容", async () => {
+    const error = new Error("cancelled");
+    error.name = "AbortError";
+    const h = await makeHarness({
+      scripts: [
+        [
+          { type: "text_delta", text: "partial" },
+          { type: "throw", error },
+        ],
+      ],
+    });
+    expect(await runTurn(h.deps, prompt())).toBe("aborted");
+    expect(h.provider.requests).toHaveLength(1);
+    expect(h.events.some((e) => e.type === "provider.retry")).toBe(false);
+    expect(h.events.find((e) => e.type === "message.assistant")?.payload).toMatchObject({
+      content: [{ type: "text", text: "partial" }],
+      finishReason: "aborted",
+    });
+    await h.session.close();
+  });
+
+  it.each(["network", "timeout"] as const)(
+    "%s 输出后重试用尽：只保存最后尝试并提示继续",
+    async (kind) => {
+      let attempt = 0;
+      const h = await makeHarness({
+        config: { retryLimit: 2 },
+        handler: () => [
+          { type: "text_delta", text: `partial ${++attempt}` },
+          { type: "throw", error: new ProviderError({ kind, message: "broken" }) },
+        ],
+      });
+      expect(await runTurn(h.deps, prompt())).toBe("error");
+      expect(h.provider.requests).toHaveLength(3);
+      expect(h.events.filter((e) => e.type === "provider.retry")).toHaveLength(2);
+      const assistants = h.session.durableEvents().filter((e) => e.type === "message.assistant");
+      expect(assistants).toHaveLength(1);
+      expect(assistants[0]?.payload).toMatchObject({
+        content: [{ type: "text", text: "partial 3" }],
+        finishReason: "aborted",
+      });
+      const end = h.events.find((e) => e.type === "turn.completed");
+      expect(end?.payload.error).toEqual({
+        code: `provider_${kind}`,
+        message: "服务商响应流中途断开，已重试 2 次仍失败：broken。可发送「继续」接着做",
+      });
+      expect(end?.payload.error?.message).not.toContain("nctrn setup");
+      expect(end?.payload.error?.message).not.toContain("服务地址不通");
+      await h.session.close();
+    },
+  );
+
+  it("输出后不可重试错误不重发，保存部分内容", async () => {
+    const h = await makeHarness({
+      scripts: [
+        [
+          { type: "text_delta", text: "partial" },
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "network", message: "fatal", retryable: false }),
+          },
+        ],
+      ],
+    });
+    expect(await runTurn(h.deps, prompt())).toBe("error");
+    expect(h.provider.requests).toHaveLength(1);
+    expect(h.events.some((e) => e.type === "provider.retry")).toBe(false);
+    expect(h.events.find((e) => e.type === "message.assistant")?.payload.content).toEqual([
+      { type: "text", text: "partial" },
+    ]);
+    await h.session.close();
   });
 
   it("不可重试的 Provider 错误直接 error", async () => {
@@ -427,11 +599,20 @@ describe("runTurn", () => {
 
   it("Provider network/timeout 错误：提示地址不通并给出 nctrn setup", async () => {
     for (const kind of ["network", "timeout"] as const) {
+      const records: { kind: string; data: Record<string, unknown> }[] = [];
       const h = await makeHarness({
-        config: { retryLimit: 0 },
-        scripts: [[{ type: "throw", error: new ProviderError({ kind, message: "unreachable" }) }]],
+        config: { retryLimit: 1 },
+        handler: () => [
+          { type: "throw", error: new ProviderError({ kind, message: "unreachable" }) },
+        ],
+        diagnostics: { record: (kind, data) => records.push({ kind, data: data ?? {} }) },
       });
       expect(await runTurn(h.deps, prompt())).toBe("error");
+      expect(h.provider.requests).toHaveLength(2);
+      expect(h.events.find((e) => e.type === "provider.retry")?.payload.discarded).toBeUndefined();
+      expect(
+        records.filter((r) => r.kind === "provider.error").map((r) => r.data.producedOutput),
+      ).toEqual([false, false]);
       const done = h.events.find((e) => e.type === "turn.completed");
       const msg = done?.type === "turn.completed" ? done.payload.error?.message : "";
       expect(msg).toContain("地址不通");
@@ -509,6 +690,12 @@ describe("runTurn", () => {
     });
     const reason = await runTurn(h.deps, prompt());
     expect(reason).toBe("aborted");
+    expect(h.provider.requests).toHaveLength(1);
+    expect(h.events.some((e) => e.type === "provider.retry")).toBe(false);
+    expect(h.events.find((e) => e.type === "message.assistant")?.payload).toMatchObject({
+      content: [{ type: "text", text: "chunk1" }],
+      finishReason: "aborted",
+    });
     const done = h.events.find((e) => e.type === "turn.completed");
     expect(done?.type === "turn.completed" && done.payload.reason).toBe("aborted");
   });
@@ -776,15 +963,23 @@ describe("message.assistant 计时（ADR-0053 修订 2026-10-11）", () => {
     });
   });
 
-  it("输出后失败保存的部分消息按该次尝试计时", async () => {
+  it("输出后失败重试用尽，保存的部分消息只按最后一次尝试计时", async () => {
     const { h, assistants } = await timed([
       [
         at(200, { type: "text_delta", text: "partial" }),
         { type: "throw", error: new ProviderError({ kind: "network", message: "boom" }) },
       ],
+      [
+        at(700, { type: "text_delta", text: "last partial" }),
+        { type: "throw", error: new ProviderError({ kind: "network", message: "boom" }) },
+      ],
     ]);
+    h.deps.config.retryLimit = 1;
     expect(await runTurn(h.deps, prompt())).toBe("error");
-    expect(assistants()[0]?.timing).toEqual({ ttftMs: 200, durationMs: 200 });
+    expect(h.provider.requests).toHaveLength(2);
+    expect(assistants()).toHaveLength(1);
+    expect(assistants()[0]?.content).toEqual([{ type: "text", text: "last partial" }]);
+    expect(assistants()[0]?.timing).toEqual({ ttftMs: 500, durationMs: 500 });
   });
 });
 
