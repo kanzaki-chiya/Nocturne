@@ -2,6 +2,7 @@
  * RPC 服务端（ADR-0044）：给定一个 Runtime，把公开 API 映射成 JSON-RPC 方法，
  * 把会话事件推成 `event` 通知。与传输无关：只接收按行收发的 LineTransport。
  *
+ * 后台级共享状态在 `Hub`（hub.ts），`Connection` 只保留单条连接自己的状态。
  * 一个服务端同一时刻只接一个客户端，可同时打开多个会话。权限判定仍只在
  * Runtime 的权限层——这里只转发 `permission.requested` 事件与回复（AGENTS.md 硬性约束）。
  */
@@ -9,7 +10,6 @@ import { randomUUID } from "node:crypto";
 
 import {
   commitProvider,
-  createPlatform,
   describeAccountStorage,
   describeProviderSetup,
   discardDraftLogin,
@@ -68,6 +68,7 @@ import {
 } from "../shared/methods.js";
 import type { LineTransport } from "../shared/transport.js";
 import { MethodNotFoundError, RpcProtocolError, toRpcError } from "./errors.js";
+import { Hub, type HubPeer, type ProviderState, type RpcRuntimeHandle } from "./hub.js";
 import {
   asParams,
   decodeBase64,
@@ -82,32 +83,7 @@ import {
   type Params,
 } from "./params.js";
 
-/** createRuntime 的产物：Runtime 加上服务端要对外报告与收尾的信息 */
-export interface RpcRuntimeHandle {
-  runtime: Runtime;
-  /** 会话日志目录，握手时作为只读信息返回 */
-  sessionsDir?: string | undefined;
-  /** 全部会话关闭之后调用，释放 Runtime 之外的资源 */
-  dispose?: (() => Promise<void> | void) | undefined;
-  /**
-   * 服务商配置（docs/protocols/rpc.md 3.3）：缺省时 provider.* / login.*
-   * 一律以 `provider_config_unavailable` 拒绝。
-   */
-  providerConfig?:
-    | {
-        /**
-         * 创建 Runtime 用的同一个配置对象。服务端在每次变更后重载并整体替换
-         * （启动时对象的 `base` 是加载时快照，不能发现本进程新加的服务商），
-         * 与 CLI/TUI 的 `updateProviders(await reloadConfig())` 等价。
-         */
-        config: RuntimeConfig;
-        /** 重新分层加载（apps 注入，等价 CLI 的 makeConfigLoader） */
-        reload: () => Promise<RuntimeConfig>;
-        /** describeProviders / listModelSettings / saveModelSettings 的工作区 */
-        workspaceRoot?: string | undefined;
-      }
-    | undefined;
-}
+export type { RpcRuntimeHandle } from "./hub.js";
 
 /**
  * 参数里可能含秘密值的方法（ADR-0044 第 6 节：密钥明文只在两个进程的管道里）：
@@ -171,6 +147,7 @@ export interface RpcServer {
 
 const DEFAULT_REPLAY_CHUNK = 256;
 
+/** 本连接已打开的会话及其订阅状态（会话本身登记在 Hub） */
 interface OpenSession {
   session: RuntimeSession;
   unsubscribe: (() => void) | undefined;
@@ -197,25 +174,29 @@ type Handler<K extends RpcMethodName> = (
 type HandlerTable = { [K in RpcMethodName]: Handler<K> };
 
 export function createRpcServer(options: RpcServerOptions): RpcServer {
+  const hub = new Hub();
   let serving = false;
   return {
     methods: RPC_METHOD_NAMES,
     async serve(transport) {
       if (serving) throw new Error("RPC 服务端同一时刻只接一个客户端");
       serving = true;
+      const connection = new Connection(options, hub, transport);
+      hub.attach(connection);
       try {
-        await new Connection(options, transport).run();
+        await connection.run();
       } finally {
+        hub.detach(connection);
         serving = false;
       }
     },
   };
 }
 
-class Connection {
-  private handle: RpcRuntimeHandle | undefined;
+class Connection implements HubPeer {
   private initPromise: Promise<void> | undefined;
-  private initialized = false;
+  /** 本连接已完成握手（Hub 的广播只发给已握手的连接） */
+  initialized = false;
   private shuttingDown = false;
   private closed = false;
   private inputEnded = false;
@@ -224,22 +205,7 @@ class Connection {
   private readonly sessions = new Map<string, OpenSession>();
   private readonly opening = new Set<Promise<unknown>>();
   private readonly abort = new AbortController();
-  private readonly platform = createPlatform();
   private readonly handlers: HandlerTable;
-  /**
-   * 服务商配置（握手时取自 handle.providerConfig）：`current` 是最近一次
-   * 重载的结果——Core 的草稿与草稿登录按 RuntimeConfig 对象登记，而启动时
-   * 对象的 `base` 是快照，所以变更方法后整体换成重载出的新对象。
-   */
-  private providerState:
-    | {
-        current: RuntimeConfig;
-        reload: () => Promise<RuntimeConfig>;
-        workspaceRoot: string | undefined;
-      }
-    | undefined;
-  /** 配置变更串行队列：变更 → 重载 → updateProviders → providersChanged 通知，响应最后 */
-  private configQueue: Promise<unknown> = Promise.resolve();
   /** draftId → 创建草稿时的配置对象（与该登录的创建配置一致；见 buildHandlers 的 prepareProvider） */
   private readonly providerDrafts = new Map<
     string,
@@ -252,6 +218,7 @@ class Connection {
 
   constructor(
     private readonly options: RpcServerOptions,
+    private readonly hub: Hub,
     private readonly transport: LineTransport,
   ) {
     this.handlers = this.buildHandlers();
@@ -265,7 +232,7 @@ class Connection {
       });
       this.transport.onClose(() => {
         this.inputEnded = true;
-        for (const entry of this.sessions.values()) entry.session.interrupt();
+        this.hub.interruptAll();
         void (async () => {
           await Promise.allSettled([...this.requests]);
           await this.transport.flush?.();
@@ -288,7 +255,7 @@ class Connection {
     }
   }
 
-  private send(message: RpcMessage): void {
+  send(message: RpcMessage): void {
     if (this.closed) return;
     try {
       this.transport.send(encodeMessage(message));
@@ -396,9 +363,7 @@ class Connection {
     const handler = this.handlers[name] as (p: Params) => unknown;
     const result = handler(asParams(params));
     // EOF 可能发生在等待 initialize 时；刚开始的 Turn/压缩同样必须中断。
-    if (this.inputEnded) {
-      for (const entry of this.sessions.values()) entry.session.interrupt();
-    }
+    if (this.inputEnded) this.hub.interruptAll();
     return await result;
   }
 
@@ -427,81 +392,42 @@ class Connection {
         discardDraftLogin(config, loginId);
       }
       this.draftLogins.clear();
-      await this.configQueue.catch(() => undefined);
-      const entries = [...this.sessions.values()];
-      this.sessions.clear();
-      for (const entry of entries) {
+      for (const entry of this.sessions.values()) {
         entry.generation++;
         entry.unsubscribe?.();
-        entry.session.interrupt();
       }
-      await Promise.allSettled(entries.map((entry) => entry.session.close()));
-      await this.handle?.dispose?.();
+      this.sessions.clear();
+      // 整个后台收尾：中断并关闭全部会话、释放 Runtime 资源
+      await this.hub.shutdown();
     })();
     return this.cleanupPromise;
   }
 
   private runtime(): Runtime {
-    if (this.handle === undefined) {
-      throw new RpcProtocolError("not_initialized", "第一条请求必须是 initialize");
-    }
-    return this.handle.runtime;
+    return this.hub.runtime();
   }
 
-  private providerConfig(): NonNullable<Connection["providerState"]> {
-    if (this.providerState === undefined) {
-      throw new RpcProtocolError("provider_config_unavailable", "服务端未提供服务商配置");
-    }
-    return this.providerState;
+  private providerConfig(): ProviderState {
+    return this.hub.providerConfig();
   }
 
-  /**
-   * 运行时级方法的 workspaceRoot 参数（ADR-0051）：同步读方法依赖配置的
-   * 工作区层缓存，派发前先解析真实路径再加载目标工作区；解析失败保留原串。
-   * 缺省返回 undefined（= 后台启动目录）。无 providerConfig 的连接跳过预加载，
-   * 已打开会话的工作区在会话打开时已加载。
-   */
-  private async workspaceOf(p: Params): Promise<string | undefined> {
-    const input = optString(p, "workspaceRoot");
-    if (input === undefined) return undefined;
-    const root = await this.platform.resolveReal(input).catch(() => input);
-    if (this.providerState !== undefined) {
-      await this.providerConfig().current.forWorkspace(root);
-    }
-    return root;
+  private workspaceOf(p: Params): Promise<string | undefined> {
+    return this.hub.workspaceOf(p);
   }
 
-  /**
-   * 变更入队执行，随后 reload → updateProviders → 推 `runtime.providersChanged`
-   * （docs/protocols/rpc.md 3.3）。变更抛错不重载、原样抛；重载抛错则请求
-   * 以重载错误失败——此时写入已生效、Runtime 仍用旧配置。
-   */
   private enqueueConfig<T>(task: (config: RuntimeConfig) => Promise<T>): Promise<T> {
-    const run = this.configQueue.then(() => task(this.providerConfig().current));
-    // 前一个任务失败不阻塞后续任务
-    this.configQueue = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+    return this.hub.enqueueConfig(task);
   }
 
-  private async reloadProviders(notify = true): Promise<void> {
-    const next = await this.providerConfig().reload();
-    await this.runtime().updateProviders(next);
-    this.providerConfig().current = next;
-    if (notify) this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+  private reloadProviders(notify = true): Promise<void> {
+    return this.hub.reloadProviders(notify);
   }
 
   private mutateAndReload<T>(
     mutate: (config: RuntimeConfig) => Promise<T>,
     notify = true,
   ): Promise<T> {
-    return this.enqueueConfig(async (config) => {
-      const result = await mutate(config);
-      await this.reloadProviders(notify);
-      return result;
-    });
+    return this.hub.mutateAndReload(mutate, notify);
   }
 
   // ── 登录会话 ─────────────────────────────────────────────
@@ -635,6 +561,7 @@ class Connection {
       await session.close().catch(() => undefined);
       throw new RpcProtocolError("shutting_down", "服务端正在关闭");
     }
+    this.hub.addSession(session);
     this.sessions.set(session.id, { session, unsubscribe: undefined, generation: 0 });
     const state = session.state();
     return {
@@ -720,16 +647,7 @@ class Connection {
         const init = this.options
           .createRuntime({ clientName, interactive })
           .then((handle) => {
-            this.handle = handle;
-            const providerConfig = handle.providerConfig;
-            this.providerState =
-              providerConfig !== undefined
-                ? {
-                    current: providerConfig.config,
-                    reload: providerConfig.reload,
-                    workspaceRoot: providerConfig.workspaceRoot,
-                  }
-                : undefined;
+            this.hub.setHandle(handle);
             this.initialized = true;
           })
           .catch((error: unknown) => {
@@ -742,9 +660,7 @@ class Connection {
         return {
           protocolVersion: RPC_PROTOCOL_VERSION,
           nocturneVersion: this.options.nocturneVersion,
-          ...(this.handle?.sessionsDir !== undefined
-            ? { sessionsDir: this.handle.sessionsDir }
-            : {}),
+          ...(this.hub.sessionsDir !== undefined ? { sessionsDir: this.hub.sessionsDir } : {}),
         };
       },
       shutdown: async () => {
@@ -895,13 +811,13 @@ class Connection {
           const result = await this.runtime().saveExternalAgent(
             p as unknown as Parameters<Runtime["saveExternalAgent"]>[0],
           );
-          this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+          this.hub.notifyProvidersChanged();
           return result;
         }),
       "agents.deleteExternalAgent": (p) =>
         this.enqueueConfig(async () => {
           await this.runtime().deleteExternalAgent({ name: reqString(p, "name") });
-          this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+          this.hub.notifyProvidersChanged();
           return null;
         }),
       "agents.setExternalAgentEnabled": (p) =>
@@ -909,7 +825,7 @@ class Connection {
           const enabled = optBool(p, "enabled");
           if (enabled === undefined) throw new InvalidParamsError("enabled 必须是布尔值");
           await this.runtime().setExternalAgentEnabled({ name: reqString(p, "name"), enabled });
-          this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+          this.hub.notifyProvidersChanged();
           return null;
         }),
       "agents.probeExternalAgent": (p) =>
@@ -927,7 +843,7 @@ class Connection {
             name: reqString(p, "name"),
             enabled,
           });
-          this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+          this.hub.notifyProvidersChanged();
           return result;
         });
       },
@@ -951,7 +867,7 @@ class Connection {
               ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
               decisions: parseImportDecisions(p),
             });
-            this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+            this.hub.notifyProvidersChanged();
             return result;
           });
         }
@@ -1119,8 +1035,8 @@ class Connection {
         return await this.mutateAndReload(async (config) => {
           // "正在使用拒绝删除"是客户端规则（同 CLI/TUI）；服务端持有会话，
           // 所以在服务端对本连接全部已打开会话判断——Core 不判断这条
-          for (const entry of this.sessions.values()) {
-            if (entry.session.state().config.model.provider === providerId) {
+          for (const session of this.hub.openSessions()) {
+            if (session.state().config.model.provider === providerId) {
               throw new RpcProtocolError(
                 "provider_in_use",
                 `当前会话正在使用 ${providerId}，不能删除；先切换到其他服务商的模型`,
@@ -1187,7 +1103,7 @@ class Connection {
         if (enabled === undefined) throw new InvalidParamsError("enabled 必须是布尔值");
         return this.enqueueConfig(async () => {
           await this.runtime().setProviderEnabled({ provider: reqString(p, "provider"), enabled });
-          this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+          this.hub.notifyProvidersChanged();
           return null;
         });
       },
@@ -1207,7 +1123,7 @@ class Connection {
             models: models as string[],
             enabled,
           });
-          this.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
+          this.hub.notifyProvidersChanged();
           return null;
         });
       },
@@ -1425,6 +1341,7 @@ class Connection {
       "session.close": async (p) => {
         const entry = this.session(p);
         this.sessions.delete(entry.session.id);
+        this.hub.removeSession(entry.session.id);
         entry.generation++;
         entry.unsubscribe?.();
         await entry.session.close();
