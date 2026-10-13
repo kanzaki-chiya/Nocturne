@@ -289,6 +289,8 @@ export interface ReviewInput {
 export interface ReviewResult {
   verdict: "allow" | "block" | "unsure";
   reason: string;
+  /** 放行是否可按精确主体缓存；缺省 true，依赖用户授权的内置审查放行设为 false。 */
+  cacheable?: boolean | undefined;
   /** 与主模型分开记录，不进入上下文。 */
   usage?: Usage | undefined;
 }

@@ -131,12 +131,28 @@ describe("共享提示词", () => {
 });
 
 describe("模型输出解析 parseModelReview", () => {
-  it("全否放行", () => {
-    expect(parseModelReview(toJson({}))).toEqual({ verdict: "allow", reason: "理由" });
-  });
-  it("Q1 为真放行", () => {
-    expect(parseModelReview(toJson({ requested: true, crosses: true }))).toMatchObject({
+  it.each([false, true])("风险题全否的放行可以缓存，Q1=%s", (requested) => {
+    expect(parseModelReview(toJson({ requested }))).toEqual({
       verdict: "allow",
+      reason: "理由",
+      cacheable: true,
+    });
+  });
+  it.each(["destroys", "credentials", "exfiltrates", "weakens", "crosses", "opaque"] as const)(
+    "依赖 Q1 授权的放行不缓存：%s",
+    (key) => {
+      expect(parseModelReview(toJson({ requested: true, [key]: true }))).toMatchObject({
+        verdict: "allow",
+        cacheable: false,
+      });
+    },
+  );
+  it("代码块中的授权放行也不缓存", () => {
+    expect(
+      parseModelReview(`\`\`\`json\n${toJson({ requested: true, crosses: true })}\n\`\`\``),
+    ).toMatchObject({
+      verdict: "allow",
+      cacheable: false,
     });
   });
   it("风险题为是交人并列出标签", () => {

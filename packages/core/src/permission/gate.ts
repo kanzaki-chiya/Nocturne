@@ -424,7 +424,7 @@ export function createPolicyGate(
         },
         { turnId: turn.turnId },
       );
-      if (result.verdict === "allow" && !cached) {
+      if (result.verdict === "allow" && result.cacheable !== false && !cached) {
         for (const s of reviewed.reviewTargets) {
           cachedGrants.push(grantFromSubject(s, caseSensitive));
           cachedReasons.set(`${s.kind}:${grantKey(s, caseSensitive)}`, result.reason);

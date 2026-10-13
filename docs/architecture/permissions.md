@@ -147,6 +147,8 @@ Hook 的先后关系（Phase 5，完整语义见 5.5 与 hooks.md）：
 2. **直接交人**：不送审，按 `userOnly` 处理。递归删除（目标在工作区外、无法确定位置或不是 `dist`/`build`/`out`/`node_modules`/`target`/`.turbo`/`.cache`/`coverage`）、`dd`/`mkfs`/`format`/`diskpart`/`shutdown`/`reboot`/`Stop-Computer`/`Restart-Computer`、删除或覆盖类命令的目标含 `$VAR`/`%VAR%`/`$env:X`/`$(…)`/反引号、`-EncodedCommand`、`iex`/`Invoke-Expression`/`eval`（嵌套 shell 命令体按内层方言再查，最多三层）。同一 Turn 里用户拒绝过的调用，主体集合相同的后续调用也直接问用户（gate 按 turnId 记录，新 Turn 恢复送审）。
 3. **送审**：其余全部，包括 network 和高风险表的其余条目（命中描述「预设 smart 高风险命令」）。
 
+代码运行器白名单不接受可指定输出位置的参数：`tsc` 的 `--outDir`、`--outFile`、`--out`、`--declarationDir`、`--tsBuildInfoFile`、`--generateTrace`，以及 `vitest` 的 `--outputFile`、`--coverage.reportsDirectory`（包括 `--参数=值` 形式）。这些命令改为送审，避免直接写入工作区外；`tsc --noEmit` 与 `vitest run` 仍可放行。
+
 规则的 `deny` 不进入审查；规则直接 `allow`、Grant 与 `autoApproveAsk`（`--yes`）先结算。剩余 `ask` 先交给 `PermissionRequest` Hook，再只在 `smart` 下调用 `SecurityReviewer.review(input, signal)`。审查结果只有两档：
 
 - `allow`：放行，`permission.resolved.source` 与 `tool.started.permission.source` 为 `reviewer`。
@@ -155,6 +157,8 @@ Hook 的先后关系（Phase 5，完整语义见 5.5 与 hooks.md）：
 **只由用户确认**集合不调用审查器：修改 Nocturne 授权数据、`.nocturne/` 内 edit、可能读取凭据的命令、用户/项目/CLI 的显式 ask，以及 `PreToolUse` 强制 ask。Grant、`--yes` 与 PermissionRequest Hook 的原有优先级不变；强制 ask 仍跳过 Grant 与 `--yes`。一次调用中任一 ask 主体在该集合内，整个调用跳过审查。预设中的授权数据与 `.nocturne/` 规则用结构化 `userOnly` 标记表达该限制，`label` 只用于显示。
 
 **审查输入**（`ReviewInput`，ADR-0057）：ask 主体的类别、授权目标、位置与命中规则，当前 cwd；`userMessages`——全部用户消息按时间顺序给出，单条最多 2000 字，总预算 8000 字，超出时保留第一条和尽量多的最近几条，中间插入「（省略 N 条）」（来自完整会话历史，不受压缩影响，不含 `@` 引用的文件快照）；`projectNotes`——已加载的项目指令文件（AGENTS.md 等，复用 context 模块已加载的结果）拼接后的前 2000 字；`trustedRemotes`——会话创建时读一次 `git remote -v` 的结果（每项 `name url`，拿不到为空列表；smart 会话立即读取，其他预设首次需要时再读）；`facts`——由 runtime 注入的异步函数预先查好、权限层只消费结果：`git reset --hard` / `git clean` / `git checkout -- .` 附 `git status --porcelain` 的行数，推送类命令附目标 remote、分支以及是否在可信列表里，查询失败就不给、不影响审查；`environment`（工作目录与 Nocturne 数据目录）和 `reviewerRules`（用户追加规则）写进提示词环境段。不带原始工具参数、工具输出、agent 自己说的话或文件正文。20 秒超时（含事实查询）、报错或格式无效按 `unsure` 处理；Turn 中止则取消审查。缓存只保存本会话的 allow，使用与 Grant 相同的精确主体键，恢复后清空；缓存命中也记审查事件。
+
+**靠你授权换来的放行不缓存**：内置后端只有 Q2–Q7 全否的放行可缓存（`ReviewResult.cacheable: true`）；有风险题为是、依赖 Q1 授权的放行设为 `cacheable: false`，同一 Turn 或下一 Turn 的同样调用都重新送审，避免后来追加的限制被旧缓存绕过。自定义审查器省略该字段时视为 `true`，保持原行为；该字段不写入 `permission.reviewed` 事件。
 
 未配置审查器时，原本要送审的调用直接询问用户（非交互拒绝；白名单与 `readOnlyHint` 的放行不受影响），每个会话提示一次。子会话使用父会话的同一审查器实例，仍为非交互。模型后端不带工具，使用最低思考档位 `off`，`maxOutputTokens=400`。
 

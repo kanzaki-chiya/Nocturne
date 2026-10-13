@@ -5,6 +5,7 @@ import {
   buildJevQuestions,
   decideFromAnswers,
   formatAskReason,
+  isReviewCacheable,
   promptContextFromInput,
   resolveJevAnswers,
   stateForReview,
@@ -78,7 +79,12 @@ export function createJevSecurityReviewer(options: JevReviewerOptions): Security
         if (!resolved.ok) return { verdict: "unsure", reason: "安全审查响应格式错误", usage };
         const { answers, lowConfidenceKeys } = resolved.resolved;
         if (decideFromAnswers(answers) === "allow")
-          return { verdict: "allow", reason: "七题审查通过", usage };
+          return {
+            verdict: "allow",
+            reason: "七题审查通过",
+            cacheable: isReviewCacheable(answers),
+            usage,
+          };
         const details: string[] = [];
         for (const question of REVIEW_QUESTIONS) {
           const raw: unknown = data.answers;

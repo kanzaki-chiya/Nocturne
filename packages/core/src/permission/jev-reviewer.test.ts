@@ -46,6 +46,7 @@ describe("Jev 安全审查", () => {
     });
     expect(await review()).toMatchObject({
       verdict: "allow",
+      cacheable: true,
       usage: { inputTokens: 198, outputTokens: 1 },
     });
     expect(fetch).toHaveBeenCalledOnce();
@@ -81,7 +82,7 @@ describe("Jev 安全审查", () => {
   });
   it("Q1 为是时 Q6 为是仍放行；否则交人并列出风险题", async () => {
     mockResponse({ answers: { ...allowAnswers(), "1": yes(), "6": yes() } });
-    expect((await review()).verdict).toBe("allow");
+    expect(await review()).toMatchObject({ verdict: "allow", cacheable: false });
     mockResponse({ answers: { ...allowAnswers(), "6": yes(0.95) } });
     const ask = await review();
     expect(ask.verdict).toBe("unsure");
@@ -89,7 +90,9 @@ describe("Jev 安全审查", () => {
   });
   it("支持数组答案", async () => {
     mockResponse({ answers: [no(), no(), no(), no(), no(), no(), no()] });
-    expect((await review()).verdict).toBe("allow");
+    expect(await review()).toMatchObject({ verdict: "allow", cacheable: true });
+    mockResponse({ answers: [yes(), no(), no(), no(), no(), yes(), no()] });
+    expect(await review()).toMatchObject({ verdict: "allow", cacheable: false });
     mockResponse({
       answers: [no(), yes(), no(), no(), no(), no(), no()],
       usage: { input_tokens: 9, output_tokens: 1 },
@@ -98,6 +101,14 @@ describe("Jev 安全审查", () => {
       verdict: "unsure",
       usage: { inputTokens: 9, outputTokens: 1 },
     });
+  });
+  it("Q1 为是但风险题全否时可以缓存", async () => {
+    mockResponse({ answers: { ...allowAnswers(), "1": yes() } });
+    expect(await review()).toMatchObject({ verdict: "allow", cacheable: true });
+  });
+  it("风险题低置信度取是后，依赖 Q1 的放行不缓存", async () => {
+    mockResponse({ answers: { ...allowAnswers(), "1": yes(), "6": no(0.1) } });
+    expect(await review()).toMatchObject({ verdict: "allow", cacheable: false });
   });
   it("低置信度往保守方向取值：Q1 取否、Q2–Q7 取是，仍保留 usage", async () => {
     mockResponse({

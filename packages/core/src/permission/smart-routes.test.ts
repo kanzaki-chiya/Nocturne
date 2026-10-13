@@ -187,6 +187,34 @@ describe("smart 直接交人", () => {
   });
 });
 
+describe("smart 代码运行器输出参数", () => {
+  it.each(["tsc --noEmit", "vitest run"])("普通运行器仍放行：%s", (command) => {
+    expect(evaluate(sh(command)).decision.action).toBe("allow");
+  });
+  it.each([
+    ["tsc", "--outDir"],
+    ["tsc", "--outFile"],
+    ["tsc", "--out"],
+    ["tsc", "--declarationDir"],
+    ["tsc", "--tsBuildInfoFile"],
+    ["tsc", "--generateTrace"],
+    ["vitest", "--outputFile"],
+    ["vitest", "--coverage.reportsDirectory"],
+  ])("%s 的输出参数 %s（空格或等号形式）改为送审", (exe, flag) => {
+    for (const separator of [" ", "="]) {
+      const command = `${exe} ${flag}${separator}../x`;
+      const result = evaluate(sh(command));
+      expect(result.decision.action).toBe("ask");
+      expect(result.userOnly).toBe(false);
+      expect(result.reviewSubjects).toHaveLength(1);
+    }
+  });
+  it("输出参数在非首位或大小写变化时也送审", () => {
+    expect(evaluate(sh("tsc --noEmit --OUTDIR=../x", "pwsh")).decision.action).toBe("ask");
+    expect(evaluate(sh("vitest run --outputFile=../r.json")).decision.action).toBe("ask");
+  });
+});
+
 describe("smart 网络与 MCP", () => {
   it("network 一律送审", () => {
     const result = smartPolicy().evaluate([{ kind: "network", target: "https://example.test" }]);

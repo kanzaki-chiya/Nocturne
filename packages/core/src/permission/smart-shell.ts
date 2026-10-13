@@ -258,6 +258,17 @@ const SCRIPT_ACTIONS = ["test", "typecheck", "lint", "build", "run"] as const;
 /** 包管理器前置选项里带值的那几个。 */
 const PM_VALUE_FLAGS = ["--filter", "-f", "-c", "--dir", "--prefix", "-w", "--workspace"];
 
+/** 可指定工作区外输出位置的参数不走代码运行器白名单。 */
+const TSC_OUTPUT_FLAGS = [
+  "--outdir",
+  "--outfile",
+  "--out",
+  "--declarationdir",
+  "--tsbuildinfofile",
+  "--generatetrace",
+];
+const VITEST_OUTPUT_FLAGS = ["--outputfile", "--coverage.reportsdirectory"];
+
 export interface CodeRunner {
   /** `node <file>` 的脚本路径（原样）；其余运行器为 undefined。 */
   nodeTarget?: string | undefined;
@@ -292,8 +303,15 @@ export function matchCodeRunnerSegment(
       : undefined;
   }
   if (exe === "cargo") return lowered[0] === "check" || lowered[0] === "test" ? {} : undefined;
-  if (exe === "tsc") return lowered[0] === "--init" ? undefined : {};
-  if (exe === "vitest") return {};
+  if (exe === "tsc")
+    return lowered[0] === "--init" ||
+      lowered.some((arg) => TSC_OUTPUT_FLAGS.includes(arg.split("=")[0] ?? ""))
+      ? undefined
+      : {};
+  if (exe === "vitest")
+    return lowered.some((arg) => VITEST_OUTPUT_FLAGS.includes(arg.split("=")[0] ?? ""))
+      ? undefined
+      : {};
   if (exe === "node") {
     const target = args[0];
     if (target === undefined || target.startsWith("-")) return undefined;

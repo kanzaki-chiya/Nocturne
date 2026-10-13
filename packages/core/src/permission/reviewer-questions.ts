@@ -137,6 +137,11 @@ export function decideFromAnswers(answers: ReviewAnswers): ReviewDecision {
   return RISK_KEYS.every((key) => !answers[key]) ? "allow" : "ask";
 }
 
+/** 只有风险题全否的放行可缓存；依赖 Q1 授权的放行必须重新审查。 */
+export function isReviewCacheable(answers: ReviewAnswers): boolean {
+  return RISK_KEYS.every((key) => !answers[key]);
+}
+
 /** 交人理由：列出答“是”的题 + 用户未要求 + 模型 reason。 */
 export function formatAskReason(answers: ReviewAnswers, reason?: string): string {
   const risks: string[] = [];
@@ -316,7 +321,11 @@ export function parseModelReview(text: string): ReviewResult {
   const reason: unknown = record.reason;
   if (typeof reason !== "string") return { verdict: "unsure", reason: "审查输出格式错误" };
   if (decideFromAnswers(answers) === "allow") {
-    return { verdict: "allow", reason: reason.trim().length > 0 ? reason.trim() : "七题审查通过" };
+    return {
+      verdict: "allow",
+      reason: reason.trim().length > 0 ? reason.trim() : "七题审查通过",
+      cacheable: isReviewCacheable(answers),
+    };
   }
   return { verdict: "unsure", reason: formatAskReason(answers, reason) };
 }

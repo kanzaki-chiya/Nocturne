@@ -182,6 +182,81 @@ describe("ADR-0036 审查闸门", () => {
     await gate.check([edit("C:/outside/other")], "c", signal(), turn);
     expect(reviewer.review).toHaveBeenCalledTimes(verdict === "allow" ? 2 : 3);
   });
+  it.each(["同一轮", "下一轮"])("依赖用户授权的放行在%s再次送审，追加限制生效", async (scope) => {
+    let requestedByUser = true;
+    const reviewer: SecurityReviewer = {
+      review: vi.fn(async () =>
+        parseReview(
+          JSON.stringify({
+            requested: requestedByUser,
+            destroys: false,
+            credentials: false,
+            exfiltrates: false,
+            weakens: false,
+            crosses: true,
+            opaque: false,
+            reason: requestedByUser ? "用户要求推送" : "用户要求先别 push",
+          }),
+        ),
+      ),
+    };
+    const { gate, events, turn } = setup("allow", false, { reviewer: () => reviewer });
+    const subjects = [shell("git push origin main")];
+    expect((await gate.check(subjects, "a", signal(), turn)).decision.action).toBe("allow");
+    requestedByUser = false;
+    const nextTurn = scope === "同一轮" ? turn : { ...turn, turnId: "next" };
+    expect((await gate.check(subjects, "b", signal(), nextTurn)).decision).toMatchObject({
+      action: "deny",
+      source: "non_interactive",
+    });
+    expect(reviewer.review).toHaveBeenCalledTimes(2);
+    expect(
+      events.filter((e) => e.type === "permission.reviewed").map((e) => e.payload),
+    ).toMatchObject([
+      { verdict: "allow", cached: false },
+      { verdict: "unsure", cached: false },
+    ]);
+    expect(events.some((e) => "cacheable" in (e.payload as object))).toBe(false);
+  });
+  it("风险题全否的放行仍缓存，第二次事件 cached 为 true", async () => {
+    const reviewer: SecurityReviewer = {
+      review: vi.fn(async () =>
+        parseReview(
+          JSON.stringify({
+            requested: false,
+            destroys: false,
+            credentials: false,
+            exfiltrates: false,
+            weakens: false,
+            crosses: false,
+            opaque: false,
+            reason: "无风险",
+          }),
+        ),
+      ),
+    };
+    const { gate, events, turn } = setup("allow", false, { reviewer: () => reviewer });
+    const subjects = [{ kind: "network", target: "example.test" } as const];
+    await gate.check(subjects, "a", signal(), turn);
+    await gate.check(subjects, "b", signal(), { ...turn, turnId: "next" });
+    expect(reviewer.review).toHaveBeenCalledOnce();
+    expect(
+      events.filter((e) => e.type === "permission.reviewed").map((e) => e.payload),
+    ).toMatchObject([
+      { verdict: "allow", cached: false },
+      { verdict: "allow", cached: true },
+    ]);
+  });
+  it("自定义审查器未返回 cacheable 时照旧缓存", async () => {
+    const { gate, reviewer, events, turn } = setup();
+    const subjects = [shell("git push origin main")];
+    await gate.check(subjects, "a", signal(), turn);
+    await gate.check(subjects, "b", signal(), { ...turn, turnId: "next" });
+    expect(reviewer.review).toHaveBeenCalledOnce();
+    expect(events.filter((e) => e.type === "permission.reviewed").at(-1)?.payload).toMatchObject({
+      cached: true,
+    });
+  });
   it.each(["error", "timeout", "invalid"])("%s 降级 unsure", async (failure) => {
     const reviewer: SecurityReviewer = {
       review: vi.fn(async () => {
@@ -422,9 +497,10 @@ describe("模型审查后端（七题 JSON）", () => {
       reason,
     });
   it("全否放行；Q1 为真时 Q6 为是仍放行", () => {
-    expect(parseReview(json({}))).toEqual({ verdict: "allow", reason: "理由" });
+    expect(parseReview(json({}))).toEqual({ verdict: "allow", reason: "理由", cacheable: true });
     expect(parseReview(json({ requested: true, crosses: true }))).toMatchObject({
       verdict: "allow",
+      cacheable: false,
     });
   });
   it("风险题为是且 Q1 为否交人，理由列出是题", () => {
@@ -464,7 +540,12 @@ describe("模型审查后端（七题 JSON）", () => {
     );
     expect(
       await reviewer.review({ subjects: [], cwd: "C:/ws", userMessages: [] }, signal()),
-    ).toEqual({ verdict: "allow", reason: "理由", usage: { inputTokens: 12, outputTokens: 3 } });
+    ).toEqual({
+      verdict: "allow",
+      reason: "理由",
+      cacheable: true,
+      usage: { inputTokens: 12, outputTokens: 3 },
+    });
     expect(provider.requests[0]).toMatchObject({
       tools: [],
       maxOutputTokens: 400,
