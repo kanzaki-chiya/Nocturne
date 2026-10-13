@@ -122,6 +122,55 @@ describe("spawnPipe 的协议消费者边界", () => {
   );
 });
 
+describe.runIf(process.platform === "win32")("Windows spawnPipe 不从 cwd 找裸命令", () => {
+  const name = "nocturne-cwd-tool";
+  const marker = () => path.join(root, "launched-from-cwd.txt");
+  beforeEach(async () => {
+    // 工作区里的同名脚本：一旦被执行就留下标记文件。
+    await fs.writeFile(
+      path.join(root, `${name}.cmd`),
+      `@echo off\r\necho cwd\r\necho cwd> "%~dp0launched-from-cwd.txt"\r\n`,
+    );
+  });
+
+  it("cwd 与 PATH 都有同名 cmd 时执行 PATH 里的那个", async () => {
+    const bin = path.join(root, "bin");
+    await fs.mkdir(bin);
+    await fs.writeFile(path.join(bin, `${name}.cmd`), "@echo off\r\necho path\r\n");
+    const proc = platform.process.spawnPipe(name, [], {
+      cwd: root,
+      env: { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`, PATHEXT: ".CMD;.EXE" },
+    });
+    expect((await text(proc)).trim()).toBe("path");
+    expect((await proc.wait()).code).toBe(0);
+    expect(await platform.fs.exists(marker())).toBe(false);
+  });
+
+  it("只有 cwd 有同名 cmd 时按找不到命令结算，且不启动它", async () => {
+    const proc = platform.process.spawnPipe(name, [], {
+      cwd: root,
+      env: { PATH: process.env.PATH ?? "", PATHEXT: ".CMD;.EXE" },
+    });
+    expect(proc.pid).toBe(-1);
+    expect(await text(proc)).toBe("");
+    expect(await proc.wait()).toMatchObject({ code: null, signal: null });
+    expect(await platform.fs.exists(marker())).toBe(false);
+  });
+
+  it("显式相对路径仍按 cwd 解析并启动", async () => {
+    for (const command of [`.\\${name}.cmd`, `./${name}`]) {
+      await fs.rm(marker(), { force: true });
+      const proc = platform.process.spawnPipe(command, [], {
+        cwd: root,
+        env: { PATH: process.env.PATH ?? "", PATHEXT: ".CMD;.EXE" },
+      });
+      expect((await text(proc)).trim()).toBe("cwd");
+      expect((await proc.wait()).code).toBe(0);
+      expect(await platform.fs.exists(marker())).toBe(true);
+    }
+  });
+});
+
 describe("spawnPipe minimal 代理变量", () => {
   async function withHostEnv(vars: Record<string, string | undefined>, fn: () => Promise<void>) {
     const saved = new Map<string, string | undefined>();

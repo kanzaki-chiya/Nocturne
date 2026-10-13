@@ -47,7 +47,7 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 | `type` | `stdio` / `http`，省略为 `stdio`。两类专属字段不能混写，无效条目逐条忽略并警告 |
 | `url` | HTTP 必填；只允许 HTTPS 或回环 HTTP（localhost、127.0.0.0/8、::1），拒绝内联凭据 |
 | `headers` | HTTP 专属；字符串或 `mcp.json` 专属的 `{ stored: true }`，字符串支持 `${NAME}`，疑似字面凭据拒绝 |
-| `command` | 可执行文件（必填）。经 `platform.spawnPipe` 启动，不经 shell 解释——参数用 `args` 数组，不做引号解析 |
+| `command` | 可执行文件（必填）。经 `platform.spawnPipe` 启动，不经 shell 解释——参数用 `args` 数组，不做引号解析；裸命令只查 PATH，工作区里的脚本要写显式路径（见第 8 节） |
 | `args` | 参数数组，原样传递 |
 | `env` | 显式传给该服务器的变量，叠加在**白名单默认环境**之上（见下）。值中的 `${NAME}` 启动时从 Nocturne 进程环境展开；引用的变量不存在时展开为空字符串并记警告（`mcp_env_missing`）。**禁止内联凭据**：与 `providers` 条目同规则，env 值只应引用环境变量名（`${NAME}` 形式），出现疑似凭据字面量的字段按 `config_credential_rejected` 拒绝该层文件——见 config.md 第 2 节的既有约定扩展 |
 
@@ -185,7 +185,7 @@ core:      wrapSession 中 options.mcp 存在时（空集合也建会话以支�
 - `platform` 的 `spawnPipe(command, args, opts)`：`stdin` 可写、`stdout` 原始字节流（MCP 是换行分隔 UTF-8 JSON-RPC，不走控制台代码页解码）、`stderr` 按控制台编码解码，经脱敏后只进入探测尾部、`kill()` 走进程树终止。这是 platform 的通用能力，`hooks` 也使用它。
 - Core 侧的公开导出：`ToolDefinition`、`ToolResult`、`ToolContext`、`ToolScope`、`ToolTraits`、`McpConnector` 等类型经 `@nocturne/core` 导出（纯类型，兼容变更；platform 的 `FileSystem`/`ProcessRunner`/`PathOps` 等类型同理）。
 - 外部 agent 的 ACP 接入沿用同类 connector 注入与 `spawnPipe` 进程树清理，但作为 `task` 委派而不是 MCP 工具集合；见 [subagent.md](subagent.md#17-外部-agentacp)。
-- `PipeProcess.exited()` 可提前检测根进程退出；`detachOutput()` 可结束被后代占用的本地管道，原 `wait()` 仍等待 close 以保留完整协议尾部。Windows `.cmd`/`.bat` 由平台按 PATH/PATHEXT 解析并引用参数，不按具体命令名称分支；不带扩展名的命令只试 PATHEXT 扩展名（空项忽略、不区分大小写），不命中同名无扩展名文件，都找不到时原样交给 spawn 报错。
+- `PipeProcess.exited()` 可提前检测根进程退出；`detachOutput()` 可结束被后代占用的本地管道，原 `wait()` 仍等待 close 以保留完整协议尾部。Windows `.cmd`/`.bat` 由平台按 PATH/PATHEXT 解析并引用参数，不按具体命令名称分支；不带扩展名的命令只试 PATHEXT 扩展名（空项忽略、不区分大小写），不命中同名无扩展名文件。不带路径的裸命令**只查 PATH，不搜 cwd**：MCP、Hooks、外部 agent 的 cwd 可能是用户打开的工作区，仓库根目录里的同名 `npx.cmd` 不能冒充用户层配置的命令（项目信任挡不住这一条，因为配置来自用户层）。PATH 里找不到时不把裸命令交给 spawn（libuv 在 Windows 上同样会先搜 cwd），而是模拟一次 spawn ENOENT：`pid` 为 -1，`wait()`/`exited()` 以 `code: null` 结算，各调用方沿用原有的启动失败路径与文案。要用工作区里的脚本，请写显式路径（`.\tool.cmd`、`./tool`、`sub\tool.exe` 或绝对路径），显式路径仍按 cwd 解析；此前依赖 cwd 搜索的裸命令配置需要改成显式路径。POSIX 不受影响（`execvp` 本来就不搜 cwd）。
 
 ## 9. 暂不设计
 

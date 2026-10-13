@@ -42,7 +42,7 @@ Hook 是**配置驱动的外部命令**：Runtime 在固定事件点上启动一
 | 字段 | 说明 |
 |---|---|
 | `matcher` | 字符串通配符（与权限规则同一套匹配，permissions.md 5.1），仅 `PreToolUse`/`PostToolUse`/`PermissionRequest` 有效，匹配工具名（`mcp__github__push`）；缺省 `"*"` |
-| `command` / `args` | 可执行文件与参数数组，**不经 shell 解释**（平台差异可预期；要写 shell 逻辑自己 `cmd /c` 或 `sh -c`） |
+| `command` / `args` | 可执行文件与参数数组，**不经 shell 解释**（平台差异可预期；要写 shell 逻辑自己 `cmd /c` 或 `sh -c`）；裸命令只查 PATH、不搜工作区，工作区里的脚本写显式路径（如 `.\hooks\guard.cmd`，规则见 [mcp.md](mcp.md) 第 8 节） |
 | `timeoutMs` | 默认 5000，上限 60000 |
 
 运行契约（每个被触发的条目一次调用 = 一个进程）：

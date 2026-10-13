@@ -44,10 +44,17 @@ async function resolveCommand(command: string): Promise<{ command: string; args:
 }
 
 describe.runIf(process.platform === "win32")("Windows spawnPipe 命令解析", () => {
-  it("只有无扩展名 npx 时原样交给 spawn，不当作可执行文件", async () => {
+  it("只有无扩展名 npx 时按找不到命令结算，不交给 spawn", async () => {
     await fs.mkdir(path.join(root, "bin"));
     await fs.writeFile(path.join(root, "bin", "npx"), "#!/bin/sh\n");
-    expect(await resolveCommand("npx")).toEqual({ command: "npx", args: ["--version"] });
+    const proc = createProcessRunner().spawnPipe("npx", ["--version"], {
+      cwd: root,
+      env: { PATH: path.join(root, "bin"), PATHEXT: ".CMD;.EXE" },
+    });
+    expect(proc.pid).toBe(-1);
+    expect(await proc.wait()).toMatchObject({ code: null, signal: null });
+    expect(await proc.exited()).toMatchObject({ code: null });
+    expect(spawned.calls).toEqual([]);
   });
 
   it("npx 与 npx.cmd 并存时经 cmd 调用 npx.cmd", async () => {

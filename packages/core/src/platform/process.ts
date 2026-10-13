@@ -3,9 +3,10 @@
  * Phase 1 没有内置 shell 工具，但接口必须就位：启动、流式输出、
  * AbortSignal 传播、进程树终止、超时。
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { EventEmitter } from "node:events";
 import process from "node:process";
-import type { Readable } from "node:stream";
+import { PassThrough, type Readable } from "node:stream";
 import { statSync } from "node:fs";
 import path from "node:path";
 
@@ -587,14 +588,57 @@ function pathExtensions(value: string | undefined): string[] {
   return extensions.length > 0 ? extensions : [".COM", ".EXE", ".BAT", ".CMD"];
 }
 
-/** Windows 管道命令按 PATH/PATHEXT 解析；批处理脚本必须经 cmd，而非 shell:true。 */
-function pipeInvocation(command: string, args: string[], env: NodeJS.ProcessEnv, cwd: string) {
+/**
+ * 模拟 spawn 找不到命令：异步 error(ENOENT) + close，pid 缺省。
+ * 调用方沿用真实 spawn 失败时的同一条路径与文案。
+ */
+function missingCommand(command: string, args: string[]): ChildProcessWithoutNullStreams {
+  const child = Object.assign(new EventEmitter(), {
+    pid: undefined,
+    exitCode: null as number | null,
+    signalCode: null,
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill: () => false,
+  });
+  process.nextTick(() => {
+    child.exitCode = -4058;
+    child.emit(
+      "error",
+      Object.assign(new Error(`spawn ${command} ENOENT`), {
+        code: "ENOENT",
+        errno: -4058,
+        syscall: `spawn ${command}`,
+        path: command,
+        spawnargs: args,
+      }),
+    );
+    child.stdout.end();
+    child.stderr.end();
+    child.emit("close", -4058, null);
+  });
+  return child as unknown as ChildProcessWithoutNullStreams;
+}
+
+/**
+ * Windows 管道命令按 PATH/PATHEXT 解析；批处理脚本必须经 cmd，而非 shell:true。
+ * 裸命令只查 PATH、不搜 cwd（工作区里的脚本不能冒充用户层配置的命令）；
+ * 查不到返回 undefined，由调用方模拟 ENOENT，不交给会再搜 cwd 的 libuv。
+ */
+function pipeInvocation(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): { command: string; args: string[]; verbatim: boolean } | undefined {
   if (process.platform !== "win32") return { command, args, verbatim: false };
   const environment: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(env)) environment[key.toUpperCase()] = value;
-  const directories = /[/\\]/.test(command)
+  const explicitPath = /[/\\]/.test(command);
+  const directories = explicitPath
     ? [""]
-    : [cwd, ...(environment.PATH ?? "").split(path.delimiter)];
+    : (environment.PATH ?? "").split(path.delimiter).filter((directory) => directory !== "");
   // Windows 不执行无扩展名文件，只试 PATHEXT；npm 目录里的同名 sh 脚本不能抢在 .cmd 之前命中。
   const extensions = path.extname(command) ? [""] : pathExtensions(environment.PATHEXT);
   let resolved: string | undefined;
@@ -612,6 +656,7 @@ function pipeInvocation(command: string, args: string[], env: NodeJS.ProcessEnv,
     }
     if (resolved !== undefined) break;
   }
+  if (resolved === undefined && !explicitPath) return undefined;
   if (!resolved || !/\.(cmd|bat)$/i.test(resolved)) {
     return { command: resolved ?? command, args, verbatim: false };
   }
@@ -705,14 +750,17 @@ export function createProcessRunner(): ProcessRunner {
             );
       const env = { ...inherited, ...options.env };
       const invocation = pipeInvocation(command, args, env, options.cwd ?? process.cwd());
-      const child = spawn(invocation.command, invocation.args, {
-        cwd: options.cwd,
-        env,
-        windowsHide: true,
-        windowsVerbatimArguments: invocation.verbatim,
-        detached: process.platform !== "win32",
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      const child =
+        invocation === undefined
+          ? missingCommand(command, args)
+          : spawn(invocation.command, invocation.args, {
+              cwd: options.cwd,
+              env,
+              windowsHide: true,
+              windowsVerbatimArguments: invocation.verbatim,
+              detached: process.platform !== "win32",
+              stdio: ["pipe", "pipe", "pipe"],
+            });
       const encoding = consoleEncoding();
       const { wait, kill } = attachLifecycle(child, options);
       const exited = attachLifecycle(child, {}, "exit").wait;
