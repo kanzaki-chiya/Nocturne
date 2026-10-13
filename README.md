@@ -120,9 +120,13 @@ Anthropic 协议可用另一份 Provider 条目，模型引用随之改为 `anth
 
 预设可用 `read-only`、`default`、`auto-edit`、`guarded`、`smart`、`bypass`；旧名称 `full-access` 兼容为 `guarded`。`smart` 对除只读命令外的操作先做安全审查，放行就执行，否则交给你确认；未配置审查器时这些操作直接询问你并提示一次。TUI `/settings` 的「安全审查」可独立选择小模型。`bypass` 放开工作区外写入和内建风险提示，仍保留凭据保护及显式权限规则。子代理通过内置 `task` 工具使用，`explore` 适合只读探索，`general` 可以承担更广的任务。会话中可用 `/preset` 查看或切换预设。流式首事件与空闲超时可在配置的 `turn.firstEventTimeoutMs`、`turn.idleTimeoutMs` 中调整，默认分别为 30000 和 120000 毫秒。更多配置说明见[项目文档](docs/README.md)。
 
+### 子代理档位
+
+在桌面端「设置 › 子代理」中可以添加内置档位，例如 quick 处理查找、汇总这类轻量任务，deep 处理跨模块的复杂任务。每个档位可以分别指定模型、思考强度和工具集，并写明适合什么任务；模型委派子任务时会按任务挑选合适的档位。
+
 ### 外部 agent
 
-外部 agent 是独立安装、登录的编程助手，Nocturne 可以把子任务交给它执行。在桌面端「设置 › 外部 agent」中添加，或在用户 `config.json` 中配置 `externalAgents`，例如使用 omp 并指定模型：
+外部 agent 是独立安装、登录的编程助手，Nocturne 可以把子任务交给它执行。在桌面端「设置 › 子代理」中添加，或在用户 `config.json` 中配置 `externalAgents`，例如使用 omp 并指定模型：
 
 ```json
 {
