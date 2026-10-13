@@ -74,6 +74,7 @@ export async function resolveSubjects(
         shell: req.shell,
         shellRisk: req.shellRisk,
         shellRiskByDialect: req.shellRiskByDialect,
+        readOnly: req.readOnly,
       });
     }
   }

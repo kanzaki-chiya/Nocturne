@@ -196,6 +196,21 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
     }
   });
 
+  it("readOnlyHint 随权限主体透传，未声明时不带标记（ADR-0057）", async () => {
+    const { session } = await openFake();
+    try {
+      const scope = { cwd, workspaceRoot: cwd, paths: platform.paths };
+      expect(getTool(session, "mcp__fake__peek").permissionSubjects({}, scope)).toEqual([
+        { kind: "mcp", target: "fake/peek", readOnly: true },
+      ]);
+      expect(getTool(session, "mcp__fake__echo").permissionSubjects({}, scope)).toEqual([
+        { kind: "mcp", target: "fake/echo" },
+      ]);
+    } finally {
+      await session.close();
+    }
+  });
+
   it("isError 结果映射为 error/tool_error", async () => {
     const { session } = await openFake();
     try {

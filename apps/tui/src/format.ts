@@ -165,7 +165,7 @@ export function summarizeToolInput(name: string | undefined, input: unknown): st
 
 /** ADR-0036：审查来源及用量与主模型输出分开标注。 */
 export function permissionReviewLine(review: PermissionReviewedPayload): string {
-  const label = { allow: "放行", block: "拦截", unsure: "拿不准" }[review.verdict];
+  const label = { allow: "放行", block: "拦截", unsure: "交给你确认" }[review.verdict];
   const usage = review.usage;
   return `审查：${label} — ${review.reason.replace(/\s+/g, " ")}${review.cached ? "（缓存）" : ""}${usage ? `（审查用量：${usage.inputTokens} 输入 / ${usage.outputTokens} 输出）` : ""}`;
 }

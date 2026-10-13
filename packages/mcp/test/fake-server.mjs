@@ -22,6 +22,12 @@ const tools = [
     },
   },
   {
+    name: "peek",
+    description: "只读工具，声明 readOnlyHint",
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "fail",
     description: "总是返回 isError",
     inputSchema: { type: "object", properties: {} },

@@ -377,7 +377,7 @@ describe("智能权限审查行", () => {
   for (const [verdict, label] of [
     ["allow", "放行"],
     ["block", "拦截"],
-    ["unsure", "拿不准"],
+    ["unsure", "交给你确认"],
   ] as const) {
     it(`${label} 理由及审查用量在交互和打印输出单列显示`, () => {
       const event = durable("permission.reviewed", {
@@ -415,13 +415,13 @@ describe("智能权限审查行", () => {
       ).toEqual(["└ 权限：allow（user）"]);
     }
   });
-  it("拿不准的理由和一次性选项进入确认提示", () => {
+  it("交给你确认的理由和一次性选项进入确认提示", () => {
     const text = renderPermissionPrompt(
       [{ kind: "edit", target: "/outside/a" }],
-      "审查：拿不准 — 未明确授权",
+      "审查：交给你确认 — 未明确授权",
       ["allow_once", "deny", "deny_stop"],
     );
-    expect(text).toContain("审查：拿不准 — 未明确授权");
+    expect(text).toContain("审查：交给你确认 — 未明确授权");
     expect(text).not.toContain("本会话内允许");
     expect(text).not.toContain("始终允许");
   });

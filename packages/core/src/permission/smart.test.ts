@@ -15,7 +15,7 @@ const shell = (target: string): PermissionSubject => ({ kind: "shell", target })
 describe("ADR-0036 预设", () => {
   it.each(PERMISSION_PRESET_NAMES)("%s 普通主体矩阵", (preset) => {
     const p = createRulePolicy({ ...ctx, preset, presetContext: ctx });
-    const broad = ["guarded", "smart", "bypass"].includes(preset);
+    const broad = ["guarded", "bypass"].includes(preset);
     expect(
       p.evaluate([{ kind: "read", target: "C:/ws/a", resolved: "C:/ws/a" }]).decision.action,
     ).toBe("allow");
@@ -25,12 +25,15 @@ describe("ADR-0036 预设", () => {
     expect(p.evaluate([edit("C:/outside/a")]).decision.action).toBe(
       preset === "read-only" ? "deny" : preset === "bypass" ? "allow" : "ask",
     );
+    // ADR-0057：smart 的 shell / network / mcp 不再宽放行；只读白名单与 readOnlyHint 另走 smart-routes.test.ts
     for (const subject of [
       shell("git status"),
       { kind: "network", target: "https://example.test" } as const,
       { kind: "mcp", target: "s/t" } as const,
     ])
-      expect(p.evaluate([subject]).decision.action).toBe(broad ? "allow" : "ask");
+      expect(p.evaluate([subject]).decision.action).toBe(
+        broad || (preset === "smart" && subject.target === "git status") ? "allow" : "ask",
+      );
   });
   it("只由用户确认依赖结构化标记，与显示 label 无关", () => {
     const baseRules = presetRules("smart", ctx).map((rule) => ({
@@ -48,8 +51,18 @@ describe("ADR-0036 预设", () => {
       userOnly: false,
     });
   });
-  it("smart 与 guarded 规则序列一致", () => {
-    expect(presetRules("smart", ctx)).toEqual(presetRules("guarded", ctx));
+  it("smart 与 guarded 只在 shell / network / mcp 三条宽规则上不同（ADR-0057）", () => {
+    const smart = presetRules("smart", ctx);
+    const guarded = presetRules("guarded", ctx);
+    expect(smart).toHaveLength(guarded.length);
+    const differing = smart.filter(
+      (rule, i) => JSON.stringify(rule) !== JSON.stringify(guarded[i]),
+    );
+    expect(differing.map((rule) => [rule.kind, rule.action])).toEqual([
+      ["shell", "ask"],
+      ["network", "ask"],
+      ["mcp", "ask"],
+    ]);
   });
   it("bypass 撤销四类降级，保留授权数据、凭据与显式规则", () => {
     const p = createRulePolicy({
@@ -140,7 +153,7 @@ describe("ADR-0036 审查闸门", () => {
       const operation = gate.check([edit("C:/outside/a")], "call", signal(), turn);
       if (verdict === "unsure" && interactive) {
         const request = await requested(events);
-        expect(request.reason).toContain("审查：拿不准 — 测试理由");
+        expect(request.reason).toContain("审查：交给你确认 — 测试理由");
         expect(events.map((e) => e.type).slice(0, 2)).toEqual([
           "permission.reviewed",
           "permission.requested",

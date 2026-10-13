@@ -179,7 +179,7 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
       return [aux(`! 权限请求 ${ev.payload.requestId}：${ev.payload.reason}`)];
     case "permission.reviewed": {
       const p = ev.payload;
-      const label = { allow: "放行", block: "拦截", unsure: "拿不准" }[p.verdict];
+      const label = { allow: "放行", block: "拦截", unsure: "交给你确认" }[p.verdict];
       const usage = p.usage;
       return [
         aux(

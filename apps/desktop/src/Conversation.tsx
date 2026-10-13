@@ -2048,7 +2048,7 @@ function permissionOperation(pending: PendingPermission): string {
 function permissionWhy(pending: PendingPermission): string {
   switch (pending.review?.verdict) {
     case "unsure":
-      return "审查器拿不准，交给你决定";
+      return "审查器交给你确认";
     case "block":
       return "审查器建议拒绝";
     case "allow":

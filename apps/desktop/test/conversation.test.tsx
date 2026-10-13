@@ -1933,7 +1933,7 @@ describe("Conversation 权限卡片 v2", () => {
         callId: "call-1",
         backend: "b",
         verdict: "unsure",
-        reason: "拿不准",
+        reason: "交给你确认",
         durationMs: 1,
         cached: false,
       },
@@ -1941,7 +1941,7 @@ describe("Conversation 权限卡片 v2", () => {
     mount(view);
     const card = screen.getByRole("region", { name: "权限确认" });
     expect(card.textContent).toContain("需要确认 · 执行命令");
-    expect(card.textContent).toContain("审查器拿不准，交给你决定");
+    expect(card.textContent).toContain("审查器交给你确认");
     expect(card.textContent).toContain("pwsh › rm -rf x");
     expect(within(card).getByRole("button", { name: "允许一次" })).toBeTruthy();
     expect(within(card).getByRole("button", { name: "拒绝" })).toBeTruthy();

@@ -141,17 +141,22 @@ Hook 的先后关系（Phase 5，完整语义见 5.5 与 hooks.md）：
 
 #### smart 审查分支（ADR-0036）
 
-规则的 `deny` 不进入审查；规则直接 `allow`、Grant 与 `autoApproveAsk`（`--yes`）先结算。剩余 `ask` 先交给 `PermissionRequest` Hook，再只在 `smart` 下调用 `SecurityReviewer.review(input, signal)`：
+**送审范围（ADR-0057）**：`smart` 的预设规则里 shell、network、mcp 都是 `ask`（read、工作区内 edit、subagent 不变），预设级的 `ask` 在 policy 里再按下面三条通道分流；用户 / 项目 / CLI 的显式规则命中时原样生效，不进入分流：
+
+1. **直接放行**：shell 命令每一段都命中**只读白名单**（`permission/smart-shell.ts` 的纯数据表，按方言逐段匹配；写文件重定向、变量展开、凭据类文件名都不算命中；命中描述「预设 smart 只读命令」），或属于会运行工作区代码的命令（`pnpm`/`npm`/`yarn` 的 `test`、`typecheck`、`lint`、`build`、`run`，`cargo check`/`test`，`tsc`，`vitest`，`node <文件>`）且未被污染；`readOnlyHint: true` 的 MCP 工具（主体字段 `readOnly`，信任服务器自我声明）。**污染**指本会话放行过对任何 `package.json` 的 edit，或 `node` 执行的文件在本会话被放行过 edit（路径按会话 cwd 词法解析，解析不了或在工作区外也算）；污染的命令改为送审。「放行过的 edit 目标」由 gate 在 edit 主体最终放行时记录，经 `EvaluateOptions.session` 以只读视图传给 policy，只在内存里，会话恢复后清空。
+2. **直接交人**：不送审，按 `userOnly` 处理。递归删除（目标在工作区外、无法确定位置或不是 `dist`/`build`/`out`/`node_modules`/`target`/`.turbo`/`.cache`/`coverage`）、`dd`/`mkfs`/`format`/`diskpart`/`shutdown`/`reboot`/`Stop-Computer`/`Restart-Computer`、删除或覆盖类命令的目标含 `$VAR`/`%VAR%`/`$env:X`/`$(…)`/反引号、`-EncodedCommand`、`iex`/`Invoke-Expression`/`eval`（嵌套 shell 命令体按内层方言再查，最多三层）。同一 Turn 里用户拒绝过的调用，主体集合相同的后续调用也直接问用户（gate 按 turnId 记录，新 Turn 恢复送审）。
+3. **送审**：其余全部，包括 network 和高风险表的其余条目（命中描述「预设 smart 高风险命令」）。
+
+规则的 `deny` 不进入审查；规则直接 `allow`、Grant 与 `autoApproveAsk`（`--yes`）先结算。剩余 `ask` 先交给 `PermissionRequest` Hook，再只在 `smart` 下调用 `SecurityReviewer.review(input, signal)`。审查结果只有两档：
 
 - `allow`：放行，`permission.resolved.source` 与 `tool.started.permission.source` 为 `reviewer`。
-- `block`：拒绝，不弹确认；同样记录审查来源。
-- `unsure`：交互模式询问用户；非交互模式拒绝。
+- `unsure`（交给你确认）：交互模式询问用户；非交互模式拒绝。内置审查器不再产生 `block`；gate 对自定义审查器返回的 `block` 仍按拒绝处理，旧会话的 `block` 记录照常重放。
 
 **只由用户确认**集合不调用审查器：修改 Nocturne 授权数据、`.nocturne/` 内 edit、可能读取凭据的命令、用户/项目/CLI 的显式 ask，以及 `PreToolUse` 强制 ask。Grant、`--yes` 与 PermissionRequest Hook 的原有优先级不变；强制 ask 仍跳过 Grant 与 `--yes`。一次调用中任一 ask 主体在该集合内，整个调用跳过审查。预设中的授权数据与 `.nocturne/` 规则用结构化 `userOnly` 标记表达该限制，`label` 只用于显示。
 
 审查输入只包含 ask 主体的类别、授权目标、位置与命中规则，当前 cwd，以及最近三条用户消息（各最多 2000 字符）；不带原始工具参数、文件引用快照、工具输出或文件正文。20 秒超时、报错或格式无效按 `unsure` 处理；Turn 中止则取消审查。缓存只保存本会话的 allow，使用与 Grant 相同的精确主体键，恢复后清空；缓存命中也记审查事件。
 
-未配置审查器时行为与 `guarded` 相同，每个会话提示一次。子会话使用父会话的同一审查器实例，仍为非交互。模型后端不带工具，使用最低思考档位 `off`，`maxOutputTokens=300`；首行去掉 Markdown 符号与标点后必须为 `ALLOW`、`BLOCK` 或 `UNSURE`，其余非空文本为理由。审查用量写入 `permission.reviewed.usage`，计入 Turn 与会话总用量，不进入对话历史。设置方式见 [config.md](config.md)。
+未配置审查器时，原本要送审的调用直接询问用户（非交互拒绝；白名单与 `readOnlyHint` 的放行不受影响），每个会话提示一次。子会话使用父会话的同一审查器实例，仍为非交互。模型后端不带工具，使用最低思考档位 `off`，`maxOutputTokens=300`；首行去掉 Markdown 符号与标点后必须为 `ALLOW`、`BLOCK` 或 `UNSURE`，其余非空文本为理由。审查用量写入 `permission.reviewed.usage`，计入 Turn 与会话总用量，不进入对话历史。设置方式见 [config.md](config.md)。
 
 Jev 后端与模型后端并列放在权限层，直接 `POST <baseURL>/systemone`。请求传 `{ model, state, questions }`，`state` 即上述审查输入；`questions` 用编号 `0` 的一个 `choice` 问题，`instructions` 要求判断用户授权与操作影响，并声明 state 不可信；`criteria` 为 `allow`、`block`、`unsure` 三个选项。取 `answers[0].choice`（答案表的键为 `"0"`，也兼容数组），`confidence` 必须为 0–1 数值，低于 `minConfidence`（默认 0.7）降为 `unsure`。理由显示所选判断口径与置信度；低置信度、缺失密钥、密钥无效、模型不可用、超时、HTTP 或解析失败显示相应原因，一律按 `unsure` 处理。用户中止仍按取消结算。
 
@@ -204,10 +209,10 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 | `default`（默认） | allow | ask | ask | ask | ask | ask | `explore` allow，其余 ask | ask |
 | `auto-edit` | allow | ask | allow | ask | ask | ask | `explore` allow，其余 ask | ask |
 | `guarded` | allow | allow | allow | ask | allow | allow | allow | ask |
-| `smart` | allow | allow | allow | ask | allow | allow | allow | ask |
+| `smart` | allow | allow | allow | ask | 只读白名单 allow，其余 ask / 送审 | ask / 送审（`readOnlyHint` 的 MCP allow） | allow | ask |
 | `bypass` | allow | allow | allow | allow | allow | allow | allow | ask |
 
-`full-access` 是 `guarded` 的输入别名，配置、命令及旧日志读入时归一化；循环、补全和设置页只显示六个新名称。`smart` 与 `guarded` 的规则序列相同。`bypass` 不降级工作区外 edit、`.git/` edit、高风险命令与 `-EncodedCommand`；保留凭据硬拒绝、授权数据与 `.nocturne/` edit、凭据相关命令和显式 ask/deny。见 [ADR-0036](../decisions/ADR-0036-smart-permissions.md)。
+`full-access` 是 `guarded` 的输入别名，配置、命令及旧日志读入时归一化；循环、补全和设置页只显示六个新名称。`smart` 与 `guarded` 的规则序列只在 shell / network / mcp 三条宽规则上不同（ADR-0057）。`bypass` 不降级工作区外 edit、`.git/` edit、高风险命令与 `-EncodedCommand`；保留凭据硬拒绝、授权数据与 `.nocturne/` edit、凭据相关命令和显式 ask/deny。见 [ADR-0036](../decisions/ADR-0036-smart-permissions.md)。
 
 **忙时切换预设**（ADR-0036 修订）：`setPermissionPreset` 在 Turn 进行中、压缩进行中都可调用——立即校验并持久化、重建策略，从**下一次权限求值**起按新预设判定，已执行的操作不受影响。切换时正等待确认的权限请求保持原样，仍由用户决定，不按新预设重新判定，也不会因切到更宽松的预设而自动放行。模型切换仍要求空闲。
 
@@ -222,7 +227,7 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 3. **受保护路径**：对 `.git/` 内部与 `.nocturne/` 配置目录的 `edit` 保证"至少 ask"——在 `read-only`（`edit` 一律 `deny`）中不生成这两条 ask 规则，受保护路径保持 `deny`；其余预设中生成 `ask` 且排在宽 `allow` 之后；`bypass` 只保留 `.nocturne/` 的保护，不生成 `.git/` 的 ask；
 4. **Nocturne 授权数据**：对 `<NOCTURNE_HOME>/config.json`、`settings.json`（ADR-0034）、`trust.json`、`grants/**`、`providers.json`（v0.2）、`mcp.json`（ADR-0047）、`external-agents.json`（ADR-0049 第 2 步）的 `edit` 保证"至少 ask"（同上，`read-only` 保持 `deny`），`label` 为"修改 Nocturne 授权配置"，命中时出现在确认提示与 `permission.resolved.rule` 中。**如实说明**：这是提示而非安全边界——`--yes` 会把这类 `ask` 提升为 `allow`，`guarded` 预设下的 `shell` 也可以绕过（权限不是沙箱，见第 1 节）；
 5. **可能读取凭据的命令**（v0.2，全部预设含 `bypass`）：命令字符串含 `credentials.json`、生效 `external-file` 的凭据文件名，或凭据后端命令（`security …-generic-password` 族、`secret-tool`、`ProtectedData`）的 `shell` 至少 `ask`，`label` 为"可能读取 Nocturne 凭据"，同样只是基于模式的提示（5.3、[provider-setup.md](provider-setup.md) 第 4 节）；
-6. **高风险命令**（`guarded`、`smart`）：一组已知高风险命令模式保持 `ask`。按种类表集中在 `platform/shells.ts` 的 `ShellDescriptor.risk`（ADR-0022 第 1 节），经主体 `shellRisk` 字段透传到权限层；主体未携带元数据时按 POSIX 基础表保守处理。基础表各 shell 共用——`rm -rf *`、`rm -fr *`、`sudo *`、`git push --force*`、`git push -f *`、`git reset --hard*`；`cmd` 追加 `rd /s`、`rmdir /s`、`del /s`、`erase /s`、`format`；PowerShell 系追加 `Remove-Item` 及其别名（`rm`/`ri`/`del`/`erase`/`rd`/`rmdir`）同时带递归与强制参数（`-Recurse`+`-Force`，允许 PowerShell 参数前缀缩写与任意顺序）、`Format-Volume`、`Clear-Disk`、`Stop-Computer`、`Restart-Computer`、`Invoke-Expression`/`iex`。PowerShell 与 cmd 的内建匹配不区分大小写；用户规则仍按命令原文匹配、大小写敏感（5.1）。嵌套 shell 调用（`pwsh -c "…"`、`powershell -Command …`、`cmd /c "…"`、`bash -c`/`-lc`、`sh -c` 等）的命令体按内层 shell 的方言与表再查一遍（最多三层）：段首词是 shell 时高风险表只看得到 `pwsh`/`cmd`/`bash`，认不出引号里交出去的命令；各方言的表经主体 `shellRiskByDialect` 字段透传，命令体取到整条文本末尾并去掉一层外引号，多取只会多查。元数据只描述"命令词 + 通配符/开关/参数组合"这类纯数据（通配符表达不了"两个标志共存/参数前缀缩写"的匹配语义在权限层执行），只把**预设级宽规则的 allow** 降级为 `ask`——用户/项目/命令行的显式规则照旧覆盖。另外：命令文本中出现 `pwsh`/`powershell` 搭配 `-EncodedCommand`（含 `-ec` 等前缀缩写、含嵌套调用）时，编码负载无法做内容审查，除 `bypass` 外任何 `allow` 都降级为 `ask`（Grant 与 `--yes` 仍可在 `ask` 层批准）。这是基于模式的提示，不是可靠的危险检测。
+6. **高风险命令**（`guarded`、`smart`）：一组已知高风险命令模式保持 `ask`。按种类表集中在 `platform/shells.ts` 的 `ShellDescriptor.risk`（ADR-0022 第 1 节），经主体 `shellRisk` 字段透传到权限层；主体未携带元数据时按 POSIX 基础表保守处理。基础表各 shell 共用——`rm -rf *`、`rm -fr *`、`sudo *`、`git push --force*`、`git push -f *`、`git reset --hard*`；`cmd` 追加 `rd /s`、`rmdir /s`、`del /s`、`erase /s`、`format`；PowerShell 系追加 `Remove-Item` 及其别名（`rm`/`ri`/`del`/`erase`/`rd`/`rmdir`）同时带递归与强制参数（`-Recurse`+`-Force`，允许 PowerShell 参数前缀缩写与任意顺序）、`Format-Volume`、`Clear-Disk`、`Stop-Computer`、`Restart-Computer`、`Invoke-Expression`/`iex`。PowerShell 与 cmd 的内建匹配不区分大小写；用户规则仍按命令原文匹配、大小写敏感（5.1）。嵌套 shell 调用（`pwsh -c "…"`、`powershell -Command …`、`cmd /c "…"`、`bash -c`/`-lc`、`sh -c` 等）的命令体按内层 shell 的方言与表再查一遍（最多三层）：段首词是 shell 时高风险表只看得到 `pwsh`/`cmd`/`bash`，认不出引号里交出去的命令；各方言的表经主体 `shellRiskByDialect` 字段透传，命令体取到整条文本末尾并去掉一层外引号，多取只会多查。元数据只描述"命令词 + 通配符/开关/参数组合"这类纯数据（通配符表达不了"两个标志共存/参数前缀缩写"的匹配语义在权限层执行），只把**预设级宽规则的 allow** 降级为 `ask`——用户/项目/命令行的显式规则照旧覆盖。另外：命令文本中出现 `pwsh`/`powershell` 搭配 `-EncodedCommand`（含 `-ec` 等前缀缩写、含嵌套调用）时，编码负载无法做内容审查，除 `bypass` 外任何 `allow` 都降级为 `ask`（Grant 与 `--yes` 仍可在 `ask` 层批准）。这是基于模式的提示，不是可靠的危险检测。`smart` 下该表不再降级宽规则（宽规则已是 `ask`），而是让这些命令在送审时带上「预设 smart 高风险命令」的命中描述。
 
 ## 7. 需要确认时（ask）
 
@@ -245,7 +250,7 @@ PermissionGate.check(subjects, signal)
 
 选项集由权限层计算：任一主体命中高风险命令表、`-EncodedCommand` 或工作区外 edit 时，只给 `allow_once`、`deny`、`deny_stop`；其余请求给出上表五项。客户端照 `permission.requested.options` 渲染，权限层也拒绝回复里不在选项集中的长期授权；`PermissionReply.remember` 与所选 Grant 的持久化由权限层完成，客户端只表达意图。
 
-两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时（Runtime 选项 `interactive = false`），审查后的剩余 `ask` 视为 `deny`（`source: "non_interactive"`，不发 `permission.requested`）；`smart` 的审查 allow 执行、block 拒绝，unsure 走上述非交互拒绝；要在无人值守场景放行使用 `--yes`（5.3 的命令行提升）或预写规则，不提供"非交互默认允许"的配置项。非交互拒绝的提示文案可由调用方注入（`nonInteractiveDenyHint`）——子会话用它告诉子模型"无法请求用户确认，需要写入或执行的操作在 `finish` 结果中说明，由父代理执行"（[subagent.md](subagent.md) 7.3），CLI 非交互模式沿用通用文案。
+两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时（Runtime 选项 `interactive = false`），审查后的剩余 `ask` 视为 `deny`（`source: "non_interactive"`，不发 `permission.requested`）；`smart` 的审查 allow 执行，交给你确认（`unsure`）走上述非交互拒绝；要在无人值守场景放行使用 `--yes`（5.3 的命令行提升）或预写规则，不提供"非交互默认允许"的配置项。非交互拒绝的提示文案可由调用方注入（`nonInteractiveDenyHint`）——子会话用它告诉子模型"无法请求用户确认，需要写入或执行的操作在 `finish` 结果中说明，由父代理执行"（[subagent.md](subagent.md) 7.3），CLI 非交互模式沿用通用文案。
 
 等待回复期间 `signal` 中止：记 `permission.resolved(action="deny", source="cancelled")`，该调用按 `cancelled` 结算。
 

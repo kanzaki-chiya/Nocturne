@@ -15,13 +15,19 @@ import type {
   SubjectRequest,
 } from "../protocol/index.js";
 import { grantFromSubject, grantKey, matchGrant } from "./grants.js";
-import { findRiskySegment, isOpaquePowerShellCommand, shellDialect } from "./pattern.js";
+import {
+  findRiskySegment,
+  isOpaquePowerShellCommand,
+  normalizePathText,
+  shellDialect,
+} from "./pattern.js";
 import type {
   PermissionDecision,
   PermissionPolicy,
   SecurityReviewer,
   ReviewResult,
   GateOutcome,
+  GateHookContext,
   GateTurnContext,
   HookRunner,
   PermissionGate,
@@ -92,6 +98,32 @@ export function createPolicyGate(
   let counter = 0;
   const newRequestId = options.newRequestId ?? ((callId: string) => `perm-${++counter}-${callId}`);
   const caseSensitive = options.caseSensitive ?? true;
+  // 本会话最终放行过的 edit 目标（ADR-0057）：只在内存里，会话恢复后从空开始
+  const approvedEdits = new Set<string>();
+  // 当前 Turn 内被用户拒绝过的调用（按主体集合）：同 Turn 再次出现直接问用户，不再送审
+  let deniedTurnId: string | undefined;
+  const deniedInTurn = new Set<string>();
+  const subjectSetKey = (subjects: readonly PermissionSubject[]): string =>
+    subjects
+      .map((s) => `${s.kind}|${s.resolved ?? s.target}`)
+      .sort()
+      .join("\n");
+  const recordDenied = (turnId: string, subjects: readonly PermissionSubject[]) => {
+    if (deniedTurnId !== turnId) {
+      deniedTurnId = turnId;
+      deniedInTurn.clear();
+    }
+    deniedInTurn.add(subjectSetKey(subjects));
+  };
+  const deniedBefore = (turnId: string, subjects: readonly PermissionSubject[]): boolean =>
+    deniedTurnId === turnId && deniedInTurn.has(subjectSetKey(subjects));
+  const recordApprovedEdits = (subjects: readonly PermissionSubject[]) => {
+    for (const s of subjects) {
+      if (s.kind !== "edit") continue;
+      approvedEdits.add(normalizePathText(s.target, caseSensitive));
+      if (s.resolved !== undefined) approvedEdits.add(normalizePathText(s.resolved, caseSensitive));
+    }
+  };
 
   async function emitResolved(
     req: { requestId?: string; callId: string },
@@ -236,214 +268,238 @@ export function createPolicyGate(
     };
   }
 
+  async function checkInner(
+    subjects: PermissionSubject[],
+    callId: string,
+    signal: AbortSignal,
+    turn?: GateTurnContext,
+    hookCtx?: GateHookContext,
+  ): Promise<GateOutcome> {
+    const isAborted = () => signal.aborted;
+    // Hook 强制 ask（PreToolUse decision:"ask"）：跳过 Grant 与 autoApproveAsk
+    // 求值——Hook 要求的确认不能被既有授权或 --yes 自动放行（permissions.md 5.5）
+    const forceAsk = hookCtx?.forceAsk === true;
+    const evaluation = policy.evaluate(subjects, {
+      ...(forceAsk ? { skipApprovals: true } : {}),
+      session: { cwd: options.cwd, approvedEdits },
+    });
+    let decision = evaluation.decision;
+    // forceAsk 下规则层的 allow/ask 都走确认流程；deny 不受影响直接返回
+    if (forceAsk && decision.action !== "deny") {
+      decision = {
+        action: "ask",
+        source: decision.source,
+        reason: `Hook 要求确认${hookCtx.askReason !== undefined ? `（${hookCtx.askReason}）` : ""}：${decision.reason}`,
+        matchedRule: decision.matchedRule,
+      };
+    }
+    if (isAborted()) {
+      return {
+        subjects: evaluation.subjects,
+        decision: { action: "deny", source: "cancelled", reason: "权限判定期间被中断" },
+        cancelled: true,
+      };
+    }
+    if (decision.action !== "ask") {
+      return { subjects: evaluation.subjects, decision };
+    }
+
+    // PermissionRequest Hook（hooks.md 第 3 节）：在交互/非交互分支之前运行——
+    // 非交互模式下 Hook 的 allow 同样生效；只能放行 ask，碰不到 deny
+    if (options.hooks !== undefined) {
+      const out = await options.hooks.run(
+        "PermissionRequest",
+        {
+          turnId: turn?.turnId,
+          callId,
+          tool: hookCtx?.tool,
+          input: hookCtx?.input,
+          subjects: evaluation.subjects.map((subject) => {
+            const copy = { ...subject };
+            delete copy.detail;
+            return copy;
+          }),
+          permission: {
+            action: "ask",
+            reason: decision.reason,
+            rule: decision.matchedRule?.description,
+          },
+        },
+        signal,
+      );
+      if (out?.action === "allow" || out?.action === "deny") {
+        const hookDecision: PermissionDecision = {
+          action: out.action,
+          source: "hook",
+          reason:
+            out.action === "allow"
+              ? (out.reason ?? "PermissionRequest Hook 放行")
+              : (out.reason ?? "PermissionRequest Hook 拒绝"),
+        };
+        await emitResolved({ callId }, hookDecision, "hook PermissionRequest", turn);
+        return {
+          subjects: evaluation.subjects,
+          decision: hookDecision,
+          resolvedEmitted: turn !== undefined,
+        };
+      }
+    }
+
+    if (isAborted()) {
+      return {
+        subjects: evaluation.subjects,
+        decision: { action: "deny", source: "cancelled", reason: "权限判定期间被中断" },
+        cancelled: true,
+      };
+    }
+    const reviewer = options.preset?.() === "smart" ? options.reviewer?.() : undefined;
+    // 本 Turn 里你拒绝过主体集合相同的调用：不再送审，直接问你（ADR-0057）
+    const rejectedBefore = turn !== undefined && deniedBefore(turn.turnId, evaluation.subjects);
+    if (reviewer !== undefined && rejectedBefore) {
+      decision = {
+        ...decision,
+        reason: `${decision.reason}；本 Turn 你已拒绝过同样的调用，不再送审`,
+      };
+    }
+    if (reviewer !== undefined && !forceAsk && !rejectedBefore && evaluation.userOnly !== true) {
+      const reviewed = await review(reviewer, evaluation, signal);
+      if (isAborted() || reviewed.cancelled) {
+        return {
+          subjects: evaluation.subjects,
+          decision: { action: "deny", source: "cancelled", reason: "安全审查期间被中断" },
+          cancelled: true,
+        };
+      }
+      const { result, cached, durationMs } = reviewed;
+      await turn?.events.emit(
+        "permission.reviewed",
+        {
+          callId,
+          backend: reviewer.backend ?? "custom",
+          model: reviewer.model,
+          verdict: result.verdict,
+          reason: result.reason,
+          durationMs,
+          cached,
+          usage: cached ? undefined : result.usage,
+        },
+        { turnId: turn.turnId },
+      );
+      if (result.verdict === "allow" && !cached) {
+        for (const s of reviewed.reviewTargets) {
+          cachedGrants.push(grantFromSubject(s, caseSensitive));
+          cachedReasons.set(`${s.kind}:${grantKey(s, caseSensitive)}`, result.reason);
+        }
+      }
+      if (result.verdict !== "unsure") {
+        const reviewedDecision: PermissionDecision = {
+          action: result.verdict === "allow" ? "allow" : "deny",
+          source: "reviewer",
+          reason: result.reason,
+        };
+        await emitResolved({ callId }, reviewedDecision, `安全审查：${result.reason}`, turn);
+        return {
+          subjects: evaluation.subjects,
+          decision: reviewedDecision,
+          resolvedEmitted: turn !== undefined,
+        };
+      }
+      decision = { ...decision, reason: `${decision.reason}；审查：交给你确认 — ${result.reason}` };
+    }
+
+    // 非交互：ask 一律拒绝，不发 permission.requested
+    if (options.interactive !== true || turn === undefined) {
+      const hint = options.nonInteractiveDenyHint;
+      return {
+        subjects: evaluation.subjects,
+        decision: {
+          action: "deny",
+          source: "non_interactive",
+          reason:
+            `非交互模式：需确认的操作被拒绝（${decision.reason}）` +
+            (hint !== undefined ? `；${hint}` : ""),
+          matchedRule: decision.matchedRule,
+        },
+      };
+    }
+
+    // ask：先登记等待中的请求（客户端可能在 requested 事件回调里同步回复），
+    // 再发 permission.requested，然后等待 respond / 中断
+    const requestId = newRequestId(callId);
+    const ruleDesc = decision.matchedRule?.description ?? decision.reason;
+    let resolveWait!: (outcome: GateOutcome) => void;
+    const waitPromise = new Promise<GateOutcome>((resolve) => {
+      resolveWait = resolve;
+    });
+    const onAbort = () => {
+      settle(requestId, {
+        subjects: evaluation.subjects,
+        decision: {
+          action: "deny",
+          source: "cancelled",
+          reason: "等待权限回复期间被中断",
+        },
+        cancelled: true,
+      });
+    };
+    pending.set(requestId, {
+      callId,
+      options: confirmationOptions(evaluation.subjects),
+      subjects: evaluation.subjects,
+      reason: decision.reason,
+      ruleDesc,
+      turn,
+      resolve: resolveWait,
+      cleanup: () => {
+        signal.removeEventListener("abort", onAbort);
+      },
+    });
+    if (isAborted()) onAbort();
+    else signal.addEventListener("abort", onAbort);
+
+    const events: ToolEventSink = turn.events;
+    try {
+      await events.emit(
+        "permission.requested",
+        {
+          requestId,
+          callId,
+          subjects: evaluation.subjects,
+          reason: decision.reason,
+          options: confirmationOptions(evaluation.subjects),
+        },
+        { turnId: turn.turnId },
+      );
+    } catch (e) {
+      // 持久化失败等：清掉等待项后继续抛出，由 Executor 按异常路径处理
+      settle(requestId, {
+        subjects: evaluation.subjects,
+        decision: {
+          action: "deny",
+          source: "cancelled",
+          reason: "permission.requested 发出失败",
+        },
+        cancelled: true,
+      });
+      throw e;
+    }
+
+    const outcome = await waitPromise;
+
+    // gate 内部发出 permission.resolved；Executor 不再补发
+    await emitResolved({ requestId, callId }, outcome.decision, ruleDesc, turn, {
+      feedback: outcome.feedback,
+      remember: outcome.remember,
+    });
+    return { ...outcome, resolvedEmitted: true };
+  }
+
   return {
     async check(subjects, callId, signal, turn, hookCtx): Promise<GateOutcome> {
-      const isAborted = () => signal.aborted;
-      // Hook 强制 ask（PreToolUse decision:"ask"）：跳过 Grant 与 autoApproveAsk
-      // 求值——Hook 要求的确认不能被既有授权或 --yes 自动放行（permissions.md 5.5）
-      const forceAsk = hookCtx?.forceAsk === true;
-      const evaluation = policy.evaluate(subjects, forceAsk ? { skipApprovals: true } : undefined);
-      let decision = evaluation.decision;
-      // forceAsk 下规则层的 allow/ask 都走确认流程；deny 不受影响直接返回
-      if (forceAsk && decision.action !== "deny") {
-        decision = {
-          action: "ask",
-          source: decision.source,
-          reason: `Hook 要求确认${hookCtx.askReason !== undefined ? `（${hookCtx.askReason}）` : ""}：${decision.reason}`,
-          matchedRule: decision.matchedRule,
-        };
-      }
-      if (isAborted()) {
-        return {
-          subjects: evaluation.subjects,
-          decision: { action: "deny", source: "cancelled", reason: "权限判定期间被中断" },
-          cancelled: true,
-        };
-      }
-      if (decision.action !== "ask") {
-        return { subjects: evaluation.subjects, decision };
-      }
-
-      // PermissionRequest Hook（hooks.md 第 3 节）：在交互/非交互分支之前运行——
-      // 非交互模式下 Hook 的 allow 同样生效；只能放行 ask，碰不到 deny
-      if (options.hooks !== undefined) {
-        const out = await options.hooks.run(
-          "PermissionRequest",
-          {
-            turnId: turn?.turnId,
-            callId,
-            tool: hookCtx?.tool,
-            input: hookCtx?.input,
-            subjects: evaluation.subjects.map((subject) => {
-              const copy = { ...subject };
-              delete copy.detail;
-              return copy;
-            }),
-            permission: {
-              action: "ask",
-              reason: decision.reason,
-              rule: decision.matchedRule?.description,
-            },
-          },
-          signal,
-        );
-        if (out?.action === "allow" || out?.action === "deny") {
-          const hookDecision: PermissionDecision = {
-            action: out.action,
-            source: "hook",
-            reason:
-              out.action === "allow"
-                ? (out.reason ?? "PermissionRequest Hook 放行")
-                : (out.reason ?? "PermissionRequest Hook 拒绝"),
-          };
-          await emitResolved({ callId }, hookDecision, "hook PermissionRequest", turn);
-          return {
-            subjects: evaluation.subjects,
-            decision: hookDecision,
-            resolvedEmitted: turn !== undefined,
-          };
-        }
-      }
-
-      if (isAborted()) {
-        return {
-          subjects: evaluation.subjects,
-          decision: { action: "deny", source: "cancelled", reason: "权限判定期间被中断" },
-          cancelled: true,
-        };
-      }
-      const reviewer = options.preset?.() === "smart" ? options.reviewer?.() : undefined;
-      if (reviewer !== undefined && !forceAsk && evaluation.userOnly !== true) {
-        const reviewed = await review(reviewer, evaluation, signal);
-        if (isAborted() || reviewed.cancelled) {
-          return {
-            subjects: evaluation.subjects,
-            decision: { action: "deny", source: "cancelled", reason: "安全审查期间被中断" },
-            cancelled: true,
-          };
-        }
-        const { result, cached, durationMs } = reviewed;
-        await turn?.events.emit(
-          "permission.reviewed",
-          {
-            callId,
-            backend: reviewer.backend ?? "custom",
-            model: reviewer.model,
-            verdict: result.verdict,
-            reason: result.reason,
-            durationMs,
-            cached,
-            usage: cached ? undefined : result.usage,
-          },
-          { turnId: turn.turnId },
-        );
-        if (result.verdict === "allow" && !cached) {
-          for (const s of reviewed.reviewTargets) {
-            cachedGrants.push(grantFromSubject(s, caseSensitive));
-            cachedReasons.set(`${s.kind}:${grantKey(s, caseSensitive)}`, result.reason);
-          }
-        }
-        if (result.verdict !== "unsure") {
-          const reviewedDecision: PermissionDecision = {
-            action: result.verdict === "allow" ? "allow" : "deny",
-            source: "reviewer",
-            reason: result.reason,
-          };
-          await emitResolved({ callId }, reviewedDecision, `安全审查：${result.reason}`, turn);
-          return {
-            subjects: evaluation.subjects,
-            decision: reviewedDecision,
-            resolvedEmitted: turn !== undefined,
-          };
-        }
-        decision = { ...decision, reason: `${decision.reason}；审查：拿不准 — ${result.reason}` };
-      }
-
-      // 非交互：ask 一律拒绝，不发 permission.requested
-      if (options.interactive !== true || turn === undefined) {
-        const hint = options.nonInteractiveDenyHint;
-        return {
-          subjects: evaluation.subjects,
-          decision: {
-            action: "deny",
-            source: "non_interactive",
-            reason:
-              `非交互模式：需确认的操作被拒绝（${decision.reason}）` +
-              (hint !== undefined ? `；${hint}` : ""),
-            matchedRule: decision.matchedRule,
-          },
-        };
-      }
-
-      // ask：先登记等待中的请求（客户端可能在 requested 事件回调里同步回复），
-      // 再发 permission.requested，然后等待 respond / 中断
-      const requestId = newRequestId(callId);
-      const ruleDesc = decision.matchedRule?.description ?? decision.reason;
-      let resolveWait!: (outcome: GateOutcome) => void;
-      const waitPromise = new Promise<GateOutcome>((resolve) => {
-        resolveWait = resolve;
-      });
-      const onAbort = () => {
-        settle(requestId, {
-          subjects: evaluation.subjects,
-          decision: {
-            action: "deny",
-            source: "cancelled",
-            reason: "等待权限回复期间被中断",
-          },
-          cancelled: true,
-        });
-      };
-      pending.set(requestId, {
-        callId,
-        options: confirmationOptions(evaluation.subjects),
-        subjects: evaluation.subjects,
-        reason: decision.reason,
-        ruleDesc,
-        turn,
-        resolve: resolveWait,
-        cleanup: () => {
-          signal.removeEventListener("abort", onAbort);
-        },
-      });
-      if (isAborted()) onAbort();
-      else signal.addEventListener("abort", onAbort);
-
-      const events: ToolEventSink = turn.events;
-      try {
-        await events.emit(
-          "permission.requested",
-          {
-            requestId,
-            callId,
-            subjects: evaluation.subjects,
-            reason: decision.reason,
-            options: confirmationOptions(evaluation.subjects),
-          },
-          { turnId: turn.turnId },
-        );
-      } catch (e) {
-        // 持久化失败等：清掉等待项后继续抛出，由 Executor 按异常路径处理
-        settle(requestId, {
-          subjects: evaluation.subjects,
-          decision: {
-            action: "deny",
-            source: "cancelled",
-            reason: "permission.requested 发出失败",
-          },
-          cancelled: true,
-        });
-        throw e;
-      }
-
-      const outcome = await waitPromise;
-
-      // gate 内部发出 permission.resolved；Executor 不再补发
-      await emitResolved({ requestId, callId }, outcome.decision, ruleDesc, turn, {
-        feedback: outcome.feedback,
-        remember: outcome.remember,
-      });
-      return { ...outcome, resolvedEmitted: true };
+      const outcome = await checkInner(subjects, callId, signal, turn, hookCtx);
+      // edit 主体最终放行时记录目标，供 policy 判断「运行工作区代码」是否仍可信
+      if (outcome.decision.action === "allow") recordApprovedEdits(outcome.subjects);
+      return outcome;
     },
 
     checkLexical(request: SubjectRequest) {
@@ -502,6 +558,7 @@ export function createPolicyGate(
           remember = "session";
         }
       }
+      if (reply.decision === "deny") recordDenied(p.turn.turnId, p.subjects);
       const decision: PermissionDecision =
         reply.decision === "allow"
           ? {

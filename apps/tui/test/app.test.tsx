@@ -440,7 +440,7 @@ describe("TUI", () => {
   for (const [verdict, label] of [
     ["allow", "放行"],
     ["block", "拦截"],
-    ["unsure", "拿不准"],
+    ["unsure", "交给你确认"],
   ] as const) {
     it(`审查${label}行在工具上方，普通与全屏帧一致`, () => {
       const entry = toolEntry("review-tool", "running");
@@ -489,7 +489,7 @@ describe("TUI", () => {
     const screen = render(
       inEnv(createElement(PermissionDialog, { pending, active: true, onReply: reply, width: 100 })),
     );
-    expect(screen.lastFrame()).toContain("审查：拿不准");
+    expect(screen.lastFrame()).toContain("审查：交给你确认");
     expect(screen.lastFrame()).toContain("未明确授权目标");
     expect(screen.lastFrame()).not.toContain("[s]");
     expect(screen.lastFrame()).not.toContain("[p]");

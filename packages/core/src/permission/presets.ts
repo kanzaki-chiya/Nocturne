@@ -100,8 +100,19 @@ function broadRules(name: PermissionPresetName): BroadRule[] {
         ...other("ask"),
         ...subagentExplore,
       ];
-    case "guarded":
     case "smart":
+      // ADR-0057：shell / network / mcp 默认 ask，policy 再按只读白名单、
+      // 直接交人与 readOnlyHint 逐项放行或送审；read、工作区 edit、subagent 不变
+      return [
+        readWs,
+        readOut("allow"),
+        edit("allow", "workspace"),
+        edit("ask", "outside"),
+        shell("ask"),
+        ...other("ask"),
+        { kind: "subagent", pattern: "*", action: "allow" },
+      ];
+    case "guarded":
       return [
         readWs,
         readOut("allow"),

@@ -215,3 +215,7 @@ decision == ask 时：
 - **不放开的**：模型切换仍要求空闲（`session_busy`），回退仍按 ADR-0041 只在空闲时执行。
 - **客户端**：TUI `/preset` 与 Shift+Tab、CLI `/preset`、桌面端状态栏的权限菜单都允许忙时切换；桌面端忙时打开菜单显示一行说明「本轮正在进行：从下一次权限判定起按新预设，已执行的操作不受影响」，有待确认请求时改为说明该请求仍等用户决定。
 - **文档**：events.md 第 7 节 `setPermissionPreset` 一行、permissions.md 预设一节、tui.md、cli.md、desktop.md 同步。
+
+### 2026-10-13：送审范围与审查器输出由 ADR-0057 取代
+
+[ADR-0057](ADR-0057-reviewer-v2.md) 取代本 ADR 中两处决定：（1）`smart` 不再与 `guarded` 共用宽规则——shell、network、MCP 默认 `ask`，由只读白名单、直接交人和审查三条通道分流，范围远大于本 ADR 的「规则拦下的操作」；（2）审查结果只有「放行」和「交给你确认」，`block` 不再由内置审查器产生（`permission.reviewed.verdict` 取值不变，交人写 `unsure`，旧会话照常重放），审查器改为回答七道是非题、由权限层的纯函数得出结论。本 ADR 其余部分（预设重排、`guarded`、`bypass`、只由用户确认集合、缓存、非交互结算、Jev 与模型后端并列）仍然有效。

@@ -147,7 +147,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 | `tool.progress` | `stdout`/`stderr` 的片段按顺序拼接，只在原始换行处结束行；`info` 每次调用是一行独立摘要，渲染层补换行。两类输出均缩进两格（约定见 [tool-api.md](../protocols/tool-api.md) 第 2 节） |
 | `tool.completed` | `└ <status>` + 耗时；`error`/`denied`/`cancelled`/`interrupted` 附 `error.code` 与原因；`edit`/`write` 的 `output.diff` 完整显示旧/新行号、`+`/`-` 标记及「新增 N 行，删除 M 行」，无色终端仍保留标记，旧头部不臆造行号；结构化输出超限时显示省略提示；`truncated` 为真时附一行"输出已截断，完整内容在 \<path\>"（落盘路径见 [tools.md](../architecture/tools.md) 第 4 节） |
 
-| `permission.reviewed` | `审查：放行/拦截/拿不准 — 理由`，附缓存标记与审查来源用量；非交互写 stderr，交互显示在工具之前 |
+| `permission.reviewed` | `审查：放行/拦截/交给你确认 — 理由`（`unsure` 显示为「交给你确认」，`拦截` 只出现在旧记录里），附缓存标记与审查来源用量；非交互写 stderr，交互显示在工具之前 |
 | `permission.requested` | 第 6 节的确认提示 |
 | `permission.resolved` | `└ 权限：<allow\|deny>（<source>：<rule\|reason>）` 一行——命中规则时展示 `rule`（如"用户配置第 3 条 {…}"），无规则时展示原因；`source: "reviewer"` 时不输出（结论已在「审查：」行）|
 | `context.compacted` | 按 `kind`：prune 为 `◇ 已省略较早的工具输出`，summary 为 `◇ 上下文已压缩为摘要`（不显示 kind 与 throughSeq） |
@@ -170,7 +170,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 
 预设与规则由配置决定（第 8 节、permissions.md 第 6 节），`--preset` 或 `/preset` 切换会话预设。ask 走协议流程：`permission.requested` → `session.respondPermission(requestId, reply)` → `permission.resolved`。
 
-smart 拿不准时，确认提示的原因包含审查理由；权限回复只接受事件给出的选项，隐藏的 s/p 不会授予长期权限。`full-access` 在 --preset、/preset 与 /settings preset 输入时兼容为 guarded，但不在补全中显示。
+smart 审查交给你确认时，确认提示的原因包含审查理由；权限回复只接受事件给出的选项，隐藏的 s/p 不会授予长期权限。`full-access` 在 --preset、/preset 与 /settings preset 输入时兼容为 guarded，但不在补全中显示。
 
 主体有 `detail` 时在目标下方显示一行，过宽时省略中间并保留两端；`web_fetch` 的该行是完整 URL。网络主体的 `s` 选项显示「本会话允许访问 <主机>」，明确授权范围；`detail` 只用于展示，判定仍由权限层完成。
 

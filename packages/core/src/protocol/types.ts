@@ -283,6 +283,11 @@ export interface SubjectRequest {
    * `pwsh -c "…"`、`cmd /c "…"`、`bash -c "…"` 这类嵌套调用的命令体
    */
   shellRiskByDialect?: Readonly<Record<string, ShellRiskProfile>> | undefined;
+  /**
+   * mcp 主体：服务器经 `readOnlyHint: true` 自我声明为只读（ADR-0057）。
+   * 权限层只在 smart 预设下据此直接放行；声明不可信，用户配置的服务器本就在本机运行。
+   */
+  readOnly?: boolean | undefined;
 }
 
 export type SubjectWhere = "workspace" | "outside";
@@ -303,6 +308,8 @@ export interface PermissionSubject {
   shellRisk?: ShellRiskProfile | undefined;
   /** shell 主体：各方言的高风险元数据，用于嵌套 shell 调用的命令体（见 SubjectRequest） */
   shellRiskByDialect?: Readonly<Record<string, ShellRiskProfile>> | undefined;
+  /** mcp 主体：服务器自我声明只读（见 SubjectRequest.readOnly） */
+  readOnly?: boolean | undefined;
 }
 
 export type PermissionAction = "allow" | "ask" | "deny";

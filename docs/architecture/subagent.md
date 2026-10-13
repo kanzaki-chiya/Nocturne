@@ -196,7 +196,7 @@ launch(request, ctx)
 | 机制 | 子会话行为 |
 |---|---|
 | 规则 deny（含不可信项目收紧、受保护路径） | 照常 deny——没有任何子会话机制能越过 |
-| 规则 ask | 先按父策略经 Hook 与 smart 审查；剩余 ask 为 `non_interactive` deny（不发 `permission.requested`）。拒绝消息由子会话 gate 的 `nonInteractiveDenyHint` 注入指引文案：**"子代理无法请求用户确认；需要写入或执行的操作请在 `finish` 结果中说明，由父代理执行"**——让子模型把受阻操作转化为结果内容，而不是反复重试浪费步数 |
+| 规则 ask | 先按父策略经 Hook 与 smart 审查；剩余 ask 为 `non_interactive` deny（smart 下白名单外的 shell、network、未声明只读的 MCP 都会送审，审查交给你确认或直接交人的命令在子会话里就是被拒——ADR-0057，子会话可用的命令比以前少）（不发 `permission.requested`）。拒绝消息由子会话 gate 的 `nonInteractiveDenyHint` 注入指引文案：**"子代理无法请求用户确认；需要写入或执行的操作请在 `finish` 结果中说明，由父代理执行"**——让子模型把受阻操作转化为结果内容，而不是反复重试浪费步数 |
 | 会话 Grant | 继承父会话的授权集（只读共享），精确匹配照常 `allow(source:"grant")` |
 | 项目 Grant | 同一 workspaceRoot，照常生效 |
 | `--yes` / `autoApproveAsk` | 继承：规则判定的 ask 提升为 allow；**仍不覆盖 deny，也不提升 Hook 强制的 ask** |

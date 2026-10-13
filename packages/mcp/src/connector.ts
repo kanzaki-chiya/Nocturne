@@ -812,7 +812,14 @@ function wrapTool(
     },
     permissionSubjects() {
       // 权限主体固定为 mcp <server>/<tool>（mcp.md 第 7 节）
-      return [{ kind: "mcp", target: safeText(st, `${st.cfg.name}/${remote}`) }];
+      // readOnlyHint 同样随主体透传：smart 预设信任服务器的自我声明（ADR-0057）
+      return [
+        {
+          kind: "mcp",
+          target: safeText(st, `${st.cfg.name}/${remote}`),
+          ...(tool.annotations?.readOnlyHint === true ? { readOnly: true } : {}),
+        },
+      ];
     },
     async execute(_input: unknown, ctx: ToolContext): Promise<ToolResult> {
       if (ctx.signal.aborted) return err("cancelled", "调用已被中断");

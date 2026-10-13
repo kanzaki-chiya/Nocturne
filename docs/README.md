@@ -90,6 +90,8 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 会话通知（三类事件、没在看才提醒、settings.json 通知偏好、判定放客户端）见 [ADR-0056](decisions/ADR-0056-session-notifications.md)。
 
+安全审查第二版（smart 的送审范围、只读白名单、直接交人、七道是非题与纯函数判定、追加规则、样例集）见 [ADR-0057](decisions/ADR-0057-reviewer-v2.md)。
+
 ## Roadmap
 
 [roadmap/roadmap.md](roadmap/roadmap.md)：阶段划分与验收标准。

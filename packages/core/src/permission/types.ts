@@ -49,6 +49,19 @@ export interface EvaluateOptions {
    * 规则层的 allow/ask/deny 判定不受影响。
    */
   skipApprovals?: boolean | undefined;
+  /**
+   * 会话状态的只读视图（ADR-0057）：gate 在 edit 主体最终放行时记录目标，
+   * policy 据此判断「运行工作区代码」的命令是否仍可信。不持久化，
+   * 会话恢复后重新开始；缺省视为没有任何记录。
+   */
+  session?:
+    | {
+        /** 会话 cwd；相对路径据此解析，缺省时相对路径无法解析 */
+        cwd?: string | undefined;
+        /** 本会话放行过的 edit 目标（target 与 resolved，均按 normalizePathText 规范化） */
+        approvedEdits?: ReadonlySet<string> | undefined;
+      }
+    | undefined;
 }
 
 /**

@@ -28,6 +28,7 @@ import {
   shellSegments,
 } from "./pattern.js";
 import { presetRules, type PresetContext } from "./presets.js";
+import { classifySmartShell } from "./smart-shell.js";
 import { computeWhere } from "./where.js";
 import type { EvaluateOptions, PermissionPolicy, SubjectEvaluation } from "./types.js";
 
@@ -238,7 +239,11 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     return undefined;
   }
 
-  function decideSubject(s: PermissionSubject, skipApprovals: boolean | undefined): SubjectVerdict {
+  function decideSubject(
+    s: PermissionSubject,
+    evalOptions: EvaluateOptions | undefined,
+  ): SubjectVerdict {
+    const skipApprovals = evalOptions?.skipApprovals;
     // 内置硬拒绝（provider-setup.md 第 4 节）：凭据索引等文件在任何
     // 规则/Grant/--yes/guarded/Hook 下都不可读写——词法与真实路径都查
     const externalCredential = isExternalCredential(s);
@@ -270,6 +275,53 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       hit = protectedEdit;
     }
 
+    // smart 预设（ADR-0057）：预设级的 ask 才走白名单 / 直接交人 / 送审三路；
+    // 用户、项目、CLI 的显式规则命中时（hit.origin 不是 preset）原样生效
+    let smartAllowed = false;
+    let smartDirect = false;
+    if (presetName === "smart" && action === "ask" && hit.origin === "preset") {
+      if (s.kind === "shell") {
+        const route = classifySmartShell(s.target, shellDialect(s.shell), {
+          workspaceRoot,
+          caseSensitive,
+          cwd: evalOptions?.session?.cwd,
+          approvedEdits: evalOptions?.session?.approvedEdits,
+        });
+        if (route.kind === "allow") {
+          action = "allow";
+          hit = { origin: "preset", description: route.description };
+          smartAllowed = true;
+        } else if (route.kind === "user") {
+          hit = { origin: "preset", description: `预设 smart 直接交人：${route.reason}` };
+          smartDirect = true;
+        } else {
+          note = route.note;
+          // 污染原因同样作为命中规则交给审查器
+          if (route.note !== undefined) {
+            hit = { origin: "preset", description: `预设 smart ${route.note}` };
+          }
+          const risky = findRiskySegment(
+            s.target,
+            shellDialect(s.shell),
+            s.shellRisk,
+            s.shellRiskByDialect,
+          );
+          if (risky !== undefined) {
+            hit = { origin: "preset", description: "预设 smart 高风险命令" };
+            note = [note, `高风险命令「${risky}」按 ${s.shell ?? "sh"} 语法判定`]
+              .filter(Boolean)
+              .join("；");
+          }
+        }
+      } else if (s.kind === "mcp" && s.readOnly === true) {
+        action = "allow";
+        hit = {
+          origin: "preset",
+          description: "预设 smart 只读 MCP 工具（服务器声明 readOnlyHint）",
+        };
+      }
+    }
+
     // 不可信项目规则只收紧：取更严格者（permissions.md 5.2）
     const untrustedHit = lastMatch(untrusted, s);
     const untrustedAction = untrustedHit?.rule?.action;
@@ -287,7 +339,12 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     // 任一段命中 ask/deny（高风险命令、用户 deny 等）就取最严格者。
     // ADR-0022：分段方言由主体携带的 shell 种类决定（PowerShell 另切脚本块）
     const dialect = shellDialect(s.kind === "shell" ? s.shell : undefined);
-    if (s.kind === "shell" && action === "allow" && isCompositeShell(s.target, dialect)) {
+    if (
+      s.kind === "shell" &&
+      action === "allow" &&
+      !smartAllowed &&
+      isCompositeShell(s.target, dialect)
+    ) {
       if (hit.rule?.pattern === "*") {
         for (const segment of shellSegments(s.target, dialect)) {
           const seg = { ...s, target: segment };
@@ -382,6 +439,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     }
     const presetHit = lastMatch(preset, s);
     const userOnly =
+      smartDirect ||
       (s.kind === "shell" && isCredentialCommand(s.target)) ||
       presetHit?.rule?.userOnly === true ||
       (hit.rule?.action === "ask" && hit.origin !== "preset" && hit.origin !== "default");
@@ -399,7 +457,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       }));
 
       // 多主体合并：任一 deny → deny；否则任一 ask → ask；否则 allow（5.3）
-      const verdicts = evaluated.map((s) => decideSubject(s, options?.skipApprovals));
+      const verdicts = evaluated.map((s) => decideSubject(s, options));
       let action: PermissionAction = "allow";
       let decisive: SubjectVerdict | undefined;
       for (const v of verdicts) {

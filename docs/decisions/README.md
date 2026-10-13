@@ -62,6 +62,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0054](ADR-0054-provider-model-toggle.md) | 服务商与模型启停：停用即不可用、记在 settings.json、注册表盖不可用标记、桌面开关与 TUI 命令 | 已接受 |
 | [ADR-0055](ADR-0055-retry-after-partial-stream.md) | 流式输出中途失败时丢弃部分输出并重发 | 已接受 |
 | [ADR-0056](ADR-0056-session-notifications.md) | 会话通知：只在没看时提醒需要确认、出错与完成 | 已接受 |
+| [ADR-0057](ADR-0057-reviewer-v2.md) | 安全审查第二版：smart 扩大送审范围、是非题、直接交人 | 已接受 |
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
 ## 模板
