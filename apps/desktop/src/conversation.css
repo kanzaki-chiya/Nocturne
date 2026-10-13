@@ -6,6 +6,15 @@
   min-width: 0;
   position: relative;
 }
+.subagent-badge {
+  font: 11.5px var(--mono);
+  padding: 1px 7px;
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 9px;
+  color: var(--a-accent);
+  background: var(--a-raised);
+  flex: none;
+}
 .conversation .conversation-scroll {
   padding: 22px 24px 24px;
   overflow-anchor: none;

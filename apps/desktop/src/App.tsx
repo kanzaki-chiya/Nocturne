@@ -1214,6 +1214,9 @@ export function App({ host }: { host: DesktopHost }) {
                   onOpenProviders={() => {
                     setPage("providers");
                   }}
+                  onOpenSubagents={() => {
+                    setPage("agents");
+                  }}
                   notifications={{
                     sendTest: (sound) =>
                       host.notify({

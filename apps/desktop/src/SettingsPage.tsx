@@ -134,6 +134,7 @@ export function SettingsPage({
   notifications,
   onConfigSaved,
   onOpenProviders,
+  onOpenSubagents,
 }: {
   section: SettingsPageSection;
   client: RpcClient | undefined;
@@ -174,6 +175,7 @@ export function SettingsPage({
   onConfigSaved?: () => void;
   /** 「模型」页尾的链接：进入设置 › 服务商 */
   onOpenProviders?: () => void;
+  onOpenSubagents?: () => void;
 }) {
   const [items, setItems] = useState<SettingItem[] | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -882,10 +884,11 @@ export function SettingsPage({
                     <button
                       className="btn"
                       onClick={() => {
-                        setDialog({ role });
+                        if (role === "task") onOpenSubagents?.();
+                        else setDialog({ role });
                       }}
                     >
-                      选择
+                      {role === "task" ? "设置 › 子代理" : "选择"}
                     </button>
                   </span>
                   {src(it)}
@@ -1011,7 +1014,7 @@ export function SettingsPage({
           onSave={async (ref) => {
             const key = `modelRoles.${dialog.role}` as const;
             const label = ROLES.find((r) => r.role === dialog.role)?.label ?? dialog.role;
-            const err = await save(key, label, { [key]: ref });
+            const err = await save(key, label, { [key]: ref } as SettingsPatch);
             if (err === undefined) setDialog(null);
             return err;
           }}

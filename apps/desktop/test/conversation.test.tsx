@@ -1768,6 +1768,38 @@ describe("Conversation 工具行与拒绝", () => {
     expect(line?.textContent?.match(/exa\/web_search_exa/g)).toHaveLength(1);
   });
 
+  it("子代理行显示档位徽标、实际模型与强度，展开显示选择理由；旧调用无档位不显示徽标", () => {
+    const view = createSessionView();
+    const entry = tool({
+      name: "task",
+      input: { task: "找出调用点", profile: "quick", reason: "只需读文件" },
+      subjects: [{ kind: "subagent", target: "explore" }],
+    });
+    if (entry.result) entry.result.output = { model: "p/cheap", reasoningEffort: "low" };
+    const legacy = tool({
+      key: "tool-2",
+      seq: 4,
+      callId: "call-2",
+      name: "task",
+      input: { task: "旧任务" },
+      subjects: [{ kind: "subagent", target: "general" }],
+    });
+    if (legacy.result) legacy.result.output = { model: "p/strong" };
+    view.entries = [entry, legacy];
+    const { container } = mount(view);
+    const [line, old] = Array.from(container.querySelectorAll(".tool-line"));
+    expect(line?.querySelector(".subagent-badge")?.textContent).toBe("quick");
+    expect(line?.querySelector(".tool-arg")?.textContent).toBe("找出调用点");
+    expect(line?.textContent).toContain("p/cheap · low");
+    expect(old?.querySelector(".subagent-badge")).toBeNull();
+    expect(old?.textContent).toContain("p/strong");
+    expect(screen.queryByText("选择理由")).toBeNull();
+    if (line === undefined) throw new Error("子代理行不存在");
+    fireEvent.click(line);
+    expect(screen.getByText("选择理由")).toBeTruthy();
+    expect(screen.getByText("只需读文件")).toBeTruthy();
+  });
+
   it("MCP 工具缺 subjects 时从注册名解析名字；无字符串入参则参数留空", () => {
     const view = createSessionView();
     const noSubjects = tool({

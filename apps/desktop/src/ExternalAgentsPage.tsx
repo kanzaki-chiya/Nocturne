@@ -10,6 +10,10 @@ import type {
 import { Dropdown } from "./Dropdown";
 import { Scrim } from "./ProvidersPage";
 import { externalAgentSlashConflict } from "./commands";
+import { profilesFromSettings, SubagentProfileEditor } from "./SubagentProfileEditor";
+import type { ModelInfo, SettingItem, SettingsPatch } from "./rpc-types";
+import type { SubagentProfileConfig } from "@nocturne/core/protocol";
+import "./subagent-profiles.css";
 import "./pages.css";
 import "./mcp.css";
 import "./external-agents.css";
@@ -66,6 +70,14 @@ export function ExternalAgentsPage({
   version: number;
 }) {
   const [agents, setAgents] = useState<ExternalAgentOverview[]>([]);
+  const [items, setItems] = useState<SettingItem[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [profileName, setProfileName] = useState<string | undefined>("default");
+  const [profileDraft, setProfileDraft] = useState<{
+    name: string;
+    config: SubagentProfileConfig;
+  }>();
+  const [addingProfile, setAddingProfile] = useState(false);
   const [skills, setSkills] = useState<SkillOverview[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [selected, setSelected] = useState<string>();
@@ -91,11 +103,15 @@ export function ExternalAgentsPage({
   const refresh = useCallback(async () => {
     if (!client) return;
     try {
-      const [data, skillData] = await Promise.all([
+      const [data, skillData, settings, models] = await Promise.all([
         client.runtime.describeExternalAgents({ workspaceRoot }),
         client.runtime.describeSkills({ workspaceRoot }),
+        client.runtime.describeSettings({ workspaceRoot }),
+        client.runtime.listModels({ workspaceRoot }),
       ]);
       setAgents(data.agents);
+      setItems(settings);
+      setModels(models);
       setWarnings(data.warnings);
       setSkills(skillData.skills);
       setSelected((old) =>
@@ -144,16 +160,39 @@ export function ExternalAgentsPage({
     }
   };
   const add = () => {
+    setProfileName(undefined);
+    setProfileDraft(undefined);
     setForm({ config: { name: "", command: "", args: [], enabled: false }, replace: false });
     setError("");
+  };
+  const profiles = profilesFromSettings(items);
+  const profile = profiles.find((profile) => profile.name === profileName);
+  const defaultModel = items.find((item) => item.key === "modelRoles.task")?.effective;
+  const profileConfig: SubagentProfileConfig | undefined =
+    profileDraft?.config ??
+    (profileName === "default"
+      ? {
+          description: "通用。跟随当前会话模型和思考档位。",
+          enabled: true,
+          ...(defaultModel ? { model: defaultModel } : {}),
+        }
+      : profile?.config);
+  const saveProfile = async (patch: SettingsPatch) => {
+    if (!client) return;
+    await client.runtime.updateSettings(patch, { workspaceRoot });
+    const key = Object.keys(patch).find((key) => key.startsWith("subagents.profiles."));
+    if (key) setProfileName(key.slice("subagents.profiles.".length));
+    setProfileDraft(undefined);
+    await refresh();
   };
   return (
     <div className="page3 mcp-page external-agents-page">
       <header className="ph3">
         <div className="grow">
-          <h3>外部 agent</h3>
+          <h3>子代理</h3>
           <span className="sub">
-            {agents.length} 个 agent · 费用与额度计在该 agent 自己的账号上
+            {profiles.length + 1} 个内置档位 · {agents.length} 个外部 agent ·
+            外部费用计在其自己的账号
           </span>
         </div>
       </header>
@@ -168,7 +207,82 @@ export function ExternalAgentsPage({
         </div>
       ))}
       <div className="cols3">
-        <nav className="plist" aria-label="外部 agent 列表">
+        <nav className="plist" aria-label="子代理列表">
+          <div className="mcp-list-actions">
+            <button
+              className="btn primary"
+              disabled={!client || busy}
+              onClick={() => {
+                setAddingProfile((old) => !old);
+              }}
+            >
+              添加档位
+            </button>
+          </div>
+          {addingProfile && (
+            <div className="profile-options">
+              {(["空白", "quick", "deep"] as const).map((template) => (
+                <button
+                  className="btn"
+                  key={template}
+                  onClick={() => {
+                    setAddingProfile(false);
+                    setProfileName(undefined);
+                    setForm(undefined);
+                    setProfileDraft({
+                      name: template === "空白" ? "" : template,
+                      config: {
+                        description: "",
+                        enabled: true,
+                        ...(template === "quick"
+                          ? { tools: "explore", effort: "low" }
+                          : template === "deep"
+                            ? { tools: "general", effort: "high" }
+                            : {}),
+                      },
+                    });
+                  }}
+                >
+                  {template}
+                </button>
+              ))}
+            </div>
+          )}
+          <h5>内置档位</h5>
+          {[
+            {
+              name: "default",
+              config: {
+                description: "通用",
+                enabled: true,
+                model: defaultModel,
+                effort: undefined,
+              },
+            },
+            ...profiles,
+          ].map((profile) => (
+            <button
+              className={`mcp-server-row profile-row ${profileName === profile.name && !profileDraft ? "on" : ""}`}
+              key={profile.name}
+              onClick={() => {
+                setProfileName(profile.name);
+                setProfileDraft(undefined);
+                setForm(undefined);
+              }}
+            >
+              <span className={`dot ${profile.config.enabled ? "ok" : "off"}`} />
+              <span className="nm">
+                {profile.name}
+                <small>
+                  {profile.config.model ?? "跟随当前模型"} · {profile.config.effort ?? "跟随会话"}
+                </small>
+              </span>
+              <small>
+                {profile.name === "default" ? "默认" : profile.config.enabled ? "" : "已停用"}
+              </small>
+            </button>
+          ))}
+          <h5>外部 agent</h5>
           <div className="mcp-list-actions">
             <button className="btn primary" disabled={!client || busy} onClick={add}>
               添加 agent
@@ -182,8 +296,10 @@ export function ExternalAgentsPage({
                 .map((agent) => (
                   <button
                     key={agent.name}
-                    className={`mcp-server-row ${selected === agent.name && !form ? "on" : ""}`}
+                    className={`mcp-server-row ${selected === agent.name && !form && profileName === undefined && profileDraft === undefined ? "on" : ""}`}
                     onClick={() => {
+                      setProfileName(undefined);
+                      setProfileDraft(undefined);
                       setSelected(agent.name);
                       setForm(undefined);
                     }}
@@ -206,7 +322,31 @@ export function ExternalAgentsPage({
           <span className="fine pad">只读取用户级配置，项目配置里的外部 agent 不生效。</span>
         </nav>
         <div className="pane">
-          {form && client ? (
+          {profileConfig !== undefined ? (
+            <SubagentProfileEditor
+              key={
+                profileDraft
+                  ? `new-${profileDraft.name}`
+                  : `${profileName}-${JSON.stringify(profileConfig)}`
+              }
+              name={profileDraft?.name ?? profileName ?? ""}
+              initial={profileConfig}
+              creating={profileDraft !== undefined}
+              items={items}
+              models={models}
+              agents={agents}
+              onSave={saveProfile}
+              onCancel={() => {
+                setProfileDraft(undefined);
+                setProfileName("default");
+              }}
+              onDelete={async () => {
+                if (!profileName) return;
+                await saveProfile({ [`subagents.profiles.${profileName}`]: null });
+                setProfileName("default");
+              }}
+            />
+          ) : form && client ? (
             <ExternalAgentForm
               key={`${form.replace}-${form.config.name}`}
               client={client}
@@ -539,7 +679,7 @@ function ExternalAgentForm({
           <small>创建后不可改，与所有来源中的名称不区分大小写唯一。</small>
         </label>
         <label className="field">
-          说明
+          何时用（给模型看）
           <input
             value={description}
             onChange={(event) => {

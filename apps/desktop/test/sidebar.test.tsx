@@ -42,6 +42,15 @@ function props(overrides?: Partial<SidebarProps>): SidebarProps {
 afterEach(cleanup);
 
 describe("Sidebar", () => {
+  it("设置导航把「外部 agent」改名为「子代理」，点击进入同一页", () => {
+    const onOpenPage = vi.fn();
+    render(<Sidebar {...props({ page: "general", onOpenPage })} />);
+    const nav = screen.getByRole("navigation", { name: "设置" });
+    expect(nav.textContent).not.toContain("外部 agent");
+    fireEvent.click(screen.getByRole("button", { name: "子代理" }));
+    expect(onOpenPage).toHaveBeenCalledWith("agents");
+  });
+
   it("没有对话会话时不渲染「对话」标题", () => {
     const { container } = render(<Sidebar {...props()} />);
     expect(screen.queryByText("对话")).toBeNull();

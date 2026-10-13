@@ -13,6 +13,7 @@ import { marked, type Token, type Tokens } from "marked";
 import {
   parseFileRefs,
   todoItemsFromCompletion,
+  subagentRowInfo,
   splitCodeRef,
   type PendingPermission,
   type ImageAttachment,
@@ -1094,6 +1095,8 @@ function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path:
   switch (entry.name) {
     case "skill":
       return plain(input === undefined ? "" : text(input.name));
+    case "task":
+      return plain(input === undefined ? "" : text(input.task));
     case "read":
     case "edit":
     case "write":
@@ -1484,6 +1487,7 @@ function ToolLine({
   arg,
   argClassName,
   extras,
+  profile,
   status,
   onToggle,
 }: {
@@ -1494,6 +1498,7 @@ function ToolLine({
   arg: ArgParts;
   argClassName?: string | undefined;
   extras?: ReactNode;
+  profile?: string | undefined;
   status: ReactNode;
   onToggle: () => void;
 }) {
@@ -1515,6 +1520,7 @@ function ToolLine({
         {icon}
       </span>
       <span className="tool-name">{label}</span>
+      {profile !== undefined && <span className="subagent-badge">{profile}</span>}
       <span
         className={`tool-arg${argClassName ? ` ${argClassName}` : ""}`}
         title={arg.title || undefined}
@@ -1590,6 +1596,7 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
   const isTimeout = result?.error?.code === "timeout";
   const input = inputOf(entry);
   const output = result?.output;
+  const subagent = subagentRowInfo(entry);
   const value =
     output !== null && typeof output === "object" ? (output as Record<string, unknown>) : undefined;
   const command = typeof input?.command === "string" ? input.command : undefined;
@@ -1605,6 +1612,12 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
   const hasDiff = fileDiffs(entry, cwd).length > 0;
   return (
     <>
+      {subagent.reason !== undefined && (
+        <div className="tool-info">
+          <span>选择理由</span>
+          <span>{subagent.reason}</span>
+        </div>
+      )}
       {!hasDiff &&
         (command !== undefined ? (
           <div className="tool-payload tool-shell">
@@ -1753,6 +1766,7 @@ function ToolRow({
   const [open, setOpen] = useState(false);
   const [fileOpen, setFileOpen] = useState<Record<string, boolean>>({});
   const meta = toolMeta(entry.name ?? "", entry.subjects);
+  const subagent = subagentRowInfo(entry);
   const todos = todoItemsFromCompletion({
     name: entry.name ?? "",
     status: entry.status,
@@ -1781,6 +1795,12 @@ function ToolRow({
   ) : (
     <>
       {running && !asked && <span className="tool-spin" aria-hidden="true" />}
+      {subagent.model !== undefined && (
+        <span className="tool-range">
+          {subagent.model}
+          {subagent.effort !== undefined ? ` · ${subagent.effort}` : ""}
+        </span>
+      )}
       {asked && (
         <span className="tool-res tool-wait">
           <span aria-hidden="true" />
@@ -1832,7 +1852,8 @@ function ToolRow({
               open={isOpen}
               disabled={preparing}
               icon={meta.icon}
-              label={meta.label}
+              label={subagent.profile !== undefined ? "子代理" : meta.label}
+              profile={subagent.profile}
               arg={
                 file === undefined
                   ? arg

@@ -2,7 +2,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it } from "vitest";
 import type { ExternalAgentOverview } from "@nocturne/core/protocol";
 import { EXTERNAL_AGENT_PRESETS, ExternalAgentsPage } from "../src/ExternalAgentsPage";
-import { fakeServer, RpcFail, withInit } from "./fake-server";
+import { fakeServer, RpcFail, withInit as initHandlers } from "./fake-server";
+
+const withInit = (handlers: Parameters<typeof initHandlers>[0]) =>
+  initHandlers({ "runtime.describeSettings": [], "runtime.listModels": [], ...handlers });
 
 afterEach(cleanup);
 const managed: ExternalAgentOverview = {
@@ -60,8 +63,9 @@ describe("外部 agent 设置页", () => {
     );
     await f.initialize();
     render(<ExternalAgentsPage client={f.client} workspaceRoot="/work" version={0} />);
+    fireEvent.click(await screen.findByRole("button", { name: /managed/ }));
     await screen.findByRole("heading", { name: "managed" });
-    expect(screen.getByText(/费用与额度计在该 agent 自己的账号上/)).toBeDefined();
+    expect(screen.getByText(/外部费用计在其自己的账号/)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /manual/ }));
     await screen.findByRole("heading", { name: "manual" });
     expect((screen.getByRole("switch") as HTMLButtonElement).disabled).toBe(true);
@@ -104,7 +108,7 @@ describe("外部 agent 设置页", () => {
     );
     await f.initialize();
     render(<ExternalAgentsPage client={f.client} workspaceRoot={undefined} version={0} />);
-    await screen.findByRole("heading", { name: "还没有外部 agent" });
+    await screen.findByRole("heading", { name: "default" });
     const [add] = screen.getAllByRole("button", { name: "添加 agent" });
     if (add === undefined) throw new Error("外部 agent 添加入口不存在");
     fireEvent.click(add);
@@ -166,6 +170,7 @@ describe("外部 agent 设置页", () => {
     );
     await f.initialize();
     render(<ExternalAgentsPage client={f.client} workspaceRoot={undefined} version={0} />);
+    fireEvent.click(await screen.findByRole("button", { name: /managed/ }));
     fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
     const model = await screen.findByRole("combobox", { name: "Model" });
@@ -215,6 +220,7 @@ describe("外部 agent 设置页", () => {
     );
     await f.initialize();
     render(<ExternalAgentsPage client={f.client} workspaceRoot={undefined} version={0} />);
+    fireEvent.click(await screen.findByRole("button", { name: /managed/ }));
     await screen.findByRole("heading", { name: "managed" });
     fireEvent.click(screen.getByRole("switch"));
     await waitFor(() =>
@@ -222,10 +228,14 @@ describe("外部 agent 设置页", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
     expect((screen.getByLabelText(/^名称/) as HTMLInputElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("说明"), { target: { value: "保持草稿" } });
+    fireEvent.change(screen.getByLabelText("何时用（给模型看）"), {
+      target: { value: "保持草稿" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await screen.findByRole("alert");
-    expect((screen.getByLabelText("说明") as HTMLInputElement).value).toBe("保持草稿");
+    expect((screen.getByLabelText("何时用（给模型看）") as HTMLInputElement).value).toBe(
+      "保持草稿",
+    );
     reject = false;
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await screen.findByRole("heading", { name: "managed" });

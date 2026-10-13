@@ -1,0 +1,93 @@
+.profile-editor {
+  display: grid;
+  gap: 18px;
+  max-width: 760px;
+}
+.profile-field {
+  display: grid;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--a-secondary);
+}
+.profile-field small {
+  color: var(--a-muted);
+  font-size: 11.5px;
+}
+.profile-field input,
+.profile-field textarea {
+  width: 100%;
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 6px;
+  background: var(--a-input);
+  color: var(--a-text);
+  padding: 7px 10px;
+  font: inherit;
+}
+.profile-field textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+.profile-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.profile-options {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.profile-options .selected {
+  background: var(--a-sel);
+  border-color: var(--a-accent);
+}
+.profile-enabled {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.external-agents-page .profile-enabled input {
+  width: auto;
+  flex: none;
+  accent-color: var(--a-accent);
+}
+.profile-editor .acts {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+.external-agents-page .profile-row .nm small {
+  margin-left: 0;
+  max-width: none;
+}
+.profile-delete {
+  margin-left: auto;
+  color: var(--a-error);
+}
+.profile-preview {
+  color: var(--a-muted);
+  font-size: 12px;
+}
+.profile-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.7 var(--mono);
+  background: var(--a-panel);
+  padding: 12px;
+  border-radius: 6px;
+}
+.profile-row .nm {
+  display: grid;
+  min-width: 0;
+}
+.profile-row .nm small {
+  font: 11px var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .profile-pair {
+    grid-template-columns: 1fr;
+  }
+}

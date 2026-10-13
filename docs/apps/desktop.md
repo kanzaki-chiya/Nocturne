@@ -5,6 +5,8 @@
 `apps/desktop` 是 Nocturne 的桌面端：一个 Tauri 进程内，React 前端经 `@nocturne/rpc/client` 与一个常驻 `nctrn rpc --stdio` 后台进程通信，Rust 外壳只负责进程管理与按行转发。所有会话语义（握手、方法调用、事件）都在前端处理，外壳不解析报文。
 
 ## 1. 进程结构与后台策略
+子代理档位见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)：设置导航「外部 agent」改名「子代理」，同页左列分内置档位和外部 agent。添加提供空白/quick/deep 模板（模型留空），编辑器包含名称（创建后锁定）、何时用、模型、超时、强度、工具上限、启用和删除。default 始终启用且不能删除，模型写 modelRoles.task；模型页的子代理模型行跳转到这里。预览复用 Core 的 subagentSelectionTable；对话工具行显示档位徽标、实际模型和强度，展开显示选择理由，旧调用无 profile 不显示徽标。外部编辑和探测保持原行为，说明标签改为何时用。
+
 
 - **单后台（ADR-0051）**：整个窗口只有一个 `nctrn rpc --stdio` 后台，`backend_open` 以普通对话工作区（见第 3 节）为 cwd 启动 `node <脚本> rpc --stdio`，窗口打开期间常驻；所有项目和普通对话的会话都在这个后台里创建与恢复，不再按项目起停后台。后台的启动目录只是它的缺省工作区：每个会话的 `cwd`/`workspaceRoot` 在 `runtime.createSession` 时传入、并写入 `session.created` 元数据，恢复时以日志记录的目录为准（[sessions.md](../architecture/sessions.md)）。会话列表是全局的（`<NOCTURNE_HOME>/sessions`），前端用这个常驻后台 `runtime.listSessions()` 取全部会话。
 - **后台生命周期**：Rust 外壳在 Tauri 页面开始加载钩子中同步推进后台代际，F5 或 Vite 整页重载后并行关闭旧页面全部后台（关 stdin → 等自行退出 → 5 秒强杀），不依赖前端异步 `beforeunload`；在途 `backend_open` 在启动前校验分发时捕获的代际，旧页面请求被取消，旧清理只使用旧代快照，不影响新页面后台。窗口关闭时对所有后台（含正在重载清理的后台）执行相同关闭流程，全部结束后退出应用；Windows 上后台在 spawn 后被放入全局 Job Object（`KILL_ON_JOB_CLOSE`），外壳被强杀时后台一起结束。Job 创建或加入失败不致命，往该后台的 stderr 缓冲记一行说明。纯 React Fast Refresh 不重新加载文档，由前端组件生命周期释放连接。

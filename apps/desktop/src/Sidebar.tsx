@@ -136,7 +136,7 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
   },
   {
     key: "agents",
-    label: "外部 agent",
+    label: "子代理",
     icon: (
       <svg {...GLYPH_PROPS}>
         <rect

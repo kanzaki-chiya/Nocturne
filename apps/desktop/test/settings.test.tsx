@@ -3,7 +3,7 @@
  * 覆盖标黄、默认模型与档位成对保存、模型角色、审查器密钥按 password 处理、主题卡片、
  * 写成功后通知桌面端协调其他后台。
  */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RpcClient } from "@nocturne/rpc/client";
 
@@ -124,6 +124,7 @@ function props(
     onFileOpenerChange?: (o: "system" | "vscode" | "cursor") => boolean;
     onConfigSaved?: () => void;
     onOpenProviders?: () => void;
+    onOpenSubagents?: () => void;
     notifications?: {
       sendTest: () => Promise<{ shown: boolean; reason?: "disabled" | "unsupported" | "error" }>;
     };
@@ -152,6 +153,7 @@ function props(
     notifications: overrides?.notifications ?? { sendTest: () => Promise.resolve({ shown: true }) },
     onConfigSaved: overrides?.onConfigSaved ?? noop,
     onOpenProviders: overrides?.onOpenProviders ?? noop,
+    onOpenSubagents: overrides?.onOpenSubagents ?? noop,
   };
 }
 
@@ -913,6 +915,18 @@ it("默认模型与角色指向停用模型时加删除线并注明按未设置�
   expect(taskRow.textContent).toContain("已停用，按未设置处理");
   // 未停用的角色值与默认文案保持不变
   expect(row("看图模型").querySelector(".model-value.off")).toBeNull();
+  server.close();
+});
+
+it("模型页的子代理模型行跳转到设置 › 子代理，不再弹出模型对话框", async () => {
+  const server = fakeServer(handlers());
+  await server.initialize();
+  const onOpenSubagents = vi.fn();
+  render(<SettingsPage {...props(server.client, { section: "models", onOpenSubagents })} />);
+  await screen.findByText("默认模型与档位");
+  fireEvent.click(within(row("子代理模型")).getByRole("button", { name: "设置 › 子代理" }));
+  expect(onOpenSubagents).toHaveBeenCalledOnce();
+  expect(screen.queryByRole("dialog")).toBeNull();
   server.close();
 });
 
