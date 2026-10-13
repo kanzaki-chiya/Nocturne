@@ -96,7 +96,7 @@ const roleRow = async (
 };
 it("模型角色三行默认显示，选定即落盘；vision 只列能看图的模型", async () => {
   const { runtime, session, screen, click, close } = await page();
-  expect(screen.lastFrame()).toMatch(/子代理模型\s+跟随当前模型/);
+  expect(screen.lastFrame()).toMatch(/default 档位模型\s+跟随当前模型/);
   expect(screen.lastFrame()).toMatch(/看图模型\s+未设置/);
   expect(screen.lastFrame()).toMatch(/标题模型\s+跟随当前模型/);
   for (const role of ["task", "vision", "smol"] as const) {

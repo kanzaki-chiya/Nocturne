@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createSessionView, type ViewEntry } from "@nocturne/core/protocol";
 import { interleaveClient } from "../src/client-lines.js";
-import { transcriptBlocks } from "../src/lines.js";
+import { layoutEntry, transcriptBlocks } from "../src/lines.js";
 import { subagentModel } from "../src/format.js";
 import type { ToolEntry } from "@nocturne/core/protocol";
 
@@ -14,6 +14,50 @@ describe("本地提示行定位", () => {
     expect(subagentModel(entry)).toBe(" [fake/child]");
     expect(subagentModel({ ...entry, name: "read" })).toBe("");
     expect(subagentModel({ ...entry, result: undefined })).toBe("");
+  });
+  it("task 摘要显示档位、实际模型与强度；运行中从进度行取模型", () => {
+    const done = {
+      name: "task",
+      input: { task: "找调用点", profile: "quick", reason: "只读即可" },
+      liveOutput: "",
+      result: { output: { model: "fake/cheap", reasoningEffort: "low" } },
+    } as unknown as ToolEntry;
+    expect(subagentModel(done)).toBe(" [quick] [fake/cheap · low]");
+    const running = {
+      name: "task",
+      input: { task: "找调用点", profile: "deep" },
+      liveOutput: "子代理模型：fake/strong · high\n",
+      result: undefined,
+    } as unknown as ToolEntry;
+    expect(subagentModel(running)).toBe(" [deep] [fake/strong · high]");
+  });
+  it("task 工具行：标题带档位与模型，下一行显示选择理由；旧调用无档位行", () => {
+    const tool = (input: Record<string, unknown>) =>
+      ({
+        kind: "tool",
+        key: "t1",
+        name: "task",
+        status: "ok",
+        input,
+        subjects: [],
+        liveOutput: "",
+        result: {
+          status: "ok",
+          modelContent: "done",
+          output: { model: "fake/cheap", reasoningEffort: "low" },
+        },
+      }) as unknown as ToolEntry;
+    const text = (entry: ToolEntry) =>
+      layoutEntry(entry, 120, false)
+        .map((l) => l.text)
+        .join("\n");
+    const current = text(tool({ task: "找调用点", profile: "quick", reason: "只读即可" }));
+    // 渲染层统一把 · 换成 •（format.ts 字形映射）
+    expect(current).toContain("task [quick] [fake/cheap • low] 找调用点");
+    expect(current).toContain("  选择理由：只读即可");
+    const legacy = text(tool({ task: "旧任务" }));
+    expect(legacy).toContain("task [fake/cheap • low] 旧任务");
+    expect(legacy).not.toContain("选择理由");
   });
   it("按推入时的条目数插在条目之间，其余排在最后", () => {
     const out = interleaveClient(

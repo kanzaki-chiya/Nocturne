@@ -8,7 +8,7 @@ import type { ToggleImpact } from "@nocturne/core";
 
 /** 模型角色中文名（describeToggleImpact 的角色列表） */
 export const TOGGLE_ROLE_LABELS: Record<ToggleImpact["roles"][number], string> = {
-  task: "子代理模型",
+  task: "default 档位模型",
   vision: "看图模型",
   smol: "轻量模型",
 };

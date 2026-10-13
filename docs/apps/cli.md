@@ -5,6 +5,8 @@
 本文是 `nctrn` 命令行客户端的设计文档：命令行参数、REPL、事件渲染、权限确认、退出码与 Provider 配置。
 
 ## 1. 定位与边界
+task 的工具行对新调用展示 `[profile]` 和选择理由，结果显示实际模型、思考强度；旧调用保留原样。档位配置与权限规则见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)。
+
 
 `nctrn` 是 Runtime 的进程内客户端：采集输入、渲染事件、把权限确认交给用户。**它不包含任何 Agent 行为、会话状态、权限判定或上下文构建逻辑**，只使用 `@nocturne/core` 的公开入口与 `@nocturne/core/protocol` 的类型；该约束由 dependency-cruiser 规则强制（见第 9 节），不是靠代码评审自觉。
 

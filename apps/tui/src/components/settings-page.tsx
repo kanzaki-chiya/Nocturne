@@ -4,6 +4,7 @@
  * 对话框里的「保存」就是落盘，取消不写任何东西。写入失败时值回到原样，错误显示在说明区。
  */
 import { Box } from "ink";
+import type { SubagentProfileConfig } from "@nocturne/core/protocol";
 import { useRef, useState } from "react";
 import type {
   ModelRole,
@@ -36,7 +37,8 @@ const SOURCES: Record<SettingItem["source"], string> = {
 };
 const PRESETS = ["read-only", "default", "auto-edit", "guarded", "smart", "bypass"] as const;
 const ROLES = ["task", "vision", "smol"] as const;
-const ROLE_LABELS = { task: "子代理模型", vision: "看图模型", smol: "标题模型" };
+const PROFILE_EDIT_HINT = "编辑档位：桌面端 设置 › 子代理，或 ~/.nocturne/settings.json";
+const ROLE_LABELS = { task: "default 档位模型", vision: "看图模型", smol: "标题模型" };
 const GROUPS = [
   { id: "session", label: "会话默认" },
   { id: "ui", label: "界面" },
@@ -53,7 +55,7 @@ const EXPLAIN: Record<string, string> = {
   theme: "界面深浅配色；←→ 立即切换，Enter 打开预览页",
   shell: "shell 工具使用的命令行；auto 按探测结果选择，Enter 选择",
   threshold: "上下文占用达到该值时自动压缩，支持百分比或 token 数；100% 停止预防性压缩",
-  task: "子代理使用的模型；未设置时跟随当前模型，Enter 选择",
+  task: "default 子代理档位使用的模型；未设置时跟随当前模型，Enter 选择",
   vision: "当前模型不能看图时，由它先描述图片再发送；只列支持图片输入的模型，Enter 选择",
   smol: "生成会话标题等轻量任务使用的模型；未设置时跟随当前模型，Enter 选择",
 };
@@ -198,9 +200,11 @@ export function SettingsPage({
       return;
     }
     setNotice(undefined);
-    void commit({ [`modelRoles.${role}`]: ref === "" ? null : ref }).then((failure) => {
-      if (failure !== undefined) fail(failure);
-    });
+    void commit({ [`modelRoles.${role}`]: ref === "" ? null : ref } as SettingsPatch).then(
+      (failure) => {
+        if (failure !== undefined) fail(failure);
+      },
+    );
   };
 
   const effectiveReviewer =
@@ -273,6 +277,24 @@ export function SettingsPage({
         search: `${ROLE_LABELS[role]} ${EXPLAIN[role]}`,
       };
     }),
+    ...items
+      .filter((item) => item.key.startsWith("subagents.profiles."))
+      .map((item): ShellRow => {
+        const profile = JSON.parse(item.effective ?? "{}") as SubagentProfileConfig;
+        return {
+          id: item.key,
+          group: "roles",
+          cells: [
+            { text: item.key.slice("subagents.profiles.".length) },
+            {
+              text: `${profile.model ?? "跟随当前模型"} · ${profile.effort ?? "跟随会话"} · ${profile.tools === "explore" ? "只读" : "全部"}${profile.enabled ? "" : " · 已停用"}`,
+              tone: "muted",
+            },
+          ],
+          trail: [{ text: "只读", tone: "muted" }],
+          search: profile.description,
+        };
+      }),
   ];
 
   const labelOf = (id: string): string =>
@@ -306,6 +328,8 @@ export function SettingsPage({
 
   const describe = (row: ShellRow | undefined): ShellSpan[][] => {
     if (row === undefined) return [];
+    if (row.id.startsWith("subagents.profiles."))
+      return [[{ text: PROFILE_EDIT_HINT, tone: "muted" }]];
     const first: ShellSpan[] = [
       { text: labelOf(row.id), tone: "secondary" },
       { text: `  ${EXPLAIN[row.id] ?? ""}`, tone: "muted" },
@@ -398,6 +422,8 @@ export function SettingsPage({
               setNotice({ text: "默认模型与档位请在 /model 页选「设为默认」", tone: "muted" });
             else if (id === "preset")
               setNotice({ text: "用 ←→ 修改，立即保存到 settings.json", tone: "muted" });
+            else if (id.startsWith("subagents.profiles."))
+              setNotice({ text: PROFILE_EDIT_HINT, tone: "muted" });
             else setNested(id as Nested);
           }}
         />

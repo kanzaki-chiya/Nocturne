@@ -140,7 +140,7 @@ export function ModelPicker({
   /** 审查/角色模型选择只返回引用，不更改会话模型、默认模型或档位。 */
   selectionOnly?: boolean;
   clearLabel?: string | undefined;
-  /** 面包屑；默认「模型」，设置页里选角色模型时传「设置 › 子代理模型」 */
+  /** 面包屑；默认「模型」，设置页里选角色模型时传「设置 › default 档位模型」 */
   title?: readonly string[] | undefined;
   onPick: (ref: string, setDefault: boolean, effort: ReasoningEffort | null) => void;
   onClose: () => void;

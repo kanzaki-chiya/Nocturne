@@ -5,16 +5,11 @@
 import stringWidth from "string-width";
 
 import type { PermissionReviewedPayload, ToolEntry, Usage } from "@nocturne/core/protocol";
+import { subagentRowInfo } from "@nocturne/core/protocol";
 
 export function subagentModel(entry: ToolEntry): string {
-  const output = entry.result?.output;
-  return entry.name === "task" &&
-    typeof output === "object" &&
-    output !== null &&
-    "model" in output &&
-    typeof output.model === "string"
-    ? ` [${output.model}]`
-    : "";
+  const info = subagentRowInfo(entry);
+  return `${info.profile !== undefined ? ` [${info.profile}]` : ""}${info.model !== undefined ? ` [${info.model}${info.effort !== undefined ? ` · ${info.effort}` : ""}]` : ""}`;
 }
 
 /**
@@ -135,6 +130,7 @@ const inputString = (input: unknown, key: string): string | undefined => {
 
 /** 工具输入单行摘要：shell→command；read/write/edit→path；grep/glob→pattern；apply_patch→文件清单 */
 export function summarizeToolInput(name: string | undefined, input: unknown): string {
+  if (name === "task") return inputString(input, "task") ?? "";
   if (name === "todo_write") {
     const items =
       typeof input === "object" && input !== null && "items" in input ? input.items : undefined;

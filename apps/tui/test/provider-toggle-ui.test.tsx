@@ -183,7 +183,7 @@ describe("服务商页启停（ADR-0054 §5）", () => {
     const prompt = ui.lastFrame() ?? "";
     expect(prompt).toContain("2 个打开的会话");
     expect(prompt).toContain("默认模型");
-    expect(prompt).toContain("子代理模型");
+    expect(prompt).toContain("default 档位模型");
     expect(setProviderEnabled).not.toHaveBeenCalled();
 
     ui.stdin.write("n");

@@ -24,7 +24,7 @@ import { DiffView } from "./diff.js";
 import { SegmentText, TodoRows } from "./todo-panel.js";
 
 import type { LiveTool, ToolEntry } from "@nocturne/core/protocol";
-import { todoItemsFromCompletion } from "@nocturne/core/protocol";
+import { todoItemsFromCompletion, subagentRowInfo } from "@nocturne/core/protocol";
 
 const LIVE_TAIL = 3;
 const RESULT_TAIL = 5;
@@ -138,6 +138,9 @@ export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): 
         <Text>{head}</Text>
         {suffix !== "" ? <Text dimColor> {suffix.trim()}</Text> : null}
       </Text>
+      {subagentRowInfo(entry).reason !== undefined && (
+        <Text dimColor wrap="truncate">{`  选择理由：${subagentRowInfo(entry).reason}`}</Text>
+      )}
       {running && entry.liveOutput !== ""
         ? tailLines(entry.liveOutput, LIVE_TAIL).map((l, i) => (
             <Text key={i} dimColor wrap="truncate">

@@ -35,6 +35,7 @@ function page(
     ascii?: boolean;
     failure?: boolean;
     themeFailure?: boolean;
+    extraItems?: SettingItem[];
   } = {},
 ) {
   let items: SettingItem[] = [
@@ -69,6 +70,7 @@ function page(
       source: "default",
       overridden: false,
     },
+    ...(options.extraItems ?? []),
   ];
   const update = vi.fn(async (patch: SettingsPatch) => {
     if (options.failure) throw new Error("disk failure");
@@ -200,6 +202,44 @@ const selected = (frame: string | undefined) =>
   (frame ?? "").split("\n").find((l) => l.includes("▌"));
 
 describe("ADR-0045 设置页", () => {
+  it("模型角色下只读列出其余档位，Enter 只提示去哪编辑", async () => {
+    const profileItem = (name: string, value: object): SettingItem => ({
+      key: `subagents.profiles.${name}`,
+      effective: JSON.stringify(value),
+      saved: JSON.stringify(value),
+      source: "settings",
+      overridden: false,
+    });
+    const screen = page({
+      height: 40,
+      extraItems: [
+        profileItem("quick", {
+          description: "查找",
+          model: "fake/m",
+          effort: "low",
+          tools: "explore",
+          enabled: true,
+        }),
+        profileItem("deep", { description: "实现", enabled: false }),
+      ],
+    });
+    await screen.ready();
+    const frame = screen.lastFrame() ?? "";
+    expect(frame).toMatch(/quick\s+fake\/m · low · 只读\s+只读/);
+    expect(frame).toMatch(/deep\s+跟随当前模型 · 跟随会话 · 全部 · 已停用/);
+    for (let i = 0; i < 20 && !(selected(screen.lastFrame()) ?? "").includes("quick"); i++)
+      await screen.down(1);
+    expect(selected(screen.lastFrame())).toContain("quick");
+    expect(screen.lastFrame()).toContain("编辑档位：桌面端 设置 › 子代理");
+    await screen.input("\r");
+    expect(screen.lastFrame()).toContain("默认权限预设");
+    expect(screen.lastFrame()).toContain("编辑档位：桌面端 设置 › 子代理");
+    expect(screen.update).not.toHaveBeenCalled();
+    await screen.down(1);
+    expect(selected(screen.lastFrame())).toContain("deep");
+    screen.unmount();
+  });
+
   it("双栏分组、来源、只读行与说明区；没有外框和底部按钮", async () => {
     const screen = page();
     await screen.ready();
@@ -211,7 +251,7 @@ describe("ADR-0045 设置页", () => {
       "界面",
       "执行",
       "模型角色",
-      "子代理模型",
+      "default 档位模型",
       "看图模型",
       "标题模型",
     ])
@@ -390,7 +430,7 @@ describe("ADR-0045 设置页", () => {
     expect(screen.shell).toHaveBeenCalledWith("bash");
     await waitFor(() => (screen.lastFrame() ?? "").includes("默认权限预设"));
     await screen.down(2);
-    expect(selected(screen.lastFrame())).toContain("子代理模型");
+    expect(selected(screen.lastFrame())).toContain("default 档位模型");
     await screen.input("\r");
     await waitFor(() => (screen.lastFrame() ?? "").includes("跟随当前模型"));
     await pause();

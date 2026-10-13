@@ -6,7 +6,7 @@
 import stringWidth from "string-width";
 
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
-import { todoItemsFromCompletion } from "@nocturne/core/protocol";
+import { todoItemsFromCompletion, subagentRowInfo } from "@nocturne/core/protocol";
 
 import { questionToolLines } from "./question-format.js";
 import { webFetchSummary } from "./web-fetch.js";
@@ -345,6 +345,9 @@ function layoutEntryBody(
       const summary = summarizeToolInput(entry.name, entry.input);
       const head = `${mark} ${entry.name ?? "?"}${subagentModel(entry)} ${summary} ${entry.status}`;
       const lines = [...review, ...rows(entry.key, head, width, { toggle })];
+      const reason = subagentRowInfo(entry).reason;
+      if (reason !== undefined)
+        lines.push(...rows(`${entry.key}:reason`, `  选择理由：${reason}`, width, { dim: true }));
       const attachmentRows = (entry.result?.attachments ?? []).flatMap((att, i) =>
         rows(`${entry.key}:image:${i}`, `  ${attachmentLine(att, i, ascii)}`, width, {
           color: theme.accent,

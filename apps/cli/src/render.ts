@@ -113,6 +113,19 @@ function toolCompletedLines(p: ToolCompletedPayload): string[] {
   }
   const out = p.output;
   if (
+    p.name === "task" &&
+    out !== null &&
+    typeof out === "object" &&
+    "model" in out &&
+    typeof out.model === "string"
+  ) {
+    const effort =
+      "reasoningEffort" in out && typeof out.reasoningEffort === "string"
+        ? ` · ${out.reasoningEffort}`
+        : "";
+    lines.push(`  子代理模型：${out.model}${effort}`);
+  }
+  if (
     out !== null &&
     typeof out === "object" &&
     "diff" in out &&
@@ -158,6 +171,19 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
     }
     case "tool.started": {
       const p = ev.payload;
+      if (p.name === "task") {
+        const input = p.input as
+          { profile?: unknown; task?: unknown; reason?: unknown } | undefined;
+        if (typeof input?.profile === "string")
+          return [
+            aux(
+              `● 子代理 [${input.profile}] ${typeof input.task === "string" ? input.task.replace(/\s+/g, " ").slice(0, 100) : ""}`,
+            ),
+            ...(typeof input.reason === "string"
+              ? [aux(`  选择理由：${Array.from(input.reason).slice(0, 200).join("")}`)]
+              : []),
+          ];
+      }
       if (p.name === "ask_user") {
         const input = p.input as { questions?: unknown[] } | undefined;
         const n = input?.questions?.length ?? 0;
