@@ -110,7 +110,7 @@ subagent?: {
 }
 ```
 
-配置文件不新增 `subagent` 段（第 16 节）；用户级开关是权限规则 `subagent * → deny`， embedder 用 `RuntimeOptions.subagent.enabled`。
+运行级限制仍由 `RuntimeOptions.subagent` 提供；命名档位配置为 `subagents.profiles`（第 19 节），用户级权限开关仍是 `subagent * → deny`。
 
 ## 4. 子会话生命周期
 
@@ -217,7 +217,7 @@ launch(request, ctx)
 
 [ADR-0040](../decisions/ADR-0040-model-roles.md)：子代理独立模型由 `task` 角色决定，未配置或引用无效时继承父会话当前模型。派生时固定模型与档位，催促轮继续使用同一个子模型；档位继承父会话意图并按子模型可用集合就近降档。`session.created.model` 与 `task.output.model` 记录实际模型，TUI 工具行显示该模型。
 
-`runTurn` 的改动仅限两个注入点，都不含工具名/角色分支：
+自定义档位可覆盖模型和思考强度，完整规则见第 19 节；default 仍使用上述角色行为。`runTurn` 的注入点不含工具名/角色分支：
 
 - `TurnDeps.basePrompt?: string` → 传给 `buildContext`（第 8 节）；
 - `TurnDeps.shouldFinish?(state): boolean` → 每个工具调用结算后检查，命中走 `finish("done")`；
@@ -328,5 +328,15 @@ Runtime 提供 `describeExternalAgents({workspaceRoot?})`、`saveExternalAgent({
 客户端把 `/<agent名> 任务` 提交为 `delegate:{agent,task}`，与 `skill` 互斥。Core 在 Turn 边界校验名称对应已启用 agent（忽略大小写定位、使用配置中的规范名称），附明确的 `task` 工具指令、指定的 `agent` 和未转义改写的任务原文；`message.user.delegate` 与消息内容共同构成快照，历史折叠、在线视图、恢复与回放均读取日志，不根据当前配置重新生成。该指令不会直接调用 connector，也不会自动授权；模型发起的 `task` 仍走入口权限管线。
 
 斜杠优先级为内置命令、技能、外部 agent。命令或技能与 agent 重名时不能斜杠点名，列表显示警告，模型仍可调用。CLI/TUI 的 `/agents` 只读，桌面端管理与探测入口见 [desktop.md](../apps/desktop.md)。
+
+## 19. 子代理档位
+
+[ADR-0058](../decisions/ADR-0058-subagent-profiles.md)：task.profile 缺省 default；可选值为 default、已启用且模型可用的内置档位、已启用外部 agent。只有 default 时不公开 profile 字段且描述保持原状。agent 字段兼容一个版本，按同名 profile 处理；同时指定时报 invalid_input。外部档位仍与 preset/tools/outputSchema 互斥。
+
+声明为 `{description, model?, effort?, tools?, timeoutMs?, enabled}`，由 config 层解析，launcher 使用解析结果；Agent Loop 不认识档位。default 模型即 modelRoles.task，不迁移数据，不能删或停用。其他档位模型留空跟随当前会话；effort 留空继承父会话，再以 clampReasoningEffort 就近降档。实际模型和强度记 session.created，并由 task.output.model / reasoningEffort 供客户端呈现（后者可选，旧输出兼容）。运行中以既有 tool.progress 传递模型和强度。
+
+explore 档位不能请求 general，显式 tools 必须是只读池子集；general 可用 preset/tools 收窄。档位 timeoutMs 是默认值，请求可覆盖且封顶 3600 秒。不存在、停用或模型不可用报 invalid_input 并列出可选档位，不换模型；模型不可用发 runtime.warning(subagent_profile_unavailable) 并排除出选择表。嵌套子会话使用同一内置档位表，但不暴露外部 agent。
+
+选择表由共享 subagentSelectionTable 生成，何时用后追加模型、强度和只读标记；外部标记账号费用。reason 可选，展示前截到 200 字，不参与判断。profile/reason 留在工具参数中，不新增事件字段；权限主体与第 7 节不变，档位只改变工具上限。配置分层、补丁和名称约束见 [config.md](config.md#子代理档位设置)。
 
 

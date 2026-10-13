@@ -55,6 +55,7 @@ import { loadSettingsStore } from "./settings.js";
 import { reviewerRulesText, reviewerText } from "./reviewer.js";
 import { readTrustList } from "./trust.js";
 import type {
+  SettingsPatch,
   ConfigFile,
   LoadConfigOptions,
   ModelSettingsPatch,
@@ -381,6 +382,17 @@ export async function loadConfig(
           String(merged.resolved.notifications?.sound ?? true),
           saved.notifications?.sound === undefined ? undefined : String(saved.notifications.sound),
         ],
+        ...Object.entries(merged.resolved.subagentProfiles ?? {}).map(
+          ([name, profile]) =>
+            [
+              `subagents.profiles.${name}` as const,
+              `subagents.profiles.${name}` as const,
+              JSON.stringify(profile),
+              saved.subagents?.profiles?.[name] === undefined
+                ? undefined
+                : JSON.stringify(saved.subagents.profiles[name]),
+            ] as const,
+        ),
       ] as const
     ).map(([key, field, effective, value]) => {
       const origin =
@@ -586,6 +598,13 @@ export async function loadConfig(
       return { agents: describeExternalAgents(resolved), warnings: resolved.warnings };
     },
     async saveExternalAgent(input) {
+      if (
+        input.name.toLowerCase() === "default" ||
+        Object.keys(base().resolved.subagentProfiles ?? {}).some(
+          (name) => name.toLowerCase() === input.name.toLowerCase(),
+        )
+      )
+        throw new TypeError(`名称 ${input.name} 已被子代理档位使用`);
       await externalAgentStore.save(input, base().resolved);
       const agent = describeExternalAgents(base().resolved).find(
         (item) => item.name === input.name,
@@ -830,9 +849,25 @@ export async function loadConfig(
     },
     describeSettings,
     resolvedSettings: (root, shellEnv) => mergedSettings(root, shellEnv).resolved,
-    updateSettings: (patch) => settings.store.update(patch),
+    updateSettings: (patch) => {
+      for (const [key, value] of Object.entries(patch)) {
+        if (
+          value != null &&
+          key.startsWith("subagents.profiles.") &&
+          base().resolved.externalAgents.some(
+            (agent) =>
+              agent.name.toLowerCase() === key.slice("subagents.profiles.".length).toLowerCase(),
+          )
+        )
+          throw new TypeError(
+            `名称 ${key.slice("subagents.profiles.".length)} 已被外部 agent 使用`,
+          );
+      }
+      return settings.store.update(patch);
+    },
     setDefaultModel: (model, effort) => settings.store.setDefaultModel(model, effort),
-    setModelRole: (role, ref) => settings.store.update({ [`modelRoles.${role}`]: ref }),
+    setModelRole: (role, ref) =>
+      settings.store.update({ [`modelRoles.${role}`]: ref } as SettingsPatch),
     shellSetting: () => settings.store.shellFields(),
     setShellSetting: (kind, path) => settings.store.setShell(kind, path),
     getPreference: (key) => settings.store.getPreference(key),

@@ -12,6 +12,7 @@ import { parseConfigFile } from "./schema.js";
 import type { ConfigFile, SettingsPatch } from "./types.js";
 import { MODEL_ROLES } from "./types.js";
 import type { ReasoningEffort } from "../protocol/index.js";
+import { isValidSubagentProfileName } from "../protocol/index.js";
 
 /** settings.json 的原始 JSON 对象（未知字段保留） */
 type SettingsData = Record<string, unknown>;
@@ -43,6 +44,7 @@ const reservedFields = new Set([
   "skills",
   "model",
   "modelRoles",
+  "subagents",
   "reasoningEffort",
   "permissions",
   "permission",
@@ -80,6 +82,7 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
         key !== "permission.reviewer" &&
         key !== "permission.reviewerRules" &&
         !MODEL_ROLES.some((role) => key === `modelRoles.${role}`) &&
+        !key.startsWith("subagents.profiles.") &&
         key !== "compaction.threshold" &&
         !NOTIFY_KEYS.includes(key),
     )
@@ -89,6 +92,15 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
     );
   }
   const patch = input as SettingsPatch;
+  for (const [key, value] of Object.entries(patch)) {
+    if (!key.startsWith("subagents.profiles.")) continue;
+    const name = key.slice("subagents.profiles.".length);
+    if (!isValidSubagentProfileName(name)) throw new TypeError(`无效档位名：${name}`);
+    if (value == null) continue;
+    const parsed = parseConfigFile({ subagents: { profiles: { [name]: value } } }, "settings.json");
+    if (parsed.subagentProfileWarnings?.length)
+      throw new TypeError(parsed.subagentProfileWarnings.join("；"));
+  }
   const preset = patch["permissions.preset"];
   const attention = patch["notifications.events.attention"];
   const error = patch["notifications.events.error"];
@@ -156,6 +168,7 @@ function configFields(data: SettingsData, warn?: (message: string) => void): Con
   for (const key of [
     "model",
     "modelRoles",
+    "subagents",
     "reasoningEffort",
     "shell",
     "shellPath",
@@ -427,6 +440,28 @@ export async function loadSettingsStore(
             if (ref === null) Reflect.deleteProperty(roles, role);
             else roles[role] = ref;
             next.modelRoles = roles;
+          }
+          for (const [key, value] of Object.entries(patch)) {
+            if (!key.startsWith("subagents.profiles.") || value === undefined) continue;
+            const name = key.slice("subagents.profiles.".length);
+            const subagents =
+              typeof next.subagents === "object" &&
+              next.subagents !== null &&
+              !Array.isArray(next.subagents)
+                ? { ...(next.subagents as Record<string, unknown>) }
+                : {};
+            const profiles =
+              typeof subagents.profiles === "object" &&
+              subagents.profiles !== null &&
+              !Array.isArray(subagents.profiles)
+                ? { ...(subagents.profiles as Record<string, unknown>) }
+                : {};
+            if (value === null) Reflect.deleteProperty(profiles, name);
+            else profiles[name] = value;
+            if (Object.keys(profiles).length > 0) subagents.profiles = profiles;
+            else delete subagents.profiles;
+            if (Object.keys(subagents).length > 0) next.subagents = subagents;
+            else delete next.subagents;
           }
           const threshold = patch["compaction.threshold"];
           if (threshold !== undefined) {

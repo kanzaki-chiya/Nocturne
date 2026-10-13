@@ -6,6 +6,7 @@
  * 完成（tools 不 import agent；接口在本模块，实现在 agent/subagent.ts）。
  */
 import { createSchemaCompiler } from "../schema.js";
+import { subagentSelectionTable, type SubagentProfileConfig } from "../../protocol/index.js";
 import type { JsonSchema, SubjectRequest } from "../../protocol/index.js";
 import type {
   ExternalAgentInfo,
@@ -22,6 +23,8 @@ interface TaskInput {
   task: string;
   /** 已启用的外部 agent；与内置子代理的选择字段互斥 */
   agent?: string;
+  profile?: string;
+  reason?: string;
   /** 工具集预设；缺省 general；与 tools 互斥 */
   preset?: "general" | "explore";
   /** 显式工具名白名单（与 preset 互斥） */
@@ -63,20 +66,31 @@ export function createTaskTool(
   launcher?: SubagentLauncher,
   externalAgents?: ExternalTaskRunner,
   defaultTimeoutMs: number = TASK_DEFAULT_TIMEOUT_MS,
+  profiles: readonly (SubagentProfileConfig & { name: string })[] = [],
 ): ToolDefinition<TaskInput> {
   const agents = externalAgents?.agents ?? [];
   const hasExternalAgents = agents.length > 0;
+  const hasProfiles = profiles.length > 0 || hasExternalAgents;
+  const available = [
+    "default",
+    ...profiles.map((profile) => profile.name),
+    ...agents.map((agent) => agent.name),
+  ];
+  const selectedAgent = (input: TaskInput) =>
+    agents.find((agent) => agent.name === (input.profile ?? input.agent));
   const validateInput = (input: TaskInput): string | undefined => {
-    if (input.agent !== undefined) {
+    if (input.agent !== undefined && input.profile !== undefined)
+      return "agent 与 profile 不能同时给出";
+    const name = input.profile ?? input.agent ?? "default";
+    if (!available.includes(name))
+      return `档位 ${name} 不存在、已停用或模型不可用；可选：${available.join(", ")}`;
+    if (selectedAgent(input) !== undefined) {
       if (
         input.preset !== undefined ||
         input.tools !== undefined ||
         input.outputSchema !== undefined
       ) {
         return "agent 与 preset、tools、outputSchema 互斥";
-      }
-      if (!agents.some((agent) => agent.name === input.agent)) {
-        return `未知外部 agent：${input.agent}；可选：${agents.map((agent) => agent.name).join(", ") || "无"}`;
       }
       return undefined;
     }
@@ -113,12 +127,19 @@ export function createTaskTool(
           "执行期权限请求经过非交互判定，剩余询问会被拒绝；仅覆盖外部 agent 主动请求的操作，不是沙箱。" +
           "外部 agent 的文件修改不受检查点或按文件回退追踪；费用与额度计在该 agent 自己的账号上。" +
           "外部 agent 看不到 task 工具，不能再委派（不能嵌套）。"
-        : ""),
+        : "") +
+      (hasProfiles ? `\n${subagentSelectionTable(profiles, agents)}` : ""),
     inputSchema: {
       type: "object",
-      required: launcher !== undefined ? ["task"] : ["task", "agent"],
+      required: ["task"],
       properties: {
         task: { type: "string", description: "子代理的任务描述（自包含）" },
+        ...(hasProfiles
+          ? {
+              profile: { type: "string", enum: available, description: "子代理档位，缺省 default" },
+            }
+          : {}),
+        reason: { type: "string", description: "选择此档位的理由（一句话，最多显示 200 字）" },
         ...(hasExternalAgents
           ? {
               agent: {
@@ -158,7 +179,10 @@ export function createTaskTool(
     traits: {
       mutates: true,
       concurrencySafe: false,
-      timeoutMs: effectiveDefaultTimeoutMs,
+      timeoutMs: Math.max(
+        effectiveDefaultTimeoutMs,
+        ...profiles.map((profile) => profile.timeoutMs ?? effectiveDefaultTimeoutMs),
+      ),
       maxTimeoutMs: TASK_MAX_TIMEOUT_MS,
       maxModelChars: 30_000,
     },
@@ -166,11 +190,13 @@ export function createTaskTool(
 
     permissionSubjects(input: TaskInput): SubjectRequest[] {
       const target =
-        input.agent !== undefined
-          ? `external:${input.agent}`
+        selectedAgent(input) !== undefined
+          ? `external:${selectedAgent(input)?.name}`
           : input.tools !== undefined
             ? "custom"
-            : (input.preset ?? "general");
+            : (input.preset ??
+              profiles.find((profile) => profile.name === input.profile)?.tools ??
+              "general");
       return [{ kind: "subagent", target }];
     },
 
@@ -181,12 +207,13 @@ export function createTaskTool(
       // launcher/connector 自己的计时器与执行器的兜底一致（都先触发于生效值）
       const timeoutMs =
         input.timeoutMs === undefined ? undefined : Math.min(input.timeoutMs, TASK_MAX_TIMEOUT_MS);
-      if (input.agent !== undefined && externalAgents !== undefined) {
+      const agent = selectedAgent(input);
+      if (agent !== undefined && externalAgents !== undefined) {
         return externalAgents.run(
           {
-            agent: input.agent,
+            agent: agent.name,
             task: input.task,
-            ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+            timeoutMs: timeoutMs ?? effectiveDefaultTimeoutMs,
           },
           ctx,
         );
@@ -195,6 +222,10 @@ export function createTaskTool(
       const outcome = await launcher.launch(
         {
           task: input.task,
+          profile: input.profile ?? input.agent ?? "default",
+          ...(input.reason !== undefined
+            ? { reason: Array.from(input.reason).slice(0, 200).join("") }
+            : {}),
           ...(input.preset !== undefined ? { preset: input.preset } : {}),
           ...(input.tools !== undefined ? { tools: input.tools } : {}),
           ...(input.outputSchema !== undefined ? { outputSchema: input.outputSchema } : {}),

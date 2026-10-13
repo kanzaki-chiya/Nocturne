@@ -76,6 +76,7 @@ export interface MergeResult {
       | "permission.reviewer"
       | "permission.reviewerRules"
       | `modelRoles.${ModelRole}`
+      | `subagents.profiles.${string}`
       | "notifications.enabled"
       | "notifications.events.attention"
       | "notifications.events.error"
@@ -340,6 +341,7 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     const { kind, file } = layer;
     out.warnings.push(...(file.mcpWarnings ?? []));
     out.warnings.push(...(file.externalAgentWarnings ?? []));
+    out.warnings.push(...(file.subagentProfileWarnings ?? []));
     if (kind === "app" || kind === "user") {
       const layerNames = new Set<string>();
       for (const entry of file.externalAgents ?? []) {
@@ -371,6 +373,11 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
         out.modelRoles = { ...out.modelRoles, [role]: ref };
         origins[`modelRoles.${role}`] = kind;
       }
+    }
+    // 档位按名逐条合并：同名高层整条替换，不同名并存（ADR-0058，与 modelRoles 同规则）
+    for (const [name, profile] of Object.entries(file.subagents?.profiles ?? {})) {
+      out.subagentProfiles = { ...out.subagentProfiles, [name]: profile };
+      origins[`subagents.profiles.${name}`] = kind;
     }
     // 旧 shell 选择把程序设置、手写配置、环境各作为一份声明；
     // 手写层之间仍逐字段覆盖，跨这些边界时不沿用低层的可执行路径。
@@ -489,6 +496,19 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     }
   }
 
+  // ADR-0058：档位与外部 agent 共用一个命名空间（不区分大小写）；重名时档位忽略并警告
+  if (out.subagentProfiles !== undefined) {
+    for (const name of Object.keys(out.subagentProfiles)) {
+      if (out.externalAgents.some((agent) => agent.name.toLowerCase() === name.toLowerCase())) {
+        out.warnings.push(
+          `subagent_profile_config_invalid：档位 ${name} 与外部 agent 重名（共用命名空间，不区分大小写），已忽略`,
+        );
+        const { [name]: _removed, ...rest } = out.subagentProfiles;
+        out.subagentProfiles = rest;
+      }
+    }
+    if (Object.keys(out.subagentProfiles).length === 0) delete out.subagentProfiles;
+  }
   // 合成层（userModels）不为清单外模型建条目：只由 userModels 引入的模型剔除
   for (const [providerId, entry] of providers) {
     if (entry.models === undefined) continue;

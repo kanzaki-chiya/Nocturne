@@ -6,13 +6,20 @@
 import { z } from "zod";
 
 import {
+  DEFAULT_SUBAGENT_PROFILE,
   REASONING_EFFORT_LEVELS,
   REASONING_EFFORT_ORDER,
   PERMISSION_PRESET_NAMES,
+  isValidSubagentProfileName,
   parseCompactionThreshold,
   subjectKindSchema,
 } from "../protocol/index.js";
-import type { ConfigFile, ExternalAgentConfig, McpServerEntry } from "./types.js";
+import type {
+  ConfigFile,
+  ExternalAgentConfig,
+  McpServerEntry,
+  SubagentProfileConfig,
+} from "./types.js";
 import { ConfigError } from "./errors.js";
 
 export const externalAgentSchema = z.object({
@@ -33,6 +40,60 @@ const modelProtocolSchema = z.enum(["openai-compatible", "anthropic", "openai-re
 /** 思考档位（ADR-0018）：全部七档（含 off）/ 可用档位（六档，不含 off） */
 const reasoningEffortSchema = z.enum(REASONING_EFFORT_ORDER);
 const reasoningEffortLevelSchema = z.enum(REASONING_EFFORT_LEVELS);
+
+/** 子代理档位声明（ADR-0058）：必填字段缺失整条忽略；可选字段逐个降级并发出警告 */
+const profileModelSchema = z.string().regex(/^[^/]+\/.+$/u);
+const PROFILE_FIELDS = ["description", "model", "effort", "tools", "timeoutMs", "enabled"] as const;
+
+function parseSubagentProfile(
+  filePath: string,
+  name: string,
+  value: unknown,
+  warnings: string[],
+): SubagentProfileConfig | undefined {
+  if (!isValidSubagentProfileName(name)) {
+    warnings.push(
+      `subagent_profile_config_invalid：${filePath} 中的档位名 "${name}" 无效` +
+        `（只允许小写字母、数字和 -，最长 32；"${DEFAULT_SUBAGENT_PROFILE}" 是保留名），已忽略`,
+    );
+    return undefined;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    warnings.push(`subagent_profile_config_invalid：${filePath} 中档位 ${name} 不是对象，已忽略`);
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  for (const key of Object.keys(raw)) {
+    if (!PROFILE_FIELDS.includes(key as (typeof PROFILE_FIELDS)[number]))
+      warnings.push(
+        `subagent_profile_config_invalid：${filePath} 中档位 ${name} 的字段 ${key} 无效，已忽略`,
+      );
+  }
+  const description = z.string().min(1).safeParse(raw.description);
+  const enabled = z.boolean().safeParse(raw.enabled);
+  if (!description.success || !enabled.success) {
+    warnings.push(
+      `subagent_profile_config_invalid：${filePath} 中档位 ${name} 缺少有效的 description/enabled，已忽略`,
+    );
+    return undefined;
+  }
+  const profile: SubagentProfileConfig = { description: description.data, enabled: enabled.data };
+  for (const [field, schema] of [
+    ["model", profileModelSchema],
+    ["effort", reasoningEffortSchema],
+    ["tools", z.enum(["general", "explore"])],
+    ["timeoutMs", z.number().int().positive().max(3_600_000)],
+  ] as const) {
+    if (raw[field] === undefined) continue;
+    const parsed = schema.safeParse(raw[field]);
+    if (parsed.success) (profile as unknown as Record<string, unknown>)[field] = parsed.data;
+    else
+      warnings.push(
+        `subagent_profile_config_invalid：${filePath} 中档位 ${name} 的 ${field} 无效，已忽略`,
+      );
+  }
+  return profile;
+}
 
 const permissionRuleSchema = z.object({
   kind: z.union([subjectKindSchema, z.literal("*")]).optional(),
@@ -299,6 +360,8 @@ const configFileSchema = z.object({
         .optional(),
     })
     .optional(),
+  /** 子代理档位（ADR-0058）：profiles 按档位名逐条校验（形状在 parseSubagentProfile） */
+  subagents: z.object({ profiles: z.record(z.string(), z.unknown()).optional() }).optional(),
   /** 会话默认思考档位（ADR-0018） */
   reasoningEffort: reasoningEffortSchema.optional(),
   /** shell 选择（ADR-0022 第 2 节）：auto | pwsh | powershell | bash | cmd | sh */
@@ -516,11 +579,24 @@ export function parseConfigFile(
         `external_agent_config_invalid：${filePath} 中 externalAgents.${index} 无效，已忽略`,
       );
   }
-  const { mcp, externalAgents: configuredAgents, ...fields } = parsed.data;
+  const subagentProfiles: Record<string, SubagentProfileConfig> = {};
+  const subagentProfileWarnings: string[] = [];
+  for (const [name, entry] of Object.entries(parsed.data.subagents?.profiles ?? {})) {
+    const profile = parseSubagentProfile(filePath, name, entry, subagentProfileWarnings);
+    if (profile !== undefined) subagentProfiles[name] = profile;
+  }
+  const {
+    mcp,
+    externalAgents: configuredAgents,
+    subagents: configuredSubagents,
+    ...fields
+  } = parsed.data;
   return {
     ...fields,
     ...(mcp ? { mcp: { servers }, mcpWarnings } : {}),
     ...(configuredAgents ? { externalAgents } : {}),
     ...(externalAgentWarnings.length > 0 ? { externalAgentWarnings } : {}),
+    ...(configuredSubagents ? { subagents: { profiles: subagentProfiles } } : {}),
+    ...(subagentProfileWarnings.length > 0 ? { subagentProfileWarnings } : {}),
   };
 }

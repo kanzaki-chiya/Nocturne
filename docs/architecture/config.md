@@ -52,6 +52,7 @@ interface ConfigFile {
   model?: string;
   /** 模型角色（ADR-0040）：逐角色覆盖；不可信项目忽略 */
   modelRoles?: { task?: string; vision?: string; smol?: string };
+  subagents?: { profiles?: Record<string, SubagentProfileConfig> };
   /** 新会话的默认思考档位（ADR-0018；缺省 off）。档位是否可用由所选模型的声明决定，
       不支持时按就近降档生效 */
   reasoningEffort?: ReasoningEffort;
@@ -188,6 +189,12 @@ describeToggleImpact({ provider, models? }): ToggleImpact
 **绕过审查的显式规则**：用户 / 项目 / CLI 的显式规则命中时不进入 smart 的分流，因此 `shell allow *` 这类规则等于关掉 shell 审查（白名单、直接交人、送审都不再生效）；Runtime 没有为此提供检测接口，设置页不据此硬猜，只在这里说明。
 
 **通用界面偏好**（[ADR-0029](../decisions/ADR-0029-tui-themes.md) 第 3 节）：`RuntimeConfig` 与公开的 `Runtime` 都提供 `getPreference(key: string): string | undefined`、`setPreference(key: string, value: string | undefined): Promise<void>`。它们读写 `settings.json` 顶层的普通字符串字段；`undefined` 删除字段。写入拒绝无效字段名、`shell`/`shellPath` 等有专用接口的保留字段和非字符串值；原子写盘成功后才更新内存，失败时旧值不变，未知字段原样保留。`Runtime` 委托注入的 `RuntimeConfig`；`createRuntime` 未传 `config` 时，读取返回 `undefined`，写入返回被拒绝的 Promise，错误为「未注入 RuntimeConfig，无法保存偏好」。Core 不解释偏好值的 UI 含义；TUI 在首次渲染前读取 `theme`，由 TUI 判断 `dark`/`light`，非法值回退 `dark`；`/theme` 保存失败时保持原主题并留在选择页提示错误。
+
+### 子代理档位设置
+
+`subagents.profiles` 加入 settings.json 白名单。用户层和可信项目层按名称整条覆盖，不可信项目忽略整段。值为 `{ description: string, model?: "provider/model", effort?: ReasoningEffort, tools?: "general" | "explore", timeoutMs?: number, enabled: boolean }`。加载时非法字段分别忽略并警告；保存补丁非法时整体拒绝。名称只能含小写字母、数字、`-`，最长 32，default 保留；保存时与外部 agent 不区分大小写重名则报错。
+
+`SettingItem.key` 为 `subagents.profiles.<name>`，effective/saved 是档位 JSON 字符串，其余来源与覆盖标记沿用模型角色。`SettingsPatch` 同键，值为档位对象，null 删除设置层条目（高层手写值仍可生效）。不新增 RPC 方法，经 describeSettings/updateSettings 读写。default 模型仍是 modelRoles.task。运行、可用性、工具上限与权限规则见 [subagent.md 第 19 节](subagent.md#19-子代理档位)。
 
 ### 外部 agent 配置
 

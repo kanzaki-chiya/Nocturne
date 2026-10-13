@@ -164,6 +164,7 @@ import { resolveFileRefs } from "./tools/file-refs.js";
 import { buildFileIndex, type FileIndexEntry } from "./tools/file-index.js";
 import { isReasoningEffort, REASONING_EFFORT_ORDER } from "./protocol/index.js";
 import { validateSettingsPatch } from "./config/settings.js";
+import { resolveSubagentProfile } from "./config/subagent-profiles.js";
 import {
   createSessionStore,
   SessionError,
@@ -1823,6 +1824,26 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 .map(({ origin: _origin, path: _path, ...agent }) => agent),
             );
       const agentSnapshot = enabledExternalAgents;
+      const configuredProfiles =
+        config?.resolvedSettings(session.state().meta.workspaceRoot).subagentProfiles ?? {};
+      const profileSnapshot = Object.entries(configuredProfiles).flatMap(([name, profile]) => {
+        if (
+          !profile.enabled ||
+          agentSnapshot.some((agent) => agent.name.toLowerCase() === name.toLowerCase())
+        )
+          return [];
+        if (
+          profile.model !== undefined &&
+          resolveModelRole(sessionRegistry, profile.model, "task") === undefined
+        ) {
+          session.emitEphemeral("runtime.warning", {
+            code: "subagent_profile_unavailable",
+            message: `子代理档位 ${name} 的模型 ${profile.model} 不可用，已排除`,
+          });
+          return [];
+        }
+        return [{ ...profile, name }];
+      });
       const hasExternalAgents = enabledExternalAgents.length > 0;
       tools.unregister("task");
       if (!subagentEnabled && !hasExternalAgents) return;
@@ -1836,6 +1857,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           diagnostics,
           instructions,
           environment,
+          profiles: profileSnapshot,
+          resolveProfile: (name, currentModel) =>
+            resolveSubagentProfile(
+              name,
+              configuredProfiles,
+              (ref) => resolveModelRole(sessionRegistry, ref, "task"),
+              currentModel ?? model,
+              resolveModelRole(
+                sessionRegistry,
+                config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.task,
+                "task",
+              ) ??
+                currentModel ??
+                model,
+            ),
           model: () =>
             resolveModelRole(
               sessionRegistry,
@@ -1968,7 +2004,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               },
             }
           : undefined;
-      tools.register(createTaskTool(launcher, externalRunner, subagentLimits.timeoutMs));
+      tools.register(
+        createTaskTool(launcher, externalRunner, subagentLimits.timeoutMs, profileSnapshot),
+      );
     };
     const applyExternalAgents = (): void => {
       if (!pendingExternalAgents) return;

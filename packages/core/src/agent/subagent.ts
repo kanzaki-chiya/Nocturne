@@ -1,4 +1,4 @@
-import type { SkillOverview } from "../protocol/index.js";
+import type { SkillOverview, SubagentProfileConfig } from "../protocol/index.js";
 import type { ReviewInputSources, SecurityReviewer } from "../permission/index.js";
 /**
  * SubagentLauncher 实现（subagent.md 第 3–5 节）。
@@ -98,6 +98,11 @@ export interface SubagentDeps {
   environment: EnvironmentInfo;
   /** 启动时刻读取父会话当前模型/预设（setModel/setPermissionPreset 后派生反映最新值） */
   model(): ResolvedModel;
+  profiles?: readonly (SubagentProfileConfig & { name: string })[];
+  resolveProfile?(
+    name: string,
+    currentModel?: ResolvedModel,
+  ): { model: ResolvedModel; profile: SubagentProfileConfig } | undefined;
   visionModel?(): ResolvedModel | undefined;
   permissionPreset(): string;
   reviewer?(): SecurityReviewer | undefined;
@@ -248,11 +253,20 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         depth: deps.depth + 1,
       };
       try {
-        const childModel = deps.model();
+        const resolvedProfile = deps.resolveProfile?.(request.profile ?? "default");
+        if (deps.resolveProfile !== undefined && resolvedProfile === undefined)
+          return error(
+            "invalid_input",
+            `档位 ${request.profile ?? "default"} 不存在、已停用或模型不可用；可选：${["default", ...(deps.profiles ?? []).map((p) => p.name)].join(", ")}`,
+          );
+        const profile = resolvedProfile?.profile;
+        const childModel = resolvedProfile?.model ?? deps.model();
+        if (profile?.tools === "explore" && request.preset === "general")
+          return error("invalid_input", "只读档位不能请求 general 工具集");
         // 子代理继承父会话档位（ADR-0018 §4）：按子模型可用集合就近降档；
         // off / 无可用档 → 不写字段（等价 off）
         const childEffort = clampReasoningEffort(
-          deps.reasoningEffort?.(),
+          profile?.effort ?? deps.reasoningEffort?.(),
           childModel.model.capabilities.reasoningEffort,
         );
         child = await deps.store.create({
@@ -264,6 +278,10 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           parent: { sessionId: ctx.sessionId, callId: ctx.callId },
           ...(childEffort !== undefined ? { reasoningEffort: childEffort } : {}),
         });
+        ctx.progress(
+          `子代理模型：${childModel.model.ref.provider}/${childModel.model.ref.model} · ${childEffort ?? "off"}`,
+          "info",
+        );
 
         // 可选池 = 内置 ∪ 父会话 MCP 快照 ∪ task（子会话自身深度未达上限才可再派生）。
         // ADR-0032 §4：子会话非交互，声明 needsUser 的工具按特性排除——
@@ -297,17 +315,33 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             createTaskTool(
               createSubagentLauncher({
                 ...deps,
+                model: () => childModel,
+                reasoningEffort: () => childEffort,
+                ...(deps.resolveProfile !== undefined
+                  ? {
+                      resolveProfile: (name: string, currentModel?: ResolvedModel) =>
+                        deps.resolveProfile?.(name, currentModel ?? childModel),
+                    }
+                  : {}),
                 skills: skillSnapshot ? () => skillSnapshot : undefined,
                 depth: deps.depth + 1,
               }),
               undefined,
               deps.limits.timeoutMs,
+              deps.profiles,
             ),
           );
         }
         const names = new Set(pool.map((t) => t.name));
         let selected: ToolDefinition[];
         if (request.tools !== undefined) {
+          if (
+            profile?.tools === "explore" &&
+            request.tools.some((name) =>
+              pool.some((tool) => tool.name === name && tool.traits.mutates),
+            )
+          )
+            return error("invalid_input", "tools 必须是 explore 工具集的子集");
           const unknown = request.tools.filter((n) => !names.has(n) || n === "finish");
           if (unknown.length > 0) {
             return error(
@@ -317,7 +351,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           }
           const wanted = new Set(request.tools);
           selected = pool.filter((t) => wanted.has(t.name));
-        } else if (request.preset === "explore") {
+        } else if ((request.preset ?? profile?.tools) === "explore") {
           // 按特性筛选（subagent.md 第 6 节）：只读工具自动在内，与名字无关
           selected = pool.filter((t) => !t.traits.mutates);
         } else {
@@ -408,7 +442,10 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
               };
         // 催促循环：done 且无 finish → 再开一轮催促；最后一轮 toolChoice 强制
         const maxAttempts = deps.limits.maxAttempts;
-        const timeoutMs = request.timeoutMs ?? deps.limits.timeoutMs;
+        const timeoutMs = Math.min(
+          request.timeoutMs ?? profile?.timeoutMs ?? deps.limits.timeoutMs,
+          3_600_000,
+        );
         // launcher 自己的超时计时器单独持有：Turn 以 aborted 结束时按
         // signal.aborted 区分「本次超时」与「父会话中断」（subagent.md 第 4 节）
         const launchTimeoutSignal = AbortSignal.timeout(timeoutMs);
@@ -443,6 +480,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             shouldFinish: finishSubmitted,
             // ADR-0031 §3：子代理请求填根会话 ID
             rootSessionId: deps.rootSessionId,
+            ...(!last && childEffort !== undefined ? { reasoningEffort: childEffort } : {}),
             ...(last ? { toolChoice: { name: "finish" } } : {}),
           };
           const reason = await runTurn(turnDeps, [{ type: "text", text: prompt }]);
@@ -457,6 +495,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
               childSessionId: child.id,
               childLogPath: child.logPath,
               model: `${childModel.model.ref.provider}/${childModel.model.ref.model}`,
+              reasoningEffort: childEffort ?? "off",
               turns: attempt,
               steps: child.state().history.filter((h) => h.kind === "tool").length,
               ...(usageOf(child) !== undefined ? { usage: usageOf(child) } : {}),
@@ -530,6 +569,7 @@ function statsOf(session: Session, turns: number): SubagentStats {
     childSessionId: session.id,
     childLogPath: session.logPath,
     model: `${session.state().config.model.provider}/${session.state().config.model.model}`,
+    reasoningEffort: session.state().config.reasoningEffort ?? "off",
     turns,
     steps: session.state().history.filter((h) => h.kind === "tool").length,
     ...(usageOf(session) !== undefined ? { usage: usageOf(session) } : {}),

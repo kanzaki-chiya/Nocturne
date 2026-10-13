@@ -105,3 +105,9 @@ omp 的 `modelRoles` 有 default、smol、slow、vision、plan、commit、tiny�
 - **未配置的角色一律回落到主对话模型**（路线图原文）：`task` 与 `smol` 采用（标题请求极小，回落代价可以忽略）；`vision` 回落没有意义，主模型本来就不能看图。
 - **角色配置带思考档位**：多一个维度，界面和校验都更复杂，目前没有明确需求，不做。
 - **一次性加入 slow、plan、commit 等角色**：Nocturne 目前没有对应的功能入口，配置了也用不上，不做。
+
+## 修订
+
+### 2026-10-13：子代理档位
+
+`modelRoles.task` 即 `default` 档位的模型，不迁移数据；其他执行者改用 [ADR-0058](ADR-0058-subagent-profiles.md) 的档位。

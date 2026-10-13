@@ -93,6 +93,8 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 安全审查第二版（smart 的送审范围、只读白名单、直接交人、七道是非题与纯函数判定、追加规则、样例集）见 [ADR-0057](decisions/ADR-0057-reviewer-v2.md)。
 
 ## Roadmap
+子代理档位（按任务选择执行者）见 [ADR-0058](decisions/ADR-0058-subagent-profiles.md)，主文档是 [subagent.md](architecture/subagent.md)。
+
 
 [roadmap/roadmap.md](roadmap/roadmap.md)：阶段划分与验收标准。
 

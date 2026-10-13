@@ -41,6 +41,7 @@ import {
   type RuntimeConfig,
   type RuntimeEvent,
   type RuntimeSession,
+  type SettingsPatch,
   type SubmitInput,
   type UpdateSetupProviderPatch,
 } from "@nocturne/core";
@@ -838,7 +839,7 @@ class Connection {
         const reviewerKey = optString(p, "reviewerKey");
         const workspaceRoot = await this.workspaceOf(p);
         return this.runtime().updateSettings(
-          reqObject(p, "patch"),
+          reqObject(p, "patch") as SettingsPatch,
           reviewerKey !== undefined || workspaceRoot !== undefined
             ? {
                 ...(reviewerKey !== undefined ? { reviewerKey } : {}),

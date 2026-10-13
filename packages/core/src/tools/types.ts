@@ -44,6 +44,7 @@ import type {
   QuestionAnswer,
   QuestionItem,
   QuestionReply,
+  ReasoningEffort,
   SubjectRequest,
   ToolCallRef,
   ToolSpec,
@@ -437,6 +438,8 @@ export interface ToolExecutor {
  * 的可见性）；task 工具只做输入预检与结果映射。
  */
 export interface SubagentRequest {
+  profile?: string | undefined;
+  reason?: string | undefined;
   /** 交给子代理的完整任务描述（子会话看不到父会话历史，必须自包含） */
   task: string;
   /** 工具集预设：general（可选池全部）/ explore（只读工具）；缺省 general */
@@ -451,6 +454,7 @@ export interface SubagentRequest {
 
 /** task 工具结果的 output 形状（subagent.md 第 1 节） */
 export interface SubagentStats {
+  reasoningEffort?: ReasoningEffort | undefined;
   model: string;
   childSessionId: string;
   childLogPath: string;

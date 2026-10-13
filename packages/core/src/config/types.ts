@@ -23,11 +23,12 @@ import type {
   ModelRef,
   ModelPricing,
   PricingSource,
+  ReasoningEffort,
+  ReasoningEffortLevel,
+  SubagentProfileConfig,
   PermissionPresetName,
   PermissionRule,
   ProviderAuth,
-  ReasoningEffort,
-  ReasoningEffortLevel,
 } from "../protocol/index.js";
 
 export type { AnnotatedRule };
@@ -39,6 +40,9 @@ export type {
   ExternalAgentSaveInput,
   ExternalAgentsDescription,
   ResolvedExternalAgentConfig,
+  SubagentProfileConfig,
+  SubagentProfileInfo,
+  SubagentProfilesDescription,
 } from "../protocol/index.js";
 export type { HookEntry, HookPoint, McpServerEntry };
 
@@ -220,8 +224,11 @@ export interface ConfigFile {
   skills?: SkillsConfig | undefined;
   mcpWarnings?: string[] | undefined;
   externalAgentWarnings?: string[] | undefined;
+  subagentProfileWarnings?: string[] | undefined;
   /** 只接受用户级声明；重复 name 保留首条并警告。 */
   externalAgents?: ExternalAgentConfig[] | undefined;
+  /** 子代理档位（ADR-0058）：按档位名逐条合并；不可信项目整段忽略 */
+  subagents?: { profiles?: Record<string, SubagentProfileConfig> | undefined } | undefined;
   compaction?: { threshold?: string | number | undefined } | undefined;
   notifications?: NotificationsConfig | undefined;
   /** false 时只使用本地 models.dev 数据，不联网刷新 */
@@ -265,6 +272,8 @@ export interface ConfigFile {
 /** 一层合并后的结果（config.md 第 1 节） */
 export interface ResolvedConfig {
   modelRoles?: Partial<Record<ModelRole, string | undefined>> | undefined;
+  /** 自定义档位合并结果（不含 `default`——default 的模型即 modelRoles.task） */
+  subagentProfiles?: Record<string, SubagentProfileConfig> | undefined;
   compactionThreshold?: string | number | undefined;
   /** 通知偏好（ADR-0056）：六个字段逐层合并，未声明时取缺省 */
   notifications?: Required<{ enabled: boolean; doneAfterSeconds: number; sound: boolean }> & {
@@ -558,7 +567,9 @@ export interface SettingItem {
     | "notifications.events.error"
     | "notifications.events.done"
     | "notifications.doneAfterSeconds"
-    | "notifications.sound";
+    | "notifications.sound"
+    /** 子代理档位逐条：effective/saved 为档位 JSON（ADR-0058） */
+    | `subagents.profiles.${string}`;
   effective: string | undefined;
   source: "default" | "setup" | "settings" | "user" | "project" | "env" | "cli";
   saved: string | undefined;
@@ -582,7 +593,9 @@ export type SettingsPatch = Partial<{
   "notifications.events.done": boolean | null;
   "notifications.doneAfterSeconds": number | null;
   "notifications.sound": boolean | null;
-}>;
+}> &
+  /** 子代理档位逐条补丁：null 删除设置层条目（ADR-0058） */
+  Partial<Record<`subagents.profiles.${string}`, SubagentProfileConfig | null>>;
 
 /**
  * loadConfig 的产物（config.md 第 6 节）。

@@ -1,5 +1,6 @@
 /** config — 分层配置加载、校验、合并与信任/授权数据存储（config.md） */
 export * from "./types.js";
+export { resolveSubagentProfile } from "./subagent-profiles.js";
 export * from "./reviewer.js";
 export {
   EXTERNAL_AGENT_PRESETS,

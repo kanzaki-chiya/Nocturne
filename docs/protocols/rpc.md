@@ -52,6 +52,8 @@
 `SessionOpened`：`{ sessionId, meta, config, warnings, recovery?, lastSeq }`。打开会话**不推事件**——事件要另行 `session.subscribe`。同一连接里已打开的会话再次 `resumeSession` 报 `session_already_open`。`Runtime.updateProviders` 映射为 `runtime.reloadConfig`：服务端在每个 `provider.*` 变更方法之后已经自动重载配置并推 `runtime.providersChanged`（见 3.3），`reloadConfig` 用于**别的进程**改了配置文件之后让本服务端同步（例如桌面端后台运行期间用户用 CLI 改了 providers.json 或 settings.json）。`updateSettings` / `setDefaultModel` / `setModelRole` 只写设置层，不推 `runtime.providersChanged`。服务端不追踪重载的来源：多个服务端进程之间协调时，客户端必须自己识别由 `reloadConfig` 引起的那次通知，不再转发，否则会互相触发成环。
 
 ### 3.2 `session.*`
+子代理档位使用既有 runtime.describeSettings/updateSettings，逐条键 subagents.profiles.<name>，值与删除语义见 [config.md](../architecture/config.md#子代理档位设置)，不新增 RPC 方法。
+
 
 | 方法 | 参数（除 `sessionId`）→ 结果 |
 |---|---|

@@ -36,6 +36,7 @@ import {
   PERMISSION_PRESET_NAMES,
   type JsonSchema,
   type RuntimeEvent,
+  type SubagentProfileConfig,
 } from "../src/protocol/index.js";
 import { type SecurityReviewer, createRulePolicy } from "../src/permission/index.js";
 import { createTaskTool, type McpConnector, type ToolDefinition } from "../src/tools/index.js";
@@ -57,6 +58,7 @@ const isNestedChild = (r: ModelRequest) =>
 const isGrandchild = (r: ModelRequest) => isChildRequest(r) && !isNestedChild(r);
 
 interface RuntimeExtra {
+  profiles?: Record<string, SubagentProfileConfig>;
   interactive?: boolean;
   autoApproveAsk?: boolean;
   reviewer?: SecurityReviewer;
@@ -91,21 +93,25 @@ async function makeRuntime(
     env: () => undefined,
   };
   let config: RuntimeConfig | undefined;
-  if (extra.externalAgents !== undefined) {
+  if (extra.externalAgents !== undefined || extra.profiles !== undefined) {
     writeFileSync(
       path.join(sessionsDir, "config.json"),
       JSON.stringify({
         modelsDev: false,
         skills: { sources: { agents: false, claude: false } },
-        externalAgents: [
-          {
-            name: "offline",
-            command: "offline",
-            args: [],
-            description: "离线外部代理",
-            enabled: true,
-          },
-        ],
+        subagents: { profiles: extra.profiles },
+        externalAgents:
+          extra.externalAgents === undefined
+            ? []
+            : [
+                {
+                  name: "offline",
+                  command: "offline",
+                  args: [],
+                  description: "离线外部代理",
+                  enabled: true,
+                },
+              ],
       }),
     );
     config = await loadConfig(platform, { nocturneHome: sessionsDir, env: () => undefined });
@@ -159,6 +165,60 @@ const taskCompleted = (events: RuntimeEvent[]) =>
   );
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe("子代理档位 launcher", () => {
+  const quick = {
+    description: "查找",
+    enabled: true,
+    tools: "explore" as const,
+    effort: "high" as const,
+  };
+  it.each([{ preset: "general" }, { tools: ["shell"] }])(
+    "explore 档位拒绝放宽 %j",
+    async (selection) => {
+      const { runtime } = await makeRuntime(
+        parentTaskScript({ task: "test", profile: "quick", ...selection }),
+        { profiles: { quick }, autoApproveAsk: true },
+      );
+      const session = await makeSession(runtime);
+      const events = collect(session);
+      await session.submit({ text: "go" });
+      expect(taskCompleted(events)?.payload.error?.code).toBe("invalid_input");
+      await session.close();
+    },
+  );
+  it("档位工具集自动收窄，实际强度进入请求与输出", async () => {
+    let childRequest: ModelRequest | undefined;
+    const provider = new FakeProvider({
+      handler: (req) => {
+        if (isChildRequest(req)) {
+          childRequest = req;
+          return [
+            { type: "tool_call", toolCallId: "f", name: "finish", input: { result: "ok" } },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return req.messages.some((m) => m.role === "tool")
+          ? doneScript()
+          : (parentTaskScript({ task: "test", profile: "quick" })[0] ?? doneScript());
+      },
+    });
+    const { runtime } = await makeRuntime(undefined, {
+      provider,
+      profiles: { quick },
+      autoApproveAsk: true,
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "go" });
+    expect(childRequest?.tools.some((tool) => tool.name === "shell")).toBe(false);
+    expect(taskCompleted(events)?.payload.output).toMatchObject({
+      model: "fake/fake-model",
+      reasoningEffort: childRequest?.reasoningEffort ?? "off",
+    });
+    await session.close();
+  });
+});
 
 describe("subagent：基本往返", () => {
   it("explore 预设默认放行：父调用 → 子 finish → 结果回到父模型，子日志带父关联", async () => {
@@ -1573,7 +1633,7 @@ describe("external agent：Core task 与权限装配", () => {
     await session.close();
   });
 
-  it("没有外部代理时 schema/描述不暴露 agent；外部独占时 agent 必填", () => {
+  it("没有外部代理时隐藏 agent；外部独占通过预检要求执行者", () => {
     const launcher = {
       launch: async () => ({
         status: "error" as const,
@@ -1587,7 +1647,8 @@ describe("external agent：Core task 与权限装配", () => {
       agents: [{ name: "offline", description: "离线外部代理" }],
       run: async () => ({ status: "ok", modelContent: "offline" }),
     });
-    expect(exclusive.inputSchema.required).toEqual(["task", "agent"]);
+    expect(exclusive.inputSchema.required).toEqual(["task"]);
+    expect(exclusive.validateInput?.({ task: "x" })).toContain("内置子代理未启用");
     expect(exclusive.inputSchema.properties).not.toHaveProperty("preset");
     expect(exclusive.description).toContain("offline（离线外部代理）");
     expect(exclusive.description).toContain("检查点");
@@ -1819,7 +1880,7 @@ describe("external agent：Core task 与权限装配", () => {
     await session.submit({ text: "go" });
     expect(
       provider.requests[0]?.tools.find((t) => t.name === "task")?.inputSchema.required,
-    ).toEqual(["task", "agent"]);
+    ).toEqual(["task"]);
     expect(taskCompleted(events)?.payload).toMatchObject({ error: { code: "invalid_input" } });
     expect(calls).toBe(0);
     await session.close();
