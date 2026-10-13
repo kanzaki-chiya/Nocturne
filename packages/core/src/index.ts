@@ -87,6 +87,11 @@ import {
   createRulePolicy,
   createModelSecurityReviewer,
   createJevSecurityReviewer,
+  createReviewFacts,
+  projectNotesFrom,
+  readTrustedRemotes,
+  type GitRunner,
+  type ReviewInputSources,
   type SecurityReviewer,
   isPermissionPresetName,
   type PermissionPolicy,
@@ -1314,24 +1319,62 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
       return modelReviewer;
     };
-    const recentUserMessages = () =>
-      session
-        .state()
-        .history.flatMap((entry) => {
-          if (entry.kind !== "user") return [];
-          // @ 引用的文件/目录快照附在消息尾部；审查只读取用户亲自输入的部分。
-          const snapshots =
-            (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) +
-            (entry.skill ? 1 : 0);
-          return [
-            entry.content
-              .slice(0, entry.content.length - snapshots)
-              .filter((b) => b.type === "text")
-              .map((b) => b.text)
-              .join(""),
-          ];
-        })
-        .slice(-3);
+    // 审查输入的来源（ADR-0057 §7）：gate 在送审时取值并按预算裁剪
+    const userMessages = () =>
+      session.state().history.flatMap((entry) => {
+        if (entry.kind !== "user") return [];
+        // @ 引用的文件/目录快照附在消息尾部；审查只读取用户亲自输入的部分。
+        const snapshots =
+          (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) +
+          (entry.skill ? 1 : 0);
+        return [
+          entry.content
+            .slice(0, entry.content.length - snapshots)
+            .filter((b) => b.type === "text")
+            .map((b) => b.text)
+            .join(""),
+        ];
+      });
+    const runGit: GitRunner = async (args, signal) => {
+      try {
+        const child = platform.process.spawn("git", args, {
+          cwd: meta.cwd,
+          signal,
+          timeoutMs: 5_000,
+          env: { GIT_OPTIONAL_LOCKS: "0" },
+        });
+        let out = "";
+        for await (const chunk of child.stdout) out += chunk;
+        const exit = await child.wait();
+        return exit.code === 0 ? out : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    // 会话开始时读一次 git remote；拿不到就是空列表。smart 会话立刻开读，其他预设首次需要时再读
+    let remotesRead: Promise<string[]> | undefined;
+    const trustedRemotes = () =>
+      (remotesRead ??= readTrustedRemotes(runGit, new AbortController().signal));
+    if (session.state().config.permissionPreset === "smart") void trustedRemotes();
+    // 关闭会话时等读取结束，避免 git 子进程还占着工作目录
+    teardown.push(async () => {
+      await remotesRead;
+    });
+    const reviewSources: ReviewInputSources = {
+      userMessages,
+      projectNotes: () =>
+        projectNotesFrom([
+          ...(instructions.user ? [instructions.user] : []),
+          ...instructions.project,
+        ]),
+      trustedRemotes,
+      facts: createReviewFacts({ git: runGit, trustedRemotes }),
+      reviewerRules: () =>
+        config === undefined
+          ? resolved?.permissionReviewerRules
+          : config.resolvedSettings(meta.workspaceRoot).permissionReviewerRules,
+      environment: { workspaceRoot: meta.workspaceRoot, nocturneHome },
+    };
     let warnedMissingReviewer = false;
     const warnMissingReviewer = () => {
       if (
@@ -1359,7 +1402,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           return getReviewer();
         },
         cwd: meta.cwd,
-        recentUserMessages,
+        ...reviewSources,
         caseSensitive: platform.caseSensitivePaths,
         grants: { session: sessionGrants, project: ws?.grants },
         hooks: hookRunner,
@@ -1791,7 +1834,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               "vision",
             ),
           reviewer: getReviewer,
-          recentUserMessages,
+          reviewSources,
           // 子会话继承父会话的思考档位（ADR-0018 §4；受子模型可用档位约束，
           // 就近降档在 launcher 内完成）
           reasoningEffort: () => session.state().config.reasoningEffort,
@@ -1863,7 +1906,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                       preset: () => session.state().config.permissionPreset,
                       reviewer: getReviewer,
                       cwd: meta.cwd,
-                      recentUserMessages,
+                      ...reviewSources,
                       caseSensitive: platform.caseSensitivePaths,
                       hooks: hookRunner,
                     },
@@ -3630,9 +3673,20 @@ export type {
 
 export type {
   SecurityReviewer,
+  ReviewFacts,
   ReviewInput,
   ReviewResult,
+  ReviewerRules,
   ReviewSubject,
+  ReviewerSample,
+  ReviewerSampleContext,
+  ReviewerSampleResult,
+} from "./permission/index.js";
+export {
+  decideFromAnswers,
+  REVIEWER_SAMPLES,
+  runReviewerSamples,
+  summarizeSampleResults,
 } from "./permission/index.js";
 
 export {

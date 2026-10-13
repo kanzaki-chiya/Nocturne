@@ -192,6 +192,14 @@ export interface JevReviewerConfig {
 export type SecurityReviewerConfig =
   { backend: "model"; model: ModelRef } | { backend: "off" } | JevReviewerConfig;
 
+/** 用户追加的审查规则（ADR-0057）：两段自然语言原样拼进审查提示词，单段最多 1000 字 */
+export interface ReviewerRulesConfig {
+  /** 以下情况交人 */
+  ask?: string | undefined;
+  /** 以下情况放行 */
+  allow?: string | undefined;
+}
+
 /** 通知偏好（ADR-0056）：settings.json 白名单段；与 config.json 共用 schema 逐字段合并 */
 export interface NotificationsConfig {
   enabled?: boolean | undefined;
@@ -231,7 +239,12 @@ export interface ConfigFile {
   /** 非标准安装位置的可执行文件；种类仍由 shell 决定（ADR-0022） */
   shellPath?: string | undefined;
   providers?: ProviderEntryConfig[] | undefined;
-  permission?: { reviewer?: SecurityReviewerConfig | undefined } | undefined;
+  permission?:
+    | {
+        reviewer?: SecurityReviewerConfig | undefined;
+        reviewerRules?: ReviewerRulesConfig | undefined;
+      }
+    | undefined;
   permissions?:
     | {
         preset?: PermissionPresetName | undefined;
@@ -263,6 +276,8 @@ export interface ResolvedConfig {
   model?: string | undefined;
   permissionPreset?: PermissionPresetName | undefined;
   permissionReviewer?: SecurityReviewerConfig | undefined;
+  /** 用户追加的审查规则（ADR-0057）：ask / allow 两段逐层逐字段合并 */
+  permissionReviewerRules?: ReviewerRulesConfig | undefined;
   /** 会话默认思考档位（ADR-0018）：未配置时 undefined（off 语义） */
   reasoningEffort?: ReasoningEffort | undefined;
   /** 手写 config.json 层的 shell 选择原文（ADR-0022）；未配置时 undefined */
@@ -524,8 +539,14 @@ export interface SettingItem {
     effective: SecurityReviewerConfig | undefined;
     saved: SecurityReviewerConfig | undefined;
   };
+  /** permission.reviewerRules 行：生效值与 settings.json 已保存值（ADR-0057） */
+  reviewerRules?: {
+    effective: ReviewerRulesConfig | undefined;
+    saved: ReviewerRulesConfig | undefined;
+  };
   key:
     | "permission.reviewer"
+    | "permission.reviewerRules"
     | "permissions.preset"
     | "reasoningEffort"
     | "shell"
@@ -553,6 +574,8 @@ export type SettingsPatch = Partial<{
   "compaction.threshold": string | number | null;
   "permissions.preset": PermissionPresetName | null;
   "permission.reviewer": SecurityReviewerConfig | null;
+  /** ask / allow 为空字符串或 null 时删除该段；整体为 null 删除两段 */
+  "permission.reviewerRules": ReviewerRulesConfig | null;
   "notifications.enabled": boolean | null;
   "notifications.events.attention": boolean | null;
   "notifications.events.error": boolean | null;

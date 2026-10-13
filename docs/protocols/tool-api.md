@@ -77,6 +77,9 @@ type SubjectRequest = {
   /** 生效 ShellDescriptor 的纯数据高风险元数据（表集中在 platform，
       匹配判定在权限层）；缺省时权限层按 POSIX 基础表保守处理 */
   shellRisk?: ShellRiskProfile
+  /** mcp 主体：服务器经 readOnlyHint: true 自我声明只读。smart 预设据此直接放行
+      （信任服务器的自我声明，ADR-0057）；不参与规则匹配、Grant 键与 Hook 判定 */
+  readOnly?: boolean
 }
 // 解析后的 PermissionSubject 定义见 events.md 第 4 节
 ```

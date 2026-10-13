@@ -21,9 +21,14 @@ import {
   normalizePathText,
   shellDialect,
 } from "./pattern.js";
+import { budgetUserMessages } from "./review-input.js";
+import type { ReviewFactsProvider } from "./review-facts.js";
 import type {
   PermissionDecision,
   PermissionPolicy,
+  ReviewerRules,
+  ReviewFacts,
+  ReviewInput,
   SecurityReviewer,
   ReviewResult,
   GateOutcome,
@@ -41,13 +46,28 @@ export interface GateGrantSink {
   project?: { add(grant: Grant): Promise<void> } | undefined;
 }
 
-export interface PolicyGateOptions {
+/** 审查输入的来源（ADR-0057 §7）：由 runtime 注入，gate 只在送审时取值并按预算裁剪 */
+export interface ReviewInputSources {
+  /** 全部用户消息（按时间顺序）；gate 按 8000 字总预算、单条 2000 字裁剪 */
+  userMessages?: (() => string[]) | undefined;
+  /** 已加载项目指令文件拼接后的前 2000 字 */
+  projectNotes?: (() => string | undefined) | undefined;
+  /** 会话开始时读取的 git remote（`name url`）；拿不到为空列表 */
+  trustedRemotes?: (() => readonly string[] | Promise<readonly string[]>) | undefined;
+  /** 补充事实：查询失败不给，不影响审查；权限层只消费结果 */
+  facts?: ReviewFactsProvider | undefined;
+  /** 用户追加规则（permission.reviewerRules） */
+  reviewerRules?: (() => ReviewerRules | undefined) | undefined;
+  /** 工作区与 Nocturne 数据目录，写进提示词环境段 */
+  environment?: { workspaceRoot: string; nocturneHome: string } | undefined;
+}
+
+export interface PolicyGateOptions extends ReviewInputSources {
   /** 是否有能回复权限请求的客户端（permissions.md 第 7 节）；默认 false */
   interactive?: boolean | undefined;
   preset?: (() => string) | undefined;
   reviewer?: (() => SecurityReviewer | undefined) | undefined;
   cwd?: string | undefined;
-  recentUserMessages?: (() => string[]) | undefined;
   /** 默认 20 秒，测试可缩短。 */
   reviewTimeoutMs?: number | undefined;
   /** 新会话内请求 id 的分配器（测试可注入确定性序列） */
@@ -229,16 +249,35 @@ export function createPolicyGate(
     let result: ReviewResult;
     try {
       result = await Promise.race([
-        reviewer.review(
-          {
+        (async () => {
+          // 补充事实与可信 remote 的查询失败都不影响审查，只是不给
+          let facts: ReviewFacts | undefined;
+          try {
+            facts = await options.facts?.(subjects, controller.signal);
+          } catch {
+            facts = undefined;
+          }
+          let trustedRemotes: string[] | undefined;
+          try {
+            const remotes = await options.trustedRemotes?.();
+            trustedRemotes = remotes === undefined ? undefined : [...remotes];
+          } catch {
+            trustedRemotes = [];
+          }
+          const projectNotes = options.projectNotes?.();
+          const reviewerRules = options.reviewerRules?.();
+          const input: ReviewInput = {
             subjects,
             cwd: options.cwd ?? "",
-            recentUserMessages: (options.recentUserMessages?.() ?? [])
-              .slice(-3)
-              .map((text) => text.slice(0, 2000)),
-          },
-          controller.signal,
-        ),
+            userMessages: budgetUserMessages(options.userMessages?.() ?? []),
+            ...(projectNotes !== undefined ? { projectNotes } : {}),
+            ...(trustedRemotes !== undefined ? { trustedRemotes } : {}),
+            ...(facts !== undefined ? { facts } : {}),
+            ...(options.environment !== undefined ? { environment: options.environment } : {}),
+            ...(reviewerRules !== undefined ? { reviewerRules } : {}),
+          };
+          return reviewer.review(input, controller.signal);
+        })(),
         aborted,
       ]);
       if (

@@ -187,7 +187,7 @@ launch(request, ctx)
 - 同一 `autoApproveAsk`：`--yes` 是运行级操作者决定，子会话继承它（提升范围与父会话逐点一致，不覆盖 deny、不绕过 Hook 强制的 ask）；
 - `presetContext.sessionId` 换为**子会话** id（附件目录规则绑定自己的落盘目录）。
 
-子会话 gate：`createPolicyGate(childPolicy, { interactive: false, hooks: childHookRunner, caseSensitive, preset, reviewer, recentUserMessages })`，审查器 getter 沿用父会话实例。
+子会话 gate：`createPolicyGate(childPolicy, { interactive: false, hooks: childHookRunner, caseSensitive, preset, reviewer, ...reviewSources }（`reviewSources` 是父会话的审查输入来源：用户消息、项目说明、可信 remote、补充事实与追加规则）)`，审查器 getter 沿用父会话实例。
 
 **不宽于父会话的论证**：对每个主体，子会话的求值输入（规则、Grant、autoApproveAsk、Hook 建议）与父会话完全相同，唯一差异是 ask 分支——smart 的剩余 ask 都先经同一审查器，allow/block 直接结算；仍需确认时父会话等人回答，子会话 `deny(source: "non_interactive")`。因此子会话的任何 `allow` 都是父会话同一求值下也会得到的 `allow`；差异方向只有"更严"。
 

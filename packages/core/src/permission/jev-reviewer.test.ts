@@ -5,7 +5,7 @@ import type { ReviewInput } from "./types.js";
 const input: ReviewInput = {
   cwd: "C:/ws",
   subjects: [{ kind: "shell", target: "rm -rf build" }],
-  recentUserMessages: ["清理生成的 build 目录"],
+  userMessages: ["清理生成的 build 目录"],
 };
 const options = {
   baseURL: "https://example.invalid/v1/",
@@ -22,15 +22,26 @@ const mockResponse = (value: unknown, status = 200) => {
   vi.stubGlobal("fetch", mock);
   return mock;
 };
+const no = (confidence = 0.9) => ({ choice: "no", confidence });
+const yes = (confidence = 0.9) => ({ choice: "yes", confidence });
+const allowAnswers = () => ({
+  "1": no(),
+  "2": no(),
+  "3": no(),
+  "4": no(),
+  "5": no(),
+  "6": no(),
+  "7": no(),
+});
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe("Jev 安全审查", () => {
-  it("POST systemone，编号 choice 问题、上下文、凭据及会话头；独立用量", async () => {
+  it("POST systemone，七个编号 choice 问题、上下文、凭据及会话头；独立用量", async () => {
     const fetch = mockResponse({
-      answers: { "0": { choice: "allow", confidence: 0.99 } },
+      answers: allowAnswers(),
       usage: { input_tokens: 198, output_tokens: 1 },
     });
     expect(await review()).toMatchObject({
@@ -51,54 +62,69 @@ describe("Jev 安全审查", () => {
       },
     });
     const body = JSON.parse(String(init?.body));
-    expect(body).toEqual({
-      model: "jev-test",
-      state: input,
-      questions: {
-        "0": {
-          type: "choice",
-          instructions: expect.stringContaining("不可信"),
-          criteria: {
-            allow: expect.any(String),
-            block: expect.any(String),
-            unsure: expect.any(String),
-          },
-        },
-      },
-    });
+    expect(Object.keys(body.questions).sort()).toEqual(["1", "2", "3", "4", "5", "6", "7"]);
+    for (const question of Object.values(body.questions) as {
+      type: string;
+      instructions: string;
+      criteria: unknown;
+    }[]) {
+      expect(question.type).toBe("choice");
+      expect(question.instructions).toContain("不可信");
+      expect(question.criteria).toEqual({ yes: expect.any(String), no: expect.any(String) });
+    }
+    expect(body.state).toEqual(input);
     expect(body.tools).toBeUndefined();
     expect(createJevSecurityReviewer(options).model).toEqual({
       provider: "opencode-zen",
       model: "jev-test",
     });
   });
-  it.each(["allow", "block", "unsure"] as const)(
-    "confidence 达到阈值时保留 %s，支持数组答案",
-    async (choice) => {
-      mockResponse({ answers: [{ choice, confidence: 0.7 }] });
-      expect((await review()).verdict).toBe(choice);
-    },
-  );
-  it.each(["allow", "block", "unsure"])("低置信度 %s 降为 unsure，仍保留 usage", async (choice) => {
+  it("Q1 为是时 Q6 为是仍放行；否则交人并列出风险题", async () => {
+    mockResponse({ answers: { ...allowAnswers(), "1": yes(), "6": yes() } });
+    expect((await review()).verdict).toBe("allow");
+    mockResponse({ answers: { ...allowAnswers(), "6": yes(0.95) } });
+    const ask = await review();
+    expect(ask.verdict).toBe("unsure");
+    expect(ask.reason).toContain("会推送");
+  });
+  it("支持数组答案", async () => {
+    mockResponse({ answers: [no(), no(), no(), no(), no(), no(), no()] });
+    expect((await review()).verdict).toBe("allow");
     mockResponse({
-      answers: { "0": { choice, confidence: 0.69 } },
+      answers: [no(), yes(), no(), no(), no(), no(), no()],
       usage: { input_tokens: 9, output_tokens: 1 },
     });
     expect(await review()).toMatchObject({
       verdict: "unsure",
-      reason: expect.stringContaining("低于阈值"),
       usage: { inputTokens: 9, outputTokens: 1 },
     });
+  });
+  it("低置信度往保守方向取值：Q1 取否、Q2–Q7 取是，仍保留 usage", async () => {
+    mockResponse({
+      answers: { ...allowAnswers(), "1": yes(0.69), "6": yes() },
+      usage: { input_tokens: 9, output_tokens: 1 },
+    });
+    const result = await review();
+    expect(result).toMatchObject({
+      verdict: "unsure",
+      usage: { inputTokens: 9, outputTokens: 1 },
+    });
+    expect(result.reason).toContain("低于阈值");
+    mockResponse({ answers: { ...allowAnswers(), "2": { choice: "no", confidence: 0.1 } } });
+    const conservative = await review();
+    expect(conservative.verdict).toBe("unsure");
+    expect(conservative.reason).toContain("会删除");
   });
   it.each([
     null,
     {},
     { answers: [] },
-    { answers: [{ choice: "ALLOW", confidence: 0.9 }] },
-    { answers: [{ choice: "allow" }] },
-    { answers: [{ choice: "allow", confidence: "0.9" }] },
-    { answers: [{ choice: "block", confidence: 1.1 }] },
-    { answers: [{ choice: "allow", confidence: -1 }] },
+    { answers: [{ choice: "no", confidence: 0.9 }] },
+    { answers: { ...allowAnswers(), "7": { choice: "allow", confidence: 0.9 } } },
+    { answers: { ...allowAnswers(), "1": { choice: "no" } } },
+    { answers: { ...allowAnswers(), "1": { choice: "no", confidence: "0.9" } } },
+    { answers: { ...allowAnswers(), "1": { choice: "no", confidence: 1.1 } } },
+    { answers: { ...allowAnswers(), "1": { choice: "no", confidence: -1 } } },
   ])("响应错误按 unsure：%j", async (body) => {
     mockResponse(body);
     expect((await review()).verdict).toBe("unsure");

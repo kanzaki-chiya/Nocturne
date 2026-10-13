@@ -569,6 +569,57 @@ describe("ADR-0034 设置层", () => {
     });
     expect((await readSettings()).notifications ?? {}).toEqual({});
   });
+  it("审查追加规则：逐字段合并、无效只丢自己不连累审查器、补丁读写与清除", async () => {
+    const reviewer = { backend: "model", model: { provider: "fake", model: "m" } };
+    await json("settings.json", {
+      permission: { reviewer, reviewerRules: { ask: "任何 docker 命令", allow: "x".repeat(1001) } },
+    });
+    const invalid = await load();
+    expect(invalid.base.permissionReviewer).toEqual(reviewer);
+    expect(invalid.base.permissionReviewerRules).toBeUndefined();
+    expect(invalid.base.warnings.join("\n")).toContain("permission.reviewerRules");
+
+    await json("settings.json", { permission: { reviewerRules: { allow: "允许 pnpm install" } } });
+    await json("config.json", { permission: { reviewerRules: { ask: "任何 ssh 命令" } } });
+    const merged = await load();
+    expect(merged.base.permissionReviewerRules).toEqual({
+      ask: "任何 ssh 命令",
+      allow: "允许 pnpm install",
+    });
+    expect(
+      merged.describeSettings().find((item) => item.key === "permission.reviewerRules"),
+    ).toMatchObject({
+      effective: "额外交人 9 字 · 额外放行 15 字",
+      saved: "额外放行 15 字",
+      reviewerRules: {
+        effective: { ask: "任何 ssh 命令", allow: "允许 pnpm install" },
+        saved: { allow: "允许 pnpm install" },
+      },
+    });
+
+    const before = await readSettings();
+    await expect(
+      merged.updateSettings({ "permission.reviewerRules": { ask: "x".repeat(1001) } }),
+    ).rejects.toThrow();
+    await expect(
+      merged.updateSettings({ "permission.reviewerRules": { ask: 1 } } as never),
+    ).rejects.toThrow();
+    expect(await readSettings()).toEqual(before);
+
+    await merged.updateSettings({
+      "permission.reviewerRules": { ask: "不要动 prod 目录", allow: "  " },
+    });
+    expect((await readSettings()).permission).toEqual({
+      reviewerRules: { ask: "不要动 prod 目录" },
+    });
+    await merged.updateSettings({ "permission.reviewer": { backend: "off" } });
+    expect((await readSettings()).permission).toEqual({
+      reviewer: { backend: "off" },
+      reviewerRules: { ask: "不要动 prod 目录" },
+    });
+    await merged.updateSettings({ "permission.reviewerRules": null });
+    expect((await readSettings()).permission).toEqual({ reviewer: { backend: "off" } });
+  });
   it("通知事件无效字段单独忽略、容器无效不影响其他字段、未知字段写回保留", async () => {
     await json("settings.json", {
       notifications: {

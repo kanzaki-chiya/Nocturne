@@ -1531,8 +1531,8 @@ function ReviewerDialog({
         <div className="pbanner">
           首次启用 Jev
           <span>
-            将把待确认操作的类别、目标或命令、工作目录和最近三条用户消息发送给{" "}
-            {endpoint === "custom" ? baseURL.trim() : endpoint}
+            将把待确认操作的类别、目标或命令、工作目录、全部用户消息（约 8000 字内）、项目说明前
+            2000 字和 git remote 地址发送给 {endpoint === "custom" ? baseURL.trim() : endpoint}
             ，可能包含任务代码或命令文本。点「保存」表示同意。
           </span>
         </div>

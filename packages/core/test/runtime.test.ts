@@ -246,7 +246,13 @@ describe("公开 Runtime API", () => {
       });
       const fetchReview = vi.fn<typeof fetch>().mockResolvedValue(
         Response.json({
-          answers: { "0": { choice: "allow", confidence: 0.99 } },
+          // ADR-0057：七道是非题，Q1 答是即放行
+          answers: Object.fromEntries(
+            [1, 2, 3, 4, 5, 6, 7].map((n) => [
+              String(n),
+              { choice: n === 1 ? "yes" : "no", confidence: 0.99 },
+            ]),
+          ),
           usage: { input_tokens: 11, output_tokens: 3 },
         }),
       );
@@ -271,7 +277,19 @@ describe("公开 Runtime API", () => {
         handler: (request) => {
           if (request.tools.length === 0)
             return [
-              { type: "text_delta", text: "ALLOW\n用户明确授权写入" },
+              {
+                type: "text_delta",
+                text: JSON.stringify({
+                  requested: true,
+                  destroys: false,
+                  credentials: false,
+                  exfiltrates: false,
+                  weakens: false,
+                  crosses: false,
+                  opaque: false,
+                  reason: "用户明确授权写入",
+                }),
+              },
               { type: "usage", usage: { inputTokens: 11, outputTokens: 3 } },
               { type: "finish", reason: "stop" },
             ];
@@ -327,8 +345,8 @@ describe("公开 Runtime API", () => {
         if (audit === undefined) throw new Error("未发审查请求");
         expect(
           JSON.parse((audit.messages[0] as { content: { text: string }[] }).content[0]?.text ?? ""),
-        ).toMatchObject({ recentUserMessages: ["写入工作区外的 result.txt @context.txt"] });
-        expect(audit).toMatchObject({ maxOutputTokens: 300, tools: [] });
+        ).toMatchObject({ userMessages: ["写入工作区外的 result.txt @context.txt"] });
+        expect(audit).toMatchObject({ maxOutputTokens: 400, tools: [] });
         expect(JSON.stringify(audit.messages)).not.toContain("FILE SNAPSHOT MUST NOT ENTER REVIEW");
       } else {
         expect(fetchReview).toHaveBeenCalledOnce();
@@ -343,7 +361,7 @@ describe("公开 Runtime API", () => {
         const body = JSON.parse(String(request?.body));
         expect(body.state).toMatchObject({
           cwd: workspace,
-          recentUserMessages: ["写入工作区外的 result.txt @context.txt"],
+          userMessages: ["写入工作区外的 result.txt @context.txt"],
         });
         expect(JSON.stringify(body)).not.toContain("FILE SNAPSHOT MUST NOT ENTER REVIEW");
       }

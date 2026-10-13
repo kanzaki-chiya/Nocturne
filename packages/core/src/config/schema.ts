@@ -356,6 +356,14 @@ const configFileSchema = z.object({
           }
         })
         .optional(),
+      /** ADR-0057：用户追加的审查规则，单段最多 1000 字 */
+      reviewerRules: z
+        .object({
+          ask: z.string().max(1000).optional(),
+          allow: z.string().max(1000).optional(),
+        })
+        .strict()
+        .optional(),
     })
     .optional(),
   permissions: z

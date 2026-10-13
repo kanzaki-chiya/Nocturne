@@ -78,13 +78,14 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
       (key) =>
         key !== "permissions.preset" &&
         key !== "permission.reviewer" &&
+        key !== "permission.reviewerRules" &&
         !MODEL_ROLES.some((role) => key === `modelRoles.${role}`) &&
         key !== "compaction.threshold" &&
         !NOTIFY_KEYS.includes(key),
     )
   ) {
     throw new TypeError(
-      "仅支持 permissions.preset、permission.reviewer、compaction.threshold、modelRoles.* 与 notifications.*；默认档位随默认模型经 setDefaultModel 保存",
+      "仅支持 permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、modelRoles.* 与 notifications.*；默认档位随默认模型经 setDefaultModel 保存",
     );
   }
   const patch = input as SettingsPatch;
@@ -104,8 +105,17 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
         ? { compaction: { threshold: patch["compaction.threshold"] } }
         : {}),
       ...(preset !== null && preset !== undefined ? { permissions: { preset } } : {}),
-      ...(patch["permission.reviewer"] != null
-        ? { permission: { reviewer: patch["permission.reviewer"] } }
+      ...(patch["permission.reviewer"] != null || patch["permission.reviewerRules"] != null
+        ? {
+            permission: {
+              ...(patch["permission.reviewer"] != null
+                ? { reviewer: patch["permission.reviewer"] }
+                : {}),
+              ...(patch["permission.reviewerRules"] != null
+                ? { reviewerRules: patch["permission.reviewerRules"] }
+                : {}),
+            },
+          }
         : {}),
       ...(patch["notifications.enabled"] != null ||
       attention != null ||
@@ -150,7 +160,6 @@ function configFields(data: SettingsData, warn?: (message: string) => void): Con
     "shell",
     "shellPath",
     "permissions",
-    "permission",
     "compaction",
   ] as const) {
     if (!Object.hasOwn(data, key)) continue;
@@ -165,6 +174,27 @@ function configFields(data: SettingsData, warn?: (message: string) => void): Con
       result = { ...result, ...parseConfigFile({ [key]: value }, "settings.json") };
     } catch {
       warn?.(`settings.json 的 ${key} 无效，已忽略`);
+    }
+  }
+  // permission 的两个字段各自校验：追加规则写坏不能连累已配置的审查器
+  if (Object.hasOwn(data, "permission")) {
+    const permission = data.permission;
+    if (typeof permission !== "object" || permission === null || Array.isArray(permission)) {
+      warn?.("settings.json 的 permission 无效，已忽略");
+    } else {
+      for (const key of ["reviewer", "reviewerRules"] as const) {
+        const value = (permission as Record<string, unknown>)[key];
+        if (value === undefined) continue;
+        try {
+          const parsed = parseConfigFile({ permission: { [key]: value } }, "settings.json");
+          result = {
+            ...result,
+            permission: { ...result.permission, ...parsed.permission },
+          };
+        } catch {
+          warn?.(`settings.json 的 permission.${key} 无效，已忽略`);
+        }
+      }
     }
   }
   if (Object.hasOwn(data, "notifications")) {
@@ -421,6 +451,25 @@ export async function loadSettingsStore(
             if (reviewer === null) delete permission.reviewer;
             else permission.reviewer = reviewer;
             next.permission = permission;
+          }
+          const reviewerRules = patch["permission.reviewerRules"];
+          if (reviewerRules !== undefined) {
+            const permission =
+              typeof next.permission === "object" &&
+              next.permission !== null &&
+              !Array.isArray(next.permission)
+                ? { ...(next.permission as Record<string, unknown>) }
+                : {};
+            // 整段替换；空串视为删除该段，两段都空则删除 reviewerRules
+            const rules: Record<string, string> = {};
+            for (const field of ["ask", "allow"] as const) {
+              const text = reviewerRules?.[field];
+              if (text !== undefined && text.trim() !== "") rules[field] = text;
+            }
+            if (Object.keys(rules).length === 0) delete permission.reviewerRules;
+            else permission.reviewerRules = rules;
+            if (Object.keys(permission).length > 0) next.permission = permission;
+            else delete next.permission;
           }
           if (preset !== undefined) {
             const permissions =

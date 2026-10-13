@@ -52,7 +52,7 @@ import {
   type ProviderSetupState,
 } from "./setup.js";
 import { loadSettingsStore } from "./settings.js";
-import { reviewerText } from "./reviewer.js";
+import { reviewerRulesText, reviewerText } from "./reviewer.js";
 import { readTrustList } from "./trust.js";
 import type {
   ConfigFile,
@@ -316,6 +316,14 @@ export async function loadConfig(
           saved.permission?.reviewer ? reviewerText(saved.permission.reviewer) : undefined,
         ],
         [
+          "permission.reviewerRules",
+          "permission.reviewerRules",
+          reviewerRulesText(merged.resolved.permissionReviewerRules),
+          saved.permission?.reviewerRules
+            ? reviewerRulesText(saved.permission.reviewerRules)
+            : undefined,
+        ],
+        [
           "reasoningEffort",
           "reasoningEffort",
           merged.resolved.reasoningEffort ?? "off",
@@ -393,6 +401,14 @@ export async function loadConfig(
               reviewer: {
                 effective: merged.resolved.permissionReviewer,
                 saved: saved.permission?.reviewer,
+              },
+            }
+          : {}),
+        ...(key === "permission.reviewerRules"
+          ? {
+              reviewerRules: {
+                effective: merged.resolved.permissionReviewerRules,
+                saved: saved.permission?.reviewerRules,
               },
             }
           : {}),

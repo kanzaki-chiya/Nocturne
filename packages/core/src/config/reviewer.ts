@@ -4,6 +4,7 @@ import type {
   JevReviewerConfig,
   ProviderEntryConfig,
   ProviderOverview,
+  ReviewerRulesConfig,
   SecurityReviewerConfig,
 } from "./types.js";
 
@@ -69,6 +70,16 @@ export function reviewerText(reviewer: SecurityReviewerConfig | undefined): stri
   if (!reviewer || reviewer.backend === "off") return "off";
   if (reviewer.backend === "model") return `${reviewer.model.provider}/${reviewer.model.model}`;
   return `Jev · ${reviewer.endpoint} · ${reviewer.model}`;
+}
+
+/** 追加规则的一行摘要（设置页与 describeSettings 的显示值） */
+export function reviewerRulesText(rules: ReviewerRulesConfig | undefined): string {
+  const parts: string[] = [];
+  if (rules?.ask !== undefined && rules.ask.trim() !== "")
+    parts.push(`额外交人 ${rules.ask.length} 字`);
+  if (rules?.allow !== undefined && rules.allow.trim() !== "")
+    parts.push(`额外放行 ${rules.allow.length} 字`);
+  return parts.length === 0 ? "未设置" : parts.join(" · ");
 }
 
 export function resolveJevConnection(

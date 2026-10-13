@@ -131,7 +131,7 @@ describeToggleImpact({ provider, models? }): ToggleImpact
 
 `setProviderEnabled` / `setModelsEnabled` / `describeToggleImpact` 是服务商与模型启停（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)）：前两者写 `settings.json` 的 `disabledProviders` / `disabledModels`（专用读写，用户级），写盘成功后重建 Provider 注册表并让已打开会话在下一空闲边界重解析；`describeToggleImpact` 只读，返回受影响的打开会话数、默认模型是否命中与受影响的模型角色，供客户端在停用前确认。默认模型指向停用模型时 `defaultModel()` 返回 `undefined`；角色按 ADR-0040 的「不可用按未配置」路径处理。
 
-`SettingItem` 给出默认预设、安全审查模型、默认模型、默认档位、shell、压缩阈值、三个模型角色和六个通知偏好（`notifications.enabled`、`notifications.events.attention/error/done`、`notifications.doneAfterSeconds`、`notifications.sound`，`effective` 为字符串）的生效值、来源、保存值与覆盖标记；默认模型与默认档位只读。`SettingsPatch` 接受 `permissions.preset`、`permission.reviewer` 、`compaction.threshold`、`modelRoles.*` 与 `notifications.*`，`null` 清除；默认档位不能单独修改，只随默认模型经 `setDefaultModel` 成对保存（ADR-0034 修订），`setDefaultModel` 按该模型的可用档位校验，不支持时以 `invalid_command` 拒绝并列出可选值。`setDefaultModel` 在一次原子写入中保存模型和档位，`null` 清除档位；不再写 `providers.json`，其中旧 `model` 仍按向导层读取。完整类型见 ADR-0034 第 3 节。未注入 `RuntimeConfig` 时读取返回空数组，写入 Promise 拒绝。
+`SettingItem` 给出默认预设、安全审查模型、默认模型、默认档位、shell、压缩阈值、三个模型角色和六个通知偏好（`notifications.enabled`、`notifications.events.attention/error/done`、`notifications.doneAfterSeconds`、`notifications.sound`，`effective` 为字符串）的生效值、来源、保存值与覆盖标记；默认模型与默认档位只读。`SettingsPatch` 接受 `permissions.preset`、`permission.reviewer` 、`permission.reviewerRules`、`compaction.threshold`、`modelRoles.*` 与 `notifications.*`，`null` 清除；默认档位不能单独修改，只随默认模型经 `setDefaultModel` 成对保存（ADR-0034 修订），`setDefaultModel` 按该模型的可用档位校验，不支持时以 `invalid_command` 拒绝并列出可选值。`setDefaultModel` 在一次原子写入中保存模型和档位，`null` 清除档位；不再写 `providers.json`，其中旧 `model` 仍按向导层读取。完整类型见 ADR-0034 第 3 节。未注入 `RuntimeConfig` 时读取返回空数组，写入 Promise 拒绝。
 
 这些默认值只影响之后新建的会话，已有会话和恢复的会话继续使用自己的配置快照；`/new` 使用最新生效默认值。`/model` 页「设为默认」是显式切换，会同时修改当前会话；`/settings` 不修改当前会话的模型、档位或权限。
 
@@ -177,7 +177,11 @@ describeToggleImpact({ provider, models? }): ToggleImpact
 
 `SettingItem` 保留可显示的保存值（model 为 `provider/model`，关闭为 `off`，Jev 为后端/接入点/模型），并通过可选 `reviewer: { saved, effective }` 提供结构化配置给客户端；`SettingsPatch["permission.reviewer"]` 接受上述对象或 `null`。单独输入密钥经 `updateSettings(patch, { reviewerKey })` 写凭据库，再原子保存配置；配置写入失败时恢复原密钥或撤销新条目，凭据写入失败则不保存设置。同一 Runtime 的此类更新串行执行，避免失败回滚覆盖另一笔成功保存的密钥。
 
-`/settings` 的交互见 [tui.md](../apps/tui.md) 第 11 节。首次开启 Jev 的披露确认在设置页成功保存时记为界面偏好 `jevDisclosureAccepted: "yes"`，取消不写入。审查器独立于主模型，已有 smart 会话的下一次审查使用最新设置；该项是前段“仅影响新会话”的例外。未配置时按 guarded 并提示一次；模型不可用或请求失败按 unsure，见 [permissions.md](permissions.md) 5.3。
+`/settings` 的交互见 [tui.md](../apps/tui.md) 第 11 节。首次开启 Jev 的披露确认在设置页成功保存时记为界面偏好 `jevDisclosureAccepted: "yes"`，取消不写入。审查器独立于主模型，已有 smart 会话的下一次审查使用最新设置；该项是前段“仅影响新会话”的例外。未配置时，原本要送审的调用直接询问用户并提示一次；模型不可用或请求失败按 unsure，见 [permissions.md](permissions.md) 5.3。
+
+**审查追加规则 `permission.reviewerRules`**（ADR-0057）：`{ ask?: string; allow?: string }`，与 `permission.reviewer` 并列放在 settings.json 白名单的 `permission` 段（config.json 层同样接受，逐层逐字段合并，后层覆盖前层），两段都是自然语言，单段最多 1000 字。`ask`（「额外交人」）和 `allow`（「额外放行」）原样拼进审查提示词，标题为「用户追加：以下情况交人」「用户追加：以下情况放行」；它们只影响审查器答题，**不改变**白名单、直接交人和纯函数判定（因此追加规则无法放行「直接交人」的命令）。`SettingsPatch["permission.reviewerRules"]` 接受 `{ ask?, allow? }` 或 `null`：整段替换，空串视为删除该段，两段都空或 `null` 删除整个字段；超长或类型不符的补丁整体拒绝，不落盘。读取时 `permission.reviewer` 与 `permission.reviewerRules` 各自校验，追加规则写坏只丢它自己并给出警告，不连累已配置的审查器。`SettingItem` 的键 `permission.reviewerRules` 给出一行摘要（如「额外交人 9 字 · 额外放行 15 字」），并通过可选 `reviewerRules: { saved, effective }` 提供结构化值。
+
+**绕过审查的显式规则**：用户 / 项目 / CLI 的显式规则命中时不进入 smart 的分流，因此 `shell allow *` 这类规则等于关掉 shell 审查（白名单、直接交人、送审都不再生效）；Runtime 没有为此提供检测接口，设置页不据此硬猜，只在这里说明。
 
 **通用界面偏好**（[ADR-0029](../decisions/ADR-0029-tui-themes.md) 第 3 节）：`RuntimeConfig` 与公开的 `Runtime` 都提供 `getPreference(key: string): string | undefined`、`setPreference(key: string, value: string | undefined): Promise<void>`。它们读写 `settings.json` 顶层的普通字符串字段；`undefined` 删除字段。写入拒绝无效字段名、`shell`/`shellPath` 等有专用接口的保留字段和非字符串值；原子写盘成功后才更新内存，失败时旧值不变，未知字段原样保留。`Runtime` 委托注入的 `RuntimeConfig`；`createRuntime` 未传 `config` 时，读取返回 `undefined`，写入返回被拒绝的 Promise，错误为「未注入 RuntimeConfig，无法保存偏好」。Core 不解释偏好值的 UI 含义；TUI 在首次渲染前读取 `theme`，由 TUI 判断 `dark`/`light`，非法值回退 `dark`；`/theme` 保存失败时保持原主题并留在选择页提示错误。
 

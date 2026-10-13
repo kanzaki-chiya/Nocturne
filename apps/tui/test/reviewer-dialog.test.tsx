@@ -111,7 +111,7 @@ describe("ADR-0036 安全审查对话框", () => {
     expect(s.lastFrame()).toContain("jev-1.13");
     await s.click("save");
     expect(s.lastFrame()).toContain("首次开启 Jev");
-    expect(s.lastFrame()).toContain("工作目录和最近三条用户消息");
+    expect(s.lastFrame()).toContain("工作目录、全部用户消息");
     expect(s.lastFrame()).toContain("OpenCode 与 TypeSafe");
     expect(s.lastFrame()).toContain("https://opencode.ai/zen/v1");
     expect(s.apply).not.toHaveBeenCalled();

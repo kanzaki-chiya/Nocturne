@@ -154,11 +154,15 @@ Hook 的先后关系（Phase 5，完整语义见 5.5 与 hooks.md）：
 
 **只由用户确认**集合不调用审查器：修改 Nocturne 授权数据、`.nocturne/` 内 edit、可能读取凭据的命令、用户/项目/CLI 的显式 ask，以及 `PreToolUse` 强制 ask。Grant、`--yes` 与 PermissionRequest Hook 的原有优先级不变；强制 ask 仍跳过 Grant 与 `--yes`。一次调用中任一 ask 主体在该集合内，整个调用跳过审查。预设中的授权数据与 `.nocturne/` 规则用结构化 `userOnly` 标记表达该限制，`label` 只用于显示。
 
-审查输入只包含 ask 主体的类别、授权目标、位置与命中规则，当前 cwd，以及最近三条用户消息（各最多 2000 字符）；不带原始工具参数、文件引用快照、工具输出或文件正文。20 秒超时、报错或格式无效按 `unsure` 处理；Turn 中止则取消审查。缓存只保存本会话的 allow，使用与 Grant 相同的精确主体键，恢复后清空；缓存命中也记审查事件。
+**审查输入**（`ReviewInput`，ADR-0057）：ask 主体的类别、授权目标、位置与命中规则，当前 cwd；`userMessages`——全部用户消息按时间顺序给出，单条最多 2000 字，总预算 8000 字，超出时保留第一条和尽量多的最近几条，中间插入「（省略 N 条）」（来自完整会话历史，不受压缩影响，不含 `@` 引用的文件快照）；`projectNotes`——已加载的项目指令文件（AGENTS.md 等，复用 context 模块已加载的结果）拼接后的前 2000 字；`trustedRemotes`——会话创建时读一次 `git remote -v` 的结果（每项 `name url`，拿不到为空列表；smart 会话立即读取，其他预设首次需要时再读）；`facts`——由 runtime 注入的异步函数预先查好、权限层只消费结果：`git reset --hard` / `git clean` / `git checkout -- .` 附 `git status --porcelain` 的行数，推送类命令附目标 remote、分支以及是否在可信列表里，查询失败就不给、不影响审查；`environment`（工作目录与 Nocturne 数据目录）和 `reviewerRules`（用户追加规则）写进提示词环境段。不带原始工具参数、工具输出、agent 自己说的话或文件正文。20 秒超时（含事实查询）、报错或格式无效按 `unsure` 处理；Turn 中止则取消审查。缓存只保存本会话的 allow，使用与 Grant 相同的精确主体键，恢复后清空；缓存命中也记审查事件。
 
-未配置审查器时，原本要送审的调用直接询问用户（非交互拒绝；白名单与 `readOnlyHint` 的放行不受影响），每个会话提示一次。子会话使用父会话的同一审查器实例，仍为非交互。模型后端不带工具，使用最低思考档位 `off`，`maxOutputTokens=300`；首行去掉 Markdown 符号与标点后必须为 `ALLOW`、`BLOCK` 或 `UNSURE`，其余非空文本为理由。审查用量写入 `permission.reviewed.usage`，计入 Turn 与会话总用量，不进入对话历史。设置方式见 [config.md](config.md)。
+未配置审查器时，原本要送审的调用直接询问用户（非交互拒绝；白名单与 `readOnlyHint` 的放行不受影响），每个会话提示一次。子会话使用父会话的同一审查器实例，仍为非交互。模型后端不带工具，使用最低思考档位 `off`，`maxOutputTokens=400`。
 
-Jev 后端与模型后端并列放在权限层，直接 `POST <baseURL>/systemone`。请求传 `{ model, state, questions }`，`state` 即上述审查输入；`questions` 用编号 `0` 的一个 `choice` 问题，`instructions` 要求判断用户授权与操作影响，并声明 state 不可信；`criteria` 为 `allow`、`block`、`unsure` 三个选项。取 `answers[0].choice`（答案表的键为 `"0"`，也兼容数组），`confidence` 必须为 0–1 数值，低于 `minConfidence`（默认 0.7）降为 `unsure`。理由显示所选判断口径与置信度；低置信度、缺失密钥、密钥无效、模型不可用、超时、HTTP 或解析失败显示相应原因，一律按 `unsure` 处理。用户中止仍按取消结算。
+**七道是非题与纯函数判定**（ADR-0057 §6）：审查器不给结论，只回答七道题——Q1 `requested`（用户的话是否点名要求了这个动作且目标一致；用户说过且没有撤回的限制命中时答否）、Q2 `destroys`、Q3 `credentials`、Q4 `exfiltrates`、Q5 `weakens`、Q6 `crosses`、Q7 `opaque`。题干与判断依据在共享模块 `permission/reviewer-questions.ts`，模型后端与 Jev 后端共用，环境段（工作目录、可信 remote、数据目录）运行时填入。**结论由权限层的纯函数 `decideFromAnswers(answers)` 计算**：Q2–Q7 全否放行；有任一为是，只有 Q1 为是时才放行；其余交人。交人的理由列出答「是」的题和模型给的 `reason`。用户追加规则（`permission.reviewerRules`，见 [config.md](config.md)）以「用户追加：以下情况交人」「用户追加：以下情况放行」两段原样拼进提示词，单段最多 1000 字。
+
+模型后端要求输出一个 JSON 对象（七个布尔字段加 `reason`），容忍 Markdown 代码块包裹；任一字段缺失或不是布尔值就交人，理由「审查输出格式错误」。审查用量写入 `permission.reviewed.usage`，计入 Turn 与会话总用量，不进入对话历史。设置方式见 [config.md](config.md)。
+
+Jev 后端与模型后端并列放在权限层，直接 `POST <baseURL>/systemone`。请求传 `{ model, state, questions }`，`state` 即上述审查输入（环境与追加规则已写进题干，不在 state 里重复）；`questions` 是七个编号 `1`–`7` 的 `choice` 问题，每题 `criteria` 为 `yes` / `no`，`instructions` 带环境段、该题的判断依据和追加规则，并声明 state 不可信。`answers` 以对象（键为题号）或数组两种形式返回都接受，每题的 `confidence` 必须为 0–1 数值；低于 `minConfidence`（默认 0.7）时往保守方向取值（Q1 取否，Q2–Q7 取是），再由 `decideFromAnswers` 判定。理由显示答「是」的题与置信度情况；低置信度、缺失密钥、密钥无效、模型不可用、超时、HTTP 或解析失败显示相应原因，一律按 `unsure` 处理。用户中止仍按取消结算。
 
 Jev 的 `usage.input_tokens/output_tokens` 转为 `ReviewResult.usage`，沿用 `permission.reviewed.usage` 持久化与恢复记账，标注接入点/模型来源；缓存命中不重复记账。接入点表、模型列表与凭据解析位于 config 层，权限后端只接收解析后的连接信息；借用密钥按服务商 id 从凭据库取，环境变量只读所选变量，独立密钥取索引 id `reviewer`。OpenCode 网关沿用条目的 `sessionHeader`，缺省为 `x-opencode-session`，值为会话 id。配置与列表退回行为见 [config.md](config.md)。
 

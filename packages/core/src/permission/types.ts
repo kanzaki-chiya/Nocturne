@@ -257,10 +257,34 @@ export interface ReviewSubject {
   where?: PermissionSubject["where"] | undefined;
   rule?: RuleHit | undefined;
 }
+/** 权限层预先查好的补充事实（review-facts.ts）：查询失败的项不给 */
+export interface ReviewFacts {
+  /** `git status --porcelain` 的行数（reset --hard / clean / checkout -- . 时给） */
+  uncommittedChanges?: number | undefined;
+  /** 推送类命令的目标 */
+  push?: { remote?: string | undefined; branch?: string | undefined; trusted: boolean } | undefined;
+}
+
+/** 用户追加的审查规则（permission.reviewerRules）：自然语言，原样拼进提示词 */
+export interface ReviewerRules {
+  /** 以下情况交人 */
+  ask?: string | undefined;
+  /** 以下情况放行 */
+  allow?: string | undefined;
+}
+
 export interface ReviewInput {
   subjects: ReviewSubject[];
   cwd: string;
-  recentUserMessages: string[];
+  /** 全部用户消息（按时间顺序；总预算 8000 字，超出时保留第一条与最近几条，中间插入省略标记） */
+  userMessages: string[];
+  /** 已加载的项目指令文件拼接后的前 2000 字 */
+  projectNotes?: string | undefined;
+  /** 会话开始时 `git remote -v` 的结果（每项 `name url`）；拿不到为空列表 */
+  trustedRemotes?: string[] | undefined;
+  facts?: ReviewFacts | undefined;
+  environment?: { workspaceRoot: string; nocturneHome: string } | undefined;
+  reviewerRules?: ReviewerRules | undefined;
 }
 export interface ReviewResult {
   verdict: "allow" | "block" | "unsure";

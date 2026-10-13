@@ -74,6 +74,7 @@ export interface MergeResult {
       | "permissions.preset"
       | "compaction.threshold"
       | "permission.reviewer"
+      | "permission.reviewerRules"
       | `modelRoles.${ModelRole}`
       | "notifications.enabled"
       | "notifications.events.attention"
@@ -388,6 +389,14 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     if (file.permission?.reviewer !== undefined) {
       out.permissionReviewer = file.permission.reviewer;
       origins["permission.reviewer"] = layer.kind;
+    }
+    if (file.permission?.reviewerRules !== undefined) {
+      const rules = file.permission.reviewerRules;
+      const next = { ...out.permissionReviewerRules };
+      if (rules.ask !== undefined) next.ask = rules.ask;
+      if (rules.allow !== undefined) next.allow = rules.allow;
+      out.permissionReviewerRules = next;
+      origins["permission.reviewerRules"] = layer.kind;
     }
     if (file.permissions?.preset !== undefined) origins["permissions.preset"] = kind;
     if (file.model !== undefined) out.model = file.model;

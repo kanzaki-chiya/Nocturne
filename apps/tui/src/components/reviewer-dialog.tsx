@@ -622,7 +622,10 @@ export function ReviewerDialog({
                 {disclosure ? (
                   <>
                     <Text>首次开启 Jev</Text>
-                    <Text>将发送待确认操作的类别、目标/命令、工作目录和最近三条用户消息。</Text>
+                    <Text>
+                      将发送待确认操作的类别、目标/命令、工作目录、全部用户消息（约 8000
+                      字内）、项目说明前 2000 字和 git remote 地址。
+                    </Text>
                     <Text>
                       接收方：{JEV_ENDPOINTS[jev.endpoint].recipient}。地址：{jevBaseURL(jev)}
                       ；可能包含任务代码或命令文本。

@@ -1,5 +1,5 @@
 import type { SkillOverview } from "../protocol/index.js";
-import type { SecurityReviewer } from "../permission/index.js";
+import type { ReviewInputSources, SecurityReviewer } from "../permission/index.js";
 /**
  * SubagentLauncher 实现（subagent.md 第 3–5 节）。
  * 子会话是普通会话：独立 JSONL 日志与锁、同一 runTurn 与执行管线；
@@ -101,7 +101,8 @@ export interface SubagentDeps {
   visionModel?(): ResolvedModel | undefined;
   permissionPreset(): string;
   reviewer?(): SecurityReviewer | undefined;
-  recentUserMessages?(): string[];
+  /** 审查输入的来源（用户消息、项目说明、可信 remote、补充事实、追加规则） */
+  reviewSources?: ReviewInputSources;
   /** 父会话当前思考档位（ADR-0018 §4）：子会话继承，受子模型可用档位约束 */
   reasoningEffort?(): ReasoningEffort | undefined;
   compactionThreshold?(): string | number | undefined;
@@ -346,7 +347,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             preset: () => deps.permissionPreset(),
             reviewer: () => deps.reviewer?.(),
             cwd: deps.environment.cwd,
-            recentUserMessages: () => deps.recentUserMessages?.() ?? [],
+            ...deps.reviewSources,
             caseSensitive: deps.platform.caseSensitivePaths,
             ...(deps.grants !== undefined ? { grants: deps.grants } : {}),
             ...(childRunner !== undefined ? { hooks: childRunner } : {}),

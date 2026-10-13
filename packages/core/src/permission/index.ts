@@ -32,3 +32,7 @@ export * from "./types.js";
 export * from "./gate.js";
 export * from "./reviewer.js";
 export * from "./jev-reviewer.js";
+export * from "./reviewer-questions.js";
+export * from "./reviewer-samples.js";
+export * from "./review-input.js";
+export * from "./review-facts.js";
