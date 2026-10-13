@@ -116,6 +116,26 @@ export interface UserEntry {
   descriptions?: AttachmentDescribedPayload[] | undefined;
 }
 
+/**
+ * 用户消息里用户亲自输入的正文（客户端显示、复制、重发用）。
+ *
+ * 提交时 Core 在 `content` 末尾按顺序追加给模型看的快照块（`src/index.ts`
+ * 的 submit 路径，经 `runTurn` 落盘）：每个非图片 `@` 引用一块（`resolveFileRefs`）、
+ * 技能正文一块、委派指令一块。这里按条数从末尾切掉，再拼接剩下的 text 块。
+ * 以后新增快照种类或改变追加数量，必须同步改这里。
+ */
+export function userEntryText(entry: UserEntry): string {
+  const snapshots =
+    (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) +
+    (entry.skill ? 1 : 0) +
+    (entry.delegate ? 1 : 0);
+  const content = snapshots === 0 ? entry.content : entry.content.slice(0, -snapshots);
+  return content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+}
+
 export interface AssistantEntry {
   kind: "assistant";
   key: string;

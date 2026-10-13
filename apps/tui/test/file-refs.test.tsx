@@ -71,6 +71,31 @@ describe("TUI 文件引用", () => {
         .join("\n"),
     ).toContain("SNAPSHOT_MUST_BE_HIDDEN");
   });
+  it("带委派的历史用户行只显示正文，不出现委派指令", async () => {
+    const entry: UserEntry = {
+      ...user,
+      content: [
+        { type: "text", text: "/claude2 总结 README" },
+        { type: "text", text: "DELEGATION_MUST_BE_HIDDEN" },
+      ],
+      fileRefs: undefined,
+      delegate: { agent: "claude2", task: "总结 README" },
+    };
+    const { lastFrame, unmount } = render(<EntryRow entry={entry} width={80} />);
+    try {
+      await vi.waitFor(() => expect(lastFrame()).toContain("/claude2 总结 README"), {
+        timeout: 5000,
+      });
+      expect(lastFrame()).not.toContain("DELEGATION_MUST_BE_HIDDEN");
+      const text = layoutEntry(entry, 80, false)
+        .map((line) => line.text)
+        .join("\n");
+      expect(text).toContain("/claude2 总结 README");
+      expect(text).not.toContain("DELEGATION_MUST_BE_HIDDEN");
+    } finally {
+      unmount();
+    }
+  });
   it("引用与图片用同一种强调分段，邮箱不是引用，窗口切片保留高亮", () => {
     const text = 'a@b.com @"my notes.md" [Image #1]';
     expect(

@@ -1,4 +1,4 @@
-import type { FileRef, UserEntry } from "@nocturne/core/protocol";
+import { userEntryText, type FileRef, type UserEntry } from "@nocturne/core/protocol";
 
 /** @ 补全索引条目（与 session.fileIndex() 返回结构相同）。 */
 export interface FileIndexEntry {
@@ -154,17 +154,9 @@ export function fileRefDeleteRange(
   return undefined;
 }
 
-/** 用户消息原文：去掉末尾文件、技能和委派快照内容块。 */
+/** 用户消息原文：规则在 Core 的 `userEntryText`（去掉末尾快照块）。 */
 export function userText(entry: UserEntry): string {
-  const snapshots =
-    (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) +
-    (entry.skill ? 1 : 0) +
-    (entry.delegate ? 1 : 0);
-  const content = snapshots === 0 ? entry.content : entry.content.slice(0, -snapshots);
-  return content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("");
+  return userEntryText(entry);
 }
 
 /** @ 引用气泡的悬停说明。 */

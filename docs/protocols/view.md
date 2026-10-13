@@ -128,6 +128,8 @@ interface NoticeEntry {
 }
 ```
 
+用户条目的 `content` 末尾带有给模型看的快照块（每个非图片 `@` 引用一块、技能正文一块、委派指令一块），客户端不显示。显示、复制与重发用户正文一律调用 `@nocturne/core/protocol` 的 `userEntryText(entry)`，它按 `fileRefs`、`skill`、`delegate` 的条数从末尾切掉快照块再拼接剩余 text 块；客户端不得各自实现这条规则。
+
 ### 在途实体（live）
 
 ```ts
@@ -296,6 +298,7 @@ function createSessionView(): SessionView;
 function reduceSessionView(view: SessionView, event: RuntimeEvent): void;
 function replaySessionView(events: readonly DurableEvent[]): SessionView; // ≡ fold
 function sessionUsageSoFar(view: SessionView): Usage;
+function userEntryText(entry: UserEntry): string;   // 用户正文，去掉末尾快照块（见第 2 节）
 ```
 
 `sessionUsageSoFar` 给状态栏的累计用量：`view.usage` 加上进行中 Turn 已写入的 assistant 消息用量，每步结束即更新，不等 `turn.completed`；无进行中 Turn 时就是 `view.usage`。TUI 与桌面端的缓存命中率都用它。

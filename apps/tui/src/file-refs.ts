@@ -1,14 +1,9 @@
 import { parseFileRefs } from "@nocturne/core";
-import type { FileRef, UserEntry } from "@nocturne/core/protocol";
+import { userEntryText, type FileRef, type UserEntry } from "@nocturne/core/protocol";
 
+/** 用户消息原文：规则在 Core 的 `userEntryText`（去掉末尾快照块）。 */
 export function userText(entry: UserEntry): string {
-  const snapshots =
-    (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) + (entry.skill ? 1 : 0);
-  const content = snapshots === 0 ? entry.content : entry.content.slice(0, -snapshots);
-  return content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("");
+  return userEntryText(entry);
 }
 
 export function fileRefLine(ref: FileRef): string {
