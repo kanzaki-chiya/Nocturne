@@ -55,12 +55,15 @@ export interface ProviderState {
 
 /** Hub 向连接广播通知所需要的最小接口 */
 export interface HubPeer {
+  readonly origin: "local" | "remote";
   /** 已完成握手；通知只发给已握手的连接 */
   readonly initialized: boolean;
   send(message: RpcMessage): void;
+  disconnect(): Promise<void>;
 }
 
 export class Hub {
+  stopping = false;
   private handle: RpcRuntimeHandle | undefined;
   private providerState: ProviderState | undefined;
   /** 配置变更串行队列：变更 → 重载 → updateProviders → providersChanged 通知，响应最后 */
@@ -69,6 +72,20 @@ export class Hub {
   /** 后台里已打开的会话（sessionId → 会话） */
   private readonly sessions = new Map<string, RuntimeSession>();
   private readonly peers = new Set<HubPeer>();
+  private readonly references = new Map<string, number>();
+  private readonly active = new Map<string, number>();
+  private readonly opening = new Map<string, Promise<RuntimeSession>>();
+  private readonly closing = new Map<string, Promise<void>>();
+
+  get available(): boolean {
+    return this.handle !== undefined && !this.stopping;
+  }
+
+  async closeRemotes(): Promise<void> {
+    await Promise.allSettled(
+      [...this.peers].filter((peer) => peer.origin === "remote").map((peer) => peer.disconnect()),
+    );
+  }
 
   // ── 连接登记 ─────────────────────────────────────────────
 
@@ -175,10 +192,79 @@ export class Hub {
 
   addSession(session: RuntimeSession): void {
     this.sessions.set(session.id, session);
+    this.references.set(session.id, (this.references.get(session.id) ?? 0) + 1);
   }
 
-  removeSession(sessionId: string): void {
+  async resume(
+    sessionId: string,
+    options: Parameters<Runtime["resumeSession"]>[1],
+  ): Promise<RuntimeSession> {
+    await this.closing.get(sessionId);
+    const existing = this.sessions.get(sessionId);
+    if (existing !== undefined) {
+      this.addSession(existing);
+      return existing;
+    }
+    let pending = this.opening.get(sessionId);
+    if (pending === undefined) {
+      pending = this.runtime()
+        .resumeSession(sessionId, options)
+        .then((session) => {
+          this.sessions.set(sessionId, session);
+          return session;
+        });
+      this.opening.set(sessionId, pending);
+    }
+    try {
+      const session = await pending;
+      this.addSession(session);
+      return session;
+    } finally {
+      if (this.opening.get(sessionId) === pending) this.opening.delete(sessionId);
+    }
+  }
+
+  async release(sessionId: string): Promise<void> {
+    this.references.set(sessionId, Math.max(0, (this.references.get(sessionId) ?? 0) - 1));
+    await this.closeUnused(sessionId);
+  }
+
+  private async closeUnused(sessionId: string): Promise<void> {
+    if ((this.references.get(sessionId) ?? 0) > 0 || (this.active.get(sessionId) ?? 0) > 0) return;
+    const session = this.sessions.get(sessionId);
+    if (session === undefined) return;
     this.sessions.delete(sessionId);
+    this.references.delete(sessionId);
+    const closing = session.close();
+    this.closing.set(sessionId, closing);
+    try {
+      await closing;
+    } finally {
+      this.closing.delete(sessionId);
+    }
+  }
+
+  async operate<T>(session: RuntimeSession, task: () => Promise<T>): Promise<T> {
+    this.active.set(session.id, (this.active.get(session.id) ?? 0) + 1);
+    try {
+      return await task();
+    } finally {
+      this.active.set(session.id, (this.active.get(session.id) ?? 1) - 1);
+      await this.closeUnused(session.id);
+    }
+  }
+
+  async allowWorkspace(input: string): Promise<boolean> {
+    const root = await this.platform.resolveReal(input).catch(() => undefined);
+    if (root === undefined) return false;
+    const summaries = await this.runtime().listSessions({ includeSubagents: false });
+    for (const summary of summaries) {
+      for (const directory of [summary.cwd, summary.workspaceRoot]) {
+        if (root === (await this.platform.resolveReal(directory).catch(() => undefined)))
+          return true;
+      }
+    }
+    return false;
   }
 
   openSessions(): IterableIterator<RuntimeSession> {
@@ -201,8 +287,12 @@ export class Hub {
     this.sessions.clear();
     for (const session of sessions) session.interrupt();
     await Promise.allSettled(sessions.map((session) => session.close()));
+    await Promise.allSettled([...this.closing.values()]);
+    this.references.clear();
+    this.active.clear();
     await this.handle?.dispose?.();
     this.handle = undefined;
     this.providerState = undefined;
+    this.stopping = false;
   }
 }

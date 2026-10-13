@@ -63,7 +63,6 @@ export const SESSION_NOT_MAPPED = {
   warnings: "打开时的警告随 SessionOpened 返回",
   recovery: "打开时的恢复修复汇总随 SessionOpened 返回",
   durableEvents: "持久事件由 session.subscribe 的回放推送（afterSeq 之后的全部）",
-  interrupt: "是通知 session.interrupt（无应答），不在请求方法表里",
 } as const satisfies Partial<Record<keyof RuntimeSession, string>>;
 
 export const SESSION_METHODS: Record<
@@ -71,6 +70,7 @@ export const SESSION_METHODS: Record<
   RpcMethodName
 > = {
   rewindTargets: "session.rewindTargets",
+  interrupt: "session.interrupt",
   turnChanges: "session.turnChanges",
   turnChangeDiff: "session.turnChangeDiff",
   rewind: "session.rewind",

@@ -9,7 +9,7 @@
 - 每条报文是**一行 JSON**，以 `\n` 分隔，不使用 Content-Length 头；不支持批量（数组报文报 `-32600`）。服务端对传输只有"按行收发"的要求（`LineTransport`），stdio 是第一种接入，`@nocturne/rpc/server` 提供 `createStdioTransport`，测试与嵌入方可用 `createMemoryTransportPair`。
 - 三种报文：客户端→服务端的**请求**（有 `id`，等结果）、客户端→服务端的**通知**（无 `id`）、服务端→客户端的**通知**。没有服务端→客户端的请求：需要用户参与的流程都是"事件请求 + 命令回复"（权限、提问）。
 - 约定：`undefined` 在线上是 `null`（客户端封装负责还原）；二进制数据（图片附件）用标准 base64 字符串；整数 `seq`、毫秒时间戳保持数字。
-- 一个服务端同一时刻只接**一个客户端**，可以同时打开多个会话；会话方法都带 `sessionId`。
+- 一个服务端共享一个 Runtime，可同时服务一条本机连接与多条远程连接，各自打开多个会话；会话方法都带 `sessionId`。嵌入接口为 `serve(transport, { origin?: "local" | "remote" })`，缺省 `local`，同一时刻第二条本机连接被拒。`origin` 由服务端接入方指定，不从客户端报文获取；本轮只实现内存/stdio 接入，不新增网络。
 
 ## 2. 握手
 
@@ -19,9 +19,9 @@
 |---|---|
 | `protocolVersion` | 整数；必须与服务端一致（第一版不做向下兼容），否则报错 `protocol_version_mismatch` |
 | `clientName` | 客户端标识，诊断用 |
-| `capabilities.interactive` | 客户端能否回复权限与提问请求；`false` 时服务端用 `interactive: false` 创建 Runtime，权限请求按配置的非交互规则处理（与 `-p` 一致） |
+| `capabilities.interactive` | 客户端能否回复权限与提问请求；仅本机连接的声明用于创建 Runtime，远程声明不改变交互模式 |
 
-结果：`{ protocolVersion, nocturneVersion, sessionsDir? }`。Runtime 在握手时才创建（`interactive` 取自客户端声明）；创建失败时握手报错、连接保持，客户端可重试。握手前发其他请求报 `not_initialized`。
+结果对两种连接相同：`{ protocolVersion, nocturneVersion, sessionsDir? }`。Runtime 只在本机连接握手时创建，`interactive` 取自本机声明；创建失败时握手报错、连接保持，可重试。远程连接永远不创建 Runtime，本机尚未创建时远程握手报 `runtime_unavailable`，连接保持，可稍后重试。握手前发其他请求报 `not_initialized`（远程能力越界优先报第 7 节错误）。
 
 ## 3. 方法
 
@@ -72,7 +72,7 @@
 | `resolveFiles` | `{ paths: string[] }` → `FileRefResolution[]`（`{ input, absolutePath, withinWorkspace, relativePath?, exists, isDirectory }`，`relativePath` 只在工作区内给出）；只读，按会话工作区解析路径（相对路径相对工作区，绝对路径规范化后判定是否越界），`paths` 非字符串数组报 -32602。越界路径照常返回绝对路径与 exists，由客户端决定只给复制/显示入口（U-09） |
 | `readInputHistory` / `recordInputHistory` | → `string[]`；`{ text }` → `null` |
 | `readAttachment` | `{ file }` → `{ data: base64, mimeType, bytes }`；只读取当前会话持久事件登记过的图片附件，见下文 |
-| `close` | → `null`；关闭这一个会话（刷盘、释放会话锁），其余会话不受影响 |
+| `close` | → `null`；释放本连接对会话的引用与订阅，最后引用且空闲时才刷盘、释放会话锁，其余会话不受影响 |
 
 `submit.attachments` 是 `[{ data: base64, mimeType, label? }]`；解码后交给 Core，大小与格式校验仍在 Core（[ADR-0023](../decisions/ADR-0023-image-input.md)）。`data` 不是合法 base64 报 `invalid_params`，不进 Runtime。
 
@@ -100,7 +100,7 @@
 | `saveModelSettings` | `{ providerId, modelId, patch, workspaceRoot? }` → `null`；**变更方法** |
 | `refreshUpstreamLimits` | `{ providerId }` → `{ warning: string \| null }`；**变更方法** |
 | `refreshModelsDev` | `{}` → `{ warning: string \| null }`；**变更方法** |
-| `removeSetupProvider` | `{ providerId }` → `null`；**变更方法**；本连接任一会话正在使用时报 `provider_in_use`（同 CLI/TUI 的规则；因服务端持有会话，由服务端对本连接全部已打开会话判断） |
+| `removeSetupProvider` | `{ providerId }` → `null`；**变更方法**；后台任一会话正在使用时报 `provider_in_use`（同 CLI/TUI 的规则；服务端对共享的全部已打开会话判断） |
 | `logoutProvider` | `{ providerId }` → `null`；**变更方法** |
 | `describeSetupProvider` | `{ providerId }` → `ProviderEntryConfig \| null`；providers.json 条目原文（不含凭据），供编辑表单预填；非向导条目为 `null` |
 | `probeSetupProviderModels` | `{ providerId, type, baseURL?, headers? }` → `{ models: UpstreamModelEntry[] }`；按候选配置向候选地址发一次模型列表请求，凭据按条目现有规则解析，不写任何配置；失败原样报错，由客户端决定是否「仍然保存」 |
@@ -199,7 +199,9 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 
 - **临时事件不回放**：断开期间错过的流式增量、进度不补发（[events.md](events.md) 第 1、2 节）。
 - **不限流**：第一版服务端不为慢客户端设有界队列，事件直接写入传输（stdio 管道由操作系统缓冲）；持久事件本来可按 `seq` 补读，临时事件的丢弃策略留到出现慢连接问题时再定（与 [events.md](events.md) 第 6 节同步）。
-- 同一会话同一时刻只有一路订阅：再次 `subscribe` 替换前一路，服务端只有一份推送，不会向旧监听器重复发事件。
+- 同一连接内同一会话同一时刻只有一路订阅：再次 `subscribe` 替换该连接的前一路，不影响别的连接。不同连接各自按 `afterSeq` 回放并衔接实时推送，不丢不重。
+- 实际会话在后台级 Hub 共享：第一条连接真正打开，其他连接 `resumeSession` 返回当前 `SessionOpened`（含当前 `lastSeq`），同连接重复打开仍报 `session_already_open`。两端命令共用 Core 行为：后到的 submit 报 `session_busy`，权限/提问任一端回复生效，重复回复报 `unknown_request`，中断任一端可发。
+- 权限结算广播已有的 `permission.resolved`；Core 没有 `question.resolved`，提问回复后沿用 `runtime.status(running_tool)` 与对应 `tool.completed` 收束（ADR-0052 修订）。
 - 客户端用 `protocol` 的 reducer 折叠视图（`createSessionView` / `reduceSessionView` / `replaySessionView`，`@nocturne/rpc/client` 重新导出，`trackSessionView` 封装"订阅 + 折叠"）。**验收标准**：同一会话经 RPC 折叠得到的 `SessionView` 与进程内重放相等（[view.md](view.md) 第 6 节，`revision` 与 `notices` 除外）。
 - 重连：保存最后收到的持久事件 `seq`，重启后台后 `resumeSession`，再以 `afterSeq` 订阅即可续接；会话日志是唯一事实来源（[ADR-0003](../decisions/ADR-0003-session-event-log.md)）。
 
@@ -217,24 +219,41 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 | `-32001` | `RuntimeCommandError`（命令被拒绝，原因码见 [events.md](events.md) 第 7 节） | `session_busy`、`unknown_request`、`invalid_reply`、`invalid_command`、`invalid_model`（因模型不可用，如已停用；此时 `data` 另带 `disabled: "provider" \| "model"` 与 `model: { provider, model }`，双重停用时另带 `providerDisabled: true`（`disabled` 记 `"model"`，一键重新启用需同时恢复两者），见 [ADR-0054](../decisions/ADR-0054-provider-model-toggle.md) §3，客户端据此区分「已停用」与「已删除」） |
 | `-32002` | `SessionError` | 会话层错误码 |
 | `-32003` | `ProviderLoginError` | 登录错误码 |
-| `-32004` | RPC 层状态错误 | `not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down`、`provider_config_unavailable`（服务端未注入服务商配置）、`provider_in_use`（会话正在使用的服务商拒绝删除）、`unknown_login`（登录会话不存在或已结束） |
+| `-32004` | RPC 层状态错误 | `runtime_unavailable`（本机尚未创建 Runtime）、`remote_not_allowed`（远程方法或参数越界，中文文案说明限制）、`not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down`、`provider_config_unavailable`（服务端未注入服务商配置）、`provider_in_use`（后台任一会话正在使用的服务商拒绝删除）、`unknown_login`（登录会话不存在或已结束） |
 | `-32005` | `ProviderSetupError` / `McpSettingsError` / `ExternalAgentSettingsError`（管理表单字段错误） | `invalid_field`；`data.field` 为对应字段名，客户端据此标输入框。外部 agent 使用 `name`、`mode`、`command`、`configOptions` 等，名称冲突同样返回 `name`（3.7） |
 
 客户端侧另有 `connection_closed`：连接断开时所有在途请求以它失败，而不是悬挂。
 
 ## 6. 生命周期
 
-- **输入结束**（stdin EOF）：不再接收请求，输出仍可用。服务端中断运行中的 Turn，等待已接收的请求（包括等待握手或打开会话的请求）返回；EOF 后才开始的 submit 同样中断并返回 `aborted`。所有回复写完并刷出后，关闭全部会话（刷盘、释放会话锁）、释放 Runtime 之外的资源，再结束 `serve`。之后新 Runtime 可直接恢复会话，没有残留锁。
+- **本机输入结束**（stdin EOF）：不再接收请求，输出仍可用。主动关闭全部远程传输，中断所有运行中的 Turn，等待已接收的本机请求（包括等待握手或打开会话的请求）返回；EOF 后才开始的本机 submit 同样中断并返回 `aborted`。所有回复写完并刷出后，关闭全部会话（刷盘、释放会话锁）、释放 Runtime 资源，再结束 `serve`。之后新 Runtime 可直接恢复会话，没有残留锁。
 - **完整断开**（输出 EPIPE、客户端崩溃）：执行同样的中断与清理，但输出不可用时丢弃回复。`LineTransport.onClose` 表示输入结束或完整断开；异步缓冲输出的传输实现可选的 `flush()`，保证清理前已发送的报文刷出。
 - **登录与草稿清理**（两种断开与 `shutdown` 相同）：进行中的登录会话全部 `cancel`（关闭回环端口，其 `login.completed` 照常推送）；本连接未提交的 `prepareProvider` 草稿丢弃（只释放内存，不写盘、不消费登录）；已完成未提交的草稿登录经 `discardDraftLogin` 丢弃暂存凭据。草稿与草稿登录因此不跨连接存活。
-- **`shutdown` 请求**：同样的清理完成后回复，再关闭传输。
+- **远程断开**：只清理本连接的订阅、会话引用与在途请求，不中断 Turn，不等待挂起 submit；Turn 结束后的回复直接丢弃。引用归零且空闲才真正关闭；运行中的 Turn 收束后再关，其间又有连接打开则保留。
+- **`shutdown` 请求**：仅本机可调用，同样的后台清理完成后回复，再关闭传输；远程报 `remote_not_allowed`，不影响后台。
 - 握手前断开：不创建 Runtime，正常结束。
 
 ## 7. 安全与日志
 
-- 第一版不监听端口，不鉴权：能连上传输的只有启动服务端的父进程，权限等同于运行 `nctrn` 的用户（[ADR-0044](../decisions/ADR-0044-rpc-stdio.md) 第 8 节）。
+- 本轮不监听端口或新增网络。stdio 本机连接仍由父进程持有；未来远程接入按 [ADR-0052](../decisions/ADR-0052-remote-web-client.md) 实施邀请、配对与加密，不能把能力白名单当作鉴权。
+- 远程能力白名单在服务端显式登记，以 `RpcMethodName` 编译检查；新增方法默认不开放。方法越界和参数越界均报 `-32004 / remote_not_allowed`，且不调用 Core，不消费待处理请求：
+
+| 方法 | 远程限制 |
+|---|---|
+| `initialize` | 仅连接握手，不创建 Runtime |
+| `runtime.listSessions` | 允许 |
+| `runtime.listModels`、`runtime.defaultModel` | 只读 |
+| `runtime.createSession` | 仅 `model`、`reasoningEffort`、`cwd`、`workspaceRoot`、`text`；拒绝其他字段。显式目录须是列表可见的非子代理会话用过的 cwd 或工作区根（真实路径匹配）；不传沿用后台默认 cwd。`text` 与既有创建接口一致不触发 Turn，发送文字另调 submit |
+| `runtime.resumeSession` | 仅 `sessionId`，不接受 `model`、`force` |
+| `session.subscribe`、`session.unsubscribe`、`session.close`、`session.state` | 允许 |
+| `session.submit` | 除路由字段 `sessionId` 外只接受 `text` |
+| `session.interrupt` | 请求与通知均允许 |
+| `session.respondPermission` | `reply.remember === "project"` 拒绝并保持待处理；`"session"` 或省略允许 |
+| `session.respondQuestion` | 允许 |
+
+- `runtime.providersChanged` 广播给所有已握手连接；`login.completed` 只发给发起登录的连接。Runtime 句柄、实际会话、配置对象与变更队列在 Hub 共享；订阅、请求、握手、草稿和登录属于单连接。
 - 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` 事件与 `respondPermission` 回复，不判断"要不要确认"。
-- 诊断记录（`diagnostics` 回调）只含连接状态、方法名与结果（成功与否、错误码），**不含任何参数与通知内容**——参数里可能有密钥明文（`provider.prepareProvider`、`provider.setCredential`）或用户输入，通知里可能有一次性密钥（`login.completed.unstoredKey`）。
+- 诊断记录（`diagnostics` 回调）只含连接状态（含 `origin`）、方法名与结果（成功与否、错误码），**不含任何参数与通知内容**——参数里可能有密钥明文（`provider.prepareProvider`、`provider.setCredential`）或用户输入，通知里可能有一次性密钥（`login.completed.unstoredKey`）。
 - **敏感参数**：服务端维护一张敏感方法表（`SENSITIVE_METHODS`）——`runtime.updateSettings` 的 `reviewerKey`、`provider.prepareProvider` 中 `credential.kind === "apiKey"` 的 `key`、`provider.setCredential` 的 `key`、`provider.updateSetupProvider` 的 `patch.headers` 各值、`provider.probeSetupProviderModels` 的 `headers` 各值、`login.submitManual` 的 `text`。这些方法失败时，错误响应 `message` 与 `data` 里出现的秘密值一律替换为 `[redacted]`；其他方法沿用 Core 的固定文案错误（Core 错误本身不含秘密）。通知内容不进诊断，密钥只经其语义通道传递（如 `login.completed.unstoredKey` 恰好一次）。
 
 ## 8. 与公开 API 保持一致

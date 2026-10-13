@@ -335,6 +335,22 @@ export async function until(
   }
 }
 
+/** 一个后台、多条离线内存连接；默认先完成本机握手。 */
+export async function connectMany(options: HarnessOptions = {}) {
+  const h = await connect(options);
+  const connections: { client: RpcClient; transport: LineTransport; served: Promise<void> }[] = [];
+  const add = async (origin: "local" | "remote" = "remote", initialize = true) => {
+    const [serverEnd, transport] = createMemoryTransportPair();
+    const served = h.server.serve(serverEnd, { origin });
+    const client = createRpcClient(transport, { clientName: origin, interactive: true });
+    const connection = { client, transport, served };
+    connections.push(connection);
+    if (initialize) await client.initialize();
+    return connection;
+  };
+  return { ...h, add, connections };
+}
+
 export interface RawHarness {
   send(message: unknown): void;
   sendLine(line: string): void;

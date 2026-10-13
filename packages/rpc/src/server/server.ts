@@ -3,7 +3,7 @@
  * 把会话事件推成 `event` 通知。与传输无关：只接收按行收发的 LineTransport。
  *
  * 后台级共享状态在 `Hub`（hub.ts），`Connection` 只保留单条连接自己的状态。
- * 一个服务端同一时刻只接一个客户端，可同时打开多个会话。权限判定仍只在
+ * 一个服务端共享 Runtime，服务一条本机连接与多条远程连接。权限判定仍只在
  * Runtime 的权限层——这里只转发 `permission.requested` 事件与回复（AGENTS.md 硬性约束）。
  */
 import { randomUUID } from "node:crypto";
@@ -130,7 +130,7 @@ export interface RpcServerOptions {
 }
 
 export type RpcDiagnostic =
-  | { kind: "connection"; state: "open" | "closed" }
+  | { kind: "connection"; state: "open" | "closed"; origin: "local" | "remote" }
   | { kind: "request"; id: RpcId; method: string }
   | { kind: "notification"; method: string }
   | { kind: "response"; id: RpcId | null; ok: boolean; errorCode?: string };
@@ -139,11 +139,29 @@ export interface RpcServer {
   /** 本服务端实现的请求方法（不含通知）；覆盖测试用它与公开 API 对照 */
   readonly methods: readonly RpcMethodName[];
   /**
-   * 在一条传输上服务一个客户端。输入结束时中断 Turn、等待在途请求并刷出回复，
-   * 再关闭全部会话（刷盘、释放锁）和释放 Runtime 资源。shutdown 先清理再回复。
+   * 一条传输对应一条连接，缺省本机；本机断开收尾整个后台，远程只释放自身引用。
+   * 本机 shutdown 先清理再回复，远程不得 shutdown。
    */
-  serve(transport: LineTransport): Promise<void>;
+  serve(transport: LineTransport, options?: { origin?: "local" | "remote" }): Promise<void>;
 }
+
+/** ADR-0052 第 3 节：显式能力白名单，新增方法默认不开放给远程连接。 */
+export const REMOTE_METHODS = [
+  "initialize",
+  "runtime.listSessions",
+  "runtime.listModels",
+  "runtime.defaultModel",
+  "runtime.createSession",
+  "runtime.resumeSession",
+  "session.subscribe",
+  "session.unsubscribe",
+  "session.close",
+  "session.state",
+  "session.submit",
+  "session.interrupt",
+  "session.respondPermission",
+  "session.respondQuestion",
+] as const satisfies readonly RpcMethodName[];
 
 const DEFAULT_REPLAY_CHUNK = 256;
 
@@ -178,16 +196,19 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
   let serving = false;
   return {
     methods: RPC_METHOD_NAMES,
-    async serve(transport) {
-      if (serving) throw new Error("RPC 服务端同一时刻只接一个客户端");
-      serving = true;
-      const connection = new Connection(options, hub, transport);
+    async serve(transport, connectionOptions) {
+      const origin = connectionOptions?.origin ?? "local";
+      if (hub.stopping) throw new RpcProtocolError("shutting_down", "服务端正在关闭");
+      if (origin === "local" && serving)
+        throw new Error("RPC 服务端同一时刻只接一个客户端（本机连接）");
+      if (origin === "local") serving = true;
+      const connection = new Connection(options, hub, transport, origin);
       hub.attach(connection);
       try {
         await connection.run();
       } finally {
         hub.detach(connection);
-        serving = false;
+        if (origin === "local") serving = false;
       }
     },
   };
@@ -204,6 +225,7 @@ class Connection implements HubPeer {
   private cleanupPromise: Promise<void> | undefined;
   private readonly sessions = new Map<string, OpenSession>();
   private readonly opening = new Set<Promise<unknown>>();
+  private readonly openingIds = new Set<string>();
   private readonly abort = new AbortController();
   private readonly handlers: HandlerTable;
   /** draftId → 创建草稿时的配置对象（与该登录的创建配置一致；见 buildHandlers 的 prepareProvider） */
@@ -220,25 +242,32 @@ class Connection implements HubPeer {
     private readonly options: RpcServerOptions,
     private readonly hub: Hub,
     private readonly transport: LineTransport,
+    readonly origin: "local" | "remote",
   ) {
     this.handlers = this.buildHandlers();
   }
 
   run(): Promise<void> {
     return new Promise<void>((resolve) => {
-      this.diagnose({ kind: "connection", state: "open" });
+      this.diagnose({ kind: "connection", state: "open", origin: this.origin });
       this.transport.onLine((line) => {
         this.onLine(line);
       });
       this.transport.onClose(() => {
         this.inputEnded = true;
-        this.hub.interruptAll();
+        if (this.origin === "local") {
+          if (this.cleanupPromise === undefined) this.hub.stopping = true;
+          void this.hub.closeRemotes();
+          this.hub.interruptAll();
+        } else {
+          this.closed = true;
+        }
         void (async () => {
-          await Promise.allSettled([...this.requests]);
+          if (this.origin === "local") await Promise.allSettled([...this.requests]);
           await this.transport.flush?.();
           await this.cleanup();
           this.closed = true;
-          this.diagnose({ kind: "connection", state: "closed" });
+          this.diagnose({ kind: "connection", state: "closed", origin: this.origin });
           resolve();
         })();
       });
@@ -246,6 +275,12 @@ class Connection implements HubPeer {
   }
 
   // ── 报文收发 ─────────────────────────────────────────────
+
+  disconnect(): Promise<void> {
+    this.closed = true;
+    this.transport.close();
+    return this.cleanup();
+  }
 
   private diagnose(record: RpcDiagnostic): void {
     try {
@@ -325,6 +360,7 @@ class Connection implements HubPeer {
   private async onRequest(id: RpcId, method: string, params: unknown): Promise<void> {
     this.diagnose({ kind: "request", id, method });
     try {
+      if (this.origin === "remote") await this.checkRemote(method, params);
       let result: unknown;
       if (method === "session.interrupt") {
         // 允许以请求形式发中断（便于需要确认送达的客户端）
@@ -348,6 +384,9 @@ class Connection implements HubPeer {
   }
 
   private async dispatch(method: string, params: unknown): Promise<unknown> {
+    if (this.origin === "remote" && (this.inputEnded || this.closed || this.hub.stopping)) {
+      throw new RpcProtocolError("shutting_down", "连接正在关闭");
+    }
     if (!Object.hasOwn(this.handlers, method)) {
       throw new MethodNotFoundError(method);
     }
@@ -363,8 +402,44 @@ class Connection implements HubPeer {
     const handler = this.handlers[name] as (p: Params) => unknown;
     const result = handler(asParams(params));
     // EOF 可能发生在等待 initialize 时；刚开始的 Turn/压缩同样必须中断。
-    if (this.inputEnded) this.hub.interruptAll();
+    if (this.inputEnded && this.origin === "local") this.hub.interruptAll();
     return await result;
+  }
+
+  private async checkRemote(method: string, params: unknown): Promise<void> {
+    const deny = (message: string): never => {
+      throw new RpcProtocolError("remote_not_allowed", message);
+    };
+    if (!(REMOTE_METHODS as readonly string[]).includes(method)) {
+      deny(`远程连接不允许调用 ${method}`);
+    }
+    const p = asParams(params);
+    if (method !== "initialize" && this.initPromise !== undefined)
+      await this.initPromise.catch(() => undefined);
+    const allowed =
+      method === "runtime.createSession"
+        ? ["model", "reasoningEffort", "cwd", "workspaceRoot", "text"]
+        : method === "session.submit"
+          ? ["sessionId", "text"]
+          : method === "runtime.resumeSession"
+            ? ["sessionId"]
+            : undefined;
+    if (allowed !== undefined) {
+      for (const key of Object.keys(p)) {
+        if (!allowed.includes(key)) deny(`远程连接的 ${method} 不允许参数 ${key}`);
+      }
+    }
+    if (method === "session.respondPermission" && reqObject(p, "reply").remember === "project") {
+      deny("远程连接不能保存项目级授权；请求仍待处理，请在本机回复");
+    }
+    if (method === "runtime.createSession") {
+      for (const key of ["cwd", "workspaceRoot"]) {
+        const directory = optString(p, key);
+        if (directory !== undefined && !(await this.hub.allowWorkspace(directory))) {
+          deny(`远程新建会话的 ${key} 必须是已有非子代理会话用过的工作目录或工作区根`);
+        }
+      }
+    }
   }
 
   // ── 生命周期 ─────────────────────────────────────────────
@@ -373,6 +448,11 @@ class Connection implements HubPeer {
   private cleanup(): Promise<void> {
     this.cleanupPromise ??= (async () => {
       this.shuttingDown = true;
+      if (this.origin === "local") {
+        this.hub.stopping = true;
+        await this.hub.closeRemotes();
+        this.hub.interruptAll();
+      }
       this.abort.abort();
       // 握手与会话打开可能还在途中：等它们落定，新打开的会话在 register 里被直接关闭
       await this.initPromise?.catch(() => undefined);
@@ -396,9 +476,12 @@ class Connection implements HubPeer {
         entry.generation++;
         entry.unsubscribe?.();
       }
+      const sessionIds = [...this.sessions.keys()];
       this.sessions.clear();
+      if (this.origin === "remote") this.requests.clear();
       // 整个后台收尾：中断并关闭全部会话、释放 Runtime 资源
-      await this.hub.shutdown();
+      if (this.origin === "local") await this.hub.shutdown();
+      else await Promise.all(sessionIds.map((id) => this.hub.release(id)));
     })();
     return this.cleanupPromise;
   }
@@ -556,12 +639,12 @@ class Connection implements HubPeer {
   }
 
   /** 登记一个新打开的会话；服务端已在关闭时直接关掉它 */
-  private async register(session: RuntimeSession): Promise<SessionOpened> {
+  private async register(session: RuntimeSession, acquired = false): Promise<SessionOpened> {
+    if (!acquired) this.hub.addSession(session);
     if (this.shuttingDown) {
-      await session.close().catch(() => undefined);
+      await this.hub.release(session.id).catch(() => undefined);
       throw new RpcProtocolError("shutting_down", "服务端正在关闭");
     }
-    this.hub.addSession(session);
     this.sessions.set(session.id, { session, unsubscribe: undefined, generation: 0 });
     const state = session.state();
     return {
@@ -644,10 +727,19 @@ class Connection implements HubPeer {
         }
         const clientName = reqString(p, "clientName");
         const interactive = optBool(reqObject(p, "capabilities"), "interactive") ?? false;
-        const init = this.options
-          .createRuntime({ clientName, interactive })
+        if (this.origin === "remote" && !this.hub.available) {
+          throw new RpcProtocolError(
+            "runtime_unavailable",
+            "本机连接尚未完成握手，Runtime 不可用；可稍后重试",
+          );
+        }
+        const init = (
+          this.origin === "local"
+            ? this.options.createRuntime({ clientName, interactive })
+            : Promise.resolve(undefined)
+        )
           .then((handle) => {
-            this.hub.setHandle(handle);
+            if (handle !== undefined) this.hub.setHandle(handle);
             this.initialized = true;
           })
           .catch((error: unknown) => {
@@ -710,7 +802,7 @@ class Connection implements HubPeer {
         this.track(
           (async () => {
             const sessionId = reqString(p, "sessionId");
-            if (this.sessions.has(sessionId)) {
+            if (this.sessions.has(sessionId) || this.openingIds.has(sessionId)) {
               throw new RpcProtocolError(
                 "session_already_open",
                 `会话已在本连接中打开：${sessionId}`,
@@ -719,11 +811,16 @@ class Connection implements HubPeer {
             const force = optBool(p, "force");
             const model =
               p.model === undefined || p.model === null ? undefined : reqModel(p, "model");
-            const session = await this.runtime().resumeSession(sessionId, {
-              ...(force !== undefined ? { force } : {}),
-              ...(model !== undefined ? { model } : {}),
-            });
-            return await this.register(session);
+            this.openingIds.add(sessionId);
+            try {
+              const session = await this.hub.resume(sessionId, {
+                ...(force !== undefined ? { force } : {}),
+                ...(model !== undefined ? { model } : {}),
+              });
+              return await this.register(session, true);
+            } finally {
+              this.openingIds.delete(sessionId);
+            }
           })(),
         ),
       "runtime.forkSession": async (p) => {
@@ -1034,7 +1131,7 @@ class Connection implements HubPeer {
         const providerId = reqString(p, "providerId");
         return await this.mutateAndReload(async (config) => {
           // "正在使用拒绝删除"是客户端规则（同 CLI/TUI）；服务端持有会话，
-          // 所以在服务端对本连接全部已打开会话判断——Core 不判断这条
+          // 所以在服务端对后台全部已打开会话判断——Core 不判断这条
           for (const session of this.hub.openSessions()) {
             if (session.state().config.model.provider === providerId) {
               throw new RpcProtocolError(
@@ -1208,6 +1305,10 @@ class Connection implements HubPeer {
         const lastSeq = await this.subscribe(entry, optInt(p, "afterSeq") ?? 0);
         return { lastSeq };
       },
+      "session.interrupt": (p) => {
+        this.interrupt(p);
+        return null;
+      },
       "session.unsubscribe": (p) => {
         const entry = this.session(p);
         entry.generation++;
@@ -1248,7 +1349,7 @@ class Connection implements HubPeer {
         if (p.attachments !== undefined && p.attachments !== null) {
           input.attachments = parseAttachments(p.attachments);
         }
-        return await session.submit(input);
+        return await this.hub.operate(session, () => session.submit(input));
       },
       "session.respondPermission": async (p) => {
         await this.session(p).session.respondPermission(
@@ -1281,7 +1382,8 @@ class Connection implements HubPeer {
         return null;
       },
       "session.compact": async (p) => {
-        await this.session(p).session.compact();
+        const { session } = this.session(p);
+        await this.hub.operate(session, () => session.compact());
         return null;
       },
       "session.rewindTargets": (p) => this.session(p).session.rewindTargets(),
@@ -1295,7 +1397,10 @@ class Connection implements HubPeer {
       },
       "session.rewind": (p) => {
         const mode = reqString(p, "mode");
-        return this.session(p).session.rewind(reqInt(p, "targetSeq"), mode as RewindMode);
+        const { session } = this.session(p);
+        return this.hub.operate(session, () =>
+          session.rewind(reqInt(p, "targetSeq"), mode as RewindMode),
+        );
       },
       "session.state": (p) => {
         const state = this.session(p).session.state();
@@ -1341,10 +1446,9 @@ class Connection implements HubPeer {
       "session.close": async (p) => {
         const entry = this.session(p);
         this.sessions.delete(entry.session.id);
-        this.hub.removeSession(entry.session.id);
         entry.generation++;
         entry.unsubscribe?.();
-        await entry.session.close();
+        await this.hub.release(entry.session.id);
         return null;
       },
     };

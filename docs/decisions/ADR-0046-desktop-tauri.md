@@ -5,6 +5,8 @@
 
 ## 背景
 
+> 此处的 RPC 单客户端描述是 0.5.0 的历史背景；当前多连接行为由 [ADR-0052](ADR-0052-remote-web-client.md) 修订，见 [RPC 协议](../protocols/rpc.md)。
+
 维护者 2026-10-03 选定 Tauri 做桌面端，理由是不想像 Electron 应用那样臃肿（[ADR-0044](ADR-0044-rpc-stdio.md) 背景）。ADR-0044 已经把进程外接口做完并随 0.5.0 发布：`nctrn rpc --stdio` 一个进程一个 Runtime、一个客户端，可以同时打开多个会话；服务商配置是"描述 + 准备 + 提交"的数据接口，登录拆成请求与通知；`@nocturne/rpc/client` 只依赖 `@nocturne/core/protocol`，传输由使用方注入（`LineTransport`）。
 
 桌面端还缺这些决定：Node 从哪里来、外壳与后台怎么连、一个窗口对应几个后台、前端用什么技术栈、第一版做哪些界面、怎么打包和测试。本 ADR 把它们定下来。

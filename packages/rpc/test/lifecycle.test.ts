@@ -162,6 +162,6 @@ describe("诊断与密钥", () => {
     expect(h.diagnostics).toContainEqual(
       expect.objectContaining({ kind: "request", method: "session.submit" }),
     );
-    expect(h.diagnostics).toContainEqual({ kind: "connection", state: "closed" });
+    expect(h.diagnostics).toContainEqual({ kind: "connection", state: "closed", origin: "local" });
   });
 });

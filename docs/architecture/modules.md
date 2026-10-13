@@ -242,7 +242,7 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 
 ## 5. 未来模块（现在不创建目录）
 
-目前没有待创建的模块。WebSocket 等网络传输、`packages/protocol` 拆包、多客户端共享后台，都留到真实需求出现时再写 ADR。
+RPC 多客户端共享后台与远程能力边界已落地，见 [rpc.md](../protocols/rpc.md)；网络与加密模块按 [ADR-0052](../decisions/ADR-0052-remote-web-client.md) 后续轮次实施，本轮不创建。`packages/protocol` 拆包仍暂缓。
 
 `subagent` 已在 Phase 6 落地：它不是独立模块——接口在 `tools`、实现在 `agent`、装配在 `core/index`，见 [subagent.md](subagent.md) 第 3 节。
 

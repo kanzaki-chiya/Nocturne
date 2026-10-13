@@ -465,6 +465,7 @@ export interface RpcMethods {
   "session.readInputHistory": { params: SessionParams; result: string[] };
   "session.recordInputHistory": { params: SessionParams & { text: string }; result: null };
   "session.close": { params: SessionParams; result: null };
+  "session.interrupt": { params: SessionParams; result: null };
 }
 
 export type RpcMethodName = keyof RpcMethods;
@@ -580,6 +581,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.readInputHistory": true,
   "session.recordInputHistory": true,
   "session.close": true,
+  "session.interrupt": true,
 };
 
 /** 全部请求方法名（`RpcMethods` 增删方法而这里没跟着改，编译失败） */
