@@ -162,7 +162,7 @@ type RawImageAttachment = {
 | code | 含义 |
 |---|---|
 | `unknown_tool` | 模型调用了不存在的工具 |
-| `invalid_input` | 输入不符合 schema（含 `PreToolUse` Hook 修改后的输入未通过重新校验），或未通过工具可选的 `validateInput` 语义预检 |
+| `invalid_input` | 输入不符合 schema（含 `PreToolUse` Hook 修改后的输入未通过重新校验；枚举不匹配时报错附带可选值），或未通过工具可选的 `validateInput` 语义预检 |
 | `permission_denied` | 规则或用户拒绝 |
 | `hook_denied` | `PreToolUse` Hook 拒绝（Phase 5，见 [hooks.md](../architecture/hooks.md)） |
 | `cancelled` | 被中断 |

@@ -67,6 +67,7 @@ export function createTaskTool(
   externalAgents?: ExternalTaskRunner,
   defaultTimeoutMs: number = TASK_DEFAULT_TIMEOUT_MS,
   profiles: readonly (SubagentProfileConfig & { name: string })[] = [],
+  defaultModel?: string,
 ): ToolDefinition<TaskInput> {
   const agents = externalAgents?.agents ?? [];
   const hasExternalAgents = agents.length > 0;
@@ -120,15 +121,15 @@ export function createTaskTool(
     description:
       (launcher !== undefined
         ? DESCRIPTION
-        : "委派自包含任务给已启用的外部 agent；必须通过 agent 选择执行者。") +
+        : "委派自包含任务给已启用的外部 agent；通过 profile 选择执行者（agent 为兼容别名）。") +
       (hasExternalAgents
         ? `外部 agent：${agents.map((agent) => `${agent.name}${agent.description ? `（${agent.description}）` : ""}`).join("、")}。` +
-          "给出 agent 时不得给 preset、tools、outputSchema。" +
+          "选择外部档位时不得给 preset、tools、outputSchema。" +
           "执行期权限请求经过非交互判定，剩余询问会被拒绝；仅覆盖外部 agent 主动请求的操作，不是沙箱。" +
           "外部 agent 的文件修改不受检查点或按文件回退追踪；费用与额度计在该 agent 自己的账号上。" +
           "外部 agent 看不到 task 工具，不能再委派（不能嵌套）。"
         : "") +
-      (hasProfiles ? `\n${subagentSelectionTable(profiles, agents)}` : ""),
+      (hasProfiles ? `\n${subagentSelectionTable(profiles, agents, defaultModel)}` : ""),
     inputSchema: {
       type: "object",
       required: ["task"],

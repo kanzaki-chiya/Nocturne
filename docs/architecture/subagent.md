@@ -335,7 +335,7 @@ Runtime 提供 `describeExternalAgents({workspaceRoot?})`、`saveExternalAgent({
 
 声明为 `{description, model?, effort?, tools?, timeoutMs?, enabled}`，由 config 层解析，launcher 使用解析结果；Agent Loop 不认识档位。default 模型即 modelRoles.task，不迁移数据，不能删或停用。其他档位模型留空跟随当前会话；effort 留空继承父会话，再以 clampReasoningEffort 就近降档。实际模型和强度记 session.created，并由 task.output.model / reasoningEffort 供客户端呈现（后者可选，旧输出兼容）。运行中以既有 tool.progress 传递模型和强度。
 
-explore 档位不能请求 general，显式 tools 必须是只读池子集；general 可用 preset/tools 收窄。档位 timeoutMs 是默认值，请求可覆盖且封顶 3600 秒。不存在、停用或模型不可用报 invalid_input 并列出可选档位，不换模型；模型不可用发 runtime.warning(subagent_profile_unavailable) 并排除出选择表。嵌套子会话使用同一内置档位表，但不暴露外部 agent。
+explore 档位不能请求 general，显式 tools 必须是只读池子集；general 可用 preset/tools 收窄。档位 timeoutMs 是默认值，请求可覆盖且封顶 3600 秒。不存在、停用或模型不可用报 invalid_input 并列出可选档位，不换模型；模型不可用时排除出选择表，并与 `model_role_unavailable` 同一方式提示：写入 `session.warnings`、发 runtime.warning(subagent_profile_unavailable)，同一档位同一模型只提示一次。档位表、default 模型和可用性在设置保存或模型开关后的下一个空闲边界（submit / setModel 开头）随服务商注册表一起重建，当前会话无需重开。枚举外的 profile 在 schema 校验阶段即被拒绝，报错附带可选值。嵌套子会话使用同一内置档位表，但不暴露外部 agent。
 
 选择表由共享 subagentSelectionTable 生成，何时用后追加模型、强度和只读标记；外部标记账号费用。reason 可选，展示前截到 200 字，不参与判断。profile/reason 留在工具参数中，不新增事件字段；权限主体与第 7 节不变，档位只改变工具上限。配置分层、补丁和名称约束见 [config.md](config.md#子代理档位设置)。
 

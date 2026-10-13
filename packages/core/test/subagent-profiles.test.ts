@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { loadConfig, createPlatform } from "../src/index.js";
@@ -44,7 +44,7 @@ describe("子代理档位配置", () => {
       deep: profile,
     });
   });
-  it("补丁逐条保存、删除；不可信项目不生效；外部名称冲突拒绝", async () => {
+  it("补丁逐条保存、删除，双向外部名称冲突拒绝", async () => {
     const home = mkdtempSync(path.join(tmpdir(), "profiles-"));
     roots.push(home);
     const platform = { ...createPlatform(), env: () => undefined, homeDir: () => home };
@@ -66,8 +66,42 @@ describe("子代理档位配置", () => {
     expect(() => config.updateSettings({ "subagents.profiles.offline": profile })).toThrow(
       "外部 agent",
     );
+    await expect(
+      config.saveExternalAgent({
+        mode: "create",
+        name: "quick",
+        config: { command: "offline", args: [], enabled: false },
+      }),
+    ).rejects.toThrow("档位");
     await config.updateSettings({ "subagents.profiles.quick": null });
     expect(config.resolvedSettings(home).subagentProfiles).toBeUndefined();
+  });
+  it("可信项目覆盖用户同名条目，不可信时整段忽略", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "profile-trust-"));
+    roots.push(root);
+    const home = path.join(root, "home");
+    const workspace = path.join(root, "ws");
+    mkdirSync(home);
+    mkdirSync(path.join(workspace, ".nocturne"), { recursive: true });
+    writeFileSync(
+      path.join(home, "config.json"),
+      JSON.stringify({ modelsDev: false, subagents: { profiles: { quick: profile } } }),
+    );
+    writeFileSync(
+      path.join(workspace, ".nocturne", "config.json"),
+      JSON.stringify({
+        subagents: { profiles: { quick: { description: "项目档位", enabled: false } } },
+      }),
+    );
+    const config = await loadConfig(createPlatform(), { nocturneHome: home, env: () => undefined });
+    expect((await config.forWorkspace(workspace)).resolved.subagentProfiles?.quick).toEqual(
+      profile,
+    );
+    await config.setWorkspaceTrusted(workspace, true);
+    expect((await config.forWorkspace(workspace)).resolved.subagentProfiles?.quick).toEqual({
+      description: "项目档位",
+      enabled: false,
+    });
   });
   it("模型留空跟随当前，default 使用角色，模型不可用不回退", () => {
     const profiles = {

@@ -54,10 +54,11 @@ export interface SubagentProfilesDescription {
 export function subagentSelectionTable(
   profiles: readonly (SubagentProfileConfig & { name: string })[],
   agents: readonly { name: string; description?: string | undefined }[] = [],
+  defaultModel?: string,
 ): string {
   return [
     "按任务难度和性质挑最便宜的够用档位；拿不准用 default。",
-    "  - default：通用。使用 default 档位模型，思考强度跟随父会话。",
+    `  - default：通用。（${defaultModel ?? "跟随当前模型"}，跟随会话）`,
     ...profiles.map(
       (profile) =>
         `  - ${profile.name}：${profile.description}（${profile.model ?? "跟随当前模型"}，${profile.effort ?? "跟随会话"}${profile.tools === "explore" ? "，只读" : ""}）`,

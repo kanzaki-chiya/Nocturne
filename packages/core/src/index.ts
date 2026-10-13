@@ -1721,6 +1721,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       } catch {
         /* 保留当前可用实例，模型错误仍由下一轮发送路径报告。 */
       }
+      // 档位表依赖设置与模型可用性：同一空闲边界重建
+      installTask();
     };
     /**
      * 档位就近降档提示（ADR-0018 第 4 节）：会话记录的档位在目标模型
@@ -1811,6 +1813,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const externalConnector = meta.parent === undefined ? options.externalAgents : undefined;
     let enabledExternalAgents: ExternalAgentConfig[] = [];
     let pendingExternalAgents = false;
+    const unavailableProfiles = new Set<string>();
 
     // 子代理（subagent.md 第 3 节）：launcher 捕获本会话装配上下文；
     // task 与内置工具同一注册表——Agent Loop 无工具名分支
@@ -1832,16 +1835,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           agentSnapshot.some((agent) => agent.name.toLowerCase() === name.toLowerCase())
         )
           return [];
+        const key = `${name}/${profile.model}`;
         if (
           profile.model !== undefined &&
           resolveModelRole(sessionRegistry, profile.model, "task") === undefined
         ) {
-          session.emitEphemeral("runtime.warning", {
-            code: "subagent_profile_unavailable",
-            message: `子代理档位 ${name} 的模型 ${profile.model} 不可用，已排除`,
-          });
+          // 与 model_role_unavailable 同一模式：进 session.warnings 并去重，空闲边界重新评估
+          if (!unavailableProfiles.has(key)) {
+            unavailableProfiles.add(key);
+            const message = `子代理档位 ${name} 的模型 ${profile.model} 不可用，已排除`;
+            warnings.push(message);
+            session.emitEphemeral("runtime.warning", {
+              code: "subagent_profile_unavailable",
+              message,
+            });
+          }
           return [];
         }
+        unavailableProfiles.delete(key);
         return [{ ...profile, name }];
       });
       const hasExternalAgents = enabledExternalAgents.length > 0;
@@ -2005,7 +2016,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             }
           : undefined;
       tools.register(
-        createTaskTool(launcher, externalRunner, subagentLimits.timeoutMs, profileSnapshot),
+        createTaskTool(
+          launcher,
+          externalRunner,
+          subagentLimits.timeoutMs,
+          profileSnapshot,
+          config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.task,
+        ),
       );
     };
     const applyExternalAgents = (): void => {

@@ -47,7 +47,16 @@ export function createSchemaCompiler(options: Options): SchemaCompiler {
       return instance(dialect).compile(rest);
     },
     errorsText(errors) {
-      return instance("draft-07").errorsText(errors, { separator: "; " });
+      // 枚举不匹配时附上可选值，模型据此自行改正（如 task.profile 列出可选档位）
+      const detailed = errors?.map((error) =>
+        error.keyword === "enum" && Array.isArray(error.params.allowedValues)
+          ? {
+              ...error,
+              message: `${error.message ?? ""}: ${error.params.allowedValues.map(String).join(", ")}`,
+            }
+          : error,
+      );
+      return instance("draft-07").errorsText(detailed, { separator: "; " });
     },
   };
 }

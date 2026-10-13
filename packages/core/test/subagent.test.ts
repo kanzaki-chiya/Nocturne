@@ -220,6 +220,210 @@ describe("子代理档位 launcher", () => {
   });
 });
 
+describe("子代理档位：模型、强度、工具集与超时", () => {
+  const quick: SubagentProfileConfig = { description: "查找", enabled: true, tools: "explore" };
+  const finishScript: FakeScript = [
+    { type: "tool_call", toolCallId: "f", name: "finish", input: { result: "ok" } },
+    { type: "finish", reason: "tool_calls" },
+  ];
+  /** fake-1 支持 low/medium/high；cheap 只支持 low */
+  const tieredModels = (): ModelInfo[] => {
+    const base = new FakeProvider({}).models()[0];
+    if (base === undefined) throw new Error("fake model missing");
+    return [
+      {
+        ...base,
+        capabilities: { ...base.capabilities, reasoningEffort: ["low", "medium", "high"] },
+      },
+      {
+        ...base,
+        ref: { provider: "fake", model: "cheap" },
+        capabilities: { ...base.capabilities, reasoningEffort: ["low"] },
+      },
+    ];
+  };
+  const taskTool = (req: ModelRequest | undefined) =>
+    req?.tools.find((tool) => tool.name === "task");
+
+  async function runProfile(
+    input: Record<string, unknown>,
+    extra: RuntimeExtra,
+    options: { effort?: "low" | "medium" | "high"; child?: FakeScript } = {},
+  ) {
+    const childRequests: ModelRequest[] = [];
+    const parentRequests: ModelRequest[] = [];
+    const provider = new FakeProvider({
+      models: tieredModels(),
+      handler: (req) => {
+        if (isChildRequest(req)) {
+          childRequests.push(req);
+          return options.child ?? finishScript;
+        }
+        parentRequests.push(req);
+        return req.messages.at(-1)?.role === "tool"
+          ? doneScript()
+          : [
+              {
+                type: "tool_call",
+                toolCallId: `task-${parentRequests.length}`,
+                name: "task",
+                input,
+              },
+              { type: "finish", reason: "tool_calls" },
+            ];
+      },
+    });
+    const { runtime } = await makeRuntime(undefined, { ...extra, provider, autoApproveAsk: true });
+    const session = await runtime.createSession({
+      model: "fake/fake-1",
+      reasoningEffort: options.effort ?? "high",
+    });
+    const events = collect(session);
+    await session.submit({ text: "go" });
+    return { runtime, session, events, childRequests, parentRequests };
+  }
+  const lastTask = (events: RuntimeEvent[]) =>
+    events.findLast(
+      (e): e is Extract<RuntimeEvent, { type: "tool.completed" }> =>
+        e.type === "tool.completed" && e.payload.name === "task",
+    );
+
+  it("档位模型生效，档位强度在子模型上就近降档，实际值进入请求与输出", async () => {
+    const r = await runProfile(
+      { task: "t", profile: "quick" },
+      { profiles: { quick: { ...quick, model: "fake/cheap", effort: "high" } } },
+    );
+    expect(r.childRequests[0]).toMatchObject({ model: "cheap", reasoningEffort: "low" });
+    expect(lastTask(r.events)?.payload.output).toMatchObject({
+      model: "fake/cheap",
+      reasoningEffort: "low",
+    });
+    await r.session.close();
+  });
+
+  it("模型留空跟随会话，强度未指定时继承父会话", async () => {
+    const r = await runProfile(
+      { task: "t", profile: "quick" },
+      { profiles: { quick } },
+      { effort: "medium" },
+    );
+    expect(r.childRequests[0]).toMatchObject({ model: "fake-1", reasoningEffort: "medium" });
+    await r.session.close();
+  });
+
+  it("档位指定的强度覆盖父会话", async () => {
+    const r = await runProfile(
+      { task: "t", profile: "quick" },
+      { profiles: { quick: { ...quick, effort: "low" } } },
+      { effort: "high" },
+    );
+    expect(r.childRequests[0]).toMatchObject({ model: "fake-1", reasoningEffort: "low" });
+    await r.session.close();
+  });
+
+  it("explore 档位下 tools 白名单含写工具时报错，不启动子会话", async () => {
+    const r = await runProfile(
+      { task: "t", profile: "quick", tools: ["read", "edit"] },
+      { profiles: { quick } },
+    );
+    const completed = lastTask(r.events);
+    expect(completed?.payload.error?.code).toBe("invalid_input");
+    expect(completed?.payload.error?.message).toContain("explore 工具集的子集");
+    expect(r.childRequests).toHaveLength(0);
+    await r.session.close();
+  });
+
+  it.each([{ preset: "explore" }, { tools: ["read"] }])(
+    "general 档位可以收窄工具集：%j",
+    async (selection) => {
+      const r = await runProfile(
+        { task: "t", profile: "deep", ...selection },
+        { profiles: { deep: { description: "实现", enabled: true, tools: "general" } } },
+      );
+      const names = r.childRequests[0]?.tools.map((tool) => tool.name) ?? [];
+      expect(names).toContain("read");
+      expect(names).not.toContain("shell");
+      expect(names).not.toContain("edit");
+      await r.session.close();
+    },
+  );
+
+  it.each([
+    { profileTimeout: 120, request: undefined, expected: 120 },
+    { profileTimeout: 60_000, request: 150, expected: 150 },
+  ])(
+    "超时：档位值作默认，请求可覆盖（档位 $profileTimeout，请求 $request）",
+    async ({ profileTimeout, request, expected }) => {
+      const r = await runProfile(
+        { task: "t", profile: "quick", ...(request !== undefined ? { timeoutMs: request } : {}) },
+        { profiles: { quick: { ...quick, timeoutMs: profileTimeout } } },
+        {
+          child: [
+            { type: "text_delta", text: "慢" },
+            { type: "wait", ms: 600 },
+          ],
+        },
+      );
+      const error = lastTask(r.events)?.payload.error;
+      expect(error?.code).toBe("timeout");
+      expect(error?.message).toContain(`超过 ${expected}ms 未完成`);
+      await r.session.close();
+    },
+  );
+
+  it.each([
+    { name: "不存在", requested: "missing", profiles: { quick } },
+    { name: "已停用", requested: "off", profiles: { quick, off: { ...quick, enabled: false } } },
+  ])("档位 $name 时报错并列出可选档位，不回退", async ({ requested, profiles }) => {
+    const r = await runProfile({ task: "t", profile: requested }, { profiles });
+    const error = lastTask(r.events)?.payload.error;
+    expect(error?.code).toBe("invalid_input");
+    expect(error?.message).toContain("default, quick");
+    expect(r.childRequests).toHaveLength(0);
+    await r.session.close();
+  });
+
+  it("default 档位就是 modelRoles.task；设置改动后选择表与子模型同步", async () => {
+    const r = await runProfile({ task: "t", profile: "default" }, { profiles: { quick } });
+    expect(taskTool(r.parentRequests[0])?.description).toContain(
+      "default：通用。（跟随当前模型，跟随会话）",
+    );
+    expect(r.childRequests.at(-1)?.model).toBe("fake-1");
+    await r.runtime.updateSettings({ "modelRoles.task": "fake/cheap" });
+    await r.session.submit({ text: "again" });
+    expect(taskTool(r.parentRequests.at(-2))?.description).toContain(
+      "default：通用。（fake/cheap，跟随会话）",
+    );
+    expect(r.childRequests.at(-1)?.model).toBe("cheap");
+    await r.session.close();
+  });
+
+  it("档位模型停用后退出可选表并告警，重新启用后回到表中", async () => {
+    const r = await runProfile(
+      { task: "t", profile: "quick" },
+      { profiles: { quick: { ...quick, model: "fake/cheap" } } },
+    );
+    const profileEnum = (req: ModelRequest | undefined) =>
+      (taskTool(req)?.inputSchema.properties as Record<string, { enum?: string[] }> | undefined)
+        ?.profile?.enum;
+    expect(profileEnum(r.parentRequests[0])).toEqual(["default", "quick"]);
+    await r.runtime.setModelsEnabled({ provider: "fake", models: ["cheap"], enabled: false });
+    await r.session.submit({ text: "again" });
+    expect(profileEnum(r.parentRequests.at(-2))).toBeUndefined();
+    expect(lastTask(r.events)?.payload.error?.code).toBe("invalid_input");
+    expect(
+      r.events.some(
+        (e) => e.type === "runtime.warning" && e.payload.code === "subagent_profile_unavailable",
+      ),
+    ).toBe(true);
+    expect(r.session.warnings.some((w) => w.includes("子代理档位 quick"))).toBe(true);
+    await r.runtime.setModelsEnabled({ provider: "fake", models: ["cheap"], enabled: true });
+    await r.session.submit({ text: "third" });
+    expect(profileEnum(r.parentRequests.at(-2))).toEqual(["default", "quick"]);
+    await r.session.close();
+  });
+});
+
 describe("subagent：基本往返", () => {
   it("explore 预设默认放行：父调用 → 子 finish → 结果回到父模型，子日志带父关联", async () => {
     const provider = new FakeProvider({

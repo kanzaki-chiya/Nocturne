@@ -168,7 +168,7 @@ describe("外部 agent：Runtime 管理与 Turn 快照", () => {
     expect(
       f.session.describeContext().request.tools.find((tool) => tool.name === "task")?.inputSchema
         .required,
-    ).toEqual(["task", "agent"]);
+    ).toEqual(["task"]);
     await f.runtime.deleteExternalAgent({ name: "offline" });
     expect(f.session.describeContext().request.tools.some((tool) => tool.name === "task")).toBe(
       false,
