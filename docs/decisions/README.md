@@ -57,7 +57,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0049](ADR-0049-external-agent-subagent.md) | 外部 agent 子代理：经 ACP 调用 omp、Codex 等命令行工具，task 新增 agent 字段，执行期请求进权限层 | 已接受 |
 | [ADR-0050](ADR-0050-distribution.md) | 分发：npm 单文件包、桌面端随附 Node 与自动更新、草稿发布流水线 | 已接受 |
 | [ADR-0051](ADR-0051-desktop-single-backend.md) | 桌面端改为单后台：一个 nctrn 后台服务所有项目，工作区随会话；切换会话立即生效 | 已接受 |
-| [ADR-0052](ADR-0052-remote-web-client.md) | 远程网页客户端：同一后台服务多个客户端、局域网 WebSocket 监听、扫码配对与设备令牌、复用桌面前端的手机网页 | 提议 |
+| [ADR-0052](ADR-0052-remote-web-client.md) | 远程网页客户端：自建中继、邀请制、端到端加密，同一后台服务多个客户端，复用桌面前端的手机网页 | 已接受（第 2 版） |
 | [ADR-0053](ADR-0053-usage-and-cost.md) | 用量统计与费用估算：pricing 增加缓存读写与分档、models.dev 取价、Runtime.usageStats、桌面用量页与 /cost | 已接受 |
 | [ADR-0054](ADR-0054-provider-model-toggle.md) | 服务商与模型启停：停用即不可用、记在 settings.json、注册表盖不可用标记、桌面开关与 TUI 命令 | 已接受 |
 | [ADR-0055](ADR-0055-retry-after-partial-stream.md) | 流式输出中途失败时丢弃部分输出并重发 | 已接受 |
