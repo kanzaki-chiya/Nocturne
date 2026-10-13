@@ -162,6 +162,16 @@
   border-radius: 4px;
   padding: 1px 4px;
 }
+/* 斜杠委派标记：沿用 .ref 的视觉语言，但语义是 agent 而不是文件 */
+.conversation .delegate-ref {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  color: var(--a-accent);
+  background: var(--a-selStrong);
+  border-radius: 4px;
+  padding: 1px 4px;
+  white-space: nowrap;
+}
 .conversation .u-img-frame,
 .conversation .u-img-placeholder {
   display: inline-flex;

@@ -822,7 +822,23 @@ function UserMessage({
   const byPath = new Map((entry.fileRefs ?? []).map((ref) => [ref.path, ref]));
   const segments: ReactNode[] = [];
   let at = 0;
+  if (entry.delegate) {
+    // 斜杠委派：正文开头的 `/agent` 渲染成行内标记；正文不以它开头（旧数据或别的客户端）时补一个
+    const tag = `/${entry.delegate.agent}`;
+    const leading =
+      body.slice(0, tag.length).toLowerCase() === tag.toLowerCase() &&
+      (body.length === tag.length || /\s/.test(body.charAt(tag.length)));
+    const label = `委派给外部 agent ${entry.delegate.agent}`;
+    segments.push(
+      <span key="delegate" className="delegate-ref" title={label} aria-label={label}>
+        {leading ? body.slice(0, tag.length) : tag}
+      </span>,
+    );
+    if (leading) at = tag.length;
+    else if (body !== "") segments.push(" ");
+  }
   refs.forEach((ref, index) => {
+    if (ref.start < at) return;
     if (ref.start > at) segments.push(body.slice(at, ref.start));
     const file = byPath.get(ref.path);
     segments.push(
@@ -967,7 +983,7 @@ function UserMessage({
                   visible={visible}
                 />
               ))}
-              {body !== "" && <div className="u-text">{segments}</div>}
+              {(body !== "" || entry.delegate) && <div className="u-text">{segments}</div>}
               {entry.skill && (
                 <details className="skill-message">
                   <summary>
@@ -975,14 +991,6 @@ function UserMessage({
                     {entry.skill.body.length.toLocaleString()} 字
                   </summary>
                   <pre>{entry.skill.body}</pre>
-                </details>
-              )}
-              {entry.delegate && (
-                <details className="skill-message">
-                  <summary>
-                    委派给外部 agent <b>{entry.delegate.agent}</b>
-                  </summary>
-                  <pre>{entry.delegate.task}</pre>
                 </details>
               )}
             </div>

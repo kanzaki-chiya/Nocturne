@@ -169,27 +169,114 @@ it("失败的任务清单工具沿用普通错误与详情", () => {
   expect(screen.getByRole("button", { name: "详情" })).toBeTruthy();
 });
 
-it("委派标签显示日志快照而不把模型指令重复放进用户气泡", () => {
-  const view = createSessionView();
-  view.entries = [
-    {
-      kind: "user",
-      key: "delegate-user",
-      seq: 1,
-      turnId: "t",
-      content: [
-        { type: "text", text: "/omp 原始任务" },
-        { type: "text", text: "给模型的委派指令" },
-      ],
-      delegate: { agent: "omp", task: "原始任务" },
-    },
-  ];
-  const rendered = mount(view);
-  expect(screen.getByText("/omp 原始任务")).toBeDefined();
-  expect(screen.queryByText("给模型的委派指令")).toBeNull();
-  const summary = rendered.container.querySelector(".skill-message summary");
-  expect(summary?.textContent).toBe("委派给外部 agent omp");
-  expect(rendered.container.querySelector(".skill-message pre")?.textContent).toBe("原始任务");
+describe("斜杠委派行内标记", () => {
+  function delegateView(
+    text: string,
+    extra: Partial<Extract<SessionView["entries"][number], { kind: "user" }>> = {},
+  ) {
+    const view = createSessionView();
+    view.entries = [
+      {
+        kind: "user",
+        key: "delegate-user",
+        seq: 1,
+        turnId: "t",
+        content: [
+          { type: "text", text },
+          { type: "text", text: "给模型的委派指令" },
+        ],
+        delegate: { agent: "claude2", task: "看一下 README 写了什么，用三句话总结" },
+        ...extra,
+      },
+    ];
+    return view;
+  }
+
+  it("正文开头的 /agent 渲染成行内标记，不再有折叠块，其余正文完整", () => {
+    const rendered = mount(delegateView("/claude2 看一下 README 写了什么，用三句话总结"));
+    const bubble = rendered.container.querySelector(".u-bubble");
+    expect(bubble?.querySelector("details")).toBeNull();
+    const tag = rendered.container.querySelector(".delegate-ref");
+    expect(tag?.textContent).toBe("/claude2");
+    expect(tag?.getAttribute("title")).toBe("委派给外部 agent claude2");
+    expect(tag?.getAttribute("aria-label")).toBe("委派给外部 agent claude2");
+    expect(rendered.container.querySelector(".u-text")?.textContent).toBe(
+      "/claude2 看一下 README 写了什么，用三句话总结",
+    );
+    expect(screen.queryByText("给模型的委派指令")).toBeNull();
+  });
+
+  it("正文不以 /agent 开头时在前面补一个标记", () => {
+    const rendered = mount(delegateView("看一下 README"));
+    const text = rendered.container.querySelector(".u-text");
+    expect(text?.firstElementChild?.className).toBe("delegate-ref");
+    expect(text?.firstElementChild?.textContent).toBe("/claude2");
+    expect(text?.textContent).toBe("/claude2 看一下 README");
+    expect(rendered.container.querySelector(".u-bubble details")).toBeNull();
+  });
+
+  it("大小写不同的 /Claude2 也识别为标记并保留用户原样", () => {
+    const rendered = mount(delegateView("/Claude2 总结"));
+    const tags = rendered.container.querySelectorAll(".delegate-ref");
+    expect(tags).toHaveLength(1);
+    expect(tags[0]?.textContent).toBe("/Claude2");
+    expect(rendered.container.querySelector(".u-text")?.textContent).toBe("/Claude2 总结");
+  });
+
+  it("同时带 @文件 引用时两种标记各自渲染", () => {
+    const rendered = mount(
+      delegateView("/claude2 看 @src/a.ts 这里", {
+        content: [
+          { type: "text", text: "/claude2 看 @src/a.ts 这里" },
+          { type: "text", text: "（a.ts 快照内容）" },
+          { type: "text", text: "给模型的委派指令" },
+        ],
+        fileRefs: [
+          {
+            path: "src/a.ts",
+            kind: "file",
+            chars: 10,
+            lines: 36,
+            totalLines: 120,
+            truncated: false,
+          },
+        ],
+      }),
+    );
+    expect(rendered.container.querySelector(".delegate-ref")?.textContent).toBe("/claude2");
+    expect(rendered.container.querySelector(".ref")?.textContent).toBe("@src/a.ts");
+    expect(rendered.container.querySelector(".u-text")?.textContent).toBe(
+      "/claude2 看 @src/a.ts 这里",
+    );
+  });
+
+  it("技能消息仍保留可展开的折叠块且没有委派标记", () => {
+    const view = createSessionView();
+    view.entries = [
+      {
+        kind: "user",
+        key: "skill-user",
+        seq: 1,
+        turnId: "t",
+        content: [
+          { type: "text", text: "/alpha file" },
+          { type: "text", text: '<skill name="alpha">快照正文</skill>' },
+        ],
+        skill: { name: "alpha", body: "快照正文" },
+      },
+    ];
+    const rendered = mount(view);
+    expect(rendered.container.querySelector(".u-bubble details.skill-message")).not.toBeNull();
+    expect(rendered.container.querySelector(".delegate-ref")).toBeNull();
+  });
+
+  it("复制按钮复制包含 /claude2 的原始正文", async () => {
+    const writeText = vi.fn(async (_text: string) => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    mount(delegateView("/claude2 总结 README"));
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("/claude2 总结 README"));
+  });
 });
 
 function sessionFixture(id = "session-1") {
