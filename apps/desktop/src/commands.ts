@@ -41,7 +41,7 @@ export const REDIRECTS: Record<string, RedirectHint> = {
     session: "输入 / 查看可用命令；模型、档位和预设在底部状态栏切换",
   },
   "/provider": "在 设置 › 服务商 管理；状态栏模型菜单的「管理服务商…」也能进入",
-  "/agents": "在 设置 › 外部 agent 查看与管理",
+  "/agents": "在 设置 › 子代理 查看与管理",
   "/skills": "在 设置 › 技能 查看与管理",
   "/settings": "点左栏底部「设置」打开 设置 › 常规",
   "/theme": "在 设置 › 外观 切换主题",
