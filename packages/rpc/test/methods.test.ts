@@ -75,6 +75,48 @@ describe("runtime.* 方法映射", () => {
     h.client.close();
     await h.served;
   });
+  it("审查样例 RPC 往返：列表、未配置拒绝、按已保存配置逐条运行、参数校验", async () => {
+    const allNo = JSON.stringify({
+      requested: false,
+      destroys: false,
+      credentials: false,
+      exfiltrates: false,
+      weakens: false,
+      crosses: false,
+      opaque: false,
+      reason: "离线",
+    });
+    const h = await connectWithConfig({ scripts: [textScript(allNo)] });
+    const list = await h.client.runtime.listReviewerSamples();
+    expect(list.length).toBeGreaterThanOrEqual(18);
+    expect(list[0]).toEqual({
+      id: expect.any(String) as string,
+      title: expect.any(String) as string,
+      expect: expect.stringMatching(/^(allow|ask)$/) as string,
+    });
+    await expect(h.client.runtime.testReviewerSample("pnpm-install")).rejects.toMatchObject({
+      code: "invalid_command",
+      message: "安全审查未配置或已关闭",
+    });
+    await h.client.runtime.updateSettings({
+      "permission.reviewer": { backend: "model", model: { provider: "fake", model: "fake-model" } },
+    });
+    const result = await h.client.runtime.testReviewerSample("pnpm-install", {
+      workspaceRoot: h.ws,
+    });
+    expect(result).toMatchObject({
+      id: "pnpm-install",
+      expected: "allow",
+      actual: "allow",
+      match: true,
+      reason: "离线",
+    });
+    await expect(
+      h.client.call("runtime.testReviewerSample", { sampleId: 1 as never }),
+    ).rejects.toMatchObject({ rpcCode: -32602 });
+    h.client.close();
+    await h.served;
+  });
   it("createSession / listSessions / resumeSession / forkSession", async () => {
     const h = await connect({ scripts: [textScript("hello")] });
     const { opened, session } = await h.client.runtime.createSession({ model: MODEL });

@@ -82,7 +82,7 @@
 
 ### 8. 用户追加规则与样例集
 
-新增设置项 `permission.reviewerRules: { ask?: string; allow?: string }`，两段自然语言原样拼进提示词（标题「用户追加：以下情况交人」和「用户追加：以下情况放行」，单段最多 1000 字）。内置样例集 `permission/reviewer-samples.ts`（约 20 条，覆盖越界样例与应当放行的样例）和公开函数 `runReviewerSamples(reviewer, samples, signal)` 供设置页的「测试」按钮使用。
+新增设置项 `permission.reviewerRules: { ask?: string; allow?: string }`，两段自然语言原样拼进提示词（标题「用户追加：以下情况交人」和「用户追加：以下情况放行」，单段最多 1000 字）。内置样例集 `permission/reviewer-samples.ts`（约 20 条，覆盖越界样例与应当放行的样例）和公开函数 `runReviewerSamples(reviewer, samples, signal)` 供设置页的「测试」按钮使用。Runtime 为此公开 `listReviewerSamples()` 与 `testReviewerSample(id)`（RPC `runtime.listReviewerSamples` / `runtime.testReviewerSample`，用已保存的审查器配置一条一条跑，取消即客户端不再发后续请求）；桌面端设置页有「额外交人」「额外放行」两个输入框和「测试」按钮，TUI 本次不做按钮，两段追加规则可直接写进 settings.json。
 
 ## 不做的事
 

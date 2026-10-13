@@ -988,6 +988,15 @@ class Connection {
           workspaceRoot !== undefined ? { workspaceRoot } : undefined,
         );
       },
+      "runtime.listReviewerSamples": () => this.runtime().listReviewerSamples(),
+      "runtime.testReviewerSample": async (p) => {
+        const workspaceRoot = await this.workspaceOf(p);
+        return this.runtime().testReviewerSample(
+          reqString(p, "sampleId"),
+          this.abort.signal,
+          workspaceRoot !== undefined ? { workspaceRoot } : undefined,
+        );
+      },
       "runtime.listReviewerModels": async (p) => {
         const workspaceRoot = await this.workspaceOf(p);
         return this.runtime().listReviewerModels(

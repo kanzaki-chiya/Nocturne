@@ -386,6 +386,204 @@ describe("SettingsPage", () => {
     server.close();
   });
 
+  describe("安全审查：追加规则与样例检查（ADR-0057）", () => {
+    const MODEL_REVIEWER = {
+      backend: "model",
+      model: { provider: "openrouter", model: "gpt-5" },
+    } as const;
+    const itemsWith = (reviewer: unknown, rules?: unknown): SettingItem[] => [
+      ...ITEMS.filter((item) => item.key !== "permission.reviewer"),
+      {
+        key: "permission.reviewer",
+        effective: undefined,
+        source: "settings",
+        saved: undefined,
+        overridden: false,
+        reviewer: { effective: reviewer, saved: reviewer },
+      } as SettingItem,
+      {
+        key: "permission.reviewerRules",
+        effective: undefined,
+        source: "settings",
+        saved: undefined,
+        overridden: false,
+        reviewerRules: { effective: rules, saved: rules },
+      } as SettingItem,
+    ];
+    const SAMPLES = [
+      { id: "s1", title: "没有被要求就推送", expect: "ask" },
+      { id: "s2", title: "用户要求后推送", expect: "allow" },
+      { id: "s3", title: "读取 .env", expect: "ask" },
+    ];
+    const RESULTS: Record<string, unknown> = {
+      s1: {
+        id: "s1",
+        title: "没有被要求就推送",
+        expected: "ask",
+        actual: "ask",
+        match: true,
+        durationMs: 800,
+        reason: "会推送",
+      },
+      s2: {
+        id: "s2",
+        title: "用户要求后推送",
+        expected: "allow",
+        actual: "ask",
+        match: false,
+        durationMs: 1200,
+        reason: "审查输出格式错误",
+      },
+      s3: {
+        id: "s3",
+        title: "读取 .env",
+        expected: "ask",
+        actual: "ask",
+        match: true,
+        durationMs: 500,
+        reason: "会读取凭据",
+      },
+    };
+    async function openDialog(extra: Record<string, unknown>, items: SettingItem[]) {
+      const server = fakeServer(handlers({ "runtime.describeSettings": items, ...extra }));
+      await server.initialize();
+      render(<SettingsPage {...props(server.client)} />);
+      await screen.findByText("安全审查");
+      fireEvent.click(row("安全审查").querySelector("button") ?? document.body);
+      await screen.findByRole("dialog", { name: "安全审查" });
+      return server;
+    }
+
+    it("设置行副标题说明 smart 下除只读命令外先交给它判断", async () => {
+      const server = fakeServer(handlers());
+      await server.initialize();
+      render(<SettingsPage {...props(server.client)} />);
+      await screen.findByText("安全审查");
+      expect(row("安全审查").textContent).toContain("smart 下除只读命令外的操作先交给它判断");
+      expect(row("安全审查").textContent).not.toContain("规则拦下的操作");
+      server.close();
+    });
+
+    it("对话框带两个多行输入框和示例占位，保存走 permission.reviewerRules", async () => {
+      const server = await openDialog(
+        { "runtime.updateSettings": ITEMS },
+        itemsWith(undefined, { ask: "任何 ssh 命令" }),
+      );
+      const ask = screen.getByLabelText("额外交人");
+      const allow = screen.getByLabelText("额外放行");
+      expect(ask.tagName).toBe("TEXTAREA");
+      expect(allow.tagName).toBe("TEXTAREA");
+      expect(ask.getAttribute("placeholder")).toMatch(/^例如：/);
+      expect(allow.getAttribute("placeholder")).toMatch(/^例如：/);
+      expect(ask).toHaveProperty("value", "任何 ssh 命令");
+      fireEvent.change(ask, { target: { value: "  任何 docker 命令  " } });
+      fireEvent.change(allow, { target: { value: "运行 pnpm test" } });
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      await waitFor(() => {
+        const call = server.calls.find((c) => c.method === "runtime.updateSettings");
+        expect(call?.params.patch).toEqual({
+          "permission.reviewer": { backend: "off" },
+          "permission.reviewerRules": { ask: "任何 docker 命令", allow: "运行 pnpm test" },
+        });
+      });
+      server.close();
+    });
+
+    it("两段都清空保存为 null（删除 permission.reviewerRules）", async () => {
+      const server = await openDialog(
+        { "runtime.updateSettings": ITEMS },
+        itemsWith(undefined, { ask: "任何 ssh 命令" }),
+      );
+      fireEvent.change(screen.getByLabelText("额外交人"), { target: { value: "" } });
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      await waitFor(() => {
+        const call = server.calls.find((c) => c.method === "runtime.updateSettings");
+        expect(
+          (call?.params.patch as Record<string, unknown>)["permission.reviewerRules"],
+        ).toBeNull();
+      });
+      server.close();
+    });
+
+    it("测试按钮：逐行显示说明/期望/实际/用时，不一致的行标红，末尾给出命中率", async () => {
+      const server = await openDialog(
+        {
+          "runtime.listReviewerSamples": SAMPLES,
+          "runtime.testReviewerSample": (p: Record<string, unknown>) => RESULTS[String(p.sampleId)],
+        },
+        itemsWith(MODEL_REVIEWER),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "测试" }));
+      const status = await screen.findByRole("status");
+      expect(status.textContent).toBe("命中率 2/3（67%）");
+      const rows = [...document.querySelectorAll(".stable tbody tr")];
+      expect(rows.map((r) => [...r.querySelectorAll("td")].map((td) => td.textContent))).toEqual([
+        ["没有被要求就推送", "交人", "交人", "0.8s"],
+        ["用户要求后推送", "放行", "交人 ✗", "1.2s"],
+        ["读取 .env", "交人", "交人", "0.5s"],
+      ]);
+      expect(rows.map((r) => r.classList.contains("bad"))).toEqual([false, true, false]);
+      expect(server.calls.filter((c) => c.method === "runtime.testReviewerSample")).toHaveLength(3);
+      server.close();
+    });
+
+    it("审查器为 off（或未配置）时测试按钮不可用", async () => {
+      const off = await openDialog({}, itemsWith({ backend: "off" }));
+      expect(screen.getByRole("button", { name: "测试" })).toHaveProperty("disabled", true);
+      off.close();
+      cleanup();
+      const none = await openDialog({}, itemsWith(undefined));
+      expect(screen.getByRole("button", { name: "测试" })).toHaveProperty("disabled", true);
+      none.close();
+    });
+
+    it("运行中可取消：不再请求后续样例，丢弃在途结果，显示已取消和已有命中率", async () => {
+      let release: (value: unknown) => void = noop;
+      const server = await openDialog(
+        {
+          "runtime.listReviewerSamples": SAMPLES,
+          "runtime.testReviewerSample": (p: Record<string, unknown>) =>
+            p.sampleId === "s1"
+              ? RESULTS.s1
+              : new Promise((resolve) => {
+                  release = resolve;
+                }),
+        },
+        itemsWith(MODEL_REVIEWER),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "测试" }));
+      await waitFor(() => {
+        expect(document.querySelectorAll(".stable tbody tr")).toHaveLength(1);
+      });
+      fireEvent.click(await screen.findByRole("button", { name: "取消测试" }));
+      release(RESULTS.s2);
+      const status = await screen.findByRole("status");
+      expect(status.textContent).toBe("已取消，已跑 1/3 条 · 命中率 1/1（100%）");
+      expect(screen.getByRole("button", { name: "测试" })).toHaveProperty("disabled", false);
+      expect(document.querySelectorAll(".stable tbody tr")).toHaveLength(1);
+      expect(
+        server.calls
+          .filter((c) => c.method === "runtime.testReviewerSample")
+          .map((c) => c.params.sampleId),
+      ).toEqual(["s1", "s2"]);
+      server.close();
+    });
+
+    it("测试出错时显示原因，按钮恢复", async () => {
+      const server = await openDialog(
+        {
+          "runtime.listReviewerSamples": SAMPLES,
+          "runtime.testReviewerSample": new RpcFail(-32000, "安全审查未配置或已关闭"),
+        },
+        itemsWith(MODEL_REVIEWER),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "测试" }));
+      await screen.findByText("测试失败：安全审查未配置或已关闭");
+      expect(screen.getByRole("button", { name: "测试" })).toHaveProperty("disabled", false);
+      server.close();
+    });
+  });
+
   it("主题只写本机 prefs：点选立即生效并提示", async () => {
     const server = fakeServer(handlers());
     await server.initialize();

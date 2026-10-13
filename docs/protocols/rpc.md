@@ -44,6 +44,7 @@
 | `describeModelRoles` / `setModelRole` | `ModelRoleInfo[]`；`setModelRole { role, ref }` → `SettingItem[]`；均可带 `workspaceRoot` |
 | `getPreference` / `setPreference` | `{ key }` → `string \| null`；`{ key, value? }` → `null` |
 | `listReviewerProviders` / `defaultReviewer` / `listReviewerModels` | 智能权限审查模型相关（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)）；均可带 `workspaceRoot` |
+| `listReviewerSamples` / `testReviewerSample` | `{}` → `{ id, title, expect }[]`（内置审查样例的说明与期望，ADR-0057）；`{ sampleId, workspaceRoot? }` → `{ id, title, expected, actual, match, durationMs, reason }`，用已保存的审查器配置（含追加规则）跑一条样例，客户端逐条调用并汇总命中率。审查器关闭 / 未配置报 `invalid_command`，模型不可用报 `invalid_model`，未知样例报 `invalid_command`；审查失败或超过 30 秒记为 `actual: "ask"` 并带原因，不报错。取消 = 客户端不再发后续请求 |
 | `reloadConfig` | `{}` → `null`；重新读取配置文件并重建 Provider 注册表，推 `runtime.providersChanged`（在响应之前到达）；**变更方法**，走同一配置队列 |
 
 带 `workspaceRoot` 的运行时级方法（ADR-0051）：`workspaceRoot` 指定按哪个工作区合并项目配置层，缺省为后台启动目录（旧客户端不传不受影响）。上述设置、模型、审查器方法及带该参数的 `provider.*` 方法，RPC 服务端先用 Core 的 `platform.resolveReal` 解析真实路径，再对该路径执行 `forWorkspace` 预加载并转交 Runtime 或配置接口；解析失败则保留客户端传入的原字符串，不因该解析失败拒绝请求。客户端不必预先解析短路径、大小写差异或符号链接。同步读方法依赖服务端已加载的工作区层，写方法也使用同一真实路径校验。该参数解决单后台服务多个项目的场景（桌面端按会话工作区传参），不是跨进程寻址。

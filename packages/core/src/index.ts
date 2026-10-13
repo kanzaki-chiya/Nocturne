@@ -84,12 +84,16 @@ import { createCheckpointRecorder } from "./session/checkpoints.js";
 import { rewindTargets, restoreCheckpointFiles } from "./session/rewind.js";
 import { createTurnChanges } from "./session/turn-changes.js";
 import {
+  type ReviewerSampleInfo,
+  type ReviewerSampleResult,
   createRulePolicy,
   createModelSecurityReviewer,
   createJevSecurityReviewer,
   createReviewFacts,
   projectNotesFrom,
   readTrustedRemotes,
+  REVIEWER_SAMPLES,
+  runReviewerSamples,
   type GitRunner,
   type ReviewInputSources,
   type SecurityReviewer,
@@ -564,6 +568,18 @@ export interface Runtime {
     signal?: AbortSignal,
     input?: { workspaceRoot?: string | undefined },
   ): Promise<{ models: string[]; warning?: string }>;
+  /** 内置审查样例的说明与期望（ADR-0057 §8），供设置页逐条检查 */
+  listReviewerSamples(): ReviewerSampleInfo[];
+  /**
+   * 用当前**已保存**的审查器配置（含追加规则）跑一条内置样例；离线样例，
+   * 不经过会话。审查器关闭或模型不可用时以 invalid_command / invalid_model 拒绝；
+   * 审查失败或超时（30 秒）记为「交人」并带原因，不抛错。
+   */
+  testReviewerSample(
+    sampleId: string,
+    signal?: AbortSignal,
+    input?: { workspaceRoot?: string | undefined },
+  ): Promise<ReviewerSampleResult>;
   setDefaultModel(
     model: string,
     reasoningEffort: ReasoningEffort | null,
@@ -3290,6 +3306,66 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         JEV_ENDPOINTS[reviewer.endpoint].modelFilter,
       );
     },
+    listReviewerSamples: () =>
+      REVIEWER_SAMPLES.map(({ id, title, expect }) => ({ id, title, expect })),
+    async testReviewerSample(sampleId, signal, input) {
+      if (config === undefined) throw new Error("未注入 RuntimeConfig，无法读取审查器设置");
+      const sample = REVIEWER_SAMPLES.find((item) => item.id === sampleId);
+      if (sample === undefined)
+        throw new RuntimeCommandError("invalid_command", `未知的审查样例 ${sampleId}`);
+      const root = input?.workspaceRoot ?? workspaceRoot;
+      await config.forWorkspace(root);
+      const settings = config.resolvedSettings(root);
+      const selected = settings.permissionReviewer;
+      if (selected === undefined || selected.backend === "off")
+        throw new RuntimeCommandError("invalid_command", "安全审查未配置或已关闭");
+      let reviewer: SecurityReviewer;
+      if (selected.backend === "jev") {
+        reviewer = createJevSecurityReviewer({
+          ...resolveJevConnection(
+            selected,
+            settings.providers,
+            reviewerCredentials(settings.providers),
+            (name) => platform.env(name),
+          ),
+          sessionId: "reviewer-samples",
+        });
+      } else {
+        const resolvedReviewer = buildRegistry(settings.providers).resolve(selected.model);
+        if (resolvedReviewer.model.unavailable !== undefined)
+          throw invalidModelError(
+            resolvedReviewer.model.unavailable.reason,
+            resolvedReviewer.model,
+          );
+        reviewer = createModelSecurityReviewer(resolvedReviewer, "reviewer-samples");
+      }
+      const timeout = AbortSignal.timeout(30_000);
+      const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+      const started = Date.now();
+      try {
+        const [result] = await runReviewerSamples(reviewer, [sample], combined, {
+          cwd: root,
+          environment: { workspaceRoot: root, nocturneHome },
+          ...(settings.permissionReviewerRules !== undefined
+            ? { reviewerRules: settings.permissionReviewerRules }
+            : {}),
+        });
+        if (result === undefined) throw new Error("审查没有返回结果");
+        return result;
+      } catch (error) {
+        if (signal?.aborted === true) throw error;
+        // 超时：与生产路径一致，按交人记录
+        return {
+          id: sample.id,
+          title: sample.title,
+          expected: sample.expect,
+          actual: "ask",
+          match: sample.expect === "ask",
+          durationMs: Date.now() - started,
+          reason: timeout.aborted ? "审查超时（30 秒）" : "审查失败",
+        };
+      }
+    },
     updateSettings(patch, settingsOptions) {
       const operation = settingsPending.then(async () => {
         if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存设置");
@@ -3688,6 +3764,7 @@ export {
   runReviewerSamples,
   summarizeSampleResults,
 } from "./permission/index.js";
+export type { ReviewerSampleInfo } from "./permission/index.js";
 
 export {
   startProviderLogin,

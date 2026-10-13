@@ -22,6 +22,8 @@ import type {
   JevEndpoint,
   JevReviewerConfig,
   ModelInfo,
+  ReviewerRules,
+  ReviewerSampleResult,
   SecurityReviewerConfig,
   SettingItem,
   SettingsPatch,
@@ -269,6 +271,7 @@ export function SettingsPage({
   const effortItem = item("reasoningEffort");
   const presetItem = item("permissions.preset");
   const reviewerItem = item("permission.reviewer");
+  const reviewerRulesItem = item("permission.reviewerRules");
   const thresholdItem = item("compaction.threshold");
   const shellItem = item("shell");
   const reviewerCfg = reviewerItem?.reviewer?.effective;
@@ -434,7 +437,7 @@ export function SettingsPage({
             </div>
             <div className={rowClass("permission.reviewer")}>
               <span className="n">
-                安全审查<small>规则拦下的操作先交给它判断</small>
+                安全审查<small>smart 下除只读命令外的操作先交给它判断</small>
               </span>
               <span className="v">
                 <span className="t">{reviewerText(reviewerCfg)}</span>
@@ -967,6 +970,7 @@ export function SettingsPage({
           models={models}
           providers={reviewerProviders}
           current={reviewerItem?.reviewer?.saved ?? reviewerCfg}
+          currentRules={reviewerRulesItem?.reviewerRules?.saved}
           onClose={() => {
             setDialog(null);
           }}
@@ -1349,11 +1353,14 @@ const JEV_ENDPOINTS: { v: JevEndpoint; label: string }[] = [
   { v: "custom", label: "自定义地址" },
 ];
 
+const RULES_LIMIT = 1000;
+
 function ReviewerDialog({
   client,
   models,
   providers,
   current,
+  currentRules,
   onClose,
   onSave,
 }: {
@@ -1361,6 +1368,8 @@ function ReviewerDialog({
   models: ModelInfo[];
   providers: string[];
   current: SecurityReviewerConfig | undefined;
+  /** settings.json 里已保存的追加规则 */
+  currentRules: ReviewerRules | undefined;
   onClose: () => void;
   onSave: (
     patch: SettingsPatch,
@@ -1398,6 +1407,8 @@ function ReviewerDialog({
   const [disclosure, setDisclosure] = useState<"unknown" | "needed" | "shown" | "accepted">(
     "unknown",
   );
+  const [rulesAsk, setRulesAsk] = useState(currentRules?.ask ?? "");
+  const [rulesAllow, setRulesAllow] = useState(currentRules?.allow ?? "");
   const { busy, error, setError, run } = useDialogSave();
 
   useEffect(() => {
@@ -1432,7 +1443,26 @@ function ReviewerDialog({
     };
   }, [client, backend, endpoint, baseURL]);
 
+  /** 两段追加规则随审查器配置一起保存；全空表示清除 */
+  const rulesPatch = (): SettingsPatch => {
+    const ask = rulesAsk.trim();
+    const allow = rulesAllow.trim();
+    return {
+      "permission.reviewerRules":
+        ask === "" && allow === ""
+          ? null
+          : { ...(ask !== "" ? { ask } : {}), ...(allow !== "" ? { allow } : {}) },
+    };
+  };
+
   const build = ():
+    { patch: SettingsPatch; options: { reviewerKey: string } | undefined } | string => {
+    const built = buildReviewer();
+    if (typeof built === "string") return built;
+    return { patch: { ...built.patch, ...rulesPatch() }, options: built.options };
+  };
+
+  const buildReviewer = ():
     { patch: SettingsPatch; options: { reviewerKey: string } | undefined } | string => {
     if (backend === "off")
       return { patch: { "permission.reviewer": { backend: "off" } }, options: undefined };
@@ -1520,7 +1550,7 @@ function ReviewerDialog({
   return (
     <Dialog
       title="安全审查"
-      sub="规则拦下的操作先交给审查器判断；保存到 settings.json"
+      sub="smart 下除只读命令外的操作先交给审查器判断；保存到 settings.json"
       width={600}
       error={error}
       busy={busy}
@@ -1666,8 +1696,173 @@ function ReviewerDialog({
               </div>
             </>
           )}
+          <div className="field">
+            <div className="lab">
+              <label htmlFor="rv-rules-ask">额外交人</label>
+              <small>自然语言，最多 {RULES_LIMIT} 字</small>
+            </div>
+            <textarea
+              id="rv-rules-ask"
+              className="input"
+              rows={3}
+              maxLength={RULES_LIMIT}
+              spellCheck={false}
+              value={rulesAsk}
+              placeholder="例如：任何 docker 或 kubectl 命令都交给我确认"
+              onChange={(e) => {
+                setRulesAsk(e.target.value);
+              }}
+            />
+          </div>
+          <div className="field">
+            <div className="lab">
+              <label htmlFor="rv-rules-allow">额外放行</label>
+              <small>自然语言，最多 {RULES_LIMIT} 字</small>
+            </div>
+            <textarea
+              id="rv-rules-allow"
+              className="input"
+              rows={3}
+              maxLength={RULES_LIMIT}
+              spellCheck={false}
+              value={rulesAllow}
+              placeholder="例如：在本仓库里运行 pnpm install 和 pnpm test 可以直接放行"
+              onChange={(e) => {
+                setRulesAllow(e.target.value);
+              }}
+            />
+            <div className="hint">
+              两段原样交给审查器，不改变只读白名单，也不能放行直接交给你确认的命令
+            </div>
+          </div>
+          <ReviewerSampleCheck
+            client={client}
+            enabled={current !== undefined && current.backend !== "off"}
+          />
         </>
       )}
     </Dialog>
+  );
+}
+
+const EXPECT_TEXT = { allow: "放行", ask: "交人" } as const;
+
+type SampleRun =
+  | { state: "idle" }
+  | { state: "running"; total: number | undefined }
+  | { state: "done" | "cancelled"; total: number }
+  | { state: "error"; message: string };
+
+/**
+ * 审查器样例检查（ADR-0057 §8）：用当前**已保存**的审查器配置逐条跑内置样例，
+ * 逐行显示说明、期望、实际与用时，不一致的行标红，最后给出命中率。
+ * 一条一次 RPC，取消即停止后续条目并丢弃在途结果。
+ */
+function ReviewerSampleCheck({ client, enabled }: { client: RpcClient; enabled: boolean }) {
+  const [run, setRun] = useState<SampleRun>({ state: "idle" });
+  const [rows, setRows] = useState<ReviewerSampleResult[]>([]);
+  const token = useRef<{ cancelled: boolean } | null>(null);
+
+  useEffect(
+    () => () => {
+      if (token.current !== null) token.current.cancelled = true;
+    },
+    [],
+  );
+
+  const start = () => {
+    const mine = { cancelled: false };
+    // 取消发生在 await 之间：经函数读取，避免属性收窄把检查误判为恒假
+    const isCancelled = () => mine.cancelled;
+    token.current = mine;
+    setRows([]);
+    setRun({ state: "running", total: undefined });
+    void (async () => {
+      try {
+        const list = await client.runtime.listReviewerSamples();
+        if (isCancelled()) return;
+        setRun({ state: "running", total: list.length });
+        for (const sample of list) {
+          const result = await client.runtime.testReviewerSample(sample.id);
+          if (isCancelled()) return;
+          setRows((prev) => [...prev, result]);
+        }
+        setRun({ state: "done", total: list.length });
+      } catch (e) {
+        if (!isCancelled()) setRun({ state: "error", message: errText(e) });
+      }
+    })();
+  };
+  const cancel = () => {
+    if (token.current !== null) token.current.cancelled = true;
+    setRun((prev) =>
+      prev.state === "running" ? { state: "cancelled", total: prev.total ?? rows.length } : prev,
+    );
+  };
+
+  const matched = rows.filter((row) => row.match).length;
+  const rate = rows.length === 0 ? 0 : Math.round((matched / rows.length) * 100);
+  const running = run.state === "running";
+  return (
+    <div className="field samples">
+      <div className="lab">
+        <label>样例检查</label>
+        <small>用已保存的审查器配置跑内置样例</small>
+      </div>
+      <div className="srun">
+        {running ? (
+          <button className="btn" onClick={cancel}>
+            取消测试
+          </button>
+        ) : (
+          <button
+            className="btn"
+            disabled={!enabled}
+            title={enabled ? undefined : "审查器为关闭时不可用"}
+            onClick={start}
+          >
+            测试
+          </button>
+        )}
+        {!enabled && <span className="hint">审查器已关闭：先选择后端并保存</span>}
+        {running && (
+          <span className="hint">
+            已跑 {rows.length}/{run.total ?? "?"} 条
+          </span>
+        )}
+      </div>
+      {rows.length > 0 && (
+        <table className="stable">
+          <thead>
+            <tr>
+              <th>样例</th>
+              <th>期望</th>
+              <th>实际</th>
+              <th>用时</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id} className={row.match ? undefined : "bad"} title={row.reason}>
+                <td>{row.title}</td>
+                <td>{EXPECT_TEXT[row.expected]}</td>
+                <td>
+                  {EXPECT_TEXT[row.actual]}
+                  {row.match ? "" : " ✗"}
+                </td>
+                <td>{(row.durationMs / 1000).toFixed(1)}s</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {(run.state === "done" || run.state === "cancelled") && (
+        <div className="ssum" role="status">
+          {run.state === "cancelled" ? `已取消，已跑 ${rows.length}/${run.total} 条 · ` : ""}
+          命中率 {matched}/{rows.length}（{rate}%）
+        </div>
+      )}
+      {run.state === "error" && <div className="errt">测试失败：{run.message}</div>}
+    </div>
   );
 }

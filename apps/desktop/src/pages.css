@@ -1390,3 +1390,41 @@
     padding-inline: 16px;
   }
 }
+
+/* 审查器对话框：追加规则与样例检查（ADR-0057） */
+.page3 textarea.input {
+  resize: vertical;
+  font-family: var(--sans);
+}
+.page3 .samples .srun {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.page3 .stable {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.page3 .stable th,
+.page3 .stable td {
+  padding: 4px 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--a-border);
+}
+.page3 .stable th {
+  color: var(--a-muted);
+  font-weight: 400;
+}
+.page3 .stable td:nth-child(n + 2) {
+  white-space: nowrap;
+}
+.page3 .stable tr.bad td {
+  color: var(--a-error);
+}
+.page3 .ssum {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--a-secondary);
+}

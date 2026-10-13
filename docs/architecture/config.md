@@ -123,6 +123,8 @@ updateSettings(patch: SettingsPatch, options?: { reviewerKey: string }): Promise
 listReviewerProviders(): Promise<ProviderOverview[]>
 defaultReviewer(endpoint: JevEndpoint, baseURL?: string): Promise<JevReviewerConfig>
 listReviewerModels(reviewer: JevReviewerConfig, signal?: AbortSignal): Promise<{ models: string[]; warning?: string }>
+listReviewerSamples(): ReviewerSampleInfo[]
+testReviewerSample(sampleId: string, signal?: AbortSignal): Promise<ReviewerSampleResult>
 setDefaultModel(model: string, reasoningEffort: ReasoningEffort | null): Promise<SettingItem[]>
 setProviderEnabled({ provider, enabled }): Promise<void>
 setModelsEnabled({ provider, models, enabled }): Promise<void>
@@ -180,6 +182,8 @@ describeToggleImpact({ provider, models? }): ToggleImpact
 `/settings` 的交互见 [tui.md](../apps/tui.md) 第 11 节。首次开启 Jev 的披露确认在设置页成功保存时记为界面偏好 `jevDisclosureAccepted: "yes"`，取消不写入。审查器独立于主模型，已有 smart 会话的下一次审查使用最新设置；该项是前段“仅影响新会话”的例外。未配置时，原本要送审的调用直接询问用户并提示一次；模型不可用或请求失败按 unsure，见 [permissions.md](permissions.md) 5.3。
 
 **审查追加规则 `permission.reviewerRules`**（ADR-0057）：`{ ask?: string; allow?: string }`，与 `permission.reviewer` 并列放在 settings.json 白名单的 `permission` 段（config.json 层同样接受，逐层逐字段合并，后层覆盖前层），两段都是自然语言，单段最多 1000 字。`ask`（「额外交人」）和 `allow`（「额外放行」）原样拼进审查提示词，标题为「用户追加：以下情况交人」「用户追加：以下情况放行」；它们只影响审查器答题，**不改变**白名单、直接交人和纯函数判定（因此追加规则无法放行「直接交人」的命令）。`SettingsPatch["permission.reviewerRules"]` 接受 `{ ask?, allow? }` 或 `null`：整段替换，空串视为删除该段，两段都空或 `null` 删除整个字段；超长或类型不符的补丁整体拒绝，不落盘。读取时 `permission.reviewer` 与 `permission.reviewerRules` 各自校验，追加规则写坏只丢它自己并给出警告，不连累已配置的审查器。`SettingItem` 的键 `permission.reviewerRules` 给出一行摘要（如「额外交人 9 字 · 额外放行 15 字」），并通过可选 `reviewerRules: { saved, effective }` 提供结构化值。
+
+**样例检查**（ADR-0057 §8）：`listReviewerSamples()` 返回内置样例（约 20 条，`permission/reviewer-samples.ts`，含越界样例与应当放行的样例）的 `{ id, title, expect }`，`testReviewerSample(id)` 用**当前已保存**的审查器配置和追加规则跑一条，返回 `{ id, title, expected, actual, match, durationMs, reason }`（`expected` / `actual` 为 `allow` 或 `ask`，`ask` 即交人；`block` 与 `unsure` 都记为 `ask`）。审查器关闭或未配置报 `invalid_command`，审查模型不可用报 `invalid_model`；审查失败或超过 30 秒按「交人」记录并带原因，不抛错，调用方中止则抛出中止原因。核心函数 `runReviewerSamples(reviewer, samples, signal)` 逐条返回同样的结果，命中率由 `summarizeSampleResults` 计算。
 
 **绕过审查的显式规则**：用户 / 项目 / CLI 的显式规则命中时不进入 smart 的分流，因此 `shell allow *` 这类规则等于关掉 shell 审查（白名单、直接交人、送审都不再生效）；Runtime 没有为此提供检测接口，设置页不据此硬猜，只在这里说明。
 

@@ -31,6 +31,8 @@ import type {
   ImageMimeType,
   JevEndpoint,
   JevReviewerConfig,
+  ReviewerSampleInfo,
+  ReviewerSampleResult,
   ModelInfo,
   ModelRef,
   ModelRole,
@@ -297,6 +299,11 @@ export interface RpcMethods {
     params: { reviewer: JevReviewerConfig; workspaceRoot?: string | undefined };
     result: { models: string[]; warning?: string };
   };
+  "runtime.listReviewerSamples": { params: Record<string, never>; result: ReviewerSampleInfo[] };
+  "runtime.testReviewerSample": {
+    params: { sampleId: string; workspaceRoot?: string | undefined };
+    result: ReviewerSampleResult;
+  };
 
   // 服务商配置（provider-setup.md 第 6 节、docs/protocols/rpc.md 3.3）：
   // 只读描述 + 两阶段提交；写操作由服务端串行执行"变更 → 重载 →
@@ -520,6 +527,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "mcp.probeMcpServer": true,
   "runtime.defaultReviewer": true,
   "runtime.listReviewerModels": true,
+  "runtime.listReviewerSamples": true,
+  "runtime.testReviewerSample": true,
   "provider.listProviderPresets": true,
   "provider.describeProviders": true,
   "provider.describeProviderSetup": true,

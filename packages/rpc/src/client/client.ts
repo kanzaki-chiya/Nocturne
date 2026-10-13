@@ -28,6 +28,8 @@ import type {
   FileRefResolution,
   JevEndpoint,
   JevReviewerConfig,
+  ReviewerSampleInfo,
+  ReviewerSampleResult,
   ModelInfo,
   ModelRef,
   ModelRole,
@@ -293,6 +295,13 @@ export interface RpcRuntime {
     reviewer: JevReviewerConfig,
     input?: { workspaceRoot?: string | undefined },
   ): Promise<{ models: string[]; warning?: string }>;
+  /** 内置审查样例的说明与期望（ADR-0057 §8） */
+  listReviewerSamples(): Promise<ReviewerSampleInfo[]>;
+  /** 用已保存的审查器配置跑一条样例；客户端逐条调用并自行汇总命中率 */
+  testReviewerSample(
+    sampleId: string,
+    input?: { workspaceRoot?: string | undefined },
+  ): Promise<ReviewerSampleResult>;
 }
 
 /**
@@ -723,6 +732,12 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     listReviewerModels: (reviewer, input) =>
       call("runtime.listReviewerModels", {
         reviewer,
+        ...(input?.workspaceRoot !== undefined ? { workspaceRoot: input.workspaceRoot } : {}),
+      }),
+    listReviewerSamples: () => call("runtime.listReviewerSamples", {}),
+    testReviewerSample: (sampleId, input) =>
+      call("runtime.testReviewerSample", {
+        sampleId,
         ...(input?.workspaceRoot !== undefined ? { workspaceRoot: input.workspaceRoot } : {}),
       }),
   };

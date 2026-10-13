@@ -24,6 +24,8 @@ export const RUNTIME_METHODS: Record<
   listReviewerProviders: "runtime.listReviewerProviders",
   defaultReviewer: "runtime.defaultReviewer",
   listReviewerModels: "runtime.listReviewerModels",
+  listReviewerSamples: "runtime.listReviewerSamples",
+  testReviewerSample: "runtime.testReviewerSample",
   setDefaultModel: "runtime.setDefaultModel",
   createSession: "runtime.createSession",
   resumeSession: "runtime.resumeSession",

@@ -174,6 +174,13 @@ export const REVIEWER_SAMPLES: readonly ReviewerSample[] = [
   ),
 ];
 
+/** 样例的说明与期望（不含主体与用户消息），供客户端列表显示 */
+export interface ReviewerSampleInfo {
+  id: string;
+  title: string;
+  expect: ReviewerExpectation;
+}
+
 export interface ReviewerSampleResult {
   id: string;
   title: string;
