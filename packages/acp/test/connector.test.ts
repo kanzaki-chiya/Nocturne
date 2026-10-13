@@ -403,6 +403,46 @@ describe("ACP 单调用生命周期", () => {
     await expectGone(pids.child);
   });
 
+  it.runIf(process.platform === "win32")(
+    "probe 在同名无扩展名脚本与 cmd 并存时解析到 cmd，显式 .cmd 不变",
+    async () => {
+      const directory = path.join(root, "npm global");
+      await fs.mkdir(directory);
+      await fs.writeFile(path.join(directory, "probe-agent"), '#!/bin/sh\nexec node "$0" "$@"\n');
+      await fs.writeFile(
+        path.join(directory, "probe-agent.cmd"),
+        `@echo off\r\n"${process.execPath}" "${fixture}" %*\r\n`,
+      );
+      for (const command of ["probe-agent", "probe-agent.cmd"]) {
+        const { connector, config } = setup("normal", { command, args: ["probeOnly"] });
+        config.env = {
+          ...config.env,
+          PATH: `${directory};${process.env.PATH ?? ""}`,
+          PATHEXT: ".EXE;;.cmd",
+        };
+        expect(await connector.probe({ nocturneHome: root })).toMatchObject({ ok: true });
+        await expectGone((await waitForPid()).pid);
+        await fs.rm(path.join(root, "pids.json"), { force: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "probe 只有无扩展名脚本时报未安装且不启动进程",
+    async () => {
+      const directory = path.join(root, "sh only");
+      await fs.mkdir(directory);
+      await fs.writeFile(path.join(directory, "probe-agent"), '#!/bin/sh\nexec node "$0" "$@"\n');
+      const { connector, config } = setup("normal", { command: "probe-agent" });
+      config.env = { ...config.env, PATH: directory, PATHEXT: ".CMD;.EXE" };
+      expect(await connector.probe({ nocturneHome: root })).toMatchObject({
+        ok: false,
+        error: { code: "external_agent_not_installed" },
+      });
+      expect(await platform.fs.exists(path.join(root, "pids.json"))).toBe(false);
+    },
+  );
+
   it.each(["normalTree", "ignoreCancelTree"])(
     "%s 正常/timeout 均结束根和子树",
     async (scenario) => {

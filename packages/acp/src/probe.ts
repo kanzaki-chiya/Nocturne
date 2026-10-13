@@ -15,6 +15,21 @@ import type {
 
 const PROBE_TIMEOUT_MS = 10_000;
 
+/** PATHEXT 候选：去掉空项，按不区分大小写去重；全空时回退默认值。 */
+function pathExtensions(value: string | undefined): string[] {
+  const seen = new Set<string>();
+  const extensions = (value ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((extension) => extension.trim())
+    .filter((extension) => {
+      const key = extension.toUpperCase();
+      if (!extension || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return extensions.length > 0 ? extensions : [".COM", ".EXE", ".BAT", ".CMD"];
+}
+
 /** 探测仅握手与建立会话，绝不调用 prompt 或 authenticate。 */
 export async function probeAgent(
   platform: Platform,
@@ -53,10 +68,9 @@ export async function probeAgent(
     const directories = hasPath
       ? [""]
       : (envValue("PATH") ?? "").split(windows ? ";" : ":").filter(Boolean);
+    // Windows 不执行无扩展名文件，只试 PATHEXT；npm 目录里的同名 sh 脚本不能抢在 .cmd 之前命中。
     const extensions =
-      windows && !/\.[^/\\.]+$/.test(config.command)
-        ? ["", ...(envValue("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD").split(";")]
-        : [""];
+      windows && !/\.[^/\\.]+$/.test(config.command) ? pathExtensions(envValue("PATHEXT")) : [""];
     let command: string | undefined;
     for (const directory of directories) {
       for (const extension of extensions) {

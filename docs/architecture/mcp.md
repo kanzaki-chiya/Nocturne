@@ -185,7 +185,7 @@ core:      wrapSession 中 options.mcp 存在时（空集合也建会话以支�
 - `platform` 的 `spawnPipe(command, args, opts)`：`stdin` 可写、`stdout` 原始字节流（MCP 是换行分隔 UTF-8 JSON-RPC，不走控制台代码页解码）、`stderr` 按控制台编码解码，经脱敏后只进入探测尾部、`kill()` 走进程树终止。这是 platform 的通用能力，`hooks` 也使用它。
 - Core 侧的公开导出：`ToolDefinition`、`ToolResult`、`ToolContext`、`ToolScope`、`ToolTraits`、`McpConnector` 等类型经 `@nocturne/core` 导出（纯类型，兼容变更；platform 的 `FileSystem`/`ProcessRunner`/`PathOps` 等类型同理）。
 - 外部 agent 的 ACP 接入沿用同类 connector 注入与 `spawnPipe` 进程树清理，但作为 `task` 委派而不是 MCP 工具集合；见 [subagent.md](subagent.md#17-外部-agentacp)。
-- `PipeProcess.exited()` 可提前检测根进程退出；`detachOutput()` 可结束被后代占用的本地管道，原 `wait()` 仍等待 close 以保留完整协议尾部。Windows `.cmd`/`.bat` 由平台按 PATH/PATHEXT 解析并引用参数，不按具体命令名称分支。
+- `PipeProcess.exited()` 可提前检测根进程退出；`detachOutput()` 可结束被后代占用的本地管道，原 `wait()` 仍等待 close 以保留完整协议尾部。Windows `.cmd`/`.bat` 由平台按 PATH/PATHEXT 解析并引用参数，不按具体命令名称分支；不带扩展名的命令只试 PATHEXT 扩展名（空项忽略、不区分大小写），不命中同名无扩展名文件，都找不到时原样交给 spawn 报错。
 
 ## 9. 暂不设计
 

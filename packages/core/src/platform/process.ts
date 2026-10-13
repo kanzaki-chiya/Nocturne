@@ -572,6 +572,21 @@ async function killTree(child: ChildProcess): Promise<void> {
   }
 }
 
+/** PATHEXT 候选：去掉空项，按不区分大小写去重；全空时回退默认值。 */
+function pathExtensions(value: string | undefined): string[] {
+  const seen = new Set<string>();
+  const extensions = (value ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((extension) => extension.trim())
+    .filter((extension) => {
+      const key = extension.toUpperCase();
+      if (!extension || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return extensions.length > 0 ? extensions : [".COM", ".EXE", ".BAT", ".CMD"];
+}
+
 /** Windows 管道命令按 PATH/PATHEXT 解析；批处理脚本必须经 cmd，而非 shell:true。 */
 function pipeInvocation(command: string, args: string[], env: NodeJS.ProcessEnv, cwd: string) {
   if (process.platform !== "win32") return { command, args, verbatim: false };
@@ -580,9 +595,8 @@ function pipeInvocation(command: string, args: string[], env: NodeJS.ProcessEnv,
   const directories = /[/\\]/.test(command)
     ? [""]
     : [cwd, ...(environment.PATH ?? "").split(path.delimiter)];
-  const extensions = path.extname(command)
-    ? [""]
-    : ["", ...(environment.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";")];
+  // Windows 不执行无扩展名文件，只试 PATHEXT；npm 目录里的同名 sh 脚本不能抢在 .cmd 之前命中。
+  const extensions = path.extname(command) ? [""] : pathExtensions(environment.PATHEXT);
   let resolved: string | undefined;
   for (const directory of directories) {
     for (const extension of extensions) {

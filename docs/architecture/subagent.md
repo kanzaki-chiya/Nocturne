@@ -323,7 +323,7 @@ ADR-0036 第一轮：子会话沿用父会话的审查器实例与最近用户�
 
 Runtime 提供 `describeExternalAgents({workspaceRoot?})`、`saveExternalAgent({mode,name,config})`、`deleteExternalAgent({name})`、`setExternalAgentEnabled({name,enabled})`、`probeExternalAgent({name}|{config})`；会话提供异步 `describeExternalAgents()`。查询返回 `{agents,warnings}`，保留停用条目与来源信息；写操作只修改程序维护层并重载，手写条目只读，配置细节见 [config.md](config.md#外部-agent-配置)。
 
-探测可以使用已保存名称或未保存草稿，不依赖启用状态。connector 的 `probe(config,{nocturneHome,timeoutMs?})` 先解析命令，再 `initialize`、在 `<NOCTURNE_HOME>` 临时目录 `session/new`，读取 agent 信息、认证方式与会话可选配置项，最后关闭进程并移除临时目录；不发送 prompt、不代办登录，探测结果不持久化。
+探测可以使用已保存名称或未保存草稿，不依赖启用状态。connector 的 `probe(config,{nocturneHome,timeoutMs?})` 先解析命令（Windows 上不带扩展名的命令只按 PATHEXT 补扩展名，不命中同名无扩展名文件——npm 目录里给 Git Bash 用的 `npx` 脚本不会抢在 `npx.cmd` 之前，命令直接写 `npx` 即可；带扩展名的命令与非 Windows 平台原样查找；找不到报 `external_agent_not_installed`），再 `initialize`、在 `<NOCTURNE_HOME>` 临时目录 `session/new`，读取 agent 信息、认证方式与会话可选配置项，最后关闭进程并移除临时目录；不发送 prompt、不代办登录，探测结果不持久化。
 
 客户端把 `/<agent名> 任务` 提交为 `delegate:{agent,task}`，与 `skill` 互斥。Core 在 Turn 边界校验名称对应已启用 agent（忽略大小写定位、使用配置中的规范名称），附明确的 `task` 工具指令、指定的 `agent` 和未转义改写的任务原文；`message.user.delegate` 与消息内容共同构成快照，历史折叠、在线视图、恢复与回放均读取日志，不根据当前配置重新生成。该指令不会直接调用 connector，也不会自动授权；模型发起的 `task` 仍走入口权限管线。
 

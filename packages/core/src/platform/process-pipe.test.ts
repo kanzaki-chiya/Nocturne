@@ -80,7 +80,7 @@ describe("spawnPipe 的协议消费者边界", () => {
   });
 
   it.runIf(process.platform === "win32")(
-    "PATH/PATHEXT 将 npx 解析为 npx.cmd；cmd/bat 空格/引号/元字符不变成命令",
+    "PATH/PATHEXT 将 npx 解析为 npx.cmd（同名无扩展名脚本不抢先）；cmd/bat 空格/引号/元字符不变成命令",
     async () => {
       const directory = path.join(root, "shim directory");
       await fs.mkdir(directory);
@@ -89,6 +89,8 @@ describe("spawnPipe 的协议消费者边界", () => {
         "console.log(JSON.stringify(process.argv.slice(2)));\n",
       );
       const wrapper = `@echo off\r\n"${process.execPath}" "%~dp0args.mjs" %*\r\n`;
+      // npm 全局目录里与 npx.cmd 并存的 Git Bash 脚本：不能先于 .cmd 命中。
+      await fs.writeFile(path.join(directory, "npx"), '#!/bin/sh\nexec node "$0" "$@"\n');
       await fs.writeFile(path.join(directory, "npx.cmd"), wrapper);
       await fs.writeFile(path.join(directory, "other.bat"), wrapper);
       const values = [
