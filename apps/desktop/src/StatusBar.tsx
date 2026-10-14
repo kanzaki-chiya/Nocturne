@@ -8,7 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { sessionUsageSoFar, type SessionView } from "@nocturne/core/protocol";
-import type { ContextSummary, RpcSession } from "@nocturne/rpc/client";
+import type { ContextSummary, RpcSession, RpcClient, RemoteStatus } from "@nocturne/rpc/client";
+import { RemoteBadge } from "./RemotePage";
 
 import { Dropdown } from "./Dropdown";
 import { unavailableMcpServers, type UnavailableMcpServer } from "./mcp-status";
@@ -27,6 +28,9 @@ import "./status-bar.css";
 export type StatusPanel = "context";
 
 export interface StatusBarProps {
+  remoteStatus?: RemoteStatus | undefined;
+  remoteClient?: RpcClient | undefined;
+  onManageRemote?: () => void;
   session: RpcSession;
   view: SessionView;
   controls: SessionControls;
@@ -408,6 +412,9 @@ export function StatusBar({
   home,
   onManageProviders,
   onManageMcp,
+  remoteStatus,
+  remoteClient,
+  onManageRemote,
 }: StatusBarProps) {
   const speed = useStepSpeed(session, view);
   const [localPanel, setLocalPanel] = useState<StatusPanel | null>(null);
@@ -684,6 +691,9 @@ export function StatusBar({
         )}
       </div>
       <div className="status-right">
+        {onManageRemote && (
+          <RemoteBadge status={remoteStatus} client={remoteClient} onOpen={onManageRemote} />
+        )}
         <McpBadge servers={unavailableMcpServers(view)} onOpen={onManageMcp} />
         {trigger(
           "context",

@@ -30,12 +30,21 @@ import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
 import { SkillsPage } from "./SkillsPage";
 import { SettingsPage } from "./SettingsPage";
+import { RemotePage } from "./RemotePage";
+import { useRemoteStatus } from "./remote";
+import type { RemoteStatus } from "@nocturne/rpc/client";
 import { UsagePage } from "./UsagePage";
 
 import { BackendPool } from "./backends";
 import type { DesktopHost } from "./host";
 import { NodeHelp } from "./NodeHelp";
-import { decideNotification, NOTIFY_DEFAULTS, notifyPrefsFrom, sessionMarkFor } from "./notify";
+import {
+  decideNotification,
+  NOTIFY_DEFAULTS,
+  notifyPrefsFrom,
+  sessionMarkFor,
+  pushRemoteNotification,
+} from "./notify";
 import { abbreviateHome, middleTruncate } from "./paths";
 import { createPrefsStore, migrateLegacyProjectOrder, type PrefsStore } from "./prefs";
 import { useDraftControls, useSessionControls } from "./session-controls";
@@ -76,6 +85,9 @@ export function App({ host }: { host: DesktopHost }) {
   const prefs = useMemo(() => createPrefsStore(globalThis.localStorage), []);
   const workspaceRef = useRef<string | null>(null);
   const pool = useMemo(() => new BackendPool(host, () => workspaceRef.current), [host]);
+  const remoteStatus = useRemoteStatus(pool.get());
+  const remoteRef = useRef(remoteStatus);
+  remoteRef.current = remoteStatus;
   const images = useMemo(() => createAttachmentImageSource(), []);
   const p = prefs.get();
   useEffect(
@@ -308,8 +320,9 @@ export function App({ host }: { host: DesktopHost }) {
         sound: state.prefs.sound,
       });
       void host.requestAttention();
+      void pushRemoteNotification(pool.get(), remoteRef.current, host.note);
     },
-    [host, conversations],
+    [host, conversations, pool],
   );
   onSessionEventRef.current = onSessionEvent;
 
@@ -1137,6 +1150,10 @@ export function App({ host }: { host: DesktopHost }) {
                   version={providersVersion}
                 />
               </PaneErrorBoundary>
+            ) : page === "remote" ? (
+              <PaneErrorBoundary key="remote">
+                <RemotePage client={pageClient} />
+              </PaneErrorBoundary>
             ) : page === "skills" ? (
               <PaneErrorBoundary key="skills">
                 <SkillsPage
@@ -1269,6 +1286,10 @@ export function App({ host }: { host: DesktopHost }) {
                 }}
                 onManageMcp={() => {
                   setPage("mcp");
+                }}
+                remoteStatus={remoteStatus}
+                onManageRemote={() => {
+                  setPage("remote");
                 }}
               />
             </PaneErrorBoundary>
@@ -1494,6 +1515,8 @@ interface SessionPaneProps {
   onManageProviders: () => void;
   /** 状态栏「MCP 未连接」标记：进入设置 › MCP */
   onManageMcp: () => void;
+  remoteStatus: RemoteStatus | undefined;
+  onManageRemote: () => void;
   /** 服务商配置变更计数：状态栏的模型/档位/预设数据随之重取 */
   providersVersion: number;
 }
@@ -1524,6 +1547,8 @@ function SessionPane({
   providersVersion,
   onManageProviders,
   onManageMcp,
+  remoteStatus,
+  onManageRemote,
 }: SessionPaneProps) {
   const runtime = client.runtime;
   const controls = useSessionControls(session, runtime, view, prefs, providersVersion, workspace);
@@ -1634,6 +1659,9 @@ function SessionPane({
         home={home}
         onManageProviders={onManageProviders}
         onManageMcp={onManageMcp}
+        remoteStatus={remoteStatus}
+        remoteClient={client}
+        onManageRemote={onManageRemote}
       />
     </>
   );

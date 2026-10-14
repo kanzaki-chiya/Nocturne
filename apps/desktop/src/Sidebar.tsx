@@ -10,6 +10,7 @@ export type SettingsSection =
   | "mcp"
   | "skills"
   | "agents"
+  | "remote"
   | "appearance"
   | "usage"
   | "logs";
@@ -159,6 +160,25 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
         <circle cx="8" cy="2.2" r="0.9" fill="currentColor" />
         <circle cx="5.9" cy="8.4" r="0.95" fill="currentColor" />
         <circle cx="10.1" cy="8.4" r="0.95" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    key: "remote",
+    label: "远程",
+    icon: (
+      <svg {...GLYPH_PROPS}>
+        <rect
+          x="4"
+          y="1.5"
+          width="8"
+          height="13"
+          rx="1.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.3"
+        />
+        <path d="M7 12h2" stroke="currentColor" strokeWidth="1.3" />
       </svg>
     ),
   },

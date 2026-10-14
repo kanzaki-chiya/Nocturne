@@ -20,9 +20,31 @@ import type {
 } from "@nocturne/core/protocol";
 
 import type { SettingItem } from "./rpc-types";
+import type { RemoteStatus, RpcClient } from "@nocturne/rpc/client";
 import type { SessionMark } from "./session-tree";
 
 export type NotifyKind = "attention" | "error" | "done";
+
+/** 仅在已有桌面通知判定通过的分支调用，不另起提醒规则。 */
+export async function pushRemoteNotification(
+  client: RpcClient | undefined,
+  status: RemoteStatus | undefined,
+  log: (message: string) => void,
+): Promise<void> {
+  if (
+    !client ||
+    !status?.registered ||
+    !status.enabled ||
+    status.connection !== "online" ||
+    status.connections.length > 0
+  )
+    return;
+  try {
+    await client.call("remote.push", {});
+  } catch {
+    log("[remote] 手机推送失败");
+  }
+}
 
 /** `settings.json` notifications 段的生效值（缺省见 Core 侧 schema） */
 export interface NotifyPrefs {

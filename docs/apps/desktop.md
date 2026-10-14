@@ -203,6 +203,8 @@ interface NodeProbe {
 
 ### 5.4 状态栏与上下文
 
+**远程标识**：有远程 RPC 连接时显示「手机在线」，多台设备显示数量（按设备 id 去重）。点击展开当前手机列表，每台可立即「断开」，底部「打开远程设置」。没有连接不显示；已登记且被吊销或替换时显示警示，点击进入远程页。
+
 `src/StatusBar.tsx` 左侧是会话控件 pill 组：模型（绿点 +「provider · model」+ ▶）、「思考 <level> ▶」、「权限 <preset> ▶」（预设值用警告色）、「Shell <kind> ▶」。模型与 Shell 打开与空状态 chip 共用的 `ChoiceMenu`（`src/Menu.tsx`，锚定 pill 自动向上弹出），模型菜单为「最近使用」+ 按服务商分组（组名用服务商显示名、组序与服务商页一致，搜索跨组过滤；会话内与空状态共用 `modelGroups`），底部有「管理服务商…」，进入 设置 › 服务商；思考档位与权限预设用自绘下拉 `Dropdown`（见 5.6），选项带中文名与一句说明；数据来自 `useSessionControls`（模型/档位/预设复用 `controls.controls`，Shell 是 `shellControl`：`auto`（「自动选择」）+ 探测到的 shell，未安装的置灰并标注「未安装」，被 env/config 覆盖时菜单底部给提示；打开 Shell 菜单时调 `loadShells()` 探测）。选择分别调 `setModel` / `setReasoningEffort`（并写 `prefs.lastEffort`）/ `setPermissionPreset` / `setShell`。Turn 进行中模型 pill 锁定（title「当前 Turn 结束后可切换」），思考档位、权限预设、Shell 仍可切换：档位菜单注明「下一个 Turn 生效」，预设菜单注明「从下一次权限判定起按新预设」（等待确认的请求仍由用户决定，切换不替它放行），Shell 菜单注明「下一次命令生效」。右侧不变：上下文用量（点击开上下文面板）、累计缓存命中（`sessionUsageSoFar`，含进行中 Turn 已完成的步骤，每步结束即更新，见 [view.md §8](../protocols/view.md#8-api)；服务商未返回缓存数据时显示「—」）、生成速度、Turn 状态。
 
 **生成速度**（`src/speed.ts`，口径见 [ADR-0053 修订 2026-10-11](../decisions/ADR-0053-usage-and-cost.md)）：缓存之后、Turn 状态之前一段。流式期间显示 `~N tok/s`，用 `estimateTokens(正文 + 推理)` 除以客户端从首个增量起的用时，最多每秒刷新一次，前面有一个强调色脉动点（减少动态效果时不动）；这一步的 `message.assistant` 到达后改为 `usage.outputTokens ÷ (durationMs − ttftMs)`，缺 usage 或 timing 时退回客户端测得的用时（无 usage 时仍带 `~`）。生成用时不足 0.5 秒时不显示。只追踪本次打开后亲眼看到流式增量的步骤：历史消息没有到达时间，所以切换或恢复会话后、打开时已在流式的那一步结束前都不显示，直到下一次生成。悬停或聚焦弹出 `role="tooltip"`：结束后列输出、其中推理、TTFT、生成用时、请求总耗时（缺的项不列；时长小于 10 秒保留一位小数），底部一行「上一步 · 速度 = 输出 ÷ 生成用时」；流式期间只写「估算中」与已用时长。Esc 关闭。
@@ -218,6 +220,10 @@ interface NodeProbe {
 已知限制（等 RPC 能力）：空状态的项目文件搜索需要 runtime 级 `fileIndex`（`fileIndex` 目前是 session 级，前端已用 `Composer.fileRefs` 作为数据接缝，届时只换数据源）。
 
 ### 5.5 设置区
+
+「子代理」之后的「远程」页（`src/RemotePage.tsx`）只使用本机 `remote.*` RPC，未登记只读取 `remote.describe` 缓存，显示索取邀请/自建中继说明、邀请输入和登记按钮，不联网。已登记显示中继域名、状态、允许远程访问开关、设备在线与最近在线时间、推送订阅、断开/移除和退出登记；后两项必须在页内确认。状态变化通过 `remote.statusChanged` 更新。
+
+「配对新手机」需要在线，弹出二维码、截止倒计时和可复制链接；`remote.paired` 显示设备名后自动关闭，失败显示中文原因，关闭或离开页面取消配对。`qrcode-generator@2.0.4` 以 M 纠错生成矩阵，React 渲染一个 SVG path，四模块留白，深浅主题均为浅底深码，不使用 innerHTML。固定信任说明指出中继看不到加密内容，但必须信任管理员不会篡改手机网页。存储与精确契约见 [rpc.md 第 11 节](../protocols/rpc.md#11-远程主机)。
 
 左栏底部「设置」进入设置区：左栏整列换成设置导航（「← 返回 Esc」、「设置」标题、常规 / 模型 / 服务商 / MCP / 技能 / 子代理 / 外观 / 用量 / 后台日志九项、底部一行说明），会话树不显示；主区换成对应页面。空状态与状态栏的模型菜单底部「管理服务商…」直接进入「服务商」。设置区以 `.settings-over` 盖在主区之上，原来的会话或空状态（`.mainpane`）保持挂载并设为 `inert`，所以「← 返回」或 Esc 回到的是同一个会话，滚动位置不变；在导航项之间切换不算返回。Esc 只在没有被下拉、对话框先处理时才返回（下拉的 Esc 会 `preventDefault` 并停止冒泡；设置区里有打开的对话框时不返回）。被盖住的会话的窗口级快捷键（权限卡片的 Esc 拒绝与数字键作答、输入框的 Esc 中断）在其所在区域 `inert` 时一律不响应。服务商页与常规 / 模型 / 外观页都走常驻后台读写全局配置（不带 `workspaceRoot`，即后台启动目录的项目层参与合并）；会话控件（状态栏 pill、会话内查询）则带该会话的工作区——`listModels` / `defaultModel` / `describeSettings` / `describeSkills` / `describeExternalAgents` 等运行时查询都接受可选 `workspaceRoot`（rpc.md 3.1）。
 
@@ -323,11 +329,15 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 ### 5.9 会话通知（ADR-0056）
 
+同一个系统通知判定通过的分支也经 `notify.ts` 调用 `remote.push`：仅已登记、开启、在线且没有远程连接时发送。无载荷推送不含会话信息；失败静默记诊断（后台日志页的外壳条目），不新增后台通知判定规则。
+
 判定全在客户端（`src/notify.ts` 纯函数 `decideNotification`，不碰 DOM、不调外壳）：输入事件、会话标题、Turn 开始时间、是否在看、生效设置，输出「不提醒」或 `{ title, body, kind }`。只对本次运行实时到达的事件判定——`Conversations` 以「订阅起始时间」定时间边界：订阅响应返回前后到达的持久事件按 `event.time` 与订阅起始区分，起始时刻及之后（含同 ms，`>=`）是回放窗口期内新产生的 `permission.requested`/`turn.completed`（`live=true`），之前的是旧回放（`live=false`）；恢复补写的 `turn.completed`（`recovered:true`）时间也是新的，按 `live=true` 透出，另由 `recovered` 在 `decideNotification`/`sessionMarkFor` 挡掉（不提醒不留痕）；易失事件（`runtime.status`/`question.requested`）从不回放，订阅期间到达即实时（`time` 缺失或非法按回放处理，不误报）——重放、打开历史会话读到的旧事件不提醒。桌面端「在看」= 窗口有焦点（`focus`/`blur` 维护，初始 `document.hasFocus()`）且设置区没盖住（`page === null`）且该会话是当前显示的会话；设置页获焦不算在看。新 `turn.started`（实时）清掉该会话旧留痕，`Sidebar` 运行中（`running`/`pending`）也不显示旧标签。权限操作文字（`operationForSubjectKind`）权限卡片与通知真的共用同一函数。三类事件：需要确认（`permission.requested`/`question.requested`，含子代理经父会话 `task` 工具冒泡的请求，天然按父会话判断、标题用父会话名）、出错停止（`turn.completed` 且 `reason === "error"`，不看用时）、完成（其他非中断结束，用时 ≥ `doneAfterSeconds`…
 
 提醒动作：`host.notify`（`notify_show`）+ `host.requestAttention()`（任务栏 `Informational` 闪烁，窗口获焦即停）。外壳（`src-tauri/src/notify.rs`）不用 `tauri-plugin-notification`（桌面端无点击回调），直接用 `windows` crate 的 WinRT 绑定（`UI_Notifications`）：toast 的 tag/group 都是会话 id（64 字符上限），同一会话新通知替换旧的；`Activated` 回调里外壳先 `unminimize` + `set_focus` 再 emit `notify-activated`（带 sessionId），前端切到对应会话；toast 对象持有在 `NotifyState`（drop 即撤回调），切到该会话或窗口重新获焦时 `notify_dismiss` 先 Hide 原 toast 再按 tag/group 清通知中心历史并放掉对象。AUMID：安装版（release）直接用 bundle identifier（与 NSIS 快捷方式一致）；只有开发构建才探测注册表 `HKCU\Software\Classes\AppUserModelId\<bundle identifier>`，未登记退回 PowerShell 默认 AUMID（通知照常显示、署名不对），不崩溃。非 Windows 命令照常存在，调用返回 `unsupported` 静默不发。测试通知走同一个 `notify_show`（`sessionId: "test"`）。
 
 ## 6. 安全边界
+
+- 远程网络仅由 Node 后台连接，前端不增加网络权限。手机经配对、签名握手和端到端加密访问；能力上限由后台 [RPC 第 7 节白名单](../protocols/rpc.md#7-安全与日志) 强制限制，配置与远程设备管理只能从本机进行。中继下发的手机网页未被篡改是额外信任点，界面固定说明。
 
 - `capabilities/main.json` 只授予：十五个应用命令（`allow-backend-open/send/close/stderr`、`allow-node-probe`、`allow-plain-workspace`、`allow-pick-images`、`allow-open-skill-directory`、`allow-app-note`、`allow-shell-log`、`allow-detect-editors`、`allow-open-in-editor`、`allow-open-with-default`、`allow-notify-show`、`allow-notify-dismiss`）、`core:app:allow-version`（`appVersion()` 显示与版本过滤用）、`core:path:allow-resolve-directory`（前端 `homeDir()` 主目录解析所需；`pick_images` 的对话框与读文件都在 Rust 侧，不需要它）、窗口权限 `core:window:allow-minimize`、`allow-toggle-maximize`、`allow-internal-toggle-maximize`（Tauri drag-region 的原生双击）、`allow-close`、`allow-start-dragging`、`allow-is-maximized`、`allow-request-user-attention`（通知时任务栏闪烁，`Informational`）、`core:event:allow-listen` / `allow-unlisten`（通知点击 `notify-activated` 事件），以及 `dialog:allow-open`、自动更新的 `updater:allow-check` 与 `updater:allow-download-and-install` 以及重启用的 `process:allow-restart`、`opener:allow-open-url`（scope…
 - 主窗口 `dragDropEnabled: false`：关掉 Tauri 的原生拖放接管，HTML5 drop 才能向输入框交付 `File` 对象（图片附件的拖入路径）。
