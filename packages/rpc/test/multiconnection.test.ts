@@ -10,6 +10,35 @@ import { createRpcClient } from "@nocturne/rpc/client";
 afterEach(cleanupTmp);
 
 describe("多连接共享后台", () => {
+  it("远程模型读方法拒绝未知工作区，本机不受影响，cwd 过滤不受限", async () => {
+    const h = await connectMany();
+    const remote = await h.add();
+    const workspaceRoot = path.dirname(h.ws);
+    for (const method of ["runtime.listModels", "runtime.defaultModel"] as const) {
+      await expect(remote.client.call(method, { workspaceRoot })).rejects.toMatchObject({
+        code: "remote_not_allowed",
+      });
+      await h.client.call(method, { workspaceRoot });
+      await remote.client.call(method, {});
+    }
+    await remote.client.runtime.listSessions({ cwd: workspaceRoot });
+    await h.client.shutdown();
+    await Promise.all([h.served, remote.served]);
+  });
+
+  it("远程模型读方法接受已知工作区", async () => {
+    const h = await connectMany();
+    await h.client.runtime.createSession({ model: MODEL, cwd: h.ws });
+    const remote = await h.add();
+    for (const method of ["runtime.listModels", "runtime.defaultModel"] as const) {
+      expect(await remote.client.call(method, { workspaceRoot: h.ws })).toEqual(
+        await h.client.call(method, { workspaceRoot: h.ws }),
+      );
+    }
+    await h.client.shutdown();
+    await Promise.all([h.served, remote.served]);
+  });
+
   it("远程先握手报 runtime_unavailable，本机握手后可重试且只创建一次 Runtime", async () => {
     const h = await connectMany({ initialize: false });
     const remote = await h.add("remote", false);

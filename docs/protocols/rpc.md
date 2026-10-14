@@ -242,7 +242,8 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 |---|---|
 | `initialize` | 仅连接握手，不创建 Runtime |
 | `runtime.listSessions` | 允许 |
-| `runtime.listModels`、`runtime.defaultModel` | 只读 |
+| `runtime.listModels` | 只读；显式 `workspaceRoot` 必须满足 `createSession` 的已知工作区规则，不传照常 |
+| `runtime.defaultModel` | 只读；显式 `workspaceRoot` 必须满足 `createSession` 的已知工作区规则，不传照常 |
 | `runtime.createSession` | 仅 `model`、`reasoningEffort`、`cwd`、`workspaceRoot`、`text`；拒绝其他字段。显式目录须是列表可见的非子代理会话用过的 cwd 或工作区根（真实路径匹配）；不传沿用后台默认 cwd。`text` 与既有创建接口一致不触发 Turn，发送文字另调 submit |
 | `runtime.resumeSession` | 仅 `sessionId`，不接受 `model`、`force` |
 | `session.subscribe`、`session.unsubscribe`、`session.close`、`session.state` | 允许 |
@@ -252,6 +253,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 | `session.respondQuestion` | 允许 |
 
 - `runtime.providersChanged` 广播给所有已握手连接；`login.completed` 只发给发起登录的连接。Runtime 句柄、实际会话、配置对象与变更队列在 Hub 共享；订阅、请求、握手、草稿和登录属于单连接。
+- 会话已被其他连接打开时，`resumeSession` 的 `model` / `force` 被忽略，返回当前状态；远程连接仍不接受这两个参数。`runtime.listSessions` 的 `cwd` 只是过滤条件，不限制。
 - 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` 事件与 `respondPermission` 回复，不判断"要不要确认"。
 - 诊断记录（`diagnostics` 回调）只含连接状态（含 `origin`）、方法名与结果（成功与否、错误码），**不含任何参数与通知内容**——参数里可能有密钥明文（`provider.prepareProvider`、`provider.setCredential`）或用户输入，通知里可能有一次性密钥（`login.completed.unstoredKey`）。
 - **敏感参数**：服务端维护一张敏感方法表（`SENSITIVE_METHODS`）——`runtime.updateSettings` 的 `reviewerKey`、`provider.prepareProvider` 中 `credential.kind === "apiKey"` 的 `key`、`provider.setCredential` 的 `key`、`provider.updateSetupProvider` 的 `patch.headers` 各值、`provider.probeSetupProviderModels` 的 `headers` 各值、`login.submitManual` 的 `text`。这些方法失败时，错误响应 `message` 与 `data` 里出现的秘密值一律替换为 `[redacted]`；其他方法沿用 Core 的固定文案错误（Core 错误本身不含秘密）。通知内容不进诊断，密钥只经其语义通道传递（如 `login.completed.unstoredKey` 恰好一次）。

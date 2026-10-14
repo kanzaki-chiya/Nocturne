@@ -432,11 +432,17 @@ class Connection implements HubPeer {
     if (method === "session.respondPermission" && reqObject(p, "reply").remember === "project") {
       deny("远程连接不能保存项目级授权；请求仍待处理，请在本机回复");
     }
-    if (method === "runtime.createSession") {
-      for (const key of ["cwd", "workspaceRoot"]) {
+    if (
+      method === "runtime.createSession" ||
+      method === "runtime.listModels" ||
+      method === "runtime.defaultModel"
+    ) {
+      const keys =
+        method === "runtime.createSession" ? ["cwd", "workspaceRoot"] : ["workspaceRoot"];
+      for (const key of keys) {
         const directory = optString(p, key);
         if (directory !== undefined && !(await this.hub.allowWorkspace(directory))) {
-          deny(`远程新建会话的 ${key} 必须是已有非子代理会话用过的工作目录或工作区根`);
+          deny(`远程连接的 ${key} 必须是已有非子代理会话用过的工作目录或工作区根`);
         }
       }
     }
