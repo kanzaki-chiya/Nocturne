@@ -20,6 +20,7 @@
 | 用量统计、费用估算 | [architecture/usage.md](docs/architecture/usage.md) |
 | 事件类型或字段 | [protocols/events.md](docs/protocols/events.md) |
 | 会话派生视图、重放、客户端共享状态 | [protocols/view.md](docs/protocols/view.md) |
+| 远程通道、配对、加密 | [protocols/remote-channel.md](docs/protocols/remote-channel.md)、[ADR-0052](docs/decisions/ADR-0052-remote-web-client.md) |
 | 上下文构建、压缩、提示词组装 | [architecture/context.md](docs/architecture/context.md) |
 | 工具运行时或内置工具 | [architecture/tools.md](docs/architecture/tools.md)、[protocols/tool-api.md](docs/protocols/tool-api.md) |
 | 权限规则、审批流程 | [architecture/permissions.md](docs/architecture/permissions.md) |

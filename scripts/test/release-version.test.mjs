@@ -21,6 +21,7 @@ function makeFixture() {
     "package.json",
     "packages/core/package.json",
     "packages/rpc/package.json",
+    "packages/remote/package.json",
     "packages/mcp/package.json",
     "packages/acp/package.json",
     "apps/cli/package.json",
@@ -93,6 +94,7 @@ describe("release-version", () => {
   it("一次改齐所有版本位置", () => {
     applyVersion(root, "0.6.0");
     const versions = collectVersions(root);
+    expect(versions["packages/remote/package.json"]).toBe("0.6.0");
     for (const [file, v] of Object.entries(versions)) {
       expect(v, file).toBe("0.6.0");
     }

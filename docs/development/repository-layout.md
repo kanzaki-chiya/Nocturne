@@ -57,6 +57,9 @@ nocturne/
 │   │   ├── package.json         依赖 @nocturne/core 公开入口与 @agentclientprotocol/sdk
 │   │   ├── src/                 ACP 调用、权限映射、transcript 与进程生命周期
 │   │   └── test/fixtures/       SDK agent 端离线进程夹具；真实账号冒烟独立运行
+│   ├── remote/                  @nocturne/remote：同构配对、握手、帧加密（ADR-0052）
+│   │   ├── src/                 只用 WebCrypto/标准 Web API，不依赖项目内包
+│   │   └── test/                内存帧管道测试与固定密码学向量
 │   └── rpc/                     @nocturne/rpc：JSON-RPC 服务端与类型化客户端（ADR-0044）
 │       ├── package.json         exports: "./server" 与 "./client"；依赖 @nocturne/core 公开入口
 │       ├── src/                 server（方法映射、订阅回放）、client、shared（报文、方法表、传输）
@@ -80,7 +83,7 @@ nocturne/
 
 ## 2. 包边界
 
-- `packages/core`、`packages/mcp`、`packages/acp`、`packages/rpc`、`apps/cli`、`apps/tui`、`apps/desktop` 是七个 workspace 包；Core 不依赖客户端、MCP 或 ACP SDK，connector、RPC 和客户端只使用 Core 的公开入口。桌面端边界更窄：只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`。
+- `packages/core`、`packages/mcp`、`packages/acp`、`packages/rpc`、`packages/remote`、`apps/cli`、`apps/tui`、`apps/desktop` 是八个 workspace 包；Core 不依赖客户端、MCP 或 ACP SDK，connector、RPC 和客户端只使用 Core 的公开入口。remote 不依赖任何项目内包，本轮 rpc 仅开发测试依赖 remote；后续 rpc、中继与 desktop 网页入口接入它（依赖方向见 [modules.md](../architecture/modules.md)）。当前桌面端边界仍只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`。
 - Core 内部的模块边界用目录加静态依赖检查维护，不再拆成十几个包。
 - `protocol` 以子路径导出（`@nocturne/core/protocol`），客户端可以只导入类型，为将来独立成包提前划好界线。
 

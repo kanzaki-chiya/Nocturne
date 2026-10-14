@@ -52,6 +52,7 @@
 | [events.md](protocols/events.md) | 事件信封、事件类型、持久化规则、顺序与关联 |
 | [view.md](protocols/view.md) | `SessionView` 派生视图：reducer 状态形状、归约规则、重放等价不变量 |
 | [rpc.md](protocols/rpc.md) | RPC 协议：JSON-RPC 2.0 报文、握手、方法映射、订阅回放、错误码、生命周期（`@nocturne/rpc`） |
+| [remote-channel.md](protocols/remote-channel.md) | 同构远程加密通道：身份、扫码配对、签名握手、帧格式与生命周期（`@nocturne/remote`） |
 | [tool-api.md](protocols/tool-api.md) | `ToolDefinition`、`ToolContext`、`ToolResult` |
 | [provider-api.md](protocols/provider-api.md) | `Provider`、`ModelInfo`、`ModelRequest`、`ModelStreamEvent`、`ProviderError` |
 

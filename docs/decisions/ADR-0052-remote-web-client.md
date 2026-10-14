@@ -173,3 +173,9 @@
 ### 第 1 轮实现核对：提问结算事件
 
 第 2 节的 `question.resolved` 是设计文字误记，既有 Core 没有该事件；本轮保持 Core 不变，提问回复后沿用 `runtime.status(running_tool)` 与对应 `tool.completed` 收束，重复回复仍报 `unknown_request`。权限回复仍广播已有的 `permission.resolved`。精确契约见 [RPC 协议](../protocols/rpc.md)。
+
+### 2026-10-14：第 2 轮握手定稿
+
+- 长期密钥只用 ECDSA，ECDH 只用临时密钥：同一 WebCrypto CryptoKey 不能兼任两种算法，手机私钥不可导出也无法转换用途。
+- 握手、配对的精确定义以 [remote-channel.md](../protocols/remote-channel.md) 为准。
+- 配对报文里的设备名对中继可见；中继本来就要在 `device list` 里显示它。

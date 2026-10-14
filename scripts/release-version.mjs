@@ -22,6 +22,7 @@ const JSON_VERSION_FILES = [
   "package.json",
   "packages/core/package.json",
   "packages/rpc/package.json",
+  "packages/remote/package.json",
   "packages/mcp/package.json",
   "packages/acp/package.json",
   "apps/cli/package.json",

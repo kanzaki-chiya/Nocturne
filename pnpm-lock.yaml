@@ -191,11 +191,17 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/remote: {}
+
   packages/rpc:
     dependencies:
       '@nocturne/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      '@nocturne/remote':
+        specifier: workspace:*
+        version: link:../remote
 
 packages:
 

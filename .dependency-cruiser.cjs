@@ -4,6 +4,18 @@
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [
+    {
+      name: "remote-no-node",
+      severity: "error",
+      from: { path: "^packages/remote/src/" },
+      to: { dependencyTypes: ["core"] },
+    },
+    {
+      name: "remote-no-workspace",
+      severity: "error",
+      from: { path: "^packages/remote/src/" },
+      to: { path: "^(packages/(?!remote/)|apps/)" },
+    },
     // ── 全局 ────────────────────────────────────────────────
     {
       name: "no-circular",

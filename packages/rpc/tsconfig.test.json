@@ -1,7 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    "lib": ["ES2023", "ES2024.Promise", "DOM"]
   },
   "include": ["test", "vitest.config.ts", "tsdown.config.ts"]
 }

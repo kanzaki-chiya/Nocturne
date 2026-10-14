@@ -9,6 +9,10 @@ export default defineConfig({
     // 离线测试直接对 core 源码运行，不需要先构建 dist
     alias: [
       {
+        find: /^@nocturne\/remote$/,
+        replacement: path.resolve(here, "../remote/src/index.ts"),
+      },
+      {
         find: /^@nocturne\/core\/protocol$/,
         replacement: path.resolve(here, "../core/src/protocol/index.ts"),
       },

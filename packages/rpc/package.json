@@ -28,5 +28,8 @@
   },
   "dependencies": {
     "@nocturne/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@nocturne/remote": "workspace:*"
   }
 }
