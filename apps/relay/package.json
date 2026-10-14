@@ -1,0 +1,32 @@
+{
+  "name": "@nocturne/relay",
+  "version": "0.9.0",
+  "description": "Nocturne 邀请制密文中继",
+  "license": "GPL-3.0-only",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "nocturne-relay": "dist/main.mjs"
+  },
+  "files": [
+    "dist",
+    "public"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nocturne/remote": "workspace:*",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.2",
+    "@nocturne/core": "workspace:*",
+    "@nocturne/rpc": "workspace:*"
+  }
+}

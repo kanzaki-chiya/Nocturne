@@ -20,6 +20,28 @@ export {
 } from "./pairing.js";
 export { createMemoryFramePair, type FrameTransport } from "./transport.js";
 export {
+  RelayError,
+  registerHost,
+  connectHostRelay,
+  connectDeviceRelay,
+  connectPairRelay,
+  type HostRelay,
+  type DeviceRelay,
+  type RelayConnection,
+} from "./relay/client.js";
+export {
+  RELAY_CLOSE_CODES,
+  MAX_CONTROL,
+  parseRelayMessage,
+  registerTranscript,
+  hostAuthTranscript,
+  deviceAuthTranscript,
+  verifySignature,
+  parseInvite,
+  type RelayMessage,
+  type RelayDevice,
+} from "./relay/protocol.js";
+export {
   connectChannel,
   acceptChannel,
   type SecureLineTransport,

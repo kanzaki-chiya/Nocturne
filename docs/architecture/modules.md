@@ -40,7 +40,8 @@
 - `skills`（技能发现与目录构建）只依赖 protocol、platform；由 `core/index` 与 `tools` 使用，不经公开 API 导出（见 [skills.md](skills.md)）。
 - `packages/mcp`（`@nocturne/mcp`）只允许依赖 `@nocturne/core` 的 `index` / `protocol/index` 两个入口与 `@modelcontextprotocol/sdk`——与 `apps/*` 同一检查规则；**Core 不依赖 `mcp`**（见 [mcp.md](mcp.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)）。
 - `packages/acp`（`@nocturne/acp`）只依赖 Core 公开入口与 `@agentclientprotocol/sdk`，由 CLI 经 `RuntimeOptions.externalAgents` 注入；Core 不依赖 ACP 实现。权限判定留在 Core 权限层，connector 只映射 ACP 主体与一次性选项，见 [subagent.md](subagent.md#17-外部-agentacp)。
-- `packages/remote`（`@nocturne/remote`）负责同构配对、签名握手与加密通道，只用标准 Web API，不依赖 Node、第三方或任何项目内包；协议见 [remote-channel.md](../protocols/remote-channel.md)。本轮 rpc 仅在测试开发依赖它，src 不引用；后续 rpc、中继与 desktop 网页入口接入时依赖它并同步扩展静态规则，Core 不依赖它。
+- `packages/remote`（`@nocturne/remote`）负责同构配对、签名握手、加密通道与中继客户端，只用标准 Web API，不依赖 Node、第三方或任何项目内包；见 [remote-channel.md](../protocols/remote-channel.md) 与 [relay.md](../protocols/relay.md)。rpc 仅开发测试依赖它，src 不引用；apps/relay 运行时依赖它。Core 不依赖它。
+- `apps/relay` 只依赖 remote、ws 与 Node 内置模块，不依赖 Core、RPC 或其他 workspace；Core/RPC 仅为端到端开发测试依赖，depcheck relay-only-remote 强制 src 边界。
 - 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。CLI 对 TUI 可惰性 `import()` 主入口，或静态引用 `@nocturne/tui/slash-catalog`、`@nocturne/tui/text-format`、`@nocturne/tui/provider-setup-flow`、`@nocturne/tui/provider-prompts` 与 `@nocturne/tui/provider-login`；命令表不得 import 任何模块，纯文本入口仅复用格式函数、protocol 类型与 `string-width`，三个共享向导入口及其间接依赖也不得加载 Ink/React，保证逐行模式不加载 Ink/React。其余 apps→apps 依赖禁止（[tui.md](../apps/tui.md) 第 9 节）。
 - 桌面端（`apps/desktop/src`）边界更窄：只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`，不引 core 运行时、其他 workspace 包与 Node 内置模块（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 7 节，depcheck `desktop-*` 规则强制）。
 
@@ -214,6 +215,12 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 
 ## 4. 客户端
 
+### apps/relay（独立中继服务）
+
+- 负责：邀请、登记、挑战认证、密文路由、限额、本地管理通道、静态托管、无载荷 Web Push。
+- 不负责：解密、RPC 语义、Agent 行为、桌面接入、手机网页。
+- 依赖：`@nocturne/remote` 与 `ws`；详见 [apps/relay.md](../apps/relay.md)。
+
 ### apps/cli（`nctrn`）
 
 - **负责**：参数解析；REPL 输入；把事件渲染为终端输出（流式文本、工具状态、diff 摘要）；权限确认提示并调用 `respondPermission`；退出码。
@@ -243,7 +250,7 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 
 ## 5. 未来模块（现在不创建目录）
 
-RPC 多客户端共享后台与远程能力边界已落地，见 [rpc.md](../protocols/rpc.md)；网络与加密模块按 [ADR-0052](../decisions/ADR-0052-remote-web-client.md) 后续轮次实施，本轮不创建。`packages/protocol` 拆包仍暂缓。
+RPC 多客户端、远程能力边界、加密与中继已落地；桌面接入与手机网页按 [ADR-0052](../decisions/ADR-0052-remote-web-client.md) 后续轮次实施。`packages/protocol` 拆包仍暂缓。
 
 `subagent` 已在 Phase 6 落地：它不是独立模块——接口在 `tools`、实现在 `agent`、装配在 `core/index`，见 [subagent.md](subagent.md) 第 3 节。
 

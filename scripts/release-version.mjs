@@ -26,6 +26,7 @@ const JSON_VERSION_FILES = [
   "packages/mcp/package.json",
   "packages/acp/package.json",
   "apps/cli/package.json",
+  "apps/relay/package.json",
   "apps/tui/package.json",
   "apps/desktop/package.json",
   "apps/desktop/src-tauri/tauri.conf.json",

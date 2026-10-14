@@ -25,6 +25,7 @@ function makeFixture() {
     "packages/mcp/package.json",
     "packages/acp/package.json",
     "apps/cli/package.json",
+    "apps/relay/package.json",
     "apps/tui/package.json",
     "apps/desktop/package.json",
     "apps/desktop/src-tauri/tauri.conf.json",
@@ -95,6 +96,7 @@ describe("release-version", () => {
     applyVersion(root, "0.6.0");
     const versions = collectVersions(root);
     expect(versions["packages/remote/package.json"]).toBe("0.6.0");
+    expect(versions["apps/relay/package.json"]).toBe("0.6.0");
     for (const [file, v] of Object.entries(versions)) {
       expect(v, file).toBe("0.6.0");
     }

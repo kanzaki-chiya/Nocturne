@@ -5,6 +5,12 @@
 module.exports = {
   forbidden: [
     {
+      name: "relay-only-remote",
+      severity: "error",
+      from: { path: "^apps/relay/src/" },
+      to: { path: "^(packages/(?!remote/)|apps/(?!relay/))" },
+    },
+    {
       name: "remote-no-node",
       severity: "error",
       from: { path: "^packages/remote/src/" },

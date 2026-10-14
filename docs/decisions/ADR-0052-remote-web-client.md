@@ -179,3 +179,10 @@
 - 长期密钥只用 ECDSA，ECDH 只用临时密钥：同一 WebCrypto CryptoKey 不能兼任两种算法，手机私钥不可导出也无法转换用途。
 - 握手、配对的精确定义以 [remote-channel.md](../protocols/remote-channel.md) 为准。
 - 配对报文里的设备名对中继可见；中继本来就要在 `device list` 里显示它。
+
+### 2026-10-14：第 3 轮中继协议定稿
+
+- 推送无载荷，由 service worker 显示固定文案。
+- 管理命令走本地管理通道，不直接写数据文件。
+- 精确协议见 [relay.md](../protocols/relay.md)；中继客户端位于同构 `packages/remote`，服务运行时只依赖 remote 与 ws。
+- 维护者澄清：device.remove/unregister 保留管理员吊销墓碑，防止同一公钥重新登记绕过吊销。

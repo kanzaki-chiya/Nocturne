@@ -17,6 +17,7 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `react` | 19.3.0 | MIT |
 | `react-dom` | 19.3.0 | MIT |
 | `string-width` | 8.2.2 | MIT |
+| `ws` | 8.22.0 | MIT |
 | `@tauri-apps/api` | 2.12.0 | Apache-2.0 OR MIT |
 | `@tauri-apps/plugin-dialog` | 2.8.0 | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-opener` | 2.6.0 | MIT OR Apache-2.0 |
@@ -26,6 +27,7 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | 开发与测试依赖 | 版本 | 许可证 |
 |---|---:|---|
 | `@types/node` | 24.13.5 | MIT |
+| `@types/ws` | 8.18.2 | MIT |
 | `@types/react` | 19.3.0 | MIT |
 | `@types/react-dom` | 19.3.0 | MIT |
 | `@testing-library/dom` | 10.4.2 | MIT |

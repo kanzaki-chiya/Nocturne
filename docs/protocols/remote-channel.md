@@ -3,6 +3,7 @@
 > 状态：已接受 v1（2026-10-14）｜决策：[ADR-0052](../decisions/ADR-0052-remote-web-client.md)｜代码：`packages/remote`
 
 本文是配对、签名握手与加密帧的唯一主文档。通道不负责真实网络、身份持久化或 RPC 方法权限；每条消息承载一条 UTF-8 JSON-RPC 报文，不含换行。
+中继认证、路由与客户端协议见 [relay.md](relay.md)。
 信任边界包含中继下发的网页未被篡改，见 [ADR-0052 第 4 节「绕不开的信任点」](../decisions/ADR-0052-remote-web-client.md#4-端到端加密)。
 
 ## 1. 编码
