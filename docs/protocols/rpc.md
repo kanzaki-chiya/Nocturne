@@ -279,6 +279,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 `createRpcServer` 可注入 `remote: { home, credentials, connect? }`；不注入时全部远程管理方法报 `-32004 / remote_unavailable`，没有网络行为。CLI 使用同一 RuntimeConfig 的用户 home 与凭据存储。本机握手成功、有登记且 enabled 才连接中继；本机断开或 shutdown 先关中继、再关全部手机连接。网络请求复用进程入口的代理 dispatcher。
 
 登记文件是用户级 `remote.json`：`{version:1,origin,hostId,enabled,devices:[{id,name,pub,createdAt,lastSeenAt?}]}`，pub 是配对得到的 raw 公钥 b64u，唯一设备鉴权来源。中继列表不能新增/覆盖可信公钥；只同步名称、时间、在线和推送状态，删除已不存在设备；未知设备只显示、不允许握手。
+设备轮询逐字段比较登记内容，无变化不写盘；损坏文件按未登记处理并保留，重新登记写入前改名为 `remote.json.corrupt-<时间戳>-<随机后缀>`，警告显示备份文件名。
 
 | 方法 | 参数 → 结果 |
 |---|---|

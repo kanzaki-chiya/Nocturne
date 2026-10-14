@@ -24,6 +24,7 @@ import { RpcProtocolError } from "../errors.js";
 import {
   deleteRegistration,
   loadRegistration,
+  preserveCorruptRegistration,
   saveRegistration,
   type RemoteRegistration,
 } from "./storage.js";
@@ -226,7 +227,19 @@ export class RemoteHost {
         : [];
     });
     const next = { ...r, devices };
-    await saveRegistration(this.options.home, next);
+    const unchanged =
+      devices.length === r.devices.length &&
+      devices.every((d, index) => {
+        const previous = r.devices[index];
+        return (
+          d.id === previous?.id &&
+          d.name === previous.name &&
+          d.pub === previous.pub &&
+          d.createdAt === previous.createdAt &&
+          d.lastSeenAt === previous.lastSeenAt
+        );
+      });
+    if (!unchanged) await saveRegistration(this.options.home, next);
     if (generation !== this.generation) return;
     this.registration = next;
     this.devices = list;
@@ -376,6 +389,7 @@ export class RemoteHost {
         identity,
       });
       let wrote = false;
+      let backupWarning: string | undefined;
       try {
         await this.options.credentials.set(CREDENTIAL, await exportIdentity(identity));
         wrote = true;
@@ -386,13 +400,14 @@ export class RemoteHost {
           enabled: true,
           devices: [],
         };
+        backupWarning = await preserveCorruptRegistration(this.options.home);
         await saveRegistration(this.options.home, registration);
         this.registration = registration;
       } catch {
         if (wrote) await this.options.credentials.delete(CREDENTIAL);
         throw new RemoteError("remote_storage_failed", "无法保存远程登记，已撤销本地凭据写入");
       }
-      this.warnings = [];
+      this.warnings = backupWarning ? [backupWarning] : [];
       this.connect();
       this.changed();
       return this.describe();

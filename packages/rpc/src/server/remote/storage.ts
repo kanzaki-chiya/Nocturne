@@ -77,6 +77,14 @@ export async function saveRegistration(
   }
 }
 
+export async function preserveCorruptRegistration(home: string): Promise<string | undefined> {
+  const loaded = await loadRegistration(home);
+  if (!loaded.warning) return undefined;
+  const name = `remote.json.corrupt-${Date.now()}-${randomUUID()}`;
+  await rename(join(home, "remote.json"), join(home, name));
+  return `损坏的远程登记文件已备份为 ${name}`;
+}
+
 export async function deleteRegistration(home: string): Promise<void> {
   await rm(join(home, "remote.json"), { force: true });
 }

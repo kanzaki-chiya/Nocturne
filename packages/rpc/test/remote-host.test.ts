@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -351,6 +351,60 @@ it("enabled:false 的已登记主机不连接", async () => {
   );
   await host.start();
   expect(factory).not.toHaveBeenCalled();
+  host.stop();
+});
+
+it("轮询登记不变时不写盘，名称和 lastSeenAt 变化时写盘", async () => {
+  let poll: (() => void) | undefined;
+  const interval = globalThis.setInterval;
+  vi.spyOn(globalThis, "setInterval").mockImplementation((callback, delay, ...args) => {
+    if (delay === 10000 && typeof callback === "function") poll = callback as () => void;
+    return interval(callback, delay, ...args);
+  });
+  const h = await registered();
+  const p = await pair(h);
+  const path = join(h.home, "remote.json");
+  const before = new Date(1000000);
+  await utimes(path, before, before);
+  expect(poll).toBeDefined();
+  const calls = vi.mocked(h.relay.listDevices).mock.calls.length;
+  poll?.();
+  await vi.waitFor(() => expect(h.relay.listDevices).toHaveBeenCalledTimes(calls + 1));
+  await h.client.call("remote.describe", {});
+  expect((await stat(path)).mtimeMs).toBe(before.getTime());
+  for (const patch of [{ name: "新的名字" }, { lastSeenAt: 12345 }]) {
+    const list = await h.relay.listDevices();
+    h.setDevices(list.map((d) => ({ ...d, ...patch })));
+    poll?.();
+    await vi.waitFor(async () => {
+      const saved = JSON.parse(await readFile(path, "utf8")) as {
+        devices: { id: string; name: string; lastSeenAt?: number }[];
+      };
+      expect(saved.devices.find((d) => d.id === p.phone.id)).toMatchObject(patch);
+    });
+    expect((await stat(path)).mtimeMs).not.toBe(before.getTime());
+    await utimes(path, before, before);
+  }
+});
+
+it("损坏文件重新登记前备份，内容不变且警告说明文件名", async () => {
+  const h = await harness();
+  await writeFile(join(h.home, "remote.json"), "broken original");
+  const host = new RemoteHost(
+    { home: h.home, credentials: h.credentials, connect: { registerHost: h.register } },
+    vi.fn(),
+    () => Promise.resolve(),
+  );
+  const status = await host.register(invite);
+  const backups = (await readdir(h.home)).filter((name) => name.startsWith("remote.json.corrupt-"));
+  expect(backups).toHaveLength(1);
+  expect(await readFile(join(h.home, backups[0] ?? ""), "utf8")).toBe("broken original");
+  expect(status.warnings[0]).toContain(backups[0]);
+  expect(JSON.parse(await readFile(join(h.home, "remote.json"), "utf8"))).toMatchObject({
+    version: 1,
+    enabled: true,
+    hostId: status.relay?.hostId,
+  });
   host.stop();
 });
 
