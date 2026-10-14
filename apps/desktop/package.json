@@ -8,12 +8,14 @@
   "scripts": {
     "dev": "tauri dev",
     "vite": "vite",
+    "build": "vite build --config vite.web.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run"
   },
   "dependencies": {
     "@nocturne/core": "workspace:*",
     "@nocturne/rpc": "workspace:*",
+    "@nocturne/remote": "workspace:*",
     "@tauri-apps/api": "2.12.0",
     "@tauri-apps/plugin-dialog": "2.8.0",
     "@tauri-apps/plugin-opener": "2.6.0",

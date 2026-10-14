@@ -22,6 +22,10 @@ import {
   connectChannel,
 } from "@nocturne/remote";
 import { RelayServer, type RelayLog } from "../src/server.js";
+import { PhoneConnection } from "../../desktop/src/web/connection.js";
+import { pairPhone, parsePairingLink } from "../../desktop/src/web/pairing.js";
+import { memoryStorage } from "../../desktop/src/web/storage.js";
+import { PhoneSessions } from "../../desktop/src/web/sessions.js";
 
 it("手机经本机中继完成扫码配对、加密 RPC 初始化、列表、恢复与事件订阅，日志和数据无会话内容", async () => {
   const dir = await mkdtemp(join(tmpdir(), "relay-e2e-"));
@@ -235,6 +239,116 @@ it("桌面后台登记、配对并服务手机加密 RPC，移除设备后拒绝
     await served;
     await relay.close();
     await new Promise<void>((resolve) => push.close(() => resolve()));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("网页连接模块经真实中继与桌面主机：配对、列表、提交、事件、权限回复", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "relay-phone-e2e-"));
+  const relay = new RelayServer(
+    { publicOrigin: "http://127.0.0.1:1", listen: "127.0.0.1:0", dataDir: join(dir, "relay") },
+    () => undefined,
+  );
+  const port = await relay.start();
+  const origin = `http://127.0.0.1:${port}`;
+  relay.config.publicOrigin = origin;
+  const { store: credentials } = await createCredentialStore(createPlatform(), join(dir, "home"), {
+    backend: "memory",
+  });
+  const server = createRpcServer({
+    nocturneVersion: "test",
+    remote: {
+      home: join(dir, "home"),
+      credentials,
+      connect: {
+        registerHost: (o) => registerHost({ ...o, origin }),
+        connectHostRelay: (o) => connectHostRelay({ ...o, origin }),
+      },
+    },
+    createRuntime: async () => ({
+      runtime: await createRuntime({
+        cwd: dir,
+        sessionsDir: join(dir, "sessions"),
+        interactive: true,
+        providers: [
+          new FakeProvider({
+            scripts: [
+              [
+                { type: "text_delta", text: "准备修改" },
+                {
+                  type: "tool_call",
+                  toolCallId: "w1",
+                  name: "write",
+                  input: { path: "output.txt", content: "测试内容" },
+                },
+                { type: "finish", reason: "tool_calls" },
+              ],
+              [
+                { type: "text_delta", text: "修改完成" },
+                { type: "finish", reason: "stop" },
+              ],
+            ],
+          }),
+        ],
+      }),
+    }),
+  });
+  const [s, c] = createMemoryTransportPair();
+  const served = server.serve(s);
+  const local = createRpcClient(c, { clientName: "desktop" });
+  let connection: PhoneConnection | undefined;
+  try {
+    await local.initialize();
+    const { session: localSession } = await local.runtime.createSession({ model: "fake/fake-1" });
+    const invite = await relay.store.invite(origin, 10000);
+    await local.call("remote.register", {
+      invite: `nocturne-invite:relay.example/${invite.split("/").at(-1) ?? ""}`,
+    });
+    await vi.waitFor(async () => {
+      expect((await local.call("remote.describe", {})).connection).toBe("online");
+    });
+    const offer = await local.call("remote.startPairing", {});
+    const storage = memoryStorage();
+    const host = await pairPhone(
+      storage,
+      parsePairingLink(offer.url, "https://relay.example"),
+      origin,
+      "网页测试手机",
+    );
+    const sessions = new PhoneSessions(() => undefined);
+    connection = new PhoneConnection({
+      origin,
+      identity: await storage.identity(),
+      host,
+      changed: () => undefined,
+      connected: (client) => sessions.connected(client),
+      disconnected: () => sessions.disconnected(),
+    });
+    connection.start();
+    await vi.waitFor(() => {
+      expect(connection?.state).toBe("online");
+    });
+    expect(sessions.list.some((item) => item.id === localSession.id)).toBe(true);
+    const entry = await sessions.open(localSession.id);
+    const turn = entry.session.submit({ text: "写入测试内容" });
+    await vi.waitFor(() => {
+      expect(entry.view.pendingPermission).toBeDefined();
+    });
+    const pending = entry.view.pendingPermission;
+    if (!pending) throw new Error("缺少权限请求");
+    await entry.session.respondPermission(pending.requestId, {
+      decision: "allow",
+      remember: "session",
+    });
+    expect(await turn).toBe("done");
+    expect(entry.view.pendingPermission).toBeUndefined();
+    expect(await readFile(join(dir, "output.txt"), "utf8")).toBe("测试内容");
+    expect(JSON.stringify(entry.view.entries)).toContain("修改完成");
+  } finally {
+    connection?.stop();
+    local.close();
+    await served;
+    await relay.close();
     await rm(dir, { recursive: true, force: true });
   }
 });

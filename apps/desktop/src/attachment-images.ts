@@ -3,6 +3,7 @@ import type { RpcSession } from "@nocturne/rpc/client";
 
 /** 消息流的窗口级图片缓存：按 sha256 复用 blob URL，未命中时回读当前会话附件。 */
 export interface AttachmentImageSource {
+  placeholder?: string;
   url: (attachment: ImageAttachment) => string | undefined;
   /** sha256（小写 hex）→ object URL，重复登记返回同一 URL */
   register: (data: Uint8Array, mimeType: ImageMimeType) => Promise<string>;

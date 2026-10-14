@@ -49,7 +49,7 @@ export interface OpenConversation {
   readonly listeners: Set<() => void>;
 }
 
-export function conversationStatus(entry: OpenConversation): SessionStatus {
+export function conversationStatus(entry: Pick<OpenConversation, "view" | "busy">): SessionStatus {
   if (entry.view.pendingPermission !== undefined || entry.view.pendingQuestion !== undefined) {
     return "pending";
   }

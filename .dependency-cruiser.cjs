@@ -5,6 +5,15 @@
 module.exports = {
   forbidden: [
     {
+      name: "phone-web-no-tauri",
+      severity: "error",
+      from: { path: "^apps/desktop/src/web/" },
+      to: {
+        path: "(@tauri-apps/|^apps/desktop/src/(tauri-host|updater|transport)\\.ts$)",
+        reachable: true,
+      },
+    },
+    {
       name: "relay-only-remote",
       severity: "error",
       from: { path: "^apps/relay/src/" },
@@ -290,7 +299,7 @@ module.exports = {
       severity: "error",
       comment: "桌面端不依赖其他 apps 与 packages（ADR-0046 第 7 节）",
       from: { path: "^apps/desktop/src/" },
-      to: { path: "^(apps/(?!desktop/)|packages/(?!rpc/|core/))" },
+      to: { path: "^(apps/(?!desktop/)|packages/(?!rpc/|core/|remote/))" },
     },
     {
       name: "desktop-no-node",

@@ -396,7 +396,15 @@ function conversationProps(rendered: { session: RpcSession; openUrl: (url: strin
 function mount(
   view: SessionView = createSessionView(),
   overrides: Partial<
-    Pick<ConversationProps, "cwd" | "subscribeEvents" | "images" | "fileLinks">
+    Pick<
+      ConversationProps,
+      | "cwd"
+      | "subscribeEvents"
+      | "images"
+      | "fileLinks"
+      | "onResubmit"
+      | "hidePersistentPermissions"
+    >
   > & { resolveFilesImpl?: RpcSession["resolveFiles"] } = {},
 ) {
   const { session, methods } = sessionFixture();
@@ -430,6 +438,30 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+it("远程模式隐藏重发和持久授权；桌面缺省仍保留", () => {
+  const view = imageView([]);
+  view.pendingPermission = permission();
+  const remote = mount(view, { onResubmit: undefined, hidePersistentPermissions: true });
+  expect(screen.queryByRole("button", { name: "重发" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "编辑并重发" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "本项目允许" })).toBeNull();
+  expect(screen.getByRole("button", { name: "本会话允许" })).toBeTruthy();
+  remote.unmount();
+  mount(view);
+  expect(screen.getByRole("button", { name: "重发" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "编辑并重发" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "本项目允许" })).toBeTruthy();
+});
+
+it("远程图片占位不读取附件", () => {
+  const load = vi.fn();
+  mount(imageView(), {
+    images: { ...createAttachmentImageSource(), placeholder: "图片（请在电脑上查看）", load },
+  });
+  expect(screen.getByText("图片（请在电脑上查看）")).toBeTruthy();
+  expect(load).not.toHaveBeenCalled();
 });
 
 describe("回复与代码复制", () => {

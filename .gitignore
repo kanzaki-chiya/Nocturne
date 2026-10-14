@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+apps/desktop/dist-web/
 *.tsbuildinfo
 
 # Test / coverage

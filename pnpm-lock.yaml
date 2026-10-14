@@ -62,6 +62,9 @@ importers:
       '@nocturne/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@nocturne/remote':
+        specifier: workspace:*
+        version: link:../../packages/remote
       '@nocturne/rpc':
         specifier: workspace:*
         version: link:../../packages/rpc

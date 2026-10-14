@@ -347,11 +347,22 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 ## 7. 依赖边界与运行方式
 
-`apps/desktop/src` 只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`，不引 core 运行时、其他 workspace 包、Node 内置模块（含 Node 全局，eslint `no-restricted-globals` + depcheck `desktop-*` 规则强制）。Vite/vitest 用 alias 直接跑 `packages/rpc/src/client` 与 `packages/core/src/protocol` 源码，dev 与测试不需要先构建 rpc。
+`apps/desktop/src` 只能引 `@nocturne/rpc/client`、`@nocturne/core/protocol` 与同构 `@nocturne/remote`，不引 core 运行时、其他 workspace 包、Node 内置模块（含 Node 全局，eslint `no-restricted-globals` + depcheck `desktop-*` 规则强制）。Vite/vitest 用 alias 直接跑源码，dev 与测试不需要先构建 rpc。
 
 - `pnpm desktop:dev`（先跑 `scripts/fetch-node.mjs` 补齐随附 Node，再 `pnpm --filter @nocturne/desktop dev` → `tauri dev`，自动先跑 `pnpm vite`）：开发运行，后台用 `apps/cli/dist/main.js`，需先 `pnpm build`。
 - `pnpm desktop:build`（根 `package.json`）：依次跑 `pnpm build` → `node scripts/bundle-nctrn.mjs` → `node scripts/fetch-node.mjs` → `cargo test`（`apps/desktop/src-tauri`）→ `tauri build`（`beforeBuildCommand` 自动先跑 `pnpm vite build`），任何一步失败即终止。产出 NSIS 安装包 `apps/desktop/src-tauri/target/release/bundle/nsis/Nocturne_<ver>_x64-setup.exe`：per-user 安装（`installMode: "currentUser"`，装进 `%LOCALAPPDATA%\Nocturne`，不需要管理员权限），不签名；`resources/nctrn.mjs` 与 `resources/node/{node.exe,LICENSE}` 随包放进安装目录（`nctrn.mjs` 在根、`node/` 子目录），无需用户自装 Node。`bundle.createUpdaterArtifacts: true` 时旁边还产出 `<setup>.exe.sig` 签名文件（需 `TAURI_SIGNING_PRIVATE_KEY`/`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，见 [workflow.md](../development/workflow.md) 第 8 节）。卸载器只删安装目录，用户数据（`%APPDATA%\io.github.kanzaki-chiya.nocturne`）按 Tauri 默认保留。Rust 工具链只在这条流程需要。
 - `pnpm release:build`（根 `package.json` → `scripts/release-build.mjs`）：发布总入口，bundle → npm pack → 取随附 Node → cargo test → tauri build → 生成 `latest.json`，产物收进 `release/<version>/`（不入库）。本地演练可传 `--config <覆盖.json>` 只覆盖 updater `pubkey`/`endpoints` 等字段。
-- `pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test`（vitest + jsdom，完全离线，进入默认测试集）覆盖 `src/` 与 `test/`；`pnpm build` 不构建桌面端，也不需要 Rust。
+- `pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test`（vitest + jsdom，完全离线，进入默认测试集）覆盖 `src/` 与 `test/`；`pnpm build` 构建手机网页，不构建 Tauri，也不需要 Rust。
 - 后台、工具、Hook 与 MCP 的真实进程测试使用跨包辅助函数 `scripts/test/process-cleanup.mjs`，启动即登记句柄并预登记孤儿 PID 文件，失败/超时后的 `afterEach` 先清进程树再有限重试删除临时目录；Windows `taskkill /T /F` 自身停滞时兜底收回已登记 PID。测试包装平台工厂，不增加生产 Runtime 接口。同步构建探针保留命令自身超时。
 - Rust 外壳只在 `desktop:*` 流程需要：在 `apps/desktop/src-tauri` 手动跑 `cargo build`、`cargo test`（切行、版本解析、关闭超时、进程级转发）、`cargo clippy --all-targets`；不进默认测试集。
+
+## 8. 手机网页
+
+`web.html` → `src/web/main.tsx` 是独立单栏手机入口，不加载桌面 App；WebHost 仅打开安全外链与写无内容诊断，不实现 DesktopHost。`vite.web.config.ts` 沿用桌面 alias 并引入 remote，构建到 `dist-web/index.html`，开发验收中继以 `--web-root apps/desktop/dist-web` 托管；发布打包与 HTTPS 真机验收属于第 6 轮。依赖边界由 `phone-web-no-tauri` 的可达检查强制。
+
+- `storage.ts` 的接口生产用 IndexedDB `nocturne-remote`，测试用内存；不可导出的 CryptoKey 直接结构化克隆，不导出私钥。一份手机身份共用多台电脑；只保存电脑公钥、id、名称与配对/最近连接时间，不持久化会话内容。打开请求持久存储，失败忽略。移除仅删除手机记录并提示在电脑移除设备。
+- 加载即清理配对片段，仅在内存留存；粘贴接受同源完整链接或片段。配对依次连接槽位、真实签名/MAC 与指纹校验、保存电脑，失败明确提示重新申请链接。iOS Safari 与主屏幕应用不共享 IndexedDB，提示添加后重新配对，依据见 ADR-0052 修订。
+- `PhoneConnection` 同时只连接一台电脑，离线等待 host online，在线建立加密通道再 initialize(interactive:true)。不兼容停止；当前 RPC mismatch 错误没有结构化版本，仅从既有文案取服务端版本，不更改协议。4003/4004 停止重连；4002 返回等待；其他断线从 1 秒翻倍至 30 秒并 ±20% 抖动。后台不主动断开、不重连，回前台若已断即重连。
+- `PhoneSessions` 保存已打开会话视图，重连逐个 resume 并按 lastSeq 订阅；不清空已显示内容。Conversations 含禁止的 turnChanges、回退等路径，故不直接复用；状态使用相同 conversationStatus 判定与 session-tree 路径/状态类型。会话列表全局读取并按最近活动排序，新建只能选择列表非子代理工作区、使用后台默认模型。
+- 会话复用 Conversation；工具默认折叠，文字输入另写小组件，不复用 Composer 的附件/技能/命令补全。onResubmit 可省略以隐藏重发，hidePersistentPermissions 隐藏永久授权，hideRequests 让外壳用底部面板统一显示权限和 QuestionCard；这些 prop 缺省保持桌面行为。远程图片源只返回「图片（请在电脑上查看）」占位，不读附件；不传 fileLinks/turnChanges/回退能力。另一端结算经视图关闭面板，unknown_request 静默关闭。
+- 导航使用浏览器 history；跟随系统深浅 token、44px 触控、安全区与 visualViewport 高度，输入软键盘不遮消息。未配对与关于页写明信任边界。

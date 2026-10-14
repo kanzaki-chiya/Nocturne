@@ -192,3 +192,10 @@
 - 电脑身份存凭据后端，键名 `remote/host-identity`，无系统后端拒绝登记，私钥不落明文。
 - 推送由桌面端在发系统通知时一并触发 `remote.push`，复用 ADR-0056 的判定，不在后台另写一套规则。
 - 中继吊销、认证失败或同身份被替换时停止重连。
+
+### 2026-10-14：第 5 轮手机网页入口与验收
+
+- 第 8 节的完整 DesktopHost 实现改为独立 `web.html` / `src/web/main.tsx` 手机外壳，不挂桌面 App。DesktopHost 大部分是 Tauri 进程、文件、更新与编辑器能力，桌面 App 是双栏布局；WebHost 只提供外链与无内容诊断，复用 Conversation 与状态判定，不模拟不可用的宿主方法。
+- Conversations 自动查询远程白名单禁止的 turnChanges，且包含回退、附件、输入历史与技能路径；手机使用薄的 PhoneSessions，只调用白名单内方法，复用 RPC 的同一视图 reducer 与 lastSeq 续接。
+- 真机验收移至第 6 轮部署 HTTPS 后。本轮使用 127.0.0.1 的安全上下文与桌面浏览器手机视口验证。
+- iOS 17.2 起添加到主屏幕会复制 cookies，但不会复制 IndexedDB 等其他本地存储，且之后不共享数据（[WebKit 官方说明](https://webkit.org/blog/14787/webkit-features-in-safari-17-2/)）。手机身份是 IndexedDB 中不可导出的 CryptoKey，所以 Safari 配对后提示在主屏幕应用重新配对；不把 cookie 复制误当作身份共享。

@@ -63,7 +63,11 @@ export interface ConversationProps {
   /** 非空闲（Turn 进行中 / 等待确认）时禁用重发与编辑重发（U-01） */
   busy: boolean;
   /** 重发一条用户消息：先 rewind(targetSeq, mode) 再 submit（Conversations.resubmit） */
-  onResubmit: (targetSeq: number, text: string, mode: RewindMode) => Promise<void>;
+  onResubmit?: ((targetSeq: number, text: string, mode: RewindMode) => Promise<void>) | undefined;
+  /** 手机端隐藏持久授权选项；缺省保留桌面行为。 */
+  hidePersistentPermissions?: boolean;
+  /** 底部面板由手机外壳统一渲染。 */
+  hideRequests?: boolean;
   turnChanges?: ReadonlyMap<number, TurnChanges>;
   onRewindFiles?: (seq: number) => Promise<void>;
   loadChangeDiff?: (seq: number, path: string) => Promise<TurnChangeDiff>;
@@ -718,7 +722,7 @@ function UserImage({
   const [url, setUrl] = useState<string>();
   const [error, setError] = useState<string>();
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || images.placeholder) return;
     let active = true;
     void images.load(attachment, session).then(
       (loaded) => {
@@ -732,6 +736,7 @@ function UserImage({
       active = false;
     };
   }, [attachment, images, session, visible]);
+  if (images.placeholder) return <span className="u-img-chip">{images.placeholder}</span>;
   if (error !== undefined) {
     return (
       <span className="u-img-chip" title={`图片加载失败：${error}`}>
@@ -875,6 +880,7 @@ function UserMessage({
       });
   };
   const sendResubmit = (content: string, rewindMode: "both" | "conversation") => {
+    if (!onResubmit) return;
     setError(undefined);
     setPending(true);
     void onResubmit(entry.seq, content, rewindMode).catch((reason: unknown) => {
@@ -1004,26 +1010,30 @@ function UserMessage({
               >
                 {copied ? "已复制" : "复制"}
               </button>
-              <button
-                type="button"
-                className="u-act"
-                disabled={busy || pending}
-                title={busyTitle ?? "编辑消息并重新发送"}
-                onClick={startEdit}
-              >
-                编辑并重发
-              </button>
-              <button
-                type="button"
-                className="u-act"
-                disabled={busy || pending}
-                title={busyTitle ?? "重新发送这条消息（连同之后的文件改动一起回退）"}
-                onClick={() => {
-                  sendResubmit(body, "both");
-                }}
-              >
-                重发
-              </button>
+              {onResubmit && (
+                <button
+                  type="button"
+                  className="u-act"
+                  disabled={busy || pending}
+                  title={busyTitle ?? "编辑消息并重新发送"}
+                  onClick={startEdit}
+                >
+                  编辑并重发
+                </button>
+              )}
+              {onResubmit && (
+                <button
+                  type="button"
+                  className="u-act"
+                  disabled={busy || pending}
+                  title={busyTitle ?? "重新发送这条消息（连同之后的文件改动一起回退）"}
+                  onClick={() => {
+                    sendResubmit(body, "both");
+                  }}
+                >
+                  重发
+                </button>
+              )}
             </div>
             {error !== undefined ? (
               <p className="conversation-error" role="alert">
@@ -2108,24 +2118,32 @@ function useReply<Reply>(send: (reply: Reply) => Promise<void>) {
   return { reply, busy, error };
 }
 
-function PermissionCard({
+export function PermissionCard({
   pending,
   session,
   cwd,
   shellKind,
+  hidePersistentPermissions = false,
 }: {
   pending: PendingPermission;
   session: RpcSession;
   cwd: string;
   shellKind?: string | undefined;
+  hidePersistentPermissions?: boolean;
 }) {
   const [feedback, setFeedback] = useState<string | null>(null);
   const { reply, busy, error } = useReply((value: PermissionReply) =>
     session.respondPermission(pending.requestId, value),
   );
-  const options: PermissionOption[] = pending.options.length
-    ? pending.options
-    : ["allow_once", "deny"];
+  const options: PermissionOption[] = (
+    pending.options.length ? pending.options : (["allow_once", "deny"] as PermissionOption[])
+  ).filter(
+    (option) =>
+      !hidePersistentPermissions ||
+      option === "allow_once" ||
+      option === "allow_session" ||
+      option === "deny",
+  );
   const optionsRef = useRef(options);
   optionsRef.current = options;
   const replyRef = useRef(reply);
@@ -2736,6 +2754,8 @@ function ConversationContent({
   turnChanges,
   onRewindFiles,
   loadChangeDiff,
+  hidePersistentPermissions,
+  hideRequests = false,
 }: ConversationProps) {
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -2977,13 +2997,14 @@ function ConversationContent({
           </button>
         </div>
       ) : null}
-      {view.pendingPermission ? (
+      {!hideRequests && view.pendingPermission ? (
         <div className="conversation-requests">
           <PermissionCard
             key={`permission:${view.pendingPermission.requestId}`}
             pending={view.pendingPermission}
             session={session}
             cwd={cwd}
+            {...(hidePersistentPermissions !== undefined ? { hidePersistentPermissions } : {})}
             {...(shellKind !== undefined ? { shellKind } : {})}
           />
         </div>

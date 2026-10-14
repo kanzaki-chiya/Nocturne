@@ -65,6 +65,7 @@ export default tseslint.config(
       "dist/",
       "node_modules/",
       "**/dist/",
+      "apps/desktop/dist-web/",
       "coverage/",
       "**/src-tauri/target/",
       "**/src-tauri/gen/",
