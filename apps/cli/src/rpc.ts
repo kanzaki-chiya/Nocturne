@@ -72,6 +72,13 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
 
     const server = createRpcServer({
       nocturneVersion: options.version,
+      remote: {
+        home: runtimeConfig.nocturneHome,
+        credentials: runtimeConfig.credentials,
+        diagnostics: (state) => {
+          io.stderr.write(`[remote] ${state}\n`);
+        },
+      },
       createRuntime: async ({ interactive }) => {
         const runtime = await createRuntime({
           cwd,

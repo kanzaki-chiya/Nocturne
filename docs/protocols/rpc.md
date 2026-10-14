@@ -235,7 +235,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 
 ## 7. 安全与日志
 
-- 本轮不监听端口或新增网络。stdio 本机连接仍由父进程持有；未来远程接入按 [ADR-0052](../decisions/ADR-0052-remote-web-client.md) 实施邀请、配对与加密，不能把能力白名单当作鉴权。
+- stdio 本机连接仍由父进程持有；配置了远程主机时由后台主动连中继，按 [ADR-0052](../decisions/ADR-0052-remote-web-client.md) 实施邀请、配对与加密，不能把能力白名单当作鉴权。全部 `remote.*` 方法仅开放给本机，不进入远程白名单。
 - 远程能力白名单在服务端显式登记，以 `RpcMethodName` 编译检查；新增方法默认不开放。方法越界和参数越界均报 `-32004 / remote_not_allowed`，且不调用 Core，不消费待处理请求：
 
 | 方法 | 远程限制 |
@@ -273,3 +273,27 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 ## 10. 客户端包
 
 `@nocturne/rpc/client` 运行时只依赖 `@nocturne/core/protocol`，对 `@nocturne/core` 只有 `import type`，也不使用 Node 内置模块（传输由使用方注入），由 `.dependency-cruiser.cjs` 的 `rpc-client-*` 规则强制。桌面端前端只引这个入口和 `protocol`，打包不会带进 Node 代码。入口：`createRpcClient(transport, { clientName, interactive? })`、`RpcError`、`trackSessionView`、`encodeBase64`。
+
+## 11. 远程主机
+
+`createRpcServer` 可注入 `remote: { home, credentials, connect? }`；不注入时全部远程管理方法报 `-32004 / remote_unavailable`，没有网络行为。CLI 使用同一 RuntimeConfig 的用户 home 与凭据存储。本机握手成功、有登记且 enabled 才连接中继；本机断开或 shutdown 先关中继、再关全部手机连接。网络请求复用进程入口的代理 dispatcher。
+
+登记文件是用户级 `remote.json`：`{version:1,origin,hostId,enabled,devices:[{id,name,pub,createdAt,lastSeenAt?}]}`，pub 是配对得到的 raw 公钥 b64u，唯一设备鉴权来源。中继列表不能新增/覆盖可信公钥；只同步名称、时间、在线和推送状态，删除已不存在设备；未知设备只显示、不允许握手。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `remote.describe` | `{}` → `RemoteStatus`；仅缓存，不联网 |
+| `remote.register` | `{invite}` → `RemoteStatus`；先登记中继，再存凭据与原子写文件，重复登记报 `remote_already_registered` |
+| `remote.unregister` | `{}` → `RemoteStatus`；在线等待 unregistered，离线也可清理本地但附管理员吊销警告 |
+| `remote.setEnabled` | `{enabled}` → `RemoteStatus`；关闭即断开中继及全部设备连接 |
+| `remote.startPairing` | `{}` → `{url,expiresAt}`；需要在线，新配对作废旧配对 |
+| `remote.cancelPairing` | `{}` → `null` |
+| `remote.removeDevice` | `{id}` → `RemoteStatus`；需要在线，删除中继记录及对应连接 |
+| `remote.disconnectDevice` | `{id}` → `null`；只断开当前连接，允许重连 |
+| `remote.push` | `{}` → `{sent}`；离线返回零 |
+
+`RemoteStatus`：`{registered,relay?:{origin,hostId},enabled,connection,devices,connections,pairing?:{expiresAt},warnings:string[]}`。connection 为 off/connecting/online/offline/revoked/replaced；devices 为 `{id,name,createdAt,lastSeenAt?,online,push}[]`，connections 为 `{deviceId,name,since}[]`。不含私钥、公钥或配对秘密。
+
+只给本机已握手连接发送 `remote.statusChanged {status}`、`remote.paired {device:{id,name}}`、`remote.pairingFailed {code}`。客户端用类型化 `call` 调用方法，`onNotification(method,handler)` 监听通知（返回退订函数）。配对帧等待 60 秒；错误沿用 RemoteChannelError 或 limit/revoked/timeout。
+
+断线以 1 秒起、翻倍、60 秒上限、±20% 抖动重连，成功后清零；4003/4004 记 revoked，4001 记 replaced，停止重连。诊断只记录连接状态，不含邀请、秘密或帧。状态错误属于 -32004，包括 remote_unavailable/remote_already_registered/remote_not_registered/remote_offline/remote_storage_failed/credential_missing/credential_backend_unavailable；中继 403/409/429 保留 invalid_invite/already_registered/rate_limited。

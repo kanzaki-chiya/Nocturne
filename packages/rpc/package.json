@@ -27,9 +27,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nocturne/core": "workspace:*"
-  },
-  "devDependencies": {
+    "@nocturne/core": "workspace:*",
     "@nocturne/remote": "workspace:*"
   }
 }

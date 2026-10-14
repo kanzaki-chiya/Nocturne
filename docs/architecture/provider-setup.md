@@ -99,7 +99,7 @@ interface ProviderSetupFile {
 
 ## 3. 凭据存储：交给操作系统
 
-凭据 id 分命名空间：服务商 id 禁止 `/`；MCP 使用 `mcp/<serverId>/<name>`，stdio 的 name 为环境变量名，HTTP 为小写请求头名。MCP 的保存、回滚与清理规则见 [mcp.md](mcp.md)。
+凭据 id 分命名空间：服务商 id 禁止 `/`；非服务商条目包括 `mcp/...` 和远程电脑身份 `remote/host-identity`（私钥 JWK，只存系统后端）。MCP 使用 `mcp/<serverId>/<name>`，stdio 的 name 为环境变量名，HTTP 为小写请求头名。MCP 的保存、回滚与清理规则见 [mcp.md](mcp.md)；远程主机见 [rpc.md](../protocols/rpc.md#11-远程主机)。
 
 API key **不以明文落盘**。向导把密钥交给操作系统自带的凭据保护能力，全部通过系统自带的命令完成，不引入原生依赖。账号登录记录的明文例外只在用户显式选择后发生，见下文。
 

@@ -523,6 +523,15 @@ describe("公开 API 与 RPC 方法集合一致", () => {
       ...Object.values(PROVIDER_FUNCTION_METHODS),
       "session.unsubscribe",
       "login.submitManual",
+      "remote.describe",
+      "remote.register",
+      "remote.unregister",
+      "remote.setEnabled",
+      "remote.startPairing",
+      "remote.cancelPairing",
+      "remote.removeDevice",
+      "remote.disconnectDevice",
+      "remote.push",
     ]);
     for (const method of server.methods) {
       if (method === "initialize" || method === "shutdown") continue;

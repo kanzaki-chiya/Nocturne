@@ -97,6 +97,12 @@ export class Hub {
     this.peers.delete(peer);
   }
 
+  notifyLocal(message: RpcMessage): void {
+    for (const peer of this.peers) {
+      if (peer.origin === "local" && peer.initialized) peer.send(message);
+    }
+  }
+
   /** `runtime.providersChanged` 广播给所有已握手的连接 */
   notifyProvidersChanged(): void {
     for (const peer of this.peers) {

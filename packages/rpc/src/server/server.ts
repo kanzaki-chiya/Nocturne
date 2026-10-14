@@ -69,6 +69,7 @@ import {
 import type { LineTransport } from "../shared/transport.js";
 import { MethodNotFoundError, RpcProtocolError, toRpcError } from "./errors.js";
 import { Hub, type HubPeer, type ProviderState, type RpcRuntimeHandle } from "./hub.js";
+import { RemoteHost, type RemoteHostOptions } from "./remote/host.js";
 import {
   asParams,
   decodeBase64,
@@ -91,6 +92,7 @@ export type { RpcRuntimeHandle } from "./hub.js";
  * `[redacted]`，避免密钥随报错文本回流客户端或进入日志。诊断记录本来就不含参数。
  */
 export const SENSITIVE_METHODS: Partial<Record<RpcMethodName, (p: Params) => string[]>> = {
+  "remote.register": (p) => (typeof p.invite === "string" ? [p.invite] : []),
   "runtime.updateSettings": (p) => (typeof p.reviewerKey === "string" ? [p.reviewerKey] : []),
   "provider.prepareProvider": (p) => {
     const credential = p.credential;
@@ -115,6 +117,7 @@ function headerSecrets(p: unknown): string[] {
 }
 
 export interface RpcServerOptions {
+  remote?: RemoteHostOptions | undefined;
   nocturneVersion: string;
   /**
    * 握手后创建 Runtime：客户端声明的 `interactive` 能力决定 Runtime 的 `interactive`
@@ -194,7 +197,16 @@ type HandlerTable = { [K in RpcMethodName]: Handler<K> };
 export function createRpcServer(options: RpcServerOptions): RpcServer {
   const hub = new Hub();
   let serving = false;
-  return {
+  const remote = options.remote
+    ? new RemoteHost(
+        options.remote,
+        (message) => {
+          hub.notifyLocal(message);
+        },
+        (transport) => server.serve(transport, { origin: "remote" }),
+      )
+    : undefined;
+  const server: RpcServer = {
     methods: RPC_METHOD_NAMES,
     async serve(transport, connectionOptions) {
       const origin = connectionOptions?.origin ?? "local";
@@ -202,7 +214,7 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
       if (origin === "local" && serving)
         throw new Error("RPC 服务端同一时刻只接一个客户端（本机连接）");
       if (origin === "local") serving = true;
-      const connection = new Connection(options, hub, transport, origin);
+      const connection = new Connection(options, hub, transport, origin, remote);
       hub.attach(connection);
       try {
         await connection.run();
@@ -212,6 +224,7 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
       }
     },
   };
+  return server;
 }
 
 class Connection implements HubPeer {
@@ -243,6 +256,7 @@ class Connection implements HubPeer {
     private readonly hub: Hub,
     private readonly transport: LineTransport,
     readonly origin: "local" | "remote",
+    private readonly remote: RemoteHost | undefined,
   ) {
     this.handlers = this.buildHandlers();
   }
@@ -257,6 +271,7 @@ class Connection implements HubPeer {
         this.inputEnded = true;
         if (this.origin === "local") {
           if (this.cleanupPromise === undefined) this.hub.stopping = true;
+          this.remote?.stop();
           void this.hub.closeRemotes();
           this.hub.interruptAll();
         } else {
@@ -456,6 +471,7 @@ class Connection implements HubPeer {
       this.shuttingDown = true;
       if (this.origin === "local") {
         this.hub.stopping = true;
+        this.remote?.stop();
         await this.hub.closeRemotes();
         this.hub.interruptAll();
       }
@@ -719,7 +735,25 @@ class Connection implements HubPeer {
   // ── 方法表 ───────────────────────────────────────────────
 
   private buildHandlers(): HandlerTable {
+    const remote = (): RemoteHost => {
+      if (!this.remote)
+        throw new RpcProtocolError("remote_unavailable", "服务端未提供远程主机功能");
+      return this.remote;
+    };
     return {
+      "remote.describe": () => remote().describe(),
+      "remote.register": (p) => remote().register(reqString(p, "invite")),
+      "remote.unregister": () => remote().unregister(),
+      "remote.setEnabled": (p) => {
+        const enabled = optBool(p, "enabled");
+        if (enabled === undefined) throw new InvalidParamsError("enabled 必须是布尔值");
+        return remote().setEnabled(enabled);
+      },
+      "remote.startPairing": () => remote().startPairing(),
+      "remote.cancelPairing": () => remote().cancelPairing(),
+      "remote.removeDevice": (p) => remote().removeDevice(reqString(p, "id")),
+      "remote.disconnectDevice": (p) => remote().disconnectDevice(reqString(p, "id")),
+      "remote.push": () => remote().push(),
       initialize: async (p) => {
         if (this.initPromise !== undefined) {
           throw new RpcProtocolError("already_initialized", "initialize 只能调用一次");
@@ -744,9 +778,10 @@ class Connection implements HubPeer {
             ? this.options.createRuntime({ clientName, interactive })
             : Promise.resolve(undefined)
         )
-          .then((handle) => {
+          .then(async (handle) => {
             if (handle !== undefined) this.hub.setHandle(handle);
             this.initialized = true;
+            if (this.origin === "local" && !this.hub.stopping) await this.remote?.start();
           })
           .catch((error: unknown) => {
             // 创建失败：允许客户端修正后重试

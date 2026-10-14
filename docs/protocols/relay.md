@@ -84,6 +84,8 @@ JWT header `{typ:"JWT",alg:"ES256"}`，claims `{aud:endpoint.origin,exp:now+12h,
 
 `registerHost({origin,code,identity,fetch?}):Promise<{hostId}>`，403/409/429 对应 RelayError 的 invalid_invite/already_registered/rate_limited。
 
+认证完成之前的 WebSocket 关闭也通过 `RelayError.closeCode` 保留数值关闭码，供主机判断吊销、认证失败与被替换后停止重连。
+
 `connectHostRelay({origin,identity,hostId}):Promise<HostRelay>`：onConnection 接收 `{conn,kind,device?,slot?,transport:FrameTransport}`；openPairingSlot、allowDevice({id,publicKey,name})、removeDevice、listDevices、push、unregister 的请求串行化；close 和 onClose(code)。
 
 `connectDeviceRelay({origin,identity,hostId}):Promise<DeviceRelay>`：online、onHostOnline、transport、subscribePush、unsubscribePush、onClose(code)。

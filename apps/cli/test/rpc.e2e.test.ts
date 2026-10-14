@@ -211,6 +211,18 @@ async function exitWithin(c: Child, ms = 20_000): Promise<number | null> {
 }
 
 describe("nctrn rpc --stdio（真实子进程）", () => {
+  it("握手后 remote.describe 使用后台注入的临时 home 与凭据存储", async () => {
+    const c = spawnRpc();
+    const client = createRpcClient(c.transport, { clientName: "remote-probe" });
+    await client.initialize();
+    expect(await client.call("remote.describe", {})).toMatchObject({
+      registered: false,
+      enabled: false,
+      connection: "off",
+    });
+    await client.shutdown();
+    expect(await exitWithin(c), c.stderr()).toBe(0);
+  }, 60000);
   it("管线化握手和查询后立即关闭 stdin：全部回复写出再退出", async () => {
     const c = spawnRpc();
     c.proc.stdin.end(

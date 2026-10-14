@@ -217,7 +217,6 @@ importers:
       '@nocturne/core':
         specifier: workspace:*
         version: link:../core
-    devDependencies:
       '@nocturne/remote':
         specifier: workspace:*
         version: link:../remote

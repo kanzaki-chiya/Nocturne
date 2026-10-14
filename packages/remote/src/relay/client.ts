@@ -22,6 +22,7 @@ export class RelayError extends Error {
       | "protocol_error"
       | "push_endpoint"
       | "closed",
+    readonly closeCode?: number,
   ) {
     super(`中继请求失败：${code}`);
     this.name = "RelayError";
@@ -231,7 +232,7 @@ async function socketConnection(
     socket.addEventListener("close", (event) => {
       closed = event.code;
       clearTimeout(timer);
-      if (!ready) reject(new RelayError("closed"));
+      if (!ready) reject(new RelayError("closed", event.code));
       waiter?.reject(new RelayError("closed"));
       waiter = undefined;
       for (const handler of closers) handler(event.code);

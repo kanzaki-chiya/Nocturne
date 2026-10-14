@@ -1,8 +1,9 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
-import { createRuntime, FakeProvider } from "@nocturne/core";
+import { createServer } from "node:http";
+import { expect, it, vi } from "vitest";
+import { createRuntime, FakeProvider, createPlatform, createCredentialStore } from "@nocturne/core";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
 import { createRpcServer, createMemoryTransportPair } from "@nocturne/rpc/server";
 import { createRpcClient } from "@nocturne/rpc/client";
@@ -138,6 +139,102 @@ it("手机经本机中继完成扫码配对、加密 RPC 初始化、列表、�
   } finally {
     localClient.close();
     await relay.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("桌面后台登记、配对并服务手机加密 RPC，移除设备后拒绝认证", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "relay-desktop-e2e-"));
+  let pushes = 0;
+  const push = createServer((request, response) => {
+    request.resume();
+    pushes++;
+    response.writeHead(201);
+    response.end();
+  });
+  await new Promise<void>((resolve) => push.listen(0, "127.0.0.1", resolve));
+  const pushAddress = push.address() as { port: number };
+  const relay = new RelayServer({
+    publicOrigin: "http://127.0.0.1:1",
+    listen: "127.0.0.1:0",
+    dataDir: join(dir, "relay"),
+    allowInsecurePush: true,
+    pushHosts: ["127.0.0.1"],
+  });
+  const port = await relay.start(),
+    origin = `http://127.0.0.1:${port}`;
+  relay.config.publicOrigin = origin;
+  const { store: credentials } = await createCredentialStore(createPlatform(), join(dir, "home"), {
+    backend: "memory",
+  });
+  const server = createRpcServer({
+    nocturneVersion: "test",
+    remote: {
+      home: join(dir, "home"),
+      credentials,
+      connect: {
+        registerHost: (options) => registerHost({ ...options, origin }),
+        connectHostRelay: (options) => connectHostRelay({ ...options, origin }),
+      },
+    },
+    createRuntime: async () => ({
+      runtime: await createRuntime({
+        cwd: dir,
+        sessionsDir: join(dir, "sessions"),
+        providers: [new FakeProvider({ scripts: [] })],
+      }),
+    }),
+  });
+  const [s, c] = createMemoryTransportPair(),
+    served = server.serve(s);
+  const local = createRpcClient(c, { clientName: "desktop" });
+  try {
+    await local.initialize();
+    const invite = await relay.store.invite(origin, 10000),
+      code = invite.split("/").at(-1) ?? "";
+    await local.call("remote.register", { invite: `nocturne-invite:relay.example/${code}` });
+    await vi.waitFor(async () => {
+      expect((await local.call("remote.describe", {})).connection).toBe("online");
+    });
+    const offer = await local.call("remote.startPairing", {}),
+      parsed = parsePairingFragment(new URL(offer.url).hash);
+    const phone = await generateIdentity({ extractable: false }),
+      pair = await connectPairRelay({ origin, slot: parsed.slot });
+    const hello = await createPairingHello(phone, parsed, "端到端手机"),
+      reply = new Promise<Uint8Array>((resolve) => pair.onFrame(resolve));
+    pair.send(hello.message);
+    const result = await finishPairing(hello.state, await reply);
+    await vi.waitFor(async () => {
+      expect((await local.call("remote.describe", {})).devices).toHaveLength(1);
+    });
+    const device = await connectDeviceRelay({ origin, identity: phone, hostId: result.hostId });
+    const channel = await connectChannel(device.transport, {
+      identity: phone,
+      hostPublicKey: result.hostPublicKey,
+    });
+    const client = createRpcClient(channel, { clientName: "phone" });
+    await client.initialize();
+    expect(await client.runtime.listSessions()).toEqual([]);
+    await device.subscribePush({
+      endpoint: `http://127.0.0.1:${pushAddress.port}/push`,
+      p256dh: Buffer.from(phone.publicKey).toString("base64url"),
+      auth: Buffer.alloc(16).toString("base64url"),
+    });
+    expect(await local.call("remote.push", {})).toEqual({ sent: 1 });
+    expect(pushes).toBe(1);
+    await local.call("remote.removeDevice", { id: phone.id });
+    await client.closed;
+    await expect(
+      connectDeviceRelay({ origin, identity: phone, hostId: result.hostId }),
+    ).rejects.toMatchObject({ code: "closed", closeCode: 4004 });
+    expect(await local.call("remote.push", {})).toEqual({ sent: 0 });
+    await local.shutdown();
+    await served;
+  } finally {
+    local.close();
+    await served;
+    await relay.close();
+    await new Promise<void>((resolve) => push.close(() => resolve()));
     await rm(dir, { recursive: true, force: true });
   }
 });

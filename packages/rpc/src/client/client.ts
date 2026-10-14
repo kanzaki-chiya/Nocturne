@@ -78,6 +78,7 @@ import type {
   RpcMethodName,
   RpcParams,
   RpcResult,
+  RpcServerNotifications,
   SessionOpened,
   SessionStateSummary,
 } from "../shared/methods.js";
@@ -402,6 +403,10 @@ export interface RpcLogin {
 }
 
 export interface RpcClient {
+  onNotification<M extends keyof RpcServerNotifications>(
+    method: M,
+    handler: (params: RpcServerNotifications[M]) => void,
+  ): () => void;
   /** 握手：必须是第一个调用；协议版本不一致时抛 `protocol_version_mismatch` */
   initialize(): Promise<InitializeResult>;
   readonly runtime: RpcRuntime;
@@ -443,6 +448,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   const globalListeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
   const providersChangedListeners = new Set<() => void>();
   const loginCompletedListeners = new Set<(n: LoginCompleted) => void>();
+  const notificationListeners = new Map<string, Set<(params: never) => void>>();
   let resolveClosed!: () => void;
   const closed = new Promise<void>((resolve) => {
     resolveClosed = resolve;
@@ -472,6 +478,15 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     const parsed = parseLine(line);
     if (parsed.kind === "error") return;
     const message = parsed.message;
+    if (typeof message.method === "string" && !isRpcId(message.id)) {
+      for (const handler of notificationListeners.get(message.method) ?? []) {
+        try {
+          handler(message.params as never);
+        } catch {
+          /* 监听器异常不影响其他监听器 */
+        }
+      }
+    }
     const id = message.id;
     if (isRpcId(id) && ("result" in message || "error" in message)) {
       const entry = pending.get(id);
@@ -812,6 +827,14 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   };
 
   return {
+    onNotification(method, handler) {
+      const listeners = notificationListeners.get(method) ?? new Set<(params: never) => void>();
+      notificationListeners.set(method, listeners);
+      listeners.add(handler);
+      return () => {
+        listeners.delete(handler);
+      };
+    },
     async initialize() {
       const result = await call("initialize", {
         protocolVersion: RPC_PROTOCOL_VERSION,

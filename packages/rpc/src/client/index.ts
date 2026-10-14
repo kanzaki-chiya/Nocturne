@@ -22,6 +22,7 @@ export { createMemoryTransportPair, type LineTransport } from "../shared/transpo
 export { RPC_ERROR, RPC_PROTOCOL_VERSION } from "../shared/jsonrpc.js";
 export type {
   ContextSummary,
+  RemoteStatus,
   InitializeParams,
   InitializeResult,
   LoginAccountStorage,

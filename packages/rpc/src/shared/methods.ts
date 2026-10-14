@@ -165,7 +165,37 @@ type Ret<K extends keyof RuntimeSession> = RuntimeSession[K] extends (...args: n
   : never;
 
 /** 方法名 → 参数与结果 */
+export interface RemoteStatus {
+  registered: boolean;
+  relay?: { origin: string; hostId: string };
+  enabled: boolean;
+  connection: "off" | "connecting" | "online" | "offline" | "revoked" | "replaced";
+  devices: {
+    id: string;
+    name: string;
+    createdAt: number;
+    lastSeenAt?: number;
+    online: boolean;
+    push: boolean;
+  }[];
+  connections: { deviceId: string; name: string; since: number }[];
+  pairing?: { expiresAt: number };
+  warnings: string[];
+}
+
 export interface RpcMethods {
+  "remote.describe": { params: Record<string, never>; result: RemoteStatus };
+  "remote.register": { params: { invite: string }; result: RemoteStatus };
+  "remote.unregister": { params: Record<string, never>; result: RemoteStatus };
+  "remote.setEnabled": { params: { enabled: boolean }; result: RemoteStatus };
+  "remote.startPairing": {
+    params: Record<string, never>;
+    result: { url: string; expiresAt: number };
+  };
+  "remote.cancelPairing": { params: Record<string, never>; result: null };
+  "remote.removeDevice": { params: { id: string }; result: RemoteStatus };
+  "remote.disconnectDevice": { params: { id: string }; result: null };
+  "remote.push": { params: Record<string, never>; result: { sent: number } };
   "agents.describeExternalAgents": {
     params: { workspaceRoot?: string | undefined };
     result: ExternalAgentsDescription;
@@ -479,6 +509,9 @@ export interface RpcClientNotifications {
 
 /** 服务端→客户端的通知 */
 export interface RpcServerNotifications {
+  "remote.statusChanged": { status: RemoteStatus };
+  "remote.paired": { device: { id: string; name: string } };
+  "remote.pairingFailed": { code: string };
   event: { sessionId: string; event: RuntimeEvent };
   /**
    * 配置变更方法（provider.commitProvider 等）成功后、响应之前推送：
@@ -490,6 +523,15 @@ export interface RpcServerNotifications {
 }
 
 const METHOD_TABLE: Record<RpcMethodName, true> = {
+  "remote.describe": true,
+  "remote.register": true,
+  "remote.unregister": true,
+  "remote.setEnabled": true,
+  "remote.startPairing": true,
+  "remote.cancelPairing": true,
+  "remote.removeDevice": true,
+  "remote.disconnectDevice": true,
+  "remote.push": true,
   initialize: true,
   shutdown: true,
   "runtime.listSessions": true,
