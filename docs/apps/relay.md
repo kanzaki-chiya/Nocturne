@@ -2,7 +2,7 @@
 
 > 状态：第 3 轮已实现｜前置：[ADR-0052](../decisions/ADR-0052-remote-web-client.md)｜线上协议：[relay.md](../protocols/relay.md)
 
-`@nocturne/relay` 是独立 Node ≥24 服务，使用 Node http 与 ws noServer；只依赖 remote 和 ws，不依赖 Core/RPC，后两者只用于开发测试。不解析、不缓存密文内容。本轮不接桌面端、不提供手机网页（public/index.html 为中文占位页）。
+`@nocturne/relay` 是独立 Node ≥24 服务，使用 Node http 与 ws noServer；只依赖 remote 和 ws，不依赖 Core/RPC，后两者只用于开发测试。不解析、不缓存密文内容。默认 public/index.html 保留中文占位页，第 5 轮手机网页用 `--web-root apps/desktop/dist-web` 托管；发布物集成与 HTTPS 真机验收在第 6 轮。
 
 ## 配置
 
@@ -47,6 +47,7 @@ expires 支持正整数 h/d，默认 7 天。invite create 输出明文邀请一
 有 Origin 的 upgrade 必须等于 publicOrigin，否则 HTTP 403；无 Origin 放行。每 30 秒 ping，下一周期未 pong terminate。转发前目标 bufferedAmount 超 8 MiB，4007 关闭目标。
 
 GET/HEAD 静态路径需位于 webRoot 内（也检查 realpath，拒绝穿越/外部符号链接）。按扩展名 Content-Type；index no-cache，其余 max-age=300。统一 CSP、nosniff、no-referrer，精确 CSP 见源码与线上协议。
+connect-src 根据 publicOrigin 显式允许对应 WebSocket 源；worker 与 manifest 仅同源，不开放内联脚本/样式或 eval，精确主表在 [relay 协议第 2 节](../protocols/relay.md#2-邀请与-http)。
 
 stdout JSON 行只含 time、event(connect/auth_ok/auth_failed/close/register/revoke/push)、role、id、code、received/sent 字节数、source。**不记帧内容、邀请码、签名、推送 endpoint**；邀请码只由管理命令返回。
 

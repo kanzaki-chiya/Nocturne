@@ -15,6 +15,7 @@ import {
 import { config, type ConfigInput, type RelayConfig } from "./config.js";
 import { Store, hash, type HostRecord, type DeviceRecord } from "./store.js";
 import { PushService } from "./push.js";
+import { staticCsp } from "./csp.js";
 
 interface Peer {
   ws: WebSocket;
@@ -159,10 +160,7 @@ export class RelayServer {
     res.end(JSON.stringify(value));
   }
   private async request(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    res.setHeader(
-      "Content-Security-Policy",
-      "default-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
-    );
+    res.setHeader("Content-Security-Policy", staticCsp(this.config.publicOrigin));
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     if (req.method === "GET" && req.url === "/healthz") {

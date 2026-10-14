@@ -366,3 +366,5 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 - `PhoneSessions` 保存已打开会话视图，重连逐个 resume 并按 lastSeq 订阅；不清空已显示内容。Conversations 含禁止的 turnChanges、回退等路径，故不直接复用；状态使用相同 conversationStatus 判定与 session-tree 路径/状态类型。会话列表全局读取并按最近活动排序，新建只能选择列表非子代理工作区、使用后台默认模型。
 - 会话复用 Conversation；工具默认折叠，文字输入另写小组件，不复用 Composer 的附件/技能/命令补全。onResubmit 可省略以隐藏重发，hidePersistentPermissions 隐藏永久授权，hideRequests 让外壳用底部面板统一显示权限和 QuestionCard；这些 prop 缺省保持桌面行为。远程图片源只返回「图片（请在电脑上查看）」占位，不读附件；不传 fileLinks/turnChanges/回退能力。另一端结算经视图关闭面板，unknown_request 静默关闭。
 - 导航使用浏览器 history；跟随系统深浅 token、44px 触控、安全区与 visualViewport 高度，输入软键盘不遮消息。未配对与关于页写明信任边界。
+- `public-web/manifest.webmanifest` 与 192/512 any、maskable、180 apple-touch 图标构成主屏幕应用；主题色沿用 token。`/sw.js` 固定路径、作用域 `/`，只监听 push 与 notificationclick，不监听 fetch、不缓存页面；无载荷推送固定文案「Nocturne：有会话需要你处理」，固定 tag 替换旧提醒。点击优先聚焦已有同源窗口，否则打开 `/`。
+- `PhonePush` 只在点击「开启推送通知」时请求权限，从 `/v1/info` 取 VAPID 公钥。订阅通过设备认证连接发送给当前电脑；其他已配对电脑下次连接补发，同一份浏览器订阅共用。关闭取消浏览器订阅，当前电脑立即 unsubscribe，其他电脑下次连接补发取消。拒绝给系统/网站设置指引；iOS 非 standalone 不显示按钮，提示添加主屏幕（iOS 16.4+）。前述状态不持久化会话内容或通知载荷。

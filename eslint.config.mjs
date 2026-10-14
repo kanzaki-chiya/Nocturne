@@ -53,6 +53,7 @@ export default tseslint.config(
       "**/*.config.ts",
       "**/*.config.mts",
       "**/*.config.mjs",
+      "apps/desktop/public-web/*.js",
     ],
     ...tseslint.configs.disableTypeChecked,
   },

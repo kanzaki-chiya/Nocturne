@@ -9,6 +9,7 @@ import { pairPhone, pairingError, parsePairingLink } from "./pairing";
 import { PhoneSessions, knownWorkspaces, phoneStatus } from "./sessions";
 import type { PairedHost, PhoneStorage } from "./storage";
 import { webHost, type WebHost } from "./host";
+import { browserPush, pushAvailable, type PhonePush } from "./push";
 
 export const TRUST_TEXT =
   "中继只转发密文，看不到会话内容。你仍需信任中继维护者及服务器不会篡改下发的手机网页；端到端加密防不住被篡改的网页。远程访问相当于在手机上执行代码，请妥善保管手机并及时移除丢失设备。";
@@ -41,16 +42,19 @@ export function PhoneApp({
   storage,
   initialFragment = "",
   host = webHost,
+  push: injectedPush,
 }: {
   storage: PhoneStorage;
   initialFragment?: string;
   host?: WebHost;
+  push?: PhonePush;
 }) {
   const [, render] = useState(0);
   const changed = () => {
     render((n) => n + 1);
   };
   const [sessions] = useState(() => new PhoneSessions(changed));
+  const [push] = useState(() => injectedPush ?? browserPush(changed));
   const [connection, setConnection] = useState<PhoneConnection>();
   const [hosts, setHosts] = useState<PairedHost[]>([]);
   const [page, setPage] = useState<Page>({ kind: "hosts" });
@@ -90,6 +94,7 @@ export function PhoneApp({
     }
   };
   useEffect(() => {
+    void push.refresh();
     let active = true;
     void storage
       .hosts()
@@ -139,12 +144,14 @@ export function PhoneApp({
           identity,
           host: computer,
           changed,
-          connected: async (client) => {
+          connected: async (client, relay) => {
             await sessions.connected(client);
             await storage.putHost({ ...computer, lastConnectedAt: Date.now() });
+            await push.attach(computer.hostId, relay).catch(() => undefined);
           },
           disconnected: () => {
             sessions.disconnected();
+            push.detach(computer.hostId);
           },
         });
         setConnection(channel);
@@ -159,6 +166,7 @@ export function PhoneApp({
     return () => {
       active = false;
       channel?.stop();
+      push.detach(computer.hostId);
       document.removeEventListener("visibilitychange", visibility);
     };
   }, [hostId, storage]);
@@ -313,6 +321,9 @@ export function PhoneApp({
           ) : hosts.length === 0 ? (
             <>
               <h2>把会话带在身边</h2>
+              {standalone() && (
+                <p className="phone-pair-first">在主屏幕应用里，请先粘贴电脑复制的配对链接。</p>
+              )}
               <p>在电脑的「设置 › 远程」登记中继，然后选择「配对新手机」，用相机扫码。</p>
               <p>{TRUST_TEXT}</p>
             </>
@@ -449,6 +460,33 @@ export function PhoneApp({
           >
             管理电脑与配对
           </button>
+          <section className="phone-push" aria-label="推送通知">
+            {!pushAvailable(iosBrowser(), standalone()) ? (
+              <p>添加到主屏幕后才能接收推送</p>
+            ) : push.state === "unsupported" ? (
+              <p>此浏览器不支持推送通知</p>
+            ) : (
+              <>
+                {push.state === "denied" && (
+                  <p>通知权限已被拒绝，请在系统设置或浏览器的网站设置中允许 Nocturne 通知。</p>
+                )}
+                {push.message && <p role="status">{push.message}</p>}
+                <button
+                  disabled={push.state === "working" || push.state === "denied"}
+                  onClick={() => {
+                    void (push.state === "enabled" ? push.disable() : push.enable());
+                  }}
+                >
+                  {push.state === "working"
+                    ? "正在设置推送…"
+                    : push.state === "enabled"
+                      ? "关闭推送通知"
+                      : "开启推送通知"}
+                </button>
+                {push.state === "enabled" && <small>已开启 · 只显示固定提醒，不发送会话内容</small>}
+              </>
+            )}
+          </section>
         </section>
       ) : (
         <>

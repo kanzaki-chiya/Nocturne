@@ -18,6 +18,8 @@
 
 `GET /v1/info` 返回 `{protocol:1,relayVersion,vapidPublicKey}`（raw P-256 公钥的 b64u）；`GET /healthz` 返回 `ok`。
 
+所有 HTTP 接口与静态资源带 CSP：`default-src 'self'`、`script-src 'self'`、`style-src 'self'`，`connect-src 'self'` 加配置 `publicOrigin` 对应的 `wss://`（http 开发环境为 `ws://`）源，`worker-src 'self'`、`manifest-src 'self'`、`img-src 'self' data:`、`object-src 'none'`、`base-uri 'none'`、`frame-ancestors 'none'`；不允许 unsafe-inline/unsafe-eval。另带 `X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`。手机 SW 不拦截 fetch、不缓存页面，行为见 [手机网页](../apps/desktop.md#8-手机网页)。
+
 ## 3. 电脑入口 `/v1/host`
 
 中继先发 `{t:"challenge",n:b64u(random(32))}`，10 秒内须回 `{t:"auth",id:hostId,sig}`。签名 `Sign_IdH(T("nocturne/relay/v1/host",origin,n,hostId))`，按已登记且未吊销公钥验签。成功 `{t:"ok"}`。失败或超时统一 `4004 auth_failed`，不说明原因。同 hostId 只允许一条连接，新连接认证成功后旧连接 `4001 replaced`。

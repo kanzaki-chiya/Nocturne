@@ -17,6 +17,7 @@ import {
 } from "@nocturne/remote";
 import { RelayServer, type RelayLog } from "../src/server.js";
 import { startAdmin, requestAdmin } from "../src/admin.js";
+import { staticCsp } from "../src/csp.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 function required<T>(value: T | undefined | null): T {
@@ -393,6 +394,7 @@ describe("relay", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("");
     expect(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(res.headers.get("content-security-policy")).toBe(staticCsp(f.origin));
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(res.headers.get("referrer-policy")).toBe("no-referrer");
     expect(res.headers.get("cache-control")).toBe("no-cache");
@@ -491,4 +493,16 @@ describe("relay", () => {
     expect(calls).toBe(1);
     expect(JSON.stringify(f.logs)).not.toContain(endpoint);
   });
+});
+
+it.each([
+  ["https://relay.example", "wss://relay.example"],
+  ["http://127.0.0.1:12345", "ws://127.0.0.1:12345"],
+])("CSP 从 %s 推导 WebSocket 源与 worker/manifest 范围", (origin, websocket) => {
+  const policy = staticCsp(origin ?? "");
+  expect(policy).toContain(`connect-src 'self' ${websocket}`);
+  expect(policy).toContain("worker-src 'self'");
+  expect(policy).toContain("manifest-src 'self'");
+  expect(policy).not.toContain("unsafe-inline");
+  expect(policy).not.toContain("unsafe-eval");
 });

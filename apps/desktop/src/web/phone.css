@@ -271,3 +271,12 @@
   scrollbar-color: var(--a-borderStrong) transparent;
   scrollbar-width: thin;
 }
+.phone-push {
+  border-top: 1px solid var(--a-border);
+  margin-top: 20px;
+  padding-top: 12px;
+}
+.phone-pair-first {
+  color: var(--a-accent) !important;
+  font-weight: 600;
+}
