@@ -7,5 +7,7 @@ export default defineConfig({
   outDir: "dist",
   platform: "node",
   target: "node24",
+  noExternal: ["@nocturne/remote"],
+  external: ["ws"],
   outExtensions: () => ({ js: ".mjs" }),
 });

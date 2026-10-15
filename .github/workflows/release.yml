@@ -1,6 +1,6 @@
 # 发布流水线（ADR-0050 第 4 节）：推送 v* 标签触发。
 # 主任务在 windows-latest 上跑完整检查与 pnpm release:build，
-# 产物（setup.exe、.sig、latest.json、tgz）经 gh release create 上传为草稿；
+# 产物（setup.exe、.sig、latest.json、nctrn tgz、中继 nocturne-relay tgz）经 gh release create 上传为草稿；
 # ubuntu/macos 任务只对 tgz 做安装冒烟，结果追加进草稿说明。
 # 用到的 secrets：GITHUB_TOKEN（内置）、TAURI_SIGNING_PRIVATE_KEY、
 # TAURI_SIGNING_PRIVATE_KEY_PASSWORD（更新包签名私钥，维护者配置）。
@@ -70,12 +70,17 @@ jobs:
         shell: bash
         run: node scripts/smoke-nctrn.mjs "release/$VERSION/nctrn-$VERSION.tgz"
 
+      - name: 中继 tgz 安装冒烟（本机）
+        shell: bash
+        run: node scripts/smoke-relay.mjs "release/$VERSION/nocturne-relay-$VERSION.tgz"
+
       - name: 创建草稿 Release 并上传产物
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           node scripts/release-notes.mjs "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+          printf '\n- Windows 中继 tgz 冒烟：通过\n' >> "$RUNNER_TEMP/release-notes.md"
           # 预发布号（含 -）标成 prerelease：GitHub 的 latest 不含预发布，updater 端点
           # /releases/latest/download/latest.json 因而不会把 rc 推给正式版用户
           prerelease=()
@@ -114,11 +119,16 @@ jobs:
       - name: 下载草稿 Release 里的 tgz
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release download "$GITHUB_REF_NAME" --pattern "nctrn-*.tgz" --dir .
+        run: gh release download "$GITHUB_REF_NAME" --pattern "nctrn-*.tgz" --pattern "nocturne-relay-*.tgz" --dir .
 
       - name: 安装冒烟
         id: smoke
         run: node scripts/smoke-nctrn.mjs ./nctrn-*.tgz
+
+      - name: 中继安装冒烟
+        id: relay-smoke
+        if: ${{ !cancelled() && steps.smoke.outcome != 'skipped' }}
+        run: node scripts/smoke-relay.mjs ./nocturne-relay-*.tgz
 
       - name: 把结果追加进草稿 Release 说明
         if: always()
@@ -126,6 +136,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          RELAY_OUTCOME: ${{ steps.relay-smoke.outcome }}
         run: |
           if [ "$SMOKE_OUTCOME" = "success" ]; then
             mark="通过"
@@ -134,4 +145,6 @@ jobs:
           fi
           gh release view "$GITHUB_REF_NAME" --json body --jq .body > "$RUNNER_TEMP/notes.md"
           printf '\n- %s tgz 安装冒烟：%s\n' "$RUNNER_OS" "$mark" >> "$RUNNER_TEMP/notes.md"
+          if [ "$RELAY_OUTCOME" = "success" ]; then relay_mark="通过"; else relay_mark="失败"; fi
+          printf '\n- %s 中继 tgz 冒烟：%s\n' "$RUNNER_OS" "$relay_mark" >> "$RUNNER_TEMP/notes.md"
           gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"

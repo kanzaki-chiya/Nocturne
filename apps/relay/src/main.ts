@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, type ConfigInput } from "./config.js";
@@ -23,8 +24,16 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       note: { type: "string" },
       expires: { type: "string" },
       host: { type: "string" },
+      version: { type: "boolean" },
     },
   });
+  if (values.version) {
+    const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as {
+      version: string;
+    };
+    console.log(pkg.version);
+    return;
+  }
   if (positionals[0] === "serve") {
     const input: ConfigInput = {};
     for (const [option, key] of [

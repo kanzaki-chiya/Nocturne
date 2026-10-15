@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,6 +48,12 @@ it("真实命令行经管理通道输出邀请与电脑列表；服务未运行�
       outExtensions: () => ({ js: ".mjs" }),
     });
     const entry = join(dir, "dist", "main.mjs");
+    const manifest = await readFile(new URL("../package.json", import.meta.url), "utf8");
+    await writeFile(join(dir, "package.json"), manifest);
+    expect(await command(entry, ["--version"])).toEqual({
+      code: 0,
+      output: `${(JSON.parse(manifest) as { version: string }).version}\n`,
+    });
     await relay.start();
     const admin = await startAdmin(relay);
     try {

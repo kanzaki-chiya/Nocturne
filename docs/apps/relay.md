@@ -2,7 +2,7 @@
 
 > 状态：第 3 轮已实现｜前置：[ADR-0052](../decisions/ADR-0052-remote-web-client.md)｜线上协议：[relay.md](../protocols/relay.md)
 
-`@nocturne/relay` 是独立 Node ≥24 服务，使用 Node http 与 ws noServer；只依赖 remote 和 ws，不依赖 Core/RPC，后两者只用于开发测试。不解析、不缓存密文内容。默认 public/index.html 保留中文占位页，第 5 轮手机网页用 `--web-root apps/desktop/dist-web` 托管；发布物集成与 HTTPS 真机验收在第 6 轮。
+`@nocturne/relay` 是独立 Node ≥24 服务，使用 Node http 与 ws noServer；只依赖 remote 和 ws，不依赖 Core/RPC，后两者只用于开发测试。不解析、不缓存密文内容。源码树的 public/index.html 是占位页；`scripts/pack-relay.mjs` 将 apps/relay/dist（含 sourcemap）与 apps/desktop/dist-web（完整替换包内 public/）组装为 `nocturne-relay-<version>.tgz`，附自建指南、LICENSE 与第三方声明。tsdown 内联私有 workspace remote，安装依赖仅精确版本 ws。`scripts/smoke-relay.mjs <tgz>` 在临时前缀安装、验证版本/静态资源/管理通道与正常关闭，不依赖仓库 web-root。
 
 ## 配置
 
@@ -30,6 +30,7 @@ relay-data.json v1 存 invites(hash/note?/createdAt/expiresAt/usedAt?)、hosts(i
 
 ```text
 nocturne-relay serve [配置参数]
+nocturne-relay --version
 nocturne-relay invite create [--note <名字>] [--expires 7d] [--data-dir <目录>]
 nocturne-relay invite list [--data-dir <目录>]
 nocturne-relay host list [--data-dir <目录>]

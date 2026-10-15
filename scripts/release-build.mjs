@@ -4,7 +4,7 @@
  *
  *   node scripts/release-build.mjs [--config <覆盖配置.json>] [--notes <文本>]
  *
- * 依次执行：pnpm build → bundle 单文件 → npm pack → 取随附 Node →
+ * 依次执行：pnpm build → bundle 单文件 → npm pack → 中继 pack → 取随附 Node →
  * cargo test → tauri build → 生成 latest.json，产物统一收集到
  * release/<version>/（已加入 .gitignore；每次构建先清空该版本目录）。
  *
@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url";
 
 import { extractNotes } from "./release-notes.mjs";
 import { packNpm } from "./pack-npm.mjs";
+import { packRelay } from "./pack-relay.mjs";
 import { run } from "./lib/proc.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -85,23 +86,26 @@ function main() {
   mkdirSync(releaseDir, { recursive: true });
   const bundleFile = join(tauriDir, "resources", "nctrn.mjs");
 
-  console.log("== 1/6 pnpm build");
+  console.log("== 1/7 pnpm build");
   run("pnpm", ["build"], { cwd: root });
 
-  console.log("== 2/6 bundle 单文件");
+  console.log("== 2/7 bundle 单文件");
   run("node", [join(root, "scripts", "bundle-nctrn.mjs")], { cwd: root });
 
-  console.log("== 3/6 npm pack");
+  console.log("== 3/7 npm pack");
   const tgz = packNpm({ bundleFile, out: releaseDir });
   console.log(`npm 包: ${tgz}`);
 
-  console.log("== 4/6 随附 Node");
+  console.log("== 4/7 中继 pack（含手机网页）");
+  console.log(`中继包: ${packRelay({ out: releaseDir })}`);
+
+  console.log("== 5/7 随附 Node");
   run("node", [join(root, "scripts", "fetch-node.mjs")], { cwd: root });
 
-  console.log("== 5/6 cargo test");
+  console.log("== 6/7 cargo test");
   run("cargo", ["test", "--manifest-path", join(tauriDir, "Cargo.toml")], { cwd: root });
 
-  console.log("== 6/6 tauri build");
+  console.log("== 7/7 tauri build");
   const args = ["--dir", join(root, "apps", "desktop"), "exec", "tauri", "build"];
   if (overridePath !== undefined) args.push("--config", overridePath);
   run("pnpm", args, { cwd: root });
