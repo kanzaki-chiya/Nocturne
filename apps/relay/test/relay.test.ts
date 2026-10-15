@@ -447,6 +447,60 @@ describe("relay", () => {
       ),
     ).toBe(403);
   });
+  describe("App WebView 源", () => {
+    const APP = "http://tauri.localhost";
+    function upgrade(f: { origin: string }, path: string, origin: string | undefined) {
+      const ws = new WebSocket(
+        `${f.origin.replace("http", "ws")}${path}`,
+        origin ? { origin } : {},
+      );
+      return new Promise<{ status: number } | { first: string } | { closed: number }>((done) => {
+        ws.once("unexpected-response", (_, res) => {
+          done({ status: required(res.statusCode) });
+          res.resume();
+          ws.terminate();
+        });
+        ws.once("message", (data) => {
+          done({ first: data.toString() });
+          ws.terminate();
+        });
+        ws.once("close", (code) => {
+          done({ closed: code });
+        });
+        ws.once("error", () => {
+          /* 拒绝升级由 unexpected-response 报告。 */
+        });
+      });
+    }
+    it("允许表内的源可以升级手机入口（device、pair）", async () => {
+      const f = await fixture();
+      const device = await upgrade(f, "/v1/device", APP);
+      expect(device).toHaveProperty("first");
+      expect(JSON.parse((device as { first: string }).first)).toMatchObject({ t: "challenge" });
+      const pair = await upgrade(f, "/v1/pair?slot=unknown", APP);
+      expect(pair).toEqual({ closed: 4008 });
+    });
+    it("App 源不能连电脑入口，其他源仍然拒绝，没有 Origin 的行为不变", async () => {
+      const f = await fixture();
+      expect(await upgrade(f, "/v1/host", APP)).toEqual({ status: 403 });
+      for (const origin of [
+        "http://tauri.localhost:80",
+        "https://tauri.localhost",
+        "http://localhost",
+        "tauri://localhost",
+        "null",
+      ])
+        expect(await upgrade(f, "/v1/device", origin)).toEqual({ status: 403 });
+      expect(await upgrade(f, "/v1/device", undefined)).toHaveProperty("first");
+      expect(await upgrade(f, "/v1/device", f.origin)).toHaveProperty("first");
+      expect(await upgrade(f, "/v1/host", undefined)).toHaveProperty("first");
+    });
+    it("HTTP 接口不为 App 源增加 CORS 头", async () => {
+      const f = await fixture();
+      const response = await fetch(`${f.origin}/v1/info`, { headers: { origin: APP } });
+      expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    });
+  });
   it("本地无载荷推送请求 JWT 正确、410 删除订阅、30 秒限频与允许表", async () => {
     const f = await hostFixture();
     let calls = 0;

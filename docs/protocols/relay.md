@@ -10,6 +10,17 @@
 
 控制消息为 WebSocket 文本帧里的 JSON 对象，`t` 为类型，字段必须恰好匹配；多余、缺失、未知类型或超过 16 KiB（UTF-8 字节）为 `protocol_error`。二进制帧承载通道帧；中继只处理路由头，不解析通道内容。
 
+## Origin 允许表
+
+WebSocket 升级请求带 `Origin` 时必须在表内，否则中继以 HTTP 403 拒绝；不带 `Origin`（Node 客户端、电脑后台）放行，行为不变。
+
+| Origin | 允许的入口 | 来源 |
+|---|---|---|
+| `publicOrigin` | `/v1/host`、`/v1/device`、`/v1/pair` | 手机网页由中继托管，页面源就是中继 |
+| `http://tauri.localhost` | `/v1/device`、`/v1/pair` | 安卓 App（[ADR-0059](../decisions/ADR-0059-android-app.md)）的 WebView 源，Tauri 2 安卓固定值，模拟器 android-36、WebView 133 实测 |
+
+表是代码常量 `APP_ORIGINS`，不可配置，不放开成任意源；`/v1/host` 不接受 App 源。签名转录里的 `origin` 与页面源无关，始终是客户端所连中继的 `publicOrigin`（`packages/remote` 的客户端从调用方传入的中继地址取，不读 `location.origin`）。HTTP 接口不发 CORS 头，App 源不能跨源调用它们：App 不需要 `/v1/info`（只服务网页推送）与 `/v1/register`（电脑端调用）。
+
 ## 2. 邀请与 HTTP
 
 邀请码 `code=b64u(random(18))`，24 字符；只存 SHA-256(code)。邀请串 `nocturne-invite:<host[:port]>/<code>`。`parseInvite` 接受首尾空白、主机名转小写，返回 `{origin:"https://<host[:port]>",code}`；拒绝路径、查询、用户信息、http 和其他格式，抛 `RemoteChannelError("protocol_error")`。

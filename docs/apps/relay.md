@@ -45,7 +45,7 @@ expires 支持正整数 h/d，默认 7 天。invite create 输出明文邀请一
 
 ## 网络、安全与日志
 
-有 Origin 的 upgrade 必须等于 publicOrigin，否则 HTTP 403；无 Origin 放行。每 30 秒 ping，下一周期未 pong terminate。转发前目标 bufferedAmount 超 8 MiB，4007 关闭目标。
+有 Origin 的 upgrade 必须等于 publicOrigin 或在 [App 源允许表](../protocols/relay.md#origin-允许表)内（仅手机入口），否则 HTTP 403；无 Origin 放行。每 30 秒 ping，下一周期未 pong terminate。转发前目标 bufferedAmount 超 8 MiB，4007 关闭目标。
 
 GET/HEAD 静态路径需位于 webRoot 内（也检查 realpath，拒绝穿越/外部符号链接）。按扩展名 Content-Type；index no-cache，其余 max-age=300。统一 CSP、nosniff、no-referrer，精确 CSP 见源码与线上协议。
 connect-src 根据 publicOrigin 显式允许对应 WebSocket 源；worker 与 manifest 仅同源，不开放内联脚本/样式或 eval，精确主表在 [relay 协议第 2 节](../protocols/relay.md#2-邀请与-http)。

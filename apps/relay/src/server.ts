@@ -12,7 +12,7 @@ import {
   verifySignature,
   type RelayMessage,
 } from "@nocturne/remote";
-import { config, type ConfigInput, type RelayConfig } from "./config.js";
+import { APP_ORIGINS, config, type ConfigInput, type RelayConfig } from "./config.js";
 import { Store, hash, type HostRecord, type DeviceRecord } from "./store.js";
 import { PushService } from "./push.js";
 import { staticCsp } from "./csp.js";
@@ -93,10 +93,6 @@ export class RelayServer {
       pair: new WebSocketServer({ noServer: true, maxPayload: 4096 }),
     };
     this.http.on("upgrade", (req, socket, head) => {
-      if (req.headers.origin !== undefined && req.headers.origin !== this.config.publicOrigin) {
-        socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
-        return;
-      }
       const url = new URL(req.url ?? "/", this.config.publicOrigin);
       const role =
         url.pathname === "/v1/host"
@@ -106,6 +102,16 @@ export class RelayServer {
             : url.pathname === "/v1/pair"
               ? "pair"
               : undefined;
+      const origin = req.headers.origin;
+      // App 的 WebView 源只放行手机用的两个入口；电脑入口用 Node 客户端，不带 Origin
+      const allowed =
+        origin === undefined ||
+        origin === this.config.publicOrigin ||
+        (role !== "host" && APP_ORIGINS.includes(origin));
+      if (!allowed) {
+        socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        return;
+      }
       if (!role) {
         socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
         return;

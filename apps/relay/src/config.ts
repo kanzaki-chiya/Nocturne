@@ -3,6 +3,12 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MAX_FRAME } from "@nocturne/remote";
 
+/**
+ * 安卓 App（ADR-0059）的 WebView 源：Tauri 2 安卓固定为 `http://tauri.localhost`
+ * （模拟器 android-36、WebView 133 实测）。固定值，不可配置，也不放开成任意源。
+ */
+export const APP_ORIGINS: readonly string[] = ["http://tauri.localhost"];
+
 export interface RelayConfig {
   listen: string;
   publicOrigin: string;
