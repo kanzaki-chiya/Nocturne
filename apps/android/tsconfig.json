@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // 与 apps/desktop 相同：复用的上游源码 typecheck 需要 node 类型，src 自身不使用 Node 全局
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src"]
+}

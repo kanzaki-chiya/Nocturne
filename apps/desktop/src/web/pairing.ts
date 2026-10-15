@@ -23,6 +23,24 @@ export function parsePairingLink(text: string, origin: string): ParsedOffer {
   if (url.origin !== origin) throw new Error("请在配对链接对应的中继网页上打开链接");
   return parsePairingFragment(url.hash);
 }
+/**
+ * App：配对链接必须带中继地址（页面源是 App 自己的固定源，不是中继）。
+ * 中继地址只接受 https，或本机开发用的 http://127.0.0.1，与 remote 客户端的限制一致。
+ */
+export function parsePairingTarget(text: string): { offer: ParsedOffer; origin: string } {
+  const input = text.trim();
+  if (/^#?pair=/.test(input))
+    throw new Error("请粘贴完整的配对链接（含中继地址），不要只粘贴 pair= 部分");
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new Error("配对链接格式不对");
+  }
+  const local = url.protocol === "http:" && url.hostname === "127.0.0.1";
+  if (url.protocol !== "https:" && !local) throw new Error("中继地址必须是 https");
+  return { offer: parsePairingFragment(url.hash), origin: url.origin };
+}
 export function pairingError(error: unknown): string {
   const code = error instanceof RemoteChannelError ? error.code : "";
   const messages: Record<string, string> = {
@@ -42,6 +60,7 @@ export async function pairPhone(
   deviceName: string,
   connect = connectPairRelay,
   timeoutMs = 60000,
+  rememberOrigin = false,
 ): Promise<PairedHost> {
   const identity = await storage.identity();
   const transport = await connect({ origin, slot: offer.slot });
@@ -65,6 +84,7 @@ export async function pairPhone(
       hostPub: encode(result.hostPublicKey),
       name: hosts.find((h) => h.hostId === result.hostId)?.name ?? `电脑 ${hosts.length + 1}`,
       pairedAt: Date.now(),
+      ...(rememberOrigin ? { origin } : {}),
     };
     await storage.putHost(host);
     return host;

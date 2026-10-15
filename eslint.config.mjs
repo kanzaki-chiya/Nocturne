@@ -25,8 +25,8 @@ export default tseslint.config(
     },
   },
   {
-    // 桌面端前端不使用 Node 全局（types 里带 node 仅为上游源码 typecheck）
-    files: ["apps/desktop/src/**/*.{ts,tsx}"],
+    // 桌面端与安卓 App 前端不使用 Node 全局（types 里带 node 仅为上游源码 typecheck）
+    files: ["apps/desktop/src/**/*.{ts,tsx}", "apps/android/src/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-globals": [
         "error",

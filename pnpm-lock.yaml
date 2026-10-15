@@ -39,6 +39,46 @@ importers:
         specifier: 5.0.1
         version: 5.0.1(@types/node@24.13.5)(jsdom@30.1.1)(vite@8.3.0(@types/node@24.13.5)(yaml@2.8.1))
 
+  apps/android:
+    dependencies:
+      '@nocturne/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@nocturne/remote':
+        specifier: workspace:*
+        version: link:../../packages/remote
+      '@nocturne/rpc':
+        specifier: workspace:*
+        version: link:../../packages/rpc
+      '@tauri-apps/api':
+        specifier: 2.12.0
+        version: 2.12.0
+      react:
+        specifier: 19.3.0
+        version: 19.3.0
+      react-dom:
+        specifier: 19.3.0
+        version: 19.3.0(react@19.3.0)
+    devDependencies:
+      '@tauri-apps/cli':
+        specifier: 2.12.0
+        version: 2.12.0
+      '@types/react':
+        specifier: 19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: 19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      '@vitejs/plugin-react':
+        specifier: 6.1.1
+        version: 6.1.1(vite@8.3.0(@types/node@24.13.5)(yaml@2.8.1))
+      jsdom:
+        specifier: 30.1.1
+        version: 30.1.1
+      vite:
+        specifier: 8.3.0
+        version: 8.3.0(@types/node@24.13.5)(yaml@2.8.1)
+
   apps/cli:
     dependencies:
       '@nocturne/acp':

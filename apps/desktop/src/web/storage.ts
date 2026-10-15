@@ -6,6 +6,8 @@ export interface PairedHost {
   name: string;
   pairedAt: number;
   lastConnectedAt?: number;
+  /** 这台电脑所在的中继（小写 URL origin）。App 的页面源不是中继，所以随电脑保存；网页不写，用页面源 */
+  origin?: string;
 }
 export interface PhoneStorage {
   identity(): Promise<Identity>;

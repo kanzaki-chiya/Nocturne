@@ -6,11 +6,12 @@ import type { ComposerSubmit } from "../Composer";
 import { projectKey } from "../session-tree";
 import { UsagePage } from "../UsagePage";
 import { PhoneConnection } from "./connection";
-import { pairPhone, pairingError, parsePairingLink } from "./pairing";
+import { pairPhone, pairingError, parsePairingLink, parsePairingTarget } from "./pairing";
 import { PhoneSessions, phoneStatus, submitAccepted, type PhoneCreateOptions } from "./sessions";
 import type { PairedHost, PhoneStorage } from "./storage";
 import { webHost, type WebHost } from "./host";
-import { browserPush, pushAvailable, type PhonePush } from "./push";
+import { pushAvailable, type PhonePush } from "./push";
+import { webPlatform, type PhoneExtensionApi, type PhonePlatform } from "./platform";
 import {
   applyTheme,
   clearDisconnects,
@@ -62,7 +63,8 @@ type Page =
   | { kind: "project"; hostId: string; path: string }
   | { kind: "session"; hostId: string; sessionId: string }
   | { kind: "settings"; hostId?: string }
-  | { kind: "usage"; hostId: string };
+  | { kind: "usage"; hostId: string }
+  | { kind: "ext"; page: string; hostId?: string };
 
 const STATE_TEXT: Record<string, string> = {
   online: "已连接",
@@ -83,17 +85,27 @@ export function PhoneApp({
   initialFragment = "",
   host = webHost,
   push: injectedPush,
+  platform = webPlatform,
 }: {
   storage: PhoneStorage;
   initialFragment?: string;
   host?: WebHost;
-  push?: PhonePush;
+  /** 网页传 `browserPush`；不传（App）则没有推送，设置页不出现推送区块 */
+  push?: PhonePush | ((changed: () => void) => PhonePush);
+  platform?: PhonePlatform;
 }) {
   const [, render] = useState(0);
   const changed = () => {
     render((n) => n + 1);
   };
-  const [sessions] = useState(() => new PhoneSessions(changed));
+  const platformRef = useRef(platform);
+  platformRef.current = platform;
+  const [sessions] = useState(
+    () =>
+      new PhoneSessions(changed, (sessionId, type, seq, live) => {
+        platformRef.current.observer?.event?.(sessionId, type, seq, live);
+      }),
+  );
   // 消息里的图片经 readAttachment 回读；过大的由后台拒绝，占位条显示原因
   const [images] = useState<AttachmentImageSource>(() => ({
     ...createAttachmentImageSource(),
@@ -105,11 +117,15 @@ export function PhoneApp({
     },
     [images],
   );
-  const [push] = useState(() => injectedPush ?? browserPush(changed));
+  const [push] = useState(() =>
+    typeof injectedPush === "function" ? injectedPush(changed) : injectedPush,
+  );
   const [connection, setConnection] = useState<PhoneConnection>();
   const [hosts, setHosts] = useState<PairedHost[]>([]);
   const [page, setPage] = useState<Page>({ kind: "welcome" });
   const [offer, setOffer] = useState<ParsedOffer>();
+  /** 本次配对的中继：网页是页面源，App 取自配对链接 */
+  const [offerOrigin, setOfferOrigin] = useState(() => location.origin);
   const [link, setLink] = useState("");
   const [deviceName, setDeviceName] = useState(
     navigator.userAgent.includes("iPhone")
@@ -159,7 +175,7 @@ export function PhoneApp({
     applyTheme(theme);
   }, [theme]);
   useEffect(() => {
-    void push.refresh();
+    void push?.refresh();
     let active = true;
     void storage
       .hosts()
@@ -167,7 +183,7 @@ export function PhoneApp({
         if (!active) return;
         setHosts(list);
         setReady(true);
-        if (initialFragment) {
+        if (initialFragment && platform.relay === "page") {
           try {
             setOffer(parsePairingLink(initialFragment, location.origin));
           } catch (e) {
@@ -191,6 +207,9 @@ export function PhoneApp({
       window.removeEventListener("popstate", pop);
     };
   }, [storage]);
+  /** 页面可见，或 App 开了「后台保持连接」：都要保持连接 */
+  const shouldConnect = () =>
+    platformRef.current.keepConnected === true || document.visibilityState !== "hidden";
   const hostId = "hostId" in page ? page.hostId : undefined;
   const computer = hosts.find((h) => h.hostId === hostId);
   useEffect(() => {
@@ -208,35 +227,41 @@ export function PhoneApp({
       .identity()
       .then((identity) => {
         if (!active) return;
+        const origin = platform.relay === "page" ? location.origin : target.origin;
+        if (!origin) {
+          setError("这台电脑的配对记录缺少中继地址，请移除后重新配对");
+          return;
+        }
         channel = new PhoneConnection({
-          origin: location.origin,
+          origin,
           identity,
           host: target,
           changed,
           connected: async (client, relay) => {
             await sessions.connected(client);
             await storage.putHost({ ...target, lastConnectedAt: Date.now() });
-            await push.attach(target.hostId, relay).catch(() => undefined);
+            await push?.attach(target.hostId, relay).catch(() => undefined);
           },
           disconnected: (reason) => {
             recordDisconnect(target.name, reason);
+            platformRef.current.observer?.disconnected?.(target, reason);
             sessions.disconnected();
-            push.detach(target.hostId);
+            push?.detach(target.hostId);
           },
         });
         setConnection(channel);
-        channel.visibility(document.visibilityState !== "hidden");
+        channel.visibility(shouldConnect());
         channel.start();
       })
       .catch(() => {
         setError("无法读取手机身份，请检查网站存储权限");
       });
-    const visibility = () => channel?.visibility(document.visibilityState !== "hidden");
+    const visibility = () => channel?.visibility(shouldConnect());
     document.addEventListener("visibilitychange", visibility);
     return () => {
       active = false;
       channel?.stop();
-      push.detach(target.hostId);
+      push?.detach(target.hostId);
       document.removeEventListener("visibilitychange", visibility);
     };
     // hosts 变化（重命名）不重连；切换电脑才重连
@@ -261,7 +286,10 @@ export function PhoneApp({
     };
   }, []);
   useEffect(() => {
-    const worker = navigator.serviceWorker as ServiceWorkerContainer | undefined;
+    // service worker 只有网页的推送会用；App 没有推送，不监听
+    const worker = push
+      ? (navigator.serviceWorker as ServiceWorkerContainer | undefined)
+      : undefined;
     const message = (e: MessageEvent) => {
       if ((e.data as { t?: unknown } | null)?.t === "nocturne.attention") setAttention(true);
     };
@@ -296,6 +324,32 @@ export function PhoneApp({
   }, [attention, online, loaded, hostId]);
   const entry = page.kind === "session" ? sessions.opened.get(page.sessionId) : undefined;
   const connected = online;
+  const extension: PhoneExtensionApi = {
+    open: (name) => {
+      navigate({ kind: "ext", page: name, ...(hostId ? { hostId } : {}) });
+    },
+    host: computer,
+    connected,
+  };
+  // 平台观察者：已配对电脑与连接状态变化（App 据此维护后台服务与常驻通知）
+  useEffect(() => {
+    platformRef.current.observer?.hosts?.(hosts);
+  }, [hosts]);
+  const reportedState = `${computer?.hostId ?? ""}|${connection?.state ?? "offline"}|${connection?.message ?? ""}`;
+  const lastReported = useRef("");
+  useEffect(() => {
+    if (lastReported.current === reportedState) return;
+    lastReported.current = reportedState;
+    platformRef.current.observer?.state?.(
+      computer,
+      connection?.state ?? "offline",
+      connection?.message ?? "",
+    );
+  });
+  // 「后台保持连接」开关变化：立即按新值重新判定是否保持
+  useEffect(() => {
+    connection?.visibility(shouldConnect());
+  }, [platform.keepConnected, connection]);
   const statuses = Object.fromEntries(
     [...sessions.opened].map(([id, opened]) => [id, phoneStatus(opened)]),
   );
@@ -326,7 +380,7 @@ export function PhoneApp({
       void target.session.recordInputHistory(input.text).catch(() => undefined);
   };
 
-  const pushSection = (
+  const pushSection = push && (
     <section className="phone-section" aria-label="推送通知">
       <h3>推送通知</h3>
       {!pushAvailable(iosBrowser(), standalone()) ? (
@@ -366,7 +420,14 @@ export function PhoneApp({
       onSubmit={(e) => {
         e.preventDefault();
         try {
-          setOffer(parsePairingLink(link, location.origin));
+          if (platform.relay === "page") {
+            setOffer(parsePairingLink(link, location.origin));
+            setOfferOrigin(location.origin);
+          } else {
+            const target = parsePairingTarget(link);
+            setOffer(target.offer);
+            setOfferOrigin(target.origin);
+          }
           setLink("");
           setError("");
         } catch (cause) {
@@ -383,7 +444,9 @@ export function PhoneApp({
           onChange={(e) => {
             setLink(e.target.value);
           }}
-          placeholder="https://…/#pair=… 或 pair=…"
+          placeholder={
+            platform.relay === "page" ? "https://…/#pair=… 或 pair=…" : "https://…/#pair=…"
+          }
         />
       </label>
       <button className="phone-primary" disabled={!link.trim()}>
@@ -401,6 +464,8 @@ export function PhoneApp({
         return "设置";
       case "usage":
         return "用量";
+      case "ext":
+        return platform.pages?.[page.page]?.title ?? "设置";
       case "project":
         return plainWorkspace !== undefined && projectKey(page.path) === projectKey(plainWorkspace)
           ? "普通对话"
@@ -438,11 +503,19 @@ export function PhoneApp({
           onClick={() => {
             void operation(async () => {
               try {
-                const paired = await pairPhone(storage, offer, location.origin, deviceName);
+                const paired = await pairPhone(
+                  storage,
+                  offer,
+                  offerOrigin,
+                  deviceName,
+                  undefined,
+                  undefined,
+                  platform.relay === "link",
+                );
                 setOffer(undefined);
                 setAddingHost(false);
                 setHosts(await storage.hosts());
-                setInstallHint(iosBrowser() && !standalone());
+                setInstallHint(platform.relay === "page" && iosBrowser() && !standalone());
                 navigate({ kind: "home", hostId: paired.hostId }, true);
               } catch (e) {
                 throw new Error(pairingError(e));
@@ -462,11 +535,14 @@ export function PhoneApp({
         ) : (
           <>
             <h2>把会话带在身边</h2>
-            {standalone() && (
+            {platform.relay === "page" && standalone() && (
               <p className="phone-pair-first">在主屏幕应用里，请先粘贴电脑复制的配对链接。</p>
             )}
-            <p>在电脑的「设置 › 远程」登记中继，然后选择「配对新手机」，用相机扫码。</p>
-            <p>{TRUST_TEXT}</p>
+            <p>
+              {platform.pairHint ??
+                "在电脑的「设置 › 远程」登记中继，然后选择「配对新手机」，用相机扫码。"}
+            </p>
+            <p>{platform.trustText ?? TRUST_TEXT}</p>
             {pairForm}
           </>
         )}
@@ -636,6 +712,12 @@ export function PhoneApp({
         <p role="status">{connected ? "正在打开会话…" : "连接后会打开会话。"}</p>
       </section>
     );
+  } else if (page.kind === "ext") {
+    body = (
+      <section className="phone-body phone-settings">
+        {platform.pages?.[page.page]?.render(extension)}
+      </section>
+    );
   } else if (page.kind === "usage") {
     body = (
       <section className="phone-body phone-usage">
@@ -709,6 +791,7 @@ export function PhoneApp({
             </button>
           )}
         </section>
+        {platform.background?.(extension)}
         {pushSection}
         <section className="phone-section" aria-label="连接诊断">
           <h3>连接诊断</h3>
@@ -748,6 +831,7 @@ export function PhoneApp({
             </>
           )}
           <small>只记在这台手机上，不含会话内容。</small>
+          {platform.diagnostics?.(extension)}
         </section>
         <section className="phone-section" aria-label="主题">
           <h3>主题</h3>
@@ -790,7 +874,7 @@ export function PhoneApp({
         <section className="phone-section" aria-label="关于">
           <h3>关于与信任边界</h3>
           <p>{ABILITY_TEXT}</p>
-          <p>{TRUST_TEXT}</p>
+          <p>{platform.trustText ?? TRUST_TEXT}</p>
         </section>
       </section>
     );
@@ -855,6 +939,7 @@ export function PhoneApp({
           </button>
         ) : page.kind === "settings" ||
           page.kind === "usage" ||
+          page.kind === "ext" ||
           page.kind === "welcome" ||
           offer ? (
           <span className="phone-header-side" />

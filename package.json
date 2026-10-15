@@ -19,6 +19,8 @@
     "depcheck": "dependency-cruiser packages apps --config .dependency-cruiser.cjs",
     "desktop:dev": "node scripts/fetch-node.mjs && pnpm --filter @nocturne/desktop dev",
     "desktop:build": "pnpm build && node scripts/bundle-nctrn.mjs && node scripts/fetch-node.mjs && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml && pnpm --dir apps/desktop exec tauri build",
+    "android:dev": "pnpm --filter @nocturne/android android:dev",
+    "android:build": "pnpm --filter @nocturne/android android:build",
     "release:build": "node scripts/release-build.mjs"
   },
   "devDependencies": {

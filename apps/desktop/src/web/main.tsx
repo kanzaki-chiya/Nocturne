@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import { PhoneApp } from "./App";
 import { indexedStorage } from "./storage";
 import { takePairingFragment } from "./pairing";
-import { registerWorker } from "./push";
+import { browserPush, registerWorker } from "./browser-push";
 import "../styles.css";
 import "./phone.css";
 
@@ -11,4 +11,6 @@ const fragment = takePairingFragment(location, history);
 void registerWorker().catch(() => undefined);
 const root = document.getElementById("root");
 if (root)
-  createRoot(root).render(<PhoneApp storage={indexedStorage()} initialFragment={fragment} />);
+  createRoot(root).render(
+    <PhoneApp storage={indexedStorage()} initialFragment={fragment} push={browserPush} />,
+  );

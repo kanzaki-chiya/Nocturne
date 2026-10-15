@@ -44,6 +44,7 @@
 - `apps/relay` 只依赖 remote、ws 与 Node 内置模块，不依赖 Core、RPC 或其他 workspace；Core/RPC 仅为端到端开发测试依赖，depcheck relay-only-remote 强制 src 边界。
 - 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。CLI 对 TUI 可惰性 `import()` 主入口，或静态引用 `@nocturne/tui/slash-catalog`、`@nocturne/tui/text-format`、`@nocturne/tui/provider-setup-flow`、`@nocturne/tui/provider-prompts` 与 `@nocturne/tui/provider-login`；命令表不得 import 任何模块，纯文本入口仅复用格式函数、protocol 类型与 `string-width`，三个共享向导入口及其间接依赖也不得加载 Ink/React，保证逐行模式不加载 Ink/React。其余 apps→apps 依赖禁止（[tui.md](../apps/tui.md) 第 9 节）。
 - 桌面端（`apps/desktop/src`）边界更窄：只能引 `@nocturne/rpc/client`、`@nocturne/core/protocol` 与同构 `@nocturne/remote`，不引 core 运行时、其他 workspace 包与 Node 内置模块（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 7 节，depcheck `desktop-*` 规则强制）。手机入口 `src/web` 及其可达依赖不得加载 Tauri API、`tauri-host`、`updater` 或桌面行传输，由 `phone-web-no-tauri` 强制；模块职责见 [桌面应用第 8 节](../apps/desktop.md#8-手机网页)。
+- 安卓 App（`apps/android/src`，[ADR-0059](../decisions/ADR-0059-android-app.md)）复用手机网页入口 `apps/desktop/src/web` 及其可达模块，边界与桌面端相同（只引 `@nocturne/rpc/client`、`@nocturne/core/protocol`、`@nocturne/remote`，不引 Node 内置模块），并且不得引入网页专属的 `browser-push`（service worker 与 Web Push）、桌面外壳（`tauri-host`、`updater`、`transport`）与桌面专属 Tauri 插件，由 `android-*` 规则强制。反方向由 `desktop-no-other-workspace` 保证：桌面端与网页入口不依赖 `apps/android`。
 
 依赖规则已由 dependency-cruiser 固化，见 [workflow.md](../development/workflow.md)。
 

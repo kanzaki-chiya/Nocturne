@@ -278,7 +278,7 @@ module.exports = {
       name: "desktop-no-core-runtime",
       severity: "error",
       comment: "桌面端不能引 @nocturne/core 运行时（ADR-0046 第 7 节）",
-      from: { path: "^apps/desktop/src/" },
+      from: { path: "^apps/(desktop|android)/src/" },
       to: {
         path: "^packages/core/src/",
         pathNot: "^packages/core/src/protocol/index\\.ts$",
@@ -288,7 +288,7 @@ module.exports = {
       name: "desktop-rpc-client-only",
       severity: "error",
       comment: "桌面端只能引 @nocturne/rpc/client 入口（ADR-0046 第 7 节）",
-      from: { path: "^apps/desktop/src/" },
+      from: { path: "^apps/(desktop|android)/src/" },
       to: {
         path: "^packages/rpc/src/",
         pathNot: "^packages/rpc/src/client/index\\.ts$",
@@ -305,8 +305,34 @@ module.exports = {
       name: "desktop-no-node",
       severity: "error",
       comment: "桌面端前端不使用 Node 内置模块（ADR-0046 第 7 节）",
-      from: { path: "^apps/desktop/src/" },
+      from: { path: "^apps/(desktop|android)/src/" },
       to: { dependencyTypes: ["core"] },
+    },
+    // ── 安卓 App（ADR-0059）：复用手机网页入口 apps/desktop/src/web 及其可达依赖；
+    //    网页入口不能反过来依赖 App（desktop-no-other-workspace 已禁止 desktop → apps/android）
+    {
+      name: "android-no-web-only",
+      severity: "error",
+      comment: "App 入口不引入网页专属的 service worker 与 Web Push（ADR-0059 第 1 节）",
+      from: { path: "^apps/android/src/" },
+      to: { path: "^apps/desktop/src/web/browser-push\\.ts$", reachable: true },
+    },
+    {
+      name: "android-no-desktop-shell",
+      severity: "error",
+      comment: "App 入口不引桌面外壳（桌面命令、更新器、桌面行传输）与桌面专属 Tauri 插件",
+      from: { path: "^apps/android/src/" },
+      to: {
+        path: "(@tauri-apps/plugin-|^apps/desktop/src/(tauri-host|updater|transport)\\.ts$)",
+        reachable: true,
+      },
+    },
+    {
+      name: "android-no-other-workspace",
+      severity: "error",
+      comment: "App 只依赖自己、桌面端的手机网页入口与 rpc/core/remote 的公开入口",
+      from: { path: "^apps/android/src/" },
+      to: { path: "^(apps/(?!android/|desktop/)|packages/(?!rpc/|core/|remote/))" },
     },
     {
       name: "cli-tui-static-boundary",

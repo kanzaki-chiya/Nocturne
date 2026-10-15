@@ -1,0 +1,34 @@
+{
+  "name": "@nocturne/android",
+  "version": "0.10.0",
+  "description": "Nocturne 安卓 App（Tauri 2 外壳加载随包的手机网页，ADR-0059）",
+  "license": "GPL-3.0-only",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "vite": "vite",
+    "build:web": "vite build",
+    "tauri": "tauri",
+    "android:dev": "tauri android dev",
+    "android:build": "tauri android build --debug --apk --target aarch64",
+    "android:build:emulator": "tauri android build --debug --apk --target x86_64",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nocturne/core": "workspace:*",
+    "@nocturne/remote": "workspace:*",
+    "@nocturne/rpc": "workspace:*",
+    "@tauri-apps/api": "2.12.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "jsdom": "30.1.1",
+    "vite": "8.3.0"
+  }
+}

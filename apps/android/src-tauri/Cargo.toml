@@ -1,0 +1,21 @@
+[package]
+name = "nocturne-android"
+version = "0.10.0"
+description = "Nocturne Android shell (Tauri)"
+license = "GPL-3.0-only"
+publish = false
+edition = "2021"
+
+[lib]
+name = "nocturne_android_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.0", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.0", features = [] }
+
+[features]
+# `tauri build` 打开它，让 WebView 使用打包进 APK 的 dist（而不是 devUrl）
+custom-protocol = ["tauri/custom-protocol"]

@@ -81,7 +81,16 @@ export class PhoneSessions {
   private generation = 0;
   private readonly opening = new Map<string, Promise<PhoneSession>>();
   private tracked: Promise<void> = Promise.resolve();
-  constructor(private readonly changed: () => void) {}
+  constructor(
+    private readonly changed: () => void,
+    /** 平台观察者（App 探针）：只给事件类型与序号，live=false 表示重连后的回放 */
+    private readonly onEvent?: (
+      sessionId: string,
+      type: string,
+      seq: number | undefined,
+      live: boolean,
+    ) => void,
+  ) {}
   async connected(client: RpcClient): Promise<void> {
     this.client = client;
     const generation = ++this.generation;
@@ -167,6 +176,7 @@ export class PhoneSessions {
     entry.tracker = await trackSessionView(
       session,
       (_view, event) => {
+        this.onEvent?.(session.id, event.type, "seq" in event ? event.seq : undefined, subscribed);
         for (const listener of entry.listeners) listener();
         this.changed();
         if (subscribed && event.type === "turn.completed") void this.refreshTurnChanges(entry);
