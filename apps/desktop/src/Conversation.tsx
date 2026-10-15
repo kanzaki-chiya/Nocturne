@@ -741,7 +741,7 @@ function UserImage({
     return (
       <span className="u-img-chip" title={`图片加载失败：${error}`}>
         <ImageIcon />
-        {attachment.file}
+        {images.showErrors ? error : attachment.file}
       </span>
     );
   }

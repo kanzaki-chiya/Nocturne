@@ -37,8 +37,11 @@ export function SessionScreen({
   openUrl,
   onError,
   onChanged,
+  plain = false,
 }: {
   entry: PhoneSession;
+  /** 普通对话工作区：没有项目文件索引，@ 引用不可用（同桌面） */
+  plain?: boolean;
   connected: boolean;
   images: AttachmentImageSource;
   openUrl: (url: string) => void;
@@ -86,8 +89,6 @@ export function SessionScreen({
   const submit = async (input: ComposerSubmit): Promise<boolean> => {
     if (entry.dead) throw new Error("电脑尚未连接");
     if (view.pendingPermission ?? view.pendingQuestion) throw new Error("请先处理待确认的请求");
-    // 输入历史尽力记录，失败不影响发送
-    if (input.text !== "") void session.recordInputHistory(input.text).catch(() => undefined);
     setBusy(true);
     try {
       await submitAccepted(
@@ -110,6 +111,8 @@ export function SessionScreen({
     } finally {
       setBusy(false);
     }
+    // 与桌面相同：消息被接收后才记入输入历史，记录失败不影响发送
+    if (input.text !== "") void session.recordInputHistory(input.text).catch(() => undefined);
     onChanged();
     return true;
   };
@@ -187,6 +190,9 @@ export function SessionScreen({
           load: () => session.describeContext(),
           key: `${view.entries.length}:${view.status}`,
         }}
+        fileRefs={plain ? null : { load: () => session.fileIndex(), key: view.turnCount }}
+        readInputHistory={() => session.readInputHistory()}
+        getVisionHint={controls.visionHint}
         shell={{
           label: controls.shell?.effective?.kind ?? controls.shell?.selected ?? "—",
           note: controls.shellControl.note,

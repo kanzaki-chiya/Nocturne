@@ -105,6 +105,13 @@ export const IconHistory = () => (
     <path d="M10 6.5V10l2.5 1.8" {...stroke} />
   </Icon>
 );
+export const IconAt = () => (
+  <Icon>
+    <circle cx="10" cy="10" r="3" {...stroke} />
+    <path d="M13 7v4.2a2 2 0 0 0 4 0V10a7 7 0 1 0-2.8 5.6" {...stroke} />
+  </Icon>
+);
+
 export const IconTerminal = () => (
   <Icon>
     <rect x="2.5" y="3.5" width="15" height="13" rx="2" {...stroke} />

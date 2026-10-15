@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { RpcError } from "@nocturne/rpc/client";
 import type { ParsedOffer } from "@nocturne/remote";
-import type { AttachmentImageSource } from "../attachment-images";
+import { createAttachmentImageSource, type AttachmentImageSource } from "../attachment-images";
 import type { ComposerSubmit } from "../Composer";
 import { projectKey } from "../session-tree";
 import { PhoneConnection } from "./connection";
@@ -54,13 +54,6 @@ export function standalone(): boolean {
     (navigator as Navigator & { standalone?: boolean }).standalone === true
   );
 }
-const images: AttachmentImageSource = {
-  placeholder: "图片（请在电脑上查看）",
-  url: () => undefined,
-  register: () => Promise.reject(new Error("请在电脑上查看图片")),
-  load: () => Promise.reject(new Error("请在电脑上查看图片")),
-  dispose: () => undefined,
-};
 type Page =
   | { kind: "welcome" }
   | { kind: "home"; hostId: string }
@@ -98,6 +91,17 @@ export function PhoneApp({
     render((n) => n + 1);
   };
   const [sessions] = useState(() => new PhoneSessions(changed));
+  // 消息里的图片经 readAttachment 回读；过大的由后台拒绝，占位条显示原因
+  const [images] = useState<AttachmentImageSource>(() => ({
+    ...createAttachmentImageSource(),
+    showErrors: true,
+  }));
+  useEffect(
+    () => () => {
+      images.dispose();
+    },
+    [images],
+  );
   const [push] = useState(() => injectedPush ?? browserPush(changed));
   const [connection, setConnection] = useState<PhoneConnection>();
   const [hosts, setHosts] = useState<PairedHost[]>([]);
@@ -295,7 +299,6 @@ export function PhoneApp({
     if (!hostId) throw new Error("电脑尚未连接");
     const target = await sessions.create(path, options);
     navigate({ kind: "session", hostId, sessionId: target.session.id });
-    if (input.text !== "") await target.session.recordInputHistory(input.text);
     await submitAccepted(
       target,
       {
@@ -313,6 +316,9 @@ export function PhoneApp({
         void sessions.refresh().catch(() => undefined);
       },
     );
+    // 与桌面相同：被接收后才记入输入历史，失败不影响发送
+    if (input.text !== "")
+      void target.session.recordInputHistory(input.text).catch(() => undefined);
   };
 
   const pushSection = (
@@ -542,6 +548,9 @@ export function PhoneApp({
         entry={entry}
         connected={connected}
         images={images}
+        plain={
+          plainWorkspace !== undefined && projectKey(entry.workspace) === projectKey(plainWorkspace)
+        }
         openUrl={(url) => {
           host.openUrl(url);
         }}

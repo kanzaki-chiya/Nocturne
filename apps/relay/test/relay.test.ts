@@ -521,6 +521,7 @@ it.each([
   expect(policy).toContain(`connect-src 'self' ${websocket}`);
   expect(policy).toContain("worker-src 'self'");
   expect(policy).toContain("manifest-src 'self'");
+  expect(policy).toContain("img-src 'self' data: blob:");
   expect(policy).not.toContain("unsafe-inline");
   expect(policy).not.toContain("unsafe-eval");
 });

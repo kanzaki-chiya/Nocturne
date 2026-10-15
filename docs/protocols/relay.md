@@ -18,7 +18,7 @@
 
 `GET /v1/info` 返回 `{protocol:1,relayVersion,vapidPublicKey}`（raw P-256 公钥的 b64u）；`GET /healthz` 返回 `ok`。
 
-所有 HTTP 接口与静态资源带 CSP：`default-src 'self'`、`script-src 'self'`、`style-src 'self'`，`connect-src 'self'` 加配置 `publicOrigin` 对应的 `wss://`（http 开发环境为 `ws://`）源，`worker-src 'self'`、`manifest-src 'self'`、`img-src 'self' data:`、`object-src 'none'`、`base-uri 'none'`、`frame-ancestors 'none'`；不允许 unsafe-inline/unsafe-eval。另带 `X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`。手机 SW 不拦截 fetch、不缓存页面，行为见 [手机网页](../apps/desktop.md#8-手机网页)。
+所有 HTTP 接口与静态资源带 CSP：`default-src 'self'`、`script-src 'self'`、`style-src 'self'`，`connect-src 'self'` 加配置 `publicOrigin` 对应的 `wss://`（http 开发环境为 `ws://`）源，`worker-src 'self'`、`manifest-src 'self'`、`img-src 'self' data: blob:`（手机网页的图片预览与会话内图片用同源 blob URL）、`object-src 'none'`、`base-uri 'none'`、`frame-ancestors 'none'`；不允许 unsafe-inline/unsafe-eval。另带 `X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`。手机 SW 不拦截 fetch、不缓存页面，行为见 [手机网页](../apps/desktop.md#8-手机网页)。
 
 ## 3. 电脑入口 `/v1/host`
 

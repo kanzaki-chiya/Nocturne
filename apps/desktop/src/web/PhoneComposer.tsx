@@ -1,13 +1,23 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { ExternalAgentOverview, SkillOverview } from "@nocturne/core/protocol";
 import type { ContextSummary } from "@nocturne/rpc/client";
 
 import { completeSlash, parseSlash, type ParsedSlash } from "../commands";
-import type { ChoiceControl, ComposerControls, ComposerSubmit } from "../Composer";
+import type { ChoiceControl, ComposerControls, ComposerSubmit, FileRefSource } from "../Composer";
 import { ContextPanel, percent } from "../context-panel";
 import {
+  completeFileRefs,
+  fileRefDeleteRange,
+  fileRefToken,
+  type FileIndexEntry,
+} from "../file-refs";
+import {
   ContextRing,
+  IconAt,
+  IconCamera,
+  IconHistory,
+  IconImage,
   IconMore,
   IconPaperclip,
   IconSend,
@@ -15,6 +25,13 @@ import {
   IconStop,
   IconTerminal,
 } from "./icons";
+import {
+  estimateSubmitBytes,
+  formatBytes,
+  preparePhoneImage,
+  SUBMIT_MESSAGE_LIMIT,
+  type PhoneImage,
+} from "./phone-images";
 import { Popover, PopoverOption } from "./Popover";
 
 /** 桌面提示里指向左栏、设置页的命令，在手机上换成手机的去处 */
@@ -65,9 +82,22 @@ export interface PhoneComposerProps {
   context?: PhoneContextSource | undefined;
   shell?: { label: string; note?: string | undefined } | undefined;
   home?: string | null;
+  /** null：本目录没有项目文件索引（普通对话、草稿），@ 引用不可用 */
+  fileRefs?: FileRefSource | null;
+  /** 输入历史（「更多」里的「输入历史」） */
+  readInputHistory?: (() => Promise<string[]>) | undefined;
+  /** 首张图片加入时读一次，模型不支持图片时给出提示（与桌面相同） */
+  getVisionHint?: (() => Promise<string | undefined>) | undefined;
+  /** 测试注入：图片处理 */
+  prepareImage?: (file: File) => Promise<PhoneImage>;
 }
 
-type PopoverKind = "attach" | "preset" | "model" | "effort" | "context" | "more" | "output";
+type PopoverKind =
+  "attach" | "preset" | "model" | "effort" | "context" | "more" | "output" | "history";
+
+interface PhoneAttachment extends PhoneImage {
+  url: string;
+}
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -85,6 +115,10 @@ export function PhoneComposer({
   context,
   shell,
   home,
+  fileRefs = null,
+  readInputHistory,
+  getVisionHint,
+  prepareImage = preparePhoneImage,
 }: PhoneComposerProps) {
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState<PopoverKind | null>(null);
@@ -99,12 +133,80 @@ export function PhoneComposer({
   const card = useRef<HTMLDivElement>(null);
   const triggers = useRef<Partial<Record<PopoverKind, HTMLButtonElement | null>>>({});
   const mounted = useRef(true);
+  const [attachments, setAttachments] = useState<PhoneAttachment[]>([]);
+  const attachmentsRef = useRef<PhoneAttachment[]>([]);
+  attachmentsRef.current = attachments;
+  const [processing, setProcessing] = useState(0);
+  const [vision, setVision] = useState<string>();
+  const camera = useRef<HTMLInputElement>(null);
+  const gallery = useRef<HTMLInputElement>(null);
+  const [caret, setCaret] = useState(0);
+  const [refsDismissed, setRefsDismissed] = useState(false);
+  const [index, setIndex] = useState<{
+    key: string | number;
+    entries: FileIndexEntry[];
+    failed?: boolean;
+  }>();
+  const indexLoading = useRef<string | number | null>(null);
+  const [history, setHistory] = useState<string[]>();
+  const [historyError, setHistoryError] = useState<string>();
   useEffect(
     () => () => {
       mounted.current = false;
+      for (const attachment of attachmentsRef.current) URL.revokeObjectURL(attachment.url);
     },
     [],
   );
+
+  // 首张图片加入时问一次视觉能力（模型不支持图片时提示）
+  useEffect(() => {
+    if (attachments.length === 0) {
+      setVision(undefined);
+      return;
+    }
+    if (vision !== undefined || getVisionHint === undefined) return;
+    let cancelled = false;
+    void getVisionHint().then(
+      (text) => {
+        if (!cancelled) setVision(text);
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [attachments.length, getVisionHint, vision]);
+
+  // @ 引用：首次用到时拉取文件索引，fileRefs.key 变化时重新拉
+  const indexKey = index?.key;
+  const ensureIndex = useCallback(() => {
+    if (fileRefs === null) return;
+    const key = fileRefs.key;
+    if (indexKey === key || indexLoading.current === key) return;
+    indexLoading.current = key;
+    void fileRefs
+      .load()
+      .then(
+        (entries) => {
+          if (mounted.current) setIndex({ key, entries });
+        },
+        () => {
+          if (mounted.current) setIndex({ key, entries: [], failed: true });
+        },
+      )
+      .finally(() => {
+        if (indexLoading.current === key) indexLoading.current = null;
+      });
+  }, [fileRefs, indexKey]);
+  const refToken = fileRefs !== null && !refsDismissed ? fileRefToken(draft, caret) : undefined;
+  const refActive = refToken !== undefined;
+  useEffect(() => {
+    if (refActive) ensureIndex();
+  }, [refActive, ensureIndex]);
+  const refCompletion = refActive
+    ? completeFileRefs(draft, caret, index?.entries ?? [])
+    : undefined;
+  const indexReady = fileRefs !== null && index?.key === fileRefs.key;
 
   const contextKey = context?.key;
   const loadContext = context?.load;
@@ -143,11 +245,91 @@ export function PhoneComposer({
   );
   const redirect = parsed?.kind === "redirect" ? phoneSlashHint(parsed) : undefined;
 
-  const update = (text: string) => {
+  const update = (text: string, nextCaret = text.length) => {
     setDraft(text);
+    setCaret(nextCaret);
     setDismissed(false);
+    setRefsDismissed(false);
     setHint(undefined);
     setError(undefined);
+  };
+  const placeCaret = (position: number) => {
+    requestAnimationFrame(() => {
+      const node = field.current;
+      if (node === null) return;
+      node.focus();
+      node.setSelectionRange(position, position);
+      setCaret(position);
+    });
+  };
+  const insertRef = () => {
+    setOpen(null);
+    const node = field.current;
+    const at = node?.selectionStart ?? draft.length;
+    const before = draft.slice(0, at);
+    const after = draft.slice(node?.selectionEnd ?? at);
+    const prefix = before === "" || /\s$/.test(before) ? "" : " ";
+    const position = before.length + prefix.length + 1;
+    update(`${before}${prefix}@${after}`, position);
+    placeCaret(position);
+    ensureIndex();
+  };
+  const chooseRef = (insert: string, directory: boolean) => {
+    if (refCompletion === undefined) return;
+    const next = draft.slice(0, refCompletion.start) + insert + draft.slice(refCompletion.end);
+    const position = refCompletion.start + insert.length;
+    update(next, position);
+    if (!directory) setRefsDismissed(true);
+    placeCaret(position);
+  };
+
+  const addFiles = async (files: File[]) => {
+    setOpen(null);
+    if (files.length === 0) return;
+    setProcessing((n) => n + files.length);
+    setError(undefined);
+    for (const file of files) {
+      try {
+        const image = await prepareImage(file);
+        if (!mounted.current) return;
+        const url = URL.createObjectURL(
+          new Blob([image.data as BlobPart], { type: image.mimeType }),
+        );
+        setAttachments((current) => [...current, { ...image, url }]);
+      } catch (reason) {
+        if (mounted.current) setError(errorText(reason));
+      } finally {
+        if (mounted.current) setProcessing((n) => n - 1);
+      }
+    }
+  };
+  const removeAttachment = (at: number) => {
+    setAttachments((current) => {
+      const removed = current[at];
+      if (removed !== undefined) URL.revokeObjectURL(removed.url);
+      return current.filter((_, i) => i !== at);
+    });
+    setError(undefined);
+  };
+  const messageBytes = estimateSubmitBytes(
+    draft,
+    attachments.map((attachment) => ({ data: attachment.data, label: attachment.name })),
+  );
+  const tooLarge = messageBytes > SUBMIT_MESSAGE_LIMIT;
+
+  const openHistory = () => {
+    setOpen("history");
+    setHistory(undefined);
+    setHistoryError(undefined);
+    if (readInputHistory === undefined) return;
+    void readInputHistory().then(
+      (rows) => {
+        if (mounted.current) setHistory([...new Set(rows.slice(-200).reverse())]);
+      },
+      (reason: unknown) => {
+        if (mounted.current) setHistoryError(errorText(reason));
+      },
+    );
   };
   const toggle = (kind: PopoverKind) => {
     setOpen((current) => (current === kind ? null : kind));
@@ -159,8 +341,9 @@ export function PhoneComposer({
 
   const submit = async () => {
     const text = draft;
-    if (disabled !== undefined || running || submitting) return;
-    if (text.trim() === "") return;
+    if (disabled !== undefined || running || submitting || processing > 0) return;
+    if (text.trim() === "" && attachmentsRef.current.length === 0) return;
+    if (tooLarge) return;
     const slash = parseSlash(text, variant, skills, externalAgents);
     if (slash?.kind === "redirect" || slash?.kind === "unknown") {
       setHint(phoneSlashHint(slash));
@@ -183,9 +366,17 @@ export function PhoneComposer({
         text,
         ...(slash?.kind === "skill" ? { skill: slash.invocation } : {}),
         ...(slash?.kind === "agent" ? { delegate: slash.delegate } : {}),
-        attachments: [],
+        attachments: attachmentsRef.current.map((attachment) => ({
+          data: attachment.data,
+          mimeType: attachment.mimeType,
+          label: attachment.name,
+        })),
       });
-      if (accepted && mounted.current) update("");
+      if (accepted && mounted.current) {
+        update("");
+        for (const attachment of attachmentsRef.current) URL.revokeObjectURL(attachment.url);
+        setAttachments([]);
+      }
     } catch (reason) {
       if (mounted.current) setError(errorText(reason));
     } finally {
@@ -277,7 +468,13 @@ export function PhoneComposer({
 
   const busyDisabled = (control: ChoiceControl | undefined) =>
     control === undefined ? "正在读取…" : control.disabled;
-  const canSend = disabled === undefined && !running && draft.trim() !== "" && !submitting;
+  const canSend =
+    disabled === undefined &&
+    !running &&
+    (draft.trim() !== "" || attachments.length > 0) &&
+    !submitting &&
+    processing === 0 &&
+    !tooLarge;
 
   return (
     <div className="phone-composer">
@@ -286,7 +483,45 @@ export function PhoneComposer({
           {hint ?? redirect}
         </div>
       )}
-      {slashGroups.length > 0 && (
+      {tooLarge && (
+        <div className="phone-composer-error" role="alert">
+          这条消息约 {formatBytes(messageBytes)}，超过远程连接单条上限{" "}
+          {formatBytes(SUBMIT_MESSAGE_LIMIT)}，不会发送。请减少图片。
+        </div>
+      )}
+      {!tooLarge && vision !== undefined && (
+        <div className="phone-composer-hint" role="status">
+          {vision}
+        </div>
+      )}
+      {refActive && (
+        <div className="phone-slash" role="listbox" aria-label="文件引用补全">
+          <div className="phone-popover-group">引用文件</div>
+          {!indexReady ? (
+            <p className="phone-popover-note">正在读取文件索引…</p>
+          ) : index.failed ? (
+            <p className="phone-popover-note">读取文件索引失败</p>
+          ) : refCompletion === undefined || refCompletion.candidates.length === 0 ? (
+            <p className="phone-popover-note">没有匹配的文件</p>
+          ) : (
+            refCompletion.candidates.slice(0, 50).map((candidate) => (
+              <button
+                type="button"
+                role="option"
+                aria-selected={false}
+                key={candidate.path}
+                className="phone-slash-row ref"
+                onClick={() => {
+                  chooseRef(candidate.insert, candidate.directory);
+                }}
+              >
+                <b>{candidate.label}</b>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+      {!refActive && slashGroups.length > 0 && (
         <div className="phone-slash" role="listbox" aria-label="斜杠命令补全">
           {slashGroups.map((group) => (
             <Fragment key={group.id}>
@@ -317,6 +552,30 @@ export function PhoneComposer({
         </div>
       )}
       <div className="phone-card" ref={card}>
+        {(attachments.length > 0 || processing > 0) && (
+          <div className="phone-attachments" aria-label="图片附件">
+            {attachments.map((attachment, at) => (
+              <span className="phone-attachment" key={attachment.url}>
+                <img src={attachment.url} alt={attachment.name} />
+                <button
+                  type="button"
+                  aria-label={`移除 ${attachment.name}`}
+                  onClick={() => {
+                    removeAttachment(at);
+                  }}
+                >
+                  ×
+                </button>
+                <small>{formatBytes(attachment.data.length)}</small>
+              </span>
+            ))}
+            {processing > 0 && (
+              <span className="phone-attachment busy" role="status" aria-label="正在处理图片">
+                …
+              </span>
+            )}
+          </div>
+        )}
         <textarea
           ref={field}
           aria-label="消息"
@@ -326,7 +585,24 @@ export function PhoneComposer({
             placeholder ?? (running ? "正在运行，可点右侧按钮中断" : "输入消息，/ 查看命令")
           }
           onChange={(event) => {
-            update(event.target.value);
+            update(event.target.value, event.target.selectionStart);
+          }}
+          onSelect={(event) => {
+            setCaret(event.currentTarget.selectionStart);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Backspace" && event.key !== "Delete") return;
+            const node = event.currentTarget;
+            if (node.selectionStart !== node.selectionEnd) return;
+            const range = fileRefDeleteRange(
+              draft,
+              node.selectionStart,
+              event.key === "Backspace" ? "backward" : "forward",
+            );
+            if (range === undefined) return;
+            event.preventDefault();
+            update(draft.slice(0, range.start) + draft.slice(range.end), range.start);
+            placeCaret(range.start);
           }}
         />
         {running ? (
@@ -394,10 +670,56 @@ export function PhoneComposer({
           {error ?? controls?.error}
         </div>
       )}
+      <input
+        ref={camera}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        hidden
+        aria-label="拍照"
+        onChange={(event) => {
+          void addFiles([...(event.target.files ?? [])]);
+          event.target.value = "";
+        }}
+      />
+      <input
+        ref={gallery}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        aria-label="选择图片"
+        onChange={(event) => {
+          void addFiles([...(event.target.files ?? [])]);
+          event.target.value = "";
+        }}
+      />
       {open === "attach" && (
         <Popover anchor={triggers.current.attach ?? null} label="添加" onClose={close}>
           <div className="phone-popover-h">添加</div>
-          <p className="phone-popover-note">图片附件将在下一步提供。</p>
+          <PopoverOption
+            icon={<IconCamera />}
+            label="拍照"
+            detail="用相机拍一张发给模型"
+            onSelect={() => {
+              camera.current?.click();
+            }}
+          />
+          <PopoverOption
+            icon={<IconImage />}
+            label="选择图片"
+            detail="从相册选取，支持 PNG、JPEG、GIF、WebP"
+            onSelect={() => {
+              gallery.current?.click();
+            }}
+          />
+          <PopoverOption
+            icon={<IconAt />}
+            label="引用文件"
+            detail="插入 @，从项目文件里选"
+            disabled={fileRefs === null ? "普通对话与新会话没有项目文件索引" : undefined}
+            onSelect={insertRef}
+          />
         </Popover>
       )}
       {open === "preset" && controls !== undefined && choicePopover("preset", controls.preset)}
@@ -420,11 +742,46 @@ export function PhoneComposer({
       {open === "more" && (
         <Popover anchor={triggers.current.more ?? null} label="更多" onClose={close}>
           <div className="phone-popover-h">更多</div>
+          {readInputHistory !== undefined && (
+            <PopoverOption
+              icon={<IconHistory />}
+              label="输入历史"
+              detail="选一条填回输入框"
+              onSelect={openHistory}
+            />
+          )}
           <PopoverOption
             icon={<IconTerminal />}
             label={`Shell · ${shell?.label ?? "—"}`}
             detail={shell?.note ?? "Shell 设置只能在电脑上切换"}
           />
+        </Popover>
+      )}
+      {open === "history" && (
+        <Popover anchor={triggers.current.more ?? null} label="输入历史" onClose={close} wide>
+          <div className="phone-popover-h">输入历史</div>
+          {history === undefined ? (
+            <p className="phone-popover-note" role={historyError ? "alert" : "status"}>
+              {historyError ?? "正在读取…"}
+            </p>
+          ) : history.length === 0 ? (
+            <p className="phone-popover-note">还没有输入历史</p>
+          ) : (
+            history.map((row) => (
+              <button
+                type="button"
+                key={row}
+                className="phone-history-row"
+                onClick={() => {
+                  setOpen(null);
+                  update(row);
+                  placeCaret(row.length);
+                }}
+              >
+                {row}
+              </button>
+            ))
+          )}
         </Popover>
       )}
       {open === "output" && output !== undefined && (
