@@ -273,6 +273,45 @@ export class Hub {
     return false;
   }
 
+  /**
+   * 远程新建会话的目录检查（ADR-0052 修订 2026-10-15）：目录必须是已存在的绝对路径；
+   * 工作区根有项目配置却未信任、且不是已有会话用过的工作区时，信任要在电脑上决定，
+   * 手机不能代为在新目录里以未信任方式开始。
+   */
+  async checkRemoteWorkspace(cwd: string | undefined, root: string | undefined): Promise<void> {
+    const real: string[] = [];
+    for (const directory of [cwd, root]) {
+      if (directory === undefined) continue;
+      const resolved = this.platform.paths.isAbsolute(directory)
+        ? await this.platform.resolveReal(directory).catch(() => undefined)
+        : undefined;
+      const stat =
+        resolved === undefined
+          ? undefined
+          : await this.platform.fs.stat(resolved).catch(() => undefined);
+      if (resolved === undefined || stat?.type !== "directory") {
+        throw new RpcProtocolError(
+          "workspace_not_found",
+          `目录不存在或不是文件夹：${directory}（请填写电脑上的完整路径）`,
+        );
+      }
+      real.push(resolved);
+    }
+    const workspace = root !== undefined ? real.at(-1) : real[0];
+    if (workspace === undefined || this.providerState === undefined) return;
+    const { projectConfig } = await this.providerConfig().current.forWorkspace(workspace);
+    if (
+      projectConfig.present &&
+      !projectConfig.trusted &&
+      !(await this.allowWorkspace(workspace))
+    ) {
+      throw new RpcProtocolError(
+        "workspace_untrusted",
+        "这个目录的项目配置还没有信任。手机不能代为决定，请在电脑上信任该项目（在项目目录运行 nctrn trust）或先在电脑上新建会话",
+      );
+    }
+  }
+
   openSessions(): IterableIterator<RuntimeSession> {
     return this.sessions.values();
   }

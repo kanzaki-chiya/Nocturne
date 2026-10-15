@@ -10,15 +10,14 @@ import { createRpcClient } from "@nocturne/rpc/client";
 afterEach(cleanupTmp);
 
 describe("多连接共享后台", () => {
-  it("远程模型读方法拒绝未知工作区，本机不受影响，cwd 过滤不受限", async () => {
+  it("远程模型读方法不再限定工作区，cwd 过滤不受限", async () => {
     const h = await connectMany();
     const remote = await h.add();
     const workspaceRoot = path.dirname(h.ws);
     for (const method of ["runtime.listModels", "runtime.defaultModel"] as const) {
-      await expect(remote.client.call(method, { workspaceRoot })).rejects.toMatchObject({
-        code: "remote_not_allowed",
-      });
-      await h.client.call(method, { workspaceRoot });
+      expect(await remote.client.call(method, { workspaceRoot })).toEqual(
+        await h.client.call(method, { workspaceRoot }),
+      );
       await remote.client.call(method, {});
     }
     await remote.client.runtime.listSessions({ cwd: workspaceRoot });
@@ -281,7 +280,7 @@ describe("多连接共享后台", () => {
     },
   );
 
-  it("白名单外方法与越界参数统一拒绝；本机与已知工作区照常可用", async () => {
+  it("白名单外方法统一拒绝，shutdown 只在本机", async () => {
     const h = await connectMany();
     const remote = await h.add();
     for (const method of [
@@ -290,8 +289,7 @@ describe("多连接共享后台", () => {
       "mcp.saveMcpServer",
       "mcp.deleteMcpServer",
       "mcp.setMcpServerEnabled",
-      "session.rewind",
-      "session.readAttachment",
+      "session.setShell",
       "shutdown",
     ]) {
       await expect(remote.client.call(method as "shutdown", {})).rejects.toMatchObject({
@@ -300,51 +298,7 @@ describe("多连接共享后台", () => {
       });
     }
     expect(REMOTE_METHODS).not.toContain("shutdown");
-    for (const key of [
-      "permissionPreset",
-      "content",
-      "attachments",
-      "skill",
-      "delegate",
-      "unknown",
-    ]) {
-      await expect(
-        remote.client.call("runtime.createSession", { model: MODEL, [key]: null }),
-      ).rejects.toMatchObject({ code: "remote_not_allowed" });
-    }
-    await expect(
-      remote.client.runtime.createSession({ model: MODEL, permissionPreset: "default" }),
-    ).rejects.toMatchObject({ code: "remote_not_allowed" });
-    await expect(
-      remote.client.runtime.createSession({ model: MODEL, cwd: path.dirname(h.ws) }),
-    ).rejects.toMatchObject({ code: "remote_not_allowed" });
-    const { session: a } = await h.client.runtime.createSession({
-      model: MODEL,
-      cwd: h.ws,
-      permissionPreset: "default",
-    });
-    const { session: b } = await remote.client.runtime.createSession({ model: MODEL, cwd: h.ws });
-    await expect(
-      remote.client.runtime.createSession({ model: MODEL, workspaceRoot: path.dirname(h.ws) }),
-    ).rejects.toMatchObject({ code: "remote_not_allowed" });
-    await remote.client.runtime.createSession({ model: MODEL, workspaceRoot: h.ws });
-    for (const key of ["content", "attachments", "skill", "delegate", "unknown"]) {
-      await expect(
-        remote.client.call("session.submit", { sessionId: b.id, text: "文字", [key]: null }),
-      ).rejects.toMatchObject({ code: "remote_not_allowed" });
-    }
-    await expect(b.submit({ text: "附件", attachments: [] })).rejects.toMatchObject({
-      code: "remote_not_allowed",
-    });
-    await expect(remote.client.runtime.resumeSession(a.id, { force: false })).rejects.toMatchObject(
-      { code: "remote_not_allowed" },
-    );
-    await expect(remote.client.runtime.resumeSession(a.id, { model: MODEL })).rejects.toMatchObject(
-      { code: "remote_not_allowed" },
-    );
     expect(await remote.client.runtime.listModels()).not.toHaveLength(0);
-    await remote.client.runtime.defaultModel();
-    expect((await remote.client.runtime.listSessions()).some((s) => s.id === a.id)).toBe(true);
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);
   });

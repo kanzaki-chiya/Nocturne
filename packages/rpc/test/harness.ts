@@ -91,6 +91,8 @@ export interface HarnessOptions {
   replayYield?: () => Promise<void>;
   sessionsDir?: string;
   ws?: string;
+  /** 远程单条报文上限（测试缩小以触发 response_too_large） */
+  remoteMessageLimit?: number;
 }
 
 /** 内存管道连接 server 与 client；不 initialize 时由测试自己握手 */
@@ -108,6 +110,9 @@ export async function connect(options: HarnessOptions = {}): Promise<Harness> {
     nocturneVersion: "0.0.0-test",
     ...(options.replayChunkSize !== undefined ? { replayChunkSize: options.replayChunkSize } : {}),
     ...(options.replayYield !== undefined ? { replayYield: options.replayYield } : {}),
+    ...(options.remoteMessageLimit !== undefined
+      ? { remoteMessageLimit: options.remoteMessageLimit }
+      : {}),
     diagnostics: (record) => diagnostics.push(record),
     createRuntime: async (init) => {
       inits.push(init);
@@ -245,6 +250,9 @@ export async function connectWithConfig(
   let disposed = false;
   const server = createRpcServer({
     nocturneVersion: "0.0.0-test",
+    ...(options.remoteMessageLimit !== undefined
+      ? { remoteMessageLimit: options.remoteMessageLimit }
+      : {}),
     diagnostics: (record) => diagnostics.push(record),
     createRuntime: async (init) => {
       inits.push(init);
@@ -335,20 +343,31 @@ export async function until(
   }
 }
 
-/** 一个后台、多条离线内存连接；默认先完成本机握手。 */
-export async function connectMany(options: HarnessOptions = {}) {
-  const h = await connect(options);
+/** 给已有服务端再接一条内存连接（默认远程，并完成握手） */
+function connector(server: RpcServer) {
   const connections: { client: RpcClient; transport: LineTransport; served: Promise<void> }[] = [];
   const add = async (origin: "local" | "remote" = "remote", initialize = true) => {
     const [serverEnd, transport] = createMemoryTransportPair();
-    const served = h.server.serve(serverEnd, { origin });
+    const served = server.serve(serverEnd, { origin });
     const client = createRpcClient(transport, { clientName: origin, interactive: true });
     const connection = { client, transport, served };
     connections.push(connection);
     if (initialize) await client.initialize();
     return connection;
   };
-  return { ...h, add, connections };
+  return { add, connections };
+}
+
+/** 一个后台、多条离线内存连接；默认先完成本机握手。 */
+export async function connectMany(options: HarnessOptions = {}) {
+  const h = await connect(options);
+  return { ...h, ...connector(h.server) };
+}
+
+/** 带真实配置（项目层、信任列表）的后台，外加多条连接 */
+export async function connectManyWithConfig(options: ProviderHarnessOptions = {}) {
+  const h = await connectWithConfig(options);
+  return { ...h, ...connector(h.server) };
 }
 
 export interface RawHarness {

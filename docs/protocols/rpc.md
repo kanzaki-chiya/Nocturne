@@ -219,7 +219,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 | `-32001` | `RuntimeCommandError`（命令被拒绝，原因码见 [events.md](events.md) 第 7 节） | `session_busy`、`unknown_request`、`invalid_reply`、`invalid_command`、`invalid_model`（因模型不可用，如已停用；此时 `data` 另带 `disabled: "provider" \| "model"` 与 `model: { provider, model }`，双重停用时另带 `providerDisabled: true`（`disabled` 记 `"model"`，一键重新启用需同时恢复两者），见 [ADR-0054](../decisions/ADR-0054-provider-model-toggle.md) §3，客户端据此区分「已停用」与「已删除」） |
 | `-32002` | `SessionError` | 会话层错误码 |
 | `-32003` | `ProviderLoginError` | 登录错误码 |
-| `-32004` | RPC 层状态错误 | `runtime_unavailable`（本机尚未创建 Runtime）、`remote_not_allowed`（远程方法或参数越界，中文文案说明限制）、`not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down`、`provider_config_unavailable`（服务端未注入服务商配置）、`provider_in_use`（后台任一会话正在使用的服务商拒绝删除）、`unknown_login`（登录会话不存在或已结束） |
+| `-32004` | RPC 层状态错误 | `runtime_unavailable`（本机尚未创建 Runtime）、`remote_not_allowed`（远程方法或参数越界，中文文案说明限制）、`workspace_not_found` / `workspace_untrusted`（远程新建会话的目录不存在或需在电脑上信任）、`response_too_large` / `attachment_too_large`（远程结果超过报文上限）、`not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down`、`provider_config_unavailable`（服务端未注入服务商配置）、`provider_in_use`（后台任一会话正在使用的服务商拒绝删除）、`unknown_login`（登录会话不存在或已结束） |
 | `-32005` | `ProviderSetupError` / `McpSettingsError` / `ExternalAgentSettingsError`（管理表单字段错误） | `invalid_field`；`data.field` 为对应字段名，客户端据此标输入框。外部 agent 使用 `name`、`mode`、`command`、`configOptions` 等，名称冲突同样返回 `name`（3.7） |
 
 客户端侧另有 `connection_closed`：连接断开时所有在途请求以它失败，而不是悬挂。
@@ -236,24 +236,29 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 ## 7. 安全与日志
 
 - stdio 本机连接仍由父进程持有；配置了远程主机时由后台主动连中继，按 [ADR-0052](../decisions/ADR-0052-remote-web-client.md) 实施邀请、配对与加密，不能把能力白名单当作鉴权。全部 `remote.*` 方法仅开放给本机，不进入远程白名单。
-- 远程能力白名单在服务端显式登记，以 `RpcMethodName` 编译检查；新增方法默认不开放。方法越界和参数越界均报 `-32004 / remote_not_allowed`，且不调用 Core，不消费待处理请求：
+- 远程能力白名单在服务端显式登记，以 `RpcMethodName` 编译检查；新增方法默认不开放。边界原则（[ADR-0052 修订 2026-10-15](../decisions/ADR-0052-remote-web-client.md#2026-10-15手机功能对齐桌面端设置除外)）：远程连接不能改动撤销手机后仍然生效的东西（设置、凭据、持久授权、项目信任），会话内操作全部放开。方法越界和参数越界均报 `-32004 / remote_not_allowed`，且不调用 Core，不消费待处理请求：
 
-| 方法 | 远程限制 |
+| 方法 | 远程 |
 |---|---|
 | `initialize` | 仅连接握手，不创建 Runtime |
-| `runtime.listSessions` | 允许 |
-| `runtime.listModels` | 只读；显式 `workspaceRoot` 必须满足 `createSession` 的已知工作区规则，不传照常 |
-| `runtime.defaultModel` | 只读；显式 `workspaceRoot` 必须满足 `createSession` 的已知工作区规则，不传照常 |
-| `runtime.createSession` | 仅 `model`、`reasoningEffort`、`cwd`、`workspaceRoot`、`text`；拒绝其他字段。显式目录须是列表可见的非子代理会话用过的 cwd 或工作区根（真实路径匹配）；不传沿用后台默认 cwd。`text` 与既有创建接口一致不触发 Turn，发送文字另调 submit |
-| `runtime.resumeSession` | 仅 `sessionId`，不接受 `model`、`force` |
+| `runtime.listSessions`、`runtime.usageStats` | 允许（只读）；`listSessions` 的 `cwd` 只是过滤条件 |
+| `runtime.listModels`、`runtime.defaultModel`、`runtime.listRecentModels`、`runtime.describeModelRoles`、`runtime.listShells` | 允许（只读），`workspaceRoot` 不受限 |
+| `runtime.createSession` | 允许全部选项。显式 `cwd` / `workspaceRoot` 须是已存在的绝对路径文件夹，否则 `workspace_not_found`；工作区根有项目配置但未信任、且不是列表可见的非子代理会话用过的 cwd 或工作区根（真实路径匹配）时报 `workspace_untrusted`，信任只能在电脑上决定。`text` 不触发 Turn |
+| `runtime.resumeSession`、`runtime.forkSession` | 允许，含 `model`、`force` |
 | `session.subscribe`、`session.unsubscribe`、`session.close`、`session.state` | 允许 |
-| `session.submit` | 除路由字段 `sessionId` 外只接受 `text` |
+| `session.submit` | 允许完整载荷（图片、文件引用、技能、`delegate`） |
 | `session.interrupt` | 请求与通知均允许 |
 | `session.respondPermission` | `reply.remember === "project"` 拒绝并保持待处理；`"session"` 或省略允许 |
 | `session.respondQuestion` | 允许 |
+| `session.setModel`、`session.setReasoningEffort`、`session.setPermissionPreset`、`session.compact`、`session.rewind`、`session.rewindTargets`、`session.turnChanges`、`session.turnChangeDiff` | 允许（会话内，随会话结束） |
+| `session.describeContext`、`session.describeSkills`、`session.describeExternalAgents`、`session.mcpServers`、`session.listShells`、`session.shellInfo`、`session.reasoningEffortInfo`、`session.visionInfo`、`session.fileIndex`、`session.resolveFiles` | 允许（只读） |
+| `session.readAttachment` | 允许；附件原始字节超过远程上限报 `attachment_too_large` |
+| `session.readInputHistory`、`session.recordInputHistory` | 允许 |
+| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入与 `describeSettings`、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、`remote.*`、`mcp.*`、`agents.*`、`skills.*` |
 
+- **报文上限**：加密通道单条消息超过 `MAX_MESSAGE`（16 MiB）会整条关闭。远程连接的成功结果编码后超过 `REMOTE_MESSAGE_LIMIT`（`MAX_MESSAGE` 减 64 KiB 余量）时改报 `-32004 / response_too_large`；`readAttachment` 先按原始字节预检（base64 后不超上限，`remoteAttachmentLimit`），超限报 `attachment_too_large`，文案「图片过大，请在电脑上查看」。请求方向由手机网页发送前估算，服务端不再放宽。
 - `runtime.providersChanged` 广播给所有已握手连接；`login.completed` 只发给发起登录的连接。Runtime 句柄、实际会话、配置对象与变更队列在 Hub 共享；订阅、请求、握手、草稿和登录属于单连接。
-- 会话已被其他连接打开时，`resumeSession` 的 `model` / `force` 被忽略，返回当前状态；远程连接仍不接受这两个参数。`runtime.listSessions` 的 `cwd` 只是过滤条件，不限制。
+- 会话已被其他连接打开时，`resumeSession` 的 `model` / `force` 被忽略，返回当前状态。
 - 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` 事件与 `respondPermission` 回复，不判断"要不要确认"。
 - 诊断记录（`diagnostics` 回调）只含连接状态（含 `origin`）、方法名与结果（成功与否、错误码），**不含任何参数与通知内容**——参数里可能有密钥明文（`provider.prepareProvider`、`provider.setCredential`）或用户输入，通知里可能有一次性密钥（`login.completed.unstoredKey`）。
 - **敏感参数**：服务端维护一张敏感方法表（`SENSITIVE_METHODS`）——`runtime.updateSettings` 的 `reviewerKey`、`provider.prepareProvider` 中 `credential.kind === "apiKey"` 的 `key`、`provider.setCredential` 的 `key`、`provider.updateSetupProvider` 的 `patch.headers` 各值、`provider.probeSetupProviderModels` 的 `headers` 各值、`login.submitManual` 的 `text`。这些方法失败时，错误响应 `message` 与 `data` 里出现的秘密值一律替换为 `[redacted]`；其他方法沿用 Core 的固定文案错误（Core 错误本身不含秘密）。通知内容不进诊断，密钥只经其语义通道传递（如 `login.completed.unstoredKey` 恰好一次）。

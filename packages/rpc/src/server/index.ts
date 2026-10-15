@@ -2,7 +2,13 @@
  * @nocturne/rpc/server — RPC 服务端（ADR-0044）。
  * 与传输无关：`createRpcServer(...).serve(transport)`；stdio 是第一种接入。
  */
-export { createRpcServer, SENSITIVE_METHODS, REMOTE_METHODS } from "./server.js";
+export {
+  createRpcServer,
+  SENSITIVE_METHODS,
+  REMOTE_METHODS,
+  REMOTE_MESSAGE_LIMIT,
+  remoteAttachmentLimit,
+} from "./server.js";
 export type { RpcDiagnostic, RpcRuntimeHandle, RpcServer, RpcServerOptions } from "./server.js";
 export { createStdioTransport } from "./stdio.js";
 export {

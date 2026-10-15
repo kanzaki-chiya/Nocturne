@@ -70,6 +70,7 @@ import type { LineTransport } from "../shared/transport.js";
 import { MethodNotFoundError, RpcProtocolError, toRpcError } from "./errors.js";
 import { Hub, type HubPeer, type ProviderState, type RpcRuntimeHandle } from "./hub.js";
 import { RemoteHost, type RemoteHostOptions } from "./remote/host.js";
+import { MAX_MESSAGE } from "@nocturne/remote";
 import {
   asParams,
   decodeBase64,
@@ -130,6 +131,8 @@ export interface RpcServerOptions {
   replayYield?: (() => Promise<void>) | undefined;
   /** 诊断记录：只含方法名与结果，永远不含参数（参数里可能有密钥明文） */
   diagnostics?: ((record: RpcDiagnostic) => void) | undefined;
+  /** 远程单条报文上限（缺省 REMOTE_MESSAGE_LIMIT）；测试可缩小 */
+  remoteMessageLimit?: number | undefined;
 }
 
 export type RpcDiagnostic =
@@ -148,14 +151,23 @@ export interface RpcServer {
   serve(transport: LineTransport, options?: { origin?: "local" | "remote" }): Promise<void>;
 }
 
-/** ADR-0052 第 3 节：显式能力白名单，新增方法默认不开放给远程连接。 */
+/**
+ * ADR-0052 修订（2026-10-15）：显式能力白名单，新增方法默认不开放给远程连接。
+ * 原则是撤销手机后不留后患：会话内操作放开，设置、凭据、持久授权、项目信任只在本机。
+ * `session.setShell` 会写 settings.json（与 `runtime.setShellSetting` 同一处），不放开。
+ */
 export const REMOTE_METHODS = [
   "initialize",
   "runtime.listSessions",
-  "runtime.listModels",
-  "runtime.defaultModel",
+  "runtime.usageStats",
   "runtime.createSession",
   "runtime.resumeSession",
+  "runtime.forkSession",
+  "runtime.listModels",
+  "runtime.defaultModel",
+  "runtime.listRecentModels",
+  "runtime.describeModelRoles",
+  "runtime.listShells",
   "session.subscribe",
   "session.unsubscribe",
   "session.close",
@@ -164,7 +176,38 @@ export const REMOTE_METHODS = [
   "session.interrupt",
   "session.respondPermission",
   "session.respondQuestion",
+  "session.setModel",
+  "session.setReasoningEffort",
+  "session.setPermissionPreset",
+  "session.compact",
+  "session.rewind",
+  "session.rewindTargets",
+  "session.turnChanges",
+  "session.turnChangeDiff",
+  "session.describeContext",
+  "session.describeSkills",
+  "session.describeExternalAgents",
+  "session.mcpServers",
+  "session.listShells",
+  "session.shellInfo",
+  "session.reasoningEffortInfo",
+  "session.visionInfo",
+  "session.fileIndex",
+  "session.resolveFiles",
+  "session.readAttachment",
+  "session.readInputHistory",
+  "session.recordInputHistory",
 ] as const satisfies readonly RpcMethodName[];
+
+/**
+ * 远程单条报文的上限：加密通道单条消息超过 MAX_MESSAGE 会整条关闭，
+ * 这里留 64 KiB 给 JSON 包装与转义余量。
+ */
+export const REMOTE_MESSAGE_LIMIT = MAX_MESSAGE - 64 * 1024;
+/** 远程读取附件的原始字节上限：base64 后仍在报文上限之内 */
+export function remoteAttachmentLimit(messageLimit = REMOTE_MESSAGE_LIMIT): number {
+  return Math.floor((messageLimit * 3) / 4) - 1024;
+}
 
 const DEFAULT_REPLAY_CHUNK = 256;
 
@@ -306,9 +349,13 @@ class Connection implements HubPeer {
   }
 
   send(message: RpcMessage): void {
+    this.sendLine(encodeMessage(message));
+  }
+
+  private sendLine(line: string): void {
     if (this.closed) return;
     try {
-      this.transport.send(encodeMessage(message));
+      this.transport.send(line);
     } catch {
       // 传输已断开：由 onClose 收尾
     }
@@ -384,8 +431,10 @@ class Connection implements HubPeer {
       } else {
         result = await this.dispatch(method, params);
       }
+      const line = encodeMessage({ jsonrpc: "2.0", id, result: result ?? null });
+      this.checkRemoteSize(method, line);
       this.diagnose({ kind: "response", id, ok: true });
-      this.send({ jsonrpc: "2.0", id, result: result ?? null });
+      this.sendLine(line);
       // login.completed 绝不先于对应 start 响应到达（rpc.md 3.4）
       if (method === "login.start" || method === "login.startDraft") {
         const loginId = (result as { loginId?: unknown } | null)?.loginId;
@@ -431,36 +480,26 @@ class Connection implements HubPeer {
     const p = asParams(params);
     if (method !== "initialize" && this.initPromise !== undefined)
       await this.initPromise.catch(() => undefined);
-    const allowed =
-      method === "runtime.createSession"
-        ? ["model", "reasoningEffort", "cwd", "workspaceRoot", "text"]
-        : method === "session.submit"
-          ? ["sessionId", "text"]
-          : method === "runtime.resumeSession"
-            ? ["sessionId"]
-            : undefined;
-    if (allowed !== undefined) {
-      for (const key of Object.keys(p)) {
-        if (!allowed.includes(key)) deny(`远程连接的 ${method} 不允许参数 ${key}`);
-      }
-    }
+    // 持久授权（写入项目 Grant）只能在电脑上选；会话级与单次批准照常
     if (method === "session.respondPermission" && reqObject(p, "reply").remember === "project") {
       deny("远程连接不能保存项目级授权；请求仍待处理，请在本机回复");
     }
-    if (
-      method === "runtime.createSession" ||
-      method === "runtime.listModels" ||
-      method === "runtime.defaultModel"
-    ) {
-      const keys =
-        method === "runtime.createSession" ? ["cwd", "workspaceRoot"] : ["workspaceRoot"];
-      for (const key of keys) {
-        const directory = optString(p, key);
-        if (directory !== undefined && !(await this.hub.allowWorkspace(directory))) {
-          deny(`远程连接的 ${key} 必须是已有非子代理会话用过的工作目录或工作区根`);
-        }
-      }
+    if (method === "runtime.createSession" && this.initialized && this.hub.available) {
+      await this.hub.checkRemoteWorkspace(optString(p, "cwd"), optString(p, "workspaceRoot"));
     }
+  }
+
+  private get remoteLimit(): number {
+    return this.options.remoteMessageLimit ?? REMOTE_MESSAGE_LIMIT;
+  }
+
+  /** 远程连接的结果超过通道上限时改报错误，避免整条加密通道被关闭 */
+  private checkRemoteSize(method: string, line: string): void {
+    if (this.origin !== "remote" || Buffer.byteLength(line, "utf8") <= this.remoteLimit) return;
+    throw new RpcProtocolError(
+      "response_too_large",
+      `${method} 的结果过大，无法经远程连接传输，请在电脑上查看`,
+    );
   }
 
   // ── 生命周期 ─────────────────────────────────────────────
@@ -1359,6 +1398,12 @@ class Connection implements HubPeer {
       },
       "session.readAttachment": async (p) => {
         const attachment = await this.session(p).session.readAttachment(reqString(p, "file"));
+        if (
+          this.origin === "remote" &&
+          attachment.bytes > remoteAttachmentLimit(this.remoteLimit)
+        ) {
+          throw new RpcProtocolError("attachment_too_large", "图片过大，请在电脑上查看");
+        }
         return {
           data: Buffer.from(attachment.data).toString("base64"),
           mimeType: attachment.mimeType,
