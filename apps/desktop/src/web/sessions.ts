@@ -1,4 +1,9 @@
-import { createSessionView, type SessionView } from "@nocturne/core/protocol";
+import {
+  createSessionView,
+  type ModelRef,
+  type ReasoningEffort,
+  type SessionView,
+} from "@nocturne/core/protocol";
 import {
   trackSessionView,
   type RpcClient,
@@ -6,7 +11,7 @@ import {
   type SessionViewTracker,
 } from "@nocturne/rpc/client";
 import { conversationStatus } from "../conversations";
-import { projectKey, type SessionSummary, type SessionStatus } from "../session-tree";
+import type { SessionSummary, SessionStatus } from "../session-tree";
 
 export interface PhoneSession {
   session: RpcSession;
@@ -15,18 +20,51 @@ export interface PhoneSession {
   view: SessionView;
   tracker?: SessionViewTracker;
   dead: boolean;
+  /** 每次视图折叠后回调（发送时等待 Turn 被接受） */
+  readonly listeners: Set<() => void>;
+}
+export interface PhoneCreateOptions {
+  model?: ModelRef | undefined;
+  reasoningEffort?: string;
+  permissionPreset?: string;
 }
 export function phoneStatus(entry: PhoneSession): SessionStatus {
   return conversationStatus({ view: entry.view, busy: false });
 }
-export function knownWorkspaces(list: SessionSummary[]): string[] {
-  const paths = new Map<string, string>();
-  for (const s of list)
-    if (!s.parent) {
-      paths.set(projectKey(s.cwd), s.cwd);
-      paths.set(projectKey(s.workspaceRoot), s.workspaceRoot);
-    }
-  return [...paths.values()];
+/**
+ * 发送一条消息：返回时 Turn 已被后台接受（视图出现新 Turn 或新用户条目，或 submit
+ * 已结束），与桌面 Conversations.send 的接受判定相同；接受前被拒绝则抛出，
+ * 输入框保留草稿。Turn 本身在后台继续，结束时调用 finished。
+ */
+export async function submitAccepted(
+  entry: PhoneSession,
+  input: Parameters<RpcSession["submit"]>[0],
+  finished: (error: unknown) => void,
+): Promise<void> {
+  const baseline = entry.view.entries.length;
+  const isAccepted = () =>
+    entry.view.currentTurn !== undefined || entry.view.entries.length > baseline;
+  let listener: (() => void) | undefined;
+  const accepted = new Promise<void>((resolve) => {
+    listener = () => {
+      if (isAccepted()) resolve();
+    };
+    entry.listeners.add(listener);
+  });
+  const submission = entry.session.submit(input);
+  try {
+    await Promise.race([accepted, submission]);
+  } finally {
+    if (listener) entry.listeners.delete(listener);
+  }
+  submission.then(
+    () => {
+      finished(undefined);
+    },
+    (error: unknown) => {
+      finished(error);
+    },
+  );
 }
 export class PhoneSessions {
   readonly opened = new Map<string, PhoneSession>();
@@ -105,11 +143,13 @@ export class PhoneSessions {
     workspace: string,
     view = createSessionView(),
   ): Promise<PhoneSession> {
-    const entry: PhoneSession = { client, session, workspace, view, dead: false };
+    const listeners = this.opened.get(session.id)?.listeners ?? new Set<() => void>();
+    const entry: PhoneSession = { client, session, workspace, view, dead: false, listeners };
     this.opened.set(session.id, entry);
     entry.tracker = await trackSessionView(
       session,
       () => {
+        for (const listener of entry.listeners) listener();
         this.changed();
       },
       {
@@ -140,18 +180,29 @@ export class PhoneSessions {
       if (this.opening.get(id) === run) this.opening.delete(id);
     }
   }
-  async create(workspace: string): Promise<PhoneSession> {
-    if (!knownWorkspaces(this.list).includes(workspace))
-      throw new Error("请选择会话列表中已有的工作区");
+  /**
+   * 在 workspace 新建会话（与桌面草稿相同：未选过的档位与预设省略，由 Core 解析
+   * 项目默认）。目录不存在或需要在电脑上信任时后台报错，原样抛给界面。
+   */
+  async create(workspace: string, options: PhoneCreateOptions = {}): Promise<PhoneSession> {
     const client = this.requireClient();
-    const model = await client.runtime.defaultModel({ workspaceRoot: workspace });
+    const model =
+      options.model ?? (await client.runtime.defaultModel({ workspaceRoot: workspace }));
     if (!model) throw new Error("电脑未设置默认模型，请在电脑上选择默认模型");
     const { session } = await client.runtime.createSession({
       model,
       cwd: workspace,
       workspaceRoot: workspace,
+      ...(options.reasoningEffort !== undefined
+        ? { reasoningEffort: options.reasoningEffort as ReasoningEffort }
+        : {}),
+      ...(options.permissionPreset !== undefined
+        ? { permissionPreset: options.permissionPreset }
+        : {}),
     });
-    return this.attach(client, session, workspace);
+    const entry = await this.attach(client, session, workspace);
+    void this.refresh().catch(() => undefined);
+    return entry;
   }
   private requireClient(): RpcClient {
     if (!this.client) throw new Error("电脑尚未连接，请稍后重试");

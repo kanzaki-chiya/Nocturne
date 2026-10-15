@@ -29,6 +29,15 @@ vi.mock("../src/web/connection", () => ({
   },
 }));
 let root: Root | undefined;
+/** 只实现用例关心的方法；其余会话方法一律失败，界面应当静默降级 */
+const fakeSession = (methods: Record<string, unknown>): RpcSession =>
+  new Proxy(methods, {
+    get: (target, key) => {
+      if (typeof key === "symbol" || key === "then") return undefined;
+      if (key in target) return target[key];
+      return () => Promise.reject(new Error(`未实现 ${key}`));
+    },
+  }) as unknown as RpcSession;
 afterEach(async () => {
   await act(() => root?.unmount());
   document.body.innerHTML = "";
@@ -48,7 +57,7 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
   const submit = vi.fn(() => Promise.resolve("done"));
   const interrupt = vi.fn();
   const respondPermission = vi.fn(() => Promise.resolve());
-  const session = {
+  const session = fakeSession({
     id: "s",
     submit,
     interrupt,
@@ -57,7 +66,7 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
       receive = fn;
       return Promise.resolve({ lastSeq: 0, unsubscribe: vi.fn() });
     },
-  } as unknown as RpcSession;
+  });
   vi.spyOn(client.runtime, "listSessions").mockResolvedValue([
     {
       id: "s",
@@ -89,8 +98,12 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
   await act(async () => {
     await shared.connect?.(client, { subscribePush: vi.fn(), unsubscribePush: vi.fn() });
   });
-  expect(container.querySelector(".phone-badge")?.textContent).toBe("空闲");
-  const row = container.querySelector<HTMLButtonElement>(".phone-session-row");
+  // 首页是项目列表，进入项目后才是会话列表
+  const project = container.querySelector<HTMLButtonElement>(".phone-row");
+  expect(project?.textContent).toContain("work");
+  await act(() => project?.click());
+  const row = container.querySelector<HTMLButtonElement>(".phone-row.session");
+  expect(row?.textContent).toContain("测试会话");
   await act(() => row?.click());
   const field = container.querySelector<HTMLTextAreaElement>("textarea");
   if (!field) throw new Error("缺少文字输入");
@@ -102,7 +115,9 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
     field.dispatchEvent(new Event("input", { bubbles: true }));
   });
   const click = (label: string) => {
-    const b = [...container.querySelectorAll("button")].find((e) => e.textContent === label);
+    const b = [...container.querySelectorAll("button")].find(
+      (e) => e.textContent === label || e.getAttribute("aria-label") === label,
+    );
     if (!b) throw new Error(`缺少 ${label}`);
     b.click();
   };
@@ -174,10 +189,10 @@ it("从推送点进来连上后直接进入会话", async () => {
   const storage = memoryStorage();
   await storage.putHost({ hostId: "host", hostPub: "pub", name: "电脑 1", pairedAt: 1 });
   await storage.identity();
-  const session = {
+  const session = fakeSession({
     id: "s",
     subscribe: () => Promise.resolve({ lastSeq: 0, unsubscribe: vi.fn() }),
-  } as unknown as RpcSession;
+  });
   vi.spyOn(client.runtime, "listSessions").mockResolvedValue([
     {
       id: "s",
@@ -212,5 +227,13 @@ it("从推送点进来连上后直接进入会话", async () => {
     expect(container.querySelector("textarea")).not.toBeNull();
   });
   expect(location.search).toBe("");
+  // 返回时回到该会话所在的项目页
+  await act(async () => {
+    history.back();
+    await new Promise((done) => setTimeout(done, 20));
+  });
+  await vi.waitFor(() => {
+    expect(container.querySelector(".phone-row.session")?.textContent).toContain("测试会话");
+  });
   client.close();
 });

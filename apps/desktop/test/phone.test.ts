@@ -13,7 +13,17 @@ import { createMemoryTransportPair, type RpcClient, type RpcSession } from "@noc
 import { memoryStorage, encode, type PairedHost } from "../src/web/storage";
 import { pairPhone, pairingError, parsePairingLink, takePairingFragment } from "../src/web/pairing";
 import { PhoneConnection, retryDelay, versionMessage } from "../src/web/connection";
-import { knownWorkspaces, PhoneSessions, phoneStatus } from "../src/web/sessions";
+import { PhoneSessions, phoneStatus } from "../src/web/sessions";
+import { phoneProjects, plainWorkspaceOf, projectSessions, shortDate } from "../src/web/projects";
+import {
+  applyTheme,
+  clearDisconnects,
+  closeReason,
+  loadDisconnects,
+  loadTheme,
+  recordDisconnect,
+  saveTheme,
+} from "../src/web/local";
 import { createSessionView } from "@nocturne/core/protocol";
 
 beforeEach(() => {
@@ -231,7 +241,7 @@ it("握手失败关闭触发 onClose 时只安排一次重连", async () => {
   c.stop();
   expect(vi.getTimerCount()).toBe(0);
 });
-it("重连续接 lastSeq 并保留显示视图，列表工作区不含子代理", async () => {
+it("重连续接 lastSeq 并保留显示视图，新建会话可用任意目录并带上草稿选项", async () => {
   const [transport] = createMemoryTransportPair();
   const { createRpcClient } = await import("@nocturne/rpc/client");
   const client = createRpcClient(transport, { clientName: "test" });
@@ -253,12 +263,25 @@ it("重连续接 lastSeq 并保留显示视图，列表工作区不含子代理"
   const entry = sessions.opened.get("s");
   if (!entry) throw new Error("缺少恢复会话");
   expect(phoneStatus(entry)).toBe("idle");
-  const list = [
-    { cwd: "Z:/work", workspaceRoot: "Z:/work" },
-    { cwd: "Z:/child", workspaceRoot: "Z:/child", parent: { sessionId: "s", callId: "c" } },
-  ] as Parameters<typeof knownWorkspaces>[0];
-  expect(knownWorkspaces(list)).toEqual(["Z:/work"]);
-  await expect(sessions.create("Z:/other")).rejects.toThrow("已有的工作区");
+  const created = {
+    id: "n",
+    subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
+  } as unknown as RpcSession;
+  const create = vi
+    .spyOn(client.runtime, "createSession")
+    .mockResolvedValue({ session: created } as Awaited<
+      ReturnType<RpcClient["runtime"]["createSession"]>
+    >);
+  const model = { provider: "fake", model: "fake-1" };
+  await sessions.create("Z:/other", { model, reasoningEffort: "high", permissionPreset: "auto" });
+  expect(create).toHaveBeenCalledWith({
+    model,
+    cwd: "Z:/other",
+    workspaceRoot: "Z:/other",
+    reasoningEffort: "high",
+    permissionPreset: "auto",
+  });
+  expect(sessions.opened.get("n")?.workspace).toBe("Z:/other");
   client.close();
 });
 
@@ -396,4 +419,78 @@ it("真实配对回复指纹错配拒绝且不保存电脑", async () => {
     pairPhone(storage, parsed, "https://relay.example", "手机", () => Promise.resolve(phone)),
   ).rejects.toMatchObject({ code: "fingerprint_mismatch" });
   expect(await storage.hosts()).toEqual([]);
+});
+
+it("首页按项目分组：普通对话在首位，子代理不计数，项目页列出该项目会话", () => {
+  expect(plainWorkspaceOf(String.raw`C:\Users\a\.nocturne\sessions`)).toBe(
+    String.raw`C:\Users\a\.nocturne\workspace`,
+  );
+  expect(plainWorkspaceOf("/home/a/.nocturne/sessions/")).toBe("/home/a/.nocturne/workspace");
+  expect(plainWorkspaceOf(undefined)).toBeUndefined();
+  const base = {
+    createdAt: "2026-10-01T00:00:00.000Z",
+    model: { provider: "fake", model: "fake-1" },
+  };
+  const list = [
+    { ...base, id: "a", cwd: "Z:/work", workspaceRoot: "Z:/work", mtimeMs: 10, firstText: "甲" },
+    { ...base, id: "b", cwd: "Z:/work", workspaceRoot: "Z:/work", mtimeMs: 30, firstText: "乙" },
+    { ...base, id: "c", cwd: "Z:/old", workspaceRoot: "Z:/old", mtimeMs: 20, firstText: "丙" },
+    {
+      ...base,
+      id: "d",
+      cwd: "Z:/home/workspace",
+      workspaceRoot: "Z:/home/workspace",
+      mtimeMs: 5,
+      firstText: "闲聊",
+    },
+    {
+      ...base,
+      id: "e",
+      cwd: "Z:/work",
+      workspaceRoot: "Z:/work",
+      mtimeMs: 40,
+      parent: { sessionId: "a", callId: "x" },
+    },
+  ];
+  const projects = phoneProjects(list, "Z:/home/workspace");
+  expect(projects.map((p) => [p.name, p.count, p.plain])).toEqual([
+    ["普通对话", 1, true],
+    ["work", 2, false],
+    ["old", 1, false],
+  ]);
+  expect(projects[1]?.latest).toBe(30);
+  expect(projectSessions(list, "Z:/work", "Z:/home/workspace").map((r) => r.id)).toEqual([
+    "b",
+    "a",
+  ]);
+  expect(projectSessions(list, "Z:/home/workspace", "Z:/home/workspace").map((r) => r.id)).toEqual([
+    "d",
+  ]);
+  const now = new Date(2026, 9, 15, 12).getTime();
+  expect(shortDate(new Date(2026, 8, 3).getTime(), now)).toBe("09-03");
+  expect(shortDate(new Date(2025, 8, 3).getTime(), now)).toBe("2025-09-03");
+});
+
+it("主题与断线诊断只存在手机本地，诊断最多保留 8 条", () => {
+  const values = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => values.get(k) ?? null,
+    setItem: (k: string, v: string) => values.set(k, v),
+    removeItem: (k: string) => values.delete(k),
+  });
+  expect(loadTheme()).toBe("system");
+  saveTheme("dark");
+  expect(loadTheme()).toBe("dark");
+  applyTheme("light");
+  expect(document.documentElement.dataset.theme).toBe("light");
+  applyTheme("system");
+  expect(document.documentElement.dataset.theme).toBeUndefined();
+  for (let i = 0; i < 10; i++) recordDisconnect("电脑 1", `原因 ${i}`, i);
+  const log = loadDisconnects();
+  expect(log).toHaveLength(8);
+  expect(log[0]?.reason).toBe("原因 9");
+  clearDisconnects();
+  expect(loadDisconnects()).toEqual([]);
+  expect(closeReason(4002)).toContain("离线");
+  expect(closeReason(undefined)).not.toBe("");
 });

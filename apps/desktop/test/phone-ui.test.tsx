@@ -53,16 +53,18 @@ it.each([true, false])("iOS 非 standalone=%s：按钮显示与权限只在点�
     root?.render(<PhoneApp storage={storage} push={push} />);
   });
   expect(request).not.toHaveBeenCalled();
-  const button = [...container.querySelectorAll("button")].find(
-    (b) => b.textContent === "开启推送通知",
-  );
+  // 推送开关在设置页
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
+  });
+  const toggle = container.querySelector<HTMLInputElement>('input[aria-label="推送通知"]');
   if (ios) {
-    expect(button).toBeUndefined();
+    expect(toggle).toBeNull();
     expect(container.textContent).toContain("添加到主屏幕后才能接收推送");
   } else {
-    expect(button).toBeDefined();
+    expect(toggle).not.toBeNull();
     await act(async () => {
-      button?.click();
+      toggle?.click();
     });
     expect(request).toHaveBeenCalledOnce();
   }

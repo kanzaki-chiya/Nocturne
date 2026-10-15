@@ -84,6 +84,9 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     const { session: b } = await remote.client.runtime.resumeSession(a.id);
     const events: RuntimeEvent[] = [];
     await b.subscribe((e) => events.push(e));
+    // 电脑端同一会话的订阅：手机改档位、预设后桌面状态栏靠它刷新
+    const local: RuntimeEvent[] = [];
+    await a.subscribe((e) => local.push(e));
 
     // 第一轮：写文件，从手机批准本会话
     const turn = b.submit({ text: "写" });
@@ -110,6 +113,16 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     await b.setPermissionPreset("read-only");
     expect((await b.state()).config.permissionPreset).toBe("read-only");
     expect((await a.state()).config.permissionPreset).toBe("read-only");
+    await until(
+      () =>
+        local.some(
+          (e) => e.type === "session.config_changed" && e.payload.permissionPreset === "read-only",
+        ) &&
+        local.some(
+          (e) => e.type === "session.config_changed" && e.payload.reasoningEffort === "off",
+        ),
+      "电脑端收到手机的配置变更",
+    );
 
     const turns = await b.turnChanges();
     expect(turns.length).toBeGreaterThan(0);

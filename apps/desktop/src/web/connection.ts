@@ -11,6 +11,7 @@ import {
   RPC_PROTOCOL_VERSION,
   type RpcClient,
 } from "@nocturne/rpc/client";
+import { closeReason } from "./local";
 import { decode, type PairedHost } from "./storage";
 
 export type ConnectionState = "connecting" | "offline" | "online" | "revoked" | "incompatible";
@@ -27,6 +28,8 @@ export class PhoneConnection {
   relay: DeviceRelay | undefined;
   state: ConnectionState = "offline";
   message = "";
+  /** 电脑的会话目录（initialize 的只读信息），用来推导普通对话工作区 */
+  sessionsDir: string | undefined;
   private generation = 0;
   private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -40,7 +43,8 @@ export class PhoneConnection {
       host: PairedHost;
       changed: () => void;
       connected: (client: RpcClient, relay: DeviceRelay) => Promise<void>;
-      disconnected: () => void;
+      /** reason：断线原因（中文），供手机本地的连接诊断记录 */
+      disconnected: (reason: string) => void;
       connect?: typeof connectDeviceRelay;
       channel?: typeof connectChannel;
     },
@@ -76,14 +80,14 @@ export class PhoneConnection {
     this.message = message;
     this.options.changed();
   }
-  private retry(code?: number): void {
+  private retry(code?: number, reason = closeReason(code)): void {
     if (this.stopped) return;
     this.generation++;
     this.client?.close();
     this.client = undefined;
     this.relay = undefined;
     this.connecting = false;
-    this.options.disconnected();
+    this.options.disconnected(reason);
     if (code === 4003 || code === 4004) {
       this.stopped = true;
       this.set("revoked", "这台手机已被移除或吊销");
@@ -125,7 +129,10 @@ export class PhoneConnection {
       });
     } catch (error) {
       if (generation === this.generation)
-        this.retry(error instanceof RelayError ? error.closeCode : undefined);
+        this.retry(
+          error instanceof RelayError ? error.closeCode : undefined,
+          error instanceof RelayError ? closeReason(error.closeCode) : "无法连接中继",
+        );
     }
   }
   private async handshake(relay: DeviceRelay, generation: number): Promise<void> {
@@ -141,6 +148,7 @@ export class PhoneConnection {
       const client = createRpcClient(channel, { clientName: "nocturne-phone", interactive: true });
       this.client = client;
       const initialized = await client.initialize();
+      this.sessionsDir = initialized.sessionsDir;
       if (initialized.protocolVersion !== RPC_PROTOCOL_VERSION) {
         this.stop();
         this.set("incompatible", versionMessage(initialized.protocolVersion));
@@ -152,7 +160,7 @@ export class PhoneConnection {
       this.attempt = 0;
       this.set("online");
       void client.closed.then(() => {
-        if (generation === this.generation) this.retry();
+        if (generation === this.generation) this.retry(undefined, "加密连接关闭");
       });
     } catch (error) {
       if (generation !== this.generation) return;
@@ -162,7 +170,10 @@ export class PhoneConnection {
         this.stop();
         this.set("incompatible", versionMessage(Number(version ?? RPC_PROTOCOL_VERSION + 1)));
       } else {
-        this.retry();
+        this.retry(
+          undefined,
+          `握手失败：${error instanceof Error ? error.message : String(error)}`,
+        );
         relay.transport.close();
       }
     }

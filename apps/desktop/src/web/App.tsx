@@ -1,18 +1,47 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { RpcError } from "@nocturne/rpc/client";
 import type { ParsedOffer } from "@nocturne/remote";
-import { Conversation, PermissionCard, QuestionCard } from "../Conversation";
 import type { AttachmentImageSource } from "../attachment-images";
-import { projectName } from "../session-tree";
+import type { ComposerSubmit } from "../Composer";
+import { projectKey } from "../session-tree";
 import { PhoneConnection } from "./connection";
 import { pairPhone, pairingError, parsePairingLink } from "./pairing";
-import { PhoneSessions, knownWorkspaces, phoneStatus } from "./sessions";
+import { PhoneSessions, phoneStatus, submitAccepted, type PhoneCreateOptions } from "./sessions";
 import type { PairedHost, PhoneStorage } from "./storage";
 import { webHost, type WebHost } from "./host";
 import { browserPush, pushAvailable, type PhonePush } from "./push";
+import {
+  applyTheme,
+  clearDisconnects,
+  loadDisconnects,
+  loadTheme,
+  recordDisconnect,
+  saveTheme,
+  type PhoneTheme,
+} from "./local";
+import {
+  phoneProjects,
+  plainWorkspaceOf,
+  projectName,
+  projectSessions,
+  shortDate,
+} from "./projects";
+import {
+  IconBack,
+  IconChevron,
+  IconComputer,
+  IconFolder,
+  IconHome,
+  IconMore,
+  IconSettings,
+} from "./icons";
+import { Popover, PopoverOption } from "./Popover";
+import { DraftComposer, SessionScreen, mcpText } from "./SessionScreen";
 
 export const TRUST_TEXT =
   "中继只转发密文，看不到会话内容。你仍需信任中继维护者及服务器不会篡改下发的手机网页；端到端加密防不住被篡改的网页。远程访问相当于在手机上执行代码，请妥善保管手机并及时移除丢失设备。";
+export const ABILITY_TEXT =
+  "手机能做会话里的一切：对话、切换模型、思考档位与权限预设、压缩、斜杠命令与技能、权限与提问、中断。设置、服务商与凭据、MCP 与外部 agent 管理、持久授权、项目信任和 Shell 设置只能在电脑上改——这些在移除手机之后仍会生效。";
 export function iosBrowser(): boolean {
   return (
     /iPhone|iPad|iPod/.test(navigator.userAgent) ||
@@ -33,11 +62,26 @@ const images: AttachmentImageSource = {
   dispose: () => undefined,
 };
 type Page =
-  | { kind: "hosts" }
-  | { kind: "list"; hostId: string }
+  | { kind: "welcome" }
+  | { kind: "home"; hostId: string }
+  | { kind: "project"; hostId: string; path: string }
   | { kind: "session"; hostId: string; sessionId: string }
-  | { kind: "new"; hostId: string }
-  | { kind: "about" };
+  | { kind: "settings"; hostId?: string };
+
+const STATE_TEXT: Record<string, string> = {
+  online: "已连接",
+  connecting: "正在连接",
+  offline: "电脑离线",
+  revoked: "已被移除",
+  incompatible: "版本不兼容",
+};
+
+function lastHost(hosts: PairedHost[]): PairedHost | undefined {
+  return [...hosts].sort(
+    (a, b) => (b.lastConnectedAt ?? b.pairedAt) - (a.lastConnectedAt ?? a.pairedAt),
+  )[0];
+}
+
 export function PhoneApp({
   storage,
   initialFragment = "",
@@ -57,7 +101,7 @@ export function PhoneApp({
   const [push] = useState(() => injectedPush ?? browserPush(changed));
   const [connection, setConnection] = useState<PhoneConnection>();
   const [hosts, setHosts] = useState<PairedHost[]>([]);
-  const [page, setPage] = useState<Page>({ kind: "hosts" });
+  const [page, setPage] = useState<Page>({ kind: "welcome" });
   const [offer, setOffer] = useState<ParsedOffer>();
   const [link, setLink] = useState("");
   const [deviceName, setDeviceName] = useState(
@@ -70,9 +114,13 @@ export function PhoneApp({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [installHint, setInstallHint] = useState(false);
-  const [text, setText] = useState("");
-  const [workspace, setWorkspace] = useState("");
   const [ready, setReady] = useState(false);
+  const [theme, setTheme] = useState<PhoneTheme>(() => loadTheme());
+  const [menu, setMenu] = useState<"hosts" | "session" | null>(null);
+  const [menuOutput, setMenuOutput] = useState<string>();
+  const [addingHost, setAddingHost] = useState(false);
+  const hostTrigger = useRef<HTMLButtonElement>(null);
+  const sessionTrigger = useRef<HTMLButtonElement>(null);
   // 从推送点进来：连上电脑后跳到需要处理的会话
   const [attention, setAttention] = useState(() =>
     new URLSearchParams(location.search).has("attention"),
@@ -85,6 +133,7 @@ export function PhoneApp({
     );
     setPage(next);
     setError("");
+    setMenu(null);
   };
   const operation = async (run: () => Promise<void>) => {
     setError("");
@@ -97,6 +146,9 @@ export function PhoneApp({
       setBusy(false);
     }
   };
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
   useEffect(() => {
     void push.refresh();
     let active = true;
@@ -112,14 +164,17 @@ export function PhoneApp({
           } catch (e) {
             setError(pairingError(e));
           }
-        } else if (list.length === 1 && list[0]) navigate({ kind: "list", hostId: list[0].hostId });
+        }
+        const recent = lastHost(list);
+        if (recent) navigate({ kind: "home", hostId: recent.hostId }, true);
       })
       .catch(() => {
         setError("无法读取手机存储，请允许网站保存数据后重试");
       });
     const pop = (e: PopStateEvent) => {
-      setPage((e.state as Page | null) ?? { kind: "hosts" });
+      setPage((e.state as Page | null) ?? { kind: "welcome" });
       setError("");
+      setMenu(null);
     };
     window.addEventListener("popstate", pop);
     return () => {
@@ -128,14 +183,15 @@ export function PhoneApp({
     };
   }, [storage]);
   const hostId = "hostId" in page ? page.hostId : undefined;
+  const computer = hosts.find((h) => h.hostId === hostId);
   useEffect(() => {
     if (!hostId) {
       setConnection(undefined);
       sessions.clear();
       return;
     }
-    const computer = hosts.find((h) => h.hostId === hostId);
-    if (!computer) return;
+    const target = hosts.find((h) => h.hostId === hostId);
+    if (!target) return;
     let active = true;
     let channel: PhoneConnection | undefined;
     sessions.clear();
@@ -146,16 +202,17 @@ export function PhoneApp({
         channel = new PhoneConnection({
           origin: location.origin,
           identity,
-          host: computer,
+          host: target,
           changed,
           connected: async (client, relay) => {
             await sessions.connected(client);
-            await storage.putHost({ ...computer, lastConnectedAt: Date.now() });
-            await push.attach(computer.hostId, relay).catch(() => undefined);
+            await storage.putHost({ ...target, lastConnectedAt: Date.now() });
+            await push.attach(target.hostId, relay).catch(() => undefined);
           },
-          disconnected: () => {
+          disconnected: (reason) => {
+            recordDisconnect(target.name, reason);
             sessions.disconnected();
-            push.detach(computer.hostId);
+            push.detach(target.hostId);
           },
         });
         setConnection(channel);
@@ -170,10 +227,11 @@ export function PhoneApp({
     return () => {
       active = false;
       channel?.stop();
-      push.detach(computer.hostId);
+      push.detach(target.hostId);
       document.removeEventListener("visibilitychange", visibility);
     };
-  }, [hostId, storage]);
+    // hosts 变化（重命名）不重连；切换电脑才重连
+  }, [hostId, storage, hosts.length]);
   useEffect(() => {
     const viewport = window.visualViewport;
     // iOS 弹出软键盘时会把可视区在布局视口内上移（offsetTop），只缩高度会让整页滚出可视区。
@@ -203,6 +261,12 @@ export function PhoneApp({
   }, []);
   const online = connection?.state === "online";
   const loaded = sessions.loaded;
+  const plainWorkspace = plainWorkspaceOf(connection?.sessionsDir);
+  const openSession = (id: string) => {
+    void operation(async () => {
+      await sessions.open(id);
+    });
+  };
   useEffect(() => {
     if (!attention || !online || !loaded || !hostId) return;
     let active = true;
@@ -210,10 +274,12 @@ export function PhoneApp({
       if (!active) return;
       setAttention(false);
       if (!id) return;
+      // 返回时回到该会话所在的项目页：首页 → 项目 → 会话
+      const summary = sessions.list.find((item) => item.id === id);
+      navigate({ kind: "home", hostId }, true);
+      if (summary) navigate({ kind: "project", hostId, path: summary.cwd });
       navigate({ kind: "session", hostId, sessionId: id });
-      void operation(async () => {
-        await sessions.open(id);
-      });
+      openSession(id);
     });
     return () => {
       active = false;
@@ -221,8 +287,37 @@ export function PhoneApp({
   }, [attention, online, loaded, hostId]);
   const entry = page.kind === "session" ? sessions.opened.get(page.sessionId) : undefined;
   const connected = online;
+  const statuses = Object.fromEntries(
+    [...sessions.opened].map(([id, opened]) => [id, phoneStatus(opened)]),
+  );
+
+  const createIn = async (path: string, input: ComposerSubmit, options: PhoneCreateOptions) => {
+    if (!hostId) throw new Error("电脑尚未连接");
+    const target = await sessions.create(path, options);
+    navigate({ kind: "session", hostId, sessionId: target.session.id });
+    if (input.text !== "") await target.session.recordInputHistory(input.text);
+    await submitAccepted(
+      target,
+      {
+        text: input.text,
+        ...(input.skill ? { skill: input.skill } : {}),
+        ...(input.delegate ? { delegate: input.delegate } : {}),
+        ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
+      },
+      (failure) => {
+        if (
+          failure !== undefined &&
+          !(failure instanceof RpcError && failure.code === "connection_closed")
+        )
+          setError(failure instanceof Error ? failure.message : "发送失败");
+        void sessions.refresh().catch(() => undefined);
+      },
+    );
+  };
+
   const pushSection = (
-    <section className="phone-push" aria-label="推送通知">
+    <section className="phone-section" aria-label="推送通知">
+      <h3>推送通知</h3>
       {!pushAvailable(iosBrowser(), standalone()) ? (
         <p>添加到主屏幕后才能接收推送</p>
       ) : push.state === "unsupported" ? (
@@ -233,102 +328,448 @@ export function PhoneApp({
             <p>通知权限已被拒绝，请在系统设置或浏览器的网站设置中允许 Nocturne 通知。</p>
           )}
           {push.message && <p role="status">{push.message}</p>}
-          <button
-            className="phone-list-action"
-            disabled={push.state === "working" || push.state === "denied"}
-            onClick={() => {
-              void (push.state === "enabled" ? push.disable() : push.enable());
-            }}
-          >
-            {push.state === "working"
-              ? "正在设置推送…"
-              : push.state === "enabled"
-                ? "关闭推送通知"
-                : "开启推送通知"}
-          </button>
-          {push.state === "enabled" && <small>已开启 · 只显示固定提醒，不发送会话内容</small>}
+          <label className="phone-switch">
+            <span>
+              {push.state === "working" ? "正在设置推送…" : "需要处理时提醒我"}
+              <small>只显示固定提醒，不发送会话内容</small>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="推送通知"
+              checked={push.state === "enabled"}
+              disabled={push.state === "working" || push.state === "denied" || !hostId}
+              onChange={() => {
+                void (push.state === "enabled" ? push.disable() : push.enable());
+              }}
+            />
+          </label>
+          {!hostId && <small>先连上一台电脑再开启</small>}
         </>
       )}
     </section>
   );
-  const [dismissed, setDismissed] = useState("");
-  const pendingKey =
-    entry?.view.pendingPermission?.requestId ?? entry?.view.pendingQuestion?.requestId;
-  const replySession = entry && {
-    ...entry.session,
-    respondPermission: async (...args: Parameters<typeof entry.session.respondPermission>) => {
-      try {
-        await entry.session.respondPermission(...args);
-      } catch (e) {
-        if (!(e instanceof RpcError && e.code === "unknown_request")) throw e;
-      }
-      setDismissed(args[0]);
-    },
-    respondQuestion: async (...args: Parameters<typeof entry.session.respondQuestion>) => {
-      try {
-        await entry.session.respondQuestion(...args);
-      } catch (e) {
-        if (!(e instanceof RpcError && e.code === "unknown_request")) throw e;
-      }
-      setDismissed(args[0]);
-    },
-  };
-  const submit = async () => {
-    if (!text.trim()) return;
-    const outgoing = text;
-    const target = page.kind === "new" ? await sessions.create(workspace) : entry;
-    if (!target || target.dead) throw new Error("电脑尚未连接");
-    navigate({ kind: "session", hostId: hostId ?? "", sessionId: target.session.id });
-    setText("");
-    // Turn 期间保持中断与权限回复可用，不把提交挂到全页 busy。
-    void target.session
-      .submit({ text: outgoing })
-      .catch((e: unknown) => {
-        if (!(e instanceof RpcError && e.code === "connection_closed"))
-          setError(e instanceof Error ? e.message : "发送失败");
-      })
-      .finally(() => {
-        void sessions.refresh().catch(() => undefined);
-      });
-  };
+
+  const pairForm = (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        try {
+          setOffer(parsePairingLink(link, location.origin));
+          setLink("");
+          setError("");
+        } catch (cause) {
+          setError(pairingError(cause));
+        }
+      }}
+    >
+      <label>
+        粘贴配对链接
+        <input
+          autoComplete="off"
+          spellCheck={false}
+          value={link}
+          onChange={(e) => {
+            setLink(e.target.value);
+          }}
+          placeholder="https://…/#pair=… 或 pair=…"
+        />
+      </label>
+      <button className="phone-primary" disabled={!link.trim()}>
+        继续配对
+      </button>
+    </form>
+  );
+
+  const title = (() => {
+    if (offer) return "将与电脑配对";
+    switch (page.kind) {
+      case "welcome":
+        return "Nocturne";
+      case "settings":
+        return "设置";
+      case "project":
+        return plainWorkspace !== undefined && projectKey(page.path) === projectKey(plainWorkspace)
+          ? "普通对话"
+          : projectName(page.path);
+      case "session":
+        return (
+          entry?.view.title ??
+          sessions.list.find((item) => item.id === page.sessionId)?.firstText ??
+          "会话"
+        );
+      default:
+        return computer?.name ?? "电脑";
+    }
+  })();
+
+  let body: ReactNode;
+  if (offer) {
+    body = (
+      <section className="phone-body">
+        <h2>确认这台手机的名称</h2>
+        <p>名称会显示在电脑的「设置 › 远程」中。</p>
+        <label>
+          设备名
+          <input
+            value={deviceName}
+            maxLength={64}
+            onChange={(e) => {
+              setDeviceName(e.target.value);
+            }}
+          />
+        </label>
+        <button
+          className="phone-primary"
+          disabled={busy || !deviceName.trim()}
+          onClick={() => {
+            void operation(async () => {
+              try {
+                const paired = await pairPhone(storage, offer, location.origin, deviceName);
+                setOffer(undefined);
+                setAddingHost(false);
+                setHosts(await storage.hosts());
+                setInstallHint(iosBrowser() && !standalone());
+                navigate({ kind: "home", hostId: paired.hostId }, true);
+              } catch (e) {
+                throw new Error(pairingError(e));
+              }
+            });
+          }}
+        >
+          {busy ? "正在配对…" : "确认配对"}
+        </button>
+      </section>
+    );
+  } else if (page.kind === "welcome") {
+    body = (
+      <section className="phone-body">
+        {!ready ? (
+          <p role="status">正在读取手机存储…</p>
+        ) : (
+          <>
+            <h2>把会话带在身边</h2>
+            {standalone() && (
+              <p className="phone-pair-first">在主屏幕应用里，请先粘贴电脑复制的配对链接。</p>
+            )}
+            <p>在电脑的「设置 › 远程」登记中继，然后选择「配对新手机」，用相机扫码。</p>
+            <p>{TRUST_TEXT}</p>
+            {pairForm}
+          </>
+        )}
+      </section>
+    );
+  } else if (page.kind === "home") {
+    const projects = phoneProjects(sessions.list, plainWorkspace);
+    body = (
+      <section className="phone-body phone-list">
+        <h3 className="phone-list-h">项目</h3>
+        {!loaded && <p role="status">{connected ? "正在读取会话…" : "连接后会在这里显示项目。"}</p>}
+        {projects.map((project) => (
+          <button
+            key={project.key}
+            className="phone-row"
+            disabled={!loaded}
+            onClick={() => {
+              navigate({ kind: "project", hostId: page.hostId, path: project.path });
+            }}
+          >
+            <span className="phone-row-icon">{project.plain ? <IconHome /> : <IconFolder />}</span>
+            <span className="phone-row-main">
+              <b>{project.name}</b>
+              <small>
+                <span>{project.count} 个会话</span>
+                {project.latest !== undefined && <span>{shortDate(project.latest)}</span>}
+              </small>
+            </span>
+          </button>
+        ))}
+      </section>
+    );
+  } else if (page.kind === "project") {
+    const rows = projectSessions(sessions.list, page.path, plainWorkspace, statuses);
+    const byId = new Map(sessions.list.map((item) => [item.id, item]));
+    body = (
+      <>
+        <section className="phone-body phone-list">
+          <p className="phone-sub">{computer?.name ?? "电脑"}</p>
+          <p className="phone-sub" title={page.path}>
+            {rows.length} 个会话 · {page.path}
+          </p>
+          {rows.length === 0 && loaded && <p>还没有会话，在下方输入即可在这里新建。</p>}
+          {rows.map((row) => {
+            const opened = sessions.opened.get(row.id);
+            const summary = byId.get(row.id);
+            const heading = opened?.view.title ?? row.title;
+            const status = statuses[row.id] ?? "idle";
+            return (
+              <button
+                className="phone-row session"
+                key={row.id}
+                disabled={!connected}
+                onClick={() => {
+                  navigate({ kind: "session", hostId: page.hostId, sessionId: row.id });
+                  openSession(row.id);
+                }}
+              >
+                <span className="phone-row-main">
+                  <b>{heading}</b>
+                  {heading !== row.title && <span className="phone-row-summary">{row.title}</span>}
+                  <small>
+                    <span className={`phone-badge ${status}`}>
+                      {status === "pending" ? "待确认" : status === "running" ? "运行中" : ""}
+                      {summary?.forkedFrom ? "分叉" : ""}
+                    </span>
+                    <span>{summary ? shortDate(summary.mtimeMs) : ""}</span>
+                  </small>
+                </span>
+              </button>
+            );
+          })}
+        </section>
+        <DraftComposer
+          runtime={connected ? sessions.client?.runtime : undefined}
+          workspace={page.path}
+          connected={connected}
+          onCreate={(input, options) => createIn(page.path, input, options)}
+        />
+      </>
+    );
+  } else if (page.kind === "session") {
+    body = entry ? (
+      <SessionScreen
+        key={entry.session.id}
+        entry={entry}
+        connected={connected}
+        images={images}
+        openUrl={(url) => {
+          host.openUrl(url);
+        }}
+        onError={setError}
+        onChanged={() => {
+          void sessions.refresh().catch(() => undefined);
+        }}
+      />
+    ) : (
+      <section className="phone-body">
+        <p role="status">{connected ? "正在打开会话…" : "连接后会打开会话。"}</p>
+      </section>
+    );
+  } else {
+    const disconnects = loadDisconnects();
+    body = (
+      <section className="phone-body phone-settings">
+        <section className="phone-section" aria-label="已配对的电脑">
+          <h3>已配对的电脑</h3>
+          {hosts.map((item) => (
+            <div className="phone-host" key={item.hostId}>
+              <div className="phone-host-line">
+                <IconComputer />
+                <input
+                  aria-label={`重命名 ${item.name}`}
+                  defaultValue={item.name}
+                  onBlur={(e) => {
+                    const name = e.target.value.trim();
+                    if (name && name !== item.name)
+                      void operation(async () => {
+                        await storage.putHost({ ...item, name });
+                        setHosts(await storage.hosts());
+                      });
+                  }}
+                />
+              </div>
+              <div className="phone-host-actions">
+                <button
+                  onClick={() => {
+                    navigate({ kind: "home", hostId: item.hostId });
+                  }}
+                >
+                  打开
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => {
+                    void operation(async () => {
+                      await storage.removeHost(item.hostId);
+                      const rest = await storage.hosts();
+                      setHosts(rest);
+                      setError("已从手机移除。电脑上的设备记录请在电脑的『设置 › 远程』里移除");
+                      if (item.hostId === page.hostId) navigate({ kind: "settings" }, true);
+                    });
+                  }}
+                >
+                  移除
+                </button>
+              </div>
+            </div>
+          ))}
+          {addingHost ? (
+            <>
+              <p>在电脑的「设置 › 远程」选择「配对新手机」，扫码或复制链接粘贴到这里。</p>
+              {pairForm}
+            </>
+          ) : (
+            <button
+              className="phone-list-action"
+              onClick={() => {
+                setAddingHost(true);
+              }}
+            >
+              添加电脑
+            </button>
+          )}
+        </section>
+        {pushSection}
+        <section className="phone-section" aria-label="连接诊断">
+          <h3>连接诊断</h3>
+          <dl className="phone-facts">
+            <div>
+              <dt>当前</dt>
+              <dd>
+                {page.hostId === undefined || connection === undefined
+                  ? "未连接任何电脑"
+                  : `${computer?.name ?? "电脑"} · ${STATE_TEXT[connection.state] ?? connection.state}${connection.message ? `（${connection.message}）` : ""}`}
+              </dd>
+            </div>
+          </dl>
+          {disconnects.length === 0 ? (
+            <small>最近没有断线记录</small>
+          ) : (
+            <>
+              <ul className="phone-log" aria-label="最近断线">
+                {disconnects.map((item) => (
+                  <li key={`${item.at}:${item.reason}`}>
+                    <time>{new Date(item.at).toLocaleString("zh-CN", { hour12: false })}</time>
+                    <span>
+                      {item.host} · {item.reason}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <button
+                className="phone-list-action"
+                onClick={() => {
+                  clearDisconnects();
+                  changed();
+                }}
+              >
+                清除记录
+              </button>
+            </>
+          )}
+          <small>只记在这台手机上，不含会话内容。</small>
+        </section>
+        <section className="phone-section" aria-label="主题">
+          <h3>主题</h3>
+          <div className="phone-segment" role="radiogroup" aria-label="主题">
+            {(
+              [
+                ["system", "跟随系统"],
+                ["light", "亮色"],
+                ["dark", "暗色"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                role="radio"
+                aria-checked={theme === value}
+                className={theme === value ? "on" : undefined}
+                onClick={() => {
+                  saveTheme(value);
+                  setTheme(value);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </section>
+        <section className="phone-section" aria-label="关于">
+          <h3>关于与信任边界</h3>
+          <p>{ABILITY_TEXT}</p>
+          <p>{TRUST_TEXT}</p>
+        </section>
+      </section>
+    );
+  }
+
+  const homeHeader = page.kind === "home" && !offer;
   return (
     <main className="phone">
-      <header className="phone-header">
-        <button
-          aria-label="返回"
-          disabled={page.kind === "hosts" && !offer}
-          onClick={() => {
-            if (offer) setOffer(undefined);
-            else history.back();
-          }}
-        >
-          返回
-        </button>
-        <h1>
-          {offer
-            ? "将与电脑配对"
-            : page.kind === "hosts"
-              ? "Nocturne"
-              : page.kind === "about"
-                ? "关于远程访问"
-                : page.kind === "session"
-                  ? (entry?.view.title ?? "会话")
-                  : (hosts.find((h) => h.hostId === hostId)?.name ?? "电脑")}
-        </h1>
-        <button
-          onClick={() => {
-            navigate({ kind: "about" });
-          }}
-        >
-          关于
-        </button>
+      <header className={`phone-header${homeHeader ? " home" : ""}`}>
+        {homeHeader ? (
+          <span className="phone-header-side" />
+        ) : (
+          <button
+            className="phone-icon-button"
+            aria-label="返回"
+            disabled={(page.kind === "welcome" && !offer) || (!offer && history.length <= 1)}
+            onClick={() => {
+              if (offer) setOffer(undefined);
+              else history.back();
+            }}
+          >
+            <IconBack />
+          </button>
+        )}
+        {homeHeader ? (
+          <button
+            ref={hostTrigger}
+            className="phone-host-switch"
+            aria-label="切换电脑"
+            aria-haspopup="dialog"
+            aria-expanded={menu === "hosts"}
+            onClick={() => {
+              setMenu(menu === "hosts" ? null : "hosts");
+            }}
+          >
+            <IconComputer />
+            <h1>{title}</h1>
+            <i
+              className={`phone-dot ${connection?.state ?? "offline"}`}
+              aria-label={STATE_TEXT[connection?.state ?? "offline"]}
+              role="img"
+            />
+            <IconChevron />
+          </button>
+        ) : (
+          <h1>{title}</h1>
+        )}
+        {page.kind === "session" ? (
+          <button
+            ref={sessionTrigger}
+            className="phone-icon-button"
+            aria-label="会话菜单"
+            aria-haspopup="dialog"
+            aria-expanded={menu === "session"}
+            disabled={!entry}
+            onClick={() => {
+              setMenuOutput(undefined);
+              setMenu(menu === "session" ? null : "session");
+            }}
+          >
+            <IconMore />
+          </button>
+        ) : page.kind === "settings" || page.kind === "welcome" || offer ? (
+          <span className="phone-header-side" />
+        ) : (
+          <button
+            className="phone-icon-button"
+            aria-label="设置"
+            onClick={() => {
+              navigate({ kind: "settings", ...(hostId ? { hostId } : {}) });
+            }}
+          >
+            <IconSettings />
+          </button>
+        )}
       </header>
       {error && (
         <p className="phone-error" role="alert">
           {error}
         </p>
       )}
-      {connection && connection.state !== "online" && (
+      {connection && connection.state !== "online" && page.kind !== "settings" && (
         <aside className="phone-status" role="status">
           {connection.message || "正在建立加密连接…"}
         </aside>
@@ -339,306 +780,92 @@ export function PhoneApp({
           分享菜单选择「添加到主屏幕」。添加后需在主屏幕应用里再配对一次，用电脑上的「复制链接」粘贴即可。
         </aside>
       )}
-      {offer ? (
-        <section className="phone-body">
-          <h2>确认这台手机的名称</h2>
-          <p>名称会显示在电脑的「设置 › 远程」中。</p>
-          <label>
-            设备名
-            <input
-              value={deviceName}
-              maxLength={64}
-              onChange={(e) => {
-                setDeviceName(e.target.value);
+      {body}
+      {menu === "hosts" && (
+        <Popover
+          anchor={hostTrigger.current}
+          label="切换电脑"
+          onClose={() => {
+            setMenu(null);
+          }}
+        >
+          <div className="phone-popover-h">电脑</div>
+          {hosts.map((item) => (
+            <PopoverOption
+              key={item.hostId}
+              icon={<IconComputer />}
+              label={item.name}
+              detail={
+                item.hostId === hostId
+                  ? STATE_TEXT[connection?.state ?? "offline"]
+                  : item.lastConnectedAt
+                    ? `上次连接 ${shortDate(item.lastConnectedAt)}`
+                    : "尚未连接"
+              }
+              checked={item.hostId === hostId}
+              onSelect={() => {
+                setMenu(null);
+                if (item.hostId !== hostId) navigate({ kind: "home", hostId: item.hostId }, true);
               }}
             />
-          </label>
-          <button
-            className="phone-primary"
-            disabled={busy || !deviceName.trim()}
-            onClick={() => {
-              void operation(async () => {
-                try {
-                  const paired = await pairPhone(storage, offer, location.origin, deviceName);
-                  setOffer(undefined);
-                  setHosts(await storage.hosts());
-                  setInstallHint(iosBrowser() && !standalone());
-                  navigate({ kind: "list", hostId: paired.hostId });
-                } catch (e) {
-                  throw new Error(pairingError(e));
-                }
-              });
+          ))}
+          <PopoverOption
+            label="管理电脑与配对…"
+            onSelect={() => {
+              navigate({ kind: "settings", ...(hostId ? { hostId } : {}) });
             }}
-          >
-            {busy ? "正在配对…" : "确认配对"}
-          </button>
-        </section>
-      ) : page.kind === "about" ? (
-        <section className="phone-body">
-          <h2>自己的电脑，随时继续</h2>
-          <p>{TRUST_TEXT}</p>
-          <p>
-            这里只支持文字、消息与工具调用、权限与提问、中断。不支持附件、回退、文件访问或修改设置。
-          </p>
-        </section>
-      ) : page.kind === "hosts" ? (
-        <section className="phone-body">
-          {!ready ? (
-            <p role="status">正在读取手机存储…</p>
-          ) : hosts.length === 0 ? (
-            <>
-              <h2>把会话带在身边</h2>
-              {standalone() && (
-                <p className="phone-pair-first">在主屏幕应用里，请先粘贴电脑复制的配对链接。</p>
-              )}
-              <p>在电脑的「设置 › 远程」登记中继，然后选择「配对新手机」，用相机扫码。</p>
-              <p>{TRUST_TEXT}</p>
-            </>
+          />
+        </Popover>
+      )}
+      {menu === "session" && entry && (
+        <Popover
+          anchor={sessionTrigger.current}
+          label="会话菜单"
+          onClose={() => {
+            setMenu(null);
+          }}
+          wide={menuOutput !== undefined}
+        >
+          <div className="phone-popover-h">{menuOutput !== undefined ? "MCP 状态" : "会话"}</div>
+          {menuOutput !== undefined ? (
+            <pre className="phone-output">{menuOutput}</pre>
           ) : (
             <>
-              <h2>已配对的电脑</h2>
-              {hosts.map((computer) => (
-                <div className="phone-host" key={computer.hostId}>
-                  <button
-                    onClick={() => {
-                      navigate({ kind: "list", hostId: computer.hostId });
-                    }}
-                  >
-                    {computer.name}
-                    <small>打开会话列表</small>
-                  </button>
-                  <label>
-                    电脑名称
-                    <input
-                      aria-label={`重命名 ${computer.name}`}
-                      defaultValue={computer.name}
-                      onBlur={(e) => {
-                        const name = e.target.value.trim();
-                        if (name && name !== computer.name)
-                          void operation(async () => {
-                            await storage.putHost({ ...computer, name });
-                            setHosts(await storage.hosts());
-                          });
-                      }}
-                    />
-                  </label>
-                  <button
-                    onClick={() => {
-                      void operation(async () => {
-                        await storage.removeHost(computer.hostId);
-                        setHosts(await storage.hosts());
-                        setError("已从手机移除。电脑上的设备记录请在电脑的『设置 › 远程』里移除");
-                      });
-                    }}
-                  >
-                    移除这台电脑
-                  </button>
-                </div>
-              ))}
-            </>
-          )}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              try {
-                setOffer(parsePairingLink(link, location.origin));
-                setLink("");
-                setError("");
-              } catch (cause) {
-                setError(pairingError(cause));
-              }
-            }}
-          >
-            <label>
-              粘贴配对链接
-              <input
-                autoComplete="off"
-                spellCheck={false}
-                value={link}
-                onChange={(e) => {
-                  setLink(e.target.value);
-                }}
-                placeholder="https://…/#pair=… 或 pair=…"
-              />
-            </label>
-            <button className="phone-primary" disabled={!link.trim()}>
-              继续配对
-            </button>
-          </form>
-        </section>
-      ) : page.kind === "list" ? (
-        <section className="phone-body">
-          <div className="phone-toolbar">
-            <h2>会话</h2>
-            <button
-              disabled={!connected || busy}
-              onClick={() => {
-                void operation(() => sessions.refresh());
-              }}
-            >
-              刷新
-            </button>
-            <button
-              disabled={!connected || !knownWorkspaces(sessions.list).length}
-              onClick={() => {
-                setWorkspace(knownWorkspaces(sessions.list)[0] ?? "");
-                navigate({ kind: "new", hostId: page.hostId });
-              }}
-            >
-              新建会话
-            </button>
-          </div>
-          {push.state !== "enabled" && pushSection}
-          {sessions.list.length === 0 && (
-            <p>
-              {connected
-                ? "这台电脑还没有会话，请先在电脑上开始一个会话。"
-                : "连接后会在这里显示会话。"}
-            </p>
-          )}
-          {sessions.list.map((item) => {
-            const opened = sessions.opened.get(item.id);
-            const status = opened ? phoneStatus(opened) : "idle";
-            return (
-              <button
-                className="phone-session-row"
-                key={item.id}
-                disabled={!connected || busy}
-                onClick={() => {
-                  navigate({ kind: "session", hostId: page.hostId, sessionId: item.id });
+              <PopoverOption
+                label="压缩上下文"
+                detail="与输入 /compact 相同"
+                disabled={
+                  !connected
+                    ? "电脑尚未连接"
+                    : entry.view.currentTurn !== undefined
+                      ? "当前 Turn 结束后可压缩"
+                      : undefined
+                }
+                onSelect={() => {
+                  setMenu(null);
                   void operation(async () => {
-                    await sessions.open(item.id);
+                    await entry.session.compact();
                   });
                 }}
-              >
-                <b>{opened?.view.title ?? item.firstText ?? "未命名会话"}</b>
-                <small>
-                  {projectName(item.cwd)}
-                  <span className={`phone-badge ${status}`}>
-                    {status === "pending" ? "待确认" : status === "running" ? "运行中" : "空闲"}
-                  </span>
-                </small>
-              </button>
-            );
-          })}
-          <button
-            className="phone-list-action"
-            onClick={() => {
-              navigate({ kind: "hosts" });
-            }}
-          >
-            管理电脑与配对
-          </button>
-          {push.state === "enabled" && pushSection}
-        </section>
-      ) : (
-        <>
-          {page.kind === "new" ? (
-            <section className="phone-body">
-              <h2>新建会话</h2>
-              <label>
-                工作区
-                <select
-                  value={workspace}
-                  onChange={(e) => {
-                    setWorkspace(e.target.value);
-                  }}
-                >
-                  {knownWorkspaces(sessions.list).map((path) => (
-                    <option value={path} key={path}>
-                      {projectName(path)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p>使用电脑的默认模型，仅能选择已有会话的工作区。</p>
-            </section>
-          ) : entry ? (
-            <Conversation
-              session={entry.session}
-              view={entry.view}
-              openUrl={(url) => {
-                host.openUrl(url);
-              }}
-              cwd={entry.workspace}
-              images={images}
-              busy={entry.view.currentTurn !== undefined}
-              hidePersistentPermissions
-              hideRequests
-              subscribeEvents={(listener) =>
-                entry.client.onEvent((id, event) => {
-                  if (id === entry.session.id) listener(event);
-                })
-              }
-            />
-          ) : (
-            <section className="phone-body">
-              <p role="status">正在打开会话…</p>
-            </section>
+              />
+              <PopoverOption
+                label="MCP 状态"
+                detail="与输入 /mcp 相同"
+                disabled={connected ? undefined : "电脑尚未连接"}
+                onSelect={() => {
+                  void entry.session.mcpServers().then(
+                    (servers) => {
+                      setMenuOutput(mcpText(servers));
+                    },
+                    (reason: unknown) => {
+                      setMenuOutput(reason instanceof Error ? reason.message : String(reason));
+                    },
+                  );
+                }}
+              />
+            </>
           )}
-          <form
-            className="phone-composer"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void operation(submit);
-            }}
-          >
-            <textarea
-              aria-label="消息"
-              placeholder="发送文字消息…"
-              value={text}
-              rows={2}
-              onChange={(e) => {
-                setText(e.target.value);
-              }}
-            />
-            <div>
-              <button
-                type="button"
-                disabled={!connected || !entry?.view.currentTurn}
-                onClick={() => entry?.session.interrupt()}
-              >
-                中断
-              </button>
-              <button
-                className="phone-primary"
-                disabled={
-                  !connected || busy || !text.trim() || entry?.view.currentTurn !== undefined
-                }
-              >
-                发送
-              </button>
-            </div>
-          </form>
-          {entry &&
-            replySession &&
-            pendingKey !== dismissed &&
-            connected &&
-            (entry.view.pendingPermission ?? entry.view.pendingQuestion) && (
-              <div
-                className="phone-sheet"
-                role="dialog"
-                aria-modal="true"
-                aria-label={entry.view.pendingPermission ? "权限面板" : "提问面板"}
-              >
-                {entry.view.pendingPermission ? (
-                  <PermissionCard
-                    key={pendingKey}
-                    pending={entry.view.pendingPermission}
-                    session={replySession}
-                    cwd={entry.workspace}
-                    hidePersistentPermissions
-                  />
-                ) : entry.view.pendingQuestion ? (
-                  <QuestionCard
-                    key={pendingKey}
-                    pending={entry.view.pendingQuestion}
-                    session={replySession}
-                  />
-                ) : null}
-              </div>
-            )}
-        </>
+        </Popover>
       )}
       {connection?.state === "revoked" && hostId && (
         <button
@@ -646,8 +873,10 @@ export function PhoneApp({
           onClick={() => {
             void operation(async () => {
               await storage.removeHost(hostId);
-              setHosts(await storage.hosts());
-              navigate({ kind: "hosts" });
+              const rest = await storage.hosts();
+              setHosts(rest);
+              const next = lastHost(rest);
+              navigate(next ? { kind: "home", hostId: next.hostId } : { kind: "welcome" }, true);
               setError("电脑上的设备记录请在电脑的『设置 › 远程』里移除");
             });
           }}

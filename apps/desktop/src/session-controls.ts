@@ -91,7 +91,8 @@ export function useSessionControls(
   session: RpcSession,
   runtime: RpcRuntime,
   view: SessionView,
-  prefs: PrefsStore,
+  /** 桌面端记住上次的思考档位；手机网页不传，只改会话内档位 */
+  prefs: PrefsStore | undefined,
   /** 服务商配置变更计数：变化时重新拉取模型/预设等数据 */
   providersVersion = 0,
   /** 会话自己的工作区（ADR-0051）：模型清单按它合并项目层配置 */
@@ -252,7 +253,7 @@ export function useSessionControls(
     onSelect: (value) =>
       choose(async () => {
         await session.setReasoningEffort(value);
-        prefs.update({ lastEffort: value });
+        prefs?.update({ lastEffort: value });
       }),
   };
   const presetControl: ChoiceControl = {
@@ -317,6 +318,8 @@ export interface DraftControls {
   controls: ComposerControls;
   /** 第一条消息建会话用的选项；未触碰的预设/档位省略，让 Core 解析项目默认 */
   createOptions(): DraftCreateOptions;
+  /** 模型列表与默认模型尚未读到 */
+  loading: boolean;
   error?: string;
 }
 
@@ -343,10 +346,15 @@ function pickDefaultModel(
  */
 export function useDraftControls(
   runtime: RpcRuntime | undefined,
-  prefs: PrefsStore,
+  prefs: PrefsStore | undefined,
   /** 服务商配置变更计数：变化时重新拉取模型列表 */
   providersVersion = 0,
   workspace?: string | null,
+  /**
+   * false：不读设置（手机远程连接不开放 describeSettings）。未选过的档位与预设
+   * 显示「默认」，建会话时省略，由 Core 按项目默认解析。
+   */
+  readSettings = true,
 ): DraftControls {
   const [data, setData] = useState<{
     models: ModelInfo[];
@@ -363,6 +371,7 @@ export function useDraftControls(
   const request = useRef(0);
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
+  const settingsLabel = readSettings ? undefined : "默认";
 
   useEffect(() => {
     if (runtime === undefined) return;
@@ -373,14 +382,14 @@ export function useDraftControls(
       runtime.listModels(scope),
       runtime.listRecentModels(),
       runtime.defaultModel(scope),
-      runtime.describeSettings(scope),
+      readSettings ? runtime.describeSettings(scope) : Promise.resolve([]),
     ]).then(
       ([models, recents, configured, settings]) => {
         if (cancelled || id !== request.current) return;
         setData({ models, recents, configured, settings });
         setError(undefined);
         // lastEffort 作为初始（已选）档位；后续按所选模型的可用集合过滤
-        const lastEffort = prefsRef.current.get().lastEffort;
+        const lastEffort = prefsRef.current?.get().lastEffort;
         if (lastEffort !== undefined) {
           setPicked((current) => ({ ...current, effort: current.effort ?? lastEffort }));
         }
@@ -392,7 +401,7 @@ export function useDraftControls(
     return () => {
       cancelled = true;
     };
-  }, [runtime, providersVersion, workspace]);
+  }, [runtime, providersVersion, workspace, readSettings]);
 
   const models = data?.models ?? [];
   const byKey = new Map(models.map((info) => [refKey(info.ref), info]));
@@ -424,19 +433,19 @@ export function useDraftControls(
       },
     },
     effort: {
-      value: effort,
-      label: effort,
+      value: effortExplicit || settingsLabel === undefined ? effort : undefined,
+      label: effortExplicit ? effort : (settingsLabel ?? effort),
       heading: `思考档位 · ${model?.ref.model ?? "—"}`,
       groups: [{ options: levels.map(effortOption) }],
       ...(effortNote !== undefined ? { note: effortNote } : {}),
       onSelect: (value) => {
         setPicked((current) => ({ ...current, effort: value }));
-        prefs.update({ lastEffort: value });
+        prefs?.update({ lastEffort: value });
       },
     },
     preset: {
       value: preset,
-      label: preset ?? "—",
+      label: preset ?? settingsLabel ?? "—",
       groups: [{ options: presetOptions() }],
       onSelect: (value) => {
         setPicked((current) => ({ ...current, preset: value }));
@@ -451,5 +460,10 @@ export function useDraftControls(
     ...(picked.preset !== undefined ? { permissionPreset: picked.preset } : {}),
   });
 
-  return { controls, createOptions, ...(error !== undefined ? { error } : {}) };
+  return {
+    controls,
+    createOptions,
+    loading: data === null && error === undefined,
+    ...(error !== undefined ? { error } : {}),
+  };
 }

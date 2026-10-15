@@ -37,27 +37,77 @@
 .phone button:hover:not(:disabled) {
   background: var(--a-raised);
 }
+.phone-icon {
+  flex: none;
+  display: block;
+}
+
+/* ── 标题栏 ── */
 .phone-header {
   display: flex;
   align-items: center;
-  padding: 8px max(8px, env(safe-area-inset-right)) 8px max(8px, env(safe-area-inset-left));
-  border-bottom: 1px solid var(--a-border);
+  padding: 6px max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left));
   flex: none;
-  gap: 8px;
+  gap: 4px;
 }
 .phone-header h1 {
   flex: 1;
   margin: 0;
   font-size: 18px;
+  font-weight: 600;
   min-width: 0;
-  overflow-wrap: anywhere;
-  max-height: 4em;
-  overflow: auto;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.phone .phone-icon-button,
+.phone-header-side {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.phone-host-switch {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.phone .phone-host-switch h1 {
+  flex: 0 1 auto;
+}
+.phone-host-switch .phone-icon:last-child {
+  color: var(--a-muted);
+}
+.phone-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--a-faint);
+}
+.phone-dot.online {
+  background: var(--a-success);
+}
+.phone-dot.connecting {
+  background: var(--a-warning);
+}
+.phone-dot.revoked,
+.phone-dot.incompatible {
+  background: var(--a-error);
+}
+
+/* ── 正文 ── */
 .phone-body {
   overflow: auto;
   flex: 1;
-  padding: 24px max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom))
+  min-height: 0;
+  padding: 16px max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom))
     max(20px, env(safe-area-inset-left));
 }
 .phone h2 {
@@ -114,51 +164,84 @@
 .phone-error {
   color: var(--a-error);
 }
-.phone-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 12px;
-}
-.phone-toolbar h2 {
-  flex: 1;
-  margin: 0;
-}
-.phone-host {
-  padding: 16px 0;
-  border-bottom: 1px solid var(--a-border);
-}
-.phone-host > button:first-child {
-  width: 100%;
-  text-align: left;
-  font-size: 20px;
-}
 .phone small {
   display: block;
   font-size: 13px;
   color: var(--a-muted);
 }
-.phone-session-row {
-  display: block;
+
+/* ── 列表（首页项目、项目页会话） ── */
+.phone-list {
+  padding-top: 4px;
+}
+.phone-list-h {
+  margin: 8px 0 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--a-muted);
+}
+.phone-sub {
+  margin: 0 0 4px;
+  font-size: 14px;
+  color: var(--a-muted) !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.phone-sub + .phone-sub {
+  margin-bottom: 8px;
+}
+.phone .phone-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
   width: 100%;
   text-align: left;
-  border-bottom: 1px solid var(--a-border);
-  margin: 0;
-  padding: 16px 0 !important;
-  border-radius: 0 !important;
+  padding: 14px 0;
+  border-radius: 0;
 }
-.phone-session-row b {
+.phone-row-icon {
+  flex: none;
+  color: var(--a-secondary);
+}
+.phone-row-icon .phone-icon {
+  width: 24px;
+  height: 24px;
+}
+.phone-row-main {
+  flex: 1;
+  min-width: 0;
   display: block;
-  overflow-wrap: anywhere;
-  font-weight: 600;
+  border-bottom: 1px solid var(--a-border);
+  padding-bottom: 14px;
+  margin-bottom: -14px;
 }
-.phone-session-row small {
+.phone-row-main b {
+  display: block;
+  font-size: 18px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.phone-row.session .phone-row-main b {
+  font-size: 17px;
+}
+.phone-row-summary {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+  color: var(--a-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.phone .phone-row-main small {
   display: flex;
   justify-content: space-between;
-  margin-top: 8px;
   gap: 12px;
-  overflow-wrap: anywhere;
+  margin-top: 4px;
+  font-size: 14px;
 }
 .phone-badge {
   white-space: nowrap;
@@ -169,6 +252,8 @@
 .phone-badge.running {
   color: var(--a-accent);
 }
+
+/* ── 会话页 ── */
 .phone .conversation {
   min-height: 0;
   flex: 1;
@@ -194,22 +279,292 @@
 .phone .conversation-code pre {
   overflow: auto;
 }
+.phone .tool-line {
+  white-space: normal;
+  align-items: flex-start;
+}
+.phone .tool-arg,
+.phone .tool-live,
+.phone .tool-res {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+.phone .tool-dir {
+  display: block;
+  color: var(--a-muted);
+}
+
+/* ── 输入框与工具栏 ── */
 .phone-composer {
-  padding: 8px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom))
-    max(12px, env(safe-area-inset-left));
-  border-top: 1px solid var(--a-border);
   flex: none;
+  padding: 8px max(12px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
 }
-.phone-composer textarea {
-  resize: none;
-  max-height: 140px;
-  margin: 0;
-}
-.phone-composer > div {
+.phone-card {
   display: flex;
-  justify-content: space-between;
-  margin-top: 8px;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 6px 6px 16px;
+  background: var(--a-panel);
+  border: 1px solid var(--a-border);
+  border-radius: 22px;
 }
+.phone-card textarea {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 0;
+  border: 0;
+  background: transparent;
+  resize: none;
+  max-height: 160px;
+  line-height: 1.45;
+}
+.phone .phone-card textarea:focus-visible {
+  outline: none;
+}
+.phone .phone-send {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--a-accent);
+  color: var(--a-onAccent);
+}
+.phone .phone-send.off {
+  background: var(--a-raised);
+  color: var(--a-muted);
+  opacity: 1;
+}
+.phone .phone-send.stop {
+  background: var(--a-text);
+  color: var(--a-bg);
+}
+.phone-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 2px 4px;
+  background: var(--a-panel);
+  border: 1px solid var(--a-border);
+  border-radius: 16px;
+}
+.phone .phone-tool {
+  flex: none;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--a-secondary);
+}
+.phone .phone-tool.on {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+.phone .phone-tool.grow {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+}
+.phone-tool-model,
+.phone-tool-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  color: var(--a-text);
+}
+.phone-tools-sep {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  background: var(--a-border);
+}
+.phone-composer-hint,
+.phone-composer-error {
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--a-warnBg);
+  color: var(--a-warning);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.phone-composer-error {
+  margin: 8px 0 0;
+  color: var(--a-error);
+}
+.phone-slash {
+  max-height: min(40dvh, calc(var(--phone-height, 100dvh) - 260px));
+  overflow: auto;
+  margin-bottom: 8px;
+  padding: 6px;
+  background: var(--a-panel);
+  border: 1px solid var(--a-border);
+  border-radius: 16px;
+}
+.phone .phone-slash-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+}
+.phone-slash-row b {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--mono);
+  font-weight: 500;
+}
+.phone-slash-row em {
+  font-style: normal;
+  color: var(--a-muted);
+  font-size: 13px;
+}
+.phone .phone-slash-row small {
+  display: inline;
+  margin-left: auto;
+  font-family: var(--sans);
+}
+.phone-slash-row span {
+  display: block;
+  font-size: 13px;
+  color: var(--a-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 浮层 ── */
+.phone-popover {
+  position: fixed;
+  z-index: 20;
+  width: min(300px, calc(100vw - 16px));
+  display: flex;
+  flex-direction: column;
+  background: var(--a-panel);
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 18px;
+  box-shadow: 0 12px 40px #0004;
+}
+.phone-popover.wide {
+  width: min(560px, calc(100vw - 16px));
+}
+.phone-popover::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--arrow, 50%) - 8px);
+  bottom: -8px;
+  width: 14px;
+  height: 14px;
+  background: var(--a-panel);
+  border-right: 1px solid var(--a-borderStrong);
+  border-bottom: 1px solid var(--a-borderStrong);
+  transform: rotate(45deg);
+}
+.phone-popover.down::after {
+  bottom: auto;
+  top: -8px;
+  transform: rotate(225deg);
+}
+.phone-popover-scroll {
+  overflow: auto;
+  min-height: 0;
+  padding: 8px;
+  border-radius: 18px;
+}
+.phone-popover-h {
+  padding: 6px 10px 4px;
+  font-size: 13px;
+  color: var(--a-muted);
+}
+.phone-popover-group {
+  padding: 10px 10px 2px;
+  font-size: 12px;
+  color: var(--a-faint);
+  text-transform: none;
+}
+.phone .phone-popover-note {
+  margin: 6px 10px;
+  font-size: 13px;
+  color: var(--a-muted);
+}
+.phone .phone-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  border-radius: 12px;
+}
+.phone .phone-option:disabled {
+  opacity: 1;
+}
+.phone .phone-option:disabled .phone-option-text b {
+  color: var(--a-muted);
+}
+.phone-option-icon {
+  flex: none;
+  color: var(--a-secondary);
+}
+.phone-option.risk .phone-option-icon,
+.phone-option.risk .phone-option-text b {
+  color: var(--a-warning);
+}
+.phone-option-text {
+  flex: 1;
+  min-width: 0;
+}
+.phone-option-text b {
+  display: block;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.phone .phone-option-text small {
+  margin-top: 2px;
+}
+.phone-option-code {
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--a-muted);
+  font-weight: 400;
+}
+.phone-option-check {
+  flex: none;
+  color: var(--a-success);
+  font-size: 18px;
+}
+.phone-context {
+  padding: 0 10px 8px;
+  font-size: 14px;
+}
+.phone-context .context-details dt small {
+  max-width: 40vw;
+}
+.phone-output {
+  margin: 0;
+  padding: 4px 10px 10px;
+  font: 13px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.phone-ring {
+  display: block;
+}
+
+/* ── 底部弹出面板（权限、提问） ── */
 .phone-sheet {
   position: fixed;
   z-index: 10;
@@ -245,24 +600,112 @@
   font-size: 13px;
   margin-top: 4px;
 }
-.phone .tool-line {
-  white-space: normal;
-  align-items: flex-start;
-}
-.phone .tool-arg,
-.phone .tool-live,
-.phone .tool-res {
-  white-space: normal;
-  overflow: visible;
-  overflow-wrap: anywhere;
-  text-overflow: clip;
-}
-.phone .tool-dir {
-  display: block;
-  color: var(--a-muted);
-}
 .phone-sheet .ask-subjects {
   overflow-wrap: anywhere;
+}
+
+/* ── 设置 ── */
+.phone-section {
+  padding: 8px 0 20px;
+  border-bottom: 1px solid var(--a-border);
+}
+.phone-section:last-child {
+  border-bottom: 0;
+}
+.phone-section h3 {
+  margin: 8px 0 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--a-muted);
+}
+.phone-host {
+  padding: 8px 0;
+}
+.phone-host-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.phone .phone-host-line input {
+  margin: 0;
+  font-size: 17px;
+}
+.phone-host-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 4px;
+}
+.phone .danger {
+  color: var(--a-error);
+}
+.phone .phone-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 8px 0;
+  font-size: 16px;
+}
+.phone .phone-switch input {
+  flex: none;
+  width: 48px;
+  height: 28px;
+  min-height: 28px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--a-accent);
+}
+.phone-facts {
+  margin: 0 0 8px;
+}
+.phone-facts div {
+  display: flex;
+  gap: 12px;
+}
+.phone-facts dt {
+  flex: none;
+  color: var(--a-muted);
+}
+.phone-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.phone-log {
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+.phone-log li {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+  border-top: 1px solid var(--a-border);
+}
+.phone-log time {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--a-muted);
+}
+.phone-segment {
+  display: flex;
+  padding: 3px;
+  gap: 3px;
+  border-radius: 12px;
+  background: var(--a-input);
+  border: 1px solid var(--a-border);
+}
+.phone .phone-segment button {
+  flex: 1;
+  min-height: 38px;
+  border-radius: 9px;
+  color: var(--a-secondary);
+}
+.phone .phone-segment button.on {
+  background: var(--a-raised);
+  color: var(--a-text);
+  font-weight: 600;
 }
 .phone-remove {
   flex: none;
@@ -275,31 +718,14 @@
   scrollbar-color: var(--a-borderStrong) transparent;
   scrollbar-width: thin;
 }
-.phone-push {
-  border-top: 1px solid var(--a-border);
-  margin-top: 20px;
-  padding-top: 12px;
-}
-/* 未开启时在列表上方 */
-.phone-toolbar + .phone-push {
-  border-top: none;
-  border-bottom: 1px solid var(--a-border);
-  margin-top: 0;
-  padding: 0 0 8px;
-}
-.phone-toolbar + .phone-push .phone-list-action {
-  margin-top: 0;
-}
 .phone .phone-list-action {
   display: block;
   width: 100%;
   text-align: left;
   padding: 12px 0;
-  margin-top: 12px;
+  margin-top: 4px;
   border-radius: 0;
   color: var(--a-accent);
-  text-decoration: underline;
-  text-underline-offset: 4px;
 }
 .phone-pair-first {
   color: var(--a-accent) !important;
