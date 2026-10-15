@@ -262,6 +262,78 @@ it("重连续接 lastSeq 并保留显示视图，列表工作区不含子代理"
   client.close();
 });
 
+it("连接只等列表，后台只订阅持锁会话", async () => {
+  const [transport] = createMemoryTransportPair();
+  const { createRpcClient } = await import("@nocturne/rpc/client");
+  const client = createRpcClient(transport, { clientName: "test" });
+  let release!: () => void;
+  const gate = new Promise<void>((done) => (release = done));
+  const resume = vi.spyOn(client.runtime, "resumeSession").mockImplementation(async (id) => {
+    await gate;
+    const session = {
+      id,
+      subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
+    } as unknown as RpcSession;
+    return { session, opened: {} } as Awaited<ReturnType<RpcClient["runtime"]["resumeSession"]>>;
+  });
+  const summary = (id: string, locked: boolean) => ({
+    id,
+    cwd: "Z:/work",
+    workspaceRoot: "Z:/work",
+    createdAt: "",
+    mtimeMs: 1,
+    model: { provider: "p", model: "m" },
+    locked,
+  });
+  vi.spyOn(client.runtime, "listSessions").mockResolvedValue([
+    summary("busy", true),
+    summary("old", false),
+  ]);
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(client);
+  expect(sessions.list.map((s) => s.id)).toEqual(["busy", "old"]);
+  release();
+  await vi.waitFor(() => expect(sessions.opened.has("busy")).toBe(true));
+  expect(resume.mock.calls.map(([id]) => id)).toEqual(["busy"]);
+  client.close();
+});
+
+it("推送点进来优先最近的待处理会话，没有则取最近会话", async () => {
+  const [transport] = createMemoryTransportPair();
+  const { createRpcClient } = await import("@nocturne/rpc/client");
+  const client = createRpcClient(transport, { clientName: "test" });
+  vi.spyOn(client.runtime, "resumeSession").mockImplementation(async (id) => {
+    const session = {
+      id,
+      subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
+    } as unknown as RpcSession;
+    return { session, opened: {} } as Awaited<ReturnType<RpcClient["runtime"]["resumeSession"]>>;
+  });
+  const summary = (id: string, mtimeMs: number, locked: boolean) => ({
+    id,
+    cwd: "Z:/work",
+    workspaceRoot: "Z:/work",
+    createdAt: "",
+    mtimeMs,
+    model: { provider: "p", model: "m" },
+    locked,
+  });
+  const list = vi
+    .spyOn(client.runtime, "listSessions")
+    .mockResolvedValue([summary("new", 3, false), summary("ask", 2, true)]);
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(client);
+  expect(await sessions.attentionTarget()).toBe("new");
+  const entry = sessions.opened.get("ask");
+  if (!entry) throw new Error("持锁会话未订阅");
+  entry.view.pendingQuestion = { requestId: "q" } as typeof entry.view.pendingQuestion;
+  expect(await sessions.attentionTarget()).toBe("ask");
+  list.mockResolvedValue([]);
+  await sessions.refresh();
+  expect(await sessions.attentionTarget()).toBeUndefined();
+  client.close();
+});
+
 it.each([0, 2])("RPC initialize 版本 %i 不兼容停止且正确提示", async (version) => {
   const identity = await generateIdentity({ extractable: false });
   const [transport] = createMemoryFramePair();

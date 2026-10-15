@@ -31,9 +31,12 @@ export function knownWorkspaces(list: SessionSummary[]): string[] {
 export class PhoneSessions {
   readonly opened = new Map<string, PhoneSession>();
   list: SessionSummary[] = [];
+  /** 本次连接已拿到会话列表 */
+  loaded = false;
   client: RpcClient | undefined;
   private generation = 0;
   private readonly opening = new Map<string, Promise<PhoneSession>>();
+  private tracked: Promise<void> = Promise.resolve();
   constructor(private readonly changed: () => void) {}
   async connected(client: RpcClient): Promise<void> {
     this.client = client;
@@ -47,6 +50,7 @@ export class PhoneSessions {
   }
   disconnected(): void {
     this.generation++;
+    this.loaded = false;
     this.opening.clear();
     this.client = undefined;
     for (const entry of this.opened.values()) entry.dead = true;
@@ -54,6 +58,7 @@ export class PhoneSessions {
   }
   clear(): void {
     this.generation++;
+    this.loaded = false;
     this.opening.clear();
     this.client = undefined;
     this.opened.clear();
@@ -67,9 +72,29 @@ export class PhoneSessions {
     const list = await client.runtime.listSessions();
     if (generation !== this.generation) return;
     this.list = list.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    this.loaded = true;
     this.changed();
-    // 锁只说明后台持有会话，不代表正在运行；订阅同一视图判定准确状态。
-    for (const item of list) {
+    this.tracked = this.track(list.filter((item) => item.locked));
+  }
+  /**
+   * 点开推送后要去的会话：推送无载荷，只能在连上后判断。等后台订阅完成，
+   * 优先最近一个等待确认或回答的会话，没有就取最近有动静的会话（完成、出错类提醒）。
+   */
+  async attentionTarget(): Promise<string | undefined> {
+    await this.tracked;
+    const pending = this.list.find((item) => {
+      const entry = this.opened.get(item.id);
+      return (
+        !!entry && !entry.dead && !!(entry.view.pendingPermission ?? entry.view.pendingQuestion)
+      );
+    });
+    return (pending ?? this.list[0])?.id;
+  }
+  // 没有锁的会话不可能在运行，点开时再订阅；全部回放会让上百个会话的电脑迟迟连不上。
+  // 锁只说明后台持有会话，不代表正在运行；在后台订阅同一视图判定准确状态，不阻塞连接。
+  private async track(items: SessionSummary[]): Promise<void> {
+    const generation = this.generation;
+    for (const item of items) {
       if (generation !== this.generation) return;
       if (!this.opened.has(item.id)) await this.open(item.id).catch(() => undefined);
     }

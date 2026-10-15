@@ -163,3 +163,54 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
   expect(container.textContent).not.toContain("另一端已回复");
   client.close();
 });
+
+it("从推送点进来连上后直接进入会话", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  history.replaceState(null, "", "/?attention");
+  const [transport] = createMemoryTransportPair();
+  const client = createRpcClient(transport, { clientName: "test" });
+  const storage = memoryStorage();
+  await storage.putHost({ hostId: "host", hostPub: "pub", name: "电脑 1", pairedAt: 1 });
+  await storage.identity();
+  const session = {
+    id: "s",
+    subscribe: () => Promise.resolve({ lastSeq: 0, unsubscribe: vi.fn() }),
+  } as unknown as RpcSession;
+  vi.spyOn(client.runtime, "listSessions").mockResolvedValue([
+    {
+      id: "s",
+      createdAt: new Date().toISOString(),
+      model: { provider: "fake", model: "fake-1" },
+      cwd: "Z:/work",
+      workspaceRoot: "Z:/work",
+      mtimeMs: 1,
+      firstText: "测试会话",
+    },
+  ]);
+  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({ session, opened: {} } as Awaited<
+    ReturnType<typeof client.runtime.resumeSession>
+  >);
+  const push = new PhonePush({
+    registration: () => Promise.reject(new Error("unsupported")),
+    permission: () => "default",
+    requestPermission: vi.fn(),
+    info: vi.fn(),
+    changed: vi.fn(),
+  });
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => {
+    root?.render(<PhoneApp storage={storage} push={push} />);
+  });
+  await act(async () => {
+    await shared.connect?.(client, { subscribePush: vi.fn(), unsubscribePush: vi.fn() });
+  });
+  await vi.waitFor(() => {
+    expect(container.querySelector("textarea")).not.toBeNull();
+  });
+  expect(location.search).toBe("");
+  client.close();
+});

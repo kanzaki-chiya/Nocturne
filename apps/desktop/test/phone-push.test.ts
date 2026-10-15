@@ -92,6 +92,7 @@ it.each([true, false])(
       }) => void
     >();
     const focus = vi.fn(() => Promise.resolve());
+    const postMessage = vi.fn();
     const openWindow = vi.fn(() => Promise.resolve());
     const showNotification = vi.fn(() => Promise.resolve());
     const source = await readFile("public-web/sw.js", "utf8");
@@ -111,7 +112,9 @@ it.each([true, false])(
         registration: { showNotification },
         clients: {
           matchAll: () =>
-            Promise.resolve(existing ? [{ url: "https://relay.example/", focus }] : []),
+            Promise.resolve(
+              existing ? [{ url: "https://relay.example/", focus, postMessage }] : [],
+            ),
           openWindow,
         },
       },
@@ -137,9 +140,10 @@ it.each([true, false])(
     await work;
     expect(close).toHaveBeenCalledOnce();
     if (existing) {
+      expect(postMessage).toHaveBeenCalledWith({ t: "nocturne.attention" });
       expect(focus).toHaveBeenCalledOnce();
       expect(openWindow).not.toHaveBeenCalled();
-    } else expect(openWindow).toHaveBeenCalledWith("/");
+    } else expect(openWindow).toHaveBeenCalledWith("/?attention");
   },
 );
 it("manifest 字段和所有 PNG 尺寸正确，SW 固定文件存在", async () => {

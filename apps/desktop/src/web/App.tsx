@@ -73,6 +73,10 @@ export function PhoneApp({
   const [text, setText] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [ready, setReady] = useState(false);
+  // 从推送点进来：连上电脑后跳到需要处理的会话
+  const [attention, setAttention] = useState(() =>
+    new URLSearchParams(location.search).has("attention"),
+  );
   const navigate = (next: Page, replace = false) => {
     (replace ? history.replaceState.bind(history) : history.pushState.bind(history))(
       next,
@@ -172,18 +176,81 @@ export function PhoneApp({
   }, [hostId, storage]);
   useEffect(() => {
     const viewport = window.visualViewport;
+    // iOS 弹出软键盘时会把可视区在布局视口内上移（offsetTop），只缩高度会让整页滚出可视区。
     const resize = () => {
-      document.documentElement.style.setProperty(
-        "--phone-height",
-        `${viewport?.height ?? window.innerHeight}px`,
-      );
+      const style = document.documentElement.style;
+      const height = viewport?.height ?? window.innerHeight;
+      const top = viewport?.offsetTop ?? 0;
+      style.setProperty("--phone-height", `${height}px`);
+      style.setProperty("--phone-top", `${top}px`);
+      style.setProperty("--phone-bottom", `${Math.max(0, window.innerHeight - top - height)}px`);
     };
     resize();
     viewport?.addEventListener("resize", resize);
-    return () => viewport?.removeEventListener("resize", resize);
+    viewport?.addEventListener("scroll", resize);
+    return () => {
+      viewport?.removeEventListener("resize", resize);
+      viewport?.removeEventListener("scroll", resize);
+    };
   }, []);
+  useEffect(() => {
+    const worker = navigator.serviceWorker as ServiceWorkerContainer | undefined;
+    const message = (e: MessageEvent) => {
+      if ((e.data as { t?: unknown } | null)?.t === "nocturne.attention") setAttention(true);
+    };
+    worker?.addEventListener("message", message);
+    return () => worker?.removeEventListener("message", message);
+  }, []);
+  const online = connection?.state === "online";
+  const loaded = sessions.loaded;
+  useEffect(() => {
+    if (!attention || !online || !loaded || !hostId) return;
+    let active = true;
+    void sessions.attentionTarget().then((id) => {
+      if (!active) return;
+      setAttention(false);
+      if (!id) return;
+      navigate({ kind: "session", hostId, sessionId: id });
+      void operation(async () => {
+        await sessions.open(id);
+      });
+    });
+    return () => {
+      active = false;
+    };
+  }, [attention, online, loaded, hostId]);
   const entry = page.kind === "session" ? sessions.opened.get(page.sessionId) : undefined;
-  const connected = connection?.state === "online";
+  const connected = online;
+  const pushSection = (
+    <section className="phone-push" aria-label="推送通知">
+      {!pushAvailable(iosBrowser(), standalone()) ? (
+        <p>添加到主屏幕后才能接收推送</p>
+      ) : push.state === "unsupported" ? (
+        <p>此浏览器不支持推送通知</p>
+      ) : (
+        <>
+          {push.state === "denied" && (
+            <p>通知权限已被拒绝，请在系统设置或浏览器的网站设置中允许 Nocturne 通知。</p>
+          )}
+          {push.message && <p role="status">{push.message}</p>}
+          <button
+            className="phone-list-action"
+            disabled={push.state === "working" || push.state === "denied"}
+            onClick={() => {
+              void (push.state === "enabled" ? push.disable() : push.enable());
+            }}
+          >
+            {push.state === "working"
+              ? "正在设置推送…"
+              : push.state === "enabled"
+                ? "关闭推送通知"
+                : "开启推送通知"}
+          </button>
+          {push.state === "enabled" && <small>已开启 · 只显示固定提醒，不发送会话内容</small>}
+        </>
+      )}
+    </section>
+  );
   const [dismissed, setDismissed] = useState("");
   const pendingKey =
     entry?.view.pendingPermission?.requestId ?? entry?.view.pendingQuestion?.requestId;
@@ -421,6 +488,7 @@ export function PhoneApp({
               新建会话
             </button>
           </div>
+          {push.state !== "enabled" && pushSection}
           {sessions.list.length === 0 && (
             <p>
               {connected
@@ -461,34 +529,7 @@ export function PhoneApp({
           >
             管理电脑与配对
           </button>
-          <section className="phone-push" aria-label="推送通知">
-            {!pushAvailable(iosBrowser(), standalone()) ? (
-              <p>添加到主屏幕后才能接收推送</p>
-            ) : push.state === "unsupported" ? (
-              <p>此浏览器不支持推送通知</p>
-            ) : (
-              <>
-                {push.state === "denied" && (
-                  <p>通知权限已被拒绝，请在系统设置或浏览器的网站设置中允许 Nocturne 通知。</p>
-                )}
-                {push.message && <p role="status">{push.message}</p>}
-                <button
-                  className="phone-list-action"
-                  disabled={push.state === "working" || push.state === "denied"}
-                  onClick={() => {
-                    void (push.state === "enabled" ? push.disable() : push.enable());
-                  }}
-                >
-                  {push.state === "working"
-                    ? "正在设置推送…"
-                    : push.state === "enabled"
-                      ? "关闭推送通知"
-                      : "开启推送通知"}
-                </button>
-                {push.state === "enabled" && <small>已开启 · 只显示固定提醒，不发送会话内容</small>}
-              </>
-            )}
-          </section>
+          {push.state === "enabled" && pushSection}
         </section>
       ) : (
         <>

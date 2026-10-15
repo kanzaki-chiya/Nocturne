@@ -15,8 +15,11 @@ self.addEventListener("notificationclick", (event) => {
       const existing = windows.find(
         (client) => new URL(client.url).origin === self.location.origin,
       );
-      if (existing) await existing.focus();
-      else await self.clients.openWindow("/");
+      // 推送无载荷，由网页连上电脑后自己找要处理的会话
+      if (existing) {
+        existing.postMessage({ t: "nocturne.attention" });
+        await existing.focus();
+      } else await self.clients.openWindow("/?attention");
     })(),
   );
 });

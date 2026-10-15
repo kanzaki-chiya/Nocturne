@@ -1,7 +1,11 @@
 .phone {
+  position: fixed;
+  top: var(--phone-top, 0);
+  left: 0;
+  right: 0;
   height: var(--phone-height, 100dvh);
   max-width: 600px;
-  margin: auto;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -209,7 +213,7 @@
 .phone-sheet {
   position: fixed;
   z-index: 10;
-  bottom: 0;
+  bottom: var(--phone-bottom, 0);
   left: 50%;
   transform: translateX(-50%);
   width: min(100%, 600px);
@@ -275,6 +279,16 @@
   border-top: 1px solid var(--a-border);
   margin-top: 20px;
   padding-top: 12px;
+}
+/* 未开启时在列表上方 */
+.phone-toolbar + .phone-push {
+  border-top: none;
+  border-bottom: 1px solid var(--a-border);
+  margin-top: 0;
+  padding: 0 0 8px;
+}
+.phone-toolbar + .phone-push .phone-list-action {
+  margin-top: 0;
 }
 .phone .phone-list-action {
   display: block;

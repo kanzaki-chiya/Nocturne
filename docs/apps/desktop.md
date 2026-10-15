@@ -358,15 +358,15 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 ## 8. 手机网页
 
-会话列表的管理与推送操作使用对齐会话行的整行链接按钮（至少 44px）；页面声明 PNG favicon 与通用 mobile-web-app-capable 元数据。握手失败先作废当前连接再关闭传输，确保关闭回调不会重复安排重连。固定 tag 通知启用 renotify，替换旧通知时仍提醒。
+会话列表的管理与推送操作使用对齐会话行的整行链接按钮（至少 44px）；推送未开启时开关放在列表上方，开启后移到底部；页面声明 PNG favicon 与通用 mobile-web-app-capable 元数据。握手失败先作废当前连接再关闭传输，确保关闭回调不会重复安排重连。固定 tag 通知启用 renotify，替换旧通知时仍提醒。
 
 `web.html` → `src/web/main.tsx` 是独立单栏手机入口，不加载桌面 App；WebHost 仅打开安全外链与写无内容诊断，不实现 DesktopHost。`vite.web.config.ts` 沿用桌面 alias 并引入 remote，构建到 `dist-web/index.html`，开发验收中继以 `--web-root apps/desktop/dist-web` 托管；发布时由 [中继打包脚本](../../scripts/pack-relay.mjs) 放入 tgz 的 public/，无需 web-root 参数。HTTPS 真机验收另行进行。依赖边界由 `phone-web-no-tauri` 的可达检查强制。
 
 - `storage.ts` 的接口生产用 IndexedDB `nocturne-remote`，测试用内存；不可导出的 CryptoKey 直接结构化克隆，不导出私钥。一份手机身份共用多台电脑；只保存电脑公钥、id、名称与配对/最近连接时间，不持久化会话内容。打开请求持久存储，失败忽略。移除仅删除手机记录并提示在电脑移除设备。
 - 加载即清理配对片段，仅在内存留存；粘贴接受同源完整链接或片段。配对依次连接槽位、真实签名/MAC 与指纹校验、保存电脑，失败明确提示重新申请链接。iOS Safari 与主屏幕应用不共享 IndexedDB，提示添加后重新配对，依据见 ADR-0052 修订。
 - `PhoneConnection` 同时只连接一台电脑，离线等待 host online，在线建立加密通道再 initialize(interactive:true)。不兼容停止；当前 RPC mismatch 错误没有结构化版本，仅从既有文案取服务端版本，不更改协议。4003/4004 停止重连；4002 返回等待；其他断线从 1 秒翻倍至 30 秒并 ±20% 抖动。后台不主动断开、不重连，回前台若已断即重连。
-- `PhoneSessions` 保存已打开会话视图，重连逐个 resume 并按 lastSeq 订阅；不清空已显示内容。Conversations 含禁止的 turnChanges、回退等路径，故不直接复用；状态使用相同 conversationStatus 判定与 session-tree 路径/状态类型。会话列表全局读取并按最近活动排序，新建只能选择列表非子代理工作区、使用后台默认模型。
+- `PhoneSessions` 保存已打开会话视图，重连逐个 resume 并按 lastSeq 订阅；不清空已显示内容。Conversations 含禁止的 turnChanges、回退等路径，故不直接复用；状态使用相同 conversationStatus 判定与 session-tree 路径/状态类型。会话列表全局读取并按最近活动排序；拿到列表即算连上，后台只订阅持锁会话判定状态，其余会话点开时再订阅（避免会话多时迟迟连不上），新建只能选择列表非子代理工作区、使用后台默认模型。
 - 会话复用 Conversation；工具默认折叠，文字输入另写小组件，不复用 Composer 的附件/技能/命令补全。onResubmit 可省略以隐藏重发，hidePersistentPermissions 隐藏永久授权，hideRequests 让外壳用底部面板统一显示权限和 QuestionCard；这些 prop 缺省保持桌面行为。远程图片源只返回「图片（请在电脑上查看）」占位，不读附件；不传 fileLinks/turnChanges/回退能力。另一端结算经视图关闭面板，unknown_request 静默关闭。
-- 导航使用浏览器 history；跟随系统深浅 token、44px 触控、安全区与 visualViewport 高度，输入软键盘不遮消息。未配对与关于页写明信任边界。
-- `public-web/manifest.webmanifest` 与 192/512 any、maskable、180 apple-touch 图标构成主屏幕应用；主题色沿用 token。`/sw.js` 固定路径、作用域 `/`，只监听 push 与 notificationclick，不监听 fetch、不缓存页面；无载荷推送固定文案「Nocturne：有会话需要你处理」，固定 tag 替换旧提醒。点击优先聚焦已有同源窗口，否则打开 `/`。
+- 导航使用浏览器 history；跟随系统深浅 token、44px 触控、安全区；整页固定在 visualViewport 内（高度与 offsetTop 都跟随，iOS 弹出软键盘时不会滚出可视区），底部面板停在键盘上方。未配对与关于页写明信任边界。
+- `public-web/manifest.webmanifest` 与 192/512 any、maskable、180 apple-touch 图标构成主屏幕应用；主题色沿用 token。`/sw.js` 固定路径、作用域 `/`，只监听 push 与 notificationclick，不监听 fetch、不缓存页面；无载荷推送固定文案「Nocturne：有会话需要你处理」，固定 tag 替换旧提醒。点击优先聚焦已有同源窗口并发 `{t:"nocturne.attention"}` 消息，否则打开 `/?attention`；网页拿到会话列表、后台订阅完持锁会话后，进入最近一个待确认或待回答的会话，没有则进入列表里最近的会话。
 - `PhonePush` 只在点击「开启推送通知」时请求权限，从 `/v1/info` 取 VAPID 公钥。订阅通过设备认证连接发送给当前电脑；其他已配对电脑下次连接补发，同一份浏览器订阅共用。关闭取消浏览器订阅，当前电脑立即 unsubscribe，其他电脑下次连接补发取消。拒绝给系统/网站设置指引；iOS 非 standalone 不显示按钮，提示添加主屏幕（iOS 16.4+）。前述状态不持久化会话内容或通知载荷。
