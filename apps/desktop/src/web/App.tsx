@@ -330,6 +330,7 @@ export function PhoneApp({
     },
     host: computer,
     connected,
+    refresh: changed,
   };
   // 平台观察者：已配对电脑与连接状态变化（App 据此维护后台服务与常驻通知）
   useEffect(() => {

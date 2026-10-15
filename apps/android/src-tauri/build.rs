@@ -4,5 +4,14 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
         println!("cargo:rustc-link-arg-cdylib=-Wl,-z,max-page-size=16384");
     }
-    tauri_build::build();
+    // 后台服务插件（src/background.rs）是应用内的内联插件：只有一个 `call` 命令，权限 background:default
+    tauri_build::try_build(
+        tauri_build::Attributes::new().plugin(
+            "background",
+            tauri_build::InlinedPlugin::new()
+                .commands(&["call"])
+                .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
+        ),
+    )
+    .expect("failed to run tauri-build");
 }

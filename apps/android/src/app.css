@@ -1,0 +1,24 @@
+/* App 专属的少量样式，其余沿用手机网页的 phone.css */
+.phone .phone-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+}
+.phone .phone-actions .phone-list-action {
+  width: auto;
+}
+.phone .phone-probe-log {
+  margin: 8px 0 0;
+  padding: 8px;
+  max-height: 40vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--a-muted);
+  background: var(--a-input);
+  border: 1px solid var(--a-border);
+  border-radius: 8px;
+}

@@ -1,3 +1,5 @@
+mod background;
+
 use tauri::{Url, WebviewUrl, WebviewWindowBuilder};
 
 /// App 页面随 APK 打包，Tauri 2 安卓上由自定义协议以固定源提供（ADR-0059）。
@@ -19,6 +21,7 @@ fn navigation_allowed(url: &Url, dev: Option<&Url>) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(background::plugin())
         .setup(|app| {
             let dev = app.config().build.dev_url.clone();
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))

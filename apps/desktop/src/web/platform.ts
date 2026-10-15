@@ -22,6 +22,8 @@ export interface PhoneExtensionApi {
   /** 已配对并已打开的电脑；设置页没有选中电脑时为 undefined */
   host: PairedHost | undefined;
   connected: boolean;
+  /** 平台状态变了（例如设置页的开关），让页面按新值重新判定 */
+  refresh(): void;
 }
 export interface PhonePlatform {
   /**
