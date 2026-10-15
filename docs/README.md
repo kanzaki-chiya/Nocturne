@@ -40,7 +40,7 @@
 | 文档 | 回答的问题 |
 |---|---|
 | [apps/cli.md](apps/cli.md) | `nctrn` 命令行客户端：参数、REPL、事件渲染、权限确认、会话恢复、退出码、配置来源 |
-| [apps/relay.md](apps/relay.md) | 邀请制密文中继：配置、数据、管理通道、限额、日志 |
+| [apps/relay.md](apps/relay.md) | 邀请制密文中继：配置、数据、管理通道、限额、日志；用户部署见[自建指南](../apps/relay/deploy/README.md) |
 | [apps/tui.md](apps/tui.md) | 终端界面客户端：布局、主题、欢迎框、状态栏、模型选择页、服务商页、键位、降级行为；TTY 时为 `nctrn` 默认界面 |
 | [apps/desktop.md](apps/desktop.md) | 桌面端（Tauri）：进程结构、十个外壳命令与消息格式、stderr 缓冲与后台日志页、崩溃恢复、Node 查找与说明页、会话树、单文件后台与 NSIS 打包（随附 Node）、自动更新、界面状态与安全边界（ADR-0046、ADR-0050） |
 

@@ -16,6 +16,8 @@ nocturne/
 ├── scripts/
 │   ├── bundle-nctrn.mjs                 tsdown 把 apps/cli 打成单文件后台 nctrn.mjs（默认进 src-tauri/resources/，--out-dir 可改）
 │   ├── pack-npm.mjs                     组装 nctrn npm 包暂存目录并 npm pack（packaging/npm 模板 + LICENSE + THIRD-PARTY-NOTICES.md）
+│   ├── pack-relay.mjs                   组装中继 tgz（relay dist + 手机 dist-web + 指南与许可）
+│   ├── smoke-relay.mjs                  临时安装中继 tgz，验证版本、HTTP、管理与正常关闭
 │   ├── fetch-node.mjs                   下载校验官方 Node（node-version.json 固定版本与 SHA-256），解出 src-tauri/resources/node/
 │   ├── node-version.json                随附 Node 的版本与官方压缩包 SHA-256
 │   ├── release-version.mjs              统一改齐/校验各 package.json、tauri.conf.json、Cargo.toml/lock、npm 模板的版本号
@@ -68,6 +70,7 @@ nocturne/
     ├── relay/                   邀请制密文中继（ADR-0052）
     │   ├── src/                 HTTP/WS 服务、本地管理通道、配置、存储、推送
     │   ├── public/              手机网页占位页
+    │   ├── deploy/              自建指南、Docker/compose、Caddy/nginx、systemd 与 CI 冒烟
     │   └── test/                本机 WebSocket 与加密 RPC 离线端到端测试
     ├── cli/                     nctrn 命令行入口
     │   ├── src/                 main、args、config、repl、session-switch、commands、render
