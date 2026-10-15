@@ -454,6 +454,7 @@ export function PhoneApp({
             );
           })}
           <button
+            className="phone-list-action"
             onClick={() => {
               navigate({ kind: "hosts" });
             }}
@@ -472,6 +473,7 @@ export function PhoneApp({
                 )}
                 {push.message && <p role="status">{push.message}</p>}
                 <button
+                  className="phone-list-action"
                   disabled={push.state === "working" || push.state === "denied"}
                   onClick={() => {
                     void (push.state === "enabled" ? push.disable() : push.enable());

@@ -193,6 +193,44 @@ it("认证阶段 4003 也停止重连", async () => {
   await vi.waitFor(() => expect(c.state).toBe("revoked"));
   c.stop();
 });
+it("握手失败关闭触发 onClose 时只安排一次重连", async () => {
+  const identity = await generateIdentity({ extractable: false });
+  const [transport] = createMemoryFramePair();
+  let closed: (() => void) | undefined;
+  vi.spyOn(transport, "close").mockImplementation(() => closed?.());
+  const relay: DeviceRelay = {
+    online: true,
+    transport,
+    onClose: (fn) => {
+      closed = () => fn(1006);
+    },
+    onHostOnline: (fn) => {
+      queueMicrotask(fn);
+    },
+    subscribePush: vi.fn(),
+    unsubscribePush: vi.fn(),
+  };
+  const connect = vi.fn(() => Promise.resolve(relay));
+  const disconnected = vi.fn();
+  const c = new PhoneConnection({
+    identity,
+    host: { hostId: identity.id, hostPub: encode(identity.publicKey), name: "电脑", pairedAt: 1 },
+    origin: "https://relay.example",
+    changed: vi.fn(),
+    connected: vi.fn(),
+    disconnected,
+    connect,
+    channel: () => Promise.reject(new Error("握手失败")),
+  });
+  vi.useFakeTimers();
+  c.start();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(disconnected).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(1);
+  expect(connect).toHaveBeenCalledTimes(1);
+  c.stop();
+  expect(vi.getTimerCount()).toBe(0);
+});
 it("重连续接 lastSeq 并保留显示视图，列表工作区不含子代理", async () => {
   const [transport] = createMemoryTransportPair();
   const { createRpcClient } = await import("@nocturne/rpc/client");

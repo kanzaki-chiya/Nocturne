@@ -2,6 +2,7 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification("Nocturne：有会话需要你处理", {
       tag: "nocturne-attention",
+      renotify: true,
       icon: "/icons/icon-192.png",
     }),
   );

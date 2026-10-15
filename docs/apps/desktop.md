@@ -358,6 +358,8 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 ## 8. 手机网页
 
+会话列表的管理与推送操作使用对齐会话行的整行链接按钮（至少 44px）；页面声明 PNG favicon 与通用 mobile-web-app-capable 元数据。握手失败先作废当前连接再关闭传输，确保关闭回调不会重复安排重连。固定 tag 通知启用 renotify，替换旧通知时仍提醒。
+
 `web.html` → `src/web/main.tsx` 是独立单栏手机入口，不加载桌面 App；WebHost 仅打开安全外链与写无内容诊断，不实现 DesktopHost。`vite.web.config.ts` 沿用桌面 alias 并引入 remote，构建到 `dist-web/index.html`，开发验收中继以 `--web-root apps/desktop/dist-web` 托管；发布打包与 HTTPS 真机验收属于第 6 轮。依赖边界由 `phone-web-no-tauri` 的可达检查强制。
 
 - `storage.ts` 的接口生产用 IndexedDB `nocturne-remote`，测试用内存；不可导出的 CryptoKey 直接结构化克隆，不导出私钥。一份手机身份共用多台电脑；只保存电脑公钥、id、名称与配对/最近连接时间，不持久化会话内容。打开请求持久存储，失败忽略。移除仅删除手机记录并提示在电脑移除设备。

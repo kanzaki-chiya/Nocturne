@@ -130,6 +130,7 @@ it.each([true, false])(
     await work;
     expect(showNotification).toHaveBeenCalledWith("Nocturne：有会话需要你处理", {
       tag: "nocturne-attention",
+      renotify: true,
       icon: "/icons/icon-192.png",
     });
     handlers.get("notificationclick")?.(event);

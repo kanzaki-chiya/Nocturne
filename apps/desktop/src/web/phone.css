@@ -276,6 +276,17 @@
   margin-top: 20px;
   padding-top: 12px;
 }
+.phone .phone-list-action {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 12px 0;
+  margin-top: 12px;
+  border-radius: 0;
+  color: var(--a-accent);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
 .phone-pair-first {
   color: var(--a-accent) !important;
   font-weight: 600;

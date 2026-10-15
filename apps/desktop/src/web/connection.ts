@@ -162,8 +162,8 @@ export class PhoneConnection {
         this.stop();
         this.set("incompatible", versionMessage(Number(version ?? RPC_PROTOCOL_VERSION + 1)));
       } else {
-        relay.transport.close();
         this.retry();
+        relay.transport.close();
       }
     }
   }
