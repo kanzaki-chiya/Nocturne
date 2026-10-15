@@ -78,6 +78,10 @@ nocturne/
     ├── tui/                     Ink 终端客户端，经 nctrn --tui 进入
     │   ├── src/                 app、commands、session-view、components 等
     │   └── test/                ink-testing-library 渲染与按键测试
+    ├── android/                 安卓 App（Tauri 2 外壳 + 手机网页入口，ADR-0059）
+    │   ├── src/                 App 入口、AppHost、后台控制器与探针
+    │   ├── test/                vitest + jsdom 离线测试
+    │   └── src-tauri/           Rust 外壳（导航锁、后台插件转发）与 gen/android 工程（Kotlin 前台服务、WebView 守卫）
     └── desktop/                 桌面端（Tauri 外壳 + React 前端，ADR-0046）
         ├── index.html、vite.config.ts、vitest.config.ts
         ├── src/                 host 抽象、TauriLineTransport、BackendPool、会话树、界面
@@ -90,7 +94,7 @@ nocturne/
 
 ## 2. 包边界
 
-- `packages/core`、`packages/mcp`、`packages/acp`、`packages/rpc`、`packages/remote`、`apps/cli`、`apps/tui`、`apps/desktop`、`apps/relay` 是九个 workspace 包；Core 不依赖客户端、MCP 或 ACP SDK。remote 不依赖任何项目内包；relay 运行时只依赖 remote 与 ws，Core/RPC 仅开发测试依赖（方向见 [modules.md](../architecture/modules.md)）。当前桌面端边界仍只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`。
+- `packages/core`、`packages/mcp`、`packages/acp`、`packages/rpc`、`packages/remote`、`apps/cli`、`apps/tui`、`apps/desktop`、`apps/android`、`apps/relay` 是十个 workspace 包；Core 不依赖客户端、MCP 或 ACP SDK。remote 不依赖任何项目内包；relay 运行时只依赖 remote 与 ws，Core/RPC 仅开发测试依赖（方向见 [modules.md](../architecture/modules.md)）。当前桌面端边界仍只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`。
 - Core 内部的模块边界用目录加静态依赖检查维护，不再拆成十几个包。
 - `protocol` 以子路径导出（`@nocturne/core/protocol`），客户端可以只导入类型，为将来独立成包提前划好界线。
 
