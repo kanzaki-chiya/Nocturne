@@ -8,7 +8,12 @@ import type { ComposerSubmit } from "../Composer";
 import { Conversation, PermissionCard, QuestionCard } from "../Conversation";
 import { useDraftControls, useSessionControls } from "../session-controls";
 import { PhoneComposer } from "./PhoneComposer";
-import { submitAccepted, type PhoneCreateOptions, type PhoneSession } from "./sessions";
+import {
+  submitAccepted,
+  type PhoneCreateOptions,
+  type PhoneSession,
+  type PhoneSessions,
+} from "./sessions";
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -38,8 +43,14 @@ export function SessionScreen({
   onError,
   onChanged,
   plain = false,
+  sessions,
+  onForked,
 }: {
   entry: PhoneSession;
+  /** 回退、改动摘要与分叉经由会话管理器（与桌面 Conversations 相同的刷新规则） */
+  sessions: PhoneSessions;
+  /** 分叉出的新会话已打开，跳过去 */
+  onForked: (sessionId: string) => void;
   /** 普通对话工作区：没有项目文件索引，@ 引用不可用（同桌面） */
   plain?: boolean;
   connected: boolean;
@@ -172,6 +183,30 @@ export function SessionScreen({
         hidePersistentPermissions
         hideRequests
         subscribeEvents={subscribeEvents}
+        onResubmit={async (targetSeq, text, mode) => {
+          // 同桌面 resubmit：先回退再按普通发送；重发只带文本
+          setBusy(true);
+          try {
+            await sessions.rewind(entry, targetSeq, mode);
+          } finally {
+            setBusy(false);
+          }
+          await submit({ text, attachments: [] });
+        }}
+        onFork={async (targetSeq) => {
+          const forked = await sessions.fork(entry, targetSeq);
+          onForked(forked.session.id);
+        }}
+        turnChanges={entry.turnChanges}
+        onRewindFiles={async (seq) => {
+          setBusy(true);
+          try {
+            await sessions.rewind(entry, seq, "files");
+          } finally {
+            setBusy(false);
+          }
+        }}
+        loadChangeDiff={(seq, path) => sessions.turnChangeDiff(entry, seq, path)}
       />
       <PhoneComposer
         key={session.id}

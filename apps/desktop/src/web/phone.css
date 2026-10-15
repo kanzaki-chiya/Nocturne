@@ -273,8 +273,28 @@
   max-width: 100%;
   overflow-wrap: anywhere;
 }
+/* 手机没有悬停：消息操作（复制、编辑并重发、重发、分叉）常驻显示，按钮加大到可点 */
 .phone .u-actions {
+  visibility: visible;
   opacity: 1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.phone .conversation .u-act {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+/* 本轮改动与 diff：不撑宽页面，diff 正文在卡内横向滚动 */
+.phone .turn-changes,
+.phone .turn-change-file,
+.phone .diff-body {
+  min-width: 0;
+  max-width: 100%;
+}
+.phone .conversation .diff-body {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }
 .phone .conversation-code pre {
   overflow: auto;
@@ -799,4 +819,50 @@
 .phone-pair-first {
   color: var(--a-accent) !important;
   font-weight: 600;
+}
+
+/* ── 首页「其他目录…」 ── */
+.phone .phone-row.other .phone-row-main b {
+  color: var(--a-secondary);
+}
+.phone-other-dir {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 12px;
+  background: var(--a-panel);
+  border: 1px solid var(--a-border);
+  border-radius: 16px;
+}
+.phone-other-dir label {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--a-secondary);
+}
+.phone-other-dir input {
+  font-family: var(--mono);
+}
+.phone-other-dir small {
+  color: var(--a-muted);
+  font-size: 13px;
+}
+.phone-other-dir .phone-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ── 用量页：复用桌面 UsagePage，收窄内边距，标题由页头给出 ── */
+.phone-usage {
+  padding: 0;
+}
+.phone-usage .usage-page .ph3 {
+  padding: 12px 16px 0;
+}
+.phone-usage .usage-page .ph3 h3 {
+  display: none;
+}
+.phone-usage .usage-body {
+  padding: 12px 16px 24px;
 }

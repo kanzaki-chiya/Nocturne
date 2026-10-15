@@ -256,7 +256,16 @@ it("重连续接 lastSeq 并保留显示视图，新建会话可用任意目录�
   const sessions = new PhoneSessions(vi.fn());
   const view = createSessionView();
   view.lastSeq = 12;
-  sessions.opened.set("s", { session, client, workspace: "Z:/work", view, dead: true });
+  sessions.opened.set("s", {
+    session,
+    client,
+    workspace: "Z:/work",
+    view,
+    dead: true,
+    listeners: new Set(),
+    turnChanges: new Map(),
+    changeDiffs: new Map(),
+  });
   await sessions.connected(client);
   expect(sessions.opened.get("s")?.view).toBe(view);
   expect(session.subscribe).toHaveBeenCalledWith(expect.any(Function), { afterSeq: 12 });
@@ -493,4 +502,66 @@ it("主题与断线诊断只存在手机本地，诊断最多保留 8 条", () =
   expect(loadDisconnects()).toEqual([]);
   expect(closeReason(4002)).toContain("离线");
   expect(closeReason(undefined)).not.toBe("");
+});
+
+it("改动摘要在订阅后与 Turn 结束时刷新；回退后刷新；分叉打开新会话", async () => {
+  const [transport] = createMemoryTransportPair();
+  const { createRpcClient } = await import("@nocturne/rpc/client");
+  const client = createRpcClient(transport, { clientName: "test" });
+  let emit: ((event: Parameters<Parameters<RpcSession["subscribe"]>[0]>[0]) => void) | undefined;
+  const turn = { seq: 3, files: [], shellCalls: 0 };
+  const session = {
+    id: "s",
+    subscribe: vi.fn(async (listener: typeof emit) => {
+      emit = listener;
+      return { lastSeq: 0, unsubscribe: vi.fn() };
+    }),
+    turnChanges: vi.fn(async () => [turn]),
+    turnChangeDiff: vi.fn(async () => ({ diff: "" })),
+    rewind: vi.fn(async () => undefined),
+  } as unknown as RpcSession;
+  const forked = {
+    id: "f",
+    subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
+    turnChanges: vi.fn(async () => []),
+  } as unknown as RpcSession;
+  vi.spyOn(client.runtime, "listSessions").mockResolvedValue([]);
+  vi.spyOn(client.runtime, "resumeSession").mockImplementation(
+    async (id) =>
+      ({ session: id === "f" ? forked : session, opened: {} }) as Awaited<
+        ReturnType<RpcClient["runtime"]["resumeSession"]>
+      >,
+  );
+  const fork = vi.spyOn(client.runtime, "forkSession").mockResolvedValue("f");
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(client);
+  const entry = await sessions.open("s");
+  await vi.waitFor(() => {
+    expect(entry.turnChanges.get(3)).toBe(turn);
+  });
+  expect(session.turnChanges).toHaveBeenCalledTimes(1);
+  emit?.({
+    sessionId: "s",
+    seq: 1,
+    time: new Date().toISOString(),
+    turnId: "t",
+    type: "turn.completed",
+    payload: { reason: "completed", steps: 1, usage: { inputTokens: 0, outputTokens: 0 } },
+  } as never);
+  await vi.waitFor(() => {
+    expect(session.turnChanges).toHaveBeenCalledTimes(2);
+  });
+  await sessions.turnChangeDiff(entry, 3, "a.ts");
+  await sessions.turnChangeDiff(entry, 3, "a.ts");
+  expect(session.turnChangeDiff).toHaveBeenCalledTimes(1);
+
+  await sessions.rewind(entry, 3, "files");
+  expect(session.rewind).toHaveBeenCalledWith(3, "files");
+  expect(session.turnChanges).toHaveBeenCalledTimes(3);
+
+  const opened = await sessions.fork(entry, 3);
+  expect(fork).toHaveBeenCalledWith("s", { targetSeq: 3 });
+  expect(opened.session.id).toBe("f");
+  expect(sessions.opened.get("f")?.workspace).toBe(entry.workspace);
+  client.close();
 });

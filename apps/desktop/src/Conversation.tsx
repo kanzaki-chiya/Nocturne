@@ -64,6 +64,11 @@ export interface ConversationProps {
   busy: boolean;
   /** 重发一条用户消息：先 rewind(targetSeq, mode) 再 submit（Conversations.resubmit） */
   onResubmit?: ((targetSeq: number, text: string, mode: RewindMode) => Promise<void>) | undefined;
+  /**
+   * 从一条用户消息之前分叉出新会话（runtime.forkSession 的 targetSeq）。缺省时不显示
+   * 「分叉」：桌面暂无分叉入口，手机传入。
+   */
+  onFork?: ((targetSeq: number) => Promise<void>) | undefined;
   /** 手机端隐藏持久授权选项；缺省保留桌面行为。 */
   hidePersistentPermissions?: boolean;
   /** 底部面板由手机外壳统一渲染。 */
@@ -784,6 +789,7 @@ function UserMessage({
   busy,
   repliesAfter,
   onResubmit,
+  onFork,
 }: {
   entry: UserEntry;
   images: AttachmentImageSource;
@@ -793,6 +799,7 @@ function UserMessage({
   /** 这条消息之后将被撤回的回复轮数（助手 turn 数） */
   repliesAfter: number;
   onResubmit: ConversationProps["onResubmit"];
+  onFork?: ConversationProps["onFork"];
 }) {
   const bubble = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -802,6 +809,7 @@ function UserMessage({
   const [target, setTarget] = useState<RewindTarget | undefined>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [confirmFork, setConfirmFork] = useState(false);
   const { copy, copied } = useCopyText(setError);
   const hasImages = (entry.attachments?.length ?? 0) > 0;
   useEffect(() => {
@@ -1034,7 +1042,60 @@ function UserMessage({
                   重发
                 </button>
               )}
+              {onFork && (
+                <button
+                  type="button"
+                  className="u-act"
+                  disabled={pending}
+                  title="以这条消息之前的对话新建会话"
+                  onClick={() => {
+                    setError(undefined);
+                    setConfirmFork(true);
+                  }}
+                >
+                  分叉
+                </button>
+              )}
             </div>
+            {confirmFork && onFork ? (
+              <div className="u-fork" role="group" aria-label="确认分叉">
+                <p>
+                  将以这条消息之前的对话新建会话，可在新会话里重新提问。原会话不变；工作区文件保持当前状态，不会回退。
+                </p>
+                <div className="u-edit-actions">
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={pending}
+                    onClick={() => {
+                      setPending(true);
+                      void onFork(entry.seq)
+                        .then(() => {
+                          setConfirmFork(false);
+                        })
+                        .catch((reason: unknown) => {
+                          setError(`分叉失败：${reasonText(reason)}`);
+                        })
+                        .finally(() => {
+                          setPending(false);
+                        });
+                    }}
+                  >
+                    {pending ? "分叉中…" : "分叉"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={pending}
+                    onClick={() => {
+                      setConfirmFork(false);
+                    }}
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            ) : null}
             {error !== undefined ? (
               <p className="conversation-error" role="alert">
                 {error}
@@ -1986,6 +2047,7 @@ function EntryView({
   busy,
   repliesAfter,
   onResubmit,
+  onFork,
   fileLinks,
   showReplyActions,
   changesCard,
@@ -2002,6 +2064,7 @@ function EntryView({
   busy: boolean;
   repliesAfter: number;
   onResubmit: ConversationProps["onResubmit"];
+  onFork?: ConversationProps["onFork"];
   fileLinks: ConversationProps["fileLinks"];
   showReplyActions: boolean;
   changesCard: ReactNode;
@@ -2021,6 +2084,7 @@ function EntryView({
           busy={busy}
           repliesAfter={repliesAfter}
           onResubmit={onResubmit}
+          onFork={onFork}
         />
       );
     case "assistant":
@@ -2750,6 +2814,7 @@ function ConversationContent({
   images,
   busy,
   onResubmit,
+  onFork,
   fileLinks,
   turnChanges,
   onRewindFiles,
@@ -2914,6 +2979,7 @@ function ConversationContent({
                     waitingCallId={view.pendingQuestion?.callId}
                     repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
                     onResubmit={onResubmit}
+                    onFork={onFork}
                     fileLinks={fileLinks}
                     showReplyActions={replyActionKeys.has(entry.key)}
                     changesCard={

@@ -403,6 +403,7 @@ function mount(
       | "images"
       | "fileLinks"
       | "onResubmit"
+      | "onFork"
       | "hidePersistentPermissions"
     >
   > & { resolveFilesImpl?: RpcSession["resolveFiles"] } = {},
@@ -453,6 +454,40 @@ it("远程模式隐藏重发和持久授权；桌面缺省仍保留", () => {
   expect(screen.getByRole("button", { name: "重发" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "编辑并重发" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "本项目允许" })).toBeTruthy();
+});
+
+it("分叉只在传入 onFork 时出现，确认后以该条用户消息的 seq 分叉", async () => {
+  const view = imageView([]);
+  const desktop = mount(view);
+  expect(screen.queryByRole("button", { name: "分叉" })).toBeNull();
+  desktop.unmount();
+  const onFork = vi.fn(() => Promise.resolve());
+  mount(view, { onFork });
+  fireEvent.click(screen.getByRole("button", { name: "分叉" }));
+  const confirm = screen.getByRole("group", { name: "确认分叉" });
+  expect(confirm.textContent).toContain("工作区文件保持当前状态");
+  expect(onFork).not.toHaveBeenCalled();
+  fireEvent.click(within(confirm).getByRole("button", { name: "取消" }));
+  expect(screen.queryByRole("group", { name: "确认分叉" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "分叉" }));
+  fireEvent.click(
+    within(screen.getByRole("group", { name: "确认分叉" })).getByRole("button", { name: "分叉" }),
+  );
+  expect(onFork).toHaveBeenCalledWith(1);
+  await waitFor(() => {
+    expect(screen.queryByRole("group", { name: "确认分叉" })).toBeNull();
+  });
+});
+
+it("手机图片源读取失败时占位条显示后台给出的原因", async () => {
+  const images = {
+    ...createAttachmentImageSource(),
+    showErrors: true,
+    load: vi.fn(() => Promise.reject(new Error("图片过大，请在电脑上查看"))),
+  };
+  mount(imageView(), { images });
+  enterViewport();
+  expect(await screen.findByText("图片过大，请在电脑上查看")).toBeTruthy();
 });
 
 it("远程图片占位不读取附件", () => {

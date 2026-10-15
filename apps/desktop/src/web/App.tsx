@@ -4,6 +4,7 @@ import type { ParsedOffer } from "@nocturne/remote";
 import { createAttachmentImageSource, type AttachmentImageSource } from "../attachment-images";
 import type { ComposerSubmit } from "../Composer";
 import { projectKey } from "../session-tree";
+import { UsagePage } from "../UsagePage";
 import { PhoneConnection } from "./connection";
 import { pairPhone, pairingError, parsePairingLink } from "./pairing";
 import { PhoneSessions, phoneStatus, submitAccepted, type PhoneCreateOptions } from "./sessions";
@@ -33,6 +34,7 @@ import {
   IconFolder,
   IconHome,
   IconMore,
+  IconPlus,
   IconSettings,
 } from "./icons";
 import { Popover, PopoverOption } from "./Popover";
@@ -41,7 +43,7 @@ import { DraftComposer, SessionScreen, mcpText } from "./SessionScreen";
 export const TRUST_TEXT =
   "中继只转发密文，看不到会话内容。你仍需信任中继维护者及服务器不会篡改下发的手机网页；端到端加密防不住被篡改的网页。远程访问相当于在手机上执行代码，请妥善保管手机并及时移除丢失设备。";
 export const ABILITY_TEXT =
-  "手机能做会话里的一切：对话、切换模型、思考档位与权限预设、压缩、斜杠命令与技能、权限与提问、中断。设置、服务商与凭据、MCP 与外部 agent 管理、持久授权、项目信任和 Shell 设置只能在电脑上改——这些在移除手机之后仍会生效。";
+  "手机能做会话里的一切：在任意项目新建会话、对话（含图片与 @ 文件引用）、切换模型、思考档位与权限预设、压缩、斜杠命令与技能、权限与提问、中断、回退与重发、分叉、查看本轮改动和用量。设置、服务商与凭据、MCP 与外部 agent 管理、持久授权、项目信任和 Shell 设置只能在电脑上改——这些在移除手机之后仍会生效。";
 export function iosBrowser(): boolean {
   return (
     /iPhone|iPad|iPod/.test(navigator.userAgent) ||
@@ -59,7 +61,8 @@ type Page =
   | { kind: "home"; hostId: string }
   | { kind: "project"; hostId: string; path: string }
   | { kind: "session"; hostId: string; sessionId: string }
-  | { kind: "settings"; hostId?: string };
+  | { kind: "settings"; hostId?: string }
+  | { kind: "usage"; hostId: string };
 
 const STATE_TEXT: Record<string, string> = {
   online: "已连接",
@@ -123,6 +126,8 @@ export function PhoneApp({
   const [menu, setMenu] = useState<"hosts" | "session" | null>(null);
   const [menuOutput, setMenuOutput] = useState<string>();
   const [addingHost, setAddingHost] = useState(false);
+  /** 首页「其他目录…」正在输入的路径；undefined 表示收起 */
+  const [otherDir, setOtherDir] = useState<string>();
   const hostTrigger = useRef<HTMLButtonElement>(null);
   const sessionTrigger = useRef<HTMLButtonElement>(null);
   // 从推送点进来：连上电脑后跳到需要处理的会话
@@ -394,6 +399,8 @@ export function PhoneApp({
         return "Nocturne";
       case "settings":
         return "设置";
+      case "usage":
+        return "用量";
       case "project":
         return plainWorkspace !== undefined && projectKey(page.path) === projectKey(plainWorkspace)
           ? "普通对话"
@@ -490,6 +497,67 @@ export function PhoneApp({
             </span>
           </button>
         ))}
+        {loaded &&
+          (otherDir === undefined ? (
+            <button
+              className="phone-row other"
+              onClick={() => {
+                setOtherDir("");
+              }}
+            >
+              <span className="phone-row-icon">
+                <IconPlus />
+              </span>
+              <span className="phone-row-main">
+                <b>其他目录…</b>
+                <small>
+                  <span>在电脑上的任意已有目录新建会话</span>
+                </small>
+              </span>
+            </button>
+          ) : (
+            <form
+              className="phone-other-dir"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const path = otherDir.trim();
+                if (path === "") return;
+                setOtherDir(undefined);
+                navigate({ kind: "project", hostId: page.hostId, path });
+              }}
+            >
+              <label>
+                电脑上的目录完整路径
+                <input
+                  value={otherDir}
+                  autoFocus
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder="例如 D:\code\app 或 /home/me/app"
+                  onChange={(event) => {
+                    setOtherDir(event.target.value);
+                  }}
+                />
+              </label>
+              <small>
+                目录必须已存在。项目配置未被信任的新目录需要先在电脑上信任（nctrn trust）。
+              </small>
+              <div className="phone-actions">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOtherDir(undefined);
+                  }}
+                >
+                  取消
+                </button>
+                <button className="phone-primary" disabled={otherDir.trim() === ""}>
+                  打开
+                </button>
+              </div>
+            </form>
+          ))}
       </section>
     );
   } else if (page.kind === "project") {
@@ -558,10 +626,23 @@ export function PhoneApp({
         onChanged={() => {
           void sessions.refresh().catch(() => undefined);
         }}
+        sessions={sessions}
+        onForked={(id) => {
+          navigate({ kind: "session", hostId: page.hostId, sessionId: id });
+        }}
       />
     ) : (
       <section className="phone-body">
         <p role="status">{connected ? "正在打开会话…" : "连接后会打开会话。"}</p>
+      </section>
+    );
+  } else if (page.kind === "usage") {
+    body = (
+      <section className="phone-body phone-usage">
+        <UsagePage
+          client={connected ? sessions.client : undefined}
+          scope={`${computer?.name ?? "电脑"}上的全部会话 · 含子代理`}
+        />
       </section>
     );
   } else {
@@ -693,6 +774,19 @@ export function PhoneApp({
             ))}
           </div>
         </section>
+        {page.hostId !== undefined && (
+          <section className="phone-section" aria-label="用量">
+            <h3>用量</h3>
+            <button
+              className="phone-list-action"
+              onClick={() => {
+                if (page.hostId !== undefined) navigate({ kind: "usage", hostId: page.hostId });
+              }}
+            >
+              查看 {computer?.name ?? "电脑"} 的用量统计
+            </button>
+          </section>
+        )}
         <section className="phone-section" aria-label="关于">
           <h3>关于与信任边界</h3>
           <p>{ABILITY_TEXT}</p>
@@ -759,7 +853,10 @@ export function PhoneApp({
           >
             <IconMore />
           </button>
-        ) : page.kind === "settings" || page.kind === "welcome" || offer ? (
+        ) : page.kind === "settings" ||
+          page.kind === "usage" ||
+          page.kind === "welcome" ||
+          offer ? (
           <span className="phone-header-side" />
         ) : (
           <button

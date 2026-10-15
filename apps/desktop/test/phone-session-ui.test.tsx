@@ -237,3 +237,97 @@ it("从推送点进来连上后直接进入会话", async () => {
   });
   client.close();
 });
+
+it("其他目录：输入路径进入项目页，后台拒绝时在输入框下显示原因；设置里进入用量", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  history.replaceState(null, "", "/");
+  const [transport] = createMemoryTransportPair();
+  const client = createRpcClient(transport, { clientName: "test" });
+  const storage = memoryStorage();
+  await storage.putHost({ hostId: "host", hostPub: "pub", name: "电脑 1", pairedAt: 1 });
+  await storage.identity();
+  vi.spyOn(client.runtime, "listSessions").mockResolvedValue([]);
+  vi.spyOn(client.runtime, "listModels").mockResolvedValue([]);
+  vi.spyOn(client.runtime, "listRecentModels").mockResolvedValue([]);
+  vi.spyOn(client.runtime, "defaultModel").mockResolvedValue({ provider: "fake", model: "m" });
+  const create = vi
+    .spyOn(client.runtime, "createSession")
+    .mockRejectedValue(
+      new RpcError(
+        "workspace_untrusted",
+        "这个目录的项目配置还没有信任。手机不能代为决定，请在电脑上信任该项目（在项目目录运行 nctrn trust）或先在电脑上新建会话",
+      ),
+    );
+  // 统计内容的渲染由桌面用量页测试覆盖，这里只看入口与调用
+  const usage = vi.spyOn(client.runtime, "usageStats").mockRejectedValue(new Error("统计暂不可用"));
+  const push = new PhonePush({
+    registration: () => Promise.reject(new Error("unsupported")),
+    permission: () => "default",
+    requestPermission: vi.fn(),
+    info: vi.fn(),
+    changed: vi.fn(),
+  });
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => {
+    root?.render(<PhoneApp storage={storage} push={push} />);
+  });
+  await act(async () => {
+    await shared.connect?.(client, { subscribePush: vi.fn(), unsubscribePush: vi.fn() });
+  });
+  const byText = (text: string) => {
+    const found = [...container.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes(text),
+    );
+    if (!found) throw new Error(`缺少 ${text}`);
+    return found;
+  };
+  await act(() => byText("其他目录").click());
+  const input = container.querySelector<HTMLInputElement>(".phone-other-dir input");
+  if (!input) throw new Error("缺少路径输入");
+  await act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+      input,
+      "Z:/fresh",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(() => byText("打开").click());
+  expect(container.querySelector("h1")?.textContent).toBe("fresh");
+  expect(container.textContent).toContain("0 个会话 · Z:/fresh");
+  const field = container.querySelector<HTMLTextAreaElement>("textarea");
+  if (!field) throw new Error("缺少输入框");
+  await act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
+      field,
+      "开始",
+    );
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('button[aria-label="发送"]')?.click();
+    await new Promise((done) => setTimeout(done, 0));
+  });
+  expect(create).toHaveBeenCalledWith(
+    expect.objectContaining({ cwd: "Z:/fresh", workspaceRoot: "Z:/fresh" }),
+  );
+  expect(container.querySelector(".phone-composer-error")?.textContent).toContain("nctrn trust");
+  expect(field.value).toBe("开始");
+
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
+  });
+  await act(async () => {
+    byText("用量统计").click();
+    await new Promise((done) => setTimeout(done, 0));
+  });
+  expect(container.querySelector("h1")?.textContent).toBe("用量");
+  expect(usage).toHaveBeenCalledWith({ days: 30 });
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("统计暂不可用");
+  });
+  client.close();
+});

@@ -2,7 +2,10 @@ import {
   createSessionView,
   type ModelRef,
   type ReasoningEffort,
+  type RewindMode,
   type SessionView,
+  type TurnChangeDiff,
+  type TurnChanges,
 } from "@nocturne/core/protocol";
 import {
   trackSessionView,
@@ -22,6 +25,9 @@ export interface PhoneSession {
   dead: boolean;
   /** 每次视图折叠后回调（发送时等待 Turn 被接受） */
   readonly listeners: Set<() => void>;
+  /** 本轮改动摘要（按用户消息 seq），Turn 结束与回退后刷新，同桌面 */
+  turnChanges: Map<number, TurnChanges>;
+  changeDiffs: Map<string, Promise<TurnChangeDiff>>;
 }
 export interface PhoneCreateOptions {
   model?: ModelRef | undefined;
@@ -143,22 +149,84 @@ export class PhoneSessions {
     workspace: string,
     view = createSessionView(),
   ): Promise<PhoneSession> {
-    const listeners = this.opened.get(session.id)?.listeners ?? new Set<() => void>();
-    const entry: PhoneSession = { client, session, workspace, view, dead: false, listeners };
+    const previous = this.opened.get(session.id);
+    const listeners = previous?.listeners ?? new Set<() => void>();
+    const entry: PhoneSession = {
+      client,
+      session,
+      workspace,
+      view,
+      dead: false,
+      listeners,
+      turnChanges: previous?.turnChanges ?? new Map<number, TurnChanges>(),
+      changeDiffs: new Map(),
+    };
     this.opened.set(session.id, entry);
+    // 订阅建立前到达的是回放，只在订阅完成后统一查一次改动
+    let subscribed = false;
     entry.tracker = await trackSessionView(
       session,
-      () => {
+      (_view, event) => {
         for (const listener of entry.listeners) listener();
         this.changed();
+        if (subscribed && event.type === "turn.completed") void this.refreshTurnChanges(entry);
       },
       {
         view,
         afterSeq: view.lastSeq,
       },
     );
+    subscribed = true;
     this.changed();
+    void this.refreshTurnChanges(entry);
     return entry;
+  }
+  /** 与桌面 Conversations.refreshTurnChanges 相同：Turn 进行中不查，查完视图已前进则丢弃 */
+  async refreshTurnChanges(entry: PhoneSession): Promise<void> {
+    if (entry.dead || entry.view.currentTurn !== undefined) return;
+    const boundary = entry.view.lastSeq;
+    try {
+      const changes = await entry.session.turnChanges();
+      if (this.opened.get(entry.session.id) !== entry || entry.view.lastSeq !== boundary) return;
+      entry.turnChanges = new Map(changes.map((turn) => [turn.seq, turn]));
+      entry.changeDiffs.clear();
+    } catch {
+      entry.turnChanges = new Map();
+      entry.changeDiffs.clear();
+    }
+    this.changed();
+  }
+  turnChangeDiff(entry: PhoneSession, seq: number, path: string): Promise<TurnChangeDiff> {
+    const key = JSON.stringify([seq, path]);
+    let pending = entry.changeDiffs.get(key);
+    if (!pending) {
+      pending = entry.session.turnChangeDiff(seq, path);
+      entry.changeDiffs.set(key, pending);
+      void pending.catch(() => {
+        if (entry.changeDiffs.get(key) === pending) entry.changeDiffs.delete(key);
+      });
+    }
+    return pending;
+  }
+  /** 回退到 targetSeq 之前（编辑重发、重发、只还原文件共用），完成后刷新改动 */
+  async rewind(entry: PhoneSession, targetSeq: number, mode: RewindMode): Promise<void> {
+    if (entry.dead) throw new Error("电脑尚未连接");
+    if (phoneStatus(entry) !== "idle") throw new Error("会话正在运行");
+    await entry.session.rewind(targetSeq, mode);
+    await this.refreshTurnChanges(entry);
+  }
+  /**
+   * 从 targetSeq 那条用户消息之前分叉（runtime.forkSession）：新会话复制日志并只回退
+   * 对话，工作区文件不动。返回新会话 id，随即打开。
+   */
+  async fork(entry: PhoneSession, targetSeq: number): Promise<PhoneSession> {
+    const client = this.requireClient();
+    const id = await client.runtime.forkSession(entry.session.id, { targetSeq });
+    await this.refresh().catch(() => undefined);
+    const { session } = await client.runtime.resumeSession(id);
+    const forked = await this.attach(client, session, entry.workspace);
+    void this.refresh().catch(() => undefined);
+    return forked;
   }
   async open(id: string): Promise<PhoneSession> {
     const old = this.opened.get(id);

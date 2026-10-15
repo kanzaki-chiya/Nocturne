@@ -303,6 +303,7 @@ export function UsageView({
   error,
   onRange,
   onRefresh,
+  scope = "本机全部会话 · 含子代理",
 }: {
   stats: UsageStats | undefined;
   range: Range;
@@ -310,6 +311,8 @@ export function UsageView({
   error: string | undefined;
   onRange: (range: Range) => void;
   onRefresh: () => void;
+  /** 标题下的统计口径说明（手机上「本机」指电脑，改写措辞） */
+  scope?: string;
 }) {
   const [sort, setSort] = useState<"cost" | "input">("cost");
   // 展开状态按模型键保存，切换范围时保留
@@ -370,7 +373,7 @@ export function UsageView({
       <header className="ph3">
         <div className="grow">
           <h3>用量</h3>
-          <span className="sub">本机全部会话 · 含子代理</span>
+          <span className="sub">{scope}</span>
         </div>
         <div className="usage-toggle" aria-label="统计范围">
           {(["7", "30", "all"] as const).map((r) => (
@@ -628,7 +631,13 @@ export function UsageView({
   );
 }
 
-export function UsagePage({ client }: { client: RpcClient | null | undefined }) {
+export function UsagePage({
+  client,
+  scope,
+}: {
+  client: RpcClient | null | undefined;
+  scope?: string;
+}) {
   const [range, setRange] = useState<Range>("30");
   const [stats, setStats] = useState<UsageStats>();
   const [loading, setLoading] = useState(false);
@@ -665,6 +674,7 @@ export function UsagePage({ client }: { client: RpcClient | null | undefined }) 
       onRefresh={() => {
         setRefresh((n) => n + 1);
       }}
+      {...(scope !== undefined ? { scope } : {})}
     />
   );
 }

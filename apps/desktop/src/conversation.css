@@ -1267,3 +1267,16 @@
     padding: 10px;
   }
 }
+/* 分叉确认：在消息操作行下方展开 */
+.conversation .u-fork {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--a-border);
+  border-radius: 10px;
+  background: var(--a-panel);
+  font-size: 13px;
+  color: var(--a-secondary);
+}
+.conversation .u-fork p {
+  margin: 0;
+}
