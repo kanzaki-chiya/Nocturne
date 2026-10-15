@@ -1,0 +1,8 @@
+# 将域名换为自己的 HTTPS 域名；Caddy 自动申请和续签证书，并透传 WebSocket Upgrade。
+relay.example.com {
+    reverse_proxy 127.0.0.1:8787 {
+        transport http {
+            read_timeout 120s
+        }
+    }
+}

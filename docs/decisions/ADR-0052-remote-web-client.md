@@ -199,3 +199,7 @@
 - Conversations 自动查询远程白名单禁止的 turnChanges，且包含回退、附件、输入历史与技能路径；手机使用薄的 PhoneSessions，只调用白名单内方法，复用 RPC 的同一视图 reducer 与 lastSeq 续接。
 - 真机验收移至第 6 轮部署 HTTPS 后。本轮使用 127.0.0.1 的安全上下文与桌面浏览器手机视口验证。
 - iOS 17.2 起添加到主屏幕会复制 cookies，但不会复制 IndexedDB 等其他本地存储，且之后不共享数据（[WebKit 官方说明](https://webkit.org/blog/14787/webkit-features-in-safari-17-2/)）。手机身份是 IndexedDB 中不可导出的 CryptoKey，所以 Safari 配对后提示在主屏幕应用重新配对；不把 cookie 复制误当作身份共享。
+
+### 第 6 轮：Docker 分发修订
+
+第 5 节原拟「随 Release 提供 tgz 和 Docker 镜像」修订为：Release 只提供 `nocturne-relay-<version>.tgz`，仓库提供基于该 tgz 自建镜像的 Dockerfile 与 compose 示例，不发布镜像仓库。现阶段维护镜像仓库权限与多架构构建/运维的成本没有必要；自建镜像依然满足部署需求，反向代理负责 HTTPS。部署细节见 [中继应用](../apps/relay.md)。

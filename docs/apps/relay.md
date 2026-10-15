@@ -54,4 +54,4 @@ stdout JSON 行只含 time、event(connect/auth_ok/auth_failed/close/register/re
 
 信任边界：必须信任维护者及服务器未篡改下发网页，端到端加密不能阻止恶意网页取走解密后的内容，见 [ADR-0052 第 4 节](../decisions/ADR-0052-remote-web-client.md#4-端到端加密)。
 
-部署示例：待第 6 轮补充。
+部署示例见 [deploy/](../../apps/relay/deploy/)：Dockerfile、compose、Caddy、nginx 与 systemd；用户操作见[自建指南](../../apps/relay/deploy/README.md)。镜像基于 Release tgz 自建，不发布镜像仓库；CI Ubuntu 构建镜像并验证管理、数据卷重启持久化与正常退出。

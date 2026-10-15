@@ -1,0 +1,20 @@
+services:
+  relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # 先将 Release 的 tgz 放在本目录，再设置 RELAY_TGZ 为文件名（不要用仓库根目录作构建上下文）。
+        RELAY_TGZ: ${RELAY_TGZ:?先将中继 tgz 放到本目录并设置 RELAY_TGZ}
+    container_name: nocturne-relay
+    restart: unless-stopped
+    environment:
+      NOCTURNE_RELAY_PUBLIC_ORIGIN: ${NOCTURNE_RELAY_PUBLIC_ORIGIN:?必须设置 NOCTURNE_RELAY_PUBLIC_ORIGIN（例如 https://relay.example.com）}
+      NOCTURNE_RELAY_TRUST_PROXY: ${NOCTURNE_RELAY_TRUST_PROXY:-true}
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - relay-data:/data
+
+volumes:
+  relay-data:

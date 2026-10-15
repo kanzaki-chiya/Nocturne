@@ -1,0 +1,28 @@
+[Unit]
+Description=Nocturne relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 预先创建专用 nocturne-relay 用户/组，并将 tgz 安装到该用户可读取的全局路径。
+User=nocturne-relay
+Group=nocturne-relay
+StateDirectory=nocturne-relay
+StateDirectoryMode=0700
+Environment=NOCTURNE_RELAY_DATA_DIR=/var/lib/nocturne-relay
+Environment=NOCTURNE_RELAY_LISTEN=127.0.0.1:8787
+EnvironmentFile=/etc/nocturne-relay.env
+# 管理命令使用同一用户和数据目录：
+# sudo -u nocturne-relay nocturne-relay invite create --data-dir /var/lib/nocturne-relay
+ExecStart=/usr/local/bin/nocturne-relay serve
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

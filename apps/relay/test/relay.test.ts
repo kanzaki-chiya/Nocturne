@@ -94,6 +94,24 @@ async function rawAuth(
   return { ws, code };
 }
 describe("relay", () => {
+  it("容器监听 0.0.0.0 可由本机访问，管理 socket 位于数据目录", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "relay-container-listen-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const relay = new RelayServer({
+      listen: "0.0.0.0:0",
+      publicOrigin: "http://127.0.0.1:8787",
+      dataDir: dir,
+    });
+    const port = await relay.start();
+    cleanups.push(() => relay.close());
+    expect((await fetch(`http://127.0.0.1:${port}/healthz`)).status).toBe(200);
+    const admin = await startAdmin(relay);
+    cleanups.push(() => new Promise<void>((done) => admin.close(() => done())));
+    expect((await requestAdmin(dir, { command: "invite create", note: "container" })).ok).toBe(
+      true,
+    );
+    expect((await requestAdmin(dir, { command: "invite list" })).output).toContain("container");
+  });
   it("生成邀请、登记成功、同一邀请第二次返回 403，数据不存明文", async () => {
     const f = await fixture();
     expect(await f.register()).toEqual({ hostId: f.identity.id });
