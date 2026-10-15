@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -81,7 +82,16 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   console.log(result.output);
   if (!result.ok) process.exitCode = 1;
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// npm 装出的 bin 是指向 dist/main.mjs 的符号链接（Windows 是 .cmd 包装），比较前先解析真实路径
+function invokedDirectly(entry: string | undefined): boolean {
+  if (!entry) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+  } catch {
+    return false;
+  }
+}
+if (invokedDirectly(process.argv[1])) {
   void main().catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : "中继命令失败");
     process.exitCode = 1;

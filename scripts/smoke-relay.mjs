@@ -75,7 +75,15 @@ export async function smokeRelay(tgz) {
     );
     const main = join(installed, "dist", "main.mjs");
     const env = safeEnvironment();
-    const version = run(process.execPath, [main, "--version"], { capture: true, env }).trim();
+    // 经 npm 装出的命令调用（POSIX 是符号链接、Windows 是 .cmd），覆盖用户实际的启动方式
+    const bin = join(
+      prefix,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? "nocturne-relay.cmd" : "nocturne-relay",
+    );
+    check(existsSync(bin), `npm 未生成命令 ${bin}`);
+    const version = run(bin, ["--version"], { capture: true, env }).trim();
     check(version === pkg.version, `--version 与包版本不一致 (${version} / ${pkg.version})`);
     console.log(`版本: ${version}`);
 
