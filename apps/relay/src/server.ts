@@ -17,6 +17,9 @@ import { Store, hash, type HostRecord, type DeviceRecord } from "./store.js";
 import { PushService } from "./push.js";
 import { staticCsp } from "./csp.js";
 
+/** 由 scripts/release-version.mjs 与各包版本一起改写 */
+export const RELAY_VERSION = "0.10.0";
+
 interface Peer {
   ws: WebSocket;
   role: "host" | "device" | "pair";
@@ -170,7 +173,7 @@ export class RelayServer {
     if (req.method === "GET" && req.url === "/v1/info") {
       this.json(res, 200, {
         protocol: 1,
-        relayVersion: "0.9.0",
+        relayVersion: RELAY_VERSION,
         vapidPublicKey: this.pushService.publicKey,
       });
       return;

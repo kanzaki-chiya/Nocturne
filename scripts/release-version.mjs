@@ -40,6 +40,7 @@ const CONST_VERSION_FILES = {
   "packages/acp/src/connector.ts": "CLIENT_VERSION",
   "apps/cli/src/main.ts": "VERSION",
   "apps/tui/src/version.ts": "APP_VERSION",
+  "apps/relay/src/server.ts": "RELAY_VERSION",
 };
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z.-]+)?$/;

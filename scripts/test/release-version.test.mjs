@@ -74,6 +74,7 @@ function makeFixture() {
     "packages/acp/src/connector.ts": 'const CLIENT_VERSION = "0.5.0";\n',
     "apps/cli/src/main.ts": 'const VERSION = "0.5.0";\nconst OTHER_VERSION = "9.9.9";\n',
     "apps/tui/src/version.ts": 'export const APP_VERSION = "0.5.0";\n',
+    "apps/relay/src/server.ts": 'import x from "y";\n\nexport const RELAY_VERSION = "0.5.0";\n',
   };
   for (const [rel, text] of Object.entries(constFiles)) {
     const file = join(root, rel);
