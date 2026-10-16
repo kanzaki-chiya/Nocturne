@@ -62,6 +62,9 @@ export interface HubPeer {
   disconnect(): Promise<void>;
 }
 
+/** `runtime.sessionsChanged` 的合并窗口 */
+const SESSIONS_CHANGED_WINDOW_MS = 300;
+
 export class Hub {
   stopping = false;
   private handle: RpcRuntimeHandle | undefined;
@@ -76,6 +79,9 @@ export class Hub {
   private readonly active = new Map<string, number>();
   private readonly opening = new Map<string, Promise<RuntimeSession>>();
   private readonly closing = new Map<string, Promise<void>>();
+  /** 已登记会话的列表变化监听（首条用户消息、标题），随会话关闭撤销 */
+  private readonly watchers = new Map<string, () => void>();
+  private sessionsChangedTimer: ReturnType<typeof setTimeout> | undefined;
 
   get available(): boolean {
     return this.handle !== undefined && !this.stopping;
@@ -110,6 +116,46 @@ export class Hub {
         peer.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
       }
     }
+  }
+
+  /**
+   * `runtime.sessionsChanged` 广播给所有已握手的连接（含远程），不带内容。
+   * 窗口内的多次变化合并为一条：第一次变化起 300 ms 后发出，窗口内不再顺延。
+   */
+  notifySessionsChanged(): void {
+    if (this.sessionsChangedTimer !== undefined || this.stopping) return;
+    this.sessionsChangedTimer = setTimeout(() => {
+      this.sessionsChangedTimer = undefined;
+      if (this.stopping) return;
+      for (const peer of this.peers) {
+        if (peer.initialized) {
+          peer.send({ jsonrpc: "2.0", method: "runtime.sessionsChanged", params: {} });
+        }
+      }
+    }, SESSIONS_CHANGED_WINDOW_MS);
+  }
+
+  /**
+   * 会话进入后台后监听列表可见的变化：首条用户消息从无到有（列表标题 firstText 出现）
+   * 与 session.titled（生成的标题优先于首句）。其余事件不触发。
+   */
+  private watch(session: RuntimeSession): void {
+    if (this.watchers.has(session.id)) return;
+    let hasUser = session.durableEvents().some((event) => event.type === "message.user");
+    const unsubscribe = session.subscribe((event) => {
+      if (event.type === "message.user" && !hasUser) {
+        hasUser = true;
+        this.notifySessionsChanged();
+      } else if (event.type === "session.titled") {
+        this.notifySessionsChanged();
+      }
+    });
+    this.watchers.set(session.id, unsubscribe);
+  }
+
+  private unwatch(sessionId: string): void {
+    this.watchers.get(sessionId)?.();
+    this.watchers.delete(sessionId);
   }
 
   // ── Runtime ──────────────────────────────────────────────
@@ -198,6 +244,7 @@ export class Hub {
 
   addSession(session: RuntimeSession): void {
     this.sessions.set(session.id, session);
+    this.watch(session);
     this.references.set(session.id, (this.references.get(session.id) ?? 0) + 1);
   }
 
@@ -241,6 +288,7 @@ export class Hub {
     if (session === undefined) return;
     this.sessions.delete(sessionId);
     this.references.delete(sessionId);
+    this.unwatch(sessionId);
     const closing = session.close();
     this.closing.set(sessionId, closing);
     try {
@@ -330,6 +378,10 @@ export class Hub {
     await this.configQueue.catch(() => undefined);
     const sessions = [...this.sessions.values()];
     this.sessions.clear();
+    for (const unsubscribe of this.watchers.values()) unsubscribe();
+    this.watchers.clear();
+    clearTimeout(this.sessionsChangedTimer);
+    this.sessionsChangedTimer = undefined;
     for (const session of sessions) session.interrupt();
     await Promise.allSettled(sessions.map((session) => session.close()));
     await Promise.allSettled([...this.closing.values()]);

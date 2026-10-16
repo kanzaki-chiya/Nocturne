@@ -875,7 +875,9 @@ class Connection implements HubPeer {
             if (sessionCwd !== undefined) options.cwd = sessionCwd;
             const sessionRoot = optString(p, "workspaceRoot");
             if (sessionRoot !== undefined) options.workspaceRoot = sessionRoot;
-            return await this.register(await this.runtime().createSession(options));
+            const opened = await this.register(await this.runtime().createSession(options));
+            this.hub.notifySessionsChanged();
+            return opened;
           })(),
         ),
       "runtime.resumeSession": (p) =>
@@ -908,6 +910,7 @@ class Connection implements HubPeer {
         const sessionId = await this.runtime().forkSession(reqString(p, "sessionId"), {
           ...(targetSeq !== undefined ? { targetSeq } : {}),
         });
+        this.hub.notifySessionsChanged();
         return { sessionId };
       },
       "runtime.listModels": async (p) => {

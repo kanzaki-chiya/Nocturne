@@ -518,6 +518,11 @@ export interface RpcServerNotifications {
    * Runtime 的 Provider 注册表已用重载后的配置重建，listModels 等读到的已是新值
    */
   "runtime.providersChanged": Record<string, never>;
+  /**
+   * 会话列表变了，请重拉 `runtime.listSessions`：本后台创建或分叉会话成功、会话首条用户消息
+   * 或标题落盘之后推送，短时间内的多次变化合并为一条。不带任何会话内容；别的进程改的列表不在此列
+   */
+  "runtime.sessionsChanged": Record<string, never>;
   /** 登录会话完成或失败（含取消）；绝不先于对应 login.start/startDraft 的响应到达 */
   "login.completed": LoginCompleted;
 }
