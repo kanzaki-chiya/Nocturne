@@ -1,6 +1,6 @@
 # 安卓 App
 
-> 状态：第 1 轮（外壳、后台保持连接与探针）｜决策：[ADR-0059](../decisions/ADR-0059-android-app.md)｜实现：`apps/android`
+> 状态：第 1 轮（外壳、后台保持连接与探针）＋第 8 轮补丁（会话列表保持最新）｜决策：[ADR-0059](../decisions/ADR-0059-android-app.md)｜实现：`apps/android`
 
 `apps/android` 是 Tauri 2 的安卓工程，把[手机网页](desktop.md#8-手机网页)随 APK 安装：WebView 只加载打包进 APK 的页面，页面代码不再由中继下发。界面、加密通道、RPC 客户端与会话视图全部复用 `apps/desktop/src/web`，App 只补平台差异。本轮不含本地通知、扫码、拍照、正式签名与自动更新（第 2、3 轮）。
 
@@ -57,7 +57,7 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 | 外链 | 新标签打开 | 不打开：`on_navigation` 只允许 `http://tauri.localhost`（调试构建另允许开发服务器） |
 | 能力边界 | 白名单 | 不变，App 不改 RPC 白名单 |
 
-共享层的扩展点是 `PhonePlatform`（`apps/desktop/src/web/platform.ts`）：`relay`（`page` / `link`）、`keepConnected`、`observer`（已配对电脑、连接状态、断线、会话事件）、`trustText`、`pairHint`、`background` / `diagnostics`（设置页区块）与 `pages`（App 自己的页面）。网页入口不传即为 `{ relay: "page" }`，行为不变。
+共享层的扩展点是 `PhonePlatform`（`apps/desktop/src/web/platform.ts`）：`relay`（`page` / `link`）、`keepConnected`、`observer`（已配对电脑、连接状态、断线、会话事件）、`onForeground`（回到前台）、`trustText`、`pairHint`、`background` / `diagnostics`（设置页区块）与 `pages`（App 自己的页面）。网页入口不传即为 `{ relay: "page" }`，行为不变。
 
 ## 4. 后台保持连接
 
@@ -84,7 +84,16 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 
 **系统设置引导**：设置页的「电池优化设置」打开系统的电池优化列表（`ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`，不需要额外权限），「自启动设置」优先打开小米安全中心的自启动管理页，其他系统退回应用详情页。小米还需要把省电策略设为「无限制」、在最近任务里锁定 App，这两项没有可靠的跳转，只能由用户手动设置：设置 › 应用 › 应用管理 › Nocturne › 省电策略 › 无限制；在「最近任务」里长按 Nocturne 卡片选择锁定。
 
-## 5. 后台探针
+## 5. 会话列表保持最新
+
+后台保持连接让手机一直在线，列表不能再靠「回前台重连时顺带重拉」更新。分两层：
+
+- **通知**：连接期间页面监听电脑后台的 `runtime.sessionsChanged`（电脑上创建或分叉会话、首条消息与标题出现时 300 ms 内合并推送，不带内容，[rpc.md §3.8](../protocols/rpc.md)），收到就重拉列表并订阅新出现的持锁会话，因此新会话的标题、运行与待确认状态在 2 秒内出现。旧电脑没有这条通知，页面只依赖下面的兜底。
+- **回前台兜底**：别的进程（如 CLI）新建的会话不经过电脑后台，没有通知。`MainActivity.onResume` 在页面的 `window` 上派发 `nocturne-android-resume` 事件（`src/host.ts` 的 `RESUME_EVENT`），`appPlatform` 的 `onForeground` 把它交给页面，页面刷新一次列表。不用 `visibilitychange`：「窗口保持可见」的变通让页面在后台也认为自己可见；也不轮询。
+
+网页版不变：切到后台页面断线，回前台重连时重拉列表，连接期间同样监听通知。
+
+## 6. 后台探针
 
 设置页「连接诊断」里的「后台探针」，数据只在手机本地（`localStorage` 与 App 私有目录里的原生日志），不上传、不含会话内容：
 
