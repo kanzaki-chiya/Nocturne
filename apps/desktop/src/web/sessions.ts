@@ -81,6 +81,9 @@ export class PhoneSessions {
   private generation = 0;
   private readonly opening = new Map<string, Promise<PhoneSession>>();
   private tracked: Promise<void> = Promise.resolve();
+  /** 进行中的列表刷新：期间再来的刷新请求并入它的补拉，不并发调用 listSessions */
+  private refreshing: { generation: number; requests: number; done: Promise<void> } | undefined;
+  private unsubscribeChanged: (() => void) | undefined;
   constructor(
     private readonly changed: () => void,
     /** 平台观察者（App 探针）：只给事件类型与序号，live=false 表示重连后的回放 */
@@ -94,15 +97,38 @@ export class PhoneSessions {
   async connected(client: RpcClient): Promise<void> {
     this.client = client;
     const generation = ++this.generation;
-    for (const [id, entry] of this.opened) {
-      const result = await client.runtime.resumeSession(id);
+    // 电脑上新建或分叉了会话：旧后台没有这条通知，退化为 App 回前台时刷新
+    this.unsubscribeChanged?.();
+    this.unsubscribeChanged = client.onNotification("runtime.sessionsChanged", () => {
+      void this.refresh().catch(() => undefined);
+    });
+    // 只恢复连接开始时已有的会话：恢复期间通知带来的新会话由 track/open 打开，
+    // 遍历活 Map 会把它们再 resume 一次（后台报 session_already_open）
+    for (const [id, entry] of [...this.opened]) {
       if (generation !== this.generation) return;
-      await this.attach(client, result.session, entry.workspace, entry.view);
+      // 恢复期间用户已点开它：并入那次打开，不重复 resume
+      const inFlight = this.opening.get(id);
+      if (inFlight) {
+        await inFlight.catch(() => undefined);
+        continue;
+      }
+      if (this.opened.get(id) !== entry) continue;
+      const run = this.resume(client, id, entry.workspace, entry.view, generation);
+      this.opening.set(id, run);
+      try {
+        await run;
+      } catch (error) {
+        if (generation !== this.generation) return;
+        throw error;
+      } finally {
+        if (this.opening.get(id) === run) this.opening.delete(id);
+      }
     }
     await this.refresh();
   }
   disconnected(): void {
     this.generation++;
+    this.stopListening();
     this.loaded = false;
     this.opening.clear();
     this.client = undefined;
@@ -111,6 +137,7 @@ export class PhoneSessions {
   }
   clear(): void {
     this.generation++;
+    this.stopListening();
     this.loaded = false;
     this.opening.clear();
     this.client = undefined;
@@ -118,7 +145,37 @@ export class PhoneSessions {
     this.list = [];
     this.changed();
   }
-  async refresh(): Promise<void> {
+  private stopListening(): void {
+    this.unsubscribeChanged?.();
+    this.unsubscribeChanged = undefined;
+    this.refreshing = undefined;
+  }
+  /**
+   * 重新拉会话列表并订阅新出现的带锁会话。合并：正在刷新时再调用，等这次完成后
+   * 补拉一次（多次请求合成一次），返回的 Promise 在补拉也完成后才落定。
+   */
+  refresh(): Promise<void> {
+    const running = this.refreshing;
+    if (running?.generation === this.generation) {
+      running.requests++;
+      return running.done;
+    }
+    const run = { generation: this.generation, requests: 1, done: Promise.resolve() };
+    run.done = (async () => {
+      try {
+        let served: number;
+        do {
+          served = run.requests;
+          await this.fetchList();
+        } while (run.requests !== served && run.generation === this.generation);
+      } finally {
+        if (this.refreshing === run) this.refreshing = undefined;
+      }
+    })();
+    this.refreshing = run;
+    return run.done;
+  }
+  private async fetchList(): Promise<void> {
     const client = this.client;
     const generation = this.generation;
     if (!client) return;
@@ -127,7 +184,10 @@ export class PhoneSessions {
     this.list = list.sort((a, b) => b.mtimeMs - a.mtimeMs);
     this.loaded = true;
     this.changed();
-    this.tracked = this.track(list.filter((item) => item.locked));
+    const previous = this.tracked;
+    this.tracked = Promise.all([previous, this.track(list.filter((item) => item.locked))]).then(
+      () => undefined,
+    );
   }
   /**
    * 点开推送后要去的会话：推送无载荷，只能在连上后判断。等后台订阅完成，
@@ -246,17 +306,24 @@ export class PhoneSessions {
     const client = this.requireClient();
     const generation = this.generation;
     const item = this.list.find((s) => s.id === id);
-    const run = (async () => {
-      const { session } = await client.runtime.resumeSession(id);
-      if (generation !== this.generation) throw new Error("电脑连接已切换");
-      return this.attach(client, session, item?.cwd ?? "", old?.view);
-    })();
+    const run = this.resume(client, id, item?.cwd ?? "", old?.view, generation);
     this.opening.set(id, run);
     try {
       return await run;
     } finally {
       if (this.opening.get(id) === run) this.opening.delete(id);
     }
+  }
+  private async resume(
+    client: RpcClient,
+    id: string,
+    workspace: string,
+    view: SessionView | undefined,
+    generation: number,
+  ): Promise<PhoneSession> {
+    const { session } = await client.runtime.resumeSession(id);
+    if (generation !== this.generation) throw new Error("电脑连接已切换");
+    return this.attach(client, session, workspace, view);
   }
   /**
    * 在 workspace 新建会话（与桌面草稿相同：未选过的档位与预设省略，由 Core 解析

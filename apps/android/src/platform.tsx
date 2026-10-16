@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { PhoneExtensionApi, PhonePlatform } from "../../desktop/src/web/platform";
 import { Background } from "./background";
-import type { AppHost, BackgroundStatus } from "./host";
+import { RESUME_EVENT, type AppHost, type BackgroundStatus } from "./host";
 import { parseNativeLog, ProbeLog, summarize } from "./probe";
 
 /** 信任边界：页面随安装包，不再由中继下发（ADR-0059 第 5 节） */
@@ -217,6 +217,12 @@ export function appPlatform(
       return controller.enabled;
     },
     observer: controller.observer,
+    onForeground: (listener) => {
+      window.addEventListener(RESUME_EVENT, listener);
+      return () => {
+        window.removeEventListener(RESUME_EVENT, listener);
+      };
+    },
     pairHint: APP_PAIR_HINT,
     trustText: APP_TRUST_TEXT,
     probe,

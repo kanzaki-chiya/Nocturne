@@ -162,3 +162,27 @@ it.each([true, false])("keepConnected=%s：页面隐藏时的连接判定", asyn
   });
   expect(visibilities.at(-1)).toBe(keep);
 });
+
+it("平台的 onForeground 在页面挂载时登记、卸载时退订；没有它的平台不受影响", async () => {
+  const storage = memoryStorage();
+  await storage.putHost({
+    hostId: "computer",
+    hostPub: "pub",
+    name: "电脑 1",
+    pairedAt: 1,
+    origin: "https://relay.example",
+  });
+  const unsubscribe = vi.fn();
+  const onForeground = vi.fn((_listener: () => void) => unsubscribe);
+  await mount(<PhoneApp storage={storage} platform={{ relay: "link", onForeground }} />);
+  expect(onForeground).toHaveBeenCalledOnce();
+  // 未连上电脑时回前台没有可刷新的连接，调用不报错
+  const listener = onForeground.mock.calls[0]?.[0];
+  await act(async () => {
+    listener?.();
+  });
+  await act(() => root?.unmount());
+  root = undefined;
+  expect(unsubscribe).toHaveBeenCalledOnce();
+  await mount(<PhoneApp storage={storage} platform={{ relay: "link" }} />);
+});

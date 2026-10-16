@@ -45,6 +45,15 @@ class MainActivity : TauriActivity() {
     handler.removeCallbacks(keepVisible)
     NativeLog.add("activity_resume")
     if (rendererLost) restart()
+    else notifyPageResumed()
+  }
+
+  /**
+   * 页面靠「窗口保持可见」在后台继续运行，visibilitychange 不可靠；回前台时用原生信号让页面补刷
+   * 一次会话列表（别的进程新建的会话没有通知）。事件名与 src/host.ts 的 RESUME_EVENT 一致。
+   */
+  private fun notifyPageResumed() {
+    webViewRef?.evaluateJavascript("window.dispatchEvent(new Event('nocturne-android-resume'))", null)
   }
 
   override fun onRequestPermissionsResult(

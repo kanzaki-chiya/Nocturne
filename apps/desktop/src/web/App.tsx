@@ -347,6 +347,14 @@ export function PhoneApp({
       connection?.message ?? "",
     );
   });
+  // App 回到前台：补刷一次会话列表（别的进程新建的会话没有通知）
+  useEffect(
+    () =>
+      platformRef.current.onForeground?.(() => {
+        void sessions.refresh().catch(() => undefined);
+      }),
+    [sessions],
+  );
   // 「后台保持连接」开关变化：立即按新值重新判定是否保持
   useEffect(() => {
     connection?.visibility(shouldConnect());

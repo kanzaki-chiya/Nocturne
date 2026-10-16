@@ -366,6 +366,295 @@ it("推送点进来优先最近的待处理会话，没有则取最近会话", a
   client.close();
 });
 
+const SESSIONS_CHANGED = JSON.stringify({
+  jsonrpc: "2.0",
+  method: "runtime.sessionsChanged",
+  params: {},
+});
+function listedSession(id: string, mtimeMs: number, locked: boolean, firstText?: string) {
+  return {
+    id,
+    cwd: "Z:/work",
+    workspaceRoot: "Z:/work",
+    createdAt: "",
+    mtimeMs,
+    model: { provider: "p", model: "m" },
+    locked,
+    ...(firstText !== undefined ? { firstText } : {}),
+  };
+}
+async function notifiedClient() {
+  const [transport, server] = createMemoryTransportPair();
+  const { createRpcClient } = await import("@nocturne/rpc/client");
+  const client = createRpcClient(transport, { clientName: "test" });
+  const resume = vi.spyOn(client.runtime, "resumeSession").mockImplementation(async (id) => {
+    const session = {
+      id,
+      subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
+    } as unknown as RpcSession;
+    return { session, opened: {} } as Awaited<ReturnType<RpcClient["runtime"]["resumeSession"]>>;
+  });
+  const list = vi.spyOn(client.runtime, "listSessions").mockResolvedValue([]);
+  return { client, server, resume, list };
+}
+
+it("收到 runtime.sessionsChanged 后刷新列表，新出现的持锁会话被订阅，重复刷新不重复打开", async () => {
+  const { client, server, resume, list } = await notifiedClient();
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(client);
+  expect(sessions.list).toEqual([]);
+  list.mockResolvedValue([listedSession("new", 5, true, "新会话"), listedSession("old", 1, false)]);
+  server.send(SESSIONS_CHANGED);
+  await vi.waitFor(() => expect(sessions.list.map((s) => s.id)).toEqual(["new", "old"]));
+  expect(sessions.list[0]?.firstText).toBe("新会话");
+  await vi.waitFor(() => expect(sessions.opened.has("new")).toBe(true));
+  // 标题更新：同一会话再来一次通知，不再 resume
+  list.mockResolvedValue([
+    listedSession("new", 6, true, "改过的标题"),
+    listedSession("old", 1, false),
+  ]);
+  server.send(SESSIONS_CHANGED);
+  await vi.waitFor(() => expect(sessions.list[0]?.firstText).toBe("改过的标题"));
+  await sessions.refresh();
+  expect(resume.mock.calls.map(([id]) => id)).toEqual(["new"]);
+  client.close();
+});
+
+it("连续多条通知只触发有限次 listSessions：刷新中再来的合并成一次补拉", async () => {
+  const { client, server, list } = await notifiedClient();
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(client);
+  list.mockClear();
+  let release!: () => void;
+  const gate = new Promise<void>((done) => (release = done));
+  let inflight = 0;
+  let maxInflight = 0;
+  list.mockImplementation(async () => {
+    inflight += 1;
+    maxInflight = Math.max(maxInflight, inflight);
+    await gate;
+    inflight -= 1;
+    return [listedSession("a", 1, false)];
+  });
+  for (let i = 0; i < 6; i++) server.send(SESSIONS_CHANGED);
+  await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+  release();
+  await vi.waitFor(() => expect(sessions.list.map((s) => s.id)).toEqual(["a"]));
+  await new Promise((done) => setTimeout(done, 30));
+  expect(list).toHaveBeenCalledTimes(2);
+  expect(maxInflight).toBe(1);
+  client.close();
+});
+
+it("断线、清空、切换电脑之后，旧连接的通知不再触发 listSessions", async () => {
+  const first = await notifiedClient();
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(first.client);
+  first.list.mockClear();
+  sessions.disconnected();
+  first.server.send(SESSIONS_CHANGED);
+  await new Promise((done) => setTimeout(done, 30));
+  expect(first.list).not.toHaveBeenCalled();
+
+  // 重连到另一台电脑：只有新连接的通知生效
+  const second = await notifiedClient();
+  await sessions.connected(second.client);
+  first.list.mockClear();
+  second.list.mockClear();
+  sessions.clear();
+  first.server.send(SESSIONS_CHANGED);
+  second.server.send(SESSIONS_CHANGED);
+  await new Promise((done) => setTimeout(done, 30));
+  expect(first.list).not.toHaveBeenCalled();
+  expect(second.list).not.toHaveBeenCalled();
+  await sessions.connected(second.client);
+  second.list.mockClear();
+  first.server.send(SESSIONS_CHANGED);
+  await new Promise((done) => setTimeout(done, 30));
+  expect(first.list).not.toHaveBeenCalled();
+  expect(second.list).not.toHaveBeenCalled();
+  second.server.send(SESSIONS_CHANGED);
+  await vi.waitFor(() => expect(second.list).toHaveBeenCalledTimes(1));
+  first.client.close();
+  second.client.close();
+});
+
+it("旧电脑没有这条通知：回前台时 refresh 照常补上新会话", async () => {
+  const { client, list } = await notifiedClient();
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(client);
+  list.mockResolvedValue([listedSession("cli", 9, true, "CLI 新开的")]);
+  await sessions.refresh();
+  expect(sessions.list.map((s) => s.id)).toEqual(["cli"]);
+  await vi.waitFor(() => expect(sessions.opened.has("cli")).toBe(true));
+  client.close();
+});
+
+/** 真实后台的约束：同一连接上同一会话只能 resume 一次，重复报 session_already_open */
+function strictResume(resume: ReturnType<typeof vi.spyOn>, gates: Map<string, Promise<void>>) {
+  const openOnConnection = new Set<string>();
+  const calls: string[] = [];
+  resume.mockImplementation((async (id: string) => {
+    calls.push(id);
+    if (openOnConnection.has(id)) throw new Error("session_already_open");
+    openOnConnection.add(id);
+    await gates.get(id);
+    const session = {
+      id,
+      subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
+    } as unknown as RpcSession;
+    return { session, opened: {} };
+  }) as never);
+  return calls;
+}
+/** 已有一个被订阅的会话 A，连接断开（A 变成 dead），返回断线后的 PhoneSessions */
+async function reconnectingAfterOpened() {
+  const first = await notifiedClient();
+  first.list.mockResolvedValue([listedSession("A", 9, true)]);
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(first.client);
+  await vi.waitFor(() => expect(sessions.opened.get("A")?.dead).toBe(false));
+  sessions.disconnected();
+  first.client.close();
+  expect(sessions.opened.get("A")?.dead).toBe(true);
+  return sessions;
+}
+
+it("重连恢复 A 期间通知带来新持锁会话 B：B 只 resume 一次，连接初始化不失败", async () => {
+  const sessions = await reconnectingAfterOpened();
+  const second = await notifiedClient();
+  second.list.mockResolvedValue([listedSession("B", 20, true), listedSession("A", 9, true)]);
+  let release!: () => void;
+  const gates = new Map([["A", new Promise<void>((done) => (release = done))]]);
+  const calls = strictResume(second.resume, gates);
+  const connecting = sessions.connected(second.client);
+  await vi.waitFor(() => expect(calls).toEqual(["A"]));
+  second.server.send(SESSIONS_CHANGED);
+  await vi.waitFor(() => expect(sessions.opened.has("B")).toBe(true));
+  release();
+  await connecting;
+  expect(calls.toSorted()).toEqual(["A", "B"]);
+  expect(sessions.opened.get("A")?.dead).toBe(false);
+  expect(sessions.opened.get("B")?.dead).toBe(false);
+  second.client.close();
+});
+
+it("重连恢复期间用户点开尚未恢复的 A：与恢复合并，只 resume 一次，沿用旧视图", async () => {
+  const sessions = await reconnectingAfterOpened();
+  const staleView = sessions.opened.get("A")?.view;
+  const second = await notifiedClient();
+  second.list.mockResolvedValue([listedSession("A", 9, true)]);
+  let release!: () => void;
+  const gates = new Map([["A", new Promise<void>((done) => (release = done))]]);
+  const calls = strictResume(second.resume, gates);
+  const connecting = sessions.connected(second.client);
+  await vi.waitFor(() => expect(calls).toEqual(["A"]));
+  const opening = sessions.open("A");
+  release();
+  const [, entry] = await Promise.all([connecting, opening]);
+  expect(calls).toEqual(["A"]);
+  expect(entry.dead).toBe(false);
+  expect(entry.view).toBe(staleView);
+  expect(sessions.opened.get("A")).toBe(entry);
+  second.client.close();
+});
+
+it("重连队列里靠后的 C 被用户抢先打开（仍在进行或已完成），恢复轮到时不再重复 resume", async () => {
+  const first = await notifiedClient();
+  first.list.mockResolvedValue([listedSession("A", 9, true), listedSession("C", 8, true)]);
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(first.client);
+  await vi.waitFor(() => expect(sessions.opened.get("C")?.dead).toBe(false));
+  sessions.disconnected();
+  first.client.close();
+  const second = await notifiedClient();
+  second.list.mockResolvedValue([]);
+  let releaseA!: () => void;
+  let releaseC!: () => void;
+  const gates = new Map([
+    ["A", new Promise<void>((done) => (releaseA = done))],
+    ["C", new Promise<void>((done) => (releaseC = done))],
+  ]);
+  const calls = strictResume(second.resume, gates);
+  const connecting = sessions.connected(second.client);
+  await vi.waitFor(() => expect(calls).toEqual(["A"]));
+  // 用户在恢复 A 时点开队列里靠后的 C，恢复轮到 C 时这次打开仍在进行
+  const opening = sessions.open("C");
+  await vi.waitFor(() => expect(calls).toEqual(["A", "C"]));
+  releaseA();
+  await new Promise((done) => setTimeout(done, 20));
+  releaseC();
+  await Promise.all([connecting, opening]);
+  expect(calls).toEqual(["A", "C"]);
+  expect(sessions.opened.get("C")?.dead).toBe(false);
+  second.client.close();
+});
+
+it("重连队列里靠后的 C 在轮到前已被用户打开完成：恢复直接跳过", async () => {
+  const first = await notifiedClient();
+  first.list.mockResolvedValue([listedSession("A", 9, true), listedSession("C", 8, true)]);
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(first.client);
+  await vi.waitFor(() => expect(sessions.opened.get("C")?.dead).toBe(false));
+  sessions.disconnected();
+  first.client.close();
+  const second = await notifiedClient();
+  second.list.mockResolvedValue([]);
+  let release!: () => void;
+  const gates = new Map([["A", new Promise<void>((done) => (release = done))]]);
+  const calls = strictResume(second.resume, gates);
+  const connecting = sessions.connected(second.client);
+  await vi.waitFor(() => expect(calls).toEqual(["A"]));
+  await sessions.open("C");
+  release();
+  await connecting;
+  expect(calls).toEqual(["A", "C"]);
+  second.client.close();
+});
+
+it("断线后才返回的旧 listSessions 不覆写列表，也不订阅旧列表里的会话", async () => {
+  const first = await notifiedClient();
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(first.client);
+  let release!: (list: ReturnType<typeof listedSession>[]) => void;
+  first.list.mockReturnValue(new Promise((done) => (release = done)));
+  first.resume.mockClear();
+  const stale = sessions.refresh();
+  sessions.disconnected();
+  release([listedSession("stale", 99, true, "旧电脑")]);
+  await stale;
+  expect(sessions.list).toEqual([]);
+  expect(sessions.loaded).toBe(false);
+  await new Promise((done) => setTimeout(done, 30));
+  expect(first.resume).not.toHaveBeenCalled();
+  expect(sessions.opened.has("stale")).toBe(false);
+  first.client.close();
+});
+
+it("切换电脑（clear 后连新电脑）后才返回的旧 listSessions 不覆写新连接的列表", async () => {
+  const first = await notifiedClient();
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(first.client);
+  let release!: (list: ReturnType<typeof listedSession>[]) => void;
+  first.list.mockReturnValue(new Promise((done) => (release = done)));
+  first.resume.mockClear();
+  const stale = sessions.refresh();
+  sessions.clear();
+  const second = await notifiedClient();
+  second.list.mockResolvedValue([listedSession("fresh", 5, false, "新电脑")]);
+  await sessions.connected(second.client);
+  expect(sessions.list.map((s) => s.id)).toEqual(["fresh"]);
+  release([listedSession("stale", 99, true, "旧电脑")]);
+  await stale;
+  await new Promise((done) => setTimeout(done, 30));
+  expect(sessions.list.map((s) => s.id)).toEqual(["fresh"]);
+  expect(sessions.opened.has("stale")).toBe(false);
+  expect(first.resume).not.toHaveBeenCalled();
+  expect(second.resume).not.toHaveBeenCalled();
+  first.client.close();
+  second.client.close();
+});
+
 it.each([0, 2])("RPC initialize 版本 %i 不兼容停止且正确提示", async (version) => {
   const identity = await generateIdentity({ extractable: false });
   const [transport] = createMemoryFramePair();

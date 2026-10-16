@@ -29,6 +29,12 @@ export interface AppHost {
   clearNativeLog(): Promise<void>;
 }
 
+/**
+ * Activity 恢复（回到前台）时 Kotlin 在页面的 window 上派发的事件（MainActivity.onResume）。
+ * 「窗口保持可见」的变通让页面在后台也认为自己可见，visibilitychange 不可靠，只能用原生信号。
+ */
+export const RESUME_EVENT = "nocturne-android-resume";
+
 /** 没有原生插件时的宿主（测试）：没有后台服务，不能打开系统设置 */
 export const shellHost: AppHost = {
   backgroundStatus: () => Promise.resolve({ supported: false, running: false }),

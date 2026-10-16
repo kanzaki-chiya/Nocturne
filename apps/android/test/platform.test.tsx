@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { PhoneExtensionApi } from "../../desktop/src/web/platform";
-import { shellHost, type AppHost } from "../src/host";
+import { RESUME_EVENT, shellHost, type AppHost } from "../src/host";
 import { ProbeLog } from "../src/probe";
 import { APP_PAIR_HINT, APP_TRUST_TEXT, appPlatform } from "../src/platform";
 
@@ -137,4 +137,21 @@ it("连接诊断里有后台探针入口，探针页能复制与清除记录", a
   });
   expect(probe.all()).toHaveLength(0);
   expect(clear).toHaveBeenCalled();
+});
+
+it("Activity 恢复事件通知页面回前台，退订后不再通知", () => {
+  const platform = appPlatform(shellHost);
+  const foreground = vi.fn();
+  const unsubscribe = platform.onForeground?.(foreground);
+  window.dispatchEvent(new Event(RESUME_EVENT));
+  window.dispatchEvent(new Event(RESUME_EVENT));
+  expect(foreground).toHaveBeenCalledTimes(2);
+  unsubscribe?.();
+  window.dispatchEvent(new Event(RESUME_EVENT));
+  expect(foreground).toHaveBeenCalledTimes(2);
+  // visibilitychange 不再被当成回前台信号（后台页面也认为自己可见）
+  const other = vi.fn();
+  platform.onForeground?.(other)();
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(other).not.toHaveBeenCalled();
 });

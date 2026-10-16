@@ -34,6 +34,12 @@ export interface PhonePlatform {
   /** 页面不可见（App 在后台）时是否继续保持连接 */
   keepConnected?: boolean;
   observer?: PhoneObserver;
+  /**
+   * 平台告知页面回到前台（App 的 Activity 恢复）。App 靠「窗口保持可见」的变通让页面在后台继续运行，
+   * visibilitychange 不再可靠；页面据此刷新一次会话列表，补上别的进程（如 CLI）新建的会话。
+   * 返回退订函数。
+   */
+  onForeground?(listener: () => void): () => void;
   /** 取代网页版信任边界说明（网页由中继下发，App 的页面随安装包）；不传用网页版文字 */
   trustText?: string;
   /** 配对说明里描述「怎么拿到配对链接」的一句话 */
