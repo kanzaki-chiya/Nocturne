@@ -9,7 +9,7 @@ use tauri::{
 };
 
 /// Kotlin `BackgroundPlugin` 暴露的命令；其他名字一律拒绝。
-const COMMANDS: [&str; 7] = [
+const COMMANDS: [&str; 13] = [
     "start",
     "update",
     "stop",
@@ -17,6 +17,12 @@ const COMMANDS: [&str; 7] = [
     "open_settings",
     "log",
     "clear_log",
+    "notification_status",
+    "notify_show",
+    "notify_dismiss",
+    "notification_target",
+    "move_to_back",
+    "activity_state",
 ];
 
 #[cfg(target_os = "android")]

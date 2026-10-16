@@ -28,6 +28,15 @@ class SettingsArgs {
   var target: String = "app"
 }
 
+@InvokeArg
+class NotificationArgs {
+  var hostId: String = ""
+  var sessionId: String = ""
+  var title: String = ""
+  var body: String = ""
+  var kind: String = "done"
+}
+
 /** 前端经 `plugin:background|call` 调用的命令（Rust 侧 background.rs 只转发白名单内的名字）。 */
 @TauriPlugin
 class BackgroundPlugin(private val activity: Activity) : Plugin(activity) {
@@ -102,6 +111,45 @@ class BackgroundPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun clear_log(invoke: Invoke) {
     NativeLog.clear()
+    invoke.resolve(JSObject())
+  }
+
+  @Command
+  fun notification_status(invoke: Invoke) {
+    invoke.resolve(JSObject().put("enabled", SessionNotifications.enabled(activity)))
+  }
+
+  @Command
+  fun activity_state(invoke: Invoke) {
+    invoke.resolve(JSObject().put("foreground", (activity as? MainActivity)?.isActivityForeground() == true))
+  }
+
+  @Command
+  fun notify_show(invoke: Invoke) {
+    val args = invoke.parseArgs(NotificationArgs::class.java)
+    if (args.hostId.isEmpty() || args.sessionId.isEmpty() || args.title.isEmpty() || args.kind !in listOf("attention", "error", "done")) {
+      invoke.reject("通知参数无效")
+      return
+    }
+    invoke.resolve(JSObject().put("shown", SessionNotifications.show(activity, args.hostId, args.sessionId, args.title, args.body, args.kind)))
+  }
+
+  @Command
+  fun notify_dismiss(invoke: Invoke) {
+    val args = invoke.parseArgs(NotificationArgs::class.java)
+    if (args.hostId.isNotEmpty() && args.sessionId.isNotEmpty()) SessionNotifications.dismiss(activity, args.hostId, args.sessionId)
+    invoke.resolve(JSObject())
+  }
+
+  @Command
+  fun notification_target(invoke: Invoke) {
+    val target = (activity as? MainActivity)?.consumeNotificationTarget()
+    invoke.resolve(if (target == null) JSObject() else JSObject().put("hostId", target.first).put("sessionId", target.second))
+  }
+
+  @Command
+  fun move_to_back(invoke: Invoke) {
+    activity.moveTaskToBack(true)
     invoke.resolve(JSObject())
   }
 

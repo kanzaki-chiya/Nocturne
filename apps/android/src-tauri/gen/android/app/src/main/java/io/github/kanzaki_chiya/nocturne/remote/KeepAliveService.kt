@@ -92,4 +92,10 @@ class KeepAliveService : Service() {
     NativeLog.add("service_stop")
     super.onDestroy()
   }
+
+  override fun onTaskRemoved(rootIntent: Intent?) {
+    NativeLog.add("task_removed")
+    stopSelf()
+    super.onTaskRemoved(rootIntent)
+  }
 }

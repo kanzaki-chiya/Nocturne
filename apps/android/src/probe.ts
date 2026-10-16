@@ -25,6 +25,7 @@ export interface ProbeSummary {
   batches: number;
   /** 后台的计时器延迟：30 秒窗口里的最大值（毫秒） */
   maxTimerLag: number;
+  backgroundLatency: { median: number; max: number; count: number };
   native: { serviceStarts: number; serviceStops: number; rendererGone: number; restarts: number };
 }
 
@@ -64,10 +65,12 @@ export function summarize(
     gapsOver5s: { fg: 0, bg: 0 },
     batches: 0,
     maxTimerLag: 0,
+    backgroundLatency: { median: 0, max: 0, count: 0 },
     native: { serviceStarts: 0, serviceStops: 0, rendererGone: 0, restarts: 0 },
   };
   let previous: number | undefined;
   let quietBefore = false;
+  const latencies: number[] = [];
   for (const [at, kind, detail] of entries) {
     if (kind === "disconnect") summary.disconnects++;
     else if (kind === "connect") summary.connects++;
@@ -83,6 +86,10 @@ export function summarize(
         continue;
       }
       summary.events[side]++;
+      if (side === "bg") {
+        const match = / sent=(\d+)/.exec(detail);
+        if (match) latencies.push(at - Number(match[1]));
+      }
       if (previous !== undefined) {
         const gap = at - previous;
         if (gap > summary.maxGap[side]) summary.maxGap[side] = gap;
@@ -93,6 +100,16 @@ export function summarize(
       previous = at;
     }
   }
+  latencies.sort((a, b) => a - b);
+  summary.backgroundLatency = {
+    count: latencies.length,
+    median: latencies.length
+      ? ((latencies[Math.floor((latencies.length - 1) / 2)] ?? 0) +
+          (latencies[Math.floor(latencies.length / 2)] ?? 0)) /
+        2
+      : 0,
+    max: latencies.at(-1) ?? 0,
+  };
   for (const { event } of native) {
     if (event === "service_start") summary.native.serviceStarts++;
     else if (event === "service_stop") summary.native.serviceStops++;
@@ -123,9 +140,12 @@ export class ProbeLog {
   private listeners = new Set<() => void>();
 
   constructor(
-    private readonly visible: () => boolean = () => document.visibilityState !== "hidden",
+    private visible: () => boolean = () => true,
     private readonly now: () => number = Date.now,
   ) {}
+  setVisible(visible: () => boolean): void {
+    this.visible = visible;
+  }
 
   /** 开始计时器延迟测量与「应用启动」记录；重复调用无效 */
   start(): void {
@@ -174,10 +194,17 @@ export class ProbeLog {
   }
 
   /** 一条会话事件：只记类型、会话 id、序号，以及是实时事件还是重连后的回放 */
-  event(sessionId: string, type: string, seq: number | undefined, live: boolean): void {
+  event(
+    sessionId: string,
+    type: string,
+    seq: number | undefined,
+    live: boolean,
+    eventTime?: string,
+  ): void {
+    const sent = eventTime === undefined ? NaN : Date.parse(eventTime);
     this.add(
       "event",
-      `${this.visible() ? "fg" : "bg"} ${live ? "live" : "replay"} ${sessionId} ${type} ${seq ?? "-"}`,
+      `${this.visible() ? "fg" : "bg"} ${live ? "live" : "replay"} ${sessionId} ${type} ${seq ?? "-"}${Number.isFinite(sent) ? ` sent=${sent}` : ""}`,
     );
     for (const listener of this.listeners) listener();
   }
@@ -215,6 +242,8 @@ export class ProbeLog {
       `事件：前台 ${summary.events.fg}，后台 ${summary.events.bg}，重连回放 ${summary.events.replay}`,
       `最大事件间隔：前台 ${summary.maxGap.fg}ms，后台 ${summary.maxGap.bg}ms；间隔>5s：前台 ${summary.gapsOver5s.fg}，后台 ${summary.gapsOver5s.bg}`,
       `成批涌入：${summary.batches} 批；后台计时器最大延迟：${summary.maxTimerLag}ms`,
+      `后台到达延迟：${summary.backgroundLatency.count} 条，中位数 ${summary.backgroundLatency.median}ms，最大 ${summary.backgroundLatency.max}ms`,
+      "到达延迟依赖电脑与手机时钟同步；负值表示时钟偏差，不能当成网络耗时。",
       `断线 ${summary.disconnects} 次，连上 ${summary.connects} 次`,
       `前台服务启 ${summary.native.serviceStarts} 次、停 ${summary.native.serviceStops} 次；渲染进程回收 ${summary.native.rendererGone} 次，重启 App ${summary.native.restarts} 次`,
       "---",
@@ -222,9 +251,12 @@ export class ProbeLog {
     const merged: { at: number; line: string }[] = [
       ...this.entries.map(([at, kind, detail]) => ({
         at,
-        line: `${formatTime(at)} ${kind} ${detail}`,
+        line: `${formatTime(at)} epoch=${at} ${kind} ${detail}`,
       })),
-      ...native.map(({ at, event }) => ({ at, line: `${formatTime(at)} native ${event}` })),
+      ...native.map(({ at, event }) => ({
+        at,
+        line: `${formatTime(at)} epoch=${at} native ${event}`,
+      })),
     ];
     merged.sort((a, b) => a.at - b.at);
     return [...lines, ...merged.map((item) => item.line)].join("\n");

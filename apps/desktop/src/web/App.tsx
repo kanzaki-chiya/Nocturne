@@ -100,11 +100,38 @@ export function PhoneApp({
   };
   const platformRef = useRef(platform);
   platformRef.current = platform;
+  const currentRef = useRef<{
+    hostId: string | undefined;
+    sessionId: string | undefined;
+    covered: boolean;
+  }>({ hostId: undefined, sessionId: undefined, covered: false });
   const [sessions] = useState(
     () =>
-      new PhoneSessions(changed, (sessionId, type, seq, live) => {
-        platformRef.current.observer?.event?.(sessionId, type, seq, live);
-      }),
+      new PhoneSessions(
+        changed,
+        (sessionId, type, seq, live, eventTime) => {
+          platformRef.current.observer?.event?.(sessionId, type, seq, live, eventTime);
+        },
+        (sessionId, event, live, entry, turnStartedAt) => {
+          const current = currentRef.current;
+          if (!current.hostId) return;
+          const summary = sessions.list.find((item) => item.id === sessionId);
+          platformRef.current.observer?.sessionEvent?.(
+            current.hostId,
+            sessionId,
+            event,
+            live,
+            {
+              ...(entry.view.title !== undefined ? { title: entry.view.title } : {}),
+              ...(summary?.firstText !== undefined ? { firstText: summary.firstText } : {}),
+            },
+            platformRef.current.isForeground?.() === true &&
+              !current.covered &&
+              current.sessionId === sessionId,
+            turnStartedAt,
+          );
+        },
+      ),
   );
   // 消息里的图片经 readAttachment 回读；过大的由后台拒绝，占位条显示原因
   const [images] = useState<AttachmentImageSource>(() => ({
@@ -150,6 +177,10 @@ export function PhoneApp({
   const [attention, setAttention] = useState(() =>
     new URLSearchParams(location.search).has("attention"),
   );
+  const [notificationTarget, setNotificationTarget] = useState<{
+    hostId: string;
+    sessionId: string;
+  } | null>(null);
   const navigate = (next: Page, replace = false) => {
     (replace ? history.replaceState.bind(history) : history.pushState.bind(history))(
       next,
@@ -192,6 +223,9 @@ export function PhoneApp({
         }
         const recent = lastHost(list);
         if (recent) navigate({ kind: "home", hostId: recent.hostId }, true);
+        void platform.notificationTarget?.().then((target) => {
+          if (target) setNotificationTarget(target);
+        });
       })
       .catch(() => {
         setError("无法读取手机存储，请允许网站保存数据后重试");
@@ -211,6 +245,23 @@ export function PhoneApp({
   const shouldConnect = () =>
     platformRef.current.keepConnected === true || document.visibilityState !== "hidden";
   const hostId = "hostId" in page ? page.hostId : undefined;
+  currentRef.current = {
+    hostId,
+    sessionId: page.kind === "session" ? page.sessionId : undefined,
+    covered: !!offer,
+  };
+  useEffect(() => {
+    if (page.kind === "session") platform.dismissNotification?.(page.hostId, page.sessionId);
+  }, [page, platform]);
+  useEffect(() => platform.onNotificationTarget?.(setNotificationTarget), [platform]);
+  useEffect(
+    () =>
+      platform.onAndroidBack?.(() => {
+        if (page.kind === "welcome" || page.kind === "home") platform.moveTaskToBack?.();
+        else history.back();
+      }),
+    [page, platform],
+  );
   const computer = hosts.find((h) => h.hostId === hostId);
   useEffect(() => {
     if (!hostId) {
@@ -322,6 +373,22 @@ export function PhoneApp({
       active = false;
     };
   }, [attention, online, loaded, hostId]);
+  useEffect(() => {
+    if (!notificationTarget || !ready || !hosts.some((h) => h.hostId === notificationTarget.hostId))
+      return;
+    if (hostId !== notificationTarget.hostId) {
+      navigate({ kind: "home", hostId: notificationTarget.hostId }, true);
+      return;
+    }
+    if (!online || !loaded) return;
+    const { sessionId } = notificationTarget;
+    setNotificationTarget(null);
+    const summary = sessions.list.find((item) => item.id === sessionId);
+    navigate({ kind: "home", hostId }, true);
+    if (summary) navigate({ kind: "project", hostId, path: summary.cwd });
+    navigate({ kind: "session", hostId, sessionId });
+    openSession(sessionId);
+  }, [notificationTarget, ready, hosts, hostId, online, loaded]);
   const entry = page.kind === "session" ? sessions.opened.get(page.sessionId) : undefined;
   const connected = online;
   const extension: PhoneExtensionApi = {

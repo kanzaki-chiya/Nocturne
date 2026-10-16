@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { ConnectionState } from "./connection";
 import type { PairedHost } from "./storage";
+import type { RuntimeEvent } from "@nocturne/core/protocol";
 
 /**
  * 手机界面的平台扩展点。网页入口不传（等同 `{ relay: "page" }`）；安卓 App 入口
@@ -14,7 +15,23 @@ export interface PhoneObserver {
   /** 一次断线与原因 */
   disconnected?(host: PairedHost, reason: string): void;
   /** 收到一条会话事件：只有类型、序号和是否为重连后的回放，不含内容 */
-  event?(sessionId: string, type: string, seq: number | undefined, live: boolean): void;
+  event?(
+    sessionId: string,
+    type: string,
+    seq: number | undefined,
+    live: boolean,
+    eventTime?: string,
+  ): void;
+  /** App 本地通知消费完整事件；网页不实现此钩子。 */
+  sessionEvent?(
+    hostId: string,
+    sessionId: string,
+    event: RuntimeEvent,
+    live: boolean,
+    session: { title?: string; firstText?: string },
+    watching: boolean,
+    turnStartedAt?: number,
+  ): void;
 }
 export interface PhoneExtensionApi {
   /** 打开 `pages` 里登记的页面 */
@@ -40,6 +57,16 @@ export interface PhonePlatform {
    * 返回退订函数。
    */
   onForeground?(listener: () => void): () => void;
+  /** 原生 Activity 前后台信号（与 WebView visibility 无关）。 */
+  isForeground?(): boolean;
+  /** 通知点击的明确目标；启动与暖启动均交给宿主，返回后清除一次性目标。 */
+  notificationTarget?(): Promise<{ hostId: string; sessionId: string } | null>;
+  onNotificationTarget?(
+    listener: (target: { hostId: string; sessionId: string }) => void,
+  ): () => void;
+  onAndroidBack?(listener: () => void): () => void;
+  moveTaskToBack?(): void;
+  dismissNotification?(hostId: string, sessionId: string): void;
   /** 取代网页版信任边界说明（网页由中继下发，App 的页面随安装包）；不传用网页版文字 */
   trustText?: string;
   /** 配对说明里描述「怎么拿到配对链接」的一句话 */

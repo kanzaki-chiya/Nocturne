@@ -122,11 +122,26 @@ describe("ProbeLog", () => {
     expect(text).toContain("设备 测试设备");
     expect(text).toContain("前台服务启 1 次、停 1 次");
     const body = lines.slice(lines.indexOf("---") + 1);
-    expect(body.map((line) => line.replace(/^\S+ \S+ /, ""))).toEqual([
+    expect(body.map((line) => line.replace(/^\S+ \S+ epoch=\d+ /, ""))).toEqual([
       "native service_start",
       "event fg live s message.delta 1",
       "native service_stop",
     ]);
     expect(text).not.toContain("好的");
+    expect(text).toContain("epoch=3000");
+  });
+  it("用事件时间统计后台延迟且不把回放算作实时", () => {
+    const entries: ProbeEntry[] = [
+      [2000, "event", "bg live s message.delta - sent=1900"],
+      [3000, "event", "bg live s message.delta - sent=2700"],
+      [4000, "event", "bg live s message.delta - sent=3500"],
+      [5000, "event", "bg replay s turn.completed 4 sent=1000"],
+    ];
+    expect(summarize(entries, []).backgroundLatency).toEqual({ count: 3, median: 300, max: 500 });
+  });
+  it("保留负延迟以暴露设备时钟偏差，不伪装成零网络耗时", () => {
+    expect(
+      summarize([[1000, "event", "bg live s turn.completed 1 sent=1650"]], []).backgroundLatency,
+    ).toEqual({ count: 1, median: -650, max: -650 });
   });
 });

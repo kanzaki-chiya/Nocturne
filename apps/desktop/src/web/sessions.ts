@@ -2,6 +2,7 @@ import {
   createSessionView,
   type ModelRef,
   type ReasoningEffort,
+  type RuntimeEvent,
   type RewindMode,
   type SessionView,
   type TurnChangeDiff,
@@ -80,6 +81,7 @@ export class PhoneSessions {
   client: RpcClient | undefined;
   private generation = 0;
   private readonly opening = new Map<string, Promise<PhoneSession>>();
+  private readonly turnStarts = new Map<string, number>();
   private tracked: Promise<void> = Promise.resolve();
   /** 进行中的列表刷新：期间再来的刷新请求并入它的补拉，不并发调用 listSessions */
   private refreshing: { generation: number; requests: number; done: Promise<void> } | undefined;
@@ -92,6 +94,14 @@ export class PhoneSessions {
       type: string,
       seq: number | undefined,
       live: boolean,
+      eventTime?: string,
+    ) => void,
+    private readonly onSessionEvent?: (
+      sessionId: string,
+      event: RuntimeEvent,
+      live: boolean,
+      entry: PhoneSession,
+      turnStartedAt: number | undefined,
     ) => void,
   ) {}
   async connected(client: RpcClient): Promise<void> {
@@ -137,6 +147,7 @@ export class PhoneSessions {
   }
   clear(): void {
     this.generation++;
+    this.turnStarts.clear();
     this.stopListening();
     this.loaded = false;
     this.opening.clear();
@@ -231,15 +242,26 @@ export class PhoneSessions {
       changeDiffs: new Map(),
     };
     this.opened.set(session.id, entry);
-    // 订阅建立前到达的是回放，只在订阅完成后统一查一次改动
+    // 与桌面 conversations.ts 一致：订阅窗口期间的新持久事件按 event.time 判断。
+    const subscribeStart = Date.now();
     let subscribed = false;
     entry.tracker = await trackSessionView(
       session,
       (_view, event) => {
-        this.onEvent?.(session.id, event.type, "seq" in event ? event.seq : undefined, subscribed);
+        const at = Date.parse(event.time);
+        const live = subscribed || !("seq" in event) || (!Number.isNaN(at) && at >= subscribeStart);
+        if (event.type === "turn.started" && !Number.isNaN(at)) this.turnStarts.set(session.id, at);
+        this.onEvent?.(
+          session.id,
+          event.type,
+          "seq" in event ? event.seq : undefined,
+          live,
+          event.time,
+        );
+        this.onSessionEvent?.(session.id, event, live, entry, this.turnStarts.get(session.id));
         for (const listener of entry.listeners) listener();
         this.changed();
-        if (subscribed && event.type === "turn.completed") void this.refreshTurnChanges(entry);
+        if (live && event.type === "turn.completed") void this.refreshTurnChanges(entry);
       },
       {
         view,

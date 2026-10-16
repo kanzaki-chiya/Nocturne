@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import type { PhoneExtensionApi, PhonePlatform } from "../../desktop/src/web/platform";
 import { Background } from "./background";
 import { RESUME_EVENT, type AppHost, type BackgroundStatus } from "./host";
+import { BACK_EVENT, PAUSE_EVENT, TARGET_EVENT } from "./host";
+import { LocalNotifications, DONE_THRESHOLD_CHOICES, saveNotifyPrefs } from "./notifications";
 import { parseNativeLog, ProbeLog, summarize } from "./probe";
+import { version } from "../package.json";
 
 /** 信任边界：页面随安装包，不再由中继下发（ADR-0059 第 5 节） */
 export const APP_TRUST_TEXT =
@@ -11,7 +14,7 @@ export const APP_TRUST_TEXT =
 export const APP_PAIR_HINT =
   "在电脑的「设置 › 远程」选择「配对新手机」，复制配对链接，粘贴到下面。链接里带着中继地址，同一个 App 可以连任何中继。";
 
-export const APP_VERSION = "0.10.0";
+export const APP_VERSION = version;
 
 function BackgroundSection({
   host,
@@ -109,6 +112,108 @@ function BackgroundSection({
   );
 }
 
+function NotificationSection({
+  host,
+  notifications,
+}: {
+  host: AppHost;
+  notifications: LocalNotifications;
+}) {
+  const [prefs, setPrefs] = useState(() => notifications.prefs);
+  const [enabled, setEnabled] = useState(true);
+  useEffect(() => {
+    let active = true;
+    const read = () => {
+      void host
+        .notificationStatus()
+        .then((status) => {
+          if (active) setEnabled(status.enabled);
+        })
+        .catch(() => {
+          if (active) setEnabled(false);
+        });
+    };
+    read();
+    window.addEventListener(RESUME_EVENT, read);
+    return () => {
+      active = false;
+      window.removeEventListener(RESUME_EVENT, read);
+    };
+  }, [host]);
+  const update = (patch: Partial<typeof prefs>) => {
+    const next = { ...prefs, ...patch };
+    notifications.prefs = next;
+    saveNotifyPrefs(next);
+    setPrefs(next);
+  };
+  return (
+    <section className="phone-section" aria-label="会话提醒">
+      <h3>会话提醒</h3>
+      <label className="phone-switch">
+        <span>提醒我需要处理的会话</span>
+        <input
+          type="checkbox"
+          role="switch"
+          aria-label="会话提醒"
+          checked={prefs.enabled}
+          onChange={(e) => {
+            update({ enabled: e.target.checked });
+          }}
+        />
+      </label>
+      {(
+        [
+          ["attention", "需要确认"],
+          ["error", "出错停止"],
+          ["done", "长任务完成"],
+        ] as const
+      ).map(([key, label]) => (
+        <label className="phone-switch" key={key}>
+          <span>{label}</span>
+          <input
+            type="checkbox"
+            aria-label={label}
+            disabled={!prefs.enabled}
+            checked={prefs[key]}
+            onChange={(e) => {
+              update({ [key]: e.target.checked });
+            }}
+          />
+        </label>
+      ))}
+      <label>
+        完成阈值{" "}
+        <select
+          aria-label="完成阈值"
+          disabled={!prefs.enabled || !prefs.done}
+          value={prefs.doneAfterSeconds}
+          onChange={(e) => {
+            update({ doneAfterSeconds: Number(e.target.value) });
+          }}
+        >
+          {!DONE_THRESHOLD_CHOICES.some((choice) => choice.seconds === prefs.doneAfterSeconds) && (
+            <option value={prefs.doneAfterSeconds}>{prefs.doneAfterSeconds} 秒</option>
+          )}
+          {DONE_THRESHOLD_CHOICES.map((choice) => (
+            <option key={choice.seconds} value={choice.seconds}>
+              {choice.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {!enabled && <p role="status">系统通知已关闭，请到系统 › 应用 › Nocturne › 通知中开启。</p>}
+      <button
+        className="phone-list-action"
+        onClick={() => {
+          void host.openSettings("app").catch(() => undefined);
+        }}
+      >
+        打开系统应用设置
+      </button>
+    </section>
+  );
+}
+
 function useRefreshEvery2s() {
   const [, render] = useState(0);
   useEffect(() => {
@@ -164,6 +269,10 @@ function ProbePage({ host, probe }: { host: AppHost; probe: ProbeLog }) {
         {summary.batches} 批；后台计时器最大延迟 {summary.maxTimerLag}ms。
       </p>
       <p>
+        后台到达延迟：{summary.backgroundLatency.count} 条，中位数{" "}
+        {summary.backgroundLatency.median}ms，最大 {summary.backgroundLatency.max}ms。
+      </p>
+      <p>
         前台服务启 {summary.native.serviceStarts} 次、停 {summary.native.serviceStops} 次。
       </p>
       <div className="phone-actions">
@@ -211,12 +320,65 @@ export function appPlatform(
   changed: () => void = () => undefined,
 ): AppPlatform {
   const controller = new Background(host, probe, changed);
+  const notifications = new LocalNotifications(host);
+  let foreground = false;
+  let lifecycleRevision = 0;
+  void host
+    .activityForeground()
+    .then((value) => {
+      if (lifecycleRevision === 0) foreground = value;
+    })
+    .catch(() => undefined);
+  window.addEventListener(RESUME_EVENT, () => {
+    lifecycleRevision++;
+    foreground = true;
+  });
+  window.addEventListener(PAUSE_EVENT, () => {
+    lifecycleRevision++;
+    foreground = false;
+    probe.flush();
+  });
+  probe.setVisible(() => foreground);
+  const target = async () => {
+    const value = await host.consumeNotificationTarget();
+    return value?.hostId && value.sessionId ? value : null;
+  };
   return {
     relay: "link",
     get keepConnected() {
       return controller.enabled;
     },
-    observer: controller.observer,
+    observer: {
+      ...controller.observer,
+      sessionEvent: (hostId, sessionId, event, live, session, watching, turnStartedAt) => {
+        notifications.event(hostId, sessionId, event, live, session, watching, turnStartedAt);
+      },
+    },
+    isForeground: () => foreground,
+    notificationTarget: target,
+    onNotificationTarget: (listener) => {
+      const handler = () => {
+        void target().then((value) => {
+          if (value) listener(value);
+        });
+      };
+      window.addEventListener(TARGET_EVENT, handler);
+      return () => {
+        window.removeEventListener(TARGET_EVENT, handler);
+      };
+    },
+    onAndroidBack: (listener) => {
+      window.addEventListener(BACK_EVENT, listener);
+      return () => {
+        window.removeEventListener(BACK_EVENT, listener);
+      };
+    },
+    moveTaskToBack: () => {
+      void host.moveTaskToBack();
+    },
+    dismissNotification: (hostId: string, sessionId: string) => {
+      notifications.dismiss(hostId, sessionId);
+    },
     onForeground: (listener) => {
       window.addEventListener(RESUME_EVENT, listener);
       return () => {
@@ -227,7 +389,12 @@ export function appPlatform(
     trustText: APP_TRUST_TEXT,
     probe,
     controller,
-    background: (api) => <BackgroundSection host={host} background={controller} api={api} />,
+    background: (api) => (
+      <>
+        <BackgroundSection host={host} background={controller} api={api} />
+        <NotificationSection host={host} notifications={notifications} />
+      </>
+    ),
     diagnostics: (api) => (
       <button
         className="phone-list-action"

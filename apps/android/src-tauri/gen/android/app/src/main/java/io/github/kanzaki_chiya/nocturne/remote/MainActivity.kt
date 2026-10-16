@@ -8,9 +8,12 @@ import android.os.Process
 import android.view.View
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.OnBackPressedCallback
 
 class MainActivity : TauriActivity() {
+  private var pendingTarget: Pair<String, String>? = null
   private var foreground = false
+  fun isActivityForeground(): Boolean = foreground
   private var rendererLost = false
   private var webViewRef: WebView? = null
   private val handler = Handler(Looper.getMainLooper())
@@ -26,7 +29,39 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     NativeLog.init(this)
     NativeLog.add("activity_create")
+    captureTarget(intent)
     super.onCreate(savedInstanceState)
+    onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+      override fun handleOnBackPressed() {
+        // 页面掌握 SPA 导航栈：首页后台化，内页交给 history.back()。
+        if (webViewRef == null) moveTaskToBack(true)
+        else webViewRef?.evaluateJavascript("window.dispatchEvent(new Event('nocturne-android-back'))", null)
+      }
+    })
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    captureTarget(intent)
+    webViewRef?.evaluateJavascript("window.dispatchEvent(new Event('nocturne-android-notification-target'))", null)
+  }
+
+  private fun captureTarget(intent: Intent?) {
+    val host = intent?.getStringExtra(SessionNotifications.HOST)
+    val session = intent?.getStringExtra(SessionNotifications.SESSION)
+    if (!host.isNullOrEmpty() && !session.isNullOrEmpty()) {
+      pendingTarget = host to session
+      SessionNotifications.dismiss(this, host, session)
+    }
+  }
+
+  fun consumeNotificationTarget(): Pair<String, String>? {
+    val target = pendingTarget
+    pendingTarget = null
+    intent?.removeExtra(SessionNotifications.HOST)
+    intent?.removeExtra(SessionNotifications.SESSION)
+    return target
   }
 
   override fun onWebViewCreate(webView: WebView) {
@@ -70,6 +105,7 @@ class MainActivity : TauriActivity() {
     super.onPause()
     foreground = false
     NativeLog.add("activity_pause")
+    webViewRef?.evaluateJavascript("window.dispatchEvent(new Event('nocturne-android-pause'))", null)
     keepWebViewRunning()
   }
 

@@ -27,6 +27,18 @@ export interface AppHost {
   /** 原生一侧的探针记录（前台服务启停、Activity 前后台、渲染进程回收），每行 `毫秒时间戳\t事件` */
   nativeLog(): Promise<string>;
   clearNativeLog(): Promise<void>;
+  notificationStatus(): Promise<{ enabled: boolean }>;
+  showNotification(input: {
+    hostId: string;
+    sessionId: string;
+    title: string;
+    body: string;
+    kind: string;
+  }): Promise<void>;
+  dismissNotification(hostId: string, sessionId: string): Promise<void>;
+  consumeNotificationTarget(): Promise<{ hostId: string; sessionId: string } | null>;
+  moveTaskToBack(): Promise<void>;
+  activityForeground(): Promise<boolean>;
 }
 
 /**
@@ -34,6 +46,9 @@ export interface AppHost {
  * 「窗口保持可见」的变通让页面在后台也认为自己可见，visibilitychange 不可靠，只能用原生信号。
  */
 export const RESUME_EVENT = "nocturne-android-resume";
+export const PAUSE_EVENT = "nocturne-android-pause";
+export const TARGET_EVENT = "nocturne-android-notification-target";
+export const BACK_EVENT = "nocturne-android-back";
 
 /** 没有原生插件时的宿主（测试）：没有后台服务，不能打开系统设置 */
 export const shellHost: AppHost = {
@@ -44,6 +59,12 @@ export const shellHost: AppHost = {
   openSettings: () => Promise.reject(new Error("此版本不能打开系统设置")),
   nativeLog: () => Promise.resolve(""),
   clearNativeLog: () => Promise.resolve(),
+  notificationStatus: () => Promise.resolve({ enabled: false }),
+  showNotification: () => Promise.resolve(),
+  dismissNotification: () => Promise.resolve(),
+  consumeNotificationTarget: () => Promise.resolve(null),
+  moveTaskToBack: () => Promise.resolve(),
+  activityForeground: () => Promise.resolve(true),
 };
 
 /** 经 Rust 侧 `background` 插件（只转发白名单命令）调用 Kotlin 的 BackgroundPlugin */
@@ -72,4 +93,17 @@ export const tauriHost: AppHost = {
   clearNativeLog: async () => {
     await call("clear_log");
   },
+  notificationStatus: () => call("notification_status"),
+  showNotification: async (payload) => {
+    await call("notify_show", payload);
+  },
+  dismissNotification: async (hostId, sessionId) => {
+    await call("notify_dismiss", { hostId, sessionId });
+  },
+  consumeNotificationTarget: () => call("notification_target"),
+  moveTaskToBack: async () => {
+    await call("move_to_back");
+  },
+  activityForeground: async () =>
+    (await call<{ foreground: boolean }>("activity_state")).foreground,
 };

@@ -61,8 +61,8 @@ export class Background {
     disconnected: (host, reason) => {
       this.probe.add("disconnect", `${host.name} ${reason}`);
     },
-    event: (sessionId, type, seq, live) => {
-      this.probe.event(sessionId, type, seq, live);
+    event: (sessionId, type, seq, live, eventTime) => {
+      this.probe.event(sessionId, type, seq, live, eventTime);
     },
   };
 
