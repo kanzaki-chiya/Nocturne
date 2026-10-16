@@ -449,6 +449,7 @@ it("远程模式隐藏重发和持久授权；桌面缺省仍保留", () => {
   expect(screen.queryByRole("button", { name: "编辑并重发" })).toBeNull();
   expect(screen.queryByRole("button", { name: "本项目允许" })).toBeNull();
   expect(screen.getByRole("button", { name: "本会话允许" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "拒绝并停止" })).toBeTruthy();
   remote.unmount();
   mount(view);
   expect(screen.getByRole("button", { name: "重发" })).toBeTruthy();
@@ -711,6 +712,22 @@ describe("Conversation 历史图片", () => {
 });
 
 describe("Conversation 权限卡片", () => {
+  it("远程模式仍可拒绝并停止，回传 stop 而不写持久授权", async () => {
+    const view = createSessionView();
+    view.pendingPermission = permission();
+    const { methods } = mount(view, { hidePersistentPermissions: true });
+    expect(screen.queryByRole("button", { name: "本项目允许" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "拒绝并停止" }));
+    await waitFor(() =>
+      expect(methods.respondPermission).toHaveBeenCalledWith("permission-1", {
+        decision: "deny",
+        stop: true,
+      }),
+    );
+    expect(methods.respondPermission).toHaveBeenCalledTimes(1);
+    expect(methods.interrupt).not.toHaveBeenCalled();
+  });
+
   const choices: [PermissionOption, string, PermissionReply][] = [
     ["allow_once", "允许一次", { decision: "allow" }],
     ["allow_session", "本会话允许", { decision: "allow", remember: "session" }],

@@ -2202,11 +2202,7 @@ export function PermissionCard({
   const options: PermissionOption[] = (
     pending.options.length ? pending.options : (["allow_once", "deny"] as PermissionOption[])
   ).filter(
-    (option) =>
-      !hidePersistentPermissions ||
-      option === "allow_once" ||
-      option === "allow_session" ||
-      option === "deny",
+    (option) => !hidePersistentPermissions || permissionReplies[option].remember !== "project",
   );
   const optionsRef = useRef(options);
   optionsRef.current = options;
