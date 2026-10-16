@@ -5,8 +5,8 @@
  *   node scripts/release-version.mjs <version>          # 写入所有版本位置
  *   node scripts/release-version.mjs --check <version>  # 全部一致才返回 0
  *
- * 覆盖：根与各 workspace package.json、apps/desktop/src-tauri/tauri.conf.json、
- * Cargo.toml（[package] version）、Cargo.lock（nocturne-desktop 条目）、
+ * 覆盖：根与各 workspace package.json、桌面及安卓 tauri.conf.json、
+ * Cargo.toml（[package] version）、Cargo.lock（各自本包条目）、
  * packaging/npm/package.json，以及源码里的版本常量（CONST_VERSION_FILES）。
  * 接受 0.6.0-rc.1 这类预发布号。
  */
@@ -15,7 +15,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const CRATE = "nocturne-desktop";
+const TAURI_CRATES = [
+  { dir: "apps/desktop/src-tauri", name: "nocturne-desktop" },
+  { dir: "apps/android/src-tauri", name: "nocturne-android" },
+];
 
 /** 与 package.json / tauri.conf.json 顶层 version 字段对应的文件 */
 const JSON_VERSION_FILES = [
@@ -30,6 +33,8 @@ const JSON_VERSION_FILES = [
   "apps/tui/package.json",
   "apps/desktop/package.json",
   "apps/desktop/src-tauri/tauri.conf.json",
+  "apps/android/package.json",
+  "apps/android/src-tauri/tauri.conf.json",
   "packaging/npm/package.json",
 ];
 
@@ -122,13 +127,10 @@ export function collectVersions(root) {
   for (const rel of JSON_VERSION_FILES) {
     versions[rel] = readJsonVersion(join(root, rel));
   }
-  versions["apps/desktop/src-tauri/Cargo.toml"] = readCargoVersion(
-    join(root, "apps/desktop/src-tauri/Cargo.toml"),
-  );
-  versions["apps/desktop/src-tauri/Cargo.lock"] = readLockVersion(
-    join(root, "apps/desktop/src-tauri/Cargo.lock"),
-    CRATE,
-  );
+  for (const { dir, name } of TAURI_CRATES) {
+    versions[`${dir}/Cargo.toml`] = readCargoVersion(join(root, dir, "Cargo.toml"));
+    versions[`${dir}/Cargo.lock`] = readLockVersion(join(root, dir, "Cargo.lock"), name);
+  }
   for (const [rel, name] of Object.entries(CONST_VERSION_FILES)) {
     versions[rel] = readConstVersion(join(root, rel), name);
   }
@@ -140,8 +142,10 @@ export function applyVersion(root, version) {
   for (const rel of JSON_VERSION_FILES) {
     writeJsonVersion(join(root, rel), version);
   }
-  writeCargoVersion(join(root, "apps/desktop/src-tauri/Cargo.toml"), version);
-  writeLockVersion(join(root, "apps/desktop/src-tauri/Cargo.lock"), CRATE, version);
+  for (const { dir, name } of TAURI_CRATES) {
+    writeCargoVersion(join(root, dir, "Cargo.toml"), version);
+    writeLockVersion(join(root, dir, "Cargo.lock"), name, version);
+  }
   for (const [rel, name] of Object.entries(CONST_VERSION_FILES)) {
     writeConstVersion(join(root, rel), name, version);
   }

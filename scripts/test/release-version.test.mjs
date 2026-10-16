@@ -29,6 +29,8 @@ function makeFixture() {
     "apps/tui/package.json",
     "apps/desktop/package.json",
     "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/android/package.json",
+    "apps/android/src-tauri/tauri.conf.json",
     "packaging/npm/package.json",
   ];
   for (const rel of jsonFiles) {
@@ -36,38 +38,43 @@ function makeFixture() {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `{\n  "name": "x",\n  "version": "0.5.0"\n}\n`);
   }
-  const cargoDir = join(root, "apps/desktop/src-tauri");
-  writeFileSync(
-    join(cargoDir, "Cargo.toml"),
-    [
-      "[package]",
-      'name = "nocturne-desktop"',
-      'version = "0.5.0"',
-      'edition = "2021"',
-      "",
-      "[dependencies]",
-      'serde = { version = "1" }',
-      "",
-    ].join("\n"),
-  );
-  writeFileSync(
-    join(cargoDir, "Cargo.lock"),
-    [
-      "version = 4",
-      "",
-      "[[package]]",
-      'name = "nocturne-desktop"',
-      'version = "0.5.0"',
-      "dependencies = [",
-      ' "serde",',
-      "]",
-      "",
-      "[[package]]",
-      'name = "serde"',
-      'version = "1.0.0"',
-      "",
-    ].join("\n"),
-  );
+  for (const [dir, crate] of [
+    ["apps/desktop/src-tauri", "nocturne-desktop"],
+    ["apps/android/src-tauri", "nocturne-android"],
+  ]) {
+    const cargoDir = join(root, dir);
+    writeFileSync(
+      join(cargoDir, "Cargo.toml"),
+      [
+        "[package]",
+        `name = "${crate}"`,
+        'version = "0.5.0"',
+        'edition = "2021"',
+        "",
+        "[dependencies]",
+        'serde = { version = "1" }',
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(cargoDir, "Cargo.lock"),
+      [
+        "version = 4",
+        "",
+        "[[package]]",
+        `name = "${crate}"`,
+        'version = "0.5.0"',
+        "dependencies = [",
+        ' "serde",',
+        "]",
+        "",
+        "[[package]]",
+        'name = "serde"',
+        'version = "1.0.0"',
+        "",
+      ].join("\n"),
+    );
+  }
   const constFiles = {
     "packages/core/src/protocol/version.ts": 'export const NOCTURNE_VERSION = "0.5.0";\n',
     "packages/mcp/src/connector.ts": 'import x from "y";\n\nconst CLIENT_VERSION = "0.5.0";\n',
@@ -98,6 +105,10 @@ describe("release-version", () => {
     const versions = collectVersions(root);
     expect(versions["packages/remote/package.json"]).toBe("0.6.0");
     expect(versions["apps/relay/package.json"]).toBe("0.6.0");
+    expect(versions["apps/android/package.json"]).toBe("0.6.0");
+    expect(versions["apps/android/src-tauri/tauri.conf.json"]).toBe("0.6.0");
+    expect(versions["apps/android/src-tauri/Cargo.toml"]).toBe("0.6.0");
+    expect(versions["apps/android/src-tauri/Cargo.lock"]).toBe("0.6.0");
     for (const [file, v] of Object.entries(versions)) {
       expect(v, file).toBe("0.6.0");
     }
@@ -109,6 +120,9 @@ describe("release-version", () => {
     const lock = readFileSync(join(root, "apps/desktop/src-tauri/Cargo.lock"), "utf8");
     expect(lock).toContain('name = "nocturne-desktop"\nversion = "0.6.0-rc.1"');
     expect(lock).toContain('name = "serde"\nversion = "1.0.0"');
+    const androidLock = readFileSync(join(root, "apps/android/src-tauri/Cargo.lock"), "utf8");
+    expect(androidLock).toContain('name = "nocturne-android"\nversion = "0.6.0-rc.1"');
+    expect(androidLock).toContain('name = "serde"\nversion = "1.0.0"');
   });
 
   it("Cargo.toml 只改 [package] 节，不动依赖的 version", () => {
@@ -116,6 +130,9 @@ describe("release-version", () => {
     const toml = readFileSync(join(root, "apps/desktop/src-tauri/Cargo.toml"), "utf8");
     expect(toml).toContain('version = "0.6.0"');
     expect(toml).toContain('serde = { version = "1" }');
+    const androidToml = readFileSync(join(root, "apps/android/src-tauri/Cargo.toml"), "utf8");
+    expect(androidToml).toContain('version = "0.6.0"');
+    expect(androidToml).toContain('serde = { version = "1" }');
   });
 
   it("源码版本常量只改目标常量", () => {
@@ -143,6 +160,20 @@ describe("release-version", () => {
     const result = checkVersion(root, "0.6.0");
     expect(result.ok).toBe(false);
     expect(result.versions["packages/core/package.json"]).toBe("0.5.0");
+  });
+
+  it.each([
+    "apps/android/package.json",
+    "apps/android/src-tauri/tauri.conf.json",
+    "apps/android/src-tauri/Cargo.toml",
+    "apps/android/src-tauri/Cargo.lock",
+  ])("--check 检出 %s 版本不一致", (rel) => {
+    applyVersion(root, "0.6.0");
+    const file = join(root, rel);
+    writeFileSync(file, readFileSync(file, "utf8").replace("0.6.0", "0.5.0"));
+    const result = checkVersion(root, "0.6.0");
+    expect(result.ok).toBe(false);
+    expect(result.versions[rel]).toBe("0.5.0");
   });
 
   it("拒绝非法版本号", () => {
