@@ -57,7 +57,7 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 | 外链 | 新标签打开 | 不打开：`on_navigation` 只允许 `http://tauri.localhost`（调试构建另允许开发服务器） |
 | 能力边界 | 白名单 | 不变，App 不改 RPC 白名单 |
 
-共享层的扩展点是 `PhonePlatform`（`apps/desktop/src/web/platform.ts`）：`relay`（`page` / `link`）、`keepConnected`、`observer`（已配对电脑、连接状态、断线、会话事件）、`onForeground`（回到前台）、`trustText`、`pairHint`、`background` / `diagnostics`（设置页区块）与 `pages`（App 自己的页面）。网页入口不传即为 `{ relay: "page" }`，行为不变。
+共享层的扩展点是 `PhonePlatform`（`apps/desktop/src/web/platform.ts`）：`relay`（`page` / `link`）、`keepConnected`、`observer`（已配对电脑、连接状态、断线、会话事件）、`onForeground`（回到前台）、`trustText`（只在设置页「关于」完整显示，配对页只留一句指路）、`pairHint`、`background` / `diagnostics`（设置页区块）与 `pages`（App 自己的页面）。网页入口不传即为 `{ relay: "page" }`，行为不变。
 
 ## 4. 后台保持连接
 

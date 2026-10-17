@@ -132,7 +132,7 @@ describe("desktop usage", () => {
       "不代表代理或中转服务的实际收费",
     );
     expect(document.querySelector(".usage-table-note")?.textContent).toContain(
-      "来源为「厂商价」的模型按模型厂商官方 API 价估算",
+      "按声明价格估算，以服务商账单为准",
     );
     expect(screen.getByText(/在配置文件的模型条目里写 pricing/).tagName).toBe("P");
     expect(screen.queryByRole("link", { name: /pricing/ })).toBeNull();

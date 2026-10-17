@@ -955,7 +955,7 @@ export function App({ host }: { host: DesktopHost }) {
     {
       backendId: SHELL_LOG_ID,
       label: "外壳",
-      detail: "外壳自身诊断（更新检查结果等），不写盘",
+      detail: "更新检查等",
     },
   ];
 
@@ -1126,9 +1126,6 @@ export function App({ host }: { host: DesktopHost }) {
                   inUse={providersInUse}
                   openUrl={(url) => void host.openUrl(url)}
                   providersVersion={providersVersion}
-                  onOpenModels={() => {
-                    setPage("models");
-                  }}
                 />
               </PaneErrorBoundary>
             ) : page === "mcp" ? (

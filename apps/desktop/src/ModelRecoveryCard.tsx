@@ -115,13 +115,11 @@ export function ModelRecoveryCard({
       <h3>{disabled === undefined ? "这个会话用的模型已不可用" : "这个会话用的模型已停用"}</h3>
       <div className="lead">
         {disabled === undefined ? (
-          "会话原来用的模型已不在当前配置里（可能删掉或改名了服务商）。选一个模型继续，之后的对话改用它；之前的记录不变。"
+          "原来的模型已不可用，选一个继续；之前的记录不变"
         ) : (
           <>
             <span className="mono">{disabledRef ?? "这个模型"}</span>
-            {
-              " 已在 设置 › 服务商 停用。选一个模型继续，之后的对话改用它，之前的记录不变；也可以重新启用原来的模型。"
-            }
+            {" 已停用，选一个继续；之前的记录不变"}
           </>
         )}
       </div>

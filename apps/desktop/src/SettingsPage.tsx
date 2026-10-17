@@ -35,13 +35,13 @@ export type ThemePref = "system" | "light" | "dark";
 /** 设置区里由本组件渲染的导航项（服务商页另见 ProvidersPage） */
 export type SettingsPageSection = "general" | "models" | "appearance";
 
-const SECTION_HEAD: Record<SettingsPageSection, { title: string; sub: string }> = {
+const SECTION_HEAD: Record<SettingsPageSection, { title: string; sub?: string }> = {
   general: {
     title: "常规",
-    sub: "默认值对新会话生效；当前会话在状态栏切换模型、思考档位和权限",
+    sub: "默认值对新会话生效",
   },
   models: { title: "模型", sub: "新会话默认用哪个模型，以及子任务用哪些模型" },
-  appearance: { title: "外观", sub: "只影响这台电脑上的桌面端" },
+  appearance: { title: "外观" },
 };
 
 const THEMES: { value: ThemePref; label: string; sub?: string; cls: string }[] = [
@@ -389,7 +389,7 @@ export function SettingsPage({
       <div className="ph3">
         <div className="grow">
           <h3>{head.title}</h3>
-          <span className="sub">{head.sub}</span>
+          {head.sub !== undefined && <span className="sub">{head.sub}</span>}
         </div>
       </div>
       {toast !== null && (
@@ -644,9 +644,7 @@ export function SettingsPage({
           <>
             <h5>更新</h5>
             <div className={rowClass("autoUpdate")}>
-              <span className="n">
-                自动检查更新<small>每 24 小时最多一次，失败不会打扰使用</small>
-              </span>
+              <span className="n">自动检查更新</span>
               <span className="v">
                 <button
                   role="switch"
@@ -790,9 +788,7 @@ export function SettingsPage({
               {errLine("notifications.doneAfterSeconds")}
             </div>
             <div className={rowClassDim(!notifyEnabled, ["notifications.sound"])}>
-              <span className="n">
-                提示音<small>只管桌面端；TUI 响铃的声音按终端自己的设置</small>
-              </span>
+              <span className="n">提示音</span>
               <span className="v sans">
                 <button
                   type="button"
@@ -1212,7 +1208,7 @@ function DefaultModelDialog({
   return (
     <Dialog
       title="默认模型与档位"
-      sub="成对保存到 settings.json，对之后新建的会话生效"
+      sub="对之后新建的会话生效"
       error={error}
       busy={busy}
       canSave={picked !== null}
@@ -1335,7 +1331,7 @@ function RoleDialog({
   return (
     <Dialog
       title={label}
-      sub="保存到 settings.json；选第一项清除设置"
+      sub="选第一项清除设置"
       error={error}
       busy={busy}
       onClose={onClose}
@@ -1553,7 +1549,7 @@ function ReviewerDialog({
   return (
     <Dialog
       title="安全审查"
-      sub="smart 下除只读命令外的操作先交给审查器判断；保存到 settings.json"
+      sub="smart 下除只读命令外的操作先交给审查器判断"
       width={600}
       error={error}
       busy={busy}

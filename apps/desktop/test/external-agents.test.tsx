@@ -72,7 +72,7 @@ describe("外部 agent 设置页", () => {
     expect((screen.getByRole("button", { name: "编辑" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "删除" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
-    await screen.findByText("仅初始化并新建临时 ACP 会话，不发送 prompt，不消耗对方额度。");
+    await screen.findByText("Local login");
     expect(screen.getByText("最近测试").nextElementSibling?.textContent).toContain(
       "已连接 · Fake 1",
     );

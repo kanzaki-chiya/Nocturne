@@ -607,9 +607,7 @@ export function UsageView({
               {!models.length && <p className="usage-empty">这个时间范围内还没有模型用量</p>}
               <p className="usage-table-note">
                 Tokens/s 和 TTFT 只统计带计时的请求；旧版本的记录没有计时，显示「—」。单价为 USD /
-                每百万 token，缓存单价见展开详情，缺失缓存价按输入价估算。
-                {models.some((m) => m.pricingSource === "vendor") &&
-                  `来源为「厂商价」的模型${VENDOR_NOTE}。`}
+                每百万 token。按声明价格估算，以服务商账单为准。
               </p>
               {stats.unpricedModels.length > 0 && (
                 <p className="usage-notice">
@@ -618,12 +616,11 @@ export function UsageView({
                 </p>
               )}
             </section>
-            <footer className="usage-footer">
-              费用按模型声明的价格估算，只作参考，以服务商账单为准；订阅制服务商不按此计费。
-              {stats.skippedFiles > 0 && (
-                <span> 已跳过 {stats.skippedFiles} 个损坏或无法读取的日志。</span>
-              )}
-            </footer>
+            {stats.skippedFiles > 0 && (
+              <footer className="usage-footer">
+                已跳过 {stats.skippedFiles} 个损坏或无法读取的日志。
+              </footer>
+            )}
           </>
         )}
       </div>

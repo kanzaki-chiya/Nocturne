@@ -1016,9 +1016,7 @@ export function Composer({
     </button>
   );
 
-  const defaultPlaceholder = isSession
-    ? "输入消息，@ 引用文件，Enter 发送，Shift+Enter 换行"
-    : "输入消息，@ 引用文件";
+  const defaultPlaceholder = "输入消息，@ 引用文件";
 
   const txtBlock = (
     <div className="txt">

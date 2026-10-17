@@ -149,11 +149,7 @@ export function SkillsPage({
         <div className="skill-empty">
           <span className="skill-empty-icon">▤</span>
           <h4>把常用的做法写成技能</h4>
-          <p>
-            技能是一个带 SKILL.md 的文件夹。Nocturne 会在
-            ~/.nocturne/skills、~/.agents/skills、~/.claude/skills 和项目里的同名目录中查找，Claude
-            Code、Codex 装好的技能可以直接用。
-          </p>
+          <p>把常用做法写成带 SKILL.md 的文件夹；Claude Code、Codex 的技能可直接用</p>
           <div>
             <button
               className="btn primary"
@@ -281,10 +277,6 @@ export function SkillsPage({
                   <>
                     <div className="skill-banner warn">
                       有 {skill.ignored.length} 处写法在 Nocturne 里不生效
-                      <span>
-                        技能照常可用。Nocturne
-                        不让技能文件自己放行工具或执行命令，这些操作都要经过权限设置。
-                      </span>
                     </div>
                     <table className="skill-ignored">
                       <thead>
@@ -611,7 +603,7 @@ function SkillImportDialog({
       <div className="dlg" role="dialog" aria-label="导入技能">
         <div className="dh3">
           <b>导入技能</b>
-          <span>只支持本地文件夹；只复制文件，不执行其中任何脚本。</span>
+          <span>只复制文件，不执行其中的脚本</span>
         </div>
         <div className="db">
           <div className="field">
@@ -641,7 +633,6 @@ function SkillImportDialog({
           </div>
           {phase.kind === "pick" && (
             <div className="fl">
-              <span>选中的文件夹本身含 SKILL.md 时作为单个技能；否则扫描其下一层子目录。</span>
               <button className="btn primary" onClick={() => void pick()}>
                 选择文件夹…
               </button>

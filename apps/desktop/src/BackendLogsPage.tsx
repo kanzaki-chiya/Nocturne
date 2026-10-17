@@ -101,7 +101,6 @@ export function BackendLogsPage({
       <div className="ph3">
         <div className="grow">
           <h3>后台日志</h3>
-          <span className="sub">后台进程 stderr 的内存缓冲（最近 500 行），不写盘、不轮询</span>
         </div>
         <Dropdown
           label="后台"

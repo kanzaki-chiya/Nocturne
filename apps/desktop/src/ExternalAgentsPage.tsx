@@ -319,7 +319,6 @@ export function ExternalAgentsPage({
                 ))}
             </div>
           ))}
-          <span className="fine pad">只读取用户级配置，项目配置里的外部 agent 不生效。</span>
         </nav>
         <div className="pane">
           {profileConfig !== undefined ? (
@@ -472,7 +471,6 @@ export function ExternalAgentsPage({
           ) : (
             <div className="mcp-empty">
               <h3>还没有外部 agent</h3>
-              <p className="sub">添加已安装的 ACP 命令行工具，用斜杠点名委派任务。</p>
               <button className="btn primary" disabled={!client} onClick={add}>
                 添加 agent
               </button>
@@ -533,7 +531,6 @@ function ProbeDetails({ result }: { result: ExternalAgentProbeResult }) {
       </p>
       {result.ok && (
         <>
-          <p className="fine">仅初始化并新建临时 ACP 会话，不发送 prompt，不消耗对方额度。</p>
           {result.authMethods && result.authMethods.length > 0 && (
             <div>
               <h4>登录方式</h4>
@@ -745,9 +742,7 @@ function ExternalAgentForm({
       </fieldset>
       <section>
         <h4>会话配置项</h4>
-        <p className="sub">
-          测试连接后可从 agent 返回的可选值中搜索选择。未设置的项沿用 agent 默认值。
-        </p>
+        <p className="sub">未设置的项沿用 agent 默认值。</p>
         {result?.ok &&
           result.configOptions.map((option) => (
             <div className="field external-option" key={option.id}>

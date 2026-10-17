@@ -43,8 +43,7 @@ import { DraftComposer, SessionScreen, mcpText } from "./SessionScreen";
 
 export const TRUST_TEXT =
   "中继只转发密文，看不到会话内容。你仍需信任中继维护者及服务器不会篡改下发的手机网页；端到端加密防不住被篡改的网页。远程访问相当于在手机上执行代码，请妥善保管手机并及时移除丢失设备。";
-export const ABILITY_TEXT =
-  "手机能做会话里的一切：在任意项目新建会话、对话（含图片与 @ 文件引用）、切换模型、思考档位与权限预设、压缩、斜杠命令与技能、权限与提问、中断、回退与重发、分叉、查看本轮改动和用量。设置、服务商与凭据、MCP 与外部 agent 管理、持久授权、项目信任和 Shell 设置只能在电脑上改——这些在移除手机之后仍会生效。";
+export const PAIR_TRUST_NOTE = "中继只转发密文；详细的信任说明见「设置 › 关于」。";
 export function iosBrowser(): boolean {
   return (
     /iPhone|iPad|iPod/.test(navigator.userAgent) ||
@@ -618,7 +617,7 @@ export function PhoneApp({
               {platform.pairHint ??
                 "在电脑的「设置 › 远程」登记中继，然后选择「配对新手机」，用相机扫码。"}
             </p>
-            <p>{platform.trustText ?? TRUST_TEXT}</p>
+            <p>{PAIR_TRUST_NOTE}</p>
             {pairForm}
           </>
         )}
@@ -948,8 +947,7 @@ export function PhoneApp({
           </section>
         )}
         <section className="phone-section" aria-label="关于">
-          <h3>关于与信任边界</h3>
-          <p>{ABILITY_TEXT}</p>
+          <h3>关于</h3>
           <p>{platform.trustText ?? TRUST_TEXT}</p>
         </section>
       </section>
@@ -1013,11 +1011,7 @@ export function PhoneApp({
           >
             <IconMore />
           </button>
-        ) : page.kind === "settings" ||
-          page.kind === "usage" ||
-          page.kind === "ext" ||
-          page.kind === "welcome" ||
-          offer ? (
+        ) : page.kind === "settings" || page.kind === "usage" || page.kind === "ext" || offer ? (
           <span className="phone-header-side" />
         ) : (
           <button

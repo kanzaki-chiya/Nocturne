@@ -141,7 +141,7 @@ export function SubagentProfileEditor({
             set({ description: event.target.value });
           }}
         />
-        <small>说明适合与不适合的任务；模型名和强度由系统追加。</small>
+        <small>说明适合与不适合的任务。</small>
       </label>
       <div className="profile-pair">
         <div className="profile-field">

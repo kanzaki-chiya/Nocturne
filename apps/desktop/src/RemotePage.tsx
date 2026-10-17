@@ -165,7 +165,6 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
       <header className="ph3">
         <div className="grow">
           <h3>远程</h3>
-          <span className="sub">在手机上继续自己的会话，处理需要确认的操作</span>
         </div>
       </header>
       <div className="remote-body">

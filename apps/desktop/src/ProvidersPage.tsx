@@ -206,7 +206,6 @@ export function ProvidersPage({
   inUse,
   openUrl,
   providersVersion,
-  onOpenModels,
 }: {
   /** 常驻后台的 client；全局服务商配置与 cwd 无关，可为 undefined（尚未就绪） */
   client: RpcClient | undefined;
@@ -219,7 +218,6 @@ export function ProvidersPage({
   openUrl: (url: string) => void;
   /** providersChanged 计数：变化时重取 */
   providersVersion: number;
-  onOpenModels?: (() => void) | undefined;
 }) {
   const [data, setData] = useState<{
     providers: ProviderOverview[];
@@ -392,7 +390,6 @@ export function ProvidersPage({
                   }
                   openUrl={openUrl}
                   onChanged={() => void refresh()}
-                  onOpenModels={onOpenModels}
                 />
               )}
               {selPreset !== undefined && (
@@ -435,7 +432,6 @@ function ProviderDetail({
   inUseModel,
   openUrl,
   onChanged,
-  onOpenModels,
 }: {
   client: RpcClient;
   provider: ProviderOverview;
@@ -448,7 +444,6 @@ function ProviderDetail({
   inUseModel: string | undefined;
   openUrl: (url: string) => void;
   onChanged: () => void;
-  onOpenModels?: (() => void) | undefined;
 }) {
   const [models, setModels] = useState<ModelSettingsView[] | null>(null);
   const [query, setQuery] = useState("");
@@ -898,14 +893,7 @@ function ProviderDetail({
           </div>
         )}
       </div>
-      <span className="fine">
-        R 推理 · I
-        图片输入。停用的模型不会出现在模型菜单里，刷新模型列表后仍保持停用；新出现的模型默认启用。默认模型在「
-        <button type="button" className="lk" onClick={onOpenModels}>
-          模型
-        </button>
-        」页修改。
-      </span>
+      <span className="fine">停用的模型不出现在模型菜单里</span>
 
       {confirm !== null && (
         <ConfirmDialog
@@ -2167,9 +2155,6 @@ function PresetForm({
               </button>
             )}
             {fetchState.kind === "busy" && <span className="fine">正在获取模型列表…</span>}
-            {fetchState.kind === "idle" && (
-              <span className="fine">只请求模型列表，不消耗 token，也不写入任何文件</span>
-            )}
             {fetchState.kind === "ok" && (
               <>
                 <span className={fetchState.result.modelCount > 0 ? "ok" : "bad"}>

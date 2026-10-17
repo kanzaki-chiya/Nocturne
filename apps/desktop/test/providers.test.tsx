@@ -211,12 +211,8 @@ describe("ProvidersPage 列表与详情", () => {
       }),
     );
     await server.initialize();
-    const onOpenModels = vi.fn();
     render(
-      <ProvidersPage
-        {...pageProps({ client: server.client, currentProvider: "openrouter" })}
-        onOpenModels={onOpenModels}
-      />,
+      <ProvidersPage {...pageProps({ client: server.client, currentProvider: "openrouter" })} />,
     );
     await screen.findByText("已配置");
     const list = screen.getByRole("navigation", { name: "服务商列表" });
@@ -236,8 +232,7 @@ describe("ProvidersPage 列表与详情", () => {
     expect(page.querySelectorAll(".mr .model-output")).toHaveLength(3);
     expect(page.querySelector(".mr .m")).not.toBeNull();
     expect(page.querySelector(".mr .cap")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "模型" }));
-    expect(onOpenModels).toHaveBeenCalledTimes(1);
+    expect(page.textContent).toContain("停用的模型不出现在模型菜单里");
     expect(row("chatgpt")?.querySelector(".r.warn")?.textContent).toContain("已失效");
     // 已配置的 openrouter 不再出现在「可添加」；自定义预设始终可添加
     expect(row("OpenRouter")).toBeUndefined();

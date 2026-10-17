@@ -392,7 +392,6 @@ export function Sidebar(props: SidebarProps) {
             </button>
           ))}
         </nav>
-        <div className="ver">设置保存在 ~/.nocturne，主题只存在本机</div>
       </aside>
     );
   }

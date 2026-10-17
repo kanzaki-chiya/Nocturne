@@ -14,7 +14,7 @@ import "./pages.css";
 import "./mcp.css";
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-const propagation = "空闲会话立即生效，正在回复的会话在本轮结束后切换";
+const propagation = "正在回复的会话本轮结束后生效";
 const probeErrors = {
   auth_required: "认证失败，请检查请求头",
   spawn_failed: "启动失败，请检查命令是否已安装、路径是否正确",
@@ -134,10 +134,7 @@ export function McpPage({
       <header className="ph3">
         <div className="grow">
           <h3>MCP</h3>
-          <span className="sub">
-            {servers.length} 台服务器 ·
-            改动对新会话和已打开的会话都生效，正在回复的会话在本轮结束后切换
-          </span>
+          <span className="sub">{servers.length} 台服务器</span>
         </div>
       </header>
       {error && (
@@ -191,7 +188,6 @@ export function McpPage({
                 ))}
             </div>
           ))}
-          <span className="fine pad">项目级配置不在全局页列出，随工作区查看。</span>
         </nav>
         <div className="pane">
           {form && client ? (
@@ -331,7 +327,6 @@ export function McpPage({
           ) : (
             <div className="mcp-empty">
               <h3>给 Nocturne 接上外部工具</h3>
-              <p>MCP 服务器可以提供代码搜索、浏览器、数据库等工具。</p>
               <button className="btn primary" onClick={add}>
                 ＋ 添加服务器
               </button>
