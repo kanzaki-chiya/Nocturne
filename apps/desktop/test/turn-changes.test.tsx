@@ -154,6 +154,16 @@ it("卡片位置与标题合计；整卡不再折叠，刷新不收起文件行"
   expect(file.getAttribute("aria-expanded")).toBe("true");
 });
 
+it("「查看变更」只在桌面传入时出现，点击带上这一轮的 seq", () => {
+  const h = fixture();
+  expect(screen.queryByRole("button", { name: "查看变更" })).toBeNull();
+  const onViewChanges = vi.fn();
+  h.rendered.rerender(<Conversation {...h.props} onViewChanges={onViewChanges} />);
+  const first = screen.getByRole("region", { name: "本轮文件更改 2" });
+  fireEvent.click(within(first).getByRole("button", { name: "查看变更" }));
+  expect(onViewChanges).toHaveBeenCalledWith(2);
+});
+
 it("同用户轮含多个 Turn 时卡片和回复操作只跟最后非空文字", () => {
   const h = fixture();
   h.props.view.entries.push(reply(10, "retry"));

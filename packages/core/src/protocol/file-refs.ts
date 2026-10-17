@@ -53,3 +53,37 @@ export function splitCodeRef(
   if (endLine !== undefined && endLine < line) return { path: trimmed };
   return { path, line, ...(endLine !== undefined ? { endLine } : {}) };
 }
+
+/** `session.readFile` 的读取上限（ADR-0060 第 3 节）：超过时报 file_too_large，不截断 */
+export const READ_FILE_MAX_BYTES = 2 * 1024 * 1024;
+
+export type WorkspaceImageMimeType =
+  | "image/png"
+  | "image/jpeg"
+  | "image/gif"
+  | "image/webp"
+  | "image/bmp"
+  | "image/x-icon"
+  | "image/avif";
+
+/**
+ * 面板「文件」标签读取的工作区文件（ADR-0060 第 3 节）。只读、不产生事件、
+ * 不经权限层；路径按会话工作区解析，链接逃逸与越界一律拒绝。
+ */
+export type WorkspaceFileContent =
+  | {
+      kind: "text";
+      /** 真实路径（已解析链接） */
+      absolutePath: string;
+      relativePath: string;
+      text: string;
+      bytes: number;
+    }
+  | {
+      kind: "image";
+      absolutePath: string;
+      relativePath: string;
+      data: Uint8Array;
+      mimeType: WorkspaceImageMimeType;
+      bytes: number;
+    };

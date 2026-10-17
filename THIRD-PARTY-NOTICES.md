@@ -22,8 +22,24 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `@tauri-apps/api` | 2.12.0 | Apache-2.0 OR MIT |
 | `@tauri-apps/plugin-dialog` | 2.8.0 | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-opener` | 2.6.0 | MIT OR Apache-2.0 |
+| `@codemirror/view` | 6.43.14 | MIT |
+| `@codemirror/state` | 6.7.6 | MIT |
+| `@codemirror/language` | 6.13.1 | MIT |
+| `@codemirror/search` | 6.7.2 | MIT |
+| `@codemirror/lang-css` | 6.3.1 | MIT |
+| `@codemirror/lang-html` | 6.4.12 | MIT |
+| `@codemirror/lang-javascript` | 6.2.5 | MIT |
+| `@codemirror/lang-json` | 6.0.2 | MIT |
+| `@codemirror/lang-markdown` | 6.5.2 | MIT |
+| `@codemirror/lang-python` | 6.2.1 | MIT |
+| `@codemirror/lang-rust` | 6.0.2 | MIT |
+| `@codemirror/lang-xml` | 6.1.0 | MIT |
+| `@codemirror/lang-yaml` | 6.1.3 | MIT |
+| `@lezer/highlight` | 1.2.5 | MIT |
 
 桌面端第 2 步复用 `marked` **18.0.7**（MIT；2026-07-21 发布，采用时已满 7 天）解析 Markdown token，由 React 元素渲染；不使用其 HTML 输出，不渲染原始 HTML。
+
+桌面端右侧面板的只读文件查看用 CodeMirror 6（上表 `@codemirror/*` 与 `@lezer/highlight`，均为 MIT），按需动态加载，不进手机网页。它们间接带入的 `@codemirror/autocomplete`、`@codemirror/lint`、`@lezer/common`、`@lezer/lr`、各语言的 `@lezer/*` 解析器、`style-mod`、`w3c-keyname`、`crelt`、`@marijn/find-cluster-break` 也都是 MIT。
 
 | 开发与测试依赖 | 版本 | 许可证 |
 |---|---:|---|

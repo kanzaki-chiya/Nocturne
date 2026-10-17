@@ -52,6 +52,7 @@ import type {
   SessionRewoundPayload,
   ReadAttachmentResult,
   SessionSummary,
+  WorkspaceFileContent,
   SettingItem,
   SettingsPatch,
   SubmitInput,
@@ -200,6 +201,8 @@ export interface RpcSession {
    * 越界路径照常返回绝对路径与 exists，由客户端决定入口。
    */
   resolveFiles(paths: string[]): Promise<FileRefResolution[]>;
+  /** 面板「文件」标签读取工作区文件（ADR-0060）；图片字节已解码 */
+  readFile(path: string): Promise<WorkspaceFileContent>;
   readInputHistory(): Promise<string[]>;
   recordInputHistory(text: string): Promise<void>;
   close(): Promise<void>;
@@ -587,10 +590,12 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       },
       async readAttachment(file) {
         const result = await call("session.readAttachment", { ...p, file });
-        const binary = atob(result.data);
-        const data = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) data[i] = binary.charCodeAt(i);
-        return { data, mimeType: result.mimeType, bytes: result.bytes };
+        return { data: decodeBase64(result.data), mimeType: result.mimeType, bytes: result.bytes };
+      },
+      async readFile(path) {
+        const result = await call("session.readFile", { ...p, path });
+        if (result.kind === "text") return result;
+        return { ...result, data: decodeBase64(result.data) };
       },
       submit: async (input) => {
         const attachments = input.attachments?.map((a) => ({
@@ -894,6 +899,13 @@ export function encodeBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + step));
   }
   return btoa(binary);
+}
+
+export function decodeBase64(text: string): Uint8Array {
+  const binary = atob(text);
+  const data = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) data[i] = binary.charCodeAt(i);
+  return data;
 }
 
 export interface SessionViewTracker {

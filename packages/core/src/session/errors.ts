@@ -19,7 +19,19 @@ export type SessionErrorCode =
   /** 附件读取发生其他 I/O 错误 */
   | "attachment_read_failed"
   /** 附件字节大小或 sha256 与日志引用不符 */
-  | "attachment_corrupt";
+  | "attachment_corrupt"
+  /** session.readFile：路径含 ..、控制字符、备用数据流或设备名（ADR-0060） */
+  | "invalid_file_path"
+  /** session.readFile：路径或其链接目标在工作区之外 */
+  | "file_outside_workspace"
+  | "file_not_found"
+  /** session.readFile：目录或其他非普通文件 */
+  | "file_not_regular"
+  /** session.readFile：超过 READ_FILE_MAX_BYTES，不截断返回 */
+  | "file_too_large"
+  /** session.readFile：不是文本也不是可显示的图片 */
+  | "file_binary"
+  | "file_read_failed";
 
 export class SessionError extends Error {
   readonly code: SessionErrorCode;

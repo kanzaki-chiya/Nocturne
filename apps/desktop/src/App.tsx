@@ -46,7 +46,13 @@ import {
   pushRemoteNotification,
 } from "./notify";
 import { abbreviateHome, middleTruncate } from "./paths";
-import { createPrefsStore, migrateLegacyProjectOrder, type PrefsStore } from "./prefs";
+import { useSidePanel, type SidePanelController } from "./PanelHost";
+import {
+  createPrefsStore,
+  FILE_OPENER_LABELS,
+  migrateLegacyProjectOrder,
+  type PrefsStore,
+} from "./prefs";
 import { useDraftControls, useSessionControls } from "./session-controls";
 import {
   buildSessionTree,
@@ -130,13 +136,18 @@ export function App({ host }: { host: DesktopHost }) {
    * 回答内文件引用的打开能力（U-09）：左键按"打开文件用"设置打开，右键菜单
    * 列出资源管理器与检测到的编辑器。prefsVersion 驱动设置变更后重算。
    */
+  const panelRef = useRef<SidePanelController | null>(null);
   const fileLinks: FileLinkHooks = useMemo(() => {
-    const opener = () => prefs.get().fileOpener ?? "system";
+    // 缺省 Nocturne 面板（ADR-0060）；面板之外的选择照旧
+    const opener = () => prefs.get().fileOpener ?? "panel";
     return {
-      openerLabel: () =>
-        opener() === "vscode" ? "VS Code" : opener() === "cursor" ? "Cursor" : "系统默认程序",
-      open: async (absolutePath, line) => {
+      openerLabel: () => FILE_OPENER_LABELS[opener()],
+      open: async (absolutePath, line, ref) => {
         const kind = opener();
+        if (kind === "panel") {
+          panelRef.current?.openFile(absolutePath, line, ref);
+          return;
+        }
         // 选中的编辑器没装（或探测失败）时退回系统默认程序
         if (kind === "system" || !editors[kind]) {
           await host.openPath(absolutePath);
@@ -824,6 +835,17 @@ export function App({ host }: { host: DesktopHost }) {
   /** 当前选中会话的打开失败（占位区显示错误与「重试」，不退回上一个会话） */
   const selectedOpenError =
     selectedId === null ? undefined : conversations.openErrors.get(selectedId);
+  const sidePanel = useSidePanel({
+    prefs,
+    host,
+    active: active?.dead === true ? undefined : active,
+    opened: () => conversations.opened.values(),
+    loadDiff: (entry, seq, path) => conversations.turnChangeDiff(entry, seq, path),
+    editors,
+    settingsOpen: page !== null,
+    plainKey: effectiveWorkspace === null ? null : projectKey(effectiveWorkspace),
+  });
+  panelRef.current = sidePanel;
   // 会话由忙转闲时刷新一次列表（标题/时间可能更新）；切换本身由
   // selectSession 刷新一次，不在此重复（ADR-0051）
   const runningSessions = useRef<ReadonlySet<string>>(new Set());
@@ -960,7 +982,10 @@ export function App({ host }: { host: DesktopHost }) {
   ];
 
   return (
-    <div className={`body${page !== null ? " settings-mode" : ""}`}>
+    <div
+      className={`body${page !== null ? " settings-mode" : ""}${sidePanel.bodyClass}`}
+      ref={sidePanel.bodyRef}
+    >
       <Sidebar
         tree={tree}
         pinnedIds={pinnedIds}
@@ -1037,7 +1062,8 @@ export function App({ host }: { host: DesktopHost }) {
           setPage(null);
         }}
       />
-      <div className="main">
+      <div className={`main${sidePanel.mainClass}`}>
+        {sidePanel.mainOverlays}
         {(backendExit !== null || startupError !== null) && (
           <div className="banner">
             {backendExit !== null && (
@@ -1188,10 +1214,10 @@ export function App({ host }: { host: DesktopHost }) {
                   section={page}
                   client={pageClient}
                   theme={p.theme ?? "system"}
-                  fileOpener={p.fileOpener ?? "system"}
+                  fileOpener={p.fileOpener ?? "panel"}
                   editors={editors}
                   onFileOpenerChange={(opener) => {
-                    prefs.update({ fileOpener: opener === "system" ? undefined : opener });
+                    prefs.update({ fileOpener: opener === "panel" ? undefined : opener });
                     bumpPrefs();
                     return prefs.persistent;
                   }}
@@ -1268,6 +1294,7 @@ export function App({ host }: { host: DesktopHost }) {
                 turnChanges={active.turnChanges}
                 onRewindFiles={(seq) => conversations.rewindFiles(seq)}
                 loadChangeDiff={(seq, path) => conversations.turnChangeDiff(active, seq, path)}
+                onViewChanges={sidePanel.viewChanges}
                 onSubmit={(input) => submitInput(input)}
                 onInterrupt={() => {
                   conversations.interrupt();
@@ -1479,6 +1506,7 @@ export function App({ host }: { host: DesktopHost }) {
           </div>
         )}
       </div>
+      {sidePanel.panel}
     </div>
   );
 }
@@ -1502,6 +1530,8 @@ interface SessionPaneProps {
   turnChanges: ReadonlyMap<number, TurnChanges>;
   onRewindFiles: (seq: number) => Promise<void>;
   loadChangeDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
+  /** 改动卡片「查看变更」→ 右侧面板（ADR-0060） */
+  onViewChanges: (seq: number) => void;
   onSubmit: (input: ComposerSubmit) => Promise<boolean>;
   onInterrupt: () => void;
   onSlash: (line: string) => Promise<boolean>;
@@ -1534,6 +1564,7 @@ function SessionPane({
   turnChanges,
   onRewindFiles,
   loadChangeDiff,
+  onViewChanges,
   onSubmit,
   onInterrupt,
   onSlash,
@@ -1617,6 +1648,7 @@ function SessionPane({
         turnChanges={turnChanges}
         onRewindFiles={onRewindFiles}
         loadChangeDiff={loadChangeDiff}
+        onViewChanges={onViewChanges}
         fileLinks={fileLinks}
       />
       {view.pendingQuestion ? (

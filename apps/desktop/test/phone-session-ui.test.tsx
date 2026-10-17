@@ -105,6 +105,15 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
   const row = container.querySelector<HTMLButtonElement>(".phone-row.session");
   expect(row?.textContent).toContain("测试会话");
   await act(() => row?.click());
+  // ADR-0060：右侧面板、概览按钮只在桌面窗口里，手机共用前端但不出现
+  expect(container.querySelector(".side-panel")).toBeNull();
+  for (const label of ["右侧面板", "会话概览", "查看变更"]) {
+    expect(
+      [...container.querySelectorAll("button")].some(
+        (b) => b.getAttribute("aria-label") === label || b.textContent === label,
+      ),
+    ).toBe(false);
+  }
   const field = container.querySelector<HTMLTextAreaElement>("textarea");
   if (!field) throw new Error("缺少文字输入");
   await act(() => {

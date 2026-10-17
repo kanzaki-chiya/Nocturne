@@ -9,6 +9,7 @@ import type { RpcClient } from "@nocturne/rpc/client";
 
 import { SettingsPage, type SettingsPageSection, type ThemePref } from "../src/SettingsPage";
 import type { SettingItem } from "../src/rpc-types";
+import type { FileOpener } from "../src/prefs";
 import type { CheckResult } from "../src/updater";
 import { fakeServer, RpcFail, withInit } from "./fake-server";
 
@@ -119,9 +120,9 @@ function props(
     section?: SettingsPageSection;
     theme?: ThemePref;
     onThemeChange?: (t: ThemePref) => boolean;
-    fileOpener?: "system" | "vscode" | "cursor";
+    fileOpener?: FileOpener;
     editors?: { vscode: boolean; cursor: boolean };
-    onFileOpenerChange?: (o: "system" | "vscode" | "cursor") => boolean;
+    onFileOpenerChange?: (o: FileOpener) => boolean;
     onConfigSaved?: () => void;
     onOpenProviders?: () => void;
     onOpenSubagents?: () => void;
@@ -144,7 +145,7 @@ function props(
     workspaceOverridden: false,
     ...(overrides?.update !== undefined ? { update: overrides.update } : {}),
     onThemeChange: overrides?.onThemeChange ?? (() => true),
-    fileOpener: overrides?.fileOpener ?? ("system" as const),
+    fileOpener: overrides?.fileOpener ?? ("panel" as const),
     editors: overrides?.editors ?? { vscode: true, cursor: false },
     onFileOpenerChange: overrides?.onFileOpenerChange ?? (() => true),
     onWorkspaceChange: () => Promise.resolve(undefined),
@@ -930,14 +931,13 @@ it("模型页的子代理模型行跳转到设置 › 子代理，不再弹出�
   server.close();
 });
 
-it("打开文件用：只列检测到的编辑器，选择写本机 prefs", async () => {
+it("打开文件用：缺省 Nocturne 面板，只列检测到的编辑器，选择写本机 prefs", async () => {
   const server = fakeServer(handlers());
   await server.initialize();
   const onFileOpenerChange = vi.fn(() => true);
   render(
     <SettingsPage
       {...props(server.client, {
-        fileOpener: "system",
         editors: { vscode: true, cursor: false },
         onFileOpenerChange,
       })}
@@ -945,14 +945,17 @@ it("打开文件用：只列检测到的编辑器，选择写本机 prefs", asyn
   );
   await screen.findByText("默认权限预设");
   const trigger = screen.getByRole("combobox", { name: "打开文件用" });
+  expect(trigger.textContent).toContain("Nocturne 面板");
   fireEvent.click(trigger);
+  expect(screen.getByRole("option", { name: /Nocturne 面板/ })).toBeTruthy();
+  expect(screen.getByRole("option", { name: /系统默认程序/ })).toBeTruthy();
   expect(screen.getByRole("option", { name: /VS Code/ })).toBeTruthy();
   expect(screen.queryByRole("option", { name: /Cursor/ })).toBeNull();
   fireEvent.click(screen.getByRole("option", { name: /VS Code/ }));
   expect(onFileOpenerChange).toHaveBeenCalledWith("vscode");
   expect(await screen.findByRole("status")).toHaveProperty(
     "textContent",
-    "✓已保存 打开文件用 = vscode",
+    "✓已保存 打开文件用 = VS Code",
   );
   server.close();
 });

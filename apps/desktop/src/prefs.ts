@@ -5,8 +5,22 @@
  */
 
 import type { ProjectSort } from "./session-tree";
+import { parseStoredTabs, type StoredPanelTab } from "./side-panel";
 
 export type { ProjectSort };
+
+export type FileOpener = "panel" | "system" | "vscode" | "cursor";
+
+export const FILE_OPENER_LABELS: Record<FileOpener, string> = {
+  panel: "Nocturne 面板",
+  system: "系统默认程序",
+  vscode: "VS Code",
+  cursor: "Cursor",
+};
+
+export function isFileOpener(value: unknown): value is FileOpener {
+  return value === "panel" || value === "system" || value === "vscode" || value === "cursor";
+}
 
 export const PREFS_KEY = "nocturne.desktop.prefs.v1";
 
@@ -37,10 +51,25 @@ export interface Prefs {
   /** 常驻任务清单折叠状态；缺省展开，全局一份 */
   todosCollapsed?: boolean | undefined;
   /**
-   * 回答内文件引用"打开文件用"（U-09）：系统默认程序 / VS Code / Cursor。
-   * 存应用数据（localStorage），不进 settings.json；缺省 system。
+   * 回答内文件引用"打开文件用"（U-09、ADR-0060）：Nocturne 面板 / 系统默认程序 /
+   * VS Code / Cursor。存应用数据（localStorage），不进 settings.json；缺省 panel。
    */
-  fileOpener?: "system" | "vscode" | "cursor" | undefined;
+  fileOpener?: FileOpener | undefined;
+  /**
+   * ADR-0060 升级迁移标记：没有这个标记的旧数据，已有的 fileOpener 一律改回缺省
+   * （Nocturne 面板），只做一次；之后用户改回 VS Code 等保留。
+   */
+  fileOpenerMigrated?: boolean | undefined;
+  /** 右侧面板开关（ADR-0060 第 1 节）；缺省关 */
+  panelOpen?: boolean | undefined;
+  /** 右侧面板宽度 px；缺省 PANEL_DEFAULT_WIDTH，读取时夹在上下限之间 */
+  panelWidth?: number | undefined;
+  /** 会话概览浮层开关；缺省关 */
+  overviewOpen?: boolean | undefined;
+  /** 重启恢复的面板标签（只存「文件」和「变更」） */
+  panelTabs?: StoredPanelTab[] | undefined;
+  /** 重启恢复时选中的标签 id */
+  panelActiveTab?: string | undefined;
   /** 上次检查更新的时间戳 ms；自动与手动检查都计入 24h 节流 */
   lastUpdateCheck?: number | undefined;
   /** 上次检查发现的新版本；「稍后」只清本次运行，重启后若仍比当前新则继续提示 */
@@ -106,9 +135,21 @@ function parse(raw: string | null): Prefs {
   if (plainWorkspaces !== undefined) prefs.plainWorkspaces = plainWorkspaces;
   if (typeof obj.autoUpdate === "boolean") prefs.autoUpdate = obj.autoUpdate;
   if (typeof obj.todosCollapsed === "boolean") prefs.todosCollapsed = obj.todosCollapsed;
-  if (obj.fileOpener === "system" || obj.fileOpener === "vscode" || obj.fileOpener === "cursor") {
-    prefs.fileOpener = obj.fileOpener;
+  // ADR-0060：没有迁移标记的旧选择不读，统一回到缺省的 Nocturne 面板
+  if (obj.fileOpenerMigrated === true) {
+    prefs.fileOpenerMigrated = true;
+    if (isFileOpener(obj.fileOpener)) {
+      prefs.fileOpener = obj.fileOpener;
+    }
   }
+  if (typeof obj.panelOpen === "boolean") prefs.panelOpen = obj.panelOpen;
+  if (typeof obj.panelWidth === "number" && Number.isFinite(obj.panelWidth)) {
+    prefs.panelWidth = obj.panelWidth;
+  }
+  if (typeof obj.overviewOpen === "boolean") prefs.overviewOpen = obj.overviewOpen;
+  const tabs = parseStoredTabs(obj.panelTabs);
+  if (tabs.length > 0) prefs.panelTabs = tabs;
+  if (typeof obj.panelActiveTab === "string") prefs.panelActiveTab = obj.panelActiveTab;
   if (typeof obj.lastUpdateCheck === "number" && Number.isFinite(obj.lastUpdateCheck)) {
     prefs.lastUpdateCheck = obj.lastUpdateCheck;
   }
@@ -152,7 +193,7 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
   } catch {
     prefs = { ...DEFAULTS };
   }
-  return {
+  const store: PrefsStore = {
     get persistent() {
       return persistent;
     },
@@ -170,6 +211,16 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         ...(prefs.autoUpdate !== undefined ? { autoUpdate: prefs.autoUpdate } : {}),
         ...(prefs.todosCollapsed !== undefined ? { todosCollapsed: prefs.todosCollapsed } : {}),
         ...(prefs.fileOpener !== undefined ? { fileOpener: prefs.fileOpener } : {}),
+        ...(prefs.fileOpenerMigrated !== undefined
+          ? { fileOpenerMigrated: prefs.fileOpenerMigrated }
+          : {}),
+        ...(prefs.panelOpen !== undefined ? { panelOpen: prefs.panelOpen } : {}),
+        ...(prefs.panelWidth !== undefined ? { panelWidth: prefs.panelWidth } : {}),
+        ...(prefs.overviewOpen !== undefined ? { overviewOpen: prefs.overviewOpen } : {}),
+        ...(prefs.panelTabs !== undefined
+          ? { panelTabs: prefs.panelTabs.map((tab) => ({ ...tab })) }
+          : {}),
+        ...(prefs.panelActiveTab !== undefined ? { panelActiveTab: prefs.panelActiveTab } : {}),
         ...(prefs.lastUpdateCheck !== undefined ? { lastUpdateCheck: prefs.lastUpdateCheck } : {}),
         ...(prefs.pendingUpdate !== undefined ? { pendingUpdate: { ...prefs.pendingUpdate } } : {}),
       };
@@ -185,4 +236,7 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
       }
     },
   };
+  // ADR-0060 一次性迁移：写回标记，此后用户的选择原样保留
+  if (prefs.fileOpenerMigrated !== true) store.update({ fileOpenerMigrated: true });
+  return store;
 }

@@ -28,6 +28,7 @@ import type {
   CreateSessionOptions,
   FileIndexEntry,
   FileRefResolution,
+  WorkspaceFileContent,
   ImageMimeType,
   JevEndpoint,
   JevReviewerConfig,
@@ -106,6 +107,11 @@ export interface WireAttachment {
   mimeType: ImageMimeType;
   label?: string;
 }
+
+/** `session.readFile` 的线上形状：图片的 `data` 是 base64 字符串 */
+export type WireWorkspaceFile =
+  | Extract<WorkspaceFileContent, { kind: "text" }>
+  | (Omit<Extract<WorkspaceFileContent, { kind: "image" }>, "data"> & { data: string });
 
 export interface SessionParams {
   sessionId: string;
@@ -492,6 +498,14 @@ export interface RpcMethods {
     params: SessionParams & { paths: string[] };
     result: FileRefResolution[];
   };
+  /**
+   * 面板「文件」标签读取工作区文件（ADR-0060 第 3 节）：只读，不进远程白名单；
+   * 图片字节为标准 base64。
+   */
+  "session.readFile": {
+    params: SessionParams & { path: string };
+    result: WireWorkspaceFile;
+  };
   "session.readInputHistory": { params: SessionParams; result: string[] };
   "session.recordInputHistory": { params: SessionParams & { text: string }; result: null };
   "session.close": { params: SessionParams; result: null };
@@ -625,6 +639,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.mcpServers": true,
   "session.fileIndex": true,
   "session.resolveFiles": true,
+  "session.readFile": true,
   "session.readInputHistory": true,
   "session.recordInputHistory": true,
   "session.close": true,

@@ -2395,9 +2395,24 @@ describe("回答内文件引用（U-09）", () => {
     mount(view, { fileLinks, resolveFilesImpl: async (paths: string[]) => inside(paths) });
     fireEvent.click(await screen.findByRole("button", { name: "src/a.ts:12-20" }));
     await waitFor(() => {
-      expect(fileLinks.open).toHaveBeenCalledWith("Z:/project/src/a.ts", 12);
+      expect(fileLinks.open).toHaveBeenCalledWith("Z:/project/src/a.ts", 12, {
+        relativePath: "src/a.ts",
+        endLine: 20,
+      });
     });
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("打开文件用 = Nocturne 面板：菜单「打开」项说明是面板，不另列重复项", async () => {
+    const view = createSessionView();
+    view.entries = [assistant({ text: "看 `src/a.ts:12`" })];
+    const fileLinks = hooks({ openerLabel: () => "Nocturne 面板" });
+    mount(view, { fileLinks, resolveFilesImpl: async (paths: string[]) => inside(paths) });
+    fireEvent.contextMenu(await screen.findByRole("button", { name: "src/a.ts:12" }));
+    const menu = await screen.findByRole("menu");
+    const items = within(menu).getAllByRole("menuitem");
+    expect(items[0]?.textContent).toContain("Nocturne 面板 · 第 12 行");
+    expect(items.filter((item) => item.textContent?.includes("Nocturne 面板"))).toHaveLength(1);
   });
 
   it("右键菜单：打开、资源管理器、检测到的编辑器、复制绝对与相对路径", async () => {

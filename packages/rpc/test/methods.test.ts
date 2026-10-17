@@ -310,6 +310,11 @@ describe("session.* 方法映射", () => {
         paths: "x" as never,
       }),
     ).rejects.toMatchObject({ rpcCode: -32602 });
+    expect(await session.readFile("a.txt")).toMatchObject({ kind: "text" });
+    await expect(session.readFile("../a.txt")).rejects.toMatchObject({
+      rpcCode: -32002,
+      code: "invalid_file_path",
+    });
 
     expect(await session.readInputHistory()).toEqual([]);
     await session.recordInputHistory("第一条");

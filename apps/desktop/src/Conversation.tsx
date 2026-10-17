@@ -76,6 +76,8 @@ export interface ConversationProps {
   turnChanges?: ReadonlyMap<number, TurnChanges>;
   onRewindFiles?: (seq: number) => Promise<void>;
   loadChangeDiff?: (seq: number, path: string) => Promise<TurnChangeDiff>;
+  /** 改动卡片「查看变更」：打开右侧面板的变更标签（ADR-0060）；手机不传 */
+  onViewChanges?: ((seq: number) => void) | undefined;
   /**
    * 回答内文件引用的打开能力（U-09，方案 A）：缺省时 codespan 保持普通
    * 行内代码。历史助手消息传入，实时流式消息不传（流式中引用不完整）。
@@ -87,8 +89,15 @@ export interface ConversationProps {
 export interface FileLinkHooks {
   /** 左键默认动作用的程序名（"打开文件用"设置），菜单「打开」项的说明 */
   openerLabel: () => string;
-  /** 左键：按"打开文件用"设置打开（编辑器带行号，系统默认不带） */
-  open: (absolutePath: string, line?: number) => Promise<void>;
+  /**
+   * 左键：按"打开文件用"设置打开（面板与编辑器带行号，系统默认不带）。
+   * ref 给面板用：相对路径作标签标题，endLine 高亮行范围。
+   */
+  open: (
+    absolutePath: string,
+    line?: number,
+    ref?: { relativePath?: string | undefined; endLine?: number | undefined },
+  ) => Promise<void>;
   /** 已检测到的编辑器：右键菜单逐个列出 */
   editors: () => { vscode: boolean; cursor: boolean };
   /** 用指定编辑器打开并跳到行号 */
@@ -452,7 +461,12 @@ function CodeRef({ text }: { text: string }) {
     });
   };
   const openDefault = () =>
-    hit.isDirectory ? hooks.openFolder(hit.absolutePath) : hooks.open(hit.absolutePath, hit.line);
+    hit.isDirectory
+      ? hooks.openFolder(hit.absolutePath)
+      : hooks.open(hit.absolutePath, hit.line, {
+          relativePath: hit.relativePath,
+          endLine: hit.endLine,
+        });
   const relative = hit.relativePath;
   return (
     <>
@@ -1513,7 +1527,7 @@ export function diffCounts(diff: string): { add: number; del: number } {
 }
 
 /** 展开的 diff 正文；折叠行的「展开」与这里的正文共用同一份按行渲染。 */
-function DiffBody({ diff }: { diff: string }) {
+export function DiffBody({ diff }: { diff: string }) {
   return (
     <div className="diff-body" aria-label="文件差异">
       {diffRows(diff).map((row, index) =>
@@ -2815,6 +2829,7 @@ function ConversationContent({
   turnChanges,
   onRewindFiles,
   loadChangeDiff,
+  onViewChanges,
   hidePersistentPermissions,
   hideRequests = false,
 }: ConversationProps) {
@@ -2853,6 +2868,7 @@ function ConversationContent({
         onRewind={onRewindFiles}
         loadDiff={loadChangeDiff}
         renderDiff={(diff) => <DiffBody diff={diff} />}
+        onViewChanges={onViewChanges}
       />
     ) : null;
   const replies = new Map<string, string>();

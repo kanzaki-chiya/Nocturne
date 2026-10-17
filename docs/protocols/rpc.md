@@ -70,6 +70,7 @@
 | `describeContext` | → `BuiltContext` 去掉发给模型的整份 `request`，只留报告与判定 |
 | `reasoningEffortInfo` / `shellInfo` / `listShells` / `visionInfo` / `mcpServers` / `fileIndex` | 只读查询，结果同进程内 |
 | `resolveFiles` | `{ paths: string[] }` → `FileRefResolution[]`（`{ input, absolutePath, withinWorkspace, relativePath?, exists, isDirectory }`，`relativePath` 只在工作区内给出）；只读，按会话工作区解析路径（相对路径相对工作区，绝对路径规范化后判定是否越界），`paths` 非字符串数组报 -32602。越界路径照常返回绝对路径与 exists，由客户端决定只给复制/显示入口（U-09） |
+| `readFile` | `{ path }` → `{ kind: "text", absolutePath, relativePath, text, bytes }` 或 `{ kind: "image", absolutePath, relativePath, data: base64, mimeType, bytes }`；桌面右侧面板「文件」标签用（[ADR-0060](../decisions/ADR-0060-desktop-side-panel.md)），只读、不产生事件、不经权限层，也不是 agent 工具。路径校验在 Core，见下文 |
 | `readInputHistory` / `recordInputHistory` | → `string[]`；`{ text }` → `null` |
 | `readAttachment` | `{ file }` → `{ data: base64, mimeType, bytes }`；只读取当前会话持久事件登记过的图片附件，见下文 |
 | `close` | → `null`；释放本连接对会话的引用与订阅，最后引用且空闲时才刷盘、释放会话锁，其余会话不受影响 |
@@ -81,6 +82,8 @@
 `readAttachment` 对应 `RuntimeSession.readAttachment(file)`，客户端 `RpcSession.readAttachment(file)` 将标准 base64 解码为 `Uint8Array`。Core 仅接受单个文件名，拒绝路径分隔符、`..`、绝对路径与 Windows 替代数据流；文件必须出现于本会话的持久 `message.user.attachments` 或 `tool.completed.attachments`（包括回退后仍保留的原始记录）。读取当前会话附件目录中的实际文件，每次校验字节数与 sha256，不通过父会话目录兜底，也不允许链接逃逸。分叉读取复制到新 id 的附件；子会话仅授权自身日志里的引用（[sessions.md](../architecture/sessions.md)）。
 
 附件错误以 `SessionError`（`-32002`）返回：`invalid_attachment_file`（非法文件名或链接路径）、`attachment_not_found`（本会话未登记）、`attachment_missing`（文件缺失）、`attachment_corrupt`（大小或 sha256 不符）、`attachment_read_failed`（其他文件读取 I/O 错误，如访问被拒绝）。
+
+`readFile` 对应 `RuntimeSession.readFile(path)`，客户端 `RpcSession.readFile(path)` 把图片的 base64 解码为 `Uint8Array`。`path` 可以是工作区相对路径或绝对路径；Core 先做词法检查（空串、控制字符、`..` 段、Windows 备用数据流与设备名一律拒绝），再取工作区根与目标的真实路径判定归属，符号链接或 junction 指向工作区外的同样拒绝。只读普通文件，上限 `READ_FILE_MAX_BYTES`（2 MiB），超过时整份拒绝、不截断；扩展名是常见图片格式的按图片返回，其余按 BOM（UTF-16）或严格 UTF-8 解码，前 8 KiB 含 NUL 或解码失败视为二进制。错误以 `SessionError`（`-32002`）返回：`invalid_file_path`、`file_outside_workspace`、`file_not_found`、`file_not_regular`、`file_too_large`、`file_binary`、`file_read_failed`（其他 I/O 错误）。
 
 ### 3.3 `provider.*`
 
@@ -255,6 +258,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 | `session.describeContext`、`session.describeSkills`、`session.describeExternalAgents`、`session.mcpServers`、`session.listShells`、`session.shellInfo`、`session.reasoningEffortInfo`、`session.visionInfo`、`session.fileIndex`、`session.resolveFiles` | 允许（只读） |
 | `session.readAttachment` | 允许；附件原始字节超过远程上限报 `attachment_too_large` |
 | `session.readInputHistory`、`session.recordInputHistory` | 允许 |
+| `session.readFile` | 拒绝：只服务本机右侧面板（ADR-0060），手机没有面板，也不扩大远程可读的文件范围 |
 | 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入与 `describeSettings`、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、`remote.*`、`mcp.*`、`agents.*`、`skills.*` |
 
 - **报文上限**：加密通道单条消息超过 `MAX_MESSAGE`（16 MiB）会整条关闭。远程连接的成功结果编码后超过 `REMOTE_MESSAGE_LIMIT`（`MAX_MESSAGE` 减 64 KiB 余量）时改报 `-32004 / response_too_large`；`readAttachment` 先按原始字节预检（base64 后不超上限，`remoteAttachmentLimit`），超限报 `attachment_too_large`，文案「图片过大，请在电脑上查看」。请求方向由手机网页发送前估算，服务端不再放宽。

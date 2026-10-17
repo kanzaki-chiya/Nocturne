@@ -17,6 +17,8 @@ interface Props {
   onRewind: (seq: number) => Promise<void>;
   loadDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
   renderDiff: (diff: string) => ReactNode;
+  /** 「查看变更」：在右侧面板的变更标签里定位这一轮（只有桌面传入） */
+  onViewChanges?: ((seq: number) => void) | undefined;
 }
 
 function Counts({ added, removed }: { added: number; removed: number }) {
@@ -117,7 +119,7 @@ function revertedText(turn: TurnChanges): string {
 const PREVIEW = 3;
 
 export function TurnChangesCard(props: Props) {
-  const { turn, latest, busy, cwd, session, onRewind } = props;
+  const { turn, latest, busy, cwd, session, onRewind, onViewChanges } = props;
   const [showAll, setShowAll] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [target, setTarget] = useState<RewindTarget>();
@@ -247,6 +249,18 @@ export function TurnChangesCard(props: Props) {
             }}
           >
             ↶ 撤销
+          </button>
+        )}
+        {onViewChanges !== undefined && turn.files.length > 0 && (
+          <button
+            type="button"
+            className="u-act"
+            title="在右侧面板查看这一轮的改动"
+            onClick={() => {
+              onViewChanges(turn.seq);
+            }}
+          >
+            查看变更
           </button>
         )}
       </div>

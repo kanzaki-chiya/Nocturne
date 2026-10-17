@@ -159,7 +159,7 @@ import type {
 } from "./protocol/index.js";
 import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
 import { normalizePermissionPreset } from "./protocol/index.js";
-import type { FileRefResolution } from "./protocol/file-refs.js";
+import type { FileRefResolution, WorkspaceFileContent } from "./protocol/file-refs.js";
 import { resolveFileRefs } from "./tools/file-refs.js";
 import { buildFileIndex, type FileIndexEntry } from "./tools/file-index.js";
 import { isReasoningEffort, REASONING_EFFORT_ORDER } from "./protocol/index.js";
@@ -167,6 +167,7 @@ import { validateSettingsPatch } from "./config/settings.js";
 import { resolveSubagentProfile } from "./config/subagent-profiles.js";
 import {
   createSessionStore,
+  readWorkspaceFile,
   SessionError,
   type Session,
   type SessionRecovery,
@@ -388,6 +389,12 @@ export interface RuntimeSession {
    * 与 exists，由客户端决定只给复制/显示入口。
    */
   resolveFiles(paths: string[]): Promise<FileRefResolution[]>;
+  /**
+   * 面板「文件」标签读取工作区文件（ADR-0060 第 3 节）：路径规则同 resolveFiles，
+   * 只允许工作区内的普通文件，链接逃逸、..、备用数据流一律拒绝；返回文本或图片，
+   * 超过 READ_FILE_MAX_BYTES 报 file_too_large。不是 agent 工具，不经权限层。
+   */
+  readFile(path: string): Promise<WorkspaceFileContent>;
   /** 提交一个 Turn；Turn 结束时 resolve（events.md 第 7 节） */
   submit(input: SubmitInput): Promise<TurnEndReason>;
   /** 中断运行中的 Turn；无运行中 Turn 时无操作 */
@@ -2389,6 +2396,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           }),
         );
       },
+      readFile(input) {
+        assertUsable();
+        return readWorkspaceFile(fs, paths, meta.workspaceRoot, input);
+      },
       interrupt() {
         controller?.abort();
         // 压缩是 Turn 之外的会话级活动，interrupt 同样中止它
@@ -3778,7 +3789,14 @@ export {
 } from "./platform/index.js";
 export { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
 export { completeFileRefs, type FileCompletion, type FileIndexEntry } from "./tools/file-index.js";
-export { splitCodeRef, type FileRefResolution, type ParsedFileRef } from "./protocol/file-refs.js";
+export {
+  READ_FILE_MAX_BYTES,
+  splitCodeRef,
+  type FileRefResolution,
+  type ParsedFileRef,
+  type WorkspaceFileContent,
+  type WorkspaceImageMimeType,
+} from "./protocol/file-refs.js";
 // MCP / Hook 装配点类型（modules.md：注入方是 apps；实现位于 packages/mcp）
 export type {
   HookCallInput,

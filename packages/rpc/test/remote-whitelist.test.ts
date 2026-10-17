@@ -56,6 +56,7 @@ const STILL_LOCAL = [
   "runtime.listReviewerSamples",
   "runtime.defaultReviewer",
   "session.setShell",
+  "session.readFile",
   "skills.importSkills",
   "skills.setSkillEnabled",
   "provider.refreshModelsDev",
@@ -71,8 +72,11 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     for (const name of RPC_METHOD_NAMES) {
       if (/^(provider|login|remote|mcp|agents)\./.test(name)) expect(denied).toContain(name);
     }
-    // 会话方法只有写 settings.json 的 setShell 留在本机
-    expect(denied.filter((name) => name.startsWith("session."))).toEqual(["session.setShell"]);
+    // 会话方法只有写 settings.json 的 setShell 与面板读文件（ADR-0060）留在本机
+    expect(denied.filter((name) => name.startsWith("session.")).sort()).toEqual([
+      "session.readFile",
+      "session.setShell",
+    ]);
   });
 
   it("新放开的会话方法都能经远程到达 Core", async () => {
@@ -138,6 +142,9 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     await b.visionInfo();
     await reaches(b.fileIndex());
     expect(await b.resolveFiles(["out.txt"])).toHaveLength(1);
+    // 面板读文件只给电脑（ADR-0060 第 3 节）：远程被拒，本机可读
+    await expect(b.readFile("out.txt")).rejects.toMatchObject({ code: "remote_not_allowed" });
+    expect(await a.readFile("out.txt")).toMatchObject({ kind: "text", text: "ok" });
     await b.recordInputHistory("手机输入");
     expect(await b.readInputHistory()).toContain("手机输入");
     await reaches(b.compact());

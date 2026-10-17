@@ -1527,6 +1527,11 @@ class Connection implements HubPeer {
         }
         return this.session(p).session.resolveFiles(paths as string[]);
       },
+      "session.readFile": async (p) => {
+        const file = await this.session(p).session.readFile(reqString(p, "path"));
+        if (file.kind === "text") return file;
+        return { ...file, data: Buffer.from(file.data).toString("base64") };
+      },
       "session.readInputHistory": (p) => this.session(p).session.readInputHistory(),
       "session.recordInputHistory": async (p) => {
         await this.session(p).session.recordInputHistory(reqString(p, "text"));

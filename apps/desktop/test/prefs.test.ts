@@ -33,6 +33,7 @@ describe("prefs store", () => {
       hidden: [],
       projectSort: "manual",
       plainWorkspaces: [],
+      fileOpenerMigrated: true,
     });
     expect(store2.persistent).toBe(true);
   });
@@ -45,6 +46,7 @@ describe("prefs store", () => {
       hidden: [],
       projectSort: "manual",
       plainWorkspaces: [],
+      fileOpenerMigrated: true,
     });
   });
 
@@ -64,6 +66,7 @@ describe("prefs store", () => {
       hidden: [],
       projectSort: "manual",
       plainWorkspaces: [],
+      fileOpenerMigrated: true,
     });
   });
 
@@ -156,6 +159,7 @@ describe("prefs store", () => {
       hidden: [],
       projectSort: "manual",
       plainWorkspaces: [],
+      fileOpenerMigrated: true,
     });
   });
 
@@ -233,5 +237,82 @@ describe("prefs store", () => {
     expect(bad.autoUpdate).toBeUndefined();
     expect(bad.lastUpdateCheck).toBeUndefined();
     expect(bad.pendingUpdate).toEqual({ version: "0.6.0", notes: null });
+  });
+
+  it("右侧面板：开关、宽度、概览、标签读写往返；损坏的标签逐项丢弃", () => {
+    const storage = memoryStorage();
+    const store = createPrefsStore(storage);
+    store.update({
+      panelOpen: true,
+      panelWidth: 600,
+      overviewOpen: true,
+      panelTabs: [
+        { id: "c", kind: "changes" },
+        {
+          id: "f",
+          kind: "file",
+          workspace: "Z:\\p",
+          sessionId: "s1",
+          absolutePath: "Z:\\p\\a.ts",
+          relativePath: "a.ts",
+          line: 3,
+        },
+      ],
+      panelActiveTab: "f",
+    });
+    const reread = createPrefsStore(storage).get();
+    expect(reread.panelOpen).toBe(true);
+    expect(reread.panelWidth).toBe(600);
+    expect(reread.overviewOpen).toBe(true);
+    expect(reread.panelTabs?.map((tab) => tab.id)).toEqual(["c", "f"]);
+    expect(reread.panelActiveTab).toBe("f");
+
+    const bad = createPrefsStore(
+      memoryStorage({
+        [PREFS_KEY]: JSON.stringify({
+          panelOpen: "yes",
+          panelWidth: "wide",
+          panelTabs: [
+            { id: "x", kind: "file" },
+            { id: "c1", kind: "changes" },
+            { id: "c2", kind: "changes" },
+            { id: "n", kind: "new" },
+          ],
+        }),
+      }),
+    ).get();
+    expect(bad.panelOpen).toBeUndefined();
+    expect(bad.panelWidth).toBeUndefined();
+    // 文件缺字段丢弃；变更只留一个；新标签页不存
+    expect(bad.panelTabs).toEqual([{ id: "c1", kind: "changes" }]);
+  });
+
+  it("打开文件用：缺省为面板；旧选择一次性迁移到面板，之后改回 VS Code 保留", () => {
+    // 升级前存的是 VS Code：没有迁移标记，回到缺省（面板）并写回标记
+    const storage = memoryStorage({ [PREFS_KEY]: JSON.stringify({ fileOpener: "vscode" }) });
+    const first = createPrefsStore(storage);
+    expect(first.get().fileOpener).toBeUndefined();
+    expect(first.get().fileOpenerMigrated).toBe(true);
+    const saved = JSON.parse(storage.data.get(PREFS_KEY) ?? "{}") as Record<string, unknown>;
+    expect(saved.fileOpenerMigrated).toBe(true);
+    expect(saved).not.toHaveProperty("fileOpener");
+    // 迁移后用户再改回 VS Code：重启（多次）后保留
+    first.update({ fileOpener: "vscode" });
+    expect(createPrefsStore(storage).get().fileOpener).toBe("vscode");
+    expect(createPrefsStore(storage).get().fileOpener).toBe("vscode");
+    // system / cursor 同样迁移
+    for (const old of ["system", "cursor"]) {
+      const legacy = createPrefsStore(
+        memoryStorage({ [PREFS_KEY]: JSON.stringify({ fileOpener: old }) }),
+      );
+      expect(legacy.get().fileOpener).toBeUndefined();
+    }
+    // 迁移后的非法值按缺省处理
+    const bad = createPrefsStore(
+      memoryStorage({
+        [PREFS_KEY]: JSON.stringify({ fileOpener: "notepad", fileOpenerMigrated: true }),
+      }),
+    );
+    expect(bad.get().fileOpener).toBeUndefined();
   });
 });

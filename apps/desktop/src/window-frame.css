@@ -19,6 +19,15 @@
   flex: 1;
   min-width: 0;
 }
+.window-tools {
+  display: flex;
+  flex: none;
+}
+/* 面板并排时按钮停在对话区右上角，窗口按钮在面板右上角（--panel-dock 由 App 设置） */
+.window-panel-gap {
+  flex: none;
+  width: max(0px, calc(var(--panel-dock, 0px) - 138px));
+}
 .window-controls {
   display: flex;
   flex: none;

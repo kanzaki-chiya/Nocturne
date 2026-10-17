@@ -1,12 +1,15 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { DesktopHost } from "./host";
+import { TitlebarSlot } from "./PanelChrome";
 import "./window-frame.css";
 
 /** 窗口操作仍走宿主；会话、后台与权限判定不进入标题栏。 */
 export function WindowFrame({ host, children }: { host: DesktopHost; children: ReactNode }) {
   const [maximized, setMaximized] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** App 经 TitlebarPortal 把面板与概览按钮放进来（ADR-0060） */
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     let disposed = false;
     const refresh = () => {
@@ -43,6 +46,8 @@ export function WindowFrame({ host, children }: { host: DesktopHost; children: R
     <div className="window-frame">
       <header className="window-titlebar" aria-label="窗口标题栏">
         <div className="window-drag-region" data-tauri-drag-region />
+        <div className="window-tools" ref={setSlot} />
+        <div className="window-panel-gap" data-tauri-drag-region />
         <div className="window-controls">
           <button
             type="button"
@@ -81,7 +86,7 @@ export function WindowFrame({ host, children }: { host: DesktopHost; children: R
           </button>
         </div>
       </header>
-      {children}
+      <TitlebarSlot.Provider value={slot}>{children}</TitlebarSlot.Provider>
       {error !== null && (
         <div className="window-error" role="alert">
           窗口操作失败：{error}
