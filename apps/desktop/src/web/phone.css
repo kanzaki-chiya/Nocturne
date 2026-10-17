@@ -302,14 +302,48 @@
 .phone .tool-line {
   white-space: normal;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 .phone .tool-arg,
+.phone .tool-line:has(.tool-live) .tool-arg {
+  flex: 1 0 12em;
+  min-width: min(12em, 100%);
+  max-width: 100%;
+}
+.phone .tool-arg,
+.phone .tool-range,
 .phone .tool-live,
 .phone .tool-res {
   white-space: normal;
   overflow: visible;
   overflow-wrap: anywhere;
   text-overflow: clip;
+}
+.phone .tool-range,
+.phone .tool-live,
+.phone .tool-res,
+.phone .tool-res.err,
+.phone .tool-res.recoverable {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.phone .tool-live {
+  flex: 1 0 12em;
+}
+.phone .tool-line:has(.subagent-badge) .tool-range {
+  flex-basis: 100%;
+  order: 1;
+}
+.phone .tool-live,
+.phone .tool-spin,
+.phone .tool-secs,
+.phone .tool-res {
+  order: 2;
+}
+.phone .tool-counts,
+.phone .tool-wait {
+  flex-shrink: 0;
 }
 .phone .tool-dir {
   display: block;
