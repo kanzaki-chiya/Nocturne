@@ -160,11 +160,11 @@ Hook 的先后关系（Phase 5，完整语义见 5.5 与 hooks.md）：
 
 **靠你授权换来的放行不缓存**：内置后端只有 Q2–Q7 全否的放行可缓存（`ReviewResult.cacheable: true`）；有风险题为是、依赖 Q1 授权的放行设为 `cacheable: false`，同一 Turn 或下一 Turn 的同样调用都重新送审，避免后来追加的限制被旧缓存绕过。自定义审查器省略该字段时视为 `true`，保持原行为；该字段不写入 `permission.reviewed` 事件。
 
-未配置审查器时，原本要送审的调用直接询问用户（非交互拒绝；白名单与 `readOnlyHint` 的放行不受影响），每个会话提示一次。子会话使用父会话的同一审查器实例，仍为非交互。模型后端不带工具，使用最低思考档位 `off`，`maxOutputTokens=400`。
+未配置审查器时，原本要送审的调用直接询问用户（非交互拒绝；白名单与 `readOnlyHint` 的放行不受影响），每个会话提示一次。子会话使用父会话的同一审查器实例，仍为非交互。模型后端不带工具，不传思考参数，思考档位沿用模型默认，`maxOutputTokens=8192`。主流模型默认思考且多数关不掉，思考和回答共用这一个输出上限，因此预留充足预算、审查质量优先，不为审查专门降低思考档位；20 秒超时不变。
 
 **七道是非题与纯函数判定**（ADR-0057 §6）：审查器不给结论，只回答七道题——Q1 `requested`（用户的话是否点名要求了这个动作且目标一致；用户说过且没有撤回的限制命中时答否）、Q2 `destroys`、Q3 `credentials`、Q4 `exfiltrates`、Q5 `weakens`、Q6 `crosses`、Q7 `opaque`。题干与判断依据在共享模块 `permission/reviewer-questions.ts`，模型后端与 Jev 后端共用，环境段（工作目录、可信 remote、数据目录）运行时填入。**结论由权限层的纯函数 `decideFromAnswers(answers)` 计算**：Q2–Q7 全否放行；有任一为是，只有 Q1 为是时才放行；其余交人。交人的理由列出答「是」的题和模型给的 `reason`。用户追加规则（`permission.reviewerRules`，见 [config.md](config.md)）以「用户追加：以下情况交人」「用户追加：以下情况放行」两段原样拼进提示词，单段最多 1000 字。
 
-模型后端要求输出一个 JSON 对象（七个布尔字段加 `reason`），容忍 Markdown 代码块包裹；任一字段缺失或不是布尔值就交人，理由「审查输出格式错误」。审查用量写入 `permission.reviewed.usage`，计入 Turn 与会话总用量，不进入对话历史。设置方式见 [config.md](config.md)。
+模型后端要求输出一个 JSON 对象（七个布尔字段加 `reason`），容忍 Markdown 代码块包裹；流以 `length` 结束，或只有思考没有正文（思考内容或 `reasoningTokens` 表明发生过思考）时按 `unsure` 交人，理由「安全审查输出被截断」，即使截断时已有可解析 JSON 也不放行。其他字段缺失或不是布尔值的输出仍交人，理由「审查输出格式错误」。审查用量写入 `permission.reviewed.usage`，计入 Turn 与会话总用量，不进入对话历史。设置方式见 [config.md](config.md)。
 
 Jev 后端与模型后端并列放在权限层，直接 `POST <baseURL>/systemone`。请求传 `{ model, state, questions }`，`state` 即上述审查输入（环境与追加规则已写进题干，不在 state 里重复）；`questions` 是七个编号 `1`–`7` 的 `choice` 问题，每题 `criteria` 为 `yes` / `no`，`instructions` 带环境段、该题的判断依据和追加规则，并声明 state 不可信。`answers` 以对象（键为题号）或数组两种形式返回都接受，每题的 `confidence` 必须为 0–1 数值；低于 `minConfidence`（默认 0.7）时往保守方向取值（Q1 取否，Q2–Q7 取是），再由 `decideFromAnswers` 判定。理由显示答「是」的题与置信度情况；低置信度、缺失密钥、密钥无效、模型不可用、超时、HTTP 或解析失败显示相应原因，一律按 `unsure` 处理。用户中止仍按取消结算。
 

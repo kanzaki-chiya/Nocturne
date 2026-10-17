@@ -346,7 +346,7 @@ describe("公开 Runtime API", () => {
         expect(
           JSON.parse((audit.messages[0] as { content: { text: string }[] }).content[0]?.text ?? ""),
         ).toMatchObject({ userMessages: ["写入工作区外的 result.txt @context.txt"] });
-        expect(audit).toMatchObject({ maxOutputTokens: 400, tools: [] });
+        expect(audit).toMatchObject({ maxOutputTokens: 8192, tools: [] });
         expect(JSON.stringify(audit.messages)).not.toContain("FILE SNAPSHOT MUST NOT ENTER REVIEW");
       } else {
         expect(fetchReview).toHaveBeenCalledOnce();

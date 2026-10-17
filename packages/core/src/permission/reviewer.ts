@@ -16,7 +16,7 @@ export function parseReview(text: string): ReviewResult {
   return parseModelReview(text);
 }
 
-/** 只经 Provider 的公开流接口发请求；off 恒可用，以缺省思考参数表达。 */
+/** 只经 Provider 的公开流接口发请求，思考档位沿用模型默认。 */
 export function createModelSecurityReviewer(
   resolved: ResolvedModel,
   sessionId?: string,
@@ -27,6 +27,8 @@ export function createModelSecurityReviewer(
     async review(input, signal) {
       let text = "";
       let usage: Usage | undefined;
+      let sawReasoning = false;
+      let lengthLimited = false;
       const system = buildReviewSystemPrompt(promptContextFromInput(input));
       try {
         for await (const event of resolved.provider.stream(
@@ -41,13 +43,24 @@ export function createModelSecurityReviewer(
               },
             ],
             tools: [],
-            maxOutputTokens: 400,
+            // 主流模型默认思考且多数关不掉；思考和回答共用输出上限，留足预算以保证审查质量。
+            maxOutputTokens: 8192,
             sessionId,
           },
           signal,
         )) {
           if (event.type === "text_delta") text += event.text;
           if (event.type === "usage") usage = event.usage;
+          if (event.type === "reasoning_delta" || event.type === "reasoning_block") {
+            sawReasoning ||= event.text.trim().length > 0;
+          }
+          if (event.type === "finish" && event.reason === "length") lengthLimited = true;
+        }
+        if (
+          lengthLimited ||
+          (text.trim().length === 0 && (sawReasoning || (usage?.reasoningTokens ?? 0) > 0))
+        ) {
+          return { verdict: "unsure", reason: "安全审查输出被截断", usage };
         }
         return { ...parseModelReview(text), usage };
       } catch (error) {

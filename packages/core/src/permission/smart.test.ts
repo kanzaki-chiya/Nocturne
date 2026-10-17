@@ -521,7 +521,7 @@ describe("模型审查后端（七题 JSON）", () => {
   ])("格式错按 unsure：%s", (text) => {
     expect(parseReview(text)).toEqual({ verdict: "unsure", reason: "审查输出格式错误" });
   });
-  it("经 Provider 请求，无工具/思考参数，400 输出 token，system 为七题提示词，保留独立用量", async () => {
+  it("经 Provider 请求，无工具/思考参数，8192 输出 token，system 为七题提示词，保留独立用量", async () => {
     const provider = new FakeProvider({
       scripts: [
         [
@@ -548,7 +548,7 @@ describe("模型审查后端（七题 JSON）", () => {
     });
     expect(provider.requests[0]).toMatchObject({
       tools: [],
-      maxOutputTokens: 400,
+      maxOutputTokens: 8192,
       sessionId: "root",
     });
     expect(provider.requests[0]?.reasoningEffort).toBeUndefined();
