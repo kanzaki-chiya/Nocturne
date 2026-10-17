@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/android",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Nocturne 安卓 App（Tauri 2 外壳加载随包的手机网页，ADR-0059）",
   "license": "GPL-3.0-only",
   "private": true,
