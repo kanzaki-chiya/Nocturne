@@ -299,9 +299,8 @@
 .phone .conversation-code pre {
   overflow: auto;
 }
+/* 与桌面端一致：各段单行省略；放不下的段整体折到下一行，参数不被挤成竖排 */
 .phone .tool-line {
-  white-space: normal;
-  align-items: flex-start;
   flex-wrap: wrap;
 }
 .phone .tool-arg,
@@ -314,10 +313,9 @@
 .phone .tool-range,
 .phone .tool-live,
 .phone .tool-res {
-  white-space: normal;
-  overflow: visible;
-  overflow-wrap: anywhere;
-  text-overflow: clip;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .phone .tool-range,
 .phone .tool-live,
@@ -347,6 +345,8 @@
 }
 .phone .tool-dir {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--a-muted);
 }
 

@@ -12,7 +12,9 @@ import androidx.core.app.NotificationManagerCompat
 
 /** 与保活通知分开；同一 host/session 的 tag 固定，下一条替换上一条。 */
 object SessionNotifications {
-  private const val CHANNEL = "nocturne_sessions"
+  // 渠道级别创建后不能调高：旧渠道是 DEFAULT，换新 id 用 HIGH 以悬浮通知弹出，并删掉旧渠道
+  private const val CHANNEL = "nocturne_sessions_v2"
+  private const val LEGACY_CHANNEL = "nocturne_sessions"
   const val HOST = "notification_host_id"
   const val SESSION = "notification_session_id"
 
@@ -31,7 +33,8 @@ object SessionNotifications {
     if (!enabled(context)) return false
     val system = context.getSystemService(NotificationManager::class.java)
     if (system.getNotificationChannel(CHANNEL) == null) {
-      system.createNotificationChannel(NotificationChannel(CHANNEL, "会话提醒", NotificationManager.IMPORTANCE_DEFAULT))
+      system.createNotificationChannel(NotificationChannel(CHANNEL, "会话提醒", NotificationManager.IMPORTANCE_HIGH))
+      system.deleteNotificationChannel(LEGACY_CHANNEL)
     }
     if (system.getNotificationChannel(CHANNEL)?.importance == NotificationManager.IMPORTANCE_NONE) return false
     val intent = Intent(context, MainActivity::class.java)
@@ -56,6 +59,7 @@ object SessionNotifications {
       .setSmallIcon(android.R.drawable.ic_dialog_info)
       .setContentTitle(title).setContentText(body)
       .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+      .setPriority(NotificationCompat.PRIORITY_HIGH)
       .setContentIntent(open).setAutoCancel(true)
       .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
       .setPublicVersion(publicVersion)
