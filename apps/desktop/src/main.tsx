@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
+import { installInlineStyleShim } from "./inline-style-shim";
 import { createTauriHost } from "./tauri-host";
 import { WindowFrame } from "./WindowFrame";
 import "./styles.css";
@@ -11,6 +12,9 @@ import "./styles.css";
 import.meta.hot?.on("vite:beforeUpdate", () => {
   window.location.reload();
 });
+
+// CodeMirror、xterm 运行时插的 <style> 在正式包 CSP 下会被拦，见 inline-style-shim.ts
+installInlineStyleShim();
 
 const root = document.getElementById("root");
 const host = createTauriHost();

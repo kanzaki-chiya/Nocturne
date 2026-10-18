@@ -1,13 +1,13 @@
 /**
- * 面板「终端」标签（ADR-0060 第 4 节及 2026-10-18 修订）：一个标签一个进程，
- * 头部 Shell 下拉换 shell（结束旧进程、同一标签开新进程），进程退出后显示退出码与
- * 「重新启动」。终端是用户自己的，agent 看不到也操作不了，不经过权限层。
+ * 面板「终端」标签（ADR-0060 第 4 节及 2026-10-18 两次修订）：一个标签一个进程，
+ * 默认 shell 跟随设置里的 Shell，头部 Shell 下拉只换这一个标签（结束旧进程、同一标签
+ * 开新进程），进程退出后显示退出码与「重新启动」。右键按 Windows Terminal 的规则复制或
+ * 粘贴，剪贴板由外壳读写。终端是用户自己的，agent 看不到也操作不了，不经过权限层。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Dropdown } from "./Dropdown";
 import type { TerminalHost } from "./host";
-import { Menu, MenuItem } from "./Menu";
 import { terminalShell, type ShellOption, type TerminalTab } from "./side-panel";
 import { TerminalSession, type TerminalStatus } from "./terminal-session";
 import type { MountedTerminal } from "./terminal-view";
@@ -28,33 +28,55 @@ export function exitText(code: number | undefined): string {
   return code === undefined ? "进程已退出" : `进程已退出（代码 ${String(code)}）`;
 }
 
+/**
+ * 右键做什么（Windows Terminal 的规则，不弹菜单）：程序开了鼠标上报时交给程序；
+ * 否则有选区就复制并清掉选区，没有选区就粘贴。
+ */
+export function rightClickAction(
+  mouseTracking: boolean,
+  selection: string,
+): "program" | "copy" | "paste" {
+  if (mouseTracking) return "program";
+  return selection === "" ? "paste" : "copy";
+}
+
+/** runtime.listShells 的结果和设置里 Shell 的生效值（种类名或路径；读不到时 undefined） */
+export interface TerminalShellChoice {
+  shells: readonly ShellOption[];
+  setting: string | undefined;
+}
+
 export interface TerminalPaneProps {
   tab: TerminalTab;
   host: TerminalHost;
-  /** runtime.listShells（后台还没连上时等它连上） */
-  listShells: () => Promise<readonly ShellOption[]>;
+  /** runtime.listShells + describeSettings（后台还没连上时等它连上），按终端工作目录取 */
+  loadShells: (cwd: string) => Promise<TerminalShellChoice>;
   /** 标签可见：可见时重排并聚焦 */
   visible: boolean;
   onShellChange: (tabId: string, executable: string) => void;
 }
 
-export function TerminalPane({ tab, host, listShells, visible, onShellChange }: TerminalPaneProps) {
+export function TerminalPane({ tab, host, loadShells, visible, onShellChange }: TerminalPaneProps) {
   const container = useRef<HTMLDivElement>(null);
   const view = useRef<MountedTerminal | null>(null);
   const session = useRef<TerminalSession | null>(null);
   const [shells, setShells] = useState<ShellOption[]>();
+  const [setting, setSetting] = useState<string>();
   const [shellError, setShellError] = useState<string>();
   const [status, setStatus] = useState<TerminalStatus>({ kind: "starting" });
   const [ready, setReady] = useState(false);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const menuAnchor = useRef<HTMLSpanElement>(null);
+  const [clipError, setClipError] = useState<string>();
   const [restarts, setRestarts] = useState(0);
 
+  // 开标签时取一次：之后改设置不影响已经开着的终端，新开的标签才跟随
+  const cwd = tab.cwd;
   useEffect(() => {
     let alive = true;
-    listShells()
-      .then((list) => {
-        if (alive) setShells(terminalShells(list));
+    loadShells(cwd)
+      .then((choice) => {
+        if (!alive) return;
+        setShells(terminalShells(choice.shells));
+        setSetting(choice.setting);
       })
       .catch((e: unknown) => {
         if (alive) setShellError(e instanceof Error ? e.message : String(e));
@@ -62,25 +84,47 @@ export function TerminalPane({ tab, host, listShells, visible, onShellChange }: 
     return () => {
       alive = false;
     };
-  }, [listShells]);
+  }, [loadShells, cwd]);
 
   const shell = useMemo(
-    () => (shells === undefined ? undefined : terminalShell(shells, tab.shell)),
-    [shells, tab.shell],
+    () => (shells === undefined ? undefined : terminalShell(shells, tab.shell, setting)),
+    [shells, tab.shell, setting],
   );
 
-  const copy = () => {
+  // 复制失败的提示几秒后自己消失
+  useEffect(() => {
+    if (clipError === undefined) return;
+    const timer = setTimeout(() => {
+      setClipError(undefined);
+    }, 4000);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [clipError]);
+
+  // 剪贴板都由外壳读写：WebView2 里 navigator.clipboard.writeText 静默失败，readText 会弹权限框
+  const copy = (clear: boolean) => {
     const text = view.current?.selection() ?? "";
-    if (text !== "") void navigator.clipboard.writeText(text).catch(() => undefined);
+    if (text === "") return;
+    if (clear) view.current?.clearSelection();
+    host.writeClipboard(text).then(
+      () => {
+        setClipError(undefined);
+      },
+      (e: unknown) => {
+        setClipError(`复制失败：${e instanceof Error ? e.message : String(e)}`);
+      },
+    );
   };
-  // 菜单「粘贴」由外壳读剪贴板；navigator.clipboard.readText 在 WebView2 里会弹权限框
   const paste = () => {
     void host
       .readClipboard()
       .then((text) => {
         if (text !== "") view.current?.paste(text);
       })
-      .catch(() => undefined);
+      .catch((e: unknown) => {
+        setClipError(`粘贴失败：${e instanceof Error ? e.message : String(e)}`);
+      });
   };
   const actions = useRef({ copy, paste });
   actions.current = { copy, paste };
@@ -107,7 +151,7 @@ export function TerminalPane({ tab, host, listShells, visible, onShellChange }: 
           controller.resize(cols, rows);
         },
         onCopy: () => {
-          actions.current.copy();
+          actions.current.copy(false);
         },
       });
       setReady(true);
@@ -185,6 +229,11 @@ export function TerminalPane({ tab, host, listShells, visible, onShellChange }: 
           </button>
         </div>
       )}
+      {clipError !== undefined && (
+        <div className="sp-term-exit sp-term-clip" role="alert">
+          <span>{clipError}</span>
+        </div>
+      )}
       {(shellError !== undefined || noShell) && (
         <div className="sp-term-exit" role="alert">
           <span>
@@ -196,46 +245,18 @@ export function TerminalPane({ tab, host, listShells, visible, onShellChange }: 
         className="sp-term-body"
         aria-label="终端"
         onContextMenu={(event) => {
+          // 永远不弹浏览器菜单；鼠标上报模式下 xterm 已把右键交给程序
           event.preventDefault();
-          setMenu({ x: event.clientX, y: event.clientY });
+          const term = view.current;
+          if (term === null) return;
+          const action = rightClickAction(term.mouseTracking(), term.selection());
+          if (action === "copy") actions.current.copy(true);
+          else if (action === "paste") actions.current.paste();
+          term.focus();
         }}
       >
         <div className="sp-term-host" ref={container} />
       </div>
-      <span
-        ref={menuAnchor}
-        className="sp-term-anchor"
-        style={menu === null ? undefined : { left: menu.x, top: menu.y }}
-      />
-      {menu !== null && (
-        <Menu
-          anchor={menuAnchor.current}
-          label="终端"
-          onClose={() => {
-            setMenu(null);
-            view.current?.focus();
-          }}
-        >
-          <MenuItem
-            label="复制"
-            right="Ctrl+Shift+C"
-            onSelect={() => {
-              copy();
-              setMenu(null);
-              view.current?.focus();
-            }}
-          />
-          <MenuItem
-            label="粘贴"
-            right="Ctrl+Shift+V"
-            onSelect={() => {
-              paste();
-              setMenu(null);
-              view.current?.focus();
-            }}
-          />
-        </Menu>
-      )}
     </div>
   );
 }

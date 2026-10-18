@@ -13,6 +13,9 @@ export interface MountedTerminal {
   size: () => { cols: number; rows: number };
   focus: () => void;
   selection: () => string;
+  clearSelection: () => void;
+  /** 程序开了鼠标上报（Claude Code、vim、htop 等）：右键交给程序 */
+  mouseTracking: () => boolean;
   paste: (text: string) => void;
   clear: () => void;
   dispose: () => void;
@@ -33,6 +36,14 @@ function isAppShortcut(event: KeyboardEvent): boolean {
   return key === "b" || key === "t" || key === "p";
 }
 
+/** 浅色主题：程序自己给的 256 色 / 真彩色也拉到这个对比度以上（ANSI 黄单独用加深的 token） */
+const LIGHT_MIN_CONTRAST = 4.5;
+
+function isLightTheme(): boolean {
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--a-bg").trim();
+  return luminance(bg || "#121419") > 0.5;
+}
+
 function readTheme(): ITheme {
   const style = getComputedStyle(document.documentElement);
   const v = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
@@ -48,7 +59,7 @@ function readTheme(): ITheme {
     black: light ? text : v("--a-borderStrong", "#3a4150"),
     red: v("--a-error", "#e58f90"),
     green: v("--a-success", "#84c49a"),
-    yellow: v("--a-warning", "#e5bd77"),
+    yellow: v("--a-termYellow", "#e5bd77"),
     blue: v("--a-cat5", "#8fa6c9"),
     magenta: v("--a-cat4", "#d99ac9"),
     cyan: v("--a-accentAlt", "#83c4c8"),
@@ -56,11 +67,15 @@ function readTheme(): ITheme {
     brightBlack: v("--a-faint", "#5a626e"),
     brightRed: v("--a-error", "#e58f90"),
     brightGreen: v("--a-success", "#84c49a"),
-    brightYellow: v("--a-cat3", "#e5bd77"),
+    brightYellow: v("--a-termYellowBright", "#e5bd77"),
     brightBlue: v("--a-accent", "#a6a4e8"),
     brightMagenta: v("--a-cat4", "#d99ac9"),
     brightCyan: v("--a-cat2", "#83c4c8"),
     brightWhite: light ? v("--a-secondary", "#454f5c") : text,
+    // 和面板其余滚动区一样的细滚动条颜色（styles.css .thin-scroll）
+    scrollbarSliderBackground: v("--a-scrollThumb", "rgba(183, 192, 204, 0.22)"),
+    scrollbarSliderHoverBackground: v("--a-scrollThumbHover", "rgba(183, 192, 204, 0.38)"),
+    scrollbarSliderActiveBackground: v("--a-scrollThumbHover", "rgba(183, 192, 204, 0.38)"),
   };
 }
 
@@ -82,6 +97,9 @@ export function mountTerminal(parent: HTMLElement, callbacks: TerminalCallbacks)
     cursorBlink: true,
     allowProposedApi: false,
     theme: readTheme(),
+    minimumContrastRatio: isLightTheme() ? LIGHT_MIN_CONTRAST : 1,
+    // 竖滚动条宽度跟随概览标尺宽度：与面板其余滚动区一样 10px
+    overviewRuler: { width: 10 },
   });
   const fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
@@ -119,6 +137,7 @@ export function mountTerminal(parent: HTMLElement, callbacks: TerminalCallbacks)
   // 主题：设置页改 data-theme，或跟随系统时系统切换
   const retheme = () => {
     term.options.theme = readTheme();
+    term.options.minimumContrastRatio = isLightTheme() ? LIGHT_MIN_CONTRAST : 1;
   };
   const themeObserver = new MutationObserver(retheme);
   themeObserver.observe(document.documentElement, {
@@ -138,6 +157,10 @@ export function mountTerminal(parent: HTMLElement, callbacks: TerminalCallbacks)
       term.focus();
     },
     selection: () => term.getSelection(),
+    clearSelection: () => {
+      term.clearSelection();
+    },
+    mouseTracking: () => term.modes.mouseTrackingMode !== "none",
     paste: (text) => {
       term.paste(text);
     },

@@ -12,7 +12,7 @@ import { createPlatform, type FileSystem, type FileStat } from "../src/platform/
 import { loadConfig } from "../src/config/index.js";
 import { createRuntime, READ_FILE_MAX_BYTES, type Runtime } from "../src/index.js";
 import { FakeProvider } from "../src/provider/index.js";
-import { isNetworkPath, readLocalFile } from "../src/session/local-file.js";
+import { isNetworkPath, readLocalFile, resolveFileRef } from "../src/session/local-file.js";
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 const windows = process.platform === "win32";
@@ -194,5 +194,67 @@ describe("readLocalFile 的链接解析", () => {
     expect(isNetworkPath("\\\\?\\C:\\x")).toBe(false);
     expect(isNetworkPath("C:\\x")).toBe(false);
     expect(isNetworkPath("/home/x")).toBe(false);
+  });
+});
+
+describe("读取与存在性判断的时限（ADR-0060 修订 2026-10-18（二））", () => {
+  const platform = createPlatform();
+  const root = windows ? "Q:\\share" : "/mnt/q";
+  const file = platform.paths.join(root, "report.md");
+  const directory: FileStat = { type: "directory", size: 0, mtimeMs: 0 };
+
+  /** 慢文件系统：模拟映射盘主机离线，某一步一直不返回 */
+  function slowFs(stuck: "lstat" | "stat" | "readFile"): FileSystem {
+    const never = () => new Promise<never>(() => undefined);
+    const fileStat: FileStat = { type: "file", size: 8, mtimeMs: 0 };
+    return {
+      ...platform.fs,
+      lstat: (p) =>
+        stuck === "lstat" ? never() : Promise.resolve(p === file ? fileStat : directory),
+      readlink: never,
+      stat: () => (stuck === "stat" ? never() : Promise.resolve(fileStat)),
+      readFile: () =>
+        stuck === "readFile" ? never() : Promise.resolve(new TextEncoder().encode("# 报告\n")),
+    };
+  }
+
+  it("任何一步卡住都在总时限内报 file_read_timeout", async () => {
+    for (const stuck of ["lstat", "stat", "readFile"] as const) {
+      const started = Date.now();
+      await expect(
+        readLocalFile(slowFs(stuck), platform.paths, file, READ_FILE_MAX_BYTES, 50),
+        stuck,
+      ).rejects.toMatchObject({
+        code: "file_read_timeout",
+        message: "读取超时，所在磁盘可能不可用",
+      });
+      expect(Date.now() - started).toBeLessThan(1000);
+    }
+  });
+
+  it("时限内读完照常返回（映射盘不拒绝）", async () => {
+    const fast: FileSystem = {
+      ...slowFs("readFile"),
+      readFile: () => Promise.resolve(new TextEncoder().encode("ok")),
+    };
+    const result = await readLocalFile(fast, platform.paths, file, READ_FILE_MAX_BYTES, 50);
+    expect(result).toMatchObject({ kind: "text", text: "ok" });
+  });
+
+  it("resolveFileRef：判断超时按不存在返回，不拖住其余路径", async () => {
+    const fs: FileSystem = {
+      ...platform.fs,
+      lstat: (p) =>
+        p.startsWith(root) ? new Promise<never>(() => undefined) : platform.fs.lstat(p),
+    };
+    const local = path.join(ws, "src", "a.ts");
+    const started = Date.now();
+    const [slow, fast] = await Promise.all([
+      resolveFileRef(fs, platform.paths, ws, file, 50),
+      resolveFileRef(fs, platform.paths, ws, local, 50),
+    ]);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(slow).toMatchObject({ exists: false, isDirectory: false, withinWorkspace: false });
+    expect(fast).toMatchObject({ exists: true, withinWorkspace: true });
   });
 });

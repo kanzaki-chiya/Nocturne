@@ -21,6 +21,7 @@ function setup(options: { failOpen?: boolean } = {}) {
     resize: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
     readClipboard: vi.fn(async () => ""),
+    writeClipboard: vi.fn(async () => undefined),
   };
   const output: string[] = [];
   const statuses: TerminalStatus[] = [];

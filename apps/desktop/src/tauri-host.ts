@@ -41,6 +41,7 @@ export function createTauriHost(): DesktopHost {
       resize: (id, cols, rows) => invoke("terminal_resize", { id, cols, rows }),
       close: (id) => invoke("terminal_close", { id }),
       readClipboard: () => invoke<string>("terminal_read_clipboard"),
+      writeClipboard: (text) => invoke("terminal_write_clipboard", { text }),
     },
     async detectEditors() {
       try {

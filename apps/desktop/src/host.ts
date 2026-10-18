@@ -32,8 +32,13 @@ export interface TerminalHost {
   resize: (id: number, cols: number, rows: number) => Promise<void>;
   /** 结束进程；已经结束的也返回成功 */
   close: (id: number) => Promise<void>;
-  /** 读系统剪贴板文本（右键菜单「粘贴」）；剪贴板里没有文本时是空串 */
+  /** 读系统剪贴板文本（右键粘贴）；剪贴板里没有文本时是空串 */
   readClipboard: () => Promise<string>;
+  /**
+   * 写系统剪贴板文本（Ctrl+Shift+C、右键复制）。WebView2 里 navigator.clipboard.writeText
+   * 会静默失败，所以由外壳写；失败时抛错，界面要给出提示。
+   */
+  writeClipboard: (text: string) => Promise<void>;
 }
 
 /**

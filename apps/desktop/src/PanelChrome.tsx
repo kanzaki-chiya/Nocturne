@@ -28,12 +28,15 @@ export function TitlebarButtons({
   overviewOpen,
   overviewDisabled,
   panelOpen,
+  panelDisabled = false,
   onToggleOverview,
   onTogglePanel,
 }: {
   overviewOpen: boolean;
   overviewDisabled: boolean;
   panelOpen: boolean;
+  /** 没有会话（首页、新建会话页）时面板不可用 */
+  panelDisabled?: boolean;
   onToggleOverview: () => void;
   onTogglePanel: () => void;
 }) {
@@ -58,8 +61,9 @@ export function TitlebarButtons({
         type="button"
         className="tb-btn"
         aria-label="右侧面板"
-        title="右侧面板 (Ctrl+B)"
+        title={panelDisabled ? "右侧面板（先打开一个会话）" : "右侧面板 (Ctrl+B)"}
         aria-pressed={panelOpen}
+        disabled={panelDisabled}
         onClick={onTogglePanel}
       >
         <svg viewBox="0 0 16 16" aria-hidden="true">

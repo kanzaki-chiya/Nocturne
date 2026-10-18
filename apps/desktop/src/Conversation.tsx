@@ -1542,9 +1542,13 @@ export function diffCounts(diff: string): { add: number; del: number } {
 }
 
 /** 展开的 diff 正文；折叠行的「展开」与这里的正文共用同一份按行渲染。 */
-export function DiffBody({ diff }: { diff: string }) {
+/**
+ * 差异行。wrap：长行自动换行，续行缩进到代码起点（行号和 +/− 不重复）；
+ * 不传时整行不折、横向滚动（对话里的改动卡片）。
+ */
+export function DiffBody({ diff, wrap = false }: { diff: string; wrap?: boolean }) {
   return (
-    <div className="diff-body" aria-label="文件差异">
+    <div className={`diff-body${wrap ? " diff-wrap" : ""}`} aria-label="文件差异">
       {diffRows(diff).map((row, index) =>
         row.kind === "sep" ? (
           <div key={index} className="diff-row diff-sep" aria-hidden="true">

@@ -285,6 +285,44 @@ describe("prefs store", () => {
     expect(bad.panelTabs).toEqual([{ id: "c1", kind: "changes" }]);
   });
 
+  it("按会话的面板读写往返；迁移完成后不再读旧全局字段；损坏的会话整条丢弃", () => {
+    const storage = memoryStorage();
+    createPrefsStore(storage).update({
+      panelSessions: {
+        a: {
+          open: true,
+          tabs: [{ id: "c", kind: "changes" }],
+          activeTab: "c",
+          treeWidth: 333,
+          wrap: false,
+        },
+        b: { tabs: [] },
+      },
+      panelSessionsMigrated: true,
+      panelTabs: [{ id: "old", kind: "changes" }],
+    });
+    const reread = createPrefsStore(storage).get();
+    expect(reread.panelSessions?.a).toEqual({
+      open: true,
+      tabs: [{ id: "c", kind: "changes" }],
+      activeTab: "c",
+      treeWidth: 333,
+      wrap: false,
+    });
+    expect(reread.panelSessions?.b).toEqual({ tabs: [] });
+    expect(reread.panelSessionsMigrated).toBe(true);
+    expect(reread.panelTabs).toBeUndefined();
+
+    const bad = createPrefsStore(
+      memoryStorage({
+        [PREFS_KEY]: JSON.stringify({
+          panelSessions: { a: "x", b: { tabs: "no", treeWidth: 9999 }, "": { tabs: [] } },
+        }),
+      }),
+    ).get();
+    expect(bad.panelSessions).toEqual({ b: { tabs: [], treeWidth: 420 } });
+  });
+
   it("打开文件用：缺省为面板；旧选择一次性迁移到面板，之后改回 VS Code 保留", () => {
     // 升级前存的是 VS Code：没有迁移标记，回到缺省（面板）并写回标记
     const storage = memoryStorage({ [PREFS_KEY]: JSON.stringify({ fileOpener: "vscode" }) });

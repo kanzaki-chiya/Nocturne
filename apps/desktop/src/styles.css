@@ -31,6 +31,10 @@
   --a-cat1: #a6a4e8;
   --a-cat2: #83c4c8;
   --a-cat3: #e5bd77;
+  --a-termYellow: #e5bd77;
+  --a-termYellowBright: #e5bd77;
+  --a-scrollThumb: rgba(183, 192, 204, 0.22);
+  --a-scrollThumbHover: rgba(183, 192, 204, 0.38);
   --a-cat4: #d99ac9;
   --a-cat5: #8fa6c9;
   color-scheme: dark;
@@ -62,6 +66,11 @@
     --a-cat1: #6255aa;
     --a-cat2: #24727a;
     --a-cat3: #9a6a1c;
+    /* 终端 ANSI 黄 / 亮黄：浅底上对比度 ≥ 4.5（#7a5410 6.49:1，#8a5f12 5.40:1，对 #fafafb） */
+    --a-termYellow: #7a5410;
+    --a-termYellowBright: #8a5f12;
+    --a-scrollThumb: rgba(69, 79, 92, 0.22);
+    --a-scrollThumbHover: rgba(69, 79, 92, 0.4);
     --a-cat4: #a54d8f;
     --a-cat5: #4f6585;
     color-scheme: light;
@@ -95,6 +104,11 @@
   --a-cat1: #6255aa;
   --a-cat2: #24727a;
   --a-cat3: #9a6a1c;
+  /* 终端 ANSI 黄 / 亮黄：浅底上对比度 ≥ 4.5（#7a5410 6.49:1，#8a5f12 5.40:1，对 #fafafb） */
+  --a-termYellow: #7a5410;
+  --a-termYellowBright: #8a5f12;
+  --a-scrollThumb: rgba(69, 79, 92, 0.22);
+  --a-scrollThumbHover: rgba(69, 79, 92, 0.4);
   --a-cat4: #a54d8f;
   --a-cat5: #4f6585;
   color-scheme: light;
@@ -126,6 +140,10 @@
   --a-cat1: #a6a4e8;
   --a-cat2: #83c4c8;
   --a-cat3: #e5bd77;
+  --a-termYellow: #e5bd77;
+  --a-termYellowBright: #e5bd77;
+  --a-scrollThumb: rgba(183, 192, 204, 0.22);
+  --a-scrollThumbHover: rgba(183, 192, 204, 0.38);
   --a-cat4: #d99ac9;
   --a-cat5: #8fa6c9;
   color-scheme: dark;
@@ -203,6 +221,41 @@ button {
   min-height: 0;
   overflow-y: auto;
   flex: 1;
+}
+/*
+ * 细滚动条（ADR-0060 修订 2026-10-18（二））：右侧面板所有滚动区共用。10px、轨道透明、
+ * 滑块取 --a-scrollThumb，悬停加深变粗。不写 scrollbar-width / scrollbar-color：
+ * Chromium 设了这两个标准属性就忽略 ::-webkit-scrollbar，又会露出箭头按钮。
+ */
+.thin-scroll::-webkit-scrollbar,
+.thin-scroll *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.thin-scroll::-webkit-scrollbar-button,
+.thin-scroll *::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.thin-scroll::-webkit-scrollbar-track,
+.thin-scroll::-webkit-scrollbar-corner,
+.thin-scroll *::-webkit-scrollbar-track,
+.thin-scroll *::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.thin-scroll::-webkit-scrollbar-thumb,
+.thin-scroll *::-webkit-scrollbar-thumb {
+  background: var(--a-scrollThumb);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 10px;
+}
+.thin-scroll::-webkit-scrollbar-thumb:hover,
+.thin-scroll *::-webkit-scrollbar-thumb:hover {
+  background: var(--a-scrollThumbHover);
+  background-clip: padding-box;
+  border-width: 2px;
 }
 /* WebView2 的原生 thin 滚动条仍会显示箭头；统一使用无按钮的自定义滚动条。 */
 .tree::-webkit-scrollbar,

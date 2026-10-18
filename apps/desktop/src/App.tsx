@@ -842,21 +842,21 @@ export function App({ host }: { host: DesktopHost }) {
   const sidePanel = useSidePanel({
     prefs,
     host,
-    active: active?.dead === true ? undefined : active,
+    // 面板跟着会话走：首页和新建会话页没有面板（ADR-0060 修订 2026-10-18（二））
+    sessionId: selectedId,
+    active:
+      active === undefined || active.dead === true || active.session.id !== selectedId
+        ? undefined
+        : active,
+    sessionCwd: selected?.cwd,
+    sessions: listed ? sessions : undefined,
+    openIds: new Set(conversations.opened.keys()),
     loadDiff: (entry, seq, path) => conversations.turnChangeDiff(entry, seq, path),
     editors,
     settingsOpen: page !== null,
     plainKey: effectiveWorkspace === null ? null : projectKey(effectiveWorkspace),
     client: pool.get(),
     ensureClient: () => pool.ensure(),
-    // 没有打开会话：最近活动的项目，再不然用户主目录（ADR-0060 第 4 节）
-    terminalCwd: async () => {
-      const recent = sessions.reduce<SessionSummary | undefined>(
-        (best, s) => (best === undefined || s.mtimeMs > best.mtimeMs ? s : best),
-        undefined,
-      );
-      return recent?.cwd ?? (await host.homeDir()) ?? undefined;
-    },
   });
   panelRef.current = sidePanel;
   // 会话由忙转闲时刷新一次列表（标题/时间可能更新）；切换本身由

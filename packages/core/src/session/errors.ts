@@ -31,6 +31,8 @@ export type SessionErrorCode =
   | "file_too_large"
   /** runtime.readFile：不是文本也不是可显示的图片 */
   | "file_binary"
+  /** runtime.readFile：总时限内没读完（映射的网络盘主机离线等），可重试 */
+  | "file_read_timeout"
   | "file_read_failed";
 
 export class SessionError extends Error {

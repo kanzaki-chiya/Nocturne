@@ -368,7 +368,7 @@ pub async fn terminal_close(
     .map_err(|e| CommandError::new("io", e.to_string()))
 }
 
-/// 右键菜单「粘贴」读剪贴板文本。网页里的 `navigator.clipboard.readText` 会让 WebView2
+/// 右键粘贴读剪贴板文本。网页里的 `navigator.clipboard.readText` 会让 WebView2
 /// 弹「想要查看剪贴板」的权限框，所以由外壳直接读；只读 CF_UNICODETEXT。
 /// Ctrl+Shift+V 走浏览器原生粘贴事件，不经过这里。
 #[tauri::command]
@@ -427,10 +427,104 @@ fn read_clipboard_text() -> CmdResult<String> {
     Err(CommandError::new("unsupported", "这个平台还不支持读剪贴板"))
 }
 
+/// 终端复制（Ctrl+Shift+C、有选区时右键）写剪贴板文本。WebView2 里
+/// `navigator.clipboard.writeText` 会静默失败，所以由外壳写；失败返回错误，界面给出提示。
+#[tauri::command]
+pub async fn terminal_write_clipboard(text: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || write_clipboard_text(&text))
+        .await
+        .map_err(|e| CommandError::new("io", e.to_string()))?
+}
+
+/// CF_UNICODETEXT 的内容：UTF-16 加结尾的 NUL
+fn clipboard_units(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(windows)]
+fn write_clipboard_text(text: &str) -> CmdResult<()> {
+    use windows_sys::Win32::Foundation::GlobalFree;
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+    };
+    use windows_sys::Win32::System::Memory::{
+        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
+    };
+    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
+
+    let units = clipboard_units(text);
+    let bytes = units.len() * std::mem::size_of::<u16>();
+    // SAFETY: 标准的剪贴板写入流程。打开后无论结果都 CloseClipboard；GlobalLock 拿到的
+    // 指针只在 GlobalUnlock 之前写入，写入长度等于分配长度。SetClipboardData 成功后内存
+    // 归系统所有，不再释放；失败时自己 GlobalFree。
+    unsafe {
+        let mut opened = false;
+        for _ in 0..10 {
+            if OpenClipboard(std::ptr::null_mut()) != 0 {
+                opened = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        if !opened {
+            return Err(CommandError::new("io", "剪贴板正被别的程序占用"));
+        }
+        let result = (|| {
+            if EmptyClipboard() == 0 {
+                return Err(CommandError::new("io", "清空剪贴板失败"));
+            }
+            let handle = GlobalAlloc(GMEM_MOVEABLE, bytes);
+            if handle.is_null() {
+                return Err(CommandError::new("io", "剪贴板内存分配失败"));
+            }
+            let data = GlobalLock(handle) as *mut u16;
+            if data.is_null() {
+                GlobalFree(handle);
+                return Err(CommandError::new("io", "剪贴板内存锁定失败"));
+            }
+            std::ptr::copy_nonoverlapping(units.as_ptr(), data, units.len());
+            GlobalUnlock(handle);
+            if SetClipboardData(u32::from(CF_UNICODETEXT), handle).is_null() {
+                GlobalFree(handle);
+                return Err(CommandError::new("io", "写入剪贴板失败"));
+            }
+            Ok(())
+        })();
+        CloseClipboard();
+        result
+    }
+}
+
+#[cfg(not(windows))]
+fn write_clipboard_text(_text: &str) -> CmdResult<()> {
+    Err(CommandError::new("unsupported", "这个平台还不支持写剪贴板"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn clipboard_units_are_utf16_with_nul() {
+        assert_eq!(clipboard_units(""), vec![0]);
+        assert_eq!(clipboard_units("a中"), vec![0x61, 0x4e2d, 0]);
+        // 代理对（emoji）占两个单元
+        assert_eq!(clipboard_units("😀").len(), 3);
+    }
+
+    /// 真写系统剪贴板再读回（会覆盖剪贴板，结束时恢复原内容）：
+    /// `cargo test -- --ignored clipboard_round_trip`
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "touches the real system clipboard"]
+    fn clipboard_round_trip() {
+        let before = read_clipboard_text().unwrap_or_default();
+        let text = "nocturne 剪贴板 ✓ https://example.com/a?b=c";
+        write_clipboard_text(text).unwrap();
+        assert_eq!(read_clipboard_text().unwrap(), text);
+        write_clipboard_text(&before).unwrap();
+    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir =

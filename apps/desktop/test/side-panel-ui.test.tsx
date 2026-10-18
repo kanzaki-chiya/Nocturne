@@ -1,10 +1,12 @@
 /**
- * 右侧面板界面（ADR-0060）：文件标签的读取结果、新标签页、标签关闭、快速打开、
- * 终端标签（Shell 下拉、退出与重新启动）、变更按文件合并、窄标签隐藏项目名。
+ * 右侧面板界面（ADR-0060 及修订）：文件标签的读取结果与超时重试、新标签页、标签关闭、
+ * 快速打开、终端标签（默认 shell 跟随设置、Shell 下拉、退出与重新启动、右键复制粘贴、
+ * 剪贴板失败提示、别的会话的终端后台保留）、变更（按文件合并、分隔条、换行、Windows 路径）、
+ * 窄标签隐藏项目名。
  */
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { LocalFileContent, TurnChanges } from "@nocturne/core/protocol";
+import type { LocalFileContent, TurnChangeDiff, TurnChanges } from "@nocturne/core/protocol";
 import { RpcError } from "@nocturne/rpc/client";
 
 import type { TerminalHost, TerminalMessage } from "../src/host";
@@ -16,6 +18,8 @@ import type { FileTab, PanelTab, TerminalTab } from "../src/side-panel";
 const written: string[] = [];
 const pasted: string[] = [];
 const focused = { count: 0 };
+/** 假终端的选区与鼠标上报模式，测试里直接改 */
+const term = { selection: "", mouseTracking: false, cleared: 0 };
 vi.mock("../src/terminal-view", () => ({
   mountTerminal: () => ({
     write: (data: string) => {
@@ -26,7 +30,12 @@ vi.mock("../src/terminal-view", () => ({
     focus: () => {
       focused.count += 1;
     },
-    selection: () => "",
+    selection: () => term.selection,
+    clearSelection: () => {
+      term.selection = "";
+      term.cleared += 1;
+    },
+    mouseTracking: () => term.mouseTracking,
     paste: (text: string) => {
       pasted.push(text);
     },
@@ -37,7 +46,12 @@ vi.mock("../src/terminal-view", () => ({
   }),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  term.selection = "";
+  term.mouseTracking = false;
+  term.cleared = 0;
+});
 
 const fileTab: FileTab = {
   id: "f",
@@ -72,7 +86,7 @@ function props(overrides: Partial<SidePanelProps>): SidePanelProps {
       openInBrowser: vi.fn(async () => undefined),
     },
     terminals: undefined,
-    listShells: vi.fn(async () => []),
+    loadShells: vi.fn(async () => ({ shells: [], setting: undefined })),
     onShellChange: vi.fn(),
     ...overrides,
   };
@@ -114,6 +128,27 @@ it("网络路径被拒绝时给出说明；后台重新连上（readerKey 变化
   view.rerender(<SidePanel {...p} readerKey="2" />);
   await waitFor(() => {
     expect(readFile).toHaveBeenCalledTimes(2);
+  });
+});
+
+it("读取超时：提示所在磁盘可能不可用，「重试」重新读取", async () => {
+  const readFile = vi
+    .fn<(path: string) => Promise<LocalFileContent>>()
+    .mockRejectedValueOnce(new RpcError("file_read_timeout", "读取超时", -32002))
+    .mockResolvedValueOnce({
+      kind: "text",
+      absolutePath: "Z:\\proj\\gone.ts",
+      text: "ok",
+      bytes: 2,
+    });
+  render(<SidePanel {...props({ tabs: [fileTab], activeId: "f", readFile })} />);
+  expect(await screen.findByText("读取超时，所在磁盘可能不可用")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "重试" }));
+  await waitFor(() => {
+    expect(readFile).toHaveBeenCalledTimes(2);
+  });
+  await waitFor(() => {
+    expect(screen.queryByText("读取超时，所在磁盘可能不可用")).toBeNull();
   });
 });
 
@@ -177,6 +212,7 @@ function fakeTerminals() {
       closed.push(id);
     }),
     readClipboard: vi.fn(async () => "echo 剪贴板"),
+    writeClipboard: vi.fn(async (_text: string) => undefined),
   };
   return { host, opened, closed };
 }
@@ -197,7 +233,7 @@ it("终端：按 auto 规则开 pwsh，输出写进终端；进程退出显示�
     tabs: [termTab],
     activeId: "t",
     terminals: fake.host,
-    listShells: vi.fn(async () => SHELLS),
+    loadShells: vi.fn(async () => ({ shells: SHELLS, setting: undefined })),
   });
   render(<SidePanel {...p} />);
   await waitFor(() => {
@@ -228,25 +264,117 @@ it("终端：按 auto 规则开 pwsh，输出写进终端；进程退出显示�
   });
 });
 
-it("终端右键菜单「粘贴」由外壳读剪贴板（不用 navigator.clipboard，免得 WebView2 弹权限框）", async () => {
+async function openTerminal(overrides: Partial<SidePanelProps> = {}) {
   const fake = fakeTerminals();
   const p = props({
     tabs: [termTab],
     activeId: "t",
     terminals: fake.host,
-    listShells: vi.fn(async () => SHELLS),
+    loadShells: vi.fn(async () => ({ shells: SHELLS, setting: undefined })),
+    ...overrides,
   });
-  render(<SidePanel {...p} />);
+  const view = render(<SidePanel {...p} />);
   await waitFor(() => {
     expect(fake.opened).toHaveLength(1);
   });
+  return { fake, p, view };
+}
+
+it("终端右键（Windows Terminal 规则）：没有选区时粘贴，由外壳读剪贴板，不弹菜单", async () => {
+  const { fake } = await openTerminal();
   pasted.length = 0;
-  fireEvent.contextMenu(screen.getByLabelText("终端"));
-  fireEvent.click(await screen.findByText("粘贴"));
+  const body = screen.getByLabelText("终端");
+  const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+  body.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
   await waitFor(() => {
     expect(pasted).toEqual(["echo 剪贴板"]);
   });
   expect(fake.host.readClipboard).toHaveBeenCalledTimes(1);
+  expect(fake.host.writeClipboard).not.toHaveBeenCalled();
+  expect(screen.queryByRole("menu")).toBeNull();
+});
+
+it("终端右键：有选区时复制（外壳写剪贴板）并清掉选区，不粘贴", async () => {
+  const { fake } = await openTerminal();
+  pasted.length = 0;
+  term.selection = "npm test";
+  fireEvent.contextMenu(screen.getByLabelText("终端"));
+  await waitFor(() => {
+    expect(fake.host.writeClipboard).toHaveBeenCalledWith("npm test");
+  });
+  expect(term.cleared).toBe(1);
+  expect(fake.host.readClipboard).not.toHaveBeenCalled();
+  expect(pasted).toEqual([]);
+});
+
+it("终端右键：程序开了鼠标上报（Claude Code 等）时什么都不做，交给程序", async () => {
+  const { fake } = await openTerminal();
+  pasted.length = 0;
+  term.mouseTracking = true;
+  term.selection = "selected";
+  fireEvent.contextMenu(screen.getByLabelText("终端"));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(fake.host.readClipboard).not.toHaveBeenCalled();
+  expect(fake.host.writeClipboard).not.toHaveBeenCalled();
+  expect(term.cleared).toBe(0);
+  expect(pasted).toEqual([]);
+});
+
+it("终端复制失败时给出看得见的提示", async () => {
+  const { fake } = await openTerminal();
+  vi.mocked(fake.host.writeClipboard).mockRejectedValueOnce(new Error("剪贴板被占用"));
+  term.selection = "abc";
+  fireEvent.contextMenu(screen.getByLabelText("终端"));
+  expect((await screen.findByRole("alert")).textContent).toContain("复制失败：剪贴板被占用");
+});
+
+it("终端默认 shell 跟随设置里的 Shell；设置的 shell 没安装时退回 auto", async () => {
+  const bash = await openTerminal({
+    loadShells: vi.fn(async () => ({ shells: SHELLS, setting: "bash" })),
+  });
+  expect(bash.fake.opened[0]?.shell).toBe("C:\\Git\\bin\\bash.exe");
+  // 下拉显示的是这个 shell，没有把设置写回去
+  expect(screen.getByRole("combobox", { name: "Shell" }).textContent).toContain("Git Bash");
+  expect(bash.p.onShellChange).not.toHaveBeenCalled();
+  bash.view.unmount();
+  const missing = await openTerminal({
+    loadShells: vi.fn(async () => ({ shells: SHELLS, setting: "powershell" })),
+  });
+  expect(missing.fake.opened[0]?.shell).toBe("C:\\pwsh\\pwsh.exe");
+  missing.view.unmount();
+  const byPath = await openTerminal({
+    loadShells: vi.fn(async () => ({
+      shells: SHELLS,
+      setting: "c:\\windows\\system32\\CMD.exe",
+    })),
+  });
+  expect(byPath.fake.opened[0]?.shell).toBe("C:\\Windows\\System32\\cmd.exe");
+});
+
+it("别的会话的终端作为隐藏标签页挂着：不在标签栏、不可见、进程不结束", async () => {
+  const other: TerminalTab = { id: "o", kind: "terminal", cwd: "Z:\\other", label: "other" };
+  const { fake, p, view } = await openTerminal();
+  // 切到另一个会话：当前标签换成新标签页，原来的终端留在 panes 里
+  const next: PanelTab[] = [{ id: "n", kind: "new" }];
+  view.rerender(<SidePanel {...p} tabs={next} activeId="n" panes={[termTab, ...next]} />);
+  expect(screen.queryByRole("tab", { name: /终端/ })).toBeNull();
+  expect(fake.closed).toEqual([]);
+  const pane = view.container.querySelector<HTMLElement>(".sp-term")?.parentElement;
+  expect(pane?.hidden).toBe(true);
+  // 另一个会话也开了终端：两个进程并存
+  view.rerender(<SidePanel {...p} tabs={[other]} activeId="o" panes={[termTab, other]} />);
+  await waitFor(() => {
+    expect(fake.opened).toHaveLength(2);
+  });
+  expect(fake.closed).toEqual([]);
+  // 会话被删除：它的终端从 panes 里拿掉即结束进程
+  view.rerender(<SidePanel {...p} tabs={[other]} activeId="o" panes={[other]} />);
+  await waitFor(() => {
+    expect(fake.closed).toEqual([1]);
+  });
 });
 
 it("终端 Shell 下拉只列外壳认可且已安装的 shell；选了交给面板换 shell", async () => {
@@ -255,7 +383,7 @@ it("终端 Shell 下拉只列外壳认可且已安装的 shell；选了交给面
     tabs: [termTab],
     activeId: "t",
     terminals: fake.host,
-    listShells: vi.fn(async () => SHELLS),
+    loadShells: vi.fn(async () => ({ shells: SHELLS, setting: undefined })),
   });
   render(<SidePanel {...p} />);
   await waitFor(() => {
@@ -281,7 +409,7 @@ it("终端换了 shell：结束旧进程，在同一标签开新进程；关闭�
     tabs: [termTab],
     activeId: "t",
     terminals: fake.host,
-    listShells: vi.fn(async () => SHELLS),
+    loadShells: vi.fn(async () => ({ shells: SHELLS, setting: undefined })),
   });
   const view = render(<SidePanel {...p} />);
   await waitFor(() => {
@@ -310,7 +438,7 @@ it("面板收起时终端仍挂着，不结束进程", async () => {
     tabs: [termTab],
     activeId: "t",
     terminals: fake.host,
-    listShells: vi.fn(async () => SHELLS),
+    loadShells: vi.fn(async () => ({ shells: SHELLS, setting: undefined })),
   });
   const view = render(<SidePanel {...p} />);
   await waitFor(() => {
@@ -369,6 +497,101 @@ it("变更：同一文件多轮合并成一行，展开列出各轮，点轮次�
   expect(scrolled.at(-1)).toBe("1:Z:\\proj\\src\\a.ts");
   // 差异区仍按轮各一段
   expect(screen.getAllByRole("region", { name: /a\.ts 第 \d 轮/ })).toHaveLength(2);
+});
+
+function changesProps(overrides: Partial<SidePanelProps> = {}): SidePanelProps {
+  const turns = new Map<number, TurnChanges>([
+    [
+      1,
+      {
+        seq: 1,
+        files: [
+          {
+            path: "Z:\\proj\\docs\\a-very-long-file-name-for-truncation.md",
+            added: 12,
+            removed: 3,
+          },
+          { path: "Z:\\nocturne-mockups\\report.md", added: 4, removed: 0 },
+        ],
+      } as TurnChanges,
+    ],
+  ]);
+  return props({
+    tabs: [{ id: "c", kind: "changes" }],
+    activeId: "c",
+    changes: {
+      workspace: "Z:\\proj",
+      turns,
+      userSeqs: [1],
+      loadDiff: vi.fn(async () => ({ diff: "@@ -1 +1 @@\n-old\n+new line" }) as TurnChangeDiff),
+    },
+    ...overrides,
+  });
+}
+
+it("变更分隔条：拖动调整文件树宽度（松手才保存），← → 键调整，夹在 180–420px", () => {
+  const onTreeWidth = vi.fn();
+  const view = render(<SidePanel {...changesProps({ treeWidth: 260, onTreeWidth })} />);
+  const split = screen.getByRole("separator", { name: "调整文件树宽度" });
+  expect(split.getAttribute("aria-valuenow")).toBe("260");
+  expect(split.getAttribute("aria-valuemin")).toBe("180");
+  expect(split.getAttribute("aria-valuemax")).toBe("420");
+  const grid = view.container.querySelector<HTMLElement>(".sp-changes");
+  // jsdom 没有指针捕获
+  split.setPointerCapture = () => undefined;
+  split.hasPointerCapture = () => false;
+  fireEvent.pointerDown(split, { clientX: 500, pointerId: 1 });
+  fireEvent.pointerMove(split, { clientX: 440, pointerId: 1 });
+  expect(split.getAttribute("aria-valuenow")).toBe("320");
+  expect(grid?.style.getPropertyValue("--sp-tree-width")).toBe("320px");
+  expect(onTreeWidth).not.toHaveBeenCalled();
+  // 拖过头：夹在上限
+  fireEvent.pointerMove(split, { clientX: 0, pointerId: 1 });
+  fireEvent.pointerUp(split, { clientX: 0, pointerId: 1 });
+  expect(onTreeWidth).toHaveBeenLastCalledWith(420);
+  view.rerender(<SidePanel {...changesProps({ treeWidth: 420, onTreeWidth })} />);
+  fireEvent.keyDown(split, { key: "ArrowLeft" });
+  expect(onTreeWidth).toHaveBeenLastCalledWith(420);
+  fireEvent.keyDown(split, { key: "ArrowRight" });
+  expect(onTreeWidth).toHaveBeenLastCalledWith(404);
+  view.rerender(<SidePanel {...changesProps({ treeWidth: 190, onTreeWidth })} />);
+  fireEvent.keyDown(split, { key: "ArrowRight" });
+  expect(onTreeWidth).toHaveBeenLastCalledWith(180);
+});
+
+it("变更换行：默认换行，卡片头「换行」切换并交给面板记住；关掉后差异不换行", async () => {
+  const onWrap = vi.fn();
+  const view = render(<SidePanel {...changesProps({ onWrap })} />);
+  await waitFor(() => {
+    expect(view.container.querySelector(".diff-body")).not.toBeNull();
+  });
+  expect(view.container.querySelector(".diff-body")?.classList.contains("diff-wrap")).toBe(true);
+  const toggle = screen.getAllByRole("button", { name: "换行" })[0];
+  expect(toggle?.getAttribute("aria-pressed")).toBe("true");
+  if (toggle !== undefined) fireEvent.click(toggle);
+  expect(onWrap).toHaveBeenCalledWith(false);
+  view.rerender(<SidePanel {...changesProps({ onWrap, wrap: false })} />);
+  expect(view.container.querySelector(".diff-body")?.classList.contains("diff-wrap")).toBe(false);
+  expect(screen.getAllByRole("button", { name: "换行" })[0]?.getAttribute("aria-pressed")).toBe(
+    "false",
+  );
+});
+
+it("变更：Windows 工作区用反斜杠，工作区外分组是 Z:\\nocturne-mockups，悬停显示完整路径", () => {
+  render(<SidePanel {...changesProps()} />);
+  const tree = screen.getByRole("complementary", { name: "改动的文件" });
+  expect(within(tree).getByText("Z:\\nocturne-mockups")).toBeTruthy();
+  const row = within(tree).getByRole("button", { name: /a-very-long-file-name/ });
+  expect(row.getAttribute("title")).toContain(
+    "Z:\\proj\\docs\\a-very-long-file-name-for-truncation.md",
+  );
+  // 增减行数完整保留在行尾
+  expect(row.querySelector(".sp-counts")?.textContent).toBe("+12−3");
+  const heads = [...document.querySelectorAll<HTMLElement>(".sp-change-path")].map(
+    (node) => node.textContent,
+  );
+  expect(heads).toContain("docs\\a-very-long-file-name-for-truncation.md");
+  expect(heads).toContain("Z:\\nocturne-mockups\\report.md");
 });
 
 it("窄标签：项目名放不下整段隐藏，放得下照常显示", () => {

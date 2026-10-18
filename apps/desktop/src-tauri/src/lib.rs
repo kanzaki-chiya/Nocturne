@@ -70,6 +70,7 @@ pub fn run() {
         terminal::terminal_resize,
         terminal::terminal_close,
         terminal::terminal_read_clipboard,
+        terminal::terminal_write_clipboard,
     ];
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

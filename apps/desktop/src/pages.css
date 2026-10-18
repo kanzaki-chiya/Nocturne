@@ -876,6 +876,15 @@
   color: var(--a-faint);
   font-family: var(--sans);
 }
+/* 下拉跟着值列收窄，不再顶出列压住右侧来源标签（侧面板开着时设置页会很窄） */
+.page3 .s3 .dd {
+  min-width: min(260px, 100%);
+}
+@container settings-content (width < 640px) {
+  .page3 .s3 .dd .dd-d {
+    display: none;
+  }
+}
 .page3 .s3 .src {
   font-size: 11.5px;
   color: var(--a-faint);

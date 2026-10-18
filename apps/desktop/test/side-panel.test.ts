@@ -4,13 +4,20 @@ import type { TurnChanges } from "@nocturne/core/protocol";
 
 import {
   buildChangeTree,
+  CHANGE_TREE_DEFAULT_WIDTH,
+  CHANGE_TREE_MAX_WIDTH,
+  CHANGE_TREE_MIN_WIDTH,
   clampPanelWidth,
+  clampTreeWidth,
   collectChanges,
   dirName,
   fileTabLabel,
   groupChanges,
   isNetworkPath,
+  isWindowsPath,
+  migrateGlobalPanel,
   moveTab,
+  nativeSeparators,
   nextActiveAfterClose,
   PANEL_MAX_WIDTH,
   PANEL_MIN_WIDTH,
@@ -20,10 +27,13 @@ import {
   projectFits,
   rankQuickOpen,
   relativeTo,
+  restoreSessionPanel,
   restoreTabs,
   sessionChangeTotals,
   storedTabs,
+  storeSessionPanel,
   terminalShell,
+  vanishedSessions,
   type FileTab,
   type PanelTab,
 } from "../src/side-panel";
@@ -276,5 +286,102 @@ describe("终端默认 shell", () => {
     expect(terminalShell(shells, "c:\\w\\CMD.exe")?.kind).toBe("cmd");
     expect(terminalShell(shells, "C:\\gone\\pwsh.exe")?.kind).toBe("bash");
     expect(terminalShell([])).toBeUndefined();
+  });
+});
+
+describe("终端 shell 跟随设置（ADR-0060 修订 2026-10-18（二））", () => {
+  const shells = [
+    { kind: "pwsh", name: "PowerShell 7", executable: "C:\\P\\pwsh.exe", available: true },
+    { kind: "bash", name: "Git Bash", executable: "C:\\Git\\bin\\bash.exe", available: true },
+    { kind: "cmd", name: "cmd", executable: "C:\\W\\cmd.exe", available: true },
+    { kind: "powershell", name: "Windows PowerShell", available: false },
+  ];
+  it("auto 按 auto 规则；种类名或路径直接用；没安装退回 auto；标签换过的优先", () => {
+    expect(terminalShell(shells, undefined, "auto")?.kind).toBe("pwsh");
+    expect(terminalShell(shells, undefined, "bash")?.kind).toBe("bash");
+    expect(terminalShell(shells, undefined, "c:\\w\\CMD.EXE")?.kind).toBe("cmd");
+    expect(terminalShell(shells, undefined, "powershell")?.kind).toBe("pwsh");
+    expect(terminalShell(shells, undefined, "D:\\none\\nu.exe")?.kind).toBe("pwsh");
+    expect(terminalShell(shells, "C:\\W\\cmd.exe", "bash")?.kind).toBe("cmd");
+  });
+});
+
+describe("按会话的面板", () => {
+  let n = 0;
+  const id = () => `n${String(++n)}`;
+  it("没有记录：关着、只有新标签页、默认树宽、换行开", () => {
+    const panel = restoreSessionPanel(undefined, id);
+    expect(panel.open).toBe(false);
+    expect(panel.tabs.map((t) => t.kind)).toEqual(["new"]);
+    expect(panel.treeWidth).toBe(CHANGE_TREE_DEFAULT_WIDTH);
+    expect(panel.wrap).toBe(true);
+  });
+  it("存储往返：终端和新标签页不存，树宽与换行保留", () => {
+    const panel = {
+      open: true,
+      tabs: [
+        { id: "c", kind: "changes" as const },
+        file("f", "a.ts"),
+        { id: "t", kind: "terminal" as const, cwd: "Z:\\p", label: "p" },
+      ],
+      activeId: "f",
+      treeWidth: 300,
+      wrap: false,
+    };
+    const stored = storeSessionPanel(panel);
+    expect(stored.tabs.map((t) => t.id)).toEqual(["c", "f"]);
+    const back = restoreSessionPanel(stored, id);
+    expect(back).toMatchObject({ open: true, activeId: "f", treeWidth: 300, wrap: false });
+    expect(back.tabs.map((t) => t.id)).toEqual(["c", "f"]);
+    // 默认值不写进存储
+    expect(storeSessionPanel({ ...panel, open: false, treeWidth: 260, wrap: true })).toEqual({
+      tabs: stored.tabs,
+      activeTab: "f",
+    });
+  });
+  it("旧全局标签只迁给最近活动的会话；它已有记录不覆盖；没有会话不迁", () => {
+    const legacy = { tabs: [{ id: "c", kind: "changes" as const }], activeTab: "c", open: true };
+    const sessions = [
+      { id: "old", mtimeMs: 1 },
+      { id: "new", mtimeMs: 9 },
+    ];
+    expect(migrateGlobalPanel(legacy, sessions, {})).toEqual({
+      new: { open: true, tabs: legacy.tabs, activeTab: "c" },
+    });
+    const existing = { new: { tabs: [] } };
+    expect(migrateGlobalPanel(legacy, sessions, existing)).toBe(existing);
+    expect(migrateGlobalPanel(legacy, [], {})).toEqual({});
+    expect(migrateGlobalPanel({}, sessions, {})).toEqual({});
+  });
+  it("被删除的会话：列表里没有、也没打开着", () => {
+    expect(vanishedSessions(["a", "b", "c"], [{ id: "a" }], new Set(["c"]))).toEqual(["b"]);
+  });
+  it("文件树宽度夹在 180–420px", () => {
+    expect(clampTreeWidth(100)).toBe(CHANGE_TREE_MIN_WIDTH);
+    expect(clampTreeWidth(999)).toBe(CHANGE_TREE_MAX_WIDTH);
+    expect(clampTreeWidth(Number.NaN)).toBe(CHANGE_TREE_DEFAULT_WIDTH);
+    expect(clampTreeWidth(300.4)).toBe(300);
+  });
+  it("Windows 工作区：树里合并的目录用反斜杠", () => {
+    const tree = buildChangeTree(
+      [
+        {
+          key: "k",
+          path: "Z:/m/x/a.md",
+          added: 1,
+          removed: 0,
+          rounds: [],
+          reverted: false,
+          approximate: false,
+        },
+      ],
+      (f) => f.path,
+      "\\",
+    );
+    expect(tree.children[0]?.name).toBe("Z:\\m\\x");
+    expect(isWindowsPath("Z:\\p")).toBe(true);
+    expect(isWindowsPath("/home/u")).toBe(false);
+    expect(nativeSeparators("a/b", true)).toBe("a\\b");
+    expect(nativeSeparators("a/b", false)).toBe("a/b");
   });
 });

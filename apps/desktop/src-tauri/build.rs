@@ -21,6 +21,7 @@ fn main() {
             "terminal_resize",
             "terminal_close",
             "terminal_read_clipboard",
+            "terminal_write_clipboard",
         ]),
     ))
     .expect("failed to run tauri-build");

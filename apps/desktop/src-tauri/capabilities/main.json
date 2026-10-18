@@ -57,6 +57,7 @@
     "allow-terminal-resize",
     "allow-terminal-close",
     "allow-terminal-read-clipboard",
+    "allow-terminal-write-clipboard",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:window:allow-request-user-attention"

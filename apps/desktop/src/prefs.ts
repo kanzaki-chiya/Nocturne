@@ -5,7 +5,12 @@
  */
 
 import type { ProjectSort } from "./session-tree";
-import { parseStoredTabs, type StoredPanelTab } from "./side-panel";
+import {
+  parseStoredSessionPanels,
+  parseStoredTabs,
+  type StoredPanelTab,
+  type StoredSessionPanel,
+} from "./side-panel";
 
 export type { ProjectSort };
 
@@ -60,15 +65,25 @@ export interface Prefs {
    * （Nocturne 面板），只做一次；之后用户改回 VS Code 等保留。
    */
   fileOpenerMigrated?: boolean | undefined;
-  /** 右侧面板开关（ADR-0060 第 1 节）；缺省关 */
-  panelOpen?: boolean | undefined;
-  /** 右侧面板宽度 px；缺省 PANEL_DEFAULT_WIDTH，读取时夹在上下限之间 */
+  /** 右侧面板宽度 px（全局，ADR-0060 第 1 节）；缺省 PANEL_DEFAULT_WIDTH，读取时夹在上下限之间 */
   panelWidth?: number | undefined;
-  /** 会话概览浮层开关；缺省关 */
+  /** 会话概览浮层开关（全局，只在有会话时显示）；缺省关 */
   overviewOpen?: boolean | undefined;
-  /** 重启恢复的面板标签（只存「文件」和「变更」） */
+  /**
+   * 按会话存的面板（ADR-0060 修订 2026-10-18（二））：开关、「文件」「变更」标签、
+   * 当前标签、文件树宽度、换行。会话被删除时一并清掉。
+   */
+  panelSessions?: Record<string, StoredSessionPanel> | undefined;
+  /**
+   * 第 1、2 轮的全局标签已经迁移到会话（只迁一次）。没有这个标记时，下面三个旧字段在
+   * 拿到会话列表后迁移给最近活动的会话，然后清掉。
+   */
+  panelSessionsMigrated?: boolean | undefined;
+  /** 旧：全局面板开关（只读来迁移） */
+  panelOpen?: boolean | undefined;
+  /** 旧：全局面板标签（只读来迁移） */
   panelTabs?: StoredPanelTab[] | undefined;
-  /** 重启恢复时选中的标签 id */
+  /** 旧：全局当前标签（只读来迁移） */
   panelActiveTab?: string | undefined;
   /** 上次检查更新的时间戳 ms；自动与手动检查都计入 24h 节流 */
   lastUpdateCheck?: number | undefined;
@@ -142,14 +157,21 @@ function parse(raw: string | null): Prefs {
       prefs.fileOpener = obj.fileOpener;
     }
   }
-  if (typeof obj.panelOpen === "boolean") prefs.panelOpen = obj.panelOpen;
   if (typeof obj.panelWidth === "number" && Number.isFinite(obj.panelWidth)) {
     prefs.panelWidth = obj.panelWidth;
   }
   if (typeof obj.overviewOpen === "boolean") prefs.overviewOpen = obj.overviewOpen;
-  const tabs = parseStoredTabs(obj.panelTabs);
-  if (tabs.length > 0) prefs.panelTabs = tabs;
-  if (typeof obj.panelActiveTab === "string") prefs.panelActiveTab = obj.panelActiveTab;
+  const sessions = parseStoredSessionPanels(obj.panelSessions);
+  if (Object.keys(sessions).length > 0) prefs.panelSessions = sessions;
+  if (obj.panelSessionsMigrated === true) {
+    prefs.panelSessionsMigrated = true;
+  } else {
+    // 迁移前的旧全局字段；迁移后不再读
+    if (typeof obj.panelOpen === "boolean") prefs.panelOpen = obj.panelOpen;
+    const tabs = parseStoredTabs(obj.panelTabs);
+    if (tabs.length > 0) prefs.panelTabs = tabs;
+    if (typeof obj.panelActiveTab === "string") prefs.panelActiveTab = obj.panelActiveTab;
+  }
   if (typeof obj.lastUpdateCheck === "number" && Number.isFinite(obj.lastUpdateCheck)) {
     prefs.lastUpdateCheck = obj.lastUpdateCheck;
   }
@@ -217,6 +239,19 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         ...(prefs.panelOpen !== undefined ? { panelOpen: prefs.panelOpen } : {}),
         ...(prefs.panelWidth !== undefined ? { panelWidth: prefs.panelWidth } : {}),
         ...(prefs.overviewOpen !== undefined ? { overviewOpen: prefs.overviewOpen } : {}),
+        ...(prefs.panelSessions !== undefined
+          ? {
+              panelSessions: Object.fromEntries(
+                Object.entries(prefs.panelSessions).map(([id, panel]) => [
+                  id,
+                  { ...panel, tabs: panel.tabs.map((tab) => ({ ...tab })) },
+                ]),
+              ),
+            }
+          : {}),
+        ...(prefs.panelSessionsMigrated !== undefined
+          ? { panelSessionsMigrated: prefs.panelSessionsMigrated }
+          : {}),
         ...(prefs.panelTabs !== undefined
           ? { panelTabs: prefs.panelTabs.map((tab) => ({ ...tab })) }
           : {}),

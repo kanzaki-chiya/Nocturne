@@ -315,38 +315,65 @@
   font-size: 11.5px;
 }
 
-/* ── 变更：左边 diff，右边文件树；面板窄时文件树在上 ── */
+/*
+ * ── 变更：左边 diff | 分隔条 | 右边文件树（宽度按会话记住，--sp-tree-width）；
+ * 面板窄于 560px 时文件树移到 diff 上方，最高 190px，分隔条隐藏 ──
+ */
 .sp-changes {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 220px;
+  grid-template-columns: minmax(0, 1fr) 9px var(--sp-tree-width, 260px);
   min-height: 0;
 }
 .sp-changes-diff {
   min-width: 0;
   min-height: 0;
-  overflow: auto;
-  padding: 8px 10px 24px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 8px 6px 24px 10px;
+}
+.sp-tree-split {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sp-tree-split::before {
+  content: "";
+  position: absolute;
+  inset: 0 4px;
+  background: var(--a-border);
+}
+.sp-tree-split:hover::before,
+.sp-tree-split.drag::before,
+.sp-tree-split:focus-visible::before {
+  inset: 0 3px;
+  background: var(--a-accent);
+}
+.sp-tree-split:focus-visible {
+  outline: none;
 }
 .sp-changes-tree {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 6px;
+  min-width: 0;
   min-height: 0;
   padding: 8px 6px;
-  border-left: 1px solid var(--a-border);
 }
 .side-panel {
   container-type: inline-size;
   container-name: side-panel;
 }
-@container side-panel (max-width: 560px) {
+@container side-panel (max-width: 559px) {
   .sp-changes {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(96px, 34%) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .sp-tree-split {
+    display: none;
   }
   .sp-changes-tree {
     grid-row: 1;
-    border-left: 0;
+    max-height: 190px;
     border-bottom: 1px solid var(--a-border);
   }
   .sp-changes-diff {
@@ -376,8 +403,14 @@
   display: grid;
   align-content: start;
   gap: 1px;
+  min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.sp-tree-group {
+  display: grid;
+  min-width: 0;
 }
 .sp-tree-dir,
 .sp-tree-file {
@@ -431,7 +464,8 @@
   border: 1px solid var(--a-border);
   border-radius: 8px;
   background: var(--a-panel);
-  overflow: hidden;
+  /* clip 而不是 hidden：不建滚动容器，头部才能在外层 diff 区里吸顶 */
+  overflow: clip;
   scroll-margin-top: 8px;
 }
 .sp-change.focus {
@@ -441,21 +475,53 @@
   opacity: 0.6;
 }
 .sp-change-head {
+  position: sticky;
+  top: -8px;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
   padding: 7px 10px;
   border-bottom: 1px solid var(--a-border);
+  border-radius: 8px 8px 0 0;
+  background: var(--a-panel);
   font-size: 12px;
 }
+/* 长路径从左边省略，保留文件名 */
 .sp-change-path {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  direction: rtl;
+  text-align: left;
   font: 11.5px var(--mono);
+}
+.sp-change-path bdi {
+  direction: ltr;
+}
+.sp-wrap-btn {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid var(--a-border);
+  border-radius: 5px;
+  color: var(--a-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.sp-wrap-btn:hover {
+  color: var(--a-text);
+}
+.sp-wrap-btn[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+.sp-wrap-btn:focus-visible {
+  outline: 2px solid var(--a-accent);
+  outline-offset: 1px;
 }
 .sp-change-round {
   color: var(--a-faint);
@@ -515,6 +581,25 @@
   padding: 2px 0 2px calc(4em + 1em);
   color: var(--a-faint);
   letter-spacing: 2px;
+}
+/* 不换行：所有行一样宽（取最长行），横向滚动时短行的底色不会中途断掉 */
+.sp-change .diff-body:not(.diff-wrap) {
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr);
+}
+.sp-change .diff-body:not(.diff-wrap) .diff-row {
+  width: auto;
+}
+/* 换行：代码列占满剩余宽度、可在任意位置断（中英文、长 URL），续行缩进到代码起点 */
+.side-panel .diff-wrap .diff-row {
+  width: auto;
+  white-space: pre-wrap;
+}
+.side-panel .diff-wrap .diff-row code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 /* ── 文件 ── */
@@ -930,9 +1015,7 @@
 .sp-term-host .xterm .xterm-viewport {
   background-color: var(--a-bg);
 }
-.sp-term-anchor {
-  position: fixed;
-  width: 0;
-  height: 0;
-  pointer-events: none;
+/* 竖滚动条宽度由 overviewRuler.width 定为 10px，颜色取 --a-scrollThumb（terminal-view.ts） */
+.sp-term-host .xterm .xterm-scrollable-element > .scrollbar > .slider {
+  border-radius: 5px;
 }

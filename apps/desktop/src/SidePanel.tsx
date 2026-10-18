@@ -1,7 +1,8 @@
 /**
  * 右侧面板（ADR-0060）：标签栏、新标签页、「变更」「文件」「终端」三种标签。
  * 面板只读：撤销仍在对话里的改动卡片上，文件第一版不能编辑。
- * 状态（标签、宽度、开关）由 App 持有并存进本机偏好；这里只管渲染与交互。
+ * 状态（按会话的标签、开关、文件树宽度、换行；全局宽度）由 PanelHost 持有并存进本机
+ * 偏好；这里只管渲染与交互。
  */
 import {
   useEffect,
@@ -22,10 +23,16 @@ import type { TerminalHost } from "./host";
 import { displayPath } from "./paths";
 import {
   buildChangeTree,
+  CHANGE_TREE_DEFAULT_WIDTH,
+  CHANGE_TREE_MAX_WIDTH,
+  CHANGE_TREE_MIN_WIDTH,
+  clampTreeWidth,
   collectChanges,
   fileTabLabel,
   groupChanges,
   isHtmlPath,
+  isWindowsPath,
+  nativeSeparators,
   projectFits,
   type ChangeFile,
   type ChangeItem,
@@ -33,10 +40,11 @@ import {
   type ChangesTab,
   type FileTab,
   type PanelTab,
-  type ShellOption,
 } from "./side-panel";
-import { TerminalPane } from "./TerminalPane";
+import { TerminalPane, type TerminalShellChoice } from "./TerminalPane";
 import "./side-panel.css";
+
+export type { TerminalShellChoice };
 
 export interface PanelChangesSource {
   workspace: string;
@@ -58,7 +66,13 @@ export interface PanelFileActions {
 export interface SidePanelProps {
   /** 面板收起时仍然挂着（终端进程不随面板收起结束），只是隐藏 */
   hidden?: boolean;
+  /** 当前会话的标签（标签栏） */
   tabs: readonly PanelTab[];
+  /**
+   * 要挂着的标签页：当前会话的全部标签，加上别的会话的终端（隐藏，进程继续跑）。
+   * 不传时等于 tabs。
+   */
+  panes?: readonly PanelTab[];
   activeId: string;
   overlay: boolean;
   width: number;
@@ -75,6 +89,12 @@ export interface SidePanelProps {
   onAddress: (text: string) => Promise<string | undefined>;
   /** 当前会话的改动；没有打开会话时 undefined */
   changes: PanelChangesSource | undefined;
+  /** 「变更」右侧文件树宽度（按会话记住）；缺省 CHANGE_TREE_DEFAULT_WIDTH */
+  treeWidth?: number | undefined;
+  onTreeWidth?: (width: number) => void;
+  /** 「变更」差异是否自动换行（按会话记住）；缺省换行 */
+  wrap?: boolean;
+  onWrap?: (wrap: boolean) => void;
   /** 没有打开会话时文件入口置灰 */
   canOpenFiles: boolean;
   /** rpc.md runtime.readFile：按绝对路径读取，不依赖会话 */
@@ -84,7 +104,7 @@ export interface SidePanelProps {
   fileActions: PanelFileActions;
   /** 面板终端；没有时「终端」入口置灰 */
   terminals: TerminalHost | undefined;
-  listShells: () => Promise<readonly ShellOption[]>;
+  loadShells: (cwd: string) => Promise<TerminalShellChoice>;
   onShellChange: (tabId: string, executable: string) => void;
 }
 
@@ -399,13 +419,20 @@ function Counts({ added, removed }: { added: number; removed: number }) {
 function ChangeSection({
   item,
   label,
+  title,
   loadDiff,
   highlighted,
+  wrap,
+  onWrap,
 }: {
   item: ChangeItem;
   label: string;
+  /** 悬停显示的完整路径 */
+  title: string;
   loadDiff: PanelChangesSource["loadDiff"];
   highlighted: boolean;
+  wrap: boolean;
+  onWrap: (wrap: boolean) => void;
 }) {
   const ref = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(false);
@@ -461,14 +488,26 @@ function ChangeSection({
       aria-label={`${label} 第 ${item.round} 轮`}
     >
       <header className="sp-change-head">
-        <span className="sp-change-path" title={item.path}>
-          {label}
+        {/* 从左边省略、保留文件名：rtl 容器里放 ltr 的 bdi */}
+        <span className="sp-change-path" title={title}>
+          <bdi>{label}</bdi>
         </span>
         {item.status === "added" && <span className="turn-change-tag">新建</span>}
         {item.status === "deleted" && <span className="turn-change-tag">已删除</span>}
         {item.reverted && <span className="turn-change-tag">已撤销</span>}
         <span className="sp-change-round">第 {item.round} 轮</span>
         {item.unavailable === undefined && <Counts added={item.added} removed={item.removed} />}
+        <button
+          type="button"
+          className="sp-wrap-btn"
+          aria-pressed={wrap}
+          title={wrap ? "长行自动换行（点击改为横向滚动）" : "长行横向滚动（点击改为自动换行）"}
+          onClick={() => {
+            onWrap(!wrap);
+          }}
+        >
+          换行
+        </button>
       </header>
       {item.unavailable !== undefined ? (
         <p className="turn-change-note">{item.unavailable}</p>
@@ -477,7 +516,7 @@ function ChangeSection({
           {error}
         </p>
       ) : result !== undefined ? (
-        <DiffBody diff={result.diff} />
+        <DiffBody diff={result.diff} wrap={wrap} />
       ) : (
         <p className="turn-change-note" role="status">
           正在读取差异…
@@ -496,6 +535,7 @@ function TreeDir({
   onToggleFile,
   onPick,
   selected,
+  fullPath,
 }: {
   dir: ChangeTreeDir;
   depth: number;
@@ -505,6 +545,8 @@ function TreeDir({
   onToggleFile: (file: ChangeFile) => void;
   onPick: (item: ChangeItem) => void;
   selected: string | undefined;
+  /** 悬停显示的完整路径（系统写法） */
+  fullPath: (path: string) => string;
 }) {
   return (
     <>
@@ -521,7 +563,7 @@ function TreeDir({
                 type="button"
                 className={`sp-tree-file${on && !open ? " on" : ""}${file.reverted ? " reverted" : ""}`}
                 style={{ paddingLeft: 8 + depth * 12 }}
-                title={`${file.path} · ${String(file.rounds.length)} 轮`}
+                title={`${fullPath(file.path)} · ${String(file.rounds.length)} 轮`}
                 aria-expanded={multi ? open : undefined}
                 onClick={() => {
                   if (multi) onToggleFile(file);
@@ -548,7 +590,7 @@ function TreeDir({
                     type="button"
                     className={`sp-tree-file sp-tree-roundrow${selected === round.key ? " on" : ""}${round.reverted ? " reverted" : ""}`}
                     style={{ paddingLeft: 8 + (depth + 1) * 12 + 12 }}
-                    title={`${file.path} · 第 ${String(round.round)} 轮`}
+                    title={`${fullPath(file.path)} · 第 ${String(round.round)} 轮`}
                     onClick={() => {
                       onPick(round);
                     }}
@@ -591,6 +633,7 @@ function TreeDir({
                 onToggleFile={onToggleFile}
                 onPick={onPick}
                 selected={selected}
+                fullPath={fullPath}
               />
             )}
           </div>
@@ -607,23 +650,112 @@ function toggled(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
   return next;
 }
 
-function ChangesView({ tab, source }: { tab: ChangesTab; source: PanelChangesSource | undefined }) {
+/**
+ * diff 和文件树之间的分隔条（ADR-0060 修订 2026-10-18（二））：拖动或 ← → 调整树宽，
+ * 范围 CHANGE_TREE_MIN_WIDTH–CHANGE_TREE_MAX_WIDTH。树在右边：往左拖、按 ← 变宽。
+ * 拖动中只改本地宽度，松手才交给 onCommit（写进会话面板）。
+ */
+export function TreeSplitter({
+  width,
+  onLive,
+  onCommit,
+}: {
+  width: number;
+  onLive: (width: number) => void;
+  onCommit: (width: number) => void;
+}) {
+  const drag = useRef<{ startX: number; startWidth: number; width: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  return (
+    <div
+      className={`sp-tree-split${dragging ? " drag" : ""}`}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="调整文件树宽度"
+      aria-valuenow={width}
+      aria-valuemin={CHANGE_TREE_MIN_WIDTH}
+      aria-valuemax={CHANGE_TREE_MAX_WIDTH}
+      tabIndex={0}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        drag.current = { startX: event.clientX, startWidth: width, width };
+        setDragging(true);
+      }}
+      onPointerMove={(event) => {
+        const state = drag.current;
+        if (state === null) return;
+        state.width = clampTreeWidth(state.startWidth + (state.startX - event.clientX));
+        onLive(state.width);
+      }}
+      onPointerUp={(event) => {
+        const state = drag.current;
+        if (state === null) return;
+        drag.current = null;
+        setDragging(false);
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        onCommit(state.width);
+      }}
+      onPointerCancel={() => {
+        const state = drag.current;
+        if (state === null) return;
+        drag.current = null;
+        setDragging(false);
+        onCommit(state.width);
+      }}
+      onKeyDown={(event) => {
+        const step = event.shiftKey ? 48 : 16;
+        let next: number;
+        if (event.key === "ArrowLeft") next = width + step;
+        else if (event.key === "ArrowRight") next = width - step;
+        else if (event.key === "Home") next = CHANGE_TREE_MIN_WIDTH;
+        else if (event.key === "End") next = CHANGE_TREE_MAX_WIDTH;
+        else return;
+        event.preventDefault();
+        onCommit(clampTreeWidth(next));
+      }}
+    />
+  );
+}
+
+function ChangesView({
+  tab,
+  source,
+  treeWidth,
+  onTreeWidth,
+  wrap,
+  onWrap,
+}: {
+  tab: ChangesTab;
+  source: PanelChangesSource | undefined;
+  treeWidth: number;
+  onTreeWidth: (width: number) => void;
+  wrap: boolean;
+  onWrap: (wrap: boolean) => void;
+}) {
   const [filter, setFilter] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState<string>();
+  /** 拖动中的树宽；松手后回到会话记住的宽度 */
+  const [live, setLive] = useState<number>();
   const list = useRef<HTMLDivElement>(null);
   const items = useMemo(
     () => (source === undefined ? [] : collectChanges(source.turns.values(), source.userSeqs)),
     [source],
   );
   const files = useMemo(() => groupChanges(items), [items]);
-  const label = (path: string) => displayPath(path, source?.workspace);
+  // Windows 工作区按 Windows 写法显示路径（工作区外的分组是 Z:\nocturne-mockups）
+  const windows = source !== undefined && isWindowsPath(source.workspace);
+  const label = (path: string) => nativeSeparators(displayPath(path, source?.workspace), windows);
+  const fullPath = (path: string) => nativeSeparators(path, windows);
   const query = filter.trim().toLowerCase();
   const matches = (path: string) => query === "" || label(path).toLowerCase().includes(query);
   const shownFiles = files.filter((file) => matches(file.path));
   const shown = items.filter((item) => matches(item.path));
-  const tree = buildChangeTree(shownFiles, (file) => label(file.path));
+  const tree = buildChangeTree(shownFiles, (file) => label(file.path), windows ? "\\" : "/");
   const rounds = new Set(items.map((item) => item.seq)).size;
   const scrollTo = (key: string | undefined) => {
     if (key === undefined) return;
@@ -654,20 +786,32 @@ function ChangesView({ tab, source }: { tab: ChangesTab; source: PanelChangesSou
     setSelected(item.key);
     scrollTo(item.key);
   };
+  const width = live ?? treeWidth;
   return (
-    <div className="sp-changes">
+    <div className="sp-changes" style={{ ["--sp-tree-width" as string]: `${String(width)}px` }}>
       <div className="sp-changes-diff" ref={list}>
         {shown.map((item) => (
           <ChangeSection
             key={item.key}
             item={item}
             label={label(item.path)}
+            title={fullPath(item.path)}
             loadDiff={source.loadDiff}
             highlighted={selected === item.key}
+            wrap={wrap}
+            onWrap={onWrap}
           />
         ))}
         {shown.length === 0 && <div className="sp-empty">没有匹配的文件</div>}
       </div>
+      <TreeSplitter
+        width={width}
+        onLive={setLive}
+        onCommit={(next) => {
+          setLive(undefined);
+          onTreeWidth(next);
+        }}
+      />
       <aside className="sp-changes-tree" aria-label="改动的文件">
         <div className="sp-tree-summary">
           本会话 · {rounds} 轮 · {files.length} 个文件
@@ -689,6 +833,7 @@ function ChangesView({ tab, source }: { tab: ChangesTab; source: PanelChangesSou
             collapsed={collapsed}
             expanded={expanded}
             selected={selected}
+            fullPath={fullPath}
             onToggle={(path) => {
               setCollapsed((current) => toggled(current, path));
             }}
@@ -727,6 +872,8 @@ function fileErrorText(code: string | undefined, message: string): string {
       return "不读取网络路径上的文件";
     case "file_not_regular":
       return "这不是普通文件";
+    case "file_read_timeout":
+      return "读取超时，所在磁盘可能不可用";
     default:
       return message;
   }
@@ -829,6 +976,7 @@ function FileView({
   const missing = state.kind === "error" && state.code === "file_not_found";
   const externalOnly =
     state.kind === "error" && (state.code === "file_too_large" || state.code === "file_binary");
+  const timedOut = state.kind === "error" && state.code === "file_read_timeout";
   return (
     <div className="sp-file">
       <header className="sp-file-head">
@@ -894,6 +1042,19 @@ function FileView({
         ) : (
           <div className="sp-empty sp-file-missing">
             <p>{fileErrorText(state.code, state.message)}</p>
+            {timedOut && (
+              <div className="sp-file-actions">
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setReload((n) => n + 1);
+                  }}
+                >
+                  重试
+                </button>
+              </div>
+            )}
             {externalOnly && (
               <div className="sp-file-actions">
                 <button
@@ -927,6 +1088,8 @@ function FileView({
 
 export function SidePanel(props: SidePanelProps) {
   const { tabs, activeId, overlay, width, onResize, changes, hidden = false } = props;
+  const panes = props.panes ?? tabs;
+  const current = new Set(tabs.map((tab) => tab.id));
   const drag = useRef<{ startX: number; startWidth: number; width: number } | null>(null);
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -956,7 +1119,7 @@ export function SidePanel(props: SidePanelProps) {
   };
   return (
     <aside
-      className={`side-panel${overlay ? " overlay" : ""}`}
+      className={`side-panel thin-scroll${overlay ? " overlay" : ""}`}
       style={{ width }}
       aria-label="右侧面板"
       hidden={hidden}
@@ -976,8 +1139,13 @@ export function SidePanel(props: SidePanelProps) {
       />
       <TabBar {...props} />
       <div className="sp-content">
-        {tabs.map((tab) => (
-          <div key={tab.id} className="sp-pane" role="tabpanel" hidden={tab.id !== activeId}>
+        {panes.map((tab) => (
+          <div
+            key={tab.id}
+            className="sp-pane"
+            role="tabpanel"
+            hidden={tab.id !== activeId || !current.has(tab.id)}
+          >
             {tab.kind === "new" ? (
               <NewTabPage
                 onOpenChanges={props.onOpenChanges}
@@ -989,7 +1157,14 @@ export function SidePanel(props: SidePanelProps) {
                 hasTerminal={props.terminals !== undefined}
               />
             ) : tab.kind === "changes" ? (
-              <ChangesView tab={tab} source={changes} />
+              <ChangesView
+                tab={tab}
+                source={changes}
+                treeWidth={props.treeWidth ?? CHANGE_TREE_DEFAULT_WIDTH}
+                onTreeWidth={(next) => props.onTreeWidth?.(next)}
+                wrap={props.wrap !== false}
+                onWrap={(next) => props.onWrap?.(next)}
+              />
             ) : tab.kind === "terminal" ? (
               props.terminals === undefined ? (
                 <div className="sp-empty">这个环境没有终端</div>
@@ -997,8 +1172,8 @@ export function SidePanel(props: SidePanelProps) {
                 <TerminalPane
                   tab={tab}
                   host={props.terminals}
-                  listShells={props.listShells}
-                  visible={!hidden && tab.id === activeId}
+                  loadShells={props.loadShells}
+                  visible={!hidden && tab.id === activeId && current.has(tab.id)}
                   onShellChange={props.onShellChange}
                 />
               )

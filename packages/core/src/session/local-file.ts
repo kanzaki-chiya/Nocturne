@@ -6,10 +6,17 @@
  * 网络路径一律拒绝且不去访问：回答内容来自模型，访问 `\\server\share` 会让系统向
  * 那台主机发起 SMB 连接并带上 Windows 凭据。链接目标也按同样规则逐级检查，
  * 而不是交给 realpath——realpath 会跟着 junction / 符号链接去打开网络位置。
+ *
+ * 映射到 `\\server\share` 的盘符（如 `Q:`）照常读取：那是用户自己挂的盘，凭据本来就
+ * 交给了那台主机。主机离线时系统调用可能挂几十秒，所以读取和存在性判断都有时限
+ * （ADR-0060 修订 2026-10-18（二））。
  */
 import { fsErrorCode, type FileSystem, type PathOps } from "../platform/index.js";
 import {
   READ_FILE_MAX_BYTES,
+  READ_FILE_TIMEOUT_MS,
+  RESOLVE_FILE_TIMEOUT_MS,
+  type FileRefResolution,
   type LocalFileContent,
   type LocalImageMimeType,
 } from "../protocol/index.js";
@@ -142,13 +149,47 @@ function decodeText(data: Uint8Array): string | undefined {
   }
 }
 
+/**
+ * 给一串文件系统调用加总时限：到点先返回 onTimeout()，原调用在后台跑完后丢弃结果
+ * （Node 的 fs 调用取消不了）。
+ */
+function withDeadline<T>(work: Promise<T>, ms: number, onTimeout: () => T | Error): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<T>((resolve, reject) => {
+    timer = setTimeout(() => {
+      const value = onTimeout();
+      if (value instanceof Error) reject(value);
+      else resolve(value);
+    }, ms);
+  });
+  // 超时后原调用才失败：吞掉，免得成为未处理的拒绝
+  work.catch(() => undefined);
+  return Promise.race([work, deadline]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
 export async function readLocalFile(
   fs: FileSystem,
   paths: PathOps,
   input: unknown,
   maxBytes = READ_FILE_MAX_BYTES,
+  timeoutMs = READ_FILE_TIMEOUT_MS,
 ): Promise<LocalFileContent> {
   const lexical = checkInput(input, paths);
+  return withDeadline(
+    readChecked(fs, paths, lexical, maxBytes),
+    timeoutMs,
+    () => new SessionError("file_read_timeout", "读取超时，所在磁盘可能不可用"),
+  );
+}
+
+async function readChecked(
+  fs: FileSystem,
+  paths: PathOps,
+  lexical: string,
+  maxBytes: number,
+): Promise<LocalFileContent> {
   try {
     const real = await resolveLocalPath(fs, paths, lexical);
     const stat = await fs.stat(real);
@@ -181,4 +222,44 @@ export async function readLocalFile(
     }
     throw new SessionError("file_read_failed", "文件读取失败", { cause: error });
   }
+}
+
+/**
+ * `session.resolveFiles` 的一项：按工作区根解析路径并判断是否存在。网络路径不去访问，
+ * 链接逐级解析（指向网络位置的同样不访问）；判断超过 timeoutMs 就按不存在返回，
+ * 不让一个离线的映射盘拖住整条消息的链接化。
+ */
+export async function resolveFileRef(
+  fs: FileSystem,
+  paths: PathOps,
+  root: string,
+  input: string,
+  timeoutMs = RESOLVE_FILE_TIMEOUT_MS,
+): Promise<FileRefResolution> {
+  // 网络路径不去判断存在性（ADR-0060 修订 2026-10-18）：stat 会向那台主机
+  // 发起 SMB 连接并带上 Windows 凭据。按不存在返回，客户端保持普通行内代码
+  if (paths.sep === "\\" && isNetworkPath(input)) {
+    return {
+      input,
+      absolutePath: input,
+      withinWorkspace: false,
+      exists: false,
+      isDirectory: false,
+    };
+  }
+  const absolute = paths.isAbsolute(input) ? paths.normalize(input) : paths.join(root, input);
+  const withinWorkspace = paths.isWithin(root, absolute);
+  const stat = await withDeadline(
+    resolveLocalPath(fs, paths, absolute).then((real) => fs.stat(real)),
+    timeoutMs,
+    () => undefined,
+  ).catch(() => undefined);
+  return {
+    input,
+    absolutePath: absolute,
+    withinWorkspace,
+    ...(withinWorkspace ? { relativePath: paths.relative(root, absolute) } : {}),
+    exists: stat !== undefined,
+    isDirectory: stat?.type === "directory",
+  };
 }

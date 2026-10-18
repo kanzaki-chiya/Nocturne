@@ -167,9 +167,8 @@ import { validateSettingsPatch } from "./config/settings.js";
 import { resolveSubagentProfile } from "./config/subagent-profiles.js";
 import {
   createSessionStore,
-  isNetworkPath,
   readLocalFile,
-  resolveLocalPath,
+  resolveFileRef,
   SessionError,
   type Session,
   type SessionRecovery,
@@ -2381,38 +2380,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       async resolveFiles(inputs) {
         assertUsable();
         const root = await fs.realpath(meta.workspaceRoot).catch(() => meta.workspaceRoot);
-        const windows = paths.sep === "\\";
-        return Promise.all(
-          inputs.map(async (input): Promise<FileRefResolution> => {
-            // 网络路径不去判断存在性（ADR-0060 修订 2026-10-18）：stat 会向那台主机
-            // 发起 SMB 连接并带上 Windows 凭据。按不存在返回，客户端保持普通行内代码
-            if (windows && isNetworkPath(input)) {
-              return {
-                input,
-                absolutePath: input,
-                withinWorkspace: false,
-                exists: false,
-                isDirectory: false,
-              };
-            }
-            const absolute = paths.isAbsolute(input)
-              ? paths.normalize(input)
-              : paths.join(root, input);
-            const withinWorkspace = paths.isWithin(root, absolute);
-            // 逐级解析链接：junction / 符号链接指向网络位置时同样不访问
-            const stat = await resolveLocalPath(fs, paths, absolute)
-              .then((real) => fs.stat(real))
-              .catch(() => undefined);
-            return {
-              input,
-              absolutePath: absolute,
-              withinWorkspace,
-              ...(withinWorkspace ? { relativePath: paths.relative(root, absolute) } : {}),
-              exists: stat !== undefined,
-              isDirectory: stat?.type === "directory",
-            };
-          }),
-        );
+        return Promise.all(inputs.map((input) => resolveFileRef(fs, paths, root, input)));
       },
       interrupt() {
         controller?.abort();
@@ -3808,6 +3776,8 @@ export { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from 
 export { completeFileRefs, type FileCompletion, type FileIndexEntry } from "./tools/file-index.js";
 export {
   READ_FILE_MAX_BYTES,
+  READ_FILE_TIMEOUT_MS,
+  RESOLVE_FILE_TIMEOUT_MS,
   splitCodeRef,
   type FileRefResolution,
   type ParsedFileRef,

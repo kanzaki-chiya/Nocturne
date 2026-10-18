@@ -57,6 +57,15 @@ export function splitCodeRef(
 /** `runtime.readFile` 的读取上限（ADR-0060 第 3 节）：超过时报 file_too_large，不截断 */
 export const READ_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
+/**
+ * `runtime.readFile` 的总时限（ADR-0060 修订 2026-10-18（二））：lstat、readlink、stat、
+ * 读取各步合计。映射的网络盘主机离线时系统调用可能挂几十秒，超时报 file_read_timeout。
+ */
+export const READ_FILE_TIMEOUT_MS = 5000;
+
+/** `session.resolveFiles` 每个路径判断存在性的时限：超时按不存在返回，不链接化 */
+export const RESOLVE_FILE_TIMEOUT_MS = 2000;
+
 export type LocalImageMimeType =
   | "image/png"
   | "image/jpeg"

@@ -1,6 +1,6 @@
 /**
- * 右侧面板的纯逻辑（ADR-0060 第 1–4 节）：标签模型、持久化与恢复、宽度上下限、
- * 快速打开排名、变更汇总、终端默认 shell。界面在 SidePanel.tsx。
+ * 右侧面板的纯逻辑（ADR-0060 第 1–4 节及修订）：标签模型、按会话持久化与恢复、
+ * 旧全局标签迁移、宽度上下限、快速打开排名、变更汇总、终端默认 shell。界面在 SidePanel.tsx。
  */
 import type { TurnChanges } from "@nocturne/core/protocol";
 
@@ -18,7 +18,7 @@ export interface NewTab {
   kind: "new";
 }
 
-/** 变更：跟随当前会话；focusSeq 是「查看变更」要定位的那一轮 */
+/** 变更：显示所属会话的改动；focusSeq 是「查看变更」要定位的那一轮 */
 export interface ChangesTab {
   id: string;
   kind: "changes";
@@ -44,7 +44,7 @@ export interface FileTab {
 
 /**
  * 终端（ADR-0060 第 4 节）：一个标签一个进程，不持久化。cwd 是创建时的工作目录，
- * label 是标签上的项目名；shell 是用户在下拉里换过的可执行文件，缺省按 auto 规则选。
+ * label 是标签上的项目名；shell 是用户在下拉里换过的可执行文件，缺省跟随设置里的 Shell。
  */
 export interface TerminalTab {
   id: string;
@@ -73,6 +73,131 @@ export const PANEL_MAX_WIDTH = 960;
 export const PANEL_DEFAULT_WIDTH = 520;
 /** 对话区至少留这么宽；更窄时面板改为盖在对话区上（ADR-0060 第 1 节） */
 export const CONVERSATION_MIN_WIDTH = 480;
+
+/** 「变更」右侧文件树的宽度（ADR-0060 修订 2026-10-18（二）），按会话记住 */
+export const CHANGE_TREE_MIN_WIDTH = 180;
+export const CHANGE_TREE_MAX_WIDTH = 420;
+export const CHANGE_TREE_DEFAULT_WIDTH = 260;
+
+export function clampTreeWidth(width: number): number {
+  if (!Number.isFinite(width)) return CHANGE_TREE_DEFAULT_WIDTH;
+  return Math.round(Math.min(CHANGE_TREE_MAX_WIDTH, Math.max(CHANGE_TREE_MIN_WIDTH, width)));
+}
+
+/**
+ * 一个会话的面板（ADR-0060 修订 2026-10-18（二））：标签、当前标签、开关，以及
+ * 「变更」的文件树宽度和换行偏好。面板宽度是全局的，不在这里。
+ */
+export interface SessionPanel {
+  open: boolean;
+  tabs: PanelTab[];
+  activeId: string;
+  treeWidth: number;
+  wrap: boolean;
+}
+
+/** 存进本机偏好的会话面板：终端和新标签页不存 */
+export interface StoredSessionPanel {
+  open?: boolean;
+  tabs: StoredPanelTab[];
+  activeTab?: string;
+  treeWidth?: number;
+  wrap?: boolean;
+}
+
+/** 会话第一次打开时面板关着，只有一个新标签页；有记录就按记录恢复 */
+export function restoreSessionPanel(
+  stored: StoredSessionPanel | undefined,
+  newId: () => string,
+): SessionPanel {
+  const { tabs, activeId } = restoreTabs(stored?.tabs, stored?.activeTab, newId);
+  return {
+    open: stored?.open === true,
+    tabs,
+    activeId,
+    treeWidth: clampTreeWidth(stored?.treeWidth ?? CHANGE_TREE_DEFAULT_WIDTH),
+    wrap: stored?.wrap !== false,
+  };
+}
+
+export function storeSessionPanel(panel: SessionPanel): StoredSessionPanel {
+  const tabs = storedTabs(panel.tabs);
+  return {
+    ...(panel.open ? { open: true } : {}),
+    tabs,
+    ...(tabs.some((tab) => tab.id === panel.activeId) ? { activeTab: panel.activeId } : {}),
+    ...(panel.treeWidth !== CHANGE_TREE_DEFAULT_WIDTH ? { treeWidth: panel.treeWidth } : {}),
+    ...(panel.wrap ? {} : { wrap: false }),
+  };
+}
+
+/** 逐会话校验存储的面板；损坏的会话整条丢弃，不影响其余 */
+export function parseStoredSessionPanels(value: unknown): Record<string, StoredSessionPanel> {
+  const result: Record<string, StoredSessionPanel> = {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return result;
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (id === "" || typeof raw !== "object" || raw === null || Array.isArray(raw)) continue;
+    const entry = raw as Record<string, unknown>;
+    result[id] = {
+      ...(entry.open === true ? { open: true } : {}),
+      tabs: parseStoredTabs(entry.tabs),
+      ...(str(entry.activeTab) ? { activeTab: entry.activeTab } : {}),
+      ...(typeof entry.treeWidth === "number" && Number.isFinite(entry.treeWidth)
+        ? { treeWidth: clampTreeWidth(entry.treeWidth) }
+        : {}),
+      ...(entry.wrap === false ? { wrap: false } : {}),
+    };
+  }
+  return result;
+}
+
+/** 第 1、2 轮存下的全局面板（prefs 里的 panelTabs / panelActiveTab / panelOpen） */
+export interface LegacyPanel {
+  tabs?: StoredPanelTab[] | undefined;
+  activeTab?: string | undefined;
+  open?: boolean | undefined;
+}
+
+/**
+ * 旧全局标签迁移到最近一次打开的会话（只做一次，ADR-0060 修订 2026-10-18（二））：
+ * 按会话列表里最近活动的会话认领；它已经有自己的记录就不覆盖。没有会话或没有标签时不迁。
+ */
+export function migrateGlobalPanel(
+  legacy: LegacyPanel,
+  sessions: readonly { id: string; mtimeMs: number }[],
+  existing: Record<string, StoredSessionPanel>,
+): Record<string, StoredSessionPanel> {
+  const tabs = legacy.tabs ?? [];
+  if (tabs.length === 0) return existing;
+  const recent = sessions.reduce<{ id: string; mtimeMs: number } | undefined>(
+    (best, s) => (best === undefined || s.mtimeMs > best.mtimeMs ? s : best),
+    undefined,
+  );
+  if (recent === undefined || existing[recent.id] !== undefined) return existing;
+  return {
+    ...existing,
+    [recent.id]: {
+      ...(legacy.open === true ? { open: true } : {}),
+      tabs,
+      ...(legacy.activeTab !== undefined && tabs.some((tab) => tab.id === legacy.activeTab)
+        ? { activeTab: legacy.activeTab }
+        : {}),
+    },
+  };
+}
+
+/**
+ * 被删除的会话：上次的会话列表里有、这次没有。keep 是仍然打开着的会话（刚建好还没进
+ * 列表的也算），它们不当作删除。返回要结束终端、清掉面板记录的会话 id。
+ */
+export function vanishedSessions(
+  known: Iterable<string>,
+  listed: readonly { id: string }[],
+  keep: ReadonlySet<string>,
+): string[] {
+  const present = new Set(listed.map((s) => s.id));
+  return [...known].filter((id) => !present.has(id) && !keep.has(id));
+}
 
 /** 面板宽度夹在上下限之间；窗口很窄时上限再让出对话区的一部分 */
 export function clampPanelWidth(width: number, available?: number): number {
@@ -260,16 +385,25 @@ export function projectFits(
 const AUTO_SHELL_ORDER = ["pwsh", "bash", "cmd", "sh"] as const;
 
 /**
- * 终端的 shell：新终端默认用 auto 规则选出的第一个可用 shell（设置里没有全局 Shell
- * 项，ADR-0060 修订 2026-10-18）；标签里换过的保留，前提是它仍然可用。
+ * 终端的 shell（ADR-0060 修订 2026-10-18（二））：标签里换过的优先（仍然可用的话）；
+ * 否则跟随「设置 › 常规 › 执行 › Shell」的生效值——种类名（pwsh / bash / cmd …）
+ * 或可执行文件路径；`auto`、没设置、或设置的那种 shell 没安装时按 auto 规则选。
  */
 export function terminalShell(
   shells: readonly ShellOption[],
   chosen?: string,
+  setting?: string,
 ): ShellOption | undefined {
   const usable = shells.filter((s) => s.available && s.executable !== undefined);
+  const byPath = (path: string) =>
+    usable.find((s) => s.executable !== undefined && samePath(s.executable, path));
   if (chosen !== undefined) {
-    const hit = usable.find((s) => s.executable !== undefined && samePath(s.executable, chosen));
+    const hit = byPath(chosen);
+    if (hit !== undefined) return hit;
+  }
+  const wanted = setting?.trim();
+  if (wanted !== undefined && wanted !== "" && wanted !== "auto") {
+    const hit = isAbsolutePath(wanted) ? byPath(wanted) : usable.find((s) => s.kind === wanted);
     if (hit !== undefined) return hit;
   }
   for (const kind of AUTO_SHELL_ORDER) {
@@ -477,13 +611,24 @@ export interface ChangeTreeDir {
 }
 export type ChangeTreeNode = ChangeTreeDir | { kind: "file"; file: ChangeFile; name: string };
 
+/** 工作区是 Windows 路径（盘符或反斜杠）：变更标签按 Windows 写法显示路径 */
+export function isWindowsPath(path: string): boolean {
+  return /^[A-Za-z]:/.test(path) || path.includes("\\");
+}
+
+/** 展示用路径换成系统写法：Windows 上用反斜杠（`Z:\nocturne-mockups`），POSIX 不变 */
+export function nativeSeparators(path: string, windows: boolean): string {
+  return windows ? path.replaceAll("/", "\\") : path;
+}
+
 /**
  * 按目录折叠的文件树（一个文件一行）：路径相对工作区显示（displayPath 由调用方先做），
- * 只有一个子目录的目录链合并成一级（a/b/c）。
+ * 只有一个子目录的目录链合并成一级，用 sep 连接（a/b/c，Windows 上 a\b\c）。
  */
 export function buildChangeTree(
   files: readonly ChangeFile[],
   label: (file: ChangeFile) => string,
+  sep = "/",
 ): ChangeTreeDir {
   const root: ChangeTreeDir = { kind: "dir", path: "", name: "", children: [] };
   for (const file of files) {
@@ -507,7 +652,7 @@ export function buildChangeTree(
     dir.children = dir.children.map((child) => (child.kind === "dir" ? compact(child) : child));
     const only = dir.children[0];
     if (dir.path !== "" && dir.children.length === 1 && only?.kind === "dir") {
-      return { ...only, name: `${dir.name}/${only.name}` };
+      return { ...only, name: `${dir.name}${sep}${only.name}` };
     }
     return dir;
   };
