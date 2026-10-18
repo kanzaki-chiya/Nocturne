@@ -2,7 +2,7 @@
  * 思考强度（reasoningEffort，ADR-0018）真实服务冒烟——与默认测试集分离。
  * 运行：pnpm test:smoke；需要环境变量：
  *   NOCTURNE_SMOKE_BASE_URL / NOCTURNE_SMOKE_API_KEY / NOCTURNE_SMOKE_MODEL
- *     openai 格式端点（commandcode）
+ *     openai 格式端点（commandcode）；可选 NOCTURNE_SMOKE_SESSION_HEADER 给它带会话头（ADR-0031）
  *   NOCTURNE_SMOKE_ANTHROPIC_API_KEY / NOCTURNE_SMOKE_ANTHROPIC_MODEL /
  *   NOCTURNE_SMOKE_ANTHROPIC_BASE_URL
  *     openrouter 格式端点（借 anthropic 变量组，base_url 指向 openrouter.ai）
@@ -22,6 +22,7 @@ import { createRuntime } from "../src/index.js";
 import type { OpenAICompatibleConfig } from "../src/provider/index.js";
 import type { ReasoningEffort, RuntimeEvent, TurnCompletedPayload } from "../src/protocol/index.js";
 import { REASONING_EFFORT_LEVELS } from "../src/protocol/index.js";
+import { smokeSessionHeader } from "./smoke-env.js";
 
 const OAI_BASE = process.env.NOCTURNE_SMOKE_BASE_URL;
 const OAI_KEY = process.env.NOCTURNE_SMOKE_API_KEY;
@@ -102,6 +103,7 @@ describe.skipIf(!oaiConfigured)("reasoningEffort 冒烟：openai 格式（comman
       type: "openai-compatible",
       baseURL: OAI_BASE ?? "",
       apiKeyEnv: "NOCTURNE_SMOKE_API_KEY",
+      ...smokeSessionHeader(),
       models: {
         // 逐模型声明全部六档——服务端是否真接受由响应判定，这是实测的目的
         [OAI_MODEL ?? ""]: {

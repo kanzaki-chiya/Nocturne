@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { createPrefsStore, migrateLegacyProjectOrder, PREFS_KEY } from "../src/prefs";
+import {
+  createPrefsStore,
+  migrateLegacyProjectOrder,
+  outsideOpenable,
+  PREFS_KEY,
+} from "../src/prefs";
 
 function memoryStorage(initial?: Record<string, string>): Storage & { data: Map<string, string> } {
   const data = new Map(Object.entries(initial ?? {}));
@@ -350,5 +355,17 @@ describe("prefs store", () => {
       }),
     );
     expect(bad.get().fileOpener).toBeUndefined();
+  });
+});
+
+describe("工作区外文件的左键", () => {
+  it("系统默认程序只开菜单；面板与检测到的编辑器直接打开；没检测到的编辑器也只开菜单", () => {
+    const none = { vscode: false, cursor: false };
+    const both = { vscode: true, cursor: true };
+    expect(outsideOpenable("system", both)).toBe(false);
+    expect(outsideOpenable("panel", none)).toBe(true);
+    expect(outsideOpenable("vscode", both)).toBe(true);
+    expect(outsideOpenable("vscode", none)).toBe(false);
+    expect(outsideOpenable("cursor", { vscode: true, cursor: false })).toBe(false);
   });
 });

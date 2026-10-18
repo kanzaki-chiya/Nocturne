@@ -10,6 +10,7 @@ import {
   clampPanelWidth,
   clampTreeWidth,
   collectChanges,
+  CONVERSATION_MIN_WIDTH,
   dirName,
   fileTabLabel,
   groupChanges,
@@ -19,12 +20,17 @@ import {
   moveTab,
   nativeSeparators,
   nextActiveAfterClose,
+  OVERVIEW_RESERVE,
+  overviewDocks,
   PANEL_MAX_WIDTH,
   PANEL_MIN_WIDTH,
   panelOverlays,
   parseAddress,
+  parseStoredSessionPanels,
   parseStoredTabs,
   projectFits,
+  pushRecent,
+  RECENT_FILES_MAX,
   rankQuickOpen,
   relativeTo,
   restoreSessionPanel,
@@ -137,6 +143,36 @@ describe("快速打开排名", () => {
       name: "poster.css",
       dir: "src/",
     });
+  });
+  it("空查询：最近打开的在前（新的在前），其余按路径字母序", () => {
+    expect(rankQuickOpen("", entries).map((h) => h.path)).toEqual([
+      "archive/poster-old.css",
+      "docs/composer.md",
+      "maiyu-bakery-poster.html",
+      "src/poster.css",
+    ]);
+    const recent = ["src/poster.css", "gone.ts", "docs/composer.md"];
+    expect(rankQuickOpen("  ", entries, 50, recent).map((h) => h.path)).toEqual([
+      "src/poster.css",
+      "docs/composer.md",
+      "archive/poster-old.css",
+      "maiyu-bakery-poster.html",
+    ]);
+    // 有查询时不看最近记录
+    expect(rankQuickOpen("pos", entries, 50, ["maiyu-bakery-poster.html"])[0]?.path).toBe(
+      "src/poster.css",
+    );
+  });
+  it("最近打开：挪到最前、按路径去重、有上限", () => {
+    expect(pushRecent(["Z:\\p\\a.ts", "Z:\\p\\b.ts"], "z:\\P\\b.ts")).toEqual([
+      "z:\\P\\b.ts",
+      "Z:\\p\\a.ts",
+    ]);
+    const many = Array.from({ length: RECENT_FILES_MAX }, (_, i) => `/p/${i}`);
+    const next = pushRecent(many, "/p/new");
+    expect(next).toHaveLength(RECENT_FILES_MAX);
+    expect(next[0]).toBe("/p/new");
+    expect(next).not.toContain(`/p/${RECENT_FILES_MAX - 1}`);
   });
 });
 
@@ -327,14 +363,27 @@ describe("按会话的面板", () => {
       activeId: "f",
       treeWidth: 300,
       wrap: false,
+      recent: ["Z:\\p\\a.ts"],
     };
     const stored = storeSessionPanel(panel);
     expect(stored.tabs.map((t) => t.id)).toEqual(["c", "f"]);
     const back = restoreSessionPanel(stored, id);
-    expect(back).toMatchObject({ open: true, activeId: "f", treeWidth: 300, wrap: false });
+    expect(back).toMatchObject({
+      open: true,
+      activeId: "f",
+      treeWidth: 300,
+      wrap: false,
+      recent: ["Z:\\p\\a.ts"],
+    });
     expect(back.tabs.map((t) => t.id)).toEqual(["c", "f"]);
+    expect(parseStoredSessionPanels({ s: { tabs: [], recent: ["a", 3, "b"] } }).s?.recent).toEqual([
+      "a",
+      "b",
+    ]);
     // 默认值不写进存储
-    expect(storeSessionPanel({ ...panel, open: false, treeWidth: 260, wrap: true })).toEqual({
+    expect(
+      storeSessionPanel({ ...panel, open: false, treeWidth: 260, wrap: true, recent: [] }),
+    ).toEqual({
       tabs: stored.tabs,
       activeTab: "f",
     });
@@ -353,8 +402,23 @@ describe("按会话的面板", () => {
     expect(migrateGlobalPanel(legacy, [], {})).toEqual({});
     expect(migrateGlobalPanel({}, sessions, {})).toEqual({});
   });
-  it("被删除的会话：列表里没有、也没打开着", () => {
-    expect(vanishedSessions(["a", "b", "c"], [{ id: "a" }], new Set(["c"]))).toEqual(["b"]);
+  it("被删除的会话：列过又不见了就整套清理，开着也算；没列过的只有开着才暂缓", () => {
+    const seen = new Set(["c", "d", "e"]);
+    const open = new Set(["b", "c", "e"]);
+    // a 还在列表；b 刚建、没进过列表但开着；c 列过、开着、不见了；d 列过、没开、不见了；
+    // e 正在看；f 没列过也没开（上次运行以后被删）
+    expect(
+      vanishedSessions(["a", "b", "c", "d", "e", "f", "c"], [{ id: "a" }], seen, open, "e"),
+    ).toEqual(["c", "d", "f"]);
+    expect(vanishedSessions(["e"], [], seen, open, null)).toEqual(["e"]);
+  });
+  it("概览浮层停靠阈值：让位后对话区仍 ≥480px 才停靠", () => {
+    const sidebar = 236;
+    const edge = sidebar + OVERVIEW_RESERVE + CONVERSATION_MIN_WIDTH;
+    expect(overviewDocks(edge, sidebar)).toBe(true);
+    expect(overviewDocks(edge - 1, sidebar)).toBe(false);
+    expect(overviewDocks(1200, sidebar)).toBe(true);
+    expect(overviewDocks(900, sidebar)).toBe(false);
   });
   it("文件树宽度夹在 180–420px", () => {
     expect(clampTreeWidth(100)).toBe(CHANGE_TREE_MIN_WIDTH);

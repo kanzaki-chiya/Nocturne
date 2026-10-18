@@ -104,7 +104,11 @@ function McpBadge({
           setOpen(false);
         }}
         onKeyDown={(event) => {
-          if (event.key === "Escape") setOpen(false);
+          // 开着的提示才消费 Esc，否则留给会话概览
+          if (event.key === "Escape" && open) {
+            event.preventDefault();
+            setOpen(false);
+          }
         }}
         onClick={() => {
           setOpen(false);
@@ -213,7 +217,10 @@ function SpeedBadge({ speed }: { speed: SpeedDisplay | undefined }) {
         setOpen(false);
       }}
       onKeyDown={(event) => {
-        if (event.key === "Escape") setOpen(false);
+        if (event.key === "Escape" && open) {
+          event.preventDefault();
+          setOpen(false);
+        }
       }}
     >
       {speed.live && <span className="status-speed-live" aria-hidden="true" />}

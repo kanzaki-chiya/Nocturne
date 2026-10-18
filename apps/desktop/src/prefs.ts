@@ -23,6 +23,17 @@ export const FILE_OPENER_LABELS: Record<FileOpener, string> = {
   cursor: "Cursor",
 };
 
+/**
+ * 工作区外的文件能不能左键直接打开：面板与检测到的编辑器可以；
+ * 系统默认程序（以及没检测到的编辑器，会退回系统默认）只开菜单，避免点到可执行文件。
+ */
+export function outsideOpenable(
+  opener: FileOpener,
+  editors: { vscode: boolean; cursor: boolean },
+): boolean {
+  return opener === "panel" || (opener !== "system" && editors[opener]);
+}
+
 export function isFileOpener(value: unknown): value is FileOpener {
   return value === "panel" || value === "system" || value === "vscode" || value === "cursor";
 }

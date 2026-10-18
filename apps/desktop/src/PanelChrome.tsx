@@ -92,11 +92,14 @@ function Highlighted({ text, query }: { text: string; query: string }) {
 export function QuickOpen({
   project,
   load,
+  recent = [],
   onPick,
   onClose,
 }: {
   project: string;
   load: () => Promise<FileIndexEntry[]>;
+  /** 最近在面板里打开过的文件（相对路径，新的在前）：空查询时排在前面 */
+  recent?: readonly string[];
   onPick: (relativePath: string) => void;
   onClose: () => void;
 }) {
@@ -131,7 +134,13 @@ export function QuickOpen({
       alive = false;
     };
   }, [load]);
-  const hits = useMemo(() => rankQuickOpen(query, entries ?? []), [query, entries]);
+  // recent 每次渲染都是新数组：按内容比较
+  const recentKey = recent.join("\n");
+  const hits = useMemo(
+    () =>
+      rankQuickOpen(query, entries ?? [], undefined, recentKey === "" ? [] : recentKey.split("\n")),
+    [query, entries, recentKey],
+  );
   const fileCount = useMemo(
     () => entries?.filter((entry) => entry.kind === "file").length ?? 0,
     [entries],
@@ -273,8 +282,14 @@ export function SessionOverview({
             <span className="ovpop-none">无</span>
           ) : (
             <>
-              <span className="diff-add">+{totals.added}</span>{" "}
-              <span className="diff-del">−{totals.removed}</span>
+              <span className="diff-add">+{totals.added}</span>
+              {/* 和改动卡片同一口径：没有删除行不写 −0 */}
+              {totals.removed > 0 && (
+                <>
+                  {" "}
+                  <span className="diff-del">−{totals.removed}</span>
+                </>
+              )}
             </>
           )}
         </span>

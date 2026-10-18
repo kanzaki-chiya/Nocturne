@@ -9,11 +9,12 @@ import {
   connectDeviceRelay,
 } from "@nocturne/remote";
 import { RelayServer } from "../src/server.js";
+import { fetchSafeListen } from "./ports.js";
 
 it("重启后电脑与设备仍能认证，吊销墓碑持久化且 unregister 不删除", async () => {
   const dir = await mkdtemp(join(tmpdir(), "relay-persist-"));
   let relay = new RelayServer(
-    { dataDir: dir, listen: "127.0.0.1:0", publicOrigin: "http://127.0.0.1:1" },
+    { dataDir: dir, listen: await fetchSafeListen(), publicOrigin: "http://127.0.0.1:1" },
     () => {
       /* 测试日志静默。 */
     },
@@ -30,7 +31,7 @@ it("重启后电脑与设备仍能认证，吊销墓碑持久化且 unregister �
     await host.allowDevice({ ...phone, name: "手机" });
     await relay.close();
     relay = new RelayServer(
-      { dataDir: dir, listen: "127.0.0.1:0", publicOrigin: "http://127.0.0.1:1" },
+      { dataDir: dir, listen: await fetchSafeListen(), publicOrigin: "http://127.0.0.1:1" },
       () => {
         /* 测试日志静默。 */
       },
@@ -46,7 +47,7 @@ it("重启后电脑与设备仍能认证，吊销墓碑持久化且 unregister �
     expect(relay.store.data.devices.some((d) => d.id === phone.id && d.revokedAt)).toBe(true);
     await relay.close();
     relay = new RelayServer(
-      { dataDir: dir, listen: "127.0.0.1:0", publicOrigin: "http://127.0.0.1:1" },
+      { dataDir: dir, listen: await fetchSafeListen(), publicOrigin: "http://127.0.0.1:1" },
       () => {
         /* 测试日志静默。 */
       },

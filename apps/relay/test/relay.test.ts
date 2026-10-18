@@ -18,6 +18,7 @@ import {
 import { RelayServer, type RelayLog } from "../src/server.js";
 import { startAdmin, requestAdmin } from "../src/admin.js";
 import { staticCsp } from "../src/csp.js";
+import { fetchSafeListen, listenFetchSafe } from "./ports.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 function required<T>(value: T | undefined | null): T {
@@ -35,7 +36,7 @@ async function fixture(limits = {}) {
   const relay = new RelayServer(
     {
       publicOrigin: "http://127.0.0.1:1",
-      listen: "127.0.0.1:0",
+      listen: await fetchSafeListen(),
       dataDir: dir,
       limits: { ratePerMinute: 1000, ...limits },
       allowInsecurePush: true,
@@ -98,7 +99,7 @@ describe("relay", () => {
     const dir = await mkdtemp(join(tmpdir(), "relay-container-listen-"));
     cleanups.push(() => rm(dir, { recursive: true, force: true }));
     const relay = new RelayServer({
-      listen: "0.0.0.0:0",
+      listen: await fetchSafeListen("0.0.0.0"),
       publicOrigin: "http://127.0.0.1:8787",
       dataDir: dir,
     });
@@ -537,7 +538,7 @@ describe("relay", () => {
       res.writeHead(410);
       res.end();
     });
-    await new Promise<void>((done) => push.listen(0, "127.0.0.1", done));
+    await listenFetchSafe(push);
     cleanups.push(() => new Promise<void>((done) => push.close(() => done())));
     const addr = push.address() as { port: number };
     const endpoint = `http://127.0.0.1:${addr.port}/push`;

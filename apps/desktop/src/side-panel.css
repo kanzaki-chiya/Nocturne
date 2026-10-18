@@ -477,7 +477,7 @@
 .sp-change-head {
   position: sticky;
   top: -8px;
-  z-index: 1;
+  z-index: 2; /* 高于不换行时吸左的行号格（z-index 1） */
   display: flex;
   align-items: center;
   gap: 8px;
@@ -589,6 +589,29 @@
 }
 .sp-change .diff-body:not(.diff-wrap) .diff-row {
   width: auto;
+}
+/*
+ * 不换行时行号和 +/− 固定在左边，横向滚动只滚代码。背景不透明（增删行在面板底色上
+ * 叠同样的增删色），代码从下面滑过、不和行号重叠。
+ */
+.sp-change .diff-body:not(.diff-wrap) :is(.diff-num, .diff-mark) {
+  position: sticky;
+  z-index: 1;
+  align-self: stretch;
+  background: var(--a-panel);
+}
+.sp-change .diff-body:not(.diff-wrap) .diff-num {
+  left: 0;
+}
+.sp-change .diff-body:not(.diff-wrap) .diff-mark {
+  left: 4em;
+  box-shadow: 1px 0 0 var(--a-border);
+}
+.sp-change .diff-body:not(.diff-wrap) .diff-row-add :is(.diff-num, .diff-mark) {
+  background: linear-gradient(var(--a-add), var(--a-add)), var(--a-panel);
+}
+.sp-change .diff-body:not(.diff-wrap) .diff-row-delete :is(.diff-num, .diff-mark) {
+  background: linear-gradient(var(--a-del), var(--a-del)), var(--a-panel);
 }
 /* 换行：代码列占满剩余宽度、可在任意位置断（中英文、长 URL），续行缩进到代码起点 */
 .side-panel .diff-wrap .diff-row {

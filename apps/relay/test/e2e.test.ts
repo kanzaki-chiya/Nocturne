@@ -26,12 +26,17 @@ import { PhoneConnection } from "../../desktop/src/web/connection.js";
 import { pairPhone, parsePairingLink } from "../../desktop/src/web/pairing.js";
 import { memoryStorage } from "../../desktop/src/web/storage.js";
 import { PhoneSessions } from "../../desktop/src/web/sessions.js";
+import { fetchSafeListen, listenFetchSafe } from "./ports.js";
 
 it("手机经本机中继完成扫码配对、加密 RPC 初始化、列表、恢复与事件订阅，日志和数据无会话内容", async () => {
   const dir = await mkdtemp(join(tmpdir(), "relay-e2e-"));
   const logs: RelayLog[] = [];
   const relay = new RelayServer(
-    { publicOrigin: "http://127.0.0.1:1", listen: "127.0.0.1:0", dataDir: join(dir, "relay") },
+    {
+      publicOrigin: "http://127.0.0.1:1",
+      listen: await fetchSafeListen(),
+      dataDir: join(dir, "relay"),
+    },
     (log) => logs.push(log),
   );
   const port = await relay.start();
@@ -156,11 +161,11 @@ it("桌面后台登记、配对并服务手机加密 RPC，移除设备后拒绝
     response.writeHead(201);
     response.end();
   });
-  await new Promise<void>((resolve) => push.listen(0, "127.0.0.1", resolve));
+  await listenFetchSafe(push);
   const pushAddress = push.address() as { port: number };
   const relay = new RelayServer({
     publicOrigin: "http://127.0.0.1:1",
-    listen: "127.0.0.1:0",
+    listen: await fetchSafeListen(),
     dataDir: join(dir, "relay"),
     allowInsecurePush: true,
     pushHosts: ["127.0.0.1"],
@@ -246,7 +251,11 @@ it("桌面后台登记、配对并服务手机加密 RPC，移除设备后拒绝
 it("网页连接模块经真实中继与桌面主机：配对、列表、提交、事件、权限回复", async () => {
   const dir = await mkdtemp(join(tmpdir(), "relay-phone-e2e-"));
   const relay = new RelayServer(
-    { publicOrigin: "http://127.0.0.1:1", listen: "127.0.0.1:0", dataDir: join(dir, "relay") },
+    {
+      publicOrigin: "http://127.0.0.1:1",
+      listen: await fetchSafeListen(),
+      dataDir: join(dir, "relay"),
+    },
     () => undefined,
   );
   const port = await relay.start();

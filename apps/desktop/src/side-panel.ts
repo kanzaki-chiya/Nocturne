@@ -73,6 +73,10 @@ export const PANEL_MAX_WIDTH = 960;
 export const PANEL_DEFAULT_WIDTH = 520;
 /** 对话区至少留这么宽；更窄时面板改为盖在对话区上（ADR-0060 第 1 节） */
 export const CONVERSATION_MIN_WIDTH = 480;
+/** 概览浮层停靠时对话列让出的宽度（side-panel.css 的 --ov-reserve） */
+export const OVERVIEW_RESERVE = 300;
+/** 每个会话记住的最近在面板里打开过的文件数（Ctrl+P 空查询排在前面） */
+export const RECENT_FILES_MAX = 20;
 
 /** 「变更」右侧文件树的宽度（ADR-0060 修订 2026-10-18（二）），按会话记住 */
 export const CHANGE_TREE_MIN_WIDTH = 180;
@@ -94,6 +98,8 @@ export interface SessionPanel {
   activeId: string;
   treeWidth: number;
   wrap: boolean;
+  /** 最近在面板里打开过的文件（绝对路径，新的在前，至多 RECENT_FILES_MAX 个） */
+  recent: string[];
 }
 
 /** 存进本机偏好的会话面板：终端和新标签页不存 */
@@ -103,6 +109,15 @@ export interface StoredSessionPanel {
   activeTab?: string;
   treeWidth?: number;
   wrap?: boolean;
+  recent?: string[];
+}
+
+/** 记一次打开：挪到最前，去重（按 samePath），超出上限丢最旧的 */
+export function pushRecent(recent: readonly string[], absolutePath: string): string[] {
+  return [absolutePath, ...recent.filter((path) => !samePath(path, absolutePath))].slice(
+    0,
+    RECENT_FILES_MAX,
+  );
 }
 
 /** 会话第一次打开时面板关着，只有一个新标签页；有记录就按记录恢复 */
@@ -117,6 +132,7 @@ export function restoreSessionPanel(
     activeId,
     treeWidth: clampTreeWidth(stored?.treeWidth ?? CHANGE_TREE_DEFAULT_WIDTH),
     wrap: stored?.wrap !== false,
+    recent: [...(stored?.recent ?? [])],
   };
 }
 
@@ -128,6 +144,7 @@ export function storeSessionPanel(panel: SessionPanel): StoredSessionPanel {
     ...(tabs.some((tab) => tab.id === panel.activeId) ? { activeTab: panel.activeId } : {}),
     ...(panel.treeWidth !== CHANGE_TREE_DEFAULT_WIDTH ? { treeWidth: panel.treeWidth } : {}),
     ...(panel.wrap ? {} : { wrap: false }),
+    ...(panel.recent.length > 0 ? { recent: [...panel.recent] } : {}),
   };
 }
 
@@ -146,6 +163,9 @@ export function parseStoredSessionPanels(value: unknown): Record<string, StoredS
         ? { treeWidth: clampTreeWidth(entry.treeWidth) }
         : {}),
       ...(entry.wrap === false ? { wrap: false } : {}),
+      ...(Array.isArray(entry.recent) && entry.recent.some(str)
+        ? { recent: entry.recent.filter(str).slice(0, RECENT_FILES_MAX) }
+        : {}),
     };
   }
   return result;
@@ -187,16 +207,34 @@ export function migrateGlobalPanel(
 }
 
 /**
- * 被删除的会话：上次的会话列表里有、这次没有。keep 是仍然打开着的会话（刚建好还没进
- * 列表的也算），它们不当作删除。返回要结束终端、清掉面板记录的会话 id。
+ * 被删除的会话（ADR-0060 修订 2026-10-18（二）的「删除时清理」）：判定已删除就整套
+ * 清理——结束终端、删掉面板记录，不因为会话还开着而只做一半。
+ *
+ * - candidates：有面板记录（偏好里或本次运行里）的会话；
+ * - seen：本次运行里出现在会话列表里的会话。列过、这次没有，就是被删了，开没开着都算；
+ * - 没进过列表的会话只有打开着（刚建好，列表还没跟上）才暂缓，否则是上次运行以后被删的；
+ * - current（正在看的会话）也暂缓，离开后下一份列表再判。
  */
 export function vanishedSessions(
-  known: Iterable<string>,
+  candidates: Iterable<string>,
   listed: readonly { id: string }[],
-  keep: ReadonlySet<string>,
+  seen: ReadonlySet<string>,
+  open: ReadonlySet<string>,
+  current: string | null,
 ): string[] {
   const present = new Set(listed.map((s) => s.id));
-  return [...known].filter((id) => !present.has(id) && !keep.has(id));
+  return [...new Set(candidates)].filter(
+    (id) => !present.has(id) && id !== current && (seen.has(id) || !open.has(id)),
+  );
+}
+
+/**
+ * 概览浮层能否停靠（ADR-0060 修订 2026-10-18（三））：面板关着、对话列让出浮层位置后
+ * 对话区仍不小于 480px 才停靠；否则盖在对话区上。只看窗口宽度，不受停靠本身影响，
+ * 拖动窗口跨过阈值时只切换一次。
+ */
+export function overviewDocks(bodyWidth: number, sidebarWidth: number): boolean {
+  return bodyWidth - sidebarWidth - OVERVIEW_RESERVE >= CONVERSATION_MIN_WIDTH;
 }
 
 /** 面板宽度夹在上下限之间；窗口很窄时上限再让出对话区的一部分 */
@@ -442,14 +480,34 @@ export interface QuickOpenHit {
 
 /**
  * Ctrl+P 排名（与 @ 补全同一套档位）：文件名前缀 > 文件名包含 > 路径包含 >
- * 路径按字符顺序匹配；同档短路径在前。只列文件。
+ * 路径按字符顺序匹配；同档短路径在前。只列文件。空查询时先列 recent（最近在面板里
+ * 打开过的相对路径，新的在前），其余按路径字母序。
  */
 export function rankQuickOpen(
   query: string,
   entries: readonly { path: string; kind: "file" | "directory" }[],
   limit = 50,
+  recent: readonly string[] = [],
 ): QuickOpenHit[] {
   const q = query.trim().toLowerCase().replaceAll("\\", "/");
+  if (q === "") {
+    const order = new Map(recent.map((path, index) => [path, index]));
+    const files = entries
+      .filter((entry) => entry.kind === "file")
+      .map((entry) => entry.path)
+      .sort((a, b) => {
+        const ra = order.get(a);
+        const rb = order.get(b);
+        if (ra !== undefined || rb !== undefined) {
+          return (ra ?? Infinity) - (rb ?? Infinity);
+        }
+        return a.localeCompare(b);
+      });
+    return files.slice(0, limit).map((path) => {
+      const cut = path.lastIndexOf("/");
+      return { path, name: path.slice(cut + 1), dir: path.slice(0, cut + 1) };
+    });
+  }
   const subsequence = (text: string): boolean => {
     let at = 0;
     for (const ch of text) if (ch === q[at]) at += 1;

@@ -407,11 +407,12 @@ function NewTabPage({
 
 // ── 变更 ──
 
+/** 和对话里的改动卡片同一口径：没有删除行时只写 +N，不写 −0 */
 function Counts({ added, removed }: { added: number; removed: number }) {
   return (
     <span className="sp-counts">
       <span className="diff-add">+{added}</span>
-      <span className="diff-del">−{removed}</span>
+      {removed > 0 && <span className="diff-del">−{removed}</span>}
     </span>
   );
 }
@@ -677,7 +678,9 @@ export function TreeSplitter({
       aria-valuemax={CHANGE_TREE_MAX_WIDTH}
       tabIndex={0}
       onPointerDown={(event) => {
+        // preventDefault 防止拖动时选中文字，但也拦掉了默认聚焦：手动聚焦，点过就能用 ← →
         event.preventDefault();
+        event.currentTarget.focus();
         event.currentTarget.setPointerCapture(event.pointerId);
         drag.current = { startX: event.clientX, startWidth: width, width };
         setDragging(true);
@@ -1092,7 +1095,9 @@ export function SidePanel(props: SidePanelProps) {
   const current = new Set(tabs.map((tab) => tab.id));
   const drag = useRef<{ startX: number; startWidth: number; width: number } | null>(null);
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    // 同 TreeSplitter：preventDefault 拦掉了默认聚焦，手动聚焦后才能用 ← →
     event.preventDefault();
+    event.currentTarget.focus();
     event.currentTarget.setPointerCapture(event.pointerId);
     drag.current = { startX: event.clientX, startWidth: width, width };
   };

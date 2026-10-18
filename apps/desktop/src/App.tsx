@@ -51,6 +51,7 @@ import {
   createPrefsStore,
   FILE_OPENER_LABELS,
   migrateLegacyProjectOrder,
+  outsideOpenable,
   type PrefsStore,
 } from "./prefs";
 import { useDraftControls, useSessionControls } from "./session-controls";
@@ -155,10 +156,7 @@ export function App({ host }: { host: DesktopHost }) {
         }
         await host.openInEditor(kind, absolutePath, line);
       },
-      outsideOpenable: () => {
-        const kind = opener();
-        return kind === "panel" || (kind !== "system" && editors[kind]);
-      },
+      outsideOpenable: () => outsideOpenable(opener(), editors),
       editors: () => editors,
       openInEditor: (editor, absolutePath, line) => host.openInEditor(editor, absolutePath, line),
       // 目录交给系统（资源管理器打开）；open_with_default 对目录不拦截

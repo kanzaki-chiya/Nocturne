@@ -4,13 +4,14 @@
  * 剪贴板失败提示、别的会话的终端后台保留）、变更（按文件合并、分隔条、换行、Windows 路径）、
  * 窄标签隐藏项目名。
  */
+import { readFileSync } from "node:fs";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { LocalFileContent, TurnChangeDiff, TurnChanges } from "@nocturne/core/protocol";
 import { RpcError } from "@nocturne/rpc/client";
 
 import type { TerminalHost, TerminalMessage } from "../src/host";
-import { QuickOpen } from "../src/PanelChrome";
+import { QuickOpen, SessionOverview } from "../src/PanelChrome";
 import { SidePanel, type SidePanelProps } from "../src/SidePanel";
 import type { FileTab, PanelTab, TerminalTab } from "../src/side-panel";
 
@@ -673,4 +674,174 @@ it("快速打开：点在对话框外（包括标题栏按钮）就关闭，点�
   expect(onClose).not.toHaveBeenCalled();
   fireEvent.mouseDown(screen.getByRole("button", { name: "会话概览" }));
   expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("变更：点哪一轮高亮哪一轮（含「查看变更」定位、重复点同一轮再滚一次）", async () => {
+  const turns = new Map<number, TurnChanges>([
+    [1, { seq: 1, files: [{ path: "Z:\\proj\\a.ts", added: 1, removed: 1 }] } as TurnChanges],
+    [2, { seq: 2, files: [{ path: "Z:\\proj\\a.ts", added: 2, removed: 0 }] } as TurnChanges],
+  ]);
+  const scrolled: string[] = [];
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this.getAttribute("data-change-seq") ?? "");
+  };
+  const source = {
+    workspace: "Z:\\proj",
+    turns,
+    userSeqs: [1, 2],
+    loadDiff: vi.fn(async () => ({ diff: "" })),
+  };
+  const view = render(
+    <SidePanel
+      {...props({
+        tabs: [{ id: "c", kind: "changes", focusSeq: 2, focusNonce: 1 }],
+        activeId: "c",
+        changes: source,
+      })}
+    />,
+  );
+  const focusedRounds = () =>
+    [...document.querySelectorAll(".sp-change.focus")].map((n) =>
+      n.getAttribute("data-change-seq"),
+    );
+  // 「查看变更」：第 2 轮
+  await waitFor(() => {
+    expect(scrolled.at(-1)).toBe("2");
+  });
+  expect(focusedRounds()).toEqual(["2"]);
+  const tree = screen.getByRole("complementary", { name: "改动的文件" });
+  fireEvent.click(within(tree).getByRole("button", { name: /a\.ts/ }));
+  fireEvent.click(within(tree).getByRole("button", { name: /第 1 轮/ }));
+  expect(focusedRounds()).toEqual(["1"]);
+  expect(scrolled.at(-1)).toBe("1");
+  const before = scrolled.length;
+  fireEvent.click(within(tree).getByRole("button", { name: /第 1 轮/ }));
+  expect(scrolled.length).toBe(before + 1);
+  expect(focusedRounds()).toEqual(["1"]);
+  fireEvent.click(within(tree).getByRole("button", { name: /第 2 轮/ }));
+  expect(focusedRounds()).toEqual(["2"]);
+  // 再次「查看变更」第 1 轮（nonce 变了）：高亮跟过去
+  view.rerender(
+    <SidePanel
+      {...props({
+        tabs: [{ id: "c", kind: "changes", focusSeq: 1, focusNonce: 2 }],
+        activeId: "c",
+        changes: source,
+      })}
+    />,
+  );
+  await waitFor(() => {
+    expect(focusedRounds()).toEqual(["1"]);
+  });
+});
+
+it("分隔条：按下即获得焦点，之后 ← → Home End 能用；往窄拖到 180 为止", () => {
+  const onTreeWidth = vi.fn();
+  const onResize = vi.fn();
+  render(<SidePanel {...changesProps({ treeWidth: 300, onTreeWidth, onResize })} />);
+  const split = screen.getByRole("separator", { name: "调整文件树宽度" });
+  split.setPointerCapture = () => undefined;
+  split.hasPointerCapture = () => true;
+  split.releasePointerCapture = () => undefined;
+  (document.activeElement as HTMLElement | null)?.blur();
+  fireEvent.pointerDown(split, { clientX: 500, pointerId: 1 });
+  expect(document.activeElement).toBe(split);
+  // 往右拖 = 变窄，过头夹在下限
+  fireEvent.pointerMove(split, { clientX: 560, pointerId: 1 });
+  expect(split.getAttribute("aria-valuenow")).toBe("240");
+  fireEvent.pointerMove(split, { clientX: 900, pointerId: 1 });
+  fireEvent.pointerUp(split, { clientX: 900, pointerId: 1 });
+  expect(onTreeWidth).toHaveBeenLastCalledWith(180);
+  fireEvent.keyDown(document.activeElement ?? split, { key: "End" });
+  expect(onTreeWidth).toHaveBeenLastCalledWith(420);
+  fireEvent.keyDown(document.activeElement ?? split, { key: "Home" });
+  expect(onTreeWidth).toHaveBeenLastCalledWith(180);
+
+  const panelSplit = screen.getByRole("separator", { name: "调整面板宽度" });
+  panelSplit.setPointerCapture = () => undefined;
+  panelSplit.releasePointerCapture = () => undefined;
+  fireEvent.pointerDown(panelSplit, { clientX: 100, pointerId: 2 });
+  expect(document.activeElement).toBe(panelSplit);
+  fireEvent.pointerUp(panelSplit, { clientX: 100, pointerId: 2 });
+  fireEvent.keyDown(document.activeElement ?? panelSplit, { key: "ArrowRight" });
+  expect(onResize).toHaveBeenLastCalledWith(504, true);
+});
+
+it("没有删除行时不写 −0：文件树、diff 卡片头、概览浮层", async () => {
+  render(<SidePanel {...changesProps()} />);
+  const tree = screen.getByRole("complementary", { name: "改动的文件" });
+  const report = within(tree).getByRole("button", { name: /report\.md/ });
+  expect(report.querySelector(".sp-counts")?.textContent).toBe("+4");
+  const card = screen.getByRole("region", { name: /report\.md 第 1 轮/ });
+  expect(card.querySelector(".sp-change-head .sp-counts")?.textContent).toBe("+4");
+  expect(card.querySelector(".sp-change-head")?.textContent).not.toContain("−");
+  cleanup();
+  const overview = (removed: number) =>
+    render(
+      <SessionOverview
+        project="proj"
+        workspace="Z:\proj"
+        totals={{ added: 7, removed, files: 2 }}
+        docked
+        rightOffset={0}
+        onOpenChanges={vi.fn()}
+      />,
+    );
+  overview(0);
+  expect(screen.getByRole("button", { name: /变更/ }).textContent).toBe("变更+7");
+  cleanup();
+  overview(3);
+  expect(screen.getByRole("button", { name: /变更/ }).textContent).toBe("变更+7 −3");
+});
+
+it("换行关掉时行号列固定在左侧：sticky、背景不透明（样式表约定）", () => {
+  // jsdom 算不出 sticky，直接查样式表（vitest 下 ?raw 的 CSS 是空串）
+  const css = readFileSync(`${import.meta.dirname}/../src/side-panel.css`, "utf8");
+  const rule = (selector: string) => {
+    const at = css.indexOf(`${selector} {`);
+    return at < 0 ? "" : css.slice(at, css.indexOf("}", at));
+  };
+  const gutter = rule(".sp-change .diff-body:not(.diff-wrap) :is(.diff-num, .diff-mark)");
+  expect(gutter).toContain("position: sticky");
+  expect(gutter).toContain("background: var(--a-panel)");
+  expect(rule(".sp-change .diff-body:not(.diff-wrap) .diff-num")).toContain("left: 0");
+  // 吸顶的卡片头压在吸左的行号格上面
+  const z = (text: string) => Number(/z-index: (\d+)/.exec(text)?.[1]);
+  expect(z(rule(".sp-change-head"))).toBeGreaterThan(z(gutter));
+  expect(rule(".sp-change .diff-body:not(.diff-wrap) .diff-mark")).toMatch(/left: \S+/);
+  // 增删行的行号格：半透明底色叠在不透明的卡片底色上
+  expect(
+    rule(".sp-change .diff-body:not(.diff-wrap) .diff-row-add :is(.diff-num, .diff-mark)"),
+  ).toContain("var(--a-panel)");
+});
+
+it("快速打开：空查询时最近打开的在前，其余按路径字母序", async () => {
+  render(
+    <QuickOpen
+      project="proj"
+      load={() =>
+        Promise.resolve([
+          { path: "src/z.ts", kind: "file" as const },
+          { path: "b.md", kind: "file" as const },
+          { path: "a/c.ts", kind: "file" as const },
+          { path: "src/y.ts", kind: "file" as const },
+        ])
+      }
+      recent={["src/y.ts", "b.md"]}
+      onPick={vi.fn()}
+      onClose={vi.fn()}
+    />,
+  );
+  await waitFor(() => {
+    expect(screen.getAllByRole("option")).toHaveLength(4);
+  });
+  expect(
+    screen
+      .getAllByRole("option")
+      .map(
+        (o) =>
+          o.querySelector("small")?.textContent +
+          (o.querySelector(".qopen-name")?.textContent ?? ""),
+      ),
+  ).toEqual(["src/y.ts", "./b.md", "a/c.ts", "src/z.ts"]);
 });

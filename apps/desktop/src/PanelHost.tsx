@@ -21,9 +21,11 @@ import {
   migrateGlobalPanel,
   moveTab,
   nextActiveAfterClose,
+  overviewDocks,
   PANEL_DEFAULT_WIDTH,
   panelOverlays,
   parseAddress,
+  pushRecent,
   relativeTo,
   restoreSessionPanel,
   samePath,
@@ -139,7 +141,14 @@ export function useSidePanel({
     [prefs],
   );
   const current = sessionId === null ? undefined : panelFor(sessionId, panels);
+  /**
+   * 设置页和首页一样没有面板（ADR-0060 修订 2026-10-18（三））：只是不显示、按钮和快捷键
+   * 不可用，会话自己的面板状态不动，返回会话时原样恢复；终端照常挂着。
+   */
+  const hasPanel = sessionId !== null && !settingsOpen;
+  /** 会话面板记录里的开关；显示与否还要看 hasPanel */
   const open = current?.open === true;
+  const shown = open && hasPanel;
   const tabs = useMemo(() => current?.tabs ?? [], [current]);
   const activeId = current?.activeId ?? "";
 
@@ -161,7 +170,8 @@ export function useSidePanel({
   }, [prefs, panels]);
 
   // ── 会话列表到了：一次性迁移旧全局标签；被删除的会话结束终端、清掉记录 ──
-  const knownIds = useRef(new Set<string>());
+  /** 本次运行里出现在会话列表里的会话：再从列表里消失就是被删了（vanishedSessions） */
+  const seenIds = useRef(new Set<string>());
   useEffect(() => {
     if (sessions === undefined) return;
     const p = prefs.get();
@@ -182,16 +192,19 @@ export function useSidePanel({
         panelOpen: undefined,
       });
     }
-    const keep = new Set(openIds);
-    if (sessionId !== null) keep.add(sessionId);
+    for (const s of sessions) seenIds.current.add(s.id);
     const gone = vanishedSessions(
-      new Set([...knownIds.current, ...Object.keys(stored), ...panels.keys()]),
+      [...Object.keys(stored), ...panels.keys()],
       sessions,
-      keep,
+      seenIds.current,
+      openIds,
+      sessionId,
     );
-    knownIds.current = new Set(sessions.map((s) => s.id));
     if (gone.length === 0) return;
-    for (const id of gone) restored.current.delete(id);
+    for (const id of gone) {
+      restored.current.delete(id);
+      seenIds.current.delete(id);
+    }
     // 卸载它们的终端标签即结束进程（TerminalSession.dispose）
     setPanels((map) => {
       if (!gone.some((id) => map.has(id))) return map;
@@ -239,7 +252,7 @@ export function useSidePanel({
   const available = bodySize.width > 0 ? bodySize.width - bodySize.sidebar : undefined;
   const shownWidth = clampPanelWidth(width, available);
   const overlay = bodySize.width > 0 && panelOverlays(bodySize.width, bodySize.sidebar, shownWidth);
-  const docked = open && !overlay;
+  const docked = shown && !overlay;
   // 标题栏：并排时窗口按钮让到面板上方
   useEffect(() => {
     const root = document.documentElement;
@@ -340,6 +353,7 @@ export function useSidePanel({
           ...panel,
           open: true,
           activeId: existing.id,
+          recent: pushRecent(panel.recent, file.absolutePath),
           tabs: panel.tabs.map((t) =>
             t.id === existing.id && t.kind === "file"
               ? {
@@ -354,6 +368,8 @@ export function useSidePanel({
         return;
       }
       placeTab({ id: newTabId(), kind: "file", ...file, focusNonce: 1 });
+      // Ctrl+P 空查询时排在前面
+      update((panel) => ({ ...panel, recent: pushRecent(panel.recent, file.absolutePath) }));
     },
     [tabs, update, placeTab],
   );
@@ -497,19 +513,27 @@ export function useSidePanel({
     return session === undefined ? undefined : () => session.fileIndex();
   }, [active?.session]);
 
-  // 会话切走时快速打开跟着关掉：它列的是原会话的工作区
+  // 会话切走或进了设置页时快速打开跟着关掉：它列的是原会话的工作区
   useEffect(() => {
     setQuickOpen(false);
-  }, [sessionId]);
+  }, [sessionId, settingsOpen]);
 
-  // ── 快捷键（只有桌面窗口挂这个 hook）；没有会话时面板相关快捷键都不响应 ──
-  const keyState = useRef({ open, overview, quickOpen, settingsOpen, hasSession: false });
+  // ── 快捷键（只有桌面窗口挂这个 hook）；没有面板（首页、新建会话页、设置页）时都不响应 ──
+  const keyState = useRef({
+    open,
+    overview,
+    quickOpen,
+    settingsOpen,
+    hasPanel: false,
+    hasSession: false,
+  });
   keyState.current = {
     open,
     overview,
     quickOpen,
     settingsOpen,
-    hasSession: sessionId !== null,
+    hasPanel,
+    hasSession: active !== undefined,
   };
   const actions = useRef({ newTab, openChanges, setPanelOpen, setOverviewOpen, openTerminal });
   actions.current = { newTab, openChanges, setPanelOpen, setOverviewOpen, openTerminal };
@@ -518,9 +542,12 @@ export function useSidePanel({
       const state = keyState.current;
       const act = actions.current;
       if (event.key === "Escape") {
-        // 浮层只由按钮和 Esc 关闭；别处已消费的 Esc（中断、菜单、搜索框）不算
-        if (event.defaultPrevented || state.quickOpen || state.settingsOpen) return;
+        // 浮层由按钮和 Esc 开关；别处已消费的 Esc（输入框的补全与中断、菜单、提示、搜索框、
+        // 终端）不算，所以输入框空闲时 Esc 也开关浮层。没有会话时按钮置灰，Esc 同样不开
+        if (event.defaultPrevented || event.isComposing || state.quickOpen || state.settingsOpen)
+          return;
         if (state.overview) act.setOverviewOpen(false);
+        else if (state.hasSession) act.setOverviewOpen(true);
         return;
       }
       if (!event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
@@ -530,9 +557,9 @@ export function useSidePanel({
         (!event.shiftKey && (key === "b" || key === "t" || key === "p")) ||
         (event.shiftKey && key === "g");
       if (!panelKey) return;
-      // 仍然拦下浏览器默认行为（Ctrl+P 是打印）；没有会话时什么都不做
+      // 仍然拦下浏览器默认行为（Ctrl+P 是打印）；没有面板时什么都不做
       event.preventDefault();
-      if (!state.hasSession) return;
+      if (!state.hasPanel) return;
       if (event.code === "Backquote") {
         // Ctrl+`：已有终端就切过去，没有就新开一个
         act.openTerminal(true);
@@ -553,7 +580,12 @@ export function useSidePanel({
   }, []);
 
   const overviewVisible = overview && active !== undefined && !settingsOpen;
-  const overviewDocked = overviewVisible && !open;
+  // 面板关着且对话区让位后仍放得下才停靠，否则盖在对话区上（修订 2026-10-18（三））
+  const overviewDocked =
+    overviewVisible &&
+    !shown &&
+    bodySize.width > 0 &&
+    overviewDocks(bodySize.width, bodySize.sidebar);
   const project =
     workspace === undefined
       ? ""
@@ -576,10 +608,10 @@ export function useSidePanel({
     return list;
   }, [panels, sessionId, tabs]);
 
-  // 没有会话时面板整个隐藏（首页、新建会话页），但别的会话的终端仍然挂着
+  // 没有面板时整个隐藏（首页、新建会话页、设置页），但各会话的终端仍然挂着
   const panel = (
     <SidePanel
-      hidden={!open}
+      hidden={!shown}
       tabs={tabs}
       panes={panes}
       activeId={activeId}
@@ -625,9 +657,9 @@ export function useSidePanel({
     <>
       <TitlebarButtons
         overviewOpen={overviewVisible}
-        overviewDisabled={active === undefined}
-        panelOpen={open}
-        panelDisabled={sessionId === null}
+        overviewDisabled={active === undefined || settingsOpen}
+        panelOpen={shown}
+        panelDisabled={!hasPanel}
         onToggleOverview={() => {
           setOverviewOpen(!overview);
         }}
@@ -641,7 +673,7 @@ export function useSidePanel({
           workspace={workspace}
           totals={sessionChangeTotals(active.turnChanges.values())}
           docked={overviewDocked}
-          rightOffset={open && overlay ? shownWidth : 0}
+          rightOffset={shown && overlay ? shownWidth : 0}
           onOpenChanges={() => {
             openChanges();
           }}
@@ -651,6 +683,11 @@ export function useSidePanel({
         <QuickOpen
           project={project}
           load={loadIndex}
+          recent={(current?.recent ?? []).flatMap((path) => {
+            const rel = relativeTo(active.workspace, path);
+            // fileIndex 的相对路径用 / 分隔
+            return rel === undefined ? [] : [rel.replaceAll("\\", "/")];
+          })}
           onClose={() => {
             setQuickOpen(false);
           }}

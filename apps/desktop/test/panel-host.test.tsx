@@ -95,6 +95,7 @@ interface HarnessProps {
   sessionId: string | null;
   sessions: readonly { id: string; mtimeMs: number }[] | undefined;
   openIds?: ReadonlySet<string>;
+  settingsOpen?: boolean;
   controller?: { current: SidePanelController | null };
 }
 
@@ -111,7 +112,7 @@ function Panel(props: HarnessProps) {
     openIds: props.openIds ?? new Set(props.sessionId === null ? [] : [props.sessionId]),
     loadDiff: vi.fn(),
     editors: { vscode: false, cursor: false },
-    settingsOpen: false,
+    settingsOpen: props.settingsOpen ?? false,
     plainKey: null,
     client: undefined,
     ensureClient: async () => rpc,
@@ -119,6 +120,10 @@ function Panel(props: HarnessProps) {
   if (props.controller !== undefined) props.controller.current = panel;
   return (
     <div className="body" ref={panel.bodyRef}>
+      <nav className="sidebar" />
+      <main className={`mainpane${panel.mainClass}`}>
+        <textarea aria-label="输入框" />
+      </main>
       {panel.mainOverlays}
       {panel.panel}
     </div>
@@ -347,4 +352,164 @@ it("面板宽度全局；Ctrl+B 只开关当前会话的面板", () => {
   expect(panelEl()?.hidden).toBe(true);
   view.rerender(<Harness prefs={prefs} host={host} sessionId="a" sessions={sessions} />);
   expect(panelEl()?.hidden).toBe(false);
+});
+
+it("设置页：不渲染面板，按钮置灰，面板快捷键与 Esc 都不响应；回到会话恢复原状，终端不受影响", async () => {
+  const { prefs, host, terminals } = setup();
+  const sessions = [{ id: "a", mtimeMs: 1 }];
+  const view = render(<Harness prefs={prefs} host={host} sessionId="a" sessions={sessions} />);
+  act(() => {
+    press({ key: "`", code: "Backquote", ctrlKey: true });
+  });
+  await waitFor(() => {
+    expect(terminals.opened).toHaveLength(1);
+  });
+  expect(panelEl()?.hidden).toBe(false);
+
+  view.rerender(
+    <Harness prefs={prefs} host={host} sessionId="a" sessions={sessions} settingsOpen />,
+  );
+  expect(panelEl()?.hidden).toBe(true);
+  expect((screen.getByRole("button", { name: "右侧面板" }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  expect((screen.getByRole("button", { name: "会话概览" }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  act(() => {
+    for (const init of [
+      { key: "b", ctrlKey: true },
+      { key: "t", ctrlKey: true },
+      { key: "p", ctrlKey: true },
+      { key: "`", code: "Backquote", ctrlKey: true },
+      { key: "Escape" },
+    ])
+      press(init);
+  });
+  expect(panelEl()?.hidden).toBe(true);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(terminals.opened).toHaveLength(1);
+  expect(terminals.closed).toEqual([]);
+
+  view.rerender(<Harness prefs={prefs} host={host} sessionId="a" sessions={sessions} />);
+  expect(panelEl()?.hidden).toBe(false);
+  expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
+    expect.stringContaining("终端"),
+  ]);
+  expect(terminals.opened).toHaveLength(1);
+});
+
+it("Esc 开关概览浮层：焦点在空闲输入框里也行；别处已处理的 Esc 不算；没有会话不开", () => {
+  const { prefs, host } = setup();
+  const sessions = [{ id: "a", mtimeMs: 1 }];
+  const view = render(<Harness prefs={prefs} host={host} sessionId="a" sessions={sessions} />);
+  const overview = () => screen.queryByRole("dialog", { name: "会话概览" });
+  const field = screen.getByRole("textbox", { name: "输入框" });
+  field.focus();
+  act(() => {
+    fireEvent.keyDown(field, { key: "Escape" });
+  });
+  expect(overview()).not.toBeNull();
+  act(() => {
+    fireEvent.keyDown(field, { key: "Escape" });
+  });
+  expect(overview()).toBeNull();
+  // 输入框的补全、中断等先处理了（preventDefault）：浮层不动
+  field.addEventListener("keydown", (event) => {
+    event.preventDefault();
+  });
+  act(() => {
+    fireEvent.keyDown(field, { key: "Escape" });
+  });
+  expect(overview()).toBeNull();
+  view.rerender(<Harness prefs={prefs} host={host} sessionId={null} sessions={sessions} />);
+  act(() => {
+    press({ key: "Escape" });
+  });
+  expect(overview()).toBeNull();
+});
+
+it("概览浮层：让位后对话区仍 ≥480px 才停靠，否则盖在对话上", () => {
+  let bodyWidth = 1200;
+  const rect = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: HTMLElement) {
+      const width = this.classList.contains("body")
+        ? bodyWidth
+        : this.classList.contains("sidebar")
+          ? 236
+          : 0;
+      return { width, height: 0, x: 0, y: 0, top: 0, left: 0, right: width, bottom: 0 } as DOMRect;
+    });
+  const observers: (() => void)[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: () => void) {
+        observers.push(callback);
+      }
+      observe() {
+        return undefined;
+      }
+      disconnect() {
+        return undefined;
+      }
+    },
+  );
+  try {
+    const { prefs, host } = setup();
+    prefs.update({ overviewOpen: true });
+    render(
+      <Harness prefs={prefs} host={host} sessionId="a" sessions={[{ id: "a", mtimeMs: 1 }]} />,
+    );
+    const main = () => document.querySelector("main");
+    const pop = () => document.querySelector(".ovpop");
+    expect(main()?.classList.contains("ov-docked")).toBe(true);
+    expect(pop()?.classList.contains("docked")).toBe(true);
+    // 236 + 300 + 480 = 1016：差 1px 就改成覆盖
+    bodyWidth = 1015;
+    act(() => {
+      for (const measure of observers) measure();
+    });
+    expect(main()?.classList.contains("ov-docked")).toBe(false);
+    expect(pop()?.classList.contains("docked")).toBe(false);
+    bodyWidth = 1016;
+    act(() => {
+      for (const measure of observers) measure();
+    });
+    expect(main()?.classList.contains("ov-docked")).toBe(true);
+  } finally {
+    rect.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("开着的会话被删除（列过又不见了）也整套清理：结束终端、删掉记录", async () => {
+  const { storage, prefs, host, terminals } = setup();
+  const sessions = [
+    { id: "a", mtimeMs: 1 },
+    { id: "b", mtimeMs: 2 },
+  ];
+  const view = render(<Harness prefs={prefs} host={host} sessionId="a" sessions={sessions} />);
+  act(() => {
+    press({ key: "`", code: "Backquote", ctrlKey: true });
+  });
+  await waitFor(() => {
+    expect(terminals.opened).toHaveLength(1);
+  });
+  view.rerender(<Harness prefs={prefs} host={host} sessionId="b" sessions={sessions} />);
+  // a 还在打开的会话里（例如后台已退出的会话关不掉），但列表里没了
+  view.rerender(
+    <Harness
+      prefs={prefs}
+      host={host}
+      sessionId="b"
+      sessions={[{ id: "b", mtimeMs: 2 }]}
+      openIds={new Set(["a", "b"])}
+    />,
+  );
+  await waitFor(() => {
+    expect(terminals.closed).toEqual([1]);
+  });
+  expect(Object.keys((stored(storage).panelSessions ?? {}) as object)).not.toContain("a");
 });

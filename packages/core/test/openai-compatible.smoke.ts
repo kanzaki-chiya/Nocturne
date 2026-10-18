@@ -5,6 +5,7 @@
  *   NOCTURNE_SMOKE_API_KEY   服务凭据（只从环境变量读取）
  *   NOCTURNE_SMOKE_MODEL     模型 id，例如 deepseek-chat
  *   NOCTURNE_SMOKE_IMAGE=1   可选：开启读图用例（要求 NOCTURNE_SMOKE_MODEL 真能看图）
+ *   NOCTURNE_SMOKE_SESSION_HEADER  可选：会话头名（如 x-opencode-session，ADR-0031）
  * 未设置时跳过。仅在不含敏感信息的测试工作区中运行——工作区内容会发给模型服务。
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -14,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createRuntime } from "../src/index.js";
 import type { RuntimeEvent } from "../src/protocol/index.js";
+import { smokeSessionHeader } from "./smoke-env.js";
 
 const BASE_URL = process.env.NOCTURNE_SMOKE_BASE_URL;
 const API_KEY = process.env.NOCTURNE_SMOKE_API_KEY;
@@ -43,6 +45,7 @@ async function openSession(cwd: string, model = MODEL, imageInput = false) {
         id: PROVIDER_ID,
         baseURL: BASE_URL ?? "",
         apiKeyEnv: "NOCTURNE_SMOKE_API_KEY",
+        ...smokeSessionHeader(),
         models: {
           [model ?? ""]: imageInput
             ? {

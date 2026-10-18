@@ -346,7 +346,10 @@ export function Sidebar(props: SidebarProps) {
   useEffect(() => {
     if (menu === null) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenu(null);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMenu(null);
+      }
     };
     const onDown = (e: MouseEvent) => {
       if (menuRef.current !== null && !menuRef.current.contains(e.target as Node)) {
