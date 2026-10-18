@@ -59,6 +59,9 @@ export function Menu({ anchor, align = "left", label, onClose, children }: MenuP
       };
     }
     setStyle({ ...horizontal, ...vertical, visibility: "visible" });
+    // state 要等重渲染才提交，此刻 DOM 仍是 visibility: hidden，focus() 会静默失败；
+    // 先同步写 DOM 让菜单可见再聚焦（与随后提交的 style 一致）
+    if (root.current !== null) root.current.style.visibility = "visible";
     const items = root.current?.querySelectorAll<HTMLButtonElement>(
       '[role="menuitemradio"]:not(:disabled), [role="menuitem"]:not(:disabled)',
     );
