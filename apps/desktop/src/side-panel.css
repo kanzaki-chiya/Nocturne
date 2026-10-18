@@ -189,11 +189,13 @@
 
 .sp-content {
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
 .sp-pane {
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   grid-area: 1 / 1;
   min-height: 0;
   min-width: 0;
@@ -842,4 +844,95 @@
 }
 .main.ov-docked .head {
   padding-right: calc(var(--ov-reserve) + 36px);
+}
+
+/* 面板收起时仍挂着（终端进程不随面板收起结束） */
+.side-panel[hidden] {
+  display: none;
+}
+
+/* 窄标签：项目名放不下就整段不显示（占位保持宽度，见 SidePanel TabLabel） */
+.sp-tab-label.no-project .sp-tab-project {
+  visibility: hidden;
+}
+
+/* 变更：一个文件一行，多轮的展开列出各轮 */
+.sp-tree-spacer {
+  flex: none;
+  width: 10px;
+}
+.sp-tree-file .fold-arrow {
+  flex: none;
+}
+.sp-tree-roundrow {
+  color: var(--a-muted);
+}
+.sp-tree-file.reverted .sp-tree-name {
+  color: var(--a-faint);
+  text-decoration: line-through;
+}
+
+/* 终端 */
+/* flex 而不是固定行的 grid：退出/错误横条是条件渲染，固定行会让终端区落进 auto 行 */
+.sp-term {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.sp-term-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--a-border);
+  font-size: 12px;
+}
+.sp-term-shell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--a-text);
+}
+.sp-term-caret {
+  color: var(--a-faint);
+  font-size: 9px;
+}
+.sp-term-exit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--a-border);
+  background: var(--a-warnBg);
+  color: var(--a-secondary);
+  font-size: 12px;
+}
+.sp-term-body {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--a-bg);
+}
+/* xterm 挂在绝对定位的宿主里：行数不能反过来撑高容器，否则 fit 量到的永远是默认 24 行 */
+.sp-term-host {
+  position: absolute;
+  inset: 6px 0 0 10px;
+}
+.sp-term-host .xterm {
+  height: 100%;
+}
+/* 行数取整后剩下的几像素露出的是视口；xterm.css 默认黑底，改成面板底色 */
+.sp-term-host .xterm .xterm-viewport {
+  background-color: var(--a-bg);
+}
+.sp-term-anchor {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }

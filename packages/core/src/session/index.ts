@@ -5,4 +5,4 @@ export * from "./fold.js";
 export * from "./session.js";
 export * from "./lock.js";
 export * from "./store.js";
-export * from "./workspace-file.js";
+export * from "./local-file.js";

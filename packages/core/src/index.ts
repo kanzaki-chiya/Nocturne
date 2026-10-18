@@ -159,7 +159,7 @@ import type {
 } from "./protocol/index.js";
 import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
 import { normalizePermissionPreset } from "./protocol/index.js";
-import type { FileRefResolution, WorkspaceFileContent } from "./protocol/file-refs.js";
+import type { FileRefResolution, LocalFileContent } from "./protocol/file-refs.js";
 import { resolveFileRefs } from "./tools/file-refs.js";
 import { buildFileIndex, type FileIndexEntry } from "./tools/file-index.js";
 import { isReasoningEffort, REASONING_EFFORT_ORDER } from "./protocol/index.js";
@@ -167,7 +167,9 @@ import { validateSettingsPatch } from "./config/settings.js";
 import { resolveSubagentProfile } from "./config/subagent-profiles.js";
 import {
   createSessionStore,
-  readWorkspaceFile,
+  isNetworkPath,
+  readLocalFile,
+  resolveLocalPath,
   SessionError,
   type Session,
   type SessionRecovery,
@@ -389,12 +391,6 @@ export interface RuntimeSession {
    * 与 exists，由客户端决定只给复制/显示入口。
    */
   resolveFiles(paths: string[]): Promise<FileRefResolution[]>;
-  /**
-   * 面板「文件」标签读取工作区文件（ADR-0060 第 3 节）：路径规则同 resolveFiles，
-   * 只允许工作区内的普通文件，链接逃逸、..、备用数据流一律拒绝；返回文本或图片，
-   * 超过 READ_FILE_MAX_BYTES 报 file_too_large。不是 agent 工具，不经权限层。
-   */
-  readFile(path: string): Promise<WorkspaceFileContent>;
   /** 提交一个 Turn；Turn 结束时 resolve（events.md 第 7 节） */
   submit(input: SubmitInput): Promise<TurnEndReason>;
   /** 中断运行中的 Turn；无运行中 Turn 时无操作 */
@@ -555,6 +551,13 @@ export interface Runtime {
   ): Promise<SettingItem[]>;
   describeSettings(input?: { workspaceRoot?: string | undefined }): SettingItem[];
   listShells(input?: { workspaceRoot?: string | undefined }): Promise<readonly DetectedShell[]>;
+  /**
+   * 面板「文件」标签读取本机文件（ADR-0060 第 3 节及 2026-10-18 修订）：只收绝对路径，
+   * 不依赖会话、不限工作区；UNC 等网络路径与链接到网络位置的路径直接拒绝、不访问。
+   * 只读普通文件，返回文本或图片，超过 READ_FILE_MAX_BYTES 报 file_too_large。
+   * 不是 agent 工具，不经权限层。
+   */
+  readFile(path: string): Promise<LocalFileContent>;
   setShellSetting(
     kind: string,
     input?: { workspaceRoot?: string | undefined },
@@ -2378,13 +2381,28 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       async resolveFiles(inputs) {
         assertUsable();
         const root = await fs.realpath(meta.workspaceRoot).catch(() => meta.workspaceRoot);
+        const windows = paths.sep === "\\";
         return Promise.all(
           inputs.map(async (input): Promise<FileRefResolution> => {
+            // 网络路径不去判断存在性（ADR-0060 修订 2026-10-18）：stat 会向那台主机
+            // 发起 SMB 连接并带上 Windows 凭据。按不存在返回，客户端保持普通行内代码
+            if (windows && isNetworkPath(input)) {
+              return {
+                input,
+                absolutePath: input,
+                withinWorkspace: false,
+                exists: false,
+                isDirectory: false,
+              };
+            }
             const absolute = paths.isAbsolute(input)
               ? paths.normalize(input)
               : paths.join(root, input);
             const withinWorkspace = paths.isWithin(root, absolute);
-            const stat = await fs.stat(absolute).catch(() => undefined);
+            // 逐级解析链接：junction / 符号链接指向网络位置时同样不访问
+            const stat = await resolveLocalPath(fs, paths, absolute)
+              .then((real) => fs.stat(real))
+              .catch(() => undefined);
             return {
               input,
               absolutePath: absolute,
@@ -2395,10 +2413,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             };
           }),
         );
-      },
-      readFile(input) {
-        assertUsable();
-        return readWorkspaceFile(fs, paths, meta.workspaceRoot, input);
       },
       interrupt() {
         controller?.abort();
@@ -3336,6 +3350,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async listShells(input) {
       return (await runtimeShellResolver(input?.workspaceRoot ?? workspaceRoot)).list();
     },
+    readFile(input) {
+      return readLocalFile(fs, paths, input);
+    },
     async setShellSetting(kind, input) {
       if (config === undefined) throw new Error("未注入 RuntimeConfig，无法保存 Shell");
       const settingsConfig = config;
@@ -3794,8 +3811,8 @@ export {
   splitCodeRef,
   type FileRefResolution,
   type ParsedFileRef,
-  type WorkspaceFileContent,
-  type WorkspaceImageMimeType,
+  type LocalFileContent,
+  type LocalImageMimeType,
 } from "./protocol/file-refs.js";
 // MCP / Hook 装配点类型（modules.md：注入方是 apps；实现位于 packages/mcp）
 export type {

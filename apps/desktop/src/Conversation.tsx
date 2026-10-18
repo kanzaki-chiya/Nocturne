@@ -41,6 +41,7 @@ import { fileRefTitle, userText } from "./file-refs";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { operationForSubjectKind } from "./notify";
 import { displayPath } from "./paths";
+import { isNetworkPath } from "./side-panel";
 import { TurnChangesCard } from "./TurnChangesCard";
 import { TodoList, TodoProgress, todoSummary } from "./TodoList";
 import { useReasoning, type ReasoningMap } from "./reasoning";
@@ -91,13 +92,18 @@ export interface FileLinkHooks {
   openerLabel: () => string;
   /**
    * 左键：按"打开文件用"设置打开（面板与编辑器带行号，系统默认不带）。
-   * ref 给面板用：相对路径作标签标题，endLine 高亮行范围。
+   * ref 给面板用：endLine 高亮行范围。
    */
   open: (
     absolutePath: string,
     line?: number,
-    ref?: { relativePath?: string | undefined; endLine?: number | undefined },
+    ref?: { endLine?: number | undefined },
   ) => Promise<void>;
+  /**
+   * 工作区外的文件能否左键打开（ADR-0060 修订 2026-10-18）：面板只读查看、编辑器
+   * 只是打开，都可以；「系统默认」可能直接运行文件，工作区外仍然只开菜单（ADR-0046）。
+   */
+  outsideOpenable: () => boolean;
   /** 已检测到的编辑器：右键菜单逐个列出 */
   editors: () => { vscode: boolean; cursor: boolean };
   /** 用指定编辑器打开并跳到行号 */
@@ -351,14 +357,15 @@ function Markdown({
       return;
     }
     let alive = true;
-    // 收集本消息 codespan 里的候选路径，一次批量 resolveFiles
+    // 收集本消息 codespan 里的候选路径，一次批量 resolveFiles。网络路径不链接化，
+    // 也不送去判断存在性（ADR-0060 修订 2026-10-18；Core 侧同样拦截）
     const paths: string[] = [];
     const seen = new Set<string>();
     const collect = (tokens: readonly Token[]) => {
       for (const token of tokens) {
         if (token.type === "codespan") {
           const split = splitCodeRef((token as Tokens.Codespan).text);
-          if (split !== undefined && !seen.has(split.path)) {
+          if (split !== undefined && !seen.has(split.path) && !isNetworkPath(split.path)) {
             seen.add(split.path);
             paths.push(split.path);
           }
@@ -439,9 +446,10 @@ function Markdown({
 /**
  * 行内代码的文件引用（U-09）：存在的文件渲染成「类型图标 + 路径」链接。
  * 工作区内：左键按"打开文件用"设置打开（目录交给系统），右键开菜单
- * （打开、资源管理器、检测到的编辑器、复制绝对/相对路径）。工作区外：
- * 不直接打开，左右键都开菜单且只有资源管理器与复制绝对路径。
- * 不存在 → 普通行内代码。
+ * （打开、资源管理器、检测到的编辑器、复制绝对/相对路径）。工作区外的文件：
+ * 「打开文件用」是面板或编辑器时左键同样打开，菜单多一项「打开」；是系统默认时
+ * 左右键都只开菜单（资源管理器与复制绝对路径）。工作区外的目录只开菜单。
+ * 不存在、网络路径 → 普通行内代码。
  */
 function CodeRef({ text }: { text: string }) {
   const context = useContext(FileLinksContext);
@@ -451,7 +459,7 @@ function CodeRef({ text }: { text: string }) {
   const hit = context.lookup(text);
   if (hit === undefined) return <code>{text}</code>;
   const { hooks } = context;
-  const canOpen = hit.withinWorkspace;
+  const canOpen = hit.withinWorkspace || (!hit.isDirectory && hooks.outsideOpenable());
   const editors = hooks.editors();
   const run = (action: () => Promise<void>) => {
     setAnchor(null);
@@ -463,20 +471,27 @@ function CodeRef({ text }: { text: string }) {
   const openDefault = () =>
     hit.isDirectory
       ? hooks.openFolder(hit.absolutePath)
-      : hooks.open(hit.absolutePath, hit.line, {
-          relativePath: hit.relativePath,
-          endLine: hit.endLine,
-        });
+      : hooks.open(hit.absolutePath, hit.line, { endLine: hit.endLine });
   const relative = hit.relativePath;
+  const activate = (target: HTMLElement) => {
+    if (canOpen) run(openDefault);
+    else setAnchor(target);
+  };
   return (
     <>
-      <button
-        type="button"
+      {/* span 而不是 button：button 再设 display:inline 也是原子行内块，长路径整块掉到下一行 */}
+      <span
+        role="button"
+        tabIndex={0}
         className="file-ref-link"
-        title={`${hit.absolutePath}\n${canOpen ? "单击打开，右键更多" : "工作区外的文件：单击查看选项"}`}
+        title={`${hit.absolutePath}\n${canOpen ? "单击打开，右键更多" : "工作区外：单击查看选项"}`}
         onClick={(event) => {
-          if (canOpen) run(openDefault);
-          else setAnchor(event.currentTarget);
+          activate(event.currentTarget);
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          activate(event.currentTarget);
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -486,7 +501,7 @@ function CodeRef({ text }: { text: string }) {
       >
         <FileGlyph directory={hit.isDirectory} />
         <span className="file-ref-text">{text}</span>
-      </button>
+      </span>
       {anchor !== null && (
         <Menu
           anchor={anchor}
@@ -518,7 +533,7 @@ function CodeRef({ text }: { text: string }) {
               run(() => hooks.reveal(hit.absolutePath));
             }}
           />
-          {canOpen && !hit.isDirectory && editors.vscode && (
+          {hit.withinWorkspace && !hit.isDirectory && editors.vscode && (
             <MenuItem
               icon={<MenuGlyph kind="editor" />}
               label="VS Code"
@@ -527,7 +542,7 @@ function CodeRef({ text }: { text: string }) {
               }}
             />
           )}
-          {canOpen && !hit.isDirectory && editors.cursor && (
+          {hit.withinWorkspace && !hit.isDirectory && editors.cursor && (
             <MenuItem
               icon={<MenuGlyph kind="editor" />}
               label="Cursor"

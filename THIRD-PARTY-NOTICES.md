@@ -36,10 +36,14 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `@codemirror/lang-xml` | 6.1.0 | MIT |
 | `@codemirror/lang-yaml` | 6.1.3 | MIT |
 | `@lezer/highlight` | 1.2.5 | MIT |
+| `@xterm/xterm` | 6.0.0 | MIT |
+| `@xterm/addon-fit` | 0.11.0 | MIT |
 
 桌面端第 2 步复用 `marked` **18.0.7**（MIT；2026-07-21 发布，采用时已满 7 天）解析 Markdown token，由 React 元素渲染；不使用其 HTML 输出，不渲染原始 HTML。
 
 桌面端右侧面板的只读文件查看用 CodeMirror 6（上表 `@codemirror/*` 与 `@lezer/highlight`，均为 MIT），按需动态加载，不进手机网页。它们间接带入的 `@codemirror/autocomplete`、`@codemirror/lint`、`@lezer/common`、`@lezer/lr`、各语言的 `@lezer/*` 解析器、`style-mod`、`w3c-keyname`、`crelt`、`@marijn/find-cluster-break` 也都是 MIT。
+
+桌面端右侧面板的终端用 xterm.js（上表 `@xterm/xterm` 与 `@xterm/addon-fit`，均为 MIT，无运行时依赖），随终端标签首次打开动态加载，不进手机网页。
 
 | 开发与测试依赖 | 版本 | 许可证 |
 |---|---:|---|
@@ -73,6 +77,9 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `tauri-plugin-opener` | 2.6.0 | Apache-2.0 OR MIT |
 | `serde` | 1.0.229 | MIT OR Apache-2.0 |
 | `windows-sys` | 0.61.2 | MIT OR Apache-2.0 |
+| `portable-pty` | 0.9.0 | MIT |
+
+`portable-pty`（面板终端，Windows 上走 ConPTY）间接带入的 crate：`filedescriptor` 0.8.3（MIT）、`serial2` 0.2.38（BSD-2-Clause OR Apache-2.0）、`shared_library` 0.1.9（Apache-2.0/MIT）、`shell-words` 1.1.1（MIT/Apache-2.0）、`winreg` 0.10.1（MIT）、`nix` 0.28.0（MIT）、`downcast-rs` 1.2.1（MIT/Apache-2.0）、`lazy_static` 1.5.1（MIT OR Apache-2.0）、`cfg_aliases` 0.1.1（MIT）。
 
 这些是通过各包 `package.json` 核对的直接依赖；间接依赖与完整许可文本可从 `pnpm-lock.yaml` 和安装后的 `node_modules` 查阅。仓库未从参考项目复制第三方源文件，故没有需要附加的来源 NOTICE。
 

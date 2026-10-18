@@ -28,7 +28,7 @@ import type {
   CreateSessionOptions,
   FileIndexEntry,
   FileRefResolution,
-  WorkspaceFileContent,
+  LocalFileContent,
   ImageMimeType,
   JevEndpoint,
   JevReviewerConfig,
@@ -108,10 +108,10 @@ export interface WireAttachment {
   label?: string;
 }
 
-/** `session.readFile` 的线上形状：图片的 `data` 是 base64 字符串 */
-export type WireWorkspaceFile =
-  | Extract<WorkspaceFileContent, { kind: "text" }>
-  | (Omit<Extract<WorkspaceFileContent, { kind: "image" }>, "data"> & { data: string });
+/** `runtime.readFile` 的线上形状：图片的 `data` 是 base64 字符串 */
+export type WireLocalFile =
+  | Extract<LocalFileContent, { kind: "text" }>
+  | (Omit<Extract<LocalFileContent, { kind: "image" }>, "data"> & { data: string });
 
 export interface SessionParams {
   sessionId: string;
@@ -275,6 +275,11 @@ export interface RpcMethods {
     params: { workspaceRoot?: string | undefined };
     result: Ret<"listShells">;
   };
+  /**
+   * 面板「文件」标签读取本机文件（ADR-0060 第 3 节及 2026-10-18 修订）：只收绝对路径，
+   * 不依赖会话，拒绝网络路径；只读，不进远程白名单；图片字节为标准 base64。
+   */
+  "runtime.readFile": { params: { path: string }; result: WireLocalFile };
   "runtime.setShellSetting": {
     params: { kind: string; workspaceRoot?: string | undefined };
     result: SettingItem[];
@@ -498,14 +503,6 @@ export interface RpcMethods {
     params: SessionParams & { paths: string[] };
     result: FileRefResolution[];
   };
-  /**
-   * 面板「文件」标签读取工作区文件（ADR-0060 第 3 节）：只读，不进远程白名单；
-   * 图片字节为标准 base64。
-   */
-  "session.readFile": {
-    params: SessionParams & { path: string };
-    result: WireWorkspaceFile;
-  };
   "session.readInputHistory": { params: SessionParams; result: string[] };
   "session.recordInputHistory": { params: SessionParams & { text: string }; result: null };
   "session.close": { params: SessionParams; result: null };
@@ -563,6 +560,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.listRecentModels": true,
   "runtime.describeSettings": true,
   "runtime.listShells": true,
+  "runtime.readFile": true,
   "runtime.setShellSetting": true,
   "runtime.updateSettings": true,
   "runtime.setDefaultModel": true,
@@ -639,7 +637,6 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.mcpServers": true,
   "session.fileIndex": true,
   "session.resolveFiles": true,
-  "session.readFile": true,
   "session.readInputHistory": true,
   "session.recordInputHistory": true,
   "session.close": true,

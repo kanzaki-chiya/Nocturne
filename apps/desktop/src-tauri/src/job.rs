@@ -51,8 +51,7 @@ mod imp {
         /// 把 pid 对应的进程加入 Job；句柄用完即关。
         pub fn assign_process(&self, pid: u32) -> io::Result<()> {
             unsafe {
-                let process =
-                    OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+                let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
                 if process.is_null() {
                     return Err(io::Error::last_os_error());
                 }

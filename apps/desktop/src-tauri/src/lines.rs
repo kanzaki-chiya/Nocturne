@@ -38,9 +38,7 @@ impl LineSplitter {
                         self.buf.pop();
                     }
                     if !self.buf.is_empty() {
-                        out.push(Split::Line(
-                            String::from_utf8_lossy(&self.buf).into_owned(),
-                        ));
+                        out.push(Split::Line(String::from_utf8_lossy(&self.buf).into_owned()));
                     }
                     self.buf.clear();
                 }
@@ -163,10 +161,10 @@ mod tests {
     #[test]
     fn strips_cr_before_lf() {
         let mut s = LineSplitter::new(1024);
-        assert_eq!(s.push(b"a\r\nb\r\n"), vec![
-            Split::Line("a".into()),
-            Split::Line("b".into()),
-        ]);
+        assert_eq!(
+            s.push(b"a\r\nb\r\n"),
+            vec![Split::Line("a".into()), Split::Line("b".into()),]
+        );
     }
 
     #[test]
@@ -194,10 +192,10 @@ mod tests {
     fn overlong_line_dropped_then_next_line_ok() {
         let mut s = LineSplitter::new(8);
         let out = s.push(b"0123456789abcdef\nok\n");
-        assert_eq!(out, vec![
-            Split::Overlong { bytes: 16 },
-            Split::Line("ok".into()),
-        ]);
+        assert_eq!(
+            out,
+            vec![Split::Overlong { bytes: 16 }, Split::Line("ok".into()),]
+        );
     }
 
     #[test]

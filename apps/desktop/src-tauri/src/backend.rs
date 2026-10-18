@@ -305,6 +305,22 @@ impl AppState {
         }
     }
 
+    /// 把面板终端的 shell 进程放进 Job Object（ADR-0060 第 4 节）；失败只记一行外壳日志。
+    #[cfg(windows)]
+    pub fn assign_job(&self, pid: u32) {
+        let error = match lock(&self.job).as_ref() {
+            Some(job) => job.assign_process(pid).err().map(|e| e.to_string()),
+            None => Some(
+                lock(&self.job_error)
+                    .clone()
+                    .unwrap_or_else(|| "Job Object 不可用".into()),
+            ),
+        };
+        if let Some(error) = error {
+            self.push_shell_note(format!("终端进程未加入 Job Object：{error}"));
+        }
+    }
+
     pub fn backend(&self, id: u32) -> Option<Arc<Backend>> {
         lock(&self.registry)
             .backends

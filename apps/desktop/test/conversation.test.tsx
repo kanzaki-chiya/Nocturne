@@ -2356,6 +2356,7 @@ describe("回答内文件引用（U-09）", () => {
   const hooks = (overrides: Partial<FileLinkHooks> = {}) => ({
     openerLabel: () => "系统默认程序",
     open: vi.fn(async (_path: string, _line?: number) => undefined),
+    outsideOpenable: () => false,
     editors: () => ({ vscode: true, cursor: false }),
     openInEditor: vi.fn(
       async (_editor: "vscode" | "cursor", _path: string, _line?: number) => undefined,
@@ -2395,12 +2396,25 @@ describe("回答内文件引用（U-09）", () => {
     mount(view, { fileLinks, resolveFilesImpl: async (paths: string[]) => inside(paths) });
     fireEvent.click(await screen.findByRole("button", { name: "src/a.ts:12-20" }));
     await waitFor(() => {
-      expect(fileLinks.open).toHaveBeenCalledWith("Z:/project/src/a.ts", 12, {
-        relativePath: "src/a.ts",
-        endLine: 20,
-      });
+      expect(fileLinks.open).toHaveBeenCalledWith("Z:/project/src/a.ts", 12, { endLine: 20 });
     });
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("链接是可聚焦的行内元素（长路径随正文换行），回车同样打开", async () => {
+    const view = createSessionView();
+    view.entries = [assistant({ text: "看 `src/a.ts`" })];
+    const fileLinks = hooks();
+    mount(view, { fileLinks, resolveFilesImpl: async (paths: string[]) => inside(paths) });
+    const link = await screen.findByRole("button", { name: "src/a.ts" });
+    expect(link.tagName).toBe("SPAN");
+    expect(link.tabIndex).toBe(0);
+    fireEvent.keyDown(link, { key: "Enter" });
+    await waitFor(() => {
+      expect(fileLinks.open).toHaveBeenCalledWith("Z:/project/src/a.ts", undefined, {
+        endLine: undefined,
+      });
+    });
   });
 
   it("打开文件用 = Nocturne 面板：菜单「打开」项说明是面板，不另列重复项", async () => {
@@ -2458,7 +2472,67 @@ describe("回答内文件引用（U-09）", () => {
     expect(fileLinks.open).not.toHaveBeenCalled();
   });
 
-  it("工作区外的路径不能直接打开：单击开菜单，只有资源管理器与复制绝对路径", async () => {
+  const outside =
+    (absolutePath: string, isDirectory = false) =>
+    async (paths: string[]) =>
+      paths.map((input) => ({
+        input,
+        absolutePath,
+        withinWorkspace: false,
+        exists: true,
+        isDirectory,
+      }));
+
+  it("工作区外的文件 + 面板：左键在面板打开，菜单多一项「打开」（ADR-0060 修订）", async () => {
+    const view = createSessionView();
+    view.entries = [assistant({ text: "报告在 `Z:/sibling/report.md:3`" })];
+    const fileLinks = hooks({ openerLabel: () => "Nocturne 面板", outsideOpenable: () => true });
+    mount(view, { fileLinks, resolveFilesImpl: outside("Z:/sibling/report.md") });
+    const link = await screen.findByRole("button", { name: "Z:/sibling/report.md:3" });
+    fireEvent.click(link);
+    await waitFor(() => {
+      expect(fileLinks.open).toHaveBeenCalledWith("Z:/sibling/report.md", 3, {
+        endLine: undefined,
+      });
+    });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.contextMenu(link);
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: /打开/ }).textContent).toContain(
+      "Nocturne 面板",
+    );
+    // 其余保持工作区外的菜单：不列编辑器、不给相对路径
+    expect(within(menu).queryByRole("menuitem", { name: "VS Code" })).toBeNull();
+    expect(within(menu).queryByRole("menuitem", { name: "复制相对路径" })).toBeNull();
+  });
+
+  it("工作区外的目录即使可打开文件也只开菜单", async () => {
+    const view = createSessionView();
+    view.entries = [assistant({ text: "目录 `Z:/sibling`" })];
+    const fileLinks = hooks({ outsideOpenable: () => true });
+    mount(view, { fileLinks, resolveFilesImpl: outside("Z:/sibling", true) });
+    fireEvent.click(await screen.findByRole("button", { name: "Z:/sibling" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: /打开/ })).toBeNull();
+    expect(fileLinks.openFolder).not.toHaveBeenCalled();
+  });
+
+  it("网络路径的引用不链接化，也不送去 resolveFiles", async () => {
+    const view = createSessionView();
+    view.entries = [
+      assistant({
+        text: "看 `\\\\127.0.0.1\\c$\\Windows\\win.ini` 和 `//host/share/a.txt` 以及 `src/a.ts`",
+      }),
+    ];
+    const resolveFilesImpl = vi.fn(async (paths: string[]) => inside(paths));
+    mount(view, { fileLinks: hooks({ outsideOpenable: () => true }), resolveFilesImpl });
+    await screen.findByRole("button", { name: "src/a.ts" });
+    expect(resolveFilesImpl).toHaveBeenCalledWith(["src/a.ts"]);
+    expect(screen.getByText("\\\\127.0.0.1\\c$\\Windows\\win.ini").tagName).toBe("CODE");
+    expect(screen.getByText("//host/share/a.txt").tagName).toBe("CODE");
+  });
+
+  it("工作区外的路径（系统默认）不能直接打开：单击开菜单，只有资源管理器与复制绝对路径", async () => {
     const view = createSessionView();
     view.entries = [assistant({ text: "系统文件 `C:/Windows/exec.exe` 别乱点" })];
     const fileLinks = hooks();

@@ -50,6 +50,8 @@ export interface FileSystem {
   /** 不跟随符号链接 */
   lstat(path: string): Promise<FileStat>;
   realpath(path: string): Promise<string>;
+  /** 读符号链接 / junction 的目标，不访问目标本身 */
+  readlink(path: string): Promise<string>;
   exists(path: string): Promise<boolean>;
   unlink(path: string): Promise<void>;
   rename(oldPath: string, newPath: string): Promise<void>;
@@ -119,6 +121,7 @@ export function createNodeFileSystem(): FileSystem {
       return { type: statType(s), size: s.size, mtimeMs: s.mtimeMs };
     },
     realpath: (p) => fs.realpath(p),
+    readlink: (p) => fs.readlink(p),
     async exists(p) {
       try {
         await fs.access(p);

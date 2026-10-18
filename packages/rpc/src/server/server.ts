@@ -927,6 +927,12 @@ class Connection implements HubPeer {
         this.runtime().describeSettings({ workspaceRoot: await this.workspaceOf(p) }),
       "runtime.listShells": async (p) =>
         this.runtime().listShells({ workspaceRoot: await this.workspaceOf(p) }),
+      // 不在 REMOTE_METHODS：只服务本机面板（ADR-0060），远程调用报 remote_not_allowed
+      "runtime.readFile": async (p) => {
+        const file = await this.runtime().readFile(reqString(p, "path"));
+        if (file.kind === "text") return file;
+        return { ...file, data: Buffer.from(file.data).toString("base64") };
+      },
       "runtime.setShellSetting": async (p) =>
         this.runtime().setShellSetting(reqString(p, "kind"), {
           workspaceRoot: await this.workspaceOf(p),
@@ -1526,11 +1532,6 @@ class Connection implements HubPeer {
           throw new InvalidParamsError("paths 必须是非空字符串数组");
         }
         return this.session(p).session.resolveFiles(paths as string[]);
-      },
-      "session.readFile": async (p) => {
-        const file = await this.session(p).session.readFile(reqString(p, "path"));
-        if (file.kind === "text") return file;
-        return { ...file, data: Buffer.from(file.data).toString("base64") };
       },
       "session.readInputHistory": (p) => this.session(p).session.readInputHistory(),
       "session.recordInputHistory": async (p) => {

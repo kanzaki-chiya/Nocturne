@@ -1,9 +1,10 @@
 /**
- * 右侧面板的状态与接线（ADR-0060 第 1 轮）：标签、宽度、开关、概览浮层、
+ * 右侧面板的状态与接线（ADR-0060）：标签、宽度、开关、概览浮层、
  * 快捷键与偏好持久化。App 只拿回打开入口和要渲染的节点，状态不进 App。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { TurnChangeDiff, WorkspaceFileContent } from "@nocturne/core/protocol";
+import type { LocalFileContent, TurnChangeDiff } from "@nocturne/core/protocol";
+import type { RpcClient } from "@nocturne/rpc/client";
 
 import type { OpenConversation } from "./conversations";
 import type { DesktopHost } from "./host";
@@ -12,7 +13,6 @@ import type { PrefsStore } from "./prefs";
 import { projectKey, projectName } from "./session-tree";
 import { SidePanel, type PanelChangesSource } from "./SidePanel";
 import {
-  baseName,
   clampPanelWidth,
   joinWorkspace,
   moveTab,
@@ -20,12 +20,15 @@ import {
   PANEL_DEFAULT_WIDTH,
   panelOverlays,
   parseAddress,
+  relativeTo,
   restoreTabs,
   samePath,
   sessionChangeTotals,
   storedTabs,
   type FileTab,
   type PanelTab,
+  type ShellOption,
+  type TerminalTab,
 } from "./side-panel";
 
 let tabSeq = 0;
@@ -34,18 +37,23 @@ function newTabId(): string {
   return `t${Date.now().toString(36)}${tabSeq.toString(36)}`;
 }
 
-/** 文件标签读取时没有这个工作区的已打开会话 */
-class NoSessionError extends Error {
-  readonly code = "session_unavailable";
+/** 后台连接的序号：连接换了（后台重启）文件标签重读 */
+const clientIds = new WeakMap<RpcClient, number>();
+let clientSeq = 0;
+function clientKey(client: RpcClient | undefined): string {
+  if (client === undefined) return "none";
+  let id = clientIds.get(client);
+  if (id === undefined) {
+    clientSeq += 1;
+    id = clientSeq;
+    clientIds.set(client, id);
+  }
+  return String(id);
 }
 
 export interface SidePanelController {
   /** 文件引用左键（打开文件用 = Nocturne 面板）：在文件标签里打开并定位 */
-  openFile: (
-    absolutePath: string,
-    line?: number,
-    ref?: { relativePath?: string | undefined; endLine?: number | undefined },
-  ) => void;
+  openFile: (absolutePath: string, line?: number, ref?: { endLine?: number | undefined }) => void;
   /** 改动卡片「查看变更」 */
   viewChanges: (seq: number) => void;
   bodyClass: string;
@@ -62,22 +70,29 @@ export function useSidePanel({
   prefs,
   host,
   active,
-  opened,
   loadDiff,
   editors,
   settingsOpen,
   plainKey,
+  client,
+  ensureClient,
+  terminalCwd,
 }: {
   prefs: PrefsStore;
   host: DesktopHost;
   active: OpenConversation | undefined;
-  opened: () => Iterable<OpenConversation>;
   loadDiff: (entry: OpenConversation, seq: number, path: string) => Promise<TurnChangeDiff>;
   editors: { vscode: boolean; cursor: boolean };
   /** 设置区盖住主区时概览浮层隐藏、Esc 归设置区 */
   settingsOpen: boolean;
   /** 普通对话的项目键：概览里显示「对话」而不是目录名 */
   plainKey: string | null;
+  /** 当前后台连接；没连上时 undefined（文件标签等它连上再读） */
+  client: RpcClient | undefined;
+  /** 需要后台时拉起（终端取 shell 列表） */
+  ensureClient: () => Promise<RpcClient>;
+  /** 没有打开会话时终端的工作目录：最近的项目，再不然用户主目录 */
+  terminalCwd: () => Promise<string | undefined>;
 }): SidePanelController {
   const initial = useMemo(() => {
     const p = prefs.get();
@@ -249,50 +264,68 @@ export function useSidePanel({
 
   const openFile = useCallback<SidePanelController["openFile"]>(
     (absolutePath, line, ref) => {
-      if (active === undefined) return;
-      const workspace = active.workspace;
-      const relative =
-        ref?.relativePath ??
-        (absolutePath.toLowerCase().startsWith(workspace.toLowerCase())
-          ? absolutePath.slice(workspace.length).replace(/^[\\/]+/, "")
-          : baseName(absolutePath));
-      openFileTab({
-        workspace,
-        sessionId: active.session.id,
-        absolutePath,
-        relativePath: relative,
-        line,
-        endLine: ref?.endLine,
-      });
+      // 工作区外的文件不记工作区：标签显示所在目录名
+      const workspace =
+        active !== undefined && relativeTo(active.workspace, absolutePath) !== undefined
+          ? active.workspace
+          : undefined;
+      openFileTab({ absolutePath, workspace, line, endLine: ref?.endLine });
     },
     [active, openFileTab],
   );
 
-  // ── 读取：经同一工作区的已打开会话 ──
-  const sessionFor = useCallback(
-    (tab: FileTab): OpenConversation | undefined => {
-      if (active !== undefined && active.dead !== true && samePath(active.workspace, tab.workspace))
-        return active;
-      for (const entry of opened()) {
-        if (entry.dead !== true && samePath(entry.workspace, tab.workspace)) return entry;
-      }
-      return undefined;
-    },
-    [active, opened],
-  );
+  // ── 读取：rpc.md runtime.readFile，不经会话 ──
   const readFile = useCallback(
-    async (tab: FileTab): Promise<WorkspaceFileContent> => {
-      const entry = sessionFor(tab);
-      if (entry === undefined) {
-        throw new NoSessionError(
-          `打开「${projectName(tab.workspace)}」里的一个会话后才能读取这个文件`,
-        );
-      }
-      return entry.session.readFile(tab.absolutePath);
-    },
-    [sessionFor],
+    (absolutePath: string): Promise<LocalFileContent> =>
+      client === undefined
+        ? // 后台还没连上：保持「正在读取…」，连上后 readerKey 变化触发重读
+          new Promise<LocalFileContent>(() => undefined)
+        : client.runtime.readFile(absolutePath),
+    [client],
   );
-  const readKey = useCallback((tab: FileTab) => sessionFor(tab)?.session.id ?? "", [sessionFor]);
+  const readerKey = clientKey(client);
+
+  // ── 终端 ──
+  const ensureRef = useRef(ensureClient);
+  ensureRef.current = ensureClient;
+  const listShells = useCallback(
+    async (): Promise<readonly ShellOption[]> => (await ensureRef.current()).runtime.listShells(),
+    [],
+  );
+  const cwdRef = useRef(terminalCwd);
+  cwdRef.current = terminalCwd;
+  const openTerminal = useCallback(
+    (reuse: boolean) => {
+      if (host.terminals === undefined) return;
+      if (reuse) {
+        const existing = tabs.find((t) => t.kind === "terminal");
+        if (existing !== undefined) {
+          setActiveId(existing.id);
+          setPanelOpen(true);
+          return;
+        }
+      }
+      const workspace = active?.workspace;
+      void (workspace !== undefined ? Promise.resolve(workspace) : cwdRef.current()).then((cwd) => {
+        if (cwd === undefined) return;
+        const tab: TerminalTab = {
+          id: newTabId(),
+          kind: "terminal",
+          cwd,
+          label: plainKey !== null && projectKey(cwd) === plainKey ? "对话" : projectName(cwd),
+        };
+        placeTab(tab);
+      });
+    },
+    [host.terminals, tabs, active?.workspace, plainKey, placeTab, setPanelOpen],
+  );
+  const onShellChange = useCallback((tabId: string, executable: string) => {
+    setTabs((current) =>
+      current.map((t) =>
+        t.id === tabId && t.kind === "terminal" ? { ...t, shell: executable } : t,
+      ),
+    );
+  }, []);
 
   const externalEditor = editors.vscode ? "vscode" : editors.cursor ? "cursor" : undefined;
   const fileActions = useMemo(
@@ -363,8 +396,8 @@ export function useSidePanel({
     settingsOpen,
     hasSession: active !== undefined,
   };
-  const actions = useRef({ newTab, openChanges, setPanelOpen, setOverviewOpen });
-  actions.current = { newTab, openChanges, setPanelOpen, setOverviewOpen };
+  const actions = useRef({ newTab, openChanges, setPanelOpen, setOverviewOpen, openTerminal });
+  actions.current = { newTab, openChanges, setPanelOpen, setOverviewOpen, openTerminal };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const state = keyState.current;
@@ -377,7 +410,11 @@ export function useSidePanel({
       }
       if (!event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
       const key = event.key.toLowerCase();
-      if (key === "b" && !event.shiftKey) {
+      if (event.code === "Backquote" && !event.shiftKey) {
+        // Ctrl+`：已有终端就切过去，没有就新开一个
+        event.preventDefault();
+        act.openTerminal(true);
+      } else if (key === "b" && !event.shiftKey) {
         event.preventDefault();
         act.setPanelOpen(!state.open);
       } else if (key === "t" && !event.shiftKey) {
@@ -407,8 +444,10 @@ export function useSidePanel({
         ? "对话"
         : projectName(workspace);
 
-  const panel = open ? (
+  // 面板收起时也挂着（只是隐藏）：终端进程不随面板收起结束
+  const panel = (
     <SidePanel
+      hidden={!open}
       tabs={tabs}
       activeId={activeId}
       overlay={overlay}
@@ -426,14 +465,20 @@ export function useSidePanel({
       onQuickOpen={() => {
         setQuickOpen(true);
       }}
+      onOpenTerminal={() => {
+        openTerminal(false);
+      }}
       onAddress={onAddress}
       changes={changes}
       canOpenFiles={active !== undefined}
       readFile={readFile}
-      readKey={readKey}
+      readerKey={readerKey}
       fileActions={fileActions}
+      terminals={host.terminals}
+      listShells={listShells}
+      onShellChange={onShellChange}
     />
-  ) : null;
+  );
 
   const mainOverlays = (
     <>
@@ -469,14 +514,7 @@ export function useSidePanel({
           }}
           onPick={(relativePath) => {
             setQuickOpen(false);
-            const session = active?.session;
-            if (session === undefined) return;
-            openFileTab({
-              workspace,
-              sessionId: session.id,
-              absolutePath: joinWorkspace(workspace, relativePath),
-              relativePath,
-            });
+            openFileTab({ workspace, absolutePath: joinWorkspace(workspace, relativePath) });
           }}
         />
       )}

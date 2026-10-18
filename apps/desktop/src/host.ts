@@ -15,6 +15,27 @@ export interface AvailableUpdate {
   ) => Promise<void>;
 }
 
+/** 外壳终端推来的消息（src-tauri/src/terminal.rs TerminalMessage） */
+export type TerminalMessage =
+  { kind: "output"; data: string } | { kind: "exit"; code: number | null };
+
+/**
+ * 面板终端（ADR-0060 第 4 节）：pty 在 Tauri 外壳。shell 只能是外壳认可的可执行文件，
+ * 参数由外壳按 shell 种类决定，前端只给路径、工作目录和尺寸。
+ */
+export interface TerminalHost {
+  open: (
+    input: { shell: string; cwd: string; cols: number; rows: number },
+    onMessage: (message: TerminalMessage) => void,
+  ) => Promise<number>;
+  write: (id: number, data: string) => Promise<void>;
+  resize: (id: number, cols: number, rows: number) => Promise<void>;
+  /** 结束进程；已经结束的也返回成功 */
+  close: (id: number) => Promise<void>;
+  /** 读系统剪贴板文本（右键菜单「粘贴」）；剪贴板里没有文本时是空串 */
+  readClipboard: () => Promise<string>;
+}
+
 /**
  * 宿主抽象：前端对 Tauri 的全部依赖都在这一个接口后面，
  * 测试用假宿主替换（docs/apps/desktop.md）。
@@ -73,4 +94,6 @@ export interface DesktopHost {
   requestAttention: () => Promise<void>;
   /** 通知被点击（外壳在 toast 激活时空调用）：回调会话 id；返回取消订阅 */
   onNotificationActivated: (handler: (sessionId: string) => void) => () => void;
+  /** 面板终端；没有（测试宿主）时新标签页的「终端」入口置灰 */
+  terminals?: TerminalHost;
 }

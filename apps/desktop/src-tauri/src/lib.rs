@@ -1,6 +1,6 @@
-//! Nocturne 桌面外壳（ADR-0046）：只做三件事——启停 `nctrn rpc --stdio` 子进程、
-//! 按行转发 stdin/stdout、把子进程退出通知前端。所有 Nocturne 语义在前端经
-//! `@nocturne/rpc/client` 处理。
+//! Nocturne 桌面外壳（ADR-0046）：启停 `nctrn rpc --stdio` 子进程、按行转发
+//! stdin/stdout、把子进程退出通知前端；另管面板终端的 pty 进程（ADR-0060）。
+//! 所有 Nocturne 语义在前端经 `@nocturne/rpc/client` 处理。
 
 mod backend;
 mod editor;
@@ -9,6 +9,7 @@ mod job;
 mod lines;
 mod node;
 mod notify;
+mod terminal;
 mod workspace;
 
 use backend::{close_backend, AppState};
@@ -39,7 +40,10 @@ fn close_backends(backends: Vec<Arc<backend::Backend>>) {
 fn begin_shutdown(app: &AppHandle) {
     let app = app.clone();
     thread::spawn(move || {
+        let terminals = Arc::clone(app.state::<Arc<terminal::TerminalState>>().inner());
+        let closing_terminals = thread::spawn(move || terminals.close_all());
         close_backends(app.state::<Arc<AppState>>().backends_snapshot());
+        let _ = closing_terminals.join();
         app.exit(0);
     });
 }
@@ -61,6 +65,11 @@ pub fn run() {
         editor::open_with_default,
         notify::notify_show,
         notify::notify_dismiss,
+        terminal::terminal_open,
+        terminal::terminal_write,
+        terminal::terminal_resize,
+        terminal::terminal_close,
+        terminal::terminal_read_clipboard,
     ];
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -86,6 +95,8 @@ pub fn run() {
             app.manage(state);
             // 通知：持有每个会话当前那条 toast，点击回调才有效（ADR-0056）
             app.manage(notify::NotifyState::default());
+            // 面板终端（ADR-0060 第 4 节）：页面重载、应用退出时全部结束
+            app.manage(Arc::new(terminal::TerminalState::default()));
             Ok(())
         })
         .on_page_load(|webview, payload| {
@@ -100,6 +111,11 @@ pub fn run() {
                 let previous = state.begin_page_load();
                 if !previous.is_empty() {
                     thread::spawn(move || close_backends(previous));
+                }
+                // 前端的终端标签随页面一起没了，进程不再有人接管
+                if let Some(terminals) = webview.try_state::<Arc<terminal::TerminalState>>() {
+                    let terminals = Arc::clone(terminals.inner());
+                    thread::spawn(move || terminals.close_all());
                 }
             }
         })

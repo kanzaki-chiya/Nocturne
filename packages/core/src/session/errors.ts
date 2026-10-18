@@ -20,16 +20,16 @@ export type SessionErrorCode =
   | "attachment_read_failed"
   /** 附件字节大小或 sha256 与日志引用不符 */
   | "attachment_corrupt"
-  /** session.readFile：路径含 ..、控制字符、备用数据流或设备名（ADR-0060） */
+  /** runtime.readFile：相对路径，或含 ..、控制字符、备用数据流、设备名（ADR-0060） */
   | "invalid_file_path"
-  /** session.readFile：路径或其链接目标在工作区之外 */
-  | "file_outside_workspace"
+  /** runtime.readFile：UNC 等网络路径，或链接指向网络位置；不访问，直接拒绝 */
+  | "file_network_path"
   | "file_not_found"
-  /** session.readFile：目录或其他非普通文件 */
+  /** runtime.readFile：目录或其他非普通文件 */
   | "file_not_regular"
-  /** session.readFile：超过 READ_FILE_MAX_BYTES，不截断返回 */
+  /** runtime.readFile：超过 READ_FILE_MAX_BYTES，不截断返回 */
   | "file_too_large"
-  /** session.readFile：不是文本也不是可显示的图片 */
+  /** runtime.readFile：不是文本也不是可显示的图片 */
   | "file_binary"
   | "file_read_failed";
 

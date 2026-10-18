@@ -9,7 +9,7 @@ import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 
 import { isAllowedExternalUrl } from "./external-url";
-import type { DesktopHost } from "./host";
+import type { DesktopHost, TerminalMessage } from "./host";
 import type { NotifyResult } from "./notify";
 import { decodePickedImages } from "./picked-images";
 import type { BackendMessage } from "./types";
@@ -31,6 +31,17 @@ export function createTauriHost(): DesktopHost {
       await invoke("open_with_default", { path });
     },
     revealItem: (path) => tauriReveal(path),
+    terminals: {
+      open({ shell, cwd, cols, rows }, onMessage) {
+        const channel = new Channel<TerminalMessage>();
+        channel.onmessage = onMessage;
+        return invoke<number>("terminal_open", { shell, cwd, cols, rows, channel });
+      },
+      write: (id, data) => invoke("terminal_write", { id, data }),
+      resize: (id, cols, rows) => invoke("terminal_resize", { id, cols, rows }),
+      close: (id) => invoke("terminal_close", { id }),
+      readClipboard: () => invoke<string>("terminal_read_clipboard"),
+    },
     async detectEditors() {
       try {
         return await invoke<{ vscode: boolean; cursor: boolean }>("detect_editors");

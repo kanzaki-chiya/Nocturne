@@ -2,10 +2,11 @@
  * 回答内文件引用（U-09）：splitCodeRef 拆分行号、session.resolveFiles
  * 按工作区解析存在性。只读，不产生事件。
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import fsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createPlatform } from "../src/platform/index.js";
 import { loadConfig } from "../src/config/index.js";
@@ -72,4 +73,44 @@ describe("session.resolveFiles", () => {
       await session.close();
     }
   });
+
+  it.runIf(process.platform === "win32")(
+    "网络路径与指向 UNC 的 junction 按不存在返回，不访问网络（ADR-0060 修订）",
+    async () => {
+      const root = mkdtempSync(path.join(tmpdir(), "nct-resolve-unc-"));
+      roots.push(root);
+      const home = path.join(root, "home");
+      const ws = path.join(root, "ws");
+      mkdirSync(home, { recursive: true });
+      mkdirSync(ws, { recursive: true });
+      symlinkSync("\\\\127.0.0.1\\nosuchshare\\dir", path.join(ws, "net"), "junction");
+      const platform = createPlatform();
+      const config = await loadConfig(platform, { nocturneHome: home, env: () => undefined });
+      const runtime = await createRuntime({
+        cwd: ws,
+        providers: [new FakeProvider({})],
+        interactive: false,
+        config,
+      });
+      const session = await runtime.createSession({ model: "fake/fake-1" });
+      const stat = vi.spyOn(fsPromises, "stat");
+      const lstat = vi.spyOn(fsPromises, "lstat");
+      try {
+        const results = await session.resolveFiles([
+          "\\\\127.0.0.1\\c$\\Windows\\win.ini",
+          "//127.0.0.1/c$/Windows/win.ini",
+          "\\\\?\\UNC\\127.0.0.1\\c$\\Windows\\win.ini",
+          "net/a.txt",
+        ]);
+        for (const result of results) expect(result, result.input).toMatchObject({ exists: false });
+        const touched = [...stat.mock.calls, ...lstat.mock.calls].map((call) => String(call[0]));
+        // 只允许本地路径被 stat / lstat：\\ 或 // 开头（网络）的都不该出现
+        expect(touched.filter((p) => p.startsWith("\\\\") || p.startsWith("//"))).toEqual([]);
+      } finally {
+        stat.mockRestore();
+        lstat.mockRestore();
+        await session.close();
+      }
+    },
+  );
 });

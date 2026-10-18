@@ -52,7 +52,7 @@ import type {
   SessionRewoundPayload,
   ReadAttachmentResult,
   SessionSummary,
-  WorkspaceFileContent,
+  LocalFileContent,
   SettingItem,
   SettingsPatch,
   SubmitInput,
@@ -201,8 +201,6 @@ export interface RpcSession {
    * 越界路径照常返回绝对路径与 exists，由客户端决定入口。
    */
   resolveFiles(paths: string[]): Promise<FileRefResolution[]>;
-  /** 面板「文件」标签读取工作区文件（ADR-0060）；图片字节已解码 */
-  readFile(path: string): Promise<WorkspaceFileContent>;
   readInputHistory(): Promise<string[]>;
   recordInputHistory(text: string): Promise<void>;
   close(): Promise<void>;
@@ -264,6 +262,8 @@ export interface RpcRuntime {
   listShells(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<RpcResult<"runtime.listShells">>;
+  /** 面板「文件」标签读取本机文件（ADR-0060）：只收绝对路径；图片字节已解码 */
+  readFile(path: string): Promise<LocalFileContent>;
   setShellSetting(
     kind: string,
     input?: { workspaceRoot?: string | undefined },
@@ -592,11 +592,6 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
         const result = await call("session.readAttachment", { ...p, file });
         return { data: decodeBase64(result.data), mimeType: result.mimeType, bytes: result.bytes };
       },
-      async readFile(path) {
-        const result = await call("session.readFile", { ...p, path });
-        if (result.kind === "text") return result;
-        return { ...result, data: decodeBase64(result.data) };
-      },
       submit: async (input) => {
         const attachments = input.attachments?.map((a) => ({
           data: encodeBase64(a.data),
@@ -707,6 +702,11 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     listRecentModels: () => call("runtime.listRecentModels", {}),
     describeSettings: (input) => call("runtime.describeSettings", input ?? {}),
     listShells: (input) => call("runtime.listShells", input ?? {}),
+    async readFile(path) {
+      const result = await call("runtime.readFile", { path });
+      if (result.kind === "text") return result;
+      return { ...result, data: decodeBase64(result.data) };
+    },
     setShellSetting: (kind, input) => call("runtime.setShellSetting", { kind, ...input }),
     updateSettings: (patch, updateOptions) =>
       call("runtime.updateSettings", {

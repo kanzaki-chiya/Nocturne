@@ -155,6 +155,10 @@ export function App({ host }: { host: DesktopHost }) {
         }
         await host.openInEditor(kind, absolutePath, line);
       },
+      outsideOpenable: () => {
+        const kind = opener();
+        return kind === "panel" || (kind !== "system" && editors[kind]);
+      },
       editors: () => editors,
       openInEditor: (editor, absolutePath, line) => host.openInEditor(editor, absolutePath, line),
       // 目录交给系统（资源管理器打开）；open_with_default 对目录不拦截
@@ -839,11 +843,20 @@ export function App({ host }: { host: DesktopHost }) {
     prefs,
     host,
     active: active?.dead === true ? undefined : active,
-    opened: () => conversations.opened.values(),
     loadDiff: (entry, seq, path) => conversations.turnChangeDiff(entry, seq, path),
     editors,
     settingsOpen: page !== null,
     plainKey: effectiveWorkspace === null ? null : projectKey(effectiveWorkspace),
+    client: pool.get(),
+    ensureClient: () => pool.ensure(),
+    // 没有打开会话：最近活动的项目，再不然用户主目录（ADR-0060 第 4 节）
+    terminalCwd: async () => {
+      const recent = sessions.reduce<SessionSummary | undefined>(
+        (best, s) => (best === undefined || s.mtimeMs > best.mtimeMs ? s : best),
+        undefined,
+      );
+      return recent?.cwd ?? (await host.homeDir()) ?? undefined;
+    },
   });
   panelRef.current = sidePanel;
   // 会话由忙转闲时刷新一次列表（标题/时间可能更新）；切换本身由

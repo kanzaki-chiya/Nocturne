@@ -310,8 +310,12 @@ describe("session.* 方法映射", () => {
         paths: "x" as never,
       }),
     ).rejects.toMatchObject({ rpcCode: -32602 });
-    expect(await session.readFile("a.txt")).toMatchObject({ kind: "text" });
-    await expect(session.readFile("../a.txt")).rejects.toMatchObject({
+    // 面板读文件是 runtime 级（ADR-0060 修订 2026-10-18）：只收绝对路径
+    expect(await h.client.runtime.readFile(path.join(h.ws, "a.txt"))).toMatchObject({
+      kind: "text",
+      text: "x",
+    });
+    await expect(h.client.runtime.readFile("a.txt")).rejects.toMatchObject({
       rpcCode: -32002,
       code: "invalid_file_path",
     });

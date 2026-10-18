@@ -16,6 +16,11 @@ fn main() {
             "open_with_default",
             "notify_show",
             "notify_dismiss",
+            "terminal_open",
+            "terminal_write",
+            "terminal_resize",
+            "terminal_close",
+            "terminal_read_clipboard",
         ]),
     ))
     .expect("failed to run tauri-build");

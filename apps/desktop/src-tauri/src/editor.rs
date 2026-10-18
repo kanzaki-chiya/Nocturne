@@ -29,7 +29,11 @@ pub async fn detect_editors() -> EditorAvailability {
 /// path 必须是绝对路径；目录只能用系统默认程序或资源管理器打开，
 /// 这里拒绝（前端不应对目录提供"打开"入口）。
 #[tauri::command]
-pub async fn open_in_editor(editor: String, path: String, line: Option<u32>) -> Result<(), CommandError> {
+pub async fn open_in_editor(
+    editor: String,
+    path: String,
+    line: Option<u32>,
+) -> Result<(), CommandError> {
     let target = PathBuf::from(&path);
     if !target.is_absolute() {
         return Err(CommandError::new("invalid_path", "文件路径必须是绝对路径"));
@@ -81,8 +85,8 @@ pub async fn open_with_default(path: String) -> Result<DefaultOpenOutcome, Comma
         return Err(CommandError::new("invalid_path", "文件路径必须是绝对路径"));
     }
     // 真实路径也查一遍：`a.bat.` 这类尾点名、指向脚本的符号链接都按目标类型算
-    let real = std::fs::canonicalize(&target)
-        .map_err(|_| CommandError::new("not_found", "文件不存在"))?;
+    let real =
+        std::fs::canonicalize(&target).map_err(|_| CommandError::new("not_found", "文件不存在"))?;
     let pathext = std::env::var("PATHEXT").ok();
     if launches_code(&target, pathext.as_deref()) || launches_code(&real, pathext.as_deref()) {
         tauri_plugin_opener::reveal_item_in_dir(&target)
@@ -96,6 +100,7 @@ pub async fn open_with_default(path: String) -> Result<DefaultOpenOutcome, Comma
 
 /// 用 Windows 外壳默认方式打开就会执行代码的扩展名：PATHEXT 里的全部，
 /// 加上 PATHEXT 通常不含、但默认关联仍会运行或安装的类型。目录不算。
+#[rustfmt::skip]
 const LAUNCHING_EXTENSIONS: &[&str] = &[
     "exe", "com", "bat", "cmd", "ps1", "psm1", "psd1", "vbs", "vbe", "js", "jse", "wsf", "wsh",
     "msc", "msi", "msp", "msix", "msixbundle", "appx", "appxbundle", "appref-ms", "application",
@@ -141,7 +146,14 @@ fn find_editor(cmd: &str) -> Option<PathBuf> {
                 &["Programs", "Microsoft VS Code", "bin", "code.cmd"],
                 &["Programs", "Microsoft VS Code", "Code.exe"],
             ],
-            "cursor" => &[&["Programs", "cursor", "resources", "app", "bin", "cursor.exe"]],
+            "cursor" => &[&[
+                "Programs",
+                "cursor",
+                "resources",
+                "app",
+                "bin",
+                "cursor.exe",
+            ]],
             _ => &[],
         };
         for parts in candidates {
@@ -174,12 +186,25 @@ mod tests {
     #[test]
     fn launches_code_blocks_scripts_and_pathext() {
         let tmp = std::env::temp_dir();
-        for name in ["run.bat", "a.PS1", "jc_check.py", "setup.exe", "x.lnk", "y.reg"] {
+        for name in [
+            "run.bat",
+            "a.PS1",
+            "jc_check.py",
+            "setup.exe",
+            "x.lnk",
+            "y.reg",
+        ] {
             assert!(launches_code(&tmp.join(name), None), "{name}");
         }
-        assert!(launches_code(&tmp.join("tool.custom"), Some(".COM;.EXE;.CUSTOM")));
+        assert!(launches_code(
+            &tmp.join("tool.custom"),
+            Some(".COM;.EXE;.CUSTOM")
+        ));
         for name in ["notes.md", "index.html", "a.ts", "Makefile", "image.png"] {
-            assert!(!launches_code(&tmp.join(name), Some(".COM;.EXE;.BAT")), "{name}");
+            assert!(
+                !launches_code(&tmp.join(name), Some(".COM;.EXE;.BAT")),
+                "{name}"
+            );
         }
         // 目录即使名字像脚本也不算（交给资源管理器打开）
         assert!(!launches_code(&tmp, Some(".COM;.EXE")));

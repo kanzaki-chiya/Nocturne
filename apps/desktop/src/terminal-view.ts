@@ -1,0 +1,156 @@
+/**
+ * xterm.js 封装（ADR-0060 第 4 节）。只由 TerminalPane 动态 import：不打开终端就不进
+ * 首屏包，手机网页版也不会打进 xterm。颜色取 `--a-*` 变量，深浅主题切换时跟着换。
+ */
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal, type ITheme } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
+
+export interface MountedTerminal {
+  write: (data: string) => void;
+  /** 按容器尺寸重排；容器不可见（0 尺寸）时不动 */
+  fit: () => void;
+  size: () => { cols: number; rows: number };
+  focus: () => void;
+  selection: () => string;
+  paste: (text: string) => void;
+  clear: () => void;
+  dispose: () => void;
+}
+
+export interface TerminalCallbacks {
+  onData: (data: string) => void;
+  onResize: (cols: number, rows: number) => void;
+  onCopy: () => void;
+}
+
+/** 终端里也交给窗口处理的应用快捷键（面板开关、新标签、变更、快速打开、终端） */
+function isAppShortcut(event: KeyboardEvent): boolean {
+  if (!event.ctrlKey || event.altKey || event.metaKey) return false;
+  if (event.code === "Backquote") return true;
+  const key = event.key.toLowerCase();
+  if (event.shiftKey) return key === "g";
+  return key === "b" || key === "t" || key === "p";
+}
+
+function readTheme(): ITheme {
+  const style = getComputedStyle(document.documentElement);
+  const v = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
+  const bg = v("--a-bg", "#121419");
+  const light = luminance(bg) > 0.5;
+  const text = v("--a-text", "#d8dce3");
+  return {
+    background: bg,
+    foreground: text,
+    cursor: v("--a-accent", "#a6a4e8"),
+    cursorAccent: bg,
+    selectionBackground: v("--a-selStrong", "#383555"),
+    black: light ? text : v("--a-borderStrong", "#3a4150"),
+    red: v("--a-error", "#e58f90"),
+    green: v("--a-success", "#84c49a"),
+    yellow: v("--a-warning", "#e5bd77"),
+    blue: v("--a-cat5", "#8fa6c9"),
+    magenta: v("--a-cat4", "#d99ac9"),
+    cyan: v("--a-accentAlt", "#83c4c8"),
+    white: light ? v("--a-muted", "#656f7b") : v("--a-secondary", "#b7c0cc"),
+    brightBlack: v("--a-faint", "#5a626e"),
+    brightRed: v("--a-error", "#e58f90"),
+    brightGreen: v("--a-success", "#84c49a"),
+    brightYellow: v("--a-cat3", "#e5bd77"),
+    brightBlue: v("--a-accent", "#a6a4e8"),
+    brightMagenta: v("--a-cat4", "#d99ac9"),
+    brightCyan: v("--a-cat2", "#83c4c8"),
+    brightWhite: light ? v("--a-secondary", "#454f5c") : text,
+  };
+}
+
+/** #rrggbb 的相对亮度（0–1）；解析不了按深色 */
+function luminance(color: string): number {
+  const hex = /^#([0-9a-f]{6})$/i.exec(color)?.[1];
+  if (hex === undefined) return 0;
+  const n = Number.parseInt(hex, 16);
+  return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+}
+
+export function mountTerminal(parent: HTMLElement, callbacks: TerminalCallbacks): MountedTerminal {
+  const style = getComputedStyle(document.documentElement);
+  const term = new Terminal({
+    scrollback: 5000,
+    fontFamily: style.getPropertyValue("--mono").trim() || "Consolas, monospace",
+    fontSize: 13,
+    lineHeight: 1.15,
+    cursorBlink: true,
+    allowProposedApi: false,
+    theme: readTheme(),
+  });
+  const fitAddon = new FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(parent);
+  term.attachCustomKeyEventHandler((event) => {
+    if (event.type !== "keydown") return !isAppShortcut(event);
+    if (event.ctrlKey && event.shiftKey && !event.altKey) {
+      const key = event.key.toLowerCase();
+      if (key === "c") {
+        event.preventDefault();
+        callbacks.onCopy();
+        return false;
+      }
+      // 不拦默认行为：浏览器原生粘贴事件进 xterm 的 textarea，xterm 自己处理（含括号粘贴），
+      // 也不会像 navigator.clipboard.readText 那样触发 WebView2 的剪贴板权限框
+      if (key === "v") return false;
+    }
+    // 返回 false：xterm 不处理，事件照常冒泡到窗口的快捷键
+    return !isAppShortcut(event);
+  });
+  const data = term.onData(callbacks.onData);
+  const resize = term.onResize(({ cols, rows }) => {
+    callbacks.onResize(cols, rows);
+  });
+  const fit = () => {
+    if (parent.clientWidth === 0 || parent.clientHeight === 0) return;
+    try {
+      fitAddon.fit();
+    } catch {
+      // 渲染器还没就绪时 fit 会抛错，下一次尺寸变化再来
+    }
+  };
+  const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(fit);
+  observer?.observe(parent);
+  // 主题：设置页改 data-theme，或跟随系统时系统切换
+  const retheme = () => {
+    term.options.theme = readTheme();
+  };
+  const themeObserver = new MutationObserver(retheme);
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme"],
+  });
+  const media = window.matchMedia("(prefers-color-scheme: light)");
+  media.addEventListener("change", retheme);
+  fit();
+  return {
+    write: (text) => {
+      term.write(text);
+    },
+    fit,
+    size: () => ({ cols: term.cols, rows: term.rows }),
+    focus: () => {
+      term.focus();
+    },
+    selection: () => term.getSelection(),
+    paste: (text) => {
+      term.paste(text);
+    },
+    clear: () => {
+      term.reset();
+    },
+    dispose: () => {
+      observer?.disconnect();
+      themeObserver.disconnect();
+      media.removeEventListener("change", retheme);
+      data.dispose();
+      resize.dispose();
+      term.dispose();
+    },
+  };
+}

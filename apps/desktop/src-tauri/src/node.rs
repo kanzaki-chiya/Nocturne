@@ -249,7 +249,11 @@ pub fn probe_node(resource_dir: &Path) -> NodeProbe {
     } else {
         match find_on_path() {
             Some(path) => {
-                steps.push(step(NodeSource::Path, StepStatus::Found, Some(path.clone())));
+                steps.push(step(
+                    NodeSource::Path,
+                    StepStatus::Found,
+                    Some(path.clone()),
+                ));
                 found = Some((NodeSource::Path, path));
             }
             None => steps.push(step(NodeSource::Path, StepStatus::Missing, None)),
@@ -306,11 +310,7 @@ pub fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
                 // 只剥形如 \\?\X:\… 的：剥完是带盘符的绝对路径；
                 // \\?\Z:（无反斜杠）剥完会退化成盘相对路径，保持原样更安全
                 let b = rest.as_bytes();
-                if b.len() >= 3
-                    && b[0].is_ascii_alphabetic()
-                    && b[1] == b':'
-                    && b[2] == b'\\'
-                {
+                if b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\' {
                     return PathBuf::from(rest);
                 }
             }
@@ -386,14 +386,19 @@ mod tests {
             version: Some("v24.21.0".into()),
             error: None,
         };
-        assert_eq!(bundled.describe(), r"bundled：C:\app\node\node.exe（v24.21.0）");
+        assert_eq!(
+            bundled.describe(),
+            r"bundled：C:\app\node\node.exe（v24.21.0）"
+        );
         let missing_version = SelectedNode {
             source: NodeSource::Path,
             path: "node".into(),
             version: None,
             error: None,
         };
-        assert!(missing_version.describe().starts_with("path：node（未知版本"));
+        assert!(missing_version
+            .describe()
+            .starts_with("path：node（未知版本"));
     }
 
     /// resource_dir() 经 canonicalize 返回 \\?\ verbatim 路径，
@@ -426,7 +431,8 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn cmd_script_version_and_arg_forwarding() {
-        let dir = std::env::temp_dir().join(format!("nocturne desktop test {}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("nocturne desktop test {}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
 
         // 假 node.cmd：run_node_version 拿到 --version 输出
@@ -455,7 +461,10 @@ mod tests {
         })
         .unwrap();
         let line = out.trim();
-        assert!(line.contains("C:\\some dir\\main.js"), "参数丢失或被拆散: {line}");
+        assert!(
+            line.contains("C:\\some dir\\main.js"),
+            "参数丢失或被拆散: {line}"
+        );
         assert!(line.contains("rpc"), "输出: {line}");
         assert!(line.contains("--stdio"), "输出: {line}");
 

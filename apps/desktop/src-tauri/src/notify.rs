@@ -36,12 +36,20 @@ pub struct NotifyOutcome {
 impl NotifyOutcome {
     #[cfg(windows)]
     fn failed(reason: &'static str, detail: impl Into<String>) -> Self {
-        Self { shown: false, reason: Some(reason), detail: Some(detail.into()) }
+        Self {
+            shown: false,
+            reason: Some(reason),
+            detail: Some(detail.into()),
+        }
     }
 
     #[cfg(not(windows))]
     fn unsupported() -> Self {
-        Self { shown: false, reason: Some("unsupported"), detail: None }
+        Self {
+            shown: false,
+            reason: Some("unsupported"),
+            detail: None,
+        }
     }
 }
 
@@ -50,7 +58,9 @@ impl NotifyOutcome {
 #[derive(Default)]
 pub struct NotifyState {
     #[cfg(windows)]
-    live: std::sync::Mutex<std::collections::HashMap<String, windows::UI::Notifications::ToastNotification>>,
+    live: std::sync::Mutex<
+        std::collections::HashMap<String, windows::UI::Notifications::ToastNotification>,
+    >,
 }
 
 #[cfg(windows)]
@@ -180,7 +190,13 @@ mod imp {
         };
         match notifier.Setting() {
             Ok(NotificationSetting::Enabled) => {}
-            Ok(_) => return NotifyOutcome { shown: false, reason: Some("disabled"), detail: None },
+            Ok(_) => {
+                return NotifyOutcome {
+                    shown: false,
+                    reason: Some("disabled"),
+                    detail: None,
+                }
+            }
             // 查不到就照发：Windows 自己会吞掉它，比误报「被关掉」好
             Err(_) => {}
         }
@@ -213,7 +229,11 @@ mod imp {
             return NotifyOutcome::failed("error", error.message());
         }
         app.state::<NotifyState>().keep(tag, toast);
-        NotifyOutcome { shown: true, reason: None, detail: None }
+        NotifyOutcome {
+            shown: true,
+            reason: None,
+            detail: None,
+        }
     }
 
     /// 撤掉某个会话的通知：先 Hide 原 toast 对象（屏幕上那条立刻消失），

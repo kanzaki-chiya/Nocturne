@@ -1,8 +1,16 @@
 /**
- * 右侧面板的纯逻辑（ADR-0060 第 1–3 节）：标签模型、持久化与恢复、宽度上下限、
- * 快速打开排名、变更汇总。界面在 SidePanel.tsx。
+ * 右侧面板的纯逻辑（ADR-0060 第 1–4 节）：标签模型、持久化与恢复、宽度上下限、
+ * 快速打开排名、变更汇总、终端默认 shell。界面在 SidePanel.tsx。
  */
 import type { TurnChanges } from "@nocturne/core/protocol";
+
+/** runtime.listShells 的一项（Core platform/shells.ts DetectedShell 的结构） */
+export interface ShellOption {
+  kind: string;
+  name: string;
+  executable?: string | undefined;
+  available: boolean;
+}
 
 /** 新标签页：地址栏 + 工具列表；不持久化 */
 export interface NewTab {
@@ -20,34 +28,42 @@ export interface ChangesTab {
 }
 
 /**
- * 文件：创建时绑定会话的工作区（标签显示项目名），切换会话不影响它。
- * sessionId 是创建时的会话：读取文件要经过这个工作区的某个会话（rpc.md session.readFile）。
+ * 文件：按绝对路径读取（rpc.md `runtime.readFile`），不依赖会话。workspace 是打开时
+ * 所在会话的工作区（标签显示项目名）；工作区外的文件没有 workspace，标签显示所在目录名。
  */
 export interface FileTab {
   id: string;
   kind: "file";
-  workspace: string;
-  sessionId: string;
   absolutePath: string;
-  relativePath: string;
+  workspace?: string | undefined;
   line?: number | undefined;
   endLine?: number | undefined;
   /** 每次定位递增：同一文件再点另一行时重新滚动 */
   focusNonce?: number | undefined;
 }
 
-export type PanelTab = NewTab | ChangesTab | FileTab;
+/**
+ * 终端（ADR-0060 第 4 节）：一个标签一个进程，不持久化。cwd 是创建时的工作目录，
+ * label 是标签上的项目名；shell 是用户在下拉里换过的可执行文件，缺省按 auto 规则选。
+ */
+export interface TerminalTab {
+  id: string;
+  kind: "terminal";
+  cwd: string;
+  label: string;
+  shell?: string | undefined;
+}
 
-/** 存进本机偏好的标签：只有「文件」和「变更」（新标签页不恢复） */
+export type PanelTab = NewTab | ChangesTab | FileTab | TerminalTab;
+
+/** 存进本机偏好的标签：只有「文件」和「变更」（新标签页、终端不恢复） */
 export type StoredPanelTab =
   | { id: string; kind: "changes" }
   | {
       id: string;
       kind: "file";
-      workspace: string;
-      sessionId: string;
       absolutePath: string;
-      relativePath: string;
+      workspace?: string;
       line?: number;
       endLine?: number;
     };
@@ -95,21 +111,14 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
       changes = true;
       ids.add(raw.id);
       tabs.push({ id: raw.id, kind: "changes" });
-    } else if (
-      raw.kind === "file" &&
-      str(raw.workspace) &&
-      str(raw.sessionId) &&
-      str(raw.absolutePath) &&
-      typeof raw.relativePath === "string"
-    ) {
+    } else if (raw.kind === "file" && str(raw.absolutePath) && isAbsolutePath(raw.absolutePath)) {
+      // 第 1 轮存下的标签还带 sessionId / relativePath，忽略即可
       ids.add(raw.id);
       tabs.push({
         id: raw.id,
         kind: "file",
-        workspace: raw.workspace,
-        sessionId: raw.sessionId,
         absolutePath: raw.absolutePath,
-        relativePath: raw.relativePath,
+        ...(str(raw.workspace) ? { workspace: raw.workspace } : {}),
         ...(posInt(raw.line) ? { line: raw.line } : {}),
         ...(posInt(raw.line) && posInt(raw.endLine) ? { endLine: raw.endLine } : {}),
       });
@@ -127,10 +136,8 @@ export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
         {
           id: tab.id,
           kind: "file",
-          workspace: tab.workspace,
-          sessionId: tab.sessionId,
           absolutePath: tab.absolutePath,
-          relativePath: tab.relativePath,
+          ...(tab.workspace !== undefined ? { workspace: tab.workspace } : {}),
           ...(tab.line !== undefined ? { line: tab.line } : {}),
           ...(tab.endLine !== undefined ? { endLine: tab.endLine } : {}),
         },
@@ -184,6 +191,92 @@ export function nextActiveAfterClose(
 export function baseName(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, "");
   return trimmed.slice(Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\")) + 1);
+}
+
+/** 所在目录：去掉最后一段；没有上级时原样返回 */
+export function dirName(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return cut <= 0 ? trimmed : trimmed.slice(0, cut);
+}
+
+/** 绝对路径（盘符或 POSIX 根）；runtime.readFile 只收绝对路径 */
+export function isAbsolutePath(path: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/");
+}
+
+/**
+ * 网络路径（`\\server\share`、`//server/share`、`\\?\UNC\...`）：回答里的这类引用
+ * 不链接化、不送去判断存在性（ADR-0060 修订 2026-10-18；Core 侧同样拦截）。
+ */
+export function isNetworkPath(path: string): boolean {
+  const p = path.replaceAll("/", "\\");
+  if (/^\\\\[?.]\\unc\\/i.test(p)) return true;
+  return p.startsWith("\\\\") && !/^\\\\[?.]\\/.test(p);
+}
+
+/** 路径在工作区内时给出相对路径（Windows 不分大小写），否则 undefined */
+export function relativeTo(workspace: string, absolute: string): string | undefined {
+  const root = workspace.replace(/[\\/]+$/, "");
+  if (absolute.length <= root.length) return undefined;
+  const sep = absolute[root.length];
+  if (sep !== "\\" && sep !== "/") return undefined;
+  if (!samePath(absolute.slice(0, root.length), root)) return undefined;
+  return absolute.slice(root.length + 1);
+}
+
+/**
+ * 文件标签的显示：文件名、范围（工作区内是项目名，工作区外是所在目录名）、
+ * 面包屑里的路径（工作区内是相对路径，工作区外只有文件名）。
+ */
+export function fileTabLabel(tab: Pick<FileTab, "absolutePath" | "workspace">): {
+  name: string;
+  scope: string;
+  path: string;
+} {
+  const name = baseName(tab.absolutePath);
+  const relative =
+    tab.workspace === undefined ? undefined : relativeTo(tab.workspace, tab.absolutePath);
+  if (tab.workspace !== undefined && relative !== undefined) {
+    return { name, scope: baseName(tab.workspace), path: relative.replaceAll("\\", "/") };
+  }
+  return { name, scope: baseName(dirName(tab.absolutePath)), path: name };
+}
+
+/**
+ * 标签上的项目名放得下才显示（第 1 轮报告：窄标签只剩一个字母加省略号）：
+ * 文件名整段显示之后，剩余宽度要能放下整个项目名，否则整段隐藏。
+ */
+export function projectFits(
+  labelWidth: number,
+  nameWidth: number,
+  projectWidth: number,
+  gap = 6,
+): boolean {
+  return nameWidth + gap + projectWidth <= labelWidth + 0.5;
+}
+
+/** Core auto 规则的顺序（platform/shells.ts autoOrder）：Windows 上 pwsh → Git Bash → cmd */
+const AUTO_SHELL_ORDER = ["pwsh", "bash", "cmd", "sh"] as const;
+
+/**
+ * 终端的 shell：新终端默认用 auto 规则选出的第一个可用 shell（设置里没有全局 Shell
+ * 项，ADR-0060 修订 2026-10-18）；标签里换过的保留，前提是它仍然可用。
+ */
+export function terminalShell(
+  shells: readonly ShellOption[],
+  chosen?: string,
+): ShellOption | undefined {
+  const usable = shells.filter((s) => s.available && s.executable !== undefined);
+  if (chosen !== undefined) {
+    const hit = usable.find((s) => s.executable !== undefined && samePath(s.executable, chosen));
+    if (hit !== undefined) return hit;
+  }
+  for (const kind of AUTO_SHELL_ORDER) {
+    const hit = usable.find((s) => s.kind === kind);
+    if (hit !== undefined) return hit;
+  }
+  return usable[0];
 }
 
 /** 工作区内路径拼绝对路径：沿用工作区自己的分隔符 */
@@ -324,6 +417,57 @@ export function sessionChangeTotals(turns: Iterable<TurnChanges>): {
   return { added, removed, files: files.size };
 }
 
+/**
+ * 「变更」文件列表的一行：同一文件的所有轮次汇总（ADR-0060 修订 2026-10-18）。
+ * 增减行数合计未撤销的轮；全部撤销时合计全部并标记 reverted。rounds 新的在前。
+ */
+export interface ChangeFile {
+  key: string;
+  path: string;
+  added: number;
+  removed: number;
+  approximate: boolean;
+  /** 所有轮都拿不到行数时的说明 */
+  unavailable?: string | undefined;
+  /** 第一轮新建、最后一轮删除时给出 */
+  status?: string | undefined;
+  reverted: boolean;
+  rounds: ChangeItem[];
+}
+
+/** 按文件汇总（输入是 collectChanges 的结果：新的一轮在前）；输出按路径排序 */
+export function groupChanges(items: readonly ChangeItem[]): ChangeFile[] {
+  const byPath = new Map<string, ChangeItem[]>();
+  for (const item of items) {
+    const list = byPath.get(item.path);
+    if (list === undefined) byPath.set(item.path, [item]);
+    else list.push(item);
+  }
+  const files: ChangeFile[] = [];
+  for (const [path, rounds] of byPath) {
+    const sorted = [...rounds].sort((a, b) => b.seq - a.seq);
+    const live = sorted.filter((r) => !r.reverted);
+    const counted = (live.length > 0 ? live : sorted).filter((r) => r.unavailable === undefined);
+    const newest = sorted[0];
+    const oldest = sorted[sorted.length - 1];
+    files.push({
+      key: `file:${path}`,
+      path,
+      added: counted.reduce((n, r) => n + r.added, 0),
+      removed: counted.reduce((n, r) => n + r.removed, 0),
+      approximate: counted.some((r) => r.approximate),
+      unavailable: sorted.every((r) => r.unavailable !== undefined)
+        ? newest?.unavailable
+        : undefined,
+      status:
+        newest?.status === "deleted" ? "deleted" : oldest?.status === "added" ? "added" : undefined,
+      reverted: live.length === 0,
+      rounds: sorted,
+    });
+  }
+  return files.sort((a, b) => a.path.localeCompare(b.path));
+}
+
 export interface ChangeTreeDir {
   kind: "dir";
   /** 目录相对路径（/ 分隔，空串是根） */
@@ -331,20 +475,20 @@ export interface ChangeTreeDir {
   name: string;
   children: ChangeTreeNode[];
 }
-export type ChangeTreeNode = ChangeTreeDir | { kind: "file"; item: ChangeItem; name: string };
+export type ChangeTreeNode = ChangeTreeDir | { kind: "file"; file: ChangeFile; name: string };
 
 /**
- * 按目录折叠的文件树：路径相对工作区显示（displayPath 由调用方先做），
+ * 按目录折叠的文件树（一个文件一行）：路径相对工作区显示（displayPath 由调用方先做），
  * 只有一个子目录的目录链合并成一级（a/b/c）。
  */
 export function buildChangeTree(
-  items: readonly ChangeItem[],
-  label: (item: ChangeItem) => string,
+  files: readonly ChangeFile[],
+  label: (file: ChangeFile) => string,
 ): ChangeTreeDir {
   const root: ChangeTreeDir = { kind: "dir", path: "", name: "", children: [] };
-  for (const item of items) {
-    const parts = label(item).replaceAll("\\", "/").split("/").filter(Boolean);
-    const name = parts.pop() ?? item.path;
+  for (const file of files) {
+    const parts = label(file).replaceAll("\\", "/").split("/").filter(Boolean);
+    const name = parts.pop() ?? file.path;
     let dir = root;
     for (const part of parts) {
       const path = dir.path === "" ? part : `${dir.path}/${part}`;
@@ -357,7 +501,7 @@ export function buildChangeTree(
       }
       dir = next;
     }
-    dir.children.push({ kind: "file", item, name });
+    dir.children.push({ kind: "file", file, name });
   }
   const compact = (dir: ChangeTreeDir): ChangeTreeDir => {
     dir.children = dir.children.map((child) => (child.kind === "dir" ? compact(child) : child));
@@ -369,12 +513,7 @@ export function buildChangeTree(
   };
   const sortChildren = (dir: ChangeTreeDir) => {
     dir.children.sort((a, b) =>
-      a.kind !== b.kind
-        ? a.kind === "dir"
-          ? -1
-          : 1
-        : a.name.localeCompare(b.name) ||
-          (a.kind === "file" && b.kind === "file" ? b.item.seq - a.item.seq : 0),
+      a.kind !== b.kind ? (a.kind === "dir" ? -1 : 1) : a.name.localeCompare(b.name),
     );
     for (const child of dir.children) if (child.kind === "dir") sortChildren(child);
   };
@@ -410,7 +549,8 @@ export function parseAddress(input: string, workspace: string | undefined): Addr
     }
   }
   if (isHtmlPath(text)) {
-    if (/^[A-Za-z]:[\\/]/.test(text) || text.startsWith("/") || text.startsWith("\\\\")) {
+    if (isNetworkPath(text)) return { kind: "invalid", message: "不打开网络路径上的文件" };
+    if (/^[A-Za-z]:[\\/]/.test(text) || text.startsWith("/")) {
       return { kind: "path", path: text };
     }
     if (workspace === undefined) return { kind: "invalid", message: "相对路径需要先打开一个会话" };

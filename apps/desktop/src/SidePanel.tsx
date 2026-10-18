@@ -1,10 +1,11 @@
 /**
- * 右侧面板（ADR-0060）：标签栏、新标签页、「变更」「文件」两种标签。
+ * 右侧面板（ADR-0060）：标签栏、新标签页、「变更」「文件」「终端」三种标签。
  * 面板只读：撤销仍在对话里的改动卡片上，文件第一版不能编辑。
  * 状态（标签、宽度、开关）由 App 持有并存进本机偏好；这里只管渲染与交互。
  */
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -12,23 +13,29 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import type { TurnChangeDiff, TurnChanges, WorkspaceFileContent } from "@nocturne/core/protocol";
+import type { LocalFileContent, TurnChangeDiff, TurnChanges } from "@nocturne/core/protocol";
 import { RpcError } from "@nocturne/rpc/client";
 
 import { DiffBody } from "./Conversation";
 import type { CodeViewer } from "./code-viewer";
+import type { TerminalHost } from "./host";
 import { displayPath } from "./paths";
 import {
-  baseName,
   buildChangeTree,
   collectChanges,
+  fileTabLabel,
+  groupChanges,
   isHtmlPath,
+  projectFits,
+  type ChangeFile,
   type ChangeItem,
   type ChangeTreeDir,
   type ChangesTab,
   type FileTab,
   type PanelTab,
+  type ShellOption,
 } from "./side-panel";
+import { TerminalPane } from "./TerminalPane";
 import "./side-panel.css";
 
 export interface PanelChangesSource {
@@ -49,6 +56,8 @@ export interface PanelFileActions {
 }
 
 export interface SidePanelProps {
+  /** 面板收起时仍然挂着（终端进程不随面板收起结束），只是隐藏 */
+  hidden?: boolean;
   tabs: readonly PanelTab[];
   activeId: string;
   overlay: boolean;
@@ -61,16 +70,22 @@ export interface SidePanelProps {
   onResize: (width: number, commit: boolean) => void;
   onOpenChanges: () => void;
   onQuickOpen: () => void;
+  onOpenTerminal: () => void;
   /** 新标签页地址栏；返回错误文案或 undefined */
   onAddress: (text: string) => Promise<string | undefined>;
   /** 当前会话的改动；没有打开会话时 undefined */
   changes: PanelChangesSource | undefined;
   /** 没有打开会话时文件入口置灰 */
   canOpenFiles: boolean;
-  readFile: (tab: FileTab) => Promise<WorkspaceFileContent>;
-  /** 读取文件经过的会话；读取失败后它变化（如打开了同项目的会话）就重读 */
-  readKey: (tab: FileTab) => string;
+  /** rpc.md runtime.readFile：按绝对路径读取，不依赖会话 */
+  readFile: (absolutePath: string) => Promise<LocalFileContent>;
+  /** 后台连接的标识：后台（重新）连上时读取失败或还在等待的文件标签重读 */
+  readerKey: string;
   fileActions: PanelFileActions;
+  /** 面板终端；没有时「终端」入口置灰 */
+  terminals: TerminalHost | undefined;
+  listShells: () => Promise<readonly ShellOption[]>;
+  onShellChange: (tabId: string, executable: string) => void;
 }
 
 function Glyph({ kind }: { kind: "changes" | "file" | "terminal" | "globe" | "plus" | "close" }) {
@@ -109,20 +124,69 @@ function Glyph({ kind }: { kind: "changes" | "file" | "terminal" | "globe" | "pl
 function tabTitle(tab: PanelTab): { name: string; project?: string; title: string } {
   if (tab.kind === "changes") return { name: "变更", title: "当前会话改过的文件" };
   if (tab.kind === "new") return { name: "新标签页", title: "新标签页" };
-  const name = baseName(tab.relativePath || tab.absolutePath);
-  return { name, project: baseName(tab.workspace), title: tab.absolutePath };
+  if (tab.kind === "terminal") return { name: "终端", project: tab.label, title: tab.cwd };
+  const { name, scope } = fileTabLabel(tab);
+  return { name, project: scope, title: tab.absolutePath };
+}
+
+/**
+ * 标签上的文件名 + 项目名：项目名整段放得下才显示（projectFits），放不下时只占位不显示，
+ * 不出现「一个字母加省略号」。占位保持标签宽度不变，显示与否不会来回切换。
+ */
+function TabLabel({ name, project }: { name: string; project: string | undefined }) {
+  const label = useRef<HTMLSpanElement>(null);
+  const [fits, setFits] = useState(true);
+  useLayoutEffect(() => {
+    const node = label.current;
+    if (node === null || project === undefined) return;
+    const measure = () => {
+      const nameNode = node.querySelector<HTMLElement>(".sp-tab-name");
+      const projectNode = node.querySelector<HTMLElement>(".sp-tab-project");
+      if (nameNode === null || projectNode === null || node.clientWidth === 0) return;
+      setFits(projectFits(node.clientWidth, nameNode.scrollWidth, projectNode.scrollWidth));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+    };
+  }, [name, project]);
+  return (
+    <span className={`sp-tab-label${fits ? "" : " no-project"}`} ref={label}>
+      <span className="sp-tab-name">{name}</span>
+      {project !== undefined && (
+        <span className="sp-tab-project" aria-hidden={fits ? undefined : true}>
+          {project}
+        </span>
+      )}
+    </span>
+  );
 }
 
 function TabBar(props: SidePanelProps) {
   const { tabs, activeId, onActivate, onCloseTab, onMoveTab, onNewTab } = props;
   const [dragging, setDragging] = useState<string | null>(null);
   const bar = useRef<HTMLDivElement>(null);
-  // 选中的标签滚进可见区
+  // 选中的标签滚进可见区；拖窄面板时也要重新滚，不然选中的标签会被挤到右边看不见
   useEffect(() => {
-    const node = bar.current?.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(activeId)}"]`);
-    // jsdom 没有 scrollIntoView
-    if (node && "scrollIntoView" in node)
-      node.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const reveal = () => {
+      const node = bar.current?.querySelector<HTMLElement>(
+        `[data-tab-id="${CSS.escape(activeId)}"]`,
+      );
+      // jsdom 没有 scrollIntoView
+      if (node && "scrollIntoView" in node)
+        node.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+    reveal();
+    const node = bar.current;
+    if (node === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(reveal);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+    };
   }, [activeId, tabs.length]);
   return (
     <div className="sp-tabbar">
@@ -177,13 +241,8 @@ function TabBar(props: SidePanelProps) {
                 }
               }}
             >
-              <Glyph
-                kind={tab.kind === "changes" ? "changes" : tab.kind === "file" ? "file" : "globe"}
-              />
-              <span className="sp-tab-label">
-                <span className="sp-tab-name">{name}</span>
-                {project !== undefined && <span className="sp-tab-project">{project}</span>}
-              </span>
+              <Glyph kind={tab.kind === "new" ? "globe" : tab.kind} />
+              <TabLabel name={name} project={project} />
               <button
                 type="button"
                 className="sp-tab-close"
@@ -220,11 +279,17 @@ function Kbd({ children }: { children: string }) {
 function NewTabPage({
   onOpenChanges,
   onQuickOpen,
+  onOpenTerminal,
   onAddress,
   canOpenFiles,
   hasSession,
-}: Pick<SidePanelProps, "onOpenChanges" | "onQuickOpen" | "onAddress" | "canOpenFiles"> & {
+  hasTerminal,
+}: Pick<
+  SidePanelProps,
+  "onOpenChanges" | "onQuickOpen" | "onOpenTerminal" | "onAddress" | "canOpenFiles"
+> & {
   hasSession: boolean;
+  hasTerminal: boolean;
 }) {
   const [address, setAddress] = useState("");
   const [error, setError] = useState<string>();
@@ -297,13 +362,20 @@ function NewTabPage({
               <span className="sp-tool-desc">搜索并查看工作区文件</span>
             </span>
           </button>
-          <button type="button" className="sp-tool" disabled aria-describedby="sp-term-note">
+          <button
+            type="button"
+            className="sp-tool"
+            disabled={!hasTerminal}
+            title={hasTerminal ? undefined : "这个环境没有终端"}
+            onClick={onOpenTerminal}
+          >
             <Glyph kind="terminal" />
             <span className="sp-tool-text">
-              <span className="sp-tool-name">终端</span>
-              <span className="sp-tool-desc" id="sp-term-note">
-                下个版本提供
+              <span className="sp-tool-head">
+                <span className="sp-tool-name">终端</span>
+                <Kbd>Ctrl+`</Kbd>
               </span>
+              <span className="sp-tool-desc">在项目目录里开一个终端</span>
             </span>
           </button>
         </div>
@@ -419,14 +491,18 @@ function TreeDir({
   dir,
   depth,
   collapsed,
+  expanded,
   onToggle,
+  onToggleFile,
   onPick,
   selected,
 }: {
   dir: ChangeTreeDir;
   depth: number;
   collapsed: ReadonlySet<string>;
+  expanded: ReadonlySet<string>;
   onToggle: (path: string) => void;
+  onToggleFile: (file: ChangeFile) => void;
   onPick: (item: ChangeItem) => void;
   selected: string | undefined;
 }) {
@@ -434,24 +510,58 @@ function TreeDir({
     <>
       {dir.children.map((child) => {
         if (child.kind === "file") {
-          const { item } = child;
+          const { file } = child;
+          const multi = file.rounds.length > 1;
+          const open = multi && expanded.has(file.key);
+          const only = file.rounds[0];
+          const on = file.rounds.some((round) => round.key === selected);
           return (
-            <button
-              key={item.key}
-              type="button"
-              className={`sp-tree-file${selected === item.key ? " on" : ""}`}
-              style={{ paddingLeft: 8 + depth * 12 }}
-              title={`${item.path} · 第 ${item.round} 轮`}
-              onClick={() => {
-                onPick(item);
-              }}
-            >
-              <span className="sp-tree-name">{child.name}</span>
-              <span className="sp-tree-round">{item.round}</span>
-              {item.unavailable === undefined && (
-                <Counts added={item.added} removed={item.removed} />
-              )}
-            </button>
+            <div key={file.key} className="sp-tree-group">
+              <button
+                type="button"
+                className={`sp-tree-file${on && !open ? " on" : ""}${file.reverted ? " reverted" : ""}`}
+                style={{ paddingLeft: 8 + depth * 12 }}
+                title={`${file.path} · ${String(file.rounds.length)} 轮`}
+                aria-expanded={multi ? open : undefined}
+                onClick={() => {
+                  if (multi) onToggleFile(file);
+                  else if (only !== undefined) onPick(only);
+                }}
+              >
+                {multi ? (
+                  <span className={`fold-arrow${open ? " down" : ""}`} aria-hidden="true">
+                    ▶
+                  </span>
+                ) : (
+                  <span className="sp-tree-spacer" aria-hidden="true" />
+                )}
+                <span className="sp-tree-name">{child.name}</span>
+                {multi && <span className="sp-tree-round">{file.rounds.length} 轮</span>}
+                {file.unavailable === undefined && (
+                  <Counts added={file.added} removed={file.removed} />
+                )}
+              </button>
+              {open &&
+                file.rounds.map((round) => (
+                  <button
+                    key={round.key}
+                    type="button"
+                    className={`sp-tree-file sp-tree-roundrow${selected === round.key ? " on" : ""}${round.reverted ? " reverted" : ""}`}
+                    style={{ paddingLeft: 8 + (depth + 1) * 12 + 12 }}
+                    title={`${file.path} · 第 ${String(round.round)} 轮`}
+                    onClick={() => {
+                      onPick(round);
+                    }}
+                  >
+                    <span className="sp-tree-name">
+                      第 {round.round} 轮{round.reverted ? " · 已撤销" : ""}
+                    </span>
+                    {round.unavailable === undefined && (
+                      <Counts added={round.added} removed={round.removed} />
+                    )}
+                  </button>
+                ))}
+            </div>
           );
         }
         const open = !collapsed.has(child.path);
@@ -476,7 +586,9 @@ function TreeDir({
                 dir={child}
                 depth={depth + 1}
                 collapsed={collapsed}
+                expanded={expanded}
                 onToggle={onToggle}
+                onToggleFile={onToggleFile}
                 onPick={onPick}
                 selected={selected}
               />
@@ -488,26 +600,34 @@ function TreeDir({
   );
 }
 
+function toggled(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
+  const next = new Set(set);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+}
+
 function ChangesView({ tab, source }: { tab: ChangesTab; source: PanelChangesSource | undefined }) {
   const [filter, setFilter] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState<string>();
   const list = useRef<HTMLDivElement>(null);
   const items = useMemo(
     () => (source === undefined ? [] : collectChanges(source.turns.values(), source.userSeqs)),
     [source],
   );
-  const label = (item: ChangeItem) => displayPath(item.path, source?.workspace);
+  const files = useMemo(() => groupChanges(items), [items]);
+  const label = (path: string) => displayPath(path, source?.workspace);
   const query = filter.trim().toLowerCase();
-  const shown = query === "" ? items : items.filter((i) => label(i).toLowerCase().includes(query));
-  const tree = buildChangeTree(shown, label);
+  const matches = (path: string) => query === "" || label(path).toLowerCase().includes(query);
+  const shownFiles = files.filter((file) => matches(file.path));
+  const shown = items.filter((item) => matches(item.path));
+  const tree = buildChangeTree(shownFiles, (file) => label(file.path));
   const rounds = new Set(items.map((item) => item.seq)).size;
-  const files = new Set(items.map((item) => item.path)).size;
-  const scrollTo = (key: string | undefined, seq?: number) => {
-    const node =
-      key !== undefined
-        ? list.current?.querySelector<HTMLElement>(`[data-change-key="${CSS.escape(key)}"]`)
-        : list.current?.querySelector<HTMLElement>(`[data-change-seq="${String(seq)}"]`);
+  const scrollTo = (key: string | undefined) => {
+    if (key === undefined) return;
+    const node = list.current?.querySelector<HTMLElement>(`[data-change-key="${CSS.escape(key)}"]`);
     if (node && "scrollIntoView" in node) node.scrollIntoView({ block: "start" });
   };
   // 「查看变更」定位到那一轮
@@ -530,6 +650,10 @@ function ChangesView({ tab, source }: { tab: ChangesTab; source: PanelChangesSou
   if (items.length === 0) {
     return <div className="sp-empty">本会话还没有文件改动</div>;
   }
+  const pick = (item: ChangeItem) => {
+    setSelected(item.key);
+    scrollTo(item.key);
+  };
   return (
     <div className="sp-changes">
       <div className="sp-changes-diff" ref={list}>
@@ -537,7 +661,7 @@ function ChangesView({ tab, source }: { tab: ChangesTab; source: PanelChangesSou
           <ChangeSection
             key={item.key}
             item={item}
-            label={label(item)}
+            label={label(item.path)}
             loadDiff={source.loadDiff}
             highlighted={selected === item.key}
           />
@@ -546,7 +670,7 @@ function ChangesView({ tab, source }: { tab: ChangesTab; source: PanelChangesSou
       </div>
       <aside className="sp-changes-tree" aria-label="改动的文件">
         <div className="sp-tree-summary">
-          本会话 · {rounds} 轮 · {files} 个文件
+          本会话 · {rounds} 轮 · {files.length} 个文件
         </div>
         <input
           className="sp-filter"
@@ -563,19 +687,19 @@ function ChangesView({ tab, source }: { tab: ChangesTab; source: PanelChangesSou
             dir={tree}
             depth={0}
             collapsed={collapsed}
+            expanded={expanded}
             selected={selected}
             onToggle={(path) => {
-              setCollapsed((current) => {
-                const next = new Set(current);
-                if (next.has(path)) next.delete(path);
-                else next.add(path);
-                return next;
-              });
+              setCollapsed((current) => toggled(current, path));
             }}
-            onPick={(item) => {
-              setSelected(item.key);
-              scrollTo(item.key);
+            onToggleFile={(file) => {
+              const opening = !expanded.has(file.key);
+              setExpanded((current) => toggled(current, file.key));
+              // 展开时顺带跳到最新一轮
+              const newest = file.rounds[0];
+              if (opening && newest !== undefined) pick(newest);
             }}
+            onPick={pick}
           />
         </div>
       </aside>
@@ -599,8 +723,8 @@ function fileErrorText(code: string | undefined, message: string): string {
       return "文件超过 2 MB，面板里不显示";
     case "file_binary":
       return "二进制文件，面板里无法预览";
-    case "file_outside_workspace":
-      return "文件在工作区之外";
+    case "file_network_path":
+      return "不读取网络路径上的文件";
     case "file_not_regular":
       return "这不是普通文件";
     default:
@@ -653,12 +777,12 @@ function CodeArea({ tab, text }: { tab: FileTab; text: string }) {
 function FileView({
   tab,
   readFile,
-  readKey,
+  readerKey,
   actions,
 }: {
   tab: FileTab;
   readFile: SidePanelProps["readFile"];
-  readKey: string;
+  readerKey: string;
   actions: PanelFileActions;
 }) {
   const [state, setState] = useState<FileState>({ kind: "loading" });
@@ -666,14 +790,12 @@ function FileView({
   const [actionError, setActionError] = useState<string>();
   const reader = useRef(readFile);
   reader.current = readFile;
-  const tabRef = useRef(tab);
-  tabRef.current = tab;
   useEffect(() => {
     let alive = true;
     let url: string | undefined;
     setState({ kind: "loading" });
     reader
-      .current(tabRef.current)
+      .current(tab.absolutePath)
       .then((file) => {
         if (!alive) return;
         if (file.kind === "text") {
@@ -695,20 +817,15 @@ function FileView({
       alive = false;
       if (url !== undefined) URL.revokeObjectURL(url);
     };
-  }, [tab.absolutePath, reload]);
-  const failed = state.kind === "error";
-  useEffect(() => {
-    if (failed) setReload((n) => n + 1);
-    // 只在读取会话变化时重试
-  }, [readKey]);
+    // 后台重新连上（readerKey 变化）也重读：启动时恢复的标签要等后台就绪
+  }, [tab.absolutePath, reload, readerKey]);
   const run = (action: () => Promise<void>) => {
     setActionError(undefined);
     void action().catch((e: unknown) => {
       setActionError(e instanceof Error ? e.message : String(e));
     });
   };
-  const project = baseName(tab.workspace);
-  const rel = (tab.relativePath || tab.absolutePath).replaceAll("\\", "/");
+  const { scope: project, path: rel } = fileTabLabel(tab);
   const missing = state.kind === "error" && state.code === "file_not_found";
   const externalOnly =
     state.kind === "error" && (state.code === "file_too_large" || state.code === "file_binary");
@@ -809,7 +926,7 @@ function FileView({
 // ── 面板 ──
 
 export function SidePanel(props: SidePanelProps) {
-  const { tabs, activeId, overlay, width, onResize, changes } = props;
+  const { tabs, activeId, overlay, width, onResize, changes, hidden = false } = props;
   const drag = useRef<{ startX: number; startWidth: number; width: number } | null>(null);
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -842,6 +959,7 @@ export function SidePanel(props: SidePanelProps) {
       className={`side-panel${overlay ? " overlay" : ""}`}
       style={{ width }}
       aria-label="右侧面板"
+      hidden={hidden}
     >
       <div
         className="sp-splitter"
@@ -864,17 +982,31 @@ export function SidePanel(props: SidePanelProps) {
               <NewTabPage
                 onOpenChanges={props.onOpenChanges}
                 onQuickOpen={props.onQuickOpen}
+                onOpenTerminal={props.onOpenTerminal}
                 onAddress={props.onAddress}
                 canOpenFiles={props.canOpenFiles}
                 hasSession={changes !== undefined}
+                hasTerminal={props.terminals !== undefined}
               />
             ) : tab.kind === "changes" ? (
               <ChangesView tab={tab} source={changes} />
+            ) : tab.kind === "terminal" ? (
+              props.terminals === undefined ? (
+                <div className="sp-empty">这个环境没有终端</div>
+              ) : (
+                <TerminalPane
+                  tab={tab}
+                  host={props.terminals}
+                  listShells={props.listShells}
+                  visible={!hidden && tab.id === activeId}
+                  onShellChange={props.onShellChange}
+                />
+              )
             ) : (
               <FileView
                 tab={tab}
                 readFile={props.readFile}
-                readKey={props.readKey(tab)}
+                readerKey={props.readerKey}
                 actions={props.fileActions}
               />
             )}

@@ -135,6 +135,8 @@
   color: var(--a-muted);
   font-size: 11.5px;
   line-height: 1.5;
+  /* 说明里可能是很长的可执行文件路径，没有空格也要能折行 */
+  overflow-wrap: anywhere;
 }
 .ddm .ddo.on {
   background: var(--a-sel);

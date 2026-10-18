@@ -457,18 +457,16 @@
   text-underline-offset: 3px;
 }
 /* 回答内文件引用（U-09）：类型图标 + 路径，链接色；存在的文件才渲染 */
+/* 纯行内元素：工作区外的绝对路径很长，要跟正文一起逐字换行 */
 .conversation-markdown .file-ref-link {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
   padding: 0 2px;
-  border: 0;
   border-radius: 3px;
-  background: none;
   cursor: pointer;
   color: var(--a-accentAlt);
-  font: inherit;
-  vertical-align: baseline;
+}
+.conversation-markdown .file-ref-link:focus-visible {
+  outline: 2px solid var(--a-accent);
+  outline-offset: 1px;
 }
 .conversation-markdown .file-ref-link:hover {
   background: var(--a-raised);
@@ -485,8 +483,8 @@
 .conversation-markdown .file-ref-glyph {
   width: 13px;
   height: 13px;
-  flex: none;
-  align-self: center;
+  margin-right: 4px;
+  vertical-align: -2px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.2;
