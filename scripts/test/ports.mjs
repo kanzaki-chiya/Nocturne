@@ -1,6 +1,8 @@
-import { createServer, type Server } from "node:net";
+import { createServer } from "node:net";
 
 /**
+ * 测试用随机端口（各包测试共用，见 docs/development/workflow.md 第 4 节）。
+ *
  * fetch 规范的禁用端口（WHATWG Fetch「bad port」）：Node 的 fetch 连这些端口直接报
  * `bad port`。随机端口由系统分配，范围取决于本机（可能是 1024–65535），所以测试不能
  * 指望分不到它们。
@@ -13,11 +15,11 @@ const FETCH_BLOCKED_PORTS = new Set([
   6669, 6679, 6697, 10080,
 ]);
 
-export function isFetchBlockedPort(port: number): boolean {
+export function isFetchBlockedPort(port) {
   return FETCH_BLOCKED_PORTS.has(port);
 }
 
-function listenOnce(server: Server, host: string): Promise<number> {
+function listenOnce(server, host) {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, host, () => {
@@ -29,12 +31,12 @@ function listenOnce(server: Server, host: string): Promise<number> {
   });
 }
 
-function closeServer(server: Server): Promise<void> {
+function closeServer(server) {
   return new Promise((resolve) => server.close(() => resolve()));
 }
 
 /** 在随机端口上监听；分到 fetch 禁用的端口就关掉重分。返回实际端口 */
-export async function listenFetchSafe(server: Server, host = "127.0.0.1"): Promise<number> {
+export async function listenFetchSafe(server, host = "127.0.0.1") {
   for (let attempt = 0; attempt < 20; attempt++) {
     const port = await listenOnce(server, host);
     if (!isFetchBlockedPort(port)) return port;
@@ -43,13 +45,18 @@ export async function listenFetchSafe(server: Server, host = "127.0.0.1"): Promi
   throw new Error("连续分到 fetch 禁用端口");
 }
 
+/** 一个 fetch 可用、当前没有监听的端口：先占一个再放掉 */
+export async function unusedFetchSafePort(host = "127.0.0.1") {
+  const probe = createServer();
+  const port = await listenFetchSafe(probe, host);
+  await closeServer(probe);
+  return port;
+}
+
 /**
  * 给 RelayServer 的 `listen` 配置：先占一个 fetch 可用的随机端口再放掉。
  * `start()` 同时打开存储与推送服务，不适合分到坏端口后关掉重来。
  */
-export async function fetchSafeListen(host = "127.0.0.1"): Promise<string> {
-  const probe = createServer();
-  const port = await listenFetchSafe(probe, host);
-  await closeServer(probe);
-  return `${host}:${port}`;
+export async function fetchSafeListen(host = "127.0.0.1") {
+  return `${host}:${await unusedFetchSafePort(host)}`;
 }

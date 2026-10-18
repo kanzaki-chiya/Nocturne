@@ -18,7 +18,7 @@ import {
 import { RelayServer, type RelayLog } from "../src/server.js";
 import { startAdmin, requestAdmin } from "../src/admin.js";
 import { staticCsp } from "../src/csp.js";
-import { fetchSafeListen, listenFetchSafe } from "./ports.js";
+import { fetchSafeListen, listenFetchSafe } from "../../../scripts/test/ports.mjs";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 function required<T>(value: T | undefined | null): T {

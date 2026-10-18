@@ -14,7 +14,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "=2.7.0", features = [] }
 
 [dependencies]
-tauri = { version = "=2.12.0", features = [] }
+# unstable：面板内置浏览器用 Window::add_child 挂子 webview（ADR-0060 第 5 节）
+tauri = { version = "=2.12.0", features = ["unstable"] }
 tauri-plugin-dialog = "=2.8.0"
 tauri-plugin-opener = "=2.6.0"
 tauri-plugin-process = "=2.4.0"
@@ -34,6 +35,7 @@ windows-sys = { version = "=0.61.2", features = [
     "Win32_System_Ole",
     "Win32_System_Registry",
     "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
 ] }
 # WinRT toast（ADR-0056）：tauri-winrt-notification 0.8.1 的公开 API 设不了
 # tag/group，也就无法「同会话替换、切走撤销」，所以直接经 windows 的
@@ -42,4 +44,13 @@ windows = { version = "=0.62.2", features = [
     "Data_Xml_Dom",
     "Foundation",
     "UI_Notifications",
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
 ] }
+# 面板内置浏览器（ADR-0060 第 5 节）：Tauri 没有包装的 WebView2 事件和操作（加速键、
+# 地址与历史、网站图标、外部协议、截图）。版本与 wry 用的一致，类型才能互通。
+webview2-com = "=0.39.1"
+# 下载的「另存为」：下载回调在主线程同步等结果，用 tauri-plugin-dialog 底下的同一个
+# rfd 的同步对话框（插件的阻塞接口在主线程上会和父窗口互相等待）。
+rfd = { version = "=0.16.0", default-features = false, features = ["common-controls-v6"] }

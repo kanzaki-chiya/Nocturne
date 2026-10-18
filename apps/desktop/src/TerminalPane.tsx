@@ -150,8 +150,8 @@ export function TerminalPane({ tab, host, loadShells, visible, onShellChange }: 
         onResize: (cols, rows) => {
           controller.resize(cols, rows);
         },
-        onCopy: () => {
-          actions.current.copy(false);
+        onCopy: (clear) => {
+          actions.current.copy(clear);
         },
       });
       setReady(true);

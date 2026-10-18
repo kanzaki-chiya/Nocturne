@@ -54,11 +54,23 @@ export interface TerminalTab {
   shell?: string | undefined;
 }
 
-export type PanelTab = NewTab | ChangesTab | FileTab | TerminalTab;
+/**
+ * 浏览器（ADR-0060 第 5 节）：一个标签一个外壳子 webview。url 和 title 跟着网页走、
+ * 重启时恢复（历史不恢复）；webview 本身由 browser-pool 按需创建、超出上限时回收。
+ */
+export interface BrowserTab {
+  id: string;
+  kind: "browser";
+  url: string;
+  title?: string | undefined;
+}
 
-/** 存进本机偏好的标签：只有「文件」和「变更」（新标签页、终端不恢复） */
+export type PanelTab = NewTab | ChangesTab | FileTab | TerminalTab | BrowserTab;
+
+/** 存进本机偏好的标签：「文件」「变更」「浏览器」（新标签页、终端不恢复） */
 export type StoredPanelTab =
   | { id: string; kind: "changes" }
+  | { id: string; kind: "browser"; url: string; title?: string }
   | {
       id: string;
       kind: "file";
@@ -274,6 +286,14 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
       changes = true;
       ids.add(raw.id);
       tabs.push({ id: raw.id, kind: "changes" });
+    } else if (raw.kind === "browser" && str(raw.url) && isBrowserUrl(raw.url)) {
+      ids.add(raw.id);
+      tabs.push({
+        id: raw.id,
+        kind: "browser",
+        url: raw.url,
+        ...(str(raw.title) ? { title: raw.title } : {}),
+      });
     } else if (raw.kind === "file" && str(raw.absolutePath) && isAbsolutePath(raw.absolutePath)) {
       // 第 1 轮存下的标签还带 sessionId / relativePath，忽略即可
       ids.add(raw.id);
@@ -294,6 +314,16 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
 export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
   return tabs.flatMap((tab): StoredPanelTab[] => {
     if (tab.kind === "changes") return [{ id: tab.id, kind: "changes" }];
+    if (tab.kind === "browser") {
+      return [
+        {
+          id: tab.id,
+          kind: "browser",
+          url: tab.url,
+          ...(tab.title !== undefined && tab.title !== "" ? { title: tab.title } : {}),
+        },
+      ];
+    }
     if (tab.kind === "file") {
       return [
         {
@@ -311,7 +341,7 @@ export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
 }
 
 /**
- * 重启恢复：按存储顺序还原「文件」和「变更」标签；一个都没有时给一个新标签页。
+ * 重启恢复：按存储顺序还原「文件」「变更」「浏览器」标签；一个都没有时给一个新标签页。
  * 选中项不存在时选第一个。文件是否还在由「文件」标签自己读取时判定。
  */
 export function restoreTabs(
@@ -727,44 +757,99 @@ export function buildChangeTree(
 
 export type AddressTarget =
   | { kind: "url"; url: string }
-  | { kind: "path"; path: string }
+  /** 本机文件：url 是 file:// 地址，path 是对应的本地路径（没有内置浏览器时交给系统） */
+  | { kind: "file"; path: string; url: string }
   | { kind: "invalid"; message: string };
 
+/** 内置浏览器能打开的地址（外壳 browser_policy 的白名单：http、https、file、about:blank） */
+export function isBrowserUrl(url: string): boolean {
+  if (url === "about:blank") return true;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:" || protocol === "file:";
+  } catch {
+    return false;
+  }
+}
+
+/** 本地绝对路径转 file:// 地址：Windows 盘符路径换成正斜杠，空格、# 和 ? 转义 */
+export function fileUrl(path: string): string {
+  const slashed = path.replaceAll("\\", "/");
+  const rooted = slashed.startsWith("/") ? slashed : `/${slashed}`;
+  return `file://${encodeURI(rooted).replaceAll("#", "%23").replaceAll("?", "%3F")}`;
+}
+
+/** file:// 地址转本地路径（Windows 去掉盘符前的斜杠）；不是 file:// 时 undefined */
+export function filePath(url: string): string | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== "file:") return undefined;
+  const path = decodeURIComponent(parsed.pathname);
+  return /^\/[A-Za-z]:/.test(path) ? path.slice(1).replaceAll("/", "\\") : path;
+}
+
+/** 浏览器标签上的名字：网页标题，没有时用主机名，再没有用文件名或地址 */
+export function browserTabName(tab: Pick<BrowserTab, "url" | "title">): string {
+  if (tab.title !== undefined && tab.title.trim() !== "") return tab.title.trim();
+  if (tab.url === "about:blank") return "空白页";
+  const local = filePath(tab.url);
+  if (local !== undefined) return baseName(local) || local;
+  try {
+    return new URL(tab.url).host || tab.url;
+  } catch {
+    return tab.url;
+  }
+}
+
 /**
- * 新标签页地址栏（ADR-0060 实现计划第 1 轮）：内置浏览器做好之前，网址和 HTML 路径
- * 都交给系统浏览器。裸域名补 https://；file:// 与相对路径转成绝对路径。
+ * 地址栏（新标签页和浏览器标签共用，ADR-0060 第 5 节）：网址和本地 HTML 路径在面板
+ * 浏览器里打开。裸域名补 https://（本机地址补 http://），相对路径按工作区拼成绝对路径，
+ * 再转成 file:// 地址。不像网址的输入不去搜索引擎，只提示「请输入网址」。
  */
 export function parseAddress(input: string, workspace: string | undefined): AddressTarget {
   const text = input.trim();
-  if (text === "") return { kind: "invalid", message: "请输入网址或 HTML 文件路径" };
+  const invalid = { kind: "invalid", message: "请输入网址" } as const;
+  if (text === "") return invalid;
+  if (text.toLowerCase() === "about:blank") return { kind: "url", url: "about:blank" };
   if (/^file:\/\//i.test(text)) {
-    let path = decodeURI(text.replace(/^file:\/\/\/?/i, ""));
-    if (!/^[A-Za-z]:/.test(path) && !path.startsWith("/")) path = `/${path}`;
-    return isHtmlPath(path)
-      ? { kind: "path", path: path.replace(/^\/(?=[A-Za-z]:)/, "") }
-      : { kind: "invalid", message: "这一版只能打开 HTML 文件" };
+    try {
+      const url = new URL(text).href;
+      const path = filePath(url);
+      if (path === undefined || isNetworkPath(path) || new URL(url).host !== "") {
+        return { kind: "invalid", message: "不打开网络路径上的文件" };
+      }
+      return { kind: "file", path, url };
+    } catch {
+      return invalid;
+    }
   }
   if (/^https?:\/\//i.test(text)) {
     try {
       return { kind: "url", url: new URL(text).href };
     } catch {
-      return { kind: "invalid", message: "网址格式不对" };
+      return invalid;
     }
   }
   if (isHtmlPath(text)) {
     if (isNetworkPath(text)) return { kind: "invalid", message: "不打开网络路径上的文件" };
-    if (/^[A-Za-z]:[\\/]/.test(text) || text.startsWith("/")) {
-      return { kind: "path", path: text };
+    let path: string;
+    if (/^[A-Za-z]:[\\/]/.test(text) || text.startsWith("/")) path = text;
+    else if (workspace === undefined) {
+      return { kind: "invalid", message: "相对路径需要先打开一个会话" };
+    } else path = joinWorkspace(workspace, text);
+    return { kind: "file", path, url: fileUrl(path) };
+  }
+  const local = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/.*)?$/i.test(text);
+  if (local || (!/\s/.test(text) && /^[\w-]+(\.[\w-]+)+(:\d+)?([/?#].*)?$/.test(text))) {
+    try {
+      return { kind: "url", url: new URL(`${local ? "http" : "https"}://${text}`).href };
+    } catch {
+      return invalid;
     }
-    if (workspace === undefined) return { kind: "invalid", message: "相对路径需要先打开一个会话" };
-    return { kind: "path", path: joinWorkspace(workspace, text) };
   }
-  if (!/\s/.test(text) && /^[\w-]+(\.[\w-]+)+(:\d+)?(\/.*)?$/.test(text)) {
-    const local = /^(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(text);
-    return { kind: "url", url: new URL(`${local ? "http" : "https"}://${text}`).href };
-  }
-  if (/^(localhost|127\.0\.0\.1)(:\d+)?(\/.*)?$/i.test(text)) {
-    return { kind: "url", url: new URL(`http://${text}`).href };
-  }
-  return { kind: "invalid", message: "这一版地址栏只接受网址和 HTML 文件路径" };
+  return invalid;
 }

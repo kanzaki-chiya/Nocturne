@@ -9,7 +9,13 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { RpcClient } from "@nocturne/rpc/client";
 
 import type { OpenConversation } from "../src/conversations";
-import type { DesktopHost, TerminalHost, TerminalMessage } from "../src/host";
+import type {
+  BrowserHost,
+  BrowserMessage,
+  DesktopHost,
+  TerminalHost,
+  TerminalMessage,
+} from "../src/host";
 import { useSidePanel, type SidePanelController } from "../src/PanelHost";
 import { TitlebarSlot } from "../src/PanelChrome";
 import { createPrefsStore, PREFS_KEY, type PrefsStore } from "../src/prefs";
@@ -512,4 +518,367 @@ it("开着的会话被删除（列过又不见了）也整套清理：结束终�
     expect(terminals.closed).toEqual([1]);
   });
   expect(Object.keys((stored(storage).panelSessions ?? {}) as object)).not.toContain("a");
+});
+
+// ── 浏览器标签（ADR-0060 第 5 节） ──
+
+function fakeBrowsers() {
+  const log: string[] = [];
+  const pushes = new Map<number, (m: BrowserMessage) => void>();
+  let next = 1;
+  const browsers: BrowserHost = {
+    create: vi.fn(async (url: string, _bounds, onMessage) => {
+      const id = next++;
+      pushes.set(id, onMessage);
+      log.push(`create ${id} ${url}`);
+      return id;
+    }),
+    navigate: vi.fn(async (id: number, url: string) => {
+      log.push(`navigate ${id} ${url}`);
+    }),
+    layout: vi.fn(async (id: number, bounds) => {
+      log.push(`layout ${id} ${bounds === null ? "hide" : "show"}`);
+    }),
+    action: vi.fn(async () => undefined),
+    capture: vi.fn(async () => new Uint8Array([137, 80, 78, 71])),
+    destroy: vi.fn(async (id: number) => {
+      log.push(`destroy ${id}`);
+    }),
+  };
+  return { browsers, log, push: (id: number, m: BrowserMessage) => pushes.get(id)?.(m) };
+}
+
+const domRect = (left: number, top: number, width: number, height: number) =>
+  ({
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  }) as DOMRect;
+
+/** jsdom 没有布局：浏览器占位区给一个尺寸，webview 才会显示 */
+function withSlotSize() {
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    if (this.classList.contains("sp-browser-slot")) return domRect(600, 80, 500, 620);
+    return original.call(this);
+  };
+  return () => {
+    HTMLElement.prototype.getBoundingClientRect = original;
+  };
+}
+
+function browserSetup(storage = memoryStorage()) {
+  const base = setup(storage);
+  const fake = fakeBrowsers();
+  const host = { ...base.host, browsers: fake.browsers } as unknown as DesktopHost;
+  return { ...base, ...fake, host };
+}
+
+const flushAsync = () =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+it("地址栏输入网址：新标签页就地变成浏览器标签；不像网址的提示「请输入网址」", async () => {
+  const restore = withSlotSize();
+  try {
+    const { prefs, host, log, storage } = browserSetup();
+    render(
+      <Harness prefs={prefs} host={host} sessionId="a" sessions={[{ id: "a", mtimeMs: 1 }]} />,
+    );
+    act(() => {
+      press({ key: "t", ctrlKey: true });
+    });
+    const input = screen.getByRole("textbox", { name: "地址栏" });
+    fireEvent.change(input, { target: { value: "随便写点什么" } });
+    fireEvent.submit(input);
+    expect(await screen.findByText("请输入网址")).toBeTruthy();
+    fireEvent.change(input, { target: { value: "example.com" } });
+    fireEvent.submit(input);
+    await flushAsync();
+    // 会话本来就有一个新标签页，Ctrl+T 又开了一个：后开的那个变成浏览器
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(2);
+    expect(tabs[1]?.textContent).toContain("example.com");
+    expect(tabs[1]?.getAttribute("aria-selected")).toBe("true");
+    expect(log).toEqual(["create 1 https://example.com/", "layout 1 show"]);
+    const saved = stored(storage).panelSessions as Record<string, { tabs: unknown[] }>;
+    expect(saved.a?.tabs).toEqual([
+      { id: expect.any(String) as string, kind: "browser", url: "https://example.com/" },
+    ]);
+  } finally {
+    restore();
+  }
+});
+
+it("工作区内的 HTML 引用左键进浏览器标签，「查看源码」进文件标签；工作区外的照旧是文件", async () => {
+  const restore = withSlotSize();
+  try {
+    const { prefs, host, log } = browserSetup();
+    const controller = { current: null as SidePanelController | null };
+    render(
+      <Harness
+        prefs={prefs}
+        host={host}
+        sessionId="a"
+        sessions={[{ id: "a", mtimeMs: 1 }]}
+        controller={controller}
+      />,
+    );
+    expect(controller.current?.previewsHtml("Z:\\a\\site\\index.html")).toBe(true);
+    expect(controller.current?.previewsHtml("D:\\other\\index.html")).toBe(false);
+    expect(controller.current?.previewsHtml("Z:\\a\\notes.md")).toBe(false);
+    act(() => {
+      controller.current?.openFile("Z:\\a\\site\\index.html");
+    });
+    await flushAsync();
+    expect(log[0]).toBe("create 1 file:///Z:/a/site/index.html");
+    act(() => {
+      controller.current?.viewSource("Z:\\a\\site\\index.html", 3);
+    });
+    act(() => {
+      controller.current?.openFile("D:\\other\\index.html");
+    });
+    await flushAsync();
+    const names = screen.getAllByRole("tab").map((t) => t.textContent ?? "");
+    expect(names).toHaveLength(3);
+    expect(names[0]).toContain("index.html");
+    // 第二、三个是文件标签（源码、工作区外的 HTML）
+    expect(document.querySelectorAll(".sp-file")).toHaveLength(2);
+    // 浏览器被切走：隐藏但不销毁
+    expect(log).toContain("layout 1 hide");
+    expect(log).not.toContain("destroy 1");
+  } finally {
+    restore();
+  }
+});
+
+it("网页 target=_blank 在本会话新开浏览器标签；标题和地址写回标签；网页里的 Ctrl+B 收起面板", async () => {
+  const restore = withSlotSize();
+  try {
+    const { prefs, host, log, push, storage } = browserSetup();
+    const controller = { current: null as SidePanelController | null };
+    render(
+      <Harness
+        prefs={prefs}
+        host={host}
+        sessionId="a"
+        sessions={[{ id: "a", mtimeMs: 1 }]}
+        controller={controller}
+      />,
+    );
+    act(() => {
+      controller.current?.openFile("Z:\\a\\index.html");
+    });
+    await flushAsync();
+    act(() => {
+      push(1, { kind: "title", title: "首页" });
+      push(1, { kind: "url", url: "file:///Z:/a/index.html#top" });
+    });
+    expect(screen.getAllByRole("tab")[0]?.textContent).toContain("首页");
+    act(() => {
+      push(1, { kind: "newWindow", url: "https://example.org/" });
+    });
+    await flushAsync();
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(2);
+    expect(tabs[1]?.getAttribute("aria-selected")).toBe("true");
+    expect(log).toContain("create 2 https://example.org/");
+    expect(log).toContain("layout 1 hide");
+    const saved = stored(storage).panelSessions as Record<
+      string,
+      { tabs: { url?: string; title?: string }[] }
+    >;
+    expect(saved.a?.tabs[0]).toMatchObject({ url: "file:///Z:/a/index.html#top", title: "首页" });
+    act(() => {
+      push(2, { kind: "shortcut", key: "b" });
+    });
+    await flushAsync();
+    expect(panelEl()?.hidden).toBe(true);
+    expect(log[log.length - 1]).toBe("layout 2 hide");
+  } finally {
+    restore();
+  }
+});
+
+it("切换会话隐藏浏览器、切回来原样显示；设置页隐藏；关闭标签和删除会话销毁 webview；重启恢复地址", async () => {
+  const restore = withSlotSize();
+  try {
+    const { prefs, host, log, storage } = browserSetup();
+    const controller = { current: null as SidePanelController | null };
+    const sessions = [
+      { id: "a", mtimeMs: 1 },
+      { id: "b", mtimeMs: 2 },
+    ];
+    const view = render(
+      <Harness
+        prefs={prefs}
+        host={host}
+        sessionId="a"
+        sessions={sessions}
+        controller={controller}
+      />,
+    );
+    act(() => {
+      controller.current?.openFile("Z:\\a\\index.html");
+    });
+    await flushAsync();
+    view.rerender(
+      <Harness
+        prefs={prefs}
+        host={host}
+        sessionId="b"
+        sessions={sessions}
+        controller={controller}
+      />,
+    );
+    await flushAsync();
+    expect(log).toEqual(["create 1 file:///Z:/a/index.html", "layout 1 show", "layout 1 hide"]);
+    view.rerender(
+      <Harness
+        prefs={prefs}
+        host={host}
+        sessionId="a"
+        sessions={sessions}
+        controller={controller}
+      />,
+    );
+    await flushAsync();
+    expect(log.slice(3)).toEqual(["layout 1 show"]);
+    view.rerender(
+      <Harness
+        prefs={prefs}
+        host={host}
+        sessionId="a"
+        sessions={sessions}
+        controller={controller}
+        settingsOpen
+      />,
+    );
+    await flushAsync();
+    expect(log.slice(4)).toEqual(["layout 1 hide"]);
+    view.rerender(
+      <Harness
+        prefs={prefs}
+        host={host}
+        sessionId="a"
+        sessions={sessions}
+        controller={controller}
+      />,
+    );
+    await flushAsync();
+    // 关闭标签：销毁
+    fireEvent.click(screen.getByRole("button", { name: /^关闭 / }));
+    await flushAsync();
+    expect(log.slice(-1)).toEqual(["destroy 1"]);
+
+    // b 里开一个，再删掉 b：销毁
+    view.rerender(
+      <Harness
+        prefs={prefs}
+        host={host}
+        sessionId="b"
+        sessions={sessions}
+        controller={controller}
+      />,
+    );
+    act(() => {
+      controller.current?.openFile("Z:\\b\\x.html");
+    });
+    await flushAsync();
+    expect(log).toContain("create 2 file:///Z:/b/x.html");
+    view.rerender(
+      <Harness
+        prefs={prefs}
+        host={host}
+        sessionId="a"
+        sessions={[{ id: "a", mtimeMs: 1 }]}
+        openIds={new Set(["a"])}
+        controller={controller}
+      />,
+    );
+    await flushAsync();
+    expect(log.slice(-1)).toEqual(["destroy 2"]);
+    view.unmount();
+
+    // 重启：a 的浏览器标签按地址恢复（历史不恢复）
+    prefs.update({
+      panelSessions: {
+        a: {
+          open: true,
+          tabs: [{ id: "r1", kind: "browser", url: "https://example.com/", title: "Example" }],
+          activeTab: "r1",
+        },
+      },
+    });
+    const again = browserSetup(storage);
+    render(
+      <Harness
+        prefs={again.prefs}
+        host={again.host}
+        sessionId="a"
+        sessions={[{ id: "a", mtimeMs: 1 }]}
+      />,
+    );
+    await flushAsync();
+    expect(screen.getAllByRole("tab")[0]?.textContent).toContain("Example");
+    expect(again.log).toEqual(["create 1 https://example.com/", "layout 1 show"]);
+  } finally {
+    restore();
+  }
+});
+
+it("主界面浮层伸进浏览器区域：截图占位后隐藏 webview，浮层关掉后恢复", async () => {
+  const restore = withSlotSize();
+  // jsdom 没有 object URL 和图片解码
+  const created = vi.fn(() => "blob:cover");
+  Object.assign(URL, { createObjectURL: created, revokeObjectURL: vi.fn() });
+  Object.assign(HTMLImageElement.prototype, { decode: async () => undefined });
+  try {
+    const { prefs, host, log, browsers } = browserSetup();
+    const controller = { current: null as SidePanelController | null };
+    render(
+      <Harness
+        prefs={prefs}
+        host={host}
+        sessionId="a"
+        sessions={[{ id: "a", mtimeMs: 1 }]}
+        controller={controller}
+      />,
+    );
+    act(() => {
+      controller.current?.openFile("Z:\\a\\index.html");
+    });
+    await flushAsync();
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    menu.getBoundingClientRect = () => domRect(700, 100, 200, 200);
+    act(() => {
+      document.body.append(menu);
+    });
+    await waitFor(() => {
+      expect(browsers.capture).toHaveBeenCalled();
+    });
+    // 截图到位前浮层透明
+    expect(menu.hasAttribute("data-nct-cover-hold")).toBe(true);
+    await waitFor(() => {
+      expect(log.slice(-1)).toEqual(["layout 1 hide"]);
+    });
+    expect(menu.hasAttribute("data-nct-cover-hold")).toBe(false);
+    expect(document.querySelector(".sp-browser-cover")).not.toBeNull();
+    act(() => {
+      menu.remove();
+    });
+    await waitFor(() => {
+      expect(log.slice(-1)).toEqual(["layout 1 show"]);
+    });
+  } finally {
+    restore();
+  }
 });

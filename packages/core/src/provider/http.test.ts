@@ -2,15 +2,10 @@
 import { createServer, type Server } from "node:http";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthFetch } from "./http.js";
+import { listenFetchSafe } from "../../../../scripts/test/ports.mjs";
 
 async function listen(server: Server): Promise<string> {
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  if (address === null || typeof address === "string") throw new Error("Missing loopback port");
-  return `http://127.0.0.1:${address.port}`;
+  return `http://127.0.0.1:${await listenFetchSafe(server)}`;
 }
 
 async function close(server: Server): Promise<void> {

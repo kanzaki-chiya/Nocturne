@@ -26,7 +26,7 @@ import { PhoneConnection } from "../../desktop/src/web/connection.js";
 import { pairPhone, parsePairingLink } from "../../desktop/src/web/pairing.js";
 import { memoryStorage } from "../../desktop/src/web/storage.js";
 import { PhoneSessions } from "../../desktop/src/web/sessions.js";
-import { fetchSafeListen, listenFetchSafe } from "./ports.js";
+import { fetchSafeListen, listenFetchSafe } from "../../../scripts/test/ports.mjs";
 
 it("手机经本机中继完成扫码配对、加密 RPC 初始化、列表、恢复与事件订阅，日志和数据无会话内容", async () => {
   const dir = await mkdtemp(join(tmpdir(), "relay-e2e-"));

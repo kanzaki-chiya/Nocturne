@@ -9,7 +9,7 @@ import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 
 import { isAllowedExternalUrl } from "./external-url";
-import type { DesktopHost, TerminalMessage } from "./host";
+import type { BrowserMessage, DesktopHost, TerminalMessage } from "./host";
 import type { NotifyResult } from "./notify";
 import { decodePickedImages } from "./picked-images";
 import type { BackendMessage } from "./types";
@@ -42,6 +42,20 @@ export function createTauriHost(): DesktopHost {
       close: (id) => invoke("terminal_close", { id }),
       readClipboard: () => invoke<string>("terminal_read_clipboard"),
       writeClipboard: (text) => invoke("terminal_write_clipboard", { text }),
+    },
+    browsers: {
+      create(url, bounds, onMessage) {
+        const channel = new Channel<BrowserMessage>();
+        channel.onmessage = onMessage;
+        return invoke<number>("browser_create", { url, bounds, channel });
+      },
+      navigate: (id, url) => invoke("browser_navigate", { id, url }),
+      layout: (id, bounds) => invoke("browser_layout", { id, bounds }),
+      action: (id, action) => invoke("browser_action", { id, action }),
+      async capture(id) {
+        return new Uint8Array(await invoke<ArrayBuffer>("browser_capture", { id }));
+      },
+      destroy: (id) => invoke("browser_destroy", { id }),
     },
     async detectEditors() {
       try {

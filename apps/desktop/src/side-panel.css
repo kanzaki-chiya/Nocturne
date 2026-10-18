@@ -1042,3 +1042,107 @@
 .sp-term-host .xterm .xterm-scrollable-element > .scrollbar > .slider {
   border-radius: 5px;
 }
+
+/* ── 浏览器（desktop.md 5.10）：占位区上方叠着外壳 webview ── */
+.sp-browser {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+}
+.sp-browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--a-border);
+}
+.sp-browser-bar .sp-icon-btn:disabled {
+  background: none;
+  color: var(--a-faint);
+  opacity: 0.6;
+}
+.sp-browser-address {
+  flex: 1;
+  min-width: 0;
+  margin: 0 4px;
+}
+.sp-browser-address input {
+  width: 100%;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--a-border);
+  border-radius: 13px;
+  background: var(--a-panel);
+  color: var(--a-text);
+  font: 12px var(--sans);
+}
+.sp-browser-address input:focus {
+  outline: none;
+  border-color: var(--a-accent);
+}
+.sp-browser-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 8px 4px 12px;
+  border-bottom: 1px solid var(--a-border);
+  color: var(--a-muted);
+  font-size: 12px;
+}
+.sp-browser-notice > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-browser-notice.alert {
+  color: var(--a-error);
+}
+.sp-browser-slot {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  grid-row: 4;
+  overflow: hidden;
+  background: var(--a-bg);
+}
+.sp-browser-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  user-select: none;
+  pointer-events: none;
+}
+.sp-favicon {
+  object-fit: contain;
+  stroke: none;
+}
+.sp-spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  border: 1.5px solid var(--a-borderStrong);
+  border-top-color: var(--a-accent);
+  border-radius: 50%;
+  animation: sp-spin 0.9s linear infinite;
+}
+@keyframes sp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sp-spinner {
+    animation: none;
+  }
+}
+/* 截图占位换上之前，伸进浏览器区域的主界面浮层先透明（browser-occlusion.ts） */
+[data-nct-cover-hold] {
+  opacity: 0 !important;
+  transition: none !important;
+}

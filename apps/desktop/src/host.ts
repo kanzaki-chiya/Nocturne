@@ -41,6 +41,53 @@ export interface TerminalHost {
   writeClipboard: (text: string) => Promise<void>;
 }
 
+/** 外壳浏览器推来的页面事件（src-tauri/src/browser.rs BrowserMessage） */
+export type BrowserMessage =
+  | { kind: "url"; url: string }
+  | { kind: "title"; title: string }
+  | { kind: "loading"; loading: boolean }
+  | { kind: "history"; back: boolean; forward: boolean }
+  /** 网站图标 PNG 字节；没有图标时 null */
+  | { kind: "favicon"; png: number[] | null }
+  /** target=_blank / window.open：在本会话开一个新浏览器标签 */
+  | { kind: "newWindow"; url: string }
+  /** 被导航规则拦下（外部程序、应用自身地址、网页跳本地文件等） */
+  | { kind: "blocked"; url: string; reason: string; message: string }
+  | { kind: "download"; state: "started" | "finished" | "failed"; name: string }
+  /** 焦点在网页里时按下的应用快捷键（Ctrl+B / T / P / `） */
+  | { kind: "shortcut"; key: "b" | "t" | "p" | "backquote" };
+
+/** 浏览器在窗口里的位置（CSS 像素，相对窗口客户区左上角） */
+export interface BrowserBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export type BrowserAction = "reload" | "back" | "forward" | "stop" | "devtools" | "focus";
+
+/**
+ * 面板内置浏览器（ADR-0060 第 5 节、desktop.md 5.10）：每个浏览器标签一个外壳子 webview，
+ * 叠在主界面上方。导航规则、隔离和下载都在外壳；前端只给地址和位置。
+ */
+export interface BrowserHost {
+  /** bounds 为 null 时先建好但不显示 */
+  create: (
+    url: string,
+    bounds: BrowserBounds | null,
+    onMessage: (message: BrowserMessage) => void,
+  ) => Promise<number>;
+  /** 地址栏导航；白名单外的协议被拒绝（抛错，message 是给用户看的文案） */
+  navigate: (id: number, url: string) => Promise<void>;
+  /** null = 隐藏 */
+  layout: (id: number, bounds: BrowserBounds | null) => Promise<void>;
+  action: (id: number, action: BrowserAction) => Promise<void>;
+  /** 当前页面截图（PNG）；主界面浮层伸进面板时做占位 */
+  capture: (id: number) => Promise<Uint8Array>;
+  destroy: (id: number) => Promise<void>;
+}
+
 /**
  * 宿主抽象：前端对 Tauri 的全部依赖都在这一个接口后面，
  * 测试用假宿主替换（docs/apps/desktop.md）。
@@ -101,4 +148,6 @@ export interface DesktopHost {
   onNotificationActivated: (handler: (sessionId: string) => void) => () => void;
   /** 面板终端；没有（测试宿主）时新标签页的「终端」入口置灰 */
   terminals?: TerminalHost;
+  /** 面板内置浏览器；没有时网址与 HTML 交给系统浏览器 */
+  browsers?: BrowserHost;
 }

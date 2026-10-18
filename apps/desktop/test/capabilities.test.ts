@@ -10,7 +10,11 @@ import { describe, expect, it } from "vitest";
 const root = path.resolve(import.meta.dirname, "..");
 const capability = JSON.parse(
   readFileSync(path.join(root, "src-tauri", "capabilities", "main.json"), "utf8"),
-) as { permissions: (string | { identifier: string })[] };
+) as {
+  permissions: (string | { identifier: string })[];
+  windows?: unknown;
+  webviews?: unknown;
+};
 const granted = new Set(
   capability.permissions.map((p) => (typeof p === "string" ? p : p.identifier)),
 );
@@ -72,5 +76,11 @@ describe("capability 授权覆盖前端调用", () => {
         }
       }
     }
+  });
+
+  it("只按 webview 标签授权给主界面：面板浏览器的子 webview 不在范围里", () => {
+    // 按窗口匹配会把同一窗口里的浏览器子 webview 一起授权（desktop.md 第 6 节）
+    expect(capability.windows).toBeUndefined();
+    expect(capability.webviews).toEqual(["main"]);
   });
 });

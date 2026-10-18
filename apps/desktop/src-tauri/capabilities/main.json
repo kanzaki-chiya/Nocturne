@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "主窗口：外壳命令、面板终端、文件夹与图片选择、受限外链、自动更新",
-  "windows": ["main"],
+  "description": "主界面 webview：外壳命令、面板终端与浏览器、文件夹与图片选择、受限外链、自动更新。只按 webview 标签匹配，面板浏览器的 webview 不匹配（ADR-0060 修订（四））",
+  "webviews": ["main"],
   "permissions": [
     "allow-app-note",
     "allow-backend-open",
@@ -58,6 +58,12 @@
     "allow-terminal-close",
     "allow-terminal-read-clipboard",
     "allow-terminal-write-clipboard",
+    "allow-browser-create",
+    "allow-browser-navigate",
+    "allow-browser-layout",
+    "allow-browser-action",
+    "allow-browser-capture",
+    "allow-browser-destroy",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:window:allow-request-user-attention"

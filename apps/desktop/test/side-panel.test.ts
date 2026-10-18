@@ -25,6 +25,10 @@ import {
   PANEL_MAX_WIDTH,
   PANEL_MIN_WIDTH,
   panelOverlays,
+  browserTabName,
+  fileUrl,
+  filePath,
+  isBrowserUrl,
   parseAddress,
   parseStoredSessionPanels,
   parseStoredTabs,
@@ -241,7 +245,7 @@ describe("变更汇总", () => {
 });
 
 describe("地址栏", () => {
-  it("网址、裸域名、本机地址、HTML 路径；其他拒绝", () => {
+  it("网址、裸域名、本机地址在面板浏览器打开；HTML 路径转成 file:// 地址", () => {
     expect(parseAddress("https://example.com/a", undefined)).toEqual({
       kind: "url",
       url: "https://example.com/a",
@@ -250,25 +254,84 @@ describe("地址栏", () => {
       kind: "url",
       url: "https://example.com/",
     });
+    expect(parseAddress("http://example.com", undefined)).toEqual({
+      kind: "url",
+      url: "http://example.com/",
+    });
     expect(parseAddress("localhost:5173", undefined)).toEqual({
       kind: "url",
       url: "http://localhost:5173/",
     });
     expect(parseAddress("poster.html", "Z:\\p")).toEqual({
-      kind: "path",
+      kind: "file",
       path: "Z:\\p\\poster.html",
+      url: "file:///Z:/p/poster.html",
     });
-    expect(parseAddress("D:\\site\\index.html", undefined)).toEqual({
-      kind: "path",
-      path: "D:\\site\\index.html",
+    expect(parseAddress("D:\\my site\\index.html", undefined)).toEqual({
+      kind: "file",
+      path: "D:\\my site\\index.html",
+      url: "file:///D:/my%20site/index.html",
     });
     expect(parseAddress("file:///D:/site/index.html", undefined)).toEqual({
-      kind: "path",
-      path: "D:/site/index.html",
+      kind: "file",
+      path: "D:\\site\\index.html",
+      url: "file:///D:/site/index.html",
     });
-    expect(parseAddress("随便写点什么", undefined).kind).toBe("invalid");
+    expect(parseAddress("about:blank", undefined)).toEqual({ kind: "url", url: "about:blank" });
+  });
+
+  it("不像网址的输入只提示「请输入网址」，不去搜索；javascript: 等协议不收", () => {
+    for (const text of [
+      "随便写点什么",
+      "",
+      "   ",
+      "javascript:alert(1)",
+      "vscode://x",
+      "a b.com",
+    ]) {
+      expect(parseAddress(text, undefined)).toEqual({ kind: "invalid", message: "请输入网址" });
+    }
     expect(parseAddress("\\\\server\\share\\a.html", undefined).kind).toBe("invalid");
+    expect(parseAddress("file://server/share/a.html", undefined).kind).toBe("invalid");
     expect(parseAddress("poster.html", undefined).kind).toBe("invalid");
+  });
+
+  it("file:// 地址与本地路径互转；浏览器标签名用标题、主机名或文件名", () => {
+    expect(fileUrl("Z:\\a b\\#1?.html")).toBe("file:///Z:/a%20b/%231%3F.html");
+    expect(filePath("file:///Z:/a%20b/%231%3F.html")).toBe("Z:\\a b\\#1?.html");
+    expect(fileUrl("/home/u/x.html")).toBe("file:///home/u/x.html");
+    expect(filePath("file:///home/u/x.html")).toBe("/home/u/x.html");
+    expect(filePath("https://example.com/")).toBeUndefined();
+    expect(browserTabName({ url: "https://example.com/a", title: " Example " })).toBe("Example");
+    expect(browserTabName({ url: "https://example.com/a" })).toBe("example.com");
+    expect(browserTabName({ url: "file:///Z:/p/poster.html", title: "" })).toBe("poster.html");
+    expect(browserTabName({ url: "about:blank" })).toBe("空白页");
+    expect(isBrowserUrl("https://a.b/")).toBe(true);
+    expect(isBrowserUrl("file:///Z:/a.html")).toBe(true);
+    expect(isBrowserUrl("javascript:alert(1)")).toBe(false);
+    expect(isBrowserUrl("tauri://localhost")).toBe(false);
+  });
+
+  it("浏览器标签存地址和标题，重启恢复；白名单外的地址丢弃", () => {
+    const tabs: PanelTab[] = [
+      { id: "b1", kind: "browser", url: "https://example.com/", title: "Example" },
+      { id: "b2", kind: "browser", url: "file:///Z:/p/a.html" },
+    ];
+    const stored = storedTabs(tabs);
+    expect(stored).toEqual([
+      { id: "b1", kind: "browser", url: "https://example.com/", title: "Example" },
+      { id: "b2", kind: "browser", url: "file:///Z:/p/a.html" },
+    ]);
+    expect(
+      parseStoredTabs([
+        ...stored,
+        { id: "b3", kind: "browser", url: "javascript:alert(1)" },
+        { id: "b4", kind: "browser" },
+      ]),
+    ).toEqual(stored);
+    const restored = restoreTabs(stored, "b2", () => "n");
+    expect(restored.activeId).toBe("b2");
+    expect(restored.tabs).toEqual(tabs);
   });
 });
 

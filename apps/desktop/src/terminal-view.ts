@@ -6,6 +6,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
+import { isAppShortcut, terminalKeyAction } from "./terminal-keys";
+
 export interface MountedTerminal {
   write: (data: string) => void;
   /** 按容器尺寸重排；容器不可见（0 尺寸）时不动 */
@@ -24,16 +26,8 @@ export interface MountedTerminal {
 export interface TerminalCallbacks {
   onData: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
-  onCopy: () => void;
-}
-
-/** 终端里也交给窗口处理的应用快捷键（面板开关、新标签、变更、快速打开、终端） */
-function isAppShortcut(event: KeyboardEvent): boolean {
-  if (!event.ctrlKey || event.altKey || event.metaKey) return false;
-  if (event.code === "Backquote") return true;
-  const key = event.key.toLowerCase();
-  if (event.shiftKey) return key === "g";
-  return key === "b" || key === "t" || key === "p";
+  /** 复制选区；clear 为 true 时复制后清掉选区 */
+  onCopy: (clear: boolean) => void;
 }
 
 /** 浅色主题：程序自己给的 256 色 / 真彩色也拉到这个对比度以上（ANSI 黄单独用加深的 token） */
@@ -106,19 +100,22 @@ export function mountTerminal(parent: HTMLElement, callbacks: TerminalCallbacks)
   term.open(parent);
   term.attachCustomKeyEventHandler((event) => {
     if (event.type !== "keydown") return !isAppShortcut(event);
-    if (event.ctrlKey && event.shiftKey && !event.altKey) {
-      const key = event.key.toLowerCase();
-      if (key === "c") {
+    switch (terminalKeyAction(event, term.hasSelection())) {
+      case "copy":
+      case "copy-keep":
         event.preventDefault();
-        callbacks.onCopy();
+        callbacks.onCopy(!(event.ctrlKey && event.shiftKey));
         return false;
-      }
-      // 不拦默认行为：浏览器原生粘贴事件进 xterm 的 textarea，xterm 自己处理（含括号粘贴），
-      // 也不会像 navigator.clipboard.readText 那样触发 WebView2 的剪贴板权限框
-      if (key === "v") return false;
+      case "paste":
+        // 不拦默认行为：浏览器原生粘贴事件进 xterm 的 textarea，xterm 自己处理（含括号粘贴），
+        // 也不会像 navigator.clipboard.readText 那样触发 WebView2 的剪贴板权限框
+        return false;
+      case "app":
+        // 返回 false：xterm 不处理，事件照常冒泡到窗口的快捷键
+        return false;
+      case "terminal":
+        return true;
     }
-    // 返回 false：xterm 不处理，事件照常冒泡到窗口的快捷键
-    return !isAppShortcut(event);
   });
   const data = term.onData(callbacks.onData);
   const resize = term.onResize(({ cols, rows }) => {

@@ -5,7 +5,6 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -22,6 +21,7 @@ import {
 import { createMemoryTransportPair, createRpcClient } from "@nocturne/rpc/client";
 
 import { cleanupTmp, connectWithConfig, tmpDir, type ProviderHarness } from "./harness.js";
+import { listenFetchSafe } from "../../../scripts/test/ports.mjs";
 
 afterEach(cleanupTmp);
 
@@ -41,8 +41,7 @@ async function serveUpstream(models: { id: string; context_length?: number }[]):
     response.end();
   });
   servers.push(server);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return { baseURL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1` };
+  return { baseURL: `http://127.0.0.1:${await listenFetchSafe(server)}/v1` };
 }
 
 afterEach(async () => {

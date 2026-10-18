@@ -9,7 +9,7 @@ import {
   connectDeviceRelay,
 } from "@nocturne/remote";
 import { RelayServer } from "../src/server.js";
-import { fetchSafeListen } from "./ports.js";
+import { fetchSafeListen } from "../../../scripts/test/ports.mjs";
 
 it("重启后电脑与设备仍能认证，吊销墓碑持久化且 unregister 不删除", async () => {
   const dir = await mkdtemp(join(tmpdir(), "relay-persist-"));

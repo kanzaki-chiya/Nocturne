@@ -1,6 +1,11 @@
-import { createServer, type Server } from "node:net";
+import { createServer } from "node:net";
 import { describe, expect, it } from "vitest";
-import { fetchSafeListen, isFetchBlockedPort, listenFetchSafe } from "./ports.js";
+import {
+  fetchSafeListen,
+  isFetchBlockedPort,
+  listenFetchSafe,
+  unusedFetchSafePort,
+} from "./ports.mjs";
 
 describe("测试端口", () => {
   it("识别 fetch 禁用端口", () => {
@@ -11,7 +16,7 @@ describe("测试端口", () => {
 
   it("分到禁用端口就关掉重分", async () => {
     const ports = [6666, 10080, 40001];
-    const calls: string[] = [];
+    const calls = [];
     let current = 0;
     // 只模拟 listen/close/address：按顺序「分到」上面的端口
     const fake = {
@@ -21,19 +26,19 @@ describe("测试端口", () => {
       removeListener() {
         return fake;
       },
-      listen(_port: number, _host: string, done: () => void) {
+      listen(_port, _host, done) {
         current = ports[calls.filter((c) => c === "listen").length] ?? 0;
         calls.push("listen");
         done();
         return fake;
       },
       address: () => ({ port: current, address: "127.0.0.1", family: "IPv4" }),
-      close(done: () => void) {
+      close(done) {
         calls.push("close");
         done();
         return fake;
       },
-    } as unknown as Server;
+    };
     expect(await listenFetchSafe(fake)).toBe(40001);
     expect(calls).toEqual(["listen", "close", "listen", "close", "listen"]);
   });
@@ -42,9 +47,10 @@ describe("测试端口", () => {
     const server = createServer();
     const port = await listenFetchSafe(server);
     expect(isFetchBlockedPort(port)).toBe(false);
-    await new Promise<void>((done) => server.close(() => done()));
+    await new Promise((done) => server.close(() => done()));
     const listen = await fetchSafeListen();
     expect(listen).toMatch(/^127\.0\.0\.1:\d+$/);
     expect(isFetchBlockedPort(Number(listen.split(":")[1]))).toBe(false);
+    expect(isFetchBlockedPort(await unusedFetchSafePort())).toBe(false);
   });
 });

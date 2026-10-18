@@ -15,7 +15,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -32,6 +31,7 @@ import {
 import { createRpcClient, RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
 import type { LineTransport } from "@nocturne/rpc/server";
 import { createProcessCleanup, removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
+import { listenFetchSafe } from "../../../scripts/test/ports.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../..");
@@ -74,8 +74,7 @@ beforeAll(async () => {
       response.end("data: [DONE]\n\n");
     });
   });
-  await new Promise<void>((resolve) => fake.listen(0, "127.0.0.1", resolve));
-  baseURL = `http://127.0.0.1:${(fake.address() as AddressInfo).port}/v1`;
+  baseURL = `http://127.0.0.1:${await listenFetchSafe(fake)}/v1`;
 }, 180_000);
 
 afterAll(async () => {

@@ -22,6 +22,12 @@ fn main() {
             "terminal_close",
             "terminal_read_clipboard",
             "terminal_write_clipboard",
+            "browser_create",
+            "browser_navigate",
+            "browser_layout",
+            "browser_action",
+            "browser_capture",
+            "browser_destroy",
         ]),
     ))
     .expect("failed to run tauri-build");

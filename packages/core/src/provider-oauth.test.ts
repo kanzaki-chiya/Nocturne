@@ -24,6 +24,7 @@ import { constrainedResponseError } from "./provider/errors.js";
 import { createEntryProvider } from "./provider/entry.js";
 import { fetchModels } from "./provider/presets.js";
 import type { ModelRequest, ModelStreamEvent } from "./provider/types.js";
+import { listenFetchSafe } from "../../../scripts/test/ports.mjs";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const jwk = publicKey.export({ format: "jwk" }) as JsonWebKey;
@@ -95,7 +96,7 @@ async function noneStore(): Promise<{
   return { credentials, root, platform };
 }
 
-function listen(
+async function listen(
   handler: (url: URL, body: string, respond: (status: number, payload: unknown) => void) => void,
 ) {
   const server = createServer((request, response) => {
@@ -110,13 +111,7 @@ function listen(
     });
   });
   servers.push(server);
-  return new Promise<string>((resolvePromise) => {
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (address === null || typeof address === "string") throw new Error("测试服务器未监听");
-      resolvePromise(`http://127.0.0.1:${address.port}`);
-    });
-  });
+  return `http://127.0.0.1:${await listenFetchSafe(server)}`;
 }
 
 function callbackOf(authorize: URL, clientId: string): string {

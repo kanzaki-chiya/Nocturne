@@ -165,6 +165,13 @@ export function App({ host }: { host: DesktopHost }) {
         await navigator.clipboard.writeText(text);
       },
       reveal: (absolutePath) => host.revealItem(absolutePath),
+      // 工作区内的 HTML 左键进面板浏览器；「查看源码」照旧进文件标签
+      previewsHtml: (absolutePath) =>
+        opener() === "panel" && panelRef.current?.previewsHtml(absolutePath) === true,
+      viewSource: async (absolutePath, line) => {
+        panelRef.current?.viewSource(absolutePath, line);
+        return Promise.resolve();
+      },
     };
   }, [host, prefs, prefsVersion, editors]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());

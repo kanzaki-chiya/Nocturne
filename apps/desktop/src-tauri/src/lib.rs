@@ -1,8 +1,11 @@
 //! Nocturne 桌面外壳（ADR-0046）：启停 `nctrn rpc --stdio` 子进程、按行转发
-//! stdin/stdout、把子进程退出通知前端；另管面板终端的 pty 进程（ADR-0060）。
+//! stdin/stdout、把子进程退出通知前端；另管面板终端的 pty 进程和面板浏览器的子 webview
+//! （ADR-0060）。
 //! 所有 Nocturne 语义在前端经 `@nocturne/rpc/client` 处理。
 
 mod backend;
+mod browser;
+mod browser_policy;
 mod editor;
 mod images;
 mod job;
@@ -42,6 +45,7 @@ fn begin_shutdown(app: &AppHandle) {
     thread::spawn(move || {
         let terminals = Arc::clone(app.state::<Arc<terminal::TerminalState>>().inner());
         let closing_terminals = thread::spawn(move || terminals.close_all());
+        app.state::<Arc<browser::BrowserState>>().close_all(&app);
         close_backends(app.state::<Arc<AppState>>().backends_snapshot());
         let _ = closing_terminals.join();
         app.exit(0);
@@ -71,10 +75,23 @@ pub fn run() {
         terminal::terminal_close,
         terminal::terminal_read_clipboard,
         terminal::terminal_write_clipboard,
+        browser::browser_create,
+        browser::browser_navigate,
+        browser::browser_layout,
+        browser::browser_action,
+        browser::browser_capture,
+        browser::browser_destroy,
     ];
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
+        // 不要插件往每个 webview 注入的「_blank 链接交给系统浏览器」脚本：主界面的链接都自己
+        // 处理；面板浏览器里它会吞掉 target=_blank 的点击（调 open_url 被 ACL 拒），也不该往
+        // 第三方网页里注入东西
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(move |invoke| {
@@ -98,6 +115,8 @@ pub fn run() {
             app.manage(notify::NotifyState::default());
             // 面板终端（ADR-0060 第 4 节）：页面重载、应用退出时全部结束
             app.manage(Arc::new(terminal::TerminalState::default()));
+            // 面板浏览器（ADR-0060 第 5 节）：同上，随页面重载、应用退出全部关掉
+            app.manage(Arc::new(browser::BrowserState::default()));
             Ok(())
         })
         .on_page_load(|webview, payload| {
@@ -117,6 +136,9 @@ pub fn run() {
                 if let Some(terminals) = webview.try_state::<Arc<terminal::TerminalState>>() {
                     let terminals = Arc::clone(terminals.inner());
                     thread::spawn(move || terminals.close_all());
+                }
+                if let Some(browsers) = webview.try_state::<Arc<browser::BrowserState>>() {
+                    browsers.close_all(webview.app_handle());
                 }
             }
         })

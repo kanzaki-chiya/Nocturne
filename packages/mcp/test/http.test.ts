@@ -13,6 +13,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import { createProcessCleanup } from "../../../scripts/test/process-cleanup.mjs";
 import { createMcpConnector } from "../src/index.js";
+import { listenFetchSafe } from "../../../scripts/test/ports.mjs";
 
 const processes = createProcessCleanup();
 const platform = processes.platform(createPlatform());
@@ -100,11 +101,9 @@ async function httpFixture(reflectSecret = false, failList = false) {
     await new Promise<void>((resolve) => http.close(() => resolve()));
   };
   closers.add(close);
-  await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
-  const address = http.address();
-  if (!address || typeof address === "string") throw new Error("port unavailable");
+  const port = await listenFetchSafe(http);
   return {
-    url: `http://127.0.0.1:${address.port}`,
+    url: `http://127.0.0.1:${port}`,
     requests,
     close,
   };

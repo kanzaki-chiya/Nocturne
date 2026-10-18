@@ -114,6 +114,13 @@ export interface FileLinkHooks {
   copy: (text: string) => Promise<void>;
   /** 在资源管理器中显示 */
   reveal: (absolutePath: string) => Promise<void>;
+  /**
+   * 左键会在面板浏览器里打开（工作区内的 HTML、打开文件用 = 面板）：菜单「打开」写成
+   * 浏览器，并多一项「查看源码」。没有时按普通文件处理。
+   */
+  previewsHtml?: (absolutePath: string) => boolean;
+  /** 「查看源码」：在面板的文件标签里打开 */
+  viewSource?: (absolutePath: string, line?: number) => Promise<void>;
 }
 
 type OpenUrl = ConversationProps["openUrl"];
@@ -473,6 +480,9 @@ function CodeRef({ text }: { text: string }) {
       ? hooks.openFolder(hit.absolutePath)
       : hooks.open(hit.absolutePath, hit.line, { endLine: hit.endLine });
   const relative = hit.relativePath;
+  const viewSource = hooks.viewSource;
+  const preview =
+    !hit.isDirectory && viewSource !== undefined && hooks.previewsHtml?.(hit.absolutePath) === true;
   const activate = (target: HTMLElement) => {
     if (canOpen) run(openDefault);
     else setAnchor(target);
@@ -517,12 +527,23 @@ function CodeRef({ text }: { text: string }) {
                 detail={
                   hit.isDirectory
                     ? "资源管理器"
-                    : `${hooks.openerLabel()}${hit.line !== undefined ? ` · 第 ${hit.line} 行` : ""}`
+                    : preview
+                      ? "面板浏览器"
+                      : `${hooks.openerLabel()}${hit.line !== undefined ? ` · 第 ${hit.line} 行` : ""}`
                 }
                 onSelect={() => {
                   run(openDefault);
                 }}
               />
+              {preview && (
+                <MenuItem
+                  label="查看源码"
+                  detail={`${hooks.openerLabel()}${hit.line !== undefined ? ` · 第 ${hit.line} 行` : ""}`}
+                  onSelect={() => {
+                    run(() => viewSource(hit.absolutePath, hit.line));
+                  }}
+                />
+              )}
               <MenuSeparator />
             </>
           )}

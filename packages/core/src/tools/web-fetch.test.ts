@@ -19,6 +19,7 @@ import {
   type ExecutionScope,
   type HookRunner,
 } from "./index.js";
+import { listenFetchSafe } from "../../../../scripts/test/ports.mjs";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -303,17 +304,15 @@ describe("web_fetch", () => {
         res.end("done");
       }
     });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (address === null || typeof address === "string") throw new Error("Missing server address");
+    const port = await listenFetchSafe(server);
     try {
       const h = harness();
-      const url = `http://127.0.0.1:${address.port}/start`;
+      const url = `http://127.0.0.1:${port}/start`;
       const result = (await h.run({ url })).result;
       expect(result.status).toBe("ok");
       expect(result.output).toMatchObject({
         url,
-        finalUrl: `http://127.0.0.1:${address.port}/end`,
+        finalUrl: `http://127.0.0.1:${port}/end`,
       });
       expect(received.map((req) => req.url)).toEqual(["/start", "/end"]);
       expect(
@@ -330,7 +329,7 @@ describe("web_fetch", () => {
       expect(h.events.find((event) => event.type === "tool.started")?.payload.subjects).toEqual([
         expect.objectContaining({
           kind: "network",
-          target: `127.0.0.1:${address.port}`,
+          target: `127.0.0.1:${port}`,
           detail: url,
         }),
       ]);

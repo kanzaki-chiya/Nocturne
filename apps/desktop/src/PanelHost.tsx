@@ -1,13 +1,15 @@
 /**
  * 右侧面板的状态与接线（ADR-0060 及 2026-10-18（二）修订）：每个会话有自己的一套标签、
  * 当前标签、开关、文件树宽度与换行；面板宽度和概览浮层是全局的。没有会话（首页、
- * 新建会话页）就没有面板。切到别的会话时，原会话的终端在后台继续运行（隐藏，不卸载）；
- * 会话被删除时结束它的终端并清掉面板记录。App 只拿回打开入口和要渲染的节点。
+ * 新建会话页）就没有面板。切到别的会话时，原会话的终端和浏览器在后台继续（隐藏，不卸载；
+ * 浏览器超出上限时由 browser-pool 回收）；会话被删除时结束它的终端、销毁浏览器并清掉
+ * 面板记录。App 只拿回打开入口和要渲染的节点。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { LocalFileContent, TurnChangeDiff } from "@nocturne/core/protocol";
 import type { RpcClient } from "@nocturne/rpc/client";
 
+import { BrowserPool } from "./browser-pool";
 import type { OpenConversation } from "./conversations";
 import type { DesktopHost } from "./host";
 import { QuickOpen, SessionOverview, TitlebarButtons } from "./PanelChrome";
@@ -17,6 +19,8 @@ import { SidePanel, type PanelChangesSource, type TerminalShellChoice } from "./
 import {
   clampPanelWidth,
   clampTreeWidth,
+  fileUrl,
+  isHtmlPath,
   joinWorkspace,
   migrateGlobalPanel,
   moveTab,
@@ -32,6 +36,7 @@ import {
   sessionChangeTotals,
   storeSessionPanel,
   vanishedSessions,
+  type BrowserTab,
   type FileTab,
   type PanelTab,
   type SessionPanel,
@@ -64,8 +69,15 @@ function shellSetting(items: readonly { key: string; effective?: string | undefi
 }
 
 export interface SidePanelController {
-  /** 文件引用左键（打开文件用 = Nocturne 面板）：在当前会话的文件标签里打开并定位 */
+  /**
+   * 文件引用左键（打开文件用 = Nocturne 面板）：在当前会话的文件标签里打开并定位；
+   * 工作区内的 HTML 在浏览器标签里打开（有内置浏览器时）
+   */
   openFile: (absolutePath: string, line?: number, ref?: { endLine?: number | undefined }) => void;
+  /** 工作区内 HTML 左键会进浏览器标签：右键菜单另给「查看源码」 */
+  previewsHtml: (absolutePath: string) => boolean;
+  /** 「查看源码」：总在文件标签里打开 */
+  viewSource: (absolutePath: string, line?: number) => void;
   /** 改动卡片「查看变更」 */
   viewChanges: (seq: number) => void;
   bodyClass: string;
@@ -220,11 +232,28 @@ export function useSidePanel({
     // panels / openIds / sessionId 变化不重跑：只在拿到新列表时比对
   }, [sessions, prefs]);
 
+  // 浏览器池在后面才建好，这里经 ref 取
+  const poolRef = useRef<BrowserPool | undefined>(undefined);
+  const activeTabRef = useRef<string | undefined>(undefined);
+  activeTabRef.current = current?.activeId;
+  /**
+   * 显示中的网页要被收起或换走时：先等它藏好再改界面。主界面重排在同一帧完成，
+   * 原生 webview 走异步命令，不先藏就会在对话区或别的标签上多留一帧
+   */
+  const hideBrowserThen = useCallback((apply: () => void) => {
+    const pool = poolRef.current;
+    if (pool === undefined) apply();
+    else void pool.hideShown().then(apply);
+  }, []);
   const setPanelOpen = useCallback(
     (next: boolean) => {
-      update((panel) => ({ ...panel, open: next }));
+      const apply = () => {
+        update((panel) => ({ ...panel, open: next }));
+      };
+      if (next) apply();
+      else hideBrowserThen(apply);
     },
-    [update],
+    [update, hideBrowserThen],
   );
   const setOverviewOpen = useCallback(
     (next: boolean) => {
@@ -301,27 +330,35 @@ export function useSidePanel({
   }, [update]);
   const closeTab = useCallback(
     (id: string) => {
-      update((panel) => {
-        const rest = panel.tabs.filter((t) => t.id !== id);
-        if (rest.length === 0) {
-          // 关掉最后一个标签：留一个新标签页，面板不收起
-          const fresh = newTabId();
-          return { ...panel, tabs: [{ id: fresh, kind: "new" }], activeId: fresh };
-        }
-        return {
-          ...panel,
-          tabs: rest,
-          activeId: nextActiveAfterClose(panel.tabs, id, panel.activeId) ?? rest[0]?.id ?? "",
-        };
-      });
+      const apply = () => {
+        update((panel) => {
+          const rest = panel.tabs.filter((t) => t.id !== id);
+          if (rest.length === 0) {
+            // 关掉最后一个标签：留一个新标签页，面板不收起
+            const fresh = newTabId();
+            return { ...panel, tabs: [{ id: fresh, kind: "new" }], activeId: fresh };
+          }
+          return {
+            ...panel,
+            tabs: rest,
+            activeId: nextActiveAfterClose(panel.tabs, id, panel.activeId) ?? rest[0]?.id ?? "",
+          };
+        });
+      };
+      if (id === activeTabRef.current) hideBrowserThen(apply);
+      else apply();
     },
-    [update],
+    [update, hideBrowserThen],
   );
   const activate = useCallback(
     (id: string) => {
-      update((panel) => ({ ...panel, activeId: id }));
+      const apply = () => {
+        update((panel) => ({ ...panel, activeId: id }));
+      };
+      if (id === activeTabRef.current) apply();
+      else hideBrowserThen(apply);
     },
-    [update],
+    [update, hideBrowserThen],
   );
   const openChanges = useCallback(
     (seq?: number) => {
@@ -374,16 +411,117 @@ export function useSidePanel({
     [tabs, update, placeTab],
   );
 
+  const viewSource = useCallback<SidePanelController["viewSource"]>(
+    (absolutePath, line) => {
+      // 工作区外的文件不记工作区：标签显示所在目录名
+      const workspace =
+        active !== undefined && relativeTo(active.workspace, absolutePath) !== undefined
+          ? active.workspace
+          : undefined;
+      openFileTab({ absolutePath, workspace, line });
+    },
+    [active, openFileTab],
+  );
+  const previewsHtml = useCallback(
+    (absolutePath: string) =>
+      host.browsers !== undefined &&
+      isHtmlPath(absolutePath) &&
+      active !== undefined &&
+      relativeTo(active.workspace, absolutePath) !== undefined,
+    [host.browsers, active],
+  );
+  const openBrowser = useCallback(
+    (url: string) => {
+      placeTab({ id: newTabId(), kind: "browser", url });
+    },
+    [placeTab],
+  );
   const openFile = useCallback<SidePanelController["openFile"]>(
     (absolutePath, line, ref) => {
-      // 工作区外的文件不记工作区：标签显示所在目录名
+      if (previewsHtml(absolutePath)) {
+        openBrowser(fileUrl(absolutePath));
+        return;
+      }
       const workspace =
         active !== undefined && relativeTo(active.workspace, absolutePath) !== undefined
           ? active.workspace
           : undefined;
       openFileTab({ absolutePath, workspace, line, endLine: ref?.endLine });
     },
-    [active, openFileTab],
+    [active, openFileTab, previewsHtml, openBrowser],
+  );
+
+  // ── 浏览器（ADR-0060 第 5 节）：webview 池随宿主建一次，事件按标签 id 找到所在会话 ──
+  /** 标签所在的会话面板：本次运行动过的，或只按偏好恢复、还没动过的 */
+  const findPanel = useCallback(
+    (map: ReadonlyMap<string, SessionPanel>, tabId: string) => {
+      for (const id of new Set([...map.keys(), ...restored.current.keys()])) {
+        const panel = panelFor(id, map);
+        if (panel.tabs.some((t) => t.id === tabId)) return { id, panel };
+      }
+      return undefined;
+    },
+    [panelFor],
+  );
+  /** 改某个标签（可能属于后台会话）；没变化时不触发渲染 */
+  const patchTab = useCallback(
+    (tabId: string, fn: (tab: PanelTab) => PanelTab) => {
+      setPanels((map) => {
+        const hit = findPanel(map, tabId);
+        const tab = hit?.panel.tabs.find((t) => t.id === tabId);
+        if (hit === undefined || tab === undefined) return map;
+        const next = fn(tab);
+        if (next === tab) return map;
+        return new Map(map).set(hit.id, {
+          ...hit.panel,
+          tabs: hit.panel.tabs.map((t) => (t.id === tabId ? next : t)),
+        });
+      });
+    },
+    [findPanel],
+  );
+  /** target=_blank / window.open：插在来源标签右边并选中 */
+  const openFromBrowser = useCallback(
+    (sourceId: string, url: string) => {
+      setPanels((map) => {
+        const hit = findPanel(map, sourceId);
+        if (hit === undefined) return map;
+        const tab: BrowserTab = { id: newTabId(), kind: "browser", url };
+        const tabs = [...hit.panel.tabs];
+        tabs.splice(tabs.findIndex((t) => t.id === sourceId) + 1, 0, tab);
+        return new Map(map).set(hit.id, { ...hit.panel, tabs, activeId: tab.id, open: true });
+      });
+    },
+    [findPanel],
+  );
+  const shortcutRef = useRef<(key: "b" | "t" | "p" | "backquote") => void>(() => undefined);
+  const browserHost = host.browsers;
+  const pool = useMemo(
+    () =>
+      browserHost === undefined
+        ? undefined
+        : new BrowserPool(browserHost, {
+            onUrl: (tabId, url) => {
+              patchTab(tabId, (t) => (t.kind === "browser" && t.url !== url ? { ...t, url } : t));
+            },
+            onTitle: (tabId, title) => {
+              patchTab(tabId, (t) =>
+                t.kind === "browser" && t.title !== title ? { ...t, title } : t,
+              );
+            },
+            onNewWindow: openFromBrowser,
+            onShortcut: (key) => {
+              shortcutRef.current(key);
+            },
+          }),
+    [browserHost, patchTab, openFromBrowser],
+  );
+  poolRef.current = pool;
+  useEffect(
+    () => () => {
+      pool?.dispose();
+    },
+    [pool],
   );
 
   // ── 读取：rpc.md runtime.readFile，不经会话 ──
@@ -467,34 +605,50 @@ export function useSidePanel({
           ? host.openPath(absolutePath)
           : host.openInEditor(externalEditor, absolutePath, line),
       reveal: (absolutePath: string) => host.revealItem(absolutePath),
-      openInBrowser: (absolutePath: string) => host.openPath(absolutePath),
+      openInBrowser: async (absolutePath: string) => {
+        if (pool === undefined) await host.openPath(absolutePath);
+        else openBrowser(fileUrl(absolutePath));
+      },
+      browserLabel: pool === undefined ? "在系统浏览器打开" : "在浏览器标签打开",
     }),
-    [host, externalEditor],
+    [host, externalEditor, pool, openBrowser],
+  );
+  const openExternalUrl = useCallback(
+    async (url: string) => {
+      const target = parseAddress(url, workspace);
+      if (target.kind === "file") {
+        await host.openPath(target.path);
+        return;
+      }
+      const parsed = new URL(url);
+      if (
+        parsed.protocol === "http:" &&
+        parsed.hostname !== "localhost" &&
+        parsed.hostname !== "127.0.0.1"
+      ) {
+        throw new Error("系统浏览器只打开 https 网址或本机 http 地址");
+      }
+      await host.openUrl(url);
+    },
+    [host, workspace],
   );
   const onAddress = useCallback(
     async (text: string): Promise<string | undefined> => {
       const target = parseAddress(text, workspace);
       if (target.kind === "invalid") return target.message;
+      // 有内置浏览器：新标签页就地变成浏览器标签
+      if (pool !== undefined) {
+        openBrowser(target.url);
+        return undefined;
+      }
       try {
-        if (target.kind === "url") {
-          const url = new URL(target.url);
-          if (
-            url.protocol === "http:" &&
-            url.hostname !== "localhost" &&
-            url.hostname !== "127.0.0.1"
-          ) {
-            return "只能打开 https 网址或本机 http 地址";
-          }
-          await host.openUrl(target.url);
-        } else {
-          await host.openPath(target.path);
-        }
+        await openExternalUrl(target.url);
         return undefined;
       } catch (e) {
         return e instanceof Error ? e.message : String(e);
       }
     },
-    [host, workspace],
+    [workspace, pool, openBrowser, openExternalUrl],
   );
 
   const changes: PanelChangesSource | undefined = useMemo(() => {
@@ -537,6 +691,25 @@ export function useSidePanel({
   };
   const actions = useRef({ newTab, openChanges, setPanelOpen, setOverviewOpen, openTerminal });
   actions.current = { newTab, openChanges, setPanelOpen, setOverviewOpen, openTerminal };
+  /** 面板快捷键：焦点在主界面（keydown）和在网页里（外壳转发）走同一套 */
+  const runPanelKey = useCallback((key: "b" | "t" | "p" | "g" | "backquote") => {
+    const state = keyState.current;
+    const act = actions.current;
+    if (!state.hasPanel) return;
+    if (key === "backquote") {
+      // Ctrl+`：已有终端就切过去，没有就新开一个
+      act.openTerminal(true);
+    } else if (key === "b") {
+      act.setPanelOpen(!state.open);
+    } else if (key === "t") {
+      act.newTab();
+    } else if (key === "g") {
+      act.openChanges();
+    } else {
+      setQuickOpen(true);
+    }
+  }, []);
+  shortcutRef.current = runPanelKey;
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const state = keyState.current;
@@ -559,25 +732,13 @@ export function useSidePanel({
       if (!panelKey) return;
       // 仍然拦下浏览器默认行为（Ctrl+P 是打印）；没有面板时什么都不做
       event.preventDefault();
-      if (!state.hasPanel) return;
-      if (event.code === "Backquote") {
-        // Ctrl+`：已有终端就切过去，没有就新开一个
-        act.openTerminal(true);
-      } else if (key === "b") {
-        act.setPanelOpen(!state.open);
-      } else if (key === "t") {
-        act.newTab();
-      } else if (key === "g") {
-        act.openChanges();
-      } else if (key === "p") {
-        setQuickOpen(true);
-      }
+      runPanelKey(event.code === "Backquote" ? "backquote" : (key as "b" | "t" | "p" | "g"));
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, []);
+  }, [runPanelKey]);
 
   const overviewVisible = overview && active !== undefined && !settingsOpen;
   // 面板关着且对话区让位后仍放得下才停靠，否则盖在对话区上（修订 2026-10-18（三））
@@ -594,19 +755,24 @@ export function useSidePanel({
         : projectName(workspace);
 
   /**
-   * 要挂着的标签页：当前会话的全部标签，加上别的会话的终端（隐藏，进程继续跑）。
-   * 按会话的固定顺序排，切换会话时终端的 DOM 不挪位置。
+   * 要挂着的标签页：当前会话的全部标签，加上别的会话的终端和浏览器（隐藏，进程和网页
+   * 继续）。按会话的固定顺序排，切换会话时它们的 DOM 不挪位置。
    */
   const panes = useMemo(() => {
-    const ids = new Set(panels.keys());
+    // 只按偏好恢复、没动过的会话也算：显示过的浏览器切走后要留在后台
+    const ids = new Set([...panels.keys(), ...restored.current.keys()]);
     if (sessionId !== null) ids.add(sessionId);
     const list: PanelTab[] = [];
     for (const id of ids) {
       if (id === sessionId) list.push(...tabs);
-      else list.push(...(panels.get(id)?.tabs ?? []).filter((t) => t.kind === "terminal"));
+      else {
+        list.push(
+          ...panelFor(id, panels).tabs.filter((t) => t.kind === "terminal" || t.kind === "browser"),
+        );
+      }
     }
     return list;
-  }, [panels, sessionId, tabs]);
+  }, [panels, sessionId, tabs, panelFor]);
 
   // 没有面板时整个隐藏（首页、新建会话页、设置页），但各会话的终端仍然挂着
   const panel = (
@@ -650,6 +816,9 @@ export function useSidePanel({
       terminals={host.terminals}
       loadShells={loadShells}
       onShellChange={onShellChange}
+      browsers={pool}
+      workspace={workspace}
+      openExternalUrl={openExternalUrl}
     />
   );
 
@@ -705,6 +874,8 @@ export function useSidePanel({
 
   return {
     openFile,
+    previewsHtml,
+    viewSource,
     viewChanges: openChanges,
     bodyClass: docked ? " panel-docked" : "",
     mainClass: overviewDocked ? " ov-docked" : "",

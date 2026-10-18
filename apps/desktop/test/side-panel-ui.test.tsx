@@ -85,6 +85,7 @@ function props(overrides: Partial<SidePanelProps>): SidePanelProps {
       openExternal: vi.fn(async () => undefined),
       reveal: vi.fn(async () => undefined),
       openInBrowser: vi.fn(async () => undefined),
+      browserLabel: "在系统浏览器打开",
     },
     terminals: undefined,
     loadShells: vi.fn(async () => ({ shells: [], setting: undefined })),

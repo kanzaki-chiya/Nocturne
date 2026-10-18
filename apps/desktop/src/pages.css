@@ -1104,15 +1104,20 @@
   max-width: none;
 }
 
-/* 外观页：主题卡片 */
-.s3-themes {
-  align-items: start;
+/* 外观页：主题卡片。「本机」紧跟在卡片后面，不再被推到整行最右边 */
+.page3 .s3.s3-themes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 16px;
+}
+.page3 .s3.s3-themes .errl {
+  flex-basis: 100%;
 }
 .themes {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  grid-column: 1 / 3;
 }
 .tcard {
   width: 150px;

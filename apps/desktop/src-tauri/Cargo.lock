@@ -2250,6 +2250,7 @@ name = "nocturne-desktop"
 version = "0.10.3"
 dependencies = [
  "portable-pty",
+ "rfd",
  "serde",
  "serde_json",
  "tauri",
@@ -2258,6 +2259,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-process",
  "tauri-plugin-updater",
+ "webview2-com",
  "windows 0.62.2",
  "windows-sys 0.61.2",
 ]

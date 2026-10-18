@@ -1,5 +1,5 @@
 /**
- * 右侧面板（ADR-0060）：标签栏、新标签页、「变更」「文件」「终端」三种标签。
+ * 右侧面板（ADR-0060）：标签栏、新标签页、「变更」「文件」「终端」「浏览器」四种标签。
  * 面板只读：撤销仍在对话里的改动卡片上，文件第一版不能编辑。
  * 状态（按会话的标签、开关、文件树宽度、换行；全局宽度）由 PanelHost 持有并存进本机
  * 偏好；这里只管渲染与交互。
@@ -17,11 +17,14 @@ import {
 import type { LocalFileContent, TurnChangeDiff, TurnChanges } from "@nocturne/core/protocol";
 import { RpcError } from "@nocturne/rpc/client";
 
+import type { BrowserPool } from "./browser-pool";
+import { BrowserPane, BrowserTabIcon } from "./BrowserPane";
 import { DiffBody } from "./Conversation";
 import type { CodeViewer } from "./code-viewer";
 import type { TerminalHost } from "./host";
 import { displayPath } from "./paths";
 import {
+  browserTabName,
   buildChangeTree,
   CHANGE_TREE_DEFAULT_WIDTH,
   CHANGE_TREE_MAX_WIDTH,
@@ -59,8 +62,10 @@ export interface PanelFileActions {
   externalLabel: string;
   openExternal: (absolutePath: string, line?: number) => Promise<void>;
   reveal: (absolutePath: string) => Promise<void>;
-  /** HTML：内置浏览器做好之前用系统浏览器打开 */
+  /** HTML：在面板浏览器标签里打开（没有内置浏览器时用系统浏览器） */
   openInBrowser: (absolutePath: string) => Promise<void>;
+  /** openInBrowser 按钮的文字 */
+  browserLabel: string;
 }
 
 export interface SidePanelProps {
@@ -106,6 +111,12 @@ export interface SidePanelProps {
   terminals: TerminalHost | undefined;
   loadShells: (cwd: string) => Promise<TerminalShellChoice>;
   onShellChange: (tabId: string, executable: string) => void;
+  /** 面板内置浏览器；没有时浏览器标签显示说明 */
+  browsers?: BrowserPool | undefined;
+  /** 当前会话的工作区：浏览器地址栏里的相对 HTML 路径按它拼 */
+  workspace?: string | undefined;
+  /** 浏览器工具栏「在系统浏览器打开」 */
+  openExternalUrl?: (url: string) => Promise<void>;
 }
 
 function Glyph({ kind }: { kind: "changes" | "file" | "terminal" | "globe" | "plus" | "close" }) {
@@ -145,6 +156,7 @@ function tabTitle(tab: PanelTab): { name: string; project?: string; title: strin
   if (tab.kind === "changes") return { name: "变更", title: "当前会话改过的文件" };
   if (tab.kind === "new") return { name: "新标签页", title: "新标签页" };
   if (tab.kind === "terminal") return { name: "终端", project: tab.label, title: tab.cwd };
+  if (tab.kind === "browser") return { name: browserTabName(tab), title: tab.url };
   const { name, scope } = fileTabLabel(tab);
   return { name, project: scope, title: tab.absolutePath };
 }
@@ -261,7 +273,11 @@ function TabBar(props: SidePanelProps) {
                 }
               }}
             >
-              <Glyph kind={tab.kind === "new" ? "globe" : tab.kind} />
+              {tab.kind === "browser" && props.browsers !== undefined ? (
+                <BrowserTabIcon pool={props.browsers} tab={tab} globe={<Glyph kind="globe" />} />
+              ) : (
+                <Glyph kind={tab.kind === "new" || tab.kind === "browser" ? "globe" : tab.kind} />
+              )}
               <TabLabel name={name} project={project} />
               <button
                 type="button"
@@ -304,12 +320,14 @@ function NewTabPage({
   canOpenFiles,
   hasSession,
   hasTerminal,
+  hasBrowser,
 }: Pick<
   SidePanelProps,
   "onOpenChanges" | "onQuickOpen" | "onOpenTerminal" | "onAddress" | "canOpenFiles"
 > & {
   hasSession: boolean;
   hasTerminal: boolean;
+  hasBrowser: boolean;
 }) {
   const [address, setAddress] = useState("");
   const [error, setError] = useState<string>();
@@ -399,7 +417,9 @@ function NewTabPage({
             </span>
           </button>
         </div>
-        <p className="sp-hint">网址和 HTML 文件暂时用系统浏览器打开。</p>
+        <p className="sp-hint">
+          {hasBrowser ? "网址和 HTML 文件在这个标签里打开。" : "网址和 HTML 文件用系统浏览器打开。"}
+        </p>
       </div>
     </div>
   );
@@ -997,7 +1017,7 @@ function FileView({
               run(() => actions.openInBrowser(tab.absolutePath));
             }}
           >
-            在系统浏览器打开
+            {actions.browserLabel}
           </button>
         )}
         {!missing && !externalOnly && (
@@ -1160,6 +1180,7 @@ export function SidePanel(props: SidePanelProps) {
                 canOpenFiles={props.canOpenFiles}
                 hasSession={changes !== undefined}
                 hasTerminal={props.terminals !== undefined}
+                hasBrowser={props.browsers !== undefined}
               />
             ) : tab.kind === "changes" ? (
               <ChangesView
@@ -1180,6 +1201,18 @@ export function SidePanel(props: SidePanelProps) {
                   loadShells={props.loadShells}
                   visible={!hidden && tab.id === activeId && current.has(tab.id)}
                   onShellChange={props.onShellChange}
+                />
+              )
+            ) : tab.kind === "browser" ? (
+              props.browsers === undefined ? (
+                <div className="sp-empty">这个环境没有内置浏览器</div>
+              ) : (
+                <BrowserPane
+                  tab={tab}
+                  pool={props.browsers}
+                  visible={!hidden && tab.id === activeId && current.has(tab.id)}
+                  workspace={props.workspace}
+                  openExternal={props.openExternalUrl ?? (() => Promise.resolve())}
                 />
               )
             ) : (

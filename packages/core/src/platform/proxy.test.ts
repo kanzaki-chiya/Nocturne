@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import * as http from "node:http";
 import { connect } from "node:net";
@@ -7,6 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { configureEnvProxy } from "./proxy.js";
 import { createProcessCleanup } from "../../../../scripts/test/process-cleanup.mjs";
+import { listenFetchSafe } from "../../../../scripts/test/ports.mjs";
 
 const processes = createProcessCleanup();
 afterEach(async () => {
@@ -115,11 +115,7 @@ describe("configureEnvProxy", () => {
 });
 
 async function listen(server: Server): Promise<number> {
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  if (address === null || typeof address === "string") throw new Error("Missing server port");
-  return address.port;
+  return listenFetchSafe(server);
 }
 
 it.skipIf(!("setGlobalProxyFromEnv" in http))(

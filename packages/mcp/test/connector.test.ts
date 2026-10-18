@@ -3,7 +3,6 @@
  * 正常调用 / isError / 超时 / 崩溃与惰性重连 / list_changed 暂存 /
  * 环境白名单。
  */
-import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,6 +21,7 @@ import {
 } from "@nocturne/core";
 
 import { createMcpConnector } from "../src/index.js";
+import { unusedFetchSafePort } from "../../../scripts/test/ports.mjs";
 
 const FAKE_SERVER = fileURLToPath(new URL("./fake-server.mjs", import.meta.url));
 
@@ -342,15 +342,8 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
   });
 });
 
-/** 取一个当前没有监听的本机端口：先占用再释放 */
-async function unusedPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  if (address === null || typeof address === "string") throw new Error("未取得端口");
-  return address.port;
-}
+/** 取一个当前没有监听、fetch 也不拒绝的本机端口 */
+const unusedPort = () => unusedFetchSafePort();
 
 async function openWith(cfg: McpServerConfig): Promise<Opened> {
   const servers: McpServerPayload[] = [];

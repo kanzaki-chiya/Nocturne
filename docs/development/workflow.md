@@ -43,6 +43,7 @@
   - 权限：不可信项目规则只能收紧、Grant 不能改变 deny、符号链接与 `..` 逃逸、枚举结果过滤、shell 组合命令；
   - 压缩：边界不拆分工具调用对、多次压缩叠加、摘要失败与必须压缩时失败。
 - Agent Loop 的测试使用脚本化的假 Provider，不访问真实模型服务；真实 Provider 的冒烟测试单独运行，不进入默认测试集。
+- 测试要监听本机随机端口、再用 `fetch` 访问时，用共用的 `scripts/test/ports.mjs`（`listenFetchSafe` / `unusedFetchSafePort`，类型在 `ports.d.mts`）：系统分配的随机端口可能落在 fetch 规范的禁用端口上，Node 的 fetch 会直接报 `bad port`，测试偶发失败。relay、mcp、rpc、cli 与 core 的 HTTP 测试都用它。
 - 涉及文件系统与子进程的行为需考虑 Windows、macOS、Linux 差异；无法在当前平台验证的，在变更说明中如实写明。
 - 代码、测试、文档三者冲突时必须显式指出，不得静默跳过或修改测试迁就实现。
 
