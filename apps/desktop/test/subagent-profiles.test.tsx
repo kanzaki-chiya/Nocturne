@@ -84,12 +84,45 @@ it("default 不能删除停用；新增模板、编辑、预览和删除档位",
   });
   fireEvent.click(screen.getByRole("button", { name: "保存" }));
   await waitFor(() => expect(items[0]?.effective).toContain("读取文件"));
-  const original = window.confirm;
-  window.confirm = () => true;
   fireEvent.click(screen.getByRole("button", { name: "删除档位" }));
+  const dialog = screen.getByRole("dialog", { name: "删除档位 quick？" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
   await screen.findByRole("heading", { name: "default" });
-  window.confirm = original;
+  expect(screen.queryByRole("dialog")).toBeNull();
   expect(items).toEqual([]);
+  server.close();
+});
+
+it("删除档位用应用内确认框：默认焦点在取消，取消和 Esc 都不删除", async () => {
+  const quick: SubagentProfileConfig = { description: "查找", tools: "explore", enabled: true };
+  const { server, patches } = profileServer([settingItem("subagents.profiles.quick", quick)]);
+  await server.initialize();
+  render(<ExternalAgentsPage client={server.client} workspaceRoot={undefined} version={0} />);
+  await screen.findByRole("heading", { name: "default" });
+  fireEvent.click(screen.getByRole("button", { name: /quick/ }));
+  const remove = await screen.findByRole("button", { name: "删除档位" });
+
+  fireEvent.click(remove);
+  let dialog = screen.getByRole("dialog", { name: "删除档位 quick？" });
+  const cancel = within(dialog).getByRole("button", { name: "取消" });
+  expect(document.activeElement).toBe(cancel);
+  fireEvent.click(cancel);
+  expect(screen.queryByRole("dialog")).toBeNull();
+
+  fireEvent.click(remove);
+  dialog = screen.getByRole("dialog", { name: "删除档位 quick？" });
+  // Esc 被对话框消费（defaultPrevented），设置区的「Esc = 返回」不会跟着退出
+  expect(fireEvent.keyDown(document.activeElement ?? dialog, { key: "Escape" })).toBe(false);
+  expect(screen.queryByRole("dialog")).toBeNull();
+
+  // 取消、Esc 之后都没有删除，也没有顺带提交外面的编辑表单
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(patches).toEqual([]);
+
+  fireEvent.click(remove);
+  dialog = screen.getByRole("dialog", { name: "删除档位 quick？" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+  await waitFor(() => expect(patches).toEqual([{ "subagents.profiles.quick": null }]));
   server.close();
 });
 

@@ -8,6 +8,7 @@ import {
   type ReasoningEffort,
 } from "@nocturne/core/protocol";
 import { Dropdown } from "./Dropdown";
+import { ConfirmDialog } from "./ProvidersPage";
 
 export function profilesFromSettings(items: readonly SettingItem[]) {
   return items
@@ -44,6 +45,7 @@ export function SubagentProfileEditor({
   const [draft, setDraft] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const isDefault = initialName === "default" && !creating;
   const set = (patch: Partial<SubagentProfileConfig>) => {
     setDraft((old) => ({ ...old, ...patch }));
@@ -249,13 +251,28 @@ export function SubagentProfileEditor({
             type="button"
             disabled={busy}
             onClick={() => {
-              if (window.confirm(`删除档位 ${name}？`)) void mutate(onDelete);
+              setConfirmingDelete(true);
             }}
           >
             删除档位
           </button>
         )}
       </div>
+      {confirmingDelete && (
+        <ConfirmDialog
+          title={`删除档位 ${name}？`}
+          body="删除后，子代理不能再选这个档位。"
+          confirmLabel="删除"
+          danger
+          onClose={() => {
+            setConfirmingDelete(false);
+          }}
+          onConfirm={async () => {
+            setConfirmingDelete(false);
+            await mutate(onDelete);
+          }}
+        />
+      )}
       <details className="profile-preview">
         <summary>预览模型看到的文字</summary>
         <pre>{preview}</pre>

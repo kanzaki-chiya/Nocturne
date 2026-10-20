@@ -44,6 +44,13 @@ export default tseslint.config(
     },
   },
   {
+    // 主界面不弹浏览器自带的 alert / confirm / prompt：确认用应用内对话框（ProvidersPage ConfirmDialog）
+    files: ["apps/desktop/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-alert": "error",
+    },
+  },
+  {
     files: [
       "**/*.test.{ts,tsx}",
       "**/*.smoke.ts",

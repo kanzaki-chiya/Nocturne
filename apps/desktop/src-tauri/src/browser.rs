@@ -125,10 +125,24 @@ impl BrowserState {
         let all: Vec<Arc<Browser>> = lock(&self.browsers).drain().map(|(_, b)| b).collect();
         for browser in all {
             if let Some(webview) = app.get_webview(&browser.label) {
-                let _ = webview.close();
+                close_later(webview);
             }
         }
     }
+}
+
+/// 关掉一个浏览器 webview：不在调用方的线程上关，换一个线程发起。
+///
+/// 同步命令和页面加载钩子都跑在主线程上，主线程这时可能正卡在另一个浏览器的创建里：
+/// tauri-runtime-wry 建 webview 时一直拿着 web context 的锁，同时嵌套泵消息等 WebView2
+/// 建好控制器，主界面发来的 IPC 请求就在这个嵌套循环里执行。在这里直接 `close()`，
+/// 析构 webview 又去拿同一把锁，主线程把自己锁死，整个应用无响应。从别的线程
+/// `close()` 只是给事件循环发一条消息；事件处理器还没返回时 tao 先把它缓冲起来，
+/// 等 webview 建完、锁放开后再关。
+fn close_later(webview: tauri::Webview) {
+    std::thread::spawn(move || {
+        let _ = webview.close();
+    });
 }
 
 /// 前端给的位置和尺寸（主界面的 CSS 像素 = 逻辑像素）。
@@ -476,7 +490,7 @@ pub fn browser_destroy(
         return Ok(());
     };
     if let Some(webview) = app.get_webview(&browser.label) {
-        webview.close().map_err(native_error)?;
+        close_later(webview);
     }
     Ok(())
 }
@@ -767,5 +781,23 @@ mod native {
         if result.is_err() {
             let _ = done.send(None);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// 关浏览器 webview 只能经 [`super::close_later`]：在主线程上直接关，会和正在创建的
+    /// webview 争同一把锁，整个应用卡死（desktop.md 5.10）。这里没法真的建 webview，
+    /// 只检查源码里关 webview 的地方只有那一处。
+    #[test]
+    fn webviews_are_closed_only_through_close_later() {
+        let close = [".clo", "se()"].concat();
+        let source = include_str!("browser.rs");
+        let code = &source[..source.find("#[cfg(test)]").unwrap_or(source.len())];
+        let calls: Vec<&str> = code
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//") && line.contains(&close))
+            .collect();
+        assert_eq!(calls, ["        let _ = webview.close();"]);
     }
 }

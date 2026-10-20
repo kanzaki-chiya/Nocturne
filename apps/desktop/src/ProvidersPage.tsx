@@ -1121,7 +1121,11 @@ export function Scrim({ onClose, children }: { onClose: () => void; children: Re
         if (e.target === e.currentTarget) onClose();
       }}
       onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
+        if (e.key !== "Escape") return;
+        // 设置区的 Esc =「返回」（App.tsx）认 defaultPrevented：这里关掉对话框后它已不在
+        // DOM 里，不标记的话同一次 Esc 会连设置页一起退出
+        e.preventDefault();
+        onClose();
       }}
     >
       {children}
@@ -1129,7 +1133,11 @@ export function Scrim({ onClose, children }: { onClose: () => void; children: Re
   );
 }
 
-function ConfirmDialog({
+/**
+ * 应用内确认框：主界面不用 window.confirm（eslint no-alert）。默认焦点在「取消」，
+ * Esc、点遮罩都等于取消，按确认才执行 onConfirm。
+ */
+export function ConfirmDialog({
   title,
   body,
   confirmLabel,
@@ -1162,10 +1170,11 @@ function ConfirmDialog({
         </div>
         <div className="df">
           <span className="sp" />
-          <button className="btn" onClick={onClose} disabled={busy}>
+          <button type="button" className="btn" onClick={onClose} disabled={busy} autoFocus>
             取消
           </button>
           <button
+            type="button"
             className={`btn ${danger ? "danger" : "primary"}`}
             disabled={busy}
             onClick={() => {
