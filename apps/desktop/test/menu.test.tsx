@@ -3,6 +3,8 @@
  * Esc 关闭后焦点回触发元素，不冒泡到外层。
  */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -91,5 +93,27 @@ describe("Menu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     expect(document.activeElement).toBe(anchor);
     expect(outer).not.toHaveBeenCalled();
+  });
+
+  it("悬停把焦点移到该项，同一时刻只有一个高亮", () => {
+    render(<Harness />);
+    fireEvent.contextMenu(screen.getByText("文件引用"));
+    const third = screen.getByRole("menuitem", { name: "在文件夹中显示" });
+    fireEvent.pointerMove(third);
+    expect(document.activeElement).toBe(third);
+  });
+
+  it("焦点与选中各一种样式，菜单和下拉一致：焦点 --a-sel 底色，选中只打 ✓", () => {
+    const css = (name: string) =>
+      readFileSync(path.resolve(import.meta.dirname, "../src", name), "utf8").replace(
+        /\/\*[\s\S]*?\*\//g,
+        "",
+      );
+    const menu = css("composer.css");
+    expect(menu).toMatch(/\.menu \.menu-item:focus \{\s*background: var\(--a-sel\);/);
+    expect(menu).not.toMatch(/\.menu-item:(hover|focus-visible)/);
+    const dropdown = css("dropdown.css");
+    expect(dropdown).toMatch(/\.ddm \.ddo\.act \{\s*background: var\(--a-sel\);/);
+    expect(dropdown).not.toMatch(/\.ddo\.on/);
   });
 });

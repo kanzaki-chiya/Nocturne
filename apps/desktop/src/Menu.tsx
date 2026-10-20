@@ -248,6 +248,12 @@ export function MenuItem({
       disabled={disabled !== undefined}
       title={disabled}
       onClick={onSelect}
+      onPointerMove={(event) => {
+        // 悬停即焦点：和键盘移动的是同一个高亮
+        if (disabled === undefined && document.activeElement !== event.currentTarget) {
+          event.currentTarget.focus();
+        }
+      }}
     >
       <span className="menu-ck" aria-hidden="true">
         {checked === true ? "✓" : ""}

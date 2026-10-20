@@ -12,7 +12,7 @@
 //! - 页面事件经创建时的 Channel 只推给主界面，不广播事件。
 
 use crate::backend::CommandError;
-use crate::browser_policy::{self, Blocked};
+use crate::browser_policy::{self, Blocked, DownloadReport, Downloads};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -73,9 +73,8 @@ pub struct Browser {
     nav: Mutex<Nav>,
     /// WebView2 的焦点：隐藏时焦点要还给主界面
     focused: AtomicBool,
-    /// 选好了保存位置、真正开始的下载：取消另存为时 WebView2 也会报一次失败的结束，
-    /// 只有在这里登记过的才提示结果
-    downloads: Mutex<Vec<(Url, String)>>,
+    /// 下载登记：哪些结束要提示（browser_policy::Downloads）
+    downloads: Mutex<Downloads>,
 }
 
 #[derive(Default)]
@@ -96,6 +95,8 @@ impl Browser {
 pub struct BrowserState {
     next_id: AtomicU32,
     browsers: Mutex<HashMap<u32, Arc<Browser>>>,
+    /// 启动时接管的 `WEBVIEW2_USER_DATA_FOLDER`（browser_policy::browser_data_dir）
+    data_override: Option<std::path::PathBuf>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -105,6 +106,13 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl BrowserState {
+    pub fn new(data_override: Option<std::path::PathBuf>) -> Self {
+        Self {
+            data_override,
+            ..Self::default()
+        }
+    }
+
     fn get(&self, id: u32) -> CmdResult<Arc<Browser>> {
         lock(&self.browsers)
             .get(&id)
@@ -158,7 +166,8 @@ fn native_error(error: impl std::fmt::Display) -> CommandError {
     CommandError::new("browser_failed", format!("浏览器操作失败：{error}"))
 }
 
-/// 下载：弹系统的「另存为」，取消就不下载；不自动存进默认目录。
+/// 下载：弹系统的「另存为」，取消就不下载；不自动存进默认目录。结果配对见
+/// [`browser_policy::Downloads`]。
 fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> bool {
     match event {
         DownloadEvent::Requested { url, destination } => {
@@ -173,34 +182,36 @@ fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> 
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or(name);
                     *destination = path;
-                    lock(&browser.downloads).push((url, chosen.clone()));
+                    lock(&browser.downloads).chosen(url.as_str(), chosen.clone());
                     browser.send(BrowserMessage::Download {
                         state: "started",
                         name: chosen,
                     });
                     true
                 }
-                None => false,
+                None => {
+                    lock(&browser.downloads).cancelled(url.as_str());
+                    false
+                }
             }
         }
         DownloadEvent::Finished { url, path, success } => {
-            let mut started = lock(&browser.downloads);
-            let Some(index) = started.iter().position(|(u, _)| *u == url) else {
-                // 用户在另存为里取消的
-                return true;
-            };
-            let (_, chosen) = started.remove(index);
-            drop(started);
-            // 失败时 WebView2 不给路径，用开始时选的文件名
-            let name = path
+            let file_name = path
                 .as_ref()
                 .and_then(|p| p.file_name())
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or(chosen);
-            browser.send(BrowserMessage::Download {
-                state: if success { "finished" } else { "failed" },
-                name,
-            });
+                .map(|n| n.to_string_lossy().into_owned());
+            let report = lock(&browser.downloads).finished(url.as_str(), file_name, success);
+            match report {
+                Some(DownloadReport::Finished(name)) => browser.send(BrowserMessage::Download {
+                    state: "finished",
+                    name,
+                }),
+                Some(DownloadReport::Failed(name)) => browser.send(BrowserMessage::Download {
+                    state: "failed",
+                    name,
+                }),
+                None => {}
+            }
             true
         }
         _ => true,
@@ -242,8 +253,13 @@ pub async fn browser_create(
     let window = app
         .get_window("main")
         .ok_or_else(|| CommandError::new("browser_failed", "主窗口不存在"))?;
-    let data_dir =
-        browser_policy::browser_data_dir(&app.path().app_local_data_dir().map_err(native_error)?);
+    let data_dir = match state.data_override.as_deref() {
+        Some(dir) => browser_policy::browser_data_dir(dir, Some(dir)),
+        None => browser_policy::browser_data_dir(
+            &app.path().app_local_data_dir().map_err(native_error)?,
+            None,
+        ),
+    };
     let id = state.next_id.fetch_add(1, Ordering::Relaxed) + 1;
     let browser = Arc::new(Browser {
         label: browser_policy::browser_label(id),
@@ -253,7 +269,7 @@ pub async fn browser_create(
             user_target: Some(target.clone()),
         }),
         focused: AtomicBool::new(false),
-        downloads: Mutex::new(Vec::new()),
+        downloads: Mutex::new(Downloads::default()),
     });
 
     let nav = Arc::clone(&browser);

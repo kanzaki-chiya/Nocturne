@@ -7,3 +7,4 @@ pnpm-lock.yaml
 packages/core/src/config/models-dev-snapshot.ts
 **/src-tauri/target/
 **/src-tauri/gen/
+.claude/worktrees/

@@ -9,6 +9,36 @@
 import type { BrowserAction, BrowserBounds, BrowserHost, BrowserMessage } from "./host";
 
 export const MAX_LIVE_BROWSERS = 5;
+/** 「已下载」提示显示这么久后自动消失 */
+export const NOTICE_HIDE_MS = 4000;
+
+/**
+ * 工具栏下方的提示：被拦下的导航或下载。只显示最近的一条，新的替换旧的；
+ * 拦截提示在下一次开始加载时清掉，「已下载」几秒后自动消失（autoHide）。
+ */
+export interface BrowserNotice {
+  kind: "blocked" | "download";
+  text: string;
+  alert: boolean;
+  autoHide: boolean;
+  /** 每条提示一个序号：关闭和自动消失只作用于这一条 */
+  seq: number;
+}
+
+/** 下载消息的提示文案 */
+export function downloadNotice(
+  state: "started" | "finished" | "failed",
+  name: string,
+): Pick<BrowserNotice, "text" | "alert" | "autoHide"> {
+  switch (state) {
+    case "started":
+      return { text: `正在下载 ${name}`, alert: false, autoHide: false };
+    case "finished":
+      return { text: `已下载 ${name}`, alert: false, autoHide: true };
+    case "failed":
+      return { text: `下载失败：${name}`, alert: true, autoHide: false };
+  }
+}
 
 export interface BrowserStatus {
   url: string;
@@ -17,9 +47,8 @@ export interface BrowserStatus {
   forward: boolean;
   /** 网站图标的 object URL；没有时 undefined */
   favicon?: string | undefined;
-  /** 最近一次被拦下的导航（下次开始加载时清掉） */
-  blocked?: string | undefined;
-  download?: { state: "started" | "finished" | "failed"; name: string } | undefined;
+  /** 工具栏下方的提示（BrowserNotice） */
+  notice?: BrowserNotice | undefined;
   /** 创建或导航失败的说明 */
   error?: string | undefined;
   /** 外壳里有没有对应的 webview（被回收或还没显示过时为 false） */
@@ -78,6 +107,7 @@ const sameBounds = (a: BrowserBounds | null | undefined, b: BrowserBounds | null
 export class BrowserPool {
   private readonly entries = new Map<string, Entry>();
   private clock = 0;
+  private noticeSeq = 0;
 
   constructor(
     private readonly host: BrowserHost,
@@ -177,11 +207,18 @@ export class BrowserPool {
     clearTimeout(timer);
   }
 
+  /** 关掉一条提示（关闭按钮、自动消失）；已被新提示替换时不动 */
+  dismissNotice(tabId: string, seq: number): void {
+    const entry = this.entries.get(tabId);
+    if (entry?.status.notice?.seq !== seq) return;
+    this.patch(entry, { notice: undefined });
+  }
+
   /** 地址栏导航；返回错误文案（外壳拒绝的协议等），成功为 undefined */
   async navigate(tabId: string, url: string): Promise<string | undefined> {
     const entry = this.entries.get(tabId);
     if (entry === undefined) return undefined;
-    this.patch(entry, { blocked: undefined, error: undefined });
+    this.patch(entry, { notice: this.withoutBlocked(entry), error: undefined });
     if (!entry.status.live) {
       // 还没有 webview（被回收、还没显示过、创建失败）：记下地址，按它创建
       this.patch(entry, { url });
@@ -238,6 +275,19 @@ export class BrowserPool {
 
   // ── 内部 ──
 
+  /** 清掉拦截提示，下载提示留着 */
+  private withoutBlocked(entry: Entry): BrowserNotice | undefined {
+    return entry.status.notice?.kind === "blocked" ? undefined : entry.status.notice;
+  }
+
+  private notice(
+    kind: BrowserNotice["kind"],
+    body: Pick<BrowserNotice, "text" | "alert" | "autoHide">,
+  ): BrowserNotice {
+    this.noticeSeq += 1;
+    return { kind, ...body, seq: this.noticeSeq };
+  }
+
   private patch(entry: Entry, change: Partial<BrowserStatus>): void {
     entry.status = { ...entry.status, ...change };
     for (const listener of entry.listeners) listener();
@@ -280,7 +330,7 @@ export class BrowserPool {
         loading: false,
         back: false,
         forward: false,
-        download: undefined,
+        notice: undefined,
       });
     }
   }
@@ -336,7 +386,9 @@ export class BrowserPool {
       case "loading":
         this.patch(
           entry,
-          message.loading ? { loading: true, blocked: undefined } : { loading: false },
+          message.loading
+            ? { loading: true, notice: this.withoutBlocked(entry) }
+            : { loading: false },
         );
         return;
       case "history":
@@ -355,10 +407,15 @@ export class BrowserPool {
         this.events.onNewWindow(entry.tabId, message.url);
         return;
       case "blocked":
-        this.patch(entry, { blocked: message.message, loading: false });
+        this.patch(entry, {
+          notice: this.notice("blocked", { text: message.message, alert: true, autoHide: false }),
+          loading: false,
+        });
         return;
       case "download":
-        this.patch(entry, { download: { state: message.state, name: message.name } });
+        this.patch(entry, {
+          notice: this.notice("download", downloadNotice(message.state, message.name)),
+        });
         return;
       case "shortcut":
         this.events.onShortcut(message.key);

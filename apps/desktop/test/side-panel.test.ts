@@ -30,6 +30,7 @@ import {
   filePath,
   isBrowserUrl,
   parseAddress,
+  browserTabShowing,
   parseStoredSessionPanels,
   parseStoredTabs,
   projectFits,
@@ -280,20 +281,34 @@ describe("地址栏", () => {
     expect(parseAddress("about:blank", undefined)).toEqual({ kind: "url", url: "about:blank" });
   });
 
-  it("不像网址的输入只提示「请输入网址」，不去搜索；javascript: 等协议不收", () => {
-    for (const text of [
-      "随便写点什么",
-      "",
-      "   ",
-      "javascript:alert(1)",
-      "vscode://x",
-      "a b.com",
-    ]) {
+  it("不像网址的输入只提示「请输入网址」，不去搜索；javascript: 等协议提示不支持", () => {
+    for (const text of ["随便写点什么", "", "   ", "a b.com", "http:/x", "foo:8080", "C:\a.txt"]) {
       expect(parseAddress(text, undefined)).toEqual({ kind: "invalid", message: "请输入网址" });
+    }
+    for (const [text, scheme] of [
+      ["javascript:alert(1)", "javascript"],
+      ["ms-settings:", "ms-settings"],
+      ["vscode://x", "vscode"],
+      ["MailTo:a@b.com", "mailto"],
+    ] as const) {
+      expect(parseAddress(text, undefined)).toEqual({
+        kind: "invalid",
+        message: `不支持 ${scheme}: 地址`,
+      });
     }
     expect(parseAddress("\\\\server\\share\\a.html", undefined).kind).toBe("invalid");
     expect(parseAddress("file://server/share/a.html", undefined).kind).toBe("invalid");
     expect(parseAddress("poster.html", undefined).kind).toBe("invalid");
+  });
+
+  it("左键引用同一个本地 HTML：找到正在显示它的浏览器标签", () => {
+    const tabs: PanelTab[] = [
+      { id: "f", kind: "file", absolutePath: "Z:\p\index.html" },
+      { id: "w", kind: "browser", url: "https://example.com/index.html" },
+      { id: "b", kind: "browser", url: "file:///Z:/p/index.html?x=1#top" },
+    ];
+    expect(browserTabShowing(tabs, "z:/P/index.html")?.id).toBe("b");
+    expect(browserTabShowing(tabs, "Z:\p\other.html")).toBeUndefined();
   });
 
   it("file:// 地址与本地路径互转；浏览器标签名用标题、主机名或文件名", () => {

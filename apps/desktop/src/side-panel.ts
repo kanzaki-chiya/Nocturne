@@ -792,6 +792,21 @@ export function filePath(url: string): string | undefined {
   return /^\/[A-Za-z]:/.test(path) ? path.slice(1).replaceAll("/", "\\") : path;
 }
 
+/**
+ * 正在显示这个本地 HTML 的浏览器标签（左键引用复用它，和文件标签同一规则）：
+ * 比的是当前地址的路径，查询串和锚点不算
+ */
+export function browserTabShowing(
+  tabs: readonly PanelTab[],
+  absolutePath: string,
+): BrowserTab | undefined {
+  return tabs.find((t): t is BrowserTab => {
+    if (t.kind !== "browser") return false;
+    const path = filePath(t.url);
+    return path !== undefined && samePath(path, absolutePath);
+  });
+}
+
 /** 浏览器标签上的名字：网页标题，没有时用主机名，再没有用文件名或地址 */
 export function browserTabName(tab: Pick<BrowserTab, "url" | "title">): string {
   if (tab.title !== undefined && tab.title.trim() !== "") return tab.title.trim();
@@ -850,6 +865,13 @@ export function parseAddress(input: string, workspace: string | undefined): Addr
     } catch {
       return invalid;
     }
+  }
+  // 带了协议、但不在白名单里（javascript:、ms-settings:、mailto: …）：说清楚是协议不支持。
+  // 单个字母是盘符（C:\x.txt 这类非 HTML 路径），「主机:端口」也不算协议；写坏的
+  // http: / file: 地址仍提示「请输入网址」
+  const scheme = /^([a-z][a-z0-9+.-]+):(?!\d+(?:[/?#]|$))/i.exec(text)?.[1]?.toLowerCase();
+  if (scheme !== undefined && !["http", "https", "file", "about"].includes(scheme)) {
+    return { kind: "invalid", message: `不支持 ${scheme}: 地址` };
   }
   return invalid;
 }

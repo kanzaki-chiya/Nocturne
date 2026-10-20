@@ -138,14 +138,9 @@
   /* 说明里可能是很长的可执行文件路径，没有空格也要能折行 */
   overflow-wrap: anywhere;
 }
-.ddm .ddo.on {
-  background: var(--a-sel);
-}
+/* 与菜单（.menu-item）、Ctrl+P、输入框补全同一套：当前选中只打 ✓，焦点项是 --a-sel 底色 */
 .ddm .ddo.act {
-  background: var(--a-raised);
-}
-.ddm .ddo.on.act {
-  background: var(--a-selStrong);
+  background: var(--a-sel);
 }
 .ddm .ddo.risk b,
 .ddm .ddo.risk .tg {

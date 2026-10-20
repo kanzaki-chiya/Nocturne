@@ -20,7 +20,7 @@ import {
   type CoverEvent,
   type CoverState,
 } from "./browser-occlusion";
-import type { BrowserPool, BrowserStatus } from "./browser-pool";
+import { NOTICE_HIDE_MS, type BrowserPool, type BrowserStatus } from "./browser-pool";
 import { parseAddress, type BrowserTab } from "./side-panel";
 
 const FALLBACK: BrowserStatus = {
@@ -99,7 +99,6 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
   const [editing, setEditing] = useState<string>();
   const [addressError, setAddressError] = useState<string>();
   const [cover, setCover] = useState<string>();
-  const [noticeOpen, setNoticeOpen] = useState(true);
   const coverState = useRef<CoverState>("live");
 
   // 登记在布局与订阅之前（layout effect 先于普通 effect）；卸载（关闭标签、删除会话）时销毁 webview
@@ -112,9 +111,18 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
   }, [pool, tab.id]);
   const status = useBrowserStatus(pool, tab);
 
+  // 「已下载」几秒后自动消失；换成新提示时重新计时
+  const notice = status.notice;
   useEffect(() => {
-    setNoticeOpen(true);
-  }, [status.blocked, status.download]);
+    if (notice?.autoHide !== true) return;
+    const seq = notice.seq;
+    const timer = setTimeout(() => {
+      pool.dismissNotice(tab.id, seq);
+    }, NOTICE_HIDE_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [notice, pool, tab.id]);
 
   // ── 位置：可见时跟着占位区走；用 layout effect，隐藏命令在这一帧绘制前发出 ──
   useLayoutEffect(() => {
@@ -258,20 +266,6 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
       if (message !== undefined) setAddressError(message);
     });
   };
-  const notice =
-    status.blocked !== undefined
-      ? { text: status.blocked, alert: true }
-      : status.download !== undefined
-        ? {
-            text:
-              status.download.state === "started"
-                ? `正在下载 ${status.download.name}`
-                : status.download.state === "finished"
-                  ? `已下载 ${status.download.name}`
-                  : `下载失败：${status.download.name}`,
-            alert: status.download.state === "failed",
-          }
-        : undefined;
   const address = editing ?? (status.url === "about:blank" ? "" : status.url);
   return (
     <div className="sp-browser" ref={root}>
@@ -374,7 +368,7 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
           {addressError}
         </p>
       )}
-      {notice !== undefined && noticeOpen && (
+      {notice !== undefined && (
         <p className={`sp-browser-notice${notice.alert ? " alert" : ""}`} role="status">
           <span>{notice.text}</span>
           <button
@@ -383,7 +377,7 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
             aria-label="关闭提示"
             title="关闭"
             onClick={() => {
-              setNoticeOpen(false);
+              pool.dismissNotice(tab.id, notice.seq);
             }}
           >
             <ToolGlyph kind="stop" />

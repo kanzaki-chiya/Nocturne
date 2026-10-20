@@ -17,6 +17,7 @@ import type { PrefsStore } from "./prefs";
 import { projectKey, projectName } from "./session-tree";
 import { SidePanel, type PanelChangesSource, type TerminalShellChoice } from "./SidePanel";
 import {
+  browserTabShowing,
   clampPanelWidth,
   clampTreeWidth,
   fileUrl,
@@ -436,10 +437,26 @@ export function useSidePanel({
     },
     [placeTab],
   );
+  /** 本地 HTML：已有标签在显示它就切过去，否则新开 */
+  const openHtml = useCallback(
+    (absolutePath: string) => {
+      const existing = browserTabShowing(tabs, absolutePath);
+      if (existing === undefined) {
+        openBrowser(fileUrl(absolutePath));
+        return;
+      }
+      const apply = () => {
+        update((panel) => ({ ...panel, open: true, activeId: existing.id }));
+      };
+      if (existing.id === activeTabRef.current) apply();
+      else hideBrowserThen(apply);
+    },
+    [tabs, openBrowser, update, hideBrowserThen],
+  );
   const openFile = useCallback<SidePanelController["openFile"]>(
     (absolutePath, line, ref) => {
       if (previewsHtml(absolutePath)) {
-        openBrowser(fileUrl(absolutePath));
+        openHtml(absolutePath);
         return;
       }
       const workspace =
@@ -448,7 +465,7 @@ export function useSidePanel({
           : undefined;
       openFileTab({ absolutePath, workspace, line, endLine: ref?.endLine });
     },
-    [active, openFileTab, previewsHtml, openBrowser],
+    [active, openFileTab, previewsHtml, openHtml],
   );
 
   // ── 浏览器（ADR-0060 第 5 节）：webview 池随宿主建一次，事件按标签 id 找到所在会话 ──
@@ -607,11 +624,11 @@ export function useSidePanel({
       reveal: (absolutePath: string) => host.revealItem(absolutePath),
       openInBrowser: async (absolutePath: string) => {
         if (pool === undefined) await host.openPath(absolutePath);
-        else openBrowser(fileUrl(absolutePath));
+        else openHtml(absolutePath);
       },
       browserLabel: pool === undefined ? "在系统浏览器打开" : "在浏览器标签打开",
     }),
-    [host, externalEditor, pool, openBrowser],
+    [host, externalEditor, pool, openHtml],
   );
   const openExternalUrl = useCallback(
     async (url: string) => {

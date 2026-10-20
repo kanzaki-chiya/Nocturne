@@ -12,6 +12,7 @@ mod job;
 mod lines;
 mod node;
 mod notify;
+mod plugin_script;
 mod terminal;
 mod workspace;
 
@@ -54,6 +55,17 @@ fn begin_shutdown(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 设了 WEBVIEW2_USER_DATA_FOLDER 时它会覆盖每个 WebView2 环境的数据目录，浏览器就和
+    // 主界面共用一个目录（browser_policy::take_user_data_override）。这里还没有别的线程：
+    // 读出来删掉，主窗口改在 setup 里显式用这个目录创建
+    let webview_data = browser_policy::take_user_data_override();
+    let mut context = tauri::generate_context!();
+    let main_window = webview_data.as_ref().and_then(|_| {
+        let windows = &mut context.config_mut().app.windows;
+        let main = windows.iter_mut().find(|w| w.label == "main")?;
+        main.create = false;
+        Some(main.clone())
+    });
     let commands: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
         backend::app_note,
         backend::backend_send,
@@ -83,7 +95,9 @@ pub fn run() {
         browser::browser_destroy,
     ];
     tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
+        // 不要插件往每个 webview 注入的 alert / confirm 改写（plugin_script.rs）：网页和主界面都用
+        // WebView2 自带的脚本对话框
+        .plugin(plugin_script::WithoutScript(tauri_plugin_dialog::init()))
         // 不要插件往每个 webview 注入的「_blank 链接交给系统浏览器」脚本：主界面的链接都自己
         // 处理；面板浏览器里它会吞掉 target=_blank 的点击（调 open_url 被 ACL 拒），也不该往
         // 第三方网页里注入东西
@@ -102,7 +116,7 @@ pub fn run() {
                 commands(invoke)
             }
         })
-        .setup(|app| {
+        .setup(move |app| {
             let resource_dir = app
                 .path()
                 .resource_dir()
@@ -116,7 +130,12 @@ pub fn run() {
             // 面板终端（ADR-0060 第 4 节）：页面重载、应用退出时全部结束
             app.manage(Arc::new(terminal::TerminalState::default()));
             // 面板浏览器（ADR-0060 第 5 节）：同上，随页面重载、应用退出全部关掉
-            app.manage(Arc::new(browser::BrowserState::default()));
+            app.manage(Arc::new(browser::BrowserState::new(webview_data.clone())));
+            if let (Some(config), Some(dir)) = (&main_window, &webview_data) {
+                tauri::WebviewWindowBuilder::from_config(app.handle(), config)?
+                    .data_directory(dir.clone())
+                    .build()?;
+            }
             Ok(())
         })
         .on_page_load(|webview, payload| {
@@ -153,7 +172,7 @@ pub fn run() {
                 begin_shutdown(window.app_handle());
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {

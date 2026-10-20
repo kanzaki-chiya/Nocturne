@@ -5,7 +5,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
-import { BrowserPool, errorText, MAX_LIVE_BROWSERS } from "../src/browser-pool";
+import { BrowserPool, downloadNotice, errorText, MAX_LIVE_BROWSERS } from "../src/browser-pool";
 import type { BrowserBounds, BrowserHost, BrowserMessage } from "../src/host";
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -192,11 +192,11 @@ describe("浏览器池", () => {
       back: true,
       forward: false,
       loading: false,
-      blocked: "已阻止打开外部程序（ms-settings:）",
+      notice: { kind: "blocked", text: "已阻止打开外部程序（ms-settings:）", alert: true },
     });
     // 下一次开始加载时清掉拦截提示
     push(1, { kind: "loading", loading: true });
-    expect(pool.status("a")?.blocked).toBeUndefined();
+    expect(pool.status("a")?.notice).toBeUndefined();
     const stale = (host.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as (
       m: BrowserMessage,
     ) => void;
@@ -241,5 +241,61 @@ describe("浏览器池", () => {
     await flush();
     expect(host.create).toHaveBeenCalledTimes(2);
     expect(pool.status("a")?.live).toBe(true);
+  });
+
+  it("提示只显示最近一条：之前的拦截提示不挡住下载提示；关掉一条不会再冒出旧的", async () => {
+    const { host, push } = fakeHost();
+    const pool = new BrowserPool(host, events());
+    pool.register("a", "http://127.0.0.1:31791/");
+    pool.show("a", box);
+    await flush();
+    push(1, {
+      kind: "blocked",
+      url: "http://tauri.localhost/",
+      reason: "internal",
+      message: "不能打开应用内部地址",
+    });
+    const blocked = pool.status("a")?.notice;
+    expect(blocked?.text).toBe("不能打开应用内部地址");
+    // 用户关掉拦截提示，然后下载：下载提示照常出现
+    pool.dismissNotice("a", blocked?.seq ?? -1);
+    expect(pool.status("a")?.notice).toBeUndefined();
+    push(1, { kind: "download", state: "started", name: "dl-test.txt" });
+    expect(pool.status("a")?.notice).toMatchObject({
+      kind: "download",
+      text: "正在下载 dl-test.txt",
+    });
+    push(1, { kind: "download", state: "finished", name: "dl-test.txt" });
+    const done = pool.status("a")?.notice;
+    expect(done).toMatchObject({ text: "已下载 dl-test.txt", autoHide: true });
+    // 没关掉的拦截提示也一样被新的下载提示替换
+    push(1, { kind: "blocked", url: "ms-settings:", reason: "external", message: "已阻止" });
+    push(1, { kind: "download", state: "finished", name: "dl-test2.txt" });
+    const second = pool.status("a")?.notice;
+    expect(second?.text).toBe("已下载 dl-test2.txt");
+    // 关旧序号不影响新提示
+    pool.dismissNotice("a", done?.seq ?? -1);
+    expect(pool.status("a")?.notice).toBe(second);
+    // 开始加载只清拦截提示，下载提示留着等自动消失
+    push(1, { kind: "loading", loading: true });
+    expect(pool.status("a")?.notice).toBe(second);
+  });
+
+  it("下载提示文案：完成的自动消失，进行中与失败的留着", () => {
+    expect(downloadNotice("started", "a.txt")).toEqual({
+      text: "正在下载 a.txt",
+      alert: false,
+      autoHide: false,
+    });
+    expect(downloadNotice("finished", "a.txt")).toEqual({
+      text: "已下载 a.txt",
+      alert: false,
+      autoHide: true,
+    });
+    expect(downloadNotice("failed", "a.txt")).toEqual({
+      text: "下载失败：a.txt",
+      alert: true,
+      autoHide: false,
+    });
   });
 });
