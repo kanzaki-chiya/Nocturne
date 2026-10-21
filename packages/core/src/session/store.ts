@@ -6,7 +6,6 @@ import { randomBytes } from "node:crypto";
 import {
   decodeDurableEvent,
   encodeDurableEvent,
-  EventParseError,
   LOG_FORMAT_VERSION,
   firstUserText,
   type DurableEvent,
@@ -15,6 +14,7 @@ import { fsErrorCode, type Platform } from "../platform/index.js";
 import { SessionError } from "./errors.js";
 import { acquireSessionLock, lockLooksHeld, type SessionLock } from "./lock.js";
 import { foldEvents } from "./fold.js";
+import { assertLogHead, parseLogBytes } from "./log-parse.js";
 import { SessionImpl } from "./session.js";
 import type {
   CreateSessionInput,
@@ -126,62 +126,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
       throw e;
     }
 
-    // 按 \n 切分，记录每行的字节偏移
-    const lineOffsets: { start: number; end: number }[] = [];
-    let cursor = 0;
-    for (let i = 0; i < buf.length; i++) {
-      if (buf[i] === 0x0a) {
-        lineOffsets.push({ start: cursor, end: i });
-        cursor = i + 1;
-      }
-    }
-    const endsClean = buf.length > 0 && buf[buf.length - 1] === 0x0a;
-    if (cursor < buf.length) {
-      // 最后一行无结尾换行符：写入中断过，无论内容是否可解析都按尾部处理
-      lineOffsets.push({ start: cursor, end: buf.length });
-    }
-
-    const events: DurableEvent[] = [];
-    let tailStart = -1;
-    if (!endsClean && lineOffsets.length > 0) {
-      // 未终止的最后一行无条件视为损坏尾部
-      tailStart = lineOffsets.at(-1)?.start ?? -1;
-      lineOffsets.pop();
-    }
-    for (let i = 0; i < lineOffsets.length; i++) {
-      const range = lineOffsets[i];
-      if (range === undefined) break;
-      const { start, end } = range;
-      const line = new TextDecoder().decode(buf.subarray(start, end));
-      if (line === "") {
-        throw new SessionError("session_log_corrupt", `日志第 ${i + 1} 行为空`);
-      }
-      let event: DurableEvent;
-      try {
-        event = decodeDurableEvent(line);
-      } catch (e) {
-        if (e instanceof EventParseError && e.code === "unknown_event_type") {
-          throw new SessionError(
-            "session_log_newer",
-            `日志包含不认识的持久化事件类型: ${e.message}`,
-            { cause: e },
-          );
-        }
-        if (i === lineOffsets.length - 1 && tailStart === -1) {
-          // 已终止但无法解析的最后一行同样算损坏尾部（sessions.md 第 4 节）
-          tailStart = start;
-          break;
-        }
-        throw new SessionError("session_log_corrupt", `日志第 ${i + 1} 行无法解析`, { cause: e });
-      }
-      if (event.seq !== events.length + 1) {
-        throw new SessionError(
-          "session_log_corrupt",
-          `日志 seq 不连续：第 ${i + 1} 行 seq=${event.seq}，期望 ${events.length + 1}`,
-        );
-      }
-      events.push(event);
-    }
+    const { events, tailStart } = parseLogBytes(buf);
 
     let truncatedTail: string | undefined;
     if (tailStart >= 0) {
@@ -192,16 +137,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
       truncatedTail = tailName;
     }
 
-    const first = events[0];
-    if (first?.type !== "session.created") {
-      throw new SessionError("session_log_corrupt", "日志第一行不是 session.created");
-    }
-    if (first.payload.formatVersion > LOG_FORMAT_VERSION) {
-      throw new SessionError(
-        "session_log_newer",
-        `日志格式版本 ${first.payload.formatVersion} 高于支持的 ${LOG_FORMAT_VERSION}`,
-      );
-    }
+    assertLogHead(events);
     return { events, truncatedTail };
   }
 

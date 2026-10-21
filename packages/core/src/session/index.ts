@@ -6,3 +6,7 @@ export * from "./session.js";
 export * from "./lock.js";
 export * from "./store.js";
 export * from "./local-file.js";
+export * from "./attachment-read.js";
+export * from "./readonly-log.js";
+export * from "./subagent-registry.js";
+export * from "./subagent-observe.js";

@@ -9,7 +9,14 @@ import type { ReviewInputSources, SecurityReviewer } from "../permission/index.j
 import type { Diagnostics, JsonSchema, ReasoningEffort, Usage } from "../protocol/index.js";
 import type { InstructionSet, EnvironmentInfo } from "../context/index.js";
 import { clampReasoningEffort, type ResolvedModel } from "../provider/index.js";
-import type { Session, SessionState, SessionStore } from "../session/index.js";
+import {
+  summarizeSubagentTask,
+  type Session,
+  type SessionState,
+  type SessionStore,
+  type SubagentRegistration,
+  type SubagentRegistry,
+} from "../session/index.js";
 import type { PermissionPolicy } from "../permission/index.js";
 import {
   builtinTools,
@@ -149,6 +156,11 @@ export interface SubagentDeps {
   depth: number;
   limits: SubagentLimits;
   limiter: SubagentLimiter;
+  /**
+   * Runtime 级观察登记簿（rpc.md 4.1）：与 limiter 同寿命，递归共享；
+   * 缺省时不登记（子会话照常运行，只是无法被实时观察）
+   */
+  registry?: SubagentRegistry | undefined;
 }
 
 function finishTool(
@@ -246,6 +258,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         );
       }
       let child: Session | undefined;
+      let registration: SubagentRegistration | undefined;
       // Hook 标记里的 depth 是子会话自身深度（祖先进会话数）
       const meta = {
         parentSessionId: ctx.sessionId,
@@ -277,6 +290,14 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           nocturneVersion: deps.nocturneVersion,
           parent: { sessionId: ctx.sessionId, callId: ctx.callId },
           ...(childEffort !== undefined ? { reasoningEffort: childEffort } : {}),
+        });
+        // 子创建事件已提交：执行与进度转发之前登记观察源（rpc.md 4.1）
+        registration = deps.registry?.register({
+          child,
+          parentSessionId: ctx.sessionId,
+          callId: ctx.callId,
+          profile: request.profile ?? "default",
+          taskSummary: summarizeSubagentTask(request.task),
         });
         ctx.progress(
           `子代理模型：${childModel.model.ref.provider}/${childModel.model.ref.model} · ${childEffort ?? "off"}`,
@@ -545,20 +566,26 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           statsOf(child, maxAttempts),
         );
       } finally {
-        if (child !== undefined) {
-          // SessionEnd Hook（hooks.md）：与父会话 close 同点位；失败已降级
-          await deps
-            .makeHookRunner(child, meta)
-            ?.run("SessionEnd", { reason: "close" })
-            .catch(() => undefined);
-          await child.close().catch((e: unknown) => {
-            deps.diagnostics?.record("subagent.close_failed", {
-              childSessionId: child?.id,
-              message: e instanceof Error ? e.message : String(e),
+        try {
+          if (child !== undefined) {
+            // SessionEnd Hook（hooks.md）：与父会话 close 同点位；失败已降级
+            await deps
+              .makeHookRunner(child, meta)
+              ?.run("SessionEnd", { reason: "close" })
+              .catch(() => undefined);
+            await child.close().catch((e: unknown) => {
+              deps.diagnostics?.record("subagent.close_failed", {
+                childSessionId: child?.id,
+                message: e instanceof Error ? e.message : String(e),
+              });
             });
-          });
+          }
+        } finally {
+          // 写入落定、close 完成之后才发内存终止信号并移除登记项；异常与失败同样
+          // 经过这里，观察者的状态不影响并发槽的归还
+          registration?.end();
+          deps.limiter.release();
         }
-        deps.limiter.release();
       }
     },
   };

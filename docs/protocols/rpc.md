@@ -185,6 +185,8 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 
 ### 3.8 通知
 
+ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复用可交互的 `session.*` 句柄。
+
 | 方向 | 方法 | 参数 | 说明 |
 |---|---|---|---|
 | 客户端→服务端 | `session.interrupt` | `{ sessionId }` | 中断运行中的 Turn；无 Turn 时无操作。`submit` 请求随后以 `aborted` 返回。服务端也接受带 `id` 的请求形式（回复 `null`） |
@@ -208,6 +210,94 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 - 权限结算广播已有的 `permission.resolved`；Core 没有 `question.resolved`，提问回复后沿用 `runtime.status(running_tool)` 与对应 `tool.completed` 收束（ADR-0052 修订）。
 - 客户端用 `protocol` 的 reducer 折叠视图（`createSessionView` / `reduceSessionView` / `replaySessionView`，`@nocturne/rpc/client` 重新导出，`trackSessionView` 封装"订阅 + 折叠"）。**验收标准**：同一会话经 RPC 折叠得到的 `SessionView` 与进程内重放相等（[view.md](view.md) 第 6 节，`revision` 与 `notices` 除外）。
 - 重连：保存最后收到的持久事件 `seq`，重启后台后 `resumeSession`，再以 `afterSeq` 订阅即可续接；会话日志是唯一事实来源（[ADR-0003](../decisions/ADR-0003-session-event-log.md)）。
+
+### 4.1 子会话只读观察（ADR-0060 第 4 轮）
+
+**不新增或修改 RuntimeEvent**，不改变协议版本 `1` 或日志格式；新增 JSON-RPC 方法与通知，旧客户端不调用、不受影响。行为与事实来源见 [subagent.md 第 12 节](../architecture/subagent.md#12-客户端呈现)。
+
+#### 查询与 Core API
+
+新增 Runtime 级 API，不放在 `RuntimeSession`，因为 launcher 持有的子会话没有 Hub 的可交互句柄：
+
+```ts
+Runtime.listSubagents({ parentSessionId }): Promise<SubagentSummary[]>;
+Runtime.readSubagentAttachment(
+  { parentSessionId, childSessionId, file },
+): Promise<ReadAttachmentResult>;
+Runtime.observeSubagent(
+  { parentSessionId, childSessionId, afterSeq?: number, signal?: AbortSignal },
+  { onEvent(event: RuntimeEvent): void, onEnd(end: SubagentReadEnd): void },
+): Promise<SubagentObservation>;
+
+interface SubagentSummary {
+  parentSessionId: string;
+  callId: string;
+  childSessionId: string;
+  profile: string;                 // 启动参数 profile / agent / default，不读当前配置反推
+  taskSummary: string;             // task 原文压成单行，最多 120 个 Unicode 码点
+  startedAt: string;               // 子 session.created.time，ISO 8601
+  state: "running" | "ended" | "unsealed";
+  endedAt?: string;                // 有终止事实才提供，不以读取时刻代替
+  durationMs?: number;             // 父 task.completed.durationMs 优先；否则起止事件时间差
+  durationApproximate?: true;      // 仅在使用事件时间差时提供
+  outcome?: { status: ToolCallStatus; error?: { code: string; message: string } };
+}
+interface SubagentReadEnd {
+  lastSeq: number;
+  summary: SubagentSummary;
+  source: "launcher" | "snapshot";
+  tailIgnored: boolean;            // 只读快照略过不完整/无法解析的最后一行
+}
+interface SubagentObservation {
+  lastSeq: number;                 // 回放和缓冲衔接后的持久高水位
+  summary: SubagentSummary;
+  mode: "live" | "snapshot";
+  unsubscribe(): void;             // 幂等；只撤观察，不关闭子会话
+}
+```
+
+`ToolCallStatus` 沿用 protocol。summary 是查询投影，不是新的会话状态或事件；最终结果正文仍从父 `task.completed.modelContent` 或子 `finish` 的已持久化输入读取，不复制进 summary。`outcome` 只来自父调用已持久化的结算，没有时省略；`endedAt` 优先取父结算时间，否则取可判定终止的最后一个子 `turn.completed.time`。缺父耗时的时间差是近似耗时，客户端须标注；没有结束事实时不提供最终耗时。
+
+`listSubagents` 返回该父会话的**直接内置子会话**（含已结束），按 `startedAt`、`childSessionId` 升序。父日志必须存在；已有父 Session 时读其已提交事件，否则只读父日志。映射以子 `session.created.parent` 为准，父日志 `tool.started.input` 补档位和摘要；旧日志缺启动参数时档位用 `default`、摘要回退首条子 `message.user`，再缺则「子任务」。不能根据当前档位配置判断历史调用属于内置还是外部。`task.output.childSessionId` 仅为定位提示，使用前仍校验 child 的 parent。外部 ACP 不返回伪造的 child id（桌面处理见 ADR 修订（五））。
+
+查询可复用 `listSessions({ includeSubagents: true })` 的只读日志头扫描建立候选索引，但不能把 `locked` 当作运行状态，也不能只靠该列表的容错跳过逻辑校验指定 child。运行态来自 Runtime 共享的 launcher 登记簿；缓存失效可重扫日志，不能把缓存作为持久事实源。
+
+#### RPC 映射与通知
+
+Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂等取消；signal 不上 RPC 线，服务端用它取消建立中的订阅。回放与缓冲冲刷每 128 条让出事件循环，每条 event 各发一条通知，不把整个日志塞进单条消息。固定快照由一次 readFile 获得，日志解码也按 128 条分批。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `subagent.list` | `{ parentSessionId }` → `SubagentSummary[]`；不要求 `resumeSession` 或打开父会话 |
+| `subagent.readAttachment` | `{ parentSessionId, childSessionId, file }` → `{ data: base64, mimeType, bytes }`；只读子日志登记的图片附件，同 3.2 的文件名、真实路径、字节数和 sha256 校验，不借父目录兜底、不打开 child |
+| `subagent.subscribe` | `{ parentSessionId, childSessionId, subscriptionId, afterSeq? }` → `{ lastSeq, summary, mode }`；衔接完成后响应 |
+| `subagent.unsubscribe` | `{ subscriptionId }` → `null`；连接内幂等，也能取消正在回放的观察 |
+
+| 服务端通知 | 参数 | 说明 |
+|---|---|---|
+| `subagent.event` | `{ subscriptionId, parentSessionId, childSessionId, event }` | 原样 RuntimeEvent，事件的 sessionId 必须等于 childSessionId；不混入父 `event` 通道 |
+| `subagent.closed` | `{ subscriptionId, parentSessionId, childSessionId, end: SubagentReadEnd }` | 本次观察自然结束，最后一条事件之后至多一次；不是 RuntimeEvent、不写日志 |
+
+`RpcRuntime.listSubagents(parentSessionId)` 封装查询；`RpcRuntime.readSubagentAttachment(input)` 将附件 base64 解码为 Uint8Array，返回类型同 Core 的 ReadAttachmentResult；复用已有附件读取校验器并以只读子日志前缀为授权引用集合，不要求先订阅。`RpcRuntime.observeSubagent(input, observer)` 封装订阅，返回只读 observation 与幂等退订，不返回 `RpcSession`。客户端包在发送前生成本连接内不复用的 subscriptionId、挂好通知路由，再发请求；不向调用方要求手工维护 id。同连接同一 `(parentSessionId, childSessionId)` 再订阅替换旧观察；其他 child 或其他连接互不影响。服务端按代数取消旧回放、缓冲和监听，旧 subscriptionId 的迟到消息由客户端丢弃。通知（包括快照的 closed）允许先于 subscribe 响应，封装必须缓存终止状态，不得在收到响应后重新标成 live。subscribe 失败时清掉通知路由与监听；unsubscribe 不产生 closed。
+
+#### 回放、衔接与结束
+
+1. **运行中**：在 Runtime 登记簿中同步取得该 child 的观察源，先挂事件与 launcher 终止监听并缓冲，再复制 `child.durableEvents()` 的已提交前缀。登记簿查找、挂监听、取前缀之间不插入异步间隙；之后分批回放可以让出事件循环。只推 `seq > afterSeq` 的持久事件，冲刷缓冲时按 seq 去重，再接实时持久与临时事件。此路径不重新打开日志，不获取子锁。
+2. **运行中结束**：launcher 的最后一轮 `turn.completed` 不一定代表调用结束（可能还要催促）；必须等 launcher 的 SessionEnd、所有排队写入与 child.close 完成后，才排入观察源的终止标记。标记排在全部已提交事件之后；回放期间结束则连同终止标记一起缓冲，冲刷完成后发 closed。异步 close 期间仍保留登记项；查找只会得到完整观察源或关闭后的只读快照，不能落入一个无人监听的交接窗口。
+3. **未登记/已结束/后台重启后**：只读固定字节快照，校验后回放，mode 为 snapshot，最后发 closed；没有文件监听、轮询日志或跨进程接流。即使另一个进程正持锁也只表示「本次日志快照」，不能声称它已结束或本后台正在运行。主动刷新可重读快照。
+4. **未收束日志**：读到的合法持久前缀照常推送；没有当前 launcher，也无可证明终止的日志事实时 summary.state 为 unsealed，显示「日志未收束／运行状态未知」。closed 只表示本次读取结束，绝不等于成功或中断。即使有旧 `turn.completed(done)`，缺 finish 且可能还有催促轮，也不能据此认定完成。运行源不存在时，有父结算且子 Turn 已闭合、或已闭合的成功 finish、或子最后一轮明确以非 done 原因结束，才可判 ended；尚有未闭合 Turn 时始终 unsealed。
+5. **只读解析**：只读 reader 可共享解码、连续 seq/首条 session.created/版本校验，不调用 `store.load`、`loadEvents` 的修尾路径或 repair。不取锁、不 fsync、不建目录、不启动 Hook/MCP/Provider、不截断、不备份尾部、不追加恢复事件；忽略未换行尾行（即使能解析）或无法解析的最后一行并置 tailIgnored。中间损坏、seq 空洞/倒序、sessionId 不匹配或不支持的版本报错，不跳过坏行拼接后文。未知持久类型仍按 session_log_newer 报错，不当普通坏尾忽略。
+
+临时事件只交付挂监听后收到的部分，按原顺序最多一次，不承诺补回订阅前的增量；同第 4 节。afterSeq 缺省 0，必须是非负安全整数且不大于读到的持久高水位，否则 invalid_params；换后台只用最后持久 seq 续接，瞬态内容清空，持久去重由观察封装保证。客户端若没有保留之前的 SessionView，必须从 0 重放。
+
+#### 只读边界、错误与清理
+
+- Core 对两个 session id 验证为安全的单文件名标识（非空、至多 128 个 ASCII 字母/数字/下划线/连字符），不接受路径；RPC 对字符串、subscriptionId（非空、至多 128 字符）及 afterSeq 做形状校验，重复的在用 subscriptionId 报 invalid_params。文件不存在为 `SessionError / session_not_found`，父子关系不匹配（包括把顶层会话当 child）为新增 `SessionError / subagent_parent_mismatch`，非法 Core id 为 `SessionError / invalid_session_id`；日志错误沿用 session_log_corrupt / session_log_newer，I/O 读取失败为新增 session_read_failed。均按第 5 节映射 -32002；RPC 形状错误为 -32602。list 单个不可读候选可按既有列表规则跳过，指定 child 的 subscribe 必须明确报错。
+- 新方法**均不进远程白名单**，按 ADR-0060 第 6 节，远程在 Core 调用前报 remote_not_allowed；ADR-0052 的配对、加密与既有 session 方法规则不变。新通知只发给持有观察的本机连接，不广播。以后手机要使用须另审白名单，不因「只读」自动开放。
+- readAttachment 同样先校验父子关系与安全 id；file 必须为字符串，否则 invalid_params；附件层错误沿用第 3.2 节。该补充只读方法用于保持主对话的图片输出渲染，不使用 runtime.readFile 绕过附件引用校验。只读观察的 DTO 放 protocol，行为与观察源放 Core，RPC 客户端仍仅运行时依赖 protocol。
+- 观察不在 Hub.sessions / Connection.sessions 登记可交互句柄，不增持有子锁的引用，不提供 submit/respondPermission/respondQuestion/interrupt/close 子会话的方法。未显式打开的 child 对既有 session 命令仍为 unknown_session；已有显式 resume 的行为不在本接口中改变。它不是 agent 工具，不经权限求值，也不创建 Grant。
+- 连接持有观察表（含还在建立的观察）；unsubscribe、替换、父 `session.close`、连接断开和 shutdown 都撤监听、取消回放并丢缓冲。未完成的异步读取返回时检查取消代数并立即退订，不得复活。自然 closed 后释放表项；客户端缓存视图不影响服务器清理。观察退出不触碰 launcher、并发槽或 child.close。本机整条连接断开导致 Turn 中断是第 6 节既有宿主行为，不是观察的副作用。
+- `resumeSession` 保留原来的交互式打开/锁/修复语义，**不能描述为只读**；`listSessions({includeSubagents})` 保留原语义，既不建立事件订阅也不授予操作能力。本接口是新增方法，不是给这两者添加一个含糊的 readonly 开关。
 
 ## 5. 错误
 

@@ -15,8 +15,10 @@ import {
   type ReactNode,
 } from "react";
 import type { LocalFileContent, TurnChangeDiff, TurnChanges } from "@nocturne/core/protocol";
+import type { SubagentSummary, ToolEntry } from "@nocturne/core/protocol";
 import { RpcError } from "@nocturne/rpc/client";
 
+import type { AttachmentImageSource } from "./attachment-images";
 import type { BrowserPool } from "./browser-pool";
 import { BrowserPane, BrowserTabIcon } from "./BrowserPane";
 import { DiffBody } from "./Conversation";
@@ -37,6 +39,7 @@ import {
   isWindowsPath,
   nativeSeparators,
   projectFits,
+  subagentTabName,
   type ChangeFile,
   type ChangeItem,
   type ChangeTreeDir,
@@ -44,6 +47,8 @@ import {
   type FileTab,
   type PanelTab,
 } from "./side-panel";
+import { SubagentPane, type SubagentRuntime } from "./SubagentPane";
+import type { SubagentWatcher } from "./subagent-watch";
 import { TerminalPane, type TerminalShellChoice } from "./TerminalPane";
 import "./side-panel.css";
 
@@ -66,6 +71,21 @@ export interface PanelFileActions {
   openInBrowser: (absolutePath: string) => Promise<void>;
   /** openInBrowser 按钮的文字 */
   browserLabel: string;
+}
+
+/** 子代理标签的数据与能力（ADR-0060 第 6 节）；缺省（手机、没有子代理的测试）时子代理标签只显示说明 */
+export interface PanelSubagents {
+  watcher: SubagentWatcher;
+  /** 后台还没连上时 undefined */
+  runtime: SubagentRuntime | undefined;
+  /** 标签所属的父会话（即当前会话） */
+  parentSessionId: string;
+  /** 目录里这个 child 的最新摘要 */
+  summaryFor: (childSessionId: string) => SubagentSummary | undefined;
+  /** 父视图里的 task 调用（持久结算与耗时） */
+  parentEntryFor: (callId: string) => ToolEntry | undefined;
+  images: AttachmentImageSource;
+  openUrl: (url: string) => void;
 }
 
 export interface SidePanelProps {
@@ -117,9 +137,15 @@ export interface SidePanelProps {
   workspace?: string | undefined;
   /** 浏览器工具栏「在系统浏览器打开」 */
   openExternalUrl?: (url: string) => Promise<void>;
+  /** 子代理标签；没有时子代理标签显示说明 */
+  subagents?: PanelSubagents | undefined;
 }
 
-function Glyph({ kind }: { kind: "changes" | "file" | "terminal" | "globe" | "plus" | "close" }) {
+function Glyph({
+  kind,
+}: {
+  kind: "changes" | "file" | "terminal" | "globe" | "plus" | "close" | "agent";
+}) {
   const paths: Record<typeof kind, ReactNode> = {
     changes: (
       <>
@@ -142,6 +168,12 @@ function Glyph({ kind }: { kind: "changes" | "file" | "terminal" | "globe" | "pl
         <path d="M1.8 8h12.4M8 1.8c2 2.2 2 10.2 0 12.4M8 1.8c-2 2.2-2 10.2 0 12.4" />
       </>
     ),
+    agent: (
+      <>
+        <circle cx="8" cy="5" r="2.4" />
+        <path d="M3.2 13.5c.4-2.6 2.3-4 4.8-4s4.4 1.4 4.8 4" />
+      </>
+    ),
     plus: <path d="M8 3v10M3 8h10" />,
     close: <path d="m4 4 8 8m0-8-8 8" />,
   };
@@ -157,6 +189,10 @@ function tabTitle(tab: PanelTab): { name: string; project?: string; title: strin
   if (tab.kind === "new") return { name: "新标签页", title: "新标签页" };
   if (tab.kind === "terminal") return { name: "终端", project: tab.label, title: tab.cwd };
   if (tab.kind === "browser") return { name: browserTabName(tab), title: tab.url };
+  if (tab.kind === "subagent") {
+    const name = subagentTabName(tab);
+    return { name, title: name };
+  }
   const { name, scope } = fileTabLabel(tab);
   return { name, project: scope, title: tab.absolutePath };
 }
@@ -276,7 +312,15 @@ function TabBar(props: SidePanelProps) {
               {tab.kind === "browser" && props.browsers !== undefined ? (
                 <BrowserTabIcon pool={props.browsers} tab={tab} globe={<Glyph kind="globe" />} />
               ) : (
-                <Glyph kind={tab.kind === "new" || tab.kind === "browser" ? "globe" : tab.kind} />
+                <Glyph
+                  kind={
+                    tab.kind === "new" || tab.kind === "browser"
+                      ? "globe"
+                      : tab.kind === "subagent"
+                        ? "agent"
+                        : tab.kind
+                  }
+                />
               )}
               <TabLabel name={name} project={project} />
               <button
@@ -1213,6 +1257,23 @@ export function SidePanel(props: SidePanelProps) {
                   visible={!hidden && tab.id === activeId && current.has(tab.id)}
                   workspace={props.workspace}
                   openExternal={props.openExternalUrl ?? (() => Promise.resolve())}
+                />
+              )
+            ) : tab.kind === "subagent" ? (
+              props.subagents === undefined ? (
+                <div className="sp-empty">这个环境不能查看子代理</div>
+              ) : (
+                <SubagentPane
+                  tab={tab}
+                  parentSessionId={props.subagents.parentSessionId}
+                  visible={!hidden && tab.id === activeId && current.has(tab.id)}
+                  watcher={props.subagents.watcher}
+                  runtime={props.subagents.runtime}
+                  summary={props.subagents.summaryFor(tab.childSessionId)}
+                  parentEntry={props.subagents.parentEntryFor(tab.parentCallId)}
+                  workspace={props.workspace ?? ""}
+                  images={props.subagents.images}
+                  openUrl={props.subagents.openUrl}
                 />
               )
             ) : (

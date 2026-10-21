@@ -21,6 +21,7 @@ import {
   prepareProvider,
   probeSetupProviderModels,
   ProviderLoginError,
+  SessionError,
   startDraftProviderLogin,
   startProviderLogin,
   updateSetupProvider,
@@ -42,6 +43,7 @@ import {
   type RuntimeEvent,
   type RuntimeSession,
   type SettingsPatch,
+  type SubagentObservation,
   type SubmitInput,
   type UpdateSetupProviderPatch,
 } from "@nocturne/core";
@@ -232,6 +234,20 @@ interface LoginEntry {
   unstored: { value: { key: string; envName: string } | undefined };
 }
 
+/** 本连接对一个子会话的只读观察（含还在建立中的）；与 RuntimeSession 订阅互不相干 */
+interface SubagentWatch {
+  subscriptionId: string;
+  parentSessionId: string;
+  childSessionId: string;
+  /** 取消尚在建立中的观察；建立完成后改用 observation.unsubscribe */
+  controller: AbortController;
+  observation: SubagentObservation | undefined;
+  /** unsubscribe / 替换 / 父会话关闭 / 断线 / shutdown 已撤销；迟到的异步结果据此立即退订 */
+  cancelled: boolean;
+  /** 已自然结束（closed 已发出），表项随即释放 */
+  ended: boolean;
+}
+
 type Handler<K extends RpcMethodName> = (
   params: Params,
 ) => Promise<RpcMethods[K]["result"]> | RpcMethods[K]["result"];
@@ -280,6 +296,9 @@ class Connection implements HubPeer {
   private readonly requests = new Set<Promise<void>>();
   private cleanupPromise: Promise<void> | undefined;
   private readonly sessions = new Map<string, OpenSession>();
+  /** 子会话只读观察表：subscriptionId → 观察；pair 表用于「同一 child 再订阅替换旧观察」 */
+  private readonly subagentWatches = new Map<string, SubagentWatch>();
+  private readonly subagentPairs = new Map<string, string>();
   private readonly opening = new Set<Promise<unknown>>();
   private readonly openingIds = new Set<string>();
   private readonly abort = new AbortController();
@@ -312,6 +331,8 @@ class Connection implements HubPeer {
       });
       this.transport.onClose(() => {
         this.inputEnded = true;
+        // 子会话观察不等在途请求：断线时立即撤监听、取消尚在建立的回放
+        this.cancelSubagentWatches();
         if (this.origin === "local") {
           if (this.cleanupPromise === undefined) this.hub.stopping = true;
           this.remote?.stop();
@@ -533,6 +554,8 @@ class Connection implements HubPeer {
         discardDraftLogin(config, loginId);
       }
       this.draftLogins.clear();
+      // 子会话观察：撤监听、取消回放、丢缓冲；不触碰子会话的运行、锁与并发槽
+      this.cancelSubagentWatches();
       for (const entry of this.sessions.values()) {
         entry.generation++;
         entry.unsubscribe?.();
@@ -769,6 +792,118 @@ class Connection implements HubPeer {
     replaying = false;
     for (const event of buffer.splice(0)) push(event);
     return lastSeq;
+  }
+
+  // ── 子会话只读观察 ────────────────────────────────────────
+
+  private releaseSubagentWatch(watch: SubagentWatch): void {
+    if (this.subagentWatches.get(watch.subscriptionId) === watch) {
+      this.subagentWatches.delete(watch.subscriptionId);
+    }
+    const pair = subagentPairKey(watch.parentSessionId, watch.childSessionId);
+    if (this.subagentPairs.get(pair) === watch.subscriptionId) this.subagentPairs.delete(pair);
+  }
+
+  private cancelSubagentWatch(watch: SubagentWatch): void {
+    if (!watch.cancelled) {
+      watch.cancelled = true;
+      watch.controller.abort();
+      watch.observation?.unsubscribe();
+    }
+    this.releaseSubagentWatch(watch);
+  }
+
+  private cancelSubagentWatches(match?: (watch: SubagentWatch) => boolean): void {
+    for (const watch of [...this.subagentWatches.values()]) {
+      if (match === undefined || match(watch)) this.cancelSubagentWatch(watch);
+    }
+  }
+
+  private async subscribeSubagent(p: Params): Promise<RpcMethods["subagent.subscribe"]["result"]> {
+    const parentSessionId = reqString(p, "parentSessionId");
+    const childSessionId = reqString(p, "childSessionId");
+    const subscriptionId = reqString(p, "subscriptionId");
+    if (subscriptionId === "" || subscriptionId.length > 128) {
+      throw new InvalidParamsError("subscriptionId 必须是 1 到 128 个字符的非空字符串");
+    }
+    const afterSeq = optInt(p, "afterSeq");
+    if (afterSeq !== undefined && (!Number.isSafeInteger(afterSeq) || afterSeq < 0)) {
+      throw new InvalidParamsError("afterSeq 必须是非负整数");
+    }
+    if (this.subagentWatches.has(subscriptionId)) {
+      throw new InvalidParamsError("subscriptionId 已在使用");
+    }
+    if (this.shuttingDown || this.closed) {
+      throw new RpcProtocolError("shutting_down", "服务端正在关闭");
+    }
+    // 同一 (parent, child) 再订阅替换旧观察；其他 child 与其他连接互不影响
+    const pair = subagentPairKey(parentSessionId, childSessionId);
+    const previous = this.subagentPairs.get(pair);
+    const previousWatch = previous === undefined ? undefined : this.subagentWatches.get(previous);
+    if (previousWatch !== undefined) this.cancelSubagentWatch(previousWatch);
+
+    const watch: SubagentWatch = {
+      subscriptionId,
+      parentSessionId,
+      childSessionId,
+      controller: new AbortController(),
+      observation: undefined,
+      cancelled: false,
+      ended: false,
+    };
+    this.subagentWatches.set(subscriptionId, watch);
+    this.subagentPairs.set(pair, subscriptionId);
+    const cancelled = (): RpcProtocolError =>
+      new RpcProtocolError("subscription_cancelled", "子会话观察已被取消或替换");
+    try {
+      const observation = await this.runtime().observeSubagent(
+        {
+          parentSessionId,
+          childSessionId,
+          ...(afterSeq !== undefined ? { afterSeq } : {}),
+          signal: watch.controller.signal,
+        },
+        {
+          onEvent: (event) => {
+            if (watch.cancelled || watch.ended || event.sessionId !== childSessionId) return;
+            this.send({
+              jsonrpc: "2.0",
+              method: "subagent.event",
+              params: { subscriptionId, parentSessionId, childSessionId, event },
+            });
+          },
+          onEnd: (end) => {
+            if (watch.cancelled || watch.ended) return;
+            watch.ended = true;
+            this.send({
+              jsonrpc: "2.0",
+              method: "subagent.closed",
+              params: { subscriptionId, parentSessionId, childSessionId, end },
+            });
+            // 自然 closed 后释放表项
+            this.releaseSubagentWatch(watch);
+          },
+        },
+      );
+      if (watch.cancelled) {
+        // 建立期间被撤销：返回的观察不得复活
+        observation.unsubscribe();
+        throw cancelled();
+      }
+      watch.observation = observation;
+      return {
+        lastSeq: observation.lastSeq,
+        summary: observation.summary,
+        mode: observation.mode,
+      };
+    } catch (error) {
+      if (watch.cancelled) throw cancelled();
+      this.cancelSubagentWatch(watch);
+      if (error instanceof SessionError && error.code === "invalid_after_seq") {
+        throw new InvalidParamsError(error.message);
+      }
+      throw error;
+    }
   }
 
   // ── 方法表 ───────────────────────────────────────────────
@@ -1389,6 +1524,27 @@ class Connection implements HubPeer {
         throw new RpcProtocolError("unknown_login", "登录会话不存在或已结束");
       },
 
+      // 不在 REMOTE_METHODS：只服务本机面板（ADR-0060 第 4 轮），远程在 Core 调用前被拒
+      "subagent.list": (p) =>
+        this.runtime().listSubagents({ parentSessionId: reqString(p, "parentSessionId") }),
+      "subagent.readAttachment": async (p) => {
+        const attachment = await this.runtime().readSubagentAttachment({
+          parentSessionId: reqString(p, "parentSessionId"),
+          childSessionId: reqString(p, "childSessionId"),
+          file: reqString(p, "file"),
+        });
+        return {
+          data: Buffer.from(attachment.data).toString("base64"),
+          mimeType: attachment.mimeType,
+          bytes: attachment.bytes,
+        };
+      },
+      "subagent.subscribe": (p) => this.subscribeSubagent(p),
+      "subagent.unsubscribe": (p) => {
+        const watch = this.subagentWatches.get(reqString(p, "subscriptionId"));
+        if (watch !== undefined) this.cancelSubagentWatch(watch);
+        return null;
+      },
       "session.subscribe": async (p) => {
         const entry = this.session(p);
         const lastSeq = await this.subscribe(entry, optInt(p, "afterSeq") ?? 0);
@@ -1543,12 +1699,17 @@ class Connection implements HubPeer {
         this.sessions.delete(entry.session.id);
         entry.generation++;
         entry.unsubscribe?.();
+        // 父会话关闭：以它为 parent 的子会话观察一并撤销
+        this.cancelSubagentWatches((watch) => watch.parentSessionId === entry.session.id);
         await this.hub.release(entry.session.id);
         return null;
       },
     };
   }
 }
+
+const subagentPairKey = (parentSessionId: string, childSessionId: string): string =>
+  `${parentSessionId}\u0000${childSessionId}`;
 
 /** skills.importSkills 的 target：只有用户级与项目两处 */
 function parseImportTarget(p: Params): "user" | "project" {

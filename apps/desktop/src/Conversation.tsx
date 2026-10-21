@@ -42,6 +42,7 @@ import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { operationForSubjectKind } from "./notify";
 import { displayPath } from "./paths";
 import { isNetworkPath } from "./side-panel";
+import type { SubagentLink } from "./subagent-panel";
 import { TurnChangesCard } from "./TurnChangesCard";
 import { TodoList, TodoProgress, todoSummary } from "./TodoList";
 import { useReasoning, type ReasoningMap } from "./reasoning";
@@ -50,8 +51,39 @@ import { useStickyOutput } from "./useStickyOutput";
 import { useCopyText } from "./useCopyText";
 import "./conversation.css";
 
+/**
+ * 只读观察（ADR-0060 第 4 轮）：子代理视图只有身份和读图能力，没有任何命令入口。
+ * 它不是 RpcSession——不伪造命令句柄，写入口所在的分支靠 isLiveSession 排除。
+ */
+export interface ReadOnlySessionRef {
+  readonly id: string;
+  readonly readOnly: true;
+  readAttachment: RpcSession["readAttachment"];
+}
+
+/** 只读渲染开关：缺省（undefined）时主对话与手机的行为和渲染完全不变 */
+export interface ReadOnlyMode {
+  /**
+   * 日志未收束或观察已结束而没有终止事实：停止转圈与计时，仍在 running 的工具行标「未收束」，
+   * 但不伪造任何 reducer 事件
+   */
+  frozen: boolean;
+}
+
+/** 父对话 task 行的「在面板中查看」（ADR-0060 第 6 节）；手机不传，只读视图里嵌套的 task 也不传 */
+export interface SubagentLinks {
+  link: (entry: ToolEntry) => SubagentLink;
+  open: (childSessionId: string) => void;
+}
+
+export function isLiveSession(session: RpcSession | ReadOnlySessionRef): session is RpcSession {
+  return !("readOnly" in session && session.readOnly);
+}
+
 export interface ConversationProps {
   session: RpcSession;
+  /** task 行的「在面板中查看」；缺省不显示（手机不传） */
+  subagentLinks?: SubagentLinks | undefined;
   view: SessionView;
   openUrl: (url: string) => void;
   /** 会话工作区（工具行与权限主体里的路径相对化） */
@@ -122,6 +154,34 @@ export interface FileLinkHooks {
   /** 「查看源码」：在面板的文件标签里打开 */
   viewSource?: (absolutePath: string, line?: number) => Promise<void>;
 }
+
+/**
+ * 只读观察的 props（子代理标签）：session 换成只读引用，必带 readOnly；没有 onResubmit、onFork、
+ * 改动卡片、权限/提问应答等写入口的位置（Omit 掉，类型上就传不进去）。
+ */
+export type ReadOnlyConversationProps = Omit<
+  ConversationProps,
+  | "session"
+  | "onResubmit"
+  | "onFork"
+  | "turnChanges"
+  | "onRewindFiles"
+  | "loadChangeDiff"
+  | "onViewChanges"
+  | "subagentLinks"
+  | "hideRequests"
+  | "hidePersistentPermissions"
+> & {
+  session: ReadOnlySessionRef;
+  /** 只读观察：不挂权限/提问应答卡片，用户消息只读展示，没有编辑、重发、分叉、撤销 */
+  readOnly: ReadOnlyMode;
+};
+
+/** 内部统一形状：实时对话与只读观察共用同一份渲染 */
+type ContentProps = Omit<ConversationProps, "session"> & {
+  session: RpcSession | ReadOnlySessionRef;
+  readOnly?: ReadOnlyMode | undefined;
+};
 
 type OpenUrl = ConversationProps["openUrl"];
 
@@ -346,7 +406,7 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
   });
 }
 
-function Markdown({
+export function Markdown({
   text: markdown,
   openUrl,
   session,
@@ -642,6 +702,10 @@ const ThinkScrollContext = createContext<ThinkScroll>({
   collapsed: () => undefined,
 });
 
+/** 只读且日志未收束：工具行停止转圈与计时（ReadOnlyMode.frozen） */
+const FrozenContext = createContext(false);
+const SubagentLinksContext = createContext<SubagentLinks | null>(null);
+
 function durationText(seconds: number): string {
   if (seconds < 60) return `${String(seconds)} 秒`;
   const rest = seconds % 60;
@@ -771,7 +835,7 @@ function UserImage({
 }: {
   attachment: ImageAttachment;
   images: AttachmentImageSource;
-  session: RpcSession;
+  session: Pick<RpcSession, "readAttachment">;
   visible: boolean;
 }) {
   const [url, setUrl] = useState<string>();
@@ -843,7 +907,7 @@ function UserMessage({
 }: {
   entry: UserEntry;
   images: AttachmentImageSource;
-  session: RpcSession;
+  session: RpcSession | ReadOnlySessionRef;
   cwd: string;
   busy: boolean;
   /** 这条消息之后将被撤回的回复轮数（助手 turn 数） */
@@ -920,6 +984,7 @@ function UserMessage({
   const reasonText = (reason: unknown): string =>
     reason instanceof Error ? reason.message : String(reason);
   const startEdit = () => {
+    if (!isLiveSession(session)) return;
     setError(undefined);
     setPending(true);
     void session
@@ -1917,7 +1982,12 @@ function ToolRow({
           : { name: argument.text, dir: "", title: argument.text };
   const range = toolRange(entry);
   const running = !preparing && entry.status === "running";
-  const seconds = useRunningSeconds(running && !waiting);
+  // 只读且日志未收束：保留 running 的事实，但不转圈、不计时
+  const frozen = useContext(FrozenContext) && running;
+  const animating = running && !frozen;
+  const seconds = useRunningSeconds(animating && !waiting);
+  const links = useContext(SubagentLinksContext);
+  const subagentLink = links !== null && !preparing ? links.link(entry) : undefined;
   const result = toolResultText(entry);
   const error = entry.result?.error;
   const preview = running ? lastOutputLine(entry.liveOutput) : "";
@@ -1927,7 +1997,7 @@ function ToolRow({
     <span className="tool-res">接收参数中</span>
   ) : (
     <>
-      {running && !asked && <span className="tool-spin" aria-hidden="true" />}
+      {animating && !asked && <span className="tool-spin" aria-hidden="true" />}
       {subagent.model !== undefined && (
         <span className="tool-range">
           {subagent.model}
@@ -1941,7 +2011,7 @@ function ToolRow({
         </span>
       )}
       {seconds !== undefined && !asked && <span className="tool-secs">{seconds} 秒</span>}
-      {!running && todos === undefined && (
+      {(!running || frozen) && todos === undefined && (
         <span
           className={`tool-res${
             error !== undefined
@@ -1951,7 +2021,7 @@ function ToolRow({
               : ""
           }`}
         >
-          {error === undefined ? result.text : toolErrorSummary(entry, cwd)}
+          {frozen ? "未收束" : error === undefined ? result.text : toolErrorSummary(entry, cwd)}
         </span>
       )}
     </>
@@ -1960,6 +2030,24 @@ function ToolRow({
     <>
       {todos !== undefined && todos.length > 0 && <TodoProgress items={todos} />}
       {range !== undefined && <span className="tool-range">{range}</span>}
+      {subagentLink !== undefined && subagentLink.kind !== "none" && links !== null && (
+        // 独立按钮：不触发行的展开/收起（ADR-0060 第 6 节）
+        <button
+          type="button"
+          className="subagent-view"
+          disabled={subagentLink.kind === "locating"}
+          title={
+            subagentLink.kind === "locating" ? "正在定位子代理…" : "在右侧面板中查看子代理过程"
+          }
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (subagentLink.kind === "ready") links.open(subagentLink.childSessionId);
+          }}
+        >
+          {subagentLink.kind === "locating" ? "正在定位…" : "在面板中查看"}
+        </button>
+      )}
       {preview !== "" && (
         <span className="tool-live" title={entry.liveOutput}>
           {preview}
@@ -1970,7 +2058,7 @@ function ToolRow({
   const rows: (FileDiff | undefined)[] = diffs.length > 0 ? diffs : [undefined];
   return (
     <article
-      className={`tool${running ? " running" : ""}${preparing ? " preparing" : ""}`}
+      className={`tool${animating ? " running" : ""}${preparing ? " preparing" : ""}`}
       aria-label={`工具 ${entry.name ?? entry.callId}`}
     >
       {rows.map((file, index) => {
@@ -2107,6 +2195,7 @@ function EntryView({
   changesCard,
   preparing = false,
   waitingCallId,
+  userRole,
 }: {
   entry: ViewEntry;
   openUrl: OpenUrl;
@@ -2114,7 +2203,7 @@ function EntryView({
   parts: ReasoningMap;
   now: number;
   images: AttachmentImageSource;
-  session: RpcSession;
+  session: RpcSession | ReadOnlySessionRef;
   busy: boolean;
   repliesAfter: number;
   onResubmit: ConversationProps["onResubmit"];
@@ -2126,9 +2215,33 @@ function EntryView({
   preparing?: boolean;
   /** 与待回答提问同 callId 的工具行：行尾等待圆点，不计秒 */
   waitingCallId?: string | undefined;
+  /** 只读视图里用户消息的角色：第一条是任务，之后是催促；缺省 = 普通用户气泡 */
+  userRole?: "task" | "nudge" | undefined;
 }) {
   switch (entry.kind) {
     case "user":
+      if (userRole !== undefined) {
+        // 只读：任务原文与催促折叠展示，不当作可编辑的用户气泡（没有编辑、重发、分叉）
+        return (
+          <details className="ro-user">
+            <summary>
+              <span className="ro-user-tag">{userRole === "task" ? "任务" : "催促"}</span>
+              <span className="ro-user-preview">
+                {Array.from(userText(entry).replace(/\s+/g, " ").trim()).slice(0, 120).join("")}
+              </span>
+            </summary>
+            <UserMessage
+              entry={entry}
+              images={images}
+              session={session}
+              cwd={cwd}
+              busy={false}
+              repliesAfter={0}
+              onResubmit={undefined}
+            />
+          </details>
+        );
+      }
       return (
         <UserMessage
           entry={entry}
@@ -2145,7 +2258,12 @@ function EntryView({
       return (
         <article className="a" aria-label="助手消息">
           <Think messageId={entry.messageId} text={entry.reasoning} parts={parts} now={now} />
-          <Markdown text={entry.text} openUrl={openUrl} session={session} fileLinks={fileLinks} />
+          <Markdown
+            text={entry.text}
+            openUrl={openUrl}
+            session={isLiveSession(session) ? session : undefined}
+            fileLinks={fileLinks}
+          />
           {entry.finishReason === "aborted" ? (
             <p className="conversation-review">回复已中断</p>
           ) : null}
@@ -2872,7 +2990,8 @@ function ConversationContent({
   onViewChanges,
   hidePersistentPermissions,
   hideRequests = false,
-}: ConversationProps) {
+  readOnly,
+}: ContentProps) {
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
@@ -2881,6 +3000,14 @@ function ConversationContent({
   const { parts, now } = useReasoning(subscribeEvents);
   const users = view.entries.filter((e) => e.kind === "user");
   const lastSeq = users.at(-1)?.seq;
+  const firstUserSeq = users[0]?.seq;
+  /** 只读视图里的用户消息是任务/催促，不是可编辑的气泡 */
+  const roleOf = (entry: ViewEntry): "task" | "nudge" | undefined =>
+    readOnly === undefined || entry.kind !== "user"
+      ? undefined
+      : entry.seq === firstUserSeq
+        ? "task"
+        : "nudge";
   const changesByKey = new Map<string, TurnChanges>();
   for (const [index, user] of users.entries()) {
     const turn = turnChanges?.get(user.seq);
@@ -2897,7 +3024,7 @@ function ConversationContent({
     if (anchor) changesByKey.set(anchor.key, turn);
   }
   const renderChanges = (turn: TurnChanges | undefined) =>
-    turn && onRewindFiles && loadChangeDiff ? (
+    turn && onRewindFiles && loadChangeDiff && isLiveSession(session) ? (
       <TurnChangesCard
         key={turn.seq}
         turn={turn}
@@ -3029,6 +3156,7 @@ function ConversationContent({
                     session={session}
                     busy={busy}
                     waitingCallId={view.pendingQuestion?.callId}
+                    userRole={roleOf(entry)}
                     repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
                     onResubmit={onResubmit}
                     onFork={onFork}
@@ -3115,7 +3243,16 @@ function ConversationContent({
           </button>
         </div>
       ) : null}
-      {!hideRequests && view.pendingPermission ? (
+      {readOnly !== undefined && view.pendingPermission ? (
+        // 只读：旧日志里的未决确认只给提示，没有任何应答按钮或快捷键
+        <div className="conversation-requests">
+          <p className="ro-pending" role="status">
+            {readOnly.frozen
+              ? "这是历史日志里没有结算的确认请求；确认仍在主对话处理，此处不能批准。"
+              : "确认仍在主对话处理；此处不能批准。"}
+          </p>
+        </div>
+      ) : !hideRequests && view.pendingPermission && isLiveSession(session) ? (
         <div className="conversation-requests">
           <PermissionCard
             key={`permission:${view.pendingPermission.requestId}`}
@@ -3131,6 +3268,14 @@ function ConversationContent({
   );
 }
 
-export function Conversation(props: ConversationProps) {
-  return <ConversationContent key={props.session.id} {...props} />;
+export function Conversation(props: ConversationProps | ReadOnlyConversationProps) {
+  const readOnly = "readOnly" in props ? props.readOnly : undefined;
+  const links = "subagentLinks" in props ? props.subagentLinks : undefined;
+  return (
+    <FrozenContext.Provider value={readOnly?.frozen === true}>
+      <SubagentLinksContext.Provider value={readOnly === undefined ? (links ?? null) : null}>
+        <ConversationContent key={props.session.id} {...props} />
+      </SubagentLinksContext.Provider>
+    </FrozenContext.Provider>
+  );
 }

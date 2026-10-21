@@ -13,8 +13,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import type { SubagentSummary } from "@nocturne/core/protocol";
+
 import type { FileIndexEntry } from "./file-refs";
-import { rankQuickOpen } from "./side-panel";
+import { rankQuickOpen, SUBAGENT_SUMMARY_MAX } from "./side-panel";
+import { elapsedText, runningMs } from "./subagent-panel";
 
 /** WindowFrame 标题栏里给 App 放按钮的位置；没有标题栏（测试、手机）时为 null */
 export const TitlebarSlot = createContext<HTMLElement | null>(null);
@@ -232,8 +235,91 @@ export function QuickOpen({
   );
 }
 
+/** 概览里的外部 agent 行：只读展示，不可点击；since 是首次看到它运行的本地时刻 */
+export interface OverviewExternal {
+  callId: string;
+  agent: string;
+  summary: string;
+  since: number;
+}
+
+/** 概览「子代理」分组的内容（ADR-0060 第 1 节与修订（五）第 3 条） */
+export interface OverviewSubagents {
+  /** 直接内置、仍在运行的子代理（可点击） */
+  running: readonly SubagentSummary[];
+  external: readonly OverviewExternal[];
+  onOpen: (summary: SubagentSummary) => void;
+}
+
+/** 每秒刷新的本地时钟：概览里的秒数靠它，不靠查询 */
+function useNow(enabled: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    setNow(Date.now());
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [enabled]);
+  return now;
+}
+
+function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
+  const { running, external, onOpen } = subagents;
+  const now = useNow(running.length + external.length > 0);
+  return (
+    <div className="ovpop-group thin-scroll" role="group" aria-label="子代理">
+      <div className="ovpop-head">子代理</div>
+      {running.map((agent) => {
+        const ms = runningMs(agent.startedAt, now);
+        return (
+          <button
+            key={agent.childSessionId}
+            type="button"
+            className="ovpop-agent"
+            title={agent.taskSummary}
+            onClick={() => {
+              onOpen(agent);
+            }}
+          >
+            <svg className="sp-glyph" viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="5" r="2.4" />
+              <path d="M3.2 13.5c.4-2.6 2.3-4 4.8-4s4.4 1.4 4.8 4" />
+            </svg>
+            <span className="ovpop-agent-text">
+              <span className="ovpop-agent-profile">{agent.profile}</span>
+              <span className="ovpop-agent-summary">
+                {Array.from(agent.taskSummary).slice(0, SUBAGENT_SUMMARY_MAX).join("")}
+              </span>
+            </span>
+            <span className="ovpop-n ovpop-time">{ms === undefined ? "" : elapsedText(ms)}</span>
+          </button>
+        );
+      })}
+      {external.map((run) => (
+        // 外部 agent 的过程只在主对话的进度里，没有 Nocturne 子会话可看：不可点击
+        <div key={run.callId} className="ovpop-agent external" title={run.summary}>
+          <svg className="sp-glyph" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="5" r="2.4" />
+            <path d="M3.2 13.5c.4-2.6 2.3-4 4.8-4s4.4 1.4 4.8 4" />
+          </svg>
+          <span className="ovpop-agent-text">
+            <span className="ovpop-agent-profile">{run.agent}</span>
+            <span className="ovpop-agent-summary">{run.summary}</span>
+            <span className="ovpop-agent-note">外部 agent · 仅主对话进度</span>
+          </span>
+          <span className="ovpop-n ovpop-time">{elapsedText(Math.max(0, now - run.since))}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
- * 会话概览浮层（ADR-0060 第 2 节）：第 1 轮只有项目行和「变更」行。
+ * 会话概览浮层（ADR-0060 第 2 节）：项目行、「变更」行和「子代理」分组（没有运行项时隐藏）。
  * 开关只经标题栏按钮与 Esc，点「变更」不关浮层。docked 时停在对话区右侧
  * 空白（对话列让位），否则盖在对话上。
  */
@@ -244,6 +330,7 @@ export function SessionOverview({
   docked,
   rightOffset,
   onOpenChanges,
+  subagents,
 }: {
   project: string;
   workspace: string;
@@ -252,6 +339,8 @@ export function SessionOverview({
   /** 面板盖在对话区上时浮层让到面板左边；对话区放不下时压在面板上，不盖侧边栏 */
   rightOffset: number;
   onOpenChanges: () => void;
+  /** 子代理分组；没有运行项（或不传）时整组隐藏 */
+  subagents?: OverviewSubagents | undefined;
 }) {
   return (
     <div
@@ -294,6 +383,9 @@ export function SessionOverview({
           )}
         </span>
       </button>
+      {subagents !== undefined && subagents.running.length + subagents.external.length > 0 && (
+        <SubagentRows subagents={subagents} />
+      )}
     </div>
   );
 }

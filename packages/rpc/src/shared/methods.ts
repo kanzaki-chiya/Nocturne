@@ -59,6 +59,9 @@ import type {
   SessionState,
   SessionSummary,
   SettingItem,
+  SubagentReadEnd,
+  SubagentObservationInfo,
+  SubagentSummary,
   SettingsPatch,
   ToggleImpact,
   TurnEndReason,
@@ -449,6 +452,27 @@ export interface RpcMethods {
   "login.submitManual": { params: { loginId: string; text: string }; result: null };
   "login.cancel": { params: { loginId: string }; result: null };
 
+  /**
+   * 子会话只读观察（rpc.md 4.1，ADR-0060 第 4 轮）：不要求打开父会话，也不返回
+   * RpcSession；仅本机开放，不进远程白名单。
+   */
+  "subagent.list": { params: { parentSessionId: string }; result: SubagentSummary[] };
+  "subagent.readAttachment": {
+    params: { parentSessionId: string; childSessionId: string; file: string };
+    result: { data: string; mimeType: ImageMimeType; bytes: number };
+  };
+  "subagent.subscribe": {
+    params: {
+      parentSessionId: string;
+      childSessionId: string;
+      /** 客户端生成、本连接内不复用的订阅标识 */
+      subscriptionId: string;
+      afterSeq?: number;
+    };
+    /** 回放与衔接完成后返回；通知（含 closed）可先于本响应到达 */
+    result: SubagentObservationInfo;
+  };
+  "subagent.unsubscribe": { params: { subscriptionId: string }; result: null };
   "session.subscribe": {
     params: SessionParams & { afterSeq?: number };
     /** 回放与实时衔接已完成时返回；`lastSeq` 是已推送的最后一个持久事件的 seq */
@@ -524,6 +548,20 @@ export interface RpcServerNotifications {
   "remote.paired": { device: { id: string; name: string } };
   "remote.pairingFailed": { code: string };
   event: { sessionId: string; event: RuntimeEvent };
+  /** 子会话事件，原样 RuntimeEvent（sessionId 等于 childSessionId）；不混入父 `event` 通道 */
+  "subagent.event": {
+    subscriptionId: string;
+    parentSessionId: string;
+    childSessionId: string;
+    event: RuntimeEvent;
+  };
+  /** 本次观察自然结束，最后一条事件之后至多一次；不是 RuntimeEvent，也不写日志 */
+  "subagent.closed": {
+    subscriptionId: string;
+    parentSessionId: string;
+    childSessionId: string;
+    end: SubagentReadEnd;
+  };
   /**
    * 配置变更方法（provider.commitProvider 等）成功后、响应之前推送：
    * Runtime 的 Provider 注册表已用重载后的配置重建，listModels 等读到的已是新值
@@ -613,6 +651,10 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "login.startDraft": true,
   "login.submitManual": true,
   "login.cancel": true,
+  "subagent.list": true,
+  "subagent.readAttachment": true,
+  "subagent.subscribe": true,
+  "subagent.unsubscribe": true,
   "session.subscribe": true,
   "session.unsubscribe": true,
   "session.readAttachment": true,

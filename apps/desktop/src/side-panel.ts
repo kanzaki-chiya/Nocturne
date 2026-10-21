@@ -65,11 +65,33 @@ export interface BrowserTab {
   title?: string | undefined;
 }
 
-export type PanelTab = NewTab | ChangesTab | FileTab | TerminalTab | BrowserTab;
+/**
+ * 子代理（ADR-0060 第 6 节与修订（五））：父会话某次 task 调用派生的内置子会话的只读视图。
+ * 只存标识和展示用的档位、摘要，不存事件、任务全文或任何交互句柄；所属父会话是
+ * panelSessions 的外层键。同一 childSessionId 在父会话内只有一个标签。
+ */
+export interface SubagentTab {
+  id: string;
+  kind: "subagent";
+  childSessionId: string;
+  parentCallId: string;
+  profile: string;
+  taskSummary: string;
+}
 
-/** 存进本机偏好的标签：「文件」「变更」「浏览器」（新标签页、终端不恢复） */
+export type PanelTab = NewTab | ChangesTab | FileTab | TerminalTab | BrowserTab | SubagentTab;
+
+/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」（新标签页、终端不恢复） */
 export type StoredPanelTab =
   | { id: string; kind: "changes" }
+  | {
+      id: string;
+      kind: "subagent";
+      childSessionId: string;
+      parentCallId: string;
+      profile: string;
+      taskSummary: string;
+    }
   | { id: string; kind: "browser"; url: string; title?: string }
   | {
       id: string;
@@ -87,6 +109,8 @@ export const PANEL_DEFAULT_WIDTH = 520;
 export const CONVERSATION_MIN_WIDTH = 480;
 /** 概览浮层停靠时对话列让出的宽度（side-panel.css 的 --ov-reserve） */
 export const OVERVIEW_RESERVE = 300;
+/** 子代理标签名里任务摘要的码点上限（与 Core SubagentSummary.taskSummary 同一口径） */
+export const SUBAGENT_SUMMARY_MAX = 120;
 /** 每个会话记住的最近在面板里打开过的文件数（Ctrl+P 空查询排在前面） */
 export const RECENT_FILES_MAX = 20;
 
@@ -277,6 +301,7 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
   if (!Array.isArray(value)) return [];
   const tabs: StoredPanelTab[] = [];
   const ids = new Set<string>();
+  const subagentChildren = new Set<string>();
   let changes = false;
   for (const item of value) {
     if (typeof item !== "object" || item === null) continue;
@@ -286,6 +311,24 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
       changes = true;
       ids.add(raw.id);
       tabs.push({ id: raw.id, kind: "changes" });
+    } else if (
+      raw.kind === "subagent" &&
+      str(raw.childSessionId) &&
+      str(raw.parentCallId) &&
+      !subagentChildren.has(raw.childSessionId)
+    ) {
+      // 一个 child 只有一个标签；缺档位/摘要的损坏条目丢弃，不猜
+      if (!str(raw.profile) || typeof raw.taskSummary !== "string") continue;
+      subagentChildren.add(raw.childSessionId);
+      ids.add(raw.id);
+      tabs.push({
+        id: raw.id,
+        kind: "subagent",
+        childSessionId: raw.childSessionId,
+        parentCallId: raw.parentCallId,
+        profile: raw.profile,
+        taskSummary: raw.taskSummary,
+      });
     } else if (raw.kind === "browser" && str(raw.url) && isBrowserUrl(raw.url)) {
       ids.add(raw.id);
       tabs.push({
@@ -314,6 +357,18 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
 export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
   return tabs.flatMap((tab): StoredPanelTab[] => {
     if (tab.kind === "changes") return [{ id: tab.id, kind: "changes" }];
+    if (tab.kind === "subagent") {
+      return [
+        {
+          id: tab.id,
+          kind: "subagent",
+          childSessionId: tab.childSessionId,
+          parentCallId: tab.parentCallId,
+          profile: tab.profile,
+          taskSummary: tab.taskSummary,
+        },
+      ];
+    }
     if (tab.kind === "browser") {
       return [
         {
@@ -356,6 +411,23 @@ export function restoreTabs(
   }
   const active = tabs.find((tab) => tab.id === activeId) ?? tabs[0];
   return { tabs, activeId: active?.id ?? "" };
+}
+
+/** 标签名：档位 · 任务摘要；摘要压成单行、最多 120 个码点，按宽度省略交给样式 */
+export function subagentTabName(tab: Pick<SubagentTab, "profile" | "taskSummary">): string {
+  const flat = tab.taskSummary.replace(/\s+/g, " ").trim();
+  const summary = Array.from(flat).slice(0, SUBAGENT_SUMMARY_MAX).join("");
+  return summary === "" ? tab.profile : `${tab.profile} · ${summary}`;
+}
+
+/** 父会话里已开的这个 child 的标签（按 childSessionId 去重） */
+export function subagentTabFor(
+  tabs: readonly PanelTab[],
+  childSessionId: string,
+): SubagentTab | undefined {
+  return tabs.find(
+    (tab): tab is SubagentTab => tab.kind === "subagent" && tab.childSessionId === childSessionId,
+  );
 }
 
 /** 拖动排序：把 fromId 移到 toId 的位置 */

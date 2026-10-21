@@ -1146,3 +1146,155 @@
   opacity: 0 !important;
   transition: none !important;
 }
+
+/* ── 子代理标签（ADR-0060 第 6 节） ── */
+.sp-sub {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.sp-sub-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 10px 6px 12px;
+  border-bottom: 1px solid var(--a-border);
+  font-size: 12px;
+}
+.sp-sub-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--a-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-sub-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--a-muted);
+  white-space: nowrap;
+}
+.sp-sub-status.running {
+  color: var(--a-accent);
+}
+.sp-sub-status.error,
+.sp-sub-status.denied {
+  color: var(--a-error);
+}
+.sp-sub-status .tool-spin {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--a-borderStrong);
+  border-top-color: var(--a-secondary);
+  border-radius: 50%;
+  animation: tool-spin 1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sp-sub-status .tool-spin {
+    animation: none;
+  }
+}
+.sp-sub-time {
+  flex: none;
+  color: var(--a-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sp-sub-note {
+  flex: none;
+  margin: 0;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--a-border);
+  color: var(--a-muted);
+  font-size: 12px;
+}
+.sp-sub-note.err {
+  color: var(--a-error);
+}
+.sp-sub-result {
+  flex: none;
+  max-height: 40%;
+  padding: 0 12px;
+  overflow: auto;
+  border-bottom: 1px solid var(--a-border);
+  font-size: 13px;
+}
+.sp-sub-result > summary {
+  padding: 6px 0;
+  color: var(--a-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.sp-sub-result pre {
+  margin: 0 0 8px;
+  font: 12px/1.6 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.sp-sub-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.sp-sub-body .conversation .conversation-scroll {
+  padding: 12px;
+}
+
+/* 概览浮层的「子代理」分组 */
+.ovpop-group {
+  display: grid;
+  gap: 2px;
+  max-height: 240px;
+  margin-top: 6px;
+  padding-top: 6px;
+  overflow: auto;
+  border-top: 1px solid var(--a-border);
+}
+.ovpop-head {
+  padding: 2px 10px;
+  color: var(--a-faint);
+  font-size: 11px;
+}
+.ovpop-agent-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.ovpop-agent-profile {
+  color: var(--a-accent);
+  font: 11.5px var(--mono);
+}
+.ovpop-agent-summary {
+  overflow: hidden;
+  color: var(--a-text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ovpop-agent-note {
+  color: var(--a-faint);
+  font-size: 10.5px;
+}
+.ovpop-time {
+  color: var(--a-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ovpop-agent.external {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: default;
+}

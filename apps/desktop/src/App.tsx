@@ -14,7 +14,7 @@ import type {
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
 import { BackendLogsPage, SHELL_LOG_ID, type BackendLogTarget } from "./BackendLogsPage";
 import { Composer, type ComposerSubmit, type WorkspaceChoice } from "./Composer";
-import { Conversation, QuestionCard, type FileLinkHooks } from "./Conversation";
+import { Conversation, QuestionCard, type FileLinkHooks, type SubagentLinks } from "./Conversation";
 import {
   activeConversationCount,
   Conversations,
@@ -862,6 +862,7 @@ export function App({ host }: { host: DesktopHost }) {
     plainKey: effectiveWorkspace === null ? null : projectKey(effectiveWorkspace),
     client: pool.get(),
     ensureClient: () => pool.ensure(),
+    images,
   });
   panelRef.current = sidePanel;
   // 会话由忙转闲时刷新一次列表（标题/时间可能更新）；切换本身由
@@ -1313,6 +1314,7 @@ export function App({ host }: { host: DesktopHost }) {
                 onRewindFiles={(seq) => conversations.rewindFiles(seq)}
                 loadChangeDiff={(seq, path) => conversations.turnChangeDiff(active, seq, path)}
                 onViewChanges={sidePanel.viewChanges}
+                subagentLinks={sidePanel.subagentLinks}
                 onSubmit={(input) => submitInput(input)}
                 onInterrupt={() => {
                   conversations.interrupt();
@@ -1550,6 +1552,8 @@ interface SessionPaneProps {
   loadChangeDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
   /** 改动卡片「查看变更」→ 右侧面板（ADR-0060） */
   onViewChanges: (seq: number) => void;
+  /** task 行的「在面板中查看」（右侧面板打开子代理标签）；没连着后台时没有 */
+  subagentLinks: SubagentLinks | undefined;
   onSubmit: (input: ComposerSubmit) => Promise<boolean>;
   onInterrupt: () => void;
   onSlash: (line: string) => Promise<boolean>;
@@ -1583,6 +1587,7 @@ function SessionPane({
   onRewindFiles,
   loadChangeDiff,
   onViewChanges,
+  subagentLinks,
   onSubmit,
   onInterrupt,
   onSlash,
@@ -1667,6 +1672,7 @@ function SessionPane({
         onRewindFiles={onRewindFiles}
         loadChangeDiff={loadChangeDiff}
         onViewChanges={onViewChanges}
+        subagentLinks={subagentLinks}
         fileLinks={fileLinks}
       />
       {view.pendingQuestion ? (

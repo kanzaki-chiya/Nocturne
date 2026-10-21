@@ -10,6 +10,14 @@ export type SessionErrorCode =
   | "session_not_found"
   /** 会话被另一个进程持锁（ADR-0009） */
   | "session_locked"
+  /** 只读观察（rpc.md 4.1）：session id 不是安全的单文件名标识 */
+  | "invalid_session_id"
+  /** 只读观察：指定的 child 不是该 parent 的直接子会话（含把顶层会话当 child） */
+  | "subagent_parent_mismatch"
+  /** 只读观察：afterSeq 超过读到的持久高水位 */
+  | "invalid_after_seq"
+  /** 只读读取日志时的 I/O 错误（不含文件不存在） */
+  | "session_read_failed"
   /** 附件文件名不安全或落盘路径是链接 */
   | "invalid_attachment_file"
   /** 本会话的持久事件未登记该图片文件 */

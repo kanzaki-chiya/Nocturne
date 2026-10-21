@@ -138,7 +138,7 @@ launch(request, ctx)
 
 - **日志**：`<NOCTURNE_HOME>/sessions/<childSessionId>.jsonl` + `.lock`，与顶层会话同目录、同格式、同锁语义（ADR-0009）。子会话的落盘附件在 `attachments/<childSessionId>/` 下——`presetContext.sessionId` 传子会话 id，预设规则自动放行它自己的附件目录。
 - **父子关联**：`session.created` 增加可选字段 `parent?: { sessionId: string; callId: string }`（兼容新增，旧版本忽略）。`callId` 是父会话中那次 `task` 调用的标识——由此可从子日志找到父会话与触发它的那格调用。
-- **列表可见性**：`SessionSummary` 增加 `parent` 字段；`SessionStore.list`/`listSessions` 增加 `includeSubagents?: boolean`，**默认 false**——`--sessions`、`/resume`、`-c/--continue` 都只面向顶层会话，子会话是运行痕迹而非可交互会话（避免 `-c` 误恢复一条子日志）。按 id 显式 `resumeSession(childId)` 仍然可行：它只是打开一条普通日志，供排查与只读回放。
+- **列表可见性**：`SessionSummary` 增加 `parent` 字段；`SessionStore.list`/`listSessions` 增加 `includeSubagents?: boolean`，**默认 false**——`--sessions`、`/resume`、`-c/--continue` 都只面向顶层会话，子会话是运行痕迹而非可交互会话（避免 `-c` 误恢复一条子日志）。按 id 显式 `resumeSession(childId)` 仍然可行，但它会取得锁并可能修复日志，不是只读接口；只读查看采用第 12 节的独立设计。
 - **恢复**：
   - 父会话被杀/中断时子代理在跑：父侧按既有修复把未结算的 `task` 调用补 `tool.completed(interrupted)` + `turn.completed(process_exited, recovered)`；
   - 子日志到 kill 点为止的内容是完整的已提交前缀（每条日志独立）；未收束的 Turn 与调用**在下一次打开该子日志时**按第 6 节惰性修复——与任何崩溃会话一致，父侧恢复不主动触碰子日志（打开、取锁、修复是子日志自己的生命周期动作）。
@@ -239,9 +239,32 @@ launch(request, ctx)
 
 **不新增事件类型。** `task` 在父会话就是一格普通工具条目（`tool.started`/`tool.completed`）；运行期间 launcher 订阅子会话事件并把**一行式摘要**经 `ctx.progress` 转发为父会话的 `tool.progress(stream:"info")`：子 Turn 开始、每个子工具调用的 `<name> → <status>` 结算行。发送方不补换行；CLI 为每条 `info` 单独成行，TUI 的视图归约在 `liveOutput` 中分行后展示尾部（[tool-api.md](../protocols/tool-api.md) 第 2 节）。
 
-**为什么不流式转发子会话内部内容**：子代理的文本与工具明细全量复制到父时间线会淹没父会话视图，且这些信息已经完整、可审计地写在子日志里（`output.childLogPath` 指路）。一行一结算的进度在"知道它在干活"与"不打扰"之间取平衡；要看全程，打开子日志。
+**为什么不流式转发子会话内部内容**：子代理的文本与工具明细全量复制到父时间线会淹没父会话视图，且这些信息已经完整、可审计地写在子日志里（`output.childLogPath` 指路）。一行一结算的进度在"知道它在干活"与"不打扰"之间取平衡；要看全程，在独立只读视图里观察子会话，不把它的事件混入父 reducer。
 
 `--sessions` 与 `/resume` 默认不列出子会话（第 5 节）；子代理调用本身在父会话的权限确认提示中显示为 `subagent <preset>` 主体，文案与其他主体一致。
+
+### 12.1 只读发现与观察（ADR-0060 第 4 轮）
+
+精确类型、RPC 方法、回放算法、错误与清理契约以 [rpc.md 第 4.1 节](../protocols/rpc.md#41-子会话只读观察adr-0060-第-4-轮) 为主文档。实现位于 `session/subagent-registry.ts`、`session/subagent-observe.ts` 与 `session/readonly-log.ts`，由 Runtime 装配并向 launcher 注入共享登记簿。
+
+- **发现不靠解析进度文本**：新增 `Runtime.listSubagents({parentSessionId})`，返回直接内置子会话的 child id、父 callId、启动档位/任务摘要、起止时间与可证明的状态。`session.created.parent` 是持久映射；运行中无需等父 `tool.completed.output`。可复用只读日志头索引查历史映射，不新增事件或事件字段，也不把当前档位配置用于解释历史。
+- **Runtime 级观察登记簿**：与运行级 limiter 同寿命，注入所有 launcher（递归共享），不是 Hub 的 sessions 表。子创建事件提交后、执行和进度转发前登记 child Session；登记时可捕获 request 的档位与摘要，父日志仍保留原始任务。索引以 `(parentSessionId, callId, childSessionId)` 关联；同一父调用意外出现多个 child 时保留各自 id，不任取一个覆盖。launcher 在 finally 中处理 SessionEnd、等写入与 close 后才发内存终止信号并移除活动项；异常和失败也必须走这条清理路径。观察者抛错或退出不得影响运行、锁、并发槽或结果返回。
+- **结束和重启**：活动登记簿不落盘；结束后无需永久保留 Session 引用，按子日志 parent 重建映射，父工具输入补展示元数据。重启不复活子代理，不把旧的 running 工具行当作活动登记；只读日志前缀决定可显示内容。已结束、未收束和来自别的进程的日志都能看，但后两者不能被伪装成本后台实时运行或成功。子会话被删除后保留的面板标签显示不可用，不自动派生或恢复运行。
+- **无缝接流与自然结束**：新增 `Runtime.observeSubagent` 返回观察对象，不返回 `RuntimeSession`。活动 child 直接接已有 Session 的已提交事件，回放先监听后取快照、按 seq 去重；终止信号与事件一起衔接。不能在一个 `turn.completed(done)` 后就退订，因为 launcher 可能继续催促。无活动项走独立只读 reader，不经 load/repair；不完整尾行仅在内存略过，不取锁、不写任何文件。EOF 是读取完成，不是子代理成功。
+- **嵌套**：观察 API 以直接父子关系校验，能看任意深度的内置 child；先 list 当前 child 的直接子级，再携带该 child 作为 parent 观察孙级。本轮桌面不做嵌套跳转入口，不展开递归树；顶层概览只列直接子代理。
+- **外部 ACP**：没有 Nocturne 子会话，不伪装为 SessionView、不把 `external/<callId>.jsonl` 翻译成 RuntimeEvent。保留父工具行的进度、最终结果与已有审计路径；不提供「在面板中查看」。概览可由父工具条目的 `subagent external:<name>` 主体识别运行中的外部调用，显示「外部 agent · 仅主对话进度」，不作为可点击项。审计文件可能缺失/不完整（第 17 节），本轮不增加专用解析器。
+
+### 12.2 视图与权限边界
+
+每个被观察 child 使用独立的 `createSessionView` / `reduceSessionView`，无需改变 reducer、事件类型或持久重放规则。`message.user` 是任务原文（后续可能是催促），展示层标成「任务」/「催促」，保留可展开的原文，不把它当成用户可编辑气泡；思考、普通工具、输出使用主对话的同一渲染原语。`finish` 是普通工具条目，成功提交时从其持久 input.result 展示「最终结果」（字符串为 Markdown、结构化值为格式化 JSON）；`finish.tool.completed.modelContent` 只是提交回执，不是结果正文。父 task 结算到达后以其状态和耗时为准；无成功 finish 时显示失败/最后输出，不能拿最后一条 assistant 文本冒充最终结果。
+
+图片输出由只读 `Runtime.readSubagentAttachment` 提供，复用既有附件引用/路径/哈希校验，不创建 RpcSession；文件引用的展示可以复用主对话渲染，但不为此打开 child 或启用任何交互命令。
+
+观察完成状态放在视图外的只读来源元数据中，不给 reducer 注入虚假的 turn.completed；未收束日志可以仍有 currentTurn / pendingPermission，但界面停止转圈并提示「日志未收束／运行状态未知」。实时订阅前丢失的思考增量不能补造；持久 message.assistant 到达后按完整内容收敛，思考时长只展示已知值。
+
+**权限语义不扩展**：当前内置子会话及 ACP 都是非交互 gate，剩余 ask 直接 non_interactive deny，不产生等待用户确认。父 task 启动前的确认留在主对话，此时还没有 child，不提供可用的子标签入口；标签内受阻操作提示「子代理无法请求确认；需由主代理在主对话处理」。若读取旧日志发现未决 permission.requested，只展示只读状态与「确认仍在主对话处理；此处不能批准」，无应答按钮；历史未收束请求不声称当前仍在等待。未来若做权限冒泡，另行设计，不能在这轮为了造一个等待状态而改变第 7 节。
+
+只读观察不启动会话、不授予交互句柄，不进入工具权限管线、不新增 Grant。已有 resumeSession 仍是显式打开；不得借观察对象调用 submit、respondPermission、respondQuestion 或 interrupt。新 RPC 仅本机开放，远程由服务端白名单拒绝，ADR-0052 的通道与手机现有能力保持不变。
 
 ## 13. 诊断与关联（含 traceId 决定）
 

@@ -2,7 +2,6 @@
  * @nocturne/core 公开入口（modules.md 第 3 节"core/index（公开 API）"）。
  * 客户端看到的全部能力都经由这里；进程内与将来的 RPC 客户端共用同一份语义（ADR-0002）。
  */
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import { McpSettingsError, validateMcpEntry } from "./config/mcp.js";
 import type {
@@ -104,7 +103,6 @@ import {
   createPlatform,
   createShellResolver,
   detectShells,
-  fsErrorCode,
   isShellKind,
   parseShellSpec,
   specFromConfigFields,
@@ -141,7 +139,6 @@ import type {
   HookEntry,
   HookPoint,
   DurableEvent,
-  ImageAttachment,
   ImageMimeType,
   ModelRef,
   PermissionReply,
@@ -153,6 +150,9 @@ import type {
   RewindTarget,
   RewindMode,
   SessionRewoundPayload,
+  SubagentObservation,
+  SubagentObserver,
+  SubagentSummary,
   TurnEndReason,
   TurnChanges,
   TurnChangeDiff,
@@ -167,9 +167,13 @@ import { validateSettingsPatch } from "./config/settings.js";
 import { resolveSubagentProfile } from "./config/subagent-profiles.js";
 import {
   createSessionStore,
+  createSubagentObservation,
+  createSubagentRegistry,
   readLocalFile,
+  readSessionAttachment,
   resolveFileRef,
   SessionError,
+  type ReadAttachmentResult,
   type Session,
   type SessionRecovery,
   type SessionState,
@@ -353,12 +357,7 @@ export interface SubmitInput {
   delegate?: AgentDelegation | undefined;
 }
 
-/** 本会话已登记并通过磁盘完整性校验的图片附件。 */
-export interface ReadAttachmentResult {
-  data: Uint8Array;
-  mimeType: ImageMimeType;
-  bytes: number;
-}
+export type { ReadAttachmentResult };
 
 export interface RuntimeSession {
   describeSkills(): SkillsDescription;
@@ -598,6 +597,31 @@ export interface Runtime {
   createSession(options: CreateSessionOptions): Promise<RuntimeSession>;
   resumeSession(id: string, options?: ResumeSessionOptions): Promise<RuntimeSession>;
   forkSession(id: string, options?: { targetSeq?: number }): Promise<string>;
+  /**
+   * 只读发现父会话的直接内置子会话（含已结束，ADR-0060 第 4 轮、rpc.md 4.1）：
+   * 登记簿里的活动项 ∪ 日志 `session.created.parent` 映射。不打开会话、不取锁、不修复。
+   */
+  listSubagents(input: { parentSessionId: string }): Promise<SubagentSummary[]>;
+  /**
+   * 只读观察一个直接子会话：运行中直接接已提交事件（先监听、后取前缀、按 seq 去重），
+   * 否则读固定日志快照；自然结束经 onEnd 至多一次。返回的观察对象不是 RuntimeSession，
+   * 没有任何命令入口。`signal` 可取消建立和实时阶段的观察，返回后也可用 unsubscribe。
+   */
+  observeSubagent(
+    input: {
+      parentSessionId: string;
+      childSessionId: string;
+      afterSeq?: number | undefined;
+      signal?: AbortSignal | undefined;
+    },
+    observer: SubagentObserver,
+  ): Promise<SubagentObservation>;
+  /** 读取子会话自己的持久事件登记过的图片附件，复用附件路径/哈希校验，不打开 child */
+  readSubagentAttachment(input: {
+    parentSessionId: string;
+    childSessionId: string;
+    file: string;
+  }): Promise<ReadAttachmentResult>;
   listSessions(filter?: {
     cwd?: string | undefined;
     /** 默认 false：子会话（session.created.parent 存在）不进列表 */
@@ -880,8 +904,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     timeoutMs: Math.min(Math.max(options.subagent?.timeoutMs ?? 600_000, 1), 3_600_000),
   };
   const subagentLimiter = createSubagentLimiter(subagentLimits.maxConcurrent);
+  // 观察登记簿与 limiter 同寿命：所有会话、所有嵌套层级的 launcher 共享（rpc.md 4.1）
+  const subagentRegistry = createSubagentRegistry();
 
   const store: SessionStore = createSessionStore({ platform, sessionsDir });
+  const subagentObservation = createSubagentObservation({
+    platform,
+    sessionsDir,
+    registry: subagentRegistry,
+  });
   const usageStats = createUsageStats({
     platform,
     sessionsDir,
@@ -1938,6 +1969,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           depth: 0,
           limits: subagentLimits,
           limiter: subagentLimiter,
+          registry: subagentRegistry,
         });
       const externalRunner =
         hasExternalAgents && externalConnector !== undefined
@@ -2214,6 +2246,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (openSessions.get(session.id) === runtimeHooks) openSessions.delete(session.id);
     };
     teardown.push(detach);
+    teardown.push(subagentRegistry.trackSession(session));
     const runtimeSession: RuntimeSession = {
       describeSkills: () => ({
         skills: catalog.skills,
@@ -2231,70 +2264,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       durableEvents: () => session.durableEvents(),
       async readAttachment(file) {
         assertUsable();
-        if (
-          typeof file !== "string" ||
-          file.length === 0 ||
-          file.includes("..") ||
-          /[<>:"/\\|?*\u0000-\u001f]/.test(file) ||
-          /[. ]$/.test(file) ||
-          /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(file)
-        ) {
-          throw new SessionError("invalid_attachment_file", "附件必须是单个安全文件名");
-        }
-        // 原始持久日志是授权来源，包含已被回退或压缩隐藏的图片；不沿 parent 回溯。
-        let attachment: ImageAttachment | undefined;
-        for (const event of session.durableEvents()) {
-          if (event.type !== "message.user" && event.type !== "tool.completed") continue;
-          attachment = event.payload.attachments?.find((ref) => ref.file === file);
-          if (attachment !== undefined) break;
-        }
-        if (attachment === undefined) {
-          throw new SessionError("attachment_not_found", "本会话未登记该图片附件");
-        }
-        const root = paths.join(sessionsDir, "attachments");
-        const dir = paths.join(root, session.id);
-        const target = paths.join(dir, file);
-        try {
-          // 拒绝文件链接、会话目录 junction 与附件根链接；realpath 再检查实际归属。
-          if (
-            (await fs.lstat(root)).type !== "directory" ||
-            (await fs.lstat(dir)).type !== "directory"
-          ) {
-            throw new SessionError("invalid_attachment_file", "附件目录不能是链接");
-          }
-          const stat = await fs.lstat(target);
-          if (stat.type !== "file") {
-            throw new SessionError("invalid_attachment_file", "附件必须是普通文件");
-          }
-          const realRoot = await fs.realpath(root);
-          const realDir = await fs.realpath(dir);
-          const realTarget = await fs.realpath(target);
-          if (
-            !paths.equals(realDir, paths.join(realRoot, session.id)) ||
-            !paths.equals(realTarget, paths.join(realDir, file))
-          ) {
-            throw new SessionError("invalid_attachment_file", "附件路径超出本会话目录");
-          }
-          if (stat.size !== attachment.bytes) {
-            throw new SessionError("attachment_corrupt", "图片附件大小与记录不符");
-          }
-          // 不走 AttachmentStore.load 的 sha 缓存：落盘文件可能在上次读取后被改动。
-          const data = await fs.readFile(realTarget);
-          if (
-            data.byteLength !== attachment.bytes ||
-            createHash("sha256").update(data).digest("hex") !== attachment.sha256
-          ) {
-            throw new SessionError("attachment_corrupt", "图片附件内容与记录不符");
-          }
-          return { data, mimeType: attachment.mimeType, bytes: data.byteLength };
-        } catch (error) {
-          if (error instanceof SessionError) throw error;
-          const code = fsErrorCode(error);
-          if (code === "ENOENT" || code === "ENOTDIR") {
-            throw new SessionError("attachment_missing", "图片附件文件缺失", { cause: error });
-          }
-          throw new SessionError("attachment_read_failed", "图片附件读取失败", { cause: error });
-        }
+        return readSessionAttachment(
+          platform,
+          sessionsDir,
+          session.id,
+          session.durableEvents(),
+          file,
+        );
       },
       rewindTargets() {
         assertUsable();
@@ -3541,6 +3517,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     },
     listSessions: (filter) => store.list(filter),
+    listSubagents: (input) => subagentObservation.list(input),
+    observeSubagent: (input, observer) => subagentObservation.observe(input, observer),
+    readSubagentAttachment: (input) => subagentObservation.readAttachment(input),
     usageStats,
     async forkSession(id, forkOptions) {
       const open = openSessions.get(id);

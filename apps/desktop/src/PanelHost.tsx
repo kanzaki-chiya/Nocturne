@@ -5,14 +5,24 @@
  * 浏览器超出上限时由 browser-pool 回收）；会话被删除时结束它的终端、销毁浏览器并清掉
  * 面板记录。App 只拿回打开入口和要渲染的节点。
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { LocalFileContent, TurnChangeDiff } from "@nocturne/core/protocol";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import type { LocalFileContent, SubagentSummary, TurnChangeDiff } from "@nocturne/core/protocol";
 import type { RpcClient } from "@nocturne/rpc/client";
 
+import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
 import { BrowserPool } from "./browser-pool";
+import type { SubagentLinks } from "./Conversation";
 import type { OpenConversation } from "./conversations";
 import type { DesktopHost } from "./host";
-import { QuickOpen, SessionOverview, TitlebarButtons } from "./PanelChrome";
+import { QuickOpen, SessionOverview, TitlebarButtons, type OverviewSubagents } from "./PanelChrome";
 import type { PrefsStore } from "./prefs";
 import { projectKey, projectName } from "./session-tree";
 import { SidePanel, type PanelChangesSource, type TerminalShellChoice } from "./SidePanel";
@@ -36,13 +46,24 @@ import {
   samePath,
   sessionChangeTotals,
   storeSessionPanel,
+  subagentTabFor,
   vanishedSessions,
   type BrowserTab,
   type FileTab,
   type PanelTab,
   type SessionPanel,
+  type SubagentTab,
   type TerminalTab,
 } from "./side-panel";
+import { SubagentDirectory } from "./subagent-directory";
+import {
+  externalRuns,
+  isTaskEntry,
+  linkFor,
+  runningBuiltin,
+  unsettledBuiltinTasks,
+} from "./subagent-panel";
+import { SubagentWatcher } from "./subagent-watch";
 
 let tabSeq = 0;
 function newTabId(): string {
@@ -69,6 +90,20 @@ function shellSetting(items: readonly { key: string; effective?: string | undefi
   return items.find((item) => item.key === "shell")?.effective;
 }
 
+/** 新增标签：选中的是新标签页时替换它，否则插在选中标签右边；顺带打开面板 */
+function withTab(panel: SessionPanel, tab: PanelTab): SessionPanel {
+  const index = panel.tabs.findIndex((t) => t.id === panel.activeId);
+  const at = panel.tabs[index];
+  let next: PanelTab[];
+  if (at?.kind === "new") {
+    next = panel.tabs.map((t) => (t.id === panel.activeId ? tab : t));
+  } else {
+    next = [...panel.tabs];
+    next.splice(index < 0 ? next.length : index + 1, 0, tab);
+  }
+  return { ...panel, tabs: next, activeId: tab.id, open: true };
+}
+
 export interface SidePanelController {
   /**
    * 文件引用左键（打开文件用 = Nocturne 面板）：在当前会话的文件标签里打开并定位；
@@ -81,6 +116,8 @@ export interface SidePanelController {
   viewSource: (absolutePath: string, line?: number) => void;
   /** 改动卡片「查看变更」 */
   viewChanges: (seq: number) => void;
+  /** 对话里 task 行的「在面板中查看」；没有连着后台时 undefined（不显示按钮） */
+  subagentLinks: SubagentLinks | undefined;
   bodyClass: string;
   mainClass: string;
   /** .body 上的 ref：量宽度决定并排还是覆盖 */
@@ -105,6 +142,7 @@ export function useSidePanel({
   plainKey,
   client,
   ensureClient,
+  images,
 }: {
   prefs: PrefsStore;
   host: DesktopHost;
@@ -128,6 +166,8 @@ export function useSidePanel({
   client: RpcClient | undefined;
   /** 需要后台时拉起（终端取 shell 列表与 Shell 设置） */
   ensureClient: () => Promise<RpcClient>;
+  /** 窗口级图片缓存（子代理视图的图片按 sha256 共用）；缺省时面板自己建一份 */
+  images?: AttachmentImageSource | undefined;
 }): SidePanelController {
   const [width, setWidth] = useState(() => prefs.get().panelWidth ?? PANEL_DEFAULT_WIDTH);
   const [overview, setOverview] = useState(() => prefs.get().overviewOpen === true);
@@ -139,6 +179,30 @@ export function useSidePanel({
   const [quickOpen, setQuickOpen] = useState(false);
   const [body, setBody] = useState<HTMLDivElement | null>(null);
   const [bodySize, setBodySize] = useState({ width: 0, sidebar: 0 });
+  /** 子代理标签的只读观察状态（每个 child 一个独立 SessionView）与目录查询 */
+  const watcher = useMemo(() => new SubagentWatcher(), []);
+  const directory = useMemo(() => new SubagentDirectory(), []);
+  useSyncExternalStore(directory.subscribe, directory.getVersion);
+  useEffect(() => {
+    directory.revive();
+    return () => {
+      directory.dispose();
+    };
+  }, [directory]);
+  useEffect(
+    () => () => {
+      watcher.dispose();
+    },
+    [watcher],
+  );
+  // 窗口没传图片缓存时（测试）面板自己建一份，并只回收自己建的
+  const imageSource = useMemo(() => images ?? createAttachmentImageSource(), [images]);
+  useEffect(
+    () => () => {
+      if (images === undefined) imageSource.dispose();
+    },
+    [imageSource, images],
+  );
 
   const panelFor = useCallback(
     (id: string, map: ReadonlyMap<string, SessionPanel>): SessionPanel => {
@@ -217,6 +281,7 @@ export function useSidePanel({
     for (const id of gone) {
       restored.current.delete(id);
       seenIds.current.delete(id);
+      watcher.releaseParent(id);
     }
     // 卸载它们的终端标签即结束进程（TerminalSession.dispose）
     setPanels((map) => {
@@ -231,7 +296,7 @@ export function useSidePanel({
     );
     prefs.update({ panelSessions: rest });
     // panels / openIds / sessionId 变化不重跑：只在拿到新列表时比对
-  }, [sessions, prefs]);
+  }, [sessions, prefs, watcher]);
 
   // 浏览器池在后面才建好，这里经 ref 取
   const poolRef = useRef<BrowserPool | undefined>(undefined);
@@ -305,18 +370,7 @@ export function useSidePanel({
   /** 新增标签：选中的是新标签页时替换它，否则插在选中标签右边；顺带打开面板 */
   const placeTab = useCallback(
     (tab: PanelTab) => {
-      update((panel) => {
-        const index = panel.tabs.findIndex((t) => t.id === panel.activeId);
-        const at = panel.tabs[index];
-        let next: PanelTab[];
-        if (at?.kind === "new") {
-          next = panel.tabs.map((t) => (t.id === panel.activeId ? tab : t));
-        } else {
-          next = [...panel.tabs];
-          next.splice(index < 0 ? next.length : index + 1, 0, tab);
-        }
-        return { ...panel, tabs: next, activeId: tab.id, open: true };
-      });
+      update((panel) => withTab(panel, tab));
     },
     [update],
   );
@@ -331,6 +385,11 @@ export function useSidePanel({
   }, [update]);
   const closeTab = useCallback(
     (id: string) => {
+      const closing = tabs.find((t) => t.id === id);
+      if (closing?.kind === "subagent" && sessionId !== null) {
+        // 关标签就退订并丢弃它的视图（只是切走时才保留）
+        watcher.release(sessionId, closing.childSessionId);
+      }
       const apply = () => {
         update((panel) => {
           const rest = panel.tabs.filter((t) => t.id !== id);
@@ -349,7 +408,7 @@ export function useSidePanel({
       if (id === activeTabRef.current) hideBrowserThen(apply);
       else apply();
     },
-    [update, hideBrowserThen],
+    [tabs, sessionId, watcher, update, hideBrowserThen],
   );
   const activate = useCallback(
     (id: string) => {
@@ -467,6 +526,121 @@ export function useSidePanel({
     },
     [active, openFileTab, previewsHtml, openHtml],
   );
+
+  // ── 子代理（ADR-0060 第 6 节与修订（五））──
+  const runtime = client?.runtime;
+  const hasSession = active !== undefined;
+  const [documentVisible, setDocumentVisible] = useState(
+    () =>
+      typeof document === "undefined" ||
+      (document.visibilityState !== "hidden" && document.hasFocus()),
+  );
+  useEffect(() => {
+    const onChange = () => {
+      setDocumentVisible(document.visibilityState !== "hidden" && document.hasFocus());
+    };
+    const onBlur = () => {
+      setDocumentVisible(false);
+    };
+    document.addEventListener("visibilitychange", onChange);
+    window.addEventListener("focus", onChange);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      document.removeEventListener("visibilitychange", onChange);
+      window.removeEventListener("focus", onChange);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+  const view = active?.view;
+  const pollNeeded = view !== undefined && unsettledBuiltinTasks(view) > 0;
+  // 目录只在「当前会话、窗口可见、不在设置里、连着后台」时查询，其余一概停止并丢弃在途响应
+  useEffect(() => {
+    directory.setContext({
+      runtime,
+      sessionId: hasSession ? sessionId : null,
+      visible: documentVisible,
+      settingsOpen,
+      pollNeeded,
+    });
+  }, [directory, runtime, hasSession, sessionId, documentVisible, settingsOpen, pollNeeded]);
+  // 父 task 的 started / progress / completed 触发合并查询；不解析 progress 文本
+  useEffect(() => {
+    if (client === undefined || !hasSession || sessionId === null) return;
+    const taskCalls = new Set<string>();
+    for (const entry of view?.entries ?? []) {
+      if (isTaskEntry(entry) && entry.status === "running") taskCalls.add(entry.callId);
+    }
+    return client.onEvent((id, event) => {
+      if (id !== sessionId) return;
+      if (event.type === "tool.started" && event.payload.name === "task") {
+        taskCalls.add(event.payload.callId);
+        directory.trigger();
+      } else if (event.type === "tool.completed" && event.payload.name === "task") {
+        taskCalls.delete(event.payload.callId);
+        directory.trigger();
+      } else if (event.type === "tool.progress" && taskCalls.has(event.payload.callId)) {
+        directory.trigger();
+      }
+    });
+    // view 在原地变化；这里只在换会话/连接时按当时的运行中 task 初始化
+  }, [client, hasSession, sessionId, directory]);
+  const summaries = directory.summaries;
+  /** 打开（或切到）一个子代理的标签；同一 child 在父会话内只有一个标签 */
+  const openSubagent = useCallback(
+    (summary: SubagentSummary) => {
+      const existing = subagentTabFor(tabs, summary.childSessionId);
+      const apply = () => {
+        update((panel) => {
+          const found = subagentTabFor(panel.tabs, summary.childSessionId);
+          if (found !== undefined) return { ...panel, open: true, activeId: found.id };
+          const tab: SubagentTab = {
+            id: newTabId(),
+            kind: "subagent",
+            childSessionId: summary.childSessionId,
+            parentCallId: summary.callId,
+            profile: summary.profile,
+            taskSummary: summary.taskSummary,
+          };
+          return withTab(panel, tab);
+        });
+      };
+      // 由浏览器切过来：先藏起显示中的网页再改界面（第 3 轮安全规则）
+      if (existing !== undefined && existing.id === activeTabRef.current) apply();
+      else hideBrowserThen(apply);
+    },
+    [tabs, update, hideBrowserThen],
+  );
+  const openSubagentById = useCallback(
+    (childSessionId: string) => {
+      const summary = directory.summaries.find((s) => s.childSessionId === childSessionId);
+      if (summary !== undefined) openSubagent(summary);
+    },
+    [directory, openSubagent],
+  );
+  const subagentLinks = useMemo<SubagentLinks | undefined>(
+    () =>
+      runtime === undefined || !hasSession
+        ? undefined
+        : {
+            link: (entry) => linkFor(entry, summaries),
+            open: openSubagentById,
+          },
+    [runtime, hasSession, summaries, openSubagentById],
+  );
+  /** 外部 agent 调用没有 child：概览里首次看到它运行的本地时刻，用来本地计时 */
+  const externalSeen = useRef(new Map<string, number>());
+  const externalRows = useMemo(() => {
+    const runs = view === undefined ? [] : externalRuns(view);
+    const seen = externalSeen.current;
+    const now = Date.now();
+    const live = new Set(runs.map((run) => run.callId));
+    for (const callId of [...seen.keys()]) if (!live.has(callId)) seen.delete(callId);
+    return runs.map((run) => {
+      if (!seen.has(run.callId)) seen.set(run.callId, now);
+      return { ...run, since: seen.get(run.callId) ?? now };
+    });
+    // view 在原地变化：每次渲染都重算（只是遍历 entries）
+  }, [view, view?.revision]);
 
   // ── 浏览器（ADR-0060 第 5 节）：webview 池随宿主建一次，事件按标签 id 找到所在会话 ──
   /** 标签所在的会话面板：本次运行动过的，或只按偏好恢复、还没动过的 */
@@ -758,6 +932,17 @@ export function useSidePanel({
   }, [runPanelKey]);
 
   const overviewVisible = overview && active !== undefined && !settingsOpen;
+  // 打开浮层时查询一次；进入会话时本来就查过，挂载那一次不重复
+  const overviewWasVisible = useRef(overviewVisible);
+  useEffect(() => {
+    if (overviewVisible && !overviewWasVisible.current) directory.trigger();
+    overviewWasVisible.current = overviewVisible;
+  }, [overviewVisible, directory]);
+  const overviewSubagents: OverviewSubagents = {
+    running: runningBuiltin(summaries),
+    external: externalRows,
+    onOpen: openSubagent,
+  };
   // 面板关着且对话区让位后仍放得下才停靠，否则盖在对话区上（修订 2026-10-18（三））
   const overviewDocked =
     overviewVisible &&
@@ -836,6 +1021,23 @@ export function useSidePanel({
       browsers={pool}
       workspace={workspace}
       openExternalUrl={openExternalUrl}
+      subagents={
+        sessionId === null
+          ? undefined
+          : {
+              watcher,
+              runtime,
+              parentSessionId: sessionId,
+              summaryFor: (childSessionId) =>
+                summaries.find((summary) => summary.childSessionId === childSessionId),
+              parentEntryFor: (callId) =>
+                view?.entries.filter(isTaskEntry).find((entry) => entry.callId === callId),
+              images: imageSource,
+              openUrl: (url) => {
+                void host.openUrl(url);
+              },
+            }
+      }
     />
   );
 
@@ -863,6 +1065,7 @@ export function useSidePanel({
           onOpenChanges={() => {
             openChanges();
           }}
+          subagents={overviewSubagents}
         />
       )}
       {quickOpen && loadIndex !== undefined && active !== undefined && (
@@ -894,6 +1097,7 @@ export function useSidePanel({
     previewsHtml,
     viewSource,
     viewChanges: openChanges,
+    subagentLinks,
     bodyClass: docked ? " panel-docked" : "",
     mainClass: overviewDocked ? " ov-docked" : "",
     bodyRef: setBody,

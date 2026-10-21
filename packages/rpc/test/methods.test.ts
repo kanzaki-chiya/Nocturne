@@ -524,13 +524,14 @@ describe("公开 API 与 RPC 方法集合一致", () => {
     check(Object.keys(session), SESSION_METHODS, SESSION_NOT_MAPPED);
 
     // 服务端方法表里的每个 runtime./session./provider./login. 方法都对应公开成员
-    // （unsubscribe 是 subscribe 的退订半边；login.submitManual 是 LoginSession 的方法）
+    // （unsubscribe 是 subscribe 的退订半边——session 与 subagent 同理；login.submitManual 是 LoginSession 的方法）
     const mappedMethods = new Set<string>([
       ...Object.values(RUNTIME_METHODS),
       ...Object.values(SESSION_METHODS),
       ...Object.values(CONFIG_METHODS),
       ...Object.values(PROVIDER_FUNCTION_METHODS),
       "session.unsubscribe",
+      "subagent.unsubscribe",
       "login.submitManual",
       "remote.describe",
       "remote.register",

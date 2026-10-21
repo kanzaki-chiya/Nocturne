@@ -9,6 +9,9 @@ import {
   reduceSessionView,
   type SessionView,
   type RuntimeEvent,
+  type SubagentObservation,
+  type SubagentObserver,
+  type SubagentSummary,
   type UsageStats,
 } from "@nocturne/core/protocol";
 import type {
@@ -248,6 +251,28 @@ export interface RpcRuntime {
   ): Promise<{ opened: SessionOpened; session: RpcSession }>;
   forkSession(id: string, options?: { targetSeq?: number }): Promise<string>;
   /**
+   * 只读发现父会话的直接内置子会话（含已结束；ADR-0060 第 4 轮，rpc.md 4.1）。
+   * 不要求打开父会话。参数既可传 id，也可传与进程内 `Runtime.listSubagents` 相同的对象。
+   */
+  listSubagents(parent: string | { parentSessionId: string }): Promise<SubagentSummary[]>;
+  /** 读取子会话自己的持久事件登记过的图片附件（只读，不打开 child）；字节已解码 */
+  readSubagentAttachment(input: {
+    parentSessionId: string;
+    childSessionId: string;
+    file: string;
+  }): Promise<ReadAttachmentResult>;
+  /**
+   * 只读观察一个直接子会话：先交付 afterSeq 之后的持久事件，再接实时（持久与临时都推）。
+   * 自然结束时 `observer.onEnd` 至多一次，**可先于本方法的返回**（回放期间结束，或快照读完）；
+   * 返回的观察对象不是 RpcSession，没有任何命令入口。同一 (parent, child) 再次观察会替换旧观察，
+   * 旧观察的迟到消息被丢弃；连接断开时不回调 onEnd（客户端用 `RpcClient.closed` 感知）。
+   * `unsubscribe` 幂等，不产生 onEnd，也不关闭子会话。
+   */
+  observeSubagent(
+    input: { parentSessionId: string; childSessionId: string; afterSeq?: number | undefined },
+    observer: SubagentObserver,
+  ): Promise<SubagentObservation>;
+  /**
    * workspaceRoot（ADR-0051）：下列方法可带 `workspaceRoot` 指定按哪个工作区
    * 合并配置层；缺省为后台启动目录。
    */
@@ -443,6 +468,20 @@ interface Pending {
   reject(error: unknown): void;
 }
 
+interface SubagentWatch {
+  subscriptionId: string;
+  parentSessionId: string;
+  childSessionId: string;
+  observer: SubagentObserver;
+  /** 已退订或被同一 child 的新观察替换 */
+  cancelled: boolean;
+  /** 已收到 closed */
+  ended: boolean;
+}
+
+const subagentPairKey = (parentSessionId: string, childSessionId: string): string =>
+  `${parentSessionId}\u0000${childSessionId}`;
+
 export function createRpcClient(transport: LineTransport, options: RpcClientOptions): RpcClient {
   let nextId = 1;
   let isClosed = false;
@@ -452,6 +491,10 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   const providersChangedListeners = new Set<() => void>();
   const loginCompletedListeners = new Set<(n: LoginCompleted) => void>();
   const notificationListeners = new Map<string, Set<(params: never) => void>>();
+  /** 子会话只读观察表：subscriptionId → 观察；pair 表用于「同一 child 再观察替换旧观察」 */
+  const subagentWatches = new Map<string, SubagentWatch>();
+  const subagentPairs = new Map<string, string>();
+  let nextSubscriptionId = 1;
   let resolveClosed!: () => void;
   const closed = new Promise<void>((resolve) => {
     resolveClosed = resolve;
@@ -530,6 +573,8 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   });
   transport.onClose(() => {
     isClosed = true;
+    subagentWatches.clear();
+    subagentPairs.clear();
     for (const entry of pending.values()) entry.reject(connectionClosed());
     pending.clear();
     resolveClosed();
@@ -551,6 +596,43 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       }
     });
   };
+
+  const dropSubagentWatch = (watch: SubagentWatch): void => {
+    if (subagentWatches.get(watch.subscriptionId) === watch) {
+      subagentWatches.delete(watch.subscriptionId);
+    }
+    const pair = subagentPairKey(watch.parentSessionId, watch.childSessionId);
+    if (subagentPairs.get(pair) === watch.subscriptionId) subagentPairs.delete(pair);
+  };
+  // 通知路由：按 subscriptionId 找观察；已替换/已退订/已结束的迟到消息直接丢弃
+  const routeSubagent = <M extends "subagent.event" | "subagent.closed">(
+    method: M,
+    handler: (watch: SubagentWatch, params: RpcServerNotifications[M]) => void,
+  ): void => {
+    const listeners = notificationListeners.get(method) ?? new Set<(params: never) => void>();
+    notificationListeners.set(method, listeners);
+    listeners.add((params: RpcServerNotifications[M]) => {
+      const watch = subagentWatches.get(params.subscriptionId);
+      if (
+        watch === undefined ||
+        watch.cancelled ||
+        watch.ended ||
+        watch.parentSessionId !== params.parentSessionId ||
+        watch.childSessionId !== params.childSessionId
+      )
+        return;
+      handler(watch, params);
+    });
+  };
+  routeSubagent("subagent.event", (watch, params) => {
+    watch.observer.onEvent(params.event);
+  });
+  routeSubagent("subagent.closed", (watch, params) => {
+    // 缓存终止状态：closed 可能先于 subscribe 响应到达，响应后也不能再当作 live
+    watch.ended = true;
+    dropSubagentWatch(watch);
+    watch.observer.onEnd(params.end);
+  });
 
   const notify = (method: string, params: unknown): void => {
     if (isClosed) return;
@@ -697,6 +779,79 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     },
     forkSession: async (id, forkOptions) =>
       (await call("runtime.forkSession", { sessionId: id, ...forkOptions })).sessionId,
+    listSubagents: (parent) =>
+      call("subagent.list", {
+        parentSessionId: typeof parent === "string" ? parent : parent.parentSessionId,
+      }),
+    async readSubagentAttachment(input) {
+      const result = await call("subagent.readAttachment", input);
+      return { data: decodeBase64(result.data), mimeType: result.mimeType, bytes: result.bytes };
+    },
+    async observeSubagent(input, observer) {
+      const { parentSessionId, childSessionId } = input;
+      const subscriptionId = `subagent-${nextSubscriptionId++}`;
+      const pair = subagentPairKey(parentSessionId, childSessionId);
+      const previous = subagentPairs.get(pair);
+      const previousWatch = previous === undefined ? undefined : subagentWatches.get(previous);
+      if (previousWatch !== undefined) {
+        previousWatch.cancelled = true;
+        dropSubagentWatch(previousWatch);
+      }
+      const watch: SubagentWatch = {
+        subscriptionId,
+        parentSessionId,
+        childSessionId,
+        observer: {
+          onEvent: (event) => {
+            try {
+              observer.onEvent(event);
+            } catch {
+              // 观察者异常不影响其他观察
+            }
+          },
+          onEnd: (end) => {
+            try {
+              observer.onEnd(end);
+            } catch {
+              // 同上
+            }
+          },
+        },
+        cancelled: false,
+        ended: false,
+      };
+      subagentWatches.set(subscriptionId, watch);
+      subagentPairs.set(pair, subscriptionId);
+      let info;
+      try {
+        info = await call("subagent.subscribe", {
+          parentSessionId,
+          childSessionId,
+          subscriptionId,
+          ...(input.afterSeq !== undefined ? { afterSeq: input.afterSeq } : {}),
+        });
+      } catch (error) {
+        watch.cancelled = true;
+        dropSubagentWatch(watch);
+        throw error;
+      }
+      let unsubscribed = false;
+      return {
+        lastSeq: info.lastSeq,
+        summary: info.summary,
+        mode: info.mode,
+        unsubscribe() {
+          if (unsubscribed) return;
+          unsubscribed = true;
+          // 已结束或已被替换：服务端表项早已释放，不再发请求
+          if (watch.cancelled || watch.ended) return;
+          watch.cancelled = true;
+          dropSubagentWatch(watch);
+          if (!isClosed)
+            void call("subagent.unsubscribe", { subscriptionId }).catch(() => undefined);
+        },
+      };
+    },
     listModels: (input) => call("runtime.listModels", input ?? {}),
     defaultModel: async (input) => (await call("runtime.defaultModel", input ?? {})) ?? undefined,
     listRecentModels: () => call("runtime.listRecentModels", {}),

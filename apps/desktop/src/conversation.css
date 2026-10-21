@@ -1278,3 +1278,69 @@
 .conversation .u-fork p {
   margin: 0;
 }
+
+/* ── 子代理（ADR-0060 第 6 节）：task 行的「在面板中查看」与只读视图 ── */
+.conversation .subagent-view {
+  flex: none;
+  padding: 0 8px;
+  border: 1px solid var(--a-borderStrong);
+  border-radius: 9px;
+  background: var(--a-panel);
+  color: var(--a-secondary);
+  font: 11px/18px var(--sans);
+  cursor: pointer;
+}
+.conversation .subagent-view:hover:not(:disabled),
+.conversation .subagent-view:focus-visible {
+  background: var(--a-raised);
+  color: var(--a-text);
+}
+.conversation .subagent-view:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+/* 只读视图里的任务原文与催促：折叠展示，不当作可编辑的用户气泡 */
+.conversation .ro-user {
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--a-border);
+  border-radius: 8px;
+  background: var(--a-panel);
+}
+.conversation .ro-user > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  list-style: none;
+}
+.conversation .ro-user > summary::-webkit-details-marker {
+  display: none;
+}
+.conversation .ro-user-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: var(--a-raised);
+  color: var(--a-accent);
+  font-size: 11px;
+}
+.conversation .ro-user-preview {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--a-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation .ro-user[open] .ro-user-preview {
+  display: none;
+}
+.conversation .ro-pending {
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px dashed var(--a-borderStrong);
+  border-radius: 8px;
+  color: var(--a-muted);
+  font-size: 12px;
+}
