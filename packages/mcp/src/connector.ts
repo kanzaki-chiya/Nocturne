@@ -84,6 +84,10 @@ interface Server {
   announced?: boolean | undefined;
   /** HTTP：冷却结束时间戳（Date.now 毫秒）；undefined 表示无冷却 */
   retryAt?: number | undefined;
+  /** 受信运行时来源（桌面浏览器）：tools/call 注入调用者 _meta；普通 MCP 为 false */
+  callerMetadata?: boolean | undefined;
+  /** 运行时来源提供的条目：reconcile 时保留，不因用户配置重载被移除 */
+  fromRuntime?: boolean | undefined;
 }
 
 function err(code: string, message: string): ToolResult {
@@ -710,13 +714,125 @@ async function forceReconnect(
   return await ensureClient(scope, st);
 }
 
-/** content[] → modelContent + output 元数据（mcp.md 第 6 节结果映射） */
-function mapContent(res: CallToolResult | Record<string, unknown>): {
+/** 单张图片原始文件上限：5 MB（与 core tools/image.ts 同值，mcp 侧本地实现以保持依赖方向） */
+const MCP_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+/** 图片单边像素上限（与 core 同值） */
+const MCP_IMAGE_MAX_EDGE = 8000;
+/** 每次 tools/call 最多返回的图片数 */
+const MCP_IMAGE_MAX_COUNT = 4;
+/** 每次 tools/call 图片合计上限：8 MB */
+const MCP_IMAGE_TOTAL_MAX_BYTES = 8 * 1024 * 1024;
+
+type McpImageMime = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+
+function mcpSniffImageMime(bytes: Uint8Array): McpImageMime | undefined {
+  const startsWith = (offset: number, magic: readonly number[]): boolean => {
+    if (bytes.length < offset + magic.length) return false;
+    for (let i = 0; i < magic.length; i++) if (bytes[offset + i] !== magic[i]) return false;
+    return true;
+  };
+  const asciiAt = (offset: number, text: string): boolean => {
+    if (bytes.length < offset + text.length) return false;
+    for (let i = 0; i < text.length; i++)
+      if (bytes[offset + i] !== text.charCodeAt(i)) return false;
+    return true;
+  };
+  if (startsWith(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png";
+  if (startsWith(0, [0xff, 0xd8, 0xff])) return "image/jpeg";
+  if (asciiAt(0, "GIF87a") || asciiAt(0, "GIF89a")) return "image/gif";
+  if (asciiAt(0, "RIFF") && asciiAt(8, "WEBP")) return "image/webp";
+  return undefined;
+}
+
+function mcpParseImageSize(
+  bytes: Uint8Array,
+  mime: McpImageMime,
+): { width: number; height: number } | undefined {
+  const u16be = (o: number) => ((bytes[o] ?? 0) << 8) | (bytes[o + 1] ?? 0);
+  const u16le = (o: number) => (bytes[o] ?? 0) | ((bytes[o + 1] ?? 0) << 8);
+  const u24le = (o: number) =>
+    (bytes[o] ?? 0) | ((bytes[o + 1] ?? 0) << 8) | ((bytes[o + 2] ?? 0) << 16);
+  const u32be = (o: number) =>
+    ((bytes[o] ?? 0) << 24) |
+    ((bytes[o + 1] ?? 0) << 16) |
+    ((bytes[o + 2] ?? 0) << 8) |
+    (bytes[o + 3] ?? 0);
+  const asciiAt = (offset: number, text: string): boolean => {
+    if (bytes.length < offset + text.length) return false;
+    for (let i = 0; i < text.length; i++)
+      if (bytes[offset + i] !== text.charCodeAt(i)) return false;
+    return true;
+  };
+  let size: { width: number; height: number } | undefined;
+  if (mime === "image/png") {
+    if (bytes.length < 24 || !asciiAt(12, "IHDR")) return undefined;
+    size = { width: u32be(16), height: u32be(20) };
+  } else if (mime === "image/jpeg") {
+    let i = 2;
+    while (i + 1 < bytes.length) {
+      if (bytes[i] !== 0xff) return undefined;
+      while (i < bytes.length && bytes[i] === 0xff) i++;
+      if (i >= bytes.length) return undefined;
+      const marker = bytes[i] ?? 0;
+      i++;
+      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+      if (marker === 0xd9 || marker === 0xda) return undefined;
+      if (i + 2 > bytes.length) return undefined;
+      const len = u16be(i);
+      if (len < 2) return undefined;
+      const isSof =
+        marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+      if (isSof) {
+        if (i + 7 > bytes.length || len < 7) return undefined;
+        size = { width: u16be(i + 5), height: u16be(i + 3) };
+        break;
+      }
+      i += len;
+    }
+    if (size === undefined) return undefined;
+  } else if (mime === "image/gif") {
+    if (bytes.length < 10) return undefined;
+    size = { width: u16le(6), height: u16le(8) };
+  } else {
+    if (bytes.length < 20) return undefined;
+    if (asciiAt(12, "VP8X")) {
+      if (bytes.length < 30) return undefined;
+      size = { width: u24le(24) + 1, height: u24le(27) + 1 };
+    } else if (asciiAt(12, "VP8L")) {
+      if (bytes.length < 25 || bytes[20] !== 0x2f) return undefined;
+      const bits =
+        (bytes[21] ?? 0) |
+        ((bytes[22] ?? 0) << 8) |
+        ((bytes[23] ?? 0) << 16) |
+        ((bytes[24] ?? 0) << 24);
+      size = { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+    } else if (asciiAt(12, "VP8 ")) {
+      const startsWith = (offset: number, magic: readonly number[]): boolean => {
+        if (bytes.length < offset + magic.length) return false;
+        for (let k = 0; k < magic.length; k++) if (bytes[offset + k] !== magic[k]) return false;
+        return true;
+      };
+      if (bytes.length < 30 || !startsWith(23, [0x9d, 0x01, 0x2a])) return undefined;
+      size = { width: u16le(26) & 0x3fff, height: u16le(28) & 0x3fff };
+    } else {
+      return undefined;
+    }
+  }
+  if (size.width === 0 || size.height === 0) return undefined;
+  return size;
+}
+
+/** content[] → modelContent + output 元数据 + 图片附件（mcp.md 第 6 节结果映射） */
+export function mapContent(res: CallToolResult | Record<string, unknown>): {
   text: string;
   output: Record<string, unknown>;
+  attachments?: ToolResult["attachments"];
 } {
   const texts: string[] = [];
   const meta: Record<string, unknown>[] = [];
+  const attachments: NonNullable<ToolResult["attachments"]> = [];
+  let totalImageBytes = 0;
+  let imageCount = 0;
   const blocks =
     "content" in res && Array.isArray(res.content)
       ? (res.content as CallToolResult["content"])
@@ -727,16 +843,67 @@ function mapContent(res: CallToolResult | Record<string, unknown>): {
         texts.push(block.text);
         meta.push({ type: "text" });
         break;
-      case "image":
-        texts.push(
-          `[image: ${block.mimeType}，约 ${Math.round((block.data.length * 3) / 4)} 字节，内容未传回模型]`,
-        );
+      case "image": {
+        imageCount += 1;
+        const declared = typeof block.mimeType === "string" ? block.mimeType.toLowerCase() : "";
+        const supported: McpImageMime[] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+        if (!supported.includes(declared as McpImageMime)) {
+          texts.push(`[image: 不支持的图片类型 ${block.mimeType}，已跳过]`);
+          meta.push({ type: "image", mimeType: block.mimeType, skipped: "unsupported_type" });
+          break;
+        }
+        if (imageCount > MCP_IMAGE_MAX_COUNT) {
+          texts.push(`[image: ${block.mimeType}，超出本次最多 ${MCP_IMAGE_MAX_COUNT} 张，已跳过]`);
+          meta.push({ type: "image", mimeType: block.mimeType, skipped: "too_many" });
+          break;
+        }
+        let bytes: Uint8Array | undefined;
+        try {
+          if (typeof block.data !== "string" || block.data.length === 0) throw new Error("empty");
+          const buf = Buffer.from(block.data, "base64");
+          if (buf.length === 0) throw new Error("empty");
+          bytes = new Uint8Array(buf);
+        } catch {
+          texts.push(`[image: ${block.mimeType}，base64 解码失败，已跳过]`);
+          meta.push({ type: "image", mimeType: block.mimeType, skipped: "corrupt" });
+          break;
+        }
+        if (bytes.length > MCP_IMAGE_MAX_BYTES) {
+          texts.push(`[image: ${block.mimeType}，${bytes.length} 字节超过 5 MB 上限，已跳过]`);
+          meta.push({ type: "image", mimeType: block.mimeType, skipped: "too_large" });
+          break;
+        }
+        if (totalImageBytes + bytes.length > MCP_IMAGE_TOTAL_MAX_BYTES) {
+          texts.push(`[image: ${block.mimeType}，合计超过 8 MB 上限，已跳过]`);
+          meta.push({ type: "image", mimeType: block.mimeType, skipped: "total_too_large" });
+          break;
+        }
+        const sniffed = mcpSniffImageMime(bytes);
+        const size = sniffed === undefined ? undefined : mcpParseImageSize(bytes, sniffed);
+        if (sniffed === undefined || size === undefined || sniffed !== (declared as McpImageMime)) {
+          texts.push(`[image: ${block.mimeType}，文件头损坏或与声明不符，已跳过]`);
+          meta.push({ type: "image", mimeType: block.mimeType, skipped: "corrupt" });
+          break;
+        }
+        if (size.width > MCP_IMAGE_MAX_EDGE || size.height > MCP_IMAGE_MAX_EDGE) {
+          texts.push(
+            `[image: ${block.mimeType}，${size.width}×${size.height} 超过 ${MCP_IMAGE_MAX_EDGE} px 上限，已跳过]`,
+          );
+          meta.push({ type: "image", mimeType: block.mimeType, skipped: "too_large" });
+          break;
+        }
+        totalImageBytes += bytes.length;
+        attachments.push({ mimeType: sniffed, data: bytes });
+        texts.push(`[image: ${sniffed}，${size.width}×${size.height}，${bytes.length} 字节]`);
         meta.push({
           type: "image",
-          mimeType: block.mimeType,
-          approxBytes: Math.round((block.data.length * 3) / 4),
+          mimeType: sniffed,
+          width: size.width,
+          height: size.height,
+          bytes: bytes.length,
         });
         break;
+      }
       case "audio":
         texts.push(`[audio: ${block.mimeType}，内容未传回模型]`);
         meta.push({ type: "audio", mimeType: block.mimeType });
@@ -773,7 +940,11 @@ function mapContent(res: CallToolResult | Record<string, unknown>): {
   if ("structuredContent" in res && res.structuredContent !== undefined) {
     output.structured = res.structuredContent;
   }
-  return { text: texts.join("\n"), output };
+  return {
+    text: texts.join("\n"),
+    output,
+    ...(attachments.length > 0 ? { attachments } : {}),
+  };
 }
 
 function isErrorResult(res: unknown): boolean {
@@ -854,12 +1025,27 @@ function wrapTool(
         const transport = st.runtime?.transport;
         const sessionIdAtCall =
           transport instanceof StreamableHTTPClientTransport ? transport.sessionId : undefined;
+        // 受信运行时来源（桌面浏览器）在 _meta 注入调用者信息，用来绑定会话和区分
+        // actor；模型 schema 无这些字段，用户参数不能覆盖。普通 MCP 不发送会话元数据。
+        const params =
+          st.callerMetadata === true
+            ? {
+                name: remote,
+                arguments: _input as Record<string, unknown>,
+                _meta: {
+                  "nocturne/caller": {
+                    sessionId: ctx.sessionId,
+                    turnId: ctx.turnId,
+                    callId: ctx.callId,
+                  },
+                },
+              }
+            : { name: remote, arguments: _input as Record<string, unknown> };
         try {
-          const res = await client.callTool(
-            { name: remote, arguments: _input as Record<string, unknown> },
-            undefined,
-            { signal: combined, timeout: callMs },
-          );
+          const res = await client.callTool(params, undefined, {
+            signal: combined,
+            timeout: callMs,
+          });
           scope.diagnostics?.record("mcp.call", {
             server: st.cfg.name,
             tool: safeText(st, remote),
@@ -871,6 +1057,7 @@ function wrapTool(
           const mapped = mapContent(res);
           const text = safeText(st, mapped.text);
           const output = safeOutput(st, mapped.output) as Record<string, unknown>;
+          const attachments = mapped.attachments;
           if (isErrorResult(res)) {
             return {
               ok: true,
@@ -878,11 +1065,20 @@ function wrapTool(
                 status: "error",
                 modelContent: text === "" ? "MCP 工具返回 isError（无文本）" : text,
                 output,
+                ...(attachments !== undefined ? { attachments } : {}),
                 error: { code: "tool_error", message: text.slice(0, 300) || "isError" },
               },
             };
           }
-          return { ok: true, result: { status: "ok", modelContent: text, output } };
+          return {
+            ok: true,
+            result: {
+              status: "ok",
+              modelContent: text,
+              output,
+              ...(attachments !== undefined ? { attachments } : {}),
+            },
+          };
         } catch (error) {
           return { ok: false, error, sessionIdAtCall };
         }
@@ -963,7 +1159,24 @@ function statusOf(st: Server): McpServerStatus {
   };
 }
 
-export function createMcpConnector(): McpConnector {
+/**
+ * 受信运行时来源（desktop-browser.md 第 1 节）：由可信装配方（apps/cli 的桌面后台
+ * 入口）提供，不写用户 mcp.json，凭据只放内存。open 返回的 servers 与 credentials
+ * 合并进本次连接；callerMetadata 为 true 的服务器在 tools/call 的 _meta 注入调用者
+ * 信息（sessionId、turnId、callId），普通 MCP 不发送会话元数据。
+ */
+export interface RuntimeMcpSource {
+  open(scope: McpOpenScope): Promise<{
+    servers: readonly McpServerConfig[];
+    credentials: { get(id: string): Promise<string | undefined> };
+    callerMetadata: boolean;
+    close(): Promise<void>;
+  }>;
+}
+
+export function createMcpConnector(options?: {
+  runtimeServers?: readonly RuntimeMcpSource[] | undefined;
+}): McpConnector {
   return {
     async probe(scope) {
       const started = Date.now();
@@ -1013,39 +1226,98 @@ export function createMcpConnector(): McpConnector {
         };
       }
     },
-    open(scope) {
+    async open(scope) {
+      // 受信运行时来源先装配：不写用户 mcp.json，凭据只放内存；同名（忽略大小写）
+      // 报冲突并跳过用户配置条目。
+      const runtimeClosers: (() => Promise<void>)[] = [];
+      const runtimeServers: { cfg: McpServerConfig; callerMetadata: boolean }[] = [];
+      let effectiveScope: McpOpenScope = scope;
+      const sources = options?.runtimeServers ?? [];
+      if (sources.length > 0) {
+        const opened = await Promise.all(
+          sources.map((src) => src.open(scope).catch(() => undefined)),
+        );
+        const runtimeCreds: { get(id: string): Promise<string | undefined> }[] = [];
+        for (const res of opened) {
+          if (res === undefined) continue;
+          for (const cfg of res.servers) {
+            if (cfg.enabled === false) continue;
+            runtimeServers.push({ cfg, callerMetadata: res.callerMetadata });
+          }
+          runtimeCreds.push(res.credentials);
+          runtimeClosers.push(() => res.close());
+        }
+        if (runtimeCreds.length > 0) {
+          const fallback = scope.credentials;
+          const mergedGet = async (
+            id: string,
+            opts?: { fresh?: boolean | undefined },
+          ): Promise<string | undefined> => {
+            for (const c of runtimeCreds) {
+              const v = await c.get(id);
+              if (v !== undefined) return v;
+            }
+            return fallback?.get(id, opts);
+          };
+          effectiveScope = {
+            ...scope,
+            servers: [...runtimeServers.map((s) => s.cfg), ...scope.servers],
+            credentials: { get: mergedGet },
+          };
+        }
+      }
+      const runtimeNames = new Set(runtimeServers.map((s) => s.cfg.name.toLowerCase()));
       const removed: string[] = [];
-      const servers: Server[] = scope.servers
+      const servers: Server[] = effectiveScope.servers
         .filter((cfg) => cfg.enabled !== false)
-        .map((cfg) => ({
-          cfg,
-          state: "starting",
-          restarts: 0,
-          tools: new Map(),
-          closed: false,
-          secrets: [],
-          run: 0,
-        }));
+        .filter((cfg) => {
+          // 运行时来源已提供同名条目时跳过用户配置，避免普通配置覆盖受信来源
+          if (
+            runtimeNames.has(cfg.name.toLowerCase()) &&
+            !runtimeServers.some((s) => s.cfg === cfg)
+          ) {
+            scope.warn(
+              "mcp_server_failed",
+              `MCP 服务器 ${cfg.name} 与内置运行时来源重名，已跳过该配置条目`,
+            );
+            return false;
+          }
+          return true;
+        })
+        .map((cfg) => {
+          const rt = runtimeServers.find((s) => s.cfg === cfg);
+          return {
+            cfg,
+            state: "starting" as const,
+            restarts: 0,
+            tools: new Map(),
+            closed: false,
+            secrets: [],
+            run: 0,
+            callerMetadata: rt?.callerMetadata,
+            fromRuntime: rt !== undefined,
+          };
+        });
       // 并行启动；单服务器失败只影响自身（降级为无该服务器工具）
       const initialStartup = Promise.all(
         servers.map(async (st) => {
-          scope.emitServer({ name: st.cfg.name, state: "starting" });
-          scope.diagnostics?.record("mcp.event", {
+          effectiveScope.emitServer({ name: st.cfg.name, state: "starting" });
+          effectiveScope.diagnostics?.record("mcp.event", {
             server: st.cfg.name,
             state: "starting",
           });
           try {
-            await connectServer(scope, st, ++st.run);
+            await connectServer(effectiveScope, st, ++st.run);
             if (st.closed) return;
             st.state = "ready";
             st.error = undefined;
             st.announced = false;
-            scope.emitServer({
+            effectiveScope.emitServer({
               name: st.cfg.name,
               state: "ready",
               toolCount: st.staged?.size ?? 0,
             });
-            scope.diagnostics?.record("mcp.event", {
+            effectiveScope.diagnostics?.record("mcp.event", {
               server: st.cfg.name,
               state: "ready",
               toolCount: st.staged?.size ?? 0,
@@ -1063,8 +1335,8 @@ export function createMcpConnector(): McpConnector {
               st.restarts += 1;
               st.retryAt = Date.now() + HTTP_RETRY_COOLDOWN_MS;
             }
-            scope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
-            scope.diagnostics?.record("mcp.event", {
+            effectiveScope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
+            effectiveScope.diagnostics?.record("mcp.event", {
               server: st.cfg.name,
               state: "failed",
               error: safeText(st, diagnosticError(e)),
@@ -1072,7 +1344,7 @@ export function createMcpConnector(): McpConnector {
             });
             if (st.announced !== true) {
               st.announced = true;
-              scope.warn(
+              effectiveScope.warn(
                 st.code === "mcp_secret_missing" ? "mcp_secret_missing" : "mcp_server_failed",
                 `MCP 服务器 ${st.cfg.name} 启动失败：${st.error}`,
               );
@@ -1102,14 +1374,23 @@ export function createMcpConnector(): McpConnector {
           const wanted = new Map(
             configs.filter((cfg) => cfg.enabled !== false).map((cfg) => [cfg.name, cfg]),
           );
+          // 运行时来源条目不受用户配置重载影响：只移除非运行时且不在新配置中的条目
           for (const st of [...servers]) {
+            if (st.fromRuntime === true) continue;
             if (wanted.has(st.cfg.name)) continue;
             removed.push(...st.tools.keys());
             await stopServer(st);
             servers.splice(servers.indexOf(st), 1);
-            scope.emitServer({ name: st.cfg.name, state: "stopped" });
+            effectiveScope.emitServer({ name: st.cfg.name, state: "stopped" });
           }
           for (const cfg of wanted.values()) {
+            if (runtimeNames.has(cfg.name.toLowerCase())) {
+              effectiveScope.warn(
+                "mcp_server_failed",
+                `MCP 服务器 ${cfg.name} 与内置运行时来源重名，已跳过该配置条目`,
+              );
+              continue;
+            }
             const signature: Server = {
               cfg,
               state: "starting",
@@ -1121,7 +1402,7 @@ export function createMcpConnector(): McpConnector {
             };
             const values = await expandEnv(
               cfg.type === "http" ? cfg.headers : cfg.env,
-              scope,
+              effectiveScope,
               signature,
             ).catch(() => undefined);
             const digest = fingerprint(cfg, values);
@@ -1140,9 +1421,9 @@ export function createMcpConnector(): McpConnector {
             st.retryAt = undefined;
             st.restarts = 0;
             st.announced = false;
-            scope.emitServer({ name: cfg.name, state: "starting" });
+            effectiveScope.emitServer({ name: cfg.name, state: "starting" });
             try {
-              await connectServer(scope, st, ++st.run);
+              await connectServer(effectiveScope, st, ++st.run);
               st.state = "ready";
               st.error = undefined;
             } catch (e) {
@@ -1159,12 +1440,12 @@ export function createMcpConnector(): McpConnector {
               }
               st.staged = new Map();
               st.announced = true;
-              scope.warn(
+              effectiveScope.warn(
                 st.code === "mcp_secret_missing" ? st.code : "mcp_server_failed",
                 `MCP 服务器 ${cfg.name} 启动失败：${st.error}`,
               );
             }
-            scope.emitServer({
+            effectiveScope.emitServer({
               name: cfg.name,
               state: st.state,
               toolCount: st.staged?.size ?? 0,
@@ -1194,7 +1475,7 @@ export function createMcpConnector(): McpConnector {
           if (targets.length === 0) return;
           // 并发共享同一次尝试（st.restarting）；失败已由 ensureClient 记 failed/冷却
           const attempts = Promise.all(
-            targets.map((st) => ensureClient(scope, st).catch(() => undefined)),
+            targets.map((st) => ensureClient(effectiveScope, st).catch(() => undefined)),
           ).then(() => undefined);
           void attempts.catch(() => undefined);
           let timer: NodeJS.Timeout | undefined;
@@ -1245,6 +1526,7 @@ export function createMcpConnector(): McpConnector {
               st.state = "stopped";
             }),
           );
+          await Promise.all(runtimeClosers.map((fn) => fn().catch(() => undefined)));
         },
       });
     },

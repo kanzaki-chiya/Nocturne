@@ -3,3 +3,4 @@
  * 装配方（apps/*）注入 RuntimeOptions.mcp；Core 不反向依赖本包。
  */
 export { createMcpConnector } from "./connector.js";
+export type { RuntimeMcpSource } from "./connector.js";
