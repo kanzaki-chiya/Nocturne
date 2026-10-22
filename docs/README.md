@@ -57,6 +57,7 @@
 | [remote-channel.md](protocols/remote-channel.md) | 同构远程加密通道：身份、扫码配对、签名握手、帧格式与生命周期（`@nocturne/remote`） |
 | [relay.md](protocols/relay.md) | 中继入口、签名认证、严格控制消息、二进制路由、关闭码与无载荷推送 |
 | [tool-api.md](protocols/tool-api.md) | `ToolDefinition`、`ToolContext`、`ToolResult` |
+| [desktop-browser.md](protocols/desktop-browser.md) | 桌面内置浏览器 MCP 接入、会话/actor 绑定、工具、权限、隔离和生命周期（ADR-0060 第 5 轮） |
 | [provider-api.md](protocols/provider-api.md) | `Provider`、`ModelInfo`、`ModelRequest`、`ModelStreamEvent`、`ProviderError` |
 
 ## Development（开发流程）

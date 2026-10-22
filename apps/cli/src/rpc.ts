@@ -10,7 +10,7 @@ import type { Readable, Writable } from "node:stream";
 
 import { createAcpConnector } from "@nocturne/acp";
 import { createRuntime, type Platform } from "@nocturne/core";
-import { createMcpConnector } from "@nocturne/mcp";
+import { createMcpConnector, type RuntimeMcpSource } from "@nocturne/mcp";
 import { createRpcServer, createStdioTransport } from "@nocturne/rpc/server";
 
 import type { CliArgs } from "./args.js";
@@ -56,6 +56,9 @@ function redirectConsoleToStderr(stderr: Writable): () => void {
 export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
   const { args, platform, cwd, io } = options;
   const restoreConsole = redirectConsoleToStderr(io.stderr);
+  // 桌面浏览器启动凭证（desktop-browser.md 第 1 节）：进程专属环境字段，读出后立即删除，
+  // 不进 shellEnvStrip/子进程/日志；无该字段时（CLI/TUI 自行启动）无内置来源。
+  const bootstrap = takeDesktopBrowserBootstrap();
   try {
     // 与 trust/setup 一致：不要求已有模型或服务商——桌面端首次启动时还没配置，
     // 之后经配置相关方法补齐；已声明却无法解析的配置照常报错（退出码 2）
@@ -85,7 +88,10 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
           config: runtimeConfig,
           interactive,
           permissions: { autoApproveAsk: false },
-          mcp: createMcpConnector(),
+          mcp:
+            bootstrap === undefined
+              ? createMcpConnector()
+              : createMcpConnector({ runtimeServers: [createDesktopBrowserSource(bootstrap)] }),
           externalAgents: createAcpConnector(platform),
           debug: {
             enabled: debugEnabled,
@@ -137,4 +143,109 @@ function defaultOnTerminate(handler: () => void): () => void {
   return () => {
     for (const s of signals) process.off(s, handler);
   };
+}
+
+interface DesktopBrowserBootstrap {
+  version: 1;
+  port: number;
+  secret: string;
+}
+
+/**
+ * 读出并删除进程专属的桌面浏览器启动凭证（desktop-browser.md 第 1 节）。
+ * 字段只在本进程内存短暂存在，不进 argv/日志/前端；解析失败视为无来源。
+ */
+function takeDesktopBrowserBootstrap(): DesktopBrowserBootstrap | undefined {
+  const raw = process.env.NOCTURNE_DESKTOP_BROWSER_BOOTSTRAP;
+  if (raw === undefined) return undefined;
+  delete process.env.NOCTURNE_DESKTOP_BROWSER_BOOTSTRAP;
+  try {
+    const parsed = JSON.parse(raw) as { version?: unknown; port?: unknown; secret?: unknown };
+    if (parsed.version !== 1) return undefined;
+    if (typeof parsed.port !== "number" || !Number.isInteger(parsed.port) || parsed.port <= 0) {
+      return undefined;
+    }
+    if (typeof parsed.secret !== "string" || parsed.secret.length === 0) return undefined;
+    return { version: 1, port: parsed.port, secret: parsed.secret };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 桌面内置浏览器运行时来源：经回环 HTTP 取每根会话独立 bearer，不写 mcp.json。
+ * bootstrap 口令只用于 /bindings 获取绑定；MCP 调用只用绑定 bearer。凭据只放内存，
+ * 经 credentials.get 注入请求头，不进 URL/日志/模型。直连 127.0.0.1，不走代理、不跟随重定向。
+ */
+function createDesktopBrowserSource(bootstrap: DesktopBrowserBootstrap): RuntimeMcpSource {
+  const base = `http://127.0.0.1:${bootstrap.port}`;
+  return {
+    open: async (scope) => {
+      const binding = await fetchBinding(base, bootstrap.secret, scope.sessionId);
+      if (binding === undefined) {
+        // 无绑定时提供空来源：不断开会话，仅无桌面浏览器工具
+        return {
+          servers: [],
+          credentials: { get: () => Promise.resolve(undefined) },
+          callerMetadata: true,
+          close: () => Promise.resolve(),
+        };
+      }
+      const bearer = binding.bearer;
+      const bindingId = binding.bindingId;
+      let released = false;
+      return {
+        servers: [
+          {
+            name: "desktop_browser",
+            origin: "app",
+            type: "http",
+            url: `${base}/mcp/${bindingId}`,
+            headers: { authorization: { stored: true } },
+          },
+        ],
+        credentials: {
+          get: (id) =>
+            Promise.resolve(
+              id === "mcp/desktop_browser/authorization" && !released
+                ? `Bearer ${bearer}`
+                : undefined,
+            ),
+        },
+        callerMetadata: true,
+        close: () => {
+          if (released) return Promise.resolve();
+          released = true;
+          return fetch(`${base}/bindings/${encodeURIComponent(bindingId)}`, {
+            method: "DELETE",
+            headers: { authorization: `Bearer ${bearer}` },
+          }).then(
+            () => undefined,
+            () => undefined,
+          );
+        },
+      };
+    },
+  };
+}
+
+async function fetchBinding(
+  base: string,
+  secret: string,
+  rootSessionId: string,
+): Promise<{ bindingId: string; bearer: string } | undefined> {
+  try {
+    const res = await fetch(`${base}/bindings`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ rootSessionId }),
+    });
+    if (!res.ok) return undefined;
+    const body = (await res.json()) as { bindingId?: unknown; bearer?: unknown };
+    if (typeof body.bindingId !== "string" || typeof body.bearer !== "string") return undefined;
+    if (body.bindingId.length === 0 || body.bearer.length === 0) return undefined;
+    return { bindingId: body.bindingId, bearer: body.bearer };
+  } catch {
+    return undefined;
+  }
 }

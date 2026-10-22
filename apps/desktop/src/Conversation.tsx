@@ -829,6 +829,96 @@ function ImageIcon() {
   );
 }
 
+/**
+ * 工具结果里的截图（第 5 轮）：桌面内置浏览器返回的 PNG 走工具附件，
+ * 和用户消息里的图片共用窗口级缓存；只在这里显示缩略图，不重复进上下文。
+ */
+function ToolImage({
+  attachment,
+  images,
+  session,
+}: {
+  attachment: ImageAttachment;
+  images: AttachmentImageSource;
+  session: Pick<RpcSession, "readAttachment">;
+}) {
+  const [url, setUrl] = useState<string | undefined>(() => images.url(attachment));
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    if (url !== undefined || images.placeholder) return;
+    let active = true;
+    void images.load(attachment, session).then(
+      (loaded) => {
+        if (active) setUrl(loaded);
+      },
+      (reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : String(reason));
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [attachment, images, session, url]);
+  if (error !== undefined) {
+    return (
+      <span className="u-img-chip" title={`截图加载失败：${error}`}>
+        <ImageIcon />
+        {attachment.file}
+      </span>
+    );
+  }
+  if (url !== undefined) {
+    return (
+      <span className="u-img-frame tool-shot">
+        <img
+          className="u-img"
+          src={url}
+          alt={attachment.label ?? attachment.file}
+          onError={() => {
+            setError("图片无法解码或显示");
+          }}
+        />
+      </span>
+    );
+  }
+  return (
+    <span className="u-img-placeholder" role="status" aria-label={`加载截图：${attachment.file}`}>
+      <ImageIcon />
+    </span>
+  );
+}
+
+function ToolShots({
+  attachments,
+  images,
+  session,
+}: {
+  attachments: readonly ImageAttachment[];
+  images?: AttachmentImageSource | undefined;
+  session?: Pick<RpcSession, "readAttachment"> | undefined;
+}) {
+  if (attachments.length === 0) return null;
+  if (images === undefined || session === undefined) {
+    return (
+      <div className="tool-shots">
+        {attachments.map((attachment, index) => (
+          <span key={index} className="u-img-chip">
+            <ImageIcon />
+            {attachment.label ?? attachment.file}
+          </span>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className="tool-shots">
+      {attachments.map((attachment, index) => (
+        <ToolImage key={index} attachment={attachment} images={images} session={session} />
+      ))}
+    </div>
+  );
+}
+
 function UserImage({
   attachment,
   images,
@@ -1790,7 +1880,17 @@ function LiveOutput({ text }: { text: string }) {
   );
 }
 
-function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
+function ToolDetails({
+  entry,
+  cwd,
+  images,
+  session,
+}: {
+  entry: ToolEntry;
+  cwd: string;
+  images?: AttachmentImageSource | undefined;
+  session?: Pick<RpcSession, "readAttachment"> | undefined;
+}) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const result = entry.result;
   const isTimeout = result?.error?.code === "timeout";
@@ -1886,12 +1986,9 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd: string }) {
           输出已截断{result.spillPath ? ` · 完整输出：${displayPath(result.spillPath, cwd)}` : ""}
         </p>
       ) : null}
-      {(result?.attachments ?? []).map((attachment, index) => (
-        <span key={index} className="u-img-chip" title="暂不支持查看历史图片">
-          <ImageIcon />
-          {attachment.label ?? attachment.file}
-        </span>
-      ))}
+      {(result?.attachments ?? []).length > 0 && (
+        <ToolShots attachments={result?.attachments ?? []} images={images} session={session} />
+      )}
       {entry.descriptions?.map((description, index) =>
         description.text ? (
           <p key={index} className="conversation-review">
@@ -1957,11 +2054,15 @@ function ToolRow({
   cwd,
   preparing = false,
   waiting = false,
+  images,
+  session,
 }: {
   entry: ToolEntry;
   cwd: string;
   preparing?: boolean;
   waiting?: boolean;
+  images?: AttachmentImageSource | undefined;
+  session?: Pick<RpcSession, "readAttachment"> | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const [fileOpen, setFileOpen] = useState<Record<string, boolean>>({});
@@ -2106,7 +2207,7 @@ function ToolRow({
                       <DiffBody diff={file.diff} />
                     </div>
                   ) : null}
-                  <ToolDetails entry={entry} cwd={cwd} />
+                  <ToolDetails entry={entry} cwd={cwd} images={images} session={session} />
                 </div>
               )
             ) : null}
@@ -2150,12 +2251,16 @@ function ToolEntryView({
   cwd,
   preparing = false,
   waiting = false,
+  images,
+  session,
 }: {
   entry: ToolEntry;
   cwd: string;
   preparing?: boolean;
   /** 提问等待回答中：行尾用等待圆点，不计秒 */
   waiting?: boolean;
+  images?: AttachmentImageSource | undefined;
+  session?: Pick<RpcSession, "readAttachment"> | undefined;
 }) {
   if (entry.status === "denied") {
     return (
@@ -2168,7 +2273,16 @@ function ToolEntryView({
       </div>
     );
   }
-  return <ToolRow entry={entry} cwd={cwd} preparing={preparing} waiting={waiting} />;
+  return (
+    <ToolRow
+      entry={entry}
+      cwd={cwd}
+      preparing={preparing}
+      waiting={waiting}
+      images={images}
+      session={session}
+    />
+  );
 }
 
 const TURN_END_LABELS: Record<TurnEndReason, string> = {
@@ -2287,6 +2401,8 @@ function EntryView({
           cwd={cwd}
           preparing={preparing}
           waiting={entry.callId === waitingCallId}
+          images={images}
+          session={session}
         />
       );
     case "notice": {

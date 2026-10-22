@@ -1297,3 +1297,79 @@
   border-radius: 7px;
   cursor: default;
 }
+
+/* ── agent 标签（第 5 轮） ── */
+.sp-tab.agent .sp-tab-name {
+  max-width: 150px;
+}
+.sp-agent-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--a-faint);
+}
+.sp-agent-dot.busy {
+  background: var(--a-accent);
+  animation: sp-agent-pulse 1.2s ease-in-out infinite;
+}
+.sp-agent-dot.taken {
+  background: var(--a-warning);
+}
+@keyframes sp-agent-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+.sp-agent-browser .sp-browser-bar {
+  gap: 8px;
+}
+.sp-agent-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border: 1px solid var(--a-border);
+  border-radius: 999px;
+  color: var(--a-secondary);
+  font: 11px var(--mono);
+}
+.sp-agent-badge.child {
+  border-color: var(--a-borderStrong);
+  color: var(--a-accent);
+}
+.sp-agent-badge .sp-glyph {
+  width: 12px;
+  height: 12px;
+}
+.sp-agent-state {
+  flex: none;
+  color: var(--a-muted);
+  font-size: 11.5px;
+}
+.sp-agent-state.busy {
+  color: var(--a-accent);
+}
+.sp-agent-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--a-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-agent-control {
+  flex: none;
+  white-space: nowrap;
+}
+.sp-agent-hint {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--a-border);
+  color: var(--a-faint);
+  font-size: 11.5px;
+}
+.sp-agent-slot {
+  position: relative;
+}

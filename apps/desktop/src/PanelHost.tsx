@@ -18,10 +18,18 @@ import type { LocalFileContent, SubagentSummary, TurnChangeDiff } from "@nocturn
 import type { RpcClient } from "@nocturne/rpc/client";
 
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
+import {
+  activeAgent,
+  agentPanelTabId,
+  AgentBrowserStore,
+  agentTabsFor,
+  syncAgentTabs,
+  withoutAgentTabs,
+} from "./agent-browser";
 import { BrowserPool } from "./browser-pool";
 import type { SubagentLinks } from "./Conversation";
 import type { OpenConversation } from "./conversations";
-import type { DesktopHost } from "./host";
+import type { BrowserBounds, DesktopHost } from "./host";
 import { QuickOpen, SessionOverview, TitlebarButtons, type OverviewSubagents } from "./PanelChrome";
 import type { PrefsStore } from "./prefs";
 import { projectKey, projectName } from "./session-tree";
@@ -218,6 +226,33 @@ export function useSidePanel({
     [prefs],
   );
   const current = sessionId === null ? undefined : panelFor(sessionId, panels);
+  // ── agent 浏览器（第 5 轮）：外壳建的标签只在这里显示、布局与接管 ──
+  const agentHost = host.agentBrowser;
+  const agents = useMemo(() => new AgentBrowserStore(agentHost), [agentHost]);
+  useSyncExternalStore(agents.subscribe, agents.getVersion);
+  useEffect(() => {
+    agents.start();
+    return () => {
+      agents.dispose();
+    };
+  }, [agents]);
+  const agentSnapshot = agents.get();
+  const [agentSlot, setAgentSlot] = useState<{ tabId: string; bounds: BrowserBounds }>();
+  const [presentTick, setPresentTick] = useState(0);
+  const layoutVersion = useRef(0);
+  /** agent 标签的位置与尺寸：可见的 agent 标签报给外壳，其余由外壳移到可见区外 */
+  const onAgentSlot = useCallback((tabId: string, bounds: BrowserBounds) => {
+    setAgentSlot((current) => {
+      if (current === undefined) return { tabId, bounds };
+      const same =
+        current.tabId === tabId &&
+        current.bounds.x === bounds.x &&
+        current.bounds.y === bounds.y &&
+        current.bounds.width === bounds.width &&
+        current.bounds.height === bounds.height;
+      return same ? current : { tabId, bounds };
+    });
+  }, []);
   /**
    * 设置页和首页一样没有面板（ADR-0060 修订 2026-10-18（三））：只是不显示、按钮和快捷键
    * 不可用，会话自己的面板状态不动，返回会话时原样恢复；终端照常挂着。
@@ -228,6 +263,8 @@ export function useSidePanel({
   const shown = open && hasPanel;
   const tabs = useMemo(() => current?.tabs ?? [], [current]);
   const activeId = current?.activeId ?? "";
+  /** 当前选中的是 agent 标签时，外壳里的对应标签信息 */
+  const agentInfo = activeAgent(current);
 
   /** 改当前会话的面板；没有会话时什么都不做 */
   const update = useCallback(
@@ -236,6 +273,50 @@ export function useSidePanel({
       setPanels((map) => new Map(map).set(sessionId, fn(panelFor(sessionId, map))));
     },
     [sessionId, panelFor],
+  );
+
+  // ── agent 标签合进面板：当前会话按外壳状态增删改，别的会话里残留的清掉 ──
+  useEffect(() => {
+    const desired = agentTabsFor(agentSnapshot, sessionId);
+    setPanels((map) => {
+      let next: Map<string, SessionPanel> | undefined;
+      for (const [id, panel] of map) {
+        if (id === sessionId) continue;
+        const cleaned = withoutAgentTabs(panel);
+        if (cleaned !== panel) next = new Map(next ?? map).set(id, cleaned);
+      }
+      if (sessionId !== null) {
+        const base = map.get(sessionId) ?? restored.current.get(sessionId);
+        if (base !== undefined || desired.length > 0) {
+          const panel = base ?? restoreSessionPanel(undefined, newTabId);
+          const merged = syncAgentTabs(panel, desired);
+          if (merged !== panel || base === undefined) {
+            if (base !== undefined) restored.current.delete(sessionId);
+            next = new Map(next ?? map).set(sessionId, merged);
+          }
+        }
+      }
+      return next ?? map;
+    });
+  }, [agentSnapshot, sessionId]);
+
+  // `open` 在前台：切到 agent 的新标签，等布局送到外壳后确认（desktop-browser.md 第 6 节）
+  useEffect(
+    () =>
+      agents.onPresent(({ tabId }) => {
+        if (sessionId === null) return;
+        const id = agentPanelTabId(tabId);
+        setPresentTick((n) => n + 1);
+        setPanels((map) => {
+          const panel = syncAgentTabs(
+            panelFor(sessionId, map),
+            agentTabsFor(agents.get(), sessionId),
+          );
+          if (!panel.tabs.some((tab) => tab.id === id)) return map;
+          return new Map(map).set(sessionId, { ...panel, open: true, activeId: id });
+        });
+      }),
+    [agents, sessionId, panelFor],
   );
 
   // ── 持久化：动过的会话面板写回偏好（终端、新标签页不存） ──
@@ -390,6 +471,10 @@ export function useSidePanel({
         // 关标签就退订并丢弃它的视图（只是切走时才保留）
         watcher.release(sessionId, closing.childSessionId);
       }
+      // agent 标签的 webview 在外壳里：先让外壳关，再移除本地标签
+      if (closing?.kind === "browser" && closing.agent !== undefined) {
+        void agents.control(closing.agent.tabId, "close");
+      }
       const apply = () => {
         update((panel) => {
           const rest = panel.tabs.filter((t) => t.id !== id);
@@ -408,7 +493,7 @@ export function useSidePanel({
       if (id === activeTabRef.current) hideBrowserThen(apply);
       else apply();
     },
-    [tabs, sessionId, watcher, update, hideBrowserThen],
+    [tabs, sessionId, watcher, update, hideBrowserThen, agents],
   );
   const activate = useCallback(
     (id: string) => {
@@ -419,6 +504,13 @@ export function useSidePanel({
       else hideBrowserThen(apply);
     },
     [update, hideBrowserThen],
+  );
+  /** 接管 / 交给 agent：外壳执行，结果经 watch 快照回来 */
+  const agentControl = useCallback(
+    (tabId: string, action: "takeover" | "return") => {
+      void agents.control(tabId, action);
+    },
+    [agents],
   );
   const openChanges = useCallback(
     (seq?: number) => {
@@ -932,6 +1024,64 @@ export function useSidePanel({
   }, [runPanelKey]);
 
   const overviewVisible = overview && active !== undefined && !settingsOpen;
+  // ── 主界面向外壳报告 UI 状态：外壳据此把正在显示的 agent 标签放到占位区 ──
+  const agentVisible = shown && agentInfo !== undefined ? agentInfo.tabId : undefined;
+  useEffect(() => {
+    if (agentHost === undefined) return;
+    const snapshot = agents.get();
+    const bounds =
+      agentVisible !== undefined && agentSlot?.tabId === agentVisible
+        ? agentSlot.bounds
+        : undefined;
+    layoutVersion.current += 1;
+    const version = layoutVersion.current;
+    const route: "session" | "settings" | "home" =
+      sessionId === null ? "home" : settingsOpen ? "settings" : "session";
+    void agents
+      .uiState({
+        shellGeneration: snapshot.shellGeneration,
+        revision: snapshot.revision,
+        route,
+        ...(sessionId !== null ? { sessionId } : {}),
+        panelOpen: shown,
+        ...(activeId !== "" ? { activeTabId: activeId } : {}),
+        covered: overviewVisible,
+        ...(agentVisible !== undefined && bounds !== undefined
+          ? { layout: { tabId: agentVisible, version, bounds } }
+          : {}),
+      })
+      .then(() => {
+        // present：这一代布局已经送到外壳，确认后外壳才把页面留在可见位置
+        const pending = agents.pending();
+        if (
+          pending === undefined ||
+          agentVisible === undefined ||
+          pending.tabId !== agentVisible ||
+          bounds === undefined
+        ) {
+          return;
+        }
+        agents.takePendingPresent();
+        void agents.presented({
+          shellGeneration: snapshot.shellGeneration,
+          operationId: pending.operationId,
+          tabId: pending.tabId,
+          layoutVersion: version,
+        });
+      });
+  }, [
+    agentHost,
+    agents,
+    shown,
+    sessionId,
+    settingsOpen,
+    activeId,
+    overviewVisible,
+    agentVisible,
+    agentSlot,
+    agentSnapshot.revision,
+    presentTick,
+  ]);
   // 打开浮层时查询一次；进入会话时本来就查过，挂载那一次不重复
   const overviewWasVisible = useRef(overviewVisible);
   useEffect(() => {
@@ -1035,6 +1185,18 @@ export function useSidePanel({
               images: imageSource,
               openUrl: (url) => {
                 void host.openUrl(url);
+              },
+            }
+      }
+      agents={
+        agentHost === undefined
+          ? undefined
+          : {
+              tabs: new Map(agentSnapshot.tabs.map((info) => [info.tabId, info])),
+              onSlot: onAgentSlot,
+              onControl: agentControl,
+              onClose: (tabId) => {
+                closeTab(agentPanelTabId(tabId));
               },
             }
       }

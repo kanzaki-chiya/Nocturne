@@ -654,7 +654,7 @@ describe("Conversation 历史图片", () => {
     images.dispose();
   });
 
-  it("工具图片只显示 chip，即便缓存命中也不读取或显示缩略图", async () => {
+  it("工具图片在缓存命中时直接显示缩略图，不重复读取", async () => {
     const images = createAttachmentImageSource();
     await images.register(imageData, "image/png");
     const entry = tool({ name: "read", input: { path: "history.png" } });
@@ -666,9 +666,8 @@ describe("Conversation 历史图片", () => {
     const rendered = mount(view, { images });
     expect(rendered.container.querySelector(".u-img-chip")).toBeNull();
     fireEvent.click(screen.getByLabelText("工具详细信息"));
-    expect(rendered.container.querySelector(".u-img-chip")?.textContent).toBe("历史截图");
-    expect(screen.queryByRole("img")).toBeNull();
-    expect(visibilityObservers).toHaveLength(0);
+    const image = rendered.container.querySelector<HTMLImageElement>(".tool-shots img");
+    expect(image?.getAttribute("src")).toBe(images.url(historyImage));
     expect(rendered.methods.readAttachment).not.toHaveBeenCalled();
     images.dispose();
   });

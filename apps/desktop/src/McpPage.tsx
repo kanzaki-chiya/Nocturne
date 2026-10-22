@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { RpcError, type RpcClient } from "@nocturne/rpc/client";
 import type { McpProbeResult, McpServerOverview, McpValueOverview } from "@nocturne/core/protocol";
 import { Dropdown } from "./Dropdown";
+import type { AgentBrowserHost } from "./host";
+import type { PrefsStore } from "./prefs";
 import { Scrim } from "./ProvidersPage";
 import {
   overviewValues,
@@ -59,11 +61,16 @@ export function McpPage({
   workspaceRoot,
   version,
   onChanged,
+  agentBrowser,
+  prefs,
 }: {
   client: RpcClient | undefined;
   workspaceRoot: string | undefined;
   version: number;
   onChanged: () => void;
+  /** 面板浏览器 · 桌面内置（第 5 轮）；没有外壳时设置里不显示 */
+  agentBrowser?: AgentBrowserHost | undefined;
+  prefs?: PrefsStore | undefined;
 }) {
   const [servers, setServers] = useState<McpServerOverview[]>([]);
   const [selected, setSelected] = useState<string>();
@@ -137,6 +144,9 @@ export function McpPage({
           <span className="sub">{servers.length} 台服务器</span>
         </div>
       </header>
+      {agentBrowser !== undefined && prefs !== undefined && (
+        <AgentBrowserCard host={agentBrowser} prefs={prefs} />
+      )}
       {error && (
         <div className="errt" role="alert">
           {error}
@@ -819,6 +829,106 @@ function McpForm({
         </div>
       </form>
     </div>
+  );
+}
+
+function AgentBrowserCard({ host, prefs }: { host: AgentBrowserHost; prefs: PrefsStore }) {
+  const [enabled, setEnabled] = useState(() => prefs.get().agentBrowserEnabled === true);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+
+  const apply = async (next: boolean) => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await host.setEnabled(next);
+      prefs.update({ agentBrowserEnabled: result.enabled });
+      setEnabled(result.enabled);
+      setNote(
+        result.enabled
+          ? "已启用。重启应用后新的后台进程才会拿到工具。"
+          : "已关闭；已有绑定和标签已撤销。",
+      );
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const onToggle = (next: boolean) => {
+    if (next && prefs.get().agentBrowserRiskAccepted !== true) {
+      setConfirming(true);
+      return;
+    }
+    void apply(next);
+  };
+  return (
+    <section className="agent-browser-card" aria-labelledby="agent-browser-heading">
+      <div className="agent-browser-head">
+        <div className="grow">
+          <h4 id="agent-browser-heading">面板浏览器 · 桌面内置</h4>
+          <p className="fine">
+            让 agent 在 Nocturne
+            的面板里打开网页、截图和操作页面。默认关闭；开启后只对新的后台进程生效。
+          </p>
+        </div>
+        <label className="agent-browser-switch">
+          <input
+            type="checkbox"
+            checked={enabled}
+            disabled={busy}
+            onChange={(e) => {
+              onToggle(e.target.checked);
+            }}
+          />
+          <span>{enabled ? "已启用" : "已关闭"}</span>
+        </label>
+      </div>
+      {confirming && (
+        <div className="agent-browser-risk" role="alertdialog" aria-label="启用面板浏览器">
+          <p>agent 会读取网页文字、截图并点击输入。网页内容不可信，可能诱导它操作其他页面。</p>
+          <ul>
+            <li>标签只属于发起它的会话；你可以随时接管、交回或关闭。</li>
+            <li>点网页或按「接管」会立即撤销 agent 的控制权。</li>
+            <li>下载会被取消，脚本对话框会转交给你处理。</li>
+            <li>截图会作为工具结果附件进入模型上下文。</li>
+          </ul>
+          <div className="agent-browser-risk-actions">
+            <button
+              className="btn ghost"
+              onClick={() => {
+                setConfirming(false);
+              }}
+            >
+              取消
+            </button>
+            <button
+              className="btn primary"
+              disabled={busy}
+              onClick={() => {
+                prefs.update({ agentBrowserRiskAccepted: true });
+                setConfirming(false);
+                void apply(true);
+              }}
+            >
+              仍然启用
+            </button>
+          </div>
+        </div>
+      )}
+      {note !== "" && (
+        <p className="fine" role="status">
+          {note}
+        </p>
+      )}
+      {error !== "" && (
+        <p className="errt" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
   );
 }
 

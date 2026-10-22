@@ -237,3 +237,11 @@ const read: ToolDefinition<{ path: string; offset?: number; limit?: number }> = 
 
 - 新增可选的 `traits` 字段、`ToolDefinition` 可选方法（如 `validateInput`）或 `ToolContext` 能力：兼容变更，更新本文。
 - 修改 `ToolResult` 形状或执行管线的保证：不兼容变更，需要 ADR。
+
+## 7. 桌面运行时来源的调用者元数据
+
+决策见 [ADR-0060 修订（六）](../decisions/ADR-0060-desktop-side-panel.md#2026-10-22六agent-操作面板浏览器)，完整来源/传输契约见 [desktop-browser.md](desktop-browser.md)。
+
+`packages/mcp` 的受信运行时来源（不是服务器自报的 annotations）在 tools/call 的 `_meta["nocturne/caller"]` 注入 `ToolContext.sessionId/turnId/callId`；模型 schema 无这些字段，用户参数不能覆盖。这是连接器绑定和审计元数据，用来绑定会话和区分 actor，不改变 permissionSubjects 纯函数约束。子会话复用同连接、用自身 ctx 区分 actor，不发明新的权限类别或人工确认路径。手机发起的 Turn 也可以用这组工具，权限照常处理。
+
+图片仍使用第 3 节现有 ToolResult.attachments，不改变结果形状。MCP 连接器对所有 MCP image 做通用、受预算的解码与映射，不按工具名特殊处理；执行器/模型能力/客户端沿现有附件通道，origin=mcp。见 [mcp.md 第 6 节](../architecture/mcp.md#6-调用与结果映射)。

@@ -498,6 +498,15 @@ pub fn handle_backend_open(invoke: tauri::ipc::Invoke) {
         message: &invoke.message,
         acl: &invoke.acl,
     });
+    // 桌面浏览器启动凭证（desktop-browser.md 第 1 节）：只在启用时给本次 spawn 的环境。
+    // 后台入口读出后立即删除；不进 argv、前端、配置或日志。
+    let browser_bootstrap = invoke
+        .message
+        .webview_ref()
+        .state::<Arc<crate::agent_browser::AgentBrowserState>>()
+        .inner()
+        .clone()
+        .bootstrap_env();
     let (workspace, channel) = match (workspace, channel) {
         (Ok(workspace), Ok(channel)) => (workspace, channel),
         (Err(error), _) | (_, Err(error)) => {
@@ -507,7 +516,10 @@ pub fn handle_backend_open(invoke: tauri::ipc::Invoke) {
     };
     let resolver = invoke.resolver;
     tauri::async_runtime::spawn_blocking(move || {
-        resolver.respond(backend_open(&state, generation, workspace, channel).map_err(Into::into));
+        resolver.respond(
+            backend_open(&state, generation, workspace, channel, browser_bootstrap)
+                .map_err(Into::into),
+        );
     });
 }
 
@@ -516,6 +528,7 @@ fn backend_open(
     generation: u64,
     workspace: String,
     channel: tauri::ipc::Channel<BackendMessage>,
+    browser_bootstrap: Option<(String, String)>,
 ) -> CmdResult<u32> {
     let workspace_path = Path::new(&workspace);
     if !workspace_path.is_dir() {
@@ -564,6 +577,11 @@ fn backend_open(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // 每次 spawn 都先清掉再按需写入：后台不会从外壳继承到一个过期的凭证
+    command.env_remove("NOCTURNE_DESKTOP_BROWSER_BOOTSTRAP");
+    if let Some((key, value)) = &browser_bootstrap {
+        command.env(key, value);
+    }
 
     state.open_in_page(generation, move |id| {
         let state_arc = Arc::clone(state);

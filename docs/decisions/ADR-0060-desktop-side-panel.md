@@ -74,13 +74,15 @@
 
 ### 7. agent 操作浏览器（单列一轮）
 
-维护者的日常验收靠 BrowserOS 和无头 Chrome 截图；如果 agent 能直接操作面板里的浏览器，用户可以实时看着它打开页面、截图、点击，这是这个面板最大的增值。方案草案如下：
+维护者的日常验收靠 BrowserOS 和无头 Chrome 截图；agent 直接操作面板里的浏览器，用户实时看着它打开页面、截图、点击，这是这个面板最大的增值。方案如下：
 
 - Core 不能依赖 UI（AGENTS.md 硬性约束），所以不在 Core 里加浏览器工具。由桌面外壳在本机起一个 **MCP 服务器**，经 WebView2 的 DevTools 协议提供 `open`、`screenshot`、`click`、`type`、`read` 等工具；Nocturne 把它当成一个内置的 MCP 服务器接入。
 - 这样权限就走现有的 `mcp` 规则和 `smart` 审查，不需要新增权限类别；截图、读取这类工具声明 `readOnlyHint`。
 - 只有桌面端可用；子会话的权限照常收敛。
 
-这一轮要做，排在最后，时间不急；进入这一轮前先补一份细化设计。
+这一轮排在最后；细化设计见文末修订（六），精确契约见 [desktop-browser.md](../protocols/desktop-browser.md)。
+
+第 5 轮的细化设计见文末修订（六），精确契约见 [desktop-browser.md](../protocols/desktop-browser.md)。
 
 ### 8. 不做
 
@@ -170,3 +172,17 @@
 8. **结束、耗时与恢复**：自然收尾后保留标签，显示最终结果（或失败/取消信息）、状态与耗时，直到用户关闭；从概览删除运行项。状态优先父 task 的持久结算，耗时优先父 tool.completed.durationMs；缺它则按已知起止事件时间计算并标近似，无终止事实不编造最终耗时。父尚未结算但已收到成功 finish 时先显示「结果已提交」，不抢先宣告父 task 成功。未收束快照停止动画但保留实际事件，不伪造中断/修复事件。
 9. **持久化和资源**：panelSessions 增加 subagent 标签描述（id、kind、childSessionId、parentCallId、profile、taskSummary；所属父 id 取外层键），不存事件、任务全文或任何交互句柄。重启后标签/顺序/当前项恢复，首次显示从 0 只读回放，后台重连时保留的视图按最后持久 seq 续接并清瞬态；重新校验父子关系，日志丢失或关系不符时标签留着显示错误和重试，不自动删除或 resume。只订阅当前显示的子标签，切走、关面板、进设置、关标签时退订，回看用保留视图与 seq 补读；组件卸载可释放视图，下次从 0 重放。服务器自然终止/断线要释放监听和缓冲，观察本身不延长子锁寿命或中断运行；父会话删除沿用现有面板整套清理。
 10. **不套用浏览器生命周期**：子标签是主 webview 内的普通 DOM，不创建子 webview，不使用浏览器截图占位、cookie 目录、MAX_LIVE_BROWSERS 或后台 LRU；只读观察按上一条管理。由浏览器切到子标签仍必须沿用 hideShown 的先藏后切流程，概览变高后仍由浏览器浮层相交检测处理遮挡，不能绕开第 3 轮安全规则。无需修改浏览器 CSP、capability 或终端进程管理。
+
+### 2026-10-22（六）：agent 操作面板浏览器
+
+精确接入、工具 schema、超时、权限矩阵和生命周期以 [desktop-browser.md](../protocols/desktop-browser.md) 为主文档。
+
+1. **外壳回环 HTTP MCP**。随机端口、256 bit 临时启动凭证、每根会话独立 bearer；不写用户 mcp.json、不进 argv/日志/前端。后台入口读出并删除进程专属环境字段，以通用运行时来源注入 packages/mcp，Core 仍只消费 McpConnector，Agent Loop 不按工具名分支。与现有 stdio RPC 分离，取消/重连沿 MCP；不把 CDP 放到 RPC，也不开远程调试端口。其他本机进程可连 TCP，但无凭证不能调用；不承诺防同用户恶意进程。设置可见且可停用，不伪装成可编辑的用户 MCP 配置。
+2. **不采用前端中转**。现有 RPC 没有服务端→客户端请求，外壳只按行转发；复用意味着引入反向控制消息、请求相关表、前端重载恢复和自定义 MCP transport，额外经过主 webview。
+3. **标签只归本绑定的 actor**。模型不能传 session id；包装器从 ToolContext 注入调用者元数据（sessionId、turnId、callId）。根/子会话共享 MCP 连接但各自 actor 只能操作自己开的标签，child 的标签显示在父面板，不碰用户/兄弟标签。每个 `tabId` 随机生成，每次调用校验 owner 和 generation；`open` 总是新建标签。agent 标签固定（pinned），不参与 `MAX_LIVE_BROWSERS` 的后台回收；容量满了就报错。外壳持权威登记，前端仅投影，不让组件卸载误销毁 agent 资源。
+4. **标签不可见时后台照常操作**。用户切到别的会话、进了设置页、关了面板、选了别的标签时，agent 的标签不用 `hide()`，而是在主窗口里保持 shown、移到可见区域之外；窗口最小化或失焦时照常执行。用户切回来时标签回到面板正常位置，状态不丢失。离屏标签不参与浮层遮挡的截图占位逻辑，也不盖住主界面任何区域。离屏期间标签上的 agent 徽标带活动状态。`open` 新开标签时，所属会话正显示在前台就打开面板并切到新标签；不在前台就在后台新建，不抢用户当前的会话、页面或标签。
+5. **工具与安全**。WebView2 CallDevToolsProtocolMethod 只在外壳使用，提供 open/navigate/screenshot/read/click/type/press/scroll/wait/back/forward/list_tabs/close_tab，不开放任意 `Runtime.evaluate`、上传或自动下载。refs 绑定快照/文档/代数，截图坐标有 viewport 与 DPI 契约；可访问性树做有界摘要，超出预算明确截断。导航复用现有策略（`check_target`、`allow_navigation`）并额外拒绝 agent `file://`，应用自己的地址和 `devUrl` 一律拦截，不冒充用户主动本地文件授权。agent 下载直接取消，不弹另存为；新窗口仍拒绝原生 popup，受控开同 actor 标签；网页的脚本对话框（alert、confirm、prompt）不自动确认，交给用户处理。
+6. **权限沿用现有 MCP 语义，不加新机制**。全部走 mcp 主体；只读声明在 smart 下可直接放行，其余送既有审查。启用这组工具时明确提示风险：选了「本会话允许」后，同一个工具后面不再逐次确认；`smart` 只看主体，不看网页内容。文档如实写明这个限制，不宣称能识别「敏感操作」。`default` 首次均 ask，但既有授权可覆盖后续调用，guarded/bypass 更宽。
+7. **agent 专用数据目录**。agent 用专用的持久目录 `agent-browser`，不和用户在面板里浏览时的数据共用。需要登录时，用户在 agent 的标签里接管、登录，然后交回。专用 agent 目录跨会话共用登录状态，不把「标签隔离」宣传成「账号隔离」。不复制/导入普通浏览 cookie。
+8. **接管只做两种，不做输入屏障**。显式「接管」按钮是主入口；用户点进 agent 的标签、子 webview 拿到原生焦点（GotFocus）时自动撤销 agent 的控制权。第一版不做原生输入屏障，也不做透明 layered 窗口：用户的第一次点击直接交给网页。「交回」时先把原生焦点移回主界面，再恢复 agent 的控制权。不做输入屏障的原因是透明 layered 子窗口在本机创建失败（`0x8007007E`），普通 sibling 的 alpha 设置返回 `E_INVALIDARG`，不能作为可靠的透明方案。中断取消队列/等待、忽略迟到回调，不声称撤销已发往网站的副作用。agent 标签不持久化成普通标签；cookie 目录保留，绑定/refs 不保留。
+9. **通用补齐**。截图走现有的 `ToolResult.attachments`，是对 `packages/mcp` 的通用改进，不按工具名特殊处理；支持/不支持看图模型各走既有降级，主对话复用图片展示。手机发起的 Turn 也可以用这组工具，权限照常处理。Core 不解释浏览器，只消费中性声明；调用者信息见 Tool API 第 7 节。

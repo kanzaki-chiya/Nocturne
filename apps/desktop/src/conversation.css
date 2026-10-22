@@ -1344,3 +1344,17 @@
   color: var(--a-muted);
   font-size: 12px;
 }
+
+/* ── 工具结果里的截图（第 5 轮） ── */
+.tool-shots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0;
+}
+.tool-shot .u-img {
+  width: auto;
+  max-height: 220px;
+  max-width: 100%;
+  object-fit: contain;
+}

@@ -64,6 +64,11 @@
     "allow-browser-action",
     "allow-browser-capture",
     "allow-browser-destroy",
+    "allow-agent-browser-watch",
+    "allow-agent-browser-ui-state",
+    "allow-agent-browser-presented",
+    "allow-agent-browser-control",
+    "allow-agent-browser-set-enabled",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:window:allow-request-user-attention"

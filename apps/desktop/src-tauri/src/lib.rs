@@ -3,6 +3,7 @@
 //! （ADR-0060）。
 //! 所有 Nocturne 语义在前端经 `@nocturne/rpc/client` 处理。
 
+mod agent_browser;
 mod backend;
 mod browser;
 mod browser_policy;
@@ -47,6 +48,10 @@ fn begin_shutdown(app: &AppHandle) {
         let terminals = Arc::clone(app.state::<Arc<terminal::TerminalState>>().inner());
         let closing_terminals = thread::spawn(move || terminals.close_all());
         app.state::<Arc<browser::BrowserState>>().close_all(&app);
+        // agent 浏览器：先撤绑定（阻断仍在途的 HTTP 调用），再关 webview
+        let agents = app.state::<Arc<agent_browser::AgentBrowserState>>();
+        agents.revoke_all();
+        agents.destroy_all();
         close_backends(app.state::<Arc<AppState>>().backends_snapshot());
         let _ = closing_terminals.join();
         app.exit(0);
@@ -93,6 +98,11 @@ pub fn run() {
         browser::browser_action,
         browser::browser_capture,
         browser::browser_destroy,
+        agent_browser::agent_browser_watch,
+        agent_browser::agent_browser_ui_state,
+        agent_browser::agent_browser_presented,
+        agent_browser::agent_browser_control,
+        agent_browser::agent_browser_set_enabled,
     ];
     tauri::Builder::default()
         // 不要插件往每个 webview 注入的 alert / confirm 改写（plugin_script.rs）：网页和主界面都用
@@ -131,6 +141,20 @@ pub fn run() {
             app.manage(Arc::new(terminal::TerminalState::default()));
             // 面板浏览器（ADR-0060 第 5 节）：同上，随页面重载、应用退出全部关掉
             app.manage(Arc::new(browser::BrowserState::new(webview_data.clone())));
+            // 第 5 轮 agent 浏览器：回环 MCP 与 agent 标签，默认关闭；开关落在
+            // agent 专用目录的标记文件里，外壳启动时先读它再开服务器，和前端调用顺序无关
+            {
+                let platform = agent_browser::shell::ShellPlatform::new(
+                    app.handle().clone(),
+                    webview_data.clone(),
+                );
+                let enabled_path = app.path().app_local_data_dir().ok().map(|dir| {
+                    browser_policy::agent_data_dir(&dir, webview_data.as_deref()).join("enabled")
+                });
+                let agents = agent_browser::AgentBrowserState::new(platform.clone(), enabled_path);
+                platform.bind(Arc::downgrade(&agents));
+                app.manage(agents);
+            }
             if let (Some(config), Some(dir)) = (&main_window, &webview_data) {
                 tauri::WebviewWindowBuilder::from_config(app.handle(), config)?
                     .data_directory(dir.clone())
@@ -158,6 +182,10 @@ pub fn run() {
                 }
                 if let Some(browsers) = webview.try_state::<Arc<browser::BrowserState>>() {
                     browsers.close_all(webview.app_handle());
+                }
+                // agent 标签与绑定随页面代际一起作废：先撤绑定再关 webview
+                if let Some(agents) = webview.try_state::<Arc<agent_browser::AgentBrowserState>>() {
+                    agent_browser::page_reloaded(agents.inner());
                 }
             }
         })

@@ -1179,6 +1179,8 @@ export function App({ host }: { host: DesktopHost }) {
                   client={pageClient}
                   workspaceRoot={effectiveWorkspace ?? undefined}
                   version={providersVersion}
+                  agentBrowser={host.agentBrowser}
+                  prefs={prefs}
                   onChanged={() => {
                     void refresh();
                   }}

@@ -9,7 +9,13 @@ import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 
 import { isAllowedExternalUrl } from "./external-url";
-import type { BrowserMessage, DesktopHost, TerminalMessage } from "./host";
+import type {
+  AgentWatchMessage,
+  AgentWatchSnapshot,
+  BrowserMessage,
+  DesktopHost,
+  TerminalMessage,
+} from "./host";
 import type { NotifyResult } from "./notify";
 import { decodePickedImages } from "./picked-images";
 import type { BackendMessage } from "./types";
@@ -56,6 +62,24 @@ export function createTauriHost(): DesktopHost {
         return new Uint8Array(await invoke<ArrayBuffer>("browser_capture", { id }));
       },
       destroy: (id) => invoke("browser_destroy", { id }),
+    },
+    agentBrowser: {
+      watch(onMessage) {
+        const channel = new Channel<AgentWatchMessage>();
+        channel.onmessage = onMessage;
+        return invoke<AgentWatchSnapshot>("agent_browser_watch", { channel });
+      },
+      uiState: (ui) => invoke("agent_browser_ui_state", { ui }),
+      presented: (input) => invoke("agent_browser_presented", input),
+      control: (tabId, action) =>
+        invoke<{ revision: number; state?: string }>("agent_browser_control", {
+          tabId,
+          action,
+        }),
+      setEnabled: (enabled) =>
+        invoke<{ enabled: boolean; restartRequired: boolean }>("agent_browser_set_enabled", {
+          enabled,
+        }),
     },
     async detectEditors() {
       try {

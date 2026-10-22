@@ -98,6 +98,13 @@ export interface Prefs {
   panelActiveTab?: string | undefined;
   /** 上次检查更新的时间戳 ms；自动与手动检查都计入 24h 节流 */
   lastUpdateCheck?: number | undefined;
+  /**
+   * 面板浏览器 · 桌面内置（第 5 轮）：默认关闭。外壳另有同名开关文件，
+   * 启用后要重启后台（新的 Turn）才拿到工具；关闭立即撤销旧绑定。
+   */
+  agentBrowserEnabled?: boolean | undefined;
+  /** 用户已经看过启用风险说明（只在第一次启用时拦一下） */
+  agentBrowserRiskAccepted?: boolean | undefined;
   /** 上次检查发现的新版本；「稍后」只清本次运行，重启后若仍比当前新则继续提示 */
   pendingUpdate?: { version: string; notes: string | null } | undefined;
 }
@@ -186,6 +193,10 @@ function parse(raw: string | null): Prefs {
   if (typeof obj.lastUpdateCheck === "number" && Number.isFinite(obj.lastUpdateCheck)) {
     prefs.lastUpdateCheck = obj.lastUpdateCheck;
   }
+  if (typeof obj.agentBrowserEnabled === "boolean") {
+    prefs.agentBrowserEnabled = obj.agentBrowserEnabled;
+  }
+  if (obj.agentBrowserRiskAccepted === true) prefs.agentBrowserRiskAccepted = true;
   const pending = obj.pendingUpdate;
   if (
     typeof pending === "object" &&
@@ -268,6 +279,12 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
           : {}),
         ...(prefs.panelActiveTab !== undefined ? { panelActiveTab: prefs.panelActiveTab } : {}),
         ...(prefs.lastUpdateCheck !== undefined ? { lastUpdateCheck: prefs.lastUpdateCheck } : {}),
+        ...(prefs.agentBrowserEnabled !== undefined
+          ? { agentBrowserEnabled: prefs.agentBrowserEnabled }
+          : {}),
+        ...(prefs.agentBrowserRiskAccepted !== undefined
+          ? { agentBrowserRiskAccepted: prefs.agentBrowserRiskAccepted }
+          : {}),
         ...(prefs.pendingUpdate !== undefined ? { pendingUpdate: { ...prefs.pendingUpdate } } : {}),
       };
     },

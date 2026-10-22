@@ -77,18 +77,18 @@ pub struct Browser {
     downloads: Mutex<Downloads>,
 }
 
+impl Browser {
+    fn send(&self, message: BrowserMessage) {
+        let _ = self.channel.send(message);
+    }
+}
+
 #[derive(Default)]
 struct Nav {
     /// 当前文档的地址（页面提交时更新）：判断「网页从 http(s) 跳到 file」
     current: Option<Url>,
     /// 我们自己发起的那次导航：用户主动打开的本地文件凭它放行
     user_target: Option<Url>,
-}
-
-impl Browser {
-    fn send(&self, message: BrowserMessage) {
-        let _ = self.channel.send(message);
-    }
 }
 
 #[derive(Default)]
@@ -129,6 +129,11 @@ impl BrowserState {
             }
         }
     }
+
+    /// 当前存活的用户浏览器标签数。容量判定把 agent 标签另算（desktop-browser.md 第 2 节）。
+    pub fn live_count(&self) -> usize {
+        lock(&self.browsers).len()
+    }
 }
 
 /// 关掉一个浏览器 webview：不在调用方的线程上关，换一个线程发起。
@@ -143,6 +148,11 @@ fn close_later(webview: tauri::Webview) {
     std::thread::spawn(move || {
         let _ = webview.close();
     });
+}
+
+/// agent 标签关 webview 也走同一条路径（desktop-browser.md 第 2 节）。
+pub fn close_later_for_agent(webview: tauri::Webview) {
+    close_later(webview);
 }
 
 /// 前端给的位置和尺寸（主界面的 CSS 像素 = 逻辑像素）。

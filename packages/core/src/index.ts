@@ -1655,6 +1655,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ...new Set([
         "NOCTURNE_API_KEY",
         "ANTHROPIC_API_KEY",
+        // 桌面浏览器启动凭证：后台入口读出即删，shell / 外部进程再拿不到
+        "NOCTURNE_DESKTOP_BROWSER_BOOTSTRAP",
         ...Object.values(JEV_ENDPOINTS).map((entry) => entry.env),
         ...(() => {
           const reviewer =

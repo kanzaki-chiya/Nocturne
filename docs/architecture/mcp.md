@@ -133,7 +133,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 | MCP 结果 | 映射 |
 |---|---|
 | `content[].type = "text"` | 文本按序拼接进 `modelContent` |
-| `content[].type = "image"` | `modelContent` 中追加占位 `[image <mimeType>, <N> bytes]`；`output` 只保留元数据（mimeType、字节数），**不带 base64 数据**——`ContentBlock` 尚无图片类型，图片不发给模型（第 9 节） |
+| `content[].type = "image"` | 通用、受预算地解码并映射到 `ToolResult.attachments`（origin=mcp，不按工具名特殊处理）：单张原始文件不超过 5MB、每边不超过 8000px、每次最多4张且合计8MB；验证 MIME/文件头与 base64，拒绝畸形/过量数据。`modelContent` 保留简短占位（含 mime、尺寸、字节数），`output.content` 只保留元数据。后续沿现有附件通道落盘、进模型能力分支与客户端展示 |
 | `content[].type = "resource"` | 带 `text` 的按文本拼接（前缀标注 `[resource <uri>]`）；带 `blob` 的记占位 `[resource <uri> (<mimeType>, <N> bytes)]` |
 | `content[].type = "audio"` | 占位 `[audio <mimeType>, <N> bytes]` |
 | `structuredContent` | 进 `ToolResult.output.structured`（受 `output` 独立上限约束） |
@@ -191,3 +191,7 @@ core:      wrapSession 中 options.mcp 存在时（空集合也建会话以支�
 
 - **OAuth**：本轮只支持静态请求头，不传 authProvider；需要登录的端点提示本版本暂不支持。
 - **旧版 SSE**：导入时明确提示暂不支持并跳过。
+
+## 10. 桌面浏览器运行时来源
+
+桌面外壳提供回环 HTTP MCP，经 CLI 的桌面后台启动凭证装配为临时来源，不写用户 mcp.json；根会话绑定、子 actor、停用、同名冲突和图片附件映射的契约见 [desktop-browser.md](../protocols/desktop-browser.md)。普通配置的传输、重载与权限语义不变。

@@ -3,6 +3,7 @@
  * 旧全局标签迁移、宽度上下限、快速打开排名、变更汇总、终端默认 shell。界面在 SidePanel.tsx。
  */
 import type { TurnChanges } from "@nocturne/core/protocol";
+import type { AgentTabInfo } from "./host";
 
 /** runtime.listShells 的一项（Core platform/shells.ts DetectedShell 的结构） */
 export interface ShellOption {
@@ -57,12 +58,16 @@ export interface TerminalTab {
 /**
  * 浏览器（ADR-0060 第 5 节）：一个标签一个外壳子 webview。url 和 title 跟着网页走、
  * 重启时恢复（历史不恢复）；webview 本身由 browser-pool 按需创建、超出上限时回收。
+ *
+ * 第 5 轮：`agent` 存在时是 agent 自己的标签（外壳建立、不持久化、不参与回收），
+ * 面板只负责显示、布局与接管/交回；`id` 与外壳的 tabId 一致。
  */
 export interface BrowserTab {
   id: string;
   kind: "browser";
   url: string;
   title?: string | undefined;
+  agent?: AgentTabInfo | undefined;
 }
 
 /**
@@ -370,6 +375,8 @@ export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
       ];
     }
     if (tab.kind === "browser") {
+      // agent 标签（第 5 轮）由外壳建立，不持久化：重启后没有对应的 webview
+      if (tab.agent !== undefined) return [];
       return [
         {
           id: tab.id,

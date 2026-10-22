@@ -88,6 +88,84 @@ export interface BrowserHost {
   destroy: (id: number) => Promise<void>;
 }
 
+/** agent 标签的展示状态（desktop-browser.md 第 7 节） */
+export interface AgentTabInfo {
+  tabId: string;
+  rootSessionId: string;
+  actorSessionId: string;
+  title: string;
+  url: string;
+  live: boolean;
+  pinned: boolean;
+  state: "agent" | "busy" | "taken_over" | "ended";
+  operation?: string | undefined;
+  child: boolean;
+  notice?: string | undefined;
+  dialog?: { kind: string; uri: string; message: string } | undefined;
+}
+
+export interface AgentWatchSnapshot {
+  shellGeneration: number;
+  revision: number;
+  enabled: boolean;
+  tabs: AgentTabInfo[];
+}
+
+export type AgentWatchMessage =
+  | ({
+      kind: "tabs";
+      tabs: AgentTabInfo[];
+    } & Omit<AgentWatchSnapshot, "tabs" | "enabled">)
+  | {
+      kind: "present";
+      shellGeneration: number;
+      revision: number;
+      operationId: string;
+      tabId: string;
+    }
+  | {
+      kind: "operation";
+      shellGeneration: number;
+      revision: number;
+      tabId: string;
+      operationId: string;
+      state: "started" | "completed" | "cancelled";
+      operation: string;
+      errorCode?: string | undefined;
+    };
+
+/** 主界面向外壳报告的 UI 状态：外壳据此把 agent webview 放到面板或移出可见区 */
+export interface AgentUiState {
+  shellGeneration: number;
+  revision: number;
+  route: "session" | "settings" | "home";
+  sessionId?: string | undefined;
+  panelOpen: boolean;
+  activeTabId?: string | undefined;
+  covered: boolean;
+  layout?: { tabId: string; version: number; bounds: BrowserBounds } | undefined;
+}
+
+/**
+ * 面板浏览器 · 桌面内置（desktop-browser.md）：功能默认关闭；启用后 agent 经回环 MCP
+ * 操作自己的标签。前端只做展示、接管/交回与布局，不接触 bearer 或网页正文。
+ */
+export interface AgentBrowserHost {
+  watch: (onMessage: (message: AgentWatchMessage) => void) => Promise<AgentWatchSnapshot>;
+  uiState: (ui: AgentUiState) => Promise<void>;
+  presented: (input: {
+    shellGeneration: number;
+    operationId: string;
+    tabId: string;
+    layoutVersion: number;
+  }) => Promise<void>;
+  control: (
+    tabId: string,
+    action: "takeover" | "return" | "close",
+  ) => Promise<{ revision: number; state?: string | undefined }>;
+  setEnabled: (enabled: boolean) => Promise<{ enabled: boolean; restartRequired: boolean }>;
+}
+
 /**
  * 宿主抽象：前端对 Tauri 的全部依赖都在这一个接口后面，
  * 测试用假宿主替换（docs/apps/desktop.md）。
@@ -150,4 +228,6 @@ export interface DesktopHost {
   terminals?: TerminalHost;
   /** 面板内置浏览器；没有时网址与 HTML 交给系统浏览器 */
   browsers?: BrowserHost;
+  /** 面板浏览器 · 桌面内置（agent）；没有时设置里不显示这一项 */
+  agentBrowser?: AgentBrowserHost;
 }

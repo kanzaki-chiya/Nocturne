@@ -19,11 +19,12 @@ import type { SubagentSummary, ToolEntry } from "@nocturne/core/protocol";
 import { RpcError } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "./attachment-images";
+import { AgentBrowserPane } from "./AgentBrowserPane";
 import type { BrowserPool } from "./browser-pool";
 import { BrowserPane, BrowserTabIcon } from "./BrowserPane";
 import { DiffBody } from "./Conversation";
 import type { CodeViewer } from "./code-viewer";
-import type { TerminalHost } from "./host";
+import type { AgentTabInfo, BrowserBounds, TerminalHost } from "./host";
 import { displayPath } from "./paths";
 import {
   browserTabName,
@@ -139,7 +140,25 @@ export interface SidePanelProps {
   openExternalUrl?: (url: string) => Promise<void>;
   /** 子代理标签；没有时子代理标签显示说明 */
   subagents?: PanelSubagents | undefined;
+  /** agent 自己的浏览器标签（外壳建立）；没有时 agent 标签显示说明 */
+  agents?: PanelAgents | undefined;
 }
+
+/** agent 标签的显示与操作；标签信息来自外壳的 watch 快照 */
+export interface PanelAgents {
+  tabs: ReadonlyMap<string, AgentTabInfo>;
+  onSlot: (tabId: string, bounds: BrowserBounds) => void;
+  onControl: (tabId: string, action: "takeover" | "return") => void;
+  onClose: (tabId: string) => void;
+}
+
+/** 标签上活动状态点的说明（与 AgentBrowserPane 的状态文案同一口径） */
+const AGENT_TAB_STATE: Record<AgentTabInfo["state"], string> = {
+  agent: "agent 控制中",
+  busy: "agent 正在操作",
+  taken_over: "已被你接管",
+  ended: "已关闭",
+};
 
 function Glyph({
   kind,
@@ -188,7 +207,13 @@ function tabTitle(tab: PanelTab): { name: string; project?: string; title: strin
   if (tab.kind === "changes") return { name: "变更", title: "当前会话改过的文件" };
   if (tab.kind === "new") return { name: "新标签页", title: "新标签页" };
   if (tab.kind === "terminal") return { name: "终端", project: tab.label, title: tab.cwd };
-  if (tab.kind === "browser") return { name: browserTabName(tab), title: tab.url };
+  if (tab.kind === "browser") {
+    if (tab.agent !== undefined) {
+      const name = tab.agent.title !== "" ? tab.agent.title : browserTabName(tab);
+      return { name, project: tab.agent.child ? "子代理" : "agent", title: tab.agent.url };
+    }
+    return { name: browserTabName(tab), title: tab.url };
+  }
   if (tab.kind === "subagent") {
     const name = subagentTabName(tab);
     return { name, title: name };
@@ -266,7 +291,7 @@ function TabBar(props: SidePanelProps) {
             <div
               key={tab.id}
               data-tab-id={tab.id}
-              className={`sp-tab${active ? " on" : ""}${dragging === tab.id ? " dragging" : ""}`}
+              className={`sp-tab${active ? " on" : ""}${tab.kind === "browser" && tab.agent !== undefined ? " agent" : ""}${tab.kind === "browser" && tab.agent?.state === "busy" ? " busy" : ""}${dragging === tab.id ? " dragging" : ""}`}
               role="tab"
               aria-selected={active}
               tabIndex={active ? 0 : -1}
@@ -309,7 +334,9 @@ function TabBar(props: SidePanelProps) {
                 }
               }}
             >
-              {tab.kind === "browser" && props.browsers !== undefined ? (
+              {tab.kind === "browser" && tab.agent !== undefined ? (
+                <Glyph kind="agent" />
+              ) : tab.kind === "browser" && props.browsers !== undefined ? (
                 <BrowserTabIcon pool={props.browsers} tab={tab} globe={<Glyph kind="globe" />} />
               ) : (
                 <Glyph
@@ -323,6 +350,15 @@ function TabBar(props: SidePanelProps) {
                 />
               )}
               <TabLabel name={name} project={project} />
+              {tab.kind === "browser" && tab.agent !== undefined && (
+                <span
+                  className={`sp-agent-dot${tab.agent.state === "busy" ? " busy" : ""}${
+                    tab.agent.state === "taken_over" ? " taken" : ""
+                  }`}
+                  title={AGENT_TAB_STATE[tab.agent.state]}
+                  aria-label={AGENT_TAB_STATE[tab.agent.state]}
+                />
+              )}
               <button
                 type="button"
                 className="sp-tab-close"
@@ -1248,7 +1284,20 @@ export function SidePanel(props: SidePanelProps) {
                 />
               )
             ) : tab.kind === "browser" ? (
-              props.browsers === undefined ? (
+              tab.agent !== undefined ? (
+                props.agents === undefined ? (
+                  <div className="sp-empty">这个环境不能查看 agent 标签</div>
+                ) : (
+                  <AgentBrowserPane
+                    tab={tab}
+                    info={props.agents.tabs.get(tab.agent.tabId) ?? tab.agent}
+                    visible={!hidden && tab.id === activeId && current.has(tab.id)}
+                    onSlot={props.agents.onSlot}
+                    onControl={props.agents.onControl}
+                    onClose={props.agents.onClose}
+                  />
+                )
+              ) : props.browsers === undefined ? (
                 <div className="sp-empty">这个环境没有内置浏览器</div>
               ) : (
                 <BrowserPane

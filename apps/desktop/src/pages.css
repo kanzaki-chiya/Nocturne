@@ -1442,3 +1442,50 @@
   font-size: 12px;
   color: var(--a-secondary);
 }
+
+/* ── 面板浏览器 · 桌面内置（第 5 轮） ── */
+.agent-browser-card {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--a-border);
+  border-radius: 10px;
+  background: var(--a-raised);
+}
+.agent-browser-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.agent-browser-head h4 {
+  margin: 0 0 3px;
+  font-size: 13px;
+}
+.agent-browser-switch {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  color: var(--a-secondary);
+  font-size: 12px;
+}
+.agent-browser-risk {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--a-warning);
+  border-radius: 8px;
+  background: var(--a-warnBg);
+  color: var(--a-text);
+  font-size: 12px;
+}
+.agent-browser-risk p {
+  margin: 0;
+}
+.agent-browser-risk ul {
+  margin: 6px 0 8px;
+  padding-left: 18px;
+}
+.agent-browser-risk-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

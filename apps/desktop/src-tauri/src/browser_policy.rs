@@ -156,6 +156,82 @@ pub fn browser_data_dir(app_local_data: &Path, user_data_override: Option<&Path>
     user_data_override.unwrap_or(app_local_data).join("browser")
 }
 
+/// agent 专用的持久数据目录（desktop-browser.md 第 5 节）：应用本地数据下的
+/// `agent-browser`，不和用户在面板里浏览时的数据共用。需要登录时用户在 agent 的
+/// 标签里接管、登录，然后交回。隔离环境下放在 `<WEBVIEW2_USER_DATA_FOLDER>/agent-browser`。
+/// HTTP/CDP 集成后续使用（第二阶段剩余工作），先行合并函数与单测。
+#[allow(dead_code)]
+pub fn agent_data_dir(app_local_data: &Path, user_data_override: Option<&Path>) -> PathBuf {
+    user_data_override
+        .unwrap_or(app_local_data)
+        .join("agent-browser")
+}
+
+/// agent 是否被禁止访问该 host：应用内部地址（tauri.localhost、*.localhost 等）
+/// 与常见内网后缀一律拦截；**本机回环允许**（desktop-browser.md 第 5 节：
+/// 本机 http 开发服务可用），启动端口的 bootstrap/MCP 路径另由
+/// [`agent_allow_navigation`] 按端口/路径拒绝。
+pub fn is_agent_blocked_host(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    let bare = lower.strip_suffix('.').unwrap_or(&lower);
+    if APP_HOSTS.contains(&bare) {
+        return true;
+    }
+    // Tauri 自定义协议映射成的 *.localhost 子域：浏览器也能读到应用资源，一律不让进
+    if bare.ends_with(".localhost") {
+        return true;
+    }
+    // 常见本机开发后缀：与修订（四）的应用内部地址判定一致
+    for suffix in [".local", ".internal", ".lan"] {
+        if bare.ends_with(suffix) {
+            return true;
+        }
+    }
+    false
+}
+
+/// agent 导航策略（desktop-browser.md 第 5 节）：在现有用户策略之上额外拒绝
+/// `file://`（agent 不能打开）、应用自己的地址与 devUrl；本机回环允许，但
+/// 启动端口的 `/bindings` 与 `/mcp/*` 一律拒绝。外站走现有 allow_navigation。
+pub fn agent_allow_navigation(
+    url: &Url,
+    current: Option<&Url>,
+    user_target: Option<&Url>,
+    dev: Option<&Url>,
+    agent_port: Option<u16>,
+) -> Result<(), Blocked> {
+    if url.scheme() == "file" {
+        return Err(Blocked::File);
+    }
+    // 本机回环上的启动端口：bootstrap 与 MCP 路径不能从网页进入
+    if let (Some(port), Some(url_port)) = (agent_port, url.port_or_known_default()) {
+        if url_port == port
+            && url.host_str().is_some_and(|host| {
+                let bare = host.to_ascii_lowercase();
+                bare == "localhost"
+                    || bare == "::1"
+                    || bare == "[::1]"
+                    || bare
+                        .strip_prefix("127.")
+                        .is_some_and(|rest| rest.split('.').all(|p| p.parse::<u8>().is_ok()))
+            })
+            && (url.path() == "/bindings" || url.path().starts_with("/mcp/"))
+        {
+            return Err(Blocked::Internal);
+        }
+    }
+    if let Some(host) = url.host_str() {
+        if is_agent_blocked_host(host) {
+            return Err(Blocked::Internal);
+        }
+    } else if url.scheme() != "about" {
+        return Err(Blocked::Unsupported {
+            scheme: url.scheme().to_string(),
+        });
+    }
+    allow_navigation(url, current, user_target, dev)
+}
+
 /// `WEBVIEW2_USER_DATA_FOLDER` 由 WebView2 加载器在每次创建环境时读取，并直接替换传入的
 /// 数据目录（WebView2 文档 CreateCoreWebView2EnvironmentWithOptions：「use the
 /// browserExecutableFolder and userDataFolder values as replacements」）。留着它，浏览器
@@ -423,6 +499,103 @@ mod tests {
         assert_eq!(dir, over.join("browser"));
         assert!(!dir.starts_with(over.join("EBWebView")));
         assert!(!dir.starts_with(base));
+
+        // agent 专用目录与用户浏览目录分开
+        assert_eq!(agent_data_dir(base, None), base.join("agent-browser"));
+        assert_ne!(agent_data_dir(base, None), browser_data_dir(base, None));
+        assert_eq!(agent_data_dir(base, Some(over)), over.join("agent-browser"));
+    }
+
+    #[test]
+    fn agent_navigation_allows_loopback_but_blocks_file_app_and_agent_paths() {
+        let web = url("https://example.com/");
+        // agent 不能打开 file://（即使用户目标也是 file://）
+        assert_eq!(
+            agent_allow_navigation(
+                &url("file:///C:/secret.txt"),
+                Some(&web),
+                Some(&url("file:///C:/secret.txt")),
+                None,
+                None
+            ),
+            Err(Blocked::File)
+        );
+        // 外站放行
+        assert!(
+            agent_allow_navigation(&url("https://example.org/"), Some(&web), None, None, None)
+                .is_ok()
+        );
+        // 本机 http 开发服务允许（文档第 5 节）
+        for input in [
+            "http://localhost:8080/",
+            "http://127.0.0.1:31420/src/main.tsx",
+            "http://[::1]:3000/",
+        ] {
+            assert!(
+                agent_allow_navigation(&url(input), Some(&web), None, None, None).is_ok(),
+                "{input}"
+            );
+        }
+        // devUrl 同源仍然拒绝
+        assert_eq!(
+            agent_allow_navigation(
+                &url("http://localhost:31420/"),
+                Some(&web),
+                None,
+                Some(&dev()),
+                None
+            ),
+            Err(Blocked::Internal)
+        );
+        // 应用自己的地址一律拦截
+        for input in [
+            "http://tauri.localhost/",
+            "https://foo.localhost/",
+            "http://app.local/",
+        ] {
+            assert_eq!(
+                agent_allow_navigation(&url(input), Some(&web), None, None, None),
+                Err(Blocked::Internal),
+                "{input}"
+            );
+        }
+        // 启动端口的 bootstrap / MCP 路径拒绝；同端口其他路径、其他端口放行
+        for input in [
+            "http://127.0.0.1:5555/bindings",
+            "http://127.0.0.1:5555/mcp/abc",
+            "http://localhost:5555/bindings",
+        ] {
+            assert_eq!(
+                agent_allow_navigation(&url(input), Some(&web), None, None, Some(5555)),
+                Err(Blocked::Internal),
+                "{input}"
+            );
+        }
+        assert!(agent_allow_navigation(
+            &url("http://127.0.0.1:5555/"),
+            Some(&web),
+            None,
+            None,
+            Some(5555)
+        )
+        .is_ok());
+        assert!(agent_allow_navigation(
+            &url("http://127.0.0.1:9999/mcp/abc"),
+            Some(&web),
+            None,
+            None,
+            Some(5555)
+        )
+        .is_ok());
+        // 后缀形如 127.0.0.1.evil.com 不是回环，是外部站，不应误拦
+        assert!(agent_allow_navigation(
+            &url("http://127.0.0.1.evil.com/"),
+            Some(&web),
+            None,
+            None,
+            None
+        )
+        .is_ok());
     }
 
     #[test]
