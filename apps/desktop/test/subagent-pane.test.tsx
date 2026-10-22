@@ -154,7 +154,10 @@ it("finish 的 input.result 是最终结果（Markdown），提交回执不当�
     toolStarted(2, "f1", "finish", { result: "## 结论\n全部**正常**" }),
     toolCompleted(3, "f1", "finish", "ok", "结果已提交给父会话。"),
   );
-  const result = screen.getByText("最终结果").closest("details") as HTMLElement;
+  const result = screen.getByRole("region", { name: "最终结果" });
+  // 结果接在时间线末尾、随对话一起滚动，标签里只有一个滚动区
+  expect(result.closest(".conversation-scroll")).not.toBeNull();
+  expect(document.querySelectorAll(".sp-sub .conversation-scroll")).toHaveLength(1);
   expect(result.querySelector("h2")?.textContent).toBe("结论");
   expect(result.querySelector("strong")?.textContent).toBe("正常");
   expect(result.textContent).not.toContain("结果已提交给父会话");
@@ -172,7 +175,7 @@ it("结构化的最终结果按 JSON 展示", async () => {
     toolStarted(2, "f1", "finish", { result: { passed: true } }),
     toolCompleted(3, "f1", "finish", "ok"),
   );
-  const block = screen.getByText("最终结果").closest("details") as HTMLElement;
+  const block = screen.getByRole("region", { name: "最终结果" });
   expect(block.querySelector("pre")?.textContent).toBe(JSON.stringify({ passed: true }, null, 2));
 });
 

@@ -68,6 +68,8 @@ export interface ReadOnlyMode {
    * 但不伪造任何 reducer 事件
    */
   frozen: boolean;
+  /** 接在时间线末尾、随对话一起滚动的内容（子代理的最终结果）；只读视图只有这一个滚动区 */
+  footer?: ReactNode;
 }
 
 /** 父对话 task 行的「在面板中查看」（ADR-0060 第 6 节）；手机不传，只读视图里嵌套的 task 也不传 */
@@ -3225,6 +3227,7 @@ function ConversationContent({
                 </div>
               ),
             )}
+            {readOnly?.footer}
           </div>
         </ThinkScrollContext.Provider>
       </div>

@@ -200,16 +200,6 @@ export function SubagentPane({
           日志末尾不完整，已忽略最后一行。
         </p>
       )}
-      {result !== undefined && (
-        <details className="sp-sub-result thin-scroll" open>
-          <summary>最终结果</summary>
-          {result.kind === "text" ? (
-            <Markdown text={result.text} openUrl={openUrl} />
-          ) : (
-            <pre className="thin-scroll">{result.text}</pre>
-          )}
-        </details>
-      )}
       <div className="sp-sub-body">
         {placeholder ??
           (view !== undefined && (
@@ -217,7 +207,20 @@ export function SubagentPane({
               key={child}
               session={session}
               view={view}
-              readOnly={{ frozen }}
+              // 最终结果接在时间线末尾，和过程一起滚动：整个标签只有一个滚动区
+              readOnly={{
+                frozen,
+                footer: result !== undefined && (
+                  <section className="sp-sub-result" aria-label="最终结果">
+                    <h3>最终结果</h3>
+                    {result.kind === "text" ? (
+                      <Markdown text={result.text} openUrl={openUrl} />
+                    ) : (
+                      <pre className="thin-scroll">{result.text}</pre>
+                    )}
+                  </section>
+                ),
+              }}
               openUrl={openUrl}
               cwd={workspace}
               subscribeEvents={subscribeEvents}
