@@ -87,7 +87,6 @@ it("接管和交回按钮调用各自的动作；接管后界面写明控制权�
   const onControl = vi.fn();
   const view = render(
     <AgentBrowserPane
-      tab={agentTab()}
       info={info()}
       visible
       onSlot={vi.fn()}
@@ -102,7 +101,6 @@ it("接管和交回按钮调用各自的动作；接管后界面写明控制权�
 
   view.rerender(
     <AgentBrowserPane
-      tab={agentTab()}
       info={info({ state: "taken_over" })}
       visible
       onSlot={vi.fn()}
@@ -121,7 +119,6 @@ it("子代理标签显示子代理徽标；已关闭的标签不能再接管", (
   const onClose = vi.fn();
   render(
     <AgentBrowserPane
-      tab={agentTab()}
       info={info({ child: true, actorSessionId: "child-1", state: "ended", live: false })}
       visible
       onSlot={vi.fn()}
@@ -135,6 +132,10 @@ it("子代理标签显示子代理徽标；已关闭的标签不能再接管", (
   expect(screen.getByText("标签已关闭")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "关闭 agent 标签" }));
   expect(onClose).toHaveBeenCalledWith("tab-1");
+  // 占位区里的移除按钮同样传外壳 tabId，不是面板里带 `agent:` 前缀的 id
+  onClose.mockClear();
+  fireEvent.click(screen.getByRole("button", { name: "移除已关闭的标签" }));
+  expect(onClose).toHaveBeenCalledWith("tab-1");
 });
 
 it("可见时上报占位区；不可见时不上报，也不发 hide", () => {
@@ -142,7 +143,6 @@ it("可见时上报占位区；不可见时不上报，也不发 hide", () => {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect(480, 640));
   const view = render(
     <AgentBrowserPane
-      tab={agentTab()}
       info={info()}
       visible
       onSlot={onSlot}
@@ -154,7 +154,6 @@ it("可见时上报占位区；不可见时不上报，也不发 hide", () => {
   onSlot.mockClear();
   view.rerender(
     <AgentBrowserPane
-      tab={agentTab()}
       info={info()}
       visible={false}
       onSlot={onSlot}

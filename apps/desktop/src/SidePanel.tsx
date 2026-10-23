@@ -1289,7 +1289,6 @@ export function SidePanel(props: SidePanelProps) {
                   <div className="sp-empty">这个环境不能查看 agent 标签</div>
                 ) : (
                   <AgentBrowserPane
-                    tab={tab}
                     info={props.agents.tabs.get(tab.agent.tabId) ?? tab.agent}
                     visible={!hidden && tab.id === activeId && current.has(tab.id)}
                     onSlot={props.agents.onSlot}

@@ -6,7 +6,6 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 
 import type { AgentTabInfo, BrowserBounds } from "./host";
-import type { BrowserTab } from "./side-panel";
 
 const STATE_TEXT: Record<AgentTabInfo["state"], string> = {
   agent: "agent 控制中",
@@ -37,7 +36,6 @@ function AgentGlyph({ kind }: { kind: "agent" | "hand" | "back" | "close" }): Re
 }
 
 export interface AgentBrowserPaneProps {
-  tab: BrowserTab;
   info: AgentTabInfo;
   /** 面板可见且是当前标签：可见时把 webview 放在占位区，否则由外壳移到可见区域外 */
   visible: boolean;
@@ -47,7 +45,6 @@ export interface AgentBrowserPaneProps {
 }
 
 export function AgentBrowserPane({
-  tab,
   info,
   visible,
   onSlot,
@@ -144,8 +141,9 @@ export function AgentBrowserPane({
               <button
                 type="button"
                 className="btn"
+                aria-label="移除已关闭的标签"
                 onClick={() => {
-                  onClose(tab.id);
+                  onClose(info.tabId);
                 }}
               >
                 <AgentGlyph kind="back" />
