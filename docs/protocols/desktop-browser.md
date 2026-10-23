@@ -160,7 +160,7 @@ schema 均 `additionalProperties: false`。所有网页工具显式 tabId；动�
 
 ### 截图附件
 
-所有 MCP image 做通用、受预算的解码，映射到既有 `ToolResult.attachments`，origin=mcp；不为 desktop_browser 特判。限制单图 5 MiB、任一边 8000 px、每次最多4张且合计8 MiB，验证 MIME/文件头与 base64，拒绝畸形/过量数据；由现有 AttachmentStore 落会话附件、tool.completed 只存引用，主对话 ToolImages 复用展示。screenshot 只截 viewport，过大返回 image_too_large，不静默发超限图片。
+所有 MCP image 做通用、受预算的解码，映射到既有 `ToolResult.attachments`，origin=mcp；不为 desktop_browser 特判。限制单图 5 MiB、任一边 8000 px、每次最多4张且合计8 MiB，验证 MIME/文件头与 base64，拒绝畸形/过量数据；由现有 AttachmentStore 落会话附件、tool.completed 只存引用，主对话和子代理只读视图的工具行复用同一缩略图。手机远程的图片源带占位说明：工具截图和用户图一样只显示占位，不把图片字节拉过远程通道。screenshot 只截 viewport，过大返回 image_too_large，不静默发超限图片。
 
 图像能力沿中性模型能力与已有附件路径：支持看图则送图片，不支持则模型收到明确「截图已存附件，当前模型不能看图，请 read 文本快照」；用户仍可看图片。不为此新增 Provider 分支或把 base64 塞进 modelContent/output。
 

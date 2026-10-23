@@ -845,6 +845,7 @@ function ToolImage({
   const [url, setUrl] = useState<string | undefined>(() => images.url(attachment));
   const [error, setError] = useState<string>();
   useEffect(() => {
+    // 手机远程没有本地图片缓存：和用户图一样只留占位，不把截图字节拉过远程通道
     if (url !== undefined || images.placeholder) return;
     let active = true;
     void images.load(attachment, session).then(
@@ -859,6 +860,14 @@ function ToolImage({
       active = false;
     };
   }, [attachment, images, session, url]);
+  if (images.placeholder) {
+    return (
+      <span className="u-img-chip" title={attachment.file}>
+        <ImageIcon />
+        {images.placeholder}
+      </span>
+    );
+  }
   if (error !== undefined) {
     return (
       <span className="u-img-chip" title={`截图加载失败：${error}`}>

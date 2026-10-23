@@ -720,6 +720,22 @@ describe("Conversation 历史图片", () => {
     images.dispose();
   });
 
+  it("手机图片源对工具截图也只留占位，不读取附件", async () => {
+    const images = {
+      ...createAttachmentImageSource(),
+      placeholder: "图片（请在电脑上查看）",
+      showErrors: true,
+    };
+    const view = createSessionView();
+    view.entries = [...imageView().entries, toolShot()];
+    const rendered = mount(view, { images });
+    expect(screen.getAllByText("图片（请在电脑上查看）")).toHaveLength(1);
+    fireEvent.click(screen.getByLabelText("工具详细信息"));
+    expect(screen.getAllByText("图片（请在电脑上查看）")).toHaveLength(2);
+    expect(rendered.container.querySelector(".tool-shots img")).toBeNull();
+    expect(rendered.methods.readAttachment).not.toHaveBeenCalled();
+  });
+
   it("卸载断开观察器；旧请求完成后不更新新会话", async () => {
     const images = createAttachmentImageSource();
     const rendered = mount(imageView(), { images });
