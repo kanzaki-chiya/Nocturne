@@ -19,6 +19,8 @@ export {
   lastClosedBoundary,
   lastOpenTurnId,
   MAX_IMAGES_PER_REQUEST,
+  projectedTokens,
+  retentionBoundary,
   renderTranscript,
   retentionTokens,
   SUMMARY_MAX_OUTPUT_TOKENS,

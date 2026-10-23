@@ -10,9 +10,12 @@ import {
   chooseSummaryBoundary,
   closedBoundaries,
   estimateTokens,
+  compactionCutoffs,
   inputBudgetTokens,
-  retentionTokens,
+  projectedTokens,
   renderTranscript,
+  retentionBoundary,
+  retentionTokens,
 } from "./index.js";
 import type { BuildContextInput } from "./index.js";
 
@@ -52,6 +55,113 @@ const baseInput = (over: Partial<BuildContextInput> = {}): BuildContextInput => 
 });
 
 describe("buildContext", () => {
+  it("保留边界的局部 token 缓存与逐候选重算等价（取整、工具配对、note、图片、压缩）", () => {
+    // 覆盖同一内容块在多个候选尾部中的复用：中文/emoji 与 ASCII 的取整、
+    // 工具参数 JSON、note 文本、图片占位/固定 token，以及 prune/summary 边界。
+    const history: HistoryEntry[] = [];
+    const events: DurableEvent[] = [];
+    const event = (seq: number, type: string, payload: unknown) => {
+      events.push({
+        seq,
+        type,
+        payload,
+        sessionId: "s",
+        turnId: "t",
+        time: "2026-01-01",
+      } as DurableEvent);
+    };
+    for (let i = 0; i < 30; i++) {
+      const seq = i * 5 + 1;
+      history.push({
+        kind: "assistant",
+        seq,
+        turnId: "t",
+        messageId: `m${i}`,
+        model: model.ref,
+        content: [{ type: "text", text: "中a😀".repeat(i + 1) }],
+        toolCalls: [{ callId: `c${i}`, name: "read", input: { n: i } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      });
+      event(seq, "message.assistant", { toolCalls: [{ callId: `c${i}` }] });
+      history.push({ kind: "note", seq: seq + 1, turnId: "t", text: "延迟 note!" });
+      history.push({
+        kind: "tool",
+        seq: seq + 2,
+        turnId: "t",
+        callId: `c${i}`,
+        name: "read",
+        status: "ok",
+        modelContent: "短x".repeat(100 + i),
+        attachments: Array.from({ length: 2 }, (_, n) => ({
+          type: "image" as const,
+          bytes: 10,
+          source: "read" as const,
+          file: `img-${n}.png`,
+          mimeType: "image/png" as const,
+          sha256: `${i}-${n}`,
+        })),
+      });
+      event(seq + 2, "tool.completed", { callId: `c${i}` });
+      if (i === 10)
+        history.push({
+          kind: "compaction",
+          seq: seq + 3,
+          turnId: undefined,
+          compactKind: "prune",
+          throughSeq: seq - 5,
+          summary: undefined,
+        });
+      if (i === 20)
+        history.push({
+          kind: "compaction",
+          seq: seq + 3,
+          turnId: undefined,
+          compactKind: "summary",
+          throughSeq: seq - 5,
+          summary: "摘要",
+        });
+    }
+    for (const source of [
+      history,
+      history.filter((e) => e.kind !== "compaction"),
+      history.filter((e) => e.kind !== "compaction" || e.compactKind !== "summary"),
+    ])
+      for (const imageInput of [false, true])
+        for (const contextWindow of [1500, 10000, 100000]) {
+          const m = {
+            ...model,
+            contextWindow,
+            capabilities: { ...model.capabilities, imageInput },
+          };
+          const { summaryThrough } = compactionCutoffs(source);
+          const candidates = closedBoundaries(events).filter(
+            (b) =>
+              b > summaryThrough &&
+              source.some((e) => e.kind !== "compaction" && e.seq > summaryThrough && e.seq <= b),
+          );
+          const cache = new Map<string, number>();
+          for (const boundary of candidates) {
+            const tail = source.filter(
+              (e) => e.seq > boundary && (e.kind !== "compaction" || e.compactKind === "prune"),
+            );
+            expect(projectedTokens(tail, m, undefined, undefined, cache)).toBe(
+              projectedTokens(tail, m),
+            );
+          }
+          const expected =
+            candidates.find(
+              (b) =>
+                projectedTokens(
+                  source.filter(
+                    (e) => e.seq > b && (e.kind !== "compaction" || e.compactKind === "prune"),
+                  ),
+                  m,
+                ) <= retentionTokens(inputBudgetTokens(m)),
+            ) ?? candidates.at(-1);
+          expect(retentionBoundary(events, source, m)).toBe(expected);
+        }
+  });
   it("压缩后的清单独立进入模型请求并计入预算，清空后撤去", () => {
     const todos = [{ text: "当前任务", status: "in_progress" as const }];
     const plain = buildContext(baseInput({ history: [] }));

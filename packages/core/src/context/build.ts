@@ -45,12 +45,19 @@ const SUMMARY_SYSTEM = `你是 Nocturne 会话的压缩器。把给定的会话�
 摘要必须包含：用户的总体目标、已完成的工作及结论、关键文件与工具调用结果、未决事项与下一步建议，以及已经加载的技能名（需要正文时可重新加载）。
 只输出摘要正文，不要寒暄、不要复述指令。`;
 
-function messageTokens(message: ModelMessage): number {
+function messageTokens(message: ModelMessage, cache?: Map<string, number>): number {
+  const tokens = (text: string): number => {
+    const hit = cache?.get(text);
+    if (hit !== undefined) return hit;
+    const value = estimateTokens(text);
+    cache?.set(text, value);
+    return value;
+  };
   return (
     (message.role === "tool"
-      ? estimateTokens(message.content)
-      : message.content.reduce((total, block) => total + estimateTokens(block.text), 0) +
-        (message.role === "assistant" ? estimateTokens(JSON.stringify(message.toolCalls)) : 0)) +
+      ? tokens(message.content)
+      : message.content.reduce((total, block) => total + tokens(block.text), 0) +
+        (message.role === "assistant" ? tokens(JSON.stringify(message.toolCalls)) : 0)) +
     (message.role !== "assistant" ? (message.images?.length ?? 0) * IMAGE_TOKEN_ESTIMATE : 0)
   );
 }
@@ -67,7 +74,7 @@ export function retentionTokens(budget: number): number {
   return Math.min(Math.max(20_000, Math.min(40_000, 0.2 * budget)), 0.25 * budget);
 }
 
-function retentionBoundary(
+export function retentionBoundary(
   events: readonly DurableEvent[],
   history: readonly HistoryEntry[],
   model: ModelInfo,
@@ -82,23 +89,26 @@ function retentionBoundary(
       ),
   );
   const limit = retentionTokens(inputBudgetTokens(model));
-  // ponytail: 候选边界扫描为 O(n²)；超长事件日志成为瓶颈时改用投影 token 的后缀和。
+  // 候选顺序和投影规则不变。只在本次扫描内记忆化纯文本 token，
+  // 避免同一长文本被每个候选边界重复扫描；取整、工具配对、note、图片上限仍由投影决定。
+  const tokenCache = new Map<string, number>();
   for (const boundary of boundaries) {
     const tail = history.filter(
       (entry) =>
         entry.seq > boundary && (entry.kind !== "compaction" || entry.compactKind === "prune"),
     );
-    const tokens = projectedTokens(tail, model);
+    const tokens = projectedTokens(tail, model, undefined, undefined, tokenCache);
     if (tokens <= limit) return boundary;
   }
   return boundaries.at(-1);
 }
 
-function projectedTokens(
+export function projectedTokens(
   history: readonly HistoryEntry[],
   model: ModelInfo,
   data?: ReadonlyMap<string, string>,
   events?: readonly DurableEvent[],
+  tokenCache?: Map<string, number>,
 ): number {
   const virtual = new Map<ModelMessage, number>();
   const projected = historyToMessages(
@@ -120,7 +130,7 @@ function projectedTokens(
     projected.messages.reduce(
       (total, message) =>
         total +
-        messageTokens(message) -
+        messageTokens(message, tokenCache) -
         (message.role !== "assistant" ? (message.images?.length ?? 0) * IMAGE_TOKEN_ESTIMATE : 0),
       0,
     ) +

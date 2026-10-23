@@ -2249,6 +2249,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     };
     teardown.push(detach);
     teardown.push(subagentRegistry.trackSession(session));
+    // 只缓存最近一次 describeContext；键覆盖 seq 与不写事件的 Builder 输入。
+    // 返回值和缓存各自深拷贝，避免调用者改到缓存或持久历史。
+    let contextCache: { key: string; value: BuiltContext } | undefined;
     const runtimeSession: RuntimeSession = {
       describeSkills: () => ({
         skills: catalog.skills,
@@ -2855,19 +2858,35 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       warnings,
       recovery: session.recovery,
       describeContext() {
-        const state = session.state();
-        return buildContext({
+        const events = session.durableEvents();
+        const specs = tools.specs(model.model.capabilities.editTool);
+        const compactionThreshold = config?.resolvedSettings(
+          environment.workspaceRoot,
+        ).compactionThreshold;
+        const key = JSON.stringify({
+          seq: events.at(-1)?.seq,
+          model: model.model,
+          tools: specs,
           skills: catalog,
-          compactionThreshold: config?.resolvedSettings(state.meta.workspaceRoot)
-            .compactionThreshold,
+          instructions,
+          environment,
+          compactionThreshold,
+        });
+        if (contextCache?.key === key) return structuredClone(contextCache.value);
+        const state = session.state();
+        const value = buildContext({
+          skills: catalog,
+          compactionThreshold,
           history: state.history,
           todos: state.todos,
           model: model.model,
-          tools: tools.specs(model.model.capabilities.editTool),
+          tools: specs,
           instructions,
           environment,
-          events: session.durableEvents(),
+          events,
         });
+        contextCache = { key, value: structuredClone(value) };
+        return structuredClone(contextCache.value);
       },
       mcpServers() {
         return mcpSession?.status() ?? [];

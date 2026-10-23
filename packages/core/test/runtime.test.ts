@@ -19,6 +19,7 @@ import {
 } from "../src/provider/index.js";
 import { replaySessionView, type RuntimeEvent } from "../src/protocol/index.js";
 import { internalSession } from "./internal-session.js";
+import * as contextBuilder from "../src/context/index.js";
 
 const tmpRoots: string[] = [];
 
@@ -1643,6 +1644,84 @@ describe("上下文与运行时命令（Phase 2）", () => {
     const models = runtime.listModels();
     expect(models.some((m) => m.ref.provider === "fake")).toBe(true);
     await session.close();
+  });
+
+  it("describeContext 缓存命中且隔离调用者修改，事件/待办/压缩/模型均失效", async () => {
+    // 同一 seq 和输入下命中；新历史、todo_write、summary 压缩、换模型分别失效。
+    // 调用者改返回值不得污染缓存或持久历史。
+    const { runtime } = await makeRuntime([]);
+    const session = await makeSession(runtime);
+    const build = vi.spyOn(contextBuilder, "buildContext");
+    try {
+      const first = session.describeContext();
+      const expected = structuredClone(first);
+      first.report.sections.length = 0;
+      first.request.messages.length = 0;
+      expect(session.describeContext()).toEqual(expected);
+      expect(build).toHaveBeenCalledTimes(1);
+      const inner = internalSession(session);
+      await inner.emit(
+        "message.user",
+        { messageId: "cache-user", content: [{ type: "text", text: "new history" }] },
+        { turnId: "cache-turn" },
+      );
+      session.describeContext();
+      expect(build).toHaveBeenCalledTimes(2);
+      await inner.emit(
+        "tool.completed",
+        {
+          callId: "todo",
+          name: "todo_write",
+          status: "ok",
+          durationMs: 0,
+          output: { items: [{ text: "cache todo", status: "pending" }] },
+          modelContent: "todo",
+        },
+        { turnId: "cache-turn" },
+      );
+      expect(session.describeContext().report.sections.some((s) => s.name === "todos")).toBe(true);
+      expect(build).toHaveBeenCalledTimes(3);
+      await inner.emit("context.compacted", {
+        kind: "summary",
+        throughSeq: 2,
+        summary: "cached summary",
+      });
+      session.describeContext();
+      expect(build).toHaveBeenCalledTimes(4);
+      await session.setModel("fake/fake-1");
+      session.describeContext();
+      expect(build).toHaveBeenCalledTimes(5);
+      session.describeContext();
+      expect(build).toHaveBeenCalledTimes(5);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("describeContext 在没有新事件时也按实际压缩设置失效", async () => {
+    // 压缩阈值不写会话事件，但仍改变 Builder 计划，必须单独进入缓存键。
+    const home = makeTmpDir("nct-cache-home-");
+    const config = await loadConfig(createPlatform(), { nocturneHome: home, env: () => undefined });
+    const runtime = await createRuntime({
+      cwd: makeTmpDir("nct-cache-ws-"),
+      sessionsDir: makeTmpDir("nct-cache-sessions-"),
+      config,
+      providers: [new FakeProvider({})],
+    });
+    const session = await makeSession(runtime);
+    const build = vi.spyOn(contextBuilder, "buildContext");
+    try {
+      session.describeContext();
+      session.describeContext();
+      expect(build).toHaveBeenCalledTimes(1);
+      await config.updateSettings({ "compaction.threshold": "50%" });
+      session.describeContext();
+      expect(build).toHaveBeenCalledTimes(2);
+      session.describeContext();
+      expect(build).toHaveBeenCalledTimes(2);
+    } finally {
+      await session.close();
+    }
   });
 });
 
