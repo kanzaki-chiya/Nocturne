@@ -6,18 +6,18 @@
 .profile-field {
   display: grid;
   gap: 7px;
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-secondary);
 }
 .profile-field small {
   color: var(--a-muted);
-  font-size: 11.5px;
+  font-size: var(--fs-1);
 }
 .profile-field input,
 .profile-field textarea {
   width: 100%;
   border: 1px solid var(--a-borderStrong);
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   background: var(--a-input);
   color: var(--a-text);
   padding: 7px 10px;
@@ -66,22 +66,22 @@
 }
 .profile-preview {
   color: var(--a-muted);
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .profile-preview pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: 12px/1.7 var(--mono);
+  font: var(--fs-1)/1.7 var(--mono);
   background: var(--a-panel);
   padding: 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-2);
 }
 .profile-row .nm {
   display: grid;
   min-width: 0;
 }
 .profile-row .nm small {
-  font: 11px var(--mono);
+  font: var(--fs-1) var(--mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

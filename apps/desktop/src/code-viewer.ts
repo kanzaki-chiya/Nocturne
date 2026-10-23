@@ -81,7 +81,7 @@ const highlight = HighlightStyle.define([
 const theme = EditorView.theme({
   "&": {
     height: "100%",
-    fontSize: "12.5px",
+    fontSize: "var(--fs-2)",
     backgroundColor: "transparent",
     color: "var(--a-text)",
   },
@@ -107,8 +107,8 @@ const theme = EditorView.theme({
     borderColor: "var(--a-border)",
   },
   ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--a-border)" },
-  ".cm-panel.cm-search": { fontFamily: "inherit", fontSize: "12px", padding: "6px 8px" },
-  ".cm-panel.cm-search input, .cm-panel.cm-search button": { fontSize: "12px" },
+  ".cm-panel.cm-search": { fontFamily: "inherit", fontSize: "var(--fs-1)", padding: "6px 8px" },
+  ".cm-panel.cm-search input, .cm-panel.cm-search button": { fontSize: "var(--fs-1)" },
   ".cm-textfield": {
     backgroundColor: "var(--a-bg)",
     border: "1px solid var(--a-border)",

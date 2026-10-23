@@ -2,7 +2,7 @@
   list-style: none;
   margin: 0;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .todo-list li {
   display: flex;
@@ -39,7 +39,7 @@
   flex: none;
   width: 46px;
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-1);
   background: var(--a-border);
   overflow: hidden;
 }
@@ -59,7 +59,7 @@
   margin: 0 14px -1px;
   border: 1px solid var(--a-border);
   border-bottom: 0;
-  border-radius: 10px 10px 0 0;
+  border-radius: var(--radius-3) var(--radius-3) 0 0;
   background: var(--a-side);
   display: flex;
   flex-direction: column;
@@ -81,7 +81,7 @@
   border: 0;
   background: none;
   color: var(--a-muted);
-  font: 11.5px/1.5 var(--sans);
+  font: var(--fs-1)/1.5 var(--sans);
   cursor: pointer;
   text-align: left;
 }

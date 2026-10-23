@@ -38,12 +38,12 @@
 }
 .page3 .ph3 h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--fs-4);
   font-weight: 700;
 }
 .page3 .ph3 .sub {
   color: var(--a-muted);
-  font-size: 12.5px;
+  font-size: var(--fs-2);
 }
 .page3 .ph3 .grow {
   display: grid;
@@ -67,7 +67,7 @@
 }
 .page3 .plist h5 {
   margin: 12px 10px 4px;
-  font-size: 11px;
+  font-size: var(--fs-1);
   letter-spacing: 0.1em;
   color: var(--a-faint);
   font-weight: 500;
@@ -80,7 +80,7 @@
   gap: 9px;
   align-items: center;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   color: var(--a-secondary);
   position: relative;
   white-space: nowrap;
@@ -92,7 +92,7 @@
 .page3 .plist a .r {
   margin-left: auto;
   color: var(--a-faint);
-  font-size: 11.5px;
+  font-size: var(--fs-1);
 }
 .page3 .plist a .r.warn {
   color: var(--a-warning);
@@ -108,22 +108,22 @@
   top: 7px;
   bottom: 7px;
   width: 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-1);
   background: var(--a-accent);
 }
 .page3 .tagc {
-  font-size: 11px;
+  font-size: var(--fs-1);
   color: var(--a-accent);
   border: 1px solid color-mix(in srgb, var(--a-accent) 40%, transparent);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   padding: 0 5px;
   line-height: 17px;
 }
 .page3 .tagw {
-  font-size: 11px;
+  font-size: var(--fs-1);
   color: var(--a-warning);
   border: 1px solid color-mix(in srgb, var(--a-warning) 45%, transparent);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   padding: 0 5px;
   line-height: 17px;
 }
@@ -143,7 +143,7 @@
 }
 .page3 .pane .t1 h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--fs-4);
   font-weight: 700;
 }
 .page3 .pane .t1 .acts {
@@ -156,7 +156,7 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px 22px;
   border: 1px solid var(--a-border);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   background: var(--a-panel);
   padding: 12px 16px;
 }
@@ -166,18 +166,18 @@
   min-width: 0;
 }
 .page3 .kv dt {
-  font-size: 11.5px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
 }
 .page3 .kv dd {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-text);
   overflow-wrap: anywhere;
 }
 .page3 .kv dd.mono {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .page3 .kv dd.ok {
   color: var(--a-success);
@@ -195,22 +195,22 @@
 }
 .page3 .sh h4 {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--fs-2);
   font-weight: 700;
   color: var(--a-text);
 }
 .page3 .sh small {
   color: var(--a-faint);
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .page3 .search {
   margin-left: auto;
   width: 220px;
   max-width: 40%;
   border: 1px solid var(--a-borderStrong);
-  border-radius: 7px;
+  border-radius: var(--radius-2);
   padding: 4px 10px;
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-text);
   background: var(--a-input);
   outline: none;
@@ -221,7 +221,7 @@
 }
 .page3 .mt {
   border: 1px solid var(--a-border);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   overflow: hidden auto;
   flex-shrink: 0;
   min-height: 0;
@@ -233,13 +233,13 @@
   align-items: center;
   padding: 7px 14px;
   border-bottom: 1px solid var(--a-border);
-  font-size: 12.5px;
+  font-size: var(--fs-2);
 }
 .page3 .mr:last-child {
   border-bottom: none;
 }
 .page3 .mr.h {
-  font-size: 11.5px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
   background: var(--a-side);
   padding-block: 5px;
@@ -248,7 +248,7 @@
 }
 .page3 .mr .m {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-text);
   display: flex;
   gap: 8px;
@@ -262,7 +262,7 @@
 }
 .page3 .mr .num {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-secondary);
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -272,10 +272,10 @@
   gap: 3px;
 }
 .page3 .cap b {
-  font: 600 10px/16px var(--mono);
+  font: 600 var(--fs-1)/16px var(--mono);
   width: 16px;
   text-align: center;
-  border-radius: 3px;
+  border-radius: var(--radius-1);
   background: var(--a-raised);
   color: var(--a-accentAlt);
   border: 1px solid var(--a-border);
@@ -283,7 +283,7 @@
 .page3 .mr .lnk {
   color: var(--a-faint);
   text-align: right;
-  font-size: 12px;
+  font-size: var(--fs-1);
   cursor: pointer;
 }
 .page3 .mr:hover {
@@ -293,15 +293,15 @@
   color: var(--a-accent);
 }
 .page3 .edited {
-  font: 11px/16px var(--sans);
+  font: var(--fs-1)/16px var(--sans);
   color: var(--a-accentAlt);
   border: 1px solid color-mix(in srgb, var(--a-accentAlt) 45%, transparent);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   padding: 0 5px;
   flex: none;
 }
 .page3 .dflt {
-  font: 11px/16px var(--sans);
+  font: var(--fs-1)/16px var(--sans);
   color: var(--a-accent);
   flex: none;
 }
@@ -321,10 +321,10 @@
   color: var(--a-faint);
 }
 .page3 .tagm {
-  font-size: 11px;
+  font-size: var(--fs-1);
   color: var(--a-muted);
   border: 1px solid var(--a-borderStrong);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   padding: 0 5px;
   line-height: 17px;
 }
@@ -335,19 +335,19 @@
   margin: 4px 0 0;
   padding-left: 18px;
   color: var(--a-secondary);
-  font-size: 12px;
+  font-size: var(--fs-1);
   display: grid;
   gap: 3px;
 }
 .page3 .fine {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
 }
 .page3 .done {
   display: flex;
   gap: 8px;
   align-items: center;
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-secondary);
 }
 .page3 .done b {
@@ -371,19 +371,19 @@
   gap: 8px;
 }
 .page3 .field .lab label {
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-secondary);
   font-weight: 500;
 }
 .page3 .field .lab small {
   color: var(--a-faint);
-  font-size: 11.5px;
+  font-size: var(--fs-1);
   font-weight: 400;
 }
 .page3 .field .lab .lk {
   margin-left: auto;
   color: var(--a-accent);
-  font-size: 12px;
+  font-size: var(--fs-1);
   font-weight: 400;
   cursor: pointer;
 }
@@ -392,10 +392,10 @@
 .page3 select.input {
   border: 1px solid var(--a-borderStrong);
   background: var(--a-input);
-  border-radius: 7px;
+  border-radius: var(--radius-2);
   padding: 7px 10px;
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-text);
   outline: none;
   width: 100%;
@@ -412,11 +412,11 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-error) 14%, transparent);
 }
 .page3 .field .errt {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-error);
 }
 .page3 .field .hint {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
 }
 /* 自定义请求头编辑行（编辑服务商对话框） */
@@ -427,7 +427,7 @@
   align-items: center;
 }
 .page3 .field .hrow .lnk {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
   cursor: pointer;
 }
@@ -446,14 +446,14 @@
 .page3 .seg {
   display: inline-flex;
   border: 1px solid var(--a-borderStrong);
-  border-radius: 7px;
+  border-radius: var(--radius-2);
   overflow: hidden;
   width: max-content;
   max-width: 100%;
 }
 .page3 .seg button {
   padding: 6px 14px;
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-secondary);
   border: none;
   border-right: 1px solid var(--a-borderStrong);
@@ -474,7 +474,7 @@
 }
 .page3 .fetch {
   border: 1px solid var(--a-border);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   background: var(--a-panel);
   padding: 10px 12px;
   display: grid;
@@ -484,7 +484,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   flex-wrap: wrap;
 }
 .page3 .fetch .fl .ok {
@@ -499,7 +499,7 @@
   margin-left: auto;
   color: var(--a-accent);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-1);
   background: none;
   border: 0;
   padding: 0;
@@ -508,7 +508,7 @@
 .page3 .fetch .fl .tog:focus-visible {
   outline: 2px solid var(--a-accent);
   outline-offset: 2px;
-  border-radius: 3px;
+  border-radius: var(--radius-1);
 }
 .page3 .fetch .ms {
   display: flex;
@@ -516,9 +516,9 @@
   flex-wrap: wrap;
 }
 .page3 .fetch .ms span {
-  font: 11.5px/20px var(--mono);
+  font: var(--fs-1)/20px var(--mono);
   padding: 0 7px;
-  border-radius: 5px;
+  border-radius: var(--radius-1);
   background: var(--a-raised);
   color: var(--a-secondary);
   border: 1px solid var(--a-border);
@@ -531,7 +531,7 @@
 }
 .page3 .flist {
   border: 1px solid var(--a-border);
-  border-radius: 8px;
+  border-radius: var(--radius-2);
   overflow: hidden;
   background: var(--a-input);
 }
@@ -541,10 +541,10 @@
   gap: 10px;
   align-items: center;
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .page3 .fr.h {
-  font-size: 11px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
   background: var(--a-side);
   border-bottom: 1px solid var(--a-border);
@@ -571,7 +571,7 @@
 .page3 .wait {
   border: 1px solid var(--a-border);
   background: var(--a-panel);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   padding: 14px 16px;
   display: grid;
   gap: 10px;
@@ -589,7 +589,7 @@
 .page3 .spin {
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   border: 2px solid var(--a-selStrong);
   border-top-color: var(--a-accent);
   animation: page3-spin 0.9s linear infinite;
@@ -600,11 +600,11 @@
   }
 }
 .page3 .wait .url {
-  font: 12px/1.5 var(--mono);
+  font: var(--fs-1)/1.5 var(--mono);
   color: var(--a-muted);
   background: var(--a-input);
   border: 1px solid var(--a-border);
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   padding: 6px 10px;
   white-space: nowrap;
   overflow: hidden;
@@ -620,7 +620,7 @@
   margin-left: auto;
   color: var(--a-faint);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .page3 .wait .manual {
   display: flex;
@@ -637,9 +637,9 @@
   border: 1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border));
   background: var(--a-warnBg);
   color: var(--a-warning);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   padding: 9px 14px;
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   max-width: 640px;
 }
 .page3 .pbanner span {
@@ -651,22 +651,22 @@
 .page3 .keybox {
   border: 1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border));
   background: var(--a-warnBg);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   padding: 10px 14px;
   display: grid;
   gap: 6px;
   max-width: 640px;
-  font-size: 12.5px;
+  font-size: var(--fs-2);
 }
 .page3 .keybox code {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-text);
   word-break: break-all;
   user-select: all;
 }
 .page3 .keybox .fine {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-warning);
 }
 
@@ -686,7 +686,7 @@
   overflow-y: auto;
   background: var(--a-panel);
   border: 1px solid var(--a-borderStrong);
-  border-radius: 14px;
+  border-radius: var(--radius-3);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
   display: grid;
 }
@@ -696,11 +696,11 @@
   gap: 2px;
 }
 .page3 .dlg .dh3 b {
-  font-size: 15px;
+  font-size: var(--fs-4);
 }
 .page3 .dlg .dh3 span {
   color: var(--a-muted);
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .page3 .dlg .db {
   padding: 4px 20px 14px;
@@ -719,11 +719,11 @@
   border-bottom: none;
 }
 .page3 .mrow > span:first-child {
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-secondary);
 }
 .page3 .mrow .src {
-  font-size: 11.5px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
   text-align: right;
   white-space: nowrap;
@@ -735,7 +735,7 @@
   color: var(--a-accentAlt);
 }
 .page3 .mrow .ro {
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-faint);
 }
 .page3 .mrow .input {
@@ -750,9 +750,9 @@
   flex-wrap: wrap;
 }
 .page3 .effs button {
-  font: 12px/22px var(--mono);
+  font: var(--fs-1)/22px var(--mono);
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   border: 1px solid var(--a-borderStrong);
   color: var(--a-secondary);
   background: transparent;
@@ -778,7 +778,7 @@
   margin-left: auto;
 }
 .page3 .dlg .errt {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-error);
   padding: 0 20px 8px;
 }
@@ -793,11 +793,11 @@
   gap: 8px;
   align-items: baseline;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   background: transparent;
   border: none;
   color: var(--a-secondary);
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   text-align: left;
   cursor: pointer;
 }
@@ -828,7 +828,7 @@
 }
 .page3 .sets3 h5 {
   margin: 8px 0 2px 12px;
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-accent);
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -842,7 +842,7 @@
   gap: 16px;
   align-items: center;
   padding: 6px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-2);
   position: relative;
 }
 .page3 .s3 .n {
@@ -852,13 +852,13 @@
 }
 .page3 .s3 .n small {
   color: var(--a-faint);
-  font-size: 11.5px;
+  font-size: var(--fs-1);
   line-height: 1.4;
 }
 .page3 .s3 .v {
   color: var(--a-secondary);
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -886,7 +886,7 @@
   }
 }
 .page3 .s3 .src {
-  font-size: 11.5px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
   white-space: nowrap;
 }
@@ -917,12 +917,12 @@
 .page3 .s3 .chk .box {
   width: 15px;
   height: 15px;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   border: 1px solid var(--a-borderStrong);
   background: var(--a-input);
   display: grid;
   place-items: center;
-  font-size: 11px;
+  font-size: var(--fs-1);
   line-height: 1;
   color: var(--a-onAccent);
   flex: none;
@@ -940,18 +940,18 @@
 }
 .page3 .s3 .errl {
   grid-column: 2 / 4;
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-error);
   margin-top: -4px;
 }
 .page3 .s3 .select {
   border: 1px solid var(--a-borderStrong);
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   padding: 3px 10px;
   background: var(--a-input);
   color: var(--a-text);
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -968,9 +968,9 @@
   top: 58px;
   background: var(--a-panel);
   border: 1px solid var(--a-borderStrong);
-  border-radius: 8px;
+  border-radius: var(--radius-2);
   padding: 7px 12px;
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-secondary);
   display: flex;
   gap: 8px;
@@ -1022,7 +1022,7 @@
 .page3 .dlg::-webkit-scrollbar-thumb,
 .page3 .dlg .picklist::-webkit-scrollbar-thumb {
   background: var(--a-borderStrong);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
 }
 
 /* 第 3 步补充：列表截断、只读摘要、获取失败原因、空状态与提示色 */
@@ -1044,11 +1044,11 @@
   font-family: var(--mono);
 }
 .page3 .errt {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-error);
 }
 .page3 .hint {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
 }
 .page3 .hint.warnt {
@@ -1058,7 +1058,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px 18px;
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-muted);
 }
 .page3 .form .fixed b {
@@ -1067,7 +1067,7 @@
 }
 .page3 .fetch .reason {
   color: var(--a-error);
-  font-size: 12px;
+  font-size: var(--fs-1);
   overflow-wrap: anywhere;
 }
 .page3 .mr.empty {
@@ -1075,11 +1075,11 @@
   padding: 14px 12px;
 }
 .page3 .wait .code {
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-secondary);
 }
 .page3 .wait .code b {
-  font-size: 14px;
+  font-size: var(--fs-3);
   letter-spacing: 0.08em;
   color: var(--a-text);
 }
@@ -1122,11 +1122,11 @@
 .tcard {
   width: 150px;
   border: 1px solid var(--a-borderStrong);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   padding: 8px;
   display: grid;
   gap: 7px;
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   color: var(--a-secondary);
   background: transparent;
   text-align: left;
@@ -1146,7 +1146,7 @@
 }
 .tcard .pv {
   height: 64px;
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   display: grid;
   grid-template-columns: 34% 1fr;
   overflow: hidden;
@@ -1178,7 +1178,7 @@
 }
 .tcard .tsub {
   display: block;
-  font-size: 11px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
 }
 
@@ -1207,7 +1207,7 @@
 .page3 .lk:focus-visible {
   outline: 2px solid var(--a-accent);
   outline-offset: 2px;
-  border-radius: 3px;
+  border-radius: var(--radius-1);
 }
 
 /* 设置布局仅依据容器宽度；会话左栏保持原宽度。 */
@@ -1285,7 +1285,7 @@
 }
 .page3 .model-provider {
   color: var(--a-faint);
-  font-size: 11.5px;
+  font-size: var(--fs-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1300,7 +1300,7 @@
 }
 .page3 .s3 .warnl {
   grid-column: 2 / 4;
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-warning);
   margin-top: -4px;
 }
@@ -1377,12 +1377,12 @@
 .page3 .logempty {
   margin: auto;
   color: var(--a-muted);
-  font-size: 13px;
+  font-size: var(--fs-2);
   text-align: center;
 }
 .page3 .logerr {
   color: var(--a-error);
-  font-size: 12.5px;
+  font-size: var(--fs-2);
 }
 .page3 .logview {
   flex: 1;
@@ -1391,9 +1391,9 @@
   overflow: auto;
   padding: 12px 14px;
   border: 1px solid var(--a-border);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   background: var(--a-input);
-  font: 11.5px/1.65 var(--mono);
+  font: var(--fs-1)/1.65 var(--mono);
   color: var(--a-secondary);
   white-space: pre-wrap;
   word-break: break-all;
@@ -1419,7 +1419,7 @@
   width: 100%;
   margin-top: 8px;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .page3 .stable th,
 .page3 .stable td {
@@ -1439,7 +1439,7 @@
 }
 .page3 .ssum {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-secondary);
 }
 
@@ -1449,7 +1449,7 @@
   margin: 14px 28px;
   padding: 12px 14px;
   border: 1px solid var(--a-border);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   background: var(--a-raised);
 }
 .agent-browser-head {
@@ -1463,7 +1463,7 @@
 }
 .agent-browser-head h4 {
   margin: 0 0 3px;
-  font-size: 13px;
+  font-size: var(--fs-2);
 }
 .agent-browser-switch {
   display: flex;
@@ -1471,7 +1471,7 @@
   align-items: center;
   gap: 7px;
   color: var(--a-secondary);
-  font-size: 12px;
+  font-size: var(--fs-1);
   white-space: nowrap;
 }
 .agent-browser-switch input {
@@ -1483,10 +1483,10 @@
   margin-top: 10px;
   padding: 10px 12px;
   border: 1px solid var(--a-warning);
-  border-radius: 8px;
+  border-radius: var(--radius-2);
   background: var(--a-warnBg);
   color: var(--a-text);
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .agent-browser-risk p {
   margin: 0;

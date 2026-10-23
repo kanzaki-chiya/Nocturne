@@ -10,7 +10,7 @@
   flex-direction: column;
   overflow: hidden;
   padding-top: env(safe-area-inset-top);
-  font-size: 16px;
+  font-size: var(--fs-4);
 }
 .phone button,
 .phone input,
@@ -21,7 +21,7 @@
 }
 .phone button {
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-3);
 }
 .phone button:disabled {
   opacity: 0.45;
@@ -53,7 +53,7 @@
 .phone-header h1 {
   flex: 1;
   margin: 0;
-  font-size: 18px;
+  font-size: var(--fs-4);
   font-weight: 600;
   min-width: 0;
   text-align: center;
@@ -88,7 +88,7 @@
   flex: none;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--a-faint);
 }
 .phone-dot.online {
@@ -111,7 +111,7 @@
     max(20px, env(safe-area-inset-left));
 }
 .phone h2 {
-  font-size: 24px;
+  font-size: var(--fs-5);
   margin: 0 0 12px;
   letter-spacing: -0.02em;
 }
@@ -124,7 +124,7 @@
 .phone label {
   display: block;
   margin: 20px 0 12px;
-  font-size: 14px;
+  font-size: var(--fs-3);
 }
 .phone input,
 .phone select,
@@ -133,7 +133,7 @@
   font: inherit;
   color: var(--a-text);
   border: 1px solid var(--a-borderStrong);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   padding: 12px;
   background: var(--a-input);
   margin-top: 6px;
@@ -158,7 +158,7 @@
   background: var(--a-warnBg);
   color: var(--a-warning);
   flex: none;
-  font-size: 14px;
+  font-size: var(--fs-3);
   overflow-wrap: anywhere;
 }
 .phone-error {
@@ -166,7 +166,7 @@
 }
 .phone small {
   display: block;
-  font-size: 13px;
+  font-size: var(--fs-2);
   color: var(--a-muted);
 }
 
@@ -176,13 +176,13 @@
 }
 .phone-list-h {
   margin: 8px 0 4px;
-  font-size: 14px;
+  font-size: var(--fs-3);
   font-weight: 500;
   color: var(--a-muted);
 }
 .phone-sub {
   margin: 0 0 4px;
-  font-size: 14px;
+  font-size: var(--fs-3);
   color: var(--a-muted) !important;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -218,19 +218,19 @@
 }
 .phone-row-main b {
   display: block;
-  font-size: 18px;
+  font-size: var(--fs-4);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .phone-row.session .phone-row-main b {
-  font-size: 17px;
+  font-size: var(--fs-4);
 }
 .phone-row-summary {
   display: block;
   margin-top: 2px;
-  font-size: 14px;
+  font-size: var(--fs-3);
   color: var(--a-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -241,7 +241,7 @@
   justify-content: space-between;
   gap: 12px;
   margin-top: 4px;
-  font-size: 14px;
+  font-size: var(--fs-3);
 }
 .phone-badge {
   white-space: nowrap;
@@ -283,7 +283,7 @@
 .phone .conversation .u-act {
   min-height: 32px;
   padding: 4px 8px;
-  font-size: 13px;
+  font-size: var(--fs-2);
 }
 /* 本轮改动与 diff：不撑宽页面，diff 正文在卡内横向滚动 */
 .phone .turn-changes,
@@ -364,7 +364,7 @@
   padding: 6px 6px 6px 16px;
   background: var(--a-panel);
   border: 1px solid var(--a-border);
-  border-radius: 22px;
+  border-radius: var(--radius-3);
 }
 .phone-card textarea {
   flex: 1;
@@ -390,7 +390,7 @@
   flex: none;
   width: 64px;
   height: 64px;
-  border-radius: 12px;
+  border-radius: var(--radius-3);
   overflow: hidden;
   background: var(--a-raised);
   border: 1px solid var(--a-border);
@@ -411,7 +411,7 @@
   height: 24px;
   min-height: 24px;
   padding: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: rgb(0 0 0 / 0.6);
   color: #fff;
   font-size: 15px;
@@ -425,7 +425,7 @@
   padding: 1px 4px;
   background: rgb(0 0 0 / 0.5);
   color: #fff;
-  font-size: 10px;
+  font-size: var(--fs-1);
   text-align: center;
 }
 .phone .phone-card textarea:focus-visible {
@@ -436,7 +436,7 @@
   width: 44px;
   height: 44px;
   padding: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   display: grid;
   place-items: center;
   background: var(--a-accent);
@@ -459,7 +459,7 @@
   padding: 2px 4px;
   background: var(--a-panel);
   border: 1px solid var(--a-border);
-  border-radius: 16px;
+  border-radius: var(--radius-3);
 }
 .phone .phone-tool {
   flex: none;
@@ -487,7 +487,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 15px;
+  font-size: var(--fs-4);
   color: var(--a-text);
 }
 .phone-tools-sep {
@@ -500,10 +500,10 @@
 .phone-composer-error {
   margin-bottom: 8px;
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   background: var(--a-warnBg);
   color: var(--a-warning);
-  font-size: 14px;
+  font-size: var(--fs-3);
   overflow-wrap: anywhere;
 }
 .phone-composer-error {
@@ -517,7 +517,7 @@
   padding: 6px;
   background: var(--a-panel);
   border: 1px solid var(--a-border);
-  border-radius: 16px;
+  border-radius: var(--radius-3);
 }
 .phone .phone-slash-row {
   display: block;
@@ -535,7 +535,7 @@
 .phone-slash-row em {
   font-style: normal;
   color: var(--a-muted);
-  font-size: 13px;
+  font-size: var(--fs-2);
 }
 .phone .phone-slash-row small {
   display: inline;
@@ -543,7 +543,7 @@
   font-family: var(--sans);
 }
 .phone-slash-row.ref b {
-  font-size: 14px;
+  font-size: var(--fs-3);
   overflow-wrap: anywhere;
 }
 .phone .phone-history-row {
@@ -561,7 +561,7 @@
 }
 .phone-slash-row span {
   display: block;
-  font-size: 13px;
+  font-size: var(--fs-2);
   color: var(--a-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -577,7 +577,7 @@
   flex-direction: column;
   background: var(--a-panel);
   border: 1px solid var(--a-borderStrong);
-  border-radius: 18px;
+  border-radius: var(--radius-3);
   box-shadow: 0 12px 40px #0004;
 }
 .phone-popover.wide {
@@ -604,22 +604,22 @@
   overflow: auto;
   min-height: 0;
   padding: 8px;
-  border-radius: 18px;
+  border-radius: var(--radius-3);
 }
 .phone-popover-h {
   padding: 6px 10px 4px;
-  font-size: 13px;
+  font-size: var(--fs-2);
   color: var(--a-muted);
 }
 .phone-popover-group {
   padding: 10px 10px 2px;
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
   text-transform: none;
 }
 .phone .phone-popover-note {
   margin: 6px 10px;
-  font-size: 13px;
+  font-size: var(--fs-2);
   color: var(--a-muted);
 }
 .phone .phone-option {
@@ -629,7 +629,7 @@
   width: 100%;
   text-align: left;
   padding: 10px;
-  border-radius: 12px;
+  border-radius: var(--radius-3);
 }
 .phone .phone-option:disabled {
   opacity: 1;
@@ -660,7 +660,7 @@
 .phone-option-code {
   margin-left: 8px;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-muted);
   font-weight: 400;
 }
@@ -671,7 +671,7 @@
 }
 .phone-context {
   padding: 0 10px 8px;
-  font-size: 14px;
+  font-size: var(--fs-3);
 }
 .phone-context .context-details dt small {
   max-width: 40vw;
@@ -679,7 +679,7 @@
 .phone-output {
   margin: 0;
   padding: 4px 10px 10px;
-  font: 13px/1.5 var(--mono);
+  font: var(--fs-2)/1.5 var(--mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -701,7 +701,7 @@
     max(16px, env(safe-area-inset-left));
   background: var(--a-panel);
   border-top: 1px solid var(--a-borderStrong);
-  border-radius: 16px 16px 0 0;
+  border-radius: var(--radius-3) var(--radius-3) 0 0;
   box-shadow: 0 -12px 40px #0003;
 }
 .phone-sheet .ask {
@@ -720,7 +720,7 @@
 .phone-sheet .ask-why {
   display: block;
   color: var(--a-muted);
-  font-size: 13px;
+  font-size: var(--fs-2);
   margin-top: 4px;
 }
 .phone-sheet .ask-subjects {
@@ -737,7 +737,7 @@
 }
 .phone-section h3 {
   margin: 8px 0 8px;
-  font-size: 14px;
+  font-size: var(--fs-3);
   font-weight: 500;
   color: var(--a-muted);
 }
@@ -751,7 +751,7 @@
 }
 .phone .phone-host-line input {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--fs-4);
 }
 .phone-host-actions {
   display: flex;
@@ -768,7 +768,7 @@
   justify-content: space-between;
   gap: 16px;
   margin: 8px 0;
-  font-size: 16px;
+  font-size: var(--fs-4);
 }
 .phone .phone-switch input {
   flex: none;
@@ -798,7 +798,7 @@
   margin: 0 0 4px;
   padding: 0;
   list-style: none;
-  font-size: 14px;
+  font-size: var(--fs-3);
 }
 .phone-log li {
   display: flex;
@@ -808,21 +808,21 @@
 }
 .phone-log time {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-muted);
 }
 .phone-segment {
   display: flex;
   padding: 3px;
   gap: 3px;
-  border-radius: 12px;
+  border-radius: var(--radius-3);
   background: var(--a-input);
   border: 1px solid var(--a-border);
 }
 .phone .phone-segment button {
   flex: 1;
   min-height: 38px;
-  border-radius: 9px;
+  border-radius: var(--radius-2);
   color: var(--a-secondary);
 }
 .phone .phone-segment button.on {
@@ -866,12 +866,12 @@
   padding: 12px;
   background: var(--a-panel);
   border: 1px solid var(--a-border);
-  border-radius: 16px;
+  border-radius: var(--radius-3);
 }
 .phone-other-dir label {
   display: grid;
   gap: 6px;
-  font-size: 14px;
+  font-size: var(--fs-3);
   color: var(--a-secondary);
 }
 .phone-other-dir input {
@@ -879,7 +879,7 @@
 }
 .phone-other-dir small {
   color: var(--a-muted);
-  font-size: 13px;
+  font-size: var(--fs-2);
 }
 .phone-other-dir .phone-actions {
   display: flex;

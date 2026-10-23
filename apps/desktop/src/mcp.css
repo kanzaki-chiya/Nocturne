@@ -17,7 +17,7 @@
 }
 .mcp-list-actions .btn {
   padding: 5px 7px;
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .mcp-server-row {
   display: flex;
@@ -28,7 +28,7 @@
   background: transparent;
   color: var(--a-secondary);
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   cursor: pointer;
   text-align: left;
 }
@@ -40,7 +40,7 @@
 .mcp-server-row small {
   margin-left: auto;
   color: var(--a-muted);
-  font-size: 11px;
+  font-size: var(--fs-1);
 }
 .mcp-values > div {
   display: grid;
@@ -68,7 +68,7 @@
   border: 1px solid var(--a-borderStrong);
   background: var(--a-input);
   color: var(--a-text);
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   padding: 8px 10px;
   font: inherit;
 }
@@ -108,7 +108,7 @@
   display: inline-block;
   width: 28px;
   height: 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-2);
   vertical-align: middle;
   background: radial-gradient(circle at 8px 8px, white 5px, transparent 6px), var(--a-muted);
   margin-right: 6px;

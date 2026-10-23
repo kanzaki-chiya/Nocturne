@@ -10,7 +10,7 @@
   border-top: 1px solid var(--a-border);
   background: var(--a-side);
   color: var(--a-muted);
-  font-size: 12px;
+  font-size: var(--fs-1);
   white-space: nowrap;
 }
 .status-controls,
@@ -48,7 +48,7 @@
   min-height: 26px;
   max-width: 100%;
   padding: 2px 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-1);
   color: var(--a-secondary);
   white-space: nowrap;
 }
@@ -74,13 +74,13 @@
   flex: 0 0 5px;
   width: 5px;
   height: 5px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--a-success);
 }
 .status-meter {
   width: 54px;
   height: 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-1);
   background: var(--a-raised);
   overflow: hidden;
 }
@@ -103,7 +103,7 @@
   gap: 4px;
   padding: 2px 6px;
   margin: 0 -6px;
-  border-radius: 5px;
+  border-radius: var(--radius-1);
   cursor: default;
   white-space: nowrap;
 }
@@ -125,7 +125,7 @@
   flex: 0 0 5px;
   width: 5px;
   height: 5px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--a-accent);
   animation: status-speed-pulse 1.2s ease-in-out infinite;
 }
@@ -147,7 +147,7 @@
   max-width: min(320px, 80vw);
   gap: 8px;
   padding: 10px 12px;
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .status-speed-tip dl {
   display: grid;
@@ -170,7 +170,7 @@
 }
 .status-speed-tip .status-note {
   color: var(--a-faint);
-  font-size: 11px;
+  font-size: var(--fs-1);
 }
 .status-mcp {
   position: relative;
@@ -186,7 +186,7 @@
   flex: 0 0 5px;
   width: 5px;
   height: 5px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--a-warning);
 }
 .status-mcp-tip {
@@ -201,7 +201,7 @@
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 2px 8px;
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .status-mcp-row b {
   color: var(--a-text);
@@ -229,7 +229,7 @@
   gap: 10px;
   background: var(--a-panel);
   border: 1px solid var(--a-borderStrong);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   color: var(--a-secondary);
   white-space: normal;
@@ -245,12 +245,12 @@
   justify-content: space-between;
   gap: 12px;
   color: var(--a-text);
-  font-size: 13px;
+  font-size: var(--fs-2);
 }
 .status-popover-heading > button {
   width: 24px;
   height: 24px;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   color: var(--a-muted);
   font-size: 18px;
 }
@@ -272,14 +272,14 @@
   min-height: 32px;
   width: 100%;
   padding: 6px 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-1);
   text-align: left;
   overflow-wrap: anywhere;
 }
 .status-option small {
   display: block;
   color: var(--a-muted);
-  font-size: 11px;
+  font-size: var(--fs-1);
 }
 .status-option:hover:not(:disabled) {
   background: var(--a-raised);
@@ -301,7 +301,7 @@
 .status-error,
 .status-warning {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-1);
   overflow-wrap: anywhere;
 }
 .status-note {
@@ -325,7 +325,7 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px 10px;
-  font-size: 13px;
+  font-size: var(--fs-2);
 }
 .context-total b {
   color: var(--a-text);
@@ -333,12 +333,12 @@
 .context-total span {
   margin-left: auto;
   color: var(--a-muted);
-  font: 12px/1.6 var(--mono);
+  font: var(--fs-1)/1.6 var(--mono);
 }
 .context-stack {
   display: flex;
   height: 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   overflow: hidden;
   background: var(--a-raised);
 }
@@ -356,7 +356,7 @@
   align-items: baseline;
   gap: 8px;
   padding: 2px 0;
-  font-size: 12.5px;
+  font-size: var(--fs-2);
 }
 .context-details dt {
   display: flex;
@@ -370,7 +370,7 @@
   width: 8px;
   height: 8px;
   flex: 0 0 8px;
-  border-radius: 2px;
+  border-radius: var(--radius-1);
 }
 .context-details dt small {
   max-width: 130px;
@@ -378,11 +378,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--a-faint);
-  font-size: 11.5px;
+  font-size: var(--fs-1);
 }
 .context-details dd {
   margin: 0 0 0 auto;
-  font: 12px/1.6 var(--mono);
+  font: var(--fs-1)/1.6 var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--a-text);
 }
@@ -397,7 +397,7 @@
 .context-footer {
   border-top: 1px solid var(--a-border);
   padding-top: 8px;
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
 }
 .context-footer code {
@@ -416,7 +416,7 @@
   background: transparent;
 }
 .status-popover::-webkit-scrollbar-thumb {
-  border-radius: 3px;
+  border-radius: var(--radius-1);
   background: var(--a-borderStrong);
 }
 @media (max-width: 800px) {
@@ -465,7 +465,7 @@
   .desktop-status {
     gap: 4px;
     padding-inline: 4px;
-    font-size: 11px;
+    font-size: var(--fs-1);
   }
   .status-right {
     gap: 4px;

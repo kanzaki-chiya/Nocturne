@@ -21,12 +21,12 @@
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--a-border);
-  border-radius: 7px;
+  border-radius: var(--radius-2);
   background: var(--a-panel);
 }
 .usage-toggle button {
   padding: 4px 12px;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   color: var(--a-muted);
   white-space: nowrap;
 }
@@ -51,7 +51,7 @@
 .usage-overview > div {
   background: var(--a-panel);
   border: 1px solid var(--a-border);
-  border-radius: 9px;
+  border-radius: var(--radius-2);
   padding: 16px;
   min-width: 0;
 }
@@ -59,19 +59,19 @@
 .usage-overview small {
   display: block;
   color: var(--a-muted);
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .usage-overview strong {
   display: block;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: 24px;
+  font-size: var(--fs-5);
   font-weight: 500;
   margin: 6px 0;
   white-space: nowrap;
 }
 .usage-overview em {
-  font: normal 12px var(--sans);
+  font: normal var(--fs-1) var(--sans);
   color: var(--a-muted);
   margin-left: 4px;
 }
@@ -87,12 +87,12 @@
 }
 .usage-section h4 {
   margin: 0 0 14px;
-  font-size: 14px;
+  font-size: var(--fs-3);
   font-weight: 600;
 }
 .usage-section h4 span {
   color: var(--a-muted);
-  font-size: 12px;
+  font-size: var(--fs-1);
   font-weight: 400;
   margin-left: 8px;
 }
@@ -108,7 +108,7 @@
   margin: 0;
 }
 .usage-section-head > span {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-muted);
 }
 .usage-heat-scroll {
@@ -121,7 +121,7 @@
   min-width: 648px;
   margin: 0 0 8px 24px;
   color: var(--a-muted);
-  font-size: 11px;
+  font-size: var(--fs-1);
 }
 .usage-months span {
   white-space: nowrap;
@@ -133,9 +133,9 @@
 }
 .usage-weekdays {
   display: grid;
-  grid-template-rows: repeat(7, 11px);
+  grid-template-rows: repeat(7, 12px);
   gap: 3px;
-  font-size: 10px;
+  font-size: var(--fs-1);
   color: var(--a-muted);
 }
 .usage-weekdays span:nth-child(1) {
@@ -149,7 +149,7 @@
 }
 .usage-heat {
   display: grid;
-  grid-template-rows: repeat(7, 11px);
+  grid-template-rows: repeat(7, 12px);
   grid-auto-flow: column;
   grid-auto-columns: minmax(9px, 1fr);
   gap: 3px;
@@ -157,7 +157,7 @@
 }
 .usage-cell {
   min-width: 0;
-  border-radius: 2px;
+  border-radius: var(--radius-1);
 }
 .usage-cell:hover,
 .usage-cell[aria-pressed="true"] {
@@ -190,7 +190,7 @@
   flex-wrap: wrap;
   margin-top: 12px;
   color: var(--a-muted);
-  font-size: 11px;
+  font-size: var(--fs-1);
 }
 .usage-day-detail {
   font-family: var(--mono);
@@ -204,12 +204,12 @@
 .usage-legend i {
   width: 10px;
   height: 10px;
-  border-radius: 2px;
+  border-radius: var(--radius-1);
 }
 .usage-composition-bar {
   display: flex;
   height: 10px;
-  border-radius: 3px;
+  border-radius: var(--radius-1);
   overflow: hidden;
   background: var(--a-raised);
   margin-bottom: 16px;
@@ -237,18 +237,18 @@
 }
 .usage-composition span,
 .usage-composition small {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-muted);
 }
 .usage-composition span i {
   display: inline-block;
   width: 8px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--radius-1);
   margin-right: 7px;
 }
 .usage-composition b {
-  font: 500 17px var(--mono);
+  font: 500 var(--fs-4) var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .usage-composition small {
@@ -277,7 +277,7 @@
   text-overflow: ellipsis;
 }
 .usage-ranking b {
-  font: 12px var(--mono);
+  font: var(--fs-1) var(--mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
   color: var(--a-secondary);
@@ -285,14 +285,14 @@
 .usage-bar {
   height: 5px;
   background: var(--a-raised);
-  border-radius: 2px;
+  border-radius: var(--radius-1);
   overflow: hidden;
 }
 .usage-bar i {
   display: block;
   height: 100%;
   background: var(--a-accent);
-  border-radius: 2px;
+  border-radius: var(--radius-1);
 }
 .usage-table-scroll {
   overflow-x: auto;
@@ -300,7 +300,7 @@
 .usage-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .usage-table thead th {
   color: var(--a-muted);
@@ -329,7 +329,7 @@
 }
 .usage-table small {
   color: var(--a-muted);
-  font-size: 10px;
+  font-size: var(--fs-1);
 }
 .usage-table td {
   font-family: var(--mono);
@@ -344,7 +344,7 @@
 .usage-footer,
 .usage-empty {
   color: var(--a-muted);
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .usage-table-note {
   margin-bottom: 0;
@@ -387,7 +387,7 @@
   padding: 16px 18px 12px;
   background: var(--a-panel);
   border: 1px solid var(--a-border);
-  border-radius: 9px;
+  border-radius: var(--radius-2);
 }
 .usage-daily-top {
   display: flex;
@@ -400,7 +400,7 @@
 }
 .usage-daily-sum {
   color: var(--a-muted);
-  font: 11px var(--mono);
+  font: var(--fs-1) var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .usage-daily-legend {
@@ -409,7 +409,7 @@
   gap: 4px 14px;
   margin: 8px 0 12px;
   color: var(--a-muted);
-  font-size: 11px;
+  font-size: var(--fs-1);
 }
 .usage-daily-legend i,
 .usage-tip dt i,
@@ -418,7 +418,7 @@
   flex: none;
   width: 8px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--radius-1);
   margin-right: 6px;
   vertical-align: 0;
 }
@@ -445,7 +445,7 @@
   width: 100%;
   max-width: 48px;
   background: var(--a-raised);
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -469,13 +469,13 @@
   box-shadow: 0 0 0 2px var(--a-accent);
 }
 .usage-daily-val {
-  font: 11px var(--mono);
+  font: var(--fs-1) var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--a-text);
   white-space: nowrap;
 }
 .usage-daily-label {
-  font: 10px var(--mono);
+  font: var(--fs-1) var(--mono);
   color: var(--a-muted);
   white-space: nowrap;
 }
@@ -485,11 +485,11 @@
   pointer-events: none;
   padding: 10px 12px;
   border: 1px solid var(--a-borderStrong);
-  border-radius: 8px;
+  border-radius: var(--radius-2);
   background: var(--a-panel);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25);
   color: var(--a-secondary);
-  font-size: 12px;
+  font-size: var(--fs-1);
   white-space: nowrap;
 }
 .usage-tip b {
@@ -499,7 +499,7 @@
 }
 .usage-tip-sub {
   color: var(--a-muted);
-  font-size: 11px;
+  font-size: var(--fs-1);
   margin: 2px 0 6px;
 }
 .usage-tip dl {
@@ -632,7 +632,7 @@
 }
 .usage-metrics h5 {
   margin: 0 0 6px;
-  font-size: 11px;
+  font-size: var(--fs-1);
   font-weight: 500;
   color: var(--a-muted);
   letter-spacing: 0.08em;
@@ -645,22 +645,22 @@
 }
 .usage-metrics dt {
   color: var(--a-muted);
-  font-size: 11px;
+  font-size: var(--fs-1);
 }
 .usage-metrics dd {
   margin: 2px 0 0;
-  font: 13px var(--mono);
+  font: var(--fs-2) var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--a-text);
 }
 .usage-basis {
   margin: 6px 0 0;
   color: var(--a-faint);
-  font-size: 11px;
+  font-size: var(--fs-1);
 }
 .usage-seen {
   color: var(--a-muted);
-  font-size: 11px;
+  font-size: var(--fs-1);
   border-top: 1px solid var(--a-border);
   padding-top: 10px;
 }
@@ -675,7 +675,7 @@
   min-width: 0;
   background: var(--a-panel);
   border: 1px solid var(--a-border);
-  border-radius: 9px;
+  border-radius: var(--radius-2);
   padding: 14px 16px 10px;
 }
 .usage-chart-top {
@@ -687,7 +687,7 @@
 }
 .usage-chart-top h5 {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-1);
   font-weight: 500;
   flex: 1;
   min-width: 0;
@@ -697,7 +697,7 @@
   display: flex;
   gap: 14px;
   color: var(--a-muted);
-  font-size: 11px;
+  font-size: var(--fs-1);
 }
 .usage-chart-legend i {
   display: inline-block;
@@ -722,7 +722,7 @@
 /* viewBox 宽度等于图区像素宽度（UsageCharts usePixelWidth），字号、线宽按屏幕像素 */
 .usage-chart text {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-1);
   fill: var(--a-faint);
 }
 .usage-chart .grid {
@@ -766,7 +766,7 @@
 }
 .usage-chart-tip {
   top: 8px;
-  font-size: 11px;
+  font-size: var(--fs-1);
 }
 .usage-chart-tip b {
   margin-bottom: 3px;
@@ -781,7 +781,7 @@
   min-height: 200px;
   padding: 20px;
   color: var(--a-muted);
-  font-size: 12px;
+  font-size: var(--fs-1);
   text-align: center;
 }
 @container (max-width: 760px) {

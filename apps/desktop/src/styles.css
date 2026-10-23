@@ -37,6 +37,18 @@
   --a-scrollThumbHover: rgba(183, 192, 204, 0.38);
   --a-cat4: #d99ac9;
   --a-cat5: #8fa6c9;
+  /* 字号与圆角档位（视觉规范见 docs/apps/desktop.md 第 9 节）：
+     正文与界面 12/13/14/16 四档 + 展示性大字 20 一档；圆角 4/8/12 三档 + 胶囊。
+     组件 CSS 只引用这些变量，图标字形（▶ ✓ ✕ 这类按盒子尺寸配好的单字符）除外。 */
+  --fs-1: 12px;
+  --fs-2: 13px;
+  --fs-3: 14px;
+  --fs-4: 16px;
+  --fs-5: 20px;
+  --radius-1: 4px;
+  --radius-2: 8px;
+  --radius-3: 12px;
+  --radius-pill: 9999px;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
@@ -161,7 +173,7 @@ body {
   margin: 0;
   background: var(--a-bg);
   color: var(--a-text);
-  font: 13.5px/1.6 var(--sans);
+  font: var(--fs-3)/1.6 var(--sans);
 }
 .mono {
   font-family: var(--mono);
@@ -196,7 +208,7 @@ button {
 .side h4 {
   margin: 0 0 4px;
   padding: 0 10px;
-  font-size: 11px;
+  font-size: var(--fs-1);
   letter-spacing: 0.1em;
   color: var(--a-faint);
   font-weight: 500;
@@ -209,7 +221,7 @@ button {
 .side .brand {
   font-weight: 700;
   color: var(--a-text);
-  font-size: 14px;
+  font-size: var(--fs-3);
 }
 .side .shead .glyph {
   margin-left: auto;
@@ -249,7 +261,7 @@ button {
   background: var(--a-scrollThumb);
   background-clip: padding-box;
   border: 3px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-3);
 }
 .thin-scroll::-webkit-scrollbar-thumb:hover,
 .thin-scroll *::-webkit-scrollbar-thumb:hover {
@@ -284,7 +296,7 @@ button {
 .composer textarea::-webkit-scrollbar-thumb,
 .conversation-stream::-webkit-scrollbar-thumb {
   background: var(--a-borderStrong);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
 }
 .side .tree h4 {
   margin-top: 6px;
@@ -306,11 +318,11 @@ button {
   gap: 4px;
 }
 .side .h4row .hb {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   padding: 0 4px;
   opacity: 0;
   cursor: pointer;
@@ -341,7 +353,7 @@ button {
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   color: var(--a-secondary);
   font-weight: 500;
   background: transparent;
@@ -359,10 +371,10 @@ button {
 }
 .snav .sback .k {
   margin-left: auto;
-  font: 11px/1 var(--mono);
+  font: var(--fs-1)/1 var(--mono);
   color: var(--a-faint);
   border: 1px solid var(--a-border);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   padding: 2px 5px;
 }
 .snav h4 {
@@ -392,7 +404,7 @@ button {
   align-items: center;
   gap: 8px;
   padding: 5px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   color: var(--a-secondary);
   text-decoration: none;
   position: relative;
@@ -407,7 +419,7 @@ button {
 }
 .nav .item .meta {
   margin-left: auto;
-  font-size: 11.5px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
   flex: none;
 }
@@ -422,7 +434,7 @@ button {
   top: 6px;
   bottom: 6px;
   width: 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-1);
   background: var(--a-accent);
 }
 .nav .item.add {
@@ -437,10 +449,10 @@ button {
 }
 .nav .item .proj {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
   border: 1px solid var(--a-border);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   padding: 0 5px;
   line-height: 16px;
   flex: none;
@@ -451,10 +463,10 @@ button {
 /* 会话行留痕标签（ADR-0056）：待确认 / 出错 / 已完成；底色用同一主题变量的半透明 */
 .nav .item .tag {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--fs-1);
   line-height: 16px;
   padding: 0 6px;
-  border-radius: 9px;
+  border-radius: var(--radius-2);
   flex: none;
 }
 .nav .item .tag.need {
@@ -474,7 +486,7 @@ button {
 }
 .nav .item.more {
   color: var(--a-faint);
-  font-size: 12px;
+  font-size: var(--fs-1);
   padding-left: 41px;
 }
 /* 「对话」平铺区的 .more 与行标题文字对齐（10 内边距 + 7 圆点 + 8 间隙） */
@@ -518,11 +530,11 @@ button {
   top: 50%;
   transform: translateY(-50%);
   color: var(--a-faint);
-  font-size: 12px;
+  font-size: var(--fs-1);
   font-weight: 400;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   padding: 0 4px;
   opacity: 0;
   cursor: pointer;
@@ -553,7 +565,7 @@ button {
 .dot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   flex: none;
   background: var(--a-faint);
 }
@@ -580,7 +592,7 @@ button {
   width: 16px;
   text-align: center;
   color: var(--a-muted);
-  font-size: 13px;
+  font-size: var(--fs-2);
   flex: none;
 }
 
@@ -595,7 +607,7 @@ button {
   padding: 5px 10px 5px 4px;
   color: var(--a-text);
   font-weight: 500;
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   position: relative;
 }
 .gh-toggle {
@@ -664,7 +676,7 @@ details[open] > summary:not(.tool-line)::before {
 }
 .gh .meta {
   color: var(--a-faint);
-  font-size: 12px;
+  font-size: var(--fs-1);
   font-weight: 400;
   flex: none;
 }
@@ -678,11 +690,11 @@ details[open] > summary:not(.tool-line)::before {
   top: 50%;
   transform: translateY(-50%);
   color: var(--a-faint);
-  font-size: 12px;
+  font-size: var(--fs-1);
   font-weight: 400;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   padding: 0 4px;
   opacity: 0;
   cursor: pointer;
@@ -716,7 +728,7 @@ details[open] > summary:not(.tool-line)::before {
 .crumb {
   font-weight: 700;
   color: var(--a-accent);
-  font-size: 14px;
+  font-size: var(--fs-3);
   display: flex;
   align-items: baseline;
   min-width: 0;
@@ -738,7 +750,7 @@ details[open] > summary:not(.tool-line)::before {
 }
 .head .path {
   color: var(--a-faint);
-  font-size: 12px;
+  font-size: var(--fs-1);
   flex: none;
   white-space: nowrap;
 }
@@ -785,7 +797,7 @@ details[open] > summary:not(.tool-line)::before {
   max-width: 820px;
   width: 100%;
   border: 1px solid color-mix(in srgb, var(--a-error) 45%, var(--a-border));
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   padding: 10px 14px;
   display: grid;
   gap: 8px;
@@ -797,7 +809,7 @@ details[open] > summary:not(.tool-line)::before {
   align-items: center;
   color: var(--a-error);
   font-weight: 500;
-  font-size: 13px;
+  font-size: var(--fs-2);
 }
 .crash .t .btn {
   margin-left: auto;
@@ -812,13 +824,13 @@ details[open] > summary:not(.tool-line)::before {
 }
 .crash .fail {
   color: var(--a-error);
-  font-size: 12px;
+  font-size: var(--fs-1);
   font-weight: 400;
 }
 .crash .logmore {
   justify-self: start;
   padding: 3px 8px;
-  font-size: 11.5px;
+  font-size: var(--fs-1);
 }
 .pane-error {
   margin: auto;
@@ -827,17 +839,17 @@ details[open] > summary:not(.tool-line)::before {
   gap: 8px;
   padding: 18px 20px;
   border: 1px solid color-mix(in srgb, var(--a-error) 45%, var(--a-border));
-  border-radius: 12px;
+  border-radius: var(--radius-3);
   background: color-mix(in srgb, var(--a-error) 6%, transparent);
 }
 .pane-error b {
   color: var(--a-error);
-  font-size: 14px;
+  font-size: var(--fs-3);
 }
 .pane-error p {
   margin: 0;
   color: var(--a-secondary);
-  font-size: 13px;
+  font-size: var(--fs-2);
   word-break: break-all;
 }
 .pane-error .btn {
@@ -846,7 +858,7 @@ details[open] > summary:not(.tool-line)::before {
 
 .crash pre {
   margin: 0;
-  font: 11.5px/1.6 var(--mono);
+  font: var(--fs-1)/1.6 var(--mono);
   color: var(--a-muted);
   white-space: pre-wrap;
   max-height: 168px;
@@ -866,7 +878,7 @@ details[open] > summary:not(.tool-line)::before {
   padding: 8px 24px;
   border-top: 1px solid var(--a-borderStrong);
   background: var(--a-panel);
-  font-size: 12.5px;
+  font-size: var(--fs-2);
 }
 .updbar .t {
   color: var(--a-text);
@@ -897,8 +909,8 @@ details[open] > summary:not(.tool-line)::before {
 }
 
 .btn {
-  font: 500 12.5px/1 var(--sans);
-  border-radius: 6px;
+  font: 500 var(--fs-2)/1 var(--sans);
+  border-radius: var(--radius-2);
   padding: 7px 12px;
   border: 1px solid var(--a-borderStrong);
   background: transparent;
@@ -936,7 +948,7 @@ details[open] > summary:not(.tool-line)::before {
 }
 .nodecard h3 {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--fs-5);
 }
 .nodecard .lead {
   color: var(--a-muted);
@@ -947,14 +959,14 @@ details[open] > summary:not(.tool-line)::before {
   align-items: center;
   gap: 10px;
   color: var(--a-muted);
-  font-size: 13px;
+  font-size: var(--fs-2);
   opacity: 0;
   animation: opening-in 0.15s ease-out 0.2s forwards;
 }
 .opening .spin {
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   border: 2px solid var(--a-selStrong);
   border-top-color: var(--a-accent);
   animation: opening-spin 0.9s linear infinite;
@@ -980,7 +992,7 @@ details[open] > summary:not(.tool-line)::before {
 }
 .probe {
   border: 1px solid var(--a-border);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   background: var(--a-panel);
   overflow: hidden;
 }
@@ -990,7 +1002,7 @@ details[open] > summary:not(.tool-line)::before {
   gap: 12px;
   padding: 9px 14px;
   border-bottom: 1px solid var(--a-border);
-  font-size: 12.5px;
+  font-size: var(--fs-2);
 }
 .probe div:last-child {
   border-bottom: none;
@@ -1024,7 +1036,7 @@ details[open] > summary:not(.tool-line)::before {
   gap: 8px;
 }
 .nodecard .fine {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
 }
 
@@ -1035,7 +1047,7 @@ details[open] > summary:not(.tool-line)::before {
   min-width: 140px;
   background: var(--a-panel);
   border: 1px solid var(--a-borderStrong);
-  border-radius: 8px;
+  border-radius: var(--radius-2);
   padding: 4px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
 }
@@ -1044,9 +1056,9 @@ details[open] > summary:not(.tool-line)::before {
   width: 100%;
   text-align: left;
   padding: 6px 12px;
-  border-radius: 5px;
+  border-radius: var(--radius-1);
   color: var(--a-secondary);
-  font-size: 12.5px;
+  font-size: var(--fs-2);
 }
 .ctxmenu button:hover {
   background: var(--a-sel);
@@ -1065,9 +1077,9 @@ details[open] > summary:not(.tool-line)::before {
   align-items: center;
   gap: 4px;
   padding: 6px 12px;
-  border-radius: 5px;
+  border-radius: var(--radius-1);
   color: var(--a-secondary);
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   cursor: default;
 }
 .ctxmenu .mi .arr {
@@ -1121,7 +1133,7 @@ details[open] > summary:not(.tool-line)::before {
   display: block;
 }
 .hero h3 {
-  font-size: 17px;
+  font-size: var(--fs-4);
   font-weight: 500;
   margin: 12px 0 20px;
   text-align: center;
@@ -1153,7 +1165,7 @@ details[open] > summary:not(.tool-line)::before {
 .desktop-dialog {
   background: var(--a-panel);
   border: 1px solid var(--a-borderStrong);
-  border-radius: 10px;
+  border-radius: var(--radius-3);
   padding: 20px;
   width: min(520px, 90%);
   max-height: 80%;
@@ -1164,7 +1176,7 @@ details[open] > summary:not(.tool-line)::before {
 }
 .desktop-dialog pre {
   white-space: pre-wrap;
-  font: 12.5px/1.8 var(--mono);
+  font: var(--fs-2)/1.8 var(--mono);
 }
 
 /* 手动排序拖动：被拖的项目组变淡，插入位置画一条主色指示线 */
@@ -1181,7 +1193,7 @@ details[open] > summary:not(.tool-line)::before {
   left: 6px;
   right: 6px;
   height: 2px;
-  border-radius: 1px;
+  border-radius: var(--radius-1);
   background: var(--a-accent);
   pointer-events: none;
 }

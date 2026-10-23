@@ -8,7 +8,7 @@
 .remote-body h4,
 .remote-panel h4 {
   margin: 0 0 10px;
-  font-size: 14px;
+  font-size: var(--fs-3);
 }
 .remote-body p {
   color: var(--a-secondary);
@@ -33,7 +33,7 @@
   padding: 9px 12px;
   background: var(--a-input);
   border: 1px solid var(--a-border);
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   color: var(--a-text);
   font: inherit;
 }
@@ -52,7 +52,7 @@
   margin-bottom: 4px;
 }
 .remote-state {
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-secondary);
 }
 .remote-state.online {
@@ -79,7 +79,7 @@
 }
 .remote-device p {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .remote-actions {
   display: flex;
@@ -92,7 +92,7 @@
   padding: 16px;
   margin-top: 16px;
   border: 1px solid var(--a-border);
-  border-radius: 8px;
+  border-radius: var(--radius-2);
 }
 .remote-trust {
   margin-top: 36px;
@@ -100,7 +100,7 @@
   border-top: 1px solid var(--a-border);
 }
 .remote-trust p {
-  font-size: 12.5px;
+  font-size: var(--fs-2);
   margin-bottom: 0;
 }
 .remote-pair {
@@ -122,7 +122,7 @@
   display: block;
   text-align: left;
   margin-bottom: 8px;
-  font-size: 12px;
+  font-size: var(--fs-1);
   color: var(--a-secondary);
 }
 .remote-pair > .btn3 {
@@ -138,7 +138,7 @@
   min-width: 280px;
   padding: 18px;
   border: 1px solid var(--a-border);
-  border-radius: 8px;
+  border-radius: var(--radius-2);
   background: var(--a-raised);
   color: var(--a-text);
   z-index: 25;
@@ -150,11 +150,11 @@
 .remote-pair .btn3,
 .remote-panel .btn3 {
   border: 1px solid var(--a-borderStrong);
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   background: var(--a-raised);
   color: var(--a-text);
   padding: 6px 12px;
-  font: 12.5px/1.5 var(--sans);
+  font: var(--fs-2)/1.5 var(--sans);
   white-space: nowrap;
   cursor: pointer;
 }
