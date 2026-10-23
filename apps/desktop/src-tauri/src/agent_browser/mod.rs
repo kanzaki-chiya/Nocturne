@@ -221,7 +221,11 @@ impl AgentTab {
 /// `rename_all` 只改变体名（kind 的值）；变体里的字段要靠 `rename_all_fields` 才是 camelCase，
 /// 否则主界面读到的 `shellGeneration`、`tabId` 都是 undefined。
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum WatchMessage {
     Tabs {
         shell_generation: u64,
