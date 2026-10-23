@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AgentBrowserHost } from "../src/host";
 import { McpPage } from "../src/McpPage";
 import { parseMcpImport } from "../src/mcp-import";
+import { createPrefsStore, PREFS_KEY } from "../src/prefs";
 import { RpcFail, fakeServer, withInit } from "./fake-server";
 
 afterEach(cleanup);
@@ -277,6 +279,131 @@ describe("MCP 设置页", () => {
     }
     await waitFor(() => expect(lists()).toBe(2));
     expect(screen.getByText(/配置未能应用到会话/)).toBeDefined();
+    f.close();
+  });
+});
+
+describe("面板浏览器 · 桌面内置", () => {
+  function memory(): Storage {
+    const data = new Map<string, string>();
+    return {
+      get length() {
+        return data.size;
+      },
+      clear: () => data.clear(),
+      getItem: (key) => data.get(key) ?? null,
+      key: (index) => [...data.keys()][index] ?? null,
+      removeItem: (key) => {
+        data.delete(key);
+      },
+      setItem: (key, value) => {
+        data.set(key, value);
+      },
+    };
+  }
+
+  function browserHost(): AgentBrowserHost & { enabled: boolean[] } {
+    const enabled: boolean[] = [];
+    return {
+      enabled,
+      watch: vi.fn(async () => ({ shellGeneration: 0, revision: 0, enabled: false, tabs: [] })),
+      uiState: vi.fn(async () => undefined),
+      presented: vi.fn(async () => undefined),
+      control: vi.fn(async () => ({ revision: 0 })),
+      setEnabled: vi.fn(async (next) => {
+        enabled.push(next);
+        return { enabled: next, restartRequired: next };
+      }),
+    };
+  }
+
+  async function mount(host: AgentBrowserHost, storage = memory()) {
+    const f = fakeServer(
+      withInit({
+        "mcp.describeMcpServers": { servers: [], warnings: [] },
+        "provider.describeProviderSetup": { credential: { backend: { available: true } } },
+      }),
+    );
+    await f.initialize();
+    const prefs = createPrefsStore(storage);
+    render(
+      <McpPage
+        client={f.client}
+        workspaceRoot={undefined}
+        version={0}
+        onChanged={() => undefined}
+        agentBrowser={host}
+        prefs={prefs}
+      />,
+    );
+    await screen.findByRole("heading", { name: "面板浏览器 · 桌面内置" });
+    return { f, prefs, storage };
+  }
+
+  it("第一次启用先弹风险提示，取消就不启用", async () => {
+    const host = browserHost();
+    const { f, prefs } = await mount(host);
+    expect(screen.getByText("已关闭")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(screen.getByRole("alertdialog", { name: "启用面板浏览器" })).toBeTruthy();
+    expect(host.setEnabled).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(prefs.get().agentBrowserEnabled).toBeUndefined();
+    expect(prefs.get().agentBrowserRiskAccepted).toBeUndefined();
+    expect(host.enabled).toEqual([]);
+    f.close();
+  });
+
+  it("确认启用后记下风险已读，并提示重启后台后生效", async () => {
+    const host = browserHost();
+    const { f, prefs, storage } = await mount(host);
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "仍然启用" }));
+    expect(await screen.findByText(/重启应用后新的后台进程才会拿到工具/)).toBeTruthy();
+    expect(screen.getByText("已启用")).toBeTruthy();
+    expect(host.enabled).toEqual([true]);
+    expect(prefs.get().agentBrowserEnabled).toBe(true);
+    expect(prefs.get().agentBrowserRiskAccepted).toBe(true);
+    expect(storage.getItem(PREFS_KEY)).toContain('"agentBrowserEnabled":true');
+    f.close();
+  });
+
+  it("已经看过风险提示后再开不再弹；关闭时调用关闭命令", async () => {
+    const storage = memory();
+    storage.setItem(
+      PREFS_KEY,
+      JSON.stringify({ agentBrowserEnabled: true, agentBrowserRiskAccepted: true }),
+    );
+    const host = browserHost();
+    const { f, prefs } = await mount(host, storage);
+    expect(screen.getByText("已启用")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(await screen.findByText(/已关闭；已有绑定和标签已撤销/)).toBeTruthy();
+    expect(host.enabled).toEqual([false]);
+    expect(prefs.get().agentBrowserEnabled).toBe(false);
+    f.close();
+  });
+
+  it("没有外壳时设置里不出现这个开关", async () => {
+    const f = fakeServer(
+      withInit({
+        "mcp.describeMcpServers": { servers: [], warnings: [] },
+        "provider.describeProviderSetup": { credential: { backend: { available: true } } },
+      }),
+    );
+    await f.initialize();
+    render(
+      <McpPage
+        client={f.client}
+        workspaceRoot={undefined}
+        version={0}
+        onChanged={() => undefined}
+      />,
+    );
+    await screen.findByRole("heading", { name: "MCP" });
+    expect(screen.queryByRole("heading", { name: "面板浏览器 · 桌面内置" })).toBeNull();
     f.close();
   });
 });

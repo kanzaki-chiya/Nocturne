@@ -23,6 +23,7 @@ import {
   QuestionCard,
   type ConversationProps,
   type FileLinkHooks,
+  type ReadOnlyConversationProps,
 } from "../src/Conversation";
 import { createAttachmentImageSource } from "../src/attachment-images";
 
@@ -654,21 +655,68 @@ describe("Conversation 历史图片", () => {
     images.dispose();
   });
 
+  function toolShot(): ToolEntry {
+    const entry = tool({ name: "desktop_browser__screenshot", input: { tabId: "tab-1" } });
+    if (!entry.result) throw new Error("工具 fixture 缺少结果");
+    entry.result.attachments = [historyImage];
+    entry.result.output = { tabId: "tab-1" };
+    entry.result.modelContent = "已截图";
+    return entry;
+  }
+
   it("工具图片在缓存命中时直接显示缩略图，不重复读取", async () => {
     const images = createAttachmentImageSource();
     await images.register(imageData, "image/png");
-    const entry = tool({ name: "read", input: { path: "history.png" } });
-    if (!entry.result) throw new Error("工具 fixture 缺少结果");
-    entry.result.attachments = [historyImage];
-    entry.result.output = undefined;
     const view = createSessionView();
-    view.entries = [entry];
+    view.entries = [toolShot()];
     const rendered = mount(view, { images });
     expect(rendered.container.querySelector(".u-img-chip")).toBeNull();
     fireEvent.click(screen.getByLabelText("工具详细信息"));
     const image = rendered.container.querySelector<HTMLImageElement>(".tool-shots img");
     expect(image?.getAttribute("src")).toBe(images.url(historyImage));
+    expect(image?.className).toContain("u-img");
     expect(rendered.methods.readAttachment).not.toHaveBeenCalled();
+    images.dispose();
+  });
+
+  it("工具截图未命中缓存时读取附件并显示缩略图", async () => {
+    const images = createAttachmentImageSource();
+    const view = createSessionView();
+    view.entries = [toolShot()];
+    const rendered = mount(view, { images });
+    rendered.methods.readAttachment.mockResolvedValue({
+      data: imageData,
+      mimeType: "image/png",
+      bytes: 3,
+    });
+    fireEvent.click(screen.getByLabelText("工具详细信息"));
+    expect(screen.getByLabelText("加载截图：history.png")).toBeTruthy();
+    const image = await screen.findByRole("img", { name: "历史截图" });
+    expect(image.closest(".tool-shots")).toBeTruthy();
+    expect(rendered.methods.readAttachment).toHaveBeenCalledWith("history.png");
+    images.dispose();
+  });
+
+  it("子代理只读视图里的工具截图同样显示缩略图", async () => {
+    const images = createAttachmentImageSource();
+    await images.register(imageData, "image/png");
+    const view = createSessionView();
+    view.entries = [toolShot()];
+    const props: ReadOnlyConversationProps = {
+      session: { id: "child-1", readOnly: true, readAttachment: vi.fn() },
+      readOnly: { frozen: false },
+      view,
+      openUrl: vi.fn(),
+      cwd: "Z:/project",
+      subscribeEvents: () => () => undefined,
+      images,
+      busy: false,
+    };
+    const rendered = render(<Conversation {...props} />);
+    fireEvent.click(screen.getByLabelText("工具详细信息"));
+    const image = rendered.container.querySelector<HTMLImageElement>(".tool-shots img");
+    expect(image?.getAttribute("src")).toBe(images.url(historyImage));
+    expect(screen.queryByRole("button", { name: "重发" })).toBeNull();
     images.dispose();
   });
 
