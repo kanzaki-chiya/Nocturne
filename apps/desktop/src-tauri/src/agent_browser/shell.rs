@@ -95,6 +95,9 @@ impl AgentPlatform for ShellPlatform {
             ),
         )
         .data_directory(self.agent_dir())
+        // 新建时不抢键盘焦点：默认会把原生焦点移进新 webview，用户正在输入的字落进 agent 的网页，
+        // 而且用户之后点进来也不再触发 GotFocus，自动接管失效
+        .focused(false)
         .on_navigation(move |url| {
             let dev = dev.as_ref();
             let current = nav_tab.url_text();
