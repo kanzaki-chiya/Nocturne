@@ -134,6 +134,8 @@ export interface SidePanelController {
   panel: ReactNode;
   /** 放在 .main 里：概览浮层、快速打开、标题栏按钮 */
   mainOverlays: ReactNode;
+  /** 还有活着的 agent 标签的会话：这些会话空闲时也不能关（关会话会连带关掉标签） */
+  agentSessions: ReadonlySet<string>;
 }
 
 export function useSidePanel({
@@ -237,6 +239,16 @@ export function useSidePanel({
     };
   }, [agents]);
   const agentSnapshot = agents.get();
+  // 按内容记忆：快照每次推送都是新对象，集合不变时不重新通知会话列表
+  const agentSessionKey = JSON.stringify(
+    [
+      ...new Set(agentSnapshot.tabs.filter((tab) => tab.live).map((tab) => tab.rootSessionId)),
+    ].sort(),
+  );
+  const agentSessions = useMemo<ReadonlySet<string>>(
+    () => new Set(JSON.parse(agentSessionKey) as string[]),
+    [agentSessionKey],
+  );
   const [agentSlot, setAgentSlot] = useState<{ tabId: string; bounds: BrowserBounds }>();
   const [presentTick, setPresentTick] = useState(0);
   const layoutVersion = useRef(0);
@@ -1278,5 +1290,6 @@ export function useSidePanel({
     bodyRef: setBody,
     panel,
     mainOverlays,
+    agentSessions,
   };
 }

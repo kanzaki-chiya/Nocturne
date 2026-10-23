@@ -1029,3 +1029,41 @@ it("agent 标签：切走时上报的状态没有布局，切回来用外壳 tab
     restore();
   }
 });
+
+it("agent 标签所在的会话：只算活着的标签，集合内容不变时保持同一个对象", async () => {
+  const base = setup();
+  const agents = agentHostOf({
+    shellGeneration: 2,
+    revision: 1,
+    enabled: true,
+    tabs: [agentInfo(), agentInfo({ tabId: "tab-2", rootSessionId: "b", live: false })],
+  });
+  const host = { ...base.host, agentBrowser: agents.host } as DesktopHost;
+  const controller: { current: SidePanelController | null } = { current: null };
+  render(
+    <Harness
+      prefs={base.prefs}
+      host={host}
+      sessionId="b"
+      sessions={[{ id: "a", mtimeMs: 1 }]}
+      controller={controller}
+    />,
+  );
+  await waitFor(() => {
+    expect([...(controller.current?.agentSessions ?? [])]).toEqual(["a"]);
+  });
+  const first = controller.current?.agentSessions;
+  act(() => {
+    agents.push({
+      kind: "tabs",
+      shellGeneration: 2,
+      revision: 2,
+      tabs: [agentInfo({ state: "busy" }), agentInfo({ tabId: "tab-3", rootSessionId: "a" })],
+    });
+  });
+  expect(controller.current?.agentSessions).toBe(first);
+  act(() => {
+    agents.push({ kind: "tabs", shellGeneration: 2, revision: 3, tabs: [] });
+  });
+  expect(controller.current?.agentSessions.size).toBe(0);
+});

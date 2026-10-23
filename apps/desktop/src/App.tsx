@@ -865,6 +865,11 @@ export function App({ host }: { host: DesktopHost }) {
     images,
   });
   panelRef.current = sidePanel;
+  // 有活着的 agent 标签的会话不随空闲关闭；标签都关了再按原规则关
+  const agentSessions = sidePanel.agentSessions;
+  useEffect(() => {
+    conversations.setAgentSessions(agentSessions);
+  }, [conversations, agentSessions]);
   // 会话由忙转闲时刷新一次列表（标题/时间可能更新）；切换本身由
   // selectSession 刷新一次，不在此重复（ADR-0051）
   const runningSessions = useRef<ReadonlySet<string>>(new Set());

@@ -389,6 +389,35 @@ describe("desktop conversation lifecycle", () => {
     expect(f.failures).toEqual([]);
   });
 
+  it("还有 agent 浏览器标签的会话跑完后切走也不关；标签都关了再按空闲规则关", async () => {
+    const f = fixture();
+    await f.controller.open("a", "project");
+    f.controller.setAgentSessions(new Set(["a"]));
+    await f.controller.send({ text: "打开网页", attachments: [] });
+    await f.controller.open("b", "project");
+    // 用户切走后 agent 跑完：空闲、没被选中，但标签还活着，绑定不能撤
+    f.complete("a");
+    const a = f.controller.opened.get("a");
+    if (a === undefined) throw new Error("有 agent 标签的会话被提前关闭");
+    await vi.waitFor(() => expect(conversationStatus(a)).toBe("idle"));
+    await f.controller.open("c", "project");
+    expect(f.opened.has("a")).toBe(true);
+    expect(f.calls.some((c) => c.method === "session.close" && c.params.sessionId === "a")).toBe(
+      false,
+    );
+    // 切回来仍是同一个打开的会话
+    await f.controller.open("a", "project");
+    expect(f.controller.opened.get("a")).toBe(a);
+    await f.controller.open("b", "project");
+    // 集合内容不变（快照重推）不触发关闭
+    f.controller.setAgentSessions(new Set(["a"]));
+    expect(f.opened.has("a")).toBe(true);
+    // 标签都关了：空闲且没被选中，按原规则关闭
+    f.controller.setAgentSessions(new Set());
+    await vi.waitFor(() => expect(f.opened.has("a")).toBe(false));
+    expect(f.failures).toEqual([]);
+  });
+
   it("锁定目标打开失败：选中留在目标会话并显示错误，显式 force 才能接管", async () => {
     const f = fixture("locked");
     await f.controller.open("old", "plain");

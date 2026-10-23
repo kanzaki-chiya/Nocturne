@@ -131,6 +131,11 @@ export class Conversations {
   private queue: Promise<unknown> = Promise.resolve();
   /** 每次 open 递增；被更新的点击取代的打开在串行队列里直接跳过 */
   private openToken = 0;
+  /**
+   * 还有活着的 agent 浏览器标签的会话（desktop-browser.md 第 7 节）：空闲且没被选中也不关，
+   * 否则关会话会撤销绑定、连带关掉 agent 标签，切回来标签就没了。
+   */
+  private agentSessions: ReadonlySet<string> = new Set();
 
   constructor(
     private readonly pool: ConversationBackendPool,
@@ -573,9 +578,22 @@ export class Conversations {
     });
   }
 
+  /**
+   * 更新有 agent 标签的会话。标签全部关掉的会话按原规则处理：空闲且没被选中就关闭。
+   */
+  setAgentSessions(ids: ReadonlySet<string>): void {
+    const released = [...this.agentSessions].filter((id) => !ids.has(id));
+    this.agentSessions = ids;
+    for (const id of released) {
+      const entry = this.opened.get(id);
+      if (entry !== undefined) void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
+    }
+  }
+
   private async closeIfIdle(entry: OpenConversation): Promise<void> {
     if (
       entry.session.id === this.selectedId ||
+      this.agentSessions.has(entry.session.id) ||
       entry.dead === true ||
       conversationStatus(entry) !== "idle" ||
       this.opened.get(entry.session.id) !== entry
