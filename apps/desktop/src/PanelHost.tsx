@@ -1044,7 +1044,12 @@ export function useSidePanel({
         route,
         ...(sessionId !== null ? { sessionId } : {}),
         panelOpen: shown,
-        ...(activeId !== "" ? { activeTabId: activeId } : {}),
+        // 外壳按自己的 tabId 匹配；面板标签 id 是 `agent:` 前缀，不能原样送回去
+        ...(agentInfo !== undefined
+          ? { activeTabId: agentInfo.tabId }
+          : activeId !== ""
+            ? { activeTabId: activeId }
+            : {}),
         covered: overviewVisible,
         ...(agentVisible !== undefined && bounds !== undefined
           ? { layout: { tabId: agentVisible, version, bounds } }

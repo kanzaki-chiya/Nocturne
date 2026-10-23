@@ -10,6 +10,11 @@ import type { RpcClient } from "@nocturne/rpc/client";
 
 import type { OpenConversation } from "../src/conversations";
 import type {
+  AgentBrowserHost,
+  AgentTabInfo,
+  AgentUiState,
+  AgentWatchMessage,
+  AgentWatchSnapshot,
   BrowserHost,
   BrowserMessage,
   DesktopHost,
@@ -158,6 +163,51 @@ function setup(storage = memoryStorage()) {
     openInEditor: vi.fn(async () => undefined),
   } as unknown as DesktopHost;
   return { storage, prefs: createPrefsStore(storage), host, terminals };
+}
+
+function agentInfo(over: Partial<AgentTabInfo> = {}): AgentTabInfo {
+  return {
+    tabId: "tab-1",
+    rootSessionId: "a",
+    actorSessionId: "a",
+    title: "测试页",
+    url: "http://127.0.0.1:9/",
+    live: true,
+    pinned: true,
+    state: "agent",
+    child: false,
+    ...over,
+  };
+}
+
+/** 外壳 watch 的假实现：测试里用 push 推快照和 present */
+function agentHostOf(initial?: AgentWatchSnapshot) {
+  const ui: AgentUiState[] = [];
+  const control: { tabId: string; action: string }[] = [];
+  let onMessage: ((message: AgentWatchMessage) => void) | undefined;
+  const host: AgentBrowserHost = {
+    watch: vi.fn(async (listener) => {
+      onMessage = listener;
+      return initial ?? { shellGeneration: 1, revision: 1, enabled: true, tabs: [] };
+    }),
+    uiState: vi.fn(async (next) => {
+      ui.push(next);
+    }),
+    presented: vi.fn(async () => undefined),
+    control: vi.fn(async (tabId, action) => {
+      control.push({ tabId, action });
+      return { revision: 2, state: action };
+    }),
+    setEnabled: vi.fn(async (enabled) => ({ enabled, restartRequired: enabled })),
+  };
+  return {
+    host,
+    ui,
+    control,
+    push(message: AgentWatchMessage) {
+      onMessage?.(message);
+    },
+  };
 }
 
 function stored(storage: Storage): Record<string, unknown> {
@@ -878,6 +928,85 @@ it("主界面浮层伸进浏览器区域：截图占位后隐藏 webview，浮�
     await waitFor(() => {
       expect(log.slice(-1)).toEqual(["layout 1 show"]);
     });
+  } finally {
+    restore();
+  }
+});
+
+it("agent 标签：切走时上报的状态没有布局，切回来用外壳 tabId 而不是面板 id", async () => {
+  const restore = withSlotSize();
+  try {
+    const base = setup();
+    const agents = agentHostOf({
+      shellGeneration: 4,
+      revision: 2,
+      enabled: true,
+      tabs: [agentInfo({ state: "busy", operation: "click" })],
+    });
+    const host = { ...base.host, agentBrowser: agents.host } as DesktopHost;
+    const sessions = [{ id: "a", mtimeMs: 1 }];
+    const view = render(
+      <Harness prefs={base.prefs} host={host} sessionId="a" sessions={sessions} />,
+    );
+    act(() => {
+      press({ key: "b", ctrlKey: true });
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("agent 正在操作")).toBeTruthy();
+    });
+    // 面板开着但选中的不是 agent 标签：不带布局，外壳据此离屏
+    const hidden = agents.ui.at(-1);
+    expect(hidden?.panelOpen).toBe(true);
+    expect(hidden?.layout).toBeUndefined();
+    expect(hidden?.activeTabId).not.toBe("tab-1");
+
+    fireEvent.click(screen.getByRole("tab", { name: /测试页/ }));
+    await waitFor(() => {
+      expect(agents.ui.at(-1)?.layout?.tabId).toBe("tab-1");
+    });
+    const shown = agents.ui.at(-1);
+    expect(shown?.activeTabId).toBe("tab-1");
+    expect(shown?.activeTabId?.startsWith("agent:")).toBe(false);
+    expect(shown?.layout?.bounds.width).toBeGreaterThan(1);
+
+    // 切到别的会话：这个标签不再带布局
+    view.rerender(<Harness prefs={base.prefs} host={host} sessionId="b" sessions={sessions} />);
+    await waitFor(() => {
+      expect(agents.ui.at(-1)?.sessionId).toBe("b");
+    });
+    expect(agents.ui.at(-1)?.layout).toBeUndefined();
+    // 活动徽标留在原来的会话里，不跟着出现在 b
+    expect(screen.queryByLabelText("agent 正在操作")).toBeNull();
+
+    // 接管、交回、关闭都用外壳的 tabId；按钮文案跟着外壳推回的状态变
+    view.rerender(<Harness prefs={base.prefs} host={host} sessionId="a" sessions={sessions} />);
+    fireEvent.click(screen.getByRole("tab", { name: /测试页/ }));
+    fireEvent.click(screen.getByRole("button", { name: "接管" }));
+    act(() => {
+      agents.push({
+        kind: "tabs",
+        shellGeneration: 4,
+        revision: 3,
+        tabs: [agentInfo({ state: "taken_over" })],
+      });
+    });
+    expect(screen.getByText("已被你接管")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "交给 agent" }));
+    act(() => {
+      agents.push({
+        kind: "tabs",
+        shellGeneration: 4,
+        revision: 4,
+        tabs: [agentInfo({ state: "agent" })],
+      });
+    });
+    expect(screen.getByText("agent 控制中")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "关闭 agent 标签" }));
+    expect(agents.control).toEqual([
+      { tabId: "tab-1", action: "takeover" },
+      { tabId: "tab-1", action: "return" },
+      { tabId: "tab-1", action: "close" },
+    ]);
   } finally {
     restore();
   }

@@ -69,7 +69,7 @@ HTTP bootstrap 控制协议（不是通用 RPC，不对前端开放）：
 | 命令 | 参数 → 返回 |
 |---|---|
 | `agent_browser_watch` | `{ channel }` → `{ shellGeneration, revision, enabled, tabs: AgentBrowserTab[] }`；新的watch替换旧watch，返回后按revision继续channel推送，不丢快照间隙 |
-| `agent_browser_ui_state` | `{ shellGeneration, revision, route: "session" \| "settings" \| "home", sessionId?: string, panelOpen: boolean, activeTabId?: string, covered: boolean, layout?: { tabId, version, bounds } }` → null；旧代/旧revision拒绝；缺布局或未确认状态一律不可操作 |
+| `agent_browser_ui_state` | `{ shellGeneration, revision, route: "session" \| "settings" \| "home", sessionId?: string, panelOpen: boolean, activeTabId?: string, covered: boolean, layout?: { tabId, version, bounds } }` → null；旧代/旧revision拒绝；缺布局或未确认状态一律不可操作。`activeTabId` 与 `layout.tabId` 都是外壳的 `tabId`，不是面板里带 `agent:` 前缀的标签 id |
 | `agent_browser_presented` | `{ shellGeneration, operationId, tabId, layoutVersion }` → null；仅响应外壳在本代pending的展示请求，不能借它为任意标签授权 |
 | `agent_browser_control` | `{ tabId, action: "takeover" \| "return" \| "close" }` → `{ revision, state }`；用户主动控制；return只对同代保留的agent标签有效，失效refs后允许原owner actor继续 |
 | `agent_browser_set_enabled` | `{ enabled: boolean }` → `{ enabled, restartRequired: boolean }`；停用立即撤销，启用不在现有后台伪造凭证；prefs落盘由主界面现有偏好路径维护，Rust内存开关缺省false |
