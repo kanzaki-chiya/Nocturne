@@ -980,7 +980,11 @@ it("agent 标签：切走时上报的状态没有布局，切回来用外壳 tab
 
     // 接管、交回、关闭都用外壳的 tabId；按钮文案跟着外壳推回的状态变
     view.rerender(<Harness prefs={base.prefs} host={host} sessionId="a" sessions={sessions} />);
-    fireEvent.click(screen.getByRole("tab", { name: /测试页/ }));
+    // 切回来：切走前选中的 agent 标签仍选中，不用再点
+    await waitFor(() => {
+      expect(agents.ui.at(-1)?.layout?.tabId).toBe("tab-1");
+    });
+    expect(screen.getByRole("tab", { name: /测试页/ }).getAttribute("aria-selected")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "接管" }));
     act(() => {
       agents.push({

@@ -86,8 +86,9 @@ export function syncAgentTabs(panel: SessionPanel, desired: readonly AgentTabInf
     kept.push(agentTabOf(info));
     changed = true;
   }
-  if (!changed) return panel;
   const activeExists = kept.some((tab) => tab.id === panel.activeId);
+  // 没有变化且选中项还在：原样返回。选中项不在时（切走前选的 agent 标签已经关了）要修正
+  if (!changed && (activeExists || kept.length === 0)) return panel;
   return {
     ...panel,
     tabs: kept,
@@ -95,15 +96,14 @@ export function syncAgentTabs(panel: SessionPanel, desired: readonly AgentTabInf
   };
 }
 
-/** 面板里除了 agent 之外的标签（切换会话时清理别的会话的 agent 标签用） */
+/**
+ * 面板里除了 agent 之外的标签（切换会话时清理别的会话的 agent 标签用）。选中项照旧保留：
+ * 切回来时标签还在就仍选中它，已经关了由 syncAgentTabs 改选；偏好里不会存下不存在的选中项。
+ */
 export function withoutAgentTabs(panel: SessionPanel): SessionPanel {
   const tabs = panel.tabs.filter((tab) => !(tab.kind === "browser" && tab.agent !== undefined));
   if (tabs.length === panel.tabs.length) return panel;
-  return {
-    ...panel,
-    tabs,
-    activeId: tabs.some((tab) => tab.id === panel.activeId) ? panel.activeId : (tabs[0]?.id ?? ""),
-  };
+  return { ...panel, tabs };
 }
 
 /** 面板当前标签里的 agent 信息（uiState 用） */

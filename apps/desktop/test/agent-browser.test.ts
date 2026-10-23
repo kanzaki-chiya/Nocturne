@@ -148,6 +148,25 @@ it("只合入当前会话还活着的标签；切走后别的会话残留被清�
   );
 });
 
+it("切走时记住选中的 agent 标签：切回来还活着就仍选中，已经关了就改选剩下的", () => {
+  const shown = {
+    ...syncAgentTabs(panel([{ id: "new", kind: "new" }], "new"), [info()]),
+    activeId: agentPanelTabId("tab-1"),
+  };
+  const away = withoutAgentTabs(shown);
+  expect(away.tabs.map((tab) => tab.id)).toEqual(["new"]);
+  // 偏好里不存不存在的选中项
+  expect(storeSessionPanel(away).activeTab).toBeUndefined();
+
+  const back = syncAgentTabs(away, [info()]);
+  expect(back.activeId).toBe(agentPanelTabId("tab-1"));
+  expect(activeAgent(back)?.tabId).toBe("tab-1");
+
+  const closedMeanwhile = syncAgentTabs(away, []);
+  expect(closedMeanwhile.activeId).toBe("new");
+  expect(activeAgent(closedMeanwhile)).toBeUndefined();
+});
+
 it("watch 通道：快照、活动文案、过期修订被丢掉，present 只确认一次", async () => {
   const fake = hostOf({ ...EMPTY_SNAPSHOT, shellGeneration: 3, revision: 1, enabled: true });
   const store = new AgentBrowserStore(fake.host);
