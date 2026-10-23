@@ -47,6 +47,7 @@ function hostOf(snapshot: AgentWatchSnapshot = EMPTY_SNAPSHOT) {
   const ui: AgentUiState[] = [];
   const presented: Parameters<AgentBrowserHost["presented"]>[0][] = [];
   const control: { tabId: string; action: "takeover" | "return" | "close" }[] = [];
+  const dialogs: [string, boolean, string | undefined][] = [];
   let onMessage: ((message: AgentWatchMessage) => void) | undefined;
   const host: AgentBrowserHost = {
     watch: vi.fn(async (listener) => {
@@ -63,6 +64,9 @@ function hostOf(snapshot: AgentWatchSnapshot = EMPTY_SNAPSHOT) {
       control.push({ tabId, action });
       return { revision: 2, state: action === "takeover" ? "taken_over" : "agent" };
     }),
+    dialog: vi.fn(async (tabId, accept, text) => {
+      dialogs.push([tabId, accept, text]);
+    }),
     setEnabled: vi.fn(async (enabled) => ({ enabled, restartRequired: enabled })),
   };
   return {
@@ -70,6 +74,7 @@ function hostOf(snapshot: AgentWatchSnapshot = EMPTY_SNAPSHOT) {
     ui,
     presented,
     control,
+    dialogs,
     push(message: AgentWatchMessage) {
       onMessage?.(message);
     },
@@ -250,6 +255,27 @@ it("接管、交回、关闭各自调用对应的外壳命令", async () => {
   ]);
   const missing = new AgentBrowserStore(undefined);
   await expect(missing.control("tab-1", "takeover")).resolves.toBeUndefined();
+});
+
+it("对话框的答复交给外壳；外壳报错（对话框已经不在）不抛出", async () => {
+  const fake = hostOf();
+  const store = new AgentBrowserStore(fake.host);
+  await store.answerDialog("tab-1", true, "中文名字");
+  await store.answerDialog("tab-1", false);
+  expect(fake.dialogs).toEqual([
+    ["tab-1", true, "中文名字"],
+    ["tab-1", false, undefined],
+  ]);
+  vi.mocked(fake.host.dialog).mockRejectedValueOnce(new Error("no_dialog"));
+  await expect(store.answerDialog("tab-1", true)).resolves.toBeUndefined();
+  // 对话框内容变了要重画横幅
+  const shown = syncAgentTabs(panel(), [
+    info({ dialog: { kind: "alert", uri: "http://127.0.0.1:9/", message: "a" } }),
+  ]);
+  const next = syncAgentTabs(shown, [
+    info({ dialog: { kind: "confirm", uri: "http://127.0.0.1:9/", message: "a" } }),
+  ]);
+  expect(next).not.toBe(shown);
 });
 
 it("不可见时上报的 UI 状态没有布局：离屏位置由外壳计算，不是 hide", async () => {

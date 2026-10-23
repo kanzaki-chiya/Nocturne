@@ -310,6 +310,7 @@ describe("面板浏览器 · 桌面内置", () => {
       uiState: vi.fn(async () => undefined),
       presented: vi.fn(async () => undefined),
       control: vi.fn(async () => ({ revision: 0 })),
+      dialog: vi.fn(async () => undefined),
       setEnabled: vi.fn(async (next) => {
         enabled.push(next);
         return { enabled: next, restartRequired: next };

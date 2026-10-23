@@ -89,6 +89,13 @@ pub trait AgentPlatform: Send + Sync {
     fn live_webviews(&self) -> usize;
     /// 开发服务器的同源地址（正式包为 None）：agent 也不许访问自己的应用。
     fn dev_url(&self) -> Option<tauri::Url>;
+    /// 答复挂起的脚本对话框：`accept` = 确定（prompt 带 `text`），否则取消。
+    fn resolve_dialog(
+        &self,
+        tab: &Arc<AgentTab>,
+        accept: bool,
+        text: Option<String>,
+    ) -> Result<(), String>;
 }
 
 /// 接管后 agent 的动作被拒绝；取消后不再派发动作。纯判定供调用方在派发前检查。
@@ -157,12 +164,17 @@ pub struct DialogView {
     pub kind: String,
     pub uri: String,
     pub message: String,
+    /// prompt 的默认输入；其他类型为空
+    pub default_text: String,
 }
 
+/// 网页的脚本对话框：外壳挂起它（不自动接受或取消），等用户在面板横幅里处理。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DialogInfo {
     pub kind: String,
     pub uri: String,
     pub message: String,
+    pub default_text: String,
 }
 
 pub struct AgentTab {
@@ -833,6 +845,7 @@ impl AgentBrowserState {
                     kind: dialog.kind.clone(),
                     uri: dialog.uri.clone(),
                     message: dialog.message.clone(),
+                    default_text: dialog.default_text.clone(),
                 }),
             })
             .collect()
@@ -1045,6 +1058,40 @@ impl AgentBrowserState {
         Ok(())
     }
 
+    // ── 脚本对话框 ──
+
+    /// 网页弹出脚本对话框：记下内容推给主界面。网页脚本停在对话框上，直到用户在横幅里处理；
+    /// 期间 agent 的网页动作返回 `dialog_open`。
+    pub fn dialog_opened(&self, tab: &Arc<AgentTab>, dialog: DialogInfo) {
+        *lock(&tab.dialog) = Some(dialog);
+        self.notify_tabs();
+    }
+
+    /// 用户在横幅里点了确定或取消。答复后 agent 可以继续（refs 照旧，网页可能已经变化，应重新 read）。
+    pub fn resolve_dialog(
+        &self,
+        tab: &Arc<AgentTab>,
+        accept: bool,
+        text: Option<String>,
+    ) -> Result<(), &'static str> {
+        let kind = match lock(&tab.dialog).as_ref() {
+            Some(dialog) => dialog.kind.clone(),
+            None => return Err("no_dialog"),
+        };
+        // 只有 prompt 带输入；其他类型忽略 text
+        let text = if accept && kind == "prompt" {
+            Some(text.unwrap_or_default())
+        } else {
+            None
+        };
+        self.platform
+            .resolve_dialog(tab, accept, text)
+            .map_err(|_| "browser_failed")?;
+        *lock(&tab.dialog) = None;
+        self.notify_tabs();
+        Ok(())
+    }
+
     /// 页面提交：文档换了，旧 refs 与 capture 全部失效。
     pub fn document_changed(&self, tab: &Arc<AgentTab>, url: &str) {
         *lock(&tab.url) = url.to_string();
@@ -1154,6 +1201,22 @@ pub fn agent_browser_control(
     })
 }
 
+/// 用户在 agent 标签的横幅里答复脚本对话框。
+#[tauri::command]
+pub fn agent_browser_dialog(
+    state: State<'_, Arc<AgentBrowserState>>,
+    tab_id: String,
+    accept: bool,
+    text: Option<String>,
+) -> Result<(), String> {
+    let tab = state
+        .tab(&tab_id)
+        .ok_or_else(|| "unknown_tab".to_string())?;
+    state
+        .resolve_dialog(&tab, accept, text)
+        .map_err(str::to_string)
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnabledResult {
@@ -1211,6 +1274,11 @@ pub mod testing {
         pub cdp_error: Mutex<Option<String>>,
         pub ax_nodes: Mutex<Vec<Value>>,
         pub ready: AtomicBool,
+        /// 下一次松开鼠标时网页弹出的对话框（模拟 ScriptDialogOpening）
+        pub dialog_on_click: Mutex<Option<DialogInfo>>,
+        /// 外壳收到的对话框答复：(tabId, 确定, prompt 文字)
+        pub resolved: Mutex<Vec<(String, bool, Option<String>)>>,
+        pub state: Mutex<Option<std::sync::Weak<AgentBrowserState>>>,
     }
 
     impl MockPlatform {
@@ -1305,7 +1373,30 @@ pub mod testing {
                 return Err(error);
             }
             lock(&self.calls).push((tab.id.clone(), method.to_string(), params.clone()));
+            if method == "Input.dispatchMouseEvent" && params["type"] == "mouseReleased" {
+                if let Some(dialog) = lock(&self.dialog_on_click).take() {
+                    // 真实外壳里 CDP 回调要等对话框关掉才回来；这里直接报未完成
+                    let state = lock(&self.state)
+                        .as_ref()
+                        .and_then(std::sync::Weak::upgrade);
+                    match state {
+                        Some(state) => state.dialog_opened(tab, dialog),
+                        None => *lock(&tab.dialog) = Some(dialog),
+                    }
+                    return Err("网页弹出了对话框".into());
+                }
+            }
             self.canned(method, &params)
+        }
+
+        fn resolve_dialog(
+            &self,
+            tab: &Arc<AgentTab>,
+            accept: bool,
+            text: Option<String>,
+        ) -> Result<(), String> {
+            lock(&self.resolved).push((tab.id.clone(), accept, text));
+            Ok(())
         }
 
         fn focus_main(&self) -> Result<(), String> {

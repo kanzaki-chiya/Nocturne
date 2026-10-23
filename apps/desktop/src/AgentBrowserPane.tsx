@@ -1,9 +1,9 @@
 /**
  * 面板里的 agent 标签（desktop-browser.md 第 7 节）：外壳建立的只读受控 webview 叠在
- * 占位区上，这里只画工具栏（徽标、活动状态、接管/交回、关闭）和占位区，并把占位区的
- * 位置报给外壳。agent 的截图走工具结果附件，不在这里显示。
+ * 占位区上，这里只画工具栏（徽标、活动状态、接管/交回、关闭）、网页脚本对话框的横幅和
+ * 占位区，并把占位区的位置报给外壳。agent 的截图走工具结果附件，不在这里显示。
  */
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import type { AgentTabInfo, BrowserBounds } from "./host";
 
@@ -35,12 +35,86 @@ function AgentGlyph({ kind }: { kind: "agent" | "hand" | "back" | "close" }): Re
   );
 }
 
+const DIALOG_KIND: Record<string, string> = {
+  alert: "提示框",
+  confirm: "确认框",
+  prompt: "输入框",
+  beforeunload: "离开确认",
+};
+
+function originOf(uri: string): string {
+  try {
+    return new URL(uri).host || uri;
+  } catch {
+    return uri;
+  }
+}
+
+type AgentDialog = NonNullable<AgentTabInfo["dialog"]>;
+
+/**
+ * 网页的脚本对话框：外壳挂起它，网页脚本停在这里，agent 的动作返回 dialog_open，
+ * 直到用户在这里点确定或取消（prompt 先填输入）。
+ */
+function DialogBanner({
+  dialog,
+  onAnswer,
+}: {
+  dialog: AgentDialog;
+  onAnswer: (accept: boolean, text?: string) => void;
+}) {
+  const [text, setText] = useState(dialog.defaultText ?? "");
+  const prompt = dialog.kind === "prompt";
+  return (
+    <form
+      className="sp-agent-dialog"
+      aria-label="网页对话框"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onAnswer(true, prompt ? text : undefined);
+      }}
+    >
+      <p className="sp-agent-dialog-title" role="alert">
+        {originOf(dialog.uri)} 的网页弹出了{DIALOG_KIND[dialog.kind] ?? "对话框"}，等你处理
+        {dialog.message !== "" ? "：" : ""}
+      </p>
+      {dialog.message !== "" && <p className="sp-agent-dialog-message">{dialog.message}</p>}
+      {prompt && (
+        <input
+          aria-label="对话框输入"
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value);
+          }}
+        />
+      )}
+      <div className="sp-agent-dialog-actions">
+        {dialog.kind !== "alert" && (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              onAnswer(false);
+            }}
+          >
+            取消
+          </button>
+        )}
+        <button type="submit" className="btn primary">
+          确定
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export interface AgentBrowserPaneProps {
   info: AgentTabInfo;
   /** 面板可见且是当前标签：可见时把 webview 放在占位区，否则由外壳移到可见区域外 */
   visible: boolean;
   onSlot: (tabId: string, bounds: BrowserBounds) => void;
   onControl: (tabId: string, action: "takeover" | "return") => void;
+  onDialog: (tabId: string, accept: boolean, text?: string) => void;
   onClose: (tabId: string) => void;
 }
 
@@ -49,6 +123,7 @@ export function AgentBrowserPane({
   visible,
   onSlot,
   onControl,
+  onDialog,
   onClose,
 }: AgentBrowserPaneProps) {
   const slot = useRef<HTMLDivElement>(null);
@@ -118,20 +193,27 @@ export function AgentBrowserPane({
           <AgentGlyph kind="close" />
         </button>
       </header>
-      {info.dialog !== undefined && (
-        <p className="sp-browser-notice alert" role="alert">
-          网页打开了 {info.dialog.kind}：{info.dialog.message}。接管后可处理这个对话框。
-        </p>
-      )}
-      {info.notice !== undefined && info.notice !== "" && (
-        <p className="sp-browser-notice" role="status">
-          {info.notice}
-        </p>
-      )}
-      <div className="sp-agent-hint">
-        {takenOver
-          ? "你已接管：直接操作网页；点「交给 agent」把控制权交回。"
-          : "这个标签由 agent 打开、内容不可信；点网页或「接管」会立即撤销 agent 的控制权。"}
+      {/* 横幅、提示和说明放在同一行网格里：占位区固定在第 4 行，不能被挤乱 */}
+      <div className="sp-agent-info">
+        {info.dialog !== undefined && !ended && (
+          <DialogBanner
+            key={`${info.dialog.kind}|${info.dialog.message}`}
+            dialog={info.dialog}
+            onAnswer={(accept, text) => {
+              onDialog(info.tabId, accept, text);
+            }}
+          />
+        )}
+        {info.notice !== undefined && info.notice !== "" && (
+          <p className="sp-browser-notice" role="status">
+            {info.notice}
+          </p>
+        )}
+        <div className="sp-agent-hint">
+          {takenOver
+            ? "你已接管：直接操作网页；点「交给 agent」把控制权交回。"
+            : "这个标签由 agent 打开、内容不可信；点网页或「接管」会立即撤销 agent 的控制权。"}
+        </div>
       </div>
       <div className="sp-browser-slot sp-agent-slot" ref={slot}>
         {ended && (

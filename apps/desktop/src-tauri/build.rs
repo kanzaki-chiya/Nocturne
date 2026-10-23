@@ -32,6 +32,7 @@ fn main() {
             "agent_browser_ui_state",
             "agent_browser_presented",
             "agent_browser_control",
+            "agent_browser_dialog",
             "agent_browser_set_enabled",
         ]),
     ))

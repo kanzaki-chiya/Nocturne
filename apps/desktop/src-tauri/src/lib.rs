@@ -102,6 +102,7 @@ pub fn run() {
         agent_browser::agent_browser_ui_state,
         agent_browser::agent_browser_presented,
         agent_browser::agent_browser_control,
+        agent_browser::agent_browser_dialog,
         agent_browser::agent_browser_set_enabled,
     ];
     tauri::Builder::default()

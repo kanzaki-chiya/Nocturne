@@ -72,6 +72,7 @@ HTTP bootstrap 控制协议（不是通用 RPC，不对前端开放）：
 | `agent_browser_ui_state` | `{ shellGeneration, revision, route: "session" \| "settings" \| "home", sessionId?: string, panelOpen: boolean, activeTabId?: string, covered: boolean, layout?: { tabId, version, bounds } }` → null；旧代/旧revision拒绝；缺布局或未确认状态一律不可操作。`activeTabId` 与 `layout.tabId` 都是外壳的 `tabId`，不是面板里带 `agent:` 前缀的标签 id |
 | `agent_browser_presented` | `{ shellGeneration, operationId, tabId, layoutVersion }` → null；仅响应外壳在本代pending的展示请求，不能借它为任意标签授权 |
 | `agent_browser_control` | `{ tabId, action: "takeover" \| "return" \| "close" }` → `{ revision, state }`；用户主动控制；return只对同代保留的agent标签有效，失效refs后允许原owner actor继续 |
+| `agent_browser_dialog` | `{ tabId, accept: boolean, text?: string }` → null；用户在横幅里答复该标签挂起的脚本对话框（第 5 节）；`text` 只对 prompt 的确定生效；没有挂起的对话框报 `no_dialog` |
 | `agent_browser_set_enabled` | `{ enabled: boolean }` → `{ enabled, restartRequired: boolean }`；停用立即撤销，启用不在现有后台伪造凭证；prefs落盘由主界面现有偏好路径维护，Rust内存开关缺省false |
 
 `AgentBrowserTab = { tabId, rootSessionId, actorSessionId, title, url, live, pinned, state: "agent" | "busy" | "taken_over" | "ended", operation?: string }`，不含bearer、截图、网页内容或type文本。Channel消息为 `{ shellGeneration, revision, kind: "tabs", tabs }`（完整有界快照）、`{ ..., kind: "present", operationId, tabId }`、`{ ..., kind: "operation", tabId, operationId, state: "started" | "completed" | "cancelled", operation, errorCode? }`。revision严格递增；主界面发现缺口/重连重新watch，不解析进度文字找id。
@@ -170,7 +171,7 @@ schema 均 `additionalProperties: false`。所有网页工具显式 tabId；动�
 - 本机 http 开发服务允许，但应用 devUrl 同源仍拒绝；禁入启动端口的 bootstrap/MCP 路径，Origin/鉴权仍是独立防线。不宣称这是网络沙箱，页面的子资源可连接网络。
 - agent 标签的下载在 Requested 直接取消，返回/提示 `download_blocked`，**不弹另存为、不自动存盘**。已有普通用户标签的下载不改。用户要下载必须先接管，用普通浏览器流程；不因一次 click 的批准隐式取得本机写文件权。
 - `window.open`/target=_blank 沿现有 Deny 原生弹窗路径：仅在来源调用仍有效、可归属该 actor 时建同根/同 actor 的 agent 标签，校验 URL/容量后纳入列表并报告 opener/newTabId；不切换用户当前标签，不继承为用户标签。about:blank 后脚本写入依赖 opener 的复杂弹窗第一版不支持，说明被拦；拒绝迟到/无法归属的 popup。重定向/历史仍逐次校验。
-- JS alert/confirm/prompt 不自动接受，agent 标签关闭默认脚本对话框，外壳订阅 ScriptDialogOpening 并以 `dialog_open` 暂停调用；显示站点来源，用户接管后处理。不能让隐藏网页原生 modal 卡住 UI/HTTP 线程。登录、验证码、权限弹窗同样交人，不自动批准。
+- JS alert/confirm/prompt（以及 beforeunload）既不自动接受也不自动取消：agent 标签关闭默认脚本对话框，外壳订阅 ScriptDialogOpening 并取 deferral 挂起它，网页脚本停在对话框上；类型、站点来源、文字（prompt 另带默认值）进 `AgentBrowserTab.dialog`，面板在该标签的工具栏下方显示横幅，「确定」/「取消」（prompt 带输入框）由用户答复，经 `agent_browser_dialog` 完成 deferral。agent 控制和用户接管时一样挂起，接管不会替用户点确定。触发对话框的动作（CDP 要等对话框关掉才回复，外壳看到对话框就不再等）、加载中弹出对话框的 open/navigate，以及挂起期间这个标签的其他网页动作，都返回 `dialog_open`，`structuredContent` 带 `{ tabId, dialog: { kind, message, uri, defaultText? } }`，text 写明类型和文字；`list_tabs` 标出 `dialog`。用户答复后横幅消失，agent 重新 read 后继续；关闭标签先取消挂起的对话框。不能让隐藏网页原生 modal 卡住 UI/HTTP 线程。登录、验证码、权限弹窗同样交人，不自动批准。
 
 ### 数据目录
 

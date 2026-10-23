@@ -149,6 +149,7 @@ export interface PanelAgents {
   tabs: ReadonlyMap<string, AgentTabInfo>;
   onSlot: (tabId: string, bounds: BrowserBounds) => void;
   onControl: (tabId: string, action: "takeover" | "return") => void;
+  onDialog: (tabId: string, accept: boolean, text?: string) => void;
   onClose: (tabId: string) => void;
 }
 
@@ -1293,6 +1294,7 @@ export function SidePanel(props: SidePanelProps) {
                     visible={!hidden && tab.id === activeId && current.has(tab.id)}
                     onSlot={props.agents.onSlot}
                     onControl={props.agents.onControl}
+                    onDialog={props.agents.onDialog}
                     onClose={props.agents.onClose}
                   />
                 )

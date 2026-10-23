@@ -678,9 +678,15 @@ fn tool_error_result(error: ToolError, request_key: &str) -> Value {
     } else {
         format!("{}: {}（{}）", error.code, error.message, error.hint)
     };
+    let mut structured = json!({ "outcome": "error", "errorCode": error.code });
+    if let Some(Value::Object(data)) = error.data {
+        for (key, value) in data {
+            structured[key] = value;
+        }
+    }
     json!({
         "content": [{ "type": "text", "text": text }],
-        "structuredContent": { "outcome": "error", "errorCode": error.code },
+        "structuredContent": structured,
         "isError": true
     })
 }
@@ -695,6 +701,18 @@ fn rpc_error(id: Value, code: i64, message: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_error_data_is_merged_into_structured_content() {
+        let error = ToolError::new("dialog_open", "网页弹出了 alert 对话框")
+            .data(json!({ "tabId": "t_1", "dialog": { "kind": "alert", "message": "hi" } }));
+        let out = tool_error_result(error, "k");
+        assert_eq!(out["isError"], true);
+        assert_eq!(out["structuredContent"]["errorCode"], "dialog_open");
+        assert_eq!(out["structuredContent"]["outcome"], "error");
+        assert_eq!(out["structuredContent"]["dialog"]["kind"], "alert");
+        assert_eq!(out["structuredContent"]["tabId"], "t_1");
+    }
     use crate::agent_browser::testing::{MockPlatform, PNG_1X1_BASE64};
     use crate::agent_browser::AgentBrowserState;
 

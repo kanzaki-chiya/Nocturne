@@ -512,6 +512,13 @@ export function useSidePanel({
     },
     [agents],
   );
+  /** 网页脚本对话框的确定 / 取消：外壳答复后，横幅随快照消失 */
+  const agentDialog = useCallback(
+    (tabId: string, accept: boolean, text?: string) => {
+      void agents.answerDialog(tabId, accept, text);
+    },
+    [agents],
+  );
   const openChanges = useCallback(
     (seq?: number) => {
       const existing = tabs.find((t) => t.kind === "changes");
@@ -1200,6 +1207,7 @@ export function useSidePanel({
               tabs: new Map(agentSnapshot.tabs.map((info) => [info.tabId, info])),
               onSlot: onAgentSlot,
               onControl: agentControl,
+              onDialog: agentDialog,
               onClose: (tabId) => {
                 closeTab(agentPanelTabId(tabId));
               },

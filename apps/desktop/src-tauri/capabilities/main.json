@@ -68,6 +68,7 @@
     "allow-agent-browser-ui-state",
     "allow-agent-browser-presented",
     "allow-agent-browser-control",
+    "allow-agent-browser-dialog",
     "allow-agent-browser-set-enabled",
     "core:event:allow-listen",
     "core:event:allow-unlisten",

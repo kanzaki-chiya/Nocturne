@@ -74,6 +74,7 @@ export function syncAgentTabs(panel: SessionPanel, desired: readonly AgentTabInf
       tab.agent.state !== info.state ||
       tab.agent.operation !== info.operation ||
       tab.agent.notice !== info.notice ||
+      (tab.agent.dialog?.kind ?? "") !== (info.dialog?.kind ?? "") ||
       (tab.agent.dialog?.message ?? "") !== (info.dialog?.message ?? "")
     ) {
       changed = true;
@@ -269,6 +270,16 @@ export class AgentBrowserStore {
       return result.state;
     } catch {
       return undefined;
+    }
+  }
+
+  /** 答复网页的脚本对话框；结果经 watch 快照回来（横幅随之消失） */
+  async answerDialog(tabId: string, accept: boolean, text?: string): Promise<void> {
+    if (this.host === undefined) return;
+    try {
+      await this.host.dialog(tabId, accept, text);
+    } catch {
+      // 对话框已经不在（标签关了或网页自己走了）：下一份快照会去掉横幅
     }
   }
 }

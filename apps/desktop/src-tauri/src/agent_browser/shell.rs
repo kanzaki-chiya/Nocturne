@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Url};
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -196,6 +196,11 @@ impl AgentPlatform for ShellPlatform {
     }
 
     fn destroy(&self, tab: &Arc<AgentTab>) {
+        // 关标签前先取消挂起的对话框，网页脚本不停在半路
+        let id = tab.id.clone();
+        let _ = self
+            .app
+            .run_on_main_thread(move || native::resolve_dialog(&id, false, None));
         let webview = lock(&self.webviews).remove(&tab.id);
         if let Some(webview) = webview {
             crate::browser::close_later_for_agent(webview);
@@ -284,8 +289,24 @@ impl AgentPlatform for ShellPlatform {
                 }
             })
             .map_err(|error| error.to_string())?;
-        rx.recv_timeout(Duration::from_secs(5))
-            .map_err(|_| "CDP 超时".to_string())?
+        // 动作触发脚本对话框时，CDP 要等对话框关掉才回复：看到对话框就不再等，交给调用方报 dialog_open
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(value) => return value,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("CDP 通道已断开".into())
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if lock(&tab.dialog).is_some() {
+                        return Err("网页弹出了对话框".into());
+                    }
+                    if Instant::now() >= deadline {
+                        return Err("CDP 超时".into());
+                    }
+                }
+            }
+        }
     }
 
     fn focus_main(&self) -> Result<(), String> {
@@ -298,6 +319,19 @@ impl AgentPlatform for ShellPlatform {
 
     fn child_focused(&self, tab: &Arc<AgentTab>) -> bool {
         tab.focused.load(Ordering::SeqCst)
+    }
+
+    fn resolve_dialog(
+        &self,
+        tab: &Arc<AgentTab>,
+        accept: bool,
+        text: Option<String>,
+    ) -> Result<(), String> {
+        let id = tab.id.clone();
+        // 挂起的对话框参数只在主线程上有效
+        self.app
+            .run_on_main_thread(move || native::resolve_dialog(&id, accept, text.as_deref()))
+            .map_err(|error| error.to_string())
     }
 
     fn live_webviews(&self) -> usize {
@@ -315,6 +349,8 @@ impl AgentPlatform for ShellPlatform {
 #[cfg(windows)]
 mod native {
     use super::{AgentBrowserState, AgentTab};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
@@ -322,7 +358,32 @@ mod native {
         take_pwstr, FocusChangedEventHandler, NavigationCompletedEventHandler,
         ScriptDialogOpeningEventHandler, SourceChangedEventHandler,
     };
-    use windows::core::PWSTR;
+    use windows::core::{HSTRING, PWSTR};
+
+    thread_local! {
+        /// 挂起的脚本对话框（按 tabId）。WebView2 对象只在主线程上用，所以放线程局部。
+        static PENDING: RefCell<
+            HashMap<String, (ICoreWebView2ScriptDialogOpeningEventArgs, ICoreWebView2Deferral)>,
+        > = RefCell::new(HashMap::new());
+    }
+
+    /// 答复挂起的对话框（主线程）：确定时 prompt 带上输入；没有挂起的对话框时什么都不做。
+    pub fn resolve_dialog(tab_id: &str, accept: bool, text: Option<&str>) {
+        let Some((args, deferral)) = PENDING.with(|pending| pending.borrow_mut().remove(tab_id))
+        else {
+            return;
+        };
+        // SAFETY: 主线程、事件参数与 deferral 在 Complete 之前都有效
+        unsafe {
+            if accept {
+                if let Some(text) = text {
+                    let _ = args.SetResultText(&HSTRING::from(text));
+                }
+                let _ = args.Accept();
+            }
+            let _ = deferral.Complete();
+        }
+    }
 
     pub fn attach(webview: &tauri::Webview, tab: Arc<AgentTab>, state: Arc<AgentBrowserState>) {
         let callback_tab = Arc::clone(&tab);
@@ -346,7 +407,7 @@ mod native {
         // SAFETY: 全部在主线程、对有效的 WebView2 对象；闭包持有 Arc，不借用栈上数据
         unsafe {
             let core = controller.CoreWebView2()?;
-            // 脚本对话框由外壳接管：未接管时记录并抑制，用户接管后按默认显示
+            // 脚本对话框不弹原生窗口，也不自动答复：挂起它，内容推给面板横幅，由用户点确定或取消
             core.Settings()?.SetAreDefaultScriptDialogsEnabled(false)?;
 
             let dialog_tab = Arc::clone(tab);
@@ -360,24 +421,30 @@ mod native {
                     args.Uri(&mut uri)?;
                     let mut message = PWSTR::null();
                     args.Message(&mut message)?;
+                    let mut default_text = PWSTR::null();
+                    args.DefaultText(&mut default_text)?;
                     let kind_name = match kind {
                         COREWEBVIEW2_SCRIPT_DIALOG_KIND_CONFIRM => "confirm",
                         COREWEBVIEW2_SCRIPT_DIALOG_KIND_PROMPT => "prompt",
                         COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD => "beforeunload",
                         _ => "alert",
                     };
-                    *dialog_tab.dialog.lock().unwrap_or_else(|p| p.into_inner()) =
-                        Some(super::super::DialogInfo {
-                            kind: kind_name.to_string(),
-                            uri: take_pwstr(uri),
-                            message: take_pwstr(message),
-                        });
-                    // 用户接管后，网页的对话框直接显示给他处理；未接管时抑制
-                    if dialog_tab.tab_state() == super::super::STATE_TAKEN_OVER {
-                        args.Accept()?;
-                    } else {
-                        dialog_state.notify_tabs();
-                    }
+                    let dialog = super::super::DialogInfo {
+                        kind: kind_name.to_string(),
+                        uri: take_pwstr(uri),
+                        message: take_pwstr(message),
+                        default_text: take_pwstr(default_text),
+                    };
+                    // 不管 agent 控制还是用户接管，都等用户在横幅里答复；返回前不调用 Accept
+                    let deferral = args.GetDeferral()?;
+                    // 同一标签不会同时挂两个对话框；万一有旧的先取消，避免网页永远停住
+                    resolve_dialog(&dialog_tab.id, false, None);
+                    PENDING.with(|pending| {
+                        pending
+                            .borrow_mut()
+                            .insert(dialog_tab.id.clone(), (args, deferral))
+                    });
+                    dialog_state.dialog_opened(&dialog_tab, dialog);
                     Ok(())
                 })),
                 &mut token,
@@ -489,6 +556,14 @@ impl AgentPlatform for ShellPlatform {
     }
     fn dev_url(&self) -> Option<Url> {
         None
+    }
+    fn resolve_dialog(
+        &self,
+        _tab: &Arc<AgentTab>,
+        _accept: bool,
+        _text: Option<String>,
+    ) -> Result<(), String> {
+        Err("这个平台不支持面板浏览器".into())
     }
 }
 

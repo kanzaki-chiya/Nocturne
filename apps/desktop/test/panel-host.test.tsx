@@ -198,6 +198,7 @@ function agentHostOf(initial?: AgentWatchSnapshot) {
       control.push({ tabId, action });
       return { revision: 2, state: action };
     }),
+    dialog: vi.fn(async () => undefined),
     setEnabled: vi.fn(async (enabled) => ({ enabled, restartRequired: enabled })),
   };
   return {
@@ -1005,6 +1006,19 @@ it("agent 标签：切走时上报的状态没有布局，切回来用外壳 tab
       });
     });
     expect(screen.getByText("agent 控制中")).toBeTruthy();
+    // 网页对话框：横幅的答复同样用外壳 tabId
+    act(() => {
+      agents.push({
+        kind: "tabs",
+        shellGeneration: 4,
+        revision: 5,
+        tabs: [
+          agentInfo({ dialog: { kind: "confirm", uri: "http://127.0.0.1:9/", message: "继续？" } }),
+        ],
+      });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(agents.host.dialog).toHaveBeenCalledWith("tab-1", false, undefined);
     fireEvent.click(screen.getByRole("button", { name: "关闭 agent 标签" }));
     expect(agents.control).toEqual([
       { tabId: "tab-1", action: "takeover" },

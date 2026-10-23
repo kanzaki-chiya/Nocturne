@@ -18,6 +18,8 @@ pub struct ToolError {
     pub code: &'static str,
     pub message: String,
     pub hint: String,
+    /// 并进 structuredContent 的附加字段（如 `dialog`）
+    pub data: Option<Value>,
 }
 
 impl ToolError {
@@ -26,11 +28,17 @@ impl ToolError {
             code,
             message: message.into(),
             hint: String::new(),
+            data: None,
         }
     }
 
     pub fn hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = hint.into();
+        self
+    }
+
+    pub fn data(mut self, data: Value) -> Self {
+        self.data = Some(data);
         self
     }
 }
@@ -87,6 +95,27 @@ impl CallCtx {
 
 fn cancelled_error() -> ToolError {
     ToolError::new("cancelled", "操作已取消，不再派发后续动作")
+}
+
+/// 网页挂着脚本对话框时的错误：带上类型和文字。用户在面板里处理之前，这个标签的网页动作都返回它。
+fn dialog_error(tab: &Arc<AgentTab>) -> Option<ToolError> {
+    let dialog = tab.dialog.lock().unwrap_or_else(|p| p.into_inner());
+    let dialog = dialog.as_ref()?;
+    let mut data = json!({ "kind": dialog.kind, "message": dialog.message, "uri": dialog.uri });
+    if dialog.kind == "prompt" {
+        data["defaultText"] = json!(dialog.default_text);
+    }
+    Some(
+        ToolError::new(
+            "dialog_open",
+            format!(
+                "网页弹出了 {} 对话框：「{}」，正在等用户在面板里处理",
+                dialog.kind, dialog.message
+            ),
+        )
+        .hint("agent 不能代为确定或取消；用户处理后重新 read 再继续")
+        .data(json!({ "tabId": tab.id, "dialog": data })),
+    )
 }
 
 fn invalid(message: impl Into<String>) -> ToolError {
@@ -297,6 +326,9 @@ fn busy<T>(
     body: impl FnOnce() -> Result<T, ToolError>,
 ) -> Result<T, ToolError> {
     ctx.check(tab)?;
+    if let Some(error) = dialog_error(tab) {
+        return Err(error);
+    }
     let _guard = tab.busy.lock().unwrap_or_else(|p| p.into_inner());
     ctx.check(tab)?;
     if tab.tab_state() == STATE_AGENT {
@@ -304,7 +336,11 @@ fn busy<T>(
     }
     *tab.operation.lock().unwrap_or_else(|p| p.into_inner()) = Some(operation.to_string());
     state.notify_operation(&tab.id, &ctx.op.request_key, "started", operation, None);
-    let result = body();
+    // 动作中途弹出对话框：不管动作本身报了什么（CDP 等不到回复），都如实返回 dialog_open
+    let result = match (body(), dialog_error(tab)) {
+        (_, Some(error)) => Err(error),
+        (result, None) => result,
+    };
     let cancelled = ctx.cancelled();
     *tab.operation.lock().unwrap_or_else(|p| p.into_inner()) = None;
     if tab.tab_state() == STATE_BUSY {
@@ -378,6 +414,10 @@ fn wait_loading(tab: &Arc<AgentTab>, deadline: Instant, op: &Op) -> Result<(), T
         if op.cancelled() {
             return Err(cancelled_error());
         }
+        // 加载中弹出对话框：网页停在对话框上，不再等加载完成
+        if let Some(error) = dialog_error(tab) {
+            return Err(error);
+        }
         if Instant::now() > deadline {
             return Ok(());
         }
@@ -416,16 +456,8 @@ fn open(
     }
     let deadline = Instant::now() + Duration::from_secs(20);
     wait_loading(&tab, deadline, &ctx.op)?;
-    if let Some(dialog) = tab
-        .dialog
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .as_ref()
-    {
-        return Err(ToolError::new(
-            "dialog_open",
-            format!("网页打开了{}，需要用户接管处理", dialog.kind),
-        ));
+    if let Some(error) = dialog_error(&tab) {
+        return Err(error);
     }
     let url = tab.url_text();
     let title = tab.title_text();
@@ -467,17 +499,6 @@ fn navigate(
             .map_err(|_| ToolError::new("browser_failed", "导航失败"))?;
         let deadline = Instant::now() + Duration::from_secs(20);
         wait_loading(&tab, deadline, &ctx.op)?;
-        if let Some(dialog) = tab
-            .dialog
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_ref()
-        {
-            return Err(ToolError::new(
-                "dialog_open",
-                format!("网页打开了{}，需要用户接管处理", dialog.kind),
-            ));
-        }
         let current = tab.url_text();
         Ok(ToolOutcome::text(
             format!("已导航到 {current}"),
@@ -1319,22 +1340,36 @@ fn list_tabs(state: &Arc<AgentBrowserState>, ctx: &CallCtx) -> Result<ToolOutcom
     let mut items = Vec::new();
     for tab in &tabs {
         let state_name = state_name(tab.tab_state());
+        let dialog = tab
+            .dialog
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .map(|dialog| dialog.kind.clone());
         lines.push(format!(
-            "- {} {} pinned=true live={} state={} title={}",
+            "- {} {} pinned=true live={} state={}{} title={}",
             tab.id,
             tab.url_text(),
             tab.live.load(Ordering::SeqCst),
             state_name,
+            dialog
+                .as_deref()
+                .map(|kind| format!(" dialog={kind}"))
+                .unwrap_or_default(),
             tab.title_text()
         ));
-        items.push(json!({
+        let mut item = json!({
             "tabId": tab.id,
             "url": tab.url_text(),
             "title": tab.title_text(),
             "state": state_name,
             "live": tab.live.load(Ordering::SeqCst),
             "pinned": true
-        }));
+        });
+        if let Some(kind) = dialog {
+            item["dialog"] = json!(kind);
+        }
+        items.push(item);
     }
     lines.push(format!(
         "面板里一共 {} 个浏览器（上限 5，agent 标签不参与回收）",
@@ -1569,6 +1604,127 @@ mod tests {
         assert_eq!(list.structured["tabs"][0]["tabId"], child_tab);
         let list = call(&state, &mut ctx, "list_tabs", &json!({})).unwrap();
         assert_eq!(list.structured["tabs"].as_array().unwrap().len(), 1);
+    }
+
+    fn pop_dialog(platform: &MockPlatform, kind: &str, message: &str, default_text: &str) {
+        *platform.dialog_on_click.lock().unwrap() = Some(crate::agent_browser::DialogInfo {
+            kind: kind.into(),
+            uri: "https://example.test/".into(),
+            message: message.into(),
+            default_text: default_text.into(),
+        });
+    }
+
+    fn click_go(state: &Arc<AgentBrowserState>, ctx: &mut CallCtx, tab: &str) -> ToolError {
+        let read = call(state, ctx, "read", &json!({ "tabId": tab })).unwrap();
+        let snapshot = read.structured["snapshotId"].as_str().unwrap().to_string();
+        call(
+            state,
+            ctx,
+            "click",
+            &json!({ "tabId": tab, "target": { "snapshotId": snapshot, "ref": "e2" } }),
+        )
+        .unwrap_err()
+    }
+
+    #[test]
+    fn dialog_pauses_the_tab_until_the_user_answers() {
+        let (state, platform, mut ctx) = setup();
+        *platform.state.lock().unwrap() = Some(Arc::downgrade(&state));
+        with_ax(&platform);
+        let tab = open_tab(&state, &mut ctx);
+        let tab_ref = state.tab(&tab).unwrap();
+
+        // 点击触发 confirm：不自动取消后报成功，如实返回 dialog_open，带类型和文字
+        pop_dialog(&platform, "confirm", "确定删除这一项？", "");
+        let error = click_go(&state, &mut ctx, &tab);
+        assert_eq!(error.code, "dialog_open");
+        assert!(error.message.contains("confirm"), "{}", error.message);
+        assert!(
+            error.message.contains("确定删除这一项？"),
+            "{}",
+            error.message
+        );
+        let data = error.data.unwrap();
+        assert_eq!(data["tabId"], tab);
+        assert_eq!(data["dialog"]["kind"], "confirm");
+        assert_eq!(data["dialog"]["message"], "确定删除这一项？");
+        assert!(data["dialog"].get("defaultText").is_none());
+        // 状态回到 agent，不卡在 busy；横幅能拿到对话框内容
+        assert_eq!(tab_ref.tab_state(), STATE_AGENT);
+        let tabs = serde_json::to_value(state.serialize_tabs()).unwrap();
+        assert_eq!(tabs[0]["dialog"]["message"], "确定删除这一项？");
+
+        // 用户处理前，这个标签的网页动作都返回 dialog_open；list_tabs 标出来
+        let error = call(&state, &mut ctx, "read", &json!({ "tabId": tab })).unwrap_err();
+        assert_eq!(error.code, "dialog_open");
+        let list = call(&state, &mut ctx, "list_tabs", &json!({})).unwrap();
+        assert_eq!(list.structured["tabs"][0]["dialog"], "confirm");
+        assert!(list.text.contains("dialog=confirm"));
+
+        // 接管不会替用户答复对话框
+        state.takeover(&tab_ref);
+        assert!(platform.resolved.lock().unwrap().is_empty());
+        assert!(tab_ref.dialog.lock().unwrap().is_some());
+        state.give_back(&tab_ref).unwrap();
+
+        // 用户点确定：confirm 不带文字；之后 agent 能继续
+        state
+            .resolve_dialog(&tab_ref, true, Some("忽略".into()))
+            .unwrap();
+        assert_eq!(
+            *platform.resolved.lock().unwrap(),
+            [(tab.clone(), true, None)]
+        );
+        assert!(tab_ref.dialog.lock().unwrap().is_none());
+        ctx.op = state
+            .begin_call(&ctx.binding_id, "2", "root-a/t2/c2")
+            .unwrap();
+        call(&state, &mut ctx, "read", &json!({ "tabId": tab })).unwrap();
+        assert_eq!(state.resolve_dialog(&tab_ref, true, None), Err("no_dialog"));
+    }
+
+    #[test]
+    fn prompt_and_alert_answers_reach_the_page() {
+        let (state, platform, mut ctx) = setup();
+        *platform.state.lock().unwrap() = Some(Arc::downgrade(&state));
+        with_ax(&platform);
+        let tab = open_tab(&state, &mut ctx);
+        let tab_ref = state.tab(&tab).unwrap();
+
+        pop_dialog(&platform, "prompt", "你的名字？", "默认名");
+        let error = click_go(&state, &mut ctx, &tab);
+        assert_eq!(error.code, "dialog_open");
+        assert_eq!(error.data.unwrap()["dialog"]["defaultText"], "默认名");
+        state
+            .resolve_dialog(&tab_ref, true, Some("中文名字".into()))
+            .unwrap();
+
+        pop_dialog(&platform, "prompt", "再输一次？", "");
+        ctx.op = state
+            .begin_call(&ctx.binding_id, "2", "root-a/t2/c2")
+            .unwrap();
+        assert_eq!(click_go(&state, &mut ctx, &tab).code, "dialog_open");
+        state
+            .resolve_dialog(&tab_ref, false, Some("不送".into()))
+            .unwrap();
+
+        pop_dialog(&platform, "alert", "保存成功", "");
+        ctx.op = state
+            .begin_call(&ctx.binding_id, "3", "root-a/t3/c3")
+            .unwrap();
+        let error = click_go(&state, &mut ctx, &tab);
+        assert!(error.message.contains("alert"));
+        state.resolve_dialog(&tab_ref, true, None).unwrap();
+
+        assert_eq!(
+            *platform.resolved.lock().unwrap(),
+            [
+                (tab.clone(), true, Some("中文名字".to_string())),
+                (tab.clone(), false, None),
+                (tab.clone(), true, None),
+            ]
+        );
     }
 
     #[test]

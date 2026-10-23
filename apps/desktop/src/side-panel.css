@@ -1364,6 +1364,50 @@
   flex: none;
   white-space: nowrap;
 }
+.sp-agent-info {
+  grid-row: 2;
+  min-width: 0;
+}
+.sp-agent-dialog {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--a-border);
+  background: var(--a-panel);
+  font-size: 12px;
+}
+.sp-agent-dialog-title {
+  margin: 0;
+  color: var(--a-text);
+  font-weight: 600;
+}
+.sp-agent-dialog-message {
+  max-height: 96px;
+  margin: 0;
+  overflow: auto;
+  color: var(--a-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.sp-agent-dialog input {
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--a-border);
+  border-radius: 6px;
+  background: var(--a-bg);
+  color: var(--a-text);
+  font: 12px var(--sans);
+}
+.sp-agent-dialog input:focus {
+  outline: none;
+  border-color: var(--a-accent);
+}
+.sp-agent-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
 .sp-agent-hint {
   padding: 4px 10px;
   border-bottom: 1px solid var(--a-border);

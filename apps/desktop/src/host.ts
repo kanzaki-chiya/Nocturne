@@ -101,7 +101,8 @@ export interface AgentTabInfo {
   operation?: string | undefined;
   child: boolean;
   notice?: string | undefined;
-  dialog?: { kind: string; uri: string; message: string } | undefined;
+  /** 网页挂起的脚本对话框，等用户在横幅里答复（`defaultText` 只对 prompt 有意义） */
+  dialog?: { kind: string; uri: string; message: string; defaultText?: string } | undefined;
 }
 
 export interface AgentWatchSnapshot {
@@ -163,6 +164,8 @@ export interface AgentBrowserHost {
     tabId: string,
     action: "takeover" | "return" | "close",
   ) => Promise<{ revision: number; state?: string | undefined }>;
+  /** 用户答复挂起的脚本对话框：确定（prompt 带输入）或取消 */
+  dialog: (tabId: string, accept: boolean, text?: string) => Promise<void>;
   setEnabled: (enabled: boolean) => Promise<{ enabled: boolean; restartRequired: boolean }>;
 }
 

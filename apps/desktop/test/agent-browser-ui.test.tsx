@@ -91,6 +91,7 @@ it("接管和交回按钮调用各自的动作；接管后界面写明控制权�
       visible
       onSlot={vi.fn()}
       onControl={onControl}
+      onDialog={vi.fn()}
       onClose={vi.fn()}
     />,
   );
@@ -105,6 +106,7 @@ it("接管和交回按钮调用各自的动作；接管后界面写明控制权�
       visible
       onSlot={vi.fn()}
       onControl={onControl}
+      onDialog={vi.fn()}
       onClose={vi.fn()}
     />,
   );
@@ -123,6 +125,7 @@ it("子代理标签显示子代理徽标；已关闭的标签不能再接管", (
       visible
       onSlot={vi.fn()}
       onControl={vi.fn()}
+      onDialog={vi.fn()}
       onClose={onClose}
     />,
   );
@@ -138,6 +141,60 @@ it("子代理标签显示子代理徽标；已关闭的标签不能再接管", (
   expect(onClose).toHaveBeenCalledWith("tab-1");
 });
 
+it("网页对话框挂起时横幅显示内容，确定和取消由用户答复", () => {
+  const onDialog = vi.fn();
+  const pane = (dialog: AgentTabInfo["dialog"], state: AgentTabInfo["state"] = "agent") => (
+    <AgentBrowserPane
+      info={info({ dialog, state })}
+      visible
+      onSlot={vi.fn()}
+      onControl={vi.fn()}
+      onDialog={onDialog}
+      onClose={vi.fn()}
+    />
+  );
+  const view = render(
+    pane({ kind: "confirm", uri: "http://127.0.0.1:9/page", message: "确定删除这一项？" }),
+  );
+  const banner = screen.getByRole("form", { name: "网页对话框" });
+  expect(banner.textContent).toContain("127.0.0.1:9 的网页弹出了确认框");
+  expect(banner.textContent).toContain("确定删除这一项？");
+  // 不再提示「接管后处理」：用户直接在横幅里答复
+  expect(screen.queryByText(/接管后可处理/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  expect(onDialog).toHaveBeenLastCalledWith("tab-1", false, undefined);
+  fireEvent.click(screen.getByRole("button", { name: "确定" }));
+  expect(onDialog).toHaveBeenLastCalledWith("tab-1", true, undefined);
+
+  // prompt：带默认值的输入框，回车提交填好的文字
+  view.rerender(
+    pane({
+      kind: "prompt",
+      uri: "http://127.0.0.1:9/page",
+      message: "你的名字？",
+      defaultText: "默认",
+    }),
+  );
+  const input = screen.getByRole("textbox", { name: "对话框输入" }) as HTMLInputElement;
+  expect(input.value).toBe("默认");
+  fireEvent.change(input, { target: { value: "中文名字" } });
+  fireEvent.submit(screen.getByRole("form", { name: "网页对话框" }));
+  expect(onDialog).toHaveBeenLastCalledWith("tab-1", true, "中文名字");
+
+  // alert 只有确定；接管后横幅照样在，由用户答复
+  view.rerender(
+    pane({ kind: "alert", uri: "http://127.0.0.1:9/page", message: "保存成功" }, "taken_over"),
+  );
+  expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
+  expect(screen.queryByRole("textbox", { name: "对话框输入" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "确定" }));
+  expect(onDialog).toHaveBeenLastCalledWith("tab-1", true, undefined);
+
+  // 对话框答复后快照不再带 dialog：横幅消失
+  view.rerender(pane(undefined));
+  expect(screen.queryByRole("form", { name: "网页对话框" })).toBeNull();
+});
+
 it("可见时上报占位区；不可见时不上报，也不发 hide", () => {
   const onSlot = vi.fn();
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect(480, 640));
@@ -147,6 +204,7 @@ it("可见时上报占位区；不可见时不上报，也不发 hide", () => {
       visible
       onSlot={onSlot}
       onControl={vi.fn()}
+      onDialog={vi.fn()}
       onClose={vi.fn()}
     />,
   );
@@ -158,6 +216,7 @@ it("可见时上报占位区；不可见时不上报，也不发 hide", () => {
       visible={false}
       onSlot={onSlot}
       onControl={vi.fn()}
+      onDialog={vi.fn()}
       onClose={vi.fn()}
     />,
   );
@@ -217,6 +276,7 @@ it("浮层遮挡只截用户的浏览器标签；agent 标签不进浏览器池�
     tabs: new Map([["tab-1", shown]]),
     onSlot,
     onControl: vi.fn(),
+    onDialog: vi.fn(),
     onClose: vi.fn(),
   };
   const view = render(

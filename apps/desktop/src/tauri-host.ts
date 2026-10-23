@@ -76,6 +76,8 @@ export function createTauriHost(): DesktopHost {
           tabId,
           action,
         }),
+      dialog: (tabId, accept, text) =>
+        invoke("agent_browser_dialog", { tabId, accept, text: text ?? null }),
       setEnabled: (enabled) =>
         invoke<{ enabled: boolean; restartRequired: boolean }>("agent_browser_set_enabled", {
           enabled,
