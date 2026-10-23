@@ -201,6 +201,8 @@ it("watch 通道：快照、活动文案、过期修订被丢掉，present 只�
     operation: "click",
   });
   expect(store.tabs()[0]?.operation).toBe("click");
+  // 外壳开始动作时只发 operation：徽标靠它变成忙碌
+  expect(store.tabs()[0]?.state).toBe("busy");
   fake.push({
     kind: "operation",
     shellGeneration: 3,
@@ -211,6 +213,7 @@ it("watch 通道：快照、活动文案、过期修订被丢掉，present 只�
     operation: "click",
   });
   expect(store.tabs()[0]?.operation).toBeUndefined();
+  expect(store.tabs()[0]?.state).toBe("agent");
 
   fake.push({
     kind: "tabs",

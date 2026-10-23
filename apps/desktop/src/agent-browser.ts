@@ -210,15 +210,24 @@ export class AgentBrowserStore {
       this.emit();
       return;
     }
-    // operation：只更新对应标签的活动文案，不重排
+    // operation：只更新对应标签的活动文案和忙闲，不重排。外壳开始动作时只发这条消息，
+    // 结束后才推 tabs 快照，所以 busy 要在这里置上，否则徽标永远看不到活动状态
     if (message.revision < this.snapshot.revision) return;
-    const operation = message.state === "started" ? message.operation : undefined;
+    const started = message.state === "started";
+    const operation = started ? message.operation : undefined;
     this.snapshot = {
       ...this.snapshot,
       revision: message.revision,
-      tabs: this.snapshot.tabs.map((tab) =>
-        tab.tabId === message.tabId ? { ...tab, operation } : tab,
-      ),
+      tabs: this.snapshot.tabs.map((tab) => {
+        if (tab.tabId !== message.tabId) return tab;
+        const state =
+          started && tab.state === "agent"
+            ? "busy"
+            : !started && tab.state === "busy"
+              ? "agent"
+              : tab.state;
+        return { ...tab, operation, state };
+      }),
     };
     this.emit();
   }
