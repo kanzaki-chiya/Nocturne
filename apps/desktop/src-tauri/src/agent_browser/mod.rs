@@ -218,8 +218,10 @@ impl AgentTab {
     }
 }
 
+/// `rename_all` 只改变体名（kind 的值）；变体里的字段要靠 `rename_all_fields` 才是 camelCase，
+/// 否则主界面读到的 `shellGeneration`、`tabId` 都是 undefined。
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum WatchMessage {
     Tabs {
         shell_generation: u64,
@@ -1337,6 +1339,61 @@ mod tests {
 
     fn bound(state: &Arc<AgentBrowserState>) -> (String, String) {
         state.open_binding("root-a").unwrap()
+    }
+
+    #[test]
+    fn watch_messages_use_camel_case_fields() {
+        // 主界面按 desktop-browser.md 第 3 节读 camelCase 字段
+        let tabs = serde_json::to_value(WatchMessage::Tabs {
+            shell_generation: 3,
+            revision: 7,
+            tabs: Vec::new(),
+        })
+        .unwrap();
+        assert_eq!(
+            tabs,
+            json!({ "kind": "tabs", "shellGeneration": 3, "revision": 7, "tabs": [] })
+        );
+        let present = serde_json::to_value(WatchMessage::Present {
+            shell_generation: 3,
+            revision: 8,
+            operation_id: "op_1".into(),
+            tab_id: "t_1".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            present,
+            json!({
+                "kind": "present",
+                "shellGeneration": 3,
+                "revision": 8,
+                "operationId": "op_1",
+                "tabId": "t_1"
+            })
+        );
+        let operation = serde_json::to_value(WatchMessage::Operation {
+            shell_generation: 3,
+            revision: 9,
+            tab_id: "t_1".into(),
+            operation_id: "op_2".into(),
+            state: "completed",
+            operation: "click".into(),
+            error_code: Some("taken_over".into()),
+        })
+        .unwrap();
+        assert_eq!(
+            operation,
+            json!({
+                "kind": "operation",
+                "shellGeneration": 3,
+                "revision": 9,
+                "tabId": "t_1",
+                "operationId": "op_2",
+                "state": "completed",
+                "operation": "click",
+                "errorCode": "taken_over"
+            })
+        );
     }
 
     #[test]
