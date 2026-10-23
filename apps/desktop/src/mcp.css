@@ -32,10 +32,10 @@
   cursor: pointer;
   text-align: left;
 }
+/* 选中行用整行底色表示，不再加左侧色条 */
 .mcp-server-row.on {
   background: var(--a-sel);
   color: var(--a-text);
-  border-left: 3px solid var(--a-accent);
 }
 .mcp-server-row small {
   margin-left: auto;

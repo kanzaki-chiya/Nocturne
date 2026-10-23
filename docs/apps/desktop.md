@@ -485,3 +485,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 - 主要嵌套组合：输入框卡片（`--radius-3`）里的附件预览 `--radius-2`、圆形按钮 `--radius-pill`；确认卡与提问卡（`--radius-3`）里的选项行与按钮 `--radius-2`、按键角标 `--radius-1`；面板标签栏的标签 `--radius-2`；agent 横幅里的输入框 `--radius-2`；设置页卡片（`--radius-3`）里的行 `--radius-2`、复选方块 `--radius-1`。
 - 归档规则：2–5 → 4，6–9 → 8，10–14 → 12；正圆与全圆角（半径等于高度一半）用 `--radius-pill`。
 - 例外：手机列表行贴边排布，`border-radius: 0` 保留（`web/phone.css` 的 `.phone-row`、输入历史行与「其他目录…」入口）。
+
+### 左侧色条
+
+提示条（`conversation-notice-warning`/`-error`）与 MCP 列表选中行不使用左侧色条：提示条用浅色底（警告 `--a-warnBg`、错误 8% `--a-error`）加文字颜色区分级别；MCP 选中行用整行 `--a-sel` 底色表示。引用块与思考块左侧的细线属于常规排版，保留。

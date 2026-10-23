@@ -858,15 +858,16 @@
   font-size: var(--fs-1);
   overflow-wrap: anywhere;
 }
+/* 警告/错误提示条：浅色底 + 文字颜色区分级别，不再用左侧色条 */
 .conversation-notice-warning,
 .conversation-notice-error {
   padding: 8px 12px;
-  border-left: 2px solid var(--a-warning);
+  border-radius: var(--radius-2);
   background: var(--a-warnBg);
   color: var(--a-warning);
 }
 .conversation-notice-error {
-  border-color: var(--a-error);
+  background: color-mix(in srgb, var(--a-error) 8%, transparent);
   color: var(--a-error);
 }
 .conversation-jump-row {
