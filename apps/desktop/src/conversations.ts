@@ -36,6 +36,8 @@ export interface OpenConversation {
   view: SessionView;
   warnings: string[];
   busy: boolean;
+  /** `trackSessionView` 完成前为 true；状态栏和控件在此期间不随回放条目刷新。 */
+  replaying?: boolean;
   turnChanges: Map<number, TurnChanges>;
   changeDiffs: Map<string, Promise<TurnChangeDiff>>;
   tracker?: SessionViewTracker;
@@ -174,6 +176,7 @@ export class Conversations {
       view: continuity?.view ?? createSessionView(),
       warnings: result.opened.warnings,
       busy: false,
+      replaying: true,
       turnChanges: new Map(),
       changeDiffs: new Map(),
       listeners: new Set(),
@@ -214,6 +217,8 @@ export class Conversations {
         },
       );
       subscribed = true;
+      entry.replaying = false;
+      this.changed();
       await this.refreshTurnChanges(entry);
       return entry;
     } catch (error) {

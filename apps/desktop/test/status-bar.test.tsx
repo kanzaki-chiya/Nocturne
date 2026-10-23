@@ -3,6 +3,7 @@ import {
   type AssistantEntry,
   type AssistantTiming,
   type Usage,
+  type SessionView,
 } from "@nocturne/core/protocol";
 import type { ContextSummary, RpcSession } from "@nocturne/rpc/client";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -122,6 +123,52 @@ function fixture() {
 }
 
 describe("上下文 breakdown", () => {
+  it("回放增长不查上下文，结束只查一次；实时变化 single-flight 后补拉", async () => {
+    // 飞行中的多次条目变化只合成一次 describeContext，不并发发出旧请求。
+    const f = fixture();
+    const pending: ((value: ContextSummary) => void)[] = [];
+    f.api.describeContext.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    const ui = (replaying: boolean) => (
+      <StatusBar session={f.session} view={f.view} controls={f.controls} replaying={replaying} />
+    );
+    const mounted = render(ui(true));
+    for (let i = 0; i < 4; i++) {
+      f.view.entries.push({} as SessionView["entries"][number]);
+      mounted.rerender(ui(true));
+    }
+    expect(f.api.describeContext).not.toHaveBeenCalled();
+    mounted.rerender(ui(false));
+    expect(f.api.describeContext).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 4; i++) {
+      f.view.entries.push({} as SessionView["entries"][number]);
+      mounted.rerender(ui(false));
+    }
+    expect(f.api.describeContext).toHaveBeenCalledTimes(1);
+    await act(async () => pending.shift()?.(context));
+    expect(f.api.describeContext).toHaveBeenCalledTimes(2);
+    await act(async () => pending.shift()?.(context));
+    expect(f.api.describeContext).toHaveBeenCalledTimes(2);
+  });
+
+  it("切换会话后旧上下文响应不能覆盖新会话", async () => {
+    // 旧会话晚到的响应必须被会话身份丢弃，不能写入当前状态栏。
+    const a = fixture(),
+      b = fixture();
+    let finish: ((value: ContextSummary) => void) | undefined;
+    a.api.describeContext.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const mounted = render(<StatusBar session={a.session} view={a.view} controls={a.controls} />);
+    mounted.rerender(<StatusBar session={b.session} view={b.view} controls={b.controls} />);
+    await waitFor(() => expect(b.api.describeContext).toHaveBeenCalledTimes(1));
+    await act(async () =>
+      finish?.({ ...context, report: { ...context.report, estimatedTokens: 999999 } }),
+    );
+    expect(screen.queryByText(/999,999/)).toBeNull();
+  });
   it("四类来自 history.breakdown，历史总量不重复进入堆叠条", () => {
     const { container } = render(<ContextPanel context={context} />);
     for (const [label, tokens] of [

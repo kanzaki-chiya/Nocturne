@@ -6,6 +6,7 @@ import type { ContextSummary } from "@nocturne/rpc/client";
 import { completeSlash, parseSlash, type ParsedSlash } from "../commands";
 import type { ChoiceControl, ComposerControls, ComposerSubmit, FileRefSource } from "../Composer";
 import { ContextPanel, percent } from "../context-panel";
+import { useSessionRefresh } from "../use-session-refresh";
 import {
   completeFileRefs,
   fileRefDeleteRange,
@@ -62,6 +63,8 @@ export function phoneSlashHint(parsed: ParsedSlash | null): string | undefined {
 
 export interface PhoneContextSource {
   load: () => Promise<ContextSummary>;
+  /** 历史回放期间为 true：不按条目数刷新，结束后刷新一次 */
+  replaying?: boolean;
   /** 变化时重新读取（持久条目数与状态） */
   key: string;
 }
@@ -210,23 +213,27 @@ export function PhoneComposer({
 
   const contextKey = context?.key;
   const loadContext = context?.load;
+  const contextOwner = useRef({});
+  const refreshContext = useSessionRefresh(
+    loadContext ?? contextOwner.current,
+    loadContext !== undefined && context?.replaying !== true,
+    async (isCurrent) => {
+      if (!loadContext) return;
+      await loadContext().then(
+        (result) => {
+          if (!isCurrent()) return;
+          setSummary(result);
+          setContextError(undefined);
+        },
+        (reason: unknown) => {
+          if (isCurrent()) setContextError(errorText(reason));
+        },
+      );
+    },
+  );
   useEffect(() => {
-    if (loadContext === undefined) return;
-    let active = true;
-    void loadContext().then(
-      (result) => {
-        if (!active) return;
-        setSummary(result);
-        setContextError(undefined);
-      },
-      (reason: unknown) => {
-        if (active) setContextError(errorText(reason));
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [contextKey, loadContext, open === "context"]);
+    void refreshContext();
+  }, [contextKey, refreshContext, context?.replaying, open === "context"]);
 
   useEffect(() => {
     const node = field.current;

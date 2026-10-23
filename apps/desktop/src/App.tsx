@@ -1301,6 +1301,7 @@ export function App({ host }: { host: DesktopHost }) {
             <PaneErrorBoundary key={active.session.id}>
               <SessionPane
                 view={active.view}
+                replaying={active.replaying === true}
                 workspace={active.workspace}
                 session={active.session}
                 client={active.client}
@@ -1537,6 +1538,7 @@ export function App({ host }: { host: DesktopHost }) {
 
 interface SessionPaneProps {
   view: SessionView;
+  replaying: boolean;
   workspace: string;
   session: RpcSession;
   client: RpcClient;
@@ -1574,6 +1576,7 @@ interface SessionPaneProps {
 
 function SessionPane({
   view,
+  replaying,
   workspace,
   session,
   client,
@@ -1604,7 +1607,15 @@ function SessionPane({
   onManageRemote,
 }: SessionPaneProps) {
   const runtime = client.runtime;
-  const controls = useSessionControls(session, runtime, view, prefs, providersVersion, workspace);
+  const controls = useSessionControls(
+    session,
+    runtime,
+    view,
+    prefs,
+    providersVersion,
+    workspace,
+    replaying,
+  );
   const [skills, setSkills] = useState<SkillOverview[]>([]);
   const [externalAgents, setExternalAgents] = useState<ExternalAgentOverview[]>([]);
   useEffect(() => {
@@ -1708,6 +1719,7 @@ function SessionPane({
       <StatusBar
         session={session}
         view={view}
+        replaying={replaying}
         controls={controls}
         panel={panel}
         onPanelChange={onPanelChange}

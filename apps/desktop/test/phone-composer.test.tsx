@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import type { ComposerSubmit } from "../src/Composer";
+import type { ContextSummary } from "@nocturne/rpc/client";
 import { PhoneComposer } from "../src/web/PhoneComposer";
 import {
   estimateSubmitBytes,
@@ -44,6 +45,38 @@ const codec = (width: number, height: number, sizes: number[] = []) => {
   };
   return { fake, encoded };
 };
+
+it("手机上下文回放时不查，完成只查一次，实时变化合并补拉", async () => {
+  // 与桌面状态栏同一 single-flight：回放不查，结束后一次，飞行中的变化只补一次。
+  const pending: ((value: ContextSummary) => void)[] = [];
+  const load = vi.fn(() => new Promise<ContextSummary>((resolve) => pending.push(resolve)));
+  const ui = (replaying: boolean, key: string) => (
+    <PhoneComposer
+      variant="session"
+      controls={undefined}
+      running={false}
+      onSubmit={async () => true}
+      onInterrupt={vi.fn()}
+      onSlash={async () => false}
+      context={{ load, key, replaying }}
+    />
+  );
+  for (let i = 0; i < 4; i++) await act(() => root?.render(ui(true, String(i))));
+  expect(load).not.toHaveBeenCalled();
+  await act(() => root?.render(ui(false, "ready")));
+  expect(load).toHaveBeenCalledTimes(1);
+  for (let i = 0; i < 4; i++) await act(() => root?.render(ui(false, String(i))));
+  expect(load).toHaveBeenCalledTimes(1);
+  const summary: ContextSummary = {
+    report: { sections: [], totalChars: 0, estimatedTokens: 0, budgetTokens: 100 },
+    overBudget: false,
+    mustCompact: false,
+  };
+  await act(() => pending.shift()?.(summary));
+  expect(load).toHaveBeenCalledTimes(2);
+  await act(() => pending.shift()?.(summary));
+  expect(load).toHaveBeenCalledTimes(2);
+});
 
 it("图片在上限内原样发送；超限或类型不支持时缩放转码并逐级降质", async () => {
   const small = new File([new Uint8Array(2000)], "a.png", { type: "image/png" });

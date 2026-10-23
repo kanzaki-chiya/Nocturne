@@ -462,6 +462,7 @@ describe("desktop conversation lifecycle", () => {
       ).toBe(true),
     );
     // 旧回放：time 远早于订阅起始 → live=false
+    expect(f.controller.opened.get("a")?.replaying).toBe(true);
     f.event("a", "message.user", { messageId: "replay-1", content: [] });
     // 回放窗口期内新产生的 permission.requested/turn.completed：time 取订阅起始
     // 时刻及之后 → live=true（同 ms 取 >=，默认实时）
@@ -488,6 +489,7 @@ describe("desktop conversation lifecycle", () => {
     // 放行订阅响应：转实时，此后持久事件也是实时
     f.releaseSubscribe("a");
     await opening;
+    expect(f.controller.opened.get("a")?.replaying).toBe(false);
     f.event("a", "turn.started", { turnIndex: 1 }, new Date().toISOString());
     await vi.waitFor(() => expect(seen.some((s) => s.type === "turn.started")).toBe(true));
     expect(seen.filter((s) => s.type === "turn.started").every((s) => s.live)).toBe(true);

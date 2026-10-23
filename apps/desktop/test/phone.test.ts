@@ -326,6 +326,7 @@ it("连接只等列表，后台只订阅持锁会话", async () => {
   expect(sessions.list.map((s) => s.id)).toEqual(["busy", "old"]);
   release();
   await vi.waitFor(() => expect(sessions.opened.has("busy")).toBe(true));
+  expect(sessions.opened.get("busy")?.replaying).toBe(false);
   expect(resume.mock.calls.map(([id]) => id)).toEqual(["busy"]);
   client.close();
 });

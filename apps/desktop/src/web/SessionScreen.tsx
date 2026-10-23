@@ -61,6 +61,8 @@ export function SessionScreen({
   onChanged: () => void;
 }) {
   const { session, view } = entry;
+  // 查询函数按会话稳定：圆环的刷新边界由 replaying/key 决定，不因父组件重绘重建。
+  const loadContext = useCallback(() => session.describeContext(), [session]);
   const controls = useSessionControls(
     session,
     entry.client.runtime,
@@ -68,6 +70,7 @@ export function SessionScreen({
     undefined,
     0,
     entry.workspace,
+    entry.replaying,
   );
   const [skills, setSkills] = useState<SkillOverview[]>([]);
   const [agents, setAgents] = useState<ExternalAgentOverview[]>([]);
@@ -222,7 +225,8 @@ export function SessionScreen({
         }}
         onSlash={slash}
         context={{
-          load: () => session.describeContext(),
+          load: loadContext,
+          replaying: entry.replaying === true,
           key: `${view.entries.length}:${view.status}`,
         }}
         fileRefs={plain ? null : { load: () => session.fileIndex(), key: view.turnCount }}

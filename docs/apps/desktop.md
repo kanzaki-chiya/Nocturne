@@ -219,6 +219,8 @@ interface NodeProbe {
 
 ### 5.4 状态栏与上下文
 
+打开/续接会话时，`Conversations`（手机为 `PhoneSessions`）在 `trackSessionView` 完成前标记 `replaying`。这期间不因历史条目数增长刷新状态栏上下文与会话控件；订阅回放完成后各集中刷新一次。实时阶段同一会话每组查询 single-flight：飞行中的多次变化只标记 latest-dirty，返回后补拉一次；切换会话或卸载后旧响应不得写入新界面。手机的控件和上下文圆环使用同一规则，传给圆环的查询函数按会话保持稳定，避免每次重绘重查。Core 的报告缓存与失效规则见 [context.md](../architecture/context.md#11-describecontext-的会话级缓存)。
+
 **远程标识**：有远程 RPC 连接时显示「手机在线」，多台设备显示数量（按设备 id 去重）。点击展开当前手机列表，每台可立即「断开」，底部「打开远程设置」。没有连接不显示；已登记且被吊销或替换时显示警示，点击进入远程页。
 
 `src/StatusBar.tsx` 左侧是会话控件 pill 组：模型（绿点 +「provider · model」+ ▶）、「思考 <level> ▶」、「权限 <preset> ▶」（预设值用警告色）、「Shell <kind> ▶」。模型与 Shell 打开与空状态 chip 共用的 `ChoiceMenu`（`src/Menu.tsx`，锚定 pill 自动向上弹出），模型菜单为「最近使用」+ 按服务商分组（组名用服务商显示名、组序与服务商页一致，搜索跨组过滤；会话内与空状态共用 `modelGroups`），底部有「管理服务商…」，进入 设置 › 服务商；思考档位与权限预设用自绘下拉 `Dropdown`（见 5.6），选项带中文名与一句说明；数据来自 `useSessionControls`（模型/档位/预设复用 `controls.controls`，Shell 是 `shellControl`：`auto`（「自动选择」）+ 探测到的 shell，未安装的置灰并标注「未安装」，被 env/config 覆盖时菜单底部给提示；打开 Shell 菜单时调 `loadShells()` 探测）。选择分别调 `setModel` / `setReasoningEffort`（并写 `prefs.lastEffort`）/ `setPermissionPreset` / `setShell`；手机远程改模型、档位或预设后，Core 广播 `session.config_changed`，状态栏随之刷新。Turn 进行中模型 pill 锁定（title「当前 Turn 结束后可切换」），思考档位、权限预设、Shell 仍可切换：档位菜单注明「下一个 Turn 生效」，预设菜单注明「从下一次权限判定起按新预设」（等待确认的请求仍由用户决定，切换不替它放行），Shell 菜单注明「下一次命令生效」。右侧不变：上下文用量（点击开上下文面板）、累计缓存命中（`sessionUsageSoFar`，含进行中 Turn 已完成的步骤，每步结束即更新，见 [view.md §8](../protocols/view.md#8-api)；服务商未返回缓存数据时显示「—」）、生成速度、Turn 状态。

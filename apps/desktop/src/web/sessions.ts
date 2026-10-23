@@ -24,6 +24,8 @@ export interface PhoneSession {
   view: SessionView;
   tracker?: SessionViewTracker;
   dead: boolean;
+  /** `trackSessionView` 完成前为 true；控件和上下文圆环在此期间不随回放条目刷新。 */
+  replaying?: boolean;
   /** 每次视图折叠后回调（发送时等待 Turn 被接受） */
   readonly listeners: Set<() => void>;
   /** 本轮改动摘要（按用户消息 seq），Turn 结束与回退后刷新，同桌面 */
@@ -237,6 +239,7 @@ export class PhoneSessions {
       workspace,
       view,
       dead: false,
+      replaying: true,
       listeners,
       turnChanges: previous?.turnChanges ?? new Map<number, TurnChanges>(),
       changeDiffs: new Map(),
@@ -269,6 +272,7 @@ export class PhoneSessions {
       },
     );
     subscribed = true;
+    entry.replaying = false;
     this.changed();
     void this.refreshTurnChanges(entry);
     return entry;

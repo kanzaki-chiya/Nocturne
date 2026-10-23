@@ -16,6 +16,7 @@ import { unavailableMcpServers, type UnavailableMcpServer } from "./mcp-status";
 import { ContextPanel, number, percent } from "./context-panel";
 import { ChoiceMenu } from "./Menu";
 import type { SessionControls } from "./session-controls";
+import { useSessionRefresh } from "./use-session-refresh";
 import {
   describeStepSpeed,
   formatSeconds,
@@ -33,6 +34,8 @@ export interface StatusBarProps {
   onManageRemote?: () => void;
   session: RpcSession;
   view: SessionView;
+  /** 历史回放期间为 true：不按条目数刷新上下文，结束后刷新一次 */
+  replaying?: boolean;
   controls: SessionControls;
   panel?: StatusPanel | null;
   onPanelChange?: (panel: StatusPanel | null) => void;
@@ -258,6 +261,7 @@ function SpeedBadge({ speed }: { speed: SpeedDisplay | undefined }) {
 export function StatusBar({
   session,
   view,
+  replaying = false,
   controls,
   panel,
   onPanelChange,
@@ -275,7 +279,6 @@ export function StatusBar({
   const [context, setContext] = useState<ContextSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const request = useRef(0);
   const root = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const triggers = useRef<Partial<Record<StatusPanel | StatusMenu, HTMLButtonElement | null>>>({});
@@ -294,29 +297,26 @@ export function StatusBar({
     trigger?.focus();
   }, [activePanel, changePanel]);
 
-  const refresh = useCallback(async () => {
-    const id = ++request.current;
+  const refresh = useSessionRefresh(session, !replaying, async (isCurrent) => {
     setLoading(true);
     setError(null);
     try {
       const summary = await session.describeContext();
-      if (id !== request.current) return;
+      if (!isCurrent()) return;
       setContext(summary);
     } catch (failure) {
-      if (id === request.current) setError(message(failure));
+      if (isCurrent()) setError(message(failure));
     } finally {
-      if (id === request.current) setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [session]);
+  });
 
   // 持久条目与状态变化时刷新；流式 delta 不重复构建上下文。
   useEffect(() => {
     void refresh();
-    return () => {
-      request.current += 1;
-    };
-  }, [refresh, view.entries.length, view.status]);
+  }, [refresh, replaying, view.entries.length, view.status]);
   useEffect(() => {
+    setContext(null);
     setLocalPanel(null);
     setOpenMenu(null);
   }, [session]);

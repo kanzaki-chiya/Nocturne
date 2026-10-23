@@ -6,6 +6,7 @@ import type { RpcRuntime, RpcSession } from "@nocturne/rpc/client";
 import { effortOption, presetOptions } from "./choice-info";
 import type { ChoiceControl, ChoiceGroup, ComposerControls } from "./Composer";
 import type { PrefsStore } from "./prefs";
+import { useSessionRefresh } from "./use-session-refresh";
 
 type ModelInfo = Awaited<ReturnType<RpcRuntime["listModels"]>>[number];
 type ShellInfo = Awaited<ReturnType<RpcSession["shellInfo"]>>;
@@ -97,6 +98,8 @@ export function useSessionControls(
   providersVersion = 0,
   /** 会话自己的工作区（ADR-0051）：模型清单按它合并项目层配置 */
   workspace?: string,
+  /** 历史回放期间为 true：不按条目数刷新，结束后刷新一次 */
+  replaying = false,
 ): SessionControls {
   const [snapshot, setSnapshot] = useState<{
     model: ModelRef | undefined;
@@ -108,15 +111,13 @@ export function useSessionControls(
   } | null>(null);
   const [shells, setShells] = useState<readonly ShellEntry[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
-  const request = useRef(0);
   const mounted = useRef(true);
   const current = useRef(session);
   current.current = session;
   /** 控件变更串行队列：新选择排在上一个变更之后，永不静默丢弃 */
   const mutation = useRef<Promise<void>>(Promise.resolve());
 
-  const refresh = useCallback(async () => {
-    const id = ++request.current;
+  const refresh = useSessionRefresh(session, !replaying, async (isCurrent) => {
     try {
       const [state, effort, shell, models, recents] = await Promise.all([
         session.state(),
@@ -125,7 +126,7 @@ export function useSessionControls(
         runtime.listModels(workspace !== undefined ? { workspaceRoot: workspace } : undefined),
         runtime.listRecentModels(),
       ]);
-      if (id !== request.current || !mounted.current) return;
+      if (!isCurrent()) return;
       setSnapshot({
         model: state.config.model,
         preset: state.config.permissionPreset,
@@ -136,18 +137,16 @@ export function useSessionControls(
       });
       setError(undefined);
     } catch (failure) {
-      if (id === request.current && mounted.current) setError(message(failure));
+      if (isCurrent()) setError(message(failure));
     }
-  }, [session, runtime, workspace]);
+  });
 
   // 持久条目、状态与配置变化时刷新
   useEffect(() => {
     void refresh();
-    return () => {
-      request.current += 1;
-    };
   }, [
     refresh,
+    replaying,
     providersVersion,
     view.entries.length,
     view.status,
