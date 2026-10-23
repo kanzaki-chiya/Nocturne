@@ -1445,7 +1445,8 @@
 
 /* ── 面板浏览器 · 桌面内置（第 5 轮） ── */
 .agent-browser-card {
-  margin: 0 0 14px;
+  /* 与 .ph3 的左右内边距对齐，不贴着导航分隔线和窗口右缘 */
+  margin: 14px 28px;
   padding: 12px 14px;
   border: 1px solid var(--a-border);
   border-radius: 10px;
@@ -1455,6 +1456,10 @@
   display: flex;
   align-items: flex-start;
   gap: 16px;
+}
+.agent-browser-head .grow {
+  flex: 1;
+  min-width: 0;
 }
 .agent-browser-head h4 {
   margin: 0 0 3px;
@@ -1467,6 +1472,12 @@
   gap: 7px;
   color: var(--a-secondary);
   font-size: 12px;
+  white-space: nowrap;
+}
+.agent-browser-switch input {
+  /* 不继承表单输入的百分比宽度：那会让标签缩到最小内容宽，文字逐字换行 */
+  width: auto;
+  margin: 0;
 }
 .agent-browser-risk {
   margin-top: 10px;
