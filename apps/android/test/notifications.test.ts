@@ -50,7 +50,7 @@ it("仅实时、没在看且达到阈值通知；重放/恢复/用户查看不�
     sessionId: "s",
     kind: "done",
     title: "项目",
-    body: "已完成 · 用时 1 分钟 · 3 步",
+    body: "已完成，用时 1 分钟，3 步",
   });
   local.dismiss("computer", "s");
   expect(dismissNotification).toHaveBeenCalledWith("computer", "s");
