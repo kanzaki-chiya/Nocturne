@@ -489,4 +489,4 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 ### 左侧色条
 
-提示条（`conversation-notice-warning`/`-error`）与 MCP 列表选中行不使用左侧色条：提示条用浅色底（警告 `--a-warnBg`、错误 8% `--a-error`）加文字颜色区分级别；MCP 选中行用整行 `--a-sel` 底色表示。引用块与思考块左侧的细线属于常规排版，保留。
+提示条（`conversation-notice-warning`/`-error`）、权限确认卡（`.ask`）与 MCP 列表选中行不使用左侧色条：提示条用浅色底（警告 `--a-warnBg`、错误 8% `--a-error`）加文字颜色区分级别；确认卡用整圈警告色边框（55% `--a-warning`）加 `--a-warnBg` 浅底；MCP 选中行用整行 `--a-sel` 底色表示。引用块与思考块左侧的细线属于常规排版，侧栏与设置导航的选中指示条属于导航选中态，都保留。
