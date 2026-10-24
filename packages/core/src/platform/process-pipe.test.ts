@@ -258,3 +258,54 @@ describe("spawnPipe minimal 代理变量", () => {
     );
   });
 });
+
+describe("进程树终止", () => {
+  // 回归：Windows 的 taskkill 自身启动就要约 2 秒，旧实现 2 秒即把它杀掉，根、子、孙全部遗留。
+  it(
+    "kill() 返回时根、子、孙进程都已不存在（按进程是否存在判断）",
+    { timeout: 30_000 },
+    async () => {
+      const pidFile = path.join(root, "tree.json");
+      processes.watchPidFile(pidFile);
+      const grandchild = "setInterval(()=>{},1000)";
+      const child = [
+        'const {spawn}=require("node:child_process");',
+        `const g=spawn(process.execPath,["-e",${JSON.stringify(grandchild)}],{stdio:"ignore"});`,
+        "console.log(JSON.stringify({child:process.pid,grandchild:g.pid}));",
+        "setInterval(()=>{},1000);",
+      ].join("");
+      const rootScript = [
+        'const {spawn}=require("node:child_process");',
+        `const c=spawn(process.execPath,["-e",${JSON.stringify(child)}],{stdio:["ignore","pipe","ignore"]});`,
+        'c.stdout.on("data",(d)=>{',
+        "const {child,grandchild}=JSON.parse(String(d).trim());",
+        `require("node:fs").writeFileSync(${JSON.stringify(pidFile)},JSON.stringify({root:process.pid,child,grandchild}));`,
+        "});",
+        "setInterval(()=>{},1000);",
+      ].join("");
+      const proc = platform.process.spawnPipe(process.execPath, ["-e", rootScript]);
+      let pids: { root: number; child: number; grandchild: number } | undefined;
+      await vi.waitFor(
+        async () => {
+          pids = JSON.parse(await fs.readFile(pidFile, "utf8")) as typeof pids;
+          expect(pids?.grandchild).toBeGreaterThan(0);
+        },
+        { timeout: 10_000, interval: 20 },
+      );
+      if (pids === undefined) throw new Error("pid 文件未写出");
+      const { root: rootPid, child: childPid, grandchild: grandchildPid } = pids;
+      for (const pid of [rootPid, childPid, grandchildPid])
+        expect(platform.processAlive(pid)).toBe(true);
+      await proc.kill();
+      proc.detachOutput();
+      // kill() 已等 taskkill 结束；容许操作系统几十毫秒内完成句柄回收，但不靠放宽超时掩盖漏杀
+      await vi.waitFor(
+        () => {
+          for (const pid of [rootPid, childPid, grandchildPid])
+            expect(platform.processAlive(pid), `pid ${pid}`).toBe(false);
+        },
+        { timeout: 1_000, interval: 20 },
+      );
+    },
+  );
+});

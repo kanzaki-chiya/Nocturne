@@ -88,7 +88,7 @@ execute(call, ctx):
 
 - 每个工具声明默认超时；同时声明 `maxTimeoutMs` 并在 `inputSchema` 中声明整数 `timeoutMs` 的工具（目前只有 `task`）允许调用方在上限内指定超时，读取规则见第 2 节第 7 步；未声明的工具不受该输入影响。`shell` 也接受 `timeoutMs` 输入，但未声明 `maxTimeoutMs`，超时由它自己的计时器实现，执行器不读该输入。
 - 中断信号来自 Turn 的 `AbortController`。工具应尽快停止；超过宽限期后执行器放弃等待并记为 `cancelled`。`shell` 尝试终止整个进程树（Windows 与 POSIX 的实现不同，由 `platform` 负责）；Nocturne 自身异常退出时子进程是否随之结束不作保证，见 [sessions.md](sessions.md) 第 6 节。
-- **各平台进程树终止**：Windows 用 `taskkill /pid <pid> /T /F` 终止整棵树；POSIX 在 `spawn` 时以 `detached: true` 使子进程成为进程组组长，用 `kill(-pid, SIGKILL)` 整组终止。正常中断与主进程被强杀是不同场景；后者对 MCP 服务器的已知限制见 [mcp.md](mcp.md) 第 4 节。
+- **各平台进程树终止**：Windows 用 `taskkill /pid <pid> /T /F` 终止整棵树，`kill()` 等 taskkill 结束（上限 15 秒，超时或失败时至少收回根进程）——它自己启动就要约 2 秒（见下方实测记录），不能当成瞬时操作；POSIX 在 `spawn` 时以 `detached: true` 使子进程成为进程组组长，用 `kill(-pid, SIGKILL)` 整组终止。正常中断与主进程被强杀是不同场景；后者对 MCP 服务器的已知限制见 [mcp.md](mcp.md) 第 4 节。
 - 工具声明 `concurrencySafe`。MVP 串行执行所有调用；以后可以并行执行连续的 `concurrencySafe` 调用，不需要修改工具。
 
 ## 6. 内置工具（MVP）
@@ -166,7 +166,7 @@ HTML/XHTML 删除 `script/style/noscript/svg/iframe/nav/header/footer/aside/form
 - **退出与输出管道分离**：`spawnShell` 的 `wait()` 在直接子进程（cmd/sh 本体）`exit` 时结算，而不是等 stdio 全部关闭的 `close`——`close` 会被继承了输出管道的后台孙进程无限期拖住（`start`、`nohup`、`detached` 派生等）。子进程退出后输出流最多再等 500ms 自然收尾；仍被占用则经 `SpawnedProcess.detachOutput()` 销毁读取端，已捕获输出按原解码规则冲刷后保留，读取方正常结束而非报错。通用 `spawn`/`spawnPipe`（MCP stdio、Hooks）仍按 `close` 结算，行为不变。
 - **孤儿进程遗留**：中断/超时只保证终止进程树——Windows `taskkill /T` 沿父子链终止，中间进程已退出的 detached 孙进程会脱离链条杀不到；POSIX 进程组终止对已 `setsid` 逃逸的进程同理。分离输出后仍存活的后台进程需用户按提示自行清理。
 - **输出解码**：Windows 取 `chcp` 代码页映射为 WHATWG 编码（如 CP936 → GBK），其余平台与未识别代码页按 UTF-8。探测到非 UTF-8 代码页时，stdout、stderr 各自按换行分段：整段字节能以 fatal UTF-8 解码就使用 UTF-8，否则按控制台编码解码，原样保留 `\r\n`。未换行尾巴超过 8KB 或空闲 50ms 后也按同一规则冲刷；末尾截断的 UTF-8 多字节字符（最多 3 字节）留待下一块。流结束时解码剩余字节。`NOCTURNE_CONSOLE_ENCODING` 可显式指定任意 WHATWG label（如 `utf-8`、`gbk`），设置后完全按该编码流式解码，不再逐行判定。残留风险：极短的 GBK 字节串偶然也是合法 UTF-8 时，会被识别为 UTF-8。PowerShell 系 shell 的前奏已把输出编码固定为 UTF-8（ADR-0022），逐行判定主要用于 cmd 与输出 GBK 的旧程序。
-- **进程树终止实测记录**（tools.md 第 5 节要求）：Windows（`taskkill /pid /T /F`）：已实测——测试在 `cmd /c` 下启动 Node 父进程并派生孙进程，中断后孙进程消失（`packages/core/src/tools/write-edit-shell.test.ts` "中断：终止整个进程树"用例）；POSIX（`detached` 进程组 + `kill(-pid, SIGKILL)`）：未在当前平台验证，CI/其他平台需复跑该用例。
+- **进程树终止实测记录**（tools.md 第 5 节要求）：Windows（`taskkill /pid /T /F`）：已实测——测试在 `cmd /c` 下启动 Node 父进程并派生孙进程，中断后孙进程消失（`packages/core/src/tools/write-edit-shell.test.ts` "中断：终止整个进程树"用例）；POSIX（`detached` 进程组 + `kill(-pid, SIGKILL)`）：未在当前平台验证，CI/其他平台需复跑该用例。**taskkill 启动耗时**（2026-10 补充）：在装有安全软件、WMI 负载高的 Windows 上，`taskkill` 连不存在的 pid 也要约 2.0–2.4 秒才返回。旧实现把等待上限设为 2 秒，等于在它动手前把它自己杀掉：根、子、孙进程全部遗留，表现为"终止整个进程树""cmd shim abort 清树"一类用例时好时坏、残留 `node` 夹具进程累积，ACP 探测在删除临时目录时因子进程仍占着 cwd 报 EBUSY。现在 `kill()` 等 taskkill 自己结束；`process-pipe.test.ts` 的"进程树终止"用例按根、子、孙进程是否存在断言。依赖"kill 之后马上返回"的有界时间断言（`write-edit-shell.test.ts`）为此留出 taskkill 启动的余量。
 
 `apply_patch` 的约定（[ADR-0035](../decisions/ADR-0035-apply-patch.md)）：
 

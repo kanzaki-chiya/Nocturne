@@ -49,6 +49,12 @@ async function createdAt(pid) {
   return Date.parse(`${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}`);
 }
 
+/**
+ * taskkill 在被安全软件或 WMI 拖慢的机器上，空转启动就要 2 秒以上（实测 ≈2.0–2.4 s）；
+ * 与 core 的 killTree 同一上限，过短会在它动手前把它杀掉而遗留整棵树。
+ */
+const KILL_TREE_TIMEOUT_MS = 15_000;
+
 export async function killPidTree(pid) {
   if (!Number.isInteger(pid) || pid <= 0 || !alive(pid)) return;
   if (process.platform === "win32") {
@@ -60,7 +66,7 @@ export async function killPidTree(pid) {
       const timer = setTimeout(() => {
         killer.kill();
         resolve();
-      }, 2000);
+      }, KILL_TREE_TIMEOUT_MS);
       const done = () => {
         clearTimeout(timer);
         resolve();

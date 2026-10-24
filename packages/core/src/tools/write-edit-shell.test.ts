@@ -49,6 +49,13 @@ async function trackOrphan(pidFile: string): Promise<void> {
   }
 }
 
+/**
+ * 经 kill 收尾的有界返回上限：超时/中断 + Windows taskkill 自身启动约 2–2.5 s（空转实测，
+ * 见 process.ts KILL_TREE_TIMEOUT_MS）+ 500ms 管道收尾窗口。目的只是证明不会挂到孤儿退出，
+ * 3 s 在这台机器上没有余量；10 s 仍远小于"无限等待"。
+ */
+const KILL_BOUND_MS = 10_000;
+
 const LEAF_SPAWN = `const {spawn}=require("node:child_process");
 const fs=require("node:fs");
 const c=spawn(process.execPath,["orphan-leaf.js"],{cwd:__dirname,detached:true,stdio:["ignore","inherit","inherit"],windowsHide:true});
@@ -670,7 +677,7 @@ setInterval(()=>{},1000);`,
     expect(r.status).toBe("cancelled");
     // 中断结果由执行器统一归一化（cancelled 不由工具返回）；有界返回本身
     // 证明 detach 收尾生效——否则输出泵会被孤儿占用的管道一直挂住
-    expect(elapsed).toBeLessThan(3_000);
+    expect(elapsed).toBeLessThan(KILL_BOUND_MS);
   });
 
   it("孙进程占用管道时超时：有界 timeout 并附提示", async () => {
@@ -693,7 +700,7 @@ setInterval(()=>{},1000);`,
     expect(output.outputDetached).toBe(true);
     expect(r.result.modelContent).toContain("命令超过 400ms 超时");
     expect(r.result.modelContent).toContain("命令已退出，但仍有后台进程占用输出管道");
-    expect(elapsed).toBeLessThan(3_000);
+    expect(elapsed).toBeLessThan(KILL_BOUND_MS);
   });
 
   it("下游命令与孙进程占用输出管道：有界返回", async () => {
@@ -722,7 +729,7 @@ setInterval(()=>{},1000);`,
     } else {
       expect(r.status).toBe("ok");
     }
-    expect(elapsed).toBeLessThan(4_000);
+    expect(elapsed).toBeLessThan(KILL_BOUND_MS);
   });
 
   it("无后台占用的正常命令：modelContent 与退出码不变，无 outputDetached", async () => {

@@ -112,7 +112,8 @@ async function waitForPid(): Promise<{ pid: number; child?: number }> {
 async function expectGone(pid: number | undefined): Promise<void> {
   if (pid === undefined) throw new Error("Fixture did not report the expected process PID");
   await vi.waitFor(() => expect(platform.processAlive(pid)).toBe(false), {
-    timeout: 2_000,
+    // Windows 的 taskkill 自身启动就要约 2 秒（process.ts KILL_TREE_TIMEOUT_MS），再留足余量
+    timeout: 20_000,
     interval: 20,
   });
 }

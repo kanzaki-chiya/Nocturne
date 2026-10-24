@@ -534,12 +534,19 @@ function attachLifecycle(
   return { wait: () => waitPromise, kill };
 }
 
+/** Windows 等待 taskkill 结束的上限；见 killTree */
+const KILL_TREE_TIMEOUT_MS = 15_000;
+
+function hasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
 async function killTree(child: ChildProcess): Promise<void> {
   if (child.pid === undefined) return;
   const pid = child.pid;
   if (process.platform === "win32") {
     // Windows 的 /T 只能在根进程仍在时枚举树；不能对复用的 pid 发 taskkill。
-    if (child.exitCode !== null || child.signalCode !== null) return;
+    if (hasExited(child)) return;
     let resolve!: () => void;
     const promise = new Promise<void>((done) => {
       resolve = done;
@@ -548,10 +555,12 @@ async function killTree(child: ChildProcess): Promise<void> {
       windowsHide: true,
       stdio: "ignore",
     });
+    // taskkill 在被安全软件或 WMI 拖慢的机器上，空转启动就要 2 秒以上（实测 ≈2.0–2.4 s）；
+    // 超时过短会在它动手前把它自己杀掉，整棵树原样遗留。超时只作兜底，正常等它结束。
     const timer = setTimeout(() => {
       killer.kill();
       resolve();
-    }, 2_000);
+    }, KILL_TREE_TIMEOUT_MS);
     const done = () => {
       clearTimeout(timer);
       resolve();
@@ -559,6 +568,8 @@ async function killTree(child: ChildProcess): Promise<void> {
     killer.once("exit", done);
     killer.once("error", done);
     await promise;
+    // taskkill 失败或超时时至少收回根进程，避免它继续持有 cwd 与管道
+    if (!hasExited(child)) child.kill("SIGKILL");
   } else {
     try {
       // spawn(detached: true) 使子进程成为进程组组长，可整组终止
