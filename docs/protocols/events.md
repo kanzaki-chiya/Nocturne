@@ -129,12 +129,13 @@ Phase 5 新增事件的取舍：`mcp.server` 与 Hook 执行记录都选**临时
 type ModelRef = { provider: string; model: string }
 
 type ContentBlock =
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; provider?: string; providerData?: unknown }
   | { type: "reasoning"; text: string; provider?: string; providerData?: unknown }
 
 type ToolCallRef = {
   callId: string            // Runtime 分配，会话内唯一，字符集 [A-Za-z0-9_-]
   providerCallId?: string   // Provider 返回的原始 ID，只保证在一次响应内唯一
+  providerData?: unknown    // 适配器专有数据；仅同服务商、同协议回传（ADR-0061）
   name: string
   input?: unknown           // 参数解析失败时为空
   rawInput?: string         // 参数解析失败时的原文

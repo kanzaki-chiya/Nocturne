@@ -30,6 +30,12 @@ export interface ToAiMessagesOptions {
    * 返回 undefined 表示不带 providerOptions。
    */
   reasoningProviderOptions?: (providerData: unknown) => SdkProviderOptions | undefined;
+  textProviderOptions?: (providerData: unknown) => SdkProviderOptions | undefined;
+  /** index 为该调用在本条 assistant 消息 toolCalls 中的位置（同一步内按序调用）。 */
+  toolCallProviderOptions?: (
+    providerData: unknown,
+    index: number,
+  ) => SdkProviderOptions | undefined;
   /**
    * 工具结果图片的传输方式（ADR-0023）：
    * - "user-message"（缺省，openai-compatible）：tool 消息只放文本——
@@ -97,7 +103,12 @@ export function toAiMessages(
         const parts: AssistantContent = [];
         for (const c of m.content) {
           if (c.type === "text") {
-            parts.push({ type: "text", text: c.text });
+            const providerOptions = options.textProviderOptions?.(c.providerData);
+            parts.push({
+              type: "text",
+              text: c.text,
+              ...(providerOptions !== undefined ? { providerOptions } : {}),
+            });
           } else {
             const providerOptions =
               c.providerData !== undefined
@@ -110,7 +121,7 @@ export function toAiMessages(
             );
           }
         }
-        for (const tc of m.toolCalls) {
+        for (const [index, tc] of m.toolCalls.entries()) {
           const wireId = tc.providerCallId ?? tc.callId;
           wireIds.set(tc.callId, wireId);
           let input = tc.input;
@@ -121,8 +132,10 @@ export function toAiMessages(
               input = {};
             }
           }
+          const providerOptions = options.toolCallProviderOptions?.(tc.providerData, index);
           parts.push({
             type: "tool-call",
+            ...(providerOptions !== undefined ? { providerOptions } : {}),
             toolCallId: wireId,
             toolName: tc.name,
             input: input ?? {},
@@ -370,10 +383,19 @@ export function createLiveness(fetchImpl: typeof fetch): {
 export function mapPart(
   part: TextStreamPart<ToolSet>,
   toolNames: Map<string, string>,
+  preservePartData = false,
 ): ModelStreamEvent[] {
   switch (part.type) {
     case "text-delta":
-      return [{ type: "text_delta", text: part.text }];
+      return [
+        {
+          type: "text_delta",
+          text: part.text,
+          ...(preservePartData && part.providerMetadata !== undefined
+            ? { providerData: part.providerMetadata }
+            : {}),
+        },
+      ];
     case "reasoning-delta": {
       const providerData =
         part.providerMetadata !== undefined ? { ...part.providerMetadata } : undefined;
@@ -430,6 +452,9 @@ export function mapPart(
           name: part.toolName,
           input: invalid ? undefined : part.input,
           rawInput: invalid && typeof part.input === "string" ? part.input : undefined,
+          ...(preservePartData && part.providerMetadata !== undefined
+            ? { providerData: part.providerMetadata }
+            : {}),
         },
       ];
     }

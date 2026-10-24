@@ -155,11 +155,11 @@ type ModelMessage =
 
 ```ts
 type ModelStreamEvent =
-  | { type: "text_delta"; text: string }
+  | { type: "text_delta"; text: string; providerData?: unknown }
   | { type: "reasoning_delta"; text: string; providerData?: unknown }       // providerData：随增量携带的专有数据（如 Anthropic 签名 delta），落到当前推理块
   | { type: "reasoning_block"; text: string; providerData?: unknown }       // 完整推理块（含签名等专有数据时必须提供）
   | { type: "tool_call_delta"; toolCallId: string; name: string; argsDelta: string }   // 可选，仅用于显示
-  | { type: "tool_call"; toolCallId: string; name: string; input?: unknown; rawInput?: string }
+  | { type: "tool_call"; toolCallId: string; name: string; input?: unknown; rawInput?: string; providerData?: unknown }
   | { type: "usage"; usage: Usage }
   | { type: "finish"; reason: FinishReason; rawReason?: string }
   | { type: "heartbeat" }                                                   // 上游已开始响应；只给计时用，不转发、不算输出
@@ -168,6 +168,8 @@ type FinishReason = "stop" | "tool_calls" | "length" | "content_filter" | "other
 ```
 
 流式契约（适配器必须保证）：
+
+ADR-0061：文本签名采用 `text_delta.providerData`，包括空文本的仅元数据增量；消费方先追加非空文本再把数据落到当前同类块，不发空的界面增量。工具调用的数据随完整 `tool_call` 落到对应 `ToolCallRef`。数据对运行时不透明，只能在同服务商、同协议时回传，旧日志可缺省。
 
 1. 成功的流以且仅以一个 `finish` 结束；`finish` 之后不再有事件。
 2. `tool_call` 只在该调用的参数完整后发出。参数 JSON 解析失败时 `input` 为空、`rawInput` 为原文，由工具执行器返回 `invalid_input` 让模型修正，而不是让整个请求失败。

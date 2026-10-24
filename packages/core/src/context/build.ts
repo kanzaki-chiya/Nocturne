@@ -666,7 +666,10 @@ function historyToMessages(
           (entry.protocol === undefined || entry.protocol === currentModelProtocol);
         const content = sameSource
           ? entry.content
-          : entry.content.filter((b) => !(b.type === "reasoning" && b.providerData !== undefined));
+          : entry.content.flatMap((b): ContentBlock[] => {
+              if (b.providerData === undefined) return [b];
+              return b.type === "reasoning" ? [] : [{ type: "text", text: b.text }];
+            });
         // 旧日志里失败轮次可能留下空 assistant；Messages 不接受空 content。
         if (content.length === 0 && entry.toolCalls.length === 0) break;
         // 细分（ADR-0046 §5）：回答文字与推理归 assistant，调用参数归 tool
@@ -675,7 +678,9 @@ function historyToMessages(
         messages.push({
           role: "assistant",
           content,
-          toolCalls: entry.toolCalls,
+          toolCalls: sameSource
+            ? entry.toolCalls
+            : entry.toolCalls.map(({ providerData: _data, ...call }) => call),
         });
         for (const c of entry.toolCalls) unsettled.add(c.callId);
         break;

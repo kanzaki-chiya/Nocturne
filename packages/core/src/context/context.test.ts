@@ -457,6 +457,24 @@ describe("buildContext", () => {
   });
   const chatModel: ModelInfo = { ...model, protocol: "openai-compatible" };
 
+  it.each(["same", "provider", "protocol"])("文本与工具签名只在同源回传：%s", (change) => {
+    const entry = assistantWith("openai-compatible");
+    if (entry.kind !== "assistant") throw new Error("assistant required");
+    entry.content = [
+      { type: "text", text: "answer", provider: "test", providerData: { sig: "text" } },
+    ];
+    entry.toolCalls = [{ callId: "call", name: "read", input: {}, providerData: { sig: "call" } }];
+    if (change === "provider") entry.model = { provider: "other", model: "m" };
+    if (change === "protocol") entry.protocol = "openai-responses";
+    const msg = buildContext(baseInput({ history: [entry], model: chatModel })).request.messages[0];
+    expect(msg?.role).toBe("assistant");
+    if (msg?.role !== "assistant") throw new Error("assistant required");
+    expect(msg.content[0]).toEqual(
+      change === "same" ? entry.content[0] : { type: "text", text: "answer" },
+    );
+    expect(msg.toolCalls[0]?.providerData).toEqual(change === "same" ? { sig: "call" } : undefined);
+  });
+
   it("同一服务商但跨协议切换：剥离 providerData 推理块，保留文本", () => {
     const built = buildContext(
       baseInput({ history: [assistantWith("anthropic")], model: chatModel }),

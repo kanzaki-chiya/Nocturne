@@ -167,7 +167,7 @@ export interface ModelRequest {
 // ── 流式事件（provider-api.md 第 4 节） ────────────────────
 
 export type ModelStreamEvent =
-  | { type: "text_delta"; text: string }
+  | { type: "text_delta"; text: string; providerData?: unknown }
   | {
       type: "reasoning_delta";
       text: string;
@@ -190,6 +190,7 @@ export type ModelStreamEvent =
       name: string;
       input?: unknown;
       rawInput?: string | undefined;
+      providerData?: unknown;
     }
   | { type: "usage"; usage: Usage }
   | { type: "finish"; reason: FinishReason; rawReason?: string | undefined }

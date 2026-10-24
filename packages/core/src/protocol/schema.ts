@@ -15,7 +15,12 @@ const modelRefSchema = z.object({
 });
 
 const contentBlockSchema = z.union([
-  z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({
+    type: z.literal("text"),
+    text: z.string(),
+    provider: z.string().optional(),
+    providerData: z.unknown().optional(),
+  }),
   z.object({
     type: z.literal("reasoning"),
     text: z.string(),
@@ -27,6 +32,7 @@ const contentBlockSchema = z.union([
 const toolCallRefSchema = z.object({
   callId: z.string(),
   providerCallId: z.string().optional(),
+  providerData: z.unknown().optional(),
   name: z.string(),
   input: z.unknown().optional(),
   rawInput: z.string().optional(),

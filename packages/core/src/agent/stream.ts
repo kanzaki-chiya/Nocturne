@@ -162,7 +162,18 @@ export async function consumeStream(
         if (firstContent === undefined && isContentEvent(ev)) firstContent = now();
         switch (ev.type) {
           case "text_delta": {
-            appendDelta(acc.content, "text", ev.text);
+            if (
+              ev.text !== "" ||
+              ev.providerData === undefined ||
+              acc.content.at(-1)?.type !== "text"
+            )
+              appendDelta(acc.content, "text", ev.text);
+            const last = acc.content.at(-1);
+            if (last?.type === "text" && ev.providerData !== undefined) {
+              last.provider = provider.id;
+              last.providerData = ev.providerData;
+            }
+            if (ev.text === "") break;
             session.emitEphemeral(
               "message.assistant.delta",
               { messageId, kind: "text", delta: ev.text },
@@ -171,8 +182,13 @@ export async function consumeStream(
             break;
           }
           case "reasoning_delta": {
+            if (
+              ev.text !== "" ||
+              (ev.providerData !== undefined && acc.content.at(-1)?.type !== "reasoning")
+            )
+              appendDelta(acc.content, "reasoning", ev.text);
             // 专有数据 delta（如 Anthropic signature）落到末尾推理块；
-            // text 为空时只合并数据，不产生空块/空 delta 事件
+            // 仅元数据的部件也要保留，但不产生空的界面 delta。
             if (ev.providerData !== undefined) {
               const last = acc.content.at(-1);
               if (last?.type === "reasoning") {
@@ -181,7 +197,6 @@ export async function consumeStream(
               }
             }
             if (ev.text === "") break;
-            appendDelta(acc.content, "reasoning", ev.text);
             session.emitEphemeral(
               "message.assistant.delta",
               { messageId, kind: "reasoning", delta: ev.text },
@@ -229,6 +244,7 @@ export async function consumeStream(
             acc.toolCalls.push({
               callId,
               providerCallId: ev.toolCallId,
+              ...(ev.providerData !== undefined ? { providerData: ev.providerData } : {}),
               name: ev.name,
               input,
               rawInput: input === undefined ? rawInput : undefined,

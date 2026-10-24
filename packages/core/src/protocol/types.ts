@@ -157,7 +157,7 @@ export function normalizeReasoningEffortLevels(
 }
 
 export type ContentBlock =
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; provider?: string | undefined; providerData?: unknown }
   | {
       type: "reasoning";
       text: string;
@@ -205,6 +205,7 @@ export interface ToolCallRef {
   callId: string;
   /** Provider 返回的原始 ID，仅用于回传该 Provider，业务逻辑不得依赖 */
   providerCallId?: string | undefined;
+  providerData?: unknown;
   name: string;
   /** 参数解析失败时为空 */
   input?: unknown;

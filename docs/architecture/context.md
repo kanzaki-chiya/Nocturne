@@ -171,6 +171,8 @@ Phase 2 提供自动修剪与手动 `/compact`；Phase 3 加入自动摘要（6.
 
 ## 7. 切换模型或 Provider
 
+ADR-0061 将下述同一来源条件扩展到正文与工具调用的 `providerData`：不满足时正文保留文字、去掉 provider/providerData，工具调用保留中性字段、去掉 providerData；签名推理块沿用丢弃规则。满足时三者原样回传。Context 不解释签名、不填占位值，Gemini 的缺签名兜底在适配器中完成。
+
 历史中的内容大多是中性的（文本、工具调用、工具结果），可以直接用于新模型。例外：
 
 - 推理内容若携带 Provider 专有数据（签名、加密内容），只能回传给产生它的 Provider **且同一协议**（ADR-0026 §6）：历史 `message.assistant` 记录的协议与当前模型的生效协议相同才保留 `providerData`，否则（跨 Provider、跨协议，或新模型协议无从比对时）丢弃这类推理块的专有数据。历史条目缺 `protocol` 字段（旧日志）时按旧规则只比较服务商。
