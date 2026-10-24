@@ -1182,9 +1182,9 @@ describe("readAttachment：复用附件校验，只认 child 自己的登记", (
 });
 
 describe("summarizeSubagentTask", () => {
-  it("压成单行、按 Unicode 码点截断；空文本回退「子任务」", () => {
+  it("压成单行、按 Unicode 码点截断；空文本回退「子代理」", () => {
     expect(summarizeSubagentTask("  a\n\tb   c  ")).toBe("a b c");
     expect(Array.from(summarizeSubagentTask("😀".repeat(200)))).toHaveLength(120);
-    expect(summarizeSubagentTask(" \n ")).toBe("子任务");
+    expect(summarizeSubagentTask(" \n ")).toBe("子代理");
   });
 });

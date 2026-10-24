@@ -260,7 +260,7 @@ interface SubagentObservation {
 
 `ToolCallStatus` 沿用 protocol。summary 是查询投影，不是新的会话状态或事件；最终结果正文仍从父 `task.completed.modelContent` 或子 `finish` 的已持久化输入读取，不复制进 summary。`outcome` 只来自父调用已持久化的结算，没有时省略；`endedAt` 优先取父结算时间，否则取可判定终止的最后一个子 `turn.completed.time`。缺父耗时的时间差是近似耗时，客户端须标注；没有结束事实时不提供最终耗时。
 
-`listSubagents` 返回该父会话的**直接内置子会话**（含已结束），按 `startedAt`、`childSessionId` 升序。父日志必须存在；已有父 Session 时读其已提交事件，否则只读父日志。映射以子 `session.created.parent` 为准，父日志 `tool.started.input` 补档位和摘要；旧日志缺启动参数时档位用 `default`、摘要回退首条子 `message.user`，再缺则「子任务」。不能根据当前档位配置判断历史调用属于内置还是外部。`task.output.childSessionId` 仅为定位提示，使用前仍校验 child 的 parent。外部 ACP 不返回伪造的 child id（桌面处理见 ADR 修订（五））。
+`listSubagents` 返回该父会话的**直接内置子会话**（含已结束），按 `startedAt`、`childSessionId` 升序。父日志必须存在；已有父 Session 时读其已提交事件，否则只读父日志。映射以子 `session.created.parent` 为准，父日志 `tool.started.input` 补档位和摘要；旧日志缺启动参数时档位用 `default`、摘要回退首条子 `message.user`，再缺则「子代理」（常量 `SUBAGENT_TASK_FALLBACK`，由 `@nocturne/core/protocol` 导出，Core 与桌面端共用）。不能根据当前档位配置判断历史调用属于内置还是外部。`task.output.childSessionId` 仅为定位提示，使用前仍校验 child 的 parent。外部 ACP 不返回伪造的 child id（桌面处理见 ADR 修订（五））。
 
 查询可复用 `listSessions({ includeSubagents: true })` 的只读日志头扫描建立候选索引，但不能把 `locked` 当作运行状态，也不能只靠该列表的容错跳过逻辑校验指定 child。运行态来自 Runtime 共享的 launcher 登记簿；缓存失效可重扫日志，不能把缓存作为持久事实源。
 

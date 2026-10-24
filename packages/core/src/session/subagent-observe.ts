@@ -10,6 +10,7 @@
  * 返回时检查标记并立即退订，不会复活。
  */
 import {
+  SUBAGENT_TASK_FALLBACK,
   decodeDurableEvent,
   isDurableEvent,
   type DurableEvent,
@@ -30,16 +31,17 @@ import type { ActiveSubagent, ObservedSignal, SubagentRegistry } from "./subagen
 /** 回放每批推送的事件数，批间让出事件循环（与 RPC session.subscribe 回放同一数值） */
 const REPLAY_CHUNK = 256;
 const TASK_SUMMARY_MAX = 120;
-const FALLBACK_TASK = "子任务";
 /** 日志头索引先读的字节数：够装 session.created 首行 */
 const HEAD_BYTES = 4096;
 const INDEX_BATCH = 32;
 const CACHE_LIMIT = 512;
 
-/** task 原文压成单行，最多 120 个 Unicode 码点；空文本回退「子任务」 */
+/** task 原文压成单行，最多 120 个 Unicode 码点；空文本回退 `SUBAGENT_TASK_FALLBACK`（「子代理」） */
 export function summarizeSubagentTask(text: string): string {
   const flat = text.slice(0, 20_000).replace(/\s+/g, " ").trim();
-  return flat === "" ? FALLBACK_TASK : Array.from(flat).slice(0, TASK_SUMMARY_MAX).join("");
+  return flat === ""
+    ? SUBAGENT_TASK_FALLBACK
+    : Array.from(flat).slice(0, TASK_SUMMARY_MAX).join("");
 }
 
 export interface SubagentObservationDeps {

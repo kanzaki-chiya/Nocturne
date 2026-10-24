@@ -63,9 +63,9 @@ it("外部 agent 按父持久工具主体识别，不读当前配置；内置不
   );
 });
 
-it("task 原文压成单行、至多 120 个码点（含代理对），空文本回退「子任务」", () => {
+it("task 原文压成单行、至多 120 个码点（含代理对），空文本回退「子代理」", () => {
   expect(oneLineSummary("  第一行\n\n第二行\t尾  ")).toBe("第一行 第二行 尾");
-  expect(oneLineSummary("   ")).toBe("子任务");
+  expect(oneLineSummary("   ")).toBe("子代理");
   const long = "😀".repeat(200);
   expect(Array.from(oneLineSummary(long))).toHaveLength(120);
 });

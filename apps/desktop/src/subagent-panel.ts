@@ -3,11 +3,12 @@
  * 状态与耗时的推导、最终结果的提取。界面在 SubagentPane.tsx / PanelChrome.tsx，
  * 观察状态在 subagent-watch.ts。不依赖 React。
  */
-import type {
-  SessionView,
-  SubagentSummary,
-  ToolCallStatus,
-  ToolEntry,
+import {
+  SUBAGENT_TASK_FALLBACK,
+  type SessionView,
+  type SubagentSummary,
+  type ToolCallStatus,
+  type ToolEntry,
 } from "@nocturne/core/protocol";
 
 import { SUBAGENT_SUMMARY_MAX } from "./side-panel";
@@ -22,7 +23,9 @@ export interface ExternalRun {
 /** task 原文压成单行、至多 120 个码点（与 Core 的摘要同一口径，只用于外部调用等没有 child 摘要的场合） */
 export function oneLineSummary(text: string): string {
   const flat = text.slice(0, 20_000).replace(/\s+/g, " ").trim();
-  return flat === "" ? "子任务" : Array.from(flat).slice(0, SUBAGENT_SUMMARY_MAX).join("");
+  return flat === ""
+    ? SUBAGENT_TASK_FALLBACK
+    : Array.from(flat).slice(0, SUBAGENT_SUMMARY_MAX).join("");
 }
 
 /** 工具行是不是 task 调用 */

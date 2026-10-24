@@ -5,6 +5,9 @@
 import type { RuntimeEvent } from "./events.js";
 import type { ToolCallStatus } from "./types.js";
 
+/** task 原文为空时摘要的兜底文案；Core 的 `summarizeSubagentTask` 与桌面端共用这一份 */
+export const SUBAGENT_TASK_FALLBACK = "子代理";
+
 export interface SubagentSummary {
   parentSessionId: string;
   callId: string;
