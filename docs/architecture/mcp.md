@@ -111,11 +111,15 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
     mutates: !(annotations?.readOnlyHint === true),
     concurrencySafe: annotations?.readOnlyHint === true && annotations?.destructiveHint !== true,
     timeoutMs: server.callTimeoutMs ?? 60_000,
+    // 仅受信运行时来源（callerMetadata: true）：_meta["nocturne/fileEffects"] === "none"
+    fileEffects?: "none",
   },
   permissionSubjects: () => [{ kind: "mcp", target: "<server>/<tool>" }],
   execute: (input, ctx) => /* tools/call 调用与结果映射（第 6 节） */,
 }
 ```
+
+`fileEffects` 只采信受信运行时来源（第 10 节）在工具 `_meta["nocturne/fileEffects"]` 上的声明；用户配置的服务器即使声明也忽略，其可写工具照常计入回退的未追踪调用。
 
 **命名规范化**（工具名字符集为 `[a-z0-9_]`，见 [tool-api.md](../protocols/tool-api.md)）：
 

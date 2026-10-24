@@ -1,7 +1,7 @@
 import path from "node:path";
 import { Box, Text, useInput, type DOMElement } from "ink";
 import { useEffect, useRef, useState } from "react";
-import type { RewindMode, RewindTarget } from "@nocturne/core/protocol";
+import { untrackedCallsText, type RewindMode, type RewindTarget } from "@nocturne/core/protocol";
 import { boxSafe, truncateLine } from "../format.js";
 import { relativeTime } from "../resume-label.js";
 import { useTheme } from "../theme.js";
@@ -82,7 +82,7 @@ export function RewindPage({
             ),
             ...(target.untrackedCalls > 0
               ? [
-                  `这一轮之后有 ${target.untrackedCalls} 次 shell/MCP 调用，它们造成的改动不会被还原`,
+                  `这一轮之后${untrackedCallsText(target.untrackedCalls, target.untrackedByKind)}的改动不会被还原`,
                 ]
               : []),
             ...(operation === "conversation" ? ["文件保持当前状态"] : []),
@@ -228,10 +228,10 @@ export function RewindPage({
                   {start + i === state.cursor ? "› " : "  "}
                   {truncateLine(
                     boxSafe(item.firstLine),
-                    Math.max(1, width - (item.untrackedCalls ? 46 : 34)),
+                    Math.max(1, width - (item.untrackedCalls ? 50 : 34)),
                   )}{" "}
                   · {relativeTime(Date.parse(item.time))} · 改动 {item.files.length} 个文件
-                  {item.untrackedCalls ? " · 含 shell" : ""}
+                  {item.untrackedCalls ? " · 含未追踪调用" : ""}
                 </Text>
               </Box>
             ))

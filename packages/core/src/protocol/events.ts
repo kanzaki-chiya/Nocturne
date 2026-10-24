@@ -110,6 +110,11 @@ export interface ToolStartedPayload {
   /** 工具声明其结果参与历史折叠（tools.md 第 4 节 pinResult）；缺省同 false */
   pinResult?: boolean | undefined;
   mutates?: boolean | undefined;
+  /**
+   * 工具声明不改动工作区文件（tool-api.md 的 traits.fileEffects）：未追踪调用统计据此
+   * 排除；缺省（含旧日志）按可能改动处理。
+   */
+  fileEffects?: "none" | undefined;
 }
 
 export interface PermissionRequestedPayload {

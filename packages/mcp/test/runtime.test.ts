@@ -77,6 +77,8 @@ async function imageMetaFixture(
         name: "shot",
         description: "screenshot",
         inputSchema: { type: "object", properties: {} },
+        // 只有受信运行时来源的这条声明会被采信（fileEffects，见 mcp.md 第 7 节）
+        _meta: { "nocturne/fileEffects": "none" },
       },
     ],
   }));
@@ -211,7 +213,7 @@ describe("MCP 图片通用映射（不按工具名特殊处理）", () => {
 });
 
 describe("调用者 _meta 注入（仅受信运行时来源）", () => {
-  it("运行时来源的调用带 sessionId/turnId/callId，普通 MCP 不带", async () => {
+  it("运行时来源的调用带 sessionId/turnId/callId，fileEffects 声明只对它生效；普通 MCP 都不带", async () => {
     const plainFx = await imageMetaFixture((params) => ({
       content: [{ type: "text", text: JSON.stringify(params._meta ?? null) }],
     }));
@@ -230,6 +232,8 @@ describe("调用者 _meta 注入（仅受信运行时来源）", () => {
         expect(tool).toBeDefined();
         await tool?.execute({}, toolCtx("call-plain"));
         expect(plainFx.lastMeta.at(-1)).toBeUndefined();
+        // 普通 MCP 自称不改文件也不采信：照常计入未追踪调用
+        expect(tool?.traits.fileEffects).toBeUndefined();
       } finally {
         await plain.close();
       }
@@ -264,6 +268,7 @@ describe("调用者 _meta 注入（仅受信运行时来源）", () => {
         const tool = session.tools().find((t) => t.name === "mcp__desktop_browser__shot");
         expect(all).toContain("mcp__desktop_browser__shot");
         expect(tool).toBeDefined();
+        expect(tool?.traits.fileEffects).toBe("none");
         const res = await tool?.execute({}, toolCtx("call-rt-1"));
         expect(res?.status).toBe("ok");
         expect(rtFx.lastMeta.at(-1)).toMatchObject({

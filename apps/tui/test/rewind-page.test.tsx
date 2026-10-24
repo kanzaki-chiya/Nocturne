@@ -18,6 +18,10 @@ const target: RewindTarget = {
     { path: "C:/work/dir", action: "untracked", reason: "目录", external: false },
   ],
   untrackedCalls: 2,
+  untrackedByKind: [
+    { kind: "shell", count: 1 },
+    { kind: "mcp", count: 1 },
+  ],
 };
 async function page(targets: RewindTarget[] = [target], width = 81, height = 24, inline = false) {
   const mouse = providerMouse(),
@@ -42,7 +46,7 @@ async function page(targets: RewindTarget[] = [target], width = 81, height = 24,
 it("竖排操作和两级默认取消；预览标明删除、无法还原、外部修改和未追踪调用", async () => {
   const ui = await page();
   expect(ui.lastFrame()).toContain("改动 3 个文件");
-  expect(ui.lastFrame()).toContain("含 shell");
+  expect(ui.lastFrame()).toContain("含未追踪调用");
   await changedFrame(ui, () => ui.stdin.write("\r"));
   expect(ui.lastFrame()).toContain("> [ 取消 ]");
   await changedFrame(ui, () => ui.stdin.write("\r"));
@@ -56,7 +60,7 @@ it("竖排操作和两级默认取消；预览标明删除、无法还原、外�
     "已在外部修改",
     "删除 new.txt",
     "无法还原（目录）",
-    "2 次 shell/MCP",
+    "命令 1 次、MCP 工具 1 次的改动不会被还原",
     "> [ 取消 ]",
   ])
     expect(ui.lastFrame()).toContain(text);

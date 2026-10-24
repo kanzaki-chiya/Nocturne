@@ -8,15 +8,59 @@ import {
   type RewindFile,
   type RewindTarget,
   type SessionRewoundPayload,
+  type UntrackedCallCount,
+  type UntrackedCallKind,
 } from "../protocol/index.js";
 import type { Session } from "./types.js";
 
+/**
+ * 可能改动文件却不被检查点追踪的调用：声明 mutates、没有 edit 主体、且没有声明
+ * fileEffects: "none"。只看事件里保存的工具声明，不按工具名判断。
+ */
 export function isUntrackedCall(event: DurableEvent): boolean {
   return (
     event.type === "tool.started" &&
     event.payload.mutates === true &&
+    event.payload.fileEffects !== "none" &&
     !event.payload.subjects.some((s) => s.kind === "edit")
   );
+}
+
+/** 类别显示顺序固定，界面不必再排序 */
+const UNTRACKED_KIND_ORDER: readonly UntrackedCallKind[] = [
+  "shell",
+  "mcp",
+  "subagent",
+  "network",
+  "read",
+  "other",
+];
+
+/** 按类别统计未追踪调用；只保留计数大于 0 的类别 */
+export function countUntrackedCalls(events: Iterable<DurableEvent>): {
+  total: number;
+  byKind: UntrackedCallCount[];
+} {
+  const counts = new Map<UntrackedCallKind, number>();
+  let total = 0;
+  for (const event of events) {
+    if (event.type !== "tool.started" || !isUntrackedCall(event)) continue;
+    let kind: UntrackedCallKind = "other";
+    for (const subject of event.payload.subjects) {
+      if (subject.kind === "edit") continue;
+      kind = subject.kind;
+      break;
+    }
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    total++;
+  }
+  return {
+    total,
+    byKind: UNTRACKED_KIND_ORDER.flatMap((kind) => {
+      const count = counts.get(kind);
+      return count === undefined ? [] : [{ kind, count }];
+    }),
+  };
 }
 
 export function rewindCheckpoints(
@@ -108,6 +152,7 @@ export async function rewindTargets(
         external: baseline.has(key) && current !== baseline.get(key),
       });
     }
+    const untracked = countUntrackedCalls(events.filter((e) => e.seq > event.seq));
     targets.push({
       seq: event.seq,
       firstLine: firstUserText(event.payload) ?? "",
@@ -123,7 +168,8 @@ export async function rewindTargets(
         .join("\n"),
       hasImages: (event.payload.attachments?.length ?? 0) > 0,
       files,
-      untrackedCalls: events.filter((e) => e.seq > event.seq && isUntrackedCall(e)).length,
+      untrackedCalls: untracked.total,
+      untrackedByKind: untracked.byKind,
     });
   }
   return targets;

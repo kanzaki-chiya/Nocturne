@@ -1,4 +1,5 @@
 import type { SessionRewoundPayload } from "./events.js";
+import type { UntrackedCallCount } from "./rewind.js";
 
 export type RewindFileResult = SessionRewoundPayload["files"][number];
 export interface TurnChangeFile {
@@ -16,6 +17,8 @@ export interface TurnChanges {
   seq: number;
   files: TurnChangeFile[];
   untrackedCalls: number;
+  /** untrackedCalls 按类别拆分（见 UntrackedCallKind）；旧后台不给 */
+  untrackedByKind?: UntrackedCallCount[] | undefined;
   reverted?: { seq: number; files: RewindFileResult[] };
 }
 export interface TurnChangeDiff {

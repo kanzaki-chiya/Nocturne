@@ -9,7 +9,7 @@ import {
   type TurnChanges,
   type TurnChangeDiff,
 } from "../protocol/index.js";
-import { isUntrackedCall, lastFileStates } from "./rewind.js";
+import { countUntrackedCalls, isUntrackedCall, lastFileStates } from "./rewind.js";
 import type { Session } from "./types.js";
 
 interface Snapshot {
@@ -69,17 +69,17 @@ export function createTurnChanges(session: Session, platform: Platform, sessions
         .filter((e) => e.type === "message.user")
         .map((e) => e.seq),
     );
-    const rounds = new Map<number, { files: Map<string, Snapshot>; untrackedCalls: number }>();
+    const rounds = new Map<number, { files: Map<string, Snapshot>; untracked: DurableEvent[] }>();
     const lastAfter = lastFileStates(events, platform);
     let seq = 0;
     for (const e of events) {
       if (e.type === "message.user") {
         seq = e.seq;
-        if (active.has(seq)) rounds.set(seq, { files: new Map(), untrackedCalls: 0 });
+        if (active.has(seq)) rounds.set(seq, { files: new Map(), untracked: [] });
       }
       const round = rounds.get(seq);
       if (!round) continue;
-      if (isUntrackedCall(e)) round.untrackedCalls++;
+      if (isUntrackedCall(e)) round.untracked.push(e);
       if (e.type === "tool.completed" && e.payload.status === "ok") {
         for (const item of resultDiffs(e.payload.output)) {
           const snapshot = round.files.get(canonical(item.path));
@@ -239,7 +239,8 @@ export function createTurnChanges(session: Session, platform: Platform, sessions
               external: await external(snapshot.path, lastAfter.get(key)),
             });
         }
-        if (!files.length && !round.untrackedCalls) continue;
+        const untracked = countUntrackedCalls(round.untracked);
+        if (!files.length && !untracked.total) continue;
         const reverted = events.findLast(
           (e) =>
             e.type === "session.rewound" &&
@@ -250,7 +251,8 @@ export function createTurnChanges(session: Session, platform: Platform, sessions
         result.push({
           seq,
           files,
-          untrackedCalls: round.untrackedCalls,
+          untrackedCalls: untracked.total,
+          untrackedByKind: untracked.byKind,
           ...(reverted?.type === "session.rewound"
             ? { reverted: { seq: reverted.seq, files: reverted.payload.files } }
             : {}),

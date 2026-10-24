@@ -203,6 +203,7 @@ const payloadSchemas = {
     }),
     pinResult: z.boolean().optional(),
     mutates: z.boolean().optional(),
+    fileEffects: z.literal("none").optional(),
   }),
   "permission.requested": z.object({
     requestId: z.string(),

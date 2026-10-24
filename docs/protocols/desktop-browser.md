@@ -85,6 +85,7 @@ open先在外壳预留资源和tabId：所属会话正显示在前台时向main�
 - 包装器在 `tools/call.params._meta["nocturne/caller"]` 覆写可信上下文：`{ sessionId, turnId, callId }`，来自 **ToolContext**，不从 arguments 或模型 `_meta` 合并。只有受信的运行时来源启用该注入，普通 MCP 默认不发送会话元数据。校验根绑定和调用者上下文后才分配操作租约；同一 `(sessionId, turnId, callId)` 的在途重复请求拒绝，不自动重放结果或副作用。
 - 内置子会话复用父 MCP 工具定义和连接，不二次 initialize。根 bearer 的权限范围只到父面板；`ctx.sessionId` 区分 child actor。外壳信任该后台提供的 actor（同一凭证已授权到该根面板），不据此扩大跨根权限。每个 actor 的 `open` 创建自己标签；父与兄弟 child 默认不能操作彼此标签，`list_tabs` 也只列该 actor 的标签。child 标签呈现在父会话面板，徽标显示子代理。子会话依旧先过自身非交互 gate，不新增权限冒泡；`explore` 仅可见只读工具，不能新开标签。
 - `tabId` 为外壳生成的随机不透明 id；每次操作检查绑定、actor、ownership、generation、手动接管状态。猜到别的 id 仍报 `tab_not_owned`。不复用用户标签，不允许模型「认领」普通标签。`open` 总是新建；已有 agent 标签须用明确 tabId 导航，无隐含的「当前标签」。
+- 每个工具在 `tools/list` 的 `_meta["nocturne/fileEffects"]` 声明 `"none"`：浏览器操作不改动工作区文件，包装后带 `traits.fileEffects: "none"`，不计入回退与本轮改动的未追踪调用（[mcp.md](../architecture/mcp.md) 第 5 节）。
 - 手机发起的 Turn 也可以用这组工具，权限照常处理。调用者信息见 [tool-api.md 第 7 节](tool-api.md#7-桌面运行时来源的调用者元数据)。
 
 ### 标签不可见时后台照常操作

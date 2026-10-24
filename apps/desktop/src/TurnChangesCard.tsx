@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type {
-  RewindTarget,
-  TurnChangeDiff,
-  TurnChangeFile,
-  TurnChanges,
+import {
+  untrackedCallsText,
+  type RewindTarget,
+  type TurnChangeDiff,
+  type TurnChangeFile,
+  type TurnChanges,
 } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 import { displayPath } from "./paths";
@@ -205,9 +206,10 @@ export function TurnChangesCard(props: Props) {
     .filter((f) => f.external)
     .map((f) => displayPath(f.path, cwd).split(/[\\/]/).at(-1))
     .join("、");
+  // 未追踪调用按类别说明（ADR-0041 修订 2026-10-24），不再统称 shell
   const shellNote = (
     <p className="turn-change-note">
-      这一轮有 {turn.untrackedCalls} 次 shell 调用，它们造成的改动不在统计里
+      未计入统计：{untrackedCallsText(turn.untrackedCalls, turn.untrackedByKind)}
     </p>
   );
   if (turn.files.length === 0) {
@@ -314,7 +316,8 @@ export function TurnChangesCard(props: Props) {
           <p className="turn-change-note">对话保留，会告诉模型这些文件已经还原。</p>
           {(target?.untrackedCalls ?? 0) > 0 && (
             <p className="turn-change-note">
-              这一轮有 {target?.untrackedCalls} 次 shell 调用，它们造成的改动不会被还原。
+              {untrackedCallsText(target?.untrackedCalls ?? 0, target?.untrackedByKind)}
+              的改动不会还原
             </p>
           )}
           {error && (

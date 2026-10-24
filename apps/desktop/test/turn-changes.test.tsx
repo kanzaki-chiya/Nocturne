@@ -77,6 +77,7 @@ function fixture() {
       },
     ],
     untrackedCalls: 1,
+    untrackedByKind: [{ kind: "shell", count: 1 }],
   };
   const target: RewindTarget = {
     seq: 8,
@@ -90,6 +91,7 @@ function fixture() {
       { path: latest.files[2]?.path ?? "", action: "untracked", reason: "目录", external: false },
     ],
     untrackedCalls: 1,
+    untrackedByKind: [{ kind: "shell", count: 1 }],
   };
   const diff = vi
     .fn<RpcSession["turnChangeDiff"]>()
@@ -197,6 +199,7 @@ it("确认列还原、删除、无法还原与外部警告；取消默认聚焦�
   expect(screen.getByText("删除")).toBeDefined();
   expect(screen.getByText("本轮新建")).toBeDefined();
   expect(screen.getByText("a.ts 在这一轮之后被外部修改过，撤销会覆盖那些修改")).toBeDefined();
+  expect(screen.getByText("命令 1 次的改动不会还原")).toBeDefined();
   expect(h.targets).toHaveBeenCalledTimes(1);
   fireEvent.keyDown(window, { key: "Escape" });
   expect(screen.queryByRole("group", { name: "确认撤销文件改动" })).toBeNull();
@@ -336,32 +339,32 @@ it("无助手文字时卡片落在最后条目之后；全 unavailable 无合计
   expect(screen.queryByRole("button", { name: "↶ 撤销" })).toBeNull();
 });
 
-it("有文件时 shell 说明不带「还有」", () => {
+it("有文件时未计入说明按类别写、不带「还有」", () => {
   fixture();
   const card = screen.getByRole("region", { name: "本轮文件更改 8" });
-  expect(
-    within(card).getByText("这一轮有 1 次 shell 调用，它们造成的改动不在统计里"),
-  ).toBeDefined();
+  expect(within(card).getByText("未计入统计：命令 1 次")).toBeDefined();
   expect(card.textContent).not.toContain("还有");
 });
 
-it("0 个文件只留 shell 说明一行，没有标题、合计和撤销；已撤销也不显示结果", () => {
+it("0 个文件只留未计入说明一行，没有标题、合计和撤销；已撤销也不显示结果", () => {
   const h = fixture();
   h.latest.files = [];
   h.latest.untrackedCalls = 2;
+  // 旧后台不给类别：退回「工具调用 N 次」
+  h.latest.untrackedByKind = undefined;
   h.rendered.rerender(<Conversation {...h.props} />);
   expect(screen.queryByRole("region", { name: "本轮文件更改 8" })).toBeNull();
   expect(screen.queryByText(/已编辑 0 个文件/)).toBeNull();
   expect(screen.queryByRole("button", { name: "↶ 撤销" })).toBeNull();
-  const note = screen.getByText("这一轮有 2 次 shell 调用，它们造成的改动不在统计里");
+  const note = screen.getByText("未计入统计：工具调用 2 次");
   expect(note.closest(".turn-changes")).toBeNull();
   h.latest.reverted = { seq: 20, files: [] };
   h.rendered.rerender(<Conversation {...h.props} />);
   expect(screen.queryByText(/已撤销/)).toBeNull();
-  expect(screen.getByText("这一轮有 2 次 shell 调用，它们造成的改动不在统计里")).toBeDefined();
+  expect(screen.getByText("未计入统计：工具调用 2 次")).toBeDefined();
 });
 
-it("0 个文件且没有 shell 调用时卡片不渲染任何内容", () => {
+it("0 个文件且没有未追踪调用时卡片不渲染任何内容", () => {
   const h = fixture();
   cleanup();
   const { container } = render(

@@ -57,6 +57,12 @@ import type { AttachmentStore } from "./attachments.js";
 export interface ToolTraits {
   /** 执行是否可能改变外部状态 */
   mutates: boolean;
+  /**
+   * 声明为 "none" 表示虽可能改变外部状态（网页、远端服务），但不改动工作区文件：
+   * 回退预览与每轮改动的「未追踪调用」统计不计入它（ADR-0041 修订 2026-10-24）。
+   * 缺省按可能改动文件处理；拿不准的工具不要声明。
+   */
+  fileEffects?: "none" | undefined;
   /** 能否与其他 concurrencySafe 调用并行执行 */
   concurrencySafe: boolean;
   /** 默认超时（毫秒） */

@@ -1,7 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime, FakeProvider, createPlatform } from "../src/index.js";
 import { createCheckpointRecorder } from "../src/session/checkpoints.js";
 import { createTurnChanges } from "../src/session/turn-changes.js";
@@ -65,6 +65,7 @@ it("同轮两次编辑取净值；两轮归属与后续工具改动不误报 ext
           },
         ],
         untrackedCalls: 0,
+        untrackedByKind: [],
       },
       {
         seq: second.seq,
@@ -87,6 +88,7 @@ it("同轮两次编辑取净值；两轮归属与后续工具改动不误报 ext
           },
         ],
         untrackedCalls: 0,
+        untrackedByKind: [],
       },
     ]);
     console.log("turnChanges two-round JSON:", JSON.stringify(changes));
@@ -477,4 +479,117 @@ it("after 字节存在时不走退回，结果与精确计算相同", async () =
   } finally {
     await h.session.close();
   }
+});
+
+describe("未追踪调用按类别统计（ADR-0041 修订 2026-10-24）", () => {
+  type Started = Parameters<ReturnType<typeof internalSession>["emit"]>;
+  const started = (
+    callId: string,
+    subjects: { kind: "shell" | "mcp" | "subagent" | "edit"; target: string }[],
+    extra: { mutates?: boolean; fileEffects?: "none" } = {},
+  ): [Started[0], Started[1]] => [
+    "tool.started",
+    {
+      callId,
+      name: `tool-${callId}`,
+      input: {},
+      subjects,
+      permission: { action: "allow", source: "rule" },
+      mutates: true,
+      ...extra,
+    } as Started[1],
+  ];
+
+  it("只用浏览器与 task 的轮：声明不改文件的浏览器调用不计入，task 记为子代理", async () => {
+    const h = await setup();
+    try {
+      const turn = await h.user();
+      const browser = { kind: "mcp" as const, target: "desktop_browser/open" };
+      await h.s.emit(...started("b1", [browser], { fileEffects: "none" }));
+      await h.s.emit(...started("b2", [browser], { fileEffects: "none" }));
+      await h.s.emit(...started("t1", [{ kind: "subagent", target: "quick" }]));
+      const [changes] = await h.session.turnChanges();
+      expect(changes).toMatchObject({
+        seq: turn.seq,
+        files: [],
+        untrackedCalls: 1,
+        untrackedByKind: [{ kind: "subagent", count: 1 }],
+      });
+    } finally {
+      await h.session.close();
+    }
+  });
+
+  it("只有声明不改文件的调用时整轮不出现", async () => {
+    const h = await setup();
+    try {
+      await h.user();
+      await h.s.emit(
+        ...started("b1", [{ kind: "mcp", target: "desktop_browser/click" }], {
+          fileEffects: "none",
+        }),
+      );
+      expect(await h.session.turnChanges()).toEqual([]);
+    } finally {
+      await h.session.close();
+    }
+  });
+
+  it("命令与 MCP 混合：按类别计数、顺序固定；只读与 edit 调用不计入", async () => {
+    const h = await setup();
+    try {
+      await h.user();
+      await h.s.emit(...started("m1", [{ kind: "mcp", target: "demo/search" }]));
+      await h.s.emit(...started("s1", [{ kind: "shell", target: "echo 1 > a" }]));
+      await h.s.emit(...started("s2", [{ kind: "shell", target: "dir" }]));
+      await h.s.emit(...started("r1", [{ kind: "mcp", target: "demo/list" }], { mutates: false }));
+      await h.s.emit(...started("e1", [{ kind: "edit", target: path.join(h.root, "a") }]));
+      await h.s.emit(...started("o1", []));
+      const [changes] = await h.session.turnChanges();
+      expect(changes?.untrackedCalls).toBe(4);
+      expect(changes?.untrackedByKind).toEqual([
+        { kind: "shell", count: 2 },
+        { kind: "mcp", count: 1 },
+        { kind: "other", count: 1 },
+      ]);
+    } finally {
+      await h.session.close();
+    }
+  });
+
+  it("撤销路径：rewindTargets 统计目标之后所有轮的未追踪调用，类别与计数一致", async () => {
+    const h = await setup();
+    try {
+      const first = await h.user();
+      await h.edit("a", "one\n");
+      await h.s.emit(...started("s1", [{ kind: "shell", target: "dir" }]));
+      await h.s.emit(
+        ...started("b1", [{ kind: "mcp", target: "desktop_browser/open" }], {
+          fileEffects: "none",
+        }),
+      );
+      const second = await h.user();
+      await h.s.emit(...started("m1", [{ kind: "mcp", target: "demo/search" }]));
+      await h.s.emit(...started("t1", [{ kind: "subagent", target: "general" }]));
+      const targets = await h.session.rewindTargets();
+      const byKind = (seq: number) => targets.find((t) => t.seq === seq);
+      expect(byKind(first.seq)).toMatchObject({
+        untrackedCalls: 3,
+        untrackedByKind: [
+          { kind: "shell", count: 1 },
+          { kind: "mcp", count: 1 },
+          { kind: "subagent", count: 1 },
+        ],
+      });
+      expect(byKind(second.seq)).toMatchObject({
+        untrackedCalls: 2,
+        untrackedByKind: [
+          { kind: "mcp", count: 1 },
+          { kind: "subagent", count: 1 },
+        ],
+      });
+    } finally {
+      await h.session.close();
+    }
+  });
 });

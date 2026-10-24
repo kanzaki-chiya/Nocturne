@@ -251,6 +251,30 @@ describe("Executor 管线", () => {
     expect(h.scope.readState.get(path.join(wsReal, "a.txt"))).toBeDefined();
   });
 
+  it("tool.started 原样保存 mutates 与 fileEffects 声明（未追踪调用统计据此判断）", async () => {
+    const ws = tmpWorkspace();
+    const h = await makeHarness(ws);
+    const registry = createToolRegistry();
+    const page = (name: string, fileEffects?: "none"): ToolDefinition => ({
+      name,
+      description: "x",
+      inputSchema: { type: "object" },
+      traits: { mutates: true, concurrencySafe: true, timeoutMs: 1000, fileEffects },
+      permissionSubjects: () => [],
+      execute: () => Promise.resolve({ status: "ok", modelContent: "ok" }),
+    });
+    registry.register(page("page_click", "none"));
+    registry.register(page("plain_mutation"));
+    const executor = createToolExecutor(registry);
+    await executor.execute(call("page_click", {}), h.scope);
+    await executor.execute(call("plain_mutation", {}), h.scope);
+    const started = h.events.flatMap((e) => (e.type === "tool.started" ? [e.payload] : []));
+    expect(started.map((p) => [p.name, p.mutates, p.fileEffects])).toEqual([
+      ["page_click", true, "none"],
+      ["plain_mutation", true, undefined],
+    ]);
+  });
+
   it("工具抛异常 → tool_failed", async () => {
     const ws = tmpWorkspace();
     const h = await makeHarness(ws);

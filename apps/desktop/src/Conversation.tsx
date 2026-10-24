@@ -12,6 +12,7 @@ import {
 import { marked, type Token, type Tokens } from "marked";
 import {
   parseFileRefs,
+  untrackedCallsText,
   todoItemsFromCompletion,
   subagentRowInfo,
   splitCodeRef,
@@ -1143,7 +1144,7 @@ function UserMessage({
                     .join("、")}`
                 : ""}
               {(target?.untrackedCalls ?? 0) > 0
-                ? `；另有 ${target?.untrackedCalls} 次命令改动不还原`
+                ? `；${untrackedCallsText(target?.untrackedCalls ?? 0, target?.untrackedByKind)}的改动不还原`
                 : ""}
             </p>
             {restorable.length > 0 ? (

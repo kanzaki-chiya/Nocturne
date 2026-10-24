@@ -1,5 +1,6 @@
 import type { DurableEvent, SessionRewoundPayload } from "./events.js";
 import type { MessageUserPayload } from "./events.js";
+import type { SubjectKind } from "./types.js";
 
 export function firstUserText(payload: Pick<MessageUserPayload, "content">): string | undefined {
   const block = payload.content.find((b) => b.type === "text");
@@ -11,6 +12,37 @@ export function firstUserText(payload: Pick<MessageUserPayload, "content">): str
     if (line !== "") return line;
   }
   return undefined;
+}
+
+/**
+ * 未追踪调用的类别（ADR-0041 修订 2026-10-24）：取调用的第一个非 edit 权限主体的
+ * kind，没有主体时为 other。界面据此说明「哪类调用」的改动没进统计。
+ */
+export type UntrackedCallKind = Exclude<SubjectKind, "edit"> | "other";
+export interface UntrackedCallCount {
+  kind: UntrackedCallKind;
+  count: number;
+}
+
+const UNTRACKED_KIND_LABELS: Record<UntrackedCallKind, string> = {
+  shell: "命令",
+  mcp: "MCP 工具",
+  subagent: "子代理",
+  network: "网络请求",
+  read: "读取",
+  other: "其他工具",
+};
+
+/**
+ * 「命令 2 次、MCP 工具 1 次」：各客户端说明未追踪调用时共用的写法。
+ * 旧后台不给类别时退回「工具调用 N 次」，不猜测类别。
+ */
+export function untrackedCallsText(
+  total: number,
+  byKind: readonly UntrackedCallCount[] | undefined,
+): string {
+  if (byKind === undefined || byKind.length === 0) return `工具调用 ${total} 次`;
+  return byKind.map((item) => `${UNTRACKED_KIND_LABELS[item.kind]} ${item.count} 次`).join("、");
 }
 
 export type RewindMode = "both" | "conversation" | "files";
@@ -28,6 +60,8 @@ export interface RewindTarget {
   hasImages: boolean;
   files: RewindFile[];
   untrackedCalls: number;
+  /** untrackedCalls 按类别拆分，计数之和等于 untrackedCalls；旧后台不给 */
+  untrackedByKind?: UntrackedCallCount[] | undefined;
 }
 
 /** Raw logs remain intact; only the effective conversation is cut. */

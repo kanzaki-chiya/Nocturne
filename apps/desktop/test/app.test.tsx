@@ -440,6 +440,7 @@ function replayHost(
                 { path: `Z:/qa-${id}/${id}.log`, action: "untracked", external: false },
               ],
               untrackedCalls: 1,
+              untrackedByKind: [{ kind: "shell", count: 1 }],
             },
           ];
           break;
@@ -537,7 +538,7 @@ it("用户消息操作：复制、编辑并重发（仅对话）、重发与忙�
   const box = await screen.findByLabelText<HTMLTextAreaElement>("编辑消息");
   expect(box.value).toBe("gamma 正文");
   await screen.findByText(/将撤回 0 轮回复，将还原 1 个文件：gamma\.txt/);
-  expect(screen.getByText(/另有 1 次命令改动不还原/)).toBeTruthy();
+  expect(screen.getByText(/命令 1 次的改动不还原/)).toBeTruthy();
   fireEvent.click(screen.getByRole("radio", { name: "仅对话" }));
   fireEvent.change(box, { target: { value: "改写后的正文" } });
   const editBox = box.closest(".u-edit") as HTMLElement;

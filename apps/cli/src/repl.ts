@@ -17,6 +17,7 @@ import {
 } from "@nocturne/core";
 import {
   rewindNotification,
+  untrackedCallsText,
   type RewindMode,
   type RewindTarget,
   type QuestionAnswer,
@@ -319,7 +320,7 @@ export async function runRepl(
         "选择轮次（输入编号，空行取消）：",
         ...rows.map(
           (target, index) =>
-            `  ${index + 1}. ${target.firstLine} · ${target.time} · 改动 ${target.files.length} 个文件${target.untrackedCalls ? " · 含 shell" : ""}`,
+            `  ${index + 1}. ${target.firstLine} · ${target.time} · 改动 ${target.files.length} 个文件${target.untrackedCalls ? " · 含未追踪调用" : ""}`,
         ),
       ].join("\n"),
     );
@@ -529,7 +530,7 @@ export async function runRepl(
                       ),
                       ...(target.untrackedCalls
                         ? [
-                            `这一轮之后有 ${target.untrackedCalls} 次 shell/MCP 调用，它们造成的改动不会被还原`,
+                            `这一轮之后${untrackedCallsText(target.untrackedCalls, target.untrackedByKind)}的改动不会被还原`,
                           ]
                         : []),
                       ...(mode === "conversation" ? ["文件保持当前状态"] : []),

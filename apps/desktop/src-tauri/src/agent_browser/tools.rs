@@ -173,7 +173,7 @@ pub fn schemas() -> Vec<Value> {
             "properties": properties
         })
     }
-    vec![
+    let mut tools = vec![
         json!({
             "name": "open",
             "description": "打开一个网页，返回新的 tabId。只接受 http(s) 与 about:blank；总是新建标签。",
@@ -284,7 +284,13 @@ pub fn schemas() -> Vec<Value> {
             "inputSchema": schema(json!({ "tabId": tab("标签 id") }), vec!["tabId"]),
             "annotations": { "readOnlyHint": false }
         }),
-    ]
+    ];
+    // 面板浏览器只操作网页，下载一律取消，不写工作区文件：声明后这些调用不计入
+    // 「未追踪调用」统计（Nocturne 只采信受信运行时来源的这条 _meta，见 mcp.md 第 5 节）
+    for tool in &mut tools {
+        tool["_meta"] = json!({ "nocturne/fileEffects": "none" });
+    }
+    tools
 }
 
 /// 能力入口：调用工具。未知工具按协议错误返回，不执行任何动作。
@@ -1463,6 +1469,19 @@ mod tests {
                 "backendDOMNodeId": 9, "childIds": []
             }),
         ]);
+    }
+
+    #[test]
+    fn every_tool_declares_no_file_effects() {
+        let tools = schemas();
+        assert!(!tools.is_empty());
+        for tool in tools {
+            assert_eq!(
+                tool["_meta"]["nocturne/fileEffects"], "none",
+                "{}",
+                tool["name"]
+            );
+        }
     }
 
     #[test]

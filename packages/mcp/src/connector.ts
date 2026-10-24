@@ -90,6 +90,9 @@ interface Server {
   fromRuntime?: boolean | undefined;
 }
 
+/** 受信运行时来源在工具定义 _meta 里声明「不改动工作区文件」的键 */
+export const FILE_EFFECTS_META = "nocturne/fileEffects";
+
 function err(code: string, message: string): ToolResult {
   return { status: "error", modelContent: message, error: { code, message } };
 }
@@ -978,6 +981,11 @@ function wrapTool(
       // readOnlyHint 是服务器自己声明的标注（不可信）：只决定能否进入
       // explore 工具集（subagent.md 第 6 节），放行仍由权限层逐项判断
       mutates: tool.annotations?.readOnlyHint !== true,
+      // 「不改工作区文件」只采信受信运行时来源（桌面浏览器）在 _meta 里的声明；
+      // 用户配置的第三方服务器一律按可能改动文件计入未追踪调用（mcp.md 第 7 节）
+      ...(st.callerMetadata === true && tool._meta?.[FILE_EFFECTS_META] === "none"
+        ? { fileEffects: "none" as const }
+        : {}),
       concurrencySafe: false,
       timeoutMs: callMs + 30_000,
     },

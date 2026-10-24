@@ -56,6 +56,9 @@ interface ToolTraits {
       "apply_patch"；未声明的工具不参与该筛选。携带模型的
       capabilities.editTool 时注册表只暴露同值成员 */
   editTool?: EditToolKind   // "edit" | "apply_patch"，定义在 protocol
+  /** 声明 "none" 表示调用不会改动工作区文件（如桌面面板浏览器）：mutates 仍为真，
+      但不计入回退与本轮改动的未追踪调用。未声明即可能改动文件，宁可计入 */
+  fileEffects?: "none"
 }
 ```
 
@@ -233,7 +236,7 @@ const read: ToolDefinition<{ path: string; offset?: number; limit?: number }> = 
 
 ## 6. 演进规则
 
-执行环境可注入 `checkpoint(phase, callId, resolvedSubjects, sourceSessionId)`，执行器在执行前后调用，工具实现不接触该能力。`tool.started.mutates` 保存工具声明，回退预览按 `mutates=true` 且没有 edit 主体统计未追踪调用，不按工具名猜测；旧日志无该字段时不推断。检查点记录与回退契约见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
+执行环境可注入 `checkpoint(phase, callId, resolvedSubjects, sourceSessionId)`，执行器在执行前后调用，工具实现不接触该能力。`tool.started.mutates` 与 `fileEffects` 保存工具声明，回退预览与本轮改动按 `mutates=true`、没有 edit 主体且未声明 `fileEffects: "none"` 统计未追踪调用，不按工具名猜测；旧日志无该字段时不推断。类别取调用第一个非 edit 主体的 kind（没有主体为 `other`），客户端用 protocol 的 `untrackedCallsText` 写成「命令 2 次、MCP 工具 1 次」。检查点记录与回退契约见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
 
 - 新增可选的 `traits` 字段、`ToolDefinition` 可选方法（如 `validateInput`）或 `ToolContext` 能力：兼容变更，更新本文。
 - 修改 `ToolResult` 形状或执行管线的保证：不兼容变更，需要 ADR。
