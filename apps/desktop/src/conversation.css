@@ -38,9 +38,10 @@
   overflow-wrap: anywhere;
   margin: 8px 0;
 }
+/* 嵌在文字里的行内元素随周围字号缩放，但不低于最小档（视觉规范第 9 节） */
 .conversation code {
   font-family: var(--mono);
-  font-size: var(--fs-1);
+  font-size: max(var(--fs-1), 0.92em);
 }
 .conversation details > summary {
   cursor: pointer;
@@ -156,7 +157,7 @@
 }
 .conversation .ref {
   font-family: var(--mono);
-  font-size: var(--fs-1);
+  font-size: max(var(--fs-1), 0.85em);
   color: var(--a-accent);
   background: var(--a-selStrong);
   border-radius: var(--radius-1);
@@ -165,7 +166,7 @@
 /* 斜杠委派标记：沿用 .ref 的视觉语言，但语义是 agent 而不是文件 */
 .conversation .delegate-ref {
   font-family: var(--mono);
-  font-size: var(--fs-1);
+  font-size: max(var(--fs-1), 0.85em);
   color: var(--a-accent);
   background: var(--a-selStrong);
   border-radius: var(--radius-1);
@@ -477,7 +478,7 @@
 }
 .conversation-markdown .file-ref-text {
   font-family: var(--mono);
-  font-size: var(--fs-1);
+  font-size: max(var(--fs-1), 0.92em);
   overflow-wrap: anywhere;
 }
 .conversation-markdown .file-ref-glyph {

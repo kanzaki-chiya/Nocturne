@@ -470,6 +470,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
   - 勾选与状态符 `✓ —`：`composer.css` 的 `.menu-ck`，`conversation.css` 的 `.qcard .ok`/`.qcard .skip`，`phone.css` 的 `.phone-option-check`；
   - 关闭与移除 `✕`：`composer.css` 的 `.thumb2 .x`，`status-bar.css` 的概览弹层关闭按钮，`phone.css` 的附件移除按钮；
   - 工具图标字母与空态图标：`conversation.css` 的 `.tool .ic`（9px），`skills.css` 的 `.skill-empty-icon`（▤，32px）。
+- 嵌在文字里的行内元素用相对字号，随所在段落或标题缩放：对话里的行内代码与文件引用 `max(var(--fs-1), 0.92em)`，用户消息里的引用与委派标记 `max(var(--fs-1), 0.85em)`。`max()` 保证在最小档的文字里算出来也不低于 12px。
 - 终端（xterm）字号在 `terminal-view.ts` 设置；面板浏览器里渲染的网页内容不受本规范约束。
 
 ### 圆角
