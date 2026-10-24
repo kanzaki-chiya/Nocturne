@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createRuntime } from "../src/index.js";
+import { createRuntime, createPlatform, loadConfig } from "../src/index.js";
 import type { RuntimeEvent } from "../src/protocol/index.js";
 
 const API_KEY = process.env.NOCTURNE_SMOKE_OPENCODE_API_KEY;
@@ -23,6 +23,7 @@ const BASE_URL = process.env.NOCTURNE_SMOKE_OPENCODE_BASE_URL ?? "https://openco
 const CHAT_MODEL = process.env.NOCTURNE_SMOKE_OPENCODE_CHAT_MODEL;
 const MESSAGES_MODEL = process.env.NOCTURNE_SMOKE_OPENCODE_MESSAGES_MODEL;
 const RESPONSES_MODEL = process.env.NOCTURNE_SMOKE_OPENCODE_RESPONSES_MODEL;
+const GEMINI_MODEL = process.env.NOCTURNE_SMOKE_OPENCODE_GEMINI_MODEL;
 const PROVIDER_ID = "smoke-opencode";
 
 const configured =
@@ -42,16 +43,26 @@ const makeTmp = (p: string) => {
 };
 
 /** 捕获发往服务商的请求头（断言 x-opencode-session 用；密钥不记录） */
-function captureHeaders(): { headers: [string, Headers][]; restore: () => void } {
+function captureHeaders(): {
+  headers: [string, Headers][];
+  bodies: Record<string, unknown>[];
+  restore: () => void;
+} {
   // 逐次记录（同一端点的多次请求都要检查，不能按 URL 覆盖）
   const headers: [string, Headers][] = [];
+  const bodies: Record<string, unknown>[] = [];
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = String(input);
-    if (url.startsWith(BASE_URL)) headers.push([url, new Headers(init?.headers)]);
+    if (new URL(url).hostname === new URL(BASE_URL).hostname) {
+      headers.push([url, new Headers(init?.headers)]);
+      if (url.includes(":streamGenerateContent") && typeof init?.body === "string")
+        bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+      console.log(`OpenCode request: ${url}`);
+    }
     return original(input, init);
   }) as typeof fetch;
-  return { headers, restore: () => (globalThis.fetch = original) };
+  return { headers, bodies, restore: () => (globalThis.fetch = original) };
 }
 
 describe.skipIf(!configured)("OpenCode 冒烟（ADR-0031 §5，真实服务）", () => {
@@ -59,25 +70,15 @@ describe.skipIf(!configured)("OpenCode 冒烟（ADR-0031 §5，真实服务）",
     const ws = makeTmp("nct-smoke-oc-ws-");
     writeFileSync(path.join(ws, "note.txt"), "opencode-smoke-ok");
     const capture = captureHeaders();
+    const config = await smokeConfig([
+      CHAT_MODEL ?? "",
+      MESSAGES_MODEL ?? "",
+      RESPONSES_MODEL ?? "",
+    ]);
     const runtime = await createRuntime({
+      config,
       cwd: ws,
       sessionsDir: makeTmp("nct-smoke-oc-sessions-"),
-      providerConfigs: [
-        {
-          id: PROVIDER_ID,
-          type: "openai-compatible",
-          baseURL: BASE_URL,
-          apiKeyEnv: "NOCTURNE_SMOKE_OPENCODE_API_KEY",
-          sessionHeader: "x-opencode-session",
-          // providerConfigs 绕过配置加载，models.dev 服务商层不生效；
-          // 逐模型协议由手写 protocol 固定（与 opencode-go 预设形态等价）
-          models: {
-            [CHAT_MODEL ?? ""]: { protocol: "openai-compatible" },
-            [MESSAGES_MODEL ?? ""]: { protocol: "anthropic" },
-            [RESPONSES_MODEL ?? ""]: { protocol: "openai-responses" },
-          },
-        },
-      ],
       permissions: { autoApproveAsk: true },
     });
 
@@ -111,3 +112,112 @@ describe.skipIf(!configured)("OpenCode 冒烟（ADR-0031 §5，真实服务）",
     }
   });
 });
+
+/** 使用真实配置装配路径，验证 models.dev 的协议与地址，而非手写协议绕过。 */
+async function smokeConfig(models: string[]) {
+  const home = makeTmp("nct-smoke-oc-home-");
+  writeFileSync(path.join(home, "config.json"), JSON.stringify({ modelsDev: false }));
+  writeFileSync(
+    path.join(home, "providers.json"),
+    JSON.stringify({
+      version: 1,
+      providers: [
+        {
+          id: PROVIDER_ID,
+          type: "openai-compatible",
+          baseURL: BASE_URL,
+          apiKeyEnv: "NOCTURNE_SMOKE_OPENCODE_API_KEY",
+          sessionHeader: "x-opencode-session",
+          modelsDevProvider: "opencode-go",
+          // 目录尚未提供 contributor 别名的能力项；本用例显式声明推理以检验档位传输。
+          models: Object.fromEntries(
+            models.map((id) => [
+              id,
+              id === GEMINI_MODEL ? { capabilities: { reasoning: "visible" } } : {},
+            ]),
+          ),
+        },
+      ],
+    }),
+  );
+  return loadConfig(createPlatform(), { nocturneHome: home });
+}
+
+describe.skipIf(API_KEY === undefined || GEMINI_MODEL === undefined)(
+  "OpenCode Gemini 冒烟（ADR-0061）",
+  () => {
+    it.each(["text", "tools", "thinking"])("%s：原生接口、签名回传、思考档位", async (mode) => {
+      const ws = makeTmp("nct-smoke-gemini-ws-");
+      writeFileSync(path.join(ws, "note.txt"), "gemini-signature-smoke-ok");
+      const capture = captureHeaders();
+      const config = await smokeConfig([GEMINI_MODEL ?? ""]);
+      const runtime = await createRuntime({
+        config,
+        cwd: ws,
+        sessionsDir: makeTmp("nct-smoke-gemini-sessions-"),
+        permissions: { autoApproveAsk: true },
+      });
+      const session = await runtime.createSession({
+        model: `${PROVIDER_ID}/${GEMINI_MODEL}`,
+        ...(mode === "thinking" ? { reasoningEffort: "high" as const } : {}),
+      });
+      const events: RuntimeEvent[] = [];
+      session.subscribe((event) => events.push(event));
+      try {
+        const reason = await session.submit({
+          text:
+            mode === "tools"
+              ? "必须调用 read 工具读取 note.txt，读取成功后只回复文件内容。"
+              : "只回复 gemini-smoke-ok。",
+        });
+        const done = events.find((event) => event.type === "turn.completed");
+        expect(reason, JSON.stringify(done?.payload)).toBe("done");
+        const requests = capture.headers.filter(([url]) => url.includes(":streamGenerateContent"));
+        expect(requests.length).toBeGreaterThanOrEqual(mode === "tools" ? 2 : 1);
+        for (const [url, headers] of requests) {
+          expect(url).toContain("/inference/go/google/v1beta/models/");
+          expect(headers.get("x-opencode-session")).toBeTruthy();
+        }
+        if (mode === "thinking")
+          expect(
+            capture.bodies.some(
+              (body) =>
+                (
+                  body.generationConfig as
+                    { thinkingConfig?: { thinkingLevel?: string } } | undefined
+                )?.thinkingConfig?.thinkingLevel === "high",
+            ),
+          ).toBe(true);
+        if (mode === "tools") {
+          const assistant = events.find(
+            (event) => event.type === "message.assistant" && event.payload.toolCalls.length > 0,
+          );
+          expect(
+            assistant?.type === "message.assistant" &&
+              assistant.payload.toolCalls.some((call) => call.providerData !== undefined),
+          ).toBe(true);
+          if (assistant?.type === "message.assistant") {
+            const signature = (
+              assistant.payload.toolCalls[0]?.providerData as
+                { google?: { thoughtSignature?: string } } | undefined
+            )?.google?.thoughtSignature;
+            expect(typeof signature).toBe("string");
+            // 只在内存比较，断言信息不含签名与鉴权；避免仅靠占位值通过后续轮。
+            expect(
+              signature !== undefined &&
+                capture.bodies.some((body) => JSON.stringify(body).includes(signature)),
+            ).toBe(true);
+          }
+          expect(
+            events.some(
+              (event) => event.type === "tool.completed" && event.payload.status === "ok",
+            ),
+          ).toBe(true);
+        }
+      } finally {
+        capture.restore();
+        await session.close();
+      }
+    });
+  },
+);

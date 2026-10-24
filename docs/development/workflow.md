@@ -113,6 +113,7 @@ OpenCode Go 的三协议冒烟（ADR-0031 §5，`test/opencode.smoke.ts`）用�
 #   NOCTURNE_SMOKE_OPENCODE_CHAT_MODEL         Chat Completions 模型 id（如 claude-sonnet-4-5）
 #   NOCTURNE_SMOKE_OPENCODE_MESSAGES_MODEL     Messages 协议模型 id
 #   NOCTURNE_SMOKE_OPENCODE_RESPONSES_MODEL    Responses 协议模型 id
+#   NOCTURNE_SMOKE_OPENCODE_GEMINI_MODEL       可选，例如 gemini-4-argon-contributor
 ```
 
 四个变量齐备才运行（缺一即跳过）：在 `opencode-go` 预设形态（baseURL + `x-opencode-session` + `modelsDevProvider`）下，三个模型各跑一轮带 `read` 工具调用的对话，断言 `message.assistant.protocol` 分别为 `openai-compatible`/`anthropic`/`openai-responses`、每次请求都写 `x-opencode-session`、不出现网关「缺少 x-opencode-session」报错；Responses 模型额外断言推理加密内容的多轮回传。若某 id 实际不走对应协议（models.dev 接口声明与假设不符）会失败而非跳过，此时应核对 models.dev 对该模型的 `npm` 声明。
@@ -120,6 +121,8 @@ OpenCode Go 的三协议冒烟（ADR-0031 §5，`test/opencode.smoke.ts`）用�
 Phase 2 的 CLI 冒烟（`apps/cli`）：在临时目录生成一个含失败测试的 fixture 仓库，以非交互模式 `nctrn --yes -p "<任务>"` 驱动真实模型完成"阅读项目 → 定位 bug → 修改文件 → 运行测试 → 报告结果"，断言 fixture 的测试在运行后通过。纯文本回复或只读工具调用不算验收。
 
 仅在不含敏感信息的测试工作区中运行冒烟测试——工作区内容会发送给模型服务。文档改动至少检查所有相对链接可达。
+
+ADR-0061 Gemini 冒烟只要求 `NOCTURNE_SMOKE_OPENCODE_API_KEY` 与 `NOCTURNE_SMOKE_OPENCODE_GEMINI_MODEL`，覆盖纯文本、带工具调用的后续一步（签名回传）、`high` 思考档位；与三协议回归独立跳过。用例经隔离的 providers.json 和内置快照装配，实际请求走 models.dev `/inference/go/...` 地址，测试输出仅记录 URL，不输出鉴权头。可临时设置模型变量为 `gemini-4-argon-contributor`，无需改 `.env`。
 
 ## 6. 许可证与第三方代码
 
