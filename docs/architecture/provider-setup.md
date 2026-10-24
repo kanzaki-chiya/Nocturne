@@ -60,6 +60,10 @@ TUI 另有全屏的**模型选择页**（`/model` 打开）：左右双栏（范
 
 ## 2. 向导配置层：`providers.json`
 
+ADR-0061：模型编辑增加第九个可选字段「接口地址」，保存到 `userModels.<id>.baseURL`，清空表示自动选择；协议增加 Gemini（CLI `gemini`）。地址按「用户模型地址 > models.dev 模型 provider.api（缺省取服务商 api，且协议未显式覆盖、与 npm 推导一致）> 条目 baseURL」解析。显式改协议即不再使用 models.dev 地址，即使写的是相同协议；未知模型或无 api 时回落条目。地址与来源在模型设置视图和请求诊断中可查。
+
+OpenCode 预设仍保存 `/zen/v1`、`/zen/go/v1` 作为条目 baseURL，`GET /models` 不变。聊天实际分别走 `https://opencode.ai/inference/[go/]openai/v1`（Chat/Responses）、`https://opencode.ai/inference/[go/]anthropic/v1`（Messages）、`https://opencode.ai/inference/[go/]google/v1beta`（Gemini），地址来自 models.dev，不在预设或路由按服务商写死。
+
 用户手写的 `config.json` 仍然**程序从不改写**（[config.md](config.md) 第 1 节）。向导写入的是一个新的**机器维护文件** `<NOCTURNE_HOME>/providers.json`，它在分层中位于内置默认之上、用户配置之下：
 
 ```text

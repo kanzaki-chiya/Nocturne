@@ -480,9 +480,10 @@ export function patchValueError(patch: ModelSettingsPatch): string | undefined {
     p !== null &&
     p !== "openai-compatible" &&
     p !== "anthropic" &&
-    p !== "openai-responses"
+    p !== "openai-responses" &&
+    p !== "gemini"
   ) {
-    return `协议只能为 openai-compatible/anthropic/openai-responses`;
+    return `协议只能为 openai-compatible/anthropic/openai-responses/gemini`;
   }
   if (patch.baseURL !== undefined && patch.baseURL !== null) {
     try {

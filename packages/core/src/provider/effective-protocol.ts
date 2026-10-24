@@ -14,7 +14,9 @@ import type { ModelInfo } from "./types.js";
 export { unavailableProtocolReason };
 
 export function isModelProtocol(t: string): t is ModelProtocol {
-  return t === "openai-compatible" || t === "anthropic" || t === "openai-responses";
+  return (
+    t === "openai-compatible" || t === "anthropic" || t === "openai-responses" || t === "gemini"
+  );
 }
 
 /**

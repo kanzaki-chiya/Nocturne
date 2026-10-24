@@ -254,7 +254,8 @@ describe("models.dev 服务商层（ADR-0031 §4）", () => {
     expect(npmToEndpoints("@ai-sdk/openai-compatible")).toEqual(["/chat/completions"]);
     expect(npmToEndpoints("@ai-sdk/anthropic")).toEqual(["/messages"]);
     expect(npmToEndpoints("@ai-sdk/openai")).toEqual(["/responses"]);
-    expect(npmToEndpoints("@ai-sdk/google")).toEqual(["npm:@ai-sdk/google"]);
+    expect(npmToEndpoints("@ai-sdk/google")).toEqual([":streamGenerateContent"]);
+    expect(npmToEndpoints("@ai-sdk/unknown")).toEqual(["npm:@ai-sdk/unknown"]);
   });
 
   it("devProviderEndpoints：逐模型 npm 优先，缺省继承服务商级；查不到不贡献", () => {
@@ -264,7 +265,7 @@ describe("models.dev 服务商层（ADR-0031 §4）", () => {
       "/chat/completions",
     ]);
     expect(devProviderEndpoints(devData, "opencode", "gemini-3-pro")).toEqual([
-      "npm:@ai-sdk/google",
+      ":streamGenerateContent",
     ]);
     // 不在服务商表内的模型 / 未知服务商键 / 无 providers 块 → 不贡献
     expect(devProviderEndpoints(devData, "opencode", "not-listed")).toBeUndefined();

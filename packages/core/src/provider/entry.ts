@@ -9,6 +9,7 @@ import { PROTOCOL_ENDPOINTS, type Diagnostics, type ModelProtocol } from "../pro
 import { createAnthropicProvider } from "./adapters/anthropic.js";
 import { createOpenAICompatibleProvider } from "./adapters/openai-compatible.js";
 import { createOpenAIResponsesProvider } from "./adapters/openai-responses.js";
+import { createGeminiProvider } from "./adapters/gemini.js";
 import { createAuthResolver } from "./auth.js";
 import { ProviderError } from "./errors.js";
 import { withEffectiveProtocol } from "./effective-protocol.js";
@@ -196,7 +197,9 @@ export function createEntryProvider(
             ? anthropic(baseURL)
             : protocol === "openai-responses"
               ? responses(baseURL)
-              : openai(baseURL);
+              : protocol === "gemini"
+                ? createGeminiProvider({ ...common, baseURL: baseURL ?? "" }, env, fetchImpl)
+                : openai(baseURL);
         adapters.set(key, adapter);
       }
       yield* adapter.stream(request, signal);

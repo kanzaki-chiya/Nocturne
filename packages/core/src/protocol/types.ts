@@ -23,7 +23,7 @@ export interface AgentDelegation {
  * anthropic（Messages）与 openai-responses（Responses；ADR-0031 §1）。
  * Provider 条目的 type 同时是默认协议。
  */
-export type ModelProtocol = "openai-compatible" | "anthropic" | "openai-responses";
+export type ModelProtocol = "openai-compatible" | "anthropic" | "openai-responses" | "gemini";
 
 /**
  * 模型的生效协议（ADR-0026 §1）：三种可用协议之一；
@@ -37,6 +37,7 @@ export const PROTOCOL_ENDPOINTS: Record<ModelProtocol, string> = {
   "openai-compatible": "/chat/completions",
   anthropic: "/messages",
   "openai-responses": "/responses",
+  gemini: ":streamGenerateContent",
 };
 
 /** 接口路径归一化：小写、去尾斜杠、保证前导斜杠——按末尾比较 */
@@ -61,11 +62,12 @@ export function deriveProtocolFromEndpoints(
 ): EffectiveProtocol | undefined {
   if (endpoints === undefined || endpoints.length === 0) return undefined;
   const norms = endpoints.map(normalizeEndpoint);
-  const has = (path: string) => norms.some((n) => n.endsWith(path));
+  const has = (path: string) => norms.some((n) => n.endsWith(path.toLowerCase()));
   if (has(PROTOCOL_ENDPOINTS[entryType])) return entryType;
   if (has(PROTOCOL_ENDPOINTS["openai-compatible"])) return "openai-compatible";
   if (has(PROTOCOL_ENDPOINTS.anthropic)) return "anthropic";
   if (has(PROTOCOL_ENDPOINTS["openai-responses"])) return "openai-responses";
+  if (has(PROTOCOL_ENDPOINTS.gemini)) return "gemini";
   return "unavailable";
 }
 

@@ -16,6 +16,7 @@ import {
   createAnthropicProvider,
   createOpenAICompatibleProvider,
   createOpenAIResponsesProvider,
+  createGeminiProvider,
   type FakeScript,
   type Provider,
 } from "../src/provider/index.js";
@@ -291,7 +292,7 @@ describe("外部 agent：submit.delegate 持久快照", () => {
     expect(f.run).not.toHaveBeenCalled();
   });
 
-  it.each<ModelProtocol>(["openai-compatible", "anthropic", "openai-responses"])(
+  it.each<ModelProtocol>(["openai-compatible", "anthropic", "openai-responses", "gemini"])(
     "%s 投影保留指令和任务原文，在线/序列化/恢复回放一致",
     async (protocol) => {
       const base = new FakeProvider({}).models()[0];
@@ -321,6 +322,7 @@ describe("外部 agent：submit.delegate 持久快照", () => {
       if (request === undefined) throw new Error("缺少投影请求");
       let wireBody: Record<string, unknown> | undefined;
       const streamEvents: Record<ModelProtocol, object[]> = {
+        gemini: [{ candidates: [{ content: { parts: [{ text: "ok" }] }, finishReason: "STOP" }] }],
         "openai-compatible": [
           {
             id: "offline",
@@ -379,6 +381,7 @@ describe("外部 agent：submit.delegate 持久快照", () => {
         models: { "fake-1": {} },
       };
       const adapters: Record<ModelProtocol, () => Provider> = {
+        gemini: () => createGeminiProvider(adapterConfig, () => "offline-key", captureFetch),
         "openai-compatible": () =>
           createOpenAICompatibleProvider(adapterConfig, () => "offline-key", captureFetch),
         anthropic: () =>

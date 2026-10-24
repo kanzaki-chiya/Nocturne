@@ -14,6 +14,7 @@ export * from "./fake.js";
 export * from "./adapters/openai-compatible.js";
 export * from "./adapters/anthropic.js";
 export * from "./adapters/openai-responses.js";
+export * from "./adapters/gemini.js";
 export * from "./presets.js";
 
 import type { AnthropicConfig } from "./adapters/anthropic.js";

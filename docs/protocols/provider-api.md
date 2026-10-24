@@ -42,7 +42,9 @@ interface ModelInfo {
   pricingSource?: "config" | "upstream" | "models.dev" | "vendor"
   /** 生效协议（ADR-0026 §2）：写入请求时作为本模型要走的协议
       （手写/编辑声明 > endpoints 推导 > 条目 type）；openai-responses 见 ADR-0031 §1 */
-  protocol?: "openai-compatible" | "anthropic" | "openai-responses"
+  protocol?: "openai-compatible" | "anthropic" | "openai-responses" | "gemini"
+  baseURL?: string               // 实际模型接口基础地址（ADR-0061 §3）
+  baseURLSource?: "user" | "models.dev" | "entry"
   /** 上游声明的服务接口原文（supported_endpoints；ADR-0026 §2） */
   endpoints?: string[]
   /** 生效协议为 "unavailable" 时的说明（ADR-0026 §5）：模型照常列出，
@@ -100,7 +102,7 @@ interface ModelRequest {
   cachePrefix?: { systemBlocks: number; messages: number }   // 可缓存前缀的边界提示，适配器自行决定是否使用
   /** 本请求的生效协议（ADR-0026 §4）：由 Runtime 从 resolved ModelInfo 透传，
       条目路由据此分发到对应协议的适配器；缺省时按清单盖章或条目 type */
-  protocol?: "openai-compatible" | "anthropic" | "openai-responses"
+  protocol?: "openai-compatible" | "anthropic" | "openai-responses" | "gemini"
   providerOptions?: Record<string, unknown>                  // 请求级 Provider 专有选项，原样交给适配器，Core 不解释
   /** 会话标识（ADR-0031 §3）：Runtime 对每个模型请求填入根会话 ID（主 Turn、
       压缩、子代理兜底轮同一值；子代理沿 parent 链到顶取根会话）。
@@ -119,6 +121,7 @@ interface ModelRequest {
 | `openai`（缺省） | `"reasoning_effort": "high"` |
 | `openrouter` | `"reasoning": { "effort": "high" }` |
 | anthropic（不看 thinking-format） | `"thinking": { "type": "enabled", "budget_tokens": 16384 }` |
+| gemini（不看 thinking-format） | `"thinkingConfig": { "includeThoughts": true, "thinkingLevel": "high" }` |
 
 - 档位→`budget_tokens` 默认预算表：`minimal 1024 / low 4096 / medium 8192 / high 16384 / xhigh 32768 / max 32768`（条目 `thinking.budgets` 可覆盖）；`max` 是通用最高档而非 Anthropic 专有，openai/openrouter 格式原样发送 `"max"`。
 - anthropic 发送前调整 `max_tokens`：要求 `max_tokens ≥ budget_tokens + 1024`，不足先抬 `max_tokens`（封顶模型声明的最大输出长度，未声明无封顶），仍不足则压低预算，预算压到低于 1024 时本轮不发思考参数。
@@ -127,6 +130,8 @@ interface ModelRequest {
 - 思考开启 + 强制 `toolChoice` 的冲突沿用上文规则（适配器丢弃 `toolChoice` 并记诊断）；子代理兜底轮不携带 `reasoningEffort`，正常路径不触发该规则。
 
 全部细节与理由见 [ADR-0018](../decisions/ADR-0018-reasoning-effort.md)。
+
+Gemini 的请求级 `providerOptions` 命名空间固定为 `google`；不接收跨协议的条目级选项。`includeThoughts` 始终开启，档位缺省时不发 `thinkingLevel`，仅 minimal/low/medium/high 可表达，xhigh/max 省略并记诊断。工具结果图片与 openai-compatible 一样使用 `user-message`；签名只由 Gemini 适配器解释（ADR-0061）。
 
 ```ts
 type SystemBlock = { text: string }

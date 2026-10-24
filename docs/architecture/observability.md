@@ -45,6 +45,8 @@
 | `provider.error` | agent | ProviderError kind、message、retryable、attempt、producedOutput（本次尝试是否已产生输出事件） |
 | `provider.sdk_warning` | provider | AI SDK 的调用警告（provider、model、warnings 原文）；适配器装配时设置 `AI_SDK_LOG_WARNINGS`，SDK 不再经 `process.emitWarning` 打到 stderr；用户已自行设置该全局时不覆盖 |
 | `provider.reasoning_dropped` | provider | Responses 丢弃缺少 OpenAI 条目标识的推理块：仅 count 与 reason，不记录正文 |
+| `provider.endpoint` | provider（条目路由） | 每次模型请求实际使用的地址：provider、model、protocol、baseURL、source（`user` / `models.dev` / `entry`，ADR-0061 §3）；不含请求头 |
+| `provider.unsupported_capability` | provider | 适配器无法表达而省略的能力（capability、value、reason）；Gemini 缺思考签名时 capability 为 `thought_signature`，附填写的占位值与本次请求的 count（ADR-0061 §2） |
 | `context.build` | context | 各段落名与字符/token 数、estimatedTokens、预算、是否裁剪/压缩（进 `context.section` 明细） |
 | `context.attachment_missing` | agent | 历史引用了但 `AttachmentStore` 读不回字节的图片附件：turnId、file、sha256（ADR-0023） |
 | `tool.permission` | tools/gate | callId、工具名、subjects、action、source、命中规则描述、耗时 |

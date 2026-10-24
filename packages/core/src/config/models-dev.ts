@@ -33,6 +33,8 @@ export function npmToEndpoints(npm: string): string[] {
       return ["/messages"];
     case "@ai-sdk/openai":
       return ["/responses"];
+    case "@ai-sdk/google":
+      return [":streamGenerateContent"];
     default:
       return [`npm:${npm}`];
   }

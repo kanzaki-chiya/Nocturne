@@ -52,7 +52,8 @@ models.dev 现已收录 `opencode`（Zen）与 `opencode-go` 两个服务商，�
   | `@ai-sdk/openai-compatible` | `["/chat/completions"]` |
   | `@ai-sdk/anthropic` | `["/messages"]` |
   | `@ai-sdk/openai` | `["/responses"]` |
-  | 其他（如 `@ai-sdk/google`） | `["npm:<包名>"]` |
+  | `@ai-sdk/google`（ADR-0061 扩展） | `[":streamGenerateContent"]` |
+  | 其他 | `["npm:<包名>"]` |
 
   最后一行无法被推导规则识别，模型标为不可用，说明写「models.dev 标注该模型使用 <包名> 对应的接口，Nocturne 暂不支持」。
 - **不在表中的模型**：条目 `modelsDevProvider` 下查不到的模型，不从 models.dev 取接口，回落到条目 `type`。本 ADR 不改变 models.dev 层其他字段（推理、看图、上下文、输出）的匹配方式。

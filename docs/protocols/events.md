@@ -215,6 +215,8 @@ type QuestionAnswer = { declined: true } | {
 
 `providerData` 只能回传给 `provider` 字段所示的 Provider，且要求同一协议（ADR-0026 §6），见 [context.md](../architecture/context.md) 第 7 节。
 
+ADR-0061：`message.assistant.protocol` 可为 `gemini`。正文与推理块的 `provider/providerData`、工具调用的 `providerData` 均可缺省，工具调用的来源取所在 assistant 消息的 model/protocol。schema 保持非严格，不提升 `formatVersion`；旧日志没有这些字段仍照常重放。签名不作为界面文本或工具参数解释。
+
 ## 5. 不变量
 
 1. **先写后发，先写后执行**：持久化事件写入日志成功后才分发给订阅者；`tool.started` 写入成功后工具才开始执行。写入失败的处理见 [sessions.md](../architecture/sessions.md) 第 5 节。

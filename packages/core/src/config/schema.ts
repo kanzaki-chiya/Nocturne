@@ -35,7 +35,12 @@ export const externalAgentSchema = z.object({
 });
 
 /** 逐模型协议（ADR-0026；Responses 由 ADR-0031 §1 接入）：models/userModels 的 protocol 字段取值 */
-const modelProtocolSchema = z.enum(["openai-compatible", "anthropic", "openai-responses"]);
+const modelProtocolSchema = z.enum([
+  "openai-compatible",
+  "anthropic",
+  "openai-responses",
+  "gemini",
+]);
 
 /** 思考档位（ADR-0018）：全部七档（含 off）/ 可用档位（六档，不含 off） */
 const reasoningEffortSchema = z.enum(REASONING_EFFORT_ORDER);
