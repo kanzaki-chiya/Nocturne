@@ -55,6 +55,7 @@ const view = (modelId: string): ModelSettingsView => ({
       kind: "entryType",
     }),
     editTool: field<"edit" | "apply_patch">("edit", { kind: "default" }),
+    baseURL: field("https://api.test/v1", { kind: "default" }),
   } as ModelSettingsView["fields"],
 });
 

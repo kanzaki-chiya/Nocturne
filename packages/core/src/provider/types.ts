@@ -41,6 +41,9 @@ export interface ModelCapabilities {
 
 export interface ModelInfo {
   ref: ModelRef;
+  /** 实际模型接口地址与来源（ADR-0061 §3）。 */
+  baseURL?: string | undefined;
+  baseURLSource?: "user" | "models.dev" | "entry" | undefined;
   displayName?: string | undefined;
   /**
    * 输入 + 输出共享的窗口大小。undefined = 上游与配置都未声明

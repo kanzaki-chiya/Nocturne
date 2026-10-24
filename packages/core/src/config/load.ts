@@ -4,13 +4,14 @@
  * （不含项目层）；forWorkspace(root) 按会话记录的工作区加载项目层与 Grant。
  * v0.2 增补：凭据存储、providers.json 向导写入接口、recent-models.json。
  */
-import type { ModelRef } from "../protocol/index.js";
+import { resolveEffectiveProtocol, type ModelRef } from "../protocol/index.js";
 import type { Platform } from "../platform/index.js";
 import { envLayerConfig, cliLayerConfig } from "./env.js";
 import { ConfigError } from "./errors.js";
 import { loadConfigFile, writeJsonAtomic } from "./files.js";
 import {
   devProviderEndpoints,
+  devProviderApi,
   matchModelsDev,
   modelOverrideFromDev,
   readModelsDev,
@@ -170,6 +171,10 @@ export async function loadConfig(
           priceModels !== undefined ? matchModelsDev(priceModels, modelId)?.cost : undefined;
         const vendor = keyed === undefined ? vendorPricing(modelsDev, modelId) : undefined;
         const override = {
+          ...(providerKey !== undefined &&
+          devProviderApi(modelsDev, providerKey, modelId) !== undefined
+            ? { baseURL: devProviderApi(modelsDev, providerKey, modelId) }
+            : {}),
           ...(record !== undefined ? modelOverrideFromDev(record) : {}),
           ...(endpoints !== undefined ? { endpoints } : {}),
           ...(keyed !== undefined ? { pricing: keyed } : {}),
@@ -180,7 +185,50 @@ export async function loadConfig(
       }
       if (Object.keys(models).length > 0) providers.push({ id, models });
     }
-    return mergeLayers([{ kind: "modelsDev", file: { providers } }, ...layers]);
+    const merged = mergeLayers([{ kind: "modelsDev", file: { providers } }, ...layers]);
+    for (const entry of merged.resolved.providers) {
+      for (const [modelId, model] of Object.entries(entry.models ?? {})) {
+        const fields = merged.modelInfo.fields.get(entry.id)?.get(modelId);
+        const addresses = fields?.get("baseURL");
+        const top = addresses?.at(-1);
+        // models.dev 地址仅在协议未被显式覆盖、且生效协议与 npm 一致时使用。
+        const key = devProviderKey.get(entry.id);
+        const endpoints =
+          key === undefined ? undefined : devProviderEndpoints(modelsDev, key, modelId);
+        const explicit = (fields?.get("protocol")?.length ?? 0) > 0;
+        const effective = resolveEffectiveProtocol(
+          model.protocol,
+          model.endpoints,
+          entry.type ?? "openai-compatible",
+        );
+        const fromDev = resolveEffectiveProtocol(
+          undefined,
+          endpoints,
+          entry.type ?? "openai-compatible",
+        );
+        if (
+          top?.origin.kind === "modelsDev" &&
+          (explicit || endpoints === undefined || effective !== fromDev)
+        ) {
+          delete model.baseURL;
+          fields?.delete("baseURL");
+        }
+        model.baseURLSource =
+          model.baseURL === undefined
+            ? "entry"
+            : top?.origin.kind === "modelsDev"
+              ? "models.dev"
+              : "user";
+        // 官方 Messages 地址只兜底 anthropic 协议：条目缺 baseURL 时其他协议
+        // 仍由条目路由报「缺 baseURL」，不得被改投到 api.anthropic.com。
+        model.baseURL ??=
+          entry.baseURL ??
+          (entry.type === "anthropic" && effective === "anthropic"
+            ? "https://api.anthropic.com/v1"
+            : undefined);
+      }
+    }
+    return merged;
   }
 
   const envLayer = envLayerConfig(env);

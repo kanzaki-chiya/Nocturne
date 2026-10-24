@@ -55,6 +55,17 @@ export function devProviderEndpoints(
   return npm === undefined ? undefined : npmToEndpoints(npm);
 }
 
+/** 只取该服务商确实收录的模型的地址，逐模型缺省时继承服务商级。 */
+export function devProviderApi(
+  data: ModelsDevData,
+  providerKey: string,
+  modelId: string,
+): string | undefined {
+  const provider = data.providers?.[providerKey];
+  if (provider?.models === undefined || !Object.hasOwn(provider.models, modelId)) return undefined;
+  return provider.models[modelId]?.api ?? provider.api;
+}
+
 function validCache(raw: unknown): raw is ModelsDevData {
   if (raw === null || typeof raw !== "object") return false;
   const data = raw as Record<string, unknown>;
@@ -75,8 +86,18 @@ function validCache(raw: unknown): raw is ModelsDevData {
       if (pv === null || typeof pv !== "object" || Array.isArray(pv)) return false;
       const p = pv as Record<string, unknown>;
       if (p.npm !== undefined && typeof p.npm !== "string") return false;
+      if (p.api !== undefined && typeof p.api !== "string") return false;
       if (p.models !== undefined && (p.models === null || typeof p.models !== "object")) {
         return false;
+      }
+      if (p.models !== undefined) {
+        if (Array.isArray(p.models)) return false;
+        for (const model of Object.values(p.models as Record<string, unknown>)) {
+          if (model === null || typeof model !== "object" || Array.isArray(model)) return false;
+          const item = model as Record<string, unknown>;
+          if (item.npm !== undefined && typeof item.npm !== "string") return false;
+          if (item.api !== undefined && typeof item.api !== "string") return false;
+        }
       }
     }
   }

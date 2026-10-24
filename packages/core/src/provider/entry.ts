@@ -100,16 +100,14 @@ export function createEntryProvider(
     diagnostics: config.diagnostics,
   };
 
-  let openaiAdapter: Provider | undefined;
-  let anthropicAdapter: Provider | undefined;
-  let responsesAdapter: Provider | undefined;
+  const adapters = new Map<string, Provider>();
 
-  const openai = (): Provider => {
-    openaiAdapter ??= createOpenAICompatibleProvider(
+  const openai = (baseURL: string | undefined): Provider => {
+    return createOpenAICompatibleProvider(
       {
         ...common,
         type: "openai-compatible",
-        baseURL: config.baseURL ?? "",
+        baseURL: baseURL ?? "",
         // ADR-0026 §3：条目级 providerOptions 只给同协议请求（键是按协议写的）
         ...(entryType === "openai-compatible" && config.providerOptions !== undefined
           ? { providerOptions: config.providerOptions }
@@ -118,14 +116,13 @@ export function createEntryProvider(
       env,
       fetchImpl,
     );
-    return openaiAdapter;
   };
-  const anthropic = (): Provider => {
-    anthropicAdapter ??= createAnthropicProvider(
+  const anthropic = (baseURL: string | undefined): Provider => {
+    return createAnthropicProvider(
       {
         ...common,
         type: "anthropic",
-        ...(config.baseURL !== undefined ? { baseURL: config.baseURL } : {}),
+        ...(baseURL !== undefined ? { baseURL } : {}),
         ...(entryType === "anthropic" && config.providerOptions !== undefined
           ? { providerOptions: config.providerOptions }
           : {}),
@@ -136,21 +133,19 @@ export function createEntryProvider(
       env,
       fetchImpl,
     );
-    return anthropicAdapter;
   };
-  const responses = (): Provider => {
-    responsesAdapter ??= createOpenAIResponsesProvider(
+  const responses = (baseURL: string | undefined): Provider => {
+    return createOpenAIResponsesProvider(
       {
         ...common,
         type: "openai-responses",
-        baseURL: config.baseURL ?? "",
+        baseURL: baseURL ?? "",
         // ADR-0031 §6：条目级 providerOptions 不给 Responses 适配器
         // （协议选项固定由适配器写死：store:false + reasoning.encrypted_content）
       },
       env,
       fetchImpl,
     );
-    return responsesAdapter;
   };
 
   /** 鉴权通道限定 > 请求携带 > 清单盖章 > 条目 type */
@@ -174,13 +169,17 @@ export function createEntryProvider(
         });
       }
       const protocol = protocolOf(request);
-      if (protocol === "anthropic") {
-        yield* anthropic().stream(request, signal);
-        return;
-      }
+      const baseURL = declared?.baseURL ?? config.baseURL;
+      config.diagnostics?.record("provider.endpoint", {
+        provider: config.id,
+        model: request.model,
+        protocol,
+        baseURL,
+        source: declared?.baseURLSource ?? "entry",
+      });
       // anthropic 条目省略 baseURL 时没有可构造 openai 请求的地址
       // （api.anthropic.com 不提供 Chat Completions / Responses）
-      if (config.baseURL === undefined || config.baseURL === "") {
+      if (protocol !== "anthropic" && (baseURL === undefined || baseURL === "")) {
         throw new ProviderError({
           kind: "invalid_request",
           message:
@@ -189,11 +188,18 @@ export function createEntryProvider(
           retryable: false,
         });
       }
-      if (protocol === "openai-responses") {
-        yield* responses().stream(request, signal);
-        return;
+      const key = `${protocol}:${baseURL ?? ""}`;
+      let adapter = adapters.get(key);
+      if (adapter === undefined) {
+        adapter =
+          protocol === "anthropic"
+            ? anthropic(baseURL)
+            : protocol === "openai-responses"
+              ? responses(baseURL)
+              : openai(baseURL);
+        adapters.set(key, adapter);
       }
-      yield* openai().stream(request, signal);
+      yield* adapter.stream(request, signal);
     },
   };
 }

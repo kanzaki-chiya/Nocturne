@@ -86,6 +86,8 @@ export function applyModelOverride(
   if (override === undefined) return base;
   return {
     ref: base.ref,
+    baseURL: override.baseURL ?? base.baseURL,
+    baseURLSource: override.baseURLSource ?? base.baseURLSource,
     displayName: override.displayName ?? base.displayName,
     contextWindow: override.contextWindow ?? base.contextWindow,
     maxOutputTokens: override.maxOutputTokens ?? base.maxOutputTokens,

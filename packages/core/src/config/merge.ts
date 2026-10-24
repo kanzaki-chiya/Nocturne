@@ -96,6 +96,7 @@ const isConfigKind = (k: LayerKind): boolean => CONFIG_KINDS.has(k);
  * ADR-0026：protocol/endpoints 同样逐字段——高层只覆盖它实际声明的字段。
  */
 const MODEL_TOP_FIELDS = [
+  "baseURL",
   "displayName",
   "contextWindow",
   "maxOutputTokens",

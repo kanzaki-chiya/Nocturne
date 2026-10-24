@@ -20,8 +20,13 @@ export interface ModelsDevRecord {
  */
 export interface ModelsDevProviderData {
   npm?: string | undefined;
+  api?: string | undefined;
   models?:
-    Record<string, { npm?: string | undefined; cost?: ModelPricing | undefined }> | undefined;
+    | Record<
+        string,
+        { npm?: string | undefined; api?: string | undefined; cost?: ModelPricing | undefined }
+      >
+    | undefined;
 }
 
 export interface ModelsDevData {
@@ -152,13 +157,16 @@ export function trimModelsDevProviders(
           ? (mv as { provider?: { npm?: unknown } }).provider?.npm
           : undefined;
       const cost = trimModelsDevCost((mv as { cost?: unknown } | null)?.cost);
+      const api = (mv as { provider?: { api?: unknown } } | null)?.provider?.api;
       modelMap[modelId] = {
         ...(typeof npm === "string" && npm !== "" ? { npm } : {}),
+        ...(typeof api === "string" && api !== "" ? { api } : {}),
         ...(cost !== undefined ? { cost } : {}),
       };
     }
     providers[key] = {
       ...(typeof provider.npm === "string" ? { npm: provider.npm } : {}),
+      ...(typeof provider.api === "string" && provider.api !== "" ? { api: provider.api } : {}),
       models: modelMap,
     };
   }

@@ -51,6 +51,9 @@ export const MODEL_ROLES = ["task", "vision", "smol"] as const;
 
 /** Provider 条目中模型能力的覆盖形状（对齐 provider 的 ModelOverride） */
 export interface ModelOverrideShape {
+  baseURL?: string | undefined;
+  /** 装配派生，不接受文件直接声明。 */
+  baseURLSource?: "user" | "models.dev" | "entry" | undefined;
   displayName?: string | undefined;
   contextWindow?: number | undefined;
   maxOutputTokens?: number | undefined;
@@ -88,6 +91,7 @@ export interface ModelOverrideShape {
 
 /** userModels 中单个模型的用户编辑（ADR-0024 第 1 节；ADR-0035 起八个可编辑字段） */
 export interface UserModelEntry {
+  baseURL?: string | undefined;
   displayName?: string | undefined;
   contextWindow?: number | undefined;
   maxOutputTokens?: number | undefined;
@@ -526,6 +530,7 @@ export interface ModelSettingsView {
      * 推导结果为 unavailable 时 value 为 undefined、unavailable 给出原因。
      */
     protocol: ModelField<ModelProtocol>;
+    baseURL: ModelField<string>;
     /** 编辑工具（ADR-0035 §5）：value 恒有值（默认表兜底） */
     editTool: ModelField<EditToolKind>;
   };

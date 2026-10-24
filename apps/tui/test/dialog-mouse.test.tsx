@@ -40,6 +40,7 @@ const view: ModelSettingsView = {
     reasoningEffort: field(["low", "high"]),
     protocol: field("openai-compatible"),
     editTool: field("edit" as const),
+    baseURL: field("https://api.test/v1"),
   },
 };
 function mouseController() {

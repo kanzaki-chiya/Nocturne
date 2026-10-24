@@ -219,6 +219,7 @@ export const providerEntrySchema = z
             .optional(),
           // ADR-0026 第 7 节：编辑页「协议」字段的用户编辑
           protocol: modelProtocolSchema.optional(),
+          baseURL: z.url().optional(),
         }),
       )
       .optional(),

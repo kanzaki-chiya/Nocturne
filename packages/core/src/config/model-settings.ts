@@ -346,6 +346,17 @@ export function buildModelSettingsViews(input: ModelSettingsViewInput): ModelSet
         ),
         reasoningEffort,
         protocol: protocol.field,
+        baseURL: scalarField<string>(
+          ctx,
+          "baseURL",
+          model?.baseURL,
+          undefined,
+          entry?.baseURL ??
+            (entryType === "anthropic" && protocol.field.value === "anthropic"
+              ? "https://api.anthropic.com/v1"
+              : undefined),
+          userEntry?.baseURL,
+        ),
         // ADR-0035 §5：内置默认表作最低兜底，缺省值来源为 default
         editTool: scalarField<EditToolKind>(
           ctx,
@@ -370,6 +381,7 @@ const FIELD_KEYS = [
   "imageInput",
   "reasoningEffort",
   "protocol",
+  "baseURL",
   "editTool",
 ] as const;
 type FieldKey = (typeof FIELD_KEYS)[number];
@@ -471,6 +483,14 @@ export function patchValueError(patch: ModelSettingsPatch): string | undefined {
     p !== "openai-responses"
   ) {
     return `协议只能为 openai-compatible/anthropic/openai-responses`;
+  }
+  if (patch.baseURL !== undefined && patch.baseURL !== null) {
+    try {
+      const url = new URL(patch.baseURL);
+      if (!["https:", "http:"].includes(url.protocol)) return "接口地址必须为 HTTP(S) URL";
+    } catch {
+      return "接口地址必须为 HTTP(S) URL";
+    }
   }
   const t: unknown = patch.editTool;
   if (t !== undefined && t !== null && t !== "edit" && t !== "apply_patch") {

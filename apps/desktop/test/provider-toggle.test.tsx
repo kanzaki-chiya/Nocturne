@@ -43,6 +43,7 @@ const modelSettings = (id: string) => ({
     reasoningEffort: { value: ["low"], editable: true, source: { kind: "derived" } },
     protocol: { value: "openai-compatible", editable: true, source: { kind: "entryType" } },
     editTool: { value: "edit", editable: true, source: { kind: "default" } },
+    baseURL: { value: "https://api.test/v1", editable: true, source: { kind: "default" } },
   },
 });
 
