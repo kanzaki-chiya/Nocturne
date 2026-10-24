@@ -6,6 +6,7 @@ import { RpcError, type RpcRuntime } from "@nocturne/rpc/client";
 import type { AttachmentImageSource } from "../attachment-images";
 import type { ComposerSubmit } from "../Composer";
 import { Conversation, PermissionCard, QuestionCard } from "../Conversation";
+import { phoneWarningText } from "../open-warnings";
 import { useDraftControls, useSessionControls } from "../session-controls";
 import { PhoneComposer } from "./PhoneComposer";
 import {
@@ -178,6 +179,7 @@ export function SessionScreen({
       <Conversation
         session={session}
         view={view}
+        openWarnings={entry.warnings.map(phoneWarningText)}
         openUrl={openUrl}
         cwd={entry.workspace}
         shellKind={controls.shell?.effective?.kind}

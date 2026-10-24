@@ -2,7 +2,12 @@ import { webcrypto } from "node:crypto";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createMemoryTransportPair, createRpcClient, type RpcSession } from "@nocturne/rpc/client";
+import {
+  createMemoryTransportPair,
+  createRpcClient,
+  type RpcSession,
+  type SessionOpened,
+} from "@nocturne/rpc/client";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
 import { PhoneSessions } from "../src/web/sessions";
 import { PhoneApp } from "../src/web/App";
@@ -86,9 +91,10 @@ it("PhoneSessions 回放以订阅开始时间区分 live，turn.started 回放�
     }),
     turnChanges: vi.fn(async () => []),
   } as unknown as RpcSession;
-  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({ session, opened: {} } as Awaited<
-    ReturnType<typeof client.runtime.resumeSession>
-  >);
+  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({
+    session,
+    opened: { warnings: [] as string[] } as SessionOpened,
+  } as Awaited<ReturnType<typeof client.runtime.resumeSession>>);
   vi.spyOn(client.runtime, "listSessions").mockResolvedValue([]);
   const observed = vi.fn();
   const events = vi.fn();
@@ -136,9 +142,10 @@ it("新持锁会话经 runtime.sessionsChanged 订阅后把事件传到通知观
     turnChanges: vi.fn(async () => []),
   } as unknown as RpcSession;
   const list = vi.spyOn(client.runtime, "listSessions").mockResolvedValue([]);
-  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({ session, opened: {} } as Awaited<
-    ReturnType<typeof client.runtime.resumeSession>
-  >);
+  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({
+    session,
+    opened: { warnings: [] as string[] } as SessionOpened,
+  } as Awaited<ReturnType<typeof client.runtime.resumeSession>>);
   const onEvent = vi.fn();
   const sessions = new PhoneSessions(vi.fn(), undefined, onEvent);
   await sessions.connected(client);
@@ -188,7 +195,7 @@ it("通知目标冷启动与暖启动切到指定电脑/会话；只在原生前
                 : () => Promise.reject(new Error(`未实现 ${String(key)}`)),
           },
         ) as unknown as RpcSession,
-        opened: {},
+        opened: { warnings: [] as string[] } as SessionOpened,
       }) as Awaited<ReturnType<typeof client.runtime.resumeSession>>,
   );
   let targetListener: ((target: { hostId: string; sessionId: string }) => void) | undefined;

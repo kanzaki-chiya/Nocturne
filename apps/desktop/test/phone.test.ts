@@ -9,7 +9,12 @@ import {
   RelayError,
   type DeviceRelay,
 } from "@nocturne/remote";
-import { createMemoryTransportPair, type RpcClient, type RpcSession } from "@nocturne/rpc/client";
+import {
+  createMemoryTransportPair,
+  type RpcClient,
+  type RpcSession,
+  type SessionOpened,
+} from "@nocturne/rpc/client";
 import { memoryStorage, encode, type PairedHost } from "../src/web/storage";
 import { pairPhone, pairingError, parsePairingLink, takePairingFragment } from "../src/web/pairing";
 import { PhoneConnection, retryDelay, versionMessage } from "../src/web/connection";
@@ -249,9 +254,10 @@ it("重连续接 lastSeq 并保留显示视图，新建会话可用任意目录�
     id: "s",
     subscribe: vi.fn(async () => ({ lastSeq: 12, unsubscribe: vi.fn() })),
   } as unknown as RpcSession;
-  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({ session, opened: {} } as Awaited<
-    ReturnType<RpcClient["runtime"]["resumeSession"]>
-  >);
+  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({
+    session,
+    opened: { warnings: [] as string[] } as SessionOpened,
+  } as Awaited<ReturnType<RpcClient["runtime"]["resumeSession"]>>);
   vi.spyOn(client.runtime, "listSessions").mockResolvedValue([]);
   const sessions = new PhoneSessions(vi.fn());
   const view = createSessionView();
@@ -261,6 +267,7 @@ it("重连续接 lastSeq 并保留显示视图，新建会话可用任意目录�
     client,
     workspace: "Z:/work",
     view,
+    warnings: [],
     dead: true,
     listeners: new Set(),
     turnChanges: new Map(),
@@ -276,11 +283,10 @@ it("重连续接 lastSeq 并保留显示视图，新建会话可用任意目录�
     id: "n",
     subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
   } as unknown as RpcSession;
-  const create = vi
-    .spyOn(client.runtime, "createSession")
-    .mockResolvedValue({ session: created } as Awaited<
-      ReturnType<RpcClient["runtime"]["createSession"]>
-    >);
+  const create = vi.spyOn(client.runtime, "createSession").mockResolvedValue({
+    session: created,
+    opened: { warnings: [] as string[] } as SessionOpened,
+  } as Awaited<ReturnType<RpcClient["runtime"]["createSession"]>>);
   const model = { provider: "fake", model: "fake-1" };
   await sessions.create("Z:/other", { model, reasoningEffort: "high", permissionPreset: "auto" });
   expect(create).toHaveBeenCalledWith({
@@ -306,7 +312,9 @@ it("连接只等列表，后台只订阅持锁会话", async () => {
       id,
       subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
     } as unknown as RpcSession;
-    return { session, opened: {} } as Awaited<ReturnType<RpcClient["runtime"]["resumeSession"]>>;
+    return { session, opened: { warnings: [] as string[] } as SessionOpened } as Awaited<
+      ReturnType<RpcClient["runtime"]["resumeSession"]>
+    >;
   });
   const summary = (id: string, locked: boolean) => ({
     id,
@@ -340,7 +348,9 @@ it("推送点进来优先最近的待处理会话，没有则取最近会话", a
       id,
       subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
     } as unknown as RpcSession;
-    return { session, opened: {} } as Awaited<ReturnType<RpcClient["runtime"]["resumeSession"]>>;
+    return { session, opened: { warnings: [] as string[] } as SessionOpened } as Awaited<
+      ReturnType<RpcClient["runtime"]["resumeSession"]>
+    >;
   });
   const summary = (id: string, mtimeMs: number, locked: boolean) => ({
     id,
@@ -393,7 +403,9 @@ async function notifiedClient() {
       id,
       subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
     } as unknown as RpcSession;
-    return { session, opened: {} } as Awaited<ReturnType<RpcClient["runtime"]["resumeSession"]>>;
+    return { session, opened: { warnings: [] as string[] } as SessionOpened } as Awaited<
+      ReturnType<RpcClient["runtime"]["resumeSession"]>
+    >;
   });
   const list = vi.spyOn(client.runtime, "listSessions").mockResolvedValue([]);
   return { client, server, resume, list };
@@ -504,7 +516,7 @@ function strictResume(resume: ReturnType<typeof vi.spyOn>, gates: Map<string, Pr
       id,
       subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
     } as unknown as RpcSession;
-    return { session, opened: {} };
+    return { session, opened: { warnings: [] as string[] } as SessionOpened };
   }) as never);
   return calls;
 }
@@ -818,9 +830,10 @@ it("改动摘要在订阅后与 Turn 结束时刷新；回退后刷新；分叉�
   vi.spyOn(client.runtime, "listSessions").mockResolvedValue([]);
   vi.spyOn(client.runtime, "resumeSession").mockImplementation(
     async (id) =>
-      ({ session: id === "f" ? forked : session, opened: {} }) as Awaited<
-        ReturnType<RpcClient["runtime"]["resumeSession"]>
-      >,
+      ({
+        session: id === "f" ? forked : session,
+        opened: { warnings: [] as string[] } as SessionOpened,
+      }) as Awaited<ReturnType<RpcClient["runtime"]["resumeSession"]>>,
   );
   const fork = vi.spyOn(client.runtime, "forkSession").mockResolvedValue("f");
   const sessions = new PhoneSessions(vi.fn());

@@ -407,6 +407,7 @@ function mount(
       | "onResubmit"
       | "onFork"
       | "hidePersistentPermissions"
+      | "openWarnings"
     >
   > & { resolveFilesImpl?: RpcSession["resolveFiles"] } = {},
 ) {
@@ -2658,5 +2659,33 @@ describe("会话区提示", () => {
       (node) => node.textContent,
     );
     expect(shown).toEqual(["MCP 工具名冲突", "MCP 工具列表已更新", "响应较慢"]);
+  });
+
+  it("显示会话打开时的警告，没有警告时不显示", () => {
+    const withWarnings = mount(createSessionView(), {
+      openWarnings: ["检测到项目配置 a.json，但该工作区未信任", "技能解析失败"],
+    });
+    const shown = [...withWarnings.container.querySelectorAll(".conversation-notice-warning")].map(
+      (node) => node.textContent,
+    );
+    expect(shown).toEqual(["检测到项目配置 a.json，但该工作区未信任", "技能解析失败"]);
+    cleanup();
+    expect(mount(createSessionView()).container.querySelector(".conversation-notice")).toBeNull();
+    cleanup();
+    expect(
+      mount(createSessionView(), { openWarnings: [] }).container.querySelector(
+        ".conversation-notice",
+      ),
+    ).toBeNull();
+  });
+
+  it("视图提示里已有同样文字的警告只显示一次", () => {
+    const view = createSessionView();
+    view.notices = [{ level: "warning", code: "config_warning", message: "配置降级" }];
+    const { container } = mount(view, { openWarnings: ["配置降级", "技能解析失败"] });
+    const shown = [...container.querySelectorAll(".conversation-notice")].map(
+      (node) => node.textContent,
+    );
+    expect(shown).toEqual(["技能解析失败", "配置降级"]);
   });
 });

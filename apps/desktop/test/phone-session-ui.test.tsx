@@ -7,6 +7,7 @@ import {
   createRpcClient,
   RpcError,
   type RpcSession,
+  type SessionOpened,
 } from "@nocturne/rpc/client";
 import type { RuntimeEvent, PendingPermission } from "@nocturne/core/protocol";
 import { PhoneApp } from "../src/web/App";
@@ -79,9 +80,10 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
       firstText: "测试会话",
     },
   ]);
-  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({ session, opened: {} } as Awaited<
-    ReturnType<typeof client.runtime.resumeSession>
-  >);
+  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({
+    session,
+    opened: { warnings: [] as string[] } as SessionOpened,
+  } as Awaited<ReturnType<typeof client.runtime.resumeSession>>);
   const push = new PhonePush({
     registration: () => Promise.reject(new Error("unsupported")),
     permission: () => "default",
@@ -213,9 +215,10 @@ it("从推送点进来连上后直接进入会话", async () => {
       firstText: "测试会话",
     },
   ]);
-  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({ session, opened: {} } as Awaited<
-    ReturnType<typeof client.runtime.resumeSession>
-  >);
+  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({
+    session,
+    opened: { warnings: [] as string[] } as SessionOpened,
+  } as Awaited<ReturnType<typeof client.runtime.resumeSession>>);
   const push = new PhonePush({
     registration: () => Promise.reject(new Error("unsupported")),
     permission: () => "default",
@@ -244,6 +247,65 @@ it("从推送点进来连上后直接进入会话", async () => {
   await vi.waitFor(() => {
     expect(container.querySelector(".phone-row.session")?.textContent).toContain("测试会话");
   });
+  client.close();
+});
+
+it("手机对话页显示打开警告，且不出现命令行指令", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  history.replaceState(null, "", "/?attention");
+  const [transport] = createMemoryTransportPair();
+  const client = createRpcClient(transport, { clientName: "test" });
+  const storage = memoryStorage();
+  await storage.putHost({ hostId: "host", hostPub: "pub", name: "电脑 1", pairedAt: 1 });
+  await storage.identity();
+  const session = fakeSession({
+    id: "s",
+    subscribe: () => Promise.resolve({ lastSeq: 0, unsubscribe: vi.fn() }),
+  });
+  vi.spyOn(client.runtime, "listSessions").mockResolvedValue([
+    {
+      id: "s",
+      createdAt: new Date().toISOString(),
+      model: { provider: "fake", model: "fake-1" },
+      cwd: "Z:/work",
+      workspaceRoot: "Z:/work",
+      mtimeMs: 1,
+      firstText: "测试会话",
+    },
+  ]);
+  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({
+    session,
+    opened: {
+      warnings: [
+        "检测到项目配置 a.json，但该工作区未信任——其中仅收紧方向的规则生效；执行 nctrn trust 信任该工作区",
+      ],
+    } as SessionOpened,
+  } as Awaited<ReturnType<typeof client.runtime.resumeSession>>);
+  const push = new PhonePush({
+    registration: () => Promise.reject(new Error("unsupported")),
+    permission: () => "default",
+    requestPermission: vi.fn(),
+    info: vi.fn(),
+    changed: vi.fn(),
+  });
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => {
+    root?.render(<PhoneApp storage={storage} push={push} />);
+  });
+  await act(async () => {
+    await shared.connect?.(client, { subscribePush: vi.fn(), unsubscribePush: vi.fn() });
+  });
+  await vi.waitFor(() => {
+    expect(container.querySelector(".conversation-notice-warning")).not.toBeNull();
+  });
+  const text = container.querySelector(".conversation-notice-warning")?.textContent ?? "";
+  expect(text).toContain("该工作区未信任");
+  expect(text).toContain("请在电脑上信任该项目");
+  expect(text).not.toContain("nctrn");
   client.close();
 });
 

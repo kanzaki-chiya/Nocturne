@@ -1306,6 +1306,7 @@ export function App({ host }: { host: DesktopHost }) {
             <PaneErrorBoundary key={active.session.id}>
               <SessionPane
                 view={active.view}
+                openWarnings={active.warnings}
                 replaying={active.replaying === true}
                 workspace={active.workspace}
                 session={active.session}
@@ -1543,6 +1544,8 @@ export function App({ host }: { host: DesktopHost }) {
 
 interface SessionPaneProps {
   view: SessionView;
+  /** 会话打开时的警告，显示在对话页顶部 */
+  openWarnings: readonly string[];
   replaying: boolean;
   workspace: string;
   session: RpcSession;
@@ -1581,6 +1584,7 @@ interface SessionPaneProps {
 
 function SessionPane({
   view,
+  openWarnings,
   replaying,
   workspace,
   session,
@@ -1679,6 +1683,7 @@ function SessionPane({
         key={`conversation:${session.id}`}
         session={session}
         view={view}
+        openWarnings={openWarnings}
         openUrl={openUrl}
         cwd={workspace}
         shellKind={controls.shell?.effective?.kind}

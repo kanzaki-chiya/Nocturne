@@ -12,6 +12,7 @@ import {
   trackSessionView,
   type RpcClient,
   type RpcSession,
+  type SessionOpened,
   type SessionViewTracker,
 } from "@nocturne/rpc/client";
 import { conversationStatus } from "../conversations";
@@ -22,6 +23,8 @@ export interface PhoneSession {
   client: RpcClient;
   workspace: string;
   view: SessionView;
+  /** 打开时的警告（`SessionOpened.warnings`）；对话页顶部显示 */
+  warnings: string[];
   tracker?: SessionViewTracker;
   dead: boolean;
   /** `trackSessionView` 完成前为 true；控件和上下文圆环在此期间不随回放条目刷新。 */
@@ -227,10 +230,11 @@ export class PhoneSessions {
   }
   private async attach(
     client: RpcClient,
-    session: RpcSession,
+    result: { session: RpcSession; opened: SessionOpened },
     workspace: string,
     view = createSessionView(),
   ): Promise<PhoneSession> {
+    const { session } = result;
     const previous = this.opened.get(session.id);
     const listeners = previous?.listeners ?? new Set<() => void>();
     const entry: PhoneSession = {
@@ -238,6 +242,7 @@ export class PhoneSessions {
       session,
       workspace,
       view,
+      warnings: result.opened.warnings,
       dead: false,
       replaying: true,
       listeners,
@@ -319,8 +324,8 @@ export class PhoneSessions {
     const client = this.requireClient();
     const id = await client.runtime.forkSession(entry.session.id, { targetSeq });
     await this.refresh().catch(() => undefined);
-    const { session } = await client.runtime.resumeSession(id);
-    const forked = await this.attach(client, session, entry.workspace);
+    const result = await client.runtime.resumeSession(id);
+    const forked = await this.attach(client, result, entry.workspace);
     void this.refresh().catch(() => undefined);
     return forked;
   }
@@ -347,9 +352,9 @@ export class PhoneSessions {
     view: SessionView | undefined,
     generation: number,
   ): Promise<PhoneSession> {
-    const { session } = await client.runtime.resumeSession(id);
+    const result = await client.runtime.resumeSession(id);
     if (generation !== this.generation) throw new Error("电脑连接已切换");
-    return this.attach(client, session, workspace, view);
+    return this.attach(client, result, workspace, view);
   }
   /**
    * 在 workspace 新建会话（与桌面草稿相同：未选过的档位与预设省略，由 Core 解析
@@ -360,7 +365,7 @@ export class PhoneSessions {
     const model =
       options.model ?? (await client.runtime.defaultModel({ workspaceRoot: workspace }));
     if (!model) throw new Error("电脑未设置默认模型，请在电脑上选择默认模型");
-    const { session } = await client.runtime.createSession({
+    const result = await client.runtime.createSession({
       model,
       cwd: workspace,
       workspaceRoot: workspace,
@@ -371,7 +376,7 @@ export class PhoneSessions {
         ? { permissionPreset: options.permissionPreset }
         : {}),
     });
-    const entry = await this.attach(client, session, workspace);
+    const entry = await this.attach(client, result, workspace);
     void this.refresh().catch(() => undefined);
     return entry;
   }

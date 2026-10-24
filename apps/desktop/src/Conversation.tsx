@@ -48,6 +48,7 @@ import { TurnChangesCard } from "./TurnChangesCard";
 import { TodoList, TodoProgress, todoSummary } from "./TodoList";
 import { useReasoning, type ReasoningMap } from "./reasoning";
 import { MCP_STATE_NOTICE_CODES } from "./mcp-status";
+import { openWarningsToShow } from "./open-warnings";
 import { useStickyOutput } from "./useStickyOutput";
 import { useCopyText } from "./useCopyText";
 import { KeyHint } from "./KeyHint";
@@ -120,6 +121,8 @@ export interface ConversationProps {
    * 行内代码。历史助手消息传入，实时流式消息不传（流式中引用不完整）。
    */
   fileLinks?: FileLinkHooks | undefined;
+  /** 会话打开时的警告（`SessionOpened.warnings`），显示在消息流顶部；缺省不显示 */
+  openWarnings?: readonly string[] | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -175,6 +178,7 @@ export type ReadOnlyConversationProps = Omit<
   | "subagentLinks"
   | "hideRequests"
   | "hidePersistentPermissions"
+  | "openWarnings"
 > & {
   session: ReadOnlySessionRef;
   /** 只读观察：不挂权限/提问应答卡片，用户消息只读展示，没有编辑、重发、分叉、撤销 */
@@ -3142,6 +3146,7 @@ function ConversationContent({
   onViewChanges,
   hidePersistentPermissions,
   hideRequests = false,
+  openWarnings,
   readOnly,
 }: ContentProps) {
   const scroll = useRef<HTMLDivElement>(null);
@@ -3292,6 +3297,15 @@ function ConversationContent({
       >
         <ThinkScrollContext.Provider value={thinkScroll}>
           <div className="conversation-transcript" ref={content}>
+            {openWarningsToShow(openWarnings, view.notices).map((warning, index) => (
+              <div
+                key={`open-warning:${index}`}
+                className="conversation-notice conversation-notice-warning"
+                role="alert"
+              >
+                {warning}
+              </div>
+            ))}
             {!view.entries.length && !view.live.assistants.length && !view.live.tools.length ? (
               <div className="conversation-empty">发送消息，开始这个会话。</div>
             ) : null}
