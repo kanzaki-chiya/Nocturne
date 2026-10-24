@@ -898,7 +898,18 @@
   border: 1px solid color-mix(in srgb, var(--a-warning) 55%, var(--a-border));
   border-radius: var(--radius-3);
   background: linear-gradient(var(--a-warnBg), var(--a-warnBg)), var(--a-panel);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
   overflow-wrap: anywhere;
+}
+/* 卡片出现时被程序聚焦（tabIndex -1）：去掉浏览器默认焦点框，改用与提问卡一致的强调色边框和外圈 */
+.conversation .ask:focus-within {
+  border-color: var(--a-accent);
+  box-shadow: 0 0 0 3px var(--a-sel);
+}
+.conversation .ask:focus {
+  outline: none;
 }
 .conversation .ask + .ask {
   margin-top: 12px;
