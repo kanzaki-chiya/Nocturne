@@ -374,9 +374,10 @@ const FIELD_ORDER = [
   "reasoning",
   "reasoningEffort",
   "protocol",
-  // ADR-0035 §5：第八个字段「编辑工具」
-  "editTool",
+  // ADR-0061 §4：接口地址紧跟协议（与桌面端同序）
   "baseURL",
+  // ADR-0035 §5：编辑工具
+  "editTool",
 ] as const;
 type FieldKey = (typeof FIELD_ORDER)[number];
 const FIELD_LABELS: Record<FieldKey, string> = {

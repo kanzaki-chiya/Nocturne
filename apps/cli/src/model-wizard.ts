@@ -23,9 +23,10 @@ const MODEL_FIELD_LABELS = {
   reasoningEffort: "思考档位",
   // ADR-0026 第 7 节：第七个字段「协议」
   protocol: "协议",
-  // ADR-0035 §5：第八个字段「编辑工具」
-  editTool: "编辑工具",
+  // ADR-0061 §4：接口地址紧跟协议（与桌面端同序）
   baseURL: "接口地址",
+  // ADR-0035 §5：编辑工具
+  editTool: "编辑工具",
 } as const;
 type ModelFieldKey = keyof typeof MODEL_FIELD_LABELS;
 const MODEL_FIELD_ORDER: readonly ModelFieldKey[] = [
@@ -36,8 +37,8 @@ const MODEL_FIELD_ORDER: readonly ModelFieldKey[] = [
   "imageInput",
   "reasoningEffort",
   "protocol",
-  "editTool",
   "baseURL",
+  "editTool",
 ];
 
 /** 当前值的一行显示（用户未声明时显示生效值；未声明显示 "—"） */

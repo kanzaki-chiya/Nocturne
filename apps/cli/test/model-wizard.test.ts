@@ -98,8 +98,8 @@ describe("runProviderModelWizard", () => {
       "y",
       "low,high",
       "gemini",
-      "patch",
       "https://model.test/v1beta",
+      "patch",
     ]);
     await runProviderModelWizard(io, config, "corp", "m1");
     expect(saved[0]?.patch).toEqual({
@@ -135,7 +135,7 @@ describe("runProviderModelWizard", () => {
 
   it("「-」清除用户编辑 → patch 写 null", async () => {
     const { config, saved } = makeConfig([baseView()]);
-    const { io } = scriptedIo(["-", "-", "", "", "", "", "", "", "-"]);
+    const { io } = scriptedIo(["-", "-", "", "", "", "", "", "-", ""]);
     await runProviderModelWizard(io, config, "corp", "m1");
     expect(saved[0]?.patch).toEqual({ displayName: null, contextWindow: null, baseURL: null });
   });

@@ -992,9 +992,9 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     await waitFor(() => (again.lastFrame() ?? "").includes("> [ 保存 ]"));
     again.stdin.write(LEFT);
     await waitFor(() => (again.lastFrame() ?? "").includes("> [ 取消 ]"));
-    // ↑ 回最后一个可编辑字段（接口地址）
+    // ↑ 回最后一个可编辑字段（编辑工具；接口地址紧跟协议，在它之前）
     again.stdin.write(UP);
-    await waitFor(() => (again.lastFrame() ?? "").includes("> 接口地址"));
+    await waitFor(() => (again.lastFrame() ?? "").includes("> 编辑工具"));
     again.unmount();
   });
 
@@ -1023,8 +1023,8 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     const { stdin, lastFrame, unmount } = editor({ onSave: save });
     await waitFor(() => (lastFrame() ?? "").includes("> 显示名"));
     await flushInput();
-    // ↓×7 到「编辑工具」（最后一个字段）
-    for (let i = 0; i < 7; i += 1) stdin.write(DOWN);
+    // ↓×8 到「编辑工具」（最后一个字段；接口地址紧跟协议，在它之前）
+    for (let i = 0; i < 8; i += 1) stdin.write(DOWN);
     await waitFor(() => (lastFrame() ?? "").includes("> 编辑工具"));
     // →→：跟随 → edit → apply_patch
     stdin.write(RIGHT);
