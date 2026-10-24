@@ -119,6 +119,43 @@ describe("输出落盘（tools.md 第 4 节）", () => {
     expect(done?.payload.modelContent).toContain(spillPath as string);
   });
 
+  it("截断说明给出总长、省略的行号范围和可直接用于 read 的 offset/limit", async () => {
+    const ws = tmpDir("nct-spill-ws-");
+    const attachmentsDir = tmpDir("nct-spill-att-");
+    const { scope, events } = await makeScope(ws, attachmentsDir);
+    const lineTool: ToolDefinition = {
+      ...bigTool,
+      name: "lines",
+      execute: () =>
+        Promise.resolve({
+          status: "ok",
+          modelContent: Array.from(
+            { length: 5_000 },
+            (_, i) => `row-${String(i + 1).padStart(5, "0")}`,
+          ).join("\n"),
+        }),
+    };
+    const r = createToolRegistry();
+    r.register(lineTool);
+    await createToolExecutor(r).execute({ callId: "c1", name: "lines", input: {} }, scope);
+    const done = events.find((e) => e.type === "tool.completed");
+    const content = String(done?.payload.modelContent);
+    const match = /中间第 (\d+)–(\d+) 行/.exec(content);
+    expect(match).not.toBeNull();
+    const [from, to] = [Number(match?.[1]), Number(match?.[2])];
+    expect(content).toContain("输出共 49999 字符、5000 行");
+    expect(content).toContain(`offset=${from}、limit=${to - from + 1}`);
+    // 省略范围与实际省略的行一致：from 之前一行和 to 之后一行都还在，中间的不在
+    const row = (n: number) => `row-${String(n).padStart(5, "0")}`;
+    expect(content).toContain(row(from - 1));
+    expect(content).toContain(row(to + 1));
+    expect(content).not.toContain(row(Math.floor((from + to) / 2)));
+    // 按提示读落盘文件：offset 起的内容正是被省略的那一段
+    const spilled = readFileSync(String(done?.payload.spillPath), "utf8").split("\n");
+    expect(spilled[from - 1]).toBe(row(from));
+    expect(spilled[to - 1]).toBe(row(to));
+  });
+
   it("attachmentsDir 缺省：降级为普通截断，明确说明未落盘", async () => {
     const ws = tmpDir("nct-spill-ws-");
     const { scope, events } = await makeScope(ws);

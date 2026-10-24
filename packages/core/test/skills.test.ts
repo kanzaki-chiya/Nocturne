@@ -611,3 +611,27 @@ function item<T>(items: readonly T[], index: number): T {
   if (value === undefined) throw new Error("缺少测试条目");
   return value;
 }
+
+it("正文超过单次输出预算：开头提示总长和 SKILL.md 的读法；预算内不加提示", async () => {
+  const f = fixture();
+  f.skill(path.join(f.home, "skills"), "big", "description: big", "行".repeat(40_000));
+  f.skill(path.join(f.home, "skills"), "small", "description: small", "短正文");
+  const discovery = await f.scan();
+  const tool = createSkillTool(
+    skillCatalog(discovery.skills, []).skills.map((s, i) => ({
+      ...s,
+      body: item(discovery.skills, i).body,
+    })),
+  );
+  const ctx = { sessionId: "session", workspaceRoot: f.workspace } as Parameters<
+    typeof tool.execute
+  >[1];
+  const big = (await tool.execute({ name: "big" }, ctx)).modelContent;
+  const noticeAt = big.indexOf("提示：正文共 40000 字符");
+  expect(noticeAt).toBeGreaterThan(0);
+  // 提示在开头，位于正文之前，不会被执行器截掉的中间一段吞掉
+  expect(noticeAt).toBeLessThan(500);
+  expect(big).toContain(path.join("skills", "big", "SKILL.md"));
+  expect(big).toContain("offset/limit");
+  expect((await tool.execute({ name: "small" }, ctx)).modelContent).not.toContain("提示：正文共");
+});

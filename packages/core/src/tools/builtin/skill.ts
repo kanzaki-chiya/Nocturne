@@ -1,5 +1,6 @@
 import { renderSkill } from "../../skills/index.js";
 import type { SkillInvocation, SkillOverview } from "../../protocol/index.js";
+import { DEFAULT_MAX_MODEL_CHARS } from "../budget.js";
 import type { ToolDefinition } from "../types.js";
 
 export const SKILL_TOOL_NAME = "skill";
@@ -76,9 +77,17 @@ export function createSkillTool(
           output: { name: skill.name, repeated: true },
         });
       loaded.set(key, content);
+      const header = `技能 ${skill.name}\n目录：${skill.realPath}\n文件：${skill.files.map((f) => f.name + (f.directory ? "/" : "")).join("、")}`;
+      // 正文超过单次输出预算时执行器会截掉中间一段（日志分析：cua-driver 加载 6 次、每次被截断）。
+      // 提示放在开头，一定进得了上下文：告诉模型总长和怎么读原文
+      const sep = skill.realPath.includes("\\") ? "\\" : "/";
+      const notice =
+        header.length + body.length + 2 > DEFAULT_MAX_MODEL_CHARS
+          ? `\n提示：正文共 ${body.length} 字符，超过单次输出预算（${DEFAULT_MAX_MODEL_CHARS} 字符），中间部分会被省略。完整原文在 ${skill.realPath}${sep}SKILL.md，用 read 的 offset/limit 分段读取；目录里的其他文件同样用 read。`
+          : "";
       return Promise.resolve({
         status: "ok",
-        modelContent: `技能 ${skill.name}\n目录：${skill.realPath}\n文件：${skill.files.map((f) => f.name + (f.directory ? "/" : "")).join("、")}\n\n${body}`,
+        modelContent: `${header}${notice}\n\n${body}`,
         output: { name: skill.name, directory: skill.realPath, files: skill.files },
       });
     },

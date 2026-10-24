@@ -13,7 +13,7 @@ import type {
   SubjectRequest,
   ToolCallRef,
 } from "../protocol/index.js";
-import { applyBudget } from "./budget.js";
+import { applyBudget, truncationNote } from "./budget.js";
 import { createSchemaCompiler } from "./schema.js";
 import { writeSpill } from "./spill.js";
 import type {
@@ -146,10 +146,14 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
               spillPath = undefined;
             }
           }
+          // 说明总长、截在哪里、剩余部分怎么读（日志分析：skill 被截断 6 次、模型一次也没去读）
           modelContent +=
-            spillPath !== undefined
-              ? `\n\n[完整输出已写入 ${spillPath}（本会话内可用 read 查看）]`
-              : "\n\n[完整输出未保留：落盘不可用或写入失败]";
+            "\n\n" +
+            (budget.span !== undefined
+              ? truncationNote(result.modelContent, budget.span, budget.maxChars, spillPath)
+              : spillPath !== undefined
+                ? `[完整输出已写入 ${spillPath}（本会话内可用 read 查看）]`
+                : "[完整输出未保留：落盘不可用或写入失败]");
         }
         // 图片附件落盘（ADR-0023 第 2 节）：字节经 AttachmentStore 存入会话
         // 附件目录，tool.completed 只带 ImageAttachment 引用。单张失败不拖垮

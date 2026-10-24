@@ -39,6 +39,8 @@ type ReadOutput =
     };
 
 const DEFAULT_LIMIT = 2000;
+/** 单次返回内容的字符预算：低于执行器的 30,000 字符截断线，留出续读说明的余量 */
+const READ_CHAR_BUDGET = 28_000;
 
 /** 图片大小的人读格式：<1KB → "N B"；<1MB → 整数 "N KB"；否则一位小数 "N.N MB" */
 function formatBytes(n: number): string {
@@ -162,18 +164,33 @@ export const readTool: ToolDefinition<ReadInput, ReadOutput> = {
     const start = Math.min(Math.max(offset - 1, 0), lines.length);
     const end = Math.min(start + limit, lines.length);
 
+    // 输出受字符预算约束：按整行截止，并给出下一段的 offset。交给执行器截断会丢掉中间一段，
+    // 模型只知道"被省略了"，不知道省略在哪几行（日志分析：整文件 read 被截断 19 次）
     const numbered: string[] = [];
+    let chars = 0;
+    let stop = start;
     for (let i = start; i < end; i++) {
-      numbered.push(`${i + 1}|${(lines[i] ?? "").replace(/\r$/, "")}`);
+      let row = `${i + 1}|${(lines[i] ?? "").replace(/\r$/, "")}`;
+      if (i > start && chars + row.length + 1 > READ_CHAR_BUDGET) break;
+      if (row.length > READ_CHAR_BUDGET) {
+        row = `${row.slice(0, READ_CHAR_BUDGET)}…（本行过长，已截断）`;
+      }
+      numbered.push(row);
+      chars += row.length + 1;
+      stop = i + 1;
     }
-    const remaining = lines.length - end;
+    const remaining = lines.length - stop;
     if (remaining > 0) {
-      numbered.push(`…（其后还有 ${remaining} 行，用 offset 继续读取）`);
+      numbered.push(
+        stop < end
+          ? `…（输出受 ${READ_CHAR_BUDGET} 字符限制，已读到第 ${stop} 行，其后还有 ${remaining} 行，用 offset=${stop + 1} 继续读取）`
+          : `…（其后还有 ${remaining} 行，用 offset=${stop + 1} 继续读取）`,
+      );
     }
 
     // 记录"已读状态"（write/edit 据此做先读检查与过期检测）：
     // 内容哈希必存；完整读取且 ≤64KB 才留原文（部分读取按无旧文本处理）
-    const full = start === 0 && end === lines.length;
+    const full = start === 0 && stop === lines.length;
     ctx.readState.record(target, {
       mtimeMs: stat.mtimeMs,
       size: stat.size,
@@ -188,7 +205,7 @@ export const readTool: ToolDefinition<ReadInput, ReadOutput> = {
         path: target,
         totalLines: lines.length,
         offset,
-        returnedLines: end - start,
+        returnedLines: stop - start,
       },
     };
   },

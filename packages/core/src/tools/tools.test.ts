@@ -648,6 +648,35 @@ describe("read 工具", () => {
     expect(r.result.modelContent).toContain("还有 2 行");
   });
 
+  it("整文件超过字符预算：按整行截止并给出下一段 offset，不交给执行器截掉中间一段", async () => {
+    const ws = tmpWorkspace();
+    const rows = Array.from(
+      { length: 3_000 },
+      (_, i) => `line-${String(i + 1).padStart(5, "0")}-${"x".repeat(30)}`,
+    );
+    await writeWs(ws, "big.txt", rows.join("\n"));
+    const h = await makeHarness(ws);
+    const r = await h.executor.execute(call("read", { path: "big.txt" }), h.scope);
+    expect(r.status).toBe("ok");
+    const content = r.result.modelContent;
+    expect(content.length).toBeLessThan(30_000);
+    expect(content).not.toContain("已省略");
+    const match = /已读到第 (\d+) 行，其后还有 (\d+) 行，用 offset=(\d+) 继续读取/.exec(content);
+    expect(match).not.toBeNull();
+    const stop = Number(match?.[1]);
+    expect(Number(match?.[3])).toBe(stop + 1);
+    expect(Number(match?.[2])).toBe(3_000 - stop);
+    // 返回的是连续的前 stop 行，最后一行完整
+    expect(content).toContain(`${stop}|${rows[stop - 1]}`);
+    expect(content).not.toContain(`${stop + 1}|`);
+    // 按提示续读得到下一行
+    const next = await h.executor.execute(
+      call("read", { path: "big.txt", offset: stop + 1, limit: 2 }),
+      h.scope,
+    );
+    expect(next.result.modelContent).toContain(`${stop + 1}|${rows[stop]}`);
+  });
+
   it("文件不存在 → file_not_found", async () => {
     const ws = tmpWorkspace();
     const h = await makeHarness(ws);
