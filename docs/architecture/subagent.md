@@ -132,7 +132,7 @@ launch(request, ctx)
 
 **恰好一个 `tool.completed`**：`launch` 只被 `task.execute` 调用一次、只返回一次；无论子会话内部经历了多少轮/多少工具，父日志中这次调用的事件序列与普通工具完全一致（`tool.started` → `tool.completed`；期间的子会话进度以 `tool.progress` 临时事件呈现，见第 12 节）。子会话的所有事实都写在子日志里，父日志不记录子会话内部事件。
 
-**出错、超时、超步数**：子 Turn 的 `turn.completed` reason 映射为结果——`done` 且有 `finish` → `ok`；`done` 无 `finish` → 进入催促；`error`/`max_steps`/`truncated`/`refused` → `subagent_turn_failed`；`aborted` 按中止信号来源结算：父会话中断（`ctx.signal` 非超时中止）→ `cancelled`，本次 task 超时（launcher 自己的计时器，或经 `ctx.signal` 传入的执行器超时信号，reason 为 `TimeoutError`）→ `timeout` 并附「超过 Nms 未完成 + 可能已修改工作区请先检查 git status + 只读审查/调研任务也不要设短于默认值的超时」提示，父/子日志 `failedSignal` 中止 → `subagent_turn_failed`。`timeout`/`cancelled` 与 `subagent_turn_failed` 一样附 `tailTextOf`/`statsOf`（子会话路径、已完成步数、最后一段文字）。子会话创建失败、`close` 抛错等内部异常 → `tool_failed`（执行器既有兜底）。
+**出错、超时、超步数**：子 Turn 的 `turn.completed` reason 映射为结果——`done` 且有 `finish` → `ok`；`done` 无 `finish` → 进入催促；`error`/`max_steps`/`truncated`/`refused` → `subagent_turn_failed`；`aborted` 按中止信号来源结算：父会话中断（`ctx.signal` 非超时中止）→ `cancelled`，本次 task 超时（launcher 自己的计时器，或经 `ctx.signal` 传入的执行器超时信号，reason 为 `TimeoutError`）→ `timeout` 并附「超过 Nms 未完成 + 可能已修改工作区请先检查 git status + 只读审查/调研任务也不要设短于默认值的超时」提示，父/子日志 `failedSignal` 中止 → `subagent_turn_failed`。`timeout`/`cancelled` 与 `subagent_turn_failed`、`subagent_no_result` 一样附子会话已有的产出（`partialOutputOf`）和 `statsOf`（子会话路径、已完成步数）：已完成工具调用的清单（最近 15 条：工具名、参数摘要、状态、结果首行至多 120 字）加最后一段助手文本；`task` 工具把它以「子会话没有提交结果，以下是它已有的产出（未完成，可能不完整，请自行核对）」交给模型。超时常落在写报告的最后一步，那一步的文字不会落盘，前面的调研靠这份清单留给父模型。父会话中断时执行器按既有规则把整个调用归一为 `cancelled`（Turn 随之结束），产出只留在子会话日志里，不进入父模型的上下文。子会话创建失败、`close` 抛错等内部异常 → `tool_failed`（执行器既有兜底）。
 
 ## 5. 会话与持久化
 

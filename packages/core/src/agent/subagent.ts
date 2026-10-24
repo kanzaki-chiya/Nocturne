@@ -6,7 +6,13 @@ import type { ReviewInputSources, SecurityReviewer } from "../permission/index.j
  * 父子关联写在 session.created.parent；取消/超时经共享 AbortSignal
  * 传播；父侧恰好一个 tool.completed 由执行器不变量保证。
  */
-import type { Diagnostics, JsonSchema, ReasoningEffort, Usage } from "../protocol/index.js";
+import type {
+  Diagnostics,
+  HistoryEntry,
+  JsonSchema,
+  ReasoningEffort,
+  Usage,
+} from "../protocol/index.js";
 import type { InstructionSet, EnvironmentInfo } from "../context/index.js";
 import { clampReasoningEffort, type ResolvedModel } from "../provider/index.js";
 import {
@@ -241,6 +247,45 @@ function tailTextOf(session: Session): string | undefined {
 /** 执行器的超时经 AbortSignal.any 传入 ctx.signal 后 reason 仍是 TimeoutError（与 ACP connector 同一判定） */
 function timeoutAbort(signal: AbortSignal): boolean {
   return signal.aborted && signal.reason instanceof Error && signal.reason.name === "TimeoutError";
+}
+
+/** 未完成结果里最多列出的已完成工具调用条数（取最近的） */
+const PARTIAL_TOOL_LIMIT = 15;
+const PARTIAL_BRIEF_CHARS = 120;
+
+/**
+ * 子会话没能提交结果（超时、中断、失败、轮次用尽）时交给父模型的已有产出：
+ * 已完成的工具调用清单（工具名、参数摘要、状态与结果首行）加最后一段助手文本。
+ * 超时常落在写报告的最后一步，那一步的文字不会落盘；前面做过的调研靠这份清单留给父模型。
+ */
+function partialOutputOf(session: Session): string | undefined {
+  const calls = session
+    .state()
+    .history.filter(
+      (h): h is Extract<HistoryEntry, { kind: "tool" }> => h.kind === "tool" && h.name !== "finish",
+    );
+  const parts: string[] = [];
+  if (calls.length > 0) {
+    const lines = calls.slice(-PARTIAL_TOOL_LIMIT).map((h) => {
+      const first =
+        h.modelContent
+          .split("\n")
+          .find((l) => l.trim() !== "")
+          ?.trim() ?? "";
+      const chars = Array.from(first);
+      const brief =
+        chars.length > PARTIAL_BRIEF_CHARS
+          ? `${chars.slice(0, PARTIAL_BRIEF_CHARS).join("")}…`
+          : first;
+      const args = h.inputSummary !== undefined ? `(${h.inputSummary})` : "";
+      return `- ${h.name}${args} → ${h.status}${brief !== "" ? `：${brief}` : ""}`;
+    });
+    const recent = calls.length > PARTIAL_TOOL_LIMIT ? `（最近 ${PARTIAL_TOOL_LIMIT} 条）` : "";
+    parts.push(`已完成的工具调用 ${calls.length} 次${recent}：\n${lines.join("\n")}`);
+  }
+  const tail = tailTextOf(session);
+  if (tail !== undefined) parts.push(`最后一段助手文本：\n${tail}`);
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
 
 function usageOf(session: Session): Usage | undefined {
@@ -535,7 +580,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
                   "timeout",
                   `子代理超过 ${timeoutMs}ms 未完成。它可能已修改工作区文件，请先检查 git status；` +
                     `只读审查或调研任务也不要设短于默认值 ${deps.limits.timeoutMs}ms 的超时`,
-                  tailTextOf(child),
+                  partialOutputOf(child),
                   statsOf(child, attempt),
                 );
               }
@@ -543,7 +588,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
                 return error(
                   "cancelled",
                   "子会话已被父会话中断",
-                  tailTextOf(child),
+                  partialOutputOf(child),
                   statsOf(child, attempt),
                 );
               }
@@ -553,7 +598,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             return error(
               "subagent_turn_failed",
               `子会话 Turn 以 ${reason} 结束`,
-              tailTextOf(child),
+              partialOutputOf(child),
               statsOf(child, attempt),
             );
           }
@@ -562,7 +607,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         return error(
           "subagent_no_result",
           `子代理在 ${maxAttempts} 轮内未调用 finish 提交结果`,
-          tailTextOf(child),
+          partialOutputOf(child),
           statsOf(child, maxAttempts),
         );
       } finally {

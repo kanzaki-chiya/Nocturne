@@ -1014,6 +1014,96 @@ describe("subagent：中断、超时与失败", () => {
     );
     await session.close();
   });
+
+  // 日志分析（72f0e82c#23）：子代理在写报告的最后一步超时，父会话只拿到一句「超过 N ms」，
+  // 前面做过的调研全部丢失。未完成时要附上已完成的工具调用清单和最后一段助手文本。
+  const childUsedGlobThen = (second: FakeScript): FakeProvider =>
+    new FakeProvider({
+      handler: (req) => {
+        if (isChildRequest(req)) {
+          return req.messages.some((m) => m.role === "tool")
+            ? second
+            : [
+                {
+                  type: "tool_call",
+                  toolCallId: "g1",
+                  name: "glob",
+                  input: { pattern: "*.nonexistent" },
+                },
+                { type: "finish", reason: "tool_calls" },
+              ];
+        }
+        return req.messages.some((m) => m.role === "tool")
+          ? doneScript()
+          : [
+              {
+                type: "tool_call",
+                toolCallId: "task-1",
+                name: "task",
+                input: { task: "调研", preset: "explore" },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ];
+      },
+    });
+
+  it("子会话超时 → 错误结果附已完成的工具调用清单与最后一段助手文本，并注明未完成", async () => {
+    const provider = childUsedGlobThen([
+      { type: "text_delta", text: "调研到一半的结论" },
+      { type: "wait", ms: 3_000 },
+    ]);
+    const { runtime } = await makeRuntime(undefined, { provider, subagent: { timeoutMs: 1_200 } });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "go" });
+    const completed = taskCompleted(events);
+    expect(completed?.type === "tool.completed" && completed.payload.error?.code).toBe("timeout");
+    const content =
+      completed?.type === "tool.completed" ? String(completed.payload.modelContent) : "";
+    expect(content).toContain("未完成");
+    expect(content).toContain("已完成的工具调用 1 次");
+    expect(content).toMatch(/- glob\(.*\) → ok/);
+    expect(content).toContain("调研到一半的结论");
+    await session.close();
+  });
+
+  it("子会话 Turn 失败 → 同样附已完成的工具调用清单", async () => {
+    const provider = childUsedGlobThen([
+      {
+        type: "throw",
+        error: new ProviderError({ kind: "server", message: "child boom", retryable: false }),
+      },
+    ]);
+    const { runtime } = await makeRuntime(undefined, { provider });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "go" });
+    const completed = taskCompleted(events);
+    expect(completed?.type === "tool.completed" && completed.payload.error?.code).toBe(
+      "subagent_turn_failed",
+    );
+    expect(
+      completed?.type === "tool.completed" && String(completed.payload.modelContent),
+    ).toContain("已完成的工具调用 1 次");
+    await session.close();
+  });
+
+  it("task 工具把中断（cancelled）结果里的已有产出也交给模型", async () => {
+    const tool = createTaskTool({
+      launch: async () => ({
+        status: "error" as const,
+        error: { code: "cancelled", message: "子会话已被父会话中断" },
+        tailText: "已完成的工具调用 2 次：\n- read(a.ts) → ok：export const a = 1",
+      }),
+    });
+    const result = await tool.execute({ task: "x" }, {
+      signal: new AbortController().signal,
+    } as unknown as Parameters<typeof tool.execute>[1]);
+    expect(result.status).toBe("error");
+    expect(result.modelContent).toContain("子会话已被父会话中断");
+    expect(result.modelContent).toContain("未完成");
+    expect(result.modelContent).toContain("- read(a.ts) → ok：export const a = 1");
+  });
 });
 
 describe("subagent：递归与并发上限", () => {

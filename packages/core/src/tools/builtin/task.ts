@@ -243,7 +243,7 @@ export function createTaskTool(
       }
       const modelContent =
         outcome.tailText !== undefined && outcome.tailText !== ""
-          ? `${outcome.error.message}\n\n子会话最后的输出尾部：\n${outcome.tailText}`
+          ? `${outcome.error.message}\n\n子会话没有提交结果，以下是它已有的产出（未完成，可能不完整，请自行核对）：\n${outcome.tailText}`
           : outcome.error.message;
       return {
         status: "error",
