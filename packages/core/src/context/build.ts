@@ -42,8 +42,22 @@ const MAX_OUTPUT_FALLBACK = 8_192;
 export const SUMMARY_MAX_OUTPUT_TOKENS = 4_000;
 
 const SUMMARY_SYSTEM = `你是 Nocturne 会话的压缩器。把给定的会话转录压缩为一段结构化中文摘要，供后续模型继续任务时阅读。
-摘要必须包含：用户的总体目标、已完成的工作及结论、关键文件与工具调用结果、未决事项与下一步建议，以及已经加载的技能名（需要正文时可重新加载）。
+摘要必须包含这几项：
+1. 用户的总体目标。
+2. 已经完成的工作及结论：逐条写出已提交的提交（哈希和标题）、已写出或修改的文件与报告。
+3. 当前任务清单的真实状态：逐项写明已完成、进行中、待办，不要重置或改写。
+4. 关键文件与工具调用结果。
+5. 未决事项，以及下一步要做什么：从已完成的部分接着往下做，不要从头开始。
+6. 已经加载的技能名（需要正文时可重新加载）。
+"已完成"以转录里的工具结果为准（例如 git commit 的输出）；没有证据的不要写成已完成。
 只输出摘要正文，不要寒暄、不要复述指令。`;
+
+/**
+ * 摘要后重新注入的当前 Turn 用户请求的首块标记（context.md 6.3）。它位于摘要之后、
+ * 其后的保留区之前，说明这不是新的请求；摘要请求切片据此跳过它。
+ */
+const REINJECTED_TASK_MARK =
+  "[当前 Turn 开始时的用户请求（原文）]\n它被上面的摘要覆盖后重新附在这里，不是新的请求。其后是摘要之后的真实进展，请接着做，不要从头重做摘要里已完成的工作。";
 
 function messageTokens(message: ModelMessage, cache?: Map<string, number>): number {
   const tokens = (text: string): number => {
@@ -792,14 +806,15 @@ export function buildSummaryRequest(input: BuildSummaryRequestInput): ModelReque
       undefined,
       input.events,
     ).messages.length;
-    // 压缩后注入的独立清单消息（单块 user 消息，以清单标记开头）不进摘要输入
+    // 压缩后注入的独立清单消息（单块 user 消息，以清单标记开头）与重新注入的当前请求
+    // （首块为 REINJECTED_TASK_MARK）都不进摘要输入
     const mainBase = main.messages.filter(
       (m) =>
         !(
           m.role === "user" &&
           m.content.length === 1 &&
           m.content[0]?.text.startsWith("当前会话任务清单（由 Runtime 附加") === true
-        ),
+        ) && !(m.role === "user" && m.content[0]?.text === REINJECTED_TASK_MARK),
     );
     const request: ModelRequest = {
       model: main.model,
@@ -1050,6 +1065,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     if (coveredUser?.kind === "user") {
       const atts = resolveAttachments(coveredUser.attachments, imageOpts);
       const blocks: ContentBlock[] = [
+        { type: "text", text: REINJECTED_TASK_MARK },
         ...coveredUser.content,
         ...atts.texts.map((text) => ({ type: "text" as const, text })),
       ];
@@ -1059,7 +1075,13 @@ export function buildContext(input: BuildContextInput): BuiltContext {
         ...(atts.images.length > 0 ? { images: atts.images } : {}),
       };
       if (atts.virtual > 0) imageOpts.virtual?.set(msg, atts.virtual);
-      messages.push(msg);
+      // 紧跟摘要（清单注入随后插在两者之间）、排在保留区之前：它在时间上先于保留区里的
+      // 一切进展；放在末尾会让模型把最新一条 user 消息当成新请求而从头重做
+      messages.splice(
+        summaryMessage !== undefined ? messages.indexOf(summaryMessage) + 1 : 0,
+        0,
+        msg,
+      );
       byChars.user += blockChars(blocks);
     }
   }

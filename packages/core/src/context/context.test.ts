@@ -1356,6 +1356,145 @@ describe("自动 L2 与进行中输入保留（context.md 6.5）", () => {
     const last = built.request.messages[1];
     expect(last?.role === "user" && JSON.stringify(last.content)).toContain("当前任务：修复登录");
   });
+
+  // 日志分析（f0136a6d）：摘要压缩后模型把待办改回全部未开始并从头开工。
+  // 待办全部完成 + 已提交 → 摘要压缩后，完成状态与提交信息必须仍在上下文里，
+  // 且原始请求排在保留区之前，最后一条消息是模型自己的最新进展而不是"新请求"。
+  const statefulHistory = (): { history: HistoryEntry[]; events: DurableEvent[] } => {
+    const done = [
+      { text: "实现", status: "completed" as const },
+      { text: "提交与报告", status: "completed" as const },
+    ];
+    const commitOutput = "[main 9411b7a0] feat(mcp): map image blocks to attachments";
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 2,
+        turnId: "t1",
+        messageId: "u2",
+        content: [{ type: "text", text: "按第3节进入第二阶段实现，先做开工检查" }],
+      },
+      {
+        kind: "assistant",
+        seq: 3,
+        turnId: "t1",
+        messageId: "a3",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c4", name: "shell", input: { command: "git commit" } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 4,
+        turnId: "t1",
+        callId: "c4",
+        name: "shell",
+        status: "ok",
+        modelContent: commitOutput,
+      },
+      {
+        kind: "assistant",
+        seq: 5,
+        turnId: "t1",
+        messageId: "a5",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c6", name: "todo_write", input: { items: done } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 6,
+        turnId: "t1",
+        callId: "c6",
+        name: "todo_write",
+        status: "ok",
+        modelContent: `任务清单已更新：2 项。\n\n${formatTodoBlock(done)}`,
+        pinResult: true,
+      },
+      {
+        kind: "compaction",
+        seq: 7,
+        turnId: "t1",
+        compactKind: "summary",
+        throughSeq: 4,
+        summary: "已提交 9411b7a0 feat(mcp): map image blocks to attachments；报告已写出。",
+      },
+    ];
+    const events = [
+      evT(1, "turn.started", { turnIndex: 1 }, "t1"),
+      evT(4, "tool.completed", { callId: "c4" }, "t1"),
+      evT(6, "tool.completed", { callId: "c6" }, "t1"),
+      evT(
+        7,
+        "context.compacted",
+        { kind: "summary", throughSeq: 4, summary: "已提交 9411b7a0" },
+        "t1",
+      ),
+    ];
+    return { history, events };
+  };
+
+  it("摘要压缩后：待办完成状态与提交信息仍可见，原始请求排在保留区之前", () => {
+    const { history, events } = statefulHistory();
+    const todos = [
+      { text: "实现", status: "completed" as const },
+      { text: "提交与报告", status: "completed" as const },
+    ];
+    const built = buildContext(baseInput({ history, events, todos }));
+    const texts = built.request.messages.map((m) =>
+      m.role === "tool" ? m.content : JSON.stringify(m.content),
+    );
+    const joined = texts.join("\n");
+    // 摘要保留提交的哈希和标题；清单（已完成）在保留区的 todo_write 结果里原样可见
+    expect(joined).toContain("9411b7a0 feat(mcp): map image blocks to attachments");
+    expect(joined).toContain('"status":"completed"');
+    expect(joined).not.toContain('"status":"pending"');
+    // 顺序：摘要 → 原始请求（带"不是新请求"说明）→ 保留区；最后一条是模型自己的工具结果
+    const summaryAt = texts.findIndex((t) => t.includes("[会话历史摘要]"));
+    const taskAt = texts.findIndex((t) => t.includes("按第3节进入第二阶段实现"));
+    const retainedAt = texts.findIndex((t) => t.includes("任务清单已更新"));
+    expect(summaryAt).toBe(0);
+    expect(taskAt).toBeGreaterThan(summaryAt);
+    expect(taskAt).toBeLessThan(retainedAt);
+    expect(texts[taskAt]).toContain("不是新的请求");
+    expect(built.request.messages.at(-1)?.role).toBe("tool");
+  });
+
+  it("清单已不在投影里时，压缩后固定注入在摘要之后、原始请求之前", () => {
+    const { history, events } = statefulHistory();
+    // 去掉保留区里的 todo_write 结果，模拟清单被摘要覆盖
+    const covered = history.filter((e) => e.seq !== 5 && e.seq !== 6);
+    const todos = [{ text: "提交与报告", status: "completed" as const }];
+    const built = buildContext(baseInput({ history: covered, events, todos }));
+    const texts = built.request.messages.map((m) =>
+      m.role === "tool" ? m.content : JSON.stringify(m.content),
+    );
+    const todoAt = texts.findIndex((t) => t.includes("提交与报告"));
+    const taskAt = texts.findIndex((t) => t.includes("按第3节进入第二阶段实现"));
+    expect(todoAt).toBe(1);
+    expect(taskAt).toBe(2);
+    expect(texts[todoAt]).toContain("completed");
+  });
+
+  it("摘要请求要求写出提交、任务清单真实状态与下一步；重新注入的请求不进摘要输入", () => {
+    const { history, events } = statefulHistory();
+    const built = buildContext(baseInput({ history, events }));
+    const req = buildSummaryRequest({
+      history,
+      model,
+      throughSeq: 6,
+      mainRequest: built.request,
+      events,
+    });
+    const instruction = JSON.stringify(req.messages.at(-1)?.content);
+    for (const keyword of ["提交", "哈希", "任务清单", "真实状态", "下一步", "不要从头开始"])
+      expect(instruction).toContain(keyword);
+    expect(JSON.stringify(req.messages)).not.toContain("不是新的请求");
+  });
 });
 
 describe("图片附件投影（ADR-0023）", () => {
