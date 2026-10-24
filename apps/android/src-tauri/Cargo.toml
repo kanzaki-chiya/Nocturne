@@ -1,6 +1,6 @@
 [package]
 name = "nocturne-android"
-version = "0.13.0"
+version = "0.14.0"
 description = "Nocturne Android shell (Tauri)"
 license = "GPL-3.0-only"
 publish = false

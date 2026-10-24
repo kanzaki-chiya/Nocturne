@@ -18,7 +18,7 @@ import { PushService } from "./push.js";
 import { staticCsp } from "./csp.js";
 
 /** 由 scripts/release-version.mjs 与各包版本一起改写 */
-export const RELAY_VERSION = "0.13.0";
+export const RELAY_VERSION = "0.14.0";
 
 interface Peer {
   ws: WebSocket;

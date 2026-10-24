@@ -31,14 +31,14 @@ async function json(file: string, value: unknown) {
 }
 
 describe("ADR-0061 协议、地址与兼容", () => {
-  it("内置目录的 Zen 9 个与 Go 1 个 Gemini 模型均可路由", async () => {
+  it("内置目录的 Zen 9 个与 Go 2 个 Gemini 模型均可路由", async () => {
     const home = await temp();
     const catalogue: ModelsDevData = modelsDevSnapshot;
     const providers = ["opencode", "opencode-go"].map((id) => {
       const models = Object.entries(catalogue.providers?.[id]?.models ?? {})
         .filter(([, model]) => model.npm === "@ai-sdk/google")
         .map(([modelId]) => [modelId, {}]);
-      expect(models).toHaveLength(id === "opencode" ? 9 : 1);
+      expect(models).toHaveLength(id === "opencode" ? 9 : 2);
       return {
         id,
         type: "openai-compatible",
