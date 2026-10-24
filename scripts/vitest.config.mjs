@@ -2,6 +2,9 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // 不管外层环境是什么（例如继承来的 NODE_ENV=production），测试都按测试环境跑；
+    // vitest 只在 NODE_ENV 未设置时才默认 test
+    env: { NODE_ENV: "test" },
     include: ["test/**/*.test.mjs"],
     environment: "node",
     // npm pack、bundle 等会起子进程：CI runner 上明显更慢（pack 实测约 9s），仅在 CI 放宽超时并重试

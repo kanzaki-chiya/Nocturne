@@ -25,6 +25,7 @@ import {
   makeConfigLoader,
   normalizeModelRef,
 } from "./config.js";
+import { injectHostEnv } from "./host-env.js";
 import { createEventWriter, renderEvent } from "./render.js";
 import { runRepl } from "./repl.js";
 import { runRpcStdio } from "./rpc.js";
@@ -81,8 +82,8 @@ async function confirmForeignWorkspace(workspaceRoot: string): Promise<boolean> 
 async function main(): Promise<number> {
   // React/Ink 按 NODE_ENV 选构建：开发版渲染器每次提交都记 performance.measure 且不清理，
   // 长会话会攒到上百万条（内存泄漏并触发 MaxPerformanceEntryBufferExceededWarning）。
-  // TUI 是动态导入，这里先设好；用户显式设置时尊重其值
-  process.env.NODE_ENV ??= "production";
+  // TUI 是动态导入，这里先设好；用户显式设置时尊重其值。登记为宿主注入，不传给工具启动的子进程
+  injectHostEnv("NODE_ENV", "production");
   const proxyWarning = configureEnvProxy();
   if (proxyWarning !== undefined) process.stderr.write(`! ${proxyWarning}\n`);
 

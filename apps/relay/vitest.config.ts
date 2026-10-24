@@ -31,5 +31,11 @@ export default defineConfig({
       },
     ],
   },
-  test: { include: ["test/**/*.test.ts"], environment: "node", testTimeout: 30000 },
+  test: {
+    include: ["test/**/*.test.ts"],
+    environment: "node",
+    testTimeout: 30000,
+    // 不管外层环境是什么（例如继承来的 NODE_ENV=production），测试都按测试环境跑
+    env: { NODE_ENV: "test" },
+  },
 });

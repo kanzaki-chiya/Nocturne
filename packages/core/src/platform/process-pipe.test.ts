@@ -309,3 +309,60 @@ describe("进程树终止", () => {
     },
   );
 });
+
+describe("宿主注入的环境变量不进子进程", () => {
+  const script =
+    "process.stdout.write(JSON.stringify([process.env.NODE_ENV ?? null, process.env.NOCTURNE_HOST_INJECTED_ENV ?? null, process.env.NOCTURNE_TEST_KEEP ?? null]))";
+
+  async function viaSpawn(env?: Record<string, string>): Promise<unknown> {
+    const proc = platform.process.spawn(process.execPath, ["-e", script], env ? { env } : {});
+    let out = "";
+    for await (const chunk of proc.stdout) out += chunk;
+    expect((await proc.wait()).code).toBe(0);
+    return JSON.parse(out);
+  }
+  async function viaPipe(env?: Record<string, string>): Promise<unknown> {
+    const proc = platform.process.spawnPipe(process.execPath, ["-e", script], env ? { env } : {});
+    expect((await proc.wait()).code).toBe(0);
+    return JSON.parse(await text(proc));
+  }
+
+  it.each([
+    ["spawn", viaSpawn],
+    ["spawnPipe", viaPipe],
+  ])("%s：登记的 NODE_ENV 与登记变量本身都被剔除，其余原样继承", async (_name, run) => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NOCTURNE_HOST_INJECTED_ENV", "NODE_ENV");
+    vi.stubEnv("NOCTURNE_TEST_KEEP", "yes");
+    try {
+      expect(await run()).toEqual([null, null, "yes"]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    ["spawn", viaSpawn],
+    ["spawnPipe", viaPipe],
+  ])("%s：用户自己设置的 NODE_ENV（未登记）原样保留", async (_name, run) => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("NOCTURNE_HOST_INJECTED_ENV", undefined);
+    try {
+      expect(await run()).toEqual(["development", null, null]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("登记多个变量（逗号分隔、忽略空白）；调用方显式传入的 env 优先", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NOCTURNE_TEST_KEEP", "injected");
+    vi.stubEnv("NOCTURNE_HOST_INJECTED_ENV", " NODE_ENV , NOCTURNE_TEST_KEEP ");
+    try {
+      expect(await viaSpawn()).toEqual([null, null, null]);
+      expect(await viaSpawn({ NODE_ENV: "test" })).toEqual(["test", null, null]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});

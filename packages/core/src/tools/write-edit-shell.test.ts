@@ -428,6 +428,32 @@ describe("shell 工具", () => {
     }
   });
 
+  // 日志分析：nctrn 入口为 Ink 注入的 NODE_ENV=production 经继承泄漏到 shell 子进程，
+  // 全量测试因此白跑 192 秒。宿主注入的不进子进程，用户自己设置的原样保留。
+  it.each([
+    ["宿主注入（已登记）", "production", "NODE_ENV", "null"],
+    ["用户自己设置（未登记）", "development", undefined, '"development"'],
+  ])("NODE_ENV %s：子进程看到 %s", async (_label, value, injected, expected) => {
+    vi.stubEnv("NODE_ENV", value);
+    vi.stubEnv("NOCTURNE_HOST_INJECTED_ENV", injected);
+    try {
+      const ws = tmpWorkspace();
+      writeFileSync(
+        path.join(ws, "env.js"),
+        "process.stdout.write(JSON.stringify([process.env.NODE_ENV ?? null, process.env.NOCTURNE_HOST_INJECTED_ENV ?? null]));",
+      );
+      const h = await makeHarness(ws);
+      const r = await h.executor.execute(call("shell", { command: `${node} env.js` }), h.scope);
+      expect(r.status).toBe("ok");
+      expect(r.result.modelContent).toBe(`[${expected},null]
+[exit code 0]`);
+      // 父进程环境不被改动
+      expect(process.env.NODE_ENV).toBe(value);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("模型可见说明分两种情况：可能卡住设短超时，已知耗时长直接设足", () => {
     expect(shellTool.description).toContain("timeout 30 python3 test.py");
     expect(shellTool.description).toContain("PowerShell/cmd 用对应写法");

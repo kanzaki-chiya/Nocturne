@@ -19,6 +19,8 @@ export default defineConfig({
     ],
   },
   test: {
+    // 不管外层环境是什么（例如继承来的 NODE_ENV=production），测试都按测试环境跑；
+    // vitest 只在 NODE_ENV 未设置时才默认 test
     include: ["test/**/*.test.{ts,tsx}"],
     environment: "node",
     setupFiles: ["test/setup-isolated-home.ts"],
@@ -30,6 +32,6 @@ export default defineConfig({
     // Ink 测试断言的是可见文本；不让宿主 FORCE_COLOR 改写帧里的 ANSI 序列。
     // CI 环境变量会让 Ink（is-in-ci）关闭增量渲染、只输出最后一帧，测试断言的中间帧就不存在了；
     // CI=false 让 is-in-ci 判为非 CI，测试在 GitHub runner 上与本机一致。
-    env: { FORCE_COLOR: "0", CI: "false" },
+    env: { NODE_ENV: "test", FORCE_COLOR: "0", CI: "false" },
   },
 });

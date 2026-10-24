@@ -191,6 +191,27 @@ function minimalEnvironment(): Record<string, string> {
   return out;
 }
 
+/**
+ * 宿主入口登记"自己写进 process.env 的变量名"的环境变量（逗号分隔；tools.md 第 3 节"子进程环境"）。
+ * 例如 nctrn 入口为了让 Ink 用生产版渲染器设置的 NODE_ENV=production：它是 nctrn 自己的，
+ * 不是用户的，不能经继承泄漏给工具、Hook、MCP 或外部 agent 启动的子进程，否则子进程里的
+ * 测试、构建会按生产环境跑。用户启动前自己设置的变量不登记，原样继承。
+ */
+const HOST_INJECTED_ENV = "NOCTURNE_HOST_INJECTED_ENV";
+
+/** 子进程基线要额外剔除的名字：登记的宿主注入变量，以及登记变量本身 */
+function hostInjectedNames(): string[] {
+  const raw = process.env[HOST_INJECTED_ENV];
+  if (raw === undefined) return [];
+  return [
+    HOST_INJECTED_ENV,
+    ...raw
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name !== ""),
+  ];
+}
+
 /** 从继承环境基线中剔除 envStrip 变量名（Windows 大小写不敏感） */
 function stripEnvVars(
   base: Record<string, string | undefined>,
@@ -708,7 +729,10 @@ export function createProcessRunner(): ProcessRunner {
   ): SpawnedProcess => {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: { ...stripEnvVars(process.env, options.envStrip), ...options.env },
+      env: {
+        ...stripEnvVars(process.env, [...(options.envStrip ?? []), ...hostInjectedNames()]),
+        ...options.env,
+      },
       windowsHide: true,
       windowsVerbatimArguments: verbatimArgs,
       detached: process.platform !== "win32",
@@ -748,7 +772,7 @@ export function createProcessRunner(): ProcessRunner {
       const base =
         options.envMode === "minimal"
           ? minimalEnvironment()
-          : stripEnvVars(process.env, options.envStrip);
+          : stripEnvVars(process.env, [...(options.envStrip ?? []), ...hostInjectedNames()]);
       const overridden =
         process.platform === "win32"
           ? new Set(Object.keys(options.env ?? {}).map((key) => key.toUpperCase()))
