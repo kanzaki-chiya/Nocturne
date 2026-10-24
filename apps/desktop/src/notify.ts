@@ -227,7 +227,7 @@ export function decideNotification(input: NotifyInput): NotifyDecision | null {
 
   if (payload.reason === "error") {
     if (!prefs.error) return null;
-    const spent = durationMs === undefined ? "" : ` · 用时 ${formatDuration(durationMs)}`;
+    const spent = durationMs === undefined ? "" : `，用时 ${formatDuration(durationMs)}`;
     return {
       kind: "error",
       title: sessionTitle(input.session),
@@ -240,7 +240,7 @@ export function decideNotification(input: NotifyInput): NotifyDecision | null {
   return {
     kind: "done",
     title: sessionTitle(input.session),
-    body: `已完成 · 用时 ${formatDuration(durationMs)} · ${payload.steps} 步`,
+    body: `已完成，用时 ${formatDuration(durationMs)}，${payload.steps} 步`,
   };
 }
 

@@ -191,13 +191,13 @@ describe("MCP 设置页", () => {
       <McpPage client={f.client} workspaceRoot="test-workspace" version={0} onChanged={changed} />,
     );
     await screen.findByRole("heading", { name: "managed" });
-    expect(screen.getByText("config.json · 只读")).toBeDefined();
+    expect(screen.getByText("config.json（只读）")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /manual/ }));
     expect(screen.getByRole("switch").hasAttribute("disabled")).toBe(true);
     expect(screen.getByText(/home\/config.json/)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "＋ 添加服务器" }));
     fireEvent.change(screen.getByLabelText(/^名称/), { target: { value: "test" } });
-    fireEvent.click(screen.getByRole("button", { name: "流式 HTTP · 远程地址" }));
+    fireEvent.click(screen.getByRole("button", { name: "流式 HTTP（远程地址）" }));
     expect((screen.getByLabelText(/^名称/) as HTMLInputElement).value).toBe("test");
     fireEvent.change(screen.getByLabelText(/^地址/), {
       target: { value: "https://example.com/mcp" },
@@ -283,7 +283,7 @@ describe("MCP 设置页", () => {
   });
 });
 
-describe("面板浏览器 · 桌面内置", () => {
+describe("面板浏览器（桌面内置）", () => {
   function memory(): Storage {
     const data = new Map<string, string>();
     return {
@@ -337,7 +337,7 @@ describe("面板浏览器 · 桌面内置", () => {
         prefs={prefs}
       />,
     );
-    await screen.findByRole("heading", { name: "面板浏览器 · 桌面内置" });
+    await screen.findByRole("heading", { name: "面板浏览器（桌面内置）" });
     return { f, prefs, storage };
   }
 
@@ -404,7 +404,7 @@ describe("面板浏览器 · 桌面内置", () => {
       />,
     );
     await screen.findByRole("heading", { name: "MCP" });
-    expect(screen.queryByRole("heading", { name: "面板浏览器 · 桌面内置" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "面板浏览器（桌面内置）" })).toBeNull();
     f.close();
   });
 });

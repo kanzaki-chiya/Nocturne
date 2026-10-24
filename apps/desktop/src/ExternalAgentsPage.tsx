@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { RpcClient } from "@nocturne/rpc/client";
 import { EXTERNAL_AGENT_PRESETS } from "@nocturne/core/protocol";
 import type {
@@ -27,12 +27,21 @@ interface ProbeRecord {
 const probeCache = new Map<string, ProbeRecord>();
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 export { EXTERNAL_AGENT_PRESETS };
-const resultText = (result: ExternalAgentProbeResult | undefined) =>
-  !result
-    ? "未测试"
-    : result.ok
-      ? `已连接${result.agentInfo ? ` · ${result.agentInfo.name} ${result.agentInfo.version}` : ""}`
-      : (result.error?.message ?? "测试失败");
+const resultText = (result: ExternalAgentProbeResult | undefined): ReactNode =>
+  !result ? (
+    "未测试"
+  ) : result.ok ? (
+    <>
+      已连接
+      {result.agentInfo && (
+        <span className="muted-value">
+          {result.agentInfo.name} {result.agentInfo.version}
+        </span>
+      )}
+    </>
+  ) : (
+    (result.error?.message ?? "测试失败")
+  );
 // 探测只用启动参数（不发 configOptions），保存时据此判断测试结果是否仍然有效
 const launchKey = (config: ExternalAgentConfig) =>
   JSON.stringify([config.command, config.args, config.env ?? {}]);
@@ -128,7 +137,7 @@ export function ExternalAgentsPage({
   const recent = current ? results[current.name] : undefined;
   const changed = async (text: string) => {
     // RPC 在响应之前发 providersChanged；单后台下 App 只刷新本会话的数据版本。
-    setToast(`${text} · 空闲会话立即生效，正在回复的会话在本轮结束后切换`);
+    setToast(`${text}，空闲会话立即生效，正在回复的会话在本轮结束后切换`);
     await refresh();
   };
   const mutate = async (action: () => Promise<unknown>, text: string) => {
@@ -191,7 +200,7 @@ export function ExternalAgentsPage({
         <div className="grow">
           <h3>子代理</h3>
           <span className="sub">
-            {profiles.length + 1} 个内置档位 · {agents.length} 个外部 agent ·
+            {profiles.length + 1} 个内置档位，{agents.length} 个外部 agent，
             外部费用计在其自己的账号
           </span>
         </div>
@@ -274,7 +283,8 @@ export function ExternalAgentsPage({
               <span className="nm">
                 {profile.name}
                 <small>
-                  {profile.config.model ?? "跟随当前模型"} · {profile.config.effort ?? "跟随会话"}
+                  {profile.config.model ?? "跟随当前模型"}
+                  <span className="muted-value">{profile.config.effort ?? "跟随会话"}</span>
                 </small>
               </span>
               <small>
@@ -290,7 +300,7 @@ export function ExternalAgentsPage({
           </div>
           {(["app", "user"] as const).map((origin) => (
             <div key={origin}>
-              <h5>{origin === "app" ? "程序管理" : "config.json · 只读"}</h5>
+              <h5>{origin === "app" ? "程序管理" : "config.json（只读）"}</h5>
               {agents
                 .filter((agent) => agent.origin === origin)
                 .map((agent) => (
@@ -443,7 +453,7 @@ export function ExternalAgentsPage({
                   <span>
                     {current.path ??
                       (current.origin === "app" ? "external-agents.json" : "config.json")}
-                    {!current.editable ? " · 在 config.json 中定义，请在文件中修改" : ""}
+                    {!current.editable ? "（在 config.json 中定义，请在文件中修改）" : ""}
                   </span>
                 </div>
                 <div className="full">
@@ -462,7 +472,7 @@ export function ExternalAgentsPage({
                   <label>最近测试</label>
                   <span>
                     {resultText(recent?.result)}
-                    {recent ? ` · ${recent.at} · ${recent.result.durationMs} ms` : ""}
+                    {recent ? `（${recent.at}，${recent.result.durationMs} ms）` : ""}
                   </span>
                 </div>
               </div>
@@ -540,7 +550,7 @@ function ProbeDetails({ result }: { result: ExternalAgentProbeResult }) {
               {result.authMethods.map((method) => (
                 <p key={method.id}>
                   {method.name}
-                  {method.description ? ` · ${method.description}` : ""}
+                  {method.description ? `：${method.description}` : ""}
                 </p>
               ))}
             </div>

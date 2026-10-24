@@ -24,6 +24,7 @@ import {
   type SpeedDisplay,
   type StepSpeed,
 } from "./speed";
+import { MODEL_REF_SEPARATOR, modelRefText } from "./model-ref";
 import "./status-bar.css";
 
 export type StatusPanel = "context";
@@ -249,7 +250,7 @@ function SpeedBadge({ speed }: { speed: SpeedDisplay | undefined }) {
                   ))}
                 </dl>
               )}
-              <span className="status-note">上一步 · 速度 = 输出 ÷ 生成用时</span>
+              <span className="status-note">速度 = 输出 ÷ 生成用时（上一步）</span>
             </>
           )}
         </span>
@@ -427,7 +428,7 @@ export function StatusBar({
       disabled={control.disabled !== undefined}
       title={
         kind === "model"
-          ? `${model === undefined ? "模型 —" : `${model.provider} · ${model.model}`}${control.disabled === undefined ? "" : ` · ${control.disabled}`}`
+          ? `${model === undefined ? "模型 —" : modelRefText(model)}${control.disabled === undefined ? "" : `（${control.disabled}）`}`
           : control.disabled
       }
       onClick={() => {
@@ -511,7 +512,10 @@ export function StatusBar({
                 "模型 —"
               ) : (
                 <>
-                  <span className="status-prov">{model.provider} · </span>
+                  <span className="status-prov">
+                    {model.provider}
+                    {MODEL_REF_SEPARATOR}
+                  </span>
                   {model.model}
                 </>
               )}
@@ -568,7 +572,9 @@ export function StatusBar({
         <SpeedBadge speed={speed} />
         <span className={`status-turn${busy ? " status-turn-busy" : ""}`}>
           ● {STATUS_TEXT[view.status]}
-          {view.currentTurn ? ` · Turn ${view.currentTurn.turnIndex}` : ""}
+          {view.currentTurn && (
+            <span className="muted-value">Turn {view.currentTurn.turnIndex}</span>
+          )}
         </span>
       </div>
       {openMenu !== null && menuControl(openMenu)}

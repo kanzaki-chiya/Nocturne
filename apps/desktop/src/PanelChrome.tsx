@@ -18,6 +18,7 @@ import type { SubagentSummary } from "@nocturne/core/protocol";
 import type { FileIndexEntry } from "./file-refs";
 import { rankQuickOpen, SUBAGENT_SUMMARY_MAX } from "./side-panel";
 import { elapsedText, runningMs } from "./subagent-panel";
+import { KeyHint } from "./KeyHint";
 
 /** WindowFrame 标题栏里给 App 放按钮的位置；没有标题栏（测试、手机）时为 null */
 export const TitlebarSlot = createContext<HTMLElement | null>(null);
@@ -222,12 +223,16 @@ export function QuickOpen({
           </ul>
         )}
         <div className="qopen-foot">
-          <span>↑↓ 选择</span>
-          <span>Enter 打开</span>
-          <span>Esc 关闭</span>
+          <KeyHint
+            groups={[
+              { keys: ["↑", "↓"], label: "选择" },
+              { keys: ["Enter"], label: "打开" },
+              { keys: ["Esc"], label: "关闭" },
+            ]}
+          />
           <span className="qopen-count">
             {project}
-            {entries !== null ? ` · ${fileCount} 个文件` : ""}
+            {entries !== null && <span className="muted-value">{fileCount} 个文件</span>}
           </span>
         </div>
       </div>
@@ -309,7 +314,9 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
           <span className="ovpop-agent-text">
             <span className="ovpop-agent-profile">{run.agent}</span>
             <span className="ovpop-agent-summary">{run.summary}</span>
-            <span className="ovpop-agent-note">外部 agent · 仅主对话进度</span>
+            <span className="ovpop-agent-note">
+              外部 agent<span className="muted-value">仅主对话进度</span>
+            </span>
           </span>
           <span className="ovpop-n ovpop-time">{elapsedText(Math.max(0, now - run.since))}</span>
         </div>

@@ -293,8 +293,14 @@ export function ModelSettingsDialog({
         <div className="dh3">
           <b className="mono">{view.modelId}</b>
           <span>
-            {readonlyHint ??
-              `${providerId} · 改动写入 providers.json 的 userModels，不影响其他服务商`}
+            {readonlyHint ?? (
+              <>
+                {providerId}
+                <span className="muted-value">
+                  改动写入 providers.json 的 userModels，不影响其他服务商
+                </span>
+              </>
+            )}
           </span>
         </div>
         <div className="db">

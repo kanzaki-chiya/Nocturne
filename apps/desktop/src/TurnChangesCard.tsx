@@ -114,7 +114,7 @@ function revertedText(turn: TurnChanges): string {
   const restored = files.filter((f) => f.result === "restored").length;
   const deleted = files.filter((f) => f.result === "deleted").length;
   const failed = files.filter((f) => f.result === "failed").length;
-  return `已撤销 · 还原 ${restored} 个文件${deleted ? `，删除 ${deleted} 个` : ""}${failed ? `，${failed} 个失败` : ""}`;
+  return `已撤销，还原 ${restored} 个文件${deleted ? `，删除 ${deleted} 个` : ""}${failed ? `，${failed} 个失败` : ""}`;
 }
 
 const PREVIEW = 3;

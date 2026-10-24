@@ -234,7 +234,10 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                 }}
               />
             </div>
-            <p>允许远程访问 · {status.enabled ? "已开启" : "已关闭"}</p>
+            <p>
+              允许远程访问
+              <span className="muted-value">{status.enabled ? "已开启" : "已关闭"}</span>
+            </p>
             <section className="remote-devices">
               <div className="remote-heading">
                 <h4>已配对设备</h4>
@@ -258,11 +261,11 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                     <div>
                       <b>{device.name}</b>
                       <p>
-                        {device.online ? "在线" : "离线"} ·{" "}
+                        {device.online ? "在线" : "离线"}，
                         {device.lastSeenAt
                           ? `最近在线 ${new Date(device.lastSeenAt).toLocaleString("zh-CN")}`
-                          : "尚未上线"}{" "}
-                        · {device.push ? "已订阅推送" : "无推送订阅"}
+                          : "尚未上线"}
+                        ，{device.push ? "已订阅推送" : "无推送订阅"}
                       </p>
                     </div>
                     <div className="remote-actions">
@@ -387,7 +390,7 @@ export function RemoteBadge({
   if (status.connection === "revoked" || status.connection === "replaced")
     return (
       <button className="status-item remote-warning" onClick={onOpen}>
-        远程 · {REMOTE_CONNECTION_TEXT[status.connection]}
+        远程<span className="muted-value">{REMOTE_CONNECTION_TEXT[status.connection]}</span>
       </button>
     );
   if (status.connections.length === 0) return null;

@@ -306,7 +306,7 @@ it("其他目录：输入路径进入项目页，后台拒绝时在输入框下�
   });
   await act(() => byText("打开").click());
   expect(container.querySelector("h1")?.textContent).toBe("fresh");
-  expect(container.textContent).toContain("0 个会话 · Z:/fresh");
+  expect(container.textContent).toContain("0 个会话Z:/fresh");
   const field = container.querySelector<HTMLTextAreaElement>("textarea");
   if (!field) throw new Error("缺少输入框");
   await act(() => {
@@ -323,7 +323,9 @@ it("其他目录：输入路径进入项目页，后台拒绝时在输入框下�
   expect(create).toHaveBeenCalledWith(
     expect.objectContaining({ cwd: "Z:/fresh", workspaceRoot: "Z:/fresh" }),
   );
-  expect(container.querySelector(".phone-composer-error")?.textContent).toContain("nctrn trust");
+  expect(container.querySelector(".phone-composer-error")?.textContent).toContain(
+    "请在电脑上信任该项目",
+  );
   expect(field.value).toBe("开始");
 
   await act(async () => {

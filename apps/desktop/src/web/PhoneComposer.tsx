@@ -759,7 +759,11 @@ export function PhoneComposer({
           )}
           <PopoverOption
             icon={<IconTerminal />}
-            label={`Shell · ${shell?.label ?? "—"}`}
+            label={
+              <>
+                Shell<span className="muted-value">{shell?.label ?? "—"}</span>
+              </>
+            }
             detail={shell?.note ?? "Shell 设置只能在电脑上切换"}
           />
         </Popover>

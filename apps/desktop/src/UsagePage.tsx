@@ -32,7 +32,7 @@ const price = (v: number | undefined) => (v === undefined ? "—" : `$${v}`);
 const prices = (p: ModelPricing | undefined) => [price(p?.input), price(p?.output)];
 /** 展开区的完整单价行；分档模型显示基础档 */
 export const priceLine = (p: ModelPricing | undefined): string =>
-  `单价 输入 ${price(p?.input)} · 缓存读 ${price(p?.cacheRead)} / 写 ${price(p?.cacheWrite)} · 输出 ${price(p?.output)}（USD / 每百万 token）${p?.tiers?.length ? " · 分档" : ""}`;
+  `单价 输入 ${price(p?.input)}，缓存读 ${price(p?.cacheRead)} / 写 ${price(p?.cacheWrite)}，输出 ${price(p?.output)}（USD / 每百万 token）${p?.tiers?.length ? "，分档" : ""}`;
 const SOURCE = { config: "配置", upstream: "上游", "models.dev": "models.dev", vendor: "厂商价" };
 const VENDOR_NOTE = "按模型厂商官方 API 价估算，不代表代理或中转服务的实际收费";
 
@@ -57,7 +57,7 @@ function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
   });
   const max = Math.max(1, ...cells.map((c) => c.day[mode]));
   const describe = (d: DailyUsageStats) =>
-    `${d.date} · ${formatUsageTokens(d.tokens)} tokens · 约 ${formatUsageCost(d.cost)} · ${d.turns} Turn`;
+    `${d.date}，${formatUsageTokens(d.tokens)} tokens，约 ${formatUsageCost(d.cost)}，${d.turns} Turn`;
   const selected = hover ?? pinned;
   const columns = Math.ceil((first.getDay() + cells.length) / 7);
   const months = cells.flatMap(({ day }, i) =>
@@ -284,8 +284,8 @@ function ModelDetail({
             首次使用{" "}
             <span title={formatDateTime(new Date(m.firstUsedAt))}>
               {relativeTime(m.firstUsedAt)}
-            </span>{" "}
-            · 最近使用{" "}
+            </span>
+            ，最近使用{" "}
             <span title={formatDateTime(new Date(m.lastUsedAt))}>{relativeTime(m.lastUsedAt)}</span>
           </div>
         )}
@@ -303,7 +303,7 @@ export function UsageView({
   error,
   onRange,
   onRefresh,
-  scope = "本机全部会话 · 含子代理",
+  scope = "本机全部会话（含子代理）",
 }: {
   stats: UsageStats | undefined;
   range: Range;
@@ -428,7 +428,7 @@ export function UsageView({
                 <span>会话 / Turn</span>
                 <strong>{stats.sessions.toLocaleString("en-US")}</strong>
                 <small>
-                  {stats.turns.toLocaleString("en-US")} Turns · 子代理 {stats.subagentTurns}
+                  {stats.turns.toLocaleString("en-US")} Turns，子代理 {stats.subagentTurns}
                 </small>
               </div>
               <div>
@@ -439,7 +439,7 @@ export function UsageView({
                 </strong>
                 <small title={stats.longestTurn?.sessionTitle}>
                   {stats.longestTurn
-                    ? `${stats.longestTurn.date} · ${stats.longestTurn.sessionTitle}`
+                    ? `${stats.longestTurn.date}，${stats.longestTurn.sessionTitle}`
                     : "暂无已完成 Turn"}
                 </small>
               </div>
@@ -566,7 +566,7 @@ export function UsageView({
                                     title={m.pricingSource === "vendor" ? VENDOR_NOTE : undefined}
                                   >
                                     {SOURCE[m.pricingSource]}
-                                    {m.pricing?.tiers?.length ? " · 分档" : ""}
+                                    {m.pricing?.tiers?.length ? "（分档）" : ""}
                                   </small>
                                 )}
                               </div>

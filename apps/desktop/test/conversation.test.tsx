@@ -122,7 +122,7 @@ it("用户技能小标签使用日志快照，展开正文，工具行显示已�
   const rendered = mount(view);
   expect(screen.getByText("/alpha file")).toBeTruthy();
   const summary = rendered.container.querySelector(".skill-message summary");
-  expect(summary?.textContent).toBe("技能 alpha · 已附加正文 4 字");
+  expect(summary?.textContent).toBe("技能 alpha（已附加正文 4 字）");
   if (!summary) throw new Error("缺少技能标签");
   fireEvent.click(summary);
   expect(rendered.container.querySelector(".skill-message pre")?.textContent).toBe("快照正文");
@@ -143,7 +143,8 @@ it("任务清单成功工具行显示快照、进度与全部完成或清空，�
   view.entries = [entry];
   const rendered = mount(view);
   expect(screen.getByText("任务清单")).toBeTruthy();
-  expect(screen.getByText("1/3 · 正在：正在做")).toBeTruthy();
+  expect(screen.getByText("正在：正在做").className).toContain("tool-dir");
+  expect(screen.getByTitle("1/3，正在：正在做")).toBeTruthy();
   expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("1");
   fireEvent.click(screen.getByLabelText("工具详细信息"));
   expect(screen.getAllByRole("listitem")).toHaveLength(3);
@@ -154,7 +155,7 @@ it("任务清单成功工具行显示快照、进度与全部完成或清空，�
   entry.result.output = { items: [{ text: "第一项", status: "completed" }] };
   view.revision++;
   rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
-  expect(screen.getByText("1/1 · 全部完成").className).toContain("todo-complete");
+  expect(screen.getByTitle("1/1，全部完成").className).toContain("todo-complete");
   entry.result.output = { items: [] };
   view.revision++;
   rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
@@ -949,7 +950,7 @@ describe("Conversation 提问卡片", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "拒绝回答" }));
     expect(screen.getByRole("tab", { name: /存储/ }).textContent).toContain("—");
-    fireEvent.click(screen.getByRole("button", { name: "已拒绝回答 · 撤销" }));
+    fireEvent.click(screen.getByRole("button", { name: "撤销拒绝回答" }));
     expect(screen.getByRole("tab", { name: /存储/ }).textContent).not.toContain("—");
     fireEvent.click(screen.getByRole("tab", { name: "第2题" }));
     expect(screen.getByText("选择功能")).toBeTruthy();
@@ -1014,7 +1015,7 @@ describe("Conversation 提问卡片", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一题" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "缓存" }));
     fireEvent.click(screen.getByRole("button", { name: "拒绝回答" }));
-    expect(screen.getByRole("button", { name: "已拒绝回答 · 撤销" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "撤销拒绝回答" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "下一题" }));
     expect(screen.getByRole("button", { name: "提交" })).toHaveProperty("disabled", true);
     fireEvent.click(screen.getByRole("button", { name: "拒绝回答" }));
@@ -2024,7 +2025,8 @@ describe("Conversation 工具行与拒绝", () => {
     const [line, old] = Array.from(container.querySelectorAll(".tool-line"));
     expect(line?.querySelector(".subagent-badge")?.textContent).toBe("quick");
     expect(line?.querySelector(".tool-arg")?.textContent).toBe("找出调用点");
-    expect(line?.textContent).toContain("p/cheap · low");
+    expect(line?.querySelector(".tool-range .muted-value")?.textContent).toBe("low");
+    expect(line?.querySelector(".tool-range")?.textContent).toBe("p/cheaplow");
     expect(old?.querySelector(".subagent-badge")).toBeNull();
     expect(old?.textContent).toContain("p/strong");
     expect(screen.queryByText("选择理由")).toBeNull();
@@ -2206,7 +2208,8 @@ describe("Conversation 权限卡片 v2", () => {
     });
     mount(view);
     const card = screen.getByRole("region", { name: "权限确认" });
-    expect(card.textContent).toContain("需要确认 · 执行命令");
+    expect(card.querySelector(".ask-t .muted-value")?.textContent).toBe("执行命令");
+    expect(card.querySelector(".kbd-hint")?.textContent).toBe("1–5 选择Esc 拒绝");
     expect(card.textContent).toContain("审查器交给你确认");
     expect(card.textContent).toContain("pwsh › rm -rf x");
     expect(within(card).getByRole("button", { name: "允许一次" })).toBeTruthy();
@@ -2406,7 +2409,8 @@ describe("长思考收起", () => {
       });
       const header = screen.getByRole("button", { name: "思考了 72s" });
       fireEvent.click(header);
-      expect(header.textContent).toBe("思考 · 1 分 12 秒▶");
+      expect(header.textContent).toBe("思考1 分 12 秒▶");
+      expect(header.querySelector(".muted-value")?.textContent).toBe("1 分 12 秒");
       expect(header.querySelector(".fold-arrow.up")).not.toBeNull();
       expect(header.getAttribute("title")).toBe("收起思考");
     } finally {
@@ -2488,7 +2492,7 @@ describe("回答内文件引用（U-09）", () => {
     fireEvent.contextMenu(await screen.findByRole("button", { name: "src/a.ts:12" }));
     const menu = await screen.findByRole("menu");
     const items = within(menu).getAllByRole("menuitem");
-    expect(items[0]?.textContent).toContain("Nocturne 面板 · 第 12 行");
+    expect(items[0]?.textContent).toContain("Nocturne 面板（第 12 行）");
     expect(items.filter((item) => item.textContent?.includes("Nocturne 面板"))).toHaveLength(1);
   });
 

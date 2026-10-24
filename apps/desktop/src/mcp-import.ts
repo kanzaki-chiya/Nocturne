@@ -96,7 +96,7 @@ export function parseMcpImport(text: string, existing: readonly string[]): McpIm
       unknown.length ? `未支持字段 ${unknown.join("、")}，不会导入` : "",
     ]
       .filter(Boolean)
-      .join(" · ");
+      .join("，");
     return { id, draft: { id, config, secrets }, notice };
   });
 }

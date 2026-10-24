@@ -187,7 +187,7 @@ it("吊销时状态栏警示可打开远程设置", () => {
   render(
     <RemoteBadge status={{ ...online, connection: "revoked" }} client={undefined} onOpen={open} />,
   );
-  fireEvent.click(screen.getByText("远程 · 已被吊销"));
+  fireEvent.click(screen.getByRole("button", { name: "远程已被吊销" }));
   expect(open).toHaveBeenCalledTimes(1);
 });
 it("通知只有登记、开启、在线且没有手机连接才推送", async () => {

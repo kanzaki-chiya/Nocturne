@@ -782,15 +782,23 @@ function ProviderDetail({
       <div className="sh">
         <h4>模型</h4>
         <small>
-          {models === null
-            ? "…"
-            : q !== ""
-              ? `${filtered.length} / ${models.length}`
-              : off
-                ? `服务商已停用 · 逐个设置保留 ${models.filter((m) => disabledByModel[m.modelId] !== "model").length} / ${total}`
-                : onCount < total
-                  ? `已启用 ${onCount} / ${total}`
-                  : `${models.length} 个`}
+          {models === null ? (
+            "…"
+          ) : q !== "" ? (
+            `${filtered.length} / ${models.length}`
+          ) : off ? (
+            <>
+              服务商已停用
+              <span className="muted-value">
+                逐个设置保留 {models.filter((m) => disabledByModel[m.modelId] !== "model").length} /{" "}
+                {total}
+              </span>
+            </>
+          ) : onCount < total ? (
+            `已启用 ${onCount} / ${total}`
+          ) : (
+            `${models.length} 个`
+          )}
         </small>
         <input
           className="search"
@@ -1076,7 +1084,7 @@ function RekeyDialog({
     <Scrim onClose={onClose}>
       <div className="dlg narrow" role="dialog" aria-label={`换密钥 · ${providerId}`}>
         <div className="dh3">
-          <b>换密钥 · {providerId}</b>
+          <b>换密钥（{providerId}）</b>
           <span>新密钥交给系统凭据存储，界面不留存。</span>
         </div>
         <div className="db">

@@ -143,7 +143,7 @@ describe("fileRefTitle", () => {
       }),
     ).toBe("已附带 36/120 行");
     expect(fileRefTitle({ path: "a", kind: "file", chars: 1, truncated: true })).toBe(
-      "已附带文件 · 已截断",
+      "已附带文件（已截断）",
     );
     expect(fileRefTitle({ path: "d/", kind: "directory", chars: 1, truncated: false })).toBe(
       "目录",

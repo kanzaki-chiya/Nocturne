@@ -96,7 +96,7 @@ export function DailyBars({
       <div className="usage-daily-top">
         <h4>每日用量</h4>
         <span className="usage-daily-sum">
-          {formatTokens(sum)} tokens · 活跃 {activeDays} 天
+          {formatTokens(sum)} tokens，活跃 {activeDays} 天
         </span>
       </div>
       {(legend.length > 0 || hasOther) && (
@@ -156,7 +156,7 @@ export function DailyBars({
                 <div id={tipId} role="tooltip" className="usage-tip usage-daily-tip">
                   <b>{longDate(d.date)}</b>
                   <div className="usage-tip-sub">
-                    {d.requests.toLocaleString("en-US")} 次请求 · {formatTokens(d.total)} tokens
+                    {d.requests.toLocaleString("en-US")} 次请求，{formatTokens(d.total)} tokens
                   </div>
                   {rows.length === 0 ? (
                     <div className="usage-tip-sub">这一天没有用量</div>

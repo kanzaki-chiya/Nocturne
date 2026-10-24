@@ -3,22 +3,21 @@ import type { TodoItem } from "@nocturne/core/protocol";
 import type { PrefsStore } from "./prefs";
 import "./todos.css";
 
+/** count 是「N/M」，note 是弱化的附注（全部完成 / 正在：…，R4 不写中点）；text 供悬停提示 */
 export function todoSummary(items: readonly TodoItem[]): {
   text: string;
+  count: string;
+  note: string;
   done: number;
   complete: boolean;
 } {
   const done = items.filter((item) => item.status === "completed").length;
   const complete = items.length > 0 && done === items.length;
   const current = items.find((item) => item.status === "in_progress");
-  return {
-    done,
-    complete,
-    text:
-      items.length === 0
-        ? "清空任务清单"
-        : `${done}/${items.length}${complete ? " · 全部完成" : current ? ` · 正在：${current.text}` : ""}`,
-  };
+  const count = items.length === 0 ? "清空任务清单" : `${done}/${items.length}`;
+  const note =
+    items.length === 0 ? "" : complete ? "全部完成" : current ? `正在：${current.text}` : "";
+  return { done, complete, count, note, text: note === "" ? count : `${count}，${note}` };
 }
 
 export function TodoProgress({ items }: { items: readonly TodoItem[] }) {

@@ -271,8 +271,10 @@ describe("SettingsPage", () => {
     const server = fakeServer(handlers());
     await server.initialize();
     render(<SettingsPage {...props(server.client)} />);
-    const ov = await screen.findByText("已被覆盖 · 项目配置");
-    expect(ov.className).toContain("ov");
+    const ov = await screen.findByText("项目配置");
+    expect(ov.className).toContain("muted-value");
+    expect(ov.parentElement?.textContent).toBe("已被覆盖项目配置");
+    expect(ov.parentElement?.className).toContain("ov");
     server.close();
   });
 
@@ -281,7 +283,9 @@ describe("SettingsPage", () => {
     await server.initialize();
     const onConfigSaved = vi.fn();
     render(<SettingsPage {...props(server.client, { section: "models", onConfigSaved })} />);
-    const primary = await screen.findByText("gpt-5 · high");
+    const primary = await screen.findByText("gpt-5");
+    expect(primary.textContent).toBe("gpt-5high");
+    expect(primary.querySelector(".muted-value")?.textContent).toBe("high");
     expect(primary.className).toBe("model-primary");
     expect(primary.parentElement?.title).toBe("openrouter · gpt-5");
     expect(primary.parentElement?.querySelector(".model-provider")?.textContent).toBe("openrouter");
@@ -561,7 +565,7 @@ describe("SettingsPage", () => {
       fireEvent.click(await screen.findByRole("button", { name: "取消测试" }));
       release(RESULTS.s2);
       const status = await screen.findByRole("status");
-      expect(status.textContent).toBe("已取消，已跑 1/3 条 · 命中率 1/1（100%）");
+      expect(status.textContent).toBe("已取消，已跑 1/3 条，命中率 1/1（100%）");
       expect(screen.getByRole("button", { name: "测试" })).toHaveProperty("disabled", false);
       expect(document.querySelectorAll(".stable tbody tr")).toHaveLength(1);
       expect(

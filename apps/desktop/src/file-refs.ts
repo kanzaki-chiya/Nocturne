@@ -167,5 +167,5 @@ export function fileRefTitle(ref: FileRef): string {
     ref.lines !== undefined && ref.totalLines !== undefined
       ? `已附带 ${ref.lines}/${ref.totalLines} 行`
       : "已附带文件";
-  return ref.truncated ? `${lines} · 已截断` : lines;
+  return ref.truncated ? `${lines}（已截断）` : lines;
 }

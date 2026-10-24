@@ -310,7 +310,7 @@ it("进入会话查一次（浮层本来开着也只查一次）；之后每次�
   expect(backend.state.listCalls.at(-1)).toBe("q");
 });
 
-it("概览：外部 agent 由父 task 主体识别，不可点击并注明「外部 agent · 仅主对话进度」", async () => {
+it("概览：外部 agent 由父 task 主体识别，不可点击并注明「外部 agent」与「仅主对话进度」", async () => {
   const { prefs, host, backend } = setup({ overview: true });
   render(
     <Harness
@@ -325,7 +325,7 @@ it("概览：外部 agent 由父 task 主体识别，不可点击并注明「外
   const box = group() as HTMLElement;
   expect(box.textContent).toContain("claude");
   expect(box.textContent).toContain("外部 agent 的任务");
-  expect(box.textContent).toContain("外部 agent · 仅主对话进度");
+  expect(box.textContent).toContain("外部 agent仅主对话进度");
   expect(within(box).queryAllByRole("button")).toHaveLength(0);
   // 没有 Nocturne 子会话，也没有观察
   expect(backend.state.subscriptions).toHaveLength(0);

@@ -95,7 +95,7 @@ describe("desktop usage", () => {
     expect(screen.getByRole("table").textContent).not.toContain(".0 万");
     expect(overview?.textContent).toContain("80.0%");
     expect(overview?.textContent).toContain("$10.00");
-    expect(overview?.textContent).toContain("30 Turns · 子代理 4");
+    expect(overview?.textContent).toContain("30 Turns，子代理 4");
     expect(overview?.textContent).toContain("2.0分钟");
     fireEvent.click(screen.getByRole("button", { name: "7 天" }));
     await waitFor(() =>
@@ -148,15 +148,15 @@ describe("desktop usage", () => {
     );
     expect(grid.querySelectorAll(".usage-outside")).toHaveLength(335);
     const cell = within(grid).getByRole("button", {
-      name: `${today} · 12 万 tokens · 约 $10.00 · 30 Turn`,
+      name: `${today}，12 万 tokens，约 $10.00，30 Turn`,
     });
     expect(cell.title).toContain("约 $10.00");
     fireEvent.mouseEnter(cell);
-    expect(screen.getByText(`${today} · 12 万 tokens · 约 $10.00 · 30 Turn`)).toBeTruthy();
+    expect(screen.getByText(`${today}，12 万 tokens，约 $10.00，30 Turn`)).toBeTruthy();
     fireEvent.click(cell);
     fireEvent.mouseLeave(cell);
     expect(cell.getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByText(`${today} · 12 万 tokens · 约 $10.00 · 30 Turn`)).toBeTruthy();
+    expect(screen.getByText(`${today}，12 万 tokens，约 $10.00，30 Turn`)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "费用" }));
     expect(cell.className).toContain("usage-level-4");
   });

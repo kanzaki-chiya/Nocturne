@@ -106,7 +106,9 @@ describe("ProvidersPage 启停", () => {
     // 逐个开关保留状态（Core 的 disabled 个别优先报 "model"）：m1 仍为启用，
     // 表头计数写「逐个设置保留」（ADR-0054 §4「开关保留状态」）
     expect(modelSwitch.getAttribute("aria-checked")).toBe("true");
-    expect(await screen.findByText(/服务商已停用 · 逐个设置保留 2 \/ 3/)).toBeTruthy();
+    expect((await screen.findByText("服务商已停用")).textContent).toBe(
+      "服务商已停用逐个设置保留 2 / 3",
+    );
     // 左侧列表：空心点、名字变淡、标「已停用」
     await waitFor(() => {
       expect(document.querySelector(".plist .tagm")?.textContent).toBe("已停用");

@@ -129,8 +129,8 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   );
   await screen.findByText("模型目录到此为止");
   expect(screen.getByRole("meter").getAttribute("value")).toBe("678");
-  expect(screen.getByText(/完整说明 2 个 · 只显示名字 4 个 · 已停用 1 个/)).toBeTruthy();
-  expect(screen.getByText("项目 · project")).toBeTruthy();
+  expect(screen.getByText(/完整说明 2 个，只显示名字 4 个，已停用 1 个/)).toBeTruthy();
+  expect(screen.getByText("project").parentElement?.textContent).toBe("项目project");
   const list = screen.getByRole("navigation", { name: "技能列表" });
   fireEvent.click(within(list).getByRole("button", { name: /release/ }));
   expect(screen.getByText("有 2 处写法在 Nocturne 里不生效").className).toContain("warn");
@@ -141,13 +141,13 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   expect(list.querySelector(".shadowed")?.textContent).toBe("alpha");
   fireEvent.click(within(list).getByRole("button", { name: /manual/ }));
   expect(screen.getByText("缺少说明，模型看不到这个技能").className).toContain("warn");
-  fireEvent.click(screen.getByText("1 个技能的前言解析失败 · 查看 ›"));
+  fireEvent.click(screen.getByText("1 个技能的前言解析失败，查看 ›"));
   expect(screen.getByText("C:/home/bad/SKILL.md:3")).toBeTruthy();
   fireEvent.click(within(list).getByRole("button", { name: /alpha.*模型/ }));
   fireEvent.click(screen.getByRole("switch"));
   expect(await screen.findByRole("status")).toHaveProperty(
     "textContent",
-    "✓ 已停用 alpha · 2 个已打开的会话将在本轮结束后更新技能目录",
+    "✓ 已停用 alpha，2 个已打开的会话将在本轮结束后更新技能目录",
   );
 });
 
@@ -176,7 +176,7 @@ it("大小格只在有子目录时显示子目录数", async () => {
   expect((await screen.findByText("大小")).nextElementSibling?.textContent).toBe("1.0 KB");
   const list = screen.getByRole("navigation", { name: "技能列表" });
   fireEvent.click(within(list).getByRole("button", { name: /nested/ }));
-  expect(size()).toBe("1.0 KB · 2 个子目录");
+  expect(size()).toBe("1.0 KB，2 个子目录");
 });
 
 it("输入技能与参数后 Enter 把 skill 字段交给提交，不执行斜杠命令", () => {
@@ -408,7 +408,7 @@ it("导入技能：选择文件夹→预检→改名/跳过→结果与停用", 
   fireEvent.click(within(dialog).getByRole("button", { name: "停用" }));
   expect(await screen.findByRole("status")).toHaveProperty(
     "textContent",
-    "✓ 已导入并停用 alpha · 1 个已打开的会话将在本轮结束后更新",
+    "✓ 已导入并停用 alpha，1 个已打开的会话将在本轮结束后更新",
   );
   expect(f.calls.find((c) => c.method === "skills.setSkillEnabled")?.params).toMatchObject({
     name: "alpha",

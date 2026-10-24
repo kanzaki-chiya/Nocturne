@@ -4,7 +4,7 @@
  * settings.json；复合项开对话框，对话框里「保存」才落盘；失败时值回到原样，
  * 这一行下面写红字。主题与普通对话工作区只写本机 prefs，不进 Core。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { PermissionPresetName, ReasoningEffort } from "@nocturne/core/protocol";
 import type { RpcClient } from "@nocturne/rpc/client";
 import { presetOptions } from "./choice-info";
@@ -17,6 +17,7 @@ import {
 } from "./notify";
 import { Scrim } from "./ProvidersPage";
 import { refKey, shellGroups } from "./session-controls";
+import { modelKeyText, modelRefText } from "./model-ref";
 import { ChoiceMenu } from "./Menu";
 import type {
   JevEndpoint,
@@ -81,11 +82,7 @@ const ROLES: { role: RoleKey; label: string; hint?: string; unset: string }[] = 
   { role: "smol", label: "轻量模型", hint: "生成标题等小任务", unset: "跟随当前模型" },
 ];
 
-/** "provider/model" → "provider · model" */
-function refText(ref: string): string {
-  const at = ref.indexOf("/");
-  return at < 0 ? ref : `${ref.slice(0, at)} · ${ref.slice(at + 1)}`;
-}
+const refText = modelKeyText;
 
 /** 模型名与档位优先展示，服务商单独一行允许省略。off = 指向已停用模型（ADR-0054）。 */
 function ModelValue({
@@ -104,17 +101,28 @@ function ModelValue({
     <span className={`model-value${off ? " off" : ""}`} title={refText(value)}>
       <span className="model-primary">
         {model}
-        {effort !== undefined ? ` · ${effort}` : ""}
+        {effort !== undefined && <span className="muted-value">{effort}</span>}
       </span>
       {provider !== "" && <span className="model-provider">{provider}</span>}
     </span>
   );
 }
 
-function reviewerText(cfg: SecurityReviewerConfig | undefined): string {
+function reviewerText(cfg: SecurityReviewerConfig | undefined): ReactNode {
   if (cfg === undefined || cfg.backend === "off") return "关闭";
-  if (cfg.backend === "model") return `模型 · ${refText(refKey(cfg.model))}`;
-  return `Jev · ${cfg.endpoint === "custom" ? (cfg.baseURL ?? "自定义地址") : cfg.endpoint} · ${cfg.model}`;
+  if (cfg.backend === "model")
+    return (
+      <>
+        模型<span className="muted-value">{refText(refKey(cfg.model))}</span>
+      </>
+    );
+  const endpoint = cfg.endpoint === "custom" ? (cfg.baseURL ?? "自定义地址") : cfg.endpoint;
+  return (
+    <>
+      Jev
+      <span className="muted-value">{modelRefText({ provider: endpoint, model: cfg.model })}</span>
+    </>
+  );
 }
 
 export function SettingsPage({
@@ -286,7 +294,13 @@ export function SettingsPage({
         className={`src${it.overridden ? " ov" : ""}`}
         title={it.overridden ? "保存的值被更高层覆盖，改了也不生效" : undefined}
       >
-        {it.overridden ? `已被覆盖 · ${LAYER_TEXT[it.source]}` : LAYER_TEXT[it.source]}
+        {it.overridden ? (
+          <>
+            已被覆盖<span className="muted-value">{LAYER_TEXT[it.source]}</span>
+          </>
+        ) : (
+          LAYER_TEXT[it.source]
+        )}
       </span>
     );
   };
@@ -960,7 +974,7 @@ export function SettingsPage({
               setRowErr("defaultModel", null);
               setDialog(null);
               showToast(
-                `已保存 默认模型与档位 = ${refText(model)}${effort !== null ? ` · ${effort}` : ""}`,
+                `已保存 默认模型与档位 = ${refText(model)}${effort !== null ? `（${effort}）` : ""}`,
               );
               return undefined;
             } catch (e) {
@@ -1863,7 +1877,7 @@ function ReviewerSampleCheck({ client, enabled }: { client: RpcClient; enabled: 
       )}
       {(run.state === "done" || run.state === "cancelled") && (
         <div className="ssum" role="status">
-          {run.state === "cancelled" ? `已取消，已跑 ${rows.length}/${run.total} 条 · ` : ""}
+          {run.state === "cancelled" ? `已取消，已跑 ${rows.length}/${run.total} 条，` : ""}
           命中率 {matched}/{rows.length}（{rate}%）
         </div>
       )}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { RpcError, type RpcClient } from "@nocturne/rpc/client";
 import type { McpProbeResult, McpServerOverview, McpValueOverview } from "@nocturne/core/protocol";
 import { Dropdown } from "./Dropdown";
@@ -27,14 +27,18 @@ const probeErrors = {
   connect_failed: "连接失败，请检查 HTTP 地址和网络连接",
   http_status: "HTTP 请求失败，请检查服务器返回的状态码",
 };
-const resultText = (r: McpProbeResult | undefined): string =>
-  !r
-    ? "未测试"
-    : r.ok
-      ? `已连接 · ${r.tools.length} 个工具`
-      : r.error
-        ? probeErrors[r.error.code]
-        : "测试失败";
+const resultText = (r: McpProbeResult | undefined): ReactNode =>
+  !r ? (
+    "未测试"
+  ) : r.ok ? (
+    <>
+      已连接<span className="muted-value">{r.tools.length} 个工具</span>
+    </>
+  ) : r.error ? (
+    probeErrors[r.error.code]
+  ) : (
+    "测试失败"
+  );
 function draftOf(server: McpServerOverview): McpDraft {
   return {
     id: server.id,
@@ -102,7 +106,7 @@ export function McpPage({
   }, [refresh, version]);
   const changed = async (text: string) => {
     onChanged();
-    setToast(`${text} · ${propagation}`);
+    setToast(`${text}，${propagation}`);
     await refresh();
   };
   const current = servers.find((s) => s.id === selected);
@@ -169,7 +173,7 @@ export function McpPage({
           </div>
           {(["app", "readonly"] as const).map((group) => (
             <div key={group}>
-              <h5>{group === "app" ? "程序管理" : "config.json · 只读"}</h5>
+              <h5>{group === "app" ? "程序管理" : "config.json（只读）"}</h5>
               {servers
                 .filter((s) => (s.origin === "app") === (group === "app"))
                 .map((s) => (
@@ -429,7 +433,7 @@ function ProbeResult({ result }: { result: McpProbeResult }) {
       <b>{resultText(result)}</b>
       <span>
         {(result.durationMs / 1000).toFixed(1)} 秒
-        {result.httpStatus ? ` · HTTP ${result.httpStatus}` : ""}
+        {result.httpStatus ? `（HTTP ${result.httpStatus}）` : ""}
       </span>
       {result.stderrTail?.length ? (
         <details>
@@ -598,7 +602,7 @@ function McpForm({
                   }
                 }}
               >
-                {t === "stdio" ? "STDIO · 本地命令" : "流式 HTTP · 远程地址"}
+                {t === "stdio" ? "STDIO（本地命令）" : "流式 HTTP（远程地址）"}
               </button>
             ))}
           </div>
@@ -643,7 +647,7 @@ function McpForm({
               {err("command")}
             </label>
             <label className="field">
-              参数 · 一行一个
+              参数，一行一个
               <textarea
                 value={args}
                 onChange={(e) => {
@@ -868,7 +872,7 @@ function AgentBrowserCard({ host, prefs }: { host: AgentBrowserHost; prefs: Pref
     <section className="agent-browser-card" aria-labelledby="agent-browser-heading">
       <div className="agent-browser-head">
         <div className="grow">
-          <h4 id="agent-browser-heading">面板浏览器 · 桌面内置</h4>
+          <h4 id="agent-browser-heading">面板浏览器（桌面内置）</h4>
           <p className="fine">
             让 agent 在 Nocturne
             的面板里打开网页、截图和操作页面。默认关闭；开启后只对新的后台进程生效。
@@ -974,13 +978,13 @@ function McpImport({
           )}
           {rows.map((row, i) => (
             <p key={i}>
-              <b>{row.id || "未命名"}</b> · {row.notice}
+              <b>{row.id || "未命名"}</b>：{row.notice}
             </p>
           ))}
         </div>
         <div className="df">
           <span className="fine">
-            识别到 {rows.length} 台 · 可导入 {drafts.length} 台
+            识别到 {rows.length} 台，可导入 {drafts.length} 台
           </span>
           <button className="btn ghost" onClick={onClose}>
             取消

@@ -166,7 +166,7 @@ export function AgentBrowserPane({
         </span>
         <span className={`sp-agent-state${info.state === "busy" ? " busy" : ""}`} role="status">
           {STATE_TEXT[info.state]}
-          {info.operation !== undefined ? ` · ${info.operation}` : ""}
+          {info.operation !== undefined && <span className="muted-value">{info.operation}</span>}
         </span>
         <span className="sp-agent-url" title={info.url}>
           {info.title !== "" ? info.title : info.url}

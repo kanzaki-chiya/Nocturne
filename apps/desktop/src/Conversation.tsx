@@ -50,6 +50,7 @@ import { useReasoning, type ReasoningMap } from "./reasoning";
 import { MCP_STATE_NOTICE_CODES } from "./mcp-status";
 import { useStickyOutput } from "./useStickyOutput";
 import { useCopyText } from "./useCopyText";
+import { KeyHint } from "./KeyHint";
 import "./conversation.css";
 
 /**
@@ -592,7 +593,7 @@ function CodeRef({ text }: { text: string }) {
                     ? "资源管理器"
                     : preview
                       ? "面板浏览器"
-                      : `${hooks.openerLabel()}${hit.line !== undefined ? ` · 第 ${hit.line} 行` : ""}`
+                      : `${hooks.openerLabel()}${hit.line !== undefined ? `（第 ${hit.line} 行）` : ""}`
                 }
                 onSelect={() => {
                   run(openDefault);
@@ -601,7 +602,7 @@ function CodeRef({ text }: { text: string }) {
               {preview && (
                 <MenuItem
                   label="查看源码"
-                  detail={`${hooks.openerLabel()}${hit.line !== undefined ? ` · 第 ${hit.line} 行` : ""}`}
+                  detail={`${hooks.openerLabel()}${hit.line !== undefined ? `（第 ${hit.line} 行）` : ""}`}
                   onSelect={() => {
                     run(() => viewSource(hit.absolutePath, hit.line));
                   }}
@@ -761,9 +762,14 @@ function Think({
     seconds < 1 ? "思考" : part?.active === true ? `思考中 ${seconds}s` : `思考了 ${seconds}s`;
   if (body === "") return <div className="think">{label}</div>;
   const openLabel =
-    seconds < 1
-      ? "思考"
-      : `${part?.active === true ? "思考中" : "思考"} · ${durationText(seconds)}`;
+    seconds < 1 ? (
+      "思考"
+    ) : (
+      <>
+        {part?.active === true ? "思考中" : "思考"}
+        <span className="muted-value">{durationText(seconds)}</span>
+      </>
+    );
   const collapse = () => {
     reveal.current = true;
     setOpen(false);
@@ -1218,8 +1224,8 @@ function UserMessage({
               {entry.skill && (
                 <details className="skill-message">
                   <summary>
-                    技能 <b>{entry.skill.name}</b> · 已附加正文{" "}
-                    {entry.skill.body.length.toLocaleString()} 字
+                    技能 <b>{entry.skill.name}</b>（已附加正文{" "}
+                    {entry.skill.body.length.toLocaleString()} 字）
                   </summary>
                   <pre>{entry.skill.body}</pre>
                 </details>
@@ -1324,7 +1330,9 @@ function UserMessage({
       {entry.descriptions?.map((description, index) =>
         description.text ? (
           <details key={index}>
-            <summary>图片说明 · {description.model}</summary>
+            <summary>
+              图片说明<span className="muted-value">{description.model}</span>
+            </summary>
             <pre>{description.text}</pre>
           </details>
         ) : null,
@@ -1958,7 +1966,11 @@ function ToolDetails({
           <span>目录 {displayPath(input.cwd, cwd)}</span>
         )}
         {typeof value?.replaced === "number" && <span>{value.replaced} 处替换</span>}
-        {entry.review && <span title={entry.review.reason}>安全审查 · {entry.review.verdict}</span>}
+        {entry.review && (
+          <span title={entry.review.reason}>
+            安全审查<span className="muted-value">{entry.review.verdict}</span>
+          </span>
+        )}
         {entry.subjects.map((subject, index) =>
           (subject.resolved && subject.resolved !== subject.target) || subject.detail ? (
             <span key={index}>
@@ -1993,7 +2005,7 @@ function ToolDetails({
       )}
       {result?.truncated ? (
         <p className="conversation-review">
-          输出已截断{result.spillPath ? ` · 完整输出：${displayPath(result.spillPath, cwd)}` : ""}
+          输出已截断{result.spillPath ? `，完整输出：${displayPath(result.spillPath, cwd)}` : ""}
         </p>
       ) : null}
       {(result?.attachments ?? []).length > 0 && (
@@ -2002,7 +2014,7 @@ function ToolDetails({
       {entry.descriptions?.map((description, index) =>
         description.text ? (
           <p key={index} className="conversation-review">
-            图片说明 · {description.model} · {description.text}
+            图片说明<span className="muted-value">{description.model}</span>：{description.text}
           </p>
         ) : null,
       )}
@@ -2087,7 +2099,7 @@ function ToolRow({
   const argument = toolArgumentValue(entry, cwd);
   const arg: ArgParts =
     summary !== undefined
-      ? { name: summary.text, dir: "", title: summary.text }
+      ? { name: summary.count, dir: summary.note, title: summary.text }
       : preparing && inputOf(entry) === undefined
         ? { name: "", dir: "", title: "" }
         : argument.path
@@ -2114,7 +2126,7 @@ function ToolRow({
       {subagent.model !== undefined && (
         <span className="tool-range">
           {subagent.model}
-          {subagent.effort !== undefined ? ` · ${subagent.effort}` : ""}
+          {subagent.effort !== undefined && <span className="muted-value">{subagent.effort}</span>}
         </span>
       )}
       {asked && (
@@ -2565,7 +2577,7 @@ export function PermissionCard({
   return (
     <section className="ask v2" aria-label="权限确认" aria-busy={busy} tabIndex={-1} ref={cardRef}>
       <div className="ask-t" title={hover}>
-        需要确认 · {operation}
+        需要确认<span className="muted-value">{operation}</span>
         <span className="ask-why">{why}</span>
       </div>
       <ul className="ask-subjects">
@@ -2608,7 +2620,13 @@ export function PermissionCard({
               </button>
             );
           })}
-          <span className="ask-kbd">1–{options.length} 选择 · Esc 拒绝</span>
+          <KeyHint
+            className="ask-kbd"
+            groups={[
+              { keys: ["1", String(options.length)], range: true, label: "选择" },
+              { keys: ["Esc"], label: "拒绝" },
+            ]}
+          />
         </div>
       ) : (
         <form
@@ -2906,7 +2924,12 @@ export function QuestionCard({
           ?
         </span>
         <span className="qlabel">
-          需要你回答{questions.length > 1 ? ` · ${index + 1}/${questions.length}` : ""}
+          需要你回答
+          {questions.length > 1 && (
+            <span className="muted-value">
+              {index + 1}/{questions.length}
+            </span>
+          )}
         </span>
         {questions.length > 1 ? (
           <div className="tabs" role="tablist" aria-label="问题列表">
@@ -3054,16 +3077,17 @@ export function QuestionCard({
       </div>
       <div className="qfoot">
         <button type="button" className="link" disabled={busy} onClick={toggleDecline}>
-          {draft.declined ? "已拒绝回答 · 撤销" : "拒绝回答"}
+          {draft.declined ? "撤销拒绝回答" : "拒绝回答"}
         </button>
-        <span className="hint">
-          {options.length > 0 ? (
-            <>
-              <kbd>1</kbd>–<kbd>{total}</kbd> 选择 ·{" "}
-            </>
-          ) : null}
-          <kbd>Enter</kbd> {last ? "提交" : "下一题"}
-        </span>
+        <KeyHint
+          className="hint"
+          groups={[
+            ...(options.length > 0
+              ? [{ keys: ["1", String(total)], range: true, label: "选择" }]
+              : []),
+            { keys: ["Enter"], label: last ? "提交" : "下一题" },
+          ]}
+        />
         <span className="sp" />
         {index > 0 ? (
           <button

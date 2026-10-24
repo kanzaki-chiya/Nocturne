@@ -26,7 +26,7 @@ export function mcpText(
     : servers
         .map(
           (server) =>
-            `${server.name}  ${server.state}${server.error === undefined ? "" : ` · ${server.error}`}`,
+            `${server.name}  ${server.state}${server.error === undefined ? "" : `：${server.error}`}`,
         )
         .join("\n");
 }

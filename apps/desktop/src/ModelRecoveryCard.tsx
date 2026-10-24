@@ -14,6 +14,7 @@ import type { RpcRuntime } from "@nocturne/rpc/client";
 import { ChoiceMenu } from "./Menu";
 import type { ModelInfo } from "./rpc-types";
 import { modelGroups, refKey } from "./session-controls";
+import { modelRefText } from "./model-ref";
 
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -138,7 +139,7 @@ export function ModelRecoveryCard({
               setMenuOpen((open) => !open);
             }}
           >
-            {chosen === undefined ? "选择模型" : `${chosen.ref.provider} · ${chosen.ref.model}`} ▾
+            {chosen === undefined ? "选择模型" : modelRefText(chosen.ref)} ▾
           </button>
           {menuOpen && (
             <ChoiceMenu

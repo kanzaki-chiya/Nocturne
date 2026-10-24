@@ -1615,7 +1615,7 @@ it("后台会话出错时发系统通知 + 任务栏闪烁 + 侧栏留痕；点�
   expect(host.notifications[0]).toEqual({
     sessionId: "alpha",
     title: "alpha 正文",
-    body: "出错停止 · 用时 26 分钟：服务商响应流中途断开，已重试 4 次仍失败",
+    body: "出错停止，用时 26 分钟：服务商响应流中途断开，已重试 4 次仍失败",
     sound: true,
   });
   expect(host.attention.count).toBe(1);

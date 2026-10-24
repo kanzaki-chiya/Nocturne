@@ -178,6 +178,28 @@ body {
 .mono {
   font-family: var(--mono);
 }
+/* 文案规则 R1「标签 + 弱化值」：值单独成元素、弱化色，不再写中点（docs/apps/desktop.md §9） */
+.muted-value {
+  color: var(--a-muted);
+  font-weight: 400;
+  margin-inline-start: 0.5em;
+}
+/* 文案规则 R5 键盘提示：键名用 kbd 框，组与组只靠间距分开，不写分隔符 */
+.kbd-hint {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+  font-size: var(--fs-1);
+  color: var(--a-faint);
+}
+.kbd-hint kbd {
+  font: var(--fs-1)/1 var(--mono);
+  padding: 1px 4px;
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-1);
+  color: var(--a-muted);
+}
 button {
   font: inherit;
   color: inherit;

@@ -242,7 +242,7 @@ export function useSessionControls(
   const effortControl: ChoiceControl = {
     value: effort?.current ?? view.config.reasoningEffort,
     label: effort?.current ?? view.config.reasoningEffort ?? "—",
-    heading: `思考档位 · ${model?.model ?? "—"}`,
+    heading: `思考档位（${model?.model ?? "—"}）`,
     groups: [
       {
         options: ["off", ...(effort?.available ?? [])].map(effortOption),
@@ -434,7 +434,7 @@ export function useDraftControls(
     effort: {
       value: effortExplicit || settingsLabel === undefined ? effort : undefined,
       label: effortExplicit ? effort : (settingsLabel ?? effort),
-      heading: `思考档位 · ${model?.ref.model ?? "—"}`,
+      heading: `思考档位（${model?.ref.model ?? "—"}）`,
       groups: [{ options: levels.map(effortOption) }],
       ...(effortNote !== undefined ? { note: effortNote } : {}),
       onSelect: (value) => {

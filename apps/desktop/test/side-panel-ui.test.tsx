@@ -484,7 +484,7 @@ it("变更：同一文件多轮合并成一行，展开列出各轮，点轮次�
       })}
     />,
   );
-  expect(screen.getByText("本会话 · 2 轮 · 2 个文件")).toBeTruthy();
+  expect(screen.getByText("本会话 2 轮，2 个文件")).toBeTruthy();
   const tree = screen.getByRole("complementary", { name: "改动的文件" });
   const row = within(tree).getByRole("button", { name: /a\.ts/ });
   // 一行，合计 +5 −3

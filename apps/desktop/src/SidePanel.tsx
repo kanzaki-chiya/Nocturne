@@ -698,7 +698,7 @@ function TreeDir({
                     }}
                   >
                     <span className="sp-tree-name">
-                      第 {round.round} 轮{round.reverted ? " · 已撤销" : ""}
+                      第 {round.round} 轮{round.reverted ? "（已撤销）" : ""}
                     </span>
                     {round.unavailable === undefined && (
                       <Counts added={round.added} removed={round.removed} />
@@ -918,7 +918,7 @@ function ChangesView({
       />
       <aside className="sp-changes-tree" aria-label="改动的文件">
         <div className="sp-tree-summary">
-          本会话 · {rounds} 轮 · {files.length} 个文件
+          本会话 {rounds} 轮，{files.length} 个文件
         </div>
         <input
           className="sp-filter"

@@ -215,7 +215,7 @@ it("撤销调用 files 模式，成功后结果与收起；失败保留确认区
   expect(screen.getByRole("alert").textContent).toBe("磁盘拒绝写入");
   expect(screen.getByRole("group", { name: "确认撤销文件改动" })).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "撤销文件改动" }));
-  await screen.findByText("已撤销 · 还原 1 个文件，删除 1 个");
+  await screen.findByText("已撤销，还原 1 个文件，删除 1 个");
   expect(h.rewind).toHaveBeenLastCalledWith(8, "files");
   expect(screen.queryByRole("button", { name: "↶ 撤销" })).toBeNull();
   expect(screen.getByRole("button", { name: "文件差异 src/a.ts" })).toBeDefined();

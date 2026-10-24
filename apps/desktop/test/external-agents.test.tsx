@@ -73,9 +73,7 @@ describe("外部 agent 设置页", () => {
     expect((screen.getByRole("button", { name: "删除" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
     await screen.findByText("Local login");
-    expect(screen.getByText("最近测试").nextElementSibling?.textContent).toContain(
-      "已连接 · Fake 1",
-    );
+    expect(screen.getByText("最近测试").nextElementSibling?.textContent).toContain("已连接Fake 1");
     expect(
       f.calls
         .filter((call) => call.method === "agents.probeExternalAgent")
@@ -192,9 +190,7 @@ describe("外部 agent 设置页", () => {
     await waitFor(() =>
       expect(f.calls.some((call) => call.method === "agents.saveExternalAgent")).toBe(true),
     );
-    await waitFor(() =>
-      expect(screen.getAllByText(/已连接 · omp 18\.6\.0/).length).toBeGreaterThan(0),
-    );
+    await waitFor(() => expect(screen.getAllByText("omp 18.6.0").length).toBeGreaterThan(0));
     f.close();
   });
   it("toggle、replace、删除和失败保持草稿；名称锁定", async () => {

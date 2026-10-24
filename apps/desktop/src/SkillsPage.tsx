@@ -90,7 +90,7 @@ export function SkillsPage({
         enabled: !skill.enabled,
       });
       setToast(
-        `已${skill.enabled ? "停用" : "启用"} ${skill.name} · ${result.affectedSessions} 个已打开的会话将在本轮结束后更新技能目录`,
+        `已${skill.enabled ? "停用" : "启用"} ${skill.name}，${result.affectedSessions} 个已打开的会话将在本轮结束后更新技能目录`,
       );
       await refresh();
     });
@@ -116,7 +116,7 @@ export function SkillsPage({
                 <b>
                   {budget.usedTokens.toLocaleString()} / {budget.limitTokens.toLocaleString()}
                 </b>{" "}
-                token · 完整说明 {budget.fullCount} 个 · 只显示名字 {budget.nameCount} 个 · 已停用{" "}
+                token：完整说明 {budget.fullCount} 个，只显示名字 {budget.nameCount} 个，已停用{" "}
                 {budget.disabledCount} 个
               </span>
             </div>
@@ -173,9 +173,16 @@ export function SkillsPage({
             {(["user", "project"] as const).map((layer) => (
               <div key={layer}>
                 <h5>
-                  {layer === "user"
-                    ? "用户"
-                    : `项目 · ${workspaceRoot ? projectName(workspaceRoot) : "当前工作区"}`}
+                  {layer === "user" ? (
+                    "用户"
+                  ) : (
+                    <>
+                      项目
+                      <span className="muted-value">
+                        {workspaceRoot ? projectName(workspaceRoot) : "当前工作区"}
+                      </span>
+                    </>
+                  )}
                 </h5>
                 {data?.skills
                   .filter((s) => s.layer === layer)
@@ -208,8 +215,10 @@ export function SkillsPage({
                 <div className="t1">
                   <h3>{skill.name}</h3>
                   <span className="tagc">
-                    {skill.layer === "user" ? "用户" : "项目"} ·{" "}
-                    {skill.source === "extra" ? "额外目录" : skill.source}
+                    {skill.layer === "user" ? "用户" : "项目"}
+                    <span className="muted-value">
+                      {skill.source === "extra" ? "额外目录" : skill.source}
+                    </span>
                   </span>
                   <div className="acts">
                     <button
@@ -334,7 +343,7 @@ export function SkillsPage({
                     <dd>
                       {(skill.size / 1024).toFixed(1)} KB
                       {skill.files.some((f) => f.directory)
-                        ? ` · ${skill.files.filter((f) => f.directory).length} 个子目录`
+                        ? `，${skill.files.filter((f) => f.directory).length} 个子目录`
                         : ""}
                     </dd>
                   </div>
@@ -347,7 +356,7 @@ export function SkillsPage({
                         {skill.description.length} 字符
                         {skill.catalogStatus === "full" &&
                         skill.displayedDescriptionLength < skill.description.length
-                          ? ` · 模型目录里显示前 ${skill.displayedDescriptionLength} 字符`
+                          ? `，模型目录里显示前 ${skill.displayedDescriptionLength} 字符`
                           : ""}
                       </small>
                     </div>
@@ -382,7 +391,7 @@ export function SkillsPage({
                       className="skill-unknown"
                       title={JSON.stringify(skill.unknownFields[key])}
                     >
-                      {key} · 仅展示
+                      {key}（仅展示）
                     </span>
                   ))}
                   {skill.ignored
@@ -396,7 +405,7 @@ export function SkillsPage({
                 <div className="skill-heading">
                   <h4>正文预览</h4>
                   <small>
-                    前 {Math.min(40, skill.bodyLines)} 行 · 共 {skill.bodyLines} 行
+                    前 {Math.min(40, skill.bodyLines)} / {skill.bodyLines} 行
                   </small>
                 </div>
                 <pre className="tail">{skill.bodyPreview}</pre>
@@ -446,7 +455,7 @@ export function SkillsPage({
 function SkillWarnings({ warnings }: { warnings: SkillsDescription["warnings"] }) {
   return warnings.length ? (
     <details className="skill-warnings">
-      <summary>{warnings.length} 个技能的前言解析失败 · 查看 ›</summary>
+      <summary>{warnings.length} 个技能的前言解析失败，查看 ›</summary>
       {warnings.map((w, i) => (
         <div key={i}>
           <code>
@@ -589,7 +598,9 @@ function SkillImportDialog({
     try {
       const result = await client.runtime.setSkillEnabled({ name, enabled: false });
       if (!mounted.current) return;
-      onDone(`已导入并停用 ${name} · ${result.affectedSessions} 个已打开的会话将在本轮结束后更新`);
+      onDone(
+        `已导入并停用 ${name}，${result.affectedSessions} 个已打开的会话将在本轮结束后更新`,
+      );
     } catch (e) {
       if (!mounted.current) return;
       setError(e instanceof Error ? e.message : String(e));
@@ -642,7 +653,7 @@ function SkillImportDialog({
           {(phase.kind === "review" || phase.kind === "committing") && preview !== null && (
             <>
               <div className="fine">
-                目标 {preview.targetDir} · {validCount} 个可导入
+                目标 {preview.targetDir}，{validCount} 个可导入
               </div>
               {preview.candidates.map((candidate) => (
                 <div className="fetch" key={candidate.sourcePath}>
@@ -755,11 +766,9 @@ function SkillImportDialog({
           {phase.kind === "done" && (
             <>
               <div className="fine">
-                {results.filter((r) => r.status === "imported").length} 个成功 · 跳过{" "}
+                {results.filter((r) => r.status === "imported").length} 个成功，跳过{" "}
                 {results.filter((r) => r.status === "skipped").length} 个
-                {affectedSessions > 0
-                  ? ` · ${affectedSessions} 个已打开的会话将在本轮结束后看到新技能`
-                  : ""}
+                {affectedSessions > 0 ? `，${affectedSessions} 个已打开的会话将在本轮结束后看到新技能` : ""}
               </div>
               {results.map((result) => (
                 <div className="fetch" key={result.sourcePath}>

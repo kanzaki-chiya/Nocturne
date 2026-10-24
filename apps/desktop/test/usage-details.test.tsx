@@ -122,7 +122,7 @@ describe("每日用量柱状图", () => {
     expect(screen.queryByRole("region", { name: "每日用量" })).toBeNull();
     rendered.rerender(view("7"));
     const region = screen.getByRole("region", { name: "每日用量" });
-    expect(region.querySelector(".usage-daily-sum")?.textContent).toBe("30 万 tokens · 活跃 1 天");
+    expect(region.querySelector(".usage-daily-sum")?.textContent).toBe("30 万 tokens，活跃 1 天");
   });
 
   it("7 根柱，日期 M/D 不带星期；空日只有轨道，值为 0", () => {
@@ -150,7 +150,7 @@ describe("每日用量柱状图", () => {
     expect(tip.querySelector("b")?.textContent).toBe(
       `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`,
     );
-    expect(tip.textContent).toContain("5 次请求 · 30 万 tokens");
+    expect(tip.textContent).toContain("5 次请求，30 万 tokens");
     expect([...tip.querySelectorAll("dt")].map((e) => e.textContent)).toEqual(["timed", "legacy"]);
     fireEvent.mouseLeave(must(cols[5]));
     fireEvent.focus(must(cols[0]));
@@ -283,11 +283,11 @@ describe("模型行展开", () => {
     });
     expect(detail.querySelector(".usage-basis")?.textContent).toBe("基于 12 次请求");
     expect(detail.querySelector(".usage-prices")?.textContent).toBe(
-      "单价 输入 $2 · 缓存读 $0.2 / 写 — · 输出 $8（USD / 每百万 token）",
+      "单价 输入 $2，缓存读 $0.2 / 写 —，输出 $8（USD / 每百万 token）",
     );
     expect(detail.closest("td")?.colSpan).toBe(11);
     const seen = detail.querySelector(".usage-seen");
-    expect(seen?.textContent).toBe("首次使用 3 天前 · 最近使用 2 小时前");
+    expect(seen?.textContent).toBe("首次使用 3 天前，最近使用 2 小时前");
     expect(seen?.querySelector("span")?.getAttribute("title")).toMatch(
       /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/,
     );
@@ -448,9 +448,7 @@ describe("性能图", () => {
 
 describe("展开区单价行", () => {
   it("缺失显示「—」，分档模型显示基础档并注明分档", () => {
-    expect(priceLine(undefined)).toBe(
-      "单价 输入 — · 缓存读 — / 写 — · 输出 —（USD / 每百万 token）",
-    );
+    expect(priceLine(undefined)).toBe("单价 输入 —，缓存读 — / 写 —，输出 —（USD / 每百万 token）");
     expect(
       priceLine({
         input: 1.25,
@@ -459,6 +457,6 @@ describe("展开区单价行", () => {
         cacheWrite: 1.5,
         tiers: [{ aboveInputTokens: 200_000, input: 2.5, output: 15 }],
       }),
-    ).toBe("单价 输入 $1.25 · 缓存读 $0.125 / 写 $1.5 · 输出 $10（USD / 每百万 token） · 分档");
+    ).toBe("单价 输入 $1.25，缓存读 $0.125 / 写 $1.5，输出 $10（USD / 每百万 token），分档");
   });
 });

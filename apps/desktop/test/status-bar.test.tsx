@@ -181,7 +181,7 @@ describe("上下文 breakdown", () => {
       if (row === null) throw new Error("缺少历史明细行");
       expect(row.textContent).toContain(tokens);
     }
-    expect(screen.getByText("1,400 / 10,000 tokens · 14%")).toBeTruthy();
+    expect(screen.getByText("1,400 / 10,000 tokens（14%）")).toBeTruthy();
     expect(screen.getByText("8 条消息")).toBeTruthy();
     expect(screen.getByText("/compact")).toBeTruthy();
     const segments = Array.from(container.querySelectorAll<HTMLElement>("[data-segment]"));
@@ -244,7 +244,7 @@ describe("上下文 breakdown", () => {
       },
     };
     const { container } = render(<ContextPanel context={zero} />);
-    expect(screen.getByText("0 / 0 tokens · 无可用预算")).toBeTruthy();
+    expect(screen.getByText("0 / 0 tokens（无可用预算）")).toBeTruthy();
     expect(screen.getByText("压缩摘要")).toBeTruthy();
     expect(container.innerHTML).not.toMatch(/NaN|Infinity/);
     for (const segment of container.querySelectorAll<HTMLElement>("[data-segment]"))
@@ -446,7 +446,7 @@ describe("StatusBar", () => {
       currentTurn: { turnId: "t1", turnIndex: 3 },
     };
     render(<StatusBar {...state} view={view} />);
-    expect(await screen.findByText(/Turn 3/)).toBeTruthy();
+    expect(await screen.findByText("Turn 3")).toBeTruthy();
   });
 });
 
@@ -603,7 +603,7 @@ describe("状态栏速度段", () => {
       "TTFT1.0s",
       "生成用时3.0s",
       "请求总耗时4.0s",
-      "上一步 · 速度 = 输出 ÷ 生成用时",
+      "速度 = 输出 ÷ 生成用时（上一步）",
     ])
       expect(detail).toContain(part);
     fireEvent.keyDown(must(speed()), { key: "Escape" });

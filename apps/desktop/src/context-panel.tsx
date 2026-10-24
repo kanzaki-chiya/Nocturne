@@ -110,7 +110,7 @@ export function ContextPanel({
         <b>上下文</b>
         <span>
           {number.format(report.estimatedTokens)} / {number.format(report.budgetTokens)} tokens
-          {used === null ? " · 无可用预算" : ` · ${used}%`}
+          {used === null ? "（无可用预算）" : `（${used}%）`}
         </span>
       </div>
       <div className="context-stack" aria-label="上下文组成">

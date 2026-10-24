@@ -164,7 +164,7 @@ describe("decideNotification · 出错与完成", () => {
     expect(decideNotification(input({ event }))).toEqual({
       kind: "error",
       title: "桌面端提问卡片改版",
-      body: "出错停止 · 用时 26 分钟：服务商响应流中途断开，已重试 4 次仍失败",
+      body: "出错停止，用时 26 分钟：服务商响应流中途断开，已重试 4 次仍失败",
     });
     // 用时未知（没记到 turn.started）时省略用时，不猜
     expect(decideNotification(input({ event, turnStartedAt: undefined }))?.body).toBe(
@@ -172,19 +172,17 @@ describe("decideNotification · 出错与完成", () => {
     );
     // 没有 message 时退回错误码
     const bare = completed({ reason: "error", seconds: 10, error: { code: "boom", message: "" } });
-    expect(decideNotification(input({ event: bare }))?.body).toBe("出错停止 · 用时 10 秒：boom");
+    expect(decideNotification(input({ event: bare }))?.body).toBe("出错停止，用时 10 秒：boom");
   });
 
-  it("完成：用时到阈值才提醒，正文是「已完成 · 用时 X · N 步」", () => {
+  it("完成：用时到阈值才提醒，正文是「已完成，用时 X，N 步」", () => {
     const event = completed({ reason: "done", seconds: 6 * 60, steps: 54 });
-    expect(decideNotification(input({ event }))?.body).toBe("已完成 · 用时 6 分钟 · 54 步");
+    expect(decideNotification(input({ event }))?.body).toBe("已完成，用时 6 分钟，54 步");
   });
 
   it("阈值边界：等于阈值提醒，少 1 秒不提醒", () => {
     const exactly = completed({ reason: "done", seconds: 60 });
-    expect(decideNotification(input({ event: exactly }))?.body).toBe(
-      "已完成 · 用时 1 分钟 · 54 步",
-    );
+    expect(decideNotification(input({ event: exactly }))?.body).toBe("已完成，用时 1 分钟，54 步");
     const justUnder = completed({ reason: "done", seconds: 59 });
     expect(decideNotification(input({ event: justUnder }))).toBeNull();
     const custom = { ...NOTIFY_DEFAULTS, doneAfterSeconds: 300 };

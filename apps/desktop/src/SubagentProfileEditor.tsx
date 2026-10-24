@@ -102,11 +102,11 @@ export function SubagentProfileEditor({
         <h3>{creating ? "添加档位" : name}</h3>
         <span className="tagc">
           {isDefault
-            ? "默认 · 始终启用"
+            ? "默认（始终启用）"
             : source?.source === "project"
-              ? "项目配置 · 只读"
+              ? "项目配置（只读）"
               : readonly
-                ? "config.json · 只读"
+                ? "config.json（只读）"
                 : "settings.json"}
         </span>
       </div>

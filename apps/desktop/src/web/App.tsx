@@ -719,7 +719,7 @@ export function PhoneApp({
         <section className="phone-body phone-list">
           <p className="phone-sub">{computer?.name ?? "电脑"}</p>
           <p className="phone-sub" title={page.path}>
-            {rows.length} 个会话 · {page.path}
+            {rows.length} 个会话<span className="muted-value">{page.path}</span>
           </p>
           {rows.length === 0 && loaded && <p>还没有会话，在下方输入即可在这里新建。</p>}
           {rows.map((row) => {
@@ -798,7 +798,7 @@ export function PhoneApp({
       <section className="phone-body phone-usage">
         <UsagePage
           client={connected ? sessions.client : undefined}
-          scope={`${computer?.name ?? "电脑"}上的全部会话 · 含子代理`}
+          scope={`${computer?.name ?? "电脑"}上的全部会话（含子代理）`}
         />
       </section>
     );
@@ -874,9 +874,17 @@ export function PhoneApp({
             <div>
               <dt>当前</dt>
               <dd>
-                {page.hostId === undefined || connection === undefined
-                  ? "未连接任何电脑"
-                  : `${computer?.name ?? "电脑"} · ${STATE_TEXT[connection.state] ?? connection.state}${connection.message ? `（${connection.message}）` : ""}`}
+                {page.hostId === undefined || connection === undefined ? (
+                  "未连接任何电脑"
+                ) : (
+                  <>
+                    {computer?.name ?? "电脑"}
+                    <span className="muted-value">
+                      {STATE_TEXT[connection.state] ?? connection.state}
+                      {connection.message ? `（${connection.message}）` : ""}
+                    </span>
+                  </>
+                )}
               </dd>
             </div>
           </dl>
@@ -889,7 +897,7 @@ export function PhoneApp({
                   <li key={`${item.at}:${item.reason}`}>
                     <time>{new Date(item.at).toLocaleString("zh-CN", { hour12: false })}</time>
                     <span>
-                      {item.host} · {item.reason}
+                      {item.host}：{item.reason}
                     </span>
                   </li>
                 ))}
