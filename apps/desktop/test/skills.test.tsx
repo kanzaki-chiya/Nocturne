@@ -147,7 +147,7 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   fireEvent.click(screen.getByRole("switch"));
   expect(await screen.findByRole("status")).toHaveProperty(
     "textContent",
-    "✓ 已停用 alpha，2 个已打开的会话将在本轮结束后更新技能目录",
+    "✓ 已停用 alpha，进行中的会话本轮结束后生效",
   );
 });
 
@@ -408,7 +408,7 @@ it("导入技能：选择文件夹→预检→改名/跳过→结果与停用", 
   fireEvent.click(within(dialog).getByRole("button", { name: "停用" }));
   expect(await screen.findByRole("status")).toHaveProperty(
     "textContent",
-    "✓ 已导入并停用 alpha，1 个已打开的会话将在本轮结束后更新",
+    "✓ 已导入并停用 alpha，进行中的会话本轮结束后生效",
   );
   expect(f.calls.find((c) => c.method === "skills.setSkillEnabled")?.params).toMatchObject({
     name: "alpha",

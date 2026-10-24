@@ -197,7 +197,7 @@ describe("MCP 设置页", () => {
     expect(screen.getByText(/home\/config.json/)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "＋ 添加服务器" }));
     fireEvent.change(screen.getByLabelText(/^名称/), { target: { value: "test" } });
-    fireEvent.click(screen.getByRole("button", { name: "流式 HTTP（远程地址）" }));
+    fireEvent.click(screen.getByRole("button", { name: "远程地址（HTTP）" }));
     expect((screen.getByLabelText(/^名称/) as HTMLInputElement).value).toBe("test");
     fireEvent.change(screen.getByLabelText(/^地址/), {
       target: { value: "https://example.com/mcp" },

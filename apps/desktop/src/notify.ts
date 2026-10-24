@@ -155,7 +155,7 @@ export function operationForSubjectKind(kind: SubjectKind | undefined, fallback 
     case "mcp":
       return "调用 MCP 工具";
     case "subagent":
-      return "启动子任务";
+      return "启动子代理";
     default:
       return fallback;
   }

@@ -57,7 +57,7 @@ function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
   });
   const max = Math.max(1, ...cells.map((c) => c.day[mode]));
   const describe = (d: DailyUsageStats) =>
-    `${d.date}，${formatUsageTokens(d.tokens)} tokens，约 ${formatUsageCost(d.cost)}，${d.turns} Turn`;
+    `${d.date}，${formatUsageTokens(d.tokens)} tokens，约 ${formatUsageCost(d.cost)}，${d.turns} 轮`;
   const selected = hover ?? pinned;
   const columns = Math.ceil((first.getDay() + cells.length) / 7);
   const months = cells.flatMap(({ day }, i) =>
@@ -425,14 +425,14 @@ export function UsageView({
                 <small>读取 / 输入 tokens</small>
               </div>
               <div>
-                <span>会话 / Turn</span>
+                <span>会话 / 轮</span>
                 <strong>{stats.sessions.toLocaleString("en-US")}</strong>
                 <small>
-                  {stats.turns.toLocaleString("en-US")} Turns，子代理 {stats.subagentTurns}
+                  {stats.turns.toLocaleString("en-US")} 轮，子代理 {stats.subagentTurns} 轮
                 </small>
               </div>
               <div>
-                <span>最长 Turn</span>
+                <span>最长一轮</span>
                 <strong>
                   {stats.longestTurn ? (stats.longestTurn.durationMs / 60_000).toFixed(1) : "—"}
                   <em>{stats.longestTurn ? "分钟" : ""}</em>
@@ -440,7 +440,7 @@ export function UsageView({
                 <small title={stats.longestTurn?.sessionTitle}>
                   {stats.longestTurn
                     ? `${stats.longestTurn.date}，${stats.longestTurn.sessionTitle}`
-                    : "暂无已完成 Turn"}
+                    : "暂无已完成的轮"}
                 </small>
               </div>
             </div>
@@ -506,7 +506,7 @@ export function UsageView({
                   <thead>
                     <tr>
                       <th>模型 / 服务商</th>
-                      <th>Turns</th>
+                      <th>轮</th>
                       <th>输入</th>
                       <th>输出</th>
                       <th>缓存命中</th>

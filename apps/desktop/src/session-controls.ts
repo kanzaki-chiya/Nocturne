@@ -215,9 +215,9 @@ export function useSessionControls(
   const effort = snapshot?.effort;
   const effortNote = [
     effort?.available.length === 0 ? "该模型未声明可用思考档位" : undefined,
-    busy ? "本轮正在进行：下一个 Turn 生效" : undefined,
+    busy ? "本轮正在进行：下一轮生效" : undefined,
     effort !== undefined && effort.current !== effort.effective
-      ? `本 Turn 使用 ${effort.effective}；${effort.current} 将在下一 Turn 生效`
+      ? `本轮使用 ${effort.effective}；${effort.current} 将在下一轮生效`
       : undefined,
   ]
     .filter((text): text is string => text !== undefined)
@@ -232,7 +232,7 @@ export function useSessionControls(
     value: model === undefined ? undefined : refKey(model),
     label: model?.model ?? "模型 —",
     groups: modelGroups(snapshot?.models ?? [], snapshot?.recents ?? []),
-    ...(busy ? { disabled: "当前 Turn 结束后可切换" } : {}),
+    ...(busy ? { disabled: "本轮结束后可切换" } : {}),
     onSelect: (value) =>
       choose(async () => {
         const info = snapshot?.models.find((item) => refKey(item.ref) === value);

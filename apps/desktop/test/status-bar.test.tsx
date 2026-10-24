@@ -446,7 +446,7 @@ describe("StatusBar", () => {
       currentTurn: { turnId: "t1", turnIndex: 3 },
     };
     render(<StatusBar {...state} view={view} />);
-    expect(await screen.findByText("Turn 3")).toBeTruthy();
+    expect(await screen.findByText("第 3 轮")).toBeTruthy();
   });
 });
 

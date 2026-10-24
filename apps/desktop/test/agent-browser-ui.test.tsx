@@ -96,7 +96,10 @@ it("接管和交回按钮调用各自的动作；接管后界面写明控制权�
     />,
   );
   expect(screen.getByText("agent 控制中")).toBeTruthy();
-  expect(screen.getByText(/点网页或「接管」会立即撤销/)).toBeTruthy();
+  expect(screen.getByText("agent 打开的标签，内容不可信")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "接管" }).getAttribute("title")).toContain(
+    "立即撤销 agent 的控制权",
+  );
   fireEvent.click(screen.getByRole("button", { name: "接管" }));
   expect(onControl).toHaveBeenCalledWith("tab-1", "takeover");
 

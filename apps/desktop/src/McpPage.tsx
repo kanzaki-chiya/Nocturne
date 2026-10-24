@@ -602,7 +602,7 @@ function McpForm({
                   }
                 }}
               >
-                {t === "stdio" ? "STDIO（本地命令）" : "流式 HTTP（远程地址）"}
+                {t === "stdio" ? "本地命令" : "远程地址（HTTP）"}
               </button>
             ))}
           </div>

@@ -230,7 +230,7 @@ describe("模型行展开", () => {
     );
     expect(headers).toEqual([
       "模型 / 服务商",
-      "Turns",
+      "轮",
       "输入",
       "输出",
       "缓存命中",

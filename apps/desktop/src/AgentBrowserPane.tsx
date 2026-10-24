@@ -175,6 +175,11 @@ export function AgentBrowserPane({
           type="button"
           className={`btn sp-agent-control${takenOver ? "" : " primary"}`}
           disabled={ended}
+          title={
+            takenOver
+              ? "把控制权交回 agent"
+              : "立即撤销 agent 的控制权，由你操作网页；直接点网页也会接管"
+          }
           onClick={() => {
             onControl(info.tabId, takenOver ? "return" : "takeover");
           }}
@@ -212,7 +217,7 @@ export function AgentBrowserPane({
         <div className="sp-agent-hint">
           {takenOver
             ? "你已接管：直接操作网页；点「交给 agent」把控制权交回。"
-            : "这个标签由 agent 打开、内容不可信；点网页或「接管」会立即撤销 agent 的控制权。"}
+            : "agent 打开的标签，内容不可信"}
         </div>
       </div>
       <div className="sp-browser-slot sp-agent-slot" ref={slot}>

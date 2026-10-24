@@ -921,10 +921,9 @@ export function Composer({
   );
   const slashHint = parsedSlash?.kind === "redirect" ? parsedSlash.hint : enterHint;
   const canSend = !running && (draft.trim() !== "" || attachments.length > 0);
-  // draft：能力提示落在 tray；session：无 tray，显示在卡片上方气泡
-  const hint = isSession
-    ? null
-    : (vision ?? (draft.trim() !== "" ? "Enter 发送 · Shift+Enter 换行" : null));
+  // draft：能力提示落在 tray；session：无 tray，显示在卡片上方气泡。
+  // 不再常驻 Enter/Shift+Enter 按键说明（聊天输入框的惯例）
+  const hint = isSession ? null : (vision ?? null);
   const shownError = error ?? controls?.error ?? null;
 
   const chip = (

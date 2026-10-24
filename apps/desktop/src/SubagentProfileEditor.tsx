@@ -187,8 +187,8 @@ export function SubagentProfileEditor({
         </label>
       </div>
       <div className="profile-field">
-        <label>思考强度</label>
-        <div className="profile-options" role="radiogroup" aria-label="思考强度">
+        <label>思考档位</label>
+        <div className="profile-options" role="radiogroup" aria-label="思考档位">
           {["", ...efforts].map((effort) => (
             <button
               type="button"

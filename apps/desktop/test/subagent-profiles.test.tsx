@@ -169,11 +169,11 @@ function profileServer(initial: SettingItem[], agents: ExternalAgentOverview[] =
 }
 
 const radios = () =>
-  within(screen.getByRole("radiogroup", { name: "思考强度" }))
+  within(screen.getByRole("radiogroup", { name: "思考档位" }))
     .getAllByRole("radio")
     .map((radio) => radio.textContent);
 
-it("思考强度选项跟随所选模型：跟随当前模型列全部档位，选定模型只列它支持的，换模型清空已选强度", async () => {
+it("思考档位选项跟随所选模型：跟随当前模型列全部档位，选定模型只列它支持的，换模型清空已选强度", async () => {
   const { server } = profileServer([]);
   await server.initialize();
   render(<ExternalAgentsPage client={server.client} workspaceRoot={undefined} version={0} />);

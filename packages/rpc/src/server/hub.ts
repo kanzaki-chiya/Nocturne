@@ -355,7 +355,7 @@ export class Hub {
     ) {
       throw new RpcProtocolError(
         "workspace_untrusted",
-        "这个目录的项目配置还没有信任。手机不能代为决定，请在电脑上信任该项目（在项目目录运行 nctrn trust）或先在电脑上新建会话",
+        "这个目录的项目配置还没有信任。手机不能代为决定，请在电脑上信任该项目，或先在电脑上新建会话",
       );
     }
   }

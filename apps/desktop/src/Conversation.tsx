@@ -1355,8 +1355,8 @@ const TOOL_META: Record<string, { icon: string; label: string }> = {
   shell: { icon: "$", label: "命令" },
   web_fetch: { icon: "U", label: "读取网页" },
   web_search: { icon: "Q", label: "网页搜索" },
-  subagent: { icon: "T", label: "子任务" },
-  task: { icon: "T", label: "子任务" },
+  subagent: { icon: "T", label: "子代理" },
+  task: { icon: "T", label: "子代理" },
   ask_user: { icon: "?", label: "提问" },
 };
 

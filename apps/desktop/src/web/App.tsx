@@ -691,9 +691,7 @@ export function PhoneApp({
                   }}
                 />
               </label>
-              <small>
-                目录必须已存在。项目配置未被信任的新目录需要先在电脑上信任（nctrn trust）。
-              </small>
+              <small>目录必须已存在。项目配置未被信任的目录，需要先在电脑上信任该项目。</small>
               <div className="phone-actions">
                 <button
                   type="button"
@@ -1107,7 +1105,7 @@ export function PhoneApp({
                   !connected
                     ? "电脑尚未连接"
                     : entry.view.currentTurn !== undefined
-                      ? "当前 Turn 结束后可压缩"
+                      ? "本轮结束后可压缩"
                       : undefined
                 }
                 onSelect={() => {

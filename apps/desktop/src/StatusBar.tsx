@@ -573,7 +573,7 @@ export function StatusBar({
         <span className={`status-turn${busy ? " status-turn-busy" : ""}`}>
           ● {STATUS_TEXT[view.status]}
           {view.currentTurn && (
-            <span className="muted-value">Turn {view.currentTurn.turnIndex}</span>
+            <span className="muted-value">第 {view.currentTurn.turnIndex} 轮</span>
           )}
         </span>
       </div>

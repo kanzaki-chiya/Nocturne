@@ -292,13 +292,17 @@ export function ModelSettingsDialog({
       <div className="dlg" role="dialog" aria-label={`模型设置 · ${view.modelId}`}>
         <div className="dh3">
           <b className="mono">{view.modelId}</b>
-          <span>
+          <span
+            title={
+              readonlyHint === undefined
+                ? "写入 providers.json 的 userModels，不影响其他服务商"
+                : undefined
+            }
+          >
             {readonlyHint ?? (
               <>
                 {providerId}
-                <span className="muted-value">
-                  改动写入 providers.json 的 userModels，不影响其他服务商
-                </span>
+                <span className="muted-value">改动只写入 userModels</span>
               </>
             )}
           </span>

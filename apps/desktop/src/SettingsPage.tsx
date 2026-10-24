@@ -42,7 +42,7 @@ const SECTION_HEAD: Record<SettingsPageSection, { title: string; sub?: string }>
     title: "常规",
     sub: "默认值对新会话生效",
   },
-  models: { title: "模型", sub: "新会话默认用哪个模型，以及子任务用哪些模型" },
+  models: { title: "模型", sub: "新会话默认用哪个模型，以及子代理用哪些模型" },
   appearance: { title: "外观" },
 };
 
@@ -332,7 +332,7 @@ export function SettingsPage({
     const options = DONE_THRESHOLD_CHOICES.map((choice) => ({
       value: String(choice.seconds),
       label: choice.label,
-      description: `用时不到 ${choice.label}的回合不提醒`,
+      description: `用时不到 ${choice.label}的轮不提醒`,
     }));
     if (!DONE_THRESHOLD_CHOICES.some((choice) => choice.seconds === seconds)) {
       options.push({
@@ -783,7 +783,7 @@ export function SettingsPage({
               className={rowClassDim(!notifyEnabled || !notifyEvents.done, NOTIFY_THRESHOLD_KEYS)}
             >
               <span className="n">
-                完成提醒的阈值<small>用时不到这么久的回合不提醒</small>
+                完成提醒的阈值<small>用时不到这么久的轮不提醒</small>
               </span>
               <span className="v sans">
                 <Dropdown

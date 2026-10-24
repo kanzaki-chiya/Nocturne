@@ -101,7 +101,18 @@
 }
 .remote-trust p {
   font-size: var(--fs-2);
-  margin-bottom: 0;
+  margin: 0;
+}
+.remote-trust details {
+  margin-top: 6px;
+  font-size: var(--fs-2);
+}
+.remote-trust summary {
+  cursor: pointer;
+  color: var(--a-muted);
+}
+.remote-trust details p {
+  margin-top: 6px;
 }
 .remote-pair {
   text-align: center;

@@ -90,7 +90,7 @@ export function SkillsPage({
         enabled: !skill.enabled,
       });
       setToast(
-        `已${skill.enabled ? "停用" : "启用"} ${skill.name}，${result.affectedSessions} 个已打开的会话将在本轮结束后更新技能目录`,
+        `已${skill.enabled ? "停用" : "启用"} ${skill.name}${result.affectedSessions > 0 ? "，进行中的会话本轮结束后生效" : ""}`,
       );
       await refresh();
     });
@@ -116,7 +116,7 @@ export function SkillsPage({
                 <b>
                   {budget.usedTokens.toLocaleString()} / {budget.limitTokens.toLocaleString()}
                 </b>{" "}
-                token：完整说明 {budget.fullCount} 个，只显示名字 {budget.nameCount} 个，已停用{" "}
+                tokens：完整说明 {budget.fullCount} 个，只显示名字 {budget.nameCount} 个，已停用{" "}
                 {budget.disabledCount} 个
               </span>
             </div>
@@ -599,7 +599,7 @@ function SkillImportDialog({
       const result = await client.runtime.setSkillEnabled({ name, enabled: false });
       if (!mounted.current) return;
       onDone(
-        `已导入并停用 ${name}，${result.affectedSessions} 个已打开的会话将在本轮结束后更新`,
+        `已导入并停用 ${name}${result.affectedSessions > 0 ? "，进行中的会话本轮结束后生效" : ""}`,
       );
     } catch (e) {
       if (!mounted.current) return;
@@ -768,7 +768,7 @@ function SkillImportDialog({
               <div className="fine">
                 {results.filter((r) => r.status === "imported").length} 个成功，跳过{" "}
                 {results.filter((r) => r.status === "skipped").length} 个
-                {affectedSessions > 0 ? `，${affectedSessions} 个已打开的会话将在本轮结束后看到新技能` : ""}
+                {affectedSessions > 0 ? "，进行中的会话本轮结束后看到新技能" : ""}
               </div>
               {results.map((result) => (
                 <div className="fetch" key={result.sourcePath}>

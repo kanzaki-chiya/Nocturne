@@ -107,7 +107,7 @@ describe("decideNotification · 需要确认", () => {
     ["edit", "修改文件"],
     ["network", "访问网络"],
     ["mcp", "调用 MCP 工具"],
-    ["subagent", "启动子任务"],
+    ["subagent", "启动子代理"],
   ] as const)("subject kind %s 用权限卡片同款操作文字 %s", (kind, label) => {
     const decision = decideNotification(
       input({ event: permission([{ kind, target: "C:/tmp/a.txt" }]) }),

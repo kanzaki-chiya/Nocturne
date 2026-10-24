@@ -353,10 +353,13 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
           </p>
         ))}
         <section className="remote-trust">
-          <h4>你需要信任谁</h4>
-          <p>
-            中继只转发加密内容，看不到你的对话、代码或命令。但手机网页由中继管理员提供：你需要信任管理员不会篡改网页，并妥善保护服务器。被篡改的网页可以在手机解密后读取内容，端到端加密无法防止这一点。
-          </p>
+          <p>中继只转发密文，看不到你的对话、代码或命令。</p>
+          <details>
+            <summary>你需要信任谁</summary>
+            <p>
+              手机网页由中继管理员提供：你需要信任管理员不会篡改网页，并妥善保护服务器。被篡改的网页可以在手机解密后读取内容，端到端加密无法防止这一点。
+            </p>
+          </details>
         </section>
       </div>
       {offer && client && <PairingDialog client={client} offer={offer} onClose={closePairing} />}

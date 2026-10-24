@@ -302,9 +302,7 @@ export function ProvidersPage({
       <div className="ph3">
         <div className="grow">
           <h3>服务商</h3>
-          <span className="sub">
-            {configured.length} 个已配置 · 密钥和账号交给系统凭据存储，界面不留存
-          </span>
+          <span className="sub">{configured.length} 个已配置</span>
         </div>
       </div>
       <div className="cols3">
