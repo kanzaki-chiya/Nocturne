@@ -88,6 +88,19 @@ Gemini 3 起，模型在一步里返回的函数调用（以及部分文本、�
 - 地址解析多了一层 models.dev 来源，排查请求地址时要看诊断里写的来源。
 - 新增依赖 `@ai-sdk/google`。
 
+## 实现记录（2026-10-24）
+
+- SDK 选定 `@ai-sdk/google@4.0.77`，其 `@ai-sdk/provider@4.0.17` 与 `provider-utils@5.0.45` 和现有 Anthropic/OpenAI 依赖一致；未升级现有 SDK。
+- 鉴权实测（2026-10-24 真实冒烟，`gemini-4-argon-contributor`）：OpenCode Go 接受 `x-goog-api-key`，无需 Bearer 改写。纯文本、带 `read` 工具的两步对话（第二步请求体带回第一步的真实签名）、`high` 档位均通过，请求地址为 `https://opencode.ai/inference/go/google/v1beta/models/<模型>:streamGenerateContent?alt=sse`。Chat / Messages / Responses 回归分别打到 `/inference/go/openai/v1/chat/completions`、`/inference/go/anthropic/v1/messages`、`/inference/go/openai/v1/responses`，均通过。
+- 占位值经 SDK 源码 `convert-to-google-messages.ts` 核实为 `skip_thought_signature_validator`。SDK 自身只对模型名形如 `gemini-*`（且不是 1.x / 2.x）的请求兜底，网关别名不一定满足，兜底也不经过 Nocturne 的诊断，所以由适配器先行填写；判定与 SDK 一致：同一步里在带签名的调用之后的并行调用缺签名属正常，不填；该步此前没有签名的调用逐个填。每次请求记一条聚合诊断，不由 Context 或 Agent Loop 判断。
+- 文本签名采用 `text_delta.providerData`，因为 SDK 在 `text-delta`（包括空文本增量）返回 `providerMetadata.google.thoughtSignature`。消费方先追加内容再附加元数据，避免首个增量的数据丢失；不另加事件。
+- 工具结果图片保持 `user-message`。SDK 虽提供原生多模态 functionResponse，但其转换依赖模型支持判定，未承诺网关新模型可用；本轮不启用未经验证的 native 路径。
+- thinkingLevel 可表达 minimal/low/medium/high；xhigh/max 依既有不支持能力规则省略并记诊断。includeThoughts 始终为 true。
+- 模型详情通过可选 `baseURL` / `baseURLSource` 展示解析结果；来源为 user/models.dev/entry。配置层统一解析，条目路由按协议和地址缓存适配器；预设原地址及 GET /models 不变。
+- 限制：Zen 无独立密钥，模型清单与地址通过快照核对，真实带密钥验收使用 Go。
+- 限制：models.dev 扁平模型表没有 `gemini-4-argon-contributor` 的能力项，默认不声明推理，思考档位要在模型编辑里把「推理」设为「是」后才会发送；冒烟用例为此显式声明了推理。
+- 修订（交接复核）：anthropic 条目省略 `baseURL` 时，官方 Messages 地址只作为 `anthropic` 生效协议的兜底；该条目下改用其他协议的模型仍按原规则报「缺 baseURL」，不会被改投到 `api.anthropic.com`。
+
 ## 备选方案
 
 - **预设写死按协议的地址表**（条目新增 `baseURLs: { gemini: …, anthropic: … }`，预设写入）：显式、不依赖 models.dev，但已写进 `providers.json` 的旧条目要迁移，OpenCode 再换地址时还要发版。
