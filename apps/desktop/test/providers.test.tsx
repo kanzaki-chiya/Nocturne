@@ -112,6 +112,12 @@ const MODEL_SETTINGS = [
       },
       protocol: { value: "openai-compatible", editable: true, source: { kind: "entryType" } },
       editTool: { value: "edit", editable: true, source: { kind: "default" } },
+      baseURL: {
+        value: "https://api.test/v1",
+        lowerValue: "https://api.test/v1",
+        editable: true,
+        source: { kind: "default" },
+      },
     },
   },
   {
@@ -140,6 +146,12 @@ const MODEL_SETTINGS = [
       },
       protocol: { value: "openai-responses", editable: true, source: { kind: "entryType" } },
       editTool: { value: "edit", editable: true, source: { kind: "default" } },
+      baseURL: {
+        value: "https://api.test/v1",
+        lowerValue: "https://api.test/v1",
+        editable: true,
+        source: { kind: "default" },
+      },
     },
   },
 ];
@@ -652,12 +664,20 @@ describe("模型设置对话框", () => {
     await server.initialize();
     await OPEN_DIALOG(server);
     fireEvent.change(screen.getByLabelText("显示名"), { target: { value: "Sonnet 4.5" } });
+    const endpoint = screen.getByLabelText("接口地址") as HTMLInputElement;
+    expect(endpoint.placeholder).toBe("https://api.test/v1");
+    fireEvent.change(endpoint, { target: { value: "https://google.test/v1beta" } });
+    fireEvent.click(button("Gemini"));
     fireEvent.click(button("保存"));
     await waitFor(() => {
       expect(saved.params).toBeDefined();
     });
     expect(saved.params?.modelId).toBe("anthropic/claude-sonnet-4");
     expect((saved.params?.patch as Record<string, unknown>).displayName).toBe("Sonnet 4.5");
+    expect(saved.params?.patch).toMatchObject({
+      protocol: "gemini",
+      baseURL: "https://google.test/v1beta",
+    });
     server.close();
   });
 

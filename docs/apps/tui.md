@@ -5,6 +5,8 @@
 `apps/tui` 是 Nocturne 的终端界面客户端：与 CLI 驱动同一套 Runtime，只消费公开 API（`@nocturne/core`）与 `protocol`（含 `SessionView` reducer）。TUI 不包含任何 Agent 逻辑，不复用 CLI 的渲染代码，不自行做事件投影。
 
 ## 1. 启动入口
+
+ADR-0061：模型编辑的协议选项为「跟随 / Chat Completions / Messages / Responses / Gemini」，增加可选文本字段「接口地址」，空值自动选择，占位显示当前下层地址。来源仍用用户编辑 / models.dev / 默认标注；实际解析规则见 [provider-setup.md](../architecture/provider-setup.md) 第 2 节。
 子代理工具行显示 `[档位]`、实际模型与思考强度及选择理由；旧调用没有 profile 时不显示档位。`/settings › 模型角色` 中 task 改名为「default 档位模型」，其他档位只读列出（Enter 只显示编辑位置），并提示到桌面端「设置 › 子代理」或 settings.json 编辑。运行规则见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)。
 
 

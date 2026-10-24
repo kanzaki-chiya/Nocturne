@@ -5,6 +5,8 @@
 本文是 `nctrn` 命令行客户端的设计文档：命令行参数、REPL、事件渲染、权限确认、退出码与 Provider 配置。
 
 ## 1. 定位与边界
+
+ADR-0061：`/provider model <服务商> <模型>` 的逐字段问答在「协议」接受 `gemini`（与 `chat/messages/responses` 并列），末尾增加「接口地址」。输入 HTTP(S) URL 保存到 `userModels.<id>.baseURL`，回车保留、`-` 清除覆盖并自动选择；提示展示自动地址。地址规则见 [provider-setup.md](../architecture/provider-setup.md) 第 2 节。
 task 的工具行对新调用展示 `[profile]` 和选择理由，结果显示实际模型、思考强度；旧调用保留原样。档位配置与权限规则见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)。
 
 

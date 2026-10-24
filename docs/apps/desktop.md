@@ -5,6 +5,8 @@
 `apps/desktop` 是 Nocturne 的桌面端：一个 Tauri 进程内，React 前端经 `@nocturne/rpc/client` 与一个常驻 `nctrn rpc --stdio` 后台进程通信，Rust 外壳只负责进程管理与按行转发。所有会话语义（握手、方法调用、事件）都在前端处理，外壳不解析报文。
 
 ## 1. 进程结构与后台策略
+
+ADR-0061：服务商页的模型设置对话框增加 Gemini 协议选项及可选「接口地址」；空值清除 `userModels.<id>.baseURL`，占位显示当前自动地址，来源列显示用户编辑 / models.dev / 默认。保持原有草稿、保存、全部恢复跟随与只读行为。解析规则见 [provider-setup.md](../architecture/provider-setup.md) 第 2 节。
 子代理档位见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)：设置导航「外部 agent」改名「子代理」，同页左列分内置档位和外部 agent。添加提供空白/quick/deep 模板（模型留空），编辑器包含名称（创建后锁定）、何时用、模型、超时、强度、工具上限、启用和删除。default 始终启用且不能删除，模型写 modelRoles.task；模型页的子代理模型行跳转到这里。预览复用 Core 的 subagentSelectionTable；对话工具行显示档位徽标、实际模型和强度，展开显示选择理由，旧调用无 profile 不显示徽标。外部编辑和探测保持原行为，说明标签改为何时用。
 
 

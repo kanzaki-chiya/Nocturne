@@ -15,6 +15,7 @@ type FieldKey =
   | "reasoning"
   | "reasoningEffort"
   | "protocol"
+  | "baseURL"
   | "editTool";
 const FIELD_LABELS: Record<FieldKey, string> = {
   displayName: "显示名",
@@ -25,14 +26,16 @@ const FIELD_LABELS: Record<FieldKey, string> = {
   reasoningEffort: "思考档位",
   protocol: "协议",
   editTool: "编辑工具",
+  baseURL: "接口地址",
 };
 
 type TriState = "follow" | "true" | "false";
 type ReasoningDraft = "follow" | "yes" | "no";
-type ProtocolDraft = "follow" | "chat" | "messages" | "responses";
+type ProtocolDraft = "follow" | "chat" | "messages" | "responses" | "gemini";
 type EditToolDraft = "follow" | "edit" | "patch";
 
 interface Draft {
+  baseURL: string;
   displayName: string;
   contextWindow: string;
   maxOutputTokens: string;
@@ -46,6 +49,7 @@ interface Draft {
 function initDraft(view: ModelSettingsView): Draft {
   const f = view.fields;
   return {
+    baseURL: f.baseURL.userValue ?? "",
     displayName: f.displayName.userValue ?? "",
     contextWindow: f.contextWindow.userValue !== undefined ? String(f.contextWindow.userValue) : "",
     maxOutputTokens:
@@ -66,7 +70,9 @@ function initDraft(view: ModelSettingsView): Draft {
           ? "messages"
           : f.protocol.userValue === "openai-responses"
             ? "responses"
-            : "chat",
+            : f.protocol.userValue === "gemini"
+              ? "gemini"
+              : "chat",
     editTool:
       f.editTool.userValue === undefined
         ? "follow"
@@ -80,6 +86,8 @@ function initDraft(view: ModelSettingsView): Draft {
 export function draftToPatch(view: ModelSettingsView, draft: Draft): ModelSettingsPatch {
   const f = view.fields;
   const patch: ModelSettingsPatch = {};
+  if (draft.baseURL.trim() !== "") patch.baseURL = draft.baseURL.trim();
+  else if (f.baseURL.userValue !== undefined) patch.baseURL = null;
   const num = (s: string): number | null =>
     s === "" ? null : Number.isInteger(Number(s)) && Number(s) > 0 ? Number(s) : null;
   if (draft.displayName !== "") patch.displayName = draft.displayName;
@@ -107,7 +115,9 @@ export function draftToPatch(view: ModelSettingsView, draft: Draft): ModelSettin
         ? "anthropic"
         : draft.protocol === "responses"
           ? "openai-responses"
-          : "openai-compatible";
+          : draft.protocol === "gemini"
+            ? "gemini"
+            : "openai-compatible";
   else if (f.protocol.userValue !== undefined) patch.protocol = null;
   if (draft.editTool !== "follow")
     patch.editTool = draft.editTool === "patch" ? "apply_patch" : "edit";
@@ -130,6 +140,7 @@ function showValue(key: FieldKey, value: unknown): string {
     if (value === "openai-compatible") return "Chat Completions";
     if (value === "anthropic") return "Messages";
     if (value === "openai-responses") return "Responses";
+    if (value === "gemini") return "Gemini";
     return "协议不支持";
   }
   if (key === "editTool") return value === "apply_patch" ? "apply_patch" : "edit";
@@ -199,6 +210,7 @@ export function ModelSettingsDialog({
 
   const resetAll = () => {
     setDraft({
+      baseURL: "",
       displayName: "",
       contextWindow: "",
       maxOutputTokens: "",
@@ -234,7 +246,7 @@ export function ModelSettingsDialog({
   const effortShown = draft.reasoningEffort === "follow" ? null : draft.reasoningEffort;
 
   const textInput = (
-    key: "displayName" | "contextWindow" | "maxOutputTokens",
+    key: "displayName" | "contextWindow" | "maxOutputTokens" | "baseURL",
     opts: { placeholder?: string; width?: number; mono?: boolean } = {},
   ) => {
     const f = field[key];
@@ -250,7 +262,13 @@ export function ModelSettingsDialog({
           width: opts.width ?? 180,
           fontFamily: opts.mono === false ? "inherit" : "var(--mono)",
         }}
-        placeholder={f.userValue !== undefined ? `跟随（${showValue(key, f.lowerValue)}）` : "跟随"}
+        placeholder={
+          key === "baseURL"
+            ? String(f.lowerValue ?? "自动选择服务商地址")
+            : f.userValue !== undefined
+              ? `跟随（${showValue(key, f.lowerValue)}）`
+              : "跟随"
+        }
         value={draft[key]}
         onChange={(e) => {
           set(key, e.target.value);
@@ -452,6 +470,7 @@ export function ModelSettingsDialog({
                   { v: "chat", label: "Chat" },
                   { v: "messages", label: "Messages" },
                   { v: "responses", label: "Responses" },
+                  { v: "gemini", label: "Gemini" },
                 ],
                 (v) => {
                   set("protocol", v);
@@ -461,6 +480,14 @@ export function ModelSettingsDialog({
             )}
             <span className={`src ${field.protocol.userValue !== undefined ? "ed" : ""}`}>
               {sourceText(field.protocol.source, field.protocol.userValue !== undefined)}
+            </span>
+          </div>
+          {/* 接口地址（ADR-0061 §4） */}
+          <div className="mrow">
+            <span>{FIELD_LABELS.baseURL}</span>
+            {textInput("baseURL", { width: 320 })}
+            <span className="src">
+              {sourceText(field.baseURL.source, field.baseURL.userValue !== undefined)}
             </span>
           </div>
           {/* 编辑工具 */}

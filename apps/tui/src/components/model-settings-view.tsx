@@ -376,6 +376,7 @@ const FIELD_ORDER = [
   "protocol",
   // ADR-0035 §5：第八个字段「编辑工具」
   "editTool",
+  "baseURL",
 ] as const;
 type FieldKey = (typeof FIELD_ORDER)[number];
 const FIELD_LABELS: Record<FieldKey, string> = {
@@ -388,8 +389,10 @@ const FIELD_LABELS: Record<FieldKey, string> = {
   // ADR-0026 §7：第七个字段「协议」
   protocol: "协议",
   editTool: "编辑工具",
+  baseURL: "接口地址",
 };
 const TEXT_FIELDS: ReadonlySet<FieldKey> = new Set([
+  "baseURL",
   "displayName",
   "contextWindow",
   "maxOutputTokens",
@@ -404,11 +407,12 @@ const CYCLE_FIELDS: ReadonlySet<FieldKey> = new Set([
 type TriState = "follow" | "true" | "false";
 type ReasoningDraft = "follow" | "yes" | "no";
 /** 协议选项（ADR-0026 §7；Responses 由 ADR-0031 §1 接入）：跟随 / Chat / Messages / Responses */
-type ProtocolDraft = "follow" | "chat" | "messages" | "responses";
+type ProtocolDraft = "follow" | "chat" | "messages" | "responses" | "gemini";
 /** 编辑工具选项（ADR-0035 §5）：跟随 / edit+write / apply_patch */
 type EditToolDraft = "follow" | "edit" | "patch";
 
 interface Draft {
+  baseURL: string;
   displayName: string;
   contextWindow: string;
   maxOutputTokens: string;
@@ -422,6 +426,7 @@ interface Draft {
 function initDraft(view: ModelSettingsView): Draft {
   const f = view.fields;
   return {
+    baseURL: f.baseURL.userValue ?? "",
     displayName: f.displayName.userValue ?? "",
     contextWindow: f.contextWindow.userValue !== undefined ? String(f.contextWindow.userValue) : "",
     maxOutputTokens:
@@ -442,7 +447,9 @@ function initDraft(view: ModelSettingsView): Draft {
           ? "messages"
           : f.protocol.userValue === "openai-responses"
             ? "responses"
-            : "chat",
+            : f.protocol.userValue === "gemini"
+              ? "gemini"
+              : "chat",
     editTool:
       f.editTool.userValue === undefined
         ? "follow"
@@ -475,6 +482,7 @@ function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>)
       if (value === "openai-compatible") return "Chat Completions";
       if (value === "anthropic") return "Messages";
       if (value === "openai-responses") return "Responses";
+      if (value === "gemini") return "Gemini";
       return "协议不支持";
     }
     if (key === "editTool") return value === "apply_patch" ? "apply_patch" : "edit";
@@ -484,7 +492,7 @@ function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>)
   const followBase = field.userValue !== undefined ? field.lowerValue : field.value;
   const follow = `跟随（${show(followBase)}）`;
   if (TEXT_FIELDS.has(key)) {
-    const raw = draft[key as "displayName" | "contextWindow" | "maxOutputTokens"];
+    const raw = draft[key as "displayName" | "contextWindow" | "maxOutputTokens" | "baseURL"];
     return raw !== "" ? raw : follow;
   }
   if (key === "imageInput") {
@@ -504,7 +512,9 @@ function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>)
         ? "Chat Completions"
         : d === "messages"
           ? "Messages"
-          : "Responses";
+          : d === "gemini"
+            ? "Gemini"
+            : "Responses";
   }
   if (key === "editTool") {
     const d = draft.editTool;
@@ -520,6 +530,8 @@ function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>)
 export function draftToPatch(view: ModelSettingsView, draft: Draft): ModelSettingsPatch {
   const f = view.fields;
   const patch: ModelSettingsPatch = {};
+  if (draft.baseURL.trim() !== "") patch.baseURL = draft.baseURL.trim();
+  else if (f.baseURL.userValue !== undefined) patch.baseURL = null;
   const num = (s: string): number | null =>
     s === "" ? null : Number.isInteger(Number(s)) && Number(s) > 0 ? Number(s) : null;
   if (draft.displayName !== "") patch.displayName = draft.displayName;
@@ -552,7 +564,9 @@ export function draftToPatch(view: ModelSettingsView, draft: Draft): ModelSettin
         ? "anthropic"
         : draft.protocol === "responses"
           ? "openai-responses"
-          : "openai-compatible";
+          : draft.protocol === "gemini"
+            ? "gemini"
+            : "openai-compatible";
   else if (f.protocol.userValue !== undefined) patch.protocol = null;
   // ADR-0035 §5：跟随 = 清除用户编辑（写 null），仅在有用户编辑时
   if (draft.editTool !== "follow")
@@ -680,7 +694,7 @@ export function ModelEditPane({
     setFocused(next);
     if (TEXT_FIELDS.has(next as FieldKey)) {
       posRef.current = Array.from(
-        draftRef.current[next as "displayName" | "contextWindow" | "maxOutputTokens"],
+        draftRef.current[next as "displayName" | "contextWindow" | "maxOutputTokens" | "baseURL"],
       ).length;
       setPosition(posRef.current);
     }
@@ -703,7 +717,7 @@ export function ModelEditPane({
           ? ["follow", "yes", "no"]
           : field === "editTool"
             ? ["follow", "edit", "patch"]
-            : ["follow", "chat", "messages", "responses"];
+            : ["follow", "chat", "messages", "responses", "gemini"];
     draftRef.current = {
       ...d,
       [field]:
@@ -821,7 +835,7 @@ export function ModelEditPane({
       return;
     }
     if (TEXT_FIELDS.has(cur as FieldKey)) {
-      const field = cur as "displayName" | "contextWindow" | "maxOutputTokens";
+      const field = cur as "displayName" | "contextWindow" | "maxOutputTokens" | "baseURL";
       const chars = Array.from(draftRef.current[field]);
       if (key.return) {
         move("tab");
@@ -922,7 +936,7 @@ export function ModelEditPane({
   const visible = single ? fields.filter((field) => field === currentField) : fields;
   const choices = (field: FieldKey): string[] =>
     field === "protocol"
-      ? ["follow", "chat", "messages", "responses"]
+      ? ["follow", "chat", "messages", "responses", "gemini"]
       : field === "reasoning"
         ? ["follow", "yes", "no"]
         : field === "editTool"
@@ -1004,7 +1018,7 @@ export function ModelEditPane({
         if (readonly || !view.fields[field].editable) continue;
         const rect = screenRect(nodes.current.get(field));
         if (TEXT_FIELDS.has(field)) {
-          const key = field as "displayName" | "contextWindow" | "maxOutputTokens";
+          const key = field as "displayName" | "contextWindow" | "maxOutputTokens" | "baseURL";
           const raw = draft[key];
           const window = inputWindow(
             raw,
@@ -1126,10 +1140,13 @@ export function ModelEditPane({
         </Text>
       );
     else if (TEXT_FIELDS.has(field)) {
-      const raw = draft[field as "displayName" | "contextWindow" | "maxOutputTokens"];
+      const raw = draft[field as "displayName" | "contextWindow" | "maxOutputTokens" | "baseURL"];
       control = (
         <TextInput
           value={raw}
+          placeholder={
+            field === "baseURL" ? (view.fields.baseURL.lowerValue ?? "自动选择服务商地址") : "跟随"
+          }
           cursor={focus ? position : Array.from(raw).length}
           focused={focus}
           width={Math.max(5, innerWidth - stringWidth(prefix) - 1)}
@@ -1144,12 +1161,12 @@ export function ModelEditPane({
             ? ["follow", "yes", "no"].indexOf(draft.reasoning)
             : field === "editTool"
               ? ["follow", "edit", "patch"].indexOf(draft.editTool)
-              : ["follow", "chat", "messages", "responses"].indexOf(draft.protocol);
+              : ["follow", "chat", "messages", "responses", "gemini"].indexOf(draft.protocol);
       control = (
         <Segmented
           options={
             field === "protocol"
-              ? ["跟随", "Chat Completions", "Messages", "Responses"]
+              ? ["跟随", "Chat Completions", "Messages", "Responses", "Gemini"]
               : field === "editTool"
                 ? ["跟随", "edit", "apply_patch"]
                 : ["跟随", "是", "否"]
@@ -1200,7 +1217,7 @@ export function ModelEditPane({
               stringWidth(prefix) +
               2 +
               inputWindow(
-                draft[field as "displayName" | "contextWindow" | "maxOutputTokens"],
+                draft[field as "displayName" | "contextWindow" | "maxOutputTokens" | "baseURL"],
                 position,
                 Math.max(5, innerWidth - stringWidth(prefix) - 1),
               ).column

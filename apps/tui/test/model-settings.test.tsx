@@ -91,6 +91,7 @@ const fullView = (
       kind: "entryType",
     }),
     editTool: field<"edit" | "apply_patch">("edit", { kind: "default" }),
+    baseURL: field("https://api.test/v1", { kind: "default" }),
     ...over,
   } as ModelSettingsView["fields"],
   ...top,
@@ -99,6 +100,7 @@ const fullView = (
 const views = [fullView(), fullView(undefined, { modelId: "m2" })];
 
 const blankDraft = {
+  baseURL: "",
   displayName: "",
   contextWindow: "",
   maxOutputTokens: "",
@@ -144,6 +146,24 @@ function pageProps(over?: Record<string, unknown>) {
 }
 
 describe("draftToPatch 固定期望值", () => {
+  it("Gemini 协议与地址覆盖保存，空地址清除用户编辑", () => {
+    expect(
+      draftToPatch(fullView(), {
+        ...blankDraft,
+        protocol: "gemini",
+        baseURL: "https://google.test/v1beta",
+      }),
+    ).toMatchObject({ protocol: "gemini", baseURL: "https://google.test/v1beta" });
+    const view = fullView({
+      baseURL: field(
+        "https://google.test/v1beta",
+        { kind: "user" },
+        true,
+        "https://google.test/v1beta",
+      ),
+    });
+    expect(draftToPatch(view, blankDraft)).toMatchObject({ baseURL: null });
+  });
   it("既有三态、数字、协议与清除覆盖的输出保持不变", () => {
     expect(draftToPatch(fullView(), blankDraft)).toEqual({});
     expect(
@@ -291,7 +311,7 @@ describe("模型设置编辑页（ADR-0024）", () => {
     stdin.write(RIGHT);
     await nextFrame(frames);
     // Tab 跨过剩余字段与取消，到保存。
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < 7; i += 1) {
       stdin.write("\t");
       await nextFrame(frames);
     }
@@ -355,7 +375,7 @@ describe("模型设置编辑页（ADR-0024）", () => {
     }
     stdin.write(LEFT);
     await nextFrame(frames);
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < 7; i += 1) {
       stdin.write("\t");
       await nextFrame(frames);
     }
@@ -375,7 +395,7 @@ describe("模型设置编辑页（ADR-0024）", () => {
     await waitFor(() => (lastFrame() ?? "").includes("[ 保存 ]"));
     await flushInput();
     // Tab 遍历所有字段与取消，到保存。
-    for (let i = 0; i < 9; i += 1) {
+    for (let i = 0; i < 10; i += 1) {
       stdin.write("\t");
       await nextFrame(frames);
     }
@@ -805,7 +825,7 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     stdin.write("X");
     await waitFor(() => (lastFrame() ?? "").includes("[ X"));
-    for (let i = 0; i < 9; i += 1) {
+    for (let i = 0; i < 10; i += 1) {
       stdin.write("\t");
       await nextFrame(frames);
     }
@@ -881,7 +901,7 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     await waitFor(() => (lastFrame() ?? "").includes("[ k"));
     expect(lastFrame()).toContain("> 显示名");
     // Tab 到末尾的保存，再 Tab 回第一个字段（循环）
-    for (let i = 0; i < 9; i += 1) stdin.write("\t");
+    for (let i = 0; i < 10; i += 1) stdin.write("\t");
     await waitFor(() => (lastFrame() ?? "").includes("> [ 保存 ]"));
     stdin.write("\t");
     await waitFor(
@@ -915,7 +935,8 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     expect(effortRow).not.toContain("只读");
     stdin.write(DOWN);
     await waitFor(() => (lastFrame() ?? "").includes("> 思考档位"));
-    // ↓×3：协议 → 编辑工具 → 保存
+    // ↓×4：协议 → 编辑工具 → 接口地址 → 保存
+    stdin.write(DOWN);
     stdin.write(DOWN);
     stdin.write(DOWN);
     stdin.write(DOWN);
@@ -953,7 +974,7 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     const { stdin, lastFrame, onBack, unmount } = editor();
     await waitFor(() => (lastFrame() ?? "").includes("> 显示名"));
     await flushInput();
-    for (let i = 0; i < 8; i += 1) stdin.write("\t");
+    for (let i = 0; i < 9; i += 1) stdin.write("\t");
     await waitFor(() => (lastFrame() ?? "").includes("> [ 取消 ]"));
     // ↓ 在按钮区停住：随后 Enter 仍执行取消
     stdin.write(DOWN);
@@ -964,16 +985,16 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     const again = editor();
     await waitFor(() => (again.lastFrame() ?? "").includes("> 显示名"));
     await flushInput();
-    for (let i = 0; i < 8; i += 1) again.stdin.write("\t");
+    for (let i = 0; i < 9; i += 1) again.stdin.write("\t");
     await waitFor(() => (again.lastFrame() ?? "").includes("> [ 取消 ]"));
     // ←/→ 在取消与保存之间移动
     again.stdin.write(RIGHT);
     await waitFor(() => (again.lastFrame() ?? "").includes("> [ 保存 ]"));
     again.stdin.write(LEFT);
     await waitFor(() => (again.lastFrame() ?? "").includes("> [ 取消 ]"));
-    // ↑ 回最后一个可编辑字段（编辑工具）
+    // ↑ 回最后一个可编辑字段（接口地址）
     again.stdin.write(UP);
-    await waitFor(() => (again.lastFrame() ?? "").includes("> 编辑工具"));
+    await waitFor(() => (again.lastFrame() ?? "").includes("> 接口地址"));
     again.unmount();
   });
 
@@ -989,7 +1010,7 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     stdin.write(RIGHT);
     stdin.write(RIGHT);
     await waitFor(() => (lastFrame() ?? "").includes("[* 否]"));
-    for (let i = 0; i < 6; i += 1) stdin.write("\t");
+    for (let i = 0; i < 7; i += 1) stdin.write("\t");
     await waitFor(() => (lastFrame() ?? "").includes("> [ 保存 ]"));
     stdin.write(ENTER);
     await waitFor(() => save.mock.calls.length === 1);
@@ -1009,6 +1030,7 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     stdin.write(RIGHT);
     stdin.write(RIGHT);
     await waitFor(() => (lastFrame() ?? "").includes("[* apply_patch]"));
+    stdin.write(DOWN);
     stdin.write(DOWN);
     await waitFor(() => (lastFrame() ?? "").includes("> [ 保存 ]"));
     stdin.write(ENTER);

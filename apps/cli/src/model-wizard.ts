@@ -25,6 +25,7 @@ const MODEL_FIELD_LABELS = {
   protocol: "协议",
   // ADR-0035 §5：第八个字段「编辑工具」
   editTool: "编辑工具",
+  baseURL: "接口地址",
 } as const;
 type ModelFieldKey = keyof typeof MODEL_FIELD_LABELS;
 const MODEL_FIELD_ORDER: readonly ModelFieldKey[] = [
@@ -36,6 +37,7 @@ const MODEL_FIELD_ORDER: readonly ModelFieldKey[] = [
   "reasoningEffort",
   "protocol",
   "editTool",
+  "baseURL",
 ];
 
 /** 当前值的一行显示（用户未声明时显示生效值；未声明显示 "—"） */
@@ -49,6 +51,7 @@ function modelFieldText(key: ModelFieldKey, value: unknown): string {
     if (value === "openai-compatible") return "Chat Completions";
     if (value === "anthropic") return "Messages";
     if (value === "openai-responses") return "Responses";
+    if (value === "gemini") return "Gemini";
     return "—";
   }
   return typeof value === "string" || typeof value === "number" ? String(value) : "—";
@@ -59,6 +62,7 @@ function parseModelField(key: ModelFieldKey, input: string): unknown {
   if (s === "") return "";
   switch (key) {
     case "displayName":
+    case "baseURL":
       return s;
     case "contextWindow":
     case "maxOutputTokens": {
@@ -87,6 +91,7 @@ function parseModelField(key: ModelFieldKey, input: string): unknown {
       if (t === "chat") return "openai-compatible";
       if (t === "messages") return "anthropic";
       if (t === "responses") return "openai-responses";
+      if (t === "gemini") return "gemini";
       return undefined;
     }
     case "editTool": {
@@ -148,10 +153,12 @@ export async function runProviderModelWizard(
               : key === "reasoningEffort"
                 ? `逗号分隔（${REASONING_EFFORT_LEVELS.join(",")}）或 none = 不支持；- 清除用户编辑`
                 : key === "protocol"
-                  ? "chat / messages / responses；- 清除用户编辑（跟随）"
-                  : key === "editTool"
-                    ? "edit = edit+write / patch = apply_patch；- 清除用户编辑"
-                    : "正整数；- 清除用户编辑",
+                  ? "chat / messages / responses / gemini；- 清除用户编辑（跟随）"
+                  : key === "baseURL"
+                    ? `HTTP(S) 地址；- 自动选择（${f.lowerValue ?? "服务商地址"}）`
+                    : key === "editTool"
+                      ? "edit = edit+write / patch = apply_patch；- 清除用户编辑"
+                      : "正整数；- 清除用户编辑",
     });
     const t = answer.trim();
     if (t === "") continue;

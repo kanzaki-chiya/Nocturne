@@ -63,6 +63,7 @@ describe("runProviderModelWizard", () => {
         kind: "entryType",
       }),
       editTool: field<"edit" | "apply_patch" | undefined>("edit", { kind: "default" }),
+      baseURL: field("https://api.test/v1", { kind: "default" }),
       ...over,
     } as ModelSettingsView["fields"],
   });
@@ -80,7 +81,7 @@ describe("runProviderModelWizard", () => {
 
   it("回车保留：patch 为空对象；打印当前值（来源）与「已保存」", async () => {
     const { config, saved } = makeConfig([baseView()]);
-    const { io, printed } = scriptedIo(["", "", "", "", "", "", "", ""]);
+    const { io, printed } = scriptedIo(["", "", "", "", "", "", "", "", ""]);
     await runProviderModelWizard(io, config, "corp", "m1");
     expect(saved).toEqual([{ p: "corp", m: "m1", patch: {} }]);
     expect(printed.some((l) => l.includes("100000") && l.includes("上游"))).toBe(true);
@@ -89,7 +90,17 @@ describe("runProviderModelWizard", () => {
 
   it("正常值解析：正整数 / y / 逗号档位 / none=空数组 / patch=apply_patch", async () => {
     const { config, saved } = makeConfig([baseView()]);
-    const { io } = scriptedIo(["命名", "128000", "4096", "y", "y", "low,high", "", "patch"]);
+    const { io } = scriptedIo([
+      "命名",
+      "128000",
+      "4096",
+      "y",
+      "y",
+      "low,high",
+      "gemini",
+      "patch",
+      "https://model.test/v1beta",
+    ]);
     await runProviderModelWizard(io, config, "corp", "m1");
     expect(saved[0]?.patch).toEqual({
       displayName: "命名",
@@ -99,9 +110,11 @@ describe("runProviderModelWizard", () => {
       imageInput: true,
       reasoningEffort: ["low", "high"],
       editTool: "apply_patch",
+      protocol: "gemini",
+      baseURL: "https://model.test/v1beta",
     });
     const { config: c2, saved: s2 } = makeConfig([baseView()]);
-    const { io: io2 } = scriptedIo(["", "", "", "", "", "none", "", ""]);
+    const { io: io2 } = scriptedIo(["", "", "", "", "", "none", "", "", ""]);
     await runProviderModelWizard(io2, c2, "corp", "m1");
     expect(s2[0]?.patch).toEqual({ reasoningEffort: [] });
   });
@@ -111,9 +124,10 @@ describe("runProviderModelWizard", () => {
       ["chat", "openai-compatible"],
       ["messages", "anthropic"],
       ["responses", "openai-responses"],
+      ["gemini", "gemini"],
     ] as const) {
       const { config, saved } = makeConfig([baseView()]);
-      const { io } = scriptedIo(["", "", "", "", "", "", input, ""]);
+      const { io } = scriptedIo(["", "", "", "", "", "", input, "", ""]);
       await runProviderModelWizard(io, config, "corp", "m1");
       expect(saved[0]?.patch).toEqual({ protocol });
     }
@@ -121,9 +135,9 @@ describe("runProviderModelWizard", () => {
 
   it("「-」清除用户编辑 → patch 写 null", async () => {
     const { config, saved } = makeConfig([baseView()]);
-    const { io } = scriptedIo(["-", "-", "", "", "", "", "", ""]);
+    const { io } = scriptedIo(["-", "-", "", "", "", "", "", "", "-"]);
     await runProviderModelWizard(io, config, "corp", "m1");
-    expect(saved[0]?.patch).toEqual({ displayName: null, contextWindow: null });
+    expect(saved[0]?.patch).toEqual({ displayName: null, contextWindow: null, baseURL: null });
   });
 
   it("config 来源的只读字段只显示不提问", async () => {
@@ -136,11 +150,11 @@ describe("runProviderModelWizard", () => {
     });
     const { config } = makeConfig([view]);
     let asks = 0;
-    const { io, printed } = scriptedIo(["", "", "", "", "", "", ""]);
+    const { io, printed } = scriptedIo(["", "", "", "", "", "", "", ""]);
     const spyIo: Prompts = { ...io, ask: async (p, o) => ((asks += 1), io.ask(p, o)) };
     await runProviderModelWizard(spyIo, config, "corp", "m1");
-    // 8 字段中 contextWindow 只读 → 只问 7 次；显示行含「由 … 决定」
-    expect(asks).toBe(7);
+    // 9 字段中 contextWindow 只读 → 只问 8 次；显示行含「由 … 决定」
+    expect(asks).toBe(8);
     expect(
       printed.some((l) => l.includes("上下文长度") && l.includes("由 /tmp/config.json 决定")),
     ).toBe(true);
@@ -153,10 +167,10 @@ describe("runProviderModelWizard", () => {
     });
     const { config } = makeConfig([view]);
     let asks = 0;
-    const { io, printed } = scriptedIo(["", "", "", "", "", "", ""]);
+    const { io, printed } = scriptedIo(["", "", "", "", "", "", "", ""]);
     const spyIo: Prompts = { ...io, ask: async (p, o) => ((asks += 1), io.ask(p, o)) };
     await runProviderModelWizard(spyIo, config, "corp", "m1");
-    expect(asks).toBe(7);
+    expect(asks).toBe(8);
     expect(printed.some((l) => l.includes("思考档位"))).toBe(false);
   });
 
@@ -168,7 +182,7 @@ describe("runProviderModelWizard", () => {
         throw new Error("最大输出超过上下文长度");
       },
     } as unknown as RuntimeConfig;
-    const { io, printed } = scriptedIo(["", "", "", "", "", "", "", ""]);
+    const { io, printed } = scriptedIo(["", "", "", "", "", "", "", "", ""]);
     await runProviderModelWizard(io, config, "corp", "m1");
     expect(printed.some((l) => l.includes("保存失败") && l.includes("最大输出"))).toBe(true);
 
