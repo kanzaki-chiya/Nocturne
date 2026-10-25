@@ -30,6 +30,7 @@ export {
 export * from "./types.js";
 
 export * from "./gate.js";
+export * from "./unattended.js";
 export * from "./reviewer.js";
 export * from "./jev-reviewer.js";
 export * from "./reviewer-questions.js";

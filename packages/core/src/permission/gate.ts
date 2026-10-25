@@ -63,8 +63,11 @@ export interface ReviewInputSources {
 }
 
 export interface PolicyGateOptions extends ReviewInputSources {
-  /** 是否有能回复权限请求的客户端（permissions.md 第 7 节）；默认 false */
-  interactive?: boolean | undefined;
+  /**
+   * 是否有能回复权限请求的客户端（permissions.md 第 7 节）；默认 false。
+   * 函数形态每次求值时读取（会话级非交互在客户端接管后恢复交互，ADR-0064）。
+   */
+  interactive?: boolean | (() => boolean) | undefined;
   preset?: (() => string) | undefined;
   reviewer?: (() => SecurityReviewer | undefined) | undefined;
   cwd?: string | undefined;
@@ -447,7 +450,9 @@ export function createPolicyGate(
     }
 
     // 非交互：ask 一律拒绝，不发 permission.requested
-    if (options.interactive !== true || turn === undefined) {
+    const interactive =
+      typeof options.interactive === "function" ? options.interactive() : options.interactive;
+    if (interactive !== true || turn === undefined) {
       const hint = options.nonInteractiveDenyHint;
       return {
         subjects: evaluation.subjects,

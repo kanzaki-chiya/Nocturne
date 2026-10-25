@@ -167,6 +167,13 @@ const payloadSchemas = {
     reasoningEffort: reasoningEffortSchema.optional(),
     parent: z.object({ sessionId: z.string(), callId: z.string() }).optional(),
     forkedFrom: z.object({ sessionId: z.string(), seq: z.number().int().positive() }).optional(),
+    schedule: z
+      .object({
+        taskId: z.string(),
+        scheduledAt: z.string(),
+        trigger: z.enum(["schedule", "catchup", "manual"]),
+      })
+      .optional(),
   }),
   "session.config_changed": z.object({
     model: modelRefSchema.optional(),

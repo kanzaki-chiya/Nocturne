@@ -18,6 +18,7 @@ import type {
   PermissionSubject,
   QuestionItem,
   ReasoningEffort,
+  SessionSchedule,
   ToolCallRef,
   Usage,
 } from "./types.js";
@@ -37,6 +38,8 @@ export interface SessionCreatedPayload {
   /** 子会话的父关联（Phase 6，subagent.md 第 5 节）；仅子会话存在 */
   parent?: { sessionId: string; callId: string } | undefined;
   forkedFrom?: { sessionId: string; seq: number } | undefined;
+  /** 定时任务发起的会话的来源（ADR-0064）；旧版本读到时忽略 */
+  schedule?: SessionSchedule | undefined;
 }
 
 export interface SessionConfigChangedPayload {

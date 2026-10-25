@@ -10,6 +10,17 @@ export interface ModelRef {
   model: string;
 }
 
+/** 定时任务一次运行的触发方式（ADR-0064 第 3 节） */
+export type ScheduleTrigger = "schedule" | "catchup" | "manual";
+
+/** 定时任务运行出来的会话的来源（`session.created.schedule`，ADR-0064 第 3 节） */
+export interface SessionSchedule {
+  taskId: string;
+  /** 原计划时间（ISO 8601）；手动运行为触发时刻 */
+  scheduledAt: string;
+  trigger: ScheduleTrigger;
+}
+
 /** 用户点名外部 agent 的任务原文快照（ADR-0049 第 2 步）。 */
 export interface AgentDelegation {
   agent: string;

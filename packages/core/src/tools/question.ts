@@ -61,8 +61,11 @@ function checkReply(questions: QuestionItem[], reply: unknown): AskUserReply | u
 }
 
 export interface QuestionBrokerOptions {
-  /** 是否有能回答的客户端（ADR-0032 §4；与权限闸门同一开关） */
-  interactive?: boolean | undefined;
+  /**
+   * 是否有能回答的客户端（ADR-0032 §4；与权限闸门同一开关）。
+   * 函数形态每次提问时读取（会话级非交互恢复交互，ADR-0064）。
+   */
+  interactive?: boolean | (() => boolean) | undefined;
   /** 测试可注入确定性的 requestId 序列 */
   newRequestId?: ((callId: string) => string) | undefined;
 }
@@ -90,7 +93,9 @@ export function createQuestionBroker(options: QuestionBrokerOptions = {}): Quest
   return {
     ask(callId, request, turn, signal) {
       // 非交互环境（ADR-0032 §4）：不发 question.requested，立即不可用
-      if (options.interactive !== true) return Promise.resolve({ kind: "unavailable" });
+      const interactive =
+        typeof options.interactive === "function" ? options.interactive() : options.interactive;
+      if (interactive !== true) return Promise.resolve({ kind: "unavailable" });
       if (signal.aborted) return Promise.reject(new Error("调用已被中断"));
 
       const requestId = newRequestId(callId);

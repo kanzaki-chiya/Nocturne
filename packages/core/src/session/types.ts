@@ -13,6 +13,7 @@ import type {
   ModelRef,
   ReasoningEffort,
   RuntimeEvent,
+  SessionSchedule,
   Usage,
   TodoItem,
 } from "../protocol/index.js";
@@ -29,6 +30,8 @@ export interface SessionMeta {
   /** 子会话的父关联（Phase 6，subagent.md 第 5 节）；仅子会话存在 */
   parent?: { sessionId: string; callId: string } | undefined;
   forkedFrom?: { sessionId: string; seq: number } | undefined;
+  /** 定时任务发起的会话的来源（ADR-0064）；客户端据此显示来源、归组 */
+  schedule?: SessionSchedule | undefined;
 }
 
 export interface SessionConfig {
@@ -141,6 +144,8 @@ export interface SessionSummary {
   locked?: boolean | undefined;
   /** 子会话的父关联；仅子会话存在（默认不进入列表，见 list 的 includeSubagents） */
   parent?: { sessionId: string; callId: string } | undefined;
+  /** 定时任务发起的会话的来源（ADR-0064）；侧栏据此归入「定时任务」分组 */
+  schedule?: SessionSchedule | undefined;
   /**
    * 首条 message.user 的首行文本（TUI 欢迎框"最近会话"摘要，v0.3）；
    * 无用户消息或日志损坏时缺省
@@ -158,6 +163,8 @@ export interface CreateSessionInput {
   reasoningEffort?: ReasoningEffort | undefined;
   /** 子会话的父关联（Phase 6）；写入 session.created.parent */
   parent?: { sessionId: string; callId: string } | undefined;
+  /** 定时任务来源（ADR-0064）；写入 session.created.schedule */
+  schedule?: SessionSchedule | undefined;
 }
 
 export interface LoadSessionOptions {

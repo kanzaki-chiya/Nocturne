@@ -85,6 +85,7 @@ import { createTurnChanges } from "./session/turn-changes.js";
 import {
   type ReviewerSampleInfo,
   type ReviewerSampleResult,
+  createAttendance,
   createRulePolicy,
   createModelSecurityReviewer,
   createJevSecurityReviewer,
@@ -96,6 +97,7 @@ import {
   type GitRunner,
   type ReviewInputSources,
   type SecurityReviewer,
+  UNATTENDED_DENY_HINT,
   isPermissionPresetName,
   type PermissionPolicy,
 } from "./permission/index.js";
@@ -150,6 +152,7 @@ import type {
   RewindTarget,
   RewindMode,
   SessionRewoundPayload,
+  SessionSchedule,
   SubagentObservation,
   SubagentObserver,
   SubagentSummary,
@@ -343,6 +346,16 @@ export interface CreateSessionOptions {
    * （reasoningEffort 顶层字段），再缺省视为 off
    */
   reasoningEffort?: ReasoningEffort | undefined;
+  /**
+   * 会话级交互（ADR-0064）：缺省沿用 Runtime 的 `interactive`。Runtime 交互时可设 `false`
+   * 开出无人值守会话（调度器用）：会话里剩余 `ask` 直接拒绝（`non_interactive`），
+   * `ask_user` 以 `not_interactive` 结算；客户端提交第二条用户消息后转为交互且不再变回。
+   * 非交互的 Runtime 里设 `true` 不生效。仅无人值守会话带 `schedule` 时才能在
+   * 重新打开后保持这一状态（来源写入日志），所以调度器之外不要单独使用 `false`。
+   */
+  interactive?: boolean | undefined;
+  /** 定时任务来源（ADR-0064）：写入 `session.created.schedule`，只由调度器传 */
+  schedule?: SessionSchedule | undefined;
 }
 
 export interface SubmitInput {
@@ -1083,6 +1096,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   async function wrapSession(
     session: Session,
     resume?: { modelOverride?: string | ModelRef | undefined },
+    unattended = false,
   ): Promise<RuntimeSession> {
     // 打开途中取得的 Runtime 级登记与外部资源（MCP 连接）按序登记撤销步骤；
     // 打开失败在此逆序撤销，close 复用同一份。会话锁由调用方 session.close() 释放。
@@ -1091,7 +1105,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       for (const step of teardown.splice(0).reverse()) await step();
     };
     try {
-      return await assembleSession(session, resume, teardown, runTeardown);
+      return await assembleSession(session, resume, teardown, runTeardown, unattended);
     } catch (e) {
       await runTeardown().catch(() => undefined);
       throw e;
@@ -1103,8 +1117,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     resume: { modelOverride?: string | ModelRef | undefined } | undefined,
     teardown: (() => Promise<void> | void)[],
     runTeardown: () => Promise<void>,
+    unattendedOption: boolean,
   ): Promise<RuntimeSession> {
     const meta = session.state().meta;
+    // 会话级非交互（ADR-0064）：带定时任务来源的会话、或创建时声明 interactive:false，
+    // 在客户端提交第二条用户消息之前按非交互处理；之后转为交互（permissions.md 第 7 节）
+    const unattendedSession = unattendedOption || meta.schedule !== undefined;
+    const sessionInteractive = createAttendance({
+      runtimeInteractive: interactive,
+      unattended: unattendedSession,
+      userMessageCount: () =>
+        session.durableEvents().filter((event) => event.type === "message.user").length,
+    });
     const openedAt = Date.now();
     const openGeneration = configGeneration;
 
@@ -1452,7 +1476,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const gate: PermissionGate = createPolicyGate(
       { evaluate: (subjects, evaluationOptions) => policy.evaluate(subjects, evaluationOptions) },
       {
-        interactive,
+        interactive: sessionInteractive,
+        ...(unattendedSession ? { nonInteractiveDenyHint: UNATTENDED_DENY_HINT } : {}),
         preset: () => session.state().config.permissionPreset,
         reviewer: () => {
           warnMissingReviewer();
@@ -1467,7 +1492,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     );
     // 提问通道（ADR-0032）按会话持有：等待中的请求与会话绑定，
     // respondQuestion 按 requestId 路由；非交互时 ask 立即不可用
-    const questions = createQuestionBroker({ interactive });
+    const questions = createQuestionBroker({ interactive: sessionInteractive });
     // 会话级工具注册表：内置工具 ∪ MCP 工具（mcp.md 第 4、5 节）。
     // MCP 服务器在会话打开时并行启动；list_changed / 重连带来的工具集变化
     // 先暂存，在 submit() 的 Turn 边界经 applyPendingTools() 应用。
@@ -3519,9 +3544,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         permissionPreset: preset,
         nocturneVersion: options.version ?? NOCTURNE_VERSION,
         ...(initialEffort !== undefined ? { reasoningEffort: initialEffort } : {}),
+        ...(opts.schedule !== undefined ? { schedule: opts.schedule } : {}),
       });
       try {
-        const wrapped = await wrapSession(session);
+        const wrapped = await wrapSession(session, undefined, opts.interactive === false);
         // recent-models.json：新建会话记录初始模型（provider-setup.md 第 6 节）
         void config?.recordRecentModel(session.state().config.model).catch((e: unknown) => {
           diagnostics.record("config.recent_models_write_failed", {

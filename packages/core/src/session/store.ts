@@ -241,6 +241,8 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
           payload: {
             ...first.payload,
             parent: undefined,
+            // 分叉是用户亲自开的会话：不继承定时任务来源（ADR-0064），也就不再是无人值守
+            schedule: undefined,
             forkedFrom: { sessionId: source.id, seq: targetSeq ?? source.state().lastSeq },
           },
         };
@@ -295,6 +297,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             ? { reasoningEffort: input.reasoningEffort }
             : {}),
           ...(input.parent !== undefined ? { parent: input.parent } : {}),
+          ...(input.schedule !== undefined ? { schedule: input.schedule } : {}),
         });
         return session;
       } catch (e) {
@@ -384,6 +387,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             ...(event.payload.forkedFrom !== undefined
               ? { forkedFrom: event.payload.forkedFrom }
               : {}),
+            ...(event.payload.schedule !== undefined ? { schedule: event.payload.schedule } : {}),
             ...(firstText !== undefined ? { firstText } : {}),
           });
         } catch {
