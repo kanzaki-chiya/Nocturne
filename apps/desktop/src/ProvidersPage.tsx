@@ -178,6 +178,10 @@ function FetchedModels({ models, open }: { models: FetchedModel[]; open: boolean
       <div className="fbody">
         {models.map((m) => {
           const r = m.reasoning !== undefined && m.reasoning !== "none";
+          const implausibleOutput =
+            m.maxOutputTokens !== undefined &&
+            m.contextWindow !== undefined &&
+            m.maxOutputTokens >= m.contextWindow;
           return (
             <div className="fr" key={m.id}>
               <span className="m" title={m.displayName ?? m.id}>
@@ -188,7 +192,12 @@ function FetchedModels({ models, open }: { models: FetchedModel[]; open: boolean
                 {m.imageInput === true && <b title="看图">I</b>}
               </span>
               <span className="num model-context">{fullTokens(m.contextWindow)}</span>
-              <span className="num model-output">{shortTokens(m.maxOutputTokens)}</span>
+              <span
+                className={`num model-output${implausibleOutput ? " implausible" : ""}`}
+                title={implausibleOutput ? "上游声明的最大输出不小于上下文窗口，已忽略" : undefined}
+              >
+                {shortTokens(m.maxOutputTokens)}
+              </span>
             </div>
           );
         })}
@@ -856,6 +865,15 @@ function ProviderDetail({
           // 逐个设置保留（ADR-0054 §4、效果图）。
           const individuallyOff = disabledByModel[m.modelId] === "model";
           const rowOff = off || disabledByModel[m.modelId] !== undefined;
+          const rawMaxOutput =
+            m.fields.maxOutputTokens.value ?? m.fields.maxOutputTokens.lowerValue;
+          const implausibleMaxOutput =
+            rawMaxOutput !== undefined &&
+            m.fields.contextWindow.value !== undefined &&
+            rawMaxOutput >= m.fields.contextWindow.value &&
+            m.fields.maxOutputTokens.userValue === undefined &&
+            m.fields.maxOutputTokens.source.kind !== "user" &&
+            m.fields.maxOutputTokens.source.kind !== "config";
           return (
             <div className={`mr${rowOff ? " off" : ""}`} key={m.modelId}>
               <span className="tog">
@@ -881,8 +899,13 @@ function ProviderDetail({
                 {c.i && <b title="图片输入">I</b>}
               </span>
               <span className="num model-context">{fullTokens(m.fields.contextWindow.value)}</span>
-              <span className="num model-output">
-                {shortTokens(m.fields.maxOutputTokens.value)}
+              <span
+                className={`num model-output${implausibleMaxOutput ? " implausible" : ""}`}
+                title={
+                  implausibleMaxOutput ? "上游声明的最大输出不小于上下文窗口，已忽略" : undefined
+                }
+              >
+                {shortTokens(implausibleMaxOutput ? rawMaxOutput : m.fields.maxOutputTokens.value)}
               </span>
               <a
                 className="lnk"

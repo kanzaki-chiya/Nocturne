@@ -362,10 +362,12 @@ runtime.listRecentModels(): ModelRef[]                   // 模型选择页"最�
 - 上游或 models.dev 标明支持推理且没有逐模型档位声明时推导完整六档；用户可通过「编辑模型」或手写 `capabilities.reasoningEffort` 收窄。旧 `thinking.levels/source` 在运行时忽略，下次程序写入该条目时删除；启动提示见 [events.md](../protocols/events.md)。
 - 写入 `models` 的 `pricing` 进入 `ModelInfo.pricing`（[provider-api.md](../protocols/provider-api.md) 第 2 节）；模型选择页按这些字段渲染"推理 / 图片输入 / 上下文 / 价格"列（[tui.md](../apps/tui.md) 第 7 节），未声明的列留空，不编造数据。
 - **最大输出长度未知时不替上游做决定**：
-  - `openai-compatible`：请求**不带** `max_tokens`，由上游按它自己的上限处理；
+  - `openai-compatible`、`openai-responses`、`gemini`：请求**不带**输出上限字段，由上游按它自己的上限处理；
   - `anthropic`：协议要求必填，只有这种情况使用兜底值（8192），并在提示中说明。
   - 上下文预算为输出预留的空间与发送的值分开：未知时按兜底值预留，只影响本地预算估算，不发送给上游。
-- **上下文窗口未知时**仍按 128000 估算（预算必须有一个数），同时在会话打开与 `setModel` 时发出 `runtime.warning(code="model_capabilities_defaulted")`，说明哪些值是默认的、如何运行 `/provider refresh` 或在 `config.json` 的 `models` 里声明；`/context` 报告显示同样的标注。
+- **可疑限额与警告规则**（[ADR-0016 2026-10-25 修订](../decisions/ADR-0016-model-limits-from-upstream.md)）：
+  - 上游或 models.dev 声明的 `maxOutputTokens >= contextWindow` 视为未声明（用户在 `userModels` 或手写配置里手填的值不做此检查）；原始声明仍保留在 `listModelSettings` 的 `lowerValue` 中，供服务商页以可疑态（灰色删除线）展示。
+  - **上下文窗口未知时**仍按 128000 估算（预算必须有一个数）。会话打开与 `setModel` 时，若缺 `contextWindow`、或缺 `maxOutputTokens` 且 `ModelInfo.requiresMaxOutputTokens === true`，发出 `runtime.warning(code="model_capabilities_defaulted")`——文案只写真正缺失的项（缺上下文写「上下文按 128000 估算」，缺最大输出写「输出预留按 8192 估算」，两项都缺两句都写）及补救方式；只缺 `maxOutputTokens` 而适配器不会按兜底值发往上游时不发会话警告，`/context` 报告照样标注。
 - 这要求 `ModelInfo.maxOutputTokens` 与 `ModelRequest.maxOutputTokens` 变为可选（[provider-api.md](../protocols/provider-api.md) 第 2、3 节），属于协议契约变化，见 [ADR-0016](../decisions/ADR-0016-model-limits-from-upstream.md)。
 
 ## 8. 本阶段不做

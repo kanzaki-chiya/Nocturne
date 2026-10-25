@@ -32,6 +32,9 @@ interface ModelInfo {
   displayName?: string
   contextWindow: number          // 输入 + 输出共享的窗口大小
   maxOutputTokens?: number       // v0.2 改为可选：未知表示上游未声明（ADR-0016）
+  /** 未声明 maxOutputTokens 时，该模型的生效协议适配器是否仍会按兜底值向请求体写 max_tokens
+      （ADR-0016 2026-10-25 修订；由 resolveModelInfo 从生效协议对应的适配器静态声明复制） */
+  requiresMaxOutputTokens?: boolean
   capabilities: ModelCapabilities
   /** USD / 每百万 token；配置 > 上游 > models.dev 服务商键 > 厂商价；整体替换 */
   pricing?: {

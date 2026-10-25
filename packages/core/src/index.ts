@@ -130,10 +130,12 @@ import {
 } from "./platform/index.js";
 import {
   clampReasoningEffort,
+  CONTEXT_WINDOW_FALLBACK,
   createEntryProvider,
   externalAuthPath,
   applyDisabled,
   createProviderRegistry,
+  MAX_OUTPUT_FALLBACK,
   nocturneUserAgent,
   UnknownModelError,
   type AuthResolver,
@@ -1855,17 +1857,31 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             : `思考档位 ${stored} 在模型 ${m.ref.provider}/${m.ref.model} 不可用，就近降为 ${clamped}`,
       });
     };
-    /** 限额未声明（ADR-0016）：会话打开与 setModel 时提示默认值来源与补救方式 */
+    /**
+     * 限额未声明（ADR-0016 2026-10-25 修订）：
+     * - 只写真正缺失的项（缺上下文写「上下文按 128000 估算」，缺最大输出写「输出预留按 8192 估算」）；
+     * - 只缺最大输出且模型所属协议适配器不会按兜底值发出 max_tokens（requiresMaxOutputTokens !== true）时，
+     *   不发会话警告（/context 仍标注）。
+     */
     const warnIfCapabilitiesDefaulted = (m: ModelInfo): void => {
+      const missingContext = m.contextWindow === undefined;
+      const missingMaxOutput = m.maxOutputTokens === undefined;
+      if (!missingContext && (!missingMaxOutput || m.requiresMaxOutputTokens !== true)) return;
       const missing: string[] = [];
-      if (m.contextWindow === undefined) missing.push("上下文窗口");
-      if (m.maxOutputTokens === undefined) missing.push("最大输出长度");
-      if (missing.length === 0) return;
+      const estimates: string[] = [];
+      if (missingContext) {
+        missing.push("上下文窗口");
+        estimates.push(`上下文按 ${CONTEXT_WINDOW_FALLBACK} 估算`);
+      }
+      if (missingMaxOutput) {
+        missing.push("最大输出长度");
+        estimates.push(`输出预留按 ${MAX_OUTPUT_FALLBACK} 估算`);
+      }
       session.emitEphemeral("runtime.warning", {
         code: "model_capabilities_defaulted",
         message:
           `模型 ${m.ref.provider}/${m.ref.model} 的${missing.join("与")}未由上游或配置声明，` +
-          `本地预算按默认值估算（上下文 128000 / 输出预留 8192）；` +
+          `本地预算按默认值估算（${estimates.join("，")}）；` +
           `可运行 /provider refresh ${m.ref.provider} 或在 config.json 的 models 中声明`,
       });
     };

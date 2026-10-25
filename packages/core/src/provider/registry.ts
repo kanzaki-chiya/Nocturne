@@ -10,7 +10,27 @@ import {
 import { BUILTIN_MODEL_CATALOG, DEFAULT_MODEL_FALLBACK } from "./catalog.js";
 import { isModelProtocol, withEffectiveProtocol } from "./effective-protocol.js";
 import { withReasoningEfforts } from "./reasoning.js";
-import type { ModelInfo, Provider, ProviderRegistry, ResolvedModel } from "./types.js";
+import type {
+  ModelInfo,
+  ModelProtocol,
+  Provider,
+  ProviderRegistry,
+  ResolvedModel,
+} from "./types.js";
+
+/** 各协议适配器的传输层静态特征声明（ADR-0016 2026-10-25 修订） */
+export interface ProtocolAdapterSpec {
+  readonly protocol: ModelProtocol;
+  /** 未声明 maxOutputTokens 时适配器是否仍会按兜底值向请求体写 max_tokens */
+  readonly requiresMaxOutputTokens: boolean;
+}
+
+const PROTOCOL_ADAPTER_SPECS = new Map<ModelProtocol, ProtocolAdapterSpec>();
+
+/** 各协议适配器在模块加载时注册自身传输层特征声明，resolveModelInfo 只按协议查表复制。 */
+export function registerProtocolAdapterSpec(spec: ProtocolAdapterSpec): void {
+  PROTOCOL_ADAPTER_SPECS.set(spec.protocol, spec);
+}
 
 export class UnknownModelError extends Error {
   readonly ref: ModelRef;
@@ -84,6 +104,12 @@ export function applyModelOverride(
   override: ModelOverride | undefined,
 ): ModelInfo {
   if (override === undefined) return base;
+  const protocol = override.protocol ?? base.protocol;
+  const adapterSpec = protocol !== undefined ? PROTOCOL_ADAPTER_SPECS.get(protocol) : undefined;
+  const requiresMaxOutputTokens =
+    override.requiresMaxOutputTokens ??
+    adapterSpec?.requiresMaxOutputTokens ??
+    base.requiresMaxOutputTokens;
   return {
     ref: base.ref,
     baseURL: override.baseURL ?? base.baseURL,
@@ -91,10 +117,11 @@ export function applyModelOverride(
     displayName: override.displayName ?? base.displayName,
     contextWindow: override.contextWindow ?? base.contextWindow,
     maxOutputTokens: override.maxOutputTokens ?? base.maxOutputTokens,
+    ...(requiresMaxOutputTokens !== undefined ? { requiresMaxOutputTokens } : {}),
     pricing: override.pricing ?? base.pricing,
     pricingSource:
       override.pricing !== undefined ? (override.pricingSource ?? "config") : base.pricingSource,
-    protocol: override.protocol ?? base.protocol,
+    protocol,
     endpoints: override.endpoints ?? base.endpoints,
     ...(base.unavailable !== undefined ? { unavailable: base.unavailable } : {}),
     capabilities: {
@@ -179,9 +206,17 @@ export function createProviderRegistry(
       // ADR-0026：按条目标识协议重算生效协议——清单内模型已盖章（幂等），
       // 清单外/覆盖后的模型取条目 type；非协议感知的 Provider（type 不是
       // 两种协议）不盖章。
-      const model = isModelProtocol(provider.type)
+      const withProto = isModelProtocol(provider.type)
         ? withEffectiveProtocol(merged2, provider.type)
         : merged2;
+      const spec =
+        withProto.protocol !== undefined
+          ? PROTOCOL_ADAPTER_SPECS.get(withProto.protocol)
+          : undefined;
+      const model =
+        withProto.requiresMaxOutputTokens === undefined && spec !== undefined
+          ? { ...withProto, requiresMaxOutputTokens: spec.requiresMaxOutputTokens }
+          : withProto;
       // ADR-0054 §3：停用在此盖章——停用的服务商照常解析出实例，但结果不可用。
       return { provider, model: applyDisabled(model, disabled) };
     },

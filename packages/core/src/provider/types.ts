@@ -51,10 +51,16 @@ export interface ModelInfo {
    */
   contextWindow?: number | undefined;
   /**
-   * undefined = 未声明：openai-compatible 请求不带 max_tokens；
+   * undefined = 未声明：openai-compatible 等协议请求不带 max_tokens；
    * anthropic 必填故按兜底值发送（ADR-0016）
    */
   maxOutputTokens?: number | undefined;
+  /**
+   * 未声明 maxOutputTokens 时，该模型的生效协议适配器是否仍会按兜底值
+   * 向请求体写 max_tokens（ADR-0016 2026-10-25 修订）。由 resolveModelInfo
+   * 从生效协议对应的适配器静态声明复制。
+   */
+  requiresMaxOutputTokens?: boolean | undefined;
   /** 每百万 token 的 USD 价格（上游声明换算；provider-setup.md 第 7 节） */
   pricing?: ModelPricing | undefined;
   pricingSource?: PricingSource | undefined;

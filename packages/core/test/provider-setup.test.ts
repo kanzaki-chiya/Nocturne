@@ -774,7 +774,7 @@ describe("runtime：updateProviders 与警告（provider-setup.md 第 6 节）",
     await session.close();
   });
 
-  it("model_capabilities_defaulted：未声明限额的模型在 setModel 时警告", async () => {
+  it("model_capabilities_defaulted：三种缺失组合文案、按协议区分只缺最大输出、可疑限额与手填值", async () => {
     await writeJson(path.join(home, "providers.json"), {
       version: 1,
       providers: [
@@ -782,21 +782,95 @@ describe("runtime：updateProviders 与警告（provider-setup.md 第 6 节）",
           id: "corp",
           type: "openai-compatible",
           baseURL: "https://api.corp.test/v1",
-          models: { bare: {} }, // 无任何限额声明
+          models: {
+            bare: {}, // 两项都缺
+            onlyMissingCtx: { maxOutputTokens: 16_000 }, // 只缺上下文窗口
+            onlyMissingOutOpenAI: { contextWindow: 500_000 }, // 只缺最大输出（openai-compatible：不发警告）
+            onlyMissingOutAnthropic: { contextWindow: 200_000, protocol: "anthropic" }, // 只缺最大输出（anthropic：发警告）
+            implausibleOpenAI: { contextWindow: 256_000, maxOutputTokens: 500_000 }, // 上游可疑限额（openai-compatible：视为未声明且不发警告）
+            implausibleAnthropic: {
+              contextWindow: 256_000,
+              maxOutputTokens: 256_000,
+              protocol: "anthropic",
+            }, // 上游可疑限额（anthropic：视为未声明且发只缺最大输出警告）
+            userHandFilled: { contextWindow: 256_000, maxOutputTokens: 8_000 },
+          },
+          userModels: {
+            userHandFilled: { maxOutputTokens: 256_000 }, // 用户手填 >= contextWindow 不做可疑忽略
+          },
         },
       ],
     });
-    const { runtime } = await makeRuntime();
+    const { rc, runtime } = await makeRuntime();
+
+    // listModelSettings：可疑上游值的生效 value 为 undefined，原始声明保留在 lowerValue 供服务商页显示；手填值保持生效
+    const views = await rc.listModelSettings("corp");
+    const implausibleView = views.find((v) => v.modelId === "implausibleOpenAI");
+    expect(implausibleView?.fields.maxOutputTokens.value).toBeUndefined();
+    expect(implausibleView?.fields.maxOutputTokens.lowerValue).toBe(500_000);
+    expect(implausibleView?.fields.maxOutputTokens.source).toEqual({ kind: "upstream" });
+
+    const handFilledView = views.find((v) => v.modelId === "userHandFilled");
+    expect(handFilledView?.fields.maxOutputTokens.value).toBe(256_000);
+    expect(handFilledView?.fields.maxOutputTokens.source).toEqual({ kind: "user" });
+
     const session = await runtime.createSession({ model: "fake/fake-model" });
     const warnings: { code: string; message: string }[] = [];
     session.subscribe((e) => {
       if (e.type === "runtime.warning") warnings.push(e.payload);
     });
+
+    // 1. 两项都缺：两句都写
     await session.setModel("corp/bare");
-    expect(warnings.some((w) => w.code === "model_capabilities_defaulted")).toBe(true);
-    expect(warnings.find((w) => w.code === "model_capabilities_defaulted")?.message).toContain(
-      "corp/bare",
+    expect(warnings.at(-1)).toMatchObject({
+      code: "model_capabilities_defaulted",
+      message:
+        "模型 corp/bare 的上下文窗口与最大输出长度未由上游或配置声明，本地预算按默认值估算（上下文按 128000 估算，输出预留按 8192 估算）；可运行 /provider refresh corp 或在 config.json 的 models 中声明",
+    });
+
+    // 2. 只缺上下文窗口：只写「上下文按 128000 估算」
+    warnings.length = 0;
+    await session.setModel("corp/onlyMissingCtx");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toBe(
+      "模型 corp/onlyMissingCtx 的上下文窗口未由上游或配置声明，本地预算按默认值估算（上下文按 128000 估算）；可运行 /provider refresh corp 或在 config.json 的 models 中声明",
     );
+
+    // 3. 只缺最大输出（openai-compatible）：不发会话警告，但 /context（describeContext）照常按兜底预留计算预算
+    warnings.length = 0;
+    await session.setModel("corp/onlyMissingOutOpenAI");
+    expect(warnings).toHaveLength(0);
+    expect(session.describeContext().report.budgetTokens).toBe(500_000 - 8_192 - 1_024);
+
+    // 4. 只缺最大输出（anthropic）：发警告，且只写「输出预留按 8192 估算」
+    warnings.length = 0;
+    await session.setModel("corp/onlyMissingOutAnthropic");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toBe(
+      "模型 corp/onlyMissingOutAnthropic 的最大输出长度未由上游或配置声明，本地预算按默认值估算（输出预留按 8192 估算）；可运行 /provider refresh corp 或在 config.json 的 models 中声明",
+    );
+
+    // 5. 上游 maxOutputTokens >= contextWindow 视为未声明：openai-compatible 不发警告，anthropic 发只缺最大输出警告
+    warnings.length = 0;
+    await session.setModel("corp/implausibleOpenAI");
+    expect(warnings).toHaveLength(0);
+    expect(session.describeContext().report.budgetTokens).toBe(256_000 - 8_192 - 1_024);
+
+    await session.setModel("corp/implausibleAnthropic");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toBe(
+      "模型 corp/implausibleAnthropic 的最大输出长度未由上游或配置声明，本地预算按默认值估算（输出预留按 8192 估算）；可运行 /provider refresh corp 或在 config.json 的 models 中声明",
+    );
+
+    // 6. 用户手填值不受影响
+    warnings.length = 0;
+    await session.setModel("corp/userHandFilled");
+    expect(warnings).toHaveLength(0);
+    const handModel = runtime
+      .listModels()
+      .find((m) => m.ref.provider === "corp" && m.ref.model === "userHandFilled");
+    expect(handModel?.maxOutputTokens).toBe(256_000);
+
     await session.close();
   });
 });

@@ -5,7 +5,11 @@ import type { Diagnostics } from "../../protocol/index.js";
 import { createAuthResolver } from "../auth.js";
 import { abortError } from "../errors.js";
 import { createAuthFetch, modelRequestHeaders, withUserAgent } from "../http.js";
-import { resolveModelInfo } from "../registry.js";
+import {
+  registerProtocolAdapterSpec,
+  resolveModelInfo,
+  type ProtocolAdapterSpec,
+} from "../registry.js";
 import { withReasoningEfforts } from "../reasoning.js";
 import type { ModelRequest, ModelStreamEvent, Provider } from "../types.js";
 import type { OpenAIResponsesConfig } from "./openai-responses.js";
@@ -18,6 +22,13 @@ import {
   toAiTools,
   toProviderError,
 } from "./ai-sdk-common.js";
+
+/** gemini 适配器传输特征声明（ADR-0016 2026-10-25 修订）：未声明时不向请求体写 maxOutputTokens */
+export const GEMINI_ADAPTER_SPEC: ProtocolAdapterSpec = {
+  protocol: "gemini",
+  requiresMaxOutputTokens: false,
+};
+registerProtocolAdapterSpec(GEMINI_ADAPTER_SPEC);
 
 export type GeminiConfig = Omit<OpenAIResponsesConfig, "type">;
 
@@ -46,7 +57,12 @@ export function createGeminiProvider(
     fetchImpl,
   );
   const modelList = Object.keys(config.models ?? {}).map((model) =>
-    withReasoningEfforts(resolveModelInfo({ provider: config.id, model }, config.models?.[model])),
+    withReasoningEfforts(
+      resolveModelInfo(
+        { provider: config.id, model },
+        { protocol: GEMINI_ADAPTER_SPEC.protocol, ...config.models?.[model] },
+      ),
+    ),
   );
 
   return {

@@ -16,7 +16,12 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { streamText, type JSONValue } from "ai";
 import { abortError, ProviderError } from "../errors.js";
 import { createAuthResolver } from "../auth.js";
-import { resolveModelInfo, type ModelOverride } from "../registry.js";
+import {
+  registerProtocolAdapterSpec,
+  resolveModelInfo,
+  type ModelOverride,
+  type ProtocolAdapterSpec,
+} from "../registry.js";
 import { withReasoningEfforts } from "../reasoning.js";
 import type {
   AuthResolver,
@@ -41,6 +46,13 @@ import {
   createLiveness,
 } from "./ai-sdk-common.js";
 import { constrainResponsesFetch } from "./responses-constraints.js";
+
+/** openai-responses 适配器传输特征声明（ADR-0016 2026-10-25 修订）：未声明时不向请求体写 max_output_tokens */
+export const OPENAI_RESPONSES_ADAPTER_SPEC: ProtocolAdapterSpec = {
+  protocol: "openai-responses",
+  requiresMaxOutputTokens: false,
+};
+registerProtocolAdapterSpec(OPENAI_RESPONSES_ADAPTER_SPEC);
 
 export interface OpenAIResponsesConfig {
   /** Provider id */
@@ -101,7 +113,12 @@ export function createOpenAIResponsesProvider(
   // 按会话保存的粘性路由令牌（requestConstraints.stickyRoutingHeader）；只在内存里，随进程结束
   const routingTokens = new Map<string, string>();
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
-    withReasoningEfforts(resolveModelInfo({ provider: config.id, model: id }, config.models?.[id])),
+    withReasoningEfforts(
+      resolveModelInfo(
+        { provider: config.id, model: id },
+        { protocol: OPENAI_RESPONSES_ADAPTER_SPEC.protocol, ...config.models?.[id] },
+      ),
+    ),
   );
 
   return {

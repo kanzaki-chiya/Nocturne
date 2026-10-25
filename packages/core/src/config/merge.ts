@@ -567,6 +567,25 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     }
   }
 
+  // ADR-0016 2026-10-25 修订：上游声明的 maxOutputTokens >= contextWindow 视为未声明
+  // （用户在设置 userModels 或手写配置中手填的值不做此检查）。
+  // info.fields 仍保留原始声明，供 listModelSettings / 服务商页展示可疑值。
+  for (const [providerId, entry] of providers) {
+    const fields = info.fields.get(providerId);
+    for (const [modelId, model] of Object.entries(entry.models ?? {})) {
+      if (
+        model.contextWindow !== undefined &&
+        model.maxOutputTokens !== undefined &&
+        model.maxOutputTokens >= model.contextWindow
+      ) {
+        const outSrc = fields?.get(modelId)?.get("maxOutputTokens")?.at(-1)?.origin;
+        if (outSrc !== undefined && outSrc.kind !== "userModels" && !isConfigKind(outSrc.kind)) {
+          delete model.maxOutputTokens;
+        }
+      }
+    }
+  }
+
   // ADR-0022：shellPath 是给指定种类换可执行文件用的；单独存在且
   // 文件名识别不出种类时不是有效声明——忽略并警告（不静默回退自动，
   // 由下一层/自动选择接管）

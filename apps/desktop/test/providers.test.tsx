@@ -979,4 +979,60 @@ describe("编辑服务商（U-07）", () => {
     expect(button("保存").disabled).toBe(false);
     server.close();
   });
+
+  it("上游声明的最大输出 >= 上下文窗口时显示为可疑（删除线与悬停说明），手填值不受影响", async () => {
+    const baseFields = MODEL_SETTINGS[0]!.fields;
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [PROVIDER] },
+        "provider.listProviderPresets": [PRESET],
+        "runtime.defaultModel": null,
+        "provider.listModelSettings": [
+          {
+            providerId: "openrouter",
+            modelId: "xai/grok-4.7",
+            enabled: true,
+            fields: {
+              ...baseFields,
+              displayName: { value: "Grok 4.7", editable: true, source: { kind: "upstream" } },
+              contextWindow: { value: 256000, editable: true, source: { kind: "upstream" } },
+              maxOutputTokens: {
+                value: undefined,
+                lowerValue: 500000,
+                editable: true,
+                source: { kind: "upstream" },
+              },
+            },
+          },
+          {
+            providerId: "openrouter",
+            modelId: "xai/grok-user",
+            enabled: true,
+            fields: {
+              ...baseFields,
+              displayName: { value: "Grok User", editable: true, source: { kind: "upstream" } },
+              contextWindow: { value: 256000, editable: true, source: { kind: "upstream" } },
+              maxOutputTokens: {
+                value: 256000,
+                userValue: 256000,
+                lowerValue: 500000,
+                editable: true,
+                source: { kind: "user" },
+              },
+            },
+          },
+        ],
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    const suspicious = await screen.findByText("500K");
+    expect(suspicious.classList.contains("implausible")).toBe(true);
+    expect(suspicious.getAttribute("title")).toBe("上游声明的最大输出不小于上下文窗口，已忽略");
+
+    const handFilled = await screen.findByText("250K");
+    expect(handFilled.classList.contains("implausible")).toBe(false);
+    expect(handFilled.getAttribute("title")).toBeNull();
+    server.close();
+  });
 });

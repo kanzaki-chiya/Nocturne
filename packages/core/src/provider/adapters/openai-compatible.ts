@@ -7,7 +7,12 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { streamText } from "ai";
 import { abortError } from "../errors.js";
 import { createAuthResolver } from "../auth.js";
-import { resolveModelInfo, type ModelOverride } from "../registry.js";
+import {
+  registerProtocolAdapterSpec,
+  resolveModelInfo,
+  type ModelOverride,
+  type ProtocolAdapterSpec,
+} from "../registry.js";
 import { withReasoningEfforts } from "../reasoning.js";
 import type {
   AuthResolver,
@@ -32,6 +37,13 @@ import {
 } from "./ai-sdk-common.js";
 import { createAuthFetch, modelRequestHeaders, withUserAgent } from "../http.js";
 import type { JSONValue } from "ai";
+
+/** openai-compatible 适配器传输特征声明（ADR-0016 2026-10-25 修订）：未声明时不向请求体写 max_tokens */
+export const OPENAI_COMPATIBLE_ADAPTER_SPEC: ProtocolAdapterSpec = {
+  protocol: "openai-compatible",
+  requiresMaxOutputTokens: false,
+};
+registerProtocolAdapterSpec(OPENAI_COMPATIBLE_ADAPTER_SPEC);
 
 export interface OpenAICompatibleConfig {
   /** Provider id（也是 providerOptions 的键） */
@@ -119,7 +131,12 @@ export function createOpenAICompatibleProvider(
 
   const thinkingFormat = config.thinking?.format ?? "openai";
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
-    withReasoningEfforts(resolveModelInfo({ provider: config.id, model: id }, config.models?.[id])),
+    withReasoningEfforts(
+      resolveModelInfo(
+        { provider: config.id, model: id },
+        { protocol: OPENAI_COMPATIBLE_ADAPTER_SPEC.protocol, ...config.models?.[id] },
+      ),
+    ),
   );
 
   return {

@@ -267,6 +267,11 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.page3 .mr .num.implausible,
+.page3 .fr .num.implausible {
+  color: var(--a-faint);
+  text-decoration: line-through;
+}
 .page3 .cap {
   display: flex;
   gap: 3px;

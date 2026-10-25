@@ -13,7 +13,12 @@ import { abortError } from "../errors.js";
 import { createAuthResolver } from "../auth.js";
 import { MAX_OUTPUT_FALLBACK } from "../catalog.js";
 import { planAnthropicThinking, withReasoningEfforts } from "../reasoning.js";
-import { resolveModelInfo, type ModelOverride } from "../registry.js";
+import {
+  registerProtocolAdapterSpec,
+  resolveModelInfo,
+  type ModelOverride,
+  type ProtocolAdapterSpec,
+} from "../registry.js";
 import type {
   AuthResolver,
   CredentialResolver,
@@ -40,6 +45,13 @@ import {
   routeSdkWarnings,
   createLiveness,
 } from "./ai-sdk-common.js";
+
+/** anthropic 适配器传输特征声明（ADR-0016 2026-10-25 修订）：Messages API 必传 max_tokens */
+export const ANTHROPIC_ADAPTER_SPEC: ProtocolAdapterSpec = {
+  protocol: "anthropic",
+  requiresMaxOutputTokens: true,
+};
+registerProtocolAdapterSpec(ANTHROPIC_ADAPTER_SPEC);
 
 /** Messages API 的 cache_control 断点（默认 5 分钟有效） */
 const EPHEMERAL_CACHE = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
@@ -138,7 +150,12 @@ export function createAnthropicProvider(
     }
   }
   const modelList: ModelInfo[] = Object.keys(config.models ?? {}).map((id) =>
-    withReasoningEfforts(resolveModelInfo({ provider: config.id, model: id }, config.models?.[id])),
+    withReasoningEfforts(
+      resolveModelInfo(
+        { provider: config.id, model: id },
+        { protocol: ANTHROPIC_ADAPTER_SPEC.protocol, ...config.models?.[id] },
+      ),
+    ),
   );
 
   return {
