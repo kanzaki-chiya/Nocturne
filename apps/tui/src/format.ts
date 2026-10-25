@@ -131,6 +131,7 @@ const inputString = (input: unknown, key: string): string | undefined => {
 /** 工具输入单行摘要：shell→command；read/write/edit→path；grep/glob→pattern；apply_patch→文件清单 */
 export function summarizeToolInput(name: string | undefined, input: unknown): string {
   if (name === "task") return inputString(input, "task") ?? "";
+  if (name === "mcp_search") return inputString(input, "query") ?? "";
   if (name === "todo_write") {
     const items =
       typeof input === "object" && input !== null && "items" in input ? input.items : undefined;

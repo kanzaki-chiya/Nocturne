@@ -146,7 +146,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 |---|---|
 | `message.assistant.delta`（text） | 原样流式写到 stdout |
 | `message.assistant.delta`（reasoning） | 暗淡样式写 stdout |
-| `tool.started` | `● <name>(<参数摘要>)`，参数摘要取 input 的短 JSON，截断约 100 字符 |
+| `tool.started` | `● <name>(<参数摘要>)`，参数摘要取 input 的短 JSON，截断约 100 字符；带 `target` 时按目标工具名与目标输入显示，`mcp_search` 显示为 `● 搜索 MCP 工具：<query>`（[ADR-0067](../decisions/ADR-0067-mcp-tool-search.md)） |
 | `tool.input.delta` | 不渲染（Phase 4 的 TUI 才需要增量展示） |
 | `tool.progress` | `stdout`/`stderr` 的片段按顺序拼接，只在原始换行处结束行；`info` 每次调用是一行独立摘要，渲染层补换行。两类输出均缩进两格（约定见 [tool-api.md](../protocols/tool-api.md) 第 2 节） |
 | `tool.completed` | `└ <status>` + 耗时；`error`/`denied`/`cancelled`/`interrupted` 附 `error.code` 与原因；`edit`/`write` 的 `output.diff` 完整显示旧/新行号、`+`/`-` 标记及「新增 N 行，删除 M 行」，无色终端仍保留标记，旧头部不臆造行号；结构化输出超限时显示省略提示；`truncated` 为真时附一行"输出已截断，完整内容在 \<path\>"（落盘路径见 [tools.md](../architecture/tools.md) 第 4 节） |

@@ -192,16 +192,14 @@
   color: var(--a-faint);
   text-align: right;
 }
-.phone-schedules {
+.phone-body.phone-schedules {
   padding: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+  overflow-x: hidden;
 }
 .phone-schedules .schedule-page {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+  flex: none;
+  min-height: auto;
+  overflow: visible;
 }
 .phone-schedules .schedule-page .ph3 h3 {
   display: none;

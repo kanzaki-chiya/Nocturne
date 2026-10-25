@@ -171,8 +171,10 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
     }
     case "tool.started": {
       const p = ev.payload;
-      if (p.name === "task") {
-        const input = p.input as
+      const shownName = p.target?.name ?? p.name;
+      const shownInput = p.target !== undefined ? p.target.input : p.input;
+      if (shownName === "task") {
+        const input = shownInput as
           { profile?: unknown; task?: unknown; reason?: unknown } | undefined;
         if (typeof input?.profile === "string")
           return [
@@ -184,13 +186,22 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
               : []),
           ];
       }
-      if (p.name === "ask_user") {
-        const input = p.input as { questions?: unknown[] } | undefined;
+      if (shownName === "ask_user") {
+        const input = shownInput as { questions?: unknown[] } | undefined;
         const n = input?.questions?.length ?? 0;
         return [aux("? 提问" + (n > 1 ? `（${n} 题）` : ""))];
       }
+      if (shownName === "mcp_search") {
+        const query =
+          shownInput !== null &&
+          typeof shownInput === "object" &&
+          typeof (shownInput as { query?: unknown }).query === "string"
+            ? (shownInput as { query: string }).query
+            : summarizeInput(shownInput);
+        return [aux(`● 搜索 MCP 工具：${query}`)];
+      }
       const rule = p.permission.rule !== undefined ? `（命中：${p.permission.rule}）` : "";
-      return [aux(`● ${p.name}(${summarizeInput(p.input)})${rule}`)];
+      return [aux(`● ${shownName}(${summarizeInput(shownInput)})${rule}`)];
     }
     case "tool.input.delta":
       return [];

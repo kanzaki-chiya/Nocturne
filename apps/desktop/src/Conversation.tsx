@@ -256,10 +256,13 @@ const FileLinksContext = createContext<{
   hooks: FileLinkHooks;
 } | null>(null);
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
-const inputOf = (entry: ToolEntry): Record<string, unknown> | undefined =>
-  entry.input !== null && typeof entry.input === "object"
-    ? (entry.input as Record<string, unknown>)
-    : undefined;
+const effectiveToolName = (entry: ToolEntry): string => entry.target?.name ?? entry.name ?? "";
+const rawInputOf = (entry: ToolEntry): unknown =>
+  entry.target !== undefined ? entry.target.input : entry.input;
+const inputOf = (entry: ToolEntry): Record<string, unknown> | undefined => {
+  const raw = rawInputOf(entry);
+  return raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : undefined;
+};
 
 /**
  * 文件引用收集与渲染共用的解析选项（两处 token 流必须一致）。
@@ -1389,6 +1392,7 @@ const TOOL_META: Record<string, { icon: string; label: string }> = {
   task: { icon: "T", label: "子代理" },
   ask_user: { icon: "?", label: "提问" },
   schedule: { icon: "C", label: "定时任务" },
+  mcp_search: { icon: "Q", label: "搜索 MCP 工具" },
 };
 
 const MCP_NAME_PREFIX = "mcp__";
@@ -1427,7 +1431,8 @@ export function toolArgument(entry: ToolEntry, cwd: string): string {
 function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path: boolean } {
   const plain = (value: string) => ({ text: value, path: false });
   const input = inputOf(entry);
-  switch (entry.name) {
+  const name = effectiveToolName(entry);
+  switch (name) {
     case "skill":
       return plain(input === undefined ? "" : text(input.name));
     case "task":
@@ -1454,10 +1459,15 @@ function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path:
       return plain(input === undefined ? "" : text(input.url));
     case "web_search":
       return plain(input === undefined ? "" : text(input.query));
+    case "mcp_search": {
+      const q = input === undefined ? "" : text(input.query);
+      const srv = input === undefined ? "" : text(input.server);
+      return plain(srv !== "" ? `${q} · ${srv}` : q);
+    }
     default:
       // MCP 工具的名称列已是 server/tool；参数位展示主要输入（第一个非空
       // 字符串入参，如搜索 query、抓取 url），拿不到就留空，不再显示一遍名字。
-      if (mcpToolLabel(entry.name ?? "", entry.subjects) !== undefined) {
+      if (mcpToolLabel(name, entry.subjects) !== undefined) {
         if (input === undefined) return plain("");
         return plain(
           Object.values(input).find(
@@ -1520,7 +1530,7 @@ export function toolResultText(entry: ToolEntry): { text: string; error?: boolea
   const value =
     output !== null && typeof output === "object" ? (output as Record<string, unknown>) : undefined;
   let base = "完成";
-  switch (entry.name) {
+  switch (effectiveToolName(entry)) {
     case "skill":
       base = "已加载";
       break;
@@ -1546,6 +1556,9 @@ export function toolResultText(entry: ToolEntry): { text: string; error?: boolea
       if (value?.timedOut === true) base = "超时";
       else if (typeof value?.exitCode === "number" && value.exitCode !== 0)
         base = `退出码 ${value.exitCode}`;
+      break;
+    case "mcp_search":
+      if (Array.isArray(value?.matches)) base = `${value.matches.length} 个工具`;
       break;
     default:
       break;
@@ -1617,12 +1630,13 @@ function toolErrorSummary(entry: ToolEntry, cwd: string): string {
 /** 被拒绝的工具：一行红字，feedback 放 title。 */
 export function deniedLine(entry: ToolEntry, cwd: string): string {
   const input = inputOf(entry);
+  const name = effectiveToolName(entry);
   const target = (value: unknown): string =>
     displayPath(
       typeof value === "string" && value !== "" ? value : (entry.subjects[0]?.target ?? ""),
       cwd,
     );
-  switch (entry.name) {
+  switch (name) {
     case "shell":
       return `✕ 已拒绝执行 ${text(input?.command)}`;
     case "edit":
@@ -1634,7 +1648,7 @@ export function deniedLine(entry: ToolEntry, cwd: string): string {
     case "web_fetch":
       return `✕ 已拒绝访问 ${text(input?.url)}`;
     default:
-      return `✕ 已拒绝${toolMeta(entry.name ?? "", entry.subjects).label} ${toolArgument(entry, cwd)}`.trim();
+      return `✕ 已拒绝${toolMeta(name, entry.subjects).label} ${toolArgument(entry, cwd)}`.trim();
   }
 }
 
@@ -1982,7 +1996,8 @@ function ToolDetails({
   const value =
     output !== null && typeof output === "object" ? (output as Record<string, unknown>) : undefined;
   const command = typeof input?.command === "string" ? input.command : undefined;
-  const hasDetails = detailRows(entry.input).length > 0 || detailRows(output).length > 0;
+  const rawInput = rawInputOf(entry);
+  const hasDetails = detailRows(rawInput).length > 0 || detailRows(output).length > 0;
   const body =
     result?.error !== undefined
       ? isTimeout
@@ -2070,7 +2085,7 @@ function ToolDetails({
       )}
       {detailsOpen && hasDetails && (
         <div className="tool-payload tool-fields">
-          <DetailGroup label="参数" value={entry.input} cwd={cwd} />
+          <DetailGroup label="参数" value={rawInput} cwd={cwd} />
           <DetailGroup label="结果" value={output} cwd={cwd} />
         </div>
       )}
@@ -2159,7 +2174,8 @@ function ToolRow({
 }) {
   const [open, setOpen] = useState(false);
   const [fileOpen, setFileOpen] = useState<Record<string, boolean>>({});
-  const meta = toolMeta(entry.name ?? "", entry.subjects);
+  const shownName = effectiveToolName(entry);
+  const meta = toolMeta(shownName, entry.subjects);
   const subagent = subagentRowInfo(entry);
   const todos = todoItemsFromCompletion({
     name: entry.name ?? "",
@@ -2255,7 +2271,7 @@ function ToolRow({
   return (
     <article
       className={`tool${animating ? " running" : ""}${preparing ? " preparing" : ""}`}
-      aria-label={`工具 ${entry.name ?? entry.callId}`}
+      aria-label={`工具 ${shownName || entry.callId}`}
     >
       {rows.map((file, index) => {
         const isOpen = file === undefined ? open : (fileOpen[file.label] ?? open);
@@ -2322,6 +2338,17 @@ function preparingEntry(tool: LiveTool): ToolEntry {
   } catch {
     input = undefined;
   }
+  const target =
+    tool.name === "mcp_call" &&
+    input !== null &&
+    typeof input === "object" &&
+    typeof (input as { tool?: unknown }).tool === "string" &&
+    (input as { tool: string }).tool !== ""
+      ? {
+          name: (input as { tool: string }).tool,
+          input: (input as { arguments?: unknown }).arguments ?? {},
+        }
+      : undefined;
   return {
     kind: "tool",
     key: `t:${tool.callId}`,
@@ -2331,6 +2358,7 @@ function preparingEntry(tool: LiveTool): ToolEntry {
     seq: 0,
     status: "running",
     input,
+    ...(target !== undefined ? { target } : {}),
     subjects: [],
     permission: undefined,
     resolution: undefined,
@@ -2356,11 +2384,12 @@ function ToolEntryView({
   session?: Pick<RpcSession, "readAttachment"> | undefined;
 }) {
   if (entry.status === "denied") {
+    const shownName = effectiveToolName(entry);
     return (
       <div
         className="note deny"
         title={entry.resolution?.feedback ?? undefined}
-        aria-label={`工具 ${entry.name ?? entry.callId} 被拒绝`}
+        aria-label={`工具 ${shownName || entry.callId} 被拒绝`}
       >
         {deniedLine(entry, cwd)}
       </div>
@@ -2791,6 +2820,7 @@ function resizeQuestionTextarea(
   el.style.height = "auto";
   if (el.scrollHeight > 0) {
     el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
   }
 }
 

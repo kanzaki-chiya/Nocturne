@@ -443,6 +443,31 @@ describe("工具行 diff", () => {
     expect(summarizeToolInput("apply_patch", { input: "*** Begin Patch\n*** End Patch" })).toBe("");
   });
 
+  it("ADR-0067：TUI 对 mcp_search 显示为「搜索 MCP 工具：<query>」，带 target 的 mcp_call 按目标工具显示", () => {
+    const searchLines = layoutEntry(
+      {
+        ...entry({ query: "议题" }, { matches: [] }, "found"),
+        name: "mcp_search",
+      },
+      80,
+      false,
+    );
+    expect(searchLines[0]?.text).toContain("搜索 MCP 工具：议题");
+
+    const callLines = layoutEntry(
+      {
+        ...entry({ tool: "mcp__github__search_issues", arguments: { q: "bug" } }, {}, "ok"),
+        name: "mcp_call",
+        target: { name: "mcp__github__search_issues", input: { q: "bug" } },
+      },
+      80,
+      false,
+    );
+    expect(callLines[0]?.text).toContain("mcp__github__search_issues");
+    expect(callLines[0]?.text).toContain('{"q":"bug"}');
+    expect(callLines[0]?.text).not.toContain("mcp_call");
+  });
+
   it("NO_COLOR 不给 diff 行铺背景，但保留行号和标记", () => {
     const previous = process.env.NO_COLOR;
     process.env.NO_COLOR = "1";

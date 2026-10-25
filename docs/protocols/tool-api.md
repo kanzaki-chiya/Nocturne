@@ -61,6 +61,10 @@ interface ToolTraits {
   /** 声明 "none" 表示调用不会改动工作区文件（如桌面面板浏览器）：mutates 仍为真，
       但不计入回退与本轮改动的未追踪调用。未声明即可能改动文件，宁可计入 */
   fileEffects?: "none"
+  /** 代理调用分派（ADR-0067 §2）：执行管线第 1 步（查找）之后将调用解析为目标工具与目标输入，
+      之后的 schema 校验、Hook、权限主体、调用、超时、结果预算全部按目标工具进行；
+      tool.started 记录 target: { name, input } */
+  dispatch?: (input: unknown) => ToolDispatchResult
 }
 ```
 

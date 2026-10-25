@@ -86,6 +86,31 @@ describe("事件渲染（cli.md 第 5 节）", () => {
       "interactive",
     );
     expect(tool[0]?.channel).toBe("stdout");
+
+    const searchEv = renderEvent(
+      durable("tool.started", {
+        callId: "c-s",
+        name: "mcp_search",
+        input: { query: "议题" },
+        subjects: [],
+        permission: { action: "allow", source: "rule" },
+      }),
+      "interactive",
+    );
+    expect(searchEv[0]?.text).toBe("● 搜索 MCP 工具：议题");
+
+    const dispatchedEv = renderEvent(
+      durable("tool.started", {
+        callId: "c-d",
+        name: "mcp_call",
+        input: { tool: "mcp__github__search_issues", arguments: { q: "bug" } },
+        target: { name: "mcp__github__search_issues", input: { q: "bug" } },
+        subjects: [{ kind: "mcp", target: "github/search_issues" }],
+        permission: { action: "allow", source: "rule" },
+      }),
+      "interactive",
+    );
+    expect(dispatchedEv[0]?.text).toBe('● mcp__github__search_issues({"q":"bug"})');
   });
 
   it("tool.completed：ok 与 denied 形态", () => {

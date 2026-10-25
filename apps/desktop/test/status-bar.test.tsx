@@ -276,6 +276,9 @@ describe("contextSourceLabel", () => {
     expect(contextSourceLabel("nocturne base prompt")).toBe("内置提示词");
     expect(contextSourceLabel("custom base prompt")).toBe("自定义提示词");
     expect(contextSourceLabel("3 tools")).toBe("3 个工具");
+    expect(contextSourceLabel("15 tools（MCP 按需，65 个工具未列出）")).toBe(
+      "15 个工具（MCP 按需，65 个工具未列出）",
+    );
     expect(contextSourceLabel("8 items")).toBe("8 项");
     expect(contextSourceLabel("2 entries")).toBe("2 条");
     expect(contextSourceLabel("C:\\Users\\me\\proj\\file.ts", "C:/Users/me")).toBe(

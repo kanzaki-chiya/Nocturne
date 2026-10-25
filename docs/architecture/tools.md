@@ -29,12 +29,14 @@ tools/
 execute(call, ctx):
   1. 查找      registry.get(call.name)
                不存在 → 结果 error(code="unknown_tool")，列出可用工具名，交给模型自我修正
+               若工具声明 traits.dispatch(input)（ADR-0067 §2）：先校验代理工具顶层输入，再解析为目标工具与目标输入
+               （目标不在本会话工具池 → error(code="unknown_tool")，附可用服务器列表）；后续步骤 2–8 全部按目标工具执行
   2. 校验      按 inputSchema 校验并规范化输入（方言按根 $schema：2020-12、2019-09，
                其余按 draft-07，未识别的 $schema 忽略后按 draft-07 编译）
-               失败 → error(code="invalid_input")，附带校验信息
+               失败 → error(code="invalid_input")，附带校验信息（代理调用时附带目标工具 inputSchema）
                schema 本身无法编译 → 该工具跳过本地校验（诊断 tool.schema_unsupported
                记一次），由工具自身校验；不因此结束 Turn
-  2.5 PreToolUse Hook   见 hooks.md 第 3 节：deny → permission.resolved(source:"hook")
+  2.5 PreToolUse Hook   见 hooks.md 第 3 节（代理调用传目标工具名与目标输入）：deny → permission.resolved(source:"hook")
                         + error(code="hook_denied")；ask 记入第 5 步的合并（强制确认，
                         不经 Grant/--yes 提升）；updatedInput 替换输入并重新走第 2 步校验；
                         无 allow（此点在主体解析前运行）
@@ -48,7 +50,7 @@ execute(call, ctx):
                deny → error(code="permission_denied")，附理由与用户反馈
                ask  → 先过 PermissionRequest Hook（hooks.md 第 6 节）；无回答则
                       先经 Hook 与 smart 审查，仍 ask 时发出 permission.requested，等待客户端回复（可被中断）
-  6. 开始      emit tool.started（含解析后的 subjects 与权限决定），写入成功后才继续
+  6. 开始      emit tool.started（含解析后的 subjects 与权限决定，代理调用写 target: { name, input }），写入成功后才继续
   7. 执行      tool.execute(input, ctx)，ctx.subjects = 已批准的解析结果，携带 AbortSignal 与超时
                生效超时：工具同时声明 maxTimeoutMs 与 inputSchema 的 timeoutMs 时，输入正
                整数覆盖默认值（封顶 maxTimeoutMs）；其余情况用 traits.timeoutMs
@@ -56,9 +58,9 @@ execute(call, ctx):
                让工具自带计时器（launcher、connector、spawn、callTool）先触发、
                给出更具体的超时说明；工具不响应 signal 时才轮到执行器结算
                工具抛出的异常 → error(code="tool_failed")；超时 → error(code="timeout")
-  7.5 PostToolUse Hook  见 hooks.md：feedback 追加进 modelContent（参与第 8 步预算）
+  7.5 PostToolUse Hook  见 hooks.md（代理调用传目标工具名与目标输入）：feedback 追加进 modelContent（参与第 8 步预算）
   8. 归一化    按结果预算截断模型可见内容；保留结构化输出供客户端渲染
-  9. 完成      emit tool.completed（持久化），返回 ToolResult
+  9. 完成      emit tool.completed（持久化，name 保持模型原始调用名），返回 ToolResult
 ```
 
 要点：

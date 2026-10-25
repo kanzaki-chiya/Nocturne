@@ -264,7 +264,7 @@ describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、�
         [
           {
             type: "tool_call",
-            callId: "c-search",
+            toolCallId: "c-search",
             name: "mcp_search",
             input: { query: "搜索议题", server: "github" },
           },
@@ -273,7 +273,7 @@ describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、�
         [
           {
             type: "tool_call",
-            callId: "c-call",
+            toolCallId: "c-call",
             name: "mcp_call",
             input: {
               tool: "mcp__github__search_issues",
@@ -355,8 +355,8 @@ describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、�
     const home = path.join(root, "home");
     const ws = path.join(root, "ws");
     const platform = createPlatform();
-    await platform.fs.mkdir(home, { recursive: true });
-    await platform.fs.mkdir(ws, { recursive: true });
+    await platform.fs.mkdir(home);
+    await platform.fs.mkdir(ws);
     await writeFile(
       path.join(home, "config.json"),
       JSON.stringify({
@@ -393,7 +393,7 @@ describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、�
         [
           {
             type: "tool_call",
-            callId: "c-deny",
+            toolCallId: "c-deny",
             name: "mcp_call",
             input: { tool: "mcp__github__delete_repo", arguments: { repo: "a/b" } },
           },
@@ -403,7 +403,7 @@ describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、�
         [
           {
             type: "tool_call",
-            callId: "c-ask-1",
+            toolCallId: "c-ask-1",
             name: "mcp_call",
             input: { tool: "mcp__github__create_issue", arguments: { title: "first" } },
           },
@@ -413,7 +413,7 @@ describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、�
         [
           {
             type: "tool_call",
-            callId: "c-ask-2",
+            toolCallId: "c-ask-2",
             name: "mcp_call",
             input: { tool: "mcp__github__create_issue", arguments: { title: "second" } },
           },
@@ -429,7 +429,6 @@ describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、�
     const config = await loadConfig(platform, { nocturneHome: home });
     const runtime = await createRuntime({
       cwd: ws,
-      nocturneHome: home,
       sessionsDir: path.join(home, "sessions"),
       config,
       providers: [provider],
@@ -501,7 +500,7 @@ describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、�
           return [
             {
               type: "tool_call",
-              callId: "parent-task",
+              toolCallId: "parent-task",
               name: "task",
               input: { preset: "explore", task: "调查 MCP 工具池" },
             },
@@ -513,19 +512,19 @@ describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、�
           return [
             {
               type: "tool_call",
-              callId: "child-search",
+              toolCallId: "child-search",
               name: "mcp_search",
               input: { query: "议题" },
             },
             {
               type: "tool_call",
-              callId: "child-write",
+              toolCallId: "child-write",
               name: "mcp_call",
               input: { tool: "mcp__github__create_issue", arguments: { title: "hack" } },
             },
             {
               type: "tool_call",
-              callId: "child-read",
+              toolCallId: "child-read",
               name: "mcp_call",
               input: { tool: "mcp__github__search_issues", arguments: { q: "bug" } },
             },
@@ -539,7 +538,7 @@ describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、�
           return [
             {
               type: "tool_call",
-              callId: "child-finish",
+              toolCallId: "child-finish",
               name: "finish",
               input: { result: "子代理验证完成" },
             },

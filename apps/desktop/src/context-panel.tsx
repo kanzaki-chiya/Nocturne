@@ -81,8 +81,10 @@ export function contextRows(report: Report): ContextRow[] {
 export function contextSourceLabel(source: string, home?: string | null): string {
   if (source === "nocturne base prompt") return "内置提示词";
   if (source === "custom base prompt") return "自定义提示词";
-  const tools = /^(\d+) tools$/.exec(source);
-  if (tools !== null) return `${tools[1]} 个工具`;
+  const tools = /^(\d+) tools(?:（(.+)）)?$/.exec(source);
+  if (tools !== null) {
+    return tools[2] !== undefined ? `${tools[1]} 个工具（${tools[2]}）` : `${tools[1]} 个工具`;
+  }
   const items = /^(\d+) items$/.exec(source);
   if (items !== null) return `${items[1]} 项`;
   const entries = /^(\d+) entries$/.exec(source);

@@ -88,8 +88,11 @@ interface ConfigFile {
     idleTimeoutMs?: number;
     loopGuard?: { warnAt: number; stopAt: number } | false;
   };
-  /** MCP 服务器（stdio，Phase 5；见 architecture/mcp.md 第 3 节） */
-  mcp?: { servers?: Record<string, McpServerEntry> };
+  /** MCP 服务器（stdio，Phase 5；见 architecture/mcp.md 第 3 节）与工具按需加载（ADR-0067，缺省 "auto"） */
+  mcp?: {
+    servers?: Record<string, McpServerEntry>;
+    toolSearch?: "auto" | "always" | "never";
+  };
   /** Hooks（外部命令，Phase 5；见 architecture/hooks.md 第 2 节） */
   hooks?: Partial<Record<HookPoint, HookEntry[]>>;
   /** 外部 agent：仅用户级生效，见下文 */
@@ -103,7 +106,7 @@ interface ConfigFile {
 
 | 字段 | 合并方式 |
 |---|---|
-| `model`、`permissions.preset`、`permission.reviewer`、`reasoningEffort`、`compaction.threshold`、`compaction.pruneLimit`、`turn.*`（含 `turn.loopGuard`，整值覆盖）、`shell`、`shellPath` | 高层覆盖低层 |
+| `model`、`permissions.preset`、`permission.reviewer`、`reasoningEffort`、`compaction.threshold`、`compaction.pruneLimit`、`mcp.toolSearch`、`turn.*`（含 `turn.loopGuard`，整值覆盖）、`shell`、`shellPath` | 高层覆盖低层 |
 | `providers` | 按 `id` 合并：同 id 条目浅合并（高层字段覆盖），其中 `models` 按模型 id **逐字段合并**（ADR-0024 第 2 节）：顶层字段（`displayName`/`contextWindow`/`maxOutputTokens`/`pricing`/`protocol`/`endpoints`）逐个覆盖、`capabilities` 逐键覆盖、数组字段（`reasoningEffort`/`endpoints`）由最高层整体替换（显式空数组同样生效、不并集）；不同 id 并存 |
 | `permissions.rules` | 追加：高层规则排在低层之后（权限"后写优先"语义见 permissions.md 5.1） |
 | `mcp.servers` | 按服务器 id 浅合并（同 `providers`）；不同 id 并存 |

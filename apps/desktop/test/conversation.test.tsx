@@ -1133,20 +1133,18 @@ describe("Conversation 提问卡片", () => {
 
     // 卡片收起后，ask_user 工具行展开的「问 / 答」里保留换行
     view.pendingQuestion = undefined;
-    view.entries = [
-      tool({
-        callId: "ask-1",
-        name: "ask_user",
-        status: "ok",
-        result: {
-          status: "ok",
-          modelContent: `问：测试失败的用例怎么处理？\n答：补充：${multiLine}`,
-          output: {
-            answers: [{ question: "测试失败的用例怎么处理？", selected: [], text: multiLine }],
-          },
-        },
-      }),
-    ];
+    const askEntry = tool({
+      callId: "ask-1",
+      name: "ask_user",
+      status: "ok",
+    });
+    if (askEntry.result) {
+      askEntry.result.modelContent = `问：测试失败的用例怎么处理？\n答：补充：${multiLine}`;
+      askEntry.result.output = {
+        answers: [{ question: "测试失败的用例怎么处理？", selected: [], text: multiLine }],
+      };
+    }
+    view.entries = [askEntry];
     const completed = mount(view);
     fireEvent.click(completed.getByLabelText("工具详细信息"));
     const pre = completed.container.querySelector(".conversation-tool-output");
@@ -2139,6 +2137,69 @@ describe("Conversation 工具行与拒绝", () => {
     const deny = container.querySelector(".note.deny");
     expect(deny?.textContent).not.toContain("mcp__");
     expect(deny?.textContent).toBe("✕ 已拒绝exa/web_search_exa 热点新闻");
+  });
+
+  it("ADR-0067：mcp_search 显示为「搜索 MCP 工具」，带 target 的 mcp_call 显示为目标工具与参数，无 target 旧日志照原样显示", () => {
+    const view = createSessionView();
+    const searchEntry = tool({
+      key: "t:c-search",
+      callId: "c-search",
+      name: "mcp_search",
+      input: { query: "搜索议题" },
+      subjects: [],
+    });
+    if (searchEntry.result) {
+      searchEntry.result.output = {
+        query: "搜索议题",
+        matches: [{ name: "mcp__github__search_issues", description: "d", inputSchema: {} }],
+      };
+    }
+    const dispatchedEntry = tool({
+      key: "t:c-call",
+      callId: "c-call",
+      name: "mcp_call",
+      input: { tool: "mcp__github__search_issues", arguments: { query: "pruneLimit" } },
+      target: { name: "mcp__github__search_issues", input: { query: "pruneLimit" } },
+      subjects: [{ kind: "mcp", target: "github/search_issues" }],
+    });
+    if (dispatchedEntry.result) {
+      dispatchedEntry.result.output = { items: [] };
+    }
+    const legacyEntry = tool({
+      key: "t:c-legacy",
+      callId: "c-legacy",
+      name: "mcp_call",
+      input: { raw: "legacy" },
+      subjects: [],
+    });
+    if (legacyEntry.result) {
+      legacyEntry.result.output = { ok: true };
+    }
+    view.entries = [searchEntry, dispatchedEntry, legacyEntry];
+    view.pendingPermission = permission({
+      callId: "c-perm",
+      toolName: "mcp__github__create_issue",
+      subjects: [{ kind: "mcp", target: "github/create_issue" }],
+      reason: "调用 MCP 工具需要确认",
+    });
+
+    const { container } = mount(view);
+    const lines = container.querySelectorAll(".tool-line");
+    expect(lines).toHaveLength(3);
+    // 1. mcp_search
+    expect(lines[0]?.querySelector(".tool-name")?.textContent).toBe("搜索 MCP 工具");
+    expect(lines[0]?.querySelector(".tool-arg")?.textContent).toBe("搜索议题");
+    expect(lines[0]?.querySelector(".tool-res")?.textContent).toBe("1 个工具");
+    // 2. 带 target 的 mcp_call 显示为目标工具 github/search_issues 与参数 pruneLimit
+    expect(lines[1]?.querySelector(".tool-name")?.textContent).toBe("github/search_issues");
+    expect(lines[1]?.querySelector(".tool-arg")?.textContent).toBe("pruneLimit");
+    // 3. 无 target 且无 mcp subject 的旧日志照原样显示
+    expect(lines[2]?.querySelector(".tool-name")?.textContent).toBe("mcp_call");
+    // 4. 权限确认卡片按目标工具显示，不出现 mcp_call
+    const permCard = screen.getByRole("region", { name: "权限确认" });
+    expect(permCard.textContent).toContain("调用 MCP 工具");
+    expect(permCard.textContent).toContain("github/create_issue");
+    expect(permCard.textContent).not.toContain("mcp_call");
   });
 
   it("permission 与 config 子类通知不进入消息流，其他通知原样显示", () => {

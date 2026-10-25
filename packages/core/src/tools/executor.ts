@@ -282,6 +282,8 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
             ? registry.get(dispatched.tool, scope.editTool)
             : dispatched.tool;
         if (targetTool === undefined) {
+          const targetName =
+            typeof dispatched.tool === "string" ? dispatched.tool : dispatched.tool.name;
           const names = registry
             .specs(scope.editTool)
             .map((t) => t.name)
@@ -290,7 +292,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
             "error",
             errorResult(
               "unknown_tool",
-              `未知目标工具 "${String(dispatched.tool)}"。可用工具：${names || "（无）"}`,
+              `未知目标工具 "${targetName}"。可用工具：${names || "（无）"}`,
             ),
           );
         }

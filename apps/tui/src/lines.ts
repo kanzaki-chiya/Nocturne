@@ -342,8 +342,13 @@ function layoutEntryBody(
         }
         return lines;
       }
-      const summary = summarizeToolInput(entry.name, entry.input);
-      const head = `${mark} ${entry.name ?? "?"}${subagentModel(entry)} ${summary} ${entry.status}`;
+      const shownName = entry.target?.name ?? entry.name;
+      const shownInput = entry.target !== undefined ? entry.target.input : entry.input;
+      const summary = summarizeToolInput(shownName, shownInput);
+      const head =
+        shownName === "mcp_search"
+          ? `${mark} 搜索 MCP 工具：${summary} ${entry.status}`
+          : `${mark} ${shownName ?? "?"}${subagentModel(entry)} ${summary} ${entry.status}`;
       const lines = [...review, ...rows(entry.key, head, width, { toggle })];
       const reason = subagentRowInfo(entry).reason;
       if (reason !== undefined)

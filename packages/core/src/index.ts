@@ -1611,6 +1611,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     let mcpUpdate: Promise<void> = Promise.resolve();
     let mcpOnDemand = false;
     let omittedMcpToolCount = 0;
+    const activeMcpTools = new Map<string, ReturnType<McpSession["tools"]>[number]>();
     const registeredMcpNames = new Set<string>();
     const warnedMcpConflicts = new Set<string>();
 
@@ -1622,7 +1623,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       tools.unregister(MCP_SEARCH_TOOL_NAME);
       tools.unregister(MCP_CALL_TOOL_NAME);
 
-      const currentMcpTools = mcpSession?.tools() ?? [];
+      const currentMcpTools = [...activeMcpTools.values()];
       const mode =
         config?.resolvedSettings(meta.workspaceRoot).mcpToolSearch ??
         resolved?.mcpToolSearch ??
@@ -1690,6 +1691,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               });
             }
           });
+          for (const tool of mcpSession.tools()) {
+            activeMcpTools.set(tool.name, tool);
+          }
           syncMcpToolsRegistry();
         } catch (e) {
           warnings.push(`MCP 装配失败：${e instanceof Error ? e.message : String(e)}`);
@@ -1714,7 +1718,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           }
           const diff = mcpSession.applyPendingTools();
           for (const name of diff.remove) {
+            activeMcpTools.delete(name);
             warnedMcpConflicts.delete(name);
+          }
+          for (const tool of diff.add) {
+            activeMcpTools.set(tool.name, tool);
           }
           syncMcpToolsRegistry();
         });
@@ -2084,7 +2092,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           makePolicy: (childSessionId) =>
             buildPolicy(session.state().config.permissionPreset, childSessionId),
           makeHookRunner,
-          mcpTools: () => mcpSession?.tools() ?? [],
+          mcpTools: () => [...activeMcpTools.values()],
           mcpOnDemand: () => mcpOnDemand,
           mcpServers: () => [
             ...new Set([

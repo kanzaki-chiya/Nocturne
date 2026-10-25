@@ -73,3 +73,10 @@ MCP 工具进入「按需」模式时，它们不再各自出现在工具列表�
 - **依赖服务商的服务端延迟加载**（Anthropic `defer_loading` 等）：只有个别服务商支持，要在适配器之外按服务商分支；放弃。
 - **BM25 检索**：几十个工具的规模下关键词匹配够用，不引入依赖；工具数量到几百个时再考虑。
 - **不列工具名、只靠搜索**：模型不知道有什么可用，容易不去搜；名单很便宜，保留。
+
+## 实现记录（2026-10-25）
+
+- **`ToolTraits.dispatch` 与执行管线**：`packages/core/src/tools/types.ts` 新增 `ToolDispatchResult` 与 `ToolTraits.dispatch`；`packages/core/src/tools/executor.ts` 在管线第 1 步查找后执行 `dispatch(input)` 解析目标工具与目标输入，后续 `inputSchema` 校验（失败时附带目标工具 `inputSchema`）、`PreToolUse` / `PostToolUse` Hook、权限主体求值与 `PermissionGate.check`、超时、调用及结果预算全部按目标工具执行；`tool.started` 写可选 `target: { name, input }`，`tool.completed` 保持 `mcp_call` 以满足服务商协议。
+- **`mcp_search` / `mcp_call` 与按需模式切换**：`packages/core/src/tools/mcp-on-demand.ts` 实现关键词检索（匹配工具名、说明、参数名，不区分大小写，CJK 按单字拆分，支持 `server` 限定与完整工具名精确命中，最多 5 条；`mcp_search` 说明按服务器列出全部工具名）与 `mcp_call` 分派；配置 `mcp.toolSearch: "auto" | "always" | "never"`（默认 `"auto"`，阈值 10,000 token）在会话打开与每个 Turn 边界（`applyMcp`）判定，Turn 内不切换，保证请求 `tools` 前缀逐字节不变；子会话沿用父会话模式，受限池（如 `explore`）只搜得到、调得到池内工具；`/context` 的 `tools` 段在按需模式下注明「MCP 按需，N 个工具未列出」。
+- **客户端显示**：桌面端与手机网页（`apps/desktop/src/Conversation.tsx`、`context-panel.tsx`）、TUI（`apps/tui/src/lines.ts`、`format.ts`）与 CLI（`apps/cli/src/render.ts`）在存在 `target` 时按目标工具显示名称、参数与权限确认卡片，`mcp_search` 显示为「搜索 MCP 工具：<query>」，无 `target` 的旧日志照原样显示。
+

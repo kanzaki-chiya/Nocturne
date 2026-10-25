@@ -1047,7 +1047,7 @@ export function SettingsPage({
   );
 }
 
-function thresholdText(value: string | undefined, pruneLimit?: string | undefined): string {
+function thresholdText(value: string | undefined, pruneLimit?: string): string {
   if (value === undefined) return "默认";
   const base = value.endsWith("%")
     ? `上下文用到 ${value} 时自动压缩`
