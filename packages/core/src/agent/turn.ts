@@ -229,9 +229,11 @@ export async function runTurn(
     });
   }
 
-  // context.md 6.5：每类压缩每个 Turn 至多一次（成功或失败均不重复）
+  // context.md 6.5 + ADR-0065：配额按「两次模型请求之间」计（每次 message.assistant
+  // 写入后清零）；摘要一旦失败，本 Turn 内不再尝试摘要（summaryFailed 保持为 true）。
   let pruneAttempted = false;
   let summaryAttempted = false;
+  let summaryFailed = false;
   let forceCompaction = false;
   /** 最近一次请求实际携带的思考档位（invalid_request 定向提示用） */
   let sentEffort: string | undefined;
@@ -418,8 +420,8 @@ export async function runTurn(
         overBudget: built.overBudget,
         compaction: built.compaction?.kind,
       });
-      // 6.5：执行压缩计划——L1 修剪 / L2 摘要各至多一次；
-      // 预防性压缩失败降级为未压缩继续，必须压缩失败走 6.6 报错
+      // 6.5 + ADR-0065：执行压缩计划——两次模型请求之间 L1 修剪 / L2 摘要各至多一次；
+      // 预防性摘要失败降级为未压缩继续且本 Turn 不再摘要，必须压缩失败走 6.6 报错
       const plan = built.compaction;
       if (plan?.kind === "prune" && !pruneAttempted) {
         pruneAttempted = true;
@@ -438,9 +440,11 @@ export async function runTurn(
         const ok = await runSummaryPlan(plan);
         if (aborted(signal)) return await finish("aborted");
         if (ok) {
+          pruneAttempted = true;
           forceCompaction = false;
           continue;
         }
+        summaryFailed = true;
         if (!built.mustCompact) {
           session.emitEphemeral(
             "runtime.warning",
@@ -526,6 +530,10 @@ export async function runTurn(
       // 3. emit message.assistant，按结束原因分流
       const reason = outcome.finishReason;
       await emitAssistant(outcome.acc, messageId, reason);
+      // ADR-0065 §1/§2：模型请求完成（message.assistant 写入）后清零本窗口的
+      // 修剪与摘要标记；若本 Turn 摘要已失败过，则 summaryAttempted 保持为 true。
+      pruneAttempted = false;
+      summaryAttempted = summaryFailed;
 
       if (reason === "length") return await finish("truncated");
       if (reason === "content_filter") return await finish("refused");

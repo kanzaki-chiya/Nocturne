@@ -1195,7 +1195,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   // 6.5：估算超过阈值（或已超预算）→ 两级压缩计划：
   //   存在"最新压缩边界之后"的新闭合边界 → 先 L1 修剪（便宜、立刻生效）；
   //   无新边界（修剪已用过或没有可剪内容）→ L2 摘要计划（携带请求）。
-  // 调用方每类每 Turn 至多执行一次；都失败且仍超预算 → 6.6 报错路径。
+  // 调用方两次模型请求之间每类至多执行一次（ADR-0065）；都失败且仍超预算 → 6.6 报错路径。
   const request: ModelRequest = {
     model: model.ref.model,
     // ADR-0026 §4：生效协议随请求带给路由 Provider（不透明数据，不解释）
@@ -1224,8 +1224,8 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   // 修剪线 P 与摘要阈值 S（6.5）：S 达到预算时两种预防性压缩都停用
   const preventive = summaryThreshold < budgetTokens;
   const pruneLine = Math.min(PRUNE_THRESHOLD * budgetTokens, summaryThreshold);
-  // ADR-0063 §2：本 Turn 已修剪过、修剪后估算仍在 P 以上时，接着摘要，
-  // 不必等再次超过 S。判定只在这里做，Agent Loop 只执行计划。
+  // ADR-0063 §2 + ADR-0065 §3：本次模型请求前刚执行过修剪、重建后估算仍在 P 以上时，
+  // 同一配额窗口内接着摘要，不必等再次超过 S。判定只在这里做，Agent Loop 只执行计划。
   const pruneInsufficient =
     preventive && input.compactionState?.pruneAttempted === true && estimated > pruneLine;
   let compaction: CompactionPlan | undefined;

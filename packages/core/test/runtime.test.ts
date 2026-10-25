@@ -935,21 +935,20 @@ describe("上下文与运行时命令（Phase 2）", () => {
     await session.close();
   });
 
-  it("ADR-0063 §2：修剪后仍超过 P → 同一 Turn 内接着摘要；低于 P 只修剪", async () => {
+  it("ADR-0063 §2 + ADR-0065 §3：同一配额窗口内修剪后仍超过 P → 接着摘要；低于 P 只修剪", async () => {
     // 预算 B = 40000 - 8192 - 1024 = 30784；P ≈ 24627，S ≈ 27706，R ≈ 3078。
-    // 第一次构建：锚定 usage 25k + 大工具结果 → 超预算，修剪（回收约 7k）。
-    // 修剪后锚定值失效（压缩事件在锚点之后），第二次请求用自己的 usage 重新锚定：
-    // 这份 usage 决定"修剪后是否仍在 P 以上"——正是 §6.5 修订要覆盖的场景。
+    // 第一步同时输出一段不可修剪的助手文字与 28k 字符（约 7k token）的工具结果：
+    // 修剪回收约 7k 后，在同一配额窗口（下一次模型请求之前）立即重建——
+    // 剩余估算仍在 (P, S) 内时同一窗口接着摘要，低于 P 时只修剪。
     const cases = [
-      // 26k：仍在 P 以上且低于 S → 接着摘要（改动前要等到下一次超过 S）
-      { secondInput: 26_000, expect: ["prune", "summary"] },
-      // 22k：低于 P → 只修剪
-      { secondInput: 22_000, expect: ["prune"] },
+      // 修剪后估算约 25.5k（仍在 P 以上且低于 S）→ 同一窗口接着摘要
+      { assistantTokens: 23_500, expect: ["prune", "summary"] },
+      // 修剪后估算约 20k（低于 P）→ 只修剪
+      { assistantTokens: 18_000, expect: ["prune"] },
     ];
     for (const c of cases) {
       const ws = makeTmpDir("nct-rt-escalate-");
       writeFileSync(path.join(ws, "big.txt"), "z".repeat(28_000));
-      writeFileSync(path.join(ws, "small.txt"), "s".repeat(100));
       const provider = new FakeProvider({
         models: [
           {
@@ -961,20 +960,19 @@ describe("上下文与运行时命令（Phase 2）", () => {
         ],
         scripts: [
           [
+            { type: "text_delta", text: "汉".repeat(c.assistantTokens) },
             { type: "tool_call", toolCallId: "r1", name: "read", input: { path: "big.txt" } },
-            { type: "usage", usage: { inputTokens: 25_000, outputTokens: 1000 } },
             { type: "finish", reason: "tool_calls" },
           ],
-          [
-            { type: "tool_call", toolCallId: "r2", name: "read", input: { path: "small.txt" } },
-            { type: "usage", usage: { inputTokens: c.secondInput, outputTokens: 1000 } },
-            { type: "finish", reason: "tool_calls" },
-          ],
-          // 摘要调用（文本即摘要正文）
-          [
-            { type: "text_delta", text: "摘要：读过大文件" },
-            { type: "finish", reason: "stop" },
-          ],
+          ...(c.expect.includes("summary")
+            ? [
+                // 摘要调用（文本即摘要正文）
+                [
+                  { type: "text_delta", text: "摘要：读过大文件" } as const,
+                  { type: "finish", reason: "stop" } as const,
+                ],
+              ]
+            : []),
           [
             { type: "text_delta", text: "done" },
             { type: "finish", reason: "stop" },
@@ -991,6 +989,179 @@ describe("上下文与运行时命令（Phase 2）", () => {
       expect(kinds).toEqual(c.expect);
       await session.close();
     }
+  });
+
+  it("ADR-0065：同一 Turn 内多次修剪与多次摘要（aa48137e 回归形状：修剪→摘要→再增长到预算→再修剪与摘要并继续）", async () => {
+    // 预算 B = 40000 - 8192 - 1024 = 30784；P ≈ 24627，S ≈ 27706，R ≈ 3078，K ≈ 7696。
+    const ws = makeTmpDir("nct-rt-multi-compact-");
+    // CJK 1 字 = 1 token：10k 汉字（< read 的 28k 字符上限）即 10k token（> K 且 > R），
+    // 使每步之后保留区边界推进到最新一步；需要直接触发 summary 的步骤用小文件（< R）。
+    const bigCjk = ("甲".repeat(200) + "\n").repeat(50);
+    writeFileSync(path.join(ws, "step1.txt"), bigCjk);
+    writeFileSync(path.join(ws, "step2.txt"), bigCjk);
+    writeFileSync(path.join(ws, "step3.txt"), "c".repeat(400));
+    writeFileSync(path.join(ws, "step4.txt"), bigCjk);
+    writeFileSync(path.join(ws, "step5.txt"), "e".repeat(400));
+    const provider = new FakeProvider({
+      models: [
+        {
+          ...tinyModel,
+          ref: { provider: "fake", model: "fake-model" },
+          contextWindow: 40_000,
+          maxOutputTokens: 8192,
+        },
+      ],
+      scripts: [
+        // Step 1：读 step1.txt，锚定 20k + 6k 工具输出 ≈ 26k > P → 触发第 1 次 prune
+        [
+          { type: "tool_call", toolCallId: "c1", name: "read", input: { path: "step1.txt" } },
+          { type: "usage", usage: { inputTokens: 20_000, outputTokens: 500 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // Step 2（prune 后已清零标记）：读 step2.txt，锚定 20k + 6k ≈ 26k > P → 触发第 2 次 prune
+        [
+          { type: "tool_call", toolCallId: "c2", name: "read", input: { path: "step2.txt" } },
+          { type: "usage", usage: { inputTokens: 20_000, outputTokens: 500 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // Step 3：读 step3.txt，锚定 26k + 6k ≈ 32k > B（但保留区 <= K，无新可修剪边界达到 R）→ 触发第 1 次 summary
+        [
+          { type: "tool_call", toolCallId: "c3", name: "read", input: { path: "step3.txt" } },
+          { type: "usage", usage: { inputTokens: 28_000, outputTokens: 500 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // 第 1 次摘要调用
+        [
+          { type: "text_delta", text: "第一次摘要：已完成 step1-step3" },
+          { type: "finish", reason: "stop" },
+        ],
+        // Step 4（第 1 次摘要后继续增长）：读 step4.txt，锚定 20k + 6k ≈ 26k > P → 触发第 3 次 prune
+        [
+          { type: "tool_call", toolCallId: "c4", name: "read", input: { path: "step4.txt" } },
+          { type: "usage", usage: { inputTokens: 20_000, outputTokens: 500 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // Step 5（涨回预算，复现 aa48137e）：读 step5.txt，锚定 28k + 6k > B → 触发第 2 次 summary
+        [
+          { type: "tool_call", toolCallId: "c5", name: "read", input: { path: "step5.txt" } },
+          { type: "usage", usage: { inputTokens: 28_000, outputTokens: 500 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // 第 2 次摘要调用
+        [
+          { type: "text_delta", text: "第二次摘要：已完成 step1-step5" },
+          { type: "finish", reason: "stop" },
+        ],
+        // Step 6：正常收尾
+        [
+          { type: "text_delta", text: "全部完成" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, ws, { provider });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    expect(await session.submit({ text: "执行长任务" })).toBe("done");
+
+    const compacted = events
+      .filter((e) => e.type === "context.compacted")
+      .map((e) => (e.type === "context.compacted" ? e.payload.kind : ""));
+    expect(compacted).toEqual(["prune", "prune", "summary", "prune", "summary"]);
+    await session.close();
+  });
+
+  it("ADR-0065：摘要成功后重建仍超硬预算 → 立即以 compaction_failed 结束，不追加尝试", async () => {
+    const ws = makeTmpDir("nct-rt-summary-overbudget-");
+    writeFileSync(path.join(ws, "a.txt"), "a".repeat(2_000));
+    const provider = new FakeProvider({
+      models: [
+        {
+          ...tinyModel,
+          ref: { provider: "fake", model: "fake-model" },
+          contextWindow: 10_000,
+          maxOutputTokens: 1_000,
+        },
+      ],
+      scripts: [
+        [
+          { type: "tool_call", toolCallId: "c1", name: "read", input: { path: "a.txt" } },
+          { type: "usage", usage: { inputTokens: 8_500, outputTokens: 200 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // 摘要本身极长，导致摘要成功后重建仍超出硬预算（10000 - 1000 - 1024 = 7976）
+        [
+          { type: "text_delta", text: "摘".repeat(9_000) },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, ws, { provider });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    expect(await session.submit({ text: "go" })).toBe("error");
+    const done = events.find((e) => e.type === "turn.completed");
+    expect(done?.type === "turn.completed" && done.payload.error?.code).toBe("compaction_failed");
+    // 摘要只执行一次，不会在同一窗口死循环重复摘要
+    expect(provider.requests).toHaveLength(2);
+    await session.close();
+  });
+
+  it("ADR-0065：预防摘要失败后本 Turn 不再摘要；后续超预算能修剪就修剪，修剪后仍超预算则 compaction_failed", async () => {
+    const ws = makeTmpDir("nct-rt-summary-fail-once-");
+    // 10k 汉字（10k token > K ≈ 7696）：使保留区边界推进到 c2 并满足回收量 >= R
+    writeFileSync(path.join(ws, "big.txt"), ("乙".repeat(200) + "\n").repeat(50));
+    writeFileSync(path.join(ws, "small.txt"), "y".repeat(400));
+    const provider = new FakeProvider({
+      models: [
+        {
+          ...tinyModel,
+          ref: { provider: "fake", model: "fake-model" },
+          contextWindow: 40_000,
+          maxOutputTokens: 8192,
+        },
+      ],
+      scripts: [
+        // Step 1：读 small.txt，锚定 27.5k > S（无足够工具输出可修剪）→ 下一步尝试预防性摘要
+        [
+          { type: "tool_call", toolCallId: "c1", name: "read", input: { path: "small.txt" } },
+          { type: "usage", usage: { inputTokens: 27_500, outputTokens: 300 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // 预防性摘要只返回工具调用、无文本 → 摘要失败（不触发空流重试），记 summaryFailed
+        [
+          { type: "tool_call", toolCallId: "ignored", name: "read", input: { path: "small.txt" } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // Step 2 主请求：读 big.txt（10k token 工具结果），锚定 22k + 10k > B → 下一步超预算
+        [
+          { type: "tool_call", toolCallId: "c2", name: "read", input: { path: "big.txt" } },
+          { type: "usage", usage: { inputTokens: 22_000, outputTokens: 300 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // Step 3（超预算时先成功修剪 big.txt，不再重试摘要）：再次读 small.txt，这次锚定 31k > B
+        [
+          { type: "tool_call", toolCallId: "c3", name: "read", input: { path: "small.txt" } },
+          { type: "usage", usage: { inputTokens: 31_000, outputTokens: 300 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+      ],
+    });
+    const { runtime } = await makeRuntime(undefined, ws, { provider });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    expect(await session.submit({ text: "开始" })).toBe("error");
+
+    const compacted = events
+      .filter((e) => e.type === "context.compacted")
+      .map((e) => (e.type === "context.compacted" ? e.payload.kind : ""));
+    // Step 3 前能修剪就修剪了一次；Step 4 前无足够内容可修剪且本 Turn 不再摘要 → compaction_failed
+    expect(compacted).toEqual(["prune"]);
+    const done = events.find((e) => e.type === "turn.completed");
+    expect(done?.type === "turn.completed" && done.payload.error?.code).toBe("compaction_failed");
+    // 总共 4 次请求（Step 1、失败的摘要、Step 2、Step 3），没有第二次摘要请求
+    expect(provider.requests).toHaveLength(4);
+    await session.close();
   });
 
   it("超预算且无可行边界：Turn 以 error(compaction_failed) 结束", async () => {

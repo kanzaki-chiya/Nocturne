@@ -47,7 +47,7 @@ export interface BuildContextInput {
    * false 关闭；缺省 DEFAULT_LOOP_GUARD（与 Agent Loop 同一份签名实现）。
    */
   loopGuard?: LoopGuardConfig | false | undefined;
-  /** 编排者提供本 Turn 已尝试级别；强制路径不受预防阈值限制。 */
+  /** 编排者提供本次请求窗口内已尝试级别（ADR-0065；摘要失败后本 Turn 保持 summaryAttempted）；强制路径不受预防阈值限制。 */
   compactionState?:
     | {
         pruneAttempted?: boolean;

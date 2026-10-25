@@ -56,3 +56,11 @@
 - **维持每 Turn 一次，到顶了让用户发「继续」**：用户必须盯着，长任务会无故中断，违背自动执行的初衷。
 - **完全取消次数限制**：压缩若没有回收效果可能在同一步反复执行；以「两次模型请求之间至多一次」作为最小的进展条件。
 - **摘要失败后也允许在有进展后重试**：失败多为服务商或模型问题，重试代价接近一次完整请求，收益不确定；维持失败后本 Turn 不再摘要。
+
+## 实现记录（2026-10-25）
+
+- **配额窗口状态**：`packages/core/src/agent/turn.ts` 在 `pruneAttempted` / `summaryAttempted` 之外维护 Turn 级的 `summaryFailed`。每次模型请求完成并写入 `message.assistant` 后，重置 `pruneAttempted = false`、`summaryAttempted = summaryFailed`；因此两次模型请求之间修剪与摘要各至多执行一次，而摘要请求一旦失败（流错误、超时、空摘要或仅返回工具调用），本 Turn 后续窗口的 `summaryAttempted` 保持为 `true`，不再重复尝试摘要，超预算或 `context_overflow` 时仍可尝试尚未在本窗口用过的 `prune`。
+- **摘要成功后立即重建的边界**：`summary` 计划执行成功时同步标记本窗口 `pruneAttempted = true`，保证重建后若仍超硬预算不会在同一窗口追加尝试，直接以 `compaction_failed` 结束。
+- **与 ADR-0063 §2 衔接**：`packages/core/src/context/build.ts` 的 `pruneInsufficient` 仍读取 `compactionState.pruneAttempted`；因为 `pruneAttempted` 在 `message.assistant` 写入后清零，该判定自然收束在「本次模型请求前刚执行过修剪」的同一配额窗口内。
+- **测试**：`packages/core/test/runtime.test.ts` 覆盖同一配额窗口内修剪升级摘要、同一 Turn 内多次修剪与多次摘要（`aa48137e` 回归形状）、摘要成功后重建仍超硬预算立即 `compaction_failed`、预防性摘要失败后本 Turn 不再摘要但后续超预算仍可先修剪再判定 `compaction_failed`。
+

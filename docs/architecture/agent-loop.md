@@ -131,7 +131,7 @@ Provider 流每次等待前都检查是否已中止，因此中断落在两次�
 - 公共流包装分别限制首个事件等待和事件间空闲（默认 30 秒、300 秒；`turn.firstEventTimeoutMs` / `turn.idleTimeoutMs` 可调）。适配器在上游开始响应时发出的 `heartbeat` 也满足首事件等待并重置空闲计时，但不转发、不算输出。超时视为 `ProviderError(kind="timeout", retryable=true)`；普通 Step 已有输出时也按上述规则丢弃并重发。普通 Step、自动与手动摘要共用这一计时限制，见 [ADR-0014](../decisions/ADR-0014-stream-timeout-empty-response.md) 及其 [ADR-0055 修订](../decisions/ADR-0055-retry-after-partial-stream.md)。
 - 每次尝试单独计时：`timing` 只取产生该消息的那次尝试（TTFT 与总耗时，口径见 [events.md](../protocols/events.md) 第 4 节 `AssistantTiming`），失败重试的尝试不计入。
 - `stop` 但没有文本与工具调用时，Agent Loop 在持久化 assistant 消息前按可重试的空响应处理；受同一重试上限约束，用尽后以 `error.code="provider_empty_response"` 结束。该判断不改变 Provider 的公共事件与错误类型，因此没有新的 Provider kind；错误语义变化见同一 ADR。
-- `context_overflow` 不重试同一请求，而是要求 Context Builder 给出压缩计划（`mustCompact`）并重建后重试一次；可尝试的计划按 prune → summary 顺序，每类每 Turn 至多一次，都已尝试后仍溢出则以 `error(code="compaction_failed")` 结束。
+- `context_overflow` 不重试同一请求，而是要求 Context Builder 给出压缩计划（`mustCompact`）并重建后重试一次；可尝试的计划按 prune → summary 顺序，两次模型请求之间每类至多一次（`message.assistant` 写入后清零；摘要失败后本 Turn 不再摘要，见 [ADR-0065](../decisions/ADR-0065-compaction-per-request.md)），当前请求窗口内都已尝试后仍溢出则以 `error(code="compaction_failed")` 结束。
 
 ### 3.6 持久化失败
 
