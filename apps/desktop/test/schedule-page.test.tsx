@@ -205,7 +205,7 @@ describe("定时任务页", () => {
         api={api({
           listSchedules: vi.fn(async () => ({
             tasks: [],
-            scheduler: { running: false, reason: "disabled" },
+            scheduler: { running: false, reason: "disabled" as const },
             warnings: [],
           })),
         })}
