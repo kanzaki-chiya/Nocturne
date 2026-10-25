@@ -36,8 +36,8 @@ import type {
 } from "../protocol/index.js";
 import {
   advanceLoopGuard,
-  canonicalLoopInput,
   DEFAULT_LOOP_GUARD,
+  loopGuardArgs,
   loopGuardSignature,
   type LoopGuardRun,
 } from "../protocol/index.js";
@@ -265,7 +265,7 @@ export async function runTurn(
     if (loopGuard === false) return undefined;
     // 与 Builder 的重建口径一致：取消/恢复补写的结算不算"工具返回的结果"
     if (status === "cancelled") return undefined;
-    const args = call.input !== undefined ? canonicalLoopInput(call.input) : (call.rawInput ?? "");
+    const args = loopGuardArgs(call);
     loopRun = advanceLoopGuard(loopRun, loopGuardSignature(call.name, args, modelContent));
     if (loopRun.count < loopGuard.stopAt) return undefined;
     return {
