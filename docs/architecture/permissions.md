@@ -261,7 +261,7 @@ PermissionGate.check(subjects, signal)
 
 选项集由权限层计算：任一主体命中高风险命令表、`-EncodedCommand` 或工作区外 edit 时，只给 `allow_once`、`deny`、`deny_stop`；任一主体为 `schedule` 时不提供 `allow_project`（Grant 只按 `动作:任务名` 精确匹配、不看指令，项目级授权会放行以后同名任务的不同指令），其余为 `allow_once`、`allow_session`、`deny`、`deny_stop`；其他请求给出上表五项。客户端照 `permission.requested.options` 渲染，权限层也拒绝回复里不在选项集中的长期授权；`PermissionReply.remember` 与所选 Grant 的持久化由权限层完成，客户端只表达意图。
 
-两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时（Runtime 选项 `interactive = false`），审查后的剩余 `ask` 视为 `deny`（`source: "non_interactive"`，不发 `permission.requested`）；`smart` 的审查 allow 执行，交给你确认（`unsure`）走上述非交互拒绝；要在无人值守场景放行使用 `--yes`（5.3 的命令行提升）或预写规则，不提供"非交互默认允许"的配置项。非交互拒绝的提示文案可由调用方注入（`nonInteractiveDenyHint`）——子会话用它告诉子模型"无法请求用户确认，需要写入或执行的操作在 `finish` 结果中说明，由父代理执行"（[subagent.md](subagent.md) 7.3），CLI 非交互模式沿用通用文案。
+两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时（Runtime 选项 `interactive = false`，或定时会话还没被接手——见 [schedule.md](schedule.md) 第 4 节：`message.user` 少于 2 条），审查后的剩余 `ask` 视为 `deny`（`source: "non_interactive"`，不发 `permission.requested`）；`smart` 的审查 allow 执行，交给你确认（`unsure`）走上述非交互拒绝；要在无人值守场景放行使用 `--yes`（5.3 的命令行提升）或预写规则，不提供"非交互默认允许"的配置项。非交互拒绝的提示文案可由调用方注入（`nonInteractiveDenyHint`）——子会话用它告诉子模型"无法请求用户确认，需要写入或执行的操作在 `finish` 结果中说明，由父代理执行"（[subagent.md](subagent.md) 7.3），CLI 非交互模式沿用通用文案。
 
 等待回复期间 `signal` 中止：记 `permission.resolved(action="deny", source="cancelled")`，该调用按 `cancelled` 结算。
 

@@ -27,7 +27,7 @@
 | 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；API key 经环境变量或操作系统凭据后端进入。`credentials.json` 默认只存索引或密文；用户显式选择后，账号登录记录可以 `plaintext` 写入该文件（[provider-setup.md](provider-setup.md) 第 3 节） |
 | 命令行参数 | `nctrn` 参数 | 可信 | 本次启动的显式意图，优先级最高 |
 
-机器维护的运行时数据（信任列表、项目 Grant、向导配置、MCP 与外部 agent 管理、程序设置、凭据索引、最近模型列表、models.dev 缓存；另有只读的 Magpie 接入文件 `magpie.json`，由 Magpie 写）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`mcp.json`、`external-agents.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。
+机器维护的运行时数据（信任列表、项目 Grant、向导配置、MCP 与外部 agent 管理、程序设置、凭据索引、最近模型列表、models.dev 缓存；另有只读的 Magpie 接入文件 `magpie.json`，由 Magpie 写）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`mcp.json`、`external-agents.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。定时任务同样是程序维护的 `<NOCTURNE_HOME>/schedules.json` 和 `schedules/`，不参与上面的分层合并，见 [schedule.md](schedule.md)。
 
 远程登记单独保存在 `<NOCTURNE_HOME>/remote.json`，只属于用户层，不参与分层合并，项目配置不能覆盖或引用。原子写入，POSIX 权限 0600；只存中继地址、电脑 id、启停与配对设备公钥，私钥存凭据后端。损坏时保留文件、按未登记并警告。精确格式与主机生命周期见 [RPC 远程主机](../protocols/rpc.md#11-远程主机)。
 

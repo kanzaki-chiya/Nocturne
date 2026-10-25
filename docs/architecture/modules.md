@@ -38,6 +38,7 @@
 - `hooks`（实现模块）依赖 protocol、platform、diagnostics；`HookRunner` 接口定义在 `permission`（`tools` 保留类型重导出），实例由 `core/index` 按会话配置装配注入——`tools` 与 `agent` 只见接口，不 import 实现（见 [hooks.md](hooks.md)）。
 - `diagnostics`（调试通道）只依赖 protocol、platform；被 agent / context / tools / hooks / index 经注入使用，并经 `McpConnector` 传给 `packages/mcp`（见 [observability.md](observability.md)）。
 - `skills`（技能发现与目录构建）只依赖 protocol、platform；由 `core/index` 与 `tools` 使用，不经公开 API 导出（见 [skills.md](skills.md)）。
+- `schedule`（定时任务的计划、存储与调度循环）依赖 protocol、platform，以及 session 的锁和 config 的原子写；不依赖 agent、tools。由 `core/index` 装配，`tools` 只经注入的接口读写（见 [schedule.md](schedule.md)）。
 - `packages/mcp`（`@nocturne/mcp`）只允许依赖 `@nocturne/core` 的 `index` / `protocol/index` 两个入口与 `@modelcontextprotocol/sdk`——与 `apps/*` 同一检查规则；**Core 不依赖 `mcp`**（见 [mcp.md](mcp.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)）。
 - `packages/acp`（`@nocturne/acp`）只依赖 Core 公开入口与 `@agentclientprotocol/sdk`，由 CLI 经 `RuntimeOptions.externalAgents` 注入；Core 不依赖 ACP 实现。权限判定留在 Core 权限层，connector 只映射 ACP 主体与一次性选项，见 [subagent.md](subagent.md#17-外部-agentacp)。
 - `packages/remote`（`@nocturne/remote`）负责同构配对、签名握手、加密通道与中继客户端，只用标准 Web API，不依赖 Node、第三方或任何项目内包；见 [remote-channel.md](../protocols/remote-channel.md) 与 [relay.md](../protocols/relay.md)。rpc 仅开发测试依赖它，src 不引用；apps/relay 运行时依赖它。Core 不依赖它。
@@ -131,6 +132,13 @@
 - **公开接口**：`discoverSkills`、`skillCatalog`、`renderSkill`、`DiscoveredSkill`——Core 内部模块，不经 `core/index` 重导出；客户端只见 `protocol` 的类型、`parseSkillSlash`、`skillListLines` 与 `BUILTIN_SLASH_COMMANDS`。
 - **依赖**：protocol、platform。**不能依赖**：config、tools、agent、session、provider、context。
 - 详见 [skills.md](skills.md)。
+
+### schedule
+
+- **负责**：定时任务的计划校验、`schedules.json` 与运行历史、调度循环和补跑。开会话由 `core/index` 注入，本模块不碰 Agent。
+- **不负责**：权限判定、工具声明、界面。
+- **依赖**：protocol、platform、session（只为会话锁）、config（只为原子写）。**不能依赖**：agent、tools。
+- 详见 [schedule.md](schedule.md)。
 
 ### diagnostics
 

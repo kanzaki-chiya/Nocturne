@@ -30,6 +30,7 @@
 | [mcp.md](architecture/mcp.md) | MCP 客户端：stdio / Streamable HTTP、设置管理与探测、热更新、工具包装与结果映射、`mcp` 权限类别 |
 | [hooks.md](architecture/hooks.md) | Hooks：事件点、外部命令契约、与权限的关系、项目信任 |
 | [subagent.md](architecture/subagent.md) | Subagent（子代理）：`task` 工具契约、Launcher 注入、子会话权限收敛、ACP 外部 agent 的管理、探测、斜杠点名与审计边界 |
+| [schedule.md](architecture/schedule.md) | 定时任务：计划、存储、调度与补跑、无人值守会话（ADR-0064） |
 | [observability.md](architecture/observability.md) | 诊断日志：开关与输出位置、记录种类、脱敏规则 |
 | [providers.md](architecture/providers.md) | Provider 抽象、模型能力、流式与错误归一化 |
 | [magpie.md](architecture/magpie.md) | Magpie 接入：Agent 插件、只读接入文件 `magpie.json` 的契约、分层位置、`external-file` 网关 key、模型与协议映射、断开恢复与排障（ADR-0062） |

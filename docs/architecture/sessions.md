@@ -130,6 +130,8 @@ interface SessionRecovery {
 
 读取每个日志的开头和文件修改时间列出会话，可按工作目录过滤：实现只读前 64 KiB（`readFileSlice`），从头部解析 `session.created` 首行、第一条 `message.user`（取 `firstText`）与头部内出现的 `session.titled`；开头里找不到第一条用户消息或首行被截断时，回退读整份日志。截断只按完整行切分，落在多字节字符或一行中间的尾部直接丢弃，不当坏记录。每条摘要附带 `locked`（锁文件存在且持有者看起来存活），供客户端标注"正在使用/残留锁"。列表是只读操作，不取得锁；除上述头部扫描外不解析日志主体。单个日志损坏不阻塞整个列表（该条按最小摘要返回）。会话数量增长到影响启动时间时，再加入可随时从日志重建的索引文件。
 
+定时任务发起的会话在 `session.created.schedule`（`{ taskId, scheduledAt, trigger }`）里记下来源，摘要带 `schedule` 供侧栏分组。是否仍无人值守不另存：日志里的 `message.user` 少于 2 条就是非交互（调度器提交的是第 1 条），出现第 2 条之后转为交互且不再变回去。回退不删事件，关闭再打开结论不变。分叉清掉 `schedule`。见 [schedule.md](schedule.md) 第 4 节。
+
 子会话（`session.created.parent` 存在者）默认**不出现在列表中**：`listSessions({ includeSubagents?: boolean })` 缺省为 false，`--sessions`、`/resume`、`-c/--continue` 都只面向顶层会话（`/resume` 与 `-c/--continue` 另按当前目录过滤，`--sessions` 列出全部）；子会话是子代理运行的痕迹而非可交互会话。摘要带 `parent` 字段供需要时区分；按 id 显式恢复一条子日志仍然可行（它只是打开一条普通日志，见 [subagent.md](subagent.md) 第 5 节）。
 
 当前任务清单由 [ADR-0028](../decisions/ADR-0028-session-task-list.md) 的 `todo_write` 结果派生：只有持久化成功的 `tool.completed` 同时满足 `name: "todo_write"`、`status: "ok"`、`output.items` 有效，才原子替换 `SessionState.todos`。`[]` 清空；拒绝、失败、中断、只有 `tool.started` 或日志写入失败均保留旧清单。清单非空且每项均为 `completed` 时，下一条持久化的 `message.user` 先将 `SessionState.todos` 置空，再处理该消息；尚有未完成项时保留清单，历史工具快照始终保留。恢复时从日志逐事件重放同一归档规则，不读取独立清单文件；旧日志初始清单为空。子会话有独立状态，不向父会话合并。客户端遵循同一规则，见 [view.md](../protocols/view.md)。

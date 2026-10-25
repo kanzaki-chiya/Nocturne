@@ -117,4 +117,11 @@
 - 全部交互式预设（含 `bypass`）追加 `schedule * → ask`，且 `userOnly`，所以 `smart` 不送审、直接问人。用户可写显式规则 `schedule * → allow` 放行。`--yes` 沿既有规则提升。
 - 直接 `edit` `<NOCTURNE_HOME>/schedules.json`（及 `schedules/**`）同样至少 ask、`userOnly`，避免绕过 `schedule` 主体。与授权数据一样只是提示，`shell` 仍可绕过。
 
-其余实现细节（cron、恢复交互的判定、「有非交互拒绝」的推出、手机端范围）在后续步骤补进本节。
+其余实现：
+
+- cron 自己实现五段语法（`*`、数字、范围、步长、列表、月/星期三字母、星期 0/7 为周日、日与星期都限定时取或）。不引入依赖，也不支持 `@daily`、`?`、`L`、`W`、`#` 和秒字段。最小间隔看未来 800 天内的相邻触发。夏令时跟 JS `Date`。
+- 恢复交互：定时会话的 `message.user` 少于 2 条时非交互（调度器的提交是第 1 条）；第 2 条是客户端提交，之后保持交互。只数日志事件，回退不删事件，所以重新打开结论不变。没有新事件。
+- 「有非交互拒绝」：这一轮 `permission.resolved` 里 `source: "non_interactive"` 的条数，写入历史行的 `denied`。客户端不扫日志。
+- 手机：`schedule.list`、`schedule.history`、`schedule.runNow` 在远程白名单；`save` 和 `delete` 只在本机。页面控件按这个禁用。
+
+与 ADR 正文不一致的地方：无。`update` / `pause` / `delete` 的权限 target 用任务 id 而不是名称，原因见上。
