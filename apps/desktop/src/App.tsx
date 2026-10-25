@@ -14,7 +14,13 @@ import type {
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
 import { BackendLogsPage, SHELL_LOG_ID, type BackendLogTarget } from "./BackendLogsPage";
 import { Composer, type ComposerSubmit, type WorkspaceChoice } from "./Composer";
-import { Conversation, QuestionCard, type FileLinkHooks, type SubagentLinks } from "./Conversation";
+import {
+  Conversation,
+  QuestionCard,
+  type ConversationProps,
+  type FileLinkHooks,
+  type SubagentLinks,
+} from "./Conversation";
 import {
   activeConversationCount,
   Conversations,
@@ -34,6 +40,8 @@ import { RemotePage } from "./RemotePage";
 import { useRemoteStatus } from "./remote";
 import type { RemoteStatus } from "@nocturne/rpc/client";
 import { UsagePage } from "./UsagePage";
+import { SchedulePage, type ScheduleWorkspaceOption } from "./SchedulePage";
+import { catchupPreface } from "./schedule-format";
 
 import { BackendPool } from "./backends";
 import type { DesktopHost } from "./host";
@@ -211,6 +219,11 @@ export function App({ host }: { host: DesktopHost }) {
    * （inert），返回时还是原来的会话和滚动位置。
    */
   const [page, setPage] = useState<SettingsSection | null>(null);
+  /** 定时任务页盖在会话区上，左栏会话树保持显示（不同于设置区） */
+  const [schedulesOpen, setSchedulesOpen] = useState(false);
+  const [scheduledExpanded, setScheduledExpanded] = useState(false);
+  const [enabledScheduleCount, setEnabledScheduleCount] = useState<number | undefined>();
+  const [scheduleNames, setScheduleNames] = useState<ReadonlyMap<string, string>>(() => new Map());
   const settingsRef = useRef<HTMLDivElement>(null);
   // ── 自动更新（ADR-0050）：提示不打断会话，装前确认运行中的 Turn ──
   const appVersionRef = useRef<string | undefined>(undefined);
@@ -245,6 +258,7 @@ export function App({ host }: { host: DesktopHost }) {
     selectedId: null as string | null,
     /** 设置区当前导航；非 null 时会话区被盖住，不算「在看」任何会话 */
     page: null as SettingsSection | null,
+    schedulesOpen: false,
     prefs: NOTIFY_DEFAULTS,
     /** 会话标题来源（treeSessions：会话标题 ?? 首条用户消息首行） */
     sessions: [] as SessionSummary[],
@@ -252,6 +266,7 @@ export function App({ host }: { host: DesktopHost }) {
   });
   notifyState.current.selectedId = selectedId;
   notifyState.current.page = page;
+  notifyState.current.schedulesOpen = schedulesOpen;
   /** 侧栏留痕：本次运行里「没看到」的出错 / 已完成，打开会话即清除（不持久化） */
   const [sessionMarks, setSessionMarks] = useState<Record<string, SessionMark>>({});
 
@@ -313,7 +328,11 @@ export function App({ host }: { host: DesktopHost }) {
         return;
       }
       // 在看 = 窗口有焦点 + 正显示该会话 + 没被设置区盖住（page === null）
-      const watching = state.focused && state.page === null && state.selectedId === sessionId;
+      const watching =
+        state.focused &&
+        state.page === null &&
+        !state.schedulesOpen &&
+        state.selectedId === sessionId;
       if (live && !watching) {
         const mark = sessionMarkFor(event);
         if (mark !== null) {
@@ -465,10 +484,31 @@ export function App({ host }: { host: DesktopHost }) {
       pool.onClient((client) => {
         // 新后台出现也刷新一次渲染：「后台日志」页的后台条目才有候选
         setConversationVersion((v) => v + 1);
-        return client.onProvidersChanged(() => {
+        const stopProviders = client.onProvidersChanged(() => {
           setProvidersVersion((v) => v + 1);
           void refresh();
         });
+        let alive = true;
+        const loadSchedules = () => {
+          void client.runtime
+            .listSchedules()
+            .then((result) => {
+              if (!alive) return;
+              setEnabledScheduleCount(result.tasks.filter((task) => task.enabled).length);
+              setScheduleNames(new Map(result.tasks.map((task) => [task.id, task.name])));
+            })
+            .catch(() => undefined);
+        };
+        loadSchedules();
+        const stopSchedules = client.onNotification("schedule.changed", () => {
+          loadSchedules();
+          void refresh();
+        });
+        return () => {
+          alive = false;
+          stopProviders();
+          stopSchedules();
+        };
       }),
     [pool, refresh],
   );
@@ -782,6 +822,7 @@ export function App({ host }: { host: DesktopHost }) {
         plainWorkspace: effectiveWorkspace,
         plainWorkspaces: p.plainWorkspaces,
         chatsExpanded,
+        scheduledExpanded,
         expanded,
         collapsed,
         statuses: Object.fromEntries(
@@ -795,6 +836,7 @@ export function App({ host }: { host: DesktopHost }) {
       prefsVersion,
       effectiveWorkspace,
       chatsExpanded,
+      scheduledExpanded,
       expanded,
       collapsed,
       conversationVersion,
@@ -803,6 +845,10 @@ export function App({ host }: { host: DesktopHost }) {
   );
   treeRef.current = tree;
   notifyState.current.sessions = treeSessions;
+  const scheduleWorkspaces: ScheduleWorkspaceOption[] = [
+    { path: null, label: "普通对话" },
+    ...tree.projects.map((project) => ({ path: project.path, label: project.name })),
+  ];
 
   // 项目手动顺序：拿到会话列表后，旧数据（无 projectOrder）按升级前「最近活动」的显示顺序
   // 初始化一次（隐藏项目也排进去，恢复时回原位）；之后每次列表变化把新出现的项目键按显示
@@ -1017,10 +1063,21 @@ export function App({ host }: { host: DesktopHost }) {
         collapsed={collapsed}
         expanded={expanded}
         chatsExpanded={chatsExpanded}
+        scheduledExpanded={scheduledExpanded}
+        enabledScheduleCount={enabledScheduleCount}
+        schedulesOpen={schedulesOpen}
+        onOpenSchedules={() => {
+          setPage(null);
+          setSchedulesOpen(true);
+        }}
+        onToggleScheduled={() => {
+          setScheduledExpanded((open) => !open);
+        }}
         onSelectSession={(id) => {
           const summary = sessions.find((s) => s.id === id);
           if (summary !== undefined) {
             setPage(null);
+            setSchedulesOpen(false);
             void selectSession(summary.id, summary.cwd);
           }
         }}
@@ -1076,10 +1133,12 @@ export function App({ host }: { host: DesktopHost }) {
         onOpenProject={() => void openProject()}
         onNewSession={(workspace) => {
           setPage(null);
+          setSchedulesOpen(false);
           void newSession(workspace);
         }}
         page={page}
         onOpenPage={(target) => {
+          setSchedulesOpen(false);
           setPage(target);
         }}
         onLeaveSettings={() => {
@@ -1163,6 +1222,24 @@ export function App({ host }: { host: DesktopHost }) {
                 </div>
               </div>
             )}
+          </div>
+        )}
+        {schedulesOpen && page === null && (
+          <div className="settings-over">
+            <PaneErrorBoundary key="schedules">
+              <SchedulePage
+                api={pageClient?.runtime}
+                workspaces={scheduleWorkspaces}
+                onOpenSession={(sessionId) => {
+                  const summary = sessions.find((item) => item.id === sessionId);
+                  setSchedulesOpen(false);
+                  if (summary !== undefined) void selectSession(summary.id, summary.cwd);
+                }}
+                onChanged={() => {
+                  void refresh();
+                }}
+              />
+            </PaneErrorBoundary>
           </div>
         )}
         {page !== null && (
@@ -1299,8 +1376,8 @@ export function App({ host }: { host: DesktopHost }) {
         )}
         <div
           className="mainpane"
-          inert={page !== null}
-          aria-hidden={page !== null ? true : undefined}
+          inert={page !== null || schedulesOpen}
+          aria-hidden={page !== null || schedulesOpen ? true : undefined}
         >
           {active !== undefined && selectedOpenError === undefined ? (
             <PaneErrorBoundary key={active.session.id}>
@@ -1334,6 +1411,7 @@ export function App({ host }: { host: DesktopHost }) {
                 panel={panel}
                 onPanelChange={setPanel}
                 providersVersion={providersVersion}
+                scheduleSource={scheduleSourceFor(sessions, scheduleNames, active.session.id)}
                 onManageProviders={() => {
                   setPage("providers");
                 }}
@@ -1580,6 +1658,23 @@ interface SessionPaneProps {
   onManageRemote: () => void;
   /** 服务商配置变更计数：状态栏的模型/档位/预设数据随之重取 */
   providersVersion: number;
+  scheduleSource?: ConversationProps["scheduleSource"];
+}
+
+function scheduleSourceFor(
+  sessions: readonly SessionSummary[],
+  names: ReadonlyMap<string, string>,
+  sessionId: string,
+): ConversationProps["scheduleSource"] {
+  const summary = sessions.find((item) => item.id === sessionId);
+  const source = summary?.schedule;
+  if (source === undefined) return undefined;
+  const titled = summary?.firstText?.split(" · ")[0];
+  return {
+    name: names.get(source.taskId) ?? (titled !== undefined && titled !== "" ? titled : "定时任务"),
+    trigger: source.trigger,
+    preface: source.trigger === "catchup" ? catchupPreface(source.scheduledAt) : undefined,
+  };
 }
 
 function SessionPane({
@@ -1614,6 +1709,7 @@ function SessionPane({
   onManageMcp,
   remoteStatus,
   onManageRemote,
+  scheduleSource,
 }: SessionPaneProps) {
   const runtime = client.runtime;
   const controls = useSessionControls(
@@ -1690,6 +1786,7 @@ function SessionPane({
         subscribeEvents={subscribeEvents}
         images={images}
         busy={running}
+        scheduleSource={scheduleSource}
         onResubmit={onResubmit}
         turnChanges={turnChanges}
         onRewindFiles={onRewindFiles}

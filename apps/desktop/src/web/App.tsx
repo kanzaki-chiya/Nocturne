@@ -5,6 +5,7 @@ import { createAttachmentImageSource, type AttachmentImageSource } from "../atta
 import type { ComposerSubmit } from "../Composer";
 import { projectKey } from "../session-tree";
 import { UsagePage } from "../UsagePage";
+import { SchedulePage } from "../SchedulePage";
 import { PhoneConnection } from "./connection";
 import { pairPhone, pairingError, parsePairingLink, parsePairingTarget } from "./pairing";
 import { PhoneSessions, phoneStatus, submitAccepted, type PhoneCreateOptions } from "./sessions";
@@ -63,6 +64,7 @@ type Page =
   | { kind: "session"; hostId: string; sessionId: string }
   | { kind: "settings"; hostId?: string }
   | { kind: "usage"; hostId: string }
+  | { kind: "schedules"; hostId: string }
   | { kind: "ext"; page: string; hostId?: string };
 
 const STATE_TEXT: Record<string, string> = {
@@ -539,6 +541,8 @@ export function PhoneApp({
         return "设置";
       case "usage":
         return "用量";
+      case "schedules":
+        return "定时任务";
       case "ext":
         return platform.pages?.[page.page]?.title ?? "设置";
       case "project":
@@ -629,6 +633,23 @@ export function PhoneApp({
       <section className="phone-body phone-list">
         <h3 className="phone-list-h">项目</h3>
         {!loaded && <p role="status">{connected ? "正在读取会话…" : "连接后会在这里显示项目。"}</p>}
+        <button
+          className="phone-row"
+          disabled={!connected}
+          onClick={() => {
+            navigate({ kind: "schedules", hostId: page.hostId });
+          }}
+        >
+          <span className="phone-row-icon">
+            <IconHome />
+          </span>
+          <span className="phone-row-main">
+            <b>定时任务</b>
+            <small>
+              <span>只在电脑打开时运行 · 新建和修改请在电脑上操作</span>
+            </small>
+          </span>
+        </button>
         {projects.map((project) => (
           <button
             key={project.key}
@@ -789,6 +810,27 @@ export function PhoneApp({
     body = (
       <section className="phone-body phone-settings">
         {platform.pages?.[page.page]?.render(extension)}
+      </section>
+    );
+  } else if (page.kind === "schedules") {
+    const workspaces = phoneProjects(sessions.list, plainWorkspace).map((project) => ({
+      path: project.plain ? null : project.path,
+      label: project.name,
+    }));
+    body = (
+      <section className="phone-body phone-schedules">
+        <SchedulePage
+          api={connected ? sessions.client?.runtime : undefined}
+          workspaces={workspaces}
+          readOnly
+          onOpenSession={(sessionId) => {
+            navigate({ kind: "session", hostId: page.hostId, sessionId });
+            openSession(sessionId);
+          }}
+          onChanged={() => {
+            void sessions.refresh().catch(() => undefined);
+          }}
+        />
       </section>
     );
   } else if (page.kind === "usage") {
@@ -1017,7 +1059,11 @@ export function PhoneApp({
           >
             <IconMore />
           </button>
-        ) : page.kind === "settings" || page.kind === "usage" || page.kind === "ext" || offer ? (
+        ) : page.kind === "settings" ||
+          page.kind === "usage" ||
+          page.kind === "schedules" ||
+          page.kind === "ext" ||
+          offer ? (
           <span className="phone-header-side" />
         ) : (
           <button

@@ -37,7 +37,8 @@ const EMPTY_PREFS = { pinned: [], projects: [], hidden: [], projectSort: "activi
 function latestOf(sessions: SessionSummary[], key: string): number | undefined {
   let latest: number | undefined;
   for (const s of sessions)
-    if (!s.parent && projectKey(s.cwd) === key) latest = Math.max(latest ?? 0, s.mtimeMs);
+    if (!s.parent && s.schedule === undefined && projectKey(s.cwd) === key)
+      latest = Math.max(latest ?? 0, s.mtimeMs);
   return latest;
 }
 

@@ -22,6 +22,14 @@ export interface SidebarProps {
   collapsed: ReadonlySet<string>;
   expanded: ReadonlySet<string>;
   chatsExpanded: boolean;
+  /** 「定时任务」分组已展开 */
+  scheduledExpanded?: boolean;
+  /** 启用中的定时任务数；还没读到时不显示 */
+  enabledScheduleCount?: number | undefined;
+  /** 主区正在显示定时任务页 */
+  schedulesOpen?: boolean;
+  onOpenSchedules?: () => void;
+  onToggleScheduled?: () => void;
   /** 项目排序（菜单「排序」选择）；只有 manual 能拖动、上移下移 */
   projectSort: ProjectSort;
   /** 已移除（隐藏）的项目路径，菜单里逐个恢复 */
@@ -591,6 +599,29 @@ export function Sidebar(props: SidebarProps) {
         >
           <span className="glyph">＋</span>新会话
         </button>
+        <button
+          type="button"
+          className={`item${props.schedulesOpen === true ? " on" : ""}`}
+          aria-current={props.schedulesOpen === true ? "page" : undefined}
+          onClick={() => {
+            props.onOpenSchedules?.();
+          }}
+        >
+          <svg {...GLYPH_PROPS}>
+            <circle cx="8" cy="8.6" r="5.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+            <path
+              d="M8 5.6v3.2l2.2 1.4M5.4 1.6h5.2"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+            />
+          </svg>
+          <span className="t">定时任务</span>
+          {props.enabledScheduleCount !== undefined && (
+            <span className="meta">{props.enabledScheduleCount}</span>
+          )}
+        </button>
       </nav>
       <div className="tree">
         {props.tree.pinned.length > 0 && (
@@ -619,6 +650,34 @@ export function Sidebar(props: SidebarProps) {
                   className="item more flat"
                   onClick={() => {
                     props.onToggleChats();
+                  }}
+                >
+                  收起
+                </button>
+              )}
+            </nav>
+          </>
+        )}
+        {props.tree.scheduled.rows.length > 0 && (
+          <>
+            <h4>定时任务</h4>
+            <nav className="nav" aria-label="定时任务会话">
+              {props.tree.scheduled.rows.map((row) => renderRow(row))}
+              {props.tree.scheduled.moreCount > 0 && (
+                <button
+                  className="item more flat"
+                  onClick={() => {
+                    props.onToggleScheduled?.();
+                  }}
+                >
+                  展开显示（还有 {props.tree.scheduled.moreCount} 个）
+                </button>
+              )}
+              {props.scheduledExpanded === true && (
+                <button
+                  className="item more flat"
+                  onClick={() => {
+                    props.onToggleScheduled?.();
                   }}
                 >
                   收起

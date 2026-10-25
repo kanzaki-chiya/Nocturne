@@ -408,6 +408,7 @@ function mount(
       | "onFork"
       | "hidePersistentPermissions"
       | "openWarnings"
+      | "scheduleSource"
     >
   > & { resolveFilesImpl?: RpcSession["resolveFiles"] } = {},
 ) {
@@ -2279,6 +2280,40 @@ describe("Conversation 权限卡片 v2", () => {
     );
     document.body.removeChild(outside);
   });
+});
+
+it("定时任务来源只标在第一条用户消息上，补跑前言写在气泡前面", () => {
+  const view = createSessionView();
+  view.entries = [
+    {
+      kind: "user",
+      key: "sched-user",
+      seq: 1,
+      turnId: "t1",
+      content: [{ type: "text", text: "汇总提交" }],
+    },
+    {
+      kind: "user",
+      key: "sched-user-2",
+      seq: 2,
+      turnId: "t2",
+      content: [{ type: "text", text: "继续" }],
+    },
+  ];
+  const rendered = mount(view, {
+    scheduleSource: {
+      name: "每日提交汇总",
+      trigger: "catchup",
+      preface: "这是一次补跑。",
+    },
+  });
+  const sources = rendered.container.querySelectorAll(".sched-src");
+  expect(sources).toHaveLength(1);
+  expect(sources[0]?.textContent).toContain("每日提交汇总");
+  expect(sources[0]?.textContent).toContain("补跑");
+  const bubble = rendered.container.querySelector(".u-bubble");
+  expect(bubble?.querySelector(".sched-pre")?.textContent).toBe("这是一次补跑。");
+  expect(bubble?.textContent).toContain("汇总提交");
 });
 
 describe("schedule 确认卡片", () => {

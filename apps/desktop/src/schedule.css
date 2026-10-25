@@ -1,0 +1,208 @@
+/* 定时任务页（ADR-0064）。骨架沿用 pages.css 的 page3；这里只补列表两行、计划行和历史表。 */
+
+.schedule-page {
+  min-height: 0;
+}
+.schedule-page .ph3 .sub {
+  display: block;
+}
+.sched-banner {
+  margin: 0;
+  padding: 8px 28px 0;
+}
+.schedule-page .pane .t1 {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.schedule-page .pane .t1 .acts {
+  margin-left: auto;
+  flex-direction: row;
+  align-items: center;
+}
+.schedule-page .plist button.sched-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1px 8px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 6px 10px;
+  border-radius: var(--radius-2);
+  color: var(--a-secondary);
+  position: relative;
+  cursor: pointer;
+  font: inherit;
+}
+.schedule-page .plist button.sched-item:hover,
+.schedule-page .plist button.sched-item.on {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+.schedule-page .plist button.sched-item.on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: var(--radius-1);
+  background: var(--a-accent);
+}
+.schedule-page .sched-item .n {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.schedule-page .sched-item.paused .n {
+  color: var(--a-muted);
+}
+.schedule-page .sched-item .s {
+  grid-column: 1 / -1;
+  font-size: var(--fs-1);
+  color: var(--a-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.schedule-page .sched-item .r {
+  font-size: var(--fs-1);
+}
+.schedule-page .sched-item .r.ok {
+  color: var(--a-success);
+}
+.schedule-page .sched-item .r.bad {
+  color: var(--a-error);
+}
+.schedule-page .sched-item .r.dim {
+  color: var(--a-faint);
+}
+.schedule-page .tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+  width: max-content;
+}
+.schedule-page .tabs button {
+  padding: 4px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--a-muted);
+  cursor: pointer;
+  font: inherit;
+}
+.schedule-page .tabs button[aria-selected="true"] {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+.sched-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.sched-plan {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sched-plan .input.narrow {
+  width: 88px;
+}
+.sched-callout {
+  display: flex;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--a-warning) 30%, transparent);
+  background: var(--a-warnBg, rgba(229, 189, 119, 0.08));
+  border-radius: var(--radius-2);
+  padding: 8px 12px;
+  color: var(--a-secondary);
+  font-size: var(--fs-1);
+}
+.sched-callout b {
+  color: var(--a-warning);
+  font-weight: 500;
+  flex: none;
+}
+.sched-readonly {
+  margin: 0;
+  color: var(--a-warning);
+  font-size: var(--fs-2);
+}
+.sched-hist {
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  overflow: auto;
+}
+.sched-hist-row {
+  display: grid;
+  grid-template-columns: 148px 48px minmax(140px, 1fr) 52px 88px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--a-border);
+  font-size: var(--fs-2);
+}
+.sched-hist-row:last-child {
+  border-bottom: 0;
+}
+.sched-hist-row.head {
+  font-size: var(--fs-1);
+  color: var(--a-faint);
+  background: var(--a-side);
+  padding-block: 5px;
+}
+.sched-hist-row .res {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.sched-hist-row .res small {
+  color: var(--a-faint);
+  font-size: var(--fs-1);
+}
+.sched-hist-row .res.ok {
+  color: var(--a-success);
+}
+.sched-hist-row .res.warn {
+  color: var(--a-warning);
+}
+.sched-hist-row .res.bad {
+  color: var(--a-error);
+}
+.sched-hist-row .go {
+  color: var(--a-accent);
+  font-size: var(--fs-1);
+  text-align: right;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.sched-hist-row .go.none {
+  color: var(--a-faint);
+  text-align: right;
+}
+.phone-schedules {
+  padding: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.phone-schedules .schedule-page {
+  flex: 1;
+  min-height: 0;
+}
+.phone-schedules .schedule-page .ph3,
+.phone-schedules .sched-banner {
+  padding-inline: 16px;
+}
+.phone-schedules .schedule-page .pane {
+  padding: 16px;
+}

@@ -975,6 +975,22 @@
   font: inherit;
   cursor: pointer;
 }
+.sched-src {
+  font-size: var(--fs-1);
+  color: var(--a-faint);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.sched-src .k {
+  color: var(--a-accent);
+}
+.u-bubble .sched-pre {
+  display: block;
+  font-size: var(--fs-1);
+  color: var(--a-muted);
+  margin-bottom: 4px;
+}
 .conversation .ask-actions {
   display: flex;
   flex-wrap: wrap;

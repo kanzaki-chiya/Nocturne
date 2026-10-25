@@ -9,6 +9,7 @@ const noop = () => undefined;
 const emptyTree: SessionTree = {
   pinned: [],
   chats: { rows: [], moreCount: 0 },
+  scheduled: { rows: [], moreCount: 0 },
   projects: [],
   newProjectKeys: [],
 };
@@ -51,6 +52,47 @@ describe("Sidebar", () => {
     expect(onOpenPage).toHaveBeenCalledWith("agents");
   });
 
+  it("新会话下方是定时任务入口，显示启用数", () => {
+    const onOpenSchedules = vi.fn();
+    const { container } = render(
+      <Sidebar {...props({ enabledScheduleCount: 3, onOpenSchedules, schedulesOpen: true })} />,
+    );
+    const buttons = [...container.querySelectorAll(".shead + .nav .item, .nav .item")];
+    const labels = buttons.map((button) => button.textContent ?? "");
+    const scheduleAt = labels.findIndex((label) => label.includes("定时任务"));
+    const createAt = labels.findIndex((label) => label.includes("新会话"));
+    expect(createAt).toBeGreaterThanOrEqual(0);
+    expect(scheduleAt).toBeGreaterThan(createAt);
+    const entry = screen.getByRole("button", { name: /定时任务/ });
+    expect(entry.textContent).toContain("3");
+    expect(entry.getAttribute("aria-current")).toBe("page");
+    fireEvent.click(entry);
+    expect(onOpenSchedules).toHaveBeenCalledOnce();
+  });
+
+  it("有定时任务会话时渲染独立分组，不和对话混在一起", () => {
+    const tree: SessionTree = {
+      ...emptyTree,
+      scheduled: {
+        rows: [
+          {
+            id: "s1",
+            title: "每日提交汇总 · 10-25 09:00",
+            meta: "现在",
+            locked: false,
+            status: "idle",
+          },
+        ],
+        moreCount: 2,
+      },
+    };
+    render(<Sidebar {...props({ tree })} />);
+    const group = screen.getByRole("navigation", { name: "定时任务会话" });
+    expect(group.textContent).toContain("每日提交汇总 · 10-25 09:00");
+    expect(screen.getByText("展开显示（还有 2 个）")).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "对话" })).toBeNull();
+  });
+
   it("没有对话会话时不渲染「对话」标题", () => {
     const { container } = render(<Sidebar {...props()} />);
     expect(screen.queryByText("对话")).toBeNull();
@@ -64,6 +106,7 @@ describe("Sidebar", () => {
         rows: [{ id: "c1", title: "闲聊", meta: "现在", locked: false, status: "idle" }],
         moreCount: 3,
       },
+      scheduled: { rows: [], moreCount: 0 },
       projects: [],
       newProjectKeys: [],
     };
@@ -124,6 +167,7 @@ describe("Sidebar", () => {
       rows: [{ id: "s1", title: "一号会话", meta: "昨天", locked: false, status: "idle" }],
       moreCount: 0,
     },
+    scheduled: { rows: [], moreCount: 0 },
     projects: [
       {
         key: "Z:/proj",

@@ -64,6 +64,26 @@ describe("formatRelative", () => {
 });
 
 describe("buildSessionTree", () => {
+  it("定时任务会话单独成组，不进对话或项目", () => {
+    const tree = buildSessionTree(
+      [
+        session("chat", WS, NOW, { firstText: "周末去哪儿" }),
+        session("run", "Z:\\repo", NOW - 1000, {
+          firstText: "每日提交汇总 · 10-25 09:03",
+          schedule: { taskId: "t1", scheduledAt: "2026-10-25T01:00:00Z", trigger: "catchup" },
+        }),
+        session("proj", "Z:\\repo", NOW - 2000, { firstText: "实现 ADR" }),
+      ],
+      noPrefs,
+      opts({ plainWorkspace: WS }),
+    );
+    expect(tree.chats.rows.map((row) => row.id)).toEqual(["chat"]);
+    expect(tree.scheduled.rows.map((row) => row.title)).toEqual(["每日提交汇总 · 10-25 09:03"]);
+    expect(tree.projects.map((project) => project.sessions.map((row) => row.id))).toEqual([
+      ["proj"],
+    ]);
+  });
+
   it("按 cwd 分组（大小写/分隔符差异归并）且最近活动模式按最新会话排序", () => {
     const tree = buildSessionTree(
       [

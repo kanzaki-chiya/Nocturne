@@ -123,6 +123,17 @@ export interface ConversationProps {
   fileLinks?: FileLinkHooks | undefined;
   /** 会话打开时的警告（`SessionOpened.warnings`），显示在消息流顶部；缺省不显示 */
   openWarnings?: readonly string[] | undefined;
+  /**
+   * 定时任务发起的会话：标在第一条用户消息上（ADR-0064）。
+   * preface 只在补跑时有，写在气泡正文前面。
+   */
+  scheduleSource?:
+    | {
+        name: string;
+        trigger: "schedule" | "catchup" | "manual";
+        preface?: string | undefined;
+      }
+    | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -1016,6 +1027,7 @@ function UserMessage({
   repliesAfter,
   onResubmit,
   onFork,
+  scheduleSource,
 }: {
   entry: UserEntry;
   images: AttachmentImageSource;
@@ -1026,6 +1038,7 @@ function UserMessage({
   repliesAfter: number;
   onResubmit: ConversationProps["onResubmit"];
   onFork?: ConversationProps["onFork"];
+  scheduleSource?: ConversationProps["scheduleSource"];
 }) {
   const bubble = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -1128,6 +1141,16 @@ function UserMessage({
   const restorable = target?.files.filter((file) => file.action !== "untracked") ?? [];
   return (
     <article className={`u${editing ? " editing" : ""}`} aria-label="用户消息">
+      {scheduleSource !== undefined && (
+        <span className="sched-src">
+          由定时任务 <span className="k">{scheduleSource.name}</span> 发送
+          {scheduleSource.trigger === "catchup"
+            ? " · 补跑"
+            : scheduleSource.trigger === "manual"
+              ? " · 手动"
+              : ""}
+        </span>
+      )}
       <div className="u-body">
         {editing ? (
           <div className="u-edit">
@@ -1215,6 +1238,9 @@ function UserMessage({
         ) : (
           <>
             <div className="u-bubble" ref={bubble}>
+              {scheduleSource?.preface !== undefined && (
+                <span className="sched-pre">{scheduleSource.preface}</span>
+              )}
               {(entry.attachments ?? []).map((attachment, index) => (
                 <UserImage
                   key={`${attachment.file}:${attachment.sha256}:${index}`}
@@ -2379,6 +2405,7 @@ function EntryView({
   preparing = false,
   waitingCallId,
   userRole,
+  scheduleSource,
 }: {
   entry: ViewEntry;
   openUrl: OpenUrl;
@@ -2400,6 +2427,7 @@ function EntryView({
   waitingCallId?: string | undefined;
   /** 只读视图里用户消息的角色：第一条是任务，之后是催促；缺省 = 普通用户气泡 */
   userRole?: "task" | "nudge" | undefined;
+  scheduleSource?: ConversationProps["scheduleSource"];
 }) {
   switch (entry.kind) {
     case "user":
@@ -2435,6 +2463,7 @@ function EntryView({
           repliesAfter={repliesAfter}
           onResubmit={onResubmit}
           onFork={onFork}
+          scheduleSource={scheduleSource}
         />
       );
     case "assistant":
@@ -3199,6 +3228,7 @@ function ConversationContent({
   hideRequests = false,
   openWarnings,
   readOnly,
+  scheduleSource,
 }: ContentProps) {
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -3375,6 +3405,12 @@ function ConversationContent({
                     waitingCallId={view.pendingQuestion?.callId}
                     userRole={roleOf(entry)}
                     repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
+                    scheduleSource={
+                      entry.kind === "user" &&
+                      entry.seq === view.entries.find((item) => item.kind === "user")?.seq
+                        ? scheduleSource
+                        : undefined
+                    }
                     onResubmit={onResubmit}
                     onFork={onFork}
                     fileLinks={fileLinks}

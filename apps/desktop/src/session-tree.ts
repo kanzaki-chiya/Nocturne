@@ -93,6 +93,8 @@ export interface ChatsSection {
 export interface SessionTree {
   pinned: PinnedRow[];
   chats: ChatsSection;
+  /** 定时任务运行出来的会话（ADR-0064）；已置顶的不在这里重复 */
+  scheduled: ChatsSection;
   projects: ProjectNode[];
   /**
    * 可见但还不在 projectOrder 里的项目键（按手动模式规则排好的顺序）。
@@ -123,6 +125,8 @@ export interface TreeOptions {
   expanded: ReadonlySet<string>;
   /** 「对话」区已展开（显示全部，不再限 limit 条） */
   chatsExpanded?: boolean;
+  /** 「定时任务」区已展开 */
+  scheduledExpanded?: boolean;
   /** 已折叠的项目 key */
   collapsed: ReadonlySet<string>;
   now?: number;
@@ -183,9 +187,13 @@ export function buildSessionTree(
   for (const path of options.plainWorkspaces ?? []) chatKeys.add(projectKey(path));
 
   const visible = sessions.filter(isVisible);
+  // 定时任务运行出来的会话单独成组，不进「对话」或「项目」
+  const scheduledIds = new Set(visible.filter((s) => s.schedule !== undefined).map((s) => s.id));
 
   // 对话区：cwd 归并后等于任一普通对话工作区
-  const chatSessions = visible.filter((s) => chatKeys.has(projectKey(s.cwd)));
+  const chatSessions = visible.filter(
+    (s) => chatKeys.has(projectKey(s.cwd)) && !scheduledIds.has(s.id),
+  );
   const chatRows = chatSessions
     .filter((s) => !pinnedIds.has(s.id))
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -197,9 +205,21 @@ export function buildSessionTree(
     moreCount: options.chatsExpanded ? 0 : chatRows.length - chatsShown.length,
   };
 
-  // 项目分组（对话会话与对话工作区本身不进 projects）
+  const scheduledRows = visible
+    .filter((s) => scheduledIds.has(s.id) && !pinnedIds.has(s.id))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const scheduledShown = options.scheduledExpanded ? scheduledRows : scheduledRows.slice(0, limit);
+  const scheduled: ChatsSection = {
+    rows: scheduledShown.map((s) =>
+      toRow(s, now, options.statuses?.[s.id] ?? "idle", options.marks?.[s.id]),
+    ),
+    moreCount: options.scheduledExpanded ? 0 : scheduledRows.length - scheduledShown.length,
+  };
+
+  // 项目分组（对话会话、定时任务会话与对话工作区本身不进 projects）
   const groups = new Map<string, { path: string; sessions: SessionSummary[] }>();
   for (const session of visible) {
+    if (scheduledIds.has(session.id)) continue;
     const key = projectKey(session.cwd);
     if (chatKeys.has(key)) continue;
     let group = groups.get(key);
@@ -230,7 +250,8 @@ export function buildSessionTree(
     const isChat = chatKeys.has(projectKey(session.cwd));
     pinned.push({
       ...toRow(session, now, options.statuses?.[session.id] ?? "idle", options.marks?.[session.id]),
-      project: isChat ? "对话" : projectName(session.cwd),
+      project:
+        session.schedule !== undefined ? "定时任务" : isChat ? "对话" : projectName(session.cwd),
     });
   }
 
@@ -311,7 +332,7 @@ export function buildSessionTree(
     );
   }
 
-  return { pinned, chats, projects, newProjectKeys };
+  return { pinned, chats, scheduled, projects, newProjectKeys };
 }
 
 /**
