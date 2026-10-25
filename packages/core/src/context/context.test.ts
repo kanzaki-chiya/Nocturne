@@ -742,6 +742,27 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
       }).compaction,
     ).toBeUndefined();
   });
+  it("ADR-0063：修剪后仍在 P 以上 → 同一 Turn 内接着摘要；低于 P 不摘要", () => {
+    const B = inputBudgetTokens(small);
+    // 用 usage 锚定估算值（与上方 P/S 用例同法）：历史里带一个 4000 token 的工具结果
+    const anchored = (tokens: number) =>
+      input([tool(1, 4000), assistant(7, 1, tokens - 100)], { compactionThreshold: "90%" });
+    const at = (tokens: number, state: { pruneAttempted: boolean; summaryAttempted?: boolean }) =>
+      buildContext({ ...anchored(tokens), compactionState: state }).compaction;
+    // 默认 90%：P = 0.8·B，S = 0.9·B
+    expect(at(0.85 * B, { pruneAttempted: true })?.kind).toBe("summary");
+    expect(at(0.8 * B, { pruneAttempted: true })).toBeUndefined();
+    expect(at(0.85 * B, { pruneAttempted: false })?.kind).toBe("prune");
+    // 本 Turn 已摘要过：不再重复（每种压缩每 Turn 至多一次）
+    expect(at(0.85 * B, { pruneAttempted: true, summaryAttempted: true })).toBeUndefined();
+    // S = B 时预防性压缩整体停用，修剪不足也不升级
+    const off = buildContext({
+      ...anchored(0.85 * B),
+      compactionThreshold: "100%",
+      compactionState: { pruneAttempted: true },
+    });
+    expect(off.compaction).toBeUndefined();
+  });
   it("200k 在大预算模型中严格超过 200000 token 才触发", () => {
     const large = { ...small, contextWindow: 1_000_000 };
     const at = (tokens: number) =>

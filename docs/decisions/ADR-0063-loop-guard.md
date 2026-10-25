@@ -76,4 +76,5 @@
 - **配置**：`turn.loopGuard` 的 schema 为 `false | { warnAt ≥ 2, stopAt > warnAt }`，缺省 `{ warnAt: 3, stopAt: 6 }`，分层整值覆盖（`false` 也是整值）。`RuntimeOptions.turn` 与 `config.json` 两处同源装配。
 - **子代理**：`turnConfig` 原样传给子 Turn，子 Turn 触发时按既有规则映射为 `subagent_turn_failed`，父模型拿到普通错误结果与已有产出清单。
 - **客户端**：没有改动。`loop_detected` 走既有的 `turn.completed { reason: "error" }` 渲染路径（TUI / CLI / 桌面端 / 手机网页共用），显示 `error.message`。
-- **验收对照**：`packages/core/src/protocol/loop-guard.test.ts`（签名、键序、结果变化、穿插、并行、跨 Turn、取消、阈值、确定性、f0136a6d 形状）、`packages/core/src/context/context.test.ts`（说明位置、前缀不变、修剪占位保留、关闭开关）、`packages/core/test/runtime.test.ts`（第 6 次停止、`false` 关闭、入参变化不累计、自定义阈值、恢复后重建）、`packages/core/test/subagent.test.ts`（子会话 `loop_detected` → 父会话错误结果）、`packages/core/test/config.test.ts`（schema 与整值覆盖）。
+- **修剪升级摘要**：判定放在 Builder 的压缩计划里——`compactionState.pruneAttempted` 为真且重建后估算仍 `> P` 时给出 `summary` 计划；`S = B` 时预防性压缩整体停用，不升级。Agent Loop 只按计划执行，「每 Turn 每种压缩至多一次」与 §6.6 的失败处理不变。
+- **验收对照**：`packages/core/src/protocol/loop-guard.test.ts`（签名、键序、结果变化、穿插、并行、跨 Turn、取消、阈值、确定性、f0136a6d 形状）、`packages/core/src/context/context.test.ts`（说明位置、前缀不变、修剪占位保留、关闭开关、修剪升级摘要三例）、`packages/core/test/runtime.test.ts`（第 6 次停止、`false` 关闭、入参变化不累计、自定义阈值、恢复后重建、修剪升级摘要）、`packages/core/test/subagent.test.ts`（子会话 `loop_detected` → 父会话错误结果）、`packages/core/test/config.test.ts`（schema 与整值覆盖）。

@@ -140,13 +140,14 @@ Agent Loop                 → prune：直接写入事件
 ### 6.5 触发
 
 - 摘要阈值 `S` 来自 `compaction.threshold`（默认 `90%`，格式与分层见 [config.md](config.md) §2）；修剪阈值 `P = min(0.8·B, S)`。估算超过 `P` 时先尝试修剪；修剪后或不可修剪时仍超过 `S` 才尝试摘要。这类压缩是预防性的（`mustCompact = false`）。
+- **修剪不足时升级为摘要**（[ADR-0063](../decisions/ADR-0063-loop-guard.md) §2）：本 Turn 已经执行过修剪（`compactionState.pruneAttempted`）而重建后的估算**仍在 `P` 以上**时，同一 Turn 里接着给出 `summary` 计划，不必等再次超过 `S`。判定同样在 Builder 的压缩计划里，Agent Loop 只执行计划；重建后低于或等于 `P` 则不摘要。这一次摘要仍计入「本 Turn 每种压缩至多一次」，失败按 §6.6 处理，不额外重试。
 - `S = B`（`100%` 或绝对值达到预算）时两种预防性压缩都停用，只在超预算或 `context_overflow` 时走强制路径。
 - 请求已超出预算，或 Provider 返回 `context_overflow` 时，`mustCompact = true`（见 [agent-loop.md](agent-loop.md) 第 3.5 节）。
 - 用户可以用 `/compact` 手动触发摘要，走同一条路径。
 
 落地细节（自动摘要自 Phase 3 起启用，与手动 `/compact` 共用同一条 L2 路径）：
 
-- Builder 的 `compaction` 计划按序给出：超过 `P` 且存在更新于当前修剪点的保留区边界时，计算该范围工具输出替换为占位后实际回收的估算 token；只有回收量 ≥ `R = min(20k, 0.1·B)` 才给出 `prune`。不足时跳过；超过 `S` 或必须压缩时再尝试 `summary`（计划携带 `summaryRequest`）。两种计划的判定都在 Builder 内完成，Agent Loop 只按计划执行。
+- Builder 的 `compaction` 计划按序给出：超过 `P` 且存在更新于当前修剪点的保留区边界时，计算该范围工具输出替换为占位后实际回收的估算 token；只有回收量 ≥ `R = min(20k, 0.1·B)` 才给出 `prune`。不足时跳过；超过 `S`、本 Turn 已修剪后仍在 `P` 以上（上一节）、或必须压缩时再尝试 `summary`（计划携带 `summaryRequest`）。两种计划的判定都在 Builder 内完成，Agent Loop 只按计划执行。
 - **每个 Turn 每种压缩至多执行一次**（成功或失败均不重复）：预防性压缩失败后本 Turn 不再尝试（§6.6）；`context_overflow` 到达时从未尝试过的下一级继续（prune 未试过先 prune，否则 summary），两级都已尝试后仍溢出发 `compaction_failed`。
 - `summary` 计划执行成功后重建一次；重建结果仍超硬预算时不再追加尝试，Turn 以 `error(code = "compaction_failed")` 结束。
 - 摘要可以在 Turn 进行中发生：此时摘要边界只落在已闭合的步骤边界上（6.3），被覆盖的进行中 Turn 的 `message.user` 原文由 Builder 依据 `state.openTurn` 在摘要后重新注入。

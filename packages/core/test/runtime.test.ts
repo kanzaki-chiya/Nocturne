@@ -935,6 +935,64 @@ describe("上下文与运行时命令（Phase 2）", () => {
     await session.close();
   });
 
+  it("ADR-0063 §2：修剪后仍超过 P → 同一 Turn 内接着摘要；低于 P 只修剪", async () => {
+    // 预算 B = 40000 - 8192 - 1024 = 30784；P ≈ 24627，S ≈ 27706，R ≈ 3078。
+    // 第一次构建：锚定 usage 25k + 大工具结果 → 超预算，修剪（回收约 7k）。
+    // 修剪后锚定值失效（压缩事件在锚点之后），第二次请求用自己的 usage 重新锚定：
+    // 这份 usage 决定"修剪后是否仍在 P 以上"——正是 §6.5 修订要覆盖的场景。
+    const cases = [
+      // 26k：仍在 P 以上且低于 S → 接着摘要（改动前要等到下一次超过 S）
+      { secondInput: 26_000, expect: ["prune", "summary"] },
+      // 22k：低于 P → 只修剪
+      { secondInput: 22_000, expect: ["prune"] },
+    ];
+    for (const c of cases) {
+      const ws = makeTmpDir("nct-rt-escalate-");
+      writeFileSync(path.join(ws, "big.txt"), "z".repeat(28_000));
+      writeFileSync(path.join(ws, "small.txt"), "s".repeat(100));
+      const provider = new FakeProvider({
+        models: [
+          {
+            ...tinyModel,
+            ref: { provider: "fake", model: "fake-model" },
+            contextWindow: 40_000,
+            maxOutputTokens: 8192,
+          },
+        ],
+        scripts: [
+          [
+            { type: "tool_call", toolCallId: "r1", name: "read", input: { path: "big.txt" } },
+            { type: "usage", usage: { inputTokens: 25_000, outputTokens: 1000 } },
+            { type: "finish", reason: "tool_calls" },
+          ],
+          [
+            { type: "tool_call", toolCallId: "r2", name: "read", input: { path: "small.txt" } },
+            { type: "usage", usage: { inputTokens: c.secondInput, outputTokens: 1000 } },
+            { type: "finish", reason: "tool_calls" },
+          ],
+          // 摘要调用（文本即摘要正文）
+          [
+            { type: "text_delta", text: "摘要：读过大文件" },
+            { type: "finish", reason: "stop" },
+          ],
+          [
+            { type: "text_delta", text: "done" },
+            { type: "finish", reason: "stop" },
+          ],
+        ],
+      });
+      const { runtime } = await makeRuntime(undefined, ws, { provider });
+      const session = await makeSession(runtime);
+      const events = collect(session);
+      expect(await session.submit({ text: "读文件" })).toBe("done");
+      const kinds = events
+        .filter((e) => e.type === "context.compacted")
+        .map((e) => (e.type === "context.compacted" ? e.payload.kind : ""));
+      expect(kinds).toEqual(c.expect);
+      await session.close();
+    }
+  });
+
   it("超预算且无可行边界：Turn 以 error(compaction_failed) 结束", async () => {
     const impossible: ModelInfo = { ...tinyModel, contextWindow: 500 };
     const provider = new FakeProvider({

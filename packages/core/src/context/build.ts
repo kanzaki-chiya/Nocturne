@@ -1221,13 +1221,15 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     threshold.unit === "percent" ? (threshold.value / 100) * budgetTokens : threshold.value,
   );
   const forced = overBudget || input.compactionState?.force === true;
+  // 修剪线 P 与摘要阈值 S（6.5）：S 达到预算时两种预防性压缩都停用
+  const preventive = summaryThreshold < budgetTokens;
+  const pruneLine = Math.min(PRUNE_THRESHOLD * budgetTokens, summaryThreshold);
+  // ADR-0063 §2：本 Turn 已修剪过、修剪后估算仍在 P 以上时，接着摘要，
+  // 不必等再次超过 S。判定只在这里做，Agent Loop 只执行计划。
+  const pruneInsufficient =
+    preventive && input.compactionState?.pruneAttempted === true && estimated > pruneLine;
   let compaction: CompactionPlan | undefined;
-  if (
-    input.events !== undefined &&
-    (forced ||
-      (summaryThreshold < budgetTokens &&
-        estimated > Math.min(PRUNE_THRESHOLD * budgetTokens, summaryThreshold)))
-  ) {
+  if (input.events !== undefined && (forced || (preventive && estimated > pruneLine))) {
     const boundary = retentionBoundary(input.events, input.history, model);
     if (
       !input.compactionState?.pruneAttempted &&
@@ -1259,7 +1261,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     if (
       compaction === undefined &&
       !input.compactionState?.summaryAttempted &&
-      (forced || estimated > summaryThreshold)
+      (forced || pruneInsufficient || estimated > summaryThreshold)
     ) {
       const summaryBoundary = chooseSummaryBoundary(
         input.events,
