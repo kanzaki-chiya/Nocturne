@@ -88,7 +88,7 @@ export function todoItemsFromToolResult(payload: {
   const output = payload.output;
   if (output !== null && typeof output === "object" && !Array.isArray(output)) {
     if (Object.keys(output).length === 1 && "items" in output) {
-      return parseTodoItems((output as { items: unknown }).items);
+      return parseTodoItems(output.items);
     }
     return undefined;
   }

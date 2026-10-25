@@ -482,6 +482,52 @@ function replayHost(
         case "provider.setProviderEnabled":
         case "provider.setModelsEnabled":
           break;
+        case "schedule.list":
+          result = {
+            tasks: [
+              {
+                id: "daily",
+                name: "每日提交汇总",
+                prompt: "汇总今日提交",
+                workspace: "Z:/plain",
+                schedule: { type: "daily", time: "09:00" },
+                enabled: true,
+                maxDurationMinutes: 60,
+                createdAt: "2026-10-01T00:00:00.000Z",
+                nextRunAt: "2026-10-26T01:00:00.000Z",
+                running: false,
+                stats: { last7Days: { runs: 1, skipped: 0 } },
+              },
+            ],
+            scheduler: { running: true },
+            warnings: [],
+          };
+          break;
+        case "schedule.runNow":
+          sessions.push({
+            id: "sched-run-1",
+            createdAt: "2026-10-04T00:00:00Z",
+            cwd: "Z:/plain",
+            workspaceRoot: "Z:/plain",
+            model: cheap,
+            mtimeMs: 4_000,
+            firstText: "sched-run-1 会话",
+          });
+          result = { started: true, sessionId: "sched-run-1" };
+          break;
+        case "schedule.history":
+          result = [
+            {
+              id: "h-del",
+              taskId: "daily",
+              scheduledAt: "2026-10-24T01:00:00.000Z",
+              trigger: "schedule",
+              result: "done",
+              sessionId: "deleted-sess",
+              durationMs: 60_000,
+            },
+          ];
+          break;
         case "session.unsubscribe":
         case "session.close":
           break;
@@ -1711,4 +1757,29 @@ it("设置页盖住会话时仍通知；设置页获焦不撤销，返回会话�
   act(() => host.activateNotification("alpha"));
   await waitFor(() => expect(host.dismissed).toContain("alpha"));
   expect(screen.queryByRole("navigation", { name: "设置" })).toBeNull();
+});
+
+it("定时任务页：立即运行先刷新会话列表再打开新会话；历史指向已删除会话时留在定时任务页并提示", async () => {
+  const host = replayHost();
+  render(<App host={host} />);
+  await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ });
+
+  fireEvent.click(screen.getByRole("button", { name: /^定时任务/ }));
+  const page = await screen.findByRole("region", { name: "定时任务" });
+  await within(page).findByDisplayValue("每日提交汇总");
+
+  // 1) 历史里指向已删除会话：留在定时任务页并提示「这次运行的会话已删除」
+  fireEvent.click(within(page).getByRole("tab", { name: "历史" }));
+  fireEvent.click(await within(page).findByRole("button", { name: "打开会话 →" }));
+  expect(await within(page).findByRole("alert")).toHaveProperty(
+    "textContent",
+    "这次运行的会话已删除",
+  );
+  expect(screen.getByRole("region", { name: "定时任务" })).toBeTruthy();
+
+  // 2) 立即运行：新建的会话尚不在旧 sessions 中，先刷新列表再打开该会话并关闭定时任务页
+  fireEvent.click(within(page).getByRole("button", { name: "▶ 立即运行" }));
+  await waitFor(() => expect(screen.queryByRole("region", { name: "定时任务" })).toBeNull());
+  const stream = await screen.findByRole("region", { name: "会话消息" });
+  expect(await within(stream).findByText("sched-run-1 正文")).toBeTruthy();
 });

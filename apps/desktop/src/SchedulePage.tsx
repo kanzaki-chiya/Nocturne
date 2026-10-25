@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { RpcError } from "@nocturne/rpc/client";
 import {
   describeSchedulePlan,
@@ -171,6 +171,69 @@ function resultClass(result: ScheduleHistoryEntry["result"] | undefined, denied 
   return "dim";
 }
 
+const SCHED_HIST_COLUMNS: readonly {
+  key: string;
+  label: string;
+  align?: "right";
+  render: (entry: ScheduleHistoryEntry, onOpen: (sessionId: string) => void) => ReactNode;
+}[] = [
+  {
+    key: "scheduledAt",
+    label: "计划时间",
+    render: (entry) => <span className="mono">{formatScheduleWhen(entry.scheduledAt)}</span>,
+  },
+  {
+    key: "trigger",
+    label: "触发",
+    render: (entry) => (
+      <span>{entry.result === "skipped" ? "—" : scheduleTriggerLabel(entry.trigger)}</span>
+    ),
+  },
+  {
+    key: "result",
+    label: "结果",
+    render: (entry) => (
+      <span className={`res ${resultClass(entry.result, entry.denied ?? 0)}`}>
+        {scheduleResultLabel(entry.result)}
+        {entry.result === "skipped" && <small>{scheduleSkipLabel(entry.reason)}</small>}
+        {entry.result === "done" && (entry.denied ?? 0) > 0 && (
+          <small>{entry.denied} 项被拒绝</small>
+        )}
+        {entry.result === "error" && entry.error !== undefined && <small>{entry.error}</small>}
+        {entry.trigger === "catchup" &&
+          entry.result === "done" &&
+          entry.startedAt !== undefined && (
+            <small>{formatScheduleWhen(entry.startedAt)} 补跑</small>
+          )}
+      </span>
+    ),
+  },
+  {
+    key: "duration",
+    label: "用时",
+    render: (entry) => <span className="mono">{formatDurationClock(entry.durationMs)}</span>,
+  },
+  {
+    key: "session",
+    label: "会话",
+    align: "right",
+    render: (entry, onOpen) =>
+      entry.sessionId !== undefined ? (
+        <button
+          type="button"
+          className="go"
+          onClick={() => {
+            if (entry.sessionId !== undefined) onOpen(entry.sessionId);
+          }}
+        >
+          打开会话 →
+        </button>
+      ) : (
+        <span className="go none">—</span>
+      ),
+  },
+];
+
 export function SchedulePage({
   api,
   workspaces,
@@ -182,7 +245,8 @@ export function SchedulePage({
   workspaces: readonly ScheduleWorkspaceOption[];
   /** 手机端：新建、编辑、删除、启停禁用，立即运行仍可用 */
   readOnly?: boolean;
-  onOpenSession: (sessionId: string) => void;
+  /** 返回 false 表示目标会话不存在（已删除），页面留在原处并提示 */
+  onOpenSession: (sessionId: string) => unknown;
   onChanged?: () => void;
 }) {
   const [list, setList] = useState<ScheduleListResult | undefined>();
@@ -318,13 +382,24 @@ export function SchedulePage({
     }
   };
 
+  const openSession = async (sessionId: string) => {
+    setNotice(undefined);
+    setHistoryError(undefined);
+    const opened = await onOpenSession(sessionId);
+    if (opened === false) {
+      const deletedMsg = "这次运行的会话已删除";
+      setNotice(deletedMsg);
+      setHistoryError(deletedMsg);
+    }
+  };
+
   const runNow = async () => {
     if (api === undefined || selected === undefined) return;
     setBusy(true);
     setNotice(undefined);
     try {
       const result = await api.runSchedule({ id: selected.id });
-      if (result.started) onOpenSession(result.sessionId);
+      if (result.started) await openSession(result.sessionId);
       else setNotice(scheduleSkipLabel(result.reason));
       refresh();
     } catch (error) {
@@ -450,6 +525,11 @@ export function SchedulePage({
                   </span>
                 )}
               </div>
+              {readOnly && (
+                <p className="sched-readonly" role="note">
+                  请在电脑上操作。手机上可以查看，也可以立即运行。
+                </p>
+              )}
               {selected !== undefined && (
                 <dl className="kv">
                   <div>
@@ -511,11 +591,6 @@ export function SchedulePage({
                     历史
                   </button>
                 </div>
-              )}
-              {readOnly && (
-                <p className="sched-readonly" role="note">
-                  请在电脑上操作。手机上可以查看，也可以立即运行。
-                </p>
               )}
               {(tab === "settings" || selectedId === "new") && (
                 <form
@@ -867,12 +942,16 @@ export function SchedulePage({
                   {history?.length === 0 && <p className="hint">还没有运行记录。</p>}
                   {history !== undefined && history.length > 0 && (
                     <div className="sched-hist" role="table" aria-label="运行历史">
-                      <div className="sched-hist-row head" role="row">
-                        <span>计划时间</span>
-                        <span>触发</span>
-                        <span>结果</span>
-                        <span>用时</span>
-                        <span>会话</span>
+                      <div className="sched-hist-row sched-hist-head" role="row">
+                        {SCHED_HIST_COLUMNS.map((col) => (
+                          <span
+                            key={col.key}
+                            role="columnheader"
+                            className={col.align === "right" ? "go none" : undefined}
+                          >
+                            {col.label}
+                          </span>
+                        ))}
                       </div>
                       {history.map((entry) => (
                         <div
@@ -880,41 +959,13 @@ export function SchedulePage({
                           role="row"
                           key={`${entry.id}:${entry.result}`}
                         >
-                          <span className="mono">{formatScheduleWhen(entry.scheduledAt)}</span>
-                          <span>
-                            {entry.result === "skipped" ? "—" : scheduleTriggerLabel(entry.trigger)}
-                          </span>
-                          <span className={`res ${resultClass(entry.result, entry.denied ?? 0)}`}>
-                            {scheduleResultLabel(entry.result)}
-                            {entry.result === "skipped" && (
-                              <small>{scheduleSkipLabel(entry.reason)}</small>
-                            )}
-                            {entry.result === "done" && (entry.denied ?? 0) > 0 && (
-                              <small>{entry.denied} 项被拒绝</small>
-                            )}
-                            {entry.result === "error" && entry.error !== undefined && (
-                              <small>{entry.error}</small>
-                            )}
-                            {entry.trigger === "catchup" &&
-                              entry.result === "done" &&
-                              entry.startedAt !== undefined && (
-                                <small>{formatScheduleWhen(entry.startedAt)} 补跑</small>
-                              )}
-                          </span>
-                          <span className="mono">{formatDurationClock(entry.durationMs)}</span>
-                          {entry.sessionId !== undefined ? (
-                            <button
-                              type="button"
-                              className="go"
-                              onClick={() => {
-                                if (entry.sessionId !== undefined) onOpenSession(entry.sessionId);
-                              }}
-                            >
-                              打开会话 →
-                            </button>
-                          ) : (
-                            <span className="go none">—</span>
-                          )}
+                          {SCHED_HIST_COLUMNS.map((col) => (
+                            <Fragment key={col.key}>
+                              {col.render(entry, (id) => {
+                                void openSession(id);
+                              })}
+                            </Fragment>
+                          ))}
                         </div>
                       ))}
                     </div>

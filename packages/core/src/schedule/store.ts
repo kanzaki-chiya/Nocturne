@@ -269,6 +269,7 @@ export function createScheduleStore(deps: ScheduleStoreDeps) {
 
   /** 历史，最新的在前（按原计划时间，同时刻按写入先后） */
   async function history(taskId: string): Promise<ScheduleHistoryEntry[]> {
+    await pending;
     const { entries } = await readRaw(taskId);
     return entries
       .map((entry, index) => ({ entry, index }))

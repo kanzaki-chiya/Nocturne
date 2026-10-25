@@ -823,9 +823,14 @@ export function PhoneApp({
           api={connected ? sessions.client?.runtime : undefined}
           workspaces={workspaces}
           readOnly
-          onOpenSession={(sessionId) => {
+          onOpenSession={async (sessionId) => {
+            if (!sessions.list.some((item) => item.id === sessionId)) {
+              await sessions.refresh().catch(() => undefined);
+            }
+            if (!sessions.list.some((item) => item.id === sessionId)) return false;
             navigate({ kind: "session", hostId: page.hostId, sessionId });
             openSession(sessionId);
+            return true;
           }}
           onChanged={() => {
             void sessions.refresh().catch(() => undefined);

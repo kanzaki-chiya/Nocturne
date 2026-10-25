@@ -5,18 +5,13 @@
 import {
   normalizeReasoningEffortLevels,
   type EditToolKind,
+  type ModelProtocol,
   type ModelRef,
 } from "../protocol/index.js";
 import { BUILTIN_MODEL_CATALOG, DEFAULT_MODEL_FALLBACK } from "./catalog.js";
 import { isModelProtocol, withEffectiveProtocol } from "./effective-protocol.js";
 import { withReasoningEfforts } from "./reasoning.js";
-import type {
-  ModelInfo,
-  ModelProtocol,
-  Provider,
-  ProviderRegistry,
-  ResolvedModel,
-} from "./types.js";
+import type { ModelInfo, Provider, ProviderRegistry, ResolvedModel } from "./types.js";
 
 /** 各协议适配器的传输层静态特征声明（ADR-0016 2026-10-25 修订） */
 export interface ProtocolAdapterSpec {

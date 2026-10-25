@@ -120,11 +120,12 @@ describe("Menu", () => {
 
   it("modelGroups 显示名优先、无显示名回退 id，detail 保持服务商且悬停带原始 id", () => {
     const capabilities = {
-      toolCall: true,
-      streaming: true,
-      vision: false,
-      contextWindow: 128_000,
-      maxOutputTokens: 8_192,
+      toolCalls: true,
+      parallelToolCalls: true,
+      reasoning: "none" as const,
+      imageInput: false,
+      promptCache: false,
+      editTool: "edit" as const,
     };
     const groups = modelGroups(
       [
@@ -168,11 +169,12 @@ describe("Menu", () => {
 
   it("ChoiceMenu searchable：少于 8 个模型时不显示搜索框", () => {
     const capabilities = {
-      toolCall: true,
-      streaming: true,
-      vision: false,
-      contextWindow: 128_000,
-      maxOutputTokens: 8_192,
+      toolCalls: true,
+      parallelToolCalls: true,
+      reasoning: "none" as const,
+      imageInput: false,
+      promptCache: false,
+      editTool: "edit" as const,
     };
     const models = Array.from({ length: 7 }, (_, i) => ({
       ref: { provider: "openai", model: `gpt-${i}` },
@@ -197,11 +199,12 @@ describe("Menu", () => {
 
   it("ChoiceMenu searchable：打开聚焦搜索框，按显示名/id/服务商与中文过滤，↑↓/Enter/Esc 操作", () => {
     const capabilities = {
-      toolCall: true,
-      streaming: true,
-      vision: false,
-      contextWindow: 128_000,
-      maxOutputTokens: 8_192,
+      toolCalls: true,
+      parallelToolCalls: true,
+      reasoning: "none" as const,
+      imageInput: false,
+      promptCache: false,
+      editTool: "edit" as const,
     };
     const models = [
       {

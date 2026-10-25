@@ -60,7 +60,7 @@ class FakeClock implements ScheduleClock {
       if (due.every !== undefined) due.at += due.every;
       else this.timers = this.timers.filter((timer) => timer.id !== due.id);
       due.fn();
-      await sleep(15);
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
     this.t = target;
   }
@@ -73,7 +73,11 @@ class FakeClock implements ScheduleClock {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 async function waitFor(cond: () => boolean | Promise<boolean>, what = "条件"): Promise<void> {
-  const deadline = Date.now() + 4000;
+  for (let i = 0; i < 20; i += 1) {
+    if (await cond()) return;
+    await Promise.resolve();
+  }
+  const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     if (await cond()) return;
     await sleep(5);

@@ -369,16 +369,18 @@ export function App({ host }: { host: DesktopHost }) {
     setPrefsVersion((v) => v + 1);
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<SessionSummary[]> => {
     const client = pool.get();
-    if (client === undefined) return;
+    if (client === undefined) return [];
     try {
       const list = await client.runtime.listSessions();
       setSessions(list);
       setListed(true);
       setStartupError(null);
+      return list;
     } catch (error) {
       setStartupError({ message: errMessage(error) });
+      return [];
     }
   }, [pool]);
 
@@ -1230,10 +1232,14 @@ export function App({ host }: { host: DesktopHost }) {
               <SchedulePage
                 api={pageClient?.runtime}
                 workspaces={scheduleWorkspaces}
-                onOpenSession={(sessionId) => {
-                  const summary = sessions.find((item) => item.id === sessionId);
+                onOpenSession={async (sessionId) => {
+                  const summary =
+                    sessions.find((item) => item.id === sessionId) ??
+                    (await refresh()).find((item) => item.id === sessionId);
+                  if (summary === undefined) return false;
                   setSchedulesOpen(false);
-                  if (summary !== undefined) void selectSession(summary.id, summary.cwd);
+                  await selectSession(summary.id, summary.cwd);
+                  return true;
                 }}
                 onChanged={() => {
                   void refresh();

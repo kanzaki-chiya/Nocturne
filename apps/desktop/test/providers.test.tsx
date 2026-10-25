@@ -981,7 +981,9 @@ describe("编辑服务商（U-07）", () => {
   });
 
   it("上游声明的最大输出 >= 上下文窗口时显示为可疑（删除线与悬停说明），手填值不受影响", async () => {
-    const baseFields = MODEL_SETTINGS[0]!.fields;
+    const firstModel = MODEL_SETTINGS[0];
+    if (firstModel === undefined) throw new Error("缺少 MODEL_SETTINGS[0]");
+    const baseFields = firstModel.fields;
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [PROVIDER] },

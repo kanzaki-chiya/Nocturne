@@ -245,6 +245,8 @@ export function createScheduler(options: SchedulerOptions) {
         const error = flags.timedOut ? "max_duration" : stopping ? "stopped" : outcome.error;
         const endedAt = clock.now();
         await sessionRow;
+        cancelTimer();
+        runs.delete(task.id);
         await record(task.id, {
           ...base,
           result,

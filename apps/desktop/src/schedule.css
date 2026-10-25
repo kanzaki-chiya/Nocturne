@@ -3,6 +3,9 @@
 .schedule-page {
   min-height: 0;
 }
+.schedule-page .ph3 .grow {
+  flex: 1;
+}
 .schedule-page .ph3 .sub {
   display: block;
 }
@@ -150,7 +153,7 @@
 .sched-hist-row:last-child {
   border-bottom: 0;
 }
-.sched-hist-row.head {
+.sched-hist-row.sched-hist-head {
   font-size: var(--fs-1);
   color: var(--a-faint);
   background: var(--a-side);
@@ -198,11 +201,29 @@
 .phone-schedules .schedule-page {
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
 }
 .phone-schedules .schedule-page .ph3,
 .phone-schedules .sched-banner {
   padding-inline: 16px;
 }
+.phone-schedules .schedule-page .cols3 {
+  grid-template-columns: minmax(0, 1fr);
+}
+.phone-schedules .schedule-page .plist {
+  border-right: 0;
+  border-bottom: 1px solid var(--a-border);
+}
 .phone-schedules .schedule-page .pane {
   padding: 16px;
+  overflow: visible;
+  min-width: 0;
+}
+.phone-schedules .schedule-page .form,
+.phone-schedules .schedule-page .field {
+  min-width: 0;
+}
+.phone-schedules .schedule-page .seg {
+  flex-wrap: wrap;
+  max-width: 100%;
 }

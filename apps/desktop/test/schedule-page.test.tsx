@@ -153,7 +153,7 @@ describe("定时任务页", () => {
     expect(name.className).toContain("err");
   });
 
-  it("历史可打开会话；立即运行把新会话交给外面", async () => {
+  it("历史可打开会话；立即运行把新会话交给外面；表头与数据列共用同一套 5 列定义", async () => {
     const open = vi.fn();
     const client = api();
     render(
@@ -166,12 +166,47 @@ describe("定时任务页", () => {
     await screen.findByDisplayValue("每日提交汇总");
     fireEvent.click(screen.getByRole("tab", { name: "历史" }));
     expect(await screen.findByText("错过，只补最近一次")).toBeTruthy();
+    const table = screen.getByRole("table", { name: "运行历史" });
+    const rows = within(table).getAllByRole("row");
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    const headRow = rows[0];
+    if (headRow === undefined) throw new Error("缺少表头行");
+    expect(headRow.classList.contains("sched-hist-head")).toBe(true);
+    expect(headRow.classList.contains("head")).toBe(false);
+    const headers = within(headRow).getAllByRole("columnheader");
+    expect(headers.map((el) => el.textContent)).toEqual([
+      "计划时间",
+      "触发",
+      "结果",
+      "用时",
+      "会话",
+    ]);
+    for (const row of rows) {
+      expect(row.children).toHaveLength(headers.length);
+    }
     fireEvent.click(screen.getByRole("button", { name: "打开会话 →" }));
     expect(open).toHaveBeenCalledWith("s1");
     fireEvent.click(screen.getByRole("tab", { name: "设置" }));
     fireEvent.click(screen.getByRole("button", { name: "▶ 立即运行" }));
     await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(2));
     expect(client.runSchedule).toHaveBeenCalledWith({ id: "daily" });
+  });
+
+  it("历史指向已删除会话时留在定时任务页并提示「这次运行的会话已删除」", async () => {
+    const open = vi.fn(async () => false);
+    const client = api();
+    render(
+      <SchedulePage
+        api={client}
+        workspaces={[{ path: null, label: "普通对话" }]}
+        onOpenSession={open}
+      />,
+    );
+    await screen.findByDisplayValue("每日提交汇总");
+    fireEvent.click(screen.getByRole("tab", { name: "历史" }));
+    fireEvent.click(await screen.findByRole("button", { name: "打开会话 →" }));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "这次运行的会话已删除");
+    expect(screen.getByRole("region", { name: "定时任务" })).toBeTruthy();
   });
 
   it("手机只读：新建、编辑、删除、启停禁用并提示，立即运行仍可用", async () => {
