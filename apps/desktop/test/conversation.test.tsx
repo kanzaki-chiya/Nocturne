@@ -2806,4 +2806,78 @@ describe("会话区提示", () => {
     );
     expect(shown).toEqual(["技能解析失败", "配置降级"]);
   });
+
+  it("按 afterEntry 固定在对应条目之后渲染，后续消息排在下面；同一位置多条保序，无字段兜底在末尾", () => {
+    const view = createSessionView();
+    view.entries = [
+      {
+        kind: "user",
+        key: "u:1",
+        turnId: "t1",
+        messageId: "u1",
+        seq: 1,
+        content: [{ type: "text", text: "第一问" }],
+      },
+      {
+        kind: "assistant",
+        key: "a:m1",
+        turnId: "t1",
+        messageId: "m1",
+        seq: 2,
+        time: "2026-01-01T00:00:00.000Z",
+        text: "第一答",
+        reasoning: "",
+        toolCalls: [],
+        model: { provider: "openai", model: "gpt-4.1" },
+        usage: undefined,
+        finishReason: "stop",
+      },
+      {
+        kind: "user",
+        key: "u:3",
+        turnId: "t2",
+        messageId: "u2",
+        seq: 3,
+        content: [{ type: "text", text: "第二问" }],
+      },
+      {
+        kind: "assistant",
+        key: "a:m2",
+        turnId: "t2",
+        messageId: "m2",
+        seq: 4,
+        time: "2026-01-01T00:01:00.000Z",
+        text: "第二答",
+        reasoning: "",
+        toolCalls: [],
+        model: { provider: "openai", model: "gpt-4.1" },
+        usage: undefined,
+        finishReason: "stop",
+      },
+    ];
+    view.notices = [
+      { level: "warning", code: "open_warn", message: "开场警告", afterEntry: 0 },
+      { level: "warning", code: "mid_warn_1", message: "切模型警告一", afterEntry: 2 },
+      { level: "error", code: "mid_err_2", message: "切模型错误二", afterEntry: 2 },
+      { level: "warning", code: "legacy_tail", message: "无字段兜底末尾" },
+    ];
+    const { container } = mount(view);
+    const transcript = container.querySelector(".conversation-transcript");
+    const items = [...(transcript?.children ?? [])].map((el) => el.textContent?.trim() ?? "");
+    const idxOpen = items.findIndex((t) => t.includes("开场警告"));
+    const idxU1 = items.findIndex((t) => t.includes("第一问"));
+    const idxA1 = items.findIndex((t) => t.includes("第一答"));
+    const idxMid1 = items.findIndex((t) => t.includes("切模型警告一"));
+    const idxMid2 = items.findIndex((t) => t.includes("切模型错误二"));
+    const idxU2 = items.findIndex((t) => t.includes("第二问"));
+    const idxA2 = items.findIndex((t) => t.includes("第二答"));
+    const idxTail = items.findIndex((t) => t.includes("无字段兜底末尾"));
+    expect(idxOpen).toBeLessThan(idxU1);
+    expect(idxU1).toBeLessThan(idxA1);
+    expect(idxA1).toBeLessThan(idxMid1);
+    expect(idxMid1).toBeLessThan(idxMid2);
+    expect(idxMid2).toBeLessThan(idxU2);
+    expect(idxU2).toBeLessThan(idxA2);
+    expect(idxA2).toBeLessThan(idxTail);
+  });
 });

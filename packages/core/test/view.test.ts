@@ -944,6 +944,50 @@ it("mcp.server 的 starting、ready、failed 都不产生 notice", () => {
   expect(view.notices).toEqual([]);
 });
 
+it("runtime.warning / runtime.error 记入 notices 时记录当时的 entries.length（afterEntry）", () => {
+  const view = createSessionView();
+  reduceSessionView(view, {
+    type: "runtime.warning",
+    sessionId: "s",
+    runId: "r",
+    eseq: 1,
+    afterSeq: 0,
+    time: "t",
+    payload: { code: "model_capabilities_defaulted", message: "開会话警告" },
+  });
+  reduceSessionView(view, {
+    type: "message.user",
+    sessionId: "s",
+    turnId: "t1",
+    seq: 1,
+    time: "t",
+    payload: { messageId: "u1", content: [{ type: "text", text: "hi" }] },
+  });
+  reduceSessionView(view, {
+    type: "runtime.error",
+    sessionId: "s",
+    runId: "r",
+    eseq: 2,
+    afterSeq: 1,
+    time: "t",
+    payload: { code: "config_error", message: "中场错误" },
+  });
+  expect(view.notices).toEqual([
+    {
+      level: "warning",
+      code: "model_capabilities_defaulted",
+      message: "開会话警告",
+      afterEntry: 0,
+    },
+    {
+      level: "error",
+      code: "config_error",
+      message: "中场错误",
+      afterEntry: 1,
+    },
+  ]);
+});
+
 it("审查器结算不再追加权限提示，用户结算照常追加", () => {
   const resolved = (callId: string, source: "reviewer" | "user"): DurableEvent => ({
     type: "permission.resolved",

@@ -234,6 +234,8 @@ export interface SessionNotice {
   level: "info" | "warning" | "error";
   code: string;
   message: string;
+  /** 产生时 view.entries.length，供客户端把提示固定在当时的位置 */
+  afterEntry?: number | undefined;
 }
 
 // ── 归约器内部簿记（不进 JSON；符号键 + 不可枚举） ──────────
@@ -684,6 +686,7 @@ function reduceEphemeral(view: SessionView, event: EphemeralEvent): void {
         level: "warning",
         code: event.payload.code,
         message: event.payload.message,
+        afterEntry: view.entries.length,
       });
       break;
     }
@@ -692,6 +695,7 @@ function reduceEphemeral(view: SessionView, event: EphemeralEvent): void {
         level: "error",
         code: event.payload.code,
         message: event.payload.message,
+        afterEntry: view.entries.length,
       });
       if (event.payload.code === "session_failed") view.status = "failed";
       break;

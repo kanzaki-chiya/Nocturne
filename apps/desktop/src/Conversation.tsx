@@ -3390,94 +3390,127 @@ function ConversationContent({
             {!view.entries.length && !view.live.assistants.length && !view.live.tools.length ? (
               <div className="conversation-empty">发送消息，开始这个会话。</div>
             ) : null}
-            {[
-              ...view.entries.map((entry) => (
-                <Fragment key={entry.key}>
-                  <EntryView
-                    entry={entry}
-                    openUrl={openUrl}
-                    cwd={cwd}
-                    parts={parts}
-                    now={now}
-                    images={images}
-                    session={session}
-                    busy={busy}
-                    waitingCallId={view.pendingQuestion?.callId}
-                    userRole={roleOf(entry)}
-                    repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
-                    scheduleSource={
-                      entry.kind === "user" &&
-                      entry.seq === view.entries.find((item) => item.kind === "user")?.seq
-                        ? scheduleSource
-                        : undefined
-                    }
-                    onResubmit={onResubmit}
-                    onFork={onFork}
-                    fileLinks={fileLinks}
-                    showReplyActions={replyActionKeys.has(entry.key)}
-                    changesCard={
-                      entry.kind === "assistant" ? renderChanges(changesByKey.get(entry.key)) : null
-                    }
-                  />
-                  {entry.kind !== "assistant" && renderChanges(changesByKey.get(entry.key))}
-                </Fragment>
-              )),
-              ...view.live.assistants.map((assistant) => (
-                <article
-                  className="a"
-                  key={`assistant:${assistant.messageId}`}
-                  aria-label="助手实时回复"
-                >
-                  <Think
-                    messageId={assistant.messageId}
-                    text={assistant.reasoning}
-                    parts={parts}
-                    now={now}
-                  />
-                  <Markdown text={assistant.text} openUrl={openUrl} />
-                </article>
-              )),
-              // 实时工具行与正式条目同在这一个数组、同用 key t:<callId>、同一组件树：
-              // reducer 提升条目时 React 只移动节点，不卸载重挂。
-              ...view.live.tools
-                .filter((tool) => !entryKeys.has(`t:${tool.callId}`))
-                .map((tool) => {
-                  const entry = preparingEntry(tool);
-                  return (
-                    <Fragment key={entry.key}>
-                      <EntryView
-                        entry={entry}
-                        openUrl={openUrl}
-                        cwd={cwd}
-                        parts={parts}
-                        now={now}
-                        images={images}
-                        session={session}
-                        busy={busy}
-                        repliesAfter={0}
-                        onResubmit={onResubmit}
-                        fileLinks={fileLinks}
-                        showReplyActions={false}
-                        changesCard={null}
-                        preparing
-                      />
-                      {null}
-                    </Fragment>
-                  );
-                }),
-            ]}
-            {view.notices.map((notice, index) =>
-              MCP_STATE_NOTICE_CODES.has(notice.code) ? null : (
+            {(() => {
+              const byAfterEntry = new Map<
+                number,
+                { notice: (typeof view.notices)[number]; index: number }[]
+              >();
+              const trailing: { notice: (typeof view.notices)[number]; index: number }[] = [];
+              view.notices.forEach((notice, index) => {
+                if (MCP_STATE_NOTICE_CODES.has(notice.code)) return;
+                if (notice.afterEntry === undefined) {
+                  trailing.push({ notice, index });
+                  return;
+                }
+                const pos = Math.min(Math.max(0, notice.afterEntry), view.entries.length);
+                const list = byAfterEntry.get(pos) ?? [];
+                list.push({ notice, index });
+                byAfterEntry.set(pos, list);
+              });
+              const renderNotice = ({
+                notice,
+                index,
+              }: {
+                notice: (typeof view.notices)[number];
+                index: number;
+              }) => (
                 <div
-                  key={index}
+                  key={`notice:${index}`}
                   className={`conversation-notice conversation-notice-${notice.level}`}
                   role={notice.level === "info" ? "status" : "alert"}
                   title={notice.code}
                 >
                   {notice.message}
                 </div>
-              ),
-            )}
+              );
+              return (
+                <>
+                  {(byAfterEntry.get(0) ?? []).map(renderNotice)}
+                  {[
+                    ...view.entries.map((entry, entryIndex) => (
+                      <Fragment key={entry.key}>
+                        <EntryView
+                          entry={entry}
+                          openUrl={openUrl}
+                          cwd={cwd}
+                          parts={parts}
+                          now={now}
+                          images={images}
+                          session={session}
+                          busy={busy}
+                          waitingCallId={view.pendingQuestion?.callId}
+                          userRole={roleOf(entry)}
+                          repliesAfter={
+                            entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0
+                          }
+                          scheduleSource={
+                            entry.kind === "user" &&
+                            entry.seq === view.entries.find((item) => item.kind === "user")?.seq
+                              ? scheduleSource
+                              : undefined
+                          }
+                          onResubmit={onResubmit}
+                          onFork={onFork}
+                          fileLinks={fileLinks}
+                          showReplyActions={replyActionKeys.has(entry.key)}
+                          changesCard={
+                            entry.kind === "assistant"
+                              ? renderChanges(changesByKey.get(entry.key))
+                              : null
+                          }
+                        />
+                        {entry.kind !== "assistant" && renderChanges(changesByKey.get(entry.key))}
+                        {(byAfterEntry.get(entryIndex + 1) ?? []).map(renderNotice)}
+                      </Fragment>
+                    )),
+                    ...view.live.assistants.map((assistant) => (
+                      <article
+                        className="a"
+                        key={`assistant:${assistant.messageId}`}
+                        aria-label="助手实时回复"
+                      >
+                        <Think
+                          messageId={assistant.messageId}
+                          text={assistant.reasoning}
+                          parts={parts}
+                          now={now}
+                        />
+                        <Markdown text={assistant.text} openUrl={openUrl} />
+                      </article>
+                    )),
+                    // 实时工具行与正式条目同在这一个数组、同用 key t:<callId>、同一组件树：
+                    // reducer 提升条目时 React 只移动节点，不卸载重挂。
+                    ...view.live.tools
+                      .filter((tool) => !entryKeys.has(`t:${tool.callId}`))
+                      .map((tool) => {
+                        const entry = preparingEntry(tool);
+                        return (
+                          <Fragment key={entry.key}>
+                            <EntryView
+                              entry={entry}
+                              openUrl={openUrl}
+                              cwd={cwd}
+                              parts={parts}
+                              now={now}
+                              images={images}
+                              session={session}
+                              busy={busy}
+                              repliesAfter={0}
+                              onResubmit={onResubmit}
+                              fileLinks={fileLinks}
+                              showReplyActions={false}
+                              changesCard={null}
+                              preparing
+                            />
+                            {null}
+                          </Fragment>
+                        );
+                      }),
+                  ]}
+                  {trailing.map(renderNotice)}
+                </>
+              );
+            })()}
             {readOnly?.footer}
           </div>
         </ThinkScrollContext.Provider>

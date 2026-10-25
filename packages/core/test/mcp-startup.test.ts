@@ -186,7 +186,7 @@ it("启动失败解除首 Turn 等待，不注册工具，警告保持", async (
   const view = createSessionView();
   for (const event of warnings) reduceSessionView(view, event);
   expect(view.notices).toEqual([
-    { level: "warning", code: "mcp_server_failed", message: "slow failed" },
+    { level: "warning", code: "mcp_server_failed", message: "slow failed", afterEntry: 0 },
   ]);
   await session.close();
 });

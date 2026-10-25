@@ -173,6 +173,7 @@ interface SessionNotice {
   level: "warning" | "error";
   code: string;                 // runtime.warning / runtime.error 的 code
   message: string;
+  afterEntry?: number;          // 产生时 view.entries.length（仅本次打开有意义，不参与 V1 重放等价）
 }
 ```
 
