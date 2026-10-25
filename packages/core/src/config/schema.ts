@@ -451,6 +451,18 @@ const configFileSchema = z.object({
       retryBaseDelayMs: z.number().int().nonnegative().optional(),
       firstEventTimeoutMs: z.number().int().positive().optional(),
       idleTimeoutMs: z.number().int().positive().optional(),
+      // ADR-0063：重复调用保护；false 关闭，缺省 { warnAt: 3, stopAt: 6 }
+      loopGuard: z
+        .union([
+          z.literal(false),
+          z
+            .object({
+              warnAt: z.number().int().min(2),
+              stopAt: z.number().int().min(3),
+            })
+            .refine((v) => v.warnAt < v.stopAt, "loopGuard.stopAt 必须大于 warnAt"),
+        ])
+        .optional(),
     })
     .optional(),
   hooks: z.partialRecord(hookPointSchema, z.array(hookEntrySchema)).optional(),

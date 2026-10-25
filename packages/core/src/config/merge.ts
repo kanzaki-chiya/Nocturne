@@ -504,6 +504,8 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
       if (t.retryBaseDelayMs !== undefined) merged.retryBaseDelayMs = t.retryBaseDelayMs;
       if (t.firstEventTimeoutMs !== undefined) merged.firstEventTimeoutMs = t.firstEventTimeoutMs;
       if (t.idleTimeoutMs !== undefined) merged.idleTimeoutMs = t.idleTimeoutMs;
+      // ADR-0063：整个 loopGuard 值按层覆盖（false 同样生效）
+      if (t.loopGuard !== undefined) merged.loopGuard = t.loopGuard;
       out.turn = merged;
     }
   }

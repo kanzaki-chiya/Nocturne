@@ -16,6 +16,7 @@ import type {
   Grant,
   HookEntry,
   HookPoint,
+  LoopGuardConfig,
   McpServerEntry,
   McpServerOverview,
   McpSaveInput,
@@ -185,6 +186,8 @@ export interface TurnOverrides {
   retryBaseDelayMs?: number | undefined;
   firstEventTimeoutMs?: number | undefined;
   idleTimeoutMs?: number | undefined;
+  /** 重复调用保护（ADR-0063）：false 关闭；缺省 { warnAt: 3, stopAt: 6 } */
+  loopGuard?: LoopGuardConfig | false | undefined;
 }
 
 export type JevEndpoint = "opencode-zen" | "typesafe" | "custom";

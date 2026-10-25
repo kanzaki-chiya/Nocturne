@@ -6,6 +6,7 @@ import type {
   DurableEvent,
   HistoryEntry,
   ImageAttachment,
+  LoopGuardConfig,
   TodoItem,
   ToolSpec,
 } from "../protocol/index.js";
@@ -41,6 +42,11 @@ export interface EnvironmentInfo {
 export interface BuildContextInput {
   skills?: { text: string; truncated: boolean } | undefined;
   compactionThreshold?: string | number | undefined;
+  /**
+   * 重复调用保护（ADR-0063）：决定是否在投影里重建循环说明。
+   * false 关闭；缺省 DEFAULT_LOOP_GUARD（与 Agent Loop 同一份签名实现）。
+   */
+  loopGuard?: LoopGuardConfig | false | undefined;
   /** 编排者提供本 Turn 已尝试级别；强制路径不受预防阈值限制。 */
   compactionState?:
     | {

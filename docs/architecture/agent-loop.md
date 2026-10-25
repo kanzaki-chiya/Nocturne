@@ -64,6 +64,8 @@ runTurn(session, input, signal):
       #   PermissionRequest Hook，可能等待用户）→ tool.started → 执行
       #   → PostToolUse Hook → 归一化 → tool.completed
       if outcome.stopTurn: return finish("aborted")         # 用户选择"拒绝并停止"；剩余调用由 finish 结算
+      if loopGuard 命中 stopAt:                            # ADR-0063；签名与计数见第 3.9 节
+        return finish("error", { code: "loop_detected", message })
       if deps.shouldFinish?(session.state): return finish("done")   # Phase 6 注入点（subagent.md 第 2 节）
     if signal.aborted: return finish("aborted")
     # 回到循环顶部：工具结果已写入会话，下一次 build 会把它们带给模型
@@ -146,9 +148,23 @@ Context Builder 是纯计算，不调用 Provider。需要压缩时它返回压�
 
 ### 3.8 步数上限
 
-主对话默认不限制单 Turn 步数：`maxSteps` 未配置（undefined）时 Turn 不会因步数上限结束；正常由模型 `stop` 或用户中断收尾，其余结束原因（Provider 错误、截断、拒绝、持久化失败等）遵循原有规则。显式配置 `maxSteps`（正整数）后达到上限时 Turn 以 `max_steps` 结束，用户可以发送"继续"开启新 Turn。子会话不受此默认影响：Subagent 始终有自己的独立上限（`maxStepsPerTurn`，默认 50，见 [subagent.md](subagent.md)）。重复调用检测作为后续改进。
+主对话默认不限制单 Turn 步数：`maxSteps` 未配置（undefined）时 Turn 不会因步数上限结束；正常由模型 `stop` 或用户中断收尾，其余结束原因（Provider 错误、截断、拒绝、持久化失败等）遵循原有规则。显式配置 `maxSteps`（正整数）后达到上限时 Turn 以 `max_steps` 结束，用户可以发送"继续"开启新 Turn。子会话不受此默认影响：Subagent 始终有自己的独立上限（`maxStepsPerTurn`，默认 50，见 [subagent.md](subagent.md)）。原地打转的循环由下一节的重复调用保护拦下。
 
-### 3.9 Turn 的可选注入点（Phase 6）
+### 3.9 重复调用保护（ADR-0063）
+
+模型有时会连续重发同一个调用（`202610220716-f0136a6d` 里摘要压缩后连发 14 次相同的 `git status`）。判定与执行如下：
+
+- **签名**：`工具名 + 规范化入参（JSON 键排序，解析失败时用原文）+ 结果正文哈希`。实现在 `protocol/loop-guard.ts`，纯函数、无 Node 依赖，Builder 重建说明时用的是同一份实现。结果正文取 `tool.completed.modelContent`——就是执行器交给模型的那份（含截断说明）。
+- **判定点**：在 Loop 第 4 步，**每次 `tool.completed` 写入之后**（`turn.ts` 执行循环里）。同一步里并行/串行的多个调用各算一次；`cancelled`/`interrupted` 的结算不算"工具返回的结果"，不计数。不按工具名分支——只看签名。
+- **重置**：签名变化即从 1 重计；同一 Turn 内只穿插模型的文本或推理不算打断；`turn.started`/`turn.completed` 清除计数，所以跨 Turn 不累计。
+- **第 `warnAt` 次**（默认 3）：不在此处做任何事——说明由 Context Builder 在投影时从持久事件确定性地重建，附在那条工具结果之后（[context.md](context.md) 第 3 节）。Loop 不写事件、不改工具结果。
+- **第 `stopAt` 次**（默认 6）：立即 `finish("error", { code: "loop_detected", message })`，message 形如「检测到重复调用：shell 连续 6 次返回相同结果，已停止这一轮」。不再发下一次模型请求；剩余未执行的调用由 `finish` 按既有规则结算为 `cancelled`。沿用 `error` 结束原因，不新增 `TurnEndReason`。
+- **配置**：`turn.loopGuard`（[config.md](config.md) 第 2 节），默认 `{ warnAt: 3, stopAt: 6 }`，`false` 关闭。
+- **子会话同样生效**：`turnConfig` 原样传给子 Turn，子 Turn 触发时以 `error` 结束，launcher 按既有规则返回 `subagent_turn_failed`（[subagent.md](subagent.md) 第 4 节），父模型拿到普通错误结果。
+
+已知局限：只拦"同一调用原样连续重复"。A、B、A、B 交替的循环，以及每次结果都略有不同的循环（例如每次截图都不一样的界面操作）拦不住。
+
+### 3.10 Turn 的可选注入点（Phase 6）
 
 `TurnDeps` 的三个可选字段为 Subagent 引入，缺省时行为与既有版本逐项一致：
 

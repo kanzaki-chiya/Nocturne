@@ -2136,3 +2136,180 @@ describe("ADR-0028 2026-10-11 只追加（前缀缓存）", () => {
     ).toBe(0);
   });
 });
+
+describe("ADR-0063 循环说明投影", () => {
+  /** 同一调用的 n 次重复：assistant 给出调用 → tool.completed，附对应历史条目 */
+  function loopEvents(
+    n: number,
+    options: { name?: string; result?: string; startSeq?: number } = {},
+  ): { events: DurableEvent[]; history: HistoryEntry[] } {
+    const { name = "shell", result = "clean", startSeq = 1 } = options;
+    const events: DurableEvent[] = [ev(startSeq, "turn.started", {})];
+    const history: HistoryEntry[] = [];
+    for (let i = 0; i < n; i++) {
+      const callId = `c${i + 1}`;
+      const assistantSeq = startSeq + 1 + i * 2;
+      const toolSeq = assistantSeq + 1;
+      events.push(
+        ev(assistantSeq, "message.assistant", {
+          messageId: `m${i}`,
+          model: { provider: "test", model: "m1" },
+          content: [],
+          toolCalls: [{ callId, name, input: { command: "git status" } }],
+          usage: undefined,
+          finishReason: "tool_calls",
+        }),
+        ev(toolSeq, "tool.completed", { callId, name, status: "ok", modelContent: result }),
+      );
+      history.push(
+        {
+          kind: "assistant",
+          seq: assistantSeq,
+          turnId: "turn-1",
+          messageId: `m${i}`,
+          model: { provider: "test", model: "m1" },
+          content: [],
+          toolCalls: [{ callId, name, input: { command: "git status" } }],
+          usage: undefined,
+          finishReason: "tool_calls",
+        },
+        {
+          kind: "tool",
+          seq: toolSeq,
+          turnId: "turn-1",
+          callId,
+          name,
+          status: "ok",
+          modelContent: result,
+        },
+      );
+    }
+    return { events, history };
+  }
+
+  it("第 3 次结果后附说明，其余结果不带；说明只出现一次", () => {
+    const { events, history } = loopEvents(4);
+    const built = buildContext(baseInput({ history, events }));
+    const tools = built.request.messages.filter((m) => m.role === "tool");
+    expect(tools).toHaveLength(4);
+    expect(tools[0]?.role === "tool" && tools[0].content).toBe("clean");
+    expect(tools[1]?.role === "tool" && tools[1].content).toBe("clean");
+    expect(tools[2]?.role === "tool" && tools[2].content.startsWith("clean\n\n[Loop guard]")).toBe(
+      true,
+    );
+    expect(tools[3]?.role === "tool" && tools[3].content).toBe("clean");
+    expect(JSON.stringify(built.request.messages).match(/\[Loop guard\]/g)).toHaveLength(1);
+  });
+
+  it("同一步并行的相同调用：说明落在第 warnAt 个结果之后", () => {
+    const events: DurableEvent[] = [
+      ev(1, "turn.started", {}),
+      ev(2, "message.assistant", {
+        messageId: "m",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: ["c1", "c2", "c3"].map((callId) => ({
+          callId,
+          name: "shell",
+          input: { command: "git status" },
+        })),
+        usage: undefined,
+        finishReason: "tool_calls",
+      }),
+      ...[3, 4, 5].map((seq, i) =>
+        ev(seq, "tool.completed", {
+          callId: `c${i + 1}`,
+          name: "shell",
+          status: "ok",
+          modelContent: "clean",
+        }),
+      ),
+    ];
+    const history: HistoryEntry[] = [
+      {
+        kind: "assistant",
+        seq: 2,
+        turnId: "turn-1",
+        messageId: "m",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: ["c1", "c2", "c3"].map((callId) => ({
+          callId,
+          name: "shell",
+          input: { command: "git status" },
+        })),
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      ...[3, 4, 5].map((seq, i): HistoryEntry => ({
+        kind: "tool",
+        seq,
+        turnId: "turn-1",
+        callId: `c${i + 1}`,
+        name: "shell",
+        status: "ok",
+        modelContent: "clean",
+      })),
+    ];
+    const built = buildContext(baseInput({ history, events }));
+    const tools = built.request.messages.filter((m) => m.role === "tool");
+    expect(tools[2]?.role === "tool" && tools[2].content).toContain("[Loop guard]");
+    expect(tools[2]?.role === "tool" && tools[2].content).toContain("3 times");
+  });
+
+  it("同一份历史重复构建逐字节一致；追加新步骤后已有前缀不变", () => {
+    const four = loopEvents(4);
+    const first = buildContext(baseInput({ history: four.history, events: four.events })).request;
+    const second = buildContext(
+      baseInput({
+        history: structuredClone(four.history),
+        events: structuredClone(four.events),
+      }),
+    ).request;
+    expect(JSON.stringify(second.messages)).toBe(JSON.stringify(first.messages));
+
+    // 再追加两步（第 5、6 次）：前 4 条工具消息原样，说明仍在第 3 条
+    const six = loopEvents(6);
+    const extended = buildContext(baseInput({ history: six.history, events: six.events })).request;
+    expect(extended.messages.slice(0, first.messages.length)).toEqual(first.messages);
+  });
+
+  it("修剪覆盖的重复结果同样带说明（位置不随修剪移动）", () => {
+    const { events, history } = loopEvents(4);
+    const pruned: HistoryEntry[] = [
+      ...history,
+      {
+        kind: "compaction",
+        seq: 20,
+        turnId: undefined,
+        compactKind: "prune",
+        throughSeq: 8,
+        summary: undefined,
+      },
+    ];
+    const built = buildContext(baseInput({ history: pruned, events }));
+    const tools = built.request.messages.filter((m) => m.role === "tool");
+    // 前 4 条（到 seq 8）被修剪为占位，说明仍挂在第 3 条之后
+    expect(tools[2]?.role === "tool" && tools[2].content).toContain("输出已省略");
+    expect(tools[2]?.role === "tool" && tools[2].content).toContain("[Loop guard]");
+    expect(tools[3]?.role === "tool" && tools[3].content).not.toContain("[Loop guard]");
+  });
+
+  it("turn.loopGuard:false 不附说明；旧日志（无相关事件）不误报", () => {
+    const { events, history } = loopEvents(4);
+    const off = buildContext(baseInput({ history, events, loopGuard: false }));
+    expect(JSON.stringify(off.request.messages)).not.toContain("[Loop guard]");
+    const plain = buildContext(baseInput({ history: history.slice(0, 2) }));
+    expect(JSON.stringify(plain.request.messages)).not.toContain("[Loop guard]");
+  });
+
+  it("结果不同的重复不附说明", () => {
+    // 2 次相同 → 2 次不同：中间签名变化重置计数，任何一段都不到 warnAt
+    const a = loopEvents(2);
+    const b = loopEvents(2, { result: "dirty", startSeq: 20 });
+    const built = buildContext(
+      baseInput({ history: [...a.history, ...b.history], events: [...a.events, ...b.events] }),
+    );
+    expect(JSON.stringify(built.request.messages)).not.toContain("[Loop guard]");
+  });
+});

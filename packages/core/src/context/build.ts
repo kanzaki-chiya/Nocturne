@@ -15,6 +15,7 @@ import {
   parseCompactionThreshold,
   effectiveEvents,
   formatTodoBlock,
+  loopGuardNotes,
 } from "../protocol/index.js";
 export { estimateTokens } from "../protocol/index.js";
 import type {
@@ -605,6 +606,8 @@ function historyToMessages(
   currentModelProtocol: ModelProtocol | undefined,
   images?: ImageProjectionOpts,
   events?: readonly DurableEvent[],
+  /** ADR-0063：tool.completed 的 seq → 附在该工具结果末尾的循环说明 */
+  loopNotes?: ReadonlyMap<number, string>,
 ): HistoryProjection {
   const messages: ModelMessage[] = [];
   const byChars = emptyBreakdown();
@@ -707,6 +710,10 @@ function historyToMessages(
           ? { images: [], texts: [], virtual: 0 }
           : resolveAttachments(entry.attachments, imgOpts);
         for (const text of atts.texts) content += `\n${text}`;
+        // ADR-0063：第 warnAt 次连续相同的结果后附系统说明（不写事件，
+        // 由持久事件重建；位置固定在这条工具结果末尾，修剪后同样保留）
+        const note = loopNotes?.get(entry.seq);
+        if (note !== undefined) content += note;
         byChars.tool += content.length;
         const msg: ModelMessage = {
           role: "tool",
@@ -1051,7 +1058,15 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     unsettled,
     deferred,
     summaryMessage: injectedSummary,
-  } = historyToMessages(input.history, model.ref.provider, model.protocol, imageOpts, input.events);
+  } = historyToMessages(
+    input.history,
+    model.ref.provider,
+    model.protocol,
+    imageOpts,
+    input.events,
+    // ADR-0063：循环说明由持久事件确定性地重建，同一份历史每次构建结果一致
+    input.events !== undefined ? loopGuardNotes(input.events, input.loopGuard) : undefined,
+  );
   // 摘要注入消息的对象身份：压缩后清单注入是独立消息，不重建摘要对象
   const summaryMessage = injectedSummary;
   // context.md 6.5：进行中 Turn 的 message.user 被摘要覆盖时重新注入，

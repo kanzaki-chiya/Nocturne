@@ -134,6 +134,8 @@ launch(request, ctx)
 
 **出错、超时、超步数**：子 Turn 的 `turn.completed` reason 映射为结果——`done` 且有 `finish` → `ok`；`done` 无 `finish` → 进入催促；`error`/`max_steps`/`truncated`/`refused` → `subagent_turn_failed`；`aborted` 按中止信号来源结算：父会话中断（`ctx.signal` 非超时中止）→ `cancelled`，本次 task 超时（launcher 自己的计时器，或经 `ctx.signal` 传入的执行器超时信号，reason 为 `TimeoutError`）→ `timeout` 并附「超过 Nms 未完成 + 可能已修改工作区请先检查 git status + 只读审查/调研任务也不要设短于默认值的超时」提示，父/子日志 `failedSignal` 中止 → `subagent_turn_failed`。`timeout`/`cancelled` 与 `subagent_turn_failed`、`subagent_no_result` 一样附子会话已有的产出（`partialOutputOf`）和 `statsOf`（子会话路径、已完成步数）：已完成工具调用的清单（最近 15 条：工具名、参数摘要、状态、结果首行至多 120 字）加最后一段助手文本；`task` 工具把它以「子会话没有提交结果，以下是它已有的产出（未完成，可能不完整，请自行核对）」交给模型。超时常落在写报告的最后一步，那一步的文字不会落盘，前面的调研靠这份清单留给父模型。父会话中断时执行器按既有规则把整个调用归一为 `cancelled`（Turn 随之结束），产出只留在子会话日志里，不进入父模型的上下文。子会话创建失败、`close` 抛错等内部异常 → `tool_failed`（执行器既有兜底）。
 
+**重复调用保护**（[ADR-0063](../decisions/ADR-0063-loop-guard.md)）：`turnConfig` 原样传给子 Turn（只额外压 `maxSteps`），所以 `turn.loopGuard` 在子会话同样生效。子模型在自己的 Turn 里连续重复同一调用到 `stopAt` 时，子 Turn 以 `error(code = "loop_detected")` 收束，按上面的规则映射为 `subagent_turn_failed`（message 为「子会话 Turn 以 error 结束」），父模型拿到普通错误结果、附已有的产出清单。触发第 `warnAt` 次的说明由子会话的 Builder 用同一份实现重建，因此子日志里同样没有额外事件。
+
 ## 5. 会话与持久化
 
 - **日志**：`<NOCTURNE_HOME>/sessions/<childSessionId>.jsonl` + `.lock`，与顶层会话同目录、同格式、同锁语义（ADR-0009）。子会话的落盘附件在 `attachments/<childSessionId>/` 下——`presetContext.sessionId` 传子会话 id，预设规则自动放行它自己的附件目录。

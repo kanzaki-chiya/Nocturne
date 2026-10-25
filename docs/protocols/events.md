@@ -101,7 +101,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `refused` | 内容被 Provider 过滤（`content_filter`） |
 | `aborted` | 用户中断，或在权限确认中选择"拒绝并停止" |
 | `max_steps` | 达到单 Turn 步数上限：只在显式配置主会话 `turn.maxSteps` 或子代理独立上限（默认 50）时出现；主对话默认不限步数 |
-| `error` | 不可恢复的错误：Provider 错误重试耗尽、意外的结束原因、压缩失败、Runtime 内部错误；`TurnStart` Hook 拦截时为 `error.code = "hook_blocked"`（hooks.md 第 1 节）。恢复修复补写的 Turn 也使用 `error`，`error.code = "process_exited"`，`recovered: true` |
+| `error` | 不可恢复的错误：Provider 错误重试耗尽、意外的结束原因、压缩失败、Runtime 内部错误；`TurnStart` Hook 拦截时为 `error.code = "hook_blocked"`（hooks.md 第 1 节）。恢复修复补写的 Turn 也使用 `error`，`error.code = "process_exited"`，`recovered: true`。重复调用保护触发时为 `error.code = "loop_detected"`，`error.message` 说明重复的工具与次数（ADR-0063，见 [agent-loop.md](../architecture/agent-loop.md) 第 3.9 节） |
 
 `permission.resolved` 在以下情况发出：经过用户确认的请求（有 `requestId`）；被规则直接拒绝的调用；由会话或项目授权放行原本需要确认的调用（`source: "grant"`）；Hook 直接结算的调用（`source: "hook"`——`PreToolUse` 的 deny/allow 与 `PermissionRequest` 的 allow/deny，`rule` 字段记 Hook 条目的人读描述，见 [hooks.md](../architecture/hooks.md)）。规则直接允许的调用不单独发事件，其决定记录在 `tool.started.permission` 中。审查 allow/block 也结算为 `permission.resolved(source: "reviewer")`，执行时 `tool.started.permission` 沿用该来源。
 
@@ -268,6 +268,8 @@ ADR-0061：`message.assistant.protocol` 可为 `gemini`。正文与推理块的 
 - 新增临时事件类型、在已知事件中新增可选字段：兼容变更。新增字段不得改变已有字段的含义。v0.5 的 `message.user.attachments` 与 `tool.completed.attachments` 属于此类：不提升 `formatVersion`，旧版本按上表忽略未知字段。
 - 新增持久化事件类型：旧版本 Runtime 将无法恢复包含它的会话（见上表）。这是有意的保守选择；变更说明中需写明。
 - 删除字段、改变字段含义：不兼容变更，提升 `formatVersion`，提供旧格式日志的读取迁移，并新增 ADR。
+
+重复调用保护（[ADR-0063](../decisions/ADR-0063-loop-guard.md)）不新增事件类型或字段：说明由既有 `message.assistant.toolCalls` 与 `tool.completed` 确定性重建，`loop_detected` 只出现在 `turn.completed.error.code`（该字段本就承载错误码）。因此旧日志在新版本下照常恢复，并按新规则重建上下文；反过来，新日志里的 `loop_detected` 在旧版本中就是普通的 `error`。
 
 ### 智能权限审计（ADR-0036 第一轮）
 

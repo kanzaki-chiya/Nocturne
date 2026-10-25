@@ -11,6 +11,7 @@ export * from "./view.js";
 export * from "./todo.js";
 export * from "./file-refs.js";
 export * from "./compaction.js";
+export * from "./loop-guard.js";
 export * from "./rewind.js";
 export * from "./line-diff.js";
 export * from "./turn-changes.js";

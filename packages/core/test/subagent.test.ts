@@ -852,13 +852,14 @@ describe("subagent：中断、超时与失败", () => {
       const provider = new FakeProvider({
         handler: (req) => {
           if (isChildRequest(req)) {
-            // 子模型永远只调用 glob 不提交：耗尽默认 50 步上限
+            // 子模型永远只调用 glob 不提交：耗尽默认 50 步上限。
+            // 入参随步数变化，避免触发 ADR-0063 的重复调用保护（那是另一个用例）
             return [
               {
                 type: "tool_call",
                 toolCallId: `cr-${req.messages.length}`,
                 name: "glob",
-                input: { pattern: "*.ts" },
+                input: { pattern: `*.ts${req.messages.length}` },
               },
               { type: "finish", reason: "tool_calls" },
             ];
@@ -961,6 +962,64 @@ describe("subagent：中断、超时与失败", () => {
     expect(completed?.type === "tool.completed" && completed.payload.error?.message).toContain(
       "max_steps",
     );
+    await session.close();
+  });
+
+  it("子会话触发 loop_detected → 父会话拿到 subagent_turn_failed 错误结果", async () => {
+    const provider = new FakeProvider({
+      handler: (req) => {
+        if (isChildRequest(req)) {
+          // 子模型反复执行同一调用：子 Turn 以 loop_detected 结束
+          return [
+            {
+              type: "tool_call",
+              toolCallId: `loop-${req.messages.length}`,
+              name: "read",
+              input: { path: "same.txt" },
+            },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return req.messages.some((m) => m.role === "tool")
+          ? doneScript()
+          : [
+              {
+                type: "tool_call",
+                toolCallId: "task-1",
+                name: "task",
+                input: { task: "原地打转", preset: "explore" },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ];
+      },
+    });
+    const { runtime } = await makeRuntime(undefined, { provider });
+    const session = await makeSession(runtime);
+    writeFileSync(path.join(session.state().meta.cwd, "same.txt"), "constant\n");
+    const events = collect(session);
+    await session.submit({ text: "go" });
+    const completed = taskCompleted(events);
+    expect(completed?.type === "tool.completed" && completed.payload.error?.code).toBe(
+      "subagent_turn_failed",
+    );
+    // 错误消息带子 Turn 的结束原因：loop_detected 是 error agent-loop 级的信号
+    expect(completed?.type === "tool.completed" && completed.payload.error?.message).toContain(
+      "error",
+    );
+    // 子会话日志里就是 loop_detected
+    const output =
+      completed?.type === "tool.completed"
+        ? (completed.payload.output as { childLogPath?: string } | undefined)
+        : undefined;
+    expect(output?.childLogPath !== undefined && existsSync(output.childLogPath)).toBe(true);
+    if (output?.childLogPath === undefined) throw new Error("task 未返回子会话日志路径");
+    const childCompleted = readFileSync(output.childLogPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as { type: string; payload: { reason?: string; error?: unknown } })
+      .find((e) => e.type === "turn.completed");
+    expect(childCompleted?.payload.reason).toBe("error");
+    expect(JSON.stringify(childCompleted?.payload)).toContain("loop_detected");
     await session.close();
   });
 

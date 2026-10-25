@@ -736,7 +736,8 @@ describe("runTurn", () => {
     { timeout: 60_000 },
     async () => {
       // 前 151 个请求一律要求 glob，第 152 个请求输出文本并 stop：
-      // 超出旧默认 100 之上仍能继续，证明默认不限制步数
+      // 超出旧默认 100 之上仍能继续，证明默认不限制步数。
+      // 入参随步数变化，避免触发 ADR-0063 的重复调用保护（那是另一个用例）
       const h = await makeHarness({
         handler: (_req, callIndex) =>
           callIndex < 151
@@ -745,7 +746,7 @@ describe("runTurn", () => {
                   type: "tool_call",
                   toolCallId: `x${callIndex}`,
                   name: "glob",
-                  input: { pattern: "*.ts" },
+                  input: { pattern: `*.ts${callIndex}` },
                 },
                 { type: "finish", reason: "tool_calls" },
               ]

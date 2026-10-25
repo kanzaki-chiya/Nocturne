@@ -145,6 +145,41 @@ describe("分层合并", () => {
     expect(p?.models?.c).toBeDefined(); // env 层追加的当前模型条目
     await fs.unlink(path.join(home, "config.json"));
   });
+
+  it("turn.loopGuard（ADR-0063）：接受对象与 false，按层整值覆盖，非法值拒绝", async () => {
+    await writeJson(path.join(home, "config.json"), {
+      turn: { loopGuard: { warnAt: 4, stopAt: 8 } },
+    });
+    const rc = await load();
+    expect(rc.base.turn.loopGuard).toEqual({ warnAt: 4, stopAt: 8 });
+    // 项目层整值覆盖，不与用户层逐字段合并
+    const project = parseConfigFile({ turn: { loopGuard: { warnAt: 2, stopAt: 5 } } }, "project");
+    expect(
+      mergeLayers([
+        { kind: "user", file: rc.base },
+        { kind: "project", path: "project", file: project },
+      ]).resolved.turn.loopGuard,
+    ).toEqual({ warnAt: 2, stopAt: 5 });
+    // false 关闭同样生效（不被缺省值盖掉）
+    await writeJson(path.join(home, "config.json"), { turn: { loopGuard: false } });
+    expect((await load()).base.turn.loopGuard).toBe(false);
+    // 非法：warnAt < 2、stopAt ≤ warnAt、非整数
+    for (const bad of [
+      { warnAt: 1, stopAt: 6 },
+      { warnAt: 3, stopAt: 3 },
+      { warnAt: 4, stopAt: 2 },
+      { warnAt: 2.5, stopAt: 6 },
+      { warnAt: 3 },
+    ]) {
+      expect(() => parseConfigFile({ turn: { loopGuard: bad } }, "config.json")).toThrow();
+    }
+    await fs.unlink(path.join(home, "config.json"));
+  });
+
+  it("settings.json 不接受 turn.loopGuard（只走 config.json）", async () => {
+    const { validateSettingsPatch } = await import("../src/config/settings.js");
+    expect(() => validateSettingsPatch({ "turn.loopGuard": { warnAt: 3, stopAt: 6 } })).toThrow();
+  });
 });
 
 describe("外部 agent 配置（ADR-0049）", () => {

@@ -26,11 +26,20 @@ import type {
   FileRef,
   FinishReason,
   ImageAttachment,
+  LoopGuardConfig,
   PermissionReviewedPayload,
   RuntimeStatus,
   SkillSnapshot,
+  ToolCallRef,
   TurnEndReason,
   Usage,
+} from "../protocol/index.js";
+import {
+  advanceLoopGuard,
+  canonicalLoopInput,
+  DEFAULT_LOOP_GUARD,
+  loopGuardSignature,
+  type LoopGuardRun,
 } from "../protocol/index.js";
 import { SessionError } from "../session/index.js";
 import { createExecutionScope, type ExecutionScope } from "../tools/index.js";
@@ -236,6 +245,34 @@ export async function runTurn(
     deps.model.model.capabilities.reasoningEffort,
   );
 
+  // ADR-0063：重复调用保护。判定点在第 4 步每次工具结算之后（同一步里
+  // 并行/串行的调用各算一次）：达到 stopAt 立即 finish，不再发下一次请求，
+  // 中间不会插入其他模型输出。Builder 用同一份协议层实现在投影里重建
+  // 第 warnAt 次的说明，因此这里不写事件、不改工具结果。
+  const loopGuard: LoopGuardConfig | false = config.loopGuard ?? DEFAULT_LOOP_GUARD;
+  let loopRun: LoopGuardRun | undefined;
+  /**
+   * 记录一次工具结果并返回触发停止时的错误；未达到 stopAt 返回 undefined。
+   * 只按签名计数——不读工具名做分支。入参与结果都取持久化事件里的同一份数据：
+   * 入参来自 `message.assistant.toolCalls`（`rawInput` 兜底），结果正文取
+   * `tool.completed.modelContent`（执行器交给模型、已含截断说明的那份）。
+   */
+  function trackLoop(
+    call: ToolCallRef,
+    status: string,
+    modelContent: string,
+  ): { message: string } | undefined {
+    if (loopGuard === false) return undefined;
+    // 与 Builder 的重建口径一致：取消/恢复补写的结算不算"工具返回的结果"
+    if (status === "cancelled") return undefined;
+    const args = call.input !== undefined ? canonicalLoopInput(call.input) : (call.rawInput ?? "");
+    loopRun = advanceLoopGuard(loopRun, loopGuardSignature(call.name, args, modelContent));
+    if (loopRun.count < loopGuard.stopAt) return undefined;
+    return {
+      message: `检测到重复调用：${call.name} 连续 ${loopRun.count} 次返回相同结果，已停止这一轮`,
+    };
+  }
+
   /**
    * 执行一次 L2 摘要计划：成功写 context.compacted(kind="summary") 并返回 true；
    * 失败或中断不写任何压缩事件（context.md 6.6），返回 false。
@@ -353,6 +390,7 @@ export async function runTurn(
         environment: deps.environment,
         events: session.durableEvents(),
         compactionThreshold: deps.compactionThreshold,
+        loopGuard,
         compactionState: { pruneAttempted, summaryAttempted, force: forceCompaction },
         ...(deps.basePrompt !== undefined ? { basePrompt: deps.basePrompt } : {}),
         ...(attachmentData !== undefined ? { attachmentData } : {}),
@@ -516,6 +554,12 @@ export async function runTurn(
         const execution = await deps.executor.execute(call, executionScope());
         if (execution.stopTurn) {
           return await finish("aborted");
+        }
+        // ADR-0063：重复调用保护在每次 tool.completed 之后判定——达到 stopAt
+        // 立即结束 Turn，不再发下一次请求；剩余调用由 finish 结算。
+        const loop = trackLoop(call, execution.status, execution.result.modelContent);
+        if (loop !== undefined) {
+          return await finish("error", { code: "loop_detected", message: loop.message });
         }
         // 注入的结束谓词（subagent.md 第 2 节）：调用方判定 Turn 已完成，
         // 正常 done 收尾——Agent Loop 不读工具名

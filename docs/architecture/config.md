@@ -77,8 +77,17 @@ interface ConfigFile {
       否则声明无效——合并层警告后忽略（不静默回退 auto 吞掉路径） */
   shellPath?: string;
   /** Turn 参数覆盖（agent-loop.md 3.8）。maxSteps 为可选正整数：设置后主对话
-      单 Turn 步数受其限制并以 max_steps 收尾；未设即不限制 */
-  turn?: { maxSteps?: number; retryLimit?: number; retryBaseDelayMs?: number; firstEventTimeoutMs?: number; idleTimeoutMs?: number };
+      单 Turn 步数受其限制并以 max_steps 收尾；未设即不限制。
+      loopGuard（ADR-0063）为重复调用保护：{ warnAt, stopAt }，缺省
+      { warnAt: 3, stopAt: 6 }，false 关闭；整值覆盖，不与低层逐字段合并 */
+  turn?: {
+    maxSteps?: number;
+    retryLimit?: number;
+    retryBaseDelayMs?: number;
+    firstEventTimeoutMs?: number;
+    idleTimeoutMs?: number;
+    loopGuard?: { warnAt: number; stopAt: number } | false;
+  };
   /** MCP 服务器（stdio，Phase 5；见 architecture/mcp.md 第 3 节） */
   mcp?: { servers?: Record<string, McpServerEntry> };
   /** Hooks（外部命令，Phase 5；见 architecture/hooks.md 第 2 节） */
@@ -94,7 +103,7 @@ interface ConfigFile {
 
 | 字段 | 合并方式 |
 |---|---|
-| `model`、`permissions.preset`、`permission.reviewer`、`reasoningEffort`、`compaction.threshold`、`turn.*`、`shell`、`shellPath` | 高层覆盖低层 |
+| `model`、`permissions.preset`、`permission.reviewer`、`reasoningEffort`、`compaction.threshold`、`turn.*`（含 `turn.loopGuard`，整值覆盖）、`shell`、`shellPath` | 高层覆盖低层 |
 | `providers` | 按 `id` 合并：同 id 条目浅合并（高层字段覆盖），其中 `models` 按模型 id **逐字段合并**（ADR-0024 第 2 节）：顶层字段（`displayName`/`contextWindow`/`maxOutputTokens`/`pricing`/`protocol`/`endpoints`）逐个覆盖、`capabilities` 逐键覆盖、数组字段（`reasoningEffort`/`endpoints`）由最高层整体替换（显式空数组同样生效、不并集）；不同 id 并存 |
 | `permissions.rules` | 追加：高层规则排在低层之后（权限"后写优先"语义见 permissions.md 5.1） |
 | `mcp.servers` | 按服务器 id 浅合并（同 `providers`）；不同 id 并存 |
@@ -112,6 +121,8 @@ models.dev 数据在启动时从缓存或内置快照读取，启动不联网；
 **通知偏好**（[ADR-0056](../decisions/ADR-0056-session-notifications.md)）：`notifications` 段六个字段（`enabled`、`events.attention`、`events.error`、`events.done`、`doneAfterSeconds`、`sound`，缺省 `true/true/true/true/60/true`）逐字段参与通用合并（手写优先、可信项目可覆盖、不可信项目忽略）。`settings.json` 侧逐字段校验，非法字段分别忽略并警告，其他合法字段继续生效；未知成员保留但不参与合并。`SettingItem` / `SettingsPatch` 为六个逐字段条目，`effective` 和 `saved` 为字符串（`"true"` / `"60"`），`null` 清除；Core 只做校验读写，提醒判定在各客户端。
 
 **压缩阈值**（[ADR-0037](../decisions/ADR-0037-compaction-retention.md)）：`compaction.threshold` 支持 `"90%"`（须在 `(0,100%]`）、正整数 token（如 `200000`）或简写字符串（`"200k"`、`"1.5m"`，解析后须为正整数）。默认 `"90%"`；绝对值超过当前可用输入预算时按预算处理。`config.json`、`settings.json` 与可信项目配置按通用分层高层覆盖低层，不可信项目忽略。保存值不随模型窗口改写；`100%` 或达到预算的绝对值关闭预防性修剪与摘要。触发与保留区见 [context.md](context.md) §6。
+
+**重复调用保护**（[ADR-0063](../decisions/ADR-0063-loop-guard.md)）：`turn.loopGuard` 取 `{ warnAt, stopAt }` 或 `false`，缺省 `{ warnAt: 3, stopAt: 6 }`。schema 要求 `warnAt ≥ 2` 且 `warnAt < stopAt`，否则该层校验失败（`config_invalid`）。按通用分层合并，但**整值覆盖**——给出一层就替换低层整份阈值，不逐字段合并；`false` 同样是整值，关闭保护。它不在 `settings.json` 白名单内，只出现在手写的 `config.json`（或可信项目配置）里。判定与说明见 [agent-loop.md](agent-loop.md) 第 3.9 节与 [context.md](context.md) 第 3 节。
 
 Shell 也走通用合并，`session.setShell` 仍先探测可执行文件，再写 `shell`/`shellPath`；`auto` 清除保存值。保留 ADR-0022 的声明边界：手写层之间逐字段覆盖；手写配置覆盖程序 shell 设置、环境变量覆盖配置时，替换整份 shell 声明，不继承低层路径。自动选择与非法环境变量降级见 [tools.md](tools.md) 第 6 节。
 

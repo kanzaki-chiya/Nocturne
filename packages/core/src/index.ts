@@ -158,7 +158,7 @@ import type {
   TurnChangeDiff,
 } from "./protocol/index.js";
 import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
-import { normalizePermissionPreset } from "./protocol/index.js";
+import { DEFAULT_LOOP_GUARD, normalizePermissionPreset } from "./protocol/index.js";
 import type { FileRefResolution, LocalFileContent } from "./protocol/file-refs.js";
 import { resolveFileRefs } from "./tools/file-refs.js";
 import { buildFileIndex, type FileIndexEntry } from "./tools/file-index.js";
@@ -1705,6 +1705,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (src?.firstEventTimeoutMs !== undefined)
         turnConfig.firstEventTimeoutMs = src.firstEventTimeoutMs;
       if (src?.idleTimeoutMs !== undefined) turnConfig.idleTimeoutMs = src.idleTimeoutMs;
+      // ADR-0063：重复调用保护（false 关闭；缺省 DEFAULT_LOOP_GUARD）
+      if (src?.loopGuard !== undefined) turnConfig.loopGuard = src.loopGuard;
     }
 
     const resolveSessionModel = (ref: ModelRef): ResolvedModel => sessionRegistry.resolve(ref);
@@ -2801,6 +2803,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             environment,
             events,
             attachmentData,
+            // ADR-0063：压缩计划的预算与 Turn 内一致（只影响说明的计入）
+            loopGuard: turnConfig.loopGuard,
             compactionState: { force: true, summaryOnly: true },
           }).compaction;
           if (plan?.summaryRequest === undefined) {
@@ -2871,12 +2875,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           instructions,
           environment,
           compactionThreshold,
+          loopGuard: turnConfig.loopGuard ?? DEFAULT_LOOP_GUARD,
         });
         if (contextCache?.key === key) return structuredClone(contextCache.value);
         const state = session.state();
         const value = buildContext({
           skills: catalog,
           compactionThreshold,
+          loopGuard: turnConfig.loopGuard,
           history: state.history,
           todos: state.todos,
           model: model.model,

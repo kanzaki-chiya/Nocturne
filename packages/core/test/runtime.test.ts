@@ -1725,7 +1725,174 @@ describe("上下文与运行时命令（Phase 2）", () => {
   });
 });
 
-// ── 按模型协议（ADR-0026）───────────────────────────────
+// ── 重复调用保护（ADR-0063）─────────────────────────────
+
+describe("ADR-0063 重复调用保护", () => {
+  /** 第 i 步读同一个文件：入参与结果都一致（f0136a6d 的 git status 同形） */
+  const sameRead = (i: number) => [
+    { type: "tool_call" as const, toolCallId: `c${i}`, name: "read", input: { path: "same.txt" } },
+    { type: "finish" as const, reason: "tool_calls" as const },
+  ];
+  const doneScript = () => [
+    { type: "text_delta" as const, text: "done" },
+    { type: "finish" as const, reason: "stop" as const },
+  ];
+
+  it("第 3 次结果后附说明，第 6 次以 loop_detected 结束 Turn", async () => {
+    const provider = new FakeProvider({
+      handler: (req) => {
+        const step = req.messages.filter((m) => m.role === "tool").length + 1;
+        return step <= 8 ? sameRead(step) : doneScript();
+      },
+    });
+    const ws = makeTmpDir("nct-rt-loop-");
+    writeFileSync(path.join(ws, "same.txt"), "constant\n");
+    const { runtime } = await makeRuntime(undefined, ws, { provider });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    expect(await session.submit({ text: "go" })).toBe("error");
+
+    const done = events.find((e) => e.type === "turn.completed");
+    expect(done?.type === "turn.completed" && done.payload.reason).toBe("error");
+    expect(done?.type === "turn.completed" && done.payload.error?.code).toBe("loop_detected");
+    expect(done?.type === "turn.completed" && done.payload.error?.message).toContain("read");
+    expect(done?.type === "turn.completed" && done.payload.error?.message).toContain("6");
+    // 第 6 次结算后立即结束：没有第 7 次请求
+    expect(events.filter((e) => e.type === "tool.completed")).toHaveLength(6);
+    expect(provider.requests).toHaveLength(6);
+    // 说明只出现在第 3 次结果之后：第 3 个之后的请求里都带它，位置固定
+    const toolMsgs = (i: number) =>
+      provider.requests[i]?.messages.filter((m) => m.role === "tool") ?? [];
+    const thirdTools = toolMsgs(3);
+    expect(thirdTools[2]?.role === "tool" && thirdTools[2].content).toContain("[Loop guard]");
+    expect(JSON.stringify(toolMsgs(2))).not.toContain("[Loop guard]");
+    for (const i of [3, 4, 5]) {
+      const msgs = toolMsgs(i);
+      expect(
+        msgs.filter((m) => m.role === "tool" && m.content.includes("[Loop guard]")),
+      ).toHaveLength(1);
+      // 前缀不变：第 i 次请求的前 3 条工具结果与第 3 次请求逐字节一致
+      expect(JSON.stringify(msgs.slice(0, 3))).toBe(JSON.stringify(thirdTools.slice(0, 3)));
+    }
+    await session.close();
+  });
+
+  it("turn.loopGuard:false 关闭：同样的重复不会结束 Turn", async () => {
+    const provider = new FakeProvider({
+      handler: (req) => {
+        const step = req.messages.filter((m) => m.role === "tool").length + 1;
+        return step <= 8 ? sameRead(step) : doneScript();
+      },
+    });
+    const ws = makeTmpDir("nct-rt-loop-off-");
+    writeFileSync(path.join(ws, "same.txt"), "constant\n");
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: makeTmpDir("nct-rt-loop-off-s-"),
+      providers: [provider],
+      turn: { loopGuard: false },
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    const events = collect(session);
+    expect(await session.submit({ text: "go" })).toBe("done");
+    expect(events.filter((e) => e.type === "tool.completed")).toHaveLength(8);
+    await session.close();
+  });
+
+  it("入参变化（不同文件）不累计：只有连续相同签名才算重复", async () => {
+    const provider = new FakeProvider({
+      handler: (req) => {
+        const step = req.messages.filter((m) => m.role === "tool").length + 1;
+        if (step > 4) return doneScript();
+        return [
+          {
+            type: "tool_call" as const,
+            toolCallId: `c${step}`,
+            name: "read",
+            input: { path: step % 2 === 1 ? "a.txt" : "b.txt" },
+          },
+          { type: "finish" as const, reason: "tool_calls" as const },
+        ];
+      },
+    });
+    const ws = makeTmpDir("nct-rt-loop-alt-");
+    writeFileSync(path.join(ws, "a.txt"), "same\n");
+    writeFileSync(path.join(ws, "b.txt"), "same\n");
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: makeTmpDir("nct-rt-loop-alt-s-"),
+      providers: [provider],
+      turn: { loopGuard: { warnAt: 2, stopAt: 3 } },
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    const events = collect(session);
+    expect(await session.submit({ text: "go" })).toBe("done");
+    expect(events.filter((e) => e.type === "tool.completed")).toHaveLength(4);
+    await session.close();
+  });
+
+  it("自定义阈值 warnAt/stopAt 生效", async () => {
+    const provider = new FakeProvider({
+      handler: (req) => {
+        const step = req.messages.filter((m) => m.role === "tool").length + 1;
+        return step <= 6 ? sameRead(step) : doneScript();
+      },
+    });
+    const ws = makeTmpDir("nct-rt-loop-cfg-");
+    writeFileSync(path.join(ws, "same.txt"), "constant\n");
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: makeTmpDir("nct-rt-loop-cfg-s-"),
+      providers: [provider],
+      turn: { loopGuard: { warnAt: 2, stopAt: 3 } },
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    const events = collect(session);
+    expect(await session.submit({ text: "go" })).toBe("error");
+    expect(events.filter((e) => e.type === "tool.completed")).toHaveLength(3);
+    const done = events.find((e) => e.type === "turn.completed");
+    expect(done?.type === "turn.completed" && done.payload.error?.code).toBe("loop_detected");
+    // 第 2 次结果后已带说明（requests[2] 是第 2 个结果之后的请求）
+    const second = provider.requests[2]?.messages.filter((m) => m.role === "tool");
+    expect(second?.at(-1)?.role === "tool" && second.at(-1)?.content).toContain("[Loop guard]");
+    await session.close();
+  });
+
+  it("恢复会话后按同一份历史重建说明（回放确定）：位置与原文不变", async () => {
+    const provider = new FakeProvider({
+      handler: (req) => {
+        const step = req.messages.filter((m) => m.role === "tool").length + 1;
+        return step <= 3
+          ? sameRead(step)
+          : [
+              { type: "text_delta", text: "本轮被中断前先停在这里" },
+              { type: "wait", ms: 5 },
+              { type: "finish", reason: "stop" },
+            ];
+      },
+    });
+    const ws = makeTmpDir("nct-rt-loop-resume-");
+    writeFileSync(path.join(ws, "same.txt"), "constant\n");
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: makeTmpDir("nct-rt-loop-resume-s-"),
+      providers: [provider],
+      turn: { loopGuard: { warnAt: 2, stopAt: 6 } },
+    });
+    const s1 = await runtime.createSession({ model: "fake/fake-model" });
+    await s1.submit({ text: "go" });
+    const id = s1.id;
+    const before = provider.requests.at(-1)?.messages.filter((m) => m.role === "tool");
+    expect(JSON.stringify(before)).toContain("[Loop guard]");
+    await s1.close();
+
+    // 恢复后 describeContext 用同一批持久事件重建投影：说明完全相同
+    const s2 = await runtime.resumeSession(id);
+    const toolMsgs = s2.describeContext().request.messages.filter((m) => m.role === "tool");
+    expect(JSON.stringify(toolMsgs)).toBe(JSON.stringify(before));
+    await s2.close();
+  });
+});
 
 describe("按模型协议（ADR-0026）", () => {
   const entryOf = (endpoints: Record<string, string[]>) => ({

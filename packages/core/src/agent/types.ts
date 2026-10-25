@@ -3,6 +3,7 @@
  * Agent 是 Core 内唯一的编排者：不感知工具名、Provider 名、权限规则与 UI。
  */
 import type { EnvironmentInfo, InstructionSet } from "../context/index.js";
+import type { LoopGuardConfig } from "../protocol/index.js";
 import type { ResolvedModel } from "../provider/index.js";
 import type { Session, SessionState } from "../session/index.js";
 import type { ExecutionEnvironment, ToolExecutor, ToolRegistry } from "../tools/index.js";
@@ -21,6 +22,11 @@ export interface TurnConfig {
   firstEventTimeoutMs: number;
   /** 两个流式事件之间的上限（ms） */
   idleTimeoutMs: number;
+  /**
+   * 重复调用保护（ADR-0063）：false 关闭；缺省 DEFAULT_LOOP_GUARD。
+   * 只影响本 Turn 的停止判定与 Builder 的说明重建，不写事件。
+   */
+  loopGuard?: LoopGuardConfig | false | undefined;
 }
 
 export const DEFAULT_TURN_CONFIG: TurnConfig = {
