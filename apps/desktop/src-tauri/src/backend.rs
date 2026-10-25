@@ -570,6 +570,8 @@ fn backend_open(
             script.as_os_str(),
             std::ffi::OsStr::new("rpc"),
             std::ffi::OsStr::new("--stdio"),
+            // 定时任务只在桌面端打开时运行（ADR-0064）：只有这个后台启用调度器
+            std::ffi::OsStr::new("--scheduler"),
         ],
     );
     command

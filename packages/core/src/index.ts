@@ -79,6 +79,22 @@ import { createHookRunner } from "./hooks/index.js";
 import { appendInputHistory, readInputHistory } from "./input-history.js";
 import { createUsageStats } from "./usage/index.js";
 import type { UsageStats } from "./protocol/index.js";
+import type {
+  ScheduleChangedPayload,
+  ScheduleHistoryEntry,
+  ScheduleListResult,
+  ScheduleRunNowResult,
+  ScheduleSaveInput,
+  ScheduledTask,
+  ScheduleTaskOverview,
+} from "./protocol/schedule.js";
+import {
+  createScheduler,
+  createScheduleStore,
+  ScheduleError,
+  type RunContext,
+  type RunOutcome,
+} from "./schedule/index.js";
 import { createCheckpointRecorder } from "./session/checkpoints.js";
 import { rewindTargets, restoreCheckpointFiles } from "./session/rewind.js";
 import { createTurnChanges } from "./session/turn-changes.js";
@@ -263,6 +279,11 @@ export interface RuntimeOptions {
    * false/缺省：ask 一律结算为 deny（source: "non_interactive"）。
    */
   interactive?: boolean | undefined;
+  /**
+   * 是否在本进程里运行定时任务调度器（ADR-0064）；缺省 false，只有桌面端拉起的后台传 true。
+   * false 时任务仍可增删改，只是不会自动触发。
+   */
+  scheduler?: boolean | undefined;
   /** 权限层选项（Phase 2 最小形态，不含可配置规则） */
   permissions?: RuntimePermissionsOptions | undefined;
   /** 指令集；默认自动收集 <NOCTURNE_HOME>/AGENTS.md 与项目各级 AGENTS.md */
@@ -508,6 +529,19 @@ export interface ResumeSessionOptions {
 }
 
 export interface Runtime {
+  /** 定时任务列表（ADR-0064）：带下次运行时间、上次结果、是否在运行，以及调度器状态 */
+  listSchedules(): Promise<ScheduleListResult>;
+  /** 新建（不带 id）或整体替换（带 id）；字段非法以 invalid_command 拒绝 */
+  saveSchedule(input: ScheduleSaveInput): Promise<ScheduleTaskOverview>;
+  /** 删除任务及其历史；已有会话不动；任务不存在时不报错 */
+  deleteSchedule(input: { id: string }): Promise<void>;
+  /** 立即运行（trigger: manual）；上一次未结束或名额已满时返回 `started: false` 与原因 */
+  runSchedule(input: { id: string }): Promise<ScheduleRunNowResult>;
+  scheduleHistory(input: { id: string }): Promise<ScheduleHistoryEntry[]>;
+  /** 任务列表、启停、运行状态变化的易失通知（`schedule.changed`）；返回取消订阅函数 */
+  onScheduleChanged(listener: (payload: ScheduleChangedPayload) => void): () => void;
+  /** 停止调度器：中止运行中的任务、释放锁文件；后台退出前调用 */
+  stopScheduler(): Promise<void>;
   describeSkills(input?: { workspaceRoot?: string | undefined }): Promise<SkillsDescription>;
   setSkillEnabled(input: { name: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
   /**
@@ -2976,7 +3010,148 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   }
   const workspaceField = z.string().min(1).optional();
   const idFields = z.object({ id: z.string().min(1), workspaceRoot: workspaceField });
-  return {
+
+  // ── 定时任务（ADR-0064，schedule.md）：调度器是独立模块，这里只装配「开会话并提交」 ──
+  const scheduleListeners = new Set<(payload: ScheduleChangedPayload) => void>();
+  const scheduleStore = createScheduleStore({ platform, home: nocturneHome });
+  const pad2 = (n: number): string => String(n).padStart(2, "0");
+  const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  const shortStamp = (ms: number): string => {
+    const d = new Date(ms);
+    return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  };
+  const plannedStamp = (ms: number): string => {
+    const d = new Date(ms);
+    return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${WEEKDAY_NAMES[d.getDay()]} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  };
+  /** 补跑时用户消息开头附一行原计划时间（效果图 C）；桌面端据此识别并弱化显示 */
+  const catchupPrefix = (scheduledAt: number): string =>
+    `原计划 ${plannedStamp(scheduledAt)}，当时 Nocturne 没开，现在补跑。\n`;
+
+  async function runScheduledTask(task: ScheduledTask, ctx: RunContext): Promise<RunOutcome> {
+    const root = task.workspace ?? workspaceRoot;
+    const rootStat = await fs.stat(root).catch(() => undefined);
+    if (rootStat?.type !== "directory") throw new Error("workspace_missing");
+    await config?.forWorkspace(root);
+    const model = task.model ?? runtime.defaultModel({ workspaceRoot: root });
+    if (model === undefined) throw new Error("no_model");
+    const startedAt = Date.now();
+    let session: RuntimeSession;
+    try {
+      session = await runtime.createSession({
+        model,
+        cwd: task.workspace ?? cwd,
+        workspaceRoot: root,
+        ...(task.permissionPreset !== undefined ? { permissionPreset: task.permissionPreset } : {}),
+        ...(task.reasoningEffort !== undefined ? { reasoningEffort: task.reasoningEffort } : {}),
+        interactive: false,
+        schedule: {
+          taskId: task.id,
+          scheduledAt: new Date(ctx.scheduledAt).toISOString(),
+          trigger: ctx.trigger,
+        },
+      });
+    } catch (e) {
+      throw e instanceof RuntimeCommandError ? new Error(e.code) : e;
+    }
+    try {
+      ctx.onSession(session.id);
+      // 侧栏标题：「任务名 · 月-日 时:分」；写了 session.titled 就不再让模型生成标题
+      const internal = (session as unknown as Record<symbol, Session>)[INTERNAL_SESSION];
+      const ref = session.state().config.model;
+      await internal?.emit("session.titled", {
+        title: `${task.name} · ${shortStamp(ctx.trigger === "catchup" ? startedAt : ctx.scheduledAt)}`,
+        model: `${ref.provider}/${ref.model}`,
+      });
+      const text =
+        ctx.trigger === "catchup" ? `${catchupPrefix(ctx.scheduledAt)}${task.prompt}` : task.prompt;
+      const submitted = session.submit({ text });
+      // submit 同步置位 controller，之后的 interrupt 一定落在这一轮上
+      const onAbort = (): void => {
+        session.interrupt();
+      };
+      if (ctx.signal.aborted) onAbort();
+      else ctx.signal.addEventListener("abort", onAbort, { once: true });
+      let reason: TurnEndReason;
+      try {
+        reason = await submitted;
+      } finally {
+        ctx.signal.removeEventListener("abort", onAbort);
+      }
+      const events = session.durableEvents();
+      const denied = events.filter(
+        (e) => e.type === "permission.resolved" && e.payload.source === "non_interactive",
+      ).length;
+      if (reason === "done") return { result: "done", denied };
+      if (reason === "aborted") return { result: "aborted", denied };
+      const completed = events.findLast((e) => e.type === "turn.completed");
+      const code = completed?.type === "turn.completed" ? completed.payload.error?.code : undefined;
+      return { result: "error", error: code ?? reason, denied };
+    } finally {
+      await session.close().catch(() => undefined);
+    }
+  }
+
+  const scheduler = createScheduler({
+    platform,
+    home: nocturneHome,
+    store: scheduleStore,
+    enabled: options.scheduler === true,
+    runner: { run: runScheduledTask },
+    onChanged: (payload) => {
+      for (const listener of scheduleListeners) {
+        try {
+          listener(payload);
+        } catch {
+          // 监听方的错误不影响调度
+        }
+      }
+    },
+    warn: (code, message) => {
+      sinkWarnings.push({ code, message });
+      diagnostics.record("schedule.warning", { code, message });
+    },
+  });
+  /** 字段校验失败统一成 invalid_command（RPC 已有映射） */
+  async function scheduleCall<T>(call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (e) {
+      if (e instanceof ScheduleError) throw new RuntimeCommandError("invalid_command", e.message);
+      throw e;
+    }
+  }
+  const scheduleModelCheck = (input: ScheduleSaveInput): void => {
+    if (input.model === undefined || typeof input.model !== "string") return;
+    const root = workspaceRoot;
+    const known = (
+      config !== undefined ? buildRegistry(config.resolvedSettings(root).providers) : registry
+    )
+      .providers()
+      .flatMap((p) => p.models())
+      .some((m) => `${m.ref.provider}/${m.ref.model}` === input.model);
+    if (!known) throw new RuntimeCommandError("invalid_model", `模型 ${input.model} 不可用`);
+  };
+
+  const runtime: Runtime = {
+    listSchedules: () => scheduleCall(() => scheduler.list()),
+    saveSchedule: (input) =>
+      scheduleCall(async () => {
+        scheduleModelCheck(input);
+        return scheduler.save(input);
+      }),
+    async deleteSchedule(input) {
+      await scheduleCall(() => scheduler.remove(input.id));
+    },
+    runSchedule: (input) => scheduleCall(() => scheduler.runNow(input.id)),
+    scheduleHistory: (input) => scheduleCall(() => scheduler.history(input.id)),
+    onScheduleChanged(listener) {
+      scheduleListeners.add(listener);
+      return () => {
+        scheduleListeners.delete(listener);
+      };
+    },
+    stopScheduler: () => scheduler.stop(),
     describeMcpServers: (input = {}) =>
       requireMcpConfig().describeMcpServers(
         mcpInput(z.object({ workspaceRoot: workspaceField }), input),
@@ -3716,6 +3891,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ? config.setPreference(key, value)
         : Promise.reject(new Error("未注入 RuntimeConfig，无法保存偏好")),
   };
+  // 调度器在 Runtime 装配完成后启动（启动时先做一次补跑检查）；失败只警告，不让 createRuntime 失败
+  if (options.scheduler === true) {
+    await scheduler.start().catch((e: unknown) => {
+      sinkWarnings.push({
+        code: "schedule_start_failed",
+        message: `定时任务调度器启动失败：${e instanceof Error ? e.message : String(e)}`,
+      });
+    });
+  }
+  for (const w of scheduleStore.warnings)
+    sinkWarnings.push({ code: "schedule_config", message: w });
+  return runtime;
 }
 
 /** 收集用户级与项目级 AGENTS.md（context.md 第 3 节第 3 项） */

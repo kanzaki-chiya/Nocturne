@@ -9,7 +9,16 @@ import type { Runtime, RuntimeConfig, RuntimeSession } from "@nocturne/core";
 import type { RpcMethodName } from "../shared/methods.js";
 
 /** 没有（或没有一一对应的）RPC 方法的 Runtime 成员，附原因 */
-export const RUNTIME_NOT_MAPPED = {} as const satisfies Partial<Record<keyof Runtime, string>>;
+export const RUNTIME_NOT_MAPPED = {
+  // ADR-0064：schedule.* 方法在下一步（feat(rpc)）加入，届时移到 RUNTIME_METHODS
+  listSchedules: "待加入 schedule.list",
+  saveSchedule: "待加入 schedule.save",
+  deleteSchedule: "待加入 schedule.delete",
+  runSchedule: "待加入 schedule.runNow",
+  scheduleHistory: "待加入 schedule.history",
+  onScheduleChanged: "待加入 schedule.changed 通知",
+  stopScheduler: "生命周期：后台退出前由 RpcRuntimeHandle.dispose 调用，不是 RPC 方法",
+} as const satisfies Partial<Record<keyof Runtime, string>>;
 
 export const RUNTIME_METHODS: Record<
   Exclude<keyof Runtime, keyof typeof RUNTIME_NOT_MAPPED>,

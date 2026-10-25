@@ -141,6 +141,16 @@ module.exports = {
       },
     },
     {
+      name: "schedule-deps",
+      severity: "error",
+      comment:
+        "schedule（定时任务）只能依赖 protocol、platform、session（会话锁）与 config（原子写文件原语）；会话由 core/index 经注入的 runner 开，不依赖 agent（ADR-0064）",
+      from: { path: "^packages/core/src/schedule/" },
+      to: {
+        path: "^packages/core/src/(?!schedule/|protocol/|platform/|session/|config/)",
+      },
+    },
+    {
       name: "skills-deps",
       severity: "error",
       comment: "skills（发现/目录/正文渲染）只能依赖 protocol 与 platform（modules.md）",

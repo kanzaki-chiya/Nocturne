@@ -87,6 +87,7 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
           cwd,
           config: runtimeConfig,
           interactive,
+          scheduler: args.scheduler,
           permissions: { autoApproveAsk: false },
           mcp:
             bootstrap === undefined
@@ -101,6 +102,8 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
         return {
           runtime,
           sessionsDir,
+          // 后台退出前停调度器：中止运行中的定时任务、释放锁文件
+          dispose: () => runtime.stopScheduler(),
           // 服务商配置经 RPC 开放（rpc.md 3.3）：变更方法后服务端串行重载，
           // 等价 CLI 的 updateProviders(await reloadConfig())
           providerConfig: {

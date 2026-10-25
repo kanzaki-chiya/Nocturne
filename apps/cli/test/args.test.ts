@@ -111,6 +111,16 @@ describe("参数解析（cli.md 第 2 节）", () => {
     expect(() => parseArgs(["-p", "hi", "rpc", "--stdio"])).toThrow(UsageError);
   });
 
+  it("rpc --stdio --scheduler：只有桌面端后台启用调度器（ADR-0064）；其他用法都不启用", () => {
+    expect(parseArgs([]).scheduler).toBe(false);
+    expect(parseArgs(["rpc", "--stdio"]).scheduler).toBe(false);
+    expect(parseArgs(["rpc", "--stdio", "--scheduler"]).scheduler).toBe(true);
+    // 脱离 rpc 子命令：用法错
+    expect(() => parseArgs(["--scheduler"])).toThrow("rpc");
+    expect(() => parseArgs(["-p", "hi", "--scheduler"])).toThrow(UsageError);
+    expect(() => parseArgs(["setup", "--scheduler"])).toThrow(UsageError);
+  });
+
   it("--inline：默认 false；可与 -c / --resume 组合；互斥项与 --tui 相同", () => {
     expect(parseArgs([]).inline).toBe(false);
     expect(parseArgs(["--inline"]).inline).toBe(true);

@@ -46,6 +46,8 @@ export interface CliArgs {
   debugFile?: string | undefined;
   /** --stdio：RPC 服务端走 stdin/stdout（rpc 子命令必需，ADR-0044） */
   stdio: boolean;
+  /** --scheduler：rpc 后台里运行定时任务调度器（ADR-0064；只有桌面端拉起的后台传） */
+  scheduler: boolean;
   help: boolean;
   version: boolean;
   /** trust / untrust / setup / rpc 子命令 */
@@ -67,6 +69,7 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
   nctrn trust | untrust        信任/取消信任当前目录后退出
   nctrn setup                  服务商配置：TTY 打开服务商页；--cli 用行式向导
   nctrn rpc --stdio            RPC 服务端：stdin/stdout 上的 JSON-RPC（桌面端等进程外客户端使用）
+  nctrn rpc --stdio --scheduler  同上，并在本进程里运行定时任务调度器（桌面端后台用）
 
 参数：
   -p, --print [prompt]   非交互模式；值省略时读 stdin
@@ -85,6 +88,7 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
       --base-url <url>   Provider 端点（覆盖 NOCTURNE_BASE_URL）
       --api-key-env <名> 读取凭据的环境变量名
       --stdio            rpc 子命令的传输：从 stdin 读、向 stdout 写 JSON-RPC，诊断走 stderr
+      --scheduler        rpc 子命令：在本进程里运行定时任务调度器（同一 NOCTURNE_HOME 只有一个调度器）
   -y, --yes              自动批准需要确认的操作
       --debug            启用诊断输出（等价 NOCTURNE_DEBUG=1）
       --debug-file <p>   诊断输出文件；"-" 写 stderr（等价 NOCTURNE_DEBUG_FILE）
@@ -130,6 +134,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         "force-unlock": { type: "boolean", default: false },
         preset: { type: "string" },
         stdio: { type: "boolean", default: false },
+        scheduler: { type: "boolean", default: false },
         yes: { type: "boolean", short: "y", default: false },
         debug: { type: "boolean", default: false },
         "debug-file": { type: "string" },
@@ -200,6 +205,9 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   } else if (values.stdio) {
     throw new UsageError("--stdio 只能与 rpc 子命令搭配：nctrn rpc --stdio");
   }
+  if (values.scheduler && command !== "rpc") {
+    throw new UsageError("--scheduler 只能与 rpc 子命令搭配：nctrn rpc --stdio --scheduler");
+  }
   if (command !== undefined && command !== "setup" && command !== "rpc" && cli) {
     throw new UsageError(`${command} 子命令不接受 --cli`);
   }
@@ -246,6 +254,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     preset: values.preset,
     yes: values.yes,
     stdio: values.stdio,
+    scheduler: values.scheduler,
     debug: values.debug,
     debugFile: values["debug-file"],
     help: values.help,
