@@ -749,6 +749,7 @@
   overflow-wrap: anywhere;
 }
 .conversation-tool-output {
+  white-space: pre-wrap;
   max-height: 280px;
   overflow-y: auto;
 }
@@ -1209,31 +1210,41 @@
 .qcard .multi .key {
   border-radius: var(--radius-1);
 }
-.qcard input {
+.qcard :is(input, textarea) {
   font: inherit;
   color: var(--a-text);
   caret-color: var(--a-accent);
 }
 .qcard .other-in {
+  display: block;
   width: 100%;
-  padding: 4px 0 2px;
+  padding: 2px 0;
   border: 0;
   border-bottom: 1px solid var(--a-accent);
   background: transparent;
+  resize: none;
+  line-height: 20px;
+  max-height: 164px;
+  overflow-y: auto;
 }
 .qcard .lab:has(.other-in) {
   display: block;
 }
-.qcard input::placeholder,
+.qcard :is(input, textarea)::placeholder,
 .qcard .other-placeholder {
   color: var(--a-faint);
 }
 .qcard .free {
+  display: block;
   width: 100%;
   padding: 8px 10px;
   border-radius: var(--radius-2);
   border: 1px solid var(--a-borderStrong);
   background: var(--a-input);
+  resize: none;
+  line-height: 20px;
+  max-height: 176px;
+  overflow-y: auto;
 }
 .qcard .free:focus {
   border-color: var(--a-accent);
@@ -1275,7 +1286,7 @@
   opacity: 0.45;
   cursor: default;
 }
-.qcard :is(button, input):focus-visible {
+.qcard :is(button, input, textarea):focus-visible {
   outline: 2px solid var(--a-accent);
   outline-offset: 2px;
 }

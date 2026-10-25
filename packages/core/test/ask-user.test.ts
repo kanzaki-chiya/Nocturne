@@ -260,7 +260,7 @@ describe("ask_user 回答与逐题拒绝（ADR-0032 §2/§3）", () => {
         void session.respondQuestion(e.payload.requestId, {
           answers: [
             { selected: ["PostgreSQL（推荐）"] },
-            { selected: [], text: "  要兼容 13 版  " },
+            { selected: [], text: "  1. 要兼容 13 版\n2. 读写分离  " },
           ],
         });
       }
@@ -275,15 +275,15 @@ describe("ask_user 回答与逐题拒绝（ADR-0032 §2/§3）", () => {
     expect(p?.output).toEqual({
       answers: [
         { question: "用哪个数据库？", selected: ["PostgreSQL（推荐）"] },
-        { question: "补充约束？", selected: [], text: "要兼容 13 版" },
+        { question: "补充约束？", selected: [], text: "1. 要兼容 13 版\n2. 读写分离" },
       ],
     });
     expect(String(p?.modelContent)).toContain("问：用哪个数据库？");
     expect(String(p?.modelContent)).toContain("答：PostgreSQL（推荐）");
-    expect(String(p?.modelContent)).toContain("补充：要兼容 13 版");
+    expect(String(p?.modelContent)).toContain("补充：1. 要兼容 13 版\n2. 读写分离");
     // 回答随下一次模型请求的 tool 消息回给模型
     const toolMsg = provider.requests[1]?.messages.find((m) => m.role === "tool");
-    expect(toolMsg?.role === "tool" && toolMsg.content).toContain("要兼容 13 版");
+    expect(toolMsg?.role === "tool" && toolMsg.content).toContain("1. 要兼容 13 版\n2. 读写分离");
     await session.close();
   });
 

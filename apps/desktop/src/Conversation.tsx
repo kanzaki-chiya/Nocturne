@@ -2779,6 +2779,20 @@ interface AnswerDraft {
 
 const OTHER_TEXT_LIMIT = 2000;
 const SINGLE_AUTO_NEXT_MS = 200;
+/** 「其他」/自由文本多行框高度上限：约 8 行（8 * 20px + 上下内边距），再多在框内滚动 */
+const OTHER_MAX_HEIGHT = 164;
+const FREE_MAX_HEIGHT = 176;
+
+function resizeQuestionTextarea(
+  el: HTMLTextAreaElement | null,
+  maxHeight = OTHER_MAX_HEIGHT,
+): void {
+  if (el === null) return;
+  el.style.height = "auto";
+  if (el.scrollHeight > 0) {
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+  }
+}
 
 export function QuestionCard({
   pending,
@@ -2796,6 +2810,9 @@ export function QuestionCard({
     session.respondQuestion(pending.requestId, value),
   );
   const cardRef = useRef<HTMLElement>(null);
+  const otherRef = useRef<HTMLTextAreaElement | null>(null);
+  const freeRef = useRef<HTMLTextAreaElement | null>(null);
+  const composingRef = useRef(false);
   const timer = useRef<number | undefined>(undefined);
   useEffect(
     () => () => {
@@ -2946,16 +2963,21 @@ export function QuestionCard({
     const current = draftsRef.current[stateRef.current.index];
     const currentQuestion = questionsRef.current[stateRef.current.index];
     if (current === undefined || currentQuestion === undefined) return;
-    const input = cardRef.current?.querySelector<HTMLInputElement>("input");
+    const input = cardRef.current?.querySelector<HTMLElement>("input, textarea");
     if (input) input.focus();
     else cardRef.current?.focus();
   }, [index]);
 
+  useEffect(() => {
+    resizeQuestionTextarea(otherRef.current, OTHER_MAX_HEIGHT);
+    resizeQuestionTextarea(freeRef.current, FREE_MAX_HEIGHT);
+  }, [index, draft?.other, draft?.text]);
+
   // 数字键直选、Enter 下一题/提交：可编辑目标里数字键留给输入；IME 组合中不触发；
-  // Esc 不处理，留给全局（输入框中断）。设置区盖住时（inert）不响应。
+  // Shift+Enter 在多行输入里换行；Esc 不处理，留给全局（输入框中断）。设置区盖住时（inert）不响应。
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (event.isComposing) return;
+      if (event.isComposing || composingRef.current) return;
       // eslint-disable-next-line @typescript-eslint/no-deprecated -- 旧 IME 用 keyCode 229 标记组合中
       if ((event as KeyboardEvent & { keyCode?: number }).keyCode === 229) return;
       if (cardRef.current?.closest("[inert]") != null) return;
@@ -2982,6 +3004,7 @@ export function QuestionCard({
       if (event.key === "Enter") {
         // 卡片外的可编辑区（状态栏搜索等）的 Enter 不抢
         if (editable && !inside) return;
+        if (event.shiftKey) return;
         event.preventDefault();
         nextRef.current();
       }
@@ -3055,13 +3078,21 @@ export function QuestionCard({
         <p className="qtext">{question.question}</p>
         {multi && options.length > 0 ? <p className="qsub">可多选</p> : null}
         {options.length === 0 ? (
-          <input
+          <textarea
+            ref={freeRef}
             className="free"
+            rows={1}
             autoFocus
             aria-label={`${question.question} · 回答`}
             placeholder="输入回答，Enter 提交"
             value={draft.text}
             disabled={busy}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false;
+            }}
             onChange={(event) => {
               const value = Array.from(event.target.value).slice(0, OTHER_TEXT_LIMIT).join("");
               setDrafts((prev) =>
@@ -3111,13 +3142,21 @@ export function QuestionCard({
                   {total}
                 </span>
                 <span className="lab">
-                  <input
+                  <textarea
+                    ref={otherRef}
                     className="other-in"
+                    rows={1}
                     autoFocus
                     aria-label={`${question.question} · 其他`}
                     placeholder="自己输入…"
                     value={draft.other ?? ""}
                     disabled={busy}
+                    onCompositionStart={() => {
+                      composingRef.current = true;
+                    }}
+                    onCompositionEnd={() => {
+                      composingRef.current = false;
+                    }}
                     onChange={(event) => {
                       const value = Array.from(event.target.value)
                         .slice(0, OTHER_TEXT_LIMIT)

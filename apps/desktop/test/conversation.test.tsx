@@ -1076,6 +1076,82 @@ describe("Conversation 提问卡片", () => {
       }),
     );
   });
+
+  it("「其他」为多行 textarea：粘贴多行保留换行，Shift+Enter 换行，组字中 Enter 不提交，Enter 提交", async () => {
+    const view = createSessionView();
+    view.pendingQuestion = question({
+      questions: [
+        {
+          header: "方案",
+          question: "测试失败的用例怎么处理？",
+          options: [{ label: "修实现" }, { label: "更新断言" }],
+        },
+      ],
+    });
+    const { methods } = mount(view);
+    fireEvent.click(screen.getByRole("radio", { name: /其他/ }));
+    const other = screen.getByRole("textbox", { name: "测试失败的用例怎么处理？ · 其他" });
+    expect(other.tagName).toBe("TEXTAREA");
+
+    // 粘贴多行文字后，换行保留在值里
+    const multiLine = "1. 先修实现\n2. 补回归测试\n3. 更新文档";
+    fireEvent.change(other, { target: { value: multiLine } });
+    expect(other).toHaveProperty("value", multiLine);
+
+    // Shift+Enter 用于换行，不触发提交
+    const shiftEnter = new KeyboardEvent("keydown", {
+      key: "Enter",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    other.dispatchEvent(shiftEnter);
+    expect(shiftEnter.defaultPrevented).toBe(false);
+    expect(methods.respondQuestion).not.toHaveBeenCalled();
+
+    // 输入法组字中的 Enter（isComposing / compositionStart / keyCode=229）不提交
+    other.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    fireEvent.compositionStart(other);
+    fireEvent.keyDown(other, { key: "Enter" });
+    fireEvent.compositionEnd(other);
+    expect(methods.respondQuestion).not.toHaveBeenCalled();
+
+    // 普通 Enter 提交，结果里换行保留
+    fireEvent.keyDown(other, { key: "Enter" });
+    await waitFor(() =>
+      expect(methods.respondQuestion).toHaveBeenCalledWith("question-1", {
+        answers: [{ selected: [], text: multiLine }],
+      }),
+    );
+
+    // 卡片收起后，ask_user 工具行展开的「问 / 答」里保留换行
+    view.pendingQuestion = undefined;
+    view.entries = [
+      tool({
+        callId: "ask-1",
+        name: "ask_user",
+        status: "ok",
+        result: {
+          status: "ok",
+          modelContent: `问：测试失败的用例怎么处理？\n答：补充：${multiLine}`,
+          output: {
+            answers: [{ question: "测试失败的用例怎么处理？", selected: [], text: multiLine }],
+          },
+        },
+      }),
+    ];
+    const completed = mount(view);
+    fireEvent.click(completed.getByLabelText("工具详细信息"));
+    const pre = completed.container.querySelector(".conversation-tool-output");
+    expect(pre?.textContent).toBe(`问：测试失败的用例怎么处理？\n答：补充：${multiLine}`);
+  });
 });
 
 describe("Conversation 渲染与滚动", () => {
