@@ -117,16 +117,17 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       const startedAt = Date.now();
       const { turnId } = scope;
       let stopTurn = false;
-      // 结果附件的来源（ADR-0023）：找到工具后按其 origin 标记更新；
+      // 结果附件的来源（ADR-0023）与输出预算上限（ADR-0067）：找到目标工具后按其声明更新；
       // finish 闭包先于 tool 定义，不能反向收窄，故单独持有
       let attachmentSource: ImageAttachment["source"] = "read";
+      let maxModelChars: number | undefined;
 
       /** 步骤 9：唯一出口——归一化 + 发出恰好一个 tool.completed */
       async function finish(
         status: ToolExecution["status"],
         result: ToolResult,
       ): Promise<ToolExecution> {
-        const budget = applyBudget(result);
+        const budget = applyBudget(result, maxModelChars);
         // 超预算时把完整输出落盘到本会话附件目录（tools.md 第 4 节）；
         // 写盘失败降级为普通截断，并在 modelContent 里如实说明
         let spillPath: string | undefined;
@@ -223,8 +224,8 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
 
       // 1. 查找（ADR-0035 §5：按当前模型的编辑工具能力筛可见性——
       // 未对模型暴露的工具按 unknown_tool 结算，可用列表同口径）
-      const tool = registry.get(call.name, scope.editTool);
-      if (tool === undefined) {
+      const entryTool = registry.get(call.name, scope.editTool);
+      if (entryTool === undefined) {
         const names = registry
           .specs(scope.editTool)
           .map((t) => t.name)
@@ -234,9 +235,10 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           errorResult("unknown_tool", `未知工具 "${call.name}"。可用工具：${names || "（无）"}`),
         );
       }
-      attachmentSource = tool.origin === "mcp" ? "mcp" : "read";
+      attachmentSource = entryTool.origin === "mcp" ? "mcp" : "read";
+      maxModelChars = entryTool.traits.maxModelChars;
 
-      // 2. 校验并规范化输入
+      // 2. 校验并规范化输入（若带 traits.dispatch 则在顶层输入校验后解析为目标工具与目标输入，ADR-0067 §2）
       if (call.input === undefined || call.input === null) {
         return finish(
           "error",
@@ -246,23 +248,79 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           ),
         );
       }
-      let input: unknown = structuredClone(call.input);
-      const validate = validatorFor(tool, scope);
-      if (validate !== null && !validate(input)) {
-        const detail = schemas.errorsText(validate.errors);
+      const entryInput: unknown = structuredClone(call.input);
+      const entryValidate = validatorFor(entryTool, scope);
+      if (entryValidate !== null && !entryValidate(entryInput)) {
+        const detail = schemas.errorsText(entryValidate.errors);
         return finish(
           "error",
           errorResult("invalid_input", `工具 "${call.name}" 输入不符合 schema：${detail}`),
         );
       }
 
+      let tool: ToolDefinition = entryTool;
+      let input: unknown = entryInput;
+      let isDispatched = false;
+      if (entryTool.traits.dispatch !== undefined) {
+        let dispatched;
+        try {
+          dispatched = entryTool.traits.dispatch(entryInput);
+        } catch (e) {
+          return finish(
+            "error",
+            errorResult(
+              "invalid_input",
+              `工具 "${call.name}" 分派失败：${e instanceof Error ? e.message : String(e)}`,
+            ),
+          );
+        }
+        if ("error" in dispatched) {
+          return finish("error", errorResult(dispatched.code ?? "unknown_tool", dispatched.error));
+        }
+        const targetTool =
+          typeof dispatched.tool === "string"
+            ? registry.get(dispatched.tool, scope.editTool)
+            : dispatched.tool;
+        if (targetTool === undefined) {
+          const names = registry
+            .specs(scope.editTool)
+            .map((t) => t.name)
+            .join(", ");
+          return finish(
+            "error",
+            errorResult(
+              "unknown_tool",
+              `未知目标工具 "${String(dispatched.tool)}"。可用工具：${names || "（无）"}`,
+            ),
+          );
+        }
+        tool = targetTool;
+        input = structuredClone(dispatched.input ?? {});
+        isDispatched = true;
+        attachmentSource = tool.origin === "mcp" ? "mcp" : "read";
+        maxModelChars = tool.traits.maxModelChars;
+        const targetValidate = validatorFor(tool, scope);
+        if (targetValidate !== null && !targetValidate(input)) {
+          const detail = schemas.errorsText(targetValidate.errors);
+          return finish(
+            "error",
+            errorResult(
+              "invalid_input",
+              `工具 "${tool.name}" 输入不符合 schema：${detail}\n目标工具 inputSchema：${JSON.stringify(tool.inputSchema)}`,
+            ),
+          );
+        }
+      }
+      const validate = isDispatched ? validatorFor(tool, scope) : entryValidate;
+
       // 2.5 PreToolUse Hook（hooks.md 第 4 节）：在输入校验之后、主体解析之前运行。
       // 只能收紧——无 allow；deny/ask 经权限层语义处理，updatedInput 重新校验。
+      // ADR-0067 §2：代理调用时 Hook 看到的工具名是目标工具名。
       let hookAskReason: string | undefined;
       if (scope.hooks !== undefined) {
         const hookOut = await scope.hooks.run(
           "PreToolUse",
-          { turnId, callId: call.callId, tool: call.name, input },
+          { turnId, callId: call.callId, tool: tool.name, input },
           scope.signal,
         );
         if (hookOut?.decision === "deny") {
@@ -287,7 +345,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
               "error",
               errorResult(
                 "invalid_input",
-                `工具 "${call.name}" 经 Hook 修改后的输入不符合 schema：${detail}`,
+                `工具 "${tool.name}" 经 Hook 修改后的输入不符合 schema：${detail}`,
               ),
             );
           }
@@ -308,7 +366,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         } catch (e) {
           return finish(
             "error",
-            errorResult("tool_failed", `工具 "${call.name}" validateInput 抛出异常：${String(e)}`),
+            errorResult("tool_failed", `工具 "${tool.name}" validateInput 抛出异常：${String(e)}`),
           );
         }
         if (message !== undefined) {
@@ -325,7 +383,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           "error",
           errorResult(
             "tool_failed",
-            `工具 "${call.name}" permissionSubjects 抛出异常：${String(e)}`,
+            `工具 "${tool.name}" permissionSubjects 抛出异常：${String(e)}`,
           ),
         );
       }
@@ -362,7 +420,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           {
             forceAsk: hookAskReason !== undefined,
             askReason: hookAskReason,
-            tool: call.name,
+            tool: tool.name,
             input,
           },
         );
@@ -382,7 +440,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       const { decision } = outcome;
       scope.diagnostics?.record("tool.permission", {
         callId: call.callId,
-        tool: call.name,
+        tool: tool.name,
         subjects: subjects.map((s) => ({ kind: s.kind, target: s.target })),
         action: decision.action,
         source: decision.source,
@@ -407,13 +465,14 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         return finish("denied", errorResult("permission_denied", `权限拒绝：${decision.reason}`));
       }
 
-      // 6. tool.started（写入成功后才继续执行）
+      // 6. tool.started（写入成功后才继续执行；代理调用记录可选 target: { name, input }）
       await scope.events.emit(
         "tool.started",
         {
           callId: call.callId,
           name: call.name,
-          input,
+          input: isDispatched ? entryInput : input,
+          ...(isDispatched ? { target: { name: tool.name, input } } : {}),
           subjects: outcome.subjects,
           mutates: tool.traits.mutates,
           fileEffects: tool.traits.fileEffects,
@@ -485,13 +544,13 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           executionStatus = "cancelled";
           result = errorResult("cancelled", "调用已被中断");
         } else if (aborted(timeoutSignal)) {
-          result = errorResult("timeout", `工具 "${call.name}" 超过 ${timeoutMs}ms 超时`);
+          result = errorResult("timeout", `工具 "${tool.name}" 超过 ${timeoutMs}ms 超时`);
           executionStatus = "error";
         } else {
           executionStatus = "error";
           result = errorResult(
             "tool_failed",
-            `工具 "${call.name}" 抛出异常：${e instanceof Error ? e.message : String(e)}`,
+            `工具 "${tool.name}" 抛出异常：${e instanceof Error ? e.message : String(e)}`,
           );
         }
       } finally {
@@ -504,7 +563,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
 
       scope.diagnostics?.record("tool.exec", {
         callId: call.callId,
-        tool: call.name,
+        tool: tool.name,
         status: result.status,
         durationMs: Date.now() - execStart,
         modelChars: result.modelContent.length,
@@ -517,7 +576,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           {
             turnId,
             callId: call.callId,
-            tool: call.name,
+            tool: tool.name,
             input,
             result: {
               status: result.status,

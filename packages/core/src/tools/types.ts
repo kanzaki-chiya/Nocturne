@@ -57,6 +57,20 @@ import type { AttachmentStore } from "./attachments.js";
 
 // ── 工具定义 ──────────────────────────────────────────────
 
+/**
+ * 代理调用解析结果（ADR-0067 §2）：返回目标工具（定义或注册名）与目标输入，
+ * 或在目标不存在/不在会话工具池时返回错误说明。
+ */
+export type ToolDispatchResult =
+  | {
+      tool: ToolDefinition | string;
+      input: unknown;
+    }
+  | {
+      error: string;
+      code?: string | undefined;
+    };
+
 export interface ToolTraits {
   /** 执行是否可能改变外部状态 */
   mutates: boolean;
@@ -94,6 +108,12 @@ export interface ToolTraits {
    * 模型的同一能力值筛池。
    */
   editTool?: EditToolKind | undefined;
+  /**
+   * 代理调用分派（ADR-0067 §2）：管线第 1 步（查找）之后将调用解析为目标工具与目标输入，
+   * 之后的 schema 校验、Hook、权限主体、调用、超时、结果预算全部按目标工具进行；
+   * tool.started 额外记录 target: { name, input }。
+   */
+  dispatch?: ((input: unknown) => ToolDispatchResult) | undefined;
 }
 
 /**

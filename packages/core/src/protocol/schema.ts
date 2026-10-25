@@ -216,6 +216,12 @@ const payloadSchemas = {
     callId: z.string(),
     name: z.string(),
     input: z.unknown().optional(),
+    target: z
+      .object({
+        name: z.string(),
+        input: z.unknown().optional(),
+      })
+      .optional(),
     subjects: z.array(permissionSubjectSchema),
     permission: z.object({
       action: permissionActionSchema,

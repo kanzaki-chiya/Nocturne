@@ -222,7 +222,7 @@ function parse(text: string): FileAggregate {
         break;
       }
       case "tool.started":
-        result.tools.push({ time, name: e.payload.name });
+        result.tools.push({ time, name: e.payload.target?.name ?? e.payload.name });
         if (e.payload.name === SKILL_TOOL_NAME) {
           const input = e.payload.input as { name?: unknown } | null;
           if (typeof input?.name === "string") result.skills.push({ time, name: input.name });

@@ -176,7 +176,10 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         if (event.payload.pinResult) pinnedResults.add(event.payload.callId);
         const existing = unsettled.get(event.payload.callId);
         if (existing !== undefined) existing.started = true;
-        startedInputs.set(event.payload.callId, summarizeInput(event.payload.input));
+        startedInputs.set(
+          event.payload.callId,
+          summarizeInput(event.payload.target?.input ?? event.payload.input),
+        );
         break;
       }
       case "tool.completed": {

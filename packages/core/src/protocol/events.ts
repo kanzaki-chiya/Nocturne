@@ -106,6 +106,8 @@ export interface ToolStartedPayload {
   name: string;
   /** 规范化后的输入 */
   input: unknown;
+  /** 经 ToolTraits.dispatch 代理调用时记录解析后的目标工具与输入（ADR-0067 §3） */
+  target?: { name: string; input: unknown } | undefined;
   /** 解析后的权限主体 */
   subjects: PermissionSubject[];
   /** `rule` 为命中规则的人读说明（permissions.md 5.3） */

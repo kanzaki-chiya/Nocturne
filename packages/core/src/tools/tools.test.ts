@@ -1095,3 +1095,168 @@ describe("PermissionGate（ask 流程与 Grant）", () => {
     expect(outcome.decision.source).toBe("non_interactive");
   });
 });
+
+describe("ToolTraits.dispatch 代理调用管线（ADR-0067 §2）", () => {
+  const allowAll: PermissionGate = {
+    check: (subjects) =>
+      Promise.resolve({
+        subjects,
+        decision: { action: "allow", source: "rule", reason: "test" },
+      }),
+    checkLexical: () => "allow",
+  };
+  const errorPayload = (h: Harness): { code?: string; message?: string } =>
+    (completedOf(h)[0]?.payload.error ?? {}) as { code?: string; message?: string };
+
+  const targetTool: ToolDefinition<{ query: string; limit?: number }> = {
+    name: "mcp__github__search_issues",
+    description: "搜索 GitHub issue",
+    origin: "mcp",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        limit: { type: "integer" },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    traits: {
+      mutates: false,
+      fileEffects: "none",
+      concurrencySafe: true,
+      timeoutMs: 2_000,
+      maxModelChars: 60,
+    },
+    permissionSubjects: () => [{ kind: "mcp", target: "github/search_issues", readOnly: true }],
+    async execute(input) {
+      return {
+        status: "ok",
+        modelContent: `found:${input.query}:${input.limit ?? 10}`,
+        output: { query: input.query, limit: input.limit ?? 10 },
+      };
+    },
+  };
+
+  function createProxyTool(pool: ReadonlyMap<string, ToolDefinition>, servers: readonly string[]) {
+    const proxy: ToolDefinition<{ tool: string; arguments?: Record<string, unknown> }> = {
+      name: "mcp_call",
+      description: "调用 MCP 工具",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tool: { type: "string" },
+          arguments: { type: "object" },
+        },
+        required: ["tool"],
+        additionalProperties: false,
+      },
+      traits: {
+        mutates: true,
+        concurrencySafe: true,
+        timeoutMs: 60_000,
+        dispatch(raw) {
+          const input = raw as { tool: string; arguments?: Record<string, unknown> };
+          const found = pool.get(input.tool);
+          if (found === undefined) {
+            return {
+              code: "unknown_tool",
+              error: `未知或不可用的 MCP 工具 "${input.tool}"。可用服务器：${servers.join(", ") || "（无）"}`,
+            };
+          }
+          return { tool: found, input: input.arguments ?? {} };
+        },
+      },
+      permissionSubjects: () => [],
+      async execute() {
+        throw new Error("unreachable");
+      },
+    };
+    return proxy;
+  }
+
+  it("按目标工具执行校验、Hook、权限、调用、结果预算，且 tool.started 写 target", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    const pool = new Map<string, ToolDefinition>([[targetTool.name, targetTool]]);
+    const registry = createToolRegistry();
+    registry.register(createProxyTool(pool, ["github"]));
+
+    const seenHooks: { event: string; tool: string; input: unknown }[] = [];
+    const scope = {
+      ...h.scope,
+      hooks: {
+        async run(event: string, payload: { tool: string; input: unknown }) {
+          seenHooks.push({ event, tool: payload.tool, input: payload.input });
+          if (event === "PreToolUse") {
+            return { updatedInput: { ...(payload.input as object), limit: 5 } };
+          }
+          return { feedback: "ok" };
+        },
+      } as never,
+    };
+
+    const exec = await createToolExecutor(registry).execute(
+      call("mcp_call", { tool: "mcp__github__search_issues", arguments: { query: "bug" } }),
+      scope,
+    );
+    expect(exec.status).toBe("ok");
+    // Hook 看到的是目标工具名与目标输入
+    expect(seenHooks).toEqual([
+      { event: "PreToolUse", tool: "mcp__github__search_issues", input: { query: "bug" } },
+      {
+        event: "PostToolUse",
+        tool: "mcp__github__search_issues",
+        input: { query: "bug", limit: 5 },
+      },
+    ]);
+    // tool.started 保留调用名 mcp_call，但写 target: { name, input } 与目标工具的 subjects/traits
+    const started = h.events.find((e) => e.type === "tool.started")?.payload;
+    expect(started).toMatchObject({
+      name: "mcp_call",
+      input: { tool: "mcp__github__search_issues", arguments: { query: "bug" } },
+      target: {
+        name: "mcp__github__search_issues",
+        input: { query: "bug", limit: 5 },
+      },
+      subjects: [{ kind: "mcp", target: "github/search_issues", readOnly: true }],
+      mutates: false,
+      fileEffects: "none",
+    });
+    // tool.completed 仍用 mcp_call，保证回传给模型的历史与声明一致
+    const completed = h.events.find((e) => e.type === "tool.completed")?.payload;
+    expect(completed?.name).toBe("mcp_call");
+    expect(completed?.modelContent).toContain("found:bug:5");
+  });
+
+  it("目标工具参数不合法时返回 invalid_input 并附带目标工具 inputSchema", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    const pool = new Map<string, ToolDefinition>([[targetTool.name, targetTool]]);
+    const registry = createToolRegistry();
+    registry.register(createProxyTool(pool, ["github"]));
+
+    const exec = await createToolExecutor(registry).execute(
+      call("mcp_call", { tool: "mcp__github__search_issues", arguments: { limit: "bad" } }),
+      h.scope,
+    );
+    expect(exec.status).toBe("error");
+    expect(errorPayload(h).code).toBe("invalid_input");
+    expect(errorPayload(h).message).toContain("mcp__github__search_issues");
+    expect(errorPayload(h).message).toContain(JSON.stringify(targetTool.inputSchema));
+  });
+
+  it("目标不存在或不在本会话工具池时返回 error 并附可用服务器列表", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    const pool = new Map<string, ToolDefinition>([[targetTool.name, targetTool]]);
+    const registry = createToolRegistry();
+    registry.register(createProxyTool(pool, ["github", "slack"]));
+
+    const exec = await createToolExecutor(registry).execute(
+      call("mcp_call", { tool: "mcp__jira__create_issue", arguments: {} }),
+      h.scope,
+    );
+    expect(exec.status).toBe("error");
+    expect(errorPayload(h).code).toBe("unknown_tool");
+    expect(errorPayload(h).message).toContain("mcp__jira__create_issue");
+    expect(errorPayload(h).message).toContain("github, slack");
+  });
+});

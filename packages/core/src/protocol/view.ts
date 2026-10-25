@@ -165,6 +165,8 @@ export interface ToolEntry {
   seq: number;
   status: ToolEntryStatus;
   input: unknown;
+  /** 经 ToolTraits.dispatch 代理调用时解析后的目标工具与输入（ADR-0067 §3） */
+  target?: { name: string; input: unknown } | undefined;
   subjects: PermissionSubject[];
   permission:
     { action: PermissionAction; source: PermissionSource; rule: string | undefined } | undefined;
@@ -450,10 +452,20 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
       const entry = promoteTool(view, b, p.callId, turnId ?? "", event.seq);
       entry.status = "awaiting_permission";
       entry.subjects = p.subjects;
+      if (entry.target === undefined && liveTool !== undefined) {
+        const parsedTarget = parseDispatchedLiveTarget(liveTool.inputText);
+        if (parsedTarget !== undefined) entry.target = parsedTarget;
+      }
+      const mcpTarget = p.subjects.find((s) => s.kind === "mcp")?.target;
+      const resolvedToolName =
+        entry.target?.name ??
+        (mcpTarget !== undefined ? `mcp__${mcpTarget.replace("/", "__")}` : undefined) ??
+        entry.name ??
+        liveTool?.name;
       view.pendingPermission = {
         requestId: p.requestId,
         callId: p.callId,
-        toolName: entry.name ?? liveTool?.name,
+        toolName: resolvedToolName,
         subjects: p.subjects,
         reason: p.reason,
         options: p.options,
@@ -498,6 +510,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
       entry.status = "running";
       entry.name = p.name;
       entry.input = p.input;
+      if (p.target !== undefined) entry.target = p.target;
       entry.subjects = p.subjects;
       entry.permission = {
         action: p.permission.action,
@@ -578,6 +591,26 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
  */
 export function compactedNoticeText(kind: ContextCompactedPayload["kind"]): string {
   return kind === "prune" ? "已省略较早的工具输出" : "上下文已压缩为摘要";
+}
+
+function parseDispatchedLiveTarget(
+  inputText: string,
+): { name: string; input: unknown } | undefined {
+  if (inputText === "") return undefined;
+  try {
+    const parsed = JSON.parse(inputText) as { tool?: unknown; arguments?: unknown } | null;
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      typeof parsed.tool === "string" &&
+      parsed.tool !== ""
+    ) {
+      return { name: parsed.tool, input: parsed.arguments ?? {} };
+    }
+  } catch {
+    // 流式半截 JSON 忽略
+  }
+  return undefined;
 }
 
 function promoteTool(
