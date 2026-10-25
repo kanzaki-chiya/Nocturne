@@ -599,8 +599,8 @@ export function SchedulePage({
                         {models.map((model) => {
                           const id = `${model.ref.provider}/${model.ref.model}`;
                           return (
-                            <option key={id} value={id}>
-                              {model.displayName ?? model.ref.model}
+                            <option key={id} value={id} title={model.ref.model}>
+                              {model.displayName ?? model.ref.model} · {model.ref.provider}
                             </option>
                           );
                         })}

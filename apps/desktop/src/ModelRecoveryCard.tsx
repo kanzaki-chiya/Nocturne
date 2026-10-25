@@ -135,16 +135,21 @@ export function ModelRecoveryCard({
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             aria-label="选择模型"
+            title={chosen === undefined ? undefined : modelRefText(chosen.ref)}
             onClick={() => {
               setMenuOpen((open) => !open);
             }}
           >
-            {chosen === undefined ? "选择模型" : modelRefText(chosen.ref)} ▾
+            {chosen === undefined
+              ? "选择模型"
+              : `${chosen.ref.provider} · ${chosen.displayName ?? chosen.ref.model}`}{" "}
+            ▾
           </button>
           {menuOpen && (
             <ChoiceMenu
               anchor={trigger.current}
               label="选择模型"
+              searchable
               control={{
                 value: picked,
                 groups: modelGroups(models, data.recents),

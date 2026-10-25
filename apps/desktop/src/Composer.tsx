@@ -44,6 +44,8 @@ export interface ChoiceOption {
   value: string;
   label: string;
   detail?: string;
+  /** 悬停说明（如模型菜单里的原始模型 id） */
+  title?: string;
   /** 自绘下拉（Dropdown）里的中文名、说明与危险标记；说明统一来自 choice-info.ts */
   tag?: string;
   description?: string;
@@ -956,6 +958,7 @@ export function Composer({
       align={kind === "preset" ? "left" : "right"}
       label={control.heading ?? control.label}
       control={control}
+      searchable={kind === "model"}
       action={
         kind === "model" && onManageProviders !== undefined
           ? { label: "管理服务商…", onSelect: onManageProviders }

@@ -8,7 +8,8 @@ import path from "node:path";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { Menu, MenuItem } from "../src/Menu";
+import { ChoiceMenu, Menu, MenuItem } from "../src/Menu";
+import { modelGroups } from "../src/session-controls";
 
 afterEach(() => {
   cleanup();
@@ -114,6 +115,181 @@ describe("Menu", () => {
     expect(menu).not.toMatch(/\.menu-item:(hover|focus-visible)/);
     const dropdown = css("dropdown.css");
     expect(dropdown).toMatch(/\.ddm \.ddo\.act \{\s*background: var\(--a-sel\);/);
-    expect(dropdown).not.toMatch(/\.ddo\.on/);
+    expect(dropdown).not.toMatch(/\.ddo\.on /);
+  });
+
+  it("modelGroups 显示名优先、无显示名回退 id，detail 保持服务商且悬停带原始 id", () => {
+    const capabilities = {
+      toolCall: true,
+      streaming: true,
+      vision: false,
+      contextWindow: 128_000,
+      maxOutputTokens: 8_192,
+    };
+    const groups = modelGroups(
+      [
+        {
+          ref: { provider: "magpie", model: "mp-route-001" },
+          displayName: "千问旗舰版",
+          capabilities,
+        },
+        {
+          ref: { provider: "openai", model: "gpt-5-mini" },
+          capabilities,
+        },
+      ],
+      [],
+    );
+    expect(groups).toEqual([
+      {
+        label: "magpie",
+        options: [
+          {
+            value: "magpie/mp-route-001",
+            label: "千问旗舰版",
+            detail: "magpie",
+            title: "mp-route-001",
+          },
+        ],
+      },
+      {
+        label: "openai",
+        options: [
+          {
+            value: "openai/gpt-5-mini",
+            label: "gpt-5-mini",
+            detail: "openai",
+            title: "gpt-5-mini",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("ChoiceMenu searchable：少于 8 个模型时不显示搜索框", () => {
+    const capabilities = {
+      toolCall: true,
+      streaming: true,
+      vision: false,
+      contextWindow: 128_000,
+      maxOutputTokens: 8_192,
+    };
+    const models = Array.from({ length: 7 }, (_, i) => ({
+      ref: { provider: "openai", model: `gpt-${i}` },
+      displayName: `模型 ${i}`,
+      capabilities,
+    }));
+    render(
+      <ChoiceMenu
+        anchor={null}
+        label="模型"
+        searchable
+        control={{
+          value: "openai/gpt-0",
+          groups: modelGroups(models, []),
+          onSelect: vi.fn(),
+        }}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.queryByPlaceholderText("搜索模型")).toBeNull();
+  });
+
+  it("ChoiceMenu searchable：打开聚焦搜索框，按显示名/id/服务商与中文过滤，↑↓/Enter/Esc 操作", () => {
+    const capabilities = {
+      toolCall: true,
+      streaming: true,
+      vision: false,
+      contextWindow: 128_000,
+      maxOutputTokens: 8_192,
+    };
+    const models = [
+      {
+        ref: { provider: "magpie", model: "mp-qwen-max-9x" },
+        displayName: "通义千问旗舰",
+        capabilities,
+      },
+      {
+        ref: { provider: "magpie", model: "mp-deepseek-r2" },
+        displayName: "深度求索推理",
+        capabilities,
+      },
+      {
+        ref: { provider: "anthropic", model: "claude-sonnet-4-5" },
+        displayName: "Claude Sonnet 4.5",
+        capabilities,
+      },
+      {
+        ref: { provider: "anthropic", model: "claude-opus-4-5" },
+        displayName: "Claude Opus 4.5",
+        capabilities,
+      },
+      { ref: { provider: "openai", model: "gpt-5" }, displayName: "GPT-5", capabilities },
+      { ref: { provider: "openai", model: "gpt-5-mini" }, capabilities },
+      { ref: { provider: "gemini", model: "gemini-2.5-pro" }, capabilities },
+      { ref: { provider: "gemini", model: "gemini-2.5-flash" }, capabilities },
+    ];
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    const anchor = document.createElement("button");
+    document.body.appendChild(anchor);
+    render(
+      <ChoiceMenu
+        anchor={anchor}
+        label="模型"
+        searchable
+        control={{
+          value: "openai/gpt-5",
+          groups: modelGroups(models, []),
+          onSelect,
+        }}
+        onClose={onClose}
+      />,
+    );
+
+    const search = screen.getByPlaceholderText<HTMLInputElement>("搜索模型");
+    expect(document.activeElement).toBe(search);
+
+    // 中文显示名直接匹配，其他分组标题隐藏
+    fireEvent.change(search, { target: { value: "千问" } });
+    expect(screen.getAllByRole("menuitemradio")).toHaveLength(1);
+    const qwenItem = screen.getByRole("menuitemradio", { name: /通义千问旗舰/ });
+    expect(qwenItem.getAttribute("title")).toBe("mp-qwen-max-9x");
+    expect(screen.getByRole("heading", { name: "magpie" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "anthropic" })).toBeNull();
+
+    // 按原始模型 id 命中（不区分大小写）
+    fireEvent.change(search, { target: { value: "MP-DEEPSEEK" } });
+    expect(screen.getAllByRole("menuitemradio")).toHaveLength(1);
+    expect(screen.getByRole("menuitemradio", { name: /深度求索推理/ })).toBeTruthy();
+
+    // 按服务商名命中，并用 ↑↓ + Enter 选择第二项
+    fireEvent.change(search, { target: { value: "Anthropic" } });
+    const anthropicItems = screen.getAllByRole("menuitemradio");
+    expect(anthropicItems).toHaveLength(2);
+    expect(anthropicItems[0]?.getAttribute("data-active")).toBe("true");
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(anthropicItems[1]?.getAttribute("data-active")).toBe("true");
+    fireEvent.keyDown(search, { key: "ArrowUp" });
+    expect(anthropicItems[0]?.getAttribute("data-active")).toBe("true");
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("anthropic/claude-opus-4-5");
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // 无匹配时显示「没有匹配的模型」，首次 Esc 清空搜索，再次 Esc 关闭菜单
+    onClose.mockClear();
+    fireEvent.change(search, { target: { value: "不存在的模型" } });
+    expect(screen.queryAllByRole("menuitemradio")).toHaveLength(0);
+    expect(screen.getByText("没有匹配的模型")).toBeTruthy();
+
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(search.value).toBe("");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("menuitemradio")).toHaveLength(8);
+
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    anchor.remove();
   });
 });

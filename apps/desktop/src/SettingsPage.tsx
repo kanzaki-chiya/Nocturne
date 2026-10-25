@@ -1170,20 +1170,24 @@ function ModelPicker({
         )}
         {filtered.map((m) => {
           const key = refKey(m.ref);
+          const label = m.displayName ?? m.ref.model;
           return (
             <button
               key={key}
               role="option"
               aria-selected={picked === key}
               className={picked === key ? "on" : undefined}
+              title={m.ref.model}
               onClick={() => {
                 onPick(key);
               }}
             >
-              <span className="pv">{refText(key)}</span>
-              {m.displayName !== undefined && m.displayName !== m.ref.model && (
-                <small>{m.displayName}</small>
-              )}
+              <span className="pv">{label}</span>
+              <small>
+                {m.displayName !== undefined && m.displayName !== m.ref.model
+                  ? `${m.ref.provider} · ${m.ref.model}`
+                  : m.ref.provider}
+              </small>
             </button>
           );
         })}

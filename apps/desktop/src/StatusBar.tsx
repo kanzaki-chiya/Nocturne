@@ -483,6 +483,7 @@ export function StatusBar({
         anchor={triggers.current[kind] ?? null}
         label={control.heading ?? control.label}
         control={control}
+        searchable={kind === "model"}
         action={
           kind === "model" && onManageProviders !== undefined
             ? { label: "管理服务商…", onSelect: onManageProviders }
@@ -516,7 +517,9 @@ export function StatusBar({
                     {model.provider}
                     {MODEL_REF_SEPARATOR}
                   </span>
-                  {model.model}
+                  {controls.controls.model.label !== "模型 —"
+                    ? controls.controls.model.label
+                    : model.model}
                 </>
               )}
             </b>

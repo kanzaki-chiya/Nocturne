@@ -41,8 +41,9 @@ export const sessionMutationTimeout = { ms: 15_000 };
 function modelOption(info: ModelInfo) {
   return {
     value: refKey(info.ref),
-    label: info.ref.model,
+    label: info.displayName ?? info.ref.model,
     detail: info.ref.provider,
+    title: info.ref.model,
     ...(info.unavailable !== undefined ? { disabled: info.unavailable.reason } : {}),
   };
 }
@@ -228,9 +229,14 @@ export function useSessionControls(
       ? "本轮正在进行：从下一次权限判定起按新预设；等待确认的权限请求仍由你决定，切换不替它放行"
       : "本轮正在进行：从下一次权限判定起按新预设，已执行的操作不受影响"
     : undefined;
+  const currentModel =
+    model === undefined
+      ? undefined
+      : snapshot?.models.find((item) => refKey(item.ref) === refKey(model));
+  const modelLabel = currentModel?.displayName ?? model?.model;
   const modelControl: ChoiceControl = {
     value: model === undefined ? undefined : refKey(model),
-    label: model?.model ?? "模型 —",
+    label: modelLabel ?? "模型 —",
     groups: modelGroups(snapshot?.models ?? [], snapshot?.recents ?? []),
     ...(busy ? { disabled: "本轮结束后可切换" } : {}),
     onSelect: (value) =>
@@ -242,7 +248,7 @@ export function useSessionControls(
   const effortControl: ChoiceControl = {
     value: effort?.current ?? view.config.reasoningEffort,
     label: effort?.current ?? view.config.reasoningEffort ?? "—",
-    heading: `思考档位（${model?.model ?? "—"}）`,
+    heading: `思考档位（${modelLabel ?? "—"}）`,
     groups: [
       {
         options: ["off", ...(effort?.available ?? [])].map(effortOption),
@@ -422,10 +428,11 @@ export function useDraftControls(
       ? "该模型未声明可用思考档位"
       : undefined;
 
+  const draftModelLabel = model?.displayName ?? model?.ref.model;
   const controls: ComposerControls = {
     model: {
       value: modelKey,
-      label: model?.ref.model ?? "模型 —",
+      label: draftModelLabel ?? "模型 —",
       groups: modelGroups(models, data?.recents ?? []),
       onSelect: (value) => {
         setPicked((current) => ({ ...current, model: value }));
@@ -434,7 +441,7 @@ export function useDraftControls(
     effort: {
       value: effortExplicit || settingsLabel === undefined ? effort : undefined,
       label: effortExplicit ? effort : (settingsLabel ?? effort),
-      heading: `思考档位（${model?.ref.model ?? "—"}）`,
+      heading: `思考档位（${draftModelLabel ?? "—"}）`,
       groups: [{ options: levels.map(effortOption) }],
       ...(effortNote !== undefined ? { note: effortNote } : {}),
       onSelect: (value) => {
