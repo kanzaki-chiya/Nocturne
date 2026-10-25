@@ -70,6 +70,7 @@ const LAYER_TEXT: Record<SettingItem["source"], string> = {
   setup: "providers.json",
   settings: "settings.json",
   user: "config.json",
+  magpie: "magpie.json",
   project: "项目配置",
   env: "环境变量",
   cli: "命令行参数",

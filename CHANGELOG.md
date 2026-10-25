@@ -1,5 +1,12 @@
 # 更新日志
 
+## Unreleased
+
+### 模型与服务商
+
+- 新增：Magpie Agent 插件（`packaging/magpie-plugin`）。在 Magpie 的 Agent 页连接 Nocturne 后，Nocturne 多出一个只读的 Magpie 服务商，使用 Magpie 管理的订阅账号和 API 服务商；Magpie 选定的模型成为默认模型，断开后恢复原状。网关 key 只在请求时读取，不复制进 Nocturne 的配置或凭据存储。
+- 新增：配置分层多了一层只读的 `<NOCTURNE_HOME>/magpie.json`，位于用户配置之上、项目配置之下；`/provider`、`/settings` 会标注来源为 Magpie。
+
 ## 0.14.0
 
 ### 模型与服务商

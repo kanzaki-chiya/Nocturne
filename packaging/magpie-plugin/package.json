@@ -1,0 +1,14 @@
+{
+  "name": "magpie-agent-nocturne",
+  "version": "0.1.0",
+  "description": "Connect Nocturne (nctrn) to Magpie: models, subscriptions and API providers managed by Magpie.",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "files": [
+    "agent.js",
+    "README.md"
+  ],
+  "magpie": {
+    "agent": "./agent.js"
+  }
+}

@@ -22,7 +22,16 @@ import { ConfigError } from "./errors.js";
 
 /** 层的身份（模型字段来源标注用；ADR-0024/0025） */
 export type LayerKind =
-  "modelsDev" | "setup" | "app" | "userModels" | "settings" | "user" | "project" | "env" | "cli";
+  | "modelsDev"
+  | "setup"
+  | "app"
+  | "userModels"
+  | "settings"
+  | "user"
+  | "magpie"
+  | "project"
+  | "env"
+  | "cli";
 
 export interface MergeLayer {
   /**
@@ -292,6 +301,8 @@ function layerLabel(origin: FieldOrigin): string {
       return "models.dev";
     case "user":
       return origin.path ?? "config.json";
+    case "magpie":
+      return origin.path ?? "magpie.json";
     case "project":
       return origin.path ?? "项目配置";
     case "env":

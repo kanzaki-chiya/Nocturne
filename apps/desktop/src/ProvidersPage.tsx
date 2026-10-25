@@ -95,6 +95,8 @@ function originText(p: ProviderOverview): string {
       return "providers.json";
     case "user":
       return "config.json";
+    case "magpie":
+      return "magpie.json（由 Magpie 维护）";
     case "project":
       return "项目配置";
     case "env":

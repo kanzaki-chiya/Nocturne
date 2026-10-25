@@ -61,6 +61,8 @@ export default tseslint.config(
       "**/*.config.mts",
       "**/*.config.mjs",
       "apps/desktop/public-web/*.js",
+      // Magpie 在自己的 moejs 里运行的纯 JS 插件，不属于任何 tsconfig
+      "packaging/magpie-plugin/*.js",
     ],
     ...tseslint.configs.disableTypeChecked,
   },

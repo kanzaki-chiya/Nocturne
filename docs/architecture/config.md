@@ -9,7 +9,7 @@
 服务商 `auth` 省略等同 `{ kind: "apiKey" }`。非 API key 鉴权只允许用户级来源：项目声明的非 API key `auth` 被忽略；用户账号条目的项目 `auth`、`baseURL`、`headers` 覆盖被忽略并告警。非 API key 条目忽略 `apiKeyEnv`，报告 `provider_auth_conflict`。`openai-siwc` 的生效地址必须精确为 `https://api.openai.com/v1`（[ADR-0042](../decisions/ADR-0042-provider-oauth.md) 第 2 节）。
 
 ```text
-内置默认 < models.dev < 向导配置 / MCP 管理 / 外部 agent 管理 < 用户编辑 < 程序设置 < 用户配置 < 项目配置 < 环境变量 < 命令行参数
+内置默认 < models.dev < 向导配置 / MCP 管理 / 外部 agent 管理 < 用户编辑 < 程序设置 < 用户配置 < Magpie 接入 < 项目配置 < 环境变量 < 命令行参数
 ```
 
 | 层 | 位置 / 来源 | 信任 | 说明 |
@@ -22,11 +22,12 @@
 | 用户编辑（`userModels`） | 同上 providers.json 条目的 `userModels` 字段 | 可信 | **合成层**：加载时由条目内 `userModels` 包成 `{providers:[{id,models:userModels}]}`，插在向导层与用户配置之间；只作用于 `models` 逐字段合并，不产生权限规则等其他字段（ADR-0024，见第 2 节） |
 | 程序设置 | `<NOCTURNE_HOME>/settings.json` | 可信 | 白名单设置参与合并，界面偏好只保留；低于所有手写配置（[ADR-0034](../decisions/ADR-0034-settings-layer.md)，见第 2 节） |
 | 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；**程序从不改写它** |
+| Magpie 接入 | `<NOCTURNE_HOME>/magpie.json` | 可信（用户级） | 由 Magpie 的 Agent 插件维护，Nocturne **只读**；只贡献默认模型与一条名为 `magpie` 的服务商，位于用户配置之上，使 Magpie 页的模型选择压过旧的默认模型；以 `magpie.baseURL` 存在为「已接入」，断开即视为不存在。契约、鉴权与生命周期见 [magpie.md](magpie.md)、[ADR-0062](../decisions/ADR-0062-magpie-agent-plugin.md) |
 | 项目配置 | `<workspaceRoot>/.nocturne/config.json` | **默认不可信** | 来自被操作的仓库，见第 3 节信任模型 |
 | 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；API key 经环境变量或操作系统凭据后端进入。`credentials.json` 默认只存索引或密文；用户显式选择后，账号登录记录可以 `plaintext` 写入该文件（[provider-setup.md](provider-setup.md) 第 3 节） |
 | 命令行参数 | `nctrn` 参数 | 可信 | 本次启动的显式意图，优先级最高 |
 
-机器维护的运行时数据（信任列表、项目 Grant、向导配置、MCP 与外部 agent 管理、程序设置、凭据索引、最近模型列表、models.dev 缓存）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`mcp.json`、`external-agents.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。
+机器维护的运行时数据（信任列表、项目 Grant、向导配置、MCP 与外部 agent 管理、程序设置、凭据索引、最近模型列表、models.dev 缓存；另有只读的 Magpie 接入文件 `magpie.json`，由 Magpie 写）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`mcp.json`、`external-agents.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。
 
 远程登记单独保存在 `<NOCTURNE_HOME>/remote.json`，只属于用户层，不参与分层合并，项目配置不能覆盖或引用。原子写入，POSIX 权限 0600；只存中继地址、电脑 id、启停与配对设备公钥，私钥存凭据后端。损坏时保留文件、按未登记并警告。精确格式与主机生命周期见 [RPC 远程主机](../protocols/rpc.md#11-远程主机)。
 

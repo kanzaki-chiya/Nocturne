@@ -24,6 +24,7 @@ import { createCredentialStore } from "./credentials.js";
 import { describeMcp, loadMcpStore, McpSettingsError } from "./mcp.js";
 import { describeExternalAgents, loadExternalAgentStore } from "./external-agents.js";
 import { loadGrantStore } from "./grants.js";
+import { loadMagpieLayer, MAGPIE_FILE_NAME } from "./magpie.js";
 import {
   mergeLayers,
   restrictProjectProviderAuth,
@@ -103,6 +104,7 @@ export async function loadConfig(
   const grantsDir = paths.join(home, "grants");
   const providersPath = paths.join(home, "providers.json");
   const userConfigPath = paths.join(home, "config.json");
+  const magpiePath = paths.join(home, MAGPIE_FILE_NAME);
 
   const env = options.env ?? ((n: string) => platform.env(n));
 
@@ -131,6 +133,10 @@ export async function loadConfig(
 
   // 用户配置：损坏即快速失败（config.md 第 2 节）
   const userFile: ConfigFile = (await loadConfigFile(fs, userConfigPath)) ?? {};
+  // Magpie 接入层（ADR-0062）：Magpie 维护的只读文件；损坏只告警，按未接入处理
+  const magpie = await loadMagpieLayer(platform, magpiePath);
+  const magpieLayers = (): MergeLayer[] =>
+    magpie.file !== undefined ? [{ kind: "magpie", path: magpiePath, file: magpie.file }] : [];
   let modelsDev: ModelsDevData =
     userFile.modelsDev === false ? modelsDevSnapshot : await readModelsDev(platform, home);
 
@@ -261,6 +267,7 @@ export async function loadConfig(
       externalAgentLayer(),
       settingsLayer(),
       { kind: "user", path: userConfigPath, file: userFile },
+      ...magpieLayers(),
     ];
     if (workspaceRoot !== undefined) {
       const project = await projectFileIfTrusted(workspaceRoot);
@@ -285,6 +292,7 @@ export async function loadConfig(
   const loadWarnings: string[] = [...envLayer.warnings, ...cliLayer.warnings];
   loadWarnings.push(...mcpStore.warnings);
   loadWarnings.push(...externalAgentStore.warnings);
+  loadWarnings.push(...magpie.warnings);
   if (credentialsInit.warning !== undefined) loadWarnings.push(credentialsInit.warning);
   if (settings.warning !== undefined) loadWarnings.push(settings.warning);
   if (trust.warning !== undefined) loadWarnings.push(trust.warning);
@@ -295,6 +303,7 @@ export async function loadConfig(
     externalAgentLayer(),
     settingsLayer(),
     { kind: "user", path: userConfigPath, file: userFile },
+    ...magpieLayers(),
     { kind: "env", file: envLayer.file },
     { kind: "cli", file: cliLayer.file },
   ];
@@ -475,7 +484,8 @@ export async function loadConfig(
         effective,
         saved: value,
         source,
-        overridden: value !== undefined && ["user", "project", "env", "cli"].includes(source),
+        overridden:
+          value !== undefined && ["user", "magpie", "project", "env", "cli"].includes(source),
         ...(key === "defaultModel" || key === "reasoningEffort" ? { readonly: true as const } : {}),
       };
     });
@@ -523,6 +533,7 @@ export async function loadConfig(
       externalAgentLayer(),
       settingsLayer(),
       { kind: "user", path: userConfigPath, file: userFile },
+      ...magpieLayers(),
       ...(trusted && projectFile !== undefined
         ? [{ kind: "project" as const, path: projectPath, file: projectFile }]
         : []),
@@ -602,6 +613,7 @@ export async function loadConfig(
     const userProviders = mergeLayers([
       ...setupLayers(setupNow.file ?? { version: 1 }, providersPath),
       { kind: "user", path: userConfigPath, file: userFile },
+      ...magpieLayers(),
     ]).resolved.providers;
     const projectProviders =
       project?.providers !== undefined
@@ -620,6 +632,7 @@ export async function loadConfig(
       layers: {
         setup: setupNow.file?.providers,
         user: userFile.providers,
+        magpie: magpie.file?.providers,
         project: projectProviders,
         env: envLayer.file.providers,
         cli: cliLayer.file.providers,

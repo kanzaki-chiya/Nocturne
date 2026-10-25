@@ -405,7 +405,7 @@ export interface ProviderOverview {
   /** keySource="env" 或条目声明了 apiKeyEnv 时的变量名 */
   keyEnvName?: string | undefined;
   /** 定义该条目的最高层（后写优先的胜出者） */
-  origin: "setup" | "user" | "project" | "env" | "cli";
+  origin: "setup" | "user" | "magpie" | "project" | "env" | "cli";
   /** 向导条目被更高层同名条目覆盖（/provider 标注"被 config.json 覆盖"） */
   overridden: boolean;
   /** 声明的模型数 */
@@ -576,7 +576,7 @@ export interface SettingItem {
     /** 子代理档位逐条：effective/saved 为档位 JSON（ADR-0058） */
     | `subagents.profiles.${string}`;
   effective: string | undefined;
-  source: "default" | "setup" | "settings" | "user" | "project" | "env" | "cli";
+  source: "default" | "setup" | "settings" | "user" | "magpie" | "project" | "env" | "cli";
   saved: string | undefined;
   overridden: boolean;
   readonly?: true;

@@ -31,6 +31,7 @@ const SOURCES: Record<SettingItem["source"], string> = {
   setup: "向导",
   settings: "设置",
   user: "config.json",
+  magpie: "Magpie",
   project: "项目配置",
   env: "环境变量",
   cli: "命令行",

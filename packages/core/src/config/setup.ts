@@ -105,18 +105,21 @@ export interface DescribeLayers {
   /** 各层 providers 条目（低→高）：向导、用户、项目（可信）、环境变量、命令行 */
   setup?: readonly ProviderEntryConfig[] | undefined;
   user?: readonly ProviderEntryConfig[] | undefined;
+  /** Magpie 接入层（magpie.json，ADR-0062）；只读，由 Magpie 维护 */
+  magpie?: readonly ProviderEntryConfig[] | undefined;
   project?: readonly ProviderEntryConfig[] | undefined;
   env?: readonly ProviderEntryConfig[] | undefined;
   cli?: readonly ProviderEntryConfig[] | undefined;
 }
 
-const LAYER_ORDER = ["setup", "user", "project", "env", "cli"] as const;
+const LAYER_ORDER = ["setup", "user", "magpie", "project", "env", "cli"] as const;
 type LayerName = (typeof LAYER_ORDER)[number];
 
 /** 名称冲突报错里给用户看的层名（provider-setup.md「名称唯一性」） */
 const LAYER_LABEL: Record<LayerName, string> = {
   setup: "providers.json",
   user: "config.json",
+  magpie: "magpie.json",
   project: "项目配置",
   env: "环境变量",
   cli: "命令行参数",

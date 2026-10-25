@@ -32,6 +32,7 @@
 | [subagent.md](architecture/subagent.md) | Subagent（子代理）：`task` 工具契约、Launcher 注入、子会话权限收敛、ACP 外部 agent 的管理、探测、斜杠点名与审计边界 |
 | [observability.md](architecture/observability.md) | 诊断日志：开关与输出位置、记录种类、脱敏规则 |
 | [providers.md](architecture/providers.md) | Provider 抽象、模型能力、流式与错误归一化 |
+| [magpie.md](architecture/magpie.md) | Magpie 接入：Agent 插件、只读接入文件 `magpie.json` 的契约、分层位置、`external-file` 网关 key、模型与协议映射、断开恢复与排障（ADR-0062） |
 | [provider-setup.md](architecture/provider-setup.md) | 服务商配置（`nctrn setup`、`/provider`；Core 数据接口 `describeProviderSetup` / `addProvider`）、向导配置层、操作系统凭据后端、模型限额以上游为准；v0.3 起向导不再选模型，模型选择收归 `/model`（v0.2/v0.3）；服务商与模型启停（`setProviderEnabled` / `setModelsEnabled` / `describeToggleImpact`，ADR-0054） |
 | [pitfalls.md](architecture/pitfalls.md) | 最容易犯的架构错误、早期症状与规避方式 |
 

@@ -103,6 +103,8 @@ function describeOrigin(o: string): string {
       return "向导";
     case "user":
       return "config.json";
+    case "magpie":
+      return "Magpie";
     case "project":
       return "项目";
     case "env":
@@ -351,6 +353,7 @@ export async function runSlashCommand(
         setup: "向导",
         settings: "设置",
         user: "config.json",
+        magpie: "Magpie",
         project: "项目配置",
         env: "环境变量",
         cli: "命令行",

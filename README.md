@@ -156,6 +156,10 @@ Anthropic 协议可用另一份 Provider 条目，模型引用随之改为 `anth
 
 输入 `/omp 任务原文`（一般形式为 `/<名称> 任务`）可以点名委派。委派入口会请求确认，也可用权限规则放行，例如 `{ "kind": "subagent", "pattern": "external:omp", "action": "allow" }`。费用与额度计在该 agent 自己的账号上；执行期只能拦截它主动请求的操作，不能约束它直接执行、没有请求权限的操作。
 
+### 与 Magpie 配合
+
+[Magpie](https://usemagpie.ai) 是管理订阅账号和 API 服务商的本机网关。仓库里的 `packaging/magpie-plugin` 是 Magpie 的 Agent 插件：`magpie plugin add <该目录>` 安装后，在 Magpie 的 Agent 页连接 Nocturne、选择模型，重启 `nctrn` 即可使用 Magpie 的模型；断开后 Magpie 会还原它写过的内容。Nocturne 自己的服务商、设置和密钥不受影响。安装、切换与故障排查见[插件说明](packaging/magpie-plugin/README.md)。
+
 ## 基础用法
 
 ### 终端

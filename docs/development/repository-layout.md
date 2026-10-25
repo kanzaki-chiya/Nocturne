@@ -28,7 +28,8 @@ nocturne/
 │   ├── test/                            发布脚本的离线测试（进默认测试集）
 │   └── update-models-dev-snapshot.mjs  手动更新内置 models.dev 裁剪快照
 ├── packaging/
-│   └── npm/                         nctrn npm 包模板（package.json + 面向 npm 用户的 README）
+│   ├── npm/                         nctrn npm 包模板（package.json + 面向 npm 用户的 README）
+│   └── magpie-plugin/               Magpie Agent 插件（`magpie plugin add <目录>`；agent.js + README，ADR-0062）
 ├── tsconfig.base.json
 ├── docs/                        所有正式文档
 ├── packages/
