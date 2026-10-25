@@ -6,6 +6,7 @@
 import {
   createPlatform,
   type Platform,
+  type ScheduleChangedPayload,
   type Runtime,
   type RuntimeConfig,
   type RuntimeSession,
@@ -82,6 +83,7 @@ export class Hub {
   /** 已登记会话的列表变化监听（首条用户消息、标题），随会话关闭撤销 */
   private readonly watchers = new Map<string, () => void>();
   private sessionsChangedTimer: ReturnType<typeof setTimeout> | undefined;
+  private unsubscribeSchedule: (() => void) | undefined;
 
   get available(): boolean {
     return this.handle !== undefined && !this.stopping;
@@ -116,6 +118,20 @@ export class Hub {
         peer.send({ jsonrpc: "2.0", method: "runtime.providersChanged", params: {} });
       }
     }
+  }
+
+  /**
+   * `schedule.changed`（ADR-0064）广播给所有已握手的连接（含远程；list 在远程白名单内）。
+   * 一次运行会建出新会话，所以顺带通知会话列表变化（同样合并）。
+   */
+  notifyScheduleChanged(payload: ScheduleChangedPayload): void {
+    if (this.stopping) return;
+    for (const peer of this.peers) {
+      if (peer.initialized) {
+        peer.send({ jsonrpc: "2.0", method: "schedule.changed", params: { ...payload } });
+      }
+    }
+    this.notifySessionsChanged();
   }
 
   /**
@@ -163,6 +179,10 @@ export class Hub {
   /** 握手创建 Runtime 成功后登记句柄与服务商配置 */
   setHandle(handle: RpcRuntimeHandle): void {
     this.handle = handle;
+    this.unsubscribeSchedule?.();
+    this.unsubscribeSchedule = handle.runtime.onScheduleChanged((payload) => {
+      this.notifyScheduleChanged(payload);
+    });
     const providerConfig = handle.providerConfig;
     this.providerState =
       providerConfig !== undefined
@@ -380,6 +400,8 @@ export class Hub {
     this.sessions.clear();
     for (const unsubscribe of this.watchers.values()) unsubscribe();
     this.watchers.clear();
+    this.unsubscribeSchedule?.();
+    this.unsubscribeSchedule = undefined;
     clearTimeout(this.sessionsChangedTimer);
     this.sessionsChangedTimer = undefined;
     for (const session of sessions) session.interrupt();

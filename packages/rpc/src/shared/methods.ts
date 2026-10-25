@@ -55,6 +55,12 @@ import type {
   RewindTarget,
   RuntimeEvent,
   RuntimeSession,
+  ScheduleChangedPayload,
+  ScheduleHistoryEntry,
+  ScheduleListResult,
+  ScheduleRunNowResult,
+  ScheduleSaveInput,
+  ScheduleTaskOverview,
   SessionRewoundPayload,
   SessionState,
   SessionSummary,
@@ -247,7 +253,14 @@ export interface RpcMethods {
     result: SessionSummary[];
   };
   "runtime.usageStats": { params: { days?: number }; result: UsageStats };
-  "runtime.createSession": { params: CreateSessionOptions; result: SessionOpened };
+  /**
+   * 不含 `interactive` 与 `schedule`：前者是进程内会话选项，后者只由调度器写入
+   * （ADR-0064），客户端不能经 RPC 伪造定时任务来源或把会话开成无人值守。
+   */
+  "runtime.createSession": {
+    params: Omit<CreateSessionOptions, "interactive" | "schedule">;
+    result: SessionOpened;
+  };
   "runtime.resumeSession": {
     params: { sessionId: string; model?: string | ModelRef; force?: boolean };
     result: SessionOpened;
@@ -334,6 +347,17 @@ export interface RpcMethods {
     result: null;
   };
   "mcp.probeMcpServer": { params: McpProbeInput; result: McpProbeResult };
+  /**
+   * 定时任务（ADR-0064，docs/architecture/schedule.md）。`list` 的每条带服务端算好的下次运行时间、
+   * 上次运行结果与是否在运行，另返回调度器是否在运行；`save` 不带 id 为新建、带 id 为整体替换
+   * （启停也走它）；`runNow` 是立即运行（trigger: manual），不改计划的下一次时间。
+   * 状态变化经 `schedule.changed` 通知。list / history / runNow 在远程白名单内，save / delete 只在本机。
+   */
+  "schedule.list": { params: Record<string, never>; result: ScheduleListResult };
+  "schedule.save": { params: ScheduleSaveInput; result: ScheduleTaskOverview };
+  "schedule.delete": { params: { id: string }; result: null };
+  "schedule.runNow": { params: { id: string }; result: ScheduleRunNowResult };
+  "schedule.history": { params: { id: string }; result: ScheduleHistoryEntry[] };
   "runtime.reloadConfig": { params: Record<string, never>; result: null };
   "runtime.defaultReviewer": {
     params: { endpoint: JevEndpoint; baseURL?: string; workspaceRoot?: string | undefined };
@@ -572,6 +596,12 @@ export interface RpcServerNotifications {
    * 或标题落盘之后推送，短时间内的多次变化合并为一条。不带任何会话内容；别的进程改的列表不在此列
    */
   "runtime.sessionsChanged": Record<string, never>;
+  /**
+   * 定时任务列表、启停或运行状态变了，请重拉 `schedule.list`（易失，不写日志，不带任务内容）：
+   * 保存、删除、一次运行开始/结束/被跳过之后推送，广播给所有已握手的连接（含远程）。
+   * `taskId` 缺省表示整体变化。
+   */
+  "schedule.changed": ScheduleChangedPayload;
   /** 登录会话完成或失败（含取消）；绝不先于对应 login.start/startDraft 的响应到达 */
   "login.completed": LoginCompleted;
 }
@@ -623,6 +653,11 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "mcp.deleteMcpServer": true,
   "mcp.setMcpServerEnabled": true,
   "mcp.probeMcpServer": true,
+  "schedule.list": true,
+  "schedule.save": true,
+  "schedule.delete": true,
+  "schedule.runNow": true,
+  "schedule.history": true,
   "runtime.defaultReviewer": true,
   "runtime.listReviewerModels": true,
   "runtime.listReviewerSamples": true,

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createRuntime, type Runtime } from "../src/index.js";
+import { createRuntime, ScheduleError, type Runtime } from "../src/index.js";
 import { FakeProvider, type FakeScript } from "../src/provider/index.js";
 
 const roots: string[] = [];
@@ -164,7 +164,7 @@ describe("Runtime 定时任务", () => {
     await expect(runtime.runSchedule({ id: task.id })).rejects.toThrow("workspace_missing");
   });
 
-  it("保存时拒绝未知模型与非法字段（invalid_model / invalid_command）", async () => {
+  it("保存时拒绝未知模型与非法字段：抛 ScheduleError，带出错的字段名", async () => {
     const { runtime } = await setup([]);
     await expect(
       runtime.saveSchedule({
@@ -173,17 +173,17 @@ describe("Runtime 定时任务", () => {
         model: "nope/none",
         schedule: { type: "manual" },
       }),
-    ).rejects.toMatchObject({ code: "invalid_model" });
+    ).rejects.toMatchObject({ field: "model" });
     await expect(
       runtime.saveSchedule({ name: "", prompt: "p", schedule: { type: "manual" } }),
-    ).rejects.toMatchObject({ code: "invalid_command" });
+    ).rejects.toMatchObject({ field: "name" });
     await expect(
       runtime.saveSchedule({
         name: "n",
         prompt: "p",
         schedule: { type: "interval", minutes: 5 },
       }),
-    ).rejects.toMatchObject({ code: "invalid_command" });
+    ).rejects.toBeInstanceOf(ScheduleError);
   });
 
   it("删除：任务和历史消失，已有会话还在；删除不存在的任务不报错", async () => {
@@ -238,11 +238,11 @@ describe("Runtime 定时任务", () => {
     expect(listed.scheduler).toEqual({ running: false, reason: "disabled" });
     expect(listed.tasks[0]?.nextRunAt).toBeDefined();
     await expect(runtime.runSchedule({ id: task.id })).rejects.toMatchObject({
-      code: "invalid_command",
+      field: "scheduler",
     });
   });
 
-  it("启用调度器时拿锁；停止后释放，另一个 Runtime 可以接手", async () => {
+  it("启用调度器时拿锁；停止后释放", async () => {
     const { runtime, home } = await setup([]);
     expect((await runtime.listSchedules()).scheduler).toEqual({ running: true });
     expect(existsSync(path.join(home, "schedules", "scheduler.lock"))).toBe(true);

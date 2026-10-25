@@ -24,6 +24,11 @@ import type {
   McpProbeResult,
   McpSaveInput,
   McpServerOverview,
+  ScheduleHistoryEntry,
+  ScheduleListResult,
+  ScheduleRunNowResult,
+  ScheduleSaveInput,
+  ScheduleTaskOverview,
   AccountStorageSetup,
   AddProviderResult,
   CreateSessionOptions,
@@ -236,6 +241,12 @@ export interface RpcRuntime {
     workspaceRoot?: string | undefined;
   }): Promise<void>;
   probeMcpServer(input: McpProbeInput): Promise<McpProbeResult>;
+  /** 定时任务（ADR-0064）；变化经 `onNotification("schedule.changed")` 通知 */
+  listSchedules(): Promise<ScheduleListResult>;
+  saveSchedule(input: ScheduleSaveInput): Promise<ScheduleTaskOverview>;
+  deleteSchedule(input: { id: string }): Promise<void>;
+  runSchedule(input: { id: string }): Promise<ScheduleRunNowResult>;
+  scheduleHistory(input: { id: string }): Promise<ScheduleHistoryEntry[]>;
   listSessions(filter?: { cwd?: string; includeSubagents?: boolean }): Promise<SessionSummary[]>;
   usageStats(input: { days?: number }): Promise<UsageStats>;
   /**
@@ -243,7 +254,7 @@ export interface RpcRuntime {
    * 会话按自己的工作区创建；缺省为后台启动目录。
    */
   createSession(
-    options: CreateSessionOptions,
+    options: Omit<CreateSessionOptions, "interactive" | "schedule">,
   ): Promise<{ opened: SessionOpened; session: RpcSession }>;
   resumeSession(
     id: string,
@@ -767,6 +778,13 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       await call("mcp.setMcpServerEnabled", input);
     },
     probeMcpServer: (input) => call("mcp.probeMcpServer", input),
+    listSchedules: () => call("schedule.list", {}),
+    saveSchedule: (input) => call("schedule.save", input),
+    deleteSchedule: async (input) => {
+      await call("schedule.delete", input);
+    },
+    runSchedule: (input) => call("schedule.runNow", input),
+    scheduleHistory: (input) => call("schedule.history", input),
     listSessions: (filter) => call("runtime.listSessions", filter ?? {}),
     usageStats: (input) => call("runtime.usageStats", input),
     createSession: async (createOptions) => {

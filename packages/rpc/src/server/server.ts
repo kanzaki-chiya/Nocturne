@@ -170,6 +170,11 @@ export const REMOTE_METHODS = [
   "runtime.listRecentModels",
   "runtime.describeModelRoles",
   "runtime.listShells",
+  // ADR-0064：手机能看任务与历史、立即运行（不改任务、跑完不留撤销后仍生效的东西，等同会话内操作）；
+  // schedule.save / schedule.delete 改持久配置（含启停），只在本机
+  "schedule.list",
+  "schedule.history",
+  "schedule.runNow",
   "session.subscribe",
   "session.unsubscribe",
   "session.close",
@@ -1217,6 +1222,15 @@ class Connection implements HubPeer {
         }, false),
       "mcp.probeMcpServer": (p) =>
         this.runtime().probeMcpServer(p as unknown as Parameters<Runtime["probeMcpServer"]>[0]),
+      "schedule.list": () => this.runtime().listSchedules(),
+      "schedule.save": (p) =>
+        this.runtime().saveSchedule(p as unknown as Parameters<Runtime["saveSchedule"]>[0]),
+      "schedule.delete": async (p) => {
+        await this.runtime().deleteSchedule({ id: reqString(p, "id") });
+        return null;
+      },
+      "schedule.runNow": (p) => this.runtime().runSchedule({ id: reqString(p, "id") }),
+      "schedule.history": (p) => this.runtime().scheduleHistory({ id: reqString(p, "id") }),
       "runtime.defaultReviewer": async (p) => {
         const baseURL = optString(p, "baseURL");
         const workspaceRoot = await this.workspaceOf(p);

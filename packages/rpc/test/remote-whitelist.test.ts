@@ -59,6 +59,8 @@ const STILL_LOCAL = [
   "runtime.readFile",
   "skills.importSkills",
   "skills.setSkillEnabled",
+  "schedule.save",
+  "schedule.delete",
   "provider.refreshModelsDev",
   "provider.refreshUpstreamLimits",
 ] as const;

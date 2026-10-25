@@ -531,11 +531,14 @@ export interface ResumeSessionOptions {
 export interface Runtime {
   /** 定时任务列表（ADR-0064）：带下次运行时间、上次结果、是否在运行，以及调度器状态 */
   listSchedules(): Promise<ScheduleListResult>;
-  /** 新建（不带 id）或整体替换（带 id）；字段非法以 invalid_command 拒绝 */
+  /** 新建（不带 id）或整体替换（带 id）；字段非法抛 `ScheduleError`（带 `field`，客户端据此标到输入框） */
   saveSchedule(input: ScheduleSaveInput): Promise<ScheduleTaskOverview>;
   /** 删除任务及其历史；已有会话不动；任务不存在时不报错 */
   deleteSchedule(input: { id: string }): Promise<void>;
-  /** 立即运行（trigger: manual）；上一次未结束或名额已满时返回 `started: false` 与原因 */
+  /**
+   * 立即运行（trigger: manual）；上一次未结束或名额已满时返回 `started: false` 与原因；
+   * 本进程没有运行调度器、或运行没能开始时抛 `ScheduleError`
+   */
   runSchedule(input: { id: string }): Promise<ScheduleRunNowResult>;
   scheduleHistory(input: { id: string }): Promise<ScheduleHistoryEntry[]>;
   /** 任务列表、启停、运行状态变化的易失通知（`schedule.changed`）；返回取消订阅函数 */
@@ -3112,15 +3115,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       diagnostics.record("schedule.warning", { code, message });
     },
   });
-  /** 字段校验失败统一成 invalid_command（RPC 已有映射） */
-  async function scheduleCall<T>(call: () => Promise<T>): Promise<T> {
-    try {
-      return await call();
-    } catch (e) {
-      if (e instanceof ScheduleError) throw new RuntimeCommandError("invalid_command", e.message);
-      throw e;
-    }
-  }
   const scheduleModelCheck = (input: ScheduleSaveInput): void => {
     if (input.model === undefined || typeof input.model !== "string") return;
     const root = workspaceRoot;
@@ -3130,21 +3124,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       .providers()
       .flatMap((p) => p.models())
       .some((m) => `${m.ref.provider}/${m.ref.model}` === input.model);
-    if (!known) throw new RuntimeCommandError("invalid_model", `模型 ${input.model} 不可用`);
+    if (!known) throw new ScheduleError("model", `模型 ${input.model} 不可用`);
   };
 
   const runtime: Runtime = {
-    listSchedules: () => scheduleCall(() => scheduler.list()),
-    saveSchedule: (input) =>
-      scheduleCall(async () => {
-        scheduleModelCheck(input);
-        return scheduler.save(input);
-      }),
-    async deleteSchedule(input) {
-      await scheduleCall(() => scheduler.remove(input.id));
+    listSchedules: () => scheduler.list(),
+    async saveSchedule(input) {
+      scheduleModelCheck(input);
+      return await scheduler.save(input);
     },
-    runSchedule: (input) => scheduleCall(() => scheduler.runNow(input.id)),
-    scheduleHistory: (input) => scheduleCall(() => scheduler.history(input.id)),
+    async deleteSchedule(input) {
+      await scheduler.remove(input.id);
+    },
+    runSchedule: (input) => scheduler.runNow(input.id),
+    scheduleHistory: (input) => scheduler.history(input.id),
     onScheduleChanged(listener) {
       scheduleListeners.add(listener);
       return () => {
@@ -3949,6 +3942,7 @@ async function loadInstructions(
 // 公共契约类型与工具再导出：客户端只需要 @nocturne/core 与 @nocturne/core/protocol
 export * from "./protocol/index.js";
 export { McpSettingsError } from "./config/mcp.js";
+export { ScheduleError } from "./schedule/index.js";
 export type {
   AnthropicConfig,
   ModelInfo,

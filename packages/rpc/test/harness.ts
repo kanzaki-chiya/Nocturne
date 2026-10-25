@@ -195,6 +195,8 @@ export interface ProviderHarnessOptions extends HarnessOptions {
   reloadError?: Error;
   /** 不注入 providerConfig（provider.* / login.* 全部报 provider_config_unavailable） */
   noProviderConfig?: boolean;
+  /** 启用定时任务调度器（ADR-0064）；任务与历史写在这份配置的临时 NOCTURNE_HOME 下 */
+  scheduler?: boolean;
 }
 
 /**
@@ -260,6 +262,7 @@ export async function connectWithConfig(
         cwd: ws,
         ...(options.mcp ? { mcp: options.mcp } : {}),
         ...(options.externalAgents ? { externalAgents: options.externalAgents } : {}),
+        ...(options.scheduler === true ? { scheduler: true } : {}),
         config,
         providers: [provider],
         interactive: init.interactive,
@@ -277,8 +280,9 @@ export async function connectWithConfig(
       return {
         runtime: observed,
         sessionsDir: config.sessionsDir,
-        dispose: () => {
+        dispose: async () => {
           disposed = true;
+          await runtime.stopScheduler();
         },
         ...(options.noProviderConfig === true
           ? {}

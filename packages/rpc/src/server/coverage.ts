@@ -10,13 +10,7 @@ import type { RpcMethodName } from "../shared/methods.js";
 
 /** 没有（或没有一一对应的）RPC 方法的 Runtime 成员，附原因 */
 export const RUNTIME_NOT_MAPPED = {
-  // ADR-0064：schedule.* 方法在下一步（feat(rpc)）加入，届时移到 RUNTIME_METHODS
-  listSchedules: "待加入 schedule.list",
-  saveSchedule: "待加入 schedule.save",
-  deleteSchedule: "待加入 schedule.delete",
-  runSchedule: "待加入 schedule.runNow",
-  scheduleHistory: "待加入 schedule.history",
-  onScheduleChanged: "待加入 schedule.changed 通知",
+  onScheduleChanged: "事件订阅：Hub 订阅后以 schedule.changed 通知广播给所有已握手的连接",
   stopScheduler: "生命周期：后台退出前由 RpcRuntimeHandle.dispose 调用，不是 RPC 方法",
 } as const satisfies Partial<Record<keyof Runtime, string>>;
 
@@ -53,6 +47,11 @@ export const RUNTIME_METHODS: Record<
   // 参数是含函数的进程内 RuntimeConfig，无法序列化：服务端从磁盘重载出新配置
   // 再调用它（配置变更方法之后也自动这样做），客户端收 runtime.providersChanged
   updateProviders: "runtime.reloadConfig",
+  listSchedules: "schedule.list",
+  saveSchedule: "schedule.save",
+  deleteSchedule: "schedule.delete",
+  runSchedule: "schedule.runNow",
+  scheduleHistory: "schedule.history",
   describeMcpServers: "mcp.describeMcpServers",
   describeExternalAgents: "agents.describeExternalAgents",
   saveExternalAgent: "agents.saveExternalAgent",

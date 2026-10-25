@@ -4,6 +4,7 @@ import {
   McpSettingsError,
   ExternalAgentSettingsError,
   RuntimeCommandError,
+  ScheduleError,
   SessionError,
   SkillImportError,
 } from "@nocturne/core";
@@ -81,7 +82,8 @@ export function toRpcError(error: unknown): RpcErrorObject {
     error instanceof ProviderSetupError ||
     error instanceof McpSettingsError ||
     error instanceof ExternalAgentSettingsError ||
-    error instanceof SkillImportError
+    error instanceof SkillImportError ||
+    error instanceof ScheduleError
   ) {
     // 字段名让客户端把错误标到对应输入框（ADR-0044 第 6 节）
     return {

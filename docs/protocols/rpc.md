@@ -195,11 +195,30 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 | 服务端→客户端 | `event` | `{ sessionId, event }` | `event` 原样是 [events.md](events.md) 的 `RuntimeEvent` 信封，不另包一层 |
 | 服务端→客户端 | `runtime.providersChanged` | `{}` | 服务商、技能或外部 agent 配置变更成功后的通知；`provider.*`、`skills.*` 写方法（`setSkillEnabled`、`importSkills` 的 commit）、`agents.*` 三个写方法的响应之前到达一次，登录和显式重载同原规则（3.3–3.7） |
 | 服务端→客户端 | `runtime.sessionsChanged` | `{}` | 会话列表变了，请重拉 `runtime.listSessions`。**不带任何会话内容**（标题、路径都不带）。本后台的 `runtime.createSession`、`runtime.forkSession` 成功后发；会话首条用户消息落盘（列表标题 `firstText` 从无到有）和 `session.titled`（生成的标题优先于首句）也发，其余事件不发。发送前合并：第一次变化起 300 ms 内的所有变化只发一条，窗口内不顺延。别的进程（如另开的 CLI）改的列表不经过本后台，没有通知，客户端回前台时自行重拉。旧客户端没有监听器，忽略即可 |
+| 服务端→客户端 | `schedule.changed` | `{ taskId? }` | 定时任务列表、启停或运行状态变了，请重拉 `schedule.list`（ADR-0064）。易失，不写日志，不带任务内容；保存、删除、一次运行开始/结束/被跳过之后发。`taskId` 缺省表示整体变化。广播给所有已握手连接（含远程）。每次发出时同时触发一次 `runtime.sessionsChanged`（运行会建出新会话，照常 300 ms 合并） |
 | 服务端→客户端 | `login.completed` | `LoginCompleted` | 登录会话完成或失败（含取消）；绝不先于对应 `login.start`/`startDraft` 的响应到达（3.4） |
 
 ### 3.9 `shutdown`
 
 请求，无参数。服务端完成与"传输断开"相同的清理（第 6 节）后回复 `null`，再关闭传输。
+
+### 3.10 `schedule.*`（ADR-0064）
+
+定时任务的增删改查与立即运行。任务定义、存储、调度与跳过规则见 [schedule.md](../architecture/schedule.md)；这里只列接口。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `schedule.list` | `{}` → `{ tasks: ScheduleTaskOverview[], scheduler: { running, reason? }, warnings: string[] }` |
+| `schedule.save` | `ScheduleSaveInput`（`id?`、`name`、`prompt`、`workspace?`、`model?`、`reasoningEffort?`、`permissionPreset?`、`schedule`、`enabled?`、`maxDurationMinutes?`）→ `ScheduleTaskOverview`。不带 `id` 为新建，带 `id` 为整体替换；暂停与恢复也走它（`enabled`） |
+| `schedule.delete` | `{ id }` → `null`；任务和它的历史一并删除，已产生的会话保留；任务不存在时不报错 |
+| `schedule.runNow` | `{ id }` → `{ started: true, sessionId }` 或 `{ started: false, reason: "previous_running" \| "concurrency" }`。`trigger` 记 `manual`，不改动计划的下一次时间 |
+| `schedule.history` | `{ id }` → `ScheduleHistoryEntry[]`，新的在前，最多 200 条 |
+
+- `ScheduleTaskOverview` 在任务定义之外带服务端算好的 `nextRunAt`（已暂停或 `manual` 缺省）、`lastRun`（最近一次实际运行，跳过的不算）、`running`、`stats.last7Days.{runs, skipped}`，客户端的列表与概况格直接用，不自己算。历史条目的 `denied` 是这次运行中被无人值守规则拒绝（`non_interactive`）的操作数，由 Core 在运行结束时从该会话的结算记录统计，客户端不扫会话日志。
+- `scheduler.running` 为 `false` 时 `reason` 是 `disabled`（本进程没有以 `--scheduler` 启动，只有桌面端后台启用）或 `locked`（同一 `NOCTURNE_HOME` 下另一个 Nocturne 正在调度）。此时任务照常可管理，只是不会自动触发；`schedule.runNow` 在非调度器进程里被拒。
+- 字段校验失败报 `-32005 / invalid_field`，`data.field` 为出错的字段（`name`、`prompt`、`workspace`、`model`、`reasoningEffort`、`permissionPreset`、`schedule`、`enabled`、`maxDurationMinutes`），客户端据此标输入框；任务数超上限等整体错误为 `config`，任务不存在或 id 无效为 `id`。`schedule.runNow` 在非调度器进程里报同一错误码，`field: "scheduler"`，运行没能开始为 `field: "run"`。字段级校验放在这里，没有给 `RuntimeCommandError` 的 `detail` 加字段。
+- `runtime.createSession` 的参数**不含** `interactive` 与 `schedule`：前者是进程内会话选项，后者只由调度器写入。服务端只摘取列出的字段，客户端强行带上也会被忽略，不能伪造定时来源或把会话开成无人值守。
+- 远程连接：`schedule.list`、`schedule.history`、`schedule.runNow` 在白名单内，`schedule.save`、`schedule.delete` 只在本机（第 7 节）。
 
 ## 4. 订阅与回放
 
@@ -316,7 +335,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `-32002` | `SessionError` | 会话层错误码 |
 | `-32003` | `ProviderLoginError` | 登录错误码 |
 | `-32004` | RPC 层状态错误 | `runtime_unavailable`（本机尚未创建 Runtime）、`remote_not_allowed`（远程方法或参数越界，中文文案说明限制）、`workspace_not_found` / `workspace_untrusted`（远程新建会话的目录不存在或需在电脑上信任）、`response_too_large` / `attachment_too_large`（远程结果超过报文上限）、`not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down`、`provider_config_unavailable`（服务端未注入服务商配置）、`provider_in_use`（后台任一会话正在使用的服务商拒绝删除）、`unknown_login`（登录会话不存在或已结束） |
-| `-32005` | `ProviderSetupError` / `McpSettingsError` / `ExternalAgentSettingsError`（管理表单字段错误） | `invalid_field`；`data.field` 为对应字段名，客户端据此标输入框。外部 agent 使用 `name`、`mode`、`command`、`configOptions` 等，名称冲突同样返回 `name`（3.7） |
+| `-32005` | `ProviderSetupError` / `McpSettingsError` / `ExternalAgentSettingsError` / `ScheduleError`（管理表单字段错误） | `invalid_field`；`data.field` 为对应字段名，客户端据此标输入框。外部 agent 使用 `name`、`mode`、`command`、`configOptions` 等，名称冲突同样返回 `name`（3.7） |
 
 客户端侧另有 `connection_closed`：连接断开时所有在途请求以它失败，而不是悬挂。
 
@@ -350,11 +369,13 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `session.describeContext`、`session.describeSkills`、`session.describeExternalAgents`、`session.mcpServers`、`session.listShells`、`session.shellInfo`、`session.reasoningEffortInfo`、`session.visionInfo`、`session.fileIndex`、`session.resolveFiles` | 允许（只读） |
 | `session.readAttachment` | 允许；附件原始字节超过远程上限报 `attachment_too_large` |
 | `session.readInputHistory`、`session.recordInputHistory` | 允许 |
+| `schedule.list`、`schedule.history`、`schedule.runNow` | 允许（ADR-0064）。前两者只读；`runNow` 不改任务、不留下撤销手机后仍生效的东西，等同会话内操作（它跑的是电脑上已有的、用户在本机写好的指令，权限仍按任务的预设，无人值守时越权操作被直接拒绝） |
+| `schedule.save`、`schedule.delete` | 拒绝：改的是持久配置，启停与编辑也走 `save`，手机页面里这些控件禁用并提示「请在电脑上操作」 |
 | `runtime.readFile` | 拒绝：只服务本机右侧面板（ADR-0060），手机没有面板，也不扩大远程可读的文件范围 |
-| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入与 `describeSettings`、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、`remote.*`、`mcp.*`、`agents.*`、`skills.*` |
+| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入与 `describeSettings`、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、`remote.*`、`mcp.*`、`agents.*`、`skills.*`，以及上面未列出的 `schedule.*` |
 
 - **报文上限**：加密通道单条消息超过 `MAX_MESSAGE`（16 MiB）会整条关闭。远程连接的成功结果编码后超过 `REMOTE_MESSAGE_LIMIT`（`MAX_MESSAGE` 减 64 KiB 余量）时改报 `-32004 / response_too_large`；`readAttachment` 先按原始字节预检（base64 后不超上限，`remoteAttachmentLimit`），超限报 `attachment_too_large`，文案「图片过大，请在电脑上查看」。请求方向由手机网页发送前估算，服务端不再放宽。
-- 远程连接对服务端→客户端通知没有白名单，通知由发送方决定发给谁：`event` 只发给订阅了该会话的连接，`remote.*` 只发本机连接，`login.completed` 只发发起登录的连接，`runtime.providersChanged` 与 `runtime.sessionsChanged` 广播给所有已握手连接（含远程）。`runtime.sessionsChanged` 不带内容，手机收到后调用的 `runtime.listSessions` 本来就在上面的白名单里，远程能力边界不变。
+- 远程连接对服务端→客户端通知没有白名单，通知由发送方决定发给谁：`event` 只发给订阅了该会话的连接，`remote.*` 只发本机连接，`login.completed` 只发发起登录的连接，`runtime.providersChanged`、`runtime.sessionsChanged` 与 `schedule.changed` 广播给所有已握手连接（含远程）。`runtime.sessionsChanged` 不带内容，手机收到后调用的 `runtime.listSessions` 本来就在上面的白名单里，远程能力边界不变。
 - `runtime.providersChanged` 广播给所有已握手连接；`login.completed` 只发给发起登录的连接。Runtime 句柄、实际会话、配置对象与变更队列在 Hub 共享；订阅、请求、握手、草稿和登录属于单连接。
 - 会话已被其他连接打开时，`resumeSession` 的 `model` / `force` 被忽略，返回当前状态。
 - 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` 事件与 `respondPermission` 回复，不判断"要不要确认"。

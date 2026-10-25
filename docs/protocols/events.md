@@ -68,7 +68,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 
 | 类型 | turnId | payload |
 |---|---|---|
-| `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`reasoningEffort?`（思考档位，ADR-0018；缺省按 `off` 处理）、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节） |
+| `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`reasoningEffort?`（思考档位，ADR-0018；缺省按 `off` 处理）、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节）、`schedule?`（`{ taskId, scheduledAt, trigger }`，仅定时任务发起的会话存在；可选字段，旧版本忽略，ADR-0064，见 [schedule.md](../architecture/schedule.md)） |
 | `session.config_changed` | — | 变化的字段：`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018）、`shell?: { kind, path }`（shell 切换，ADR-0022：折叠时在该事件位置留 `note` 历史条目给模型，见 [context.md](../architecture/context.md) 第 3 节） |
 | `session.titled` | — | `title: string`、`model: string`（provider/model）、`usage?`（标题角色用量） |
 | `turn.started` | ✓ | `turnIndex` |
@@ -115,11 +115,13 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `runtime.status` | ✓ 或 — | `status: "idle" \| "thinking" \| "running_tool" \| "waiting_permission" \| "waiting_user" \| "retrying" \| "compacting" \| "describing_images" \| "failed"` |
 | `question.requested` | ✓ | `requestId`、`callId`、`questions: QuestionItem[]`（ADR-0032；等待 `respondQuestion`，回复校验失败返回 `invalid_reply` 且请求保持等待） |
 | `provider.retry` | ✓ | `attempt`、`maxAttempts`、`delayMs`、`error: { kind, message }`、`discarded?: { messageId: string; callIds: string[] }`（仅 Provider 错误已有输出并丢弃时；callIds 为该次已发布 tool.input.delta 的调用 ID，ADR-0055） |
-| `runtime.warning` | ✓ 或 — | `code`、`message`（Phase 5 增补的 `code`：`project_config_untrusted`（含被忽略的 `mcp`/`hooks` 段）、`mcp_server_failed`、`mcp_server_crashed`、`mcp_tool_conflict`、`mcp_env_missing`、`hook_failed`、`debug_sink_failed`、`grant_persist_failed` 等；v0.2 增补 `model_capabilities_defaulted`、`provider_setup_invalid`，见 [provider-setup.md](../architecture/provider-setup.md)；ADR-0022 增补 `shell_env_invalid`（非法 `NOCTURNE_SHELL` 回退自动）、`shell_overridden`（settings 层的 shell 选择被 env/config 覆盖）；ADR-0025 增补 `provider_thinking_levels_ignored`（旧向导配置的服务商级 `thinking.levels` 已忽略，需逐模型设置）；`config_apply_failed`（配置已保存，但未能应用到该会话，见 [mcp.md](../architecture/mcp.md) 第 4 节）） |
+| `runtime.warning` | ✓ 或 — | `code`、`message`（Phase 5 增补的 `code`：`project_config_untrusted`（含被忽略的 `mcp`/`hooks` 段）、`mcp_server_failed`、`mcp_server_crashed`、`mcp_tool_conflict`、`mcp_env_missing`、`hook_failed`、`debug_sink_failed`、`grant_persist_failed` 等；v0.2 增补 `model_capabilities_defaulted`、`provider_setup_invalid`，见 [provider-setup.md](../architecture/provider-setup.md)；ADR-0022 增补 `shell_env_invalid`（非法 `NOCTURNE_SHELL` 回退自动）、`shell_overridden`（settings 层的 shell 选择被 env/config 覆盖）；ADR-0025 增补 `provider_thinking_levels_ignored`（旧向导配置的服务商级 `thinking.levels` 已忽略，需逐模型设置）；`config_apply_failed`（配置已保存，但未能应用到该会话，见 [mcp.md](../architecture/mcp.md) 第 4 节）；ADR-0064 增补 `schedule_locked`（另一个 Nocturne 正在调度，本进程不启动调度循环）、`schedule_start_failed`、`schedule_config`（`schedules.json` 里被忽略的条目）、`schedule_check_failed`、`schedule_history_failed`，见 [schedule.md](../architecture/schedule.md)） |
 | `runtime.error` | ✓ 或 — | `code`、`message`（例如日志写入失败导致会话进入 `failed` 状态） |
 | `mcp.server` | — | `name`、`state: "starting" \| "ready" \| "failed" \| "crashed" \| "stopped"`、`toolCount?`、`error?`（Phase 5，MCP 服务器生命周期状态转移，见 [mcp.md](../architecture/mcp.md) 第 7 节；归约进 `SessionView.mcpServers`，见 [view.md](view.md) §4） |
 
 临时事件的信息要么包含在随后的持久化事件中（增量 → 完整消息），要么是可丢弃的状态提示。客户端丢失临时事件不影响正确性。
+
+定时任务不新增任何 `RuntimeEvent`（ADR-0064）：任务列表、启停与运行状态的变化走 RPC 的服务端通知 `schedule.changed`（[rpc.md](rpc.md) 3.8），它不属于会话事件流、不写日志；一次运行产生的是普通会话，来源只记在 `session.created.schedule`，被无人值守拒绝的操作照常是 `permission.resolved(source: "non_interactive")`。
 
 Phase 5 新增事件的取舍：`mcp.server` 与 Hook 执行记录都选**临时事件/诊断**而非持久化——MCP 服务器进程是本次打开的运行态，恢复时重新拉起；Hook 的效果已体现在 `permission.resolved`、`tool.completed`、`turn.completed` 里。若写进持久日志，包含这些事件的会话将无法被旧版本 Runtime 恢复（第 8 节），没有对应收益。
 

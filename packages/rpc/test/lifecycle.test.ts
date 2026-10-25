@@ -119,7 +119,8 @@ describe("连接约束", () => {
         return attempts === 1
           ? Promise.reject(new Error("配置有误"))
           : Promise.resolve({
-              runtime: undefined as never,
+              // Hub 握手后会订阅 onScheduleChanged（ADR-0064），替身只需提供这一个成员
+              runtime: { onScheduleChanged: () => () => undefined } as never,
             });
       },
     });
