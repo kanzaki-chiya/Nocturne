@@ -68,6 +68,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0060](ADR-0060-desktop-side-panel.md) | 桌面端右侧面板：变更、文件、终端、内置浏览器、子代理，标题栏会话概览 | 已接受 |
 | [ADR-0061](ADR-0061-gemini-protocol.md) | Gemini 协议、思考签名回传与按模型的接口地址 | 已接受 |
 | [ADR-0062](ADR-0062-magpie-agent-plugin.md) | Magpie Agent 插件与只读接入层 `magpie.json`（单文件写入、`external-file` 网关 key、完整模型 id） | 已接受 |
+| [ADR-0063](ADR-0063-loop-guard.md) | 重复调用保护与修剪不足时升级摘要 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
