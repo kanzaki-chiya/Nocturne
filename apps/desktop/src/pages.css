@@ -823,11 +823,11 @@
 
 /* 设置页 */
 .page3 .sets3 {
-  padding: 12px 30px 14px;
+  /* 内容限宽 880px，但滚动容器铺满，滚动条贴窗口右边而不是停在内容右侧 */
+  padding: 12px max(30px, calc(100% - 850px)) 14px 30px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 880px;
   min-height: 0;
   overflow-y: auto;
 }
