@@ -763,6 +763,70 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
     });
     expect(off.compaction).toBeUndefined();
   });
+  it("ADR-0066：修剪绝对上限 L 默认 200k；升级摘要继续用比例阈值 P_rel", () => {
+    // B = 1,000,000（大窗口）
+    const large: ModelInfo = {
+      ...small,
+      contextWindow: 1_000_000 + 1000 + 1024,
+      maxOutputTokens: 1000,
+    };
+    expect(inputBudgetTokens(large)).toBe(1_000_000);
+    // R = min(20k, 0.1·B) = 20,000；tool(1, 25000) 可回收 > 20k
+    const atLarge = (
+      tokens: number,
+      over: Partial<BuildContextInput> = {},
+      history: HistoryEntry[] = [tool(1, 25_000)],
+    ) =>
+      buildContext(
+        input([...history, assistant(7, 1, tokens - 100)], {
+          model: large,
+          compactionThreshold: "90%",
+          ...over,
+        }),
+      );
+
+    // 大窗口（B = 1M）、历史 210k、可回收 >= R：给出 prune；历史 190k：不给
+    expect(atLarge(210_000).compaction?.kind).toBe("prune");
+    expect(atLarge(190_000).compaction).toBeUndefined();
+    expect(atLarge(200_000).compaction).toBeUndefined();
+    expect(atLarge(200_001).compaction?.kind).toBe("prune");
+
+    // 回收量不足 R（20k）时不修剪（防止每步都修剪破坏缓存）
+    expect(atLarge(210_000, {}, [tool(1, 10_000)]).compaction).toBeUndefined();
+
+    // pruneLimit = 0：大窗口不设绝对上限，回到只按比例 P_rel = 800k
+    expect(atLarge(210_000, { compactionPruneLimit: 0 }).compaction).toBeUndefined();
+    expect(atLarge(800_000, { compactionPruneLimit: 0 }).compaction).toBeUndefined();
+    expect(atLarge(800_001, { compactionPruneLimit: 0 }).compaction?.kind).toBe("prune");
+
+    // 修剪后仍高于 L（250k > 200k）但低于 P_rel（800k）：不升级摘要
+    expect(
+      atLarge(250_000, { compactionState: { pruneAttempted: true } }).compaction,
+    ).toBeUndefined();
+    // 高于 P_rel（800k）：照 ADR-0063 §2 升级摘要
+    expect(atLarge(800_001, { compactionState: { pruneAttempted: true } }).compaction?.kind).toBe(
+      "summary",
+    );
+
+    // 小窗口（B = 200k，0.8·B = 160k < L）：行为与现在完全相同
+    const mid: ModelInfo = {
+      ...small,
+      contextWindow: 200_000 + 1000 + 1024,
+      maxOutputTokens: 1000,
+    };
+    expect(inputBudgetTokens(mid)).toBe(200_000);
+    const atMid = (tokens: number, state?: BuildContextInput["compactionState"]) =>
+      buildContext(
+        input([tool(1, 25_000), assistant(7, 1, tokens - 100)], {
+          model: mid,
+          compactionThreshold: "90%",
+          ...(state !== undefined ? { compactionState: state } : {}),
+        }),
+      );
+    expect(atMid(160_000).compaction).toBeUndefined();
+    expect(atMid(160_001).compaction?.kind).toBe("prune");
+    expect(atMid(165_000, { pruneAttempted: true }).compaction?.kind).toBe("summary");
+  });
   it("200k 在大预算模型中严格超过 200000 token 才触发", () => {
     const large = { ...small, contextWindow: 1_000_000 };
     const at = (tokens: number) =>

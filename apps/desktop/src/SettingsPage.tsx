@@ -285,6 +285,7 @@ export function SettingsPage({
   const reviewerItem = item("permission.reviewer");
   const reviewerRulesItem = item("permission.reviewerRules");
   const thresholdItem = item("compaction.threshold");
+  const pruneLimitItem = item("compaction.pruneLimit");
   const shellItem = item("shell");
   const reviewerCfg = reviewerItem?.reviewer?.effective;
 
@@ -574,7 +575,9 @@ export function SettingsPage({
             <div className={rowClass("compaction.threshold")}>
               <span className="n">压缩阈值</span>
               <span className="v sans">
-                <span className="t">{thresholdText(thresholdItem?.effective)}</span>
+                <span className="t">
+                  {thresholdText(thresholdItem?.effective, pruneLimitItem?.effective)}
+                </span>
                 <button
                   className="btn"
                   onClick={() => {
@@ -584,7 +587,7 @@ export function SettingsPage({
                   编辑
                 </button>
               </span>
-              {src(thresholdItem)}
+              {src(pruneLimitItem?.overridden ? pruneLimitItem : thresholdItem)}
               {errLine("compaction.threshold")}
             </div>
           </>
@@ -1005,12 +1008,15 @@ export function SettingsPage({
         <ThresholdDialog
           current={thresholdItem?.saved ?? ""}
           effective={thresholdItem?.effective}
+          pruneLimitCurrent={pruneLimitItem?.saved ?? ""}
+          pruneLimitEffective={pruneLimitItem?.effective}
           onClose={() => {
             setDialog(null);
           }}
-          onSave={async (v) => {
+          onSave={async (threshold, pruneLimit) => {
             const err = await save("compaction.threshold", "压缩阈值", {
-              "compaction.threshold": v,
+              "compaction.threshold": threshold,
+              "compaction.pruneLimit": pruneLimit,
             });
             if (err === undefined) setDialog(null);
             return err;
@@ -1041,11 +1047,13 @@ export function SettingsPage({
   );
 }
 
-function thresholdText(value: string | undefined): string {
+function thresholdText(value: string | undefined, pruneLimit?: string | undefined): string {
   if (value === undefined) return "默认";
-  return value.endsWith("%")
+  const base = value.endsWith("%")
     ? `上下文用到 ${value} 时自动压缩`
     : `上下文达到 ${value} token 时自动压缩`;
+  if (pruneLimit === undefined || pruneLimit === "200000") return base;
+  return pruneLimit === "0" ? `${base} · 不设修剪上限` : `${base} · 修剪上限 ${pruneLimit}`;
 }
 
 /* ---------------- 对话框外框 ---------------- */
@@ -1277,21 +1285,36 @@ function DefaultModelDialog({
 
 /* ---------------- 压缩阈值 ---------------- */
 
+function parsePruneLimitInput(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  if (!/^\d+$/u.test(trimmed)) return Number.NaN;
+  return Number(trimmed);
+}
+
 function ThresholdDialog({
   current,
   effective,
+  pruneLimitCurrent = "",
+  pruneLimitEffective,
   onClose,
   onSave,
 }: {
   current: string;
   effective: string | undefined;
+  pruneLimitCurrent?: string;
+  pruneLimitEffective?: string | undefined;
   onClose: () => void;
-  onSave: (value: string | null) => Promise<string | undefined>;
+  onSave: (threshold: string | null, pruneLimit: number | null) => Promise<string | undefined>;
 }) {
   const [value, setValue] = useState(current);
+  const [pruneLimit, setPruneLimit] = useState(pruneLimitCurrent);
   const { busy, error, run } = useDialogSave();
-  const submit = (v: string | null) => {
-    run(() => onSave(v));
+  const submit = (nextThreshold: string | null, nextPruneLimit: number | null) => {
+    run(() => onSave(nextThreshold, nextPruneLimit));
+  };
+  const submitCurrent = () => {
+    submit(value.trim() === "" ? null : value.trim(), parsePruneLimitInput(pruneLimit));
   };
   return (
     <Dialog
@@ -1303,33 +1326,56 @@ function ThresholdDialog({
       extra={
         <button
           className="btn ghost"
-          disabled={busy || current === ""}
+          disabled={busy || (current === "" && pruneLimitCurrent === "")}
           onClick={() => {
-            submit(null);
+            submit(null, null);
           }}
         >
           恢复默认
         </button>
       }
       onClose={onClose}
-      onSave={() => {
-        submit(value.trim() === "" ? null : value.trim());
-      }}
+      onSave={submitCurrent}
     >
-      <input
-        className="input mono"
-        value={value}
-        placeholder={effective ?? "如 85% 或 120000"}
-        aria-label="压缩阈值"
-        autoFocus
-        onChange={(e) => {
-          setValue(e.target.value);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") submit(value.trim() === "" ? null : value.trim());
-        }}
-      />
-      <div className="hint">填百分比（如 85%）或 token 数（如 120000）；留空保存即恢复默认</div>
+      <div className="field">
+        <div className="lab">
+          <label htmlFor="th-val">摘要阈值</label>
+        </div>
+        <input
+          id="th-val"
+          className="input mono"
+          value={value}
+          placeholder={effective ?? "如 85% 或 120000"}
+          autoFocus
+          onChange={(e) => {
+            setValue(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submitCurrent();
+          }}
+        />
+        <div className="hint">填百分比（如 85%）或 token 数（如 120000）；留空保存即恢复默认</div>
+      </div>
+      <div className="field">
+        <div className="lab">
+          <label htmlFor="th-prune">修剪上限</label>
+        </div>
+        <input
+          id="th-prune"
+          className="input mono"
+          value={pruneLimit}
+          placeholder={pruneLimitEffective ?? "200000"}
+          onChange={(e) => {
+            setPruneLimit(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submitCurrent();
+          }}
+        />
+        <div className="hint">
+          正整数 token（默认 200000），0 表示不设绝对上限；留空保存即恢复默认
+        </div>
+      </div>
     </Dialog>
   );
 }

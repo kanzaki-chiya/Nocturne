@@ -1,6 +1,9 @@
 /** ADR-0037：百分比相对可用输入预算，绝对值按 token 计。 */
 export type CompactionThreshold = string | number;
 
+/** ADR-0066：修剪绝对上限默认 200,000 token；0 表示不设绝对上限。 */
+export const DEFAULT_PRUNE_LIMIT = 200_000;
+
 /** CJK 约 1 字 / token，其余字符约 4 字 / token。 */
 export function estimateTokens(text: string): number {
   return Math.ceil(estimateTokenUnits(text) / 4);
@@ -39,4 +42,11 @@ export function parseCompactionThreshold(input: CompactionThreshold): {
     return { unit: "tokens", value: input };
   }
   throw new TypeError("压缩阈值须为 (0, 100%] 的百分比或正整数 token（支持 k/m）");
+}
+
+export function parseCompactionPruneLimit(input: unknown): number {
+  if (typeof input === "number" && Number.isSafeInteger(input) && input >= 0) {
+    return input;
+  }
+  throw new TypeError("修剪上限须为正整数 token 或 0（不设绝对上限）");
 }

@@ -82,6 +82,7 @@ export interface MergeResult {
       | "shellPath"
       | "permissions.preset"
       | "compaction.threshold"
+      | "compaction.pruneLimit"
       | "permission.reviewer"
       | "permission.reviewerRules"
       | `modelRoles.${ModelRole}`
@@ -422,6 +423,10 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     if (file.compaction?.threshold !== undefined) {
       out.compactionThreshold = file.compaction.threshold;
       origins["compaction.threshold"] = kind;
+    }
+    if (file.compaction?.pruneLimit !== undefined) {
+      out.compactionPruneLimit = file.compaction.pruneLimit;
+      origins["compaction.pruneLimit"] = kind;
     }
     const notify = file.notifications;
     if (notify !== undefined) {

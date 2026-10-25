@@ -392,6 +392,7 @@ export async function runTurn(
         environment: deps.environment,
         events: session.durableEvents(),
         compactionThreshold: deps.compactionThreshold,
+        compactionPruneLimit: deps.compactionPruneLimit,
         loopGuard,
         compactionState: { pruneAttempted, summaryAttempted, force: forceCompaction },
         ...(deps.basePrompt !== undefined ? { basePrompt: deps.basePrompt } : {}),

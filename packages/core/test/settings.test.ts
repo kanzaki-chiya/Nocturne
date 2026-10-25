@@ -72,6 +72,49 @@ describe("ADR-0034 设置层", () => {
     expect(config.base.shell).toBe("cmd");
     expect(config.base.warnings.join("\n")).toContain("compaction");
   });
+  it("ADR-0066 修剪上限：默认 200000、逐层覆盖、0 不设上限、非法值拒绝与独立降级", async () => {
+    const defaults = await load();
+    expect(
+      defaults.describeSettings().find((item) => item.key === "compaction.pruneLimit"),
+    ).toMatchObject({ effective: "200000", source: "default", overridden: false });
+    await json("settings.json", {
+      compaction: { threshold: "85%", pruneLimit: 150000, future: true },
+    });
+    const settings = await load();
+    expect(settings.resolvedSettings().compactionPruneLimit).toBe(150000);
+    await json("config.json", { compaction: { pruneLimit: 0 } });
+    await mkdir(path.join(workspace, ".nocturne"));
+    await writeFile(
+      path.join(workspace, ".nocturne", "config.json"),
+      JSON.stringify({ compaction: { pruneLimit: 300000 } }),
+    );
+    const config = await load();
+    await config.forWorkspace(workspace);
+    expect(config.resolvedSettings(workspace).compactionPruneLimit).toBe(0);
+    await config.setWorkspaceTrusted(workspace, true);
+    await config.forWorkspace(workspace);
+    expect(
+      config.describeSettings(workspace).find((item) => item.key === "compaction.pruneLimit"),
+    ).toMatchObject({ effective: "300000", saved: "150000", source: "project", overridden: true });
+    await expect(config.updateSettings({ "compaction.pruneLimit": -1 })).rejects.toThrow();
+    await expect(config.updateSettings({ "compaction.pruneLimit": 1.5 })).rejects.toThrow();
+    await config.updateSettings({ "compaction.pruneLimit": 0 });
+    expect((await readSettings()).compaction).toEqual({
+      threshold: "85%",
+      pruneLimit: 0,
+      future: true,
+    });
+    await config.updateSettings({ "compaction.pruneLimit": null });
+    expect((await readSettings()).compaction).toEqual({ threshold: "85%", future: true });
+
+    // 设置层 compaction.pruneLimit 损坏不影响 compaction.threshold
+    await json("config.json", {});
+    await json("settings.json", { compaction: { threshold: "80%", pruneLimit: -5 } });
+    const partial = await load();
+    expect(partial.resolvedSettings().compactionThreshold).toBe("80%");
+    expect(partial.resolvedSettings().compactionPruneLimit).toBeUndefined();
+    expect(partial.base.warnings.join("\n")).toContain("compaction.pruneLimit");
+  });
   it("审查器保存、清除、关闭与高层覆盖；未知字段保留，坏配置拒绝写入", async () => {
     await json("settings.json", { permission: { extra: 1 }, other: true });
     const config = await load();

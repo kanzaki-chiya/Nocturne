@@ -4,7 +4,7 @@
  * （不含项目层）；forWorkspace(root) 按会话记录的工作区加载项目层与 Grant。
  * v0.2 增补：凭据存储、providers.json 向导写入接口、recent-models.json。
  */
-import { resolveEffectiveProtocol, type ModelRef } from "../protocol/index.js";
+import { DEFAULT_PRUNE_LIMIT, resolveEffectiveProtocol, type ModelRef } from "../protocol/index.js";
 import type { Platform } from "../platform/index.js";
 import { envLayerConfig, cliLayerConfig } from "./env.js";
 import { ConfigError } from "./errors.js";
@@ -341,6 +341,14 @@ export async function loadConfig(
           saved.compaction?.threshold === undefined
             ? undefined
             : String(saved.compaction.threshold),
+        ],
+        [
+          "compaction.pruneLimit",
+          "compaction.pruneLimit",
+          String(merged.resolved.compactionPruneLimit ?? DEFAULT_PRUNE_LIMIT),
+          saved.compaction?.pruneLimit === undefined
+            ? undefined
+            : String(saved.compaction.pruneLimit),
         ],
         [
           "permissions.preset",

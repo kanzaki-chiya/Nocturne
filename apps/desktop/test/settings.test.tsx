@@ -61,6 +61,13 @@ const ITEMS: SettingItem[] = [
     overridden: true,
   },
   {
+    key: "compaction.pruneLimit",
+    effective: "200000",
+    source: "default",
+    saved: undefined,
+    overridden: false,
+  },
+  {
     key: "modelRoles.task",
     effective: undefined,
     source: "default",
@@ -961,5 +968,57 @@ it("打开文件用：缺省 Nocturne 面板，只列检测到的编辑器，选
     "textContent",
     "✓已保存 打开文件用 = VS Code",
   );
+  server.close();
+});
+
+it("压缩阈值对话框支持同时编辑摘要阈值与修剪上限（ADR-0066）", async () => {
+  const server = fakeServer(
+    handlers({
+      "runtime.updateSettings": (params: Record<string, unknown>) => {
+        const patch = params.patch as Record<string, unknown>;
+        return ITEMS.map((x) => {
+          if (x.key === "compaction.threshold" && "compaction.threshold" in patch) {
+            const v = patch["compaction.threshold"];
+            return {
+              ...x,
+              effective: v === null ? "90%" : String(v),
+              saved: v === null ? undefined : String(v),
+              source: v === null ? ("default" as const) : ("settings" as const),
+              overridden: false,
+            };
+          }
+          if (x.key === "compaction.pruneLimit" && "compaction.pruneLimit" in patch) {
+            const v = patch["compaction.pruneLimit"];
+            return {
+              ...x,
+              effective: v === null ? "200000" : String(v),
+              saved: v === null ? undefined : String(v),
+              source: v === null ? ("default" as const) : ("settings" as const),
+              overridden: false,
+            };
+          }
+          return x;
+        });
+      },
+    }),
+  );
+  await server.initialize();
+  render(<SettingsPage {...props(server.client)} />);
+  await screen.findByText("压缩阈值");
+  fireEvent.click(within(row("压缩阈值")).getByRole("button", { name: "编辑" }));
+  await screen.findByRole("dialog", { name: "压缩阈值" });
+  const thresholdInput = screen.getByLabelText("摘要阈值");
+  const pruneInput = screen.getByLabelText("修剪上限");
+  fireEvent.change(thresholdInput, { target: { value: "80%" } });
+  fireEvent.change(pruneInput, { target: { value: "150000" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  await waitFor(() => {
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+  const call = server.calls.find((c) => c.method === "runtime.updateSettings");
+  expect(call?.params).toEqual({
+    patch: { "compaction.threshold": "80%", "compaction.pruneLimit": 150000 },
+  });
+  expect(row("压缩阈值").textContent).toContain("修剪上限 150000");
   server.close();
 });

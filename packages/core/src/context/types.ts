@@ -42,6 +42,7 @@ export interface EnvironmentInfo {
 export interface BuildContextInput {
   skills?: { text: string; truncated: boolean } | undefined;
   compactionThreshold?: string | number | undefined;
+  compactionPruneLimit?: number | undefined;
   /**
    * 重复调用保护（ADR-0063）：决定是否在投影里重建循环说明。
    * false 关闭；缺省 DEFAULT_LOOP_GUARD（与 Agent Loop 同一份签名实现）。

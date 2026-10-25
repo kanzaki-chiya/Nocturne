@@ -44,6 +44,7 @@ export interface TurnDeps {
   prepareTools?: ((signal: AbortSignal) => Promise<void>) | undefined;
   skills?: { text: string; truncated: boolean } | undefined;
   compactionThreshold?: string | number | undefined;
+  compactionPruneLimit?: number | undefined;
   session: Session;
   model: ResolvedModel;
   visionModel?: (() => ResolvedModel | undefined) | undefined;

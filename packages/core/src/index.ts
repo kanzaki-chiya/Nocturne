@@ -2032,6 +2032,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           reasoningEffort: () => session.state().config.reasoningEffort,
           compactionThreshold: () =>
             config?.resolvedSettings(session.state().meta.workspaceRoot).compactionThreshold,
+          compactionPruneLimit: () =>
+            config?.resolvedSettings(session.state().meta.workspaceRoot).compactionPruneLimit,
           nocturneVersion: options.version ?? NOCTURNE_VERSION,
           turnConfig,
           parentFailedSignal: session.failedSignal,
@@ -2556,6 +2558,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               ),
             compactionThreshold: config?.resolvedSettings(session.state().meta.workspaceRoot)
               .compactionThreshold,
+            compactionPruneLimit: config?.resolvedSettings(session.state().meta.workspaceRoot)
+              .compactionPruneLimit,
             session,
             model,
             tools,
@@ -2949,9 +2953,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       describeContext() {
         const events = session.durableEvents();
         const specs = tools.specs(model.model.capabilities.editTool);
-        const compactionThreshold = config?.resolvedSettings(
-          environment.workspaceRoot,
-        ).compactionThreshold;
+        const resolved = config?.resolvedSettings(environment.workspaceRoot);
+        const compactionThreshold = resolved?.compactionThreshold;
+        const compactionPruneLimit = resolved?.compactionPruneLimit;
         const key = JSON.stringify({
           seq: events.at(-1)?.seq,
           model: model.model,
@@ -2960,6 +2964,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           instructions,
           environment,
           compactionThreshold,
+          compactionPruneLimit,
           loopGuard: turnConfig.loopGuard ?? DEFAULT_LOOP_GUARD,
         });
         if (contextCache?.key === key) return structuredClone(contextCache.value);
@@ -2967,6 +2972,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const value = buildContext({
           skills: catalog,
           compactionThreshold,
+          compactionPruneLimit,
           loopGuard: turnConfig.loopGuard,
           history: state.history,
           todos: state.todos,

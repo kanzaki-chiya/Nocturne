@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseCompactionThreshold } from "./compaction.js";
+import {
+  DEFAULT_PRUNE_LIMIT,
+  parseCompactionPruneLimit,
+  parseCompactionThreshold,
+} from "./compaction.js";
 
 describe("压缩阈值", () => {
   it.each([
@@ -34,5 +38,27 @@ describe("压缩阈值", () => {
     Number.MAX_SAFE_INTEGER + 1,
   ])("拒绝 %s", (input) => {
     expect(() => parseCompactionThreshold(input)).toThrow("压缩阈值");
+  });
+});
+
+describe("修剪绝对上限（ADR-0066）", () => {
+  it("默认 200,000，接受 0 与正整数，拒绝非法值", () => {
+    expect(DEFAULT_PRUNE_LIMIT).toBe(200_000);
+    expect(parseCompactionPruneLimit(0)).toBe(0);
+    expect(parseCompactionPruneLimit(200_000)).toBe(200_000);
+    expect(parseCompactionPruneLimit(1)).toBe(1);
+    for (const bad of [
+      -1,
+      1.5,
+      NaN,
+      Infinity,
+      "200000",
+      "80%",
+      null,
+      undefined,
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      expect(() => parseCompactionPruneLimit(bad)).toThrow("修剪上限");
+    }
   });
 });

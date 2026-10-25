@@ -314,7 +314,7 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 | 常规 | 权限 | 默认权限预设 | 下拉（`Dropdown`），首项「跟随默认」标出当前生效值；改完立即 `updateSettings`，提示「已保存 默认权限预设 = X」 |
 | 常规 | 权限 | 安全审查 | 对话框：关闭 / Jev / 小模型；Jev 首次启用先显示数据外发说明（偏好 `jevDisclosureAccepted`），沿用其他服务商的凭据时用下拉选服务商，单独密钥用 password 输入、经 `reviewerKey` 提交、保存后清空；设置行副标题为「smart 下除只读命令外的操作先交给它判断」。对话框另有两个多行输入框「额外交人」「额外放行」（各带一行示例占位，单段最多 1000 字），随审查器配置一起保存为 `permission.reviewerRules`（两段都清空保存为 `null`）。「样例检查」的**测试**按钮用**已保存**的审查器配置逐条跑内置样例（一条一次 `testReviewerSample`，说明 / 期望 / 实际 / 用时逐行显示，不一致的行标红，末行「命中率 x/y（z%）」），运行中按钮变为「取消测试」（停止后续样例并丢弃在途结果，显示已取消和已有命中率），审查器关闭或未配置时按钮不可用；`shell allow *` 这类显式规则会绕过审查，只在 [config.md](../architecture/config.md) 说明，界面不据此猜测。TUI 本次不提供测试按钮和追加规则编辑（[tui.md](tui.md)） |
 | 常规 | 执行 | Shell | 可选下拉（ChoiceMenu，触发器沿用 Dropdown 外观），打开时 runtime.listShells；自动项后分隔线、列全部种类，未检测到的置灰并说明原因；runtime.setShellSetting 返回值刷新整页，失败行下显示原文且值不变。被 env/user/project 覆盖时只读并写明来源；所有会话下一次调用起生效 |
-| 常规 | 执行 | 压缩阈值 | 对话框，百分比或 token 数，留空恢复默认 |
+| 常规 | 执行 | 压缩阈值 | 对话框，摘要阈值（百分比或 token 数）与修剪上限（`compaction.pruneLimit`，默认 200000，0 不设上限），留空恢复默认 |
 | 常规 | 普通对话 | 工作区 | 「更改…」选目录、「恢复默认」；只写 prefs |
 | 常规 | 更新 | 自动检查更新 | 拨动开关（`mcp-switch`），只写 `prefs.autoUpdate`（缺省开；显式关才存 `false`） |
 | 常规 | 通知 | 总开关 / 提醒哪些事 / 完成阈值 / 提示音 / 测试通知 | 「常规」页末尾新开一节（[ADR-0056](../decisions/ADR-0056-session-notifications.md)）：总开关（`notifications.enabled`，带「已开启/已关闭」文字）关闭时下面各项变灰禁用；三个事件复选（`notifications.events.attention/error/done`）同处一行共用来源列；完成阈值下拉（`notifications.doneAfterSeconds`：30 秒 / 1 分钟 / 3 分钟 / 5 分钟 / 10 分钟，保存值不在档位里时单列一项「N 秒」并保留，「完成」未勾选时整行变灰）；提示音开关（`notifications.sound`，只管桌面端 toast）；「发送测试通知」走同一个 `notify_show` 发一条「这是一条测试通知」，外壳报告 `disabled` 时在按钮旁显示「Windows 已关闭 Nocturne 的通知，请到 系统 › 通知 打开」。逐项 `updateSettings`，失败值回到原样并在行下写红字 |

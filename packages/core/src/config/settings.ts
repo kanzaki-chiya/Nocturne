@@ -84,11 +84,12 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
         !MODEL_ROLES.some((role) => key === `modelRoles.${role}`) &&
         !key.startsWith("subagents.profiles.") &&
         key !== "compaction.threshold" &&
+        key !== "compaction.pruneLimit" &&
         !NOTIFY_KEYS.includes(key),
     )
   ) {
     throw new TypeError(
-      "仅支持 permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、modelRoles.* 与 notifications.*；默认档位随默认模型经 setDefaultModel 保存",
+      "仅支持 permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、modelRoles.* 与 notifications.*；默认档位随默认模型经 setDefaultModel 保存",
     );
   }
   const patch = input as SettingsPatch;
@@ -113,8 +114,17 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
           return ref != null ? [[role, ref]] : [];
         }),
       ),
-      ...(patch["compaction.threshold"] != null
-        ? { compaction: { threshold: patch["compaction.threshold"] } }
+      ...(patch["compaction.threshold"] != null || patch["compaction.pruneLimit"] != null
+        ? {
+            compaction: {
+              ...(patch["compaction.threshold"] != null
+                ? { threshold: patch["compaction.threshold"] }
+                : {}),
+              ...(patch["compaction.pruneLimit"] != null
+                ? { pruneLimit: patch["compaction.pruneLimit"] }
+                : {}),
+            },
+          }
         : {}),
       ...(preset !== null && preset !== undefined ? { permissions: { preset } } : {}),
       ...(patch["permission.reviewer"] != null || patch["permission.reviewerRules"] != null
@@ -173,7 +183,6 @@ function configFields(data: SettingsData, warn?: (message: string) => void): Con
     "shell",
     "shellPath",
     "permissions",
-    "compaction",
   ] as const) {
     if (!Object.hasOwn(data, key)) continue;
     const value =
@@ -187,6 +196,26 @@ function configFields(data: SettingsData, warn?: (message: string) => void): Con
       result = { ...result, ...parseConfigFile({ [key]: value }, "settings.json") };
     } catch {
       warn?.(`settings.json 的 ${key} 无效，已忽略`);
+    }
+  }
+  if (Object.hasOwn(data, "compaction")) {
+    const compaction = data.compaction;
+    if (typeof compaction !== "object" || compaction === null || Array.isArray(compaction)) {
+      warn?.("settings.json 的 compaction 无效，已忽略");
+    } else {
+      for (const key of ["threshold", "pruneLimit"] as const) {
+        const value = (compaction as Record<string, unknown>)[key];
+        if (value === undefined) continue;
+        try {
+          const parsed = parseConfigFile({ compaction: { [key]: value } }, "settings.json");
+          result = {
+            ...result,
+            compaction: { ...result.compaction, ...parsed.compaction },
+          };
+        } catch {
+          warn?.(`settings.json 的 compaction.${key} 无效，已忽略`);
+        }
+      }
     }
   }
   // permission 的两个字段各自校验：追加规则写坏不能连累已配置的审查器
@@ -464,15 +493,22 @@ export async function loadSettingsStore(
             else delete next.subagents;
           }
           const threshold = patch["compaction.threshold"];
-          if (threshold !== undefined) {
+          const pruneLimit = patch["compaction.pruneLimit"];
+          if (threshold !== undefined || pruneLimit !== undefined) {
             const compaction =
               typeof next.compaction === "object" &&
               next.compaction !== null &&
               !Array.isArray(next.compaction)
                 ? { ...(next.compaction as Record<string, unknown>) }
                 : {};
-            if (threshold === null) delete compaction.threshold;
-            else compaction.threshold = threshold;
+            if (threshold !== undefined) {
+              if (threshold === null) delete compaction.threshold;
+              else compaction.threshold = threshold;
+            }
+            if (pruneLimit !== undefined) {
+              if (pruneLimit === null) delete compaction.pruneLimit;
+              else compaction.pruneLimit = pruneLimit;
+            }
             next.compaction = compaction;
           }
           const reviewer = patch["permission.reviewer"];

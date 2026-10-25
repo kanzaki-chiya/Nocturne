@@ -11,6 +11,7 @@ import {
   REASONING_EFFORT_ORDER,
   PERMISSION_PRESET_NAMES,
   isValidSubagentProfileName,
+  parseCompactionPruneLimit,
   parseCompactionThreshold,
   subjectKindSchema,
 } from "../protocol/index.js";
@@ -331,6 +332,17 @@ const configFileSchema = z.object({
             return false;
           }
         }, "无效的压缩阈值")
+        .optional(),
+      pruneLimit: z
+        .number()
+        .refine((value) => {
+          try {
+            parseCompactionPruneLimit(value);
+            return true;
+          } catch {
+            return false;
+          }
+        }, "无效的修剪上限")
         .optional(),
     })
     .optional(),

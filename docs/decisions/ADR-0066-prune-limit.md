@@ -65,3 +65,10 @@ ADR-0063 §2：修剪后估算仍在 `P` 以上，就在同一窗口接着摘要
 - **按比例降低修剪阈值**（例如大窗口用 20%）：仍和窗口挂钩，2M 窗口又会变成 40 万；绝对值更直接。
 - **到 `L` 时直接摘要**：摘要损失远大于修剪（用户消息、助手推理都会被压缩），而且每次都要一次摘要请求；修剪足以处理工具结果占大头的情况。
 - **不改，靠缓存**：缓存只解决钱，不解决长上下文下的注意力问题。
+
+## 实现记录（2026-10-25）
+
+- **修剪阈值与升级摘要**：`packages/core/src/protocol/compaction.ts` 新增 `DEFAULT_PRUNE_LIMIT = 200_000` 与 `parseCompactionPruneLimit`（接受 `0` 与正整数安全整数）。`packages/core/src/context/build.ts` 中计算比例修剪阈值 `pruneRelativeLine = min(0.8·B, S)` 与实际修剪阈值 `pruneLine = pruneLimit === 0 ? pruneRelativeLine : min(pruneRelativeLine, pruneLimit)`；升级摘要判定 `pruneInsufficient` 保持使用 `estimated > pruneRelativeLine`，只因超过 `L` 而修剪、修剪后仍高于 `L` 但低于或等于 `P_rel` 的不升级为摘要。
+- **配置分层与设置页**：`ConfigFile.compaction.pruneLimit`、`ResolvedConfig.compactionPruneLimit`、`SettingItem`（`"compaction.pruneLimit"`）与 `SettingsPatch`（`"compaction.pruneLimit": number | null`）沿用 `compaction.threshold` 的分层合并与设置层逐字段独立降级；`packages/core/src/index.ts` 在主会话 `submit`、子代理 `subagent` 与 `describeContext`（含缓存键）中统一传入 `compactionPruneLimit`。桌面端 `apps/desktop/src/SettingsPage.tsx` 的「压缩阈值」对话框新增「修剪上限」输入框。
+- **测试**：`packages/core/src/protocol/compaction.test.ts`、`packages/core/src/context/context.test.ts`、`packages/core/test/settings.test.ts` 与 `apps/desktop/test/settings.test.tsx` 覆盖全部验收项。
+

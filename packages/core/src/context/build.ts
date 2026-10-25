@@ -11,7 +11,9 @@ import type {
   ModelProtocol,
 } from "../protocol/index.js";
 import {
+  DEFAULT_PRUNE_LIMIT,
   estimateTokens,
+  parseCompactionPruneLimit,
   parseCompactionThreshold,
   effectiveEvents,
   formatTodoBlock,
@@ -1231,13 +1233,18 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     threshold.unit === "percent" ? (threshold.value / 100) * budgetTokens : threshold.value,
   );
   const forced = overBudget || input.compactionState?.force === true;
-  // 修剪线 P 与摘要阈值 S（6.5）：S 达到预算时两种预防性压缩都停用
+  // 修剪线 P 与摘要阈值 S（6.5 + ADR-0066）：P = min(0.8·B, S, L)，S 达到预算时两种预防性压缩都停用
   const preventive = summaryThreshold < budgetTokens;
-  const pruneLine = Math.min(PRUNE_THRESHOLD * budgetTokens, summaryThreshold);
-  // ADR-0063 §2 + ADR-0065 §3：本次模型请求前刚执行过修剪、重建后估算仍在 P 以上时，
-  // 同一配额窗口内接着摘要，不必等再次超过 S。判定只在这里做，Agent Loop 只执行计划。
+  const pruneRelativeLine = Math.min(PRUNE_THRESHOLD * budgetTokens, summaryThreshold);
+  const pruneLimit =
+    input.compactionPruneLimit === undefined
+      ? DEFAULT_PRUNE_LIMIT
+      : parseCompactionPruneLimit(input.compactionPruneLimit);
+  const pruneLine = pruneLimit === 0 ? pruneRelativeLine : Math.min(pruneRelativeLine, pruneLimit);
+  // ADR-0063 §2 + ADR-0065 §3 + ADR-0066 §3：本次模型请求前刚执行过修剪、重建后估算仍在比例阈值 P_rel 以上时，
+  // 同一配额窗口内接着摘要；只因超过 L 而修剪、修剪后仍高于 L 但低于 P_rel 的不升级。
   const pruneInsufficient =
-    preventive && input.compactionState?.pruneAttempted === true && estimated > pruneLine;
+    preventive && input.compactionState?.pruneAttempted === true && estimated > pruneRelativeLine;
   let compaction: CompactionPlan | undefined;
   if (input.events !== undefined && (forced || (preventive && estimated > pruneLine))) {
     const boundary = retentionBoundary(input.events, input.history, model);

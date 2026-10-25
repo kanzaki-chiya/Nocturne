@@ -236,7 +236,12 @@ export interface ConfigFile {
   externalAgents?: ExternalAgentConfig[] | undefined;
   /** 子代理档位（ADR-0058）：按档位名逐条合并；不可信项目整段忽略 */
   subagents?: { profiles?: Record<string, SubagentProfileConfig> | undefined } | undefined;
-  compaction?: { threshold?: string | number | undefined } | undefined;
+  compaction?:
+    | {
+        threshold?: string | number | undefined;
+        pruneLimit?: number | undefined;
+      }
+    | undefined;
   notifications?: NotificationsConfig | undefined;
   /** false 时只使用本地 models.dev 数据，不联网刷新 */
   modelsDev?: false | undefined;
@@ -282,6 +287,7 @@ export interface ResolvedConfig {
   /** 自定义档位合并结果（不含 `default`——default 的模型即 modelRoles.task） */
   subagentProfiles?: Record<string, SubagentProfileConfig> | undefined;
   compactionThreshold?: string | number | undefined;
+  compactionPruneLimit?: number | undefined;
   /** 通知偏好（ADR-0056）：六个字段逐层合并，未声明时取缺省 */
   notifications?: Required<{ enabled: boolean; doneAfterSeconds: number; sound: boolean }> & {
     events: Required<{ attention: boolean; error: boolean; done: boolean }>;
@@ -570,6 +576,7 @@ export interface SettingItem {
     | "defaultModel"
     | `modelRoles.${ModelRole}`
     | "compaction.threshold"
+    | "compaction.pruneLimit"
     | "notifications.enabled"
     | "notifications.events.attention"
     | "notifications.events.error"
@@ -591,6 +598,7 @@ export type SettingsPatch = Partial<{
   "modelRoles.vision": string | null;
   "modelRoles.smol": string | null;
   "compaction.threshold": string | number | null;
+  "compaction.pruneLimit": number | null;
   "permissions.preset": PermissionPresetName | null;
   "permission.reviewer": SecurityReviewerConfig | null;
   /** ask / allow 为空字符串或 null 时删除该段；整体为 null 删除两段 */

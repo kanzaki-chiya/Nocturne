@@ -124,6 +124,7 @@ export interface SubagentDeps {
   /** 父会话当前思考档位（ADR-0018 §4）：子会话继承，受子模型可用档位约束 */
   reasoningEffort?(): ReasoningEffort | undefined;
   compactionThreshold?(): string | number | undefined;
+  compactionPruneLimit?(): number | undefined;
   nocturneVersion: string;
   /** 父会话 Turn 配置（maxSteps 被子会话独立上限覆盖） */
   turnConfig: TurnConfig;
@@ -534,6 +535,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           const turnDeps: TurnDeps = {
             skills: skillSnapshot,
             compactionThreshold: deps.compactionThreshold?.(),
+            compactionPruneLimit: deps.compactionPruneLimit?.(),
             session: child,
             model: childModel,
             visionModel: () => deps.visionModel?.(),

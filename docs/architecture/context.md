@@ -139,8 +139,8 @@ Agent Loop                 → prune：直接写入事件
 
 ### 6.5 触发
 
-- 摘要阈值 `S` 来自 `compaction.threshold`（默认 `90%`，格式与分层见 [config.md](config.md) §2）；修剪阈值 `P = min(0.8·B, S)`。估算超过 `P` 时先尝试修剪；修剪后或不可修剪时仍超过 `S` 才尝试摘要。这类压缩是预防性的（`mustCompact = false`）。
-- **修剪不足时升级为摘要**（[ADR-0063](../decisions/ADR-0063-loop-guard.md) §2、[ADR-0065](../decisions/ADR-0065-compaction-per-request.md) §3）：本次模型请求前刚执行过修剪（`compactionState.pruneAttempted`）而重建后的估算**仍在 `P` 以上**时，同一配额窗口内接着给出 `summary` 计划，不必等再次超过 `S`。判定同样在 Builder 的压缩计划里，Agent Loop 只执行计划；重建后低于或等于 `P` 则不摘要。这一次摘要算作当前请求窗口内的那一次，失败按 §6.6 处理，不额外重试。
+- 摘要阈值 `S` 来自 `compaction.threshold`（默认 `90%`，格式与分层见 [config.md](config.md) §2）；修剪绝对上限 `L` 来自 `compaction.pruneLimit`（默认 `200000` token，`0` 表示不设绝对上限，[ADR-0066](../decisions/ADR-0066-prune-limit.md)）；修剪阈值 `P = min(0.8·B, S, L)`（`L = 0` 时退回比例阈值 `P_rel = min(0.8·B, S)`）。估算超过 `P` 时先尝试修剪；修剪后或不可修剪时仍超过 `S` 才尝试摘要。这类压缩是预防性的（`mustCompact = false`）。
+- **修剪不足时升级为摘要**（[ADR-0063](../decisions/ADR-0063-loop-guard.md) §2、[ADR-0065](../decisions/ADR-0065-compaction-per-request.md) §3、[ADR-0066](../decisions/ADR-0066-prune-limit.md) §3）：本次模型请求前刚执行过修剪（`compactionState.pruneAttempted`）而重建后的估算**仍在比例阈值 `P_rel = min(0.8·B, S)` 以上**时，同一配额窗口内接着给出 `summary` 计划，不必等再次超过 `S`。只因为超过 `L` 而修剪、修剪后仍高于 `L` 但低于或等于 `P_rel` 的，不升级为摘要（等下一次回收量再次满足 `≥ R` 时再修剪）。判定同样在 Builder 的压缩计划里，Agent Loop 只执行计划。这一次摘要算作当前请求窗口内的那一次，失败按 §6.6 处理，不额外重试。
 - `S = B`（`100%` 或绝对值达到预算）时两种预防性压缩都停用，只在超预算或 `context_overflow` 时走强制路径。
 - 请求已超出预算，或 Provider 返回 `context_overflow` 时，`mustCompact = true`（见 [agent-loop.md](agent-loop.md) 第 3.5 节）。
 - 用户可以用 `/compact` 手动触发摘要，走同一条路径。
