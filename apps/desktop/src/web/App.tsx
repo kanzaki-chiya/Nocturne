@@ -646,7 +646,7 @@ export function PhoneApp({
           <span className="phone-row-main">
             <b>定时任务</b>
             <small>
-              <span>只在电脑打开时运行 · 新建和修改请在电脑上操作</span>
+              <span>只在电脑端运行 · 新建和修改请在电脑上操作</span>
             </small>
           </span>
         </button>

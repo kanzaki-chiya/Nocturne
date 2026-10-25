@@ -101,7 +101,9 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
     await shared.connect?.(client, { subscribePush: vi.fn(), unsubscribePush: vi.fn() });
   });
   // 首页是项目列表，进入项目后才是会话列表
-  const project = container.querySelector<HTMLButtonElement>(".phone-row");
+  const project = [...container.querySelectorAll<HTMLButtonElement>(".phone-row")].find((row) =>
+    row.textContent?.includes("work"),
+  );
   expect(project?.textContent).toContain("work");
   await act(() => project?.click());
   const row = container.querySelector<HTMLButtonElement>(".phone-row.session");
