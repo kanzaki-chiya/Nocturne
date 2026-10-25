@@ -203,16 +203,22 @@
   min-height: 0;
   overflow-y: auto;
 }
+.phone-schedules .schedule-page .ph3 h3 {
+  display: none;
+}
 .phone-schedules .schedule-page .ph3,
 .phone-schedules .sched-banner {
   padding-inline: 16px;
 }
 .phone-schedules .schedule-page .cols3 {
   grid-template-columns: minmax(0, 1fr);
+  flex: none;
+  min-height: auto;
 }
 .phone-schedules .schedule-page .plist {
   border-right: 0;
   border-bottom: 1px solid var(--a-border);
+  overflow: visible;
 }
 .phone-schedules .schedule-page .pane {
   padding: 16px;

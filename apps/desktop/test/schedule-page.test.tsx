@@ -220,6 +220,8 @@ describe("定时任务页", () => {
       />,
     );
     await screen.findByDisplayValue("每日提交汇总");
+    expect(screen.queryByRole("heading", { name: "定时任务" })).toBeNull();
+    expect(screen.getByText(/只在 Nocturne 打开时运行/)).toBeTruthy();
     expect(screen.getByRole("note").textContent).toContain("请在电脑上操作");
     const create = screen.getByRole("button", { name: "＋ 新建任务" });
     expect(create).toHaveProperty("disabled", true);

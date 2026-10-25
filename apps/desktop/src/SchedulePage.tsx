@@ -430,7 +430,7 @@ export function SchedulePage({
     <section className="page3 schedule-page" aria-label="定时任务" aria-busy={loading || busy}>
       <header className="ph3">
         <div className="grow">
-          <h3>定时任务</h3>
+          {!readOnly && <h3>定时任务</h3>}
           <span className="sub">
             只在 Nocturne 打开时运行 · 错过的只补最近一次 · 无人值守，需要确认的操作会被直接拒绝
           </span>
