@@ -30,6 +30,7 @@ export { applyPatchTool, parsePatch } from "./builtin/apply-patch.js";
 export { shellTool } from "./builtin/shell.js";
 export { todoWriteTool } from "./builtin/todo-write.js";
 export { askUserTool } from "./builtin/ask-user.js";
+export { scheduleTool, scheduleSubjectDetail, type ScheduleToolInput } from "./builtin/schedule.js";
 export { webFetchTool } from "./builtin/web-fetch.js";
 export { diffLines } from "./builtin/diff.js";
 export { createTaskTool } from "./builtin/task.js";
@@ -46,6 +47,7 @@ import { applyPatchTool } from "./builtin/apply-patch.js";
 import { shellTool } from "./builtin/shell.js";
 import { todoWriteTool } from "./builtin/todo-write.js";
 import { askUserTool } from "./builtin/ask-user.js";
+import { scheduleTool } from "./builtin/schedule.js";
 import { webFetchTool } from "./builtin/web-fetch.js";
 
 /** 内置工具集：Phase 2 起含写入与 shell（权限层决定是否放行） */
@@ -62,6 +64,7 @@ export function builtinTools(): ToolDefinition[] {
     shellTool,
     todoWriteTool,
     askUserTool,
+    scheduleTool,
     webFetchTool,
   ];
 }

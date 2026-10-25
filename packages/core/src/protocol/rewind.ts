@@ -28,6 +28,7 @@ const UNTRACKED_KIND_LABELS: Record<UntrackedCallKind, string> = {
   shell: "命令",
   mcp: "MCP 工具",
   subagent: "子代理",
+  schedule: "定时任务",
   network: "网络请求",
   read: "读取",
   other: "其他工具",

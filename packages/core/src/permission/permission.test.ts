@@ -507,6 +507,26 @@ describe("provider-setup 权限规则（provider-setup.md 第 4 节）", () => {
   });
 
   it.each(["read-only", "default", "auto-edit", "guarded", "smart", "bypass"] as const)(
+    "%s：直接改 schedules.json 至少 ask（不走 schedule 主体时也不能静默写入）",
+    (preset) => {
+      const policy = createRulePolicy({
+        workspaceRoot: WS,
+        caseSensitive: false,
+        preset,
+        presetContext: { nocturneHome: HOME },
+      });
+      const result = policy.evaluate([
+        subject({ kind: "edit", resolved: `${HOME}\\schedules.json` }),
+      ]);
+      expect(result.decision.action).toBe(preset === "read-only" ? "deny" : "ask");
+      if (preset !== "read-only") {
+        expect(result.decision.matchedRule?.rule?.label).toBe("修改定时任务");
+        expect(result.userOnly).toBe(true);
+      }
+    },
+  );
+
+  it.each(["read-only", "default", "auto-edit", "guarded", "smart", "bypass"] as const)(
     "%s：external-agents.json 加入授权数据组，edit 至少 ask",
     (preset) => {
       const policy = createRulePolicy({

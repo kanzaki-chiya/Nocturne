@@ -942,6 +942,39 @@
   white-space: nowrap;
   padding: 1px 0;
 }
+/* schedule 的 detail 是多行纯文本：不能被上面的单行省略裁掉。手机端同一张卡片，不在 .conversation 里 */
+.ask-subjects li.ask-schedule {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  font-family: inherit;
+}
+.ask-schedule .ask-target {
+  font-family: var(--mono);
+  color: var(--a-secondary);
+}
+.subject-detail {
+  margin: 6px 0 0;
+}
+.subject-detail pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--fs-1)/1.55 var(--mono);
+  color: var(--a-text);
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.subject-detail-toggle {
+  margin-top: 4px;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--a-accent);
+  font: inherit;
+  cursor: pointer;
+}
 .conversation .ask-actions {
   display: flex;
   flex-wrap: wrap;

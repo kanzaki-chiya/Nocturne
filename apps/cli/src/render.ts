@@ -356,6 +356,35 @@ const OPTION_KEYS: Record<string, string> = {
   deny_stop: "x",
 };
 
+/**
+ * 一条权限主体的提示行。普通 detail 仍是一行、过宽省略中间；
+ * schedule 的 detail 是多行纯文本，按原换行完整打印（ADR-0064）。
+ */
+function permissionSubjectLines(
+  s: {
+    kind: string;
+    target: string;
+    resolved?: string | undefined;
+    detail?: string | undefined;
+  },
+  width: number,
+): string[] {
+  const resolved = s.resolved !== undefined && s.resolved !== s.target ? ` → ${s.resolved}` : "";
+  const head = `  ${s.kind}: ${s.target}${resolved}`;
+  if (s.detail === undefined) return [head];
+  if (s.kind === "schedule") {
+    return [
+      head,
+      ...s.detail
+        .replace(/\r\n?/g, "\n")
+        .split("\n")
+        .map((line) => `  ${line}`),
+    ];
+  }
+  const limit = Math.max(1, width - 2);
+  return [head, `  ${truncateMiddle(s.detail, limit)}`];
+}
+
 /** 权限确认提示块（cli.md 第 6 节）：主体、命中原因与完整选项 */
 export function renderPermissionPrompt(
   subjects: {
@@ -368,13 +397,7 @@ export function renderPermissionPrompt(
   options?: readonly string[],
   width = 80,
 ): string {
-  const lines = subjects.flatMap((s) => {
-    const resolved = s.resolved !== undefined && s.resolved !== s.target ? ` → ${s.resolved}` : "";
-    const detail = s.detail;
-    const limit = Math.max(1, width - 2);
-    const shown = truncateMiddle(detail ?? "", limit);
-    return [`  ${s.kind}: ${s.target}${resolved}`, ...(detail === undefined ? [] : [`  ${shown}`])];
-  });
+  const lines = subjects.flatMap((s) => permissionSubjectLines(s, width));
   const opts = options !== undefined && options.length > 0 ? options : ["allow_once", "deny"];
   const rendered = opts
     .map(

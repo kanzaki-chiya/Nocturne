@@ -245,7 +245,7 @@ export interface AssistantTiming {
   durationMs: number;
 }
 
-export type SubjectKind = "read" | "edit" | "shell" | "network" | "mcp" | "subagent";
+export type SubjectKind = "read" | "edit" | "shell" | "network" | "mcp" | "subagent" | "schedule";
 
 /**
  * 每 shell 种类的高风险命令元数据（ADR-0022 第 1 节：表集中在 platform 的

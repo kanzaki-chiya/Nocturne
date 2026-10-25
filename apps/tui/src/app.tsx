@@ -1026,6 +1026,9 @@ function SessionApp({
     pendingQ !== undefined && questionPageState.requestId === pendingQ.requestId
       ? questionPageState
       : { index: 0, confirm: false };
+  // schedule 权限详情（ADR-0064）的展开状态按 requestId 记录并在渲染时派生：新请求默认折叠
+  const [expandedPermission, setExpandedPermission] = useState<string | undefined>(undefined);
+  const permissionExpanded = pending !== undefined && expandedPermission === pending.requestId;
   const interruptible = useRef(false);
   interruptible.current = busy;
   useEffect(
@@ -2585,7 +2588,7 @@ function SessionApp({
   const popupHeight = Math.min(
     budget.conversation,
     pending !== undefined
-      ? permissionDialogRows(pending, width)
+      ? permissionDialogRows(pending, width, permissionExpanded)
       : pendingQ !== undefined
         ? questionDialogRows(pendingQ, questionPage.index, questionPage.confirm)
         : 0,
@@ -2944,6 +2947,10 @@ function SessionApp({
         height={popupHeight}
         onEscape={escapePrompt}
         width={width}
+        expanded={permissionExpanded}
+        onToggleExpanded={() => {
+          setExpandedPermission(permissionExpanded ? undefined : pending.requestId);
+        }}
       />
     ) : pendingQ !== undefined ? (
       <QuestionDialog

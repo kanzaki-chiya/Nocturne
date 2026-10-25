@@ -247,6 +247,29 @@ describe("事件渲染（cli.md 第 5 节）", () => {
     expect(ev.map((r) => r.text).join("\n")).toContain("结构化 output 超过大小上限，已省略");
   });
 
+  it("schedule 的 detail 按原换行完整打印，不截断", () => {
+    const prompt = "检查 logs/ 下最近一天的错误日志。\n按服务汇总前 5 条。";
+    const text = renderPermissionPrompt(
+      [
+        {
+          kind: "schedule",
+          target: "create:错误日志巡检",
+          detail: ["新建定时任务", "名称：错误日志巡检", "指令：", prompt].join("\n"),
+        },
+      ],
+      "按权限规则需要确认",
+      ["allow_once", "allow_session", "deny", "deny_stop"],
+      40,
+    );
+    expect(text).toContain("schedule: create:错误日志巡检");
+    expect(text).toContain("  新建定时任务");
+    expect(text).toContain("  名称：错误日志巡检");
+    expect(text).toContain("  检查 logs/ 下最近一天的错误日志。");
+    expect(text).toContain("  按服务汇总前 5 条。");
+    expect(text).not.toContain("…");
+    expect(text).not.toContain("在此项目中始终允许");
+  });
+
   it("权限提示块：列出主体与 a/d 选项", () => {
     const text = renderPermissionPrompt(
       [{ kind: "write", target: "src/a.ts", resolved: "Z:\\w\\src\\a.ts" }],

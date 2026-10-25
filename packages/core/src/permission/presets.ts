@@ -145,6 +145,16 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
     label: "外部 agent 委派",
     userOnly: true,
   });
+  // ADR-0064：创建、修改、暂停、删除定时任务会留下以后无人值守执行的东西，全部交互式预设
+  // （含 bypass）默认须确认；userOnly 使 smart 不送审、直接交人。用户可写显式规则
+  // `schedule * → allow` 放行。
+  rules.push({
+    kind: "schedule",
+    pattern: "*",
+    action: "ask",
+    label: "定时任务",
+    userOnly: true,
+  });
 
   // 本会话落盘目录可读：模型回读自己的完整输出不触发确认；
   // 只放行当前 sessionId，其他会话附件仍走正常求值
@@ -193,6 +203,16 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
           pattern,
           action: "ask",
           label: AUTH_DATA_LABEL,
+          userOnly: true,
+        });
+      }
+      // 直接改任务文件会绕过 schedule 主体的确认。与授权数据一样只是提示：shell 仍可绕过。
+      for (const pattern of [`${home}/schedules.json`, `${home}/schedules/**`]) {
+        rules.push({
+          kind: "edit",
+          pattern,
+          action: "ask",
+          label: "修改定时任务",
           userOnly: true,
         });
       }

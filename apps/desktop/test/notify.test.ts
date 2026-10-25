@@ -108,11 +108,23 @@ describe("decideNotification · 需要确认", () => {
     ["network", "访问网络"],
     ["mcp", "调用 MCP 工具"],
     ["subagent", "启动子代理"],
+    ["schedule", "定时任务"],
   ] as const)("subject kind %s 用权限卡片同款操作文字 %s", (kind, label) => {
     const decision = decideNotification(
       input({ event: permission([{ kind, target: "C:/tmp/a.txt" }]) }),
     );
     expect(decision?.body).toBe(`需要确认：${label} C:/tmp/a.txt`);
+  });
+
+  it("schedule 通知用 target，不用多行 detail", () => {
+    const detail = ["新建定时任务", "名称：巡检", "指令：", "第一行", "第二行"].join("\n");
+    const body = decideNotification(
+      input({
+        event: permission([{ kind: "schedule", target: "create:巡检", detail }]),
+      }),
+    )?.body;
+    expect(body).toBe("需要确认：定时任务 create:巡检");
+    expect(body).not.toContain("指令");
   });
 
   it("没有 subject 时只写操作文字；target 过长截断", () => {

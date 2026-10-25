@@ -1362,6 +1362,7 @@ const TOOL_META: Record<string, { icon: string; label: string }> = {
   subagent: { icon: "T", label: "子代理" },
   task: { icon: "T", label: "子代理" },
   ask_user: { icon: "?", label: "提问" },
+  schedule: { icon: "C", label: "定时任务" },
 };
 
 const MCP_NAME_PREFIX = "mcp__";
@@ -1892,6 +1893,39 @@ function useRunningSeconds(running: boolean): number | undefined {
   return Math.max(0, Math.floor((now - startedAt.current) / 1000));
 }
 
+/** schedule 主体的多行 detail 超过这么多行就折叠，按钮展开看全（ADR-0064） */
+const SUBJECT_DETAIL_FOLD_LINES = 10;
+
+/**
+ * 多行纯文本：保留换行。超过折叠行数时默认只给前几行，展开后是全文。
+ * 桌面确认卡片、手机端同一张卡片、以及工具行展开后的 schedule detail 共用。
+ */
+function FoldedPlainText({ text }: { text: string }) {
+  const normalized = text.replace(/\r\n?/g, "\n");
+  const lines = normalized.split("\n");
+  const foldable = lines.length > SUBJECT_DETAIL_FOLD_LINES;
+  const [open, setOpen] = useState(false);
+  const shown =
+    foldable && !open ? lines.slice(0, SUBJECT_DETAIL_FOLD_LINES).join("\n") : normalized;
+  return (
+    <div className="subject-detail">
+      <pre>{shown}</pre>
+      {foldable ? (
+        <button
+          type="button"
+          className="subject-detail-toggle"
+          aria-expanded={open}
+          onClick={() => {
+            setOpen((current) => !current);
+          }}
+        >
+          {open ? "收起" : `展开其余 ${lines.length - SUBJECT_DETAIL_FOLD_LINES} 行`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 /** 运行中的实时输出：粘底跟随，上翻时保留阅读位置。 */
 function LiveOutput({ text }: { text: string }) {
   const output = useStickyOutput(text);
@@ -1975,16 +2009,18 @@ function ToolDetails({
             安全审查<span className="muted-value">{entry.review.verdict}</span>
           </span>
         )}
-        {entry.subjects.map((subject, index) =>
-          (subject.resolved && subject.resolved !== subject.target) || subject.detail ? (
+        {entry.subjects.map((subject, index) => {
+          // schedule 的 detail 是多行任务说明，不塞进这一行；下面单独成块
+          if (subject.kind === "schedule") return null;
+          return (subject.resolved && subject.resolved !== subject.target) || subject.detail ? (
             <span key={index}>
               {subject.resolved && subject.resolved !== subject.target
                 ? `实际路径 → ${displayPath(subject.resolved, cwd)}`
                 : ""}
               {subject.detail ? ` ${subject.detail}` : ""}
             </span>
-          ) : null,
-        )}
+          ) : null;
+        })}
         {hasDetails && (
           <button
             type="button"
@@ -2001,6 +2037,11 @@ function ToolDetails({
           </button>
         )}
       </div>
+      {entry.subjects.map((subject, index) =>
+        subject.kind === "schedule" && subject.detail !== undefined && subject.detail !== "" ? (
+          <FoldedPlainText key={`schedule-detail:${index}`} text={subject.detail} />
+        ) : null,
+      )}
       {detailsOpen && hasDetails && (
         <div className="tool-payload tool-fields">
           <DetailGroup label="参数" value={entry.input} cwd={cwd} />
@@ -2586,6 +2627,16 @@ export function PermissionCard({
       </div>
       <ul className="ask-subjects">
         {pending.subjects.map((subject, index) => {
+          if (subject.kind === "schedule") {
+            return (
+              <li key={index} className="ask-schedule">
+                <span className="ask-target">{subject.target}</span>
+                {subject.detail !== undefined && subject.detail !== "" ? (
+                  <FoldedPlainText text={subject.detail} />
+                ) : null}
+              </li>
+            );
+          }
           const shown =
             subject.kind === "shell"
               ? `${subject.shell ?? shellKind ?? "shell"} › ${subject.target}`

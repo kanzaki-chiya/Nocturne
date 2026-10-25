@@ -189,7 +189,13 @@ export function createPolicyGate(
             findRiskySegment(s.target, shellDialect(s.shell), s.shellRisk, s.shellRiskByDialect) !==
               undefined)),
     );
-    return once ? ["allow_once", "deny", "deny_stop"] : ASK_OPTIONS;
+    if (once) return ["allow_once", "deny", "deny_stop"];
+    // ADR-0064：Grant 只按 target（动作:任务名）精确匹配、不看指令内容；定时任务会留下
+    // 以后无人值守执行的东西，所以不提供落盘的项目级授权，只给本次与本会话
+    if (subjects.some((s) => s.kind === "schedule")) {
+      return ASK_OPTIONS.filter((option) => option !== "allow_project");
+    }
+    return ASK_OPTIONS;
   }
 
   async function review(

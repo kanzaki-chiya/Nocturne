@@ -45,6 +45,9 @@ import type {
   QuestionItem,
   QuestionReply,
   ReasoningEffort,
+  ScheduleListResult,
+  ScheduleSaveInput,
+  ScheduleTaskOverview,
   SubjectRequest,
   ToolCallRef,
   ToolSpec,
@@ -79,6 +82,11 @@ export interface ToolTraits {
    * 按此特性排除，不按名字判断。
    */
   needsUser?: boolean | undefined;
+  /**
+   * 执行会新建、修改或删除定时任务（ADR-0064 第 7 节）：定时任务发起的会话与子代理的
+   * 可选池按此特性排除，防止任务自我复制或改写自己，不按名字判断。
+   */
+  mutatesSchedule?: boolean | undefined;
   /**
    * 编辑工具归属（ADR-0035 §5）：声明后仅当模型的
    * capabilities.editTool 等于该值时对模型可见（specs 不列出、
@@ -174,6 +182,12 @@ export interface ToolContext extends ToolScope {
    * 缺省 = 运行环境未提供提问通道，工具按 not_interactive 结算。
    */
   askUser?(request: AskUserRequest): Promise<AskUserReply>;
+  /**
+   * 定时任务的读写能力（ADR-0064 第 7 节）：由 Runtime 经 ExecutionEnvironment 注入，
+   * tools 不依赖 schedule 模块。缺省 = 运行环境未提供，声明 mutatesSchedule 的工具按
+   * schedule_unavailable 结算。
+   */
+  schedule?: ScheduleAccess;
 }
 
 export interface ToolDefinition<Input = unknown, Output = unknown> {
@@ -222,6 +236,21 @@ export interface ToolRegistry {
 }
 
 // ── 执行管线 ──────────────────────────────────────────────
+
+// ── 定时任务（ADR-0064）───────────────────────────────────
+
+/**
+ * ToolContext.schedule：schedule 工具读写任务的唯一入口。校验（字段、最小间隔、模型）在
+ * 实现侧，失败抛带 field 的错误（Core 的 ScheduleError），工具把它转成 invalid_input。
+ */
+export interface ScheduleAccess {
+  /** 全部任务与调度器状态（本进程是否在调度） */
+  list(): Promise<ScheduleListResult>;
+  /** 新建（不带 id）或整体替换（带 id） */
+  save(input: ScheduleSaveInput): Promise<ScheduleTaskOverview>;
+  /** 删除任务及其历史；任务不存在时不报错 */
+  remove(id: string): Promise<void>;
+}
 
 // ── 向用户提问（ADR-0032）─────────────────────────────────
 
@@ -366,6 +395,8 @@ export interface ExecutionScope extends ToolScope {
   shellEnvStrip?: readonly string[] | undefined;
   /** 提问通道（ADR-0032）：缺省时声明 needsUser 的工具按 not_interactive 结算 */
   askUser?: QuestionBroker | undefined;
+  /** 定时任务读写（ADR-0064）：缺省时声明 mutatesSchedule 的工具按 schedule_unavailable 结算 */
+  schedule?: ScheduleAccess | undefined;
   /**
    * 当前会话模型的编辑工具能力（ADR-0035 §5）：Agent Loop 每次调用
    * 按当时模型取值，模型切换后下一次调用即生效；缺省不筛选。
@@ -410,6 +441,8 @@ export interface ExecutionEnvironment {
   shell?: ShellProvider | undefined;
   /** 提问通道（ADR-0032）：缺省时声明 needsUser 的工具按 not_interactive 结算 */
   askUser?: QuestionBroker | undefined;
+  /** 定时任务读写（ADR-0064）；缺省时 schedule 工具按 schedule_unavailable 结算 */
+  schedule?: ScheduleAccess | undefined;
 }
 export interface TurnCallScope {
   cwd: string;

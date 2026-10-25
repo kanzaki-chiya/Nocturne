@@ -2281,6 +2281,89 @@ describe("Conversation 权限卡片 v2", () => {
   });
 });
 
+describe("schedule 确认卡片", () => {
+  const header = [
+    "新建定时任务",
+    "名称：错误日志巡检",
+    "计划：每天 09:00",
+    "工作区：普通对话",
+    "模型 · 档位 · 权限：默认 · 默认 · read-only",
+    "时长上限：60 分钟",
+    "指令：",
+  ];
+
+  function schedulePermission(prompt: string): PendingPermission {
+    return permission({
+      toolName: "schedule",
+      subjects: [
+        {
+          kind: "schedule",
+          target: "create:错误日志巡检",
+          detail: [...header, prompt].join("\n"),
+        },
+      ],
+      options: ["allow_once", "allow_session", "deny", "deny_stop"],
+    });
+  }
+
+  it("短指令完整显示，保留换行，不提供本项目允许", () => {
+    const view = createSessionView();
+    view.pendingPermission = schedulePermission("检查 logs/。\n按服务汇总。");
+    mount(view);
+    const card = screen.getByRole("region", { name: "权限确认" });
+    expect(card.querySelector(".ask-t .muted-value")?.textContent).toBe("定时任务");
+    expect(card.textContent).toContain("create:错误日志巡检");
+    const pre = card.querySelector(".subject-detail pre");
+    const text = pre?.textContent ?? "";
+    for (const line of [...header, "检查 logs/。", "按服务汇总。"]) expect(text).toContain(line);
+    expect(text).toContain("\n");
+    expect(screen.queryByRole("button", { name: /展开其余/ })).toBeNull();
+    expect(within(card).queryByRole("button", { name: "本项目允许" })).toBeNull();
+    expect(within(card).getByRole("button", { name: "本会话允许" })).toBeTruthy();
+  });
+
+  it("超过 10 行默认折叠，展开后能看到全文", () => {
+    const view = createSessionView();
+    const prompt = Array.from({ length: 12 }, (_, i) => `第 ${i + 1} 步`).join("\n");
+    view.pendingPermission = schedulePermission(prompt);
+    mount(view);
+    const card = screen.getByRole("region", { name: "权限确认" });
+    expect(card.querySelector(".subject-detail pre")?.textContent).not.toContain("第 12 步");
+    fireEvent.click(within(card).getByRole("button", { name: /展开其余/ }));
+    expect(card.querySelector(".subject-detail pre")?.textContent).toContain("第 12 步");
+    fireEvent.click(within(card).getByRole("button", { name: "收起" }));
+    expect(card.querySelector(".subject-detail pre")?.textContent).not.toContain("第 12 步");
+  });
+
+  it("工具行展开后同样保留换行，不把 detail 拼进元信息一行", () => {
+    const view = createSessionView();
+    const detail = [...header, "检查 logs/。", "按服务汇总。"].join("\n");
+    view.entries = [
+      tool({
+        name: "schedule",
+        input: { action: "create", name: "错误日志巡检" },
+        subjects: [{ kind: "schedule", target: "create:错误日志巡检", detail }],
+        result: {
+          status: "ok",
+          modelContent: "已创建",
+          output: { action: "create" },
+          error: undefined,
+          truncated: false,
+          spillPath: undefined,
+          durationMs: 12,
+        },
+      }),
+    ];
+    const { container } = mount(view);
+    fireEvent.click(screen.getByLabelText("工具详细信息"));
+    const pre = container.querySelector(".subject-detail pre");
+    expect(pre?.textContent).toContain("名称：错误日志巡检");
+    expect(pre?.textContent).toContain("\n");
+    expect(pre?.textContent).toContain("按服务汇总。");
+    expect(container.querySelector(".tool-info")?.textContent).not.toContain("计划：每天");
+  });
+});
+
 describe("长思考收起", () => {
   const LONG = Array.from({ length: 80 }, (_, i) => `第 ${String(i + 1)} 步推理`).join("\n");
 

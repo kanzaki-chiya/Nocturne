@@ -137,6 +137,7 @@ describe("ToolRegistry", () => {
       "glob",
       "grep",
       "read",
+      "schedule",
       "shell",
       "todo_write",
       "web_fetch",

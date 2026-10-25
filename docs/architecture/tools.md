@@ -108,8 +108,17 @@ execute(call, ctx):
 | `task` | 启动一个子代理会话执行独立任务（Phase 6） | 运行一个受控子 Turn | 输入 `task`/`preset`/`tools`/`outputSchema`/`timeoutMs`；受限工具集、独立上下文、继承或收紧的权限；结果上限与落盘走第 4 节既有路径；完整契约见 [subagent.md](subagent.md) |
 | `todo_write` | 完整替换当前会话任务清单 | 只改变会话派生状态 | 输入最多 20 项的完整 `items`；空数组清空；无文件、配置或网络 I/O。输入与结果契约见 [tool-api.md](../protocols/tool-api.md)，状态来源见 [sessions.md](sessions.md) |
 | `ask_user` | 需要用户拍板时暂停并提问（ADR-0032） | 无 | 输入与结果契约见 [tool-api.md](../protocols/tool-api.md)；等待经临时事件 `question.requested` 与会话命令 `respondQuestion`（[events.md](../protocols/events.md) 第 3、7 节）；声明 `needsUser`，子代理可选池按特性排除 |
+| `schedule` | 列出、创建、修改、暂停、删除定时任务（ADR-0064） | 写 `schedules.json`，不改工作区文件 | 见下方；声明 `mutatesSchedule`，定时会话与子代理按特性排除 |
 
 另有只在**子会话**注册表中出现的 `finish` 工具：子代理用它提交结果结束 Turn（[subagent.md](subagent.md) 第 2 节）；它不是内置工具表的成员。
+
+### `schedule`
+
+契约见 [ADR-0064](../decisions/ADR-0064-scheduled-tasks.md) 第 7 节。动作 `list` / `create` / `update` / `pause` / `delete`，任务字段与存储里的定义一致。`list` 无权限主体；其余动作各声明一个 `schedule` 主体，`target` 为 `动作:任务名`（`create` 用名称，其余用 id），`detail` 为多行纯文本。全部交互式预设（含 `bypass`）默认要确认，规则见 [permissions.md](permissions.md) 第 6 节。
+
+工具说明写明三点：每次运行都在新会话里，看不到当前对话；运行所需的背景要写进 `prompt`；无人值守时需要确认的操作会被拒绝。调度器没在这个进程里运行时，工具照常读写 `schedules.json`，结果里注明「定时任务只在桌面端打开时运行」。
+
+`traits` 为 `mutates: true`、`fileEffects: "none"`（不计入回退与本轮未追踪改动）、`concurrencySafe: false`、`mutatesSchedule: true`。定时任务发起的会话在注册工具时按 `mutatesSchedule` 排除它；子代理的可选池同样按该特性排除（[subagent.md](subagent.md) 第 6 节）。读写经 `ToolContext.schedule` 注入，tools 不依赖 schedule 模块；环境没注入时以 `schedule_unavailable` 结算。字段不合法以 `invalid_input` 结算并带出错字段，不写入。
 
 "先读后写"与过期检测防止模型基于过时内容覆盖文件，是低成本、高收益的保护。`read` 与用户 `@文件` 在记录已读状态时同时保存内容哈希（sha256）与条件原文：完整读取且文件 ≤64KB 时保留原文（每会话最多 50 份，按最久未用淘汰，其余只留哈希）；部分读取、大文件只留哈希。状态保存在运行时内存中，会话恢复后需要重新读取或重新引用。判定细则（`edit`、`write`、`apply_patch` 共用 `guardWritable` 同一判定）：
 

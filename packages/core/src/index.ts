@@ -221,6 +221,7 @@ import {
   type McpServerStatus,
   type McpSession,
   type PermissionGate,
+  type ScheduleAccess,
   type ToolRegistry,
 } from "./tools/index.js";
 import { NOCTURNE_VERSION } from "./protocol/version.js";
@@ -1534,7 +1535,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     // MCP 服务器在会话打开时并行启动；list_changed / 重连带来的工具集变化
     // 先暂存，在 submit() 的 Turn 边界经 applyPendingTools() 应用。
     const tools: ToolRegistry = createToolRegistry();
-    for (const tool of builtinTools()) tools.register(tool);
+    // ADR-0064 第 7 节：定时任务发起的会话不提供改写定时任务的工具（按特性，不按名字）
+    for (const tool of builtinTools()) {
+      if (meta.schedule !== undefined && tool.traits.mutatesSchedule === true) continue;
+      tools.register(tool);
+    }
     const loadedSkills = new Map<string, string>();
     const installSkills = () => {
       catalog = skillCatalog(
@@ -1758,6 +1763,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       shell: shellResolver,
       // ADR-0032：声明 needsUser 的工具经此提问；与权限层相互独立
       askUser: questions,
+      // ADR-0064：schedule 工具经此读写任务（校验在 Runtime 一侧）
+      schedule: scheduleAccess,
     };
     const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
     for (const src of [resolved?.turn, options.turn]) {
@@ -3126,16 +3133,27 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       .some((m) => `${m.ref.provider}/${m.ref.model}` === input.model);
     if (!known) throw new ScheduleError("model", `模型 ${input.model} 不可用`);
   };
-
-  const runtime: Runtime = {
-    listSchedules: () => scheduler.list(),
-    async saveSchedule(input) {
-      scheduleModelCheck(input);
+  // Runtime 的 schedule.* 方法与会话里的 schedule 工具共用同一入口
+  const scheduleAccess: ScheduleAccess = {
+    list: () => scheduler.list(),
+    async save(input) {
+      // 模型没变就不重新校验：服务商或模型之后被停用时，暂停、改计划这类无关的修改仍要能保存
+      const current =
+        input.id !== undefined
+          ? (await scheduler.list()).tasks.find((t) => t.id === input.id)
+          : undefined;
+      if (current === undefined || current.model !== input.model) scheduleModelCheck(input);
       return await scheduler.save(input);
     },
-    async deleteSchedule(input) {
-      await scheduler.remove(input.id);
+    async remove(id) {
+      await scheduler.remove(id);
     },
+  };
+
+  const runtime: Runtime = {
+    listSchedules: () => scheduleAccess.list(),
+    saveSchedule: (input) => scheduleAccess.save(input),
+    deleteSchedule: (input) => scheduleAccess.remove(input.id),
     runSchedule: (input) => scheduler.runNow(input.id),
     scheduleHistory: (input) => scheduler.history(input.id),
     onScheduleChanged(listener) {

@@ -156,6 +156,8 @@ export function operationForSubjectKind(kind: SubjectKind | undefined, fallback 
       return "调用 MCP 工具";
     case "subagent":
       return "启动子代理";
+    case "schedule":
+      return "定时任务";
     default:
       return fallback;
   }
@@ -167,7 +169,9 @@ export const permissionOperation = operationForSubjectKind;
 /** 首个 subject 的目标（权限卡片同款：shell 是命令、路径类是规范化后的路径） */
 function subjectTarget(subject: PermissionSubject | undefined): string | undefined {
   if (subject === undefined) return undefined;
-  const target = (subject.detail ?? subject.target).trim();
+  // schedule 的 detail 是多行任务说明，通知只用短 target（动作:任务名）
+  const raw = subject.kind === "schedule" ? subject.target : (subject.detail ?? subject.target);
+  const target = raw.trim();
   return target === "" ? undefined : ellipsize(target);
 }
 

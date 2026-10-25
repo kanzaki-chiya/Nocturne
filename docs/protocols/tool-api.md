@@ -52,6 +52,8 @@ interface ToolTraits {
   /** 执行时需要与用户交互输入（ADR-0032）：声明后 ToolContext.askUser 可用；
       子代理（非交互）的可选工具池按此特性排除（subagent.md 第 6 节） */
   needsUser?: boolean
+  /** 会新建、修改或删除定时任务（ADR-0064）：定时会话与子代理按此特性排除 */
+  mutatesSchedule?: boolean
   /** 编辑工具族标记（ADR-0035）：edit/write 声明 "edit"，apply_patch 声明
       "apply_patch"；未声明的工具不参与该筛选。携带模型的
       capabilities.editTool 时注册表只暴露同值成员 */

@@ -1,6 +1,6 @@
 /**
  * 定时任务的数据形态（ADR-0064 第 2、3 节，docs/architecture/schedule.md）。
- * 只含类型与常量，客户端与 Core 共用；校验与计算在 Core 的 schedule 模块。
+ * 类型、常量与纯展示函数，客户端与 Core 共用；校验与计算在 Core 的 schedule 模块。
  */
 import type { ReasoningEffort, ScheduleTrigger } from "./types.js";
 
@@ -134,4 +134,42 @@ export type ScheduleRunNowResult =
 export interface ScheduleChangedPayload {
   /** 变化的任务；任务列表整体变化（如启动时加载）时缺省 */
   taskId?: string | undefined;
+}
+
+const DAY_LABELS: Record<ScheduleDay, string> = {
+  mon: "周一",
+  tue: "周二",
+  wed: "周三",
+  thu: "周四",
+  fri: "周五",
+  sat: "周六",
+  sun: "周日",
+};
+
+/** 星期的中文简称（周一…周日） */
+export function scheduleDayLabel(day: ScheduleDay): string {
+  return DAY_LABELS[day];
+}
+
+/**
+ * 计划的一句话摘要（确认卡片、列表副标题共用）：`每天 09:00`、`每 30 分钟`、
+ * `cron 0 9 * * 1-5`。时间都是本地时间，不在这里重复说明。
+ */
+export function describeSchedulePlan(plan: SchedulePlan): string {
+  switch (plan.type) {
+    case "interval":
+      return `每 ${plan.minutes} 分钟`;
+    case "hourly":
+      return "每小时整点";
+    case "daily":
+      return `每天 ${plan.time}`;
+    case "weekdays":
+      return `工作日 ${plan.time}`;
+    case "weekly":
+      return `每${DAY_LABELS[plan.day]} ${plan.time}`;
+    case "manual":
+      return "仅手动运行";
+    case "cron":
+      return `cron ${plan.expr}`;
+  }
 }

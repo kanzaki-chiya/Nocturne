@@ -31,6 +31,7 @@ const UNTRACKED_KIND_ORDER: readonly UntrackedCallKind[] = [
   "shell",
   "mcp",
   "subagent",
+  "schedule",
   "network",
   "read",
   "other",

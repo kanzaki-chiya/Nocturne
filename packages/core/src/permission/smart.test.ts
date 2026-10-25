@@ -89,6 +89,8 @@ describe("ADR-0036 预设", () => {
       "C:/home/trust.json",
       "C:/home/providers.json",
       "C:/home/grants/x",
+      "C:/home/schedules.json",
+      "C:/home/schedules/history/t.jsonl",
     ])
       expect(p.evaluate([edit(path)]).decision.action).toBe("ask");
     expect(p.evaluate([edit("C:/home/credentials.json")]).decision.action).toBe("deny");

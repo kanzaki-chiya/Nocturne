@@ -176,7 +176,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 
 smart 审查交给你确认时，确认提示的原因包含审查理由；权限回复只接受事件给出的选项，隐藏的 s/p 不会授予长期权限。`full-access` 在 --preset、/preset 与 /settings preset 输入时兼容为 guarded，但不在补全中显示。
 
-主体有 `detail` 时在目标下方显示一行，过宽时省略中间并保留两端；`web_fetch` 的该行是完整 URL。网络主体的 `s` 选项显示「本会话允许访问 <主机>」，明确授权范围；`detail` 只用于展示，判定仍由权限层完成。
+主体有 `detail` 时在目标下方显示一行，过宽时省略中间并保留两端；`web_fetch` 的该行是完整 URL。`schedule` 主体的 `detail` 是多行纯文本，按原换行完整打印、不截断。网络主体的 `s` 选项显示「本会话允许访问 <主机>」，明确授权范围；`detail` 只用于展示，判定仍由权限层完成。
 
 - **交互模式**：提示块列出主体（kind、target、解析后路径）、原因与命中的规则（`reason` 与规则来源），按事件 `options` 提供选项（高风险/编码命令及工作区外 edit 只有 a/d/x）：
 

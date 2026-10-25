@@ -462,6 +462,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
                 ),
             }
           : {}),
+        ...(scope.schedule !== undefined ? { schedule: scope.schedule } : {}),
         ...(scope.shellEnvStrip !== undefined ? { shellEnvStrip: scope.shellEnvStrip } : {}),
         shell: scope.shell,
         progress: (chunk: string, stream?: "stdout" | "stderr" | "info") => {
