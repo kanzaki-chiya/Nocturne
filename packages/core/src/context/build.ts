@@ -16,6 +16,7 @@ import {
   effectiveEvents,
   formatTodoBlock,
   loopGuardNotes,
+  staleTodoNotes,
 } from "../protocol/index.js";
 export { estimateTokens } from "../protocol/index.js";
 import type {
@@ -608,6 +609,8 @@ function historyToMessages(
   events?: readonly DurableEvent[],
   /** ADR-0063：tool.completed 的 seq → 附在该工具结果末尾的循环说明 */
   loopNotes?: ReadonlyMap<number, string>,
+  /** ADR-0028：tool.completed 的 seq → 附在该工具结果末尾的清单提醒（排在循环说明之后） */
+  todoNotes?: ReadonlyMap<number, string>,
 ): HistoryProjection {
   const messages: ModelMessage[] = [];
   const byChars = emptyBreakdown();
@@ -710,10 +713,13 @@ function historyToMessages(
           ? { images: [], texts: [], virtual: 0 }
           : resolveAttachments(entry.attachments, imgOpts);
         for (const text of atts.texts) content += `\n${text}`;
-        // ADR-0063：第 warnAt 次连续相同的结果后附系统说明（不写事件，
-        // 由持久事件重建；位置固定在这条工具结果末尾，修剪后同样保留）
+        // ADR-0063 + ADR-0028：第 warnAt 次连续相同结果的循环说明与清单久未更新提醒
+        // （均不写事件，由持久事件重建；位置固定在这条工具结果末尾，修剪后同样保留；
+        // 同时出现时循环说明在前、清单提醒在后）
         const note = loopNotes?.get(entry.seq);
         if (note !== undefined) content += note;
+        const todoNote = todoNotes?.get(entry.seq);
+        if (todoNote !== undefined) content += todoNote;
         byChars.tool += content.length;
         const msg: ModelMessage = {
           role: "tool",
@@ -1066,6 +1072,10 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     input.events,
     // ADR-0063：循环说明由持久事件确定性地重建，同一份历史每次构建结果一致
     input.events !== undefined ? loopGuardNotes(input.events, input.loopGuard) : undefined,
+    // ADR-0028 2026-10-25 修订：清单久未更新提醒同样由持久事件确定性地重建
+    input.events !== undefined
+      ? staleTodoNotes(input.events, { history: input.history, todos: input.todos })
+      : undefined,
   );
   // 摘要注入消息的对象身份：压缩后清单注入是独立消息，不重建摘要对象
   const summaryMessage = injectedSummary;

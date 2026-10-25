@@ -2334,3 +2334,440 @@ describe("ADR-0063 循环说明投影", () => {
     expect(JSON.stringify(built.request.messages)).not.toContain("[Loop guard]");
   });
 });
+
+describe("ADR-0028 2026-10-25 清单久未更新提醒", () => {
+  const EXPECTED_NOTE =
+    "[Task list] The task list has not been updated in the last 30 tool calls. " +
+    "If you have finished a step or moved on to another one, update the task list now. " +
+    "If it is still accurate, continue without mentioning this note.";
+  const evT = (seq: number, type: string, payload: unknown, turnId = "t1"): DurableEvent =>
+    ({
+      seq,
+      type,
+      payload,
+      sessionId: "s",
+      turnId,
+      time: "2026-01-01T00:00:00Z",
+    }) as DurableEvent;
+
+  type StepSpec =
+    | {
+        kind: "todo";
+        items: { text: string; status: "pending" | "in_progress" | "completed" }[];
+        turnId?: string;
+      }
+    | {
+        kind: "tool";
+        name?: string;
+        result?: string;
+        status?: "ok" | "error" | "cancelled" | "interrupted";
+        turnId?: string;
+      }
+    | { kind: "user"; text: string; turnId?: string }
+    | { kind: "turn_start"; turnId: string; turnIndex: number }
+    | { kind: "turn_end"; turnId: string };
+
+  function buildTrace(specs: readonly StepSpec[]): {
+    events: DurableEvent[];
+    history: HistoryEntry[];
+  } {
+    const events: DurableEvent[] = [];
+    const history: HistoryEntry[] = [];
+    let seq = 1;
+    let callCounter = 1;
+    for (const s of specs) {
+      if (s.kind === "turn_start") {
+        events.push(evT(seq++, "turn.started", { turnIndex: s.turnIndex }, s.turnId));
+      } else if (s.kind === "turn_end") {
+        events.push(evT(seq++, "turn.completed", { reason: "done", steps: 1 }, s.turnId));
+      } else if (s.kind === "user") {
+        const sSeq = seq++;
+        const turnId = s.turnId ?? "t1";
+        events.push(
+          evT(
+            sSeq,
+            "message.user",
+            { messageId: `u${sSeq}`, content: [{ type: "text", text: s.text }] },
+            turnId,
+          ),
+        );
+        history.push({
+          kind: "user",
+          seq: sSeq,
+          turnId,
+          messageId: `u${sSeq}`,
+          content: [{ type: "text", text: s.text }],
+        });
+      } else if (s.kind === "todo") {
+        const aSeq = seq++;
+        const tSeq = seq++;
+        const callId = `todo-${callCounter++}`;
+        const turnId = s.turnId ?? "t1";
+        const body =
+          s.items.length === 0
+            ? "任务清单已清空。"
+            : `任务清单已更新：${s.items.length} 项。\n\n${formatTodoBlock(s.items)}`;
+        events.push(
+          evT(
+            aSeq,
+            "message.assistant",
+            {
+              messageId: `a${aSeq}`,
+              model: { provider: "test", model: "m1" },
+              content: [],
+              toolCalls: [{ callId, name: "todo_write", input: { items: s.items } }],
+              usage: undefined,
+              finishReason: "tool_calls",
+            },
+            turnId,
+          ),
+          evT(
+            tSeq,
+            "tool.completed",
+            {
+              callId,
+              name: "todo_write",
+              status: "ok",
+              output: { items: s.items },
+              modelContent: body,
+            },
+            turnId,
+          ),
+        );
+        history.push(
+          {
+            kind: "assistant",
+            seq: aSeq,
+            turnId,
+            messageId: `a${aSeq}`,
+            model: { provider: "test", model: "m1" },
+            content: [],
+            toolCalls: [{ callId, name: "todo_write", input: { items: s.items } }],
+            usage: undefined,
+            finishReason: "tool_calls",
+          },
+          {
+            kind: "tool",
+            seq: tSeq,
+            turnId,
+            callId,
+            name: "todo_write",
+            status: "ok",
+            modelContent: body,
+            pinResult: true,
+          },
+        );
+      } else {
+        const aSeq = seq++;
+        const tSeq = seq++;
+        const callId = `c-${callCounter++}`;
+        const turnId = s.turnId ?? "t1";
+        const name = s.name ?? "read";
+        const result = s.result ?? `out-${callId}`;
+        const status = s.status ?? "ok";
+        events.push(
+          evT(
+            aSeq,
+            "message.assistant",
+            {
+              messageId: `a${aSeq}`,
+              model: { provider: "test", model: "m1" },
+              content: [],
+              toolCalls: [{ callId, name, input: { path: `${callId}.ts` } }],
+              usage: undefined,
+              finishReason: "tool_calls",
+            },
+            turnId,
+          ),
+          evT(tSeq, "tool.completed", { callId, name, status, modelContent: result }, turnId),
+        );
+        history.push(
+          {
+            kind: "assistant",
+            seq: aSeq,
+            turnId,
+            messageId: `a${aSeq}`,
+            model: { provider: "test", model: "m1" },
+            content: [],
+            toolCalls: [{ callId, name, input: { path: `${callId}.ts` } }],
+            usage: undefined,
+            finishReason: "tool_calls",
+          },
+          {
+            kind: "tool",
+            seq: tSeq,
+            turnId,
+            callId,
+            name,
+            status,
+            modelContent: result,
+          },
+        );
+      }
+    }
+    return { events, history };
+  }
+
+  it("有未完成项时：第 30 次与第 60 次工具结果后附提醒；中途更新后从更新处重新计数", () => {
+    const active = [
+      { text: "步骤 1", status: "in_progress" as const },
+      { text: "步骤 2", status: "pending" as const },
+    ];
+    const sixty = buildTrace([
+      { kind: "todo", items: active },
+      ...Array.from({ length: 65 }, (): StepSpec => ({ kind: "tool" })),
+    ]);
+    const built65 = buildContext(baseInput({ ...sixty, todos: active }));
+    const toolMsgs = built65.request.messages.filter((m) => m.role === "tool");
+    // toolMsgs[0] 是 todo_write 本身；toolMsgs[30] 是第 30 次调用，toolMsgs[60] 是第 60 次调用
+    const remindedIndices = toolMsgs
+      .map((m, idx) => (m.role === "tool" && m.content.includes("[Task list]") ? idx : -1))
+      .filter((idx) => idx >= 0);
+    expect(remindedIndices).toEqual([30, 60]);
+    expect(toolMsgs[30]?.role === "tool" && toolMsgs[30].content).toBe(
+      `out-c-31\n\n${EXPECTED_NOTE}`,
+    );
+
+    // 第 20 次后更新一次清单，再跑 30 次：提醒落在更新后的第 30 次（无旧提醒）
+    const updated = [
+      { text: "步骤 1", status: "completed" as const },
+      { text: "步骤 2", status: "in_progress" as const },
+    ];
+    const resetTrace = buildTrace([
+      { kind: "todo", items: active },
+      ...Array.from({ length: 20 }, (): StepSpec => ({ kind: "tool" })),
+      { kind: "todo", items: updated },
+      ...Array.from({ length: 30 }, (): StepSpec => ({ kind: "tool" })),
+    ]);
+    const builtReset = buildContext(baseInput({ ...resetTrace, todos: updated }));
+    const resetTools = builtReset.request.messages.filter((m) => m.role === "tool");
+    const resetIndices = resetTools
+      .map((m, idx) => (m.role === "tool" && m.content.includes("[Task list]") ? idx : -1))
+      .filter((idx) => idx >= 0);
+    // 0: 首次 todo_write；1..20: 20 次工具；21: 第二次 todo_write；51: 其后第 30 次工具
+    expect(resetIndices).toEqual([51]);
+  });
+
+  it("清单为空、全部完成、已归档时不附提醒；cancelled / interrupted 不计数", () => {
+    const emptyTrace = buildTrace([
+      { kind: "todo", items: [] },
+      ...Array.from({ length: 35 }, (): StepSpec => ({ kind: "tool" })),
+    ]);
+    expect(
+      JSON.stringify(buildContext(baseInput({ ...emptyTrace, todos: [] })).request.messages),
+    ).not.toContain("[Task list]");
+
+    const allDone = [{ text: "步骤 1", status: "completed" as const }];
+    const doneTrace = buildTrace([
+      { kind: "todo", items: allDone },
+      ...Array.from({ length: 35 }, (): StepSpec => ({ kind: "tool" })),
+    ]);
+    expect(
+      JSON.stringify(buildContext(baseInput({ ...doneTrace, todos: allDone })).request.messages),
+    ).not.toContain("[Task list]");
+
+    const archivedTrace = buildTrace([
+      { kind: "todo", items: allDone },
+      { kind: "user", text: "下一轮任务" },
+      ...Array.from({ length: 35 }, (): StepSpec => ({ kind: "tool" })),
+    ]);
+    expect(
+      JSON.stringify(buildContext(baseInput({ ...archivedTrace, todos: [] })).request.messages),
+    ).not.toContain("[Task list]");
+
+    // 29 次正常调用 + 5 次 cancelled/interrupted + 1 次正常调用：提醒落在最后那第 30 次有效调用上
+    const active = [{ text: "步骤 1", status: "in_progress" as const }];
+    const withCancelled = buildTrace([
+      { kind: "todo", items: active },
+      ...Array.from({ length: 29 }, (): StepSpec => ({ kind: "tool" })),
+      { kind: "tool", status: "cancelled" },
+      { kind: "tool", status: "interrupted" },
+      { kind: "tool", status: "ok", result: "effective-30th" },
+    ]);
+    const built = buildContext(baseInput({ ...withCancelled, todos: active }));
+    const tools = built.request.messages.filter((m) => m.role === "tool");
+    const hit = tools.filter((m) => m.role === "tool" && m.content.includes("[Task list]"));
+    expect(hit).toHaveLength(1);
+    expect(hit[0]?.role === "tool" && hit[0].content).toBe(`effective-30th\n\n${EXPECTED_NOTE}`);
+  });
+
+  it("跨 Turn 累计：Turn 1 跑 18 次、Turn 2 跑 12 次，第 12 次触发提醒", () => {
+    const active = [{ text: "步骤 1", status: "in_progress" as const }];
+    const trace = buildTrace([
+      { kind: "turn_start", turnId: "t1", turnIndex: 1 },
+      { kind: "user", text: "第一轮", turnId: "t1" },
+      { kind: "todo", items: active, turnId: "t1" },
+      ...Array.from({ length: 18 }, (): StepSpec => ({ kind: "tool", turnId: "t1" })),
+      { kind: "turn_end", turnId: "t1" },
+      { kind: "turn_start", turnId: "t2", turnIndex: 2 },
+      { kind: "user", text: "继续", turnId: "t2" },
+      ...Array.from({ length: 12 }, (): StepSpec => ({ kind: "tool", turnId: "t2" })),
+    ]);
+    const built = buildContext(baseInput({ ...trace, todos: active }));
+    const tools = built.request.messages.filter((m) => m.role === "tool");
+    expect(tools).toHaveLength(31);
+    expect(tools[30]?.role === "tool" && tools[30].content).toContain(EXPECTED_NOTE);
+  });
+
+  it("确定性、严格前缀、L1 修剪保留、与循环说明同处一条时循环说明在前且旧日志不报错", () => {
+    const active = [{ text: "步骤 1", status: "in_progress" as const }];
+    // 第 28、29、30 次调用完全相同（触发第 3 次 Loop guard + 第 30 次 Task list 提醒）
+    const specs: StepSpec[] = [
+      { kind: "turn_start", turnId: "t1", turnIndex: 1 },
+      { kind: "todo", items: active, turnId: "t1" },
+      ...Array.from({ length: 27 }, (): StepSpec => ({ kind: "tool", turnId: "t1" })),
+    ];
+    const trace27 = buildTrace(specs);
+    // 追加 3 次完全相同的调用作为第 28、29、30 次
+    let nextSeq = (trace27.events.at(-1)?.seq ?? 0) + 1;
+    const events30 = [...trace27.events];
+    const history30 = [...trace27.history];
+    for (let i = 0; i < 3; i++) {
+      const aSeq = nextSeq++;
+      const tSeq = nextSeq++;
+      const callId = `dup-${i + 1}`;
+      events30.push(
+        evT(
+          aSeq,
+          "message.assistant",
+          {
+            messageId: `adup${i}`,
+            model: { provider: "test", model: "m1" },
+            content: [],
+            toolCalls: [{ callId, name: "shell", input: { command: "git status" } }],
+            usage: undefined,
+            finishReason: "tool_calls",
+          },
+          "t1",
+        ),
+        evT(
+          tSeq,
+          "tool.completed",
+          { callId, name: "shell", status: "ok", modelContent: "clean" },
+          "t1",
+        ),
+      );
+      history30.push(
+        {
+          kind: "assistant",
+          seq: aSeq,
+          turnId: "t1",
+          messageId: `adup${i}`,
+          model: { provider: "test", model: "m1" },
+          content: [],
+          toolCalls: [{ callId, name: "shell", input: { command: "git status" } }],
+          usage: undefined,
+          finishReason: "tool_calls",
+        },
+        {
+          kind: "tool",
+          seq: tSeq,
+          turnId: "t1",
+          callId,
+          name: "shell",
+          status: "ok",
+          modelContent: "clean",
+        },
+      );
+    }
+
+    const first = buildContext(baseInput({ history: history30, events: events30, todos: active }));
+    const second = buildContext(
+      baseInput({
+        history: structuredClone(history30),
+        events: structuredClone(events30),
+        todos: structuredClone(active),
+      }),
+    );
+    expect(JSON.stringify(second.request.messages)).toBe(JSON.stringify(first.request.messages));
+
+    const lastTool = first.request.messages.at(-1);
+    expect(lastTool?.role).toBe("tool");
+    const lastContent = lastTool?.role === "tool" ? lastTool.content : "";
+    const loopIdx = lastContent.indexOf("[Loop guard]");
+    const todoIdx = lastContent.indexOf("[Task list]");
+    expect(loopIdx).toBeGreaterThan(0);
+    expect(todoIdx).toBeGreaterThan(loopIdx);
+
+    // 再追加一步后，前一次请求的全部消息作为严格前缀保持不变
+    const aSeq = nextSeq++;
+    const tSeq = nextSeq++;
+    const events31 = [
+      ...events30,
+      evT(
+        aSeq,
+        "message.assistant",
+        {
+          messageId: "a31",
+          model: { provider: "test", model: "m1" },
+          content: [],
+          toolCalls: [{ callId: "c31", name: "read", input: { path: "x.ts" } }],
+          usage: undefined,
+          finishReason: "tool_calls",
+        },
+        "t1",
+      ),
+      evT(
+        tSeq,
+        "tool.completed",
+        { callId: "c31", name: "read", status: "ok", modelContent: "ok" },
+        "t1",
+      ),
+    ];
+    const history31: HistoryEntry[] = [
+      ...history30,
+      {
+        kind: "assistant",
+        seq: aSeq,
+        turnId: "t1",
+        messageId: "a31",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c31", name: "read", input: { path: "x.ts" } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: tSeq,
+        turnId: "t1",
+        callId: "c31",
+        name: "read",
+        status: "ok",
+        modelContent: "ok",
+      },
+    ];
+    const extended = buildContext(
+      baseInput({ history: history31, events: events31, todos: active }),
+    );
+    expect(extended.request.messages.slice(0, first.request.messages.length)).toEqual(
+      first.request.messages,
+    );
+
+    // L1 修剪成占位后，循环说明与清单提醒均保留且顺序不变
+    const prunedHistory: HistoryEntry[] = [
+      ...history30,
+      {
+        kind: "compaction",
+        seq: nextSeq++,
+        turnId: "t1",
+        compactKind: "prune",
+        throughSeq: tSeq,
+        summary: undefined,
+      },
+    ];
+    const prunedBuilt = buildContext(
+      baseInput({ history: prunedHistory, events: events30, todos: active }),
+    );
+    const prunedLast = prunedBuilt.request.messages.at(-1);
+    expect(prunedLast?.role === "tool" && prunedLast.content).toContain("输出已省略");
+    expect(prunedLast?.role === "tool" && prunedLast.content.indexOf("[Loop guard]")).toBeLessThan(
+      prunedLast?.role === "tool" ? prunedLast.content.indexOf("[Task list]") : -1,
+    );
+
+    // 旧日志（无 todo_write 事件、无 output 字段）重建不报错
+    expect(() =>
+      buildContext(baseInput({ history: history30.slice(2, 6), events: events30.slice(0, 5) })),
+    ).not.toThrow();
+  });
+});

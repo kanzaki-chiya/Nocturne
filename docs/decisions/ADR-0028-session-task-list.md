@@ -74,3 +74,8 @@ TUI 在 `todo_write` 结果出现的位置显示该次快照和完成数 N/M：�
   - 同一份历史连续构建两次逐字节相同；提醒触发后再追加几步，提醒之前的前缀不变；L1 修剪成占位后提醒仍在；
   - 与循环说明同时出现时顺序固定；
   - 旧日志在新版本下重建上下文不报错。
+- 实现记录（2026-10-25）：
+  - **代码位置**：`packages/core/src/protocol/todo.ts` 提供 `STALE_TODO_THRESHOLD`（30）、`STALE_TODO_NOTE_TEXT`、`todoItemsFromToolResult`、`staleTodoWarnings` 与 `staleTodoNotes`。`todoItemsFromToolResult` 不按工具名分支，只对 `status === "ok"` 的结果按结构化 `output.items` 或 `modelContent` 的固定清单块/清空回执识别清单更新。
+  - **投影与顺序**：`packages/core/src/context/build.ts` 的 `historyToMessages` 接收 `loopNotes` 与 `todoNotes`，按 `entry.seq` 先追加循环说明再追加清单提醒，L1 修剪成占位时同样保留，字符与 token 归入 `history.breakdown.tool`。
+  - **验收对照**：`packages/core/src/context/context.test.ts` 覆盖第 30/60 次提醒、中途更新清零重计、空清单/全部完成/已归档不提醒、`cancelled`/`interrupted` 不计、跨 Turn 累计、重复构建逐字节一致与严格前缀、L1 修剪保留、与循环说明同处一条时顺序固定，以及旧日志兼容。
+
