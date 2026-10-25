@@ -610,3 +610,6 @@ export type QuestionAnswer =
       /** 「其他」自由文本；省略 = 没有文字补充 */
       text?: string | undefined;
     };
+
+/** MCP 工具按需加载模式（ADR-0067 §4）：auto（默认，超过 10,000 token 时按需）、always、never */
+export type McpToolSearchMode = "auto" | "always" | "never";

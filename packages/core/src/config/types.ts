@@ -20,6 +20,7 @@ import type {
   McpServerEntry,
   McpServerOverview,
   McpSaveInput,
+  McpToolSearchMode,
   ModelProtocol,
   ModelRef,
   ModelPricing,
@@ -273,10 +274,11 @@ export interface ConfigFile {
   turn?: TurnOverrides | undefined;
   /** Hook 配置（hooks.md 第 2 节）：事件点 → 条目数组，层间追加 */
   hooks?: Partial<Record<HookPoint, HookEntry[]>> | undefined;
-  /** MCP 配置（mcp.md 第 2 节）：servers 按名字逐条合并 */
+  /** MCP 配置（mcp.md 第 2 节 + ADR-0067 §4）：servers 按名字逐条合并，toolSearch 高层覆盖低层 */
   mcp?:
     | {
         servers?: Record<string, McpServerEntry> | undefined;
+        toolSearch?: McpToolSearchMode | undefined;
       }
     | undefined;
 }
@@ -288,6 +290,7 @@ export interface ResolvedConfig {
   subagentProfiles?: Record<string, SubagentProfileConfig> | undefined;
   compactionThreshold?: string | number | undefined;
   compactionPruneLimit?: number | undefined;
+  mcpToolSearch?: McpToolSearchMode | undefined;
   /** 通知偏好（ADR-0056）：六个字段逐层合并，未声明时取缺省 */
   notifications?: Required<{ enabled: boolean; doneAfterSeconds: number; sound: boolean }> & {
     events: Required<{ attention: boolean; error: boolean; done: boolean }>;
@@ -577,6 +580,7 @@ export interface SettingItem {
     | `modelRoles.${ModelRole}`
     | "compaction.threshold"
     | "compaction.pruneLimit"
+    | "mcp.toolSearch"
     | "notifications.enabled"
     | "notifications.events.attention"
     | "notifications.events.error"
@@ -599,6 +603,7 @@ export type SettingsPatch = Partial<{
   "modelRoles.smol": string | null;
   "compaction.threshold": string | number | null;
   "compaction.pruneLimit": number | null;
+  "mcp.toolSearch": McpToolSearchMode | null;
   "permissions.preset": PermissionPresetName | null;
   "permission.reviewer": SecurityReviewerConfig | null;
   /** ask / allow 为空字符串或 null 时删除该段；整体为 null 删除两段 */

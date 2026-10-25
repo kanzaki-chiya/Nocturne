@@ -992,9 +992,13 @@ export function buildContext(input: BuildContextInput): BuiltContext {
 
   // 2. 工具规格（结构化字段，不计入 system 文本，但计入预算与报告）
   const toolsJson = JSON.stringify(input.tools);
+  const omittedMcp =
+    input.omittedMcpTools !== undefined && input.omittedMcpTools > 0
+      ? `（MCP 按需，${input.omittedMcpTools} 个工具未列出）`
+      : "";
   sections.push({
     name: "tools",
-    source: `${input.tools.length} tools`,
+    source: `${input.tools.length} tools${omittedMcp}`,
     chars: toolsJson.length,
     estimatedTokens: estimateTokens(toolsJson),
   });

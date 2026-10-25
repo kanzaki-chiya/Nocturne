@@ -482,6 +482,7 @@ const configFileSchema = z.object({
   mcp: z
     .object({
       servers: z.record(z.string(), z.unknown()).optional(),
+      toolSearch: z.enum(["auto", "always", "never"]).optional(),
     })
     .optional(),
 });
@@ -623,7 +624,15 @@ export function parseConfigFile(
   } = parsed.data;
   return {
     ...fields,
-    ...(mcp ? { mcp: { servers }, mcpWarnings } : {}),
+    ...(mcp
+      ? {
+          mcp: {
+            ...(mcp.servers !== undefined ? { servers } : {}),
+            ...(mcp.toolSearch !== undefined ? { toolSearch: mcp.toolSearch } : {}),
+          },
+          mcpWarnings,
+        }
+      : {}),
     ...(configuredAgents ? { externalAgents } : {}),
     ...(externalAgentWarnings.length > 0 ? { externalAgentWarnings } : {}),
     ...(configuredSubagents ? { subagents: { profiles: subagentProfiles } } : {}),

@@ -85,11 +85,12 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
         !key.startsWith("subagents.profiles.") &&
         key !== "compaction.threshold" &&
         key !== "compaction.pruneLimit" &&
+        key !== "mcp.toolSearch" &&
         !NOTIFY_KEYS.includes(key),
     )
   ) {
     throw new TypeError(
-      "仅支持 permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、modelRoles.* 与 notifications.*；默认档位随默认模型经 setDefaultModel 保存",
+      "仅支持 permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.* 与 notifications.*；默认档位随默认模型经 setDefaultModel 保存",
     );
   }
   const patch = input as SettingsPatch;
@@ -126,6 +127,7 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
             },
           }
         : {}),
+      ...(patch["mcp.toolSearch"] != null ? { mcp: { toolSearch: patch["mcp.toolSearch"] } } : {}),
       ...(preset !== null && preset !== undefined ? { permissions: { preset } } : {}),
       ...(patch["permission.reviewer"] != null || patch["permission.reviewerRules"] != null
         ? {
@@ -214,6 +216,22 @@ function configFields(data: SettingsData, warn?: (message: string) => void): Con
           };
         } catch {
           warn?.(`settings.json 的 compaction.${key} 无效，已忽略`);
+        }
+      }
+    }
+  }
+  if (Object.hasOwn(data, "mcp")) {
+    const mcp = data.mcp;
+    if (typeof mcp !== "object" || mcp === null || Array.isArray(mcp)) {
+      warn?.("settings.json 的 mcp 无效，已忽略");
+    } else {
+      const toolSearch = (mcp as Record<string, unknown>).toolSearch;
+      if (toolSearch !== undefined) {
+        try {
+          const parsed = parseConfigFile({ mcp: { toolSearch } }, "settings.json");
+          result = { ...result, mcp: { ...result.mcp, ...parsed.mcp } };
+        } catch {
+          warn?.("settings.json 的 mcp.toolSearch 无效，已忽略");
         }
       }
     }
@@ -510,6 +528,16 @@ export async function loadSettingsStore(
               else compaction.pruneLimit = pruneLimit;
             }
             next.compaction = compaction;
+          }
+          const toolSearch = patch["mcp.toolSearch"];
+          if (toolSearch !== undefined) {
+            const mcp =
+              typeof next.mcp === "object" && next.mcp !== null && !Array.isArray(next.mcp)
+                ? { ...(next.mcp as Record<string, unknown>) }
+                : {};
+            if (toolSearch === null) delete mcp.toolSearch;
+            else mcp.toolSearch = toolSearch;
+            next.mcp = mcp;
           }
           const reviewer = patch["permission.reviewer"];
           if (reviewer !== undefined) {

@@ -160,6 +160,7 @@ import type {
   HookPoint,
   DurableEvent,
   ImageMimeType,
+  McpToolSearchMode,
   ModelRef,
   PermissionReply,
   PermissionSubject,
@@ -204,6 +205,7 @@ import {
 import {
   builtinTools,
   createAttachmentStore,
+  createMcpOnDemandTools,
   createPolicyGate,
   createQuestionBroker,
   createReadStateStore,
@@ -211,7 +213,10 @@ import {
   createSkillTool,
   createToolExecutor,
   createToolRegistry,
+  MCP_CALL_TOOL_NAME,
+  MCP_SEARCH_TOOL_NAME,
   resolveSubjects,
+  shouldEnableMcpToolSearch,
   type ExternalAgentConnector,
   type ExternalAgentRequest,
   type SubagentLauncher,
@@ -305,6 +310,8 @@ export interface RuntimeOptions {
   mcp?: McpConnector | undefined;
   /** 不经配置文件直接注入的 MCP 服务器（测试与嵌入方用） */
   mcpServers?: McpServerConfig[] | undefined;
+  /** ADR-0067 §4：MCP 工具按需加载模式覆盖（缺省读配置或 "auto"） */
+  mcpToolSearch?: McpToolSearchMode | undefined;
   /**
    * 不经配置文件直接注入的 Hook 条目（测试与嵌入方用；hooks.md）；
    * 与配置层 hooks 合并时排在前。项目配置 hooks 段未信任时已整段剔除。
@@ -1602,6 +1609,56 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     let mcpSession: McpSession | undefined;
     let pendingMcp = false;
     let mcpUpdate: Promise<void> = Promise.resolve();
+    let mcpOnDemand = false;
+    let omittedMcpToolCount = 0;
+    const registeredMcpNames = new Set<string>();
+    const warnedMcpConflicts = new Set<string>();
+
+    const syncMcpToolsRegistry = (): void => {
+      for (const name of registeredMcpNames) {
+        tools.unregister(name);
+      }
+      registeredMcpNames.clear();
+      tools.unregister(MCP_SEARCH_TOOL_NAME);
+      tools.unregister(MCP_CALL_TOOL_NAME);
+
+      const currentMcpTools = mcpSession?.tools() ?? [];
+      const mode =
+        config?.resolvedSettings(meta.workspaceRoot).mcpToolSearch ??
+        resolved?.mcpToolSearch ??
+        options.mcpToolSearch ??
+        "auto";
+      mcpOnDemand = shouldEnableMcpToolSearch(currentMcpTools, mode);
+      if (mcpOnDemand) {
+        omittedMcpToolCount = currentMcpTools.length;
+        const readyServers = [
+          ...new Set([
+            ...mcpServerConfigs.map((s) => s.name),
+            ...(mcpSession?.status() ?? []).filter((s) => s.state === "ready").map((s) => s.name),
+          ]),
+        ];
+        const pair = createMcpOnDemandTools(currentMcpTools, readyServers);
+        tools.register(pair.searchTool);
+        tools.register(pair.callTool);
+      } else {
+        omittedMcpToolCount = 0;
+        for (const tool of currentMcpTools) {
+          try {
+            tools.register(tool);
+            registeredMcpNames.add(tool.name);
+          } catch (e) {
+            if (!warnedMcpConflicts.has(tool.name)) {
+              warnedMcpConflicts.add(tool.name);
+              session.emitEphemeral("runtime.warning", {
+                code: "mcp_tool_conflict",
+                message: `MCP 工具 ${tool.name} 注册失败：${e instanceof Error ? e.message : String(e)}`,
+              });
+            }
+          }
+        }
+      }
+    };
+
     if (mcpServerConfigs.length > 0 || options.mcp !== undefined) {
       if (options.mcp === undefined) {
         warnings.push(
@@ -1633,16 +1690,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               });
             }
           });
-          for (const tool of mcpSession.tools()) {
-            try {
-              tools.register(tool);
-            } catch (e) {
-              session.emitEphemeral("runtime.warning", {
-                code: "mcp_tool_conflict",
-                message: `MCP 工具 ${tool.name} 注册失败：${e instanceof Error ? e.message : String(e)}`,
-              });
-            }
-          }
+          syncMcpToolsRegistry();
         } catch (e) {
           warnings.push(`MCP 装配失败：${e instanceof Error ? e.message : String(e)}`);
         }
@@ -1665,17 +1713,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             ]);
           }
           const diff = mcpSession.applyPendingTools();
-          for (const name of diff.remove) tools.unregister(name);
-          for (const tool of diff.add) {
-            try {
-              tools.register(tool);
-            } catch {
-              session.emitEphemeral("runtime.warning", {
-                code: "mcp_tool_conflict",
-                message: `MCP 工具 ${tool.name} 注册失败`,
-              });
-            }
+          for (const name of diff.remove) {
+            warnedMcpConflicts.delete(name);
           }
+          syncMcpToolsRegistry();
         });
       return mcpUpdate;
     };
@@ -2044,6 +2085,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             buildPolicy(session.state().config.permissionPreset, childSessionId),
           makeHookRunner,
           mcpTools: () => mcpSession?.tools() ?? [],
+          mcpOnDemand: () => mcpOnDemand,
+          mcpServers: () => [
+            ...new Set([
+              ...mcpServerConfigs.map((s) => s.name),
+              ...(mcpSession?.status() ?? []).filter((s) => s.state === "ready").map((s) => s.name),
+            ]),
+          ],
           skills: () => ({
             ...catalog,
             entries: skillDiscovery.skills.map((s, i) => ({ ...s, ...catalog.skills[i] })),
@@ -2960,6 +3008,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           seq: events.at(-1)?.seq,
           model: model.model,
           tools: specs,
+          omittedMcpToolCount,
           skills: catalog,
           instructions,
           environment,
@@ -2973,6 +3022,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           skills: catalog,
           compactionThreshold,
           compactionPruneLimit,
+          omittedMcpTools: omittedMcpToolCount,
           loopGuard: turnConfig.loopGuard,
           history: state.history,
           todos: state.todos,
@@ -4140,3 +4190,18 @@ export {
   type SkillImportResult,
   type SkillImportResultView,
 } from "./skills/import.js";
+export {
+  createMcpOnDemandTools,
+  estimateMcpToolsTokens,
+  MAX_MCP_SEARCH_RESULTS,
+  MCP_CALL_TOOL_NAME,
+  MCP_SEARCH_TOOL_NAME,
+  MCP_TOOL_SEARCH_AUTO_THRESHOLD,
+  mcpServerOfTool,
+  searchMcpTools,
+  shouldEnableMcpToolSearch,
+  tokenizeMcpQuery,
+  type McpSearchMatch,
+  type McpSearchOutput,
+  type ToolDispatchResult,
+} from "./tools/index.js";

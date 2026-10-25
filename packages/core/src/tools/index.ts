@@ -34,6 +34,21 @@ export { scheduleTool, scheduleSubjectDetail, type ScheduleToolInput } from "./b
 export { webFetchTool } from "./builtin/web-fetch.js";
 export { diffLines } from "./builtin/diff.js";
 export { createTaskTool } from "./builtin/task.js";
+export {
+  createMcpOnDemandTools,
+  estimateMcpToolsTokens,
+  MAX_MCP_SEARCH_RESULTS,
+  MCP_CALL_TOOL_NAME,
+  MCP_SEARCH_TOOL_NAME,
+  MCP_TOOL_SEARCH_AUTO_THRESHOLD,
+  mcpServerOfTool,
+  searchMcpTools,
+  shouldEnableMcpToolSearch,
+  tokenizeMcpQuery,
+  type McpSearchMatch,
+  type McpSearchOutput,
+  type McpToolSearchMode,
+} from "./mcp-on-demand.js";
 export type { GateGrantSink } from "./gate.js";
 
 import type { ToolDefinition, ToolRegistry } from "./types.js";

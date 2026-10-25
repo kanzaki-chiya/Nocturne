@@ -43,6 +43,8 @@ export interface BuildContextInput {
   skills?: { text: string; truncated: boolean } | undefined;
   compactionThreshold?: string | number | undefined;
   compactionPruneLimit?: number | undefined;
+  /** ADR-0067 §4：按需模式下未放进 tools 的 MCP 工具数，/context 据此注明 */
+  omittedMcpTools?: number | undefined;
   /**
    * 重复调用保护（ADR-0063）：决定是否在投影里重建循环说明。
    * false 关闭；缺省 DEFAULT_LOOP_GUARD（与 Agent Loop 同一份签名实现）。

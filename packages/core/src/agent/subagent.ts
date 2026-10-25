@@ -27,12 +27,15 @@ import type { PermissionPolicy } from "../permission/index.js";
 import {
   builtinTools,
   createAttachmentStore,
+  createMcpOnDemandTools,
   createPolicyGate,
   createReadStateStore,
   createTaskTool,
   createSkillTool,
   createToolExecutor,
   createToolRegistry,
+  MCP_CALL_TOOL_NAME,
+  MCP_SEARCH_TOOL_NAME,
   type ExecutionEnvironment,
   type GateGrantSink,
   type HookRunner,
@@ -145,6 +148,10 @@ export interface SubagentDeps {
   ): HookRunner | undefined;
   /** 父会话 MCP 工具快照（复用既有连接，不重启服务器） */
   mcpTools(): readonly ToolDefinition[];
+  /** ADR-0067 §5：子会话沿用父会话的 MCP 按需/全量模式 */
+  mcpOnDemand?(): boolean;
+  /** 父会话已就绪的 MCP 服务器名称列表（供 mcp_call / mcp_search 报错说明） */
+  mcpServers?(): readonly string[];
   /** Grant 落点：session 数组只读共享（子 gate 无 respond 路径） */
   grants?: GateGrantSink | undefined;
   /**
@@ -369,11 +376,9 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
               ),
             ]
           : [];
-        const pool: ToolDefinition[] = [
-          ...builtinTools(),
-          ...deps.mcpTools(),
-          ...skillTools,
-        ].filter(
+        const parentMcpTools = deps.mcpTools();
+        const mcpToolNames = new Set(parentMcpTools.map((t) => t.name));
+        const pool: ToolDefinition[] = [...builtinTools(), ...parentMcpTools, ...skillTools].filter(
           (t) =>
             t.traits.needsUser !== true &&
             t.traits.mutatesSchedule !== true &&
@@ -401,7 +406,12 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             ),
           );
         }
+        const onDemandMcp = deps.mcpOnDemand?.() === true;
         const names = new Set(pool.map((t) => t.name));
+        if (onDemandMcp && parentMcpTools.length > 0) {
+          names.add(MCP_SEARCH_TOOL_NAME);
+          names.add(MCP_CALL_TOOL_NAME);
+        }
         let selected: ToolDefinition[];
         if (request.tools !== undefined) {
           if (
@@ -419,7 +429,15 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             );
           }
           const wanted = new Set(request.tools);
-          selected = pool.filter((t) => wanted.has(t.name));
+          const wantsOnDemandPair =
+            onDemandMcp && (wanted.has(MCP_SEARCH_TOOL_NAME) || wanted.has(MCP_CALL_TOOL_NAME));
+          selected = pool.filter(
+            (t) =>
+              wanted.has(t.name) ||
+              (wantsOnDemandPair &&
+                mcpToolNames.has(t.name) &&
+                (profile?.tools !== "explore" || !t.traits.mutates)),
+          );
         } else if ((request.preset ?? profile?.tools) === "explore") {
           // 按特性筛选（subagent.md 第 6 节）：只读工具自动在内，与名字无关
           selected = pool.filter((t) => !t.traits.mutates);
@@ -428,7 +446,22 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         }
 
         const registry = createToolRegistry();
-        for (const t of selected) registry.register(t);
+        if (onDemandMcp) {
+          const childMcpPool = selected.filter((t) => mcpToolNames.has(t.name));
+          for (const t of selected) {
+            if (!mcpToolNames.has(t.name)) registry.register(t);
+          }
+          if (
+            childMcpPool.length > 0 ||
+            (parentMcpTools.length > 0 && request.tools === undefined)
+          ) {
+            const pair = createMcpOnDemandTools(childMcpPool, deps.mcpServers?.() ?? []);
+            registry.register(pair.searchTool);
+            registry.register(pair.callTool);
+          }
+        } else {
+          for (const t of selected) registry.register(t);
+        }
         let submitted: { text: string; structured?: unknown } | undefined;
         registry.register(
           finishTool(request.outputSchema, (text, structured) => {

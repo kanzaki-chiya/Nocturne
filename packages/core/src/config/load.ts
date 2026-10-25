@@ -351,6 +351,12 @@ export async function loadConfig(
             : String(saved.compaction.pruneLimit),
         ],
         [
+          "mcp.toolSearch",
+          "mcp.toolSearch",
+          merged.resolved.mcpToolSearch ?? "auto",
+          saved.mcp?.toolSearch,
+        ],
+        [
           "permissions.preset",
           "permissions.preset",
           merged.resolved.permissionPreset ?? "default",
