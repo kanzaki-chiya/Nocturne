@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Nocturne — A steady companion for late-night code.</title>
+    <meta
+      name="description"
+      content="Nocturne is a coding assistant that works in your repository. Read code, edit files, and run commands with your permission presets, across desktop, terminal, and phone."
+    />
+    <link rel="canonical" href="https://nocturne.koxia.cn/en/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://nocturne.koxia.cn/" />
+    <link rel="alternate" hreflang="en" href="https://nocturne.koxia.cn/en/" />
+    <link rel="alternate" hreflang="x-default" href="https://nocturne.koxia.cn/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Nocturne" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+    <meta property="og:title" content="Nocturne — A steady companion for late-night code." />
+    <meta
+      property="og:description"
+      content="Desktop, terminal, phone. One conversation, stored locally."
+    />
+    <meta property="og:url" content="https://nocturne.koxia.cn/en/" />
+    <meta property="og:image" content="https://nocturne.koxia.cn/assets/images/social-en.webp" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Nocturne in light mode, showing a login timeout fix and its diff"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Nocturne — A steady companion for late-night code." />
+    <meta
+      name="twitter:description"
+      content="Desktop, terminal, phone. One conversation, stored locally."
+    />
+    <meta name="twitter:image" content="https://nocturne.koxia.cn/assets/images/social-en.webp" />
+    <meta name="twitter:image:alt" content="Nocturne desktop conversation and Changes panel" />
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link
+      rel="preload"
+      href="../assets/fonts/noto-serif-sc-headings.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body id="top">
+    <!-- Moonlit paper / direction B. Cool paper, serif headlines, violet crescent.
+         Real isolated demo sessions show the coding companion at work.
+         First viewport: crescent and headline left, introduction and download right.
+         Three chapters: usage, capabilities, installation. One CSS moonrise. -->
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="masthead wrap">
+      <a class="wordmark" href="#top" aria-label="Nocturne home">Nocturne</a>
+      <nav aria-label="Page sections">
+        <a href="#one"><span class="nav-num">01</span>Ways to work</a>
+        <a href="#two"><span class="nav-num">02</span>Features</a>
+        <a href="#three"><span class="nav-num">03</span>Install</a>
+      </nav>
+      <div class="languages" aria-label="Page language">
+        <a href="../" lang="zh-CN" hreflang="zh-CN">中文</a><span aria-hidden="true">/</span
+        ><span aria-current="page">English</span>
+      </div>
+    </header>
+    <main id="main">
+      <section class="hero wrap" aria-labelledby="headline">
+        <div>
+          <svg class="moon" viewBox="0 0 18 18" aria-hidden="true">
+            <path d="M10.5 1.5a6.5 6.5 0 1 0 4 11.6A7 7 0 0 1 10.5 1.5z" />
+          </svg>
+          <h1 id="headline">A steady companion<br />for late-night code.</h1>
+        </div>
+        <div class="hero-copy">
+          <p>
+            Nocturne is a coding assistant that works in your repository. Read code, edit files, and
+            run commands with the permissions you set. Every step stays in a local session you can
+            resume, rewind, or fork.
+          </p>
+          <div class="actions">
+            <a
+              class="button"
+              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
+              >Download v{{version}}<svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M10 3v12m-5-5 5 5 5-5M4 17h12" /></svg
+            ></a>
+            <a class="text-link" href="https://github.com/kanzaki-chiya/Nocturne"
+              >View on GitHub<svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M3 10h13m-5-5 5 5-5 5" /></svg
+            ></a>
+          </div>
+          <a class="all-releases" href="https://github.com/kanzaki-chiya/Nocturne/releases"
+            >Windows x64 · All releases</a
+          >
+        </div>
+      </section>
+      <figure class="hero-figure wrap">
+        <img
+          src="../assets/images/desktop-en.webp"
+          alt="Nocturne desktop with a completed login timeout fix in the echo project and the diff for src/login.mjs in the Changes panel."
+          width="1440"
+          height="900"
+          fetchpriority="high"
+        />
+        <figcaption>
+          <span class="caption-number">Fig. 1</span>Desktop: sessions grouped by project, with this
+          turn's changes on the right. Captured with a local demo model.
+        </figcaption>
+      </figure>
+      <section class="chapter" id="one" aria-labelledby="usage-title">
+        <div class="chapter-grid wrap">
+          <div class="chapter-intro">
+            <span class="number" aria-hidden="true">01</span>
+            <h2 id="usage-title">One session.<br />Three ways to work.</h2>
+            <p>
+              Your sessions, providers, and permission settings stay together. Pick up where you
+              left off.
+            </p>
+          </div>
+          <div class="uses">
+            <article class="use">
+              <div>
+                <h3>Windows desktop</h3>
+                <p>
+                  Files, changes, terminals, and web pages in the side panel. Manage providers, MCP,
+                  skills, and subagents in Settings.
+                </p>
+              </div>
+              <figure>
+                <img
+                  src="../assets/images/detail-en.webp"
+                  alt="The desktop Changes panel showing the login timeout fix"
+                  width="720"
+                  height="450"
+                  loading="lazy"
+                />
+              </figure>
+            </article>
+            <article class="use">
+              <div>
+                <h3>Terminal <code>nctrn</code></h3>
+                <p>A full-screen interface, inline mode, line-by-line CLI, or a single command.</p>
+              </div>
+              <figure>
+                <img
+                  src="../assets/images/terminal-en.webp"
+                  alt="A completed login fix in the nctrn full-screen terminal interface, using a light theme"
+                  width="960"
+                  height="600"
+                  loading="lazy"
+                />
+              </figure>
+            </article>
+            <article class="use">
+              <div>
+                <h3>Remote from your phone</h3>
+                <p>
+                  Continue your computer's sessions in a phone browser, through an end-to-end
+                  encrypted relay.
+                </p>
+              </div>
+              <figure>
+                <img
+                  class="phone-image"
+                  src="../assets/images/phone-en.webp"
+                  alt="The English login timeout conversation and composer in the phone web interface"
+                  width="390"
+                  height="780"
+                  loading="lazy"
+                />
+              </figure>
+            </article>
+          </div>
+        </div>
+      </section>
+      <section class="chapter features" id="two" aria-labelledby="features-title">
+        <div class="features-inner wrap">
+          <div class="chapter-title">
+            <span class="number" aria-hidden="true">02</span>
+            <h2 id="features-title">What it can do</h2>
+          </div>
+          <div class="feature-copy">
+            <p>
+              <strong>Providers and models.</strong> OpenAI-compatible, Anthropic, Responses, and
+              native Gemini protocols. Sign in with ChatGPT or Grok. Model capabilities sync from
+              upstream and models.dev.
+            </p>
+            <p>
+              <strong>Permissions.</strong> Six permission presets, plus individual rules. The
+              <code>smart</code> preset asks a review model first and brings uncertain cases to you.
+            </p>
+            <p>
+              <strong>Subagents.</strong> Delegate independent tasks to different models and
+              reasoning levels, or to external assistants such as omp and codex.
+            </p>
+            <p>
+              <strong>Extensions.</strong> MCP servers, Hooks, and Agent Skills. Invoke a skill with
+              <code>/skill-name arguments</code>.
+            </p>
+            <p>
+              <strong>Sessions.</strong> Automatic context compaction. Rewind and undo file changes,
+              or fork from a message.
+            </p>
+            <p>
+              <strong>Changes.</strong> Each turn's file edits appear in one card. Review the
+              changes or undo the whole turn.
+            </p>
+          </div>
+        </div>
+      </section>
+      <section class="chapter" id="three" aria-labelledby="install-title">
+        <div class="chapter-grid wrap">
+          <div class="chapter-intro">
+            <span class="number" aria-hidden="true">03</span>
+            <h2 id="install-title">Install</h2>
+            <p>
+              Current version v{{version}}<br /><a
+                href="https://github.com/kanzaki-chiya/Nocturne/blob/main/CHANGELOG.md"
+                >Changelog</a
+              >
+            </p>
+          </div>
+          <div class="install-options">
+            <div>
+              <h3>Desktop (Windows)</h3>
+              <p>
+                Node.js included. Installs per user, with automatic updates. The installer is
+                unsigned; choose "Run anyway" if SmartScreen prompts you.
+              </p>
+              <div class="actions">
+                <a
+                  class="button"
+                  href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
+                  >Download installer<svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M10 3v12m-5-5 5 5 5-5M4 17h12" /></svg></a
+                ><a class="text-link" href="https://github.com/kanzaki-chiya/Nocturne/releases"
+                  >All releases</a
+                >
+              </div>
+            </div>
+            <div>
+              <h3>Command line (Node.js 24.14+)</h3>
+              <p>
+                <a
+                  href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nctrn-{{version}}.tgz"
+                  >Download the CLI package</a
+                >
+                from Releases, install it from your download directory, then set up a provider:
+              </p>
+              <pre><code>npm install -g ./nctrn-{{version}}.tgz
+nctrn setup</code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="wrap">
+      <span>Nocturne · GPL-3.0</span
+      ><a href="https://github.com/kanzaki-chiya/Nocturne">Source code</a
+      ><a href="https://github.com/kanzaki-chiya/Nocturne/releases">All releases</a
+      ><a class="back-top" href="#top">Back to top ↑</a>
+    </footer>
+  </body>
+</html>

@@ -149,6 +149,12 @@ Redistribution and use in source and binary forms, with or without modification,
 
 This software is provided by the copyright holders and contributors “as is” and any express or implied warranties, including, but not limited to, the implied warranties of merchantability and fitness for a particular purpose are disclaimed. In no event shall the copyright owner or contributors be liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, procurement of substitute goods or services; loss of use, data, or profits; or business interruption) however caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or otherwise) arising in any way out of the use of this software, even if advised of the possibility of such damage.
 
+## 项目主页字体
+
+主页自托管 Noto Serif SC 的标题字形子集（Noto Serif CJK 2.003，SC Black）。来源：[notofonts/noto-cjk / Serif2.003](https://github.com/notofonts/noto-cjk/tree/Serif2.003)，固定提交 `9b0f1436e455d902de067a2501422e5dc71ad16b`。© 2017-2024 Adobe (http://www.adobe.com/).，字体按 **SIL Open Font License 1.1** 分发；完整许可随站点保存在 [site/assets/fonts/OFL.txt](site/assets/fonts/OFL.txt)。子集由 `scripts/subset-site-font.mjs` 生成，原始字体不进仓库，字体许可不受项目 GPL 条款替代。
+
+开发依赖 `subset-font` 2.9.0 按 BSD-3-Clause 许可分发，仅用于手动生成字体，不参与站点运行或正常构建。
+
 ## 内置数据
 
 `packages/core/src/config/models-dev-snapshot.ts` 的模型字段快照来源于 [models.dev](https://github.com/sst/models.dev) 的 `models.json`，上游仓库的 `LICENSE` 声明 MIT License。用 `scripts/update-models-dev-snapshot.mjs` 获取并筛选上游模型数据后生成此文件；运行期默认使用内置快照，只有显式刷新才访问上游。
