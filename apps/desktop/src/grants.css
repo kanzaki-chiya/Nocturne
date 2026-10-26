@@ -285,3 +285,15 @@
     min-height: 0;
   }
 }
+/* 手机：顶栏已有「授权」，正文只留副标题（同手机定时任务页）；
+   撤销按钮保留 44px 触控区，文字与类别同一基线，右缘对齐列边 */
+.phone-grants .grants-page .ph3 h3 {
+  display: none;
+}
+.phone-grants .grant-row .grant-kind,
+.phone-grants .grant-row .grant-revoke {
+  align-self: baseline;
+}
+.phone-grants .grant-row .grant-revoke {
+  margin-inline-end: -12px;
+}
