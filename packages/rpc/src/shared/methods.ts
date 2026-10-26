@@ -198,7 +198,29 @@ export interface RemoteStatus {
   warnings: string[];
 }
 
+import type {
+  Grant,
+  GrantWorkspace,
+  ProjectTrustDescription,
+  GrantsChangedPayload,
+} from "@nocturne/core/protocol";
+
 export interface RpcMethods {
+  "grants.workspaces": { params: Record<string, never>; result: GrantWorkspace[] };
+  "grants.list": { params: { workspace: string }; result: Grant[] };
+  "grants.revoke": {
+    params: { workspace: string; kind: Grant["kind"]; target: string };
+    result: null;
+  };
+  "grants.revokeAll": { params: { workspace: string }; result: null };
+  "grants.describeProject": { params: { workspace: string }; result: ProjectTrustDescription };
+  "grants.setTrusted": { params: { workspace: string; trusted: boolean }; result: null };
+  "session.listGrants": { params: SessionParams; result: Grant[] };
+  "session.revokeGrant": {
+    params: SessionParams & { kind: Grant["kind"]; target: string };
+    result: null;
+  };
+  "session.revokeAllGrants": { params: SessionParams; result: null };
   "remote.describe": { params: Record<string, never>; result: RemoteStatus };
   "remote.register": { params: { invite: string }; result: RemoteStatus };
   "remote.unregister": { params: Record<string, never>; result: RemoteStatus };
@@ -602,11 +624,21 @@ export interface RpcServerNotifications {
    * `taskId` 缺省表示整体变化。
    */
   "schedule.changed": ScheduleChangedPayload;
+  "grants.changed": GrantsChangedPayload;
   /** 登录会话完成或失败（含取消）；绝不先于对应 login.start/startDraft 的响应到达 */
   "login.completed": LoginCompleted;
 }
 
 const METHOD_TABLE: Record<RpcMethodName, true> = {
+  "grants.workspaces": true,
+  "grants.list": true,
+  "grants.revoke": true,
+  "grants.revokeAll": true,
+  "grants.describeProject": true,
+  "grants.setTrusted": true,
+  "session.listGrants": true,
+  "session.revokeGrant": true,
+  "session.revokeAllGrants": true,
   "remote.describe": true,
   "remote.register": true,
   "remote.unregister": true,

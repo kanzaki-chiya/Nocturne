@@ -195,6 +195,7 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 | 服务端→客户端 | `event` | `{ sessionId, event }` | `event` 原样是 [events.md](events.md) 的 `RuntimeEvent` 信封，不另包一层 |
 | 服务端→客户端 | `runtime.providersChanged` | `{}` | 服务商、技能或外部 agent 配置变更成功后的通知；`provider.*`、`skills.*` 写方法（`setSkillEnabled`、`importSkills` 的 commit）、`agents.*` 三个写方法的响应之前到达一次，登录和显式重载同原规则（3.3–3.7） |
 | 服务端→客户端 | `runtime.sessionsChanged` | `{}` | 会话列表变了，请重拉 `runtime.listSessions`。**不带任何会话内容**（标题、路径都不带）。本后台的 `runtime.createSession`、`runtime.forkSession` 成功后发；会话首条用户消息落盘（列表标题 `firstText` 从无到有）和 `session.titled`（生成的标题优先于首句）也发，其余事件不发。发送前合并：第一次变化起 300 ms 内的所有变化只发一条，窗口内不顺延。别的进程（如另开的 CLI）改的列表不经过本后台，没有通知，客户端回前台时自行重拉。旧客户端没有监听器，忽略即可 |
+| 服务端→客户端 | `grants.changed` | `{ workspace?, sessionId? }` | 新增、撤销授权或改信任后重拉；会话 ID 为树根。易失、不写日志，广播给所有已握手连接（含远程） |
 | 服务端→客户端 | `schedule.changed` | `{ taskId? }` | 定时任务列表、启停或运行状态变了，请重拉 `schedule.list`（ADR-0064）。易失，不写日志，不带任务内容；保存、删除、一次运行开始/结束/被跳过之后发。`taskId` 缺省表示整体变化。广播给所有已握手连接（含远程）。每次发出时同时触发一次 `runtime.sessionsChanged`（运行会建出新会话，照常 300 ms 合并） |
 | 服务端→客户端 | `login.completed` | `LoginCompleted` | 登录会话完成或失败（含取消）；绝不先于对应 `login.start`/`startDraft` 的响应到达（3.4） |
 
@@ -219,6 +220,24 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 - 字段校验失败报 `-32005 / invalid_field`，`data.field` 为出错的字段（`name`、`prompt`、`workspace`、`model`、`reasoningEffort`、`permissionPreset`、`schedule`、`enabled`、`maxDurationMinutes`），客户端据此标输入框；任务数超上限等整体错误为 `config`，任务不存在或 id 无效为 `id`。`schedule.runNow` 在非调度器进程里报同一错误码，`field: "scheduler"`，运行没能开始为 `field: "run"`。字段级校验放在这里，没有给 `RuntimeCommandError` 的 `detail` 加字段。
 - `runtime.createSession` 的参数**不含** `interactive` 与 `schedule`：前者是进程内会话选项，后者只由调度器写入。服务端只摘取列出的字段，客户端强行带上也会被忽略，不能伪造定时来源或把会话开成无人值守。
 - 远程连接：`schedule.list`、`schedule.history`、`schedule.runNow` 在白名单内，`schedule.save`、`schedule.delete` 只在本机（第 7 节）。
+
+### 3.11 `grants.*` 与会话授权（ADR-0068）
+
+用户操作入口，不注册成模型工具；授权形状与实时撤销语义见 [permissions.md 5.4](../architecture/permissions.md#54-grant-的形状与匹配)。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `grants.workspaces` | `{}` → `{ workspace, grantCount, trusted, hasProjectConfig }[]`（真实路径） |
+| `grants.list` | `{ workspace }` → `Grant[]` |
+| `grants.revoke` | `{ workspace, kind, target }` → `null` |
+| `grants.revokeAll` | `{ workspace }` → `null` |
+| `grants.describeProject` | `{ workspace }` → `{ mcpServers: [{ name, command }], hooks: [{ event, count }], relaxedRuleCount }`，只解析、不执行 |
+| `grants.setTrusted` | `{ workspace, trusted }` → `null`，新开或恢复会话生效 |
+| `session.listGrants` | `{ sessionId }` → `Grant[]` |
+| `session.revokeGrant` | `{ sessionId, kind, target }` → `null` |
+| `session.revokeAllGrants` | `{ sessionId }` → `null` |
+
+会话方法由 Core Runtime 的 `listSessionGrants/revokeSessionGrant/revokeAllSessionGrants` 解析会话树根，活动子会话 ID 与根 ID 等效；不打开或恢复子会话。单项以 kind + target 精确匹配，写入失败报错且列表不变。成功新增、撤销、改信任后由 Core 发易失变更，再由 Hub 广播；RPC 不缓存授权、不参与权限求值。工作区汇总与解析输出口径见 [config.md 第 4 节](../architecture/config.md#4-grant-的持久化)。远程只可查看和撤销，信任与命令描述在 Core 调用前拒绝（第 7 节）。
 
 ## 4. 订阅与回放
 
@@ -351,7 +370,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 ## 7. 安全与日志
 
 - stdio 本机连接仍由父进程持有；配置了远程主机时由后台主动连中继，按 [ADR-0052](../decisions/ADR-0052-remote-web-client.md) 实施邀请、配对与加密，不能把能力白名单当作鉴权。全部 `remote.*` 方法仅开放给本机，不进入远程白名单。
-- 远程能力白名单在服务端显式登记，以 `RpcMethodName` 编译检查；新增方法默认不开放。边界原则（[ADR-0052 修订 2026-10-15](../decisions/ADR-0052-remote-web-client.md#2026-10-15手机功能对齐桌面端设置除外)）：远程连接不能改动撤销手机后仍然生效的东西（设置、凭据、持久授权、项目信任），会话内操作全部放开。方法越界和参数越界均报 `-32004 / remote_not_allowed`，且不调用 Core，不消费待处理请求：
+- 远程能力白名单在服务端显式登记，以 `RpcMethodName` 编译检查；新增方法默认不开放。边界原则（[ADR-0052 修订 2026-10-15](../decisions/ADR-0052-remote-web-client.md#2026-10-15手机功能对齐桌面端设置除外)）：远程连接不能改动撤销手机后仍然生效的东西（设置、凭据、新增持久授权、项目信任）；撤销已有授权只收紧，按 [ADR-0068](../decisions/ADR-0068-grants-management.md) 放开，会话内操作全部放开。方法越界和参数越界均报 `-32004 / remote_not_allowed`，且不调用 Core，不消费待处理请求：
 
 | 方法 | 远程 |
 |---|---|
@@ -370,12 +389,14 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `session.readAttachment` | 允许；附件原始字节超过远程上限报 `attachment_too_large` |
 | `session.readInputHistory`、`session.recordInputHistory` | 允许 |
 | `schedule.list`、`schedule.history`、`schedule.runNow` | 允许（ADR-0064）。前两者只读；`runNow` 不改任务、不留下撤销手机后仍生效的东西，等同会话内操作（它跑的是电脑上已有的、用户在本机写好的指令，权限仍按任务的预设，无人值守时越权操作被直接拒绝） |
+| `grants.workspaces`、`grants.list`、`grants.revoke`、`grants.revokeAll`、`session.listGrants`、`session.revokeGrant`、`session.revokeAllGrants` | 允许：查看和收紧授权，不允许新增项目授权 |
+| `grants.setTrusted`、`grants.describeProject` | 拒绝且不调用 Core；信任会放宽，项目命令无需发送手机 |
 | `schedule.save`、`schedule.delete` | 拒绝：改的是持久配置，启停与编辑也走 `save`，手机页面里这些控件禁用并提示「请在电脑上操作」 |
 | `runtime.readFile` | 拒绝：只服务本机右侧面板（ADR-0060），手机没有面板，也不扩大远程可读的文件范围 |
 | 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入与 `describeSettings`、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、`remote.*`、`mcp.*`、`agents.*`、`skills.*`，以及上面未列出的 `schedule.*` |
 
 - **报文上限**：加密通道单条消息超过 `MAX_MESSAGE`（16 MiB）会整条关闭。远程连接的成功结果编码后超过 `REMOTE_MESSAGE_LIMIT`（`MAX_MESSAGE` 减 64 KiB 余量）时改报 `-32004 / response_too_large`；`readAttachment` 先按原始字节预检（base64 后不超上限，`remoteAttachmentLimit`），超限报 `attachment_too_large`，文案「图片过大，请在电脑上查看」。请求方向由手机网页发送前估算，服务端不再放宽。
-- 远程连接对服务端→客户端通知没有白名单，通知由发送方决定发给谁：`event` 只发给订阅了该会话的连接，`remote.*` 只发本机连接，`login.completed` 只发发起登录的连接，`runtime.providersChanged`、`runtime.sessionsChanged` 与 `schedule.changed` 广播给所有已握手连接（含远程）。`runtime.sessionsChanged` 不带内容，手机收到后调用的 `runtime.listSessions` 本来就在上面的白名单里，远程能力边界不变。
+- 远程连接对服务端→客户端通知没有白名单，通知由发送方决定发给谁：`event` 只发给订阅了该会话的连接，`remote.*` 只发本机连接，`login.completed` 只发发起登录的连接，`runtime.providersChanged`、`runtime.sessionsChanged`、`schedule.changed` 与 `grants.changed` 广播给所有已握手连接（含远程）。`runtime.sessionsChanged` 不带内容，手机收到后调用的 `runtime.listSessions` 本来就在上面的白名单里，远程能力边界不变。
 - `runtime.providersChanged` 广播给所有已握手连接；`login.completed` 只发给发起登录的连接。Runtime 句柄、实际会话、配置对象与变更队列在 Hub 共享；订阅、请求、握手、草稿和登录属于单连接。
 - 会话已被其他连接打开时，`resumeSession` 的 `model` / `force` 被忽略，返回当前状态。
 - 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` 事件与 `respondPermission` 回复，不判断"要不要确认"。

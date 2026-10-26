@@ -159,6 +159,13 @@ export interface RpcServer {
  * `session.setShell` 会写 settings.json（与 `runtime.setShellSetting` 同一处），不放开。
  */
 export const REMOTE_METHODS = [
+  "grants.workspaces",
+  "grants.list",
+  "grants.revoke",
+  "grants.revokeAll",
+  "session.listGrants",
+  "session.revokeGrant",
+  "session.revokeAllGrants",
   "initialize",
   "runtime.listSessions",
   "runtime.usageStats",
@@ -1222,6 +1229,36 @@ class Connection implements HubPeer {
         }, false),
       "mcp.probeMcpServer": (p) =>
         this.runtime().probeMcpServer(p as unknown as Parameters<Runtime["probeMcpServer"]>[0]),
+      "grants.workspaces": () => this.runtime().listGrantWorkspaces(),
+      "grants.list": (p) => this.runtime().listGrants({ workspace: reqString(p, "workspace") }),
+      "grants.revoke": async (p) => {
+        await this.runtime().revokeGrant(p as unknown as Parameters<Runtime["revokeGrant"]>[0]);
+        return null;
+      },
+      "grants.revokeAll": async (p) => {
+        await this.runtime().revokeAllGrants({ workspace: reqString(p, "workspace") });
+        return null;
+      },
+      "grants.describeProject": (p) =>
+        this.runtime().describeProject({ workspace: reqString(p, "workspace") }),
+      "grants.setTrusted": async (p) => {
+        await this.runtime().setWorkspaceTrusted(
+          p as unknown as Parameters<Runtime["setWorkspaceTrusted"]>[0],
+        );
+        return null;
+      },
+      "session.listGrants": (p) =>
+        this.runtime().listSessionGrants({ sessionId: reqString(p, "sessionId") }),
+      "session.revokeGrant": async (p) => {
+        await this.runtime().revokeSessionGrant(
+          p as unknown as Parameters<Runtime["revokeSessionGrant"]>[0],
+        );
+        return null;
+      },
+      "session.revokeAllGrants": async (p) => {
+        await this.runtime().revokeAllSessionGrants({ sessionId: reqString(p, "sessionId") });
+        return null;
+      },
       "schedule.list": () => this.runtime().listSchedules(),
       "schedule.save": (p) =>
         this.runtime().saveSchedule(p as unknown as Parameters<Runtime["saveSchedule"]>[0]),

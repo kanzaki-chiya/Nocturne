@@ -10,6 +10,7 @@ import type { RpcMethodName } from "../shared/methods.js";
 
 /** 没有（或没有一一对应的）RPC 方法的 Runtime 成员，附原因 */
 export const RUNTIME_NOT_MAPPED = {
+  onGrantsChanged: "事件订阅：Hub 广播 grants.changed 给全部已握手连接",
   onScheduleChanged: "事件订阅：Hub 订阅后以 schedule.changed 通知广播给所有已握手的连接",
   stopScheduler: "生命周期：后台退出前由 RpcRuntimeHandle.dispose 调用，不是 RPC 方法",
 } as const satisfies Partial<Record<keyof Runtime, string>>;
@@ -18,6 +19,15 @@ export const RUNTIME_METHODS: Record<
   Exclude<keyof Runtime, keyof typeof RUNTIME_NOT_MAPPED>,
   RpcMethodName
 > = {
+  listGrantWorkspaces: "grants.workspaces",
+  listGrants: "grants.list",
+  revokeGrant: "grants.revoke",
+  revokeAllGrants: "grants.revokeAll",
+  describeProject: "grants.describeProject",
+  setWorkspaceTrusted: "grants.setTrusted",
+  listSessionGrants: "session.listGrants",
+  revokeSessionGrant: "session.revokeGrant",
+  revokeAllSessionGrants: "session.revokeAllGrants",
   describeModelRoles: "runtime.describeModelRoles",
   setModelRole: "runtime.setModelRole",
   describeSettings: "runtime.describeSettings",
@@ -81,6 +91,9 @@ export const SESSION_METHODS: Record<
   Exclude<keyof RuntimeSession, keyof typeof SESSION_NOT_MAPPED>,
   RpcMethodName
 > = {
+  listGrants: "session.listGrants",
+  revokeGrant: "session.revokeGrant",
+  revokeAllGrants: "session.revokeAllGrants",
   rewindTargets: "session.rewindTargets",
   interrupt: "session.interrupt",
   turnChanges: "session.turnChanges",
@@ -129,7 +142,9 @@ export const CONFIG_NOT_MAPPED = {
   base: "进程内合并结果；经 runtime.listModels / provider.describeProviders / runtime.describeSettings 获取",
   resolvedSettings: "进程内合并结果；经 runtime.describeSettings 获取",
   forWorkspace: "进程内合并入口；经 runtime.listModels / provider.describeProviders 获取",
-  setWorkspaceTrusted: "项目信任由 nctrn trust 管理，第一版不经 RPC",
+  listGrantWorkspaces: "Runtime 汇总打开会话目录并映射 grants.workspaces",
+  describeProject: "Runtime 校验参数后映射 grants.describeProject",
+  setWorkspaceTrusted: "Runtime 写入后广播 grants.changed，映射 grants.setTrusted",
   credentials: "凭据存储对象，含明文凭据，不离开服务端进程",
   clearProviderToggles:
     "停用条目幂等清理；删除时由 removeSetupProvider 内部调用，提交时由 commitProvider 内部调用",

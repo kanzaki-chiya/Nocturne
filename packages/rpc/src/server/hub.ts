@@ -84,6 +84,7 @@ export class Hub {
   private readonly watchers = new Map<string, () => void>();
   private sessionsChangedTimer: ReturnType<typeof setTimeout> | undefined;
   private unsubscribeSchedule: (() => void) | undefined;
+  private unsubscribeGrants: (() => void) | undefined;
 
   get available(): boolean {
     return this.handle !== undefined && !this.stopping;
@@ -179,6 +180,14 @@ export class Hub {
   /** 握手创建 Runtime 成功后登记句柄与服务商配置 */
   setHandle(handle: RpcRuntimeHandle): void {
     this.handle = handle;
+    this.unsubscribeGrants?.();
+    this.unsubscribeGrants = handle.runtime.onGrantsChanged((payload) => {
+      if (this.stopping) return;
+      for (const peer of this.peers) {
+        if (peer.initialized)
+          peer.send({ jsonrpc: "2.0", method: "grants.changed", params: { ...payload } });
+      }
+    });
     this.unsubscribeSchedule?.();
     this.unsubscribeSchedule = handle.runtime.onScheduleChanged((payload) => {
       this.notifyScheduleChanged(payload);
@@ -402,6 +411,8 @@ export class Hub {
     this.watchers.clear();
     this.unsubscribeSchedule?.();
     this.unsubscribeSchedule = undefined;
+    this.unsubscribeGrants?.();
+    this.unsubscribeGrants = undefined;
     clearTimeout(this.sessionsChangedTimer);
     this.sessionsChangedTimer = undefined;
     for (const session of sessions) session.interrupt();

@@ -42,6 +42,8 @@ async function reaches(call: Promise<unknown>): Promise<void> {
 /** 撤销手机后仍会生效的写入方法，以及电脑独占的只读设置查询 */
 const STILL_LOCAL = [
   "shutdown",
+  "grants.setTrusted",
+  "grants.describeProject",
   "runtime.updateSettings",
   "runtime.setDefaultModel",
   "runtime.setModelRole",

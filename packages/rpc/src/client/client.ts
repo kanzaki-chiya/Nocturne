@@ -172,6 +172,9 @@ export interface Subscription {
 
 /** 与进程内 `RuntimeSession` 同名的方法，全部异步化；`sessionId` 已绑定 */
 export interface RpcSession {
+  listGrants(): Promise<RpcResult<"session.listGrants">>;
+  revokeGrant(input: Omit<RpcParams<"session.revokeGrant">, "sessionId">): Promise<void>;
+  revokeAllGrants(): Promise<void>;
   describeSkills(): Promise<SkillsDescription>;
   describeExternalAgents(): Promise<ExternalAgentsDescription>;
   readonly id: string;
@@ -216,6 +219,14 @@ export interface RpcSession {
 
 /** 与进程内 `Runtime` 同名的方法；`undefined` 的返回在线上是 `null`，这里还原 */
 export interface RpcRuntime {
+  listGrantWorkspaces(): Promise<RpcResult<"grants.workspaces">>;
+  listGrants(input: RpcParams<"grants.list">): Promise<RpcResult<"grants.list">>;
+  revokeGrant(input: RpcParams<"grants.revoke">): Promise<void>;
+  revokeAllGrants(input: RpcParams<"grants.revokeAll">): Promise<void>;
+  describeProject(
+    input: RpcParams<"grants.describeProject">,
+  ): Promise<RpcResult<"grants.describeProject">>;
+  setWorkspaceTrusted(input: RpcParams<"grants.setTrusted">): Promise<void>;
   describeExternalAgents(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<ExternalAgentsDescription>;
@@ -657,6 +668,13 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     const p = { sessionId };
     const handle: RpcSession = {
       id: sessionId,
+      listGrants: () => call("session.listGrants", p),
+      revokeGrant: async (input) => {
+        await call("session.revokeGrant", { ...p, ...input });
+      },
+      revokeAllGrants: async () => {
+        await call("session.revokeAllGrants", p);
+      },
       async subscribe(listener, subscribeOptions) {
         // 同一会话同一时刻一个订阅：再次订阅替换之前的监听器（重连、换视图时用）。
         // 回放是推给"这一路订阅"的，保留旧监听器会让它收到重复的回放
@@ -757,6 +775,18 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   };
 
   const runtime: RpcRuntime = {
+    listGrantWorkspaces: () => call("grants.workspaces", {}),
+    listGrants: (input) => call("grants.list", input),
+    revokeGrant: async (input) => {
+      await call("grants.revoke", input);
+    },
+    revokeAllGrants: async (input) => {
+      await call("grants.revokeAll", input);
+    },
+    describeProject: (input) => call("grants.describeProject", input),
+    setWorkspaceTrusted: async (input) => {
+      await call("grants.setTrusted", input);
+    },
     describeExternalAgents: (input = {}) => call("agents.describeExternalAgents", input),
     saveExternalAgent: (input) => call("agents.saveExternalAgent", input),
     deleteExternalAgent: async (input) => {
