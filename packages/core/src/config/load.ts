@@ -23,7 +23,7 @@ import { modelsDevSnapshot } from "./models-dev-snapshot.js";
 import { createCredentialStore } from "./credentials.js";
 import { describeMcp, loadMcpStore, McpSettingsError } from "./mcp.js";
 import { describeExternalAgents, loadExternalAgentStore } from "./external-agents.js";
-import { grantWorkspaces, loadGrantStore, type LoadedGrantStore } from "./grants.js";
+import { grantWorkspaces, sharedGrantStore, type LoadedGrantStore } from "./grants.js";
 import { loadMagpieLayer, MAGPIE_FILE_NAME } from "./magpie.js";
 import {
   mergeLayers,
@@ -93,14 +93,6 @@ function setupLayers(setupFile: ProviderSetupFile, providersPath: string): Merge
 export async function loadConfig(
   platform: Platform,
   options: LoadConfigOptions = {},
-): Promise<RuntimeConfig> {
-  return loadConfigWithGrantStores(platform, options, new Map());
-}
-
-async function loadConfigWithGrantStores(
-  platform: Platform,
-  options: LoadConfigOptions,
-  grantStores: Map<string, Promise<LoadedGrantStore>>,
 ): Promise<RuntimeConfig> {
   const { fs, paths } = platform;
   const home = paths.resolve(options.nocturneHome ?? platform.nocturneHome(), ".");
@@ -527,15 +519,7 @@ async function loadConfigWithGrantStores(
   }
 
   async function grantsFor(workspaceRoot: string): Promise<LoadedGrantStore> {
-    const realRoot = await platform.resolveReal(workspaceRoot);
-    const key = paths.canonicalize(realRoot);
-    let loaded = grantStores.get(key);
-    if (loaded === undefined) {
-      loaded = loadGrantStore(platform, grantsDir, realRoot);
-      grantStores.set(key, loaded);
-      loaded.catch(() => grantStores.delete(key));
-    }
-    return loaded;
+    return sharedGrantStore(platform, grantsDir, await platform.resolveReal(workspaceRoot));
   }
 
   async function forWorkspace(workspaceRoot: string): Promise<WorkspaceConfig> {
@@ -677,12 +661,7 @@ async function loadConfigWithGrantStores(
   // 用户鉴权 URL 无效时在加载阶段失败，而不是等首次读取 base。
   base();
   return {
-    reload: () =>
-      loadConfigWithGrantStores(
-        platform,
-        { ...options, nocturneHome: home, credentials },
-        grantStores,
-      ),
+    reload: () => loadConfig(platform, { ...options, nocturneHome: home, credentials }),
     async listGrantWorkspaces(openWorkspaces, warn) {
       const trustNow = await readTrustList(platform, trustPath);
       if (trustNow.warning) warn(trustNow.warning);

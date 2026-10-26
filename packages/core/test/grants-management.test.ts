@@ -111,6 +111,22 @@ it("配置重载保留项目授权存储，旧策略即时看到撤销和新增"
   );
 });
 
+it("两次独立 loadConfig（不经 reload）拿到同一存储，撤销影响旧策略", async () => {
+  const { config, home, workspace, platform } = await fixture();
+  const old = await config.forWorkspace(workspace);
+  await old.grants.add(grant);
+  const policy = createRulePolicy({
+    workspaceRoot: workspace,
+    caseSensitive: platform.caseSensitivePaths,
+    grants: { project: old.grants },
+  });
+  const independent = await loadConfig(platform, { nocturneHome: home, env: () => undefined });
+  const fresh = await independent.forWorkspace(workspace);
+  expect(fresh.grants).toBe(old.grants);
+  await fresh.grants.remove(grant.kind, grant.target);
+  expect(policy.evaluate([{ kind: grant.kind, target: grant.target }]).decision.action).toBe("ask");
+});
+
 it("配置重载共享缓存的加载失败可重试", async () => {
   const { config, workspace, platform } = await fixture();
   const originalExists = platform.fs.exists.bind(platform.fs);

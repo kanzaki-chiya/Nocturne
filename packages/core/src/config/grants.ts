@@ -80,6 +80,38 @@ function corruptBackupPath(filePath: string): string {
 }
 
 /**
+ * 进程级 Grant 存储缓存（config.md 第 4 节）：键为规范化的 grantsDir 与工作区
+ * 真实路径。同一进程里不管谁、经哪条路径重新 loadConfig，同一 NOCTURNE_HOME
+ * 下同一工作区都拿到同一个存储对象，已建策略即时看到撤销与新增。
+ * 加载被拒绝的 Promise 从缓存删除，下次重试。
+ */
+const grantStoreCache = new Map<string, Promise<LoadedGrantStore>>();
+
+export function sharedGrantStore(
+  platform: Platform,
+  grantsDir: string,
+  workspaceRoot: string,
+): Promise<LoadedGrantStore> {
+  const { paths } = platform;
+  const key = `${paths.canonicalize(grantsDir)}\n${paths.canonicalize(workspaceRoot)}`;
+  let loaded = grantStoreCache.get(key);
+  if (loaded === undefined) {
+    const pending = loadGrantStore(platform, grantsDir, workspaceRoot);
+    grantStoreCache.set(key, pending);
+    pending.catch(() => {
+      if (grantStoreCache.get(key) === pending) grantStoreCache.delete(key);
+    });
+    loaded = pending;
+  }
+  return loaded;
+}
+
+/** 测试用：清空进程级 Grant 存储缓存，下一次加载重读磁盘 */
+export function resetGrantStoreCache(): void {
+  grantStoreCache.clear();
+}
+
+/**
  * 打开某工作区的 Grant 文件。workspaceRoot 必须是已解析的真实路径；
  * canonical 化与文件读写都由本模块完成。
  */

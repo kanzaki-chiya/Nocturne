@@ -205,7 +205,7 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 - 客户端回复 `PermissionReply.remember = "session" | "project"` 时生成对应 Grant；`remember` 与 `decision: "deny"` 组合无意义，忽略 `remember`。
 - **坏条目与损坏文件**：加载时逐条校验，跳过无效条目并发一次警告，其余照常生效；只有 JSON 解析失败、版本不符或 `workspaceRoot` 不符时才把整份文件按空处理。这种情况下第一次 `add` 之前先把原文件改名备份为 `<原名>.corrupt-<时间戳>.json`，不得直接覆盖。
 - **`add` 去重**：`kind` 和 `target` 都相同的授权已存在时不再追加，也不重写文件。
-- **管理与撤销**（[ADR-0068](../decisions/ADR-0068-grants-management.md)）：`GrantStore.remove(kind, target)`、`clear()` 与 `add` 共用串行原子写，写盘成功后才更新内存，失败抛错且列表不变；全部撤销保留空数组文件。同一配置及其重载代际按真实工作区共享 store（[config.md 第 4 节](config.md#4-grant-的持久化)），权限层每次求值读取最新集合；撤销从下一次调用生效，不改变等待中或执行中的调用。
+- **管理与撤销**（[ADR-0068](../decisions/ADR-0068-grants-management.md)）：`GrantStore.remove(kind, target)`、`clear()` 与 `add` 共用串行原子写，写盘成功后才更新内存，失败抛错且列表不变；全部撤销保留空数组文件。同一进程内按 NOCTURNE_HOME 与真实工作区共享 store，重新加载配置不重建（[config.md 第 4 节](config.md#4-grant-的持久化)），权限层每次求值读取最新集合；撤销从下一次调用生效，不改变等待中或执行中的调用。
 - `RuntimeSession.listGrants/revokeGrant/revokeAllGrants` 管理会话树共享的内存集合。活动子会话没有 RuntimeSession，因此 Runtime 另提供 `listSessionGrants({ sessionId })`、`revokeSessionGrant({ sessionId, kind, target })`、`revokeAllSessionGrants({ sessionId })`，在 Core 内沿活动登记簿解析到根，供 RPC 原有 `session.*` 方法转发；已关闭的树无内存授权。根和子会话的下一次判定同时生效。管理入口不是模型工具，授权数据保护规则不变。
 
 ## 6. 预设

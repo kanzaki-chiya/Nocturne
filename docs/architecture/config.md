@@ -259,7 +259,7 @@ CLI 注入无状态的 `createAcpConnector(platform)`。Core 从当前合并配�
 
 ## 4. Grant 的持久化
 
-同一进程内同一工作区的项目授权共享一份存储，配置重载不重建（同一 NOCTURNE_HOME 的配置与其 reload 代际共用缓存）。
+同一进程内同一 NOCTURNE_HOME 下同一工作区的项目授权共享一份存储，重新加载配置不重建：缓存是进程级的，按规范化的 grants 目录 + 工作区真实路径作键，不论经 `reload()` 还是重新调用 `loadConfig()`（CLI/TUI 的 `/login`、`/provider` 等）都拿到同一对象。加载被拒绝时从缓存移除、下次重试；损坏文件按空集合加载并告警，照常缓存。
 
 项目 Grant 是运行期积累的授权记录（不是配置，不写入 `config.json`），按工作区存放在 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`（`{ version: 1, workspaceRoot, grants }`），形状、匹配、原子增删、坏条目跳过与损坏备份规则见 [permissions.md](permissions.md) 第 5.4 节。
 

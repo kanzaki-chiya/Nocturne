@@ -2,7 +2,7 @@
  * config 模块测试（config.md）：分层合并、schema 校验、信任模型、Grant 持久化。
  * 全部在临时目录中运行，不写真实用户目录。
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -16,6 +16,7 @@ import {
   type CliConfigArgs,
 } from "../src/config/index.js";
 import type { Grant } from "../src/protocol/index.js";
+import { resetGrantStoreCache } from "../src/config/grants.js";
 import { parseConfigFile } from "../src/config/schema.js";
 import { mergeLayers } from "../src/config/merge.js";
 import { createPolicyGate, createRulePolicy } from "../src/permission/index.js";
@@ -460,6 +461,10 @@ describe("项目配置信任", () => {
 });
 
 describe("Grant 持久化", () => {
+  // 授权存储进程级共享（config.md 第 4 节）；本组共用一个 home 并手工改写文件，
+  // 每项前清缓存，「重新加载后可读」在第二次加载前也清，确保验证的是磁盘往返
+  beforeEach(() => resetGrantStoreCache());
+
   it("add 原子写文件，重新加载后可读", async () => {
     const rc = await load();
     const ws = await rc.forWorkspace(workspace);
@@ -467,6 +472,7 @@ describe("Grant 持久化", () => {
     await ws.grants.add(grant);
     expect(ws.grants.list()).toEqual([grant]);
 
+    resetGrantStoreCache();
     const rc2 = await load();
     const ws2 = await rc2.forWorkspace(workspace);
     expect(ws2.grants.list()).toEqual([grant]);
@@ -503,6 +509,7 @@ describe("Grant 持久化", () => {
     await ws.grants.add(shell);
     expect(ws.grants.list()).toEqual([subagent, shell]);
 
+    resetGrantStoreCache();
     const rc2 = await load();
     const ws2 = await rc2.forWorkspace(workspace);
     expect(ws2.grants.list()).toEqual([subagent, shell]);
@@ -550,6 +557,7 @@ describe("Grant 持久化", () => {
     expect(events.filter((e) => e.type === "permission.requested")).toHaveLength(1);
 
     // 新会话重新加载同样放行
+    resetGrantStoreCache();
     const rc2 = await load();
     const ws2 = await rc2.forWorkspace(workspace);
     expect(ws2.grants.list()).toEqual([

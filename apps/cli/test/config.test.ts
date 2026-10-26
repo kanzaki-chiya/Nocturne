@@ -3,11 +3,16 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createPlatform, createRuntime } from "@nocturne/core";
+import { createPlatform, createRuntime, FakeProvider, type FakeScript } from "@nocturne/core";
 import { parseArgs } from "../src/args.js";
 
 import type { CliArgs } from "../src/args.js";
-import { collectConfig, configProblemsReport, normalizeModelRef } from "../src/config.js";
+import {
+  collectConfig,
+  configProblemsReport,
+  makeConfigLoader,
+  normalizeModelRef,
+} from "../src/config.js";
 
 const platform = createPlatform();
 
@@ -221,6 +226,54 @@ describe("Provider 配置收集（cli.md 第 8 节）", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.config.model).toBeUndefined();
+  });
+});
+
+describe("makeConfigLoader 重载（TUI /login、/provider 路径）", () => {
+  it("两次加载后撤销项目授权，已开会话下一次重新询问", async () => {
+    writeFileSync(
+      path.join(home, "config.json"),
+      JSON.stringify({ modelsDev: false, skills: { sources: { agents: false, claude: false } } }),
+    );
+    const workspace = mkdtempSync(path.join(tmpdir(), "nct-cli-ws-"));
+    const reloadConfig = makeConfigLoader(base, platform, () => undefined);
+    const write: FakeScript = [
+      { type: "tool_call", toolCallId: "w", name: "write", input: { path: "a.txt", content: "a" } },
+      { type: "finish", reason: "tool_calls" },
+    ];
+    const done: FakeScript = [
+      { type: "text_delta", text: "done" },
+      { type: "finish", reason: "stop" },
+    ];
+    const runtime = await createRuntime({
+      config: await reloadConfig(),
+      cwd: workspace,
+      interactive: true,
+      providers: [new FakeProvider({ scripts: [write, done, write, done] })],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    const requests: string[] = [];
+    session.subscribe((event) => {
+      if (event.type === "permission.requested") {
+        requests.push(event.payload.requestId);
+        void session.respondPermission(event.payload.requestId, {
+          decision: "allow",
+          remember: "project",
+        });
+      }
+    });
+    try {
+      await session.submit({ text: "first" });
+      const entry = (await runtime.listGrants({ workspace }))[0];
+      if (!entry) throw new Error("missing grant");
+      await runtime.updateProviders(await reloadConfig());
+      await runtime.revokeGrant({ workspace, kind: entry.kind, target: entry.target });
+      await session.submit({ text: "again" });
+      expect(requests).toHaveLength(2);
+    } finally {
+      await session.close();
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 });
 
