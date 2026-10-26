@@ -622,6 +622,14 @@
   font-size: var(--fs-2);
   color: var(--a-muted);
 }
+/* 权限浮层页脚：文字与说明行对齐，按钮保留触控区但不缩进文字 */
+.phone .session-grants {
+  padding: 10px;
+}
+.phone .session-grants button {
+  padding-inline: 10px;
+  margin-inline: -10px;
+}
 .phone .phone-option {
   display: flex;
   align-items: center;
