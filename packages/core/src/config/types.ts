@@ -339,6 +339,8 @@ export interface GrantStore {
   list(): Grant[];
   /** 追加一条并原子重写文件；失败时抛错，由调用方降级为会话 Grant */
   add(grant: Grant): Promise<void>;
+  remove(kind: Grant["kind"], target: string): Promise<void>;
+  clear(): Promise<void>;
 }
 
 export interface WorkspaceConfig {
@@ -623,6 +625,13 @@ export type SettingsPatch = Partial<{
  * base 不含项目层；forWorkspace 按会话 workspaceRoot 加载项目层与 Grant。
  */
 export interface RuntimeConfig {
+  listGrantWorkspaces(
+    openWorkspaces: string[],
+    warn: (message: string) => void,
+  ): Promise<import("../protocol/grants.js").GrantWorkspace[]>;
+  describeProject(
+    workspace: string,
+  ): Promise<import("../protocol/grants.js").ProjectTrustDescription>;
   skillConfig(): SkillsConfig;
   disabledSkills(): string[];
   setSkillEnabled(name: string, enabled: boolean): Promise<void>;

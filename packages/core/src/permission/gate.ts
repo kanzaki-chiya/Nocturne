@@ -164,6 +164,7 @@ export function createPolicyGate(
         action: decision.action === "allow" ? "allow" : "deny",
         source: decision.source,
         rule: ruleDesc,
+        grant: decision.matchedRule?.grant,
         remember: extra?.remember,
         feedback: extra?.feedback,
       },
@@ -349,6 +350,15 @@ export function createPolicyGate(
       };
     }
     if (decision.action !== "ask") {
+      if (decision.source === "grant") {
+        await emitResolved(
+          { callId },
+          decision,
+          decision.matchedRule?.description ?? decision.reason,
+          turn,
+        );
+        return { subjects: evaluation.subjects, decision, resolvedEmitted: turn !== undefined };
+      }
       return { subjects: evaluation.subjects, decision };
     }
 

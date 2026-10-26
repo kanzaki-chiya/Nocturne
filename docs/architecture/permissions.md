@@ -185,7 +185,7 @@ Jev 的 `usage.input_tokens/output_tokens` 转为 `ReviewResult.usage`，沿用 
 
 - **shell 组合命令**：命令包含 `&&`、`||`、`;`、`|`、换行、反引号、`$(`、重定向等控制符时，基于模式的 `allow` 规则不适用（规则照常匹配，但 `allow` 结果按 `ask` 对待，`deny` 仍为 `deny`）；Grant 对命令本来就只能精确匹配完整字符串（5.4），不受此影响。这避免 `git status*` 放行 `git status && rm -rf .`。例外是全放行规则（`pattern` 为 `*`，如 `guarded` 的 shell 规则）：它本来就放行任何命令，降级只会让带管道、`2>&1` 的普通命令全部来问，所以改为把命令按控制符拆段、逐段求值，任一段得到 `ask`/`deny`（如第 6 节的高风险命令、用户的 `deny` 规则）就取最严格者。拆段按原始文本切分、刻意不做引号感知：`sh -c "cd x; rm -rf build"` 里引号内的命令同样会执行，要切出 `rm -rf build"` 才能命中高风险表；组合判定同样看原始文本。拆分边界随主体 `shell` 字段的方言（ADR-0022）：PowerShell 系额外把脚本块 `{` `}` 视为边界（`&` 在两种方言里都切——调用运算符与后台运算符后面的内容照常成段求值），cmd / POSIX 保持原集合。shell 工具的末尾分页预检用另一个引号感知的词法器（`lexShellCommand`，[tools.md](tools.md) 第 6 节），它只用于提示，不参与权限判定。拆段是基于模式的提示，不是 shell 解析器，与第 6 节高风险命令一样不构成安全边界。
 - **`--yes` 的边界**：`autoApproveAsk` 只把最终求值结果为 `ask` 的调用提升为 `allow`（`source` 记 `rule`，理由注明来自命令行）。它不覆盖显式 `deny`（包括不可信项目规则的 `deny`），不绕过输入校验、主体解析或工具自身边界；转换在权限层完成，CLI 与工具实现不得自行放行。
-- **可解释**：决定中记录命中的规则及其来源：`matchedRule = { origin, index?, rule? }`，`origin` 取 `preset` / `user` / `project` / `project-untrusted` / `cli` / `grant` / `default`（兜底 ask，无规则本体）；人读说明形如"预设 default 第 3 条""用户配置第 1 条""项目配置第 2 条（不可信，仅收紧）""Grant（项目）"。没有命中任何规则而落到 `ask` 时 `origin` 为 `default`，说明为"默认询问"。
+- **可解释**：决定中记录命中的规则及其来源：`matchedRule = { origin, index?, rule?, description, grant? }`；授权命中时 `grant = { scope: "session" | "project", createdAt }`，原样写入 `tool.started.permission` 和 `permission.resolved`（旧日志缺省），`origin` 取 `preset` / `user` / `project` / `project-untrusted` / `cli` / `grant` / `default`（兜底 ask，无规则本体）；人读说明形如"预设 default 第 3 条""用户配置第 1 条""项目配置第 2 条（不可信，仅收紧）""Grant（项目）"。没有命中任何规则而落到 `ask` 时 `origin` 为 `default`，说明为"默认询问"。
 
 ### 5.4 Grant 的形状与匹配
 
@@ -205,6 +205,8 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 - 客户端回复 `PermissionReply.remember = "session" | "project"` 时生成对应 Grant；`remember` 与 `decision: "deny"` 组合无意义，忽略 `remember`。
 - **坏条目与损坏文件**：加载时逐条校验，跳过无效条目并发一次警告，其余照常生效；只有 JSON 解析失败、版本不符或 `workspaceRoot` 不符时才把整份文件按空处理。这种情况下第一次 `add` 之前先把原文件改名备份为 `<原名>.corrupt-<时间戳>.json`，不得直接覆盖。
 - **`add` 去重**：`kind` 和 `target` 都相同的授权已存在时不再追加，也不重写文件。
+- **管理与撤销**（[ADR-0068](../decisions/ADR-0068-grants-management.md)）：`GrantStore.remove(kind, target)`、`clear()` 与 `add` 共用串行原子写，写盘成功后才更新内存，失败抛错且列表不变；全部撤销保留空数组文件。同一配置实例按真实工作区共享 store，权限层每次求值读取最新集合；撤销从下一次调用生效，不改变等待中或执行中的调用。
+- `RuntimeSession.listGrants/revokeGrant/revokeAllGrants` 管理会话树共享的内存集合。活动子会话没有 RuntimeSession，因此 Runtime 另提供 `listSessionGrants({ sessionId })`、`revokeSessionGrant({ sessionId, kind, target })`、`revokeAllSessionGrants({ sessionId })`，在 Core 内沿活动登记簿解析到根，供 RPC 原有 `session.*` 方法转发；已关闭的树无内存授权。根和子会话的下一次判定同时生效。管理入口不是模型工具，授权数据保护规则不变。
 
 ## 6. 预设
 

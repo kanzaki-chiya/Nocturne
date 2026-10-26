@@ -425,6 +425,10 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
           action: "allow",
           hit: {
             origin: "grant",
+            grant: {
+              scope: sessionHit !== undefined ? "session" : "project",
+              createdAt: grant.createdAt,
+            },
             description: `Grant（${sessionHit !== undefined ? "本会话" : "本项目"}）：${s.kind} ${grant.target}`,
           },
         };

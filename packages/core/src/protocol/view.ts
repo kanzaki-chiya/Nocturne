@@ -169,7 +169,13 @@ export interface ToolEntry {
   target?: { name: string; input: unknown } | undefined;
   subjects: PermissionSubject[];
   permission:
-    { action: PermissionAction; source: PermissionSource; rule: string | undefined } | undefined;
+    | {
+        action: PermissionAction;
+        source: PermissionSource;
+        rule: string | undefined;
+        grant?: { scope: "session" | "project"; createdAt: string } | undefined;
+      }
+    | undefined;
   resolution: PermissionResolvedPayload | undefined;
   review?: PermissionReviewedPayload | undefined;
   /** tool.progress 累计；completed 时清空，收敛点上必为空 */
@@ -516,6 +522,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         action: p.permission.action,
         source: p.permission.source,
         rule: p.permission.rule,
+        grant: p.permission.grant,
       };
       break;
     }

@@ -227,6 +227,7 @@ const payloadSchemas = {
       action: permissionActionSchema,
       source: permissionSourceSchema,
       rule: z.string().optional(),
+      grant: z.object({ scope: z.enum(["session", "project"]), createdAt: z.string() }).optional(),
     }),
     pinResult: z.boolean().optional(),
     mutates: z.boolean().optional(),
@@ -257,6 +258,7 @@ const payloadSchemas = {
     source: permissionSourceSchema,
     rule: z.string().optional(),
     remember: z.enum(["session", "project"]).optional(),
+    grant: z.object({ scope: z.enum(["session", "project"]), createdAt: z.string() }).optional(),
     feedback: z.string().optional(),
   }),
   "tool.completed": z.object({

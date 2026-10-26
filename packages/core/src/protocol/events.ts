@@ -111,7 +111,12 @@ export interface ToolStartedPayload {
   /** 解析后的权限主体 */
   subjects: PermissionSubject[];
   /** `rule` 为命中规则的人读说明（permissions.md 5.3） */
-  permission: { action: PermissionAction; source: PermissionSource; rule?: string | undefined };
+  permission: {
+    action: PermissionAction;
+    source: PermissionSource;
+    rule?: string | undefined;
+    grant?: { scope: "session" | "project"; createdAt: string } | undefined;
+  };
   /** 工具声明其结果参与历史折叠（tools.md 第 4 节 pinResult）；缺省同 false */
   pinResult?: boolean | undefined;
   mutates?: boolean | undefined;
@@ -150,6 +155,7 @@ export interface PermissionResolvedPayload {
   source: PermissionSource;
   rule?: string | undefined;
   remember?: "session" | "project" | undefined;
+  grant?: { scope: "session" | "project"; createdAt: string } | undefined;
   feedback?: string | undefined;
 }
 

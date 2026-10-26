@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import { subjectKindSchema, type Grant } from "../protocol/index.js";
 import type { Platform } from "../platform/index.js";
-import { writeJsonAtomic } from "./files.js";
+import { enqueueConfigWrite, writeJsonAtomic } from "./files.js";
 import type { GrantStore } from "./types.js";
 
 const grantSchema = z.object({
@@ -43,6 +43,32 @@ export interface LoadedGrantStore {
   store: GrantStore;
   /** 文件损坏/版本不符或含坏条目时的警告（按空集合或跳过后集合处理） */
   warning?: string | undefined;
+}
+
+export async function grantWorkspaces(
+  platform: Platform,
+  grantsDir: string,
+  warn: (message: string) => void,
+): Promise<string[]> {
+  if (!(await platform.fs.exists(grantsDir))) return [];
+  const roots: string[] = [];
+  for (const entry of await platform.fs.readdir(grantsDir)) {
+    if (entry.type !== "file" || !entry.name.endsWith(".json") || entry.name.includes(".corrupt-"))
+      continue;
+    try {
+      const data = grantsFileSchema.parse(JSON.parse(await platform.fs.readTextFile(entry.path)));
+      const canonical = platform.paths.canonicalize(data.workspaceRoot);
+      if (
+        !platform.paths.isAbsolute(data.workspaceRoot) ||
+        entry.name !== `${workspaceKey(canonical)}.json`
+      )
+        throw new Error("workspace mismatch");
+      roots.push(data.workspaceRoot);
+    } catch {
+      warn(`项目授权文件 ${entry.path} 损坏或版本不符，已跳过`);
+    }
+  }
+  return roots;
 }
 
 function corruptBackupPath(filePath: string): string {
@@ -99,26 +125,41 @@ export async function loadGrantStore(
     }
   }
 
-  let backedUp = false;
+  const update = (next: () => Grant[], force = false): Promise<void> =>
+    enqueueConfigWrite(fs, async () => {
+      const entries = next();
+      if (
+        !force &&
+        !corrupt &&
+        entries.length === grants.length &&
+        entries.every((entry, i) => entry === grants[i])
+      )
+        return;
+      if (corrupt) {
+        if (await fs.exists(filePath)) {
+          await fs.rename(filePath, corruptBackupPath(filePath));
+        }
+      }
+      await writeJsonAtomic(fs, paths, filePath, {
+        version: 1,
+        workspaceRoot,
+        grants: entries,
+      });
+      corrupt = false;
+      grants.splice(0, grants.length, ...entries);
+    });
   return {
     store: {
-      list: () => [...grants],
-      async add(grant) {
-        if (grants.some((g) => g.kind === grant.kind && g.target === grant.target)) return;
-        grants.push(grant);
-        if (corrupt && !backedUp) {
-          backedUp = true;
-          if (await fs.exists(filePath)) {
-            await fs.rename(filePath, corruptBackupPath(filePath));
-          }
-          corrupt = false;
-        }
-        await writeJsonAtomic(fs, paths, filePath, {
-          version: 1,
-          workspaceRoot,
-          grants,
-        });
-      },
+      list: () => grants.map((grant) => ({ ...grant })),
+      add: (grant) =>
+        update(() =>
+          grants.some((g) => g.kind === grant.kind && g.target === grant.target)
+            ? [...grants]
+            : [...grants, { ...grant }],
+        ),
+      remove: (kind, target) =>
+        update(() => grants.filter((g) => g.kind !== kind || g.target !== target)),
+      clear: () => update(() => [], true),
     },
     warning,
   };

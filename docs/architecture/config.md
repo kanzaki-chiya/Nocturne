@@ -259,7 +259,11 @@ CLI 注入无状态的 `createAcpConnector(platform)`。Core 从当前合并配�
 
 ## 4. Grant 的持久化
 
-项目 Grant 是运行期积累的授权记录（不是配置，不写入 `config.json`），按工作区存放在 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`，形状、匹配、坏条目跳过与损坏备份规则见 [permissions.md](permissions.md) 第 5.4 节。
+项目 Grant 是运行期积累的授权记录（不是配置，不写入 `config.json`），按工作区存放在 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`（`{ version: 1, workspaceRoot, grants }`），形状、匹配、原子增删、坏条目跳过与损坏备份规则见 [permissions.md](permissions.md) 第 5.4 节。
+
+授权管理（[ADR-0068](../decisions/ADR-0068-grants-management.md)）的工作区汇总合并授权文件的 `workspaceRoot`、`trust.json` 和已打开会话目录，按真实路径去重，返回 `{ workspace, grantCount, trusted, hasProjectConfig }[]`。损坏、版本不符、文件名与工作区键不符的授权文件跳过，并向已打开会话发 `runtime.warning(grants_invalid)`（同时记诊断）。信任状态来自 `trust.json`；查询不会启动项目进程。
+
+`Runtime.describeProject({ workspace })` 只读校验项目配置，返回 `{ mcpServers: [{ name, command }], hooks: [{ event, count }], relaxedRuleCount }`，命令包含参数，放宽规则统计 `action: allow`；不启动 MCP、不执行 Hook。`setWorkspaceTrusted({ workspace, trusted })` 复用原子信任写入，新开或恢复会话时应用项目配置。授权与信任变化通过易失的 `grants.changed` 通知刷新客户端，方法与远程边界见 [rpc.md](../protocols/rpc.md)。
 
 ## 5. 环境变量层
 
@@ -310,5 +314,5 @@ CLI:   loadConfig(platform, { cliArgs })          → RuntimeConfig
 
 - Nocturne 服务商的内联凭据值（`config.json` 与 `providers.json` 不存服务商密钥；API key 只在环境变量或系统凭据后端，账号记录的明文例外只在 `credentials.json`，见 [provider-setup.md](provider-setup.md) 第 3 节）；外部 agent 的字符串 `env` 不接入该凭据库，见第 2 节；
 - JSONC / TOML / 其他格式（ADR-0007 记录了取舍）；
-- 通用的配置编辑命令（服务商的交互配置见 [provider-setup.md](provider-setup.md)）、Grant 的查看与撤销界面；
+- 通用的配置编辑命令（服务商的交互配置见 [provider-setup.md](provider-setup.md)）；
 - 每会话不同的用户配置 profile。

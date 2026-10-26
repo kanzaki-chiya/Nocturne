@@ -23,7 +23,7 @@ import { modelsDevSnapshot } from "./models-dev-snapshot.js";
 import { createCredentialStore } from "./credentials.js";
 import { describeMcp, loadMcpStore, McpSettingsError } from "./mcp.js";
 import { describeExternalAgents, loadExternalAgentStore } from "./external-agents.js";
-import { loadGrantStore } from "./grants.js";
+import { grantWorkspaces, loadGrantStore, type LoadedGrantStore } from "./grants.js";
 import { loadMagpieLayer, MAGPIE_FILE_NAME } from "./magpie.js";
 import {
   mergeLayers,
@@ -518,6 +518,19 @@ export async function loadConfig(
     }
   }
 
+  const grantStores = new Map<string, Promise<LoadedGrantStore>>();
+  async function grantsFor(workspaceRoot: string): Promise<LoadedGrantStore> {
+    const realRoot = await platform.resolveReal(workspaceRoot);
+    const key = paths.canonicalize(realRoot);
+    let loaded = grantStores.get(key);
+    if (loaded === undefined) {
+      loaded = loadGrantStore(platform, grantsDir, realRoot);
+      grantStores.set(key, loaded);
+      loaded.catch(() => grantStores.delete(key));
+    }
+    return loaded;
+  }
+
   async function forWorkspace(workspaceRoot: string): Promise<WorkspaceConfig> {
     const realRoot = await platform.resolveReal(workspaceRoot);
     const canonical = paths.canonicalize(realRoot);
@@ -583,7 +596,7 @@ export async function loadConfig(
       }
     }
 
-    const loaded = await loadGrantStore(platform, grantsDir, realRoot);
+    const loaded = await grantsFor(realRoot);
     if (loaded.warning !== undefined) resolved.warnings.push(loaded.warning);
 
     return {
@@ -658,6 +671,57 @@ export async function loadConfig(
   base();
   return {
     reload: () => loadConfig(platform, { ...options, nocturneHome: home, credentials }),
+    async listGrantWorkspaces(openWorkspaces, warn) {
+      const trustNow = await readTrustList(platform, trustPath);
+      if (trustNow.warning) warn(trustNow.warning);
+      const roots = [
+        ...(await grantWorkspaces(platform, grantsDir, warn)),
+        ...trustNow.workspaces,
+        ...openWorkspaces,
+      ];
+      const unique = new Map<string, string>();
+      for (const root of roots) {
+        const real = await platform.resolveReal(root);
+        unique.set(paths.canonicalize(real), real);
+      }
+      return Promise.all(
+        [...unique].map(async ([key, workspace]) => {
+          const loaded = await grantsFor(workspace);
+          if (loaded.warning) warn(loaded.warning);
+          return {
+            workspace,
+            grantCount: loaded.store.list().length,
+            trusted: trustNow.workspaces.has(key),
+            hasProjectConfig: await fs.exists(
+              paths.join(workspace, PROJECT_CONFIG_DIR, PROJECT_CONFIG_NAME),
+            ),
+          };
+        }),
+      );
+    },
+    async describeProject(workspace) {
+      const root = await platform.resolveReal(workspace);
+      const file = await loadConfigFile(
+        fs,
+        paths.join(root, PROJECT_CONFIG_DIR, PROJECT_CONFIG_NAME),
+        "project",
+      );
+      return {
+        mcpServers: Object.entries(file?.mcp?.servers ?? {}).map(([name, entry]) => ({
+          name,
+          command:
+            entry.type === "http"
+              ? (entry.url ?? "")
+              : [entry.command, ...(entry.args ?? [])].join(" "),
+        })),
+        hooks: Object.entries(file?.hooks ?? {}).map(([event, entries]) => ({
+          event,
+          count: entries.length,
+        })),
+        relaxedRuleCount: (file?.permissions?.rules ?? []).filter((rule) => rule.action === "allow")
+          .length,
+      };
+    },
     skillConfig: () => userFile.skills ?? {},
     disabledSkills: () => settings.store.disabledSkills(),
     setSkillEnabled: (name, enabled) => settings.store.setSkillEnabled(name, enabled),

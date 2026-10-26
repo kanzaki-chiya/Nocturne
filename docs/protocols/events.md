@@ -74,9 +74,9 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `turn.started` | ✓ | `turnIndex` |
 | `message.user` | ✓ | `messageId`、`content: ContentBlock[]`、`attachments?: ImageAttachment[]`、`fileRefs?: FileRef[]`（用户引用的快照元数据，见第 4 节）、`skill?: { name: string; body: string }`（渲染正文快照，末尾 content 同时含 skill 文本块）、`delegate?: { agent: string; task: string }`（外部委派任务原文快照，末尾 content 同时含明确的 task 工具指令；与 skill 互斥） |
 | `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`timing?: AssistantTiming`（请求计时，见第 4 节；旧日志无此字段）、`finishReason: FinishReason \| "aborted"`、`protocol?: "openai-compatible" \| "anthropic" \| "openai-responses"`（产生该消息时的生效协议，ADR-0026 §6、ADR-0031 §1；旧日志无此字段，缺省时 `providerData` 回传只比较服务商） |
-| `tool.started` | ✓ | `callId`、`name`、`input`（规范化后）、`target?: { name, input }`（经 `ToolTraits.dispatch` 代理调用时记录解析后的目标工具与目标输入，[ADR-0067](../decisions/ADR-0067-mcp-tool-search.md)）、`pinResult?: boolean`（工具结果不参与 L1 修剪）、`subjects: PermissionSubject[]`（解析后）、`permission: { action, source, rule? }`（`rule` 为命中规则的人读说明，见 [permissions.md](../architecture/permissions.md) 5.3） |
+| `tool.started` | ✓ | `callId`、`name`、`input`（规范化后）、`target?: { name, input }`（经 `ToolTraits.dispatch` 代理调用时记录解析后的目标工具与目标输入，[ADR-0067](../decisions/ADR-0067-mcp-tool-search.md)）、`pinResult?: boolean`（工具结果不参与 L1 修剪）、`subjects: PermissionSubject[]`（解析后）、`permission: { action, source, rule?, grant?: { scope: "session" \| "project", createdAt } }`（`rule` 为命中规则的人读说明，见 [permissions.md](../architecture/permissions.md) 5.3） |
 | `permission.requested` | ✓ | `requestId`、`callId`、`subjects`、`reason`、`options`（权限层给出的选项子集：通常五项，高风险命令、编码命令或工作区外 edit 只有 `allow_once`、`deny`、`deny_stop`） |
-| `permission.resolved` | ✓ | `requestId?`、`callId`、`action: "allow" \| "deny"`、`source: "user" \| "rule" \| "grant" \| "non_interactive" \| "cancelled" \| "hook" \| "reviewer"`、`rule?`、`remember?`、`feedback?` |
+| `permission.resolved` | ✓ | `requestId?`、`callId`、`action: "allow" \| "deny"`、`source: "user" \| "rule" \| "grant" \| "non_interactive" \| "cancelled" \| "hook" \| "reviewer"`、`rule?`、`grant?: { scope: "session" \| "project", createdAt }`、`remember?`、`feedback?` |
 | `permission.reviewed` | ✓ | `callId`、`requestId?`、`backend`、`model?: ModelRef`、`verdict: "allow" \| "block" \| "unsure"`、`reason`、`durationMs`、`cached`、`usage?: Usage`（审查来源用量；缓存不重复收费） |
 | `tool.completed` | ✓ | `callId`、`name`、`status`、`modelContent`、`output?`、`error?`、`truncated?`、`spillPath?`（超预算输出的落盘文件绝对路径，见 [tools.md](../architecture/tools.md) 第 4 节）、`attachments?: ImageAttachment[]`（v0.5 新增：工具结果图片的附件引用，字节已落盘，见 [tools.md](../architecture/tools.md) 第 4 节）、`durationMs?` |
 
@@ -102,6 +102,8 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `aborted` | 用户中断，或在权限确认中选择"拒绝并停止" |
 | `max_steps` | 达到单 Turn 步数上限：只在显式配置主会话 `turn.maxSteps` 或子代理独立上限（默认 50）时出现；主对话默认不限步数 |
 | `error` | 不可恢复的错误：Provider 错误重试耗尽、意外的结束原因、压缩失败、Runtime 内部错误；`TurnStart` Hook 拦截时为 `error.code = "hook_blocked"`（hooks.md 第 1 节）。恢复修复补写的 Turn 也使用 `error`，`error.code = "process_exited"`，`recovered: true`。重复调用保护触发时为 `error.code = "loop_detected"`，`error.message` 说明重复的工具与次数（ADR-0063，见 [agent-loop.md](../architecture/agent-loop.md) 第 3.9 节） |
+
+授权命中的可选 `grant` 元数据由 `RuleHit.grant` 原样传入上述两个事件；`scope` 为 `session` / `project`，`createdAt` 为授权记录时间。旧日志没有该字段时仍可按 `source: "grant"` 显示「已授权」，不解析 `rule` 文案推断范围（[ADR-0068](../decisions/ADR-0068-grants-management.md)）。
 
 `permission.resolved` 在以下情况发出：经过用户确认的请求（有 `requestId`）；被规则直接拒绝的调用；由会话或项目授权放行原本需要确认的调用（`source: "grant"`）；Hook 直接结算的调用（`source: "hook"`——`PreToolUse` 的 deny/allow 与 `PermissionRequest` 的 allow/deny，`rule` 字段记 Hook 条目的人读描述，见 [hooks.md](../architecture/hooks.md)）。规则直接允许的调用不单独发事件，其决定记录在 `tool.started.permission` 中。审查 allow/block 也结算为 `permission.resolved(source: "reviewer")`，执行时 `tool.started.permission` 沿用该来源。
 

@@ -3,6 +3,12 @@
  * 客户端看到的全部能力都经由这里；进程内与将来的 RPC 客户端共用同一份语义（ADR-0002）。
  */
 import { z } from "zod";
+import {
+  subjectKindSchema,
+  type GrantWorkspace,
+  type ProjectTrustDescription,
+  type GrantsChangedPayload,
+} from "./protocol/index.js";
 import { McpSettingsError, validateMcpEntry } from "./config/mcp.js";
 import type {
   McpProbeInput,
@@ -404,6 +410,9 @@ export interface SubmitInput {
 export type { ReadAttachmentResult };
 
 export interface RuntimeSession {
+  listGrants(): Grant[];
+  revokeGrant(input: { kind: Grant["kind"]; target: string }): Promise<void>;
+  revokeAllGrants(): Promise<void>;
   describeSkills(): SkillsDescription;
   describeExternalAgents(): Promise<ExternalAgentsDescription>;
   rewindTargets(): Promise<RewindTarget[]>;
@@ -539,6 +548,20 @@ export interface ResumeSessionOptions {
 }
 
 export interface Runtime {
+  listSessionGrants(input: { sessionId: string }): Grant[];
+  revokeSessionGrant(input: {
+    sessionId: string;
+    kind: Grant["kind"];
+    target: string;
+  }): Promise<void>;
+  revokeAllSessionGrants(input: { sessionId: string }): Promise<void>;
+  listGrantWorkspaces(): Promise<GrantWorkspace[]>;
+  listGrants(input: { workspace: string }): Promise<Grant[]>;
+  revokeGrant(input: { workspace: string; kind: Grant["kind"]; target: string }): Promise<void>;
+  revokeAllGrants(input: { workspace: string }): Promise<void>;
+  describeProject(input: { workspace: string }): Promise<ProjectTrustDescription>;
+  setWorkspaceTrusted(input: { workspace: string; trusted: boolean }): Promise<void>;
+  onGrantsChanged(listener: (payload: GrantsChangedPayload) => void): () => void;
   /** 定时任务列表（ADR-0064）：带下次运行时间、上次结果、是否在运行，以及调度器状态 */
   listSchedules(): Promise<ScheduleListResult>;
   /** 新建（不带 id）或整体替换（带 id）；字段非法抛 `ScheduleError`（带 `field`，客户端据此标到输入框） */
@@ -995,6 +1018,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
    * 会话打开的最后一步整体登记；close 与打开失败共用同一撤销步骤移除（sessions.md 第 4 节）。
    */
   interface OpenSessionHooks {
+    grantWarning(message: string): void;
     shellCurrent(): ReturnType<ReturnType<typeof createShellResolver>["current"]>;
     shellChanged(
       before: ReturnType<ReturnType<typeof createShellResolver>["current"]>,
@@ -1012,6 +1036,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     applyFailed(scope: string, error: unknown): void;
   }
   const openSessions = new Map<string, OpenSessionHooks>();
+  const grantsListeners = new Set<(payload: GrantsChangedPayload) => void>();
+  const grantLists = new Map<string, Grant[]>();
+  const grantsChanged = (payload: GrantsChangedPayload): void => {
+    for (const listener of grantsListeners) {
+      try {
+        listener(payload);
+      } catch {
+        /* 监听者不能阻断授权操作。 */
+      }
+    }
+  };
   /** 每次配置广播递增；打开途中错过的广播在登记时补成待应用（下一 Turn 边界生效） */
   let configGeneration = 0;
   /**
@@ -1320,7 +1355,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       config === undefined ? registry : buildRegistry(resolved?.providers ?? []);
 
     // 权限策略：预设 + 分层规则 + Grant 集合；setPermissionPreset 重建
-    const sessionGrants: Grant[] = [];
+    let grantRootId = session.id;
+    let grantParent = meta.parent?.sessionId;
+    while (grantParent !== undefined && subagentRegistry.liveSession(grantParent) !== undefined) {
+      grantRootId = grantParent;
+      grantParent = subagentRegistry.liveSession(grantParent)?.state().meta.parent?.sessionId;
+    }
+    const sessionGrants: Grant[] = grantLists.get(grantRootId) ?? [];
+    grantLists.set(grantRootId, sessionGrants);
+    if (grantRootId === session.id)
+      teardown.push(() => {
+        grantLists.delete(grantRootId);
+      });
     const autoApproveAsk = options.permissions?.autoApproveAsk === true;
     // 凭据索引的内置硬拒绝（provider-setup.md 第 4 节）：词法路径与
     // realpath 后的真实路径都进集合（junction/符号链接不能绕过）
@@ -2271,6 +2317,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const titleController = new AbortController();
     let titleSettled: Promise<void> | undefined;
     const unsubscribeTitle = session.subscribe((event) => {
+      if (event.type === "permission.resolved" && event.payload.remember !== undefined) {
+        grantsChanged(
+          event.payload.remember === "project"
+            ? { workspace: meta.workspaceRoot }
+            : { sessionId: grantRootId },
+        );
+      }
       if (
         resume !== undefined ||
         meta.parent !== undefined ||
@@ -2354,6 +2407,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       pendingExternalAgents = true;
     }
     const runtimeHooks: OpenSessionHooks = {
+      grantWarning: (message) =>
+        session.emitEphemeral("runtime.warning", { code: "grants_invalid", message }),
       shellCurrent: () => shellResolver.current(),
       shellChanged: async (before) => {
         const after = shellResolver.current();
@@ -2513,6 +2568,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         // 压缩是 Turn 之外的会话级活动，interrupt 同样中止它
         compactController?.abort();
       },
+      listGrants: () => runtime.listSessionGrants({ sessionId: session.id }),
+      revokeGrant: (input) => runtime.revokeSessionGrant({ sessionId: session.id, ...input }),
+      revokeAllGrants: () => runtime.revokeAllSessionGrants({ sessionId: session.id }),
       async respondPermission(requestId, reply) {
         if ((await gate.respond?.(requestId, reply)) === true) {
           return;
@@ -3230,7 +3288,78 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
   };
 
+  const grantWorkspace = (input: { workspace: string }): string =>
+    z.string().min(1).parse(input.workspace);
+  const grantConfig = (): RuntimeConfig => {
+    if (config === undefined)
+      throw new RuntimeCommandError("invalid_command", "授权管理需要配置存储");
+    return config;
+  };
+  const sessionGrantRoot = (sessionId: string): string => {
+    z.string().min(1).parse(sessionId);
+    let current = subagentRegistry.liveSession(sessionId);
+    if (current === undefined) throw new RuntimeCommandError("invalid_command", "没有打开的会话");
+    while (current.state().meta.parent !== undefined) {
+      const parent = subagentRegistry.liveSession(current.state().meta.parent!.sessionId);
+      if (parent === undefined) break;
+      current = parent;
+    }
+    return current.id;
+  };
   const runtime: Runtime = {
+    listSessionGrants({ sessionId }) {
+      return (grantLists.get(sessionGrantRoot(sessionId)) ?? []).map((grant) => ({ ...grant }));
+    },
+    async revokeSessionGrant(input) {
+      const root = sessionGrantRoot(input.sessionId);
+      const kind = subjectKindSchema.parse(input.kind);
+      const target = z.string().min(1).parse(input.target);
+      const entries = grantLists.get(root) ?? [];
+      for (let i = entries.length - 1; i >= 0; i--) {
+        if (entries[i]?.kind === kind && entries[i]?.target === target) entries.splice(i, 1);
+      }
+      grantsChanged({ sessionId: root });
+    },
+    async revokeAllSessionGrants({ sessionId }) {
+      const root = sessionGrantRoot(sessionId);
+      grantLists.get(root)?.splice(0);
+      grantsChanged({ sessionId: root });
+    },
+    listGrantWorkspaces: () =>
+      grantConfig().listGrantWorkspaces(
+        [...openSessions.values()].map((hooks) => hooks.skillModel.workspaceRoot),
+        (message) => {
+          for (const hooks of openSessions.values()) hooks.grantWarning(message);
+          diagnostics.record("grants.warning", { message });
+        },
+      ),
+    async listGrants(input) {
+      return (await grantConfig().forWorkspace(grantWorkspace(input))).grants.list();
+    },
+    async revokeGrant(input) {
+      const workspace = grantWorkspace(input);
+      const kind = subjectKindSchema.parse(input.kind);
+      const target = z.string().min(1).parse(input.target);
+      await (await grantConfig().forWorkspace(workspace)).grants.remove(kind, target);
+      grantsChanged({ workspace });
+    },
+    async revokeAllGrants(input) {
+      const workspace = grantWorkspace(input);
+      await (await grantConfig().forWorkspace(workspace)).grants.clear();
+      grantsChanged({ workspace });
+    },
+    describeProject: (input) => grantConfig().describeProject(grantWorkspace(input)),
+    async setWorkspaceTrusted(input) {
+      const workspace = grantWorkspace(input);
+      await grantConfig().setWorkspaceTrusted(workspace, z.boolean().parse(input.trusted));
+      grantsChanged({ workspace });
+    },
+    onGrantsChanged(listener) {
+      grantsListeners.add(listener);
+      return () => {
+        grantsListeners.delete(listener);
+      };
+    },
     listSchedules: () => scheduleAccess.list(),
     saveSchedule: (input) => scheduleAccess.save(input),
     deleteSchedule: (input) => scheduleAccess.remove(input.id),

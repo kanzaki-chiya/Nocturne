@@ -22,5 +22,6 @@ export * from "./external-agents.js";
 export * from "./pricing.js";
 export * from "./usage.js";
 export * from "./schedule.js";
+export * from "./grants.js";
 export * from "./subagent-profiles.js";
 export * from "./subagent-observation.js";

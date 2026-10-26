@@ -483,6 +483,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
             action: decision.action,
             source: decision.source,
             rule: decision.matchedRule?.description,
+            grant: decision.matchedRule?.grant,
           },
         },
         { turnId },

@@ -399,6 +399,7 @@ export interface RuleHit {
   index?: number | undefined;
   rule?: PermissionRule | undefined;
   description: string;
+  grant?: { scope: "session" | "project"; createdAt: string } | undefined;
 }
 
 /** 带来源标注的权限规则：config 合并产物，permission 求值输入 */
