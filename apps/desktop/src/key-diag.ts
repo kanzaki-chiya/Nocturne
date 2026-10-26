@@ -49,13 +49,14 @@ export function panelKeyReason(
   event: DiagKey,
   state: { settingsOpen: boolean; hasPanel: boolean; quickOpen: boolean },
 ): string {
-  if (event.isComposing) return "ignored: composing";
   if (event.key === "Process") return "ignored: Process key";
+  if (event.key === "Escape" && event.isComposing) return "ignored: composing";
   if (state.settingsOpen) return "ignored: settings open";
   if (!state.hasPanel) return "ignored: no panel";
   if (event.key === "Escape" && event.defaultPrevented) return "ignored: defaultPrevented";
   if (event.key === "Escape" && state.quickOpen) return "ignored: quick open";
-  return "unmatched";
+  // 通过了前置检查；是否匹配面板快捷键见随后的「PanelHost matched=…」
+  return "passed";
 }
 
 export function createKeyDiagBatch(send: (lines: string[]) => Promise<unknown>, delay = 100) {

@@ -1034,7 +1034,7 @@ export function useSidePanel({
         else if (state.hasSession) act.setOverviewOpen(true);
         return;
       }
-      if (!event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
+      if (!event.ctrlKey || event.altKey || event.metaKey || event.key === "Process") return;
       const key = event.key.toLowerCase();
       const panelKey =
         (event.code === "Backquote" && !event.shiftKey) ||

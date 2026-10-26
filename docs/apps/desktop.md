@@ -397,7 +397,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 浮层遮挡：子 webview 盖在主界面之上，主界面的下拉、右键菜单、对话框、概览浮层、快速打开、状态栏提示等伸进浏览器区域时会被它压住。浏览器显示时用 `MutationObserver` 找和占位区相交的浮层（`OVERLAY_SELECTOR`），状态机 `coverStep`（live → capturing → covered）：先给浮层加 `data-nct-cover-hold`（透明），`browser_capture` 截一张当前页面换到占位区上，两帧后隐藏 webview、去掉浮层的透明；截图 300 ms 没到也照样隐藏。浮层都关掉后显示 webview、撤掉截图；截图期间浮层就关了则 webview 不动。
 
-快捷键：焦点在网页里时外壳经 WebView2 的 `AcceleratorKeyPressed` 拦下 Ctrl+B / Ctrl+T / Ctrl+P / Ctrl+`，作为 `shortcut` 消息转给主界面，和主界面里按下效果相同（按住的自动重复只拦不转）；转发前把键盘焦点还给主界面 webview，否则快速打开等弹出后，接着打字和 Esc 仍落在网页里。Ctrl+C / Ctrl+V / Ctrl+F 等编辑键和 Esc 留给网页：外壳分不出网页是否处理过 Esc，拦下会让网页里的对话框关不掉，所以焦点在网页里时 Esc 不开关概览浮层。遇到窗口重新激活后首个快捷键失效时，可在「后台日志 › 按键诊断」查看两侧焦点、输入法状态与处理去向（5.7）。
+快捷键：中文输入法组字时 Ctrl+B / Ctrl+T / Ctrl+P / Ctrl+` / Ctrl+Shift+G 照常生效并拦下浏览器默认行为；主界面跳过 Process 事件，只处理随后真实按键，避免重复触发。Esc 在组字时仍留给输入法取消候选，不开关概览。快捷键切走输入框时，未上屏文字由输入法自行处理。网页里组字时 `AcceleratorKeyPressed` 收到的仍是真实虚拟键（实测 VK_B，不是 VK_PROCESSKEY），外壳照常匹配。焦点在网页里时外壳经 WebView2 的 `AcceleratorKeyPressed` 拦下 Ctrl+B / Ctrl+T / Ctrl+P / Ctrl+`，作为 `shortcut` 消息转给主界面，和主界面里按下效果相同（按住的自动重复只拦不转）；转发前把键盘焦点还给主界面 webview，否则快速打开等弹出后，接着打字和 Esc 仍落在网页里。Ctrl+C / Ctrl+V / Ctrl+F 等编辑键和 Esc 留给网页：外壳分不出网页是否处理过 Esc，拦下会让网页里的对话框关不掉，所以焦点在网页里时 Esc 不开关概览浮层。遇到窗口重新激活后首个快捷键失效时，可在「后台日志 › 按键诊断」查看两侧焦点、输入法状态与处理去向（5.7）。
 
 **菜单焦点**：弹出菜单（`Menu.tsx`，「＋」、文件引用右键、状态栏的模型与思考等）和下拉（`Dropdown.tsx`，权限、Shell 等）同一套样式：当前选中只打强调色的 ✓，焦点项是 `--a-sel` 底色加正文色，同一时刻只有一项高亮。菜单打开就把焦点放在选中项（没有就第一项）并立刻高亮，鼠标打开和键盘打开一样（用 `:focus`，不用 `:focus-visible`：鼠标点开后程序聚焦不算 focus-visible）；悬停把焦点移到该项，和方向键移动的是同一个高亮。快速打开和输入框补全的当前行也是 `--a-sel`。
 

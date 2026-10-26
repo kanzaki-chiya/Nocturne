@@ -49,7 +49,10 @@ describe("按键诊断", () => {
     const composing = new KeyboardEvent("keydown", { key: "b", ctrlKey: true, isComposing: true });
     const process = new KeyboardEvent("keydown", { key: "Process", keyCode: 229 });
     expect(keyRecord(composing, "input", "input", true)).toContain('"isComposing":true');
-    expect(panelKeyReason(composing, state)).toBe("ignored: composing");
+    expect(panelKeyReason(composing, state)).toBe("passed");
+    expect(
+      panelKeyReason(new KeyboardEvent("keydown", { key: "Escape", isComposing: true }), state),
+    ).toBe("ignored: composing");
     expect(keyRecord(process, "input", "input", true)).toContain('"keyCode":229');
     expect(panelKeyReason(process, state)).toBe("ignored: Process key");
     expect(panelKeyReason(new KeyboardEvent("keydown"), { ...state, settingsOpen: true })).toBe(

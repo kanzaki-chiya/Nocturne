@@ -223,6 +223,25 @@ function press(init: KeyboardEventInit): KeyboardEvent {
 
 const panelEl = () => document.querySelector<HTMLElement>(".side-panel");
 
+it("组字时真实 Ctrl+P 打开快速打开并阻止默认行为，Process 不触发，Esc 不开概览", async () => {
+  const { prefs, host } = setup();
+  render(<Harness prefs={prefs} host={host} sessionId="a" sessions={[{ id: "a", mtimeMs: 1 }]} />);
+  act(() => {
+    press({ key: "Process", code: "KeyP", keyCode: 229, ctrlKey: true, isComposing: true });
+  });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  act(() => {
+    press({ key: "Escape", isComposing: true });
+  });
+  expect(screen.queryByRole("dialog", { name: "会话概览" })).toBeNull();
+  act(() => {
+    expect(
+      press({ key: "p", code: "KeyP", ctrlKey: true, isComposing: true }).defaultPrevented,
+    ).toBe(true);
+  });
+  expect(await screen.findByRole("combobox", { name: "搜索文件" })).toBeTruthy();
+});
+
 it("没有会话（首页）：面板不显示，标题栏按钮置灰，面板快捷键不响应", () => {
   const { prefs, host, terminals } = setup();
   render(<Harness prefs={prefs} host={host} sessionId={null} sessions={[]} />);
