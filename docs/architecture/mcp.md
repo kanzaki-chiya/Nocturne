@@ -130,6 +130,8 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 
 工具集合随会话注册表存在：本会话的 `ToolRegistry` = 内置工具 ∪ 本会话 MCP 工具（`specs()` 进入 `buildContext` 与 `/context` 的口径不变）。`tools/list_changed` 与崩溃重连重新拉到的工具列表都**先暂存、在下一个 Turn 开始时一次性切换**——保证单个 Turn 内 `specs()` 稳定（模型看到的工具集不中途变化，请求前缀不变）。会话关闭后 MCP 工具随注册表一起消失。
 
+按需模式 `mcp_call` 的目标不存在或不在本会话工具池时，由工具的 dispatch 返回 unknown_tool，列可用服务器并提示先用 mcp_search；不列注册表里的内置工具名。它在通用执行器的目标查找之前结算，不为 MCP 在执行器增加名字分支（[ADR-0067](../decisions/ADR-0067-mcp-tool-search.md)）。
+
 ## 6. 调用与结果映射
 
 `execute` 把一次 `tools/call` 的结果映射为 `ToolResult`：

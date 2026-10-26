@@ -304,7 +304,7 @@ export function createMcpOnDemandTools(
         if (target === undefined) {
           return {
             code: "unknown_tool",
-            error: `MCP 工具 "${targetName}" 不存在或不在本会话工具池中。可用服务器：${serverNames.length > 0 ? serverNames.join(", ") : "（无）"}`,
+            error: `MCP 工具 "${targetName}" 不存在或不在本会话工具池中。可用服务器：${serverNames.length > 0 ? serverNames.join(", ") : "（无）"}。请先用 mcp_search 搜索可用工具，再用 mcp_call 调用。`,
           };
         }
         if (

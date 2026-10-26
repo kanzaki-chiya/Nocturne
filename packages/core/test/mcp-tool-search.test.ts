@@ -222,6 +222,61 @@ describe("ADR-0067 单元测试：mcp_search / mcp_call 与阈值判定", () => 
 });
 
 describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、权限、Hook 与子会话", () => {
+  it("mcp_call 未知目标列服务器并引导 mcp_search，不列 registry 可见工具", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "nct-mcp-unknown-"));
+    roots.push(root);
+    const platform = createPlatform();
+    await writeFile(
+      path.join(root, "config.json"),
+      JSON.stringify({ modelsDev: false, mcp: { toolSearch: "always" } }),
+    );
+    const config = await loadConfig(platform, { nocturneHome: root, env: () => undefined });
+    const runtime = await createRuntime({
+      config,
+      cwd: root,
+      mcp: makeStaticConnector(
+        [makeMcpTool({ server: "github", tool: "search", description: "search" })],
+        ["github", "exa"],
+      ),
+      providers: [
+        new FakeProvider({
+          scripts: [
+            [
+              {
+                type: "tool_call",
+                toolCallId: "missing",
+                name: "mcp_call",
+                input: { tool: "mcp__missing__tool" },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ],
+            [
+              { type: "text_delta", text: "done" },
+              { type: "finish", reason: "stop" },
+            ],
+          ],
+        }),
+      ],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    const events: RuntimeEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    try {
+      await session.submit({ text: "call unknown" });
+      const completed = events.find((event) => event.type === "tool.completed");
+      expect(completed?.payload).toMatchObject({
+        status: "error",
+        error: { code: "unknown_tool" },
+      });
+      const content = completed?.type === "tool.completed" ? completed.payload.modelContent : "";
+      expect(content).toContain("可用服务器：github, exa");
+      expect(content).toContain("请先用 mcp_search");
+      expect(content).not.toContain("可用工具：");
+      expect(content).not.toContain("todo_write");
+    } finally {
+      await session.close();
+    }
+  });
   it("按需模式下 mcp_search → mcp_call → 目标服务器收到调用，连续多步 tools 字段逐字节不变，/context 注明未列出数量", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "nct-mcp-ondemand-"));
     roots.push(root);
