@@ -64,6 +64,25 @@ describe("formatRelative", () => {
 });
 
 describe("buildSessionTree", () => {
+  it("只给别处持有的会话标锁，缺 openHere 的旧后台保持原逻辑", () => {
+    const tree = buildSessionTree(
+      [
+        session("here", WS, NOW, { locked: true, openHere: true }),
+        session("elsewhere", WS, NOW, { locked: true, openHere: false }),
+        session("legacy", WS, NOW, { locked: true }),
+      ],
+      noPrefs,
+      { ...opts({ plainWorkspace: WS }), statuses: { here: "running" } },
+    );
+    expect(
+      tree.chats.rows.map((row) => [row.id, row.locked, row.meta.includes("🔒"), row.status]),
+    ).toEqual([
+      ["here", false, false, "running"],
+      ["elsewhere", true, true, "idle"],
+      ["legacy", true, true, "idle"],
+    ]);
+  });
+
   it("定时任务会话单独成组，不进对话或项目", () => {
     const tree = buildSessionTree(
       [

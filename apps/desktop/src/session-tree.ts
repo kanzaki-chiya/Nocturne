@@ -152,12 +152,13 @@ function toRow(
   mark?: SessionMark,
 ): SessionRow {
   let meta = status === "pending" ? "待确认" : formatRelative(session.mtimeMs, now);
-  if (session.locked === true) meta = `🔒 ${meta}`;
+  const locked = session.locked === true && session.openHere !== true;
+  if (locked) meta = `🔒 ${meta}`;
   return {
     id: session.id,
     title: session.firstText ?? "未命名会话",
     meta,
-    locked: session.locked === true,
+    locked,
     status,
     ...(mark !== undefined ? { mark } : {}),
   };
