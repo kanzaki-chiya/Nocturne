@@ -47,7 +47,7 @@ it("常驻连接：离开的运行会话在 Turn 结束并空闲后关闭，当�
   h.emit("running", "running_model");
   h.sessions.setSelected(undefined);
   expect(h.closes.get("running")).not.toHaveBeenCalled();
-  entry.view.currentTurn = "turn";
+  entry.view.currentTurn = { turnId: "turn", turnIndex: 1 };
   h.emit("running", "idle");
   expect(h.closes.get("running")).not.toHaveBeenCalled();
   entry.view.currentTurn = undefined;
