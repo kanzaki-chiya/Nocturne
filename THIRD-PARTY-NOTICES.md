@@ -80,6 +80,7 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `portable-pty` | 0.9.0 | MIT |
 | `webview2-com` | 0.39.1 | MIT |
 | `rfd` | 0.16.0 | MIT |
+| `chrono` | 0.4.45 | MIT OR Apache-2.0 |
 
 `portable-pty`（面板终端，Windows 上走 ConPTY）间接带入的 crate：`filedescriptor` 0.8.3（MIT）、`serial2` 0.2.38（BSD-2-Clause OR Apache-2.0）、`shared_library` 0.1.9（Apache-2.0/MIT）、`shell-words` 1.1.1（MIT/Apache-2.0）、`winreg` 0.10.1（MIT）、`nix` 0.28.0（MIT）、`downcast-rs` 1.2.1（MIT/Apache-2.0）、`lazy_static` 1.5.1（MIT OR Apache-2.0）、`cfg_aliases` 0.1.1（MIT）。
 

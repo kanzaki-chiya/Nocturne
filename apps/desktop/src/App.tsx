@@ -12,7 +12,12 @@ import type {
 } from "@nocturne/core/protocol";
 
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
-import { BackendLogsPage, SHELL_LOG_ID, type BackendLogTarget } from "./BackendLogsPage";
+import {
+  BackendLogsPage,
+  KEY_DIAG_ID,
+  SHELL_LOG_ID,
+  type BackendLogTarget,
+} from "./BackendLogsPage";
 import { Composer, type ComposerSubmit, type WorkspaceChoice } from "./Composer";
 import {
   Conversation,
@@ -1036,7 +1041,7 @@ export function App({ host }: { host: DesktopHost }) {
     path: project.path,
     name: project.name,
   }));
-  // 「后台日志」页的选择器（ADR-0051）：单后台只有「后台」与「外壳」两项
+  // 「后台日志」页的选择器（ADR-0051）：单后台与两个独立的外壳内存缓冲
   const currentBackend = pool.current();
   const logTargets: BackendLogTarget[] = [
     ...(currentBackend !== undefined
@@ -1052,6 +1057,11 @@ export function App({ host }: { host: DesktopHost }) {
       backendId: SHELL_LOG_ID,
       label: "外壳",
       detail: "更新检查等",
+    },
+    {
+      backendId: KEY_DIAG_ID,
+      label: "按键诊断",
+      detail: "焦点、输入法状态与快捷键去向（仅内存）",
     },
   ];
 
@@ -1317,9 +1327,11 @@ export function App({ host }: { host: DesktopHost }) {
                 <BackendLogsPage
                   backends={logTargets}
                   fetchStderr={(backendId) =>
-                    backendId === SHELL_LOG_ID
-                      ? (host.invoke("shell_log") as Promise<string[]>)
-                      : (host.invoke("backend_stderr", { backendId }) as Promise<string[]>)
+                    backendId === KEY_DIAG_ID
+                      ? (host.invoke("key_diag_log") as Promise<string[]>)
+                      : backendId === SHELL_LOG_ID
+                        ? (host.invoke("shell_log") as Promise<string[]>)
+                        : (host.invoke("backend_stderr", { backendId }) as Promise<string[]>)
                   }
                 />
               </PaneErrorBoundary>

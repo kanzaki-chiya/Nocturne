@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
 import { installInlineStyleShim } from "./inline-style-shim";
+import { installKeyDiag } from "./key-diag";
 import { createTauriHost } from "./tauri-host";
 import { WindowFrame } from "./WindowFrame";
 import "./styles.css";
@@ -18,6 +19,7 @@ installInlineStyleShim();
 
 const root = document.getElementById("root");
 const host = createTauriHost();
+installKeyDiag((lines) => host.invoke("key_diag_push", { lines }));
 if (root !== null) {
   createRoot(root).render(
     <StrictMode>

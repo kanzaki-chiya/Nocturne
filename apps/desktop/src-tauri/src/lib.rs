@@ -10,6 +10,7 @@ mod browser_policy;
 mod editor;
 mod images;
 mod job;
+mod key_diag;
 mod lines;
 mod node;
 mod notify;
@@ -79,6 +80,8 @@ pub fn run() {
         backend::node_probe,
         backend::plain_workspace,
         backend::shell_log,
+        key_diag::key_diag_push,
+        key_diag::key_diag_log,
         images::pick_images,
         workspace::open_skill_directory,
         editor::detect_editors,
@@ -136,6 +139,7 @@ pub fn run() {
             #[cfg(windows)]
             state.init_job();
             app.manage(state);
+            app.manage(key_diag::KeyDiag::default());
             // 通知：持有每个会话当前那条 toast，点击回调才有效（ADR-0056）
             app.manage(notify::NotifyState::default());
             // 面板终端（ADR-0060 第 4 节）：页面重载、应用退出时全部结束
@@ -191,6 +195,14 @@ pub fn run() {
             }
         })
         .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::Focused(focused) = event {
+                    key_diag::shell(
+                        window.app_handle(),
+                        &format!("WindowEvent::Focused {focused}"),
+                    );
+                }
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let state = window.state::<Arc<AppState>>();

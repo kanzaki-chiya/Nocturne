@@ -179,6 +179,7 @@ function replayHost(
         return;
       }
       if (command === "shell_log") return [...shellLog];
+      if (command === "key_diag_log") return [];
       if (command === "backend_open") {
         const channel = args?.channel;
         if (typeof channel !== "function") throw new Error("后台缺少消息通道");
@@ -1026,6 +1027,11 @@ it("后台日志页的空态与已退出后台的回收", async () => {
   });
   // 后台退出后页面选择器回落到剩下的「外壳」条目
   await within(page).findByText(/外壳暂无诊断输出/);
+  fireEvent.click(within(page).getByRole("combobox", { name: "后台" }));
+  fireEvent.click(screen.getByRole("option", { name: /按键诊断/ }));
+  await within(page).findByText("暂无记录");
+  fireEvent.click(within(page).getByRole("button", { name: "刷新" }));
+  await within(page).findByText("暂无记录");
 });
 
 it("后台退出显示 stderr 尾部与「重启后台」；重启按 afterSeq 恢复会话", async () => {

@@ -19,6 +19,7 @@ import type { FileIndexEntry } from "./file-refs";
 import { rankQuickOpen, SUBAGENT_SUMMARY_MAX } from "./side-panel";
 import { elapsedText, runningMs } from "./subagent-panel";
 import { KeyHint } from "./KeyHint";
+import { keyDiag } from "./key-diag";
 
 /** WindowFrame 标题栏里给 App 放按钮的位置；没有标题栏（测试、手机）时为 null */
 export const TitlebarSlot = createContext<HTMLElement | null>(null);
@@ -126,6 +127,12 @@ export function QuickOpen({
   }, [onClose]);
   useEffect(() => {
     input.current?.focus();
+    keyDiag(`quickOpen rendered=${dialog.current !== null} hasFocus=${document.hasFocus()}`);
+    return () => {
+      keyDiag("quickOpen unmounted");
+    };
+  }, []);
+  useEffect(() => {
     let alive = true;
     load()
       .then((value) => {

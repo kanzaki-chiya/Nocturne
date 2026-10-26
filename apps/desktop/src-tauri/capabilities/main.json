@@ -12,6 +12,8 @@
     "allow-node-probe",
     "allow-plain-workspace",
     "allow-shell-log",
+    "allow-key-diag-push",
+    "allow-key-diag-log",
     "allow-pick-images",
     "allow-open-skill-directory",
     "core:app:allow-version",

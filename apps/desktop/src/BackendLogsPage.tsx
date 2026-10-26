@@ -1,7 +1,7 @@
 /**
  * 设置区「后台日志」页：查看常驻后台与外壳自身的 stderr 内存缓冲
- * （ADR-0051 后只有一个 nctrn 后台，选择器只有「后台」「外壳」两项）。
- * 只在打开页面、切换条目或点「刷新」时经 backend_stderr/shell_log 拉取，
+ * （ADR-0051 后只有一个 nctrn 后台，另有「外壳」「按键诊断」）。
+ * 只在打开页面、切换条目或点「刷新」时经 backend_stderr/shell_log/key_diag_log 拉取，
  * 不轮询；缓冲只在内存里保留（最近 500 行、每行不超过 64 KiB），不写盘。
  * 已退出后台的缓冲随进程回收，其尾部日志由崩溃横幅里的 closed.stderr 携带。
  */
@@ -11,6 +11,7 @@ import { Dropdown } from "./Dropdown";
 
 /** 「外壳」日志项的伪 backendId（不存在这样的后台，调用方按此值改走 shell_log） */
 export const SHELL_LOG_ID = -1;
+export const KEY_DIAG_ID = -2;
 
 /** 日志页的一个可选后台 */
 export interface BackendLogTarget {
@@ -134,9 +135,11 @@ export function BackendLogsPage({
         {error !== null && <div className="logerr">{error}</div>}
         {current !== undefined && lines !== null && lines.length === 0 && error === null && (
           <div className="logempty">
-            {current.backendId === SHELL_LOG_ID
-              ? "外壳暂无诊断输出。"
-              : "该后台暂无 stderr 输出；已退出后台的最后几行日志显示在崩溃横幅里。"}
+            {current.backendId === KEY_DIAG_ID
+              ? "暂无记录"
+              : current.backendId === SHELL_LOG_ID
+                ? "外壳暂无诊断输出。"
+                : "该后台暂无 stderr 输出；已退出后台的最后几行日志显示在崩溃横幅里。"}
           </div>
         )}
         {lines !== null && lines.length > 0 && <pre className="logview">{lines.join("\n")}</pre>}

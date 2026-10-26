@@ -12,6 +12,7 @@ ADR-0061：服务商页的模型设置对话框增加 Gemini 协议选项及可�
 
 - **单后台（ADR-0051）**：整个窗口只有一个 `nctrn rpc --stdio` 后台，`backend_open` 以普通对话工作区（见第 3 节）为 cwd 启动 `node <脚本> rpc --stdio`，窗口打开期间常驻；所有项目和普通对话的会话都在这个后台里创建与恢复，不再按项目起停后台。后台的启动目录只是它的缺省工作区：每个会话的 `cwd`/`workspaceRoot` 在 `runtime.createSession` 时传入、并写入 `session.created` 元数据，恢复时以日志记录的目录为准（[sessions.md](../architecture/sessions.md)）。会话列表是全局的（`<NOCTURNE_HOME>/sessions`），前端用这个常驻后台 `runtime.listSessions()` 取全部会话。
 - **后台生命周期**：Rust 外壳在 Tauri 页面开始加载钩子中同步推进后台代际，F5 或 Vite 整页重载后并行关闭旧页面全部后台（关 stdin → 等自行退出 → 5 秒强杀），不依赖前端异步 `beforeunload`；在途 `backend_open` 在启动前校验分发时捕获的代际，旧页面请求被取消，旧清理只使用旧代快照，不影响新页面后台。窗口关闭时对所有后台（含正在重载清理的后台）执行相同关闭流程，全部结束后退出应用；Windows 上后台在 spawn 后被放入全局 Job Object（`KILL_ON_JOB_CLOSE`），外壳被强杀时后台一起结束。Job 创建或加入失败不致命，往该后台的 stderr 缓冲记一行说明。纯 React Fast Refresh 不重新加载文档，由前端组件生命周期释放连接。
+- **按键诊断边界**：独立于 stderr 与外壳日志的最近 500 条内存环形缓冲，不写盘；仅主界面可批量写入和按需读取，只有打开「后台日志 › 按键诊断」或刷新时读取快照。记录焦点、组字状态与快捷键去向，不记录普通输入字符、输入框内容、网页地址或标题（见 5.7）。
 - **日志边界**：stdin/stdout 的内容在任何地方都不记录、不打印、不写盘（报文里可能含密钥明文）；stderr 按行截断（64 KiB/行）保留最近 500 行在内存中。缓冲只在两处离开外壳：后台退出时随 `closed` 消息交给前端（崩溃横幅显示末尾几行），以及前端经 `backend_stderr` 命令按需拉取（「后台日志」页，只在打开页面或点「刷新」时读，不轮询）。后台退出即从注册表移除，此后 `backend_stderr` 返回 `unknown_backend`——缓冲不随进程保留，退出后唯一的 stderr 副本在 `closed` 消息里。
 
 ## 2. 命令与消息格式
@@ -344,6 +345,8 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 「后台日志」（`src/BackendLogsPage.tsx`）查看运行中后台的 stderr：页头只有标题，缓冲边界以第 1 节为准；一个后台选择器（`Dropdown`，单后台下只有「后台」——当前后台的启动目录，无后台时不出现——与固定的「外壳」两项，外壳条目读外壳自身诊断日志）、等宽字体日志区、「刷新」与「复制全部」按钮（`backend_stderr` 只在打开页面或点「刷新」时调用，不轮询；选中「外壳」改走 `shell_log` 命令；「复制全部」把当前显示的缓冲整体写进剪贴板）。「外壳」条目（伪 backendId `-1`）始终存在，所以即使没有任何运行中的后台页面也不为空。所选后台缓冲为空时写「该后台暂无 stderr 输出；已退出后台的最后几行日志显示在崩溃横幅里」（外壳为「外壳暂无诊断输出」；退出后缓冲已回收，只有 `closed` 消息保留了尾部，见第 1 节日志边界）。读取失败显示错误与重试。
 
+选择器另有固定「按键诊断」（伪 backendId `-2`），经 `key_diag_log` 读取独立缓冲；「刷新」「复制全部」作用于当前快照，空缓冲显示「暂无记录」。每行以本地毫秒时间与 `shell` / `main` 来源开头。外壳记录主窗口与浏览器子 webview 焦点变化、按住 Ctrl 的 AcceleratorKeyPressed（虚拟键码、修饰键、WasKeyDown、快捷键匹配与焦点交还结果），以及隐藏网页时交还主界面的焦点。主界面由桌面入口安装 `src/key-diag.ts`，约 100ms 合并后经 `key_diag_push({ lines })` 写入：窗口焦点、可见性、无内容的 compositionstart/end，以及带 Ctrl/Alt/Meta、Escape、Process 的 keydown（key/code/keyCode/isComposing/defaultPrevented/repeat、标签/id/前两个 class 的目标与活动元素描述、document.hasFocus）；另记 PanelHost 的匹配/忽略原因、外壳 shortcut 消息、快速打开请求与实际挂载。普通字母、数字、符号输入不记录，输入内容、网页地址/标题不采集；手机网页不加载此模块。缓冲仅内存最多 500 条、每条最多 4096 UTF-8 字节，不挤占 shell_log，只在本页查看时离开外壳。两个命令仅授权 `webviews: ["main"]`，外壳也验证调用方标签。
+
 ### 5.8 自动更新（ADR-0050）
 
 `src/updater.ts` 的更新服务封装 `DesktopHost` 上的 `appVersion` / `checkUpdate` / `relaunch` / `note`（测试里用假宿主替换，`tauri-host.ts` 里落到 `@tauri-apps/plugin-updater` 与 `plugin-process`）。行为：
@@ -394,7 +397,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 浮层遮挡：子 webview 盖在主界面之上，主界面的下拉、右键菜单、对话框、概览浮层、快速打开、状态栏提示等伸进浏览器区域时会被它压住。浏览器显示时用 `MutationObserver` 找和占位区相交的浮层（`OVERLAY_SELECTOR`），状态机 `coverStep`（live → capturing → covered）：先给浮层加 `data-nct-cover-hold`（透明），`browser_capture` 截一张当前页面换到占位区上，两帧后隐藏 webview、去掉浮层的透明；截图 300 ms 没到也照样隐藏。浮层都关掉后显示 webview、撤掉截图；截图期间浮层就关了则 webview 不动。
 
-快捷键：焦点在网页里时外壳经 WebView2 的 `AcceleratorKeyPressed` 拦下 Ctrl+B / Ctrl+T / Ctrl+P / Ctrl+`，作为 `shortcut` 消息转给主界面，和主界面里按下效果相同（按住的自动重复只拦不转）；转发前把键盘焦点还给主界面 webview，否则快速打开等弹出后，接着打字和 Esc 仍落在网页里。Ctrl+C / Ctrl+V / Ctrl+F 等编辑键和 Esc 留给网页：外壳分不出网页是否处理过 Esc，拦下会让网页里的对话框关不掉，所以焦点在网页里时 Esc 不开关概览浮层。
+快捷键：焦点在网页里时外壳经 WebView2 的 `AcceleratorKeyPressed` 拦下 Ctrl+B / Ctrl+T / Ctrl+P / Ctrl+`，作为 `shortcut` 消息转给主界面，和主界面里按下效果相同（按住的自动重复只拦不转）；转发前把键盘焦点还给主界面 webview，否则快速打开等弹出后，接着打字和 Esc 仍落在网页里。Ctrl+C / Ctrl+V / Ctrl+F 等编辑键和 Esc 留给网页：外壳分不出网页是否处理过 Esc，拦下会让网页里的对话框关不掉，所以焦点在网页里时 Esc 不开关概览浮层。遇到窗口重新激活后首个快捷键失效时，可在「后台日志 › 按键诊断」查看两侧焦点、输入法状态与处理去向（5.7）。
 
 **菜单焦点**：弹出菜单（`Menu.tsx`，「＋」、文件引用右键、状态栏的模型与思考等）和下拉（`Dropdown.tsx`，权限、Shell 等）同一套样式：当前选中只打强调色的 ✓，焦点项是 `--a-sel` 底色加正文色，同一时刻只有一项高亮。菜单打开就把焦点放在选中项（没有就第一项）并立刻高亮，鼠标打开和键盘打开一样（用 `:focus`，不用 `:focus-visible`：鼠标点开后程序聚焦不算 focus-visible）；悬停把焦点移到该项，和方向键移动的是同一个高亮。快速打开和输入框补全的当前行也是 `--a-sel`。
 

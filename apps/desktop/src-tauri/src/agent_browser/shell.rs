@@ -356,6 +356,7 @@ mod native {
     use std::collections::HashMap;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
+    use tauri::Manager;
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use webview2_com::{
         take_pwstr, FocusChangedEventHandler, NavigationCompletedEventHandler,
@@ -390,8 +391,12 @@ mod native {
 
     pub fn attach(webview: &tauri::Webview, tab: Arc<AgentTab>, state: Arc<AgentBrowserState>) {
         let callback_tab = Arc::clone(&tab);
+        let app = webview.app_handle().clone();
+        let label = webview.label().to_string();
         let _ = webview.with_webview(move |platform| {
-            if let Err(error) = attach_inner(&platform.controller(), &callback_tab, &state) {
+            if let Err(error) =
+                attach_inner(&platform.controller(), &callback_tab, &state, app, label)
+            {
                 *callback_tab
                     .notice
                     .lock()
@@ -405,6 +410,8 @@ mod native {
         controller: &ICoreWebView2Controller,
         tab: &Arc<AgentTab>,
         state: &Arc<AgentBrowserState>,
+        app: tauri::AppHandle,
+        label: String,
     ) -> windows::core::Result<()> {
         let mut token = Default::default();
         // SAFETY: 全部在主线程、对有效的 WebView2 对象；闭包持有 Arc，不借用栈上数据
@@ -489,9 +496,12 @@ mod native {
 
             let focus_tab = Arc::clone(tab);
             let focus_state = Arc::clone(state);
+            let focus_app = app.clone();
+            let focus_label = label.clone();
             controller.add_GotFocus(
                 &FocusChangedEventHandler::create(Box::new(move |_, _| {
                     focus_tab.focused.store(true, Ordering::SeqCst);
+                    crate::key_diag::shell(&focus_app, &format!("GotFocus label={focus_label}"));
                     // 用户点进 agent 标签：原生焦点是撤销控制权的信号，不是权限批准
                     focus_state.auto_takeover(&focus_tab.id);
                     Ok(())
@@ -502,6 +512,7 @@ mod native {
             controller.add_LostFocus(
                 &FocusChangedEventHandler::create(Box::new(move |_, _| {
                     blur_tab.focused.store(false, Ordering::SeqCst);
+                    crate::key_diag::shell(&app, &format!("LostFocus label={label}"));
                     Ok(())
                 })),
                 &mut token,

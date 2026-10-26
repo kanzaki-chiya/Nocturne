@@ -429,7 +429,14 @@ pub fn browser_layout(
             // 隐藏前焦点在网页里：还给主界面，键盘快捷键才接得上
             if browser.focused.swap(false, Ordering::Relaxed) {
                 if let Some(main) = app.get_webview("main") {
-                    let _ = main.set_focus();
+                    let returned = main.set_focus().is_ok();
+                    crate::key_diag::shell(
+                        &app,
+                        &format!(
+                            "browser_layout hide label={} focusReturned={returned}",
+                            browser.label
+                        ),
+                    );
                 }
             }
             Ok(())
@@ -513,7 +520,7 @@ mod native {
     use std::sync::atomic::Ordering;
     use std::sync::mpsc::Sender;
     use std::sync::Arc;
-    use tauri::Url;
+    use tauri::{Manager, Url};
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use webview2_com::{
         take_pwstr, AcceleratorKeyPressedEventHandler, CapturePreviewCompletedHandler,
@@ -600,8 +607,10 @@ mod native {
         initial: Url,
         main: Option<tauri::Webview>,
     ) -> tauri::Result<()> {
+        let app = webview.app_handle().clone();
         webview.with_webview(move |platform| {
-            if let Err(error) = attach_inner(&platform.controller(), &browser, &initial, main) {
+            if let Err(error) = attach_inner(&platform.controller(), &browser, &initial, main, app)
+            {
                 browser.send(BrowserMessage::Blocked {
                     url: initial.to_string(),
                     reason: "failed",
@@ -616,6 +625,7 @@ mod native {
         browser: &Arc<Browser>,
         initial: &Url,
         main: Option<tauri::Webview>,
+        app: tauri::AppHandle,
     ) -> WinResult {
         let mut token = Default::default();
         // SAFETY: 所有调用都在主线程、对有效的 WebView2 对象；回调闭包持有 Arc，不借用栈上数据
@@ -639,22 +649,35 @@ mod native {
                     args.PhysicalKeyStatus(&mut status)?;
                     let mut key = 0u32;
                     args.VirtualKey(&mut key)?;
-                    if let Some(name) = browser_policy::app_shortcut(
-                        key,
-                        down(VK_CONTROL),
-                        down(VK_SHIFT),
-                        down(VK_MENU),
-                    ) {
+                    let (ctrl, shift, alt) = (down(VK_CONTROL), down(VK_SHIFT), down(VK_MENU));
+                    let matched = browser_policy::app_shortcut(key, ctrl, shift, alt);
+                    let mut focus_returned = false;
+                    if let Some(name) = matched {
                         args.SetHandled(true)?;
                         // 按住不放的自动重复只拦不转
                         if !status.WasKeyDown.as_bool() {
                             // 快捷键打开的都是主界面的东西（快速打开、新标签页、终端）：
                             // 键盘焦点先还给主界面，否则接着打字、按 Esc 仍落在网页里
                             if let Some(main) = &main {
-                                let _ = main.set_focus();
+                                focus_returned = main.set_focus().is_ok();
                             }
                             keys.send(BrowserMessage::Shortcut { key: name });
                         }
+                    }
+                    if let (Some(main), Some(line)) = (
+                        &main,
+                        crate::key_diag::accelerator_line(crate::key_diag::Accelerator {
+                            label: &keys.label,
+                            key,
+                            ctrl,
+                            shift,
+                            alt,
+                            was_down: status.WasKeyDown.as_bool(),
+                            matched,
+                            focus_returned,
+                        }),
+                    ) {
+                        crate::key_diag::shell(main.app_handle(), &line);
                     }
                     Ok(())
                 })),
@@ -662,9 +685,11 @@ mod native {
             )?;
 
             let got = Arc::clone(browser);
+            let got_app = app.clone();
             controller.add_GotFocus(
                 &FocusChangedEventHandler::create(Box::new(move |_, _| {
                     got.focused.store(true, Ordering::Relaxed);
+                    crate::key_diag::shell(&got_app, &format!("GotFocus label={}", got.label));
                     Ok(())
                 })),
                 &mut token,
@@ -673,6 +698,7 @@ mod native {
             controller.add_LostFocus(
                 &FocusChangedEventHandler::create(Box::new(move |_, _| {
                     lost.focused.store(false, Ordering::Relaxed);
+                    crate::key_diag::shell(&app, &format!("LostFocus label={}", lost.label));
                     Ok(())
                 })),
                 &mut token,

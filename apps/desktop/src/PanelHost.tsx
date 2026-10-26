@@ -30,6 +30,7 @@ import { BrowserPool } from "./browser-pool";
 import type { SubagentLinks } from "./Conversation";
 import type { OpenConversation } from "./conversations";
 import type { BrowserBounds, DesktopHost } from "./host";
+import { keyDiag, panelKeyReason, shouldRecordKey } from "./key-diag";
 import { QuickOpen, SessionOverview, TitlebarButtons, type OverviewSubagents } from "./PanelChrome";
 import type { PrefsStore } from "./prefs";
 import { projectKey, projectName } from "./session-tree";
@@ -813,6 +814,7 @@ export function useSidePanel({
             },
             onNewWindow: openFromBrowser,
             onShortcut: (key) => {
+              keyDiag(`shortcut shell key=${key}`);
               shortcutRef.current(key);
             },
           }),
@@ -997,6 +999,9 @@ export function useSidePanel({
   const runPanelKey = useCallback((key: "b" | "t" | "p" | "g" | "backquote") => {
     const state = keyState.current;
     const act = actions.current;
+    keyDiag(
+      `PanelHost matched=${key} ${state.settingsOpen ? "ignored: settings open" : !state.hasPanel ? "ignored: no panel" : "handled"}`,
+    );
     if (!state.hasPanel) return;
     if (key === "backquote") {
       // Ctrl+`：已有终端就切过去，没有就新开一个
@@ -1008,6 +1013,7 @@ export function useSidePanel({
     } else if (key === "g") {
       act.openChanges();
     } else {
+      keyDiag("quickOpen requested=true");
       setQuickOpen(true);
     }
   }, []);
@@ -1016,6 +1022,9 @@ export function useSidePanel({
     const onKey = (event: KeyboardEvent) => {
       const state = keyState.current;
       const act = actions.current;
+      if (shouldRecordKey(event)) {
+        keyDiag(`PanelHost ${panelKeyReason(event, state)}`);
+      }
       if (event.key === "Escape") {
         // 浮层由按钮和 Esc 开关；别处已消费的 Esc（输入框的补全与中断、菜单、提示、搜索框、
         // 终端）不算，所以输入框空闲时 Esc 也开关浮层。没有会话时按钮置灰，Esc 同样不开

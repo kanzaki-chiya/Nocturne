@@ -9,6 +9,8 @@ fn main() {
             "node_probe",
             "plain_workspace",
             "shell_log",
+            "key_diag_push",
+            "key_diag_log",
             "pick_images",
             "open_skill_directory",
             "detect_editors",
