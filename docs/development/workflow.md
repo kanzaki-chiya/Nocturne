@@ -152,7 +152,7 @@ ADR-0061 Gemini 冒烟只要求 `NOCTURNE_SMOKE_OPENCODE_API_KEY` 与 `NOCTURNE_
 2. **CHANGELOG.md**：为 `<version>` 补一节（`## <version>` 标题格式），[release-notes.mjs](../../scripts/release-notes.mjs) 提取该节作为 Release 说明与 `latest.json` 的 `notes`；找不到对应小节会让发布构建失败。
 3. **打标签**：审阅变更后 `git tag v<version>` 并推送标签。
 4. **流水线**：`.github/workflows/release.yml` 在 windows-latest 上跑完整检查（typecheck / lint / format / depcheck / build / test）、版本一致性校验、`pnpm release:build`（带签名环境变量）、两种 tgz 安装冒烟，然后 `gh release create --draft`（版本号含 `-` 时另加 `--prerelease`）上传 `setup.exe`、`.sig`、`latest.json`、`nctrn-<version>.tgz`、`nocturne-relay-<version>.tgz`；ubuntu-latest 与 macos-latest 对两种 tgz 做安装冒烟，结果分别追加进草稿说明。
-5. **审草稿**：核对产物、说明与冒烟结果，确认无误后发布 Release（草稿转正式）。
+5. **审草稿**：核对产物、说明与冒烟结果，确认无误后发布 Release（草稿转正式）。主页由 `pages.yml` 在 Release 发布后自动更新，不需要手动处理（[主页维护](site.md)）。
 6. **npm 发布**（暂缓，见 [ADR-0050 修订](../decisions/ADR-0050-distribution.md#修订)；当前命令行版只随 Release 附 tgz）：`.github/workflows/publish-npm.yml`（workflow_dispatch，输入版本号）从已发布的 Release 下载 tgz 后 `npm publish`，走 npm 受信发布（OIDC）；预发布号挂 `next` 标签，不动 `latest`；版本号输入只经环境变量进入 shell，并先按 semver 正则校验。
 
 ### 8.2 预发布版（rc）策略

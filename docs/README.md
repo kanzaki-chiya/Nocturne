@@ -68,6 +68,7 @@
 |---|---|
 | [repository-layout.md](development/repository-layout.md) | 仓库目录、代码放在哪里、何时拆包 |
 | [workflow.md](development/workflow.md) | 修改流程、文档同步清单、测试要求 |
+| [site.md](development/site.md) | 静态主页构建、Pages 部署、字体子集与隔离截图重拍 |
 
 ## Decisions（架构决策记录）
 
