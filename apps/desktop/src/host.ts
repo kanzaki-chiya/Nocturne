@@ -55,7 +55,9 @@ export type BrowserMessage =
   | { kind: "blocked"; url: string; reason: string; message: string }
   | { kind: "download"; state: "started" | "finished" | "failed"; name: string }
   /** 焦点在网页里时按下的应用快捷键（Ctrl+B / T / P / `） */
-  | { kind: "shortcut"; key: "b" | "t" | "p" | "backquote" };
+  | { kind: "shortcut"; key: "b" | "t" | "p" | "backquote" }
+  /** 网页进出全屏：全屏期间外壳让 webview 铺满窗口，布局只记下不生效 */
+  | { kind: "fullscreen"; on: boolean };
 
 /** 浏览器在窗口里的位置（CSS 像素，相对窗口客户区左上角） */
 export interface BrowserBounds {

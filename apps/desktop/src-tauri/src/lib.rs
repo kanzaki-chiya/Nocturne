@@ -6,6 +6,7 @@
 mod agent_browser;
 mod backend;
 mod browser;
+mod browser_fullscreen;
 mod browser_policy;
 mod editor;
 mod images;
@@ -201,6 +202,12 @@ pub fn run() {
                         window.app_handle(),
                         &format!("WindowEvent::Focused {focused}"),
                     );
+                }
+                // 网页全屏：窗口切到全屏后尺寸才变，全屏中的浏览器跟着铺满
+                if let tauri::WindowEvent::Resized(_) = event {
+                    if let Some(browsers) = window.try_state::<Arc<browser::BrowserState>>() {
+                        browsers.window_resized(window.app_handle());
+                    }
                 }
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

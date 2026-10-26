@@ -12,6 +12,7 @@
 //! - 页面事件经创建时的 Channel 只推给主界面，不广播事件。
 
 use crate::backend::CommandError;
+use crate::browser_fullscreen::{Fullscreen, Step};
 use crate::browser_policy::{self, Blocked, DownloadReport, Downloads};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -19,7 +20,9 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use tauri::ipc::Channel;
 use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent, WebviewBuilder};
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Rect, Url, WebviewUrl};
+use tauri::{
+    AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition, Rect, Url, WebviewUrl,
+};
 
 type CmdResult<T> = Result<T, CommandError>;
 
@@ -64,6 +67,10 @@ pub enum BrowserMessage {
     Shortcut {
         key: &'static str,
     },
+    /// 网页进出全屏（browser_fullscreen）：全屏期间 webview 铺满窗口，主界面不做浮层遮挡
+    Fullscreen {
+        on: bool,
+    },
 }
 
 /// 一个浏览器标签的外壳状态。
@@ -75,6 +82,8 @@ pub struct Browser {
     focused: AtomicBool,
     /// 下载登记：哪些结束要提示（browser_policy::Downloads）
     downloads: Mutex<Downloads>,
+    /// 网页全屏与最后一次面板位置（browser_fullscreen::Fullscreen）
+    fullscreen: Mutex<Fullscreen<Bounds>>,
 }
 
 impl Browser {
@@ -97,6 +106,8 @@ pub struct BrowserState {
     browsers: Mutex<HashMap<u32, Arc<Browser>>>,
     /// 启动时接管的 `WEBVIEW2_USER_DATA_FOLDER`（browser_policy::browser_data_dir）
     data_override: Option<std::path::PathBuf>,
+    /// 网页全屏前主窗口是最大化的：退出全屏后重新最大化（见 [`window_fullscreen`]）
+    restore_maximized: AtomicBool,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -124,6 +135,7 @@ impl BrowserState {
     pub fn close_all(&self, app: &AppHandle) {
         let all: Vec<Arc<Browser>> = lock(&self.browsers).drain().map(|(_, b)| b).collect();
         for browser in all {
+            leave_window_fullscreen(app, &browser);
             if let Some(webview) = app.get_webview(&browser.label) {
                 close_later(webview);
             }
@@ -294,6 +306,7 @@ pub async fn browser_create(
         }),
         focused: AtomicBool::new(false),
         downloads: Mutex::new(Downloads::default()),
+        fullscreen: Mutex::new(Fullscreen::new(bounds)),
     });
 
     let nav = Arc::clone(&browser);
@@ -409,7 +422,7 @@ pub fn browser_navigate(
 }
 
 /// 位置和尺寸；`bounds` 为空时隐藏。同步命令在主线程按收到的顺序执行，拖动面板时
-/// 连续的调整不会乱序。
+/// 连续的调整不会乱序。网页全屏期间只记下位置，见 [`browser_fullscreen`](crate::browser_fullscreen)。
 #[tauri::command]
 pub fn browser_layout(
     app: AppHandle,
@@ -419,19 +432,31 @@ pub fn browser_layout(
 ) -> CmdResult<()> {
     let browser = state.get(id)?;
     let webview = webview_of(&app, &browser)?;
-    match bounds {
-        Some(bounds) => {
-            webview.set_bounds(bounds.rect()).map_err(native_error)?;
-            webview.show().map_err(native_error)
+    let step = lock(&browser.fullscreen).layout(bounds);
+    apply_step(&app, &browser, &webview, step).map_err(native_error)
+}
+
+/// 把全屏取舍的结果接到 webview 上。
+fn apply_step(
+    app: &AppHandle,
+    browser: &Browser,
+    webview: &tauri::Webview,
+    step: Step<Bounds>,
+) -> tauri::Result<()> {
+    match step {
+        Step::None => Ok(()),
+        Step::Apply(Some(bounds)) => {
+            webview.set_bounds(bounds.rect())?;
+            webview.show()
         }
-        None => {
-            webview.hide().map_err(native_error)?;
+        Step::Apply(None) => {
+            webview.hide()?;
             // 隐藏前焦点在网页里：还给主界面，键盘快捷键才接得上
             if browser.focused.swap(false, Ordering::Relaxed) {
                 if let Some(main) = app.get_webview("main") {
                     let returned = main.set_focus().is_ok();
                     crate::key_diag::shell(
-                        &app,
+                        app,
                         &format!(
                             "browser_layout hide label={} focusReturned={returned}",
                             browser.label
@@ -441,6 +466,98 @@ pub fn browser_layout(
             }
             Ok(())
         }
+        Step::FillWindow => {
+            let Some(window) = app.get_window("main") else {
+                return Ok(());
+            };
+            let size = window.inner_size()?;
+            webview.set_bounds(Rect {
+                position: PhysicalPosition::new(0, 0).into(),
+                size: size.into(),
+            })?;
+            webview.show()?;
+            #[cfg(windows)]
+            native::raise(webview)?;
+            Ok(())
+        }
+        Step::ExitPage => {
+            #[cfg(windows)]
+            native::exit_page(webview)?;
+            Ok(())
+        }
+    }
+}
+
+/// 网页进出全屏（WebView2 `ContainsFullScreenElementChanged`）。事件回调里不直接改
+/// webview：换个线程把活排回事件循环，和 tauri-runtime-wry 切窗口全屏的消息一样异步。
+#[cfg(windows)]
+fn fullscreen_changed(app: &AppHandle, browser: &Arc<Browser>, on: bool) {
+    let app = app.clone();
+    let browser = Arc::clone(browser);
+    std::thread::spawn(move || {
+        let main = app.clone();
+        let _ = main.run_on_main_thread(move || {
+            let (was, step, now) = {
+                let mut fullscreen = lock(&browser.fullscreen);
+                let was = fullscreen.active();
+                let step = fullscreen.changed(on);
+                (was, step, fullscreen.active())
+            };
+            if was != now {
+                window_fullscreen(&app, now);
+                browser.send(BrowserMessage::Fullscreen { on: now });
+            }
+            if let Some(webview) = app.get_webview(&browser.label) {
+                let _ = apply_step(&app, &browser, &webview, step);
+            }
+        });
+    });
+}
+
+/// 窗口层的补正：tao 在最大化的窗口上直接把窗口拉到整屏，但窗口还带着最大化样式，
+/// 无边框窗口的客户区仍按工作区算（底下空出任务栏那条），退出时恢复的也是最大化，
+/// 矩形停在整屏。所以最大化时先还原再全屏（tao 记下普通位置），退出后再最大化。
+/// tauri-runtime-wry 自己的全屏消息先于这里到，重复的切换 tao 会忽略。
+fn window_fullscreen(app: &AppHandle, on: bool) {
+    let (Some(window), Some(state)) =
+        (app.get_window("main"), app.try_state::<Arc<BrowserState>>())
+    else {
+        return;
+    };
+    if on {
+        if window.is_maximized().unwrap_or(false) {
+            state.restore_maximized.store(true, Ordering::Relaxed);
+            let _ = window.set_fullscreen(false);
+            let _ = window.unmaximize();
+            let _ = window.set_fullscreen(true);
+        }
+    } else {
+        let _ = window.set_fullscreen(false);
+        if state.restore_maximized.swap(false, Ordering::Relaxed) {
+            let _ = window.maximize();
+        }
+    }
+}
+
+impl BrowserState {
+    /// 主窗口尺寸变了：全屏中的网页跟着铺满（切到全屏是异步的，尺寸稍后才到）。
+    pub fn window_resized(&self, app: &AppHandle) {
+        let all: Vec<Arc<Browser>> = lock(&self.browsers).values().cloned().collect();
+        for browser in all {
+            let step = lock(&browser.fullscreen).resized();
+            if matches!(step, Step::FillWindow) {
+                if let Some(webview) = app.get_webview(&browser.label) {
+                    let _ = apply_step(app, &browser, &webview, step);
+                }
+            }
+        }
+    }
+}
+
+/// 关掉还在全屏的网页时，tauri-runtime-wry 收不到退出事件，窗口会停在全屏：自己退出。
+fn leave_window_fullscreen(app: &AppHandle, browser: &Browser) {
+    if lock(&browser.fullscreen).active() {
+        window_fullscreen(app, false);
     }
 }
 
@@ -506,6 +623,7 @@ pub fn browser_destroy(
     let Some(browser) = lock(&state.browsers).remove(&id) else {
         return Ok(());
     };
+    leave_window_fullscreen(&app, &browser);
     if let Some(webview) = app.get_webview(&browser.label) {
         close_later(webview);
     }
@@ -524,6 +642,7 @@ mod native {
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use webview2_com::{
         take_pwstr, AcceleratorKeyPressedEventHandler, CapturePreviewCompletedHandler,
+        ContainsFullScreenElementChangedEventHandler, ExecuteScriptCompletedHandler,
         FaviconChangedEventHandler, FocusChangedEventHandler, GetFaviconCompletedHandler,
         HistoryChangedEventHandler, LaunchingExternalUriSchemeEventHandler,
         SourceChangedEventHandler,
@@ -533,6 +652,9 @@ mod native {
     use windows::Win32::System::Com::{IStream, STATFLAG_NONAME, STATSTG, STREAM_SEEK_SET};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     };
 
     type WinResult = windows::core::Result<()>;
@@ -650,7 +772,12 @@ mod native {
                     let mut key = 0u32;
                     args.VirtualKey(&mut key)?;
                     let (ctrl, shift, alt) = (down(VK_CONTROL), down(VK_SHIFT), down(VK_MENU));
-                    let matched = browser_policy::app_shortcut(key, ctrl, shift, alt);
+                    // 网页全屏期间不拦：面板关在全屏底下、窗口却停在全屏里更糟
+                    let matched = if super::lock(&keys.fullscreen).active() {
+                        None
+                    } else {
+                        browser_policy::app_shortcut(key, ctrl, shift, alt)
+                    };
                     let mut focus_returned = false;
                     if let Some(name) = matched {
                         args.SetHandled(true)?;
@@ -686,6 +813,7 @@ mod native {
 
             let got = Arc::clone(browser);
             let got_app = app.clone();
+            let full_app = app.clone();
             controller.add_GotFocus(
                 &FocusChangedEventHandler::create(Box::new(move |_, _| {
                     got.focused.store(true, Ordering::Relaxed);
@@ -699,6 +827,19 @@ mod native {
                 &FocusChangedEventHandler::create(Box::new(move |_, _| {
                     lost.focused.store(false, Ordering::Relaxed);
                     crate::key_diag::shell(&app, &format!("LostFocus label={}", lost.label));
+                    Ok(())
+                })),
+                &mut token,
+            )?;
+
+            // tauri-runtime-wry 自己也挂了这个事件，只把整个窗口切成全屏；webview 的尺寸归我们
+            let full = Arc::clone(browser);
+            core.add_ContainsFullScreenElementChanged(
+                &ContainsFullScreenElementChangedEventHandler::create(Box::new(move |core, _| {
+                    let Some(core) = core else { return Ok(()) };
+                    let mut on = windows::core::BOOL::default();
+                    core.ContainsFullScreenElement(&mut on)?;
+                    super::fullscreen_changed(&full_app, &full, on.as_bool());
                     Ok(())
                 })),
                 &mut token,
@@ -792,6 +933,42 @@ mod native {
                         }
                         _ => Ok(()),
                     })
+            };
+        })
+    }
+
+    /// 放到主窗口子窗口的最上层：wry 调尺寸时不动 Z 序（SWP_NOZORDER）。
+    pub fn raise(webview: &tauri::Webview) -> tauri::Result<()> {
+        webview.with_webview(|platform| {
+            let mut hwnd = windows::Win32::Foundation::HWND::default();
+            // SAFETY: 主线程、有效的 WebView2 控制器；hwnd 是 wry 建的容器窗口
+            unsafe {
+                if platform.controller().ParentWindow(&mut hwnd).is_ok() {
+                    SetWindowPos(
+                        hwnd.0,
+                        HWND_TOP,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    );
+                }
+            }
+        })
+    }
+
+    /// 让网页退出全屏；退出事件随后把 webview 放回面板或隐藏。
+    pub fn exit_page(webview: &tauri::Webview) -> tauri::Result<()> {
+        webview.with_webview(|platform| {
+            // SAFETY: 主线程、有效的 WebView2 对象
+            let _ = unsafe {
+                platform.controller().CoreWebView2().and_then(|core| {
+                    core.ExecuteScript(
+                        &HSTRING::from("document.fullscreenElement && document.exitFullscreen()"),
+                        &ExecuteScriptCompletedHandler::create(Box::new(|_, _| Ok(()))),
+                    )
+                })
             };
         })
     }

@@ -53,6 +53,8 @@ export interface BrowserStatus {
   error?: string | undefined;
   /** 外壳里有没有对应的 webview（被回收或还没显示过时为 false） */
   live: boolean;
+  /** 网页处于全屏（外壳的 fullscreen 消息）：期间不做浮层遮挡 */
+  fullscreen?: boolean | undefined;
 }
 
 export interface BrowserPoolEvents {
@@ -351,7 +353,7 @@ export class BrowserPool {
     entry.generation += 1;
     const generation = entry.generation;
     const url = entry.status.url;
-    this.patch(entry, { live: true, loading: true, error: undefined });
+    this.patch(entry, { live: true, loading: true, error: undefined, fullscreen: undefined });
     entry.chain = entry.chain.then(async () => {
       if (entry.generation !== generation) return;
       try {
@@ -419,6 +421,9 @@ export class BrowserPool {
         return;
       case "shortcut":
         this.events.onShortcut(message.key);
+        return;
+      case "fullscreen":
+        this.patch(entry, { fullscreen: message.on });
         return;
     }
   }

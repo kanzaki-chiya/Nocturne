@@ -38,6 +38,8 @@ windows-sys = { version = "=0.61.2", features = [
     "Win32_System_Registry",
     "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",
+    # 网页全屏时把浏览器 webview 放到最上层（SetWindowPos）
+    "Win32_UI_WindowsAndMessaging",
 ] }
 # WinRT toast（ADR-0056）：tauri-winrt-notification 0.8.1 的公开 API 设不了
 # tag/group，也就无法「同会话替换、切走撤销」，所以直接经 windows 的

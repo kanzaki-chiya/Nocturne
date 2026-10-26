@@ -167,6 +167,31 @@ describe("浏览器池", () => {
     expect(host.destroy).not.toHaveBeenCalled();
   });
 
+  it("全屏消息写进状态；全屏期间布局照常发给外壳（外壳只记下），重建时清掉", async () => {
+    const { host, log, push } = fakeHost();
+    const pool = new BrowserPool(host, events(), 1);
+    pool.register("a", "https://example.com/");
+    pool.show("a", box);
+    await flush();
+    push(1, { kind: "fullscreen", on: true });
+    expect(pool.status("a")?.fullscreen).toBe(true);
+    pool.show("a", { ...box, width: 600 });
+    await flush();
+    expect(log).toContain("layout 1 600x300");
+    push(1, { kind: "fullscreen", on: false });
+    expect(pool.status("a")?.fullscreen).toBe(false);
+    push(1, { kind: "fullscreen", on: true });
+    pool.hide("a");
+    pool.register("b", "https://b.test/");
+    pool.show("b", box);
+    await flush();
+    pool.hide("b");
+    pool.show("a", box);
+    await flush();
+    // a 被回收后重建：新 webview 不在全屏
+    expect(pool.status("a")?.fullscreen).toBeUndefined();
+  });
+
   it("网页事件：地址、标题、新窗口、快捷键转给面板；回收后的旧 webview 迟到的消息丢掉", async () => {
     const { host, push } = fakeHost();
     const ev = events();

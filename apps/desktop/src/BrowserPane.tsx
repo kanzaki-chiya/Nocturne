@@ -148,10 +148,14 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
     };
   }, [visible, pool, tab.id]);
 
-  // ── 遮挡：可见时盯着主界面浮层 ──
+  // ── 遮挡：可见时盯着主界面浮层；网页全屏时 webview 盖满窗口，浮层本来就看不见，
+  // 再截图隐藏反而会让外壳把网页退出全屏 ──
+  const fullscreen = status.fullscreen === true;
   useEffect(() => {
     const node = slot.current;
-    if (!visible || node === null || typeof MutationObserver === "undefined") return;
+    if (!visible || fullscreen || node === null || typeof MutationObserver === "undefined") {
+      return;
+    }
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let placeholder: string | undefined;
@@ -251,7 +255,7 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
       if (placeholder !== undefined) URL.revokeObjectURL(placeholder);
       setCover(undefined);
     };
-  }, [visible, pool, tab.id]);
+  }, [visible, fullscreen, pool, tab.id]);
 
   const submit = () => {
     const text = editing ?? status.url;
