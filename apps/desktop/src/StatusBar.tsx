@@ -12,6 +12,7 @@ import type { ContextSummary, RpcSession, RpcClient, RemoteStatus } from "@noctu
 import { RemoteBadge } from "./RemotePage";
 
 import { Dropdown } from "./Dropdown";
+import { SessionGrants, useSessionGrants } from "./SessionGrants";
 import { unavailableMcpServers, type UnavailableMcpServer } from "./mcp-status";
 import { ContextPanel, number, percent } from "./context-panel";
 import { ChoiceMenu } from "./Menu";
@@ -46,6 +47,7 @@ export interface StatusBarProps {
   onManageProviders?: () => void;
   /** MCP 未连接标记的点击：进入设置 › MCP */
   onManageMcp?: () => void;
+  onManageGrants?: () => void;
 }
 
 export { ContextPanel, contextRows, contextSourceLabel, type ContextRow } from "./context-panel";
@@ -269,11 +271,13 @@ export function StatusBar({
   home,
   onManageProviders,
   onManageMcp,
+  onManageGrants,
   remoteStatus,
   remoteClient,
   onManageRemote,
 }: StatusBarProps) {
   const speed = useStepSpeed(session, view);
+  const { grants } = useSessionGrants(session, remoteClient);
   const [localPanel, setLocalPanel] = useState<StatusPanel | null>(null);
   const activePanel = panel === undefined ? localPanel : panel;
   const [openMenu, setOpenMenu] = useState<StatusMenu | null>(null);
@@ -451,6 +455,11 @@ export function StatusBar({
   ) => (
     <Dropdown
       variant="pill"
+      footer={
+        preset ? (
+          <SessionGrants grants={grants} session={session} onManage={onManageGrants} />
+        ) : undefined
+      }
       label={label}
       value={control.value}
       options={control.groups.flatMap((group) => group.options)}

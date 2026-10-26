@@ -9,6 +9,7 @@ import { Conversation, PermissionCard, QuestionCard } from "../Conversation";
 import { phoneWarningText } from "../open-warnings";
 import { useDraftControls, useSessionControls } from "../session-controls";
 import { PhoneComposer } from "./PhoneComposer";
+import { SessionGrants, useSessionGrants } from "../SessionGrants";
 import {
   submitAccepted,
   type PhoneCreateOptions,
@@ -46,12 +47,14 @@ export function SessionScreen({
   plain = false,
   sessions,
   onForked,
+  onManageGrants,
 }: {
   entry: PhoneSession;
   /** 回退、改动摘要与分叉经由会话管理器（与桌面 Conversations 相同的刷新规则） */
   sessions: PhoneSessions;
   /** 分叉出的新会话已打开，跳过去 */
   onForked: (sessionId: string) => void;
+  onManageGrants?: (() => void) | undefined;
   /** 普通对话工作区：没有项目文件索引，@ 引用不可用（同桌面） */
   plain?: boolean;
   connected: boolean;
@@ -62,6 +65,7 @@ export function SessionScreen({
   onChanged: () => void;
 }) {
   const { session, view } = entry;
+  const { grants } = useSessionGrants(session, entry.client);
   // 查询函数按会话稳定：圆环的刷新边界由 replaying/key 决定，不因父组件重绘重建。
   const loadContext = useCallback(() => session.describeContext(), [session]);
   const controls = useSessionControls(
@@ -217,6 +221,7 @@ export function SessionScreen({
         key={session.id}
         variant="session"
         controls={controls.controls}
+        grantsFooter={<SessionGrants grants={grants} session={session} onManage={onManageGrants} />}
         running={running}
         disabled={connected && !entry.dead ? undefined : "电脑尚未连接"}
         skills={skills}

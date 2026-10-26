@@ -22,8 +22,17 @@ export function openWarningsToShow(
 
 /**
  * 手机网页不出现 CLI 命令（视觉规范「文案与分隔」）：含 `nctrn trust` 的分句
- * 改成「请在电脑上信任该项目」。桌面端没有信任入口，保留原文。
+ * 改成「请在电脑上信任该项目」。桌面端指向设置授权页。
  */
+export function desktopWarningText(warning: string): string {
+  return warning
+    .split("；")
+    .map((clause) =>
+      clause.includes("nctrn trust") ? "可在 设置 › 授权 中信任，新开或重新打开会话生效" : clause,
+    )
+    .join("；");
+}
+
 export function phoneWarningText(warning: string): string {
   return warning
     .split("；")

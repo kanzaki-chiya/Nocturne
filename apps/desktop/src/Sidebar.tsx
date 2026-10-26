@@ -8,6 +8,7 @@ export type SettingsSection =
   | "models"
   | "providers"
   | "mcp"
+  | "grants"
   | "skills"
   | "agents"
   | "remote"
@@ -131,6 +132,20 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
     icon: (
       <svg {...GLYPH_PROPS}>
         <path d="M2 3h12v4H2zM2 10h12v4H2zM5 5h5M5 12h5" fill="none" stroke="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    key: "grants",
+    label: "授权",
+    icon: (
+      <svg {...GLYPH_PROPS}>
+        <path
+          d="M8 1.5 13.5 4v4c0 3-3 5-5.5 6.5C5.5 13 2.5 11 2.5 8V4zM5.5 8l1.7 1.7 3.5-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+        />
       </svg>
     ),
   },

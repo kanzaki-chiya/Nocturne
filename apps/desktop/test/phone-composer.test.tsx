@@ -150,6 +150,33 @@ const pick = async (files: File[]) => {
   });
 };
 
+it("权限底栏附会话授权段", async () => {
+  const control = {
+    value: "default",
+    label: "default",
+    groups: [{ options: [{ value: "default", label: "default" }] }],
+    onSelect: vi.fn(),
+  };
+  await act(async () =>
+    root?.render(
+      <PhoneComposer
+        variant="session"
+        controls={{ preset: control, model: control, effort: control }}
+        running={false}
+        onSubmit={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSlash={vi.fn()}
+        grantsFooter={<section>本会话已允许 3 项</section>}
+      />,
+    ),
+  );
+  const trigger = [...container.querySelectorAll("button")].find((el) =>
+    el.getAttribute("aria-label")?.includes("权限"),
+  );
+  await act(() => trigger?.click());
+  expect(container.textContent).toContain("本会话已允许 3 项");
+});
+
 it("图片附件随消息发出，报文超限时不发送并提示", async () => {
   const onSubmit = vi.fn((_input: ComposerSubmit) => Promise.resolve(true));
   let next = 1000;

@@ -83,6 +83,7 @@ export interface PhoneComposerProps {
   /** /compact、/mcp：返回字符串时在浮层里显示（/mcp 状态） */
   onSlash: (line: string) => Promise<string | boolean>;
   context?: PhoneContextSource | undefined;
+  grantsFooter?: ReactNode;
   shell?: { label: string; note?: string | undefined } | undefined;
   home?: string | null;
   /** null：本目录没有项目文件索引（普通对话、草稿），@ 引用不可用 */
@@ -116,6 +117,7 @@ export function PhoneComposer({
   onInterrupt,
   onSlash,
   context,
+  grantsFooter,
   shell,
   home,
   fileRefs = null,
@@ -470,6 +472,7 @@ export function PhoneComposer({
         </Fragment>
       ))}
       {control.note !== undefined && <p className="phone-popover-note">{control.note}</p>}
+      {kind === "preset" && grantsFooter}
     </Popover>
   );
 

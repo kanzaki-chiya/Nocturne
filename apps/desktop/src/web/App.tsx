@@ -6,6 +6,7 @@ import type { ComposerSubmit } from "../Composer";
 import { projectKey } from "../session-tree";
 import { UsagePage } from "../UsagePage";
 import { SchedulePage } from "../SchedulePage";
+import { GrantsPage } from "../GrantsPage";
 import { PhoneConnection } from "./connection";
 import { pairPhone, pairingError, parsePairingLink, parsePairingTarget } from "./pairing";
 import { PhoneSessions, phoneStatus, submitAccepted, type PhoneCreateOptions } from "./sessions";
@@ -65,6 +66,7 @@ type Page =
   | { kind: "settings"; hostId?: string }
   | { kind: "usage"; hostId: string }
   | { kind: "schedules"; hostId: string }
+  | { kind: "grants"; hostId: string }
   | { kind: "ext"; page: string; hostId?: string };
 
 const STATE_TEXT: Record<string, string> = {
@@ -541,6 +543,8 @@ export function PhoneApp({
         return "设置";
       case "usage":
         return "用量";
+      case "grants":
+        return "授权";
       case "schedules":
         return "定时任务";
       case "ext":
@@ -797,6 +801,7 @@ export function PhoneApp({
           void sessions.refresh().catch(() => undefined);
         }}
         sessions={sessions}
+        onManageGrants={() => navigate({ kind: "grants", hostId: page.hostId })}
         onForked={(id) => {
           navigate({ kind: "session", hostId: page.hostId, sessionId: id });
         }}
@@ -835,6 +840,16 @@ export function PhoneApp({
           onChanged={() => {
             void sessions.refresh().catch(() => undefined);
           }}
+        />
+      </section>
+    );
+  } else if (page.kind === "grants") {
+    body = (
+      <section className="phone-grants">
+        <GrantsPage
+          client={connected ? sessions.client : undefined}
+          plainWorkspace={plainWorkspace ?? undefined}
+          remote
         />
       </section>
     );
@@ -988,6 +1003,15 @@ export function PhoneApp({
         </section>
         {page.hostId !== undefined && (
           <section className="phone-section" aria-label="用量">
+            <h3>授权</h3>
+            <button
+              className="phone-list-action"
+              onClick={() => {
+                if (page.hostId) navigate({ kind: "grants", hostId: page.hostId });
+              }}
+            >
+              管理项目授权
+            </button>
             <h3>用量</h3>
             <button
               className="phone-list-action"

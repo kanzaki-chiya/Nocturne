@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { openWarningsToShow, phoneWarningText } from "../src/open-warnings";
+import { desktopWarningText, openWarningsToShow, phoneWarningText } from "../src/open-warnings";
 
 const UNTRUSTED =
   "检测到项目配置 Z:/p/.nocturne/config.json，但该工作区未信任——其中仅收紧方向的规则生效；执行 nctrn trust 信任该工作区";
@@ -16,6 +16,11 @@ describe("openWarningsToShow", () => {
       openWarningsToShow(["甲", "乙", "甲", "丙"], [{ message: "乙" }, { message: "无关" }]),
     ).toEqual(["甲", "丙"]);
   });
+});
+
+it("桌面信任提示指向授权页并注明新会话生效", () => {
+  expect(desktopWarningText(UNTRUSTED)).toContain("设置 › 授权");
+  expect(desktopWarningText(UNTRUSTED)).toContain("新开或重新打开会话生效");
 });
 
 describe("phoneWarningText", () => {

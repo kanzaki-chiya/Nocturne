@@ -50,6 +50,7 @@ export interface DropdownProps {
   heading?: string;
   /** 列表底部说明 */
   note?: string;
+  footer?: ReactNode;
   /** 整个控件禁用的原因 */
   disabled?: string | undefined;
   /** 当前值不在选项里时触发器上的文字 */
@@ -77,6 +78,7 @@ export function Dropdown({
   openClassName,
   heading,
   note,
+  footer,
   disabled,
   placeholder = "—",
   title,
@@ -145,9 +147,18 @@ export function Dropdown({
         event.stopPropagation();
         close(true);
         return;
-      case "Tab":
+      case "Tab": {
+        const first = list.current?.querySelector<HTMLButtonElement>(
+          ".session-grants button:not(:disabled)",
+        );
+        if (!event.shiftKey && first) {
+          event.preventDefault();
+          first.focus();
+          return;
+        }
         close(false);
         return;
+      }
       case "ArrowDown":
       case "ArrowUp":
         event.preventDefault();
@@ -348,6 +359,19 @@ export function Dropdown({
             {ordered.length === 0 && <p className="ddm-n">没有匹配的选项</p>}
           </div>
           {note !== undefined && <p className="ddm-n">{note}</p>}
+          {footer && (
+            <div
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  close(true);
+                }
+              }}
+            >
+              {footer}
+            </div>
+          )}
         </div>
       )}
     </span>

@@ -32,6 +32,8 @@ import { StatusBar, type StatusPanel } from "./StatusBar";
 import { PaneErrorBoundary } from "./ErrorBoundary";
 import { ProvidersPage } from "./ProvidersPage";
 import { McpPage } from "./McpPage";
+import { GrantsPage } from "./GrantsPage";
+import { desktopWarningText } from "./open-warnings";
 import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
 import { SkillsPage } from "./SkillsPage";
@@ -1274,6 +1276,10 @@ export function App({ host }: { host: DesktopHost }) {
                   }}
                 />
               </PaneErrorBoundary>
+            ) : page === "grants" ? (
+              <PaneErrorBoundary key="grants">
+                <GrantsPage client={pageClient} plainWorkspace={effectiveWorkspace ?? undefined} />
+              </PaneErrorBoundary>
             ) : page === "agents" ? (
               <PaneErrorBoundary key="agents">
                 <ExternalAgentsPage
@@ -1421,6 +1427,7 @@ export function App({ host }: { host: DesktopHost }) {
                 onManageProviders={() => {
                   setPage("providers");
                 }}
+                onManageGrants={() => setPage("grants")}
                 onManageMcp={() => {
                   setPage("mcp");
                 }}
@@ -1660,6 +1667,7 @@ interface SessionPaneProps {
   onManageProviders: () => void;
   /** 状态栏「MCP 未连接」标记：进入设置 › MCP */
   onManageMcp: () => void;
+  onManageGrants: () => void;
   remoteStatus: RemoteStatus | undefined;
   onManageRemote: () => void;
   /** 服务商配置变更计数：状态栏的模型/档位/预设数据随之重取 */
@@ -1713,6 +1721,7 @@ function SessionPane({
   providersVersion,
   onManageProviders,
   onManageMcp,
+  onManageGrants,
   remoteStatus,
   onManageRemote,
   scheduleSource,
@@ -1785,7 +1794,7 @@ function SessionPane({
         key={`conversation:${session.id}`}
         session={session}
         view={view}
-        openWarnings={openWarnings}
+        openWarnings={openWarnings.map(desktopWarningText)}
         openUrl={openUrl}
         cwd={workspace}
         shellKind={controls.shell?.effective?.kind}
@@ -1839,6 +1848,7 @@ function SessionPane({
         home={home}
         onManageProviders={onManageProviders}
         onManageMcp={onManageMcp}
+        onManageGrants={onManageGrants}
         remoteStatus={remoteStatus}
         remoteClient={client}
         onManageRemote={onManageRemote}
