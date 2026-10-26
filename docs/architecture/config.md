@@ -259,6 +259,8 @@ CLI 注入无状态的 `createAcpConnector(platform)`。Core 从当前合并配�
 
 ## 4. Grant 的持久化
 
+同一进程内同一工作区的项目授权共享一份存储，配置重载不重建（同一 NOCTURNE_HOME 的配置与其 reload 代际共用缓存）。
+
 项目 Grant 是运行期积累的授权记录（不是配置，不写入 `config.json`），按工作区存放在 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`（`{ version: 1, workspaceRoot, grants }`），形状、匹配、原子增删、坏条目跳过与损坏备份规则见 [permissions.md](permissions.md) 第 5.4 节。
 
 授权管理（[ADR-0068](../decisions/ADR-0068-grants-management.md)）的工作区汇总合并授权文件的 `workspaceRoot`、`trust.json` 和已打开会话目录，按真实路径去重，返回 `{ workspace, grantCount, trusted, hasProjectConfig }[]`。损坏、版本不符、文件名与工作区键不符的授权文件跳过，并向已打开会话发 `runtime.warning(grants_invalid)`（同时记诊断）。信任状态来自 `trust.json`；查询不会启动项目进程。

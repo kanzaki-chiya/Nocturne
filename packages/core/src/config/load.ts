@@ -94,6 +94,14 @@ export async function loadConfig(
   platform: Platform,
   options: LoadConfigOptions = {},
 ): Promise<RuntimeConfig> {
+  return loadConfigWithGrantStores(platform, options, new Map());
+}
+
+async function loadConfigWithGrantStores(
+  platform: Platform,
+  options: LoadConfigOptions,
+  grantStores: Map<string, Promise<LoadedGrantStore>>,
+): Promise<RuntimeConfig> {
   const { fs, paths } = platform;
   const home = paths.resolve(options.nocturneHome ?? platform.nocturneHome(), ".");
   // POSIX 上以 0700 创建（会话日志含代码与对话内容，repository-layout.md 第 5 节）；
@@ -518,7 +526,6 @@ export async function loadConfig(
     }
   }
 
-  const grantStores = new Map<string, Promise<LoadedGrantStore>>();
   async function grantsFor(workspaceRoot: string): Promise<LoadedGrantStore> {
     const realRoot = await platform.resolveReal(workspaceRoot);
     const key = paths.canonicalize(realRoot);
@@ -670,7 +677,12 @@ export async function loadConfig(
   // 用户鉴权 URL 无效时在加载阶段失败，而不是等首次读取 base。
   base();
   return {
-    reload: () => loadConfig(platform, { ...options, nocturneHome: home, credentials }),
+    reload: () =>
+      loadConfigWithGrantStores(
+        platform,
+        { ...options, nocturneHome: home, credentials },
+        grantStores,
+      ),
     async listGrantWorkspaces(openWorkspaces, warn) {
       const trustNow = await readTrustList(platform, trustPath);
       if (trustNow.warning) warn(trustNow.warning);

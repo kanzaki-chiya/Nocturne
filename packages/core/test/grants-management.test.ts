@@ -91,6 +91,84 @@ it("同一配置的工作区共享存储；撤销立即影响已建策略，Rule
   ).toBe("session");
 });
 
+it("配置重载保留项目授权存储，旧策略即时看到撤销和新增", async () => {
+  const { config, workspace, platform } = await fixture();
+  const old = await config.forWorkspace(workspace);
+  await old.grants.add(grant);
+  const policy = createRulePolicy({
+    workspaceRoot: workspace,
+    caseSensitive: platform.caseSensitivePaths,
+    grants: { project: old.grants },
+  });
+  const reloaded = await config.reload();
+  const fresh = await reloaded.forWorkspace(workspace);
+  expect(fresh.grants).toBe(old.grants);
+  await fresh.grants.remove(grant.kind, grant.target);
+  expect(policy.evaluate([{ kind: grant.kind, target: grant.target }]).decision.action).toBe("ask");
+  await fresh.grants.add(grant);
+  expect(policy.evaluate([{ kind: grant.kind, target: grant.target }]).decision.action).toBe(
+    "allow",
+  );
+});
+
+it("配置重载共享缓存的加载失败可重试", async () => {
+  const { config, workspace, platform } = await fixture();
+  const originalExists = platform.fs.exists.bind(platform.fs);
+  let failed = false;
+  const exists = vi.spyOn(platform.fs, "exists").mockImplementation(async (file) => {
+    if (!failed && /[\\/]grants[\\/]/.test(file)) {
+      failed = true;
+      throw new Error("read failed");
+    }
+    return originalExists(file);
+  });
+  await expect(config.forWorkspace(workspace)).rejects.toThrow("read failed");
+  exists.mockRestore();
+  const reloaded = await config.reload();
+  expect((await reloaded.forWorkspace(workspace)).grants.list()).toEqual([]);
+});
+
+it("Runtime updateProviders 重载后撤销让已开会话下一次重新询问", async () => {
+  const { config, workspace } = await fixture();
+  const write: FakeScript = [
+    { type: "tool_call", toolCallId: "w", name: "write", input: { path: "a.txt", content: "a" } },
+    { type: "finish", reason: "tool_calls" },
+  ];
+  const done: FakeScript = [
+    { type: "text_delta", text: "done" },
+    { type: "finish", reason: "stop" },
+  ];
+  const runtime = await createRuntime({
+    config,
+    cwd: workspace,
+    interactive: true,
+    providers: [new FakeProvider({ scripts: [write, done, write, done] })],
+  });
+  const session = await runtime.createSession({ model: "fake/fake-1" });
+  const requests: string[] = [];
+  session.subscribe((event) => {
+    if (event.type === "permission.requested") {
+      requests.push(event.payload.requestId);
+      void session.respondPermission(event.payload.requestId, {
+        decision: "allow",
+        remember: "project",
+      });
+    }
+  });
+  try {
+    await session.submit({ text: "first" });
+    const entries = await runtime.listGrants({ workspace });
+    const first = entries[0];
+    if (!first) throw new Error("missing grant");
+    await runtime.updateProviders(await config.reload());
+    await runtime.revokeGrant({ workspace, kind: first.kind, target: first.target });
+    await session.submit({ text: "again" });
+    expect(requests).toHaveLength(2);
+  } finally {
+    await session.close();
+  }
+});
+
 it("工作区汇总合并授权、信任和打开会话；坏版本跳过并发 runtime.warning", async () => {
   const { config, workspace, home, root, platform } = await fixture();
   const trusted = path.join(root, "trusted");
