@@ -12,7 +12,7 @@ export class UsageError extends Error {
 }
 
 /** trust / untrust / setup / rpc 子命令（trust 写 trust.json；setup 走配置向导；rpc 是 RPC 服务端） */
-export type CliCommand = "trust" | "untrust" | "setup" | "rpc";
+export type CliCommand = "trust" | "untrust" | "setup" | "rpc" | "grants";
 
 export interface CliArgs {
   /** -p/--print：非交互模式 */
@@ -52,6 +52,10 @@ export interface CliArgs {
   version: boolean;
   /** trust / untrust / setup / rpc 子命令 */
   command?: CliCommand | undefined;
+  grantsAction?: "list" | "revoke" | undefined;
+  grantsIndex?: number | undefined;
+  grantsAll?: boolean | undefined;
+  workspace?: string | undefined;
 }
 
 export const HELP_TEXT = `nctrn — Nocturne CLI
@@ -66,6 +70,8 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
   nctrn -c, --continue         恢复当前目录最近的会话
   nctrn --resume <id>          恢复指定会话
   nctrn --sessions             列出会话后退出
+  nctrn grants [list] [--workspace <dir>]  查看项目授权
+  nctrn grants revoke <编号|--all> [--workspace <dir>]  撤销项目授权
   nctrn trust | untrust        信任/取消信任当前目录后退出
   nctrn setup                  服务商配置：TTY 打开服务商页；--cli 用行式向导
   nctrn rpc --stdio            RPC 服务端：stdin/stdout 上的 JSON-RPC（桌面端等进程外客户端使用）
@@ -120,6 +126,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       allowPositionals: true,
       strict: true,
       options: {
+        workspace: { type: "string" },
+        all: { type: "boolean", default: false },
         print: { type: "boolean", short: "p", default: false },
         tui: { type: "boolean", default: false },
         inline: { type: "boolean", default: false },
@@ -151,6 +159,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 
   // trust / untrust / setup / rpc 子命令：唯一合法的位置参数（且不与 -p 混用）
   let command: CliCommand | undefined;
+  let grantsAction: "list" | "revoke" | undefined;
+  let grantsIndex: number | undefined;
   if (positionals.length > 0) {
     const first = positionals[0];
     if (
@@ -159,11 +169,26 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       positionals.length === 1
     ) {
       command = first;
+    } else if (!print && first === "grants") {
+      command = "grants";
+      const action = positionals[1] ?? "list";
+      if (action === "list" && positionals.length <= 2 && !values.all) grantsAction = "list";
+      else if (
+        action === "revoke" &&
+        ((values.all && positionals.length === 2) ||
+          (!values.all && positionals.length === 3 && /^[1-9]\d*$/.test(positionals[2] ?? "")))
+      ) {
+        grantsAction = "revoke";
+        if (!values.all) grantsIndex = Number(positionals[2]);
+      } else
+        throw new UsageError("用法：nctrn grants [list] | revoke <编号|--all> [--workspace <dir>]");
     } else if (!print) {
       throw new UsageError(`未知的位置参数：${first}`);
     }
   }
 
+  if (command !== "grants" && (values.workspace !== undefined || values.all))
+    throw new UsageError("--workspace / --all 只能与 grants 搭配");
   const continueSession = values.continue;
   const resume = values.resume;
   const tui = values.tui;
@@ -260,5 +285,9 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     help: values.help,
     version: values.version,
     command,
+    grantsAction,
+    grantsIndex,
+    grantsAll: command === "grants" ? values.all : undefined,
+    workspace: values.workspace,
   };
 }

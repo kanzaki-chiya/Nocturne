@@ -137,6 +137,7 @@ export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): 
         <Text color={b.color}>{b.glyph}</Text>
         <Text>{head}</Text>
         {suffix !== "" ? <Text dimColor> {suffix.trim()}</Text> : null}
+        {entry.permission?.source === "grant" && <Text dimColor>（已授权）</Text>}
       </Text>
       {subagentRowInfo(entry).reason !== undefined && (
         <Text dimColor wrap="truncate">{`  选择理由：${subagentRowInfo(entry).reason}`}</Text>

@@ -121,6 +121,7 @@ import {
 import { StatusBar, type EffortSegment, type StatusHighlight } from "./components/status-bar.js";
 import { ThemePage } from "./components/theme-page.js";
 import { SettingsPage } from "./components/settings-page.js";
+import { GrantsPage } from "./components/grants-page.js";
 import { RewindPage } from "./components/rewind-page.js";
 import { TodoPanel, todoPanelRows } from "./components/todo-panel.js";
 import { Transcript, type TranscriptItem } from "./components/transcript.js";
@@ -958,7 +959,7 @@ function SessionApp({
   useLayoutEffect(() => {
     pickerCommitted.current = pickerOpen;
     providerCommitted.current = providerPageOpen;
-    settingsCommitted.current = overlay === "settings";
+    settingsCommitted.current = overlay === "settings" || overlay === "grants";
   }, [pickerOpen, providerPageOpen, overlay]);
   const [completionOn, setCompletionOn] = useState(true);
   const [completionIndex, setCompletionIndex] = useState(0);
@@ -1803,6 +1804,7 @@ function SessionApp({
     providerPageOpen ||
     recordOpen ||
     overlay === "settings" ||
+    overlay === "grants" ||
     rewindTargets !== undefined;
   const closeRecord = useCallback(
     () =>
@@ -2229,10 +2231,10 @@ function SessionApp({
               if (r.name === "theme") clearInput();
               if (r.name === "resume" && submitting.current)
                 pushLine("! 会话忙（Turn 进行中）；先中断再切换");
-              else if (r.name === "settings")
+              else if (r.name === "settings" || r.name === "grants")
                 void alt.enter(async () => {
                   clearInput();
-                  setOverlay("settings");
+                  setOverlay(r.name);
                   await waitCommit(settingsCommitted, true);
                 });
               else setOverlay(r.name);
@@ -2282,7 +2284,7 @@ function SessionApp({
         return;
       }
       if (overlay !== undefined) {
-        if (overlay === "settings") return;
+        if (overlay === "settings" || overlay === "grants") return;
         setOverlay(undefined);
         return;
       }
@@ -2326,7 +2328,7 @@ function SessionApp({
         return;
       }
       if (overlay !== undefined) {
-        if (overlay === "settings") return;
+        if (overlay === "settings" || overlay === "grants") return;
         setOverlay(undefined);
         return;
       }
@@ -2398,10 +2400,10 @@ function SessionApp({
               if (r.name === "theme") clearInput();
               if (r.name === "resume" && submitting.current)
                 pushLine("! 会话忙（Turn 进行中）；先中断再切换");
-              else if (r.name === "settings")
+              else if (r.name === "settings" || r.name === "grants")
                 void alt.enter(async () => {
                   clearInput();
-                  setOverlay("settings");
+                  setOverlay(r.name);
                   await waitCommit(settingsCommitted, true);
                 });
               else setOverlay(r.name);
@@ -2618,6 +2620,20 @@ function SessionApp({
         onRewind={doRewind}
         onFork={doFork}
         onMouseFrame={fullscreen ? reportDialogMouse : undefined}
+      />
+    ) : overlay === "grants" ? (
+      <GrantsPage
+        runtime={runtime}
+        session={session}
+        width={width}
+        height={budget.frameHeight}
+        onMouseFrame={fullscreen ? reportDialogMouse : undefined}
+        onClose={() => {
+          void alt.leave(() => {
+            setOverlay(undefined);
+            clearInput();
+          });
+        }}
       />
     ) : overlay === "settings" ? (
       <SettingsPage

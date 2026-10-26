@@ -19,7 +19,7 @@ import { helpLines as catalogHelpLines, externalAgentListLines } from "./slash-c
 import { safeLoginError } from "./provider-login.js";
 
 export type OverlayName =
-  "context" | "help" | "resume" | "preset" | "effort" | "shell" | "theme" | "settings";
+  "context" | "help" | "resume" | "preset" | "effort" | "shell" | "theme" | "settings" | "grants";
 
 /** /provider 向导启动形态（add / key） */
 export type ProviderWizardStart =
@@ -83,6 +83,10 @@ export async function runSlash(
     }
     case "/help":
       return { kind: "overlay", name: "help" };
+    case "/grants":
+      return arg === ""
+        ? { kind: "overlay", name: "grants" }
+        : { kind: "message", text: "用法：/grants" };
     case "/settings":
       return arg === ""
         ? { kind: "overlay", name: "settings" }

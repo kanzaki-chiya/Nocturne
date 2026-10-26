@@ -20,6 +20,7 @@ import { replaySessionView } from "@nocturne/core/protocol";
 import { cliHelpText, externalAgentListLines } from "@nocturne/tui/slash-catalog";
 
 import { normalizeModelRef } from "./config.js";
+import { sessionGrants } from "./grants.js";
 
 export interface CommandIo {
   print(text: string): void;
@@ -125,6 +126,14 @@ export async function runSlashCommand(
 ): Promise<CommandOutcome> {
   const [cmd, ...rest] = line.trim().split(/\s+/);
   switch (cmd) {
+    case "/grants": {
+      try {
+        io.print(await sessionGrants(runtime, session, rest));
+      } catch (error) {
+        io.print(`! ${errorText(error)}`);
+      }
+      return "handled";
+    }
     case "/cost": {
       if (rest.length) {
         io.print("用法：/cost");

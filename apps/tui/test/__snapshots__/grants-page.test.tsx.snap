@@ -1,0 +1,32 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`/grants 打开 PageShell；d 撤销且空状态，Esc 返回 1`] = `
+"授权 › project
+未信任 · 有项目配置 · 1 项授权
+
+  project 1      │▌ shell  git status                                                             2026-10-20
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+                 │
+─────────────────┴───────────────────────────────────────────────────────────────────────────────────────────
+规则写在 config.json 的 permissions.rules；这里只管理确认时点出来的授权。
+
+
+d 撤销  D 全部撤销  t 切换信任  Esc 返回"
+`;

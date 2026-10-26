@@ -138,6 +138,10 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 - **MCP 状态（Phase 5）**：`mcp.server` 是临时事件、不进 `SessionView`（reducer 忽略未知类型）；`failed`/`crashed` 经 `runtime.warning` 进入提示区，`/mcp` 面板按 `session.mcpServers()` 展示每台服务器的状态、工具数与失败原因。Hook 的可见效果走既有事件（`permission.resolved source:"hook"`、`tool.completed`、`runtime.warning(code:"hook_failed")`），不新增 UI 通道。
 - **宽字符**：所有截断/对齐经显示宽度计算（Ink 内建 string-width），中文文本不掰断。
 
+### 4.1 授权管理（ADR-0068）
+
+`/grants` 打开 PageShell 全屏页，普通屏幕模式临时进入备用屏幕、关闭后恢复。左栏切换工作区，右栏展示信任状态与项目授权，空状态与桌面一致。`d` 撤销所选、`D` 打开全部撤销确认、`t` 切换信任；信任前只读展示 MCP 名与命令参数、Hook 分事件计数、放宽规则条数并确认，取消信任直接执行。失败保留列表并显示错误。撤销下一次调用生效，信任新开或重新打开会话生效。页订阅 Core 授权变化刷新，接口与权限边界见 [permissions.md 5.4](../architecture/permissions.md#54-grant-的形状与匹配)。工具行 `permission.source=grant` 时末尾显示「（已授权）」，普通屏幕、全屏与回放一致，不推断旧日志范围。
+
 ## 5. 降级行为
 
 | 条件 | 行为 |

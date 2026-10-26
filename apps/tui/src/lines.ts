@@ -349,7 +349,15 @@ function layoutEntryBody(
         shownName === "mcp_search"
           ? `${mark} 搜索 MCP 工具：${summary} ${entry.status}`
           : `${mark} ${shownName ?? "?"}${subagentModel(entry)} ${summary} ${entry.status}`;
-      const lines = [...review, ...rows(entry.key, head, width, { toggle })];
+      const lines = [
+        ...review,
+        ...rows(
+          entry.key,
+          `${head}${entry.permission?.source === "grant" ? "（已授权）" : ""}`,
+          width,
+          { toggle },
+        ),
+      ];
       const reason = subagentRowInfo(entry).reason;
       if (reason !== undefined)
         lines.push(...rows(`${entry.key}:reason`, `  选择理由：${reason}`, width, { dim: true }));

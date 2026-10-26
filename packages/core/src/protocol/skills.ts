@@ -139,6 +139,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "context",
   "cost",
   "mcp",
+  "grants",
   "skills",
   "agents",
   "compact",

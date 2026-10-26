@@ -4,6 +4,8 @@
  * 退出码：0 成功 / 1 Turn 失败 / 2 用法、配置或恢复错误 / 130 中断。
  */
 import { realpathSync } from "node:fs";
+import path from "node:path";
+import { projectGrants } from "./grants.js";
 import { createInterface } from "node:readline/promises";
 
 import { createAcpConnector } from "@nocturne/acp";
@@ -212,6 +214,17 @@ async function main(): Promise<number> {
     if (!collected.ok) {
       process.stderr.write(`配置错误：\n${collected.problems.map((p) => `  - ${p}`).join("\n")}\n`);
       return 2;
+    }
+    if (args.command === "grants") {
+      try {
+        process.stdout.write(
+          `${await projectGrants(collected.config.runtime, path.resolve(cwd, args.workspace ?? "."), args.grantsAction ?? "list", args.grantsIndex, args.grantsAll)}\n`,
+        );
+        return 0;
+      } catch (error) {
+        process.stderr.write(`! ${errorText(error)}\n`);
+        return 1;
+      }
     }
     const trusted = args.command === "trust";
     try {

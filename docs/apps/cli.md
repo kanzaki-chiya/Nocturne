@@ -23,6 +23,8 @@ nctrn -p                     # 非交互模式：prompt 从 stdin 读取（stdin
 nctrn --continue             # 恢复当前目录最近的会话后进入所选模式
 nctrn --resume <id>          # 恢复指定会话后进入所选模式
 nctrn --sessions             # 列出会话后退出（只读）
+nctrn grants [list] [--workspace <dir>]  # 按编号列出项目授权（默认当前目录）
+nctrn grants revoke <编号|--all> [--workspace <dir>]  # 撤销项目授权
 nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trustedWorkspaces 后退出
 nctrn setup                  # 服务商配置向导（TTY 打开服务商页，provider-setup.md）
 nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（ADR-0044，v0.5）
@@ -72,6 +74,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 - 凭据来自环境变量或用户级凭据文件（v0.2，[provider-setup.md](../architecture/provider-setup.md) 第 3 节），**不接受命令行上的密钥值**；`--api-key-env` 指定的是变量名。
 - 启动时校验配置：缺 `baseURL`（openai-compatible）、缺凭据、缺模型 id，都打印缺失项并以退出码 2 退出，两种模式一致；stdin/stdout 均为交互终端时提示可运行 `nctrn setup`——完全没有任何服务商来源（无 `providers.json` 条目、无 `config.json` providers、无环境变量/命令行合成）时该提示置首，环境变量与手写说明退为次要；非 TTY 输出不变，不含向导提示。
 - 未知参数、参数缺值：打印用法并以退出码 2 退出。
+- `grants`（[ADR-0068](../decisions/ADR-0068-grants-management.md)）不要求配置模型，按授予时间倒序输出编号、类别、目标、时间；`revoke <编号>` 精确撤销对应 kind + target，`revoke --all` 全部撤销。工作区可用 `--workspace` 指定（相对当前目录解析），写失败报错退出 1；没有记录显示「还没有授权」。权限判定仍由 Core 实时读取存储，撤销下一次调用生效。
 - `trust` / `untrust` 子命令原子写 `<NOCTURNE_HOME>/trust.json`（[config.md](../architecture/config.md) 第 3 节），打印结果后以退出码 0 退出；程序不改写手写的 `config.json`。
 - `rpc --stdio` 子命令（[ADR-0044](../decisions/ADR-0044-rpc-stdio.md)，协议见 [rpc.md](../protocols/rpc.md)）：把 Runtime 经 stdin/stdout 上的 JSON-RPC 交给进程外客户端（桌面端后台）。`--scheduler` 只在这个子命令上有效（`nctrn rpc --stdio --scheduler`），本进程才运行定时任务调度器；TUI、`-p` 和普通 `rpc` 不带，同一 `NOCTURNE_HOME` 也不会有两个调度器（[schedule.md](../architecture/schedule.md)）。桌面端拉起后台时带上它。脱离 `rpc` 使用是用法错误。复用本 CLI 的配置加载（含 `--model`/`--base-url` 等配置层参数与 `--debug`）、代理设置与 MCP 装配；一个进程一个 Runtime，stdio 是唯一的本机连接，可同时打开多个会话；服务端已支持附加远程连接，接入按 ADR-0052 后续轮次实施。**stdout 只写 JSON-RPC 报文**，配置警告、诊断与错误一律写 stderr（`console.log` 也被改道到 stderr）。本机握手时才创建 Runtime，`interactive` 取自本机客户端声明。不接受会话与交互参数（`-c`/`--resume`/`--sessions`/`--preset`/`-p`/`--cli`/`--tui`/`-y`）：会话与权限由客户端决定，`-y`（自动批准）在这里没有意义。与 `trust` 一致，不要求已配置模型或服务商（桌面端首次启动时还没有），但已声明却无法解析的配置照常报错退出 2。
   - **生命周期**：stdin 关闭（客户端退出或崩溃）、收到 `shutdown` 请求、收到 SIGINT/SIGTERM/SIGHUP 都走同一套清理——中断运行中的 Turn（落盘为 `aborted`）、关闭全部会话（刷盘、释放会话锁；会话关闭时其 MCP 服务器进程树随之清理）——然后以退出码 0 退出；清理完成后事件循环自然排空，另设 3 秒兜底定时器防残留句柄。
@@ -123,6 +126,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 | `/settings` | 按会话默认、界面、执行分组列出生效值、来源和覆盖提示；安全审查显示独立后端与模型引用，选择用 TUI `/settings` 或 settings.json；默认模型与档位只读，修改去 `/model`，Shell 去 `/shell`，`/theme` 仅 TUI | `runtime.describeSettings()` |
 | `/settings preset <名称\|reset>` | 保存默认预设，`reset` 清除；可选 `read-only`、`default`、`auto-edit`、`guarded`、`smart`、`bypass` | `runtime.updateSettings()` |
 | `/new`、`/clear` | 新建空会话并切换，使用最新生效的默认模型、思考档位与权限预设；未注入配置时沿用当前会话值；旧会话仍可恢复，`/clear` 不是清屏 | CLI 注入的 `newSession` 回调 |
+| `/grants`、`/grants revoke <编号>` | 列出本会话和本项目授权（标范围、合并编号），或撤销对应项；下次调用生效，失败仅显示错误 | `session.listGrants/revokeGrant`、`runtime.listGrants/revokeGrant` |
 | `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
 | `/agents` | 只读列出外部 agent 的来源、启停与碰撞警告，不探测、不写配置 | `session.describeExternalAgents()` |
 | `/provider` | 列出服务商与来源，不显示密钥或令牌；附鉴权描述、凭据状态与保存位置。TUI 中打开服务商页。`add` 与 `nctrn setup --cli` 共用向导；`key` / `refresh` / `remove` / `login` / `logout` 为快捷操作。`model <名> <模型>` 逐字段显示 `当前值（来源）`，来源可为 models.dev；回车保留、`-` 清除用户编辑。图片输入和推理接受 `y`/`n`/`-`，推理为否时不询问档位；编辑工具接受 `edit`/`patch`/`apply_patch`/`-`（ADR-0035 §5）；来源为手写配置的字段只读。成功后写入 `userModels`，详见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveModelSettings()` 等 + `runtime.updateProviders` |
