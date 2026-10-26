@@ -987,13 +987,17 @@ class Connection implements HubPeer {
         return null;
       },
 
-      "runtime.listSessions": (p) => {
+      "runtime.listSessions": async (p) => {
         const cwd = optString(p, "cwd");
         const includeSubagents = optBool(p, "includeSubagents");
-        return this.runtime().listSessions({
+        const summaries = await this.runtime().listSessions({
           ...(cwd !== undefined ? { cwd } : {}),
           ...(includeSubagents !== undefined ? { includeSubagents } : {}),
         });
+        return summaries.map((summary) => ({
+          ...summary,
+          openHere: this.hub.isOpenHere(summary.id),
+        }));
       },
       "runtime.usageStats": (p) => {
         const days = p.days;

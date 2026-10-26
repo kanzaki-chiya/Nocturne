@@ -59,7 +59,6 @@ import type {
   RewindTarget,
   SessionRewoundPayload,
   ReadAttachmentResult,
-  SessionSummary,
   LocalFileContent,
   SettingItem,
   SettingsPatch,
@@ -258,7 +257,10 @@ export interface RpcRuntime {
   deleteSchedule(input: { id: string }): Promise<void>;
   runSchedule(input: { id: string }): Promise<ScheduleRunNowResult>;
   scheduleHistory(input: { id: string }): Promise<ScheduleHistoryEntry[]>;
-  listSessions(filter?: { cwd?: string; includeSubagents?: boolean }): Promise<SessionSummary[]>;
+  listSessions(filter?: {
+    cwd?: string;
+    includeSubagents?: boolean;
+  }): Promise<RpcResult<"runtime.listSessions">>;
   usageStats(input: { days?: number }): Promise<UsageStats>;
   /**
    * createSession 可携带 cwd/workspaceRoot（ADR-0051）：单后台模式下

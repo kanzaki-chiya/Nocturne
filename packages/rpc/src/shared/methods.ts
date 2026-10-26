@@ -272,7 +272,7 @@ export interface RpcMethods {
 
   "runtime.listSessions": {
     params: { cwd?: string; includeSubagents?: boolean };
-    result: SessionSummary[];
+    result: (SessionSummary & { openHere?: boolean })[];
   };
   "runtime.usageStats": { params: { days?: number }; result: UsageStats };
   /**

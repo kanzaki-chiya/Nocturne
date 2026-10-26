@@ -271,6 +271,10 @@ export class Hub {
 
   // ── 会话 ─────────────────────────────────────────────────
 
+  isOpenHere(sessionId: string): boolean {
+    return this.sessions.has(sessionId) || this.opening.has(sessionId);
+  }
+
   addSession(session: RuntimeSession): void {
     this.sessions.set(session.id, session);
     this.watch(session);
