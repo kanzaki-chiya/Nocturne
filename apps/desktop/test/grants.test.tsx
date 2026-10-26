@@ -178,9 +178,26 @@ it.each(["session", "project", undefined] as const)(
       expect(lines[0]).toMatch(
         new RegExp(`^${scope === "session" ? "本会话允许" : "本项目允许"} · 10-20 \\d{2}:\\d{2}$`),
       );
-      expect(lines[1]).toBe("shell · git status");
+      expect(lines[1]).toBe("命令 · git status");
       expect(lines).toHaveLength(scope === "project" ? 3 : 2);
       if (scope === "project") expect(lines[2]).toBe("可在 设置 › 授权 中撤销");
     }
   },
 );
+it("已授权悬停说明的类别用中文名，不显示原始 kind", () => {
+  render(
+    <GrantedTag
+      target={"Z:\\ws\\grant-demo.txt"}
+      kind="edit"
+      permission={{
+        action: "allow",
+        source: "grant",
+        rule: undefined,
+        grant: { scope: "project", createdAt: grant.createdAt },
+      }}
+    />,
+  );
+  const lines = screen.getByText("已授权").title.split("\n");
+  expect(lines[1]).toBe("修改 · Z:\\ws\\grant-demo.txt");
+  expect(lines[1]).not.toMatch(/\bedit\b/);
+});

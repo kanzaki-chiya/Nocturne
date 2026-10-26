@@ -19,7 +19,7 @@ export function GrantedTag({
 }: {
   permission: ToolEntry["permission"];
   target?: string | undefined;
-  kind?: string | undefined;
+  kind?: Grant["kind"] | undefined;
 }) {
   if (permission?.source !== "grant") return null;
   const grant = permission.grant;
@@ -40,7 +40,7 @@ export function GrantedTag({
       ? "已授权"
       : [
           `${grant.scope === "session" ? "本会话允许" : "本项目允许"} · ${time}`,
-          [kind, target].filter(Boolean).join(" · "),
+          [kind && grantKind(kind), target].filter(Boolean).join(" · "),
           ...(grant.scope === "project" ? ["可在 设置 › 授权 中撤销"] : []),
         ]
           .filter(Boolean)
@@ -79,12 +79,14 @@ import {
   type ViewEntry,
   type TurnChanges,
   type TurnChangeDiff,
+  type Grant,
 } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "./attachment-images";
 import { isAllowedExternalUrl } from "./external-url";
 import { fileRefTitle, userText } from "./file-refs";
+import { grantKind } from "./GrantsPage";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { operationForSubjectKind } from "./notify";
 import { displayPath } from "./paths";
