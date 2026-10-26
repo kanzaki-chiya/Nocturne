@@ -1070,11 +1070,11 @@ describe("模型对话框键盘操作（ADR-0030 §4）", () => {
     stdin.write(" ");
     await waitFor(
       () =>
-        (lastFrame() ?? "").includes("[x] 不支持思考强度") &&
+        (lastFrame() ?? "").includes("[x] 不支持思考档位") &&
         !(lastFrame() ?? "").includes("[x] 跟随"),
     );
     stdin.write(ENTER);
-    await waitFor(() => (lastFrame() ?? "").includes("当前：不支持思考强度"));
+    await waitFor(() => (lastFrame() ?? "").includes("当前：不支持思考档位"));
     unmount();
   });
 

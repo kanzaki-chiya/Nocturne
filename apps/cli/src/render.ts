@@ -245,7 +245,7 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
       const lines: string[] = [];
       if (p.model !== undefined) lines.push(`◇ 模型已切换为 ${p.model.provider}/${p.model.model}`);
       if (p.permissionPreset !== undefined) lines.push(`◇ 权限预设已切换为 ${p.permissionPreset}`);
-      if (p.reasoningEffort !== undefined) lines.push(`◇ 思考强度已切换为 ${p.reasoningEffort}`);
+      if (p.reasoningEffort !== undefined) lines.push(`◇ 思考档位已切换为 ${p.reasoningEffort}`);
       if (p.shell !== undefined) {
         lines.push(`◇ shell 已切换为 ${p.shell.kind}（${p.shell.path}）`);
       }
@@ -284,7 +284,7 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
       const lines: Rendered[] = [];
       if (p.reason !== "done") {
         const detail = p.error !== undefined ? `：${p.error.code} ${p.error.message}` : "";
-        lines.push(aux(`! Turn 结束（${p.reason}）${detail}`));
+        lines.push(aux(`! 本轮结束（${p.reason}）${detail}`));
       }
       if (mode === "interactive") {
         lines.push(aux(`── tokens: in ${p.usage.inputTokens} / out ${p.usage.outputTokens}`));
@@ -357,7 +357,7 @@ const OPTION_LABELS: Record<string, string> = {
   allow_session: "本会话内允许",
   allow_project: "在此项目中始终允许",
   deny: "拒绝（可附反馈）",
-  deny_stop: "拒绝并停止本 Turn",
+  deny_stop: "拒绝并停止本轮",
 };
 const OPTION_KEYS: Record<string, string> = {
   allow_once: "a",

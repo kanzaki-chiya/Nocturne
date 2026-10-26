@@ -1433,7 +1433,7 @@ function SessionApp({
   const doSwitch = useCallback(
     async (id: string, allowForeign = false, draft?: RewindTarget): Promise<void> => {
       if (submitting.current || busy) {
-        pushLine("! 会话忙（Turn 进行中）；先 Ctrl+C 中断再切换");
+        pushLine("! 会话忙（本轮进行中）；先 Ctrl+C 中断再切换");
         return;
       }
       if (switching.current) return;
@@ -1496,9 +1496,7 @@ function SessionApp({
           return;
         }
         pushLine(
-          res.kind === "busy"
-            ? "! 会话忙（Turn 进行中）；先 Ctrl+C 中断再切换"
-            : `! ${res.message}`,
+          res.kind === "busy" ? "! 会话忙（本轮进行中）；先 Ctrl+C 中断再切换" : `! ${res.message}`,
         );
       } finally {
         if (!switched) {
@@ -1580,7 +1578,7 @@ function SessionApp({
 
   const doNew = useCallback(async (): Promise<void> => {
     if (submitting.current || busy) {
-      pushLine("! 会话忙（Turn 进行中）；先中断再新建");
+      pushLine("! 会话忙（本轮进行中）；先中断再新建");
       return;
     }
     if (switching.current) return;
@@ -1621,7 +1619,7 @@ function SessionApp({
       } else {
         pushLine(
           res.kind === "busy"
-            ? "! 会话忙（Turn 进行中）；先中断再新建"
+            ? "! 会话忙（本轮进行中）；先中断再新建"
             : `! ${res.kind === "error" ? res.message : "新建会话失败"}`,
         );
       }
@@ -2230,7 +2228,7 @@ function SessionApp({
             else if (r.kind === "overlay") {
               if (r.name === "theme") clearInput();
               if (r.name === "resume" && submitting.current)
-                pushLine("! 会话忙（Turn 进行中）；先中断再切换");
+                pushLine("! 会话忙（本轮进行中）；先中断再切换");
               else if (r.name === "settings" || r.name === "grants")
                 void alt.enter(async () => {
                   clearInput();
@@ -2399,7 +2397,7 @@ function SessionApp({
             else if (r.kind === "overlay") {
               if (r.name === "theme") clearInput();
               if (r.name === "resume" && submitting.current)
-                pushLine("! 会话忙（Turn 进行中）；先中断再切换");
+                pushLine("! 会话忙（本轮进行中）；先中断再切换");
               else if (r.name === "settings" || r.name === "grants")
                 void alt.enter(async () => {
                   clearInput();
@@ -2467,7 +2465,7 @@ function SessionApp({
       // ADR-0036 修订：忙时输入框保持可输入——斜杠命令（/preset 等）在上面已分发；
       // 普通输入与委托任务仍要空闲，给个提示而不是静默丢弃
       if (busy) {
-        pushLine("! 会话忙（Turn 进行中）；Ctrl+C 可中断");
+        pushLine("! 会话忙（本轮进行中）；Ctrl+C 可中断");
         return;
       }
       if (delegate !== undefined) {
@@ -2732,10 +2730,8 @@ function SessionApp({
     if (r !== undefined) {
       const parts: string[] = [];
       if (r.truncatedTail !== undefined) parts.push(`损坏尾部已截断（另存 ${r.truncatedTail}）`);
-      if (r.interruptedCalls > 0)
-        parts.push(`${r.interruptedCalls} 个未完成调用标记为 interrupted`);
-      if (r.recoveredTurns > 0)
-        parts.push(`${r.recoveredTurns} 个未完成 Turn 已按 process_exited 收束`);
+      if (r.interruptedCalls > 0) parts.push(`${r.interruptedCalls} 个未完成调用已标记为中断`);
+      if (r.recoveredTurns > 0) parts.push(`${r.recoveredTurns} 个未完成的轮次已标记为进程退出`);
       if (parts.length > 0) notes.push(`会话恢复时已修复：${parts.join("；")}`);
     }
     for (const w of session.warnings) notes.push(w);
@@ -3069,7 +3065,7 @@ function SessionApp({
       />
     ) : overlay === "effort" ? (
       <PickList
-        title="选择思考强度"
+        title="选择思考档位"
         items={["off", ...session.reasoningEffortInfo().available].map((name) => ({
           label: name,
           value: name,

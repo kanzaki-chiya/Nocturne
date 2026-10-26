@@ -7,7 +7,7 @@
 ## 1. 定位与边界
 
 ADR-0061：`/provider model <服务商> <模型>` 的逐字段问答在「协议」接受 `gemini`（与 `chat/messages/responses` 并列），在「协议」之后增加「接口地址」（与桌面端、TUI 同序，其后是「编辑工具」）。输入 HTTP(S) URL 保存到 `userModels.<id>.baseURL`，回车保留、`-` 清除覆盖并自动选择；提示展示自动地址。地址规则见 [provider-setup.md](../architecture/provider-setup.md) 第 2 节。
-task 的工具行对新调用展示 `[profile]` 和选择理由，结果显示实际模型、思考强度；旧调用保留原样。档位配置与权限规则见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)。
+task 的工具行对新调用展示 `[profile]` 和选择理由，结果显示实际模型、思考档位；旧调用保留原样。档位配置与权限规则见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)。
 
 
 `nctrn` 是 Runtime 的进程内客户端：采集输入、渲染事件、把权限确认交给用户。**它不包含任何 Agent 行为、会话状态、权限判定或上下文构建逻辑**，只使用 `@nocturne/core` 的公开入口与 `@nocturne/core/protocol` 的类型；该约束由 dependency-cruiser 规则强制（见第 9 节），不是靠代码评审自觉。
@@ -18,7 +18,7 @@ task 的工具行对新调用展示 `[profile]` 和选择理由，结果显示�
 nctrn                        # 交互模式：TTY 时进入 TUI（v0.3 起），非 TTY 进逐行 REPL
 nctrn --cli                  # 交互模式：逐行 REPL（v0.3 新增）
 nctrn --tui                  # 交互模式：终端界面（兼容参数，等价默认形态）
-nctrn -p "<prompt>"          # 非交互模式：执行一次 Turn 后退出
+nctrn -p "<prompt>"          # 非交互模式：执行一轮后退出
 nctrn -p                     # 非交互模式：prompt 从 stdin 读取（stdin 非 TTY 时）
 nctrn --continue             # 恢复当前目录最近的会话后进入所选模式
 nctrn --resume <id>          # 恢复指定会话后进入所选模式
@@ -97,6 +97,8 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 - Phase 2 单行输入；多行与粘贴不作特殊处理。
 
 ## 4. 斜杠命令
+
+面向用户的文案与桌面端统一：对话使用「轮」、task 使用「子代理」、reasoning effort 使用「思考档位」；数值后用 `tokens`，说明文字与「每百万 token」用单数。`/effort` 输出「当前思考档位」，本轮快照与新值不同时显示「本轮生效中：…（新档位下一轮生效）」；配置变更显示「◇ 思考档位已切换为 …」。忙时提示「会话忙（本轮进行中）」，恢复摘要显示「N 个未完成的轮次已标记为进程退出」「N 个未完成调用已标记为中断」，异常结束提示「本轮结束」。内部 Turn 概念、事件名、命令参数保持原名。
 
 `/skills` 只读列出当前会话的技能、来源、覆盖和模型目录状态。补全在命令之后列技能，含 argument-hint 和最多 250 字符说明；内置命令优先，停用与 user-invocable false 不出现。`/技能名 参数` 通过 `submit.skill` 固定正文快照，事件输出显示技能名与附加字数，详见 [skills.md](../architecture/skills.md)。
 
@@ -190,7 +192,7 @@ smart 审查交给你确认时，确认提示的原因包含审查理由；权�
   | `s` | 本会话内允许 | `{ decision: "allow", remember: "session" }` |
   | `p` | 在此项目中始终允许 | `{ decision: "allow", remember: "project" }` |
   | `d` | 拒绝（可附一句反馈给模型） | `{ decision: "deny", feedback? }` |
-  | `x` | 拒绝并停止本 Turn | `{ decision: "deny", stop: true }` |
+  | `x` | 拒绝并停止本轮 | `{ decision: "deny", stop: true }` |
 
   回复经 `respondPermission` 送回；回复到达前 Turn 挂起（Ctrl+C 可中断，该请求记 `cancelled`）。
 - **非交互模式**：不产生等待——smart 审查 allow 执行、block 拒绝，审查后的剩余 `ask` 拒绝，`permission.resolved` 记 `source: "non_interactive"`。CLI 以 `RuntimeOptions.interactive` 告知 Runtime 是否有回复能力（交互 `true`，非交互 `false`，默认 `false`）。

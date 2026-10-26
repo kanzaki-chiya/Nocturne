@@ -65,7 +65,7 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
   nctrn --cli                  行式 REPL：新建会话
   nctrn --tui                  显式选择 TUI（TTY 下本为默认；与 --cli 互斥）
   nctrn --inline               TUI 普通屏幕模式：回滚区渲染，不开鼠标（与 --cli、-p 互斥）
-  nctrn -p "<prompt>"          非交互模式：执行一次 Turn 后退出
+  nctrn -p "<prompt>"          非交互模式：执行一轮后退出
   nctrn -p                     非交互模式：prompt 从 stdin 读取
   nctrn -c, --continue         恢复当前目录最近的会话
   nctrn --resume <id>          恢复指定会话

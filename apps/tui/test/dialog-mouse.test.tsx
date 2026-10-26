@@ -325,7 +325,7 @@ describe("model dialog SGR clicks", () => {
     await changed(ui, () => mouse.click("option:3")); // low
     await changed(ui, () => mouse.click("option:5")); // high
     await changed(ui, () => mouse.click("option:1")); // exclusive unsupported
-    expect(ui.lastFrame()).toContain("[x] 不支持思考强度");
+    expect(ui.lastFrame()).toContain("[x] 不支持思考档位");
     expect(ui.lastFrame()).not.toContain("[x] low");
     await changed(ui, () => mouse.click("option:3"));
     await changed(ui, () => mouse.click("option:5"));

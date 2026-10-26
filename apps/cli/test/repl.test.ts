@@ -188,7 +188,7 @@ describe("REPL 生命周期", () => {
     expect(presets).toEqual(["bypass"]);
     stdin.write("再一句\n");
     await tick();
-    expect(stdoutChunks.join("")).toContain("会话忙（Turn 进行中）；Ctrl+C 可中断");
+    expect(stdoutChunks.join("")).toContain("会话忙（本轮进行中）；Ctrl+C 可中断");
     settle()?.resolve("done");
     stdin.end();
     expect(await done).toBe(0);

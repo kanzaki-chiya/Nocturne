@@ -61,7 +61,7 @@ it("TUI /cost shows current session and 30-day model totals", async () => {
   expect(result.kind).toBe("message");
   if (result.kind !== "message") throw new Error("expected cost text");
   expect(result.text).toContain("当前会话");
-  expect(result.text).toContain("p/m · 2 Turns");
+  expect(result.text).toContain("p/m · 2 轮");
   expect(result.text).toContain("80.0%");
   expect(result.text).toContain("近 30 天");
   expect(result.text).toContain("合计 6,000 tokens · $5.00");

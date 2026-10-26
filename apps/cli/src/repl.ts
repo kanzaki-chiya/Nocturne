@@ -274,7 +274,7 @@ export async function runRepl(
       return false;
     }
     if (res.kind === "busy") {
-      out.line("stdout", "! 会话忙（Turn 进行中）；先 Ctrl+C 中断再切换");
+      out.line("stdout", "! 会话忙（本轮进行中）；先 Ctrl+C 中断再切换");
       return false;
     }
     out.line("stdout", `! ${res.message}`);
@@ -592,7 +592,7 @@ export async function runRepl(
         // ADR-0036 修订：/preset 忙时也可切换（下一次权限判定起生效）
         const busyAllowed = line === "/preset" || line.startsWith("/preset ");
         if (busy && !busyAllowed) {
-          out.line("stdout", "会话忙（Turn 进行中）；Ctrl+C 可中断");
+          out.line("stdout", "会话忙（本轮进行中）；Ctrl+C 可中断");
           prompt();
           return;
         }
@@ -629,7 +629,7 @@ export async function runRepl(
               out.line(
                 "stdout",
                 res.kind === "busy"
-                  ? "! 会话忙（Turn 进行中）；先中断再新建"
+                  ? "! 会话忙（本轮进行中）；先中断再新建"
                   : `! ${res.kind === "error" ? res.message : "新建会话失败"}`,
               );
             }

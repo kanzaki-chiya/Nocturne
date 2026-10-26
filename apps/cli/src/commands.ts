@@ -419,12 +419,12 @@ export async function runSlashCommand(
       const info = session.reasoningEffortInfo();
       if (rest.length === 0) {
         if (info.available.length === 0) {
-          io.print(`当前思考强度：${info.current}（该模型未声明可用档位）`);
+          io.print(`当前思考档位：${info.current}（该模型未声明可用档位）`);
         } else {
           io.print(
-            `当前思考强度：${info.current}\n可用档位：off | ${info.available.join(" | ")}` +
+            `当前思考档位：${info.current}\n可用档位：off | ${info.available.join(" | ")}` +
               (info.effective !== info.current
-                ? `\n本 Turn 生效中：${info.effective}（新档位下一 Turn 生效）`
+                ? `\n本轮生效中：${info.effective}（新档位下一轮生效）`
                 : ""),
           );
         }

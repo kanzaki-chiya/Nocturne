@@ -25,7 +25,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     cli: "查看设置；preset|effort <值|reset>",
   },
   { name: "/model", summary: "切换模型", cli: "列出或切换模型" },
-  { name: "/effort", summary: "切换思考档位", cli: "显示或切换思考强度", args: "effort" },
+  { name: "/effort", summary: "切换思考档位", cli: "显示或切换思考档位", args: "effort" },
   { name: "/preset", summary: "切换权限预设", cli: "显示或切换权限预设", args: "preset" },
   {
     name: "/shell",
@@ -191,7 +191,7 @@ export function cliHelpText(): string {
     const name = cmd.name === "/exit" ? "/exit, /quit" : cmd.name;
     lines.push(`  ${name.padEnd(22)}${cmd.cli ?? cmd.summary}`);
   }
-  lines.push("快捷键：Ctrl+C 中断当前 Turn（空闲时退出）；Ctrl+D 退出。");
+  lines.push("快捷键：Ctrl+C 中断当前轮（空闲时退出）；Ctrl+D 退出。");
   lines.push("输入历史按工作区保存为明文 <NOCTURNE_HOME>/history.jsonl。");
   return lines.join("\n");
 }

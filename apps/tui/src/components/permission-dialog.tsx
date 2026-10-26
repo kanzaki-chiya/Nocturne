@@ -40,7 +40,7 @@ const OPTION_LABELS: Record<PermissionOption, string> = {
   allow_session: "本会话内允许",
   allow_project: "在此项目中始终允许",
   deny: "拒绝（可附反馈）",
-  deny_stop: "拒绝并停止本 Turn",
+  deny_stop: "拒绝并停止本轮",
 };
 const OPTION_REPLIES: Record<PermissionOption, PermissionReply> = {
   allow_once: { decision: "allow" },

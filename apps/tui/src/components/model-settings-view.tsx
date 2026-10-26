@@ -524,7 +524,7 @@ function fieldValueText(key: FieldKey, draft: Draft, field: ModelField<unknown>)
   // reasoningEffort
   const d = draft.reasoningEffort;
   if (d === "follow") return follow;
-  return d.length > 0 ? d.join(" / ") : "不支持思考强度";
+  return d.length > 0 ? d.join(" / ") : "不支持思考档位";
 }
 
 /** 当前草稿 → 补丁（跟随/为空写 null 清除用户编辑，仅在该字段有用户编辑时） */
@@ -993,7 +993,7 @@ export function ModelEditPane({
     } else if (multi) {
       for (let i = 0; i < 8; i++) {
         const rect = screenRect(nodes.current.get(`option:${i}`));
-        const label = ["跟随", "不支持思考强度", ...REASONING_EFFORT_LEVELS][i] ?? "";
+        const label = ["跟随", "不支持思考档位", ...REASONING_EFFORT_LEVELS][i] ?? "";
         add(
           `option:${i}`,
           rect.row,
@@ -1269,7 +1269,7 @@ export function ModelEditPane({
               overflow="hidden"
             >
               <Text color={theme.accent}>思考档位</Text>
-              {["跟随", "不支持思考强度", ...REASONING_EFFORT_LEVELS].map((label, i) => (
+              {["跟随", "不支持思考档位", ...REASONING_EFFORT_LEVELS].map((label, i) => (
                 <Box key={label} ref={register(`option:${i}`)} flexShrink={0}>
                   <Text
                     wrap="truncate"

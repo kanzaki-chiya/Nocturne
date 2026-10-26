@@ -56,7 +56,7 @@ it("CLI /cost shows current session and 30-day totals without model calls", asyn
   expect(await runSlashCommand("/cost", session, runtime, { print })).toBe("handled");
   const text = print.mock.calls[0]?.[0] as string;
   expect(text).toContain("当前会话");
-  expect(text).toContain("p/m · 1 Turns");
+  expect(text).toContain("p/m · 1 轮");
   expect(text).toContain("未计价");
   expect(text).toContain("近 30 天");
   expect(text).toContain("合计 6,000 tokens · $5.00");

@@ -276,7 +276,7 @@ describe("TUI", () => {
       "本会话内允许",
       "在此项目中始终允许",
       "拒绝（可附反馈）",
-      "拒绝并停止本 Turn",
+      "拒绝并停止本轮",
     ]) {
       expect(lastFrame()).toContain(label);
     }

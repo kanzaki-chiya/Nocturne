@@ -193,7 +193,7 @@ describe("全屏界面", () => {
     stdin.write("/effort");
     await pause(40);
     stdin.write("\r");
-    await waitFor(() => (lastFrame() ?? "").includes("选择思考强度"));
+    await waitFor(() => (lastFrame() ?? "").includes("选择思考档位"));
     expect(lastFrame()).toContain("› off");
     await pause(60);
     stdin.write("\x1b[B");
@@ -203,10 +203,10 @@ describe("全屏界面", () => {
     stdin.write("/effort");
     await pause(40);
     stdin.write("\r");
-    await waitFor(() => (lastFrame() ?? "").includes("选择思考强度"));
+    await waitFor(() => (lastFrame() ?? "").includes("选择思考档位"));
     expect(lastFrame()).toContain("› low");
     stdin.write("\x1b");
-    await waitFor(() => !(lastFrame() ?? "").includes("选择思考强度"));
+    await waitFor(() => !(lastFrame() ?? "").includes("选择思考档位"));
     expect(lastFrame()).toContain("思考:low");
     unmount();
     await session.close();

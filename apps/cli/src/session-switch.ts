@@ -112,9 +112,8 @@ export function sessionOpenNotes(session: RuntimeSession): string[] {
   if (r !== undefined) {
     const parts: string[] = [];
     if (r.truncatedTail !== undefined) parts.push(`损坏尾部已截断（另存 ${r.truncatedTail}）`);
-    if (r.interruptedCalls > 0) parts.push(`${r.interruptedCalls} 个未完成调用标记为 interrupted`);
-    if (r.recoveredTurns > 0)
-      parts.push(`${r.recoveredTurns} 个未完成 Turn 已按 process_exited 收束`);
+    if (r.interruptedCalls > 0) parts.push(`${r.interruptedCalls} 个未完成调用已标记为中断`);
+    if (r.recoveredTurns > 0) parts.push(`${r.recoveredTurns} 个未完成的轮次已标记为进程退出`);
     if (parts.length > 0) notes.push(`会话恢复时已修复：${parts.join("；")}`);
   }
   notes.push(...session.warnings);
