@@ -297,6 +297,10 @@ export function SchedulePage({
   }, [tasks, selectedId, selected]);
 
   useEffect(() => {
+    setConfirmDelete(false);
+  }, [selectedId]);
+
+  useEffect(() => {
     if (selectedId === "new" || selectedId === null) {
       filledId.current = null;
       return;
@@ -306,7 +310,6 @@ export function SchedulePage({
     if (task === undefined) return;
     filledId.current = selectedId;
     setDraft(draftFrom(task));
-    setConfirmDelete(false);
     setFormError(undefined);
     setField(undefined);
   }, [selectedId, tasks]);

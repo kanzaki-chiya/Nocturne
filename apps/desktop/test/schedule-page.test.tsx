@@ -132,6 +132,10 @@ describe("定时任务页", () => {
         expect.objectContaining({ id: "daily", name: "早报", enabled: true }),
       );
       expect(screen.getByRole("button", { name: "保存" })).toHaveProperty("disabled", false);
+      expect(client.listSchedules).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("region", { name: "定时任务" }).getAttribute("aria-busy")).toBe(
+        "false",
+      );
     });
     fireEvent.click(screen.getByRole("button", { name: "删除任务" }));
     expect(client.deleteSchedule).not.toHaveBeenCalled();
