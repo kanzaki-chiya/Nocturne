@@ -189,7 +189,7 @@
   border-radius: var(--radius-pill);
   background: var(--a-warning);
 }
-.status-mcp-tip {
+.status-mcp .status-mcp-tip {
   left: auto;
   right: 0;
   width: max-content;
