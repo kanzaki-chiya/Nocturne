@@ -87,6 +87,7 @@ export function Dropdown({
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const footerContainer = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden" });
@@ -148,8 +149,8 @@ export function Dropdown({
         close(true);
         return;
       case "Tab": {
-        const first = list.current?.querySelector<HTMLButtonElement>(
-          ".session-grants button:not(:disabled)",
+        const first = footerContainer.current?.querySelector<HTMLButtonElement>(
+          'button:not(:disabled):not([tabindex="-1"])',
         );
         if (!event.shiftKey && first) {
           event.preventDefault();
@@ -361,6 +362,8 @@ export function Dropdown({
           {note !== undefined && <p className="ddm-n">{note}</p>}
           {footer && (
             <div
+              ref={footerContainer}
+              className="ddm-footer"
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
                   event.preventDefault();

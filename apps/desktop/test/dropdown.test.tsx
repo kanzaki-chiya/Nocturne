@@ -44,6 +44,30 @@ function activeOption(trigger: HTMLElement): HTMLElement | null {
 }
 
 describe("Dropdown", () => {
+  it("Tab 聚焦任意页脚的首个可聚焦按钮，Esc 返回触发器", () => {
+    render(
+      <Dropdown
+        label="权限"
+        value="default"
+        options={OPTIONS}
+        onChange={vi.fn()}
+        footer={
+          <section>
+            <button disabled>不可用</button>
+            <button tabIndex={-1}>跳过</button>
+            <button>页脚操作</button>
+          </section>
+        }
+      />,
+    );
+    const trigger = screen.getByRole("combobox");
+    fireEvent.click(trigger);
+    fireEvent.keyDown(trigger, { key: "Tab" });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "页脚操作" }));
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
   it("可搜索列表内部滚动不重新定位；页面滚动更新位置且始终限高", () => {
     render(
       <Dropdown label="模型" value="default" options={OPTIONS} onChange={vi.fn()} searchable />,

@@ -72,6 +72,9 @@
   padding: 5px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
   overflow-y: auto;
+  overflow-x: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
   scrollbar-width: thin;
   scrollbar-color: var(--a-borderStrong) transparent;
 }

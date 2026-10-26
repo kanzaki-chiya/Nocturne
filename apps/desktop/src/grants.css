@@ -166,6 +166,7 @@
 }
 .session-grant code {
   flex: 1;
+  font-family: var(--mono);
   overflow-wrap: anywhere;
   min-width: 0;
 }
