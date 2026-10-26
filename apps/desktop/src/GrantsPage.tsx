@@ -148,7 +148,8 @@ export function GrantsPage({
                 {samePath(item.workspace, plainWorkspace) ? "普通对话" : basename(item.workspace)}
               </b>
               <small>
-                {item.grantCount} 项授权 · {item.trusted ? "已信任" : "未信任"}
+                {item.grantCount} 项授权 ·{" "}
+                {!item.hasProjectConfig ? "没有项目配置" : item.trusted ? "已信任" : "未信任"}
               </small>
             </button>
           ))}

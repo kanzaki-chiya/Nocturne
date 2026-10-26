@@ -72,6 +72,14 @@ it("普通对话最先、项目列表和空状态、撤销后刷新；失败保�
     target: "git status",
   });
 });
+it("左栏无项目配置显示没有项目配置而非未信任", async () => {
+  const h = fixture();
+  render(<GrantsPage client={h.client} plainWorkspace="Z:/plain" />);
+  const plain = await screen.findByRole("button", { name: /普通对话/ });
+  expect(plain.textContent).toContain("0 项授权 · 没有项目配置");
+  expect(plain.textContent).not.toContain("未信任");
+  expect(screen.getByRole("button", { name: /nocturne/ }).textContent).toContain("未信任");
+});
 it("全部撤销需二次确认，刷新不重置确认", async () => {
   const h = fixture();
   render(<GrantsPage client={h.client} />);
