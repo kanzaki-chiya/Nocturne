@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/relay",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "Nocturne 邀请制密文中继",
   "license": "GPL-3.0-only",
   "private": true,
