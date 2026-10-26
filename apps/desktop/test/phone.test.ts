@@ -273,6 +273,7 @@ it("重连续接 lastSeq 并保留显示视图，新建会话可用任意目录�
     turnChanges: new Map(),
     changeDiffs: new Map(),
   });
+  sessions.setSelected("s");
   await sessions.connected(client);
   expect(sessions.opened.get("s")?.view).toBe(view);
   expect(session.subscribe).toHaveBeenCalledWith(expect.any(Function), { afterSeq: 12 });
@@ -310,7 +311,16 @@ it("连接只等列表，后台只订阅持锁会话", async () => {
     await gate;
     const session = {
       id,
-      subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
+      subscribe: vi.fn(async (listener: (event: unknown) => void) => {
+        listener({
+          type: "runtime.status",
+          time: new Date().toISOString(),
+          sessionId: id,
+          payload: { status: "running_model" },
+        });
+        return { lastSeq: 0, unsubscribe: vi.fn() };
+      }),
+      close: vi.fn(async () => undefined),
     } as unknown as RpcSession;
     return { session, opened: { warnings: [] as string[] } as SessionOpened } as Awaited<
       ReturnType<RpcClient["runtime"]["resumeSession"]>
@@ -346,7 +356,16 @@ it("推送点进来优先最近的待处理会话，没有则取最近会话", a
   vi.spyOn(client.runtime, "resumeSession").mockImplementation(async (id) => {
     const session = {
       id,
-      subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
+      subscribe: vi.fn(async (listener: (event: unknown) => void) => {
+        listener({
+          type: "runtime.status",
+          time: new Date().toISOString(),
+          sessionId: id,
+          payload: { status: "running_model" },
+        });
+        return { lastSeq: 0, unsubscribe: vi.fn() };
+      }),
+      close: vi.fn(async () => undefined),
     } as unknown as RpcSession;
     return { session, opened: { warnings: [] as string[] } as SessionOpened } as Awaited<
       ReturnType<RpcClient["runtime"]["resumeSession"]>
@@ -401,7 +420,16 @@ async function notifiedClient() {
   const resume = vi.spyOn(client.runtime, "resumeSession").mockImplementation(async (id) => {
     const session = {
       id,
-      subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
+      subscribe: vi.fn(async (listener: (event: unknown) => void) => {
+        listener({
+          type: "runtime.status",
+          time: new Date().toISOString(),
+          sessionId: id,
+          payload: { status: "running_model" },
+        });
+        return { lastSeq: 0, unsubscribe: vi.fn() };
+      }),
+      close: vi.fn(async () => undefined),
     } as unknown as RpcSession;
     return { session, opened: { warnings: [] as string[] } as SessionOpened } as Awaited<
       ReturnType<RpcClient["runtime"]["resumeSession"]>
@@ -514,7 +542,16 @@ function strictResume(resume: ReturnType<typeof vi.spyOn>, gates: Map<string, Pr
     await gates.get(id);
     const session = {
       id,
-      subscribe: vi.fn(async () => ({ lastSeq: 0, unsubscribe: vi.fn() })),
+      subscribe: vi.fn(async (listener: (event: unknown) => void) => {
+        listener({
+          type: "runtime.status",
+          time: new Date().toISOString(),
+          sessionId: id,
+          payload: { status: "running_model" },
+        });
+        return { lastSeq: 0, unsubscribe: vi.fn() };
+      }),
+      close: vi.fn(async () => undefined),
     } as unknown as RpcSession;
     return { session, opened: { warnings: [] as string[] } as SessionOpened };
   }) as never);

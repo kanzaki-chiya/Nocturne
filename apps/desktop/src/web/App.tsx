@@ -190,6 +190,7 @@ export function PhoneApp({
       "",
       location.pathname,
     );
+    sessions.setSelected(next.kind === "session" ? next.sessionId : undefined);
     setPage(next);
     setError("");
     setMenu(null);
@@ -234,7 +235,9 @@ export function PhoneApp({
         setError("无法读取手机存储，请允许网站保存数据后重试");
       });
     const pop = (e: PopStateEvent) => {
-      setPage((e.state as Page | null) ?? { kind: "welcome" });
+      const next = (e.state as Page | null) ?? { kind: "welcome" };
+      sessions.setSelected(next.kind === "session" ? next.sessionId : undefined);
+      setPage(next);
       setError("");
       setMenu(null);
     };

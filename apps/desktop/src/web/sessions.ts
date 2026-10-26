@@ -87,6 +87,44 @@ export class PhoneSessions {
   private generation = 0;
   private readonly opening = new Map<string, Promise<PhoneSession>>();
   private readonly turnStarts = new Map<string, number>();
+  private selectedId: string | undefined;
+  private readonly closing = new Map<string, Promise<void>>();
+
+  setSelected(id: string | undefined): void {
+    this.selectedId = id;
+    for (const entry of this.opened.values()) {
+      void this.closeIfIdle(entry).catch(() => undefined);
+    }
+  }
+
+  private async closeIfIdle(entry: PhoneSession): Promise<void> {
+    const id = entry.session.id;
+    if (
+      id === this.selectedId ||
+      entry.dead ||
+      entry.replaying ||
+      phoneStatus(entry) !== "idle" ||
+      this.opened.get(id) !== entry
+    )
+      return;
+    const pending = this.closing.get(id);
+    if (pending) return pending;
+    const generation = this.generation;
+    const run = (async () => {
+      await entry.session.close();
+      await entry.tracker?.stop();
+      if (generation !== this.generation || this.opened.get(id) !== entry) return;
+      this.opened.delete(id);
+      this.turnStarts.delete(id);
+      this.changed();
+    })();
+    this.closing.set(id, run);
+    try {
+      await run;
+    } finally {
+      if (this.closing.get(id) === run) this.closing.delete(id);
+    }
+  }
   private tracked: Promise<void> = Promise.resolve();
   /** 进行中的列表刷新：期间再来的刷新请求并入它的补拉，不并发调用 listSessions */
   private refreshing: { generation: number; requests: number; done: Promise<void> } | undefined;
@@ -121,6 +159,10 @@ export class PhoneSessions {
     // 遍历活 Map 会把它们再 resume 一次（后台报 session_already_open）
     for (const [id, entry] of [...this.opened]) {
       if (generation !== this.generation) return;
+      if (id !== this.selectedId && phoneStatus(entry) === "idle") {
+        this.opened.delete(id);
+        continue;
+      }
       // 恢复期间用户已点开它：并入那次打开，不重复 resume
       const inFlight = this.opening.get(id);
       if (inFlight) {
@@ -131,7 +173,8 @@ export class PhoneSessions {
       const run = this.resume(client, id, entry.workspace, entry.view, generation);
       this.opening.set(id, run);
       try {
-        await run;
+        const restored = await run;
+        await this.closeIfIdle(restored);
       } catch (error) {
         if (generation !== this.generation) return;
         throw error;
@@ -146,6 +189,7 @@ export class PhoneSessions {
     this.stopListening();
     this.loaded = false;
     this.opening.clear();
+    this.closing.clear();
     this.client = undefined;
     for (const entry of this.opened.values()) entry.dead = true;
     this.changed();
@@ -153,9 +197,12 @@ export class PhoneSessions {
   clear(): void {
     this.generation++;
     this.turnStarts.clear();
+    this.selectedId = undefined;
+    this.closing.clear();
     this.stopListening();
     this.loaded = false;
     this.opening.clear();
+    this.closing.clear();
     this.client = undefined;
     this.opened.clear();
     this.list = [];
@@ -167,7 +214,7 @@ export class PhoneSessions {
     this.refreshing = undefined;
   }
   /**
-   * 重新拉会话列表并订阅新出现的带锁会话。合并：正在刷新时再调用，等这次完成后
+   * 重新拉会话列表并订阅本后台打开的会话（旧后台按锁退回）。合并：正在刷新时再调用，等这次完成后
    * 补拉一次（多次请求合成一次），返回的 Promise 在补拉也完成后才落定。
    */
   refresh(): Promise<void> {
@@ -201,9 +248,10 @@ export class PhoneSessions {
     this.loaded = true;
     this.changed();
     const previous = this.tracked;
-    this.tracked = Promise.all([previous, this.track(list.filter((item) => item.locked))]).then(
-      () => undefined,
-    );
+    this.tracked = Promise.all([
+      previous,
+      this.track(list.filter((item) => item.openHere ?? item.locked)),
+    ]).then(() => undefined);
   }
   /**
    * 点开推送后要去的会话：推送无载荷，只能在连上后判断。等后台订阅完成，
@@ -219,13 +267,18 @@ export class PhoneSessions {
     });
     return (pending ?? this.list[0])?.id;
   }
-  // 没有锁的会话不可能在运行，点开时再订阅；全部回放会让上百个会话的电脑迟迟连不上。
-  // 锁只说明后台持有会话，不代表正在运行；在后台订阅同一视图判定准确状态，不阻塞连接。
+  // 本后台已打开的会话才可能需要跟踪；旧后台缺 openHere 时按锁退回。
+  // 订阅回放后再判空闲，避免保留手机自己的历史引用；后台跟踪不阻塞连接。
   private async track(items: SessionSummary[]): Promise<void> {
     const generation = this.generation;
     for (const item of items) {
       if (generation !== this.generation) return;
-      if (!this.opened.has(item.id)) await this.open(item.id).catch(() => undefined);
+      if (this.opened.get(item.id)?.dead === false) continue;
+      const closing = this.closing.get(item.id);
+      if (closing) await closing.catch(() => undefined);
+      if (generation !== this.generation) return;
+      const entry = await this.open(item.id, false).catch(() => undefined);
+      if (entry) await this.closeIfIdle(entry).catch(() => undefined);
     }
   }
   private async attach(
@@ -270,6 +323,7 @@ export class PhoneSessions {
         for (const listener of entry.listeners) listener();
         this.changed();
         if (live && event.type === "turn.completed") void this.refreshTurnChanges(entry);
+        if (subscribed) void this.closeIfIdle(entry).catch(() => undefined);
       },
       {
         view,
@@ -325,11 +379,14 @@ export class PhoneSessions {
     const id = await client.runtime.forkSession(entry.session.id, { targetSeq });
     await this.refresh().catch(() => undefined);
     const result = await client.runtime.resumeSession(id);
+    this.setSelected(id);
     const forked = await this.attach(client, result, entry.workspace);
     void this.refresh().catch(() => undefined);
     return forked;
   }
-  async open(id: string): Promise<PhoneSession> {
+  async open(id: string, select = true): Promise<PhoneSession> {
+    if (select) this.setSelected(id);
+    await this.closing.get(id);
     const old = this.opened.get(id);
     if (old && !old.dead) return old;
     const pending = this.opening.get(id);
@@ -340,7 +397,9 @@ export class PhoneSessions {
     const run = this.resume(client, id, item?.cwd ?? "", old?.view, generation);
     this.opening.set(id, run);
     try {
-      return await run;
+      const entry = await run;
+      await this.closeIfIdle(entry);
+      return entry;
     } finally {
       if (this.opening.get(id) === run) this.opening.delete(id);
     }
@@ -376,6 +435,7 @@ export class PhoneSessions {
         ? { permissionPreset: options.permissionPreset }
         : {}),
     });
+    this.setSelected(result.session.id);
     const entry = await this.attach(client, result, workspace);
     void this.refresh().catch(() => undefined);
     return entry;

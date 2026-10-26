@@ -91,7 +91,7 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 
 后台保持连接让手机一直在线，列表不能再靠「回前台重连时顺带重拉」更新。分两层：
 
-- **通知**：连接期间页面监听电脑后台的 `runtime.sessionsChanged`（电脑上创建或分叉会话、首条消息与标题出现时 300 ms 内合并推送，不带内容，[rpc.md §3.8](../protocols/rpc.md)），收到就重拉列表并订阅新出现的持锁会话，因此新会话的标题、运行与待确认状态在 2 秒内出现。旧电脑没有这条通知，页面只依赖下面的兜底。
+- **通知**：连接期间页面监听电脑后台的 `runtime.sessionsChanged`（电脑上创建或分叉会话、首条消息与标题出现时 300 ms 内合并推送，不带内容，[rpc.md §3.8](../protocols/rpc.md)），收到就重拉列表并订阅新出现的本后台打开会话（`openHere`，旧后台缺省时退回持锁）；空闲引用释放与重连筛选复用[手机网页规则](desktop.md#8-手机网页)，常驻连接不例外，因此新会话的标题、运行与待确认状态在 2 秒内出现。旧电脑没有这条通知，页面只依赖下面的兜底。
 - **回前台兜底**：别的进程（如 CLI）新建的会话不经过电脑后台，没有通知。`MainActivity.onResume` 在页面的 `window` 上派发 `nocturne-android-resume` 事件（`src/host.ts` 的 `RESUME_EVENT`），`appPlatform` 的 `onForeground` 把它交给页面，页面刷新一次列表。不用 `visibilitychange`：「窗口保持可见」的变通让页面在后台也认为自己可见；也不轮询。
 
 网页版不变：切到后台页面断线，回前台重连时重拉列表，连接期间同样监听通知。
