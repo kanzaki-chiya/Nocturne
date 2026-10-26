@@ -11,6 +11,14 @@ export default defineConfig({
     // 离线测试直接对 rpc 与 core 源码运行，不需要先构建 dist
     alias: [
       {
+        find: /^@nocturne\/core$/,
+        replacement: path.resolve(here, "../../packages/core/src/index.ts"),
+      },
+      {
+        find: /^@nocturne\/rpc\/server$/,
+        replacement: path.resolve(here, "../../packages/rpc/src/server/index.ts"),
+      },
+      {
         find: /^@nocturne\/remote$/,
         replacement: path.resolve(here, "../../packages/remote/src/index.ts"),
       },

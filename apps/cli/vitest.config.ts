@@ -9,6 +9,18 @@ export default defineConfig({
     // 离线测试直接对 core 源码运行（cli.md 第 9 节），不需要先构建 dist
     alias: [
       {
+        find: /^@nocturne\/mcp$/,
+        replacement: path.resolve(here, "../../packages/mcp/src/index.ts"),
+      },
+      {
+        find: /^@nocturne\/remote$/,
+        replacement: path.resolve(here, "../../packages/remote/src/index.ts"),
+      },
+      {
+        find: /^@nocturne\/tui$/,
+        replacement: path.resolve(here, "../tui/src/index.ts"),
+      },
+      {
         find: /^@nocturne\/acp$/,
         replacement: path.resolve(here, "../../packages/acp/src/index.ts"),
       },

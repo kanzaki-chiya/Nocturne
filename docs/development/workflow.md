@@ -61,9 +61,13 @@ pnpm typecheck      # tsc --noEmit（src 与 test 两套 tsconfig）
 pnpm lint           # eslint（strictTypeChecked + stylisticTypeChecked）
 pnpm format:check   # prettier --check；修复用 pnpm format
 pnpm test           # vitest run，默认测试集：完全离线，不依赖网络/API key/外部服务；各包依次运行，TUI 包内限 4 个 worker，避免渲染测试在并行负载下超时；`CI=true` 时（GitHub runner 明显更慢）core 与 cli 单测超时由 5s 放宽到 30s、TUI 由 15s 放宽到 60s，各包（含 `scripts/` 测试，其超时本地 30s、CI 60s）失败重试 2 次，本地不重试；TUI 测试固定 `CI=false`，避免 Ink 在 CI 下关闭增量渲染。本轮实测大致耗时：core 约 25 秒、TUI 约 312 秒、ACP 约 112 秒、桌面端约 9 秒，全量约 8 分钟；Agent 在本仓库跑全量测试时把 shell `timeoutMs` 设到足以覆盖全量的值（例如 600000 毫秒）。
+pnpm -r --workspace-concurrency=1 --no-bail test  # 全部包串行，失败后仍继续看各包结果（scripts/ 测试另跑下一行）
+pnpm exec vitest run --root scripts
 pnpm depcheck       # dependency-cruiser 依赖方向检查（modules.md 依赖图固化为规则）
 pnpm build          # tsdown 构建 packages/core/dist
 ```
+
+全量验收要看所有包结果时使用 `pnpm -r --workspace-concurrency=1 --no-bail test`，随后运行 `pnpm exec vitest run --root scripts`。不要用并行的 `pnpm -r --no-bail test` 作为常规全量命令：CLI 的 `rpc.e2e.test.ts` 会执行根目录 `pnpm build`，清空并重建各包 dist，可能与其他测试读取构建产物冲突。普通单测的兄弟包导入应通过 vitest alias 指向源码；CLI e2e 故意运行构建产物，保持独立验证该路径。
 
 各包与 `scripts/` 的 vitest 配置都固定 `test.env.NODE_ENV = "test"`（vitest 只在未设置时才默认取 `test`），外层环境——包括 Agent 从 `nctrn` 继承来的值——不影响测试，跑测试前不需要手动设 `NODE_ENV`。
 
