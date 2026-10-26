@@ -59,6 +59,40 @@ describe("按键诊断", () => {
       "ignored: no panel",
     );
   });
+  it("普通组字 Process 不记录物理 code，修饰键组合保留 code", () => {
+    for (const code of ["KeyN", "KeyI", "KeyH"]) {
+      const line = keyRecord(
+        new KeyboardEvent("keydown", { key: "Process", code, keyCode: 229, isComposing: true }),
+        "textarea",
+        "textarea",
+        true,
+      );
+      expect(JSON.parse((line ?? "").slice(8))).toEqual({
+        key: "Process",
+        keyCode: 229,
+        isComposing: true,
+        repeat: false,
+        target: "textarea",
+        active: "textarea",
+        hasFocus: true,
+      });
+      expect(line).not.toContain("code");
+      expect(line).not.toContain(code);
+    }
+    expect(
+      keyRecord(
+        new KeyboardEvent("keydown", {
+          key: "Process",
+          code: "KeyP",
+          ctrlKey: true,
+          isComposing: true,
+        }),
+        "textarea",
+        "textarea",
+        true,
+      ),
+    ).toContain('"code":"KeyP"');
+  });
   it("元素只记标签、id 和前两个 class，不记输入内容", () => {
     const input = document.createElement("input");
     input.id = "draft";

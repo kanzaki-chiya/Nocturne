@@ -39,6 +39,9 @@ export function keyRecord(
   if (!shouldRecordKey(event)) return undefined;
   // eslint-disable-next-line @typescript-eslint/no-deprecated -- VK_PROCESSKEY/229 is essential diagnostic evidence.
   const keyCode = event.keyCode;
+  if (event.key === "Process" && !event.ctrlKey && !event.altKey && !event.metaKey) {
+    return `keydown ${JSON.stringify({ key: event.key, keyCode, isComposing: event.isComposing, repeat: event.repeat, target, active, hasFocus })}`;
+  }
   return `keydown ${JSON.stringify({ key: event.key, code: event.code, keyCode, isComposing: event.isComposing, defaultPrevented: event.defaultPrevented, repeat: event.repeat, ctrl: event.ctrlKey, shift: event.shiftKey, alt: event.altKey, meta: event.metaKey, target, active, hasFocus })}`;
 }
 
