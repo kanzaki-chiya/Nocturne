@@ -208,7 +208,8 @@
   top: calc(100% + 6px);
   width: max-content;
   max-width: 300px;
-  white-space: normal;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
   padding: 8px 10px;
   background: var(--a-raised);
   color: var(--a-text);

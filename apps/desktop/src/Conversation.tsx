@@ -15,16 +15,36 @@ import "./grants.css";
 export function GrantedTag({
   permission,
   target,
+  kind,
 }: {
   permission: ToolEntry["permission"];
   target?: string | undefined;
+  kind?: string | undefined;
 }) {
   if (permission?.source !== "grant") return null;
   const grant = permission.grant;
+  const time =
+    grant === undefined
+      ? ""
+      : new Intl.DateTimeFormat("zh-CN", {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        })
+          .format(new Date(grant.createdAt))
+          .replace("/", "-");
   const tooltip =
     grant === undefined
       ? "已授权"
-      : `${grant.scope === "session" ? "本会话授权" : "项目授权"} · ${new Date(grant.createdAt).toLocaleString("zh-CN", { hour12: false })}授予${target ? `\n${target}` : ""}${grant.scope === "project" ? "\n可在 设置 › 授权 中撤销" : ""}`;
+      : [
+          `${grant.scope === "session" ? "本会话允许" : "本项目允许"} · ${time}`,
+          [kind, target].filter(Boolean).join(" · "),
+          ...(grant.scope === "project" ? ["可在 设置 › 授权 中撤销"] : []),
+        ]
+          .filter(Boolean)
+          .join("\n");
   return (
     <span
       className="granted-tag granted-tooltip"
@@ -2270,6 +2290,7 @@ function ToolRow({
       {range !== undefined && <span className="tool-range">{range}</span>}
       <GrantedTag
         permission={entry.permission}
+        kind={entry.subjects[0]?.kind}
         target={entry.subjects.map((subject) => subject.target).join("\n")}
       />
       {entry.review && (

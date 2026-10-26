@@ -162,6 +162,7 @@ it.each(["session", "project", undefined] as const)(
     render(
       <GrantedTag
         target="git status"
+        kind="shell"
         permission={{
           action: "allow",
           source: "grant",
@@ -173,8 +174,13 @@ it.each(["session", "project", undefined] as const)(
     const tag = screen.getByText("已授权");
     if (scope === undefined) expect(tag.title).toBe("已授权");
     else {
-      expect(tag.title).toContain(scope === "session" ? "本会话授权" : "项目授权");
-      expect(tag.title).toContain("git status");
+      const lines = tag.title.split("\n");
+      expect(lines[0]).toMatch(
+        new RegExp(`^${scope === "session" ? "本会话允许" : "本项目允许"} · 10-20 \\d{2}:\\d{2}$`),
+      );
+      expect(lines[1]).toBe("shell · git status");
+      expect(lines).toHaveLength(scope === "project" ? 3 : 2);
+      if (scope === "project") expect(lines[2]).toBe("可在 设置 › 授权 中撤销");
     }
   },
 );
