@@ -1427,7 +1427,9 @@ export function App({ host }: { host: DesktopHost }) {
                 onManageProviders={() => {
                   setPage("providers");
                 }}
-                onManageGrants={() => setPage("grants")}
+                onManageGrants={() => {
+                  setPage("grants");
+                }}
                 onManageMcp={() => {
                   setPage("mcp");
                 }}

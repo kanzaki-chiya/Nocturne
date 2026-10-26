@@ -9,7 +9,7 @@ const grant: Grant = { kind: "shell", target: "git status", createdAt: "2026-10-
 function fixture(entries = [grant]) {
   let grants = [...entries];
   let trusted = false;
-  let notify = () => undefined as void;
+  let notify: () => void = () => undefined;
   const runtime = {
     listGrantWorkspaces: vi.fn(async (): Promise<GrantWorkspace[]> => [
       { workspace: "Z:/plain", grantCount: 0, trusted: false, hasProjectConfig: false },
@@ -153,6 +153,7 @@ it.each(["session", "project", undefined] as const)(
   (scope) => {
     render(
       <GrantedTag
+        target="git status"
         permission={{
           action: "allow",
           source: "grant",
@@ -163,6 +164,9 @@ it.each(["session", "project", undefined] as const)(
     );
     const tag = screen.getByText("已授权");
     if (scope === undefined) expect(tag.title).toBe("已授权");
-    else expect(tag.title).toContain(scope === "session" ? "本会话授权" : "项目授权");
+    else {
+      expect(tag.title).toContain(scope === "session" ? "本会话授权" : "项目授权");
+      expect(tag.title).toContain("git status");
+    }
   },
 );

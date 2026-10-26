@@ -801,7 +801,9 @@ export function PhoneApp({
           void sessions.refresh().catch(() => undefined);
         }}
         sessions={sessions}
-        onManageGrants={() => navigate({ kind: "grants", hostId: page.hostId })}
+        onManageGrants={() => {
+          navigate({ kind: "grants", hostId: page.hostId });
+        }}
         onForked={(id) => {
           navigate({ kind: "session", hostId: page.hostId, sessionId: id });
         }}

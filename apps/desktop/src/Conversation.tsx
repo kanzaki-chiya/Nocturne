@@ -12,23 +12,25 @@ import {
 import { marked, type Token, type Tokens } from "marked";
 import "./grants.css";
 
-export function GrantedTag({ permission }: { permission: ToolEntry["permission"] }) {
+export function GrantedTag({
+  permission,
+  target,
+}: {
+  permission: ToolEntry["permission"];
+  target?: string | undefined;
+}) {
   if (permission?.source !== "grant") return null;
   const grant = permission.grant;
+  const tooltip =
+    grant === undefined
+      ? "已授权"
+      : `${grant.scope === "session" ? "本会话授权" : "项目授权"} · ${new Date(grant.createdAt).toLocaleString("zh-CN", { hour12: false })}授予${target ? `\n${target}` : ""}${grant.scope === "project" ? "\n可在 设置 › 授权 中撤销" : ""}`;
   return (
     <span
       className="granted-tag granted-tooltip"
       tabIndex={0}
-      data-tooltip={
-        grant === undefined
-          ? "已授权"
-          : `${grant.scope === "session" ? "本会话授权" : "项目授权"} · ${new Date(grant.createdAt).toLocaleString("zh-CN", { hour12: false })}授予${grant.scope === "project" ? "。可在 设置 › 授权 中撤销" : ""}`
-      }
-      title={
-        grant === undefined
-          ? "已授权"
-          : `${grant.scope === "session" ? "本会话授权" : "项目授权"} · ${new Date(grant.createdAt).toLocaleString("zh-CN", { hour12: false })}授予${grant.scope === "project" ? "。可在 设置 › 授权 中撤销" : ""}`
-      }
+      data-tooltip={tooltip}
+      title={tooltip}
     >
       已授权
     </span>
@@ -2266,7 +2268,10 @@ function ToolRow({
     <>
       {todos !== undefined && todos.length > 0 && <TodoProgress items={todos} />}
       {range !== undefined && <span className="tool-range">{range}</span>}
-      <GrantedTag permission={entry.permission} />
+      <GrantedTag
+        permission={entry.permission}
+        target={entry.subjects.map((subject) => subject.target).join("\n")}
+      />
       {entry.review && (
         <span className="granted-tag" title={entry.review.reason}>
           审查：{entry.review.verdict === "allow" ? "放行" : entry.review.verdict}

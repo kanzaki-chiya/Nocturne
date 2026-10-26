@@ -36,9 +36,13 @@ export function GrantsPage({
     setGrants(entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
   }, [runtime, selected]);
   useEffect(() => {
-    void refresh().catch((e: unknown) => setNotice({ text: String(e), tone: "error" }));
+    void refresh().catch((e: unknown) => {
+      setNotice({ text: String(e), tone: "error" });
+    });
     return runtime.onGrantsChanged(() => {
-      void refresh().catch((e: unknown) => setNotice({ text: String(e), tone: "error" }));
+      void refresh().catch((e: unknown) => {
+        setNotice({ text: String(e), tone: "error" });
+      });
     });
   }, [runtime, refresh]);
   const run = async (action: () => Promise<void>) => {
@@ -67,7 +71,7 @@ export function GrantsPage({
         { id: "cancel", cells: [{ text: "取消" }] },
         ...confirmation.text
           .split("\n")
-          .map((text, i) => ({ id: `description:${i}`, cells: [{ text }], disabled: true })),
+          .map((text, i) => ({ id: `description:${i}`, cells: [{ text }] })),
       ]
     : grants.map((grant, i) => ({
         id: String(i),
@@ -138,7 +142,7 @@ export function GrantsPage({
       onActivate={(id) => {
         if (!confirmation) return;
         if (id === "cancel") setConfirmation(undefined);
-        else void run(confirmation.run);
+        else if (id === "confirm") void run(confirmation.run);
       }}
       onKey={(input, _key, context) => {
         if (confirmation) return false;
@@ -164,7 +168,7 @@ export function GrantsPage({
           else if (current?.hasProjectConfig) {
             void runtime
               .describeProject({ workspace: selected })
-              .then((description) =>
+              .then((description) => {
                 setConfirmation({
                   text: [
                     `信任 ${selected}？`,
@@ -173,9 +177,11 @@ export function GrantsPage({
                     `放宽规则 ${description.relaxedRuleCount} 条。配置来自仓库，打开会话时执行。`,
                   ].join("\n"),
                   run: () => runtime.setWorkspaceTrusted({ workspace: selected, trusted: true }),
-                }),
-              )
-              .catch((e: unknown) => setNotice({ text: String(e), tone: "error" }));
+                });
+              })
+              .catch((e: unknown) => {
+                setNotice({ text: String(e), tone: "error" });
+              });
           }
           return true;
         }

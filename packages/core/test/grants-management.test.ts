@@ -170,10 +170,9 @@ it("describeProject 只解析 MCP 命令参数、事件 Hook 数和放宽规则�
 });
 
 it("活动子会话查询和撤销作用于根，后续子调用失去授权", async () => {
-  const { config, workspace } = await fixture();
-  const outside = path.join(roots.at(-1)!, "outside.txt");
+  const { config, workspace, root } = await fixture();
+  const outside = path.join(root, "outside.txt");
   await fs.writeFile(outside, "data");
-  let runtime: Awaited<ReturnType<typeof createRuntime>>;
   let childCalls = 0;
   let parentCalls = 0;
   const provider = new FakeProvider({
@@ -181,14 +180,14 @@ it("活动子会话查询和撤销作用于根，后续子调用失去授权", a
       if (request.tools.some((tool) => tool.name === "finish")) {
         childCalls++;
         if (childCalls === 2) {
-          const before = runtime.listSessionGrants({ sessionId: request.sessionId! });
+          const sessionId = request.sessionId;
+          if (!sessionId) throw new Error("missing child session id");
+          const before = runtime.listSessionGrants({ sessionId });
           expect(before).toHaveLength(1);
-          await runtime.revokeSessionGrant({
-            sessionId: request.sessionId!,
-            kind: before[0]!.kind,
-            target: before[0]!.target,
-          });
-          expect(runtime.listSessionGrants({ sessionId: request.sessionId! })).toEqual([]);
+          const entry = before[0];
+          if (!entry) throw new Error("missing session grant");
+          await runtime.revokeSessionGrant({ sessionId, kind: entry.kind, target: entry.target });
+          expect(runtime.listSessionGrants({ sessionId })).toEqual([]);
         }
         return childCalls <= 2
           ? [
@@ -227,7 +226,7 @@ it("活动子会话查询和撤销作用于根，后续子调用失去授权", a
       ];
     },
   });
-  runtime = await createRuntime({
+  const runtime = await createRuntime({
     config,
     cwd: workspace,
     interactive: true,
@@ -246,7 +245,8 @@ it("活动子会话查询和撤销作用于根，后续子调用失去授权", a
     expect(childCalls).toBe(3);
     expect(session.listGrants()).toEqual([]);
     const children = await runtime.listSubagents({ parentSessionId: session.id });
-    const child = children[0]!;
+    const child = children[0];
+    if (!child) throw new Error("missing child session");
     const events: RuntimeEvent[] = [];
     const observation = await runtime.observeSubagent(
       { parentSessionId: session.id, childSessionId: child.childSessionId },
@@ -283,7 +283,7 @@ it("活动子会话查询和撤销作用于根，后续子调用失去授权", a
 it.each(["session", "project"] as const)(
   "%s 授权撤销后同会话下一次同目标重新询问，事件和重放保留 grant",
   async (scope) => {
-    const { config, workspace, platform } = await fixture();
+    const { config, workspace } = await fixture();
     const write: FakeScript = [
       { type: "tool_call", toolCallId: "w", name: "write", input: { path: "a.txt", content: "a" } },
       { type: "finish", reason: "tool_calls" },

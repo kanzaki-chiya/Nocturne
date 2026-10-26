@@ -1,4 +1,4 @@
-import type { SkillsConfig } from "../protocol/index.js";
+import type { SkillsConfig, GrantWorkspace, ProjectTrustDescription } from "../protocol/index.js";
 /**
  * 配置层类型（config.md 第 1、2、6 节）。
  * 本模块只做加载、校验、合并、标注来源；规则的解释在 permission，
@@ -628,10 +628,8 @@ export interface RuntimeConfig {
   listGrantWorkspaces(
     openWorkspaces: string[],
     warn: (message: string) => void,
-  ): Promise<import("../protocol/grants.js").GrantWorkspace[]>;
-  describeProject(
-    workspace: string,
-  ): Promise<import("../protocol/grants.js").ProjectTrustDescription>;
+  ): Promise<GrantWorkspace[]>;
+  describeProject(workspace: string): Promise<ProjectTrustDescription>;
   skillConfig(): SkillsConfig;
   disabledSkills(): string[];
   setSkillEnabled(name: string, enabled: boolean): Promise<void>;

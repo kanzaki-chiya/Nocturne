@@ -18,8 +18,7 @@ export const grantKind = (kind: Grant["kind"]): string =>
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const basename = (value: string) => value.split(/[\\/]/).filter(Boolean).at(-1) ?? value;
 const samePath = (a: string, b: string | undefined) =>
-  b !== undefined &&
-  a.replaceAll("\\", "/").toLowerCase() === b.replaceAll("\\", "/").toLowerCase();
+  a.replaceAll("\\", "/").toLowerCase() === b?.replaceAll("\\", "/").toLowerCase();
 export function GrantTarget({ target }: { target: string }) {
   return target.length > 100 ? (
     <details className="grant-target">
@@ -141,7 +140,9 @@ export function GrantsPage({
             <button
               key={item.workspace}
               className={`grant-workspace ${selected === item.workspace ? "on" : ""}`}
-              onClick={() => setSelected(item.workspace)}
+              onClick={() => {
+                setSelected(item.workspace);
+              }}
             >
               <b>
                 {samePath(item.workspace, plainWorkspace) ? "普通对话" : basename(item.workspace)}
@@ -154,7 +155,12 @@ export function GrantsPage({
         </nav>
         <label className="grants-workspace-select">
           工作区
-          <select value={selected ?? ""} onChange={(event) => setSelected(event.target.value)}>
+          <select
+            value={selected ?? ""}
+            onChange={(event) => {
+              setSelected(event.target.value);
+            }}
+          >
             {workspaces.map((item) => (
               <option value={item.workspace} key={item.workspace}>
                 {samePath(item.workspace, plainWorkspace) ? "普通对话" : basename(item.workspace)} ·{" "}
@@ -211,7 +217,9 @@ export function GrantsPage({
                         void client.runtime
                           .describeProject({ workspace: current.workspace })
                           .then(setDescription)
-                          .catch((reason: unknown) => setError(message(reason)));
+                          .catch((reason: unknown) => {
+                            setError(message(reason));
+                          });
                       }
                     }}
                   >
@@ -328,7 +336,9 @@ export function GrantsPage({
               <h4>放宽的权限规则 · {description.relaxedRuleCount} 条</h4>
             </div>
           }
-          onClose={() => setDescription(undefined)}
+          onClose={() => {
+            setDescription(undefined);
+          }}
           onConfirm={async () => {
             const saved = await mutate(
               () =>

@@ -39,17 +39,16 @@ it("grants 方法往返、信任描述、远程仅可查看和撤销；新增和
   await until(() => remote.length === 1);
   expect(local).toHaveLength(1);
   expect(local[0]).toEqual({ workspace: expect.any(String) });
-  const workspace = local[0]!.workspace!;
+  const workspace = local[0]?.workspace;
+  if (!workspace) throw new Error("missing workspace notification");
   const grants = await phone.client.runtime.listGrants({ workspace });
   expect(grants).toHaveLength(1);
   expect(await phone.client.runtime.listGrantWorkspaces()).toContainEqual(
     expect.objectContaining({ workspace, grantCount: 1 }),
   );
-  await phone.client.runtime.revokeGrant({
-    workspace,
-    kind: grants[0]!.kind,
-    target: grants[0]!.target,
-  });
+  const first = grants[0];
+  if (!first) throw new Error("missing project grant");
+  await phone.client.runtime.revokeGrant({ workspace, kind: first.kind, target: first.target });
   await until(() => remote.length === 2);
   expect(local).toHaveLength(2);
   expect(await h.client.runtime.listGrants({ workspace })).toEqual([]);
@@ -70,8 +69,10 @@ it("grants 方法往返、信任描述、远程仅可查看和撤销；新增和
   expect(await h.client.runtime.listGrantWorkspaces()).toContainEqual(
     expect.objectContaining({ workspace, trusted: true, hasProjectConfig: true }),
   );
-  const describe = vi.spyOn(h.runtimes[0]!, "describeProject");
-  const trust = vi.spyOn(h.runtimes[0]!, "setWorkspaceTrusted");
+  const runtime = h.runtimes[0];
+  if (!runtime) throw new Error("missing runtime");
+  const describe = vi.spyOn(runtime, "describeProject");
+  const trust = vi.spyOn(runtime, "setWorkspaceTrusted");
   await expect(phone.client.runtime.describeProject({ workspace })).rejects.toMatchObject({
     code: "remote_not_allowed",
   });
@@ -105,7 +106,9 @@ it("会话授权 list/revoke/revokeAll 可经手机调用，变化恰好一次�
   await until(() => changes.length === 1);
   const grants = await b.listGrants();
   expect(grants).toHaveLength(1);
-  await b.revokeGrant({ kind: grants[0]!.kind, target: grants[0]!.target });
+  const first = grants[0];
+  if (!first) throw new Error("missing session grant");
+  await b.revokeGrant({ kind: first.kind, target: first.target });
   await until(() => changes.length === 2);
   expect(await session.listGrants()).toEqual([]);
   await session.submit({ text: "again" });

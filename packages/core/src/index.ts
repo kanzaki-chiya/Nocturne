@@ -3299,8 +3299,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     z.string().min(1).parse(sessionId);
     let current = subagentRegistry.liveSession(sessionId);
     if (current === undefined) throw new RuntimeCommandError("invalid_command", "没有打开的会话");
-    while (current.state().meta.parent !== undefined) {
-      const parent = subagentRegistry.liveSession(current.state().meta.parent!.sessionId);
+    for (;;) {
+      const parentId = current.state().meta.parent?.sessionId;
+      if (parentId === undefined) break;
+      const parent = subagentRegistry.liveSession(parentId);
       if (parent === undefined) break;
       current = parent;
     }
@@ -3310,7 +3312,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     listSessionGrants({ sessionId }) {
       return (grantLists.get(sessionGrantRoot(sessionId)) ?? []).map((grant) => ({ ...grant }));
     },
-    async revokeSessionGrant(input) {
+    revokeSessionGrant(input) {
       const root = sessionGrantRoot(input.sessionId);
       const kind = subjectKindSchema.parse(input.kind);
       const target = z.string().min(1).parse(input.target);
@@ -3319,11 +3321,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (entries[i]?.kind === kind && entries[i]?.target === target) entries.splice(i, 1);
       }
       grantsChanged({ sessionId: root });
+      return Promise.resolve();
     },
-    async revokeAllSessionGrants({ sessionId }) {
+    revokeAllSessionGrants({ sessionId }) {
       const root = sessionGrantRoot(sessionId);
       grantLists.get(root)?.splice(0);
       grantsChanged({ sessionId: root });
+      return Promise.resolve();
     },
     listGrantWorkspaces: () =>
       grantConfig().listGrantWorkspaces(
