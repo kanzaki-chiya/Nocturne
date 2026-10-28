@@ -292,6 +292,7 @@ export interface RpcMethods {
     /** 新会话 id；会话本身未打开，要用 resumeSession 打开 */
     result: { sessionId: string };
   };
+  "runtime.renameSession": { params: { sessionId: string; title: string }; result: null };
   /**
    * workspaceRoot（ADR-0051）：下列运行时级查询/写方法可携带 workspaceRoot，
    * 指定按哪个工作区合并配置层；缺省为后台启动目录。旧客户端不传不受影响。
@@ -614,7 +615,7 @@ export interface RpcServerNotifications {
    */
   "runtime.providersChanged": Record<string, never>;
   /**
-   * 会话列表变了，请重拉 `runtime.listSessions`：本后台创建或分叉会话成功、会话首条用户消息
+   * 会话列表变了，请重拉 `runtime.listSessions`：本后台创建、分叉或重命名会话成功、会话首条用户消息
    * 或标题落盘之后推送，短时间内的多次变化合并为一条。不带任何会话内容；别的进程改的列表不在此列
    */
   "runtime.sessionsChanged": Record<string, never>;
@@ -655,6 +656,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.createSession": true,
   "runtime.resumeSession": true,
   "runtime.forkSession": true,
+  "runtime.renameSession": true,
   "runtime.listModels": true,
   "runtime.defaultModel": true,
   "runtime.listRecentModels": true,

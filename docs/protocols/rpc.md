@@ -37,6 +37,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `createSession` | `CreateSessionOptions` → `SessionOpened`；ADR-0051 新增可选 `cwd` 与 `workspaceRoot`，按该目录加载项目层并把两个值写入 `session.created`。`cwd` 缺省沿用 Runtime 的 cwd；工作区根依次取显式 `workspaceRoot`、显式 `cwd` 的真实路径、Runtime 的 workspaceRoot；恢复会话沿用日志记录的工作区，不带参数 |
 | `resumeSession` | `{ sessionId, model?, force? }` → `SessionOpened` |
 | `forkSession` | `{ sessionId, targetSeq? }` → `{ sessionId }`（新会话未打开，用 `resumeSession` 打开） |
+| `renameSession` | `{ sessionId, title }` → `null`；调用 Core 的 `Runtime.renameSession`，成功后通知会话列表变化；参数必须为字符串，标题内容的校验由 Core 负责 |
 | `usageStats` | `{ days?: number }`（正整数，缺省全部）→ protocol 的 `UsageStats`（含按模型的 `requests`、`latency`、`performance`、`cacheSavings`、首末使用时间，范围内逐日的 `requests` 与 `models` 拆分，以及 `performanceGranularity`）；只读，不打开会话或取锁，见 [usage.md](../architecture/usage.md) |
 | `listModels` / `defaultModel` / `listRecentModels` | 模型列表 / `ModelRef \| null` / `ModelRef[]`；前两者可带 `workspaceRoot`；`listModels` 另可带 `includeDisabled`（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)：true 时含停用模型并带 `disabled`，默认滤除；停用模型也带 `unavailable`） |
 | `describeSettings` / `updateSettings` | `SettingItem[]`；均可带 `workspaceRoot`，`updateSettings { patch, reviewerKey? }`；`describeSettings` 的模型设置项可带 `disabled: "provider" \| "model"`，由注册表解析派生，供设置值显示停用状态，模型选择列表仍用默认 `listModels()` |
@@ -194,7 +195,7 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 | 客户端→服务端 | `session.interrupt` | `{ sessionId }` | 中断运行中的 Turn；无 Turn 时无操作。`submit` 请求随后以 `aborted` 返回。服务端也接受带 `id` 的请求形式（回复 `null`） |
 | 服务端→客户端 | `event` | `{ sessionId, event }` | `event` 原样是 [events.md](events.md) 的 `RuntimeEvent` 信封，不另包一层 |
 | 服务端→客户端 | `runtime.providersChanged` | `{}` | 服务商、技能或外部 agent 配置变更成功后的通知；`provider.*`、`skills.*` 写方法（`setSkillEnabled`、`importSkills` 的 commit）、`agents.*` 三个写方法的响应之前到达一次，登录和显式重载同原规则（3.3–3.7） |
-| 服务端→客户端 | `runtime.sessionsChanged` | `{}` | 会话列表变了，请重拉 `runtime.listSessions`。**不带任何会话内容**（标题、路径都不带）。本后台的 `runtime.createSession`、`runtime.forkSession` 成功后发；会话首条用户消息落盘（列表标题 `firstText` 从无到有）和 `session.titled`（生成的标题优先于首句）也发，其余事件不发。发送前合并：第一次变化起 300 ms 内的所有变化只发一条，窗口内不顺延。别的进程（如另开的 CLI）改的列表不经过本后台，没有通知，客户端回前台时自行重拉。旧客户端没有监听器，忽略即可 |
+| 服务端→客户端 | `runtime.sessionsChanged` | `{}` | 会话列表变了，请重拉 `runtime.listSessions`。**不带任何会话内容**（标题、路径都不带）。本后台的 `runtime.createSession`、`runtime.forkSession`、`runtime.renameSession` 成功后发；会话首条用户消息落盘（列表标题 `firstText` 从无到有）和 `session.titled`（生成的标题优先于首句）也发，其余事件不发。发送前合并：第一次变化起 300 ms 内的所有变化只发一条，窗口内不顺延。别的进程（如另开的 CLI）改的列表不经过本后台，没有通知，客户端回前台时自行重拉。旧客户端没有监听器，忽略即可 |
 | 服务端→客户端 | `grants.changed` | `{ workspace?, sessionId? }` | 新增、撤销授权或改信任后重拉；会话 ID 为树根。易失、不写日志，广播给所有已握手连接（含远程） |
 | 服务端→客户端 | `schedule.changed` | `{ taskId? }` | 定时任务列表、启停或运行状态变了，请重拉 `schedule.list`（ADR-0064）。易失，不写日志，不带任务内容；保存、删除、一次运行开始/结束/被跳过之后发。`taskId` 缺省表示整体变化。广播给所有已握手连接（含远程）。每次发出时同时触发一次 `runtime.sessionsChanged`（运行会建出新会话，照常 300 ms 合并） |
 | 服务端→客户端 | `login.completed` | `LoginCompleted` | 登录会话完成或失败（含取消）；绝不先于对应 `login.start`/`startDraft` 的响应到达（3.4） |
@@ -378,7 +379,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `runtime.listSessions`、`runtime.usageStats` | 允许（只读）；`listSessions` 的 `cwd` 只是过滤条件 |
 | `runtime.listModels`、`runtime.defaultModel`、`runtime.listRecentModels`、`runtime.describeModelRoles`、`runtime.listShells` | 允许（只读），`workspaceRoot` 不受限 |
 | `runtime.createSession` | 允许全部选项。显式 `cwd` / `workspaceRoot` 须是已存在的绝对路径文件夹，否则 `workspace_not_found`；工作区根有项目配置但未信任、且不是列表可见的非子代理会话用过的 cwd 或工作区根（真实路径匹配）时报 `workspace_untrusted`，信任只能在电脑上决定。`text` 不触发 Turn |
-| `runtime.resumeSession`、`runtime.forkSession` | 允许，含 `model`、`force` |
+| `runtime.resumeSession`、`runtime.forkSession`、`runtime.renameSession` | 允许；恢复可带 `model`、`force`，重命名只改会话标题 |
 | `session.subscribe`、`session.unsubscribe`、`session.close`、`session.state` | 允许 |
 | `session.submit` | 允许完整载荷（图片、文件引用、技能、`delegate`） |
 | `session.interrupt` | 请求与通知均允许 |

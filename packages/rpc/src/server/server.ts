@@ -172,6 +172,7 @@ export const REMOTE_METHODS = [
   "runtime.createSession",
   "runtime.resumeSession",
   "runtime.forkSession",
+  "runtime.renameSession",
   "runtime.listModels",
   "runtime.defaultModel",
   "runtime.listRecentModels",
@@ -1063,6 +1064,13 @@ class Connection implements HubPeer {
         });
         this.hub.notifySessionsChanged();
         return { sessionId };
+      },
+      "runtime.renameSession": async (p) => {
+        const sessionId = reqString(p, "sessionId");
+        const title = reqString(p, "title");
+        await this.runtime().renameSession(sessionId, title);
+        this.hub.notifySessionsChanged();
+        return null;
       },
       "runtime.listModels": async (p) => {
         const includeDisabled = optBool(p, "includeDisabled");

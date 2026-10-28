@@ -47,6 +47,45 @@ describe("runtime.sessionsChanged", () => {
     await Promise.all([h.served, remote.served]);
   });
 
+  it("远程重命名会话往返：列表标题更新，本机与远程各收到一条合并通知", async () => {
+    const h = await connectMany();
+    const remote = await h.add();
+    const { session } = await h.client.runtime.createSession({ model: MODEL });
+    await sleep(WINDOW_MS + 100);
+    const local = countSessionsChanged(h.client);
+    const phone = countSessionsChanged(remote.client);
+    expect(await remote.client.runtime.renameSession(session.id, "手动标题")).toBeUndefined();
+    await until(() => local.count() === 1 && phone.count() === 1, "重命名通知");
+    expect(
+      (await remote.client.runtime.listSessions()).find((item) => item.id === session.id)
+        ?.firstText,
+    ).toBe("手动标题");
+    await sleep(WINDOW_MS + 100);
+    expect([local.count(), phone.count()]).toEqual([1, 1]);
+    await h.client.shutdown();
+    await Promise.all([h.served, remote.served]);
+  });
+
+  it("重命名参数形状错误时不调用 Core，也不发送列表通知", async () => {
+    const h = await connectMany();
+    const { session } = await h.client.runtime.createSession({ model: MODEL });
+    await sleep(WINDOW_MS + 100);
+    const local = countSessionsChanged(h.client);
+    for (const params of [
+      { sessionId: 1, title: "错误" },
+      { sessionId: session.id, title: 1 },
+      { sessionId: session.id },
+    ]) {
+      await expect(h.client.call("runtime.renameSession", params as never)).rejects.toMatchObject({
+        rpcCode: -32602,
+      });
+    }
+    await sleep(WINDOW_MS + 100);
+    expect(local.count()).toBe(0);
+    await h.client.shutdown();
+    await h.served;
+  });
+
   it("首条用户消息落盘后推送，后续消息不再推送", async () => {
     const h = await connectMany({ scripts: [textScript("一"), textScript("二")] });
     const remote = await h.add();

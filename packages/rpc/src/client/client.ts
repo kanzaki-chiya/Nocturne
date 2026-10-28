@@ -274,6 +274,7 @@ export interface RpcRuntime {
     options?: { model?: string | ModelRef; force?: boolean },
   ): Promise<{ opened: SessionOpened; session: RpcSession }>;
   forkSession(id: string, options?: { targetSeq?: number }): Promise<string>;
+  renameSession(sessionId: string, title: string): Promise<void>;
   /**
    * 只读发现父会话的直接内置子会话（含已结束；ADR-0060 第 4 轮，rpc.md 4.1）。
    * 不要求打开父会话。参数既可传 id，也可传与进程内 `Runtime.listSubagents` 相同的对象。
@@ -829,6 +830,9 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     },
     forkSession: async (id, forkOptions) =>
       (await call("runtime.forkSession", { sessionId: id, ...forkOptions })).sessionId,
+    renameSession: async (sessionId, title) => {
+      await call("runtime.renameSession", { sessionId, title });
+    },
     listSubagents: (parent) =>
       call("subagent.list", {
         parentSessionId: typeof parent === "string" ? parent : parent.parentSessionId,
