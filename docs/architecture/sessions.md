@@ -55,7 +55,7 @@ MVP 不做快照；若将来出现加载瓶颈，再追加 `session.snapshot` �
 | `interrupt` | 中止当前 Turn；Turn 以 `aborted` 结束，会话回到 `idle` |
 | `close` | 先拒绝新操作；取消后台标题请求；若 Turn 已被接受（包括尚在提交准备阶段）或正在压缩，先发出中断并等待全部请求收束，再清理资源、释放锁。Turn 按中断语义写入 `turn.completed(reason="aborted")`（`failed` 状态下不再写入）。日志保留，可随时恢复 |
 
-新建根会话首条 `message.user` 落盘后，Runtime 在后台用 smol 角色（未配置时用当时的会话模型）请求标题，不阻塞 Turn；只取用户文字前 2000 字符，要求同语言、不超过 20 字、不带工具与思考档位。结果去引号、换行、首尾空白并截到 40 显示宽度，写入 `session.titled`。与 Turn 共用 Session 写入队列，seq、日志与发布顺序一致；失败只记诊断，不发 warning。旧会话恢复与子会话均不生成，已有标题不再请求。标题展示由 [SessionView.title](../protocols/view.md) 派生；列表读日志时 `SessionSummary.firstText` 优先取生成标题，否则取首条用户消息第一个文本块的第一个非空行（[ADR-0040](../decisions/ADR-0040-model-roles.md)）。
+新建根会话首条 `message.user` 落盘后，Runtime 在后台用 smol 角色（未配置时用当时的会话模型）请求标题，不阻塞 Turn；只取用户文字前 2000 字符，要求同语言、不超过 20 字、不带工具与思考档位。结果去引号、换行、首尾空白并截到 40 显示宽度，写入 `session.titled`。与 Turn 共用 Session 写入队列，seq、日志与发布顺序一致；失败只记诊断，不发 warning。旧会话恢复与子会话均不生成。用户可改名或清除用户覆盖；已有任何标题事件（包括清空）时不启动自动生成，后台结果入队落盘前也要复查，避免覆盖用户操作。标题展示优先用户标题、生成标题、首句；回退不撤销标题，见 [ADR-0069](../decisions/ADR-0069-session-rename-title-sidecar.md)。
 
 ## 4. 打开会话（恢复）的顺序
 
@@ -128,7 +128,7 @@ interface SessionRecovery {
 
 ## 8. 会话列表
 
-读取每个日志的开头和文件修改时间列出会话，可按工作目录过滤：实现只读前 64 KiB（`readFileSlice`），从头部解析 `session.created` 首行、第一条 `message.user`（取 `firstText`）与头部内出现的 `session.titled`；开头里找不到第一条用户消息或首行被截断时，回退读整份日志。截断只按完整行切分，落在多字节字符或一行中间的尾部直接丢弃，不当坏记录。每条摘要附带 `locked`（锁文件存在且持有者看起来存活），不区分持有者；RPC 客户端结合可选的 `openHere` 区分本后台与别的进程持有（见 [rpc.md](../protocols/rpc.md)）。列表是只读操作，不取得锁；除上述头部扫描外不解析日志主体。单个日志损坏不阻塞整个列表（该条按最小摘要返回）。会话数量增长到影响启动时间时，再加入可随时从日志重建的索引文件。
+读取每个日志的开头和文件修改时间列出会话，可按工作目录过滤：实现只读前 64 KiB（`readFileSlice`），从头部解析 `session.created` 首行、第一条 `message.user`（取 `firstText`）与头部内出现的生成标题；开头里找不到第一条用户消息或首行被截断时，回退读整份日志。截断只按完整行切分，落在多字节字符或一行中间的尾部直接丢弃，不当坏记录。用户标题优先取每会话的 `<sessionId>.title.json` 旁路缓存，失效时降级至头部扫描；恢复时由日志修复旁路文件，详见 [ADR-0069](../decisions/ADR-0069-session-rename-title-sidecar.md)。每条摘要附带 `locked`（锁文件存在且持有者看起来存活），不区分持有者；RPC 客户端结合可选的 `openHere` 区分本后台与别的进程持有（见 [rpc.md](../protocols/rpc.md)）。列表是只读操作，不取得锁；除上述头部扫描外不解析日志主体。单个日志损坏不阻塞整个列表（该条按最小摘要返回）。会话数量增长到影响启动时间时，再加入可随时从日志重建的索引文件。
 
 定时任务发起的会话在 `session.created.schedule`（`{ taskId, scheduledAt, trigger }`）里记下来源，摘要带 `schedule` 供侧栏分组。是否仍无人值守不另存：日志里的 `message.user` 少于 2 条就是非交互（调度器提交的是第 1 条），出现第 2 条之后转为交互且不再变回去。回退不删事件，关闭再打开结论不变。分叉清掉 `schedule`。见 [schedule.md](schedule.md) 第 4 节。
 

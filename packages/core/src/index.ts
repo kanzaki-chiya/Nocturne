@@ -680,6 +680,7 @@ export interface Runtime {
   createSession(options: CreateSessionOptions): Promise<RuntimeSession>;
   resumeSession(id: string, options?: ResumeSessionOptions): Promise<RuntimeSession>;
   forkSession(id: string, options?: { targetSeq?: number }): Promise<string>;
+  renameSession(id: string, title: string): Promise<void>;
   /**
    * 只读发现父会话的直接内置子会话（含已结束，ADR-0060 第 4 轮、rpc.md 4.1）：
    * 登记簿里的活动项 ∪ 日志 `session.created.parent` 映射。不打开会话、不取锁、不修复。
@@ -990,7 +991,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   // 观察登记簿与 limiter 同寿命：所有会话、所有嵌套层级的 launcher 共享（rpc.md 4.1）
   const subagentRegistry = createSubagentRegistry();
 
-  const store: SessionStore = createSessionStore({ platform, sessionsDir });
+  const store: SessionStore = createSessionStore({
+    platform,
+    sessionsDir,
+    onTitleDiagnostic: (sessionId, reason) => {
+      diagnostics.record("session.title_sidecar_invalid", { sessionId, reason });
+    },
+  });
   const subagentObservation = createSubagentObservation({
     platform,
     sessionsDir,
@@ -1032,6 +1039,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     refreshExternalAgents(): void;
     skillModel: { workspaceRoot: string; contextWindow: () => number | undefined };
     fork(targetSeq?: number): Promise<string>;
+    rename(title: string): Promise<void>;
     /** 广播到本会话失败时的提示出口 */
     applyFailed(scope: string, error: unknown): void;
   }
@@ -2365,8 +2373,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (!title) throw new Error("标题为空");
         if (signal.aborted || closing) return;
         // 复用 Session 的单一写入通道，与 Turn 保持统一 seq 和先写后发顺序。
-        await session.emit("session.titled", {
+        await session.emitGeneratedTitle({
           title,
+          source: "generated",
           model: `${titleModel.model.ref.provider}/${titleModel.model.ref.model}`,
           ...(result.usage !== undefined ? { usage: result.usage } : {}),
         });
@@ -2430,6 +2439,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         contextWindow: () => model.model.contextWindow,
       },
       fork: forkOpen,
+      rename: async (title) => {
+        assertUsable();
+        if (meta.parent !== undefined)
+          throw new RuntimeCommandError("invalid_command", "子会话不能改名");
+        await session.emit("session.titled", { title, source: "user" });
+      },
       applyFailed: (scope, error) => {
         const reason = error instanceof Error ? error.message : String(error);
         diagnostics.record("session.config_apply_failed", {
@@ -3988,6 +4003,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       } finally {
         await source.close();
       }
+    },
+    async renameSession(id, title) {
+      const cleaned = cleanTitle(title);
+      const open = openSessions.get(id);
+      if (open !== undefined) await open.rename(cleaned);
+      else await store.renameClosed(id, cleaned);
     },
     listModels: (input) => {
       const disabled = disabledSet();

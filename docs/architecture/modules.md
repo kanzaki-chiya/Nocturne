@@ -188,6 +188,7 @@ session.shellInfo() / session.listShells()                    // 生效 shell �
 await session.compact()                                       // → context.compacted("summary")
 const { report, overBudget } = session.describeContext()       // ContextReport 查询，不产事件
 runtime.listModels()                                          // 全部可用模型（/model 用）
+await runtime.renameSession(sessionId, "新标题")              // 写 session.titled(user)；空标题清除覆盖
 await session.close()
 ```
 
@@ -201,7 +202,7 @@ Phase 6 增补：`subagent` 选项（`enabled`/`maxDepth`/`maxConcurrent`/`maxSt
 
 `RuntimeConfig` 与 `Runtime` 的通用字符串偏好读写接口及未注入配置时的行为见 [config.md](config.md) 第 2 节；Core 不解释 TUI 主题取值。
 
-恢复相关的会话 API：`resumeSession(id, { force?: boolean })`（`force` 对应强制解锁，见 [sessions.md](sessions.md) 第 4 节）；`listSessions({ cwd? })` 的摘要含 `locked` 字段；`session.recovery` 暴露本次打开执行的修复（截断尾部、补齐调用与 Turn）。
+恢复相关的会话 API：`resumeSession(id, { force?: boolean })`（`force` 对应强制解锁，见 [sessions.md](sessions.md) 第 4 节）；`listSessions({ cwd? })` 的摘要含 `locked` 字段；`session.recovery` 暴露本次打开执行的修复（截断尾部、补齐调用与 Turn）。`Runtime.renameSession` 对未打开的根会话经 session 模块离线取得锁并只写事件，不启动模型或 MCP；标题旁路与竞态见 [ADR-0069](../decisions/ADR-0069-session-rename-title-sidecar.md)。
 
 `RuntimeSession` 只暴露上面这些方法，不暴露内部 `Session` 对象：客户端回放视图用 `durableEvents()`，不得绕道读会话内部状态（[ADR-0044](../decisions/ADR-0044-rpc-stdio.md) 第 5 节）。Core 与客户端自己的测试需要直接发事件时，经 `createRuntime` 挂在会话对象上的 `Symbol.for("nocturne.core.internalSession")` 属性取内部 `Session`——该属性不在公开类型里，也不可枚举。
 

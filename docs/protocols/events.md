@@ -70,7 +70,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 |---|---|---|
 | `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`reasoningEffort?`（思考档位，ADR-0018；缺省按 `off` 处理）、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节）、`schedule?`（`{ taskId, scheduledAt, trigger }`，仅定时任务发起的会话存在；可选字段，旧版本忽略，ADR-0064，见 [schedule.md](../architecture/schedule.md)） |
 | `session.config_changed` | — | 变化的字段：`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018）、`shell?: { kind, path }`（shell 切换，ADR-0022：折叠时在该事件位置留 `note` 历史条目给模型，见 [context.md](../architecture/context.md) 第 3 节） |
-| `session.titled` | — | `title: string`、`model: string`（provider/model）、`usage?`（标题角色用量） |
+| `session.titled` | — | `title: string`、`source?: "generated" \| "user"`（旧事件缺省 `generated`；用户空标题清除覆盖）、`model?: string`（生成时的 provider/model；用户改名不填）、`usage?`（标题角色用量） |
 | `turn.started` | ✓ | `turnIndex` |
 | `message.user` | ✓ | `messageId`、`content: ContentBlock[]`、`attachments?: ImageAttachment[]`、`fileRefs?: FileRef[]`（用户引用的快照元数据，见第 4 节）、`skill?: { name: string; body: string }`（渲染正文快照，末尾 content 同时含 skill 文本块）、`delegate?: { agent: string; task: string }`（外部委派任务原文快照，末尾 content 同时含明确的 task 工具指令；与 skill 互斥） |
 | `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`timing?: AssistantTiming`（请求计时，见第 4 节；旧日志无此字段）、`finishReason: FinishReason \| "aborted"`、`protocol?: "openai-compatible" \| "anthropic" \| "openai-responses"`（产生该消息时的生效协议，ADR-0026 §6、ADR-0031 §1；旧日志无此字段，缺省时 `providerData` 回传只比较服务商） |
@@ -85,6 +85,8 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `attachment.described` | ✓ | `attachmentRef: { seq, index }`（`message.user` 或 `tool.completed` 的 seq、从 0 开始的附件序号）、`model: string`（provider/model）、`text`、`usage?` |
 
 `attachment.described` 与 `session.titled` 是 ADR-0040 的兼容扩展，不提升 `formatVersion`。成功描述供投影与界面复用；描述失败时写空 `text`，记录已尝试，恢复后也不重试，界面不显示空描述。标题后台写入，与 Turn 共用会话写入队列，保持连续 seq、先落盘后发布；生命周期见 [sessions.md](../architecture/sessions.md)。角色用量只保存在各自事件，不加入 `turn.completed.usage`、主对话缓存命中率或速度。
+
+[ADR-0069](../decisions/ADR-0069-session-rename-title-sidecar.md) 为已知 `session.titled` 增加可选 `source` 并使 `model` 可选，不新增事件类型、不提升 `formatVersion`。用户清除标题仍写事件；旧事件缺省生成来源。标题事件不属于 Turn，回退不撤销。
 
 `todo_write` 不新增事件类型或 `formatVersion`：成功且已持久化的 `tool.completed` 在 `output.items` 中携带规范化后的完整清单。折叠规则与边界见 [sessions.md](../architecture/sessions.md) 和 [tool-api.md](tool-api.md)；其他状态和无效输出均不改变当前清单。
 

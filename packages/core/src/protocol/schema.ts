@@ -151,11 +151,14 @@ const payloadSchemas = {
       }),
     ]),
   ),
-  "session.titled": z.object({
-    title: z.string().min(1),
-    model: z.string(),
-    usage: usageSchema.optional(),
-  }),
+  "session.titled": z
+    .object({
+      title: z.string(),
+      source: z.enum(["generated", "user"]).optional(),
+      model: z.string().optional(),
+      usage: usageSchema.optional(),
+    })
+    .refine((p) => p.title !== "" || p.source === "user"),
   "attachment.described": z.object({
     attachmentRef: z.object({
       seq: z.number().int().positive(),

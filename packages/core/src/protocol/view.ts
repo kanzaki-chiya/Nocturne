@@ -46,6 +46,9 @@ import type {
 
 export interface SessionView {
   title: string | undefined;
+  firstTitle: string | undefined;
+  generatedTitle: string | undefined;
+  userTitle: string | undefined;
   /** 当前任务清单；全部完成后由下一条持久化 message.user 归档 */
   todos: TodoItem[];
   /** 每次归约 +1；不参与重放等价 */
@@ -91,6 +94,14 @@ export interface SessionView {
    */
   mcpServers: Record<string, McpServerViewState>;
   lastSeq: number;
+}
+
+function visibleTitle(view: SessionView): string | undefined {
+  return (
+    (view.userTitle?.length ? view.userTitle : undefined) ??
+    (view.generatedTitle?.length ? view.generatedTitle : undefined) ??
+    view.firstTitle
+  );
 }
 
 export interface McpServerViewState {
@@ -276,6 +287,9 @@ function book(view: SessionView): Bookkeeping {
 export function createSessionView(): SessionView {
   return {
     title: undefined,
+    firstTitle: undefined,
+    generatedTitle: undefined,
+    userTitle: undefined,
     todos: [],
     revision: 0,
     meta: undefined,
@@ -327,6 +341,9 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         book(rebuilt).events = b.events;
         for (const ev of effectiveEvents(b.events)) reduceDurable(rebuilt, ev, true);
         view.entries = rebuilt.entries;
+        view.firstTitle = rebuilt.firstTitle;
+        // 标题是会话元数据，不随对话回退；保留当前两个显式来源。
+        view.title = visibleTitle(view);
         view.todos = rebuilt.todos;
         view.lastTurn = rebuilt.lastTurn;
         view.currentTurn = undefined;
@@ -392,8 +409,9 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
     case "message.user": {
       if (view.todos.length > 0 && view.todos.every((item) => item.status === "completed"))
         view.todos = [];
-      if (!view.entries.some((entry) => entry.kind === "user"))
-        view.title ??= firstUserText(event.payload);
+      if (view.firstTitle === undefined && !view.entries.some((entry) => entry.kind === "user"))
+        view.firstTitle = firstUserText(event.payload);
+      view.title = visibleTitle(view);
       view.entries.push({
         kind: "user",
         key: `u:${event.payload.messageId}`,
@@ -418,7 +436,9 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
       break;
     }
     case "session.titled": {
-      view.title = event.payload.title;
+      if (event.payload.source === "user") view.userTitle = event.payload.title;
+      else view.generatedTitle = event.payload.title;
+      view.title = visibleTitle(view);
       break;
     }
     case "message.assistant": {

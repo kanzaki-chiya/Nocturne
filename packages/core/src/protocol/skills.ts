@@ -145,6 +145,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "compact",
   "resume",
   "rewind",
+  "rename",
   "fork",
   "new",
   "clear",

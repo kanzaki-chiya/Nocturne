@@ -163,7 +163,7 @@ function parse(text: string): FileAggregate {
         break;
       case "session.titled":
         result.title = e.payload.title;
-        if (e.payload.usage)
+        if (e.payload.usage && e.payload.model)
           result.requests.push({ time, usage: e.payload.usage, model: modelRef(e.payload.model) });
         break;
       case "attachment.described":

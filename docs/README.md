@@ -98,6 +98,8 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 会话通知（三类事件、没在看才提醒、settings.json 通知偏好、判定放客户端）见 [ADR-0056](decisions/ADR-0056-session-notifications.md)。
 
+用户改名与会话标题旁路缓存（日志仍为事实来源）见 [ADR-0069](decisions/ADR-0069-session-rename-title-sidecar.md)，主文档是 [sessions.md](architecture/sessions.md)。
+
 安全审查第二版（smart 的送审范围、只读白名单、直接交人、七道是非题与纯函数判定、追加规则、样例集）见 [ADR-0057](decisions/ADR-0057-reviewer-v2.md)。
 
 ## Roadmap

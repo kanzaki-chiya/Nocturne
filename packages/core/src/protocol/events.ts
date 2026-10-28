@@ -80,7 +80,9 @@ export interface AttachmentDescribedPayload {
 
 export interface SessionTitledPayload {
   title: string;
-  model: string;
+  /** 旧事件缺省为 generated。 */
+  source?: "generated" | "user" | undefined;
+  model?: string | undefined;
   usage?: Usage | undefined;
 }
 

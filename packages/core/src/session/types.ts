@@ -114,6 +114,9 @@ export interface Session {
     payload: DurablePayload<T>,
     options?: EmitOptions,
   ): Promise<DurableEvent<T>>;
+  emitGeneratedTitle(
+    payload: DurablePayload<"session.titled">,
+  ): Promise<DurableEvent<"session.titled"> | undefined>;
   /** 临时事件：只发布不写日志 */
   emitEphemeral<T extends EphemeralType>(
     type: T,
@@ -174,6 +177,8 @@ export interface LoadSessionOptions {
 
 export interface SessionStore {
   create(input: CreateSessionInput): Promise<Session>;
+  /** 只取得锁、校验/截尾并追加标题；不修复 Turn 或解析模型。 */
+  renameClosed(id: string, title: string): Promise<void>;
   fork(source: Session, targetSeq?: number): Promise<string>;
   /**
    * 打开会话：先取得排他锁，再读取日志——截断损坏尾部、校验、

@@ -8,6 +8,7 @@ export type SessionErrorCode =
   | "session_failed"
   | "session_closed"
   | "session_not_found"
+  | "invalid_command"
   /** 会话被另一个进程持锁（ADR-0009） */
   | "session_locked"
   /** 只读观察（rpc.md 4.1）：session id 不是安全的单文件名标识 */

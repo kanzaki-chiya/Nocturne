@@ -53,7 +53,7 @@ function firstUserTextInLog(logText: string): { firstText: string | undefined; s
     if (!line.includes("message.user") && !line.includes("session.titled")) continue;
     try {
       const ev = decodeDurableEvent(line);
-      if (ev.type === "session.titled") title = ev.payload.title;
+      if (ev.type === "session.titled" && ev.payload.source !== "user") title = ev.payload.title;
       if (ev.type === "message.user" && !sawUser) {
         sawUser = true;
         firstText = firstUserText(ev.payload);
@@ -91,6 +91,7 @@ export interface SessionStoreDeps {
   platform: Platform;
   /** 会话目录：<NOCTURNE_HOME>/sessions */
   sessionsDir: string;
+  onTitleDiagnostic?: ((id: string, reason: string) => void) | undefined;
 }
 
 interface LoadedLog {
@@ -108,6 +109,59 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
   }
   function lockPath(id: string): string {
     return paths.join(sessionsDir, `${id}.lock`);
+  }
+  function titlePath(id: string): string {
+    return paths.join(sessionsDir, `${id}.title.json`);
+  }
+  async function writeTitle(id: string, title: string, seq: number): Promise<void> {
+    if (!title) {
+      await fs.unlink(titlePath(id)).catch((e: unknown) => {
+        if (fsErrorCode(e) !== "ENOENT") throw e;
+      });
+      return;
+    }
+    const temp = `${titlePath(id)}.${randomBytes(6).toString("hex")}.tmp`;
+    try {
+      await fs.writeFile(temp, JSON.stringify({ title, seq }));
+      await fs.rename(temp, titlePath(id));
+    } finally {
+      await fs.unlink(temp).catch(() => undefined);
+    }
+  }
+  async function readTitle(id: string): Promise<{ title: string; seq: number } | undefined> {
+    if (!(await fs.exists(titlePath(id)))) return undefined;
+    try {
+      const data: unknown = JSON.parse(await fs.readTextFile(titlePath(id)));
+      if (
+        typeof data === "object" &&
+        data !== null &&
+        "title" in data &&
+        "seq" in data &&
+        typeof data.title === "string" &&
+        data.title.length > 0 &&
+        typeof data.seq === "number" &&
+        Number.isSafeInteger(data.seq) &&
+        data.seq > 0
+      )
+        return { title: data.title, seq: data.seq };
+    } catch (e) {
+      if (fsErrorCode(e) === "ENOENT") return undefined;
+    }
+    // 旁路只是缓存；忽略损坏内容并留诊断。
+    deps.onTitleDiagnostic?.(id, "invalid_sidecar");
+    return undefined;
+  }
+  async function reconcileTitle(id: string, events: readonly DurableEvent[]): Promise<void> {
+    const last = events
+      .filter((e) => e.type === "session.titled" && e.payload.source === "user")
+      .at(-1);
+    const expected =
+      last?.type === "session.titled" ? { title: last.payload.title, seq: last.seq } : undefined;
+    const actual = await readTitle(id);
+    if (expected?.title) {
+      if (actual?.title !== expected.title || actual.seq !== expected.seq)
+        await writeTitle(id, expected.title, expected.seq);
+    } else if (await fs.exists(titlePath(id))) await writeTitle(id, "", 0);
   }
 
   /**
@@ -205,6 +259,27 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
   }
 
   return {
+    async renameClosed(id, title) {
+      if (!/^[A-Za-z0-9_-]+$/.test(id))
+        throw new SessionError("invalid_session_id", "无效的会话 ID");
+      const lock = await acquireSessionLock(fs, platform, lockPath(id));
+      try {
+        const { events } = await loadEvents(id);
+        if (events[0]?.type === "session.created" && events[0].payload.parent !== undefined)
+          throw new SessionError("invalid_command", "子会话不能改名");
+        const session = new SessionImpl({
+          id,
+          logPath: logPath(id),
+          fs,
+          events,
+          onTitle: (value, seq) => writeTitle(id, value, seq),
+        });
+        await session.emit("session.titled", { title, source: "user" });
+        await session.close();
+      } finally {
+        await lock.release();
+      }
+    },
     async fork(source, targetSeq) {
       await source.flush();
       const events = [...source.durableEvents()];
@@ -261,12 +336,15 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             await fork.emit("session.rewound", { targetSeq, mode: "conversation", files: [] });
           await fork.flush();
           await fs.rename(pendingLog, logPath(id));
+          await reconcileTitle(id, events);
         } finally {
           await fork.close();
         }
         return id;
       } catch (error) {
         await fs.unlink(pendingLog).catch(() => undefined);
+        await fs.unlink(logPath(id)).catch(() => undefined);
+        await fs.unlink(titlePath(id)).catch(() => undefined);
         for (const file of copied) await fs.unlink(file).catch(() => undefined);
         throw error;
       } finally {
@@ -285,6 +363,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
           fs,
           events: [],
           onClose: () => lock.release(),
+          onTitle: (value, seq) => writeTitle(id, value, seq),
         });
         await session.emit("session.created", {
           formatVersion: LOG_FORMAT_VERSION,
@@ -311,6 +390,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
       const lock: SessionLock = await acquireSessionLock(fs, platform, lockPath(id), options);
       try {
         const loaded = await loadEvents(id);
+        await reconcileTitle(id, loaded.events);
         const repaired = await repair(id, loaded.events);
         const recovery: SessionRecovery | undefined =
           repaired.recovery !== undefined || loaded.truncatedTail !== undefined
@@ -329,6 +409,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
           events: repaired.events,
           ...(recovery !== undefined ? { recovery } : {}),
           onClose: () => lock.release(),
+          onTitle: (value, seq) => writeTitle(id, value, seq),
         });
       } catch (e) {
         await lock.release();
@@ -374,7 +455,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             text = await fs.readTextFile(entry.path);
             scan = firstUserTextInLog(text);
           }
-          const firstText = scan.firstText;
+          const firstText = (await readTitle(id))?.title ?? scan.firstText;
           summaries.push({
             id: event.sessionId,
             createdAt: event.time,

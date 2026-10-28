@@ -17,8 +17,14 @@
 interface SessionView {
   /** 每次归约 +1，客户端用作重渲染信号；不参与重放等价（§6） */
   revision: number;
-  /** session.titled 优先，否则取首条用户消息原文首行 */
+  /** 非空用户标题 > 生成标题 > 首条用户消息首句 */
   title: string | undefined;
+  /** 首条用户消息的第一个文本块的第一个非空行 */
+  firstTitle: string | undefined;
+  /** 最近一次模型生成标题；旧 session.titled 缺省为 generated */
+  generatedTitle: string | undefined;
+  /** 最近一次用户标题；空串表示清除用户覆盖 */
+  userTitle: string | undefined;
   /** 会话元信息（session.created 填充） */
   meta: {
     cwd: string;
@@ -186,10 +192,10 @@ interface SessionNotice {
 | 事件 | 归约 |
 |---|---|
 | `session.created` | 填充 `meta`、`config` |
-| `session.titled` | 覆盖 `title`，不创建时间线条目、不累计角色用量 |
+| `session.titled` | 按 `source`（缺省 `generated`）更新 `userTitle` 或 `generatedTitle`，重算 `title`；空用户标题只清除覆盖，不创建时间线条目、不累计角色用量 |
 | `session.config_changed` | payload 中存在的键覆盖 `config`（`shell` 不进 `config`，ADR-0022）；追加 `config` notice 条目（shell 切换文案：`shell 已切换为 <kind>（<path>）`） |
 | `turn.started` | `currentTurn = {turnId, turnIndex}`；`turnCount = max(turnCount, turnIndex)` |
-| `message.user` | 当前 `todos` 非空且每项均为 `completed` 时先置空；尚有未完成项时保留，历史工具快照不变。追加 `user` 条目（key `u:<messageId>`），保留 `attachments`、`fileRefs` 与 `skill`；首条消息且尚无标题时，以 `firstUserText`（第一个文本块的第一个非空行）填充 `title`；引用内容仍在 `content` 中，客户端可用元数据显示摘要 |
+| `message.user` | 当前 `todos` 非空且每项均为 `completed` 时先置空；尚有未完成项时保留，历史工具快照不变。追加 `user` 条目（key `u:<messageId>`），保留 `attachments`、`fileRefs` 与 `skill`；首条消息以 `firstUserText`（第一个文本块的第一个非空行）记录 `firstTitle` 并重算 `title`；引用内容仍在 `content` 中，客户端可用元数据显示摘要 |
 | `message.assistant` | `live.assistants` 中同 `messageId` 者移除并晋升：新建条目插入时间线（流式 text/reasoning 丢弃，以 `content` 为准）；无 live 对应物则直接新建条目 |
 | `permission.reviewed` | 同 callId 的 live 工具晋升为 awaiting 条目，记录 `review`；不写 notice，避免同一审查显示两次。后续 requested 将审查理由复制到 `pendingPermission.review` |
 | `permission.requested` | `pendingPermission` 设置；同 `callId` 的 `live.tools` 项移除并晋升为 `awaiting_permission` 条目（回填 `subjects`），无 live/entries 对应物则新建 `awaiting_permission` 条目（`name` 暂缺）；记录进 `pendingByCallId` |

@@ -212,3 +212,113 @@ it("后台标题与 Turn 同时完成：日志、发布、重放的 seq 顺序�
   expect(published).toEqual(disk.slice(1).map((e) => e.seq));
   expect(replaySessionView(disk).title).toBe("并发标题");
 });
+
+it("用户标题优先、清空回退到生成标题，恢复和分叉保留；未打开改名不启动模型", async () => {
+  const { session, runtime, provider } = await setup();
+  await session.submit({ text: "原始首句" });
+  await vi.waitFor(() =>
+    expect(replaySessionView(session.durableEvents()).generatedTitle).toBe("排查登录错误"),
+  );
+  await runtime.renameSession(session.id, "  「我的标题」\n");
+  expect(replaySessionView(session.durableEvents()).title).toBe("我的标题");
+  expect((await runtime.listSessions())[0]?.firstText).toBe("我的标题");
+  await session.close();
+  const before = provider.roleRequests.length;
+  await runtime.renameSession(session.id, "离线改名");
+  expect(provider.roleRequests).toHaveLength(before);
+  expect((await runtime.listSessions())[0]?.firstText).toBe("离线改名");
+  const resumed = await runtime.resumeSession(session.id);
+  expect(replaySessionView(resumed.durableEvents()).title).toBe("离线改名");
+  const forkId = await runtime.forkSession(session.id);
+  expect((await runtime.listSessions()).find((s) => s.id === forkId)?.firstText).toBe("离线改名");
+  await runtime.renameSession(session.id, "");
+  expect(replaySessionView(resumed.durableEvents()).title).toBe("排查登录错误");
+  expect((await runtime.listSessions()).find((s) => s.id === session.id)?.firstText).toBe(
+    "排查登录错误",
+  );
+  await resumed.close();
+});
+
+it("进行中的生成请求在用户改名后不落盘，清空也不重新生成", async () => {
+  let finish!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const { session, runtime, provider } = await setup(false, async () => {
+    await ready;
+    return [{ type: "text_delta", text: "过期标题" }];
+  });
+  await session.submit({ text: "首句" });
+  await vi.waitFor(() => expect(provider.roleRequests).toHaveLength(1));
+  await runtime.renameSession(session.id, "用户标题");
+  finish();
+  await vi.waitFor(() => expect(replaySessionView(session.durableEvents()).title).toBe("用户标题"));
+  await runtime.renameSession(session.id, "");
+  await session.submit({ text: "下一条" });
+  expect(provider.roleRequests).toHaveLength(1);
+  expect(
+    session
+      .durableEvents()
+      .filter((e) => e.type === "session.titled" && e.payload.source !== "user"),
+  ).toHaveLength(0);
+  await session.close();
+});
+
+it("旁路缺失、损坏和错误序号在恢复时由日志修复", async () => {
+  const { runtime, session } = await setup();
+  await runtime.renameSession(session.id, "正确标题");
+  const sidecar = path.join(home, "sessions", `${session.id}.title.json`);
+  const event = session.durableEvents().at(-1);
+  expect(JSON.parse(await readFile(sidecar, "utf8"))).toEqual({
+    title: "正确标题",
+    seq: event?.seq,
+  });
+  await session.close();
+  for (const bad of [null, "broken", JSON.stringify({ title: "错误", seq: 999 })]) {
+    if (bad === null) await rm(sidecar);
+    else await writeFile(sidecar, bad);
+    const resumed = await runtime.resumeSession(session.id);
+    expect(JSON.parse(await readFile(sidecar, "utf8"))).toEqual({
+      title: "正确标题",
+      seq: event?.seq,
+    });
+    await resumed.close();
+  }
+});
+
+it("离线改名遵守会话锁", async () => {
+  const { runtime, session } = await setup();
+  await expect(runtime.renameSession(session.id, "打开时允许")).resolves.toBeUndefined();
+  // 另一个 Runtime 不持有此会话句柄，不能绕过锁。
+  const other = await createRuntime({
+    cwd: workspace,
+    providers: [new FakeProvider({})],
+    config: await loadConfig(createPlatform(), { nocturneHome: home, env: () => undefined }),
+  });
+  await expect(other.renameSession(session.id, "拒绝")).rejects.toMatchObject({
+    code: "session_locked",
+  });
+  await session.close();
+});
+
+it("用户标题处于 64KiB 之后仍由旁路用于列表，清空不会复活旧标题", async () => {
+  const { runtime, session } = await setup(false, () => [{ type: "wait" }]);
+  await session.submit({ text: "首句\n" + "长".repeat(35000) });
+  await runtime.renameSession(session.id, "远处标题");
+  expect((await runtime.listSessions())[0]?.firstText).toBe("远处标题");
+  await runtime.renameSession(session.id, "");
+  expect((await runtime.listSessions())[0]?.firstText).toBe("首句");
+  await session.close();
+});
+
+it("回退对话不丢失用户标题元数据", async () => {
+  const { runtime, session } = await setup();
+  await session.submit({ text: "第一轮" });
+  const target = session.durableEvents().find((e) => e.type === "message.user")?.seq;
+  if (target === undefined) throw new Error("缺少用户消息");
+  await runtime.renameSession(session.id, "保留标题");
+  await session.submit({ text: "第二轮" });
+  await session.rewind(target, "conversation");
+  expect(replaySessionView(session.durableEvents()).title).toBe("保留标题");
+  await session.close();
+});

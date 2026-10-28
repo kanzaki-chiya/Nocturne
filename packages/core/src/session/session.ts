@@ -40,6 +40,7 @@ export class SessionImpl implements Session {
   private readonly diag: { event: RuntimeEvent; error: unknown }[] = [];
   private readonly failController = new AbortController();
   private readonly onClose?: (() => Promise<void>) | undefined;
+  private readonly onTitle?: ((title: string, seq: number) => Promise<void>) | undefined;
 
   private writeChain: Promise<void> = Promise.resolve();
   private nextSeq: number;
@@ -56,6 +57,7 @@ export class SessionImpl implements Session {
     recovery?: SessionRecovery | undefined;
     /** 关闭时释放的资源（会话锁等） */
     onClose?: (() => Promise<void>) | undefined;
+    onTitle?: ((title: string, seq: number) => Promise<void>) | undefined;
   }) {
     this.id = args.id;
     this.logPath = args.logPath;
@@ -64,6 +66,7 @@ export class SessionImpl implements Session {
     this.runId = args.runId ?? newRunId();
     this.recovery = args.recovery;
     this.onClose = args.onClose;
+    this.onTitle = args.onTitle;
     this.nextSeq = (this.events.at(-1)?.seq ?? 0) + 1;
     this.lastPublishedSeq = this.nextSeq - 1;
   }
@@ -95,6 +98,46 @@ export class SessionImpl implements Session {
     if (this.healthState === "closed") {
       return Promise.reject(new SessionError("session_closed", "会话已关闭"));
     }
+    return this.enqueue(type, payload, options);
+  }
+
+  /** 在写入通道内决定是否仍可生成，避免在用户改名已排队时写入过期标题。 */
+  emitGeneratedTitle(
+    payload: DurablePayload<"session.titled">,
+  ): Promise<DurableEvent<"session.titled"> | undefined> {
+    if (this.healthState !== "ok") return Promise.resolve(undefined);
+    const write = this.writeChain.then(async () => {
+      if (this.healthState !== "ok" || this.events.some((e) => e.type === "session.titled"))
+        return undefined;
+      return this.appendEvent("session.titled", payload, {});
+    });
+    this.writeChain = write.then(
+      () => undefined,
+      () => undefined,
+    );
+    return write;
+  }
+
+  private enqueue<T extends DurableType>(
+    type: T,
+    payload: DurablePayload<T>,
+    options: EmitOptions,
+  ): Promise<DurableEvent<T>> {
+    const write = this.writeChain.then(() => this.appendEvent(type, payload, options));
+    this.writeChain = write.then(
+      () => undefined,
+      () => undefined,
+    );
+    return write;
+  }
+
+  private async appendEvent<T extends DurableType>(
+    type: T,
+    payload: DurablePayload<T>,
+    options: EmitOptions,
+  ): Promise<DurableEvent<T>> {
+    if (this.healthState !== "ok")
+      throw new SessionError("session_failed", "会话已失败，不再写入日志");
     const event = {
       type,
       sessionId: this.id,
@@ -105,32 +148,26 @@ export class SessionImpl implements Session {
     } as DurableEvent<T>;
     this.nextSeq += 1;
     const line = `${encodeDurableEvent(event)}\n`;
-
-    // 单一写入通道：所有持久化事件按序追加。
-    // 追加前重查健康状态——前序写入失败后不再追加（sessions.md 第 5 节）
-    const write = this.writeChain.then(() => {
-      if (this.healthState !== "ok") {
-        throw new SessionError("session_failed", "会话已失败，不再写入日志");
+    try {
+      await this.fs.appendFile(this.logPath, line);
+      this.events.push(event);
+      this.lastPublishedSeq = event.seq;
+      if (
+        type === "session.titled" &&
+        (payload as DurablePayload<"session.titled">).source === "user"
+      ) {
+        try {
+          await this.onTitle?.((payload as DurablePayload<"session.titled">).title, event.seq);
+        } catch {
+          /* 日志是事实来源；旁路将在恢复时修复 */
+        }
       }
-      return this.fs.appendFile(this.logPath, line);
-    });
-    this.writeChain = write.then(
-      () => undefined,
-      () => undefined,
-    );
-
-    return write.then(
-      () => {
-        this.events.push(event);
-        this.lastPublishedSeq = event.seq;
-        this.publish(event);
-        return event;
-      },
-      (cause: unknown) => {
-        this.enterFailed(cause);
-        throw new SessionError("session_failed", "日志写入失败", { cause });
-      },
-    );
+      this.publish(event);
+      return event;
+    } catch (cause) {
+      this.enterFailed(cause);
+      throw new SessionError("session_failed", "日志写入失败", { cause });
+    }
   }
 
   emitEphemeral<T extends EphemeralType>(
